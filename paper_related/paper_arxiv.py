@@ -17,7 +17,7 @@ class ArxivClient:
         results = self.client.results(self.search, offset)
         papers = []
         # `results` is a generator; you can iterate over its elements one by one...
-        for r in results:
+        for idx, r in enumerate(results):
             paper = {
             'title': r.title,
             'authors': ''.join([i.name for i in r.authors]),
@@ -25,7 +25,8 @@ class ArxivClient:
             'entry_id': r.entry_id,
             'pdf_url': r.pdf_url,
             'summary': r.summary,
-            'updated': r.updated.strftime('%Y-%m-%d %H:%M:%S %Z')
+            'updated': r.updated.strftime('%Y-%m-%d %H:%M:%S %Z'),
+            'id': idx + 1
             }
             papers.append(paper)
         print(json.dumps(papers, indent=4))
@@ -35,4 +36,19 @@ arxiv_client = ArxivClient()
 
 
 if __name__ == '__main__':
-    arxiv_client.get_paper_metadata()
+    # arxiv_client.get_paper_metadata()
+    import pdfplumber
+    import codecs
+    import requests
+    import io
+    url = "https://arxiv.org/pdf/2401.01830v1.pdf"
+    dta = requests.get(url)
+    bytes_io = io.BytesIO(dta.content)
+    with open("data/ttt.pdf", "wb") as f:
+        f.write(bytes_io.getvalue())
+    
+    with pdfplumber.open("data/ttt.pdf") as pdf:
+        for page in pdf.pages:
+            f1=codecs.open('data/ttt.txt','a','utf-8')
+            f1.write(page.extract_text())
+            f1.close()

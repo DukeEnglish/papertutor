@@ -48,6 +48,15 @@ def get_papers():
 
     return jsonify(papers_subset)
 
+
+@app.route('/parse_paper')
+def get_parse_paper():
+    paper_id = request.args.get('id')  # 获取论文的ID
+    print(paper_id)
+    # parse = papers.get(paper_id, {}).get('parse')  # 根据ID获取论文的解析内容
+
+    return str(paper_id)
+
 @app.route('/total_pages')
 def get_total_pages():
     per_page = int(request.args.get('per_page', 10))
