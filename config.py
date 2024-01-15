@@ -8,7 +8,7 @@ LastEditTime: 2024-01-07 17:35:57
 '''
 # BAIDU platform
 BAIDU_API_KEY = ""
-BAIDU_SECRET_Key = ""
+BAIDU_SECRET_KEY = ""
 
 BAICHUAN_KEY = ""
 

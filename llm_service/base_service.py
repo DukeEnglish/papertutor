@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-06 00:12:20
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-16 01:21:18
+LastEditTime: 2024-01-16 01:27:52
 '''
 
 import json
@@ -56,4 +56,4 @@ class BAIDULLMService(LLMBaseService):
         }
 
         response = requests.request("POST", url, headers=headers, data=payload)
-        return response.json().get("access_token")
+        return response.json().get("access_token", "")
