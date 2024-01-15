@@ -4,9 +4,10 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-15 23:18:48
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-16 00:42:42
+LastEditTime: 2024-01-16 00:45:37
 '''
 import json
+import re
 
 def json_to_markdown_table(data):
     table = ""
@@ -38,6 +39,7 @@ def json_to_markdown_table(data):
         updated = item.get("updated", "")
         summary = item.get("summary", "").replace("\n", "")
 
+        summary = re.sub(r'[^\w\s:/.\-]', '', summary)
         # Generate Markdown table rows for each paper
         row = "|idx| {} |\n".format(idx)
         table += row
