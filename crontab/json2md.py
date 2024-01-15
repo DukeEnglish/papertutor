@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-15 23:18:48
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-16 00:36:44
+LastEditTime: 2024-01-16 00:42:42
 '''
 import json
 
@@ -36,7 +36,7 @@ def json_to_markdown_table(data):
         authors = item.get("authors", [])
         links = item.get("links", "")
         updated = item.get("updated", "")
-        summary = item.get("summary", "")
+        summary = item.get("summary", "").replace("\n", "")
 
         # Generate Markdown table rows for each paper
         row = "|idx| {} |\n".format(idx)
