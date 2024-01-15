@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-07 17:31:50
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-08 23:32:33
+LastEditTime: 2024-01-16 00:07:12
 '''
 from paper_related import arxiv_client
 from datetime import datetime
@@ -14,6 +14,7 @@ import json
 import pdfplumber
 import codecs
 import io
+from crontab.json2md import json2md
 from llm_service import glm
 
 today_date = datetime.today().strftime('%Y%m%d')
@@ -55,6 +56,8 @@ class PaperParser:
         # 最后进行qa，暂时暂停这部分，先测试git action
         # for paper_cls in self.paper_cls_list:
         #     self._process_paper_data()
+        for paper_cls in self.paper_cls_list:
+            self._save_data2md(path=self.metainfo_save_path+f"/{paper_cls}.json")
 
         # 将下载下来的论文进行解析，调用LLM
 
@@ -156,11 +159,12 @@ class PaperParser:
             result_dict[question] = res
 
         # 将结果保存到文件
-        result_file_path = os.path.join(parse_path, f"{title}_qa.json")
-        with open(result_file_path, 'w') as f:
-            json.dump(result_dict, f)
+        # result_file_path = os.path.join(parse_path, f"{title}_qa.json")
+        cls._save_json_data(result_dict, parse_path, f"{title}_qa.json")
+        # with open(result_file_path, 'w') as f:
+        #     json.dump(result_dict, f)
 
-        print(f"QA results for {title} saved to {result_file_path}")
+        print(f"QA results for {title} saved to {parse_path}/{title}_qa.json")
 
     @classmethod
     def _save_json_data(cls, json_data, path, filename):
@@ -169,23 +173,32 @@ class PaperParser:
         path_filename = path + "/" + filename
         try:
             with open(path_filename, 'w') as file:
-                json.dump(json_data, file, indent=4)
+                json.dump(json_data, file, indent=4, ensure_ascii=False)
             print(f"JSON data saved to file: {path_filename}")
         except Exception as e:
             print(f"Error saving JSON data to file: {str(e)}")
 
     @classmethod
-    def _save_data(cls, data, path):
+    def _save_data(cls, data, path, file_name):
         # 检查文件路径
         ensure_directory_exists(path)
         # 保存数据到文件
         try:
-            with open(path, 'w') as file:
+            with open(f"{path}/{file_name}", 'w') as file:
                 file.write(data)
             print(f"Data saved to file: {path}")
         except Exception as e:
             print(f"Error saving data to file: {str(e)}")
 
+    def _save_data2md(cls, path):
+        """将数据保存在docs中的index.md中，以实现gitpage的自动化展示
+
+        Args:
+            path (str): 数据路径
+        """
+        md_data = json2md(path)
+        cls._save_data(md_data, "docs", "index.md")
+        
 
 def main():
     """调用函数，实现数据自动更新
