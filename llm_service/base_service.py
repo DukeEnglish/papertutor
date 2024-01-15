@@ -4,12 +4,12 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-06 00:12:20
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-07 17:35:44
+LastEditTime: 2024-01-16 01:21:18
 '''
 
 import json
 import requests
-from my_config import BAIDU_API_KEY, BAIDU_SECRET_KEY
+from config import BAIDU_API_KEY, BAIDU_SECRET_KEY
 
 
 class LLMBaseService():
