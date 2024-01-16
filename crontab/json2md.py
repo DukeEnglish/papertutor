@@ -4,26 +4,11 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-15 23:18:48
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-16 00:45:37
+LastEditTime: 2024-01-17 00:21:26
 '''
 import json
 import re
 
-def json_to_markdown_table(data):
-    table = ""
-    
-    for item in data:
-        title = item.get("title", "")
-        authors = item.get("authors", [])
-        links = item.get("links", "")
-        updated = item.get("updated", "")
-        summary = item.get("summary", "")
-
-        # Generate Markdown table rows for each paper
-        row = "| Title: {}<br>Author: {}<br>Links: {}<br>Updated: {}<br>Summary: {} |\n".format(title, ", ".join(authors[:3]), links, updated, summary)
-        table += row
-
-    return table
 
 def json_to_markdown_table(data):
     table = ""
@@ -46,8 +31,13 @@ def json_to_markdown_table(data):
 
         row = "|title| {} |\n".format(title)
         table += row
-
-        author_row = "|authors| {}\n".format(", ".join(authors.strip().split(",")[:3]))
+        
+        authors_list = authors.strip().split(",")
+        if len(authors_list) > 3:
+            author_three = ", ".join(authors_list[:3]) + "etc."
+        else:
+            author_three = ", ".join(authors_list)
+        author_row = "|authors| {}\n".format(author_three)
         table += author_row
 
         links_row = "|links| {} |\n".format(links) 
@@ -60,29 +50,6 @@ def json_to_markdown_table(data):
 
     return table
 
-def json_to_markdown_table1(data):
-    headers = ["ID", "Title", "Authors", "Links", "Summary", "Updated"]
-    rows = []
-
-    for item in data:
-        id = str(item["id"])
-        title = item["title"]
-        authors = item["authors"]
-        links = item["links"]
-        summary = item["summary"]
-        updated = item["updated"]
-
-        row = [id, title, authors, links, summary, updated]
-        rows.append(row)
-
-    # Generate Markdown table
-    table = "| " + " | ".join(headers) + " |\n"
-    table += "| " + " | ".join(["---"] * len(headers)) + " |\n"
-
-    for row in rows:
-        table += "| " + " | ".join(row) + " |\n"
-
-    return table
 
 # Example JSON data
 json_data = [
@@ -117,6 +84,8 @@ json_data = [
         "id": 3
     }
 ]
+
+
 def json2md(json_file_path):
 
     # Read JSON data from file
