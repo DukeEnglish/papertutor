@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-03 23:13:25
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-08 23:31:40
+LastEditTime: 2024-01-10 22:36:28
 '''
 import arxiv
 import json
@@ -15,7 +15,7 @@ class ArxivClient:
         # Construct the default API client.
         self.client = arxiv.Client()
 
-    def get_paper_metadata(self, offset=0, max_results=3, query="cs.CL"):
+    def get_paper_metadata(self, offset=0, max_results=5, query="cs.CL"):
         # Search for the 10 most recent articles matching the keyword "quantum."
         self.search = arxiv.Search(
             query=query,
@@ -23,6 +23,7 @@ class ArxivClient:
             sort_by=arxiv.SortCriterion.SubmittedDate
         )
         results = self.client.results(self.search, offset)
+        print("results from arxiv", results)
         papers = []
         # `results` is a generator; you can iterate over its elements one by one...
         for idx, r in enumerate(results):
@@ -38,12 +39,12 @@ class ArxivClient:
             }
             print(paper)
             papers.append(paper)
-        print(json.dumps(papers, indent=4))
+        print("result", json.dumps(papers, indent=4))
 
         return papers
 
 
 if __name__ == '__main__':
-    pass
-    # arxiv_client.get_paper_qa()
-    # arxiv_client._download_paper(url="http://arxiv.org/pdf/2401.02417v1",title="1")
+    arxiv_client = ArxivClient()
+    arxiv_client.get_paper_metadata(query="cs.CL")
+    

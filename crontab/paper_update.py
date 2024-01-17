@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-07 17:31:50
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-16 00:07:12
+LastEditTime: 2024-01-17 00:49:00
 '''
 from paper_related import arxiv_client
 from datetime import datetime
@@ -13,14 +13,15 @@ import requests
 import json
 import pdfplumber
 import codecs
+import argparse
 import io
 from crontab.json2md import json2md
-from llm_service import glm
+from llm_service import GLMService
 
 today_date = datetime.today().strftime('%Y%m%d')
 print(f"today is {today_date}")
 
-PAPER_CLS_LIST = ["cs.CL"]
+PAPER_CLS_LIST = ["cs.CL", "cs.AI", "cs.LG", "cs.CV", "stat.ML", "cs.HC", "cs.MA"]
 
 
 def ensure_directory_exists(path):
@@ -35,7 +36,7 @@ class PaperParser:
     """Paper parser. It should get metainfo of paper and parse its info
     """
 
-    def __init__(self,):
+    def __init__(self, BAIDU_API_KEY, BAIDU_SECRET_KEY):
         """init
         """
         self.arxiv_client = arxiv_client
@@ -43,6 +44,11 @@ class PaperParser:
         self.paper_parse_data_save_path = None
         self._init_save_path()
         self.paper_cls_list = PAPER_CLS_LIST
+        if BAIDU_API_KEY and BAIDU_SECRET_KEY:
+            print("-" * 10, BAIDU_API_KEY, BAIDU_SECRET_KEY)
+            self.glm = GLMService(BAIDU_API_KEY, BAIDU_SECRET_KEY)
+        else:
+            self.glm = GLMService()
 
     def parse_paper(self,):
         # 将论文原始数据保留下来
@@ -50,14 +56,13 @@ class PaperParser:
             self.get_paper(paper_cls)
         # 接下来读取保留下来的数据，然后进行下载
         # 打开data/20240108/meta/cs.CL.json，读取内容，根据其中的pdf_url和title，调用这个函数download_paper(url, title, self.paper_parse_data_save_path)
-        for paper_cls in self.paper_cls_list:
-            # 下载并且转化为了txt
-            self.save_paper_txt(paper_cls)
+        # for paper_cls in self.paper_cls_list:
+        #     # 下载并且转化为了txt
+        #     self.save_paper_txt(paper_cls)
         # 最后进行qa，暂时暂停这部分，先测试git action
         # for paper_cls in self.paper_cls_list:
         #     self._process_paper_data()
-        for paper_cls in self.paper_cls_list:
-            self._save_data2md(path=self.metainfo_save_path+f"/{paper_cls}.json")
+        self._save_data2md()
 
         # 将下载下来的论文进行解析，调用LLM
 
@@ -153,7 +158,7 @@ class PaperParser:
                 问题:{question}
                 """
             print(prompt)
-            res = glm.llm(prompt)
+            res = cls.glm.llm(prompt)
             print(res)
 
             result_dict[question] = res
@@ -190,17 +195,19 @@ class PaperParser:
         except Exception as e:
             print(f"Error saving data to file: {str(e)}")
 
-    def _save_data2md(cls, path):
+    def _save_data2md(self):
         """将数据保存在docs中的index.md中，以实现gitpage的自动化展示
 
-        Args:
-            path (str): 数据路径
         """
-        md_data = json2md(path)
-        cls._save_data(md_data, "docs", "index.md")
-        
+        md_data = ""
+        for paper_cls in self.paper_cls_list:
+            md_data += f"# {paper_cls} \n\n"
+            path = self.metainfo_save_path + f"/{paper_cls}.json"
+            md_data += json2md(path)
+        self._save_data(md_data, "docs", "index.md")
 
-def main():
+
+def main(args):
     """调用函数，实现数据自动更新
     1. 通过论文获取接口拿到最新的论文
     2. 通过LLM对论文进行解析，拿到解析数据结果
@@ -209,9 +216,19 @@ def main():
         3.2 论文解析数据也需要每天都保存下来，在上述日期文件夹下单开一个文件夹，按照论文分类，分别创建文件夹，仅保存解析结果以减少数据量
     4. 线上前端界面每次刷新会从data文件夹中
     """
-    paper_parser = PaperParser()
+    BAIDU_API_KEY = args.BAIDU_API_KEY
+    BAIDU_SECRET_KEY = args.BAIDU_SECRET_KEY
+
+    paper_parser = PaperParser(BAIDU_API_KEY, BAIDU_SECRET_KEY)
     paper_parser.parse_paper()
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--BAIDU_API_KEY',type=str, default='',
+                            help='baidu platform api key')
+    parser.add_argument('--BAIDU_SECRET_KEY', type=str, default='',
+                            help='baidu platform api sec key')                     
+    args = parser.parse_args()
+    main(args)
