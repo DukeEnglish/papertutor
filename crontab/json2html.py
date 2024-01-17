@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from datetime import datetime
 
 
 def read_papers_from_json(file_path):
@@ -81,6 +82,12 @@ def generate_html_from_files(json_files_path):
             # 生成HTML内容
             html += generate_html_for_papers(papers, filename.replace('.json', ''))
 
+    current_time = datetime.now().strftime('%Y-%m-%d')
+    html += '''
+        <div id="last-updated">
+            <p>Updated Time: {}</p>
+        </div>
+    '''.format(current_time)
     html += '''
         </div>
     </body>
