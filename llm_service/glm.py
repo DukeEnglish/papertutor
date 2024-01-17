@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-06 12:55:46
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-17 00:44:14
+LastEditTime: 2024-01-18 02:13:18
 '''
 
 import requests
@@ -15,7 +15,7 @@ from llm_service.base_service import BAIDULLMService
 
 class GLMService(BAIDULLMService):
 
-    def __init__(self, BAIDU_API_KEY="",  BAIDU_SECRET_API_KEY=""):
+    def __init__(self, BAIDU_API_KEY="", BAIDU_SECRET_API_KEY=""):
         super().__init__()
         if BAIDU_API_KEY and BAIDU_SECRET_API_KEY:
             self.url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/chatglm2_6b_32k?access_token=" + self._get_access_token(BAIDU_API_KEY, BAIDU_SECRET_API_KEY)

@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-03 23:13:25
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-10 22:36:28
+LastEditTime: 2024-01-18 02:13:42
 '''
 import arxiv
 import json
@@ -47,4 +47,3 @@ class ArxivClient:
 if __name__ == '__main__':
     arxiv_client = ArxivClient()
     arxiv_client.get_paper_metadata(query="cs.CL")
-    

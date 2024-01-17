@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-15 23:18:48
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-17 00:21:26
+LastEditTime: 2024-01-18 02:13:00
 '''
 import json
 import re
@@ -31,7 +31,7 @@ def json_to_markdown_table(data):
 
         row = "|title| {} |\n".format(title)
         table += row
-        
+
         authors_list = authors.strip().split(",")
         if len(authors_list) > 3:
             author_three = ", ".join(authors_list[:3]) + "etc."

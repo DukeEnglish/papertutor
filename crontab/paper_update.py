@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-07 17:31:50
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-17 00:49:00
+LastEditTime: 2024-01-18 02:11:22
 '''
 from paper_related import arxiv_client
 from datetime import datetime
@@ -17,6 +17,7 @@ import argparse
 import io
 from crontab.json2md import json2md
 from llm_service import GLMService
+from crontab.json2html import generate_html_from_files
 
 today_date = datetime.today().strftime('%Y%m%d')
 print(f"today is {today_date}")
@@ -63,6 +64,7 @@ class PaperParser:
         # for paper_cls in self.paper_cls_list:
         #     self._process_paper_data()
         self._save_data2md()
+        self._save_data2html()
 
         # 将下载下来的论文进行解析，调用LLM
 
@@ -204,7 +206,20 @@ class PaperParser:
             md_data += f"# {paper_cls} \n\n"
             path = self.metainfo_save_path + f"/{paper_cls}.json"
             md_data += json2md(path)
-        self._save_data(md_data, "docs", "index.md")
+        self._save_data(md_data, "docs", "papers.md")
+
+    def _save_data2html(self):
+        """将数据保存在docs中的index.html以实现gitpage的自动化展示
+        """
+        json_files_path = self.metainfo_save_path
+
+        # 生成HTML内容
+        html_content = generate_html_from_files(json_files_path)
+
+        # 将HTML内容保存到文件
+        with open('docs/index.html', 'w') as file:
+            file.write(html_content)
+        print("save html done")
 
 
 def main(args):
@@ -227,8 +242,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--BAIDU_API_KEY',type=str, default='',
-                            help='baidu platform api key')
+                        help='baidu platform api key')
     parser.add_argument('--BAIDU_SECRET_KEY', type=str, default='',
-                            help='baidu platform api sec key')                     
+                        help='baidu platform api sec key')                     
     args = parser.parse_args()
     main(args)
