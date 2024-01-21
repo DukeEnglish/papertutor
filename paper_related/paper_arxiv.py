@@ -35,7 +35,7 @@ class ArxivClient:
                 'pdf_url': r.pdf_url,
                 'summary': r.summary,
                 'updated': r.updated.strftime('%Y-%m-%d %H:%M:%S %Z'),
-                'id': idx + 1
+                'id': r.get_short_id()
             }
             print(paper)
             papers.append(paper)
