@@ -20,8 +20,9 @@ def generate_html_for_papers(papers, title_id):
 
     for paper in papers:
         summary = paper.get("summary", "").replace("\n", "")
-
         summary = re.sub(r'[^\w\s:/.\-]', '', summary)
+
+        # 添加按钮和解读内容
         html += '''
             <li>
                 <h3>{}</h3>
@@ -29,8 +30,12 @@ def generate_html_for_papers(papers, title_id):
                 <p><a href="{}">Link to paper</a></p>
                 <p>{}</p>
                 <p>Last Updated: {}</p>
+                <button class="interpret-button" data-id="{}">Interpret</button>
+                <div id="interpretation-{}" class="interpretation" style="display:none;">
+                    <p>Interpretation: {}</p>
+                </div>
             </li>
-        '''.format(paper['title'], paper['authors'], paper['links'], summary, paper['updated'])
+        '''.format(paper['title'], paper['authors'], paper['links'], summary, paper['updated'], paper['id'], paper['id'], paper.get('interpretation', ''))
 
     html += '''
         </ul>
@@ -99,7 +104,7 @@ def generate_html_from_files(json_files_path):
 
 def main():
     # 假设你的JSON文件位于名为'data/20240117/meta'的文件夹中
-    json_files_path = 'data/20240117/meta'
+    json_files_path = 'data/20240116/meta'
 
     # 生成HTML内容
     html_content = generate_html_from_files(json_files_path)
