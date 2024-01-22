@@ -25,6 +25,12 @@ print(f"today is {today_date}")
 PAPER_CLS_LIST = ["cs.CL", "cs.AI", "cs.LG", "cs.CV", "stat.ML", "cs.HC", "cs.MA"]
 
 
+# 这个函数可以读取JSON文件并返回一个包含多个dict的列表
+def read_papers_from_json(file_path):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        return json.load(file)
+
+
 def ensure_directory_exists(path):
     if not os.path.exists(path):
         os.makedirs(path)
@@ -51,22 +57,52 @@ class PaperParser:
         else:
             self.glm = GLMService()
 
+    def get_interpretation_from_parse_data(self, title_qa):
+        # 这里需要根据实际情况修改文件路径和读取方式
+        parse_data_path = self.paper_parse_data_save_path
+        file_path = os.path.join(parse_data_path, f'{title_qa}.json')
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return json.load(file)
+
     def parse_paper(self,):
         # 将论文原始数据保留下来
         for paper_cls in self.paper_cls_list:
             self.get_paper(paper_cls)
         # 接下来读取保留下来的数据，然后进行下载
         # 打开data/20240108/meta/cs.CL.json，读取内容，根据其中的pdf_url和title，调用这个函数download_paper(url, title, self.paper_parse_data_save_path)
-        # for paper_cls in self.paper_cls_list:
-        #     # 下载并且转化为了txt
-        #     self.save_paper_txt(paper_cls)
+        for paper_cls in self.paper_cls_list:
+            # 下载并且转化为了txt
+            self.save_paper_txt(paper_cls)
         # 最后进行qa，暂时暂停这部分，先测试git action
-        # for paper_cls in self.paper_cls_list:
-        #     self._process_paper_data()
+        for paper_cls in self.paper_cls_list:
+            self._process_paper_data()
+        self.save_meta_w_interpretation()
         self._save_data2md()
         self._save_data2html()
 
-        # 将下载下来的论文进行解析，调用LLM
+    # 将下载下来的论文进行解析，调用LLM
+    def save_meta_w_interpretation(self,):
+
+        # 将对应内容写入到metainfo中
+        json_files_path = self.metainfo_save_path
+
+        # 遍历目录下的所有文件
+        for filename in os.listdir(json_files_path):
+            if filename.endswith('.json'):
+                # 读取JSON文件中的论文数据
+                papers = read_papers_from_json(os.path.join(json_files_path, filename))
+
+                # 遍历每个论文字典
+                for paper in papers:
+                    title = paper.get('title', '')  # 获取title_qa字段的值
+                    if title:  # 如果title_qa不为空
+                        interpretation_data = self.get_interpretation_from_parse_data(f"{title}_qa")
+                        # 添加interpretation字段
+                        paper['interpretation'] = interpretation_data if interpretation_data else "解释内容未找到"  # 假设解释内容
+
+                # 保存修改后的JSON文件
+                with open(os.path.join(json_files_path, filename), 'w', encoding='utf-8') as file:
+                    json.dump(papers, file, ensure_ascii=False, indent=4)
 
     def _process_paper_data(self,):
         parse_path = self.paper_parse_data_save_path
@@ -137,8 +173,7 @@ class PaperParser:
                 f1.close()
         os.remove(pdf_path)
 
-    @classmethod
-    def get_paper_qa(cls, title="1", parse_path=""):
+    def get_paper_qa(self, title="1", parse_path=""):
         question_prompt_dict = {
             "这篇论文试图解决什么问题？": "",
             "有哪些相关研究？": "",
@@ -160,14 +195,14 @@ class PaperParser:
                 问题:{question}
                 """
             print(prompt)
-            res = cls.glm.llm(prompt)
+            res = self.glm.llm(prompt)
             print(res)
 
             result_dict[question] = res
 
         # 将结果保存到文件
         # result_file_path = os.path.join(parse_path, f"{title}_qa.json")
-        cls._save_json_data(result_dict, parse_path, f"{title}_qa.json")
+        self._save_json_data(result_dict, parse_path, f"{title}_qa.json")
         # with open(result_file_path, 'w') as f:
         #     json.dump(result_dict, f)
 
