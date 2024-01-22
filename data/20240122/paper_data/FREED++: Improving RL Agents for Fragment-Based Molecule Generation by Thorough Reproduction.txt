@@ -1,0 +1,1823 @@
+Published in Transactions on Machine Learning Research (12/2023)
+FREED++: Improving RL Agents
+for Fragment-Based Molecule Generation
+by Thorough Reproduction
+Alexander Telepov∗a, Artem Tsypina, Kuzma Khrabrova, Sergey Yakukhnovc,
+Pavel Strashnova, Petr Zhilyaevd, Egor Rumiantseva, Daniel Ezhovc, Manvel Avetisiana,
+Olga Popovaa, Artur Kadurin∗a,b
+∗ Corresponding authors. Contacts: Telepov@airi.net, Kadurin@airi.net
+a AIRI, Kutuzovskiy prospect house 32 building K.1, Moscow, 121170, Russia.
+b Kuban State University, Stavropolskaya Street, 149, Krasnodar 350040, Russia.
+c Sirius University of Science and Technology, Olimpiyskiy ave. b.1, Sirius, Krasnodar 354340, Russia.
+d Independent researcher.
+Reviewed on OpenReview: https://openreview.net/forum?id=YVPb6tyRJu
+Abstract
+A rational design of new therapeutic drugs aims to find a molecular structure with desired
+biological functionality, e.g., an ability to activate or suppress a specific protein via binding
+toit. Moleculardockingisacommontechniqueforevaluatingprotein-moleculeinteractions.
+Recently, Reinforcement Learning (RL) has emerged as a promising approach to generating
+molecules with the docking score (DS) as a reward. In this work, we reproduce, scrutinize
+andimprovetherecentRLmodelformoleculegenerationcalledFREED(Yangetal.,2021).
+Extensive evaluation of the proposed method reveals several limitations and challenges de-
+spite the outstanding results reported for three target proteins. Our contributions include
+fixingnumerousimplementationbugsandsimplifyingthemodelwhileincreasingitsquality,
+significantly extending experiments, and conducting an accurate comparison with current
+state-of-the-art methods for protein-conditioned molecule generation. We show that the re-
+sultingfixedmodeliscapableofproducingmoleculeswithsuperiordockingscorescompared
+to alternative approaches.
+1 Introduction
+The traditional drug discovery process is notoriously long and expensive. Modern drug discovery pipelines
+utilize computational methods to decrease the amount of in vitro experiments reducing the time and cost of
+the whole process. One of the crucial early steps of computer-aided drug discovery (CADD) is the virtual
+screening(VS)(Lyne,2002)ofvastdatabasesofchemicalcompounds. VSidentifiespotentialdrugcandidates
+possessingdesiredchemicalproperties(e.g.,stability,lowtoxicity,syntheticaccessibility,etc.). Despitebeing
+cheaper and faster than the traditional wet-lab approach, VS has another major drawback: it is limited to
+the databases of already known drug candidates and is not suitable for de novo drug design. Moreover, it is
+estimated that there are more than 1060 (Reymond & Awale, 2012) potential drug-like molecules, making it
+impossible to screen all candidates even if such a database was available.
+Recently, deep learning (DL) has been used to overcome the limitations of traditional approaches. Early
+works focus on speeding up the virtual screening process by using neural networks (Shoichet, 2004; Dahl
+et al., 2014; Ma et al., 2015; Wallach et al., 2015; Ramsundar et al., 2015; Unterthiner et al., 2014; Gawehn
+et al., 2015; Mayr et al., 2016; Baskin et al., 2016; Koutsoukas et al., 2017). However, despite the existence
+of a large number of chemical databases, including drug-like molecules (Gaulton et al., 2012; Irwin et al.,
+2012; Polykovskiy et al., 2020), pre-computed chemical properties (Chmiela et al., 2017; Isert et al., 2022;
+Khrabrov et al., 2022; Eastman et al., 2023), and protein-ligand pairs (Francoeur et al., 2020; Hu et al.,
+1
+4202
+naJ
+81
+]MB.oib-q[
+1v04890.1042:viXraPublished in Transactions on Machine Learning Research (12/2023)
+State
+t
+Agent
+Action
+t
+State
+t+1
+Environment
+Figure 1: An overview of RL-based sequential generation methods. The agent takes the current state
+(section 3.2) and selects an action (section 3.3). The action is usually a molecular fragment appended to
+the current state. Individual atoms or atom bonds are considered trivial cases of fragments. The transition
+dynamicisstraightforward: thenewstateisassembledfromthepreviousstatebyattachinganewfragment
+to it. Note that in some frameworks (Zhou et al., 2019; Jeon & Kim, 2020) a removal of the fragment is also
+consideredanaction. Thespecifictaskdefinesthereward. SomeexamplesincludecLogP,QED,andvarious
+bindingaffinityproxies. IfJ istheoptimizationobjective,therewardcanbechosenasr =J(s )−J(s )
+t+1 t+1 t
+(
+0 if s is non-terminal;
+or r = t+1
+t+1 J(s ) if s is terminal.
+t+1 t+1
+2005), the size of the drug-like molecule space suggests that generative and other semi-supervised methods
+may be more promising.
+Generativemodelsaretrainedtomapdrug-likemoleculesintoalow-dimensionalhiddenspaceandrestorethe
+originalmoleculesfromthislow-dimensionalrepresentation. Thisapproachallowedthesamplingofnewdrug
+candidates by the perturbation of low-dimensional representations of existing molecules. Generative models
+can operate on several different molecule representations, such as SMILES (Gómez-Bombarelli et al., 2018),
+2Dgraphs(Jinetal.,2018;DeCao&Kipf,2018),hyper-graphs(Kajino,2019),and3Dstructures(Gebauer
+et al., 2019; Simm et al., 2021). Guacamol (Brown et al., 2019) provides a benchmark for such models.
+Despite several notable achievements (Zhavoronkov et al., 2019), such models do not consider the target
+protein the molecule binds to. This is suboptimal, as the therapeutic effect of the molecule is largely
+determined by its binding affinity to the target protein. Various groups have proposed an approach to the
+protein-conditioned generation of molecules based on an autoregressive generative model that sequentially
+assembles molecules by adding atoms and atom bonds Li et al. (2021); Drotár et al. (2021); Peng et al.
+(2022); Liu et al. (2022). Diffusion models (Hoogeboom et al., 2022; Igashov et al., 2022; Schneuing et al.,
+2023; Guan et al., 2023) have been proposed as an alternative to autoregressive sequential generation to
+speed up the generation process significantly. Both autoregressive and diffusion generation require a dataset
+of protein-ligand pairs, and the amount of training data limits their quality.
+An alternative approach to protein-conditioned molecule generation is to use Reinforcement Learning (RL).
+RL-based approaches can be roughly divided into two categories. The first category, briefly described in
+Fig.1,isthesequentialgeneration(Youetal.,2018;Zhouetal.,2019;Jeon&Kim,2020;Yangetal.,2021).
+Such models do not require training datasets and can utilize desired molecular properties such as docking
+score, drug-likeness (Lipinski et al., 1997), epitope score (Shashkova et al., 2022), or chemical constraints
+into the training objective. In contrast, most of graph generative models such as VAEs, Diffusion models or
+GANscannotdirectlyincorporatesuchpropertiesintotheirtrainingobjective. However,differentstrategies,
+such as active learning or evolutionary algorithms, can be used to optimize desired properties (Segler et al.,
+2018;Schneuingetal.,2023). Thesecondcategory(Popovaetal.,2018;Blaschkeetal.,2020;Thomasetal.,
+2021; Ghugare et al., 2023; Mazuz et al., 2023) uses RL to fine-tune pre-trained generative models on large
+2Published in Transactions on Machine Learning Research (12/2023)
+datasets to produce molecules with desired properties, such as cLogP and QED. Unlike the first category,
+these models require two-step training and a dataset to pre-train the generative model on.
+The binding affinity of a molecule to the target protein is a perfect reward for protein-conditioned molecule
+generation. However, since the real binding affinity is intractable, recent research has utilized its proxy,
+Docking Score (DS), as a reward in RL setting (Jeon & Kim, 2020; Cieplinski et al., 2020; Thomas et al.,
+2021; Yang et al., 2021). In this work, we focus on FREED pipeline (Yang et al., 2021), which sequentially
+generates molecules using fragments as building blocks. This allows to ensure the validity of generated
+molecules that have high DS for various target proteins.
+We strongly believe in the approach used in FREED, so in this work, we conducted a thorough analysis
+of its implementation and experimental setup. Our findings are as follows: i) the implementation contains
+multiple bugs, ii) the evaluation setup is inconsistent between the proposed model and baselines, iii) the
+amount of target proteins selected for model evaluation is insufficient, and iv) the model is overcomplicated
+and lacks ablations.
+In order to address these limitations, we meticulously inspected the code, fixed the bugs, conducted abla-
+tion studies, and simplified the proposed model. We have named the resulting fixed and simplified model
+FREED++. Moreover, we have substantially broadened the scope of our experiments. To avoid cherry-
+picking of target proteins, we have tested FREED++ on a large number of proteins from the DUD-E
+database(Mysingeretal.,2012),andadditionally,ontheubiquitin-specificprotease7(USP7)protein(Leger
+etal.,2020a). Wehaveexperimentedwithfragmentlibrariesandadditionalstructuralconstraintstoprovide
+furtherinsightintothemodel. Finally,wehavefixedtheevaluationprotocolandcomparedFREED++with
+alternativeapproachestoaccuratelycompareitwithcurrentSOTAprotein-conditionedmoleculegeneration
+methods. WefindthatFREED++exhibitsgreatgeneralizationabilitywhileproducingvalidmoleculeswith
+docking scores superior to those of alternative approaches. The code is accessible by link 1.
+2 Related work
+Current state of protein-conditioned molecule generation Our work is concerned with protein-
+conditioned molecule generation. This area of research has received increased attention lately. REIN-
+VENT (Olivecrona et al., 2017; Thomas et al., 2021), ChemRLformer (Ghugare et al., 2023) and
+Taiga (Mazuz et al., 2023) utilize RL to fine-tune an NN that was pre-trained to generate SMILES strings.
+RL guides the generation towards molecules with a high value of the property of interest (e.g., QED, DS).
+MolDQN (Zhou et al., 2019) belongs to the family of sequential generation methods based on RL. It uses a
+modification of the Deep Q-Learning algorithm (Mnih et al., 2013) to sequentially select atoms and bonds
+to add to or remove from the molecular graph. A new promising alternative to RL-based generation are
+Generative Flow Networks (Bengio et al., 2021; Jain et al., 2023). These models are trained to sample
+objects with probabilities proportional to the reward function. Unlike RL-based methods, Generative Flow
+Networks are capable of sampling from different modes of the distribution which is especially useful in drug
+designapplications. Pocket2Mol(Pengetal.,2022)istrainedinanautoregressivefashiontopredictmasked
+atoms of drug molecules in protein-ligand pairs. The trained model sequentially generates the atom’s posi-
+tion, type, and bonds. The generation process is conditioned on both the protein target and the previously
+generatedatoms. Thesemethodshavedemonstratedtheirabilitytogeneratepotentialdrugcandidatesthat
+selectivelytargetspecificproteins. WecompareFREED++withalltheapproachesdescribedinthissection
+except DiffSBDD, which has been shown (Schneuing et al., 2023) to produce molecules inferior to baselines
+in terms of various metrics.
+3 FREED++
+ThissectionprovidesadetaileddescriptionoftheproposedFREED++method. Wehighlightthedifferences
+betweentheoriginalFREEDandtheproposedFREED++withblueboxes. Insection4,weexplainthebugs
+in the original implementation of the FREED model and discuss their effects on the model’s performance.
+1https://github.com/AIRI-Institute/FFREED
+3Published in Transactions on Machine Learning Research (12/2023)
+Molecule Fragments
+S
+GCN
+a
+Critic Actor
+Q (s,a) π (a)
+Figure 2: Overview of fragment-based molecule generation frameworks. At each step, a fragment is selected
+from a pre-defined fragment library F and attached to the current state s. In general, different encoding
+methods may be used to handle s and the selected fragment f, but in this work, both are processed with
+the same GCN.
+FREED++ is a fragment-based molecule generation framework; its overview is shown in Fig. 2. It operates
+onfragmentsinsteadofsingleatomstospeedupthegenerationprocessandensurethevalidityofgenerated
+molecules. The differences between FREED++ and the original FREED are described in sections 4.1,4.2,
+4.3.
+3.1 MDP
+ThestatespaceS isdefinedasasetofallpossibleextendedmoleculargraphsdescribingstablemolecules(see
+section3.2). Theactionaconsistsofselectingafragmentf andconcatenatingitwiththemoleculargraphs.
+Theactioncomprisesthreesteps: "selectingwheretoattachanewfragment(a )",“choosingwhichfragment
+1
+to attach (a )", and “determining where on a new fragment to form a chemical bond (a )". More details
+2 3
+abouttheactioncanbefoundinsection3.3. Theinitialstates isabenzeneringwith3attachmentpoints.
+0
+Transition dynamics is straightforward: given a graph representation s of the current state of the molecule
+t
+andanactiona =(a1,a2,a3),thenewgraphisassembledfromsandthenewfragmentviaRDKit(Landrum
+t t t t
+et al., 2022). The length of the episodes is fixed and equals T. In the original implementation, the same
+length T =4 of episodes is used for all proteins (see section J for discussion). The reward r is calculated as
+t
+follows:
+(
+0, if t<T;
+r (s ,a ,s )= (1)
+t t t t+1 max(0,DS(s )), if t=T.
+t+1
+We define the DS as the negative binding energy estimated by the docking software. DS(s) is calculated
+in three steps. First, initial 3D conformation for docking is generated for a given molecular graph with
+OpenBabel (O’Boyle et al., 2011). Then, the binding affinity of the molecule to the target protein is
+estimated with QuickVina2 (Alhossary et al., 2015). Details on reward computation are in Appendix H.
+Lastly, we take the negative value of the estimated binding affinity to get the DS.
+4Published in Transactions on Machine Learning Research (12/2023)
+Step 1 Step 2 Step 3
+Concatenation
+MLP
+Sample&Fuse Sample&Fuse Sample&Fuse
+MLP
+a a a
+1 2 3
+Q (s,a)
+(a) Action selection (b) Critic architecture
+Figure3: Aschematicoverviewoftheactorandthecritic. TheactionselectionprocessisdepictedinFig.3a.
+Step 1: the current state s is embedded with a GCN G , and the resulting embedding is fused with the
+θ
+embeddingsofitsattachmentpoints. Then,oneoftheattachmentpointsisselectedasa ,anditsembedding
+1
+a˜ is used in the next step. Step 2: a˜ is passed through an MLP to get a distribution over the available
+1 1
+fragments. Oneofthefragmentsisselectedasa ,anditsembeddinga˜ isusedinthenextstep. Step 3:the
+2 2
+selected fragment a is processed by the same GCN G to obtain the embeddings of its attachment points.
+2 θ
+After fusing these embeddings with a˜ , one of the attachment points of the fragment is selected as a .
+2 3
+Critic: The embeddings of all actions are concatenated with the state embedding and processed by the
+critic (Fig. 3b).
+3.2 State
+FREED operates on extended molecular graphs — graphs that contain a special type of node called an
+"attachment point". These points indicate the locations where the atomic bonds were severed during the
+fragmentation process. Consequently, the state is represented as a molecular graph with attachment points.
+When the generation process is completed, all attachment points (if present) are replaced with hydrogen
+atoms.
+To be processed by a Graph Convolution Network (GCN) , a graph needs to be converted to a tensor. This
+is achieved by representing the nodes and edges with a set of feature vectors and an adjacency matrix.
+The node features encompass one-hot encodings of the atom’s type, valency, degree, the count of hydrogen
+atoms,andaflagindicatingwhethertheatomisapartofanaromaticring. Edgefeaturesconsistofone-hot
+encoding of the bond type.
+3.3 Action
+The action a = (a ,a ,a ) is a composite of three elements. The first component a is the index of an
+1 2 3 1
+attachment point to which the new fragment is attached. To obtain a categorical distribution over the
+attachment points of state s, we first embed s with a GCN (Kipf & Welling, 2017): V˜ = G (s). We then
+θ
+use the resulting matrix of node embeddings V˜ ∈ R|V|×d in two ways: 1) an aggregated graph embedding
+S˜=agg(V˜),S˜ ∈Rd isderivedfromV˜,whereaggisanaggregatingfunction(normally,asumoranaverage
+of rows); 2) a submatrix V˜ att ∈R|Vatt|×d of node embeddings corresponding to attachment point is formed.
+|V|and|Vatt|arethetotalnumberofnodesinthegraphandthenumberofattachmentpoints,respectively,
+and d is the embedding size. S˜ and V˜ att are then combined via a trainable fusing (i.e., Multiplicative
+interactions (Jayakumar et al., 2020) layer or a concatenation layer; refer to section 4.3 for an in-depth
+5
+etatS
+tnemhcattA
+sgniddebme
+stniop
+s
+tnemgarF
+stigol
+stnemgarF sgniddebme tnemhcattA
+sgniddebme
+stniopPublished in Transactions on Machine Learning Research (12/2023)
+discussion) function f , resulting in A˜ (s)∈R|Vatt|×d:
+ϕ1 1
+A˜ (s)=f (S˜ ,V˜att). (2)
+1 ϕ1
+After that, we use an MLP f : R|Vatt|×d →− R|Vatt| that maps A˜ (s) to logits that define a categori-
+ψ1 1
+cal distribution over attachment points. The Gumbel-Softmax (Jang et al., 2017) operator σ is used to
+reparameterize the resulting distribution. Categorical reparameterization is essential because a and a are
+2 3
+sampled autoregressively and depend on previously sampled discrete actions.
+p (·|s)=σ(f (A˜ (s))). (3)
+1 ψ1 1
+The second component a is the index of the fragment to be attached to s. First, we sample action a from
+2 1
+p (· | s) (Eq. 3) and select the a -st row a˜ of the matrix A˜ (s). To obtain the logits of the categorical
+1 1 1 1
+distribution over the fragment candidates, we process a˜ with an MLP f :Rd →− R|F|, where F is a set of
+1 ψ2
+all available fragments, and |F| is their total number.:
+p (·|s,a )=σ(f (a˜ )). (4)
+2 1 ψ2 1
+InFREED,thecategoricaldistributionoverfragmentcandidatesiscomputedsimilarlytothedistribu-
+tionoverattachmentpoints(seeSection4.3). First,ECFPembeddings(Rogers&Hahn,2010)F˜ ECFP
+are calculated for all the fragments. Then, F˜ ECFP and a˜ are combined via fusing funtion:
+1
+A˜ =f (a˜ ,F˜ECFP). (5)
+2 ϕ2 1
+Afterthat,anMLPf :R|F|×d →− R|F| mapsA˜ (a˜ )tologitswhichdefineacategoricaldistribution
+ψ2 2 1
+over fragments.
+p (·|s,a )=σ(f (A˜ )). (6)
+2 1 ψ2 2
+Note that if BRICS fragmentation (see section 5.2) is used, logits associated with fragments that lead to
+invalid molecules are replaced with −∞, effectively preventing the sampling of such fragments. Then, we
+sample an index a ∼p (·|s,a ) and the corresponding fragment f and process it along with all available
+fragments(toreuse2 inca2 seabat1 choffragmentsissampled)withthea s2 ameGCNG togetmatrixF˜ ∈R|F|×d
+θ
+of aggregated embeddings:
+F˜ ={agg(G (f))} , (7)
+θ f∈F
+Then, the a -nd row of matrix F˜ is selected and combined with a˜ using a fusing function f :
+2 1 ϕ2
+a˜ (s,a )=f (a˜ ,F˜ ). (8)
+2 1 ϕ2 1 a2
+Insteadoffusinga˜ withtheGCNembeddingoftheselectedfragmenta ,theoriginalimplementations
+1 2
+uses a fixed ECFP emdding:
+a˜ (s,a )=f (a˜ ,F˜ECFP). (9)
+2 1 ϕ2 1 a2
+Unlike in "Step 1", where we first fuse the state and embeddings of attachment points and then sample a ,
+1
+in "Step 2", we first sample a and then fuse its embedding F˜ with a˜ . This simplification (see section 4.3)
+2 a2 1
+allows to speed up the training process significantly.
+6Published in Transactions on Machine Learning Research (12/2023)
+The third component a is the index of an attachment point on the selected fragment f . To obtain a
+3 a2
+categorical distribution over attachment points of the selected fragment f , we first retrieve the matrix of
+node embeddings of the selected fragment F˜ = G (f ). We then
+selecta2
+node embeddings corresponding
+a2 θ a2
+ft ro aga mtt ea nc thm fen .t Apo fuin sit ns gF˜
+fa
+ua 2t nt ct∈ ionR| ff aa 2tt| i× sd u, tiw lih zee dre to|f caa o2tt m| bis int eh te hin su em mb be er ddo if na gtt wa ic th hm a˜en :t points on the selected
+a2 ϕ3 2
+A˜ (s,a ,a )=f (a˜ ,F˜att). (10)
+3 1 2 ϕ3 2 a2
+After that, we employ an MLP f
+ψ3
+: R|f aa 2tt|×d →− R|f aa 2tt| that maps A˜ 3(s,a 1,a 2) to logits that define a
+categorical distribution over the attachment points of the selected fragment. Similarly to "Step 2", if BRICS
+fragmentation is used, logits corresponding to invalid attachment points are replaced with −∞.
+p (·|s,a ,a )=f (A˜ (s,a ,a )). (11)
+3 1 2 ψ3 3 1 2
+Lastly, we sample a ∼ p (· | s,a ,a ) and select the a -rd row a˜ of the matrix A˜ (s,a ,a ). The whole
+3 3 1 2 3 3 3 1 2
+action selection process is illustrated in Fig. 3a.
+3.4 Critic
+The critic architecture is illustrated in Fig. 3b. It consists of two components: an encoder GCN G , which
+θ
+is also used for action selection, and an MLP f : R4d →− R. To ensure training stability, the encoder G is
+ω θ
+frozenintheactorandisonlytrainedasapartofthecritic. InFREED,theMLPf takestheconcatenation
+ω
+of (S˜ ,V˜ att,F˜ ,(F˜ att) ) and outputs the Q-value.
+a1 a2 a2 a3
+There are two scenarios in which the critic is used. The first scenario involves applying the critic to the
+actions saved in the replay buffer. Since the saved action (a ,a ,a ) is just a set of indices, the critic needs
+1 2 3
+to reprocess the saved state and fragment with the current version of the GCN and then pass it to f . This
+ω
+is necessary because the GCN parameters θ may have been updated since the transition was saved in the
+replay buffer. The second scenario involves applying the critic to actions generated with up-to-date G (i.e.,
+θ
+when calculating actor loss in SAC). In this case, there is no need for reprocessing, and the concatenation
+of (S˜ ,V˜ att,F˜ ,(F˜ att) ) is passed directly to f .
+a1 a2 a2 a3 ω
+In the original FREED paper, crtitic architecture was not covered. For the description of the critic
+used in FREED refer to the section 4.1.
+4 Fixing FREED
+ThissectionsummarizesallthechangesmadetotheoriginalFREEDmodel. Thissectionisdividedintothree
+subsections. In the first subsection, we describe the issues and bugs found in the original implementation of
+FREED,alongwiththeirpotentialeffectsonthemodel’sperformance. Inthesecondsubsection,wedescribe
+minor changes introduced to simplify the model, reduce the number of hyperparameters, or improve the the
+training stability. By implementing all the changes described in 4.1, 4.2, we arrive at a fixed version of
+FREED, which we dub FFREED”.
+In4.3,wedescribevariouscomponentsofFFREEDthatcanberemovedorsimplifiedtospeedupthemodel
+and reduce the number of trainable parameters. The resulting model after all the simplifications is called
+“FREED++”.
+4.1 Major implementation issues
+Critic architecture In the original implementation, the critic is parameterized as an MLP, which takes
+as input a concatenation of four vectors: 1) an embedding of the molecule generated by G ; 2) probabilities
+θ
+7Published in Transactions on Machine Learning Research (12/2023)
+associated with attachment points on s (see eq.3); 3) one-hot encoding of the selected fragment f ; and 4)
+a2
+probabilities associated with attachment points on f (see eq. 11).
+a2
+First,thecriticreceivesnoinformationabouttheselectedattachmentpoints,asitoperatesonprobabilities.
+Furthermore, the order in which the probabilities for the attachment points are passed to the critic is
+determined by the inner representation of the current state s in RDKit (Landrum et al., 2022). This order
+maychangeasnewfragmentsareaddedthroughoutthetrajectory. Duetothesetwofactors,thecriticcannot
+attributehighrewardstoselectingspecificattachmentpoints. Consequently,learninganymeaningfulpolicy
+for selecting a and a becomes impossible. Refer to 3.4 for details of our proposed implementation of the
+1 3
+critic architecture.
+Critic update The agent is trained with the SAC (Haarnoja et al., 2018a) algorithm that operates inside
+theMaximumEntropyFramework (Ziebartetal.,2008;Haarnojaetal.,2017),whichaugmentsthestandard
+maximum reward reinforcement learning objective with an entropy maximization term. The target for the
+Qπ function includes terms responsible for both the future discounted reward and the entropy of the policy:
+Qˆπ(s t,a t)=E (st,at,st+1)∼D,a˜∼π(·|st+1)[r(s t,a t,s t+1)+γ(Qπ(s t+1,a˜)−αlogπ(a˜|s t+1))]. (12)
+In the original implementation, the entropy term is omitted from the equation. This way, at the policy
+improvement step, the actor is forced to maximize the cumulative return and ignore the term responsible
+for the entropy of the policy in the succeeding states.
+Target networks usage Target networks are used to stabilize the training of Q functions (Mnih et al.,
+2015). AcommonpracticefortheSACalgorithmtoupdatethetargetnetworkthroughouttrainingsmoothly:
+Qπ =(1−τ)Qπ +τQπ;whereτ isasmoothingconstantthatisusuallysettoasmallvaluebetween0.01
+targ targ
+and 0.001 (Haarnoja et al., 2018a). Instead, in the original implementation, τ is set to 1, which effectively
+means that no target network was used. This leads to the moving target problem and destabilizes the
+training.
+Gumbel-Softmax Recall (see section 3.3) that the action proposed in FREED consists of three dis-
+crete random variables which are sequentially sampled in an autoregressive fashion. The authors employed
+Gumbel-Softmax (Jang et al., 2017) to propagate the gradients through the discrete sampling process.
+We found two issues in the original implementation. First, probabilities were used instead of logits. Second,
+aparameterν wasintroducedwithoutaclearmotivation. WeshowthatsamplingfromtheGumbel-Softmax
+distribution with these two issues is equivalent to sampling y ∝ expπ with a temperature τ, where π is
+ν ν
+the desired discrete distribution, and we use ∝ as expπ does not necessarily define a distribution. Refer to
+ν
+Appendix B for the derivation and an in-depth discussion of the effects.
+To evaluate the significance of each particular major implementation issue, we perform an ablation study in
+Appedinx K.
+4.2 Minor issues and simplifications
+Message passing As states and fragments represent extended molecular graphs, we use a GCN to obtain
+embeddings. GCN iteratively updates node representations by aggregating the information from the node’s
+local neighborhood. In the original implementation, directed graphs are used instead of undirected ones.
+The direction of the edge is determined by the inner representation of the graph in RDKit (Landrum et al.,
+2022). Such molecular representation differs from the undirected one previously used in various applications
+ofMLandDLinCADD(Sunetal.,2020;Wiederetal.,2020). Theintuitionbehindtheusageofundirected
+molecular graphs lies in the fact that chemical bonds do not have naturally imposed directions. Moreover,
+Wu et al. (2018) have previously shown that treating molecules as undirected graphs improves performance
+in predicting various molecular properties. We use undirected molecular graphs.
+8Published in Transactions on Machine Learning Research (12/2023)
+Learning rate schedulers In the original implementation, the learning rate scheduler is used. The actor
+learning rate is decreased by a factor of 10 if the training actor loss has not improved for a certain number
+of steps. This is not an optimal choice for actor-critic RL algorithms, as actor loss is poorly correlated with
+agent performance. While studying the original implementation, we noticed that for some target proteins,
+such a scheduler caused the learning rate to converge quickly at the beginning of training, preventing the
+agentfromimprovingfurther. Weuseaconstantlearningratethroughoutthetrainingtomitigatethisissue
+and simplify the selection of hyperparameters.
+Rewardshaping Intheoriginalimplementation,rewardshapingisused. Whileinvestigatingtheproposed
+reward shaping approach, we found it to be meaningless (see A.7) and removed it. Instead, we only assign
+non-zero rewards to the terminal states (see 3.1).
+Temperature hyperparameter in SAC In the original implementation, the temperature α is only
+trained for a fraction of the whole training time, and, furthermore, α is clipped to be in the range [0.05,20]
+(details in A.5). We follow the original implementation, remove clipping, and train α throughout training.
+Architecture In the original implementation, the sizes of latent spaces are decreased quickly and deeper
+networkforfragmentselectionisusedcomparedtotheselectionofattachmentpoints. Weoperateonbigger
+embeddings and unify the structure of logits projectors for all actions. The exact architecture changes and
+their effects are discussed in section A.9).
+Other minor changes and simplifications can be found in the Appendix A.
+4.3 From fixed FREED to FREED++
+In this section, we describe how to significantly speed up the FFREED model and reduce the number of
+trainable parameters. We investigate several components of the original FREED framework and show that
+theycanberemovedorsimplifiedwithoutaperformancedropwhilesignificantlyspeedingupthemodeland
+reducing the number of trainable parameters.
+Prioritization Toencouragetheagenttogeneratediversemolecules,theoriginalpaper’sauthorspropose
+theirvariantofprioritizedexperiencereplay(Schauletal.,2015). InsteadofusingtheTD-errortodetermine
+the probability of sampling a transition from the replay buffer, the authors suggest prioritizing novel transi-
+tions. The novelty in terminal states is defined as the L error between the reward in the terminal state and
+2
+the predicted reward. In non-terminal states, the non-existent reward is approximated with the Q function,
+and the L error between its output and the predicted reward is used as a novelty. Apart from introducing
+2
+additional computational load, this approach has multiple issues, which we discuss in Appendix C. We train
+the agent without PER and sample transitions uniformly.
+Fusing functions As mentioned in 3.3, fusing functions f , f , and f are used when selecting a and
+ϕ1 ϕ2 ϕ3 1
+a to combine the embedding of a state or a fragment with the embedding of an attachment point (see
+3
+equations 2, 10). In the original paper, multiplicative interactions (Jayakumar et al., 2020) are used as
+fusing functions. Let x ∈ Rd1,z ∈ Rd2 represent the embeddings to be combined. Then, the MI of x and z
+is:
+fMI(x,z)=zTW x+U z+V x+b , (13)
+ϕi i i i i
+whereW∈Rd2×d3×d1 isalearnable3Dtensor,U∈Rd3×d2,V∈Rd3×d1 arelearnablematrices,andb∈Rd3
+is a bias term. Note that if not stated otherwise, d = d = d = d. Notice that the MI layer contains a
+1 2 3
+bilinearform,whichisconsideredtobecomputationallyandmemoryexpensive. Toovercomethisdrawback,
+we simplify the fusing function and replace the MI layer with a concatenation layer:
+fCAT(x,z)=Q [x;z]+b , (14)
+ϕi i i
+where [· ;·] denotes the concatenation operator, Q
+i
+∈ Rd3×(d1+d2) is a learnable matrix, and b ∈ Rd3 is a
+bias term.
+9Published in Transactions on Machine Learning Research (12/2023)
+Fragment selection IntheoriginalimplementationofFREED,thefragmentselectionprotocolresembles
+the procedure of attachment point selection. First, the ECFP representations of the fragments F˜ ECFP =
+{ECFP(f)} are built. ECFP is a function that computes a d = 1024-bit Morgan fingerprint of radius
+f∈F 2
+2 (Morgan, 1965). Then, the embeddings of all fragments are fused with a˜ : A˜ =f (a˜ ,F˜ ECFP), and the
+resulting matrix A˜ is processed with an MLP f : Rd →− R to obtain the1 logit2 s of ϕ th2 e d1 istribution on the
+2 ψ2
+fragments. Noticethatwhend islarge, thebilinearforminequation13becomesexpensivetocompute. To
+2
+avoid that, we replace the procedure described in the original paper with the one described in equation 4.
+In summary, by applying these three changes to FFREED, we get FREED++. We carefully compare
+FREED++ with different variants of FFREED in section F.
+5 Experiments
+In this section, we describe the experiments conducted and our evaluation protocol. We thoroughly tested
+theimprovedFREED++frameworkonvarioustasksrelatedtogeneratingmoleculeswithdesiredproperties.
+As binding affinity is a key property of a molecule that defines the therapeutic effect of a drug, we consider
+docking score optimization as the main objective in our experiments.
+Comparison with baselines First, we compare FREED++ with existing molecular generative baselines
+on the task of generating molecules with high affinity against particular biological targets 5.1. We consider
+this to be the main experiment.
+Fragmentlibrarycollection Existingtoolsfordenovodrugdesignusevariouslibrariesofbuildingblocks
+with sizes ranging from dozens to several thousands of fragments (Rotstein & Murcko, 1993; Pierce et al.,
+2004;Douguetetal.,2005;Spiegel&Durrant,2020;Yuanetal.,2020). Themainreasonsbehindthechoice
+of fragment library can be summarized as follows: 1) the building block library should be reasonably small
+to reduce the chemical space efficiently, and 2) if known inhibitors for a particular target are available, it is
+bettertousetheirfragmentsforassembling.(Lin,2000). Whiletheusedfragmentlibraryessentiallydefines
+the set of attainable molecules, research papers on de novo drug design focus mainly on scoring functions,
+searchalgorithms,andassemblingstrategies (Schneider&Fechner,2005). Toimprovetheunderstandingof
+theproblem,weconductedexperimentswithseveralfragmentlibrariesobtainedfromtwomoleculardatasets
+with different fragmentation techniques 5.2.
+Development of USP7 inhibitors Finally, we have tested FREED++ in the practical scenario of gen-
+erating inhibitors for the USP7 protein and provided qualitative analysis of the generated molecules 5.3.
+Protein targets In the original paper, three protein targets are considered: fa7 (Zbinden et al., 2005),
+parp1 (Penning et al., 2010), and 5ht1b (Wang et al., 2013). To show an improved generalization, we
+experiment with three additional proteins: abl1 (Cowan-Jacob et al., 2007) and fkb1a (Sun et al., 2003)
+from DUDE (Mysinger et al., 2012) and usp7 (Leger et al., 2020a) from PDB (Berman et al., 2000).
+Bindingpocketsofinterestforproteinswerecomputedasfollows: first,weextractedthe3Dstructureofthe
+ligand from the corresponding pdb file; then, we computed the center of the bounding box as the average of
+all atoms’ coordinates. The size of the bounding box along each axis is estimated by adding the maximum
+difference between the coordinates of the atoms and 4Å for the corresponding axis.
+Evaluation protocol To evaluate the generation quality, we generate 1000 molecules with a fully-trained
+model, remove invalid compounds and duplicates and score the filtered molecules with QVina 2. We repeat
+the generation 3 times with different random seeds. Since the combinatorial generator is a simple baseline,
+we allow it to generate 30000 molecules instead of 1000.
+It is important to note that the evaluation protocol differs from the one used in the original paper. In the
+original work, all models except FREED are compared on the first 3000 molecules generated during the
+training. The FREED is evaluated on the 3000 molecules generated after the exploration phase (see section
+A.3). Such an approach does not reflect the actual performance of models, as the evaluated models are
+10Published in Transactions on Machine Learning Research (12/2023)
+underfitted. For example, the default REINVENT model generates ∼ 1.8×105 molecules throughout the
+training, requiring approximately twice as much computational time as FREED.
+Metrics To evaluate the performance of different models, we report the uniqueness of valid molecules, the
+average docking score of unique and valid molecules (Avg DS), the maximum docking score (Max DS) and
+the average docking score of 5% of top-scoring molecules (Top-5 DS). We report DS metrics in KCal/Mol
+units. In section G, we also consider PAINS, SureChEMBL and Glaxo metrics, which denote the fraction of
+valid unique molecules that successfully pass the corresponding structural filters.
+5.1 Comparison with baselines
+Inthissection, wecomparethemodelcorrespondingtotheoriginalimplementation2, whichwecallFREED
+4, fixed model FFREED 4.3, and our simplified model FREED++ 3 on the task of generating high-affinity
+molecules.
+Baselines We take the same objective-oriented baselines as in the original paper: REINVENT and
+MolDQN.Additionally, weconsidertwomethods: thecombinatorialgenerator(randomwalk), whichselects
+fragments proportional to their frequences at each step, and one of the current SOTA protein-conditioned
+generative methods Pocket2Mol (Peng et al., 2022). Moreover, we report metric values computed over sets
+ofknowninhibitors(KIrowsintables1,6). Forfa7,parp1,5ht1b,abl1,andfkb1atargetswetakeinhibitors
+from the DUDE dataset, and for the usp7 protein we take inhibitors reported in the paper (Leger et al.,
+2020b).
+For the combinatorial generator (CombGen) we used the implementation from MOSES3. For Pocket2Mol
+we used a pretrained model provided by the authors4.
+We train REINVENT with DS as the optimization objective. For non-valid molecules, DS is considered to
+be0. WetrainREINVENTwiththedefaultparametersoftheoriginalimplementation5 exceptforthebatch
+size (we take 32 instead of 64). As the reward we take 0.1·DS(s ) for valid molecules and 0 otherwise, to
+t
+keep a return approximately in the range [0, 1]. We search for the optimal σ ∈ [60,100,200] (see table 5)
+and pick the best in the evaluation.
+RegardingMolDQN,weexploretwosetups. Thefirstsetupissimilartotheoriginalimplementation6,except
+we replace QED with DS. In this version, gradient steps are performed every 20 iterations, and the reward
+at each step is calculated as γT−tDS(s ). The second version employs sparse rewards, with rewards set
+t+1
+to 0 everywhere except for preterminal states, where the reward is DS(s ). In the "sparse" setup, we do
+t+1
+24 gradient steps every 480 iterations maintaining the same update-to-data ratio. From the training plots
+(see 5), we observe that the version from the original implementation performs better but is approximately
+three times slower. We use the "sparse" version setup in the Docking score optimization section. Overall,
+changing the "sparse" version to the dense one does not alter the results.
+Results The results of the experiment are presented in tables 1, 6. To sum it up, the corrections to
+the FREED model (FFREED and FREED++) perform superior to other methods in all metrics except
+uniqueness. However,weagreewith(Pengetal.,2022)thatuniquenessanddiversityarenotveryimportant
+metrics for the pocket-based generation task because protein pocket is known to have strong specificity.
+Moreover,FREED++allowscontrollingthetrade-offbetweendiversityandgenerationqualityviathetarget
+entropy parameter.
+WhilePocket2Molistrainedtorecoverthemaskedatomsoftheknowninhibitors,objective-orientedmethods
+REINVENT,MolDQN,FFREED,andFREED++aredirectlyaimedtooptimizethedockingscorethrough
+the design of the reward function. Although known inhibitors commonly form strong interactions with their
+2https://github.com/AITRICS/FREED
+3https://github.com/molecularsets/moses
+4https://github.com/pengxingang/Pocket2Mol
+5https://github.com/MarcusOlivecrona/REINVENT
+6https://github.com/aksub99/MolDQN-pytorch
+11Published in Transactions on Machine Learning Research (12/2023)
+target proteins, there are no guarantees that they have the highest possible docking scores, which we also
+observeinourexperiments. Therefore,onecanexpectthatRL-basedmethodswillbemoresuccessfulinthe
+DSoptimizationtask. Wepartiallyobservedsuchaneffectinourexperiments,exceptMolDQN,whichfailed
+to generate molecules with higher docking scores than Pocket2Mol. Possible reasons for this could be the
+underfittingofmodels, shortepisodelength, poorchoiceofhyperparameters, ortheuseofanon-pre-trained
+encoder. While REINVENT succeeded in outperforming Pocket2Mol, it uses a backbone pre-trained on a
+large database compared to MolDQN, which learns from scratch.
+WeobservethatFREED++andFFREEDoutperformMolDQNandREINVENT.Wehypothesizethatthis
+behavior can be explained by the fact that FREED methods work in the paradigm of fragment generation.
+Fragment generation exponentially reduces the search space compared to atom-based assembling strategies,
+allowing the RL agent to learn efficiently.
+We found that the original FREED model performs significantly worse than other models. The learning
+process of FREED tends to diverge (see figure 6), while FFREED and FREED++ stably outperform their
+competitors. This confirms the importance of correcting implementation issues (sec. 4). We compared
+FREED and FREED++ on the first 10 proteins from the DUDE database to provide more evidence (see
+figure 7). Once again, FREED poorly optimizes the docking score and works unstably.
+method unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+CombGen 0.98 ± 0.00 8.03 ± 0.00 13.00 ± 0.26 10.53 ± 0.00
+MolDQN 0.21 ± 0.03 7.92 ± 0.23 9.93 ± 0.41 9.43 ± 0.34
+REINVENT 0.99 ± 0.00 9.69 ± 0.39 13.13 ± 0.89 12.05 ± 0.73
+Pocket2Mol 1.00 ± 0.00 8.71 ± 0.37 12.36 ± 0.40 11.30 ± 0.65
+FREED 0.10 ± 0.07 8.58 ± 1.02 11.36 ± 0.98 11.12 ± 0.88
+FFREED 0.66 ± 0.01 10.91 ± 0.15 14.03 ± 0.46 13.35 ± 0.27
+FREED++ 0.64 ± 0.07 9.66 ± 3.28 14.16 ± 0.47 13.30 ± 0.13
+KI - 9.40 11.90 11.90
+Table 1: Comparison of FREED, FFREED and FREED++ with baselines on DS optimization task for
+USP7 target. See full table in appendix 6.
+5.2 Fragment library collection
+An appropriate fragment library is an essential part of a successful molecular generation. Such a set of
+fragments can be handcrafted by a chemist or obtained via a fragmentation procedure applied to a given set
+of molecules.
+To obtain fragments for generation, the authors of FREED use CReM fragmentation (Polishchuk, 2020) to
+fragment 250k drug-like molecules from the ZINC (Irwin et al., 2012) database. Additionally, the authors
+filterfragmentsaccordingtothenumberofatoms,radius,andfrequency. Fragmentsthatcontainfewerthan
+12 atoms or appear less than 3 times in the ZINC are excluded. Fragments that cause RDKit parsing errors
+arealsoremoved. Whentwofragmentshavethesamegraphstructurebutdifferentattachmentsites(almost
+duplicates), the one with fewer attachment sites is removed. Finally, the authors choose 91 fragments that
+appear most frequently from the filtered dataset.
+CReM fragmentation is not widely used, and formally, the given dataset cannot be reconstructed with
+fragments obtained by CReM. BRICS fragmentation (Degen et al., 2008) is a set of rules for breaking
+retrosynthetically interesting chemical substructures commonly used for de novo design.
+We fragment MOSES ( (Polykovskiy et al., 2020) - cleaned version of ZINC) and ZINC datasets by CReM
+andBRICSfragmentationproceduresandcomparedifferentcombinationsoffragmentationanddataset. The
+samefragmentdictionaryasintheprevioussectionwasusedforCReM-ZINCsetup. Forothersetups,wedo
+12Published in Transactions on Machine Learning Research (12/2023)
+the following steps: extract fragments from the dataset, exclude charged fragments, remove fragments that
+appear only once, remove fragments with more than 16 heavy atoms, remove almost duplicate fragments,
+and sample 100 fragments uniformly.
+In FREED++, the optimal number of generation steps is unknown beforehand and needs to be tuned (see
+section J for an in depth discussion). Because of that, we run the generation for 4 and 5 steps and use the
+one which produces molecules with higher docking scores on evaluation.
+fragmentation dataset unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+BRICS MOSES 0.58 ± 0.17 5.82 ± 4.32 13.16 ± 0.51 12.22 ± 0.67
+ZINC 0.63 ± 0.13 9.07 ± 0.70 13.39 ± 0.88 12.42 ± 0.46
+CReM MOSES 0.74 ± 0.07 1.21 ± 1.06 12.00 ± 1.81 7.77 ± 6.27
+ZINC 0.64 ± 0.07 9.66 ± 3.28 14.16 ± 0.47 13.30 ± 0.13
+Table 2: Comparison of different fragments libraries used in FREED++ on DS optimization task for USP7
+target. See full table in appendix 7.
+Results Tables 2 and 7 demonstrate that generation performance is significantly influenced by the frag-
+ment library used. We explain these results by drawing an analogy between molecular fragmentation and
+tokenization in the NLP field. Both procedures break unstructured data into a set of meaningful elements,
+which are used as atomic units that embed contextual information. It is known that tokenization has a
+major impact on overall pipeline performance in NLP tasks (Chirkova & Troshin, 2023; Zhang & Li, 2021;
+Tayetal.,2022;Parketal.,2020). Basedonourempiricalresults,weconcludethatthedesignofafragment
+library is an extremely significant step in molecular generation.
+5.3 Development of USP7 inhibitors
+USP7isadeubiquitinatingenzyme(DUB)whichtakespartinregulatingofaplethoraofbiologicalprocesses.
+The up-regulated function of the protein is related to the development of several types of cancer, thus,
+inhibition of USP7 is considered a promising strategy for the treatment of these malignancies. During the
+last decade, numerous series of USP7 inhibitors were developed, however, none of them progressed into
+clinical trials due to their insufficient efficacy and selectivity. For that reason, it is still highly desired to
+develop novel structural types of USP7 inhibitors which possess improved profile of pharmacodynamic and
+pharmacokineticproperties. KnownUSP7(seefigure9)inhibitorsbind(Li&Liu,2020;Oliveiraetal.,2022;
+Korenev et al., 2022) to the protein in three different locations: inside the catalytic center (some irreversible
+inhibitors form a covalent bond with sulfur atom for catalytic Cys223); in the ubiquitin-binding cleft near
+the catalytic site and in the allosteric binding site (4-ethylpyridine series of inhibitors).
+A highly promising structural type of USP7 inhibitors was reported in 2020 (Leger et al., 2020b). Although
+these molecules bind to the familiar USP7 pocket, the outstanding selectivity relative to other DUBs was
+demonstrated together with notable efficacy in vivo. Those inhibitors fit the targeted pocket well and form
+four well-defined hydrogen bonds. In this work, we utilize FREED++ to generate novel plausible inhibitors
+of USP7 which bind to the same binding site.
+We perform the generation procedure for several fragment libraries: with the basic set of fragments (CReM-
+ZINC), with a relatively big set of fragments (1000 fragments) from the MOSES dataset (BRICS-MOSES)
+and the set of fragments obtained via fragmentation of known inhibitors of usp7 (BRICS-USP7). We con-
+struct the reward function in a way that takes into account several commonly desired properties of drug
+candidates. We search for molecules 1) with octanol-water partition coefficient LogP ∈ [0, 5]; 2) with a
+numberofheavyatoms≤403)withanumberofhydrogenacceptors≤10; 4)anumberofhydrogendonors
+≤5; 5)whichpassPAINS,SureChEMBL,Glaxofilters. WeintroducepenaltiesP inthefollowingway: the
+i
+penaltyformoleculeequals0ifthecorrespondingpropertyPr liesintheacceptablerange[L ,L ]and
+i min max
+linearlygrowsoutsideP (M)=ReLU(L −Pr (M))+ReLU(Pr (M)−L ). Weconsiderthefinalreward
+i min i i max
+to be a weighted sum of penalties and docking score: r(s ,a ,s )=max(0,DS(s ))+P w P (s ).
+t t t+1 t+1 i i i t+1
+13Published in Transactions on Machine Learning Research (12/2023)
+(a) BRICS-MOSES (b) BRICS-USP7 (c) CReM-ZINC
+Figure4: SelectedrepresentativemoleculeswhichweregeneratedbyFREED++withUSP7asatargetpro-
+tein. Docking score and maximum Tanimoto similarity to set of known inhibitors depicted below molecules.
+Fragment libraries: BRICS-MOSES (A); BRICS-USP7 (B); CReM-ZINC (C).
+Results TheresultsoftheFREED++generationarehighlydependentonthechosenfragmentlibrary. In
+the case of the BRICS USP7 fragment library, it is notable that FREED++-generated molecules are closely
+related to the previously reported USP7 inhibitors. The molecules generated using other libraries do not
+exhibit explicit structural analogy of the previously reported USP7 inhibitors while having higher docking
+scores. Such results indicate that FREED++ can design novel potential drug candidates and can serve as a
+motivation to test the inhibition activity of designed molecules experimentally.
+6 Conclusions
+In this paper, we present a detailed ablation study on the recent state-of-the-art objective-oriented molec-
+ular generation method FREED. Through extensive evaluation and deep analysis of FREED, we identify
+numerousimplementationissuesandinconsistenciesintheevaluationprotocol. Wefixandsimplifytheorig-
+inal FREED model, provide an accurate comparison with an extended set of baselines, perform additional
+analysis on different fragment libraries, and test the approach in the practical scenario of USP7 inhibitors
+generation. We show that our FREED++ framework can produce molecules with superior docking scores
+compared to alternative approaches and can be a valuable tool for drug discovery.
+Code and Reproducibility
+The code for FFREED and FREED++ is accessible by link 7. The code for other methods and all configs
+are available in supplementary material.
+Broader Impact Statement
+As our framework is a reimplementation of FREED, our “Broader Impact Statement” is similar to the
+original work. We provide a slightly edited version below.
+FREED++ is a powerful tool that can generate various chemical compounds with desired properties. How-
+ever, it is important to note that if this tool is used for malicious purposes, it can result in the creation of
+harmfulsubstancessuchasbiochemicalweapons. Thepotentialforabuseofthisframeworkunderscoresthe
+need for strict regulations and ethical guidelines to be put in place to prevent any misuse. Furthermore, it
+is crucial that users of this framework exercise caution and responsibility in their actions to ensure that it is
+only used for legitimate purposes that don’t harm individuals or society as a whole.
+7https://github.com/AIRI-Institute/FFREED
+14Published in Transactions on Machine Learning Research (12/2023)
+References
+Amr Alhossary, Stephanus Daniel Handoko, Yuguang Mu, and Chee-Keong Kwoh. Fast, accurate, and
+reliablemoleculardockingwithQuickVina2. Bioinformatics,31(13):2214–2216,022015. ISSN1367-4803.
+doi: 10.1093/bioinformatics/btv082. URL https://doi.org/10.1093/bioinformatics/btv082.
+Jonathan B. Baell and Georgina A. Holloway. New substructure filters for removal of pan assay interference
+compounds (pains) from screening libraries and for their exclusion in bioassays. Journal of Medicinal
+Chemistry,53(7):2719–2740,2010. doi: 10.1021/jm901137j. URLhttps://doi.org/10.1021/jm901137j.
+PMID: 20131845.
+Igor I Baskin, David Winkler, and Igor V Tetko. A renaissance of neural networks in drug discovery. Expert
+Opin Drug Discov, 11(8):785–795, July 2016.
+Emmanuel Bengio, Moksh Jain, Maksym Korablyov, Doina Precup, and Yoshua Bengio. Flow network
+based generative models for non-iterative diverse candidate generation. Advances in Neural Information
+Processing Systems, 34:27381–27394, 2021.
+Helen M. Berman, John Westbrook, Zukang Feng, Gary Gilliland, T. N. Bhat, Helge Weissig, Ilya N.
+Shindyalov, and Philip E. Bourne. The Protein Data Bank. Nucleic Acids Research, 28(1):235–242, 01
+2000. ISSN 0305-1048. doi: 10.1093/nar/28.1.235. URL https://doi.org/10.1093/nar/28.1.235.
+Thomas Blaschke, Ola Engkvist, Jürgen Bajorath, and Hongming Chen. Memory-assisted reinforcement
+learning for diverse molecular de novo design. Journal of cheminformatics, 12(1):1–17, 2020.
+Nathan Brown, Marco Fiscato, Marwin HS Segler, and Alain C Vaucher. Guacamol: benchmarking models
+for de novo molecular design. Journal of chemical information and modeling, 59(3):1096–1108, 2019.
+NadezhdaChirkovaandSergeyTroshin. CodeBPE:Investigatingsubtokenizationoptionsforlargelanguage
+modelpretrainingonsourcecode. InThe Eleventh International Conference on Learning Representations,
+2023. URL https://openreview.net/forum?id=htL4UZ344nF.
+Stefan Chmiela, Alexandre Tkatchenko, Huziel E Sauceda, Igor Poltavsky, Kristof T Schütt, and Klaus-
+Robert Müller. Machine learning of accurate energy-conserving molecular force fields. Science advances,
+3(5):e1603015, 2017.
+TobiaszCieplinski, TomaszDanel, SabinaPodlewska, andStanislawJastrzebski. Weshouldatleast beable
+to design molecules that dock well. arXiv preprint arXiv:2006.16955, 2020.
+Sandra W. Cowan-Jacob, Gabriele Fendrich, Andreas Floersheimer, Pascal Furet, Janis Liebetanz, Gabriele
+Rummel, Paul Rheinberger, Mario Centeleghe, Doriano Fabbro, and Paul W. Manley. Structural biology
+contributions to the discovery of drugs to treat chronic myelogenous leukaemia. Acta Crystallographica
+Section D, 63(1):80–93, Jan 2007. doi: 10.1107/S0907444906047287. URL https://doi.org/10.1107/
+S0907444906047287.
+GeorgeE.Dahl,NavdeepJaitly,andRuslanSalakhutdinov. Multi-taskneuralnetworksforqsarpredictions,
+2014.
+NicolaDeCaoandThomasKipf. MolGAN:Animplicitgenerativemodelforsmallmoleculargraphs. ICML
+2018 workshop on Theoretical Foundations and Applications of Deep Generative Models, 2018.
+Jörg Degen, Christof Wegscheid-Gerlach, Andrea Zaliani, and Matthias Rarey. On the art of compiling
+and using ’drug-like’ chemical fragment spaces. ChemMedChem, 3:1503–7, 10 2008. doi: 10.1002/cmdc.
+200800178.
+DominiqueDouguet,HélèneMunier-Lehmann,GillesLabesse,andSylviePochet. LEA3D:acomputer-aided
+ligand design for structure-based drug design. J Med Chem, 48(7):2457–2468, April 2005.
+PavolDrotár,ArianRokkumJamasb,BenDay,CătălinaCangea,andPietroLiò.Structure-awaregeneration
+of drug-like molecules. arXiv preprint arXiv:2111.04107, 2021.
+15Published in Transactions on Machine Learning Research (12/2023)
+Peter Eastman, Pavan Kumar Behara, David L Dotson, Raimondas Galvelis, John E Herr, Josh T Horton,
+Yuezhi Mao, John D Chodera, Benjamin P Pritchard, Yuanqing Wang, et al. Spice, a dataset of drug-like
+molecules and peptides for training machine learning potentials. Scientific Data, 10(1):11, 2023.
+Paul G Francoeur, Tomohide Masuda, Jocelyn Sunseri, Andrew Jia, Richard B Iovanisci, Ian Snyder, and
+DavidRKoes. Three-dimensionalconvolutionalneuralnetworksandacross-dockeddatasetforstructure-
+based drug design. Journal of chemical information and modeling, 60(9):4200–4215, 2020.
+Anna Gaulton, Louisa J Bellis, A Patricia Bento, Jon Chambers, Mark Davies, Anne Hersey, Yvonne
+Light, Shaun McGlinchey, David Michalovich, Bissan Al-Lazikani, et al. Chembl: a large-scale bioac-
+tivity database for drug discovery. Nucleic acids research, 40(D1):D1100–D1107, 2012.
+Erik Gawehn, Jan A Hiss, and Gisbert Schneider. Deep learning in drug discovery. Mol Inform, 35(1):3–14,
+December 2015.
+Niklas Gebauer, Michael Gastegger, and Kristof Schütt. Symmetry-adapted generation of 3d point sets for
+the targeted discovery of molecules. Advances in neural information processing systems, 32, 2019.
+Raj Ghugare, Santiago Miret, Adriana Hugessen, Mariano Phielipp, and Glen Berseth. Searching for high-
+value molecules using reinforcement learning and transformers, 2023.
+Rafael Gómez-Bombarelli, Jennifer N Wei, David Duvenaud, José Miguel Hernández-Lobato, Benjamín
+Sánchez-Lengeling, Dennis Sheberla, Jorge Aguilera-Iparraguirre, Timothy D Hirzel, Ryan P Adams,
+and Alán Aspuru-Guzik. Automatic chemical design using a data-driven continuous representation of
+molecules. ACS central science, 4(2):268–276, 2018.
+JiaqiGuan,WesleyWeiQian,XingangPeng,YufengSu,JianPeng,andJianzhuMa.3dequivariantdiffusion
+for target-aware molecule generation and affinity prediction. arXiv preprint arXiv:2303.03543, 2023.
+Tuomas Haarnoja, Haoran Tang, Pieter Abbeel, and Sergey Levine. Reinforcement learning with deep
+energy-based policies. In International conference on machine learning, pp. 1352–1361. PMLR, 2017.
+Tuomas Haarnoja, Aurick Zhou, Pieter Abbeel, and Sergey Levine. Soft actor-critic: Off-policy maximum
+entropy deep reinforcement learning with a stochastic actor. In International conference on machine
+learning, pp. 1861–1870. PMLR, 2018a.
+Tuomas Haarnoja, Aurick Zhou, Kristian Hartikainen, George Tucker, Sehoon Ha, Jie Tan, Vikash Kumar,
+Henry Zhu, Abhishek Gupta, Pieter Abbeel, et al. Soft actor-critic algorithms and applications. arXiv
+preprint arXiv:1812.05905, 2018b.
+Emiel Hoogeboom, Vıctor Garcia Satorras, Clément Vignac, and Max Welling. Equivariant diffusion for
+molecule generation in 3d. In International Conference on Machine Learning, pp. 8867–8887. PMLR,
+2022.
+Liegi Hu, Mark L Benson, Richard D Smith, Michael G Lerner, and Heather A Carlson. Binding moad
+(mother of all databases). Proteins: Structure, Function, and Bioinformatics, 60(3):333–340, 2005.
+Ilia Igashov, Hannes Stärk, Clément Vignac, Victor Garcia Satorras, Pascal Frossard, Max Welling, Michael
+Bronstein, and Bruno Correia. Equivariant 3d-conditional diffusion models for molecular linker design.
+arXiv preprint arXiv:2210.05274, 2022.
+John J. Irwin, Teague Sterling, Michael M. Mysinger, Erin S. Bolstad, and Ryan G. Coleman. Zinc: A free
+tool to discover chemistry for biology. Journal of Chemical Information and Modeling, 52(7):1757–1768,
+2012. doi: 10.1021/ci3001277. URL https://doi.org/10.1021/ci3001277. PMID: 22587354.
+Clemens Isert, Kenneth Atz, José Jiménez-Luna, and Gisbert Schneider. Qmugs, quantum mechanical
+properties of drug-like molecules. Scientific Data, 9(1):273, 2022.
+16Published in Transactions on Machine Learning Research (12/2023)
+Moksh Jain, Sharath Chandra Raparthy, Alex Hernández-García, Jarrid Rector-Brooks, Yoshua Bengio,
+SantiagoMiret,andEmmanuelBengio. Multi-objectiveGFlowNets. InAndreasKrause,EmmaBrunskill,
+KyunghyunCho,BarbaraEngelhardt,SivanSabato,andJonathanScarlett(eds.),Proceedings of the 40th
+International Conference on Machine Learning, volume202ofProceedings of Machine Learning Research,
+pp. 14631–14653. PMLR, 23–29 Jul 2023. URL https://proceedings.mlr.press/v202/jain23a.html.
+Eric Jang, Shixiang Gu, and Ben Poole. Categorical reparameterization with gumbel-softmax. In In-
+ternational Conference on Learning Representations, 2017. URL https://openreview.net/forum?id=
+rkE3y85ee.
+Siddhant M. Jayakumar, Wojciech M. Czarnecki, Jacob Menick, Jonathan Schwarz, Jack Rae, Simon Osin-
+dero, Yee Whye Teh, Tim Harley, and Razvan Pascanu. Multiplicative interactions and where to find
+them. In International Conference on Learning Representations, 2020. URL https://openreview.net/
+forum?id=rylnK6VtDH.
+WoosungJeonandDongsupKim.Autonomousmoleculegenerationusingreinforcementlearninganddocking
+to develop potential novel inhibitors. Scientific reports, 10(1):22104, 2020.
+Wengong Jin, Regina Barzilay, and Tommi Jaakkola. Junction tree variational autoencoder for molecular
+graph generation. In International conference on machine learning, pp. 2323–2332. PMLR, 2018.
+Hiroshi Kajino. Molecular hypergraph grammar with its application to molecular optimization. In Interna-
+tional Conference on Machine Learning, pp. 3183–3191. PMLR, 2019.
+Kuzma Khrabrov, Ilya Shenbin, Alexander Ryabov, Artem Tsypin, Alexander Telepov, Anton Alekseev,
+Alexander Grishin, Pavel Strashnov, Petr Zhilyaev, Sergey Nikolenko, et al. nabladft: Large-scale con-
+formational energy and hamiltonian prediction benchmark and dataset. Physical Chemistry Chemical
+Physics, 24(42):25853–25863, 2022.
+Thomas N. Kipf and Max Welling. Semi-supervised classification with graph convolutional networks. In
+International Conference on Learning Representations,2017. URLhttps://openreview.net/forum?id=
+SJU4ayYgl.
+GeorgiyKorenev, SergeyYakukhnov, AnastasiaDruk, AnastasiaGolovina, VitalyChasov, ReginaMirgaya-
+zova, Roman Ivanov, and Emil Bulatov. USP7 inhibitors in cancer immunotherapy: Current status and
+perspective. Cancers (Basel), 14(22), November 2022.
+AlexiosKoutsoukas, KeithJ.Monaghan, XiaoliLi, andJunHuan. Deep-learning: investigatingdeepneural
+networks hyper-parameters and comparison of performance to shallow methods for modeling bioactivity
+data. Journal of Cheminformatics, 9(1):42, Jun 2017. ISSN 1758-2946. doi: 10.1186/s13321-017-0226-y.
+URL https://doi.org/10.1186/s13321-017-0226-y.
+GregLandrum,PaoloTosco,BrianKelley,Ric,sriniker,gedeck,RiccardoVianello,NadineSchneider,Eisuke
+Kawashima, Andrew Dalke, Dan N, David Cosgrove, Brian Cole, Matt Swain, Samo Turk, Alexander-
+Savelyev, Gareth Jones, Alain Vaucher, Maciej Wójcikowski, Ichiru Take, Daniel Probst, Kazuya Ujihara,
+Vincent F. Scalfani, guillaume godin, Axel Pahl, Francois Berenger, JLVarjo, strets123, JP, and Doliath-
+Gavid. rdkit/rdkit: 2022_03_1(q12022)release,March2022. URLhttps://doi.org/10.5281/zenodo.
+6388425.
+Stephen J Lane, Drake S Eggleston, Keith A Brinded, John C Hollerton, Nicholas L Taylor, and Simon A
+Readshaw. Definingandmaintainingahighqualityscreeningcollection: theGSKexperience. DrugDiscov
+Today, 11(5-6):267–272, March 2006.
+Paul R. Leger, Dennis X. Hu, Berenger Biannic, Minna Bui, Xinping Han, Emily Karbarz, Jack Maung,
+AkinoriOkano,MaksimOsipov,GrantM.Shibuya,KyleYoung,ChristopherHiggs,BettyAbraham,Delia
+Bradford, Cynthia Cho, Christophe Colas, Scott Jacobson, Yamini M. Ohol, Deepa Pookot, Payal Rana,
+Jerick Sanchez, Niket Shah, Michael Sun, Steve Wong, Dirk G. Brockstedt, Paul D. Kassner, Jacob B.
+Schwarz, and David J. Wustrow. Discovery of potent, selective, and orally bioavailable inhibitors of usp7
+17Published in Transactions on Machine Learning Research (12/2023)
+withinvivoantitumoractivity.JournalofMedicinalChemistry,63(10):5398–5420,May2020a.ISSN0022-
+2623. doi: 10.1021/acs.jmedchem.0c00245. URL https://doi.org/10.1021/acs.jmedchem.0c00245.
+Paul R. Leger, Dennis X. Hu, Berenger Biannic, Minna Bui, Xinping Han, Emily Karbarz, Jack Maung,
+AkinoriOkano,MaksimOsipov,GrantM.Shibuya,KyleYoung,ChristopherHiggs,BettyAbraham,Delia
+Bradford, Cynthia Cho, Christophe Colas, Scott Jacobson, Yamini M. Ohol, Deepa Pookot, Payal Rana,
+Jerick Sanchez, Niket Shah, Michael Sun, Steve Wong, Dirk G. Brockstedt, Paul D. Kassner, Jacob B.
+Schwarz, and David J. Wustrow. Discovery of potent, selective, and orally bioavailable inhibitors of usp7
+with in vivo antitumor activity. Journal of Medicinal Chemistry, 63(10):5398–5420, 2020b. doi: 10.1021/
+acs.jmedchem.0c00245. URL https://doi.org/10.1021/acs.jmedchem.0c00245. PMID: 32302140.
+Peng Li and Hong-Min Liu. Recent advances in the development of ubiquitin-specific-processing protease 7
+(USP7) inhibitors. Eur J Med Chem, 191:112107, February 2020.
+YiboLi,JianfengPei,andLuhuaLai. Structure-baseddenovodrugdesignusing3ddeepgenerativemodels.
+Chemical science, 12(41):13664–13675, 2021.
+Shu-Kun Lin. Pharmacophore perception, development and use in drug design. edited by osman f. güner.
+Molecules, 5(7):987–989, 2000. ISSN 1420-3049. doi: 10.3390/50700987. URL https://www.mdpi.com/
+1420-3049/5/7/987.
+Christopher A. Lipinski, Franco Lombardo, Beryl W. Dominy, and Paul J. Feeney. Experimental and
+computational approaches to estimate solubility and permeability in drug discovery and development
+settings. Advanced Drug Delivery Reviews, 23(1):3–25, 1997. ISSN 0169-409X. doi: https://doi.
+org/10.1016/S0169-409X(96)00423-1. URL https://www.sciencedirect.com/science/article/pii/
+S0169409X96004231. In Vitro Models for Selection of Development Candidates.
+MengLiu, YouzhiLuo, KanjiUchino, KojiMaruhashi, andShuiwangJi. Generating3dmoleculesfortarget
+protein binding. In International Conference on Machine Learning, 2022.
+Paul D Lyne. Structure-based virtual screening: an overview. Drug discovery today, 7(20):1047–1055, 2002.
+Junshui Ma, Robert P. Sheridan, Andy Liaw, George E. Dahl, and Vladimir Svetnik. Deep neural nets as a
+method for quantitative structure–activity relationships. Journal of Chemical Information and Modeling,
+55(2):263–274, Feb 2015. ISSN 1549-9596. doi: 10.1021/ci500747n. URL https://doi.org/10.1021/
+ci500747n.
+AndreasMayr,GünterKlambauer,ThomasUnterthiner,andSeppHochreiter. Deeptox: Toxicityprediction
+using deep learning. Frontiers in Environmental Science, 3, 2016. ISSN 2296-665X. doi: 10.3389/fenvs.
+2015.00080. URL https://www.frontiersin.org/articles/10.3389/fenvs.2015.00080.
+Eyal Mazuz, Guy Shtar, Bracha Shapira, and Lior Rokach. Molecule generation using transformers and
+policy gradient reinforcement learning. Scientific Reports, 13(1):8799, May 2023. ISSN 2045-2322. doi:
+10.1038/s41598-023-35648-w. URL https://doi.org/10.1038/s41598-023-35648-w.
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Alex Graves, Ioannis Antonoglou, Daan Wierstra, and
+Martin A. Riedmiller. Playing atari with deep reinforcement learning. ArXiv, abs/1312.5602, 2013.
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A. Rusu, Joel Veness, Marc G. Bellemare, Alex
+Graves, Martin Riedmiller, Andreas K. Fidjeland, Georg Ostrovski, Stig Petersen, Charles Beattie, Amir
+Sadik, Ioannis Antonoglou, Helen King, Dharshan Kumaran, Daan Wierstra, Shane Legg, and Demis
+Hassabis. Human-level control through deep reinforcement learning. Nature, 518(7540):529–533, Feb
+2015. ISSN 1476-4687. doi: 10.1038/nature14236. URL https://doi.org/10.1038/nature14236.
+H.L.Morgan. Thegenerationofauniquemachinedescriptionforchemicalstructures-atechniquedeveloped
+at chemical abstracts service. Journal of Chemical Documentation, 5(2):107–113, May 1965. ISSN 0021-
+9576. doi: 10.1021/c160017a018. URL https://doi.org/10.1021/c160017a018.
+18Published in Transactions on Machine Learning Research (12/2023)
+Michael M. Mysinger, Michael Carchia, John. J. Irwin, and Brian K. Shoichet. Directory of useful decoys,
+enhanced (dud-e): Better ligands and decoys for better benchmarking. Journal of Medicinal Chemistry,
+55(14):6582–6594, 2012. doi: 10.1021/jm300687e. URL https://doi.org/10.1021/jm300687e. PMID:
+22716043.
+Noel M. O’Boyle, Michael Banck, Craig A. James, Chris Morley, Tim Vandermeersch, and Geoffrey R.
+Hutchison. Openbabel: Anopenchemicaltoolbox. Journal of Cheminformatics, 3(1):33, Oct2011. ISSN
+1758-2946. doi: 10.1186/1758-2946-3-33. URL https://doi.org/10.1186/1758-2946-3-33.
+MarcusOlivecrona,ThomasBlaschke,OlaEngkvist,andHongmingChen. Molecularde-novodesignthrough
+deep reinforcement learning. Journal of Cheminformatics, 9(1):48, Sep 2017. ISSN 1758-2946. doi:
+10.1186/s13321-017-0235-x. URL https://doi.org/10.1186/s13321-017-0235-x.
+Rita I. Oliveira, Romina A. Guedes, and Jorge A. R. Salvador. Highlights in usp7 inhibitors for cancer
+treatment. Frontiers in Chemistry, 10, 2022. ISSN 2296-2646. doi: 10.3389/fchem.2022.1005727. URL
+https://www.frontiersin.org/articles/10.3389/fchem.2022.1005727.
+George Papadatos, Mark Davies, Nathan Dedman, Jon Chambers, Anna Gaulton, James Siddle, Richard
+Koks, Sean A. Irvine, Joe Pettersson, Nicko Goncharoff, Anne Hersey, and John P. Overington.
+SureChEMBL:alarge-scale, chemicallyannotatedpatentdocumentdatabase. Nucleic Acids Research, 44
+(D1):D1220–D1228, 11 2015. ISSN 0305-1048. doi: 10.1093/nar/gkv1253. URL https://doi.org/10.
+1093/nar/gkv1253.
+Fabio Pardo, Arash Tavakoli, Vitaly Levdik, and Petar Kormushev. Time limits in reinforcement learning.
+In International Conference on Machine Learning, pp. 4045–4054. PMLR, 2018.
+KyubyongPark,JoohongLee,SeongboJang,andDawoonJung.Anempiricalstudyoftokenizationstrategies
+for various korean nlp tasks. CoRR, abs/2010.02534, 2020. URL https://arxiv.org/abs/2010.02534.
+XingangPeng,ShitongLuo,JiaqiGuan,QiXie,JianPeng,andJianzhuMa.Pocket2mol: Efficientmolecular
+samplingbasedon3dproteinpockets.InInternationalConferenceonMachineLearning,pp.17644–17655.
+PMLR, 2022.
+Thomas D. Penning, Gui-Dong Zhu, Jianchun Gong, Sheela Thomas, Viraj B. Gandhi, Xuesong Liu, Yan
+Shi, Vered Klinghofer, Eric F. Johnson, Chang H. Park, Elizabeth H. Fry, Cherrie K. Donawho, David J.
+Frost, Fritz G. Buchanan, Gail T. Bukofzer, Luis E. Rodriguez, Velitchka Bontcheva-Diaz, Jennifer J.
+Bouska, Donald J. Osterling, Amanda M. Olson, Kennan C. Marsh, Yan Luo, and Vincent L. Giranda.
+Optimization of phenyl-substituted benzimidazole carboxamide poly(adp-ribose) polymerase inhibitors:
+Identification of (s)-2-(2-fluoro-4-(pyrrolidin-2-yl)phenyl)-1h-benzimidazole-4-carboxamide (a-966492), a
+highlypotentandefficaciousinhibitor. Journal of Medicinal Chemistry,53(8):3142–3153,Apr2010. ISSN
+0022-2623. doi: 10.1021/jm901775y. URL https://doi.org/10.1021/jm901775y.
+Albert C Pierce, Govinda Rao, and Guy W Bemis. BREED: Generating novel inhibitors through hybridiza-
+tionofknownligands.applicationtoCDK2,p38,andHIVprotease. J Med Chem,47(11):2768–2775,May
+2004.
+Pavel Polishchuk. Crem: chemically reasonable mutations framework for structure generation. Journal of
+Cheminformatics, 12(1):28, Apr 2020. ISSN 1758-2946. doi: 10.1186/s13321-020-00431-w. URL https:
+//doi.org/10.1186/s13321-020-00431-w.
+Daniil Polykovskiy, Alexander Zhebrak, Benjamin Sanchez-Lengeling, Sergey Golovanov, Oktai Tatanov,
+StanislavBelyaev, RaufKurbanov, AlekseyArtamonov, VladimirAladinskiy, MarkVeselov, etal. Molec-
+ular sets (moses): a benchmarking platform for molecular generation models. Frontiers in pharmacology,
+11:565644, 2020.
+Mariya Popova, Olexandr Isayev, and Alexander Tropsha. Deep reinforcement learning for de novo drug
+design. Science advances, 4(7):eaap7885, 2018.
+19Published in Transactions on Machine Learning Research (12/2023)
+Bharath Ramsundar, Steven Kearnes, Patrick Riley, Dale Webster, David Konerding, and Vijay Pande.
+Massively multitask networks for drug discovery. arXiv preprint arXiv:1502.02072, 2015.
+Jean-Louis Reymond and Mahendra Awale. Exploring chemical space for drug discovery using the chemical
+universe database. ACS chemical neuroscience, 3(9):649–657, 2012.
+David Rogers and Mathew Hahn. Extended-connectivity fingerprints. Journal of chemical information and
+modeling, 50(5):742–754, 2010.
+S H Rotstein and M A Murcko. GroupBuild: a fragment-based method for de novo drug design. J Med
+Chem, 36(12):1700–1710, June 1993.
+TomSchaul,JohnQuan,IoannisAntonoglou,andDavidSilver. Prioritizedexperiencereplay. arXivpreprint
+arXiv:1511.05952, 2015.
+Gisbert Schneider and Uli Fechner. Computer-based de novo design of drug-like molecules. Nat Rev Drug
+Discov, 4(8):649–663, August 2005.
+Arne Schneuing, Yuanqi Du, Charles Harris, Arian Rokkum Jamasb, Ilia Igashov, weitao Du, Tom Leon
+Blundell, Pietro Lio, Carla P Gomes, Max Welling, Michael M. Bronstein, and Bruno Correia. Structure-
+based drug design with equivariant diffusion models, 2023. URL https://openreview.net/forum?id=
+uKmuzIuVl8z.
+Marwin H. S. Segler, Thierry Kogej, Christian Tyrchan, and Mark P. Waller. Generating focused molecule
+librariesfordrugdiscoverywithrecurrentneuralnetworks. ACS Central Science, 4(1):120–131,2018. doi:
+10.1021/acscentsci.7b00512. URL https://doi.org/10.1021/acscentsci.7b00512. PMID: 29392184.
+Tatiana I. Shashkova, Dmitriy Umerenkov, Mikhail Salnikov, Pavel V. Strashnov, Alina V. Konstanti-
+nova, Ivan Lebed, Dmitriy N. Shcherbinin, Marina N. Asatryan, Olga L. Kardymon, and Nikita V.
+Ivanisenko. Sema: Antigen b-cell conformational epitope prediction using deep transfer learning. Fron-
+tiers in Immunology, 13, 2022. ISSN 1664-3224. doi: 10.3389/fimmu.2022.960985. URL https:
+//www.frontiersin.org/articles/10.3389/fimmu.2022.960985.
+Brian K Shoichet. Virtual screening of chemical libraries. Nature, 432(7019):862–865, 2004.
+Gregor N. C. Simm, Robert Pinsler, Gábor Csányi, and José Miguel Hernández-Lobato. Symmetry-aware
+actor-criticfor3dmoleculardesign. InInternational Conference on Learning Representations, 2021. URL
+https://openreview.net/forum?id=jEYKjPE1xYN.
+Jacob O. Spiegel and Jacob D. Durrant. Autogrow4: an open-source genetic algorithm for de novo drug
+design and lead optimization. Journal of Cheminformatics, 12(1):25, Apr 2020. ISSN 1758-2946. doi:
+10.1186/s13321-020-00429-4. URL https://doi.org/10.1186/s13321-020-00429-4.
+Fei Sun, Pengyun Li, Yi Ding, Liwei Wang, Mark Bartlam, Cuilin Shu, Beifen Shen, Hualiang Jiang, Song
+Li, and Zihe Rao. Design and structure-based study of new potential FKBP12 inhibitors. Biophys J, 85
+(5):3194–3201, November 2003.
+Mengying Sun, Sendong Zhao, Coryandar Gilvary, Olivier Elemento, Jiayu Zhou, and Fei Wang. Graph
+convolutional networks for computational drug development and discovery. Brief. Bioinform., 21(3):919–
+935, May 2020.
+Yi Tay, Vinh Q. Tran, Sebastian Ruder, Jai Gupta, Hyung Won Chung, Dara Bahri, Zhen Qin, Simon
+Baumgartner,CongYu,andDonaldMetzler. Charformer: Fastcharactertransformersviagradient-based
+subword tokenization. In International Conference on Learning Representations, 2022. URL https:
+//openreview.net/forum?id=JtBRnrlOEFN.
+Morgan Thomas, Robert T Smith, Noel M O’Boyle, Chris de Graaf, and Andreas Bender. Comparison of
+structure-and ligand-based scoring functions for deep generative models: a gpcr case study. Journal of
+Cheminformatics, 13(1):1–20, 2021.
+20Published in Transactions on Machine Learning Research (12/2023)
+ThomasUnterthiner,AndreasMayr,GünterKlambauer,MarvinSteijaert,JörgKWegner,HugoCeulemans,
+and Sepp Hochreiter. Deep learning as an opportunity in virtual screening. In Proceedings of the deep
+learning workshop at NIPS, volume 27, pp. 1–9, 2014.
+Izhar Wallach, Michael Dzamba, and Abraham Heifets. Atomnet: A deep convolutional neural network
+for bioactivity prediction in structure-based drug discovery. CoRR, abs/1510.02855, 2015. URL http:
+//dblp.uni-trier.de/db/journals/corr/corr1510.html#WallachDH15.
+Chong Wang, Yi Jiang, Jinming Ma, Huixian Wu, Daniel Wacker, Vsevolod Katritch, Gye Won Han, Wei
+Liu, Xi-Ping Huang, Eyal Vardy, John D. McCorvy, Xiang Gao, X. Edward Zhou, Karsten Melcher,
+Chenghai Zhang, Fang Bai, Huaiyu Yang, Linlin Yang, Hualiang Jiang, Bryan L. Roth, Vadim Cherezov,
+Raymond C. Stevens, and H. Eric Xu. Structural basis for molecular recognition at serotonin receptors.
+Science, 340(6132):610–614, 2013. doi: 10.1126/science.1232807. URL https://www.science.org/doi/
+abs/10.1126/science.1232807.
+Steven D. Whitehead and Dana H. Ballard. Learning to perceive and act by trial and error. Machine
+Learning,7(1):45–83,Jul1991. ISSN1573-0565. doi: 10.1023/A:1022619109594. URLhttps://doi.org/
+10.1023/A:1022619109594.
+Oliver Wieder, Stefan Kohlbacher, Mélaine Kuenemann, Arthur Garon, Pierre Ducrot, Thomas Seidel, and
+Thierry Langer. A compact review of molecular property prediction with graph neural networks. Drug
+Discovery Today: Technologies, 37:1–12, 2020. ISSN 1740-6749. doi: https://doi.org/10.1016/j.ddtec.
+2020.11.009. URL https://www.sciencedirect.com/science/article/pii/S1740674920300305.
+Zhenqin Wu, Bharath Ramsundar, Evan N. Feinberg, Joseph Gomes, Caleb Geniesse, Aneesh S. Pappu,
+Karl Leswing, and Vijay Pande. Moleculenet: a benchmark for molecular machine learning. Chem. Sci.,
+9:513–530, 2018. doi: 10.1039/C7SC02664A. URL http://dx.doi.org/10.1039/C7SC02664A.
+Soojung Yang, Doyeong Hwang, Seul Lee, Seongok Ryu, and Sung Ju Hwang. Hit and lead discovery
+with explorative rl and fragment-based molecule generation. Advances in Neural Information Processing
+Systems, 34:7924–7936, 2021.
+JiaxuanYou,BowenLiu,ZhitaoYing,VijayPande,andJureLeskovec. Graphconvolutionalpolicynetwork
+forgoal-directedmoleculargraphgeneration. Advancesinneuralinformationprocessingsystems,31,2018.
+Yaxia Yuan, Jianfeng Pei, and Luhua Lai. LigBuilder v3: A Multi-Target de novo drug design approach.
+Front Chem, 8:142, February 2020.
+KatrinGroebkeZbinden,UlrikeObst-Sander,KurtHilpert,HolgerKühne,DavidW.Banner,Hans-Joachim
+Böhm, Martin Stahl, Jean Ackermann, Leo Alig, Lutz Weber, Hans Peter Wessel, Markus A. Riederer,
+ThomasB.Tschopp,andThierryLavé. Selectiveandorallybioavailablephenylglycinetissuefactor/factor
+viia inhibitors. Bioorganic & Medicinal Chemistry Letters, 15(23):5344–5352, 2005. ISSN 0960-894X. doi:
+https://doi.org/10.1016/j.bmcl.2005.04.079. URLhttps://www.sciencedirect.com/science/article/
+pii/S0960894X05011169.
+Xinsong Zhang and Hang Li. {AMBERT}: A pre-trained language model with multi-grained tokenization,
+2021. URL https://openreview.net/forum?id=DMxOBm06HUx.
+Alex Zhavoronkov, Yan A Ivanenkov, Alex Aliper, Mark S Veselov, Vladimir A Aladinskiy, Anastasiya V
+Aladinskaya, Victor A Terentiev, Daniil A Polykovskiy, Maksim D Kuznetsov, Arip Asadulaev, et al.
+Deep learning enables rapid identification of potent ddr1 kinase inhibitors. Nature biotechnology, 37(9):
+1038–1040, 2019.
+Zhenpeng Zhou, Steven Kearnes, Li Li, Richard N Zare, and Patrick Riley. Optimization of molecules via
+deep reinforcement learning. Scientific reports, 9(1):1–10, 2019.
+Brian D. Ziebart, Andrew Maas, J. Andrew Bagnell, and Anind K. Dey. Maximum entropy inverse rein-
+forcement learning. In Proceedings of the 23rd National Conference on Artificial Intelligence - Volume 3,
+AAAI’08, pp. 1433–1438. AAAI Press, 2008. ISBN 9781577353683.
+21Published in Transactions on Machine Learning Research (12/2023)
+A Other changes
+A.1 Reproducibility
+The docking score computation consists of 2 steps: first, a molecular conformation is generated from a
+molecular graph with OpenBabel software; then, the docking score is estimated with the QVina02 tool.
+Both steps include random sampling, thus requiring setting random seeds to ensure the reproducibility of
+the experiments. In the original implementation, seeds are set only for torch, random, numpy, and dgl
+packages while ignored for QVina02 and OpenBabel libraries. In our experiments, we fix that and set seeds
+for all the libraries.
+A.2 Fragment library preparation
+ForrewardcomputationinFREED,molecularconformationisgeneratedwithOpenBabelsoftware. Insome
+cases, OpenBabel may fail to generate coordinates for charged molecules. We exclude charged fragments
+from the fragment library during the preprocessing step to avoid such situations. For the fragment library
+obtained with the CReM fragmentation method from the ZINC dataset, there are five charged fragments
+out of 91 total fragments. We use a filtered library of 86 uncharged fragments in the main experiments.
+A.3 Exploration
+One commonly used strategy to increase agent exploration of the environment is to select actions uniformly.
+Such environment exploration can be done periodically with some probability (ϵ-greedy strategies) or once
+before the actor and the critic updates. In the original implementation, the number of steps for uniform-
+random action selection was set to 3k, after which the real policy was run. While this technique helps
+exploration, we remove it from our framework for debugging purposes and to save computational time.
+Additionally, westartanupdateofallnetworks’parametersassoonasthereplaybufferisfilledwithbatch-
+size observations. In the original implementation, the number of environment interactions to collect before
+starting to do gradient descent updates was set to 2k. Such a strategy is used to ensure that the replay
+buffer is complete enough for useful updates. However, we believe this stage should not change performance
+significantly, and we drop it for the simplicity of debugging.
+We test the importance of described modifications on the DS optimization task. From table 8, we can see
+that additional exploration phase does not improve the performance of the model.
+A.4 Backbone update
+To cope with the overestimation bias, the SAC algorithm uses an ensemble of two Q-functions (Haarnoja
+etal.,2018b). IntheoriginalFREEDframework,theactorandbothQ-functionsshareaGCNbackbone,and
+the gradients are propagated to the backbone only through the critic loss. In the original implementation,
+the gradients are propagated only through one Q-function (a “stop gradient” is applied to the second one).
+WefollowtheoriginalimplementationoftheSACalgorithm(Haarnojaetal.,2018b),andallowthegradients
+to propagate to the GCN through both Q-functions.
+A.5 Temperature parameter in SAC
+FREED uses a version of the SAC algorithm with a learnable temperature parameter α. Automatic tuning
+of α during training allows to avoid a costly manual grid-search. In the original implementation, α is tuned
+only between interaction steps 3000 and 33000. We do not see any reason for such a setup and follow the
+procedure described in (Haarnoja et al., 2018b), which suggests that alpha should be tuned throughout the
+whole training.
+Moreover,theαparameterisclippedtobeintherange[0.05,20]duringthecomputationoftheentropyloss
+term in the actor update. Here, we again follow (Haarnoja et al., 2018b) and discard the clipping of α.
+22Published in Transactions on Machine Learning Research (12/2023)
+A.6 Terminal states handling
+In the FREED framework, trajectories are terminated either when the timelimit is reached or when there
+are no attachment points in the extended molecular graph representing the current state. Adding terminal
+states to the replay buffer is crucial, as the docking score can only be calculated in such states. In the
+original implementation, terminal states with no attachment points are not added to the replay buffer. This
+approach negatively influences the training of the critic as other states from such trajectories do not carry
+any information about the docking score.
+A.7 Reward shaping
+In the original implementation, the authors use reward shaping (see eq. 15): at each step except for the
+terminal one, the agent received constant rewards r = 0.05. Typically, such constant reward is used when
+t
+we want to increase episode length artificially. In FREED framework, the episode’s length is fixed, so there
+is no point in such an increment.
+Moreover, when the number of explicit atoms NEA (including attachment points) in the molecular graph
+increases,anadditionalrewardof0.005isgiven. Notehydrogenatomsconsideredtobepresentedinthegraph
+implicitly, as in REINVENT, MolDQN, and GCPN. The only scenario in which NEA(s )=NEA(s ) is
+t+1 t
+when an attachment point is replaced with a single atom-like Cl.
+
+0.05, NEA(s )≤NEA(s ), t<T
+ t+1 t
+r(s ,a ,s )= 0.055, NEA(s )>NEA(s ), t<T (15)
+t t t+1 t+1 t
+max(0,DS(s )), t=T.
+t
+In our experiments, we get rid of the reward shaping and only assign a non-zero reward to the terminal
+states, where it is possible to calculate the docking score:
+(
+0, if t<T;
+r (s ,a ,s )= (16)
+t t t t+1 max(0,DS(s )), if t=T.
+t+1
+A.8 Entropy estimation
+As the SAC algorithm is designed to solve the Maximum Entropy RL task, the entropy regularization is
+crucial. To update both actor and critic in SAC, an estimate of the entropy H[π ] is used. A standart
+ϕ
+implementation of the algorithm (Haarnoja et al., 2018b) uses the following estimate:
+H[π (s)]=−logπ (a ,a ,a |s), a ∼π i=1,2,3
+ϕ ϕ e3 e2 e1 ei ϕi
+In FREED implementation, a non-default estimate of entropy is used:
+π (a ,a ,a |a ,a ,s)=π (a |a ,a ,s)π (a |a ,s)π (a |s)
+ϕ 3 2 1 e2 e1 ϕ3 3 e2 e1 ϕ2 2 e1 ϕ1 1
+X
+H[π (s)]=− π (a ,a ,a |a ,a ,s)logπ (a ,a ,a |a ,a ,s), a ∼π ,a ∼π
+ϕ ϕ 3 2 1 e2 e1 ϕ 3 2 1 e2 e1 e1 ϕ1 e2 ϕ2
+a1,a2,a3
+Despite the fact that such an estimate is unbiased, we use the vanilla version as it is easier to implement
+and the implementation is more readable.
+A.9 Arhitecture
+ArchitecturesofFREED,FFREEDandFREED++arepresentedintable3. Infusingfunctionsf ,f ,f
+ϕ1 ϕ2 ϕ3
+forFFREEDandFREED++weuseanoutputsized =128insteadd =64inFREED.Weuse3-layerMLPs
+3 3
+23Published in Transactions on Machine Learning Research (12/2023)
+with a number of hidden neurons (128, 128) as projectors f ,f , while in FREED, 2-layer MLPs with 32
+ψ1 ψ3
+neurons are used. Additionally, we use 4-layer MLPs as critic and auxiliary reward predictor heads with
+layer normalization. Moreover, in FREED, on the third step of action selection, embedding of fragment a˜
+2
+is used to condition the attachment point selection:
+A˜ (s,a ,a )=f (F˜ ,F˜att) (17)
+3 1 2 ϕ3 a2 a2
+We instead use fused representation of state, attachment point and fragment embeddings:
+A˜ (s,a ,a )=f (a˜ ,F˜att) (18)
+3 1 2 ϕ3 2 a2
+To sum it up, we use a wider and deeper architecture for FFREED than the original FREED uses. In the
+caseofFREED++,evenwithincreasedembeddingsizes,theresultingarchitectureappearstobesmaller(in
+termsofthetotalnumberoftrainableparameters)becauseofthesimplifiedmechanismoffragmentselection
+(see section 4.3). To test the importance of the increased number of layers and neurons, we compare the
+FFREED model and its version FFREED(ORIG) with same module sizes as in FREED. We observe that
+this change does not affect the model performance (see table 4). Anyway, the resulting FREED++ model
+is faster and requires fewer parameters than FREED (see table 10).
+module FREED FFREED FREED++
+G GCN(29, (128, 128, 128)) GCN(29, (128, 128, 128)) GCN(29, (128, 128, 128))
+θ
+f MI(128, 128, 64) MI(128, 128, 128) CAT(128, 128, 128)
+ϕ1
+f MLP(64, (32, 1)) MLP(128, (128, 128, 1)) MLP(128, (128, 128, 1))
+ψ1
+f MI(1024, 64, 64) MI(1024, 128, 128) CAT(128, 128, 128)
+ϕ2
+f MLP(64, (64, 64, 1)) MLP(128, (128, 128, 1)) MLP(128, (128, 128, 86))
+ψ2
+f MI(128, 128, 64) MI(128, 128, 128) CAT(128, 128, 128)
+ϕ3
+f MLP(64, (32, 1)) MLP(128, (128, 128, 1)) MLP(128, (128, 128, 1))
+ψ3
+f MLP(299, (149, 1)) MLP(512, (256, 128, 128, 1)) MLP(512, (256, 128, 128, 1))
+ω
+re GCN(29, (128, 128, 128)) GCN(29, (128, 128, 128)) -
+ζ
+rh MLP(128, (64, 1)) MLP(128, (128, 128, 128, 1)) -
+ζ
+Table 3: Comparison of architecures of FREED, FFREED and FREED++.
+B Gumbel-Softmax Issues
+When sampling from categorical distribution π defined by class probabilities π ,...,π , the following
+1 k
+reparametrization is used (Jang et al., 2017):
+exp((logπ +g )/τ)
+y = i i ,g ,...,g – i.i.d. from Gumbel(0, 1). (19)
+i Pk exp((logπ +g )/τ) 1 k
+j=1 j j
+The authors of the original paper use the following reparametrization in their implementation:
+exp((π +νg )/τ)
+y = i i =
+i Pk exp((π +νg )/τ)
+j=1 j j
+=
+exp(cid:0)(π νi +g i)/τ ν(cid:1)
+= (20)
+Pk exp(cid:0)(πj +g )/τ(cid:1)
+j=1 ν j ν
+=
+exp(cid:0)(log(expπ νi)+g i)/τ ν(cid:1)
+Pk exp(cid:0)(log(expπj)+g )/τ(cid:1)
+j=1 ν j ν
+Asitcanbeseenfromequation20,samplingfromsuchdistributionisequivalenttosampling∝exp(π)with
+ν
+temperature π. Intheoriginalimplementation,ν wassetto1×10−3,andτ wassetto1×10−1,makingthe
+ν
+temperature parameter equal to τ = 100. The described issue had thus the following effect on the action
+ν
+distribution:
+24Published in Transactions on Machine Learning Research (12/2023)
+protein name unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+fa7 FFREED(ORIG) 0.60 ± 0.18 9.52 ± 0.53 13.33 ± 0.25 12.40 ± 0.07
+FFREED 0.53 ± 0.12 8.39 ± 0.82 12.86 ± 0.05 12.37 ± 0.01
+FREED 0.43 ± 0.40 7.89 ± 0.46 10.00 ± 1.12 9.53 ± 0.85
+parp1 FFREED(ORIG) 0.58 ± 0.17 10.09 ± 2.29 17.50 ± 0.91 15.93 ± 0.27
+FFREED 0.58 ± 0.09 12.16 ± 1.58 17.90 ± 0.98 16.13 ± 0.15
+FREED 0.33 ± 0.32 10.57 ± 0.81 12.80 ± 1.91 12.29 ± 1.51
+5ht1b FFREED(ORIG) 0.50 ± 0.20 11.49 ± 0.04 14.60 ± 0.79 13.45 ± 0.07
+FFREED* 0.45 ± 0.16 11.97 ± 0.20 14.85 ± 0.21 13.99 ± 0.45
+FREED 0.21 ± 0.21 6.43 ± 5.57 8.83 ± 7.65 7.97 ± 6.90
+fkb1a FFREED(ORIG) 0.42 ± 0.09 8.19 ± 0.13 11.50 ± 0.00 10.65 ± 0.26
+FFREED 0.36 ± 0.14 8.26 ± 0.05 11.50 ± 0.00 10.49 ± 0.29
+FREED 0.44 ± 0.32 5.71 ± 0.92 8.60 ± 0.91 8.00 ± 0.69
+abl1 FFREED(ORIG) 0.37 ± 0.13 10.74 ± 0.35 13.00 ± 0.36 12.39 ± 0.19
+FFREED 0.39 ± 0.12 10.77 ± 0.35 13.03 ± 0.23 12.18 ± 0.06
+FREED 0.24 ± 0.23 2.17 ± 1.68 7.83 ± 3.75 6.36 ± 5.28
+usp7 FFREED(ORIG) 0.49 ± 0.14 10.79 ± 0.50 14.13 ± 0.15 13.37 ± 0.23
+FFREED 0.66 ± 0.01 10.91 ± 0.15 14.03 ± 0.46 13.35 ± 0.27
+FREED 0.10 ± 0.07 8.58 ± 1.02 11.36 ± 0.98 11.12 ± 0.88
+Table 4: Comparison of small and big FFREED-s. * denotes the model has a seed with Max DS ≤ 0 on
+evaluation, while on the last epoch of training Min DS > 0. We exclude such runs.
+1. The initial distribution was scaled by 1000, making some of the unnormalized probabilities ≫1.
+2. The exponent was applied to unnormalized probabilities, effectively making the distribution degen-
+erate as the largest unnormalized probability dominated all the probability mass.
+3. An extremely large temperature τ = 100 was applied to somewhat counter the effect of the two
+previous steps.
+Together with the apparent effect of making the action distribution deterministic and thus hindering the
+exploration, such reparametrization is inconsistent with the entropy optimization, as the entropy of the
+different distribution is maximized.
+C Prioritized Experience Replay Issues
+In this section, we discuss the PER proposed in the original paper. As mentioned in section 4.3, the
+probability of a transition being sampled from the replay buffer is defined by its novelty. Suppose that r is
+ζ
+the auxiliary reward model. Then, the unnormalized probabilities for transactions in the replay buffer are
+computed as follows:
+(
+|r (s )−f (s ,a )|, t<T
+p(s ,a ,s ,r )= ζ t ω t t (21)
+t t t+1 t |r (s )−r |, t=T,
+ζ t t
+where f denotes the critic. The auxiliary reward model is trained to minimize the following objective:
+ω
+E (cid:2) ∥r −r (s )∥2(cid:3) →− min, (22)
+(st,rt)∼DT t ζ t 2
+ζ
+where D denotes the set of all terminal states where reward r ̸=0.
+T t
+Estimating the non-available reward in non-terminal states with a critic has several issues. The critic is
+trained to optimize the TD loss (see equation 12). The target for the critic includes a discounting factor γ
+25Published in Transactions on Machine Learning Research (12/2023)
+as well as an entropy term arising from the Maximum Entropy framework. Even if we consider γ =1, as we
+operate with fixed-length episodes, the entropy term in the critic target makes it incorrect to use the critic’s
+output as a reward estimate. We hypothesize that for this exact reason, the entropy term was omitted from
+the critic target in the original implementation (see section 4.1).
+D Comparison with baselines
+protein σ unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+fa7 60 0.99 ± 0.00 5.98 ± 4.73 10.96 ± 0.72 9.80 ± 0.88
+100 0.99 ± 0.00 8.79 ± 0.70 11.23 ± 0.45 10.49 ± 0.48
+200 0.90 ± 0.04 2.86 ± 3.41 10.23 ± 0.80 6.71 ± 5.46
+usp7 60 0.99 ± 0.00 9.69 ± 0.39 13.13 ± 0.89 12.05 ± 0.73
+100 0.97 ± 0.01 9.70 ± 0.23 11.56 ± 0.20 10.99 ± 0.05
+200 0.79 ± 0.04 10.26 ± 1.31 11.93 ± 1.17 11.50 ± 1.35
+parp1 60 0.98 ± 0.02 10.04 ± 1.42 15.93 ± 0.15 14.06 ± 0.81
+100 0.96 ± 0.02 9.28 ± 1.62 14.33 ± 0.46 13.35 ± 0.75
+200 0.64 ± 0.12 8.90 ± 3.59 14.19 ± 1.90 13.20 ± 1.18
+5ht1b 60 0.99 ± 0.01 10.27 ± 0.16 13.33 ± 0.11 12.20 ± 0.27
+100 0.99 ± 0.00 8.71 ± 3.28 13.06 ± 0.90 12.08 ± 0.91
+200 0.90 ± 0.13 10.43 ± 2.12 12.13 ± 2.55 11.58 ± 2.47
+abl1 60 0.98 ± 0.00 10.08 ± 0.95 12.40 ± 0.95 11.66 ± 1.21
+100 0.97 ± 0.00 10.86 ± 0.66 12.83 ± 0.60 12.21 ± 0.47
+200 0.85 ± 0.03 11.61 ± 0.57 13.16 ± 0.20 12.56 ± 0.42
+fkb1a 60 0.99 ± 0.00 7.16 ± 0.23 9.03 ± 0.37 8.37 ± 0.36
+100 0.98 ± 0.01 7.20 ± 0.12 8.90 ± 0.36 8.35 ± 0.13
+200 0.93 ± 0.03 7.83 ± 0.21 9.33 ± 0.11 8.88 ± 0.05
+Table 5: Comparison of different σ parameters for REINVENT on DS optimization task.
+26Published in Transactions on Machine Learning Research (12/2023)
+MolDQN
+fa7 usp7
+8.0
+8.0
+7.5
+7.5
+7.0
+7.0
+6.5
+6.5
+6.0
+5.5 6.0
+5.0 sparse 5.5 sparse
+dense dense
+0 20 40 60 80 100 0 20 40 60 80 100
+Iteration Iteration
+parp1 5ht1b
+8.5
+9.5
+8.0
+9.0
+7.5
+8.5
+7.0
+8.0
+6.5
+7.5
+6.0
+7.0
+5.5
+6.5
+sparse sparse
+5.0
+6.0 dense dense
+0 20 40 60 80 100 0 20 40 60 80 100
+Iteration Iteration
+abl1 fkb1a
+7.0
+7
+6.5
+6
+6.0
+5
+5.5
+4
+5.0
+sparse sparse
+dense dense
+3
+4.5
+0 20 40 60 80 100 0 20 40 60 80 100
+Iteration Iteration
+Figure 5: Average docking score over batch during training for MolDQN. Shaded regions denote 95% confi-
+dence interval.
+27
+lack
+,SD
+lack
+,SD
+lom
+lom
+lack
+,SD
+lom
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lom
+lom
+lomPublished in Transactions on Machine Learning Research (12/2023)
+fa7 parp1
+11
+14
+10
+12
+9
+MolDQN MolDQN 8 10
+REINVENT REINVENT
+7 FREED 8 FREED
+FFREED FFREED
+6 FREED++ FREED++
+6
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+5ht1b fkb1a
+12.5
+10
+10.0
+8
+7.5
+MolDQN MolDQN
+5.0 REINVENT 6 REINVENT
+FREED FREED
+2.5 FFREED FFREED
+4
+FREED++ FREED++
+0.0
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+abl1 usp7
+12
+12
+10
+8 10
+6 MolDQN MolDQN
+REINVENT REINVENT
+4 8
+FREED FREED
+2 FFREED FFREED
+FREED++ 6 FREED++
+0
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+Figure 6: Average docking score over batch during training. Training curves aligned on x-axis. Shaded
+regions denote 95% confidence interval.
+28
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lom
+lom
+lom
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lom
+lom
+lomPublished in Transactions on Machine Learning Research (12/2023)
+protein method unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+fa7 CombGen 0.98 ± 0.00 7.15 ± 0.01 12.00 ± 0.30 9.40 ± 0.01
+MolDQN 0.19 ± 0.01 8.00 ± 0.27 9.93 ± 0.15 9.57 ± 0.18
+REINVENT 0.99 ± 0.00 8.79 ± 0.70 11.23 ± 0.45 10.49 ± 0.48
+Pocket2Mol 1.00 ± 0.00 8.26 ± 0.01 11.16 ± 0.20 10.24 ± 0.26
+FREED 0.43 ± 0.40 7.89 ± 0.46 10.00 ± 1.12 9.53 ± 0.85
+FFREED 0.53 ± 0.12 8.39 ± 0.82 12.86 ± 0.05 12.37 ± 0.01
+FREED++ 0.76 ± 0.05 7.78 ± 1.80 13.23 ± 0.41 12.37 ± 0.07
+KI - 8.85 10.30 10.10
+parp1 CombGen 0.98 ± 0.00 8.50 ± 0.01 15.26 ± 0.57 11.82 ± 0.00
+MolDQN 0.22 ± 0.02 9.51 ± 0.49 11.89 ± 0.20 11.35 ± 0.30
+REINVENT 0.98 ± 0.02 10.04 ± 1.42 15.93 ± 0.15 14.06 ± 0.81
+Pocket2Mol 1.00 ± 0.00 11.16 ± 0.13 15.66 ± 0.98 14.09 ± 0.54
+FREED 0.33 ± 0.32 10.57 ± 0.81 12.80 ± 1.91 12.29 ± 1.51
+FFREED 0.58 ± 0.09 12.16 ± 1.58 17.90 ± 0.98 16.13 ± 0.15
+FREED++ 0.71 ± 0.06 12.98 ± 0.15 17.73 ± 0.83 16.26 ± 0.19
+KI - 10.13 13.60 12.51
+5ht1b CombGen 0.98 ± 0.00 7.63 ± 0.04 13.13 ± 0.20 10.85 ± 0.01
+MolDQN 0.20 ± 0.03 7.97 ± 0.10 10.36 ± 0.64 9.61 ± 0.17
+REINVENT 0.99 ± 0.01 10.27 ± 0.16 13.33 ± 0.11 12.20 ± 0.27
+Pocket2Mol 1.00 ± 0.00 6.23 ± 0.56 13.26 ± 0.87 11.72 ± 0.33
+FREED 0.21 ± 0.21 6.43 ± 5.57 8.83 ± 7.65 7.97 ± 6.90
+FFREED* 0.45 ± 0.16 11.97 ± 0.20 14.85 ± 0.21 13.99 ± 0.45
+FREED++ 0.45 ± 0.07 11.78 ± 0.12 14.50 ± 0.79 13.50 ± 0.15
+KI - 8.07 10.60 10.52
+fkb1a CombGen 0.98 ± 0.00 3.99 ± 0.10 9.56 ± 0.15 7.94 ± 0.01
+MolDQN 0.18 ± 0.03 6.75 ± 0.16 8.79 ± 0.17 8.20 ± 0.12
+REINVENT 0.93 ± 0.03 7.83 ± 0.21 9.33 ± 0.11 8.88 ± 0.05
+Pocket2Mol 1.00 ± 0.00 5.75 ± 0.03 9.00 ± 0.45 8.22 ± 0.30
+FREED 0.44 ± 0.32 5.71 ± 0.92 8.60 ± 0.91 8.00 ± 0.69
+FFREED 0.36 ± 0.14 8.26 ± 0.05 11.50 ± 0.00 10.49 ± 0.29
+FREED++ 0.30 ± 0.03 8.50 ± 0.06 11.50 ± 0.00 10.92 ± 0.02
+KI - 6.99 8.90 8.76
+abl1 CombGen 0.98 ± 0.00 3.77 ± 0.17 12.83 ± 0.25 10.57 ± 0.00
+MolDQN 0.16 ± 0.02 6.99 ± 0.43 9.50 ± 0.36 9.05 ± 0.49
+REINVENT 0.85 ± 0.03 11.61 ± 0.57 13.16 ± 0.20 12.56 ± 0.42
+Pocket2Mol 1.00 ± 0.00 3.27 ± 0.14 13.26 ± 0.72 11.37 ± 0.28
+FREED 0.24 ± 0.23 2.17 ± 1.68 7.83 ± 3.75 6.36 ± 5.28
+FFREED 0.39 ± 0.12 10.77 ± 0.35 13.03 ± 0.23 12.18 ± 0.06
+FREED++ 0.34 ± 0.02 11.00 ± 0.10 12.86 ± 0.05 12.36 ± 0.21
+KI - 3.02 11.70 10.36
+usp7 CombGen 0.98 ± 0.00 8.03 ± 0.00 13.00 ± 0.26 10.53 ± 0.00
+MolDQN 0.21 ± 0.03 7.92 ± 0.23 9.93 ± 0.41 9.43 ± 0.34
+REINVENT 0.99 ± 0.00 9.69 ± 0.39 13.13 ± 0.89 12.05 ± 0.73
+Pocket2Mol 1.00 ± 0.00 8.71 ± 0.37 12.36 ± 0.40 11.30 ± 0.65
+FREED 0.10 ± 0.07 8.58 ± 1.02 11.36 ± 0.98 11.12 ± 0.88
+FFREED 0.66 ± 0.01 10.91 ± 0.15 14.03 ± 0.46 13.35 ± 0.27
+FREED++ 0.64 ± 0.07 9.66 ± 3.28 14.16 ± 0.47 13.30 ± 0.13
+KI - 9.40 11.90 11.90
+Table 6: Comparison of FREED, FFREED and FREED++ with baselines on DS optimization task. *
+denotes the model has a seed with Max DS ≤ 0 on evaluation, while on the last epoch of training Min DS
+> 0. We exclude such runs.
+29Published in Transactions on Machine Learning Research (12/2023)
+aa2ar abl1
+12 10.0
+7.5 10
+FREED FREED
+FREED++ 5.0 FREED++
+8
+2.5
+6 0.0
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+ace aces
+12
+12
+10
+10
+FREED FREED
+8 FREED++ FREED++
+8
+6
+6 4
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+ada ada17
+11
+10
+10
+9
+9 FREED FREED
+FREED++ 8 FREED++
+8
+7 7
+6 6
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+adrb1 adrb2
+12 12
+10
+10
+FREED 8 FREED
+8 FREED++ FREED++
+6
+6
+4
+4
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+akt1 akt2
+8
+10
+6
+FREED FREED
+4 FREED++ 8 FREED++
+2
+6
+0
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+Figure 7: Comparison of FREED and FREED++ on DS optimization task. 10 first proteins from DUDE
+considered as targets.
+30
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lom
+lom
+lom
+lom
+lom
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lom
+lom
+lom
+lom
+lomPublished in Transactions on Machine Learning Research (12/2023)
+E Fragments library experiments
+fa7 usp7
+12.5
+12
+10.0
+10 7.5
+BRICS BRICS
+8 CReM 5.0 CReM
+MOSES MOSES
+ZINC ZINC
+2.5
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+parp1 5ht1b
+15.0
+10
+12.5
+10.0 BRICS 5 BRICS
+CReM CReM
+7.5 MOSES MOSES
+ZINC ZINC
+0
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+abl1 fkb1a
+10.0 10.0
+7.5 7.5
+5.0 5.0
+BRICS BRICS
+2.5 CReM 2.5 CReM
+MOSES MOSES
+ZINC ZINC
+0.0 0.0
+0 25 50 75 100 125 150 175 200 0 25 50 75 100 125 150 175 200
+Epoch Epoch
+Figure 8: Average docking score over batch during training. Shaded regions denote 95% confidence interval.
+F Simplifications of FFREED
+In this section, we compare FFREED, FREED++ models and their intermediate versions. As described
+in 4, FREED++ differs from FFREED in 1) the absence of prioritization, 2) the simplified mechanism of
+fragment selection, and 3) the usage of “lightweight” fusing functions. All proposed modifications are aimed
+to decrease the total amount of parameters in the model and speed up the training process.
+We perform ablation studies on the DS optimization task to test the importance of described modifications.
+We dub FREED++ with a prioritization mechanism FREED++(PER), FREED++ with a mechanism of
+fragment selection taken from FFREED as FREED++(AM), and FREED++ with multiplicative interac-
+tions as fusing functions as FREED++(FUSE). As it can be seen in table 9, the overall performance of
+different models is approximately the same, while it can differ significantly for particular targets. For ex-
+ample, FREED++ stably outperforms FREED++(PER) for fa7 protein, while the situation is inversed for
+parp1 target. The same effect can be seen for FREED++ and FREED++(FUSE) models on fa7 and parp1
+proteins.
+TocomparethespeedofdifferentFFREEDversions, wecollect104 transactionswithauniformpolicy, split
+them into 100 batches, and measure the time of gradient updates for each method. From table 10, we can
+see that for all modifications of FREED++ in the direction of FFREED number of trainable parameters
+is increased. The most significant increase (∼7.3x) occurs when MI is used as a fusing function. Gradient
+update times increase when adding modifications to FREED++ only for PER and FUSE settings; for AM
+31
+lack
+,SD
+lack
+,SD
+lack
+,SD
+lom
+lom
+lom lack
+,SD
+lack
+,SD
+lom
+lack
+,SD
+lom
+lomPublished in Transactions on Machine Learning Research (12/2023)
+protein fragmentation dataset unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+5ht1b BRICS MOSES 0.56 ± 0.16 9.28 ± 2.22 13.40 ± 0.65 12.44 ± 0.32
+ZINC 0.47 ± 0.10 9.47 ± 1.65 13.03 ± 0.20 12.23 ± 0.31
+CReM MOSES 0.69 ± 0.18 7.07 ± 1.90 11.86 ± 0.61 10.79 ± 0.60
+ZINC 0.45 ± 0.07 11.78 ± 0.12 14.50 ± 0.79 13.50 ± 0.15
+abl1 BRICS MOSES 0.52 ± 0.41 1.29 ± 1.31 7.06 ± 6.23 6.33 ± 5.58
+ZINC 0.61 ± 0.13 5.02 ± 3.45 9.56 ± 2.18 8.78 ± 2.50
+CReM MOSES 1.00 ± 0.00 0.00 ± 0.00 0.00 ± 0.00 0.00 ± 0.00
+ZINC 0.34 ± 0.02 11.00 ± 0.10 12.86 ± 0.05 12.36 ± 0.21
+fa7 BRICS MOSES 0.61 ± 0.09 3.10 ± 0.26 14.20 ± 0.34 13.09 ± 0.07
+ZINC 0.66 ± 0.14 2.82 ± 0.81 13.66 ± 0.94 12.48 ± 0.89
+CReM MOSES 0.64 ± 0.13 1.29 ± 0.95 12.56 ± 0.40 9.26 ± 3.78
+ZINC 0.76 ± 0.05 7.78 ± 1.80 13.23 ± 0.41 12.37 ± 0.07
+fkb1a BRICS MOSES 0.57 ± 0.13 5.79 ± 1.65 9.03 ± 0.35 8.35 ± 0.37
+ZINC 0.47 ± 0.36 6.55 ± 0.86 9.86 ± 0.46 9.20 ± 0.33
+CReM MOSES 0.57 ± 0.15 4.93 ± 0.68 8.26 ± 0.68 7.67 ± 0.64
+ZINC 0.30 ± 0.03 8.50 ± 0.06 11.50 ± 0.00 10.92 ± 0.02
+parp1 BRICS MOSES 0.51 ± 0.13 5.89 ± 1.83 16.96 ± 0.49 16.07 ± 0.31
+ZINC 0.60 ± 0.27 6.82 ± 1.60 16.70 ± 0.36 15.51 ± 0.53
+CReM MOSES 0.70 ± 0.03 1.51 ± 0.86 15.69 ± 0.50 13.82 ± 0.57
+ZINC 0.71 ± 0.06 12.98 ± 0.15 17.73 ± 0.83 16.26 ± 0.19
+usp7 BRICS MOSES 0.58 ± 0.17 5.82 ± 4.32 13.16 ± 0.51 12.22 ± 0.67
+ZINC 0.63 ± 0.13 9.07 ± 0.70 13.39 ± 0.88 12.42 ± 0.46
+CReM MOSES 0.74 ± 0.07 1.21 ± 1.06 12.00 ± 1.81 7.77 ± 6.27
+ZINC 0.64 ± 0.07 9.66 ± 3.28 14.16 ± 0.47 13.30 ± 0.13
+Table 7: Comparison of different fragments libraries used in FREED++ on DS optimization task.
+protein method unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+fa7 FREED++ 0.76 ± 0.05 7.78 ± 1.80 13.23 ± 0.41 12.37 ± 0.07
+FREED++(EXPL) 0.62 ± 0.05 8.84 ± 1.53 13.03 ± 0.11 12.36 ± 0.11
+parp1 FREED++ 0.71 ± 0.06 12.98 ± 0.15 17.73 ± 0.83 16.26 ± 0.19
+FREED++(EXPL) 0.67 ± 0.17 11.37 ± 1.72 17.26 ± 0.73 16.04 ± 0.11
+5ht1b FREED++ 0.45 ± 0.07 11.78 ± 0.12 14.50 ± 0.79 13.50 ± 0.15
+FREED++(EXPL) 0.48 ± 0.04 11.98 ± 0.14 14.80 ± 0.34 13.68 ± 0.15
+fkb1a FREED++ 0.30 ± 0.03 8.50 ± 0.06 11.50 ± 0.00 10.92 ± 0.02
+FREED++(EXPL) 0.39 ± 0.18 8.24 ± 0.20 11.50 ± 0.00 10.29 ± 0.55
+abl1 FREED++ 0.34 ± 0.02 11.00 ± 0.10 12.86 ± 0.05 12.36 ± 0.21
+FREED++(EXPL) 0.31 ± 0.03 11.09 ± 0.03 12.93 ± 0.32 12.19 ± 0.15
+usp7 FREED++ 0.64 ± 0.07 9.66 ± 3.28 14.16 ± 0.47 13.30 ± 0.13
+FREED++(EXPL) 0.61 ± 0.16 11.15 ± 0.42 14.26 ± 0.30 13.19 ± 0.07
+Table 8: Comparison of FREED++ run with additional exploration stage and without.
+version, update time stays approximately the same. FREED has the worst performance in terms of size and
+time required for a gradient update - FFREED is around ∼8.5x slower on average and ∼22x bigger than
+FREED++.
+32Published in Transactions on Machine Learning Research (12/2023)
+protein version unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+fa7 FREED++ 0.76 ± 0.05 7.78 ± 1.80 13.23 ± 0.41 12.37 ± 0.07
+FFREED 0.53 ± 0.12 8.39 ± 0.82 12.86 ± 0.05 12.37 ± 0.01
+FREED++(PER)* 0.65 ± 0.05 6.24 ± 0.85 12.90 ± 0.00 12.19 ± 0.18
+FREED++(AM) 0.69 ± 0.19 8.14 ± 0.90 12.96 ± 0.20 12.28 ± 0.04
+FREED++(FUSE) 0.48 ± 0.02 8.31 ± 0.98 13.26 ± 0.30 12.66 ± 0.18
+parp1 FREED++ 0.71 ± 0.06 12.98 ± 0.15 17.73 ± 0.83 16.26 ± 0.19
+FFREED 0.58 ± 0.09 12.16 ± 1.58 17.90 ± 0.98 16.13 ± 0.15
+FREED++(PER) 0.64 ± 0.07 13.25 ± 0.53 18.16 ± 0.75 16.46 ± 0.03
+FREED++(AM) 0.59 ± 0.21 12.36 ± 1.09 18.20 ± 0.86 16.27 ± 0.12
+FREED++(FUSE) 0.73 ± 0.06 9.63 ± 3.01 16.89 ± 0.43 15.81 ± 0.31
+5ht1b FREED++ 0.45 ± 0.07 11.78 ± 0.12 14.50 ± 0.79 13.50 ± 0.15
+FFREED* 0.45 ± 0.16 11.97 ± 0.20 14.85 ± 0.21 13.99 ± 0.45
+FREED++(PER) 0.56 ± 0.10 11.78 ± 0.21 14.73 ± 0.55 13.65 ± 0.30
+FREED++(AM)* 0.45 ± 0.08 11.94 ± 0.13 14.00 ± 0.00 13.42 ± 0.16
+FREED++(FUSE) 0.55 ± 0.05 11.54 ± 0.14 14.46 ± 0.72 13.38 ± 0.08
+Table 9: Comparison of different version of FFREED on DS optimization task. * denotes the model has a
+seedwithMaxDS≤0onevaluation,whileonthelastepochoftrainingMinDS>0. Weexcludesuchruns.
+method size, MB time, sec
+FREED 24.12 1.21 ± 0.30
+FREED++ 3.77 0.38 ± 0.13
+FFREED 84.60 3.28 ± 0.47
+FREED++(PER) 4.17 0.52 ± 0.21
+FREED++(AM) 4.18 0.36 ± 0.12
+FREED++(FUSE) 27.80 0.48 ± 0.11
+Table 10: Comparison of the speed of different versions of FFREED. Time denotes gradient update time
+measured over a batch with size 100.
+33Published in Transactions on Machine Learning Research (12/2023)
+G Fragments library preprocessing
+One valuable property of FREED on which authors of the original paper were focused is the ability to
+incorporate prior knowledge into generation via filtration of used fragments. For example, fragments which
+notpassedcommonlyusedmedicinalchemistryfilterscanbeexcludedduringthepreprocessingoffragments
+collection.
+Wecomparetwogenerationsetups: withandwithoutfiltrationofthefragmentsdictionary. Inexperiments,
+we use the same set of fragments as in section 5.1 CReM/ZINC. Fragments were filtered with Glaxo (Lane
+et al., 2006), SureChEMBL (Papadatos et al., 2015), and PAINS (Baell & Holloway, 2010) filters.
+protein method library unique(↑) AvgDS(↑) MaxDS(↑) Top-5DS(↑) PAINS(↑) SureChEMBL(↑) Glaxo(↑)
+fa7 FREED++ filtered 0.62±0.10 10.49±0.13 13.16±0.35 12.45±0.15 0.99±0.00 0.96±0.01 0.99±0.00
+vanilla 0.76±0.05 7.78±1.80 13.23±0.41 12.37±0.07 0.33±0.21 0.97±0.00 0.99±0.00
+FREED filtered 0.24±0.41 8.91±0.26 11.50±0.34 9.45±1.19 0.99±0.00 0.95±0.08 1.00±0.00
+vanilla 0.43±0.40 7.89±0.46 10.00±1.12 9.53±0.85 0.97±0.02 0.77±0.24 0.74±0.23
+parp1 FREED++ filtered 0.56±0.09 12.23±1.19 18.00±1.10 16.50±0.50 0.99±0.00 0.97±0.00 0.99±0.00
+vanilla 0.71±0.06 12.98±0.15 17.73±0.83 16.26±0.19 0.45±0.27 0.97±0.00 0.98±0.01
+FREED filtered 0.04±0.06 12.35±0.91 15.20±0.70 13.18±2.27 1.00±0.00 0.97±0.03 1.00±0.00
+vanilla 0.33±0.32 10.57±0.81 12.80±1.91 12.29±1.51 0.95±0.02 0.89±0.12 0.91±0.09
+5ht1b FREED++ filtered 0.31±0.01 11.46±0.10 13.36±0.28 12.95±0.26 0.99±0.00 0.88±0.05 0.99±0.00
+vanilla 0.45±0.07 11.78±0.12 14.50±0.79 13.50±0.15 0.97±0.00 0.89±0.04 0.99±0.00
+FREED filtered 0.28±0.27 7.50±4.55 10.06±4.82 8.90±5.74 0.99±0.00 0.83±0.18 0.99±0.00
+vanilla 0.21±0.21 6.43±5.57 8.83±7.65 7.97±6.90 0.63±0.54 0.56±0.50 0.60±0.53
+fkb1a FREED++ filtered 0.32±0.04 8.39±0.36 10.30±1.05 9.81±1.00 0.99±0.00 0.86±0.05 0.98±0.00
+vanilla 0.30±0.03 8.50±0.06 11.50±0.00 10.92±0.02 0.98±0.00 0.78±0.00 0.93±0.03
+FREED filtered 0.47±0.20 6.18±1.03 9.00±0.36 8.42±0.31 0.98±0.00 0.81±0.06 0.99±0.00
+vanilla 0.44±0.32 5.71±0.92 8.60±0.91 8.00±0.69 0.89±0.03 0.55±0.09 0.67±0.38
+abl1 FREED++ filtered 0.33±0.07 11.16±0.09 13.13±0.37 12.33±0.19 1.00±0.00 0.73±0.18 0.99±0.00
+vanilla 0.34±0.02 11.00±0.10 12.86±0.05 12.36±0.21 0.99±0.00 0.73±0.08 0.97±0.02
+FREED filtered 0.02±0.03 2.92±4.50 5.70±5.06 5.12±4.45 1.00±0.00 0.60±0.53 1.00±0.00
+vanilla 0.24±0.23 2.17±1.68 7.83±3.75 6.36±5.28 0.92±0.07 0.83±0.16 0.89±0.14
+usp7 FREED++ filtered 0.64±0.07 11.37±0.23 13.76±0.40 13.27±0.23 0.99±0.00 0.92±0.03 0.99±0.00
+vanilla 0.64±0.07 9.66±3.28 14.16±0.47 13.30±0.13 0.94±0.04 0.91±0.04 0.99±0.00
+FREED filtered 0.14±0.23 3.22±5.14 5.13±6.76 4.05±6.57 1.00±0.00 0.99±0.01 1.00±0.00
+vanilla 0.10±0.07 8.58±1.02 11.36±0.98 11.12±0.88 0.99±0.00 0.90±0.06 0.93±0.06
+Table 11: Effect of fragment library filtration for FREED++ and FREED.
+Results The metrics are shown in table 11. Using a filtered fragments library results in similar docking
+scoremetricsduringgeneration. However,filteringthefragmentslibraryincreasestheproportionofmolecules
+that pass chemical filters. Since the filtration preprocessing step does not require additional computational
+resources and generally improves the generation quality, we conclude that it is helpful to include it in the
+generation pipeline.
+The same effect can be seen for FREED: filtration procedure increases the percentage of valid molecules in
+termsofconsideredfilters. AsinpreviousexperimentswithFREED,itcommonlytendstodiverge. Because
+of original implementation issues analyzing filtration impact on DS metrics is difficult.
+H Reward computation
+Following FREED paper, we estimate binding affinity with OpenBabel and QuickVina2 tools. First, we
+generate initial molecular conformation with OpenBabel gen3d operation, which consists of several steps:
+the generation of an initial approximation using a predefined set of rules and 3D templates, energy opti-
+mization with an empirical forcefield, the search for a conformation with low energy in rotor space with a
+genetic algorithm, and the energy optimization with conjugate gradient method. Further, the optimal pose
+and energy of the protein-ligand complex are searched with QuickVina2. Conceptually it uses a form of
+MemeticAlgorithm, whichinterleavestheMonteCarloalgorithmwitharestartforglobalsearchandBFGS
+method for local optimization. QuickVina2 provides a parameter called exhaustiveness, which defines the
+computational effort for docking simulation. Simulations with high exhaustiveness sample more candidates,
+whichimprovestheperformanceofsearch,butrequiresmorecomputationaltime. FollowingFREEDweuse
+34Published in Transactions on Machine Learning Research (12/2023)
+exhaustiveness=1 during training to save computational time. During evaluation (see sec. 5) we generate
+3 different initial conformations with OpenBabel, dock them with QuickVina2 with exhaustiveness=8, and
+take the minimum over obtained estimates, to obtain a reliable estimate of binding affinity.
+I USP7 structure
+Figure9: StructureofUSP7catalyticdomainincomplexwithmolecule23(PDBID:6VN3). Themolecular
+surfacewasadded. Theorangesurfacedepictsthecatalyticcenter;thegreensurfacedepictsthecleftbetween
+theThumbandPalmdomains; thebluesurfacedepictstheallostericbindingsite. Themolecule23isshown
+by stick model inside the cleft.
+J Time Limits
+Following FREED, we start generation with a benzene ring with three attachment points and restrict our-
+selves to 4 assembling steps. After the molecule is assembled, we perform a docking simulation and assign a
+reward for the episode. Hence we state generation as a time-limited task. Note that we define the state as
+a partially assembled molecule, described by extended molecular graphs (see sec. 3.2), ignoring any notion
+of time. This problem formulation results in 2 major drawbacks.
+First, it needs to be clarified how to select a time limit properly. Authors of FREED motivate the choice of
+four assembling steps by the fact that active compounds from DUDE are most commonly fragmented into
+4-6 blocks. However, the number of fragments in a molecule can vary significantly depending on the protein
+of interest (see figure 10).
+Second, in the described setup, the agent faces a state aliasing problem (Whitehead & Ballard, 1991) that
+ariseswhenanextendedgraphcanbeassembledfromseveralsetsoffragmentsofdifferentsizes. Asdescribed
+in (Pardo et al., 2018), the time-unaware agent cannot accurately estimate the value function because an
+estimate for the same state will differ depending on whether the time limit is reached.
+35Published in Transactions on Machine Learning Research (12/2023)
+One possible solution is to include a notion of the remaining time as part of the agent’s input (Pardo et al.,
+2018),whichwasutilizedinMolDQN;however,itisstillunclearhowtoselectatimelimit. Amorepromising
+solution would be the controllable generation termination when the termination signal is predicted with an
+auxiliary neural network based on the current state representation, similar to the one used in GCPN and
+Pocket2Mol. We leave this for future work.
+0.8 0.8 0.8
+MOSES KI USP7 KI FA7
+0.7 0.7 0.7
+0.6 0.6 0.6
+0.5 0.5 0.5
+0.4 0.4 0.4
+0.3 0.3 0.3
+0.2 0.2 0.2
+0.1 0.1 0.1
+0.0 0.0 0.0
+0.0 2.5 5.0 7.5 10.0 12.5 0.0 2.5 5.0 7.5 10.0 12.5 0.0 2.5 5.0 7.5 10.0 12.5
+Number of fragments Number of fragments Number of fragments
+Figure10: DistributionofanumberoffragmentsinmoleculesaccordingtoBRICSfragmentation. KIstands
+for “Known Inhibitors”."
+K Major implementation issues
+In this section, we evaluate the significance of each major implementation issue from Section 4.1. First, we
+take the FFREED and add bugs one at a time (see Table 12). Then, we take the original FREED and
+remove bugs one at a time (see Table 13).
+protein method unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+5ht1b FFREED* 0.45 ± 0.16 11.97 ± 0.20 14.85 ± 0.21 13.99 ± 0.45
+FFREED(CRITIC_ARC) 0.50 ± 0.08 10.25 ± 2.14 14.46 ± 0.50 13.44 ± 0.44
+FFREED(CRITIC_UPD) 0.62 ± 0.20 11.03 ± 0.55 14.33 ± 0.45 13.24 ± 0.17
+FFREED(GUMBEL) 1.00 ± 0.00 7.82 ± 1.35 12.70 ± 0.26 11.21 ± 0.05
+FFREED(TARGET_NET)* 0.43 ± 0.13 11.46 ± 0.19 14.70 ± 0.42 13.63 ± 0.20
+usp7 FFREED 0.66 ± 0.01 10.91 ± 0.15 14.03 ± 0.46 13.35 ± 0.27
+FFREED(CRITIC_ARC) 0.66 ± 0.06 9.34 ± 0.21 13.50 ± 0.62 12.58 ± 0.25
+FFREED(CRITIC_UPD) 0.46 ± 0.24 8.91 ± 0.07 13.80 ± 0.60 12.84 ± 0.11
+FFREED(GUMBEL) 1.00 ± 0.00 7.58 ± 1.36 11.96 ± 0.50 10.64 ± 0.19
+FFREED(TARGET_NET) 0.52 ± 0.06 10.11 ± 0.57 14.03 ± 0.45 13.28 ± 0.23
+akt1 FFREED 0.44 ± 0.05 8.87 ± 0.24 10.66 ± 0.40 10.17 ± 0.17
+FFREED(CRITIC_ARC) 0.60 ± 0.13 8.09 ± 0.91 10.20 ± 0.34 9.64 ± 0.21
+FFREED(CRITIC_UPD) 0.51 ± 0.04 8.58 ± 0.16 10.36 ± 0.20 9.78 ± 0.23
+FFREED(GUMBEL) 1.00 ± 0.00 4.96 ± 2.62 9.96 ± 0.73 8.60 ± 0.26
+FFREED(TARGET_NET) 0.55 ± 0.19 8.38 ± 0.06 10.03 ± 0.25 9.58 ± 0.07
+Table 12: Adding bugs to FFREED. Asterix (*) denotes models with seeds with a positive Avg DS during
+training but negative Max DS on evaluation. We exclude such runs.
+36
+ytilibaborP ytilibaborP ytilibaborPPublished in Transactions on Machine Learning Research (12/2023)
+The main takeaway from Table 12 is that adding all major bugs leads to performance degradation. The
+Gumbel-Softmax issue is the most significant one. Next, we take the original FREED and remove bugs one
+at a time (see Table 13).
+protein method unique (↑) Avg DS (↑) Max DS (↑) Top-5 DS (↑)
+5ht1b FREED 0.21 ± 0.21 6.43 ± 5.57 8.83 ± 7.65 7.97 ± 6.90
+FREED(CRITIC_ARC)* 0.00 ± 0.00 4.95 ± 7.00 4.95 ± 7.00 4.95 ± 7.00
+FREED(CRITIC_UPD) 0.19 ± 0.33 4.66 ± 4.13 6.43 ± 6.08 5.78 ± 5.61
+FREED(GUMBEL) 0.98 ± 0.02 7.41 ± 2.48 13.40 ± 0.55 12.16 ± 0.19
+FREED(TARGET_NET) 0.67 ± 0.44 6.78 ± 1.11 12.56 ± 0.77 11.74 ± 0.38
+usp7 FREED 0.10 ± 0.07 8.58 ± 1.02 11.36 ± 0.98 11.12 ± 0.88
+FREED(CRITIC_ARC) 0.06 ± 0.05 6.19 ± 1.84 10.76 ± 2.48 10.37 ± 2.14
+FREED(CRITIC_UPD) 0.27 ± 0.46 6.84 ± 3.94 10.50 ± 1.17 7.71 ± 4.65
+FREED(GUMBEL) 0.99 ± 0.00 7.71 ± 1.37 12.30 ± 0.39 11.33 ± 0.34
+FREED(TARGET_NET) 0.82 ± 0.26 8.35 ± 0.22 12.86 ± 0.30 11.41 ± 0.56
+akt1 FREED 0.70 ± 0.45 3.98 ± 0.21 9.26 ± 0.30 8.47 ± 0.26
+FREED(CRITIC_ARC) 0.30 ± 0.52 3.62 ± 2.72 6.33 ± 4.06 5.35 ± 3.92
+FREED(CRITIC_UPD) 0.14 ± 0.20 1.30 ± 2.25 3.06 ± 5.31 2.89 ± 5.01
+FREED(GUMBEL) 0.99 ± 0.00 5.29 ± 1.38 9.83 ± 0.41 8.77 ± 0.07
+FREED(TARGET_NET) 1.00 ± 0.00 5.84 ± 0.97 9.73 ± 0.23 8.73 ± 0.13
+Table13: RemovingbugsfromFREED.Asterix(*)denotesmodelswithseedswithapositiveAvgDSduring
+training but negative Max DS on evaluation. We exclude such runs.
+Thisablationshowsthatremovinganyparticularbugdoesnotleadtosignificantperformanceimprovements.
+All the bugs need to be fixed simultaneously.
+37

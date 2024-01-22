@@ -2,7 +2,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 1 |
+|idx| 2401.10225v1 |
 |title| ChatQA: Building GPT-4 Level Conversational QA Models |
 |authors| Zihan LiuWei PingRajarshi RoyPeng XuMohammad ShoeybiBryan Catanzaro
 |links| http://arxiv.org/abs/2401.10225v1 |
@@ -12,7 +12,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2 |
+|idx| 2401.10208v1 |
 |title| MM-Interleaved: Interleaved Image-Text Generative Modeling via Multi-modal Feature Synchronizer |
 |authors| Changyao TianXizhou ZhuYuwen XiongWeiyun WangZhe ChenWenhai WangYuntao ChenLewei LuTong LuJie ZhouHongsheng LiYu QiaoJifeng Dai
 |links| http://arxiv.org/abs/2401.10208v1 |
@@ -22,7 +22,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 3 |
+|idx| 2401.10189v1 |
 |title| Chem-FINESE: Validating Fine-Grained Few-shot Entity Extraction through Text Reconstruction |
 |authors| Qingyun WangZixuan ZhangHongxiang LiXuan LiuJiawei HanHeng JiHuimin Zhao
 |links| http://arxiv.org/abs/2401.10189v1 |
@@ -32,7 +32,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 4 |
+|idx| 2401.10186v1 |
 |title| Beyond Reference-Based Metrics: Analyzing Behaviors of Open LLMs on Data-to-Text Generation |
 |authors| Zdeněk KasnerOndřej Dušek
 |links| http://arxiv.org/abs/2401.10186v1 |
@@ -42,7 +42,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 5 |
+|idx| 2401.10134v1 |
 |title| Spatial-Temporal Large Language Model for Traffic Prediction |
 |authors| Chenxi LiuSun YangQianxiong XuZhishuai LiCheng LongZiyue LiRui Zhao
 |links| http://arxiv.org/abs/2401.10134v1 |
@@ -54,7 +54,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 1 |
+|idx| 2401.10225v1 |
 |title| ChatQA: Building GPT-4 Level Conversational QA Models |
 |authors| Zihan LiuWei PingRajarshi RoyPeng XuMohammad ShoeybiBryan Catanzaro
 |links| http://arxiv.org/abs/2401.10225v1 |
@@ -64,7 +64,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2 |
+|idx| 2401.10222v1 |
 |title| Supervised Fine-tuning in turn Improves Visual Foundation Models |
 |authors| Xiaohu JiangYixiao GeYuying GeChun YuanYing Shan
 |links| http://arxiv.org/abs/2401.10222v1 |
@@ -74,7 +74,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 3 |
+|idx| 2401.10207v1 |
 |title| Eclectic Rule Extraction for Explainability of Deep Neural Network based Intrusion Detection Systems |
 |authors| Jesse AblesNathaniel ChildersWilliam AndersonSudip MittalShahram RahimiIoana BanicescuMaria Seale
 |links| http://arxiv.org/abs/2401.10207v1 |
@@ -84,7 +84,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 4 |
+|idx| 2401.10189v1 |
 |title| Chem-FINESE: Validating Fine-Grained Few-shot Entity Extraction through Text Reconstruction |
 |authors| Qingyun WangZixuan ZhangHongxiang LiXuan LiuJiawei HanHeng JiHuimin Zhao
 |links| http://arxiv.org/abs/2401.10189v1 |
@@ -94,7 +94,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 5 |
+|idx| 2401.10178v1 |
 |title| Neural Echos: Depthwise Convolutional Filters Replicate Biological Receptive Fields |
 |authors| Zahra BabaieePeyman M. KiasariDaniela RusRadu Grosu
 |links| http://arxiv.org/abs/2401.10178v1 |
@@ -106,7 +106,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 1 |
+|idx| 2401.10227v1 |
 |title| A Simple Latent Diffusion Approach for Panoptic Segmentation and Mask Inpainting |
 |authors| Wouter Van GansbekeBert De Brabandere
 |links| http://arxiv.org/abs/2401.10227v1 |
@@ -116,7 +116,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2 |
+|idx| 2401.10225v1 |
 |title| ChatQA: Building GPT-4 Level Conversational QA Models |
 |authors| Zihan LiuWei PingRajarshi RoyPeng XuMohammad ShoeybiBryan Catanzaro
 |links| http://arxiv.org/abs/2401.10225v1 |
@@ -126,7 +126,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 3 |
+|idx| 2401.10220v1 |
 |title| AutoFT: Robust Fine-Tuning by Optimizing Hyperparameters on OOD Data |
 |authors| Caroline ChoiYoonho LeeAnnie ChenAllan ZhouAditi RaghunathanChelsea Finn
 |links| http://arxiv.org/abs/2401.10220v1 |
@@ -136,7 +136,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 4 |
+|idx| 2401.10216v1 |
 |title| Enabling Efficient Equivariant Operations in the Fourier Basis via Gaunt Tensor Products |
 |authors| Shengjie LuoTianlang ChenAditi S. Krishnapriyan
 |links| http://arxiv.org/abs/2401.10216v1 |
@@ -146,7 +146,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 5 |
+|idx| 2401.10207v1 |
 |title| Eclectic Rule Extraction for Explainability of Deep Neural Network based Intrusion Detection Systems |
 |authors| Jesse AblesNathaniel ChildersWilliam AndersonSudip MittalShahram RahimiIoana BanicescuMaria Seale
 |links| http://arxiv.org/abs/2401.10207v1 |
@@ -158,7 +158,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 1 |
+|idx| 2401.10232v1 |
 |title| ParaHome: Parameterizing Everyday Home Activities Towards 3D Generative Modeling of Human-Object Interactions |
 |authors| Jeonghwan KimJisoo KimJeonghyeon NaHanbyul Joo
 |links| http://arxiv.org/abs/2401.10232v1 |
@@ -168,7 +168,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2 |
+|idx| 2401.10229v1 |
 |title| OMG-Seg: Is One Model Good Enough For All Segmentation? |
 |authors| Xiangtai LiHaobo YuanWei LiHenghui DingSize WuWenwei ZhangYining LiKai ChenChen Change Loy
 |links| http://arxiv.org/abs/2401.10229v1 |
@@ -178,7 +178,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 3 |
+|idx| 2401.10228v1 |
 |title| RAP-SAM: Towards Real-Time All-Purpose Segment Anything |
 |authors| Shilin XuHaobo YuanQingyu ShiLu QiJingbo WangYibo YangYining LiKai ChenYunhai TongBernard GhanemXiangtai LiMing-Hsuan Yang
 |links| http://arxiv.org/abs/2401.10228v1 |
@@ -188,7 +188,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 4 |
+|idx| 2401.10227v1 |
 |title| A Simple Latent Diffusion Approach for Panoptic Segmentation and Mask Inpainting |
 |authors| Wouter Van GansbekeBert De Brabandere
 |links| http://arxiv.org/abs/2401.10227v1 |
@@ -198,7 +198,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 5 |
+|idx| 2401.10226v1 |
 |title| Towards Language-Driven Video Inpainting via Multimodal Large Language Models |
 |authors| Jianzong WuXiangtai LiChenyang SiShangchen ZhouJingkang YangJiangning ZhangYining LiKai ChenYunhai TongZiwei LiuChen Change Loy
 |links| http://arxiv.org/abs/2401.10226v1 |
@@ -210,7 +210,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 1 |
+|idx| 2401.10204v1 |
 |title| Maximal-Capacity Discrete Memoryless Channel Identification |
 |authors| Maximilian EggerRawad BitarAntonia Wachter-ZehDeniz GündüzNir Weinberger
 |links| http://arxiv.org/abs/2401.10204v1 |
@@ -220,7 +220,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2 |
+|idx| 2401.09979v1 |
 |title| False Discovery Rate Control for Gaussian Graphical Models via Neighborhood Screening |
 |authors| Taulant KokaJasin MachkourMichael Muma
 |links| http://arxiv.org/abs/2401.09979v1 |
@@ -230,7 +230,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 3 |
+|idx| 2401.09840v1 |
 |title| FREED++: Improving RL Agents for Fragment-Based Molecule Generation by Thorough Reproduction |
 |authors| Alexander TelepovArtem TsypinKuzma KhrabrovSergey YakukhnovPavel StrashnovPetr ZhilyaevEgor RumiantsevDaniel EzhovManvel AvetisianOlga PopovaArtur Kadurin
 |links| http://arxiv.org/abs/2401.09840v1 |
@@ -240,7 +240,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 4 |
+|idx| 2401.09787v1 |
 |title| Querying Easily Flip-flopped Samples for Deep Active Learning |
 |authors| Seong Jin ChoGwangsu KimJunghyun LeeJinwoo ShinChang D. Yoo
 |links| http://arxiv.org/abs/2401.09787v1 |
@@ -250,7 +250,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 5 |
+|idx| 2401.09681v1 |
 |title| Harnessing Density Ratios for Online Reinforcement Learning |
 |authors| Philip AmortilaDylan J. FosterNan JiangAyush SekhariTengyang Xie
 |links| http://arxiv.org/abs/2401.09681v1 |
@@ -262,7 +262,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 1 |
+|idx| 2401.10184v1 |
 |title| Comparing Traditional and LLM-based Search for Image Geolocation |
 |authors| Albatool WazzanStephen MacNeilRichard Souvenir
 |links| http://dx.doi.org/10.1145/3627508.3638305 |
@@ -272,7 +272,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2 |
+|idx| 2401.10175v1 |
 |title| DualTake: Predicting Takeovers across Mobilities for Future Personalized Mobility Services |
 |authors| Zhaobo ZhengKumar AkashTeruhisa Misu
 |links| http://dx.doi.org/10.1145/3610978.3640610 |
@@ -282,7 +282,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 3 |
+|idx| 2401.09937v1 |
 |title| From Cash to Cashless: UPI's Impact on Spending Behavior among Indian Users |
 |authors| Harshal DevRaj GuptaDhruv Kumar
 |links| http://arxiv.org/abs/2401.09937v1 |
@@ -292,7 +292,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 4 |
+|idx| 2401.09896v1 |
 |title| Experimental Shake Gesture Detection API for Apple Watch |
 |authors| Ezequiel França dos Santos
 |links| http://arxiv.org/abs/2401.09896v1 |
@@ -302,7 +302,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 5 |
+|idx| 2401.09828v1 |
 |title| Enhanced Automated Quality Assessment Network for Interactive Building Segmentation in High-Resolution Remote Sensing Imagery |
 |authors| Zhili ZhangXiangyun HuJiabo Xu
 |links| http://arxiv.org/abs/2401.09828v1 |
@@ -314,7 +314,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 1 |
+|idx| 2401.10149v1 |
 |title| Multi-Agent Reinforcement Learning for Maritime Operational Technology Cyber Security |
 |authors| Alec WilsonRyan MenziesNeela MorarjiDavid FosterMarco Casassa MontEsin TurkbeylerLisa Gralewski
 |links| http://arxiv.org/abs/2401.10149v1 |
@@ -324,7 +324,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2 |
+|idx| 2401.09666v1 |
 |title| Traffic Smoothing Controllers for Autonomous Vehicles Using Deep Reinforcement Learning and Real-World Trajectory Data |
 |authors| Nathan LichtléKathy JangAdit ShahEugene VinitskyJonathan W. LeeAlexandre M. Bayen
 |links| http://arxiv.org/abs/2401.09666v1 |
@@ -334,7 +334,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 3 |
+|idx| 2401.09032v1 |
 |title| Improved Consensus ADMM for Cooperative Motion Planning of Large-Scale Connected Autonomous Vehicles with Limited Communication |
 |authors| Haichao LiuZhenmin HuangZicheng ZhuYulin LiShaojie ShenJun Ma
 |links| http://arxiv.org/abs/2401.09032v1 |
@@ -344,7 +344,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 4 |
+|idx| 2401.09014v1 |
 |title| Data assimilation approach for addressing imperfections in people flow measurement techniques using particle filter |
 |authors| Ryo MurataKenji Tanaka
 |links| http://arxiv.org/abs/2401.09014v1 |
@@ -354,7 +354,7 @@
 
 | Item |Content|
 | --- |---|
-|idx| 5 |
+|idx| 2401.08728v1 |
 |title| AgentMixer: Multi-Agent Correlated Policy Factorization |
 |authors| Zhiyuan LiWenshuai ZhaoLijun WuJoni Pajarinen
 |links| http://arxiv.org/abs/2401.08728v1 |
