@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-07 17:31:50
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-18 02:11:22
+LastEditTime: 2024-01-23 00:48:24
 '''
 from paper_related import arxiv_client
 from datetime import datetime
@@ -194,17 +194,12 @@ class PaperParser:
                 论文:{paper}
                 问题:{question}
                 """
-            print(prompt)
             res = self.glm.llm(prompt)
-            print(res)
-
-            result_dict[question] = res
+            j_res = json.loads(res)
+            result_dict[question] = j_res["result"]
 
         # 将结果保存到文件
-        # result_file_path = os.path.join(parse_path, f"{title}_qa.json")
         self._save_json_data(result_dict, parse_path, f"{title}_qa.json")
-        # with open(result_file_path, 'w') as f:
-        #     json.dump(result_dict, f)
 
         print(f"QA results for {title} saved to {parse_path}/{title}_qa.json")
 
