@@ -55,12 +55,14 @@ def generate_html_from_files(json_files_path):
         <title>Research Papers</title>
         <link rel="stylesheet" href="style.css">
         <script src="script.js"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     </head>
     <body>
         <div id="sidebar">
             <h3>Papers by Category:</h3>
             <ul id="categories">
     '''
+    
 
     # 遍历meta文件夹中的所有JSON文件
     for filename in os.listdir(json_files_path):
@@ -73,6 +75,13 @@ def generate_html_from_files(json_files_path):
                 <li><a href="#{}">{}</a></li>
             '''.format(title_id, filename.replace('.json', ''))
 
+    html += '''
+                <li>
+                    <a href="https://github.com/DukeEnglish/papertutor" target="_blank" rel="noopener noreferrer">
+                        <span class="fab fa-github"></span> GitHub
+                    </a>
+                </li>
+            '''
     html += '''
             </ul>
         </div>
@@ -104,7 +113,7 @@ def generate_html_from_files(json_files_path):
 
 def main():
     # 假设你的JSON文件位于名为'data/20240117/meta'的文件夹中
-    json_files_path = 'data/20240116/meta'
+    json_files_path = 'data/20240117/meta'
 
     # 生成HTML内容
     html_content = generate_html_from_files(json_files_path)
