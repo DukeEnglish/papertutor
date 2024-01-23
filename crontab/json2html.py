@@ -21,6 +21,13 @@ def generate_html_for_papers(papers, title_id):
     for paper in papers:
         summary = paper.get("summary", "").replace("\n", "")
         summary = re.sub(r'[^\w\s:/.\-]', '', summary)
+        # 获取interpretation字段
+        interpretation = paper.get('interpretation', {})
+        interpretation_str = ''  # 初始化一个空字符串来构建interpretation的字符串表示
+
+        # 如果interpretation是字典，将其转换为字符串
+        if isinstance(interpretation, dict):
+            interpretation_str = interpretation_str = '<br>'.join([f'<strong>{key}</strong><br>: {value}' for key, value in interpretation.items()])
 
         # 添加按钮和解读内容
         html += '''
@@ -32,10 +39,10 @@ def generate_html_for_papers(papers, title_id):
                 <p>Last Updated: {}</p>
                 <button class="interpret-button" data-id="{}">Interpret</button>
                 <div id="interpretation-{}" class="interpretation" style="display:none;">
-                    <p>Interpretation: {}</p>
+                    <p>Interpretation: <br>{}</p>
                 </div>
             </li>
-        '''.format(paper['title'], paper['authors'], paper['links'], summary, paper['updated'], paper['id'], paper['id'], paper.get('interpretation', ''))
+        '''.format(paper['title'], paper['authors'], paper['links'], summary, paper['updated'], paper['id'], paper['id'], interpretation_str)
 
     html += '''
         </ul>
@@ -62,7 +69,6 @@ def generate_html_from_files(json_files_path):
             <h3>Papers by Category:</h3>
             <ul id="categories">
     '''
-    
 
     # 遍历meta文件夹中的所有JSON文件
     for filename in os.listdir(json_files_path):
@@ -113,7 +119,7 @@ def generate_html_from_files(json_files_path):
 
 def main():
     # 假设你的JSON文件位于名为'data/20240117/meta'的文件夹中
-    json_files_path = 'data/20240117/meta'
+    json_files_path = 'data/20240123/meta'
 
     # 生成HTML内容
     html_content = generate_html_from_files(json_files_path)
