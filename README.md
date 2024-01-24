@@ -17,9 +17,8 @@
 
 ## 进群交流，后续新的项目更新会在群里
 
-![img](https://github.com/DukeEnglish/papertutor/blob/main/assets/qr_code.jpg)
-
-![img](https://github.com/DukeEnglish/papertutor/blob/main/assets/per_qr_code.jpg)
+<img src="https://github.com/DukeEnglish/papertutor/blob/main/assets/qr_code.jpg"  width="30%" height="15%" />
+<img src="https://github.com/DukeEnglish/papertutor/blob/main/assets/per_qr_code.jpg"  width="30%" height="15%" />
 
 ## 联系方式
 其他信息见：https://www.zhihu.com/people/ljyduke
