@@ -17,13 +17,9 @@
 
 ## 欢迎进群交流，后续新的项目更新会在群里
 <div style="display: flex;">
-  <div style="flex: 50%;">
-    <img src="https://github.com/DukeEnglish/papertutor/blob/main/assets/qr_code.jpg" width="100%" height="auto" />
-  </div>
-  <div style="flex: 50%;">
-    <img src="https://github.com/DukeEnglish/papertutor/blob/main/assets/per_qr_code.jpg" width="100%" height="auto" />
-  </div>
+  <img src="https://github.com/DukeEnglish/papertutor/blob/main/assets/qr_code.jpg" style="width: 30%; height: 15%;" />
+  <img src="https://github.com/DukeEnglish/papertutor/blob/main/assets/per_qr_code.jpg" style="width: 30%; height: 15%;" />
 </div>
 
-## 联系方式
+## 详细介绍
 其他信息见：https://www.zhihu.com/people/ljyduke
