@@ -4,7 +4,7 @@
  * @E-mail: ljyduke@gmail.com
  * @Date: 2024-01-03 22:51:03
  * @LastEditors: Duke 叶兀
- * @LastEditTime: 2024-01-24 23:37:18
+ * @LastEditTime: 2024-01-24 23:42:38
 -->
 # paper_tutor
 
@@ -19,6 +19,8 @@
 ## 进群交流，后续新的项目更新会在群里
 
 ![WeChat QR Code](https://github.com/DukeEnglish/papertutor/tree/main/assets/qr_code.jpg)
+
+![Personal WeChat QR Code](https://github.com/DukeEnglish/papertutor/tree/main/assets/per_qr_code.jpg)
 
 ## 联系方式
 
