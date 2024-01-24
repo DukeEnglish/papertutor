@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-07 17:31:50
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-23 00:48:24
+LastEditTime: 2024-01-24 22:37:07
 '''
 from paper_related import arxiv_client
 from datetime import datetime
@@ -16,7 +16,7 @@ import codecs
 import argparse
 import io
 from crontab.json2md import json2md
-from llm_service import GLMService
+from llm_service import YIService
 from crontab.json2html import generate_html_from_files
 
 today_date = datetime.today().strftime('%Y%m%d')
@@ -53,9 +53,9 @@ class PaperParser:
         self.paper_cls_list = PAPER_CLS_LIST
         if BAIDU_API_KEY and BAIDU_SECRET_KEY:
             print("-" * 10, BAIDU_API_KEY, BAIDU_SECRET_KEY)
-            self.glm = GLMService(BAIDU_API_KEY, BAIDU_SECRET_KEY)
+            self.llm_service = YIService(BAIDU_API_KEY, BAIDU_SECRET_KEY)
         else:
-            self.glm = GLMService()
+            self.llm_service = YIService()
 
     def get_interpretation_from_parse_data(self, title_qa):
         # 这里需要根据实际情况修改文件路径和读取方式
@@ -194,7 +194,7 @@ class PaperParser:
                 论文:{paper}
                 问题:{question}
                 """
-            res = self.glm.llm(prompt)
+            res = self.llm_service.llm(prompt)
             j_res = json.loads(res)
             result_dict[question] = j_res["result"]
 
