@@ -10,11 +10,10 @@
 
 项目地址：https://dukeenglish.github.io/papertutor/
 
-## 支持我们
+## 支持
 
-如果您喜欢这个项目，请给我们一个星标 🌟 以示支持！
+如果您喜欢这个项目，请给一个星标 🌟 以示支持！感谢～
 
-[![Star This Project](https://img.shields.io/github/stars/DukeEnglish/papertutor.svg?style=social)]
 
 ## 进群交流，后续新的项目更新会在群里
 
@@ -23,5 +22,4 @@
 ![Personal WeChat QR Code](https://github.com/DukeEnglish/papertutor/tree/main/assets/per_qr_code.jpg)
 
 ## 联系方式
-
-- 微信: 扫码关注
+其他信息见：https://www.zhihu.com/people/ljyduke
