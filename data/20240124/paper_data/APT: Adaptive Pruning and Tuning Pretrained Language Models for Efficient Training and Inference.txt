@@ -1,0 +1,1445 @@
+APT: Adaptive Pruning and Tuning Pretrained Language Models for
+Efficient Training and Inference
+BowenZhao,HannanehHajishirzi,QingqingCao
+UniversityofWashington
+bowen98@uw.edu,{hannaneh,qicao}@cs.washington.edu
+Abstract LoRA APT adapter
+H H
+Fine-tuningandinferencewithlargeLanguage
+Models(LM)aregenerallyknowntobeexpen- WB WB
+sive. Parameter-efficientfine-tuningoverpre- Frozen
+ r Frozen
+ r apt
+ params params
+trainedLMsreducestrainingmemorybyupdat-
+ingasmallnumberofLMparametersbutdoes WA WA
+not improve inference efficiency. Structured
+X X
+pruningimprovesLMinferenceefficiencyby
+removingconsistentparameterblocks,yetof- Figure1: APTprovidesbothtrainingandinferenceef-
+ten increases training memory and time. To ficiencybenefitsbypruningandtuningpretrainedLM
+improvebothtrainingandinferenceefficiency, parameters adaptively via the APT adapter. We dy-
+weintroduceAPTthatadaptivelyprunesand namicallyadjust(add/reduce)APTadapterinput/output
+tunes parameters for the LMs. At the early dimensionsandtherank(r ).Reducingadapterdimen- apt
+stage of fine-tuning, APT dynamically adds sions prunes frozen parameters, making training and
+salienttuningparametersforfastandaccurate inference faster and more memory-efficient. Adding
+convergencewhilediscardingunimportantpa- adapterrankshelpsrecovertheprunedLM’staskperfor-
+rametersforefficiency. Comparedtobaselines, mance. Incontrast,existingadapterslikeLoRAallow
+ourexperimentsshowthatAPTmaintainsupto efficienttrainingbutdonotprovideinferenceefficiency
+98%taskperformancewhenpruningRoBERTa sincethemodelsizeisnotreduced.
+andT5modelswith40%parametersleftwhile
+keeping86.4%LLaMAmodels’performance parameters. However, PEFT models do not im-
+with70%parametersremained. Furthermore, prove inference efficiency because the LM size
+APTspeedsupLMs’fine-tuningbyupto8× remainsthesameorevenincreases. Forinstance,
+andreduceslargeLMs’memorytrainingfoot- LoRA(Huetal.,2021)tuneslow-rankdecomposed
+printbyupto70%.
+linearlayersparalleltofrozenparameterstoreduce
+trainingmemorybuttakeslongertoconverge(Ding
+1 Introduction
+et al., 2023). On the other hand, structured prun-
+Fine-tuninglanguagemodels(LMs)(Devlinetal., ing(Kwonetal.,2022;Xiaetal.,2022;Maetal.,
+2019; Liu et al., 2019; Raffel et al., 2020) is an 2023)improvesinferenceefficiencybyremoving
+essential paradigm to adapt them to downstream blocks of parameters such as attention heads and
+tasks (Mishra et al., 2022; Wang et al., 2022b). feed-forwardneuronsinTransformerLMs,show-
+Increasing the parameter scale of LMs improves ing more inference speedup than sparse unstruc-
+model performance (Kaplan et al., 2020), but in- turedpruningmethods(Hanetal.,2015a,b;Sanh
+curs significant training and inference costs. For etal.,2020). However,trainingprunedLMstakes
+instance, a 13B LLaMA model (Touvron et al., extratimetoconvergeandincurshighmemory.
+2023)costsabout100GBmemoryforfine-tuning IntegratingstructuredpruningandPEFTcould
+and 30GB for inference with float16 datatype. It increase both training and inference efficiency.
+isimportanttoimprovethetrainingandinference However,existingresearch(Zhaoetal.,2023)indi-
+efficiencyofLMforpracticalapplications. catesthatsimplycombiningPEFTandstructured
+Parameter-efficientfine-tuningmethods(PEFT, pruning,forinstance,applyingstructuredpruning
+summarizedinTable1)(Houlsbyetal.,2019;Li overLoRA-tunedmodels,leadstosubstantialper-
+and Liang, 2021) reduce LMs fine-tuning mem- formancelossandextratrainingcosts. Itremains
+ory consumption via updating a small number of challengingtoaccuratelypruneLMsusinglimited
+4202
+naJ
+22
+]LC.sc[
+1v00221.1042:viXraTraining Inference inglargeLMslikeLLaMA,APTcostsonly30%
+Method AP AT
+T M T M memorycomparedtothestate-of-the-artpruning
+Adapter ✗ ✗ ⇑ High ⇓ Low ⇑ Low ⇑ Low method and still maintains 86.4% performance
+PEFT ALo dR aLA oRA ✗ ✗ ✓✗ ⇑ ⇑H Hi ig gh h ⇓ ⇓L Lo ow w = = = = with 70% parameters. Our ablation study in Sec-
+tion5.6indicatestheeffectivenessofadaptiveprun-
+MvP ✗ ✗ ⇑ High ⇑ Low ⇓ Low ⇓ Low
+Pruning BMP ✗ ✗ ⇑ High ⇑ Low ⇓ High ⇓ Low ingandtuning. Italsodemonstratesthatefficient
+CoFi ✗ ✗ ⇑ High ⇑ Low ⇓ High ⇓ Low distillationwithAPTadaptersubstantiallyrecov-
+MT ✗ ✗ = = ⇓ High ⇓ Low ers small LMs’ performance while outlier-aware
+SPA ✗ ✗ ⇑ High ⇑ Low ⇓ High ⇓ Low saliencescoringpruneslargeLMsmoreaccurately.
+Combined LRP ✗ ✗ ⇑ High ⇓ Low ⇓ High ⇓ Low
+APT ✓ ✓ ⇑ Low ⇓ Low ⇓ High ⇓ Low OuranalysisinSection5.7demonstratesthatcon-
+trolledadaptivetuningwithearlypruningduring
+Table1: Comparisonofefficientmethodstofullfine-
+fine-tuningimprovesLMend-taskaccuracybetter
+tuning. AP and AT represent Adaptive Pruning and
+withlesstrainingtimeandmemorycosts.
+Tuning,wherethetotalandtuningparametersizesare
+dynamicallyadjusted. Weusetrainingconvergetime
+2 RelatedWorks
+orinferencetime(T)andpeakmemory(M)tomeasure
+efficiency. ⇑and⇓denotechangedirections.
+2.1 Parameter-efficientFine-tuning(PEFT)
+trainingresources. PEFT methods aim to tune LMs with limited re-
+Inthispaper,wedevelopanefficientfine-tuning sources by updating a small number of parame-
+approach named APT that Adaptively selects ters(Lialinetal.,2023),mainlyfallingintothree
+model parameters for Pruning and fine-Tuning. categories: selective,additive,anddynamic. Selec-
+APTcombinesthebenefitsofPEFTandstructured tivemethodsfocusontuningasubsetofparameters
+pruning to make fine-tuning and inference more in LMs with pre-defined rules (Ben Zaken et al.,
+efficient. Our intuition is that pre-trained LM pa- 2022) or importance metrics (Sung et al., 2021;
+rameterscontaingeneralknowledge,buttheirim- Guo et al., 2021). Additive methods inject layer
+portance to downstream tasks varies. Therefore, modules(Houlsbyetal.,2019;Pfeifferetal.,2020)
+wecanremovetheparametersirrelevanttothefine- orembeddings(Lesteretal.,2021;LiandLiang,
+tuningtaskintheearlytrainingstage. Removing 2021) for LM tuning. For example, LoRA (Hu
+these parameters early improves training and in- et al., 2021) tunes low-rank decomposed linear
+ferenceefficiencywhilenotsubstantiallyhurting weights to avoid inference cost overhead. How-
+modelaccuracy(Frankleetal.,2021;Shenetal., ever,LoRAkeepsthetuninglayershapesstaticin
+2022a;Zhangetal.,2023c). Meanwhile,continu- training without dynamic adjustments. Dynamic
+ouslyaddingmoreparametersforfine-tuningcould methods(Heetal.,2022)adjusttuningparameters
+improveperformancebecausetask-specificskills during training. For instance, AdaLoRA (Zhang
+thatliveinasubsetofLMparameters(Wangetal., etal.,2023b)graduallyreducestuningparameters
+2022a;Panigrahietal.,2023). but does not benefit inference efficiency. Com-
+Morespecifically,APTlearnsthepruningmasks pared to these methods, APT adaptively adjusts
+via an outlier-aware salience scoring function to thepruningandtuningparameterssimultaneously,
+remove irrelevant LM parameter blocks and add improvingtrainingandinferenceefficiency.
+moretuningparametersduringfine-tuningaccord-
+2.2 ModelCompression
+ingtolayerimportance. Tomaketrainingmoreef-
+ficient,thesaliencescoringfunctionislightweight Modelcompressionmethodslikequantizationand
+and causes little runtime and memory overhead. pruning boost inference efficiency. Quantization
+Combinedwithourself-distillationtechniquethat aimstoreduceLMs’memoryconsumptionviacon-
+shares teacher and student parameters, APT can verting parameters to low-bit data types (Frantar
+accuratelypruneanLMwithlesstrainingtimeand etal.,2022;Dettmersetal.,2022;Linetal.,2023).
+lowermemoryusage. However,despiteeffectivelyreducingLM’smem-
+Experimental results show that APT prunes oryconsumption,thespeedupbenefitsofquantiza-
+RoBERTaandT5basemodels8×fasterthanthe tion require specific framework support, limiting
+LoRApluspruningbaselinewhilereaching98.0% theirpracticalityandadaptability.
+performancewith2.4×speedupand78.1%mem- Pruning(LeCunetal.,1989;Hanetal.,2015a;
+ory consumption during inference. When prun- Frankle and Carbin, 2018; Xu et al., 2021) aimsto discard unimportant parameters in LMs for in- parametersfortrainingandinferencewithoutsacri-
+ference efficiency. Unstructured pruning (Sanh ficingtaskperformance.
+et al., 2020) prunes sparse parameters in LMs, Weformallydefinetheproblemobjectiveasmin-
+whichrequiresdedicatedhardwaresupportforef- imizingthetasklossLundertheconstraintthatthe
+ficiency improvements. Structured pruning (La- total LM parameter size Θ reaches a target spar-
+gunas et al., 2021; Xia et al., 2022), on the other sity(definedastheratioofthenumberofparame-
+hand,prunesconsistentblocksintransformerlay- tersprunedtotheoriginalLM)γ afterT training
+T
+ers(MHAheads,FFNneurons,andmodeldimen- steps. Foreachtrainingstept,thesparsityofthe
+sions) for effective and ubiquitous inference effi- LMremainsaboveγ whilethenumberoftuning
+t
+ciencygains. Suchpruningoftenusesknowledge parameters is below ∆ . We control the pruning
+t
+distillation(Hintonetal.,2015),whichcausesmore masks M and tuning ranks R to satisfy these
+t t
+trainingcosts. Post-trainingpruning(Kwonetal., constraints. Wedescribetheoptimizationprocess
+2022; Frantar and Alistarh, 2023) aims to prune as:
+fine-tunedmodelswithlimitedextracostsbutre- 1 (cid:88)
+argmin L(x,y|Θ ,M )
+quiresinitializationfromfullyfine-tunedmodels. |D| T T
+Moreover,task-agnosticpruning(Sunetal.,2023;
+ΘT,MT
+x,y∈D
+C(Θ ,M )
+Maetal.,2023)cannotachieveon-parperformance t t
+s.t. 1− ≥ γ , (1)
+t
+withtask-specificpruning. C(Θ 0,M 0)
+δ(Θ ,M ,R ) ≤ ∆ ,
+t t t t
+2.3 CombiningCompressionandPEFT
+∀t ∈ {0,...,T}.
+Combining model compression and PEFT might
+wherex,y areinputsandlabelssampledfromthe
+achievebothtrainingandinferenceefficiencyim-
+task dataset D, while C and δ denotes total and
+provements: QLoRA (Dettmers et al., 2023) and
+tuningparameternumbersoftheLM,respectively.
+QA-LoRA(Xuetal.,2023)bringquantizationand
+Based on Eq. (1), a higher target sparsity γ
+T
+LoRA together for large LM tuning. SPA (Hede-
+improves inference efficiency with fewer FLOPs
+gaard et al., 2022) combines structured pruning
+andmemoryusagebutsacrificesperformance. In-
+andCompacter(KarimiMahabadietal.,2021),yet
+creasing γ when t ≪ T also improves training
+t
+sufferssubstantialperformanceloss. CPET(Zhao
+efficiency. Ontheotherhand,tuningmoreparam-
+etal.,2023)leveragesdifferenttask-agnosticmodel
+eters with larger ∆ costs more training memory
+compression methods together with LoRA and
+but makes the model converge faster with better
+knowledgedistillation,buttheperformancelossbe-
+taskperformance. Ourformulationsupportstask
+comesnotablespecificallywhenstructuredpruning
+performanceimprovementstogetherwithtraining
+isapplied. PST(Lietal.,2022)andLRP(Zhang
+andinferenceefficiencybydynamicallyadjusting
+et al., 2023a) also explored the combination of
+theLMparametersduringfine-tuning.
+LoRAandpruning,yettheirperformancedegrada-
+tions are also substantial because their tuning pa- 4 AdaptivePruningandTuning
+rametersarestatic. Incontrast,APTidentifiestun-
+We design Adaptive Pruning and Tuning (APT)
+ingandpruningparametersbasedontheirsalience
+overLMparameterstoallowefficienttrainingand
+infine-tuning,whichcanimprovetrainingandin-
+inferencewhilemaintainingtaskperformance.
+ferenceefficiencyunderanewparadigmwithmin-
+SummarizedintheleftofFig.2,existingpruning
+imalperformanceloss.
+methodsoftenneglecttrainingcostswherethenum-
+beroftuningparametersismorethanaparameter-
+3 ProblemFormulation
+efficient threshold with ∆ ≥ C(Θ ,M ), re-
+t t t
+APT aims to improve the training and inference sulting in long training time and high memory
+efficiencyofpretrainedLMwhilemaintainingtask consumption. Instead, to improve training effi-
+performance. Intuitively,tuningfewerparameters ciency,wepruneLMparameters(increaseγ )dur-
+t
+leads to smaller training memory footprints and ing early training when t ≪ T while keeping
+shortertimepertrainingstep; modelswithfewer ∆ ≪ C(Θ ,M ) to reduce training costs. In ad-
+t t t
+parametersalsorunfasterwithlessmemoryfoot- dition,weaddtuningparameters(increase∆ )in
+t
+print during inference but come with task perfor- early training to effectively mitigate the degrada-
+mance degradation. We aim to find the optimal tionofLM’sperformanceduetopruning.Compare to existing APT adapter
+Adaptive Pruning
+pruning methods
+H
+Total parameters Pruning musk
+#param teacher model
+ +
+training Fast and efficient
+100%
+block search
+0 0 1 ... 1 1 1 0 0 0 0 1 ... 1 1 1 0 0
+Outlier-aware salience
+W scoring
+B
+training Hidden states
+Frozen
+ r
+Tuning parameters apt
+
+extra tuning
+ params Adaptive Tuning
+#param parameter
+100% Layer rank r
+W
+A Adding adapter
+parameters
+Salience calculation
+training
+Post-fine- X
+tune pruning APT Tuning Parameters
+Figure2: APTadaptivelyidentifiespruningandtuningparametersviaAPTadaptersduringfine-tuningwithlittle
+cost. APTgraduallyprunesLMparameterswithbinarypruningmaskslearnedfromourlightweightoutlier-aware
+saliencescoringfunctionfortrainingandinferenceefficiency. APTalsoaddstuningparametersinsalientlayersin
+LMfine-tuningthroughincreasingdynamicranksinAPTadaptersforperformancerecovery.
+Overview. Fig. 2 shows the overview of our where◦denotestheblock-wiseHadamardproduct
+methodthatincorporatesournewAPTadapterfor between the masks and their corresponding ma-
+pruning and tuning. Our intuition is that pruning trices. The parameter block is pruned when the
+LMs during early fine-tuning will not hurt their multiplyingmaskissetto0andretainedwhenset
+task performance while reducing training and in- to1. Inthemeantime, duringfine-tuning, wedy-
+ferencecosts. Meanwhile,unlikeexistingadapters namicallyincreaser fortheweightmatricesW
+apt B
+likeLoRA(Huetal.,2021)thatusefixedtuning and W . Compared to LoRA, APT adapters can
+A
+parameters,APTadaptersdynamicallyaddtuning bemoreefficientduetomoreadaptivepruningand
+parameterstoaccelerateLMconvergencewithsu- tuningoverLMparameters.
+perior task performance. We first introduce the In transformer-based LM fine-tuning, we add
+architecture of APT adapters in Section 4.1. We APTadaptersinqueriesandvaluesofmulti-head
+thendescribehowwepruneLMparametersatearly attention(MHA)layers. WealsoaddAPTadapter
+fine-tuningwithlowcostinSection4.2andadap- in feed-forward network (FFN) layers when fine-
+tivelytuneLMstorecovertaskperformanceeffi- tuning smaller models like RoBERTa and T5 for
+cientlyinSection4.3. Additionally,weexplainour fasttrainingconvergence. Inthesecases,m prunes
+i
+self-knowledgedistillationtechniquethatimproves transformers’hiddendimensionandm prunesat-
+o
+prunedLM’staskperformancewithlimitedtrain- tentionheadsinMHAandinternalneuronsinFFN
+ingtimeandmemoryconsumptioninSection4.4. layers. Bylearningthepruningmasksandadjust-
+ingtheranksdynamicallyintheAPTadapter,we
+4.1 APTadapter
+canachievethegoaldefinedinSection3wherethe
+WebuildtheAPTadapterarchitectureoverLoRA, tuningparameternumberδ(Θ t,M t,R t)increases
+but the key difference is that APT adapter sup- tomaintaintaskperformanceandtheLMparame-
+portsdynamicLMpruningandtuning. Assuming tersizeC(Θ t,M t)decreasestosupportmoreeffi-
+anAPTadapterprojectstheinputactivationwith cienttrainingandinference. Next,wedescribethe
+dimension d to output dimension d , we design adaptivepruningandtuningproceduresindetail.
+i o
+binary pruning masks (m
+i
+∈ Rdi for input and
+4.2 Low-costAdaptiveLMPruning(A )
+m
+o
+∈ Rdo for output) and dynamic ranks r
+apt
+in P
+APT adapter to control the total and tuning LM TobenefittheefficiencyofLMtrainingandinfer-
+parametersduringfine-tuning,respectively. Specif- ence,APTadaptivelyprunesLMparameterssince
+ically,withtuningparametersW
+A
+∈ Rrapt×di and the start of fine-tuning. The problem is finding
+W
+B
+∈ Rdo×rapt,APTadapterH
+apt
+isdenotedas: the parameters to be pruned and discarding them
+withouthurtingtrainingstability. Givenatask,we
+H (X) = m ◦(W +s·W W )X ◦m (2) computetheoutlier-awaresaliencescoreofblock
+apt o B A iparameters at each training step during the early learnthebinarypruningmaskstoincreasetheLM
+fine-tuning stage when t ≪ T. Afterward, we sparsity above γ . Intuitively, we shall prune the
+t
+useafastsearchalgorithmtodeterminewhichpa- blockswithlesssaliencescore,whichformulatesa
+rameterblockstoprune,andthenweupdatetheir latency-saliencyknapsack(Shenetal.,2022b)task.
+binarypruningmasksaccordingly. Theupper-right ForanLMwithn transformerlayers,wherelayer
+L
+ofFig.2showsthisadaptivepruningprocedure. ihasni MHAheadsandni FFNneurons,andall
+h f
+Outlier-awaresaliencescoringofLMparame- transformerlayers’hiddendimensionsizesared ,
+m
+ters. Whendeterminingtheinfluenceofpruning theapproximated2 numberLMparameteris:
+parametersontheLMperformanceforfine-tuning
+tasks,thekeyideaistocomputetheoutlier-aware
+(cid:88)nL
+C(Θ ;M ) ≈ d (4ni ·d +2ni) (7)
+saliencescoresofLMactivationsthatconsiderboth t t m h h f
+i=1
+tuning and frozen parameters. In detail, salience
+isdefinedasthemagnitudeofparameters’weight-
+where d is the dimension per attention head.
+h
+gradient production from previous works (Sanh
+To keep the constraint denoted in Eq. (1), we
+etal.,2020;Zhangetal.,2023b).
+needtopruneMHAheads,FFNneurons,andthe
+modelhiddendimensionsimultaneouslybyreduc-
+∂L
+S(W i,j) = |W i,j ·
+∂W
+| (3) ingni h,ni f,andd m. Hence,wefirstsorttheblocks
+i,j
+bytheirsaliencedividedbytheparameternumber.
+However, since the frozen weights’ gradients are Astheparametersizemonotonicallyincreaseswith
+unreachable in PEFT settings, we compute the thenumberofblocks,wethenusebinarysearchto
+salience as the magnitude of the product of ac- identifythetopsalientblockstoberetainedgiven
+tivations and their gradients. Additionally, we thesparsityconstraintγ . Forsimplicity,weleave
+t
+compresstheactivationandgradientsbysumming theimplementationdetailsinAppendixC.
+alongbatchesbeforeproductiontofurtherreduce
+the training memory consumption. On the other 4.3 AdaptiveandEfficientLMTuning(A T)
+hand,blockoutlierparametersplayacrucialrolein AsusingPEFTmethodstofine-tuneprunedLMs
+task-specificcapabilities,aspreviousquantization causes notable performance decrease (illustrated
+methodssuggest(Dettmersetal.,2022;Linetal., in Table 2 and Table 4), we aim to dynamically
+2023). Sucheffectsbroughtbyoutlierparameters add tuning parameters in LM fine-tuning to im-
+will be averaged if salience is only measured on provethemodel’send-taskperformance. However,
+the block level. To keep more outlier parameters sincemoretuningparameterswillconsumeextra
+intheprunedLMs,wecombinethesaliencescore trainingtimeandmemory,wewanttoaddparame-
+aboveandthekurtosis1 oftheactivationtogether: tersinacontrolledway,wherenewparametersare
+only added to task-sensitive APT adapters. As a
+Kurt(X) =
+(cid:88) ((cid:88) (X i−µ(X)
+)4−3) (4) result,wecanrecoverprunedLMs’performance
+σ(X)
+(x,y)∈D i with reasonable training costs. In detail, we first
+(cid:88) (cid:88) ∂L(x,y|Θ t,M t) calculatethesalienceofeachAPTadaptertodeter-
+S(cid:101)t(W :,j) = | |·
+minetheirimportance. Next,weselectthetop-half
+∂H
+j,i
+(x,y)∈Dt i (5) APTadaptersaftersortingthemwithsalienceand
+(cid:88) (cid:88)
+|H | addtheirparametersbyincreasingtheirr .
+j,i apt
+(x,y)∈Dt i Salience scoring of APT adapter. Since gradi-
+Sˆ((W :,j) = S(cid:101)(W :,j)+(Kurt(O j,:))1 2 (6) ents of tuning parameters information are avail-
+ablewhendeterminingthelayersalience,wecan
+where H is the activations in the LM, µ and first calculate each tuning parameter’s salience
+σ denote the mean and standard deviation, and with Eq. (3). Then, we define the salience
+O = W ◦X⊺ represents the activation. We of an APT adapter as the summation of the
+:,j :,j j,:
+leavedetailsofthesaliencescoringinAppendixB. parameter salience scores in W B, denoted as
+(cid:80)
+EfficientsearchofLMblockparameters. Given I(H apt) = i,jS(W Bi,j), to represent each tun-
+thesaliencecalculatedinEq.(6),thenextstepisto
+2Weignorethemodel’slayernormandbiastermssince
+1Representingthedensityoftheoutlierinadistribution, theirsizesaresmall,andwedonotcounttuningparameters
+themoretheoutliersare,thebiggerthekurtosiswillbe sincetheycanbefullymergedaftertraining.ing APT adapter’s importance3. Given the calcu- randomlysampledteacherlayersfollowing(Haidar
+lated I(H ) for each APT adapter, we can then et al., 2022), ϕ(·) is the teacher-student layer-
+apt
+decidewheretoaddnewtuningparameterstoeffi- mapping function that matches the teacher layer
+cientlyimprovetheprunedLM’staskaccuracy. toitsclosest,non-prunedstudentlayer. Trdenotes
+DynamicallyaddingAPTadapterparameters the tunable LoRA layer for layer transformation,
+to recover task performance. With the impor- initializedasanidenticalmatrixI.
+tanceofAPTadaptersI(H )calculated,thenext
+apt
+step of adaptive tuning is to add tuning parame- 5 Experiments
+tersbyincreasingthesalienttuninglayers’ranks
+To evaluate the training and inference efficiency
+r ∈ R followingbudget∆ . Therefore,firstly,
+apt t t gains of APT, we compare it with the combined
+we sort all tuning layers according to their im-
+useofPEFTwithpruninganddistillationbaselines.
+portance score I(H ) and linearly increase the
+apt Wefirstdescribethenaturallanguageunderstand-
+ranksofthetop-halfsalientones. Morespecifically,
+ing and generation tasks targeting different LM
+whenincreasingthetuningparameterfrom∆ to
+t backbones, then the setup of baselines and APT.
+∆ t′,thesalientlayer’srankischangedfromr
+apt
+to
+Wethenreporttaskperformance,speed,andmem-
+r′ = ⌊r ·∆ t′⌋where⌊·⌋denotestheflooropera-
+apt apt ∆t oryusagefortrainingandinferencecosts.
+tion. Fortrainingstability,whenaddingparameters
+and converting W B ∈ Rdo×rapt,W A ∈ Rrapt×di to 5.1 Tasks
+W′ ∈ Rdo×r a′ pt,W′ ∈ Rr a′ pt×di, we concatenate
+B A We apply APT to BERT (Devlin et al., 2019),
+randomGaussianinitializedparametersN(0,σ2)
+RoBERTa (Liu et al., 2019), T5(Raffel et al.,
+inW andzerosinW sameastheLoRAinitial-
+A B 2020)4, and LLaMA (Touvron et al., 2023). For
+ization, so the layer’s output remains unchanged
+BERT, RoBERTa, and T5 models, we train and
+beforeandafternewparametersadded.
+evaluate on SST2 and MNLI datasets from the
+GLUEbenchmark(Wangetal.,2019)andreport
+4.4 EfficientSelf-KnowledgeDistillation
+the dev set accuracy. We also train and evaluate
+AsshowninTable4,trainingprunedLMwithout
+RoBERTa on SQuAD v2.0 (Rajpurkar et al.,
+base
+knowledgedistillationcausessignificantend-task
+2018) and report the dev set F1 score. For T5
+performancedrops. Therefore,weuseknowledge
+models,wealsofine-tunethemonCNN/DM(Nal-
+distillationinAPTtoeffectivelymitigatethisper-
+lapati et al., 2016) and report the ROUGE 1/2/L
+formancelossofprunedLM.Still,existingstrate-
+scores. Meanwhile, We use the GPT-4 gener-
+gies require a fully trained teacher model being
+ated Alpaca dataset (Taori et al., 2023) to fine-
+putintotheGPUtogetherwiththestudentduring
+tune large LLaMA models and evaluate them
+distillation,causinghightrainingtimeandmemory.
+with the lm-eval-harness package (Gao et al.,
+Toavoidextratrainingcosts,wekeepduplicating
+2021) on four tasks from the Open LLM Leader-
+the tuning student layers as teachers during fine-
+board, namely 25-shot ARC (Clark et al., 2018),
+tuning to reduce total training time. Meanwhile,
+10-shot HellaSwag (Zellers et al., 2019), 5-shot
+frozenparametersaresharedbetweenthestudent
+MMLU (Hendrycks et al., 2021), and zero-shot
+andteachermodelduringtrainingtoreducemem-
+TruthfulQA(Linetal.,2022).
+oryconsumption. Weeditthedistillationobjective
+inCoFi(Xiaetal.,2022)as 5.2 Baselines
+L = µL +(1−µ)L WevalidatetheefficiencybenefitsofAPTforboth
+distill ft
+trainingandinferencebycomparingwithstate-of-
+L =
+(cid:88)T
+MSE(Tr(Hϕ(i)),Hi)
+(8)
+the-art PEFT, pruning, and distillation methods,
+layer s t
+alongwiththeircombinations.
+i=1
+LoRA+Prune: a post-training pruning method
+whereµisamovingtermlinearlyscalesfrom0to over on LoRA-tuned LMs. We use Mask Tun-
+1 during distillation to encourage the pre-pruned ing (Kwon et al., 2022), a state-of-the-art post-
+modelvastlyfittothetrainingdata,L distill isthe trainingstructuredpruningmethodbasedonfisher
+distillation objective from CoFi, T is block-wise
+4For fair comparisons, we use the t5-lm-adapt model,
+3The salience scores calculated using W and W are whichisonlypre-trainedontheC4corpustomakesurethe
+B A
+equal,sousingeitherofthemwillgetthesameresult. initialLMdoesnotobservedownstreamtasksinpre-training.information. Duetothatpost-trainingpruningper- 5.4 EvaluationMetrics
+formspoorlyonhigh-sparsitysettings,weretrain
+We evaluate APT and baselines on training and
+theprunedLMafterpruningtorecoveritsperfor-
+inferenceefficiency,measuredinruntimememory
+mance.
+andtimeconsumptionasfollows:
+Prune+Distill: knowledge distillation has been
+Training Efficiency Metrics: we report rela-
+provedtobeakeytechniqueinrecoveringpruned
+tive training peak memory (Train. Mem.) and
+LMs’taskaccuracy. Inparticular,weusethestate-
+training speedup measured by time to accuracy
+of-the-art pruning plus distillation method called (TTA5) (Coleman et al., 2019). For fair compar-
+CoFi(Xiaetal.,2022)whichusesL regulariza-
+0 isons,weconsiderthetrainingtimeoftheteacher
+tion for pruning plus dynamic layer-wise distilla-
+model plus the student for methods using knowl-
+tion objectives. We only compare APT to CoFi
+edgedistillation.
+withRoBERTamodelssincethetrainingmemory
+InferenceEfficiencyMetrics: wereporttheinfer-
+usageofCoFiistoohighforlargerLMs.
+ence peak memory (Inf. Mem.) and the relative
+LoRA+Prune+Distill: toreducethetrainingmem- speedup (Inf. Speed) based on throughput (data
+oryconsumptioninpruninganddistillation,asim- processedpersecond)forinferenceefficiency.
+plebaselineistoconductCoFipruninganddistil-
+Both training and evaluation are conducted on
+lationbutwithLoRAparameterstunedonly. More
+a single A100 GPU. The inference test batch
+specifically,onlytheL moduleandLoRAparam-
+0 size is 128 for small models while 32 and 4 for
+etersaretunableunderthissetting.
+LLaMA 7B and 13B models, respectively. We
+LLMPruner(Maetal.,2023): LLMPruneristhe demonstrate detailed training and evaluation se-
+state-of-the-art task-agnostic pruning method on tups/implementationsinAppendixA.
+LLaMAthatprunesitsblocksorchannelsbasedon
+saliencemetricswhileusingLoRAforfastperfor- 5.5 MainResults
+mancerecovery. WecompareAPTtoLLMPruner
+OverviewWedemonstratetheoverallend-taskper-
+withfine-tuningonthesameGPT-4generatedAl-
+formance of APT comparing to fine-tuning (FT),
+pacadataforfaircomparisons.
+LoRA-tuning(LoRA),andpruningbaselinesinTa-
+We also compare APT to PST (Li et al., 2022) ble 2 and Table 3. Overall, APT does not hurt
+and LRP (Zhang et al., 2023a), which are the pruned LM’s accuracy compared to fine-tuning
+state-of-the-art parameter-efficient unstructured andLoRAtuning,where99%and98%fine-tuned
+and structured pruning methods on BERT model. LMtaskaccuraciesaremaintainedwhenpruning
+WeleavetheseresultsinAppendixD. RoBERTaandT5modelsleaving40%parameters,
+respectively. APTalsoonlycostsabout70%train-
+5.3 TrainingDetails ing memory than fine-tuning for both RoBERTa
+and T5 model training. When pruning LLaMA2-
+WhenpruningLMswithAPT,following(Xiaetal.,
+7B models with 70% parameters remained, APT
+2022), we first prune and train the LM with the
+can recover 86.4% task performance on average,
+self-distillation objective, and then fine-tune the
+together with only 75.8% training memory con-
+pruned LM to recover its end-task performance.
+sumption than LoRA tuning. Furthermore, APT
+Given T pruning training steps in total, we set a
+alsosignificantlyreducestrainingtimeandmem-
+pre-determined target sparsity γ (defined as the
+T
+ory cost compared to the pruning and distillation
+ratioofprunedparametersizetothetotalparameter
+baselines, also with better end-task performance
+size)andusecubicschedulingtocontroltheLM
+parametersize,whereγ = γ +(1−γ )(1− t)3. withthesamepruningsparsities. Thedetailedcom-
+t T T T
+parisonsaredescribedasfollows:
+Weadaptivelyincreasethetuningparametersinthe
+APT speeds up RoBERTa and T5 training 8×
+pruning stage but restrict them to a specific limit
+and reduces training memory costs to 30% in
+∆ at each training step t. Towards better train-
+t
+LLaMA pruning compared to LoRA+Prune
+ingstabilityinLMpruning,wegraduallydecrease
+baseline. ShowninTable2,whenpruningwiththe
+the pruning masks of pruned blocks by α < 1
+60%sparsitytarget,APTconverges8.4×fasterin
+instead of instantly setting them from ones to ze-
+RoBERTa model pruning than the LoRA+Prune
+ros. Wealsousetheexponentialmoving-averaged
+saliencein(Zhangetal.,2023b)whencalculating
+5Forinstance,97%TTAdenotesthetimespentreaching
+thesaliencescoreduringfine-tuning. 97%ofthefullyfine-tunedmodel’sperformanceModel Method MNLI SST2 SQuADv2 CNN/DM Train.Speed(⇑) Train.Mem.(⇓) Inf.Speed(⇑) Inf.Mem.(⇓)
+FT 87.6 94.8 82.9 - 100.0% 100.0% 100.0% 100.0%
+LoRA 87.5 95.1 83.0 - 4.7% 60.5% 100.0% 100.0%
+RoBERTabase
+LoRA+Prune 84.0 93.0 79.2 - 2.0% 60.5% 262.9% 75.1%
+Prune+Distill 87.3 94.5 - - 6.7% 168.5% 259.2% 79.2%
+LoRA+Prune+Distill 84.2 91.9 - - 1.5% 141.4% 253.7% 82.3%
+APT 86.4 94.5 81.8 - 16.9% 70.1% 241.9% 78.1%
+FT 87.1 95.2 - 42.1/20.3/39.4 100.0% 100.0% 100.0% 100.0%
+LoRA 87.0 95.0 - 38.7/17.2/36.0 39.1% 62.0% 100.0% 100.0%
+T5base
+LoRA+Prune 80.9 92.3 - 36.7/15.7/33.9 2.5% 62.0% 212.5% 73.4%
+APT 87.0 95.0 - 38.6/17.0/35.8 20.6% 73.9% 134.1% 81.5%
+Table2: RoBERTaandT5pruningwithAPTcomparedtobaselinesunder60%sparsity. Wemeasurethetraining
+andinferenceefficiencywithLMsprunedontheSST2task. Trainingspeedismeasuredvia97%accuracyTTA.⇑
+denotesthemetricisbetterwhenbigger,and⇓denotessmallerisbetter.
+Method ARC HellaSwag MMLU TruthfulQA Avg. Train.Speed(⇑) Train.Mem.(⇓) Inf.Speed(⇑) Inf.Mem.(⇓)
+LLaMA27B 53.1 77.7 43.8 39.0 53.4 - - - -
+LoRA 55.6 79.3 46.9 49.9 57.9 100.0% 100.0% 100.0% 100.0%
+LoRA+Prune 46.8 65.2 23.9 46.2 45.5 55.3% 100.0% 115.5% 68.9%
+LLMPruner 39.2 67.0 24.9 40.6 42.9 115.1% 253.6% 114.8% 74.2%
+APT 45.4 71.1 36.9 46.6 50.0 94.3% 75.8% 117.0% 67.2%
+Table3: LLaMA27B30%sparsitypruningresultswithGPT4-generatedAlpacadataset,evaluatedontheOpen
+LLMleaderboardfew-shottasks. Trainingspeedismeasuredviatrainingtimeperstep. Wedonotcompareto
+distillationbaselinesbecausethetrainingcostofdistillationistoolarge,andwealsocompareAPTtoLLMPruner
+sinceitisdedicatedtolargeLMpruning. ⇑denotesthemetricisbetterwhenbigger,and⇓denotessmallerisbetter.
+baseline with consuming similar GPU memory more end-task performance on average. When
+costs. Moreover, when pruning RoBERTa mod- pruningT5modelsunderthe60%sparsity,thetask
+els, APT converges 3.6× faster than the LoRA performanceachievedbyAPTis5.1%betterthan
+baseline without pruning. APT also prunes T5 the LoRA+Prune baseline, but the inference effi-
+models 8.2× faster than the LoRA+Prune base- ciencyreachedbyAPT(1.3×speedupand81.5%
+line. The reason is that APT adaptively prunes memorycost)isworsethantheLoRA+Prunebase-
+task-irrelevant parameters during training, reduc- line(2.1×speedupand73.4%memorycost). This
+ing memory and per-step training time. Adding is because APT can adaptively prune more de-
+parametersinsalienttuninglayersalsoaccelerates coderparameters,whicharealsocomputationally
+LMconvergence. Whenpruning30%parameters cheaper than encoder parameters (due to shorter
+in billion-level LLMs before tuning, APT signif- outputsequencelength)butrelativelyuselessfor
+icantly reduces memory usage. APT costs less classificationtasks. ForLLaMA2-7Bmodelprun-
+than24GBofmemoryforpruningandfine-tuning, ing with 70% sparsity, APT outperforms LLM-
+whichcanbeeasilyadaptedtotheconsumer-level Prunerwith16.5%andtheLoRA+Prunebaseline
+GPUs. Incontrast,LLM-Prunercostsabout80GB with9.9%,wheretheinferenceefficiencyimprove-
+memorywhenpruningtheLLaMA7Bmodel6. mentsofAPT(1.2×speedupand67.2%memory
+APT achieves 2.5%-9.9% higher task perfor- cost)isslightlybetterthanbothLoRA+Pruneand
+mancethantheLoRA+Prunebaselinewiththe LLMPrunerbaselines.
+samepruningsparsities. PresentedinTable2and
+APT reaches on-par performance with the
+Table3,whenRoBERTa,T5,andLLaMAmodels,
+Prune+Distillbaselinegiventhesamepruning
+regardlessofsize,APTconsistentlyreachhigher
+sparsitybuttrained2.5×fasterandcostsonly
+taskperformancethantheLoRA+Prunebaseline
+41.6% memory. Compared to the Prune+Distill
+underthesame60%sparsity. Withthesimilarin-
+baseline,whichachievesthebesttaskperformance
+ferenceefficiencywhenpruningRoBERTamodels
+amongallbaselinemethods,APTresultsincom-
+(2.4×speedupand78.1%memorycostwithAPT,
+parable task accuracy, with only a 0.9 point drop
+and 2.6× speedup and 75.1% memory cost for
+intheMNLIdataset. Atthesametime,withsimi-
+LoRA+PruneforLoRA+Prune),APTreaches2.5%
+larinferenceefficiencyachieved,APTcostsonly
+6https://github.com/horseee/LLM-Pruner/issues/4 41.6%trainingmemoryandconverges2.5×thanthePrune+Distillbaseline. Thisisbecauseofthe ofablatingadaptivetuning(w/oA )wherethetun-
+T
+self-distillationtechniqueleveragedinAPTwhere ingparametersarestaticwhenpruningRoBERTa
+no separated teacher model is required in pruned models. Without A , the model’s performance
+T
+LMtraining. Moreover,APTachievesbettertask decreasesto93.2/84.4,leadingtoasimilarperfor-
+performance than the LoRA+Prune+Distill base- mance as the LoRA+Prune baseline (93.0/84.0).
+lineaswell,withalsofastertrainingspeedandless Moreover, equally increasing parameters across
+trainingmemoryconsumption. Theresultdemon- all layers instead of adding parameters based on
+strates that simply combining LoRA with prun- saliencewouldnotablyhurtthetaskaccuracy(84.4
+ing and distillation hurts pruned LM’s task accu- onMNLIcomparedto86.4). Atthesametime,A
+T
+racyandalsodoesnotsubstantiallyreducetraining helps the model converge 16% faster than static
+memoryconsumption. LoRA training. When ablating A in LLaMA
+T
+modelpruning,showninTable5,weobservethat
+5.6 AblationStudy A T recovers the model performance under 50%
+pruningsetting(38.2comparedto35.8)butthedif-
+Weevaluatetheimpactofdifferentcomponentsin
+ferenceunder70%pruningisinsignificant. Mean-
+APTbyremovingtheadaptivepruning(A ),adap-
+P while,ifcalculatingthepruningparametersalience
+tivetuning(A ),andself-distillation(D ). Besides
+T S withoutusingkurtosistoconsideroutliersparam-
+end-taskperformance,wealsoreportthetraining
+eters, the pruned LM performance substantially
+efficiencymetricsforeachablation. Wedonotre-
+drops from 50.0 to 38.1. We conclude that A
+T
+porttheinferenceefficiencysincetheyaresimilar
+substantiallyimprovesLMtrainingspeedandend-
+underthesamesparsity.
+task performance. For large LLaMA-based LM
+Adaptivepruning(A )Wedemonstratetheabla-
+P pruning,andoutlierparametersareessentialtore-
+tion of adaptive pruning (w/o A ) for RoBERTa
+P coveringtheprunedlargeLLaMA-basedmodels’
+modelsinTable4andLLaMAmodelsinTable5.
+capabilities.
+Inthesecases,weonlytrainLMswithadaptivetun-
+ingstrategiesasabovewithsupervisedfine-tuning
+Method SST2 MNLI Train.Speed(⇑) Train.Mem.(⇓)
+objectives without distillation. In such settings,
+APT 94.5 86.4 16.9% 70.1%
+APT can be recognized as a PEFT method with w/oAP 94.4 87.5 121.0% 62.2%
+w/osalience 94.3 84.7 16.4% 65.0%
+dynamictuningparametersadaptivelychangedin
+w/oAT 93.2 84.5 14.6% 64.4%
+LM fine-tuning. Hence, the inference efficiency w/oDS 92.9 85.3 20.7% 61.9%
+ofthetrainedLMsarethesameasfullfine-tuning
+Table4: Resultsofablatingsalience-basedallocation
+andLoRA.Withoutpruning,thetaskperformance
+strategyandAPTadapterwithRoBERTa-basemodel,
+of RoBERTa reaches 94.4 for SST2 and 87.5 for
+withrelativetrainingefficiencymetricstofine-tuning.
+MNLI(99.8%fine-tunedLMperformanceonav-
+erage). The average performance of the LLaMA Sparsity T.M. ARC HellaSwag MMLU TruthfulQA Avg.
+APT 30% 75.8% 45.4 71.1 36.9 46.6 50.0
+modelalsoachieves96.6%toitsLoRA-tunedcoun-
+w/oAP 100% 102.4% 53.8 79.1 46.9 48.4 57.1
+terpart. In addition, we surprisingly find that the w/okurtosis 30% 75.9% 47.2 39.7 23.0 42.3 38.1
+w/oAT 30% 76.1% 44.2 70.1 40.8 45.1 50.0
+RoBERTAtrainingspeedwithAPTw/oA Piseven APT 50% 60.2% 29.8 48.9 26.7 47.6 38.2
+21%fasterthanfullfine-tuningwhilecostingonly
+w/oAT 50% 60.1% 27.9 46.2 24.5 44.7 35.8
+62.2% memory. This result indicates that adap- Table5:LLaMA27Bmodelablationresultsunder30%
+tive tuning is effective in accurately and vastly and50%sparsitysettings.T.M.denotesrelativetraining
+fine-tuning LMs with minimal training memory memorycomparetoLoRA-tuning.
+cost. Inthemeantime,trainingmemorycostwill Self-distillation (D ) Shown in Table 4, tuning
+S
+be higher than LoRA without A P will be higher APTadaptersdynamicallywithoutdistillationob-
+in LLaMA pruning since the total LM parameter jectivesgets1.35worsetaskaccuracyonaverage.
+numberisfixed,yetthetuningparameternumber However,pruningRoBERTamodelswithoutself-
+willgrowlargerthanstaticLoRA-tuning. Thisab- distillation is 22.5% faster and costs 11.7% less
+lationdemonstratesthatadaptivepruningisessen- trainingmemory. Thisresultindicatestheeffective-
+tialinreducingthetrainingmemoryconsumption nessofleveragingknowledgedistillationtorecover
+of LLaMA model fine-tuning, besides benefiting pruned LM performance, but conducting distilla-
+modelinferenceefficiency. tion will result in extra training costs regarding
+Adaptivetuning(A )InTable4,weshowresults both time and memory. Detailed comparisons of
+Tself-distillation and traditional, static distillation ing during training hurts large LM performance
+strategiesareshowninAppendixG underdistillation-freesettings,andwehypothesize
+this is due to the training instability issue when
+5.7 AdaptivePruningandTuningAnalysis
+parametersaresettozerosduringfine-tuning.
+6 Conclusion
+200
+WeproposeAPTtoadaptivelyidentifyLMs’prun-
+100
+ingandtuningparametersduringfine-tuning,aim-
+0 ingforbothtrainingandinferenceefficiency. APT
+93.5 94.0 94.5 0.75 1.00 1.25 0.05 0.10 0.15
+Accuracy Train Peak Memory 97% TTA prunessmallLMsfasterwhilepruninglargeLMs
+with less memory consumption. With using sim-
+Figure3: ComparisonofdifferentinitialranksofLoRA
+layerspruningwithAPTonRoBERTawithSST2task ilar memory costs as LoRA, APT prunes small
+accuracy,relativetrainingpeakmemoryandspeedto LMs8×fasterthantheLoRApluspruningbase-
+97%fine-tuningaccuracytothefine-tuningmodel. line. In large LM pruning, APT maintains 87%
+performance with only 30% pruning memory us-
+age when 70% LM parameter retained. We con-
+ARC HellaSwag MMLU TruthfulQA Avg.
+cludethatAPTshapesanewparadigmofpruning
+LLaMA2 7B LLaMA2 13B
+LMsinfine-tuningforpeoplewithlimitedcompu-
+100
+tationalresources,openingthepossibilitiesforthe
+95
+widerusageofLMsinpracticalapplicationswith
+90
+restrictive hardware constraints. In future works,
+85
+wewouldadaptAPTtomorePEFTarchitectures
+80
+(forexample,paralleladaptersandPrefix-tuning)
+75
+0.7 0.85 1.0 0.7 0.85 1.0 while targeting better performance recovery for
+Init. Density Init. Density
+billion-levellargeLMs. Meanwhile,wealsohope
+Figure4:Traininginitialsparsitytrade-offwith30%tar- futureresearchwillcontinuetofindefficientand
+getsparsitymodel’srelativeperformancestotheLoRA-
+accuratetechniquestoidentifysalientstructuresin
+tunedLLaMA2-7Band13Bmodels.
+LMsbasedonourformulatedsetting.
+Effectsofadaptivetuningstrategiesonend-task
+performanceandtrainingefficiency. Asthetra-
+7 LimitationandDiscussion
+jectoriesshowninFig.3,simplyenlargingtheini-
+tialtuningparameternumberinAPTwillnotim- Towardsbetterperformancegainandinference
+proveorevenhurtthemodel’sfinalperformance. speedup of large LM in limited resource set-
+Moreover,thetrainingmemoryconsumptiongrows tings. Comparing Table 2 Table 3, we can no-
+evenhigherthanfine-tuningwhenthetuninglayer ticethattheperformancegapbetweenbillion-level
+ranksbecomeextremelylarge(initialrankssetas LLMsislargerthansmallerLMs. Meanwhile,in-
+256). Therefore,thisresultprovesthataddingtun- steadoftime,memoryreductionisamoreurgent
+ingparametersaccordingtolayersalienceisbetter need in practical LM-based usage to make more
+thanuniformlyincreasingthembeforetuning. LLMs possible to be utilized. Therefore, when
+Effects of early pruning on task accuracy and pruning LLMs, APT focuses on the distillation-
+training memory in LLaMA pruning. Fig. 4 free setting. At the same time, we only pro-
+showstheeffectoftheinitialdensityonLLaMA pose a simple but effective strategy. Yet, we be-
+models’taskperformanceunderthe30%sparsity lieve that superior performance-efficiency trade-
+pruningsetting. Wefindthatdensely-trainedmod- offs can be reached with better memory-efficient
+elsonlyperformbetterinTruthfulQAwithfewer distillation strategies, parameter sharing, and re-
+parameters pruned before tuning. The accuracy allocation. Furthermore, because of the unique
+reaches 48.6 and 47.4 when not pruning before features of Ampere-architecture GPUs, layer di-
+tuning, compared to 46.6 and 44.7 when directly mensionsdivisibleby8forFP16anddivisibleby
+pruningtothetargetsparsityforboth7Band13B 16forInt8wouldreachbetterspeedupwhileAPT
+models. TrainingtheLMdenselyharmsthemodel onlyfocusesontheconventionalstructuredprun-
+performance while costing extra memory for all ing paradigm. Towards better speedup, a higher
+other tasks. These results demonstrate that prun- level of structured pruning (grouped neuron and
+knar
+tini
+ARoL
+)%(
+ycaruccA
+evitaleR
+)%(
+ycaruccA
+evitaleRdimension)inLLMsshallalsobeconsidered. ofquantizedllms. arXivpreprintarXiv:2305.14314.
+Trainingcouldbeunstablebecauseofparame- (page3)
+ter shape changes. Since we conduct parameter
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+re-allocationduringtraining,therearenewparame-
+Kristina Toutanova. 2019. BERT: Pre-training of
+terstobeinitializedwhilealsoexistingparameters deepbidirectionaltransformersforlanguageunder-
+to be pruned. To avoid stability issues, we reset standing. InProceedingsofthe2019Conferenceof
+theoptimizereverytimeaftereachparameterallo- theNorthAmericanChapteroftheAssociationfor
+ComputationalLinguistics: HumanLanguageTech-
+cation,yetthisstrategymightalsocausethetrain-
+nologies,Volume1(LongandShortPapers),pages
+ingunstable. Meanwhile,theselectionofteacher
+4171–4186,Minneapolis,Minnesota.Associationfor
+checkpointsduringtrainingalsohighlyaffectsthe ComputationalLinguistics. (page1,6)
+prunedmodel’sperformance,whereaseithernon-
+Ning Ding, Yujia Qin, Guang Yang, Fuchao Wei,
+convergedorsparseteachersdon’thelpasmuchin
+Zonghan Yang, Yusheng Su, Shengding Hu, Yulin
+performancerecovery. Wechoseasimplestrategy
+Chen, Chi-Min Chan, Weize Chen, et al. 2023.
+whereonlycheckpointingtheweightsifthecurrent Parameter-efficient fine-tuning of large-scale pre-
+studentmodel’sperformancegrowsbetter,yetwe trained language models. Nature Machine Intelli-
+gence,5(3):220–235. (page1)
+alsofoundthatsomeexperimentresultsshowthat
+an even more-tuned but less performant teacher
+JonathanFrankleandMichaelCarbin.2018. Thelottery
+modelwouldhelpthedistillationbetter.
+ticket hypothesis: Finding sparse, trainable neural
+Could non-linear adapters perform better for networks. InInternationalConferenceonLearning
+performancerecovery? Toavoidinferencetime Representations. (page2)
+and memory overhead, we adapt APT adapter to
+JonathanFrankle,GintareKarolinaDziugaite,Daniel
+LoRA specifically. However, low-rank decom-
+Roy,andMichaelCarbin.2021. Pruningneuralnet-
+position does not add more complexity to a LM, worksatinitialization:Whyarewemissingthemark?
+whereasthemodel’soverallrepresentationcapacity InInternationalConferenceonLearningRepresenta-
+doesn’tincrease. Theadaptationwithawiderrange tions. (page2)
+ofadapters,suchasPrefix-tuning,HAdapters,and
+EliasFrantarandDanAlistarh.2023. Sparsegpt: Mas-
+Parallel-adapters,couldbebetterexplored.
+sive language models can be accurately pruned in
+one-shot. ArXiv,abs/2301.00774. (page3)
+References
+Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and
+Dan Alistarh. 2022. Gptq: Accurate post-training
+EladBenZaken,YoavGoldberg,andShauliRavfogel.
+quantizationforgenerativepre-trainedtransformers.
+2022. BitFit: Simpleparameter-efficientfine-tuning
+ArXiv,abs/2210.17323. (page2)
+fortransformer-basedmaskedlanguage-models. In
+Proceedings of the60th Annual Meeting of the As-
+Leo Gao, Jonathan Tow, Stella Biderman, Sid Black,
+sociationforComputationalLinguistics(Volume2:
+AnthonyDiPofi,CharlesFoster,LaurenceGolding,
+ShortPapers),pages1–9,Dublin,Ireland.Associa-
+Jeffrey Hsu, Kyle McDonell, Niklas Muennighoff,
+tionforComputationalLinguistics. (page2)
+JasonPhang,LariaReynolds,EricTang,AnishThite,
+PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot, Ben Wang, Kevin Wang, and Andy Zou. 2021. A
+AshishSabharwal,CarissaSchoenick,andOyvind frameworkforfew-shotlanguagemodelevaluation.
+Tafjord.2018. Thinkyouhavesolvedquestionan- (page6)
+swering? tryarc,theai2reasoningchallenge. arXiv
+preprintarXiv:1803.05457. (page6) Demi Guo, Alexander Rush, and Yoon Kim. 2021.
+Parameter-efficienttransferlearningwithdiffprun-
+CodyColeman,DanielKang,DeepakNarayanan,Luigi
+ing. InProceedingsofthe59thAnnualMeetingofthe
+Nardi, Tian Zhao, Jian Zhang, Peter Bailis, Kunle
+Association for Computational Linguistics and the
+Olukotun,ChrisRé,andMateiZaharia.2019. Analy-
+11thInternationalJointConferenceonNaturalLan-
+sisofdawnbench,atime-to-accuracymachinelearn-
+guageProcessing(Volume1: LongPapers),pages
+ing performance benchmark. SIGOPS Oper. Syst.
+4884–4896,Online.AssociationforComputational
+Rev.,53(1):14–25. (page7)
+Linguistics. (page2)
+Tim Dettmers, Mike Lewis, Younes Belkada, and
+Md Akmal Haidar, Nithin Anchuri, Mehdi Reza-
+Luke Zettlemoyer. 2022. Llm.int8(): 8-bit ma-
+trixmultiplicationfortransformersatscale. ArXiv, gholizadeh,AbbasGhaddar,PhilippeLanglais,and
+PascalPoupart.2022. Rail-kd: Randomintermediate
+abs/2208.07339. (page2,5)
+layer mapping for knowledge distillation. In Find-
+Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and ingsoftheAssociationforComputationalLinguistics:
+LukeZettlemoyer.2023. Qlora: Efficientfinetuning NAACL2022,pages1389–1400. (page6)Song Han, Huizi Mao, and William J. Dally. 2015a. François Lagunas, Ella Charlaix, Victor Sanh, and
+Deep compression: Compressing deep neural net- Alexander Rush. 2021. Block Pruning For Faster
+workwithpruning,trainedquantizationandhuffman Transformers. In Proceedings of the 2021 Confer-
+coding. arXiv: ComputerVisionandPatternRecog- enceonEmpiricalMethodsinNaturalLanguagePro-
+nition. (page1,2) cessing,pages10619–10629,OnlineandPuntaCana,
+DominicanRepublic.AssociationforComputational
+Song Han, Jeff Pool, John Tran, and William Dally. Linguistics. (page3)
+2015b. Learningbothweightsandconnectionsfor
+YannLeCun,JohnS.Denker,andSaraA.Solla.1989.
+efficientneuralnetwork. Advancesinneuralinfor-
+Optimalbraindamage. InNIPS. (page2)
+mationprocessingsystems,28. (page1)
+BrianLester,RamiAl-Rfou,andNoahConstant.2021.
+Shwai He, Liang Ding, Daize Dong, Jeremy Zhang,
+The power of scale for parameter-efficient prompt
+and Dacheng Tao. 2022. SparseAdapter: An easy
+tuning. InProceedingsofthe2021Conferenceon
+approachforimprovingtheparameter-efficiencyof
+EmpiricalMethodsinNaturalLanguageProcessing,
+adapters. InFindingsoftheAssociationforComputa-
+pages3045–3059,OnlineandPuntaCana,Domini-
+tionalLinguistics: EMNLP2022,pages2184–2190,
+can Republic. Association for Computational Lin-
+AbuDhabi,UnitedArabEmirates.Associationfor
+guistics. (page2)
+ComputationalLinguistics. (page2)
+Xiang Lisa Li and Percy Liang. 2021. Prefix-tuning:
+LukasHedegaard,AmanAlok,JubyJose,andAlexan- Optimizing continuous prompts for generation. In
+dros Iosifidis. 2022. Structured Pruning Adapters. Proceedingsofthe59thAnnualMeetingoftheAsso-
+ArXiv:2211.10155[cs]. (page3) ciationforComputationalLinguisticsandthe11th
+InternationalJointConferenceonNaturalLanguage
+DanHendrycks,CollinBurns,StevenBasart,AndyZou, Processing (Volume 1: Long Papers), pages 4582–
+MantasMazeika,DawnSong,andJacobSteinhardt. 4597. (page1,2)
+2021. Measuringmassivemultitasklanguageunder-
+standing. InInternationalConferenceonLearning Yuchao Li, Fuli Luo, Chuanqi Tan, Mengdi Wang,
+Representations. (page6) Songfang Huang, Shen Li, and Junjie Bai. 2022.
+Parameter-efficientsparsityforlargelanguagemod-
+els fine-tuning. In Proceedings of the Thirty-First
+Geoffrey E. Hinton, Oriol Vinyals, and Jeffrey Dean.
+International Joint Conference on Artificial Intel-
+2015. Distillingtheknowledgeinaneuralnetwork.
+ligence, IJCAI-22, pages4223–4229.International
+ArXiv,abs/1503.02531. (page3)
+JointConferencesonArtificialIntelligenceOrgani-
+zation. MainTrack. (page3,7,16)
+Neil Houlsby, Andrei Giurgiu, Stanislaw Jastrzebski,
+Bruna Morrone, Quentin De Laroussilhe, Andrea
+Vladislav Lialin, Vijeta Deshpande, and Anna
+Gesmundo,MonaAttariyan,andSylvainGelly.2019.
+Rumshisky.2023. Scalingdowntoscaleup: Aguide
+Parameter-efficienttransferlearningfornlp. InIn- to parameter-efficient fine-tuning. arXiv preprint
+ternationalConferenceonMachineLearning,pages
+arXiv:2303.15647. (page2)
+2790–2799.PMLR. (page1,2)
+Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang,
+Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan XingyuDang,andSongHan.2023. Awq:Activation-
+Allen-Zhu,YuanzhiLi,SheanWang,LuWang,and awareweightquantizationforllmcompressionand
+WeizhuChen.2021. LoRA:Low-RankAdaptation acceleration. arXiv preprint arXiv:2306.00978.
+ofLargeLanguageModels. ArXiv:2106.09685[cs]. (page2,5)
+(page1,2,4)
+StephanieLin,JacobHilton,andOwainEvans.2022.
+TruthfulQA:Measuringhowmodelsmimichuman
+JaredKaplan,SamMcCandlish,TomHenighan,TomB
+falsehoods. InProceedingsofthe60thAnnualMeet-
+Brown,BenjaminChess,RewonChild,ScottGray,
+ingoftheAssociationforComputationalLinguistics
+AlecRadford,JeffreyWu,andDarioAmodei.2020.
+(Volume1: LongPapers),pages3214–3252,Dublin,
+Scaling laws for neural language models. arXiv
+Ireland.AssociationforComputationalLinguistics.
+preprintarXiv:2001.08361. (page1)
+(page6)
+RabeehKarimiMahabadi,JamesHenderson,andSebas-
+YinhanLiu,MyleOtt,NamanGoyal,JingfeiDu,Man-
+tianRuder.2021. Compacter: Efficientlow-rankhy-
+dar Joshi, Danqi Chen, Omer Levy, Mike Lewis,
+percomplexadapterlayers. AdvancesinNeuralInfor-
+Luke Zettlemoyer, and Veselin Stoyanov. 2019.
+mationProcessingSystems,34:1022–1035. (page3)
+Roberta: A robustly optimized bert pretraining ap-
+proach. arXivpreprintarXiv:1907.11692. (page1,
+Woosuk Kwon, Sehoon Kim, Michael W Mahoney, 6)
+JosephHassoun,KurtKeutzer,andAmirGholami.
+2022. A fast post-training pruning framework for XinyinMa,GongfanFang,andXinchaoWang.2023.
+transformers. In Advances in Neural Information Llm-pruner: Onthestructuralpruningoflargelan-
+ProcessingSystems,volume35,pages24101–24116. guage models. arXiv preprint arXiv:2305.11627.
+CurranAssociates,Inc. (page1,3,6,17) (page1,3,7)Swaroop Mishra, Daniel Khashabi, Chitta Baral, and Yi-Lin Sung, Varun Nair, and Colin A Raffel. 2021.
+Hannaneh Hajishirzi. 2022. Cross-task generaliza- Training neural networks with fixed sparse masks.
+tionvianaturallanguagecrowdsourcinginstructions. AdvancesinNeuralInformationProcessingSystems,
+In Proceedings of the 60th Annual Meeting of the 34:24193–24205. (page2)
+AssociationforComputationalLinguistics(Volume
+1: LongPapers),pages3470–3487,Dublin,Ireland. Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann
+AssociationforComputationalLinguistics. (page1) Dubois, Xuechen Li, Carlos Guestrin, Percy
+Liang, and Tatsunori B. Hashimoto. 2023. Stan-
+RameshNallapati,BowenZhou,CíceroNogueirados ford alpaca: An instruction-following llama
+Santos, Çaglar Gülçehre, and Bing Xiang. 2016. model. https://github.com/tatsu-lab/
+Abstractive text summarization using sequence-to- stanford_alpaca. (page6)
+sequencernnsandbeyond. InConferenceonCom-
+HugoTouvron,ThibautLavril,GautierIzacard,Xavier
+putationalNaturalLanguageLearning. (page6)
+Martinet,Marie-AnneLachaux,TimothéeLacroix,
+Baptiste Rozière, Naman Goyal, Eric Hambro,
+AbhishekPanigrahi,NikunjSaunshi,HaoyuZhao,and
+Faisal Azhar, et al. 2023. Llama: Open and effi-
+Sanjeev Arora. 2023. Task-specific skill localiza-
+cient foundation language models. arXiv preprint
+tioninfine-tunedlanguagemodels. arXivpreprint
+arXiv:2302.13971. (page1,6)
+arXiv:2302.06600. (page2)
+Alex Wang, Amanpreet Singh, Julian Michael, Felix
+Jonas Pfeiffer, Aishwarya Kamath, Andreas Rücklé, Hill, Omer Levy, and Samuel R. Bowman. 2019.
+Kyunghyun Cho, and Iryna Gurevych. 2020. GLUE: A multi-task benchmark and analysis plat-
+Adapterfusion: Non-destructivetaskcompositionfor form for natural language understanding. In Inter-
+transferlearning. ArXiv,abs/2005.00247. (page2) national Conference on Learning Representations.
+(page6)
+ColinRaffel,NoamShazeer,AdamRoberts,Katherine
+Lee,SharanNarang,MichaelMatena,YanqiZhou, XiaozhiWang,KaiyueWen,ZhengyanZhang,LeiHou,
+WeiLi,andPeterJLiu.2020. Exploringthelimits Zhiyuan Liu, and Juanzi Li. 2022a. Finding skill
+oftransferlearningwithaunifiedtext-to-texttrans- neurons in pre-trained transformer-based language
+former. JournalofMachineLearningResearch,21:1– models. InProceedingsofthe2022Conferenceon
+67. (page1,6) Empirical Methods in Natural Language Process-
+ing,pages11132–11152,AbuDhabi,UnitedArab
+Pranav Rajpurkar, Robin Jia, and Percy Liang. 2018. Emirates.AssociationforComputationalLinguistics.
+Know what you don’t know: Unanswerable ques- (page2)
+tionsforSQuAD. InProceedingsofthe56thAnnual
+Meeting of the Association for Computational Lin- Yizhong Wang, Swaroop Mishra, Pegah Alipoormo-
+guistics(Volume2: ShortPapers), pages784–789, labashi,YeganehKordi,AmirrezaMirzaei,Atharva
+Naik, Arjun Ashok, Arut Selvan Dhanasekaran,
+Melbourne,Australia.AssociationforComputational
+Anjana Arunkumar, David Stap, Eshaan Pathak,
+Linguistics. (page6)
+Giannis Karamanolakis, Haizhi Lai, Ishan Puro-
+hit,IshaniMondal,JacobAnderson,KirbyKuznia,
+VictorSanh,ThomasWolf,andAlexanderRush.2020.
+Krima Doshi, Kuntal Kumar Pal, Maitreya Patel,
+Movement Pruning: Adaptive Sparsity by Fine-
+MehradMoradshahi,MihirParmar,MiraliPurohit,
+Tuning. InAdvancesinNeuralInformationProcess-
+NeerajVarshney,PhaniRohithaKaza,PulkitVerma,
+ingSystems,volume33,pages20378–20389.Curran
+RavsehajSinghPuri,RushangKaria,SavanDoshi,
+Associates,Inc. (page1,3,5,14)
+Shailaja Keyur Sampat, Siddhartha Mishra, Sujan
+ReddyA,SumantaPatro,TanayDixit,andXudong
+Maying Shen, Pavlo Molchanov, Hongxu Yin, and
+Shen. 2022b. Super-NaturalInstructions: General-
+JoseM.Alvarez.2022a. Whentoprune? apolicy
+ization via declarative instructions on 1600+ NLP
+towardsearlystructuralpruning. InProceedingsof
+tasks. In Proceedings of the 2022 Conference on
+theIEEE/CVFConferenceonComputerVisionand
+EmpiricalMethodsinNaturalLanguageProcessing,
+Pattern Recognition (CVPR), pages 12247–12256.
+pages5085–5109,AbuDhabi,UnitedArabEmirates.
+(page2)
+AssociationforComputationalLinguistics. (page1)
+MayingShen,HongxuYin,PavloMolchanov,LeiMao, MengzhouXia,ZexuanZhong,andDanqiChen.2022.
+Jianna Liu, and Jose M. Alvarez. 2022b. Struc- Structuredpruninglearnscompactandaccuratemod-
+turalpruningvialatency-saliencyknapsack. InAd- els. InProceedingsofthe60thAnnualMeetingofthe
+vances in Neural Information Processing Systems, AssociationforComputationalLinguistics(Volume
+volume35,pages12894–12908.CurranAssociates, 1: LongPapers),pages1513–1528,Dublin,Ireland.
+Inc. (page5) AssociationforComputationalLinguistics. (page1,
+3,6,7,14)
+Mingjie Sun, Zhuang Liu, Anna Bair, and J Zico
+Kolter. 2023. A simple and effective pruning ap- DongkuanXu,IanEn-HsuYen,JinxiZhao,andZhibin
+proach for large language models. arXiv preprint Xiao.2021. Rethinkingnetworkpruning–underthe
+arXiv:2306.11695. (page3) pre-trainandfine-tuneparadigm. InProceedingsofthe2021ConferenceoftheNorthAmericanChap- be time-consuming, we did not do the TTA eval-
+teroftheAssociationforComputationalLinguistics: uation as small models. We do not conduct any
+HumanLanguageTechnologies, pages2376–2382.
+hyper-parameters search for any training for fair
+(page2)
+comparison.
+Yuhui Xu, Lingxi Xie, Xiaotao Gu, Xin Chen, Heng
+Chang,HenghengZhang,ZhensuChen,Xiaopeng
+Hypeparameter GLUE-small GLUE-big SQuAD CNN/DM Alpaca
+Zhang, and Qi Tian. 2023. Qa-lora: Quantization-
+awarelow-rankadaptationoflargelanguagemodels. Learningrate 2e-4 2e-4 2e-4 1e-4 1e-4
+Batchsize 32 32 32 16 32
+arXivpreprintarXiv:2309.14717. (page3)
+Epochs 40 40 40 16 15
+Distillepochs 20 20 20 6 -
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali
+Farhadi, andYejinChoi.2019. HellaSwag: Cana Table6: HyperparametersusedinAPTexperiments
+machinereallyfinishyoursentence? InProceedings
+of the 57th Annual Meeting of the Association for
+Computational Linguistics, pages 4791–4800, Flo-
+rence,Italy.AssociationforComputationalLinguis-
+B Blocksaliencecalculationand
+tics. (page6)
+correlations
+Mingyang Zhang, Chunhua Shen, Zhen Yang, Linlin
+Ou, Xinyi Yu, Bohan Zhuang, et al. 2023a. Prun-
+AsaddressedinSection4.1,weusethecompressed
+ingmeetslow-rankparameter-efficientfine-tuning.
+weight-gradientproductionasthesaliencemetric
+arXivpreprintarXiv:2305.18403. (page3,7,15,16)
+for identifying the tuning and pruning parameter
+Qingru Zhang, Minshuo Chen, Alexander Bukharin,
+blocksinLMs. Previousworks(Sanhetal.,2020)
+Pengcheng He, Yu Cheng, Weizhu Chen, and
+use salience score defined as the magnitude of
+Tuo Zhao. 2023b. Adaptive budget allocation for
+parameter-efficientfine-tuning. InTheEleventhIn- theparameters’weight-gradientproduction,where
+ternationalConferenceonLearningRepresentations. given a linear layer H = WX (we omit the bias
+(page2,5,7) term here for simplicity) in model parameters Θ
+trained on the objective L, the salience scoring
+ZhengyanZhang,ZhiyuanZeng,YankaiLin,Chaojun
+Xiao, XiaozhiWang, XuHan, ZhiyuanLiu, Ruob- functionS isdefinedas:
+ingXie,MaosongSun,andJieZhou.2023c. Emer-
+gentmodularityinpre-trainedtransformers. arXiv
+preprintarXiv:2305.18390. (page2)
+(cid:88)
+S(W ) = s(W ,x,y)
+i,j i,j
+Weilin Zhao, Yuxiang Huang, Xu Han, Zhiyuan
+Liu, Zhengyan Zhang, and Maosong Sun. 2023. (x,y)∈D
+Cpet: Effectiveparameter-efficienttuningforcom- (cid:88) ∂L(x,y|Θ)
+pressed large language models. arXiv preprint = | ·W i,j|
+∂W
+arXiv:2307.07705. (page1,3) (x,y)∈D i,j
+(9)
+(cid:88) (cid:88) ∂L(x,y|Θ)
+S(W ) = | ·W |
+:,j i,j
+A HyperparameterandTrainingSetups ∂W
+i,j
+(x,y)∈D i
+Ourhyper-parametersettingsareshowninTable6. (cid:88) (cid:88) ∂L(x,y|Θ)
+= ( | ·X |)
+For GLUE task fine-tuning, we follow the hyper- ∂X j,i
+j,i
+(x,y)∈D i
+parametersettingofCoFi(Xiaetal.,2022),separat-
+ingthetasksintobig(MNLI,SST2,QNLI,QQP)
+andsmall(MRPC,CoLA,RTE,STSB)basedon where x,y are the inputs and labels sampled
+thedatasetsize. ForinstructiontuningontheAl- from the training batch D. S(W i,j) denotes the
+paca dataset, we train the pruned model for 15 unstructured, sparse parameter’s salience, and
+epochs after the pre-tuning pruning process to S(W :,j) denotes the salience score of a block in
+make sure they converge. However, in practice, theweightW (forexample,rows,columns,atten-
+such training epochs can be reduced. To adap- tionheads,etc.).
+tivelyincreasethetuningparametersintheLM,at When applying this equation to APT adapter
+thestartoffine-tuning,weinitializeadapterranks layersasdefinedinEq.(2),therearethreedifferent
+to 8, with salient layers’ ranks linearly increased. consistentdimensions,namelyinputdimensionj,
+The scaling factors are set as 2 statically. Since outputdimensioni,andtuningrankdimensionk.
+evaluatingbillion-levelLLaMAmodelsduringin- Therefore,thecombinedsalience(includingtuning
+struction tuning with all evaluation tasks would low-rank weights and the frozen weight) of theparameterblockshallbecalculatedasfollows: Wealsoomitthebiastermfordensitycalculation
+sinceittakesuplessthan1%ofLM’sparameters.
+(cid:88) ∂L(x,y|Θ) Since the number of heads, neurons, and hidden
+S(H,i) = ·H(X)
+i,l
+∂H(X) i,l dimensionsisever-changingduringpruning,were-
+l
+calculatethedensityafterexecutingeachparameter
+(cid:88) ∂L(x,y|Θ)
+= ·W i,p sizechange. Meanwhile,forT5andLLaMA-like
+∂W
+i,p
+p models,theFFNlayersaregated,consistingofup-,
+(cid:88) ∂L(x,y|Θ) gate-,anddown-projectionlinearlayers. Therefore,
++s· ·W
+Bi,q
+q
+∂W Bi,q thenumberoflayersinFFNshallbethreeinstead
+of two in these LMs. Furthermore, for encoder-
+(cid:88) ∂L(x,y|Θ)
+S(H,j) = ·X decoderLMslikeT5,thecross-attentionlayersin
+j,l
+∂X
+l j,l thedecodershallalsobecounted.
+(10)
+(cid:88) ∂L(x,y|Θ) Aftersortingtheblocksbysaliencedensity,as
+= ·W
+p,j
+∂W p,j LM’sparametersizemonotonicallyincreaseswith
+p
+thenumberofMHAheads,FFNneurons,andhid-
+(cid:88) ∂L(x,y|Θ)
++s· ·W Aq,j dendimensions,weconductabinarysearchalgo-
+∂W
+q
+Aq,j
+rithm to identify the blocks shall be retained as
+(cid:88) ∂L(x,y|Θ) LM’sparametersizemonotonicallyincreaseswith
+S(H,k) = s· ·W
+∂W
+Ak,l
+thenumberofMHAheads,FFNneurons,andhid-
+Ak,l
+l
+dendimensions. Specifically,givenasortedlistof
+(cid:88) ∂L(x,y|Θ)
+= s· ·W N blocksB = {b ,b ,...,b }andfunctionf for
+Bl,k 1 2 N
+∂W
+l Bl,k identifyingtheblock’scategorywhere
+Therefore,wecannoticethattherealblock-wise 
+0 ifb isahead
+salience of the LoRA layer shall be the sum of   i
+theblock-wisefrozenweightsalienceandthecor- f(b i) = 1 ifb i isaneuron (14)
+
+responding tuning weight. Hence, the existing 2 ifb isadimension
+i
+work(Zhangetal.,2023a)thatonlyusesthetun-
+ing block salience as layer salience leads to sub- givenanyindexi,wecancalculatetheparameter
+optimalpruningresults. Meanwhile,weshallalso number of the LM consisting of the top-i blocks
+notice the correlation between the input-, output- by:
+dimension,andtuningrankdimensions,whichare
+thesummationoftheweight-gradientproduction C = (4d′ ·n′ +2n′ )·d′
+top-i h h f m
+ofparametersondifferentdimensions.
+i−1
+(cid:88)
+n′ = δ(0,f(b ))
+C AdaptivePruningandTuningDetails h j
+j=0
+We show the detailed algorithm description (cid:88)i−1 (15)
+n′ = δ(1,f(b ))
+of our Lightweight Parameter Adjustment as de- f j
+scribed in Section 4.1 in Algorithm 1. For the j=0
+detailsofthealgorithm,wefirstsortallblocksby i−1
+(cid:88)
+d′ = δ(2,f(b ))
+thesaliencedensity,definedastheblocksalience m j
+dividedbythenumberofparametersintheblock. j=0
+For instance, given a RoBERTa-base model with
+whereδ(i,j)istheKroneckerdeltafunctionthat
+the hidden dimension d = 768, the number of
+m
+valued1ifi = j andotherwise0. Hence,wecan
+transformer layers n = 12, the number of at-
+L
+use binary search to get the top-i salient blocks,
+tention heads n = 12, and the number of FFN
+h
+which shall be retained given a parameter con-
+neuronsn = 3072,wehave:
+f
+straint, and the rest of the block shall be pruned.
+Inourimplementation,fortrainingstability,wedo
+C = 4×d ×d /n = 196608 (11)
+head m m h
+notsettheprunedblocks’correspondingmasksto
+C = 2×d = 1536 (12)
+neuron m
+0 directly but gradually decrease their values by
+C = n ×(4d +2n ) = 110592 (13)
+dimension L m f α = 0.01.Algorithm1AdaptivePruningandTuning
+1: Input: Modelf;TrainingdatasetD;totaltrainingstepsT;AdjustmentstepsetT;TrainingtargetL;
+InitialparametersandmasksΘ ,M ,trainingmemorybudget∆;Parameternumberconstraintγ;
+0 0
+Hyperparametersαβ.
+2: fort = 1,...,T do
+3: Forwardpass: L ← L(f(Θ t,D t))
+(cid:80)
+4: Cachethebatch-sequencesummedhiddenstates: H(cid:101) ← i,j(|H|) ij
+5: Backwardpass: ∇ ΘtL ← ∂L(f ∂(Θ Θt t,Dt))
+(cid:80)
+6: Calculateapproximatedsalience: S(cid:101)(m i) ← H(cid:101) · i,j(|∇ HL|) ij
+(t) (t−1)
+7: Updateglobalscores: S (m) ← βS (m)+(1−β)S(cid:101)(m);
+(t)
+8: Selectblocks: M 1,M 0 ←BinarysearchagainstconstraintEq.(7),withscoresS (m);
+(t) (t−1) (t) (t−1)
+9: Updatemasks: M ← min(1,M +α),M ← max(0,M −α);
+1 1 0 0
+10: Updateparameters: Θ t+1 ← Θ t−α∇ ΘtL
+11: endfor
+12: Output: ParametersandmasksΘ(T),M(T).
+Density Method MNLI QQP QNLI SST2 CoLA STS-B MRPC RTE GLUEAvg.
+MaP 83.6 87.8 91.5 91.0 60.1 89.8 90.7 67.2 82.7
+MvP 82.3 87.3 90.8 90.8 57.7 89.4 91.1 67.2 82.1
+50% PST 81.0 85.8 89.8 91.3 57.6 84.6 90.7 67.9 81.0
+LRP 82.4 87.2 89.6 90.9 54.1 88.7 89.8 69.3 82.2
+APT 82.8 90.1 90.1 92.7 59.6 88.3 91.8 70.4 83.2
+MaP 78.2 83.2 84.1 85.4 27.9 82.3 80.5 50.1 71.4
+MvP 80.1 84.4 87.2 87.2 28.6 84.3 84.1 57.6 74.2
+10% PST 79.6 86.1 86.6 89.0 38.0 81.3 83.6 63.2 75.9
+LRP 79.4 86.0 85.3 89.1 35.6 83.3 84.4 62.8 75.7
+APT 78.8 89.4 85.5 90.0 30.9 86.3 88.2 65.3 76.8
+Table7: ComparisonofAPTtoexistingunstructuredpruningbaselinewithusingPEFTinconjunction. Thebest
+resultsareboldwhilethesecond-bestonesareunderlined.
+D AdditionalBaselineComparisons table margin. The performance gain is credited
+toourmoreaccuratepruningstrategyconsidering
+In this section, we further compare APT to ex-
+frozen and tuning parameters. At the same time,
+isting parameter-efficient pruning methods, such
+ourefficientself-distillationtechniqueusedincon-
+as PST and LRP. In the meantime, we also show
+junctionwithsalientparametersaddedintraining
+detailed results of APT pruning compared to the
+alsoboostsperformancerecovery.
+LoRA+Distill baseline with more tasks in the
+GLUEbenchmarkandLLaMA-213Bmodelprun- D.2 FurtherComparisontoLoRA+Distill
+ingresults.
+We show the detailed comparison between APT
+and the LoRA+Distill baseline in Table 8. APT
+D.1 ComparisontoPSTandLRP
+reachessuperiortaskperformancecomparedtothe
+WecompareAPTwiththestate-of-the-artjointuse baselineinallsevenGLUEtaskslistedinthetable,
+ofunstructuredpruning(Lietal.,2022)andstruc- withonaverage93.5%fine-tunedLMperformance
+turedpruning(Zhangetal.,2023a)withPEFTon maintained, notably outperforming the joint use
+BERT model,showinginTable7. Wecansee ofLoRAandknowledgedistillation. Inparticular,
+base
+that APT outperforms existing baselines in both the results of STS-B cannot be reproduced when
+50%and10%pruningdensitysettingswithano- conducting CoFi distillation with LoRA param-Sparsity Method MNLI QQP QNLI SST2 CoLA MRPC RTE GLUEAvg.
+FT 87.6 91.9 92.8 95.2 91.2 90.2 78.7 89.7
+0%
+LoRA 87.5 90.8 93.3 95.0 63.4 89.7 72.1 84.5
+LoRA+Distill 84.2 88.3 90.1 91.9 49.9 86.8 68.6 80.0
+40%
+APT 86.4 90.9 92.3 94.5 56.5 92.3 74.4 83.9
+Table8: DetailedresultsofRoBERTapruningwithAPTcomparedtotheLoRA+Distillbaseline. Weignorethe
+evaluationresultsoftheSTS-BtasksinceitcannotbesuccessfullyreproducedwithCoFi(thedistillationbackbone).
+eters tuned only, so we exclude the comparison TruthfulQA than existing baselines regardless of
+on STS-B. Among the other seven tasks in the modelsize. TheLM’scapabilitiesonARCandHel-
+GLUE benchmark, we find that tasks with rela- laSawg downgrade the most when pruning large
+tivelysmallerdatasetsizes,namelyCoLA,MRPC, LM before fine-tuning, implying possibilities of
+and RTE, reach superior performance gain when catastrophicforgettinginthisparadigm.
+usingAPT.Weconcludethatthisisbecause,com-
+paredtosimplefine-tuning,knowledgedistillation E EfficiencyandPerformanceTradeoff
+withsalientparametersaddedintrainingismore Analysis
+robustandnotpronetooverfittingthetrainingdata.
+We use Fig. 5 to clearly show the LMs’ end-task
+D.3 LLaMA-213BPruningResults performanceandefficiencytradeoffsbetweendif-
+ferent tuning, pruning, and distillation baselines.
+We add several extra baselines to conduct more
+Method ARC HellaSwag MMLU TruthfulQA Avg.
+detailedcomparisonsbetweenAPTwithexisting
+LLaMA27B 53.1 77.7 43.8 39.0 53.4
+PEFT,pruning,anddistillationmethods:
+LoRA 55.6 79.3 46.9 49.9 57.9
+LoRA+Prunew/distill: wefirstuseLoRAtofully
+LoRA+Prune 46.8 65.2 23.9 46.2 45.5
+LLMPruner 39.2 67.0 24.9 40.6 42.9 converge a model on the task dataset, and then
+APT 45.4 71.1 36.9 46.6 50.0
+useMask-Tuning(Kwonetal.,2022)toprunethe
+LLaMA213B 59.4 82.1 55.8 37.4 58.7
+LM. Afterward, we utilize the converged model
+LoRA 60.8 82.8 56.0 46.5 61.5
+beforepruningastheteachermodelanddistillits
+LoRA+Prune 56.4 79.1 50.7 42.1 57.1
+LLMPruner 46.8 74.0 24.7 34.8 45.1 knowledgetotheprunedstudentmodelwithstatic
+APT 49.5 75.8 52.5 44.7 55.6
+knowledgedistillationobjectives.
+Table9: LLaMA27Band13B30%sparsitypruning LoRA+Prunew/oretrain: weuseMask-Tuning
+resultswithGPT4-generatedAlpacadataset,evaluated to prune a LoRA-tuned converged model but do
+ontheOpenLLMleaderboardfew-shottasks. not conduct any retraining to recover the pruned
+AsshowninTable9,whenpruningLLaMA-2 models’performance. Therefore,theLM’straining
+13B models, APT maintains 90.0% performance timewillbereduced,yetitsperformanceislower
+oftheunprunedLoRA-tunedbaseline. Compared thantheLoRA+Prunebaseline.
+to the pruning result on 7B models that maintain WiththesametargetsparsityinRoBERTaand
+86.4%densemodelperformance,betteraccuracies LLaMApruningsetups,APTachieveson-parend-
+can be recovered in larger models (13B). At the taskperformancewithfullfine-tuningandLoRA
+sametime,underthesamepre-tuningpruningset- tuningbaselines. Meanwhile,APT-tunedmodels
+tings, APT performs better than the LLMPruner reach similar or even better inference time and
+baselineonallfourevaluationtasks,indicatingthe memory efficiency than existing baselines. APT-
+effectivenessofconsideringoutlierparametersin pruned T5 LMs’ inference efficiency is slightly
+largeLMpruning. Nonetheless,theLoRA+Prune worsebecausemoredecoderparameters(withless
+baseline reaches slightly better results than APT computationshappening)areprunedthanthebase-
+whenpruning13Bmodels,illustratingthatthereis lines. Moreover,whenpruningRoBERTaandT5
+stillroomforimprovingpre-tuningpruningmeth- models, APT achieves faster training time than
+odsinfutureworks. Morespecifically,amongthe allpruninganddistillationbaselines. Specifically,
+fourtasksweuseforevaluatinglargeLMs,Truth- thetrainingspeedofAPTinRoBERTamodelsis
+fulQAbenefitsthemostfromAlpacafine-tuning. evenhigherthanLoRAtuningwithoutpruning. In
+We can see that APT reaches superior results on LLaMA model pruning, APT costs significantlyRoBERTa-baseSST2 T5-baseSST2 LLaMA27BAlpaca
+2.2 2.2 1.175
+2.5
+20 2.0 2.0 1.1 1.150
+15 M Finet eh -to ud ning 1.8 2.0 1.8 1.0 1.125
+LoRA
+10
+L
+L
+Lo
+o
+oR
+R
+RA
+A
+A+
++
++P
+P
+Dr
+r
+isu
+u
+tn
+n
+ile
+e
+lw/distBielltter 11 .. 46 1.5 Better
+1.6
+00 .. 89 Better 11 .. 01 70 50
+LoRA+Prunew/oretrain 1.0 1.4
+5 L AL PM TPruner 1.2 0.7 1.050
+1.0 0.5 1.2 1.025
+0.6
+0 0.8 0.0 1.0 1.000
+96 97 98 99 100 96 97 98 99 100 60 70 80 90 100
+RelativeAccuracy(%) RelativeAccuracy(%) RelativeAccuracy(%)
+Figure5: Theperformance-efficiencytradeoffofAPTcomparedtobaselinemethods. Allmetricsarenormalized
+usingLoRAtuningw/opruningasthebaseline. Thecirculardotswithverticalaxesontheleftindicatetraining
+speedv.s. performance,withtheirsizesdenotingthepeaktrainingmemoryusage. Thesquareddotswithaxeson
+therightindicateinferencespeedupv.s. performance,withsizesdenotinginferencememoryusage.
+Fig.6. APTachievessuperiorinferencespeedup
+APT LoRA+Prune+Distill
+LoRA+Prune LLMPruner andlessinferencememoryconsumptionthanbase-
+Prune+Distill
+lines targeting the same task performance. Com-
+100
+paredtotheLoRA+Prunebaseline,whenpruning
+98 RoBERTamodelstargetingsimilartaskaccuracy,
+96
+Better Better
+APTgains21.8%moreinferencespeedupand7%
+more memory reduction. For T5 model pruning
+94
+with 97% dense model performance maintained,
+92 APTresultsin62.7%moreinferencespeedupwith
+2 4 6 1.5 2.0 24.8%moreinferencememoryreducedcompared
+Inf. Speedup Inf. Mem. Red.
+totheLoRA+Prunebaseline. Whenpruninglarge
+100
+LLaMA2-7Bmodels,APTprunesgets6.7%more
+99 speedupand9.2%moreinferencememoryreduc-
+98
+Better Better tion than the LoRA+Prune baseline, with about
+85%densemodelperformancemaintained.
+97
+G DistillationStrategyComparison
+96
+1 2 3 4 5 1.25 1.50 1.75 2.00 2.25
+Inf. Speedup Inf. Mem. Red.
+SST2 Train.Speed(⇑) Train.Mem.(⇓)
+100 APT 94.5 16.9% 70.1%
+w/oLlayer 93.7 17.4% 69.8%
+w/oself-distillation 92.9 20.7% 69.2%
+90
+FTteacher 94.3 7.9% 111.8%
+Better Better
+LoRAteacher 93.7 1.7% 96.1%
+80
+Table10: Ablationstudyofdistillationstrategiesand
+70 comparisontonon-efficientdistillationtechniques. The
+training speed and memory are relative metrics com-
+1.0 1.2 1.4 1.6 1.00 1.25 1.50 1.75 2.00
+Inf. Speedup Inf. Mem. Red. paredtofine-tuningthedensemodel.
+We show the further analysis in Table 10 to
+Figure6: Taskperformancev.s. relativeinferenceef-
+compare the self-distillation technique we use in
+ficiencyonRoBERTa, T5, andLLaMA-27Bmodels
+withAPTandbaselines. APT and traditional knowledge distillation meth-
+ods. When ablating the dynamic layer map-
+pingstrategyinourself-distillationapproach,the
+less training memory than both LLMPruner and
+LMperformancedecreasedby0.8%withsimilar
+LoRA+Prunebaselines.
+training time and memory consumption. When
+training without distillation objectives (w/o self-
+F PruningSparsityAnalysis
+distillation), theLMperformancedropsby1.7%.
+We further show the task performance chang- Nonetheless,thetrainingisslightlyfasterwithless
+ing trajectory with different pruning sparsities in memory costs. These results present that using
+deepSgniniarTevitaleR
+ycaruccA
+evitaleR
+aTREBoR
+ycaruccA
+evitaleR
+5T
+ecnamrofreP
+evitaleR
+2AMaLL
+pudeepSecnerefnI deepSgniniarTevitaleR pudeepSecnerefnI deepSgniniarTevitaleR pudeepSecnerefnIdistillation objectives for better LM task perfor-
+mancewillsacrificetrainingefficiencyasatrade-
+off. Furthermore, we also demonstrate the com-
+parisons with existing static knowledge distilla-
+tionstrategies,usingtheconvergedfull-parameter
+fine-tunedLM(FTteacher)andLoRA-tunedLM
+(LoRAteacher)astheteachermodel. Wecalculate
+thetimeconsumptionforbothteacherandstudent
+trainingwhenusingthesedistillationbaselines. As
+showninTable10,usingfullyfine-tunedmodelsas
+theteacherwillincurmorememorycostthandense
+modelfine-tuning,whileAPTonlyconsumes70%.
+Inthemeantime,thetrainingconvergencespeedof
+APTtrainingistwotimesfasterthanthetraditional
+knowledge distillation method with a fine-tuned
+teacher. Furthermore,usingaLoRA-tunedmodel
+astheteacherwillresultinextremelyslowtraining
+speed. In addition, simply tuning the LoRA lay-
+erswithknowledgedistillationobjectivesdoesn’t
+helpreducethetrainingmemoryconsumption,as
+the memory consumption is still 96.1% than full
+fine-tuning.
