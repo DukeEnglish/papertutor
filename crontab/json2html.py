@@ -80,14 +80,12 @@ def generate_html_from_files(json_files_path):
             '''.format(title_id, filename.replace('.json', ''))
 
     html += '''
-                <li>
+            </ul>
+            <li>
                     <a href="https://github.com/DukeEnglish/papertutor" target="_blank" rel="noopener noreferrer">
                         <span class="fab fa-github"></span> GitHub
                     </a>
-                </li>
-            '''
-    html += '''
-            </ul>
+            </li>
         </div>
         <div id="content">
     '''
