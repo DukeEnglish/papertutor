@@ -14,7 +14,7 @@
 
 如果您喜欢这个项目，请给我们一个星标 🌟 以示支持！
 
-[![Star This Project](https://img.shields.io/github/stars/your_github_username/your_project_name.svg?style=social)](https://github.com/DukeEnglish/papertutor)
+[![Star This Project](https://img.shields.io/github/stars/DukeEnglish/papertutor.svg?style=social)]
 
 ## 进群交流，后续新的项目更新会在群里
 
