@@ -20,10 +20,12 @@ class YIService(BAIDULLMService):
     yi模型
     """
 
-    def __init__(self,):
+    def __init__(self, BAIDU_API_KEY="", BAIDU_SECRET_API_KEY=""):
         super().__init__()
-        self.url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/yi_34b_chat?access_token=" + \
-            self._get_access_token()
+        if BAIDU_API_KEY and BAIDU_SECRET_API_KEY:
+            self.url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/yi_34b_chat?access_token=" + self._get_access_token(BAIDU_API_KEY, BAIDU_SECRET_API_KEY)
+        else:
+            self.url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/yi_34b_chat?access_token=" + self._get_access_token()
         self.headers = {
             'Content-Type': 'application/json'
         }
