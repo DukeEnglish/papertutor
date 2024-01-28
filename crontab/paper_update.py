@@ -4,7 +4,7 @@ Author: Duke 叶兀
 E-mail: ljyduke@gmail.com
 Date: 2024-01-07 17:31:50
 LastEditors: Duke 叶兀
-LastEditTime: 2024-01-24 22:37:07
+LastEditTime: 2024-01-28 16:25:27
 '''
 from paper_related import arxiv_client
 from datetime import datetime
@@ -195,6 +195,8 @@ class PaperParser:
                 """
             res = self.llm_service.llm(prompt)
             j_res = json.loads(res)
+            if "result" not in j_res:
+                continue
             result_dict[question] = j_res["result"]
 
         # 将结果保存到文件
