@@ -302,12 +302,12 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2401.14010v1 |
+|idx| 2401.14010v2 |
 |title| Leveraging Large Models for Crafting Narrative Visualization: A Survey |
 |authors| Yi HeShixiong CaoYang ShiQing ChenKe XuNan Cao
-|links| http://arxiv.org/abs/2401.14010v1 |
-|updated| 2024-01-25 08:19:59 UTC |
-|summary| Narrative visualization effectively transforms data into engaging storiesmaking complex information accessible to a broad audience. Large modelsessential for narrative visualization inherently facilitate this processthrough their superior ability to handle natural language queries and answersgenerate cohesive narratives and enhance visual communication. Inspired byprevious work in narrative visualization and recent advances in large modelswe synthesized potential tasks and opportunities for large models at variousstages of narrative visualization. In our study we surveyed 79 papers toexplore the role of large models in automating narrative visualizationcreation. We propose a comprehensive pipeline that leverages large models forcrafting narrative visualization categorizing the reviewed literature intofour essential phases: Data Narration Visualization and Presentation.Additionally we identify ten specific tasks where large models are appliedacross these stages. This study maps out the landscape of challenges andopportunities in the LM4NV process providing insightful directions for futureresearch and valuable guidance for scholars in the field. |
+|links| http://arxiv.org/abs/2401.14010v2 |
+|updated| 2024-01-26 04:09:21 UTC |
+|summary| Narrative visualization effectively transforms data into engaging storiesmaking complex information accessible to a broad audience. Large modelsessential for narrative visualization inherently facilitate this processthrough their superior ability to handle natural language queries and answersgenerate cohesive narratives and enhance visual communication. Inspired byprevious work in narrative visualization and recent advances in large modelswe synthesized potential tasks and opportunities for large models at variousstages of narrative visualization. In our study we surveyed 79 papers toexplore the role of large models in automating narrative visualizationcreation. We propose a comprehensive pipeline that leverages large models forcrafting narrative visualization categorizing the reviewed literature intofour essential phases: Data Narration Visualization and Presentation.Additionally we identify nine specific tasks where large models are appliedacross these stages. This study maps out the landscape of challenges andopportunities in the LM4NV process providing insightful directions for futureresearch and valuable guidance for scholars in the field. |
 
 
 # cs.MA 
