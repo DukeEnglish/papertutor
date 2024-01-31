@@ -1,0 +1,926 @@
+Scaling Sparse Fine-Tuning to Large Language Models
+AlanAnsell1 IvanVulic´1 HannahSterz1 AnnaKorhonen1 EdoardoM.Ponti21
+Abstract totheirstate-of-the-artperformance(Kaplanetal.,2020).
+However,thisscaleisbothablessingandacurseastailor-
+LargeLanguageModels(LLMs)aredifficultto
+ingLLMstospecificapplicationsviafine-tuningpresents
+fullyfine-tune(e.g.,withinstructionsorhuman
+a formidable challenge: if performed na¨ıvely, this incurs
+feedback)duetotheirsheernumberofparame-
+thecostofupdatinganincrediblylargesetofparameters.
+ters. Afamilyofparameter-efficientsparsefine-
+AfamilyoflightweightmethodsforLLMadaptationhave
+tuning(SFT)methodshaveprovenpromisingin
+been proposed to mitigate this issue, known collectively
+termsofperformancebuttheirmemoryrequire-
+as Parameter-Efficient Fine-Tuning (PEFT). PEFT meth-
+ments increase proportionally to the size of the
+odslearnasmallnumberofnewparameters,denotedasϕ,
+LLMs. Inthiswork,wescalesparsefine-tuning
+whichaugmentthefrozenLLMweightsθ (Pfeifferetal.,
+tostate-of-the-artLLMslikeLLaMA27Band 2023;Lialinetal.,2023). Forinstance,Low-RankAdapters
+13B.Atanygiventime,foradesireddensitylevel,
+(LoRA;Huetal.,2022)learnadditionallow-rankmatrices
+we maintain an array of parameter indices and
+tomodifythelinearlayersinTransformerblocks.
+the deltas of these parameters relative to their
+pretrainedvalues. Weiterateamong: (a)updat- PEFT methods based on unstructured sparse fine-tuning
+ingtheactivedeltas,(b)pruningindices(based
+(SFT1),whereϕisasparsevectoraddedtoθ,haverecently
+onthechangeofmagnitudeoftheirdeltas)and shownpromise(Sungetal.,2021;Guoetal.,2021;Ansell
+(c) regrowth of indices. For regrowth, we ex- et al., 2022). These offer a strong trade-off between low
+plore two criteria based on either the accumu- numberofparametersandhighmodelperformancewithout
+latedgradientsofafewcandidateparametersor insertingadditionallayersintotheLLM’sneuralarchitec-
+theirapproximatemomentaestimatedusingthe ture, which would reduce model efficiency. In addition,
+efficient SM3 optimizer. We experiment with multipleSFTsarecomposablewhileavoidinginterference
+instruction-tuningofLLMsonstandarddataset (Ansell et al., 2022), which facilitates the integration of
+mixtures, finding that SFT is often superior to multiplesourcesofknowledgeintoLLMs. Formally,SFT
+popularparameter-efficientfine-tuningmethods canbeconceivedofasperformingjointoptimizationover
+likeLoRA(low-rankadaptation)intermsofper- thefixed-sizesetofnon-zeroindicesofϕandtheirdeltas
+formance and comparable in terms of run time. withrespecttotheLLMweights. Duetotheintricaciesof
+WeadditionallyshowthatSFTiscompatiblewith this optimization, however, SFT has so far been severely
+bothquantizationandefficientoptimizers,tofa- limitedbyamajordrawback,namely,itshighmemoryre-
+cilitate scaling to ever-larger model sizes. We quirements: existingmethodsforselectingnon-zeroindices
+releasethecodeforSFTathttps://github. includelearningamask(Sungetal.,2021),estimatingthe
+com/AlanAnsell/peft and for the instruc- Fisher information (Guo et al., 2021), or calculating the
+tion-tuningexperimentsathttps://github. differencebetweeninitializationandconvergence(Ansell
+com/ducdauge/sft-llm. et al., 2022) for all LLM parameters. Hence, SFT is not
+currentlysuitableforadaptingLLMatlargescales.
+Themaingoalofthisworkistoovercomethesechallenges
+bydevisingmemory-efficientmethodstoupdateLargeLan-
+1.Introduction
+guageModels(LLMs)sparsely,whilemaintainingperfor-
+mancebenefits,thatis,retainingthesameperformanceof
+ThescaleofLargeLanguageModels(LLMs),suchasFal-
+full-modelfine-tuningorevensurpassingit. Specifically,
+con (Almazrouei et al., 2023), LLaMA 2 (Touvron et al.,
+wewishforthememoryuseduringtraining(beyondthat
+2023), andMistral(Jiangetal.,2023), isoneofthekeys
+requiredtostorethepretrainedmodelweights)toscalelin-
+1UniversityofCambridge2UniversityofEdinburgh. Corre-
+spondenceto:AlanAnsell<aja63@cam.ac.uk>.
+1Notetheunfortunateconfusionofnomenclaturewithsuper-
+visedfine-tuning(alsofrequentlyreferredtoasSFT).
+1
+4202
+naJ
+92
+]LC.sc[
+1v50461.1042:viXraScalingSparseFine-TuningtoLargeLanguageModels
+Figure1.AvisualizationoftheproposedSparseFine-Tuning(SFT)methodscaledtoaLargeLanguageModel(LLM).PEFTparameters
+consistofindices(arrows)andcorrespondingdeltas(redsquares)withrespecttoLLMparameters(bluesquares).Afterinitialization
+(1),PEFTdeltasareupdatedforSsteps(2).Next,obsoleteindicesaredropped(3)andnewindicesaregrown(4)accordingtoeither
+accumulatedgradientsorapproximatemomenta.Thealgorithmthenreturnstotheupdatestep(2)andisrepeatediteratively.
+earlywiththenumberofSFTparametersO(d )ratherthan aswellaswithfullfine-tuning,startingfromLLaMA2(Tou-
+ϕ
+LLMparametersO(d ). Toachievethis,weintroducean vronetal.,2023)asabasemodel. Weinstruction-tunethem
+θ
+iterativeparadigmforSFTthatalternatesbetweenupdating onmulti-taskdatasuchasFlanv2(Longpreetal.,2023),
+deltasofactiveindices,deletingobsoleteindices,andgrow- datageneratedbyproprietarymodelssuchasGPT4-Alpaca
+ingnewones(Evcietal.,2020). Deletionisdeterminedby (Pengetal.,2023),oramixtureofbothwithTu¨luv2(Ivison
+changeofmagnitudebetweentrainingstepswhereasgrowth etal.,2023). Weextensivelyevaluatetheresultingmodels
+by(transientlycalculated)gradients. Thegrowthcriterion onstandardbenchmarksforfactuality(MMLU;Hendrycks
+isinspiredbyEvcietal.(2020),whichwefurtherimprove etal.,2021),reasoning(GSMandBBH;Cobbeetal.,2021;
+uponbyefficientlyaccumulatinggradientstoreducetheir Suzgunetal.,2023),multilinguality(TyDiQA;Clarketal.,
+variance. Moreover,whileouralgorithm(SFT-AG)isremi- 2020),andcoding(HumanEval;Chenetal.,2021).
+niscentofsparsetraining(Evcietal.,2020),thescatteringof
+ThemainresultsrevealthatSFToutperformsthePEFTand
+theSFTontothebaseLLMeffectivelyyieldsadensemodel.
+fullfine-tuningbaselinesonmosttasksandconfigurations
+Thisentirelyside-stepstheproblemofthe‘hardwarelottery’
+wetest,bothwithandwithout4-bitLLMquantizationdur-
+duetocumbersomesparsetensoroperations(Hooker,2021).
+ingfine-tuning(Dettmersetal.,2023). Incombinationwith
+WeprovideavisualoverviewofouralgorithmsinFigure1.
+theSFT-MAvariant,thisallowsforscalingfine-tuningto
+Whenextremememoryefficiencyisrequired,weshowhow verylargeLLMswithamodestmemoryfootprint.
+SFTcanbecombinedwithefficientoptimizerssuchasSM3,
+wherethemomentaofparametermatricesareapproximated
+2.BackgroundandRelatedWork
+byrow-wiseandcolumn-wisesummarymetrics(Aniletal.,
+2019). In these settings, gradients become unreliable, as 2.1.Parameter-EfficientandMemory-Efficient
+theirvarianceincreasesinsingle-examplemini-batchesand Fine-Tuning
+it is costly memory-wise to accumulate even a subset of
+Parameter-efficientfine-tuning(PEFT)methodshavegener-
+them. Hence,weproposethatapproximatemomentacan
+allybeendefinedasthosewhichfine-tuneasmallnumber
+additionallysubstitutegradientsasacriterionforgrowth,
+of parameters relative to the total size of the pretrained
+yieldingtheSFT-MAmodelvariant.
+model. ThepossiblebenefitsofusingaPEFTmethodas
+WecompareourSFTvariantswiththestate-of-the-artPEFT opposedtofullmodelfine-tuninginclude: (1)reducedGPU
+methodsLoRA(Huetal.,2022)and(IA)3(Liuetal.,2022),
+2ScalingSparseFine-TuningtoLargeLanguageModels
+2.2.LoRA
+Asasolution,Huetal.(2022)proposedLow-RankAdapta-
+tion(LoRA),oneofthebest-performingandmostpopular
+PEFTtechniquestodate. Inbrief,itconceptuallyfine-tunes
+onlyalow-ranksubspaceofeachweightmatrix. Inpractice,
+LoRAistypicallyappliedonlytothelinearmodulesofa
+Transformer,andisimplementedasfollows:
+α
+y =Wx+ BAx, (1)
+r
+where x ∈ Rdin, y ∈ Rdout, W ∈ Rdout×din, A ∈ Rr×din,
+B ∈ Rdout×r, the subspace rank r ≪ d in,d out, and α is a
+hyperparameter. Likebottleneckadapters,LoRAemploys
+a successive down- and up-projection, but the fact that it
+places them in parallel rather than in series with the full-
+Figure2.SFT(lowerright)versusLoRA(upperright)appliedto
+rankmatrixmultiplicationwithoutanon-linearityenables
+alinearlayer(theoutputprojectionofself-attention)ofaTrans-
+LoRAadapterstobe“merged”atinferencetimeintotheir
+formerblock.
+W matrixasfollows:
+α
+y =W′x=(W + BA)x. (2)
+r
+memoryusageduringtraining;(2)fastertraining;(3)faster
+savingandloadingofthefine-tuningwithlesspermanent This allows LoRA-adapted models to achieve inference
+storagerequiredasthe“frozen”originalweightsofthelarge speedequaltotheunderlyinglargemodel.
+underlyingmodelaresharedacrossmultipletasksandap-
+Withtherecentdevelopmentofefficientquantizationmeth-
+plications;(4)the“composability”propertyofsomePEFT
+odssuitableforLLMs,LoRAhasemergedasthedefacto
+methods,whichallowsmodulestobecombinedwithless
+standardPEFTmethodforLLMinstructiontuning(Wang,
+interferencethanwithfullfine-tuning(Pfeifferetal.,2020;
+2023;Dettmersetal.,2023).Thisisalsowhyweprovideits
+Anselletal.,2022);and(5)lesstendencytooverfitdueto
+shortself-containeddescriptionhereandtreatitasourprin-
+thereducedcapacityofPEFTwithrespecttothefullmodel.
+cipalbaseline,whileweconductadditionalcomparisonsto
+Ofthese,(1)isperhapsthemostcriticalintheeraofLarge
+(IA)3(Liuetal.,2022),anotherestablishedPEFTmethod.
+Language Models whose GPU memory requirement for
+fullfine-tuningisbeyondthereachofresearchersandde- 2.3.SFT
+velopers without multiple high-end GPUs. Nonetheless,
+A sparse fine-tuning f′ of a neural function f entails the
+parameter-efficiencyalonedoesnotguaranteeareductionin
+additionofasparse“difference”or“delta”vectorδ ∈Rdθ
+GPUmemoryusage,thoughitalmostcertainlyimpliesthat
+toitsparametersθ ∈Rdθ:
+lessspaceisrequiredtosavethefine-tuninginpermanent
+memory. Itisthusimportanttodrawadistinctionbetween f′(; θ)=f(; θ+δ). (3)
+(i)efficiencyinnumberoffine-tunedparametersversus(ii)
+thepeakGPUmemoryusageduringfine-tuning:wereferto Adeltavectorδwithd ϕnon-zerovaluescanbeexpressed
+theformerasparameterefficiencyandthelatterasmemory intermsofavectorofuniqueindicesη ∈{1,2,...,d θ}dϕ
+efficiency. andtheircorrespondingvaluesϕ∈Rdϕ.Typically,theSFT
+density dϕ isauser-definablehyperparameter. Toillustrate
+PEFTwasfirstemployedinNLPbyHoulsbyetal.(2019), dθ
+thedifferencebetweenLoRAandSFTvisually, Figure2
+inspired by the residual adapter modules of Rebuffi et al.
+showshowtheyadaptaTransformerblock.
+(2017). Houlsbyetal.(2019)insert“bottleneck”adapters
+consisting of a successive down-projection, non-linearity In its most general form, sparse fine-tuning can be inter-
+and up-projection following the feed-forward layers of a pretedasperformingjointoptimizationoverηandϕ:
+pretrainedmodel’sTransformerblocks. DuringPEFTwith
+η⋆,ϕ⋆ =argmaxlogp(D |θ,η,ϕ). (4)
+bottleneckadapters, onlytheweightsofthesedown-and
+η,ϕ
+up-projectionsareupdatedwhiletherestoftheparameters
+arefrozen. Whilebottleneckadaptersachievealltheabove Aspecializedoptimizationapproachisrequiredforηsince
+desiderataduringfine-tuning,theyhavethedrawbackthat it is a discrete latent variable and cannot be directly op-
+addingnewlayerstothemodelslowsdowninferenceasit timized through stochastic gradient descent. Approaches
+effectivelyincreasesthemodelsize. proposedinpreviousworksinclude:
+3ScalingSparseFine-TuningtoLargeLanguageModels
+• DiffPruning(Guoetal.,2021),whichappliesacontinuous 3.Method
+relaxationofabinarymasktoδduringfine-tuningwhich
+3.1.EfficientSFTwithFixedη
+issparsifiedwitharegularizationterm,andtakesηtobe
+thed ϕindiceswithmaskvaluesclosestto1attheend. Inpractice,theweightsθofaneuralfunctionarepartitioned
+into a sequence of n “parameter tensors.” To simplify
+p
+• FISH Mask (Sung et al., 2021), where η is fixed at the indexing,wethinkintermsoftheflattenedversionsofthese
+beginningoftrainingtobetheindicesofthed weights tensorsandrefertothemas“parametersubvectors”,denoted
+withhighestobservedFisherinformation. ϕ as {θ(1) ∈ Rd θ(1),θ(2) ∈ Rd θ(2),...,θ(np) ∈ Rd θ(np)}.
+Similarly,wedenotethesectionsofηandϕcorresponding
+toparametersubvectorθ(i)asη(i)andϕ(i)respectively.We
+• Lottery-TicketSFT (LT-SFT;Anselletal.,2022),whereη
+observethat,forafixedηandassumingmax d <d ,
+isfixedtobetheindicesofthed weightswhichchange
+i θ(i) ϕ
+ϕ itispossibletoperformsparsefine-tuningwiththedesired
+themostduringaninitialroundoffullfine-tuning. O(d )memoryoverheadbyscatter-addingeachϕ(i)into
+ϕ
+itscorrespondingθ(i)(whichstaysfrozen)beforeitisused:
+θ′(i) =θ(i)+scatter(η(i),ϕ(i),d ), (5)
+Thesemethodsshareacommondrawback,namelythatthe θ(i)
+amountofmemorytheyuseduringtraininginadditionto wherescatter(η,ϕ,d)∈Rdsuchthat
+thatrequiredtostorethepretrainedmodelweightsispro-
+portionaltod θ,thetotalnumberofmodelparameters. As (cid:88)dϕ
+discussed above, this makes these methods prohibitively [scatter(η,ϕ,d)] i = I ηj=iϕ j. (6)
+expensiveinmanyLLMfine-tuningscenarios,especially j=1
+withverylargemodels;wethusseekamethodwhosemem-
+Thesimplestwayofcalculatingthegradientofϕ(i)during
+oryoverheadisinsteadproportionaltod ,thenumberof
+ϕ thebackwardpassofbackpropagationisbygatheringthe
+parameterswhichareactuallymodifiedduringfine-tuning.
+relevantindicesofthegradientofθ′(i):
+Finally,thereexistsaseparatebutrelatedliteratureonpre-
+∂L ∂L
+training sparse neural networks, for which we refer the = . (7)
+∂ϕ(i) ∂θ′(i)
+readertoHoefleretal.(2021)foradetailedoverview. This j ηj
+workowesmosttoEvcietal.(2020),whosedroppingand
+WhileEquation(7)requiresthecomputationofthedense
+growthparadigmweextendtosparsefine-tuningin§3.2. gradientofeachθ(i),thiscanbedisposedofassoonasthe
+Contrarytothem,however,SFTresultsinadensemodel,
+requiredvaluesaregatheredfromit. Becaused ≪d ,
+θ(i) θ
+which side-steps the problem that available hardware is
+thisdoesnotaddsignificantlytothepeakmemoryusage.
+notwellsuitedtosparsetensoroperations(Hooker,2021).
+Furthermore,weshowinAppendixBthatforalinearlayer,
+Moreover,weintroducenovelandenhancedgrowthcriteria it is possible in principle to calculate the gradient of ϕ(i)
+inSection3.2andSection3.3. withoutneedingtocomputethefullgradientofθ(i),which
+wewillexploreinfuturework.
+2.4.QuantizedPEFT
+Thisimplementationofsparsefine-tuningstandsincontrast
+AsignificantrecentadvanceinefficientmethodsforNLP topreviousapproaches(e.g.Sungetal.,2021;Anselletal.,
+hasbeenthedevelopmentofquantizationmethodswhich 2022)which,insteadofvectorsηandϕ,maintainabinary
+are suitable for LLMs and incur minimal degradation in maskb(i) ∈ {0,1}d( θi) whichisappliedtothegradientof
+performance. Dettmersetal.(2022)andlaterDettmersetal. θ(i) after it is calculated. Since b and the gradient of θ
+(2023)proposed8-bitand4-bitquantizationtechniquesfor
+bothhavesizeproportionaltod ,thememoryoverheadof
+θ
+LLM parameter tensors that yield close to full-precision
+thisimplementationisO(d ). Althoughtheaboveimple-
+θ
+performance during inference or parameter-efficient fine-
+mentationwouldenablethefixed-ηstageofFISHMaskor
+tuning. TheqLoRAfine-tuningmethodofDettmersetal.
+LT-SFTtobeperformedwithacceptablememoryoverhead,
+(2023)reducesmemoryusagebyapplying4-bitquantiza-
+bothmethodsincurO(d )memorycostwhenselectingη.
+θ
+tiontomostofthepretrainedLLMparameterswhilestoring
+thesmallnumberofadditionaltrainableLoRAparameters
+3.2.SFT-AG:AccumulatedGradientSFT
+in full precision and dequantizing the pretrained weights
+onlywhenrequired. Weshowthatsparsefine-tuningisalso Building on Evci et al. (2020)’s “Rigging the Lottery”
+amenabletoquantizationofthepretrainedweights. Weuse (RigL)methodforpretrainingsparseneuralnetworks,we
+QUANT(·) and DEQUANT(·) to denote 4-bit NormalFloat proposeSFT-AG.SFT-AGmaintainsafixed-sizeη(i)and
+quantizationanddequantizationrespectivelywithdouble ϕ(i)foreachparametersubvectorθ(i),butunlikethemeth-
+quantization(Dettmersetal.,2023). ods discussed in the previous section, it allows η(i) to
+4ScalingSparseFine-TuningtoLargeLanguageModels
+change dynamically during training. ϕ(i) is initialized2 Algorithm1AccumulatedGradientSFT
+as [0]d ϕ(i) and η(i) is initialized as a random subset of 1: procedureSFT-AG(θ,D,r,k)
+{1,2,...,d θ(i)}. Every S training steps, η(i) is updated 2: ϕ←[0]dϕ ▷InitializeSFTvalues
+byfreezingsomeofthecurrentlytrainableweightsafterre- 3: ϕ 0 ←ϕ
+settingthemtotheirpretrainedvalues(“dropping”),while 4: η ∼ dϕ [1..d θ] ▷InitializeSFTindices
+unfreezingsomeofthecurrentlyfrozenweights(“growth”). 5: fortin1..T do
+AfamilyofpossibleSFTmethodsarisesfromthechoiceof 6: x t ∼D
+criteriafordroppingandgrowth. ForSFT-AG,weusethe 7: θ′ ←scatter-add(ϕ,η,θ)
+followingcriteria: 8: UPDATE(ϕ,∇ ϕL(f θ′(x t)))
+9: ifr—tthen
+• DROP: the k(i,t) weights in η(i) which have changed 10: d←top-k(t)(−|ϕ−ϕ 0|)
+the least from their pretrained values, i.e. η(i) = 11: ϕ,η = DROP(ϕ,η,d)
+drop
+argtopk(i,t) −|ϕ(i)|,wherek(i,t)isascheduledefin- 12: ▷Idealizedgrowthwherewecan
+ing the number of weights in parameter subvector i to 13: ▷accumulategradientsofallparameters.
+replaceatstept. 14: g
+←top-k(t)[(cid:80)t
+i=t−γ+1∇ θL(f θ′(x i))]
+15: ϕ,η = GROW(ϕ,η,g)
+• mG aR tO edW: “loth ne g-rk u( ni, ”t) grw ade ii eg nh tts mi an gnθ i( tui) dew s,ith i.el .arg ηe (s it ) es =ti- 16: ϕ 0 ←ϕ
+grow 17: returnϕ,η
+argtopk(i,t)(cid:12) (cid:12)Eˆ x∼D[∇ θ(i)L(x; θ′)](cid:12) (cid:12).
+Thegradientsrequiredforgrowthselectionareestimated
+overtheγtrainingstepsbeforeηisupdated,whichwerefer alsoneedtosettheoptimizerbuffersforthenewlygrown
+toasthegradientestimationphase. Herewedivergefrom weights GROW(η(i))toappropriatevalues. Inourexperi-
+Evcietal.(2020), whoselecttheweightstogrowonthe ments,weusetheAdamoptimizer(Kingma&Ba,2015),
+basisofgradientsfromasingleinstantaneousminibatch.3 whichtrackstheexponentiallysmoothedmeanofthefirst
+Itisnotpossibletomaintainanestimateofthefullgradient and second momenta of the parameter gradients. Conve-
+ofdimensiond withoutexceedingourmemorybudget. niently,thegradientestimationphasealreadyproducesan
+θ(i)
+Therefore,werestrictourselvestomaintainingsuchanes- estimateofthefirstmomentumofthenewlygrownweights,
+timateforjustK i“growthcandidates.” Theseareselected andweextendittoestimatethesecondaswellsothatwe
+astheweightsinθ(i)withtopK igradientmagnitudesdur- can use these values to seed the optimizer momenta. A
+ing the first batch of the gradient estimation phase. The minor complication here is that Adam multiplies the i-th
+long-rungradientsofthegrowthcandidatesareestimated momentumbyafactorof 1 beforeusetocorrectforits
+1−βt
+byaveragingtheirgradientsoverallbatchesinthegradient biastowardzero.SinceinSFT,i differentweightsare“initial-
+estimationphase: ized”atdifferenttimes,wetracktheageofeachweight(i.e.
+thenumberofstepssinceitwaslastgrown)individually,
+t
+gˆ(i)(t)= 1 (cid:88) ∂ L(x ; θ′). (8) anduseittocalculatetheappropriatebiascorrection.
+j γ ∂θ(i) s
+s=t−γ+1 j For simplicity, we set the update rate schedule k(i,t) to
+decreaselinearlyto0overthecourseoftraining,asfollows:
+Notethatalthoughitisnecessarytocalculatethedensegra-
+dient∇ L(x; θ′)ateachstepofthegradientestimation
+θ(i)
+phase,weneverneedtostoreitsincewecanimmediately (cid:40)
+d ift=γ,
+gathertheK i valuesweneedfromit. Thiscanbeimple- k(i,t)= αϕ (T(i −) t)d otherwise, (9)
+mentedwithabackwardhookinPyTorch,forinstance. In T ϕ(i)
+ourexperiments,wesetK =d .
+i ϕ(i)
+Thereissomeadditionalhousekeepingtodoafterupdating where T is the total number of training steps and α is a
+η. Wemustresetϕ(i) tozeroatindices DROP(η(i)). We hyperparameterdenotingthepeakreplacementrate. Note
+thatduringthefirstη updateatstepγ,wereplaceallthe
+2The total number of tunable parameters d is a hyper-
+ϕ weights, since the indices in η are randomly initialized;
+parameter, and d is set such that the proportion of tunable
+ϕ(i) there is no reason to believe that they are relevant to the
+parameters d ϕ(i) isthesameforeachi-thparametersubvector. task.
+d θ(i)
+3In a memory-constrained setting where it may be possible
+Weprovidehigh-levelpseudocodeforSFT-AGinAlgorithm
+toprocessjustasingletrainingexampleatatime,thehighlevel
+of variance in the gradients from one minibatch may harm the 1. Notethatsomedetailssuchastheselectionofcandidates
+selectionofweightstogrow. andoptimizermomentaseedingareomittedforconciseness.
+5ScalingSparseFine-TuningtoLargeLanguageModels
+3.3.SFT-MA:Momentum-ApproximationSFT Algorithm2Momentum-ApproximationSFT
+TheSFT-AGmethodprioritizesmakingahigh-qualityse- 1: procedureSFT-MA(θ(1),..,θ(np),D,r,k)
+lectionofweightstogrowwhenupdatingη,butthiscomes 2: foriin1..P do
+at the cost of the extra memory required during the gra- 3: ϕ(i) ←[0]d ϕ(i)
+dient estimation phase to store the indices of the growth 4: ϕ(i) ←ϕ(i)
+0
+candidatesandtheirestimatedmomenta. Weproposeanal- 5: η(i) ∼ d ϕ(i) [1..d θ(i)]
+ternativealgorithmforthemostmemory-constrainedscenar- 6: ▷InitializeSM3row-andcolumn-wise
+ios,whichwecallSFT-MA,employingtheSM3memory- 7: ▷accumulators. h(i),w(i)=heightand
+efficient adaptive optimizer of Anil et al. (2019). For a 8: ▷widthofi-thparametermatrix.
+two-dimensionalparametertensorΘofsizer×c,theSM3 9: r(i) =[0]h(i)
+optimizermaintainsbuffersr ∈Rr andc∈Rc,whichcon- 10: c(i) =[0]w(i)
+tainrunningsumsofthemaximumsquaredgradientsover
+11: fortin1..T do
+the columns and rows of Θ, respectively. We can obtain
+12: x∼D
+a(low-qualitybutcheap)estimateoftheabsolutevalueof
+themomentumm foreachelementθ ofΘbytakingthe
+13: θ′ ←concat iscatter-add(ϕ(i),η(i),θ(i))
+ij ij
+elementwisefourthrootoftheouterproductofrandc:
+14: foriin1..n pdo
+15: UPDATE-SM3[ϕ(i),η(i),r(i),c(i),
+√
+|mˆ |
+ij
+= 4r ic j. (10) 16: ∇ ϕ(i)L(f θ′(x))]
+17: ifr—tthen
+SFT-MAusesthisestimatetorankweightsforgrowth,and 18: d(i) ←top-k(i,t)(−|ϕ(i)−ϕ(i)|)
+otherwise it is the same as SFT-AG. Since the SM3 opti- 19: ϕ(i),η(i) = DROP(ϕ(i),η(i),d0 (i))
+mizerisverymemoryefficient,storingonlyr+cvaluesin 20: g(i) ←top-k(i,t)[r(i)⊗c(i)]
+itsbuffersforanr×cparametertensorcomparedtoAdam’s 21: ϕ(i),η(i) = GROW(ϕ(i),η(i),g(i))
+2rc,andSFT-MAusesnoadditionalpersistentmemoryto
+22: ϕ(i) ←ϕ(i)
+trackstatisticstoinformηupdates,significantlylessmem- 0
+oryintotalisrequiredthanforSFT-AG.Incidentally,we 23: returnϕ(1),..,ϕ(np),η(1),..,η(np)
+remarkthatthegrowthcriterionofSFT-MAassumeslocal-
+ity,i.e.,thattheimportanceofaparameteriscorrelatedto
+thoseinthesamerowandcolumn. Thisisreminiscentof
+This is equivalent to the behavior of a linear module in
+thelocality-drivensynapticgrowthinhumanbrains,which
+ordinary,non-quantizedSFTexceptthatthepretrainedpa-
+resultsindensehubsbutagloballysparseanatomy(Betzel
+rametermatrixgetsquantizedatthebeginningoftraining
+et al., 2017; Hoefler et al., 2021). We provide high-level
+andtemporarilydequantizedeachtimeitisused.
+pseudocodeforSFT-MAinAlgorithm2.
+4.ExperimentalSetup
+RegularizingSFT SimilartoLoRA,whichisregularized
+by its dropout, SFT is also likely to overfit as the model
+4.1.TrainingandEvaluationData
+divergesfromitspretrainedstate. Wethereforeregularize
+sparsefine-tuningbyapplyingL2regularizationtotheϕ TodemonstratetheeffectivenessofSFT,weaimtocompare
+parametersintheformofweightdecaywithstrengthλ. aseriesofmethodstoinstruction-tunepre-trainedLLMs.
+WelooselybaseourexperimentalsetuponthatofWangetal.
+3.4.QuantizedSFT (2023),whocomparedifferentdatamixtures. Inparticular,
+we fine-tune LLMs on (i) Wang et al. (2023)’s 50K sub-
+Asanothercontribution,weextendtheproposedSFTtech-
+sampleofFlanv2(Longpreetal.,2023),adatasetcollecting
+niquestoquantizedLLMs(“qSFT”).Considerparameter
+manuallyannotatedexamplesformultipletasksaugmented
+matrixW P( Ti) ∈Rh×oinitspre-traineddatatype(e.g.,FP32). withinstructions; (ii)GPT4-Alpaca(Pengetal.,2023),a
+InsteadofstoringW(i)itselfonGPU,westoreitsquantized datasetof50Koutputsgeneratedbydavinci-003and
+PT
+versionW(i) = QUANT(W(i)). Duringtheforwardpass GPT-4(OpenAI,2023)promptedwithinputsfromAlpaca
+NF4 PT
+ofthelinearmodule,qSFTcomputesthefollowing: (Taori et al., 2023); or (iii) the Tu¨lu v2 mixture (Ivison
+etal.,2023), consistingof326Kexamplesfrommultiple
+Y =X(DEQUANT(W(i))+∆W(i)), (11) instructionfollowingdatasets,includingFlanv2andGPT4-
+PT
+Alpacathemselves.
+where X ∈ Rb×h is the input to the linear module, Y ∈
+Rb×oistheoutput,and FollowingWangetal.(2023)andIvisonetal.(2023),we
+evaluateinstruction-tunedLLMsonbenchmarkscapturing
+∆W(i) =reshape(scatter(η(i),ϕ(i),ho),[h,o]).
+thefollowingabilities.
+6ScalingSparseFine-TuningtoLargeLanguageModels
+Factuality: MassivelyMultitaskLanguageUnderstanding 2021), andLT-SFT(Anselletal.,2022)arenotviableas
+(MMLU; Hendrycks et al., 2021) requires the model to baselinesforLLMfine-tuningastheirmemorycomplexity
+pickananswerfrom4candidatesandcovers57subjects scalesasO(d ),similartofullfine-tuning.
+θ
+including STEM, humanities, social sciences, and other
+disciplines. We evaluate models in a 5-shot setting and 4.3.TrainingSetupandHyperparameters
+reporttheiraccuracy.
+ToselectthemostimportanthyperparametersofthePEFT
+Reasoning:Wesub-sample40examplespertaskfromBIG- methods, we perform a grid search on the development
+BenchHard(BBH;Suzgunetal.,2023),asuiteofthe23 set of MMLU after fine-tuning on Flan v2 with respect
+mostchallengingtasksfromBIG-Bench. Wealsorandomly to (i) the number of trainable parameters (determined by
+selectasubsetof200examplesfromGradeSchoolMath rankrinLoRAorcorrespondingdensityinSFT)7;(ii)the
+(GSM;Cobbeetal.,2021),acollectionofmathproblems learningrate;(iii)weightdecaystrengthλforSFTmethods.
+in linguistic form. Both benchmarks require open-ended Fulldetailsofthehyperparametersearchmethodologyand
+generation. We evaluate models in a 3-shot setting with results can be found in Appendix A. We use the found
+BBHand8-shotsettingwithGSM,andreporttheirexact hyperparametersofeachPEFTmethodforallfine-tuning
+match(EM). experiments.
+Multilinguality: We choose 100 examples per language ForSFT,weupdatethesetoftrainableparametersηevery
+fromTypologicallyDiverseQuestionAnswering(TyDiQA; S =20steps,fixtheinitialupdaterateαto0.2,andforSFT-
+Clarketal.,2020),adatasetforextractivequestionanswer- AG,wesetthelengthγ ofthegradientestimationphaseto
+ing in 11 languages. We follow the Gold Standard setup 5steps. Notethatwehaveperformedonlyminimalmanual
+whereeachdocumentisguaranteedtocontaintheanswer tuningonthevaluesofS,αandγ duetoalargenumber
+span. Weevaluatemodelsina1-shotsettingandreportF1. oflarge-scaleexperimentscoupledwithconstraintsonour
+computationalbudget;itispossiblethatothervalueswould
+Coding: HumanEval (Chen et al., 2021) is a dataset for
+yieldbetterresults.
+synthesizingprogramsfromdocstrings.Weevaluatemodels
+with a temperature of 0.1 and report their precision at 1 We follow Wang et al. (2023)’s choice for the remaining
+(P@1)4.
+hyperparameters:wealwaystrainfortwoepochs,andapply
+linearlearningratedecayfollowingwarmupoverthefirst
+4.2.ModelsandBaselines 3%oftrainingsteps. Thebatchsizeisfixedat128andthe
+maximumsequencelengthat2,048,withlongersequences
+AsLLMstofine-tune,wechoosestate-of-the-artLLaMA2
+truncated. TheLoRAdropoutrateissetto0.1andLoRA
+(Touvronetal.,2023)atboth7band13bparameterscales.
+alphato16. LoRAandSFTareappliedtoalllinearTrans-
+Wereporttheperformanceoftheunmodified“vanilla”mod-
+formerblocklayers. Thepretrainedparametersarestored
+els as a baseline for a series of PEFT methods. Specifi-
+in bfloat16 data type, while the PEFT parameters are
+cally, we compare SFT with LoRA (Hu et al., 2022, see
+storedinfloat32,exceptforquantizedtraining,where
+§2.2),asitoffersthebestperformance–efficiencytrade-off
+theyarealsostoredinbfloat16.
+(Pfeifferetal.,2023)andisarguablythemostwidespread
+pre-existingPEFTmethod(Dettmersetal.,2023),aswell
+as (IA)3 (Liu et al., 2022). We use the LoRA and (IA)3 5.Results
+implementations in the peft library5. For the Tu¨lu v2
+5.1.MainResults
+fine-tuningmixture,weincludethefullyfine-tunedLLaMA
+2modelsofIvisonetal.(2023)asabaseline(“FullFT”), WepresentthemainresultsofourexperimentsinTable1.
+whichwewouldexpecttoprovideasoftupperboundon ForLlama2-7b, wefindthatSFT-AGoutperformsLoRA
+the performance of the PEFT methods.6 At 7b scale, we and(IA)3consistentlyacrossevaluationbenchmarksandin-
+alsoperformourownfullfine-tuningontheFlanv2and structiontuningdatasets,includingFlanv2,GPT4-Alpaca,
+GPT4-Alpacasplits. Wedidnotperformtheseexperiments and Tu¨lu v2. For Llama2-13b, SFT-AG similarly outper-
+at13bscaleduetothecomputationalexpense. formsallbaselineswhenfine-tunedonFlanv2andGPT4-
+Alpaca; however, we report more mixed results for Tu¨lu
+Notethatthepre-existingSFTmethods(see§2.3)suchas
+v2.8 Nonetheless,SFT-AGissuperiorin5outofthe6com-
+DiffPruning (Sung et al., 2021), FISH Mask (Guo et al.,
+binationsofscalesandinstructiontuningdatasets. Hence,
+4HerewedifferfromWangetal.(2023)inordertoreducethe
+7Thenumberoftrainableparametersfor(IA)3isnottunable.
+varianceacrossevaluationruns.
+5https://github.com/huggingface/peft
+8ItispossiblethatthehyperparameterschosenforSFTduring
+6These follow a similar hyper-parameter setup except for a thehyperparametersearchonFlanv2donotalwaystransferwellto
+Tu¨luv2,whichisamuchlargerdatasetwithadifferentdistribution
+muchhighermaximumcontextlengthof8,192.
+oftasktypes.
+7ScalingSparseFine-TuningtoLargeLanguageModels
+Table1.PerformanceofPEFTmethodsonarangeofevaluationtasksforvariousinstructiontuningdatasets.†indicatesresultsobtained
+usingthemodelsofIvisonetal.(2023).
+Flanv2 GPT4-Alpaca Tu¨luv2
+Model/Method MMLU TyDiQA HumanEval MMLU GSM BBH TyDiQA HumanEval
+Original 45.8 50.9 13.5 45.8 13.0 40.6 50.9 13.5
+FullFT 50.5 55.5 15.2 51.3† 34.5† 45.3† 56.5† 22.6†
+(IA)3 46.7 51.6 14.7 47.8 17.0 40.6 52.2 15.5
+LoRA 49.3 55.3 15.7 51.3 22.0 43.8 58.0 15.5
+SFT-AG 50.7 56.2 15.6 51.5 23.0 44.8 59.4 17.1
+SFT-MA 48.8 55.8 16.2 49.5 16.5 44.7 56.7 15.3
+Original 55.3 60.3 17.8 55.3 23.0 47.8 60.3 17.8
+FullFT - - - 56.7† 50.0† 51.9† 62.9† 26.7†
+(IA)3 55.1 60.1 18.5 55.6 27.5 50.6 62.8 18.1
+LoRA 55.8 61.4 19.8 56.2 29.0 54.6 63.9 19.5
+SFT-AG 55.8 62.5 20.0 55.9 31.5 52.8 63.5 20.3
+SFT-MA 55.5 62.5 19.9 55.9 29.0 51.2 62.8 20.2
+Table2.PerformanceofquantizedPEFTmethodsonarangeof Table3.GPUmemoryrequirements(inGB)andaveragetimeper
+evaluationtasksforvariousinstructiontuningdatasets. trainingstep(inseconds)forfine-tuningSFTandLoRAonFlan
+v2onanA100GPU.Wereportvalueseitherwithout(left)orwith
+Flanv2 GPT4-Alpaca (right)activationcheckpointing.
+Model/Method MMLU TyDiQA HumanEval
+Method LlaMA27b LlaMA213b
+Original(4-bit) 44.8 50.2 11.0
+Mem.↓ Time↓ Mem.↓ Time↓
+qLoRA 47.7 54.3 13.3
+qSFT-AG 48.8 54.9 15.3 LoRA 40/18 30.5/42.5 66/31 45.9/64.0
+qSFT-MA 48.3 52.7 15.3 SFT-AG 34/20 33.4/44.8 56/36 56.2/76.3
+Original(4-bit) 54.7 59.6 15.5 SFT-MA 30/17 30.6/41.7 51/31 50.6/70.9
+qLoRA 55.0 60.7 18.2
+qLoRA 30/ 8 38.5/55.2 46/12 63.6/ 95.3
+qSFT-AG 55.5 61.5 18.8
+qSFT-AG 26/13 42.8/58.4 40/19 73.4/101.1
+qSFT-MA 55.4 61.7 18.4
+qSFT-MA 22/10 39.6/55.5 35/14 70.1/ 97.3
+SFT-AGappearstobethestrongestmethodoverall.
+ComparingthetwoSFTmethodswithdifferentgrowthcrite-
+ria,thereappearstobeatrade-offbetweenperformanceand
+streamperformanceforopen-endedgenerationtasks,orthat
+memoryusage,withthemorememory-efficientSFT-MA
+PEFTisweakeronthesetasksingeneral,perhapsduetoits
+generallyperformingalittleworsethanSFT-AG,exceptfor
+inabilitytomodifytheinputandoutputembeddinglayers.
+afewcases,suchasHumanEvalevaluationforLlama2-7b.
+SinceGPT4-Alpaca(usedforHumanEvalevaluation)has AccordingtothescoresinTable2,wefindthat4-bitquan-
+thesameamountoftrainingexamplesasFlanv2,werule tizationresultsinonlyamodestreductioninperformance
+outthatthisdifferenceisduetodifferentlevelsofsample across PEFT methods, and their relative performance re-
+efficiencybetweenSFT-AGandSFT-MA. mains similar. In fact, SFT-AG is superior again to both
+LoRA and (IA)3 by an even higher margin compared to
+WefindthatSFT-AGgenerallymatchestheperformanceof
+Table1. TheseresultsdemonstratethatSFTisacompeti-
+fullfine-tuningonmosttasks,exceptGSMandHumanEval
+tivePEFTmethodeveninextremelyresource-constrained
+when fine-tuned on Tu¨lu v2, where FullFT vastly outper-
+scenarios.
+formsallPEFTmethods. Thiseffectwasalsoobservedby
+Ivisonetal.(2023)intheirqLoRAevaluation. Wenotethat
+5.2.TrainingSpeedandMemoryEfficiency
+themaximumsequencelengthweuseduringfine-tuningis
+2,048,whereasIvisonetal.(2023)use8,192forfullfine- InTable3,wecomparethememoryrequirementsandtrain-
+tuningand4,096forqLoRA.Itispossiblethattheshorter ingtimeofLoRA,SFTandtheirquantizedvariants. We
+sequencelengthforPEFThasasignificanteffectondown- consider two settings, with and without activation check-
+8
+b7-2amalL
+b31-2amalL
+b7-2amalL
+b31-2amalLScalingSparseFine-TuningtoLargeLanguageModels
+pointing.9 We define the memory requirements to be the
+5 SFT-AG-7B
+minimum amount of GPU memory needed to complete
+s SFT-MA-7B
+t sr ua ri en min eg ns tsuc ince Ass pf pu ell ny d. iW xCe .providemoredetailsonourmea- ndice 0.12
+SFT-AG-13B
+of
+I
+5
+SFT-MA-13B
+WefindthatLoRA,SFT-AGandSFT-MAarebroadlysimi- n
+o
+larintermsofspeedandmemoryrequirements. SFT-MA orti 2
+isconsistentlysomewhatfasterandmorememoryefficient op 0.01
+than SFT-AG. Without activation checkpointing, we find
+Pr
+5
+thattheSFTmethodsaremorememoryefficientthanLoRA;
+however, activation checkpointing is especially effective 0 10 20 30
+inreducingLoRA’smemoryconsumption,likelybecause Iteration of Growth
+LoRAstoresmoreintermediateactivationsduetotheparal-
+lelcomputationoftheLoRAupdate. Whenbothquantiza- Figure3.Proportionofindiceswithacertainage(i.e.,theiteration
+tionandactivationcheckpointingareapplied,LoRAisthe whentheywerelastgrown)oftheconvergedηaftertrainingon
+mostmemory-efficienttechniquebyasmallmargin.10 We theFlanv2dataset.
+alsofindthatLoRAisgenerallyslightlyfasterthantheSFT
+methods,despitebeinggenerallyoutperformedbySFT-AG,
+6.ConclusionsandFutureWork
+especiallywithquantization.
+We have proposed the first method (to our knowledge)
+Asexpected,quantizationandactivationcheckpointingboth
+for Sparse Fine-Tuning (SFT) that is not only parameter-
+tradeaslowdownintrainingspeedforareductioninmem-
+efficientbutalsomemory-efficient. Thisallowsittoscaleto
+oryusage. However,asamoregeneralfinding,theseresults
+LargeLanguageModels. Takinginspirationfromiterative
+wouldsuggestthatactivationcheckpointingshouldbeprior-
+methodsforsparsepre-training,wealternateamongphases
+itizedaheadofquantizationinmostcaseswhenperforming
+whereweupdate,drop,andthengrowparameters. Inpar-
+PEFT on LLMs of this size (≥ 7B), as a larger memory
+ticular,weintroducetwonewcriteriaforparametergrowth:
+savingisachievedforanonlymarginallylargerslowdown,
+AccumulatedGradientsacrossmultipleiterations(SFT-AG)
+andwithoutincurringanycostinperformance.
+andMomentumApproximation(SFT-MA),wherewereuse
+informationtrackedbyoptimizerslikeSM3. Wefindthat
+5.3.ParameterAges
+SFToftensurpassesalternativePEFTmethodssuchas(IA)3
+To shed light on the training dynamics of SFT, we study andLoRAintermsofperformanceandiscomparableto
+the age of each index (i.e., the iteration when it was last themintermsofmemoryandtimeefficiency.
+grown)oftheconvergedparameters. Weplottheproportion
+Wehopethatthesepromisingresultswillencouragefurther
+ofindicesgrownatacertainiterationinFigure3,basedon
+researchintosparsefine-tuning. Futureworkmayinclude
+modelstrainedonFlanv2. Ingeneral,SFT-MAintroduces
+extendingSFTtotheembeddinglayersofLLMs;improving
+fewer new parameter indices later in training compared
+theefficiencyofthebackwardpassforalinearlayer(see
+to SFT-AG. We also find that 13b models tend to retain
+AppendixB);consideringmoreadvanceddropping/growth
+parameterindicesfoundearlierintrainingcomparedtotheir
+criteria,especiallythosewhichwouldenableadaptiveredis-
+7bcounterparts. Thispreferenceforearlierindexsetsisnot
+tributionoftunableparametersacrossparameterstensors.
+necessarily desirable as it might reflect the fact that SFT-
+Thiswouldstandincontrasttothecurrentsetupwherethe
+MAand13bmodelstendtogetstuckinearlylocalminima.
+numberoftunableparametersineachtensorisfixed.
+Wespeculatethatbetterschedulesfordroppingandgrowth
+mightalleviatethisissueinthefuture.
+Acknowledgments Alan Ansell wishes to thank David
+9Notethat“activationcheckpointing”isasynonymof“gradient andClaudiaHardingfortheirgeneroussupportviatheHard-
+checkpointing”. ing Distinguished Postgraduate Scholarship Programme.
+10Wenotethat,unlikeourqSFTimplementation,qLoRAem-
+This work has been in part supported by the UK Re-
+ploysapagedoptimizer,whichmightexplainwhythereisalarger
+search and Innovation (UKRI) Frontier Research Grant
+memoryreductionforqLoRA.WhileqSFTisalsocompatiblewith
+theuseofpagedoptimizers,weleavetheactualimplementation EP/Y031350/1(theUKgovernment’sfundingguaranteefor
+forfuturework. ERCAdvancedGrants)awardedtoAnnaKorhonen. Ivan
+Vulic´ hasalsobeensupportedbyapersonalRoyalSociety
+UniversityResearchFellowship‘InclusiveandSustainable
+LanguageTechnologyforaTrulyMultilingualWorld’(no
+221137;2022-). HannahSterzthankstheCambridgeTrust
+fortheirsupportviatheInternationalScholarship.
+9ScalingSparseFine-TuningtoLargeLanguageModels
+References atscale. InAdvancesinNeuralInformationProcessing
+Systems35: AnnualConferenceonNeuralInformation
+Almazrouei,E.,Alobeidli,H.,Alshamsi,A.,Cappelli,A.,
+ProcessingSystems2022,NeurIPS2022,NewOrleans,
+Cojocaru,R.,Debbah,M.,Goffinet,E.,Heslow,D.,Lau-
+LA,USA,November28-December9,2022.
+nay,J.,Malartic,Q.,Noune,B.,Pannier,B.,andPenedo,
+G. Falcon-40B:Anopenlargelanguagemodelwithstate-
+Dettmers,T.,Pagnoni,A.,Holtzman,A.,andZettlemoyer,L.
+of-the-art performance. Technical report, Technology
+QLoRA:EfficientfinetuningofquantizedLLMs. arXiv
+InnovationInstitute,2023.
+preprintarXiv:2305.14314,2023.
+Anil, R., Gupta, V., Koren, T., and Singer, Y. Memory-
+Evci, U., Gale, T., Menick, J., Castro, P. S., and Elsen,
+efficient adaptive optimization. In Proceedings of the
+E. Riggingthelottery: Makingallticketswinners. In
+33rd International Conference on Neural Information
+III,H.D.andSingh,A.(eds.),Proceedingsofthe37th
+ProcessingSystems,RedHook,NY,USA,2019.
+InternationalConferenceonMachineLearning,volume
+Ansell, A., Ponti, E., Korhonen, A., and Vulic´, I. Com- 119ofProceedingsofMachineLearningResearch,pp.
+posablesparsefine-tuningforcross-lingualtransfer. In 2943–2952,13–18Jul2020.
+Proceedings of the 60th Annual Meeting of the Associ-
+ation for Computational Linguistics (Volume 1: Long Guo,D.,Rush,A.,andKim,Y. Parameter-efficienttransfer
+Papers),pp.1778–1796,Dublin,Ireland,May2022. learning with diff pruning. In Proceedings of the 59th
+AnnualMeetingoftheAssociationforComputationalLin-
+Betzel, R. F., Medaglia, J. D., Papadopoulos, L., Baum, guisticsandthe11thInternationalJointConferenceon
+G.L., Gur, R., Gur, R., Roalf, D., Satterthwaite, T.D., NaturalLanguageProcessing(Volume1: LongPapers),
+andBassett,D.S. Themodularorganizationofhuman pp.4884–4896,Online,August2021.
+anatomicalbrainnetworks: Accountingforthecostof
+wiring. NetworkNeuroscience,1(1):42–68,2017. Hendrycks,D.,Burns,C.,Basart,S.,Zou,A.,Mazeika,M.,
+Song,D.,andSteinhardt,J. Measuringmassivemultitask
+Chen,M.,Tworek,J.,Jun,H.,Yuan,Q.,deOliveiraPinto,
+languageunderstanding. InInternationalConferenceon
+H. P., Kaplan, J., Edwards, H., Burda, Y., Joseph, N.,
+LearningRepresentations,2021.
+Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov,
+M.,Khlaaf,H.,Sastry,G.,Mishkin,P.,Chan,B.,Gray,
+Hoefler, T., Alistarh, D., Ben-Nun, T., Dryden, N., and
+S.,Ryder,N.,Pavlov,M.,Power,A.,Kaiser,L.,Bavar-
+Peste,A. Sparsityindeeplearning: Pruningandgrowth
+ian,M.,Winter,C.,Tillet,P.,Such,F.P.,Cummings,D.,
+for efficient inference and training in neural networks.
+Plappert,M.,Chantzis,F.,Barnes,E.,Herbert-Voss,A.,
+TheJournalofMachineLearningResearch,22(1):10882–
+Guss, W. H., Nichol, A., Paino, A., Tezak, N., Tang,
+11005,2021.
+J., Babuschkin, I., Balaji, S., Jain, S., Saunders, W.,
+Hesse, C., Carr, A. N., Leike, J., Achiam, J., Misra,
+Hooker,S. Thehardwarelottery. Communicationsofthe
+V., Morikawa, E., Radford, A., Knight, M., Brundage,
+ACM,64(12):58–65,2021.
+M., Murati, M., Mayer, K., Welinder, P., McGrew, B.,
+Amodei,D.,McCandlish,S.,Sutskever,I.,andZaremba, Houlsby, N., Giurgiu, A., Jastrzebski, S., Morrone, B.,
+W. Evaluating large language models trained on code. DeLaroussilhe, Q., Gesmundo, A., Attariyan, M., and
+arXivpreprintarXiv:2107.03374,2021. Gelly,S. Parameter-efficienttransferlearningforNLP.
+InChaudhuri,K.andSalakhutdinov,R.(eds.),Proceed-
+Clark, J. H., Choi, E., Collins, M., Garrette, D.,
+ings of the 36th International Conference on Machine
+Kwiatkowski,T.,Nikolaev,V.,andPalomaki,J.TyDiQA:
+Learning,volume97ofProceedingsofMachineLearn-
+Abenchmarkforinformation-seekingquestionanswering
+ingResearch,pp.2790–2799,09–15Jun2019.
+intypologicallydiverselanguages. Transactionsofthe
+Association for Computational Linguistics, 8:454–470,
+Hu, E. J., yelong shen, Wallis, P., Allen-Zhu, Z., Li, Y.,
+2020.
+Wang, S., Wang, L., and Chen, W. LoRA: Low-rank
+Cobbe,K.,Kosaraju,V.,Bavarian,M.,Chen,M.,Jun,H., adaptation of large language models. In International
+Kaiser,L.,Plappert,M.,Tworek,J.,Hilton,J.,Nakano,
+ConferenceonLearningRepresentations,2022.
+R.,Hesse,C.,andSchulman,J.Trainingverifierstosolve
+Ivison,H.,Wang,Y.,Pyatkin,V.,Lambert,N.,Peters,M.,
+mathwordproblems. arXivpreprintarXiv:2110.14168,
+Dasigi,P.,Jang,J.,Wadden,D.,Smith,N.A.,Beltagy,
+2021.
+I., and Hajishirzi, H. Camels in a changing climate:
+Dettmers,T.,Lewis,M.,Belkada,Y.,andZettlemoyer,L. EnhancingLMadaptationwithTulu2. arXivpreprint
+GPT3.int8(): 8-bitmatrixmultiplicationfortransformers arXiv:2311.10702,abs/2311.10702,2023.
+10ScalingSparseFine-TuningtoLargeLanguageModels
+Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford, C., Rebuffi,S.-A.,Bilen,H.,andVedaldi,A. LearningMultiple
+Chaplot,D.S.,delasCasas,D.,Bressand,F.,Lengyel, VisualDomainswithResidualAdapters. InGuyon, I.,
+G., Lample, G., Saulnier, L., Lavaud, L. R., Lachaux, Luxburg,U.V.,Bengio,S.,Wallach,H.,Fergus,R.,Vish-
+M.-A., Stock, P., Scao, T. L., Lavril, T., Wang, T., wanathan,S.,andGarnett,R.(eds.),AdvancesinNeural
+Lacroix,T.,andSayed,W.E. Mistral7B. arXivpreprint InformationProcessingSystems,volume30,2017.
+arXiv:2310.06825,2023.
+Sung,Y.-L.,Nair,V.,andRaffel,C.A. Trainingneuralnet-
+Kaplan, J., McCandlish, S., Henighan, T., Brown, T. B., workswithfixedsparsemasks. InRanzato,M.,Beygelz-
+Chess,B.,Child,R.,Gray,S.,Radford,A.,Wu,J.,and imer,A.,Dauphin,Y.,Liang,P.,andVaughan,J.W.(eds.),
+Amodei, D. Scaling laws for neural language models. AdvancesinNeuralInformationProcessingSystems,vol-
+arXivpreprintarXiv:2001.08361,2020.
+ume34,pp.24193–24205,2021.
+Kingma,D.P.andBa,J. Adam: Amethodforstochastic
+Suzgun, M., Scales, N., Scha¨rli, N., Gehrmann, S., Tay,
+optimization. In Bengio, Y. and LeCun, Y. (eds.), 3rd
+Y., Chung, H. W., Chowdhery, A., Le, Q. V., Chi, E.,
+InternationalConferenceonLearningRepresentations,
+Zhou,D.,andWei,J. Challengingbig-benchtasksand
+ICLR2015,SanDiego,CA,USA,May7-9,2015,Confer-
+whether chain-of-thought can solve them. In Rogers,
+enceTrackProceedings,2015.
+A., Boyd-Graber, J. L., and Okazaki, N. (eds.), Find-
+ings of the Association for Computational Linguistics:
+Lialin,V.,Deshpande,V.,andRumshisky,A. Scalingdown
+ACL2023,Toronto,Canada,July9-14,2023,pp.13003–
+to scale up: A guide to parameter-efficient fine-tuning.
+13051,2023.
+arXivpreprintarXiv:2303.15647,2023.
+Liu,H.,Tam,D.,Muqeeth,M.,Mohta,J.,Huang,T.,Bansal, Taori, R., Gulrajani, I., Zhang, T., Dubois, Y., Li,
+M.,andRaffel,C.A. Few-shotparameter-efficientfine- X., Guestrin, C., Liang, P., and Hashimoto, T. B.
+tuningisbetterandcheaperthanin-contextlearning. In Stanford Alpaca: An instruction-following LLaMA
+Koyejo, S., Mohamed, S., Agarwal, A., Belgrave, D., model. https://github.com/tatsu-lab/
+Cho, K., and Oh, A. (eds.), Advances in Neural Infor- stanford_alpaca,2023.
+mationProcessingSystems,volume35,pp.1950–1965,
+2022. Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+Longpre,S.,Hou,L.,Vu,T.,Webson,A.,Chung,H.W.,Tay, Bhosale,S.,Bikel,D.,Blecher,L.,Ferrer,C.C.,Chen,
+Y.,Zhou,D.,Le,Q.V.,Zoph,B.,Wei,J.,andRoberts, M.,Cucurull,G.,Esiobu,D.,Fernandes,J.,Fu,J.,Fu,W.,
+A. Theflancollection: Designingdataandmethodsfor Fuller,B.,Gao,C.,Goswami,V.,Goyal,N.,Hartshorn,
+effectiveinstructiontuning. InKrause,A.,Brunskill,E., A.,Hosseini,S.,Hou,R.,Inan,H.,Kardas,M.,Kerkez,
+Cho,K.,Engelhardt,B.,Sabato,S.,andScarlett,J.(eds.), V.,Khabsa,M.,Kloumann,I.,Korenev,A.,Koura,P.S.,
+InternationalConferenceonMachineLearning,ICML Lachaux,M.-A.,Lavril,T.,Lee,J.,Liskovich,D.,Lu,Y.,
+2023,23-29July2023,Honolulu,Hawaii,USA,volume Mao,Y.,Martinet,X.,Mihaylov,T.,Mishra,P.,Molybog,
+202ofProceedingsofMachineLearningResearch,pp. I.,Nie,Y.,Poulton,A.,Reizenstein,J.,Rungta,R.,Saladi,
+22631–22648,2023. K.,Schelten,A.,Silva,R.,Smith,E.M.,Subramanian,R.,
+Tan,X.E.,Tang,B.,Taylor,R.,Williams,A.,Kuan,J.X.,
+OpenAI. GPT-4 technical report. arXiv preprint
+Xu,P.,Yan,Z.,Zarov,I.,Zhang,Y.,Fan,A.,Kambadur,
+arXiv:2303.08774,2023.
+M.,Narang,S.,Rodriguez,A.,Stojnic,R.,Edunov,S.,
+andScialom,T.Llama2:Openfoundationandfine-tuned
+Peng,B.,Li,C.,He,P.,Galley,M.,andGao,J. Instruction
+chatmodels. arXivpreprintarXiv:2307.09288,2023.
+tuning with GPT-4. arXiv preprint arXiv:2304.03277,
+2023.
+Wang, E. Alpaca-LoRA: Instruct-tune LLaMA on con-
+Pfeiffer, J., Vulic´, I., Gurevych, I., and Ruder, S. MAD- sumer hardware. https://github.com/tloen/
+X:AnAdapter-BasedFrameworkforMulti-TaskCross-
+alpaca-lora,2023.
+LingualTransfer. InProceedingsofthe2020Conference
+onEmpiricalMethodsinNaturalLanguageProcessing Wang,Y.,Ivison,H.,Dasigi,P.,Hessel,J.,Khot,T.,Chandu,
+(EMNLP),pp.7654–7673,Online,November2020. K.R.,Wadden,D.,MacMillan,K.,Smith,N.A.,Beltagy,
+I.,andHajishirzi,H. Howfarcancamelsgo? Exploring
+Pfeiffer,J.,Ruder,S.,Vulic´,I.,andPonti,E. Modulardeep thestateofinstructiontuningonopenresources. arXiv
+learning. TransactionsonMachineLearningResearch, preprintarXiv:2306.04751,2023.
+2023.
+11ScalingSparseFine-TuningtoLargeLanguageModels
+A.HyperparameterSearch B.AnalysisoftheBackwardPassforSFT
+Wefirstperformedagridsearchover(i)learningrateand Considertheforwardpasswhensparselyfine-tuningalinear
+(ii)numberofPEFTparameters(determinedbyrankrfor layer. Wehave:
+LoRAandd forSFT),exceptfor(IA)3wherethisnumber
+ϕ
+is fixed. For SFT methods, we also wished to establish Y =X(W +∆), (12)
+a good value for (iii) weight decay strength λ. Since we
+generally obtained a good performance with the highest wheretheinputX ∈ Rb×din,thepretrainedweightmatrix
+testedequivalentrankofr =64,andbeingthemosthighly W anditssparsedelta∆ ∈ Rdin×dout,andtheoutputY ∈
+parameterized setting this was the most likely to benefit Rb×dout,withb,d in andd out beingthebatchsizeandinput
+fromregularization,wesearchedoverarangeofλvalues andoutputdimensionsrespectively. Itcanbeshownthat
+withrsetto64andthelearningratetothebestvaluefound
+∂L ∂L
+intheinitialsearch. =X⊤ . (13)
+∂∆ ∂Y
+We searched for the optimal learning rate in the range of
+{3×10−6,1×10−5,3×10−5,1×10−4}forLoRAand However, we only need the entries of ∂∂ ∆L correspond-
+SFT-AG, {4×10−4,7×10−4,1×10−3,2×10−3} for ing to the currently active indices of ∆. Let r ∈
+{1,2,...,h}N,c ∈ {1,2,...,w}N, where h and w are the
+SFT-MA(theSM3optimizergenerallybenefitsfromhigher
+learningratesthanAdam),and{1×10−5,3×10−5,1× height and width of ∆ respectively, denote the N active
+10−4,3×10−4}for(IA)3. indices of ∆, i.e. (r i,c i) denotes the position of the ith
+activeindexin∆. Then,ifwedefineg tobethegradient
+i
+AsforthenumberofPEFTparameters,wesearchedover ofthei-thactiveindexof∆,wehave
+theranger ={8,16,32,64}forLoRAandtheequivalent
+d for the SFT methods. For LLaMA2-7b, these values ∂L
+ϕ g = (14)
+correspond to 0.30%, 0.59%, 1.2% and 2.3% of the total i ∂∆
+ri,ci
+parametercountrespectively,andforLLaMA2-13b,they (cid:16) ∂L(cid:17)
+= X⊤ (15)
+correspondto0.24%,0.48%,0.95%and1.9%.
+∂Y ri,ci
+Wesearchedoverλvaluesintherange{0,1,3,10,30}for =X⊤ (cid:16)∂L(cid:17) . (16)
+SFT-AGand{0,0.1,0.3,1,3}forSFT-MA(sinceweuse :,ri ∂Y :,ci
+higher learning rates for SFT-MA, a lower weight decay
+Thatis,thegradientofthei-thsparseupdatetoW isgiven
+strengthisrequiredtohavethesameeffect).
+bythedotproductofther -thcolumnofX andthec -th
+i i
+Eachhyperparametersettingwasevaluatedbytrainingon columnofthegradientoftheoutputY. Wecancompute
+theFlanv2subsetandtakingthe5-shotperformanceonthe thegradientofthesparseupdatesinthismannerwithbN
+MMLUdevelopmentset. FLOPs,whichisanenormoustheoreticalimprovementover
+thebd d FLOPsrequiredtonaivelyperformthefullma-
+We present the full results of the hyperparameter search in out
+trix multiplication in (13) and gather the relevant indices
+inFigure4andsummarizethebestvaluesfoundforeach
+fromtheresult,astheSFTdensity N ≪1.
+configurationinTable4. dindout
+Whilecalculatingthesparsedeltagradientinthismanner
+entailsagreatreductioninFLOPsrequired,itisnotsoeasy
+LLaMA2-7b LLaMA2-13b
+toexploitthisreductioneffectivelyonaGPUtospeedthe
+Method lr r λ lr r λ operation up. Writing an efficient CUDA kernel for this
+(IA)3 3×10−4 - - 1×10−4 - - operationisongoingwork,andthespeedresultspresented
+LoRA 1×10−4 64 - 3×10−5 64 - inthispaperwereobtainedusingthenaive“gatherfromthe
+SFT-AG 1×10−4 64 30 1×10−5 64 30 fullmatrixproduct”method.
+SFT-MA 1×10−3 64 0.3 4×10−4 16 0
+FullFT 2×10−5 - - 2×10−5 - - C.MeasurementofMemoryandTime
+Requirements
+Table4.Optimal settings yielded by hyperparameter search for
+eachPEFTmethodandmodelsize. TomeasurethememoryrequirementsofPEFTmethods,we
+usePyTorch’sset per process memory fraction
+Forfullfine-tuning,weusethelearningrateof2×10−5 functiontolimitthetotalavailableGPUmemory,andper-
+fromWangetal.(2023).TofitthemodelintoasingleA100, formabinarysearchat1GiBgranularitytofindthelowest
+weadditionallyresorttoactivationcheckpointingandpaged limitatwhichtrainingcanrunsuccessfully. Foreachlimit
+optimization. wetest,werun30stepsofFlanv2trainingwith(equivalent)
+12ScalingSparseFine-TuningtoLargeLanguageModels
+LLaMA2-7b with SFT-AG, LLaMA2-7b with SFT-MA,
+LLaMA2-7b with LoRA weight decay strength = 0 weight decay strength = 0
+44.5 44.3 45.7 50.4 46.0 47.9 51.6 49.4 48.7 48.7 49.2 40.8
+44.2 44.9 46.6 49.4 45.7 47.7 50.4 50.8 48.5 48.5 50.1 49.6
+44.0 44.6 46.1 48.6 45.5 46.7 48.5 50.5 47.4 47.9 48.6 47.9
+44.4 44.7 46.6 48.5 44.5 45.9 47.3 49.6 46.8 47.7 48.0 47.7
+3e-6 1e-5 3e-5 1e-4 3e-6 1e-5 3e-5 1e-4 4e-4 7e-4 1e-3 2e-3
+Learning rate Learning rate Learning rate
+LLaMA2-13b with SFT-AG, LLaMA2-13b with SFT-MA,
+LLaMA2-13b with LoRA weight decay strength = 0 weight decay strength = 0
+55.8 55.1 56.9 55.2 55.9 56.5 55.4 53.4 56.3 55.6 55.8 54.5
+55.5 55.1 55.7 56.8 55.6 56.3 55.5 53.6 55.1 54.6 55.0 54.6
+55.1 54.9 55.9 56.0 55.1 56.6 55.1 54.3 56.0 55.1 55.6 53.7
+55.3 54.7 56.4 55.7 54.8 56.1 55.0 54.9 55.7 54.9 55.4 54.8
+3e-6 1e-5 3e-5 1e-4 3e-6 1e-5 3e-5 1e-4 4e-4 7e-4 1e-3 2e-3
+Learning rate Learning rate Learning rate
+LLaMA2-7b with SFT-AG, LLaMA2-7b with SFT-MA, LLaMA2-13b with SFT-AG,
+learning rate = 1e-4 learning rate = 1e-3 learning rate = 1e-5
+52.1 52.1 52.6 52.6 49.1 50.2 48.7 49.5 56.6 55.7 55.7 56.8
+1 3 10 30 0.1 0.3 1 3 1 3 10 30
+Weight decay strength Weight decay strength Weight decay strength
+LLaMA2-13b with SFT-MA,
+learning rate = 4e-4
+55.4 55.8 55.8 56.0
+0.1 0.3 1 3
+Weight decay strength
+Figure4. Hyperparametersearchresults.
+13
+knaR
+knaR
+knaR
+46
+46
+23
+61
+8
+46
+23
+61
+8
+knaR
+knaR
+knaR
+knaR
+46
+46
+46
+23
+61
+8
+46
+23
+61
+8
+knaR
+knaR
+knaR
+46
+46
+23
+61
+8
+46
+23
+61
+8ScalingSparseFine-TuningtoLargeLanguageModels
+LoRArank64. Wemeasurethetimeasthemeanduration
+of each of these 30 steps for the lowest passing memory
+limit. AllourexperimentsarerunonasingleA100GPU.
+Wenotethatthismaydifferfromthepeakmemoryusage
+during(unconstrained)training,sincedeeplearningframe-
+works such as PyTorch may allocate more memory than
+theyactuallyrequireforefficiencyreasons.
+14

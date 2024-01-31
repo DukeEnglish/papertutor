@@ -1,0 +1,1557 @@
+RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Rephrasing the Web:
+A Recipe for Compute and Data-Efficient Language Modeling
+PratyushMaini∗† SkylerSeto,∗HeBai,DavidGrangier,YizheZhang,NavdeepJaitly
+CarnegieMellonUniveristy Apple
+pratyushmaini@cmu.edu {sseto,hbai22,grangier,yizhe zhang,njaitly}@apple.com
+Abstract
+Largelanguagemodelsaretrainedonmassivescrapesoftheweb,whichare
+oftenunstructured,noisy,andpoorlyphrased. Currentscalinglawsshow
+thatlearningfromsuchdatarequiresanabundanceofbothcomputeand
+data,whichgrowswiththesizeofthemodelbeingtrained. Thisisinfeasi-
+blebothbecauseofthelargecomputecostsanddurationassociatedwith
+pre-training,andtheimpendingscarcityofhigh-qualitydataontheweb.
+Inthiswork,weproposeWebRephraseAugmentedPre-training(WRAP)
+thatusesanoff-the-shelfinstruction-tunedmodelpromptedtoparaphrase
+documents on the web in specific styles such as “like Wikipedia” or in
+“question-answerformat”tojointlypre-trainLLMsonrealandsynthetic
+rephrases. First,weshowthatusingWRAPontheC4dataset,whichis
+naturallynoisy,speedsuppre-trainingby∼3×. Atthesamepre-training
+compute budget, it improves perplexity by more than 10% on average
+acrossdifferentsubsetsofthePile,andimproveszero-shotquestionanswer
+accuracy across 13 tasks by more than 2%. Second, we investigate the
+impactofthere-phrasingstyleontheperformanceofthemodel,offering
+insightsintohowthecompositionofthetrainingdatacanimpacttheper-
+formanceofLLMsinOODsettings. Ourgainsareattributedtothefactthat
+re-phrasedsyntheticdatahashigherutilitythanjustrealdatabecauseit
+(i)incorporatesstylediversitythatcloselyreflectsdownstreamevaluation
+style,and(ii)hashigher‘quality’thanweb-scrapeddata.
+1 Introduction
+Largelanguagemodel(LLM)pre-traininghasbeenlargelydemocratizedandopen-sourced,
+allowingvariousacademiclabs,andindustriestopre-traincustomLLMs. Yet,akeydiffer-
+entiatorbetweenthesemodelsisthecompositionandsizeofthedatausedtotrainthem.
+Datacurationstrategiesarerequiredtofilteroutscrapesofthewebthatareunstructured
+and/orpoorlyphrased(Eisenstein,2013). Whilesomeofthesestrategieshavebeenmade
+public(Brownetal.,2020;Wenzeketal.,2020;Penedoetal.,2023),moststate-of-the-artdata
+curationtechniquesareunknowntotheresearchcommunity,andonlyanecdotalevidence
+remains. Researchondatacurationrequiresmultipleroundsofre-training,makingitan
+expensiveendeavourtodocumenttechniquesthatleadtopracticalimprovements. Onthe
+otherhand,scalinglawsforlanguagemodels(suchasChinchillascalinglaws(Hoffmann
+etal.,2022))showthatwithincreasingmodelsizes,weshouldalsoincreaseboththetraining
+computeanddatasizelinearly. Thisisinfeasiblebecause(a)high-qualitydataislimited
+(Villalobosetal.,2022),andrepeatingforevenasmallnumberofepochs(4ormore)results
+indiminishingreturnsoroverfitting(Muennighoffetal.,2023;Touvronetal.,2023;Xue
+etal.,2023);and(b)pre-trainingforsuchlongdurationsisprohibitivelyexpensive.
+Meanwhile,theuseofsyntheticdatahasgainedprominenceintheparadigmofaligning
+pre-trainedLLMsviainstructionfine-tuning,RLHF(Ouyangetal.,2022),andinstruction
+backtranslation (Li et al., 2023b). Recently, in the context of pre-training, synthetic data
+∗EqualContribution
+†WorkdoneduringinternshipatApple
+1
+4202
+naJ
+92
+]LC.sc[
+1v08361.1042:viXraRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+48 30 Recipe: WRAP C4
+47 ~3x Faster 25 MMooddeell SSiizzee:: 335500MM 11..33BB
+46
+20
+45
+44 15
+43
+10
+42 WRAP-85B (ours)
+C4-85B
+5
+41 C4-170B
+RW-300B
+40 0
+0 100 200 300 85 35 18 170 150 85 75
+Tokens seen (in Billions) Data Pool Size (Billion Tokens)
+(a)
+(b) (c)
+Figure1: (a)WRAPRecipe: Wepromptanoff-the-shelfinstruction-tunedmodeltorephrase
+articles on the web, and pre-train an LLM on a mixture of real and synthetic data. (b)
+Zero-shotperformanceofGPT1.3BmodelstrainedoncombinationsofC4andsynthetic
+variations. Eachstepcorrespondstoabatchof1Msamples. (c)Weightedaverageperplexity
+over21sub-domainsofthePileforvaryingmodelsizesandamountofpre-trainingdata.
+wasusedtogeneratedatasetssuchasTinyStories(Eldan&Li,2023)andTextbookquality
+syntheticdata(Gunasekaretal.,2023;Lietal.,2023c). Thesewereusedtotrainsmaller
+languagemodels(likethePhimodelfamily)thatwereasperformantaslargerlanguage
+models on certain tasks. However, their data generation process stays largely opaque,
+andprohibitivelyexpensive,requiringpromptingaGPT-3.5modelforgeneratingbillions
+of tokens. Additionally, such data generation can create a large “knowledge bias” by
+specificallygeneratingdatapertainingtotasksthatwewanttoperformwellon. While
+syntheticdatahasshownpromise,itisunclearifthisisbecauseofthehigherqualitynature
+ofsyntheticdata,orbecauseofstrategictopicselection(Maini,2023).
+Inthiswork,weproposeWebRephraseAugmentedPre-training(WRAP)—thatattempts
+tobridgethreeimportantchallengesstemmingfromtheambiguityarounddatacuration—
+(i)whatdatashouldyoupre-trainon? (ii)howcanyoupre-trainwithlimiteddata? (iii)
+howcanyoupre-traincomputationallyefficiently? Inparticular,weshowthatre-phrasing
+documents on the web using an off-the-shelf medium size LLM allows models to learn
+muchmoreefficientlythanlearningfromrawtextontheweb,andaccountsforperformance
+gainsonoutofdistributiondatasetsthatcannotbeoffsetwithadditionalwebdata. Our
+proposedmethodinvolvesusingapre-trainedoff-the-shelfLLMtore-phrasedocuments
+fromawebcorpusintodifferentstyles. AnoverviewofourapproachisshowninFigure1a.
+Inourwork,wetackletwoimportantchallengesfacedduringsyntheticdatacurationinthe
+worksofGunasekaretal.(2023)—generationcost,anddatabias—byrephrasingarticleson
+theweb. (i)WRAPallowsforusinganopensource,andmuchsmallerLLM(1.8B/7Bv/s
+GPT3.5)torephraseunstructuredandpoorlyphraseddocumentsindifferentstyles,sinceit
+doesnotrelyontheLLMasaknowledgebank. (ii)Thankstotheinformationmaintaining
+natureofrephrasing,weareabletoleveragethenaturaldiversityoftheweb,ratherthan
+relyingonanLLMforinformationwhichmaybepronetofactualerrors,and/ordatabiases.
+Ourworkshowsthatthe“style”alonecanresultinlargegainsindownstreamperformance.
+UsingWRAPontheC4,weevaluatemodelperformanceon13differentzero-shottasks,and
+21differentlanguagemodelingdomainsofthePile,andfindthatpre-trainingLLMswith
+syntheticdataallowsustotrainequivalentmodelswith5xlesserdata,or3xlessercompute.
+Infact,oursyntheticdatatrainedmodels,alsooutperformtherecentTinyLLamamodels
+thatweretrainedfor3trilliontokens(10xdataandcompute)acrossseveralzero-shotQ/A
+tasks. Wefurtherobserveareductioninperplexityby∼50%onthePile,andnotethatour
+350Mparametermodeltrainedoncombinationsofrealandsyntheticrephrasesonjust15%
+oftheentireC4corpus,outperformspre-traininga1.3BparameterontheentireC4. Finally,
+weconductananalysisonthepotentialofdataleakage,propertiesofsyntheticdatastyles,
+andhowtocombinesyntheticdataforimprovingWRAPbasedLLMpre-training.
+2
+ycaruccA
+tohsoreZ
+.gvA
+ELIP
+eht
+no
+ytixelpreP
+.gvARephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+2 RelatedWork
+NeuralScalingLawsforLanguageModels Neuralscalinglawsrelatetheoptimalnumber
+ofmodelparametersandamountoftrainingdataforafixedamountofcompute. Hoffmann
+etal.(2022)presentedtheChinchillascalinglawsforlanguagemodelsdemonstratingthat
+therewasalinearrelationshipbetweenthesizeofthemodelandtheamountoftraining
+dataneeded. TheirfindingsindicatedthatpriormodelssuchasGopher(Raeetal.,2021)
+areseverelyundertrained. Recently,modelssuchasLlama(Touvronetal.,2023)aretrained
+withmuchmoredata. Thesescalinglawsweredrawnfortheparadigmofsingle-epoch
+training. Recently,Muennighoffetal.(2023)showedthatthemarginalutilityofrepeated
+data rapidly diminishes when training for more than 4 epochs, and formulated scaling
+lawsunderrepeateddata. Concurrently,Xueetal.(2023)showedthatrepeatingevensmall
+fractionsofthepre-trainingdatacanleadtooverfittingandreducemodelperformance.
+DatasetSelection Selectinghighqualitydataforpre-trainingLLMsremainsanactive,
+high-impact,yetunderstudiedareaofresearch. Forinstance,GPT-2modelwaspre-trained
+on all outbound links from Reddit, a social media platform, which received at least 3
+karma(Brownetal.,2020). Thiswasusedasaheuristicindicatorthatthedocumentmay
+beinteresting,educational,orjustfunny. Follow-upworkshaveusedotherheuristicssuch
+as prioritizing documents that resemble wikipedia (Gururangan et al., 2022). Rae et al.
+(2021)usedmultipleheuristicfilterstoremovedocuments,suchastheabsenceofcertain
+stopwords,lengthofthedocument,percentageofalphabeticcharacters,meanwordlength,
+symbol-to-wordratio,percentageoflinesstartingwithabulletpoint,orendingwithan
+ellipsisetc. Theirworkhighlightstheintricaciesoffilteringouttextdata. Analternative
+paradigm for building better datasets for training is to distill high-quality datasets. Xie
+etal.(2023)proposedamethod,DoReMi,toselectthebestdatamixtureforpre-training
+languagemodelsbyreweightingdatafromvariousdomains. Concurrently,Abbasetal.
+(2023)showedthatde-duplicatingpre-trainingdatacanimprovepre-trainingefficiency.
+Recently several methods were proposed for automatic filtering of low-quality data for
+fasterfine-tuningofLLMs(Chenetal.,2023;Solaiman&Dennison,2021;Zhouetal.,2023).
+Simultaneously,intherealmofimage-languagemodelssuchasCLIP(Radfordetal.,2021),
+theDatacompbenchmark(Gadreetal.,2023)andrecententries(Mainietal.,2023;Yuetal.,
+2023) have developed approaches at filtering out low-quality subsets from pre-training
+datasetslikeLAION(Schuhmannetal.,2022),orfromscrapesofthecommoncrawl.
+DataAugmentationandsyntheticdata Eldan&Li(2023)showedthatasynthetically
+generateddatasetintheformofstoriesthattoddlerscanunderstandallowstrainingasmall
+languagemodelthatcangeneratecoherentsentences. Gunasekaretal.(2023)showedthat
+textbookquality(synthetic)dataalonehelpsmodelsachievestate-of-the-artperformanceon
+reasoningandcodingtasks. Similarapproachesareusedinconcurrentworkforenhancing
+codingandmathematicalreasoningabilitieswhilefinetuningLiuetal.(2023a);Weietal.
+(2023). Shumailovetal.(2023)showthattrainingonsyntheticdatacanactuallybeharmful
+formodelperformance,especiallywhenwedomultipleroundsofpre-traininganLLMand
+thentrainingthenextLLMondatageneratedbythepreviousone. Ontheotherhand,some
+otherworkshaveshownthatsuchastrategycanactuallybeuseful. Lietal.(2023b)and
+Ko¨ksaletal.(2023)discusshowamodelcangenerateinstructiondataandthenfine-tune
+onitsowngenerateddatatoimproveperformance. Jungetal.(2023)discusshowsuch
+repeatedcyclesofsyntheticdatacanhelptrainaverysmallparaphraseandsummarization
+modelthatevenoutperformsGPT-3.
+Thevisionandmultimodalliteratureshavealsoseenasurgeofworksexaminingtheuse
+ofsyntheticdatafortraining. TheworksofBansal&Grover(2023);Trabuccoetal.(2023);
+Azizi et al. (2023) have shown that using synthetic data in combination with real data
+achievesstateofartmodelperformancebothin-distributionandout-of-distribution. Cubuk
+etal.(2020)usedgenerativemodelstogenerateimageaugmentationsforbetterdomain
+generalization. Therearealsomultiplestudiesonincreasingmultiplicityofaugmentations
+andtheirvalueforimprovinggeneralization(Choietal.,2019;Fortetal.,2021;Hofferetal.,
+2020). However, Alemohammadetal.(2023)showedthatgeneratedmodelstrainedfor
+morethanfivecyclesoftheirowngenerateddatacanundergoseveremodecollapse.
+3RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+3 WRAP:WebRephraseAugmentedPretraining
+Generatingsyntheticdatausinganoff-the-shelflanguagemodelcanbebothcomputation-
+ally expensive and operationally challenging. Prior approaches to generating synthetic
+textbookqualitydatausingLLMs(Gunasekaretal.,2023)required(1)alanguagemodel
+thatcontainssufficientworldknowledgetogeneratearticlesworthtrainingon,thereby
+increasinggenerationcost;(2)acarefulselectionofpromptsthatenablegeneratinghigh
+quality, and diverse articles that fill any knowledge gaps in the synthetic corpus. This
+challengewashighlightedinfollow-upworkofLietal.(2023c),andhasthepotentialof
+inadvertentlycreepinginbiasesinthelanguagemodels(Maini,2023),asopposedtothose
+trainedonthenaturaldiversityoftheweb. Asaremedytothechallengeof(i)generation
+cost, and (ii) data diversity, we propose WRAP that leverages the natural diversity of
+articles on the web, allowing us to utilize significantly smaller LLMs (than GPT-3.5) to
+generatehigh-qualityparaphrasesofnoisyandunstructuredarticlesontheweb.
+3.1 RephrasingtheWeb
+Ithasbeenobservedinpastworkthatup-weightinghigh-qualitydata,suchastextsfrom
+Wikipedia,canbeusefultoimprovelanguagemodeling. Thesetermshavegenerallybeen
+verylooselydefinedandthereisonlyanecdotalevidenceofthesame(Brownetal.,2020;
+Wenzeketal.,2020). Atthesametime,webdataisdeficientoftextinquestion-answeringor
+conversationalformat,whichisaprominentusecaseoflanguagemodels. Basedonthese
+twoinsights,wedesigntherephrasingstylesforourwork.
+RephrasingStyles Inlieuoftheanecdotalevidenceabove,weattemptrephrasingdocu-
+mentsonthewebinfourdifferentstyles—(i)Easy(textthatevenatoddlerwillunderstand);
+(ii)Medium(inhighqualityEnglishsuchasthatfoundonWikipedia);(iii)Hard(interse
+and abstruse language); (iv) Q/A (in conversation question-answering format). In or-
+dertooperationalizerephrasinginthesestylisticvariations,weappropriatelypromptan
+instruction-tuned model. The rephrased examples of these four styles and the prompts
+templatesusedinourworkareprovidedinAppendixG.
+GeneratingSyntheticData Now,wedetailhowweutilizeaninstruction-tunedlanguage
+modeltorephrasetextsfromweb-crawleddatasetssuchasC4(Raffeletal.,2020)(which
+weuseforallourexperiments). Inparticular,weuseafrozenMistral-7Binstruction-tuned
+model(Jiangetal.,2023)(seeAblationsinSection6forothermodels). Togeneratesynthetic
+datain“medium”style, theMistralmodelispromptedusingthefollowinginstruction:
+“Forthefollowingparagraphgivemeaparaphraseofthesameinhigh-qualityEnglishlanguage
+asinsentencesonWikipedia”. Thepromptwascreatedusingiterativehumanfeedbackby
+comparingoutputsof‘medium’sizedLLMswiththoseofGPT-4. Weusethemodeloutput
+tocreateaparallelcorpusof“high-quality”syntheticdatacorrespondingtotheoriginal
+noisywebdata. Eachexamplehasamaximumof300tokens,whichwasdecidedbasedon
+ourempiricalobservationthataskinganLLMtorephrasemorethan300tokens,oftenled
+tolossofinformation. DiscussionsondataqualitycanbefoundinSectionC.
+CombiningRealandSyntheticData Ourmethodofre-phrasingwebdatanaturallyincor-
+poratestheinformationdiversityfoundontheinternet. However,itdoesnotincorporate
+thenoiseinrealdata. WhilesyntheticdatamayhelpLLMspre-trainfaster,wealsowant
+themtobeabletounderstandnoisywebtextthatmaybefilledwithtyposandlinguistic
+errorssothattheLLMsdonotfailinuserfacingsituations. Inordertoincorporatethisstyle
+diversityinlanguagemodeling,wesamplerealandsyntheticdataina1:1ratio.
+3.2 ImplementationDetails
+Architecture Wetraindecoder-onlytransformermodels (Vaswanietal.,2017)atthree
+differentscales,small,mediumandXL.Thesmall-scale(128Mparameter)modelconsistsof
+12layers,12attentionheads,andahiddendimensionsizeof768. Themedium-scale(350M
+parameter)modelconsistsof24layers,16attentionheads,andahiddendimensionsize
+4RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+C4-170B
+C4-85B
+60 C4+QA-85B
+40
+20
+0
+Figure2: WRAP(C4+QA-85B)v/sC4: ComparisonofperplexityonthePilefora1.3B
+LLMtrainedfor300BtokensshowsthatWRAPoutperformsmodelstrainedon2xrealdata.
+of1024. TheXL-scale(1.3Bparameter)modelconsistsof24layers,16attentionheads,and
+ahiddendimensionsizeof2048. Wedonotusedropoutineithermodelandamaximum
+sequencelengthof1024. ThemodelsaretrainedusingNVIDIA’sMegatron-LMrepository.
+Pre-training WetrainallourXLmodelsforatotalof300kstepswithabatchsizeofone
+milliontokens,unlessotherwisespecified. Weuseamaximumlearningrateof3e−4forthe
+128M,and350Mparametermodels,and2e−4forthe1.3Bparametermodel. Theminimum
+learningrateis1e−5. Weuseaweightdecayof0.01,alongwithagradientclippingnormof
+1.0. Weusecosinelearningrateschedulerwithawarmupfor1%ofthetotalsteps;andthe
+Adamoptimizerwithβ =0.9andβ =0.999.
+1 2
+4 PerplexityEvaluation
+Weevaluatetheperplexityofthepre-trainedmodelonthevalidationsetofmultipleout-of-
+distributiondatasets. AllmodelsareeithertrainedontheC4dataset(Raffeletal.,2020),or
+aparticularstylisticrephraseofthesame. Alltheevaluationsaredoneon21sub-domains
+ofthePile(Gaoetal.,2020). Thesesubsetsarecreatedfromthefirst10,000documentsfrom
+each domain of the Pile dataset. We then evaluate the perplexity of the model on these
+subsets. AdditionalevaluationdetailsareprovidedinAppendixD.Itisimportanttonote
+thatweevaluateperplexitiesonthePileinsteadofC4. Trainingonmultipledistributionsof
+text(syntheticandrealweb)doescomeatasmallcostoflessthan1perplexityontheC4
+validationset. Tounderstandourchoiceofevaluation,andwhyweobservethisperplexity
+increase,wenotethattrainingovertheC4corpuscorrespondstominimizingtheobjective
+θ
+c4
+=m θinE x∼Dc4[L(θ;x)], (1)
+thatattemptstoexactlymodeltheC4webtext. Incontrast,trainingovermultiplestyles
+correspondstominimizingtheriskoveradifferentdistribution,
+θ
+WRAP
+=m θinE x∼Dc4∪Dsyn[L(θ;x)]. (2)
+Solvingforequation2doesnotminimizetheriskoverC4-only,andhenceitisunfairto
+compareθ andθ ontheC4. FormeaningfullycomparingmodelstrainedontheC4
+c4 WRAP
+andonitssyntheticrephrases,weevaluatetheirgeneralizationcapabilityon21different
+domainsofthePile(Gaoetal.,2020). ResultsforeachdomainarepresentedinFigure2.
+5
+ytixelpreP
+egarevA ikiW 2TWO 2skooB skooB viXrA XkcatS buhtiG htaM sweNH nornE C-dembuP utnubU A-dembuP waLeerF HIN OTPSU 91-GP lihP ebutuoY sbuSnepO CCRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+DataComplexity InFigure1c,weshowthatmodelstrainedforfewertokens(150B)and
+evensmaller350MmodelsoutperformtrainingonthefullC4for300Btokensindicating
+fasterlearningwithsyntheticrephrases. OnsomedomainssuchasArXivandHackerNews,
+weobservethattrainingwithsyntheticdataallowsreducingtheperplexitybynearly3x
+oftheperplexityofmodelstrainedonrealdataalone. Thissuggeststhatinmanycasesit
+maynotbepossibletooffsettheperformanceadvantageofpre-trainingonsyntheticdata
+bymerelytrainingonmorerealdata. Overall,onanaverageofmultiplesubsetsofthePile,
+ourmodelsimproveperplexityby50%overmodelstrainedonrealdataalone.
+LearningSpeed Weobservethatevenatthefirstcheckpoint(10Btokens)ofWRAPtrain-
+ing,theaverageperplexityoftheLLMonthePileislowerthanthatachievedbypre-training
+onC4for15checkpoints.Thissuggestsa15xpre-trainingspeed-up.Wedeferthediscussion
+onlearningspeedto‘zero-shot’tasksinordertomakemoremeaningfulcomparisons.
+5 Zero-shotTasks
+Wenowevaluateourpre-trainedlanguagemodelsonvariouszero-shotquestionanswering
+(QA)benchmarksusingtheLLMEvaluationHarness1(Gaoetal.,2023).
+5.1 Datasets
+We evaluate our models on a total of 13 different zero-shot benchmarks to assess their
+abilitiesacrossvariousnaturallanguagetaskslikecommonsensereasoning,languageand
+knowledgeunderstandingandmathematicalreasoning.
+GeneralUnderstanding TheGeneralUnderstandingcategorycomprisesdatasetstesting
+broadercognitiveskillsandlanguagecomprehension. ARCEasy(ARC-E)(Clarketal.,
+2018)isthelesschallengingcounterpartofARC-C,featuringquestionsthatrequirebasic
+reasoningskills. BoolQ(Clarketal.,2019)includesbooleanquestionsthatfocusonreading
+comprehension and general language understanding. Winogrande (Wino.) (ai2, 2019)
+challenges models with common sense reasoning in language, particularly in pronoun
+disambiguation. PIQA(Bisketal.,2020)assessesunderstandingofphysicalprocesses,an
+essentialpartofpracticalcommonsense. HellaSwag(Zellersetal.,2019)teststheability
+tocompletescenarioscoherently,demandingbothlanguageunderstandingandcommon
+sense. TruthfulQA(Linetal.,2021)iscenteredongeneratingtruthful,accurateanswers,
+thustestingthemodel’sfactualcorrectness. OpenBookQA(OBQA)(Mihaylovetal.,2018)
+evaluatestheunderstandingofabroadrangeoffactsandconcepts. Finally,LogiQA-2(Liu
+etal.,2023b)assessesthemodel’scapacitytocomprehendandapplylogicalprinciples.
+SpecializedKnowledge IntheSpecializedKnowledgecategory,weincludedatasetsthat
+demandexpertiseinspecificdomains. TheARCChallenge(ARC-C)(Clarketal.,2018)
+contains challenging science exam questions from grades 3 to 9, demanding advanced
+knowledge. SciQ (Johannes Welbl, 2017) provides science exam questions to test mod-
+els’understandingandreasoninginthescientificdomain. PubMedQA(Jinetal.,2019)
+focusesonbiomedicalliterature,assessingcomprehensioninmedicalandhealth-related
+information. MathQA(Aminietal.,2019)testsmathematicalproblem-solving,requiring
+bothnumericalcomprehensionandreasoning.Lastly,MMLU(Hendrycksetal.,2021)spans
+multipledomains,fromprofessionaltoacademic,testingthemodelonspecializedsubjects.
+5.2 Results
+Wecomparetheperformanceofamodeltrainedonamixtureofrealandsyntheticdata
+with models trained on various splits of real data. In all our experiments, we use the
+C4(Raffeletal.,2020)datasetforrephrasingandproducingsplitsofsyntheticdata. We
+use the abbreviation ‘Real Tok.’ to denote the number of tokens of web data available
+1Weusegitcommit-89618bf8forconsistencyacrossallexperimentswithabatchsizeof32.
+6RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Dataset(RealTok.) ARC-E BoolQ Wino. PIQA HellaSwag TruthfulQA OBQA LogiQA Avg
+HalfC4(85B) 61.2 59.1 57.3 74.9 46.5 34.1 22.4 23.5 47.4
+FullC4(170B) 61.6 54.2 59.0 74.9 46.8 33.5 25.0 23.4 47.3
+RW(160B) 61.6 60.7 57.5 74.3 45.2 36.8 21.8 23.2 47.6
+RW(320B) 60.7 61.1 57.1 74.4 45.6 36.0 22.6 22.5 47.5
+Pythia-Pile(300B) 60.5 63.3 57.5 70.8 40.4 38.9 22.2 22.2 47.0
+TinyLlama(1T) 60.3 57.8 59.1 73.3 45.0 37.6 21.8 24.5 47.4
+Synthetic(85B) 63.9 60.0 58.8 76.1 45.2 44.0 23.0 24.1 49.4
+Synthetic+C4(85B) 64.1 62.2 58.9 75.4 46.2 40.6 24.1 23.9 49.4
+Table1:Evaluationof∼1.3BparameterLLMson‘GeneralUnderstandingTasks’ondatasets
+focusingongeneralreasoning,languageunderstanding,andcommonsense. Resultsfor
+WRAPareaveragedover3runs
+Dataset(RealTok.) ARC-C SciQ PubMedQA MathQA MMLU Avg
+HalfC4(85B) 26.3 84.5 57.2 23.4 24.2 43.1
+FullC4(170B) 26.8 85.0 57.4 24.3 23.9 43.5
+RW(160B) 27.2 87.2 56.2 24.1 25.9 44.1
+RW(320B) 27.8 88.0 57.4 23.0 25.4 44.3
+Pythia-Pile(300B) 26.1 86.6 60.6 25.2 24.3 44.6
+TinyLlama(1T) 27.8 88.9 61.4 24.1 25.8 45.6
+Synthetic(85B) 29.7 87.0 60.2 23.4 24.6 45.0
+Synthetic+C4(85B) 29.9 87.6 61.5 23.9 24.8 45.5
+Table2:Evaluationof∼1.3BparameterLLMson‘SpecializedKnowledgeTasks’thatrequire
+specificdomainknowledgesuchasscience,medicine,mathematics,andlogic. Resultsfor
+WRAPareaveragedover3runs.
+forpre-training. Inthe‘Synthetic+Real’experiments,weaugmentthesamenumberof
+syntheticrephrases. Wechoose‘RealTokens’asthemetricofcomparisonbecausewecan
+potentiallyrephrasethesamedocumentmultipletimes,implyingthatthetotalcorpussize
+isnotmeaningful,andcorpus‘knowledge’istheactualcurrencyofinterest.
+BaselinesMethods Wepre-trainLLMsof(i)HalfofC4,andthe(ii)FullC4corresponding
+to approximately 85 Billion and 170 Billion real tokens respectively (Raffel et al., 2020).
+We also pre-train our own models on (iii) 160 Billion and (iv) 320 Billion tokens of the
+RefinedWeb Dataset (Penedo et al., 2023). Additionally, we also compare with the (iv)
+Pythia-1.4BmodelthatwastrainedonthePile(Gaoetal.,2020). Thisdatasetisnolonger
+publiclyavailable,henceweutilizeapre-trainedmodel. Finally,wealsocomparewiththe
+recent(v)TinyLlamamodel(Zhangetal.,2024)thatwastrainedfor3epochson1Trillion
+tokensofdatafromSlimPajama(Shenetal.,2023)andStarCoder(Lietal.,2023a).
+GeneralImprovements AcrossalltasksinTable1,weobservethatmodelstrainedon
+synthetic data combined with the C4 dataset (Synthetic+C4) exhibit an overall higher
+averageperformanceof49.4%ascomparedtothosetrainedsolelyontherealC4dataset
+witha85Btokensplit,whichscoredanaverageof47.4%. Thisshowsthattheinclusionof
+syntheticdatacanenhancethegeneralunderstandingcapabilitiesofNLPmodels.Moreover,
+eventheTinyLLamamodeltrainedfor10xcomputeanddata,performscomparablytothe
+othermodelstrainedonrealdata. Thissuggeststhatthegainsfromfilteringout,oradding
+morerealdataareverylow. Asopposedtothis,WRAPshowsthatpre-trainingoneven
+smallamountsofsyntheticdatacancontributetolargeperformancegains.
+SpecializedKnowledgeTasks ThekeymessagefromtheresultsinTable2isthatsynthetic
+datacannotimpart‘newknowledge’. Itcanonlyhelppre-trainfaster,whichwasalsothe
+premiseofourwork. Inparticular,wenoteseveralkeyfindings:
+1. Pre-trainingonlargerdatasetshelpsimproveperformance,bypresumablyexposing
+theLLMtomore“knowledge”. Forinstance,thePythia(300B)modelachievesan
+averagescoreof44.6%,outperformingthesmallerC4(85B)dataset’sscoreof43.5%.
+7RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+50 C4+QA-35B
+C4+Med-35B
+40 QA-35B
+Med-35B
+30
+20
+10
+0
+Figure3: ImportanceofRealData: ComparingperplexityonthePilewhenpre-training
+onC4withsyntheticdatavs. syntheticdataonly. Modelsare1.3Bparameterstrainedfora
+totalof150Btokensonarealdatasubsetcontaining35BilliontokensoftheC4.
+Dataset(RealTok.) ARC-E BoolQ Wino. PIQA HellaSwag TruthfulQA OBQA LogiQA Avg
+Med+C4-35B 59.8 57.0 55.7 74.6 44.5 36.5 23.8 21.5 46.7
+QA+C4-35B 62.2 63.3 55.7 74.8 44.6 41.4 22.4 23.2 48.4
+Med-35B 56.6 59.5 53.4 74.0 41.9 36.3 22.2 22.7 45.8
+QA-35B 61.7 62.0 53.9 75.2 43.4 43.0 22.8 23.4 48.2
+Table3: ImportanceofRealData: Evaluationof∼1.3BparameterLLMstrainedfor150B
+tokensonGeneralUnderstandingTasks. Resultsshowthataddingrealdatahelpsimprove
+modelperformancewhenpre-trainingon‘Medium’or‘Wikipedia-style’paraphrases.
+2. Despite the advantages of a larger dataset, the improvements saturate. For ex-
+ample,RefinedWeb(320B)modeloutperformstheRefinedWeb(160B)modelby
+only0.2%. Similarly,theTinyLlamamodel(1Ttokens)performscomparablytothe
+WRAP model,whichonlyhad85Btokensofrawwebdata.
+SpecificImprovements WeseemaximumimprovementintheTruthfulQAdataset,with
+the Synthetic (85B) model scoring 44.0%, which is significantly higher than any other
+model’sperformanceonthisdataset. Thisispotentiallybecauseinstruction-tunedLLMs
+alreadycorrectpotentialmisconceptionswhilerephrasingthetext. Interestingly,wenotice
+howaddingrealdatatothesyntheticmodel(Synthetic+C4)reducestheperformanceon
+TruthfulQAby4%,downto40.5%,indicatingapotentialdilutionofthebenefitsgained
+fromsyntheticdatawhencombinedwithrealdata. OtherdatasetssuchasHellaSwag,and
+BoolQ,forwhichC4trainedmodelsdowell,continuetoshowthebenefitsofincorporating
+combinationsofC4andsyntheticrephrases.
+6 AnalysisandAblations
+WefurtheraskthefollowingResearchQuestions(RQs)toinvestigateinafinergranularity
+howtoenhanceperformanceoptimally.
+6.1 DataCombinationAnalysis
+RQ1: How important is it to have real C4 data? Our findings in Tables 1–2indicate
+that synthetic data using the QA prompt are sufficient for strong performance on QA
+8
+ytixelpreP
+egarevA ikiW 2TWO 2skooB skooB viXrA XkcatS buhtiG htaM sweNH nornE C-dembuP utnubU A-dembuP waLeerF HIN OTPSU 91-GP lihP ebutuoY sbuSnepO CCRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Dataset(RealTok.) ARC-C SciQ PubMedQA MathQA MMLU Avg
+Med+C4-35B 27.2 82.2 46.2 23.1 25.2 40.8
+QA+C4-35B 29.0 85.1 62.2 22.5 26.1 45.0
+Med-35B 27.0 80.0 59.4 22.5 24.7 42.7
+QA-35B 27.1 85.5 59.2 22.2 25.0 43.8
+Table4: ImportanceofRealData: Evaluationof∼ 1.3BparameterLLMsonSpecialized
+KnowledgeTasks. Resultsshowthataddingrealdatahelpsimprovemodelperformance
+whenpre-trainingon‘Q/A-style’paraphrases.
+Dataset(RealTok.) ARC-C SciQ PubMedQA MathQA MMLU Avg
+Med+C4-35B 27.2 82.2 46.2 23.1 25.2 40.8
+QA+C4-35B 29.0 85.1 62.2 22.5 26.1 45.0
+Combined-1:1-35B 28.2 85.9 61.2 23.2 23.9 44.5
+Combined-1:2-35B 29.0 85.7 57.4 23.5 23.1 43.7
+Table5: Combiningmultiplestyles: Evaluationof∼1.3BparameterLLMstrainedfor150B
+tokenson‘SpecializedKnowledgeTasks’. Resultssuggestthatcombiningrephrasingstyles
+doesnotyieldperformancebenefitonzero-shottaskscomparedtojustQ/Astyle.
+tasks. However, whenevaluatedonPileperplexity, weobservesignificantdegradation
+inperplexityacrossmanysub-domainsinFigure3. Thisislikelybecausesyntheticdata
+is very clean containing few special characters and being highly structured. In contrast
+severalsub-domainsofthePilesuchasOWT,andHackernewshavesuchspecialtokens.
+On domains such as Philpapers and Gutenberg, we observe that dropping real C4 text
+fromthepre-trainingdata,andtrainingonsyntheticdocumentsalonedropsperformance
+significantly(increaseinperplexity). Thisisonceagainattributedtothefactthatsynthetic
+datadoesnotcontaincertain‘tags’and‘styles’thatareprevalentinrealdatascrapes,and
+emphasizedhowWRAPisabetterstrategythanpre-trainingonsyntheticdataalone. In
+terms of performance on zero-shot tasks, we once again note that the presence of real
+data helps improve zero-shot performance in Tables 3,4. Since zero-shot tasks contain
+well-writtenQ/Apairs,thiseffectisnotasevidentasthatforperplexitiesonrealdata.
+RQ2: Does a combination of multiple synthetic datasets improve performance? We
+measuretheimpactofcombiningmultiplesyntheticstyleswithC4fortraining. Weconsider
+twovariants: combiningina1:1ratiomeaningthattherearetwocopiesofC4tomatchtwo
+syntheticstyles(mediumandQA),and1:2ratiowhichcombinesonlyoneinstanceofthe
+C4dataset. Forzero-shotQAtasks,ourfindinginTable5-6indicatelowerperformance
+than combining only QA and C4 data. Evaluations over the Pile are shown in Figure 4.
+Wenoticethatboththe‘Q/A’and‘Wikipedia’paraphraseshelpimproveperformanceon
+certaindomains. Forexample,‘Stackexchange’,thathaslotsofquestion-answersbenefits
+from the presence of synthetic data in Q/A style. Overall, we note that there is a small
+improvementontheaverageperplexityonthePilebycombiningmultiplestyles.
+6.2 MethodAblations
+RQ3: Howimportantistohaveahigh-qualityre-phraser? Toanswerthis,weusedata
+fromfourdistinctre-phrasingmodels(T5-base(Raffeletal.,2020),Qwen-1.8B-chat(Baietal.,
+2023a),Mistral-7B-chat(Jiangetal.,2023),andVicuna-13B-chat-v1.3(Chiangetal.,2023))
+andtraina345Mmodelfor30Btokens. Wegeneratedatafromallmodelsusingthesame
+prompt. IncaseoftheT5-basemodel,wefinetunethemodelfor1epochonre-phrasepairs
+fromtheVicuna-13b-chatmodel. Wefindthatpre-trainingondatageneratedbysmaller
+re-phrasemodelslikeQwen-1.8BandMistral-7BachievelowerperplexitythanVicuna13B
+(Figure5). Atthesametime,ourfine-tunedT5-basemodelperformssignificantlyworse
+thantherest. Eventhen,allrephrasemodelsreduceperplexityoveronlyrealC4data. It
+remainsanopenquestiontotestthelimitsofhowsmallcanwetrainaparaphrasemodel
+thatcangeneratehighqualitysyntheticdatatofurtherscaletheapplicabilityofWRAP.
+9RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Dataset(RealTok.) ARC-E BoolQ Wino. PIQA HellaSwag TruthfulQA OBQA LogiQA Avg
+Med+C4-35B 59.8 57.0 55.7 74.6 44.5 36.5 23.8 21.5 46.7
+QA+C4-35B 62.2 63.3 55.7 74.8 44.6 41.4 22.4 23.2 48.4
+Combined-1:1-35B 60.6 60.2 57.7 73.8 43.7 40.2 22.0 22.1 47.5
+Combined-1:2-35B 61.4 62.0 57.0 74.8 44.6 39.5 23.0 21.3 48.0
+Table6: Combiningmultiplestyles: Evaluationof∼1.3BparameterLLMstrainedfor150B
+tokensonGeneralUnderstandingTasks. Resultssuggestthatcombiningrephrasingstyles
+doesnotyieldperformancebenefitonzero-shottaskscomparedtojustQ/Astyle.
+30 C4+QA-35B
+C4+Med-35B
+25 Combined-1:1-35B
+Combined-1:2-35B
+20
+15
+10
+5
+0
+Figure4: Combiningmultiplestyles: PerplexityacrossalldomainsofthePilecomparing
+combiningmultiplestylesofsyntheticdata. Modelsare1.3Bparameterstrainedforatotal
+of150Btokens. Weseesmallperplexityimprovementsfromcombiningmultiplestyles.
+RQ4: Does synthetic data improve over augmentations? Are the gains observed by
+pre-trainingonsyntheticdatathesameaspre-trainingwithaugmentations? Inorderto
+testthis,weconsidertwopopulartextaugmentationbaselines—synonymreplacementand
+randomdeletionusingtheNL-Augmenterlibrary(Dholeetal.,2021). Wepre-traina350M
+parametermodelfor15Btokensinordertoconductthissetofexperiments. Thetotalpool
+sizeisonlyabout1.5Btokens,meaningthatthemodelwouldhavetorepeatdataaround
+10timesduringthepre-trainingphase,unlessaugmentedover. Asseenintheperplexity
+analysisinFigure6,themodelstrainedonaugmenteddataperformsignificantlyworse
+thanthosetrainedoncombinationsofrealandsyntheticdata. Thissuggeststhatsynthetic
+dataenhancesthelearningprocess,andisnotmerelyanotherformofaugmentation.
+RQ5: Howdoesthestyleofsyntheticdataimpactperformanceonspecializeddomains?
+We compare the performance of various models trained on different styles of synthetic
+data. Inparticular,wegeneratefourstylesofsyntheticdata(easy,medium,hard,andQ/A)
+andevaluatetheperformanceoftrainingoncombinationsofeachstyleacrossPilesubsets.
+ThepromptstogeneratethesesyntheticdatastylesareoutlinedinAppendixG.Results
+correspondingtogenerationsfromaVicuna-v1.3model,andfora128Mmodeltrainedfor
+3BtokensaresummarizedinFigure7. WeseethattrainingwithcombinationsofrealC4
+andsyntheticdatamatchingthestyleofthedomainatevaluationimprovesperformance.
+However,wefindthatnosinglesyntheticdatastyleperformsthebestacrossalldomains,
+resulting in similar performance across training with combinations of real C4 data and
+eachsyntheticstylevariant. Whileknowingthebestsyntheticstyletopre-trainanLLMis
+impractical,anoraclethatselectsthebestsyntheticstyleacrossalldomainswillimprove
+perplexityby16%—indicatingtheimportanceoftrainingwithdiversedatastylesforLLM
+generalization,evenwhentheunderlyingknowledgestaysthesame.
+10
+ytixelpreP
+egarevA ikiW 2TWO 2skooB skooB viXrA XkcatS buhtiG htaM sweNH nornE C-dembuP utnubU A-dembuP waLeerF HIN OTPSU 91-GP lihP ebutuoY sbuSnepO CCRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+T5
+80 Qwen-1.8B
+Mistral-7B
+Vicuna-13B
+60
+40
+20
+0
+Figure5: ImportanceofHighQualityParaphraser: PerplexityacrossallthePiledomains
+forWRAPondatageneratedbydifferentLLMs. Resultsshowthatevensmallmodelslike
+Qwen-1.8Bcangenerateparaphrasesofhighquality. Though,alowqualityrephraserlike
+ourfine-tunedT5-basemodelleadstosignificantlyworselanguagemodeling.
+Med+C4
+100 Del+C4
+Sub+C4
+80 C4
+60
+40
+20
+0
+Figure6: Isre-phrasingsameasanyaugmentation? WecompareperplexityonthePilefor
+differentaugmemntationstrategies. 350Mparametermodelsaretrainedforatotalof15B
+tokens. WRAP(Medium+C4)performssignificantlybetterthantraditionalaugmentations.
+RQ6:Istheredataleakagefromtherephrasemodeltothetrainedmodel? Weinvestigate
+whetheroursyntheticdatamaintainssimilarsemanticmeaningwhilebeingstylistically
+differentfromtheoriginalC4dataandmatchingthestyleofdifferentPILEdomains. We
+startbycomparingpairsofexamplesofsyntheticandrealdatatoconfirmtheperformance
+gainisnotattributedtoknowledgeleakagefromtherephrasemodels. Wetakeasubsetof
+thefirst1000samplesfromeachofthedatasets.
+Weshowthecosinesimilarityofthesentenceembeddingsfromapre-trainedBERTmodel
+trainedwithSimCSEobjective(Gaoetal.,2021)formediumandqapromptsinFigure8(a)
+and(b). Whencomputingsimilarity,weremoveoutliers. Figureswithdistributionsuse
+a gaussian Kernel Density Estimator (KDE) to construct distributions for statistics from
+11
+ytixelpreP
+ytixelpreP
+egarevA
+egarevA
+ikiW
+ikiW
+2TWO
+2TWO
+2skooB
+2skooB
+skooB
+skooB
+viXrA
+viXrA
+XkcatS
+XkcatS
+buhtiG
+buhtiG
+htaM
+htaM
+sweNH
+sweNH
+nornE
+nornE
+C-dembuP
+C-dembuP
+utnubU
+utnubU
+A-dembuP
+A-dembuP
+waLeerF
+waLeerF
+HIN
+HIN
+OTPSU
+OTPSU
+91-GP
+91-GP
+lihP
+lihP
+ebutuoY
+ebutuoY
+sbuSnepO
+sbuSnepO
+CC
+CCRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+150 Easy+C4
+Med+C4
+125 Hard+C4
+QA+C4
+100
+Combined+C4
+C4
+75
+50
+25
+0
+Figure7: Impactofstyleofsyntheticrephrases: PerplexityacrossalldomainsofthePile
+comparingdifferentstylesofsyntheticdata. Wetrain128Mparametermodelsfor3Btokens.
+10 Real1-Para1 Real1-Para1
+Para1-Para2 7 Para1-Para2
+8 Real1-Real2 6 Real1-Real2
+1st Half-2nd Half 1st Half-2nd Half
+1st Half-Real1 5 1st Half-Real1
+6
+4
+4 3
+2
+2
+1
+0 0
+0.4 0.2 0.0 0.2 0.4 0.6 0.8 1.0 0.4 0.2 0.0 0.2 0.4 0.6 0.8 1.0
+Similarity Similarity
+(a)CosinesimilarityMediumsyntheticdata (b)CosinesimilarityQAsyntheticdata
+Figure8: ComparisonbetweensyntheticandrealdatafromtheC4corpusshowingthat
+syntheticdatamaintainssemanticmeaningcomparedwiththerealC4dataandprimarily
+changesstylefor(a)mediumrephrasesofC4,and(b)QArephrasesofC4.
+1000values. Thecosinesimilarityofreal-syntheticpairsishigherthanseveralbaselines
+includingtworandomrealsamplesfromC4,acontinuationbaselinewhichcomputescosine
+betweenthefirsthalfofasampleandthefullsample,andcosinesimilaritybetweenthe
+firsthalfandsecondhalfofthesamesample. Highsimilarityindicatesthatthere-phrases
+maintainsimilarmeaningtotheirrealcounterpartswithoutaddinginformation.
+7 LimitationsandOpportunities
+7.1 CostAnalysis
+Shouldyougeneratesyntheticdata,orjusttrainlongeronrealdata?
+TheapplicationsofWRAPliesinbothparadigms—(i)low-resourceddatasettingssuchasa
+languagemodelforFinnishlanguage(Luukkonenetal.,2023),and(ii)data-richsettings
+such as training on the common crawl. In the former, there is no alternative option of
+naivelygatheringmoredata,andhence,syntheticdataisanaturalsolutionthatshould
+outperformtrainingonin-domaindataalone. However,thereisasignificantinterestin
+traininglanguagemodelsonEnglish,ormorebroadly,generalwebdata. Isusingsynthetic
+dataaviableoptioneveninthisparadigm?
+12
+ytixelpreP
+ytisneD
+egarevA ikiW 2TWO 2skooB skooB viXrA XkcatS buhtiG htaM sweNH nornE C-dembuP
+ytisneD
+utnubU A-dembuP waLeerF HIN OTPSU 91-GP lihP ebutuoY sbuSnepO CCRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Before,wediveintothefeasibilityofpre-trainingonsyntheticdata,weshouldacknowledge
+theresultsofTable1. TheTinyLlamamodeltrainedfor3Trilliontokensalsounderperforms
+amodeljointlytrainedonrealandsyntheticdata. Infact,itperformsquitecomparablyto
+themodelsthatweretrainedfor300Btokensonjustrealdataaswell. Thissuggeststhat
+theceilingforimprovementbytrainingforlongermaynotbethathigh(foramodelofsize
+350M/1.3Bparameters;largermodelsmaybenefitfromtrainingforlonger).
+Toanalyzethiscosttrade-off,wecomparethecostofgeneratingsyntheticdata,versusthat
+oftrainingalanguagemodelonextradata. Foroursyntheticdatagenerationexperiments,
+weusethevLLM(Kwonetal.,2023)libraryforfastgeneration. Inparticular,weareableto
+generate3MtokensperhouronasingleA100whenusingtheMistral-7B.Generating85B
+tokens(asinourwork)accountsforabout25KGPUhours.
+Incomparison,on64A100s,weachieveathroughputof0.5Mtokenspersecond. Assuming
+trainingfor300Btokens,wouldmean256GPUdays,accountingforabout6kGPUhoursto
+trainasinglemodel.Onthecontrary,traininga13Bmodelwouldtakeabout30KGPUhours.
+Atthescaleoftraininga13Bmodel,reducingthetrainingcostby3-10xcanincorporatethe
+costoverheadoftrainingwithsyntheticdatainasinglerun.
+Whilethecostofgeneratinghighqualitydataisstillrelativelyhigh,twoimportantsources
+ofimprovementimpactthiscostanalysis. First,ifweusetheQwen-1.8BmodelBaietal.
+(2023b) for rephrasing, we are able to get a 3x higher token throughput. As seen in our
+preliminaryresultsinFig5,themodelpre-trainedonrephrasesgeneratedbyQwenmodel
+performscomparablytothatbytheMistralmodel. Thisreducesthecostofgenerationby3x.
+Morerecentworkinspeculativedecoding(Liuetal.,2023c)andoptimizedinference(Xia
+etal.,2024)suggestthatwecanleverageanother3-5ximprovementinthegenerationcost.
+Hence, indeed, even at the scale of just 1.3B parameter model training, we can already
+improveuponthecostofpre-trainingusingjustrealdata.
+Two additional important advantages of synthetic data generation that could not be ac-
+countedforinthediscussionabove:
+1. Thecostofsyntheticdatagenerationisaone-timeinvestment,andwemaytrain
+manymodelsofvaryingscalesoncethedataisgenerated.
+2. Datagenerationis100%parallelizable,whereastrainingrequirestheavailabilityof
+abigclusterwithfastinter-nodeconnectivity. Thisismuchmoreexpensive. Onthe
+otherhand,generationcanbethoughtofasasideprocessthatcanfillintheempty
+GPUsinanylarge-scalecomputecluster,andrunsonsingleGPUmachines.
+7.2 DiversityofSyntheticGenerations
+Anotherlimitationisenforcingthediversityinthegenerateddata.Thisdiversitycomesfrom
+boththe“style”andthe“knowledge”containedinthegenerateddata. Recentworks(Li
+etal.,2023b;c)usedaselectionoftopics,orscenariostoseedthemodeltogeneratenovel
+texts. Still,arecentstudybyPadmakumaretal.(2023)showedthatusinglanguagemodels
+forAI-assistedwritingtendstoreducecontentdiversity,particularlywhenusinginstruction-
+tunedmodels. Whileweusedtheparadigmofrephrasingspecificallytomitigatetheissues
+pertainingtothediversityofnovelcontentgeneration,itremainsforfutureworktoassess
+thepresence(orlackof)andimpactofcontentdiversityinparaphrasemodels.
+8 Conclusion
+Stronglanguagemodelsarebeingpre-trainedoncombinationsofrealandsyntheticdata.
+Usingsyntheticdataenablesbakingindesirableattributessuchasfairness,bias,andstyle
+(likeinstructionfollowing)directlyintothedata,eliminatingtheneedtoadjustthetraining
+algorithmspecifically. Thisoffersanalternativeapproachtoaligninglanguagemodelsto
+humanvalues. Therecentuptickininterestaroundsyntheticdata,especiallyforinstruction-
+tuninglanguagemodels,isnoteworthy,withconcurrentresearchersalsoleveragingitfor
+pre-training. Aswetransitionintothisparadigm,understandingthepropertiesofthedata
+fedtoourmodelsisparamount.Thispaperaimstobeacomprehensiveguideonemploying
+13RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+differentsyntheticstyledatainLLMpre-training. Wedelveintoitssignificancefromtwo
+vantagepoints:(1)Inscenarioswithscarcehigh-qualitydata,syntheticrephrasesoffermore
+valuethanmererepetitionofexistingdata;(2)Syntheticdatacanbeaboonforgeneralization
+ondifferenttextdomains,andforgeneratingtextinstylesthatareunderrepresentedinthe
+pre-trainingdataset. Aspractitionersgeneratesyntheticdatafortrainingmodels,theywill
+befacedwithimportantandexpensivedesignchoices—(i)Howimportantisthequalityof
+thesyntheticdatagenerator?;(ii)Howtobalancerealandsyntheticdata? (iii)Whendoes
+trainingonsyntheticdatareachapointofdiminishingreturnsintermsofepochs? This
+worktakesafirststeptowardsansweringthesequestions.
+Conversely,it’sessentialtonotetheinherentlimitations,andopportunitieswithsynthetic
+data. Wehighlighttwolimitations: (1)costofgenerationisstilllargeandrequiresstrong
+LMs, and (2) enforcing the diversity in the generated data is challenging. In this work,
+we leverage the natural diversity of the web to generate synthetic “re-phrases”. This
+limitsthemodelfromlearningnew“knowledge”andenhancesthelearningprocessonly
+via the provision of high-quality inputs. Whereas past work required a more intricate
+understandingoftheblindspotsofthemodel,potentiallybiasingtheknowledgecontained
+inthepre-trainingdatadistribution. Nonetheless,wedemonstratethepotentialofsynthetic
+datatoimproveLLMtrainingefficiencybothincomputeanddatasize.
+References
+Winogrande: Anadversarialwinogradschemachallengeatscale. 2019.
+AmroAbbas, KushalTirumala, DanielSimig, SuryaGanguli, andAriS.Morcos. Semd-
+edup: Data-efficient learning at web-scale through semantic deduplication. ArXiv,
+abs/2303.09540,2023. URLhttps://api.semanticscholar.org/CorpusID:257557221.
+Sina Alemohammad, Josue Casco-Rodriguez, Lorenzo Luzi, Ahmed Imtiaz Humayun,
+HosseinBabaei,DanielLeJeune,AliSiahkoohi,andRichardGBaraniuk. Self-consuming
+generativemodelsgomad. arXivpreprintarXiv:2307.01850,2023.
+AidaAmini,SaadiaGabriel,ShanchuanLin,RikKoncel-Kedziorski,YejinChoi,andHan-
+naneh Hajishirzi. MathQA: Towards interpretable math word problem solving with
+operation-based formalisms. In Proceedings of the 2019 Conference of the North Amer-
+ican Chapter of the Association for Computational Linguistics: Human Language Technolo-
+gies, Volume 1 (Long and Short Papers), pp. 2357–2367, Minneapolis, Minnesota, June
+2019. Association for Computational Linguistics. doi: 10.18653/v1/N19-1245. URL
+https://aclanthology.org/N19-1245.
+ShekoofehAzizi,SimonKornblith,ChitwanSaharia,MohammadNorouzi,andDavidJ
+Fleet. Synthetic data from diffusion models improves imagenet classification. arXiv
+preprintarXiv:2304.08466,2023.
+JinzeBai,ShuaiBai,YunfeiChu,ZeyuCui,KaiDang,XiaodongDeng,YangFan,WenbinGe,
+YuHan,FeiHuang,BinyuanHui,LuoJi,MeiLi,JunyangLin,RunjiLin,DayihengLiu,
+GaoLiu,ChengqiangLu,KemingLu,JianxinMa,RuiMen,XingzhangRen,Xuancheng
+Ren,ChuanqiTan,SinanTan,JianhongTu,PengWang,ShijieWang,WeiWang,Sheng-
+guangWu,BenfengXu,JinXu,AnYang,HaoYang,JianYang,ShushengYang,YangYao,
+BowenYu,HongyiYuan,ZhengYuan,JianweiZhang,XingxuanZhang,YichangZhang,
+ZhenruZhang,ChangZhou,JingrenZhou,XiaohuanZhou,andTianhangZhu. Qwen
+technicalreport. arXivpreprintarXiv:2309.16609,2023a.
+JinzeBai,ShuaiBai,YunfeiChu,ZeyuCui,KaiDang,XiaodongDeng,YangFan,Wenbin
+Ge, YuHan, FeiHuang, etal. Qwentechnicalreport. arXivpreprintarXiv:2309.16609,
+2023b.
+HritikBansalandAdityaGrover. Leavingrealitytoimagination: Robustclassificationvia
+generateddatasets. arXivpreprintarXiv:2302.02503,2023.
+14RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+YonatanBisk,RowanZellers,RonanLeBras,JianfengGao,andYejinChoi. Piqa: Reasoning
+aboutphysicalcommonsenseinnaturallanguage. InThirty-FourthAAAIConferenceon
+ArtificialIntelligence,2020.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla
+Dhariwal,ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,Sandhini
+Agarwal,ArielHerbert-Voss,GretchenKrueger,TomHenighan,RewonChild,Aditya
+Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens Winter, Chris Hesse, Mark Chen, Eric
+Sigler,MateuszLitwin,ScottGray,BenjaminChess,JackClark,ChristopherBerner,Sam
+McCandlish, Alec Radford, Ilya Sutskever, and Dario Amodei. Language models are
+few-shot learners. In H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin
+(eds.),AdvancesinNeuralInformationProcessingSystems,volume33,pp.1877–1901.Curran
+Associates,Inc.,2020. URLhttps://proceedings.neurips.cc/paper files/paper/2020/
+file/1457c0d6bfcb4967418bfb8ac142f64a-Paper.pdf.
+LichangChen,ShiyangLi,JunYan,HaiWang,KalpaGunaratna,VikasYadav,ZhengTang,
+VijaySrinivasan,TianyiZhou,HengHuang,etal. Alpagasus: Trainingabetteralpaca
+withfewerdata. arXivpreprintarXiv:2307.08701,2023.
+Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng, Zhanghao Wu, Hao Zhang, Lianmin
+Zheng,SiyuanZhuang,YonghaoZhuang,JosephE.Gonzalez,IonStoica,andEricP.Xing.
+Vicuna: Anopen-sourcechatbotimpressinggpt-4with90%*chatgptquality,March2023.
+URLhttps://lmsys.org/blog/2023-03-30-vicuna/.
+DamiChoi, AlexandrePassos, ChristopherJShallue, andGeorgeEDahl. Fasterneural
+networktrainingwithdataechoing. arXivpreprintarXiv:1907.05550,2019.
+ChristopherClark,KentonLee,Ming-WeiChang,TomKwiatkowski,MichaelCollins,and
+KristinaToutanova. BoolQ:Exploringthesurprisingdifficultyofnaturalyes/noques-
+tions. InProceedingsofthe2019ConferenceoftheNorthAmericanChapteroftheAssociation
+forComputationalLinguistics: HumanLanguageTechnologies,Volume1(LongandShortPa-
+pers),pp.2924–2936,Minneapolis,Minnesota,June2019.AssociationforComputational
+Linguistics. doi: 10.18653/v1/N19-1300. URLhttps://aclanthology.org/N19-1300.
+PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,
+andOyvindTafjord.Thinkyouhavesolvedquestionanswering?tryarc,theai2reasoning
+challenge. arXiv:1803.05457v1,2018.
+TogetherComputer. Redpajama: anopendatasetfortraininglargelanguagemodels. 2023.
+URLhttps://github.com/togethercomputer/RedPajama-Data.
+Ekin D Cubuk, Barret Zoph, Jonathon Shlens, and Quoc V Le. Randaugment: Practical
+automateddataaugmentationwithareducedsearchspace. InProceedingsoftheIEEE/CVF
+conferenceoncomputervisionandpatternrecognitionworkshops,pp.702–703,2020.
+Kaustubh D. Dhole, Varun Gangal, Sebastian Gehrmann, Aadesh Gupta, Zhenhao Li,
+SaadMahamood,AbinayaMahendiran,SimonMille,AshishSrivastava,SamsonTan,
+Tongshuang Wu, Jascha Sohl-Dickstein, Jinho D. Choi, Eduard Hovy, Ondrej Dusek,
+Sebastian Ruder, Sajant Anand, Nagender Aneja, Rabin Banjade, Lisa Barthe, Hanna
+Behnke, Ian Berlot-Attwell, Connor Boyle, Caroline Brun, Marco Antonio Sobrevilla
+Cabezudo,SamuelCahyawijaya,EmileChapuis,WanxiangChe,MukundChoudhary,
+ChristianClauss,PierreColombo,FilipCornell,GautierDagan,MayukhDas,TanayDixit,
+ThomasDopierre, Paul-AlexisDray, SuchitraDubey, TatianaEkeinhor, MarcoDiGio-
+vanni,RishabhGupta,RishabhGupta,LouanesHamla,SangHan,FabriceHarel-Canada,
+AntoineHonore,IshanJindal,PrzemyslawK.Joniak,DenisKleyko,VenelinKovatchev,
+KalpeshKrishna,AshutoshKumar,StefanLanger,SeungjaeRyanLee,CoreyJamesLevin-
+son,HualouLiang,KaizhaoLiang,ZhexiongLiu,AndreyLukyanenko,VukosiMarivate,
+GerarddeMelo,SimonMeoni,MaximeMeyer,AfnanMir,NafiseSadatMoosavi,Niklas
+Muennighoff,TimothySumHonMun,KentonMurray,MarcinNamysl,MariaObedkova,
+PritiOli,NivranshuPasricha,JanPfister,RichardPlant,VinayPrabhu,VasilePais,Libo
+Qin,ShahabRaji,PawanKumarRajpoot,VikasRaunak,RoyRinberg,NicolasRoberts,
+Juan Diego Rodriguez, Claude Roux, Vasconcellos P. H. S., Ananya B. Sai, Robin M.
+15RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Schmidt,ThomasScialom,TshephishoSefara,SaqibN.Shamsi,XudongShen,Haoyue
+Shi,YiwenShi,AnnaShvets,NickSiegel,DamienSileo,JamieSimon,ChandanSingh,Ro-
+manSitelew,PriyankSoni,TaylorSorensen,WilliamSoto,AmanSrivastava,KVAditya
+Srivatsa, Tony Sun, Mukund Varma T, A Tabassum, Fiona Anting Tan, Ryan Teehan,
+MoTiwari,MarieTolkiehn,AthenaWang,ZijianWang,GloriaWang,ZijieJ.Wang,Fux-
+uanWei,BryanWilie,GentaIndraWinata,XinyiWu,WitoldWydman´ski,TianbaoXie,
+UsamaYaseen, M.Yee, JingZhang, andYueZhang. Nl-augmenter: Aframeworkfor
+task-sensitivenaturallanguageaugmentation,2021.
+JacobEisenstein. Whattodoaboutbadlanguageontheinternet. InProceedingsofthe2013
+Conference of the North American Chapter of the Association for Computational Linguistics:
+HumanLanguageTechnologies,pp.359–369,Atlanta,Georgia,June2013.Associationfor
+ComputationalLinguistics. URLhttps://aclanthology.org/N13-1037.
+RonenEldanandYuanzhiLi. Tinystories: Howsmallcanlanguagemodelsbeandstill
+speakcoherentenglish? arXivpreprintarXiv:2305.07759,2023.
+StanislavFort,AndrewBrock,RazvanPascanu,SohamDe,andSamuelLSmith. Drawing
+multipleaugmentationsamplesperimageduringtrainingefficientlydecreasestesterror.
+arXivpreprintarXiv:2105.13343,2021.
+RichardFutrell,KyleMahowald,andEdwardGibson. Large-scaleevidenceofdependency
+lengthminimizationin37languages. ProceedingsoftheNationalAcademyofSciences,112
+(33):10336–10341,2015.
+SamirYitzhakGadre,GabrielIlharco,AlexFang,JonathanHayase,GeorgiosSmyrnis,Thao
+Nguyen,RyanMarten,MitchellWortsman,DhrubaGhosh,JieyuZhang,etal. Datacomp:
+Insearchofthenextgenerationofmultimodaldatasets. arXivpreprintarXiv:2304.14108,
+2023.
+LeoGao,StellaBiderman,SidBlack,LaurenceGolding,TravisHoppe,CharlesFoster,Jason
+Phang, HoraceHe, AnishThite, NoaNabeshima, etal. Thepile: An800gbdatasetof
+diversetextforlanguagemodeling. arXivpreprintarXiv:2101.00027,2020.
+LeoGao,JonathanTow,BaberAbbasi,StellaBiderman,SidBlack,AnthonyDiPofi,Charles
+Foster, Laurence Golding, Jeffrey Hsu, Alain Le Noac’h, Haonan Li, Kyle McDonell,
+Niklas Muennighoff, Chris Ociepa, Jason Phang, Laria Reynolds, Hailey Schoelkopf,
+Aviya Skowron, Lintang Sutawika, Eric Tang, Anish Thite, Ben Wang, Kevin Wang,
+andAndyZou. Aframeworkforfew-shotlanguagemodelevaluation,122023. URL
+https://zenodo.org/records/10256836.
+TianyuGao,XingchengYao,andDanqiChen. Simcse: Simplecontrastivelearningofsen-
+tenceembeddings. In2021ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,
+EMNLP2021,pp.6894–6910.AssociationforComputationalLinguistics(ACL),2021.
+EdwardGibsonetal. Thedependencylocalitytheory: Adistance-basedtheoryoflinguistic
+complexity. Image,language,brain,2000:95–126,2000.
+SuriyaGunasekar,YiZhang,JyotiAneja,CaioCe´sarTeodoroMendes,AllieDelGiorno,
+Sivakanth Gopi, Mojan Javaheripi, Piero Kauffmann, Gustavo de Rosa, Olli Saarikivi,
+etal. Textbooksareallyouneed. arXivpreprintarXiv:2306.11644,2023.
+SuchinGururangan,DallasCard,SarahDreier,EmilyGade,LeroyWang,ZeyuWang,Luke
+Zettlemoyer,andNoahA.Smith. Whoselanguagecountsashighquality? measuring
+languageideologiesintextdataselection. InProceedingsofthe2022ConferenceonEmpirical
+MethodsinNaturalLanguageProcessing,pp.2562–2580,AbuDhabi,UnitedArabEmirates,
+December 2022. Association for Computational Linguistics. doi: 10.18653/v1/2022.
+emnlp-main.165. URLhttps://aclanthology.org/2022.emnlp-main.165.
+DanHendrycks,CollinBurns,StevenBasart,AndyZou,MantasMazeika,DawnSong,and
+JacobSteinhardt. Measuringmassivemultitasklanguageunderstanding. Proceedingsof
+theInternationalConferenceonLearningRepresentations(ICLR),2021.
+16RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Elad Hoffer, Tal Ben-Nun, Itay Hubara, Niv Giladi, Torsten Hoefler, and Daniel Soudry.
+Augmentyourbatch:Improvinggeneralizationthroughinstancerepetition.InProceedings
+oftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.8129–8138,2020.
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai,
+ElizaRutherford,DiegodeLasCasas,LisaAnneHendricks,JohannesWelbl,AidanClark,
+etal. Trainingcompute-optimallargelanguagemodels. arXivpreprintarXiv:2203.15556,
+2022.
+AlbertQJiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSingh
+Chaplot,DiegodelasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,Lucile
+Saulnier,etal. Mistral7b. arXivpreprintarXiv:2310.06825,2023.
+QiaoJin,BhuwanDhingra,ZhengpingLiu,WilliamCohen,andXinghuaLu. Pubmedqa: A
+datasetforbiomedicalresearchquestionanswering. InProceedingsofthe2019Conference
+onEmpiricalMethodsinNaturalLanguageProcessingandthe9thInternationalJointConference
+onNaturalLanguageProcessing(EMNLP-IJCNLP),pp.2567–2577,2019.
+Matt Gardner Johannes Welbl, Nelson F. Liu. Crowdsourcing multiple choice science
+questions. 2017.
+Jaehun Jung, Peter West, Liwei Jiang, Faeze Brahman, Ximing Lu, Jillian Fisher, Taylor
+Sorensen,andYejinChoi. Impossibledistillation: fromlow-qualitymodeltohigh-quality
+dataset&modelforsummarizationandparaphrasing. arXivpreprintarXiv:2305.16635,
+2023.
+AbdullatifKo¨ksal,TimoSchick,AnnaKorhonen,andHinrichSchu¨tze. Longform: Opti-
+mizinginstructiontuningforlongtextgenerationwithcorpusextraction. arXivpreprint
+arXiv:2304.08460,2023.
+WoosukKwon,ZhuohanLi,SiyuanZhuang,YingSheng,LianminZheng,CodyHaoYu,
+JosephE.Gonzalez,HaoZhang,andIonStoica. Efficientmemorymanagementforlarge
+languagemodelservingwithpagedattention. InProceedingsoftheACMSIGOPS29th
+SymposiumonOperatingSystemsPrinciples,2023.
+RaymondLi,LoubnaBenAllal,YangtianZi,NiklasMuennighoff,DenisKocetkov,Cheng-
+hao Mou, Marc Marone, Christopher Akiki, Jia Li, Jenny Chim, Qian Liu, Evgenii
+Zheltonozhskii, Terry Yue Zhuo, Thomas Wang, Olivier Dehaene, Mishig Davaadorj,
+Joel Lamy-Poirier, Joa˜o Monteiro, Oleh Shliazhko, Nicolas Gontier, Nicholas Meade,
+ArmelZebaze,Ming-HoYee,LogeshKumarUmapathi,JianZhu,BenjaminLipkin,Muh-
+tashamOblokulov,ZhiruoWang,RudraMurthy,JasonStillerman,SivaSankalpPatel,
+DmitryAbulkhanov,MarcoZocca,MananDey,ZhihanZhang,NourFahmy,Urvashi
+Bhattacharyya,WenhaoYu,SwayamSingh,SashaLuccioni,PauloVillegas,MaximKu-
+nakov,FedorZhdanov,ManuelRomero,TonyLee,NadavTimor,JenniferDing,Claire
+Schlesinger,HaileySchoelkopf,JanEbert,TriDao,MayankMishra,AlexGu,Jennifer
+Robinson,CarolynJaneAnderson,BrendanDolan-Gavitt,DanishContractor,SivaReddy,
+DanielFried,DzmitryBahdanau,YacineJernite,CarlosMun˜ozFerrandis,SeanHughes,
+ThomasWolf,ArjunGuha,LeandrovonWerra,andHarmdeVries. Starcoder: maythe
+sourcebewithyou! 2023a.
+XianLi,PingYu,ChuntingZhou,TimoSchick,LukeZettlemoyer,OmerLevy,JasonWe-
+ston, andMikeLewis. Self-alignmentwithinstructionbacktranslation. arXivpreprint
+arXiv:2308.06259,2023b.
+YuanzhiLi,Se´bastienBubeck,RonenEldan,AllieDelGiorno,SuriyaGunasekar,andYinTat
+Lee. Textbooksareallyouneedii:phi-1.5technicalreport. arXivpreprintarXiv:2309.05463,
+2023c.
+StephanieLin,JacobHilton,andOwainEvans. Truthfulqa: Measuringhowmodelsmimic
+humanfalsehoods,2021.
+17RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+BingbinLiu,SebastienBubeck,RonenEldan,JanardhanKulkarni,YuanzhiLi,AnhNguyen,
+RachelWard,andYiZhang. Tinygsm: achieving¿80%ongsm8kwithsmalllanguage
+models. arXivpreprintarXiv:2312.09241,2023a.
+Hanmeng Liu, Jian Liu, Leyang Cui, Zhiyang Teng, Nan Duan, Ming Zhou, and Yue
+Zhang. Logiqa 2.0 — an improved dataset for logical reasoning in natural language
+understanding. IEEE/ACMTransactionsonAudio,Speech,andLanguageProcessing,pp.1–16,
+2023b. doi: 10.1109/TASLP.2023.3293046.
+XiaoxuanLiu,LanxiangHu,PeterBailis,IonStoica,ZhijieDeng,AlvinCheung,andHao
+Zhang. Onlinespeculativedecoding. arXivpreprintarXiv:2310.07177,2023c.
+RistoLuukkonen,VilleKomulainen,JouniLuoma,AnniEskelinen,JennaKanerva,Hanna-
+MariKupari,FilipGinter,VeronikaLaippala,NiklasMuennighoff,AleksandraPiktus,
+etal.Fingpt:Largegenerativemodelsforasmalllanguage.arXivpreprintarXiv:2311.05640,
+2023.
+Pratyush Maini. Phi-1.5 model: A case of comparing apples to oranges? 2023. URL
+https://pratyushmaini.github.io/phi-1 5/.
+PratyushMaini,SachinGoyal,ZacharyCLipton,JZicoKolter,andAditiRaghunathan.
+T-mars: Improvingvisualrepresentationsbycircumventingtextfeaturelearning. arXiv
+preprintarXiv:2307.03132,2023.
+Todor Mihaylov, Peter Clark, Tushar Khot, and Ashish Sabharwal. Can a suit of armor
+conductelectricity? anewdatasetforopenbookquestionanswering. InEMNLP,2018.
+NiklasMuennighoff,AlexanderMRush,BoazBarak,TevenLeScao,AleksandraPiktus,
+NouamaneTazi,SampoPyysalo,ThomasWolf,andColinRaffel.Scalingdata-constrained
+languagemodels. arXivpreprintarXiv:2305.16264,2023.
+LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,
+ChongZhang, SandhiniAgarwal, KatarinaSlama, AlexRay, etal. Traininglanguage
+models to follow instructions with human feedback. Advances in Neural Information
+ProcessingSystems,35:27730–27744,2022.
+MasanoriOya. Threetypesofaveragedependencydistancesofsentencesinamultilingual
+parallelcorpus. InProceedingsofthe35thPacificAsiaConferenceonLanguage,Information
+andComputation,pp.652–661,2021.
+VishakhPadmakumar,BehnamHedayatnia,DiJin,PatrickLange,SeokhwanKim,Nanyun
+Peng, Yang Liu, and Dilek Hakkani-Tur. Investigating the representation of open do-
+maindialoguecontextfortransformermodels. InProceedingsofthe24thMeetingofthe
+SpecialInterestGrouponDiscourseandDialogue,pp.538–547,Prague,Czechia,September
+2023.AssociationforComputationalLinguistics. URLhttps://aclanthology.org/2023.
+sigdial-1.50.
+Guilherme Penedo, Quentin Malartic, Daniel Hesslow, Ruxandra Cojocaru, Alessandro
+Cappelli,HamzaAlobeidli,BaptistePannier,EbtesamAlmazrouei,andJulienLaunay.
+Therefinedwebdatasetforfalconllm: outperformingcuratedcorporawithwebdata,and
+webdataonly. arXivpreprintarXiv:2306.01116,2023.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini
+Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning
+transferablevisualmodelsfromnaturallanguagesupervision. InInternationalconference
+onmachinelearning,pp.8748–8763.PMLR,2021.
+Jack W Rae, Sebastian Borgeaud, Trevor Cai, Katie Millican, Jordan Hoffmann, Francis
+Song,JohnAslanides,SarahHenderson,RomanRing,SusannahYoung,etal. Scaling
+language models: Methods, analysis & insights from training gopher. arXiv preprint
+arXiv:2112.11446,2021.
+18RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,
+Yanqi Zhou, Wei Li, and Peter J Liu. Exploring the limits of transfer learning with a
+unifiedtext-to-texttransformer. TheJournalofMachineLearningResearch,21(1):5485–5551,
+2020.
+ChristophSchuhmann,RomainBeaumont,RichardVencu,CadeGordon,RossWightman,
+MehdiCherti,TheoCoombes,AarushKatta,ClaytonMullis,MitchellWortsman,etal.
+Laion-5b: Anopenlarge-scaledatasetfortrainingnextgenerationimage-textmodels.
+AdvancesinNeuralInformationProcessingSystems,35:25278–25294,2022.
+ZhiqiangShen,TianhuaTao,LiqunMa,WillieNeiswanger,JoelHestness,NataliaVassilieva,
+DariaSoboleva,andEricXing. Slimpajama-dc: Understandingdatacombinationsforllm
+training. arXivpreprintarXiv:2309.10818,2023.
+Ilia Shumailov, Zakhar Shumaylov, Yiren Zhao, Yarin Gal, Nicolas Papernot, and Ross
+Anderson. Model dementia: Generated data makes models forget. arXiv preprint
+arXiv:2305.17493,2023.
+IreneSolaimanandChristyDennison. Processforadaptinglanguagemodelstosociety
+(palms)withvalues-targeteddatasets. AdvancesinNeuralInformationProcessingSystems,
+34:5861–5873,2021.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,
+Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2:
+Openfoundationandfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+BrandonTrabucco,KyleDoherty,MaxGurinas,andRuslanSalakhutdinov. Effectivedata
+augmentationwithdiffusionmodels. arXivpreprintarXiv:2302.07944,2023.
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,
+ŁukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. Advancesinneuralinforma-
+tionprocessingsystems,30,2017.
+PabloVillalobos,JaimeSevilla,LennartHeim,TamayBesiroglu,MariusHobbhahn,and
+AnsonHo.Willwerunoutofdata?ananalysisofthelimitsofscalingdatasetsinmachine
+learning. arXivpreprintarXiv:2211.04325,2022.
+YuxiangWei,ZheWang,JiaweiLiu,YifengDing,andLingmingZhang. Magicoder: Source
+codeisallyouneed. arXivpreprintarXiv:2312.02120,2023.
+GuillaumeWenzek,Marie-AnneLachaux,AlexisConneau,VishravChaudhary,Francisco
+Guzma´n,ArmandJoulin,andEdouardGrave. CCNet: Extractinghighqualitymonolin-
+gualdatasetsfromwebcrawldata. InProceedingsoftheTwelfthLanguageResourcesand
+EvaluationConference,pp.4003–4012,Marseille,France,May2020.EuropeanLanguage
+ResourcesAssociation. ISBN979-10-95546-34-4. URLhttps://aclanthology.org/2020.
+lrec-1.494.
+HemingXia,ZheYang,QingxiuDong,PeiyiWang,YongqiLi,TaoGe,TianyuLiu,Wenjie
+Li,andZhifangSui. Unlockingefficiencyinlargelanguagemodelinference: Acompre-
+hensivesurveyofspeculativedecoding,2024.
+SangMichaelXie,HieuPham,XuanyiDong,NanDu,HanxiaoLiu,YifengLu,PercyLiang,
+QuocVLe,TengyuMa,andAdamsWeiYu. Doremi: Optimizingdatamixturesspeeds
+uplanguagemodelpretraining. arXivpreprintarXiv:2305.10429,2023.
+FuzhaoXue,YaoFu,WangchunshuZhou,ZangweiZheng,andYangYou. Torepeatornot
+torepeat: Insightsfromscalingllmundertoken-crisis. arXivpreprintarXiv:2305.13230,
+2023.
+Haichao Yu, Yu Tian, Sateesh Kumar, Linjie Yang, and Heng Wang. The devil is in the
+details: Adeepdiveintotherabbitholeofdatafiltering. arXivpreprintarXiv:2309.15954,
+2023.
+19RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi. Hellaswag: Can
+amachinereallyfinishyoursentence? InProceedingsofthe57thAnnualMeetingofthe
+AssociationforComputationalLinguistics,2019.
+PeiyuanZhang,GuangtaoZeng,TianduoWang,andWeiLu. Tinyllama: Anopen-source
+smalllanguagemodel,2024.
+Chunting Zhou, Pengfei Liu, Puxin Xu, Srini Iyer, Jiao Sun, Yuning Mao, Xuezhe Ma,
+Avia Efrat, Ping Yu, Lili Yu, et al. Lima: Less is more for alignment. arXiv preprint
+arXiv:2305.11206,2023.
+20RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+A DatasetDetails
+A.1 TrainingDataset
+TheprimarypretrainingcorpusinourexperimentsisColossalCleanCrawledCorpus(C4),
+acuratedEnglishtextdatasetcomprisingover170billiontokens. Thiscorpusisderived
+fromCommonCrawl,acommonpracticeinthepretrainingofLLMsBrownetal.(2020);
+Raffel et al. (2020); Touvron et al. (2023). This data source is also prominently featured
+in openly available LLM pretraining corpora, including The Pile Gao et al. (2020) and
+RedPajamaComputer(2023). TherearedifferentversionsofCommonCrawldataandour
+selectionofC4forpretrainingisdrivenbydrivenbyitssizeandquality.
+Wealsocomparewithpre-trainingontheRefinedWebcorpusPenedoetal.(2023). The
+dataset is also derived from the CommonCrawl, however has a more stringent filtering
+process. OurselectionofRefinedWebisforcomparingsyntheticrephrasestohighquality
+subsetsofwebdata, whichwereshowntoachievesimilarperformancecomparedwith
+curateddatasetsPenedoetal.(2023). Forourexperimentsweusedthefirst3050filesand
+trainfor300BtokenstomatchtrainingonC4. Weasoconductexperimentswiththefirst
+1650filestoaccountformultipleepochsontheRefinedWebdataset.
+A.2 PilePerplexityEvaluation
+Fortheevaluationphase,weemployed20subsetsfromthePilecorpus. Weexcludedthe
+Europarl subset because it contained non-English language. The subsets used are: CC,
+StackExchange,Wikipedia,GitHub,PubMedAbstracts,Openwebtext2,Freelaw,Math,NIH,
+USPTO,Hackernews, Enron, Books3, PubMedCentral, Gutenberg, Arxiv, Bookcorpus2,
+Opensubtitles,Youtubesubtitles,Ubuntu,andPhilpapers. Wetakethefirst10000samples
+fromeachsubsetandsplitintodocumentsofmaximumlength1024. Thereportedaverage
+inallperplexityplotsisaweightedaverageovertheperplexityofalldomainsaccordingto
+theratiosinTable7.
+A.2.1 PileWeightedAverageRatios
+We report the ratios for samples according to the first 10,000 documents from our Pile
+validationsetinTable7. Notethattherearesomeslightvariationsintheratioscompared
+withthosereportedin(Gaoetal.,2020),butmostratiosaresimilar.
+A.3 Zero-shotEvaluationDataset
+We evaluate our models on a total of 13 different zero-shot benchmarks to assess their
+abilitiesacrossvariousnaturallanguagetasks. Thesebenchmarksarecategorizedintotwo
+subsets: SpecializedKnowledgeandGeneralUnderstanding.
+Specialized Knowledge This subset comprises datasets that focus on domain-specific
+knowledgeandexpertise.
+• ARC Challenge (ARC-C): This dataset is part of the AI2 Reasoning Challenge
+(ARC)(Clarketal.,2018),containingscienceexamquestionsfromgrades3to9.The
+ARCChallengesetincludesmoredifficultquestionsthatnecessitatehigher-order
+reasoning.
+• SciQ:Adatasetofscienceexamquestions, specificallydesignedtoevaluatethe
+ability of NLP models in understanding and reasoning within the scientific do-
+main(JohannesWelbl,2017).
+• PubMedQA: This dataset focuses on biomedical literature and is designed to
+evaluatetheunderstandingofmedicalandhealthcare-relatedinformation(Jinetal.,
+2019).
+• MathQA:Thisdatasetchallengesmodelsinmathematicalproblem-solving,requir-
+ingbothnumericalunderstandingandreasoningskills(Aminietal.,2019).
+21RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Dataset ValidationRatio(%) PublishedRatio(%)
+ArXiv 10.4 9.0
+BookCorpus2 0.8 0.8
+Books3 11.8 12.1
+Pile-CC 14.0 18.11
+Enron 0.1 0.1
+EuroParl 1.1 0.7
+FreeLaw 5.3 6.1
+Github 10.9 7.6
+Gutenberg 1.5 2.2
+Hackernews 0.6 0.6
+DmMathematics 2.0 1.2
+NIH 0.2 0.3
+OpenSubtitles 1.3 1.6
+OpenWebText2 8.2 10.0
+PhilPapers 0.7 0.4
+PubMedAbstracts 0.7 3.1
+PubMedCentral 14.9 14.4
+StackExchange 5.8 5.1
+Ubuntu 1.3 0.9
+USPTO 2.7 3.7
+Wikipedia 3.4 1.5
+YoutubeSubtitles 0.6 0.6
+Table7: Pileratiosforourevaluationcomparedwithpublishedratios
+• MMLU: Multi-domain question answering, MMLU assesses the model’s exper-
+tise over a wide range of specialized subjects, from professional domains to
+academia(Hendrycksetal.,2021).
+GeneralUnderstanding Thissubsetcontainsdatasetsthattestgeneralcognitiveskills,
+languageunderstanding,andcommonsensereasoning.
+• ARC Easy (ARC-E): The Easy set of the AI2 Reasoning Challenge (Clark et al.,
+2018)featuresquestionsfromthesamesourceasARC-Cbutareconsideredless
+challenginganddonotrequireasadvancedreasoningskills.
+• BoolQ:Adatasetconsistingofboolean(yes/no)questions,focusingonreading
+comprehensionandgeneralunderstandingofnaturallanguagetext(Clarketal.,
+2019).
+• Winogrande(Wino.): Thisdatasetchallengesmodelsoncommonsensereasoning
+inalanguagecontext,focusingonpronoundisambiguationtasks(ai2,2019).
+• PIQA:PhysicalInteractionQuestionAnsweringteststheunderstandingofevery-
+dayphysicalprocesses,anaspectofpracticalcommonsense(Bisketal.,2020).
+• HellaSwag: This dataset evaluates a model’s ability to complete scenarios in a
+contextuallyandlogicallycoherentmanner,requiringbothlanguageunderstanding
+andcommonsensereasoning(Zellersetal.,2019).
+• TruthfulQA:Focusedonthegenerationoftruthful,accurateanswers,thisdataset
+challengesmodelsontheirabilitytodiscernandreproducefactuallycorrectinfor-
+mation(Linetal.,2021).
+• OpenBookQA(OBQA):OpenBookQArequiresunderstandingawidearrayoffacts
+andconcepts,therebyevaluatingthemodel’sbroaderknowledgeandreasoning
+skills(Mihaylovetal.,2018).
+• LogiQA-2: Thisdatasetinvolveslogicalreasoning,testingthemodel’scapabilityto
+understandandapplylogicalconstructsandprinciples(Liuetal.,2023b).
+22RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Eachdatasetinthesesubsetsiscarefullyselectedtochallengeandevaluatespecificaspects
+ofnaturallanguageprocessingmodels,rangingfromdomain-specificknowledgeinscience,
+medicine, andmathematics, tobroaderskillslikecommonsensereasoningandgeneral
+languageunderstanding.
+B FilteringDetailsforSyntheticData
+Whengeneratingsyntheticparaphrasesusinglanguagemodels,weoccasionallyencounter
+thechallengeofextraneousintroductionsinthegeneratedoutputs. Suchparaphrasesmight
+commencewithphraseslike”Here’saparaphrase...”,”Thefollowing...”orevencontain
+keywordssuchas”high-qualityEnglish”. Tomitigatethis,we’vedevelopedamethodto
+filterandrefinethesyntheticoutputs.
+B.1 Methodology
+The primary function, remove unwanted part, starts by splitting the input data into indi-
+vidual sentences. If the first sentence contains delimiters such as ”\n\n” (indicating a
+new paragraph) or ”:”, the function checks the segment preceding the delimiter for the
+aforementionedunwantedelements. Iftheseelementsaredetected,theprecedingsegment
+isremoved. Theentirerevisedcontentisthenreconstructedandreturned. Incaseswhere
+nomodificationsareapplicable,butwestillhavetheflaggedkeywords, weremovethe
+paraphrasecompletely. Toachievethis:
+1. SplittheinputdataintoindividualsentencesusingtheNLTK’ssentencesplitter
+function.
+2. Examinethefirstsentenceforthepresenceofdelimiters.
+3. Ifadelimiterisdetected,checktheprecedingsegmentforunwantedelements.
+4. Ifunwantedelementsarefound,discardtheprecedingsegment(beforeanoccur-
+renceof"\n\n"or":").
+5. Modifyandreturnthefilteredparagraph.
+Based on manual inspection we found that the error rate (occurrence of sentences with
+unwantedelements)afterthemodificationislessthan0.1%.
+C PropertiesofSyntheticCorpus
+Tounderstandthepropertiesofsyntheticdatageneratedfromtherephrasemodelthatlead
+tobetterpre-trainingperformance,wecomparethesemanticsimilarity,syntacticcomplexity,
+anddiversitybetweensyntheticdata,C4data,anddatafromthePile. Ourprimaryfocusis
+answeringthefollowingquestionsaboutsyntheticdata: (i)Domodelstrainedonsynthetic
+data perform better due to information leakage from the rephrase model? (ii) Does the
+rephrasemodelaccuratelycapturemultiplestyles? (iii)Whatattributesofsyntheticdata
+make it high quality? Our investigation helps address what data is beneficial for better
+generalization to specific domains, and quantify the importance of data variability and
+quality.
+C.1 ExperimentalSetup
+We take a subset of the first 1000 documents from each of the datasets. For synthetic
+comparisonswithrealC4data,wetakepairsofsamples,whileforPilesubsets,wetake
+thefirst1000samplesfromthetestsubset. Whencomputingdatasetqualitystatistics,we
+remove outliers more than two standard deviations in metric value. When the number
+of samples from the Pile subset was fewer than 1000, we split samples. Figures with
+distributionsuseaGaussianKernelDensityEstimator(KDE)toconstructdistributionsfor
+statisticsfrom1000values.
+23RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+8
+Real-RealP
+Real-Para
+7
+Real-Real'
+R1-R2
+6
+R1-Real
+RP1-Real
+5
+R1-RealP
+4
+3
+2
+1
+0
+0.4 0.2 0.0 0.2 0.4 0.6 0.8 1.0
+Similarity
+Figure9: CosinesimilaritymediumsyntheticMRPCrephrases
+15.0
+12.5 0.6
+10.0 0.4 7.5
+5.0 0.2
+2.5
+0.0 0.0
+(a)Flesch-KincaidReadingLevel (b)Typetokenratio
+Figure10: Comparisonofreadabilityanddiversity(ttr)ofsyntheticdatacomparedwithC4
+anddifferentsubsetsofthePile.
+C.2 SemanticProperties
+In Section 6, we compared pairs of examples of synthetic and real data to confirm the
+performancegainisnotattributedtoknowledgeleakagefromtherephrasemodelsusing
+a pre-trained BERT model trained with SimCSE objective (Gao et al., 2021) for medium
+andqapromptsinFigure8(a)and(b). Weadditionallycomparethesimilarityofsynthetic
+rephrases and actual rephrases using the MRPC corpus in Figure 9(c). We denote this
+additionalcomparisonbyRealP(realparaphrase),whilemaintainingcomparisonofsplits
+ofthesentence: R1andR2. Syntheticrephraseshavesimilarcosinesimilarityonaverage
+andlowerspreadcomparedwithtruerephrasesaccordingintheMRPCcorpus.
+As the semantic information is similar between C4 and our synthetic data, we further
+investigatestylisticdifferencesinthedata. Figure10(a)showstheFlesch–Kincaidreading
+levels for different rephrase styles, and the Pile. Our findings indicate that C4 is on the
+low end of reading level (7-8). In contrast, medium increases the reading level to 10,
+andqasyntheticvariantsfurtherreducesthereadinglevelto6. Mediumsyntheticdata
+matchesthereadinglevelofWikipedia,andotherhighreadingleveldatasetsyieldingbetter
+performanceonthesedomains. OnQAsyntheticdata,weobservereducedreadinglevel.
+This is because we observed that sentences are typically split into question and answer
+leadingtoshortersetnencescomparedwithintheoriginaltextandmediumstylerephrases.
+24
+leveL
+gnidaeR
+deM AQ 4C XkcatS ikiW
+ytisneD
+CC buhtiG A-dembuP 2TWO waLeerF htaM HIN OTPSU sweNH nornE skooB C-dembuP 91-GP viXrA 2skooB sbuSnepO ebutuoY utnubU lihP
+oitaR
+nekoT
+epyT
+deM AQ 4C XkcatS ikiW CC buhtiG A-dembuP 2TWO waLeerF htaM HIN OTPSU sweNH nornE skooB C-dembuP 91-GP viXrA 2skooB sbuSnepO ebutuoY utnubU lihPRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+6 3
+4 2
+2 1
+0 0
+(a)TreeDepth (b)MeanDependencyDistance
+Figure11: ComparisonbetweensyntheticandrealdatafromtheC4corpusshowingthat
+syntheticdatahavehighersyntacticcomplexityindicatedbyhigheraveragetreedepth,and
+highermeandependencydistance(MDD).
+Thisleadstolowermetricvaluesformanyofthemetrics. Fortypetokenratio,wenotethat
+thediversityisquitesimilarbetweenmediumandmostsubsetsofthePile. TheQAdataset
+hasparticularlylowTTRmatchingubuntu,github,andmathasthesearemoresimilarto
+QAformatdatasetsandhaveheavyrepetitionoftheQuestion,andAnswerformat.
+C.3 SyntacticProperties
+Finally, we compare the mean tree depth (measured by the mean over setences of the
+depthofthedependencytree),andmeandependencydistance(measuredastheaverage
+dependencydistanceofanypairofwordswithinasentence)inFigure11,whichhavebeen
+showntobegoodmeasuresofsyntacticdifficultyFutrelletal.(2015);Gibsonetal.(2000);
+Oya(2021). WefindsimilartrendsasforreadinglevelandTTRdiversitywheremediums
+tyleincreasedepth,mdd,andsyntacticcomplexityingeneral. WefindagainthatQAstyle
+reducesthiscomplexity.
+D EvaluationMetrics
+Themetricutilizedforevaluationisthemacrotokenlevelperplexity. Givenabatchofencoded
+texts,theperplexityatthetokenlevelwascomputedasfollows:
+Giventheaccumulatedlossovertheentiredataset,denotedasL,andthetotalnumberof
+tokens,representedbyT,themacrotoken-levelperplexity,denotedasP,iscalculatedas:
+(cid:18) (cid:18) (cid:19)(cid:19)
+L
+P =exp min 20, (3)
+T
+Where:
+• expistheexponentialfunction.
+• Listhecumulativelossoverallshiftedlogitsandlabelsinthedataset.
+• Tisthetotalnumberoftokensinthedataset.
+Thevalueof20actsasanupperlimittostabilizethemetricincasesofhighlossvalues.
+E AdditionalResultsforSmallerModelandTokenSizes
+E.1 Resultsfor350MModelsTrainedfor75BTokens
+Wetrainmodelsatsmallerscalesanddemonstrateimprovement. Inparticularwetrain
+a 350M GPT-2-medium architecture for a total of 75B tokens. We show Pile perplexity
+averagedacrossthe21domainsismuchlowerthanforthatofthemodeltrainedonlyon
+25
+htpeD
+eerT
+deM AQ 4C XkcatS ikiW CC buhtiG A-dembuP 2TWO waLeerF htaM HIN OTPSU sweNH nornE skooB C-dembuP 91-GP viXrA 2skooB sbuSnepO ebutuoY utnubU lihP
+DDM
+deM AQ 4C XkcatS ikiW CC buhtiG A-dembuP 2TWO waLeerF htaM HIN OTPSU sweNH nornE skooB C-dembuP 91-GP viXrA 2skooB sbuSnepO ebutuoY utnubU lihPRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+C4-60B
+80
+C4-15B
+QA+C4-15B
+60 Med+C4-15B
+40
+20
+0
+Figure12: PerplexityacrossalldomainsofthePilecomparingcombiningmultiplestylesof
+syntheticdata. Modelsare350Mparameterstrainedforatotalof75Btokens.
+Dataset(RealTok.) ARC-C SciQ PubMedQA MathQA MMLU Avg
+C4-15B 21.2 77.1 50.6 22.2 23.1 38.8
+C4-60B 23.4 76.2 46.4 22.0 23.0 38.2
+QA+C4-15B 24.4 79.8 56.0 21.7 22.9 41.0
+Med+C4-15B 22.7 74.5 53.6 22.0 23.1 39.2
+Table8: Evaluationof350MparameterLLMstrainedfor75BtokensonSpecializedKnowl-
+edge Tasks. This table presents the performance on tasks that require specific domain
+knowledgesuchasscience,medicine,mathematics,andlogic.
+C4 in Figure 12, and even lower than 1.3B models trained only on C4 in Figure 1c. We
+alsoshowanincreaseof1.5%acrossgeneralunderstandinglanguagetasks,androughly
+3% on specialized knowledge tasks in Tables 8–9 when adding QA rephrases. We also
+experimentedwithmediumrephrasesatthissmallerscale. Ourfindingsindicatethatthe
+highqualityprovidedbymediumrephrasesimprovesperformanceoveronlyC4,however
+matchingthestyleasindicatedbyQArephraseperformancefurtherimprovesperformance.
+E.2 Resultsfor1.3BModelsTrainedfor150BTokens
+Weadditionallytrain1.3BGPT-2-XLmodelsat150Btokens,reducingthenumberofsteps
+byhalf. WeshowPileperplexityaveragedacrossthe20domainsismuchlowerthanfor
+thatofthemodeltrainedonlyonC4inFigure13,andevenlowerthan1.3Bmodelstrained
+onlyonC4inFigure1cfortwiceaslong. Wealsoshowanincreaseof2%acrossspecialized
+knowledgetasks,androughly2.5%ongeneralunderstandingtasksinTables10-11when
+addingQArephrases. Wealsoexperimentedwithmediumrephrasesatthissmallerscale,
+andreportsimilarfindingsconsistentwithothersmall-scaleexperiments.
+F LLMLeaderboardFew-shotResults
+InourmainexperimentsinSection4wedemonstratethatLLMstrainedwithsynthetic
+rephrasesareabetterbackboneforzero-shotquestion-answeringtasksasthemodellearns
+thequestion-answerformatandstyleduringpre-training. Inthissection,weshowthat
+improvementsfrompre-trainingonsyntheticrephrasesarestillpresenteveninfew-shot
+26
+ytixelpreP
+egarevA ikiW 2TWO 2skooB skooB viXrA XkcatS buhtiG htaM sweNH nornE C-dembuP utnubU A-dembuP waLeerF HIN OTPSU 91-GP lihP ebutuoY sbuSnepO CCRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Dataset(RealTok.) ARC-E BoolQ Wino. PIQA HellaSwag TruthfulQA OBQA LogiQA Avg
+C4-18B 50.5 52.8 53.0 69.8 35.6 37.8 18.6 23.0 42.6
+C4-75B 51.4 53.4 51.6 70.3 36.1 39.0 17.4 22.6 42.7
+QA+C4-18B 53.4 60.7 52.2 70.0 36.3 40.0 17.6 22.3 44.1
+Med+C4-18B 50.6 57.3 53.6 70.8 36.1 36.9 18.6 22.0 43.2
+Table9:Evaluationof350MparameterLLMstrainedfor75BtokensonGeneralUnderstand-
+ingTasks. Thistableshowstheperformanceacrossvariousdatasets,focusingongeneral
+reasoning,languageunderstanding,andcommonsensecomparingtraining.
+C4-150B
+C4-35B
+60
+C4+QA-35B
+C4+Med-35B
+40
+20
+0
+Figure13: PerplexityacrossalldomainsofthePilecomparingcombiningmultiplestylesof
+syntheticdata. Modelsare350Mparameterstrainedforatotalof75Btokens.
+settingswherethemodelhasaccesstotestsamples. Tostudyfew-shotperformance,we
+evaluateonsixtaskspresentintheOpenLLMLeaderboard2:
+1. ARC-Challenge(25shot)
+2. HellaSwag(10shot)
+3. MMLU(5shot)
+4. Truthful-QA(5shot)
+5. Winogrande(5shot)
+6. GSM8k(5shot)
+Weevaluatetwomodelstrainedfor300Band350Btokenscorrespondingtoroughly85B
+and100BuniqueC4tokensrespectively. Ourfindingsshowsubstantialimprovementson
+theARC-challengebenchmark,andTruthful-QAconssitentinthezero-shotsettingsand
+comparableperformanceacrossotherdatasets. Ourmodelsalsoperformbetterthanthe
+publiclyreleasedFalcon-1.3BmodeltrainedontheRefinedWebdataset,andthePythia-1.4B
+model,whichwastrainedonPile.
+2https://huggingface.co/spaces/HuggingFaceH4/open llm leaderboard
+27
+ytixelpreP
+egarevA ikiW 2TWO 2skooB skooB viXrA XkcatS buhtiG htaM sweNH nornE C-dembuP utnubU A-dembuP waLeerF HIN OTPSU 91-GP lihP ebutuoY sbuSnepO CCRephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Dataset(RealTok.) ARC-C SciQ PubMedQA MathQA MMLU Avg
+C4-35B 27.0 83.4 55.0 22.5 24.3 42.4
+C4-150B 25.9 83.8 55.4 23.5 25.4 42.8
+Med+C4-35B 27.2 82.2 46.2 23.1 25.2 40.8
+QA+C4-35B 29.0 85.1 62.2 22.5 26.1 45.0
+Table 10: Evaluation of ∼ 1.3B parameter LLMs trained for 150B tokens on Specialized
+KnowledgeTasks. Thistablepresentstheperformanceontasksthatrequirespecificdomain
+knowledgesuchasscience,medicine,mathematics,andlogic.
+Dataset(RealTok.) ARC-E BoolQ Wino. PIQA HellaSwag TruthfulQA OBQA LogiQA Avg
+C4-35B 58.6 55.2 56.1 73.9 44.5 36.0 22.2 22.8 46.2
+C4-150B 59.1 54.4 56.4 74.5 44.9 34.3 22.2 22.1 46.0
+Med+C4-35B 59.8 57.0 55.7 74.6 44.5 36.5 23.8 21.5 46.7
+QA+C4-35B 62.2 63.3 55.7 74.8 44.6 41.4 22.4 23.2 48.4
+Table11: Evaluationof ∼ 1.3BparameterLLMstrainedfor150BtokensonGeneralUn-
+derstandingTasks. Thistableshowstheperformanceacrossvariousdatasets,focusingon
+generalreasoning,languageunderstanding,andcommonsensecomparingtraining.
+Dataset ARC Hellaswag MMLU TruthfulQA WinoGrande GSM8K Avg
+C4 31.7 62.1 26.7 33.4 57.9 0.9 35.5
+Falcon-RW 35.1 63.6 25.3 36.0 62.0 0.5 37.1
+Pythia-1.4b-Pile 32.7 55.0 25.6 38.7 57.3 0.8 35.0
+QA+C4-85B(300K) 36.4 60.9 25.5 40.6 59.4 0.4 37.2
+QA+C4-100B(350K) 35.5 60.5 26.8 40.6 61.3 0.3 37.5
+Table12: 1.3B300KLLMLeaderboardEval. Evaluationisdoneonasingleseed(1234).
+28RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+G RephrasePromptTemplates
+WedetailthepromptsgiventotheMistral-7Bmodeltogeneratesyntheticversionsofthe
+C4datasetinspecificstyles. Note: thereareslightvariationsinthepromptthatwereusedfor
+otherfrozenLLMs,andnopromptwasusedfortheT5model.
+EasyStyle
+Astyledesignedtogeneratecontentunderstandablebytoddlers.
+A chat between a curious user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the questions.
+USER: For the following paragraph give me a paraphrase of the same using
+a very small vocabulary and extremely simple sentences that a toddler will
+understand:
+HardStyle
+Astyledesignedtogeneratecontentcomprehensibleprimarilytoscholarsusingarcane
+language.
+A chat between a curious user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the questions.
+USER: For the following paragraph give me a paraphrase of the same using very
+terse and abstruse language that only an erudite scholar will understand.
+Replace simple words and phrases with rare and complex ones:
+MediumStyle
+Astyledesignedtogeneratecontentcomparabletostandardencyclopedicentries.
+A chat between a curious user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the questions.
+USER: For the following paragraph give me a diverse paraphrase of the same
+in high quality English language as in sentences on Wikipedia:
+Q/AStyle
+Astyleintendedtoconvertnarrativesintoaconversationalformat.
+A chat between a curious user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the questions.
+USER: Convert the following paragraph into a conversational format with
+multiple tags of "Question:" followed by "Answer:":
+29RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+H RephraseExamples
+SamplesfromtheMRPCcorpusgeneratedbytheMistral-7Bmodel.
+Original
+The stock rose $2.11, or about 11 percent, to close Friday at $21.51 on
+the New York Stock Exchange.
+Revenue in the first quarter of the year dropped 15 percent from
+the same period a year earlier.
+MediumStyle
+The stock experienced an increase of approximately 11 percent, closing at
+$21.51 on the New York Stock Exchange on Friday, with a rise of $2.11.
+During the initial three months of the current year, there was a 15
+percent decrease in revenue compared to the corresponding quarter of the
+previous year.
+Q/AStyle
+Question: What was the stock’s closing price on Friday? Answer: $21.51
+Question: How much did the stock rise on Friday? Answer: $2.11 or about
+11 percent.
+Question: What was the revenue drop in the first quarter compared
+to the same period last year? Answer: The revenue dropped 15 percent.
+30RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+SamplesfromtheC4corpusgeneratedbytheMistral-7Bmodel.
+Original
+First round on stress at work survey. Answering the questionnaire is
+voluntary and all answers will be saved anonymously. Please fill in this
+questionnaire only if you have some work experience, part-or full time.
+Otherwise, you will not be able to answer some of the questions! Here is
+a the link to all language version.
+Not that there’s a thing wrong with frozen burgers. The key here
+is the meat seasonings, which are pretty strong and spicy and just GOOD,
+something else I think is really necessary in a turkey burger because
+ground turkey otherwise can be kind of flavorless. You’ll need ground
+turkey, onion powder, chili powder, salt, pepper, and cayenne pepper for
+the burgers. Then the mayo takes garlic and onion. Then we need buns,
+clearly, swiss cheese, lettuce, and onion. I LOVE tomatoes but sometimes
+find that they get in the way of other flavors, so I left them off of this
+burger. Add them if you’d like to your array of toppings! First, we’ll
+make the mayo. Grate the garlic directly into the mayo, add a pinch of
+salt, and squeeze in the lemon juice. Stir. Done! I love this. Then, we’ll
+work on the burgers. Preheat a large skillet to medium-high heat with some
+olive oil, preheat the broiler to high, then add all the spices to the
+ground turkey.
+Whether you like your velvet crushed, vibrant or head-to-toe, there’s
+really no denying the sheer luxe and elegance of this timeless textile.
+Not only is it super stylish, it can actually be so wearable for day-to-day
+wear. Yes, really! This year it’s all about embracing fun gem-toned
+velvety pieces. Long gone are the days when velvet was solely associated
+with dark moody shades of navy and black. Below we’ve rounded up the most
+covetable velvet pieces on the high street right now. We’re already coming
+up with outfit ideas! Are you completely obsessed or beyond bored of it?
+Save up to $8,086 on one of 1,258 Chrysler 200s near you. Find
+your perfect car with Edmunds expert and consumer car reviews, dealer
+reviews, car comparisons and pricing tools. We have 4,850,420. Research
+2015 Chrysler 200 Sedan 4D 200C I4 prices, used values & 200 Sedan 4D 200C
+I4 pricing, specs and more. Many years ago, we wrote about the stalling
+problem with the 2011 Chrysler 200, and believe it or not, we still receive
+an occasional call regarding the problem.However, a much larger issue has
+monopolized the phone lines as of late 2015 Chrysler 200 transmission
+problems leaving drivers with check engine lights, harsh shifting, and the
+occasional loss of power. The 2015 Chrysler 200 can fetch a premium for
+its style and its horsepower--but rear-seat room and handling are better
+bargains elsewhere. Find out why the 2015 Chrysler 200 is rated 8.4 by
+The. Don’t know where to find the perfect rims for your 2015 Chrysler 200
+CARiD.com stores a massive selection of 2015 Chrysler 200 wheels offered
+in myriads of design and finish options, including chrome, black, silver,
+and so much more.
+31RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+MediumStyle
+In the initial stage of the survey on work-related stress, participation is
+optional, and all responses will be kept confidential. It is important to
+note that only those with work experience, whether part-time or full-time,
+will be able to accurately respond to certain questions. To complete
+the questionnaire, please use the following link, which is available in
+multiple languages.
+Frozen burgers are not inherently flawed, but the meat seasonings
+are a crucial element that elevates the flavor of the dish. Ground turkey
+can be quite bland without the right blend of spices, so it is essential
+to add onion powder, chili powder, salt, pepper, and cayenne pepper to the
+mixture. Additionally, garlic and onion should be used in the mayonnaise,
+which is necessary for the burger’s topping. To make the mayo, grate
+the garlic directly into the mixture, add a pinch of salt, and squeeze
+in lemon juice. Mix well. The mayonnaise is a delicious addition to the
+burger topping. Now, let’s work on the burgers. Heat a large skillet over
+medium-high heat with some olive oil, and preheat the broiler to high. Add
+the seasonings to the ground turkey and mix well. The burgers should be
+cooked on the skillet for about 5 minutes on each side, then transferred
+to the broiler to cook for an additional 2-3 minutes. The burgers are
+ready to be assembled on buns, along with swiss cheese, lettuce, and onion.
+Tomatoes can be added as a topping, but they may overpower other flavors.
+It is up to the individual to decide if they want to include them in their
+burger. In conclusion, frozen burgers can be tasty, but the meat seasonings
+are essential to add depth and flavor to the dish. The mayonnaise and
+toppings can also be customized to suit individual preferences.
+The luxurious and elegant nature of velvet cannot be denied, whether it
+is crushed, vibrant, or head-to-toe. This timeless textile is not only
+fashionable but also wearable for daily wear. In recent years, there has
+been a shift towards embracing fun gem-toned velvety pieces, breaking away
+from the traditional association of velvet with dark moody shades of navy
+and black. Below are some of the most desirable velvet pieces available on
+the high street today, and we are already envisioning outfits around them.
+Are you completely enamored with velvet or simply beyond bored with it?
+Discover savings up to $8,086 on one of 1,258 Chrysler 200s near
+you. Get expert and consumer car reviews, dealer reviews, car comparisons,
+and pricing tools from Edmunds. We have 4,850,420 listings for 2015
+Chrysler 200 Sedan 4D 200C I4 prices, used values, and more. While we wrote
+about the stalling problem with the 2011 Chrysler 200, we still receive
+occasional calls regarding the issue. However, a more significant issue
+has taken over the phone lines recently - 2015 Chrysler 200 transmission
+problems that leave drivers with check engine lights, harsh shifting, and
+occasional loss of power. Despite the premium price for its style and
+horsepower, rear-seat room and handling are better bargains elsewhere. The
+2015 Chrysler 200 is rated 8.4 by The Car Connection. If you’re looking
+for the perfect rims for your 2015 Chrysler 200 CARiD.com offers a vast
+selection of 2015 Chrysler 200 wheels in various design and finish options,
+including chrome, black, silver, and more
+32RephrasingtheWeb: ARecipeforCompute&Data-EfficientLanguageModeling
+Q/AStyle
+Question: Is participating in the stress at work survey mandatory?
+Answer: No, it is voluntary. Question: Will all answers be saved
+anonymously? Answer: Yes, they will. Question: Who is eligible to take
+the questionnaire? Answer: Only individuals with work experience, whether
+part-time or full-time. Question: What happens if someone is not eligible
+to take the questionnaire? Answer: They will not be able to answer some of
+the questions. Question: Can you provide a link to all language versions
+of the questionnaire? Answer: Yes, here is the link.
+Question: What makes these frozen burgers so good? Answer: The
+meat seasonings are strong and spicy, and they give the burgers a good
+flavor. Question: Do you think ground turkey can be flavorless? Answer:
+Yes, ground turkey can be flavorless, but adding spices and seasonings
+can help. Question: What do you need to make these turkey burgers? Answer:
+Ground turkey, onion powder, chili powder, salt, pepper, and cayenne
+pepper for the burgers. Then the mayo takes garlic and onion. Buns, swiss
+cheese, lettuce, and onion are also needed. Question: What about toppings?
+Answer: Add tomatoes if you’d like to your array of toppings. Question:
+How do you make the mayo? Answer: Grate the garlic directly into the
+mayo, add a pinch of salt, and squeeze in the lemon juice. Stir. Done!
+Question: How do you work on the burgers? Answer: Preheat a large skillet
+to medium-high heat with some olive oil, preheat the broiler to high, then
+add all the spices to the ground turkey.
+Question: What do you think of velvet? Answer: Whether you like
+your velvet crushed, vibrant or head-to-toe, there’s really no denying
+the sheer luxe and elegance of this timeless textile. Question: Is velvet
+super stylish? Answer: Yes, really! This year it’s all about embracing
+fun gem-toned velvety pieces. Question: Was velvet solely associated with
+dark moody shades of navy and black? Answer: Long gone are the days when
+velvet was solely associated with dark moody shades of navy and black.
+Question: Do you have any covetable velvet pieces on the high street right
+now? Answer: Below we’ve rounded up the most covetable velvet pieces on
+the high street right now. Question: Are you completely obsessed or beyond
+bored of it? Answer: We’re already coming up with outfit ideas!
+Question: How can I save money on a Chrysler 200? Answer: Save up
+to $8,086 on one of 1,258 Chrysler 200s near you. Find your perfect
+car with Edmunds expert and consumer car reviews, dealer reviews, car
+comparisons and pricing tools. Question: What are the problems with the
+2015 Chrysler 200? Answer: We have 4,850,420. Research 2015 Chrysler 200
+Sedan 4D 200C I4 prices, used values & 200 Sedan 4D 200C I4 pricing, specs
+and more. Many years ago, we wrote about the stalling problem with the
+2011 Chrysler 200, and believe it or not, we still receive an occasional
+call regarding the problem. However, a much larger issue has monopolized
+the phone lines as of late 2015 Chrysler 200 transmission problems leaving
+drivers with check engine lights, harsh shifting, and the occasional loss
+of power. Question: What are the benefits of buying a 2015 Chrysler 200?
+Answer: The 2015 Chrysler 200 can fetch a premium for its style and its
+horsepower--but rear-seat room and handling are better bargains elsewhere.
+Question: How is the 2015 Chrysler 200 rated? Answer: It’s rated 8.4 by
+The. Question: Where can I find the perfect rims for my 2015 Chrysler 200?
+Answer: CARiD.com stores a massive selection of 2015 Chrysler 200 wheels
+offered in myriads of design and finish options, including chrome, black,
+silver, and so much more.
+33
