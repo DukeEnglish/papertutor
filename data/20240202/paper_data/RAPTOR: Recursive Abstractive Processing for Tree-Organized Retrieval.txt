@@ -1,0 +1,1082 @@
+PublishedasaconferencepaperatICLR2024
+RAPTOR: RECURSIVE ABSTRACTIVE PROCESSING
+FOR TREE-ORGANIZED RETRIEVAL
+ParthSarthi,SalmanAbdullah,AditiTuli,ShubhKhanna,AnnaGoldie,ChristopherD.Manning
+StanfordUniversity
+psarthi@cs.stanford.edu
+ABSTRACT
+Retrieval-augmentedlanguagemodelscanbetteradapttochangesinworldstate
+and incorporate long-tail knowledge. However, most existing methods retrieve
+only short contiguous chunks from a retrieval corpus, limiting holistic under-
+standing of the overall document context. We introduce the novel approach of
+recursivelyembedding,clustering,andsummarizingchunksoftext,constructing
+a tree with differing levels of summarization from the bottom up. At inference
+time,ourRAPTORmodelretrievesfromthistree,integratinginformationacross
+lengthydocumentsatdifferentlevelsofabstraction.Controlledexperimentsshow
+that retrieval with recursive summaries offers significant improvements over tra-
+ditionalretrieval-augmentedLMsonseveraltasks. Onquestion-answeringtasks
+that involve complex, multi-step reasoning, we show state-of-the-art results; for
+example,bycouplingRAPTORretrievalwiththeuseofGPT-4,wecanimprove
+thebestperformanceontheQuALITYbenchmarkby20%inabsoluteaccuracy.
+1 INTRODUCTION
+LargeLanguageModels(LLMs)haveemergedastransformativetoolsshowingimpressiveperfor-
+manceonmanytasks. WiththegrowingsizeofLLMs,theycanservestandaloneasveryeffective
+knowledgestores,withfactsencodedwithintheirparameters(Petronietal.,2019;Jiangetal.,2020;
+Talmoretal.,2020;Raeetal.,2021;Hoffmannetal.,2022;Chowdheryetal.,2022;Bubecketal.,
+2023; Kandpal et al., 2023) and models can be further improved with fine-tuning on downstream
+tasks (Roberts et al., 2020). Nevertheless, even a large model does not contain sufficient domain-
+specificknowledgeforparticulartasksandtheworldcontinuestochange,invalidatingfactsinthe
+LLM. Updatingtheknowledgeofthesemodelsthroughadditionalfine-tuningoreditingisdifficult,
+particularlywhendealingwithvasttextcorpora(Lewisetal.,2020;Mitchelletal.,2022). Analter-
+nativeapproach,pioneeredinopendomainquestionansweringsystems(Chenetal.,2017;Yuetal.,
+2018), is to index large quantities of text, after splitting it into chunks (paragraphs), in a separate
+information retrieval system. Retrieved information is then presented to the LLM along with the
+question as context (“retrieval augmentation”, Lewis et al., 2020; Izacard et al., 2022; Min et al.,
+2023; Ram et al., 2023), making it easy to provide a system with current knowledge particular to
+some domain and enabling easy interpretability and provenance tracking, whereas the parametric
+knowledgeofLLMsisopaqueanddifficulttotracebacktoitssource(Akyureketal.,2022).
+Nevertheless, existing retrieval-augmented approaches also have flaws. The one we tackle is that
+mostexistingmethodsretrieveonlyafewshort, contiguoustextchunks, whichlimitstheirability
+to represent and leverage large-scale discourse structure. This is particularly relevant for thematic
+questions that require integrating knowledge from multiple parts of a text, such as understanding
+an entire book, as in the NarrativeQA dataset (Kocˇisky` et al., 2018). Consider the fairy tale of
+Cinderella, and the question “How did Cinderella reach her happy ending?”. The top-k retrieved
+shortcontiguoustextswillnotcontainenoughcontexttoanswerthequestion.
+Toaddressthis,wedesignanindexingandretrievalsystemthatusesatreestructuretocaptureboth
+high-levelandlow-leveldetailsaboutatext. AsshowninFigure1,oursystem,RAPTOR,clusters
+chunksoftext,generatestextsummariesofthoseclusters,andthenrepeats,generatingatreefrom
+thebottomup. ThisstructureenablesRAPTORtoloadintoanLLM’scontextchunksrepresenting
+thetextatdifferentlevelssothatitcaneffectivelyandefficientlyanswerquestionsatdifferentlevels.
+1
+4202
+naJ
+13
+]LC.sc[
+1v95081.1042:viXraPublishedasaconferencepaperatICLR2024
+RAPTOR Tree Formation of one tree layer Contents of a node
+6 7 8 Index #8
+Root layer 9 10 2. Summarization Child Nodes: 2, 3
+by LLM
+Text: summary of
+6 7 8 3 5 1 4 5 2 3 nodes 2 and 3
+Text Embedding
+Leaf layer 1 2 3 4 5 1.Clustering 3
+.1
+4
+1 2 3 4 5 .1
+5
+Text chunks
+Figure1: Treeconstructionprocess: RAPTORrecursivelyclusterschunksoftextbasedontheir
+vector embeddings and generates text summaries of those clusters, constructing a tree from the
+bottomup. Nodesclusteredtogetheraresiblings; aparentnodecontainsthetextsummaryofthat
+cluster.
+Our main contribution is the idea of using text summarization to allow retrieval augmentation of
+contextatdifferentscales,andtoshowitseffectivenessinexperimentsoncollectionsoflongdoc-
+uments. Controlled experiments with three language models (UnifiedQA (Khashabi et al., 2020),
+GPT-3 (Brown et al., 2020) and GPT-4 (OpenAI, 2023)) show that RAPTOR outperforms current
+retrieval augmentation. Moreover, RAPTOR coupled with GPT-4, and sometimes even with Uni-
+fiedQA,givesnewstate-of-the-artresultsonthreeQAtasks: freetextresponsequestionsonbooks
+andmovies(NarrativeQA,Kocˇisky` etal.2018),full-textNLPpapers(QASPER,Dasigietal.2021),
+andmultiple-choicequestionsbasedonmedium-lengthpassages(QuALITY,Pangetal.2022).1
+2 RELATED WORK
+Why Retrieval? Recent advances in hardware and algorithms have indeed expanded the con-
+textlengthsthatmodelscanhandle, leadingtoquestionsabouttheneedforretrievalsystems(Dai
+etal.,2019;Daoetal.,2022;Liuetal.,2023). However,asLiuetal.(2023)andSunetal.(2021)
+havenoted,modelstendtounderutilizelong-rangecontextandseediminishingperformanceascon-
+textlengthincreases,especiallywhenpertinentinformationisembeddedwithinalengthycontext.
+Moreover, practically, useof longcontexts isexpensive andslow. Thissuggests thatselecting the
+mostrelevantinformationforknowledge-intensivetasksisstillcrucial.
+RetrievalMethods Retrieval-augmentedlanguagemodels(RALMs)haveseenimprovementsin
+various components: the retriever, the reader, and end-to-end system training. Retrieval methods
+have transitioned from traditional term-based techniques like TF-IDF (Spa¨rck Jones, 1972) and
+BM25 (Robertson et al., 1995; Roberts et al., 2020) to deep learning–based strategies (Karpukhin
+et al., 2020; Khattab & Zaharia, 2020; Sachan et al., 2023). Some recent work proposes using
+largelanguagemodelsasretrieversduetotheirabilitytomemorizeextensiveknowledge(Yuetal.,
+2022; Sun et al., 2022). Research on the reader component includes Fusion-in-Decoder (FiD)
+(Izacard&Grave,2022),whichemploysbothDPRandBM25forretrievalandprocessespassages
+independentlyintheencoderandRETRO(Borgeaudetal.,2022;Wangetal.,2023),whichutilizes
+cross-chunkedattentionandchunkwiseretrievaltogeneratetextgroundedonretrievedcontext.
+End-to-endsystemtrainingworkincludesAtlas(Izacardetal.,2022),whichfine-tunesanencoder-
+decodermodelinconjunctionwiththeretriever;REALM(Guuetal.,2020),abidirectional,masked
+LM fine-tuned for open-domain question answering; and RAG (Retrieval-Augmented Genera-
+tion)(Lewisetal.,2020),whichintegratespre-trainedsequence-to-sequencemodelswithaneural
+retriever. Min et al. (2021) introduced Joint Passage Retrieval (JPR) model which uses a tree-
+decodingalgorithmtohandlepassagediversityandrelevanceinmulti-answerretrieval. DenseHi-
+erarchicalRetrieval(DHR)andHybridHierarchicalRetrieval(HHR)representadvancements
+inretrievalaccuracybycombiningdocumentandpassagelevelretrievalsandintegratingsparseand
+denseretrievalmethods,respectively(Liuetal.,2021;Arivazhaganetal.,2023).
+1WewillreleasethecodeofRAPTORpubliclyhere.
+2PublishedasaconferencepaperatICLR2024
+Despite a diversity in methods, the retrieving components of models predominantly rely on stan-
+dard approaches, i.e., chunking corpora and encoding with BERT-based retrievers. Although this
+approachiswidelyadopted,Nairetal.(2023)highlightsapotentialshortcoming: contiguousseg-
+mentation might not capture the complete semantic depth of the text. Reading extracted snippets
+fromtechnicalorscientificdocumentsmaylackimportantcontextmakingthemdifficulttoreador
+evenmisleading. (Cohan&Goharian,2017;Newmanetal.,2023;Zhangetal.,2023).
+Recursive summarization as Context Summarization techniques provide a condensed view of
+documents, enablingmorefocusedengagementwiththecontent(Angelidis&Lapata,2018). The
+summarization/snippet model by Gao et al. (2023) uses summarizations and snippets of passages,
+whichimprovescorrectnessonmostdatasetsbutcansometimesbealossymeansofcompression.
+The recursive-abstractive summarization model by Wu et al. (2021) employs task decomposition
+tosummarizesmallertextchunks,whicharelaterintegratedtoformsummariesoflargersections.
+Whilethismethodiseffectiveforcapturingbroaderthemes,itcanmissgranulardetails.LlamaIndex
+(Liu, 2022) mitigates this issue by similarly summarizing adjacent text chunks but also retaining
+intermediate nodes thus storing varying levels of detail, keeping granular details. However, both
+methods,duetotheirrelianceonadjacencyforgroupingorsummarizingadjacentnodes,maystill
+overlookdistantinterdependencieswithinthetext,whichwecanfindandgroupwithRAPTOR.
+3 METHODS
+OverviewofRAPTOR Buildingontheideathatlongtextsoftenpresentsubtopicsandhierarchi-
+calstructures(Cao&Wang,2022;Dongetal.,2023b), RAPTORaddressestheissueofsemantic
+depthandconnectioninreadingbybuildingarecursivetreestructurethatbalancesbroaderthematic
+comprehensionwithgranulardetailsandwhichallowsnodestobegroupedbasedonsemanticsim-
+ilaritynotjustorderinthetext.
+ConstructionoftheRAPTORtreebeginswithsegmentingtheretrievalcorpusintoshort,contiguous
+textsoflength100,similartotraditionalretrievalaugmentationtechniques.Ifasentenceexceedsthe
+100-tokenlimit,wemovetheentiresentencetothenextchunk,ratherthancuttingitmid-sentence.
+This preserves the contextual and semantic coherence of the text within each chunk. These texts
+arethen embeddedusing SBERT,a BERT-basedencoder (multi-qa-mpnet-base-cos-v1)
+(Reimers & Gurevych, 2019). The chunks and their corresponding SBERT embeddings form the
+leafnodesofourtreestructure.
+Togroupsimilartextchunks,weemployaclusteringalgorithm. Onceclustered,aLanguageModel
+isusedtosummarizethegroupedtexts.Thesesummarizedtextsarethenre-embedded,andthecycle
+ofembedding,clustering,andsummarizationcontinuesuntilfurtherclusteringbecomesinfeasible,
+resultinginastructured,multi-layeredtreerepresentationoftheoriginaldocuments. Animportant
+aspectofRAPTORisitscomputationalefficiency. Thesystemscaleslinearlyintermsofbothbuild
+time and token expenditure, making it suitable for processing large and complex corpora. For a
+comprehensivediscussiononRAPTOR’sscalability,pleaserefertotheAppendixA.
+Forqueryingwithinthistree,weintroducetwodistinctstrategies: treetraversalandcollapsedtree.
+Thetreetraversalmethodtraversesthetreelayer-by-layer,pruningandselectingthemostrelevant
+nodesateachlevel. Thecollapsedtreemethodevaluatesnodescollectivelyacrossalllayerstofind
+themostrelevantones.
+ClusteringAlgorithm ClusteringplaysakeyroleinbuildingtheRAPTORtree,organizingtext
+segments into cohesive groups. This step groups related content together, which helps the subse-
+quentretrievalprocess.
+Oneoftheuniqueaspectsofourclusteringapproachistheuseofsoftclustering,wherenodescan
+belong to multiple clusters without requiring a fixed number of clusters. This flexibility is essen-
+tial because individual text segments often contain information relevant to various topics, thereby
+warrantingtheirinclusioninmultiplesummaries.
+Our clustering algorithm is based on Gaussian Mixture Models (GMMs), an approach that offers
+bothflexibilityandaprobabilisticframework. GMMsassumethatdatapointsaregeneratedfroma
+mixtureofseveralGaussiandistributions.
+3PublishedasaconferencepaperatICLR2024
+GivenasetofN textsegments, eachrepresentedasad-dimensionaldensevectorembedding, the
+likelihoodofatextvector,x,givenitsmembershipinthekth Gaussiandistribution,isdenotedby
+P(x|k) = N(x;µ ,Σ ). The overall probability distribution is a weighted combination P(x) =
+k k
+(cid:80)K π N(x;µ ,Σ ),whereπ signifiesthemixtureweightforthekthGaussiandistribution.
+k=1 k k k k
+The high dimensionality of vector embeddings presents a challenge for traditional GMMs, as dis-
+tancemetricsmaybehavepoorlywhenusedtomeasuresimilarityinhigh-dimensionalspaces(Ag-
+garwaletal.,2001). Tomitigatethis,weemployUniformManifoldApproximationandProjection
+(UMAP), a manifold learning technique for dimensionality reduction (McInnes et al., 2018). The
+number of nearest neighbors parameter, n neighbors, in UMAP determines the balance between
+thepreservationoflocalandglobalstructures. Ouralgorithmvariesn neighborstocreateahierar-
+chicalclusteringstructure:itfirstidentifiesglobalclustersandthenperformslocalclusteringwithin
+these global clusters. This two-step clustering process captures a broad spectrum of relationships
+amongthetextdata,frombroadthemestospecificdetails.
+Shouldalocalcluster’scombinedcontexteverexceedthesummarizationmodel’stokenthreshold,
+our algorithm recursively applies clustering within the cluster, ensuring that the context remains
+withinthetokenthreshold.
+Todeterminetheoptimalnumberofclusters,weemploytheBayesianInformationCriterion(BIC)
+for model selection. BIC not only penalizes model complexity but also rewards goodness of fit
+(Schwarz,1978). TheBICforagivenGMMisBIC =ln(N)k−2ln(Lˆ),whereN isthenumber
+of text segments (or data points), k is the number of model parameters, and Lˆ is the maximized
+valueofthelikelihoodfunctionofthemodel. InthecontextofGMM,thenumberofparametersk
+isafunctionofthedimensionalityoftheinputvectorsandthenumberofclusters.
+With the optimalnumber of clusters determined byBIC, the Expectation-Maximization algorithm
+isthenusedtoestimatetheGMMparameters,namelythemeans,covariances,andmixtureweights.
+WhiletheGaussianassumptioninGMMsmaynotperfectlyalignwiththenatureoftextdata,which
+oftenexhibitsasparseandskeweddistribution,ourempiricalobservationssuggestthatitoffersan
+effectivemodelforourpurpose. WerunanablationcomparingGMMClusteringwithsummarizing
+contiguouschunksandprovidedetailsinAppendixB.
+Model-Based Summarization After clustering the nodes using Gaussian Mixture Models, the
+nodesineachclusteraresenttoalanguagemodelforsummarization. Thisstepallowsthemodel
+to transform large chunks of text into concise, coherent summaries of the selected nodes. For our
+experiments, weusegpt-3.5-turbotogeneratethesummaries. Thesummarizationstepcon-
+denses the potentially large volume of retrieved information into a manageable size. We provide
+statistics on the compression due to the summarization in Appendix C and the prompt used for
+summarizationinAppendixD.
+Whilethesummarizationmodelgenerallyproducesreliablesummaries,afocusedannotationstudy
+revealedthatabout4%ofthesummariescontainedminorhallucinations. Thesedidnotpropagate
+toparentnodesandhadnodiscernibleimpactonquestion-answeringtasks.Foranin-depthanalysis
+ofhallucinations,refertotheappendixE.
+Querying Inthissection,weelaborateonthetwoqueryingmechanismsemployedbyRAPTOR:
+treetraversalandcollapsedtree. Thesemethodsofferuniquewaysoftraversingthemulti-layered
+RAPTOR tree to retrieve relevant information, each with its own advantages and trade-offs. We
+providethepseudocodeofbothmethodsinAppendixF.NotethatweembedallnodesusingSBERT.
+The tree traversal method first selects the top-k most relevant root nodes based on their cosine
+similaritytothequeryembedding. Thechildrenoftheseselectednodesareconsideredatthenext
+layer and the top-k nodes are selected from this pool again based on their cosine similarity to the
+queryvector.Thisprocessisrepeateduntilwereachtheleafnodes.Finally,thetextfromallselected
+nodesisconcatenatedtoformtheretrievedcontext. Thealgorithm’sstepsareoutlinedbelow:
+1. Start at the root layer of the RAPTOR tree. Compute the cosine similarity between the
+queryembeddingandtheembeddingsofallnodespresentatthisinitiallayer.
+2. Choosethetop-knodesbasedonthehighestcosinesimilarityscores,formingthesetS .
+1
+4PublishedasaconferencepaperatICLR2024
+Figure2: Illustrationofthetreetraversalandcollapsedtreeretrievalmechanisms. Treetraver-
+sal starts at the root level of the tree and retrieves the top-k (here, top-1) node(s) based on cosine
+similarityto thequeryvector. Ateach level, itretrievesthe top-k node(s)from thechildnodes of
+thepreviouslayer’stop-k. Collapsedtreecollapsesthetreeintoasinglelayerandretrievesnodes
+until a threshold number of tokens is reached, based on cosine similarity to the query vector. The
+nodesonwhichcosinesimilaritysearchisperformedarehighlightedinbothillustrations.
+3. ProceedtothechildnodesoftheelementsinsetS .Computethecosinesimilaritybetween
+1
+thequeryvectorandthevectorembeddingsofthesechildnodes.
+4. Selectthetopkchildnodeswiththehighestcosinesimilarityscorestothequery,forming
+thesetS .
+2
+5. Continuethisprocessrecursivelyfordlayers,producingsetsS ,S ,...,S .
+1 2 d
+6. ConcatenatesetsS throughS toassembletherelevantcontexttothequery.
+1 d
+Byadjustingthedepthdandthenumberofnodeskselectedateachlayer,thetreetraversalmethod
+offerscontroloverthespecificityandbreadthoftheinformationretrieved.Thealgorithmstartswith
+abroadoutlookbyconsideringthetoplayersofthetreeandprogressivelyfocusesonfinerdetails
+asitdescendsthroughthelowerlayers.
+Thecollapsedtreeapproachoffersasimplerwaytosearchforrelevantinformationbyconsidering
+all nodes in the tree simultaneously, as depicted in Figure 2. Instead of going layer-by-layer, this
+methodflattensthemulti-layeredtreeintoasinglelayer,essentiallybringingallthenodesontothe
+samelevelforcomparison. Thestepsforthismethodareoutlinedbelow:
+1. First,collapsetheentireRAPTORtreeintoasinglelayer. Thisnewsetofnodes,denoted
+asC,containsnodesfromeverylayeroftheoriginaltree.
+2. Next,calculatethecosinesimilaritybetweenthequeryembeddingandtheembeddingsof
+allnodespresentinthecollapsedsetC.
+3. Finally,pickthetop-k nodesthathavethehighestcosinesimilarityscoreswiththequery.
+Keep adding nodes to the result set until you reach a predefined maximum number of
+tokens,ensuringyoudon’texceedthemodel’sinputlimitations.
+Wetestedbothapproacheson20storiesfromtheQASPERdataset.Figure3showstheperformance
+oftreetraversalwithdifferenttop-sizesandcollapsedtreewithdifferentmaximumtokennumbers.
+The collapsed tree approach consistently performs better. We believe collapsed tree retrieval is
+betterduetoofferinggreaterflexibilitythantreetraversal; i.e., bysearchingthroughallthenodes
+simultaneously,itretrievesinformationthatisatthecorrectlevelofgranularityforagivenquestion.
+Incomparison, whileusingtreetraversalwiththesamevaluesofdandk, theratioofnodesfrom
+eachlevelofthetreewillbeconstant. So,theratioofhigher-orderthematicinformationtogranular
+detailswillremainthesameregardlessofthequestion.
+5PublishedasaconferencepaperatICLR2024
+Onedrawback,however,ofthecollapsedtreeapproachisthatitrequirescosinesimilaritysearchto
+beperformedonallnodesinthetree. However,thiscanbemademoreefficientwithfastk-nearest
+neighborlibrariessuchasFAISS(Johnsonetal.,2019).
+Overall, given the collapsed tree approach’s
+greaterflexibilityanditssuperiorperformance
+on the subset of the QASPER dataset, this is
+thequeryingapproachwithwhichweproceed.
+Specifically, we use the collapsed tree with
+2000 maximum tokens, which approximately
+equatestoretrievingthetop-20nodes. Usinga
+token-basedapproachensuresthecontextdoes
+not exceed model context constraints as token
+countscanvaryacrossnodes. Forexperiments
+withtheUnifiedQAmodel,weprovide400to-
+kens of context, as UnifiedQA has a max con-
+textlengthof512tokens. Weprovidethesame
+amountoftokensofcontexttoRAPTORandto
+thebaselines.
+Figure 3: Comparison of querying methods.
+Results on 20 stories from the QASPER dataset
+Qualitative Study We conduct a qualitative
+using tree traversal with different top-k values,
+analysis to understand the benefits of RAP-
+and collapsed tree with different context lengths.
+TOR’s retrieval process compared to Dense
+Collapsedtreewith2000tokensproducesthebest
+Passage Retrieval (DPR) methods. Our study
+results, so we use this querying strategy for our
+focusesonthematic,multi-hopquestionsusing
+mainresults.
+a1500-wordCinderellafairytale. Asillustrated
+in Figure 4, RAPTOR’s tree-based retrieval allows it to choose nodes from different tree layers,
+matching the question’s detail level. This approach often yields more relevant and comprehensive
+informationfordownstreamtasksthanDPR.Foradetaileddiscussionandexamples,includingthe
+textretrievedbybothRAPTORandDPRforspecificquestions,pleaserefertotheappendixG.
+4 EXPERIMENTS
+Datasets WemeasureRAPTOR’sperformanceacrossthreequestion-answeringdatasets: Narra-
+tiveQA,QASPER,andQuALITY.
+NarrativeQA is a dataset that comprises question-answer pairs based on the full texts of books
+and movie transcripts, totaling 1,572 documents (Kocˇisky` et al., 2018; Wu et al., 2021). The
+NarrativeQA-Story task requires a comprehensive understanding of the entire narrative in order
+to accurately answer its questions, thus testing the model’s ability to comprehend longer texts in
+theliterarydomain. WemeasureperformanceonthisdatasetusingthestandardBLEU(B-1,B-4),
+ROUGE(R-L),andMETEOR(M)metrics. PleaseseeappendixHformoredetailsontheNarra-
+tiveQAevaluationscriptusedinourexperiments.
+TheQASPERdatasetincludes5,049questionsacross1,585NLPpapers,witheachquestionprobing
+forinformationembeddedwithinthefulltext(Dasigietal.,2021). TheanswertypesinQASPER
+are categorized as Answerable/Unanswerable, Yes/No, Abstractive, and Extractive. Accuracy is
+measuredusingstandardF1.
+Lastly, the QuALITY dataset consists of multiple-choice questions, each accompanied by context
+passagesaveragingapproximately5,000tokensinlength(Pangetal.,2022). Thisdatasetcallsfor
+reasoningovertheentiredocumentforQAtasks,enablingustomeasuretheperformanceofourre-
+trievalsystemonmedium-lengthdocuments. Thedatasetincludesachallengingsubset,QuALITY-
+HARD, which contains questions that a majority of human annotators answered incorrectly in a
+speed-setting. WereportaccuraciesforboththeentiretestsetandtheHARDsubset.
+ControlledBaselineComparisons WefirstpresentcontrolledcomparisonsusingtheUnifiedQA
+3Basthereader,withSBERT(Reimers&Gurevych,2019),BM25(Robertsonetal.,1995;2009),
+and DPR (Karpukhin et al., 2020) as the embedding models with and without the RAPTOR tree
+structure, on three datasets: QASPER, NarrativeQA, and QuALITY. As shown in Tables 1 and 2,
+6PublishedasaconferencepaperatICLR2024
+Figure4: QueryingProcess: IllustrationofhowRAPTORretrievesinformationfortwoquestions
+abouttheCinderellastory: “Whatisthecentralthemeofthestory?” and“HowdidCinderellafind
+ahappyending?”. HighlightednodesindicateRAPTOR’sselections,whilearrowspointtoDPR’s
+leafnodes.Notably,RAPTOR’scontextoftenencompassestheinformationretrievedbyDPR,either
+directlyorwithinhigher-layersummaries.
+ourresultsdemonstratethatRAPTOR,whencombinedwithanyretriever,consistentlyoutperforms
+therespectiveretrieveracrossalldatasets. 2
+Since RAPTOR with SBERT has the best performance, we use it in all subsequent experiments.
+WenowcompareRAPTORwithBM25andDPR,usingthreedifferentLLMs: GPT-3,GPT-4,and
+UnifiedQA. As shown in Table 3, RAPTOR consistently outperforms BM25 and DPR across all
+threeLanguageModelsontheQASPERdataset. RAPTOR’sF-1Matchscoresare53.1%,55.7%,
+and36.6%whenusingGPT-3,GPT-4,andUnifiedQA,respectively. ThesescoressurpassDPRby
+marginsof1.8,2.7,and4.5points,andoutdoBM25by6.5,5.5,and10.2pointsacrosstherespective
+LLMs. QASPER requires synthesizing information within NLP papers, so it is unsurprising that
+RAPTOR’shigher-levelsummarynodeswouldallowittooutperformmethodsthatcanonlyextract
+thetop-kmostsimilarrawchunksoftext,whichmaynotcontainthecorrectresponseinisolation.
+Table 1: NarrativeQA Performance With + Without RAPTOR: Performance comparison of
+various retrieval methods (SBERT, BM25, DPR) with and without RAPTOR on the NarrativeQA
+dataset, using UnifiedQA-3B as the language model. RAPTOR outperforms baselines of each re-
+spectiveretrievalmethod.
+Model ROUGE BLEU-1 BLEU-4 METEOR
+SBERTwithRAPTOR 30.87% 23.50% 6.42% 19.20%
+SBERTwithoutRAPTOR 29.26% 22.56% 5.95% 18.15%
+BM25withRAPTOR 27.93% 21.17% 5.70% 17.03%
+BM25withoutRAPTOR 23.52% 17.73% 4.65% 13.98%
+DPRwithRAPTOR 30.94% 23.51% 6.45% 19.05%
+DPRwithoutRAPTOR 29.56% 22.84% 6.12% 18.44%
+Likewise,intheQuALITYdatasetasshowninTable4,RAPTORachievesanaccuracyof62.4%,
+whichisa2%and5.1%improvementoverDPRandBM25. SimilartrendsareobservedwhenUni-
+fiedQAisemployed,withRAPTORoutperformingDPRandBM25by2.7%and6.7%,respectively.
+Finally,intheNarrativeQAdataset,aspresentedinTable6,RAPTORexcelsacrossmultiplemet-
+rics. For ROUGE-L, it surpasses BM25 and DPR by 7.3 and 2.7 points, respectively. In other
+metricslikeBLEU-1,BLEU-4,andMETEOR,RAPTORoutperformsBM25andDPRbymargins
+rangingfrom1.7to5.8and0.7to2.1points,respectively.
+2FortheDPRexperimentsinTables1and2,weusedthedpr-multiset-basemodelasopposedto
+dpr-single-nq-basewhichwasusedinrestoftheexperimentsdoneearlier.Thisdecisionwasbasedon
+theperformanceobservedinKarpukhinetal.(2020),wheredpr-multiset-baseshowedsuperiorresults.
+7PublishedasaconferencepaperatICLR2024
+Table2: QuALITYandQASPERPerformanceWith+WithoutRAPTOR:Performancecom-
+parison across the QuALITY and QASPER datasets of various retrieval methods (SBERT, BM25,
+DPR)withandwithoutRAPTOR.UnifiedQA-3Bisusedasthelanguagemodel. RAPTORoutper-
+formsbaselinesofeachrespectiveretrievalmethodforbothdatasets.
+Model Accuracy(QuALITY) AnswerF1(QASPER)
+SBERTwithRAPTOR 56.6% 36.70%
+SBERTwithoutRAPTOR 54.9% 36.23%
+BM25withRAPTOR 52.1% 27.00%
+BM25withoutRAPTOR 49.9% 26.47%
+DPRwithRAPTOR 54.7% 32.23%
+DPRwithoutRAPTOR 53.1% 31.70%
+Table 3: Controlled comparison of F-1 scores on the QASPER dataset, using three different lan-
+guagemodels(GPT-3,GPT-4,UnifiedQA3B)andvariousretrievalmethods. Thecolumn”Title+
+Abstract” reflects performance when only the title and abstract of the papers are used for context.
+RAPTORoutperformstheestablishedbaselinesBM25andDPRacrossalltestedlanguagemodels.
+Specifically,RAPTOR’sF-1scoresareatleast1.8%pointshigherthanDPRandatleast5.3%points
+higherthanBM25.
+Retriever GPT-3F-1Match GPT-4F-1Match UnifiedQAF-1Match
+Title+Abstract 25.2 22.2 17.5
+BM25 46.6 50.2 26.4
+DPR 51.3 53.0 32.1
+RAPTOR 53.1 55.7 36.6
+Comparison to State-of-the-art Systems Table4: ComparisonofaccuraciesontheQuAL-
+Building upon our controlled comparisons, ITY dev dataset for two different language mod-
+we examine RAPTOR’s performance relative els(GPT-3,UnifiedQA3B)usingvariousretrieval
+to other state-of-the-art models. As shown methods. RAPTOR outperforms the baselines of
+in Table 5, RAPTOR with GPT-4 sets a new BM25andDPRbyatleast2.0%inaccuracy.
+benchmark on QASPER, with a 55.7% F-1
+score, surpassing the CoLT5 XL’s score of
+Model GPT-3Acc. UnifiedQAAcc.
+53.9%.
+BM25 57.3 49.9
+In the QuALITYdataset, as shown in Table7, DPR 60.4 53.9
+RAPTOR paired with GPT-4 sets a new state- RAPTOR 62.4 56.6
+of-the-art with an accuracy of 82.6%, surpass-
+ing the previous best result of 62.3%. In par- Table 5: Results on F-1 Match scores of various
+ticular, it outperforms CoLISA by 21.5% on modelsontheQASPERdataset.
+QuALITY-HARD, which represents questions
+that humans took unusually long to correctly
+Model F-1Match
+answer, requiring rereading parts of the text,
+LongT5XL(Guoetal.,2022) 53.1
+difficultreasoning,orboth.
+CoLT5XL(Ainslieetal.,2023) 53.9
+For the NarrativeQA dataset, as represented in RAPTOR+GPT-4 55.7
+Table6, RAPTORpairedwithUnifiedQAsets
+a new state-of-the-art METEOR score. When compared to the recursively summarizing model by
+Wu et al. (2021), which also employs UnifiedQA, RAPTOR outperforms it on all metrics. While
+Wu et al. (2021) rely solely on the summary in the top root node of the tree structure, RAPTOR
+benefitsfromitsintermediatelayersandclusteringapproaches,whichallowsittocapturearangeof
+information,fromgeneralthemestospecificdetails,contributingtoitsoverallstrongperformance.
+4.1 CONTRIBUTIONOFTHETREESTRUCTURE
+We examine the contribution of each layer of nodes to RAPTOR’s retrieval capabilities. We hy-
+pothesizedthatuppernodesplayacrucialroleinhandlingthematicormulti-hopqueriesrequiring
+abroaderunderstandingofthetext.
+8PublishedasaconferencepaperatICLR2024
+Table 6: Performance comparison on the NarrativeQA dataset across multiple models, focusing
+onfourmetrics: ROUGE-L,BLEU-1, BLEU-4,andMETEOR.RAPTOR,whenpairedwithUni-
+fiedQA3B,notonlysurpassesretrievalmethodslikeBM25andDPRbutalsosetsanewstate-of-
+the-artintheMETEORmetric.
+Model ROUGE-L BLEU-1 BLEU-4 METEOR
+BiDAF(Kocˇisky`etal.,2018) 6.2 5.7 0.3 3.7
+BM25+BERT(Mouetal.,2020) 15.5 14.5 1.4 5.0
+RecursivelySummarizingBooks(Wuetal.,2021) 21.6 22.3 4.2 10.6
+Retriever+Reader(Izacard&Grave,2022) 32.0 35.3 7.5 11.1
+RAPTOR+UnifiedQA 30.8 23.5 6.4 19.1
+Table7: AccuraciesoftheQuALITYdatasetonboththeoveralltestsetandthemorechallenging
+hardsubset. GPT-4withRAPTORsetsanewstate-of-the-art.
+Accuracy
+Model
+TestSet HardSubset
+Longformer-base(Beltagyetal.,2020) 39.5 35.3
+DPRandDeBERTaV3-large(Pangetal.,2022) 55.4 46.1
+CoLISA(DeBERTaV3-large)(Dongetal.,2023a) 62.3 54.7
+RAPTOR+GPT-4 82.6 76.2
+Table8: PerformanceofRAPTORwhenqueryingdifferenttreelayersforStory1fromtheQuAL-
+ITYdataset. Columnsrepresentdifferentstartingpoints(highestlayer)androwsrepresentdifferent
+numbersoflayersqueried.
+LayersQueried/StartLayer Layer0(LeafNodes) Layer1 Layer2
+1layer 57.9 57.8 57.9
+2layers - 52.6 63.15
+3layers - - 73.68
+Wevalidatedthishypothesisbothquantitativelyandqualitatively. Wepresentqualitativeanalysisin
+appendixG.Toquantitativelyunderstandthecontributionoftheupper-levelnodes,weusedstories
+from the QuALITY dataset. The RAPTOR tree is built for each of these stories, as described in
+Section3. However,duringretrieval,welimitthesearchtodifferentsubsetsoflayers. Forexample,
+weexclusivelyretrievefromtheleafnodesandeachupperlayer,aswellasfromdifferentcontiguous
+subsets of the layers. We show findings specific to one story in Table 8, revealing that a full-tree
+search,utilizingalllayers,outperformedretrievalstrategiesthatfocusedonlyonspecificlayers.
+These findings highlight the importance of the full tree structure in RAPTOR. By providing both
+theoriginaltextandhigher-levelsummariesforretrieval,RAPTORcaneffectivelyhandleawider
+rangeofquestions,fromhigher-orderthematicqueriestodetail-orientedquestions. Detailedresults
+foradditionalstoriesandanablationstudyonlayercontributionscanbefoundinAppendixI.
+5 CONCLUSION
+In this paper, we have presented RAPTOR, a novel tree-based retrieval system that augments the
+parametric knowledge of large language models with contextual information at various levels of
+abstraction. Byemployingrecursiveclusteringandsummarizationtechniques,RAPTORcreatesa
+hierarchicaltreestructurethatiscapableofsynthesizinginformationacrossvarioussectionsofthe
+retrievalcorpora. Duringthequeryphase,RAPTORleveragesthistreestructureformoreeffective
+retrieval. OurcontrolledexperimentsdemonstratedthatRAPTORnotonlyoutperformstraditional
+retrievalmethodsbutalsosetsnewperformancebenchmarksonseveralquestion-answeringtasks.
+9PublishedasaconferencepaperatICLR2024
+6 REPRODUCIBILITY STATEMENT
+LanguageModelsforQAandSummarization FourlanguagemodelsareusedinourRAPTOR
+experiments: GPT-3andGPT-4forQAtasks,andGPT-3.5-turboforsummarization. Thegpt-3,
+gpt-4,andgpt-3.5-turbomodelscanbeaccessedviaAPIcalls(OpenAIAPI).UnifiedQA,
+whichisusedforQAtasks,ispubliclyavailableatHuggingFace.
+Evaluation Datasets The three evaluation datasets used in our experiments—QuALITY,
+QASPER, and NarrativeQA—are all publicly accessible. These datasets ensure that the retrieval
+andQAtestsconductedinthisstudycanbereplicated.
+SourceCode ThesourcecodeforRAPTORwillbepubliclyavailablehere.
+REFERENCES
+CharuCAggarwal,AlexanderHinneburg,andDanielAKeim. OntheSurprisingBehaviorofDis-
+tanceMetricsinHighDimensionalSpace. InDatabaseTheory—ICDT2001: 8thInternational
+ConferenceLondon,UK,January4–6,2001Proceedings8,pp.420–434.Springer,2001. URL
+https://link.springer.com/chapter/10.1007/3-540-44503-x_27.
+Joshua Ainslie, Tao Lei, Michiel de Jong, Santiago Ontan˜o´n, Siddhartha Brahma, Yury Zemlyan-
+skiy, David Uthus, Mandy Guo, James Lee-Thorp, Yi Tay, et al. CoLT5: Faster long-range
+transformers with conditional computation. arXiv preprint arXiv:2303.09752, 2023. URL
+https://arxiv.org/abs/2303.09752.
+Ekin Akyurek, Tolga Bolukbasi, Frederick Liu, Binbin Xiong, Ian Tenney, Jacob Andreas, and
+Kelvin Guu. Towards tracing knowledge in language models back to the training data. In
+Findings of the Association for Computational Linguistics: EMNLP 2022, pp. 2429–2446,
+AbuDhabi, UnitedArabEmirates, December2022.AssociationforComputationalLinguistics.
+doi: 10.18653/v1/2022.findings-emnlp.180. URL https://aclanthology.org/2022.
+findings-emnlp.180.
+StefanosAngelidisandMirellaLapata. Summarizingopinions: Aspectextractionmeetssentiment
+prediction and they are both weakly supervised. arXiv preprint arXiv:1808.08858, 2018. URL
+https://arxiv.org/abs/1808.08858.
+Manoj Ghuhan Arivazhagan, Lan Liu, Peng Qi, Xinchi Chen, William Yang Wang, and Zhiheng
+Huang. Hybrid hierarchical retrieval for open-domain question answering. In Anna Rogers,
+JordanBoyd-Graber,andNaoakiOkazaki(eds.),FindingsoftheAssociationforComputational
+Linguistics:ACL2023,pp.10680–10689,Toronto,Canada,July2023.AssociationforComputa-
+tionalLinguistics.doi:10.18653/v1/2023.findings-acl.679.URLhttps://aclanthology.
+org/2023.findings-acl.679.
+IzBeltagy,MatthewE.Peters,andArmanCohan. Longformer: TheLong-documentTransformer,
+2020. URLhttps://arxiv.org/abs/2004.05150. arXivpreprintarXiv:2004.05150.
+SebastianBorgeaud,ArthurMensch,JordanHoffmann,TrevorCai,ElizaRutherford,KatieMilli-
+can,GeorgeBmVanDenDriessche,Jean-BaptisteLespiau,BogdanDamoc,AidanClark,etal.
+Improvinglanguagemodelsbyretrievingfromtrillionsoftokens. InInternationalconferenceon
+machinelearning, pp.2206–2240.PMLR,2022. URLhttps://arxiv.org/abs/2112.
+04426.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhari-
+wal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal,
+Ariel Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel
+Ziegler, Jeffrey Wu, Clemens Winter, Chris Hesse, Mark Chen, Eric Sigler, Mateusz Litwin,
+Scott Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Rad-
+ford, Ilya Sutskever, and Dario Amodei. Language Models are Few-Shot Learners. In
+H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin (eds.), Advances in Neu-
+ral Information Processing Systems, volume 33, pp. 1877–1901. Curran Associates, Inc.,
+10PublishedasaconferencepaperatICLR2024
+2020. URL https://proceedings.neurips.cc/paper_files/paper/2020/
+file/1457c0d6bfcb4967418bfb8ac142f64a-Paper.pdf.
+Se´bastien Bubeck, Varun Chandrasekaran, Ronen Eldan, Johannes Gehrke, Eric Horvitz, Ece Ka-
+mar, Peter Lee, Yin Tat Lee, Yuanzhi Li, Scott Lundberg, et al. Sparks of Artificial General
+Intelligence: Early Experiments with GPT-4. arXiv preprint arXiv:2303.12712, 2023. URL
+https://arxiv.org/abs/2303.12712.
+ShuyangCaoandLuWang. HIBRIDS:Attentionwithhierarchicalbiasesforstructure-awarelong
+document summarization. In Proceedings of the 60th Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers), pp. 786–807, Dublin, Ireland, May 2022.
+Association for Computational Linguistics. doi: 10.18653/v1/2022.acl-long.58. URL https:
+//aclanthology.org/2022.acl-long.58.
+Danqi Chen, Adam Fisch, Jason Weston, and Antoine Bordes. Reading Wikipedia to Answer
+Open-Domain Questions. In Proceedings of the 55th Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers), pp. 1870–1879, Vancouver, Canada, July
+2017. Association for Computational Linguistics. doi: 10.18653/v1/P17-1171. URL https:
+//aclanthology.org/P17-1171.
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam
+Roberts, Paul Barham, Hyung Won Chung, Charles Sutton, Sebastian Gehrmann, et al. PaLM:
+Scaling Language Modeling with Pathways. arXiv preprint arXiv:2204.02311, 2022. URL
+https://arxiv.org/abs/2204.02311.
+Arman Cohan and Nazli Goharian. Contextualizing citations for scientific summarization using
+wordembeddingsanddomainknowledge. InProceedingsofthe40thInternationalACMSIGIR
+ConferenceonResearchandDevelopmentinInformationRetrieval,pp.1133–1136,2017. URL
+https://dl.acm.org/doi/abs/10.1145/3077136.3080740.
+Zihang Dai, Zhilin Yang, Yiming Yang, Jaime Carbonell, Quoc Le, and Ruslan Salakhutdinov.
+Transformer-XL:Attentivelanguagemodelsbeyondafixed-lengthcontext.InProceedingsofthe
+57thAnnualMeetingoftheAssociationforComputationalLinguistics,pp.2978–2988,Florence,
+Italy, July2019.AssociationforComputationalLinguistics. doi: 10.18653/v1/P19-1285. URL
+https://aclanthology.org/P19-1285.
+Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and Christopher Re´. FlashAttention: Fast and
+memory-efficientexactattentionwithIO-Awareness.AdvancesinNeuralInformationProcessing
+Systems,35:16344–16359,2022. URLhttps://arxiv.org/abs/2205.14135.
+PradeepDasigi,KyleLo,IzBeltagy,ArmanCohan,NoahA.Smith,andMattGardner. ADataset
+of Information-Seeking Questions and Answers Anchored in Research Papers. In Proceed-
+ings of the 2021 Conference of the North American Chapter of the Association for Computa-
+tional Linguistics: Human Language Technologies, pp. 4599–4610, Online, June 2021. Asso-
+ciation for Computational Linguistics. doi: 10.18653/v1/2021.naacl-main.365. URL https:
+//aclanthology.org/2021.naacl-main.365.
+MengxingDong,BoweiZou,YanlingLi,andYuHong. CoLISA:InnerInteractionviaContrastive
+LearningforMulti-choiceReadingComprehension. InAdvancesinInformationRetrieval: 45th
+European Conference on Information Retrieval, ECIR 2023, Dublin, Ireland, April 2–6, 2023,
+Proceedings,PartI,pp.264–278.Springer,2023a. URLhttps://link.springer.com/
+chapter/10.1007/978-3-031-28244-7_17.
+Zican Dong, Tianyi Tang, Lunyi Li, and Wayne Xin Zhao. A survey on long text modeling with
+transformers. arXiv preprint arXiv:2302.14502, 2023b. URL https://arxiv.org/abs/
+2302.14502.
+TianyuGao,HowardYen,JiatongYu,andDanqiChen. Enablinglargelanguagemodelstogenerate
+text with citations. arXiv preprint arXiv:2305.14627, 2023. URL https://arxiv.org/
+abs/2305.14627.
+11PublishedasaconferencepaperatICLR2024
+Mandy Guo, Joshua Ainslie, David Uthus, Santiago Ontanon, Jianmo Ni, Yun-Hsuan Sung, and
+Yinfei Yang. LongT5: Efficient text-to-text transformer for long sequences. In Findings of the
+Association for Computational Linguistics: NAACL 2022, pp. 724–736, Seattle, United States,
+July2022.AssociationforComputationalLinguistics. doi: 10.18653/v1/2022.findings-naacl.55.
+URLhttps://aclanthology.org/2022.findings-naacl.55.
+KelvinGuu,KentonLee,ZoraTung,PanupongPasupat,andMingweiChang.RetrievalAugmented
+LanguageModelPre-Training. InInternationalconferenceonmachinelearning,pp.3929–3938.
+PMLR,2020. URLhttps://doi.org/10.48550/arXiv.2002.08909.
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza
+Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, et al.
+Trainingcompute-optimallargelanguagemodels. arXivpreprintarXiv:2203.15556,2022. URL
+https://arxiv.org/abs/2203.15556.
+Gautier Izacard and Edouard Grave. Distilling Knowledge from Reader to Retriever for Ques-
+tion Answering, 2022. URL https://arxiv.org/abs/2012.04584. arXiv preprint
+arXiv:2012.04584.
+Gautier Izacard, Patrick Lewis, Maria Lomeli, Lucas Hosseini, Fabio Petroni, Timo Schick, Jane
+Dwivedi-Yu, Armand Joulin, Sebastian Riedel, and Edouard Grave. Few-shot learning with re-
+trieval augmented language models. arXiv preprint arXiv:2208.03299, 2022. URL https:
+//arxiv.org/abs/2208.03299.
+Zhengbao Jiang, Frank F Xu, Jun Araki, and Graham Neubig. How can we know what language
+modelsknow? TransactionsoftheAssociationforComputationalLinguistics,8:423–438,2020.
+URLhttps://arxiv.org/abs/1911.12543.
+JeffJohnson,MatthijsDouze,andHerve´ Je´gou. Billion-ScaleSimilaritySearchwithGPUs. IEEE
+Transactions on Big Data, 7(3):535–547, 2019. URL https://arxiv.org/abs/1702.
+08734.
+Nikhil Kandpal, Haikang Deng, Adam Roberts, Eric Wallace, and Colin Raffel. Large Language
+ModelsstruggletolearnLong-TailKnowledge. InInternationalConferenceonMachineLearn-
+ing, pp.15696–15707.PMLR,2023. URLhttps://proceedings.mlr.press/v202/
+kandpal23a/kandpal23a.pdf.
+Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi
+Chen, and Wen-tau Yih. Dense Passage Retrieval for Open-Domain Question Answering. In
+Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing
+(EMNLP), pp. 6769–6781, Online, November 2020. Association for Computational Linguis-
+tics.doi:10.18653/v1/2020.emnlp-main.550.URLhttps://aclanthology.org/2020.
+emnlp-main.550.
+Daniel Khashabi, Sewon Min, Tushar Khot, Ashish Sabharwal, Oyvind Tafjord, Peter Clark, and
+Hannaneh Hajishirzi. UNIFIEDQA: Crossing format boundaries with a single QA system.
+In Findings of the Association for Computational Linguistics: EMNLP 2020, pp. 1896–1907,
+Online, November 2020. Association for Computational Linguistics. doi: 10.18653/v1/2020.
+findings-emnlp.171. URL https://aclanthology.org/2020.findings-emnlp.
+171.
+Omar Khattab and Matei Zaharia. ColBERT: Efficient and effective passage search via con-
+textualized late interaction over bert. In Proceedings of the 43rd International ACM SIGIR
+conference on research and development in Information Retrieval, pp. 39–48, 2020. URL
+https://arxiv.org/abs/2004.12832.
+Toma´sˇKocˇisky`,JonathanSchwarz,PhilBlunsom,ChrisDyer,KarlMoritzHermann,Ga´borMelis,
+and Edward Grefenstette. The NarrativeQA Reading Comprehension Challenge. Transactions
+of the Association for Computational Linguistics, 6:317–328, 2018. URL https://arxiv.
+org/abs/1712.07040.
+12PublishedasaconferencepaperatICLR2024
+PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,NamanGoyal,
+HeinrichKu¨ttler,MikeLewis,Wen-tauYih,TimRockta¨schel,etal.Retrieval-AugmentedGener-
+ationforKnowledge-IntensiveNLPTasks. AdvancesinNeuralInformationProcessingSystems,
+33:9459–9474,2020. URLhttps://doi.org/10.48550/arXiv.2005.11401.
+JerryLiu. LlamaIndex,2022. URLhttps://github.com/jerryjliu/llama_index.
+NelsonFLiu,KevinLin,JohnHewitt,AshwinParanjape,MicheleBevilacqua,FabioPetroni,and
+Percy Liang. Lost in the middle: How language models use long contexts. arXiv preprint
+arXiv:2307.03172,2023. URLhttps://arxiv.org/abs/2307.03172.
+Ye Liu, Kazuma Hashimoto, Yingbo Zhou, Semih Yavuz, Caiming Xiong, and Philip Yu. Dense
+hierarchicalretrievalforopen-domainquestionanswering. InMarie-FrancineMoens,Xuanjing
+Huang, Lucia Specia, and Scott Wen-tau Yih (eds.), Findings of the Association for Compu-
+tational Linguistics: EMNLP 2021, pp. 188–200, Punta Cana, Dominican Republic, Novem-
+ber2021.AssociationforComputationalLinguistics. doi: 10.18653/v1/2021.findings-emnlp.19.
+URLhttps://aclanthology.org/2021.findings-emnlp.19.
+Leland McInnes, John Healy, and James Melville. UMAP: Uniform Manifold Approximation
+and Projection for Dimension Reduction, 2018. URL https://arxiv.org/abs/1802.
+03426. arXivpreprintarXiv:1802.03426.
+Sewon Min, Kenton Lee, Ming-Wei Chang, Kristina Toutanova, and Hannaneh Hajishirzi. Joint
+passagerankingfordiversemulti-answerretrieval. InMarie-FrancineMoens,XuanjingHuang,
+Lucia Specia, and Scott Wen-tau Yih (eds.), Proceedings of the 2021 Conference on Empirical
+Methods in Natural Language Processing, pp. 6997–7008, Online and Punta Cana, Dominican
+Republic, November 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.
+emnlp-main.560. URLhttps://aclanthology.org/2021.emnlp-main.560.
+Sewon Min, Weijia Shi, Mike Lewis, Xilun Chen, Wen-tau Yih, Hannaneh Hajishirzi, and Luke
+Zettlemoyer. Nonparametric masked language modeling. In Findings of the Association for
+Computational Linguistics: ACL 2023, pp. 2097–2118, Toronto, Canada, July 2023. Associ-
+ation for Computational Linguistics. doi: 10.18653/v1/2023.findings-acl.132. URL https:
+//aclanthology.org/2023.findings-acl.132.
+Eric Mitchell, Charles Lin, Antoine Bosselut, Christopher D Manning, and Chelsea Finn.
+Memory-based model editing at scale. In International Conference on Machine Learning,
+pp. 15817–15831. PMLR, 2022. URL https://proceedings.mlr.press/v162/
+mitchell22a/mitchell22a.pdf.
+Xiangyang Mou, Mo Yu, Bingsheng Yao, Chenghao Yang, Xiaoxiao Guo, Saloni Potdar, and Hui
+Su. Frustratingly hard evidence retrieval for QA over books. In Proceedings of the First Joint
+WorkshoponNarrativeUnderstanding,Storylines,andEvents,pp.108–113,Online,July2020.
+Association for Computational Linguistics. doi: 10.18653/v1/2020.nuse-1.13. URL https:
+//aclanthology.org/2020.nuse-1.13.
+Inderjeet Nair, Aparna Garimella, Balaji Vasan Srinivasan, Natwar Modani, Niyati Chhaya, Srikr-
+ishna Karanam, and Sumit Shekhar. A neural CRF-based hierarchical approach for lin-
+ear text segmentation. In Findings of the Association for Computational Linguistics: EACL
+2023, pp. 883–893, Dubrovnik, Croatia, May 2023. Association for Computational Linguis-
+tics. doi: 10.18653/v1/2023.findings-eacl.65. URLhttps://aclanthology.org/2023.
+findings-eacl.65.
+BenjaminNewman,LucaSoldaini,RaymondFok,ArmanCohan,andKyleLo. Acontrollableqa-
+basedframeworkfordecontextualization.arXivpreprintarXiv:2305.14772,2023.URLhttps:
+//arxiv.org/pdf/2305.14772.pdf.
+OpenAI. GPT-4TechnicalReport. ArXiv,abs/2303.08774,2023. URLhttps://arxiv.org/
+abs/2303.08774.
+Richard Yuanzhe Pang, Alicia Parrish, Nitish Joshi, Nikita Nangia, Jason Phang, Angelica Chen,
+Vishakh Padmakumar, Johnny Ma, Jana Thompson, He He, and Samuel Bowman. QuALITY:
+13PublishedasaconferencepaperatICLR2024
+Question Answering with Long Input Texts, Yes! In Proceedings of the 2022 Conference of
+theNorthAmericanChapteroftheAssociationforComputationalLinguistics:HumanLanguage
+Technologies, pp. 5336–5358, Seattle, United States, July 2022. Association for Computational
+Linguistics. URLhttps://aclanthology.org/2022.naacl-main.391.
+FabioPetroni, TimRockta¨schel, PatrickLewis, AntonBakhtin, YuxiangWu, AlexanderHMiller,
+andSebastianRiedel. Languagemodelsasknowledgebases? arXivpreprintarXiv:1909.01066,
+2019. URLhttps://arxiv.org/abs/1909.01066.
+JackWRae,SebastianBorgeaud,TrevorCai,KatieMillican,JordanHoffmann,FrancisSong,John
+Aslanides, Sarah Henderson, Roman Ring, Susannah Young, et al. Scaling language models:
+Methods, Analysis & Insights from Training Gopher. arXiv preprint arXiv:2112.11446, 2021.
+URLhttps://arxiv.org/abs/2112.11446.
+Ori Ram, Yoav Levine, Itay Dalmedigos, Dor Muhlgay, Amnon Shashua, Kevin Leyton-
+Brown, and Yoav Shoham. In-context retrieval-augmented language models. arXiv preprint
+arXiv:2302.00083,2023. URLhttps://arxiv.org/abs/2302.00083.
+Nils Reimers and Iryna Gurevych. Sentence-BERT: Sentence embeddings using Siamese BERT-
+networks. In Proceedings of the 2019 Conference on Empirical Methods in Natural Lan-
+guage Processing and the 9th International Joint Conference on Natural Language Processing
+(EMNLP-IJCNLP),pp.3982–3992, HongKong, China, November2019.AssociationforCom-
+putationalLinguistics. doi: 10.18653/v1/D19-1410. URLhttps://aclanthology.org/
+D19-1410.
+Adam Roberts, Colin Raffel, and Noam Shazeer. How Much Knowledge Can You Pack Into
+the Parameters of a Language Model? In Proceedings of the 2020 Conference on Empir-
+ical Methods in Natural Language Processing (EMNLP), pp. 5418–5426, Online, November
+2020.AssociationforComputationalLinguistics. doi: 10.18653/v1/2020.emnlp-main.437. URL
+https://aclanthology.org/2020.emnlp-main.437.
+Stephen Robertson, Hugo Zaragoza, et al. The Probabilistic Relevance Framework: BM25 and
+Beyond. FoundationsandTrendsinInformationRetrieval,3(4):333–389,2009. URLhttps:
+//doi.org/10.1561/1500000019.
+StephenERobertson, SteveWalker, SusanJones, MichelineMHancock-Beaulieu, MikeGatford,
+et al. Okapi at TREC-3. Nist Special Publication Sp, 109:109, 1995. URL https://www.
+microsoft.com/en-us/research/publication/okapi-at-trec-3/.
+DevendraSinghSachan,MikeLewis,DaniYogatama,LukeZettlemoyer,JoellePineau,andManzil
+Zaheer. Questions are all you need to train a dense passage retriever. Transactions of the As-
+sociation for Computational Linguistics, 11:600–616, 2023. doi: 10.1162/tacl a 00564. URL
+https://aclanthology.org/2023.tacl-1.35.
+Gideon Schwarz. Estimating the Dimension of a Model. The annals of statistics, pp. 461–464,
+1978. URLhttps://projecteuclid.org/journals/annals-of-statistics/
+volume-6/issue-2/Estimating-the-Dimension-of-a-Model/10.1214/
+aos/1176344136.full.
+Karen Spa¨rck Jones. A Statistical Interpretation of Term Specificity and its Application in Re-
+trieval. Journalofdocumentation,28(1):11–21,1972. URLhttps://doi.org/10.1108/
+eb026526.
+SimengSun,KalpeshKrishna,AndrewMattarella-Micke,andMohitIyyer.Dolong-rangelanguage
+models actually use long-range context? In Marie-Francine Moens, Xuanjing Huang, Lucia
+Specia,andScottWen-tauYih(eds.),Proceedingsofthe2021ConferenceonEmpiricalMethods
+in Natural Language Processing, pp. 807–822, Online and Punta Cana, Dominican Republic,
+November2021.AssociationforComputationalLinguistics.doi:10.18653/v1/2021.emnlp-main.
+62. URLhttps://aclanthology.org/2021.emnlp-main.62.
+ZhiqingSun,XuezhiWang,YiTay,YimingYang,andDennyZhou.Recitation-augmentedlanguage
+models. arXivpreprintarXiv:2210.01296,2022. URLhttps://arxiv.org/abs/2210.
+01296.
+14PublishedasaconferencepaperatICLR2024
+Alon Talmor, Yanai Elazar, Yoav Goldberg, and Jonathan Berant. oLMpics– on what language
+model pre-training captures. Transactions of the Association for Computational Linguistics, 8:
+743–758,2020. URLhttps://arxiv.org/abs/1912.13283.
+Boxin Wang, Wei Ping, Peng Xu, Lawrence McAfee, Zihan Liu, Mohammad Shoeybi, Yi Dong,
+OleksiiKuchaiev,BoLi,ChaoweiXiao,etal. Shallwepretrainautoregressivelanguagemodels
+withretrieval? acomprehensivestudy. arXivpreprintarXiv:2304.06762, 2023. URLhttps:
+//arxiv.org/abs/2304.06762.
+Jeff Wu, Long Ouyang, Daniel M. Ziegler, Nisan Stiennon, Ryan Lowe, Jan Leike, and Paul
+Christiano. Recursively Summarizing Books with Human Feedback, 2021. URL https:
+//arxiv.org/abs/2109.10862.
+Adams Wei Yu, David Dohan, Minh-Thang Luong, Rui Zhao, Kai Chen, Mohammad Norouzi,
+and Quoc V. Le. QANet: Combining Local Convolution with Global Self-Attention for Read-
+ingComprehension,2018. URLhttps://arxiv.org/abs/1804.09541. arXivpreprint
+arXiv:1804.09541.
+Wenhao Yu, Dan Iter, Shuohang Wang, Yichong Xu, Mingxuan Ju, Soumya Sanyal, Chenguang
+Zhu,MichaelZeng,andMengJiang. Generateratherthanretrieve: LargeLanguageModelsare
+strongcontextgenerators,2022. URLhttps://arxiv.org/abs/2209.10063.
+Shiyue Zhang, David Wan, and Mohit Bansal. Extractive is not faithful: An investigation of
+broad unfaithfulness problems in extractive summarization. In Anna Rogers, Jordan Boyd-
+Graber, and Naoaki Okazaki (eds.), Proceedings of the 61st Annual Meeting of the Association
+forComputationalLinguistics(Volume1: LongPapers), pp.2153–2174, Toronto, Canada, July
+2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.acl-long.120. URL
+https://aclanthology.org/2023.acl-long.120.
+A SCALABILITY AND COMPUTATIONAL EFFICIENCY OF THE
+TREE-BUILDING PROCESS
+To assess the computational efficiency and cost-effectiveness of RAPTOR’s tree-building process,
+weconductedexperimentsonaconsumer-gradelaptop,specificallyanAppleM1Macwith16GB
+of RAM. These experiments aimed to demonstrate the scalability and feasibility of RAPTOR on
+typicalhardware. Wevariedthecontextlengthfrom12,500to78,000tokensandmeasuredboththe
+tokenexpenditureandthetimerequiredtocompletethetree-buildingprocess,frominitialsplitting
+andembeddingtotheconstructionofthefinalrootnode.
+Figure5: TokencostasafunctionofdocumentlengthforQASPER,NarrativeQA,andQuALITY.
+RAPTORtreeconstructioncostsscalelinearlywithdocumentlengthforeachofthedatasets.
+Token Expenditure We empirically investigated the relationship between the initial document
+length and the total number of tokens expended during the tree-building process, which includes
+boththepromptandcompletiontokens. Thedocumentlengthsvariedsignificantlyacrossthethree
+15PublishedasaconferencepaperatICLR2024
+datasetsexamined: QuALITY,QASPER,andNarrativeQA.Figure5illustratesaclearlinearcorre-
+lationbetweentheinitialdocumentlengthandthetotaltokenexpenditure,emphasizingthatRAP-
+TORmaintainsalineartokenscalingregardlessofdocumentcomplexityorlength.
+Figure6: Buildtimeasafunctionofdocumentlengthfordocumentsofupto80,000tokens. RAP-
+TORtreeconstructiontimescaleslinearlywithdocumentlengthforeachofthedatasets.
+BuildTime Wealsoempiricallyobservedaconsistentlineartrendbetweenthedocumentlength
+and the build time, as shown in Figure 6. This suggests that RAPTOR scales linearly in terms of
+time,makingitaviablesolutionforefficientlyprocessinglargecorporaofvaryinglengths.
+Conclusion Overall, our empirical results indicate that RAPTOR scales both in terms of tokens
+expended and build time. Even as the complexity and volume of the input text grow, the cost of
+constructingthetreescalespredictablyandlinearly. ThisdemonstratesthatRAPTORiscomputa-
+tionallyefficientandwell-suitedforprocessinglargeanddiversecorpora.
+B ABLATION STUDY ON CLUSTERING MECHANISM IN RAPTOR
+To assess the effectiveness of the clustering mechanism in our RAPTOR approach, we conducted
+an ablation study on the QuALITY dataset. This study compares RAPTOR’s performance with a
+balanced tree-style encoding and summarization of contiguous chunks, in contrast to our standard
+clusteringmethod.
+B.1 METHODOLOGY
+BothconfigurationsinthisablationstudyutilizedSBERTembeddingsandUnifiedQAtomaintain
+consistency in retrieval. For RAPTOR, we employed our typical clustering and summarization
+process. Incontrast,thealternativesetupinvolvedcreatingabalancedtreebyrecursivelyencoding
+andsummarizingcontiguoustextchunks. Wedeterminedthewindowsizeforthissetupbasedon
+theaverageclustersizeobservedinRAPTOR,whichisapproximately6.7nodes. Hence,wechose
+awindowsizeof7nodes. Thecollapsedtreeapproachwasappliedforretrievalinbothmodels.
+B.2 RESULTS&DISCUSSION
+Theresultsoftheablationstudyarepresentedintable9. Theresultsfromthisablationstudyclearly
+indicate an improvement in accuracy when employing RAPTOR’s clustering mechanism over the
+recency-basedtreeapproach.Thisfindingsubstantiatesourhypothesisthattheclusteringstrategyin
+RAPTORismoreeffectiveincapturinghomogeneouscontentforsummarization,therebyenhancing
+theoverallretrievalperformance.
+16PublishedasaconferencepaperatICLR2024
+Table9: AblationstudyresultscomparingRAPTORwitharecency-basedtreeapproach
+Configuration Accuracy
+RAPTOR+SBERTembeddings+UnifiedQA 56.6%
+Recency-basedtree+SBERTembeddings+UnifiedQA 55.8%
+C DATASET STATISTICS AND COMPRESSION RATIOS
+Theaverageratioofthesummarylengthtothesumofchildnodelengthsacrossalldatasetsis0.28,
+indicatinga72%compressionrate. Onaverage,thesummarylengthis131tokens,andtheaverage
+childnodelengthis86tokens. Belowarethedetailedstatisticsforallthreedatasets:
+Table10: StatisticsofAverageSummaryLengthandChildNodeLengthAcrossDatasets
+Dataset Avg. Avg.Child Avg.#of Avg.
+Summary NodeText ChildNodes Compression
+Length Length PerParent Ratio(%)
+(tokens) (tokens)
+AllDatasets 131 85.6 6.7 .28
+QuALITY 124.4 87.9 5.7 .28
+NarrativeQA 129.7 85.5 6.8 .27
+QASPER 145.9 86.2 5.7 .35
+D SUMMARIZATION PROMPT
+Table11showsthepromptusedforsummarization.
+Table11: PromptforSummarization
+Role Content
+system YouareaSummarizingTextPortal
+user Write a summary of the following, including as many key details as
+possible: {context}:
+E HALLUCINATION ANALYSIS
+ToassessthequalityandaccuracyofthesummarizationswithinourRAPTORmodel,weconducted
+ananalysisfocusingonhallucinationsinthegeneratedsummaries. Thesummariesweregenerated
+bygpt-3.5-turboandsubsequentlyannotatedtoquantifytheratesofhallucinations,toexamine
+whether such inaccuracies propagate to parent nodes, and to evaluate their impact on question-
+answering(QA)tasks.
+E.1 METHODOLOGY
+We randomly sampled 150 nodes across 40 stories and evaluated them for hallucinations. This
+samplingstrategyprovidesabroadviewofthemodel’sperformanceacrossdifferentcontexts. Each
+nodewasannotatedbyhand,anddeterminedifitcontainedahallucination.
+E.2 FINDINGS
+Outofthe150nodessampled,4%(6nodes)containedsomeformofhallucination.Mostcommonly,
+thesehallucinationsoriginatedfromthemodeladdingminorinformationpossiblyfromitstraining
+data that was not present in the text being summarized, or from incorrectly extrapolating some
+informationwhencreatingthesummary.
+17PublishedasaconferencepaperatICLR2024
+Example:
+Textofthechildnodes:
+”Andyouwillcomewithmetomypeople? Wemaylivehereamongthem,and
+youwillbeagreatwarrior–oh,whenJordiesyoumayevenbechief,forthereis
+nonesomightyasmywarrior...”Butyourfatherwillnotpermitit–Jor,myfather,
+HighChiefoftheGalus,willnotpermitit,forlikemeyouarecos-ata-lo. Oh,Co-
+Tan,ifwebutcould!... BradleynoticedthatshespokeinEnglish–brokenEnglish
+likeCo-Tan’sbutequallyappealing.
+Summaryfoundintheparentofthatnode:
+The protagonist, Bradley, is being asked by Co-Tan to stay with her people and
+becomeagreatwarrior, butherefusesandmustreturntohisowncountry. Tom
+BillingsofSantaMonicaarrivesandtellsthemhecametosearchforamannamed
+BowenJ.Tyler,Jr. Ajor,Co-Tan’ssister,isexcitedaboutthepossibilityofgoing
+toTom’scountrytoseestrangeandwonderfulthings...
+ThehallucinationhereisthatthesummarystatesthatJr. AjorandCo-Tanaresisters,butdoesnot
+explicitlymentionorimplythis.
+Upon reviewing all parent nodes, we found that hallucinations did not propagate to higher layers.
+Generally,thehallucinationswereminoranddidnotalterthethematicinterpretationofthetext.
+E.3 IMPACTONQATASKS
+Inourfindings,hallucinationshadnodiscernibleimpactontheperformanceofQAtasks. Thissug-
+geststhathallucinationisnotamajorconcernsforthesummarizationcomponentinourRAPTOR
+architecture.
+F PSEUDOCODE FOR RETRIEVAL METHODS
+Algorithm1TreeTraversalAlgorithm
+functionTRAVERSETREE(tree,query,k)
+S ←tree.layer[0]
+current
+forlayerinrange(tree.num layers)do
+top ←[]
+k
+fornodeinS do
+current
+score←dot product(query,node)
+top k.append((node,score))
+endfor
+S ←sorted(top k)[:k].nodes
+layer
+S ←S
+current layer
+endfor
+returnS ∪S ∪S ∪...∪S
+0 1 2 k
+endfunction
+G QUALITATIVE ANALYSIS
+To qualitatively examine RAPTOR’s retrieval process, we test it on thematic, multi-hop questions
+abouta1500-wordversionofthefairytaleCinderella. WecomparethecontextretrievedbyRAP-
+TORwiththecontextretrievedbyDensePassageRetrieval(DPR).Figure4inthemainpaperdetails
+the retrieval process within RAPTOR’s tree structure for two questions. The nodes that RAPTOR
+selectsforeachquestionarehighlighted,whiletheleafnodesthatDPRselectsforthesamequestion
+are indicated with arrows. This comparison illustrates the advantage of RAPTOR’s tree structure.
+RAPTORselectsnodesfromdifferentlayersdependingonthelevelofgranularityrequiredbythe
+18PublishedasaconferencepaperatICLR2024
+Algorithm2CollapsedTreeAlgorithm
+functionCOLLAPSEDTREE(tree,query,k,max tokens)
+tree←flatten(tree) ▷Flattentreeinto1D
+top nodes←[]
+fornodeintreedo
+top nodes.append((node,dot product(query,node))
+endfor
+top nodes←sorted(top nodes)
+result←[]
+total tokens←0
+fornodeintop nodesdo
+iftotal tokens+node.token size<max tokensthen
+result.append(node)
+endif
+total tokens←total tokens+node.token size
+endfor
+returnresult
+endfunction
+Question:Whatisthecentralthemeofthestory?
+RAPTOR FairyGodmotherhelpsCinderellaattendaballbytransformingherrags... Cinderella
+impressesthePrinceattheball... shelosestrackoftimeandhastorunhomealonein
+thedarkness. ThePrinceisunabletofindCinderellaandgoesinsearchofher... She
+forgavehersisters,andtreatedthemalwaysverykindly,andthePrincehadgreatcause
+tobegladthathehadfoundtheglassslipper.
+DPR Two mice were turned into footmen; four grasshoppers into white horses. Next, the
+FairytouchedCinderella’srags,andtheybecamerichsatinrobes,trimmedwithpoint
+lace. ... Alas! theclockhadstruckEleven. Shefoundnocoach,onlyapumpkin,and
+theratandmiceranquicklyawaywhentheysawher;whileallherfinedressturnedto
+rags,andshehadtorunhomealone...TheytoldherabeautifulPrincesshadbeenat
+theball,withwhomthePrincewasdelighted.TheydidnotknowitwasCinderella.
+Question:HowdoesCinderellafindahappyending?
+RAPTOR The story of Cinderella involves her godmother, a fairy, who transforms a pumpkin
+intoagrandcoachwithherwandandallowsCinderellatoattendtheball. However,
+Cinderellamustreturnhomebeforetheclockstrikeselevenorherdresswillturnback
+intorags... CinderellaimpressesthePrinceattheballbutleavesbeforehecanfind
+outwhosheis... ThePrincesearchedfortheownerofalostglassslipperandfoundit
+belongedtoCinderella. SheforgavehersistersandthePrincewasgladtohavefound
+her.
+DPR theclockhadstruckEleven... ThePrincewasverymuchsurprisedwhenhemissed
+Cinderella again, and leaving the ball, went in search of her... Fairy touched Cin-
+derella’s rags, and they became rich satin robes, trimmed with point lace... Her old
+shoesbecameacharmingpairofglassslippers,whichshonelikediamonds. “Nowgo
+totheball,mylove,”shesaid,“andenjoyyourself. Butremember,youmustleavethe
+roombeforetheclockstrikeseleven.Ifyoudonotyourdresswillreturntoitsoriginal
+rags.”
+Table12: RelevantexcerptsfromtextretrievedbyRAPTORandDPRforthequestionsonthe
+fairytaleCinderella.
+question at hand. Further, the information that would be retrieved by DPR is more often than not
+includedinthecontextretrievedbyRAPTOR,eitherdirectlyasaleafnodeorindirectlyaspartofa
+summaryfromahigherlayer.
+”Thefirstquestionweexamineis“HowdoesCinderellafindahappyending?”,amulti-hopquestion
+bestansweredbysynthesizinginformationfromvarioustextsegments. Tocontrolforthelanguage
+model’spotentialfamiliaritywiththeCinderellastory,weinstructedittorelysolelyontheretrieved
+informationforitsanswers. Table13showsthetextretrievedbybothRAPTORandDPRforthis
+question. RAPTOR’scontextsuccinctlydescribesCinderella’sjourneytohappiness, whileDPR’s
+leaf nodes primarily focus on her initial transformation. The difference in retrieved information
+19PublishedasaconferencepaperatICLR2024
+significantlyimpactsdownstreamtasks. WhenGPT-4isprovidedwithRAPTOR’scontext,itgen-
+eratesadetailedanswer: “CinderellafindsahappyendingwhenthePrincesearchesfortheowner
+of the lost glass slipper and discovers it belongs to Cinderella. They eventually marry, transform-
+ingCinderella’slifeforthebetter.” Incontrast,usingDPR’scontext,GPT-4states: “Basedonthe
+givencontext,itisnotpossibletodeterminehowCinderellafindsahappyending,asthetextlacks
+informationaboutthestory’sconclusion.”
+Thesecondquestionweexamineis“Whatisthecentralthemeofthestory?”, athematicquestion
+thatrequiresholisticunderstandingoftheentiretext. ThetextretrievedbyRAPTORandDPRfor
+this question is shown in Table 13. The text retrieved by RAPTOR contains short descriptions of
+allthemajorpartsofthestory,whereasthetextretrievedbyDPRcontainsdetaileddescriptionsof
+anarrowsubsetofthestory. Again,thedifferenceinretrievalmechanismsaffectstheperformance
+of GPT-4 when answering the question. Given DPR’s context, it outputs “The central theme of
+thestoryistransformationandthepowerofinnerbeauty,asCinderella,akindandhumblegirl,is
+magicallytransformedintoabeautifulprincess,capturingtheattentionandadmirationofthePrince
+and others at the ball.” This answer only takes into account the first portion of the story, up until
+Cinderellafirstmeetstheprince. Incontrast,givenRAPTOR’scontext,GPT-4outputs“Thecentral
+theme of the story is transformation and overcoming adversity, as Cinderella, with the help of her
+FairyGodmother,transformsfromamistreatedanddowntroddengirlintoabeautifulandconfident
+young woman who ultimately finds happiness and love with the Prince.” This is a more complete
+answer,demonstratingacomprehensiveunderstandingofthestory.
+This qualitative analysis indicates that RAPTOR outperforms prior retrieval mechanisms because
+theinformationthatitretrievesismorerelevantandexhaustive,allowingforbetterperformanceon
+downstreamtasks.
+Wealsocreateda2600-wordstoryalongwithquestionsaboutitsnarrativeandtheme. Anexcerpt
+fromthestoryispresentbelowandthefullPDFofthisstoryislinkedhere.Forquestionslike“What
+is the central theme of the story?”, an upper-level node is retrieved which includes the sentence:
+“This story is about the power of human connection... inspiring and uplifting each other as they
+pursued their passions.” This summary, not explicitly present in the original text, almost directly
+answersthequestion.
+Excerptfrom”TheEagerWriter”:
+”Ethan’spassionforwritinghadalwaysbeenapartofhim. Asachild,hewould
+often scribble stories and poems in his notebook, and as he grew older, his love
+forwritingonlyintensified. Hiseveningswereoftenspentinthedimlightofhis
+room, typingawayathislaptop. Hehadrecentlytakenajobasacontentwriter
+for an online marketing firm to pay the bills, but his heart still longed for the
+worldofstorytelling. However,likemanyaspiringwriters,hestruggledtofinda
+footholdintheindustry. Hetookajobasacontentwriterforanonlinemarketing
+firm,butitwasgrowingincreasinglyevidenttohimthatthiswasnotthepathhe
+wanted to pursue. It was during this time that he stumbled upon the Pathways
+app. Theappofferedaplatformforpeopleinsimilarprofessionstoconnectand
+share knowledge, and he saw it as an opportunity to finally connect with others
+whosharedhispassionforwriting. Ethansawanopportunitytomeetotherswho
+shared his passion and could offer guidance and mentorship. He quickly signed
+up and was surprised by the number of writers he found on the platform, from
+wellestablishprofessionalstobeginnersjuststartingoutinthebusiness.”
+H NARRATIVEQA EVALUATION SCRIPT
+WemadeseveralmodificationstoAllenNLP’sevaluationscript3tobetterfitourevaluationneeds:
+• Added Smoothing: Smoothing was incorporated to handle cases where BLEU score is
+zero, due to no n-gram matches occurring in the reference text. A BLEU score of zero
+skewstheresults,leadingtoanoverlyharshevaluationforrareornovelphrases.Byadding
+3docs.allennlp.org/models/main/models/rc/tools/narrativeqa/
+20PublishedasaconferencepaperatICLR2024
+asmoothingfunction,wepreventtheBLEUscoresfromdroppingtozero,providingamore
+fairevaluation.
+• Modified BLEU-4 Weighting: The original script applied a weight of 1 to the highest
+order n-gram (4-gram) and 0 to the rest in its BLEU-4 calculation (i.e., weights=(0, 0,
+0, 1)). This approach may overly focus on 4-gram matches while neglecting lower-order
+matches. Toprovideamorebalancedevaluation,weevenlydistributedtheweightacross
+all n-gram levels, changing the weights for the BLEU-4 calculation to (0.25, 0.25, 0.25,
+0.25).
+• Tokenization before Mapping in METEOR Calculation: The original script utilized a
+simplesplitandmapmethodforMETEORcalculation.Wefixedthisbyfirsttokenizingthe
+textandthenmappingthetokens.ThisamendmentimprovestheaccuracyoftheMETEOR
+calculationbytakingintoaccountthecorrectlinguisticboundariesofwords.
+Question:Whatisthecentralthemeofthestory?
+RAPTOR FairyGodmotherhelpsCinderellaattendaballbytransformingherrags... Cinderella
+impressesthePrinceattheball... shelosestrackoftimeandhastorunhomealonein
+thedarkness. ThePrinceisunabletofindCinderellaandgoesinsearchofher... She
+forgavehersisters,andtreatedthemalwaysverykindly,andthePrincehadgreatcause
+tobegladthathehadfoundtheglassslipper.
+DPR Two mice were turned into footmen; four grasshoppers into white horses. Next, the
+FairytouchedCinderella’srags,andtheybecamerichsatinrobes,trimmedwithpoint
+lace. ... Alas! theclockhadstruckEleven. Shefoundnocoach,onlyapumpkin,and
+theratandmiceranquicklyawaywhentheysawher;whileallherfinedressturnedto
+rags,andshehadtorunhomealone...TheytoldherabeautifulPrincesshadbeenat
+theball,withwhomthePrincewasdelighted.TheydidnotknowitwasCinderella.
+Question:HowdoesCinderellafindahappyending?
+RAPTOR The story of Cinderella involves her godmother, a fairy, who transforms a pumpkin
+intoagrandcoachwithherwandandallowsCinderellatoattendtheball. However,
+Cinderellamustreturnhomebeforetheclockstrikeselevenorherdresswillturnback
+intorags... CinderellaimpressesthePrinceattheballbutleavesbeforehecanfind
+outwhosheis... ThePrincesearchedfortheownerofalostglassslipperandfoundit
+belongedtoCinderella. SheforgavehersistersandthePrincewasgladtohavefound
+her.
+DPR theclockhadstruckEleven... ThePrincewasverymuchsurprisedwhenhemissed
+Cinderella again, and leaving the ball, went in search of her... Fairy touched Cin-
+derella’s rags, and they became rich satin robes, trimmed with point lace... Her old
+shoesbecameacharmingpairofglassslippers,whichshonelikediamonds. “Nowgo
+totheball,mylove,”shesaid,“andenjoyyourself. Butremember,youmustleavethe
+roombeforetheclockstrikeseleven.Ifyoudonotyourdresswillreturntoitsoriginal
+rags.”
+Table13: RelevantexcerptsfromtextretrievedbyRAPTORandDPRforthequestionsonthe
+fairytaleCinderella.
+I ANALYSIS OF DIFFERENT LAYERS ON RAPTOR’S PERFORMANCE
+I.1 HOWDODIFFERENTLAYERSIMPACTPERFORMANCE?
+Inthissection,wepresentadetailedbreakdownofRAPTOR’sretrievalperformancewhenquerying
+differentlayersofthehierarchicaltreestructureforvariousstories. Thesetablesvalidatetheutility
+ofRAPTOR’smulti-layeredstructurefordiversequeryrequirements.
+Table14: PerformanceofRAPTORwhenqueryingdifferentlayersofthetreeforStory2.
+LayersQueried/StartLayer Layer0(LeafNodes) Layer1 Layer2
+1layer 58.8 47.1 41.1
+2layers - 64.7 52.9
+3layers - - 47.1
+21PublishedasaconferencepaperatICLR2024
+Figure7:HistogramshowingthepercentageofnodesretrievedfromdifferentlayersoftheRAPTOR
+treeacrossthreedatasets(NarrativeQA,Quality,andQasper)usingthreeretrievers(SBERT,BM25,
+andDPR).Thedataindicatethatasubstantialportionofthenodescontributingtothefinalretrieval
+comesfromnon-leaflayers,withanotablepercentagefromthefirstandsecondlayers,highlighting
+theimportanceofRAPTOR’shierarchicalsummarizationintheretrievalprocess.
+Table15: PerformanceofRAPTORwhenqueryingdifferentlayersofthetreeforStory3.
+LayersQueried/StartLayer Layer0(LeafNodes) Layer1 Layer2
+1layer 66.6 61.1 61.1
+2layers - 66.6 66.6
+3layers - - 83.3
+Table16: PerformanceofRAPTORwhenqueryingdifferentlayersofthetreeforStory4.
+LayersQueried/StartLayer Layer0(LeafNodes) Layer1
+1layer 94.7 84.2
+2layers - 89.4
+Table17: PerformanceofRAPTORwhenqueryingdifferentlayersofthetreeforStory5.
+LayersQueried/StartLayer Layer0(LeafNodes) Layer1
+1layer 57.9 47.3
+2layers - 68.4
+I.2 WHICHLAYERSDORETRIEVEDNODESCOMEFROM?
+We further conduct an ablation study across all three datasets and across three different retrievers
+withRAPTORwiththecollapsedtreeretrievaltoexaminethelayersfromwhichtheretrievednodes
+originate. Weobservethatbetween18.5%to57%oftheretrievednodescomefromnon-leafnodes.
+As illustrated in Figure 7, the retrieval pattern across layers reveals the importance of RAPTOR’s
+multi-layered tree structure. Notably, a significant percentage of the nodes retrieved by RAPTOR
+using the DPR retriever for the NarrativeQA dataset come from the first and second layers of the
+tree,asopposedtotheleafnodes. Thispatternisconsistentacrosstheotherdatasetsandretrievers,
+albeitwithvaryingpercentages.
+Table18: Percentageofnodesfromnon-leafnodesacrossdifferentdatasetsandretrievers
+Dataset DPR SBERT BM25
+NarrativeQA 57.36% 36.78% 34.96%
+Quality 32.28% 24.41% 32.36%
+Qasper 22.93% 18.49% 22.76%
+22PublishedasaconferencepaperatICLR2024
+Table19: PercentageofnodesfromdifferentlayerswithDPRastheretriever
+Layer NarrativeQA Quality Qasper
+0 42.64% 67.71% 77.07%
+1 45.00% 29.43% 21.88%
+2 10.57% 2.85% 1.05%
+3 1.78% - -
+4 0.003% - -
+Table20: PercentageofnodesfromdifferentlayerswithSBERTastheretriever
+Layer NarrativeQA Quality Qasper
+0 63.22% 75.59% 81.51%
+1 31.51% 22.78% 17.84%
+2 4.85% 1.63% 0.65%
+3 0.42% - -
+Table21: PercentageofnodesfromdifferentlayerswithBM25astheretriever
+Layer NarrativeQA Quality Qasper
+0 65.04% 67.64% 77.24%
+1 28.79% 28.85% 21.57%
+2 5.36% 3.51% 1.19%
+3 0.81% - -
+23

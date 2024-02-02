@@ -1,0 +1,799 @@
+PublishedasaconferencepaperatICLR2024
+MOTION GUIDANCE: DIFFUSION-BASED IMAGE EDIT-
+ING WITH DIFFERENTIABLE MOTION ESTIMATORS
+DanielGeng,AndrewOwens
+UniversityofMichigan
+https://dangeng.github.io/motion_guidance
+ABSTRACT
+Diffusionmodelsarecapableofgeneratingimpressiveimagesconditionedontext
+descriptions, and extensions of these models allow users to edit images at a rel-
+atively coarse scale. However, the ability to precisely edit the layout, position,
+pose, and shape of objects in images with diffusion models is still difficult. To
+thisend,weproposemotionguidance,azero-shottechniquethatallowsauserto
+specifydense, complexmotionfieldsthatindicatewhereeachpixelinanimage
+shouldmove. Motionguidanceworksbysteeringthediffusionsamplingprocess
+withthegradientsthroughanoff-the-shelfopticalflownetwork. Specifically,we
+designaguidancelossthatencouragesthesampletohavethedesiredmotion,as
+estimated by a flow network, while also being visually similar to the source im-
+age. Bysimultaneouslysamplingfromadiffusionmodelandguidingthesample
+tohavelowguidanceloss,wecanobtainamotion-editedimage. Wedemonstrate
+thatourtechniqueworksoncomplexmotionsandproduceshighqualityeditsof
+realandgeneratedimages.
+1 INTRODUCTION
+Recent advances in diffusion models have provided users with the ability to manipulate images
+in a variety of ways, such as by conditioning on text (Hertz et al., 2022; Tumanyan et al., 2023),
+instructions (Brooks et al., 2023), or other images (Gal et al., 2022). Yet existing methods often
+struggle to make many seemingly simple changes to image structure, like moving an object to a
+specificpositionorchangingitsshape.
+An emerging line of work has begun to address these problems by incorporating motion prompts,
+such as user-provided displacement vectors that indicate where a given point on an object should
+move(Chenetal.,2023;Panetal.,2023a;Shietal.,2023;Mouetal.,2023;Epsteinetal.,2023).
+However,thesemethodshavesignificantlimitations. First,theyarelargelylimitedtosparsemotion
+inputs, often only allowing constraints to be placed on one point at a time. This makes it difficult
+topreciselycapturecomplexmotions,especiallythosethatrequiremovingobjectpartsinnonrigid
+ways. Second,existingmethodsoftenrequiretextinputsandplacestrongrestrictionsontheunder-
+lyingnetworkarchitecture,suchasbybeingrestrictedtoeditingobjectsthatreceivecross-attention
+fromatexttoken,byrequiringper-imagefinetuning,orbyrelyingonfeaturesfromspecificlayers
+ofspecificdiffusionarchitectures.
+To address these issues, we propose motion guidance, a simple, zero-shot method that takes ad-
+vantage of powerful, off-the-shelf motion estimators. This method allows users to edit images by
+specifyingadense,andpossiblycomplex,flowfieldindicatingwhereeachpixelshouldmoveinthe
+editedimage(Fig.1). Weguidethediffusionsamplingprocessusingalossfunctionincorporating
+an off-the-shelf optical flow estimator, similarly to classifier guidance Dhariwal & Nichol (2021).
+Aspartofeachdiffusionsamplingstep, weestimatethemotionbetweenthegeneratedimageand
+the input source image, and measure the extent to which it deviates from the user-provided flow
+field. Wethenaugmentthenoiseestimatewithgradientsthroughourloss,intheprocessbackprop-
+agating through the optical flow estimator. Simultaneously, we encourage the generated image to
+bevisuallysimilartothesourceimagebyencouragingcorrespondingpixelstobephotoconsistent,
+allowingourmodeltotradeoffbetweenthefidelityofmotionandvisualappearance.
+In contrast to other approaches, our method does not require any training, and does not require a
+specificdiffusionnetworkarchitecture. Weshowthatourmethodworksforbothrealandgenerated
+1
+4202
+naJ
+13
+]VC.sc[
+1v58081.1042:viXraPublishedasaconferencepaperatICLR2024
+Source
+Image
+Motion
+Guided
+Target
+Flow
+Flow Legend
+a) (cid:210)a teapot (cid:223)oating in water(cid:211) b) (cid:210)a photo of a cat(cid:211)
+c) (cid:210)a photo of a lion(cid:211) d) (cid:210)a photo of a laptop(cid:211) e) (cid:210)a photo of topiary(cid:211)
+f) (cid:210)a painting of a lone tree(cid:211) g) [real image] h) [real image]
+Figure1:FlowGuidance.Givenasourceimageandatargetflow,wegenerateanewimagethathasthedesired
+flowwithrespecttotheoriginalimage.Ourmethodiszero-shot,achievingthisbyperformingguidancethrough
+anopticalflownetwork,andworksonbothrealandsyntheticimages.Note,qualitativeresultsinthemainbody
+ofthispaperwereautomaticallyselectedfor,andrandomresultscanbefoundinAppendixA3.
+images, and that it supports a wide range of complex target motions, such as flow fields that have
+beenextractedfromavideo. Wemakethefollowingcontributions:
+• Weproposemotionguidance,azero-shottechniquethatallowsuserstospecifyamotionfieldto
+editanimage.
+• Weshowthatoff-the-shelfopticalflownetworksprovideausefulguidancesignalfordiffusion.
+• Through qualitative and quantitative experiments, we show that our model can handle a wide
+rangeofcomplexmotionfields,includingcompositionsoftranslations,rotations,homographies,
+stretching,deformations,andevenflowfieldsextractedfromavideo.
+2 RELATED WORK
+Diffusion Models. Diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song et al.,
+2021)arepowerfulgenerativemodelsthatlearntoreverseaforwardprocesswheredataisiteratively
+converted to noise. The reverse process is parameterized by a neural network that estimates the
+noise,ϵ (x ,t,y),giventhenoisydatapointx ,thetimestept,andoptionallysomeconditioningy,
+θ t t
+forexampleanembeddingofatextprompt.Thisnoiseestimateisthenusedtograduallyremovethe
+noisefromthedatapointundervariousupdaterules,suchasDDPMorDDIM(Songetal.,2020).
+Guidance. Diffusionmodelsadmitatechniquecalledguidance,inwhichthedenoisingprocessis
+perturbedtowardadesiredoutcome. Thisperturbationmaycomefromthediffusionmodelitselfas
+in classifier-free guidance (Ho & Salimans, 2022; Nichol et al., 2021), a classifier as in ImageNet
+classifier guidance Dhariwal & Nichol (2021), or in general the gradients of an energy function.
+ManyformsofguidancefunctionhavebeenproposedincludingCLIPembeddingdistance(Wallace
+etal.,2023;Nicholetal.,2021), LPIPSsimilarity(Leeetal.,2023), bilateralfilters(Gu&Davis,
+2023), internalrepresentationsofdiffusionmodelsthemselves(Epsteinetal.,2023), and“readout
+heads” (Luo et al., 2023). Ho et al. (2022) propose to do guidance on a one-step approximation
+of the clean data, which they term reconstruction guidance, and Bansal et al. (2023) apply this
+2PublishedasaconferencepaperatICLR2024
+(cid:210)a teapot (cid:223)oating in water(cid:211)
+a) b) c) d)
+e) f) g) h)
+Figure 2: Moving and Deforming Objects. We show various motion edits on a single source image (a),
+demonstrating our method can handle diverse deformations including scaling and stretching. We provide a
+legendforflowvisualizationinFigure1.
+idea to achieve guidance on various off-the-shelf models such as segmentation, detection, facial
+recognition, and style networks. Our method proposes using off-the-shelf optical flow models as
+guidancetoachievemotion-basedimageediting.
+ImageEditing. Diffusionmodels,duetotheirstrongimagepriors,areanattractivestartingpoint
+formanyimageeditingtechniques. Somemethods,suchasSDEdit(Mengetal.,2022),proposeto
+run the forward diffusion process partially, and then denoise the partially corrupted image. Other
+methodsmodifythedenoisingstepasinLugmayretal.(2022)andWangetal.(2023). Stillothers
+finetunea diffusionmodel forimagemanipulation tasks(Brooks etal.,2023; Zhang& Agrawala,
+2023). Another class of diffusion-based image manipulation techniques uses the features and at-
+tention inside the denoising models themselves to edit images. These techniques work due to the
+observation that features can encode attributes, identity, style, and structure. Methods in this vein
+include Prompt-to-Prompt (Hertz et al., 2022), Plug-and-Play (Tumanyan et al., 2023), and Self-
+Guidance(Epsteinetal.,2023).
+Themajorityofthesetechniquesenableimpressiveeditingofimagestyle,butareunabletomodify
+theimagestructure.Amorerecentlineofworkseekstoachieveeditingofstructure.Thesemethods
+areclosesttoours. DragGAN(Panetal.,2023a)proposesanoptimizationschemeoverStyleGAN
+features that allows users to “drag” points in an image to new locations. However, these results
+areconstrainedtonarrowlytrainedGANs. Inordertoachievemuchwiderapplicabilityconcurrent
+work has adapted the DragGAN optimization scheme to diffusion models (Shi et al., 2023; Mou
+etal.,2023), howevertheseapproacheseitherrequirefine-tuningwithLoRA(Huetal.,2021)for
+each image or have not been shown to work on complex, densely defined deformations. In recent
+work, Epstein et al. (2023) perform motion editing with classifier guidance, using the activations
+andtextual-visualcross-attentionofthediffusionmodeltospecifyobjectpositionandshape. This
+limitsthecomplexityofdeformationsandconstrainsmanipulableobjectstothosethathaveacorre-
+spondingtextualtokenintheprompt. Incontrast,ourguidancecomesfromanoff-the-shelfoptical
+flownetworkandthusdoesnotsufferfromtheseproblems,nordoesitrelyonaparticulararchitec-
+tureforthediffusionmodel. Overallourmethodseekstobuilduponpastandconcurrentwork,by
+enablingdense,complex,pixel-levelmotionmanipulationforawiderangeofimagesinazero-shot
+manner.
+3 METHOD
+Our goal is to allow a user to edit a source image x∗ ∈ Rw×h×3 by specifying a target flow field
+f ∈ Rw×h×2 that indicates how each pixel should move. To do this, we develop techniques that
+guideadiffusionmodel’sdenoisingprocessusinganoff-the-shelfopticalflownetwork.
+3PublishedasaconferencepaperatICLR2024
+3.1 GUIDANCEINDIFFUSIONMODELS
+Diffusion models (Sohl-Dickstein et al., 2015; Song et al., 2021) generate images by repeatedly
+denoisingasampleofrandomnoise. Theyarecommonlyrepresented(Hoetal.,2020)asfunctions
+ϵ (x ;t,y) that predict the noise in a noisy data point x at step t of the diffusion process, using
+θ t t
+anoptionalconditioningsignaly. Classifierguidance(Dhariwal&Nichol,2021)seekstogenerate
+samples that minimize a function L(x), such as an object classification loss, by augmenting the
+noiseestimatewiththegradientsofL:
+ϵ˜ (x ;t,y)=ϵ (x ;t,y)+σ ∇ L(x ), (1)
+θ t θ t t xt t
+whereϵ˜ isthenewnoisefunctionandσ isaweightingschedule. Akeybenefitofthisapproach
+θ t
+is that it does not require retraining, and it does not explicitly place restrictions on L, except for
+differentiability.Recentworkhasshownthatthisapproachcanbestraightforwardlyextendedtouse
+functionsLthatacceptonlyclean(denoised)imagesasinput(Bansaletal.,2023).
+3.2 MOTIONGUIDANCE
+We will use guidance to manipulate the positions and shapes of objects in images. We design a
+guidancefunctionL(x)(Eq.1)thatmeasureshowwellageneratedimage,x,capturesthedesired
+motion. Weencouragetheopticalflowbetweenx∗ andxtobef. Givena(differentiable)off-the-
+shelfopticalflowestimatorF(·,·),wewillminimizetheloss
+L (x)=∥F(x∗,x)−f∥ . (2)
+flow 1
+Whilewefoundthatperformingguidanceonthislosscouldproducethedesiredmotions, wealso
+observedthattheeditedobjectswouldoftenchangecolorortexture. Thisisbecausemotionestima-
+tionmodelsareinvarianttomanycolorvariations1,thusthereislittletoconstraintheappearanceof
+theobjecttomatchthatofthesourceimage. InspiredbyPanetal.(2023b)andGengetal.(2022),
+toaddressthisweaddalossthatencouragescorrespondingpixelstohavesimilarcolors
+L (x)=∥x∗−warp(x,F(x∗,x))∥ , (3)
+color 1
+wherewarp(x,f)indicatesabackwardwarpofanimagexusingthedisplacementfieldf. Thefull
+lossweuseforguidanceisthen
+L(x)=λ L (x)+λ m L (x), (4)
+flow flow color color color
+whereλ andλ arehyperparametersthattradeoffbetweenthemodel’sadherencetothetar-
+flow color
+get motion and the visual fidelity to objects in the source image, and m is a mask to handle
+color
+occlusions,explainedbelow.
+3.3 IMPLEMENTINGMOTIONGUIDANCE
+Wefindanumberoftechniquesusefulforproducinghighqualityeditswithmotionguidance.
+Handling Occlusions. When objects move, they occlude pixels in the background. Since these
+backgroundpixelshavenocorrespondenceinthegeneratedimage, thecolorloss(Eq.3)iscoun-
+terproductive. SimilartoLietal.(2023),weadopttheconventionthatthetargetflowspecifiesthe
+motionsoftheforeground,i.e.,thatwhenanobjectmoves,itwilloccludethepixelsthatitoverlaps
+with. Toimplementthis,wecreateanocclusionmaskfromthetargetflowandmaskoutthecolor
+lossintheoccludedregions. PleaseseeAppendixA1 fordetails.
+Edit Mask. For a given target flow, often many pixels will not move at all. In these cases, we
+can reuse content from the source image by automatically constructing an edit mask m from the
+target flow, indicating which pixels require editing. This mask consists of all locations that any
+pixel is moving to or from. To apply the edit mask during diffusion sampling, we assume access
+to a sequence of noisy versions of the source image x∗ for each timestep, which we denote x∗.
+t
+Forrealimagesthissequencecanbeconstructedbyinjectingtheappropriateamountofnoiseinto
+x∗ at each timestep t, or alternatively it can be obtained through DDIM inversion (Song et al.,
+2020). For images sampled from the diffusion model, we can also cache the x∗ from the reverse
+t
+process. Then, similarly to Song et al. (2021) and Lugmayr et al. (2022), during our denoising
+processateachtimesteptwereplacepixelsoutsideoftheeditmaskwiththecachedcontent: x ←
+t
+m⊙x +(1−m)⊙x∗.
+t t
+1Thisisquiteusefulforflowestimationonvideos,wherelightingmaychangerapidlyframetoframe.
+4PublishedasaconferencepaperatICLR2024
+Handling Noisy Images. In standard classifier guidance, noisy images x are passed into the
+t
+guidancefunction. Inourcase,thisresultsinadistributionmismatchwiththeoff-the-shelfoptical
+flowmodel, whichhasonlybeentrainedoncleanimages. Toaddressthisweadoptthetechnique
+of Bansal et al. (2023) and Ho et al. (2022), and compute the guidance function on a one step
+approximationofthecleanx givenby
+0
+√
+x − 1−α ϵ (x ,t)
+xˆ = t √ t θ t , (5)
+0 α
+t
+resultinginthegradient∇ L(xˆ (x )),withamorein-domaininputtotheguidancefunction.
+xt 0 t
+Recursive Denoising. Another problem we encounter is that the optical flow model, due to its
+complexity and size, can be quite hard to optimize through guidance. Previous work (Lugmayr
+et al., 2022; Wang et al., 2023; Bansal et al., 2023) has shown that repeating each denoising step
+for a total of K steps, where K is some hyperparameter, can result in much better convergence.
+We adopt this recursive denoising technique to stabilize our method and empirically find that this
+resolvesmanyoptimizationinstabilities,inpartduetoaniterativerefinementeffect(Lugmayretal.,
+2022)andalsoinpartduetotheadditionalstepsthattheguidanceprocesstakes,effectivelyresulting
+inmoreoptimizationstepsovertheguidanceenergy.
+Guidance Clipping. We also find that clipping guidance gradients prevents instabilities during
+denoising. ConcurrentworkbyGu&Davis(2023)introducesanadaptiveclippingstrategy,butwe
+findthatsimplyclippinggradientsbytheirnormtoapre-setthreshold,c ,workswellinourcase.
+g
+4 RESULTS
+Weevaluateourmethod’sabilitytomanipulateimagestructure,bothqualitativelyandquantitatively,
+onrealandgeneratedimages. AdditionalresultscanbefoundinAppendixA3.
+4.1 IMPLEMENTATIONDETAILS
+We use RAFT (Teed & Deng, 2020) as our flow model. To create target flow fields, we com-
+pose a set of elementary flows and use a segmentation model (Kirillov et al., 2023) for masking.
+Target flow construction and hyperparameters are discussed in detail in Appendix A1. We addi-
+tionally implement a simple GUI to generate various flow fields, which we describe in Appendix
+Figure A1 and A2. For our experiments we use Stable Diffusion (Rombach et al., 2021). Rather
+thanperformingdiffusiondirectlyonpixels, StableDiffusionperformsdiffusioninalatentspace,
+withanencoderanddecodertoconvertbetweenpixelandlatentspace. Toaccommodatethis, we
+precomposethedecoderwiththemotionguidancefunction,L(D(·)),sothattheguidancefunction
+canacceptlatentcodes. Additionally,wedownsampleoureditmaskto64×64,thespatialsizeof
+theStableDiffusionlatentspace.
+4.2 QUALITATIVERESULTS
+MainqualitativeresultscanbefoundinFigures1,2,3,and4. Followingpreviouswork(Ramesh
+et al., 2021; Bansal et al., 2023) we generate multiple samples per example and choose the best
+result according to the guidance energy. Details can be found in Sec. A1, and random and top-5
+qualitativeresultscanbefoundinSec.A3. Wepointoutseveralstrengthsofourmethod:
+Disocclusions. Because our method is built on top of a powerful diffusion model, it is able to
+reasonaboutdisoccludedregions. Forexample, inFigure1c ourmodelmovestheliontotheleft
+andisabletofillinthepreviouslyoccludedface.
+DiverseFlows. Ourmethodsuccessfullymanipulatesimagesusingtranslations(Figures1c,1h,
+3a),rotations(Figures1b,4a),stretches(Figures1a,1f,1g),andscaling(Figures2e,2f,4b). It
+alsohandlescomplexdeformations(Figures1e,3c,4c),homographies(Figures1d,3b),andmul-
+tipleobjects(Figures4e,1e). Moreover,ourmethodisabletohandlerelativelylargemovements
+(Figures2b,2c,2d,3a). Weareabletoachievesuccessesondiverseflowsduetothegeneralityof
+boththeopticalflowanddiffusionmodelweuse.
+5PublishedasaconferencepaperatICLR2024
+DiverseImages. Weshowthatourapproachworksonawiderangeofinputimageswithdiverse
+objectsandbackgrounds,includingnon-photorealisticimagessuchaspaintingsorsketches(Figures
+1f, 4b, 5a, 5b, 5c), despitethefactthattheopticalflownetworkwasnottrainedonthesestyles.
+Weattributethissuccessduetothefactthatopticalflowisarelativelylowlevelsignal,anddoesnot
+require understanding of high level semantics to estimate. Additionally, we show that our method
+worksforbothsyntheticimagesaswellasrealimages(Figures1g,1h,3c,4e,7b,7c,7d).
+SoftOptimization. Incontrasttoforwardwarping,ourmethodoptimizesasoftconstraint:satisfy
+theflowwhilealsoproducingaplausibleimage.Becauseofthis,ourmethodworksevenforcoarsely
+definedtargetflowsasshowninFigures1c,1h,5b. Thisisparticularlyusefulwhenwedomotion
+transfer in Section 4.6 and Figure 7, where the extracted flow is only roughly aligned with the
+sourceimage. Anotherbenefitofsoftoptimizationisthatourmethodworksevenwhentargetflows
+areambiguous,suchaswhenflowsspecifythattwoobjectsshouldoverlapasinFigure1e.
+Text Conditioning. Because our method is based on guidance, it is independent of text condi-
+tioning. Thisisusefulforeditingrealimages, forwhichnocaptionexists. Inallfigures, samples
+conditionedontextwillhavethepromptwritteninitalicsbelowtheexample, andrealimagesare
+labeledas“[realimage]”andareunconditionallygenerated.
+4.3 ABLATIONS
+InFigure3 wequalitativelyablateoutkeycomponentsofourguidancefunction.
+No Recursive Denoising. Without recursive denoising our method converges much less fre-
+quently, often resulting in samples with heavy artifacts as in Figure 3c. Even in cases where the
+guidancemostlysucceeds,artifactscanstilloccurasinFigure3a.
+No Color Loss. Without the color loss, our method generally moves objects to the correct loca-
+tions,butobjectstendtochangecolorasinFigure3a. Thesesamplesstillachievealowflowloss
+becauseofthecolorinvarianceoftheopticalflownetwork,highlightingtheneedforthecolorloss.
+Insomecasesweseecatastrophicfailure,asinFigure3c.
+NoFlowLoss. Removingtheflowlossalsoremovesanyknowledgethemethodhasofthetarget
+flow. Toaddressthiswealsomodifythecolorloss(Eq.3), replacingthecomputedflowwiththe
+target flow. Without the flow loss our method is able to move objects to the correct location but
+oftenhallucinatesthingsindisoccludedareas,suchasthehalfappleinFigure3a orthewaterfallin
+Figure3c. Thisisbecausethecolorlossdoesnotproduceanygradientsignalindisoccludedareas
+due to the warping operation. In the disoccluded areas the diffusion model effectively acts freely
+withnoguidanceatall,resultinginthesehallucinations.
+Source Image Target Flow No Recursive Denoising No Color Loss No Flow Loss No Occlusion Mask Ours - Motion Guided
+a)
+(cid:210)an apple on a wooden table(cid:211)
+b)
+(cid:210)a photo of a laptop(cid:211)
+c)
+[real image]
+Figure3: Ablations. Wequalitativelyablateouttechniquesweusetoachievemotionguidance. Foradiscus-
+sionpleaseseeSection4.3.WeprovidealegendfortheflowvisualizationinFigure1.
+6PublishedasaconferencepaperatICLR2024
+NoOcclusionMasking. Withoutocclusionmaskingthecolorlossisincorrectinoccludedareas.
+This is because the target flow in occluded areas is invalid, so the warping operation mismatches
+pixels. Asaresultwetendtosee“ghosting”ofmovedobjects,whereobjectsblendintotheback-
+groundortakeonthecolorofthedisoccludedbackground,ascanbeseeninFigure3a orFigure3c.
+Inmoreextremecases,theobjectcanfailtomoveintotheoccludingregionatall,asinFigure3b.
+4.4 BASELINES
+WepresentcomparisonsbetweenourmethodandbaselinesinFigure4. Foramoreextensivesetof
+comparisonspleaseseeFigureA7intheappendix.
+InstructPix2Pix. InstructPix2Pix (Brooks et al., 2023) distills Prompt-to-Prompt (Hertz et al.,
+2022)intoadiffusionmodelthatisconditionedontextualeditinginstructions. Becausethismodel
+isonlytext-conditioned,itisnotpossibletogiveitaccesstothetargetflow,butwetrytofaithfully
+summarize the flow in an instruction. As can be seen, despite our best efforts, InstructPix2Pix
+is never able to move objects significantly although it does occasionally alter the image in rather
+unpredictableways. Thisfailurecanbeattributedtotwofactors. Firstly,textisnotanidealmethod
+for describing motion. For example it is quite hard to encapsulate the motion in Figure 4e in text
+without being excessively verbose. And secondly, feature-copying methods such as Prompt-to-
+Promptoftenfailtomakesignificantstructuraleditstoimages.
+Forward Warp with SDEdit. We also use baselines that explicitly use the target flow. Specif-
+ically, we forward warp the latent code by the target flow and use SDEdit (Meng et al., 2022),
+conditionedonthetextprompt(ifgiven)atvariousnoiselevelsto“clean”thewarpedimage. While
+SDEdit succeeds to a degree in Figure 4b and Figure 4d, the results are of lower quality and the
+failurecasescontainsevereerrors.
+ForwardWarpwithRePaint. InadditiontocleaningtheforwardwarpedimagesusingSDEdit,
+wetrythediffusionbasedinpaintingmethodRePaint(Lugmayretal.,2022),conditionedonthetext
+prompt(ifgiven),tofillindisoccludedareasintheforwardwarp. Theinpaintedareasaregenerally
+realistic looking, but often not exactly correct. For example in Figure 4d, an additional teapot is
+generatedinthedisoccludedarea.
+Source Image Target Flow InstructPix2Pix FW + SDEdit 75% FW + SDEdit 50% FW + SDEdit 25% FW + RePaint Ours - Motion Guidance
+a)
+(cid:210)a photo of a cat(cid:211) (cid:210)rotate the cat slightly to the right(cid:211)
+b)
+(cid:210)a painting of a sun(cid:223)ower(cid:211) (cid:210)make the sun(cid:223)ower head a bit larger(cid:211)
+c)
+(cid:210)an aerial photo of a river(cid:211) (cid:210)curve the river to the left(cid:211)
+d)
+(cid:210)a teapot (cid:223)oating in water(cid:211) (cid:210)move the teapot down(cid:211)
+e)
+[real image] (cid:210)move the window directly under the lamp(cid:201)(cid:211)
+Figure4: Baselines. Weshowqualitativeexamplesfromvariousbaselinesandourmethod. Theinstruction
+usedforInstructPix2PixisshownbeneatheachInstructPix2Pixsample.ForadiscussionpleaseseeSection4.4.
+WeprovidealegendfortheflowvisualizationinFigure1.
+7PublishedasaconferencepaperatICLR2024
+Source Image Target Flow GAN Inversion DragGAN Ours - Motion Guidance
+a)
+(cid:210)a crayon drawing of an elephant(cid:211)
+b)
+(cid:210)a watercolor painting of a lion(cid:211)
+c)
+(cid:210)a sketch of a man face in a tophat(cid:211)
+Figure 5: Comparison to DragGAN. DragGAN works only on domains for which a StyleGAN has been
+trainedon. Attemptstoeditrealimagesthatareout-of-domain,eveniftheyareinvertible,resultsinfailures
+thatourmodelhandleswell. HereweshowresultsonStyleGANstrainedfor(a)elephants(b)lions(c)faces.
+WeprovidealegendfortheflowvisualizationinFigure1.
+DragGAN. Recent work has proposed an iterative two-step optimization procedure over GAN
+featuresto“drag”userspecifiedhandlepointstotargetpoints. Whilethemethod,DragGAN(Pan
+etal.,2023a),isimpressiveithasonlybeendemonstratedonStyleGANs(Karrasetal.,2020)trained
+on narrow domains, such as dogs, lions, or human faces, limiting the scope of such a method. To
+demonstrate this, we show out-of-domain cases in which DragGAN fails in Figure 5. Following
+DragGAN,toinvertanimagetoaStyleGANlatentcodeweusePTI(Roichetal.,2021). Wethen
+subsamplethetargetflowtoobtainhandleandtargetpointsthatarerequiredbyDragGAN.Drag-
+GANGPUmemoryusagescaleslinearlywiththenumberofhandlepoints,sodenselysamplingthe
+flowisnotfeasible,evenonanNVIDIAA40GPUwith48GBofmemory. DragGANalsosupports
+an edit mask, so we provide it with the same automatically generated edit mask that our method
+uses. WefindthatwhiletheGANinversionissuccessfulevenonout-of-domaincases,DragGAN
+motioneditscontainmanyartifacts.
+4.5 QUANTITATIVERESULTS
+We are interested in not just optimizing for a specific target flow, but also generating images that
+are faithful to the source image and that are coherent. Therefore we evaluate our method on two
+metrics which are designed to reflect the trade-offs we are interested in. One metric is the Flow
+Loss, L from Equation 2, which should measure how accurately a generated image adheres to
+flow
+the target flow. Because our guidance function actually uses L with RAFT, we present results
+flow
+usingbothRAFTandGMFlow(Xuetal.,2022)incaseweareoverfitting. Foroursecondmetric
+wecomputetheCLIPSimilarityasthecosinedistancebetweentheCLIPvisualembeddingsofthe
+sourceandgeneratedimages. Wetreatthisasameasureoffaithfulnesstothesourceimageaswell
+asameasureofgeneralimagequality.
+Figure6: QuantitativeMetrics. WeshowperformanceofbaselinesandourmethodontheFlowLossand
+CLIPSimilaritymetrics,ontwodifferentdatasets,OurcurateddatasetandanautomaticallygeneratedKITTI
+dataset.PleaseseeSection4.5 forfurtherdiscussion.
+8PublishedasaconferencepaperatICLR2024
+Weevaluateontwodifferentdatasets. Thefirstdatasetiscomposedofexampleswithhandcrafted
+target flows, a subset of which can be seen in Figures 1, 2, 3, 4, and 7. This dataset has the
+advantageofcontaininginterestingmotionsthatareofpracticalinterest. Inaddition,wecanwrite
+highly specific instructions for the InstructPix2Pix baseline for a fair comparison. However, this
+dataset is curated to an extent. We ameliorate this by performing an additional evaluation on an
+automatically generated dataset based on KITTI (Geiger et al., 2012), which contains egocentric
+drivingvideoswithlabeledboundingboxesoncars. Tobuildourdatasetweconstructtargetflows
+consistingofrandomtranslationsoncars. FormoredetailsonthedatasetspleaseseeAppendixA2.
+We show results in Figure 6. As can be seen, our method offers an attractive trade-off between
+satisfyingthetargetflowandkeepingfaithfultothesourceimage. TheRePaintbaseline,whichis
+essentially forward warping and then inpainting, achieves a low flow loss due to the explicit warp
+operationbutsuffersfromartifactsduetoaliasingandinpaintingandtherebyresultsinalowCLIP
+similarity. TheSDEditbaseline,whichalsousesforwardwarping,canachievealowflowlossifthe
+noiselevelislow,butalsofallsshortonthevisualsimilaritymetric.
+4.6 MOTIONTRANSFER
+Sometimesitishardtospecifyaflowbyhand. Inthesecaseswefindthatourmethodcansuccess-
+fully“transfer”motionfromavideotoanimage. WegiveexamplesinFigure7,whereweextract
+the flow from a video of the earth rotating and use it as our target flow. We find that even if the
+extractedflowdoesnotoverlapperfectlywiththetargetimagethedesiredmotioncanbeachieved.
+Weattributethistothefactthatourguidanceisasoftoptimizationandthediffusionmodeloverall
+ensureshigh-levelsemanticconsistency.
+Frame 0 Frame 1 Extracted Flow
+[real image] Motion Edited [real image] Motion Edited [real image] Motion Edited
+Figure 7: Motion Transfer. Our method can use the motion extracted from a source video to motion-edit
+acompletelydifferentimage. Noteweusefewerrecursivedenoisingstepsforthesesamplesthanforother
+samples because we found it to improve results slightly. We provide a legend for the flow visualization in
+Figure1.
+5 DISCUSSION
+Limitations. Whileourmethodcanproducehighqualitymotion-conditionededits,itisalsosus-
+ceptible to various weaknesses. In particular, we inherit the deficiencies of diffusion models and
+guidance based methods, such as slow sampling speed. The use of universal guidance also intro-
+ducesinstabilityinthesamplingprocess,whichisonlypartiallyaddressedbytherecursivedenois-
+ingstrategy(Sec.3.3). Inaddition, wealsoinheritthelimitationsofouropticalflowmethod, and
+findthatcertaintargetflowsarenotpossible. Wegiveacomprehensivediscussionofourlimitations
+inAppendixA4.
+5.1 CONCLUSION
+Ourresultssuggestthatwecanmanipulatethepositionsandshapesofobjectsinimagesbyguiding
+the diffusion process using an optical flow estimator. Our proposed method is simple, does not
+require text or rely on a particular architecture, and does not require any training. We see our
+workasastepintworesearchdirections. Thefirstdirectionisinintegratingdifferentiablemotion
+estimation models into image manipulation models. Second, our work opens the possibility of
+repurposing other low-level computer vision models for image generation tasks through diffusion
+guidance.
+9PublishedasaconferencepaperatICLR2024
+ACKNOWLEDGEMENTS
+This project was supported by a Sony Research Award. Daniel Geng is supported by a National
+Science Foundation Graduate Research Fellowship under Grant No. 1841052. Daniel would also
+liketothankBerlinforawonderfulsummer,duringwhichthisresearchwasconducted.
+REFERENCES
+Arpit Bansal, Hong-Min Chu, Avi Schwarzschild, Soumyadip Sengupta, Micah Goldblum, Jonas
+Geiping,andTomGoldstein. Universalguidancefordiffusionmodels,2023. 2,4,5,13,20
+TimBrooks,AleksanderHolynski,andAlexeiA.Efros. Instructpix2pix: Learningtofollowimage
+editinginstructions. InCVPR,2023. 1,3,7
+Tsai-ShienChen,ChiehHubertLin,Hung-YuTseng,Tsung-YiLin,andMing-HsuanYang.Motion-
+conditioneddiffusionmodelforcontrollablevideosynthesis. arXivpreprintarXiv:2304.14404,
+2023. 1
+Prafulla Dhariwal and Alex Nichol. Diffusion models beat gans on image synthesis. In Neural
+InformationProcessingSystems,2021. 1,2,4
+A. Dosovitskiy, P. Fischer, E. Ilg, P. Ha¨usser, C. Hazırbas¸, V. Golkov, P. v.d. Smagt, D. Cremers,
+and T. Brox. Flownet: Learning optical flow with convolutional networks. In IEEE Interna-
+tional Conference on Computer Vision (ICCV), 2015. URL http://lmb.informatik.
+uni-freiburg.de/Publications/2015/DFIB15. 13
+Dave Epstein, Allan Jabri, Ben Poole, Alexei A Efros, and Aleksander Holynski. Diffusion self-
+guidanceforcontrollableimagegeneration. NeuralInformationProcessingSystems(NeurIPS),
+2023. 1,2,3,13
+RinonGal,YuvalAlaluf,YuvalAtzmon,OrPatashnik,AmitHBermano,GalChechik,andDaniel
+Cohen-Or. An image is worth one word: Personalizing text-to-image generation using textual
+inversion. arXivpreprintarXiv:2208.01618,2022. 1
+AndreasGeiger,PhilipLenz,andRaquelUrtasun. Arewereadyforautonomousdriving? thekitti
+vision benchmark suite. In Conference on Computer Vision and Pattern Recognition (CVPR),
+2012. 9
+DanielGeng, MaxHamilton, andAndrewOwens. Comparingcorrespondences: Videoprediction
+withcorrespondence-wiselosses. InCVPR,2022. 4
+Zeqi Gu and Abe Davis. Filtered-guided diffusion: Fast filter guidance for black-box diffusion
+models,2023. 2,5
+Amir Hertz, Ron Mokady, Jay Tenenbaum, Kfir Aberman, Yael Pritch, and Daniel Cohen-Or.
+Prompt-to-promptimageeditingwithcrossattentioncontrol. 2022. 1,3,7,21
+JonathanHoandTimSalimans. Classifier-freediffusionguidance,2022. 2
+JonathanHo,AjayJain,andPieterAbbeel.Denoisingdiffusionprobabilisticmodels.arXivpreprint
+arxiv:2006.11239,2020. 2,4
+Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, and David J
+Fleet. Videodiffusionmodels. arXiv:2204.03458,2022. 2,5
+EdwardJHu,YelongShen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,
+and Weizhu Chen. Lora: Low-rank adaptation of large language models. arXiv preprint
+arXiv:2106.09685,2021. 3
+TeroKarras,SamuliLaine,MiikaAittala,JanneHellsten,JaakkoLehtinen,andTimoAila. Analyz-
+ingandimprovingtheimagequalityofStyleGAN. InProc.CVPR,2020. 8
+10PublishedasaconferencepaperatICLR2024
+AlexanderKirillov, EricMintun, NikhilaRavi, HanziMao, ChloeRolland, LauraGustafson, Tete
+Xiao, Spencer Whitehead, Alexander C. Berg, Wan-Yen Lo, Piotr Dolla´r, and Ross Girshick.
+Segmentanything. arXiv:2304.02643,2023. 5,13
+YuseungLee,KunhoKim,HyunjinKim,andMinhyukSung. Syncdiffusion:Coherentmontagevia
+synchronized joint diffusions. In Thirty-seventh Conference on Neural Information Processing
+Systems,2023. 2
+Wei Li, Xue Xu, Xinyan Xiao, Jiachen Liu, Hu Yang, Guohao Li, Zhanpeng Wang, Zhifan Feng,
+QiaoqiaoShe, YajuanLyu, andHuaWu. Upainting: Unifiedtext-to-imagediffusiongeneration
+withcross-modalguidance,2022. 13
+ZhengqiLi,RichardTucker,NoahSnavely,andAleksanderHolynski. Generativeimagedynamics.
+arXivpreprintarXiv:2309.07906,2023. 4,13
+AndreasLugmayr,MartinDanelljan,AndresRomero,FisherYu,RaduTimofte,andLucVanGool.
+Repaint: Inpaintingusingdenoisingdiffusionprobabilisticmodels,2022. 3,4,5,7
+Grace Luo, Trevor Darrell, Oliver Wang, Dan B Goldman, and Aleksander Holynski. Readout
+guidance: Learningcontrolfromdiffusionfeatures. arXivpreprintarXiv:2312.02150,2023. 2
+N. Mayer, E. Ilg, P. Ha¨usser, P. Fischer, D. Cremers, A. Dosovitskiy, and T. Brox. A large
+dataset to train convolutional networks for disparity, optical flow, and scene flow estima-
+tion. In IEEE International Conference on Computer Vision and Pattern Recognition (CVPR),
+2016. URL http://lmb.informatik.uni-freiburg.de/Publications/2016/
+MIFDB16. arXiv:1512.02134. 13
+ChenlinMeng,YutongHe,YangSong,JiamingSong,JiajunWu,Jun-YanZhu,andStefanoErmon.
+SDEdit: Guided image synthesis and editing with stochastic differential equations. In Interna-
+tionalConferenceonLearningRepresentations,2022. 3,7
+ChongMou,XintaoWang,JiechongSong,YingShan,andJianZhang. Dragondiffusion: Enabling
+drag-stylemanipulationondiffusionmodels,2023. 1,3
+Alex Nichol, Prafulla Dhariwal, Aditya Ramesh, Pranav Shyam, Pamela Mishkin, Bob McGrew,
+IlyaSutskever,andMarkChen. Glide: Towardsphotorealisticimagegenerationandeditingwith
+text-guideddiffusionmodels,2021. 2
+Xingang Pan, Ayush Tewari, Thomas Leimku¨hler, Lingjie Liu, Abhimitra Meka, and Christian
+Theobalt. Drag your gan: Interactive point-based manipulation on the generative image mani-
+fold. arXivpreprintarXiv:2305.10973,2023a. 1,3,8
+Zhaoying Pan, Daniel Geng, and Andrew Owens. Self-supervised motion magnification by back-
+propagatingthroughopticalflow.InThirty-seventhConferenceonNeuralInformationProcessing
+Systems,2023b. URLhttps://arxiv.org/abs/2311.17056. 4
+AdityaRamesh,MikhailPavlov,GabrielGoh,ScottGray,ChelseaVoss,AlecRadford,MarkChen,
+andIlyaSutskever. Zero-shottext-to-imagegeneration. InInternationalConferenceonMachine
+Learning,pp.8821–8831.PMLR,2021. 5,13
+DanielRoich,RonMokady,AmitHBermano,andDanielCohen-Or.Pivotaltuningforlatent-based
+editingofrealimages. ACMTrans.Graph.,2021. 8
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bjo¨rn Ommer. High-
+resolutionimagesynthesiswithlatentdiffusionmodels,2021. 5
+ChitwanSaharia,WilliamChan,SaurabhSaxena,LalaLi,JayWhang,EmilyDenton,SeyedKam-
+yarSeyedGhasemipour,BurcuKaragolAyan,S.SaraMahdavi,RaphaGontijoLopes,TimSal-
+imans,JonathanHo,DavidJFleet,andMohammadNorouzi. Photorealistictext-to-imagediffu-
+sionmodelswithdeeplanguageunderstanding,2022. 13
+Yujun Shi, Chuhui Xue, Jiachun Pan, Wenqing Zhang, Vincent YF Tan, and Song Bai. Dragdif-
+fusion: Harnessing diffusion models for interactive point-based image editing. arXiv preprint
+arXiv:2306.14435,2023. 1,3
+11PublishedasaconferencepaperatICLR2024
+JaschaSohl-Dickstein,EricWeiss,NiruMaheswaranathan,andSuryaGanguli. Deepunsupervised
+learning using nonequilibrium thermodynamics. In Francis Bach and David Blei (eds.), Pro-
+ceedingsofthe32ndInternationalConferenceonMachineLearning,volume37ofProceedings
+of Machine Learning Research, pp. 2256–2265, Lille, France, 07–09 Jul 2015. PMLR. URL
+https://proceedings.mlr.press/v37/sohl-dickstein15.html. 2,4
+Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models.
+arXiv:2010.02502,October2020. URLhttps://arxiv.org/abs/2010.02502. 2,4
+YangSong,JaschaSohl-Dickstein,DiederikPKingma,AbhishekKumar,StefanoErmon,andBen
+Poole. Score-based generative modeling through stochastic differential equations. In Interna-
+tional Conference on Learning Representations, 2021. URL https://openreview.net/
+forum?id=PxTIG12RRHS. 2,4
+ZacharyTeedandJiaDeng. Raft: Recurrentall-pairsfieldtransformsforopticalflow. InComputer
+Vision–ECCV2020:16thEuropeanConference,Glasgow,UK,August23–28,2020,Proceedings,
+PartII16,pp.402–419.Springer,2020. 5
+NarekTumanyan,MichalGeyer,ShaiBagon,andTaliDekel. Plug-and-playdiffusionfeaturesfor
+text-driven image-to-image translation. In Proceedings of the IEEE/CVF Conference on Com-
+puterVisionandPatternRecognition(CVPR),pp.1921–1930,June2023. 1,3
+Bram Wallace, Akash Gokul, Stefano Ermon, and Nikhil Naik. End-to-end diffusion latent opti-
+mizationimprovesclassifierguidance,2023. 2
+Yinhuai Wang, Jiwen Yu, and Jian Zhang. Zero-shot image restoration using denoising diffusion
+null-spacemodel. TheEleventhInternationalConferenceonLearningRepresentations,2023. 3,
+5
+Haofei Xu, Jing Zhang, Jianfei Cai, Hamid Rezatofighi, and Dacheng Tao. Gmflow: Learning
+optical flow via global matching. In Proceedings of the IEEE/CVF Conference on Computer
+VisionandPatternRecognition,pp.8121–8130,2022. 8
+LvminZhangandManeeshAgrawala.Addingconditionalcontroltotext-to-imagediffusionmodels,
+2023. 3
+12PublishedasaconferencepaperatICLR2024
+A1 IMPLEMENTATION DETAILS
+Hyperparameters We use Stable Diffusion v1.4 with a DDIM sampler for 500 steps, and we
+generateimagesataresolutionof512×512. AllexperimentsareconductedonasingleNVIDIA
+A40 GPU. For our motion guidance function (Eq. 4) we found that setting λ to 100 and λ
+color flow
+to 3 worked well. In addition, in our implementation we scale the guidance gradients by a global
+weight of 300. We set the gradient clipping threshold c to be 200 and take K = 10 recursive
+g
+denoisingsteps. ForjustthemotiontransferresultswesetK =10,5,2forthecat,pug,andpanda
+respectively.FortheRAFTopticalflowmodelweusethepubliccheckpointtrainedonFlyingChairs
+(Dosovitskiyetal.,2015)andFlyingThings3D(Mayeretal.,2016)with5iterativeupdates.
+Guidance Schedule Previous work (Saharia et al., 2022; Epstein et al., 2023; Li et al., 2022)
+hasshownthatsamplequalitycanimprovewithwell-chosenguidanceschedules,thatis,applying
+guidance with varying strength through out denoising. We find that applying guidance as normal
+for the first 400 steps and turning it completely off for the final 100 steps is beneficial in our case
+andweusethisscheduleforallsamples. Intuitively,inthefinal100stepsthelow-levelstructureof
+theimageisalreadysampledandlittlecanbedonetoalterthemotionofthesample. Turningoff
+guidanceduringthisphaseallowsthemodeltofocusonsynthesizingrealistic,highqualitydetails.
+Occlusion Masking In order to create an occlusion mask we need additional information or as-
+sumptions beyond just the flow. For example, depth could indicate to us which objects would oc-
+cludeothers. SimilartoLietal.(2023),intheabsenceofthisinformationwemakethesimplifying
+assumptionthatthetargetflowisappliedtoaforegroundobject.Theninordertoconstructanocclu-
+sionmaskwefindallbackgroundregionsthatwillbeoverwrittenbythetargetflowbyperforming
+awarpandaddthesepixelstotheocclusionmask,whichisusedtomaskthecolorloss.
+Reranking Followingpreviouswork(Rameshetal.,2021;Bansaletal.,2023)wegeneratemulti-
+plesamplesandautomaticallyfilterthesesamples.Specifically,wegenerate32samplesperexample
+and re-rank based on the final motion guidance loss value. We find that re-ranking is particularly
+usefulforfilteringoutpoorlyconvergedsamples,whichwediscussinmoredetailinAppendixA4.
+Wepresentbothtop-5andrandomsamplesinAppendixA3. Notewedonotusere-rankingforour
+quantitativeevaluationsinSection4.5.
+Target Flow Construction We craft target optical flows by composing translations, rotations,
+scaling, stretching, and shearing. For more complex flows, such as with the river or the topiary
+samples,weinterpolatebetweendiscretedisplacementswithsinefunctions. Forhomographies,as
+inthelaptopexample,wedefinestartingandendinglocationsforcornersandfitahomographyH
+to these points. We then extract a flow by computing Hx−x, the displacement for each point x
+underthehomography.
+InmostcaseswemaskouttheflowusingamaskextractedusingSAM(Kirillovetal.,2023). This
+mask is dilated by a few pixels by applying an all ones convolution, equivalent to a box blur, and
+thenthresholding. WefindthishelpfulbecauseSAMoftenslightlyunderestimatestheextentofan
+object. Allflowoutsideofthedilatedmaskissettozero. Wedonotmaskforthemotiontransfer
+samples.
+Foreaseofuse,wecreateasimpleGUIthatcombinesthesegmentationstepandthegenerationof
+opticalflows. OurGUIallowsuserstocreatetranslations,rotations,stretches,scaling,andcomplex
+deformationssimplybyclickingadragging.Formoredetailsandexamples,seeFiguresA1andA2.
+A2 DATASET DETAILS
+For the dataset based on KITTI we use frames with bounding box car annotations. We first filter
+outframeswithnocars,frameswithcarsthataretoosmallortoolarge,andframeswithoccluded
+cars. Occlusioninformationisannotatedbythedataset. Foreachframewechooseacarandcrop
+theframetothatcar,andresizetoobtaina512×512image. Wethenconstructaflowrepresenting
+a translation of the bounding box, with a uniformly random direction and a magnitude uniformly
+sampledbetween10and50pixels.Weuseatotalof226examples.FortheInstructPix2Pixbaseline
+we automatically construct an instruction prompt by mapping the randomly sampled direction to
+oneof8sentencessuchas“movethecartotheleft”or“movethecartotherightanddown.”We
+visualizeresultsofmotionguidanceonthisdatasetinFigureA3.
+13PublishedasaconferencepaperatICLR2024
+Original Image SAM Masking GUI Flow Motion Edited
+FigureA1:OverviewofGUI.OurGUIallowsausertostartwithanimage,maskouttheobjectstheywantto
+motion-edit,andconstructanopticalflowtobeusedwithourmethod.
+Flow Legend Translation Rotation
+Stretching Scaling Interpolated Stretching
+FigureA2: ImplementedGUIs. OurGUIsupportsthesynthesisofopticalflowsbyclickinganddragging
+controlarrows. Wedescribetheinterfaceforeachoftheaboveexamples. Translation: Globaltranslations
+areparameterizedbythedirectionandmagnitudeofthearrowdraggedoutbytheuser. Rotation: Theinitial
+clickdefinesthecenterofrotation. Theangleofrotationisparameterizedbythedistancetheuserdragsthe
+cursorawayfromthecenter. Stretching: Theinitialclickdeterminesthecenterofstretching. Thedragged
+arrow determines the angle at which to stretch, and the factor by which to stretch. The notch on the arrow
+indicatesunity,wherethestretchingfactorisequalto1. Dragginganarrowbetweenthecenterandthenotch
+indicatessqueezing,anddragginganarrowawayfromthenotchandcenterindicatessqueezing.Scaling: The
+centerofscalingisdeterminedbytheinitialclickoftheuser. Thefactorbywhichtoscaleisdeterminedby
+thearrow’sdistancefromthecenterofscaling. Thecircleindicatesunity,wherethescalingfactorisequalto
+1.Dragginganarrowinsidethecircleequatestoshrinking,anddragginganarrowoutsideofthecircleequates
+toexpanding. Interpolatedstretching: Wecantakethe“stretching”UIandallowausertodrawmultiple
+arrows, each defining a stretch (or squeeze). Treating these arrows as “control points,” we can interpolate
+betweenthesestretchesandsqueezestosynthesizecomplexdeformations.
+14PublishedasaconferencepaperatICLR2024
+Target
+Flow
+Source
+Image
+Motion
+Guided
+FigureA3: KITTIDatasetExamples. Weshowexamplesofmotionguidededitsontheautomaticallygen-
+eratedKITTIdataset. Twofailurecasesareshownontheveryright. Oneinwhichthecarisdistortedrather
+thanmovedontotherailroadtracks,andoneinwhichtheidentityofthecarchangestosatisfythetargetflow.
+Becausetheexactmotioncanbedifficulttointerpretfromtheflowvisualizationalone,wealsodrawthetarget
+locationoftheboundingboxinthetoprow.
+Source Image Target Flow Ours - Motion Guided Source Image Target Flow Ours - Motion Guided
+a) b)
+(cid:210)a photo of a cute humanoid robot on a solid background(cid:211) [real image]
+c) d)
+(cid:210)a painting of a lone tree(cid:211) (cid:210)a photo of a lion(cid:211)
+e) f)
+(cid:210)a photo of a modern house(cid:211) (cid:210)a photo of a laptop(cid:211)
+FigureA4: Additionalexamples. Wepresentadditionalresultsusingourmotionguidancemethod. These
+includetargetflowsthatare(a)rotations(b)stretches(c)scaling(d,e)translationsand(f)homographies.
+ForourcurateddatasetwesampleimagesfromStableDiffusionusingcustompromptsandcollect
+real images from Unsplash. We then handcraft interesting target flows for each image. For the
+InstructPix2Pixbaselineswethenmanuallyannotateaninstructiondescribingthemotionthetarget
+flow should apply to the source image. In addition, for our evaluations we further augment the
+datasetbyscalingeachtargetflowbyatotalof6factors,withtheaimofcoveringawiderangeof
+flowmagnitudes. Thisresultsin204examples.
+A3 ADDITIONAL RESULTS
+WeshowmoreexamplesofmotionguidanceinFigureA4. Inaddition,weshowmultiplesamples
+for source image and target flow pairs with both ranked sampling (see Appendix A1 for details)
+in Figure A5 and random sampling in Figure A6. We also show more qualitative examples using
+baselinemethodsandourmethodinFigureA7.Finally,weshowsamplesandtheirflowwithrespect
+tothesourceimageoverthecourseofthedenoisingprocessinFigureA8.
+15PublishedasaconferencepaperatICLR2024
+Source Image Target Flow Top-5 Samples
+(cid:210)a photo of a laptop(cid:211)
+(cid:210)a photo of a lion(cid:211)
+(cid:210)a painting of a sun(cid:223)ower(cid:211)
+(cid:210)a teapot (cid:223)oating in water(cid:211)
+(cid:210)a teapot (cid:223)oating in water(cid:211)
+(cid:210)a teapot (cid:223)oating in water(cid:211)
+(cid:210)a photo of topiary(cid:211)
+(cid:210)a painting of a lone tree(cid:211)
+[real image]
+[real image]
+[real image]
+[real image]
+FigureA5:Top5RankedSamples.Weshowaselectionofthetop5samplesafterrerankingwithourguidance
+loss,fromasetof32samples. Thesamplesareorderedlefttoright,bettertoworseranked. Forarandomset
+ofsamplesusingthesameimagesandtargetflowspleaseseeFigureA6.
+16PublishedasaconferencepaperatICLR2024
+Source Image Target Flow Random Samples
+(cid:210)a photo of a laptop(cid:211)
+(cid:210)a photo of a lion(cid:211)
+(cid:210)a painting of a sun(cid:223)ower(cid:211)
+(cid:210)a teapot (cid:223)oating in water(cid:211)
+(cid:210)a teapot (cid:223)oating in water(cid:211)
+(cid:210)a teapot (cid:223)oating in water(cid:211)
+(cid:210)a photo of topiary(cid:211)
+(cid:210)a painting of a lone tree(cid:211)
+[real image]
+[real image]
+[real image]
+[real image]
+FigureA6:RandomSamples.Weshowarandomsetof5samplesforeachimageandtargetflowpair.These
+samplesareofslightlylowerqualitythanthere-rankedexamplesfromFigureA5,ascanbeseenintheteapot
+handle,thetextureofthetopiarybush,thepug,orthepaintingofatree.
+17PublishedasaconferencepaperatICLR2024
+Source Image Target Flow InstructPix2Pix FW + SDEdit 75% FW + SDEdit 50% FW + SDEdit 25% FW + RePaint Ours - Motion Guidance
+a)
+(cid:210)a photo of a cat(cid:211) (cid:210)tilt the head to the left(cid:211)
+b)
+(cid:210)a photo of a modern house(cid:211) (cid:210)raise the roof of the house(cid:211)
+c)
+(cid:210)a photo of a laptop(cid:211) (cid:210)close the laptop lid a tiny bit(cid:211)
+d)
+(cid:210)a photo of a lion(cid:211) (cid:210)move the lion to the left(cid:211)
+e)
+[real image] (cid:210)lengthen the hair(cid:211)
+f)
+(cid:210)a photo of a cute humanoid (cid:210)raise the arm of the robot(cid:211)
+robot on a solid background(cid:211)
+g)
+(cid:210)a teapot (cid:223)oating in water(cid:211) (cid:210)move the teapot left(cid:211)
+h)
+(cid:210)a teapot (cid:223)oating in water(cid:211) (cid:210)make the teapot smaller(cid:211)
+h)
+(cid:210)a photo of topiary(cid:211) (cid:210)make the left topiary top heavy and the right topiary round(cid:211)
+Figure A7: Additional Baseline Images. We qualitatively compare baselines to our method on additional
+examples.ForfurtherdiscussionpleaseseeSection4.4.
+18PublishedasaconferencepaperatICLR2024
+Source Image /(
+t = 500 t = 400 t = 300 t = 200 t = 100 t = 0
+Target Flow
+FigureA8: DenoisingSamplesandFlows. Weshowsamplesthroughthedenoisingprocess,alongwiththe
+computed flows with respect to the source image. Specifically, we show the one-step approximation of the
+cleandatapointattimestept,aswellasitsflowwithrespecttothesourceimageasestimatedbyRAFT.Note
+thatbecauseourscheduleremovesguidanceforthefinal100steps,whichwefoundimprovedresults,thefinal
+flowfort=0isnotassimilartothetargetflowasprevioustimesteps.
+19PublishedasaconferencepaperatICLR2024
+Source Image Target Flow Ours - Motion Guidance
+a)
+(cid:210)Ivy vines on a brick wall(cid:211)
+b)
+[real image]
+c) d) Guidance Failure Cases
+(cid:210)a photo of a lion(cid:211)
+Figure A9: Failure Cases. We show various failure cases of our method. (a) Our method cannot handle
+out-of-distributiontargetflows,suchasaverticalflip. (b)Insomecasesourmethodaltersthecontentofthe
+sourceimage,suchasthesurfboardandtheremovaloftherightlegofthesurfer.(c)Guidancecansometimes
+be unstable and randomly result in poorly converged images, such as the lion example. In (d) we plot the
+guidanceenergiesoverthedenoisingprocessforthesamplein(c)inbrown,alongwithfiveothersamplesthat
+successfullyconverged.Thedipattimestep400istheresultofourguidanceschedule.
+A4 LIMITATIONS AND FAILURE CASES
+Ourmethodcaneffectivelyapplymotion-basedmanipulationstobothrealandsynthesizedimages
+forawiderangeoftargetopticalflows,butitalsohaslimitations,whichwediscusshere.
+Target Flows Our method works for a wide range of flows, as demonstrated in Fig-
+ures 1, 2, 3, 4, 5, 7, and A4, such as compositions of translations, rotations, stretches, shears,
+homographies, and deformations. However, we also found that there are some target flows that
+do not produce good results. For example, we could not get horizontal or vertical flips to work.
+We hypothesize this is because these target flows are out-of-domain for off-the-shelf optical flow
+networks. WegiveanexampleinwhichwetrytooptimizeaverticalfliptargetflowinFigureA9a.
+DiffusionandGuidance Becauseourmodelisbasedondiffusionguidanceweinheritthedraw-
+backsofdiffusionmodelsandguidance. Forone,ourmethodisslowtosamplefrom. Muchofour
+overheadcomesfromrecursivedenoising,whichscaleslinearlywithsamplingtime. Dependingon
+thenumberofrecursivedenoisingsteps,wetake15minutesinourbestcasewith2recursivesteps
+andintheworstwetakearound70minuteswith10recursivesteps,whichisonparwithprevious
+work(Bansaletal.,2023). Inadditionwefindthatguidanceissometimesunstable,whichisexac-
+erbated by the large and complex optical flow models we are backpropagating through. We show
+anexampleofguidancefailureinFigureA9candshowthecorrespondingguidanceenergyoverthe
+reverse diffusion process in Figure A9d, along with the energy plots for successful samples. We
+hypothesizethisinstabilitycomesfromatrade-offonguidancestrength. Alargeguidancestrength
+results in a lower guidance loss, but also increases the magnitude of the perturbation, and thereby
+thechancesthatsamplingmaydiverge.
+ForgettingandIdentity Ourmethodisalsoproneto“forgetting”thecontentofthesourceimage.
+MinorcasesofthiscanbeseeninFigureA4f,inwhichthecontentofthelaptopscreenchanges,or
+inFigure1hinwhichthereflectioninthewindowslightlychanges.Thisproblemcanbeexacerbated
+byrealimagesforwhichwehavenocaptionwecanconditionon,asshowninFigureA9b.
+20PublishedasaconferencepaperatICLR2024
+Source Image Text-Based Edits
+a)
+(cid:210)a photo of an ice cream cone(cid:211) (cid:210)a line drawing of an ice cream cone(cid:211) (cid:210)a crochet of an ice cream cone(cid:211) (cid:210)a crayon drawing of an ice cream cone(cid:211)
+b)
+[real image] (cid:210)a sketch of a horse(cid:211) (cid:210)a watercolor painting of a horse(cid:211) (cid:210)a painting of a horse in
+the style of van Gogh(cid:211)
+Figure A10: Text-Conditioned Image-to-Image Translation. Setting the target flow to zero and applying
+motionguidancewhileusinganewtextpromptcanenabletext-basededitswhilekeepingthestructureofthe
+sourceimage.
+Frame 0 Frame 1 Extracted Flow [real image] Motion Edited Forward Warp
+[real image] Motion Edited Forward Warp [real image] Motion Edited Forward Warp
+FigureA11:MotionTransferComparedtoForwardWarp.Weshowthemisalignmentsbetweenthetarget
+flowandthesourceimagebyforwardwarping.
+A5 ADDITIONAL APPLICATIONS
+Text Conditioned Image to Image Translation. Setting the target flow to be zero everywhere
+allows us to modify an image while keeping its high level structure by providing an appropriate
+prompt, as shown in Figure A10. We note that this is not simply setting the weight on the flow
+loss to be zero. Rather, we are constraining the sample to have zero flow with respect to a source
+image. Thisallowsustoproducequitedifferentimagesthatsharethesamestructureasthesource
+image, as in the “line drawing” in Figure A10a. While we can produce high quality results, we
+find that our technique is not as robust as other existing methods for text conditioned image-to-
+imagetranslationsuchasPrompt-to-Prompt(Hertzetal.,2022). Webelievethisisbecausetheflow
+network must compute the optical flow between two images of different styles, which is typically
+quiteout-of-domainforthemodel. Wehopethatfutureprogressinmotionestimatorsmayimprove
+therobustnessofthistechnique.
+A6 ADDITIONAL MOTION TRANSFER ANALYSIS
+Motiontransferisparticularlydifficultbecausetheflowdoesnotalignwiththesourceimagevery
+well.WedemonstratethisbyforwardwarpingthesourceimagesbythetargetflowfromFigureA11.
+Ourresultsdonotlookliketheforwardwarpedresultsbecauseweoptimizeasoftobjective:produce
+alikelyimagefromthedatadistributionlearnedbythediffusionmodel,thatsimultaneouslyhaslow
+guidanceenergy.
+21PublishedasaconferencepaperatICLR2024
+f = 0.1 f = 0.2 f = 0.3 f = 0.4 f = 0.5
+f = 0.6 f = 0.7 f = 0.8 f = 0.9 f = 1.0
+FigureA12: MotionGuidanceonScaledFlowsWeshowmotionguidanceonthewaterfallexamplefrom
+Figure3,butwescaletheflowbyafactoroff foreachimage.
+A7 VIDEOS FROM MOTION GUIDANCE
+We show a sequence of motion edits on the waterfall example from Figure 3. Each sample uses
+thesametargetflow,butscaledbysomefactorf. Thesedemonstrateourmodelworkingformore
+fine-grainedflowthanthelargemotionspresentedinthemainbodyofthepaper. Inaddition, this
+indicatesthepossibilityofusingourmethodtoconstructvideos. However,wenotethatbecausethe
+imagesaresampledindependently,thereisnocoherencetohowourmethodfillsindisocclusions,
+resultinginaslightlychoppyvideo. Weleavethisproblemforfuturework.
+22

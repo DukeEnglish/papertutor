@@ -1,0 +1,1116 @@
+KVQuant: Towards 10 Million Context Length LLM Inference
+with KV Cache Quantization
+ColemanHooper SehoonKim HivaMohammadzadeh
+chooper@berkeley.edu sehoonkim@berkeley.edu hiva@berkeley.edu
+UCBerkeley UCBerkeley UCBerkeley
+MichaelW.Mahoney YakunSophiaShao KurtKeutzer
+mmahoney@stat.berkeley.edu ysshao@berkeley.edu keutzer@berkeley.edu
+ICSI,LBNL,UCBerkeley UCBerkeley UCBerkeley
+AmirGholami
+amirgh@berkeley.edu
+ICSI,UCBerkeley
+ABSTRACT capabilitiesofLLMs,thereissignificantinterestinincreasingthe
+LargeLanguageModel(LLM)inferenceisbecomingoneofthe contextlengthsofLLMs.Longercontextlengthsenablenewap-
+predominantlyimportantworkloadsofourtime.Recently,LLMs plications,includinglongdocumentsummarization,retrievalfor
+havebeenparticularlysuccessfulataddressingproblemssuchas answeringquestionsaboutlongdocuments,extendedmulti-turn
+documentanalysisandsummarization.Theseproblemsandrelated applications[4],andcodeanalysis.Tosupportthispullfromappli-
+applicationsrequirelargecontextwindows,andwiththeselarge cationstherehavebeensignificantrecentadvancesinlong-context
+contextwindowsKVcacheactivationssurfaceasthedominant lengthmodelsinindustry[1,25],aswellasinacademia[4].
+contributortomemoryconsumptionduringinference.Quantiza- ThesesuccessesofLLMsmaketheinferenceofthesemodelsone
+tionisapromisingapproachforcompressingKVcacheactivations; ofthepredominantlyimportantworkloadsofourtime,andthere
+however,existingsolutionsfailtorepresentactivationsaccurately isastrongmotivationtoimprovetheinferenceefficiency.LLM
+inultra-lowprecisions,suchassub-4-bit.Thus,inthiswork,we inferencewithlargecontextlengthscanbeincrediblyresource-
+aimtotackleKVcachequantizationinordertoreducethemem- intensive;servingLLMsrequireshigh-endGPUs,andthelargest
+oryconsumptionofactivationsduringinference.Here,wepresent LLMsrequirecostlymulti-GPUinferencesetups.Whenanalyzing
+KVQuant,whichaddressesthisproblembyincorporatingnovel thecomputationalnatureofgenerativeinferencewithLLMs,it
+methodsforquantizingcachedKVactivations,including:(i)Per- becomesquicklyapparentthat,forrelativelysmallbatchsizes,the
+ChannelKeyQuantization,whereweadjustthedimensionalong computationismemorybound[16].Withthegrowingdivergence
+whichwequantizetheKeyactivationstobettermatchthedistribu- betweencomputationalspeedsandmemoryspeeds,thisproblem
+tion;(ii)Pre-RoPEKeyQuantization,wherewequantizeKeyactiva- isonlygoingtogetworseovertime[12].Thismakesreducing
+tionsbeforetherotarypositionalembeddingtomitigateitsimpact thememorybottleneckpreeminentlyimportant.Furtheranalysis
+onquantization;(iii)Non-UniformKVCacheQuantization,where showsthatthememorybottleneckisstronglyrelatedtocontext
+wederiveper-layersensitivity-weightednon-uniformdatatypes size.Forshortsequencelengths,thedominantcontributortomem-
+thatbetterrepresentthedistributions;(iv)Per-VectorDense-and- oryconsumptionistheweightmatrices,andthereforetheoptimal
+SparseQuantization,whereweisolateoutliersseparatelyforeach strategyistominimizethemodelsizeinordertoreducememory
+vectortominimizeskewsinquantizationranges;and(v)Q-Norm, consumptionaswellasbandwidthrequirements[16,17].How-
+wherewenormalizequantizationcentroidsinordertomitigate ever,forlongsequencelengths,themainbottleneckisthememory
+distributionshift,providingadditionalbenefitsfor2-bitquantiza- requirementsforcachingKeyandValue(KV)activationsthrough-
+tion.ByapplyingourmethodtotheLLaMA,LLaMA-2,andMis- outinference.Inparticular,thesizeofKVcachecanbecomethe
+tralmodels,weachieve< 0.1perplexitydegradationwith3-bit dominantcontributortomemoryfootprint,evenfora32Kcontext
+quantizationonbothWikitext-2andC4,outperformingexisting limit(seeTable1),makingitchallengingtoperformlongcontext
+approaches.OurmethodenablesservingtheLLaMA-7Bmodelwith lengthinference.Withcurrentmethods,onethereforehastoresort
+acontextlengthofupto1milliononasingleA100-80GBGPU tousingmulti-GPUinference,andeventhenitischallengingto
+and up to 10 million on an 8-GPU system. We also develop increasethecontextlengthbeyondacertainlimit.Thischallenge
+customCUDAkernelsforKVQuant,showingthatwecanachieve isfurtherexacerbatedwhenoneconsidersbatchedinference.
+upto∼1.4×speedups,comparedtobaselinefp16matrix-vector Assuch,itiscrucialtodevelopefficientmethodsforcompressing
+multiplications,fortheLLaMA-7Bmodel.Thecodeisavailableat theKVcachetoenableefficientlong-sequencelengthinference.
+https://github.com/SqueezeAILab/KVQuant/. Existing approaches lead to unacceptable accuracy degradation
+duetotheoutlierstructuresinKVcacheactivationsaswellas
+1 INTRODUCTION suboptimalbitallocationwithexistinguniformandnon-uniform
+approaches.Inthiswork,weperformanextensiveanalysisofKV
+Large language models (LLMs) have truly revolutionized many
+cacheactivationsinrecentLLMs,revealinginterestingpatterns
+naturallanguageprocessing(NLP)tasks.Inordertoimprovethe
+4202
+naJ
+13
+]GL.sc[
+1v97081.1042:viXrawhichcanbeexploitedtoenableultra-lowprecisionquantization
+withminimalimpactonaccuracy.Inparticular,wemakethefol-
+lowingcontributions(summarizedinFigure1): 10.87
+Per-Channel
+• We find that the Key matrices exhibit structured outliers in Key
+Quantization
+specificchannelsbeforeapplyingtheRoPEembedding.However,
+theoutlierchannelmagnitudesbecomelessconsistentafterthe 6.99
+Pre-RoPE
+RoPEembedding,posingadistinctchallengeforlowprecision Key
+Quantization
+quantization.Basedontheseobservations,weuseper-channel
+quantizationforKeys,andwequantizeKeysbeforetheRoPE 6.34 Non-Uniform
+Quantization
+embeddingisapplied(seeSection3.1andSection3.2). int3 + 1%
+6.01
+Grouping Outliers
+• Wefindthatexistinguniformandnon-uniformquantization
+5.76
+methodsresultinsub-optimalquantizationsignpostplacement.
+fp16
+Instead,weproposeaNon-UniformQuantization(NUQ)method, Baseline
+whichconsiderssensitivityandnotjustmagnitudewhenquan-
+tizingagivenactivation.Inparticular,weshowthatonecan
+applysensitivity-weightednon-uniformquantizationofflineon Baseline KVQuant
+acalibrationsettoderiveaccuratedatatypesforKVcachequan-
+Figure1:OverviewofthedifferentcomponentsusedinKVQuant
+tization(seeSection3.3).
+• Evenwiththeabove,wefindthatoutliervaluesincachedKV thatresultinlessthan0.1perplexitydegradationoverbaseline.All
+thecachedKeys/Valuesarestoredin3-bitprecision,resultingin4.8×
+activationscansignificantlydegradequantizationresolution.
+reductionincachedactivationmemoryfootprintasshowninTable1.
+Unlikeforweights,itisnon-trivialtoextractthesesparseval-
+uesfromactivations,giventhedynamicnatureofactivations.
+generatedtokens.Assuch,forsmallbatchsizes,thegeneration
+However,wefindthatwecanefficientlyandaccuratelyidentify
+phaseofLLMinferenceistypicallymemory-bandwidthbound,as
+andcompressoutliervaluesinordertostorethemcompactlyin
+the only available parallelism is across different sequences in a
+aseparatesparserepresentation.Wealsofindthatper-vector
+givenbatch.
+outlierdetectionoutperformsper-matrixoutlierdetectionand
+Additionally,duringgeneration,themodelneedstostoreinter-
+comes at no additional overhead. With this method, we can
+mediateKeyandValueactivationsinordertoconditiongenerations
+attainunder0.1perplexitydegradationfor3-bitKVcachequan-
+onpreviouslygeneratedoutputtokens.Otherwise,wewouldneed
+tization on both Wikitext-2 and C4 by only removing 1% of
+torecomputeallpriorKeysandValuesateachtimestep,which
+outliers,therebyfacilitatingaccurateinferencewith4.8×longer
+wouldbeprohibitivelyexpensive.Foreachpriortoken,eitherfrom
+contextlength.
+theinputpromptorfrompreviouslygeneratedoutputtokens,we
+• Forultralow-bitprecision,wefindthatthequantizedactivations
+needtostoretheKeysandValuesateachlayerinordertouse
+candeviatesignificantlyfromtheircorrespondingfp16values.
+theseactivationswhengeneratingfuturetokens.Thesestoredac-
+Toaddressthis,weproposealightweightQ-Normlayerwhich
+tivationsarereferredtoastheKey-Value(KV)cache.Throughout
+shiftsandscalesthedistributionafterde-quantizationtomatch
+thispaper,wewillcapitalizeKeyandValuetodistinguishwhen
+themeanandstandarddeviationofcorrespondingfp16values.
+wearereferringtotheKVcachetensors.Assumingamodelwith
+Interestingly,theQ-Normlayercanbefusedwithnon-uniform
+𝑛 layersandℎ attentionheadswithdimension𝑑,theKVcache
+quantizationvaluesresultinginnooverheadduringinference.
+size for batch size𝑏 and sequence length𝑙 is 2·𝑛 ·ℎ ·𝑑 ·𝑏 ·𝑙,
+Wefoundthistobeparticularlyhelpfulfor2-bitquantization
+meaningthatitgrowslinearlywithbothbatchsizeandsequence
+(seeSection3.5).
+length.AsshowninTable1,theKVcachebecomesthedominant
+• WeimplementcustomCUDAkernelstoperformactivationquan-
+contributortomemoryconsumptionforlongersequencelengths
+tizationefficientlyduringinference.Ourkernelimplementations
+andlargerbatchsizes.Notethatsinceeachsequenceinbatched
+achieveupto∼1.4×speedupsforKeyandValuematrix-vector
+inferencedependsonseparatepastcontext,thereisnoavailable
+multiplicationsfor4-bitLLaMA-7B,relativetothefp16base-
+batch-levelparallelismwhenloadingthecachedKeysandValues
+line,includingthetimetocompressincomingactivations(See
+fortheirrespectivecomputationsinbatchedinference.KVcache
+Section3.7andSection4.2).Theseresultsdemonstratehowour
+loadingisthereforealwaysmemory-bandwidthbound.Thismoti-
+methodologyallowsforaccurateandefficientlow-precisionKV
+vatespursuingmethodstooptimallycompresstheKVcache,even
+cachequantization.
+attheexpenseofamorecomplexdequantizationprocess.
+2 BACKGROUND
+2.2 LLMQuantization
+2.1 LLMInference
+KVCacheQuantization.Therehavebeenmanypriorworkson
+Wheninferringadecoder-onlyLLM,inferenceproceedsintwo LLMquantization.Severalhavefocusedonweight-onlyquanti-
+distinctphases.Intheprefillphase,themodeltakesinaninput zationforLLMs,duetothegreatercontributiontomemorycon-
+prompt,whichitprocessesinparallel.Duringthegenerationphase, sumptionandruntimeforfairlysmallsequencelengthandbatch
+themodelthengeneratestheoutputsequenceautoregressively, size[7,16,20].Therehasalsobeenworkonquantizingbothweights
+meaningthateachtokengenerationisdependentonallpreviously andactivations(includingKVcacheactivations)[27,34].However,
+2
+2txetikiW
+no
+ytixelprePTable1:Modelsizeandactivationmemorysizefordifferentsequencelengthsandbatchsize(BS)fordifferentLLaMAmodels.Forlongsequence
+lengthsandlargerbatchsizes,activationmemoryisthemainbottleneck(particularlywhenweightsarealreadyquantizedtolowprecision).Ata
+sequencelengthof128KwiththeLLaMA-7Bmodel(below),theKVcacheisthemainbottleneck.Additionally,ifmodelweightsarequantized,
+thentheKVcacheisthemainbottleneckevenatasequencelengthof32K.BycompressingtheKVcacheto3-bitprecision,wecanenable1M
+contextlengthinferencewiththeLLaMA-7BmodelonasingleA100-80GBGPU,andwecanalsoenable10Mcontextlengthinference
+withtheLLaMA-7Bmodelonan8-GPUsystem.
+ModelSize(GB) fp16KVCacheSizewithdifferentseqlen(GB)
+28% BS #Params 16-bit→3-bit 32K 128K 1M 10M(16-bit→3-bit)
+1%
+7B 12.6→2.4 8.0 32.0 244.1 2441→459.0
+13B 24.7→4.6 12.5 50.0 381.5 3815→716.7
+99% 1 30B 61.0→11.4 24.4 97.5 743.9 7439→1397
+65B 122.4→23.0 40.0 160.0 1221 12207→2292
+72%
+7B 12.6→2.4 32.0 128.0 976.6 9766→1836
+13B 24.7→4.6 50.0 200.0 1526 15259→2867
+4 30B 61.0→11.4 97.5 390.0 2976 29755→5588
+65B 122.4→23.0 160.0 640.0 4883 48828→9167
+Short sequence length Long Sequence Lengths
+Weightsare the bottleneck KV Cache is the bottleneck
+there is still a significant perplexity degradation when quantiz- per-channelnon-uniformquantizationsignpostsusingasensitivity-
+ingKVcacheactivationstolowprecision;[28,36]quantizedKV weightedk-meansapproach.Inthiswork,wedemonstratethat
+cacheactivationsto4-bits,butrequiredfine-grainedgroupingfor wecanderiveaccurateper-layernon-uniformdatatypesusinga
+4-bit quantization, while still observing some perplexity degra- sensitivity-weightedk-meansapproachwithKVcacheactivations.
+dation,and[28]observedthat3-bitKVcachequantizationwith
+fine-grainedgroupingleadstounacceptableaccuracyloss.Other 2.3 KVCacheCompression
+worksquantizedKVcacheactivationsto4-bitsbutrequiredre- TherehavealsobeenseveralpriorworksoncompressingtheKV
+trainingtomaintainperformance[21].Oneconcurrentworkalso cache.Someofthesemethodsaimtoonlystoreimportanttokens
+exploreslowprecisionKVcachequantizationinordertoenable intheKVcacheandtoevictlessimportanttokens,therebymain-
+largerbatchsizeinferencebyreducingtheKVcachesize[23].In taininglowmemoryusage[11,22,35].Othermethodsaimtoonly
+thiswork,weintroduceamethodfornear-losslesslow-bitKVcache retrieveasubsetoftokensateachsteptoachievememoryband-
+quantizationthatminimizesperformancedegradationwithoutthe widthsavings[26].Inthiswork,weexploreKVcachequantization
+needforfinetuning. asanorthogonaldirectionforcompressingtheKVcacheinorder
+Outlier-AwareLLMQuantization.LLMshavebeenknown toenablelongcontextinference.
+tohavedistinctoutliersbothinweightsandactivations[5,7,16].
+SqueezeLLMandSpQRbothdecomposetheweightmatrixintoa 3 METHOD
+sparsematrixcontainingasmallportionofoutliersandadense
+3.1 Per-ChannelKeyQuantization
+matrixthatcanbeaccuratelyquantizedtolowprecision(referred
+toasdense-and-sparseorsparse-quantizedrepresentation)[7,16]. To inform our approach, we first performed a detailed analysis
+LLM.int8()[5]handledparticularoutlierchannelsseparatelyin tounderstandtheKVcachedistributions.Figure2showssample
+higherprecision,andSmoothQuant[34]migratesquantizationdif- distributionsfortheKVcacheactivations.Weobservethatthe
+ficultyduetooutlierchannelstoweightsinordertosupportjoint Keymatricestendtohavedistinctoutlierchannels,whichhave
+weight-activationquantization.Otherworksreconsideredthedi- largeraveragemagnitudesthanotherchannels;thiscorroborates
+mensionalongwhichwequantizeinordertoreducequantization previousobservationsaboutoutlierchannelsinLLMactivations
+error(orelseaddedper-channelcompensationtoimprovequanti- [5,34].TheValuematricesexhibitbothoutlierchannelsaswellas
+zationperformance)[2,14,32,33].Inthiswork,wedemonstrate outliertokens(althoughtheseoutliersarelessextremethanthe
+thatper-channelpre-RoPEKeyquantizationprovidessignificant outlierKeychannels).
+accuracybenefitsgiventheoutlierstructureinKeys,andthatdense- ExistingKVcachequantizationapproachesperformper-token
+and-sparsequantizationcanbeefficientlyappliedforKVcache quantization(meaningthatthescalingfactorandzero-pointare
+quantization. sharedbyelementsinthesametoken)[28,36].However,dueto
+Non-uniformLLMQuantization.Non-uniformquantization the differing average magnitudes between channels, the values
+hasalsobeenappliedinthecontextofLLMs.Byallowingformore withinachannelareeasiertoquantizewhengroupedtogether
+flexiblequantizationsignpostplacement,relativetouniformquan- thanthevaluesacrossdifferentchannels.Assuch,tobettermatch
+tizationmethods,thisenablesimprovedaccuracyforthesamebit thedistributions,weinvestigateper-channelKVcachequantiza-
+precision[6,16].Buildingontheobservationthatmodelparame- tion,meaningthatthevaluesinthesamechannelshareascaling
+terstendtobeapproximatelynormally-distributed,priorworkhas factorandzero-point,ratherthanhavingasharedscalingfactor
+proposedtheNormalFloatdatatype[6].SqueezeLLM[16]derived andzero-pointamongstelementsinthesametoken.Bysharingthe
+scalingfactorandzero-pointalongthechanneldimension,thiswill
+3Figure2:ExampledistributionsoftheactivationvaluesforKeyspre-RoPE,Keyspost-RoPE,andValuesforLLaMA-7Bonasample2Ksequence
+lengthonWikitext-2dataset.Weobserveseveralpatterns:(i)Keyspre-RoPEexhibitclearoutliersinspecificchannelsacrossdifferenttokens;
+(ii)afterapplyingtheRoPElayer,thedistributionsbecomeslessstructuredandtherearelessconsistentmagnitudesforoutlierchannels(thisis
+expected,asRoPEappliesarotationoperationbetweenpairsofchannels);and(iii)Valuesexhibitnofixedoutlierpatternwithoutliervalues
+acrosschannelsandtokens.
+naturallygrouptogethervalueswithsimilarmagnitudes,thereby
+mitigatingtheimpactsofoutlierchannelsonotherchannelswhen
+quantizingtolowprecision.AsoutlinedinAppendixD,wefindthat 𝑄˜ 𝑚𝐾˜ 𝑛⊤=(𝑅 𝜃𝑑 ,𝑚·𝑄 𝑚)(𝑅 𝜃𝑑 ,𝑛·𝐾 𝑛)⊤ (1)
+per-channelquantizationprovidessignificantaccuracybenefitsfor
+KeysbutnotforValues.Byleveragingper-channelquantization
+TheQueryvectorscomputedateachiterationwillhaveRoPE
+forKeysandper-tokenquantizationforValues,weobservea3.88 applied(𝑄˜ 𝑚).WhencachingKeyvectors,weneedtoeithercache
+perplexityimprovementonWikitext-2for3-bitLLaMA-7Bquanti- 𝐾˜ 𝑛,orelseweneedtocache𝐾 𝑛andapply𝑅 𝜃𝑑 ,𝑛on-the-flyduring
+zation.Notethatthiscanpotentiallyaddruntimeoverheadsince
+inference.ThechallengewithcachingKeyvectorsafterapplying
+thequantizationdimensionisnowmisalignedwiththereduction
+thisrotationisthatitleadstomixingpairsofchannelsbydiffer-
+dimensionfortheKeyswhenperformingmatrix-vectormultiplica-
+entamountsfordifferentpositionsinthesequence,asshownin
+tions.However,wefindthatweareabletoefficientlydequantize
+AppendixA(sinceitjointlyrotatespairsofchannelsbydifferent
+KeysandperformtheQuery-Keymatrix-vectormultiplicationwith-
+anglesdependingonthepositioninthesequence).Thepost-RoPE
+outaddingruntimeoverhead,asshowninSection4.2.Additionally,
+activationdistributionisalsoshowninFigure2,demonstratinghow
+asoutlinedinSection3.6,per-channelquantizationcanalsobechal-
+therotationbetweenpairsofchannelsleadstolessconsistentchan-
+lenging,duetotheneedtorecomputescalingfactorsastokensare
+nelmagnitudes.ThismakesithardertoquantizeKeyactivation
+addedtotheKeycache.Weshowthatwecancalibrateofflinefor
+channelswhichwouldtypicallyhaveconsistentlarge-magnitude
+scalingfactors,therebyavoidingexpensiveonlinerecomputation.
+values.Thismotivatedourinvestigationintowhetherwecould
+Per-channelKeyquantizationwasalsoexploredinanothercon-
+performpre-RoPEKeyquantization(meaningthatwequantize𝐾 𝑛)
+currentwork[23],whichleveragedsimilarintuitionaboutgroup-
+andthenefficientlyapplythepositionalembeddingson-the-fly
+ingtogetherlargemagnitudevaluesinthesamechanneltomini-
+afterdequantization.Thebenefitsofpre-RoPEKeyquantization
+mizequantizationerror.Theirmethodologyrequiresfine-grained
+arehighlightedinAppendixE,yielding0.65perplexityimprove-
+groupingforper-channelquantizationwhilemaintainingaresidual
+mentonWikitext-2for3-bitLLaMA-7Bquantization.Tobeableto
+subsetoftheKVcacheinfp16(untilallelementsforthatgroup
+quantizeKeyspre-RoPE,wedevelopafusedkerneltoefficiently
+havebeenaddedtotheKVcache).Inourwork,wedemonstrate
+applyRoPEpost-dequantization(thedetailsofthisapproachwill
+thatbyleveragingofflinecalibration,wecanaccuratelyperform
+bediscussedinSection3.7).
+per-channelquantizationwithoutgrouping.
+3.3 nuqX:AnX-BitPer-Layer
+3.2 Pre-RoPEKeyQuantization Sensitivity-WeightedNon-Uniform
+Datatype
+OneissuewhenquantizingKeysistodealwiththerotarypositional
+embedding(RoPE),whichisappliedtoKeysandQueriesinmost UniformquantizationissuboptimalforKVcachequantizationsince
+publicLLMs,includingLLaMAandLLaMA-2[29].GivenQuery theQueryandKeyactivationsarenon-uniform.Additionally,KV
+andKeyvectors𝑄 𝑚 = 𝑊 𝑞 ∗𝑥 𝑚 and𝐾 𝑛 = 𝑊 𝑘 ∗𝑥 𝑛 atpositions cacheloadingismemorybandwidthbound,regardlessofbatchsize
+𝑚and𝑛inthesequence,RoPEisappliedasposition-dependent orsequencelength,meaningthatthedequantizationoverheadin-
+rotationstoeachofthesevectorstoobtain𝑄˜ 𝑚and𝐾˜ 𝑛.Thisembeds troducedbynon-uniformquantizationmethodsisnotproblematic
+therelativepositionbetweenaQueryandKeyvectorasanamount (sincetheaddedcomputationdoesnotintroduceanyadditional
+ofananglethatisamultipleofitspositionindex.Formally,RoPE latency).Itisthereforedesirabletoleveragenon-uniformquantiza-
+isappliedinselfattentionasfollows: tionmethodsforKVcachequantization.
+4In[16],theauthorscomputednon-uniformquantizationsign- accuratelycalibrateforper-channeloutlierthresholdsofflineand
+postsusingasensitivity-weightedk-meansapproach.However, efficientlycomputeper-tokenoutlierthresholdsonline.Afterde-
+thisischallengingtoapplyonlineduringinferenceduetoitscom- terminingtheupperandloweroutlierthresholds,theremaining
+putationalcost,anditisalsodifficulttoestimatesensitivityforacti- numbersinthevectorarenormalizedtotherange[−1,1],andwe
+vationsonline.Wethereforefacilitateefficientonlinenon-uniform thenminimizeEquation2(ignoringoutliers)inordertoobtainthe
+KVcachequantizationbycomputingsensitivity-weightedquanti- quantizationsignpostsforthenon-uniformdatatypefortheremain-
+zationsignpostsofflineonacalibrationsetpriortoinference.Using ingnumbers.AppendixGwilldemonstratethebenefitsofremoving
+thediagonalFisherinformationmatrix(derivedinAppendixC), asmallpercentageofnumericaloutliersandkeepingtheminfull
+alongwiththequantizationerrorforactivation𝐴,weformulate precision,aswellastheadvantagesofper-vectordense-and-sparse
+theerrorminimizationobjectiveas: quantizationoverusingasingleoutlierthresholdforeachlayer.
+AsshowninFigure1,byremoving1%ofnumericaloutliersusing
+𝑁
+𝑄(𝐴)∗≃argmin∑︁ F𝑖𝑖(cid:0)𝐴−𝑄(𝐴)(cid:1)2
+(2)
+per-vectoroutlierthresholds,weachieveanadditional0.25perplex-
+ityimprovementonWikitext-2for3-bitLLaMA-7Bquantization,
+𝑄 𝑖=1
+whichiswithin0.08perplexityofthefp16baseline.
+Inordertoderiveaper-matrixnon-uniformdatatype,wefirst
+normalizeeachvectortotherange[−1,1].Wethenminimizethe
+3.5 MitigatingDistributionShiftusingQ-Norm
+objectiveinEquation2offlineonacalibrationsetusingak-means
+solverinordertoobtainthequantizationsignpostsforthenon- Whenpushingtoextremelylowbitwidthslike2-bitquantization,
+uniformdatatypeforeachKeyorValuelayer.AppendixFcompares webegintoobserveaccuracydegradationduetodistributionshift,
+ournon-uniformquantizationapproachwithexistinguniformand meaning that the post-quantization distribution has a different
+non-uniformquantizationbaselines[6],demonstratinghowour meanandstandarddeviationthanthepre-quantizationdistribu-
+non-uniformapproachprovides0.33perplexityimprovementon tion.AsshowninAppendixH,thisdistributionshiftcanleadto
+Wikitext-2forLLaMA-7Brelativeto3-bituniformmethods.Ta- greatererroraccumulationatlaterlayers.Tocombatthis,weintro-
+ble15inAppendixIshowshowcomputingtherequiredFisher duceQ-Normalization(shortenedtoQ-Norm),wherewenormalize
+informationfortheLLaMA-65Bmodeltakesonlyafewminutes, thequantizationcentroidsobtainedfromk-meansinordertoen-
+andhowusingthek-meanssolvertakesonlyafewminutesper sure the post-quantization distribution has the same mean and
+layer(withthecomputationforeachlayerbeingindependentand standarddeviationasthepre-quantizationdistribution.Oursolu-
+thereforeparallelizable).InAppendixN,wealsodemonstratethat tionisinspiredby[19],whichdemonstratedthatensuringthat
+wecanderiveametricforaccurateone-shotmixed-precisionas- theactivationdistributionspost-weightquantizationhavesimilar
+signment(wheredifferentlayersareassigneddifferentbitwidths) meanandstandarddeviationtotheactivationdistributionspre-
+usingthequantizationerrorweightedbysensitivityinformation. weightquantizationcanhelpreduceaccuracydegradation.Given
+meanandstandarddeviation𝜇 1 and𝜎 1 forthepre-quantization
+3.4 Per-VectorDense-and-SparseQuantization distributionandmeanandstandarddeviation𝜇 2 and𝜎 2 forthe
+post-quantizationdistribution(computedofflineonacalibration
+Figure5inAppendixBshowstheportionofelementsfallingwithin
+set),wenormalizethequantizationcentroids𝐶 𝑖 to𝐶ˆ 𝑖 asfollows:
+differentpercentilesofthedynamicrange.ForbothKeysandValues,
+themajorityofelementsarecontainedwithinasmallpercentageof
+thedynamicrange.Thismeansthatbyleveragingdense-and-sparse 𝐶ˆ 𝑖 = (𝐶 𝑖 − 𝜎𝜇 2)𝜎 1 +𝜇 1 (3)
+quantization,asdemonstratedin[16],inordertoisolateasmall 2
+percentageofnumericaloutliers,wecanrestricttherangethatwe
+AsshowninAppendixH,Q-Normprovidessignificantaccuracy
+needtorepresent,therebyallowingustorepresenttheremaining
+benefitsfor2-bitquantizationwithnoaddedinferencecost.
+elementswithgreaterprecision.
+Additionally,whenlookingattheKeyandValuedistributions
+3.6 OfflineCalibrationversusOnline
+inFigure2,differentchannelsandtokenshavedifferentaverage
+Computation
+magnitudes.Therefore,anelementwhichcountsasanoutlierinone
+channelmaynotbeanoutlierinanotherchannel(sincethatchannel Acrucialchallengeforactivationquantizationisthatweeitherneed
+mayhaveagreateraveragemagnitude).Itisthereforecrucialto tocomputestatisticson-the-fly(whichispotentiallyexpensive)or
+directlytargettheoutliervaluesthatskewthedynamicrangeatthe elseweneedtouseofflinecalibrationdata(whichpotentiallyhas
+granularitythatwearequantizinginordertoaddressthevaluesthat negativeaccuracyimplications).Thechallengeswithcomputing
+areexaggeratingtherangealongthatparticulardimension.Inthis scalingfactors(andzero-points)onlineversusofflineforbothKeys
+work,weleverageper-vectordense-and-sparsequantization,where andValuesareshowninFigure3.Inper-channelquantization,itis
+weuseadifferentoutlierthresholdper-vector(eitheraseparate challengingtoupdatescalingfactorsonlinesincethescalingfactors
+thresholdper-channelforper-channelquantization,oraseparate correspondingtoeachincomingchannelwouldpotentiallyneedto
+thresholdper-tokenforper-tokenquantization),ratherthanasingle beupdatedwheneveranewtokenisaddedtotheKVcache.Itis
+outlierthresholdforeachlayer. thereforedesirabletobeabletocomputestatisticsoffline(i.e.,using
+Notethatcomputingoutlierthresholdsforper-vectordense- calibrationdatabeforerunninginference).Whilethiscanhave
+and-sparsequantizationposespotentialaccuracyandefficiency negativeeffectsonmodelaccuracy,inAppendixI,weshowthat
+challenges.However,inSection3.6,weshowthatweareableto wecaneffectivelycalibrateofflineforper-channelquantization,
+5Per-channel Quantization Per-token Quantization sensitivityformixed-precisionexperiments.WeusedtheLLaMA-
+sequence length sequence length 7B/13B/30B/65B,LLaMA-2-7B/13B/70B,andMistral-7Bmodelsto
+per-token scaling factor evaluateourmethodology[15,30,31].Wemeasuredperplexity
+per-channel scaling factor
+onbothWikitext-2andonC4usingasequencelengthequalto
+Keys New Key Values New Value themaximumcontextlengthofthemodel(2KforLLaMA,4Kfor
+Challenge: need to potentially recompute Challenge: Need to compute the LLaMA-2,and8KforMistral-7B).AveragebitwidthsandKVcache
+the scaling factor every time a new key is scaling factor for each incoming token
+added if we computeitonline sizesassumeasequencelengthof128K(withadditionaldetails
+outlinedinAppendixJ).
+Figure3:Onetypicallyachievesbetterperformancewhenthescaling
+Forevaluatingperformanceonlongercontextlengths,wefirst
+factor/zeropointarecomputedonline.However,thisisquitechal-
+evaluatedperplexityonWikitext-2usinglargeramountsofinput
+lengingtodoforper-channelquantization,asthesefactorswillnot
+context[4,13].Wealsoevaluatedretrievalperformancetoassess
+onlyneedtoberecomputedforeverynewKeyappendedtotheKey
+themodel’sabilitytouseitscontext.Passkeyretrievalinvolves
+cache,butalsoallthepriorcachedKeyswillneedtobeupdated.As
+evaluatingthemodel’scapacitytolocatespecificinformationin
+such,weuseacalibrationsettocomputeper-channelscalingfactors
+long texts [18], and this can be used to effectively measure the
+offline.Asimilarchallengeexistsforper-tokenquantization,buton-
+maximumdistanceoverwhichatokencanattendduringtheinfer-
+linecalibrationforthisdoesnotrequireupdatingpriorcachedValues.
+encestage.Weusedthepasskeyevaluationframeworkfrom[37]
+InSection3.6andAppendixI,wediscusshowweareabletoefficiently
+(whichisbasedonthemethodologyfrom[24])toevaluateretrieval
+computeoutlierthresholds/scalingfactorsforper-tokencalibration,
+performance.Weevaluatedlongcontextlengthperformanceusing
+therebyenablingonlinecomputation.
+theLLaMA-2-7B-32Kmodel(uptrainedforlongsequencelengths
+usingpositionalinterpolation[3])aswellastheLLaMA-2-70B-32K
+obviatingtheneedforonlineupdatesofscalingfactorsforper- LongLoRAmodel[4].
+channelquantization.
+4.1.2 PerplexityEvaluation. Wecomparedourmethodwithnaive
+Forper-tokenquantization,itischallengingtocalibrateforscal-
+per-tokenquantizationwithandwithoutgrouping.Forbaseline
+ingfactorsofflineduetothepresenceofoutlierValuetokens.It
+experiments,weusepost-RoPEquantization,bothsincethisisre-
+is therefore desirable to be able to compute scaling factors and
+quiredfromanefficiencyperspectivewithoutadedicatedkernel
+outlierthresholdsonlineforeachincomingtoken.Asshownin
+implementation,andbecauseitprovidesbetteraccuracywhenquan-
+AppendixI,wecanefficientlycomputeoutlierthresholdsonline
+tizingKeysper-tokenasshowninAppendixL.Table2showsthe
+per-tokenbyoffloadingtotheCPU.Byleveragingcustomquantiza-
+resultsforLLaMAmodelsfortheWikitext-2dataset.Thebaseline
+tionfunctionimplementationsforcompressingactivations,weare
+configurationsusedbyAtomandFlexGenareincludedforrefer-
+abletoperformonlineper-tokenValuequantizationwithminimal
+ence[28,36].WedidnotincluderesultsforKIVI[23]sincetheydid
+performanceimplications.
+notreportperplexityvalues.Wefindthatourmethodconsistently
+outperformsbaselineapproaches,byanespeciallylargemargin
+3.7 KernelImplementation
+with3-bitand2-bitquantization.Additionally,onceweincorpo-
+Inordertoefficientlyperformactivationquantizationon-the-fly,
+rateoutliers,wefurtherpushtheperformanceoflow-precision
+weleveragededicatedkernelimplementationswithour4-bitquan-
+quantization,achieving4-bitquantizationwithlessthan0.02per-
+tizationmethodforpackingvectorstoreducedprecision,loading
+plexitydegradationand3-bitquantizationwithunder0.1perplexity
+vectorsandcorrespondinglookuptablesinordertoperformmatrix- degradationfromthefull-precisionbaseline(whileattaining3.7×
+vectormultiplications,andperformingsparsematrix-densevector and 4.8× memory savings, respectively). For 2-bit quantization,
+multiplications.WestorethecompressedKeyandValuematricesas
+wealsoobservesignificantimprovementsrelativetothebaseline
+4-bitelements(packedinto32-bitwords),andthese4-bitelements
+approaches,attainingwithin0.5perplexityofthefp16baseline.
+are then used as indices for lookup tables to recover the corre-
+Theseresultsdemonstratehowourmethodologymakes2-bitKV
+spondingfp16valuesforthequantizedmatrix.Westorethesparse cachequantizationfeasiblewhileallowingfor6.9×memorysavings
+matricesineitherCompressed-SparseRow(CSR)orCompressed-
+relativetofp16.Table16andTable17inAppendixKshowfull
+SparseColumn(CSC)format(dependingonwhichalignsbetter
+perplexityevaluationonWikitext-2andC4,showingtheconsistent
+withappendingnewKeyandValuetokens).ThekernelsfortheKey
+performanceofourapproachacrossdifferentmodelsanddatasets.
+matrix-vectoroperationsapplyRoPEon-the-flyinordertosupport
+pre-RoPEquantization.Morekernelimplementationdetailsare 4.1.3 LongContextLengthEvaluation. Weincludeevaluationon
+providedinAppendixO. longcontextlengthstodemonstratehowourmethodallowsfor
+accuratelongcontextlengthinferenceatlowprecision.Figure4
+4 RESULTS showsevaluationresultsonvaryingamountsofinputcontext.The
+resultsdemonstratehowourmethodmaintainsaccuracyevenfor
+4.1 MainResults
+longeramountsofinputcontext,therebyenablingefficientand
+4.1.1 ExperimentalSetup. Forourempiricalevaluation,weuse16 accuratelongsequencelengthinference.Additionallongsequence
+calibrationsamplesofsequencelength2KfromtheWikitext-2train- lengthperplexityevaluationresultsfor2-bitquantization(including
+ingset(aswellasthecorrespondinggradients)toderivetheper- Q-Norm)areprovidedinAppendixM.Whilethereisnoperfor-
+channelscalingfactorsandzero-points,toderivethenon-uniform mancedegradationwith3and4-bitquantization,weobservesome
+datatypesforbothKeysandValues,andtoestimatelayer-wise degradationwith2-bitquantizationespeciallywithLLaMA-70B,
+6
+mid midTable2:Evaluationofourmethodfordifferentmodelsusingtheperplexity(PPL)measuredonWikitext-2.Non-uniformquantizationresultsare
+usingpre-RoPEper-channelquantizationforKeys.“gs128”referstobaselineexperimentsusinggroupingwithgroupsize128.KVcachesizesfora
+sequencelengthof128Kareshownforreference(ignoringcontextlengthlimitsforthemodels).At4-bitquantization,ourmethodattainswithin
+0.02perplexityofthebaseline.At3-bitand2-bitquantization,incorporating1%outliersprovidessignificantperplexitybenefits,helpingusattain
+within0.1and0.5perplexityofthebaseline,respectively.WeincorporateQ-Normfornuq2experiments.†denotesthemethodusedinATOM[36].
+‡denotesthemethodusedinFlexGen[28].Notethatweusedpost-RoPEquantizationforallbaselinemethodssinceitachieveshigheraccuracy
+whenquantizingKeysper-tokenasshowninAppendixL.
+LLaMA-7B LLaMA-13B LLaMA-30B LLaMA-65B
+Method
+PPL KVCache(GB) PPL KVCache(GB) PPL KVCache(GB) PPL KVCache(GB)
+baseline 5.68 32.0 5.09 50.0 4.10 97.5 3.53 160.0
+int4 5.98 8.0 5.32 12.5 4.34 24.4 3.73 40.0
+nf4 5.87 8.0 5.23 12.5 4.25 24.4 3.63 40.0
+int4-gs128† 5.77 8.3 5.16 13.0 4.16 25.3 3.57 41.6
+int4-gs64‡ 5.73 8.6 5.14 13.5 4.14 26.3 3.56 43.1
+nf4-gs128 5.77 8.5 5.17 13.3 4.17 25.9 3.58 42.5
+nuq4 5.73 8.0 5.15 12.5 4.16 24.4 3.57 40.0
+nuq4-1% 5.70 8.6 5.11 13.5 4.12 26.3 3.54 43.2
+int3 10.87 6.0 8.69 9.4 6.82 18.3 6.37 30.0
+nf3 7.33 6.0 6.21 9.4 5.46 18.3 4.44 30.0
+int3-gs128† 6.17 6.3 5.47 9.8 4.44 19.2 3.78 31.5
+int3-gs64‡ 5.93 6.6 5.29 10.3 4.26 20.1 3.66 33.0
+nf3-gs128 6.26 6.5 5.52 10.2 4.54 19.8 3.83 32.5
+nuq3 6.01 6.0 5.34 9.4 4.41 18.3 3.74 30.0
+nuq3-1% 5.76 6.6 5.15 10.4 4.17 20.3 3.59 33.2
+int2 11779 4.0 69965 6.3 1470 12.2 7272 20.0
+nf2 3210 4.0 5786 6.3 2044 12.2 5367 20.0
+int2-gs128† 37.37 4.3 41.77 6.7 16.49 13.0 13.63 21.4
+int2-gs64‡ 11.09 4.6 9.84 7.1 6.60 13.9 5.54 22.8
+nf2-gs128 351.23 4.5 141.19 7.0 60.97 13.7 31.69 22.5
+nuq2 8.61 4.0 7.28 6.3 7.04 12.2 20.02 20.0
+nuq2-1% 6.12 4.6 5.42 7.3 4.46 14.2 3.77 23.2
+Table3:Passkeyretrievalresultsacrossdifferentcontextlengthsfor Table4:KVcachequantizationresultswhenappliedinconjunc-
+the LLaMA-2-7B-32K model (uptrained for long sequence lengths tionwiththeweightquantizationmethodologyinSqueezeLLM[16].
+usingpositionalinterpolation[3])aswellastheLLaMA-2-70B-32K SeeAppendixJfordetails.
+LongLoRA model [4]. The values reported are the success rate for
+retrievingthepasskey,computedover50samples.2-bitresultsare Weights KVCache LLaMA-7B LLaMA-13B Avg.Bits(KVCache)
+withQ-Normenabled. fp16 fp16 5.68 5.09 16
+fp16 5.77 5.17 16
+Model Datatype 2K 4K 8K 16K 32K w4-s45 nuq4 5.83 5.22 4.00
+nuq4-1% 5.79 5.18 4.32
+fp16 1 1 1 1 1
+nuq4-1% 1 1 1 1 1 fp16 6.13 5.45 16
+LLaMA-2-7B-32K nuq3-1% 1 1 1 1 1 w3-s45 nuq3 6.55 5.77 3.00
+nuq2-1% 1 0.98 1 1 0.96 nuq3-1% 6.26 5.54 3.32
+fp16 1 1 1 1 1
+nuq4-1% 1 0.98 1 1 1 4.2 PerformanceAnalysis
+LLaMA-2-70B-32K
+nuq3-1% 1 0.98 1 1 1
+nuq2-1% 0.84 0.94 0.82 0.78 0.82 Table5showskernelbenchmarkingresultsusingabatchsizeof1
+forthe4-bitdensekernelimplementations,the4-bitsparsekernel
+implementations,andthe4-bitpackingkernelimplementations.
+Weshowresultsacrossdifferentsequencelengthstoassessthe
+indicatingpotentialroomforimprovementin2-bitquantization performanceofthekernelsatdifferentpointsduringgeneration.
+techniques.Wealsoevaluatedtheperformanceofourquantization WereportlatencybenchmarkedonanA6000GPUandaveraged
+methodonpasskeyretrieval.Thepasskeyretrievalresultsarepro- over1000runs.TheresultsshowthatfortheKeymultiplication,we
+videdinTable3,demonstratinghowourmethoddoesnotdegrade canachieve1.1-1.2xlatencysavings,with1%outliersrelativetothe
+retrievalperformanceforlongcontextlengthmodelswith4-bit baseline.ForValues,wecanachieve1.2-1.4xlatencysavings,with
+and3-bitquantization. 1%outliers.Wehaveintegratedthesekernelsintoanend-to-end
+generationpipelinethatisabletocompressactivationsdynamically
+4.1.4 JointWeightandKVCacheQuantization. Table4showsre- duringinference,therebyachievingsignificantmemorysavingsand
+sultsforourKVcachequantizationmethodwhentheweightsare allowingforeitherlargerbatchsizesorlongersequencelengths.
+alsoquantized.Weusetheapproachin[16]forweightquantiza-
+4.3 PushingtheContextLengthLimit
+tion.Weobserveminimalperplexitydegradationwhenleveraging
+ourKVcachequantizationapproach,evenwhenweightsarealso Table6showstheKVcachesizeafterquantizationwithourmethod.
+quantizedtoreducedprecision. Asonecansee,ourmethodprovides3.7×KVcachecompression
+73.7x 4.8x 3.7x 4.8x
+Figure4:PerplexityresultsfortheLLaMA-2-7B-32Kmodel(uptrainedforlongsequencelengthsusingpositionalinterpolation[3])aswellasthe
+LLaMA-2-13B-32KandLLaMA-2-70B-32KLongLoRAmodels[4]ontheWikitext-2dataset,evaluatedusingdifferentsequencelengths.Figure8in
+AppendixMprovidesadditionalresultswithlongsequencelengthevaluationfor2-bitquantizationincludingQ-Norm.
+Table5:Averagelatency(inmicroseconds)fortheKeyandValue Table6:Modelsizeandactivationmemorysize(GB)for128K,1M,
+denselookup-tablebasedkernelsaswellasforthesparsekernels(with and10Msequencelength(𝑙)fordifferentLLaMAmodels.Bycom-
+1%outliers),benchmarkedonanA6000GPUfortheLLaMA-7Bmodel. pressingtheKVcacheto3-bitprecision,wecanenable1Mcontext
+Benchmarkingresultsarereportedfordifferentsequencelengths(𝑙). lengthinferencewiththeLLaMA-7BmodelonasingleA100-80GB
+fp16matrix-vectormultiplicationlatenciesareincludedforreference, GPU,andwecanalsoenable10Mcontextlengthinferencewiththe
+andtheKeymultiplicationtimealsoincludesthetimetoapplyRoPE LLaMA-7Bmodelonan8-GPUsystem.
+tothenewlyappendedKeyvector.Wefindthatourdense-and-sparse
+approach(evenwith1%outliers)provideslatencybenefitsrelative Model Operation 𝒍=128K 𝒍=1M 𝒍=10M
+tothefp16baseline,evenwhenaccountingforthetimetocompress fp16 32.0 244.1 2441.4
+activationsonline.Section3.7andAppendixOprovideadditional LLaMA-7B nuq4-1% 8.6 66.0 659.8
+nuq3-1% 6.6 50.7 507.2
+detailsforourkernelimplementation. nuq2-1% 4.6 35.5 354.6
+fp16 160.0 1220.7 12207
+Activation Operation 𝒍=2K 𝒍=4K 𝒍=16K LLaMA-65B nuq4-1% 43.2 329.8 3297.5
+nuq3-1% 33.2 253.5 2534.6
+Key fp16Matvec 66.4 116.1 402.3 nuq2-1% 23.2 177.2 1771.6
+DensePacking 2.4 2.4 2.4
+SparsePacking 4.5 4.5 4.5 thebenefitsofourapproachforenablinglongsequencelength
+Key(nuq4-1%) DenseMatvec 42.8 75.5 283.5
+SparseMatvec 10.5 14.3 53.7 inference.
+TotalLatency 60.2 96.7 344.1
+5 CONCLUSION
+Value fp16Matvec 56.0 104.2 389.3
+DensePacking 2.0 2.0 2.0 AscontextlengthsinLLMsincrease,theKVcacheactivationssur-
+SparsePacking 4.2 4.2 4.2 faceasthedominantcontributortomemoryconsumption.Quan-
+Value(nuq4-1%) DenseMatvec 26.3 63.1 226.3
+SparseMatvec 8.3 16.5 60.9 tizationisapromisingapproachtoreducethesizeofKVcache
+TotalLatency 40.8 85.8 293.4 activations,butpriorsolutionsfailedtorepresentactivationsac-
+curatelyinultra-lowprecisions,suchassub-4-bit.Incontrast,we
+achieveaccurateultra-lowprecisionKVcachequantization.By
+(nuq4-1%)andenablesservingthequantizedLLaMA-65Bmodel quantizingKeysper-channelbeforeapplyingtheRoPEembedding,
+withacontextlengthof32KtokensonasingleA100-80GBGPU weareabletobettermatchtheoutlierdistributionandmitigate
+(requiring30GBforthemodelweightscompressedto4-bit,and the impacts of the RoPE embeddings (due to it mixing pairs of
+33GBfortheKVcachewhencompressedwithnuq4-1%);andeven channelswhichmayhavedifferentaveragemagnitudes).Weuse
+servingtheLLaMA-7Bmodelwithacontextlengthof 1Mtokens non-uniformquantizationtobetterallocatethesmallnumberof
+onasingleA100GPU(requiring3GBforthemodelweightsin4-bit quantization signposts at low precision. We observe significant
+precisionand66GBfortheKVcachewithnuq4-1%).Additionally, accuracyimprovementswhenemployingdense-and-sparsequanti-
+whenconsideringan8-GPUservingsystem,weenableservingthe zation,particularlywhendetectingoutliersatthesamegranularity
+LLaMA-7Bmodelwith10Mcontextlength(withnuq3-1%)orthe aswecomputequantizationscalingfactors.Crucially,wedemon-
+LLaMA-65Bmodel,with1Mcontextlength(withnuq4-1%).While stratethatwecanperformaccuratecalibrationofflineforKeys,as
+currentlytherearenomodelsordatasetstomeasureaccuracywith wellasefficientonlinescalingfactorandoutlierthresholdcom-
+suchlargecontextsizes,ourresultsonsmallertokensizeshowsmall putationforValues.Byleveragingthesemethods,weareableto
+degradationcomparedtobaselineinference.Thisdemonstrates enableaccuratelow-precisionactivationquantization,achieving
+84.8xcompression(nuq3-1%outliers)withonly0.1perplexitydegra- [14] JungHwanHeo,JeonghoonKim,BeomseokKwon,ByeongwookKim,SeJung
+dationacrossdifferentLLaMA,LLaMA-2,andMistralmodels.Our Kwon,andDongsooLee. Rethinkingchanneldimensionstoisolateoutliers
+forlow-bitweightquantizationoflargelanguagemodels. arXivpreprint
+methodologythereforesupportsinferringtheLLaMA-7Bmodel
+arXiv:2309.15531,2023.
+withacontextlengthof10Monan8-GPUservingsystem.Through [15] AlbertQJiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,Deven-
+ourefficientkernelimplementation,weareabletoshowimproved draSinghChaplot,DiegodelasCasas,FlorianBressand,GiannaLengyel,Guil-
+laumeLample,LucileSaulnier,etal.Mistral7b.arXivpreprintarXiv:2310.06825,
+latencyrelativetothefp16baseline,demonstratinghowourmethod 2023.
+allowsforimprovedlatencyinadditiontothememorysavings. [16] SehoonKim,ColemanHooper,AmirGholami,ZhenDong,XiuyuLi,Sheng
+Shen,MichaelWMahoney,andKurtKeutzer.Squeezellm:Dense-and-sparse
+quantization.arXivpreprintarXiv:2306.07629,2023.
+6 LIMITATIONS [17] SehoonKim,ColemanHooper,ThanakulWattanawong,MinwooKang,Ruohan
+Yan,HasanGenc,GraceDinh,QijingHuang,KurtKeutzer,MichaelWMahoney,
+Whileourworkenablesaccuratelong-contextlengthinference etal.Fullstackoptimizationoftransformerinference:asurvey.arXivpreprint
+byreducingthememoryrequirements,thereissignificantwork arXiv:2302.14017,2023.
+[18] DachengLi,RulinShao,AnzeXie,YingSheng,LianminZheng,JosephGonzalez,
+requiredfortraininglongcontextlengthmodelswithgreaterthan
+IonStoica,XuezheMa,andHaoZhang.Howlongcancontextlengthofopen-
+100Kcontextlength.Thisworkisorthogonaltoourefforts,which sourcellmstrulypromise?InNeurIPS2023WorkshoponInstructionTuningand
+areconstrainedtoefficientinferencewithlongcontextlengthmod- InstructionFollowing,2023.
+[19] LiangLi,QingyuanLi,BoZhang,andXiangxiangChu.Normtweaking:High-
+els.Additionally,ourlatencybenchmarkingresultscurrentlyfocus performancelow-bitquantizationoflargelanguagemodels. arXivpreprint
+onmemory-bandwidthboundgenerationratherthanpromptpro- arXiv:2309.02784,2023.
+[20] JiLin,JiamingTang,HaotianTang,ShangYang,XingyuDang,andSongHan.
+cessing. In future work, we plan to develop dedicated efficient
+Awq:Activation-awareweightquantizationforllmcompressionandacceleration.
+kernels for block Key/Value compression in order to efficiently arXivpreprintarXiv:2306.00978,2023.
+packseveralprompttokensatonce.Finally,inthecurrentend- [21] ZechunLiu,BarlasOguz,ChangshengZhao,ErnieChang,PierreStock,Yashar
+Mehdad,YangyangShi,RaghuramanKrishnamoorthi,andVikasChandra.Llm-
+to-endimplementation,thereareinefficienciesinhowmemory
+qat:Data-freequantizationawaretrainingforlargelanguagemodels. arXiv
+allocationishandledforupdatingthesparsematrix(wherethe preprintarXiv:2305.17888,2023.
+datacorrespondingtotheprevioustokenshavetobecopiedwhen [22] ZichangLiu,AdityaDesai,FangshuoLiao,WeitaoWang,VictorXie,Zhaozhuo
+Xu,AnastasiosKyrillidis,andAnshumaliShrivastava.Scissorhands:Exploiting
+concatenatingthemwiththedatafromthenewtoken).Infuture thepersistenceofimportancehypothesisforllmkvcachecompressionattest
+work,weplantooptimizethisbydoingblockedallocationtoavoid time.arXivpreprintarXiv:2305.17118,2023.
+[23] ZiruiLiu,JiayiYuan,HongyeJin,ShaochenZhong,ZhaozhuoXu,Vladimir
+overheadsfromreallocatingmemory.
+Braverman,BeidiChen,andXiaHu.Kivi:Plug-and-play2bitkvcachequantiza-
+tionwithstreamingasymmetricquantization.2023.
+REFERENCES [24] AmirkeivanMohtashamiandMartinJaggi.Landmarkattention:Random-access
+infinitecontextlengthfortransformers.arXivpreprintarXiv:2305.16300,2023.
+[1] Anthropic.Introducingclaude2.1,Nov2023. [25] OpenAI.Newmodelsanddeveloperproductsannouncedatdevday2023,Nov
+[2] YelyseiBondarenko,MarkusNagel,andTijmenBlankevoort.Understandingand 2023.
+overcomingthechallengesofefficienttransformerquantization.arXivpreprint [26] LukaRibar,IvanChelombiev,LukeHudlass-Galley,CharlieBlake,CarloLuschi,
+arXiv:2109.12948,2021. andDouglasOrr. Sparqattention:Bandwidth-efficientllminference. arXiv
+[3] ShouyuanChen,ShermanWong,LiangjianChen,andYuandongTian.Extending preprintarXiv:2312.04985,2023.
+contextwindowoflargelanguagemodelsviapositionalinterpolation. arXiv [27] WenqiShao,MengzhaoChen,ZhaoyangZhang,PengXu,LiruiZhao,Zhiqian
+preprintarXiv:2306.15595,2023. Li,KaipengZhang,PengGao,YuQiao,andPingLuo. Omniquant:Omnidi-
+[4] YukangChen,ShengjuQian,HaotianTang,XinLai,ZhijianLiu,SongHan,and rectionallycalibratedquantizationforlargelanguagemodels. arXivpreprint
+JiayaJia.Longlora:Efficientfine-tuningoflong-contextlargelanguagemodels. arXiv:2308.13137,2023.
+arXivpreprintarXiv:2309.12307,2023. [28] YingSheng,LianminZheng,BinhangYuan,ZhuohanLi,MaxRyabinin,Beidi
+[5] TimDettmers,MikeLewis,YounesBelkada,andLukeZettlemoyer.Llm.int8():8- Chen,PercyLiang,ChristopherRé,IonStoica,andCeZhang.Flexgen:High-
+bitmatrixmultiplicationfortransformersatscale.arXivpreprintarXiv:2208.07339, throughputgenerativeinferenceoflargelanguagemodelswithasinglegpu.In
+2022. InternationalConferenceonMachineLearning,pages31094–31116.PMLR,2023.
+[6] TimDettmers,ArtidoroPagnoni,AriHoltzman,andLukeZettlemoyer.Qlora: [29] JianlinSu,MurtadhaAhmed,YuLu,ShengfengPan,WenBo,andYunfengLiu.
+Efficientfinetuningofquantizedllms.arXivpreprintarXiv:2305.14314,2023. Roformer:Enhancedtransformerwithrotarypositionembedding.Neurocom-
+[7] TimDettmers,RuslanSvirschevski,VageEgiazarian,DenisKuznedelev,Elias puting,568:127063,2024.
+Frantar,SalehAshkboos,AlexanderBorzunov,TorstenHoefler,andDanAlistarh. [30] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-Anne
+Spqr:Asparse-quantizedrepresentationfornear-losslessllmweightcompression. Lachaux,TimothéeLacroix,BaptisteRozière,NamanGoyal,EricHambro,Faisal
+arXivpreprintarXiv:2306.03078,2023. Azhar,etal. Llama:Openandefficientfoundationlanguagemodels. arXiv
+[8] ZhenDong,ZheweiYao,DaiyaanArfeen,AmirGholami,MichaelWMahoney, preprintarXiv:2302.13971,2023.
+andKurtKeutzer.Hawq-v2:Hessianawaretrace-weightedquantizationofneural [31] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,Yas-
+networks.Advancesinneuralinformationprocessingsystems,33:18518–18529, mineBabaei,NikolayBashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhos-
+2020. ale,etal.Llama2:Openfoundationandfine-tunedchatmodels.arXivpreprint
+[9] ZhenDong,ZheweiYao,AmirGholami,MichaelWMahoney,andKurtKeutzer. arXiv:2307.09288,2023.
+Hawq:Hessianawarequantizationofneuralnetworkswithmixed-precision.In [32] XiuyingWei,YunchenZhang,YuhangLi,XiangguoZhang,RuihaoGong,Jinyang
+ProceedingsoftheIEEE/CVFInternationalConferenceonComputerVision,pages Guo,andXianglongLiu.Outliersuppression+:Accuratequantizationoflarge
+293–302,2019. languagemodelsbyequivalentandoptimalshiftingandscaling.arXivpreprint
+[10] GoranFlegarandEnriqueSQuintana-Ortí.Balancedcsrsparsematrix-vector arXiv:2304.09145,2023.
+productongraphicsprocessors.InEuro-Par2017:ParallelProcessing:23rdInterna- [33] XiuyingWei,YunchenZhang,XiangguoZhang,RuihaoGong,ShanghangZhang,
+tionalConferenceonParallelandDistributedComputing,SantiagodeCompostela, QiZhang,FengweiYu,andXianglongLiu. Outliersuppression:Pushingthe
+Spain,August28–September1,2017,Proceedings23,pages697–709.Springer, limitoflow-bittransformerlanguagemodels.AdvancesinNeuralInformation
+2017. ProcessingSystems,35:17402–17414,2022.
+[11] SuyuGe,YunanZhang,LiyuanLiu,MinjiaZhang,JiaweiHan,andJianfengGao. [34] GuangxuanXiao,JiLin,MickaelSeznec,HaoWu,JulienDemouth,andSong
+Modeltellsyouwhattodiscard:Adaptivekvcachecompressionforllms.arXiv Han.Smoothquant:Accurateandefficientpost-trainingquantizationforlarge
+preprintarXiv:2310.01801,2023. languagemodels.InInternationalConferenceonMachineLearning,pages38087–
+[12] AmirGholami,ZheweiYao,SehoonKim,MichaelMahoney,andKurtKeutzer. 38099.PMLR,2023.
+Aiandmemorywall.RiseLabMediumPost,2021. [35] ZhenyuZhang,YingSheng,TianyiZhou,TianlongChen,LianminZheng,Ruisi
+[13] ChiHan,QifanWang,WenhanXiong,YuChen,HengJi,andSinongWang. Cai,ZhaoSong,YuandongTian,ChristopherRé,ClarkBarrett,etal. H_2o:
+Lm-infinite:Simpleon-the-flylengthgeneralizationforlargelanguagemodels. Heavy-hitteroracleforefficientgenerativeinferenceoflargelanguagemodels.
+arXivpreprintarXiv:2308.16137,2023. arXivpreprintarXiv:2306.14048,2023.
+9[36] Yilong Zhao, Chien-Yu Lin, Kan Zhu, Zihao Ye, Lequn Chen, Size Zheng,
+LuisCeze,ArvindKrishnamurthy,TianqiChen,andBarisKasikci. Atom:
+Low-bitquantizationforefficientandaccuratellmserving. arXivpreprint
+arXiv:2310.19102,2023.
+[37] DaweiZhu,NanYang,LiangWang,YifanSong,WenhaoWu,FuruWei,and
+SujianLi.Pose:Efficientcontextwindowextensionofllmsviapositionalskip-
+wisetraining.arXivpreprintarXiv:2309.10400,2023.
+10A ROPEEQUATION
+TherotationmatrixfortheRoPEembeddingisprovidedinEquation4,wherecandsarecosineandsinefunctions,𝜃 𝑖 =10000−2(𝑖−1)/𝑑 ,and
+𝑛isthecurrentpositioninthesequence:
+c(𝑛𝜃 1) −s(𝑛𝜃 1) ··· 0 0 
+ s(𝑛𝜃 1) c(𝑛𝜃 1) ··· 0 0  
+   . . . . . . ... . . . . . .    (4)
+ 
+
+
+0 0 ··· c(𝑛𝜃 𝑑/2) −s(𝑛𝜃 𝑑/2)
+
+
+
+0 0 ··· s(𝑛𝜃 𝑑/2) c(𝑛𝜃 𝑑/2) 
+
+TheQueryvectorscomputedateachiterationwillhaveRoPEapplied(toobtain𝑄˜ 𝑚 = 𝑅 𝜃𝑑 ,𝑚 ∗𝑄 𝑚).WhencachingKeyvectors,we
+thereforeneedtoeithercache𝐾˜
+𝑛
+=𝑅 𝜃𝑑 ,𝑛∗𝐾 𝑛,orelseweneedtocache𝐾 𝑛andapply𝑅 𝜃𝑑 ,𝑛on-the-flyduringinference.Inordertoapply𝑅 𝜃𝑑
+,𝑛
+efficientlyon-the-fly,weleveragetheelement-wiseformulationofRoPEratherthanthematrix-multiplicationformulationfromEquation4.
+Theelement-wiseformulationfor𝑅𝑑 𝑥isasfollows,where⊙istheelement-wisemultiplicationoperator(notethattheformulationthatwe
+𝜃,𝑛
+usematchestheimplementationinHuggingfaceforLLaMA,anditisadifferentbutequivalentformulationtotheelement-wiseexpression
+in[29]):
+                   𝑥 𝑥𝑥 𝑥𝑑𝑥 𝑥 𝑑 2. . . . . . 𝑑𝑑 −1 2 2 + 11                    ⊙                    c(c ccc c 𝜃( ((( ( 𝜃 𝜃𝑑𝜃𝜃 𝜃 2. . .. . . 𝑑 𝑑11 2 2 2−𝑛𝑛 𝑛 𝑛 𝑛1)) ) 𝑛) ))                   +                    −− 𝑥−𝑥𝑥 𝑥𝑑𝑥 2𝑥𝑑𝑑 . . . . . .2 2 𝑑1 2−𝑑+ + 11 2                     ⊙                    s( sss ss 𝜃 (( (( ( 𝜃𝜃 𝑑𝜃𝜃 𝜃 2. . .. . . 𝑑𝑑 11 2 2 2−𝑛𝑛 𝑛 𝑛 𝑛1)) ) 𝑛) ))                    (5)
+Byleveragingthiselement-wiseimplementation,wecanapplyRoPEon-the-flytotheKeyactivations(afterdequantizingtheKey
+activationsandbeforemultiplyingthemwiththecorrespondingelementsintheQueryvector).
+B KEYANDVALUEDYNAMICRANGE
+Figure5showstheportionoftheelementscontainedwithindifferencepercentagesofthedynamicrangeforbothKeysandValues.The
+majorityofvalues(∼99%)arecontainedinasmallportionofthedynamicrange,andasmallportionofnumericaloutliersskewthedynamic
+rangethatmustberepresented.Thismotivatesourdense-and-sparseapproachwhichremovesnumericaloutliersandstoresthemina
+separatesparsematrix,therebyrestrictingtherangethatneedstoberepresentedinthedensecomponent.
+C DERIVATIONFORSENSITIVITYANALYSIS
+Thefollowingderivationisadaptedfrom[16],withtheonlydifferencebeingthatitisestimatingsensitivitywithrespecttoactivations
+ratherthangradients.Lettheoutputactivationforlayer𝑖forinputdata𝑋 bedenotedas𝐴 𝑖,andletthelossoftheneuralnetworkwith
+respecttoactivation𝐴 𝑖 berepresentedasL(𝐴 𝑖).LetthegradientandHessianofthelossfunctionwithrespecttoactivation𝐴 𝑖 bedenoted
+as𝑔 𝑖 = 𝜕𝐴𝜕 𝑖L(𝐴 𝑖)and𝐻 𝑖 = 𝜕𝜕 𝐴2 𝑖2L(𝐴 𝑖),respectively.
+Let𝑄(𝐴 𝑖)betheapplicationofthequantizationfunction𝑄 to𝐴 𝑖,andlet𝐴 𝑖 −𝑄(𝐴 𝑖)representthequantizationerror.Notethatthe
+subsequentderivationsassumethattheactivationandgradientmatricesareallflattenedtoonedimension.
+ByperformingTaylorexpansionofthelosswithrespecttotheHessianforlayer𝑖anddata𝑋,weget:
+L(𝐴 𝑖,𝑝)≃L(𝐴 𝑖)−𝑔 𝑖⊤(cid:0)𝐴
+𝑖
+−𝑄(𝐴 𝑖)(cid:1)
++ 1(cid:0)𝐴 𝑖 −𝑄(𝐴 𝑖)(cid:1)⊤𝐻 𝑖(cid:0)𝐴 𝑖 −𝑄(𝐴 𝑖)(cid:1) (6)
+2
+Assumingthatthelosshasconvergedtoalocalminimum,𝑔 𝑖 canbeapproximatedaszero,which(omittingconstants)yieldsthefollowing
+formulafortheincreasederrorintheloss𝐸 𝑖 duetoperturbationin𝐴 𝑖 [16]:
+𝐸 𝑖 = (cid:0)𝐴 𝑖 −𝑄(𝐴 𝑖)(cid:1)⊤𝐻 𝑖(cid:0)𝐴 𝑖 −𝑄(𝐴 𝑖)(cid:1) (7)
+Priorwork[8,9]hasusedeitherthelargestHessianeigenvalueortheHessiantracetoestimatethesharpnessofthelosslandscapewith
+respecttoaparticularlayer.However,thefullHessianisprohibitivelyexpensivetocomputeforLLMs,anditischallengingtoevenestimate
+theHessianeigenvalues.WethereforeaimtoleveragetheFisherinformationapproximationfortheHessiansinceitiseasiertocompute.
+11Keys Values
+1.0 1.0 t100
+t99.99
+t99.9
+0.8 0.8 t99
+0.6 0.6
+0.4 0.4
+0.2 0.2
+0.0 0.0
+0 10 20 30 0 10 20 30
+Layer Layer
+Figure5:DistributionofthemagnitudeofelementsofKeys(Pre-RoPE)andValueactivationsfordifferentlayersofLLaMA-7B,computedona
+singlesamplewithsequencelength2KfromtheWikitext-2dataset.Thenormalizedmagnitudeiscomputedlayerwisewherewecomputethe
+maxvalueacrossallheads.Asonecansee,forbothKeyandValueactivations,themajorityofvalueslieinasmallportionofthedynamicrange,
+withafewnumericaloutliersskewingthedynamicrange(andtherebyreducingthefidelitywhenquantizingtolowprecision).
+Table7:AblationStudy:Perplexitycomparisonofper-tokenandper-channelquantizationforKVcacheactivationsforLLaMA-7B.PTrefersto
+per-tokenquantization,andPCreferstoper-channelquantization.
+KVCacheSize(GB)
+Datatype KeyDim. ValueDim. Perplexity
+Seqlen128K
+fp16 - - 5.68 32.0
+int3 PT PT 10.87 6.0
+int3 PC PC 8.19 6.0
+int3 PC PT 6.99 6.0
+Givenactivation𝐴 𝑖 andthecorrespondingHessian𝐻 𝑖,wecanapproximatetheHessianastheFisherinformationmatrix𝐻 𝑖 ≃F𝑖 =𝑔 𝑖𝑔 𝑖⊤,
+where𝑔 𝑖 arethegradientsforactivation𝐴 𝑖.Wecanthenleveragetheapproximationthatcross-parameterinteractionsarenegligiblein
+ordertoapproximatetheFisherinformationmatrixasadiagonalmatrixthatcanbeexpressedasF 𝑖𝐷 =diag(𝑔 𝑖 ⊙𝑔 𝑖).
+D PER-CHANNELKEYQUANTIZATIONABLATIONS
+WereportresultsinTable7demonstratingtheperplexityfordifferentKVcachecompressionratios,showingthatper-channelquantization
+forKeysandper-tokenquantizationforValuesoutperformsthestandardper-tokenquantizationapproachforbothKeysandValues,yielding
+animprovementof3.88perplexityfortheLLaMA-7Bmodelat3-bitprecision.Thisdemonstratesthebenefitsofper-channelKeyquantization
+tomitigatethelargeoutlierchannelsinKeys.Additionally,althoughthereareper-channeloutliersinValues,weobservethatper-channel
+quantizationforValuesactuallyperformsworsethanper-tokenquantization.Wehypothesizethatthisbehaviorisbecauseper-channel
+Valuequantizationleadstogreatererroraccumulationinparticularoutputvalues,whichleadstogreaterquantizationerroratlatermodel
+layers.Anotherconcurrentwork,KIVI[23],observessimilarbehaviorforper-channelValuequantization,whichtheyattributetothefact
+thatper-tokenValuequantizationconfinestheerrortoeachtoken.Assumingthattheoutputisaweightedsumofonlyafewimportant
+tokens,aperturbationinthesetokenscanleadtosignificantdegradation.
+E PRE-ROPEKEYQUANTIZATIONABLATIONS
+AsshowninTable8,pre-RoPEKeyquantizationachieveshigheraccuracythanpost-RoPEquantization,withanimprovementof0.65
+perplexityfor3-bitquantizationwiththeLLaMA-7Bmodel.TheseresultsshowthattherotarypositionalembeddingsmakeKeyquantization
+12
+edutingaM
+dezilamroN
+edutingaM
+dezilamroNTable8:AblationStudy:PerplexitycomparisonofPre-RoPEandpost-RoPEKeyquantizationforLLaMA-7B.Pre-RoPEquantizationleadsto
+significantimprovement(seeSection3.2formoredetails).
+KVCacheSize(GB)
+Datatype Scheme Perplexity
+Seqlen128K
+fp16 - 5.68 32.0
+int3 post-RoPE 6.99 6.0
+int3 pre-RoPE 6.34 6.0
+Figure6:RelationshipbetweenaverageFisherinformationandnormalizedactivationvaluesforthe3-bitquantizedLLaMA-7Bmodelwith1%
+outliers,shownforlayer29.a)FisherinformationversusnormalizedactivationvaluesforKeys(with1%outliers).b)Fisherinformationversus
+normalizedactivationvaluesforValues(with1%outliers).Theseresultsdemonstratehowsensitivity-weightedk-meansshiftsthequantization
+signpostsinwardrelativetoNormalFloat(withmorecondensedsignpostsacrossaslightlynarrowerrange).Additionally,fortheValuematrix,the
+valuescloseto0haveahigheraveragesensitivity.ThisleadstomorecondensedsignpostassignmentrelativetotheKeymatrix,demonstrating
+howournon-uniformapproachderivesaccuratedatatypesforlayerswithdifferingsensitivitycharacteristics.
+morechallengingduetomixingpairsofchannelswithdifferentmagnitudes.Pre-RoPEquantizationtherebyallowsformoreaccurate
+quantizationatlowprecision.
+F SENSITIVITY-WEIGHTEDNON-UNIFORMQUANTIZATIONABLATIONS
+Table9showsperplexityevaluationresultsacrossdifferentLLaMA,LLaMA-2,andMistralmodelsonWikitext-2usingnf3,nuq3,and
+nuq3withoutusingsensitivity-weighting.Theseresultsdemonstratethebenefitsofoursensitivity-weightednon-uniformquantization
+approach,relativetoNormalFloatquantization[6],asweachieveconsistentaccuracyimprovementsofupto0.32perplexityacrossdifferent
+models(withparticularlypronouncedimprovementsforlargermodels).For3-bitquantizationwiththeLLaMA-7Bmodel,weobservea0.33
+perplexityimprovementrelativetouniformquantization.Thegainsrelativetouniformquantizationareparticularlynoticeablefor3-bit,
+wherethebenefitsofnon-uniformquantizationaremorepronouncedduetothereducedprecision.Theseresultsalsodemonstratethe
+necessityofoursensitivity-weightingapproachinordertoderiveperformantnon-uniformdatatypesusingak-meansbasedapproach.
+Figure6showstherelationshipbetweentheFisherinformationandthenormalizedactivationvaluesfortheLLaMA-7Bmodel.Forthe
+Valuematrices,weobservethattheaverageFisherinformationishigherclosetothemiddle,whichleadstoquantizationcentroidsbeingpulled
+closertothecenterofthedistribution.FortheKeymatrices,weobservethattheaveragesensitivityacrossdifferentmagnitudesisrelatively
+constant,whichleadstowiderspacingforthecentroids.TheseresultsshowthatusingFisherinformationtoderiveasensitivity-weighted
+per-layerdatatypeallowsforbetterrepresentationofKeysandValues.
+G PER-VECTORDENSE-AND-SPARSEQUANTIZATIONABLATIONS
+Table10showstheperformanceimprovementsweobservewhenisolatingasmallportionofoutliersandstoringtheminasparseformat.
+Weprovideresultsbothwithusingasingleper-matrixoutlierthreshold,aswellaswithapplyingseparateoutlierthresholdsper-vector.
+13Table9:AblationStudy:Ablationofoursensitivity-weightednon-uniformdatatypefordifferentmodelsonWikitext-2.Allexperimentsuse
+pre-RoPEper-channelquantizationforKeysandper-tokenforValues.Thatis,everythingisthesameasinKVQuant,exceptforthesensitivity-
+weightedNUQ.Wecompareagainstbothuniform(int3)andnon-uniform(nf3)[6]approaches,aswellaswithusing“unweighted”k-means(i.e.,
+notsensitivity-weighted)tocomputethenon-uniformquantizationsignposts.Notethatthereisslightvariationinaveragebitwidthacrossmodels
+duetothedifferinghiddendimensions.Resultsreportperplexitywith2K/4K/8KforLLaMA,LLaMA-2,andMistral,respectively.
+Method LLaMA-7b LLaMA-13b LLaMA-30b LLaMA-65b LLaMA-2-7b LLaMA-2-13b LLaMA-2-70b Mistral-7b Avg.Num.Bits
+baseline 5.68 5.09 4.10 3.53 5.12 4.57 3.12 4.76 16
+int3 6.34 5.62 4.69 4.16 6.10 5.59 3.46 5.52 3.00-3.01
+nf3 6.05 5.42 4.51 3.84 5.55 5.15 3.27 5.13 3.00-3.01
+nuq3(unweighted) 6.84 6.16 5.37 4.57 8.52 7.66 3.67 5.29 3.00-3.01
+nuq3 6.01 5.34 4.41 3.74 5.49 4.83 3.26 5.03 3.00-3.01
+Table10:AblationStudy:PerplexitycomparisonofdifferentoutlierisolationmethodsforLLaMA-7B.Per-vectoroutlierdetectionallowsfor
+significantaccuracyimprovementsrelativetoper-tensoroutlierdetection.Allnuq4andnuq3experimentsuseper-tokenquantizationforValues
+andper-channelquantizationforKeys(pre-RoPE).“PV”referstousingper-vectoroutlierthresholds,and“PM”referstousingasingleper-matrix
+outlierthreshold.
+KVCacheSize(GB)
+Datatype %Outliers OutlierDim. Perplexity
+Seqlen128K
+fp16 - - 5.68 32.0
+nuq3 - - 6.01 6.0
+nuq3 0.1% PM 5.94 6.1
+nuq3 0.1% PV 5.86 6.1
+nuq3 1% PM 5.86 6.6
+nuq3 1% PV 5.76 6.6
+Inparticular,weseegreaterimprovementsbyemployingoutlierdetectionwithadifferentthresholdper-channelforKeysandper-token
+forValues.Thisprovidesadditionalbenefitssincesomevalueswhichwouldbeconsideredoutliersfortheentirematrixarenotactually
+outlierswithinaparticularchannel(sotheyarenothardtoquantize).Itisthereforebettertodirectlytargettheoutliersthatwillskew
+thequantizationrangeforaparticularchannel.Byremoving1%ofoutliersusingper-vectorthresholds,wecanachieveanadditional
+0.25reductioninperplexityfortheLLaMA-7bmodelat3bits,therebyenabling3-bitquantizationwithunder0.1degradationin
+perplexity.
+H Q-NORMABLATIONS
+Table11providesperplexityresultsforLLaMA-7BandLLaMA-13BwithandwithoutQ-Norm.Asshowninthetable,Q-Normprovides
+noticeable accuracy improvements for 2-bit quantization, but it doesn’t provide significant accuracy improvements for 3-bit or 4-bit
+quantization.Figure7demonstrateshowtheminimizationofdistributionshiftprovidedbyQ-Normleadstoreducedquantizationerror
+(particularlyatlaterlayersinthenetwork).Additionally,weexperimentedwithusingper-vector Q-Norm,wherewenormalizeeach
+channelforKeysandeachtokenforValuestoensurethedistributionhasthesamemeanandstandarddeviationpost-quantization.For
+Keys,per-vectorQ-Normrequiresofflinecomputationoftherequirednormalizationper-channel;andforValues,per-vectorQ-Norm
+requiresonlinecomputationoftherequirednormalizationper-token.Withper-vectorQ-Norm,thenormalizationparametersmustalsobe
+storedseparatelyfromtheper-vectoroutlierthresholds.Table11alsocomparesemployingper-vectorQ-Normwithper-matrixQ-Norm.
+Althoughweobserveimprovedaccuracywithper-vectorQ-Normwhenincorporatingdense-and-sparsequantization,weobserveworsened
+performancewhenwearen’tusingdense-and-sparsequantization.Weattributethistothelargerrelativeshiftwhenapplyingnormalization
+per-vector,aswellastheimpactsthatsignificantchangestothecentroidscanhaveonoutliervalues(inthecasewherewearen’tusing
+dense-and-sparsequantization,aslargeperturbationsintheseoutliervaluescanleadtosignificantaccuracyloss).Theneedtoonlyslightly
+tweaknormalizationparameterswhencombattingdistributionshiftissimilarto[19],whichdescribeshowweightquantizationcanbe
+improvedbyslightlyadjustinglayernormparameterstoavoiddistributionshift.Duetotheinconsistentperformanceofper-vectorQ-Norm
+(aswellaspotentialinferenceoverheadsfromhavingtoseparatelyrescalethenon-uniformcentroidsper-vectorandcomputenormalization
+statisticson-the-flyforValues),wefocusonper-matrixQ-Norm.However,thereispotentialtoimproveaccuracythroughfine-grained
+normalizationinfuturework.
+I CALIBRATIONABLATIONS
+Table12showsaccuracyresultswhenusingofflinecalibrationforcomputingthescalingfactorsfortheKeys.For4-bitquantization,we
+observenoaccuracylosswhencalibratingscalingfactorsoffline.For3-bitquantization,weobserveminoraccuracydegradationwhennot
+employingoutlierextractionmethods.However,ifweremoveasmallpercentageofoutliers,thentheaccuracywithofflinecalibrationisthe
+sameascomputingthescalingfactorsonlineper-channelduringevaluation.Thisdemonstratesthatwhenincorporatingoutlierextraction
+methods,wearebetterabletoperformofflinecalibrationduetoreducedsensitivitytooutliers(eithertooutliersduringcalibrationthat
+14Table11:AblationStudy:PerplexitywithLLaMA-7BandLLaMA-13BwithandwithoutQ-Norm(includingresultsforbothper-matrix(“PM”)and
+per-vector(“PV”)Q-Norm).For4-bitand3-bitquantization,Q-Normprovidesminimalperplexityimprovements;however,at2-bitquantization,Q-
+Normimprovesperformancebyreducingdistributionshift.Per-vectorQ-Normprovidesbenefitswhenincorporatingdense-and-sparsequantization
+relativetoper-matrixQ-Norm,butperformsworsethanper-matrixQ-Normwithoutdense-and-sparsequantization.Notethatthereisslight
+variationinaveragebitwidthacrossmodelsduetothedifferinghiddendimensions.
+Datatype Norm LLaMA-7B LLaMA-13B Avg.Bits(KVCache)
+fp16 - 5.68 5.09 16
+nuq4 - 5.73 5.15 4.00
+nuq4 PV 5.76 5.16 4.01
+nuq4 PM 5.74 5.15 4.00
+nuq4-1% - 5.70 5.11 4.32-4.33
+nuq4-1% PV 5.70 5.10 4.33
+nuq4-1% PM 5.70 5.10 4.32-4.33
+nuq3 - 6.01 5.34 3.00
+nuq3 PV 6.11 5.42 3.01
+nuq3 PM 5.98 5.36 3.00
+nuq3-1% - 5.76 5.15 3.32-3.33
+nuq3-1% PV 5.75 5.16 3.33
+nuq3-1% PM 5.76 5.16 3.32-3.33
+nuq2 - 8.70 7.50 2.00
+nuq2 PV 34.81 18.56 2.01
+nuq2 PM 8.60 7.28 2.00
+nuq2-1% - 6.24 5.50 2.32-2.33
+nuq2-1% PV 6.06 5.41 2.33
+nuq2-1% PM 6.12 5.42 2.32-2.33
+a) Keys (0% outliers) b) Values (0% outliers) c) Keys (1% outliers) d) Values (1% outliers)
+1.00 0.50
+0.50
+0.25
+0.90
+0.45
+0.40
+0.80 0.20
+0.30 0.40
+0.70
+0.15
+0 10 20 30 0 10 20 30 0 10 20 30 0 10 20 30
+Layer Number Layer Number Layer Number Layer Number
+2-bit 2-bit-qn
+Figure7:Quantizationerrorfor2-bitquantizationwithandwithoutQ-Norm.a)QuantizationerrorforKeys(with0%outliers).b)Quantization
+errorforValues(with0%outliers).c)QuantizationerrorforKeys(with1%outliers).d)QuantizationerrorforValues(with1%outliers).Asone
+cansee,usingQ-Normishelpfulwith/withoutdense-and-sparsequantizationandresultsinimprovedquantizationerror,especiallyforlater
+layers.SeeTable11forthecorrespondingperplexityresultswhichclearlyshowthebenefitofusingQ-Norm.
+exaggeratethequantizationrange,ortooutliersduringevaluationthatcannotberepresentedaccuratelyifthereweren’tlargeoutliers
+observedduringcalibration).
+Table13showstheruntimeforthe𝑡𝑜𝑝𝑘operationfortheLLaMA-7Bmodel(whichisrequiredforcomputingoutlierthresholdsonline).
+Itcomparestheruntimeofthe𝑡𝑜𝑝𝑘 operationwiththeruntimefortheQKVprojections,findingthatthe𝑡𝑜𝑝𝑘 runtimeis60%ofthe
+matrix-vectoroperationruntime.The𝑡𝑜𝑝𝑘operationcanalsobeperformedefficientlyontheCPU,sowecanactuallyrunthisoperationin
+parallelwiththesubsequentlinearlayermatrix-vectoroperationsontheGPU(whichispossiblebycomputingtheValueprojectionbefore
+theKeyandQueryprojections).Thisallowsustocompresstheactivationsdynamicallywithoutaddedruntimeoverhead,therebyenabling
+onlinescalingfactorcomputationfortheValuetensors.
+Table14showstheperplexityoftheLLaMA-7Bmodelusingdifferentnumbersofsamplesduringcalibration.Theresultsshowthat
+perplexityissimilaracrosstherangeofthenumberofsamplestestedforeachbitwidth.Thisshowsthatthecalibrationstepdoesnotrequire
+alargenumberofcalibrationsamplestoattainhighaccuracy.Additionally,Table15showshowbothFisherinformationcomputationand
+calibration(includingk-means)per-layertakeonlyafewminutesfortheLLaMA-65Bmodelonatypicalservermachine.
+15
+rorrE
+noitazitnauQ
+evitaleR
+rorrE
+noitazitnauQ
+evitaleR
+rorrE
+noitazitnauQ
+evitaleR
+rorrE
+noitazitnauQ
+evitaleRTable12:AblationStudy:ModelaccuracywhenusingofflinecalibrationforKeyswithLLaMA-7B.Whenincorporatingoutlierdetection,offline
+calibrationforKeysisabletoperformcomparablywithonlinecalibration.Allnf4andnf3experimentsuseper-tokenquantizationforValuesand
+per-channelquantizationforKeys(pre-RoPE),andexperimentswithoutliersuseper-vectoroutlierdetection.
+Perplexity Perplexity
+Datatype %Outliers
+(OnlineforK) (OfflineforK)
+fp16 - 5.68 5.68
+nuq4 - 5.73 5.73
+nuq4 1% 5.70 5.70
+nuq3 - 5.96 6.01
+nuq3 1% 5.77 5.76
+Table13:𝑡𝑜𝑝𝑘runtimeonavectoroflength4096forcomputingoutlierthresholdswhenusing1%sparsity(comparedwiththeruntimeforthe
+QKVmatrixmultiplications,whichare4096×4096by4096matrix-vectormultiplicationsfortheLLaMA-7Bmodel).Theruntimeisreportedona
+systemwithanA6000GPUandanIntelXeonGold6126CPU.Wefindthattheruntimeforthe𝑡𝑜𝑝𝑘operationisonly60%oftheruntimeofeach
+matvecoperation.Additionally,the𝑡𝑜𝑝𝑘operationcanbeperformedefficientlyontheCPU;wecanthereforerunthisoperationinparallelwith
+subsequentlinearlayeroperationsontheGPUtocompresstheactivationsdynamicallywithoutaddedoverhead.NotethattheCPUruntime
+includesthetimeforcopyingthevectortotheCPU.
+Operation Device Outlier% Runtime(ms)
+QKVProjection GPU - 0.308
+𝑡𝑜𝑝𝑘 GPU 1% 0.073
+𝑡𝑜𝑝𝑘 CPU 1% 0.059
+QKVProjection/𝑡𝑜𝑝𝑘 GPU/CPU 1% 0.309
+Table14:AblationStudy:PerplexityonWikitext-2fortheLLaMA-7Bmodelwhenusingdifferentnumberofsamplesoflength2Kduring
+calibration.
+NumberofSamples
+Method
+1 2 4 8 16 32 64
+nuq4 5.75 5.74 5.73 5.75 5.73 5.74 5.74
+nuq4-1% 5.69 5.70 5.70 5.70 5.70 5.70 5.70
+nuq3 6.00 6.00 5.95 5.98 6.01 6.02 5.98
+nuq3-1% 5.75 5.77 5.76 5.76 5.76 5.77 5.76
+nuq2 8.34 8.32 8.26 8.70 8.61 8.93 8.45
+nuq2-1% 6.20 6.22 6.23 6.23 6.24 6.22 6.25
+Table15:RuntimeforcomputingFisherinformationaswellasforcalibration(includingk-means)with16samples.Runtimeforcomputing
+Fisherinformationwascomputedonan8-GPUA100-80GBsystem.Runtimeforcalibration(includingk-means)wasperformedonanIntelXeon
+Gold6442YCPU,andisshownforasinglelayer.Notethatcalibrationisindependentforeachlayer,soitcanbeeasilyparallelized.
+Operation Runtime(minutes)
+ComputingFisherInformation 2.8
+4-bitCalibrationPer-Layer(includingk-means) 4.5
+3-bitCalibrationPer-Layer(includingk-means) 2.7
+2-bitCalibrationPer-Layer(includingk-means) 1.9
+J MEMORYUSAGEESTIMATION
+WemakeseveralassumptionsinordertoestimateaveragebitwidthsandKVcachesizesfordifferentapproaches.Forintegerquantization,
+weassumealow-precisionintegeroffsetanda16-bitscalingfactor,whereasforNormalFloatandNUQweassumethatthezero-pointand
+offsetareeach16-bit.Forthesparsematrices,32-bitintegersareassumedfortheper-tokenindices(sinceweneedtosupportlongsequence
+lengths),andtheelementsandper-elementindicesareassumedtobe16-bit.ThismeansthatforCSR,therowsareassumedtobe32-bit
+andthecolumnsandvaluesareassumedtobe16-bit,whereasforCSC,thecolumnsareassumedtobe32-bitandtherowsandvaluesare
+assumedtobe16-bit.
+K FULLPERPLEXITYEVALUATION
+Tables16and17showperplexityevaluationresultsacrossdifferentLLaMA,LLaMA-2,andMistralmodelsonWikitext-2andC4,respectively.
+TheseresultsdemonstratethebenefitsofourapproachforKVcachecompressionacrossdifferentmodelsizesaswellasacrossdifferent
+languagemodelingdatasets.
+16Table16:Evaluationofourmethodfordifferentmodelsusingtheperplexity(PPL)measuredonWikitext-2.Non-uniformquantizationresults
+areusingpre-RoPEper-channelquantizationforKeys.“gs128”referstobaselineexperimentsusinggroupingwithgroupsize128.2-bitresults
+leverageper-matrixQ-Norm.Notethatthereisslightvariationinaveragebitwidthacrossmodelsduetothedifferinghiddendimensions.
+Method LLaMA-7b LLaMA-13b LLaMA-30b LLaMA-65b LLaMA-2-7b LLaMA-2-13b LLaMA-2-70b Mistral-7b Avg.Num.Bits
+baseline 5.68 5.09 4.10 3.53 5.12 4.57 3.12 4.76 16
+int4 5.98 5.32 4.34 3.73 5.66 5.01 3.31 4.97 4.00-4.01
+int4-gs128 5.77 5.16 4.16 3.57 5.32 4.71 3.16 4.82 4.16
+int4-gs64 5.73 5.14 4.14 3.56 5.25 4.66 3.14 4.80 4.31
+nf4 5.87 5.23 4.25 3.63 5.47 4.90 3.22 4.91 4.00-4.01
+nf4-gs128 5.77 5.17 4.17 3.58 5.30 4.71 3.16 4.83 4.16
+nuq4 5.73 5.15 4.16 3.57 5.18 4.63 3.15 4.81 4.00-4.02
++0.1%outliers 5.71 5.12 4.15 3.55 5.16 4.61 3.14 4.80 4.04-4.06
++0.5%outliers 5.70 5.11 4.12 3.54 5.14 4.60 3.13 4.78 4.16-4.19
++1.0%outliers 5.70 5.11 4.12 3.54 5.14 4.59 3.13 4.78 4.32-4.35
+int3 10.87 8.69 6.82 6.37 22.71 18.26 7.68 7.64 3.00-3.01
+int3-gs128 6.17 5.47 4.44 3.78 6.15 5.34 3.33 5.16 3.15
+int3-gs64 5.93 5.29 4.26 3.66 5.64 4.98 3.23 5.00 3.30
+nf3 7.33 6.21 5.46 4.44 9.96 9.50 4.06 6.30 3.00-3.01
+nf3-gs128 6.26 5.52 4.54 3.83 6.21 5.43 3.38 5.23 3.15
+nuq3 6.01 5.34 4.41 3.74 5.49 4.83 3.26 5.03 3.00-3.02
++0.1%outliers 5.86 5.28 4.27 3.64 5.32 4.71 3.23 4.96 3.04-3.06
++0.5%outliers 5.79 5.15 4.19 3.60 5.22 4.66 3.17 4.86 3.16-3.19
++1.0%outliers 5.76 5.15 4.17 3.59 5.20 4.64 3.16 4.84 3.32-3.35
+int2 11779 69965 1470 7272 4708 3943 976 573 2.00-2.01
+int2-gs128 37.37 41.77 16.49 13.63 117.88 93.09 18.31 51.96 2.14
+int2-gs64 11.09 9.84 6.60 5.54 25.69 26.83 5.93 12.47 2.28
+nf2 3210.5 5785.6 2044.2 5367.3 13601 4035.6 3680.3 902.51 2.00-2.01
+nf2-gs128 351.23 141.19 60.97 31.69 634.59 642.44 71.21 252.85 2.14
+nuq2 8.61 7.28 7.04 20.02 9.63 43.57 4.75 7.49 2.00-2.02
++0.1%outliers 6.96 5.84 4.94 4.15 6.37 5.72 3.74 5.97 2.04-2.06
++0.5%outliers 6.33 5.55 4.53 3.86 5.69 5.04 3.38 5.33 2.16-2.19
++1.0%outliers 6.12 5.42 4.46 3.77 5.52 4.93 3.30 5.18 2.32-2.35
+Table17:Evaluationofourmethodfordifferentmodelsusingtheperplexity(PPL)measuredonC4.PC-Kreferstousingper-channelquantization
+forKeys.“gs128”referstobaselineexperimentsusinggroupingwithgroupsize128.2-bitresultsleverageper-matrixQ-Norm.Notethatthereis
+slightvariationinaveragebitwidthacrossmodelsduetothedifferinghiddendimensions.
+Method LLaMA-7b LLaMA-13b LLaMA-30b LLaMA-65b LLaMA-2-7b LLaMA-2-13b LLaMA-2-70b Mistral-7b Avg.Num.Bits
+baseline 7.08 6.61 5.98 5.62 6.63 6.05 4.97 5.71 16
+int4 7.40 6.82 6.18 5.75 7.31 6.59 5.12 5.91 4.00-4.01
+int4-gs128 7.16 6.67 6.02 5.65 6.87 6.20 5.00 5.76 4.16
+int4-gs64 7.12 6.64 6.00 5.63 6.79 6.15 4.99 5.75 4.31
+nf4 7.27 6.74 6.10 5.69 7.09 6.45 5.06 5.85 4.00-4.01
+nf4-gs128 7.16 6.66 6.02 5.65 6.86 6.20 5.00 5.77 4.16
+nuq4 7.13 6.65 6.02 5.64 6.70 6.11 5.00 5.75 4.00-4.02
++0.1%outliers 7.11 6.63 6.00 5.63 6.68 6.08 4.99 5.75 4.04-4.06
++0.5%outliers 7.10 6.62 5.99 5.62 6.66 6.07 4.98 5.73 4.16-4.19
++1.0%outliers 7.09 6.62 5.99 5.62 6.65 6.06 4.98 5.72 4.32-4.35
+int3 12.97 10.95 9.13 8.27 30.14 28.57 16.00 8.84 3.00-3.01
+int3-gs128 7.62 6.93 6.24 5.79 8.00 7.06 5.16 6.08 3.15
+int3-gs64 7.34 6.78 6.11 5.70 7.29 6.59 5.08 5.92 3.30
+nf3 8.90 7.84 7.43 6.37 14.92 13.75 5.96 7.27 3.00-3.01
+nf3-gs128 7.65 6.99 6.29 5.82 8.03 7.12 5.24 6.16 3.15
+nuq3 7.36 6.83 6.18 5.75 7.05 6.37 5.10 5.95 3.00-3.02
++0.1%outliers 7.24 6.72 6.08 5.68 6.87 6.20 5.06 5.88 3.04-3.06
++0.5%outliers 7.16 6.67 6.03 5.65 6.75 6.14 5.01 5.80 3.16-3.19
++1.0%outliers 7.14 6.66 6.02 5.64 6.72 6.11 5.00 5.77 3.32-3.35
+int2 10892 100870 1411 7216 4708 4220 814 477 2.00-2.01
+int2-gs128 43.49 56.25 21.07 17.05 113.49 97.04 23.67 50.73 2.14
+int2-gs64 13.91 13.36 8.49 7.34 35.21 40.40 8.28 13.83 2.28
+nf2 2850.1 4680.3 1617.1 5189.7 13081.2 4175.6 3216.9 1102.3 2.00-2.01
+nf2-gs128 248.32 118.18 60.28 36.05 420.05 499.82 80.51 191.73 2.14
+nuq2 10.03 8.96 8.72 40.15 14.89 46.93 6.83 8.52 2.00-2.02
++0.1%outliers 8.21 7.25 6.57 6.00 8.29 7.57 5.55 6.90 2.04-2.06
++0.5%outliers 7.54 6.94 6.25 5.80 7.32 6.54 5.21 6.24 2.16-2.19
++1.0%outliers 7.42 6.85 6.17 5.75 7.08 6.41 5.12 6.10 2.32-2.35
+L POST-ROPEPER-TOKENQUANTIZATIONABLATION
+Table18showsperplexityevaluationonWikitext-2fortheLLaMA-7Bmodelwithuniformquantization,withKeysquantizedpre-RoPEand
+post-RoPE.Theseresultsshowthatpost-RoPEKeyquantizationissuperiortopre-RoPEKeyquantizationwhenquantizingKeysper-token.
+Thisisbecausewhenrotatinganoutlierchannelwithlargeaveragemagnitudeandanotherchannelwithsmalleraveragemagnitude
+together,atsomepositionsinthesequencepartofthemagnitudefromtheoutlierchannelwillbeshiftedtothesmallerchannel.This
+17Table18:Modelaccuracywhenusingpre-RoPEandpost-RoPEquantizationforLLaMA-7Bwithper-tokenKeyquantization.Ourexperiments
+demonstratethatpost-RoPEquantizationissuperiorwhenusingper-tokenKeyquantization.Therefore,wedecidedtousetheseresultsforbaseline
+comparisonwithper-token4/3bitquantization.
+Datatype Perplexity(Pre-RoPE) Perplexity(Post-RoPE)
+fp16 5.68 5.68
+int4 6.02 5.98
+int4-gs128 5.76 5.77
+int3 14.68 10.87
+int3-gs128 6.28 6.17
+6.8x 6.8x
+Figure8:PerplexityresultsfortheLLaMA-2-7B-32Kmodel(uptrainedforlongsequencelengthsusingpositionalinterpolation[3])aswellasthe
+LLaMA-2-13B-32KandLLaMA-2-70B-32KLongLoRAmodel[4]ontheWikitext-2datasetusing2-bitquantization,evaluatedusingdifferent
+amountsofinputcontext.ResultsareshownusingQ-Norm(“qn”)aswellasper-vectorQ-Norm(“pv-qn”),andallresultsinclude1%outliers.
+Thememoryreductionshownisfor2-bitquantizationwithper-channelQ-Norm.OurresultsshowthatusingQ-Normisonlyhelpfulforlow
+precisionquantizationsuchas2-bit.SeeFigure4for4and3bitprecisionquantization(whichdoesnotrequireQ-Norm).
+partiallymitigatestheimpactoftheoutlierchannelonskewingthequantizationrangeforsomeofthetokensinthesequence.Assuch,for
+ourbaselinecomparisons,weusepost-RoPEper-tokenKeyquantizationtoserveasastrongerbaseline.
+M 2-BITLONGSEQUENCELENGTHEVALUATION
+Figure8showsperplexityevaluationresultswithvaryingamountsofinputcontextfor2-bitquantization.TheseresultsshowthatQ-Norm
+(andinparticular,per-vectorQ-Norm)canprovidesignificantperplexityadvantagesfor2-bitquantizationwithlongsequencelengthmodels.
+Additionally,fortheLLaMA-2-70B-32Kmodel,weobserveperplexitydegradationwhengoingtoacontextlengthof32K,likelyduetoerror
+accumulation;however,thisislargelymitigatedbyemployingper-channelQ-Norm.
+N MIXED-PRECISIONQUANTIZATION
+Anadditionalmethodtooptimizecompressionperformanceistoconsidermixed-precisionquantization,wheredifferentlayersareassigned
+differentbitwidths.Thiscanallowformoreaccuratecompressiondowntolowbitwidthsduetodifferingsensitivitiestoquantizationerror
+ofdifferentlayers.Findingthebestbitprecisiondistributionfordifferentlayersisintractablewithbruteforcemethodsasthesearchspaceis
+exponentiallylarge.Wethereforeaimtoderiveametrictodeterminewhichlayerscanbequantizedtoreducedprecisionwithminimal
+degradationinmodelaccuracy,therebyenablingefficientone-shotmixed-precisionbitassignments.
+Priorworkonmixed-precisionquantizationhasleveragedthelargestHessianeigenvalueortheHessiantracetoassesswhichlayersare
+mostsensitivetoquantization[8,9];however,duetothecomputationalchallengesofcomputingthefullHessianorevenestimatingHessian
+eigenvalues,weinsteadleveragetheFisherinformationapproximationfortheHessian(asderivedinAppendixC).Usingthediagonal
+Fisherinformationmatrixalongwiththequantizationerror,wecanusethefollowingsensitivitymetricforlayer𝑖toencompassboththe
+quantizationerroraswellastheFisherinformationforthatlayer:
+Ω 𝑖 = (cid:0)𝐴−𝑄(𝐴)(cid:1)⊤ F 𝑖𝐷(cid:0)𝐴−𝑄(𝐴)(cid:1) (8)
+Weusethequantizationerrorcomputedatthelowerprecision(aswellassensitivityinformationcomputedinfp16)todeterminewhich
+layersweremostsensitivetobeingquantizedtothelowerprecisionlevel.
+18LLaMA-7B (nuq4/3) LLaMA-13B (nuq4/3)
+6.00
+5.35
+5.95
+5.30
+5.90
+5.25
+5.85
+5.80 5.20
+5.75 5.15
+5.70
+5.10
+0 10% 20% 30% 40% 50% 60% 70% 80% 90%100% 0 10% 20% 30% 40% 50% 60% 70% 80% 90%100%
+Proportion of Layers in 4-Bit Precision Proportion of Layers in 4-Bit Precision
+LLaMA-7B (nuq4/3-1%) LLaMA-13B (nuq4/3-1%)
+5.76 5.16
+5.74
+5.14
+5.72
+5.12
+5.70
+5.10
+5.68
+0 10% 20% 30% 40% 50% 60% 70% 80% 90%100% 0 10% 20% 30% 40% 50% 60% 70% 80% 90%100%
+Proportion of Layers in 4-Bit Precision Proportion of Layers in 4-Bit Precision
+fp16 Inverse Sensitivity-Weighted Quantization Error Sensitivity-Weighted
+Figure9:Perplexityresultsformixed-precisionnuq4/3quantizationfortheLLaMA-7BandLLaMA-13BmodelsontheWikitext-2dataset,
+withmodelweightsinfp16.Sensitivity-Weightedusesourmetricforlayerimportance,InverseSensitivity-Weightedreferstoselectingthe
+lowest-importancelayersusingourmetric,QuantizationErrorusesthequantizationerrortosortlayerswithoutweightingusingsensitivity
+information.
+Figure9showsthemixed-precisionperplexityresultsontheWikitext-2datasetfortheLLaMA-7BandLLaMA-13Bmodels.Weshow
+mixed-precisionresultsusingoursensitivitymetric,andweincludebothquantizationerror-basedmixed-precisionassignmentandthe
+inverseoftheselectionorderfromoursensitivitymetricasbaselines.Weseeimprovedperformancefromincorporatingsensitivity-based
+analysisfordeterminingactivationprecisionswhenemployingmixed-precisionquantization.Oursensitivitymetricthereforeallowsfor
+efficientlydetermininganaccuratemixed-precisionassignmentinordertotradeoffKVcachesizeandmodelaccuracy.
+O KERNELIMPLEMENTATIONDETAILS
+Weimplemented4-bitlookuptable-basedkernelsformatrix-vectormultiplicationbetweentheKeyorValueactivations(packedasalookup
+table(LUT)plusindicesintotheLUTper-element)andafull-precisionactivationvector.ThesekernelsloadthecompressedKeyandValue
+activationsanddequantizethemonlyasneededinordertominimizememorybandwidthutilization.Allarithmeticisperformedinfp16.
+Thelookuptableentriesarethevaluesofthesensitivity-weightednon-uniformdatatypeforthatparticularlayerscaledaccordingtothe
+rangeofactivationsthatneedtoberepresented[6].NotethatitispossibletoimplementthisusingasingleLUTsharedacrosschannelsthat
+isrescaledbyaper-channelorper-tokenscalingfactorandoffset,butforsimplicityweusedaseparateLUTper-channelorper-tokenfor
+ourinitialimplementation.
+WhenselectingbetweentheCompressed-SparseColumn(CSCformat)andtheCompressed-SparseRow(CSR)formatforstoringthe
+outliersfortheKeysandValues,weneededtoconsiderhoweasyitwouldbetoappendnewvectors.WhenusingCSCformatfortheKey
+matrix,weonlyneedtoappendasingleelementtothecolumnvector,aswellasonenewelementtotherowandvaluevectorspernonzero
+elementinthatnewcolumn.IfweusedCSRformat,wewouldneedtoinsertthenewcolumnandvalueelementsinthemiddleofthe
+existingcolumnandvaluevectors,andwewouldneedtorecomputetheelementsoftherowvector.WhenusingCSRformatfortheValue
+matrix,weonlyneedtoappendasingleelementtotherowvector,aswellasonenewelementtothecolumnandvaluevectorspernonzero
+19
+ytixelpreP
+2-txetikiW
+ytixelpreP
+2-txetikiW
+ytixelpreP
+2-txetikiW
+ytixelpreP
+2-txetikiWelementinthatnewrow.IfweusedCSCformat,wewouldneedtoinsertthenewrowandvalueelementsinthemiddleoftheexisting
+rowandvaluevectors,andwewouldneedtorecomputetheelementsofthecolumnvector.WethereforeusedtheCSCformatfortheKey
+matricesandtheCSRformatfortheValuematrices.
+Onechallengewithefficientlyprocessingthesparsematrix-densevectoroperationisthatthesparsitydistributionmaybeunbalanced.
+FortheKeymatrices,theremaybedifferentnumbersofoutliersineachtoken,andfortheValuematrices,theremaybedifferentnumbersof
+outliersineachchannel.ThisposesachallengeforefficientlyprocessingthesparsematrixonaGPUastherecanbedifferentnumbersof
+nonzerostoprocessperthread.Wethereforeleverageabalancedsparsematrix-densevectorkernelbasedon[10,16],whichassignsan
+equalnumberofnonzerosperthread.Thishasgreatersynchronizationoverheadthanassigningasinglethreadforanentireroworcolumn
+whenprocessingCSR/CSCmatrices,butitleadstoamorebalancedworkassignmentbetweenthreads.Wesetthenumberofthreadssuch
+thattherewere10nonzerovaluesassignedtoeachthread.Thedensenon-uniformkernelandbalancedsparsekernelsarelaunchedinone
+calltoavoidoverheadfromsummingtheoutputvectorsfromtheseseparateoperations.
+20
