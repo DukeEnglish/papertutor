@@ -22,11 +22,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.00856v1 |
+|idx| 2402.00856v2 |
 |title| Towards Efficient and Exact Optimization of Language Model Alignment |
 |authors| Haozhe JiCheng LuYilin NiuPei KeHongning WangJun ZhuJie TangMinlie Huang
-|links| http://arxiv.org/abs/2402.00856v1 |
-|updated| 2024-02-01 18:51:54 UTC |
+|links| http://arxiv.org/abs/2402.00856v2 |
+|updated| 2024-02-02 15:50:10 UTC |
 |summary| The alignment of language models with human preferences is vital for theirapplication in real-world tasks. The problem is formulated as optimizing themodels policy to maximize the expected reward that reflects human preferenceswith minimal deviation from the initial policy. While considered as astraightforward solution reinforcement learning RL suffers from highvariance in policy updates which impedes efficient policy improvement.Recently direct preference optimization DPO was proposed to directlyoptimize the policy from preference data. Though simple to implement DPO isderived based on the optimal policy that is not assured to be achieved inpractice which undermines its convergence to the intended solution.  In this paper we propose efficient exact optimization EXO of the alignmentobjective. We prove that EXO is guaranteed to optimize in the same direction asthe RL algorithms asymptotically for arbitary parametrization of the policywhile enables efficient optimization by circumventing the complexitiesassociated with RL algorithms. We compare our method to DPO with boththeoretical and empirical analyses and further demonstrate the advantages ofour method over existing approaches on realistic human preference data. |
 
 
@@ -198,11 +198,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.00863v1 |
+|idx| 2402.00863v2 |
 |title| Geometry Transfer for Stylizing Radiance Fields |
 |authors| Hyunyoung JungSeonghyeon NamNikolaos SarafianosSungjoo YooAlexander Sorkine-HornungRakesh Ranjan
-|links| http://arxiv.org/abs/2402.00863v1 |
-|updated| 2024-02-01 18:58:44 UTC |
+|links| http://arxiv.org/abs/2402.00863v2 |
+|updated| 2024-02-02 07:39:54 UTC |
 |summary| Shape and geometric patterns are essential in defining stylistic identity.However current 3D style transfer methods predominantly focus on transferringcolors and textures often overlooking geometric aspects. In this paper weintroduce Geometry Transfer a novel method that leverages geometricdeformation for 3D style transfer. This technique employs depth maps to extracta style guide subsequently applied to stylize the geometry of radiance fields.Moreover we propose new techniques that utilize geometric cues from the 3Dscene thereby enhancing aesthetic expressiveness and more accuratelyreflecting intended styles. Our extensive experiments show that GeometryTransfer enables a broader and more expressive range of stylizations therebysignificantly expanding the scope of 3D style transfer. |
 
 
