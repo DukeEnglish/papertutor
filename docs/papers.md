@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03303v1 |
-|title| Nevermind: Instruction Override and Moderation in Large Language Models |
-|authors| Edward Kim
-|links| http://arxiv.org/abs/2402.03303v1 |
-|updated| 2024-02-05 18:58:19 UTC |
-|summary| Given the impressive capabilities of recent Large Language Models LLMs weinvestigate and benchmark the most popular proprietary and different sized opensource models on the task of explicit instruction following in conflictingsituations e.g. overrides. These include the ability of the model to overridethe knowledge within the weights of the model the ability to override ormoderate extracted knowledge in the prompt and lastly the ability to performa full jailbreak. Experimentation performed suggest several key findings toimprove instruction following - larger models perform the best in followinginstructions that override internal and contextual instructions and areobedient even to a fault. When scaling to longer contexts via rope scaling asignificant buffer needs to be maintained from the edge of the perplexity cliffin order to maintain instruction following capabilities. Finally we observeimproving instruction following and subsequently instructionoverrides/jailbreaks is fundamentally at odds with the ability of a languagemodel to follow given safety filters or guidelines. Thus we postulate the mosteffective approach for safe trustworthy AI should be dealt external to the LLMitself. |
+|idx| 2402.04253v1 |
+|title| AnyTool: Self-Reflective, Hierarchical Agents for Large-Scale API Calls |
+|authors| Yu DuFangyun WeiHongyang Zhang
+|links| http://arxiv.org/abs/2402.04253v1 |
+|updated| 2024-02-06 18:59:57 UTC |
+|summary| We introduce AnyTool a large language model agent designed to revolutionizethe utilization of a vast array of tools in addressing user queries. We utilizeover 16000 APIs from Rapid API operating under the assumption that a subsetof these APIs could potentially resolve the queries. AnyTool primarilyincorporates three elements: an API retriever with a hierarchical structure asolver aimed at resolving user queries using a selected set of API candidatesand a self-reflection mechanism which re-activates AnyTool if the initialsolution proves impracticable. AnyTool is powered by the function callingfeature of GPT-4 eliminating the need for training external modules. We alsorevisit the evaluation protocol introduced by previous works and identify alimitation in this protocol that leads to an artificially high pass rate. Byrevising the evaluation protocol to better reflect practical applicationscenarios we introduce an additional benchmark termed AnyToolBench.Experiments across various datasets demonstrate the superiority of our AnyToolover strong baselines such as ToolLLM and a GPT-4 variant tailored for toolutilization. For instance AnyTool outperforms ToolLLM by 35.4 in terms ofaverage pass rate on ToolBench. Code will be available athttps://github.com/dyabel/AnyTool. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03300v2 |
-|title| DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models |
-|authors| Zhihong ShaoPeiyi WangQihao ZhuRunxin XuJunxiao SongMingchuan ZhangY. K. LiY. WuDaya Guo
-|links| http://arxiv.org/abs/2402.03300v2 |
-|updated| 2024-02-06 18:39:38 UTC |
-|summary| Mathematical reasoning poses a significant challenge for language models dueto its complex and structured nature. In this paper we introduce DeepSeekMath7B which continues pre-training DeepSeek-Coder-Base-v1.5 7B with 120Bmath-related tokens sourced from Common Crawl together with natural languageand code data. DeepSeekMath 7B has achieved an impressive score of 51.7 on thecompetition-level MATH benchmark without relying on external toolkits andvoting techniques approaching the performance level of Gemini-Ultra and GPT-4.Self-consistency over 64 samples from DeepSeekMath 7B achieves 60.9 on MATH.The mathematical reasoning capability of DeepSeekMath is attributed to two keyfactors: First we harness the significant potential of publicly available webdata through a meticulously engineered data selection pipeline. Second weintroduce Group Relative Policy Optimization GRPO a variant of ProximalPolicy Optimization PPO that enhances mathematical reasoning abilities whileconcurrently optimizing the memory usage of PPO. |
+|idx| 2402.04251v1 |
+|title| Linear-time Minimum Bayes Risk Decoding with Reference Aggregation |
+|authors| Jannis VamvasRico Sennrich
+|links| http://arxiv.org/abs/2402.04251v1 |
+|updated| 2024-02-06 18:59:30 UTC |
+|summary| Minimum Bayes Risk MBR decoding is a text generation technique that hasbeen shown to improve the quality of machine translations but is expensiveeven if a sampling-based approximation is used. Besides requiring a largenumber of sampled sequences it requires the pairwise calculation of a utilitymetric which has quadratic complexity. In this paper we propose toapproximate pairwise metric scores with scores calculated against aggregatedreference representations. This changes the complexity of utility estimationfrom On2 to On while empirically preserving most of the quality gainsof MBR decoding. We release our source code at https://github.com/ZurichNLP/mbr |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03299v1 |
-|title| GUARD: Role-playing to Generate Natural-language Jailbreakings to Test Guideline Adherence of Large Language Models |
-|authors| Haibo JinRuoxi ChenAndy ZhouJinyin ChenYang ZhangHaohan Wang
-|links| http://arxiv.org/abs/2402.03299v1 |
-|updated| 2024-02-05 18:54:43 UTC |
-|summary| The discovery of jailbreaks to bypass safety filters of Large LanguageModels LLMs and harmful responses have encouraged the community to implementsafety measures. One major safety measure is to proactively test the LLMs withjailbreaks prior to the release. Therefore such testing will require a methodthat can generate jailbreaks massively and efficiently. In this paper wefollow a novel yet intuitive strategy to generate jailbreaks in the style ofthe human generation. We propose a role-playing system that assigns fourdifferent roles to the user LLMs to collaborate on new jailbreaks. Furthermorewe collect existing jailbreaks and split them into different independentcharacteristics using clustering frequency and semantic patterns sentence bysentence. We organize these characteristics into a knowledge graph making themmore accessible and easier to retrieve. Our system of different roles willleverage this knowledge graph to generate new jailbreaks which have provedeffective in inducing LLMs to generate unethical or guideline-violatingresponses. In addition we also pioneer a setting in our system that willautomatically follow the government-issued guidelines to generate jailbreaks totest whether LLMs follow the guidelines accordingly. We refer to our system asGUARD Guideline Upholding through Adaptive Role-play Diagnostics. We haveempirically validated the effectiveness of GUARD on three cutting-edgeopen-sourced LLMs Vicuna-13B LongChat-7B and Llama-2-7B as well as awidely-utilized commercial LLM ChatGPT. Moreover our work extends to therealm of vision language models MiniGPT-v2 and Gemini Vision Pro showcasingGUARDs versatility and contributing valuable insights for the development ofsafer more reliable LLM-based applications across diverse modalities. |
+|idx| 2402.04249v1 |
+|title| HarmBench: A Standardized Evaluation Framework for Automated Red Teaming and Robust Refusal |
+|authors| Mantas MazeikaLong PhanXuwang YinAndy ZouZifan WangNorman MuElham SakhaeeNathaniel LiSteven BasartBo LiDavid ForsythDan Hendrycks
+|links| http://arxiv.org/abs/2402.04249v1 |
+|updated| 2024-02-06 18:59:08 UTC |
+|summary| Automated red teaming holds substantial promise for uncovering and mitigatingthe risks associated with the malicious use of large language models LLMsyet the field lacks a standardized evaluation framework to rigorously assessnew methods. To address this issue we introduce HarmBench a standardizedevaluation framework for automated red teaming. We identify several desirableproperties previously unaccounted for in red teaming evaluations andsystematically design HarmBench to meet these criteria. Using HarmBench weconduct a large-scale comparison of 18 red teaming methods and 33 target LLMsand defenses yielding novel insights. We also introduce a highly efficientadversarial training method that greatly enhances LLM robustness across a widerange of attacks demonstrating how HarmBench enables codevelopment of attacksand defenses. We open source HarmBench athttps://github.com/centerforaisafety/HarmBench. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03284v1 |
-|title| Deal, or no deal (or who knows)? Forecasting Uncertainty in Conversations using Large Language Models |
-|authors| Anthony SiciliaHyunwoo KimKhyathi Raghavi ChanduMalihe AlikhaniJack Hessel
-|links| http://arxiv.org/abs/2402.03284v1 |
-|updated| 2024-02-05 18:39:47 UTC |
-|summary| Effective interlocutors account for the uncertain goals beliefs andemotions of others. But even the best human conversationalist cannot perfectlyanticipate the trajectory of a dialogue. How well can language models representinherent uncertainty in conversations We propose FortUne Dial an expansion ofthe long-standing conversation forecasting task: instead of just accuracyevaluation is conducted with uncertainty-aware metrics effectively enablingabstention on individual instances. We study two ways in which language modelspotentially represent outcome uncertainty internally using scores anddirectly using tokens and propose fine-tuning strategies to improvecalibration of both representations. Experiments on eight difficult negotiationcorpora demonstrate that our proposed fine-tuning strategies a traditionalsupervision strategy and an off-policy reinforcement learning strategy cancalibrate smaller open-source models to compete with pre-trained models 10xtheir size. |
+|idx| 2402.04247v2 |
+|title| Prioritizing Safeguarding Over Autonomy: Risks of LLM Agents for Science |
+|authors| Xiangru TangQiao JinKunlun ZhuTongxin YuanYichi ZhangWangchunshu ZhouMeng QuYilun ZhaoJian TangZhuosheng ZhangArman CohanZhiyong LuMark Gerstein
+|links| http://arxiv.org/abs/2402.04247v2 |
+|updated| 2024-02-07 14:26:02 UTC |
+|summary| Intelligent agents powered by large language models LLMs have demonstratedsubstantial promise in autonomously conducting experiments and facilitatingscientific discoveries across various disciplines. While their capabilities arepromising they also introduce novel vulnerabilities that demand carefulconsideration for safety. However there exists a notable gap in theliterature as there has been no comprehensive exploration of thesevulnerabilities. This position paper fills this gap by conducting a thoroughexamination of vulnerabilities in LLM-based agents within scientific domainsshedding light on potential risks associated with their misuse and emphasizingthe need for safety measures. We begin by providing a comprehensive overview ofthe potential risks inherent to scientific LLM agents taking into account userintent the specific scientific domain and their potential impact on theexternal environment. Then we delve into the origins of these vulnerabilitiesand provide a scoping review of the limited existing works. Based on ouranalysis we propose a triadic framework involving human regulation agentalignment and an understanding of environmental feedback agent regulation tomitigate these identified risks. Furthermore we highlight the limitations andchallenges associated with safeguarding scientific agents and advocate for thedevelopment of improved models robust benchmarks and comprehensiveregulations to address these issues effectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03271v1 |
-|title| Uncertainty of Thoughts: Uncertainty-Aware Planning Enhances Information Seeking in Large Language Models |
-|authors| Zhiyuan HuChumin LiuXidong FengYilun ZhaoSee-Kiong NgAnh Tuan LuuJunxian HePang Wei KohBryan Hooi
-|links| http://arxiv.org/abs/2402.03271v1 |
-|updated| 2024-02-05 18:28:44 UTC |
-|summary| In the face of uncertainty the ability to seek information is of fundamentalimportance. In many practical applications such as medical diagnosis andtroubleshooting the information needed to solve the task is not initiallygiven and has to be actively sought by asking follow-up questions forexample a doctor asking a patient for more details about their symptoms. Inthis work we introduce Uncertainty of Thoughts UoT an algorithm to augmentlarge language models with the ability to actively seek information by askingeffective questions. UoT combines 1 an uncertainty-aware simulation approachwhich enables the model to simulate possible future scenarios and how likelythey are to occur 2 uncertainty-based rewards motivated by information gainwhich incentivizes the model to seek information and 3 a reward propagationscheme to select the optimal question to ask in a way that maximizes theexpected reward. In experiments on medical diagnosis troubleshooting and the20 Questions game UoT achieves an average performance improvement of 57.8in the rate of successful task completion across multiple LLMs compared withdirect prompting and also improves efficiency i.e. the number of questionsneeded to complete the task. |
+|idx| 2402.04236v1 |
+|title| CogCoM: Train Large Vision-Language Models Diving into Details through Chain of Manipulations |
+|authors| Ji QiMing DingWeihan WangYushi BaiQingsong LvWenyi HongBin XuLei HouJuanzi LiYuxiao DongJie Tang
+|links| http://arxiv.org/abs/2402.04236v1 |
+|updated| 2024-02-06 18:43:48 UTC |
+|summary| Vision-Language Models VLMs have demonstrated their widespread viabilitythanks to extensive training in aligning visual instructions to answers.However this conclusive alignment leads models to ignore critical visualreasoning and further result in failures on meticulous visual problems andunfaithful responses. In this paper we propose Chain of Manipulations amechanism that enables VLMs to solve problems with a series of manipulationswhere each manipulation refers to an operation on the visual input either fromintrinsic abilities e.g. grounding acquired through prior training or fromimitating human-like behaviors e.g. zoom in. This mechanism encourages VLMsto generate faithful responses with evidential visual reasoning and permitsusers to trace error causes in the interpretable paths. We thus train CogCoM ageneral 17B VLM with a memory-based compatible architecture endowed thisreasoning mechanism. Experiments show that our model achieves thestate-of-the-art performance across 8 benchmarks from 3 categories and alimited number of training steps with the data swiftly gains a competitiveperformance. The code and data are publicly available athttps://github.com/THUDM/CogCoM. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03311v1 |
-|title| HASSOD: Hierarchical Adaptive Self-Supervised Object Detection |
-|authors| Shengcao CaoDhiraj JoshiLiang-Yan GuiYu-Xiong Wang
-|links| http://arxiv.org/abs/2402.03311v1 |
-|updated| 2024-02-05 18:59:41 UTC |
-|summary| The human visual perception system demonstrates exceptional capabilities inlearning without explicit supervision and understanding the part-to-wholecomposition of objects. Drawing inspiration from these two abilities wepropose Hierarchical Adaptive Self-Supervised Object Detection HASSOD anovel approach that learns to detect objects and understand their compositionswithout human supervision. HASSOD employs a hierarchical adaptive clusteringstrategy to group regions into object masks based on self-supervised visualrepresentations adaptively determining the number of objects per image.Furthermore HASSOD identifies the hierarchical levels of objects in terms ofcomposition by analyzing coverage relations between masks and constructingtree structures. This additional self-supervised learning task leads toimproved detection performance and enhanced interpretability. Lastly weabandon the inefficient multi-round self-training process utilized in priormethods and instead adapt the Mean Teacher framework from semi-supervisedlearning which leads to a smoother and more efficient training process.Through extensive experiments on prevalent image datasets we demonstrate thesuperiority of HASSOD over existing methods thereby advancing the state of theart in self-supervised object detection. Notably we improve Mask AR from 20.2to 22.5 on LVIS and from 17.0 to 26.0 on SA-1B. Project page:https://HASSOD-NeurIPS23.github.io. |
+|idx| 2402.04249v1 |
+|title| HarmBench: A Standardized Evaluation Framework for Automated Red Teaming and Robust Refusal |
+|authors| Mantas MazeikaLong PhanXuwang YinAndy ZouZifan WangNorman MuElham SakhaeeNathaniel LiSteven BasartBo LiDavid ForsythDan Hendrycks
+|links| http://arxiv.org/abs/2402.04249v1 |
+|updated| 2024-02-06 18:59:08 UTC |
+|summary| Automated red teaming holds substantial promise for uncovering and mitigatingthe risks associated with the malicious use of large language models LLMsyet the field lacks a standardized evaluation framework to rigorously assessnew methods. To address this issue we introduce HarmBench a standardizedevaluation framework for automated red teaming. We identify several desirableproperties previously unaccounted for in red teaming evaluations andsystematically design HarmBench to meet these criteria. Using HarmBench weconduct a large-scale comparison of 18 red teaming methods and 33 target LLMsand defenses yielding novel insights. We also introduce a highly efficientadversarial training method that greatly enhances LLM robustness across a widerange of attacks demonstrating how HarmBench enables codevelopment of attacksand defenses. We open source HarmBench athttps://github.com/centerforaisafety/HarmBench. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03310v1 |
-|title| V-IRL: Grounding Virtual Intelligence in Real Life |
-|authors| Jihan YangRunyu DingEllis BrownXiaojuan QiSaining Xie
-|links| http://arxiv.org/abs/2402.03310v1 |
-|updated| 2024-02-05 18:59:36 UTC |
-|summary| There is a sensory gulf between the Earth that humans inhabit and the digitalrealms in which modern AI agents are created. To develop AI agents that cansense think and act as flexibly as humans in real-world settings it isimperative to bridge the realism gap between the digital and physical worlds.How can we embody agents in an environment as rich and diverse as the one weinhabit without the constraints imposed by real hardware and control Towardsthis end we introduce V-IRL: a platform that enables agents to scalablyinteract with the real world in a virtual yet realistic environment. Ourplatform serves as a playground for developing agents that can accomplishvarious practical tasks and as a vast testbed for measuring progress incapabilities spanning perception decision-making and interaction withreal-world data across the entire globe. |
+|idx| 2402.04247v2 |
+|title| Prioritizing Safeguarding Over Autonomy: Risks of LLM Agents for Science |
+|authors| Xiangru TangQiao JinKunlun ZhuTongxin YuanYichi ZhangWangchunshu ZhouMeng QuYilun ZhaoJian TangZhuosheng ZhangArman CohanZhiyong LuMark Gerstein
+|links| http://arxiv.org/abs/2402.04247v2 |
+|updated| 2024-02-07 14:26:02 UTC |
+|summary| Intelligent agents powered by large language models LLMs have demonstratedsubstantial promise in autonomously conducting experiments and facilitatingscientific discoveries across various disciplines. While their capabilities arepromising they also introduce novel vulnerabilities that demand carefulconsideration for safety. However there exists a notable gap in theliterature as there has been no comprehensive exploration of thesevulnerabilities. This position paper fills this gap by conducting a thoroughexamination of vulnerabilities in LLM-based agents within scientific domainsshedding light on potential risks associated with their misuse and emphasizingthe need for safety measures. We begin by providing a comprehensive overview ofthe potential risks inherent to scientific LLM agents taking into account userintent the specific scientific domain and their potential impact on theexternal environment. Then we delve into the origins of these vulnerabilitiesand provide a scoping review of the limited existing works. Based on ouranalysis we propose a triadic framework involving human regulation agentalignment and an understanding of environmental feedback agent regulation tomitigate these identified risks. Furthermore we highlight the limitations andchallenges associated with safeguarding scientific agents and advocate for thedevelopment of improved models robust benchmarks and comprehensiveregulations to address these issues effectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03305v1 |
-|title| Do Diffusion Models Learn Semantically Meaningful and Efficient Representations? |
-|authors| Qiyao LiangZiming LiuIla Fiete
-|links| http://arxiv.org/abs/2402.03305v1 |
-|updated| 2024-02-05 18:58:38 UTC |
-|summary| Diffusion models are capable of impressive feats of image generation withuncommon juxtapositions such as astronauts riding horses on the moon withproperly placed shadows. These outputs indicate the ability to performcompositional generalization but how do the models do so We performcontrolled experiments on conditional DDPMs learning to generate 2D sphericalGaussian bumps centered at specified x- and y-positions. Our results showthat the emergence of semantically meaningful latent representations is key toachieving high performance. En route to successful performance over learningthe model traverses three distinct phases of latent representations: phase Ano latent structure phase B a 2D manifold of disordered states and phaseC a 2D ordered manifold. Corresponding to each of these phases we identifyqualitatively different generation behaviors: 1 multiple bumps are generated2 one bump is generated but at inaccurate x and y locations 3 a bump isgenerated at the correct x and y location. Furthermore we show that evenunder imbalanced datasets where features x- versus y-positions arerepresented with skewed frequencies the learning process for x and y iscoupled rather than factorized demonstrating that simple vanilla-flavoreddiffusion models cannot learn efficient representations in which localizationin x and y are factorized into separate 1D tasks. These findings suggestthe need for future work to find inductive biases that will push generativemodels to discover and exploit factorizable independent structures in theirinputs which will be required to vault these models into more data-efficientregimes. |
+|idx| 2402.04232v2 |
+|title| Can Generative Agents Predict Emotion? |
+|authors| Ciaran ReganNanami IwahashiShogo TanakaMizuki Oka
+|links| http://arxiv.org/abs/2402.04232v2 |
+|updated| 2024-02-07 17:27:09 UTC |
+|summary| Large Language Models LLMs have demonstrated a number of human-likeabilities however the empathic understanding and emotional state of LLMs isyet to be aligned to that of humans. In this work we investigate how theemotional state of generative LLM agents evolves as they perceive new eventsintroducing a novel architecture in which new experiences are compared to pastmemories. Through this comparison the agent gains the ability to understandnew experiences in context which according to the appraisal theory of emotionis vital in emotion creation. First the agent perceives new experiences astime series text data. After perceiving each new input the agent generates asummary of past relevant memories referred to as the norm and compares thenew experience to this norm. Through this comparison we can analyse how theagent reacts to the new experience in context. The PANAS a test of affect isadministered to the agent capturing the emotional state of the agent after theperception of the new event. Finally the new experience is then added to theagents memory to be used in the creation of future norms. By creating multipleexperiences in natural language from emotionally charged situations we testthe proposed architecture on a wide range of scenarios. The mixed resultssuggests that introducing context can occasionally improve the emotionalalignment of the agent but further study and comparison with human evaluatorsis necessary. We hope that this paper is another step towards the alignment ofgenerative agents. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03303v1 |
-|title| Nevermind: Instruction Override and Moderation in Large Language Models |
-|authors| Edward Kim
-|links| http://arxiv.org/abs/2402.03303v1 |
-|updated| 2024-02-05 18:58:19 UTC |
-|summary| Given the impressive capabilities of recent Large Language Models LLMs weinvestigate and benchmark the most popular proprietary and different sized opensource models on the task of explicit instruction following in conflictingsituations e.g. overrides. These include the ability of the model to overridethe knowledge within the weights of the model the ability to override ormoderate extracted knowledge in the prompt and lastly the ability to performa full jailbreak. Experimentation performed suggest several key findings toimprove instruction following - larger models perform the best in followinginstructions that override internal and contextual instructions and areobedient even to a fault. When scaling to longer contexts via rope scaling asignificant buffer needs to be maintained from the edge of the perplexity cliffin order to maintain instruction following capabilities. Finally we observeimproving instruction following and subsequently instructionoverrides/jailbreaks is fundamentally at odds with the ability of a languagemodel to follow given safety filters or guidelines. Thus we postulate the mosteffective approach for safe trustworthy AI should be dealt external to the LLMitself. |
+|idx| 2402.04228v1 |
+|title| Intelligent Collective Escape of Swarm Robots Based on a Novel Fish-inspired Self-adaptive Approach with Neurodynamic Models |
+|authors| Junfei LiSimon X. Yang
+|links| http://dx.doi.org/10.1109/TIE.2024.3363723 |
+|updated| 2024-02-06 18:36:44 UTC |
+|summary| Fish schools present high-efficiency group behaviors through simpleindividual interactions to collective migration and dynamic escape from thepredator. The school behavior of fish is usually a good inspiration to designcontrol architecture for swarm robots. In this paper a novel fish-inspiredself-adaptive approach is proposed for collective escape for the swarm robots.In addition a bio-inspired neural network BINN is introduced to generatecollision-free escape robot trajectories through the combination of attractiveand repulsive forces. Furthermore to cope with dynamic environments aneurodynamics-based self-adaptive mechanism is proposed to improve theself-adaptive performance of the swarm robots in the changing environment.Similar to fish escape maneuvers simulation and experimental results show thatthe swarm robots are capable of collectively leaving away from the threats.Several comparison studies demonstrated that the proposed approach cansignificantly improve the effectiveness and efficiency of system performanceand the flexibility and robustness in complex environments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03300v2 |
-|title| DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models |
-|authors| Zhihong ShaoPeiyi WangQihao ZhuRunxin XuJunxiao SongMingchuan ZhangY. K. LiY. WuDaya Guo
-|links| http://arxiv.org/abs/2402.03300v2 |
-|updated| 2024-02-06 18:39:38 UTC |
-|summary| Mathematical reasoning poses a significant challenge for language models dueto its complex and structured nature. In this paper we introduce DeepSeekMath7B which continues pre-training DeepSeek-Coder-Base-v1.5 7B with 120Bmath-related tokens sourced from Common Crawl together with natural languageand code data. DeepSeekMath 7B has achieved an impressive score of 51.7 on thecompetition-level MATH benchmark without relying on external toolkits andvoting techniques approaching the performance level of Gemini-Ultra and GPT-4.Self-consistency over 64 samples from DeepSeekMath 7B achieves 60.9 on MATH.The mathematical reasoning capability of DeepSeekMath is attributed to two keyfactors: First we harness the significant potential of publicly available webdata through a meticulously engineered data selection pipeline. Second weintroduce Group Relative Policy Optimization GRPO a variant of ProximalPolicy Optimization PPO that enhances mathematical reasoning abilities whileconcurrently optimizing the memory usage of PPO. |
+|idx| 2402.04210v1 |
+|title| "Task Success" is not Enough: Investigating the Use of Video-Language Models as Behavior Critics for Catching Undesirable Agent Behaviors |
+|authors| Lin GuanYifan ZhouDenis LiuYantian ZhaHeni Ben AmorSubbarao Kambhampati
+|links| http://arxiv.org/abs/2402.04210v1 |
+|updated| 2024-02-06 18:07:43 UTC |
+|summary| Large-scale generative models are shown to be useful for sampling meaningfulcandidate solutions yet they often overlook task constraints and userpreferences. Their full power is better harnessed when the models are coupledwith external verifiers and the final solutions are derived iteratively orprogressively according to the verification feedback. In the context ofembodied AI verification often solely involves assessing whether goalconditions specified in the instructions have been met. Nonetheless for theseagents to be seamlessly integrated into daily life it is crucial to accountfor a broader range of constraints and preferences beyond bare task successe.g. a robot should grasp bread with care to avoid significant deformations.However given the unbounded scope of robot tasks it is infeasible toconstruct scripted verifiers akin to those used for explicit-knowledge taskslike the game of Go and theorem proving. This begs the question: when no soundverifier is available can we use large vision and language models VLMswhich are approximately omniscient as scalable Behavior Critics to catchundesirable robot behaviors in videos To answer this we first construct abenchmark that contains diverse cases of goal-reaching yet undesirable robotpolicies. Then we comprehensively evaluate VLM critics to gain a deeperunderstanding of their strengths and failure modes. Based on the evaluation weprovide guidelines on how to effectively utilize VLM critiques and showcase apractical way to integrate the feedback into an iterative process of policyrefinement. The dataset and codebase are released at:https://guansuns.github.io/pages/vlm-critic. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03312v1 |
-|title| Test-Time Adaptation for Depth Completion |
-|authors| Hyoungseob ParkAnjali GuptaAlex Wong
-|links| http://arxiv.org/abs/2402.03312v1 |
-|updated| 2024-02-05 18:59:52 UTC |
-|summary| It is common to observe performance degradation when transferring modelstrained on some source datasets to target testing data due to a domain gapbetween them. Existing methods for bridging this gap such as domain adaptationDA may require the source data on which the model was trained often notavailable while others i.e. source-free DA require many passes through thetesting data. We propose an online test-time adaptation method for depthcompletion the task of inferring a dense depth map from a single image andassociated sparse depth map that closes the performance gap in a single pass.We first present a study on how the domain shift in each data modality affectsmodel performance. Based on our observations that the sparse depth modalityexhibits a much smaller covariate shift than the image we design an embeddingmodule trained in the source domain that preserves a mapping from featuresencoding only sparse depth to those encoding image and sparse depth. Duringtest time sparse depth features are projected using this map as a proxy forsource domain features and are used as guidance to train a set of auxiliaryparameters i.e. adaptation layer to align image and sparse depth featuresfrom the target test domain to that of the source domain. We evaluate ourmethod on indoor and outdoor scenarios and show that it improves over baselinesby an average of 21.1. |
+|idx| 2402.04249v1 |
+|title| HarmBench: A Standardized Evaluation Framework for Automated Red Teaming and Robust Refusal |
+|authors| Mantas MazeikaLong PhanXuwang YinAndy ZouZifan WangNorman MuElham SakhaeeNathaniel LiSteven BasartBo LiDavid ForsythDan Hendrycks
+|links| http://arxiv.org/abs/2402.04249v1 |
+|updated| 2024-02-06 18:59:08 UTC |
+|summary| Automated red teaming holds substantial promise for uncovering and mitigatingthe risks associated with the malicious use of large language models LLMsyet the field lacks a standardized evaluation framework to rigorously assessnew methods. To address this issue we introduce HarmBench a standardizedevaluation framework for automated red teaming. We identify several desirableproperties previously unaccounted for in red teaming evaluations andsystematically design HarmBench to meet these criteria. Using HarmBench weconduct a large-scale comparison of 18 red teaming methods and 33 target LLMsand defenses yielding novel insights. We also introduce a highly efficientadversarial training method that greatly enhances LLM robustness across a widerange of attacks demonstrating how HarmBench enables codevelopment of attacksand defenses. We open source HarmBench athttps://github.com/centerforaisafety/HarmBench. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03311v1 |
-|title| HASSOD: Hierarchical Adaptive Self-Supervised Object Detection |
-|authors| Shengcao CaoDhiraj JoshiLiang-Yan GuiYu-Xiong Wang
-|links| http://arxiv.org/abs/2402.03311v1 |
-|updated| 2024-02-05 18:59:41 UTC |
-|summary| The human visual perception system demonstrates exceptional capabilities inlearning without explicit supervision and understanding the part-to-wholecomposition of objects. Drawing inspiration from these two abilities wepropose Hierarchical Adaptive Self-Supervised Object Detection HASSOD anovel approach that learns to detect objects and understand their compositionswithout human supervision. HASSOD employs a hierarchical adaptive clusteringstrategy to group regions into object masks based on self-supervised visualrepresentations adaptively determining the number of objects per image.Furthermore HASSOD identifies the hierarchical levels of objects in terms ofcomposition by analyzing coverage relations between masks and constructingtree structures. This additional self-supervised learning task leads toimproved detection performance and enhanced interpretability. Lastly weabandon the inefficient multi-round self-training process utilized in priormethods and instead adapt the Mean Teacher framework from semi-supervisedlearning which leads to a smoother and more efficient training process.Through extensive experiments on prevalent image datasets we demonstrate thesuperiority of HASSOD over existing methods thereby advancing the state of theart in self-supervised object detection. Notably we improve Mask AR from 20.2to 22.5 on LVIS and from 17.0 to 26.0 on SA-1B. Project page:https://HASSOD-NeurIPS23.github.io. |
+|idx| 2402.04248v1 |
+|title| Can Mamba Learn How to Learn? A Comparative Study on In-Context Learning Tasks |
+|authors| Jongho ParkJaeseung ParkZheyang XiongNayoung LeeJaewoong ChoSamet OymakKangwook LeeDimitris Papailiopoulos
+|links| http://arxiv.org/abs/2402.04248v1 |
+|updated| 2024-02-06 18:56:35 UTC |
+|summary| State-space models SSMs such as Mamba Gu  Dao 2034 have been proposedas alternatives to Transformer networks in language modeling by incorporatinggating convolutions and input-dependent token selection to mitigate thequadratic cost of multi-head attention. Although SSMs exhibit competitiveperformance their in-context learning ICL capabilities a remarkableemergent property of modern language models that enables task execution withoutparameter optimization remain underexplored compared to Transformers. In thisstudy we evaluate the ICL performance of SSMs focusing on Mamba againstTransformer models across various tasks. Our results show that SSMs performcomparably to Transformers in standard regression ICL tasks whileoutperforming them in tasks like sparse parity learning. However SSMs fallshort in tasks involving non-standard retrieval functionality. To address theselimitations we introduce a hybrid model variant that combines Mamba withattention blocks surpassing individual models in tasks where they struggleindependently. Our findings suggest that hybrid architectures offer promisingavenues for enhancing ICL in language models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03309v1 |
-|title| AONeuS: A Neural Rendering Framework for Acoustic-Optical Sensor Fusion |
-|authors| Mohamad QadriKevin ZhangAkshay HindujaMichael KaessAdithya PediredlaChristopher A. Metzler
-|links| http://arxiv.org/abs/2402.03309v1 |
-|updated| 2024-02-05 18:59:31 UTC |
-|summary| Underwater perception and 3D surface reconstruction are challenging problemswith broad applications in construction security marine archaeology andenvironmental monitoring. Treacherous operating conditions fragilesurroundings and limited navigation control often dictate that submersiblesrestrict their range of motion and thus the baseline over which they cancapture measurements. In the context of 3D scene reconstruction it iswell-known that smaller baselines make reconstruction more challenging. Ourwork develops a physics-based multimodal acoustic-optical neural surfacereconstruction framework AONeuS capable of effectively integratinghigh-resolution RGB measurements with low-resolution depth-resolved imagingsonar measurements. By fusing these complementary modalities our framework canreconstruct accurate high-resolution 3D surfaces from measurements capturedover heavily-restricted baselines. Through extensive simulations and in-labexperiments we demonstrate that AONeuS dramatically outperforms recentRGB-only and sonar-only inverse-differentiable-rendering--based surfacereconstruction methods. A website visualizing the results of our paper islocated at this address: https://aoneus.github.io/ |
+|idx| 2402.04247v2 |
+|title| Prioritizing Safeguarding Over Autonomy: Risks of LLM Agents for Science |
+|authors| Xiangru TangQiao JinKunlun ZhuTongxin YuanYichi ZhangWangchunshu ZhouMeng QuYilun ZhaoJian TangZhuosheng ZhangArman CohanZhiyong LuMark Gerstein
+|links| http://arxiv.org/abs/2402.04247v2 |
+|updated| 2024-02-07 14:26:02 UTC |
+|summary| Intelligent agents powered by large language models LLMs have demonstratedsubstantial promise in autonomously conducting experiments and facilitatingscientific discoveries across various disciplines. While their capabilities arepromising they also introduce novel vulnerabilities that demand carefulconsideration for safety. However there exists a notable gap in theliterature as there has been no comprehensive exploration of thesevulnerabilities. This position paper fills this gap by conducting a thoroughexamination of vulnerabilities in LLM-based agents within scientific domainsshedding light on potential risks associated with their misuse and emphasizingthe need for safety measures. We begin by providing a comprehensive overview ofthe potential risks inherent to scientific LLM agents taking into account userintent the specific scientific domain and their potential impact on theexternal environment. Then we delve into the origins of these vulnerabilitiesand provide a scoping review of the limited existing works. Based on ouranalysis we propose a triadic framework involving human regulation agentalignment and an understanding of environmental feedback agent regulation tomitigate these identified risks. Furthermore we highlight the limitations andchallenges associated with safeguarding scientific agents and advocate for thedevelopment of improved models robust benchmarks and comprehensiveregulations to address these issues effectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03305v1 |
-|title| Do Diffusion Models Learn Semantically Meaningful and Efficient Representations? |
-|authors| Qiyao LiangZiming LiuIla Fiete
-|links| http://arxiv.org/abs/2402.03305v1 |
-|updated| 2024-02-05 18:58:38 UTC |
-|summary| Diffusion models are capable of impressive feats of image generation withuncommon juxtapositions such as astronauts riding horses on the moon withproperly placed shadows. These outputs indicate the ability to performcompositional generalization but how do the models do so We performcontrolled experiments on conditional DDPMs learning to generate 2D sphericalGaussian bumps centered at specified x- and y-positions. Our results showthat the emergence of semantically meaningful latent representations is key toachieving high performance. En route to successful performance over learningthe model traverses three distinct phases of latent representations: phase Ano latent structure phase B a 2D manifold of disordered states and phaseC a 2D ordered manifold. Corresponding to each of these phases we identifyqualitatively different generation behaviors: 1 multiple bumps are generated2 one bump is generated but at inaccurate x and y locations 3 a bump isgenerated at the correct x and y location. Furthermore we show that evenunder imbalanced datasets where features x- versus y-positions arerepresented with skewed frequencies the learning process for x and y iscoupled rather than factorized demonstrating that simple vanilla-flavoreddiffusion models cannot learn efficient representations in which localizationin x and y are factorized into separate 1D tasks. These findings suggestthe need for future work to find inductive biases that will push generativemodels to discover and exploit factorizable independent structures in theirinputs which will be required to vault these models into more data-efficientregimes. |
+|idx| 2402.04239v1 |
+|title| CAST: Clustering Self-Attention using Surrogate Tokens for Efficient Transformers |
+|authors| Adjorn van EngelenhovenNicola StrisciuglioEstefanía Talavera
+|links| http://arxiv.org/abs/2402.04239v1 |
+|updated| 2024-02-06 18:47:52 UTC |
+|summary| The Transformer architecture has shown to be a powerful tool for a wide rangeof tasks. It is based on the self-attention mechanism which is an inherentlycomputationally expensive operation with quadratic computational complexity:memory usage and compute time increase quadratically with the length of theinput sequences thus limiting the application of Transformers. In this workwe propose a novel Clustering self-Attention mechanism using Surrogate TokensCAST to optimize the attention computation and achieve efficienttransformers. CAST utilizes learnable surrogate tokens to construct a clusteraffinity matrix used to cluster the input sequence and generate novel clustersummaries. The self-attention from within each cluster is then combined withthe cluster summaries of other clusters enabling information flow across theentire input sequence. CAST improves efficiency by reducing the complexity fromON2 to Oalpha N where N is the sequence length and alpha isconstant according to the number of clusters and samples per cluster. We showthat CAST performs better than or comparable to the baseline Transformers onlong-range sequence modeling tasks while also achieving higher results on timeand memory efficiency than other efficient transformers. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03303v1 |
-|title| Nevermind: Instruction Override and Moderation in Large Language Models |
-|authors| Edward Kim
-|links| http://arxiv.org/abs/2402.03303v1 |
-|updated| 2024-02-05 18:58:19 UTC |
-|summary| Given the impressive capabilities of recent Large Language Models LLMs weinvestigate and benchmark the most popular proprietary and different sized opensource models on the task of explicit instruction following in conflictingsituations e.g. overrides. These include the ability of the model to overridethe knowledge within the weights of the model the ability to override ormoderate extracted knowledge in the prompt and lastly the ability to performa full jailbreak. Experimentation performed suggest several key findings toimprove instruction following - larger models perform the best in followinginstructions that override internal and contextual instructions and areobedient even to a fault. When scaling to longer contexts via rope scaling asignificant buffer needs to be maintained from the edge of the perplexity cliffin order to maintain instruction following capabilities. Finally we observeimproving instruction following and subsequently instructionoverrides/jailbreaks is fundamentally at odds with the ability of a languagemodel to follow given safety filters or guidelines. Thus we postulate the mosteffective approach for safe trustworthy AI should be dealt external to the LLMitself. |
+|idx| 2402.04229v1 |
+|title| MusicRL: Aligning Music Generation to Human Preferences |
+|authors| Geoffrey CideronSertan GirginMauro VerzettiDamien VincentMatej KastelicZalán BorsosBrian McWilliamsVictor UngureanuOlivier BachemOlivier PietquinMatthieu GeistLéonard HussenotNeil ZeghidourAndrea Agostinelli
+|links| http://arxiv.org/abs/2402.04229v1 |
+|updated| 2024-02-06 18:36:52 UTC |
+|summary| We propose MusicRL the first music generation system finetuned from humanfeedback. Appreciation of text-to-music models is particularly subjective sincethe concept of musicality as well as the specific intention behind a captionare user-dependent e.g. a caption such as upbeat work-out music can map to aretro guitar solo or a techno pop beat. Not only this makes supervisedtraining of such models challenging but it also calls for integratingcontinuous human feedback in their post-deployment finetuning. MusicRL is apretrained autoregressive MusicLM Agostinelli et al. 2023 model of discreteaudio tokens finetuned with reinforcement learning to maximise sequence-levelrewards. We design reward functions related specifically to text-adherence andaudio quality with the help from selected raters and use those to finetuneMusicLM into MusicRL-R. We deploy MusicLM to users and collect a substantialdataset comprising 300000 pairwise preferences. Using Reinforcement Learningfrom Human Feedback RLHF we train MusicRL-U the first text-to-music modelthat incorporates human feedback at scale. Human evaluations show that bothMusicRL-R and MusicRL-U are preferred to the baseline. Ultimately MusicRL-RUcombines the two approaches and results in the best model according to humanraters. Ablation studies shed light on the musical attributes influencing humanpreferences indicating that text adherence and quality only account for a partof it. This underscores the prevalence of subjectivity in musical appreciationand calls for further involvement of human listeners in the finetuning of musicgeneration models. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03312v1 |
-|title| Test-Time Adaptation for Depth Completion |
-|authors| Hyoungseob ParkAnjali GuptaAlex Wong
-|links| http://arxiv.org/abs/2402.03312v1 |
-|updated| 2024-02-05 18:59:52 UTC |
-|summary| It is common to observe performance degradation when transferring modelstrained on some source datasets to target testing data due to a domain gapbetween them. Existing methods for bridging this gap such as domain adaptationDA may require the source data on which the model was trained often notavailable while others i.e. source-free DA require many passes through thetesting data. We propose an online test-time adaptation method for depthcompletion the task of inferring a dense depth map from a single image andassociated sparse depth map that closes the performance gap in a single pass.We first present a study on how the domain shift in each data modality affectsmodel performance. Based on our observations that the sparse depth modalityexhibits a much smaller covariate shift than the image we design an embeddingmodule trained in the source domain that preserves a mapping from featuresencoding only sparse depth to those encoding image and sparse depth. Duringtest time sparse depth features are projected using this map as a proxy forsource domain features and are used as guidance to train a set of auxiliaryparameters i.e. adaptation layer to align image and sparse depth featuresfrom the target test domain to that of the source domain. We evaluate ourmethod on indoor and outdoor scenarios and show that it improves over baselinesby an average of 21.1. |
+|idx| 2402.04252v1 |
+|title| EVA-CLIP-18B: Scaling CLIP to 18 Billion Parameters |
+|authors| Quan SunJinsheng WangQiying YuYufeng CuiFan ZhangXiaosong ZhangXinlong Wang
+|links| http://arxiv.org/abs/2402.04252v1 |
+|updated| 2024-02-06 18:59:48 UTC |
+|summary| Scaling up contrastive language-image pretraining CLIP is critical forempowering both vision and multimodal models. We present EVA-CLIP-18B thelargest and most powerful open-source CLIP model to date with 18-billionparameters. With only 6-billion training samples seen EVA-CLIP-18B achieves anexceptional 80.7 zero-shot top-1 accuracy averaged across 27 widely recognizedimage classification benchmarks outperforming its forerunner EVA-CLIP5-billion parameters and other open-source CLIP models by a large margin.Remarkably we observe a consistent performance improvement with the model sizescaling of EVA-CLIP despite maintaining a constant training dataset of2-billion image-text pairs from LAION-2B and COYO-700M. This dataset is openlyavailable and much smaller than the in-house datasets e.g. DFN-5B WebLI-10Bemployed in other state-of-the-art CLIP models. EVA-CLIP-18B demonstrates thepotential of EVA-style weak-to-strong visual model scaling. With our modelweights made publicly available we hope to facilitate future research invision and multimodal foundation models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03311v1 |
-|title| HASSOD: Hierarchical Adaptive Self-Supervised Object Detection |
-|authors| Shengcao CaoDhiraj JoshiLiang-Yan GuiYu-Xiong Wang
-|links| http://arxiv.org/abs/2402.03311v1 |
-|updated| 2024-02-05 18:59:41 UTC |
-|summary| The human visual perception system demonstrates exceptional capabilities inlearning without explicit supervision and understanding the part-to-wholecomposition of objects. Drawing inspiration from these two abilities wepropose Hierarchical Adaptive Self-Supervised Object Detection HASSOD anovel approach that learns to detect objects and understand their compositionswithout human supervision. HASSOD employs a hierarchical adaptive clusteringstrategy to group regions into object masks based on self-supervised visualrepresentations adaptively determining the number of objects per image.Furthermore HASSOD identifies the hierarchical levels of objects in terms ofcomposition by analyzing coverage relations between masks and constructingtree structures. This additional self-supervised learning task leads toimproved detection performance and enhanced interpretability. Lastly weabandon the inefficient multi-round self-training process utilized in priormethods and instead adapt the Mean Teacher framework from semi-supervisedlearning which leads to a smoother and more efficient training process.Through extensive experiments on prevalent image datasets we demonstrate thesuperiority of HASSOD over existing methods thereby advancing the state of theart in self-supervised object detection. Notably we improve Mask AR from 20.2to 22.5 on LVIS and from 17.0 to 26.0 on SA-1B. Project page:https://HASSOD-NeurIPS23.github.io. |
+|idx| 2402.04249v1 |
+|title| HarmBench: A Standardized Evaluation Framework for Automated Red Teaming and Robust Refusal |
+|authors| Mantas MazeikaLong PhanXuwang YinAndy ZouZifan WangNorman MuElham SakhaeeNathaniel LiSteven BasartBo LiDavid ForsythDan Hendrycks
+|links| http://arxiv.org/abs/2402.04249v1 |
+|updated| 2024-02-06 18:59:08 UTC |
+|summary| Automated red teaming holds substantial promise for uncovering and mitigatingthe risks associated with the malicious use of large language models LLMsyet the field lacks a standardized evaluation framework to rigorously assessnew methods. To address this issue we introduce HarmBench a standardizedevaluation framework for automated red teaming. We identify several desirableproperties previously unaccounted for in red teaming evaluations andsystematically design HarmBench to meet these criteria. Using HarmBench weconduct a large-scale comparison of 18 red teaming methods and 33 target LLMsand defenses yielding novel insights. We also introduce a highly efficientadversarial training method that greatly enhances LLM robustness across a widerange of attacks demonstrating how HarmBench enables codevelopment of attacksand defenses. We open source HarmBench athttps://github.com/centerforaisafety/HarmBench. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03310v1 |
-|title| V-IRL: Grounding Virtual Intelligence in Real Life |
-|authors| Jihan YangRunyu DingEllis BrownXiaojuan QiSaining Xie
-|links| http://arxiv.org/abs/2402.03310v1 |
-|updated| 2024-02-05 18:59:36 UTC |
-|summary| There is a sensory gulf between the Earth that humans inhabit and the digitalrealms in which modern AI agents are created. To develop AI agents that cansense think and act as flexibly as humans in real-world settings it isimperative to bridge the realism gap between the digital and physical worlds.How can we embody agents in an environment as rich and diverse as the one weinhabit without the constraints imposed by real hardware and control Towardsthis end we introduce V-IRL: a platform that enables agents to scalablyinteract with the real world in a virtual yet realistic environment. Ourplatform serves as a playground for developing agents that can accomplishvarious practical tasks and as a vast testbed for measuring progress incapabilities spanning perception decision-making and interaction withreal-world data across the entire globe. |
+|idx| 2402.04236v1 |
+|title| CogCoM: Train Large Vision-Language Models Diving into Details through Chain of Manipulations |
+|authors| Ji QiMing DingWeihan WangYushi BaiQingsong LvWenyi HongBin XuLei HouJuanzi LiYuxiao DongJie Tang
+|links| http://arxiv.org/abs/2402.04236v1 |
+|updated| 2024-02-06 18:43:48 UTC |
+|summary| Vision-Language Models VLMs have demonstrated their widespread viabilitythanks to extensive training in aligning visual instructions to answers.However this conclusive alignment leads models to ignore critical visualreasoning and further result in failures on meticulous visual problems andunfaithful responses. In this paper we propose Chain of Manipulations amechanism that enables VLMs to solve problems with a series of manipulationswhere each manipulation refers to an operation on the visual input either fromintrinsic abilities e.g. grounding acquired through prior training or fromimitating human-like behaviors e.g. zoom in. This mechanism encourages VLMsto generate faithful responses with evidential visual reasoning and permitsusers to trace error causes in the interpretable paths. We thus train CogCoM ageneral 17B VLM with a memory-based compatible architecture endowed thisreasoning mechanism. Experiments show that our model achieves thestate-of-the-art performance across 8 benchmarks from 3 categories and alimited number of training steps with the data swiftly gains a competitiveperformance. The code and data are publicly available athttps://github.com/THUDM/CogCoM. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03309v1 |
-|title| AONeuS: A Neural Rendering Framework for Acoustic-Optical Sensor Fusion |
-|authors| Mohamad QadriKevin ZhangAkshay HindujaMichael KaessAdithya PediredlaChristopher A. Metzler
-|links| http://arxiv.org/abs/2402.03309v1 |
-|updated| 2024-02-05 18:59:31 UTC |
-|summary| Underwater perception and 3D surface reconstruction are challenging problemswith broad applications in construction security marine archaeology andenvironmental monitoring. Treacherous operating conditions fragilesurroundings and limited navigation control often dictate that submersiblesrestrict their range of motion and thus the baseline over which they cancapture measurements. In the context of 3D scene reconstruction it iswell-known that smaller baselines make reconstruction more challenging. Ourwork develops a physics-based multimodal acoustic-optical neural surfacereconstruction framework AONeuS capable of effectively integratinghigh-resolution RGB measurements with low-resolution depth-resolved imagingsonar measurements. By fusing these complementary modalities our framework canreconstruct accurate high-resolution 3D surfaces from measurements capturedover heavily-restricted baselines. Through extensive simulations and in-labexperiments we demonstrate that AONeuS dramatically outperforms recentRGB-only and sonar-only inverse-differentiable-rendering--based surfacereconstruction methods. A website visualizing the results of our paper islocated at this address: https://aoneus.github.io/ |
+|idx| 2402.04195v1 |
+|title| Instance by Instance: An Iterative Framework for Multi-instance 3D Registration |
+|authors| Xinyue CaoXiyu ZhangYuxin ChengZhaoshuai QiYanning ZhangJiaqi Yang
+|links| http://arxiv.org/abs/2402.04195v1 |
+|updated| 2024-02-06 17:50:30 UTC |
+|summary| Multi-instance registration is a challenging problem in computer vision androbotics where multiple instances of an object need to be registered in astandard coordinate system. In this work we propose the first iterativeframework called instance-by-instance IBI for multi-instance 3D registrationMI-3DReg. It successively registers all instances in a given scenariostarting from the easiest and progressing to more challenging ones. Throughoutthe iterative process outliers are eliminated continuously leading to anincreasing inlier rate for the remaining and more challenging instances. Underthe IBI framework we further propose a sparse-to-dense-correspondence-basedmulti-instance registration method IBI-S2DC to achieve robust MI-3DReg.Experiments on the synthetic and real datasets have demonstrated theeffectiveness of IBI and suggested the new state-of-the-art performance ofIBI-S2DC e.g. our MHF1 is 12.02/12.35 higher than the existingstate-of-the-art method ECC on the synthetic/real datasets. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03307v1 |
-|title| 4D Gaussian Splatting: Towards Efficient Novel View Synthesis for Dynamic Scenes |
-|authors| Yuanxing DuanFangyin WeiQiyu DaiYuhang HeWenzheng ChenBaoquan Chen
-|links| http://arxiv.org/abs/2402.03307v1 |
-|updated| 2024-02-05 18:59:04 UTC |
-|summary| We consider the problem of novel view synthesis NVS for dynamic scenes.Recent neural approaches have accomplished exceptional NVS results for static3D scenes but extensions to 4D time-varying scenes remain non-trivial. Priorefforts often encode dynamics by learning a canonical space plus implicit orexplicit deformation fields which struggle in challenging scenarios likesudden movements or capturing high-fidelity renderings. In this paper weintroduce 4D Gaussian Splatting 4DGS a novel method that represents dynamicscenes with anisotropic 4D XYZT Gaussians inspired by the success of 3DGaussian Splatting in static scenes. We model dynamics at each timestamp bytemporally slicing the 4D Gaussians which naturally compose dynamic 3DGaussians and can be seamlessly projected into images. As an explicitspatial-temporal representation 4DGS demonstrates powerful capabilities formodeling complicated dynamics and fine details especially for scenes withabrupt motions. We further implement our temporal slicing and splattingtechniques in a highly optimized CUDA acceleration framework achievingreal-time inference rendering speeds of up to 277 FPS on an RTX 3090 GPU and583 FPS on an RTX 4090 GPU. Rigorous evaluations on scenes with diverse motionsshowcase the superior efficiency and effectiveness of 4DGS which consistentlyoutperforms existing methods both quantitatively and qualitatively. |
+|idx| 2402.04178v1 |
+|title| SHIELD : An Evaluation Benchmark for Face Spoofing and Forgery Detection with Multimodal Large Language Models |
+|authors| Yichen ShiYuhao GaoYingxin LaiHongyang WangJun FengLei HeJun WanChangsheng ChenZitong YuXiaochun Cao
+|links| http://arxiv.org/abs/2402.04178v1 |
+|updated| 2024-02-06 17:31:36 UTC |
+|summary| Multimodal large language models MLLMs have demonstrated remarkableproblem-solving capabilities in various vision fields e.g. generic objectrecognition and grounding based on strong visual semantic representation andlanguage reasoning ability. However whether MLLMs are sensitive to subtlevisual spoof/forged clues and how they perform in the domain of face attackdetection e.g. face spoofing and forgery detection is still unexplored. Inthis paper we introduce a new benchmark namely SHIELD to evaluate theability of MLLMs on face spoofing and forgery detection. Specifically wedesign true/false and multiple-choice questions to evaluate multimodal facedata in these two face security tasks. For the face anti-spoofing task weevaluate three different modalities i.e. RGB infrared depth under fourtypes of presentation attacks i.e. print attack replay attack rigid maskpaper mask. For the face forgery detection task we evaluate GAN-based anddiffusion-based data with both visual and acoustic modalities. Each question issubjected to both zero-shot and few-shot tests under standard and chain ofthought COT settings. The results indicate that MLLMs hold substantialpotential in the face security domain offering advantages over traditionalspecific models in terms of interpretability multimodal flexible reasoningand joint face spoof and forgery detection. Additionally we develop a novelMulti-Attribute Chain of Thought MA-COT paradigm for describing and judgingvarious task-specific and task-irrelevant attributes of face images whichprovides rich task-related knowledge for subtle spoof/forged clue mining.Extensive experiments in separate face anti-spoofing separate face forgerydetection and joint detection tasks demonstrate the effectiveness of theproposed MA-COT. The project is available athttps://github.com/laiyingxin2/SHIELD |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03295v1 |
-|title| Ginger: An Efficient Curvature Approximation with Linear Complexity for General Neural Networks |
-|authors| Yongchang HaoYanshuai CaoLili Mou
-|links| http://arxiv.org/abs/2402.03295v1 |
-|updated| 2024-02-05 18:51:17 UTC |
-|summary| Second-order optimization approaches like the generalized Gauss-Newton methodare considered more powerful as they utilize the curvature information of theobjective function with preconditioning matrices. Albeit offering temptingtheoretical benefits they are not easily applicable to modern deep learning.The major reason is due to the quadratic memory and cubic time complexity tocompute the inverse of the matrix. These requirements are infeasible even withstate-of-the-art hardware. In this work we propose Ginger aneigendecomposition for the inverse of the generalized Gauss-Newton matrix. Ourmethod enjoys efficient linear memory and time complexity for each iteration.Instead of approximating the conditioning matrix we directly maintain itsinverse to make the approximation more accurate. We provide the convergenceresult of Ginger for non-convex objectives. Our experiments on different taskswith different model architectures verify the effectiveness of our method. Ourcode is publicly available. |
+|idx| 2402.04211v1 |
+|title| Variational Shapley Network: A Probabilistic Approach to Self-Explaining Shapley values with Uncertainty Quantification |
+|authors| Mert KetenciIñigo UrteagaVictor Alfonso RodriguezNoémie ElhadadAdler Perotte
+|links| http://arxiv.org/abs/2402.04211v1 |
+|updated| 2024-02-06 18:09:05 UTC |
+|summary| Shapley values have emerged as a foundational tool in machine learning MLfor elucidating model decision-making processes. Despite their widespreadadoption and unique ability to satisfy essential explainability axiomscomputational challenges persist in their estimation when i evaluating amodel over all possible subset of input feature combinations ii estimatingmodel marginals and iii addressing variability in explanations. Weintroduce a novel self-explaining method that simplifies the computation ofShapley values significantly requiring only a single forward pass. Recognizingthe deterministic treatment of Shapley values as a limitation we exploreincorporating a probabilistic framework to capture the inherent uncertainty inexplanations. Unlike alternatives our technique does not rely directly on theobserved data space to estimate marginals instead it uses adaptable baselinevalues derived from a latent feature-specific embedding space generated by anovel masked neural network architecture. Evaluations on simulated and realdatasets underscore our techniques robust predictive and explanatoryperformance. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03293v1 |
-|title| Flora: Low-Rank Adapters Are Secretly Gradient Compressors |
-|authors| Yongchang HaoYanshuai CaoLili Mou
-|links| http://arxiv.org/abs/2402.03293v1 |
-|updated| 2024-02-05 18:50:39 UTC |
-|summary| Despite large neural networks demonstrating remarkable abilities to completedifferent tasks they require excessive memory usage to store the optimizationstates for training. To alleviate this the low-rank adaptation LoRA isproposed to reduce the optimization states by training fewer parameters.However LoRA restricts overall weight update matrices to be low-rank limitingthe model performance. In this work we investigate the dynamics of LoRA andidentify that it can be approximated by a random projection. Based on thisobservation we propose Flora which is able to achieve high-rank updates byresampling the projection matrices while enjoying the sublinear spacecomplexity of optimization states. We conduct experiments across differenttasks and model architectures to verify the effectiveness of our approach. |
+|idx| 2402.04177v1 |
+|title| Scaling Laws for Downstream Task Performance of Large Language Models |
+|authors| Berivan IsikNatalia PonomarevaHussein HazimehDimitris PaparasSergei VassilvitskiiSanmi Koyejo
+|links| http://arxiv.org/abs/2402.04177v1 |
+|updated| 2024-02-06 17:31:20 UTC |
+|summary| Scaling laws provide important insights that can guide the design of largelanguage models LLMs. Existing work has primarily focused on studying scalinglaws for pretraining upstream loss. However in transfer learning settingsin which LLMs are pretrained on an unsupervised dataset and then finetuned on adownstream task we often also care about the downstream performance. In thiswork we study the scaling behavior in a transfer learning setting where LLMsare finetuned for machine translation tasks. Specifically we investigate howthe choice of the pretraining data and its size affect downstream performancetranslation quality as judged by two metrics: downstream cross-entropy andBLEU score. Our experiments indicate that the size of the finetuning datasetand the distribution alignment between the pretraining and downstream datasignificantly influence the scaling behavior. With sufficient alignment bothdownstream cross-entropy and BLEU score improve monotonically with morepretraining data. In such cases we show that it is possible to predict thedownstream BLEU score with good accuracy using a log-law. However there arealso cases where moderate misalignment causes the BLEU score to fluctuate orget worse with more pretraining whereas downstream cross-entropy monotonicallyimproves. By analyzing these observations we provide new practical insightsfor choosing appropriate pretraining data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03282v1 |
-|title| A Framework for Partially Observed Reward-States in RLHF |
-|authors| Chinmaya KausikMirco MuttiAldo PacchianoAmbuj Tewari
-|links| http://arxiv.org/abs/2402.03282v1 |
-|updated| 2024-02-05 18:38:55 UTC |
-|summary| The study of reinforcement learning from human feedback RLHF has gainedprominence in recent years due to its role in the development of LLMs.Neuroscience research shows that human responses to stimuli are known to dependon partially-observed internal states. Unfortunately current models of RLHFdo not take take this into consideration. Moreover most RLHF models do notaccount for intermediate feedback which is gaining importance in empiricalwork and can help improve both sample complexity and alignment. To addressthese limitations we model RLHF as reinforcement learning with partiallyobserved reward-states PORRL. We show reductions from the the two dominantforms of human feedback in RLHF - cardinal and dueling feedback to PORRL. Forcardinal feedback we develop generic statistically efficient algorithms andinstantiate them to present POR-UCRL and POR-UCBVI. For dueling feedback weshow that a naive reduction to cardinal feedback fails to achieve sublineardueling regret. We then present the first explicit reduction that convertsguarantees for cardinal regret to dueling regret. We show that our models andguarantees in both settings generalize and extend existing ones. Finally weidentify a recursive structure on our model that could improve the statisticaland computational tractability of PORRL giving examples from past work on RLHFas well as learning perfect reward machines which PORRL subsumes. |
+|idx| 2402.04161v1 |
+|title| Attention with Markov: A Framework for Principled Analysis of Transformers via Markov Chains |
+|authors| Ashok Vardhan MakkuvaMarco BondaschiAdway GirishAlliot NagleMartin JaggiHyeji KimMichael Gastpar
+|links| http://arxiv.org/abs/2402.04161v1 |
+|updated| 2024-02-06 17:18:59 UTC |
+|summary| In recent years attention-based transformers have achieved tremendoussuccess across a variety of disciplines including natural languages. A keyingredient behind their success is the generative pretraining procedure duringwhich these models are trained on a large text corpus in an auto-regressivemanner. To shed light on this phenomenon we propose a new framework thatallows both theory and systematic experiments to study the sequential modelingcapabilities of transformers through the lens of Markov chains. Inspired by theMarkovianity of natural languages we model the data as a Markovian source andutilize this framework to systematically study the interplay between thedata-distributional properties the transformer architecture the learntdistribution and the final model performance. In particular we theoreticallycharacterize the loss landscape of single-layer transformers and show theexistence of global minima and bad local minima contingent upon the specificdata characteristics and the transformer architecture. Backed by experimentswe demonstrate that our theoretical findings are in congruence with theempirical results. We further investigate these findings in the broader contextof higher order Markov chains and deeper architectures and outline openproblems in this arena. Code is available aturlhttps://github.com/Bond1995/Markov. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03256v1 |
-|title| Learning Best-in-Class Policies for the Predict-then-Optimize Framework |
-|authors| Michael HuangVishal Gupta
-|links| http://arxiv.org/abs/2402.03256v1 |
-|updated| 2024-02-05 18:14:28 UTC |
-|summary| We propose a novel family of decision-aware surrogate losses calledPerturbation Gradient PG losses for the predict-then-optimize framework.These losses directly approximate the downstream decision loss and can beoptimized using off-the-shelf gradient-based methods. Importantly unlikeexisting surrogate losses the approximation error of our PG losses vanishes asthe number of samples grows. This implies that optimizing our surrogate lossyields a best-in-class policy asymptotically even in misspecified settings.This is the first such result in misspecified settings and we provide numericalevidence confirming our PG losses substantively outperform existing proposalswhen the underlying model is misspecified and the noise is not centrallysymmetric. Insofar as misspecification is commonplace in practice -- especiallywhen we might prefer a simpler more interpretable model -- PG losses offer anovel theoretically justified method for computationally tractabledecision-aware learning. |
+|idx| 2402.04146v1 |
+|title| Interpretable Multi-Source Data Fusion Through Latent Variable Gaussian Process |
+|authors| Sandipp Krishnan RaviYigitcan ComlekWei ChenArjun PathakVipul GuptaRajnikant UmretiyaAndrew HoffmanGhanshyam PilaniaPiyush PanditaSayan GhoshNathaniel MckeeverLiping Wang
+|links| http://arxiv.org/abs/2402.04146v1 |
+|updated| 2024-02-06 16:54:59 UTC |
+|summary| With the advent of artificial intelligence AI and machine learning MLvarious domains of science and engineering communites has leveraged data-drivensurrogates to model complex systems from numerous sources of informationdata. The proliferation has led to significant reduction in cost and timeinvolved in development of superior systems designed to perform specificfunctionalities. A high proposition of such surrogates are built extensivelyfusing multiple sources of data may it be published papers patents openrepositories or other resources. However not much attention has been paid tothe differences in quality and comprehensiveness of the known and unknownunderlying physical parameters of the information sources that could havedownstream implications during system optimization. Towards resolving thisissue a multi-source data fusion framework based on Latent Variable GaussianProcess LVGP is proposed. The individual data sources are tagged as acharacteristic categorical variable that are mapped into a physicallyinterpretable latent space allowing the development of source-aware datafusion modeling. Additionally a dissimilarity metric based on the latentvariables of LVGP is introduced to study and understand the differences in thesources of data. The proposed approach is demonstrated on and analyzed throughtwo mathematical representative parabola problem 2D Ackley function and twomaterials science design of FeCrAl and SmCoFe alloys case studies. From thecase studies it is observed that compared to using single-source and sourceunaware ML models the proposed multi-source data fusion framework can providebetter predictions for sparse-data problems interpretability regarding thesources and enhanced modeling capabilities by taking advantage of thecorrelations and relationships among different sources. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03254v1 |
-|title| Minimum Description Length and Generalization Guarantees for Representation Learning |
-|authors| Milad SefidgaranAbdellatif ZaidiPiotr Krasnowski
-|links| http://arxiv.org/abs/2402.03254v1 |
-|updated| 2024-02-05 18:12:28 UTC |
-|summary| A major challenge in designing efficient statistical supervised learningalgorithms is finding representations that perform well not only on availabletraining samples but also on unseen data. While the study of representationlearning has spurred much interest most existing such approaches areheuristic and very little is known about theoretical generalizationguarantees.  In this paper we establish a compressibility framework that allows us toderive upper bounds on the generalization error of a representation learningalgorithm in terms of the Minimum Description Length MDL of the labels orthe latent variables representations. Rather than the mutual informationbetween the encoders input and the representation which is often believed toreflect the algorithms generalization capability in the related literature butin fact falls short of doing so our new bounds involve the multi-letterrelative entropy between the distribution of the representations or labels ofthe training and test sets and a fixed prior. In particular these new boundsreflect the structure of the encoder and are not vacuous for deterministicalgorithms. Our compressibility approach which is information-theoretic innature builds upon that of Blum-Langford for PAC-MDL bounds and introduces twoessential ingredients: block-coding and lossy-compression. The latter allowsour approach to subsume the so-called geometrical compressibility as a specialcase. To the best knowledge of the authors the established generalizationbounds are the first of their kind for Information Bottleneck IB typeencoders and representation learning. Finally we partly exploit thetheoretical results by introducing a new data-dependent prior. Numericalsimulations illustrate the advantages of well-chosen such priors over classicalpriors used in IB. |
+|idx| 2402.04114v1 |
+|title| SCAFFLSA: Quantifying and Eliminating Heterogeneity Bias in Federated Linear Stochastic Approximation and Temporal Difference Learning |
+|authors| Paul MangoldSergey SamsonovSafwan LabbiIlya LevinReda AlamiAlexey NaumovEric Moulines
+|links| http://arxiv.org/abs/2402.04114v1 |
+|updated| 2024-02-06 16:06:59 UTC |
+|summary| In this paper we perform a non-asymptotic analysis of the federated linearstochastic approximation FedLSA algorithm. We explicitly quantify the biasintroduced by local training with heterogeneous agents and investigate thesample complexity of the algorithm. We show that the communication complexityof FedLSA scales polynomially with the desired precision epsilon whichlimits the benefits of federation. To overcome this we propose SCAFFLSA anovel variant of FedLSA that uses control variates to correct the bias oflocal training and prove its convergence without assumptions on statisticalheterogeneity. We apply the proposed methodology to federated temporaldifference learning with linear function approximation and analyze thecorresponding complexity improvements. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03291v1 |
-|title| Knowledge Acquisition and Integration with Expert-in-the-loop |
-|authors| Sajjadur RahmanFrederick ChoiHannah KimDan ZhangEstevam Hruschka
-|links| http://arxiv.org/abs/2402.03291v1 |
-|updated| 2024-02-05 18:49:55 UTC |
-|summary| Constructing and serving knowledge graphs KGs is an iterative andhuman-centered process involving on-demand programming and analysis. In thispaper we present Kyurem a programmable and interactive widget library thatfacilitates human-in-the-loop knowledge acquisition and integration to enablecontinuous curation a knowledge graph KG. Kyurem provides a seamlessenvironment within computational notebooks where data scientists explore a KGto identify opportunities for acquiring new knowledge and verifyrecommendations provided by AI agents for integrating the acquired knowledge inthe KG. We refined Kyurem through participatory design and conducted casestudies in a real-world setting for evaluation. The case-studies show thatintroduction of Kyurem within an existing HR knowledge graph construction andserving platform improved the user experience of the experts and helpederadicate inefficiencies related to knowledge acquisition and integration tasks |
+|idx| 2402.04142v1 |
+|title| Human Emotions Analysis and Recognition Using EEG Signals in Response to 360$^\circ$ Videos |
+|authors| Haseeb ur Rahman AbbasiZeeshan RashidMuhammad MajidSyed Muhammad Anwar
+|links| http://arxiv.org/abs/2402.04142v1 |
+|updated| 2024-02-06 16:48:58 UTC |
+|summary| Emotion recognition ER technology is an integral part for developinginnovative applications such as drowsiness detection and health monitoring thatplays a pivotal role in contemporary society. This study delves into ER usingelectroencephalography EEG within immersive virtual reality VRenvironments. There are four main stages in our proposed methodology includingdata acquisition pre-processing feature extraction and emotionclassification. Acknowledging the limitations of existing 2D datasets weintroduce a groundbreaking 3D VR dataset to elevate the precision of emotionelicitation. Leveraging the Interaxon Muse headband for EEG recording andOculus Quest 2 for VR stimuli we meticulously recorded data from 40participants prioritizing subjects without reported mental illnesses.Pre-processing entails rigorous cleaning uniform truncation and theapplication of a Savitzky-Golay filter to the EEG data. Feature extractionencompasses a comprehensive analysis of metrics such as power spectral densitycorrelation rational and divisional asymmetry and power spectrum. To ensurethe robustness of our model we employed a 10-fold cross-validation revealingan average validation accuracy of 85.54 with a noteworthy maximum accuracyof 90.20 in the best fold. Subsequently the trained model demonstrated acommendable test accuracy of 82.03 promising favorable outcomes. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03279v1 |
-|title| Stepping into the Right Shoes: The Effects of User-Matched Avatar Ethnicity and Gender on Sense of Embodiment in Virtual Reality |
-|authors| Tiffany D. DoCamille IsabellaRyan P. McMahan
-|links| http://arxiv.org/abs/2402.03279v1 |
-|updated| 2024-02-05 18:36:11 UTC |
-|summary| In many consumer virtual reality VR applications users embody predefinedcharacters that offer minimal customization options frequently emphasizingstorytelling over user choice. We explore whether matching a users physicalcharacteristics specifically ethnicity and gender with their virtualself-avatar affects their sense of embodiment in VR. We conducted a 2 x 2within-subjects experiment n32 with a diverse user population to explore theimpact of matching or not matching a users self-avatar to their ethnicity andgender on their sense of embodiment. Our results indicate that matching theethnicity of the user and their self-avatar significantly enhances sense ofembodiment regardless of gender extending across various aspects includingappearance response and ownership. We also found that matching gendersignificantly enhanced ownership suggesting that this aspect is influenced bymatching both ethnicity and gender. Interestingly we found that matchingethnicity specifically affects self-location while matching gender specificallyaffects ones body ownership. |
+|idx| 2402.04140v2 |
+|title| Advancing Legal Reasoning: The Integration of AI to Navigate Complexities and Biases in Global Jurisprudence with Semi-Automated Arbitration Processes (SAAPs) |
+|authors| Michael De'Shazer
+|links| http://arxiv.org/abs/2402.04140v2 |
+|updated| 2024-02-07 14:48:27 UTC |
+|summary| This study consists of a novel approach toward the analysis of courtjudgments spanning five countries including the United States the UnitedKingdom Rwanda Sweden and Hong Kong. This study also explores theintersection of the latest advancements in artificial intelligence AI andlegal analysis emphasizing the role of AI specifically generative AI inidentifying human biases and facilitating automated valid and coherentmultisided argumentation of court judgments with the goal of ensuringconsistent application of laws in and across various jurisdictions. Byincorporating Advanced Language Models ALMs and a newly introduced human-AIcollaborative framework this paper seeks to analyze Grounded Theory-basedresearch design with Advanced Language Models ALMs in the practice of law.SHIRLEY is the name of the AI-based application built on top of OpenAIs GPTtechnology focusing on detecting logical inconsistencies and biases acrossvarious legal decisions. SHIRLEY analysis is aggregated and is accompanied by acomparison-oriented AI-based application called SAM also an ALM to identifyrelative deviations in SHIRLEY bias detections. Further a CRITIC is generatedwithin semi-autonomous arbitration process via the ALM SARA. A novel approachis introduced in the utilization of an AI arbitrator to critically evaluatebiases and qualitative-in-nature nuances identified by the aforementioned AIapplications SAM in concert with SHIRLEY based on the Hague Rules onBusiness and Human Rights Arbitration. This Semi-Automated Arbitration ProcessSAAP aims to uphold the integrity and fairness of legal judgments by ensuringa nuanced debate-resultant understanding through a hybrid system of AI andhuman-based collaborative analysis. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03259v1 |
-|title| Meeting Bridges: Designing Information Artifacts that Bridge from Synchronous Meetings to Asynchronous Collaboration |
-|authors| Ruotong WangLin QiuJustin CranshawAmy X. Zhang
-|links| http://arxiv.org/abs/2402.03259v1 |
-|updated| 2024-02-05 18:17:15 UTC |
-|summary| A recent surge in remote meetings has led to complaints of Zoom fatigueand collaboration overload negatively impacting worker productivity andwell-being. One way to alleviate the burden of meetings is to de-emphasizetheir synchronous participation by shifting work to and enabling sensemakingduring post-meeting asynchronous activities. Towards this goal we propose thedesign concept of meeting bridges or information artifacts that canencapsulate meeting information towards bridging to and facilitatingpost-meeting activities. Through 13 interviews and a survey of 198 informationworkers we learn how people use online meeting information after meetings areover finding five main uses: as an archive as task reminders to onboard orsupport inclusion for group sensemaking and as a launching point forfollow-on collaboration. However we also find that current common meetingartifacts such as notes and recordings present challenges in serving asmeeting bridges. After conducting co-design sessions with 16 participants wedistill key principles for the design of meeting bridges to optimally supportasynchronous collaboration goals. Overall our findings point to theopportunity of designing information artifacts that not only support users toaccess but also continue to transform and engage in meeting informationpost-meeting. |
+|idx| 2402.03907v1 |
+|title| Embedding Large Language Models into Extended Reality: Opportunities and Challenges for Inclusion, Engagement, and Privacy |
+|authors| Efe BozkirSüleyman ÖzdelKa Hei Carrie LauMengdi WangHong GaoEnkelejda Kasneci
+|links| http://arxiv.org/abs/2402.03907v1 |
+|updated| 2024-02-06 11:19:40 UTC |
+|summary| Recent developments in computer graphics hardware artificial intelligenceAI and human-computer interaction likely lead to extended reality XRdevices and setups being more pervasive. While these devices and setups provideusers with interactive engaging and immersive experiences with differentsensing modalities such as eye and hand trackers many non-player charactersare utilized in a pre-scripted way or by conventional AI techniques. In thispaper we argue for using large language models LLMs in XR by embedding themin virtual avatars or as narratives to facilitate more inclusive experiencesthrough prompt engineering according to user profiles and fine-tuning the LLMsfor particular purposes. We argue that such inclusion will facilitate diversityfor XR use. In addition we believe that with the versatile conversationalcapabilities of LLMs users will engage more with XR environments which mighthelp XR be more used in everyday life. Lastly we speculate that combining theinformation provided to LLM-powered environments by the users and the biometricdata obtained through the sensors might lead to novel privacy invasions. Whilestudying such possible privacy invasions user privacy concerns and preferencesshould also be investigated. In summary despite some challenges embeddingLLMs into XR is a promising and novel research area with several opportunities. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03255v1 |
-|title| Security Advice for Parents and Children About Content Filtering and Circumvention as Found on YouTube and TikTok |
-|authors| Ran ElgedawyJohn SadikAnuj GautamTrinity BissahoyoChristopher ChildressJacob LeonardClay ShubertScott Ruoti
-|links| http://arxiv.org/abs/2402.03255v1 |
-|updated| 2024-02-05 18:12:33 UTC |
-|summary| In todays digital age concerns about online security and privacy havebecome paramount. However addressing these issues can be difficult especiallywithin the context of family relationships wherein parents and children mayhave conflicting interests. In this environment parents and children may turnto online security advice to determine how to proceed. In this paper weexamine the advice available to parents and children regarding contentfiltering and circumvention as found on YouTube and TikTok. In an analysis of839 videos returned from queries on these topics we found that half n399provide relevant advice. Our results show that of these videos roughlythree-quarters are accurate with the remaining one-fourth containing factuallyincorrect advice. We find that videos targeting children are both more likelyto be incorrect and actionable than videos targeting parents leaving childrenat increased risk of taking harmful action. Moreover we find that while advicevideos targeting parents will occasionally discuss the ethics of contentfiltering and device monitoring including recommendations to respectchildrens autonomy no such discussion of the ethics or risks of circumventingcontent filtering is given to children leaving them unaware of any risks thatmay be involved with doing so. Ultimately our research indicates thatvideo-based social media sites are already effective sources of security advicepropagation and that the public would benefit from security researchers andpractitioners engaging more with these platforms both for the creation ofcontent and of tools designed to help with more effective filtering. |
+|idx| 2402.03803v1 |
+|title| Robot voice a voice controlled robot using arduino |
+|authors| Vineeth TeedaK SujathaRakesh Mutukuru
+|links| http://arxiv.org/abs/2402.03803v1 |
+|updated| 2024-02-06 08:44:16 UTC |
+|summary| Robotic assistants reduce the manual efforts being put in by humans in theirday-to-day tasks. In this paper we develop a voice-controlled personalassistant robot. The robot takes the human voice commands by its own built-inmicrophone. This robot not only takes the commands and executes them but alsoacknowledges them through speech output. This robot can perform differentmovements turns wakeup/shutdown operations relocate an object from one placeto another and can also develop a conversation with humans. The voice commandsare processed in real time using an offline server. The speech signal commandsare directly communicated to the server using a USB cable. The personalassistant robot is developed on a microcontroller-based platform. Performanceevaluation is carried out with encouraging results of the initial experiments.Possible improvements for applications in homes hospitals car systems andindustries are also discussed. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03116v1 |
-|title| Feature-Action Design Patterns for Storytelling Visualizations with Time Series Data |
-|authors| Saiful KhanScott JonesBenjamin BachJaehoon ChaMin ChenJulie MeikleJonathan C RobertsJeyan ThiyagalingamJo WoodPanagiotis D. Ritsos
-|links| http://arxiv.org/abs/2402.03116v1 |
-|updated| 2024-02-05 15:45:59 UTC |
-|summary| We present a method to create storytelling visualization with time seriesdata. Many personal decisions nowadays rely on access to dynamic dataregularly as we have seen during the COVID-19 pandemic. It is thus desirableto construct storytelling visualization for dynamic data that is selected by anindividual for a specific context. Because of the need to tell data-dependentstories predefined storyboards based on known data cannot accommodate dynamicdata easily nor scale up to many different individuals and contexts. Motivatedinitially by the need to communicate time series data during the COVID-19pandemic we developed a novel computer-assisted method for meta-authoring ofstories which enables the design of storyboards that include feature-actionpatterns in anticipation of potential features that may appear in dynamicallyarrived or selected data. In addition to meta-storyboards involving COVID-19data we also present storyboards for telling stories about progress in amachine learning workflow. Our approach is complementary to traditional methodsfor authoring storytelling visualization and provides an efficient means toconstruct data-dependent storyboards for different data-streams of similarcontexts. |
+|idx| 2402.03750v1 |
+|title| Digital Twin Mobility Profiling: A Spatio-Temporal Graph Learning Approach |
+|authors| Xin ChenMingliang HouTao TangAchhardeep KaurFeng Xia
+|links| http://dx.doi.org/10.1109/HPCC-DSS-SmartCity-DependSys53884.2021.00182 |
+|updated| 2024-02-06 06:37:43 UTC |
+|summary| With the arrival of the big data era mobility profiling has become a viablemethod of utilizing enormous amounts of mobility data to create an intelligenttransportation system. Mobility profiling can extract potential patterns inurban traffic from mobility data and is critical for a variety oftraffic-related applications. However due to the high level of complexity andthe huge amount of data mobility profiling faces huge challenges. Digital TwinDT technology paves the way for cost-effective and performance-optimisedmanagement by digitally creating a virtual representation of the network tosimulate its behaviour. In order to capture the complex spatio-temporalfeatures in traffic scenario we construct alignment diagrams to assist incompleting the spatio-temporal correlation representation and design dilatedalignment convolution network DACN to learn the fine-grained correlationsi.e. spatio-temporal interactions. We propose a digital twin mobilityprofiling DTMP framework to learn node profiles on a mobility network DTmodel. Extensive experiments have been conducted upon three real-worlddatasets. Experimental results demonstrate the effectiveness of DTMP. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.03048v1 |
-|title| Cooperative Learning with Gaussian Processes for Euler-Lagrange Systems Tracking Control under Switching Topologies |
-|authors| Zewen YangSongbo DongArmin LedererXiaobing DaiSiyu ChenStefan SosnowskiGeorges HattabSandra Hirche
-|links| http://arxiv.org/abs/2402.03048v1 |
-|updated| 2024-02-05 14:33:52 UTC |
-|summary| This work presents an innovative learning-based approach to tackle thetracking control problem of Euler-Lagrange multi-agent systems with partiallyunknown dynamics operating under switching communication topologies. Theapproach leverages a correlation-aware cooperative algorithm framework builtupon Gaussian process regression which adeptly captures inter-agentcorrelations for uncertainty predictions. A standout feature is its exceptionalefficiency in deriving the aggregation weights achieved by circumventing thecomputationally intensive posterior variance calculations. Through Lyapunovstability analysis the distributed control law ensures bounded tracking errorswith high probability. Simulation experiments validate the protocols efficacyin effectively managing complex scenarios establishing it as a promisingsolution for robust tracking control in multi-agent systems characterized byuncertain dynamics and dynamic communication structures. |
+|idx| 2402.03972v1 |
+|title| Joint Intrinsic Motivation for Coordinated Exploration in Multi-Agent Deep Reinforcement Learning |
+|authors| Maxime ToquebiauNicolas BredecheFaïz BenamarJae-Yun Jun
+|links| http://arxiv.org/abs/2402.03972v1 |
+|updated| 2024-02-06 13:02:00 UTC |
+|summary| Multi-agent deep reinforcement learning MADRL problems often encounter thechallenge of sparse rewards. This challenge becomes even more pronounced whencoordination among agents is necessary. As performance depends not only on oneagents behavior but rather on the joint behavior of multiple agents findingan adequate solution becomes significantly harder. In this context a group ofagents can benefit from actively exploring different joint strategies in orderto determine the most efficient one. In this paper we propose an approach forrewarding strategies where agents collectively exhibit novel behaviors. Wepresent JIM Joint Intrinsic Motivation a multi-agent intrinsic motivationmethod that follows the centralized learning with decentralized executionparadigm. JIM rewards joint trajectories based on a centralized measure ofnovelty designed to function in continuous environments. We demonstrate thestrengths of this approach both in a synthetic environment designed to revealshortcomings of state-of-the-art MADRL methods and in simulated robotic tasks.Results show that joint exploration is crucial for solving tasks where theoptimal strategy requires a high level of coordination. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.02896v1 |
-|title| LLM Agents in Interaction: Measuring Personality Consistency and Linguistic Alignment in Interacting Populations of Large Language Models |
-|authors| Ivar FrischMario Giulianelli
-|links| http://arxiv.org/abs/2402.02896v1 |
-|updated| 2024-02-05 11:05:20 UTC |
-|summary| While both agent interaction and personalisation are vibrant topics inresearch on large language models LLMs there has been limited focus on theeffect of language interaction on the behaviour of persona-conditioned LLMagents. Such an endeavour is important to ensure that agents remain consistentto their assigned traits yet are able to engage in open naturalisticdialogues. In our experiments we condition GPT-3.5 on personality profilesthrough prompting and create a two-group population of LLM agents using asimple variability-inducing sampling algorithm. We then administer personalitytests and submit the agents to a collaborative writing task finding thatdifferent profiles exhibit different degrees of personality consistency andlinguistic alignment to their conversational partners. Our study seeks to laythe groundwork for better understanding of dialogue-based interaction betweenLLMs and highlights the need for new approaches to crafting robust morehuman-like LLM personas for interactive environments. |
+|idx| 2402.03928v1 |
+|title| Approximating the Core via Iterative Coalition Sampling |
+|authors| Ian GempMarc LanctotLuke MarrisYiran MaoEdgar Duéñez-GuzmánSarah PerrinAndras GyorgyRomuald ElieGeorgios PiliourasMichael KaisersDaniel HennesKalesha BullardKate LarsonYoram Bachrach
+|links| http://arxiv.org/abs/2402.03928v1 |
+|updated| 2024-02-06 11:54:48 UTC |
+|summary| The core is a central solution concept in cooperative game theory defined asthe set of feasible allocations or payments such that no subset of agents hasincentive to break away and form their own subgroup or coalition. However ithas long been known that the core and approximations such as the least-coreare hard to compute. This limits our ability to analyze cooperative games ingeneral and to fully embrace cooperative game theory contributions in domainssuch as explainable AI XAI where the core can complement the Shapley valuesto identify influential features or instances supporting predictions byblack-box models. We propose novel iterative algorithms for computing variantsof the core which avoid the computational bottleneck of many other approachesnamely solving large linear programs. As such they scale better to very largeproblems as we demonstrate across different classes of cooperative gamesincluding weighted voting games induced subgraph games and marginalcontribution networks. We also explore our algorithms in the context of XAIproviding further evidence of the power of the core for such applications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.02468v1 |
-|title| Fast Peer Adaptation with Context-aware Exploration |
-|authors| Long MaYuanfei WangFangwei ZhongSong-Chun ZhuYizhou Wang
-|links| http://arxiv.org/abs/2402.02468v1 |
-|updated| 2024-02-04 13:02:27 UTC |
-|summary| Fast adapting to unknown peers partners or opponents with differentstrategies is a key challenge in multi-agent games. To do so it is crucial forthe agent to efficiently probe and identify the peers strategy as this is theprerequisite for carrying out the best response in adaptation. However it isdifficult to explore the strategies of unknown peers especially when the gamesare partially observable and have a long horizon. In this paper we propose apeer identification reward which rewards the learning agent based on how wellit can identify the behavior pattern of the peer over the historical contextsuch as the observation over multiple episodes. This reward motivates the agentto learn a context-aware policy for effective exploration and fast adaptationi.e. to actively seek and collect informative feedback from peers whenuncertain about their policies and to exploit the context to perform the bestresponse when confident. We evaluate our method on diverse testbeds thatinvolve competitive Kuhn Poker cooperative PO-Overcooked or mixedPredator-Prey-W games with peer agents. We demonstrate that our methodinduces more active exploration behavior achieving faster adaptation andbetter outcomes than existing methods. |
+|idx| 2402.03669v1 |
+|title| Convergence Analysis of Distributed Generalized Nash Equilibria Seeking Algorithm with Asynchrony and Delays |
+|authors| Huaqing LiLiang RanLifeng ZhengZhe LiJinhui HuJun LiTingwen Huang
+|links| http://arxiv.org/abs/2402.03669v1 |
+|updated| 2024-02-06 03:46:26 UTC |
+|summary| This paper considers a class of noncooperative games in which the feasibledecision sets of all players are coupled together by a coupled inequalityconstraint. Adopting the variational inequality formulation of the game wefirst introduce a new local edge-based equilibrium condition and develop adistributed primal-dual proximal algorithm with full information. Consideringchallenges when communication delays occur we devise an asynchronousdistributed algorithm to seek a generalized Nash equilibrium. This asynchronousscheme arbitrarily activates one player to start new computations independentlyat different iteration instants which means that the picked player can use theinvolved out-dated information from itself and its neighbors to perform newupdates. A distinctive attribute is that the proposed algorithms enable thederivation of new distributed forward-backward-like extensions. In theoreticalaspect we provide explicit conditions on algorithm parameters for instancethe step-sizes to establish a sublinear convergence rate for the proposedsynchronous algorithm. Moreover the asynchronous algorithm guarantees almostsure convergence in expectation under the same step-size conditions and somestandard assumptions. An interesting observation is that our analysis approachimproves the convergence rate of prior synchronous distributedforward-backward-based algorithms. Finally the viability and performance ofthe proposed algorithms are demonstrated by numerical studies on the networkedCournot competition. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.02097v1 |
-|title| Settling Decentralized Multi-Agent Coordinated Exploration by Novelty Sharing |
-|authors| Haobin JiangZiluo DingZongqing Lu
-|links| http://arxiv.org/abs/2402.02097v1 |
-|updated| 2024-02-03 09:35:25 UTC |
-|summary| Exploration in decentralized cooperative multi-agent reinforcement learningfaces two challenges. One is that the novelty of global states is unavailablewhile the novelty of local observations is biased. The other is how agents canexplore in a coordinated way. To address these challenges we propose MACE asimple yet effective multi-agent coordinated exploration method. Bycommunicating only local novelty agents can take into account other agentslocal novelty to approximate the global novelty. Further we newly introduceweighted mutual information to measure the influence of one agents action onother agents accumulated novelty. We convert it as an intrinsic reward inhindsight to encourage agents to exert more influence on other agentsexploration and boost coordinated exploration. Empirically we show that MACEachieves superior performance in three multi-agent environments with sparserewards. |
+|idx| 2402.03653v1 |
+|title| Agent-Based Triangle Counting and its Applications in Anonymous Graphs |
+|authors| Prabhat Kumar ChandApurba DasAnisur Rahaman Molla
+|links| http://arxiv.org/abs/2402.03653v1 |
+|updated| 2024-02-06 03:00:12 UTC |
+|summary| Triangle counting in a graph is a fundamental problem and has a wide range ofapplications in various domains. It is crucial in understanding the structuralproperties of a graph and is often used as a building block for more complexgraph analytics. In this paper we solve the triangle counting problem in ananonymous graph in a distributed setting using mobile agents and subsequentlyuse this as a subroutine to tackle the truss decomposition and trianglecentrality problem. The paper employs mobile agents placed on the nodes of thegraph to coordinate among themselves to solve the triangle enumeration problemfor the graph. Following the literature we consider the synchronous systemswhere each robot executes its tasks concurrently with all others and hence timecomplexity can be measured as the number of rounds needed to complete the task.The graph is anonymous i.e. without any node labels or IDs but the agentsare autonomous with distinct IDs and have limited memory. Agents can onlycommunicate with other agents locally i.e. if and only if they are at the samenode. The goal is to devise algorithms that minimise both the time required fortriangle counting and the memory usage at each agent. We further demonstratehow the triangle count obtained through the mobile agent approach can beleveraged to address the truss decomposition triangle centrality and localclustering coefficient problems which involves finding maximal sub-graphs withstrong interconnections. Truss decomposition helps in identifying maximalhighly interconnected sub-graphs or trusses within a network thus revealingthe structural cohesion and tight-knit communities in complex graphsfacilitating the analysis of relationships and information flow in variousfields such as social networks biology and recommendation systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.01968v1 |
-|title| A Survey on Context-Aware Multi-Agent Systems: Techniques, Challenges and Future Directions |
-|authors| Hung DuSrikanth ThudumuRajesh VasaKon Mouzakis
-|links| http://arxiv.org/abs/2402.01968v1 |
-|updated| 2024-02-03 00:27:22 UTC |
-|summary| Research interest in autonomous agents is on the rise as an emerging topic.The notable achievements of Large Language Models LLMs have demonstrated theconsiderable potential to attain human-like intelligence in autonomous agents.However the challenge lies in enabling these agents to learn reason andnavigate uncertainties in dynamic environments. Context awareness emerges as apivotal element in fortifying multi-agent systems when dealing with dynamicsituations. Despite existing research focusing on both context-aware systemsand multi-agent systems there is a lack of comprehensive surveys outliningtechniques for integrating context-aware systems with multi-agent systems. Toaddress this gap this survey provides a comprehensive overview ofstate-of-the-art context-aware multi-agent systems. First we outline theproperties of both context-aware systems and multi-agent systems thatfacilitate integration between these systems. Subsequently we propose ageneral process for context-aware systems with each phase of the processencompassing diverse approaches drawn from various application domains such ascollision avoidance in autonomous driving disaster relief management utilitymanagement supply chain management human-AI interaction and others. Finallywe discuss the existing challenges of context-aware multi-agent systems andprovide future research directions in this field. |
+|idx| 2402.03590v1 |
+|title| Assessing the Impact of Distribution Shift on Reinforcement Learning Performance |
+|authors| Ted FujimotoJoshua SuetterleinSamrat ChatterjeeAuroop Ganguly
+|links| http://arxiv.org/abs/2402.03590v1 |
+|updated| 2024-02-05 23:50:55 UTC |
+|summary| Research in machine learning is making progress in fixing its ownreproducibility crisis. Reinforcement learning RL in particular faces itsown set of unique challenges. Comparison of point estimates and plots thatshow successful convergence to the optimal policy during training mayobfuscate overfitting or dependence on the experimental setup. Althoughresearchers in RL have proposed reliability metrics that account foruncertainty to better understand each algorithms strengths and weaknesses therecommendations of past work do not assume the presence of out-of-distributionobservations. We propose a set of evaluation methods that measure therobustness of RL algorithms under distribution shifts. The tools presented hereargue for the need to account for performance over time while the agent isacting in its environment. In particular we recommend time series analysis asa method of observational RL evaluation. We also show that the uniqueproperties of RL and simulated dynamic environments allow us to make strongerassumptions to justify the measurement of causal impact in our evaluations. Wethen apply these tools to single-agent and multi-agent environments to show theimpact of introducing distribution shifts during test time. We present thismethodology as a first step toward rigorous RL evaluation in the presence ofdistribution shifts. |
 
 
