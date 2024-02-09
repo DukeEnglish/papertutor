@@ -1,0 +1,689 @@
+Hydra: Sequentially-Dependent Draft Heads for Medusa De-
+coding
+ZacharyAnkner∗,1,2 RishabParthasarathy∗,1 AniruddhaNrusimha1
+ChristopherRinard1 JonathanRagan-Kelley1 WilliamBrandon1
+1MIT 2MosaicML
+Abstract
+Tocombatthememorybandwidth-boundnatureofautoregressiveLLM
+inference,previousresearchhasproposedthespeculativedecodingframe-
+work. To perform speculative decoding, a small draft model proposes
+candidatecontinuationsoftheinputsequence,thatarethenverifiedinpar-
+allelbythebasemodel. Onewaytospecifythedraftmodel,asusedinthe
+recentMedusadecodingframework,isasacollectionoflight-weightheads,
+calleddraftheads,thatoperateonthebasemodel’shiddenstates. Todate,
+allexistingdraftheadshavebeensequentiallyindependent,meaningthat
+theyspeculatetokensinthecandidatecontinuationindependentlyofany
+precedingtokensinthecandidatecontinuation. Inthiswork,wepropose
+Hydraheads,asequentiallydependent,drop-inreplacementforstandard
+draftheadsthatsignificantlyimprovesspeculationaccuracy.Decodingwith
+HydraheadsimprovesthroughputcomparedtoMedusadecodingwith
+standarddraftheads. WefurtherexplorethedesignspaceofHydrahead
+trainingobjectivesandarchitectures,andproposeacarefully-tunedHydra
+headrecipe,whichwecallHydra++,thatimprovesdecodingthroughput
+by 1.31× and 2.71× compared to Medusa decoding and autoregressive
+decoding,respectively. Overall,Hydraheadsareasimpleinterventionon
+standarddraftheadsthatsignificantlyimprovetheend-to-endspeedof
+draftheadbasedspeculativedecoding.
+1 Introduction
+Astransformer-basedlargelanguagemodels(LLMs)haveenteredwidespreaddeployment,
+researchintoimprovingtheinferenceefficiencyofthesemodelshasbecomeincreasingly
+important. WhileLLMpretrainingisabletoachievehighhardwareutilizationbyoperating
+overtheentireinputsequenceinparallel,theefficiencyofLLMinferencehastraditionally
+beenconstrainedbytheneedtogeneratetokensone-by-oneinsequence. OncurrentGPU
+hardware,theserialnatureofLLMdecodingmakesitamemorybandwidth-boundproblem,
+withthroughputlimitedbythemovementoflargeweightmatricesfromGPUmainmemory
+tolocalregisters. Aseachgenerationsteprequiresaccessingtheentiretyofthemodel’s
+weights,butonlyinvolvesacomparativelysmallnumberofFLOPs(processingjustone
+token for each sequence in the batch), LLM decoding tends to underutilize the GPU’s
+abundantcapacityforfloating-pointcomputation.
+TomitigatethememorybandwidthbottleneckinsequentialLLMdecoding,recentresearch
+hasinvestigatedacceleratingLLMinferencethroughspeculativedecoding. Speculativede-
+codingusesasmallerdraftmodeltoproposeamulti-tokencandidatecontinuationofthe
+currentsequenceoneachgenerationstep. TheoriginalLLMthenverifiesalltokensinthe
+candidatecontinuationinparallel, appendingsomesubsetofthemtothesequenceand
+discarding the rest. Because each verification step requires only a single forward pass
+throughtheoriginalLLM,butmayresultinmorethanonetokenbeingappendedtothe
+sequence,speculativedecodingcanacceleratedecodingbyreducingtheamountofweight
+datamovementrequiredpergeneratedtoken.
+*denotesequalcontribution. 1
+Correspondencetoankner@mit.edu.
+4202
+beF
+7
+]GL.sc[
+1v90150.2042:viXraA critical component in any application of speculative decoding is the choice of draft
+model,whichmustbecheapenoughsuchthatthecostofqueryingitdoesnotnegatethe
+efficiencygainsfromqueryingthebasemodelinparallel,butaccurateenoughsuchthat
+theacceptancerateintheverificationstepremainshigh. Whilethedraftmodelsusedin
+speculativedecodinghavetraditionallybeenstand-alone,independently-trainedlanguage
+models, Stern et al. (2018) and Cai et al. (2024) instead investigate structuring the draft
+modelasacollectionoflightweightheadsoperatingonthebasemodel’ssemantically-rich
+hiddenstates. WerefertothelightweightheadsthatoperatesontheoriginalLLMhidden
+statesasdraftheads. Inthedraftheadparadigm,eachdraftheadisresponsibleforpredicting
+theidentityofatokenafixednumberofstepsintothefuture.
+All draft heads to date make predictions only as a function of the base model’s hidden
+statesfrompreviouslyverifiedtokens,makingthemunawareofearliertokensinthecurrent
+candidate continuation. Specifically, when decoding the ith token in the continuation, a
+standarddraftheadisnotconditionedonwhatpreviousdraftheadsspeculativelygener-
+atedforthe1st,2nd,...,(i−1)th tokensinthecontinuation. Becauseofthestrongstatistical
+dependenciesbetweenneighboringtokensinlanguage,thissequentialindependencelimits
+thepredictionaccuracyofexistingdraftheadarchitectures. InthisworkweproposeHydra
+heads,adrop-insequentiallydependentalternativetostandarddraftheads,thatimprovetoken
+predictionaccuracyandend-to-enddecodingthroughput. Toconstructsequentiallydepen-
+dentdraftheads,weseteachhead’soutputbeafunctionofthecandidatecontinuationso
+far. Thissimpledesignchangeleadstosignificantlybetterspeculationqualityascompared
+tostandarddraftheads,increasingtheaveragecandidatecontinuationacceptancelength
+byupto0.46tokens. Thisimprovementinspeculationqualitycorrespondstoasignificant
+improvementindecodingspeeds,withHydraheadbaseddecodingachievingupto1.1×
+betterthroughputthanMedusadecoding.
+InadditiontoproposingHydraheads,wefurtherexplorethedesignspaceoftheirtrain-
+ing objective and architecture. We investigate adding noise to the base model’s hidden
+states (Jain et al., 2024), using a teacher loss objective, and adding an extra transformer
+decoderlayertotheHydraheads. Wefindthatthebestcombinationofthesetechniques
+(teacherlossandextradecoderlayer)achievesupto1.31×and2.7×higherthroughput
+thanstandardMedusadecodingandregularautoregressivedecoding,respectively.
+Contributions Inthisworkwepresentthefollowingcontributions:
+• Weanalyzethestandardformulationofdraftheadsandobservethattheyarese-
+quentiallyindependentduringdecoding.WeproposeHydraheadsasasequentially
+dependentalternative,thatincreaseend-to-enddecodingthroughputbyupto1.1×
+ascomparedtoMedusadecoding(section5).
+• WeperformathoroughempiricalexplorationofthedesignspaceofHydraheads.
+Using a teacher loss and adding an extra decoder layer to the Hydra heads, we
+are able to further increase decoding throughput by up to 1.31× and 2.7× over
+standardMedusadecodingandautoregressivedecodingrespectively. (section6,
+section7).
+2 Background
+InthissectionweprovidebackgrounddetailsonbothspeculativedecodingandMedusa
+decoding.
+Speculativedecoding. Speculativedecoding(Sternetal.,2018;Leviathanetal.,2023;Chen
+etal.,2023)providesageneralframeworkforefficientLLMdecoding. Speculativedecoding
+generatestextbycombininganexpensive,high-qualitybasemodelwithacheaper,lower-
+qualitydraftmodel. Oneachstepofspeculativedecoding,weusethedraftmodeltogenerate
+oneormorecandidatecontinuations,eachofwhichextendsseveraltokensintothefuture. We
+thenuseasingleforwardpassthroughthebasemodeltoverifythesecandidatecontinuations
+2inparallelbasedonsomeverificationcriterion. Theverificationprocessdetermineswhich
+candidatetokenswillbeappendedtothesequence,andwhichwillbediscarded.
+In the simplest form of speculative decoding, the draft model only generates a single
+candidatecontinuationoneachgenerationstep. Lettingx≤t bethesequencethathasbeen
+generatedsofarandfixingsomespeculationlength K,wequerythedraftmodel’sjoint
+distribution p draft(x t+1,...,x t+K | x≤t)togenerateacandidatecontinuationxˆ t+1,...,xˆ t+K.
+Wetheninvokethebasemodelonthecandidatecontinuationtocomputetheconditional
+probabilities: p base(xˆ t+1 | x≤t),...,p base(xˆ t+K | x≤t,xˆ t+1,...,xˆ t+K−1); querying the base
+modelisdoneinasingleforwardpass. Thesebasemodelprobabilitiesbecometheinput
+totheverificationcriterion,whichchoosessomeprefixxˆ t+1,...,xˆ t+naccept ofthecandidate
+continuationtoaccept,discardingtherest.
+Commonverificationcriteriaforusewithspeculativedecodingincluderejectionresampling
+(Leviathan et al., 2023; Chen et al., 2023), which guarantees that the output distribution
+matchesthebasemodel’sdistribution,andgreedyacceptance(Sternetal.,2018),inwhich
+candidatetokensareacceptediftheymatchthebaseLLM’smostlikelyprediction. Forall
+verificationcriteriaincommonuse,usingadraftmodelwhosepredictionsmoreaccurately
+match those of the base model will result in increased average acceptance lengths, and
+consequentlygreaterdecodingthroughput.
+Treedecoding. Speculativedecodingcanbegeneralizedtosettingsinwhichthedraft
+modelproposesatreeofcandidatecontinuations,ratherthanasinglecandidatecontinu-
+ation(Miaoetal.,2023;Spector&Re,2023;Caietal.,2024). Nodesofthiscandidatetree
+correspond to candidate tokens, and the children of a node represent different possible
+tokenswhichmightfollowitinthecontinuation. Eachpathalongthetreethusrepresents
+a different candidate continuation. To populate a node with m children, we query the
+draftmodelforthemmostlikelytokensthatmightfollowit,conditionedonthegenerated
+sequencesofarandthecandidatecontinuationdefinedbythepathtothenodefromthe
+rootofthetree. Thechildrenateachnodearesortedindescendingorderofconditional
+probability. Typically,thestructureofthetreeisfixedatdesigntime,sothatthenumberof
+childrenmateachpositioninthetreedoesnotdependonanyruntimedata.
+After generating a candidate continuation tree from the draft model, we compute the
+conditionalprobabilitiesofallnodesinthetreeusingasingleforwardpassthroughthe
+basemodel. We querythe basemodelfor theseconditional probabilitiesby packingall
+ofthetree’stokensintoasingleinputsequence,andmanipulatingtheattentionmaskto
+ensurethateachtokencanonlyattendtoitsparentsinthetree.Theconditionalprobabilities
+obtainedfromqueryingthebasemodelcanthenbeusedasinputtothesameverification
+criteriathatareusedinthesingle-candidatesetting.
+Lightweightheadsasadraftmodel. Whiletypicallythedraftmodelusedinspeculative
+decodingisanindependentlytrainedlanguagemodel,Sternetal.(2018)definethedraft
+modelasacollectionoflightweightheadsthattakeasinputthebasemodel’shiddenstate,
+whichwerefertoasthedraftheads. TakingKtobethemaximumspeculationlength,the
+draftmodelusedbySternetal. isdefinedbyacollectionofsmallMLPs f ,..., f
+draft,1 draft,K
+responsibleforpredictingthetokens1,...,Kstepsintothefuture. Thepredictionsofthese
+headsarestatisticallyindependentofeachother;lettingx≤t denotethesequencegenerated
+sofar,andlettingh t−1denotethelast-layerhiddenstateofthetokenmostrecentlyprocessed
+bythebasemodel,Sternetal. computetheirdraftpredictionsoneachgenerationstepas
+p draft(x t+i | x≤t+i−1) = f draft,i(h t−1) (1)
+Becausethehiddenstateh t−1onlydependsonthetokensx≤t−1,thejointdistributionofall
+draftheadsdecomposesassimplytheproductdistributionofindividualheadsconditioned
+onx≤t−1:
+p draft(x t+1,...,x t+K | x≤t) = p draft(x t+1 | x≤t−1)···p draft(x t+K | x≤t−1)
+fig.1providesavisualizationofcandidatecontinuationgenerationusingdraftheads.
+3Existing Draft Heads Hydra Draft Heads (Ours)
+“LLMs” “Go” “Fast” “LLMs” “Go” “Fast”
+Hidden Head Head Hidden Head Head
+State 1 2 State 1 2
+Base Model Base Model
+… Context “Make” … Context “Make”
+Figure1: Avisualizationofgeneratingacandidatecontinuationusingexistingdraftheads
+andusingourHydradraftheads. Linesgoingintoaheadrepresentinputstothedrafthead.
+Whiletheonlyinputtoexistingdraftheadsisthebasemodel’slast-layerhiddenstatefor
+themostrecentlyprocessedtoken,Hydraheadsleverageearliertokensinthecandidate
+continuationasadditionalinputs.
+Medusadecoding. Medusadecoding(Caietal.,2024)isaparticularconfigurationofthe
+techniqueslistedabove. Specifically,itisspeculativedecodingwithatreeofcandidates
+wherethedraftmodelisacollectionofdraftheads.
+WhileMedusadecodingiscompatiblewithanyspecificmodelarchitectureusedforeach
+drafthead f ,Caietal.(2024)choosetouseasinglelayerMLPwitharesidualconnec-
+draft,i
+tion.
+3 HydraHeads
+Inthissection,weprovidethetechnicaldetailsonconstructingHydraheadsbyadding
+sequentialdependencetostandarddraftheads.
+Sequentiallydependentdraftheads. ThekeyobservationbehindHydraheadsisthat
+there is no sequential dependence in standard draft heads, i.e., each draft head makes
+predictionsindependently. Adraftmodeldefinedbyacollectionofdraftheadsspeculates
+theidentityoftheith futuretoken(eq.(1))as f draft,i(h t−1). However,h t−1isonlyafunction
+ofthealreadygeneratedsequencex≤t−1. Thus,whenusingdraftheads:
+p draft(xˆ t+i|x≤t,xˆ t+1,...,xˆ t+i−1) = p draft(xˆ t+i|x≤t−1)
+Intuitively,thismeansthatthereisnosequentialdependencebetweendraftheads: when
+weuseadraftheadtospeculatetheith tokeninacandidatecontinuation,itisunawareof
+the1st,2nd,...,(i−1)th tokensinthecandidatecontinuation.
+WeproposeHydraheads,whicharesequentiallydependentdraftheads. Hydraheadsare
+sequentiallydependentastheyareafunctionofboththebasemodel’shiddenstateupto
+timetaswellastheinputembeddingsofthetokenssampledbypreviousHydraheads.
+Namely,thedraftmodelisnowacollectionofHydraheads{f ,..., f }andthe
+Hydra,1 Hydra,K
+ith futuretoken’sdistributionisparameterizedbythiscollectionofHydraheadsas:
+p draft(xˆ t+i|x≤t,xˆ t+1,...,xˆ t+i−1) = f Hydra,i(h t−1,x t,xˆ t+1,...,xˆ t+i−1) (2)
+whereh t−1isagainthebasemodel’shiddenstateofthefinaltokeninthealreadydecoded
+sequence. ThesequentialdependencyofHydraheadsv.s. standarddraftheadsisvisualized
+infig.1.
+WeusethetermHydraDecodingtorefertospeculativedecodingwithtreecandidatesand
+Hydraheads.
+4AswithMedusa,theframeworkofHydradecodingiscompatiblewithanychoiceofmodel
+architectureusedtoimplement f . Themostbasicarchitecture,whichweuseforour
+Hydra,i
+directcomparisonswithMedusa,issimplyasinglehiddenlayerMLPwhoseinputisthe
+hiddenstateh t−1concatenatedwiththeinputembeddingsoftheproceedingtokensinthe
+candidatecontinuation E ,E ,...,E , wheretheconcatenationisperformedalong
+xt xˆt+1 xˆt+i−1
+thefeaturedimension. Wechosetousethisarchitectureasitismostcomparabletothe
+baselineMedusaarchitecture;however,weexplorealternativeHydraheadarchitectures
+insection6.2.
+4 SharedTrainingandEvaluationDetails
+In this section we detail the elements of our training and evaluation procedure that are
+commonacrossallourexperiments.
+Models. We build on the Vicuna family of models (Chiang et al., 2023), which are
+conversation-finetunedLLaMamodels(Touvronetal.,2023),asthebasemodelsforour
+speculativedecodingexperiments. WeconsiderVicuna7B,13B,and33B.
+Training. Whiledraftheadscanbetrainedinconjuctionwiththebasemodel,inthiswork,
+weonlystudybasemodelswithfrozenweights. AllmodelsaretrainedontheShareGPT
+dataset(ShareGPT,2023),acollectionofmulti-turnconversations. Trainingisperformed
+on8×NvidiaA100-80gbandconductedusingtheHuggingFaceTrainer(HuggingFace).
+Weuseacosinelearningrateschedulewithwarmup(Loshchilov&Hutter,2017)andthe
+AdamWoptimizer(Loshchilov&Hutter,2019)withparametersβ =0.9,β =0.999.
+1 2
+Evaluation. AllevaluationsareperformedonMT-Bench(Zhengetal.,2023),amulti-turn
+conversationbenchmark. Unlessotherwisespecified,experimentsareconductedusingthe
+greedyverificationcriterion;sincethereisnostochasticityinthegreedysamplingprocedure,
+wedon’treportthequalityofgenerationsastheyareidenticaltothebasemodel. Instead,
+wereporttheaveragethroughput,whichisthenumberoftokensgeneratedpersecond,and
+theaverageacceptancelength,whichisthenumberoftokensgeneratedperdecodingstep,to
+evaluatethespeedandqualityofHydradecoding. Webenchmarkall7Band13Bparameter
+experimentsonasingle A100-40gbGPUandall33Bparameterexperimentsona single
+A100-80gbGPU.
+5 HeadtoHeadComparisonofMedusaandHydra
+InthissectionweperformaheadtoheadcomparisonofthedecodingspeedsofMedusa
+andHydra.
+Experimentsetup. Inadditiontothesetupdetailedinsection4,allheadsaretrainedwith
+aninitiallearningrateof1e-3,atrainingdurationof1epoch,andabatchsizeof128as
+donein Caietal.(2024). WeconsiderMedusa/Hydraschemesconsistingof4draftheads,
+eachusingasinglehiddenlayerMLPwithaskipconnectionasitsarchitecture.
+5.1 Results
+ThehypothesisthatmotivatedustoproposeHydraheadsisthatintroducingsequential
+dependenceamongdraftheadsshouldimprovetheirpredictionquality,leadingtogreater
+decodingthroughput. WetestthishypothesisbydirectlycomparingourHydradecoding
+withMedusadecodingaswellasthebaselineofstandardautoregressivedecoding. Weplot
+theresultsofourhead-to-headcomparisoninfig.2. Wefindthatacrossallbasemodelsizes
+evaluated,Hydradecodingachievethegreatestaverageacceptancelength,whichleads
+toasignificantimprovementindecodingthroughput. Specifically,Hydraheadsachieve
+a 2.36×,2.17×, and 2.15× improvement in throughput as compared to autoregressive
+decodingforthe7B,13B,and33Bparameterbasemodelsrespectively. Thistranslatestoa
+5Head to Head Medusa Comparison
+120
+2.36x 3.04x 3.06x
+3.0 2.95x 2.13x
+100
+2.58x 2.60x 2.55x
+2.5
+80 2.17x Baseline
+1.97x Medusa
+2.0 Hydra
+60
+1.00x
+2.15x 1.5 40 1.00x 1.93x
+1.00x 1.00x 1.00x
+20 1.00x 1.0
+Vicuna 7B Vicuna 13B Vicuna 33B Vicuna 7B Vicuna 13B Vicuna 33B
+Base Model Base Model
+Figure2: PerformancecomparisononMT-BenchofHydra,Medusa,andthebaselineof
+autogressivedecoding. Hydraheadsincreasedecodingthroughputandaverageacceptance
+lengthcomparedtoallothermethods.
+throughputimprovementoverMedusadecodingof1.11×,1.10×,and1.11×forthe7B,13B,
+and33Bparameterbasemodelsrespectively. Theseresultsdemonstratethatmakingdraft
+headssequentiallydependentsignificantlyimprovesthepredictionqualityofsaidheads
+andthustheirdecodingspeed.
+6 ExploringtheDesignSpaceofHydraHeads
+InthissectionweexploremodificationstothetrainingprocedureandarchitectureofHydra
+heads.
+Basic improvements to Hydra head hyperparameters. Before ablating more complex
+aspectsofHydraheadtraining,weslightlyadjustthetraininghyperparametersusedby
+Caietal.(2024). WeusetheseadjustedhyperparametersfortrainingallHydraheadsfor
+therestofourexperiments. Firstly,aswenoticedthatHydraheadqualitydoesnotsaturate
+after1epoch,wetrainHydraheadsfor10epochsinsteadof1epoch. Secondly,tomitigate
+over-fittingwesettheweightdecaytobe0.1andadddropoutatarateof0.2toeachhidden
+layeroftheHydraheadMLP.Finally,weincreasethesizeofeachHydrahead’sMLPtobe
+4hiddenlayersinsteadof1. Wechose4hiddenlayersasweobserveddiminishinggainsin
+predictionqualitybeyondthatMLPdepth.
+6.1 ExploringtheTrainingProcedureofHydraHeads
+Adding noise to the input sequence. Jain et al. (2024) demonstrate that adding noise
+totheinputembeddingsofanLLMduringfinetuningcanimprovetheresultingmodel’s
+performance. Specifically,theysamplenoiseϵ ∈ RB×L×d ∼ Uniform(−1,1),scaleitbya
+factor α√noise,andthenaddthescalednoisetotheinputembeddings,whereBisthebatch
+Ld
+size, L isthesequencelength, d isthemodeldimension, and α isahyperparameter
+noise
+that controls the strength of the noise. We consider whether applying such noise to the
+hiddenstatesofthebaseLLMcanalsoimprovetheperformanceoftheHydraheads. For
+ourexperiments,wesetα =75.
+noise
+DistillingthebaseLLM. InthestandardMedusadecodingframework,thedraftheads
+aretrainedtopredictthetextoftheunderlyingfine-tuningdataset. Wequestionwhether
+thisistheoptimaltrainingobjectiveas,duringinference,thegoalofthedraftheadsisonly
+topredictthetokenwhichthebaseLLMwouldhaveautoregressivelypredicted. Asalso
+employedbyZhouetal.(2024),weinvestigateusingateacherlosswhereeachHydrahead’s
+6
+)S
+/ koT(
+tuphguorhT
+.gvA
+)koT(
+htgneL
+ecnatpeccA
+.gvAExploring the Training Objective
+130 3.6
+125
+3.4
+120 1.04x 1.05x 115 1.00x 1.02x 3.2 1.00x 1.02x Baseline Hydra 0.98x 0.99x
+Hydra + Noise
+110 Hydra + Teach. Loss
+105 3.0 Hydra + Noise + Teach. Loss
+100 2.8
+95
+2.6
+90
+Vicuna 7B Vicuna 7B
+Base Model Base Model
+Figure3: PerformancecomparisononMT-BenchofdifferentHydraheadtrainingobjectives.
+TrainingbasedonateacherlossleadstothemostperformantHydraheads.
+traininglossisthecrossentropybetweenitspredicteddistributionandthebasemodel’s
+nexttokendistribution.
+6.1.1 Results
+TotesthoweachofourtraininginterventionsaffectsHydraheadquality,weevaluateboth
+interventionsseparatelyaswellasjointly. WecomparedecodingusingHydraheadstrained
+withtheproposedinterventionsanddecodingusingHydraheadstrainedinthestandard
+manner. Wereportthedecodingthroughputaswellastheaverageacceptancelengthfor
+eachinterventioninfig.3. Wefindthatthemostperformantinterventionistojusttrainon
+theteacherlosswithoutanyadditionalembeddingnoise. Specifically,decodingwithheads
+trainedwithjusttheteacherlossachievesa1.04×improvementinthroughputforVicuna
+7BcomparedtodecodingwithvanillaHydraheads. Interestingly,wefindthatanyaddition
+ofnoisetotheinputsequencedegradestheacceptancelengthandthusthedecodingspeed.
+Basedontheseresult,weconductallfutureexperimentsusingtheteacherlossinsteadof
+thenexttokenpredictionloss.
+6.2 ExploringAlternativeHydraHeadArchitectures
+Hydra-specificprefixattention. ForMLP-basedHydraheads,theonlyrepresentationof
+thealready-generatedsequencepassedtotheheadsasinputisthebasemodel’shidden
+statecorrespondingtothemostrecentlyprocessedtoken. However,asthebasemodelis
+trainedindependentlyoftheHydraheads,itisnotobviouswhethersufficientinformation
+regardingthecontextisencodedinthelasttoken’shiddenstate.Tobetteraggregaterelevant
+informationovertheentirecontextforusebytheHydraheads,weproposetoextendthe
+baseLLMwithanadditionaldecoderlayerwhichisusedsolelytoproducebetterinput
+representationsforthedraftmodel. WhileeachHydraheadisstillasinglelayerMLP,they
+eachnowtakeasinputtheadditionaldecoderlayer’srepresentationofthefinaltokenin
+thealreadygeneratedsequence. Astheadditionaldecoderlayeristrainedinconjunction
+withtheHydraheads,itcanlearnwhatinformationfromthealreadygeneratedsequenceis
+usefulfortheHydraheads. WenotethatallHydraheadssharethesameadditionaldecoder
+layerhiddenstate,meaningtheadditionaldecoderlayerisonlyqueriedonceperHydra
+decodingstep. WerefertotheresultingHydraheadarchitectureconsistingofanadditional
+decoderlayeralongwiththestandardMLPasthePrefixMLPHydraheadarchitecture.
+6.2.1 Results.
+TotestwhetheraddinganadditionalHydra-specificdecoderlayerimprovesmodelling
+performance,wecomparedecodingwithourproposedPrefixMLParchitecturetodecoding
+usingthestandardMLP-onlyHydrahead(fig.4).WefindthatthedecodingwithPrefixMLP
+headsimprovestheaverageacceptancelengthby1.12×whichleadstoanimprovement
+7
+)S
+/ koT( tuphguorhT
+.gvA
+)koT(
+htgneL
+ecnatpeccA
+.gvAExploring the Head Architecture
+140 4.0
+3.8 130 1.11x 1.14x 3.6
+120 1.00x 3.4 Hydra MLP
+1.00x Hydra Prefix MLP
+3.2
+110
+3.0
+100 2.8
+2.6
+Vicuna 7B Vicuna 7B
+Base Model Base Model
+Figure4: PerformancecomparisononMT-BenchofthestandardMLPonlyHydrahead
+architectureandthePrefixMLPheadarchitecture,whichintroducesanadditionaldecoder
+layer. ThePrefixMLPHydraheadarchitectureoutperformsastandaloneMLPHydrahead.
+Hydra++ Comparison
+140 4.0
+2.70x 3.70x 3.72x 3.62x
+120 2.36x 3.5
+2.13x 3.04x 3.06x 100 3.0 2.95x
+Baseline
+2.50x 2.58x 2.60x 2.55x Medusa 80 2.17x 2.5 Hydra
+1.97x
+Hydra++
+60 2.0
+1.00x 2.53x
+40 1.00x 1.93x2.15x 1.5
+1.00x 1.00x 1.00x
+20 1.00x 1.0
+Vicuna 7B Vicuna 13B Vicuna 33B Vicuna 7B Vicuna 13B Vicuna 33B
+Base Model Base Model
+Figure5: PerformancecomparisononMT-BenchofHydra++(thebest-performingHydra
+headrecipe),originalHydradecoding,originalMedusadecoding,aswellasthebaselineof
+autoregressivedecoding. Hydra++outperformsallotherdecodingschemes.
+inaveragedecodingthroughputof1.08×. Thisresultsuggeststhataggregatingcontext
+fromthegeneratedsequenceinaHydraheadawaremannerimprovesHydradecoding
+performance.
+7 Hydra++: TheMostPerformantHydraModel
+InthissectionweproposeHydra++,ourrecipeforthemostperformantHydraheads,based
+onourobservationsfromsection6. Specifically,Hydra++headsaretrainedusingusingthe
+basemodelteacherloss,aswellasusingthePrefixMLPheadarchitecture.
+7.1 EvaluatingHydra++
+TounderstandthecumulativeimpactofourinterventionstoHydraheadsonHydradecod-
+ing,weevaluateHydra++againstthethebaselinesofstandardautoregressivedecoding,
+Medusadecoding,aswellastheoriginalformulationofHydradecoding.
+Results. We plot the decoding performance of Hydra++ compared to the other base-
+linesinfig.5. Hydra++producesasignificantspeedup,improvingdecodingthroughput
+by 2.7×,2.5×, and 2.53× as compared to autoregressive decoding for Vicuna 7B, 13B,
+and33Brespectively. ComparedtoMedusadecoding,Hydra++improvesthroughputby
+8
+)S
+/ koT(
+tuphguorhT
+.gvA
+)S / koT(
+tuphguorhT
+.gvA
+)koT(
+htgneL
+ecnatpeccA
+.gvA
+)koT(
+htgneL
+ecnatpeccA
+.gvAPosterior Threshold's Effect on Decoding
+(a) (b)
+4.0
+7.8
+3.8
+3.6 7.6
+3.4 Random Sampling
+3.2 7.4 Medusa
+Hydra++
+3.0
+7.2
+2.8
+2.6 7.0
+0.05 0.10 0.15 0.20 0.25 0.05 0.10 0.15 0.20 0.25
+Posterior Threshold Posterior Threshold
+Figure6:AnanalysisoftheaverageacceptancelengthandMT-BenchscoreofMedusaheads
+andHydra++headsforvaryingposteriorthresholdswhenperformingtypicalsampling.
+Weobservethatoverallposteriorthresholds,Hydra++decodinghasasignificantlyaverage
+higher acceptance length than Medusa. Additionally, typical sampling of Hydra heads
+canachievethesameMT-Benchscoreasrandomsamplingfromthebasemodelwiththe
+temperaturerecommendedbyMT-Bench(temperature=0.7forthetasksweconsider).
+1.27×,1.27×, and 1.31× for Vicuna 7B, 13B, and 33B respectively. Finally, compared to
+decodingusingtheoriginalHydraheadformulation,Hydra++improvesdecodingthrough-
+put by 1.14×,1.15×, and 1.18× for Vicuna 7B, 13B, and 33B respectively. These results
+suggestthatsequentiallydependentdraftheadsinconjunctionwithourothertrainingand
+architectureinterventionsaresubstantialimprovementtostandarddraftheads.
+7.2 TypicalAcceptanceSampling
+Allresultspresentedsofarhaveusedthegreedyacceptancecriteria,wheretokensareonly
+verifiediftheymatchthegreedynext-tokenpredictionofthebaseLLM.Inthissection,we
+considernon-greedysamplingviathetypicalacceptanceverificationcriterionproposedby
+Caietal.(2024).
+Typicalacceptancecriterion. Thepurposeofthetypicalacceptanceverificationcriterion
+(Caietal.,2024)istosamplemorediverseandcreativesequencesthangreedyacceptance,
+whilepreservingtheefficiencybenefitsofspeculativedecoding. Whileitisalsopossibleto
+increasegenerationdiversityinthecontextofspeculativedecodingbyperformingrejection
+resamplingwithahightemperatureparameter,thistendstodegradeacceptanceratesand
+end-to-enddecodingspeed,asnotedbyGante(2023)andSpector&Re(2023).
+Thetypicalacceptancecriterionspecifiesthataspeculatedtokenxˆ t+i isacceptedif:
+p base(xˆ t+i|x≤t,xˆ t+1,...,x t+i−1;τ) >min(ϵ,αexp(−H(p base(·|x≤t,xˆ t+1,...,x t+i−1;τ))))
+whereϵisknownastheposteriorthreshold,αisknownastheposterioralpha,τisthesampling
+temperature, and H(·) is theentropy. Both ϵ and α are hyperparameters thatshould be
+tunedempirically. Intuitively,thisacceptancecriterionbiasesthegenerationtowardsmore
+likelytokenswhileacceptingmorediversecontinuationswhenthereisgreateruncertainty
+inthebasemodel’sdistribution. Foramoredetailedanalysisontypicalacceptance,we
+referthereaderto Caietal.(2024).
+Setup. Weevaluatehowdifferentsettingsofϵandαaffectbothacceptancelengthand
+generation quality. Following Cai et al. (2024), we evaluate typical acceptance on the
+“Writing”and“Roleplay”categoriesofMT-Bench,andreporttheaverageLLM-as-a-judge
+scoretoquantifygenerationquality(Zhengetal.,2023). Wefixthesamplingtemperature
+τ = 0.7,varytheposteriorthresholdϵ ∈ {0.05,0.1,0.15,0.2,0.25},andsettheposterior
+√
+alphaasα = ϵ.
+9
+)snekoT(
+htgneL
+noitalucepS
+.gvA
+erocS
+hcneB-TMResults. Weplothowvaryingtheposteriorthresholdaffectsboththeaveragespeculation
+lengthaswellasthequalityoftheresultinggenerationsinfig.6. ForbothMedusaandHy-
+dra++,increasingtheposteriorthresholdslightlydecreasestheaveragespeculationlength,
+butforallposteriorthresholdsexamined,Hydra++hasasignificantlyhigheraverageac-
+ceptancelengththanMedusa. Wedonotfindanymonotonicrelationbetweentheposterior
+thresholdandMT-BenchscoreforHydra++. However,forthebestsettingoftheposterior
+threshold (ϵ = 0.15), Hydra++ achieves a better score on MT-Bench than Medusa, and
+achievesperformancecomparabletorandomsamplingfromthebasemodel. Theseresults
+demonstratethatusingtypicalacceptanceastheverificationschemeinHydradecodingcan
+allowforcomparableperformanceassamplingthebasemodelwhilemaintainingahigh
+averagespeculationlength.
+8 RelatedWork
+AcceleratingLLMinferenceisanareaofactiveresearch.Thetechniqueourworkisbasedon,
+speculativedecoding,wasfirstproposedbyLeviathanetal.(2023)andChenetal.(2023),and
+anticipatedinarestrictedformbySternetal.(2018). Recentworkhasexploredalternatives
+tostandarddraftmodelssuchasusingretrievalmechanismstoproposecontinuations(He
+etal.,2023),andreformulatinglanguagemodelsamplingintermsofJacobiiteration(Fu
+etal.,2023). Thealternativedraftmodelarchitecturethatweexamineinthiswork,draft
+heads,wasfirstproposedbySternetal.(2018). Anotherdirectionofspeculativedecoding
+researchhasinvestigatedverifyingatreeofcandidatecontinuationsratherthanasingle
+continuation (Miao et al., 2023; Spector & Re, 2023; Cai et al., 2024). In addition to tree
+decoding, Spector & Re (2023) also propose extending the basic speculative decoding
+framework by constructing a hierarchy of draft models, with each aiding speculative
+decodingforthenext. Othercontemporarydirectionsofresearchonspeculativedecoding
+include online training of the draft model based on user queries (Liu et al., 2023a) and
+knowledgedistilattionbasedalignmentofthedraftmodel(Zhouetal.,2024). Wewould
+alsoliketoacknowledgetheconcurrentworkEAGLE(Lietal.,2024)whichisthework
+mostsimilartoours. WediscussEAGLEinappendixA.
+Another direction for accelerating LLM inference is minimizing the memory impact of
+LLMs. AcommontechniqueistocompresstheLLMeitherbyquantizingitsweightsor
+pruning the features of the model (Dettmers et al., 2022; Xiao et al., 2023; Frantar et al.,
+2023;Frantar&Alistarh,2023;Liuetal.,2023b;Alizadehetal.,2024;Shengetal.,2023).
+TodecreasethememoryfootprintoftheKV-cache, Shazeer(2019)andAinslieetal.(2023)
+introducemulti-queryandgrouped-queryattentionrespectively. Theseworksreducethe
+sizeoftheKV-cachebyusingfewerkeyandvalueheadsascomparedtothenumberof
+queryheadsinattention. AnothermethodfordecreasingthememoryfootprintofLLMsis
+knowledgedistillation,whereasmallerstudentnetworkistrainedtobeasaccurateasthe
+originallargermodel(Sanhetal.,2020).Thesememory-reductionandinferenceacceleration
+techniquesareorthogonalto,andpotentiallycomplementarywith,speculativedecoding.
+Increasingthebatchsizeatwhichinferenceisperformedisanothertechniqueforimproving
+LLMinferencethroughput. Yuetal.(2022)proposeiteration-levelschedulingforbatched
+decoding,whereexecutionsarescheduledatthegranularityofeachdecodingstepinstead
+ofatthegranularityofanincomingrequest. Additionally, Kwonetal.(2023)developthe
+vLLMservingsystemwhichutilizestheirproposedPagedAttentionmethodforimproving
+the memory management of the KV-cache and that allows for greater inference batch
+sizes. Contrarytotheseapproaches,speculativedecodingprimarilytargetsthesmall-batch
+inferenceregime,inwhichmemorybandwidthconstraintsdominateandthereareabundant
+unusedFLOPsavailabletospendonparallelverificationunderthebasemodel.
+9 Conclusion
+Inthiswork,wesystematicallyexaminedrafthead-basedspeculativedecodingandpropose
+methodsforimprovingthespeculationqualityofdraftheads. Wemaketheobservation
+thatpreviously-proposeddraftheadsaresequentiallyindependent,meaningthatwhen
+10speculatingitokensintothefuture,thedrafthead’spredictionisnotconditionedonthe
+1st,2nd,...,(i−1)th speculated tokens. To fix this problem, we propose Hydra heads: a
+drop-in,sequentiallydependentreplacementforstandarddraftheads. Hydraheadsare
+madesequentiallydependentbytakingasinputthebasemodel’sinputembeddingsof
+tokensinthecandidatecontinuation. Thissimplechangeleadstosignificantimprovements
+indecodingspeed: Hydradecodingachievesuptoa1.11×improvementinend-to-end
+throughputascomparedtoMedusadecoding. Wealsoinvestigatedifferenttrainingob-
+jectivesandarchitecturesforHydraheads. Wefindthattrainingbasedonateacherloss
+improves head quality and end-to-end decoding speed. We experiment with a Hydra
+headarchitecturewecallPrefixMLPthatbetterencodesthebasemodel’shiddenstatesby
+introducinganadditionaldecoderlayer. UsingPrefixMLPHydraheadsfurtherincreases
+decodingspeed. CombiningallHydraheadimprovementsintoaHydraheadrecipewe
+callHydra++,weincreasedecodingthroughputbyupto1.31×and2.7×ascomparedto
+Medusaandautoregressivedecodingrespectively. Draftheadbasedspeculativedecoding
+isanefficientandsimplealternativetothestandardspeculativedecodingparadigm,and
+ourworktakesanimportantsteptowardsmaximizingtheperformanceofdecodingwith
+draftheadsthroughtheconstructionofsequentiallydependentdraftheads.
+Acknowledgments
+ThisworkwasinitiallyperformedasaclassprojectforMIT’sNLPclass,6.8611,andassuch
+wewouldliketothankthe6.8611teachingstafffortheircollectivehelp. Inparticular,we
+wouldliketothankJacobAndreas,YoonKim,andChrisTannerforteachingthecourse,and
+MarcoNocitoandMichaelMaunefortheirfeedbackonthepaperthroughoutthecourse.
+References
+Joshua Ainslie, James Lee-Thorp, Michiel de Jong, Yury Zemlyanskiy, Federico Lebron,
+andSumitSanghai. GQA:Traininggeneralizedmulti-querytransformermodelsfrom
+multi-headcheckpoints. InHoudaBouamor,JuanPino,andKalikaBali(eds.),Proceedings
+ofthe2023ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,pp.4895–4901,
+Singapore,December2023.AssociationforComputationalLinguistics. doi: 10.18653/v1/
+2023.emnlp-main.298. URLhttps://aclanthology.org/2023.emnlp-main.298.
+KeivanAlizadeh,ImanMirzadeh,DmitryBelenko,KarenKhatamifard,MinsikCho,Carlo
+CDelMundo,MohammadRastegari,andMehrdadFarajtabar. Llminaflash: Efficient
+largelanguagemodelinferencewithlimitedmemory,2024.
+TianleCai,YuhongLi,ZhengyangGeng,HongwuPeng,JasonD.Lee,DemingChen,and
+TriDao. Medusa: Simplellminferenceaccelerationframeworkwithmultipledecoding
+heads,2024.
+CharlieChen,SebastianBorgeaud,GeoffreyIrving,Jean-BaptisteLespiau,LaurentSifre,
+andJohnJumper.Acceleratinglargelanguagemodeldecodingwithspeculativesampling,
+2023.
+Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng, Zhanghao Wu, Hao Zhang, Lianmin
+Zheng,SiyuanZhuang,YonghaoZhuang,JosephE.Gonzalez,IonStoica,andEricP.Xing.
+Vicuna: Anopen-sourcechatbotimpressinggpt-4with90%*chatgptquality,March2023.
+URLhttps://lmsys.org/blog/2023-03-30-vicuna/.
+TimDettmers,MikeLewis,YounesBelkada,andLukeZettlemoyer. Llm.int8(): 8-bitmatrix
+multiplicationfortransformersatscale. arXivpreprintarXiv:2208.07339,2022.
+Elias Frantar and Dan Alistarh. Sparsegpt: massive language models can be accurately
+prunedinone-shot. InProceedingsofthe40thInternationalConferenceonMachineLearning,
+ICML’23.JMLR.org,2023.
+EliasFrantar,SalehAshkboos,TorstenHoefler,andDanAlistarh. OPTQ:Accuratequanti-
+zationforgenerativepre-trainedtransformers. InTheEleventhInternationalConferenceon
+LearningRepresentations,2023. URLhttps://openreview.net/forum?id=tcbBPnfwxS.
+11YichaoFu,PeterBailis,IonStoica,andHaoZhang. Breakingthesequentialdependency
+ofllminferenceusinglookaheaddecoding,November2023. URLhttps://lmsys.org/
+blog/2023-11-21-lookahead-decoding/.
+JoaoGante. Assistedgeneration: anewdirectiontowardlow-latencytextgeneration,May
+2023. URLhttps://huggingface.co/blog/assisted-generation.
+Zhenyu He, Zexuan Zhong, Tianle Cai, Jason D Lee, and Di He. Rest: Retrieval-based
+speculativedecoding,2023.
+HuggingFace. Huggingfacetrainer. URLhttps://huggingface.co/docs/transformers/
+main_classes/trainer.
+NeelJain, Ping-yehChiang, YuxinWen, JohnKirchenbauer, Hong-MinChu, Gowthami
+Somepalli,BrianR.Bartoldson,BhavyaKailkhura,AviSchwarzschild,AniruddhaSaha,
+Micah Goldblum, Jonas Geiping, and Tom Goldstein. NEFTune: Noisy embeddings
+improveinstructionfinetuning. InTheTwelfthInternationalConferenceonLearningRepre-
+sentations,2024. URLhttps://openreview.net/forum?id=0bMmZ3fkCk.
+WoosukKwon,ZhuohanLi,SiyuanZhuang,YingSheng,LianminZheng,CodyHaoYu,
+JosephE.Gonzalez,HaoZhang,andIonStoica. Efficientmemorymanagementforlarge
+languagemodelservingwithpagedattention,2023.
+YanivLeviathan,MatanKalman,andYossiMatias. Fastinferencefromtransformersvia
+speculativedecoding.InProceedingsofthe40thInternationalConferenceonMachineLearning,
+ICML’23.JMLR.org,2023.
+YuhuiLi,FangyunWei,ChaoZhang,andHongyangZhang. Eagle: Speculativesampling
+requiresrethinkingfeatureuncertainty,2024.
+XiaoxuanLiu,LanxiangHu,PeterBailis,IonStoica,ZhijieDeng,AlvinCheung,andHao
+Zhang. Onlinespeculativedecoding,2023a.
+ZichangLiu,JueWang,TriDao,TianyiZhou,BinhangYuan,ZhaoSong,AnshumaliShri-
+vastava,CeZhang,YuandongTian,ChristopherRe´,andBeidiChen. Dejavu: contextual
+sparsityforefficientllmsatinferencetime.InProceedingsofthe40thInternationalConference
+onMachineLearning,ICML’23.JMLR.org,2023b.
+IlyaLoshchilovandFrankHutter. SGDR:Stochasticgradientdescentwithwarmrestarts.
+InInternationalConferenceonLearningRepresentations,2017. URLhttps://openreview.
+net/forum?id=Skq89Scxx.
+IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. In7thInterna-
+tionalConferenceonLearningRepresentations,ICLR2019,NewOrleans,LA,USA,May6-9,
+2019.OpenReview.net,2019. URLhttps://openreview.net/forum?id=Bkg6RiCqY7.
+XupengMiao,GabrieleOliaro,ZhihaoZhang,XinhaoCheng,ZeyuWang,RaeYingYee
+Wong,AlanZhu,LijieYang,XiaoxiangShi,ChunanShi,ZhuomingChen,DaiyaanArfeen,
+ReynaAbhyankar, andZhihaoJia. Specinfer: Acceleratinggenerativelargelanguage
+modelservingwithspeculativeinferenceandtokentreeverification,2023.
+VictorSanh,LysandreDebut,JulienChaumond,andThomasWolf. Distilbert,adistilled
+versionofbert: smaller,faster,cheaperandlighter,2020.
+ShareGPT. Sharegpt, 2023. URL https://huggingface.co/datasets/Aeala/ShareGPT_
+Vicuna_unfiltered.
+NoamShazeer. Fasttransformerdecoding: Onewrite-headisallyouneed,2019.
+YingSheng,LianminZheng,BinhangYuan,ZhuohanLi,MaxRyabinin,BeidiChen,Percy
+Liang,ChristopherRe´,IonStoica,andCeZhang. Flexgen: High-throughputgenerative
+inference of large language models with a single GPU. In Andreas Krause, Emma
+Brunskill, Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett
+(eds.),InternationalConferenceonMachineLearning,ICML2023,23-29July2023,Honolulu,
+12Hawaii, USA,volume202ofProceedingsofMachineLearningResearch, pp.31094–31116.
+PMLR,2023. URLhttps://proceedings.mlr.press/v202/sheng23a.html.
+BenjaminFrederickSpectorandChristopherRe. AcceleratingLLMinferencewithstaged
+speculativedecoding. InWorkshoponEfficientSystemsforFoundationModels@ICML2023,
+2023. URLhttps://openreview.net/forum?id=RKHF3VYjLK.
+MitchellStern,NoamShazeer,andJakobUszkoreit. Blockwiseparalleldecodingfordeep
+autoregressivemodels. InS.Bengio,H.Wallach,H.Larochelle,K.Grauman,N.Cesa-
+Bianchi,andR.Garnett(eds.),AdvancesinNeuralInformationProcessingSystems,volume31.
+CurranAssociates, Inc., 2018. URL https://proceedings.neurips.cc/paper_files/
+paper/2018/file/c4127b9194fe8562c64dc0f5bf2c93bc-Paper.pdf.
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux,
+Timothe´eLacroix,BaptisteRozie`re,NamanGoyal,EricHambro,FaisalAzhar,Aurelien
+Rodriguez,ArmandJoulin,EdouardGrave,andGuillaumeLample. Llama: Openand
+efficientfoundationlanguagemodels,2023.
+Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien Demouth, and Song Han.
+SmoothQuant: Accurateandefficientpost-trainingquantizationforlargelanguagemod-
+els. InAndreasKrause,EmmaBrunskill,KyunghyunCho,BarbaraEngelhardt,Sivan
+Sabato, and Jonathan Scarlett (eds.), Proceedings of the 40th International Conference on
+MachineLearning,volume202ofProceedingsofMachineLearningResearch,pp.38087–38099.
+PMLR,23–29Jul2023. URLhttps://proceedings.mlr.press/v202/xiao23c.html.
+Gyeong-In Yu, Joo Seong Jeong, Geon-Woo Kim, Soojeong Kim, and Byung-Gon Chun.
+Orca: AdistributedservingsystemforTransformer-Basedgenerativemodels. In16th
+USENIXSymposiumonOperatingSystemsDesignandImplementation(OSDI22),pp.521–
+538,Carlsbad,CA,July2022.USENIXAssociation. ISBN978-1-939133-28-1. URLhttps:
+//www.usenix.org/conference/osdi22/presentation/yu.
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao
+Zhuang,ZiLin,ZhuohanLi,DachengLi,EricXing,HaoZhang,JosephE.Gonzalez,and
+IonStoica. JudgingLLM-as-a-judgewithMT-benchandchatbotarena. InThirty-seventh
+ConferenceonNeuralInformationProcessingSystemsDatasetsandBenchmarksTrack,2023.
+URLhttps://openreview.net/forum?id=uccHPGDlao.
+Yongchao Zhou, Kaifeng Lyu, Ankit Singh Rawat, Aditya Krishna Menon, Afshin Ros-
+tamizadeh,SanjivKumar,Jean-Franc¸oisKagy,andRishabhAgarwal. Distillspec: Improv-
+ingspeculativedecodingviaknowledgedistillation. InTheTwelfthInternationalConference
+onLearningRepresentations,2024. URLhttps://openreview.net/forum?id=rsY6J3ZaTF.
+A EagleDecoding
+Concurrentlytoourwork,Lietal.(2024)haveproposedtheEAGLEdecodingframework.
+Similartoexistingspeculativedecodingtechniquesbasedondraftheads,thedraftmodelin
+EAGLEleveragesthebasemodel’shiddenstatesasinput. However,EAGLEdoesnotusea
+collectionofdraftheadsandinsteadusesasingulardraftheadasthedraftmodel. Similar
+toourwork,EAGLEintroducessequentialdependencetotheirdrafthead. Concretely,the
+EAGLEdraftheadisstructuredasatransformerdecoderlayerwhichtakesasinputboththe
+hiddenstatesandinputembeddingsoftheentiresequence. Duringeachstepofgenerating
+acandidatecontinuation,theEAGLEdraftmodelnotonlypredictsthenexttokeninthe
+continuation,butalsopredictsanestimateofthehiddenstatethatthebasemodelwould
+havecomputedforthatcandidatetoken. EAGLEthenextendstheinputtoitsdrafthead
+withboththeinputembeddingofthepredictedtoken,aswellastheestimatedhiddenstate.
+Lietal.(2024)demonstratethatEAGLEdecodingprovidesaspeeduprelativetoMedusa’s
+sequentially-independentdraftheads. GiventhatEAGLEwasdevelopedentirelyindepen-
+dentlyofHydra,webelievethatHydraandEAGLE,takentogether,constitutevaluable
+evidencethatthebenefitsofsequentialdependenceinspeculativedecodingarerobustand
+replicable.
+13

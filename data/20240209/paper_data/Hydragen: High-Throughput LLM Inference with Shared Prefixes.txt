@@ -1,0 +1,1059 @@
+Hydragen: High-Throughput LLM Inference with Shared Prefixes
+JordanJuravsky*1 BradleyBrown*2 RyanEhrlich*3 DanielY.Fu1 ChristopherRé1 AzaliaMirhoseini1
+Abstract
+Transformer-basedlargelanguagemodels(LLMs)
+are now deployed to hundreds of millions of
+users. LLM inference is commonly performed
+onbatchesofsequencesthatshareaprefix,such
+asfew-shotexamplesorachatbotsystemprompt.
+Decodingin thislarge-batchsettingcan bebot-
+tleneckedbytheattentionoperation,whichreads
+largekey-value(KV)cachesfrommemoryand
+computes inefficient matrix-vector products for
+everysequenceinthebatch. Inthiswork,wein- Figure1.End-to-enddecodingthroughputintokenspersecond
+troduceHydragen,ahardware-awareexactimple- (TPS)withCodeLlama-13bwhengeneratingmultiplecompletions
+mentationofattentionwithsharedprefixes. Hy- from a prompt containing 2048 tokens. An “x” indicates that
+dragencomputesattentionoverthesharedprefix FlashAttentiondoesnothaveenoughmemorytorun.Asthebatch
+anduniquesuffixesseparately. Thisdecomposi- sizegrows,Hydragenachievesasignificantlyhigherthroughput
+thanvLLMbaselines.ThroughputwithHydragenalwaysremains
+tionenablesefficientprefixattentionbybatching
+within50%oftheupperboundwhereattentionisentirelyremoved
+queries together across sequences, reducing re-
+fromthemodel.DetailsareinSection4.1.
+dundant memory reads and enabling the use of
+hardware-friendly matrix multiplications. Our
+methodcanimproveend-to-endLLMthroughput includeachatbotservingmanyuserswithsharedsystem
+byupto32xagainstcompetitivebaselines,with instructions(Figure2left),anassistantmodelusingafew-
+speedupgrowingwiththebatchsizeandshared shotpromptforsolvingdomain-specifictasks(Brownetal.,
+prefixlength. Hydragenalsoenablestheuseof 2020),andcompetitiveprogrammingsystemsthatsample
+verylongsharedcontexts: withahighbatchsize, many candidate solutions for a single problem (Li et al.,
+increasingtheprefixlengthfrom1Kto16Kto- 2022). Astransformer-basedLLMs(Vaswanietal.,2023)
+kensdecreasesHydragenthroughputbylessthan aredeployedatincreasinglylargescales(Malik,2023),im-
+15%,whilethethroughputofbaselinesdropsby proving their efficiency with shared prefixes can have a
+over90%. Hydragengeneralizesbeyondsimple significantimpact. Inthiswork,weuseahardware-aware
+prefix-suffixdecompositionandcanbeappliedto perspectivetoanalyzeandoptimizethisinferencesetting.
+tree-basedpromptsharingpatterns,allowingus
+Shared prefixes create overlaps in the attention keys and
+tofurtherreduceinferencetimeoncompetitive
+valuesacrosssequences,presentinganopportunityforspe-
+programmingproblemsby55%.
+cialized optimization. Existing work (Kwon et al., 2023)
+identifiesthatnaiveKVcachingleadstoredundantstorage
+of the prefix’s keys and values, and addresses this redun-
+1.Introduction
+dancywithapagedmemorymanagementstrategy. While
+Textgenerationonbatchesofsequencesisacommonset- this optimization can significantly reduce GPU memory
+ting for LLM inference. In many real-world use cases, consumption,itdoeslittletoaffectthespeedofcomputing
+sequences in a batch share a common prefix. Examples attention,whichcanoftenbottleneckend-to-endthroughput
+with large batches. Since each sequence in the batch has
+*Equal contribution 1Stanford University 2University adistinct(albeitoverlapping)KVcachebutonlyasingle
+of Oxford 3University of Waterloo. Correspondence
+attentionquerywhendecoding,existingattentionimplemen-
+to: Jordan Juravsky <jbj@stanford.edu>, Bradley Brown
+tationslikeFlashAttention(Daoetal.,2022;Dao,2023)and
+<bradley.brown@cs.ox.ac.uk>.
+PagedAttention(Kwonetal.,2023)computeattentionby
+Preprint. performingmanyindependentmatrix-vectorproducts. This
+1
+4202
+beF
+7
+]GL.sc[
+1v99050.2042:viXraHydragen:High-ThroughputLLMInferencewithSharedPrefixes
+Shared Prefix Unique Suffixes Prefix (K/V)
+You are ChatGPT, a large language model Hi, can you write a...
+trained by OpenAI, based on the GPT-4 Inter-Sequence
+architecture. Batch (Q)
+Knowledge cutoff: 2023-04 Tell me a funny... Attention Over Prefix
+Current date: 2023-11-16 Matrix-Vector to Matrix-Matrix
+Image input capabilities: Enabled Who is Alan Turing? K/V Q 1K Tensor Cores
+General Arithmetic
+When you send a message containing Debug this Python... 500
+Python code to python, it will be
+executed in a stateful Jupyter notebook 0
+enrivonment. Python will respond... Ignore all previous... Attention Over Suffixes Softmax Merging 2016 2018 Year 2020 2022
+Shared Prefix Setting Hydragen Tensor Core vs. General FLOPs
+Figure2.Left:AnexampleLLMinferencescenariowhereachatbotmodelprocessesmanysequencesthatsharealargesharedprefix(the
+systemprompt).Middle:AnoverviewofHydragen,whereoverallattentionisdecomposedintoattentionoverthesharedprefix(batched
+acrossallqueriesinabatch)andattentionovertheremainingsuffixes(independentacrosssequences,asisnormallydone).TopRight:
+Hydragen’sattentiondecompositionallowsmanymatrixvectorproductstobereplacedwithfewermatrix-matrixproducts.BottomRight:
+Usingmatrix-matrixproductsisparticularlyimportantasGPUsdedicateanincreasinglylargeratiooftheirtotalFLOPstotensorcores
+thatarespecializedinmatrixmultiplication.
+approachismemory-boundwhentheKVcacheislarge,and butnotredundantprefixreads. Theattentionoperationin
+moreoverdoesnotusehardware-friendlymatrixmultiplica- isolation can be accelerated by over 16x using Hydragen
+tions.Bothofthesecharacteristicsleadtopoorperformance when compared to a state-of-the-art FlashAttention base-
+onmodernGPUs. Acrosssuccessivehardwaregenerations, line,withbenefitsincreasingasthebatchsizeandshared
+GPU computational capability has improved at a signifi- prefixlengthgrow. WealsodemonstratethatHydragen’s
+cantly faster rate than memory bandwidth. Additionally, efficientprocessingofsharedprefixescaninfluencealgorith-
+anincreasinglylargefractionoftotalGPUfloating-point micdecisionsonhowtouseLLMsmosteffectively. With
+operations(FLOPs)areonlyavailablewhenusingtensor a large batch size, Hydragen allows the shared prefix to
+cores, a specialized hardware feature that is dedicated to growfrom1Ktokensto16Ktokenswithlessthana15%
+performingmatrix-matrixproductsandnotmatrix-vector throughput penalty whereas vLLM throughput decreases
+products(Figure2bottomright). byover90%. Onlongdocumentquestionansweringtasks,
+weshowthatHydragencanprocess512questionsinless
+In this paper, we demonstrate that shared prefixes enable
+timethanittakesaFlashAttentionbaselinetoprocess64
+more than just memory savings, and can additionally be
+(Section4.3). Finally,wedemonstratethatHydragen’sat-
+used to improve decoding throughput. We identify that
+tentiondecompositionandbatchingapplytomoregeneral
+FlashAttention and PagedAttention redundantly read the
+patternsofpromptsharingthanasingleprefix-suffixsplit.
+prefix’skeysandvaluesfromGPUmemorywhencomput-
+When solving APPS competitive programming problems
+ingattention,regardlessofwhethertheprefixisredundantly
+(Hendrycksetal.,2021),wheretwolevelsofpromptshar-
+stored. In order to eliminate these redundant reads, we
+ingoccur,weapplyHydragenhierarchicallytomaximize
+presentHydragen,anexactimplementationofattentionthat
+sharing and reduce evaluation time by an additional 55%
+is specialized for shared prefixes (Figure 2 middle). Hy-
+overasingle-levelofpromptsharing(Section4.4).
+dragen decomposes full-sequence attention into separate
+attentioncomputationsovertheprefixandsuffixes. These
+sub-computationscanbecheaplycombinedtorecoverthe 2.Background
+overall attention result (Section 3.1). With attention de-
+2.1.HardwareEfficiencyConsiderations
+composition,Hydragenisabletoefficientlycomputeatten-
+tionovertheprefixbybatchingtogetherattentionqueries GPUPerformanceBottlenecks: GPUspossessalimited
+acrosssequences(Section3.2). Thisinter-sequencebatch- number of processors for performing computation and a
+ingreplacesmanymatrix-vectorproductswithfewermatrix- limitedamountofbandwidthfortransferringdatabetween
+matrix products (Figure 2 top right), reducing redundant processorsandmemory.WhenaprogramrunningonaGPU
+readsoftheprefixandenablingtheuseoftensorcores. isbottleneckedwaitingforcomputeunitstofinishprocess-
+ing, itcanbeclassifiedascompute-bound. Alternatively,
+Experimentally,wefindthatHydragencansignificantlyim-
+memory-boundprogramsarebottleneckedaccessingGPU
+proveLLMthroughputinlarge-batchsettingswithshared
+memory. To summarize a program’s use of hardware re-
+prefixes. Inend-to-endbenchmarks,Hydragenincreasesthe
+sources,wecancalculateitsarithmeticintensity,definedas
+throughputofCodeLlama-13b(Rozièreetal.,2023)byup
+theratiobetweenthetotalnumberofarithmeticoperations
+to32xovervLLM(Kwonetal.,2023),ahigh-performance
+performeddividedbythetotalnumberofbytestransferred.
+inferenceframeworkthatavoidsredundantprefixstorage
+Higherarithmeticintensitiesimplyagreateruseofcompu-
+2
+sPOLFTHydragen:High-ThroughputLLMInferencewithSharedPrefixes
+tationalresourcesrelativetomemorybandwidth. whereN =1whileN ≫1,makingthemultiplications
+q kv
+withKT andV matrixvectorproducts.Attentionduringde-
+Batching: Batchingisacommonoptimizationthatcanin-
+codingisthereforememory-boundanddoesnotusetensor
+creaseanoperation’sarithmeticintensityandreducemem-
+cores.
+orybottlenecks. Considertheexampleofcomputingmatrix-
+vectorproducts. Tocomputeoneproduct,eachelementof
+2.3.BatchedInference
+the input matrix is read from memory but used in only a
+singlemultiply-accumulate. Therefore,thearithmeticinten- LLMinferencethroughputcanbeincreasedbygenerating
+sityoftheoperationislow,andismemory-boundonGPUs. textforabatchofsequencesinparallel. Withbatchedde-
+However,ifmanymatrix-vectorproductsneedtobecom- coding,eachforwardpassofthemodelprocessesthemost
+putedusingthesamematrix,wecanbatchtheoperations recenttokenfrommanysequencesinsteadofonlyone. This
+togetherintoasinglematrix-matrixproduct. Inthebatched batchingincreasesthearithmeticintensityoftransformer
+operation,thecostofreadingtheinputmatrixisamortized componentssuchasthemultilayerperceptron(MLP)blocks,
+overthebatchofvectors. Eachelementoftheinputmatrix achievingbetterhardwareutilizationandthereforeincreas-
+isnowusedformanymultiply-accumulates,increasingthe ingoverallthroughput. However,batchedtextgeneration
+arithmeticintensityoftheoveralloperationandimproving does not increase the intensity of the attention operation,
+hardwareutilization. since every sequence has a distinct key and value matrix.
+Therefore, while operations such as linear layers can be
+TensorCores: ModernGPUs(andotherAIaccelerators)
+implemented with efficient matrix multiplications during
+aredesignedwithspecializedunitsforefficientlycomputing
+batched decoding, attention instead must compute many
+matrix multiplications. Effectively using these resources
+independentmatrix-vectorproducts. Withlargebatchsizes
+canbecrucialforachievinggoodoverallperformance;on
+or long sequence lengths, computing attention becomes
+GPUs,tensorcoresdedicatedtomatrixmultiplicationscan
+increasingly expensive relative to rest of the transformer,
+computeover10xmorefloating-pointoperationspersecond
+decreasingthroughput. Additionally,thestoragefootprint
+thantherestoftheGPU.Thisfurthermotivatesbatching
+of the KV cache in GPU memory can exceed that of the
+matrix-vectorproductsintomatrix-matrixproducts.
+model parameters when the batch size is large, imposing
+constraintsonthemaximumnumberofsequencesthatcan
+2.2.AttentionandLLMInference
+besimultaneouslyprocessed.
+Thefocusofthisworkisoptimizingattentionintransformer-
+basedLLMs. Scaled-dot-product(SDP)attentionoperates 2.4.SharedPrefixes
+onasequenceofqueriesQ ∈ RNq×d,keysK ∈ RNkv×d,
+andvaluesV ∈RNkv×d,andisdefinedas: Inthispaper,weinvestigateimprovingthethroughputof
+batched text generation when the sequences in the batch
+shareacommonprefix. Thisscenariolendsitselftospecial-
+izedoptimizationsbecausesharedprefixesleadtooverlap
+(cid:18) QKT(cid:19)
+SDP(Q,K,V)=softmax √ V (1) in the key and value matrices of sequences in the batch.
+d ThecausalattentionmaskinLLMsresultsineachtoken’s
+activationsonlybeinginfluencedbyprevioustokensinthe
+Weareparticularlyinterestedintheperformancecharacter- sequence. Therefore, if multiple sequences share a com-
+isticsofattentionduringLLMtextgeneration. Generation monprefix,thekeysandvaluescorrespondingtotheprefix
+begins with a prefill stage that processes the starting se- tokenswillbeidenticalacrosssequences.
+quenceoftokensthattheLLMwillcomplete. Theprefill
+The key-value overlap introduced by shared prefixes
+phaseencodestheentirepromptinparallelusingasingle
+presentstwodistinctdirectionsforimprovingtheinference
+transformerforwardpass. Therefore,duringprefixattention
+processdescribedinSection2.3. Firstly,naivebatchedin-
+wehaveN =N ≫1andasaresultthemultiplications
+q kv ferencestorestheKVcacheseparatelyforeverysequence,
+involving KT and V are hardware-friendly matrix multi-
+leading to redundant storage of the prefix key and value
+plications. After the prefill stage, completion tokens are
+vectors. Existingworkhasidentifiedthisredundancyand
+iterativelydecodedfromthemodel,withonedecodingstep
+proposed an elegant virtual memory system to eliminate
+producingonenewtokenandrequiringoneforwardpass.
+duplicatestorage(Kwonetal.,2023).
+DecodingisacceleratedbytheuseofaKVcache,which
+storestheattentionkeysandvaluesofallprevioustokens In this work, we identify a new opportunity to optimize
+inthesequence. TheKVcacheavoidstheneededforre- theattentionoperationitself. WhenGPUkernelscompute
+processingtheentiresequenceduringeverydecodingstep, attentionforeachsequenceinthebatchusingindependent
+and instead only the most recent token is passed through matrix-vectorproducts,theprefixkeysandvaluesarerepeat-
+themodel. However,thisleadstoanattentioncomputation edlyreadfromGPUmemory,regardlessofwhethertheyare
+3Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+storedredundantlyornot. Wenowproposeanalternative adenominatorrescalingtrickinspiredbyFlashAttention’s
+approachtocomputingattention,whichcansimultaneously blocked softmax computation (Dao et al., 2022). When
+eliminatetheseredundantreadswhileenablingtheuseof computingSDP(Q,K ,V )andSDP(Q,K ,V ), wead-
+1 1 2 2
+tensorcores. ditionallycomputeandstorethelog-sum-exp(LSE)ofthe
+attentionscores(equivalently,thelogofthesoftmaxdenom-
+inator):
+3.Hydragen: EfficientAttentionwithShared
+Prefixes
+WeintroduceHydragen,anexactimplementationofatten-
+(cid:18) (cid:18) (cid:18) QKT(cid:19) (cid:19)(cid:19)
+LSE(Q,K)=log sum exp √ ,dim=1
+tion that is optimized for shared prefixes. Hydragen is a d
+combinationoftwotechniques: (4)
+1. AttentionDecomposition: Wesplitfull-sequenceat- GiventhetwopartitionedattentionoutputsandtheirLSEs,
+tentionintoseparateattentioncomputationsoverthe wecancalculateourfinalresultSDP(Q,K,V)bycomput-
+sharedprefixanduniquesuffixesthatcanbecheaply ing the full-sequence softmax denominator and rescaling
+combinedtorecoverthefullattentionresult. theattentionoutputsaccordingly:
+2. Inter-Sequence Batching: We efficiently compute
+attentionovertheprefixbybatchingtogetherattention
+queriesacrosssequences.
+SDP(Q,K 1,V 1)eLSE(Q,K1)+SDP(Q,K 2,V 2)eLSE(Q,K2)
+eLSE(Q,K1)+eLSE(Q,K2)
+(5)
+Attention decomposition allows us to isolate overlapping
+portionsofthebatch’skeyandvaluematrices,whileinter-
+WeprovidemoredetailsonthisformulainAppendixA.
+sequencebatchingexploitsthisoverlapbyreplacingmany
+matrix-vectorproductswithasinglematrix-matrixproduct.
+PseudocodeimplementingHydragenattentionisprovided 3.2.Inter-SequenceBatchedPrefixAttention
+inAppendixB.
+Withattentiondecomposition, weareabletocomputeat-
+tentionovertheprefixasastandaloneoperationforevery
+3.1.DecomposingAttentionAcrossSubsequences sequence. Whilethisdecompositiondoesnotimproveper-
+formanceonitsown(infact,itintroducesadditionalwork
+AsdiscussedinSection2.4,sequencesthatshareacommon
+inordertocombinesub-computationoutputs),itcanallow
+prefixhavepartiallyoverlappingkeysandvalueswhencom-
+ustocomputeprefixattentionmuchmoreefficientlyovera
+putingattention. Ourgoalistoseparatethiscomputation
+batchofsequences.
+withpartialoverlapintotwoseparateoperations: attention
+overthesharedprefix,wherethereistotalkey-valueover- Queriesdonotaffecteachotherwhencomputingattention,
+lap, and attention over unique suffixes, where there is no thereforeiftwosetsofqueriesattendoveridenticalkeysand
+overlap. values,theycanbemergedintoasingleattentionoperation
+withalargernumberofqueries. Withattentiondecompo-
+ConsiderthegeneralcasewhereourkeysK andvaluesV
+sition, this case now applies to each sequence’s attention
+arepartitionedacrossthesequence(row)dimensioninto:
+operation over the shared prefix. Since the prefix’s keys
+and values across sequences are identical, we can batch
+everysequence’squeryvectortogetherintooneattention
+K =K ||K (2)
+1 2 operationoverasinglesequence. Importantly,thisbatching
+V =V 1||V 2 (3) significantlyraisesN q andthearithmeticintensityofprefix
+attention,replacingmanyseparatematrix-vectorproducts
+with || denoting concatenation along the row axis. We withasinglematrix-matrixproduct. Byreplacingmultiple
+wish to avoid directly computing our desired quantity independentattentioncomputationsovertheprefixwitha
+SDP(Q,K,V), and instead calculate this value using singlebatchedoperation,wecanreducethenumberoftimes
+the results of the sub-computations SDP(Q,K ,V ) and thattheprefixKVcacheisreadfromGPUmemory. Addi-
+1 1
+SDP(Q,K ,V ). tionally,wecannowusetensorcoresduringprefixattention
+2 2
+andsignificantlyimprovehardwareutilization.
+Thechallengeinpartitioningattentioniswiththesoftmax
+operation,sincethesoftmaxdenominatoriscalculatedby Notethatweareunabletoapplyinter-sequencebatching
+summingoverallexponentiatedattentionscoresinthese- whencomputingattentionoversuffixes,sincethekeysand
+quence. Inordertocombineoursub-computations,weuse values in each sequence’s suffix are not identical. Suffix
+4Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+attention independently for every sequence (Section 4.2).
+However,translatingthistargetedefficiencyintoend-to-end
+throughputimprovementsdependsstronglyonthedetailsof
+theinferencesettingbeingconsidered. Ingeneral,inorder
+forHydragentomeaningfullyimprovedecodingspeedina
+particularsetting,attentionmustbeamajorcontributorto
+decodingtime. Forexample,withsmallbatchsizesorshort
+sequencelengths,decodingspeedisoftenbottleneckednot
+by attention, but by reading the parameters of the model
+fromGPUmemory. ThebenefitsofHydrageninthissce-
+nario will therefore be minimal. Similarly, given a fixed
+batchsizeandsequencelength,weexpectHydragentoim-
+provethroughputmoreonamodelthatusesmulti-headedat-
+Figure3.Anexampleofabatchofsequenceswithahierarchical
+tentionthanasimilarly-sizedmodelthatusesmulti-queryat-
+sharingpattern. ThisdiagramdepictsthesettingofSection4.4,
+tention(Shazeer,2019)orgrouped-queryattention(Ainslie
+whichsolvescompetitiveprogrammingproblemsusingafew-shot
+et al., 2023) in order to reduce the size of the KV cache.
+promptandbysamplingmanycandidatesolutionsperproblem.
+However, reducing the KV cache size allows for a larger
+The few-shot prompt (orange) is globally shared across all se-
+quencesinthebatch.However,thedescriptionsofeachproblem batchsizetofitwithinGPUmemoryconstraints,whichcan
+(greenandblue)areonlysharedacrossthecandidatesolutions furtherincreasethespeedupofusingHydragen.
+correspondingtothatproblem.
+AsdiscussedinSection2.3,thecostofattentionbecomes
+attentionisthereforecomputednormally,withasinglequery disproportionatelyhighasthebatchsizegrows,sincethe
+persequence. arithmeticintensityofmosttransformeroperationsimprove
+whileattentionremainsmemory-bound. Hydragengreatly
+3.3.HierarchicalSharing improvesthehardwareutilizationofattention,makingthe
+comparisonofattentionFLOPstoothermodelFLOPsmore
+Sofar,wehavefocusedonthesettingwhereallsequencesin
+usefulwhendeterminingthemaximumachievablespeedup.
+thebatchshareacommonstartingsubsequencefollowedby
+InseveralexperimentsinSection4,weincludea“NoAtten-
+suffixesthatareentirelydistinctfromoneanother. However,
+tion”baselinethatonlyrunsthenon-attentioncomponents
+thisexcludesotherformsofsharingthatappearinimpor-
+ofthetransformerinordertoestablishanupperboundfor
+tant use cases. Sequences in the batch may not all start
+attainablethroughput.
+withaglobalprefix,andinsteadthebatchmaybedivided
+intogroupsofoverlappingsequences. Additionally,sharing Anotherimportantconsiderationwhenpredictingthebene-
+may be more fine-grained than a simple prefix-suffix de- fitsofHydragenistherelativenumberofprefix(i.e. shared)
+composition,withtheoverlapbetweensequencesforminga tokens compared to suffix (i.e. unshared) tokens. Since
+treestructurewhereeachnodecontainsatokensequence Hydragen makes no optimizations to attention over suf-
+that is shared by all descendants (see Figure 3 for an ex- fixes,longsuffixescandecreasegenerationthroughput. We
+ample). Theseformsofsharingareincreasinglyrelevant explore the impact of suffix length on attention speed in
+asLLMsareappliedinmorecomplicatedinference/search Section4.2.
+algorithms(Yaoetal.,2023;Bestaetal.,2023;Ningetal.,
+2023). 3.5.Implementation
+Hydragen naturally generalizes to these richer forms of WeimplementHydragenfortheLlamafamilyofmodels
+sharingaswell. ToapplyHydragentoatreeofsequences, (Touvron et al., 2023a;b; Rozière et al., 2023). We high-
+wereplaceattentiondecompositionovertheprefixandsuffix lightthatourimplementationissimple: weusenocustom
+intoattentiondecompositionateveryvertexinthetree. We CUDAcodeandwriteHydragenentirelyinPyTorch1plus
+can then use inter-sequence batching across levels of the callstoafastattentionprimitive. Thiscontrastswithmore
+tree,sothatthekeysandvaluesassociatedwithonenode sophisticatedalgorithmslikePagedAttention,whichrequire
+inthetreearesharedacrossthequeriesofalldescendant bespokeGPUkernelstoreadfromandupdatethepagedKV
+nodes. cache.WebelievethatHydragen’ssimplicitywillallowitto
+beeasilyportedtootherhardwareplatformssuchasTPUs,
+3.4.EstimatingThroughputImprovementswith which also have hardware dedicated to fast matrix multi-
+Hydragen 1Fornon-hierarchicalinputs,we’vealsowrittenaTritonkernel
+tocombinesoftmaxdenominators,whichcanimproveattention
+Hydragensignificantlyimprovestheefficiencyofattention
+performancebyabout10-20%.
+with shared prefixes relative to approaches that compute
+5Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+tal detokenization in vLLM (accomplished by com-
+mentingoutonelineinthevLLMcodebase),which
+weobservedtoimprovethroughput.
+4. NoAttention: Weskipallself-attentioncomputations
+inthetransformer. This(functionallyincorrect)base-
+lineprovidesathroughputceilingandhelpstoillustrate
+thecostofdifferentattentionimplementationsrelative
+totherestofthetransformer. Notethatthequery,key,
+value,andoutputprojectionsintheattentionblockare
+stillperformed.
+Figure4.ComparingdecodingthroughputofCodeLlama-13bbe-
+tweenHydragen,vLLM(withandwithouttokenization),and“No
+Attention”, where the attention operation is removed from the WerunourbenchmarksonCodeLlama-13b(Rozièreetal.,
+model to demonstrate the throughput ceiling. In this scenario 2023) and distribute the model with tensor parallelism
+wherethebatchsizeisfixed,Hydragenimprovesthroughputby
+across eight A100-40GB GPUs, in order to have enough
+upto32xoverthebestbaseline,withspeedupsincreasingwith
+GPUmemorytostoretheKVcachewithlargebatchsizes.
+prefixlength.
+In Figure 1, we fix the prefix length to 2048 and sweep
+overthebatchsizewhilegenerating128tokenspercomple-
+plications. Inourimplementation,weuseversion2.3.6of tion. Whenthebatchsizeissmall,non-attentionoperations
+theflash-attnpackagewhenattendingovertheprefix, contributesignificantlytodecodingtime,withallmethods
+andaTritonkernelfromxformerswhenattendingover reachingatleasthalfofthethroughputofno-attentionup-
+thesuffix. Thesecondkernelallowsustohavechanging perbound. Attheselowbatchsizes,Hydragen,thevLLM
+sequencelengthsinthesuffixKVcacheacrossdecoding baselines, and the FlashAttention baselines have similar
+stepswhilestilladheringtotheconstraintsrequiredtouse throughputs. However,asthebatchsizegrowsandattention
+CUDAgraphs. overtheprefixbecomesincreasinglyexpensive,Hydragen
+beginstosignificantlyoutperformtheotherbaselines.
+4.Experiments InFigure4, werunasimilarexperiment, exceptnowwe
+hold the batch size constant at 1024 and sweep over the
+4.1.End-To-EndThroughput
+sharedprefixlength. ThethroughputofvLLMsignificantly
+Webenchmarkend-to-endLLMthroughputinthesetting decreasesastheprefixgrows,fromjustunder5ktokens/sec-
+wheremanycompletionsaresampledfromasingleprompt. ondwithaprefixlengthof1024tolessthan500tokens/sec-
+Thisisacommontechniqueforimprovingamodel’sability ondwithaprefixlengthof16256. However,withHydragen,
+atsolvingcomplexproblemssuchasmathorcompetitive throughputislargelyunaffecteddespitetheprefixgrowing
+programming (Rozière et al., 2023; Li et al., 2022). Our byover15ktokens. Moreover,acrossallsequencelengths
+benchmarksevaluateHydragenagainstfourbaselines: tested,Hydragenthroughputisalwayswithin70%ofthe
+no-attentionceiling.Weperformmorein-depthsweepsover
+differentmodels,prefixlengths,batchsizes,andnumbers
+1. FlashAttention: We perform inference without any
+of generated tokens in Appendix C.1 - for smaller mod-
+sharedprefixoptimizations,asifallsequencesinthe
+elsandshortercompletionslengths, Hydragen’sspeedup
+batchwerefullydistinct. Wecomputefull-sequence
+canexceed50x. Additionalevaluationsetupdetailsarein
+attentionusingtheTritonkernelthatHydragenusesfor
+AppendixD.1.
+suffixattention,andotherwiseusethesamecodebase
+as Hydragen. This baseline redundantly stores the
+4.2.MicrobenchmarkingAttention
+prefix’skeysandvaluesforeverysequenceinthebatch,
+causingthismethodtorunoutofmemoryquickly.
+WealsoperformmoregranularbenchmarkscomparingHy-
+dragenattentionagainstFlashAttention, inordertomore
+2. vLLM: We use version 0.2.7 of the vllm package,
+precisely demonstrate the performance characteristics of
+which uses the PagedAttention algorithm. vLLM
+ourmethod. OurmicrobenchmarksrunonasingleA100-
+avoidsredundantstorageoftheprefix,allowingmuch
+40GBusingeightqueryattentionheads,onekeyandvalue
+largerbatchsizestobetested. Additionally,because
+head, andaheaddimension of128(matchingthesetting
+of this non-redundant storage, PagedAttention can
+of CodeLlama-34b when distributed across eight GPUs).
+achieve a higher GPU cache hit rate when reading
+We sweep over different batch sizes, prefix lengths, and
+theprefix,reducingthecostofredundantreads.
+suffix lengths, reporting our results in Figure 5. Our mi-
+3. vLLMwithoutDetokenization:Wedisableincremen- crobenchmarkscorroborateourend-to-endmeasurements
+6Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+Figure6.Timetoanswerquestionsabouta19947token-longdoc-
+Figure5.Measuring the speedup of Hydragen attention over ument.An“x”indicatesthatFlashAttentiondoesnothaveenough
+FlashAttentionacrossvariousbatchsizes,sharedprefixlengths memorytorun.Timetoprocessprefixexcluded.
+andsuffixlengthsonanA100-40GBGPU.WeseethatHydragen
+resultsinfasterinferenceinallcases,inparticularwhentheratio
+ofsharedlengthtouniquelengthishighandthebatchsizeislarge. attentionbaselines. ResultsarereportedinFigure6. We
+Weobserveevenlargerperformancegainswhenrunningonan
+observethatprocessingtimefortheFlashAttentionbaseline
+L40S(aGPUwithahighercompute-to-bandwidthratiothanan
+rapidlygrowsfarbeyondthetimeoftheno-attentionbase-
+A100),shownininFigure8.
+line,highlightinghowattentionisthedominantoperation
+forthisconfiguration. Meanwhile,Hydragen’sprocessing
+timealwaysremainswithin75%oftheno-attentionopti-
+from Figures 1 and 4 that the speedup with Hydragen in-
+mum. Notably,Hydragencanprocess512questionsinless
+creasesasthebatchsizeandprefixlengthsgrow. However,
+time than it takes the FlashAttention baseline to process
+themicrobenchmarksalsohighlightthesignificantimpact
+64questions. Weprovideadditionalevaluationdetailsin
+ofthesuffixlengthoninferencetime. Hydragencomputes
+AppendixD.3.
+attentionoversuffixesusingmemory-boundFlashAttention
+(without inter-sequence batching). As the suffix lengths
+4.4.HierarchicalSharinginCompetitiveProgramming
+grow, reading this portion of the KV cache becomes an
+increasinglysignificantcontributortototalexecutiontime. WelastlydemonstratethebenefitsofapplyingHydragentoa
+WhengeneratingtextusingHydragen,thismeansthatthe settingwithhierarchicalsharing. Competitiveprogramming
+firsttokensdecodedbythemodelaregeneratedthefastest, wasamotivatingapplicationfordevelopingHydragen,since
+withthroughputdecreasingovertimeasthelengthsofcom- currentstate-of-the-artsystemssampleaverylargenumber
+pletions(andthereforethelengthsofsuffixes)grow. ofcandidateprogramsfrompromptsthatcancontainthou-
+sands of tokens (Li et al., 2022; Rozière et al., 2023). In
+Thesemicrobenchmarksarealsoinfluencedbythehardware
+thisexperiment, webenchmarkthetotaltimerequiredto
+platformthattheyarerunon. GPUswithahigherratioof
+evaluateCodeLlama-7bon120problemsfromtheAPPS
+computetomemorybandwidthbenefitmorefromHydragen
+dataset(Hendrycksetal.,2021)usingatwo-shotprompt
+eliminatingmemorybottleneckswhenattendingoverthe
+and128candidateprogramsperproblem. Whenmultiple
+prefix. WereportresultsonotherGPUsinAppendixC.2
+problemsareprocessedinasinglebatch,promptoverlapoc-
+andprovidemoreevaluationdetailsinAppendixD.2.
+cursacrosstwolevels: thefew-shotpromptissharedacross
+allsequencesinthebatch,whileeachproblem’sdescription
+4.3.LongDocumentQuestionAnswering
+issharedacrossalloftheproblem’scandidatesolutions(see
+Additionally,weexploretheperformanceofHydragenon Figure3).
+workloadsinvolvingverylongdocuments. Weconstructa
+Werunthisbenchmarkusingtwomethods:
+documentbyembeddingsyntheticfactsintoanexcerptof
+WarandPeace. Oursharedprefix,totalling19947tokens,
+containsboththedocumentaswellasfivefew-shotexam- 1. Single-Level Hydragen: We use a single-level ver-
+ples of question/answer pairs. Our benchmark evaluates sionofHydragentosharethefew-shotpromptacross
+Yi-6B-200k(01-ai,2023)onitsabilitytoanswerquestions allsequencesinthebatch,andnotshareproblemde-
+basedontheembeddedfacts. Werunthisbenchmarkus- scriptions across candidate solutions. This leads to
+ing Hydragen as well as with our FlashAttention and no- redundantstorageoftheproblemdescriptionacrossall
+7Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+speedupoccurringwhenthebatchsizeislarge,theshared
+prefix lengths are long, and the unique suffix lengths are
+short.
+We emphasize that Hydragen is an optimization that can
+beappliedaspartofalargerinferenceframework,andis
+not intended to be an end-to-end inference solution. Our
+proof-of-conceptimplementationofHydragenrequiresthat
+the user specifies where sharing occurs across the input
+sequences. We are excited about future work that incor-
+porates Hydragen into systems that continuously receive
+requestsandschedulesequencesforgeneration(Yuetal.,
+2022;Kwonetal.,2023),suchthatoverlappingsequences
+Figure7.Timetoruninferenceoveradatasetof120APPScoding canbedynamicallyidentifiedandexploited.
+problems,sampling128solutionsperproblemwithtwofew-shot
+WehopethatourworkinspiresnewLLMalgorithmsthat
+examples. Thebatchsizereferstothenumberofproblemspro-
+leverageefficienthandlingofsharedprefixes. Hydragen’s
+cessedsimultaneously.AcrossallHydragenruns(bothsingleand
+ability to significantly expand the shared prefix without
+two-level),thefew-shotpromptissharedacrossallsequences.By
+a significant throughput penalty should allow models to
+additionallysharingtheproblemdescriptionacrossgeneratedcan-
+didatesolutions,two-levelHydragendecreasesoverallinference beprovidedwithmuchmorecontextthanwaspreviously
+timebyanextra55%oversingle-levelHydragen. practical. Moreover, we hope that Hydragen’s ability to
+generalize to tree-shaped sharing patterns can assist with
+researchthatusesLLMstoexploremanypossiblesolutions
+candidatesolutions,reducingthemaximumbatchsize
+beforedecidingonafinaloutput.
+thatcanbeused.
+2. Two-Level Hydragen: We apply Hydragen across 6.RelatedWork
+bothlevelsofpromptoverlap. Thishasthedualben-
+efitsofimprovingattentionefficiency(byincreasing TransformersandLanguageModels: Thetransformerar-
+thedegreeofsharing)aswellasavoidingredundant chitecturehasenabledsignificantimprovementsinstate-of-
+storage,whichallowsustoincreasethebatchsizeused the-artlanguagemodels(Vaswanietal.,2023). Adefining
+forevaluation. Weavoidconflatingthesebenefitsby featureoftransformersisthattheirperformanceconsistently
+evaluating two-level Hydragen twice: once with the improves when scaling up data and model size (Radford
+samebatchsizeusedforsingle-levelHydragen, and et al., 2019; Brown et al., 2020; Chowdhery et al., 2022;
+oncewithanenlargedbatchsize. Hoffmannetal.,2022;OpenAI,2023). LLM-poweredas-
+sistants such as ChatGPT have been widely adopted and
+arecurrentlyusedbyoverahundredmillionusers(Malik,
+WereportourresultsinFigure7. Weseethatevenwhenthe
+2023), motivatingresearchintohowthesemodelscanbe
+batchsizeisheldconstant,addingasecondlevelofsharing
+deployedmoreefficiently.
+toHydragencanimproveattentionefficiencyanddecrease
+datasetevaluationtimeby18%. Furthermore,thememory KVCacheManagement: ManaginglargeKVcachesis
+savedduetonotredundantlystoringtheproblemdescription achallengewhendeployingLLMs. MQA(Shazeer,2019)
+allowsustoincreasethebatchsize,whichinturnresultsin andGQA(Ainslieetal.,2023)modifythetransformerar-
+anadditional45%reductioninevaluationtime. Weprovide chitectureinordertoreducetheKVcachesize. Thesetech-
+additionalevaluationdetailsinAppendixD.4. niquesdecreasethenumberofkey-valueattentionheadsand
+assignmultiplequeryheadstoasinglekey-valuehead. Al-
+5.Discussion ternativeapproachesoperateatasystemslevel,dynamically
+movingkeysandvaluesbetweenGPUmemory,CPUmem-
+InthisworkweintroducedHydragen,anexact,hardware- ory,anddisk(Shengetal.,2023;Aminabadietal.,2022;
+awareimplementationofattentionforbatchesofsequences HuggingFace,2022). vLLM(Kwonetal.,2023)introduces
+thatsharecommonprefixes. Ourmethodseparatesattention avirtualpagingsystemthatenablesfine-grainedKVcache
+over shared prefixes from attention over unique suffixes. management. Thisvirtualpagingcanalsoavoidredundant
+Thisallowsustobatchattentionqueriesacrosssequences storageofaprefix’skeysandvalues. Concurrentwithour
+whenattendingovertheprefix,reducingredundantmemory work, SGLang (Zheng et al., 2023) also investigates and
+readsandenablingtheuseoftensorcores. Hydragencan optimizesinferencewithsequencesthathavecomplicated
+improveLLMthroughputinscenarioswhereattentionisa promptsharingpatterns. TheirRadixAttentionalgorithm
+significantcontributortodecodingtime,withthegreatest
+8Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+dynamically scans incoming requests to find the largest Besta,M.,Blach,N.,Kubicek,A.,Gerstenberger,R.,Gi-
+subsequencethathasalreadybeenprocessed,avoidingthe aninazzi, L., Gajda, J., Lehmann, T., Podstawski, M.,
+recomputationofoverlappingkeysandvalues. Importantly, Niewiadomski,H.,Nyczyk,P.,andHoefler,T. Graphof
+whilebothvLLMandRadixAttentionavoidredundantstor- thoughts:Solvingelaborateproblemswithlargelanguage
+ageofoverlappingkeysandvalues,theydonotoptimize models,2023.
+theattentioncomputationitself.
+Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan,
+Hardware-AwareAlgorithms: Algorithmsthatleverage
+J.D.,Dhariwal,P.,Neelakantan,A.,Shyam,P.,Sastry,
+an understanding of the underlying hardware platform
+G.,Askell,A.,Agarwal,S.,Herbert-Voss,A.,Krueger,
+can significantly improve device utilization. Hardware-
+G., Henighan, T., Child, R., Ramesh, A., Ziegler, D.,
+awarenesshassignificantlyimprovedtheefficiencyofthe
+Wu, J., Winter, C., Hesse, C., Chen, M., Sigler, E.,
+attentionoperation(Rabe&Staats,2022;Daoetal.,2022;
+Litwin, M., Gray, S., Chess, B., Clark, J., Berner, C.,
+Dao,2023),reducingthememoryrequirementsfromO(N2)
+McCandlish,S.,Radford,A.,Sutskever,I.,andAmodei,
+to O(N) while improving execution time by avoiding re-
+D. Languagemodelsarefew-shotlearners. InLarochelle,
+dundantmemorytransfers. Inadditiontoimprovinginput-
+H., Ranzato, M., Hadsell, R., Balcan, M., and Lin,
+output(IO)transfers,manyGPU-awarealgorithms(includ-
+H. (eds.), Advances in Neural Information Processing
+ingHydragen)focusonleveragingtensorcores(Fuetal.,
+Systems, volume 33, pp. 1877–1901. Curran Asso-
+2023),whichcanachieveover10xmoreFLOPspersecond
+ciates, Inc., 2020. URL https://proceedings.
+thantherestoftheGPU.
+neurips.cc/paper/2020/file/
+LLM Algorithms: Recent work has demonstrated that 1457c0d6bfcb4967418bfb8ac142f64a-Paper.
+LLM capabilities can be improved when many potential pdf.
+solutions are explored when solving a problem. Self-
+consistency(Wangetal.,2023)improvesperformanceon Chowdhery,A.,Narang,S.,Devlin,J.,Bosma,M.,Mishra,
+arithmeticreasoningtasksbysamplingmanysolutionsto G., Roberts, A., Barham, P., Chung, H. W., Sutton,
+asingleproblemandusingamajority-votingprotocol. On C., Gehrmann, S., Schuh, P., Shi, K., Tsvyashchenko,
+competitive programming problems, LLMs perform sub- S., Maynez, J., Rao, A., Barnes, P., Tay, Y., Shazeer,
+stantiallybetterwhenmanydifferentattemptstoaproblem N., Prabhakaran, V., Reif, E., Du, N., Hutchinson, B.,
+are sampled (Rozière et al., 2023). AlphaCode (Li et al., Pope,R.,Bradbury,J.,Austin,J.,Isard,M.,Gur-Ari,G.,
+2022),astate-of-the-artcompetitiveprogrammingsystem, Yin,P.,Duke,T.,Levskaya,A.,Ghemawat,S.,Dev,S.,
+samples as many as a million programs to solve a single Michalewski,H.,Garcia,X.,Misra,V.,Robinson,K.,Fe-
+problem. Tree-of-Thoughts(Yaoetal.,2023)introducesan dus,L.,Zhou,D.,Ippolito,D.,Luan,D.,Lim,H.,Zoph,
+explicittree-basedsearchalgorithmforsolvingproblems B., Spiridonov, A., Sepassi, R., Dohan, D., Agrawal,
+thatcanbedecomposedintodiscretedecisionpoints. Allof S., Omernick, M., Dai, A. M., Pillai, T. S., Pellat, M.,
+thesescenariosinvolveperformingbatchedtextgeneration Lewkowycz,A.,Moreira,E.,Child,R.,Polozov,O.,Lee,
+withoverlappingprefixes,whichHydragenisspecifically K., Zhou, Z., Wang, X., Saeta, B., Diaz, M., Firat, O.,
+optimizedfor. Catasta,M.,Wei,J.,Meier-Hellstern,K.,Eck,D.,Dean,
+J., Petrov, S., and Fiedel, N. Palm: Scaling language
+modelingwithpathways,2022.
+References
+01-ai.Yi,2023.URLhttps://github.com/01-ai/ Dao,T. FlashAttention-2: Fasterattentionwithbetterparal-
+Yi.git. Accessed: 2024-02-01. lelismandworkpartitioning. 2023.
+Dao,T.,Fu,D.Y.,Ermon,S.,Rudra,A.,andRé,C.FlashAt-
+Ainslie, J., Lee-Thorp, J., de Jong, M., Zemlyanskiy, Y.,
+tention: Fastandmemory-efficientexactattentionwith
+Lebrón,F.,andSanghai,S. Gqa: Traininggeneralized
+IO-awareness. InAdvancesinNeuralInformationPro-
+multi-querytransformermodelsfrommulti-headcheck-
+cessingSystems,2022.
+points,2023.
+Fu,D.Y.,Kumbong,H.,Nguyen,E.,andRé,C. Flashfft-
+Aminabadi, R. Y., Rajbhandari, S., Awan, A. A., Li, C., conv: Efficientconvolutionsforlongsequenceswithten-
+Li, D., Zheng, E., Ruwase, O., Smith, S., Zhang, M., sorcores,2023.
+Rasley,J.,etal. Deepspeed-inference: Enablingefficient
+inferenceoftransformermodelsatunprecedentedscale. Hendrycks,D.,Basart,S.,Kadavath,S.,Mazeika,M.,Arora,
+In 2022 SC22: InternationalConference for HighPer- A.,Guo,E.,Burns,C.,Puranik,S.,He,H.,Song,D.,and
+formanceComputing,Networking,StorageandAnalysis Steinhardt,J. Measuringcodingchallengecompetence
+(SC),pp.646–660.IEEEComputerSociety,2022. withapps. NeurIPS,2021.
+9Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+Hoffmann,J.,Borgeaud,S.,Mensch,A.,Buchatskaya,E., Shazeer,N. Fasttransformerdecoding: Onewrite-headis
+Cai, T., Rutherford, E., de Las Casas, D., Hendricks, allyouneed,2019.
+L. A., Welbl, J., Clark, A., Hennigan, T., Noland, E.,
+Sheng, Y., Zheng, L., Yuan, B., Li, Z., Ryabinin, M., Fu,
+Millican, K., van den Driessche, G., Damoc, B., Guy,
+D. Y., Xie, Z., Chen, B., Barrett, C., Gonzalez, J. E.,
+A., Osindero, S., Simonyan, K., Elsen, E., Rae, J. W.,
+Liang,P.,Ré,C.,Stoica,I.,andZhang,C. Flexgen:High-
+Vinyals,O.,andSifre,L. Trainingcompute-optimallarge
+throughputgenerativeinferenceoflargelanguagemodels
+languagemodels,2022.
+withasinglegpu,2023.
+HuggingFace. Hugging face accelerate. https://
+Touvron,H.,Lavril,T.,Izacard,G.,Martinet,X.,Lachaux,
+huggingface.co/docs/accelerate/index,
+M.-A.,Lacroix,T.,Rozière,B.,Goyal,N.,Hambro,E.,
+2022.
+Azhar,F.,Rodriguez,A.,Joulin,A.,Grave,E.,andLam-
+ple,G. Llama: Openandefficientfoundationlanguage
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+models,2023a.
+C.H.,Gonzalez,J.,Zhang,H.,andStoica,I. Efficient
+memorymanagementforlargelanguagemodelserving
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+with pagedattention. In Proceedings of the 29th Sym-
+A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+posiumonOperatingSystemsPrinciples,pp.611–626,
+Bhosale,S.,Bikel,D.,Blecher,L.,Ferrer,C.C.,Chen,
+2023.
+M.,Cucurull,G.,Esiobu,D.,Fernandes,J.,Fu,J.,Fu,W.,
+Fuller,B.,Gao,C.,Goswami,V.,Goyal,N.,Hartshorn,
+Li, Y., Choi, D., Chung, J., Kushman, N., Schrittwieser,
+A.,Hosseini,S.,Hou,R.,Inan,H.,Kardas,M.,Kerkez,
+J., Leblond, R., Eccles, T., Keeling, J., Gimeno, F.,
+V.,Khabsa,M.,Kloumann,I.,Korenev,A.,Koura,P.S.,
+DalLago,A.,Hubert,T.,Choy,P.,deMassond’Autume,
+Lachaux,M.-A.,Lavril,T.,Lee,J.,Liskovich,D.,Lu,Y.,
+C., Babuschkin, I., Chen, X., Huang, P.-S., Welbl, J.,
+Mao,Y.,Martinet,X.,Mihaylov,T.,Mishra,P.,Molybog,
+Gowal, S., Cherepanov, A., Molloy, J., Mankowitz,
+I.,Nie,Y.,Poulton,A.,Reizenstein,J.,Rungta,R.,Saladi,
+D. J., Sutherland Robson, E., Kohli, P., de Freitas,
+K.,Schelten,A.,Silva,R.,Smith,E.M.,Subramanian,R.,
+N., Kavukcuoglu, K., and Vinyals, O. Competition-
+Tan,X.E.,Tang,B.,Taylor,R.,Williams,A.,Kuan,J.X.,
+level code generation with alphacode. Science, 378
+Xu,P.,Yan,Z.,Zarov,I.,Zhang,Y.,Fan,A.,Kambadur,
+(6624):1092–1097, December 2022. ISSN 1095-9203.
+M.,Narang,S.,Rodriguez,A.,Stojnic,R.,Edunov,S.,
+doi:10.1126/science.abq1158.URLhttp://dx.doi.
+andScialom,T.Llama2:Openfoundationandfine-tuned
+org/10.1126/science.abq1158.
+chatmodels,2023b.
+Malik, A. Openai’s chatgpt now has 100 million weekly
+Vaswani,A.,Shazeer,N.,Parmar,N.,Uszkoreit,J.,Jones,
+activeusers. https://techcrunch.com/2023/11/06/openais-
+L.,Gomez,A.N.,Kaiser,L.,andPolosukhin,I.Attention
+chatgpt-now-has-100-million-weekly-active-users/,2023.
+isallyouneed,2023.
+Accessed: 2023-11-06.
+Wang,X.,Wei,J.,Schuurmans,D.,Le,Q.,Chi,E.,Narang,
+Ning,X.,Lin,Z.,Zhou,Z.,Wang,Z.,Yang,H.,andWang, S., Chowdhery, A., and Zhou, D. Self-consistency im-
+Y. Skeleton-of-thought: Largelanguagemodelscando proveschainofthoughtreasoninginlanguagemodels,
+paralleldecoding,2023. 2023.
+OpenAI. Gpt-4technicalreport,2023. Yao,S.,Yu,D.,Zhao,J.,Shafran,I.,Griffiths,T.L.,Cao,
+Y., and Narasimhan, K. Tree of thoughts: Deliberate
+Rabe, M. N. and Staats, C. Self-attention does not need
+problemsolvingwithlargelanguagemodels,2023.
+o(n2)memory,2022.
+Yu,G.-I.,Jeong,J.S.,Kim,G.-W.,Kim,S.,andChun,B.-
+Radford,A.,Wu,J.,Child,R.,Luan,D.,Amodei,D.,and G. Orca: Adistributedservingsystemfor{Transformer-
+Sutskever,I.Languagemodelsareunsupervisedmultitask Based}generativemodels. In16thUSENIXSymposium
+learners. 2019. onOperatingSystemsDesignandImplementation(OSDI
+22),pp.521–538,2022.
+Rozière, B., Gehring, J., Gloeckle, F., Sootla, S., Gat,
+I., Tan, X. E., Adi, Y., Liu, J., Remez, T., Rapin, J., Zheng,L.,Yin,L.,Xie,Z.,Huang,J.,Sun,C.,Yu,C.H.,
+Kozhevnikov,A.,Evtimov,I.,Bitton,J.,Bhatt,M.,Ferrer, Cao,S.,Kozyrakis,C.,Stoica,I.,Gonzalez,J.E.,Barrett,
+C.C.,Grattafiori,A.,Xiong,W.,Défossez,A.,Copet,J., C.,andSheng,Y.Efficientlyprogramminglargelanguage
+Azhar,F.,Touvron,H.,Martin,L.,Usunier,N.,Scialom, modelsusingsglang,2023.
+T.,andSynnaeve,G. Codellama: Openfoundationmod-
+elsforcode,2023.
+10Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+A.ProvingtheCorrectnessofAttentionDecomposition
+Westartbyexplicitlyexpressingsoftmaxasanexponentiationfollowedbyanormalization:
+(cid:16) (cid:17)
+(cid:18) QKT(cid:19) exp Q √KT
+softmax √ = d (6)
+d eLSE(Q,K)
+ThereforewecanrewriteEquation1as:
+ exp(cid:16)
+Q
+√KT(cid:17)
+d
+SDP(Q,K,V)= V (7)
+eLSE(Q,K)
+WecanthenexpandEquation5:
+SDP(Q,K 1,V 1)eLSE(Q,K1)+SDP(Q,K 2,V 2)eLSE(Q,K2)
+(8)
+eLSE(Q,K1)+eLSE(Q,K2)
+ exp(cid:18)
+Q
+√K1T(cid:19)  exp(cid:18)
+Q
+√K2T(cid:19)
+ eLSE(Q,Kd
+1)
+V 1eLSE(Q,K1)+ eLSE(Q,Kd
+2)
+V 2eLSE(Q,K2)
+= (9)
+eLSE(Q,K1)+eLSE(Q,K2)
+exp(cid:16)
+Q √K
+1T(cid:17)
+V
+1+exp(cid:16)
+Q √K
+2T(cid:17)
+V
+2
+d d
+= (10)
+eLSE(Q,K1)+eLSE(Q,K2)
+(cid:16) (cid:17)
+exp
+Q(K1√||K2)T
+(V 1||V 2)
+d
+= (11)
+eLSE(Q,K1||K2)
+=SDP(Q,K ||K ,V ||V ) (12)
+1 2 1 2
+asrequired.
+B.HydragenPseudocode
+We provide PyTorch-style pseudocode implementing Hydragen attention below. We highlight that Hydragen can be
+implementedeasilyandefficientlyinexistingmachinelearninglibraries,aslongasthereisafastattentionprimitivethat
+returnstheLSEneededforsoftmaxrecombination.
+1 import torch
+2 from torch import Tensor
+3
+4 def attention(q: Tensor, k: Tensor, v: Tensor) -> tuple[Tensor, Tensor]:
+5 """
+6 Placeholder for some fast attention primitive
+7 that also returns LSEs. We use the flash-attn
+8 package in our implementation.
+9
+10 q shape: [batch, qseq_len, qheads, dim]
+11 k shape: [batch, kvseq_len, kvheads, dim]
+12 v shape: [batch, kvseq_len, kvheads, dim]
+13 """
+14 pass
+15
+16 def combine_lse(
+11Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+17 out1: Tensor,
+18 lse1: Tensor,
+19 out2: Tensor,
+20 lse2: Tensor,
+21 ):
+22 """
+23 Combines two attention results using their LSEs.
+24
+25 Out1/2 shape: [batch, seq_len, qheads, hdim]
+26 lse1/2 shape: [batch, seq_len, qheads]
+27 """
+28 max_lse = torch.maximum(lse1, lse2)
+29
+30 adjust_factor1 = (lse1 - max_lse).exp()
+31 adjust_factor2 = (lse2 - max_lse).exp()
+32
+33 new_denominator = adjust_factor1 + adjust_factor2
+34
+35 aggregated = (
+36 out1 * adjust_factor1.unsqueeze(-1) + out2 * adjust_factor2.unsqueeze(-1)
+37 ) / new_denominator.unsqueeze(-1)
+38
+39 return aggregated
+40
+41
+42 def hydragen_attention(
+43 q: Tensor,
+44 prefix_k: Tensor,
+45 prefix_v: Tensor,
+46 suffix_k: Tensor,
+47 suffix_v: Tensor,
+48 ):
+49 """
+50 q: shape [batch, num_queries (1 during decoding), qheads, dim]
+51
+52 prefix_k: shape [prefix_len, kvheads, dim]
+53 prefix_v: shape [prefix_len, kvheads, dim]
+54
+55 suffix_k: shape [batch, suffix_len, kvheads, dim]
+56 suffix_v: shape [batch, suffix_len, kvheads, dim]
+57 """
+58
+59 b, nq, hq, d = q.shape
+60
+61 # inter-sequence batching: merge attention queries
+62 # as if they all came from the same sequence.
+63 batched_q = q.view(1, b * nq, hq, d)
+64
+65
+66 # efficient attention over prefixes
+67 # prefix_out: shape [1, batch * nq, hq, dim]
+68 # prefix_lse: shape [1, batch * nq, hq]
+69 prefix_out, prefix_lse = attention(
+70 batched_q,
+71 prefix_k.unsqueeze(0),
+72 prefix_v.unsqueeze(0),
+73 )
+74
+75
+76 # normal attention over suffixes
+77 # suffix_out: shape [batch, suffix_len, hq, dim]
+78 # suffix_lse: shape [batch, suffix_len, hq]
+79 suffix_out, suffix_lse = attention(
+80 batched_q,
+81 suffix_k,
+12Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+82 suffix_v,
+83 )
+84
+85 # unmerge prefix attention results and combine
+86 # softmax denominators
+87 aggregated = combine_lse(
+88 prefix_out.view(b, nq, hq, d),
+89 prefix_lse.view(b, nq, hq),
+90 suffix_out,
+91 suffix_lse,
+92 )
+93
+94 return aggregated
+C.AdditionalResults
+C.1.End-to-EndThroughput
+Weexpandontheend-to-endthroughputexperimentsdiscussedinSection4.1. Wereportadditionalresultswithmore
+modelsizeswhengenerating128and256tokens. TheseresultsaredisplayedinTable1andTable2forCodeLlama-7b,
+Table3andTable4forCodeLlama-13b,andTable5andTable6forCodeLlama-34b,respectively(Rozièreetal.,2023).
+Notethatinthetableswhere128tokensaregeneratedpersequence,the“16K”columncorrespondstoaprefixlengthof
+16256tokens,whileforthetableswith256generatedtokenspersequence,thiscorrespondsto16128tokens(thisisdoneto
+accommodatethe16384maxsequencelengthoftheCodeLlamamodels).
+FlashAttention Hydragen vLLM(NoTokenization) vLLM UpperBound(NoAttention)
+Batch PrefixLength PrefixLength PrefixLength PrefixLength PrefixLength
+Size 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K All
+2.5 2.2 1.8 1.3 0.9 2.8 2.7 2.8 2.6 2.5 1.7 1.8 1.7 0.6 0.4 1.6 1.6 1.5 0.6 0.3
+32 ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 3.1±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.3 0.0 0.0 0.1 0.1 0.1 0.0 0.0 0.1 0.0 0.0 0.0 0.0
+4.2 3.4 2.6 1.7 5.2 4.9 5.0 4.9 4.7 3.5 3.5 2.9 0.7 0.4 2.9 2.8 2.1 0.7 0.4
+64 ± ± ± ± X ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 5.7±0.0
+0.0 0.0 0.0 0.0 0.0 0.5 0.0 0.0 0.0 0.1 0.1 0.1 0.0 0.0 0.1 0.1 0.3 0.0 0.0
+5.7 4.2 2.7 8.4 8.6 8.4 8.4 8.2
+128 ± ± ± X X ± ± ± ± ± 6.1 5.5 3.2 0.8 0.4 4.9 4.5 2.7 0.7 0.4 10.3±0.0
+0.0 0.0 0.0 1.1 0.3 0.6 0.0 0.0
+8.1 5.7 13.5 10.9 10.9 11.0 12.5
+256 ± ± X X X ± ± ± ± ± 8.9 5.6 3.1 0.8 0.4 6.9 4.2 2.5 0.8 0.4 15.8±0.0
+0.0 0.0 0.0 0.0 0.2 0.1 0.0
+19.8 19.6 19.4 18.8 17.7
+512 X X X X X ± ± ± ± ± 4.7 2.8 1.5 0.8 0.4 4.2 2.5 1.4 0.8 0.4 23.2±0.0
+0.0 0.0 0.0 0.0 0.0
+25.5 25.3 24.9 24.0 22.3
+1024 X X X X X ± ± ± ± ± 4.9 2.8 1.5 0.8 0.4 4.2 2.5 1.4 0.7 0.4 30.1±0.0
+0.0 0.0 0.0 0.0 0.0
+27.8 27.4 25.4 25.2 22.7
+2048 X X X X X ± ± ± ± ± 4.9 2.8 1.5 0.8 0.4 4.2 2.5 1.4 0.7 0.4 32.7±0.0
+0.0 0.0 0.8 0.0 0.0
+Table1.End-to-enddecodingthroughput(thousandsoftokenspersecond)withCodeLlama-7Bon8xA100-40GBGPUswhengenerating
+128tokens.An“x”indicatesthatthemodeldoesnothavetherequiredmemorytorun.
+13Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+FlashAttention Hydragen vLLM(NoTokenization) vLLM UpperBound(NoAttention)
+Batch PrefixLength PrefixLength PrefixLength PrefixLength PrefixLength
+Size 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K All
+2.4 2.2 1.8 1.3 0.9 2.7 2.6 2.6 2.6 2.5 1.7 1.8 1.7 0.6 0.4 1.6 1.5 1.5 0.6 0.3
+32 ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 3.1±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.1 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+3.9 3.4 2.5 1.7 5.0 4.9 4.9 4.8 4.6 3.4 3.3 2.7 0.7 0.4 2.8 2.8 2.3 0.6 0.4
+64 ± ± ± ± X ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 5.7±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.2 0.0 0.0 0.1 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0
+5.3 4.1 2.7 8.4 8.3 8.2 8.1 7.9
+128 ± ± ± X X ± ± ± ± ± 6.3 5.0 2.9 0.8 0.4 4.8 4.0 2.5 0.7 0.4 10.3±0.0
+0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0
+7.4 12.9 11.1 11.5 12.4 12.0
+256 ± X X X X ± ± ± ± ± 8.8 5.5 3.1 0.8 0.4 6.5 4.2 2.5 0.7 0.4 15.7±0.0
+0.0 0.0 0.4 0.6 0.0 0.0
+18.6 18.4 18.2 17.1 16.8
+512 X X X X X ± ± ± ± ± 4.6 2.8 1.6 0.8 0.4 3.8 2.4 1.4 0.7 0.4 23.2±0.0
+0.0 0.0 0.0 0.9 0.0
+23.6 23.0 21.9 22.2 20.9
+1024 X X X X X ± ± ± ± ± 4.8 2.8 1.6 0.8 0.4 3.9 2.4 1.4 0.7 0.4 30.0±0.0
+0.0 0.3 1.0 0.0 0.0
+Table2.End-to-enddecodingthroughput(thousandsoftokenspersecond)withCodeLlama-7Bon8xA100-40GBGPUswhengenerating
+256tokens.An“x”indicatesthatthemodeldoesnothavetherequiredmemorytorun.
+FlashAttention Hydragen vLLM(NoTokenization) vLLM UpperBound(NoAttention)
+Batch PrefixLength PrefixLength PrefixLength PrefixLength PrefixLength
+Size 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K All
+1.7 1.4 1.1 0.7 2.1 2.0 2.0 1.9 1.9 1.8 1.8 1.8 0.6 0.4 1.6 1.6 1.5 0.5 0.3
+32 ± ± ± ± X ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 2.3±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+2.9 2.3 1.6 3.7 3.6 3.6 3.4 3.4 3.5 3.5 2.9 0.7 0.4 3.0 2.9 2.4 0.6 0.4
+64 ± ± ± X X ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 4.2±0.0
+0.0 0.0 0.0 0.0 0.2 0.0 0.0 0.0 0.1 0.0 0.1 0.0 0.0 0.1 0.1 0.0 0.0 0.0
+4.0 2.9 5.9 5.7 5.5 5.7 5.5 4.7 3.8
+128 ± ± X X X ± ± ± ± ± 5.5 ± 3.0 0.8 0.4 4.8 ± 2.6 0.7 0.4 6.8±0.0
+0.0 0.0 0.0 0.4 0.3 0.0 0.0 0.1 0.1
+5.7 9.7 9.9 9.5 9.4 8.9 5.5 4.3
+256 ± X X X X ± ± ± ± ± 8.0 ± 3.2 0.8 0.4 6.1 ± 2.7 0.7 0.4 11.4±0.0
+0.0 0.0 0.7 0.0 0.0 0.0 0.1 0.1
+13.5 13.4 12.3 13.0 12.3 2.7 2.4
+512 X X X X X ± ± ± ± ± 4.7 ± 1.6 0.8 0.4 4.1 ± 1.4 0.8 0.4 16.1±0.0
+0.0 0.0 1.3 0.0 0.0 0.0 0.0
+15.6 15.5 15.3 14.8 13.8 4.9 2.8 1.6 0.8 0.4 4.2 2.5 1.4 0.7 0.4
+1024 X X X X X ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 18.4±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+Table3.End-to-enddecodingthroughput(thousandsoftokenspersecond)withCodeLlama-13Bon8xA100-40GBGPUswhengenerating
+128tokens.An“x”indicatesthatthemodeldoesnothavetherequiredmemorytorun.
+FlashAttention Hydragen vLLM(NoTokenization) vLLM UpperBound(NoAttention)
+Batch PrefixLength PrefixLength PrefixLength PrefixLength PrefixLength
+Size 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K All
+1.7 1.4 1.1 0.7 2.0 1.9 1.9 1.8 1.8 1.8 1.7 1.8 0.5 0.3 1.6 1.6 1.5 0.5 0.3
+32 ± ± ± ± X ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 2.3±0.0
+0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+2.8 2.2 1.6 3.6 3.5 3.5 3.3 3.3 3.4 3.4 2.9 0.7 0.4 3.0 2.7 2.2 0.6 0.4
+64 ± ± ± X X ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 4.2±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0 0.2 0.2 0.1 0.0 0.0
+3.8 2.8 5.6 5.6 5.4 5.5 5.3
+128 ± ± X X X ± ± ± ± ± 5.4 4.6 3.0 0.8 0.4 4.6 3.7 2.4 0.7 0.4 6.8±0.0
+0.0 0.0 0.0 0.1 0.0 0.0 0.0
+5.4 9.1 8.6 8.9 8.8 8.4
+256 ± X X X X ± ± ± ± ± 7.6 5.5 3.1 0.8 0.4 5.9 4.3 2.5 0.7 0.4 11.3±0.0
+0.0 0.0 0.3 0.0 0.0 0.0
+12.5 12.4 12.4 12.1 11.5
+512 X X X X X ± ± ± ± ± 4.4 2.7 1.5 0.8 0.4 3.8 2.4 1.4 0.7 0.4 16.1±0.0
+0.0 0.0 0.0 0.0 0.0
+Table4.End-to-enddecodingthroughput(thousandsoftokenspersecond)withCodeLlama-13Bon8xA100-40GBGPUswhengenerating
+256tokens.An“x”indicatesthatthemodeldoesnothavetherequiredmemorytorun.
+14Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+FlashAttention Hydragen vLLM(NoTokenization) vLLM UpperBound(NoAttention)
+Batch PrefixLength PrefixLength PrefixLength PrefixLength PrefixLength
+Size 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K All
+1.4 1.3 1.2 1.0 0.8 1.5 1.4 1.4 1.4 1.4 1.5 1.4 1.2 0.5 0.3 1.5 1.3 1.1 0.5 0.3
+32 ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 1.6±0.0
+0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+2.5 2.4 2.1 1.8 1.3 2.6 2.6 2.6 2.5 2.5 2.6 2.3 1.9 0.7 0.4 2.4 2.1 1.6 0.6 0.4
+64 ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 2.9±0.0
+0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.1 0.1 0.0 0.0
+3.8 3.4 2.8 2.1 4.2 4.2 4.1 4.1 3.9
+128 ± ± ± ± X ± ± ± ± ± 3.8 3.0 2.3 0.8 0.4 3.4 2.7 2.0 0.7 0.4 4.6±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+6.0 5.3 4.3 6.3 6.7 6.6 6.3 6.0
+256 ± ± ± X X ± ± ± ± ± 5.1 3.9 2.8 0.8 0.4 4.4 3.3 2.4 0.8 0.4 7.2±0.0
+0.0 0.0 0.0 0.4 0.0 0.0 0.0 0.0
+7.0 6.0 7.8 8.1 8.0 7.7 7.1
+512 ± ± X X X ± ± ± ± ± 4.2 2.7 1.5 0.8 0.4 3.6 2.4 1.4 0.8 0.4 8.8±0.0
+0.0 0.0 0.5 0.0 0.0 0.0 0.0
+9.0 9.0 8.8 8.3 7.5
+1024 X X X X X ± ± ± ± ± 4.3 2.8 1.6 0.8 0.4 3.7 2.5 1.4 0.8 0.4 9.7±0.0
+0.2 0.0 0.0 0.0 0.0
+10.1 10.0 9.7 9.2 8.3
+2048 X X X X X ± ± ± ± ± 4.3 2.7 1.5 0.8 0.4 3.7 2.4 1.4 0.8 0.4 10.7±0.0
+0.0 0.0 0.0 0.0 0.0
+10.7 10.6 10.4 9.5 8.9
+4096 X X X X X ± ± ± ± ± 4.0 2.6 1.4 0.8 0.4 3.5 2.3 1.3 0.7 0.4 11.3±0.0
+0.0 0.0 0.0 0.1 0.0
+Table5.End-to-enddecodingthroughput(thousandsoftokenspersecond)withCodeLlama-34Bon8xA100-40GBGPUswhengenerating
+128tokens.An“x”indicatesthatthemodeldoesnothavetherequiredmemorytorun.
+FlashAttention Hydragen vLLM(NoTokenization) vLLM UpperBound(NoAttention)
+Batch PrefixLength PrefixLength PrefixLength PrefixLength PrefixLength
+Size 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K 1K 2K 4K 8K 16K All
+1.4 1.3 1.2 1.1 0.8 1.4 1.4 1.4 1.4 1.4 1.5 1.4 1.2 0.5 0.3 1.5 1.3 1.1 0.5 0.3
+32 ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 1.6±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0
+2.5 2.4 2.1 1.8 1.3 2.6 2.6 2.6 2.5 2.5 2.6 2.3 1.8 0.7 0.4 2.3 2.0 1.6 0.6 0.4
+64 ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± ± 2.8±0.0
+0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0
+3.8 3.4 2.8 2.1 4.1 4.1 4.1 4.0 3.9
+128 ± ± ± ± X ± ± ± ± ± 3.7 3.0 2.2 0.7 0.4 3.2 2.6 2.0 0.7 0.4 4.5±0.0
+0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0
+5.8 5.3 4.3 6.6 6.5 6.4 6.2 5.9
+256 ± ± ± X X ± ± ± ± ± 5.0 3.9 2.7 0.8 0.4 4.2 3.3 2.3 0.7 0.4 7.2±0.0
+0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+6.7 5.9 7.9 7.9 7.9 7.6 7.1
+512 ± ± X X X ± ± ± ± ± 3.9 2.6 1.5 0.8 0.4 3.5 2.3 1.4 0.7 0.4 8.8±0.0
+0.0 0.0 0.0 0.1 0.0 0.0 0.0
+9.0 8.9 8.6 8.1 7.4
+1024 X X X X X ± ± ± ± ± 3.9 2.6 1.4 0.8 0.4 3.6 2.4 1.4 0.7 0.4 9.7±0.0
+0.0 0.0 0.0 0.0 0.0
+10.0 9.8 9.6 9.1 8.2
+2048 X X X X X ± ± ± ± ± 4.0 2.6 1.5 0.8 0.4 3.6 2.4 1.4 0.7 0.4 10.6±0.0
+0.0 0.0 0.0 0.0 0.0
+Table6.End-to-enddecodingthroughput(thousandsoftokenspersecond)withCodeLlama-34Bon8xA100-40GBGPUswhengenerating
+256tokens.An“x”indicatesthatthemodeldoesnothavetherequiredmemorytorun.
+C.2.Microbenchmarks
+WerepeattheA100microbenchmarkexperimentfromSection4.2onanH100andL40SGPU,reportingourresultsin
+Figure8. TheL40ShasthehighestratioofcomputecapabilitytomemorybandwidthofthethreeGPUsandtherefore
+derivesthemostbenefitfromHydragen’seliminationofmemorybottlenecks. Whilethecompute-to-bandwidthratiois
+higheronanH100thanonanA100,wemeasuresimilarHydragenspeedupsbetweenbothcards. Thisstemsfromthefact
+thattheflash-attnpackagethatweuseisnotcurrentlyoptimizedforHopperGPUs,andthereforeachievesalower
+deviceutilizationonanH100vsanA100.
+D.ExperimentDetails
+D.1.End-to-EndBenchmarks
+Ourend-to-endbenchmarksonlymeasuredecodingthroughputandexcludethetimerequiredtocomputetheprefill. We
+measure“decode-only”timebyinitiallybenchmarkingthetimerequiredtogenerateonetokenfromagivenpromptand
+subtracting that value from the time it takes to generate the desired number of tokens. This subtraction is particularly
+15Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+Figure8.SpeedupofHydragenattentionoverFlashAttentionforvariousbatchsizes,sharedprefixlengthsandsuffixlengthsonanH100
+(left)andanL40S(right)GPU.
+importantinordertofairlyevaluatevLLMbaselines,sinceitappearsthatvLLMredundantlydetokenizesthepromptfor
+everysequenceinthebatchatthebeginningofinference(thiscantakeminutesforlargebatchsizesandsequencelengths).
+Forour“vLLMnodetokenization”baseline,wedisableincrementaldetokenizationinvLLMbycommentingoutthisline.
+ForallFlashAttentionandNoAttentiondatapoints,werun10warmupiterationsandusethefollowing10iterationsto
+computethroughput. ForHydragendatapoints,werun10warmupand10timingiterationswhenthebatchsizeislessthan
+256,andforlargerbatchsizesusethreewarmupandthreetimingiterations. Weobservethatshorter-runningHydragen
+benchmarks(thosewithsmallerbatchsizes,sequencelengths,modelsizes,orcompletionlengths)canoccasionallyproduce
+longeroutliertimes. Thisseemstoberelatednottodecodingtimeitself,buttovariationsinprefillingtimebeforedecoding.
+ForvLLMbaselines(bothwithandwithoutincrementaldetokenization),weusethreewarmupandtimingiterationsfor
+allbatchsizesbelow128,aswellasforalldatapointsthatareusedinFigures1and4. Thelongest-runningvLLMruns
+cantakemanyminutestocompleteasingleiteration,soforbaselinesaboveabatchsizeof128thatonlyappearinthe
+supplementarytablesofAppendixC.1,weuseonewarmupandonetimingiteration.
+D.2.Microbenchmarks
+Ineachmicrobenchmark,werun1000iterationsofwarmupbeforereportingthemeanrunningtimeacross1000trials.
+Betweentrials,weflushtheGPUL2cachebywritingtoa128MiBtensor. WeuseCUDAgraphswhenbenchmarkingin
+ordertoreduceCPUoverhead,whichcanbeimportantsincesomebenchmarkscancompleteasingleiterationintensof
+microseconds.
+D.3.Longdocumentretrieval
+TodemonstratethethroughputbenefitsofusingHydragentoanswerquestionsaboutalongdocument, weconstructa
+document(with19974tokens)thatcontainsarbitraryfactsfromwhichquestion/answerpairscanbeeasilygenerated.
+PrefixandSuffixContent: ThecontentofthedocumentisasubsetofWarandPeace,modifiedtoincludeprocedurally
+generatedfactsoftheform“Thedognamed{name}hasfurthatis{color}”. Thequestionsareoftheform“Whatcoloris
+thefurofthedognamedname?”,wheretheansweriscolor. Weconstruct261questions(256testablequestionsplusfive
+forthefew-shotexamples)andinterleavethesethroughoutsentencesofthedocument. Whenbenchmarkingwithagreater
+numberofquestionsthan256,weduplicatequestionswhenqueryingthemodel-thisisinsteadofaddingmorequestionsto
+thedocumentinordertoconstraintotaldocumentlength.
+ModelandAcceleratorChoice: WechoosetheYi-6B-200kmodelbecauseitissmallenoughtofitalargeKVcache
+inmemory(importantwhenrunningbaselinesthatredundantlystorethedocument)whilealsosupportingalongenough
+contexttoprocessourdocument. WedistributethemodelacrossfourA100-40GBGPUsinordertomaximizepossibleKV
+cachesize(themodelonlyhasfourkey/valueattentionheads,preventingusfromeasilyusingtensorparallelismacross
+moreGPUs).
+16Hydragen:High-ThroughputLLMInferencewithSharedPrefixes
+Ourreportedmeasurementsusethemeanoffivetimingrunsaftertenwarmupiterations.
+D.4.HierarchicalSharinginCompetitiveProgramming
+Thedatasetof120problemsthatweuseforthisbenchmarkcomesfromtheintroductorydifficultysplitofAPPS.Wefilter
+outproblemsthatincludestartercode. Weusetwofew-shotexamples(2400tokenslong)thatcomefromthetrainingsplit
+ofAPPS,whilealloftheevalexamplescomefromthetestsplit. Wesample512tokensforeverycompletion. Werun
+thisexperimentusingCodeLlama-7boneightA100-40GBGPUs. Wemeasurethetotaltimetoruninferenceonall120
+questions,excludingtokenizationanddetokenizationtime.
+17
