@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05935v1 |
-|title| SPHINX-X: Scaling Data and Parameters for a Family of Multi-modal Large Language Models |
-|authors| Peng GaoRenrui ZhangChris LiuLongtian QiuSiyuan HuangWeifeng LinShitian ZhaoShijie GengZiyi LinPeng JinKaipeng ZhangWenqi ShaoChao XuConghui HeJunjun HeHao ShaoPan LuHongsheng LiYu Qiao
-|links| http://arxiv.org/abs/2402.05935v1 |
-|updated| 2024-02-08 18:59:48 UTC |
-|summary| We propose SPHINX-X an extensive Multimodality Large Language Model MLLMseries developed upon SPHINX. To improve the architecture and trainingefficiency we modify the SPHINX framework by removing redundant visualencoders bypassing fully-padded sub-images with skip tokens and simplifyingmulti-stage training into a one-stage all-in-one paradigm. To fully unleash thepotential of MLLMs we assemble a comprehensive multi-domain and multimodaldataset covering publicly available resources in language vision andvision-language tasks. We further enrich this collection with our curated OCRintensive and Set-of-Mark datasets extending the diversity and generality. Bytraining over different base LLMs including TinyLlama1.1B InternLM2-7BLLaMA2-13B and Mixtral8x7B we obtain a spectrum of MLLMs that vary inparameter size and multilingual capabilities. Comprehensive benchmarkingreveals a strong correlation between the multi-modal performance with the dataand parameter scales. Code and models are released athttps://github.com/Alpha-VLLM/LLaMA2-Accessory |
+|idx| 2402.06627v1 |
+|title| Feedback Loops With Language Models Drive In-Context Reward Hacking |
+|authors| Alexander PanErik JonesMeena JagadeesanJacob Steinhardt
+|links| http://arxiv.org/abs/2402.06627v1 |
+|updated| 2024-02-09 18:59:29 UTC |
+|summary| Language models influence the external world: they query APIs that read andwrite to web pages generate content that shapes human behavior and run systemcommands as autonomous agents. These interactions form feedback loops: LLMoutputs affect the world which in turn affect subsequent LLM outputs. In thiswork we show that feedback loops can cause in-context reward hacking ICRHwhere the LLM at test-time optimizes a potentially implicit objective butcreates negative side effects in the process. For example consider an LLMagent deployed to increase Twitter engagement the LLM may retrieve itsprevious tweets into the context window and make them more controversialincreasing engagement but also toxicity. We identify and study two processesthat lead to ICRH: output-refinement and policy-refinement. For theseprocesses evaluations on static datasets are insufficient -- they miss thefeedback effects and thus cannot capture the most harmful behavior. Inresponse we provide three recommendations for evaluation to capture moreinstances of ICRH. As AI development accelerates the effects of feedback loopswill proliferate increasing the need to understand their role in shaping LLMbehavior. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05932v1 |
-|title| Driving Everywhere with Large Language Model Policy Adaptation |
-|authors| Boyi LiYue WangJiageng MaoBoris IvanovicSushant VeerKaren LeungMarco Pavone
-|links| http://arxiv.org/abs/2402.05932v1 |
-|updated| 2024-02-08 18:59:03 UTC |
-|summary| Adapting driving behavior to new environments customs and laws is along-standing problem in autonomous driving precluding the widespreaddeployment of autonomous vehicles AVs. In this paper we present LLaDA asimple yet powerful tool that enables human drivers and autonomous vehiclesalike to drive everywhere by adapting their tasks and motion plans to trafficrules in new locations. LLaDA achieves this by leveraging the impressivezero-shot generalizability of large language models LLMs in interpreting thetraffic rules in the local driver handbook. Through an extensive user study weshow that LLaDAs instructions are useful in disambiguating in-the-wildunexpected situations. We also demonstrate LLaDAs ability to adapt AV motionplanning policies in real-world datasets LLaDA outperforms baseline planningapproaches on all our metrics. Please check our website for more details:https://boyiliee.github.io/llada. |
+|idx| 2402.06625v1 |
+|title| Understanding the Effects of Iterative Prompting on Truthfulness |
+|authors| Satyapriya KrishnaChirag AgarwalHimabindu Lakkaraju
+|links| http://arxiv.org/abs/2402.06625v1 |
+|updated| 2024-02-09 18:57:08 UTC |
+|summary| The development of Large Language Models LLMs has notably transformednumerous sectors offering impressive text generation capabilities. Yet thereliability and truthfulness of these models remain pressing concerns. To thisend we investigate iterative prompting a strategy hypothesized to refine LLMresponses assessing its impact on LLM truthfulness an area which has not beenthoroughly explored. Our extensive experiments delve into the intricacies ofiterative prompting variants examining their influence on the accuracy andcalibration of model responses. Our findings reveal that naive promptingmethods significantly undermine truthfulness leading to exacerbatedcalibration errors. In response to these challenges we introduce severalprompting variants designed to address the identified issues. These variantsdemonstrate marked improvements over existing baselines signaling a promisingdirection for future research. Our work provides a nuanced understanding ofiterative prompting and introduces novel approaches to enhance the truthfulnessof LLMs thereby contributing to the development of more accurate andtrustworthy AI systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05930v1 |
-|title| WebLINX: Real-World Website Navigation with Multi-Turn Dialogue |
-|authors| Xing Han LùZdeněk KasnerSiva Reddy
-|links| http://arxiv.org/abs/2402.05930v1 |
-|updated| 2024-02-08 18:58:02 UTC |
-|summary| We propose the problem of conversational web navigation where a digitalagent controls a web browser and follows user instructions to solve real-worldtasks in a multi-turn dialogue fashion. To support this problem we introduceWEBLINX - a large-scale benchmark of 100K interactions across 2300 expertdemonstrations of conversational web navigation. Our benchmark covers a broadrange of patterns on over 150 real-world websites and can be used to train andevaluate agents in diverse scenarios. Due to the magnitude of informationpresent Large Language Models LLMs cannot process entire web pages inreal-time. To solve this bottleneck we design a retrieval-inspired model thatefficiently prunes HTML pages by ranking relevant elements. We use the selectedelements along with screenshots and action history to assess a variety ofmodels for their ability to replicate human behavior when navigating the web.Our experiments span from small text-only to proprietary multimodal LLMs. Wefind that smaller finetuned decoders surpass the best zero-shot LLMs includingGPT-4V but also larger finetuned multimodal models which were explicitlypretrained on screenshots. However all finetuned models struggle to generalizeto unseen websites. Our findings highlight the need for large multimodal modelsthat can generalize to novel settings. Our code data and models are availablefor research: https://mcgill-nlp.github.io/weblinx |
+|idx| 2402.06619v1 |
+|title| Aya Dataset: An Open-Access Collection for Multilingual Instruction Tuning |
+|authors| Shivalika SinghFreddie VargusDaniel DsouzaBörje F. KarlssonAbinaya MahendiranWei-Yin KoHerumb ShandilyaJay PatelDeividas MataciunasLaura OMahonyMike ZhangRamith HettiarachchiJoseph WilsonMarina MachadoLuisa Souza MouraDominik KrzemińskiHakimeh FadaeiIrem ErgünIfeoma OkohAisha AlaagibOshan MudannayakeZaid AlyafeaiVu Minh ChienSebastian RuderSurya GuthikondaEmad A. AlghamdiSebastian GehrmannNiklas MuennighoffMax BartoloJulia KreutzerAhmet ÜstünMarzieh FadaeeSara Hooker
+|links| http://arxiv.org/abs/2402.06619v1 |
+|updated| 2024-02-09 18:51:49 UTC |
+|summary| Datasets are foundational to many breakthroughs in modern artificialintelligence. Many recent achievements in the space of natural languageprocessing NLP can be attributed to the finetuning of pre-trained models on adiverse set of tasks that enables a large language model LLM to respond toinstructions. Instruction fine-tuning IFT requires specifically constructedand annotated datasets. However existing datasets are almost all in theEnglish language. In this work our primary goal is to bridge the language gapby building a human-curated instruction-following dataset spanning 65languages. We worked with fluent speakers of languages from around the world tocollect natural instances of instructions and completions. Furthermore wecreate the most extensive multilingual collection to date comprising 513million instances through templating and translating existing datasets across114 languages. In total we contribute four key resources: we develop andopen-source the Aya Annotation Platform the Aya Dataset the Aya Collectionand the Aya Evaluation Suite. The Aya initiative also serves as a valuable casestudy in participatory research involving collaborators from 119 countries. Wesee this as a valuable framework for future research collaborations that aim tobridge gaps in resources. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05926v1 |
-|title| On the Convergence of Zeroth-Order Federated Tuning in Large Language Models |
-|authors| Zhenqing LingDaoyuan ChenLiuyi YaoYaliang LiYing Shen
-|links| http://arxiv.org/abs/2402.05926v1 |
-|updated| 2024-02-08 18:56:40 UTC |
-|summary| The confluence of Federated Learning FL and Large Language Models LLMs isushering in a new era in privacy-preserving natural language processing.However the intensive memory requirements for fine-tuning LLMs posesignificant challenges especially when deploying on edge devices with limitedcomputational resources. To circumvent this we explore the novel integrationof Memory-efficient Zeroth-Order Optimization within a federated setting asynergy we denote as FedMeZO. Our study is the first to examine the theoreticalunderpinnings of FedMeZO in the context of LLMs tackling key questionsregarding the influence of large parameter spaces on optimization behavior theestablishment of convergence properties and the identification of criticalparameters for convergence to inform personalized federated strategies. Ourextensive empirical evidence supports the theory showing that FedMeZO not onlyconverges faster than traditional first-order methods such as SGD but alsosignificantly reduces GPU memory usage during training to levels comparable tothose during inference. Moreover the proposed personalized FL strategy that isbuilt upon the theoretical insights to customize the client-wise learning ratecan effectively accelerate loss reduction. We hope our work can help to bridgetheoretical and practical aspects of federated fine-tuning for LLMs andfacilitate further development and research. |
+|idx| 2402.06617v1 |
+|title| FaBERT: Pre-training BERT on Persian Blogs |
+|authors| Mostafa MasumiSeyed Soroush MajdMehrnoush ShamsfardHamid Beigy
+|links| http://arxiv.org/abs/2402.06617v1 |
+|updated| 2024-02-09 18:50:51 UTC |
+|summary| We introduce FaBERT a Persian BERT-base model pre-trained on the HmBlogscorpus encompassing both informal and formal Persian texts. FaBERT is designedto excel in traditional Natural Language Understanding NLU tasks addressingthe intricacies of diverse sentence structures and linguistic styles prevalentin the Persian language. In our comprehensive evaluation of FaBERT on 12datasets in various downstream tasks encompassing Sentiment Analysis SANamed Entity Recognition NER Natural Language Inference NLI QuestionAnswering QA and Question Paraphrasing QP it consistently demonstratedimproved performance all achieved within a compact model size. The findingshighlight the importance of utilizing diverse and cleaned corpora such asHmBlogs to enhance the performance of language models like BERT in PersianNatural Language Processing NLP applications. FaBERT is openly accessible athttps://huggingface.co/sbunlp/fabert |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05913v1 |
-|title| Efficient Stagewise Pretraining via Progressive Subnetworks |
-|authors| Abhishek PanigrahiNikunj SaunshiKaifeng LyuSobhan MiryoosefiSashank ReddiSatyen KaleSanjiv Kumar
-|links| http://arxiv.org/abs/2402.05913v1 |
-|updated| 2024-02-08 18:49:09 UTC |
-|summary| Recent developments in large language models have sparked interest inefficient pretraining methods. A recent effective paradigm is to performstage-wise training where the size of the model is gradually increased overthe course of training e.g. gradual stacking Reddi et al. 2023. While theresource and wall-time savings are appealing it has limitations particularlythe inability to evaluate the full model during earlier stages and degradationin model quality due to smaller model capacity in the initial stages. In thiswork we propose an alternative framework progressive subnetwork trainingthat maintains the full model throughout training but only trains subnetworkswithin the model in each step. We focus on a simple instantiation of thisframework Random Path Training RaPTr that only trains a sub-path of layersin each step progressively increasing the path lengths in stages. RaPTrachieves better pre-training loss for BERT and UL2 language models whilerequiring 20-33 fewer FLOPs compared to standard training and is competitiveor better than other efficient training methods. Furthermore RaPTr showsbetter downstream performance on UL2 improving QA tasks and SuperGLUE by 1-5compared to standard training and stacking. Finally we provide a theoreticalbasis for RaPTr to justify a the increasing complexity of subnetworks instages and b the stability in loss across stage transitions due to residualconnections and layer norm. |
+|idx| 2402.06608v1 |
+|title| TIC: Translate-Infer-Compile for accurate 'text to plan' using LLMs and logical intermediate representations |
+|authors| Sudhir AgarwalAnu Sreepathy
+|links| http://arxiv.org/abs/2402.06608v1 |
+|updated| 2024-02-09 18:39:13 UTC |
+|summary| We study the problem of generating plans for given natural language planningtask requests. On one hand LLMs excel at natural language processing but donot perform well on planning. On the other hand classical planning tools excelat planning tasks but require input in a structured language such as thePlanning Domain Definition Language PDDL. We leverage the strengths of boththe techniques by using an LLM for generating the PDDL representation taskPDDL of planning task requests followed by using a classical planner forcomputing a plan. Unlike previous approaches that use LLMs for generating taskPDDLs directly our approach comprises of a translate: using an LLM only forgenerating a logically interpretable intermediate representation of naturallanguage task descriptions b infer: deriving additional logically dependentinformation from the intermediate representation using a logic reasonercurrently Answer Set Programming solver and c compile: generating thetarget task PDDL from the base and inferred information. We observe that usingan LLM to only output the intermediate representation significantly reduces LLMerrors. Consequently TIC approach achieves for at least one LLM highaccuracy on task PDDL generation for all seven domains of our evaluationdataset. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05935v1 |
-|title| SPHINX-X: Scaling Data and Parameters for a Family of Multi-modal Large Language Models |
-|authors| Peng GaoRenrui ZhangChris LiuLongtian QiuSiyuan HuangWeifeng LinShitian ZhaoShijie GengZiyi LinPeng JinKaipeng ZhangWenqi ShaoChao XuConghui HeJunjun HeHao ShaoPan LuHongsheng LiYu Qiao
-|links| http://arxiv.org/abs/2402.05935v1 |
-|updated| 2024-02-08 18:59:48 UTC |
-|summary| We propose SPHINX-X an extensive Multimodality Large Language Model MLLMseries developed upon SPHINX. To improve the architecture and trainingefficiency we modify the SPHINX framework by removing redundant visualencoders bypassing fully-padded sub-images with skip tokens and simplifyingmulti-stage training into a one-stage all-in-one paradigm. To fully unleash thepotential of MLLMs we assemble a comprehensive multi-domain and multimodaldataset covering publicly available resources in language vision andvision-language tasks. We further enrich this collection with our curated OCRintensive and Set-of-Mark datasets extending the diversity and generality. Bytraining over different base LLMs including TinyLlama1.1B InternLM2-7BLLaMA2-13B and Mixtral8x7B we obtain a spectrum of MLLMs that vary inparameter size and multilingual capabilities. Comprehensive benchmarkingreveals a strong correlation between the multi-modal performance with the dataand parameter scales. Code and models are released athttps://github.com/Alpha-VLLM/LLaMA2-Accessory |
+|idx| 2402.06627v1 |
+|title| Feedback Loops With Language Models Drive In-Context Reward Hacking |
+|authors| Alexander PanErik JonesMeena JagadeesanJacob Steinhardt
+|links| http://arxiv.org/abs/2402.06627v1 |
+|updated| 2024-02-09 18:59:29 UTC |
+|summary| Language models influence the external world: they query APIs that read andwrite to web pages generate content that shapes human behavior and run systemcommands as autonomous agents. These interactions form feedback loops: LLMoutputs affect the world which in turn affect subsequent LLM outputs. In thiswork we show that feedback loops can cause in-context reward hacking ICRHwhere the LLM at test-time optimizes a potentially implicit objective butcreates negative side effects in the process. For example consider an LLMagent deployed to increase Twitter engagement the LLM may retrieve itsprevious tweets into the context window and make them more controversialincreasing engagement but also toxicity. We identify and study two processesthat lead to ICRH: output-refinement and policy-refinement. For theseprocesses evaluations on static datasets are insufficient -- they miss thefeedback effects and thus cannot capture the most harmful behavior. Inresponse we provide three recommendations for evaluation to capture moreinstances of ICRH. As AI development accelerates the effects of feedback loopswill proliferate increasing the need to understand their role in shaping LLMbehavior. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05933v1 |
-|title| Time Series Diffusion in the Frequency Domain |
-|authors| Jonathan CrabbéNicolas HuynhJan StanczukMihaela van der Schaar
-|links| http://arxiv.org/abs/2402.05933v1 |
-|updated| 2024-02-08 18:59:05 UTC |
-|summary| Fourier analysis has been an instrumental tool in the development of signalprocessing. This leads us to wonder whether this framework could similarlybenefit generative modelling. In this paper we explore this question throughthe scope of time series diffusion models. More specifically we analyzewhether representing time series in the frequency domain is a useful inductivebias for score-based diffusion models. By starting from the canonical SDEformulation of diffusion in the time domain we show that a dual diffusionprocess occurs in the frequency domain with an important nuance: Brownianmotions are replaced by what we call mirrored Brownian motions characterizedby mirror symmetries among their components. Building on this insight we showhow to adapt the denoising score matching approach to implement diffusionmodels in the frequency domain. This results in frequency diffusion modelswhich we compare to canonical time diffusion models. Our empirical evaluationon real-world datasets covering various domains like healthcare and financeshows that frequency diffusion models better capture the training distributionthan time diffusion models. We explain this observation by showing that timeseries from these datasets tend to be more localized in the frequency domainthan in the time domain which makes them easier to model in the former case.All our observations point towards impactful synergies between Fourier analysisand diffusion models. |
+|idx| 2402.06619v1 |
+|title| Aya Dataset: An Open-Access Collection for Multilingual Instruction Tuning |
+|authors| Shivalika SinghFreddie VargusDaniel DsouzaBörje F. KarlssonAbinaya MahendiranWei-Yin KoHerumb ShandilyaJay PatelDeividas MataciunasLaura OMahonyMike ZhangRamith HettiarachchiJoseph WilsonMarina MachadoLuisa Souza MouraDominik KrzemińskiHakimeh FadaeiIrem ErgünIfeoma OkohAisha AlaagibOshan MudannayakeZaid AlyafeaiVu Minh ChienSebastian RuderSurya GuthikondaEmad A. AlghamdiSebastian GehrmannNiklas MuennighoffMax BartoloJulia KreutzerAhmet ÜstünMarzieh FadaeeSara Hooker
+|links| http://arxiv.org/abs/2402.06619v1 |
+|updated| 2024-02-09 18:51:49 UTC |
+|summary| Datasets are foundational to many breakthroughs in modern artificialintelligence. Many recent achievements in the space of natural languageprocessing NLP can be attributed to the finetuning of pre-trained models on adiverse set of tasks that enables a large language model LLM to respond toinstructions. Instruction fine-tuning IFT requires specifically constructedand annotated datasets. However existing datasets are almost all in theEnglish language. In this work our primary goal is to bridge the language gapby building a human-curated instruction-following dataset spanning 65languages. We worked with fluent speakers of languages from around the world tocollect natural instances of instructions and completions. Furthermore wecreate the most extensive multilingual collection to date comprising 513million instances through templating and translating existing datasets across114 languages. In total we contribute four key resources: we develop andopen-source the Aya Annotation Platform the Aya Dataset the Aya Collectionand the Aya Evaluation Suite. The Aya initiative also serves as a valuable casestudy in participatory research involving collaborators from 119 countries. Wesee this as a valuable framework for future research collaborations that aim tobridge gaps in resources. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05932v1 |
-|title| Driving Everywhere with Large Language Model Policy Adaptation |
-|authors| Boyi LiYue WangJiageng MaoBoris IvanovicSushant VeerKaren LeungMarco Pavone
-|links| http://arxiv.org/abs/2402.05932v1 |
-|updated| 2024-02-08 18:59:03 UTC |
-|summary| Adapting driving behavior to new environments customs and laws is along-standing problem in autonomous driving precluding the widespreaddeployment of autonomous vehicles AVs. In this paper we present LLaDA asimple yet powerful tool that enables human drivers and autonomous vehiclesalike to drive everywhere by adapting their tasks and motion plans to trafficrules in new locations. LLaDA achieves this by leveraging the impressivezero-shot generalizability of large language models LLMs in interpreting thetraffic rules in the local driver handbook. Through an extensive user study weshow that LLaDAs instructions are useful in disambiguating in-the-wildunexpected situations. We also demonstrate LLaDAs ability to adapt AV motionplanning policies in real-world datasets LLaDA outperforms baseline planningapproaches on all our metrics. Please check our website for more details:https://boyiliee.github.io/llada. |
+|idx| 2402.06608v1 |
+|title| TIC: Translate-Infer-Compile for accurate 'text to plan' using LLMs and logical intermediate representations |
+|authors| Sudhir AgarwalAnu Sreepathy
+|links| http://arxiv.org/abs/2402.06608v1 |
+|updated| 2024-02-09 18:39:13 UTC |
+|summary| We study the problem of generating plans for given natural language planningtask requests. On one hand LLMs excel at natural language processing but donot perform well on planning. On the other hand classical planning tools excelat planning tasks but require input in a structured language such as thePlanning Domain Definition Language PDDL. We leverage the strengths of boththe techniques by using an LLM for generating the PDDL representation taskPDDL of planning task requests followed by using a classical planner forcomputing a plan. Unlike previous approaches that use LLMs for generating taskPDDLs directly our approach comprises of a translate: using an LLM only forgenerating a logically interpretable intermediate representation of naturallanguage task descriptions b infer: deriving additional logically dependentinformation from the intermediate representation using a logic reasonercurrently Answer Set Programming solver and c compile: generating thetarget task PDDL from the base and inferred information. We observe that usingan LLM to only output the intermediate representation significantly reduces LLMerrors. Consequently TIC approach achieves for at least one LLM highaccuracy on task PDDL generation for all seven domains of our evaluationdataset. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05929v1 |
-|title| An Interactive Agent Foundation Model |
-|authors| Zane DuranteBidipta SarkarRan GongRohan TaoriYusuke NodaPaul TangEhsan AdeliShrinidhi Kowshika LakshmikanthKevin SchulmanArnold MilsteinDemetri TerzopoulosAde FamotiNoboru KunoAshley LlorensHoi VoKatsu IkeuchiLi Fei-FeiJianfeng GaoNaoki WakeQiuyuan Huang
-|links| http://arxiv.org/abs/2402.05929v1 |
-|updated| 2024-02-08 18:58:02 UTC |
-|summary| The development of artificial intelligence systems is transitioning fromcreating static task-specific models to dynamic agent-based systems capableof performing well in a wide range of applications. We propose an InteractiveAgent Foundation Model that uses a novel multi-task agent training paradigm fortraining AI agents across a wide range of domains datasets and tasks. Ourtraining paradigm unifies diverse pre-training strategies including visualmasked auto-encoders language modeling and next-action prediction enabling aversatile and adaptable AI framework. We demonstrate the performance of ourframework across three separate domains -- Robotics Gaming AI and Healthcare.Our model demonstrates its ability to generate meaningful and contextuallyrelevant outputs in each area. The strength of our approach lies in itsgenerality leveraging a variety of data sources such as robotics sequencesgameplay data large-scale video datasets and textual information foreffective multimodal and multi-task learning. Our approach provides a promisingavenue for developing generalist action-taking multimodal systems. |
+|idx| 2402.06606v1 |
+|title| RQP-SGD: Differential Private Machine Learning through Noisy SGD and Randomized Quantization |
+|authors| Ce FengParv Venkitasubramaniam
+|links| http://arxiv.org/abs/2402.06606v1 |
+|updated| 2024-02-09 18:34:08 UTC |
+|summary| The rise of IoT devices has prompted the demand for deploying machinelearning at-the-edge with real-time efficient and secure data processing. Inthis context implementing machine learning ML models with real-valued weightparameters can prove to be impractical particularly for large models and thereis a need to train models with quantized discrete weights. At the same timethese low-dimensional models also need to preserve privacy of the underlyingdataset. In this work we present RQP-SGD a new approach forprivacy-preserving quantization to train machine learning models for low-memoryML-at-the-edge. This approach combines differentially private stochasticgradient descent DP-SGD with randomized quantization providing a measurableprivacy guarantee in machine learning. In particular we study the utilityconvergence of implementing RQP-SGD on ML tasks with convex objectives andquantization constraints and demonstrate its efficacy over deterministicquantization. Through experiments conducted on two datasets we show thepractical effectiveness of RQP-SGD. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05906v1 |
-|title| Risk-Sensitive Multi-Agent Reinforcement Learning in Network Aggregative Markov Games |
-|authors| Hafez GhaemiHamed KebriaeiAlireza Ramezani MoghaddamMajid Nili Ahamdabadi
-|links| http://arxiv.org/abs/2402.05906v1 |
-|updated| 2024-02-08 18:43:27 UTC |
-|summary| Classical multi-agent reinforcement learning MARL assumes risk neutralityand complete objectivity for agents. However in settings where agents need toconsider or model human economic or social preferences a notion of risk mustbe incorporated into the RL optimization problem. This will be of greaterimportance in MARL where other human or non-human agents are involved possiblywith their own risk-sensitive policies. In this work we considerrisk-sensitive and non-cooperative MARL with cumulative prospect theory CPTa non-convex risk measure and a generalization of coherent measures of risk.CPT is capable of explaining loss aversion in humans and their tendency tooverestimate/underestimate small/large probabilities. We propose a distributedsampling-based actor-critic AC algorithm with CPT risk for networkaggregative Markov games NAMGs which we call Distributed Nested CPT-AC.Under a set of assumptions we prove the convergence of the algorithm to asubjective notion of Markov perfect Nash equilibrium in NAMGs. The experimentalresults show that subjective CPT policies obtained by our algorithm can bedifferent from the risk-neutral ones and agents with a higher loss aversionare more inclined to socially isolate themselves in an NAMG. |
+|idx| 2402.06599v1 |
+|title| On the Out-Of-Distribution Generalization of Multimodal Large Language Models |
+|authors| Xingxuan ZhangJiansheng LiWenjing ChuJunjia HaiRenzhe XuYuqing YangShikai GuanJiazheng XuPeng Cui
+|links| http://arxiv.org/abs/2402.06599v1 |
+|updated| 2024-02-09 18:21:51 UTC |
+|summary| We investigate the generalization boundaries of current Multimodal LargeLanguage Models MLLMs via comprehensive evaluation under out-of-distributionscenarios and domain-specific tasks. We evaluate their zero-shot generalizationacross synthetic images real-world distributional shifts and specializeddatasets like medical and molecular imagery. Empirical results indicate thatMLLMs struggle with generalization beyond common training domains limitingtheir direct application without adaptation. To understand the cause ofunreliable performance we analyze three hypotheses: semanticmisinterpretation visual feature extraction insufficiency and mappingdeficiency. Results identify mapping deficiency as the primary hurdle. Toaddress this problem we show that in-context learning ICL can significantlyenhance MLLMs generalization opening new avenues for overcominggeneralization barriers. We further explore the robustness of ICL underdistribution shifts and show its vulnerability to domain shifts label shiftsand spurious correlation shifts between in-context examples and test data. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05935v1 |
-|title| SPHINX-X: Scaling Data and Parameters for a Family of Multi-modal Large Language Models |
-|authors| Peng GaoRenrui ZhangChris LiuLongtian QiuSiyuan HuangWeifeng LinShitian ZhaoShijie GengZiyi LinPeng JinKaipeng ZhangWenqi ShaoChao XuConghui HeJunjun HeHao ShaoPan LuHongsheng LiYu Qiao
-|links| http://arxiv.org/abs/2402.05935v1 |
-|updated| 2024-02-08 18:59:48 UTC |
-|summary| We propose SPHINX-X an extensive Multimodality Large Language Model MLLMseries developed upon SPHINX. To improve the architecture and trainingefficiency we modify the SPHINX framework by removing redundant visualencoders bypassing fully-padded sub-images with skip tokens and simplifyingmulti-stage training into a one-stage all-in-one paradigm. To fully unleash thepotential of MLLMs we assemble a comprehensive multi-domain and multimodaldataset covering publicly available resources in language vision andvision-language tasks. We further enrich this collection with our curated OCRintensive and Set-of-Mark datasets extending the diversity and generality. Bytraining over different base LLMs including TinyLlama1.1B InternLM2-7BLLaMA2-13B and Mixtral8x7B we obtain a spectrum of MLLMs that vary inparameter size and multilingual capabilities. Comprehensive benchmarkingreveals a strong correlation between the multi-modal performance with the dataand parameter scales. Code and models are released athttps://github.com/Alpha-VLLM/LLaMA2-Accessory |
+|idx| 2402.06627v1 |
+|title| Feedback Loops With Language Models Drive In-Context Reward Hacking |
+|authors| Alexander PanErik JonesMeena JagadeesanJacob Steinhardt
+|links| http://arxiv.org/abs/2402.06627v1 |
+|updated| 2024-02-09 18:59:29 UTC |
+|summary| Language models influence the external world: they query APIs that read andwrite to web pages generate content that shapes human behavior and run systemcommands as autonomous agents. These interactions form feedback loops: LLMoutputs affect the world which in turn affect subsequent LLM outputs. In thiswork we show that feedback loops can cause in-context reward hacking ICRHwhere the LLM at test-time optimizes a potentially implicit objective butcreates negative side effects in the process. For example consider an LLMagent deployed to increase Twitter engagement the LLM may retrieve itsprevious tweets into the context window and make them more controversialincreasing engagement but also toxicity. We identify and study two processesthat lead to ICRH: output-refinement and policy-refinement. For theseprocesses evaluations on static datasets are insufficient -- they miss thefeedback effects and thus cannot capture the most harmful behavior. Inresponse we provide three recommendations for evaluation to capture moreinstances of ICRH. As AI development accelerates the effects of feedback loopswill proliferate increasing the need to understand their role in shaping LLMbehavior. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05934v1 |
-|title| Classifying Nodes in Graphs without GNNs |
-|authors| Daniel WinterNiv CohenYedid Hoshen
-|links| http://arxiv.org/abs/2402.05934v1 |
-|updated| 2024-02-08 18:59:30 UTC |
-|summary| Graph neural networks GNNs are the dominant paradigm for classifying nodesin a graph but they have several undesirable attributes stemming from theirmessage passing architecture. Recently distillation methods succeeded ineliminating the use of GNNs at test time but they still require them duringtraining. We perform a careful analysis of the role that GNNs play indistillation methods. This analysis leads us to propose a fully GNN-freeapproach for node classification not requiring them at train or test time. Ourmethod consists of three key components: smoothness constraintspseudo-labeling iterations and neighborhood-label histograms. Our finalapproach can match the state-of-the-art accuracy on standard popular benchmarkssuch as citation and co-purchase networks without training a GNN. |
+|idx| 2402.06614v1 |
+|title| The Complexity of Sequential Prediction in Dynamical Systems |
+|authors| Vinod RamanUnique SubediAmbuj Tewari
+|links| http://arxiv.org/abs/2402.06614v1 |
+|updated| 2024-02-09 18:45:00 UTC |
+|summary| We study the problem of learning to predict the next state of a dynamicalsystem when the underlying evolution function is unknown. Unlike previous workwe place no parametric assumptions on the dynamical system and study theproblem from a learning theory perspective. We define new combinatorialmeasures and dimensions and show that they quantify the optimal mistake andregret bounds in the realizable and agnostic setting respectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05933v1 |
-|title| Time Series Diffusion in the Frequency Domain |
-|authors| Jonathan CrabbéNicolas HuynhJan StanczukMihaela van der Schaar
-|links| http://arxiv.org/abs/2402.05933v1 |
-|updated| 2024-02-08 18:59:05 UTC |
-|summary| Fourier analysis has been an instrumental tool in the development of signalprocessing. This leads us to wonder whether this framework could similarlybenefit generative modelling. In this paper we explore this question throughthe scope of time series diffusion models. More specifically we analyzewhether representing time series in the frequency domain is a useful inductivebias for score-based diffusion models. By starting from the canonical SDEformulation of diffusion in the time domain we show that a dual diffusionprocess occurs in the frequency domain with an important nuance: Brownianmotions are replaced by what we call mirrored Brownian motions characterizedby mirror symmetries among their components. Building on this insight we showhow to adapt the denoising score matching approach to implement diffusionmodels in the frequency domain. This results in frequency diffusion modelswhich we compare to canonical time diffusion models. Our empirical evaluationon real-world datasets covering various domains like healthcare and financeshows that frequency diffusion models better capture the training distributionthan time diffusion models. We explain this observation by showing that timeseries from these datasets tend to be more localized in the frequency domainthan in the time domain which makes them easier to model in the former case.All our observations point towards impactful synergies between Fourier analysisand diffusion models. |
+|idx| 2402.06606v1 |
+|title| RQP-SGD: Differential Private Machine Learning through Noisy SGD and Randomized Quantization |
+|authors| Ce FengParv Venkitasubramaniam
+|links| http://arxiv.org/abs/2402.06606v1 |
+|updated| 2024-02-09 18:34:08 UTC |
+|summary| The rise of IoT devices has prompted the demand for deploying machinelearning at-the-edge with real-time efficient and secure data processing. Inthis context implementing machine learning ML models with real-valued weightparameters can prove to be impractical particularly for large models and thereis a need to train models with quantized discrete weights. At the same timethese low-dimensional models also need to preserve privacy of the underlyingdataset. In this work we present RQP-SGD a new approach forprivacy-preserving quantization to train machine learning models for low-memoryML-at-the-edge. This approach combines differentially private stochasticgradient descent DP-SGD with randomized quantization providing a measurableprivacy guarantee in machine learning. In particular we study the utilityconvergence of implementing RQP-SGD on ML tasks with convex objectives andquantization constraints and demonstrate its efficacy over deterministicquantization. Through experiments conducted on two datasets we show thepractical effectiveness of RQP-SGD. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05929v1 |
-|title| An Interactive Agent Foundation Model |
-|authors| Zane DuranteBidipta SarkarRan GongRohan TaoriYusuke NodaPaul TangEhsan AdeliShrinidhi Kowshika LakshmikanthKevin SchulmanArnold MilsteinDemetri TerzopoulosAde FamotiNoboru KunoAshley LlorensHoi VoKatsu IkeuchiLi Fei-FeiJianfeng GaoNaoki WakeQiuyuan Huang
-|links| http://arxiv.org/abs/2402.05929v1 |
-|updated| 2024-02-08 18:58:02 UTC |
-|summary| The development of artificial intelligence systems is transitioning fromcreating static task-specific models to dynamic agent-based systems capableof performing well in a wide range of applications. We propose an InteractiveAgent Foundation Model that uses a novel multi-task agent training paradigm fortraining AI agents across a wide range of domains datasets and tasks. Ourtraining paradigm unifies diverse pre-training strategies including visualmasked auto-encoders language modeling and next-action prediction enabling aversatile and adaptable AI framework. We demonstrate the performance of ourframework across three separate domains -- Robotics Gaming AI and Healthcare.Our model demonstrates its ability to generate meaningful and contextuallyrelevant outputs in each area. The strength of our approach lies in itsgenerality leveraging a variety of data sources such as robotics sequencesgameplay data large-scale video datasets and textual information foreffective multimodal and multi-task learning. Our approach provides a promisingavenue for developing generalist action-taking multimodal systems. |
+|idx| 2402.06590v1 |
+|title| Predictive representations: building blocks of intelligence |
+|authors| Wilka CarvalhoMomchil S. TomovWilliam de CothiCaswell BarrySamuel J. Gershman
+|links| http://arxiv.org/abs/2402.06590v1 |
+|updated| 2024-02-09 18:10:38 UTC |
+|summary| Adaptive behavior often requires predicting future events. The theory ofreinforcement learning prescribes what kinds of predictive representations areuseful and how to compute them. This paper integrates these theoretical ideaswith work on cognition and neuroscience. We pay special attention to thesuccessor representation SR and its generalizations which have been widelyapplied both as engineering tools and models of brain function. Thisconvergence suggests that particular kinds of predictive representations mayfunction as versatile building blocks of intelligence. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05930v1 |
-|title| WebLINX: Real-World Website Navigation with Multi-Turn Dialogue |
-|authors| Xing Han LùZdeněk KasnerSiva Reddy
-|links| http://arxiv.org/abs/2402.05930v1 |
-|updated| 2024-02-08 18:58:02 UTC |
-|summary| We propose the problem of conversational web navigation where a digitalagent controls a web browser and follows user instructions to solve real-worldtasks in a multi-turn dialogue fashion. To support this problem we introduceWEBLINX - a large-scale benchmark of 100K interactions across 2300 expertdemonstrations of conversational web navigation. Our benchmark covers a broadrange of patterns on over 150 real-world websites and can be used to train andevaluate agents in diverse scenarios. Due to the magnitude of informationpresent Large Language Models LLMs cannot process entire web pages inreal-time. To solve this bottleneck we design a retrieval-inspired model thatefficiently prunes HTML pages by ranking relevant elements. We use the selectedelements along with screenshots and action history to assess a variety ofmodels for their ability to replicate human behavior when navigating the web.Our experiments span from small text-only to proprietary multimodal LLMs. Wefind that smaller finetuned decoders surpass the best zero-shot LLMs includingGPT-4V but also larger finetuned multimodal models which were explicitlypretrained on screenshots. However all finetuned models struggle to generalizeto unseen websites. Our findings highlight the need for large multimodal modelsthat can generalize to novel settings. Our code data and models are availablefor research: https://mcgill-nlp.github.io/weblinx |
+|idx| 2402.06581v1 |
+|title| More than the Sum of Its Parts: Ensembling Backbone Networks for Few-Shot Segmentation |
+|authors| Nico CatalanoAlessandro MaranelliAgnese ChiattiMatteo Matteucci
+|links| http://arxiv.org/abs/2402.06581v1 |
+|updated| 2024-02-09 18:01:15 UTC |
+|summary| Semantic segmentation is a key prerequisite to robust image understanding forapplications in acrlongai and Robotics. acrlongfss in particularconcerns the extension and optimization of traditional segmentation methods inchallenging conditions where limited training examples are available. Apredominant approach in acrlongfss is to rely on a single backbone forvisual feature extraction. Choosing which backbone to leverage is a decidingfactor contributing to the overall performance. In this work we interrogate onwhether fusing features from different backbones can improve the ability ofacrlongfss models to capture richer visual features. To tackle thisquestion we propose and compare two ensembling techniques-Independent Votingand Feature Fusion. Among the available acrlongfss methods we implement theproposed ensembling techniques on PANet. The module dedicated to predictingsegmentation masks from the backbone embeddings in PANet avoids trainableparameters creating a controlled in vitro setting for isolating the impactof different ensembling strategies. Leveraging the complementary strengths ofdifferent backbones our approach outperforms the original single-backbonePANet across standard benchmarks even in challenging one-shot learningscenarios. Specifically it achieved a performance improvement of 7.37 onPASCAL-5textsuperscripti and of 10.68 on COCO-20textsuperscripti inthe top-performing scenario where three backbones are combined. These resultstogether with the qualitative inspection of the predicted subject maskssuggest that relying on multiple backbones in PANet leads to a morecomprehensive feature representation thus expediting the successfulapplication of acrlongfss methods in challenging data-scarce environments. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05937v1 |
-|title| InstaGen: Enhancing Object Detection by Training on Synthetic Dataset |
-|authors| Chengjian FengYujie ZhongZequn JieWeidi XieLin Ma
-|links| http://arxiv.org/abs/2402.05937v1 |
-|updated| 2024-02-08 18:59:53 UTC |
-|summary| In this paper we introduce a novel paradigm to enhance the ability of objectdetector e.g. expanding categories or improving detection performance bytraining on synthetic dataset generated from diffusion models. Specifically weintegrate an instance-level grounding head into a pre-trained generativediffusion model to augment it with the ability of localising arbitraryinstances in the generated images. The grounding head is trained to align thetext embedding of category names with the regional visual feature of thediffusion model using supervision from an off-the-shelf object detector and anovel self-training scheme on novel categories not covered by the detector.This enhanced version of diffusion model termed as InstaGen can serve as adata synthesizer for object detection. We conduct thorough experiments to showthat object detector can be enhanced while training on the synthetic datasetfrom InstaGen demonstrating superior performance over existingstate-of-the-art methods in open-vocabulary 4.5 AP and data-sparse 1.2 to5.2 AP scenarios. |
+|idx| 2402.06611v1 |
+|title| Image-based Deep Learning for the time-dependent prediction of fresh concrete properties |
+|authors| Max MeyerAmadeus LangerMax MehltretterDries BeyerMax CoenenTobias SchackMichael HaistChristian Heipke
+|links| http://arxiv.org/abs/2402.06611v1 |
+|updated| 2024-02-09 18:42:30 UTC |
+|summary| Increasing the degree of digitisation and automation in the concreteproduction process can play a crucial role in reducing the CO_2 emissionsthat are associated with the production of concrete. In this paper a method ispresented that makes it possible to predict the properties of fresh concreteduring the mixing process based on stereoscopic image sequences of theconcretes flow behaviour. A Convolutional Neural Network CNN is used for theprediction which receives the images supported by information on the mixdesign as input. In addition the network receives temporal information in theform of the time difference between the time at which the images are taken andthe time at which the reference values of the concretes are carried out. Withthis temporal information the network implicitly learns the time-dependentbehaviour of the concretes properties. The network predicts the slump flowdiameter the yield stress and the plastic viscosity. The time-dependentprediction potentially opens up the pathway to determine the temporaldevelopment of the fresh concrete properties already during mixing. Thisprovides a huge advantage for the concrete industry. As a resultcountermeasures can be taken in a timely manner. It is shown that an approachbased on depth and optical flow images supported by information of the mixdesign achieves the best results. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05935v1 |
-|title| SPHINX-X: Scaling Data and Parameters for a Family of Multi-modal Large Language Models |
-|authors| Peng GaoRenrui ZhangChris LiuLongtian QiuSiyuan HuangWeifeng LinShitian ZhaoShijie GengZiyi LinPeng JinKaipeng ZhangWenqi ShaoChao XuConghui HeJunjun HeHao ShaoPan LuHongsheng LiYu Qiao
-|links| http://arxiv.org/abs/2402.05935v1 |
-|updated| 2024-02-08 18:59:48 UTC |
-|summary| We propose SPHINX-X an extensive Multimodality Large Language Model MLLMseries developed upon SPHINX. To improve the architecture and trainingefficiency we modify the SPHINX framework by removing redundant visualencoders bypassing fully-padded sub-images with skip tokens and simplifyingmulti-stage training into a one-stage all-in-one paradigm. To fully unleash thepotential of MLLMs we assemble a comprehensive multi-domain and multimodaldataset covering publicly available resources in language vision andvision-language tasks. We further enrich this collection with our curated OCRintensive and Set-of-Mark datasets extending the diversity and generality. Bytraining over different base LLMs including TinyLlama1.1B InternLM2-7BLLaMA2-13B and Mixtral8x7B we obtain a spectrum of MLLMs that vary inparameter size and multilingual capabilities. Comprehensive benchmarkingreveals a strong correlation between the multi-modal performance with the dataand parameter scales. Code and models are released athttps://github.com/Alpha-VLLM/LLaMA2-Accessory |
+|idx| 2402.06599v1 |
+|title| On the Out-Of-Distribution Generalization of Multimodal Large Language Models |
+|authors| Xingxuan ZhangJiansheng LiWenjing ChuJunjia HaiRenzhe XuYuqing YangShikai GuanJiazheng XuPeng Cui
+|links| http://arxiv.org/abs/2402.06599v1 |
+|updated| 2024-02-09 18:21:51 UTC |
+|summary| We investigate the generalization boundaries of current Multimodal LargeLanguage Models MLLMs via comprehensive evaluation under out-of-distributionscenarios and domain-specific tasks. We evaluate their zero-shot generalizationacross synthetic images real-world distributional shifts and specializeddatasets like medical and molecular imagery. Empirical results indicate thatMLLMs struggle with generalization beyond common training domains limitingtheir direct application without adaptation. To understand the cause ofunreliable performance we analyze three hypotheses: semanticmisinterpretation visual feature extraction insufficiency and mappingdeficiency. Results identify mapping deficiency as the primary hurdle. Toaddress this problem we show that in-context learning ICL can significantlyenhance MLLMs generalization opening new avenues for overcominggeneralization barriers. We further explore the robustness of ICL underdistribution shifts and show its vulnerability to domain shifts label shiftsand spurious correlation shifts between in-context examples and test data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05930v1 |
-|title| WebLINX: Real-World Website Navigation with Multi-Turn Dialogue |
-|authors| Xing Han LùZdeněk KasnerSiva Reddy
-|links| http://arxiv.org/abs/2402.05930v1 |
-|updated| 2024-02-08 18:58:02 UTC |
-|summary| We propose the problem of conversational web navigation where a digitalagent controls a web browser and follows user instructions to solve real-worldtasks in a multi-turn dialogue fashion. To support this problem we introduceWEBLINX - a large-scale benchmark of 100K interactions across 2300 expertdemonstrations of conversational web navigation. Our benchmark covers a broadrange of patterns on over 150 real-world websites and can be used to train andevaluate agents in diverse scenarios. Due to the magnitude of informationpresent Large Language Models LLMs cannot process entire web pages inreal-time. To solve this bottleneck we design a retrieval-inspired model thatefficiently prunes HTML pages by ranking relevant elements. We use the selectedelements along with screenshots and action history to assess a variety ofmodels for their ability to replicate human behavior when navigating the web.Our experiments span from small text-only to proprietary multimodal LLMs. Wefind that smaller finetuned decoders surpass the best zero-shot LLMs includingGPT-4V but also larger finetuned multimodal models which were explicitlypretrained on screenshots. However all finetuned models struggle to generalizeto unseen websites. Our findings highlight the need for large multimodal modelsthat can generalize to novel settings. Our code data and models are availablefor research: https://mcgill-nlp.github.io/weblinx |
+|idx| 2402.06581v1 |
+|title| More than the Sum of Its Parts: Ensembling Backbone Networks for Few-Shot Segmentation |
+|authors| Nico CatalanoAlessandro MaranelliAgnese ChiattiMatteo Matteucci
+|links| http://arxiv.org/abs/2402.06581v1 |
+|updated| 2024-02-09 18:01:15 UTC |
+|summary| Semantic segmentation is a key prerequisite to robust image understanding forapplications in acrlongai and Robotics. acrlongfss in particularconcerns the extension and optimization of traditional segmentation methods inchallenging conditions where limited training examples are available. Apredominant approach in acrlongfss is to rely on a single backbone forvisual feature extraction. Choosing which backbone to leverage is a decidingfactor contributing to the overall performance. In this work we interrogate onwhether fusing features from different backbones can improve the ability ofacrlongfss models to capture richer visual features. To tackle thisquestion we propose and compare two ensembling techniques-Independent Votingand Feature Fusion. Among the available acrlongfss methods we implement theproposed ensembling techniques on PANet. The module dedicated to predictingsegmentation masks from the backbone embeddings in PANet avoids trainableparameters creating a controlled in vitro setting for isolating the impactof different ensembling strategies. Leveraging the complementary strengths ofdifferent backbones our approach outperforms the original single-backbonePANet across standard benchmarks even in challenging one-shot learningscenarios. Specifically it achieved a performance improvement of 7.37 onPASCAL-5textsuperscripti and of 10.68 on COCO-20textsuperscripti inthe top-performing scenario where three backbones are combined. These resultstogether with the qualitative inspection of the predicted subject maskssuggest that relying on multiple backbones in PANet leads to a morecomprehensive feature representation thus expediting the successfulapplication of acrlongfss methods in challenging data-scarce environments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05919v1 |
-|title| Collaborative Control for Geometry-Conditioned PBR Image Generation |
-|authors| Shimon VainerMark BossMathias PargerKonstantin KutsyDante De NigrisCiara RowlesNicolas PeronySimon Donné
-|links| http://arxiv.org/abs/2402.05919v1 |
-|updated| 2024-02-08 18:53:21 UTC |
-|summary| Current 3D content generation builds on generative models that output RGBimages. Modern graphics pipelines however require physically-based renderingPBR material properties. We propose to model the PBR image distributiondirectly to avoid photometric inaccuracies in RGB generation and the inherentambiguity in extracting PBR from RGB. Existing paradigms for cross-modalfinetuning are not suited for PBR generation due to a lack of data and the highdimensionality of the output modalities: we overcome both challenges byretaining a frozen RGB model and tightly linking a newly trained PBR modelusing a novel cross-network communication paradigm. As the base RGB model isfully frozen the proposed method does not risk catastrophic forgetting duringfinetuning and remains compatible with techniques such as IPAdapter pretrainedfor the base RGB model. We validate our design choices robustness to datasparsity and compare against existing paradigms with an extensive experimentalsection. |
+|idx| 2402.06560v1 |
+|title| Video Annotator: A framework for efficiently building video classifiers using vision-language models and active learning |
+|authors| Amir ZiaiAneesh Vartakavi
+|links| http://arxiv.org/abs/2402.06560v1 |
+|updated| 2024-02-09 17:19:05 UTC |
+|summary| High-quality and consistent annotations are fundamental to the successfuldevelopment of robust machine learning models. Traditional data annotationmethods are resource-intensive and inefficient often leading to a reliance onthird-party annotators who are not the domain experts. Hard samples which areusually the most informative for model training tend to be difficult to labelaccurately and consistently without business context. These can ariseunpredictably during the annotation process requiring a variable number ofiterations and rounds of feedback leading to unforeseen expenses and timecommitments to guarantee quality.  We posit that more direct involvement of domain experts using ahuman-in-the-loop system can resolve many of these practical challenges. Wepropose a novel framework we call Video Annotator VA for annotatingmanaging and iterating on video classification datasets. Our approach offers anew paradigm for an end-user-centered model development process enhancing theefficiency usability and effectiveness of video classifiers. Uniquely VAallows for a continuous annotation process seamlessly integrating datacollection and model training.  We leverage the zero-shot capabilities of vision-language foundation modelscombined with active learning techniques and demonstrate that VA enables theefficient creation of high-quality models. VA achieves a median 6.8 pointimprovement in Average Precision relative to the most competitive baselineacross a wide-ranging assortment of tasks. We release a dataset with 153klabels across 56 video understanding tasks annotated by three professionalvideo editors using VA and also release code to replicate our experiments at:http://github.com/netflix/videoannotator. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05917v1 |
-|title| Point-VOS: Pointing Up Video Object Segmentation |
-|authors| Idil Esen ZulfikarSabarinath MahadevanPaul VoigtlaenderBastian Leibe
-|links| http://arxiv.org/abs/2402.05917v1 |
-|updated| 2024-02-08 18:52:23 UTC |
-|summary| Current state-of-the-art Video Object Segmentation VOS methods rely ondense per-object mask annotations both during training and testing. Thisrequires time-consuming and costly video annotation mechanisms. We propose anovel Point-VOS task with a spatio-temporally sparse point-wise annotationscheme that substantially reduces the annotation effort. We apply ourannotation scheme to two large-scale video datasets with text descriptions andannotate over 19M points across 133K objects in 32K videos. Based on ourannotations we propose a new Point-VOS benchmark and a correspondingpoint-based training mechanism which we use to establish strong baselineresults. We show that existing VOS methods can easily be adapted to leverageour point annotations during training and can achieve results close to thefully-supervised performance when trained on pseudo-masks generated from thesepoints. In addition we show that our data can be used to improve models thatconnect vision and language by evaluating it on the Video Narrative GroundingVNG task. We will make our code and annotations available athttps://pointvos.github.io. |
+|idx| 2402.06539v1 |
+|title| Hybridnet for depth estimation and semantic segmentation |
+|authors| Dalila Sánchez-EscobedoXiao LinJosep R. CasasMontse Pardàs
+|links| http://dx.doi.org/10.1109/ICASSP.2018.8462433 |
+|updated| 2024-02-09 16:52:45 UTC |
+|summary| Semantic segmentation and depth estimation are two important tasks in thearea of image processing. Traditionally these two tasks are addressed in anindependent manner. However for those applications where geometric andsemantic information is required such as robotics or autonomousnavigationdepth or semantic segmentation alone are not sufficient. In thispaper depth estimation and semantic segmentation are addressed together from asingle input image through a hybrid convolutional network. Different from thestate of the art methods where features are extracted by a sole featureextraction network for both tasks the proposed HybridNet improves the featuresextraction by separating the relevant features for one task from those whichare relevant for both. Experimental results demonstrate that HybridNet resultsare comparable with the state of the art methods as well as the single taskmethods that HybridNet is based on. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05928v1 |
-|title| Sharp Rates in Dependent Learning Theory: Avoiding Sample Size Deflation for the Square Loss |
-|authors| Ingvar ZiemannStephen TuGeorge J. PappasNikolai Matni
-|links| http://arxiv.org/abs/2402.05928v1 |
-|updated| 2024-02-08 18:57:42 UTC |
-|summary| In this work we study statistical learning with dependent beta-mixingdata and square loss in a hypothesis class mathscrFsubset L_Psi_pwhere Psi_p is the norm f_Psi_p triangleq sup_mgeq 1 m-1/pf_Lm  for some pin 2infty. Our inquiry is motivated by thesearch for a sharp noise interaction term or variance proxy in learning withdependent data. Absent any realizability assumption typical non-asymptoticresults exhibit variance proxies that are deflated emphmultiplicatively bythe mixing time of the underlying covariates process. We show that whenever thetopologies of L2 and Psi_p are comparable on our hypothesis classmathscrF -- that is mathscrF is a weakly sub-Gaussian class:f_Psi_p lesssim f_L2eta for some etain 01 -- theempirical risk minimizer achieves a rate that only depends on the complexity ofthe class and second order statistics in its leading term. Our result holdswhether the problem is realizable or not and we refer to this as a emphnearmixing-free rate since direct dependence on mixing is relegated to anadditive higher order term. We arrive at our result by combining the abovenotion of a weakly sub-Gaussian class with mixed tail generic chaining. Thiscombination allows us to compute sharp instance-optimal rates for a wide rangeof problems. Our approach reliant on mixed tail generic chaining allows usto obtain sharp instance-optimal rates. Examples that satisfy our frameworkinclude sub-Gaussian linear regression more general smoothly parameterizedfunction classes finite hypothesis classes and bounded smoothness classes. |
+|idx| 2402.06614v1 |
+|title| The Complexity of Sequential Prediction in Dynamical Systems |
+|authors| Vinod RamanUnique SubediAmbuj Tewari
+|links| http://arxiv.org/abs/2402.06614v1 |
+|updated| 2024-02-09 18:45:00 UTC |
+|summary| We study the problem of learning to predict the next state of a dynamicalsystem when the underlying evolution function is unknown. Unlike previous workwe place no parametric assumptions on the dynamical system and study theproblem from a learning theory perspective. We define new combinatorialmeasures and dimensions and show that they quantify the optimal mistake andregret bounds in the realizable and agnostic setting respectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05878v1 |
-|title| Prior-Dependent Allocations for Bayesian Fixed-Budget Best-Arm Identification in Structured Bandits |
-|authors| Nicolas NguyenImad AoualiAndrás GyörgyClaire Vernade
-|links| http://arxiv.org/abs/2402.05878v1 |
-|updated| 2024-02-08 18:13:26 UTC |
-|summary| We study the problem of Bayesian fixed-budget best-arm identification BAIin structured bandits. We propose an algorithm that uses fixed allocationsbased on the prior information and the structure of the environment. We providetheoretical bounds on its performance across diverse models including thefirst prior-dependent upper bounds for linear and hierarchical BAI. Our keycontribution is introducing new proof methods that result in tighter bounds formulti-armed BAI compared to existing methods. We extensively compare ourapproach to other fixed-budget BAI methods demonstrating its consistent androbust performance in various settings. Our work improves our understanding ofBayesian fixed-budget BAI in structured bandits and highlights theeffectiveness of our approach in practical scenarios. |
+|idx| 2402.06578v1 |
+|title| On the Universality of Coupling-based Normalizing Flows |
+|authors| Felix DraxlerStefan WahlChristoph SchnörrUllrich Köthe
+|links| http://arxiv.org/abs/2402.06578v1 |
+|updated| 2024-02-09 17:51:43 UTC |
+|summary| We present a novel theoretical framework for understanding the expressivepower of coupling-based normalizing flows such as RealNVP. Despite theirprevalence in scientific applications a comprehensive understanding ofcoupling flows remains elusive due to their restricted architectures. Existingtheorems fall short as they require the use of arbitrarily ill-conditionedneural networks limiting practical applicability. Additionally we demonstratethat these constructions inherently lead to volume-preserving flows a propertywhich we show to be a fundamental constraint for expressivity. We propose a newdistributional universality theorem for coupling-based normalizing flows whichovercomes several limitations of prior work. Our results support the generalwisdom that the coupling architecture is expressive and provide a nuanced viewfor choosing the expressivity of coupling functions bridging a gap betweenempirical results and theoretical understanding. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05876v1 |
-|title| Federated Offline Reinforcement Learning: Collaborative Single-Policy Coverage Suffices |
-|authors| Jiin WooLaixi ShiGauri JoshiYuejie Chi
-|links| http://arxiv.org/abs/2402.05876v1 |
-|updated| 2024-02-08 18:09:17 UTC |
-|summary| Offline reinforcement learning RL which seeks to learn an optimal policyusing offline data has garnered significant interest due to its potential incritical applications where online data collection is infeasible or expensive.This work explores the benefit of federated learning for offline RL aiming atcollaboratively leveraging offline datasets at multiple agents. Focusing onfinite-horizon episodic tabular Markov decision processes MDPs we designFedLCB-Q a variant of the popular model-free Q-learning algorithm tailored forfederated offline RL. FedLCB-Q updates local Q-functions at agents with novellearning rate schedules and aggregates them at a central server usingimportance averaging and a carefully designed pessimistic penalty term. Oursample complexity analysis reveals that with appropriately chosen parametersand synchronization schedules FedLCB-Q achieves linear speedup in terms of thenumber of agents without requiring high-quality datasets at individual agentsas long as the local datasets collectively cover the state-action space visitedby the optimal policy highlighting the power of collaboration in the federatedsetting. In fact the sample complexity almost matches that of the single-agentcounterpart as if all the data are stored at a central location up topolynomial factors of the horizon length. Furthermore FedLCB-Q iscommunication-efficient where the number of communication rounds is onlylinear with respect to the horizon length up to logarithmic factors. |
+|idx| 2402.06535v1 |
+|title| Bandit Convex Optimisation |
+|authors| Tor Lattimore
+|links| http://arxiv.org/abs/2402.06535v1 |
+|updated| 2024-02-09 16:49:13 UTC |
+|summary| Bandit convex optimisation is a fundamental framework for studyingzeroth-order convex optimisation. These notes cover the many tools used forthis problem including cutting plane methods interior point methodscontinuous exponential weights gradient descent and online Newton step. Thenuances between the many assumptions and setups are explained. Although thereis not much truly new here some existing tools are applied in novel ways toobtain new algorithms. A few bounds are improved in minor ways. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05862v1 |
-|title| Let Your Graph Do the Talking: Encoding Structured Data for LLMs |
-|authors| Bryan PerozziBahare FatemiDustin ZelleAnton TsitsulinMehran KazemiRami Al-RfouJonathan Halcrow
-|links| http://arxiv.org/abs/2402.05862v1 |
-|updated| 2024-02-08 17:51:44 UTC |
-|summary| How can we best encode structured data into sequential form for use in largelanguage models LLMs In this work we introduce a parameter-efficient methodto explicitly represent structured data for LLMs. Our method GraphTokenlearns an encoding function to extend prompts with explicit structuredinformation. Unlike other work which focuses on limited domains e.g. knowledgegraph representation our work is the first effort focused on the generalencoding of structured data to be used for various reasoning tasks. We showthat explicitly representing the graph structure allows significantimprovements to graph reasoning tasks. Specifically we see across the boardimprovements - up to 73 points - on node edge and graph-level tasks from theGraphQA benchmark. |
+|idx| 2402.06525v1 |
+|title| Flexible infinite-width graph convolutional networks and the importance of representation learning |
+|authors| Ben AnsonEdward MilsomLaurence Aitchison
+|links| http://arxiv.org/abs/2402.06525v1 |
+|updated| 2024-02-09 16:37:08 UTC |
+|summary| A common theoretical approach to understanding neural networks is to take aninfinite-width limit at which point the outputs become Gaussian process GPdistributed. This is known as a neural network Gaussian process NNGP.However the NNGP kernel is fixed and tunable only through a small number ofhyperparameters eliminating any possibility of representation learning. Thiscontrasts with finite-width NNs which are often believed to perform wellprecisely because they are able to learn representations. Thus in simplifyingNNs to make them theoretically tractable NNGPs may eliminate precisely whatmakes them work well representation learning. This motivated us to understandwhether representation learning is necessary in a range of graph classificationtasks. We develop a precise tool for this task the graph convolutional deepkernel machine. This is very similar to an NNGP in that it is an infinitewidth limit and uses kernels but comes with a knob to control the amount ofrepresentation learning. We found that representation learning is necessary inthe sense that it gives dramatic performance improvements in graphclassification tasks and heterophilous node classification tasks but not inhomophilous node classification tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05835v1 |
-|title| How Much is Unseen Depends Chiefly on Information About the Seen |
-|authors| Seongmin LeeMarcel Böhme
-|links| http://arxiv.org/abs/2402.05835v1 |
-|updated| 2024-02-08 17:12:49 UTC |
-|summary| It might seem counter-intuitive at first: We find that in expectation theproportion of data points in an unknown population-that belong to classes thatdo not appear in the training data-is almost entirely determined by the numberf_k of classes that do appear in the training data the same number of times.While in theory we show that the difference of the induced estimator decaysexponentially in the size of the sample in practice the high variance preventsus from using it directly for an estimator of the sample coverage. However ourprecise characterization of the dependency between f_ks induces a largesearch space of different representations of the expected value which can bedeterministically instantiated as estimators. Hence we turn to optimizationand develop a genetic algorithm that given only the sample searches for anestimator with minimal mean-squared error MSE. In our experiments ourgenetic algorithm discovers estimators that have a substantially smaller MSEthan the state-of-the-art Good-Turing estimator. This holds for over 96 ofruns when there are at least as many samples as classes. Our estimators MSE isroughly 80 of the Good-Turing estimators. |
+|idx| 2402.06461v1 |
+|title| Sequential Flow Matching for Generative Modeling |
+|authors| Jongmin YoonJuho Lee
+|links| http://arxiv.org/abs/2402.06461v1 |
+|updated| 2024-02-09 15:09:38 UTC |
+|summary| Straightening the probability flow of the continuous-time generative modelssuch as diffusion models or flow-based models is the key to fast samplingthrough the numerical solvers existing methods learn a linear path by directlygenerating the probability path the joint distribution between the noise anddata distribution. One key reason for the slow sampling speed of the ODE-basedsolvers that simulate these generative models is the global truncation error ofthe ODE solver caused by the high curvature of the ODE trajectory whichexplodes the truncation error of the numerical solvers in the low-NFE regime.To address this challenge We propose a novel method called SeqRF a learningtechnique that straightens the probability flow to reduce the global truncationerror and hence enable acceleration of sampling and improve the synthesisquality. In both theoretical and empirical studies we first observe thestraightening property of our SeqRF. Through empirical evaluations via SeqRFover flow-based generative models We achieve surpassing results on CIFAR-10CelebA-64 times 64 and LSUN-Church datasets. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05904v1 |
-|title| FACT-GPT: Fact-Checking Augmentation via Claim Matching with LLMs |
-|authors| Eun Cheol ChoiEmilio Ferrara
-|links| http://arxiv.org/abs/2402.05904v1 |
-|updated| 2024-02-08 18:43:05 UTC |
-|summary| Our society is facing rampant misinformation harming public health and trust.To address the societal challenge we introduce FACT-GPT a system leveragingLarge Language Models LLMs to automate the claim matching stage offact-checking. FACT-GPT trained on a synthetic dataset identifies socialmedia content that aligns with contradicts or is irrelevant to previouslydebunked claims. Our evaluation shows that our specialized LLMs can match theaccuracy of larger models in identifying related claims closely mirroringhuman judgment. This research provides an automated solution for efficientclaim matching demonstrates the potential of LLMs in supporting fact-checkersand offers valuable resources for further research in the field. |
+|idx| 2402.06596v1 |
+|title| Understanding the Weakness of Large Language Model Agents within a Complex Android Environment |
+|authors| Mingzhe XingRongkai ZhangHui XueQi ChenFan YangZhen Xiao
+|links| http://arxiv.org/abs/2402.06596v1 |
+|updated| 2024-02-09 18:19:25 UTC |
+|summary| Large language models LLMs have empowered intelligent agents to executeintricate tasks within domain-specific software such as browsers and games.However when applied to general-purpose software systems like operatingsystems LLM agents face three primary challenges. Firstly the action space isvast and dynamic posing difficulties for LLM agents to maintain an up-to-dateunderstanding and deliver accurate responses. Secondly real-world tasks oftenrequire inter-application cooperation demanding farsighted planning from LLMagents. Thirdly agents need to identify optimal solutions aligning with userconstraints such as security concerns and preferences. These challengesmotivate AndroidArena an environment and benchmark designed to evaluate LLMagents on a modern operating system. To address high-cost of manpower wedesign a scalable and semi-automated method to construct the benchmark. In thetask evaluation AndroidArena incorporates accurate and adaptive metrics toaddress the issue of non-unique solutions. Our findings reveal that evenstate-of-the-art LLM agents struggle in cross-APP scenarios and adhering tospecific constraints. Additionally we identify a lack of four keycapabilities i.e. understanding reasoning exploration and reflection asprimary reasons for the failure of LLM agents. Furthermore we provideempirical analysis on the failure of reflection and improve the success rateby 27 with our proposed exploration strategy. This work is the first topresent valuable insights in understanding fine-grained weakness of LLM agentsand offers a path forward for future research in this area. Environmentbenchmark and evaluation code for AndroidArena are released athttps://github.com/AndroidArenaAgent/AndroidArena. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05893v1 |
-|title| Personalizing Driver Safety Interfaces via Driver Cognitive Factors Inference |
-|authors| Emily S SumnerJonathan DeCastroJean CostaDeepak E GopinathEverlyne KimaniShabnam HakimiAllison MorganAndrew BestHieu NguyenDaniel J BrooksBassam ul HaqAndrew PatrikalakisHiroshi YasudaKate SieckAvinash BalachandranTiffany ChenGuy Rosman
-|links| http://arxiv.org/abs/2402.05893v1 |
-|updated| 2024-02-08 18:32:10 UTC |
-|summary| Recent advances in AI and intelligent vehicle technology hold promise torevolutionize mobility and transportation in the form of advanced drivingassistance ADAS interfaces. Although it is widely recognized that certaincognitive factors such as impulsivity and inhibitory control are related torisky driving behavior play a significant role in on-road risk-takingexisting systems fail to leverage such factors. Varying levels of thesecognitive factors could influence the effectiveness and acceptance of driversafety interfaces.  We demonstrate an approach for personalizing driver interaction via driversafety interfaces that are triggered based on a learned recurrent neuralnetwork. The network is trained from a population of human drivers to inferimpulsivity and inhibitory control from recent driving behavior. Using ahigh-fidelity vehicle motion simulator we demonstrate the ability to deducethese factors from driver behavior. We then use these inferred factors to makeinstantaneous determinations on whether or not to engage a driver safetyinterface. This interface aims to decrease a drivers speed during yellowlights and reduce their inclination to run through them. |
+|idx| 2402.06563v1 |
+|title| What is Hiding in Medicine's Dark Matter? Learning with Missing Data in Medical Practices |
+|authors| Neslihan SuzenEvgeny M. MirkesDamian RolandJeremy LevesleyAlexander N. GorbanTim J. Coats
+|links| http://dx.doi.org/10.1109/BigData59044.2023.10386194 |
+|updated| 2024-02-09 17:27:35 UTC |
+|summary| Electronic patient records EPRs produce a wealth of data but containsignificant missing information. Understanding and handling this missing datais an important part of clinical data analysis and if left unaddressed couldresult in bias in analysis and distortion in critical conclusions. Missing datamay be linked to health care professional practice patterns and imputation ofmissing data can increase the validity of clinical decisions. This studyfocuses on statistical approaches for understanding and interpreting themissing data and machine learning based clinical data imputation using a singlecentres paediatric emergency data and the data from UKs largest clinicalaudit for traumatic injury database TARN. In the study of 56961 data pointsrelated to initial vital signs and observations taken on children presenting toan Emergency Department we have shown that missing data are likely to benon-random and how these are linked to health care professional practicepatterns. We have then examined 79 TARN fields with missing values for 5791trauma cases. Singular Value Decomposition SVD and k-Nearest Neighbour kNNbased missing data imputation methods are used and imputation results againstthe original dataset are compared and statistically tested. We have concludedthat the 1NN imputer is the best imputation which indicates a usual pattern ofclinical decision making: find the most similar patients and take theirattributes as imputation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05882v1 |
-|title| GET-Tok: A GenAI-Enriched Multimodal TikTok Dataset Documenting the 2022 Attempted Coup in Peru |
-|authors| Gabriela PintoKeith BurghardtKristina LermanEmilio Ferrara
-|links| http://arxiv.org/abs/2402.05882v1 |
-|updated| 2024-02-08 18:16:47 UTC |
-|summary| TikTok is one of the largest and fastest-growing social media sites in theworld. TikTok features however such as voice transcripts are often missingand other important features such as OCR or video descriptions do not exist.We introduce the Generative AI Enriched TikTok GET-Tok data a pipeline forcollecting TikTok videos and enriched data by augmenting the TikTok ResearchAPI with generative AI models. As a case study we collect videos about theattempted coup in Peru initiated by its former President Pedro Castillo andits accompanying protests. The data includes information on 43697 videospublished from November 20 2022 to March 1 2023 102 days. Generative AIaugments the collected data via transcripts of TikTok videos text descriptionsof what is shown in the videos what text is displayed within the video andthe stances expressed in the video. Overall this pipeline will contribute to abetter understanding of online discussion in a multimodal setting withapplications of Generative AI especially outlining the utility of thispipeline in non-English-language social media. Our code used to produce thepipeline is in a public Github repository:https://github.com/gabbypinto/GET-Tok-Peru. |
+|idx| 2402.06501v1 |
+|title| Scalable Interactive Machine Learning for Future Command and Control |
+|authors| Anna MadisonEllen NovosellerVinicius G. GoecksBenjamin T. FilesNicholas WaytowichAlfred YuVernon J. LawhernSteven ThurmanChristopher KelshawKaleb McDowell
+|links| http://arxiv.org/abs/2402.06501v1 |
+|updated| 2024-02-09 16:11:04 UTC |
+|summary| Future warfare will require Command and Control C2 personnel to makedecisions at shrinking timescales in complex and potentially ill-definedsituations. Given the need for robust decision-making processes anddecision-support tools integration of artificial and human intelligence holdsthe potential to revolutionize the C2 operations process to ensure adaptabilityand efficiency in rapidly changing operational environments. We propose toleverage recent promising breakthroughs in interactive machine learning inwhich humans can cooperate with machine learning algorithms to guide machinelearning algorithm behavior. This paper identifies several gaps instate-of-the-art science and technology that future work should address toextend these approaches to function in complex C2 contexts. In particular wedescribe three research focus areas that together aim to enable scalableinteractive machine learning SIML: 1 developing human-AI interactionalgorithms to enable planning in complex dynamic situations 2 fosteringresilient human-AI teams through optimizing roles configurations and trustand 3 scaling algorithms and human-AI teams for flexibility across a range ofpotential contexts and situations. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05880v1 |
-|title| Generative Echo Chamber? Effects of LLM-Powered Search Systems on Diverse Information Seeking |
-|authors| Nikhil SharmaQ. Vera LiaoZiang Xiao
-|links| http://arxiv.org/abs/2402.05880v1 |
-|updated| 2024-02-08 18:14:33 UTC |
-|summary| Large language models LLMs powered conversational search systems havealready been used by hundreds of millions of people and are believed to bringmany benefits over conventional search. However while decades of research andpublic discourse interrogated the risk of search systems in increasingselective exposure and creating echo chambers -- limiting exposure to diverseopinions and leading to opinion polarization little is known about such a riskof LLM-powered conversational search. We conduct two experiments toinvestigate: 1 whether and how LLM-powered conversational search increasesselective exposure compared to conventional search 2 whether and how LLMswith opinion biases that either reinforce or challenge the users view changethe effect. Overall we found that participants engaged in more biasedinformation querying with LLM-powered conversational search and an opinionatedLLM reinforcing their views exacerbated this bias. These results presentcritical implications for the development of LLMs and conversational searchsystems and the policy governing these technologies. |
+|idx| 2402.06472v1 |
+|title| "When He Feels Cold, He Goes to the Seahorse"-Blending Generative AI into Multimaterial Storymaking for Family Expressive Arts Therapy |
+|authors| Di LiuHanqing ZhouPengcheng An
+|links| http://dx.doi.org/10.1145/3613904.3642852 |
+|updated| 2024-02-09 15:25:36 UTC |
+|summary| Storymaking as an integrative form of expressive arts therapy is aneffective means to foster family communication. Yet the integration ofgenerative AI as expressive materials in therapeutic storymaking remainsunderexplored. And there is a lack of HCI implications on how to supportfamilies and therapists in this context. Addressing this our study involvedfive weeks of storymaking sessions with seven families guided by a professionaltherapist. In these sessions the families used both traditional art-makingmaterials and image-based generative AI to create and evolve their familystories. Via the rich empirical data and commentaries from four experttherapists we contextualize how families creatively melded AI and traditionalexpressive materials to externalize their ideas and feelings. Through the lensof Expressive Therapies Continuum ETC we characterize the therapeuticimplications of AI as expressive materials. Desirable interaction qualities tosupport children parents and therapists are distilled for future HCIresearch. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05865v1 |
-|title| "Can You Play Anything Else?" Understanding Play Style Flexibility in League of Legends |
-|authors| Emily ChenAlexander BisbergEmilio Ferrara
-|links| http://arxiv.org/abs/2402.05865v1 |
-|updated| 2024-02-08 17:57:03 UTC |
-|summary| This study investigates the concept of flexibility within League of Legendsa popular online multiplayer game focusing on the relationship between useradaptability and team success. Utilizing a dataset encompassing players ofvarying skill levels and play styles we calculate two measures of flexibilityfor each player: overall flexibility and temporal flexibility. Our findingssuggest that the flexibility of a user is dependent upon a users preferredplay style and flexibility does impact match outcome. This work also showsthat skill level not only indicates how willing a player is to adapt their playstyle but also how their adaptability changes over time. This paper highlightsthe the duality and balance of mastery versus flexibility providing insightsthat can inform strategic planning collaboration and resource allocation incompetitive environments. |
+|idx| 2402.06421v1 |
+|title| What's in People's Digital File Collections? |
+|authors| Jesse David DinneenCharles-Antoine Julien
+|links| http://dx.doi.org/10.1002/pra2.64 |
+|updated| 2024-02-09 14:09:03 UTC |
+|summary| Thoughtfully designing services and rigorously testing software to supportpersonal information management PIM requires understanding the relevantcollections but relatively little is known about what people keep in theirfile collections especially personal collections. Complementing recent work onthe structure of 348 file collections we examine those collections contentshow much content is duplicated and how collections used for personal mattersdiffer from those used for study and work. Though all collections contain manyimages some intuitively common file types are surprisingly scarce. Personalcollections contain more audio than others knowledge workers collectionscontain more text documents but far fewer folders and IT collections exhibitunusual traits. Collection duplication is correlated to collections structuraltraits but surprisingly not to collection age. We discuss our findings inlight of prior works and provide implications for various kinds of informationresearch. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05918v1 |
-|title| Consensus-driven Deviated Pursuit for Guaranteed Simultaneous Interception of Moving Targets |
-|authors| Abhinav SinhaDwaipayan MukherjeeShashi Ranjan Kumar
-|links| http://arxiv.org/abs/2402.05918v1 |
-|updated| 2024-02-08 18:52:35 UTC |
-|summary| This work proposes a cooperative strategy that employs deviated pursuitguidance to simultaneously intercept a moving but not manoeuvring target. Asopposed to many existing cooperative guidance strategies which use estimates oftime-to-go based on proportional-navigation guidance the proposed strategyuses an exact expression for time-to-go to ensure simultaneous interception.The guidance design considers nonlinear engagement kinematics allowing theproposed strategy to remain effective over a large operating regime. Unlikeexisting strategies on simultaneous interception that achieve interception atthe average value of their initial time-to-go estimates this work providesflexibility in the choice of impact time. By judiciously choosing the edgeweights of the communication network a weighted consensus in time-to-go can beachieved. It has been shown that by allowing an edge weight to be negativeconsensus in time-to-go can even be achieved for an impact time that liesoutside the convex hull of the set of initial time-to-go values of theindividual interceptors. The bounds on such negative weights have been analysedfor some special graphs using Nyquist criterion. Simulations are provided tovindicate the efficacy of the proposed strategy. |
+|idx| 2402.06576v2 |
+|title| Value-based Resource Matching with Fairness Criteria: Application to Agricultural Water Trading |
+|authors| Abhijin AdigaYohai TrabelsiTanvir FerdousiMadhav MaratheS. S. RaviSamarth SwarupAnil Kumar VullikantiMandy L. WilsonSarit KrausReetwika BasuSupriya SavalkarMatthew YourekMichael BradyKirti RajagopalanJonathan Yoder
+|links| http://arxiv.org/abs/2402.06576v2 |
+|updated| 2024-02-12 02:17:04 UTC |
+|summary| Optimal allocation of agricultural water in the event of droughts is animportant global problem. In addressing this problem many aspects includingthe welfare of farmers the economy and the environment must be considered.Under this backdrop our work focuses on several resource-matching problemsaccounting for agents with multi-crop portfolios geographic constraints andfairness. First we address a matching problem where the goal is to maximize awelfare function in two-sided markets where buyers requirements and sellerssupplies are represented by value functions that assign prices or costs tospecified volumes of water. For the setting where the value functions satisfycertain monotonicity properties we present an efficient algorithm thatmaximizes a social welfare function. When there are minimum water requirementconstraints we present a randomized algorithm which ensures that theconstraints are satisfied in expectation. For a single seller--multiple buyerssetting with fairness constraints we design an efficient algorithm thatmaximizes the minimum level of satisfaction of any buyer. We also presentcomputational complexity results that highlight the limits on thegeneralizability of our results. We evaluate the algorithms developed in ourwork with experiments on both real-world and synthetic data sets with respectto drought severity value functions and seniority of agents. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05906v1 |
-|title| Risk-Sensitive Multi-Agent Reinforcement Learning in Network Aggregative Markov Games |
-|authors| Hafez GhaemiHamed KebriaeiAlireza Ramezani MoghaddamMajid Nili Ahamdabadi
-|links| http://arxiv.org/abs/2402.05906v1 |
-|updated| 2024-02-08 18:43:27 UTC |
-|summary| Classical multi-agent reinforcement learning MARL assumes risk neutralityand complete objectivity for agents. However in settings where agents need toconsider or model human economic or social preferences a notion of risk mustbe incorporated into the RL optimization problem. This will be of greaterimportance in MARL where other human or non-human agents are involved possiblywith their own risk-sensitive policies. In this work we considerrisk-sensitive and non-cooperative MARL with cumulative prospect theory CPTa non-convex risk measure and a generalization of coherent measures of risk.CPT is capable of explaining loss aversion in humans and their tendency tooverestimate/underestimate small/large probabilities. We propose a distributedsampling-based actor-critic AC algorithm with CPT risk for networkaggregative Markov games NAMGs which we call Distributed Nested CPT-AC.Under a set of assumptions we prove the convergence of the algorithm to asubjective notion of Markov perfect Nash equilibrium in NAMGs. The experimentalresults show that subjective CPT policies obtained by our algorithm can bedifferent from the risk-neutral ones and agents with a higher loss aversionare more inclined to socially isolate themselves in an NAMG. |
+|idx| 2402.06359v1 |
+|title| Modelling Human Values for AI Reasoning |
+|authors| Nardine OsmanMark d'Inverno
+|links| http://arxiv.org/abs/2402.06359v1 |
+|updated| 2024-02-09 12:08:49 UTC |
+|summary| One of todays most significant societal challenges is building AI systemswhose behaviour or the behaviour it enables within communities of interactingagents human and artificial aligns with human values. To address thischallenge we detail a formal model of human values for their explicitcomputational representation. To our knowledge this has not been attempted asyet which is surprising given the growing volume of research integratingvalues within AI. Taking as our starting point the wealth of researchinvestigating the nature of human values from social psychology over the lastfew decades we set out to provide such a formal model. We show how this modelcan provide the foundational apparatus for AI-based reasoning over values anddemonstrate its applicability in real-world use cases. We illustrate how ourmodel captures the key ideas from social psychology research and propose aroadmap for future integrated and interdisciplinary research into humanvalues in AI. The ability to automatically reason over values not only helpsaddress the value alignment problem but also facilitates the design of AIsystems that can support individuals and communities in making more informedvalue-aligned decisions. More and more individuals and organisations aremotivated to understand their values more explicitly and explore whether theirbehaviours and attitudes properly reflect them. Our work on modelling humanvalues will enable AI systems to be designed and deployed to meet this growingneed. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05884v1 |
-|title| Cutsets and EF1 Fair Division of Graphs |
-|authors| Jiehua ChenWilliam S. Zwicker
-|links| http://arxiv.org/abs/2402.05884v1 |
-|updated| 2024-02-08 18:18:29 UTC |
-|summary| In fair division of a connected graph G  V E each of n agentsreceives a share of Gs vertex set V. These shares partition V with eachshare required to induce a connected subgraph. Agents use their own valuationfunctions to determine the non-negative numerical values of the shares whichdetermine whether the allocation is fair in some specified sense. We introduceforbidden substructures called graph cutsets which block divisions that arefair in the EF1 envy-free up to one item sense by cutting the graph into toomany pieces. Two parameters - gap and valence - determine blocked values ofn. If G guarantees connected EF1 allocations for n agents with valuationsthat are CA common and additive then G contains no elementary cutset ofgap k ge 2 and valence in the interval n - k  1 n - 1. If Gguarantees connected EF1 allocations for n agents with valuations in thebroader CM common and monotone class then G contains no cutset of gap kge 2 and valence in the interval n - k  1 n - 1. These results ruleout the existence of connected EF1 allocations in a variety of situations. Forsome graphs G we can with help from some new positive results pin downGs spectrum - the list of exactly which values of n do/do not guaranteeconnected EF1 allocations. Examples suggest a conjectured common spectralpattern for all graphs. Further we show that it is NP-hard to determinewhether a graph admits a cutset. We also provide an example of anon-traceable graph on eight vertices that has no cutsets of gap ge 2 atall yet fails to guarantee connected EF1 allocations for three agents with CApreferences. |
+|idx| 2402.06228v1 |
+|title| Towards participatory multi-modeling for policy support across domains and scales: a systematic procedure for integral multi-model design |
+|authors| Vittorio NespecaRick QuaxMarcel G. M. Olde RikkertHubert P. L. M. KorziliusVincent A. W. J. MarchauSophie HadijsotiriouTom OreelJannie CoenenHeiman WertheimAlexey VoinovEtiënne A. J. A. RouwetteVítor V. Vasconcelos
+|links| http://arxiv.org/abs/2402.06228v1 |
+|updated| 2024-02-09 07:35:40 UTC |
+|summary| Policymaking for complex challenges such as pandemics necessitates theconsideration of intricate implications across multiple domains and scales.Computational models can support policymaking but a single model is ofteninsufficient for such multidomain and scale challenges. Multi-models comprisingseveral interacting computational models at different scales or relying ondifferent modeling paradigms offer a potential solution. Such multi-models canbe assembled from existing computational models i.e. integrated modeling orbe designed conceptually as a whole before their computational implementationi.e. integral modeling. Integral modeling is particularly valuable for novelpolicy problems such as those faced in the early stages of a pandemic whererelevant models may be unavailable or lack standard documentation. Designingsuch multi-models through an integral approach is however a complex taskrequiring the collaboration of modelers and experts from various domains. Inthis collaborative effort modelers must precisely define the domain knowledgeneeded from experts and establish a systematic procedure for translating suchknowledge into a multi-model. Yet these requirements and systematic proceduresare currently lacking for multi-models that are both multiscale andmulti-paradigm. We address this challenge by introducing a procedure fordeveloping multi-models with an integral approach based on clearly defineddomain knowledge requirements derived from literature. We illustrate thisprocedure using the case of school closure policies in the Netherlands duringthe COVID-19 pandemic revealing their potential implications in the short andlong term and across the healthcare and educational domains. The requirementsand procedure provided in this article advance the application of integralmulti-modeling for policy support in multiscale and multidomain contexts. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05876v1 |
-|title| Federated Offline Reinforcement Learning: Collaborative Single-Policy Coverage Suffices |
-|authors| Jiin WooLaixi ShiGauri JoshiYuejie Chi
-|links| http://arxiv.org/abs/2402.05876v1 |
-|updated| 2024-02-08 18:09:17 UTC |
-|summary| Offline reinforcement learning RL which seeks to learn an optimal policyusing offline data has garnered significant interest due to its potential incritical applications where online data collection is infeasible or expensive.This work explores the benefit of federated learning for offline RL aiming atcollaboratively leveraging offline datasets at multiple agents. Focusing onfinite-horizon episodic tabular Markov decision processes MDPs we designFedLCB-Q a variant of the popular model-free Q-learning algorithm tailored forfederated offline RL. FedLCB-Q updates local Q-functions at agents with novellearning rate schedules and aggregates them at a central server usingimportance averaging and a carefully designed pessimistic penalty term. Oursample complexity analysis reveals that with appropriately chosen parametersand synchronization schedules FedLCB-Q achieves linear speedup in terms of thenumber of agents without requiring high-quality datasets at individual agentsas long as the local datasets collectively cover the state-action space visitedby the optimal policy highlighting the power of collaboration in the federatedsetting. In fact the sample complexity almost matches that of the single-agentcounterpart as if all the data are stored at a central location up topolynomial factors of the horizon length. Furthermore FedLCB-Q iscommunication-efficient where the number of communication rounds is onlylinear with respect to the horizon length up to logarithmic factors. |
+|idx| 2402.06176v1 |
+|title| Cooperative Nonlinear Guidance Strategies for Guaranteed Pursuit-Evasion |
+|authors| Saurabh KumarShashi Ranjan KumarAbhinav Sinha
+|links| http://arxiv.org/abs/2402.06176v1 |
+|updated| 2024-02-09 04:24:23 UTC |
+|summary| This paper addresses the pursuit-evasion problem involving three agents -- apurser an evader and a defender. We develop cooperative guidance laws for theevader-defender team that guarantee that the defender intercepts the pursuerbefore it reaches the vicinity of the evader. Unlike heuristic methods optimalcontrol differential game formulation and recently proposed time-constrainedguidance techniques we propose a geometric solution to safeguard the evaderfrom the pursuers incoming threat. The proposed strategy is computationallyefficient and expected to be scalable as the number of agents increases.Another alluring feature of the proposed strategy is that the evader-defenderteam does not require the knowledge of the pursuers strategy and that thepursuers interception is guaranteed from arbitrary initial engagementgeometries. We further show that the necessary error variables for theevader-defender team vanish within a time that can be exactly prescribed priorto the three-body engagement. Finally we demonstrate the efficacy of theproposed cooperative defense strategy via simulation in diverse engagementscenarios. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.05782v1 |
-|title| Analysing the Sample Complexity of Opponent Shaping |
-|authors| Kitty FungQizhen ZhangChris LuJia WanTimon WilliJakob Foerster
-|links| http://arxiv.org/abs/2402.05782v1 |
-|updated| 2024-02-08 16:17:18 UTC |
-|summary| Learning in general-sum games often yields collectively sub-optimal results.Addressing this opponent shaping OS methods actively guide the learningprocesses of other agents empirically leading to improved individual and groupperformances in many settings. Early OS methods use higher-order derivatives toshape the learning of co-players making them unsuitable for shaping multiplelearning steps. Follow-up work Model-free Opponent Shaping M-FOS addressesthese by reframing the OS problem as a meta-game. In contrast to early OSmethods there is little theoretical understanding of the M-FOS framework.Providing theoretical guarantees for M-FOS is hard because A there is littleliterature on theoretical sample complexity bounds for meta-reinforcementlearning B M-FOS operates in continuous state and action spaces sotheoretical analysis is challenging. In this work we present R-FOS a tabularversion of M-FOS that is more suitable for theoretical analysis. R-FOSdiscretises the continuous meta-game MDP into a tabular MDP. Within thisdiscretised MDP we adapt the R_max algorithm most prominently used toderive PAC-bounds for MDPs as the meta-learner in the R-FOS algorithm. Wederive a sample complexity bound that is exponential in the cardinality of theinner state and action space and the number of agents. Our bound guaranteesthat with high probability the final policy learned by an R-FOS agent isclose to the optimal policy apart from a constant factor. Finally weinvestigate how R-FOSs sample complexity scales in the size of state-actionspace. Our theoretical results on scaling are supported empirically in theMatching Pennies environment. |
+|idx| 2402.06127v1 |
+|title| CityFlowER: An Efficient and Realistic Traffic Simulator with Embedded Machine Learning Models |
+|authors| Longchao DaChen ChuWeinan ZhangHua Wei
+|links| http://arxiv.org/abs/2402.06127v1 |
+|updated| 2024-02-09 01:19:41 UTC |
+|summary| Traffic simulation is an essential tool for transportation infrastructureplanning intelligent traffic control policy learning and traffic flowanalysis. Its effectiveness relies heavily on the realism of the simulatorsused. Traditional traffic simulators such as SUMO and CityFlow are oftenlimited by their reliance on rule-based models with hyperparameters thatoversimplify driving behaviors resulting in unrealistic simulations. Toenhance realism some simulators have provided Application ProgrammingInterfaces APIs to interact with Machine Learning ML models which learnfrom observed data and offer more sophisticated driving behavior models.However this approach faces challenges in scalability and time efficiency asvehicle numbers increase. Addressing these limitations we introduceCityFlowER an advancement over the existing CityFlow simulator designed forefficient and realistic city-wide traffic simulation. CityFlowER innovativelypre-embeds ML models within the simulator eliminating the need for externalAPI interactions and enabling faster data computation. This approach allows fora blend of rule-based and ML behavior models for individual vehicles offeringunparalleled flexibility and efficiency particularly in large-scalesimulations. We provide detailed comparisons with existing simulatorsimplementation insights and comprehensive experiments to demonstrateCityFlowERs superiority in terms of realism efficiency and adaptability. |
 
 
