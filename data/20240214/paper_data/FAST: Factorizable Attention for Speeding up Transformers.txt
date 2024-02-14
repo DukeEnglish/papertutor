@@ -1,0 +1,692 @@
+FAST: Factorizable Attention for Speeding up
+Transformers
+Armin Gerami∗, Monte Hoover∗, Pranav S. Dulepet, Ramani Duraiswami
+Perceptual Interfaces and Reality Laboratory,
+Department of Computer Science, University of Maryland, College Park, USA
+{agerami, mhoover4, pdulepet, ramanid}@umd.edu
+Abstract
+Motivatedbythefactorizationinherentintheoriginalfastmultipolemethodandtheim-
+provedfastGausstransformweintroduceafactorableformofattentionthatoperatesefficiently
+inhighdimensions. Thisapproachreducesthecomputationalandmemorycomplexityofthe
+attentionmechanismintransformersfromO(N2)toO(N). Incomparisontopreviousattempts,
+ourworkpresentsalinearlyscaledattentionmechanismthatmaintainsthefullrepresentation
+oftheattentionmatrixwithoutcompromisingonsparsificationandincorporatestheall-to-all
+relationshipbetweentokens. Weexplorethepropertiesofournewattentionmetricandconduct
+testsinvariousstandardsettings. Resultsindicatethatourattentionmechanismhasarobust
+performanceandholdssignificantpromisefordiverseapplicationswhereself-attentionisused.
+Keywords: LinearAttention,Transformer,FMM,Softmax,Fastmax
+1 Introduction
+Transformersarethesingledeeplearningarchitecturethatunderpinmanyrecentsuccessfulappli-
+cations in diverse fields, including in natural language processing, speech, computer vision, and
+biology.
+Transformers incorporate a Softmax-based all-to-all score computation mechanism denoted as
+“attention”. Whilethismechanismhasproventobeextremelyeffectiveinlearningtasks,theyhave
+a cost that is quadratic in the length of the input (N) and in the data dimension (D), and need a
+similaramountofmemory. Ourgoalistodevelopamoreefficienttransformerimplementationthat
+isasexpressiveusinganovelattentionformulationdescribedin§2.
+1.1 Increasing N: Long Range attention
+Transformersarebecomingthearchitectureofchoiceduetotheirabilitytomodelarbitrarydepen-
+dencies among tokens in a constant number of layers. Training is now done on more and more
+tokensanddatatomakemodelsmoreexpressiveandlearnmorecomplexrelationships. Duetothe
+1FAST Attention
+quadraticdependenceonN,theproblemof“longrange attention” thatarisesneedstobetackled,
+andisdealtwithintheliteratureinvariousways.
+1. Algorithmic: Faster attention algorithms via various approaches, including spectral matrix
+decompositions,kernelmethodapproximations,andsparsificationvialocalitysensitivehashing
+have been proposed [6, 20, 10, 11, 9, 1], but these solutions have not appeared to have gained
+traction. Thisappearstobeforthemostpartduetoperceivedlowerexpressivityoftheresulting
+transformers. Thesealgorithmsarefurtherdiscussedin§4.
+2. Parallelization: Efficient attention via careful parallelization and minimizing communication
+between the CPU and the GPU [5, 4]. This is widely used, but is still quadratic. There are also
+quadraticframeworks toextend trainingacrossmultiplenodesandGPUs toallowlargerproblems
+tofitinmemory[15,16].
+3. Non-transformer Models: New learning architectures are being proposed as an alternative
+to Transformers. Recent ones which have generated considerable interest include Mamba [8],
+Retentivenetworks[17],andCRATE[23].Thesedorequirere-engineeringthemodelpipeline.
+Inpractice,thereallylargemodelsusequadraticvanillaattentionstrategies,andworkonthedatain
+batchesatvariousstride-lengthsandstitchtogethertheresultstoreachtokenlengthstothetrillions
+[3,19]. Previouslyproposedfastattentionmechanismsdonotappeartohavebeenintegratedinto
+theseworks.
+1.2 Contributions of this paper
+WepresentFAST,anovelalgorithmthatachievesO(N)computationalandmemorycomplexity
+forcalculating anattention-basedscore withoutcompromisingaccuracy orsparsifyingthe matrix.
+FASTisbasedonanewclassofattentionmetrics,whicharefactorizable(inthespiritofthefast
+multipole method [7] and the improved fast Gauss transform [21]) to achieve a linear cost. The
+computations are simple andsupport automatic differentiation. Our implementation of FASTcan
+beseamlesslyintegratedin any Transformerarchitecture, orwherever thereisneedforan attention
+mechanism.
+Toevaluateouralgorithm,weperformvarioustests
+• WecomparethecostofperformingforwardpassagainstSoftmaxforvariousvaluesofN andD.
+• Weanalyzetheresultingattentionmatrixonthebasicdatasets,suchasMNIST[12].
+• Tomeasuretheexpressivityofouralgorithm,wecompareourperformanceagainstSoftmaxon
+thefivetaskscomprisingtheLongRangeArena[18].
+2 FAST
+Wedescribebelowthecomputationoftheselfattentionscoreintransformersusingboththe“vanilla”
+Softmaxandournovelattentionmetric,Fastmax.
+Notation: Boldeduppercaseletters,e.g.,Xindicatematrices,andboldedlowercaselettersx and
+i
+x theithrowandtheelementattheithrowandjthcolumnofXrespectively. Unboldedletters
+ijFAST Attention
+X,x,x ,x(i) indicatescalars.
+i jkl
+2.1 Preliminaries
+Invanillaattention,givenasequenceofN tokens,channeldimensionofC,H heads,andchannel
+per head dimension of D = C/H, each head takes in three trainable matrices Q,K,V ∈ RN×D,
+andgivesan outputscorematrix O ∈ RN×D. Scorecalculation isformulatedusing amatrixvector
+product(MVP)oftheattentionAwithV asfollows:
+(cid:0) (cid:1)
+O = AV, A = Softmax QKT (1)
+√
+(cid:80)N exp(qTk / D)v
+o = n=1 i n √ nj . (2)
+ij (cid:80)N
+exp(qTk / D)
+n=1 i n
+EachheadrequiresO(N2D)computationsandmemory. Thefinalscoreisgivenbyconcatenating
+scoresfromeachhead,withatotalO(N2C)computationandmemory. Wecanapplyacausalmask
+bychangingEq.2to
+(cid:40)
+a ,j ≤ i
+ij
+O = tril(A)V, tril(A) = ; (3)
+ij
+0, j > i
+√
+(cid:80)i exp(qTk / D)v
+o = n=1 i n √ nj . (4)
+ij (cid:80)i
+exp(qˆTk / D)
+n=1 i n
+We should mention that the similarity metric of exp(q · k) used in vanilla attention is not the
+only metric deriving an attention matrix, but rather the common approach. Any convex function
+cansubstituteforthesimilaritymetric,buttheexpressivenessofthemodelhingesonthechosen
+function. During training, the weight matrices creating the Query, Key, and Value matrices are
+updated.
+2.2 Proposed attention Metric
+Wefirstnormalizeqandkandusethepolynomialkernelf(x)asoursimilaritymetricforderiving
+A,thatis
+q˜ = q −mean(q ), k˜ = k −mean(k ), (5)
+i i i i i i
+qˆ = q˜ /STD(q˜ ), kˆ = k˜ /STD(k˜ ), (6)
+i i i i i i
+f(qˆTkˆ )
+a = i j , (7)
+ij (cid:80)N f(qˆTkˆ )
+n=1 i n
+p
+(cid:88) xℓ
+f(x) = , f : R → R, (8)
+ℓ!
+ℓ=0
+which is inspired by the Taylor expansion of ex, though the resulting attention matrix is distinct
+from the exponential, and is valid as long as Eq. 10 is satisfied. Due to its relationship with theFAST Attention
+exponential, the approach provides an attention mechanism that is as robust as the original. We
+refertothisprocessasFastmax;i.e.,
+A = Fastmax(QKT) (9)
+N
+(cid:88)
+a ≥ 0, a = 1 (10)
+ij ij
+i=0
+ThescoreforeachheadisgivenbytheMVP
+O = AV; (11)
+whichcanbebrokendownto
+(cid:80)N f(qˆTkˆ )v
+o = n=1 i n nj . (12)
+ij (cid:80)N f(qˆTkˆ )
+n=1 i n
+Wecontinuethissectionassumingthatp = 2inEq. 8;i.e.,f(x) = 1+x+x2/2,whichcontains
+theresultsforp = 1aswell. Weprovidetheresultsforp = 1,2inSection3.
+2.3 Gradient Bound
+Ithas beensuggested [14]that thelack ofexpressivityin othersubquadraticattention mechanisms
+risesduetothepossibilityoftheirgradientseitherblowinguporvanishing. Toassesstherobustness
+ofourproposedsolution,wewillnowexaminethebehaviorofthegradientoftheScore,∇o ,and
+ij
+show that it is lower and upper bounded. Let us denote qˆ .kˆ as s , and write the attention and
+i j ij
+Scoreas
+N
+(cid:88) f(s )
+ij
+o = a v , a = . (13)
+ij in nj in (cid:80)N
+f(s )
+n=1 m=1 im
+Takingthederivativewithrespecttos
+il
+
+1+s
+∂a
+   (cid:80)N f(i sl )(1−a ij), n = l
+in = m=1 im (14)
+∂s 1+s
+il   il (−a ), n ̸= l
+ (cid:80)N
+f(s )
+ij
+m=1 im
+N N
+∂o (cid:88) ∂a 1+s (cid:88)
+ij in il
+= v = (v − a v ). (15)
+∂s ∂s nj (cid:80)N f(s ) lj in nj
+il n=1 il m=1 im n=1
+1+s 5
+il
+Since0 ≤ s ,a ≤ 1,thefirstterminEq.15isboundedwithin0 ≤ ≤ ,and
+il in (cid:80)N f(s ) 2N +3
+m=1 im
+thesecondterm0 ≤ v −(cid:80)N a v ≤ 2(cid:13) (cid:13)vT(cid:13) (cid:13) ,wherevT isthejthcollumnofV. Therefore
+lj n=1 in nj (cid:13) (cid:13)j ∞ j
+∂o ∂o 10(cid:13)vT(cid:13)
+ij is bounded within 0 ≤ ij ≤ j ∞. During backpropagation in neural networks,
+∂s ∂s 2N +3
+il il
+excessively large gradients can lead to disastrous exploding/vanishing updates when propagated
+throughactivationfunctions. Our attentionmechanismmitigatessuch risksbyestablishinga firm
+upperbound,ensuringstabilityandsmoothlearning.FAST Attention
+2.4 Factorization
+We will use multidimensional Taylor series to provide a factorization for the exponential in D
+dimensions. ThiscloselyfollowsthemethoddevelopedforhighdimensionalGaussiansin[21],but
+isadaptedtothecaseofexponentials. Notethatthisallowsustodevelopavalidattentionmetric
+thatsatisfiesEq10,hassimilarnear-fieldandfar-fieldbehaviortotheexponentialsoftmax,andis
+fastertocompute.
+First,tounderstandwhyfactorizationspeedsupcomputation,wepresentasimpleexample. Consider
+theMVP
+     
+a b a b a b d u
+1 1 1 2 1 3 1 1
+a 2b 1 a 2b 2 a 2b 3×d 2 = u 2. (16)
+a b a b a b d u
+3 1 3 2 3 3 3 3
+Thenaivemethodofcalculatinguwouldbe
+u = a b d +a b d +a b d , (17)
+i i 1 1 i 2 2 i 3 3
+withatotalof9multiplicationsand6accumulations. Applyingfactorization,wehave
+x = b d +b d +b d , u = a x, (18)
+1 1 2 2 3 3 i i
+reducing the operations to 6 multiplications and 2 accumulations. For an M ×M matrix-vector
+multiplicationwiththesamestructureasinEq.16,thenumberofoperationsreducesfromO(M2)
+toO(M)byapplyingfactorization. ThescorecalculationinEq.12canbebrokendowntomatrix
+multiplicationsintheformofEq.16. Specifically,
+f
+o = ij , F ∈ RN×D,G ∈ RN (19)
+ij
+g
+i
+  qˆ kˆ ... qˆ kˆ   qˆ kˆ qˆ kˆ ... qˆ kˆ qˆ kˆ 
+D 1m 1m 1m Nm D 1m 1m 1l 1l 1m Nm 1l Nl
+F=I+(cid:88)  . .
+.
+... . .
+.
++ (cid:88)  . .
+.
+... . .
+.
+V,
+    
+m=0 qˆ kˆ ... qˆ kˆ m,l=0 qˆ kˆ qˆ kˆ ... qˆ kˆ qˆ kˆ
+Nm 1m Nm Nm Nm 1m Nl 1l Ni Ni Nj Nj
+(20)
+  qˆ kˆ ... qˆ kˆ   qˆ kˆ qˆ kˆ ... qˆ kˆ qˆ kˆ 
+D 1m 1m 1m Nm D 1m 1m 1l 1l 1m Nm 1l Nl
+G = I+ (cid:88)  . . . ... . . . + (cid:88)  . . . ... . . . 1
+    
+m=0 qˆ kˆ ... qˆ kˆ m,l=0 qˆ kˆ qˆ kˆ ... qˆ kˆ qˆ kˆ
+Nm 1m Nm Nm Nm 1m Nl 1l Ni Ni Nj Nj
+(21)
+where1 ∈ RN isavectorofallones;i.e.,
+(cid:32) (cid:33)
+N D D
+(cid:88) (cid:88) (cid:88)
+f = 1+ qˆ kˆ + qˆ kˆ qˆ kˆ v , (22)
+ij im nm im nm il nl nj
+n=1 m=1 m,l=1
+(cid:32) (cid:33)
+N D D
+(cid:88) (cid:88) (cid:88)
+g = 1+ qˆ kˆ + qˆ kˆ qˆ kˆ . (23)
+i im nm im nm il nl
+n=1 m=1 m,l=1FAST Attention
+Changingthesummationordersweget
+N D N D N
+(cid:88) (cid:88)(cid:88) (cid:88) (cid:88)
+f = v + qˆ kˆ v + qˆ kˆ qˆ kˆ v , (24)
+ij nj im nm nj im nm il nl nj
+n=1 m=1n=1 m,l=1n=1
+N D N D N
+(cid:88) (cid:88)(cid:88) (cid:88) (cid:88)
+g = 1+ qˆ kˆ + qˆ kˆ qˆ kˆ . (25)
+i im nm im nm il nl
+n=1 m=1n=1 m,l=1n=1
+Applyingfactorizationweget
+D D
+(cid:88) (cid:88)
+f = x(1) + qˆ x(2) + qˆ qˆ x(3) , (26)
+ij j im jm im il jml
+m=1 m,l=1
+D D
+(cid:88) (cid:88)
+g = y(1) + qˆ y(2) + qˆ qˆ y(3), (27)
+i im m im il ml
+m=1 m,l=1
+where,
+N N N
+(cid:88) (cid:88) (cid:88)
+x(1) = v , x(2) = kˆ v , x(3) = kˆ kˆ v , (28)
+j nj jm nm nj jml nm nl nj
+n=1 n=1 n=1
+N N
+(cid:88) (cid:88)
+y(1) = N, y(2) = kˆ , y(3) = kˆ kˆ . (29)
+m nm ml nm nl
+n=1 n=1
+Computing x(1),x(2),x(3) inEq. 28respectivelyrequireO(ND), O(ND2), O(ND3) computation
+and O(D), O(D2), O(D3) memory. Computing and y(1),y(2),y(3) in Eq. 29 respectively require
+O(1), O(ND), O(ND2) computation and O(1), O(D), O(D2) memory. Computing F,G in
+Eq.s 24,25 require O(ND3), O(ND2) computations and O(ND), O(N) memory. In total, as
+written,FASThasacomputationalcomplexityofO(ND3)andmemorycomplexityofO(ND2 +
+D3)perhead,andO(NH(C/H)3)andO(NH(C/H)2 +H(C/H)3)computationalandmemory
+complexityforalloftheheads. Notethat byincreasingbothnumberofheadsH andchannelsC,
+we can reduce the computational and memory cost; e.g., by quadrupling H and doubling C, the
+computationalcosthalves.
+Toapplythecausalmask,wechangeEq.s22,23to
+i D D
+(cid:88) (cid:88) (cid:88)
+f = (1+ qˆ kˆ + qˆ kˆ qˆ kˆ )v , (30)
+ij im nm im nm il nl nj
+n=1 m=1 m,l=1
+i D D
+(cid:88) (cid:88) (cid:88)
+g = (1+ qˆ kˆ + qˆ kˆ qˆ kˆ ), (31)
+i im nm im nm il nl
+n=1 m=1 m,l=1
+where we changed the first summation range. Changing the summation orders and applyingFAST Attention
+factorizationweget
+D D
+(cid:88) (cid:88)
+f = x(1) + qˆ x(2) + qˆ qˆ x(3) , (32)
+ij j im jm im il jml
+m=1 m,l=1
+D D
+(cid:88) (cid:88)
+g = y(1) + qˆ y(2) + qˆ qˆ y(3), (33)
+i im m im il ml
+m=1 m,l=1
+where,
+x(1) = v , x(1) = x(1) +v ,
+1j 1j ij i−1j ij
+x(2) = kˆ v , x(2) = x(2) +kˆ v ,
+1jm 1m 1j ijm i−1jm im ij
+x(3) = kˆ kˆ v , x(3) = x(3) +kˆ kˆ v , (34)
+1jml 1m 1l 1j ijml i−1jml im il ij
+y(1) = i, y(2) = kˆ , y(2) = y(2) +kˆ ,
+i 1m 1m im i−1m im
+y(3) = kˆ kˆ , y(3) = y(3) +kˆ kˆ . (35)
+1ml 1m 1l iml i−1ml im il
+In the masked version of FAST, the factorized values are different for each row of F and G,
+in contrast with the unmasked version’s shared values. As a result, the memory complexity
+increasefromO(ND2 +D3)toO(ND3),whilecomputationalcomplexityremainsO(ND3)per
+head. Consideringallheads,themaskedversion’soverallcomputationalandmemorycomplexity
+becomesO(NH(C/H)3). Similartotheunmaskedversion,wecanreducethecostbyincreasing
+bothH andC. Ingeneral, thecostsin termofthe controlparameterpbecomesO(NH(C/H)p+1)
+computationalandO(NH(C/H)p+H(C/H)p+1)memorycomplexityfortheunmaskedFastmax,
+andO(NH(C/H)p+1)computationalandmemorycomplexityforthemaskedFastmax.
+Figure1showstheflowchartofourScorecalculationprocessforasinglehead. GivenQ,K,V,the
+processstartswithnormalizing QandK(Eq.s5,6)toget Qˆ,Kˆ . Wethencalculatethefactorized
+valuesxandy usingKˆ andVˆ (Eq.s28,29). Then,wefindF,GusingthefactorizedvaluesandQˆ
+(Eq.s20,21). TheScoreisgivenbytheelement-wisedivisionF/G(Eq.19).
+Onecaveattoconsideristhehandlingofdropout. WhenusingSoftmax,dropoutisimplemented
+byrandomlyomittingelementsoftheattentionmatrix. InthecaseofFastmax,sincetheattention
+matrixisnotexplicitlycreated,dropoutcannotbedirectlyapplied. Instead,dropoutisappliedtothe
+factorizedterms(xandy inEq.s28,29,34,35). Thechoiceofhowtoapplydropouttothefactorized
+termsisnotimmediatelyobvious. Oneapproachwouldbetodropoutvaluesuniformlyfromwithin
+the embedding dimensions of the factorized terms, or on the other end of the spectrum, dropout
+couldbeappliedtoalldimensionsofagivenqˆ orkˆ tokenbeforecreatingthefactorizedterms.
+i j
+Empirical results show a middle ground dropout approach to be the most effective. In Figure 2
+we show a comparison the approaches described above ”standard” and ”1d” respectively and
+an approach that only does dropout from within the embeddings of the quadratic terms of the
+factorization (”quadratic”). The quadratic approach proves to be the most effective, and the
+experiments also confirm the advantage even small amounts of this dropout provide over the
+alternativeofomittingitentirely.FAST Attention
+𝑄 𝐾 𝑉
+𝑂(𝑁𝐷 ) 𝑂(𝑁𝐷 )
+Normalization Normalization
+𝑂(𝑁𝐷𝑝)
+𝑂(𝑁𝐷𝑝+1)
+Factorization 𝑦 𝑥
+𝑂(𝑁𝐷𝑝 )
+𝑂(𝑁𝐷𝑝+1)
+Summing Up 𝐺 𝐹
+𝑂(𝑁𝐷 )
+Element-Wise Division
+𝑂
+Figure1: FlowchartofcalculatingScoreusingFastmax. Thepurpletermsontheupper-leftofeachstepindicate
+theircomputationalcost. Thebackwardpassiscomputedusingautomaticdifferentiation,butfurtheroptimizationsis
+possibleusingcustomgradient(see§2.5).
+2.5 Reducing Memory Cost with Custom Gradients
+The memory cost of Fastmax can be reduced by implementing custom gradients. To elaborate,
+consider one head and p = 2. The memory cost dependency on Dp for Fastmax arises from the
+necessityto storeallthe factorized termsto calculate thegradient update duringthe backward pass.
+GoingbacktoEq.15,thederivativeoftheScorecanbeexpressedas
+N
+∂o 1+s (cid:88)
+ij il
+= (v − a v ) (36)
+∂s (cid:80)N f(s ) lj in nj
+il m=1 im n=1
+1+qˆ .kˆ (cid:80)N f(qˆ .kˆ )v
+= i l (v − n=1 i n nj ). (37)
+(cid:80)N f(qˆ .kˆ ) lj (cid:80)N f(qˆ .kˆ )
+m=1 i m m=1 i mFAST Attention
+Figure2: Empiricalresultsofdifferentdropoutapproaches. Noticethatevensmallamountsofdropoutonthequadratic
+termbenefittestgeneralization.
+Put in to words, gradient of the Score function O can be calculated by storing Qˆ , Kˆ , V,
+(cid:80)N f(qˆ .kˆ ) and (cid:80)N f(qˆ .kˆ )v for all i and j (1 ≤ i ≤ N, 1 ≤ j ≤ D); a total of
+m=1 i m n=1 i n nj
+O(ND) elements. Moreover, the latter two terms are already calculated during forward pass,
+and qˆ .kˆ for all i and l can be calculated with O(ND) computations using factorization, as ex-
+i l
+plained earlier. The same goes for the masked version, with the difference that we should store
+(cid:80)i f(qˆ .kˆ )and(cid:80)i f(qˆ .kˆ )v insteadofthelattertwotermsforalliandj. Ingeneral,by
+m=1 i m n=1 i n nj
+usingcustomgradients,thecomputationalcomplexitywillremainO(NDp+1),whilethememory
+reducestoO(NDp−1)foreachhead,forbothmaskedandunmaskedFastmax.
+3 Results
+WehaveintroducedthenewFastmaxattention,demonstrateditslinearscalabilitywiththenumberof
+tokens,anditsabilitytoyieldstablegradientupdates. Inthissection,wewillshowthatourattention
+metricbehavesasexpectedduringimplementationandthatitisasexpressiveasSoftmax. Wewill
+firstcompareFastmaxandSoftmaxasstandaloneblocksandthenevaluatetheirperformanceon
+theLongRangeArenabenchmark. Specifically,wewilldemonstratetheresultsforFastmaxwith
+p = 1and2,denotedasFastmax1andFastmax2.
+3.1 Computational Efficiency
+Figure3illustratesthewall-clocktimefortheforwardpassoftheSoftmax,Fastmax1,andFastmax2
+fora singleattention block ona log-logscale. As anticipated, thetime forFastmax scaleslinearly
+withN,whileSoftmaxscalesquadratically. Basedonthesewall-clocktimes,amodelthesizeof
+Llama2[19]withaheaddimensionD = 128gainsspeedandmemoryadvantageswithFastmax1
+at N > 1400. Furthermore, we observe that the masked version of Fastmax has a D× higher
+wall-clock time than the unmasked version despite having the same computational cost. This isFAST Attention
+Dimension per Head (D) = 32
+x
+Fastmax2 - Unmasked x
+x
+Fastmax2 - Masked
+x
+10 1 Fastmax1 - Unmasked x
+Fastmax1 - Masked
+Softmax
+10 3
+103 104 105 106 107
+Token Length (N) [Log Scale]
+Dimension per Head (D) = 64
+x x
+10 1 x x x
+10 3
+103 104 105 106 107
+Token Length (N) [Log Scale]
+Dimension per Head (D) = 128
+x x x
+10 1 x
+x
+10 2
+10 3
+103 104 105 106 107
+Token Length (N) [Log Scale]
+Figure3: ComparisonbetweentimestakenforcalculatingtheScoresperheadusingFastmaxandSoftmaxonanRTX
+A6000(48GBmemory)forvariousdimensionperheadsD. SoftmaxscalesquadraticallywithnumberoftokensN,
+whereasFastmaxscaleslinearly. The’x’marksindicatean“outofmemory”condition.
+duetotheincreasedmemoryconsumptionofincorporatingtheattentionmask,whichcausesthe
+GPU to serialize and thus reducesits parallelizability when usingthe same amount ofmemory. As
+explainedin§2.5,thereisanopportunityinfutureworktoreducethememoryconsumptionbyan
+orderofD,subsequentlybringingthedownthewall-clocktimefurther.
+3.2 Attention Map Visualizations
+Figure4showsattentionmapsfromrandomlyselectedheadsinthestandardsoftmaxtransformer
+and froma Fastmax transformer, trained on theMNIST and the TinyShakespeare datasets. There
+are noticeable differences in the attention structure learned for image classification compared with
+text generation. The MNIST classifiers accumulate information from a small number of image
+patcheswitheachattentionheadasindicatedbythedistinctcolumns,whereasthetextgenerators
+maintain someamount ofper-token information ineach head, asindicated bythe strong diagonal.
+Fastmax maintains a structure recognizably similar to softmax attention, though there are some
+differences. We speculate that the similarity in structure indicates that the priors learned by a
+]elacS
+goL[
+)s(
+emiT
+]elacS
+goL[
+)s(
+emiT
+]elacS
+goL[
+)s(
+emiTFAST Attention
+Fastmax transformer tend to be in line with those of a standard transformer, and this is further
+substantiatedbytheachievedresultsintheLRAtest.
+It’s also worth noting that Fastmax attention is less localized than standard attention. Further
+investigationisrequiredtodeterminewhetheralesslocalizedattentionhasapositiveornegative
+impactonperformance.
+(a) (b) (c) (d)
+Figure4: AttentionmapsfromtransformerstrainedonMNISTandTinyShakespearedata: (a)Softmaxattentionon
+MNIST,(b)Fastmax2attentiononMNIST,(c)SoftmaxattentiononTinyShakespeare,(d)FastmaxattentiononTiny
+Shakespeare. Notethatthemechanismsproducedifferentscores,butbothconvergeontraining.
+3.3 Long Range Arena Results
+EarliersubquadraticattentionformulationsusedtheLongRangeArena(LRA)benchmark[18]asa
+gaugeofhowcapableagivenformulationwasatincorporatingdependenciesinlongsequencesandFAST Attention
+benchmarkingthespeedefficiencygainedbythesubquadraticattention. Itturnsoutthathighper-
+formanceontheLRAbenchmarkoftenfailstotransfertoothertaskssuchasnext-token-prediction,
+as evidenced by the low perplexity scores of Performer[2] and Reformer [11] on WikiText103
+reportedin[13]. Evenso,LRAservesasaminimumbarforarchitecturestodemonstratelong-range
+dependency capability, and it can illuminate the expressivity of a method by comparing perfor-
+mance within the various tasks. To better demonstrate the expressivity of Fastmax, and togain a
+comprehensive understandingofits capabilities, weplan to conductnumerousadditional testson
+largedatasetsinourfuturework.
+Table 1 shows the achieved accuracies of various subquadratic transformer architectures on the
+five subtasks of the LRA benchmark. It is common for a subquadratic architecture to exceed the
+standardsoftmaxdotproductattentiontransformerononetaskwhilefallingnoticeablybehindin
+others,indicatingthatthearchitecturebringswithitasetofdifferentinductivepriors(seeInformer
+onthePathfindertaskandLinearTransformerontheListOpstask). Fastmaxincontrastisintended
+to exhibit the full expressivity of softmax dot product attention, including the priors and general
+expectedbehavior. TheresultsonLRAseemtoindicatethatthisbehaviorholdstrueinpractice.
+Table1: LongRangeArenaresultsbrokenoutbytask. Scoresrepresentaccuracyonclassificationtasks. Notethat
+atransformerwithFastmaxattentionmaintainsthefullrepresentationcapabilitiesofstandardsoftmaxdotproduct
+attention.
+Model ListOps Text Retrieval Image Pathfinder Avg
+VanillaTrans. 38.37 61.95 80.69 40.57 65.26 57.37
+Informer[24] 36.95 63.60 75.25 37.55 50.33 52.74
+Reformer[11] 37.00 64.75 78.50 43.72 66.40 58.07
+LinearTrans.[10] 16.13 65.90 53.09 42.34 75.30 50.55
+Performer[2] 37.80 64.39 79.05 39.78 67.41 57.69
+Fastmax2(ours) 37.40 64.30 78.11 43.18 66.55 57.90
+Fastmax1(ours) 37.20 63.25 78.21 42.76 66.67 57.62
+Table 2: Long Range Arena timing results, reported as training steps per second. Higher is better. All tests were
+performedonRTXA5000GPUsusingthesametransformerarchitecturewithheaddimensionD =32. Notethatthe
+theoreticalbreakevenpointforsecond-orderFastmaxwithD =32isN =1024,andtheseresultsconfirmthatinreal
+trainingscenarios.
+ListOps Text Retrieval Image Pathfinder Avg
+Model
+(N = 2000) (N = 4000) (N = 4000) (N = 1000) (N = 1000)
+VanillaTrans. 6.4 1.8 1.7 3.0 6.1 3.8
+Fastmax2(ours) 11.6 6.1 6.9 3.0 6.8 6.9
+Fastmax1(ours) 47.4 26.7 24.7 12.8 24.4 27.2
+Thelosscurvesfordifferenttrainingscenariosofferanotherindicationofsoftmaxattentioncharac-
+teristicsholding truein meaningfulwaysfor Fastmax. InFigure6 wesee thattraining losscurves
+forFastmaxgenerallyfollowthetrajectoryofsoftmax,FAST Attention
+Figure5: LongRangeArenaresults,after[18],showingspeedversusaccuracyforalternatetransformerformulations,
+includingthevanillaTransformer(softmax),andseveralothersdiscussedinthepaper,aswellasthetwoFastmax
+variantsproposedinthispaper. GPUmemoryusageisrepresentedbycirclearea. ThetimingsweremeasuredonaRTX
+A5000GPU.Thehyperparametersforeachalgorithmwereoptimized. FurtherdetailsareincludedinTables1and2
+4 Related Works
+Many sub-quadratic transformers have been proposed in the last few years and have been used
+occasionallyinspecificdomains,butnonesofarhaveoffereda viable alternativetosoftmaxdot
+product attention in the general case. Reformer [11] and Performer [2] both do well on the LRA
+benchmark, but have some drawbacks that make them unsuitable in some situations. Reformer
+achieves its efficiency through sparse attention, where the sparsity is selected through locality-
+sensitive hashing. Thisis quite effective butrequires the same projectionfor the Q andK matrices,
+limitingexpressivity. Performerisakernel-basedapproachthatapproximatestheattentionmatrix
+by using orthogonal random projections. In practice this has shown a drop in performance on
+large text datasets and in addition it requires an approximation of the W(Q), W(K), and W(V)
+weight matrices, making it less suitable as a drop-in replacement for a model’s attention layer.
+Linformer [20] uses low rank decomposition of the attention matrix, and while it achieves the
+expectedtheoreticalruntimeefficiencyinpracticeonGPUs,italsosuffersthemostinaccuracyand
+expressivity.
+Therehasbeenamorerecentwaveofapproachesthatattempttodealwithsomeofthesedrawbacks.
+Flashattention [5, 4] has seen widespread adoption by tackling the problem of the gap between
+theoretical efficiency and actual wall clock time. The Flashattention CUDA kernels minimizeFAST Attention
+(a) (b)
+(c) (d)
+Figure6: LosscurvesfortrainingastandardsoftmaxattentiontransformercomparedwithFastmax1andFastmax2: (a)
+LRAImagelossplottedagainstthenumberoftrainingsteps,(b)LRAImagelossagainstwallclocktime,(c)LRA
+Retrievallossagainstthenumberoftrainingsteps,(d)LRARetrievallossagainstwallclocktime. Intheplotsonthe
+leftweseeSoftmaxconvergingatthesamespeedorfasterthanFastmax1whenmeasuredbytrainsteps,butwhen
+measuringbywallclocktimeintheplotsontherightweseeFastmax1convergingmuchfaster.
+CPU-GPU memory transfer, speeding up softmax attention by roughly 2x with no tradeoffs in
+expressivity. BecauseFastmaxispurely dotproduct-based,it can takeadvantageofFlashattention
+styleGEMMkernels,andthiswillbeasubjectoffuturework. Recentlytransformeralternatives
+such as Mamba [8] and CRATE [22] have shown promising results at efficiently extending to
+long context lengths but it remains to be seen how they perform at scale. Closest in spirit to this
+work is Hyena [13] which replaces attention with implicit convolutions and gating. Hyena also
+scales linearly and performs well on large language datasets, but does depart further from the
+characteristicsofdensedot-productattentionthanFastmaxdoes. Moreworkremainstobedone
+onMamba, CRATE,Hyena, andFastmax toshowthattheydefinitivelyprovide anadvantageon
+difficultlong-contexttaskssuchasbookandaudiosummarization.
+5 Conclusion
+We introduced a new attention metric Fastmax, and showed that it has a wall-clock time and
+memory scaling that is linear in the number of tokens N, while having the same expressivity as
+vanillaattention(Softmax). OurapproachstandsoutfrompreviousmethodsattemptingtocreateFAST Attention
+a subquadratic attention as a mechanism that does not compromise on sparsifying the attention
+matrix, localizing attention, or separating the local and far attention calculation processes under
+theassumptionthatfarattentionshavenegligiblevalues. Furthermore,Fastmaxcanbeseamlessly
+integratedintoanyTransformerarchitecturebyswappingoutSoftmaxwithFastmax.
+Thereareobviousnextstepstotry. Theuseofdata-structures,asin[21],mightallowustoincrease
+theorderp,whiledroppingnegligibleterms. Theuseofcustomgradientsmightallowareductionin
+thecomplexitybyafactorofD,asdiscussedin§2.5. ThealgorithmmaybesuitabletotryonCPU
+machines with large RAM to get pastthe lower RAM on fast GPUs (whose brute forcecomputing
+powerisneededtotackletheO(N2)complexity.
+HavingalinearlyscalingattentionmetricenablesTransformerstofindnewapplicationsindomains
+such as audio, image, and video processing that Transformers were not usable before. A Trans-
+formerwithquadratictimeandmemorycomplexitywillalwaysrequirecompromisesorexpensive
+computing to process medium/long duration audio signals, high-resolution images/video frames,
+andlargerlanguagecorpora. Asaresult,academiclabsarereducedtooffine-tuningofpre-trained
+models,ratherthantrainingTransformersfromscratch.
+5.1 Broader Impact
+Ourworkshouldhavemultiplepositiveimpacts: includingreducingenergyconsumptionthrough
+making Transformers more efficient, making AI implementable on edge devices through reducing
+the computational complexity, and making large-scale AI much more accessible through the
+reduction ofdependence onhigh-end GPUs. However, theincreased accessibility oflarge-scale AI
+alsoraisesconcernsaboutpotentialnegativesocietalimpacts,suchastheproliferationofdeepfakes,
+whichcouldbeexploitedformaliciouspurposes.
+Acknowledgements
+Discussionsoverthe lastfew monthswith severalcolleagues atUMDon thebasicsof transformers
+wereuseful. Ideasonhighdimensionalpolynomialsweredevelopedduringpreviousdiscussions
+with(late)Dr. NailGumerovandDr. ChangjiangYang. PartialsupportofONRAwardN00014-23-
+1-2086isgratefullyacknowledged.
+References
+[1] IzBeltagy,MatthewEPeters,andArmanCohan.Longformer: Thelong-documenttransformer.
+arXivpreprintarXiv:2004.05150,2020.
+[2] KrzysztofChoromanski,ValeriiLikhosherstov,DavidDohan,Xingyou Song,AndreeaGane,
+TamasSarlos,PeterHawkins,JaredDavis,AfrozMohiuddin,LukaszKaiser,etal. Rethinking
+attentionwithperformers. arXivpreprintarXiv:2009.14794,2020.
+[3] AakankshaChowdhery,SharanNarang,JacobDevlin,MaartenBosma,GauravMishra,Adam
+Roberts,PaulBarham,HyungWonChung,CharlesSutton,SebastianGehrmann,ParkerSchuh,FAST Attention
+Kensen Shi, Sasha Tsvyashchenko, Joshua Maynez, Abhishek Rao, Parker Barnes, Yi Tay,
+Noam Shazeer, Vinodkumar Prabhakaran, Emily Reif, Nan Du, Ben Hutchinson, Reiner
+Pope, James Bradbury, Jacob Austin, Michael Isard, Guy Gur-Ari, Pengcheng Yin, Toju
+Duke,AnselmLevskaya,SanjayGhemawat,SunipaDev,HenrykMichalewski,XavierGarcia,
+Vedant Misra, Kevin Robinson, Liam Fedus, Denny Zhou, Daphne Ippolito, David Luan,
+Hyeontaek Lim, Barret Zoph, Alexander Spiridonov, Ryan Sepassi, David Dohan, Shivani
+Agrawal,MarkOmernick,AndrewMDai,ThanumalayanSankaranarayanaPillai,MariePellat,
+AitorLewkowycz,EricaMoreira,RewonChild,OleksandrPolozov,KatherineLee,Zongwei
+Zhou, Xuezhi Wang, Brennan Saeta, Mark Diaz, Orhan Firat, Michele Catasta, Jason Wei,
+KathyMeier-Hellstern,DouglasEck,JeffDean,SlavPetrov,andNoahFiedel. PaLM:Scaling
+LanguageModelingwithPathways. JournalofMachineLearningResearch,24(240):1–113,
+2023. URL:https://www.jmlr.org/papers/v24/22-1144.html.
+[4] TriDao. Flashattention-2: Fasterattentionwithbetterparallelismandworkpartitioning. arXiv
+preprintarXiv:2307.08691,2023.
+[5] Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and Christopher Re´. Flashattention: Fast
+and memory-efficient exact attention with io-awareness. Advances in Neural Information
+ProcessingSystems,35:16344–16359,2022.
+[6] JiayuDing,ShumingMa,LiDong,XingxingZhang,ShaohanHuang,WenhuiWang,Nanning
+Zheng, and Furu Wei. LongNet: Scaling Transformers to 1,000,000,000 Tokens. URL:
+http://arxiv.org/abs/2307.02486, arXiv:2307.02486, doi:10.48550/
+arXiv.2307.02486.
+[7] L Greengard and V Rokhlin. A fast algorithm for particle simulations. J. Comput.
+Phys., 73(2):325–348, December 1987. URL: https://www.sciencedirect.com/
+science/article/pii/0021999187901409,doi:10.1016/0021-9991(87)
+90140-9.
+[8] Albert Gu and Tri Dao. Mamba: Linear-Time Sequence Modeling with Selective State
+Spaces. URL:http://arxiv.org/abs/2312.00752,arXiv:2312.00752,doi:
+10.48550/arXiv.2312.00752.
+[9] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh
+Chaplot,prefix=delasuseprefix=falsefamily=Casas,given=Diego,FlorianBressand,Gianna
+Lengyel, Guillaume Lample, Lucile Saulnier, Le´lio Renard Lavaud, Marie-Anne Lachaux,
+PierreStock,TevenLeScao,ThibautLavril,ThomasWang,Timothe´eLacroix,andWilliamEl
+Sayed. Mistral 7B. URL: http://arxiv.org/abs/2310.06825, arXiv:2310.
+06825,doi:10.48550/arXiv.2310.06825.
+[10] Angelos Katharopoulos, ApoorvVyas, Nikolaos Pappas, and Franc¸ois Fleuret. Transformers
+are RNNs: Fastautoregressivetransformers withlinear attention. InHal Daume´ IIIand Aarti
+Singh,editors,Proceedingsofthe37thInternationalConferenceonMachineLearning,volume
+119ofProceedingsofMachineLearningResearch,pages5156–5165.PMLR,13–18Jul2020.
+URL:https://proceedings.mlr.press/v119/katharopoulos20a.html.FAST Attention
+[11] Nikita Kitaev, Łukasz Kaiser, and Anselm Levskaya. Reformer: The Efficient Trans-
+former. URL:http://arxiv.org/abs/2001.04451,arXiv:2001.04451,doi:
+10.48550/arXiv.2001.04451.
+[12] Y Lecun, L Bottou, Y Bengio, and P Haffner. Gradient-based learning applied to doc-
+ument recognition. Proc. IEEE Inst. Electr. Electron. Eng., 86(11):2278–2324, 1998.
+URL: https://ieeexplore.ieee.org/abstract/document/726791/, doi:
+10.1109/5.726791.
+[13] MichaelPoli,StefanoMassaroli,EricNguyen,DanielY.Fu,TriDao,StephenBaccus,Yoshua
+Bengio, Stefano Ermon, and Christopher Re´. Hyena Hierarchy: Towards Larger Convo-
+lutional Language Models. URL: http://arxiv.org/abs/2302.10866, arXiv:
+2302.10866,doi:10.48550/arXiv.2302.10866.
+[14] ZhenQin,XiaodongHan,WeixuanSun,DongxuLi,LingpengKong,NickBarnes,andYiran
+Zhong. Thedevilinlineartransformer. October2022. URL:http://arxiv.org/abs/
+2210.10340,arXiv:2210.10340.
+[15] Jeff Rasley, Samyam Rajbhandari, Olatunji Ruwase, and Yuxiong He. DeepSpeed: Sys-
+tem optimizations enable training deep learning models with over 100 billion parameters.
+In Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Dis-
+covery & Data Mining, pages 3505–3506, New York, NY, USA, August 2020. ACM.
+URL: https://dl.acm.org/doi/abs/10.1145/3394486.3406703, doi:10.
+1145/3394486.3406703.
+[16] Siddharth Singh and Abhinav Bhatele. AxoNN: An asynchronous, message-driven par-
+allel framework for extreme-scale deep learning. In 2022 IEEE International Parallel
+and Distributed Processing Symposium (IPDPS), pages 606–616. IEEE, May 2022. URL:
+https://ieeexplore.ieee.org/abstract/document/9820664/, doi:10.
+1109/ipdps53621.2022.00065.
+[17] YutaoSun,LiDong,ShaohanHuang,ShumingMa,YuqingXia,JilongXue,JianyongWang,
+and Furu Wei. Retentive Network: A Successor to Transformer for Large Language Mod-
+els. URL: http://arxiv.org/abs/2307.08621, arXiv:2307.08621, doi:
+10.48550/arXiv.2307.08621.
+[18] Yi Tay, Mostafa Dehghani, Samira Abnar, Yikang Shen, Dara Bahri, Philip Pham, Jinfeng
+Rao, Liu Yang, Sebastian Ruder, and Donald Metzler. Long Range Arena: A Benchmark
+for Efficient Transformers. URL: http://arxiv.org/abs/2011.04006, arXiv:
+2011.04006,doi:10.48550/arXiv.2011.04006.
+[19] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,
+Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, Dan Bikel, Lukas
+Blecher,CristianCantonFerrer,MoyaChen,GuillemCucurull,DavidEsiobu,JudeFernandes,
+JeremyFu,WenyinFu,BrianFuller,CynthiaGao,VedanujGoswami,NamanGoyal,Anthony
+Hartshorn, Saghar Hosseini, Rui Hou, Hakan Inan, Marcin Kardas, Viktor Kerkez, Madian
+Khabsa,IsabelKloumann,ArtemKorenev,PunitSinghKoura,Marie-AnneLachaux,ThibautFAST Attention
+Lavril, Jenya Lee, Diana Liskovich, Yinghai Lu, Yuning Mao, Xavier Martinet, Todor Mi-
+haylov,PushkarMishra,IgorMolybog,YixinNie,AndrewPoulton,JeremyReizenstein,Rashi
+Rungta,KalyanSaladi,AlanSchelten,RuanSilva,EricMichaelSmith,RanjanSubramanian,
+Xiaoqing Ellen Tan, Binh Tang, Ross Taylor, Adina Williams, Jian Xiang Kuan, Puxin Xu,
+Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan, Melanie Kambadur, Sharan Narang,
+AurelienRodriguez,RobertStojnic,SergeyEdunov,andThomasScialom. Llama2: Open
+foundationandfine-tunedchatmodels,2023. arXiv:2307.09288.
+[20] Sinong Wang, Belinda Z. Li, Madian Khabsa, Han Fang, and Hao Ma. Linformer: Self-
+Attention with Linear Complexity. URL: http://arxiv.org/abs/2006.04768,
+arXiv:2006.04768,doi:10.48550/arXiv.2006.04768.
+[21] CYang,RDuraiswami,NAGumerov,andothers. Improvedfastgausstransformandefficient
+kerneldensityestimation. ComputerVision,IEEE,2003. URL:https://ieeexplore.
+ieee.org/abstract/document/1238383/.
+[22] Yaodong Yu, Sam Buchanan,Druv Pai, TianzheChu, Ziyang Wu, Shengbang Tong, Hao Bai,
+Yuexiang Zhai, Benjamin D. Haeffele, and Yi Ma. White-box transformers via sparse rate
+reduction: Compressionisallthereis?,2023. arXiv:2311.13110.
+[23] Yaodong Yu, Tianzhe Chu, Shengbang Tong, Ziyang Wu, Druv Pai, Sam Buchanan, and
+YiMa. Emergenceofsegmentationwithminimalisticwhite-boxtransformers. arXiv[cs.CV],
+August2023. URL:http://arxiv.org/abs/2308.16271,arXiv:2308.16271.
+[24] Haoyi Zhou, Shanghang Zhang, Jieqi Peng, Shuai Zhang, Jianxin Li, Hui Xiong, and Wancai
+Zhang. Informer: Beyond Efficient Transformer for Long Sequence Time-Series Forecasting.
+URL:https://arxiv.org/abs/2012.07436v3.

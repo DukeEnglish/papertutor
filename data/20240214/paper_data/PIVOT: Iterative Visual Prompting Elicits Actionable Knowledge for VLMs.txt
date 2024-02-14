@@ -1,0 +1,1021 @@
+2024-2-13
+PIVOT: Iterative Visual Prompting Elicits
+Actionable Knowledge for VLMs
+SoroushNasiriany∗,†,1,3 ,FeiXia∗,1 ,WenhaoYu∗,1 ,TedXiao∗,1 ,JackyLiang1 ,IshitaDasgupta1 ,AnnieXie2
+,
+1 1 1 1 1 1
+DannyDriess ,AyzaanWahid ,ZhuoXu ,QuanVuong ,TingnanZhang ,Tsang-WeiEdwardLee ,
+1 1 1 3 1 1 1
+Kuang-HueiLee ,PengXu ,SeanKirmani ,YukeZhu ,AndyZeng ,KarolHausman ,NicolasHeess ,
+ChelseaFinn1 ,SergeyLevine1 ,BrianIchter∗,1
+1GoogleDeepMind,2StanfordUniversity,3TheUniversityofTexasatAustin
+Correspondto:{soroushn, xiafei, magicmelon, tedxiao, ichter}@google.com
+Website:pivot-prompt.github.ioandHuggingFace:https://huggingface.co/spaces/pivot-prompt/pivot-prompt-demo
+Visionlanguagemodels(VLMs)haveshownimpressivecapabilitiesacrossavarietyoftasks,fromlogical
+reasoningtovisualunderstanding. Thisopensthedoortoricherinteractionwiththeworld,forexample
+roboticcontrol. However,VLMsproduceonlytextualoutputs,whileroboticcontrolandotherspatial
+tasksrequireoutputtingcontinuouscoordinates,actions,ortrajectories. HowcanweenableVLMsto
+handlesuchsettingswithoutfine-tuningontask-specificdata?
+In this paper, we propose a novel visual prompting approach for VLMs that we call Prompting with
+IterativeVisualOptimization(PIVOT),whichcaststasksasiterativevisualquestionanswering. Ineach
+iteration,theimageisannotatedwithavisualrepresentationofproposalsthattheVLMcanreferto
+(e.g., candidate robot actions, localizations, or trajectories). The VLM then selects the best ones for
+the task. These proposals are iteratively refined, allowing the VLM to eventually zero in on the best
+availableanswer. WeinvestigatePIVOTonreal-worldroboticnavigation,real-worldmanipulationfrom
+images,instructionfollowinginsimulation,andadditionalspatialinferencetaskssuchaslocalization.
+Wefind,perhapssurprisingly,thatourapproachenableszero-shotcontrolofroboticsystemswithoutany
+robottrainingdata,navigationinavarietyofenvironments,andothercapabilities. Althoughcurrent
+performanceisfarfromperfect,ourworkhighlightspotentialsandlimitationsofthisnewregimeand
+showsapromisingapproachforInternet-ScaleVLMsinroboticandspatialreasoningdomains.
+Task: What actions should the robot Task: What numbers overlay the “L Task: What actions should the robot Task: What actions should the robot
+take to pick up the DNA chew toy? kid”? take to go to wooden bench without take to put the pepper shaker on the
+hitting the obstacle? pink plate?
+Iteration 0: Iteration 0: Iteration 0: Iteration 0:
+Arrows: [7, 13, 18] Markers: [10, 1, 14, 17] Arrows: [12, 13, 14] Arrows: [1]
+Iteration 1: Iteration 4: Iteration 3: Iteration 1:
+Arrows: [16] Markers: [5] Arrows: [2] Arrows: [1]
+Figure 1 | PromptingwithIterativeVisualOptimization(PIVOT)castsspatialreasoningtasks,suchasrobotic
+control, as a VQA problem. This is done by first annotating an image with a visual representation of robot
+actionsor3Dcoordinates,thenqueryingaVLMtoselectthemostpromisingannotatedactionsseeninthe
+image. Thebestactionisiterativelyrefinedbyfittingadistributiontotheselectedactionsandrequeryingthe
+VLM.Thisprocedureenablesustosolvecomplextasksthatrequireoutputtinggroundedcontinuouscoordinates
+orrobotactionsutilizingaVLMwithoutanydomain-specifictraining.
+© 2024GoogleDeepMind.Allrightsreserved
+∗Equalcontribution,orderingrandomlydecided.†WorkdonewhileastudentresearcheratGoogleDeepMind.
+4202
+beF
+21
+]OR.sc[
+1v27870.2042:viXraPIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+1. Introduction
+Large language models (LLMs) have shown themselves capable of solving a broad range of practical
+problems, from code generation to question answering and even logical deduction [5, 3, 52]. The
+extension of LLMs to multi-modal inputs, resulting in powerful vision-language models (VLMs),
+enables models that handle much richer visual modalities [16, 37, 2, 9], which makes it feasible to
+interactnotonlywithnaturallanguagebutdirectlywiththephysicalworld. However,mostVLMsstill
+only output textual answers, seemingly limiting such interactions to high-level question answering.
+Manyreal-worldproblemsareinherentlyspatial: controllingthetrajectoryofaroboticarm,selecting
+a waypoint for a mobile robot, choosing how to rearrange objects on a table, or even localizing
+keypoints in an image. Can VLMs be adapted to solve these kinds of embodied, physical, and spatial
+problems? And can they do so zero shot, without additional in-domain training data? In this work,
+we propose an iterative prompting method to make this possible and study the limits and potentials
+for zero-shot robotic control and spatial inference with VLMs.
+Our proposed method is based on a simple insight: although VLMs struggle to produce precise
+spatialoutputsdirectly,theycanreadilyselectamongadiscretesetofcoarsechoices,andthisinturn
+canbeusedtorefinethissettoprovidemoreprecisechoicesatthenextiteration. Ateachiterationof
+ouriterativeprocedure,weannotatetheimagewithcandidateproposals(i.e.,numberedkeypointsas
+inYangetal.[59])drawnfromaproposaldistribution,and asktheVLM torankthedegreetowhich
+they perform the desired task. We then refine this proposal distribution, generate new candidate
+proposals that are clustered around better regions of the output space, and repeat this procedure.
+With this optimization approach, the entire loop can be viewed as an iterative optimization similar to
+the cross-entropy method [11], with each step being framed as a visual question compatible with
+current VLMs without any additional training. In Figure 1 and throughout this work, we use robot
+control as a running example, wherein candidates are numbered arrows.
+Equipped with our method for extracting spatial outputs from VLMs, we study the limits and
+potentials of zero-shot VLM inference in a range of domains: robotic navigation, grasping and
+rearranging objects, language instructions in a simulated robotic benchmark, and non-robot spatial
+inference through keypoint localization. It is important to note that in all of these domains, we use
+state-of-the-artvisionlanguagemodels,namelyGPT-4[37]andGemini[17],withoutanymodification
+or finetuning. Our aim is not necessarily to develop the best possible robotic control or keypoint
+localization technique, but to study the limits and potentials of such models. We expect that future
+improvements to VLMs will lead to further quantitative gains on the actual tasks. The zero-shot
+performance of VLMs in these settings is far from perfect, but the ability to control robots in zero
+shot without any robotic data, complex prompt design, code generation, or other specialized tools
+provides a very flexible and general way to obtain highly generalizable systems.
+Our main contribution is thus an approach for visual prompting and iterative optimization with
+VLMs, applications to low-level robotic control and other spatial tasks, and an empirical analysis of
+potentials and limitations of VLMs for such zero-shot spatial inference. We apply our approach to
+a variety of robotic systems and general visually-grounded visual question and answer tasks, and
+evaluates the kinds of situations where this approach succeeds and fails. While our current results
+are naturally specific to current state-of-the-art VLMs, we find that performance improves with larger,
+more performant VLMs. Thus, as VLM capabilities continue to improve with time, we expect our
+proposed approach to improve in turn.
+2PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+2. Related Work
+Visual annotations with VLMs. With the increasing capabilities of VLMs, there has been growing
+interest in understanding their abilities to understand visual annotations [60, 46, 57, 65], improving
+such capabilities [6, 56], as well as leveraging them for perception or decision-making tasks [18,
+59, 53, 26, 33]. Shtedritski et al. [46] identify that VLMs like CLIP [40] can recognize certain
+visual annotations. Yang et al. [60] perform a more comprehensive analysis on the GPT-4 model
+and demonstrate its ability to understand complex visual annotations. Yang et al. [59] demonstrates
+how such a model can solve visual reasoning tasks by annotating the input image with object
+masks and numbers. Several works too have applied visual prompting methods to web navigation
+tasks [26, 57, 65], obtaining impressive-zero shot performance. Our work builds upon these works:
+instead of taking proposals as given or generating the proposals with a separate perception systems,
+PIVOT generates proposals randomly, but then adapt the distribution through iterative refinement.
+As a result, we can obtain relatively precise outputs through multiple iterations, and do not require
+any separate perception system or any other model at all besides the VLM itself.
+Prompt optimization. The emergence of few-shot in context learning within LLMs [5] has lead
+to many breakthroughs in prompting. Naturally prompt optimization has emerged as a promising
+approach, whether with gradients [29, 28] or without gradients, e.g., with human engineering [27]
+or through automatic optimization in language space [66]. These automatic approaches are most
+related to our work and have shown that language-model feedback [39], answer scores [66, 58, 55],
+and environment feedback [49] can significantly improve the outputs of LLMs and VLMs. A major
+difference between these prior methods and ours is that our iterative prompting uses refinement of
+the visual input, by changing the visual annotations across refinement steps. We optimize prompts
+“online” for a specific query rather than offline to identify a fixed prompt, and show that our iterative
+procedure leads to more precise spatial outputs.
+Foundation models for robot reasoning and control. In recent years, foundation models have
+shown impressive results in robotics from high-level reasoning to low-level control [13, 19]. Many
+early works investigated robotic reasoning and planning regimes where LLMs and language outputs
+arewellsuited[21,64,1,22,34,41,47,32,31,51,8]. Toapplyfoundationmodelstocontroltasks,
+several promising approaches have emerged. One line of work has shown that foundation-model-
+selectedsubgoalsareaneffectiveabstractiontofeedintopoliciesfornavigation[12,44,7,20,43,14]
+and manipulation [10, 45]. Another abstraction that has been shown to be effective for control
+is LLM generated rewards, which can be optimized within simulation [23, 62, 35]. Others have
+investigatedcodewriting LLMstodirectlywritecode thatcanbeexecutedviacontrol andperceptive
+primitives [30, 48, 54]. On simple domains, even few-shot prompting language models has been
+showntobecapableofcontrol[36,50],whilefinetunedfoundationmodelshaveyieldedsignificantly
+more capable VLM-based controllers [4, 45, 25, 42, 15, 38]. Unlike these works, we show how VLMs
+can be applied zero-shot to low-level control of multiple real robot platforms.
+3. Prompting with Iterative Visual Optimization
+The type of tasks this work considers have to be solved by producing a value 𝑎 ∈ A from a set A
+given a task description in natural language ℓ ∈ L and an image observation 𝐼 ∈ ℝ𝐻×𝑊×3. This set
+A can, for example, include continuous coordinates, 3D spatial locations, robot control actions, or
+trajectories. When A is the set of robot actions, this amounts to finding a policy 𝜋(·|ℓ,𝐼) that emits
+an action 𝑎 ∈ A. The majority of our experiments focus on finding a control policy for robot actions.
+Therefore, in the following, we present our method of PIVOT with this use-case in mind. However,
+PIVOT is a general algorithm to generate (continuous) outputs from a VLM.
+3PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+3.1. Grounding VLMs to Robot Actions through Image Annotations
+Weproposeframingtheproblemofcreatingapolicy𝜋asaVisualQuestionAnswering(VQA)problem.
+The class of VLMs we use in this work take as input an image 𝐼 and a textual prefix 𝑤 from which
+𝑝
+they generate a distribution 𝑃 VLM(·|𝑤 𝑝,𝐼) of textual completions. Utilizing this interface to derive a
+policy raises the challenge of how an action from a (continuous) space A can be represented as a
+textual completion.
+The core idea of this work is to lift low-level actions into the visual language of a VLM, i.e., a
+combination of images and text, such that it is closer to the training distribution of general vision-
+language tasks. To achieve this, we propose the visual prompt mapping
+(cid:0)ˆ𝐼,𝑤 1:𝑀(cid:1) = Ω(𝐼,𝑎 1:𝑀) (1)
+that transforms an image observation 𝐼 and set of candidate actions 𝑎 1:𝑀, 𝑎
+𝑗
+∈ A into an annotated
+imageˆ𝐼 andtheircorrespondingtextuallabels𝑤 where𝑤 referstotheannotationrepresenting 𝑎
+1:𝑀 𝑗 𝑗
+intheimagespace. Forexample,asvisualizedinFig.1,utilizingthecameramatrices,wecanproject
+a 3D location into the image space, and draw a visual marker at this projected location. Labeling
+this marker with a textual reference, e.g., a number, consequently enables the VLM to not only be
+queried in its natural input space, namely images and text, but also to refer to spatial concepts in its
+naturaloutputspacebyproducingtextthatreferencesthemarkerlabels. InSection4.4weinvestigate
+different choices of the mapping (1) and ablate its influence on performance.
+3.2. Prompting with Iterative Visual Optimization
+Representing (continuous) robot actions and spatial concepts in image space with their associated
+textual labels allows us to query the VLM 𝑃 to judge if an action would be promising in solving
+VLM
+the task. Therefore, we can view obtaining a policy 𝜋 as solving the optimization problem
+max 𝑃 VLM(cid:0)𝑤 (cid:12) (cid:12)ˆ𝐼,ℓ(cid:1) s.t. (cid:0)ˆ𝐼,𝑤(cid:1) = Ω(𝐼,𝑎). (2)
+𝑎∈A,𝑤
+Intuitively, we aim to find an action 𝑎 for which the VLM would choose the corresponding label 𝑤
+afterapplyingthemappingΩ. Inordertosolve(2),weproposeaniterativealgorithm,whichwerefer
+to as Prompting with Iterative Visual Optimization. In each iteration 𝑖 the algorithm first samples
+a set of candidate actions 𝑎(𝑖) from a distribution 𝑃 (Figure 2 (a)). These candidate actions are
+1:𝑀 A(𝑖)
+then mapped onto the image 𝐼 producing the annotated image ˆ𝐼(𝑖) and the associated action labels
+𝑤(𝑖) (Figure 2 (b)). We then query the VLM on a multiple choice-style question on the labels 𝑤(𝑖)
+1:𝑀 1:𝑀
+to choose which of the candidate actions are most promising (Figure 2 (c)). This leads to set of
+best actions to which we fit a new distribution 𝑃 (Figure 2 (d)). The process is repeated until
+A(𝑖+1)
+convergence or a maximum number of steps 𝑁 is reached. Algorithm 1 and Figure 2 visualize this
+process.
+3.3. Robust PIVOT with Parallel Calls
+VLMs can make mistakes, causing PIVOT to select actions in sub-optimal regions. To improve the
+robustnessofPIVOT,weuseaparallelcallstrategy,wherewefirstexecute 𝐸 parallelPIVOTinstances
+and obtain 𝐸 candidate actions. We then aggregate the selected candidates to identify the final
+action output. To aggregate the candidate actions from different PIVOT instances, we compare two
+approaches: 1) we fit a new action distribution from the 𝐸 action candidates and return the fitted
+action distribution, 2) we query the VLM again to select the single best action from the 𝐸 actions. We
+4PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+find that by adopting parallel calls we can effectively improve the robustness of PIVOT and mitigate
+local minima in the optimization process.
+Algorithm 1 Prompting with Iterative Visual Optimization
+1: Given: image 𝐼, instruction ℓ, action space A, max iterations 𝑁, number of samples 𝑀
+2: Initialize: A(0) = A, 𝑖 = 0
+3: while 𝑖 < 𝑁 do
+4: Sample actions 𝑎 1:𝑀 from 𝑃 A(𝑖)
+5: Project actions into image space and textual labels (cid:0)ˆ𝐼,𝑤 1:𝑀(cid:1) = Ω(𝐼,𝑎 1:𝑀)
+6: Query VLM 𝑃 VLM(cid:0)𝑤 (cid:12) (cid:12)ˆ𝐼,ℓ(cid:1) to determine the most promising actions
+7: Fit distribution 𝑃 to best actions
+A(𝑖+1)
+8: Increment iterations 𝑖 ← 𝑖+1
+9: end while
+10: Return: an action from the VLM best actions
+(a) Sample Actions (b) Annotate Image
+Sample candidate actions from action space A(i) Project candidate actions into image and label
+4 4
+1 6 7 3 7
+5
+2 2
+PIVOT 1
+3
+5 6
+Prompting with
+(d) Fit Distribution (c) Query VLM
+Fit a selected action distribution A(i+1) Visual Iterative Query VLM via VQA for best actions
+Optimization
+Which arrows should the Which arrows should the
+robot follow to pick up the red robot follow to park between
+block? the green and blue blocks?
+Arrow: [2, 7] Arrow: [3, 5]
+(e) Iterate and Execute
+Which arrows should the robot follow to pick up the blue microfiber cloth?
+(0) (1) (2) execute
+(0) (1) (2) (3) execute
+Figure 2 | Prompting with Iterative Visual Optimization produces a robot control policy by iteratively (a)
+samplingactionsfromanactiondistributionA(𝑖),(b)projectingthemintotheimagespaceandannotating
+eachsample,(c)queryingaVLMforthebestactions,and(d)fittingadistributiontotheselectedactionsto
+formA(𝑖+1). (e)Afterasetnumberofiterations,aselectedbestactionisexecuted.
+3.4. PIVOT Implementation
+Our approach can be used to query the VLM for any type of answer as long as multiple answers
+can be simultaneously visualized on the image. As visualized in Figure 1, for the visual prompting
+mappingΩ,werepresentactionsasarrowsemanatingfromtherobotorthecenteroftheimageifthe
+embodiment is not visible. For 3D problems, the colors of the arrows and size of the labels indicate
+forward and backwards movement. We label these actions with a number label circled at the end
+5PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+of the arrow. Unless otherwise noted, the VLM used herein was GPT-4V [37]. For creating the text
+prompt 𝑤 , we prompt the VLM to use chain of thought to reason through the problem and then
+𝑝
+summarize the top few labels. The distributions 𝑃 in Algorithm 1 are approximated as isotropic
+A
+Gaussians.
+4. Experiments
+We investigate the capabilities and limitations of PIVOT for visuomotor robotic control and visually
+grounded(e.g.,spatial)VQA.Ourprimaryexamplesinvolveactionselectionforcontrolbecause(a)it
+requires fine-grained visual grounding, (b) actions can be difficult to express in language, and (c)
+it is often bottlenecked by visual generalization, which benefits from the knowledge stored within
+pre-trained VLMs. We aim to understand both the strength and weaknesses of our approach, and
+believe that (i) identifying these limitations and (ii) understanding how they may be alleviated via
+scaling and by improving the underlying foundation models are main contributions of this work.
+Specifically, we seek to answer the questions:
+1. How does PIVOT perform on robotic control tasks?
+2. How does PIVOT perform on object reference tasks?
+3. What is the influence of the different components of PIVOT (textual prompting, visual prompting,
+and iterative optimization) on performance?
+4. What are the limitations of PIVOT with current VLMs?
+5. How does PIVOT scale with VLM performance?
+4.1. Robotics Experimental Setup
+We evaluate PIVOT across the following robot embodiments, which are visualized in Figure 3 and
+described in detail in Appendix A:
+• Mobile manipulator with a head-mounted camera for both navigation (2D action space, Figure 3
+(a) and manipulation tasks (4D end-effector relative Cartesian (𝑥,𝑦,𝑧) and binary gripper action
+space, Figure 3 (b).
+• Franka arm with a wrist-mounted camera and a 4D action space (end-effector relative Cartesian
+(𝑥,𝑦,𝑧) and gripper). Results shown in Appendix F.
+• RAVENS[63]simulator,withanoverheadcameraandapickandplacepixelactionspace. Results
+shown in Appendix E.
+(a) (b) (c) (d)
+place pick
+Figure3|WeevaluatePIVOTonseveralrobotembodimentsincluding:amobilemanipulatorfor(a)navigation
+(e)
+and(b)manipulation,(c)singleFrankaarmmanipulation,and(d)tabletoppick-and-place[63].
+6Step 1 Step 2 Step 3 Step 4
+SStteepp 1 1 SStteepp 2 2 SStteepp 3 3 SStetepp 4 4
+PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+4.2. Zero-shot Robotic Control in the Real World
+Before BBeeffoorree After AAftfteerr Before BBeeffoorree After AAftfteerr “Left“ S“LLkeeifteft rS ”Skkieier”r” “Bo“yB“ Boinoy y Bi nilnu B eBlu”luee””
+OptimizationOOppttiimmizizaattiOoionnptimizatioOnOppttimimizizaattioionn OptimizatOOioppnttimimizizaattioionnOptimizOaOtppitotimnimizizaattioionn StepSS t1etepp 1 1
+Step 1 SStteepp 11 Step 1 SStteepp 1 1
+StepSS t2etepp 2 2
+SStteepp 22 SStteepp 2 2
+Step 2 Step 2
+SStteepp 33 SStteepp 3 3
+Step 3 Step 3
+SStetepp 3 3
+Step 3
+SStteepp 44 SStteepp 4 4
+Step 4 Step 4
+(a)Navigation: “Helpmefinda(b)Manipulation: “Pickupthe
+placetositandwrite” cokecan” (c)RefCOCOspatialreasoning
+Figure 4 | (a) An example rollout on a real-world navigation task. We use three parallel calls to generate
+samples. (b)Anexamplerolloutonareal-worldmanipulationtask,whereactionsselectedbyPIVOTwith3
+iterationsaredirectlyexecutedateverystep. PIVOTimprovestherobustnessandprecisionofrobotactions,
+enablingcorrectivebehaviorsuchasinStep2. (c)AnexamplerolloutonRefCOCOquestions.
+OurfirstsetofrealrobotexperimentsevaluatePIVOT’sabilitytoperformzero-shotroboticcontrol
+withmobilemanipulatornavigationandmanipulation,andFrankamanipulation. Thesehighlightthe
+flexibility of PIVOT, as these robots vary in terms of control settings (navigation and manipulation),
+camera views (first and third person), as well as action space dimensionalities. For example, Figure 4
+illustratesseveralqualitativerolloutsofPIVOTandtheactionsamples(projectedontotheimages)as
+itstepsthroughtheiterationprocess. Notethatafteroptimization,selectedactionsaremoreprecisely
+positioned on target objects and areas of interest (most relevant to the input language instructions),
+without any model fine-tuning. For goal-directed navigation tasks, we quantitatively evaluate PIVOT
+by measuring the success rates of whether it enables the mobile manipulator to reach its target
+destination(provided as alanguageinput toPIVOT).Formanipulation, weevaluateperformancevia
+threemetrics(i)whethertherobotend-effectorreachestherelevantobject(reach),(ii)efficiencyvia
+the number of action steps before successful termination (steps), and (iii) the success rate at which
+the robot grasps the relevant object (grasp – when applicable).
+Table 1 | NavigationsuccessrateonthemobilemanipulatorinFigure3(a). Weobservethatiterationsand
+parallelcallsimproveperformance.
+NoIteration 3Iterations NoIteration 3Iterations
+Task NoParallel NoParallel 3Parallel 3Parallel
+Gotoorangetablewithtissuebox 25% 50% 75% 75%
+Gotowoodenbenchwithouthittingobstacle 25% 50% 75% 50%
+Gotothedarkerroom 25% 50% 75% 100%
+Helpmefindaplacetositandwrite 75% 50% 100% 75%
+Resultsonbothnavigationandmanipulationtasks(showninTables1and2)demonstratethat(i)
+PIVOT enables non-zero task success for both domains, (ii) parallel calls improves performance (in
+terms of success rates) and efficiency (by reducing the average number of actions steps), and (iii)
+7PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+increasing the number of PIVOT iterations also improves performance. Appendix F and E presents
+Table 2 | ManipulationresultsonthemobilemanipulatorshowninFigure3(b),where“Reach”indicatesthe
+rateatwhichtherobotsuccessfullyreachedtherelevantobject,“Steps”indicatesthenumberofsteps,and
+“Grasp”indicatestherateatwhichtherobotsuccessfullygraspedtherelevantobject(whenapplicableforthe
+task). Weobservethatwhileallapproachesareabletoachievesomenon-zerosuccess,iterationandparallel
+callsimproveperformanceandefficiencyofthepolicy.
+NoIterations 3Iterations 3Iterations
+NoParallel NoParallel 3Parallel
+Task Reach Steps Grasp Reach Steps Grasp Reach Steps Grasp
+Pickcokecan 50% 4.5 0.0% 67% 3.0 33% 100% 3.0 67%
+BringtheorangetotheX 20% 4.0 - 80% 3.5 - 67% 3.5 -
+Sorttheapple 67% 3.5 - 100% 3.25 - 75% 3.0 -
+results on real Franka arm and a simulated RAVENS domain.
+4.3. Zero-shot Visual Grounding
+In addition to robotic control tasks, we also examine PIVOT for reference localization tasks from
+RefCOCO[61],whichevaluatespreciseandrobustvisualgrounding. Tothisend,weevaluateGPT-4V
+with 3 rounds of PIVOT on a random subset of 1000 examples from the RefCOCO testA split. We
+find strong performance even in the first iteration with modest improvement over further iterations.
+Prompts used are in Appendix H and results are in Figure 5 and examples in Figure 4.
+Figure 5 | RefCOCOquantitativeresults. (Left)
+Normalizeddistancebetweenthecenterofthe
+groundtruthboundingboxandtheselectedcir-
+cle. (Right)Accuracyasmeasuredbywhether
+theselectedcirclelieswithinthegroundtruth
+boundingbox.
+We provide an interactive demo on HuggingFace with a few demonstrative images as well as the
+ability to upload new images and questions; available here.
+4.4. Offline Performance and Ablations
+In this section, we examine each element of PIVOT (the text prompt, visual prompt, and iterative
+optimization) through an offline evaluation, allowing a thorough evaluation without requiring
+execution on real robots. To do this, we use demonstration data as a reference and compute how
+similar the action computed by PIVOT is to the ground-truth expert action.
+For the manipulation domain, we obtain the reference robot action from the RT-X dataset [38]
+and compute the cosine similarity of the two actions in the camera frame as our metric. This metric
+measures how VLM choice is “aligned" with human demonstrations. For example, a 0.5 cosine
+similarity in 2D space correspond to arccos(0.5) = 60◦. As our actions can be executed a maximum
+delta along the chosen Cartesian action direction, we have found this metric more informative than
+others, e.g., mean squared error. For the navigation domain, we use a human-labeled dataset from
+navigation logs and compute the normalized L2 distance between the selected action and the point
+of interest in camera frame as our metric. More information on each offline dataset can be found in
+Appendix D and B.
+8PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Text prompts. To understand the effect of different text prompts, we experiment with several
+design choices, with numbers reported in Appendix D. We investigate the role of zero-shot, few-shot,
+chain of thought, and direct prompting; we find that zero-shot chain of thought performs the best,
+though few-shot direct prompting is close and more token efficient. We also experiment over the
+ordering of the image, preamble, and task; finding that preamble, followed by image, followed by
+task performs best, though by a small margin.
+Visual prompts. Aspects of the style of
+visual prompts has been examined in prior
+works [59, 46], such as the color, size, shad-
+ing, and shape. Herein, we investigate aspects
+central to PIVOT– the number of samples and
+the importance of the visual prompt itself. An
+ablation over the number of samples is shown
+in Figure 7 where we note an interesting trend:
+moresamplesleadstobetterinitialanswers,but
+worse optimization. Intuitively, a large number
+ofsamplessupportsgoodcoveragefortheinitial
+answer, but with too many samples the region
+(a) (b)
+of the image around the correct answer gets
+crowded and causes significant issues with oc- Figure6 | Offlineevaluationresultsfornavigationtask
+clusions. For our tasks, we found 10 samples to with L2 distance (lower is better). Ablation over (6a)
+iterationsandparallelcallsand(6b)text-onlybaseline.
+best trade off between distributional coverage
+and maintaining sufficient visual clarity.
+To understand the necessity of the visual prompt itself, we compare to a language only baseline,
+whereaVLMselectsfromasubsetoflanguageactionsthatmaptoroboticactions. Forthemanipulation
+task, the VLM is given an image and task and selects from move “right”, “‘left”, “up”, and “down”. A
+similarnavigationbenchmarkisdescribedinAppendixB.WeseeinFigure7andFigure6thatPIVOT
+outperforms text by a large margin. We note here that we do not compare to learned approaches
+that require training or finetuning as our focus is on zero-shot understanding. We believe many such
+approaches would perform well in distribution on these tasks, but would have limited generalization
+on out of distribution tasks.
+Manipulation
+Average 2D Average 2D
+0.5 Cosine Similarity Cosine Similarity
+0.5
+0.4 1.0 1.0
+0.4
+0.3 0.5 0.5
+0.3
+0.2 0.0 0.0
+5 samples 0.2
+0.1 10 samples 0.5 0.5 0.1
+20 samples
+0.0 0.0 1.0 1.0
+Iter 1 Iter 2 Text PIVOT 0 1 2 w/ parallel w/o parallel
+Steps prompting Optimization Iterations
+(a)Numberofsamples (b)Text-onlybaseline (c)Iterations (d)Parallelcalls
+Figure 7 | Offlineevaluationresultsformanipulationtaskswithcosinesimilarity(higherisbetter).
+Iterative optimization. To understand the effect of the iterative optimization process, we ablate
+over the number of iterations and parallel calls. In Figures 5, 6, and 7, we find that increasing
+iterations improves performance, increasing parallel calls improves performance, and crucially doing
+9
+ytiralimiS
+enisoC
+D2
+ytiralimiS
+enisoC
+D2
+ytiralimiS
+enisoC
+D2
+ytiralimiS
+enisoC
+D2PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+both together performs the best. This echos the findings in the online evaluations above.
+4.5. Scaling
+WeobservethatPIVOTscalesacrossvaryingsizesofVLMsonthemobilemanipulatorofflineevaluation
+(results measured in terms of cosine similarity and L2 error between PIVOT and demonstration data
+ground truth in Figure 8). In particular, we compare PIVOT using four sizes of the Gemini family of
+models [17] which we labeled a to d, with progressively more parameters. We find that performance
+increases monotonically across each model size. Although there are still significant limitations and
+capabilities gaps, we see this scaling as a promising sign that PIVOT can leverage next-generation
+foundation models with increasing model size and capabilities [17].
+0.6 0.6
+0.5 0.5
+0.4 0.4
+0.3 0.3
+0.2 0.2
+0.1 0.1
+a b c d a b c d
+Gemini model size Gemini model size
+Figure 8 | ScalingresultsoffirstiterationvisualpromptingperformanceacrossGeminimodel[17]sizesshow
+thatPIVOTscaleswellwithimprovedVLMs. Leftandcenterplotsaremanipulation(pickupobjects,moveone
+objectnexttoanother),rightplotisnavigation.
+4.6. Limitations
+In this work, we evaluate PIVOT using state-of-the-art VLMs and their zero-shot capabilities. We note
+thatthebasemodelshavenotbeentrainedonin-domaindataforroboticcontrolorphysicalreasoning
+represented by visual annotation distributions. While the exact failure modes may be specific to
+particular underlying VLMs, we continue to observe trends which may reflect broad limitation areas.
+We expect that future VLMs with improved generalist visual reasoning capabilities will likewise
+improve in their visual annotation and robotics reasoning capabilities, and the general limitations of
+PIVOT on current state-of-the-art VLMs may serve to highlight potential risks and capabilities gaps,
+that point to interesting open areas for future work.
+3D understanding. While VLMs only take 2D images as visual inputs, in principle the image
+annotations and transformations applied via PIVOT can represent 3D queries as well. Although
+we examined expressing depth values as part of the annotations using colors and label sizes (and
+described what they map to within a preamble prompt), we have observed that none of the VLMs we
+tested are capable of reliably choosing actions based on depth. Beyond this, generalizing to higher
+dimensional spaces such as rotation poses even additional challenges. We believe more complex
+visuals (e.g. with shading to give the illusion of depth) may address some of these challenges, but
+ultimately, the lackof3D trainingdata inthe underlyingVLMremains thebottleneck. It islikely that
+training on either robot specific data or with depth images may alleviate these challenges.
+Interaction and fine-grained control. During closed-loop visuomotor tasks (e.g., for first-person
+navigation tasks, or manipulation task with hand-mounted cameras), images can often be character-
+ized by increasing amounts of occlusion, where the objects of interest can become no longer visible
+if the cameras are too close. This affects PIVOT and the VLM’s capacity for decision-making e.g.,
+determining when to grasp, whether to lift an object, or approaching an object from the correct side
+to push. This is visualized in Figure 9, where errors over the trajectory are shown. These errors are a
+10
+ytiralimiS
+enisoC
+D2
+retteb
+si
+ytiralimiS
+enisoC
+D2
+retteb
+siPIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+result of both occlusions, resolution of the image, but perhaps more crucially, a lack of training data
+from similar interactions. In this case, training on embodied or video data may be a remedy.
+Average 2D Cosine Similarity
+1.0
+0.5
+0.0
+0.5
+1.0
+(a)Easyscenario (b)Hardscenario
+Episode progress
+Figure 9 | PIVOTperformanceover“movenear”trajectories,whichpickupanobjectandmovethemnear
+another. Initiallyperformanceishigh,butdecreasesastherobotapproachesthegraspandlift(duetoobjects
+beingobscuredandtheVLMnotunderstandingthesubtletyofgrasping). Afterthegrasp,theperformance
+increasesasitmovestotheotherobject,butagaindecreasesasitapproaches.
+Greedy behavior. Though we find iterative optimization alleviates many simple errors, we also
+find that the underlying VLM often displays greedy, myopic behaviors for multi-step decision-making
+tasks. For instance, given the task “move the apple to the banana”, the VLM may recommend
+immediately approaching the banana rather than the apple first. We believe these mistakes may
+lessen with more capable VLMs, or with more in-domain examples provided either via fine-tuning or
+via few-shot prompting with e.g., a history of actions as input context to the VLM to guide future
+generated acitons.
+Vision-language connection reasoning errors. We find that though overall the thought process
+of the VLM is reasonable, it stochastically connects the thought process to the incorrect arrow. This
+issue appears to be a challenge of autoregressive decoding, once the number is decoded, the VLM
+must justify it, even if incorrect, and thus hallucinates an otherwise reasonable thought process.
+ManyoftheseerrorsareremediedthroughtheoptimizationprocessofPIVOT,butwebelievefurther
+improvements could be made with tools from robust optimization.
+5. Conclusion
+PIVOTpresentsapromisingsteptowardsleveragingVLMsforspatialreasoningzero-shot,andsuggests
+new opportunities to cast traditionally challenging problems (e.g., low-level robotic control) as vision
+ones. PIVOT can be used for tasks such as controlling a robot arm that require outputting spatially
+grounded continuous values with a VLM zero shot. This is made possible by representing spatial
+conceptsintheimagespaceandtheniterativelyrefiningthosebypromptingaVLM.Builtoniterative
+optimization, PIVOT stands to benefit from other sampling initialization procedures, optimization
+algorithms, or search-based strategies. Furthermore, we have identified several limitations of current
+state-of-the-art models that limits performance herein (e.g., 3D understanding and interaction).
+Therefore, adding datasets representing these areas presents an interesting avenue for future work;
+alongwithdirectlyfinetuningtaskspecificdata. Moreimportantly,though,weexpectthecapabilities
+of VLMs to improve over time, hence the zero-shot performance of PIVOT is likely to improve as
+well, as we have investigated in our scaling experiments. We believe that this work can be seen as
+an attempt to unify internet-scale general vision-language tasks with physical problems in the real
+world by representing them in the same input space. While the majority of our experiments focus
+on robotics, the algorithm can generally be applied to problems that require outputting continuous
+values with a VLM.
+11
+ytiralimiS
+enisoC
+D2PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Acknowledgements
+We thank Kanishka Rao, Jie Tan, Carolina Parada, James Harrison, Nik Stewart, and Jonathan
+Tompson for helpful discussions and providing feedback on the paper.
+References
+[1] Ahn,M.,Brohan,A.,Brown,N.,Chebotar,Y.,Cortes,O.,David,B.,Finn,C.,Fu,C.,Gopalakrishnan,K.,Hausman,K.,
+etal. Doasican,notasisay:Groundinglanguageinroboticaffordances. arXivpreprintarXiv:2204.01691,2022.
+[2] Alayrac,J.-B.,Donahue,J.,Luc,P.,Miech,A.,Barr,I.,Hasson,Y.,Lenc,K.,Mensch,A.,Millican,K.,Reynolds,M.,
+etal. Flamingo:avisuallanguagemodelforfew-shotlearning. AdvancesinNeuralInformationProcessingSystems,
+35:23716–23736,2022.
+[3] Austin,J.,Odena,A.,Nye,M.,Bosma,M.,Michalewski,H.,Dohan,D.,Jiang,E.,Cai,C.,Terry,M.,Le,Q.,etal.
+Programsynthesiswithlargelanguagemodels. arXivpreprintarXiv:2108.07732,2021.
+[4] Brohan,A.,Brown,N.,Carbajal,J.,Chebotar,Y.,Chen,X.,Choromanski,K.,Ding,T.,Driess,D.,Dubey,A.,Finn,C.,
+etal.Rt-2:Vision-language-actionmodelstransferwebknowledgetoroboticcontrol.arXivpreprintarXiv:2307.15818,
+2023.
+[5] Brown,T.,Mann,B.,Ryder,N.,Subbiah,M.,Kaplan,J.D.,Dhariwal,P.,Neelakantan,A.,Shyam,P.,Sastry,G.,Askell,
+A.,etal. Languagemodelsarefew-shotlearners. Advancesinneuralinformationprocessingsystems,33:1877–1901,
+2020.
+[6] Cai,M.,Liu,H.,Mustikovela,S.K.,Meyer,G.P.,Chai,Y.,Park,D.,andLee,Y.J. Makinglargemultimodalmodels
+understandarbitraryvisualprompts. arXivpreprintarXiv:2312.00784,2023.
+[7] Chen,B.,Xia,F.,Ichter,B.,Rao,K.,Gopalakrishnan,K.,Ryoo,M.S.,Stone,A.,andKappler,D. Open-vocabulary
+queryablescenerepresentationsforrealworldplanning. In2023IEEEInternationalConferenceonRoboticsand
+Automation(ICRA),pp.11509–11522.IEEE,2023.
+[8] Chen, B., Xu, Z., Kirmani, S., Ichter, B., Driess, D., Florence, P., Sadigh, D., Guibas, L., and Xia, F. Spatialvlm:
+Endowingvision-languagemodelswithspatialreasoningcapabilities. arXivpreprintarXiv:2401.12168,2024.
+[9] Chen,X.,Djolonga,J.,Padlewski,P.,Mustafa,B.,Changpinyo,S.,Wu,J.,Ruiz,C.R.,Goodman,S.,Wang,X.,Tay,Y.,
+etal. Pali-x:Onscalingupamultilingualvisionandlanguagemodel. arXivpreprintarXiv:2305.18565,2023.
+[10] Cui, Y., Niekum, S., Gupta, A., Kumar, V., and Rajeswaran, A. Can foundation models perform zero-shot task
+specificationforrobotmanipulation? InLearningforDynamicsandControlConference,pp.893–905.PMLR,2022.
+[11] DeBoer,P.-T.,Kroese,D.P.,Mannor,S.,andRubinstein,R.Y. Atutorialonthecross-entropymethod. Annalsof
+operationsresearch,134:19–67,2005.
+[12] Dorbala,V.S.,Sigurdsson,G.,Piramuthu,R.,Thomason,J.,andSukhatme,G.S. Clip-nav:Usingclipforzero-shot
+vision-and-languagenavigation. arXivpreprintarXiv:2211.16649,2022.
+[13] Firoozi, R., Tucker, J., Tian, S., Majumdar, A., Sun, J., Liu, W., Zhu, Y., Song, S., Kapoor, A., Hausman, K., etal.
+Foundationmodelsinrobotics:Applications,challenges,andthefuture. arXivpreprintarXiv:2312.07843,2023.
+[14] Gadre, S.Y., Wortsman, M., Ilharco, G., Schmidt, L., andSong, S. Cowsonpasture: Baselinesandbenchmarks
+forlanguage-drivenzero-shotobjectnavigation. InProceedingsoftheIEEE/CVFConferenceonComputerVisionand
+PatternRecognition,pp.23171–23181,2023.
+[15] Gao,J.,Sarkar,B.,Xia,F.,Xiao,T.,Wu,J.,Ichter,B.,Majumdar,A.,andSadigh,D.Physicallygroundedvision-language
+modelsforroboticmanipulation. arXivpreprintarXiv:2309.02561,2023.
+[16] Gemini,T.,Anil,R.,Borgeaud,S.,Wu,Y.,Alayrac,J.-B.,Yu,J.,Soricut,R.,Schalkwyk,J.,Dai,A.M.,Hauth,A.,etal.
+Gemini:afamilyofhighlycapablemultimodalmodels. arXivpreprintarXiv:2312.11805,2023.
+[17] GeminiTeam,G. Gemini: Afamilyofhighlycapablemultimodalmodels. Technicalreport,Google,2023. URL
+https://storage.googleapis.com/deepmind-media/gemini/gemini_1_report.pdf.
+12PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+[18] Gu,J.,Kirmani,S.,Wohlhart,P.,Lu,Y.,Arenas,M.G.,Rao,K.,Yu,W.,Fu,C.,Gopalakrishnan,K.,Xu,Z.,etal.
+Rt-trajectory:Robotictaskgeneralizationviahindsighttrajectorysketches. arXivpreprintarXiv:2311.01977,2023.
+[19] Hu, Y., Xie, Q., Jain, V., Francis, J., Patrikar, J., Keetha, N., Kim, S., Xie, Y., Zhang, T., Zhao, Z., et al. Toward
+general-purposerobotsviafoundationmodels:Asurveyandmeta-analysis. arXivpreprintarXiv:2312.08782,2023.
+[20] Huang,C.,Mees,O.,Zeng,A.,andBurgard,W.Visuallanguagemapsforrobotnavigation.In2023IEEEInternational
+ConferenceonRoboticsandAutomation(ICRA),pp.10608–10615.IEEE,2023.
+[21] Huang,W.,Abbeel,P.,Pathak,D.,andMordatch,I. Languagemodelsaszero-shotplanners:Extractingactionable
+knowledgeforembodiedagents. InInternationalConferenceonMachineLearning,pp.9118–9147.PMLR,2022.
+[22] Huang,W.,Xia,F.,Xiao,T.,Chan,H.,Liang,J.,Florence,P.,Zeng,A.,Tompson,J.,Mordatch,I.,Chebotar,Y.,etal.
+Innermonologue:Embodiedreasoningthroughplanningwithlanguagemodels. arXivpreprintarXiv:2207.05608,
+2022.
+[23] Huang,W.,Wang,C.,Zhang,R.,Li,Y.,Wu,J.,andFei-Fei,L. Voxposer: Composable3dvaluemapsforrobotic
+manipulationwithlanguagemodels. arXivpreprintarXiv:2307.05973,2023.
+[24] Itseez. Opensourcecomputervisionlibrary. https://github.com/itseez/opencv,2015.
+[25] Jiang,Y.,Gupta,A.,Zhang,Z.,Wang,G.,Dou,Y.,Chen,Y.,Fei-Fei,L.,Anandkumar,A.,Zhu,Y.,andFan,L. Vima:
+Generalrobotmanipulationwithmultimodalprompts. arXiv,2022.
+[26] Koh,J.Y.,Lo,R.,Jang,L.,Duvvur,V.,Lim,M.C.,Huang,P.-Y.,Neubig,G.,Zhou,S.,Salakhutdinov,R.,andFried,D.
+Visualwebarena:Evaluatingmultimodalagentsonrealisticvisualwebtasks. arXivpreprintarXiv:2401.13649,2024.
+[27] Kojima,T.,Gu,S.S.,Reid,M.,Matsuo,Y.,andIwasawa,Y. Largelanguagemodelsarezero-shotreasoners. Advances
+inneuralinformationprocessingsystems,35:22199–22213,2022.
+[28] Lester,B.,Al-Rfou,R.,andConstant,N. Thepowerofscaleforparameter-efficientprompttuning. arXivpreprint
+arXiv:2104.08691,2021.
+[29] Li,X.L.andLiang,P. Prefix-tuning:Optimizingcontinuouspromptsforgeneration. arXivpreprintarXiv:2101.00190,
+2021.
+[30] Liang,J.,Huang,W.,Xia,F.,Xu,P.,Hausman,K.,Ichter,B.,Florence,P.,andZeng,A. Codeaspolicies:Language
+modelprogramsforembodiedcontrol. In2023IEEEInternationalConferenceonRoboticsandAutomation(ICRA),pp.
+9493–9500.IEEE,2023.
+[31] Lin,K.,Agia,C.,Migimatsu,T.,Pavone,M.,andBohg,J. Text2motion:Fromnaturallanguageinstructionstofeasible
+plans. arXivpreprintarXiv:2303.12153,2023.
+[32] Liu,B.,Jiang,Y.,Zhang,X.,Liu,Q.,Zhang,S.,Biswas,J.,andStone,P. Llm+p:Empoweringlargelanguagemodels
+withoptimalplanningproficiency. arXivpreprintarXiv:2304.11477,2023.
+[33] Liu,D.,Dong,X.,Zhang,R.,Luo,X.,Gao,P.,Huang,X.,Gong,Y.,andWang,Z. 3daxiesprompts:Unleashingthe3d
+spatialtaskcapabilitiesofgpt-4v. arXivpreprintarXiv:2312.09738,2023.
+[34] Liu,Z.,Bahety,A.,andSong,S. Reflect:Summarizingrobotexperiencesforfailureexplanationandcorrection. arXiv
+preprintarXiv:2306.15724,2023.
+[35] Ma,Y.J.,Liang,W.,Wang,G.,Huang,D.-A.,Bastani,O.,Jayaraman,D.,Zhu,Y.,Fan,L.,andAnandkumar,A. Eureka:
+Human-levelrewarddesignviacodinglargelanguagemodels. arXivpreprintarXiv:2310.12931,2023.
+[36] Mirchandani,S.,Xia,F.,Florence,P.,Ichter,B.,Driess,D.,Arenas,M.G.,Rao,K.,Sadigh,D.,andZeng,A. Large
+languagemodelsasgeneralpatternmachines. arXivpreprintarXiv:2307.04721,2023.
+[37] OpenAI. Gpt-4v(ision) system card. Technical report, OpenAI, 2023. URL https://openai.com/research/
+gpt-4v-system-card.
+[38] Padalkar,A.,Pooley,A.,Jain,A.,Bewley,A.,Herzog,A.,Irpan,A.,Khazatsky,A.,Rai,A.,Singh,A.,Brohan,A.,etal.
+Openx-embodiment:Roboticlearningdatasetsandrt-xmodels. arXivpreprintarXiv:2310.08864,2023.
+[39] Pryzant,R.,Iter,D.,Li,J.,Lee,Y.T.,Zhu,C.,andZeng,M. Automaticpromptoptimizationwith"gradientdescent"
+andbeamsearch. arXivpreprintarXiv:2305.03495,2023.
+13PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+[40] Radford,A.,Kim,J.W.,Hallacy,C.,Ramesh,A.,Goh,G.,Agarwal,S.,Sastry,G.,Askell,A.,Mishkin,P.,Clark,J.,
+etal. Learningtransferablevisualmodelsfromnaturallanguagesupervision. InInternationalconferenceonmachine
+learning,pp.8748–8763.PMLR,2021.
+[41] Raman,S.S.,Cohen,V.,Rosen,E.,Idrees,I.,Paulius,D.,andTellex,S. Planningwithlargelanguagemodelsvia
+correctivere-prompting. InNeurIPS2022FoundationModelsforDecisionMakingWorkshop,2022.
+[42] Reed,S.,Zolna,K.,Parisotto,E.,Colmenarejo,S.G.,Novikov,A.,Barth-Maron,G.,Gimenez,M.,Sulsky,Y.,Kay,J.,
+Springenberg,J.T.,etal. Ageneralistagent. arXivpreprintarXiv:2205.06175,2022.
+[43] Shah,D.,Equi,M.R.,Osiński,B.,Xia,F.,Ichter,B.,andLevine,S. Navigationwithlargelanguagemodels:Semantic
+guessworkasaheuristicforplanning. InConferenceonRobotLearning,pp.2683–2699.PMLR,2023.
+[44] Shah,D.,Osiński,B.,Levine,S.,etal. Lm-nav:Roboticnavigationwithlargepre-trainedmodelsoflanguage,vision,
+andaction. InConferenceonRobotLearning,pp.492–504.PMLR,2023.
+[45] Shridhar,M.,Manuelli,L.,andFox,D. Cliport:Whatandwherepathwaysforroboticmanipulation. InConferenceon
+RobotLearning,pp.894–906.PMLR,2022.
+[46] Shtedritski,A.,Rupprecht,C.,andVedaldi,A. Whatdoesclipknowaboutaredcircle?visualpromptengineeringfor
+vlms. arXivpreprintarXiv:2304.06712,2023.
+[47] Silver,T.,Dan,S.,Srinivas,K.,Tenenbaum,J.B.,Kaelbling,L.P.,andKatz,M. Generalizedplanninginpddldomains
+withpretrainedlargelanguagemodels. arXivpreprintarXiv:2305.11014,2023.
+[48] Singh,I.,Blukis,V.,Mousavian,A.,Goyal,A.,Xu,D.,Tremblay,J.,Fox,D.,Thomason,J.,andGarg,A. Progprompt:
+Generatingsituatedrobottaskplansusinglargelanguagemodels. In2023IEEEInternationalConferenceonRobotics
+andAutomation(ICRA),pp.11523–11530.IEEE,2023.
+[49] Wang,G.,Xie,Y.,Jiang,Y.,Mandlekar,A.,Xiao,C.,Zhu,Y.,Fan,L.,andAnandkumar,A. Voyager:Anopen-ended
+embodiedagentwithlargelanguagemodels. arXivpreprintarXiv:2305.16291,2023.
+[50] Wang,Y.-J.,Zhang,B.,Chen,J.,andSreenath,K. Promptarobottowalkwithlargelanguagemodels. arXivpreprint
+arXiv:2309.09969,2023.
+[51] Wang,Z.,Cai,S.,Liu,A.,Ma,X.,andLiang,Y. Describe,explain,planandselect:Interactiveplanningwithlarge
+languagemodelsenablesopen-worldmulti-taskagents. arXivpreprintarXiv:2302.01560,2023.
+[52] Wei,J.,Wang,X.,Schuurmans,D.,Bosma,M.,Xia,F.,Chi,E.,Le,Q.V.,Zhou,D.,etal. Chain-of-thoughtprompting
+elicitsreasoninginlargelanguagemodels. AdvancesinNeuralInformationProcessingSystems,35:24824–24837,
+2022.
+[53] Wen,L.,Yang,X.,Fu,D.,Wang,X.,Cai,P.,Li,X.,Ma,T.,Li,Y.,Xu,L.,Shang,D.,etal. Ontheroadwithgpt-4v
+(ision):Earlyexplorationsofvisual-languagemodelonautonomousdriving. arXivpreprintarXiv:2311.05332,2023.
+[54] Wu,J.,Antonova,R.,Kan,A.,Lepert,M.,Zeng,A.,Song,S.,Bohg,J.,Rusinkiewicz,S.,andFunkhouser,T. Tidybot:
+Personalizedrobotassistancewithlargelanguagemodels. arXivpreprintarXiv:2305.05658,2023.
+[55] Xu,H.,Chen,Y.,Du,Y.,Shao,N.,Wang,Y.,Li,H.,andYang,Z. Gps:Geneticpromptsearchforefficientfew-shot
+learning. arXivpreprintarXiv:2210.17041,2022.
+[56] Xu,J.,Zhou,X.,Yan,S.,Gu,X.,Arnab,A.,Sun,C.,Wang,X.,andSchmid,C. Pixelalignedlanguagemodels. arXiv
+preprintarXiv:2312.09237,2023.
+[57] Yan,A.,Yang,Z.,Zhu,W.,Lin,K.,Li,L.,Wang,J.,Yang,J.,Zhong,Y.,McAuley,J.,Gao,J.,etal.Gpt-4vinwonderland:
+Largemultimodalmodelsforzero-shotsmartphoneguinavigation. arXivpreprintarXiv:2311.07562,2023.
+[58] Yang,C.,Wang,X.,Lu,Y.,Liu,H.,Le,Q.V.,Zhou,D.,andChen,X. Largelanguagemodelsasoptimizers. arXiv
+preprintarXiv:2309.03409,2023.
+[59] Yang,J.,Zhang,H.,Li,F.,Zou,X.,Li,C.,andGao,J.Set-of-markpromptingunleashesextraordinaryvisualgrounding
+ingpt-4v. arXivpreprintarXiv:2310.11441,2023.
+[60] Yang,Z.,Li,L.,Lin,K.,Wang,J.,Lin,C.-C.,Liu,Z.,andWang,L. Thedawnoflmms:Preliminaryexplorationswith
+gpt-4v(ision). arXivpreprintarXiv:2309.17421,9(1):1,2023.
+14PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+[61] Yu,L.,Poirson,P.,Yang,S.,Berg,A.C.,andBerg,T.L. Modelingcontextinreferringexpressions. InComputer
+Vision–ECCV2016:14thEuropeanConference,Amsterdam,TheNetherlands,October11-14,2016,Proceedings,PartII
+14,pp.69–85.Springer,2016.
+[62] Yu,W.,Gileadi,N.,Fu,C.,Kirmani,S.,Lee,K.-H.,Arenas,M.G.,Chiang,H.-T.L.,Erez,T.,Hasenclever,L.,Humplik,
+J.,etal. Languagetorewardsforroboticskillsynthesis. arXivpreprintarXiv:2306.08647,2023.
+[63] Zeng,A.,Florence,P.,Tompson,J.,Welker,S.,Chien,J.,Attarian,M.,Armstrong,T.,Krasin,I.,Duong,D.,Sindhwani,
+V., et al. Transporter networks: Rearranging the visual world for robotic manipulation. In Conference on Robot
+Learning,pp.726–747.PMLR,2021.
+[64] Zeng,A.,Attarian,M.,Ichter,B.,Choromanski,K.,Wong,A.,Welker,S.,Tombari,F.,Purohit,A.,Ryoo,M.,Sindhwani,
+V.,etal.Socraticmodels:Composingzero-shotmultimodalreasoningwithlanguage.arXivpreprintarXiv:2204.00598,
+2022.
+[65] Zheng,B.,Gou,B.,Kil,J.,Sun,H.,andSu,Y. Gpt-4v(ision)isageneralistwebagent,ifgrounded. arXivpreprint
+arXiv:2401.01614,2024.
+[66] Zhou,Y.,Muresanu,A.I.,Han,Z.,Paster,K.,Pitis,S.,Chan,H.,andBa,J. Largelanguagemodelsarehuman-level
+promptengineers. arXivpreprintarXiv:2211.01910,2022.
+15PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Appendix
+A. Robotic Embodiments
+Mobile Manipulator Navigation. Shown in Figure 3 (a), we use a mobile manipulator platform
+for navigation tasks. We use the image from a fixed head camera and annotate the image with
+arrows originating from the bottom center of the image to represent the 2D action space. After
+PIVOT identifies the candidate action in the pixel space, we then use the on-board depth camera
+from the robot to map it to a 3D target location and command the robot to move toward the target
+(with a maximum distance of 1.0m). We evaluate PIVOT on both a real robot and on an offline
+dataset. For real robot evaluation, we designed four scenarios where the robot is expected to reach a
+target location specified either through an object of interest (e.g. find apple) or through an indirect
+instruction(e.g.findaplacetotakeanap). Forofflineevaluation,wecreatedadatasetof60examples
+from prior robot navigation data with labeled ground truth targets. More details on the task and
+dataset can be found in Appendix Section B.
+Mobile Manipulator Manipulation. Shown in Figure 3 (b), we use a mobile manipulator
+platformformanipulationtasks. Weusetheimagefromafixedheadcameraandannotatetheimage
+with arrows originating from the end-effector in camera frame, for which each arrow represents
+a 3D relative Cartesian end-effector position (𝑥,𝑦,𝑧). To handle the z-dimension height, we study
+two settings: one where height is represented through color grading (a red to blue spectrum) and
+one where the arm only uses fixed-height actions. Gripper closing actions are not shown as visual
+annotations but instead expressed through text prompts. Note that although the end-effector has
+rotational degrees of freedoms, we fix these due to the difficulty of expressing them with visual
+prompting,asisdiscussedinSection4.6. WeevaluatePIVOTonbothrealrobotandanofflinedataset.
+For real robot evaluation, we study three tabletop manipulation tasks which require combining
+semanticandmotionreasoning. Successcriteriaconsistsofbinaryobjectreachingsuccess,numberof
+steps taken for successful reaching trajectories, and grasping success when applicable. For offline
+evaluation, we use demonstration data from the RT-X mobile manipulator dataset [38]. We sample
+10 episodes of pick demonstrations for most of our offline evaluations, and 30 episodes of move near
+demonstrations for our interaction Figure 9. More details on the results can be found in Appendix
+Section D.
+Franka. Shown in Figure 3 (c) we use the Franka for manipulation. We use the image from a
+wristmountedcameraandannotatetheimagewitharrowsoriginatingfromthecenterofthecamera
+frame, for which each arrow represents a 3D relative Cartesian end-effector position (𝑥,𝑦,𝑧, where
+the 𝑧 dimension is captured with a color spectrum from red to blue). We examine both pick tasks
+and place tasks, with 5 objects for each task. More details on the results can be found in Appendix
+Section F.
+RAVENS [63]. Show in Figure 3 (d), we use the RAVENS simulation domain for pick and place
+manipulation. We use the image from an overhead camera and annotate the image with pick and
+place locations, following the action representation in Zeng et al. [63]. This action space allows us to
+evaluate higher-level action representations. More details on the results can be found in Appendix
+Section E.
+16PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+B. Mobile Manipulator Navigation Offline Evaluation
+B.1. Dataset
+We create an offline dataset of 60 examples using images collected from the on-robot camera sensor
+by walking the robot in an indoor environment. For each example, we provide an instruction and
+a associated location in the image space as the target. We categorize our tasks into three types: 1)
+in-view finding, where the robot is tasked to approach an object within the line of sight, 2) semantic
+understanding, where the instruction implicitly refers to an object in view 3) out-of-view finding,
+where the object of interest is not visible from the current view with arrow annotations, but can be
+seen in past images from different locations. Figure 10 shows examples of the three task categories.
+Figure 10 | Exampletasksintheofflinenavigationdatasetfromdifferenttaskcategories. Reddotdenotesthe
+groundtruthtarget.
+B.2. Evaluation Results
+Table 3 shows the detailed evaluation results of PIVOT on the offline navigation dataset. We measure
+the accuracy of the PIVOT output by its deviation from the target point in image space normalized
+by the image width and break it down into the three task categories. We report mean and standard
+deviation for three runs over the entire dataset.
+17PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+As seen in the table, by using the parallel call to robustify the VLM output we see significant
+improvements over running VLM only once (0 parallel) and running PIVOT for multiple iterations
+also improves accuracy of the task. However, increasing the parallel calls or the iteration number
+further did not achieve notably better performance.
+Table 3 | NavigationofflineevaluationmeasuredinL2loss(lowerthebetter).
+In-ViewTasks
+1iter 2iter 3iter
+0parallel 0.21±0.002 0.21±0.007 0.19±0.007
+2parallel 0.19±0.004 0.2±0.012 0.18±0.005
+3parallel 0.19±0.003 0.17±0.007 0.17±0.009
+SemanticTasks
+1iter 2iter 3iter
+0parallel 0.23±0.012 0.2±0.006 0.19±0.025
+2parallel 0.26±0.015 0.21±0.02 0.2±0.02
+3parallel 0.21±0.01 0.19±0.04 0.19±0.01
+Out-of-ViewTasks
+1iter 2iter 3iter
+0parallel 0.44±0.04 0.38±0.015 0.39±0.032
+2parallel 0.38±0.001 0.39±0.02 0.39±0.02
+3parallel 0.37±0.01 0.38±0.026 0.39±0.05
+We compared our proposed approach, which reasons in image-space with image annotations,
+with reasoning in text without annotated images. In this text-based baseline, we provide the same
+image and navigation query to the VLM, but we ask the VLM to imagine that the image is split into 3
+rows and 3 columns of equal-sized regions and output the name of one of those regions (e.g. “top
+left", "bottom middle"). We then compute the distance between the center of the selected region to
+the ground truth target point. Given that we are not performing iterative optimization with this text
+baseline, we compare its results against PIVOT with just 1 iteration and 0 parallel. See results in
+Table 4. For GPT-4V, the text baseline incurs higher mean and standard deviation of errors across all
+tasks.
+Table 4 | ReasoningwithImageAnnotationsvs. withTextforNavigationofflineevaluationsmeasuredinL2
+loss(lowerthebetter).
+Method In-View Semantic Out-of-View
+Image 0.21±0.002 0.23±0.012 0.44±0.04
+Text 0.26±0.15 0.35±0.14 0.46±0.31
+C. Mobile Manipulator Manipulation Online Evaluation
+In addition to the quantitative evaluation trials for the real-world manipulation experts described in
+Section 4.2, we also showcase additional evaluation rollouts in Figure 11. Qualitatively, we find that
+PIVOT is able to recover from inaccuracies in action prediction, such as those which may result from
+imperfect depth perception or action precision challenges.
+18PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+D. Mobile Manipulator Manipulation Offline Evaluation
+Using the offline mobile manipulator dataset described in Section A, we additionally ablate the
+text prompt herein. In Figure 13 we consider the performance of zero-shot and few-shot prompting
+as well as chain of thought [52] and direct prompting. We find in general that neither is a panacea,
+thoughzero-shotchainofthoughtperformsbest,few-shotdirectpromptingperformssimilarlyandis
+significantly more token efficient. In Figure 14 we consider the effect that the order of the prompt
+has on performance. The distinct elements of the prompt are the preamble (which describes the high
+level goal), the task (which describes the specific task the robot is attempting to perform), and the
+image. Examples of these prompts can be seen in Appendix Section H. We find a small amount of
+variation in performance between orders, with preamble, image, and task resulting in the highest
+performance. We hypothesize that this order most closely mirrors the training mixture.
+To illustate the limitation of our method decribed in Fig. 9 better, we visualize two episodes of
+the mobile manipulator manipulation offline eval in Fig. 12. The figure shows that at the beginning
+of the episode where it is clear where to move, our method tend to generate accurate predictions
+while in the middle of the episode where there are interactions, our method struggles to generate
+correct actions.
+19PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Figure 12 | Twoepisodesofmobilemanipulatormanipulationofflineevaluation. Itshowsourmethodcan
+generatereasonableactionsfollowingthearrowannotations.
+Average 2D Cosine Similarity Average Response Length
+0.42 0.48 0.47 0.38
+1.0
+2000
+0.8
+0.6 1500
+0.4 1048.83
+1000
+0.2
+500 368.27
+0.0
+15.31 11.85
+0.2 0
+Z ero-s h ot
+Dire ct
+Z ero-s h
+ot
+C o T
+F e w-s h ot
+Dire ct
+F e w-s h
+ot
+C o T
+Z ero-s h ot
+Dire ct
+Z ero-s h
+ot
+C o T
+F e w-s h ot
+Dire ct
+F e w-s h
+ot
+C o T
+Figure 13 | Ablationoffew-shotvs.zero-shotandCoTvs. directperformanceonmanipulationdomain. The
+bestperformingcombinationiszero-shotCoT.However,directmodelscanachievesimilarperformancewith
+muchfeweroutputtokensthusmoretokenefficient.
+E. RAVENS Online Simulation Evaluation
+We create a suite of evaluation tasks in which the robot must pick a specified fruit and place it in a
+specified bowl. There are three fruits in the scene (banana, strawberry, pear) and three bowls with
+different colors (blue, green, yellow). Each task takes the form "pick the {fruit} and place it in the
+{color}bowl."Giventhetaskgoal,weparsethesourceobjectandthetargetobject,andindependently
+prompt the VLM to get the pick and place locations corresponding to these two objects respectively.
+Refer to Appendix H for the prompt we use. In Figure 15 we report evaluation over five random
+instances. Here we specifically report the error with respect to ground truth pick and place locations
+over each iteration of visual prompting. We see that the error generally decreases in the first few
+iterations and eventually converges. In most settings the chosen pick and place locations are close
+to the desired objects, yet the VLM lacks the often ability to precisely choose points that allow it to
+execute the task successfully in one action.
+20
+ytiralimiS
+enisoC
+D2
+)sretcarahc(
+htgneL
+esnopseRPIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+F. Franka Online Evaluation
+We evaluate PIVOT in a real world manipulation setting using a Franka robot arm with a wrist-
+mounted camera and a 4D relative Cartesian delta action space. We study 7 tabletop manipulation
+tasksinvolvinggraspingandplacingvariousobjects,andanalyzethreeversionofPIVOTwithvarying
+numbers of optimization iterations and number of parallel PIVOT processes. Each task is evaluated
+for two trials, for which we record intermediate reaching success rates for reaching the correct XY
+and YZ proximities for the target object (where in the camera frame the 𝑥-axis is into and out of the
+page, the 𝑦-axis is left and right, and the 𝑧 axis is up and down), as well as the overall number of
+timesteps taken for successful trials. As shown in Table 5, we find that all instantiations of PIVOT are
+able to achieve non-zero success, but increasing the number of optimization iterations and number of
+parallel processes increases performance and stability. Rollouts are shown in Figure 16.
+Table 5 | Manipulationresultsonthereal-worldFrankasettingshowninFigure3(c),where“XY”and“YZ”
+indicatesuccessratesforreachingtherelevantobjectXYandYZproximitiesrespectivelyand“Steps”indicates
+the number of steps taken if successful finished the task. We observe that while all approaches are able to
+achievesomenon-zerosuccess,iterationandparallelcallsimproveperformanceandefficiencyofthepolicy.
+NoIterations 3Iterations 3Iterations
+NoParallel NoParallel 3Parallel
+Task XY YZ Steps XY YZ Steps XY YZ Steps
+Placesaltshakerontheblueplate 0% 0% - 0.5% 0% - 50% 50% 3.0
+Placepeppershakeronthepinkplate 100% 100% 8.0 100% 100% 3.5 50% 50% 4.0
+Graspthepinkcup 50% 50% 7.0 0% 50% - 0% 50% -
+Graspthepeppershaker 50% 50% 8.0 0% 50% - 0% 50% -
+Graspthebluecup 0% 50% - 0% 50% - 0% 50% -
+Grasptheredketchupbottle 0% 50% - 0% 0% - 100% 100% 6.0
+Graspthecan 0% 0% - 0% 0% - 50% 50% 3.0
+Average 25% 38% 7.8 28% 31% 3.5 34% 59% 4.4
+21PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+G. Visual Annotation Sensitivity
+InspiredbypriorworkswhichfindinterestingbiasesandlimitationsofmodernVLMsonunderstanding
+visual annotations [46, 59, 60], we analyze the ability of state-of-the-art VLMs to understand various
+types of arrow annotations. We generate two synthetic datasets: one toy dataset of various styles
+of CV2 [24] arrows overlaid on a white background, and a more realistic dataset of various styles
+of object-referential arrows overlaid on a real-world robotics scene. The datasets adjust parameters
+suchasarrowcolor,arrowthickness,andrelativearrowheadsize. Inthefirstdataset,wequeryVLMs
+to classify the direction of the arrows, which studies the effect of styling on the ability of VLMs to
+understand absolute arrow directions; examples are shown in Figure 17. In the second dataset, we
+queryVLMstoselectthearrowwhichpointsataspecifiedobjectoutofmultipleobjects,whichstudies
+the effect of styling on the ability of VLMs to understand relative and object-centric arrow directions.
+The second dataset contains scenes with various objects, which we categorize into “Easy” (plates,
+boxes, cubes), “Medium” (cups, bags, mugs), “Hard” (hangers, toys), and “Very Hard” (brushes,
+eccentric objects).
+22PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Figure11 | EvaluatingPIVOTonrealworldmobilemanipulatortabletopmanipulationscenarioswhichrequire
+acombinationofsemanticreasoningandactionunderstanding. Using3optimizationiterationsonthereal
+worldmobilemanipulator,weseepromisingsuccessesfor(a)“movetheorangetocompletethesmileyface
+representedbyfruits”,(b)“usethemarkertotracealinedowntheblueroad”,and(c)“sorttheobjectitis
+holdingtothecorrectpieceofpaper”.
+Average 2D Cosine Similarity
+0.43 0.41
+1.0
+0.5
+0.0
+0.5
+1.0
+S,I,T prompt I,S,T prompt
+Figure 14 | Ablation of order of preamble, image, and task on mobile manipulation domain. We found it
+is beneficial to put the image closer to the end of the prompt, though the effect is marginal. P, I, T means
+preamble,followedbyimageandtaskdescription,andI,P,Tmeansimagefollowedbypreambleandtask
+description.
+23
+ytiralimiS
+enisoC
+D2PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Figure 15 | RAVENSevaluations. Eachcolumnshowsadifferenttaskinstance. Title: pickobjectfollowed
+byplaceobject. Toprow: initialimagewithpickandplacelocationspredictedbyVLMindicatedbywhite
+arrow. Middlerow: resultafterexecutingaction. Bottomrow: L2distancebetweenpredictedandgroundtruth
+locations(averagedforbothpicklocationandplacelocation),overiterations.
+Table 6 | VisualannotationarrowrobustnessofVLMsonasynthetictoyarrowdataset. Forvariouscolored
+arrowswithdifferentthicknesses,differentsizedarrowheads,anddifferentabsolutedirections,weevaluate
+therobustnessofGPT-4Voncorrectlyclassifyingtheabsolutearrowdirection.
+ArrowThickness ArrowheadSize Direction
+Color 2 4 6 0.1 0.3 0.5 up+right down+right up+left down+left
+red 96% 92% 96% 97% 94% 88% 100% 75% 75% 92%
+orange 92% 88% 96% 100% 91% 84% 100% 100% 50% 83%
+yellow 88% 88% 100% 100% 94% 84% 93% 100% 75% 67%
+green 96% 92% 96% 100% 100% 88% 100% 92% 92% 83%
+blue 92% 92% 88% 91% 91% 88% 100% 17% 100% 100%
+purple 100% 96% 96% 97% 97% 97% 100% 92% 92% 92%
+Task: Grasp the red ketchup bottle
+Iteration 0: Iteration 1:
+Arrows [5] Arrows [4]
+Task: Place peppershaker on the pink plate
+Iteration 0: Iteration 1:
+Arrows [1] Arrows [1]
+Figure 16 | RolloutsontheFrankaenvironment.
+24PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Table 7 | Visual annotation arrow robustness of VLMs on an object-referential arrow dataset. For various
+coloredarrowswithdifferentthicknesses,differentsizedarrowheads,anddifferentabsolutedirections,we
+evaluatetherobustnessofGPT-4Voncorrectlyselectingthearrowwhichreferstoaspecifiedobject.
+ArrowThickness ArrowheadSize TargetObject
+Color 2 4 6 0.1 0.3 0.5 Easy Medium Hard VeryHard
+red 42% 33% 33% 50% 33% 25% 44% 100% 0% 0%
+orange 25% 25% 25% 25% 25% 25% 0% 100% 0% 0%
+yellow 67% 58% 50% 83% 58% 33% 100% 33% 56% 44%
+green 50% 58% 50% 83% 58% 33% 100% 33% 56% 44%
+blue 42% 36% 33% 36% 50% 25% 100% 33% 22% 0%
+purple 33% 50% 50% 58% 58% 17% 89% 22% 56% 11%
+Figure 17 | Examples of procedurally generated datasets studying the robustness of VLMs for under-
+standing visual annotation arrow styles. (a) focuses on absolute direction understanding of single
+arrows on blank backgrounds. (b) focuses on object-relative arrow understanding in realistic scenes.
+25PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+H. Prompts
+H.1. RefCOCO prompt
+Your goal is to find the OBJECT in this scene. I have annotated the image with numbered
+circles. Choose the 3 numbers that have the most overlap with the OBJECT. If there
+are no points with overlap, then don’t choose any points. You are a five-time world
+champion in this game. Give a one sentence analysis of why you chose those points.
+Provide your answer at the end in a json file of this format:
+{"points": [] }
+H.2. Navigation prompt
+I am a wheeled robot that cannot go over objects. This is the image I’m seeing right
+now. I have annotated it with numbered circles. Each number represent a general
+direction I can follow. Now you are a five-time world-champion navigation agent and
+your task is to tell me which circle I should pick for the task of: {INSTRUCTION}?
+Choose {K} best candidate numbers. Do NOT choose routes that goes through objects.
+Skip analysis and provide your answer at the end in a json file of this form:
+{"points": [] }
+H.3. RAVENS prompt
+which number markers are closest to the {OBJECT}? Reason and express the final answer
+as ’final answer‘ followed by a list of the closest marker numbers.
+H.4. Manipulation online eval prompt
+Direct
+What number arrow should the robot follow to task?
+Rules: - You are looking at an image of a robot in front of a desk trying to arrange
+objects. The robot has an arm and a gripper with yellow fingers. - The arrows in the
+image represent actions the robot can take. - Red arrows move the arm farther away from
+the camera, blue arrows move the arm closer towards the camera. - Smaller circles are
+further from the camera and thus move the arm farther, larger circles are closer and
+thus move the arm backwards. - The robot can only grasp or move objects if the robot
+gripper is close to the object and the gripper fingers would stably enclose the object -
+Your answer must end with a list of candidate arrows which represent the immediate next
+action to take ( 0.3 seconds). Do not consider future actions between the immediate
+next step. - If multiple arrows represent good immediate actions to take, return
+all candidates ranked from worst to best. - A general rule of thumb is to return 1-4
+candidates. Instruction: Reason through the task first and at the end summarize the
+correct action choice(s) with the format, “Arrow: [<number>, <number>, etc.].“ Task:
+task
+H.5. Manipulation offline eval prompt
+Direct
+26PIVOT:IterativeVisualPromptingElicitsActionableKnowledgeforVLMs
+Summary: The arrows are actions the robot can take. Red means move the arm forward
+(away from the camera), blue means move the arm backwards (towards the camera). Smaller
+circles are further from the camera and thus move the arm forward, larger circles are
+closer and thus move the arm backwards. Do not output anything else, direct answer ith
+the format, Arrow: [<number>, <number>, etc.]. IMG, Task: What are the best arrows
+for the robot follow to pick white coat hanger?
+CoT
+Summary: The arrows are actions the robot can take. Reason through the task first and
+at the end summarize the correct action choice(s) with the format, Arrow: [<number>,
+<number>, etc.]. Description: The robot can only grasp or move objects if the gripper
+is around the object and closed on the object. Red means move the arm forward (away
+from the camera), blue means move the arm backwards (towards the camera). Smaller
+circles are further from the camera and thus move the arm forward, larger circles are
+closer and thus move the arm backwards. You must include this summarization. IMG,
+Task: What are the best arrows for the robot follow to pick catnip toy?
+Few-shot Direct
+Summary: (same as above) IMG, Task: Erase the writing on the whiteboard. Arrow: [5,
+10], IMG, Task: Pick up the iced coffee can. Arrow: [1], IMG, Task: Pick up the
+string cheese. Arrow: [8, 15, 3, 13], IMG, Task: pick white coat hanger.
+Few-shot CoT
+Summary: (same as above) IMG, Task: Erase the writing on the whiteboard. The robot
+is holding an eraser, so it should move it over the marker on the whiteboard. The
+following arrows look promising: 5. This arrow moves the eraser over the writing and
+away from the camera and thus towards the whiteboard. 10. This arrow too moves the
+eraser over the writing and has an even smaller circle (and more red) and thus more
+towards the whiteboard. Arrow: [5, 10], IMG, Task: ... Arrow: [5, 10], IMG, Task:
+... Arrow: [8, 15, 3, 13], IMG, Task: pick oreo.
+27

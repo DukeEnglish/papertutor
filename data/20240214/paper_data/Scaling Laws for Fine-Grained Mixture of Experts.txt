@@ -1,0 +1,950 @@
+SCALING LAWS FOR FINE-GRAINED
+MIXTURE OF EXPERTS
+JakubKrajewski∗ JanLudziejewski∗ KamilAdamczewski MaciejPio´ro
+UniversityofWarsaw UniversityofWarsaw IDEASNCBR IPPTPAN
+IDEASNCBR IDEASNCBR IDEASNCBR
+MichałKrutul SzymonAntoniak KamilCiebiera KrystianKro´l
+UniversityofWarsaw UniversityofWarsaw UniversityofWarsaw UniversityofWarsaw
+IDEASNCBR IDEASNCBR IDEASNCBR IDEASNCBR
+TomaszOdrzygo´z´dz´ PiotrSankowski MarekCygan SebastianJaszczur∗
+TradeLink UniversityofWarsaw UniversityofWarsaw UniversityofWarsaw
+IDEASNCBR Nomagic IDEASNCBR
+ABSTRACT
+MixtureofExperts(MoE)modelshaveemergedasaprimarysolutionforreducing
+thecomputationalcostofLargeLanguageModels. Inthiswork,weanalyzetheir
+scalingproperties,incorporatinganexpandedrangeofvariables. Specifically,we
+introduceanewhyperparameter,granularity,whoseadjustmentenablesprecise
+controloverthesizeoftheexperts. Buildingonthis,weestablishscalinglawsfor
+fine-grainedMoE,takingintoaccountthenumberoftrainingtokens,modelsize,
+andgranularity.Leveragingtheselaws,wederivetheoptimaltrainingconfiguration
+foragivencomputationalbudget. OurfindingsnotonlyshowthatMoEmodels
+consistentlyoutperformdenseTransformersbutalsohighlightthattheefficiency
+gapbetweendenseandMoEmodelswidensaswescaleupthemodelsizeand
+trainingbudget. Furthermore,wedemonstratethatthecommonpracticeofsetting
+thesizeofexpertsinMoEtomirrorthefeed-forwardlayerisnotoptimalatalmost
+anycomputationalbudget.
+1 INTRODUCTION
+Inrecentyears,wehavewitnessedLargeLanguageModels(LLMs)achieveexceptionalperformance
+intasksacrossnumerousdomains(Chowdheryetal.,2022;Yinetal.,2023;Agostinellietal.,2023).
+However, training those massive models incurs high computational costs, measured in millions
+ofGPU-hours(Touvronetal.,2023b),enabledonlybyenormousbudgets(Scaoetal.,2023)and
+leadingtonon-negligiblecarbonfootprints(Faizetal.,2024). Tocombattheseobstacles,theresearch
+communityhasbeenstrivingtoincreasetheefficiencyofLLMs. Onepromisingapproachthathas
+latelybeengainingvisibilityistheuseofMixtureofExperts(MoE)methods. ModelssuchasSwitch
+(Fedusetal.,2022)andMixtral(Jiangetal.,2024)havealreadydemonstratedthatitispossibleto
+achievecomparableeffectivenesswithsignificantlylowercomputationalcosts.
+Inthecontextofthecurrenttrendofincreasingbudgetsfortraininglanguagemodels,aquestion
+arises: willMoEmodelscontinuetobeattractiveinthefuture? Thisisanimportantissue,asother
+studieshavestatedthatthegapinefficiencybetweenMoEandstandardTransformersnarrowsat
+Contributions:Jakubimplementedfine-grainedMoE,ranexperiments,andoversawthecourseoftheproject.
+Jandesignedandimplementedthescalinglaws,alsooptimizedandtunedthefine-grainedMoEimplementation.
+KamilA.providedsignificantadviceonmanyaspectsoftheproject.Maciejexperimentedwiththeblockdesign
+and,withMichał,providedconsiderabletechnicalsupport.Szymon,KamilC.,Krystian,andTomaszcontributed
+totheprojectandtheengineeringinvariousways.Marek,alongwithPiotr,providedhigh-levelscientificadvice.
+Sebastiancameupwiththeinitialidea,startedtheproject,andsuperviseditwhilesettingtheresearchdirection
+andleadingexperimentsandanalyses.Correspondenceto<s.jaszczur@uw.edu.pl>.∗Equalcontribution.
+1
+4202
+beF
+21
+]GL.sc[
+1v17870.2042:viXra4.1
+40
+3.3 30
+20
+2.7
+64 x 1B 10
+2.2
+64 x 7B 5
+1.8
+64 x 70B
+2
+1.5
+64 x 1T
+1
+1018 1019 1020 1021 1022 1023 1024 1025 1026 1018 1019 1020 1021 1022 1023 1024 1025 1026
+FLOPs FLOPs
+8 16 32 64 MoE (optimal scaling) MoE (G=1) Dense Transformer
+(a) (b)
+Figure 1: Mixture-of-Experts can be always considered more efficient than dense Transformers,
+regardlessofthemodelsize.(a)ComputeOptimalscalingcurvesforMoEandstandardTransformers.
+ThedashedlinerepresentsadenseTransformer. Colorsdenoteoptimalgranularityforthegiven
+FLOPstrainingbudget. (b)RelativenumberofFLOPsneededtotrainTransformerandVanillaMoE
+(MoEwithG=1)toachievetheperformanceofMoEwithcomputeoptimalG.
+scale(Artetxeetal.,2022)oreventhattraditionaldensemodelsmayoutperformMoEasthesizeof
+themodelsincreases(Clarketal.,2022).
+In this paper, we argue that previous claims lose their validity when we relax certain implicit
+assumptionsregardingthetrainingprocess,presentinpreviousresearch. Inparticular,werefertothe
+fixedtrainingdurationandtheconstantsizeofexpertsinMoEmodels.
+Ourresultssuggestthatacompute-optimalMoEmodeltrainedwithabudgetof1020 FLOPswill
+achievethesamequalityasadenseTransformertrainedwitha20×greatercomputingbudget,with
+thecomputesavingsrisingsteadily,exceeding40×whenbudgetof1025 FLOPsissurpassed(see
+Figure1). Importantly,weshowthatthestandardpracticeoffixingthesizeofexpertsinMoEtobe
+thesameasfeed-forwardlayerisalmostneveroptimal.
+Ourmaincontributionsare:
+1. Introducing a new hyperparameter - granularity. Adjusting this parameter allows us to
+determine the optimal size of experts in MoE models, which translates into increased
+efficiency.
+2. DerivingnewscalinglawsforMoEmodelsthatincorporatevariabletrainingduration,the
+number of parameters, and granularity. Such scaling laws allow us to calculate optimal
+traininghyperparametersforMoEmodels.
+3. Demonstratingthat,withoptimalsettings,MoEmodelscanalwaysoutperformtraditional
+Transformersatanycomputingbudget. Thisisaconclusioncontrarytotheresultsfrom
+Clarketal.(2022).
+The code used to produce the results described in this work is open-sourced at
+github.com/llm-random/llm-random.
+2 RELATED WORK
+MixtureofExperts. Inthecontextoflanguagemodeling,MoEwasfirstintroducedbyShazeer
+etal.(2017)asasparselygatedlayerbetweenstackedblocksofLSTM(Hochreiter&Schmidhuber,
+1997). AsimilartechniquewasproposedinthecontextofTransformersbyShazeeretal.(2018)
+andLepikhinetal.(2020). Fedusetal.(2022)proposedtorouteeachinputtoonlyasingleexpert
+and designed a modified initialization scheme to reduce training instability. Numerous studies
+2
+ssoL
+daehrevO×haveproposedtomodifytheoriginalroutingmethod. Lewisetal.(2021)usedalinearassignment
+algorithmtopostprocesstoken-expertmappingsandensureevenexpertselections.Rolleretal.(2021)
+suggested another approach involving deterministic hash functions. Zhou et al. (2022) proposed
+expertchoicerouting,eliminatingtheneedforadditionalloadbalancinglosses. Puigcerveretal.
+(2023)designedafully-differentiableSoftMoEarchitecture.
+Concurrentlytoourwork,Daietal.(2024)proposedtomodifytheMoElayerbysegmentingexperts
+into smaller ones and adding shared experts to the architecture. Independently, Liu et al. (2023)
+suggestedaunifiedviewofsparsefeed-forwardlayers,considering,inparticular,varyingthesize
+of memory blocks. Both approaches can be interpreted as modifying granularity. However, we
+offeracomprehensivecomparisonoftherelationshipbetweentraininghyperparametersandderive
+principledselectioncriteria,whichtheylack.
+Scaling laws. Scaling laws are empirically derived equations relating the loss of a model with
+variablessuchasthenumberofparameters,trainingsamples,orthecomputationalbudget. Inthe
+caseofdenseTransformers,scalinglawswerefirststudiedbyKaplanetal.(2020),whoobserved
+powerlawrelationshipsbetweenthefinalmodelperplexityandmodelanddatasetsize. Thiswork
+wasextendedbyHoffmannetal.(2022)byconsideringvariablecosinecyclelengthsandformulating
+amodifiedfunctionalformofthescalingequation.
+Scaling laws have also been proposed for other architectures and training scenarios. Henighan
+etal.(2020)studiedautoregressivemodelingacrossvariousmodalities,whileGhorbanietal.(2021)
+consideredmachinetranslation. Frantaretal.(2023)exploredtheimpactofpruningonvisionand
+languageTransformers,derivingoptimalsparsityforagivencomputebudget. Clarketal.(2022)
+studied the scaling of MoE when changing model size and number of experts on a fixed dataset,
+concludingthatroutedmodelsaremoreefficientonlyuntilacertainmodelsize. Inthiswork,we
+challenge that claim by considering a variable, optimal dataset size for both model families (see
+Section6.3).
+3 BACKGROUND
+3.1 MODELARCHITECTURE
+Transformer. Astandarddecoder-onlyTransformer(Radfordetal.,2018a;b;Kaplanetal.,2020;
+Brownetal.,2020)consistsofanembeddinglayer,astackofalternatingattentionandfeed-forward
+layers,andanunembeddinglayer. Inthemodel,eachinputtokenisconvertedbytheembedding
+layerintoavectorofsized ,thedimensionmaintainedacrossallthelayersintheresidualstream.
+model
+Thefeed-forwardcomponentconsistsoftwolineartransformationsandanonlinearityϕinbetween.
+ItcanbedescribedasFFN(x) = ϕ(xW +b )W +b ,withW mappingfromd tod ,and
+1 1 2 2 1 model ff
+W backtotheoriginald . Itisstandard(Radfordetal.,2018a;Raeetal.,2022;Touvronetal.,
+2 model
+2023a;Jiangetal.,2023)tosetthehiddendimensionasd =4·d .
+ff model
+Feed-forwardlayerscontainthemajorityofTransformerparametersandrequirethebiggestcomputa-
+tionalbudgetcountedintermsofFLOPs. Subsequently,theyarethemainfocusoftheMixtureof
+Expertsmodelsconsideredinthiswork.
+MixtureofExperts. ThecoreideabehindMoEinTransformersistoreplacethefeed-forward
+layerwithasetofN experts. Thesizeofeachexpertistypically(Fedusetal.,2022;Zhouetal.,
+expert
+2022;2023;Jiangetal.,2024)settomirrortheoriginaldimensionsofthelayer,withthehidden
+expertdimensiond equaltod .Therefore,thetotalnumberofparametersinMoEscaleslinearly
+expert ff
+withthenumberofexperts. However,thecomputationalcostremainsapproximatelyconstantaseach
+inputisroutedandthenprocessedbyasubsetofexperts.
+3E1 E2 E1 E2 E3 E4
+(a) (b)
+Figure2: (a)StandardMoElayerwithG=1(b)CorrespondingMoElayerwithG=2. Eachofthe
+originalexpertsissplitintotwogranularones. Thesplitoccursinthehiddendimensionofanexpert.
+IncreasingGallowsforamoreprecisemappingbetweenexpertsandtokens. SinceforgranularityG,
+thetokenisroutedtoGgranularexperts,thenumberofparametersactivatedpertokenisthesamein
+bothcases.
+3.2 SCALINGLAWS
+Dense Transformers. Large Transformer-based models are known to approximately obey the
+power-lawrelationshipbetweenfinallossL,modelsizeN,andnumberoftrainingtokensD.This
+relationshipisoftencalledChinchillascalinglawsdescribedbyHoffmannetal.(2022)as
+a b
+L(N,D)=c+ + . (1)
+Nα Dβ
+Thepower-lawformulaiscomposedofthreedistincttermsthatcharacterizetheintrinsicentropyof
+data,constraintsofthemodel,andlimitationsinthetrainingdata. Thetermcrepresentstheminimum
+possibleerrorintrinsictothedata. Theremainingtwotermsaresuboptimalityterms,whichaddress
+thelimitationsinfunctionrepresentationowingtothesizeofthemodelandindatasignifiedbythe
+numberoftokens. Inthelimit,withinfinitedataandmodelsize,thelossisreducedtoc.
+MixtureofExperts. ForMoETransformer-basedmodels,Clarketal.(2022)formulatedthefinal
+lossforaconstantdatasetsizeDof130Btokens,allowingforvariationsintheexpansionrateE,as:
+(cid:18) 10d/a(cid:19)a(cid:18) 1(cid:19)b+clogN
+L(N,E)= . (2)
+N E
+However,thisresulthasanotablelimitationasitcanbeappliedonlytotheoriginaldatasetsize. The
+scalabilityandeffectivenessareconstrainedinthisscenariobecauseitiscrucialtoalignthenumber
+oftrainingsampleswiththeavailablecomputationalresourcesforoptimaluse. AsperKaplanetal.
+(2020)andHoffmannetal.(2022),maintainingaconstantdatasetsizewhilescalinguptheneural
+networksizeleadstoundertraining,resultinginamodelthatdoesnotperformtoitsfullpotential.
+4 GRANULARITY
+AsdescribedinSection3,inthestandardsetting,theinnerdimensionofeachexpertnetwork,d ,
+expert
+isequaltod ,whichisthesamesizeasthefeed-forwardlayerofthebasemodel.
+ff
+Inthiswork,wesuggestanalternativeapproachwherethehiddendimensionoftheexpertisnot
+necessarilysettomirrorthatofthestandardfeed-forwardlayer. Instead,itcanbeadjustedtoavalue
+thatisthemosteffective. ThisapproachallowstheconfigurationofMoEtobearticulatedinterms
+oftwokeyhyperparameters: granularity(G)andexpansionrate(E). Inthefollowingpartsofthis
+work,wewillalsousethetermactiveparameterstorefertothenon-embeddingparametersusedto
+produceoutputforasingletoken,exceptrouting. Thenumberofactiveparametersisdenotedas
+N .
+act
+4Letd bethehiddendimensionofasingleexpert. Granularityisdefinedas
+expert
+d
+G= ff .
+d
+expert
+Inotherwords,granularitydenotesthemultiplierfactorforthechangeinthesizeofanexpertfrom
+theoriginalstandardmodel,definedasG=1. Inthiswork,weinvestigateG>1whereexpertsare
+smallerthaninthestandardlayer.
+Notethatincreasinggranularitydoesnotaffectthenumberofactiveparameters. AsGincreases,the
+numberofexpertsthatprocessthetokengrowsproportionallytoG. Inotherwords,forgranularityG,
+atokenisroutedtoGfine-grainedexperts,therebykeepingthenumberofactiveparametersconstant.
+SeeFig. 2forvisualization.
+Wethendefinetheexpansionrate,whichdescribestheincreaseinthenumberofparametersfrom
+astandardtransformerlayertoaMoElayer. Giventhat,N andN denotethetotalnumberof
+MoE ff
+parametersinaMoElayerexcludingroutingandthestandardfeed-forwardlayer,respectively. The
+expansionrateE isthendefinedas
+N
+E = MoE.
+N
+ff
+ExpansionratecanalsobeseenasthetotalnumberofparametersinaMoElayercomparedtoits
+activeparameters.
+The concept of the expansion rate is intricately linked to the number of experts through the idea
+ofgranularity. Indeed,thedefinitionsofbothgranularityandexpansionrateextendandrefineour
+understandingofthenumberofexperts,symbolizedasN .
+expert
+N =G·E (3)
+expert
+Fornon-granularmodels,whereG=1,theexpansionrateisequaltothenumberofexperts.
+Intuitively, increasing granularity for a given expansion rate gives the model more flexibility in
+mappingdatapointstoexperts,potentiallyimprovingperformance. Weincorporatethenotionof
+granularityintoourscalinglawsinSection5. Thediscussionaboutpracticaltradeoffsinchanging
+thisparameterisgiveninSection6.
+5 SCALING LAWS
+Granularity determines changes in the architecture of MoE. In this section, we answer a central
+question of this work: whether the granular MoE models follow scaling laws and, if so, how
+granularityaffectsthem. Thus,weaimtoderiveaparametricscalinglawforpredictingthefinal
+lossvalueLbasedongranularityG,totalnumberofnon-embeddingparametersN,andnumberof
+trainingtokensD.
+Werunover100experimentsonthedecoder-onlyTransformerarchitecture,witheachfeed-forward
+componentreplacedbyaMixtureofExpertslayer. Thoseexperimentsinvolvetrainingmodelswith
+sizesrangingfrom129Mto3.7Bparametersacrossdifferenttrainingdurations,from16Bto130B
+tokens. Weconsiderlogarithmicallyspacedvaluesofgranularitybetween1and16. Toconstrainthe
+searchspace,E =64isfixed,followingtherecommendationsofClarketal.(2022). Inaddition,we
+alsorunexperimentswithdenseTransformerstocomparetheirperformancewithMoE.Thedetails
+ofallarchitectures,thetrainingprocedure,andhyperparameterchoicesaredescribedindetailin
+AppendixA.
+Inthesubsequentpartofthispaper,wewillusethenotationE×N todescribeaMoEmodelwith
+act
+N activeparametersandexpansionrateE.
+act
+50.5
+3.8 Training tokens Model size 16B 64x3M
+33B 0.4 64x7M
+10 1 3.6 66B 64x13M
+64x25M
+0.3 64x49M 3.4
+6×102
+0.2
+3.2
+4×102
+3×102 3.0 0.1
+2.8 0.0
+1 2 4 8 16 109 1 2 4 8 16
+Granularity Number of parameters Granularity
+(a) (b) (c)
+Figure3: (a)TheeffectofGonL (G)forconstantN andD. Bothaxesareinthelog-scale.
+N,D
+Theresultssuggestthelinearrelationshipbetweenlog(G)andlog(L−c). Thegivenvaluesare
+N = 64×25M, D = 16B, const = 3.12 . The plots for additional values of N and D can be
+foundinAppendixF.(b)TheimpactofvaryingthenumberofparametersN onthelossforfixed
+granularity G = 4. For other granularity values, see Appendix F. (c) The difference in the loss
+betweentrainingfor16Band65Btokensforallmodelsizesandgranularityvalues. Themodelsize
+isreportedastheexpansionrateandthenumberofactiveparameters.
+5.1 POWERLAWWITHRESPECTTOGRANULARITY
+Wefirstanswerthequestionofwhethergranularmodelsfollowthescalinglaws. InFigure4(a),it
+canbeseenthatincreasinggranularityresultsinalowerloss. Thereturnsfollowapproximatelyan
+exponentialpattern,convergingtoapositiveconstant. TheempiricalrelationshipgivenbyFigure
+3(a)suggeststhefollowingpower-lawdependenceoflossonavaryinggranularityforgivenN and
+Dandconstantsg,handγ thatmaybedependentonthem,
+g
+L (G)= N,D +h . (4)
+N,D GγN,D N,D
+5.2 SCALINGTHEMODELANDDATASETSIZE
+AsoutlinedinSection3.2,thepower-lawgivenbyEq.1consistsofthreetermsthatdescribeinherent
+dataentropyandlimitationsinfunctionrepresentationanddata. Thisderivationisindependentofthe
+architecture. Inparticular,theEq.1alsoholdsforconstantgranularity. Empirically,weobservea
+powerlawrelationshipinN andDanalogoustothatindensemodelsasdepictedinFigure3(b)for
+afixedvalueofgranularity(seealsoFig.1,Kaplanetal.(2020)). Furthermore,thevalidityofthis
+functionalformisverifiedbyfitinSection5.4.
+Sinceweknowthatseparatescalinglawsarevalidforgivengranularities,inthegeneralform,the
+parametersinEq.1canbedependentonthemodel’sgranularity:
+a b
+L (N,D)=c + G + G . (5)
+G G NαG DβG
+5.3 THEFORMOFTHEJOINTSCALINGLAW
+Following the above observation that models with constant granularity obey Chinchilla scaling
+lawsgivenbyEq.1,thekeyquestionarisesastohowthegeneralnotionofgranularityGcanbe
+incorporatedintothejointscalinglaw. Moreover,thescalinglawformulafromEq.5forconstant
+N andDhastoberepresentablebyEq. 4. Thisisbecausetheformerisamoregeneralequation,
+encompassingsharedhyper-parametersacrossallN,D,andG. Itisanticipatedtoalignwiththe
+latter,consistingofdistinctpowerlaws,eachwithspecificparametersfordifferentN andDvalues.
+Consequently,theobjectiveistoidentifyafunctionthatfulfillsthesecriteria.
+6
+tsnoc
+-
+ssoL
+ssoL
+gniniart
+regnol
+htiw
+ssoL16B training tokens 33B training tokens 66B training tokens
+Model size
+4×100 64x3M
+64x7M
+64x13M
+64x25M
+64x49M
+3×100
+1 2 4 8 16 1 2 4 8 16 1 2 4 8 16
+Granularity Granularity Granularity
+Figure4: Fitofthescalinglawscomparedtotheexperimentalresults.
+L(N,D,G)= L (G) = L (N,D) (6)
+N,D G
+g a b
+= N,D +h =c + G + G
+GγN,D N,D G NαG DβG
+Inthesubsequentsections,weaimtodeterminewhichoftheseparametersremainindependentofG
+andidentifytheirfunctionalform. Furthermore,wepresentsomerationaleforthestructureofour
+formula.
+LowerBound. ConsiderthelimitofEq.5forN andDgrowingtoinfinity:
+lim L(N,D,G)=c . (7)
+G
+N→∞
+D→∞
+withtheconstanttermc dependentongranularity. Thisiscontradictorytothefactthatitcaptures
+G
+theinherententropyofthedataset. Lowerboundoftheachievablelosswhentrainingbiggermodels
+onmoresamplesshouldnotdependonthearchitecture,thereforeparameterc =cisconstantfor
+G
+allgranularities.
+GranularityandNumberofTokensD. AsseeninFigure3(c),thebenefitoftrainingamodelona
+largerdatasetisalmostthesameforeachgranularityvalue. Thissuggeststhatthereisnointeraction
+betweenDandG. Therefore,wecanassumethat
+b b
+G = . (8)
+DβG Dβ
+GranularityandModelSizeN. Weconsiderαtobeaconstantthatdescribeshowthefunction
+scales with N. In this work, we assume polynomial functional forms that rule out the potential
+dependencyofαonGgiventheformofEq. 4. Therefore,theonlyelementdependentonGisa :
+G
+(cid:16) g (cid:17) 1 b
+L(N,D,G)=c+ +a + . (9)
+Gγ Nα Dβ
+Finally,onecouldconsideromittingtheconstantaintheequationabove,anditwouldstillreduceto
+4forconstantN andD. However,thiswouldmeanthatamodelwithinfinitegranularityandasmall
+numberofactiveparameterscanachievetheperfectperplexityofthelowerbound. Weassumethat
+asparseMoE(MixtureofExperts)modelisunlikelytosurpasstheperformanceofanequivalent
+densemodelthathasamatchingtotalnumberofparameters,allofwhichareactive. Thismeansthat
+constantacanactasamarginalimprovementduetogranularity.
+Subsequently,wefitparametersinEq. 9todescribethescalingofMoE.Forcomparison,wealso
+performfittingfordensetransformergivenbyEq.1. SimilarlytoHoffmannetal.(2022),weuse
+Huberloss(Huber,1964),withδ =0.1. TheoptimizationisperformedusingtheBFGSalgorithm.
+Weincludeaweightdecayof5e−4toenhancegeneralization. Westartwithfittingparametersin
+Eq.9andthenfindarchitecture-dependentcoefficientsα,β,AandBinEq.1. Weobserveagoodfit,
+withRMSE=0.015. ThevaluesarepresentedinTable1. WedepicttheresultsinFigure4.
+7
+ssoL3.8 fitted points Granularity
+validation 3.9 1
+2
+4
+3.6 8
+16
+3.7
+3.4
+3.2 3.5
+3.0
+3.3
+3.0 3.2 3.4 3.6 3.8 0 20 40 60 80 100
+Predicted loss gpu-hours
+(a) (b)
+Figure5: (a)Validationofthescalinglaws. (b)TraininglosscurvesformodelwithN =64×7M,
+D = 66B tokens,measuredagainstwall-clocktimeonNVIDIAA100GPU.G = 8leadstothe
+bestperformance,asforG=16theroutingcostdominatesgainsfromgranularity. Wemodelthe
+increasedcostofroutingbymeasuringFLOPsforeachconfiguration.
+5.4 FITTINGTHEPARAMETRICSCALINGLAW
+Table1: Valuesofthefittedcoefficients.
+Model a α b β g γ c
+MoE 18.1 0.115 30.8 0.147 2.1 0.58 0.47
+Dense 16.3 0.126 26.7 0.127 - - 0.47
+Wevalidatethestabilityofthefitbyexcludingthetop20%ofmodelswiththelowestperplexityand
+findingthecoefficientsbasedontheremainingexperiments. Weobservethattheformularemains
+almost unchanged in this scenario (see Table 5 in Appendix B). The validation RMSE is 0.019.
+ResultsaredepictedinFigure5(a).
+5.5 MOESCALINGPROPERTIES
+Comparing the part of the formula that approximates underfitting (that is, dependent on training
+tokens)inMoE(30.8D−0.147)andTransformer(26.7D−0.127),wecaninferthatMoEmodelsneed
+longertrainingtoperformcompetitivelybutscalebetterafterreachingthatpoint. Nonetheless,this
+momentmaystillprecedethecomputeoptimalforbothmodels. Ontheotherhand,wecanseethat
+theexponentondensemodelsα=−0.126scalesbetterwithatotalnumberofparametersthanthe
+MoEcounterpartα=−0.115. Thisshouldnotbesurprisingsincedensemodelsuseallparameters
+oneachtokencontrarytoMoE,whichgainsacomputationaladvantagebyactivatingonlyasubsetof
+them. Therefore,thefaircomparisonoftheperformancehastotakeintoaccountFLOPsusedby
+eachmodeltype. Inthenextsection,wefindcompute-optimalgranularityforagivenFLOPbudget.
+6 OPTIMAL ALLOCATION OF COMPUTATIONAL BUDGET
+InSection5,weshowthathighergranularityleadstolowerlossforthesamenumberoftraining
+steps. Thisisnotalwaysthecaseifweconsiderthewall-clocktime. AsdepictedinFigure5(b),in
+practicefortoohighvaluesofG(relativetod ),trainingcanbebottleneckedbytheroutingcost.
+model
+PracticalmodelingofthissituationispossiblebymeasuringFLOPsinrouting. Inthissectionwefind
+optimalN,D,GforagivencomputationalbudgetF bysolvingthefollowingoptimizationproblem,
+minimize L(N,D,G)
+N,D,G
+subjectto FLOPs(N,D,G)=F.
+8
+ssol
+devresbO ssoL6.1 COMPUTATIONALCOSTOFGRANULARITY
+Itisimportanttoacknowledgethatincreasinggranularitycanleadtosomechallengesintrainingthe
+model,namelyhighercomputationalandcommunicationcostsandalargermemoryfootprint. The
+maincomponentresponsibleforhighercostsistheincreaseinroutingoperationsduetoalargerpool
+ofgranularexperts. ThisincreaseisproportionaltothevalueofG.Forstandard,non-granularMoE
+models(G=1),theroutingoverheadstillexists,althoughithasbeenconsiderednegligible.
+Takingintoaccounttheroutingoperationoverhead,thenumberofusedFLOPsF isdescribedbythe
+followingformula:
+F =(12d 2c +d EGc )·D·n , (10)
+model f model r blocks
+givenexpansionrateE,granularityG,andconstantsthatdenoteFLOPsperactiveparameterratio,
+respectively,withinrouting(c )andwithintherestofthenetwork(c ). Theterm12d 2 isthe
+r f model
+numberofactiveparameterswithinatransformerblock,whiled EGc isthenumberofactive
+model r
+parameters within a routing network. The in-depth analysis of constants c and c can be found
+r f
+inAppendixE.WeexcludeembeddingandunembeddingfromtheFLOPscalculations,following
+Hoffmannetal.(2022).
+Observethat,incontrasttoscenarioswhereroutingoperationsareomitted,theFLOPscalculation
+that incorporates routing overhead relies on both d and n . Consequently, an additional
+model blocks
+conditionisrequiredtodeterminethescalingofd andn inrelationtoanincreaseinN,the
+model blocks
+numberofparameters. Itisnotedthatminorvariationsinthedepth-to-widthratioarenotsignificant
+(Kaplanetal.,2020). Followingthisanalysis,weopttoadopttheassumptionthatd =64n .
+model blocks
+The total number of parameters in the feed-forward layer, excluding the routing matrix, is
+2Ed d =8Ed 2,and4d 2inattention(key,query,value,andoutputprojection). This
+ff model model model
+resultsinthefollowingformulaforthetotalnumberofparameters,N =d 2·(8E+4)·n .
+model blocks
+6.2 COMPUTEOPTIMALFORMULA
+Takingintoconsiderationweneedtosolvethefollowingoptimizationproblem,givenF,
+minimize L(N,D,G)
+N,D,G
+subjectto F =(12d 2c +d EGc )·D·n
+model f model r blocks
+N =d2 ·(8E+4)·n ,
+model layers
+d =64·n .
+model layers
+Alltheseconstraintsarereducibletoaone-dimensionaloptimizationproblem,whichis,however,
+hard to solve analytically. Therefore we approximate the solution using Brent’s method (Brent,
+1971). TheresultsofthisoptimizationforvaryingFLOPsbudgetsareplottedinFigure1whilethe
+optimalconfigurationsofparametersforselectedmodelsizesarepresentedinTable2. Tovalidate
+theuncertaintyofthesepredictions,wefollowHoffmannetal.(2022)andcalculatethe10thand
+90thpercentilesestimatedviabootstrappingdata(seeAppendixCforthedetailedresults).
+6.3 MOEISALWAYSMOREEFFICIENT
+ContrarytotheresultsfromClarketal.(2022),inFigure1wecansee,thatMixture-of-Expertscanbe
+alwaysconsideredmoreefficientthandenseTransformers,regardlessofthemodelsize. Accordingto
+ourpreviousobservationsfromSection5.5,MoEmodelsscalebetterwithoptimaltraining. However,
+forshorttrainingschedules,theymayunder-performdensemodels. Thismeansthatforconstant
+trainingtimeandincreasingmodelsize,thereexistsapointwherebothmodelswillbecomevery
+under-trained,inwhichscenariodensemodelssurpassMoE.ThisshowswhyinClarketal.(2022),
+where varying the number of training tokens has not been considered, MoE was predicted to be
+under-performingformodelsbiggerthan1T. However,whenalltraininghyper-parametersN,D,G
+areproperlyselectedtobecompute-optimalforeachmodel,thegapbetweendenseandsparsemodels
+onlyincreasesaswescale.
+9Table2: Computeoptimaltraininghyper-parametersforMoEmodels. OptimalN andD follow
+approximatelysimilarrelationtotheseofHoffmannetal.(2022)foractiveparametersaroundthe
+rangeof1B to10B parameters,requiringcomparablylongertrainingforsmallermodelsandshorter
+forbiggerones. Highergranularityisoptimalforlargercomputebudgets.
+N D G FLOPs Loss
+64x100M 4.37B 8 2.95e+18 3.133
+64x1B 28.94B 16 1.93e+20 2.491
+64x3B 72.90B 16 1.41e+21 2.245
+64x7B 137.60B 32 6.46e+21 2.076
+64x70B 941.07B 32 4.16e+23 1.694
+64x300B 2.96T 64 5.69e+24 1.503
+64x1T 7.94T 64 4.97e+25 1.367
+7 DISCUSSION
+ExtremeGranularity. InSection5,wearguethatmodelperformanceimproveswithincreasing
+granularity. Thispostulatelargelyalignswiththeempiricalfindingsofourstudy. Nonetheless,at
+exceedinglyhighgranularitylevels,suchasG = 64inmodelscharacterizedbyd = 256and
+model
+E = 64,thereisanobservabledeclineinperformance. Thisphenomenonisparticularlyevident
+inscenarioswherethenumberofparametersintheroutingmechanismexceedsactiveparameters
+in actual experts. Additionally, as described in Section 6, the utility of such high granularity is
+predominantlyrestrictedtomodelsofsubstantialsize. Inalignmentwiththeprinciplesoutlinedby
+Hoffmannetal.(2022),thisresearchfocusesmoreonfindingsthatcanbebroadlyappliedrather
+thandelvingintothespecificdetailsofthesecorner-casesituations. However,itishypothesizedthat
+theefficiencyofmodelswithsignificantlyhighgranularitycouldbepotentiallyenhancedthrough
+carefulexpertinitializationormodificationstotheroutingalgorithm. Theseideasaresetasidetobe
+investigatedinfuturestudies.
+VaryingExpansionRate. Inthisstudy,duetocomputationalresourcesconstraint,wefocuson
+E =64,asrecommendedbyClarketal.(2022). ThisvalueofEwasalsousedforthelargestmodels
+inotherworks(Duetal.,2022;Zhouetal.,2022)andthebest-performingconfigurationinFedus
+etal.(2022). Nonetheless,weacknowledgetheimportanceofconsideringdifferentexpansionrates,
+asdifferentlevelsofE maybechosenbasedonfactorslikethetargetsizeofthemodelinmemory.
+Therefore,inAppendixD,wepresenttheresultsofthestudyforE = 16andshowthatthemain
+findingsofthisworkarestillvalidinsuchcases.
+IncludingE intheformula. Anotherpossibleadvancementwouldbetounifyallofthefactors
+N,D,GandE inoneformula. Whilethiswouldopenthepossibilityofstudyingtherelationships
+between coefficients in more detail, it would also be hard to practically recommend the optimal
+configuration in such a scenario using only FLOPs. This is because larger values of E typically
+leadtobetterperformancebutalsoincuradditionalmemoryrequirements. Therefore,thechoice
+ofexpansionratemaybeheavilydependentontheavailablehardwareconfiguration. Weleavea
+detailedstudyofthesefactorsforfuturework.
+Modelingthecostofgranularity. Itisimportanttonotethattheexactestimationofthetraining
+costofMoEmodelsisdependentonthetrainingsetup,hardware,andimplementation. Specifically,
+increasingGcanleadtohighertransfercosts,dependingontheadoptedmodelofdistributedtraining.
+Therefore,thepreciseselectionofhyperparametersshouldbemadeconsideringthesefactors. Inthis
+work,wemodelthecostofoperationsusingFLOPs,whichiscommonintheScalingLawsliterature
+(Kaplanetal.,2020;Hoffmannetal.,2022;Frantaretal.,2023). Additionally,wewouldliketo
+notethatinoursetup,weobservesignificantgainsoffine-grainedMoEmeasuredaswall-clocktime
+neededtoachievegivenperplexity(seeFig. 5(b)foranexample).
+108 CONCLUSIONS
+This study introduces a novel hyperparameter, granularity (G), and underscores the significance
+of adjusting it for optimizing the efficiency of experts within MoE models. A central finding
+of this research is that a standard granularity of G = 1 is suboptimal across a broad range of
+FLOPs,leadingtotherecommendationofusinghighergranularityvaluestoenhanceMoEmodel
+performanceandefficiency. Simultaneously,thisworkemphasizestheimportanceofvaryingtraining
+durationforcompute-optimalsettings. Consequently,bothgranularityandvariabletraininglengthare
+incorporatedintonewscalinglaws.TheselawsconfidentlydemonstratethatMoEmodelsconsistently
+outperformdensetransformersintermsofefficiencyandscaling. Thisworknotonlyshedsnewlight
+onthescalinglawsapplicabletoMoEmodelsbutalsoprovidespracticalguidanceforimproving
+computationalefficiencyinlargelanguagemodels. Theinsightsarecriticalforthedevelopmentand
+optimizationoflarge-scalelanguagemodels,markingasignificantadvancementinthefield.
+9 REPRODUCIBILITY
+Thecodeusedtoproducetheresultsdescribedinthisworkisopen-sourcedandcanbefoundat
+github.com/llm-random/llm-random.
+11ACKNOWLEDGMENTS
+WewouldliketoexpresssinceregratitudetoPiotrMiłos´andTomaszTrzcin´skiforvaluablefeedback
+andtoAleksandraWeglarzforherhelpwithgraphicdesign.
+ThisworkwasfundedbyIDEASNCBR,whichalsoprovidedsignificantcomputationalresourcesa
+supportiveresearchenvironmentanddirection. TheresearchwassupportedbyPL-Gridinfrastructure
+(grant PLG/2023/016148). We also benefited from the Entropy cluster (hosted at the Faculty of
+Mathematics,InformaticsandMechanicsoftheUniversityofWarsaw)fundedbyNVIDIA,Intel,the
+PolishNationalScienceCentergrant2022/45/N/ST6/02222,andERCStartingGrantTOTAL.Marek
+CyganwaspartiallysupportedbyanNCBiRgrantPOIR.01.01.01-00-0392/17-00.
+REFERENCES
+Andrea Agostinelli, Timo I. Denk, Zala´n Borsos, Jesse Engel, Mauro Verzetti, Antoine Caillon,
+QingqingHuang,ArenJansen,AdamRoberts,MarcoTagliasacchi,MattSharifi,NeilZeghidour,
+andChristianFrank. Musiclm: Generatingmusicfromtext,2023.
+MikelArtetxe,ShrutiBhosale,NamanGoyal,TodorMihaylov,MyleOtt,SamShleifer,XiVictoria
+Lin,JingfeiDu,SrinivasanIyer,RamakanthPasunuru,GiriAnantharaman,XianLi,ShuohuiChen,
+HalilAkin,MandeepBaines,LouisMartin,XingZhou,PunitSinghKoura,BrianO’Horo,Jeff
+Wang,LukeZettlemoyer,MonaDiab,ZornitsaKozareva,andVesStoyanov. Efficientlargescale
+languagemodelingwithmixturesofexperts,2022.
+Richard P. Brent. An algorithm with guaranteed convergence for finding a zero of a function.
+Comput.J.,14:422–425,1971.URLhttps://api.semanticscholar.org/CorpusID:
+10312755.
+TomB.Brown,BenjaminMann,NickRyder,MelanieSubbiah,JaredKaplan,PrafullaDhariwal,
+Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel
+Herbert-Voss,GretchenKrueger,TomHenighan,RewonChild,AdityaRamesh,DanielM.Ziegler,
+JeffreyWu,ClemensWinter,ChristopherHesse,MarkChen,EricSigler,MateuszLitwin,Scott
+Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec Radford, Ilya
+Sutskever,andDarioAmodei. Languagemodelsarefew-shotlearners,2020.
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam
+Roberts,PaulBarham,HyungWonChung,CharlesSutton,SebastianGehrmann,ParkerSchuh,
+KensenShi,SashaTsvyashchenko,JoshuaMaynez,AbhishekRao,ParkerBarnes,YiTay,Noam
+Shazeer,VinodkumarPrabhakaran,EmilyReif,NanDu,BenHutchinson,ReinerPope,James
+Bradbury,JacobAustin,MichaelIsard,GuyGur-Ari,PengchengYin,TojuDuke,AnselmLev-
+skaya,SanjayGhemawat,SunipaDev,HenrykMichalewski,XavierGarcia,VedantMisra,Kevin
+Robinson,LiamFedus,DennyZhou,DaphneIppolito,DavidLuan,HyeontaekLim,BarretZoph,
+AlexanderSpiridonov,RyanSepassi,DavidDohan,ShivaniAgrawal,MarkOmernick,AndrewM.
+Dai,ThanumalayanSankaranarayanaPillai,MariePellat,AitorLewkowycz,EricaMoreira,Rewon
+Child,OleksandrPolozov,KatherineLee,ZongweiZhou,XuezhiWang,BrennanSaeta,Mark
+Diaz,OrhanFirat,MicheleCatasta,JasonWei,KathyMeier-Hellstern,DouglasEck,JeffDean,
+SlavPetrov,andNoahFiedel. Palm: Scalinglanguagemodelingwithpathways,2022.
+AidanClark,DiegodelasCasas,AureliaGuy,ArthurMensch,MichelaPaganini,JordanHoffmann,
+BogdanDamoc,BlakeHechtman,TrevorCai,SebastianBorgeaud,GeorgevandenDriessche,
+ElizaRutherford,TomHennigan,MatthewJohnson,KatieMillican,AlbinCassirer,ChrisJones,
+ElenaBuchatskaya,DavidBudden,LaurentSifre,SimonOsindero,OriolVinyals,JackRae,Erich
+Elsen,KorayKavukcuoglu,andKarenSimonyan.Unifiedscalinglawsforroutedlanguagemodels,
+2022.
+DamaiDai,ChengqiDeng,ChenggangZhao,R.X.Xu,HuazuoGao,DeliChen,JiashiLi,Wangding
+Zeng,XingkaiYu,Y.Wu,ZhendaXie,Y.K.Li,PanpanHuang,FuliLuo,ChongRuan,ZhifangSui,
+andWenfengLiang. Deepseekmoe: Towardsultimateexpertspecializationinmixture-of-experts
+languagemodels,2024.
+12NanDu,YanpingHuang,AndrewM.Dai,SimonTong,DmitryLepikhin,YuanzhongXu,Maxim
+Krikun, Yanqi Zhou, Adams Wei Yu, Orhan Firat, Barret Zoph, Liam Fedus, Maarten Bosma,
+Zongwei Zhou, Tao Wang, Yu Emma Wang, Kellie Webster, Marie Pellat, Kevin Robinson,
+KathleenMeier-Hellstern,TojuDuke,LucasDixon,KunZhang,QuocVLe,YonghuiWu,Zhifeng
+Chen,andClaireCui. Glam: Efficientscalingoflanguagemodelswithmixture-of-experts,2022.
+Ahmad Faiz, Sotaro Kaneda, Ruhan Wang, Rita Osi, Prateek Sharma, Fan Chen, and Lei Jiang.
+Llmcarbon: Modelingtheend-to-endcarbonfootprintoflargelanguagemodels,2024.
+WilliamFedus,BarretZoph,andNoamShazeer. Switchtransformers: Scalingtotrillionparameter
+modelswithsimpleandefficientsparsity,2022.
+Elias Frantar, Carlos Riquelme, Neil Houlsby, Dan Alistarh, and Utku Evci. Scaling laws for
+sparsely-connectedfoundationmodels,2023.
+Behrooz Ghorbani, Orhan Firat, Markus Freitag, Ankur Bapna, Maxim Krikun, Xavier Garcia,
+CiprianChelba,andColinCherry. Scalinglawsforneuralmachinetranslation,2021.
+TomHenighan,JaredKaplan,MorKatz,MarkChen,ChristopherHesse,JacobJackson,Heewoo
+Jun,TomB.Brown,PrafullaDhariwal,ScottGray,ChrisHallacy,BenjaminMann,AlecRad-
+ford,AdityaRamesh,NickRyder,DanielM.Ziegler,JohnSchulman,DarioAmodei,andSam
+McCandlish. Scalinglawsforautoregressivegenerativemodeling,2020.
+Sepp Hochreiter and Ju¨rgen Schmidhuber. Long short-term memory. Neural computation, 9(8):
+1735–1780,1997.
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza
+Rutherford, Diego de Las Casas, Lisa Anne Hendricks, Johannes Welbl, Aidan Clark, Tom
+Hennigan,EricNoland,KatieMillican,GeorgevandenDriessche,BogdanDamoc,AureliaGuy,
+SimonOsindero,KarenSimonyan,ErichElsen,JackW.Rae,OriolVinyals,andLaurentSifre.
+Trainingcompute-optimallargelanguagemodels,2022.
+PeterJ.Huber. RobustEstimationofaLocationParameter. TheAnnalsofMathematicalStatistics,
+35(1):73–101,1964. doi: 10.1214/aoms/1177703732. URLhttps://doi.org/10.1214/
+aoms/1177703732.
+AlbertQ.Jiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSinghChaplot,
+Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier,
+Le´lioRenardLavaud,Marie-AnneLachaux,PierreStock,TevenLeScao,ThibautLavril,Thomas
+Wang,Timothe´eLacroix,andWilliamElSayed. Mistral7b,2023.
+Albert Q. Jiang, Alexandre Sablayrolles, Antoine Roux, Arthur Mensch, Blanche Savary, Chris
+Bamford, Devendra Singh Chaplot, Diego de las Casas, Emma Bou Hanna, Florian Bressand,
+GiannaLengyel,GuillaumeBour,GuillaumeLample,Le´lioRenardLavaud,LucileSaulnier,Marie-
+AnneLachaux,PierreStock,SandeepSubramanian,SophiaYang,SzymonAntoniak,TevenLe
+Scao,The´ophileGervet,ThibautLavril,ThomasWang,Timothe´eLacroix,andWilliamElSayed.
+Mixtralofexperts,2024.
+JaredKaplan, SamMcCandlish, TomHenighan, TomB.Brown, BenjaminChess, RewonChild,
+ScottGray,AlecRadford,JeffreyWu,andDarioAmodei.Scalinglawsforneurallanguagemodels,
+2020.
+Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang,
+MaximKrikun,NoamShazeer,andZhifengChen. Gshard: Scalinggiantmodelswithconditional
+computationandautomaticsharding,2020.
+Mike Lewis, Shruti Bhosale, Tim Dettmers, Naman Goyal, and Luke Zettlemoyer. Base layers:
+Simplifyingtrainingoflarge,sparsemodels,2021.
+ZeyuLeoLiu,TimDettmers,XiVictoriaLin,VeselinStoyanov,andXianLi. Towardsaunifiedview
+ofsparsefeed-forwardnetworkinpretraininglargelanguagemodel,2023.
+IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization,2019.
+13JoanPuigcerver,CarlosRiquelme,BasilMustafa,andNeilHoulsby. Fromsparsetosoftmixturesof
+experts,2023.
+AlecRadford,KarthikNarasimhan,TimSalimans,andIlyaSutskever. Improvinglanguageunder-
+standingbygenerativepre-training. 2018a.
+Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, and Ilya Sutskever. Lan-
+guagemodelsareunsupervisedmultitasklearners. 2018b. URLhttps://d4mucfpksywv.
+cloudfront.net/better-language-models/language-models.pdf.
+JackW.Rae,SebastianBorgeaud,TrevorCai,KatieMillican,JordanHoffmann,FrancisSong,John
+Aslanides,SarahHenderson,RomanRing,SusannahYoung,ElizaRutherford,TomHennigan,
+JacobMenick,AlbinCassirer,RichardPowell,GeorgevandenDriessche,LisaAnneHendricks,
+Maribeth Rauh, Po-Sen Huang, Amelia Glaese, Johannes Welbl, Sumanth Dathathri, Saffron
+Huang,JonathanUesato,JohnMellor,IrinaHiggins,AntoniaCreswell,NatMcAleese,AmyWu,
+ErichElsen,SiddhantJayakumar,ElenaBuchatskaya,DavidBudden,EsmeSutherland,Karen
+Simonyan,MichelaPaganini,LaurentSifre,LenaMartens,XiangLorraineLi,AdhigunaKuncoro,
+AidaNematzadeh,ElenaGribovskaya,DomenicDonato,AngelikiLazaridou,ArthurMensch,
+Jean-Baptiste Lespiau, Maria Tsimpoukelli, Nikolai Grigorev, Doug Fritz, Thibault Sottiaux,
+Mantas Pajarskas, Toby Pohlen, Zhitao Gong, Daniel Toyama, Cyprien de Masson d’Autume,
+YujiaLi, TayfunTerzi, VladimirMikulik, IgorBabuschkin, AidanClark, DiegodeLasCasas,
+AureliaGuy,ChrisJones,JamesBradbury,MatthewJohnson,BlakeHechtman,LauraWeidinger,
+Iason Gabriel, William Isaac, Ed Lockhart, Simon Osindero, Laura Rimell, Chris Dyer, Oriol
+Vinyals,KareemAyoub,JeffStanway,LorrayneBennett,DemisHassabis,KorayKavukcuoglu,
+andGeoffreyIrving. Scalinglanguagemodels: Methods,analysis&insightsfromtraininggopher,
+2022.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,Yanqi
+Zhou,WeiLi,andPeterJ.Liu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-text
+transformer,2023.
+StephenRoller,SainbayarSukhbaatar,ArthurSzlam,andJasonWeston. Hashlayersforlargesparse
+models,2021.
+TevenLeScao,AngelaFan,ChristopherAkiki,ElliePavlick,SuzanaIlic´,DanielHesslow,Roman
+Castagne´,AlexandraSashaLuccioni,Franc¸oisYvon,MatthiasGalle´,JonathanTow,AlexanderM.
+Rush,StellaBiderman,AlbertWebson,PawanSasankaAmmanamanchi,ThomasWang,Benoˆıt
+Sagot,NiklasMuennighoff,AlbertVillanovadelMoral,OlatunjiRuwase,RachelBawden,Stas
+Bekman,AngelinaMcMillan-Major,IzBeltagy,HuuNguyen,LucileSaulnier,SamsonTan,Pe-
+droOrtizSuarez,VictorSanh,HugoLaurenc¸on,YacineJernite,JulienLaunay,MargaretMitchell,
+Colin Raffel, Aaron Gokaslan, Adi Simhi, Aitor Soroa, Alham Fikri Aji, Amit Alfassy, Anna
+Rogers,ArielKreisbergNitzav,CanwenXu,ChenghaoMou,ChrisEmezue,ChristopherKlamm,
+ColinLeong,DanielvanStrien,DavidIfeoluwaAdelani,DragomirRadev,EduardoGonza´lez
+Ponferrada,EfratLevkovizh,EthanKim,EyalBarNatan,FrancescoDeToni,Ge´rardDupont,
+Germa´nKruszewski,GiadaPistilli,HadyElsahar,HamzaBenyamina,HieuTran,IanYu,Idris
+Abdulmumin,IsaacJohnson,ItziarGonzalez-Dios,JavierdelaRosa,JennyChim,JesseDodge,
+Jian Zhu, Jonathan Chang, Jo¨rg Frohberg, Joseph Tobing, Joydeep Bhattacharjee, Khalid Al-
+mubarak,KimboChen,KyleLo,LeandroVonWerra,LeonWeber,LongPhan,LoubnaBenallal,
+LudovicTanguy,MananDey,ManuelRomeroMun˜oz,MaraimMasoud,Mar´ıaGrandury,Mario
+Sˇasˇko,MaxHuang,MaximinCoavoux,MayankSingh,MikeTian-JianJiang,MinhChienVu,
+MohammadA.Jauhar,MustafaGhaleb,NishantSubramani,NoraKassner,NurulaqillaKhamis,
+OlivierNguyen,OmarEspejel,OnadeGibert,PauloVillegas,PeterHenderson,PierreColombo,
+PriscillaAmuok,QuentinLhoest,RhezaHarliman,RishiBommasani,RobertoLuisLo´pez,Rui
+Ribeiro,SalomeyOsei,SampoPyysalo,SebastianNagel,ShamikBose,ShamsuddeenHassan
+Muhammad,ShanyaSharma,ShayneLongpre,SomaiehNikpoor,StanislavSilberberg,Suhas
+Pai,SydneyZink,TiagoTimponiTorrent,TimoSchick,TristanThrush,ValentinDanchev,Vas-
+silina Nikoulina, Veronika Laippala, Violette Lepercq, Vrinda Prabhu, Zaid Alyafeai, Zeerak
+Talat, Arun Raja, Benjamin Heinzerling, Chenglei Si, Davut Emre Tas¸ar, Elizabeth Salesky,
+SabrinaJ.Mielke,WilsonY.Lee,AbheeshtSharma,AndreaSantilli,AntoineChaffin,Arnaud
+Stiegler,DebajyotiDatta,ElizaSzczechla,GunjanChhablani,HanWang,HarshitPandey,Hendrik
+Strobelt, Jason Alan Fries, Jos Rozen, Leo Gao, Lintang Sutawika, M Saiful Bari, Maged S.
+14Al-shaibani,MatteoManica,NihalNayak,RyanTeehan,SamuelAlbanie,ShengShen,Srulik
+Ben-David,StephenH.Bach,TaewoonKim,TaliBers,ThibaultFevry,TrishalaNeeraj,Urmish
+Thakker, VikasRaunak, XiangruTang, Zheng-XinYong, ZhiqingSun, ShakedBrody, Yallow
+Uri,HadarTojarieh,AdamRoberts,HyungWonChung,JaesungTae,JasonPhang,OfirPress,
+ConglongLi,DeepakNarayanan,HatimBourfoune,JaredCasper,JeffRasley,MaxRyabinin,
+MayankMishra,MinjiaZhang,MohammadShoeybi,MyriamPeyrounette,NicolasPatry,Noua-
+maneTazi,OmarSanseviero,PatrickvonPlaten,PierreCornette,PierreFranc¸oisLavalle´e,Re´mi
+Lacroix,SamyamRajbhandari,SanchitGandhi,ShadenSmith,Ste´phaneRequena,SurajPatil,Tim
+Dettmers,AhmedBaruwa,AmanpreetSingh,AnastasiaCheveleva,Anne-LaureLigozat,Arjun
+Subramonian,Aure´lieNe´ve´ol,CharlesLovering,DanGarrette,DeepakTunuguntla,EhudReiter,
+EkaterinaTaktasheva,EkaterinaVoloshina,EliBogdanov,GentaIndraWinata,HaileySchoelkopf,
+Jan-ChristophKalo,JekaterinaNovikova,JessicaZosaForde,JordanClive,JungoKasai,Ken
+Kawamura,LiamHazan,MarineCarpuat,MirunaClinciu,NajoungKim,NewtonCheng,Oleg
+Serikov,OmerAntverg,OskarvanderWal,RuiZhang,RuochenZhang,SebastianGehrmann,
+ShacharMirkin,ShaniPais,TatianaShavrina,ThomasScialom,TianYun,TomaszLimisiewicz,
+Verena Rieser, Vitaly Protasov, Vladislav Mikhailov, Yada Pruksachatkun, Yonatan Belinkov,
+ZacharyBamberger,ZdeneˇkKasner,AliceRueda,AmandaPestana,AmirFeizpour,AmmarKhan,
+AmyFaranak,AnaSantos,AnthonyHevia,AntigonaUnldreaj,ArashAghagol,ArezooAbdollahi,
+AychaTammour, AzadehHajiHosseini, BaharehBehroozi, BenjaminAjibade, BharatSaxena,
+CarlosMun˜ozFerrandis,DanielMcDuff,DanishContractor,DavidLansky,DavisDavid,Douwe
+Kiela,DuongA.Nguyen,EdwardTan,EmiBaylor,EzinwanneOzoani,FatimaMirza,Frankline
+Ononiwu,HabibRezanejad,HessieJones,IndraniBhattacharya,IreneSolaiman,IrinaSedenko,
+IsarNejadgholi,JessePassmore,JoshSeltzer,JulioBonisSanz,LiviaDutra,MaironSamagaio,
+MaraimElbadri,MargotMieskes,MarissaGerchick,MarthaAkinlolu,MichaelMcKenna,Mike
+Qiu, Muhammed Ghauri, Mykola Burynok, Nafis Abrar, Nazneen Rajani, Nour Elkott, Nour
+Fahmy,OlanrewajuSamuel,RanAn,RasmusKromann,RyanHao,SamiraAlizadeh,Sarmad
+Shubber,SilasWang,SouravRoy,SylvainViguier,ThanhLe,TobiOyebade,TrieuLe,YoyoYang,
+ZachNguyen,AbhinavRameshKashyap,AlfredoPalasciano,AlisonCallahan,AnimaShukla,
+AntonioMiranda-Escalada,AyushSingh,BenjaminBeilharz,BoWang,CaioBrito,ChenxiZhou,
+Chirag Jain, Chuxin Xu, Cle´mentine Fourrier, Daniel Leo´n Perin˜a´n, Daniel Molano, Dian Yu,
+EnriqueManjavacas,FabioBarth,FlorianFuhrimann,GabrielAltay,GiyaseddinBayrak,Gully
+Burns, Helena U. Vrabec, Imane Bello, Ishani Dash, Jihyun Kang, John Giorgi, Jonas Golde,
+JoseDavidPosada,KarthikRangasaiSivaraman,LokeshBulchandani,LuLiu,LuisaShinzato,
+Madeleine Hahn de Bykhovetz, Maiko Takeuchi, Marc Pa`mies, Maria A Castillo, Marianna
+Nezhurina,MarioSa¨nger,MatthiasSamwald,MichaelCullan,MichaelWeinberg,MichielDe
+Wolf,MinaMihaljcic,MinnaLiu,MoritzFreidank,MyungsunKang,NatashaSeelam,Nathan
+Dahlberg,NicholasMichioBroad,NikolausMuellner,PascaleFung,PatrickHaller,RamyaChan-
+drasekhar, Renata Eisenberg, Robert Martin, Rodrigo Canalli, Rosaline Su, Ruisi Su, Samuel
+Cahyawijaya,SamueleGarda,ShlokSDeshmukh,ShubhanshuMishra,SidKiblawi,SimonOtt,
+SineeSang-aroonsiri,SrishtiKumar,StefanSchweter,SushilBharati,TanmayLaud,The´oGigant,
+TomoyaKainuma,WojciechKusa,YanisLabrak,YashShaileshBajaj,YashVenkatraman,Yifan
+Xu,YingxinXu,YuXu,ZheTan,ZhongliXie,ZifanYe,MathildeBras,YounesBelkada,and
+ThomasWolf. Bloom: A176b-parameteropen-accessmultilinguallanguagemodel,2023.
+NoamShazeer,AzaliaMirhoseini,KrzysztofMaziarz,AndyDavis,QuocLe,GeoffreyHinton,and
+JeffDean. Outrageouslylargeneuralnetworks: Thesparsely-gatedmixture-of-expertslayer,2017.
+NoamShazeer,YoulongCheng,NikiParmar,DustinTran,AshishVaswani,PenpornKoanantakool,
+Peter Hawkins, HyoukJoong Lee, Mingsheng Hong, Cliff Young, Ryan Sepassi, and Blake
+Hechtman. Mesh-tensorflow: Deeplearningforsupercomputers,2018.
+HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,Timothe´e
+Lacroix,BaptisteRozie`re,NamanGoyal,EricHambro,FaisalAzhar,AurelienRodriguez,Armand
+Joulin,EdouardGrave,andGuillaumeLample. Llama: Openandefficientfoundationlanguage
+models,2023a.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+Bashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,DanBikel,LukasBlecher,Cris-
+tianCantonFerrer, MoyaChen, GuillemCucurull, DavidEsiobu, JudeFernandes, JeremyFu,
+WenyinFu, BrianFuller, CynthiaGao, VedanujGoswami, NamanGoyal, AnthonyHartshorn,
+15SagharHosseini,RuiHou,HakanInan,MarcinKardas,ViktorKerkez,MadianKhabsa,Isabel
+Kloumann,ArtemKorenev,PunitSinghKoura,Marie-AnneLachaux,ThibautLavril,JenyaLee,
+DianaLiskovich,YinghaiLu,YuningMao,XavierMartinet,TodorMihaylov,PushkarMishra,
+IgorMolybog,YixinNie, AndrewPoulton, JeremyReizenstein, RashiRungta, KalyanSaladi,
+AlanSchelten,RuanSilva,EricMichaelSmith,RanjanSubramanian,XiaoqingEllenTan,Binh
+Tang,RossTaylor,AdinaWilliams,JianXiangKuan,PuxinXu,ZhengYan,IliyanZarov,Yuchen
+Zhang, Angela Fan, Melanie Kambadur, Sharan Narang, Aurelien Rodriguez, Robert Stojnic,
+SergeyEdunov, andThomasScialom. Llama2: Openfoundationandfine-tunedchatmodels,
+2023b.
+ShukangYin,ChaoyouFu,SiruiZhao,KeLi,XingSun,TongXu,andEnhongChen. Asurveyon
+multimodallargelanguagemodels,2023.
+YanqiZhou,TaoLei,HanxiaoLiu,NanDu,YanpingHuang,VincentZhao,AndrewDai,Zhifeng
+Chen,QuocLe,andJamesLaudon. Mixture-of-expertswithexpertchoicerouting,2022.
+YanqiZhou,NanDu,YanpingHuang,DaiyiPeng,ChangLan,DaHuang,SiamakShakeri,David
+So,AndrewDai,YifengLu,ZhifengChen,QuocLe,ClaireCui,JamesLaundon,andJeffDean.
+Brainformers: Tradingsimplicityforefficiency,2023.
+16A ARCHITECTURE AND TRAINING SETUP
+Allofthemodelsconsideredinthisworkaredecoder-onlyTransformerstrainedontheC4dataset
+(Raffeletal.,2023). WeuseGPT2tokenizer(Radfordetal.,2018a). Eachbatchconsistsof0.5M
+tokenspackedinto2048sequences. OuroptimizerisAdamW(Loshchilov&Hutter,2019),witha
+weightdecayof0.1.Ineachtrainingrun,weusethemaximumlearningrateof2e−4,withlinear
+warmupfor1%stepsandcosinedecayto2e−5.Toimprovestability,weinitializeweightsusingthe
+truncatednormaldistributionwithreducedscale,asadvisedinFedusetal.(2022). Themodelsare
+trainedusingmixedprecision;wealwayskeeptheattentionmechanismandrouterinhighprecision.
+Weassumetheinfinitedataregime,asthenumberoftrainingtokensforanyoftherunsislessthan
+thenumberoftokensinthecorpus. WefollowHoffmannetal.(2022)andperformouranalysison
+thesmoothedtrainingloss.
+InMoE,weusetheExpertChoiceroutingalgorithm,asitguaranteesabalancedexpertloadwithout
+tuningadditionalhyperparameters. Tomaintaincompatibilitywithautoregressivelanguagemodeling,
+weapplytherecipedescribedinZhouetal.(2022): tokensaregroupedbypositionacrossdifferent
+sequences. Thegroupsizeisalwayssetto256.WematchthenumberofFLOPsforMoEanddense
+modelswiththesamed (meaningweactivateanaverageof8d2 parameterspertokenineach
+model model
+MoElayer). Intherouter,softmaxisperformedovertheexpertdimension,whilewechoosetokens
+overthetokendimension,asthisleadstothebestperformance(asopposedtoperformingsoftmax
+overthetokendimension). WeputanadditionallayernormalizationbeforetheoutputofMoElayer.
+ThisgivesasmallimprovementforstandardMoE,butiscrucialfortheperformanceofmodelswith
+G>1.
+Table3andTable4listtheconsideredarchitectureandtrainingvariantsfordenseandMoEmodels,
+respectively.
+Table3: Architectureandtrainingvariants(MoEmodels).
+#parameters(nonemb) d n n D(in#tokens) G
+model blocks heads
+64x3M 256 4 4 16B,33B,66B 1,2,4,8,16
+64x7M 384 4 6 16B,33B,66B 1,2,4,8,16
+64x13M 512 4 8 16B,33B,66B 1,2,4,8,16
+64x13M 512 4 8 130B 1,2,4
+64x25M 512 8 8 16B,33B, 1,2,4,8,16
+64x25M 512 8 8 66B 1,2,4,8
+64x49M 640 10 10 16B,33B 1,2,4,8,16
+64x49M 640 10 10 66B 1,2,4
+64x85M 768 12 12 33B 1,2,4
+Table4: Architectureandtrainingvariants(densemodels).
+#parameters(nonemb) d n n D(in#tokens)
+model blocks heads
+3M 256 4 4 16B,24B,33B,66B
+6M 256 8 4 16B,24B,33B,66B
+13M 512 4 8 16B,24B,33B,66B
+25M 512 8 8 16B,24B,33B,66B
+49M 640 10 10 16B,24B,33B,66B
+85M 768 12 12 16B,33B
+17B VALIDATION OF THE SCALING LAW
+In this section, we provide coefficients of the scaling law fitted with 20% of datapoints with the
+lowestperplexityexcludedforthepurposeofvalidation.
+Table5: Valuesofthefittedcoefficients.
+Model a α b β g γ c
+MoE 17.6 0.114 26.7 0.140 2.07 0.570 0.472
+C RELIABILITY OF COMPUTE OPTIMAL FORMULA
+In this section, we assess the stability of our predictions presented in Section 6.1. Similarly to
+Hoffmannetal.(2022)wecalculatethe10thand90thpercentilesestimatedviabootstrappingdata
+(80%ofthedataissampled100times). SeeTable6forthedetails.
+Table6: 10thand90thpercentilesestimatedviabootstrapingdata.
+N D G
+64x100M (2.97B,5.98B) (8,8)
+64x1B (21.17B,40.73B) (16,16)
+64x3B (50.20B,105.88B) (16,32)
+64x7B (101.06B,205.40B) (32,32)
+64x70B (638.49B,1.59T) (32,64)
+64x300B (1.99T,5.62T) (64,64)
+64x1T (5.29T,16.87T) (64,64)
+D VARYING EXPANSION RATE
+Inthissection,weprovideresultsforE = 16.Thetrainingprocedureisthesameasdescribedin
+App. A.ThemodelsconsideredinthispartarelistedinTable7.
+Table7: Architectureandtrainingvariants(MoEmodels).
+#parameters(nonemb) d n n D(in#tokens) G
+model blocks heads
+64x3M 256 4 4 8B,16B,33B 1,2,4,8,16
+64x7M 256 8 4 8B,16B,33B 1,2,4,8,16
+64x13M 512 4 8 8B,16B,33B 1,2,4,8,16
+64x13M 512 4 8 66B 1,2,4
+64x25M 512 8 8 8B,16B,33B 1,2,4,8,16
+64x49M 640 10 10 8B 1,2,4,8,16
+WefitEq.9usingthesameprocedureasdescribedinSection5.4. TheresultsaredetailedinTable8.
+Table8: Valuesofthefittedcoefficients.
+Model a α b β g γ c
+MoE(E =16) 19.64 0.124 57.07 0.169 1.18 0.986 0.472
+18UsingthecoefficientsandFLOPscalculationformulas,wecanderivethecomputeoptimaltraining
+parameters. TheresultsarepresentedinTable9.
+Table9: 10thand90thpercentilesestimatedviabootstrappingdataforE =16.
+N D G
+16x100M (10.29B,17.73B) (8,16)
+16x1B (53.74B,103.54B) (16,32)
+16x3B (106.22B,261.04B) (16,32)
+16x7B (177.65B,511.43B) (16,32)
+16x70B (721.60B,3.22T) (32,64)
+16x300B (1.73T,10.69T) (32,64)
+16x1T (3.60T,28.22T) (32,128)
+WecanobservethatsimilarlytothecasewhenE =64,largercomputebudgetsimplylargeroptimal
+valuesofG.Notethatthevaluesfor10thand90thpercentilesformlargerintervalsinthiscase,asin
+thispartwerunasmallernumberofexperimentsandkeepshortertrainingdurations. However,we
+believethatthispreliminarystudyformsavaluableadditiontotheresultsinthemainpart.
+E FLOPS CONSTANTS
+ThenumberofFLOPsF usedinTransformertraining,consideringtheroutingoperationoverheadin
+MoE,canbedescribedbythefollowingformula:
+F =(12d 2c +d EGc )·n ·n (11)
+model f model r tokens layers
+FollowingHoffmannetal.(2022),weassumec tobe6. Thisisinterpretedas6FLOPsforeachpair
+f
+ofanactiveparameter(inlinearprojection)andaprocessedtoken. Thebreakdownofoperationsis
+asfollows:
+• Duringtheforwardpass,2operations(singlemultiplicationandsingleaddition)areusedto
+computethematrixmultiplicationofaninputandlinearprojection.
+• Duringthebackwardpass,2operationsareusedtocomputegradientswrt. theinput.
+• Duringthebackwardpass,2operationsareusedtocomputegradientswrt. theweightsof
+linearprojection.
+Inourwork,wehaveassumedtheroutingconstant,c ,tobe14,withthebreakdownpresentedbelow.
+r
+Theexactnumberofoperationsmaydependontheimplementationofrouting,butitwillbebetween
+6and20. However,ourmainconclusionsofthepaperareresistanttodifferentassumptionsofthis
+constant.
+• Duringtheforwardpass,2operationsareusedtocomputetheexpertlogitsbasedonan
+inputand“routinglinearprojection”.
+• Duringthebackwardpass,2operationsareusedtocomputegradientsfor“routinglinear
+projection”wrt. theinput.
+• Duringthebackwardpass,2operationsareusedtocomputegradientsfor“routinglinear
+projection”wrt. theweightsoflinearprojection.
+• Duringtheforwardpass,2operationsareusedtorouteinputtokenstochosenexperts.
+• Duringtheforwardpass,2operationsareusedtorouteexpertoutputstochosentokensand
+multiplythoseoutputsbytheroutingscore.
+• Duringthebackwardpass,2operationsareusedtoroutegradientsfromoutputtokensto
+experts.
+• Duringthebackwardpass,2operationsareusedtoroutegradientsfromexpertstoinput
+tokens.
+19SimilarlytothecalculationofFLOPsforc ,FLOPscomeinpairsaseachmultiplicationisfollowed
+f
+byanaddition(usedtoaccumulateoutputsorgradients).
+F ADDITIONAL VISUALIZATIONS
+Granularity=1 Granularity=2
+3.8 Training tokens 3.8 Training tokens
+16B 16B
+33B 33B
+3.6 66B 3.6 66B
+3.4 3.4
+3.2 3.2
+3.0 3.0
+2.8 107 2.8 107
+Number of parameters Number of parameters
+(a) (b)
+Granularity=8 Granularity=16
+3.8 Training tokens 3.8 Training tokens
+16B 16B
+33B 33B
+3.6 66B 3.6 66B
+3.4 3.4
+3.2 3.2
+3.0 3.0
+2.8 107 2.8 107
+Number of parameters Number of parameters
+(c) (d)
+Figure6: IllustrationofscalingN andDforconstantgranularityvalueof: (a)G=1(b)G=2(c)
+G=8(d)G=16.
+2×101
+101
+101
+6×102
+6×102 4×102
+3×102
+4×102
+1 2 4 8 16 1 2 4 8 16
+Granularity Granularity
+(a) (b)
+2×101
+101
+101
+6×102
+4×102 6×102
+3×102
+4×102
+1 2 4 8 16 1 2 4 8 16
+Granularity Granularity
+(c) (d)
+Figure7: IllustrationofscalinggranularitywhenN,Darefixedfor: (a)N =64×25M,D =16B,
+const = 3.12 (b) N = 64×49M, D = 16B, const = 3.02 (c) N = 64×25M, D = 32B,
+const=3.03(d)N =64×49M,D =32B,const=2.88
+20
+ssoL
+ssoL
+tsnoc
+- ssoL
+tsnoc
+- ssoL
+ssoL
+ssoL
+tsnoc
+- ssoL
+tsnoc
+- ssoL
