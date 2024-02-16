@@ -1,0 +1,962 @@
+Active Disruption Avoidance and Trajectory Design
+for Tokamak Ramp-downs with Neural Differential
+Equations and Reinforcement Learning
+Allen M. Wang1,2,*, Oswin So2, Charles Dawson2, Darren Garnier1,3, Cristina Rea1, and
+Chuchu Fan2
+1PlasmaScienceandFusionCenter,MassachusettsInstituteofTechnology,Cambridge,MA02410,USA
+2LaboratoryforInformationandDecisionSystems,MassachusettsInstituteofTechnology,Cambridge,MA02410,
+USA
+3OpenStarTechnologiesLLC.,Wellington,Wellington6035,NewZealand
+*CorrespondingAuthor: allenw@mit.edu
+ABSTRACT
+The tokamak offers a promising path to fusion energy, but plasma disruptions pose a major economic risk, motivating
+considerableadvancesindisruptionavoidance. Thisworkdevelopsareinforcementlearningapproachtothisproblemby
+training a policy to safely ramp-down the plasma current while avoiding limits on a number of quantities correlated with
+disruptions. Thepolicytrainingenvironmentisahybridphysicsandmachinelearningmodeltrainedonsimulationsofthe
+SPARCprimaryreferencedischarge(PRD)ramp-down,anupcomingburningplasmascenariowhichweuseasatestbed.
+Toaddressphysicsuncertaintyandmodelinaccuracies,thesimulationenvironmentismassivelyparallelizedonGPUwith
+randomizedphysicsparametersduringpolicytraining. Thetrainedpolicyisthensuccessfullytransferredtoahigherfidelity
+simulatorwhereitsuccessfullyrampsdowntheplasmawhileavoidinguser-specifieddisruptivelimits. Wealsoaddressthe
+crucial issue of safety criticality by demonstrating that a constraint-conditioned policy can be used as a trajectory design
+assistanttodesignalibraryoffeed-forwardtrajectoriestohandledifferentphysicsconditionsandusersettings. Asalibrary
+oftrajectoriesismoreinterpretableandverifiableoffline,wearguesuchanapproachisapromisingpathforleveragingthe
+capabilitiesofreinforcementlearninginthesafety-criticalcontextofburningplasmatokamaks. Finally,wedemonstratehow
+thetrainingenvironmentcanbeausefulplatformforotherfeed-forwardoptimizationapproachesbyusinganevolutionary
+algorithmtoperformoptimizationoffeed-forwardtrajectoriesthatarerobusttophysicsuncertainty.
+Introduction
+Plasmadisruptions,eventswherecontroloftheplasmaislost,standasamajorbarriertorealizingeconomicalfusionenergy
+throughtokamakdevices. Unmitigateddisruptionsinexistingtokamakpilotplantdesigns,suchasARC,maydisruptmachine
+operations for months or longer1. Even at the energies of upcoming burning plasma devices such as SPARC and ITER,
+disruptions represent a major challenge, driving costly design requirements and posing risks of major delays to tokamak
+operations2,3. Toovercomethechallengeofdisruptions,considerableadvancesareneededinavoidance,mitigation,resilience,
+and recovery (AMRR) techniques. Given that “mitigation” is crucial for avoiding the most expensive consequences of
+disruptions,aconsiderablebodyofresearchhasevolveddevelopingbothmitigationactuators,suchasmassivegasinjection
+(MGI)4,anddisruptionpredictionalgorithmstotriggersaidmitigationactuators5–7. Whilerobust,reliablemitigationiscrucial
+forinvestmentprotection,itisstillexpectedtoinduceconsiderablestressontokamakcomponentsandshouldbeconsidereda
+methodoflastresort8. Thus,disruptionavoidancewouldbepreferable.
+Inthispaper,wedefineactivedisruptionavoidanceasanyreal-timetechniquewheretheplasmacontrolsystem(PCS)
+intelligentlycommandsactuatorstodrivetheplasmastateawayfrominstabilitylimitsandeitherreturnstonominaloperations
+orde-energizestheplasmatoasufficientlylowenergysuchthatadisruptionisinconsequential. Wefocusspecificallyonthe
+“ramp-down”phase,wheretheplasmaisde-energized. Theprimaryfigureofmeritforasuccessfulramp-downisoftenthe
+plasmacurrentI atwhichtheplasmaterminatesasbothstructuralloadingandtheriskposedbyrunawayelectronsscale
+p
+withI 9. Inrecentyears,workshavedevelopedbothSequentialQuadraticProgramming(SQP)andBayesianOptimization
+p
+approachesfordesigningfastfeed-forwardramp-downtrajectoriesthatareprogrammedintothemachine10–12. However,many
+challengesremainunaddressedsuchasdemonstratingscalabilitytoallowforthegenerationofmanytrajectoriestohandle
+differentscenarios,andtheoptimizationoftrajectoriesthatarerobusttophysicsuncertainty. Inaddition,activedisruption
+avoidance,remainsanunder-developedareaofresearchwithcallsforfurtheradvancement13,14.
+4202
+beF
+41
+]hp-msalp.scisyhp[
+1v78390.2042:viXraTheproblemsettingoframp-downsandactivedisruptionavoidancefacestheconsiderablechallengeofphysicsuncertainty.
+Whilerecentworksuccessfullydemonstratedtheapplicationofreinforcementlearning(RL)totheproblemofshapecontrol15,
+thephysicsrelevanttotheproblem,idealMagnetohydrodynamics(MHD),isarguablythemostwell-understoodandwell-
+simulated aspect of tokamak plasma physics. Disruption avoidance, however, is more challenging as it involves complex
+physicalphenomenasuchasturbulenttransportforwhichaccurate,full-shotsimulationfromphysics-basedprinciplesremains
+anopenresearchproblem. Thehighestfidelitysimulationsofcoreturbulenceperformedtodaywithnonlineargyrokinetics
+takemillionsofCPU-hourstosimulateasteady-stateconditionand,eventhen,requireboundaryconditionassumptionson
+quantitiessuchasthepedestalpressureandimpuritydensities16. Theextremecomputationalrequirementsofphysics-based
+simulationsstandsinstarkcontrasttotokamakoperationsrequirements. Whenunexpectedphysicsortechnicalissuesarise
+duringtokamakoperations,dynamicsmodels,trajectories,andcontrollersneedtobeupdatedassoonaspossibletoensure
+subsequentdischargesaresuccessful. Asaconsequence,scenarioandcontroldesignisoftenperformedwithhighlysimplified
+dynamicsmodelsthroughempiricalpower-lawscalingsandlinearsystemsobtainedwithtechniquesfromclassicalsystem
+identification17. In fact, both the ITER and SPARC nominal operating scenarios were designed using empirical plasma
+operationalcontour(POPCON)scalingswithscenariovalidationperformedwithhigherfidelitysimulations18–20.
+Thischallengehasmotivatedthedevelopmentofdata-drivendynamicsmodelsofexistingdevicesforthepurposesof
+reinforcement learning, but standard sequence-to-sequence models in the deep learning toolbox, such as recurrent neural
+networks(RNNs)andtransformers,aregenerallynotsampleefficient. Thisisamajorchallengeasburningplasmatokamaks
+mustworkreliablywithasfewshotsoftrainingdataaspossible,giventhehighcostofdisruptions;existingworksoftenuse
+morethan104shotsofdata21,22. Sample-efficientdynamicsmodellingmethodsareneeded.
+StatementofContributions: Thispaperaimstoadvancethestate-of-the-artonthreefronts: sample-efficientdynamics
+modellearning,activedisruptionavoidance,andoptimizingfeed-forwardtrajectorieswithrobustnesstophysicsuncertainty.
+Toaddressthemodellearningproblem,wetrainasimplehybriddynamicsmodelthatcontainsbothphysicsandmachine
+learning components on a relatively small dataset of simulations of SPARC PRD ramp-downs with the control-oriented
+simulatorRAPTOR23,24.ThisdynamicsmodelisfullyimplementedinthemachinelearningframeworkJAX25,andisthus
+fullydifferentiableandGPU-capable,enablingmassiveparallelizationacrossphysicsassumptions. Wethenwrapthisdynamics
+modelinanOpenAIGym26environmenttocreatewhatwecall“PopDownGym”. WeusePopDownGymtoaddressthematters
+offeed-forwardtrajectoryoptimizationandactivedisruptionavoidanceinaunifiedreinforcementlearning(RL)approach. Asa
+firststeptowardsexperimentaldemonstrationofactivedisruptionavoidance,wetrainapolicyonPopDownGymwithProximal
+PolicyOptimization(PPO)anddemonstrateitstransfertoRAPTORwhereitsuccessfullyrampsdownasimulatedplasma
+whileavoidinguserspecifiedlimits. Weaddresstheissueofsafetycriticalitybydemonstratinghowaconstraint-conditioned
+policycanbeusedtodesignalibraryoftrajectoriestohandledifferentconditionsbyperformingpolicyrolloutonsimulators
+underdifferentphysicssettings. Finally,webridgethegapbetweenreinforcementlearningandmoreconventionaltrajectory
+optimizationapproachesbyusingtheRLtrainingenvironmenttoperformrobustoptimizationofafeed-forwardtrajectorywith
+anevolutionaryalgorithm.
+Background
+ReinforcementLearningandOptimalControl
+Thissectionaimstoprovideabriefoverviewofreinforcementlearningandshowhowitcanbeappliedtotheproblemof
+trajectoryoptimization, whichistypicallyapproachedfromtheperspectiveofoptimalcontrol. Reinforcementlearningis
+typicallyconcernedwithsolvingPartiallyObservableMarkovDecisionProcesses(POMDPs). APOMDPisdefinedbystates
+xinastatespaceX,actionsainanactionspaceA,arewardfunctionmappingstatesandactionstoareal-valuedscalar
+r(x,a):X ×A →Randa,possiblystochastic,dynamicsmodelthatmapsstateandactionattimet tostatesatthenexttime
+step: x = f(x,a). InaPOMDP,thestateisnotobservabletothecontrolpolicy,itinsteadreceivesanobservationvector
+t+1 t t
+fromanobservationfunctionOthatmapstheunderlyingstatevectortotheobservationspace,O:o =O(x). Thefullproblem
+t t
+statementofaPOMDPisthusgivenby:
+T
+max∑γtE[r(x,a)] (1a)
+t t
+a0:T
+t=0
+s.t. x = f(x,a) ∀t (1b)
+t+1 t t
+o =O(x) ∀t (1c)
+t t
+x ∈X ∀t (1d)
+t
+a ∈A ∀t (1e)
+t
+2/17InaPOMDP,therewardfunctionisusuallyengineeredtoachievethedesiredoutcome. Forexample,inthecontextofvideo
+games,therewardfunctionisdesignedtoexpresswinsandlosses. Inthecontextoftheramp-downproblemaddressedby
+thispaper,wedesigntherewardfunctiontorewardde-energizingtheplasmawhileavoidingdisruptiveandmachinelimits.
+Thediscountfactorγ ∈[0,1]oftenaugmentstherewardfunctiontoreducetheweightoffuturerewardsandprioritizepresent
+rewards. SolutionstoPOMDPstypicallytakeoneoftwoforms: eitheracontrolpolicyoratrajectory. Acontrolpolicyis
+afunctionmappingobservationstoactionsa =π(o). Inthemoderndeepreinforcementlearningparadigm, itisusually
+t t
+implementedasadeepneuralnetwork.
+Anotherpossiblesolutiontypeisanopen-looptrajectory. Foragiveninitialstate,x ,andcorrespondingobservation,o ,
+0 0
+anactiontrajectoryisasequenceofactions[a ,a ,...,a ]overtime. Observethatgivenaccesstothedynamicsfunction f
+0 1 T
+andobservationfunctionO,onecanusetheinitialstateandanactiontrajectorytogenerateastatetrajectorybyrecursive
+applicationofthedynamicsfunction:
+x = f(x ,a ) (2a)
+1 0 0
+x = f(x ,a ) (2b)
+2 1 1
+.
+.
+.
+x = f(x ,a ) (2c)
+T+1 T T
+andthenanobservationtrajectorycanbegeneratedbyapplyingOtothestatetrajectory. Thecomputationalproblemoffinding
+optimaltrajectoriesisoftenreferredtoastrajectoryoptimizationandhaslargelybeenadvancedbythefieldofoptimalcontrol.
+Infact,thePOMDPformulationisdirectlyanalogoustostandardformulationsofstochasticoptimalcontrol27.
+Acontrolpolicycanbeviewedasamoregeneralsolutionthanatrajectoryas,givensomeinitialstate,thecontrolpolicy
+canbeusedalongwiththetransitionfunctiontogenerateatrajectorythroughaprocessknownaspolicyrollout. Theideaisto
+recursivelymaptheinitialstatetoanobservation,feedtheobservationintothepolicytodetermineanaction,andthenapply
+thestateandactiontothesimulator f:
+a =π(O(x )) x = f(x ,a ) (3a)
+0 0 1 0 0
+a =π(O(x )) x = f(x ,a ) (3b)
+1 1 2 1 1
+.
+.
+.
+a =π(O(x )) x = f(x ,a ) (3c)
+T T T+1 T T
+WhilecontrolpoliciestrainedthroughRLareoftenthoughtofasproductsforreal-timecontrol,theprocessofrolloutcan
+alsobeusedtogeneratetrajectoriesofflinethroughsimulation. TheotherkeydistinctionbetweentheRLandoptimalcontrol
+frameworksisthatthelatterexplicitlysupportsconstraints. However,asshownintheMethodssection,constraintscanbe
+implementedinrewardfunctionsviapenaltyterms. Infact,manynonlinearoptimizationmethodsusedinoptimalcontrol
+implementconstraintsascosttermsunderthehoodwithmethodssuchasaugmentedlagrangiansandbarrierfunctions28,29.
+ChallengesofPlasmaDynamicsModelling
+Inthecontextofplasmacontrol,definingthedynamicsfunction f andobservationfunctionOareconsiderablechallenges.
+While accurate full-shot simulation of plasmas from first principles is itself an open research problem, application of RL
+techniquesgenerallyrequiresstable,massivelyparallelizedsimulationwithrandomizedphysicsandthusimposesevenmore
+stringentsoftwarerequirements. Thesechallengingrequirementshavemotivatedworkondevelopingneuralnetworkdynamics
+models trained on machine data21,22. However, the relative paucity of available fusion data makes sample-efficiency and
+robustnessofthesemodelsaconsiderablechallenge.
+Atthesametime,reactorandcontroldesignareoftenperformedusingrelativelysimple0-Dmodelswhichareusedtofind
+designpointsthatarethenvalidatedusinghigherfidelitytransportsimulations. Inthecontextofreactordesign,suchmodels
+areoftenreferredtoasPlasmaOperatingContour(POPCON)modelsandincludewell-establishedphysics,suchasreactivity
+curves,withempiricalscalings,suchasτ scalings18,30. Despitetheirsimplicity,suchmodelshaveproducedpredictionsof
+E
+keyperformancemetricssuchasenergygainandτ thatareinlinewithnonlineargyrokineticsimulations. Inthecontext
+E
+ofcontroldesign,classicalsystemidentificationtechniquesareoftenemployedtofitlineardynamicalsystemstoempirical
+data;controllersarethendesignedontheselinearmodels31. Despitethecomplexityofplasmadynamics,suchtechniqueshave
+proveneffectiveforcontroldesignincertaincases24.
+NeuralDifferentialEquationsandDifferentiableSimulation
+While classical system identification techniques have yielded successes, further advances are needed. Fortunately, recent
+advancesmadebythescientificmachinelearningcommunityindifferentiablesimulationandneuraldifferentialequations
+3/17offersapowerfulnewtoolboxforcomplexnonlinearsystemidentification32–34. Thisworkappliessuchadvancestotrain
+POPCON-likedynamicsmodelsthatcombinephysicsstructurewithmachinelearningtopredictdynamicsfromrelativelyfew
+samples. IncontrasttostandardPOPCONmodels,themodelistime-dependentanditsfreeparameterscanbeupdatedtonew
+empiricaldata,and,incontrasttoclassicalsystemidentificationtechniques,themodelcanbehighlynonlinear.
+Considerthefollowingnonlineardynamicalsystemwhere f isaneuralnetworkwithfreeparametersθ:
+θ
+dx
+= f (x) (4)
+dt θ
+Suchanequationisknownasaneuraldifferentialequation(NDE).BothtrainingandinferenceofNDEsinvolvesnumerically
+integratingtheneuralnetworkfromitsinitialconditionx(0)acrosssometimehorizontosometerminalvalue. Whilestandard
+feed-forwardneuralnetworkshavethefollowinginput-outputrelationship:
+y=NN (x) (5)
+θ
+NDEshavethefollowinginput-outputrelationship:
+y=diffeqsolve(f ,x ) (6)
+θ 0
+wherediffeqsolveisanumericalintegrationschemesuchasexplicitorimplicitRunge-Kuttamethods. Then,givendatayˆ,and
+alossfunctiondefiningerrorbetweensimulationanddataL(y,yˆ),adjointmethods32,33canbeusedtoefficientlycomputethe
+gradientofthislossfunctionwithrespecttothemodelparameters∇ L(y,yˆ). Whilewehavethuscenteredthisdiscussion
+θ
+aroundthecasewhere f isaneuralnetwork,thesamemethodologyappliestoallfunctions f thataredifferentiablewith
+θ θ
+respecttoθ. Historically,thedifferentiabilityrequirementshavelimitedthecomplexityof f . However,modernautomatic
+θ
+differentiationframeworksallowforhighlycomplexchoicesof f thatcanalsoincludephysics. Thismoregeneralsettingis
+θ
+oftenreferredtoasdifferentiablesimulationandenablesthedevelopmentof f modelsthatcontainbothphysicsandneural
+θ
+networkcomponents.
+Results
+WeusethesimulatorRAPTORconfiguredtotheSPARCprimaryreferencedischarge(PRD)18,an8.7MegaAmpere(MA)
+H-modescenarioprojectedtoreachQ≈11,asourtestbed. Wefirstgenerateadatasetof481ramp-downsimulationswith
+varying plasma current and auxiliary heating ramp-rates. 336 of these ramp-down simulations are then used to train the
+PopDownGymdynamicsmodelwhiletherestareusedforvalidationandtest.
+AsshowninTable1,thepolicyreceivesanobservationfromaneightdimensionalobservationspacetoselectanaction
+vectorfromafourdimensionalactionspace. IthasthegoaloframpingdowntheplasmacurrenttobelowtwoMA,alevel
+existingdeviceshavesafelyoperatedat9,whileavoidinguser-specifiedconstraintsoneightquantitieswhichthedeviceoperator
+willwanttolimit. AsdiscussedfurtherintheMethodssection,wetrainthecontrolpolicytoacceptuser-specifiedconstraint
+limitsasinputs. Thisallowstheconstraintstobeadjustedatinferencetimewithoutretraining.
+Thissectionhighlightstwousescasesforthetrainedpolicy: 1)asatrajectorydesignassistanttodesignfeed-forward
+trajectoriesforawiderangeofphysicsconditions,and2)asareal-timesupervisorycontrollerforactivelyavoidingdisruptive
+limits. Asasteptowardsdemonstrating2)experimentally,wetransferthecontrolpolicytoRAPTOR.Finally,wedemonstrate
+thatthesamegymenvironmentcanbeleveragedtoperformrobustoptimizationoftrajectories(i.e. optimizationoffeedforward
+trajectoriesthatwillsucceedunderarangeofphysicsconditions).
+PoliciesasTrajectoryDesignAssistants
+It is desirable for burning plasma devices such as SPARC and ITER to achieve their core mission with as few shots and
+disruptionsaspossible. Inthiscontext,theapplicationofalearnedcontrolpolicy,whichgenerallytakesanon-trivialamountof
+trialanderrortotransfertoreality,isnotdesirablewithoutextensivevalidationandoperationalhistoryonexistingdevices.
+However,wedemonstratethatthelearnedcontrolpolicycanstillbeusedasatrajectorydesignassistanttodesignalibraryof
+feedforwardtrajectoriestohandleavarietyofdifferentscenarios. Thesefeedforwardtrajectoriescanthenbevalidatedagainst
+higherfidelitysimulationsbeforebeingprogrammedintothemachine. Figure1depictsthisworkflow.
+Constraint-ConditionedPolicies
+Duetouncertaintyaboutdisruptivelimits, akeyfeatureinausefultrajectorydesignassistantistheabilityfortheuserto
+adjusttheconstraintsatinferencetime. Forexample,thereisuncertaintyaboutwhatvaluesofβ maybecorrelatedwith
+p
+dangerousneoclassicaltearingmodes(NTMs)andwhatvaluesofl ortheShafranovcoefficientmaybecorrelatedwitha
+i
+4/17Parameter Description Min Max
+ObservationSpace
+l Normalizedinternalinductance 0.5 6.0
+i
+I Plasmacurrent[MA] 1.0 9.0
+p
+V Voltage(Eq. 42in35)[V] -5.0 5.0
+R
+W Plasmaenergy[J] 105 3×107
+th
+n Fueldensity[1019m−3] 1.0 30.0
+i
+P Aux. heatingpower[MW] 0.0 25.0
+aux
+g Geometryparameter 0.0 1.0
+s
+ActionSpace
+dI /dt Changeinplasmacurrent[MA/s] -3.0 -0.5
+p
+dP /dt Changeinaux. heating[MW/s] -5.0 5.0
+aux
+u Fuelingrate[1019/s] 0.0 10.0
+fuel,19
+dg /dt Geometrychangerate[1/s] 0.0 1.0
+s
+ConstrainedVariables
+l Normalizedinductance 2 3
+i
+n Greenwaldfraction 0.5 0.8
+g,frac
+β Normalizedbeta 0.015 0.028
+N
+β Poloidalbeta 0.25 0.4
+p
+dB /dt Verticalfieldchangerate[T/s] 0.2 0.4
+v
+dW /dt Energychangerate[W] 2×107 7×107
+th
+Γ Shafranovcoefficient 3.4 3.6
+ι Inversesafetyfactor 0.35 0.45
+95
+Table1. Observationandactionspaceswithbounds. Variablesoutofboundsterminatetheepisode. Constrainedvaluesrange
+forpolicytraining.
+Figure1. Simplifieddiagramoftheproposedworkflowforusingatrainedcontrolpolicyasatrajectorydesignassistant.
+verticaldisplacementevent(VDE).Afternewinformationaboutsuchlimitsisacquiredthroughtokamakoperations, itis
+desirabletoredesigntrajectoriesgiventhisnewinformationasquicklyaspossibletoenableoperationalcontinuity.
+Toaddressthischallenge,wetrainaconstraint-conditionedpolicythatallowstheusertospecifytheconstraintboundaries
+5/17atinferencetime. Figure2showsalibraryoftrajectoriesgeneratedwithtwosetsofconstraintsettings;onemorerelaxed,the
+othermorestringent. Thenewtrajectoriesaregeneratedwithoutanypolicyre-training,thus,theycanberapidlygenerated
+withasinglepolicyrollout. Inourdemonstration,thisisdonewithinseconds. InFigure2,thepolicymostlydoesagood
+joboftryingtosatisfytheconstraints,withasmallamountofviolationinl attheendofthetrajectoryinthemorestringent
+i
+constraintcase. Wefindthatthepolicystrugglestosatisfythemorestringent dWth requirement,eveninexperimentswherewe
+dt
+triedincreasingthepenaltyofconstraintviolation. Wehypothesizethisisduetoitbeingphysicallyinfeasibletoavoidthelarge
+storedenergychangecausedbytheconfinementregimestransitionincertaincases.
+a b
+7.5 7.5
+5.0 5.0
+Conditioned Conditioned
+2.5 Constraints 2.5 Constraints
+0.4 0.4
+0.3 0.3
+0.2 0.3 0.2 0.3
+0.1 0.1
+0.2 0.2
+1e7 1e7
+50 50
+5.0 5.0
+0 2.5 0 2.5
+0.03 0.03
+0.025 0.025
+0.02 0.02
+0.01 0.020 0.01 0.020
+0.015 0.015
+0.4 0.4
+0.4 0.4
+0.2 0.3 0.2 0.3
+3 3.0 3 3.0
+2 2
+2.5 2.5
+1 1
+2.0 2.0
+0.8 0.8
+0.75 0.75
+0.50 0.50
+0.6 0.6
+0.25 0.25
+4 3.6 4 3.6
+2 3.4 2 3.4
+0.45 0.45
+0.2 0.2
+0.40 0.40
+0.1 0.1
+0.35 0.35
+0 1 2 3 4 5 0 1 2 3 4 5
+Time (s) Time (s)
+Figure2. Constraint-conditionedlibraryoftrajectories. Libraryoftrajectoriesgeneratedunderflexible(a)andmore
+stringent(b)constraints. ThegreenshadedregionintheI plotsdenotesthetargetplasmacurrentofbelow2MA,whilethe
+p
+redshadedregionsdenotetheconstraintvalues. Theconstraintvaluesconditionedonforeachscenarioinrelationtothe
+minimumandmaximumvaluesusedfortrainingarevisualizedasredbarsontherightofeachplot.
+ActiveDisruptionAvoidance: Sim2SimPolicyTransfertoRAPTOR
+Oneusecaseforthislearnedpolicyistoserveasasupervisorycontrollerthatusesreal-timeobservationsoftheplasmastateto
+makedecisionsabouthowtoramp-downtheplasma. Asasteptowardsexperimentallydemonstratingsuchacapability,we
+demonstratethesuccessfultransferofthecontrolpolicytoRAPTORasasupervisorycontroller. Figure3showsthesetupfor
+oursim2simdemonstrations. ThecontrolpolicyreceivesobservationsfromRAPTORateachtimeanddecidesonanaction.
+Tosmoothouttheeffectsofnumericalspikesfromthesimulation,weemployanactionbuffersuchthattheaverageofthefive
+latestactionsisinputintoRAPTOR.Similartechniquesareemployedinotherreinforcementlearningapplicationswherenoise
+6/17
+)AM(pI
+)1
+sT(vB
+td d
+)WM(htW
+td d
+n
+p
+il
+carf,gn
+59
+)AM(pI
+)1
+sT(vB
+td d
+)WM(htW
+td d
+n
+p
+il
+carf,gn
+59Figure3. Diagramdepictingthesim2simtransfersetup.
+andoutliermeasurementsneedtobehandled36.
+Figure4showsresultsofonesuchexperimentcomparedagainstanaivebaselinefeedforwardtrajectory,wheremanyofthe
+constraintsareviolated. Thepolicyoveralldoesagoodjobofavoidingtheconstraintboundaries,butthereareimperfections.
+LikeinthestringentconstraintcaseinFigure2,weobserveasmallamountofl constraintviolationattheendoftheramp-down.
+i
+Intheactionspace,thiscanbeattributedtothepolicydecidingtoextremelyquicklyramptheplasmacurrentonceitiscloseto
+itsgoal,whichisnotnecessarilyundesirable. Wealsoobservespikesin dW and dB attheHtoLmodetransition,which
+dt th dt v
+weattributetothenumericsofboundaryconditionswitchingattheHtoLmodetransition. Afterthespike,thevaluesquickly
+settletovalueswithinthespecifiedconstraints. Similarspikesin dB alsooccurtowardstheendofthesimulation.
+dt v
+The policy exhibits some notable qualitative behaviors. For one, it begins with a large plasma current ramp-rate, but
+decreasestheramp-rateastheplasmastateenterstheregimewheretheHtoLmodetransitionisexpected. Thisisanintuitively
+correctbehaviorfortworeasons: 1)theHtoLmodetransitioncanleadtoalarge dB ,andonewaytodecreaseitsvalueisto
+dt v
+decreasetheramp-rate,and2)β startsapproachingtheuser-specifiedlimit,whichhappenswhenthecurrentdecreasesfaster
+p
+thanthestoredthermalenergy.
+Feed-forwardOptimizationwithRobustnesstoPhysicsUncertainty
+Anaturalquestionthatariseswhenusingatrainedcontrolpolicytogeneratefeedforwardtrajectoriesiswhetherwemight
+insteaddirectlyoptimizefeedforwardtrajectories,skippingthepolicyrepresentationstepentirely. Thisapproachhasanumber
+ofpotentialbenefits,particularlygiventheriskinvolvedintransferringanuntestedlearnedcontrolpolicytohardware. The
+maindifficultythatariseshereisthatwhileafeedbackpolicyisabletoobserveandadjusttodisturbancesanduncertaintyin
+thedynamics,purelyfeedforwardtrajectoriesmustbedesignedtoberobusttothosedisturbanceswithoutfeedback.
+Toaddressthischallenge,weimplementarobustfeedforwardtrajectoryoptimizationpipelinethatusesalargenumberof
+parallelsimulations,eachwithdifferentphysicsassumptions(i.e. randomchoicesfortheparametersinTable2). Weoptimize
+asinglefeedforwardtrajectorytominimizetheaverageconstraintviolationacrossallofthesesimulations. Theoptimized
+trajectoryanditsperformanceacrossarangeofrandomparametervaluesareshowninFigure5,showingthattheoptimized
+feedforwardtrajectoryachievessimilarhittingtimeandconstraintsatisfactionratestothefeedbackpolicylearnedusingRL.
+ThetrajectorytransferredtoRAPTORisalsoshowninFigure5,whereweseeitdoesasimilarlygoodjobofavoidingthe
+constraintlimitsastheRLtrainedpolicy,withtheexceptionofthel limit,whichitviolatestowardstheendofthetrajectory,
+i
+likelyduetoasim2simgapbetweenthetrainingandtestenvironments. Giventhatthelearnedpolicymanagestomostlyavoid
+thislimit,thisresultshighlightstheadvantagesofreal-timefeedbackformakingcoursecorrections.
+7/17Goal + Constraint Trajectories Action Trajectories
+Baseline
+PPO 0.5
+8
+6
+1.0
+4
+2
+1.5
+0.3
+0.2 2.0
+0.1
+2.5
+75
+50
+25 10
+0
+8
+0.03
+0.02 6
+0.01 4
+2
+0.4
+0.3 0
+0.2 5.00
+0.1
+4.75
+4
+4.50
+3
+4.25 2
+1 4.00
+3.75
+0.75
+3.50 0.50
+3.25
+0.25
+0.00 1.0
+4
+0.8
+3
+0.6
+2
+0.4
+0.2
+0.2
+0.1
+0.0
+1 2 3 4 1 2 3 4
+Time (s) Time (s)
+Figure4. ComparisonofRAPTORsimulationresultsfromanaivebaselinefeed-forwardtrajectory(red)againstthePPO
+trainedpolicyrunninginclosedloop(blue). ThePPOpolicyclearlyyieldsaconsiderablereductioninconstraintviolation.
+WhilethenominalSPARCPRDramp-downhasaconstantramp-rateof1MA/s,ourbaselinewasselectedtohavethesame
+averageramp-rateasthePPOpolicytoprovideabettercomparisonbetweenthetwocases. Notethatwhilethenominalaction
+spaceistheratesofchangeofP andg ,theplotshowsthetime-integratedvaluesforinterpertability.
+aux s
+8/17
+)AM(pI
+)1
+sT(vB
+td d
+)WM(htW
+td d
+n
+p
+il
+carf,gn
+59
+)1
+sAM(pI
+td d
+)WM(xuaP
+)1
+s9101(91,leufu
+)1
+s(sgPopDownGym RAPTOR
+Goal + Constraint Trajectories Action Trajectories
+8 1.00
+6 1.25
+4 1.50
+2 1.75
+2.00 0.3
+2.25
+0.2
+2.50
+0.1 2.75
+75 3.00
+50
+25 10
+0 8
+0.03
+0.02 6
+0.01 4
+2
+0.4
+0.3 0
+0.2
+0.1
+4 8
+3
+6
+2
+1 4
+0.75
+2
+0.50
+0.25 0
+0.00 0.30
+4
+0.25
+3 0.20
+2 0.15
+0.10
+0.2
+0.05
+0.1
+0.00
+0.5 1.0 1.5 2.0 2.5 3.0 0.5 1.0 1.5 2.0 2.5 3.0
+Time (s) Time (s)
+Figure5. (Left)resultsfromparallelPopDownGyminstancesrunningthesamefeed-forwardtrajectoryfoundviarobust
+optimization. (Right)resultsfromRAPTORsimulationrunningthefeed-forwardtrajectoryfoundviarobustoptimizationon
+PopDownGym.
+9/17
+)AM(pI
+)1sT(vBtd
+d
+)WM(htWtd
+d
+n
+p
+il
+carf,gn
+59
+)1sAM(pItd
+d
+)WM(xuaP
+)1s9101(91,leufu
+)1s(sgSensitivityAnalysis
+Ourreinforcementlearningsystemalsoenablessensitivityanalysiswithrespecttoconstraintlimitsandphysicsuncertainty.
+Theformerisenabledbytheconstraint-conditionedpolicywhichallowstheexplorationoftheoptimalramp-downfordifferent
+constraintsettings,andthelatterisenabledbythegymenvironments’massiveparallelization. Suchinformationiscriticalfor
+bothdevicedesignandoperationsasithelpsdesigners,operators,andphysicsmodellersmakedecisionsonhowtoallocate
+scarceresources. Forexample,ourresultsinFigure6showthattheoptimaltimetoramp-downishighlysensitivetothel
+i
+constraint,thusindicatingthatimprovementstotheverticalstability(VS)systemiscriticalforenablingfast,saferamp-downs.
+Onthephysicsuncertaintyfront,Figure6indicates,forexample,strongsensitivitytotheH-factor,butrelativelylowsensitivity
+totheratioofelectrontemperaturetoiontemperature. Whilesuchresultsrequirevalidation,theyprovideinformationonwhere
+toallocatetheeffortsofextremelycomputationallyexpensivesimulationsanddeviceexperiments.
+RobustnessAnalysis
+Similar to the sensitivity analysis carried out for the constraint-conditioned policy learned via PPO, we can examine the
+robustnessofthestaticfeedforwardtrajectorytovaryingphysicalparameters. Figure7showsasensitivityanalysisindicating
+whichparametershavethestrongesteffectontheconstraintsatisfactionofthefeedforwardtrajectory;weseethatH-factorhas
+thestrongesteffect,withlowH-factormakingconstraintviolationmorelikely.
+Discussion
+This paper develops a reinforcement learning approach to address the problem of disruption avoidance during tokamak
+ramp-downs,withaparticularemphasisontheneedsofoperatingburningplasmatokamkssuchasSPARCandITER.Inthose
+contexts,itisdesirablefordisruptionavoidancesolutionstoworkwithasfewshotsoftrainingdataaspossible. Inaddition,
+physicsmodels,controllers,andtrajectoriesneedtobeupdatedassoonaspossiblegivennewdatatoavoiddelaysandenable
+operationalcontinuity.
+Totrainthepolicy,weproposeanewsample-efficientapproachtobuildhybridphysicsandmachinelearningmodelsusing
+theframeworksofneuraldifferentialequationsanddifferentiablesimulation. Thesampleefficiencygainedfromthephysics
+structureofthemodelenabledasuccessfuldemonstrationofsim2simpolicytransferwhiletrainingthedynamicsmodelon
+only≈300simulations,incontrasttopriorworkswhichusedorder104simulations. ThemodelisfullyimplementedinJAX,
+enablingmassiveGPUparallelismacrossphysicsuncertainty.
+We also address the issue of safety-criticality for near-term burning plasma tokamaks such as SPARC and ITER and
+demonstrate two ways in which fusion experiments may leverage the benefits of reinforcement learning in a way more
+compatible with safety-critical contexts. First, we further leverage GPU parallelism during policy training to parallelize
+acrossconstraintsettingstotrainaconstraint-conditionedpolicy. Thisconstraint-conditionedpolicyenablestheusertoadjust
+constraintsettingsatinferencetimeandgeneratenewtrajectoriesinsecondswithasinglepolicyrollout. Weproposethatthe
+constraint-conditionedpolicymaybeausefultrajectorydesignassistantfortokamakoperators,asunexpecteddevelopments
+duringtokamakoperationsoftendemandstheadjustmentofsettings. Sincetheconstraint-conditionedpolicyisbeingused
+todesigntrajectoriesoffline,itsresultscanbecheckedandvalidatedbyhumanoperatorsandagainstvalidationsimulations.
+Second,wedemonstratethatthegymenvironmentusedinconjuctionwithothermethodsforfeed-forwardoptimization. As
+ademonstration,weuseanevolutionaryalgorithmtoperformrobustoptimizationofafeed-forwardtrajectoryonparallel
+simulatorswithdifferentphysicssettings. Theresultingfeed-forwardtrajectoryistransferredtoRAPTORandavoidsmost
+constraintlimits,butdoesviolatethel constrainttowardstheendofthetrajectorybyasignificantamount,anissuewhichthe
+i
+policyruninclosed-loopwithRAPTORlargelyavoids. Thisresulthighlightsonebenefitofhavingapolicymakecorrections
+inreal-time,abenefitwhichcanthenbeevaluatedagainsttherisksofrunningalearnedpolicyonanexpensivemachine.
+Thebiggestlimitationofthisworkistheuseofarelativelylowfidelityplasmasimulatorasatestbed,thechoiceofwhich
+wasmotivatedbytherapiditerationcyclesenabledbyRAPTOR,whichprovedcriticalforadvancinganditeratingthelarge
+numberofnewtechniquespresentedinthiswork. Ongoingworkisprogressingtoreplacethe“RAPTOR”boxusedinthis
+paperwithanexistingtokamak. Inthatsetting,datafromthetokamakwillbeusedtotrainadynamicsmodelonwhichthe
+control policy is then trained. Future work should also apply this approach to the highest fidelity simulations possible of
+upcomingdevicessuchasSPARCandITER.Itisthehopeoftheauthorsthatsucharesearchprogrammewillenablethe
+practicalapplicationofthepowerfultoolsofmachinelearningtomakeprogressonthechallengingandcriticalproblemof
+disruptionavoidance.
+10/17Methods
+RewardFunction
+Therewardfunctionisdefinedas:
+ncons
+r(x,a)= 1 (x) + I(x) + ∑ b(x) (7)
+t t Ip,t≤2MA t t i t
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124)(cid:123)(cid:122)(cid:125) i=1
+Rewardforreachinggoal Guidetermforcurrent (cid:124) (cid:123)(cid:122) (cid:125)
+Penaltytermsforconstraints
+where the first term provides a fixed reward upon reaching the goal of two MA of current, the second term I(x) rewards
+t
+decreasesincurrenttohelpguidethepolicytowardsthegoalandisgivenby:
+4
+I(x)=−1+ (8)
+t
+exp(0.5I )+2.0+exp(−0.5I )
+p,t p,t
+Thisrewardtermwasinspiredbyoneusedfortrackingerrorinquadrupedlocomotion36 withcoefficientschosenthrough
+manualtuning. Finally,thesummationtermconsistsofpenaltytermsforviolatinguser-specifiedconstraintsonundesirable
+limitssuchasdisruptivelimits. Inthiswork,allconstraintsinstateareimplementedinthefollowingform:
+g(x)≤L (9)
+i t i
+whereg(x)isthei quantitytobeconstrained,expressedasafunctionofstate,andL istheuser-specifiedlimitforthe
+i t th i
+constraint. Forexample,theGreenwaldLimitwouldbeimplementedwiththefollowinggandL:
+i
+πa2
+g(x)=n¯ L =1 (10)
+i t e i
+I
+p
+ThereareanumberofdifferentapproachesforimplementingconstraintsinPOMDPs37,38. Inourformulation,eachconstraint
+isreplacedwiththefollowing“rewardbarrierfunction”,whichwefindtosolveourproblemwellinpractice:
+(cid:18) (cid:18) (cid:18) (cid:19)(cid:19)(cid:19)
+g(x)
+i t
+b(x)=log 1−σ clip (11)
+i t L
+i
+whereσ(·)isasigmoidandclip(·)isaclipfunction. Thisrewardtermislargelyinspiredbythelogarithmicbarrierfunctions
+from classical interior point methods28 with the sigmoid and clip functions ensuring a lower bound on reward to prevent
+numericaldivergence. Theneteffectofthisfunctionistotakeonavalueclosetozerowheng(x)isawayfromL,butthen
+i t i
+rapidlyfallofftoanegativevaluewheng(x)approachesL. Figure9intheAppendixvisualizesthisfunction.
+i t i
+DynamicsModel
+RandomizedParameters
+Oneofthegoalsofthisdynamicsmodelwastoexploretheefficacyoftrainingonhighlysimplifiedmodels,butwithmassively
+parallelized,randomizedphysicssimulation. Therandomizedparametersandtheirdomainsofrandomizationareshownin
+Table2. Inmanycases,accuratesimulationsoftheseparameterswouldrequiresupercomputers. Instead,wetaketheapproach
+ofdesigningpoliciesandtrajectorieswithrobustnesstovariationsintheseparameters.
+Parameter Description MinimumValue MaximumValue
+k Mainiondilution 0.8 0.9
+dil
+k FractionoftheLHthresholdatwhichtheHLtransitionoccurs 0.55 0.75
+HL
+H HfactorusedintheIPB89andIPB98scalings 0.8 1.0
+Z Effectiveioncharge 1.2 1.8
+eff
+k Ratioofvolume-averagedelectrontoiontemperature 1.0 1.2
+te_ti
+k Ratioofparticleconfinementtimetoenergyconfinementtime 7.0 9.0
+N
+k Ratiooftotalcoreradiatedpowertobremsstrahlung 2.0 3.0
+rad
+Table2. Randomizedparameterrangesusedforpolicytraining.
+11/17GeometryEvolutionParameter
+ToenablethefulltrainingenvironmenttorunonGPUintheabsenceofaGPU-capableGrad-Shafranovsolver, weusea
+pre-computedsetofidealMHDequilibriumshapesandrestrictthepolicytoonlydecideonhowquicklytoevolvethroughsaid
+shapes. Todoso,wedefinea“progressvariable”g ∈[0,1]where0correspondstothefirstshapeand1correspondstothelast.
+s
+Thepolicythendecidesontherateofchangeofg ateachtimestep. Keyquantitiesusedinthemodelareinterpolatedbetween
+s
+theshapesandthusbecomefunctionsofg . Thequantitiesusedare:V(g ),theplasmavolume, ∂V(ρ,g ),thederivativeof
+s s ∂ρ s
+volumewithrespecttothetoroidalfluxcoordinate,κ (g ),theareaelongation,a(g ),theminorradius,δ(g ),thetriangularity.
+a s s s
+Fromhereonout,theg argumentissuppressedfornotationalsimplicity.
+s
+PowerandParticleBalance
+Wemakeuseofsimplepowerandparticlebalanceequations17:
+dW −W
+th th
+= +P +P −k P +P (12)
+dt τ Ohm α rad brems aux
+E
+dN −N
+i i
+= +fuel (13)
+dt k τ
+N E
+TheOhmicpower,P ,alphaheatingpower,P ,andBremsstrahlungradiationpowerP termsrequireprofileshapestobe
+Ohm α brems
+accuratelycalculated. Wetaketheapproachofmappingvolumeaveragedquantitiestoprofilesshapeslearnedviaprincipal
+componentsanalysis(PCA)ontheRAPTORdataset. First,volumeaveragedelectronandiontemperaturesanddensitiesare
+obtainedfromstatevariablesassuch:
+2W ⟨n⟩ ⟨T ⟩
+th i e
+=⟨p⟩≈⟨T ⟩⟨n ⟩+⟨T⟩⟨n⟩=⟨T ⟩ + ⟨n⟩ (14)
+e e i i e i
+3V k k
+dilution te_ti
+N 2W
+(cid:18)
+⟨n⟩
+⟨n⟩(cid:19)−1
+⟨n⟩ ⟨T ⟩
+i th i i i e
+⟨n⟩= , ⟨T ⟩= + , ⟨n ⟩= , ⟨T⟩= (15)
+i e e i
+V 3V k k k k
+dilution te_ti dilution te_ti
+Observethattheonlyunknowninthesetofequationsaboveisthevolume-averagedelectrontemperature⟨T ⟩. Werepresent
+e
+eachofthefourprofileswithtwosingle-componentPCAbasis: oneforH-modeandoneforL-mode. Below,theT profleis
+e
+usedasanexample,butthesamemethodologyappliesfortheotherprofiles:
+T (ρ)=cv(ρ)+b(ρ) (16)
+e
+wherev(ρ)andb(ρ)arelearnedviaPCAontheRAPTORsimulationdataset. Thevolumeintegralanditsapproximationwith
+Legendre-Gaussquadraturecanthenbecomputedas:
+1 (cid:90) 1 ∂V 1 (cid:34) ngauss ∂V ngauss ∂V (cid:35)
+⟨T ⟩= [cv(ρ)+b(ρ)] (ρ)dρ ≈ c ∑ w v(ρ ) (ρ )+ ∑ w b(ρ ) (ρ ) (17)
+e V 0 ∂ρ ∑n j=ga 1ussw j∂ ∂V ρ(ρ j) j=1 j j ∂ρ j j=1 j j ∂ρ j
+wheren isthenumberofLegendre-Gausspoints,w aretheweights,andρ aretheLegendre-Gausspoints. Rearranging
+gauss j j
+theaboveequationforcweget:
+⟨T e⟩∑n j=ga 1ussw j∂ ∂V ρ(ρ j)−∑n j=ga 1ussw jb(ρ j)∂ ∂V ρ(ρ j)
+c≈ (18)
+∑n j=ga 1ussw jv(ρ j)∂ ∂V ρ(ρ j)
+Noweverythingontherighthand-sideisafunctionofstateorapre-computedquantity. Sincev(ρ)andb(ρ)areconstantwhen
+runningthesimulation,cfullyparameterizestheT (ρ)profile.
+e
+H-modeandL-mode
+WeusetheIPB98scalingforH-mode39andIPB8940forL-mode.TheHtoLmodetransitionthresholdissubjecttoconsiderable
+uncertainty,makingourapproachofrandomizingacrossphysicsuncertaintyparticularlyrelevant. Inthismodel,wetreatthe
+HLback-transitionthresholdasaconstantmultipleoftheestablishedtheLHthresholdfrom41,withtheconstantrandomized
+acrosssimulations:
+P =k 2.15e0.107n0.782B0.772a0.975R0.999 (19)
+HL HL e,20 T
+12/17InternalInductanceEvolution
+Authorsin42derivedasimplethree-stateODEsystemforthecoupledinternalinductanceandplasmacurrentevolution. We
+makeuseoftheirequationsfortheinternalinductanceandplasmacurrentevolution,whichareexact,andreplacetheirvoltage
+dynamics,whicharead-hoc,withaneuralnetwork,resultinginthefollowingODEsystem:
+dL 2
+i
+= (−V −V ) (20)
+ind R
+dt I
+p
+dI 1
+p
+= (2V +V ) (21)
+ind R
+dt L
+i
+dV
+R
+=NN(I ,L,V ,V ,⟨T ⟩) (22)
+p i R ind e
+dt
+Algorithms
+OptimizingConstraint-ConditionedPolicieswithProximalPolicyOptimization
+WeapplyPPO43,astateofthearton-policyreinforcementlearningalgorithmtosolvefortheconstraint-conditionedpolicythat
+maximizestherewardfunction(7). Afullyconnectednetworkwiththreehiddenlayersof256unitseachisusedforboththe
+policyandvaluenetworkswithhyperbolictangentactivationfunctions. Theenvironmentobservationsareconcatenatedwith
+thedesiredconstraintvaluestoformtheinputvectorforthepolicynetwork. Thevaluenetworkadditionallytakesthecurrent
+simulationparametersasinputtoimproveperformance44,45. Allinputobservationsandoutputactionsarenormalizedtothe
+range[−1.0,+1.0].
+WeexploitthecapabilitiesofJAXandcollecttransitionsfrom2048environmentsinparallel. Duringeachtrainingstep,
+ittook0.652(±0.024)secondstocollectexperienceand0.048(±0.002)secondstoupdatethepolicyandvaluenetworks.
+TrainingconvergedinundertwohoursonasingleNvidiaRTX4090GPU.
+RobustFeedforwardTrajectoryOptimizationwithEvolutionaryStrategies
+Weapplyahighlyparallelizableblack-boxoptimizationalgorithmknownasevolutionarystrategies(ES)tooptimizerobust
+feedforwardtrajectories46. IncontrasttopolicygradientmethodslikePPO,whichconsidertheexpecteddiscountedrewardin
+Eq.(1a),ESrequiresanend-to-endobjectivefunctionthatassignsarewardtoagivenfixed-horizontrajectory;wemaximize:
+(cid:34) (cid:35)
+1 T
+U (a )=E ∑r(x,a) (23)
+dense 0:T θ T t
+t=0
+wheretheexpectationiswithrespecttotherandomparametersθ sampleduniformlyovertherangesgiveninTable2.
+Thefeedforwardtrajectoryisrepresentedasacubicinterpolationbetween10equallyspacedcontrolpointsforeachaction.
+Trajectoriesarerolledoutfor100timestepswith0.05stimestep. Weuseapopulationsizeof256,approximatetheexpectation
+inEq.23using103randomsamples,andruntheevolutionarystrategyfor250generations. Thelearningrateisinitializedat
+10−1anddecayswithrate0.995toaminimumof10−3. WeusetheESdefinedbySalimansetal.46 asimplementedinJAXin
+theevosaxlibrary47.
+RAPTORSimulationSettings
+RAPTORisconfiguredtoevolvetheT ,T,andcurrentprofilesbysolvingthecorrespondingtransportequations. Following
+e i
+priorwork,theparticletransportequationsarenotsolved10,butratheraseparateinstanceofthesimpleparticlebalancemodel
+13isimplementedRAPTORsideandreceivesthefuelingcommands. Thisseparatemodelisconfiguredwiththemaximumk
+N
+valueof9.0usedinthetrainingmodeltochallengethepolicyasgasinjectioncanbeusedtodirectlyslowdownthedensity
+decrease,butactuatorsthatcandirectlyspeedupthedensitydecreasedonotexist. Thisapproachismotivatedbythechallenges
+ofmodellingplasmadensitydynamics17; thegoalinsteadistoprovidereasonabledensityset-pointsforreal-timedensity
+controllers. TheH-Lback-transitionistriggeredwhentheRAPTORsimulatedpowerconductedtoscrape-offlayerfallsbelow
+theHLback-transitionthreshold.
+Data and Code Availability
+Thegymenvironment,trainedpolicies,trajectories,andscriptstogeneratefigureswillbeavailableatthetimeofpublication
+atgithub.com/MIT-PSFC/PopDownGym. CodeusedforRAPTORsimulationswillnotbeavailableduetotheclosed-
+sourcestatusofRAPTORatthetimeofthiswork.
+13/17References
+1. Maris,A.D.,Wang,A.,Rea,C.,Granetz,R.&Marmar,E. Theimpactofdisruptionsontheeconomicsofatokamak
+powerplant. FusionSci.Technol.1–17(2023).
+2. DeVries,P.etal. Requirementsfortriggeringtheiterdisruptionmitigationsystem. FusionSci.Technol.69,471–484
+(2016).
+3. Sweeney,R.etal. Mhdstabilityanddisruptionsinthesparctokamak. J.PlasmaPhys.86,865860507(2020).
+4. Whyte,D.etal. Mitigationoftokamakdisruptionsusinghigh-pressuregasinjection. Phys.reviewletters89,055001
+(2002).
+5. Rea,C.,Montes,K.,Erickson,K.,Granetz,R.&Tinguely,R. Areal-timemachinelearning-baseddisruptionpredictorin
+diii-d. Nucl.Fusion59,096016(2019).
+6. Montes,K.J.etal. Machinelearningfordisruptionwarningsonalcatorc-mod,diii-d,andeast. Nucl.Fusion59,096015
+(2019).
+7. Pau, A. et al. A machine learning approach based on generative topographic mapping for disruption prevention and
+avoidanceatjet. Nucl.Fusion59,106017(2019).
+8. Eidietis,N.etal. Implementingafinite-stateoff-normalandfaultresponsesystemfordisruptionavoidanceintokamaks.
+Nucl.Fusion58,056023(2018).
+9. Hender,T.etal. Mhdstability,operationallimitsanddisruptions. Nucl.fusion47,S128(2007).
+10. Teplukhina,A.etal. Simulationofprofileevolutionfromramp-uptoramp-downandoptimizationoftokamakplasma
+terminationwiththeraptorcode. PlasmaPhys.Control.Fusion59,124004(2017).
+11. VanMulders,S.etal. Scenariooptimizationforthetokamakramp-downphaseinraptor.parta: Analysisandmodel
+validationonasdexupgrade. PlasmaPhys.Control.Fusion(2023).
+12. VanMulders,S.etal. Scenariooptimizationforthetokamakramp-downphaseinraptor.partb: Safeterminationofdemo
+plasmas. PlasmaPhys.Control.Fusion(2023).
+13. Boyer,M.,Rea,C.&Clement,M. Towardactivedisruptionavoidanceviareal-timeestimationofthesafeoperatingregion
+anddisruptionproximityintokamaks. Nucl.Fusion62,026005(2021).
+14. Boozer,A.H. Plasmasteeringtoavoiddisruptionsiniterandtokamakpowerplants. Nucl.Fusion61,054004(2021).
+15. Degrave,J.etal. Magneticcontroloftokamakplasmasthroughdeepreinforcementlearning. Nature602,414–419(2022).
+16. Rodriguez-Fernandez,P.,Howard,N.&Candy,J. Nonlineargyrokineticpredictionsofsparcburningplasmaprofiles
+enabledbysurrogatemodeling. Nucl.Fusion62,076036(2022).
+17. Walker,M.L.,DeVries,P.,Felici,F.&Schuster,E. Introductiontotokamakplasmacontrol. In2020AmericanControl
+Conference(ACC),2901–2918(IEEE,2020).
+18. Creely,A.etal. Overviewofthesparctokamak. J.PlasmaPhys.86,865860502(2020).
+19. Rodriguez-Fernandez, P. et al. Predictions of core plasma performance for the sparc tokamak. J. Plasma Phys. 86,
+865860503(2020).
+20. SummaryoftheITERFinalDesignReport. No.22inITEREDADocumentationSeries(INTERNATIONALATOMIC
+ENERGYAGENCY,Vienna,2001).
+21. Abbate,J.,Conlin,R.&Kolemen,E. Data-drivenprofilepredictionfordiii-d. Nucl.Fusion61,046027(2021).
+22. Char,I.etal. Offlinemodel-basedreinforcementlearningfortokamakcontrol. InLearningforDynamicsandControl
+Conference,1357–1372(PMLR,2023).
+23. Felici,F. Real-timecontroloftokamakplasmas: fromcontrolofphysicstophysics-basedcontrol. Tech.Rep.,EPFL
+(2011).
+24. Felici,F.etal. Real-timephysics-model-basedsimulationofthecurrentdensityprofileintokamakplasmas. Nucl.Fusion
+51,083052(2011).
+25. Bradbury,J.etal. JAX:composabletransformationsofPython+NumPyprograms(2018).
+26. Brockman,G.etal. Openaigym. arXivpreprintarXiv:1606.01540(2016).
+27. Bertsekas,D. Reinforcementlearningandoptimalcontrol(AthenaScientific,2019).
+14/1728. Nesterov,Y.etal. Lecturesonconvexoptimization,vol.137(Springer,2018).
+29. Bertsekas,D.P. ConstrainedoptimizationandLagrangemultipliermethods(Academicpress,2014).
+30. Frank,S.etal. Radiativepulsedl-modeoperationinarc-classreactors. Nucl.Fusion62,126036(2022).
+31. Wang,Y.,Xiao,B.,Liu,L.&Guo,Y. Systemidentificationforeastplasmashapeandpositioncontrol. FusionEng.Des.
+129,140–146(2018).
+32. Kidger,P. Onneuraldifferentialequations. arXivpreprintarXiv:2202.02435(2022).
+33. Chen, R. T., Rubanova, Y., Bettencourt, J. & Duvenaud, D. K. Neural ordinary differential equations. Adv. neural
+informationprocessingsystems31(2018).
+34. Rackauckas,C.etal. Universaldifferentialequationsforscientificmachinelearning. arXivpreprintarXiv:2001.04385
+(2020).
+35. Romero,J.,Contributors,J.-E.etal. Plasmainternalinductancedynamicsinatokamak. Nucl.Fusion50,115002(2010).
+36. Hwangbo,J.etal. Learningagileanddynamicmotorskillsforleggedrobots. Sci.Robotics4,eaau5872(2019).
+37. So,O.&Fan,C. Solvingstabilize-avoidoptimalcontrolviaepigraphformanddeepreinforcementlearning. arXivpreprint
+arXiv:2305.14154(2023).
+38. Altman,E. ConstrainedMarkovdecisionprocesses(Routledge,2021).
+39. Editors,I.P.B.,Chairs,I.P.E.G.,Co-Chairs,Team,I.J.C.&Unit,P.I. Chapter1: Overviewandsummary. Nucl.Fusion
+39,2137,DOI:10.1088/0029-5515/39/12/301(1999).
+40. Kaye,S.etal. Iterlmodeconfinementdatabase. Nucl.Fusion37,1303(1997).
+41. Martin,Y.,Takizuka,T.etal. Powerrequirementforaccessingtheh-modeiniter. InJournalofPhysics: Conference
+Series,vol.123,012033(IOPPublishing,2008).
+42. Romero,A.,Sun,S.,Foehn,P.&Scaramuzza,D. Modelpredictivecontouringcontrolfortime-optimalquadrotorflight.
+arXivpreprintarXiv:2108.13205(2021).
+43. Schulman,J.,Wolski,F.,Dhariwal,P.,Radford,A.&Klimov,O. Proximalpolicyoptimizationalgorithms. arXivpreprint
+arXiv:1707.06347(2017).
+44. Pinto,L.,Andrychowicz,M.,Welinder,P.,Zaremba,W.&Abbeel,P. Asymmetricactorcriticforimage-basedrobot
+learning. arXivpreprintarXiv:1710.06542(2017).
+45. Zhu,Y.etal. Reinforcementandimitationlearningfordiversevisuomotorskills. arXivpreprintarXiv:1802.09564(2018).
+46. Salimans,T.,Ho,J.,Chen,X.,Sidor,S.&Sutskever,I. Evolutionstrategiesasascalablealternativetoreinforcement
+learning(2017). 1703.03864.
+47. Lange,R.T. evosax: Jax-basedevolutionstrategies. arXivpreprintarXiv:2212.04180(2022).
+Acknowledgements
+ThisworkwasfundedinpartbyCommonwealthFusionSystems. TheauthorswouldliketothankFedericoFeliciandSimon
+VanMuldersforhelpwithRAPTORandtechnicaldiscussions. TheauthorswouldalsoliketothankcolleaguesattheMIT
+PlasmaScienceandFusionCenter(PSFC)andCommonwealthFusionSystems(CFS)forhelpfultechnicaldiscussions.
+Author contributions statement
+AllenM.Wangledtheproject,developedtheGymenvironment,theinitialPPOimplementation,RAPTORtransfer,andwrote
+mostofthepaper. OswinSodevelopedthehighperformancefinalPPOimplementation,trainedtheconstraintconditioned
+policies, andledvisualizations. CharlesDawsondevelopedtherobustoptimizationalgorithmandbenchmarkedtheGym
+environment. DarrenGarnierconceptualizedtheprojectandhelpedAllenM.Wanggetuptospeedonplasmaphysicsand
+fusion. CristinaReaadvisedtheprojectonthefusionanddisruptionsfront,andrevisedthepaper. ChuchuFanadvisedthe
+projectonthecontrolsandreinforcementlearningfront.
+Additional information
+CompetingInterests
+AllenM.Wang,DarrenGarnier,andCristinaRearecievedfundingfromCommonwealthFusionSystems(CFS)andhave
+workeddirectlywithCFSontheSPARCproject.
+15/17A Sensitivity Analysis
+a b
+5 4.5
+4.0
+4
+3.5
+3
+3.0
+2.00 2.25 2.50 2.75 3.00 0.5 0.6 0.7 0.8 0.800 0.825 0.850 0.875 0.900 0.55 0.60 0.65 0.70 0.75
+l i n g,frac k dil k HL
+5 4.5
+4.0
+4
+3.5
+3
+3.0
+0.015 0.020 0.025 0.25 0.30 0.35 0.40 0.80 0.85 0.90 0.95 1.00 1.2 1.4 1.6 1.8
+β n β p H Z eff
+5 4.5
+4.0
+4
+3.5
+3
+3.0
+0.20 0.25 0.30 0.35 0.40 20 40 60 1.00 1.05 1.10 1.15 1.20 7.0 7.5 8.0 8.5 9.0
+dd tB v(Ts−1) dd tW(MW) k te_ti k N
+5 4.5
+4.0
+4
+3.5
+3
+3.0
+3.4 3.5 3.6 0.35 0.40 0.45 2.00 2.25 2.50 2.75 3.00
+Γ ι 95 k rad
+Mean 95% CI
+Figure6. a,b,Sensitivityofthetimetogoalwithrespecttoconstraintlimitsettings(a)andphysicsuncertainty(b),withthe
+95%confidenceintervalscorrespondingtothephysicsuncertainty. Inb,thegivenphysicsparameterisfixedwhiletheother
+physicsuncertaintyparametersaresampledrandomly.
+B Robustness Analysis
+Figure7. Sensitivityanalysisshowingtheeffectofvaryingphysicalparametersonconstraintsatisfactionforthefeedforward
+trajectory. Rawdatapointsareshowningrey,andaquadraticbestfitand95%confidenceintervalareshowninorange.
+16/17
+)s(
+laog
+ot
+emiT
+)s(
+laog
+ot
+emiT
+)s(
+laog
+ot
+emiT
+)s(
+laog
+ot
+emiT
+)s(
+laog
+ot
+emiT
+)s(
+laog
+ot
+emiT
+)s(
+laog
+ot
+emiT
+)s(
+laog
+ot
+emiTC Dynamics Model Performance
+TheentiredynamicsmodelisimplementedinJax. Thus,inadditiontobeingfullydifferentiable,themodelalsorunsonGPU,
+enablingmassiveparallelization. Figure8showsbenchmarkresultsofsimulation
+Figure8. Wall-clocktimeasafunctionofnumberofsimulationspervectorizedbatchshowinghowGPUparallelismenables
+104simulationsinapproximatelyasecond,whereeachsimulationconsistsof100gymenvironmenttimesteps. The
+benchmarkisperformedwith101trialsforeachbatchsize;thefirsttrialincludesjust-in-time(JIT)compilationtimeandis
+showninyellow. Theaverageof100trialsafterJITisshowninblue.
+D Visualizing the Reward Barrier Function
+Figure9. Visualizationoftherewardbarrierfunction
+17/17
