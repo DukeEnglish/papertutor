@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09404v1 |
-|title| AQA-Bench: An Interactive Benchmark for Evaluating LLMs' Sequential Reasoning Ability |
-|authors| Siwei YangBingchen ZhaoCihang Xie
-|links| http://arxiv.org/abs/2402.09404v1 |
-|updated| 2024-02-14 18:59:33 UTC |
-|summary| This paper introduces AQA-Bench a novel benchmark to assess the sequentialreasoning capabilities of large language models LLMs in algorithmic contextssuch as depth-first search DFS. The key feature of our evaluation benchmarklies in its interactive evaluation protocol -- for example in DFS theavailability of each nodes connected edge is contingent upon the modelstraversal to that node thereby necessitating the LLMs ability to effectivelyremember visited nodes and strategize subsequent moves. We comprehensivelybuild AQA-Bench with three different algorithms namely binary searchdepth-first search and breadth-first search and to evaluate the sequentialreasoning ability of 12 different LLMs. Our investigations reveal severalinteresting findings: 1 Closed-source models like GPT-4 and Gemini generallyshow strong sequential reasoning ability significantly outperformingopen-source LLMs. 2 Naively providing interactive examples may inadvertentlyhurt few-shot performance. 3 A very limited number of predecessor stepsfollowing the optimal policy can substantially boost small models performance.4 The scaling correlation between performance and model size is not alwayssignificant sometimes even showcasing an inverse trend. We hope our study cancatalyze future work on advancing the understanding and enhancement of LLMscapabilities in sequential reasoning. The code is available athttps://github.com/UCSC-VLAA/AQA-Bench. |
+|idx| 2402.10210v1 |
+|title| Self-Play Fine-Tuning of Diffusion Models for Text-to-Image Generation |
+|authors| Huizhuo YuanZixiang ChenKaixuan JiQuanquan Gu
+|links| http://arxiv.org/abs/2402.10210v1 |
+|updated| 2024-02-15 18:59:18 UTC |
+|summary| Fine-tuning Diffusion Models remains an underexplored frontier in generativeartificial intelligence GenAI especially when compared with the remarkableprogress made in fine-tuning Large Language Models LLMs. While cutting-edgediffusion models such as Stable Diffusion SD and SDXL rely on supervisedfine-tuning their performance inevitably plateaus after seeing a certainvolume of data. Recently reinforcement learning RL has been employed tofine-tune diffusion models with human preference data but it requires at leasttwo images winner and loser images for each text prompt. In this paperwe introduce an innovative technique called self-play fine-tuning for diffusionmodels SPIN-Diffusion where the diffusion model engages in competition withits earlier versions facilitating an iterative self-improvement process. Ourapproach offers an alternative to conventional supervised fine-tuning and RLstrategies significantly improving both model performance and alignment. Ourexperiments on the Pick-a-Pic dataset reveal that SPIN-Diffusion outperformsthe existing supervised fine-tuning method in aspects of human preferencealignment and visual appeal right from its first iteration. By the seconditeration it exceeds the performance of RLHF-based methods across all metricsachieving these results with less data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09401v1 |
-|title| Reinforcement Learning from Human Feedback with Active Queries |
-|authors| Kaixuan JiJiafan HeQuanquan Gu
-|links| http://arxiv.org/abs/2402.09401v1 |
-|updated| 2024-02-14 18:58:40 UTC |
-|summary| Aligning large language models LLM with human preference plays a key rolein building modern generative models and can be achieved by reinforcementlearning from human feedback RLHF. Despite their superior performancecurrent RLHF approaches often require a large amount of human-labelledpreference data which is expensive to collect. In this paper inspired by thesuccess of active learning we address this problem by proposingquery-efficient RLHF methods. We first formalize the alignment problem as acontextual dueling bandit problem and design an active-query-based proximalpolicy optimization APPO algorithm with an tildeOd2/Delta regretbound and an tildeOd2/Delta2 query complexity where d is thedimension of feature space and Delta is the sub-optimality gap over all thecontexts. We then propose ADPO a practical version of our algorithm based ondirect preference optimization DPO and apply it to fine-tuning LLMs. Ourexperiments show that ADPO while only making about half of queries for humanpreference matches the performance of the state-of-the-art DPO method. |
+|idx| 2402.10208v1 |
+|title| Recovering the Pre-Fine-Tuning Weights of Generative Models |
+|authors| Eliahu HorwitzJonathan KahanaYedid Hoshen
+|links| http://arxiv.org/abs/2402.10208v1 |
+|updated| 2024-02-15 18:59:02 UTC |
+|summary| The dominant paradigm in generative modeling consists of two steps: ipre-training on a large-scale but unsafe dataset ii aligning the pre-trainedmodel with human values via fine-tuning. This practice is considered safe asno current method can recover the unsafe pre-fine-tuning model weights. Inthis paper we demonstrate that this assumption is often false. Concretely wepresent Spectral DeTuning a method that can recover the weights of thepre-fine-tuning model using a few low-rank LoRA fine-tuned models. Incontrast to previous attacks that attempt to recover pre-fine-tuningcapabilities our method aims to recover the exact pre-fine-tuning weights. Ourapproach exploits this new vulnerability against large-scale models such as apersonalized Stable Diffusion and an aligned Mistral. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09394v1 |
-|title| Long-form evaluation of model editing |
-|authors| Domenic RosatiRobie GonzalesJinkun ChenXuemin YuMelis ErkanYahya KayaniSatya Deepika ChavatapalliFrank RudziczHassan Sajjad
-|links| http://arxiv.org/abs/2402.09394v1 |
-|updated| 2024-02-14 18:45:14 UTC |
-|summary| Evaluations of model editing currently only use the next few tokencompletions after a prompt. As a result the impact of these methods on longernatural language generation is largely unknown. We introduce long-formevaluation of model editing textbftextitLEME a novel evaluationprotocol that measures the efficacy and impact of model editing in long-formgenerative settings. Our protocol consists of a machine-rated survey and aclassifier which correlates well with human ratings. Importantly we find thatour protocol has very little relationship with previous short-form metricsdespite being designed to extend efficacy generalization locality andportability into a long-form setting indicating that our method introduces anovel set of dimensions for understanding model editing methods. Using thisprotocol we benchmark a number of model editing techniques and present severalfindings including that while some methods ROME and MEMIT perform well inmaking consistent edits within a limited scope they suffer much more fromfactual drift than other methods. Finally we present a qualitative analysisthat illustrates common failure modes in long-form generative settingsincluding internal consistency lexical cohesion and locality issues. |
+|idx| 2402.10207v1 |
+|title| Rewards-in-Context: Multi-objective Alignment of Foundation Models with Dynamic Preference Adjustment |
+|authors| Rui YangXiaoman PanFeng LuoShuang QiuHan ZhongDong YuJianshu Chen
+|links| http://arxiv.org/abs/2402.10207v1 |
+|updated| 2024-02-15 18:58:31 UTC |
+|summary| We consider the problem of multi-objective alignment of foundation modelswith human preferences which is a critical step towards helpful and harmlessAI systems. However it is generally costly and unstable to fine-tune largefoundation models using reinforcement learning RL and themulti-dimensionality heterogeneity and conflicting nature of humanpreferences further complicate the alignment process. In this paper weintroduce Rewards-in-Context RiC which conditions the response of afoundation model on multiple rewards in its prompt context and appliessupervised fine-tuning for alignment. The salient features of RiC aresimplicity and adaptivity as it only requires supervised fine-tuning of asingle foundation model and supports dynamic adjustment for user preferencesduring inference time. Inspired by the analytical solution of an abstractedconvex optimization problem our dynamic inference-time adjustment methodapproaches the Pareto-optimal solution for multiple objectives. Empiricalevidence demonstrates the efficacy of our method in aligning both LargeLanguage Models LLMs and diffusion models to accommodate diverse rewards withonly around 10 GPU hours compared with multi-objective RL baseline. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09391v1 |
-|title| LlaSMol: Advancing Large Language Models for Chemistry with a Large-Scale, Comprehensive, High-Quality Instruction Tuning Dataset |
-|authors| Botao YuFrazier N. BakerZiqi ChenXia NingHuan Sun
-|links| http://arxiv.org/abs/2402.09391v1 |
-|updated| 2024-02-14 18:42:25 UTC |
-|summary| Chemistry plays a crucial role in many domains such as drug discovery andmaterial science. While large language models LLMs such as GPT-4 exhibitremarkable capabilities on natural language processing tasks existing workshows their performance on chemistry tasks is discouragingly low. In thispaper however we demonstrate that our developed LLMs can achieve very strongresults on a comprehensive set of chemistry tasks outperforming the mostadvanced GPT-4 across all the tasks by a substantial margin and approaching theSoTA task-specific models. The key to our success is a large-scalecomprehensive high-quality dataset for instruction tuning named SMolInstruct.It contains 14 meticulously selected chemistry tasks and over three millionhigh-quality samples laying a solid foundation for training and evaluatingLLMs for chemistry. Based on SMolInstruct we fine-tune a set of open-sourceLLMs among which we find that Mistral serves as the best base model forchemistry tasks. We further conduct analysis on the impact of trainableparameters providing insights for future research. |
+|idx| 2402.10200v1 |
+|title| Chain-of-Thought Reasoning Without Prompting |
+|authors| Xuezhi WangDenny Zhou
+|links| http://arxiv.org/abs/2402.10200v1 |
+|updated| 2024-02-15 18:55:41 UTC |
+|summary| In enhancing the reasoning capabilities of large language models LLMsprior research primarily focuses on specific prompting techniques such asfew-shot or zero-shot chain-of-thought CoT prompting. These methods whileeffective often involve manually intensive prompt engineering. Our study takesa novel approach by asking: Can LLMs reason effectively without prompting Ourfindings reveal that intriguingly CoT reasoning paths can be elicited frompre-trained LLMs by simply altering the textitdecoding process. Rather thanconventional greedy decoding we investigate the top-k alternative tokensuncovering that CoT paths are frequently inherent in these sequences. Thisapproach not only bypasses the confounders of prompting but also allows us toassess the LLMs textitintrinsic reasoning abilities. Moreover we observethat the presence of a CoT in the decoding path correlates with a higherconfidence in the models decoded answer. This confidence metric effectivelydifferentiates between CoT and non-CoT paths. Extensive empirical studies onvarious reasoning benchmarks show that the proposed CoT-decoding substantiallyoutperforms the standard greedy decoding. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09390v1 |
-|title| HGOT: Hierarchical Graph of Thoughts for Retrieval-Augmented In-Context Learning in Factuality Evaluation |
-|authors| Yihao FangStephen W. ThomasXiaodan Zhu
-|links| http://arxiv.org/abs/2402.09390v1 |
-|updated| 2024-02-14 18:41:19 UTC |
-|summary| With the widespread adoption of large language models LLMs in numerousapplications the challenge of factuality and the propensity for hallucinationsraises significant concerns. To address this issue particularly inretrieval-augmented in-context learning we introduce the hierarchical graph ofthoughts HGOT a structured multi-layered graph approach designed to enhancethe retrieval of pertinent passages during in-context learning. The frameworkutilizes the emergent planning capabilities of LLMs employing thedivide-and-conquer strategy to break down complex queries into manageablesub-queries. It refines self-consistency majority voting for answer selectionwhich incorporates the recently proposed citation recall and precision metricsto assess the quality of thoughts linking an answers credibilityintrinsically to the thoughts quality. This methodology introduces a weightedsystem in majority voting prioritizing answers based on the citation qualityof their thoughts. Additionally we propose a scoring mechanism for evaluatingretrieved passages considering factors such as citation frequency and qualityself-consistency confidence and the retrieval modules ranking. Experimentsreveal that HGOT outperforms other retrieval-augmented in-context learningmethods including Demonstrate-Search-Predict DSP ReAct Self-Ask andRetrieve-then-Read on different datasets by as much as 7 demonstrating itsefficacy in enhancing the factuality of LLMs. |
+|idx| 2402.10196v1 |
+|title| A Trembling House of Cards? Mapping Adversarial Attacks against Language Agents |
+|authors| Lingbo MoZeyi LiaoBoyuan ZhengYu SuChaowei XiaoHuan Sun
+|links| http://arxiv.org/abs/2402.10196v1 |
+|updated| 2024-02-15 18:51:32 UTC |
+|summary| Language agents powered by large language models LLMs have seen explodingdevelopment. Their capability of using language as a vehicle for thought andcommunication lends an incredible level of flexibility and versatility. Peoplehave quickly capitalized on this capability to connect LLMs to a wide range ofexternal components and environments: databases tools the Internet roboticembodiment etc. Many believe an unprecedentedly powerful automation technologyis emerging. However new automation technologies come with new safety risksespecially for intricate systems like language agents. There is a surprisinglylarge gap between the speed and scale of their development and deployment andour understanding of their safety risks. Are we building a house of cards Inthis position paper we present the first systematic effort in mappingadversarial attacks against language agents. We first present a unifiedconceptual framework for agents with three major components: Perception Brainand Action. Under this framework we present a comprehensive discussion andpropose 12 potential attack scenarios against different components of an agentcovering different attack strategies e.g. input manipulation adversarialdemonstrations jailbreaking backdoors. We also draw connections tosuccessful attack strategies previously applied to LLMs. We emphasize theurgency to gain a thorough understanding of language agent risks before theirwidespread deployment. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09404v1 |
-|title| AQA-Bench: An Interactive Benchmark for Evaluating LLMs' Sequential Reasoning Ability |
-|authors| Siwei YangBingchen ZhaoCihang Xie
-|links| http://arxiv.org/abs/2402.09404v1 |
-|updated| 2024-02-14 18:59:33 UTC |
-|summary| This paper introduces AQA-Bench a novel benchmark to assess the sequentialreasoning capabilities of large language models LLMs in algorithmic contextssuch as depth-first search DFS. The key feature of our evaluation benchmarklies in its interactive evaluation protocol -- for example in DFS theavailability of each nodes connected edge is contingent upon the modelstraversal to that node thereby necessitating the LLMs ability to effectivelyremember visited nodes and strategize subsequent moves. We comprehensivelybuild AQA-Bench with three different algorithms namely binary searchdepth-first search and breadth-first search and to evaluate the sequentialreasoning ability of 12 different LLMs. Our investigations reveal severalinteresting findings: 1 Closed-source models like GPT-4 and Gemini generallyshow strong sequential reasoning ability significantly outperformingopen-source LLMs. 2 Naively providing interactive examples may inadvertentlyhurt few-shot performance. 3 A very limited number of predecessor stepsfollowing the optimal policy can substantially boost small models performance.4 The scaling correlation between performance and model size is not alwayssignificant sometimes even showcasing an inverse trend. We hope our study cancatalyze future work on advancing the understanding and enhancement of LLMscapabilities in sequential reasoning. The code is available athttps://github.com/UCSC-VLAA/AQA-Bench. |
+|idx| 2402.10210v1 |
+|title| Self-Play Fine-Tuning of Diffusion Models for Text-to-Image Generation |
+|authors| Huizhuo YuanZixiang ChenKaixuan JiQuanquan Gu
+|links| http://arxiv.org/abs/2402.10210v1 |
+|updated| 2024-02-15 18:59:18 UTC |
+|summary| Fine-tuning Diffusion Models remains an underexplored frontier in generativeartificial intelligence GenAI especially when compared with the remarkableprogress made in fine-tuning Large Language Models LLMs. While cutting-edgediffusion models such as Stable Diffusion SD and SDXL rely on supervisedfine-tuning their performance inevitably plateaus after seeing a certainvolume of data. Recently reinforcement learning RL has been employed tofine-tune diffusion models with human preference data but it requires at leasttwo images winner and loser images for each text prompt. In this paperwe introduce an innovative technique called self-play fine-tuning for diffusionmodels SPIN-Diffusion where the diffusion model engages in competition withits earlier versions facilitating an iterative self-improvement process. Ourapproach offers an alternative to conventional supervised fine-tuning and RLstrategies significantly improving both model performance and alignment. Ourexperiments on the Pick-a-Pic dataset reveal that SPIN-Diffusion outperformsthe existing supervised fine-tuning method in aspects of human preferencealignment and visual appeal right from its first iteration. By the seconditeration it exceeds the performance of RLHF-based methods across all metricsachieving these results with less data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09401v1 |
-|title| Reinforcement Learning from Human Feedback with Active Queries |
-|authors| Kaixuan JiJiafan HeQuanquan Gu
-|links| http://arxiv.org/abs/2402.09401v1 |
-|updated| 2024-02-14 18:58:40 UTC |
-|summary| Aligning large language models LLM with human preference plays a key rolein building modern generative models and can be achieved by reinforcementlearning from human feedback RLHF. Despite their superior performancecurrent RLHF approaches often require a large amount of human-labelledpreference data which is expensive to collect. In this paper inspired by thesuccess of active learning we address this problem by proposingquery-efficient RLHF methods. We first formalize the alignment problem as acontextual dueling bandit problem and design an active-query-based proximalpolicy optimization APPO algorithm with an tildeOd2/Delta regretbound and an tildeOd2/Delta2 query complexity where d is thedimension of feature space and Delta is the sub-optimality gap over all thecontexts. We then propose ADPO a practical version of our algorithm based ondirect preference optimization DPO and apply it to fine-tuning LLMs. Ourexperiments show that ADPO while only making about half of queries for humanpreference matches the performance of the state-of-the-art DPO method. |
+|idx| 2402.10207v1 |
+|title| Rewards-in-Context: Multi-objective Alignment of Foundation Models with Dynamic Preference Adjustment |
+|authors| Rui YangXiaoman PanFeng LuoShuang QiuHan ZhongDong YuJianshu Chen
+|links| http://arxiv.org/abs/2402.10207v1 |
+|updated| 2024-02-15 18:58:31 UTC |
+|summary| We consider the problem of multi-objective alignment of foundation modelswith human preferences which is a critical step towards helpful and harmlessAI systems. However it is generally costly and unstable to fine-tune largefoundation models using reinforcement learning RL and themulti-dimensionality heterogeneity and conflicting nature of humanpreferences further complicate the alignment process. In this paper weintroduce Rewards-in-Context RiC which conditions the response of afoundation model on multiple rewards in its prompt context and appliessupervised fine-tuning for alignment. The salient features of RiC aresimplicity and adaptivity as it only requires supervised fine-tuning of asingle foundation model and supports dynamic adjustment for user preferencesduring inference time. Inspired by the analytical solution of an abstractedconvex optimization problem our dynamic inference-time adjustment methodapproaches the Pareto-optimal solution for multiple objectives. Empiricalevidence demonstrates the efficacy of our method in aligning both LargeLanguage Models LLMs and diffusion models to accommodate diverse rewards withonly around 10 GPU hours compared with multi-objective RL baseline. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09398v1 |
-|title| Get More with LESS: Synthesizing Recurrence with KV Cache Compression for Efficient LLM Inference |
-|authors| Harry DongXinyu YangZhenyu ZhangZhangyang WangYuejie ChiBeidi Chen
-|links| http://arxiv.org/abs/2402.09398v1 |
-|updated| 2024-02-14 18:54:56 UTC |
-|summary| Many computational factors limit broader deployment of large language models.In this paper we focus on a memory bottleneck imposed by the key-value KVcache a computational shortcut that requires storing previous KV pairs duringdecoding. While existing KV cache methods approach this problem by pruning orevicting large swaths of relatively less important KV pairs to dramaticallyreduce the memory footprint of the cache they can have limited success intasks that require recollecting a majority of previous tokens. To alleviatethis issue we propose LESS a simple integration of a nearly free constantsized cache with eviction-based cache methods such that all tokens can bequeried at later decoding steps. Its ability to retain information throughouttime shows merit on a variety of tasks where we demonstrate LESS can helpreduce the performance gap from caching everything sometimes even matching itall while being efficient. |
+|idx| 2402.10206v1 |
+|title| Ising on the Graph: Task-specific Graph Subsampling via the Ising Model |
+|authors| Maria BånkestadJennifer AnderssonSebastian MairJens Sjölund
+|links| http://arxiv.org/abs/2402.10206v1 |
+|updated| 2024-02-15 18:58:18 UTC |
+|summary| Reducing a graph while preserving its overall structure is an importantproblem with many applications. Typically the reduction approaches eitherremove edges sparsification or merge nodes coarsening in an unsupervisedway with no specific downstream task in mind. In this paper we present anapproach for subsampling graph structures using an Ising model defined oneither the nodes or edges and learning the external magnetic field of the Isingmodel using a graph neural network. Our approach is task-specific as it canlearn how to reduce a graph for a specific downstream task in an end-to-endfashion. The utilized loss function of the task does not even have to bedifferentiable. We showcase the versatility of our approach on three distinctapplications: image segmentation 3D shape sparsification and sparseapproximate matrix inverse determination. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09392v1 |
-|title| LL-GABR: Energy Efficient Live Video Streaming Using Reinforcement Learning |
-|authors| Adithya RamanBekir TurkkanTevfik Kosar
-|links| http://arxiv.org/abs/2402.09392v1 |
-|updated| 2024-02-14 18:43:19 UTC |
-|summary| Over the recent years research and development in adaptive bitrate ABRalgorithms for live video streaming have been successful in improving usersquality of experience QoE by reducing latency to near real-time levels whiledelivering higher bitrate videos with minimal rebuffering time. However theQoE models used by these ABR algorithms do not take into account that a largeportion of live video streaming clients use mobile devices where a higherbitrate does not necessarily translate into higher perceived quality. Ignoringperceived quality results in playing videos at higher bitrates without asignificant increase in perceptual video quality and becomes a burden forbattery-constrained mobile devices due to higher energy consumption. In thispaper we propose LL-GABR a deep reinforcement learning approach that modelsthe QoE using perceived video quality instead of bitrate and uses energyconsumption along with other metrics like latency rebuffering events andsmoothness. LL-GABR makes no assumptions about the underlying videoenvironment or network settings and can operate flexibly on different videotitles each having a different bitrate encoding ladder without additionalre-training unlike existing learning-based ABRs. Trace-driven experimentalresults show that LL-GABR outperforms the state-of-the-art approaches by up to44 in terms of perceptual QoE and a 73 increase in energy efficiency as aresult of reducing net energy consumption by 11. |
+|idx| 2402.10204v1 |
+|title| Radio-astronomical Image Reconstruction with Conditional Denoising Diffusion Model |
+|authors| Mariia DrozdovaVitaliy KinakhOmkar BaitOlga TaranErica LastufkaMiroslava Dessauges-ZavadskyTaras HolotyakDaniel SchaererSlava Voloshynovskiy
+|links| http://dx.doi.org/10.1051/0004-6361/202347948 |
+|updated| 2024-02-15 18:57:24 UTC |
+|summary| Reconstructing sky models from dirty radio images for accurate sourcelocalization and flux estimation is crucial for studying galaxy evolution athigh redshift especially in deep fields using instruments like the AtacamaLarge Millimetre Array ALMA. With new projects like the Square KilometreArray SKA theres a growing need for better source extraction methods.Current techniques such as CLEAN and PyBDSF often fail to detect faintsources highlighting the need for more accurate methods. This study proposesusing stochastic neural networks to rebuild sky models directly from dirtyimages. This method can pinpoint radio sources and measure their fluxes withrelated uncertainties marking a potential improvement in radio sourcecharacterization. We tested this approach on 10164 images simulated with theCASA tool simalma based on ALMAs Cycle 5.3 antenna setup. We appliedconditional Denoising Diffusion Probabilistic Models DDPMs for sky modelsreconstruction then used Photutils to determine source coordinates and fluxesassessing the models performance across different water vapor levels. Ourmethod showed excellence in source localization achieving more than 90completeness at a signal-to-noise ratio SNR as low as 2. It also surpassedPyBDSF in flux estimation accurately identifying fluxes for 96 of sources inthe test set a significant improvement over CLEAN PyBDSFs 57. ConditionalDDPMs is a powerful tool for image-to-image translation yielding accurate androbust characterisation of radio sources and outperforming existingmethodologies. While this study underscores its significant potential forapplications in radio astronomy we also acknowledge certain limitations thataccompany its usage suggesting directions for further refinement and research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09391v1 |
-|title| LlaSMol: Advancing Large Language Models for Chemistry with a Large-Scale, Comprehensive, High-Quality Instruction Tuning Dataset |
-|authors| Botao YuFrazier N. BakerZiqi ChenXia NingHuan Sun
-|links| http://arxiv.org/abs/2402.09391v1 |
-|updated| 2024-02-14 18:42:25 UTC |
-|summary| Chemistry plays a crucial role in many domains such as drug discovery andmaterial science. While large language models LLMs such as GPT-4 exhibitremarkable capabilities on natural language processing tasks existing workshows their performance on chemistry tasks is discouragingly low. In thispaper however we demonstrate that our developed LLMs can achieve very strongresults on a comprehensive set of chemistry tasks outperforming the mostadvanced GPT-4 across all the tasks by a substantial margin and approaching theSoTA task-specific models. The key to our success is a large-scalecomprehensive high-quality dataset for instruction tuning named SMolInstruct.It contains 14 meticulously selected chemistry tasks and over three millionhigh-quality samples laying a solid foundation for training and evaluatingLLMs for chemistry. Based on SMolInstruct we fine-tune a set of open-sourceLLMs among which we find that Mistral serves as the best base model forchemistry tasks. We further conduct analysis on the impact of trainableparameters providing insights for future research. |
+|idx| 2402.10196v1 |
+|title| A Trembling House of Cards? Mapping Adversarial Attacks against Language Agents |
+|authors| Lingbo MoZeyi LiaoBoyuan ZhengYu SuChaowei XiaoHuan Sun
+|links| http://arxiv.org/abs/2402.10196v1 |
+|updated| 2024-02-15 18:51:32 UTC |
+|summary| Language agents powered by large language models LLMs have seen explodingdevelopment. Their capability of using language as a vehicle for thought andcommunication lends an incredible level of flexibility and versatility. Peoplehave quickly capitalized on this capability to connect LLMs to a wide range ofexternal components and environments: databases tools the Internet roboticembodiment etc. Many believe an unprecedentedly powerful automation technologyis emerging. However new automation technologies come with new safety risksespecially for intricate systems like language agents. There is a surprisinglylarge gap between the speed and scale of their development and deployment andour understanding of their safety risks. Are we building a house of cards Inthis position paper we present the first systematic effort in mappingadversarial attacks against language agents. We first present a unifiedconceptual framework for agents with three major components: Perception Brainand Action. Under this framework we present a comprehensive discussion andpropose 12 potential attack scenarios against different components of an agentcovering different attack strategies e.g. input manipulation adversarialdemonstrations jailbreaking backdoors. We also draw connections tosuccessful attack strategies previously applied to LLMs. We emphasize theurgency to gain a thorough understanding of language agent risks before theirwidespread deployment. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09404v1 |
-|title| AQA-Bench: An Interactive Benchmark for Evaluating LLMs' Sequential Reasoning Ability |
-|authors| Siwei YangBingchen ZhaoCihang Xie
-|links| http://arxiv.org/abs/2402.09404v1 |
-|updated| 2024-02-14 18:59:33 UTC |
-|summary| This paper introduces AQA-Bench a novel benchmark to assess the sequentialreasoning capabilities of large language models LLMs in algorithmic contextssuch as depth-first search DFS. The key feature of our evaluation benchmarklies in its interactive evaluation protocol -- for example in DFS theavailability of each nodes connected edge is contingent upon the modelstraversal to that node thereby necessitating the LLMs ability to effectivelyremember visited nodes and strategize subsequent moves. We comprehensivelybuild AQA-Bench with three different algorithms namely binary searchdepth-first search and breadth-first search and to evaluate the sequentialreasoning ability of 12 different LLMs. Our investigations reveal severalinteresting findings: 1 Closed-source models like GPT-4 and Gemini generallyshow strong sequential reasoning ability significantly outperformingopen-source LLMs. 2 Naively providing interactive examples may inadvertentlyhurt few-shot performance. 3 A very limited number of predecessor stepsfollowing the optimal policy can substantially boost small models performance.4 The scaling correlation between performance and model size is not alwayssignificant sometimes even showcasing an inverse trend. We hope our study cancatalyze future work on advancing the understanding and enhancement of LLMscapabilities in sequential reasoning. The code is available athttps://github.com/UCSC-VLAA/AQA-Bench. |
+|idx| 2402.10211v1 |
+|title| Hierarchical State Space Models for Continuous Sequence-to-Sequence Modeling |
+|authors| Raunaq BhirangiChenyu WangVenkatesh PattabiramanCarmel MajidiAbhinav GuptaTess HellebrekersLerrel Pinto
+|links| http://arxiv.org/abs/2402.10211v1 |
+|updated| 2024-02-15 18:59:43 UTC |
+|summary| Reasoning from sequences of raw sensory data is a ubiquitous problem acrossfields ranging from medical devices to robotics. These problems often involveusing long sequences of raw sensor data e.g. magnetometers piezoresistors topredict sequences of desirable physical quantities e.g. force inertialmeasurements. While classical approaches are powerful for locally-linearprediction problems they often fall short when using real-world sensors. Thesesensors are typically non-linear are affected by extraneous variables e.g.vibration and exhibit data-dependent drift. For many problems the predictiontask is exacerbated by small labeled datasets since obtaining ground-truthlabels requires expensive equipment. In this work we present HierarchicalState-Space Models HiSS a conceptually simple new technique for continuoussequential prediction. HiSS stacks structured state-space models on top of eachother to create a temporal hierarchy. Across six real-world sensor datasetsfrom tactile-based state prediction to accelerometer-based inertialmeasurement HiSS outperforms state-of-the-art sequence models such as causalTransformers LSTMs S4 and Mamba by at least 23 on MSE. Our experimentsfurther indicate that HiSS demonstrates efficient scaling to smaller datasetsand is compatible with existing data-filtering techniques. Code datasets andvideos can be found on https://hiss-csp.github.io. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09401v1 |
-|title| Reinforcement Learning from Human Feedback with Active Queries |
-|authors| Kaixuan JiJiafan HeQuanquan Gu
-|links| http://arxiv.org/abs/2402.09401v1 |
-|updated| 2024-02-14 18:58:40 UTC |
-|summary| Aligning large language models LLM with human preference plays a key rolein building modern generative models and can be achieved by reinforcementlearning from human feedback RLHF. Despite their superior performancecurrent RLHF approaches often require a large amount of human-labelledpreference data which is expensive to collect. In this paper inspired by thesuccess of active learning we address this problem by proposingquery-efficient RLHF methods. We first formalize the alignment problem as acontextual dueling bandit problem and design an active-query-based proximalpolicy optimization APPO algorithm with an tildeOd2/Delta regretbound and an tildeOd2/Delta2 query complexity where d is thedimension of feature space and Delta is the sub-optimality gap over all thecontexts. We then propose ADPO a practical version of our algorithm based ondirect preference optimization DPO and apply it to fine-tuning LLMs. Ourexperiments show that ADPO while only making about half of queries for humanpreference matches the performance of the state-of-the-art DPO method. |
+|idx| 2402.10210v1 |
+|title| Self-Play Fine-Tuning of Diffusion Models for Text-to-Image Generation |
+|authors| Huizhuo YuanZixiang ChenKaixuan JiQuanquan Gu
+|links| http://arxiv.org/abs/2402.10210v1 |
+|updated| 2024-02-15 18:59:18 UTC |
+|summary| Fine-tuning Diffusion Models remains an underexplored frontier in generativeartificial intelligence GenAI especially when compared with the remarkableprogress made in fine-tuning Large Language Models LLMs. While cutting-edgediffusion models such as Stable Diffusion SD and SDXL rely on supervisedfine-tuning their performance inevitably plateaus after seeing a certainvolume of data. Recently reinforcement learning RL has been employed tofine-tune diffusion models with human preference data but it requires at leasttwo images winner and loser images for each text prompt. In this paperwe introduce an innovative technique called self-play fine-tuning for diffusionmodels SPIN-Diffusion where the diffusion model engages in competition withits earlier versions facilitating an iterative self-improvement process. Ourapproach offers an alternative to conventional supervised fine-tuning and RLstrategies significantly improving both model performance and alignment. Ourexperiments on the Pick-a-Pic dataset reveal that SPIN-Diffusion outperformsthe existing supervised fine-tuning method in aspects of human preferencealignment and visual appeal right from its first iteration. By the seconditeration it exceeds the performance of RLHF-based methods across all metricsachieving these results with less data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09398v1 |
-|title| Get More with LESS: Synthesizing Recurrence with KV Cache Compression for Efficient LLM Inference |
-|authors| Harry DongXinyu YangZhenyu ZhangZhangyang WangYuejie ChiBeidi Chen
-|links| http://arxiv.org/abs/2402.09398v1 |
-|updated| 2024-02-14 18:54:56 UTC |
-|summary| Many computational factors limit broader deployment of large language models.In this paper we focus on a memory bottleneck imposed by the key-value KVcache a computational shortcut that requires storing previous KV pairs duringdecoding. While existing KV cache methods approach this problem by pruning orevicting large swaths of relatively less important KV pairs to dramaticallyreduce the memory footprint of the cache they can have limited success intasks that require recollecting a majority of previous tokens. To alleviatethis issue we propose LESS a simple integration of a nearly free constantsized cache with eviction-based cache methods such that all tokens can bequeried at later decoding steps. Its ability to retain information throughouttime shows merit on a variety of tasks where we demonstrate LESS can helpreduce the performance gap from caching everything sometimes even matching itall while being efficient. |
+|idx| 2402.10208v1 |
+|title| Recovering the Pre-Fine-Tuning Weights of Generative Models |
+|authors| Eliahu HorwitzJonathan KahanaYedid Hoshen
+|links| http://arxiv.org/abs/2402.10208v1 |
+|updated| 2024-02-15 18:59:02 UTC |
+|summary| The dominant paradigm in generative modeling consists of two steps: ipre-training on a large-scale but unsafe dataset ii aligning the pre-trainedmodel with human values via fine-tuning. This practice is considered safe asno current method can recover the unsafe pre-fine-tuning model weights. Inthis paper we demonstrate that this assumption is often false. Concretely wepresent Spectral DeTuning a method that can recover the weights of thepre-fine-tuning model using a few low-rank LoRA fine-tuned models. Incontrast to previous attacks that attempt to recover pre-fine-tuningcapabilities our method aims to recover the exact pre-fine-tuning weights. Ourapproach exploits this new vulnerability against large-scale models such as apersonalized Stable Diffusion and an aligned Mistral. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09387v1 |
-|title| Active Disruption Avoidance and Trajectory Design for Tokamak Ramp-downs with Neural Differential Equations and Reinforcement Learning |
-|authors| Allen M. WangOswin SoCharles DawsonDarren T. GarnierCristina ReaChuchu Fan
-|links| http://arxiv.org/abs/2402.09387v1 |
-|updated| 2024-02-14 18:37:40 UTC |
-|summary| The tokamak offers a promising path to fusion energy but plasma disruptionspose a major economic risk motivating considerable advances in disruptionavoidance. This work develops a reinforcement learning approach to this problemby training a policy to safely ramp-down the plasma current while avoidinglimits on a number of quantities correlated with disruptions. The policytraining environment is a hybrid physics and machine learning model trained onsimulations of the SPARC primary reference discharge PRD ramp-down anupcoming burning plasma scenario which we use as a testbed. To address physicsuncertainty and model inaccuracies the simulation environment is massivelyparallelized on GPU with randomized physics parameters during policy training.The trained policy is then successfully transferred to a higher fidelitysimulator where it successfully ramps down the plasma while avoidinguser-specified disruptive limits. We also address the crucial issue of safetycriticality by demonstrating that a constraint-conditioned policy can be usedas a trajectory design assistant to design a library of feed-forwardtrajectories to handle different physics conditions and user settings. As alibrary of trajectories is more interpretable and verifiable offline we arguesuch an approach is a promising path for leveraging the capabilities ofreinforcement learning in the safety-critical context of burning plasmatokamaks. Finally we demonstrate how the training environment can be a usefulplatform for other feed-forward optimization approaches by using anevolutionary algorithm to perform optimization of feed-forward trajectoriesthat are robust to physics uncertainty |
+|idx| 2402.10207v1 |
+|title| Rewards-in-Context: Multi-objective Alignment of Foundation Models with Dynamic Preference Adjustment |
+|authors| Rui YangXiaoman PanFeng LuoShuang QiuHan ZhongDong YuJianshu Chen
+|links| http://arxiv.org/abs/2402.10207v1 |
+|updated| 2024-02-15 18:58:31 UTC |
+|summary| We consider the problem of multi-objective alignment of foundation modelswith human preferences which is a critical step towards helpful and harmlessAI systems. However it is generally costly and unstable to fine-tune largefoundation models using reinforcement learning RL and themulti-dimensionality heterogeneity and conflicting nature of humanpreferences further complicate the alignment process. In this paper weintroduce Rewards-in-Context RiC which conditions the response of afoundation model on multiple rewards in its prompt context and appliessupervised fine-tuning for alignment. The salient features of RiC aresimplicity and adaptivity as it only requires supervised fine-tuning of asingle foundation model and supports dynamic adjustment for user preferencesduring inference time. Inspired by the analytical solution of an abstractedconvex optimization problem our dynamic inference-time adjustment methodapproaches the Pareto-optimal solution for multiple objectives. Empiricalevidence demonstrates the efficacy of our method in aligning both LargeLanguage Models LLMs and diffusion models to accommodate diverse rewards withonly around 10 GPU hours compared with multi-objective RL baseline. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09381v1 |
-|title| GraSSRep: Graph-Based Self-Supervised Learning for Repeat Detection in Metagenomic Assembly |
-|authors| Ali AzizpourAdvait BalajiTodd J. TreangenSantiago Segarra
-|links| http://arxiv.org/abs/2402.09381v1 |
-|updated| 2024-02-14 18:26:58 UTC |
-|summary| Repetitive DNA repeats poses significant challenges for accurate andefficient genome assembly and sequence alignment. This is particularly true formetagenomic data where genome dynamics such as horizontal gene transfer geneduplication and gene loss/gain complicate accurate genome assembly frommetagenomic communities. Detecting repeats is a crucial first step inovercoming these challenges. To address this issue we propose GraSSRep anovel approach that leverages the assembly graphs structure through graphneural networks GNNs within a self-supervised learning framework to classifyDNA sequences into repetitive and non-repetitive categories. Specifically weframe this problem as a node classification task within a metagenomic assemblygraph. In a self-supervised fashion we rely on a high-precision butlow-recall heuristic to generate pseudo-labels for a small proportion of thenodes. We then use those pseudo-labels to train a GNN embedding and a randomforest classifier to propagate the labels to the remaining nodes. In this wayGraSSRep combines sequencing features with pre-defined and learned graphfeatures to achieve state-of-the-art performance in repeat detection. Weevaluate our method using simulated and synthetic metagenomic datasets. Theresults on the simulated data highlight our GraSSReps robustness to repeatattributes demonstrating its effectiveness in handling the complexity ofrepeated sequences. Additionally our experiments with synthetic metagenomicdatasets reveal that incorporating the graph structure and the GNN enhances ourdetection performance. Finally in comparative analyses GraSSRep outperformsexisting repeat detection tools with respect to precision and recall. |
+|idx| 2402.10206v1 |
+|title| Ising on the Graph: Task-specific Graph Subsampling via the Ising Model |
+|authors| Maria BånkestadJennifer AnderssonSebastian MairJens Sjölund
+|links| http://arxiv.org/abs/2402.10206v1 |
+|updated| 2024-02-15 18:58:18 UTC |
+|summary| Reducing a graph while preserving its overall structure is an importantproblem with many applications. Typically the reduction approaches eitherremove edges sparsification or merge nodes coarsening in an unsupervisedway with no specific downstream task in mind. In this paper we present anapproach for subsampling graph structures using an Ising model defined oneither the nodes or edges and learning the external magnetic field of the Isingmodel using a graph neural network. Our approach is task-specific as it canlearn how to reduce a graph for a specific downstream task in an end-to-endfashion. The utilized loss function of the task does not even have to bedifferentiable. We showcase the versatility of our approach on three distinctapplications: image segmentation 3D shape sparsification and sparseapproximate matrix inverse determination. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09372v1 |
-|title| Deep Rib Fracture Instance Segmentation and Classification from CT on the RibFrac Challenge |
-|authors| Jiancheng YangRui ShiLiang JinXiaoyang HuangKaiming KuangDonglai WeiShixuan GuJianying LiuPengfei LiuZhizhong ChaiYongjie XiaoHao ChenLiming XuBang DuXiangyi YanHao TangAdam AlessioGregory HolsteJiapeng ZhangXiaoming WangJianye HeLixuan CheHanspeter PfisterMing LiBingbing Ni
-|links| http://arxiv.org/abs/2402.09372v1 |
-|updated| 2024-02-14 18:18:33 UTC |
-|summary| Rib fractures are a common and potentially severe injury that can bechallenging and labor-intensive to detect in CT scans. While there have beenefforts to address this field the lack of large-scale annotated datasets andevaluation benchmarks has hindered the development and validation of deeplearning algorithms. To address this issue the RibFrac Challenge wasintroduced providing a benchmark dataset of over 5000 rib fractures from 660CT scans with voxel-level instance mask annotations and diagnosis labels forfour clinical categories buckle nondisplaced displaced or segmental. Thechallenge includes two tracks: a detection instance segmentation trackevaluated by an FROC-style metric and a classification track evaluated by anF1-style metric. During the MICCAI 2020 challenge period 243 results wereevaluated and seven teams were invited to participate in the challengesummary. The analysis revealed that several top rib fracture detectionsolutions achieved performance comparable or even better than human experts.Nevertheless the current rib fracture classification solutions are hardlyclinically applicable which can be an interesting area in the future. As anactive benchmark and research resource the data and online evaluation of theRibFrac Challenge are available at the challenge website. As an independentcontribution we have also extended our previous internal baseline byincorporating recent advancements in large-scale pretrained networks andpoint-based rib segmentation techniques. The resulting FracNet demonstratescompetitive performance in rib fracture detection which lays a foundation forfurther research and development in AI-assisted rib fracture detection anddiagnosis. |
+|idx| 2402.10210v1 |
+|title| Self-Play Fine-Tuning of Diffusion Models for Text-to-Image Generation |
+|authors| Huizhuo YuanZixiang ChenKaixuan JiQuanquan Gu
+|links| http://arxiv.org/abs/2402.10210v1 |
+|updated| 2024-02-15 18:59:18 UTC |
+|summary| Fine-tuning Diffusion Models remains an underexplored frontier in generativeartificial intelligence GenAI especially when compared with the remarkableprogress made in fine-tuning Large Language Models LLMs. While cutting-edgediffusion models such as Stable Diffusion SD and SDXL rely on supervisedfine-tuning their performance inevitably plateaus after seeing a certainvolume of data. Recently reinforcement learning RL has been employed tofine-tune diffusion models with human preference data but it requires at leasttwo images winner and loser images for each text prompt. In this paperwe introduce an innovative technique called self-play fine-tuning for diffusionmodels SPIN-Diffusion where the diffusion model engages in competition withits earlier versions facilitating an iterative self-improvement process. Ourapproach offers an alternative to conventional supervised fine-tuning and RLstrategies significantly improving both model performance and alignment. Ourexperiments on the Pick-a-Pic dataset reveal that SPIN-Diffusion outperformsthe existing supervised fine-tuning method in aspects of human preferencealignment and visual appeal right from its first iteration. By the seconditeration it exceeds the performance of RLHF-based methods across all metricsachieving these results with less data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09368v1 |
-|title| Magic-Me: Identity-Specific Video Customized Diffusion |
-|authors| Ze MaDaquan ZhouChun-Hsiao YehXue-She WangXiuyu LiHuanrui YangZhen DongKurt KeutzerJiashi Feng
-|links| http://arxiv.org/abs/2402.09368v1 |
-|updated| 2024-02-14 18:13:51 UTC |
-|summary| Creating content for a specific identity ID has shown significant interestin the field of generative models. In the field of text-to-image generationT2I subject-driven content generation has achieved great progress with theID in the images controllable. However extending it to video generation is notwell explored. In this work we propose a simple yet effective subject identitycontrollable video generation framework termed Video Custom Diffusion VCD.With a specified subject ID defined by a few images VCD reinforces theidentity information extraction and injects frame-wise correlation at theinitialization stage for stable video outputs with identity preserved to alarge extent. To achieve this we propose three novel components that areessential for high-quality ID preservation: 1 an ID module trained with thecropped identity by prompt-to-segmentation to disentangle the ID informationand the background noise for more accurate ID token learning 2 atext-to-video T2V VCD module with 3D Gaussian Noise Prior for betterinter-frame consistency and 3 video-to-video V2V Face VCD and Tiled VCDmodules to deblur the face and upscale the video for higher resolution.  Despite its simplicity we conducted extensive experiments to verify that VCDis able to generate stable and high-quality videos with better ID over theselected strong baselines. Besides due to the transferability of the IDmodule VCD is also working well with finetuned text-to-image models availablepublically further improving its usability. The codes are available athttps://github.com/Zhen-Dong/Magic-Me. |
+|idx| 2402.10208v1 |
+|title| Recovering the Pre-Fine-Tuning Weights of Generative Models |
+|authors| Eliahu HorwitzJonathan KahanaYedid Hoshen
+|links| http://arxiv.org/abs/2402.10208v1 |
+|updated| 2024-02-15 18:59:02 UTC |
+|summary| The dominant paradigm in generative modeling consists of two steps: ipre-training on a large-scale but unsafe dataset ii aligning the pre-trainedmodel with human values via fine-tuning. This practice is considered safe asno current method can recover the unsafe pre-fine-tuning model weights. Inthis paper we demonstrate that this assumption is often false. Concretely wepresent Spectral DeTuning a method that can recover the weights of thepre-fine-tuning model using a few low-rank LoRA fine-tuned models. Incontrast to previous attacks that attempt to recover pre-fine-tuningcapabilities our method aims to recover the exact pre-fine-tuning weights. Ourapproach exploits this new vulnerability against large-scale models such as apersonalized Stable Diffusion and an aligned Mistral. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09367v1 |
-|title| Prediction of Activated Sludge Settling Characteristics from Microscopy Images with Deep Convolutional Neural Networks and Transfer Learning |
-|authors| Sina BorzooeiLeonardo ScabiniGisele MirandaSaba DaneshgarLukas DeblieckPiet De LangheOdemir BrunoBernard De BaetsIngmar NopensElena Torfs
-|links| http://arxiv.org/abs/2402.09367v1 |
-|updated| 2024-02-14 18:13:37 UTC |
-|summary| Microbial communities play a key role in biological wastewater treatmentprocesses. Activated sludge settling characteristics for example are affectedby microbial community composition varying by changes in operating conditionsand influent characteristics of wastewater treatment plants WWTPs. Timelyassessment and prediction of changes in microbial composition leading tosettling problems such as filamentous bulking FB can prevent operationalchallenges reductions in treatment efficiency and adverse environmentalimpacts. This study presents an innovative computer vision-based approach toassess activated sludge-settling characteristics based on the morphologicalproperties of flocs and filaments in microscopy images. Implementing thetransfer learning of deep convolutional neural network CNN models thisapproach aims to overcome the limitations of existing quantitative imageanalysis techniques. The offline microscopy image dataset was collected overtwo years with weekly sampling at a full-scale industrial WWTP in Belgium.Multiple data augmentation techniques were employed to enhance thegeneralizability of the CNN models. Various CNN architectures includingInception v3 ResNet18 ResNet152 ConvNeXt-nano and ConvNeXt-S were testedto evaluate their performance in predicting sludge settling characteristics.The sludge volume index was used as the final prediction variable but themethod can easily be adjusted to predict any other settling metric of choice.The results showed that the suggested CNN-based approach provides lesslabour-intensive objective and consistent assessments while transferlearning notably minimises the training phase resulting in a generalizablesystem that can be employed in real-time applications. |
+|idx| 2402.10204v1 |
+|title| Radio-astronomical Image Reconstruction with Conditional Denoising Diffusion Model |
+|authors| Mariia DrozdovaVitaliy KinakhOmkar BaitOlga TaranErica LastufkaMiroslava Dessauges-ZavadskyTaras HolotyakDaniel SchaererSlava Voloshynovskiy
+|links| http://dx.doi.org/10.1051/0004-6361/202347948 |
+|updated| 2024-02-15 18:57:24 UTC |
+|summary| Reconstructing sky models from dirty radio images for accurate sourcelocalization and flux estimation is crucial for studying galaxy evolution athigh redshift especially in deep fields using instruments like the AtacamaLarge Millimetre Array ALMA. With new projects like the Square KilometreArray SKA theres a growing need for better source extraction methods.Current techniques such as CLEAN and PyBDSF often fail to detect faintsources highlighting the need for more accurate methods. This study proposesusing stochastic neural networks to rebuild sky models directly from dirtyimages. This method can pinpoint radio sources and measure their fluxes withrelated uncertainties marking a potential improvement in radio sourcecharacterization. We tested this approach on 10164 images simulated with theCASA tool simalma based on ALMAs Cycle 5.3 antenna setup. We appliedconditional Denoising Diffusion Probabilistic Models DDPMs for sky modelsreconstruction then used Photutils to determine source coordinates and fluxesassessing the models performance across different water vapor levels. Ourmethod showed excellence in source localization achieving more than 90completeness at a signal-to-noise ratio SNR as low as 2. It also surpassedPyBDSF in flux estimation accurately identifying fluxes for 96 of sources inthe test set a significant improvement over CLEAN PyBDSFs 57. ConditionalDDPMs is a powerful tool for image-to-image translation yielding accurate androbust characterisation of radio sources and outperforming existingmethodologies. While this study underscores its significant potential forapplications in radio astronomy we also acknowledge certain limitations thataccompany its usage suggesting directions for further refinement and research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09359v1 |
-|title| Pruning Sparse Tensor Neural Networks Enables Deep Learning for 3D Ultrasound Localization Microscopy |
-|authors| Brice RaubyPaul XingJonathan PoréeMaxime GasseJean Provost
-|links| http://arxiv.org/abs/2402.09359v1 |
-|updated| 2024-02-14 18:03:58 UTC |
-|summary| Ultrasound Localization Microscopy ULM is a non-invasive technique thatallows for the imaging of micro-vessels in vivo at depth and with a resolutionon the order of ten microns. ULM is based on the sub-resolution localization ofindividual microbubbles injected in the bloodstream. Mapping the wholeangioarchitecture requires the accumulation of microbubbles trajectories fromthousands of frames typically acquired over a few minutes. ULM acquisitiontimes can be reduced by increasing the microbubble concentration but requiresmore advanced algorithms to detect them individually. Several deep learningapproaches have been proposed for this task but they remain limited to 2Dimaging in part due to the associated large memory requirements. Herein wepropose to use sparse tensor neural networks to reduce memory usage in 2D andto improve the scaling of the memory requirement for the extension of deeplearning architecture to 3D. We study several approaches to efficiently convertultrasound data into a sparse format and study the impact of the associatedloss of information. When applied in 2D the sparse formulation reduces thememory requirements by a factor 2 at the cost of a small reduction ofperformance when compared against dense networks. In 3D the proposed approachreduces memory requirements by two order of magnitude while largelyoutperforming conventional ULM in high concentration settings. We show thatSparse Tensor Neural Networks in 3D ULM allow for the same benefits as densedeep learning based method in 2D ULM i.e. the use of higher concentration insilico and reduced acquisition time. |
+|idx| 2402.10130v1 |
+|title| Is Continual Learning Ready for Real-world Challenges? |
+|authors| Theodora KontogianniYuanwen YueSiyu TangKonrad Schindler
+|links| http://arxiv.org/abs/2402.10130v1 |
+|updated| 2024-02-15 17:34:56 UTC |
+|summary| Despite continual learnings long and well-established academic history itsapplication in real-world scenarios remains rather limited. This paper contendsthat this gap is attributable to a misalignment between the actual challengesof continual learning and the evaluation protocols in use rendering proposedsolutions ineffective for addressing the complexities of real-world setups. Wevalidate our hypothesis and assess progress to date using a new 3D semanticsegmentation benchmark OCL-3DSS. We investigate various continual learningschemes from the literature by utilizing more realistic protocols thatnecessitate online and continual learning for dynamic real-world scenarioseg. in robotics and 3D vision applications. The outcomes are sobering: allconsidered methods perform poorly significantly deviating from the upper boundof joint offline training. This raises questions about the applicability ofexisting methods in realistic settings. Our paper aims to initiate a paradigmshift advocating for the adoption of continual learning methods through newexperimental protocols that better emulate real-world conditions to facilitatebreakthroughs in the field. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09353v1 |
-|title| DoRA: Weight-Decomposed Low-Rank Adaptation |
-|authors| Shih-Yang LiuChien-Yi WangHongxu YinPavlo MolchanovYu-Chiang Frank WangKwang-Ting ChengMin-Hung Chen
-|links| http://arxiv.org/abs/2402.09353v1 |
-|updated| 2024-02-14 17:59:34 UTC |
-|summary| Among the widely used parameter-efficient finetuning PEFT methods LoRA andits variants have gained considerable popularity because of avoiding additionalinference costs. However there still often exists an accuracy gap betweenthese methods and full fine-tuning FT. In this work we first introduce anovel weight decomposition analysis to investigate the inherent differencesbetween FT and LoRA. Aiming to resemble the learning capacity of FT from thefindings we propose Weight-Decomposed LowRank Adaptation DoRA. DoRAdecomposes the pre-trained weight into two components magnitude and directionfor fine-tuning specifically employing LoRA for directional updates toefficiently minimize the number of trainable parameters. By employing DoRA weenhance both the learning capacity and training stability of LoRA whileavoiding any additional inference overhead. DoRA consistently outperforms LoRAon fine-tuning LLaMA LLaVA and VL-BART on various downstream tasks such ascommonsense reasoning visual instruction tuning and image/video-textunderstanding. |
+|idx| 2402.10128v1 |
+|title| GES: Generalized Exponential Splatting for Efficient Radiance Field Rendering |
+|authors| Abdullah HamdiLuke Melas-KyriaziGuocheng QianJinjie MaiRuoshi LiuCarl VondrickBernard GhanemAndrea Vedaldi
+|links| http://arxiv.org/abs/2402.10128v1 |
+|updated| 2024-02-15 17:32:50 UTC |
+|summary| Advancements in 3D Gaussian Splatting have significantly accelerated 3Dreconstruction and generation. However it may require a large number ofGaussians which creates a substantial memory footprint. This paper introducesGES Generalized Exponential Splatting a novel representation that employsGeneralized Exponential Function GEF to model 3D scenes requiring far fewerparticles to represent a scene and thus significantly outperforming GaussianSplatting methods in efficiency with a plug-and-play replacement ability forGaussian-based utilities. GES is validated theoretically and empirically inboth principled 1D setup and realistic 3D scenes.  It is shown to represent signals with sharp edges more accurately which aretypically challenging for Gaussians due to their inherent low-passcharacteristics. Our empirical analysis demonstrates that GEF outperformsGaussians in fitting natural-occurring signals e.g. squares triangles andparabolic signals thereby reducing the need for extensive splittingoperations that increase the memory footprint of Gaussian Splatting. With theaid of a frequency-modulated loss GES achieves competitive performance innovel-view synthesis benchmarks while requiring less than half the memorystorage of Gaussian Splatting and increasing the rendering speed by up to 39.The code is available on the project website https://abdullahamdi.com/ges . |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09401v1 |
-|title| Reinforcement Learning from Human Feedback with Active Queries |
-|authors| Kaixuan JiJiafan HeQuanquan Gu
-|links| http://arxiv.org/abs/2402.09401v1 |
-|updated| 2024-02-14 18:58:40 UTC |
-|summary| Aligning large language models LLM with human preference plays a key rolein building modern generative models and can be achieved by reinforcementlearning from human feedback RLHF. Despite their superior performancecurrent RLHF approaches often require a large amount of human-labelledpreference data which is expensive to collect. In this paper inspired by thesuccess of active learning we address this problem by proposingquery-efficient RLHF methods. We first formalize the alignment problem as acontextual dueling bandit problem and design an active-query-based proximalpolicy optimization APPO algorithm with an tildeOd2/Delta regretbound and an tildeOd2/Delta2 query complexity where d is thedimension of feature space and Delta is the sub-optimality gap over all thecontexts. We then propose ADPO a practical version of our algorithm based ondirect preference optimization DPO and apply it to fine-tuning LLMs. Ourexperiments show that ADPO while only making about half of queries for humanpreference matches the performance of the state-of-the-art DPO method. |
+|idx| 2402.10210v1 |
+|title| Self-Play Fine-Tuning of Diffusion Models for Text-to-Image Generation |
+|authors| Huizhuo YuanZixiang ChenKaixuan JiQuanquan Gu
+|links| http://arxiv.org/abs/2402.10210v1 |
+|updated| 2024-02-15 18:59:18 UTC |
+|summary| Fine-tuning Diffusion Models remains an underexplored frontier in generativeartificial intelligence GenAI especially when compared with the remarkableprogress made in fine-tuning Large Language Models LLMs. While cutting-edgediffusion models such as Stable Diffusion SD and SDXL rely on supervisedfine-tuning their performance inevitably plateaus after seeing a certainvolume of data. Recently reinforcement learning RL has been employed tofine-tune diffusion models with human preference data but it requires at leasttwo images winner and loser images for each text prompt. In this paperwe introduce an innovative technique called self-play fine-tuning for diffusionmodels SPIN-Diffusion where the diffusion model engages in competition withits earlier versions facilitating an iterative self-improvement process. Ourapproach offers an alternative to conventional supervised fine-tuning and RLstrategies significantly improving both model performance and alignment. Ourexperiments on the Pick-a-Pic dataset reveal that SPIN-Diffusion outperformsthe existing supervised fine-tuning method in aspects of human preferencealignment and visual appeal right from its first iteration. By the seconditeration it exceeds the performance of RLHF-based methods across all metricsachieving these results with less data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09373v1 |
-|title| Loss Shaping Constraints for Long-Term Time Series Forecasting |
-|authors| Ignacio HounieJavier Porras-ValenzuelaAlejandro Ribeiro
-|links| http://arxiv.org/abs/2402.09373v1 |
-|updated| 2024-02-14 18:20:44 UTC |
-|summary| Several applications in time series forecasting require predicting multiplesteps ahead. Despite the vast amount of literature in the topic both classicaland recent deep learning based approaches have mostly focused on minimisingperformance averaged over the predicted window. We observe that this can leadto disparate distributions of errors across forecasting steps especially forrecent transformer architectures trained on popular forecasting benchmarks.That is optimising performance on average can lead to undesirably large errorsat specific time-steps. In this work we present a Constrained Learningapproach for long-term time series forecasting that aims to find the best modelin terms of average performance that respects a user-defined upper bound on theloss at each time-step. We call our approach loss shaping constraints becauseit imposes constraints on the loss at each time step and leverage recentduality results to show that despite its non-convexity the resulting problemhas a bounded duality gap. We propose a practical Primal-Dual algorithm totackle it and demonstrate that the proposed approach exhibits competitiveaverage performance in time series forecasting benchmarks while shaping thedistribution of errors across the predicted window. |
+|idx| 2402.10198v1 |
+|title| Unlocking the Potential of Transformers in Time Series Forecasting with Sharpness-Aware Minimization and Channel-Wise Attention |
+|authors| Romain IlbertAmbroise OdonnatVasilii FeofanovAladin VirmauxGiuseppe PaoloThemis PalpanasIevgen Redko
+|links| http://arxiv.org/abs/2402.10198v1 |
+|updated| 2024-02-15 18:55:05 UTC |
+|summary| Transformer-based architectures achieved breakthrough performance in naturallanguage processing and computer vision yet they remain inferior to simplerlinear baselines in multivariate long-term forecasting. To better understandthis phenomenon we start by studying a toy linear forecasting problem forwhich we show that transformers are incapable of converging to their truesolution despite their high expressive power. We further identify the attentionof transformers as being responsible for this low generalization capacity.Building upon this insight we propose a shallow lightweight transformer modelthat successfully escapes bad local minima when optimized with sharpness-awareoptimization. We empirically demonstrate that this result extends to allcommonly used real-world multivariate time series datasets. In particularSAMformer surpasses the current state-of-the-art model TSMixer by 14.33 onaverage while having 4 times fewer parameters. The code is available athttps://github.com/romilbert/samformer. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09328v1 |
-|title| Connecting Algorithmic Fairness to Quality Dimensions in Machine Learning in Official Statistics and Survey Production |
-|authors| Patrick Oliver SchenkChristoph Kern
-|links| http://arxiv.org/abs/2402.09328v1 |
-|updated| 2024-02-14 17:18:03 UTC |
-|summary| National Statistical Organizations NSOs increasingly draw on MachineLearning ML to improve the timeliness and cost-effectiveness of theirproducts. When introducing ML solutions NSOs must ensure that high standardswith respect to robustness reproducibility and accuracy are upheld ascodified e.g. in the Quality Framework for Statistical Algorithms QF4SAYung et al. 2022. At the same time a growing body of research focuses onfairness as a pre-condition of a safe deployment of ML to prevent disparatesocial impacts in practice. However fairness has not yet been explicitlydiscussed as a quality aspect in the context of the application of ML at NSOs.We employ Yung et al. 2022s QF4SA quality framework and present a mapping ofits quality dimensions to algorithmic fairness. We thereby extend the QF4SAframework in several ways: we argue for fairness as its own quality dimensionwe investigate the interaction of fairness with other dimensions and weexplicitly address data both on its own and its interaction with appliedmethodology. In parallel with empirical illustrations we show how our mappingcan contribute to methodology in the domains of official statisticsalgorithmic fairness and trustworthy machine learning. |
+|idx| 2402.10127v1 |
+|title| Nonlinear spiked covariance matrices and signal propagation in deep neural networks |
+|authors| Zhichao WangDenny WuZhou Fan
+|links| http://arxiv.org/abs/2402.10127v1 |
+|updated| 2024-02-15 17:31:19 UTC |
+|summary| Many recent works have studied the eigenvalue spectrum of the ConjugateKernel CK defined by the nonlinear feature map of a feedforward neuralnetwork. However existing results only establish weak convergence of theempirical eigenvalue distribution and fall short of providing precisequantitative characterizations of the spike eigenvalues and eigenvectorsthat often capture the low-dimensional signal structure of the learningproblem. In this work we characterize these signal eigenvalues andeigenvectors for a nonlinear version of the spiked covariance model includingthe CK as a special case. Using this general result we give a quantitativedescription of how spiked eigenstructure in the input data propagates throughthe hidden layers of a neural network with random weights. As a secondapplication we study a simple regime of representation learning where theweight matrix develops a rank-one signal component over training andcharacterize the alignment of the target function with the spike eigenvector ofthe CK on test data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09236v1 |
-|title| Learning Interpretable Concepts: Unifying Causal Representation Learning and Foundation Models |
-|authors| Goutham RajendranSimon BuchholzBryon AragamBernhard SchölkopfPradeep Ravikumar
-|links| http://arxiv.org/abs/2402.09236v1 |
-|updated| 2024-02-14 15:23:59 UTC |
-|summary| To build intelligent machine learning systems there are two broadapproaches. One approach is to build inherently interpretable models asendeavored by the growing field of causal representation learning. The otherapproach is to build highly-performant foundation models and then investefforts into understanding how they work. In this work we relate these twoapproaches and study how to learn human-interpretable concepts from data.Weaving together ideas from both fields we formally define a notion ofconcepts and show that they can be provably recovered from diverse data.Experiments on synthetic data and large language models show the utility of ourunified approach. |
+|idx| 2402.10065v1 |
+|title| How Much Does Each Datapoint Leak Your Privacy? Quantifying the Per-datum Membership Leakage |
+|authors| Achraf AzizeDebabrota Basu
+|links| http://arxiv.org/abs/2402.10065v1 |
+|updated| 2024-02-15 16:30:55 UTC |
+|summary| We study the per-datum Membership Inference Attacks MIAs where an attackeraims to infer whether a fixed target datum has been included in the inputdataset of an algorithm and thus violates privacy. First we define themembership leakage of a datum as the advantage of the optimal adversarytargeting to identify it. Then we quantify the per-datum membership leakagefor the empirical mean and show that it depends on the Mahalanobis distancebetween the target datum and the data-generating distribution. We furtherassess the effect of two privacy defences i.e. adding Gaussian noise andsub-sampling. We quantify exactly how both of them decrease the per-datummembership leakage. Our analysis builds on a novel proof technique thatcombines an Edgeworth expansion of the likelihood ratio test and aLindeberg-Feller central limit theorem. Our analysis connects the existinglikelihood ratio and scalar product attacks and also justifies differentcanary selection strategies used in the privacy auditing literature. Finallyour experiments demonstrate the impacts of the leakage score the sub-samplingratio and the noise scale on the per-datum membership leakage as indicated bythe theory. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09226v1 |
-|title| Directional Convergence Near Small Initializations and Saddles in Two-Homogeneous Neural Networks |
-|authors| Akshay KumarJarvis Haupt
-|links| http://arxiv.org/abs/2402.09226v1 |
-|updated| 2024-02-14 15:10:37 UTC |
-|summary| This paper examines gradient flow dynamics of two-homogeneous neural networksfor small initializations where all weights are initialized near the origin.For both square and logistic losses it is shown that for sufficiently smallinitializations the gradient flow dynamics spend sufficient time in theneighborhood of the origin to allow the weights of the neural network toapproximately converge in direction to the Karush-Kuhn-Tucker KKT points of aneural correlation function that quantifies the correlation between the outputof the neural network and corresponding labels in the training data set. Forsquare loss it has been observed that neural networks undergo saddle-to-saddledynamics when initialized close to the origin. Motivated by this this paperalso shows a similar directional convergence among weights of small magnitudein the neighborhood of certain saddle points. |
+|idx| 2402.10043v1 |
+|title| How to validate average calibration for machine learning regression tasks ? |
+|authors| Pascal Pernot
+|links| http://arxiv.org/abs/2402.10043v1 |
+|updated| 2024-02-15 16:05:35 UTC |
+|summary| Average calibration of the uncertainties of machine learning regression taskscan be tested in two ways. One way is to estimate the calibration error CE asthe difference between the mean absolute error MSE and the mean variance MVor mean squared uncertainty. The alternative is to compare the mean squaredz-scores or scaled errors ZMS to 1. Both approaches might lead to differentconclusion as illustrated on an ensemble of datasets from the recent machinelearning uncertainty quantification literature. It is shown here that the CE isvery sensitive to the distribution of uncertainties and notably to thepresence of outlying uncertainties and that it cannot be used reliably forcalibration testing. By contrast the ZMS statistic does not present thissensitivity issue and offers the most reliable approach in this context.Implications for the validation of conditional calibration are discussed. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09384v1 |
-|title| Persuasion, Delegation, and Private Information in Algorithm-Assisted Decisions |
-|authors| Ruqing Xu
-|links| http://arxiv.org/abs/2402.09384v1 |
-|updated| 2024-02-14 18:32:30 UTC |
-|summary| A principal designs an algorithm that generates a publicly observableprediction of a binary state. She must decide whether to act directly based onthe prediction or to delegate the decision to an agent with private informationbut potential misalignment. We study the optimal design of the predictionalgorithm and the delegation rule in such environments. Three key findingsemerge: 1 Delegation is optimal if and only if the principal would make thesame binary decision as the agent had she observed the agents information. 2Providing the most informative algorithm may be suboptimal even if theprincipal can act on the algorithms prediction. Instead the optimal algorithmmay provide more information about one state and restrict information about theother. 3 Common restrictions on algorithms such as keeping ahuman-in-the-loop or requiring maximal prediction accuracy strictly worsendecision quality in the absence of perfectly aligned agents and state-revealingsignals. These findings predict the underperformance of human-machinecollaborations if no measures are taken to mitigate common preferencemisalignment between algorithms and human decision-makers. |
+|idx| 2402.10050v1 |
+|title| On-Demand Myoelectric Control Using Wake Gestures to Eliminate False Activations During Activities of Daily Living |
+|authors| Ethan EddyEvan CampbellScott BatemanErik Scheme
+|links| http://arxiv.org/abs/2402.10050v1 |
+|updated| 2024-02-15 16:11:47 UTC |
+|summary| While myoelectric control has recently become a focus of increased researchas a possible flexible hands-free input modality current control approachesare prone to inadvertent false activations in real-world conditions. In thiswork a novel myoelectric control paradigm -- on-demand myoelectric control --is proposed designed and evaluated to reduce the number of unrelated musclemovements that are incorrectly interpreted as input gestures . By leveragingthe concept of wake gestures users were able to switch between a dedicatedcontrol mode and a sleep mode effectively eliminating inadvertent activationsduring activities of daily living ADLs. The feasibility of wake gestures wasdemonstrated in this work through two online ubiquitous EMG control tasks withvarying difficulty levels dismissing an alarm and controlling a robot. Theproposed control scheme was able to appropriately ignore almost allnon-targeted muscular inputs during ADLs 99.9 while maintaining sufficientsensitivity for reliable mode switching during intentional wake gestureelicitation. These results highlight the potential of wake gestures as acritical step towards enabling ubiquitous myoelectric control-based on-demandinput for a wide range of applications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09264v1 |
-|title| UR2M: Uncertainty and Resource-Aware Event Detection on Microcontrollers |
-|authors| Hong JiaYoung D. KwonDong MaNhat PhamLorena QendroTam VuCecilia Mascolo
-|links| http://arxiv.org/abs/2402.09264v1 |
-|updated| 2024-02-14 15:51:28 UTC |
-|summary| Traditional machine learning techniques are prone to generating inaccuratepredictions when confronted with shifts in the distribution of data between thetraining and testing phases. This vulnerability can lead to severeconsequences especially in applications such as mobile healthcare. Uncertaintyestimation has the potential to mitigate this issue by assessing thereliability of a models output. However existing uncertainty estimationtechniques often require substantial computational resources and memory makingthem impractical for implementation on microcontrollers MCUs. This limitationhinders the feasibility of many important on-device wearable event detectionWED applications such as heart attack detection.  In this paper we present UR2M a novel Uncertainty and Resource-aware eventdetection framework for MCUs. Specifically we i develop an uncertainty-awareWED based on evidential theory for accurate event detection and reliableuncertainty estimation ii introduce a cascade ML framework to achieveefficient model inference via early exits by sharing shallower model layersamong different event models iii optimize the deployment of the model andMCU library for system efficiency. We conducted extensive experiments andcompared UR2M to traditional uncertainty baselines using three wearabledatasets. Our results demonstrate that UR2M achieves up to 864 fasterinference speed 857 energy-saving for uncertainty estimation 55 memorysaving on two popular MCUs and a 22 improvement in uncertainty quantificationperformance.  UR2M can be deployed on a wide range of MCUs significantly expandingreal-time and reliable WED applications. |
+|idx| 2402.09990v1 |
+|title| TIAViz: A Browser-based Visualization Tool for Computational Pathology Models |
+|authors| Mark EastwoodJohn PocockMostafa JahanifarAdam ShephardSkiros HabibEthar AlzaidAbdullah AlsalemiJan Lukas RobertusNasir RajpootShan RazaFayyaz Minhas
+|links| http://arxiv.org/abs/2402.09990v1 |
+|updated| 2024-02-15 14:54:46 UTC |
+|summary| Digital pathology has gained significant traction in modern healthcaresystems. This shift from optical microscopes to digital imagery brings with itthe potential for improved diagnosis efficiency and the integration of AItools into the pathologists workflow. A critical aspect of this isvisualization. Throughout the development of a machine learning ML model indigital pathology it is crucial to have flexible openly available tools tovisualize models from their outputs and predictions to the underlyingannotations and images used to train or test a model. We introduce TIAViz aPython-based visualization tool built into TIAToolbox which allows flexibleinteractive fully zoomable overlay of a wide variety of information onto wholeslide images including graphs heatmaps segmentations annotations and otherWSIs. The UI is browser-based allowing use either locally on a remotemachine or on a server to provide publicly available demos. This tool is opensource and is made available at:https://github.com/TissueImageAnalytics/tiatoolbox and via pip installationpip install tiatoolbox and conda as part of TIAToolbox. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09260v1 |
-|title| Evaluating the Experience of LGBTQ+ People Using Large Language Model Based Chatbots for Mental Health Support |
-|authors| Zilin MaYiyang MeiYinru LongZhaoyuan SuKrzysztof Z. Gajos
-|links| http://dx.doi.org/10.1145/3613904.3642482 |
-|updated| 2024-02-14 15:48:07 UTC |
-|summary| LGBTQ individuals are increasingly turning to chatbots powered by largelanguage models LLMs to meet their mental health needs. However littleresearch has explored whether these chatbots can adequately and safely providetailored support for this demographic. We interviewed 18 LGBTQ and 13non-LGBTQ participants about their experiences with LLM-based chatbots formental health needs. LGBTQ participants relied on these chatbots for mentalhealth support likely due to an absence of support in real life. Notablywhile LLMs offer prompt support they frequently fall short in grasping thenuances of LGBTQ-specific challenges. Although fine-tuning LLMs to addressLGBTQ needs can be a step in the right direction it isnt the panacea. Thedeeper issue is entrenched in societal discrimination. Consequently we call onfuture researchers and designers to look beyond mere technical refinements andadvocate for holistic strategies that confront and counteract the societalbiases burdening the LGBTQ community. |
+|idx| 2402.09939v1 |
+|title| Generative AI in the Construction Industry: A State-of-the-art Analysis |
+|authors| Ridwan TaiwoIdris Temitope BelloSulemana Fatoama AbdulaiAbdul-Mugis YussifBabatunde Abiodun SalamiAbdullahi SakaTarek Zayed
+|links| http://arxiv.org/abs/2402.09939v1 |
+|updated| 2024-02-15 13:39:55 UTC |
+|summary| The construction industry is a vital sector of the global economy but itfaces many productivity challenges in various processes such as designplanning procurement inspection and maintenance. Generative artificialintelligence AI which can create novel and realistic data or content suchas text image video or code based on some input or prior knowledge offersinnovative and disruptive solutions to address these challenges. However thereis a gap in the literature on the current state opportunities and challengesof generative AI in the construction industry. This study aims to fill this gapby providing a state-of-the-art analysis of generative AI in construction withthree objectives: 1 to review and categorize the existing and emerginggenerative AI opportunities and challenges in the construction industry 2 topropose a framework for construction firms to build customized generative AIsolutions using their own data comprising steps such as data collectiondataset curation training custom large language model LLM model evaluationand deployment and 3 to demonstrate the framework via a case study ofdeveloping a generative model for querying contract documents. The results showthat retrieval augmented generation RAG improves the baseline LLM by 5.29.4 and 4.8 in terms of quality relevance and reproducibility. This studyprovides academics and construction professionals with a comprehensive analysisand practical framework to guide the adoption of generative AI techniques toenhance productivity quality safety and sustainability across theconstruction industry. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09216v1 |
-|title| Scaling the Authoring of AutoTutors with Large Language Models |
-|authors| Sankalan Pal ChowdhuryVilém ZouharMrinmaya Sachan
-|links| http://arxiv.org/abs/2402.09216v1 |
-|updated| 2024-02-14 14:53:56 UTC |
-|summary| Large Language Models LLMs have found several use cases in educationranging from automatic question generation to essay evaluation. In this paperwe explore the potential of using Large Language Models LLMs to authorIntelligent Tutoring Systems. A common pitfall of LLMs is their straying fromdesired pedagogical strategies such as leaking the answer to the student andin general providing no guarantees. We posit that while LLMs with certainguardrails can take the place of subject experts the overall pedagogicaldesign still needs to be handcrafted for the best learning results. Based onthis principle we create a sample end-to-end tutoring system named MWPTutorwhich uses LLMs to fill in the state space of a pre-defined finite statetransducer. This approach retains the structure and the pedagogy of traditionaltutoring systems that has been developed over the years by learning scientistsbut brings in additional flexibility of LLM-based approaches. Through a humanevaluation study on two datasets based on math word problems we show that ourhybrid approach achieves a better overall tutoring score than an instructedbut otherwise free-form GPT-4. MWPTutor is completely modular and opens up thescope for the community to improve its performance by improving individualmodules or using different teaching strategies that it can follow |
+|idx| 2402.09894v1 |
+|title| Not Just Novelty: A Longitudinal Study on Utility and Customization of AI Workflows |
+|authors| Tao LongKaty Ilonka GeroLydia B. Chilton
+|links| http://arxiv.org/abs/2402.09894v1 |
+|updated| 2024-02-15 11:39:11 UTC |
+|summary| Generative AI brings novel and impressive abilities to help people ineveryday tasks. There are many AI workflows that solve real and complexproblems by chaining AI outputs together with human interaction. Although thereis an undeniable lure of AI its uncertain how useful generative AI workflowsare after the novelty wears off. Additionally tools built with generative AIhave the potential to be personalized and adapted quickly and easily but dousers take advantage of the potential to customize We conducted a three-weeklongitudinal study with 12 users to understand the familiarization andcustomization of generative AI tools for science communication. Our studyrevealed that the familiarization phase lasts for 4.3 sessions where usersexplore the capabilities of the workflow and which aspects they find useful.After familiarization the perceived utility of the system is rated higher thanbefore indicating that the perceived utility of AI is not just a noveltyeffect. The increase in benefits mainly comes from end-users ability tocustomize prompts and thus appropriate the system to their own needs. Thispoints to a future where generative AI systems can allow us to design forappropriation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09205v2 |
-|title| Tell Me More! Towards Implicit User Intention Understanding of Language Model Driven Agents |
-|authors| Cheng QianBingxiang HeZhong ZhuangJia DengYujia QinXin CongZhong ZhangJie ZhouYankai LinZhiyuan LiuMaosong Sun
-|links| http://arxiv.org/abs/2402.09205v2 |
-|updated| 2024-02-15 09:59:52 UTC |
-|summary| Current language model-driven agents often lack mechanisms for effective userparticipation which is crucial given the vagueness commonly found in userinstructions. Although adept at devising strategies and performing tasks theseagents struggle with seeking clarification and grasping precise userintentions. To bridge this gap we introduce Intention-in-Interaction IN3 anovel benchmark designed to inspect users implicit intentions through explicitqueries. Next we propose the incorporation of model experts as the upstream inagent designs to enhance user-agent interaction. Employing IN3 we empiricallytrain Mistral-Interact a powerful model that proactively assesses taskvagueness inquires user intentions and refines them into actionable goalsbefore starting downstream agent task execution. Integrating it into the XAgentframework we comprehensively evaluate the enhanced agent system regarding userinstruction understanding and execution revealing that our approach notablyexcels at identifying vague user tasks recovering and summarizing criticalmissing information setting precise and necessary agent execution goals andminimizing redundant tool usage thus boosting overall efficiency. All the dataand codes are released. |
+|idx| 2402.09880v1 |
+|title| Inadequacies of Large Language Model Benchmarks in the Era of Generative Artificial Intelligence |
+|authors| Timothy R. McIntoshTeo SusnjakTong LiuPaul WattersMalka N. Halgamuge
+|links| http://arxiv.org/abs/2402.09880v1 |
+|updated| 2024-02-15 11:08:10 UTC |
+|summary| The rapid rise in popularity of Large Language Models LLMs with emergingcapabilities has spurred public curiosity to evaluate and compare differentLLMs leading many researchers to propose their LLM benchmarks. Noticingpreliminary inadequacies in those benchmarks we embarked on a study tocritically assess 23 state-of-the-art LLM benchmarks using our novel unifiedevaluation framework through the lenses of people process and technologyunder the pillars of functionality and security. Our research uncoveredsignificant limitations including biases difficulties in measuring genuinereasoning adaptability implementation inconsistencies prompt engineeringcomplexity evaluator diversity and the overlooking of cultural andideological norms in one comprehensive assessment. Our discussions emphasizedthe urgent need for standardized methodologies regulatory certainties andethical guidelines in light of Artificial Intelligence AI advancementsincluding advocating for an evolution from static benchmarks to dynamicbehavioral profiling to accurately capture LLMs complex behaviors andpotential risks. Our study highlighted the necessity for a paradigm shift inLLM evaluation methodologies underlining the importance of collaborativeefforts for the development of universally accepted benchmarks and theenhancement of AI systems integration into society. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.09233v1 |
-|title| Design and Realization of a Benchmarking Testbed for Evaluating Autonomous Platooning Algorithms |
-|authors| Michael ShahamRisha RanjanEngin KirdaTaskin Padir
-|links| http://arxiv.org/abs/2402.09233v1 |
-|updated| 2024-02-14 15:22:24 UTC |
-|summary| Autonomous vehicle platoons present near- and long-term opportunities toenhance operational efficiencies and save lives. The past 30 years have seenrapid development in the autonomous driving space enabling new technologiesthat will alleviate the strain placed on human drivers and reduce vehicleemissions. This paper introduces a testbed for evaluating and benchmarkingplatooning algorithms on 1/10th scale vehicles with onboard sensors. Todemonstrate the testbeds utility we evaluate three algorithms linearfeedback and two variations of distributed model predictive control andcompare their results on a typical platooning scenario where the lead vehicletracks a reference trajectory that changes speed multiple times. We validateour algorithms in simulation to analyze the performance as the platoon sizeincreases and find that the distributed model predictive control algorithmsoutperform linear feedback on hardware and in simulation. |
+|idx| 2402.10172v1 |
+|title| OptiMUS: Scalable Optimization Modeling with (MI)LP Solvers and Large Language Models |
+|authors| Ali AhmadiTeshniziWenzhi GaoMadeleine Udell
+|links| http://arxiv.org/abs/2402.10172v1 |
+|updated| 2024-02-15 18:19:18 UTC |
+|summary| Optimization problems are pervasive in sectors from manufacturing anddistribution to healthcare. However most such problems are still solvedheuristically by hand rather than optimally by state-of-the-art solvers becausethe expertise required to formulate and solve these problems limits thewidespread adoption of optimization tools and techniques. This paper introducesOptiMUS a Large Language Model LLM-based agent designed to formulate andsolve mixed integer linear programming problems from their natural languagedescriptions. OptiMUS can develop mathematical models write and debug solvercode evaluate the generated solutions and improve its model and code based onthese evaluations. OptiMUS utilizes a modular structure to process problemsallowing it to handle problems with long descriptions and complex data withoutlong prompts. Experiments demonstrate that OptiMUS outperforms existingstate-of-the-art methods on easy datasets by more than 20 and on harddatasets including a new dataset NLP4LP released with this paper thatfeatures long and complex problems by more than 30. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.08905v1 |
-|title| Time preference, wealth and utility inequality: A microeconomic interaction and dynamic macroeconomic model connection approach |
-|authors| Takeshi Kato
-|links| http://arxiv.org/abs/2402.08905v1 |
-|updated| 2024-02-14 02:41:36 UTC |
-|summary| Based on interactions between individuals and others and references to socialnorms this study reveals the impact of heterogeneity in time preference onwealth distribution and inequality. We present a novel approach that connectsthe interactions between microeconomic agents that generate heterogeneity tothe dynamic equations for capital and consumption in macroeconomic models.Using this approach we estimate the impact of changes in the discount rate dueto microeconomic interactions on capital consumption and utility and thedegree of inequality. The results show that intercomparisons with othersregarding consumption significantly affect capital i.e. wealth inequality.Furthermore the impact on utility is never small and social norms can reducethis impact. Our supporting evidence shows that the quantitative results ofinequality calculations correspond to survey data from cohort andcross-cultural studies. This studys micro-macro connection approach can bedeployed to connect microeconomic interactions such as exchange interest anddebt redistribution mutual aid and time preference to dynamic macroeconomicmodels. |
+|idx| 2402.09921v1 |
+|title| Identifying and modelling cognitive biases in mobility choices |
+|authors| Chloe ConradCarole Adam
+|links| http://arxiv.org/abs/2402.09921v1 |
+|updated| 2024-02-15 12:58:27 UTC |
+|summary| This report presents results from an M1 internship dedicated to agent-basedmodelling and simulation of daily mobility choices. This simulation is intendedto be realistic enough to serve as a basis for a serious game about themobility transition. In order to ensure this level of realism we conducted asurvey to measure if real mobility choices are made rationally or how biasedthey are. Results analysed here show that various biases could play a role indecisions. We then propose an implementation in a GAMA agent-based simulation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.08902v1 |
-|title| Auto-Encoding Bayesian Inverse Games |
-|authors| Xinjie LiuLasse PetersJavier Alonso-MoraUfuk TopcuDavid Fridovich-Keil
-|links| http://arxiv.org/abs/2402.08902v1 |
-|updated| 2024-02-14 02:17:37 UTC |
-|summary| When multiple agents interact in a common environment each agents actionsimpact others future decisions and noncooperative dynamic games naturallycapture this coupling. In interactive motion planning however agentstypically do not have access to a complete model of the game e.g. due tounknown objectives of other players. Therefore we consider the inverse gameproblem in which some properties of the game are unknown a priori and must beinferred from observations. Existing maximum likelihood estimation MLEapproaches to solve inverse games provide only point estimates of unknownparameters without quantifying uncertainty and perform poorly when manyparameter values explain the observed behavior. To address these limitationswe take a Bayesian perspective and construct posterior distributions of gameparameters. To render inference tractable we employ a variational autoencoderVAE with an embedded differentiable game solver. This structured VAE can betrained from an unlabeled dataset of observed interactions naturally handlescontinuous multi-modal distributions and supports efficient sampling from theinferred posteriors without computing game solutions at runtime. Extensiveevaluations in simulated driving scenarios demonstrate that the proposedapproach successfully learns the prior and posterior objective distributionsprovides more accurate objective estimates than MLE baselines and facilitatessafer and more efficient game-theoretic motion planning. |
+|idx| 2402.09776v1 |
+|title| Strategic Vote Timing in Online Elections With Public Tallies |
+|authors| Aviv YaishSvetlana AbramovaRainer Böhme
+|links| http://arxiv.org/abs/2402.09776v1 |
+|updated| 2024-02-15 08:06:21 UTC |
+|summary| We study the effect of public tallies on online elections in a setting wherevoting is costly and voters are allowed to strategically time their votes. Thestrategic importance of choosing emphwhen to vote arises when votes arepublic such as in online event scheduling polls e.g. Doodle or inblockchain governance mechanisms. In particular there is a tension betweenvoting early to influence future votes and waiting to observe interim resultsand avoid voting costs if the outcome has already been decided.  Our study draws on empirical findings showing that temporal bandwagoneffects occur when interim results are revealed to the electorate: late votersare more likely to vote for leading candidates. To capture this phenomenon weanalyze a novel model where the electorate consists of informed voters who havea preferred candidate and uninformed swing voters who can be swayed accordingto the interim outcome at the time of voting. In our main results we prove theexistence of equilibria where both early and late voting occur with a positiveprobability and we characterize conditions that lead to the appearance oflast minute voting behavior where all informed voters vote late. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.08779v1 |
-|title| Strategic Contract Negotiation in Financial Networks |
-|authors| Akhil JalanDeepayan Chakrabarti
-|links| http://arxiv.org/abs/2402.08779v1 |
-|updated| 2024-02-13 20:23:19 UTC |
-|summary| How can firms optimally negotiate bilateral contracts with each other in afinancial network Every firm seeks to maximize the utility it gains from itsportfolio of contracts. We focus on mean-variance utilities where each firmhas its own beliefs about the expected returns of the contracts and thecovariances between them Markowitz J. Finance 711 1952. Instead ofrevealing these beliefs a firm may adopt a different negotiating positionseeking better contract terms. We formulate a contract negotiation process bywhich such strategic behavior leads to a network of contracts. In ourformulation any subset of firms can be strategic. The negotiating positions ofthese firms can form Nash equilibria where each firms position is optimalgiven the others positions.  We give a polynomial-time algorithm to find the Nash equilibria if theyexist and certify their nonexistence otherwise. We explore the implications ofsuch equilibria on several model networks. These illustrate that firmsutilities can be sensitive to their negotiating position. We then propose tradedeadlines as a mechanism to reduce the need for strategic behavior. At thedeadline each firm can unilaterally cancel some or all of its contracts for apenalty. In our model networks we show that trade deadlines can reduce theloss of utility from being honest. We empirically verify our insights usingdata on international trade between 46 large economies. |
+|idx| 2402.09714v1 |
+|title| An Accelerated Distributed Stochastic Gradient Method with Momentum |
+|authors| Kun HuangShi PuAngelia Nedić
+|links| http://arxiv.org/abs/2402.09714v1 |
+|updated| 2024-02-15 05:15:22 UTC |
+|summary| In this paper we introduce an accelerated distributed stochastic gradientmethod with momentum for solving the distributed optimization problem where agroup of n agents collaboratively minimize the average of the local objectivefunctions over a connected network. The method termed Distributed StochasticMomentum Tracking DSMT is a single-loop algorithm that utilizes themomentum tracking technique as well as the Loopless Chebyshev AccelerationLCA method. We show that DSMT can asymptotically achieve comparableconvergence rates as centralized stochastic gradient descent SGD method undera general variance condition regarding the stochastic gradients. Moreover thenumber of iterations transient times required for DSMT to achieve such ratesbehaves as mathcalOn5/3/1-lambda for minimizing general smoothobjective functions and mathcalOsqrtn/1-lambda under thePolyak-Lojasiewicz PL condition. Here the term 1-lambda denotes thespectral gap of the mixing matrix related to the underlying network topology.Notably the obtained results do not rely on multiple inter-node communicationsor stochastic gradient accumulation per iteration and the transient times arethe shortest under the setting to the best of our knowledge. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2402.08772v1 |
-|title| Optimal Task Assignment and Path Planning using Conflict-Based Search with Precedence and Temporal Constraints |
-|authors| Yu Quan ChongJiaoyang LiKatia Sycara
-|links| http://arxiv.org/abs/2402.08772v1 |
-|updated| 2024-02-13 20:07:58 UTC |
-|summary| The Multi-Agent Path Finding MAPF problem entails finding collision-freepaths for a set of agents guiding them from their start to goal locations.However MAPF does not account for several practical task-related constraints.For example agents may need to perform actions at goal locations with specificexecution times adhering to predetermined orders and timeframes. Moreovergoal assignments may not be predefined for agents and the optimizationobjective may lack an explicit definition. To incorporate task assignment pathplanning and a user-defined objective into a coherent framework this paperexamines the Task Assignment and Path Finding with Precedence and TemporalConstraints TAPF-PTC problem. We augment Conflict-Based Search CBS tosimultaneously generate task assignments and collision-free paths that adhereto precedence and temporal constraints maximizing an objective quantified bythe return from a user-defined reward function in reinforcement learning RL.Experimentally we demonstrate that our algorithm CBS-TA-PTC can solve highlychallenging bomb-defusing tasks with precedence and temporal constraintsefficiently relative to MARL and adapted Target Assignment and Path FindingTAPF methods. |
+|idx| 2402.09563v1 |
+|title| ABIDES-Economist: Agent-Based Simulation of Economic Systems with Learning Agents |
+|authors| Kshama DwarakanathSvitlana VyetrenkoPeyman TavallaliTucker Balch
+|links| http://arxiv.org/abs/2402.09563v1 |
+|updated| 2024-02-14 20:26:52 UTC |
+|summary| We introduce a multi-agent simulator for economic systems comprised ofheterogeneous Households heterogeneous Firms Central Bank and Governmentagents that could be subjected to exogenous stochastic shocks. Theinteraction between agents defines the production and consumption of goods inthe economy alongside the flow of money. Each agent can be designed to actaccording to fixed rule-based strategies or learn their strategies usinginteractions with others in the simulator. We ground our simulator by choosingagent heterogeneity parameters based on economic literature while designingtheir action spaces in accordance with real data in the United States. Oursimulator facilitates the use of reinforcement learning strategies for theagents via an OpenAI Gym style environment definition for the economic system.We demonstrate the utility of our simulator by simulating and analyzing twohypothetical yet interesting economic scenarios. The first scenarioinvestigates the impact of heterogeneous household skills on their learnedpreferences to work at different firms. The second scenario examines the impactof a positive production shock to one of two firms on its pricing strategy incomparison to the second firm. We aspire that our platform sets a stage forsubsequent research at the intersection of artificial intelligence andeconomics. |
 
 
