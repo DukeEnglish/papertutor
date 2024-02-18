@@ -1,0 +1,1464 @@
+Self-Play Fine-Tuning of Diffusion Models for
+Text-to-Image Generation
+Huizhuo Yuan∗† Zixiang Chen∗‡ Kaixuan Ji∗§ Quanquan Gu¶
+Figure 1: We introduce SPIN-Diffusion, a self-play fine-tuning algorithm for diffusion models. The
+results are fine-tuned from Stable Diffusion v1.5 on the winner images of the Pick-a-Pic dataset.
+The prompts used for generating the above images are chosen from the Pick-a-Pic test set. The
+generated images demonstrate superior performance in terms of overall visual attractiveness and
+coherence with the prompts. SPIN-Diffusion is featured by its independence from paired human
+preference data, offering a useful tool for fine-tuning on custom datasets with only single image per
+text prompt provided.
+∗Equal contribution
+†Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail:
+hzyuan@cs.ucla.edu
+‡Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail:
+chenzx19@cs.ucla.edu
+§Department of Computer Science, University of California, Los Angeles, CA 90095, USA; e-mail:
+kaixuanji@cs.ucla.edu
+¶DepartmentofComputerScience,UniversityofCalifornia,LosAngeles,CA90095,USA;e-mail: qgu@cs.ucla.edu
+1
+4202
+beF
+51
+]GL.sc[
+1v01201.2042:viXraAbstract
+Fine-tuning Diffusion Models remains an underexplored frontier in generative artificial
+intelligence(GenAI),especiallywhencomparedwiththeremarkableprogressmadeinfine-tuning
+Large Language Models (LLMs). While cutting-edge diffusion models such as Stable Diffusion
+(SD) and SDXL rely on supervised fine-tuning, their performance inevitably plateaus after
+seeing a certain volume of data. Recently, reinforcement learning (RL) has been employed
+to fine-tune diffusion models with human preference data, but it requires at least two images
+(“winner” and “loser” images) for each text prompt. In this paper, we introduce an innovative
+technique called self-play fine-tuning for diffusion models (SPIN-Diffusion), where the diffusion
+model engages in competition with its earlier versions, facilitating an iterative self-improvement
+process. Our approach offers an alternative to conventional supervised fine-tuning and RL
+strategies, significantly improving both model performance and alignment. Our experiments on
+thePick-a-PicdatasetrevealthatSPIN-Diffusionoutperformstheexistingsupervisedfine-tuning
+method in aspects of human preference alignment and visual appeal right from its first iteration.
+By the second iteration, it exceeds the performance of RLHF-based methods across all metrics,
+achieving these results with less data.
+1 Introduction
+Diffusion models (Ho et al., 2020; Peebles and Xie, 2023; Podell et al., 2023; Nichol et al., 2021;
+Rombach et al., 2022a; Song et al., 2020a) have rapidly emerged as critical entities within the realm
+of generative AIs (Creswell et al., 2018; Kingma and Welling, 2013), demonstrating exceptional
+capabilities in generating high-fidelity outputs. Their versatility spans a diverse area of applications,
+ranging from image generation (Rombach et al., 2022a; Podell et al., 2023; Ramesh et al., 2022)
+to more complex tasks like structure-based drug design (Corso et al., 2022; Guan et al., 2023),
+protein structure prediction (Watson et al., 2021), text generation (Austin et al., 2021; Zheng et al.,
+2023; Chen et al., 2023), and more. Prominent diffusion models in image generation, including
+DALL-E (Ramesh et al., 2022), Stable Diffusion (Rombach et al., 2022b), SDXL (Podell et al., 2023),
+and Dreamlike, etc., typically undergo a fine-tuning process following their initial pre-training phase.
+Recently, using Reinforcement Learning (RL) for fine-tuning diffusion models has received
+increasing attention. Lee et al. (2023) first studied the alignment of text-image diffusion models to
+human preferences using reward-weighted likelihood maximization with a reward function trained on
+human preference data. Black et al. (2023) formulated the fine-tuning of diffusion models as a RL
+problem solved by policy gradient optimization. In a concurrent work, Fan et al. (2023) studied a
+similar formulation but with a KL regularization. Very recently, Wallace et al. (2023) have bypassed
+the need for training reward functions by using Direct Preference Optimization (DPO) (Rafailov
+et al., 2023) for fine-tuning diffusion models. Similar approach was proposed in Yang et al. (2023) as
+well.
+While RL fine-tuning of diffusion methods has been proven effective, its dependency on human
+preference data, often necessitating multiple images per prompt, poses a significant challenge. In
+many datasets including the community-sourced ones featuring custom content, it is often the case
+to have only one image associated with each prompt. This makes RL fine-tuning infeasible.
+In this paper, drawing inspiration from the recently proposed self-play fine-tuning (SPIN)
+technique (Chen et al., 2024) for large language models (LLM), we introduce a new supervised
+fine-tuning (SFT) method for diffusion models, eliminating the necessity for human preference data
+in the fine-tuning process. Central to our method is a general-sum minimax game, where both the
+participating players, namely the main player and the opponent player, are diffusion models. The
+main player’s goal is to discern between samples drawn from the target data distribution and those
+2generated by the opponent player. The opponent player’s goal is to garner the highest score possible,
+as assessed by the main player. A self-play mechanism can be made possible, if and only if the main
+player and the opponent player have the same structure, and therefore the opponent player can be
+designed to be previous copies of the main player (Chen et al., 2024).
+When applying the self-play fine-tuning technique (Chen et al., 2024) to diffusion models, there
+are two challenges: (a) an exponential or even infinite number of possible trajectories can lead to
+the same image. The generator in a diffusion model operates through a sequence of intermediate
+steps, but the performance of the generator is only determined by the quality of the image in the
+last step; and (b) diffusion models are parameterized by a sequence of score functions, which are the
+gradient of the probabilities rather than probabilities in LLMs. Our algorithm design effectively
+surmounts these challenges by (a) designing an objective function that considers all intermediate
+images generated during the reverse sampling process; and (b) decomposing and approximating
+the probability function step-by-step into products related to the score function. We also employ
+the Gaussian reparameterization technique in DDIM (Song et al., 2020a) to support the advanced
+sampling method. All these techniques together lead to an unbiased objective function that can
+be effectively calculated based on intermediate samples. For computational efficiency, we further
+propose an approximate objective function, which eliminates the need for intermediate images used
+in our model. We call our algorithm SPIN-Diffusion.
+Contributions. Our contributions are summarized below:
+• We propose a novel fine-tuning method for diffusion models based on the self-play mechanism,
+called SPIN-Diffusion. The proposed algorithm iteratively improves upon a diffusion model
+until converging to the target distribution. Theoretically, we prove that the model obtained by
+SPIN-Diffusion cannot be further improved via standard SFT. Moreover, the stationary point of
+our self-play mechanism is achieved when the diffusion model aligns with the target distribution.
+• Empirically,weevaluatetheperformanceofSPIN-Diffusionontext-to-imagegenerationtasks(Ramesh
+et al., 2022; Rombach et al., 2022a; Saharia et al., 2022a). Our experiments on the Pick-a-Pic
+dataset (Kirstain et al., 2023), with base model being Stable Diffusion-1.5 (Rombach et al., 2022b),
+demonstrate that SPIN-Diffusion surpasses SFT from the very first iteration. Notably, by the
+second iteration, SPIN-Diffusion outperforms Diffusion-DPO (Wallace et al., 2023) that utilizes
+additionaldatafrom‘loser’samples. Bythethirditeration,theimagesproducedbySPIN-Diffusion
+achieve a higher PickScore (Kirstain et al., 2023) than the base model SD-1.5 79.8% of the times,
+and a superior Aesthetic score 88.4% of the times.
+SPIN-Diffusion exhibits a remarkable performance improvement over current state-of-the-art fine-
+tuning algorithms, retaining this advantage even against models trained with more extensive data
+usage. This highlights its exceptional efficiency in dataset utilization. It is beneficial for the general
+public, particularly those with restricted access to datasets containing multiple images per prompt.
+Notation. We use lowercase letters and lowercase boldface letters to denote scalars and vectors,
+respectively. We use 0 : T to denote the index set {0,...,T}. In the function space, let F be
+the function class. We use the symbol q to denote the real distribution in a diffusion process,
+while p represents the distribution parameterized by a nueral network during sampling. The
+θ
+Gaussian distribution is represented as N(µ,Σ), where µ and Σ are the mean and covariance matrix,
+respectively. Lastly, Uniform{1,...,T} denotes the uniform distribution over the set {1,...,T}.
+32 Related Work
+Diffusion Models. Diffusion-based generative models (Sohl-Dickstein et al., 2015) have recently
+gained prominence, attributed to their ability to produce high-quality and diverse samples. A
+popular diffusion model is denoising diffusion probabilistic modeling (DDPM) (Ho et al., 2020).
+Song et al. (2020a) proposed a denoising diffusion implicit model (DDIM), which extended DDPM
+to a non-Markov diffusion process, enabling a deterministic sampling process and the accelerated
+generation of high-quality samples. In addition to DDPM and DDIM, diffusion models have also
+been studied with a score-matching probabilistic model using Langevin dynamics (Song and Ermon,
+2019; Song et al., 2020b). Diffusion models evolved to encompass guided diffusion models, which
+are designed to generate conditional distributions. When the conditioning input is text and the
+output is image, these models transform into text-to-image diffusion models (Rombach et al., 2022a;
+Ramesh et al., 2022; Ho et al., 2022; Saharia et al., 2022b). They bridge the gap between textual
+descriptions and image synthesis, offering exciting possibilities for content generation. A significant
+advancement in text-to-image generation is the introduction of Stable Diffusion (SD) (Rombach
+et al., 2022a). SD has expanded the potential of diffusion models by integrating latent variables
+into the generation process. This innovation in latent diffusion models enables the exploration of
+latent spaces and improves the diversity of generated content. Despite the introduction of latent
+spaces, generating images with desired content from text prompts remains a significant challenge
+(Gal et al., 2022; Ruiz et al., 2023). This is due to the difficulty in learning the semantic properties
+of text prompts with limited high-quality data.
+Fine-Tuning Diffusion Models. Efforts to improve diffusion models have focused on aligning
+them more closely with human preferences. Rombach et al. (2022a) fine-tuned a pre-trained model
+using the COCO dataset (Caesar et al., 2018), demonstrating superior performance compared to
+a generative model directly trained on the same dataset. Podell et al. (2023) expanded the model
+size of Stable Diffusion (SD) to create the SDXL model, which was fine-tuned on a high-quality but
+private dataset, leading to a significant improvement in the aesthetics of the generated images. Dai
+et al. (2023) further demonstrated the effectiveness of fine-tuning and highlighted the importance of
+the supervised fine-tuning (SFT) dataset. In addition to using datasets with high-quality images,
+Betker et al. (2023); Segalis et al. (2023) found that SFT on a data set with high text fidelity can
+also improve the performance of the diffusion model. The aforementioned methods only requires
+a high-quality SFT dataset. Recently, preference datasets have been studied in finetuing diffusion
+models (Lee et al., 2023). Concurrently, DDPO (Black et al., 2023) and DPOK (Fan et al., 2023)
+proposed to use the preference dataset to train a reward model and then fine-tune diffusion models
+using reinforcement learning. Drawing inspiration from the recent Direct Preference Optimization
+(DPO) (Rafailov et al., 2023), Diffusion-DPO (Wallace et al., 2023) and D3PO (Yang et al., 2023)
+usedtheimplicitrewardtofine-tunediffusionmodelsdirectlyonthepreferencedataset. Furthermore,
+when a differentiable reward model is available, Clark et al. (2023); Prabhudesai et al. (2023) applied
+reward backpropagation for fine-tuning diffusion models. Our SPIN-Diffusion is most related to the
+SFT method, as it only assumes access to high-quality image-text pairs. However, the high-quality
+image-text dataset can be obtained from various sources, including selecting the winner from a
+preference dataset or identifying high-reward image-text pairs through a reward model.
+3 Problem Setting and Preliminaries
+In this section, we introduce basic settings for text-to-image generation by diffusion models and the
+self-play fine-tuning (SPIN) method.
+43.1 Text-to-Image Diffusion Model
+Denoising diffusion implicit models (DDIM) (Song et al., 2020a) is a generalized framework of
+denoising diffusion probabilistic models (DDPM) (Sohl-Dickstein et al., 2015; Ho et al., 2020).
+DDIM enables the fast generation of high-quality samples and has been widely used in text-to-image
+diffusion models such as Stable Diffusion (Rombach et al., 2022a). We formulate our method building
+upon DDIM, which makes it more general.
+Forwrd Process. Following Saharia et al. (2022b), the problem of text-to-image generation can
+be formulated as conditional diffusion models. We use x ∈ Rd to denote the value of image pixels
+0
+where d is the dimension and use c to denote the text prompt. Given a prompt c, image x is drawn
+0
+from a target data distribution p (·|c). The diffusion process is characterized by the following
+data
+dynamic parameterized by a positive decreasing sequence {α }T with α = 1,
+t t=1 0
+T
+(cid:89)
+q(x |x ) := q(x |x ) q(x |x ,x ), (3.1)
+1:T 0 T 0 t−1 t 0
+t=2
+where q(x |x ,x ) represents a Gaussian distribution N(µ ,σ2I). Here, µ is the mean of Gaussian
+t−1 t 0 t t t
+defined as
+√
+√ (cid:113) x − α x
+µ := α x + 1−α −σ2· t √ t 0 .
+t t−1 0 t−1 t 1−α
+t
+√
+It can be derived from (3.1) that q(x |x ) = N( α x ,(1−α )I) for all t (Song et al., 2020a). As
+t 0 t 0 t
+a generalized diffusion process of DDPM, (3.1) reduces to DDPM (Ho et al., 2020) with a special
+choice of σ = (cid:112) (1−α )/(1−α )(cid:112) (1−α /α ).
+t t−1 t t t−1
+Generative Process. Given the sequence of {α }T and {σ }T , examples from the generative
+t t=1 t t=1
+model follows
+T
+p (x |c) = (cid:89) p (x |x ,c)·p (x |c), p (x |x ,c) = N(cid:0) µ (x ,c,t),σ2I(cid:1) . (3.2)
+θ 0:T θ t−1 t θ T θ t−1 t θ t t
+t=1
+Here θ belongs to the parameter space Θ and µ (x ,c,t) is the estimator of mean µ that can be
+θ t t
+reparameterized (Ho et al., 2020; Song et al., 2020a) as the combination of x and a neural network
+t
+ϵ (x ,c,t) named score function. Please see Appendix B for more details.
+θ t
+Training Objective. The score function ϵ (x ,c,t) is trained by minimizing the evidence lower
+θ t
+bound (ELBO) associated with the diffusion models in (3.1) and (3.2), which is equivalent to
+minimizing the following denoising score matching objective function L :
+DSM
+L DSM(θ) = E(cid:2) γ t(cid:13) (cid:13)ϵ θ(x t,c,t)−ϵ t(cid:13) (cid:13)2 2(cid:3) , (3.3)
+√ √
+where x = α x + 1−α ϵ and the expectation is computed over the distribution c ∼ q(·),x ∼
+t t 0 t t 0
+q (·|c),ϵ ∼ N(0,I), t ∼ Uniform{1,...,T}. In addition, {γ }T are pre-specified weights that
+data t t t=1
+depends on the sequences {α }T and {σ }T .
+t t=1 t t=1
+3.2 Self-Play Fine-Tuning
+Self-Play mechanism, originating from TD-Gammon (Tesauro et al., 1995), has achieved great
+sucesses in various fields, particularly in strategic games (Silver et al., 2017b,a). Central to Self-Play
+is the idea of progressively improving a model by competing against its previous iteration. This
+5approach has recently been adapted to fine-tuning Large Language Models (LLMs) (Chen et al.,
+2024), called self-play fine-tuning (SPIN). Considering an LLM where c is the input prompt and
+x is the response, the goal of SPIN is to fine-tune an LLM agent, denoted by p (·|c), based on an
+0 θ
+SFT dataset. Chen et al. (2024) assumed access to a main player and an opponent player at each
+iteration and takes the following steps iteratively:
+1. The main player maximizes the expected value gap between the target data distribution p
+data
+and the opponent player’s distribution p :
+θ
+k
+2. The opponent player generates responses that are indistinguishable from p by the main player.
+data
+Instead of alternating optimization, SPIN directly utilizes a closed-form solution of the opponent
+player, which results in the opponent player at iteration k+1 to copy parameters θ , and forming
+k+1
+an end-to-end training objective:
+(cid:20) (cid:18) p (x |c) p (x′|c) (cid:19)(cid:21)
+L = E ℓ λlog θ 0 −λlog θ 0 . (3.4)
+SPIN p (x |c) p (x′|c)
+θ k 0 θ k 0
+Here the expectation is taken over the distribution c ∼ q(c),x ∼ p (x|c),x′ ∼ p (x′|c), ℓ(·) is
+data θ
+k
+a loss function that is both monotonically decreasing and convex, and λ > 0 is a hyperparameter.
+Notably, (3.4) only requires the knowledge of demonstration/SFT data, i.e., prompt-response pairs.
+4 Method
+In this section, we are going to present a method for fine-tuning diffusion models with self-play
+mechanisam.
+Consider a setting where we are training on a high-quality dataset containing image-text pairs
+(c,x ) ∼ p (x |c)q(c) where c is the text prompt and x is the image. Our goal is to fine-tune
+0 data 0 0
+a pretrained diffusion model, denoted by p , to align with the distribution p (x |c). Instead
+θ data 0
+of directly minimizing the denoising score matching objective function L in (3.3), we adapt
+DSM
+SPIN to diffusion models. However, applying SPIN to fine-tuning diffusion models presents unique
+challenges. Specifically, the objective of SPIN (3.4) necessitates access to the marginal probability
+p (x |c). While obtaining p (x |c) is straightforward in LLMs, this is not the case with diffusion
+θ 0 θ 0
+models. Given the parameterization of the diffusion model as p (x |c), computing the marginal
+θ 0:T
+probability p (x |c) requires integration over all potential trajectories (cid:82) p (x |c)dx , which
+is
+computatioθ nal0
+ly intractable.
+x1:T θ 0:T 1:T
+Inthefollowing, weproposeanovelSPIN-Diffusionmethodwithadecomposedobjectivefunction
+that only requires the estimation of score function ϵ . This is achieved by employing the DDIM
+θ
+formulationdiscussedinSection3. Thekeytechniqueisself-playmechanismwithafocusonthejoint
+distributions of the entire diffusion process, i.e., p (x |c) = q(x |x )p (x |c) and p (x |c),
+data 0:T 1:T 0 data 0 θ 0:T
+instead of marginal distributions.
+4.1 Differentiating Diffusion Processes
+In iteration k + 1, we focus on training a function f to differentiate between the diffusion
+k+1
+trajectory x generated by the diffusion model parameterized by p (x |c), and the diffusion
+0:T θ 0:T
+processp (x |c)fromthedata. Specifically,thetrainingoff involvesminimizingageneralized
+data 0:T k+1
+Integral Probability Metric (IPM) (Müller, 1997):
+f = argminE(cid:2) ℓ(cid:0) f(c,x )−f(c,x′ )(cid:1)(cid:3) . (4.1)
+k+1 0:T 0:T
+f∈F
+k
+6Algorithm 1 Self-Play Diffusion (SPIN-Diffusion)
+Input: {(x ,c)} : SFT Dataset, p : Diffusion Model with parameter θ , K: Number of
+0 i∈[N] θ0 0
+iterations.
+for k = 0,...,K −1 do
+for i = 1,...N do
+Generate real diffusion trajectories x ∼ q(x |x ).
+1:T 1:T 0
+Generate synthetic diffusion trajectories x′ ∼ p (·|c).
+0:T θ k
+end for
+Update θ
+k+1
+= argmin θ∈ΘL(cid:98)SPIN(θ,θ k), which is the empirical version of (4.8) or (4.9) .
+end for
+Output: θ .
+K
+Here, the expectation is taken over the distributions c ∼ q(·),x ∼ p (·|c), and x′ ∼ p (·|c).
+0:T data 0:T θ k
+F denotes the class of functions under consideration and ℓ(·) is a monotonically decreasing and
+k
+convex function that helps stabilize training. The value of f reflects the degree of belief that the
+diffusion process x given context c originates from the target diffusion process p (x |c) rather
+0:T data 0:T
+than the diffusion model p (x |c). We name f the test function.
+θ 0:T
+4.2 Deceiving the Test Function
+The opponent player wants to maximize the expected value E [f (c,x)]. In addition,
+c∼q(·),x0:T∼p(·|c) k+1
+to prevent excessive deviation of p from p and stabilize the self-play fine-tuning, we incorporate
+θ θ
+k+1 k
+a Kullback-Leibler (KL) regularization term. Putting these together gives rise to the following
+optimization problem:
+argmaxE [f (c,x )]−λE KL(cid:0) p(·|c)||p (·|c)(cid:1) , (4.2)
+c∼q(·),x0:T∼p(·|c) k+1 0:T c∼q(·) θ k
+p
+where λ > 0 is the regularization parameter. Notably, (4.2) has a closed-form solution p(·|c):
+(cid:98)
+p(x |c) ∝ p (x |c)exp(cid:0) λ−1f (c,x )(cid:1) . (4.3)
+(cid:98) 0:T θ k 0:T k+1 0:T
+To ensure that p lies in the diffusion process space {p (·|c)|θ ∈ Θ}, we utilize the following test
+(cid:98) θ
+function class (Chen et al., 2024):
+(cid:26) (cid:12) (cid:27)
+F
+k
+= λ·log p θ(x 1:T|c) (cid:12) (cid:12)θ ∈ Θ . (4.4)
+p (x |c)(cid:12)
+θ 1:T
+k
+Given the choice of F in (4.4), optimizing (4.1) gives f parameterized by θ in the following
+k k+1 k+1
+form:
+p (x |c)
+f (c,x ) = λ·log θ k+1 0:T . (4.5)
+k+1 0:T
+p (x |c)
+θ 0:T
+k
+Substituting (4.5) into (4.3) yields p(x |c) = p (x |c). In other words, θ learned from
+(cid:98) 0:T θ k+1 0:T k+1
+(4.1) is exactly the diffusion parameter for the ideal choice of opponent.
+74.3 Decomposed Training Objective
+The above two steps provide a training scheme depending on the full trajectory of x . Specifically,
+0:T
+substituting (4.4) into (4.1) yields the update rule θ = argmin L (θ,θ ), where L is
+k+1 θ∈Θ SPIN k SPIN
+defined as:
+(cid:20) (cid:18) p (x |c) p (x′ |c) (cid:19)(cid:21)
+L = E ℓ λlog θ 0:T −λlog θ 0:T . (4.6)
+SPIN p (x |c) p (x′ |c)
+θ k 0:T θ k 0:T
+Here the expectation is taken over the distributions c ∼ q(·),x ∼ p (·|c),x′ ∼ p (·|c). To
+0:T data 0:T θ k
+formulate a computationally feasible objective, we decompose logp (x |c) using the backward
+θ 0:T
+process of diffusion models. Substituting (3.2) into (4.6), we have that
+(cid:18) T (cid:19)
+(cid:89)
+logp (x |c) = log p (x |x ,c)·p (x |c)
+θ 0:T θ t−1 t θ T
+t=1
+T
+(cid:88) (cid:0) (cid:1)
+= logp (x |c)+ log p (x |x ,c)
+θ T θ t−1 t
+t=1
+T
+= Constant−(cid:88) 2σ1 2(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2. (4.7)
+t=1 t
+where the last equality holds since p (x |x ,c) is a Gaussian distribution N(cid:0) µ (x ,c,t),σ2I(cid:1)
+θ t−1 t θ t t
+according to (3.2), and p (x |c) is approximately a Gaussian independent of θ. By substituting
+θ T
+(4.7) into (4.6) and introducing a reparameterization σ2 = λT/(2β ), where β is a fixed positive
+t t t
+value, we obtain
+(cid:20) (cid:18) T
+L SPIN(θ,θ k) = E ℓ −(cid:88) β Tt(cid:2)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+t=1
+(cid:19)(cid:21)
+−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:3) . (4.8)
+Here the expectation is taken over the distributions c ∼ q(·),x ∼ p (·|c),x′ ∼ p (·|c). The
+0:T data 0:T θ k
+detailed algorithm is presented in Algorithm 1. (4.8) naturally provides an objective function for
+DDIM with σ > 0, where σ controls the determinism of the reverse process (3.2). (4.8) remains
+t t
+valid for deterministic generation processes as σ → 0.
+t
+4.4 Approximate Training Objective
+While(4.8)istheexactELBO,optimizingitrequiresstoringallintermediateimagesduringthereverse
+sampling, which is not memory-efficient. To address this limitation, we propose an approximate
+objective function. By applying Jensen’s inequality and the convexity of the loss function ℓ, we can
+give an upper bound of (4.8) and thus move the average over t outside the loss function ℓ:
+(cid:20)
+La SPp Ip Nrox(θ,θ k) = E ℓ(cid:16) −β t(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:21)
+−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)(cid:17) , (4.9)
+8wheretheexpectationistakenoverthedistributionsc ∼ q(c),(x ,x ) ∼ p (x ,x |c),(x′ ,x′) ∼
+t−1 t data t−1 t t−1 t
+p (x′ ,x′|c), t ∼ Uniform{1,...,T}.
+θ k t−1 t
+The following lemma shows that Lapprox is an upper bound of L .
+SPIN SPIN
+Lemma 4.1. Fix θ ∈ Θ which serves as the starting point of Algorithm 1 for iteration k+1. It
+k
+holds that L (θ,θ ) ≤ Lapprox(θ,θ ) for all θ ∈ Θ.
+SPIN k SPIN k
+Lapprox eliminates the need to store all intermediate steps, as it only involves two consec-
+SPIN
+utive sampling steps t − 1 and t. Since the reverse process p (x′ |x′,c) approximates the
+θ 1:T 0
+forward process q(x′ |x′), we use the per step forward process q(x′ ,x′|x′) to approximate
+1:T 0 t−1 t 0
+p (x′ ,x′|x′,c). We can further approximate p (x′ ,x′|c) = (cid:82) p (x′ ,x′|x′,c)p (x′|c)dx′
+wθ ik
+th
+(cid:82)t− q1 (x′t ,0
+x′|x′)p (x′|c)dx′. Substituting
+tθ hk
+e
+ct o− r1 respt
+onding
+tθ ek rmst− i1
+n
+(4t .9)0 withθ k the0 above0
+t−1 t 0 θ k 0 0
+approximation allows us to only compute the expectation of (4.9) over the distribution c ∼ q(c),
+(x ,x ) ∼ p (x ,x |c), (x′ ,x′) ∼ (cid:82) p (x′|c)q(x′ ,x′|x′)dx′, t ∼ Uniform{1,...,T}. Fur-
+t−1 t data t−1 t t−1 t θ k 0 t−1 t 0 0
+thermore, by incorporating the reparameterization of µ into (4.8) and (4.9), we can express (4.8)
+θ
+and (4.9) in terms of ϵ (x ,c,t). Detailed derivations of (4.8) and (4.9) are provided in Appendix B.
+θ t
+5 Main Theory
+In this section, we provide a theoretical analysis of Algorithm 1. Section 4 introduces two distinct
+objective functions, as defined in (4.8) and (4.9), both of which use the loss function ℓ. Since (4.8)
+is an exact objective function, its analysis closely follows the framework established by Chen et al.
+(2024). Consequently, we instead focus on the approximate objective function Lapprox defined in (4.9),
+SPIN
+which is more efficient to optimize and is the algorithm we use in our experiments. However, its
+behavior is more difficult to analyze. We begin with a formal assumption regarding the loss function
+ℓ as follows.
+Assumption 5.1. The loss function ℓ(t) : R → R is monotonically decreasing, i.e., ∀t,ℓ′(t) ≤ 0 and
+satisfies ℓ′(0) < 0. In addition, ℓ(t) is a convex function.
+Assumption 5.1 can be satisfied by various commonly used loss functions in machine learning.
+This includes the correlation loss ℓ(t) = 1−t, the hinge loss ℓ(t) = max(0,1−t), and the logistic
+loss ℓ(t) = log(1+exp(−t)).
+To understand the behavior of SPIN-Diffusion, let us first analyze the gradient of the objective
+function (4.9),
+∇La SPp Ip Nrox = E(cid:104) (−β tℓ′ t) ·(cid:0) ∇ θ(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−∇ θ(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2(cid:1)(cid:105) , (5.1)
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Reweighting Matching Pushing
+wheretheexpectationistakenoverthedistributionsc ∼ q(c),(x ,x ) ∼ p (x ,x |c),(x′ ,x′) ∼
+t−1 t data t−1 t t−1 t
+p (x′ ,x′|c). (5.1) can be divided into three parts:
+θ k t−1 t
+• Reweighting: ℓ′(·) in the “Reweighting” term is negative and increasing because ℓ() is monotoni-
+cally decreasing and convex according to Assumption 5.1. Therefore, −β ℓ′ = −β ℓ′(cid:0) −β (cid:2) ∥x −
+t t t t t−1
+µ (x ,c,t)∥2−...+∥x′ −µ (x′,c,t)∥2(cid:3)(cid:1) is always non-negative. Furthermore, −β ℓ′ decreases
+θ t 2 t−1 θ k t 2 t t
+as the argument inside ℓ() increases.
+• Matching: The “Matching” term matches µ (x ,c,t) to x coming from pairs (x ,x ), that
+θ t t−1 t−1 t
+aresampledfromthetargetdistribution. Thisincreasesthelikelihoodof(x ,x ) ∼ p (x ,x )
+t−1 t data t−1 t
+following the generative process (3.2).
+9• Pushing: Contrary to the “Matching” term, the “Pushing” term pushes µ (x′,c,t) away from
+θ t
+x′ coming from pairs (x′ ,x′) drawn from the synthetic distribution p (x′ ,x′). Therefore,
+t−1 t−1 t θ k t−1 t
+the “Pushing” term decreases the likelihood of these samples following the process in the generative
+process (3.2).
+The “Matching” term aligns conceptually with the L in SFT, as both aim to maximize the
+DSM
+likelihood that the target trajectory x follows the generative process described in (3.2). The
+0:T
+following theorem shows a formal connection, which is pivotal for understanding the optimization
+dynamics of our method.
+Theorem 5.2. Under Assumption 5.1, if θ is not the global optimum of L in (3.3), there exists
+k DSM
+an appropriately chosen β , such that θ is not the global minimum of (4.9) and thus θ ̸= θ .
+t k k+1 k
+Theorem 5.2 suggests that the optimization process stops only when θ reaches global optimality
+of L . Consequently, the optimal diffusion model θ∗ found by Algorithm 1 cannot be further
+DSM
+improved using L . This theoretically supports that SFT with (3.3) cannot improve over SPIN-
+DSM
+Diffusion. It is also worth noting that Theorem 5.2 does not assert that every global minimum of
+L meets the convergence criterion (i.e., θ = θ ), particularly due to the influence of the
+DSM k+1 k
+“Pushing” term in (5.1). The following theorem provides additional insight into the conditions under
+which Algorithm 1 converges.
+Theorem 5.3. Under Assumption 5.1, if p (·|x) = p (·|x), then θ is the global minimum
+θ data k
+k
+of (4.9) for any λ ≥ 0.
+Theorem 5.3 shows that Algorithm 1 converges when p (·|x) = p (·|x), indicating the efficacy
+θ data
+of SPIN-Diffusion in aligning with the target data distribution. In addition, while Theorems 5.2
+and 5.3 are directly applicable to (4.9), the analogous conclusion can be drawn for (4.8) as well (see
+Appendix C for a detailed discussion).
+6 Experiments
+In this section, we conduct extensive experiments to demonstrate the effectiveness of SPIN-
+Diffusion. Our results show that SPIN-Diffusion outperforms other baseline fine-tuning methods
+including SFT and Diffusion-DPO.
+6.1 Experiment Setup
+Models, Datasets and Baselines. We use the stable diffusion v1.5 (SD-1.5) (Rombach et al.,
+2022a) as our base model. While adopting the original network structure, we use its Huggingface
+pretrained version1, which is trained on LAION-5B (Schuhmann et al., 2022) dataset, a text-image
+pair dataset containing approximately 5.85 billion CLIP-filtered image-text pairs. We use the
+Pick-a-Pic dataset (Kirstain et al., 2023) for fine-tuning. Pick-a-Pic is a dataset with pairs of images
+generated by Dreamlike2 (a fine-tuned version of SD-1.5) and SDXL-beta (Podell et al., 2023),
+where each pair corresponds to a human preference label. We also train SD-1.5 with SFT and
+Diffusion-DPO (Wallace et al., 2023) as the baselines. For SFT, we train the model to fit the winner
+images in the Pick-a-Pic (Kirstain et al., 2023) trainset. In addition to the Diffusion-DPO checkpoint
+1https://huggingface.co/runwayml/stable-diffusion-v1-5
+2https://dreamlike.art/
+10Table 1: The size of benchmark datasets in our evaluation
+Benchmarks Pick-a-Pic PartiPrompts HPSv2
+# Prompts 500 1630 3200
+provided by Wallace et al. (2023)3 (denoted by Diffusion-DPO), we also fine-tune an SD-1.5 using
+Diffusion-DPO and denote it by “Diffusion-DPO (ours)”.
+Evaluation. We use the Pick-a-Pic test set, PartiPrompts (Yu et al., 2022) and HPSv2 (Wu et al.,
+2023) as our evaluation benchmarks. All of these datasets are collections of prompts and their size
+is summarized in Table 1. Due to space limit, we defer the detailed introduction and results of
+PartiPrompts and HPSv2 to Appendix A.3. Our evaluation rubric contains two dimensions, human
+preference alignment and visual appeal. For visual appeal assessment, we follow Wallace et al.
+(2023); Lee et al. (2024) and use Aesthetic score. For human-preference alignment, we employ reward
+models including PickScore (Kirstain et al., 2023), ImageReward (Xu et al., 2023) and HPS (Wu
+et al., 2023). All these reward models are trained according to the Bradley-Terry-Luce (Bradley and
+Terry, 1952) model on different human-labeled preference datasets. For each prompt, we generate 5
+images and choose the image with highest average score over those four metrics (best out of 5). We
+report the average of HPS, PickScore, ImageReward and Aesthetic scores over all the prompts. To
+investigate how the scores align with human preference, we further compare the accuracy of these
+reward models on a small portion of the Pick-a-Pic training set. It is worth noticing that PickScore
+is most aligned with human preference according to the experiments conducted by Kirstain et al.
+(2023). The detailed results are shown in Table 2.
+Table 2: The winning rate of the winner image against the loser image in a sample (i.e., 500 text
+prompts) of the Pick-a-Pic training set in terms of the four metrics.
+Metrics PickScore HPS Aesthetic ImageReward
+Winning Rate 74.07 61.54 51.89 62.00
+6.2 Main Results
+In this subsection, we provide empirical evidence demonstrating the superiority of our SPIN-Diffusion
+model over previous fine-tuning baselines based on the network structure of SD1.5.
+Comparison in Terms of Average Score. The results are presented in Figure 2 and Table 3.
+While all fine-tuning algorithms yield improvements over the SD1.5 baseline, at iteration 1, our SPIN-
+Diffusion not only exceeds the original DPO checkpoint but also surpasses SFT in both Aesthetic
+score and PickScore. At iteration 2, the superiority of our model becomes even more pronounced,
+particularly in terms of Aesthetic score, where it consistently outperforms other fine-tuning methods,
+indicating a dominant performance in visual quality. Furthermore, at iteration 3, our model’s
+HPSv2 score surpasses all competing models, highlighting the effectiveness and robustness of the
+SPIN-Diffusion approach. Specifically, on the Pick-a-Pic dataset, while SFT achieves a PickScore
+of 21.45, and Diffusion-DPO has a slightly higher score of 21.45, SPIN-Diffusion achieves 22.00 at
+iteration 3, showing a total improvement of 0.80 over the original SD1.5 checkpoint. Furthermore,
+SPIN-Diffusion demonstrates exceptional performance in terms of Aesthetic score, achieving 6.25 at
+3https://huggingface.co/mhdang/dpo-sd1.5-text2image-v1
+1122.0
+6.2
+21.9
+21.8
+6.1
+21.7
+6.0 21.6
+21.5
+5.9 SFT 21.4 SFT
+Diffusion-DPO Diffusion-DPO
+Diffusion-DPO (ours) 21.3 Diffusion-DPO (ours)
+5.8
+SPIN-Diffusion SPIN-Diffusion
+21.2
+0 1 2 3 0 1 2 3
+Number of SPIN-Diffusion Iterations Number of SPIN-Diffusion Iterations
+(a) Aesthetic (b) PickScore
+0.276
+1.10
+0.275
+1.05
+0.274
+1.00
+0.273
+0.95
+0.272
+SFT 0.90 SFT
+0.271 Diffusion-DPO Diffusion-DPO
+Diffusion-DPO (ours) 0.85 Diffusion-DPO (ours)
+0.270 SPIN-Diffusion SPIN-Diffusion
+0 1 2 3 0 1 2 3
+Number of SPIN-Diffusion Iterations Number of SPIN-Diffusion Iterations
+(c) HPS (d) ImageReward
+Figure 2: Comparison between SPIN-Diffusion at different iterations with SD-1.5, SFT and Diffusion-
+DPO. SPIN-Diffusion outperforms SFT at iteration 1, and outperforms all the baselines after
+iteration 2.
+iteration 3, which significantly surpasses 5.86 achieved by Diffusion-DPO and 5.77 by SD1.5. The
+results are also summarized as a radar chart in Figure 3.
+Comparison in Terms of Winning Rate. We further validate our claim by a comparative
+analysis of the winning rate for our trained model. The winning rate is defined as the proportion
+of prompts for which a model’s generated images exceed the quality of those produced by another
+model. This experiment is conducted on the Pick-a-Pic test set. We show both the winning rate
+over SD-1.5, as well as the winning rate over Diffusion-DPO (ours) in Figure 4. The complete results
+are detailed in Tables 5 and 6 in Appendix A.2. We observe that throughout fine-tuning, our SPIN-
+Diffusion tremendously beats the baselines. When competing with SD-1.5, SPIN-Diffusion achieves
+an impressive winning rate of 90.0% at iteration 2, which further increases to 91.6% at iteration 3.
+This winning rate surpasses 73.2% achieved by SFT and 84.8% achieved by Diffusion-DPO (ours).
+When competing with Diffusion-DPO (ours), at iteration 3, SPIN-Diffusion achieves a winning rate
+of 56.2% on HPS, 86.8% on Aesthetic, 62.4% on PickScore, 55.8% on Image Reward, and has an
+12
+citehtseA
+SPH
+erocSkciP
+draweRegamITable 3: The results on the Pick-a-Pic test set. We report the mean of PickScore, HPS, ImageReward
+and Aesthetic over the whole test set. We also report the average score over the three evaluation
+metrics. SPIN-Diffusion outperforms all the baselines in terms of four metrics. For this and following
+tables, we use blue background to indicate our method, bold numbers to denote the best and
+underlined for the second best.
+Model HPS ↑ Aesthetic ↑ ImageReward ↑ PickScore ↑ Average ↑
+SD-1.5 0.2699 5.7691 0.8159 21.1983 7.0133
+SFT (ours) 0.2749 5.9451 1.1051 21.4542 7.1948
+Diffusion-DPO 0.2724 5.8635 0.9625 21.5919 7.1726
+Diffusion-DPO (ours) 0.2753 5.8918 1.0495 21.8866 7.2758
+SPIN-Diffusion-Iter1 0.2728 6.1206 1.0131 21.6651 7.2679
+SPIN-Diffusion-Iter2 0.2751 6.2399 1.1086 21.9567 7.3951
+SPIN-Diffusion-Iter3 0.2759 6.2481 1.1239 22.0024 7.4126
+Aesthetic
+SD-1.5
+SFT
+Diffusion-DPO (ours)
+PickScore
+SPIN-Diffusion-Iter1
+SPIN-Diffusion-Iter2
+SPIN-Diffusion-Iter3
+HPS
+Image Reward
+Average
+Figure 3: The main result is presented in radar chart. The scores are adjusted to be shown on the
+same scale. Compared with the baselines, SPIN achieves higher scores in all the four metrics and the
+average score by a large margin.
+overall winning rate of 70.2%.
+6.3 Qualitative Analysis
+We illustrate the qualitative performance of our model on three prompts coming from the Pick-a-Pic
+test dataset. We prompt SD-1.5, SFT, Diffusion-DPO (ours), and SPIN-Diffusion at iteration 1 to 3
+and present the generated images in Figure 5. Compared to the baseline methods, SPIN-Diffusion
+demonstrates a notable improvement in image quality, even more apparent than the improvements
+in scores. This is especially evident in aspects such as aligning, shading, visual appeal, and the
+intricacy of details within each image. This qualitative assessment underscores the effectiveness
+of SPIN-Diffusion in producing images that are not only contextually accurate but also visually
+superior to those generated by other existing models.
+13100 100
+SFT SPIN-Diffusion-Iter1 SD-1.5 SPIN-Diffusion-Iter1
+Diffusion-DPO SPIN-Diffusion-Iter2 SFT SPIN-Diffusion-Iter2
+Diffusion-DPO (ours) SPIN-Diffusion-Iter3 Diffusion-DPO SPIN-Diffusion-Iter3
+90 80
+80 60
+70 40
+60 20
+50 0
+PickScore HPS ImageReward Aesthetic Average PickScore HPS ImageReward Aesthetic Average
+(a) Compared to SD-1.5 (b) Compared to Diffusion-DPO (ours)
+Figure 4: Left: winning rate in percentage of SFT, Diffusion-DPO, Diffusion-DPO (ours) and
+SPIN-Diffusion over SD1.5 checkpoint. Right: winning rate in percentage of SFT, Diffusion-DPO,
+Diffusion-DPO (ours) and SPIN-Diffusion over SD1.5 checkpoint. SPIN-Diffusion shows a much
+higher winning rate than SFT and Diffusion-DPO tuned models.
+6.4 Training Dynamics of SFT and DPO
+We first study the training dynamic of SPIN-Diffusion in comparison with SFT and Diffusion-DPO,
+and we plot the results in Figure 6. We observe that after training with about 50k data, the
+performance of SFT stop improving and maintains at about 20.8 in PickScore, 0.270 in HPS, 5.6
+in Aesthetic and 8.9 in average score. These results is significantly inferior to those achieved by
+SPIN-Diffusion, which achieves 21.2 in PickScore, 0.272 in HPS, 5.9 in Aesthetic and 9.1 in average
+score. Compared to Diffusion-DPO, SPIN-Diffusion achieves a superior performance without the
+loser image. These results demonstrate that self-play fine-tuning plays a key role in SPIN-Diffusion’s
+performance.
+7 Conclusion
+This paper presents SPIN-Diffusion, an innovative fine-tuning approach tailored for diffusion models,
+particularlyeffectiveinscenarioswhereonlyasingleimageisavailablepertextprompt. Byemploying
+aself-playmechanism,SPIN-Diffusioniterativelyrefinesthemodel’sperformance,convergingtowards
+the target data distribution. Theoretical evidence underpins the superiority of SPIN-Diffusion,
+demonstrating that traditional supervised fine-tuning cannot surpass its stationary point, achievable
+atthetargetdatadistribution. EmpiricalevaluationshighlightSPIN-Diffusion’sremarkablesuccessin
+text-to-image generation tasks, surpassing the state-of-the-art fine-tuning methods even without the
+need for additional data. This underscores SPIN-Diffusion’s potential to revolutionize the practice
+of diffusion model fine-tuning, leveraging solely demonstration data to achieve unprecedented
+performance levels.
+14
+5.1-DS
+revo
+etaR
+gninniW
+)sruo(
+OPD-noisuffiD
+revo
+etaR
+gninniWSD-1.5 SFT Diffusion-DPO (ours) SPIN-Diffusion-Iter1 SPIN-Diffusion-Iter2 SPIN-Diffusion-Iter3
+Figure 5: We show the images generated by different models. The prompts are “a very cute boy,
+looking at audience, silver hair, in his room, wearing hoodie, at daytime, ai language model, 3d art,
+c4d, blender, pop mart, blind box, clay material, pixar trend, animation lighting, depth of field, ultra
+detailed”, “painting of a castle in the distance” and “red and green eagle”. The models are: SD-1.5,
+SFT, Diffusion-DPO (ours), SPIN-Diffusion-Iter1, SPIN-Diffusion-Iter2, SPIN-Diffusion-Iter3 from
+left to right. SPIN-Diffusion demonstrates a notable improvement in image quality.
+A Additional Details for Experiments
+A.1 Hyperparameters
+We train the SPIN-Diffusion on 8 NVIDIA A100 GPUs with 80G memory. In training the SPIN-
+Diffusion,weusetheAdamWoptimizerwithaweightdecayfactorof1e−2. Theimagesareprocessed
+at a 512×512 resolution. The batch size is set to 8 locally, alongside a gradient accumulation of
+32. For the learning rate, we use a schedule starting with 200 warm-up steps, followed by linear
+decay. We set the learning rate at 2.0e−5 for the initial two iterations, reducing it to 5.0e−8 for
+the third iteration. The coefficient β is chosen as 2000 for the first iteration, increasing to 5000 for
+t
+the subsequent second and third iterations. Training steps are 50 for the first iteration, 500 for the
+second, and 200 for the third. In training the DPO model, we employ the same AdamW optimizer
+and maintain a batch size of 8 and a gradient accumulation of 32. The learning rate is set to 2.0e−5,
+and β is set to 2000. The total number of training steps for DPO is 350. In SFT training, we use 4
+t
+NVIDIA A6000 GPUs. We use the AdamW optimizer with a weight decay of 0.01. The local batch
+size is set to 32 and the global batch size is set to 512. Our learning rate is 1e-5, with linear warmup
+for 500 steps with no learning rate decay. We save checkpoints every 500 steps and evaluate the
+checkpoints on Pick-a-Pic validation. We select the best checkpoint, trained after 2000 steps as our
+SFT checkpoint.
+155.9 21.2
+5.8 21.0
+SFT
+Diffusion-DPO
+5.7 20.8
+SPIN-Diffusion
+5.6 20.6 SFT
+Diffusion-DPO
+5.5 20.4 SPIN-Diffusion
+0 200 400 600 800 0 200 400 600 800
+Training Samples (k) Training Samples (k)
+(a) Aesthetic (b) PickScore
+9.1
+0.270
+9.0
+0.268
+8.9
+0.266
+SFT SFT
+8.8
+Diffusion-DPO Diffusion-DPO
+0.264 SPIN-Diffusion SPIN-Diffusion
+8.7
+0 200 400 600 800 0 200 400 600 800
+Training Samples (k) Training Samples (k)
+(c) HPS (d) Average Score
+Figure 6: The evaluation results on the Pick-a-Pic validation set of SFT, Diffusion-DPO and
+SPIN-Diffusion. The x-axis is the number of training data. SFT reaches its limit quickly, while
+Diffusion-DPO and SPIN-Diffusion continue to improve after training with over 800k data.
+During generation, we use a guidance scale of 7.5, and fixed the random seed as 5775709.
+A.2 Additional Results
+We present the median scores of baselines and SPIN-Diffusion on Pick-a-Pic testset in Table 4. The
+results are consistent to the results in Table 3. We present the detailed winning rate of baselines and
+SPIN-Diffusion over SD-1.5 in Table 5 and the winning rate over Diffusion-DPO in Table 6.
+A.3 Additional Ablation Study
+We conduct ablation study to investigate several aspects in the performance of SPIN-Diffusion.
+Continual Training for More Epochs. WefurtherstudythetrainingbehaviorofSPIN-Diffusion
+by continual training within iteration 1. Both iteration 1 and iteration 2 commence training from
+the same checkpoint. However, for subsequent epochs in iteration 1, images generated by SD-1.5
+are used, with SD-1.5 also serving as the opponent player. In contrast, during iteration 2, both the
+16
+citehtseA
+SPH
+erocSkciP
+erocS
+egarevATable 4: The results of median scores on Pick-a-Pic test set. We report the median of PickScore,
+HPSv2, ImageReward and Aesthetic over the whole test set. We also report the average score over
+the four evaluation metric. SPIN-Diffusion outperforms all the baselines regarding HPS, Aesthetic,
+PickScore and the average score, which agrees with the results of mean scores.
+Model HPS ↑ Aesthetic ↑ ImageReward ↑ PickScore ↑ Average ↑
+SD-1.5 0.2705 5.7726 0.9184 21.1813 7.0357
+SFT (ours) 0.2750 5.9331 1.3161 21.4159 7.2350
+Diffusion-DPO 0.2729 5.8837 1.1361 21.6064 7.2248
+Diffusion-DPO (ours) 0.2756 5.8895 1.2219 21.8995 7.3216
+SPIN-Diffusion-Iter1 0.2739 6.1297 1.1366 21.6464 7.2967
+SPIN-Diffusion-Iter2 0.2751 6.2385 1.3059 22.0101 7.4574
+SPIN-Diffusion-Iter3 0.2761 6.2769 1.3073 22.0703 7.4827
+Table 5: The winning rate over SD-1.5 Pick-a-Pic testset. SPIN-Diffusion shows the highest winning
+rate over SD-1.5 among all the baselines.
+Model PickScore ↑ HPS ↑ ImageReward ↑ Aesthetic ↑ Average ↑
+SFT (ours) 62.4 82.0 75.0 70.8 73.2
+Diffusion-DPO 78.4 75.8 65.0 65.4 79.8
+Diffusion-DPO (ours) 83.8 81.2 71.2 69.0 84.8
+SPIN-Diffusion-Iter1 75.4 70.0 65.8 86.0 80.8
+SPIN-Diffusion-Iter2 86.6 82.6 72.6 92.2 90.0
+SPIN-Diffusion-Iter3 87.0 86.2 77.0 93.8 91.6
+Table 6: The winning rate over Diffusion DPO (ours) on Pick-a-Pic testset. SPIN-Diffusion shows
+the highest winning rate over Diffusion DPO (ours) among all the baselines.
+Model PickScore ↑ HPS ↑ ImageReward ↑ Aesthetic ↑ Average ↑
+SD-1.5 16.2 20.8 28.8 31.0 15.2
+SFT (ours) 26.8 48.2 51.4 52.8 35.2
+Diffusion-DPO 30.6 29.4 36.8 45.2 30.4
+SPIN-Diffusion-Iter1 37.2 35.6 40.6 74.8 47.4
+SPIN-Diffusion-Iter2 56.8 49.0 52.6 86.6 68.2
+SPIN-Diffusion-Iter3 62.4 56.2 55.8 86.8 70.2
+generated images and the opponent player originate from the iteration 1 checkpoint. The results
+shown in Figure 7 are reported on the 500 prompts validation set of Pick-a-Pic. We observe that
+in terms of PickScore, HPS, and average score, continual training on iteration 1 even results in a
+performancedecay. EvenintermsofAestheticscore, continualtrainingcannotguaranteeaconsistent
+improvement. Compared to training for more epochs in iteration 1, iteration 2 has a much more
+ideal performance. These results show the key role in updating the opponent.
+Evaluation on Other Benchmarks We also conduct experiment on PartiPrompts (Yu et al.,
+2022) and HPSv2 (Wu et al., 2023). PartiPrompts consist of 1632 prompts that contains a wide range
+1721.3
+5.975 SPIN-Diffusion-Iter2
+SPIN-Diffusion-Iter1
+21.2
+5.950
+21.1
+5.925
+21.0 5.900
+20.9
+5.875
+5.850 20.8
+5.825 20.7
+SPIN-Diffusion-Iter2
+5.800 20.6 SPIN-Diffusion-Iter1
+0 1 2 3 4 5 6 0 1 2 3 4 5 6
+Epoch Epoch
+(a) Aesthetic (b) PickScore
+0.271
+9.15
+0.270
+9.10
+0.269
+9.05
+0.268 SPIN-Diffusion-Iter2 SPIN-Diffusion-Iter2
+SPIN-Diffusion-Iter1 SPIN-Diffusion-Iter1
+0.267 9.00
+0.266 8.95
+0.265
+8.90
+0 1 2 3 4 5 6 0 1 2 3 4 5 6
+Epoch Epoch
+(c) HPS (d) Average Score
+Figure 7: The evaluation results on Pick-a-Pic validation set of continual training within SPIN-
+Diffusioniteration1,andSPIN-Diffusioniteration2. Thex-axisisthenumberofepochs. Consecutive
+epochs in iteration 1 reach their limit quickly while switching to iteration 2 boosts the performance.
+Table 7: The results of mean scores on PartiPrompts. We report the mean and median of PickScore,
+HPS, ImageReward and Aesthetic score over the whole dataset. We also report the average score over
+the four evaluation metrics. SPIN-Diffusion outperforms all the baselines in terms of four metrics.
+Model HPS ↑ Aesthetic ↑ ImageReward ↑ PickScore ↑ Average ↑
+SD-1.5 0.2769 5.6721 0.9196 21.8926 7.1903
+SFT (ours) 0.2814 5.8568 1.1559 21.9719 7.3165
+Diffusion-DPO 0.2815 5.7758 1.1495 22.2723 7.3698
+SPIN-Diffusion-Iter1 0.2783 5.9073 0.9952 22.1221 7.3257
+SPIN-Diffusion-Iter2 0.2804 6.0533 1.0845 22.3122 7.4326
+of categories and difficulties that beyond daily scenarios and natural objects. HPSv2 is a text-image
+prefence dataset, where the prompts come from DiffusionDB and MSCOCO (Lin et al., 2014) dataset.
+18
+citehtseA
+SPH
+erocSkciP
+erocS
+egarevATable8: TheresultsofmedianscoresonPartiPrompts. WereportthemeanandmedianofPickScore,
+HPS, ImageReward and Aesthetic score over the whole dataset. We also report the average score over
+the four evaluation metrics. SPIN-Diffusion outperforms all the baselines in terms of four metrics.
+Model HPS ↑ Aesthetic ↑ ImageReward ↑ PickScore ↑ Average ↑
+SD-1.5 0.2781 5.6823 1.1247 21.9339 7.2548
+SFT (ours) 0.2781 5.6823 1.1247 21.9339 7.2548
+Diffusion-DPO 0.2822 5.7820 1.3823 22.3251 7.4429
+SPIN-Diffusion-Iter1 0.2793 5.8926 1.1906 22.1632 7.3814
+SPIN-Diffusion-Iter2 0.2810 6.0400 1.2857 22.2998 7.4766
+SPIN-Diffusion-Iter3 0.2825 6.0480 1.3095 22.3361 7.4940
+Table 9: The results of mean scores on HPSv2. We report the mean and median of PickScore, HPS,
+ImageReward and Aesthetic score over the whole dataset. We also report the average score over the
+four evaluation metrics. SPIN-Diffusion outperforms all the baselines in terms of four metrics.
+Model HPS ↑ Aesthetic ↑ ImageReward ↑ PickScore ↑ Average ↑
+SD-1.5 0.2783 5.9017 0.8548 21.4978 7.1332
+SFT (ours) 0.2846 6.0378 1.1547 21.8549 7.333
+Diffusion-DPO 0.2843 6.0306 1.1391 22.3012 7.4388
+SPIN-Diffusion-Iter1 0.2804 6.1943 1.0133 21.8778 7.3415
+SPIN-Diffusion-Iter2 0.2838 6.3403 1.1145 22.2994 7.5095
+SPIN-Diffusion-Iter3 0.2849 6.342 1.1292 22.3415 7.5244
+Table 10: The results of median scores on HPSv2. We report the mean and median of PickScore,
+HPS, ImageReward and Aesthetic score over the whole dataset. We also report the average score over
+the four evaluation metrics. SPIN-Diffusion outperforms all the baselines in terms of four metrics.
+Model HPS ↑ Aesthetic ↑ ImageReward ↑ PickScore ↑ Average ↑
+SD-1.5 0.2781 5.8529 0.9324 21.4825 7.1365
+SFT (ours) 0.2847 6.0057 1.308 21.8211 7.3549
+Diffusion-DPO 0.2847 5.9878 1.3085 22.2854 7.4666
+SPIN-Diffusion-Iter1 0.2803 6.1519 1.1331 21.858 7.3558
+SPIN-Diffusion-Iter2 0.2839 6.3401 1.2711 22.2577 7.5382
+SPIN-Diffusion-Iter3 0.2849 6.3296 1.2853 22.3029 7.5507
+In our experiment, we use the prompts from its test set, which contains 3200 prompts. We use the
+same evaluation metrics as before and the results are shown in Table 7 and 8. The results show that,
+on both PartiPrompts and HPSv2, SPIN-Diffusion achieves a comparable performance with Diffusion
+DPO (ours) and surpasses other baseline models at the first iteration. SPIN-Diffusion further reaches
+an average score of 9.265 and 9.326 on PartiPrompts and HPSv2 dataset respectively at second
+iteration, which outpuerforms all other baselines by a large margin. These results consolidate our
+statement that SPIN shows a superior performance over both SFT and DPO. We also conduct
+qualitative result on PartiPrompts and the results are shown in Figure 8.
+19SD-1.5 SFT Diffusion-DPO (ours) SPIN-Diffusion-Iter1 SPIN-Diffusion-Iter2 SPIN-Diffusion-Iter3
+Figure 8: We show the images generated by different models based on prompts from PartiPrompts.
+The prompts are “a photo of san francisco’s golden gate bridge”, “an aerial view of the Great
+Wall” and “Face of an orange frog in cartoon style”. The models are: SD-1.5, SFT, Diffusion-DPO,
+Diffusion-DPO(ours), SPIN-Diffusion-Iter1fromlefttoright. SPIN-Diffusiondemonstratesanotable
+improvement in image quality
+B Additional Details for SPIN-Diffusion
+B.1 Additional Details of DDIM.
+Given a prompt c, image x , sequence {α }T ⊆ (0,1] and {σ }T ⊆ [0,+∞), the forward diffusion
+0 t t=1 t t=1
+process defined in (3.1) is
+T
+(cid:89)
+q(x |x ) := q(x |x ) q(x |x ,x ),
+1:T 0 T 0 t−1 t 0
+t=2
+√
+where q(x |x ) = N( α x ,(1−α )I) and q(x |x ,x ) admits the following distribution,
+T 0 T 0 T t−1 t 0
+√
+(cid:18) √ (cid:113) x − α x (cid:19)
+N α x + 1−α −σ2· t √ t 0 ,σ2I . (B.1)
+t−1 0 t−1 t 1−α t
+t
+Here {α }T is a decreasing sequence with α = 1 and α approximately zero. By Bayesian rule, we
+t t=1 0 T √
+can show that this diffusion process ensures that q(x |x ) = N( α x ,(1−α )I) for all t and reduces
+t 0 t 0 t
+to DDPM (Ho et al., 2020) with a special choice of σ = (cid:112) (1−α )/(1−α )(cid:112) (1−α /α ).
+t t−1 t t t−1
+Given noise schedule α and σ , examples from the generative model follows
+t t
+T
+(cid:89)
+p (x |c) = p (x |x ,c)·p (x |c),
+θ 0:T θ t−1 t θ T
+t=1
+20p (x |x ,c) =
+N(cid:0)
+µ (x
+,c,t),σ2I(cid:1)
+.
+θ t−1 t θ t t
+Here θ belongs to the parameter space Θ and µ (x ,c,t) is the mean of the Gaussian that can be
+θ t
+parameterized (Ho et al., 2020; Song et al., 2020a) as
+√
+√ (cid:18) x − 1−α ϵ (x ,c,t)(cid:19) (cid:113)
+µ (x ,c,t) = α t √ t θ t + 1−α −σ2·ϵ (x ,c,t), (B.2)
+θ t t−1 α t−1 t θ t
+t
+where {ϵ (x ,c,t)}T are score functions that approximate noise. Compare (B.2) and (B.1), we
+θ t √t=1 √
+can see that (cid:0)xt− 1− √α αtϵ tθ(xt,c,t)(cid:1) approximates x 0, and ϵ
+θ
+approximates the noise ϵ
+t
+:= xt√− 1−α αt tx0 ∼
+N(0,I).
+B.2 Decoupling Technique
+In Section 4, we demonstrate that the objective function defined in (4.8) can be simplified to the
+form in (4.9). This reformulation only requires considering two consecutive sampling steps, t−1
+and t, rather than involving all intermediate steps. Now, we provide a detailed derivation.
+Proof of Lemma 4.1.
+L (θ,θ )
+SPIN k
+(cid:20) (cid:18) T
+= E
+c∼q(·),x0:T∼p data(·|c),x′ 0:T∼p θk(·|c)
+ℓ −(cid:88) β Tt(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+t=1
+(cid:19)(cid:21)
+−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)
+(cid:20) T (cid:18)
+≤ E
+c∼q(·),x0:T∼p data(·|c),x′ 0:T∼p θk(·|c)
+T1 (cid:88) ℓ −β t(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+t=1
+(cid:19)(cid:21)
+−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)
+(cid:20) (cid:18)
+= E
+c∼q(·),x0:T∼p data(·|c),x′ 0:T∼p θk(·|c),t∼Uniform{1,...,T}
+ℓ −β t(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
+−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)
+(cid:20) (cid:18)
+= E
+c∼q(c),(xt−1,xt)∼p data(xt−1,xt|c),(x′ t−1,x′ t)∼p θk(x′ t−1,x′ t|c),t∼Uniform{1,...,T}.
+ℓ −β t(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
+−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)
+= Lapprox(θ,θ ),
+SPIN k
+where the first inequality is by Jensen’s inequality and the convexity of the function ℓ, the second
+equality is by integrating the average 1 (cid:80)T into the expectation via t ∼ Uniform{1,...,T}, and
+T t=1
+the third inequality holds because the argument inside the expectation is only depend of sampling
+step t−1 and t.
+21B.3 Objective Function of SPIN-Diffusion
+We look deep into the term (cid:13) (cid:13)x
+t−1
+−µ θ(x t,c,t)(cid:13) (cid:13)2
+2
+and (cid:13) (cid:13)x′
+t−1
+−µ θ(x′ t,c,t)(cid:13) (cid:13)2
+2
+of (4.8) and (4.9) in
+this section.
+When x Follows Forward Process. We have that x ∼ p (·|c) and by (B.1) and (B.2) we
+0:T 0:T data
+have that
+√
+√ (cid:113) x − α x
+x = α x + 1−α −σ2· t √ t 0 +σ ϵ
+t−1 t−1 0 t−1 t 1−α t(cid:98)t
+t
+√
+√ (cid:18) x − 1−α ϵ (x ,c,t)(cid:19) (cid:113)
+µ (x ,c,t) = α t √ t θ t + 1−α −σ2·ϵ (x ,c,t),
+θ t t−1 α t−1 t θ t
+t
+where ϵ
+(cid:98)t
+∼ N(0,I). Therefore, (cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2
+2
+can be simplified to
+√
+h2 t(cid:13) (cid:13) (cid:13) (cid:13)x t √− 1−α αtx 0 −ϵ θ(x t,c,t)+(σ t/h t)·ϵ (cid:98)t(cid:13) (cid:13) (cid:13) (cid:13)2 , (B.3)
+t 2
+w
+s
+(cid:112)iah αne tr −e
+d 1i
+/h
+st
+αt
+r
+ti=
+√bu
+1(cid:2) t(cid:112) −ion1
+α.
+t−
+−W
+1α
+(cid:3)t h−
+ae
+n1
+n
+d−
+σ
+ϵσ
+t
+tt2
+:→
+=− x0(cid:112)
+t,
+√−α
+(
+√Bt−
+α.
+t1
+3
+x/
+)
+0α
+b
+∼t√
+ec
+N1 om−
+(0e
+,α
+s
+It )−
+h
+.1
+2
+t(cid:3)
+(cid:13)
+(cid:13)ϵa tn −d ϵx θt√− (x1√
+−
+tα ,αt ctx ,0 t)∼
+(cid:13) (cid:13)2
+2N w( it0 h,I h) tfo =llo (cid:2)w √in 1g −a αG t−a 1u −s-
+1−αt
+When x′ Follows the Backward Process. We have that x′ ∼ p (·|c) and
+0:T 0:T θ k
+x′ = µ (x′,c,t)+σ ϵ′
+t−1 θ k t √t(cid:98)t
+√ (cid:18) x′ − 1−α ϵ (x′,c,t)(cid:19) (cid:113)
+= α t √t θ k t + 1−α −σ2·ϵ (x′,c,t)+σ ϵ′
+t−1 α t−1 t θ k t t(cid:98)t
+t
+√
+√ (cid:18) x′ − 1−α ϵ (x′,c,t)(cid:19) (cid:113)
+µ (x′,c,t) = α t √ t θ t + 1−α −σ2·ϵ (x′,c,t),
+θ t t−1 α t−1 t θ t
+t
+where ϵ′
+t
+∼ N(0,I). Therefore, (cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2
+2
+can be simplified to
+h2 t(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−ϵ θ(x t,c,t)+(σ t/h t)·ϵ (cid:98)′ t(cid:13) (cid:13)2 2, (B.4)
+w
+ϵ
+θh (e xr te ,h
+c,t
+t=
+)(cid:13)
+(cid:13)(cid:2)
+2
+2(cid:112) w1 it−
+h
+hα
+tt−
+=1− (cid:2)√σ 1t2 −−(cid:112)
+α
+tα
+−1t−
+−1/ (cid:112)α
+t
+α√ t−1 1− /αα
+tt √−1
+1(cid:3) −. W
+α
+th −e 1n (cid:3).σ
+t
+→ 0,(B.4)becomesh2 t(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−
+Simple Decoupled SPIN-Diffusion Objective Function. Substituting (B.3) and (B.4) into
+(4.9) and applying σ → 0 yields,
+t
+(cid:20) (cid:18)
+La SPp Ip Nrox(θ,θ k) = E ℓ −β th2 t(cid:104)(cid:13) (cid:13)ϵ t−ϵ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ t−ϵ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
+−(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−ϵ θ(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105) , (B.5)
+where h = √ 1−α − (cid:112) α /α √ 1−α , x = α x + (1 − α )ϵ , and the expectation is
+t t−1 t−1 t t−1 t t 0 t t
+computed over the distribution,c ∼ q(c),x ∼ p (x |c),x′ ∼ p (x′|c), ϵ ∼ N(0,I) and t ∼
+0 data 0 t θ k t t
+22Uniform{1,...,T}. (B.5) still need the intermediate steps x′, as discussed below (4.9) in Section 4,
+t
+we can approximate the backward process with the forward process and obtain
+(cid:20) (cid:18)
+La SPp Ip Nrox(θ,θ k) = E ℓ −β th2 t(cid:104)(cid:13) (cid:13)ϵ t−ϵ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ t−ϵ
+θ
+k(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ′ t−ϵ θ(x′ t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
++(cid:13) (cid:13)ϵ′ t−ϵ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105) ,
+where h = √ 1−α − (cid:112) α /α √ 1−α , x = α x + (1 − α )ϵ , x′ = α x′ + (1 − α )ϵ′,
+t t−1 t−1 t t−1 t t 0 t t t t 0 t t
+and the expectation is computed over the distribution,c ∼ q(c),x ∼ p (x |c),x′ ∼ p (x′|c),
+0 data 0 0 θ k 0
+ϵ ∼ N(0,I), ϵ′ ∼ N(0,I) and t ∼ Uniform{1,...,T}.
+t t
+C Proof of Theorems in Section 5
+Proof of Theorem 5.2. We know the objective function (4.9) can be simplified to (B.5) by parame-
+terize with ϵ . So we study the objective function (B.5) as follows,
+θ
+(cid:20) (cid:18)
+La SPp Ip Nrox(θ,θ k) = E ℓ −β th2 t(cid:104)(cid:13) (cid:13)ϵ t−ϵ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ t−ϵ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
+−(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−ϵ θ(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105) .
+Since θ is not the global optimum of L , there exists θ∗ such that L (θ∗) ≤ L (θ ), which
+k DSM DSM DSM k
+gives that
+E(cid:104) γ t(cid:13) (cid:13)ϵ θ∗(x t,c,t)−ϵ t(cid:13) (cid:13)2 2(cid:105) ≤ E(cid:104) γ t(cid:13) (cid:13)ϵ
+θ
+k(x t,c,t)−ϵ t(cid:13) (cid:13)2 2(cid:105) , (C.1)
+where the expectation is computed over the distribution c ∼ q(·),x ∼ q (·|c),ϵ ∼ N(0,I),
+0 data t
+t ∼ Uniform{1,...,T}. Define g(s) = Lapprox(θ∗,θ ) with β = sγ /h2 as follows,
+SPIN k t t t
+(cid:20) (cid:18) (cid:19)(cid:21)
+g(s) = E ℓ −β th2 t(cid:104)(cid:13) (cid:13)ϵ t−ϵ θ∗(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ t−ϵ
+θ
+k(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−ϵ θ∗(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)
+(cid:20) (cid:18) (cid:19)(cid:21)
+= E ℓ −sλ t(cid:104)(cid:13) (cid:13)ϵ t−ϵ θ∗(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ t−ϵ
+θ
+k(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−ϵ θ∗(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105) .
+Then we have that g(0) = 0 and
+(cid:20) (cid:18) (cid:19)(cid:21)
+d dg s(0) = E −ℓ′(0)λ
+t
+(cid:13) (cid:13)ϵ t−ϵ θ∗(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ t−ϵ
+θ
+k(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−ϵ θ∗(x′ t,c,t)(cid:13) (cid:13)2
+2
+(cid:18)
+= −ℓ′(0) Eγ t(cid:13) (cid:13)ϵ t−ϵ θ∗(x t,c,t)(cid:13) (cid:13)2 2−Eγ t(cid:13) (cid:13)ϵ t−ϵ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)
+−Eγ t(cid:13) (cid:13)ϵ
+θ
+k(x′ t,c,t)−ϵ θ∗(x′ t,c,t)(cid:13) (cid:13)2
+2
+< 0,
+√ √
+where the last inequality is by (C.1). Here x = α x + 1−α ϵ and the expectation is computed
+t t 0 t t
+over the distribution c ∼ q(·),x ∼ q (·|c),ϵ ∼ N(0,I), t ∼ Uniform{1,...,T}.
+0 data t
+23Therefore, there exist a λ such that for all 0 < λ < λ , we have g(λ) < ℓ(0). So for those
+0 0
+β = sγ /h2 with 0 < λ < λ , we have that
+t t t 0
+Lapprox(θ∗,θ ) = g(λ) < g(0) = L (θ ,θ ),
+SPIN k SPIN k k
+where the inequality holds due to the choice of λ. Therefore, we conclude that θ is not the global
+k
+optimum of (4.9).
+Proof of Theorem 5.3. By (4.9) we have that,
+(cid:20) (cid:18)
+La SPp Ip Nrox(θ,θ k) = E ℓ −β t(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
+−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105) ,
+wheretheexpectationiscomputedoverthedistributionc ∼ q(c),(x ,x ) ∼ (cid:82) p (x |c)q(x ,x |x )dx ,
+t−1 t data 0 t−1 t 0 0
+(x′ ,x′) ∼ (cid:82) p (x′|c)q(x′ ,x′|x′)dx′, t ∼ Uniform{1,...,T}. Since p (·|c) = p (·|c), we can
+t−1 t θ k 0 t−1 t 0 0 data θt
+conclude that (x ,x ) and (x′ ,x′) are independent and identically distributed random variable.
+t−1 t t−1 t
+Therefore, by symmetry property of (x ,x ) and (x′ ,x′), we have for any θ ∈ Θ that
+t−1 t t−1 t
+(cid:20) (cid:18)
+La SPp Ip Nrox(θ,θ k) = 1 2E ℓ −β t(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)
+−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)
+(cid:18)
++ℓ −β t(cid:104)(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
+(cid:13) (cid:13)2 (cid:13) (cid:13)2(cid:105)
+−(cid:13)x t−1−µ θ(x t,c,t)(cid:13) 2+(cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13)
+2
+(cid:20) (cid:18)
+≥ E ℓ − β 2t(cid:104)(cid:13) (cid:13)x t−1−µ θ(x t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13) (cid:13)2
+2
+−(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2+(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2 2(cid:105)
+− β 2t(cid:104)(cid:13) (cid:13)x′ t−1−µ θ(x′ t,c,t)(cid:13) (cid:13)2 2−(cid:13) (cid:13)x′ t−1−µ
+θ
+k(x′ t,c,t)(cid:13) (cid:13)2
+2
+(cid:19)(cid:21)
+(cid:13) (cid:13)2 (cid:13) (cid:13)2(cid:105)
+−(cid:13)x t−1−µ θ(x t,c,t)(cid:13) 2+(cid:13)x t−1−µ
+θ
+k(x t,c,t)(cid:13)
+2
+= ℓ(0),
+wheretheinequalityisduetoJensen’sinequality(recallingthatℓisconvexinAssumption5.1),andthe
+expectation is computed over the distribution c ∼ q(c), (x ,x ) ∼ (cid:82) p (x |c)q(x ,x |x )dx ,
+t−1 t data 0 t−1 t 0 0
+(x′ ,x′) ∼ (cid:82) p (x′|c)q(x′ ,x′|x′)dx′, t ∼ Uniform{1,...,T}. Therefore, we have that
+t−1 t θ k 0 t−1 t 0 0
+Lapprox(θ,θ ) ≥ ℓ(0) = Lapprox(θ ,θ ),
+SPIN k SPIN k k
+which means that θ is the global optimum of (4.9). As a consequence, θ = θ .
+k k+1 k
+24References
+Austin, J., Johnson, D. D., Ho, J., Tarlow, D. and Van Den Berg, R. (2021). Structured
+denoising diffusion models in discrete state-spaces. Advances in Neural Information Processing
+Systems 34 17981–17993.
+Betker, J., Goh, G., Jing, L., Brooks, T., Wang, J., Li, L., Ouyang, L., Zhuang, J., Lee,
+J., Guo, Y. et al. (2023). Improving image generation with better captions. Computer Science.
+https://cdn. openai. com/papers/dall-e-3. pdf 2 3.
+Black, K., Janner, M., Du, Y., Kostrikov, I. and Levine, S. (2023). Training diffusion models
+with reinforcement learning. arXiv preprint arXiv:2305.13301 .
+Bradley, R. A. and Terry, M. E. (1952). Rank analysis of incomplete block designs: I. the
+method of paired comparisons. Biometrika 39 324–345.
+Caesar, H., Uijlings, J. and Ferrari, V. (2018). Coco-stuff: Thing and stuff classes in context.
+In Proceedings of the IEEE conference on computer vision and pattern recognition.
+Chen, Z., Deng, Y., Yuan, H., Ji, K. and Gu, Q. (2024). Self-play fine-tuning converts weak
+language models to strong language models. arXiv preprint arXiv:2401.01335 .
+Chen, Z., Yuan, H., Li, Y., Kou, Y., Zhang, J. and Gu, Q. (2023). Fast sampling via
+de-randomization for discrete diffusion models. arXiv preprint arXiv:2312.09193 .
+Clark, K., Vicol, P., Swersky, K. and Fleet, D. J. (2023). Directly fine-tuning diffusion
+models on differentiable rewards. arXiv preprint arXiv:2309.17400 .
+Corso, G., Stärk, H., Jing, B., Barzilay, R. and Jaakkola, T. (2022). Diffdock: Diffusion
+steps, twists, and turns for molecular docking. arXiv preprint arXiv:2210.01776 .
+Creswell, A., White, T., Dumoulin, V., Arulkumaran, K., Sengupta, B. and Bharath,
+A. A. (2018). Generative adversarial networks: An overview. IEEE signal processing magazine 35
+53–65.
+Dai, X., Hou, J., Ma, C.-Y., Tsai, S., Wang, J., Wang, R., Zhang, P., Vandenhende,
+S., Wang, X., Dubey, A. et al. (2023). Emu: Enhancing image generation models using
+photogenic needles in a haystack. arXiv preprint arXiv:2309.15807 .
+Fan, Y., Watkins, O., Du, Y., Liu, H., Ryu, M., Boutilier, C., Abbeel, P., Ghavamzadeh,
+M., Lee, K. and Lee, K. (2023). Dpok: Reinforcement learning for fine-tuning text-to-image
+diffusion models. arXiv preprint arXiv:2305.16381 .
+Gal, R., Alaluf, Y., Atzmon, Y., Patashnik, O., Bermano, A. H., Chechik, G. and
+Cohen-Or, D. (2022). An image is worth one word: Personalizing text-to-image generation using
+textual inversion. arXiv preprint arXiv:2208.01618 .
+Guan, J., Zhou, X., Yang, Y., Bao, Y., Peng, J., Ma, J., Liu, Q., Wang, L. and Gu, Q.
+(2023). Decompdiff: Diffusion models with decomposed priors for structure-based drug design .
+25Ho, J., Jain, A. and Abbeel, P. (2020). Denoising diffusion probabilistic models. Advances in
+neural information processing systems 33 6840–6851.
+Ho, J., Saharia, C., Chan, W., Fleet, D. J., Norouzi, M.andSalimans, T.(2022). Cascaded
+diffusion models for high fidelity image generation. The Journal of Machine Learning Research 23
+2249–2281.
+Kingma, D. P. and Welling, M. (2013). Auto-encoding variational bayes. arXiv preprint
+arXiv:1312.6114 .
+Kirstain, Y., Polyak, A., Singer, U., Matiana, S., Penna, J.andLevy, O.(2023). Pick-a-pic:
+An open dataset of user preferences for text-to-image generation. arXiv preprint arXiv:2305.01569
+.
+Lee, K., Liu, H., Ryu, M., Watkins, O., Du, Y., Boutilier, C., Abbeel, P., Ghavamzadeh,
+M. and Gu, S. S. (2023). Aligning text-to-image models using human feedback. arXiv preprint
+arXiv:2302.12192 .
+Lee, S. H., Li, Y., Ke, J., Yoo, I., Zhang, H., Yu, J., Wang, Q., Deng, F., Entis, G.,
+He, J., Li, G., Kim, S., Essa, I. and Yang, F. (2024). Parrot: Pareto-optimal multi-reward
+reinforcement learning framework for text-to-image generation.
+Lin, T.-Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., Dollár, P. and
+Zitnick, C. L. (2014). Microsoft coco: Common objects in context. In Computer Vision–ECCV
+2014: 13th European Conference, Zurich, Switzerland, September 6-12, 2014, Proceedings, Part V
+13. Springer.
+Müller, A. (1997). Integral probability metrics and their generating classes of functions. Advances
+in applied probability 29 429–443.
+Nichol, A., Dhariwal, P., Ramesh, A., Shyam, P., Mishkin, P., McGrew, B., Sutskever,
+I. and Chen, M. (2021). Glide: Towards photorealistic image generation and editing with
+text-guided diffusion models. arXiv preprint arXiv:2112.10741 .
+Peebles, W. and Xie, S. (2023). Scalable diffusion models with transformers. In Proceedings of
+the IEEE/CVF International Conference on Computer Vision.
+Podell, D., English, Z., Lacey, K., Blattmann, A., Dockhorn, T., Müller, J., Penna,
+J. and Rombach, R. (2023). Sdxl: Improving latent diffusion models for high-resolution image
+synthesis. arXiv preprint arXiv:2307.01952 .
+Prabhudesai, M., Goyal, A., Pathak, D. and Fragkiadaki, K. (2023). Aligning text-to-image
+diffusion models with reward backpropagation. arXiv preprint arXiv:2310.03739 .
+Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning, C. D. and Finn, C. (2023).
+Direct preference optimization: Your language model is secretly a reward model. arXiv preprint
+arXiv:2305.18290 .
+Ramesh, A., Dhariwal, P., Nichol, A., Chu, C. and Chen, M. (2022). Hierarchical text-
+conditional image generation with clip latents. arXiv preprint arXiv:2204.06125 1 3.
+26Rombach, R., Blattmann, A., Lorenz, D., Esser, P. and Ommer, B. (2022a). High-resolution
+image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition.
+Rombach, R., Blattmann, A., Lorenz, D., Esser, P. and Ommer, B. (2022b). High-resolution
+image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR).
+Ruiz, N., Li, Y., Jampani, V., Pritch, Y., Rubinstein, M. and Aberman, K. (2023). Dream-
+booth: Fine tuning text-to-image diffusion models for subject-driven generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+Saharia, C., Chan, W., Saxena, S., Li, L., Whang, J., Denton, E. L., Ghasemipour,
+K., Gontijo Lopes, R., Karagol Ayan, B., Salimans, T. et al. (2022a). Photorealistic
+text-to-image diffusion models with deep language understanding. Advances in Neural Information
+Processing Systems 35 36479–36494.
+Saharia, C., Ho, J., Chan, W., Salimans, T., Fleet, D. J. and Norouzi, M. (2022b). Image
+super-resolution via iterative refinement. IEEE Transactions on Pattern Analysis and Machine
+Intelligence 45 4713–4726.
+Schuhmann, C., Beaumont, R., Vencu, R., Gordon, C., Wightman, R., Cherti, M.,
+Coombes, T., Katta, A., Mullis, C., Wortsman, M. et al. (2022). Laion-5b: An open
+large-scale dataset for training next generation image-text models. Advances in Neural Information
+Processing Systems 35 25278–25294.
+Segalis, E., Valevski, D., Lumen, D., Matias, Y. and Leviathan, Y. (2023). A picture
+is worth a thousand words: Principled recaptioning improves image generation. arXiv preprint
+arXiv:2310.16656 .
+Silver, D., Hubert, T., Schrittwieser, J., Antonoglou, I., Lai, M., Guez, A., Lanctot,
+M., Sifre, L., Kumaran, D., Graepel, T. et al. (2017a). Mastering chess and shogi by
+self-play with a general reinforcement learning algorithm. arXiv preprint arXiv:1712.01815 .
+Silver, D., Schrittwieser, J., Simonyan, K., Antonoglou, I., Huang, A., Guez, A.,
+Hubert, T., Baker, L., Lai, M., Bolton, A. et al. (2017b). Mastering the game of go
+without human knowledge. nature 550 354–359.
+Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N. and Ganguli, S. (2015). Deep
+unsupervised learning using nonequilibrium thermodynamics. In International conference on
+machine learning. PMLR.
+Song, J., Meng, C. and Ermon, S. (2020a). Denoising diffusion implicit models. arXiv preprint
+arXiv:2010.02502 .
+Song, Y. and Ermon, S. (2019). Generative modeling by estimating gradients of the data
+distribution. Advances in neural information processing systems 32.
+Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A., Ermon, S. and Poole, B.
+(2020b). Score-based generative modeling through stochastic differential equations. arXiv preprint
+arXiv:2011.13456 .
+27Tesauro, G. et al. (1995). Temporal difference learning and td-gammon. Communications of the
+ACM 38 58–68.
+Wallace, B., Dang, M., Rafailov, R., Zhou, L., Lou, A., Purushwalkam, S., Ermon, S.,
+Xiong, C., Joty, S. and Naik, N. (2023). Diffusion model alignment using direct preference
+optimization. arXiv preprint arXiv:2311.12908 .
+Watson, D., Ho, J., Norouzi, M. and Chan, W. (2021). Learning to efficiently sample from
+diffusion probabilistic models. arXiv preprint arXiv:2106.03802 .
+Wu, X., Hao, Y., Sun, K., Chen, Y., Zhu, F., Zhao, R. and Li, H. (2023). Human preference
+score v2: A solid benchmark for evaluating human preferences of text-to-image synthesis. arXiv
+preprint arXiv:2306.09341 .
+Xu, J., Liu, X., Wu, Y., Tong, Y., Li, Q., Ding, M., Tang, J. and Dong, Y. (2023).
+Imagereward: Learning and evaluating human preferences for text-to-image generation. arXiv
+preprint arXiv:2304.05977 .
+Yang, K., Tao, J., Lyu, J., Ge, C., Chen, J., Li, Q., Shen, W., Zhu, X. and Li, X. (2023).
+Using human feedback to fine-tune diffusion models without any reward model. arXiv preprint
+arXiv:2311.13231 .
+Yu, J., Xu, Y., Koh, J. Y., Luong, T., Baid, G., Wang, Z., Vasudevan, V., Ku, A., Yang,
+Y., Ayan, B. K. et al. (2022). Scaling autoregressive models for content-rich text-to-image
+generation. arXiv preprint arXiv:2206.10789 2 5.
+Zheng, L., Yuan, J., Yu, L. and Kong, L. (2023). A reparameterized discrete diffusion model for
+text generation. arXiv preprint arXiv:2302.05737 .
+28
