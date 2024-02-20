@@ -1,0 +1,342 @@
+BlackJAX: Composable Bayesian inference in JAX
+∗
+Alberto Cabezas a.cabezasgonzalez@lancaster.ac.uk
+Department of Mathematics and Statistics
+Lancaster University
+Lancaster, UK
+Adrien Corenflos adrien.corenflos@aalto.fi
+Department of Electrical Engineering and Automation
+Aalto University
+Espoo, Finland
+Junpeng Lao junpenglao@google.com
+Google Switzerland
+Gustav-Gull-Platz 1
+Zurich, Switzerland
+R´emi Louf remi@dottxt.co
+.txt
+Paris, France
+Abstract
+BlackJAX is a library implementing sampling and variational inference algorithms com-
+monly used in Bayesiancomputation. It is designed for ease of use, speed, and modularity
+by taking a functional approach to the algorithms’ implementation. BlackJAX is written
+in Python, using JAX to compile and run NumpPy-like samplers and variational methods
+on CPUs, GPUs, and TPUs. The library integrates well with probabilistic programming
+languagesbyworkingdirectlywiththe (un-normalized)targetlogdensityfunction. Black-
+JAXisintendedasacollectionoflow-level,composableimplementationsofbasicstatistical
+‘atoms’thatcanbecombinedtoperformwell-definedBayesianinference,butalsoprovides
+high-levelroutines for ease of use. It is designed for users who need cutting-edge methods,
+researchers who want to create complex sampling methods, and people who want to learn
+how these work.
+Keywords: Bayesian computation, variational inference, Markov chain Monte Carlo,
+sequential Monte Carlo, approximate Bayesian inference
+∗. Authorsare listed alphabetically.
+©2024AlbertoCabezas,AdrienCorenflos,JunpengLao,andR´emiLouf.
+License: CC-BY4.0,seehttps://creativecommons.org/licenses/by/4.0/.
+4202
+beF
+61
+]SM.sc[
+1v79701.2042:viXraCabezas, Corenflos, Lao, and Louf
+1 Introduction
+Sampling from a probability distribution, either manually defined or constructed using
+probabilistic programming languages (PPLs), is a recurring topic in statistics and ma-
+chine learning. Automatic sampling software has historically been limited to Gibbs-type
+methods (Meyer and Yu, 2000; Lunn et al., 2000; Depaoli et al., 2016), requiring knowl-
+edge of the model structure. Black-box samplers, typically relying on Hamiltonian Monte
+Carlo(HMC,Duane et al.,1987),allowedgeneral,model-agnosticimprovementintheappli-
+cability of themethod. Thiswas spearheadedby Stan (Carpenter et al.,2017), which lever-
+aged the development of automatic differentiation. The same developments have allowed
+for automatically learning rich approximations via variational inference (VI, Jordan et al.,
+1999) to the models of interest. Put together, these led to the creation of an array of
+modern PPLs that have pushed the boundaries on the feasibility of Bayesian computa-
+tion (Salvatier et al., 2016; Bingham et al., 2019; Phan et al., 2019). While black-box sam-
+plers have paved the way, we believe that inference in today’s models increasingly requires
+reintroducing structure-aware algorithms.
+To achieve this, BlackJAX provides users with composable inferential building blocks
+written using JAX (Bradbury et al., 2018), such as Metropolis–Hastings (Metropolis et al.,
+1953; Hastings, 1970; Robert, 2016) accept/reject step, Hamiltonian or Langevin (Besag,
+1994) dynamics, stochastic gradient utilities, resampling and tempering mechanisms for use
+withinsequential Monte Carlo (SMC,Del Moral et al.,2006), or mean field approximations
+(Jordan et al., 1999), as well as other mechanisms. These components are unified under a
+convenient, functionally-oriented API that can be combined to form new or existing algo-
+rithms immediately applicable to sequential and parallel modern computer architectures.
+2 Design principles
+BlackJAX supports sampling algorithms such as MCMC, SMC, and Stochastic Gradient
+MCMC (SGMCMC) and approximate inference algorithms such as VI. In all cases, Black-
+JAX takes a Markovian approach, whereby all the information to obtain the next iteration
+of an algorithm is contained in its current state. This naturally results in a functionally
+pure (Lonsdorf, 2020) structure, where no side-effects are allowed, simplifying parallelisa-
+tion. For efficiency, auxiliary information may be included in the state too.
+Once the sampling algorithm has been chosen (or designed), it is instantiated on the
+target function, often given by its log density. The sampling (or VI calibration) procedure
+is then carried out as a loop, updating the previous state into the current, which can
+be collected to compute statistics. Additional information (for example, the acceptance
+probability of the proposed MCMC state) is also returned for debugging or diagnostic
+purposes.
+1 # Generic sampling algorithm:
+2 sampling_algorithm = blackjax.sampling_algorithm(logdensity_fn, ...)
+3 state = sampling_algorithm.init(initial_position)
+4 new_state, info = sampling_algorithm.step(rng_key, state)
+5
+6 # Generic approximate inference algorithm:
+7 approx_algorithm = blackjax.approx_algorithm(logdensity_fn, optimizer, ...)
+8 state = approx_algorithm.init(initial_position)
+2BlackJAX
+9 new_state, info = approx_algorithm.step(rng_key, state)
+10 position_samples = approx_algorithm.sample(rng_key, state, num_samples)
+2.1 Lower-level API
+Users might need a tailored algorithm for the model they are trying to sample or approx-
+imate from, or they might try out different Markov transition kernels running in parallel
+with various particles in an SMC algorithm, or they might use optimization to approximate
+the hyperparameters of the models while sampling from the rest. For any of these cases,
+BlackJAX provides access to a lower-level API, giving access to functions implementing
+methods with more parameters. This allows for implementing more complex methods than
+those available at the top level of the library. The user-facing interface then resembles
+(using MCMC for illustration, but it can be any algorithm type):
+1 # Lower-level sampling algorithm:
+2 init = blackjax.mcmc.sampling_algorithm.init
+3 state = init(initial_position, logdensity_fn)
+4 kernel = blackjax.mcmc.sampling_algorithm.build_kernel(...)
+5 new_state, info = kernel(rng_key, state, logdensity_fn, ...)
+6
+7 # Lower-level approximate inference algorithm:
+8 init = blackjax.vi.approx_algorithm.init
+9 state = init(initial_position, optimizer, ...)
+10 step = blackjax.vi.approx_algorithm.step
+11 new_state, info = step(rng_key, state, logdensity_fn, optimizer, ...)
+12 sample = blackjax.vi.approx_algorithm.sample
+13 position_samples = sample(rng_key, state, num_samples)
+The functional design of the library, where programs are constructed by applying and
+composing functions, allows the end user to build and experiment with new algorithms by
+applying the same mathematical logic used to design them. This is used, for instance, to
+apply different base kernels in an SMC setting or combine optimization within sampling
+algorithms. For a detailed example, see the implementation of the window adaptation
+scheme for adaptation of the step-size and mass-matrix appearing in HMC (Betancourt,
+2016).
+2.2 Basic components and the compositional paradigm
+All inference algorithms are composed of basic components which provide the lowest level
+of algorithm abstraction and are available to the user. With BlackJAX, researchers and
+practitioners can leverage all provided basic components already implemented to con-
+struct their method. For instance, BlackJAX contains two variants of the MH accep-
+t/reject step: the simpler proposal generator if the proposal transition kernel is sym-
+metric and the more general asymmetric proposal generator if the proposal transition
+kernel is asymmetric. Hence the HMC algorithm uses the former while the Metropolis
+adjusted Langevin algorithm (MALA Besag, 1994) uses the latter. Similarly, the accep-
+tance probability of the proposal is computed, the proposal is either accepted or rejected
+usingstatic binomial sampling. In BlackJAX, this staple of MCMC can immediately be
+swapped for the non-reversible slice sampling algorithm of Neal (2020) simply by replacing
+it with nonreversible slice sampling.
+3Cabezas, Corenflos, Lao, and Louf
+Because all algorithms in BlackJAX are implemented as composites of these public
+low-level components, the end-user can then build custom algorithms that are not direct
+combinations of already “well-formed” methods such as HMC. For instance, one can use
+leapfrog dynamics independently of the acceptance step, giving the user more flexibility in
+terms of their end algorithm.
+2.3 Existing sampling libraries
+BlackJAX is the only Python library specifically aimed at users who want to use but also
+develop inference methods. In Python, AeMCMC automatically constructs MCMC sam-
+plers for probabilistic models by exploiting the symbolic graphs structure of programs writ-
+ten in Aesara1. In Julia, Mamba.jl provides a platform for implementing and applying
+MCMC methods to perform Bayesian analysis. Other libraries implement domain-specific
+algorithms, such as EMCEE (Foreman-Mackey et al., 2019), Dynesty (Speagle, 2020), and
+pocoMC (Karamanis et al., 2022), or are directly tied to a PPL (Bingham et al., 2019;
+Tran et al., 2019; Oriol et al., 2023; Carpenter et al., 2017).
+3 Past impact of BlackJAX on the practice of Bayesian inference
+BlackJAXjoinsthealreadyexistingrichecosystemofJAX-poweredscientificlibraries(Wilkinson et al.,
+2023; Schoenholz and Cubuk, 2020; Bonnet et al., 2023) and is directly compatible with
+several of them either as a client: consuming outputs from these (Pinder and Dodd, 2022;
+DeepMind et al., 2020), or as a component, used within the libraries (Phan et al., 2019).
+BlackJAXcontainsacomprehensiveimplementationofstate-of-the-artHMCalgorithms,
+including vanilla HMC with various integrators, the no-U-turn sampling (NUTS) to choose
+thenumberofintegrationstepsateachiterationdynamically(Hoffman et al.,2014),andthe
+generalized HMC algorithm (Horowitz, 1991). It also contains adaptation schemes for the
+algorithms’ hyper-parameters: window adaptation2 and sophisticated calibration methods
+such as Hoffman et al. (2021); Hoffman and Sountsov (2022). Consequently, several papers
+have leveraged BlackJAX to conduct research in various fields (see, e.g., Galan et al., 2022;
+Price-Whelan et al., 2024; Balkenhol et al., 2024). Moreover, BlackJAX has made contri-
+butions to the methodological development of Bayesian inference: it has been adopted in
+a range of papers to develop new Bayesian sampling methods (Staber and Da Veiga, 2022;
+Cabezas and Nemeth, 2023; Cooper et al., 2023).
+Beyond research publications, BlackJAX has found a place in courses and tutorials, for
+examplebyDarrenWilkinson3anditsuse4inKevinMurphy’sauthoritativemanuscript(Murphy,
+2022). This usage attests to the library’s recognition as a practical resource for teaching
+Bayesian concepts, making it accessible to a broader audience of learners and practitioners.
+1. Theproject is on indefinitehiatus as we write thisarticle.
+2. https://mc-stan.org/docs/reference-manual/hmc-algorithm-parameters.html
+3. https://github.com/darrenjw/fp-ssc-course
+4. https://github.com/probml/pyprobml
+4BlackJAX
+4 The future of BlackJAX
+Enhanced portfolio. We first aim to diversify BlackJAX’s Bayesian computation meth-
+ods, particularly “meta-algorithms” which consume base MCMC and VI methods to pro-
+duceenhancedsamplers. Newadditionsincludeparallelandsequentialtempering(Marinari and Parisi,
+1992;Geyer and Thompson,1995;Syed et al.,2022);debiasingmethods(Jacob et al.,2020)
+which allow for parallelising MCMC samplers; structured VI techniques, like the Integrated
+Nested Laplace Approximation (INLA, Rue et al., 2009). Alongside these, BlackJAX will
+introduce more performance diagnostic tools.
+Documentation and tutorials. These will be expanded to cater to users at all levels,
+enhancing BlackJAX’s usability and educational value. We plan to develop a comprehen-
+sive suite of tutorials and documentation (a “sampling book”) detailing the integration
+of BlackJAX with popular probabilistic programming languages, streamlining the devel-
+opment process for complex probabilistic models. Additionally, the introduction of an
+inference database feature similar to Stan’s posteriordb will allow users to access a collec-
+tion of posteriors for testing and benchmarking. This feature aligns with the principles of
+transparency and reproducibility in Bayesian inference. It will include reference implemen-
+tations in probabilistic programming languages and reference posterior inferences in the
+form of posterior samples.
+5 Project openness and development
+BlackJAX’s source code is available under the Apache License v2.0, allowing commercial
+use. BlackJAX is hosted at https://github.com/blackjax-devs/blackjax. Anyone is
+welcome to contribute to the BlackJAX project. Contributions can be made in code, doc-
+umentation, expert reviews of open pull requests, or other forms of support, such as case
+studies using BlackJAX. BlackJAX follows the self-appointing council or board open-
+source governance model5, that is, contributions are reviewed by core contributors, and
+breaking decisions about the BlackJAX project are made by consensus among these. A
+comprehensive test suite is run automatically by a continuous integration service before
+code can be merged into the code base. As of the writing of this article, the test coverage
+of the library is 99%.
+References
+L Balkenhol, C Trendafilova, K Benabed, and S Galli. CANDL: Cosmic microwave back-
+ground analysis with a differentiable likelihood. arXiv preprint arXiv:2401.13433, 2024.
+Julian Besag. Comments on “Representations of knowledge in complex systems” by U.
+Grenander and M. I. Miller. Journal of the Royal Statistical Society Series B: Statistical
+Methodology, 56(591-592):4, 1994.
+Michael Betancourt. Identifying the optimal integration time in Hamiltonian Monte Carlo,
+2016.
+5. https://www.redhat.com/en/blog/understanding-open-source-governance-models
+5Cabezas, Corenflos, Lao, and Louf
+Eli Bingham, Jonathan P Chen, Martin Jankowiak, Fritz Obermeyer, Neeraj Pradhan,
+Theofanis Karaletsos, Rohit Singh, Paul Szerlip, Paul Horsfall, and Noah D Goodman.
+Pyro: Deep universal probabilistic programming. The Journal of Machine Learning
+Research, 20(1):973–978, 2019.
+Cl´ement Bonnet, Daniel Luo, Donal Byrne, Shikha Surana, Vincent Coyette, Paul Duck-
+worth, Laurence I. Midgley, Tristan Kalloniatis, Sasha Abramowitz, Cemlyn N. Wa-
+ters, Andries P. Smit, Nathan Grinsztajn, Ulrich A. Mbou Sob, Omayma Mahjoub,
+Elshadai Tegegn, Mohamed A. Mimouni, Raphael Boige, Ruan de Kock, Daniel
+Furelos-Blanco, Victor Le, Arnu Pretorius, and Alexandre Laterre. Jumanji: a di-
+verse suite of scalable reinforcement learning environments in JAX, 2023. URL
+https://arxiv.org/abs/2306.09884.
+JamesBradbury,RoyFrostig,PeterHawkins,MatthewJamesJohnson,ChrisLeary,Dougal
+Maclaurin, George Necula, Adam Paszke, Jake VanderPlas, SkyeWanderman-Milne, and
+QiaoZhang. JAX:composabletransformationsofPython+NumPyprograms,2018. URL
+http://github.com/google/jax.
+Alberto Cabezas and Christopher Nemeth. Transport elliptical slice sampling. In Inter-
+national Conference on Artificial Intelligence and Statistics, pages 3664–3676. PMLR,
+2023.
+Bob Carpenter, Andrew Gelman, Matthew D Hoffman, Daniel Lee, Ben Goodrich, Michael
+Betancourt, Marcus A Brubaker, Jiqiang Guo, Peter Li, and Allen Riddell. Stan: A
+probabilistic programming language. Journal of statistical software, 76, 2017.
+Alex Cooper, Aki Vehtari, Catherine Forbes, Lauren Kennedy, and Dan Simpson. Bayesian
+cross-validation by parallel Markov chain Monte Carlo. arXiv preprint arXiv:2310.07002,
+2023.
+DeepMind, Igor Babuschkin, Kate Baumli, Alison Bell, SuryaBhupatiraju, Jake Bruce, Pe-
+ter Buchlovsky, David Budden, Trevor Cai, Aidan Clark, Ivo Danihelka, Antoine Dedieu,
+Claudio Fantacci, Jonathan Godwin, Chris Jones, Ross Hemsley, Tom Hennigan, Matteo
+Hessel, Shaobo Hou, Steven Kapturowski, Thomas Keck, Iurii Kemaev, Michael King,
+Markus Kunesch, Lena Martens, Hamza Merzic, Vladimir Mikulik, Tamara Norman,
+George Papamakarios, John Quan, Roman Ring, Francisco Ruiz, Alvaro Sanchez, Lau-
+rent Sartran, Rosalia Schneider, Eren Sezener, Stephen Spencer, Srivatsan Srinivasan,
+Miloˇs Stanojevi´c, Wojciech Stokowiec, Luyu Wang, Guangyao Zhou, and Fabio Viola.
+The DeepMind JAX Ecosystem, 2020. URL http://github.com/google-deepmind.
+Pierre Del Moral, Arnaud Doucet, and Ajay Jasra. Sequential Monte Carlo sam-
+plers. Journal of the Royal Statistical Society Series B: Statistical Methodology,
+68(3):411–436, 2006. doi: https://doi.org/10.1111/j.1467-9868.2006.00553.x. URL
+https://rss.onlinelibrary.wiley.com/doi/abs/10.1111/j.1467-9868.2006.00553.x.
+Sarah Depaoli, James P. Clifton, and Patrice R. Cobb. Just Another Gibbs Sampler
+(JAGS): Flexible software for MCMC implementation. Journal of Educational and
+Behavioral Statistics, 41(6):628–649, 2016. doi: 10.3102/1076998616664876. URL
+https://doi.org/10.3102/1076998616664876.
+6BlackJAX
+SimonDuane,AnthonyDKennedy,BrianJPendleton, andDuncanRoweth. HybridMonte
+Carlo. Physics letters B, 195(2):216–222, 1987.
+DanielForeman-Mackey, WillMFarr,ManodeepSinha,AnneMArchibald,DavidWHogg,
+Jeremy S Sanders, Joe Zuntz, Peter KG Williams, Andrew RJ Nelson, Miguel de Val-
+Borro,etal. EMCEEv3: APythonensemblesamplingtoolkitforaffine-invariantMCMC.
+arXiv preprint arXiv:1911.07688, 2019.
+Aymeric Galan, Georgios Vernardos, Austin Peel, Fr´ed´eric Courbin, and J-L Starck. Using
+wavelets to capture deviations from smoothness in galaxy-scale strong lenses. Astronomy
+& Astrophysics, 668:A155, 2022.
+Charles J Geyer and Elizabeth A Thompson. Annealing Markov chain Monte Carlo with
+applications to ancestral inference. Journal of the American Statistical Association, 90
+(431):909–920, 1995.
+W.K.Hastings. MonteCarlosamplingmethodsusingMarkovchainsandtheirapplications.
+Biometrika, 57(1):97–109, 04 1970. ISSN 0006-3444. doi: 10.1093/biomet/57.1.97. URL
+https://doi.org/10.1093/biomet/57.1.97.
+Matthew Hoffman, Alexey Radul, and Pavel Sountsov. An adaptive-MCMC scheme for
+setting trajectory lengths in Hamiltonian Monte Carlo. In International Conference on
+Artificial Intelligence and Statistics, pages 3907–3915. PMLR, 2021.
+Matthew D Hoffman and Pavel Sountsov. Tuning-free generalized Hamiltonian Monte
+Carlo. In International conference on artificial intelligence and statistics, pages 7799–
+7813. PMLR, 2022.
+Matthew D Hoffman, Andrew Gelman, et al. The No-U-Turn sampler: adaptively setting
+path lengths in Hamiltonian Monte Carlo. J. Mach. Learn. Res., 15(1):1593–1623, 2014.
+Alan M Horowitz. A generalized guided Monte Carlo algorithm. Physics Letters B, 268(2):
+247–252, 1991.
+Pierre E Jacob, John O’Leary, and Yves F Atchad´e. Unbiased Markov chain Monte Carlo
+methods with couplings. Journal of the Royal Statistical Society Series B: Statistical
+Methodology, 82(3):543–600, 2020.
+Michael I Jordan, Zoubin Ghahramani, Tommi S Jaakkola, and Lawrence K Saul. An
+introduction to variational methods for graphical models. Machine learning, 37:183–233,
+1999.
+Minas Karamanis, David Nabergoj, Florian Beutler, John A Peacock, and Uros Seljak.
+pocoMC: A Python package for accelerated Bayesian inference in astronomy and cosmol-
+ogy. arXiv preprint arXiv:2207.05660, 2022.
+Brian Lonsdorf. Pure Happiness with Pure Functions, 2020. URL
+https://github.com/MostlyAdequate/mostly-adequate-guide/blob/master/ch03.md.
+7Cabezas, Corenflos, Lao, and Louf
+DavidJLunn,AndrewThomas,NickyBest,andDavidSpiegelhalter.WinBUGS-aBayesian
+modelling framework: concepts, structure, and extensibility. Statistics and computing,
+10:325–337, 2000.
+E. Marinari and G. Parisi. Simulated tempering: A new Monte Carlo scheme. Eu-
+rophysics Letters, 19(6):451, jul 1992. doi: 10.1209/0295-5075/19/6/002. URL
+https://dx.doi.org/10.1209/0295-5075/19/6/002.
+Nicholas Metropolis, Arianna W Rosenbluth, Marshall N Rosenbluth, Augusta H Teller,
+and Edward Teller. Equation of state calculations by fast computing machines. The
+journal of chemical physics, 21(6):1087–1092, 1953.
+Renate Meyer and Jun Yu. BUGS for a Bayesian analysis of stochastic volatility models.
+The Econometrics Journal, 3(2):198–215, 2000.
+Kevin P. Murphy. Probabilistic Machine Learning: An introduction. MIT Press, 2022. URL
+probml.ai.
+RadfordMNeal. Non-reversiblyupdatingauniform[0,1]valueforMetropolisaccept/reject
+decisions. arXiv preprint arXiv:2001.11950, 2020.
+Abril-Pla Oriol, Andreani Virgile, Carroll Colin, Dong Larry, Fonnesbeck Christopher J.,
+KochurovMaxim,KumarRavin,LaoJupeng,LuhmannChristianC.,MartinOsvaldoA.,
+Osthege Michael, Vieira Ricardo, Wiecki Thomas, and Zinkov Robert. PyMC: A modern
+and comprehensive probabilistic programming framework in Python. PeerJ Computer
+Science, 9:e1516, 2023. doi: 10.7717/peerj-cs.1516.
+Du Phan, Neeraj Pradhan, and Martin Jankowiak. Composable effects for flexible and
+accelerated probabilistic programming in NumPyro. arXiv preprint arXiv:1912.11554,
+2019.
+Thomas Pinder and Daniel Dodd. GPJax: A Gaussian process framework in JAX.
+Journal of Open Source Software, 7(75):4455, 2022. doi: 10.21105/joss.04455. URL
+https://doi.org/10.21105/joss.04455.
+Adrian M Price-Whelan, Jason AS Hunt, Danny Horta, Micah Oeur, David W Hogg,
+Kathryn V Johnston, and Lawrence Widrow. Data-driven dynamics with orbital torus
+imaging: A flexible model of the vertical phase space of the galaxy. arXiv preprint
+arXiv:2401.07903, 2024.
+Christian P. Robert. The Metropolis–Hastings algorithm, 2016.
+H˚avard Rue, Sara Martino, and Nicolas Chopin. Approximate Bayesian inference for latent
+GaussianmodelsbyusingintegratednestedLaplaceapproximations. Journal of the Royal
+Statistical Society Series B: Statistical Methodology, 71(2):319–392, 2009.
+JohnSalvatier, ThomasVWiecki, andChristopherFonnesbeck. Probabilisticprogramming
+in Python using PyMC3. PeerJ Computer Science, 2:e55, 2016.
+8BlackJAX
+Samuel S. Schoenholz and Ekin D. Cubuk. JAX M.D. a framework
+for differentiable physics. In Advances in Neural Information Pro-
+cessing Systems, volume 33. Curran Associates, Inc., 2020. URL
+https://papers.nips.cc/paper/2020/file/83d3d4b6c9579515e1679aca8cbc8033-Paper.pdf.
+Joshua S Speagle. DYNESTY: a dynamic nested sampling package for estimating Bayesian
+posteriors and evidences. Monthly Notices of the Royal Astronomical Society, 493(3):
+3132–3158, 2020.
+Brian Staber and S´ebastien Da Veiga. Benchmarking Bayesian neural networks and evalu-
+ation metrics for regression tasks. arXiv preprint arXiv:2206.06779, 2022.
+SaifuddinSyed,AlexandreBouchard-Cˆot´e, GeorgeDeligiannidis, andArnaudDoucet. Non-
+reversible parallel tempering: a scalable highly parallel MCMC scheme. Journal of the
+Royal Statistical Society Series B: Statistical Methodology, 84(2):321–350, 2022.
+Dustin Tran, Michael W. Dusenberry, Danijar Hafner, and Mark van der Wilk. Bayesian
+Layers: A module for neural network uncertainty. In Neural Information Processing
+Systems, 2019.
+William J Wilkinson, Simo Sa¨rkka¨, and Arno Solin. Bayes–Newton methods for approxi-
+mate Bayesian inference with PSD guarantees. Journal of Machine Learning Research,
+24(83):1–50, 2023.
+9
