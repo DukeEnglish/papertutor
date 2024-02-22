@@ -1,0 +1,1147 @@
+Smaug: Fixing Failure Modes of Preference Optimisation with
+DPO-Positive
+ArkaPal*,DeepKarkhanis,SamuelDooley,ManleyRoberts,SiddarthaNaidu,ColinWhite
+Abacus.AI
+Abstract
+DirectPreferenceOptimisation(DPO)iseffectiveatsignificantlyimprovingtheperformanceoflarge
+languagemodels(LLMs)ondownstreamtaskssuchasreasoning,summarisation,andalignment. Using
+pairsofpreferredanddispreferreddata,DPOmodelstherelativeprobabilityofpickingoneresponse
+overanother. Inthiswork,firstweshowtheoreticallythatthestandardDPOlosscanleadtoareduction
+of the model’s likelihood of the preferred examples, as long as the relative probability between the
+preferredanddispreferredclassesincreases. Wethenshowempiricallythatthisphenomenonoccurs
+whenfine-tuningLLMsoncommondatasets,especiallydatasetsinwhichtheeditdistancebetweenpairs
+ofcompletionsislow. Usingtheseinsights,wedesignDPO-Positive(DPOP),anewlossfunctionand
+trainingprocedurewhichavoidsthisfailuremode. Surprisingly,wealsofindthatDPOPsignificantly
+outperformsDPOacrossawidevarietyofdatasetsanddownstreamtasks,includingdatasetswithhigh
+editdistancesbetweencompletions. Byfine-tuningwithDPOP,wecreateandreleaseSmaug-34Band
+Smaug-72B,whichachievestate-of-the-artopen-sourceperformance. Notably,Smaug-72Bisnearly2%
+betterthananyotheropen-sourcemodelontheHuggingFaceOpenLLMLeaderboardandbecomesthe
+firstopen-sourceLLMtosurpassanaverageaccuracyof80%.
+1 Introduction
+Aligninglargelanguagemodels(LLMs)withhumanpreferencesisimportantfortheirfluencyandapplicabil-
+itytomanytasks,withthenaturallanguageprocessingliteratureusingmanytechniquestoincorporatehuman
+feedback[Christianoetal.,2017,Stiennonetal.,2020,Ouyangetal.,2022]. TypicallyinLLMalignment,
+wefirstcollectlargeamountsofpreferencedata,consistingofacontextandtwopotentialcompletions;one
+oftheseislabelledasthepreferredcompletion,andtheotherasthedispreferred. Weusethisdatatolearna
+generalpolicyforgeneratingcompletionsinagivencontext. DirectPreferenceOptimisation(DPO)[Rafailov
+etal.,2023]isapopularmethodforlearningfromhumanpreferences,andithasshowntobeeffectiveat
+improving the performance of pretrained LLMs on downstream tasks such as reasoning, summarisation,
+andalignment[Wangetal.,2023,Tunstalletal.,2023]. ThetheoreticalmotivationforDPOisbasedona
+preference-rankingmodelwithanimplicitrewardfunctionthatmodelstherelativeprobabilityofpickingthe
+preferredcompletionoverthedispreferred.
+In this work, first we show theoretically that the standard DPO loss can lead to a reduction of the
+model’slikelihoodofthepreferredcompletions(aslongastherelativeprobabilitybetweenthepreferred
+*Correspondenceto:arka@abacus.ai
+1
+4202
+beF
+02
+]LC.sc[
+1v82231.2042:viXraPaired Preference Data
+≺
+What is (3 + 5) / 2? …3+5=7… …3+5=8…
+DPO (Rafailov et al. 2023) DPOP (ours)
+incentivise: log-prob on preferred > incentivise: (i) log-prob on preferred > log-prob on dispreferred
+log-prob on dispreferred and (ii) log-prob on preferred ≥ ref log-prob on preferred
+Preferred Sequence First 3 + 5 = 8 then 8 / 2 = 4
+Dispreferred Sequence First 3 + 5 = 7 then 8 / 2 = 4
+Effect of DPO on log-prob ratio ∅ ∅ ∅ ∅ ∅
+Effect of DPOP on log-prob ratio
+Figure1: DPOPavoidsafailuremodeofDPO.Whenpreferencepairsdifferononlyafewtokens,DPO
+receives no loss incentive at all for the early tokens, and a loss incentive that in some cases can lead to
+degradationofthelog-probsoflatertokens(Section3). WeintroduceDPOP,whichaddsanewtermtothe
+losswhichleadseverytokentobeincentivisedtowardthepreferredcompletion(Section4).
+anddispreferredclassesincreases),andweempiricallyshowthatthisphenomenonoccurswhenfine-tuning
+currentLLMsoncommondatasets. Ourtheoreticalexplanationforthephenomenonsuggeststhattheproblem
+occursmostfrequentlyinpreferencedatasetswithsmalleditdistancesbetweeneachpairofcompletions,
+suchasinmath-basedpreferencedatasets.
+Usingtheseinsights,wedesignanewlossfunction: DPO-Positive(DPOP),whichaddsanewtermto
+the loss function that penalises reducing the probability of the positive completions. We also create new
+preferencedatasetsbasedonARC[Clarketal.,2018],HellaSwag[Zellersetal.,2019],andMetaMath[Yu
+etal.,2023]andusethemalongwithDPOPtocreatenewmodels.
+We introduce the Smaug class of models which use DPOP and achieve state-of-the-art open-source
+performance. Wefine-tune72B,34B,and7BmodelsonournewdatasetsandshowthatDPOPfaroutperforms
+DPO. We evaluate our resulting models on multiple benchmarks including the HuggingFace Open LLM
+Leaderboard [Beeching et al., 2023, Gao et al., 2021], which aggregates six popular benchmarks such as
+MMLU[Hendrycksetal.,2021]andGSM8K[Cobbeetal.,2021],andMT-Bench[Zhengetal.,2023],a
+challengingbenchmarkthatusesastrongLLMtoscorecandidatemodelresponsesacrosseightdifferent
+categoriesofperformance. OntheHuggingFaceOpenLLMLeaderboard,Smaug-72Bachievesanaverage
+accuracy of 80.48%, becoming the first open-source LLM to surpass an average accuracy of 80% and
+improving by nearly 2% over the second-best open-source model, and our Smaug-34B model is the best
+in its class of models of similar parameter count. We release our code and pretrained models at https:
+//github.com/abacusai/smaug.
+Ourcontributions.
+• WetheoreticallyandempiricallyshowasurprisingfailuremodeofDPO:runningDPOonpreference
+datasetswithsmalleditdistancesbetweencompletionscanresultinacatastrophicdecreaseinaccuracy.
+• WeintroduceDPO-Positive(DPOP)whichwetheoreticallyandempiricallyshowamelioratestheperfor-
+mancedegradation. Inparticular,DPOPoftenoutperformsDPO,evenonpreferencedatasetswithhigh
+editdistancesbetweencompletions.
+2• Wecreatenewpreference-basedversionsofARC,HellaSwag,andMetaMath.
+• UsingDPOPandournewdatasets,wecreateandreleasetheSmaugclassofmodels,withSmaug-72B
+becomingthefirstopen-sourcemodeltoachieveanaverageaccuracyof80%ontheHuggingFaceOpen
+LLMLeaderboard. Weopen-sourceourtrainedmodels,datasets,andcode.
+2 Background and Related Work
+Largelanguagemodels(LLMs)haveshownimpressivezero-shotandfew-shotperformance[Radfordetal.,
+2019,Brownetal.,2020,Bubecketal.,2023]. Recently,researchershavefine-tunedpretrainedLLMson
+downstreamtasksbyusinghuman-writtencompletions[Chungetal.,2022,Mishraetal.,2021]orbyusing
+datasetslabelledwithhuman-preferredcompletionsrelativetoothercompletions[Ouyangetal.,2022,Bai
+etal.,2022,Ziegleretal.,2020]. Thesetechniqueshavebeenusedtoimproveperformanceonavarietyof
+downstreamtaskssuchastranslation[Kreutzeretal.,2018]andsummarisation[Stiennonetal.,2020],as
+wellastocreategeneral-purposemodelssuchasZephyr[Tunstalletal.,2023]. Twoofthemostpopular
+techniquesforlearningfromhumanpreferencedataarereinforcementlearningfromhumanfeedback(RLHF)
+[Ouyangetal.,2022,Baietal.,2022,Ziegleretal.,2020]anddirectpreferenceoptimisation(DPO)[Rafailov
+etal.,2023]. Wesummarisetheseapproachesbelow.
+RLHF Consider a dataset of pairwise-preference ranked data D = {x(i),y(i) ,y(i) }N where x(i) are
+w l i=1
+(i) (i)
+prompts and y and y are respectively the preferred and dispreferred completions conditioned on that
+w l
+prompt. WehaveaninitialLLMπ thatparameterisesadistributionπ (y|x). Often,weinitialiseπ asan
+ref ref ref
+LLMthathasundergonesupervisedfine-tuning(SFT)toimproveperformanceondownstreamtask(s).
+RLHFbeginsbymodellingtheprobabilityofpreferringy toy usingtheBradley-Terrymodel[Bradley
+w l
+andTerry,1952]whichpositsthefollowingprobabilisticform:
+p(y ≻ y |x) = σ(r(x,y )−r(x,y ))
+w l w l
+whereσ isthelogisticfunctionandr(x,y)correspondstosomelatentrewardfunctionthatisassumedto
+exist for the completion y given the prompt x. Given D, we can learn a parameterised estimate of r by
+minimisingthenegativelog-likelihoodofthedataset:
+L (r ,D) = −E [log(σ(r (x,y )−r (x,y ))].
+R ϕ (x,yw,y l)∼D ϕ w ϕ l
+For RLHF, we use reinforcement learning to optimise based on this learned reward function r (with a
+ϕ
+regularisingKL-constrainttopreventmodelcollapse),andobtainanewLLMdistributionπ .
+θ
+DPO Rafailovetal.[2023]showedthatitispossibletooptimisethesameKL-constrainedrewardfunction
+asinRLHFwithouthavingtolearnanexplicitrewardfunction. Instead,theproblemiscastasamaximum
+likelihoodoptimisationofthedistributionπ directly,withtheobjective:
+θ
+(cid:20) (cid:18) (cid:19)(cid:21)
+π (y |x) π (y |x)
+L (π ;π ) = −E logσ βlog θ w −βlog θ l (1)
+DPO θ ref (x,yw,y l)∼D π (y |x) π (y |x)
+ref w ref l
+whereβ isaregularisationtermcorrespondingtothestrengthofKL-regularisationinRLHF.Inthiscase,the
+π (y|x)
+implicitrewardparameterisationisr(x,y) = βlog θ ,andRafailovetal.[2023]furthershowedthat
+π (y|x)
+ref
+3allrewardclassesunderthePlackett-Lucemodel[Plackett,1975,Luce,2005](suchasBradley-Terry)are
+π (y|x)
+representableunderthisparameterisation. Foranabbreviation,wedefineπ (y|x) = θ .
+ratio π (y|x)
+ref
+SincethereleaseofDPO,variousalternativeshavebeenproposed. Wediscussthemostrelevanttoour
+workbelowandinAppendixA.
+IPO Azaretal.[2023]aimtounderstandthetheoreticalunderpinningsofRLHFandDPO.Theyidentify
+thatDPOmaybepronetooverfittinginsituationswherethepreferenceprobabilityofthepreferredoverthe
+dispreferredexamplesiscloseto1. Theyproposeanalternativeformofpairwisepreferenceloss—‘Identity-
+PO(IPO)’.IPOtriestopreventoverfittingtothepreferencedatasetbypenalisingexceedingthepreference
+marginbeyondthisregularisedvalue. Conversely,weidentifythatDPOcanleadtounderfittingaswell—even
+completeperformancedegradation.
+3 Failure Mode of DPO
+Inthissection,wetakeastepbackandexaminetheDPOlossinEquation(1),specificallywithaneyetowards
+howitcanreducetheprobabilityofthepreferredcompletion. Thelossisafunctiononlyofthedifference
+in the log-ratios, which means that we can achieve a low loss value even if π (y |x) is lowered below
+ratio w
+1, as long as π (y |x) is also lowered sufficiently. This implies that the log-likelihood of the preferred
+ratio l
+completionsisreducedbelowtheoriginallog-likelihoodfromthereferencemodel!
+Whyisthisanissue? Theoriginaluse-caseofRLHFdidnotexplicitlydenotethepreferredcompletions
+asbeingalsoidealcompletions(ratherthanjustthepreferredcompletionoutofthetwochoicesy andy ),
+w l
+andhencetheDPOobjectiveisagoodmodellingchoice. However, sincethen, alargebodyofworkhas
+focusedondistillingtheknowledgeofpowerfulmodelsintosmallerorweakermodels,whilealsoshowing
+thatdoingsowithRLHF/DPOoutperformsSFT[Taorietal.,2023,Tunstalletal.,2023,Xuetal.,2023,
+Chiangetal.,2023]. Inthisparadigm,itisoftenthecasethatineachpairofcompletions,thebetterofthetwo
+isindeedalsoanidealcompletion. Furthermore,anewtechniqueistotransformastandardlabelleddataset
+intoapairwisepreferencedataset[Ivisonetal.,2023,Tunstalletal.,2023],whichalsohasthepropertythat
+foreachpairofcompletions,oneisanidealcompletion.
+Edit Distance 1 While the above illustrates a hypothetical situation, now we provide a specific case in
+whichDPOmaycauseadecreaseintheprobabilityofthebettercompletion. Considerthecaseoftrying
+toimproveamodel’smathorreasoningabilitiesbycomparingacompletionof“2+2=4”to“2+2=5.” This
+process creates a pair of preferred and dispreferred completions which have an edit (Hamming) distance
+of1, i.e., alltokensinthecompletionarethesameexceptforone. Inthefollowing, wewillexplorehow
+thelocationofthedifferingtokenimpactsthecomputationoftheDPOloss. Forsakeofargument,wewill
+examine what happens when the differing token is the first token, though the argument also follows if it
+appearselsewhere.
+For preliminaries, consider two completions with an edit distance of 1 which differ at token m with
+1 ≤ m ≤ K, i.e., consider y = (t ,...,t ) and y = (t ,...,t ,t′ ,t ,...,t ). Denote y<r =
+w 1 K l 1 m−1 m m+1 K
+(t ,...,t ) and y≥r = (t ,...,t ). Assume that the vocabulary length of the LLM is L. Let s{x}
+1 r−1 r K i
+representtheprobabilityofthei-thtokeninthemodel’svocabularygiventheinputx. WhiletheLLMmodel
+parametersθ arenumerous,werestrictourattentiontothelogits,θ withj ∈ [L].
+j
+ThegradientofEquation(1)withrespecttoθ isproportionaltothefollowing:
+∇ L (π ;π ) ∝ −[∇ logπ (y |x)−∇ logπ (y |x)].
+θ DPO θ ref θ θ w θ θ l
+4Wenotefirstthatform > 1,alltokensfrom1tom−1havenoeffectonthegradient,simplybecausefor
+all1 ≤ i < m,π (t |y<k,x) = π (t |y<k,x),causingthesetokens’contributiontothegradienttocancel
+θ i w θ i l
+out. Therefore,withoutlossofgenerality,assumem = 1,i.e.,y andy differonlyatthefirsttoken. Without
+w l
+lossofgenerality,wealsoassumethatt takesvocabularyposition1. Thenwehavethefollowingforeach
+k
+k > 1(derivationinAppendixB.1):
+∇ logπ (t |y<k,x)−∇ logπ (t |y<k,x) = s{y l<k,x} −s{y w<k,x} . (2)
+θj θ k w θj θ k l j j
+AswetypicallyrunDPOafterSFT,themodelislikelytobereasonablywelloptimised,soweshould
+{y<k,x} {y<k,x} {y<k,x} {y<k,x}
+haves w ≤ s l forj ̸= 1ands w ≥ s l . Therefore,whilethisanalysisonlyextendsto
+j j 1 1
+gradientswithrespecttothelogits,weseethatthegradientvectorisdecreasinginthecorrectlogitdimension
+and increasing in the wrong logit dimensions. Surprisingly, this suggests that under DPO, all tokens that
+followamismatchedtokenshouldhavereducedprobabilityofemittingthecorrecttokenwhencomparedto
+π . WewilllatergiveempiricalevidenceforthisinSection5andFigure3.
+ref
+4 DPOP
+Now,weintroduceDPO-Positive(DPOP),whichisasolutiontofixthefailuremodedescribedintheprevious
+section. WhilethereisnoincentiveforDPOtomaintainthehighlog-likelihoodofthepreferredcompletions,
+(cid:16) (cid:17)
+DPOPaddsthepenaltytermmax 0,
+logπ ref(yw|x)
+totheloss. Itis0whenπ (y |x) ≥ 1andincreasesas
+logπ θ(yw|x) ratio w
+theratiogoesbelow1. Thus,theDPOPlossfunctionis:
+(cid:20) (cid:18) (cid:19)
+π (y |x) π (y |x)
+L (π ;π ) = −E logσ βlog θ w −βlog θ l (3)
+DPOP θ ref (x,yw,y l)∼D π (y |x) π (y |x)
+ref w ref l
+(cid:18) (cid:19)(cid:21)
+π (y |x)
+ref w
+−λmax 0,log
+π (y |x)
+θ w
+whereλ > 0isahyperparameterthatcanbetuned. Thisformoflossretainsthepropertythatwearefitting
+parametersonthepreferencedataundertheBradley-Terrymodel. Theimplicitrewardparameterisationis
+(cid:20) (cid:18) (cid:19)(cid:21)
+π (y|x) π (y |x) π (y|x)
+θ θ w ref
+β · fory = y , β log −λmax 0,log fory = y .
+l w
+π (y|x) π (y|x) π (y|x)
+ref ref θ
+Byapplyingthisoptimisationpressure,themodelcannolongerminimisethelossbysignificantlyreducing
+the log-likelihood of the dispreferred examples more than it reduces the log-likelihood of the preferred
+examples;itmustalsoensurethatthelog-likelihoodofthepreferredexamplesremainshighrelativetothe
+log-likelihoodunderthereferencemodel.
+Now, we show that Equation (3) mitigates our examples of failure modes from the previous section.
+RecallfromSection3thatwefocusedontwocompletions,y andy ,whichdifferbyonetokenatlocation
+w l
+m = 1. WeshowedinEquation(2)thatforstandardDPO,thegradientofthek-thtokeninthecompletions
+{y<k,x} {y<k,x}
+withrespecttothej-thlogitiss l −s w . However,forDPOP,ifπ < 1,thegradientsbecome
+j j ratio
+(cid:20) (cid:21)
+∇ logπ (t |y<k,x)−logπ (t |y<k,x)−λ·logπ (t |y<k,x)])
+θj θ k w θ k l θ k w
+ (cid:16) {y<k,x}(cid:17) {y<k,x} {y<k,x}
+λ 1−s w +s l −s w i = j
+j j j
+=
+−(λ+1)s{y w<k,x} +s{y l<k,x}
+i ̸= j
+j j
+5{y<k}
+whereiisthevocabularyindexoftokent . Sinces w ≤ 1,forthecasei = j,thegradientisguaranteed
+k j
+tobepositiveforalargeenoughchoiceofλ. Similarly,forthecasei ̸= j,thegradientisguaranteedtobe
+{y<k}
+negativeforalargeenoughλ(aslongass w > 0). ThisthereforefixestheissuefromSection3. The
+j
+derivationoftheaboveisgiveninAppendixB.1.
+Connection to Contrastive Loss While the main motivation for DPOP is to avoid the failure mode
+described in Section 3, we also note its connection to contrastive loss. Contrastive learning is a popular
+technique in areas such as computer vision for datasets of similar and dissimilar pairs [Oord et al., 2018,
+Chen et al., 2020, He et al., 2020], and the loss function often uses a margin factor. Equation (3) can be
+viewedassimilartocontrastivelosswithmarginm = log 1 . WegivefurtherdetailsinAppendixC.
+π ref(yw|x)
+5 DPOP Datasets & Experiments
+Inthissection, weempiricallyvalidatethatthefailuremodedoesariseinpracticeandthatDPOPisable
+to mitigate the failure. We also show that even when the edit distance is large and DPO does not show
+degradationinperformance,DPOPcanstilloutperformondownstreamtaskevaluation.
+5.1 DatasetCreation
+Forourempiricalanalysis,wefocusonthedownstreamtasksofGSM8K,ARC,andHellaSwag,andwe
+introduceandreleaseassociatedpairedpreference-rankeddatasets.
+GSM8K[Cobbeetal.,2021],adatasetofdiversegradeschoolmathwordproblems,hasbeenadopted
+asameasureofthemathandreasoningskillsofLLMs[Chowdheryetal.,2023,Touvronetal.,2023b,a,
+Beeching et al., 2023, Gao et al., 2021]. We create a paired preference-ranked version of MetaMath [Yu
+etal.,2023],anextendedversionoftheGSM8Ktrainingdata[Anetal.,2023,Yuetal.,2023]. Thecorrect
+completionsintheMetaMathdatasetconsistofaseriesofstepswhichleadtothefinalanswer. Tocreatea
+dispreferredversion,werandomlycorruptoneoftheresultsofanintermediatecalculation. Thisdatasethasa
+low(normalised)editdistanceof6.5%.
+ARC [Clark et al., 2018] is a dataset that tests the level of understanding of science at grade-school
+level. WefocusspecificallyonARC-Challenge,themoredifficultofthetwosubsectionsofARC,which
+hasbeenwidelyadoptedasameasureofLLMreasoningandworldunderstanding[Chowdheryetal.,2023,
+Touvronetal.,2023b,a,Beechingetal.,2023,Cobbeetal.,2021]. TheARC-Challengedatasetconsistsof
+fourchoicesofresponsestoeachquestion, oneofwhichiscorrect. Tocreateapairedpreference-ranked
+dataset,foreachcorrectresponseinthetrainingsplit,wecreatethreepairsusingeachincorrectresponse.
+Duetothedifferencesintheresponses,thisdatasethasahighnormalisededitdistanceof90%.
+HellaSwag[Zellersetal.,2019]isadatasetcontainingcommonsenseinferencequestionsknowntobe
+hardforLLMs. SimilartoARC,eachquestionhasonecorrectcompletionandthreeincorrectcompletions,
+andsowecreateapairedpreference-rankeddatasetbycreatingthreepairsforeachcorrectresponseinthe
+trainingsplit. SeeAppendixDforfurtherdetailsanddocumentationaboutournewlyreleaseddatasets.
+5.2 Experiments
+Inthissection,wecomparetrainingDPO,IPO,andDPOPonthedatasetsmentionedaboveandevaluate
+themonthecorrespondingtasks. Weapplyeachpreference-trainingmethodtothebasemodelofMistral7B
+6Comparison on GSM8K
+Comparison on ARC
+Trained on MetaMath
+Trained on ARC
+40
+75.0
+72.5
+30
+70.0
+DPOP
+20 67.5 DPO
+IPO
+65.0
+10 DPOP
+DPO 62.5
+IPO
+0 60.0
+0 200 400 600 800 1000 0 200 400 600 800 1000
+Training Steps Training Steps
+Figure2: DPOPvs.DPOvs.IPO.DPOPoutperformstheothertwomethodsonbothMetaMath(left)whose
+normalizededitdistanceis6.5%,andalsoARC(right),whosenormalizededitdistanceis90%. Evaluationis
+performedonthetestsetofthedatasetsusingtheLLMEvaluationHarness.
+[Jiangetal.,2023]. WeevaluateonthetestsetsofGSM8KandARCbyusingtheLLMEvaluationHarness
+[Gaoetal.,2021].
+Lossfunctioncomparison First,wecompareDPO,IPO,andDPOPwhentrainingonbothMetaMathand
+ARC;seeFigure2. WefindthatwhentrainingonMetaMath,DPOcatastrophicallyfails,whileIPOdoesnot
+improveperformance. DPOPistheonlymodeltoimproveperformanceoverthebasemodel. Whentraining
+onARC,whichhasahighereditdistanceasdescribedintheprevioussection,bothDPOandDPOPareable
+toimproveonthebasemodelsignificantly;however,DPOPperformsbetter.
+Ablation study over β One potential hypothesis for how degradation of DPO on MetaMath could be
+preventedisbymodifyingthestrengthoftheregularisationparameter,β. Wetestβ ∈ {0.1,0.3,1.0},and
+althoughalargerβ doesinduceaslowerdecrease,theperformancewithDPOstillplummets,whileDPOP
+showsstrongandconsistentperformancewithdifferentvaluesofβ (seeAppendixFigure4).
+Token-levelanalysis RecallthatinSection3,wegavetheoreticalmotivationsforwhyDPOislikelyto
+performpoorlyonlow-editdistancedatasets. Wenowanalysethelog-probabilitiesofthetrainedmodelsat
+thetokenlevelontheMetaMathdatasetover1000samplestoempiricallysupportourarguments. Letus
+denotetheindexofthefirsttokenthatisdifferentbetweenthepreferredanddispreferredcompletionbym.
+Wesuggestedthatπ (y≥r | x,y<r)forr > mwillhave‘wrong-way’gradientupdatesandtherefore
+θ
+decrease. Wefindthisisindeedthecase—theaveragelog-probaftertrainingoftokensaftermis−0.37for
+thereferencemodeland−0.26forDPOP,but−1.82forDPOonthepreferredcompletions(see(Figure3)
+(left)). Perhapsmostinstructively,forboththereferencemodelandDPOP,inFigure3(right),weseethat
+tokensaftertheeditindicesshowhigherlog-likelihoodthanthosebeforetheeditindices—thisisindicative
+of well-behaved language modelling, with lower perplexity as more tokens are added to the context. By
+contrast,DPOshowstheoppositepattern—withlog-likelihoodactuallyreducingaftertheeditindices. This
+isindicativeofadeeperbreakdowninlanguagemodelling,whichwebelieveisfacilitatedbythewrong-way
+gradientweoutlinedinSection3. Finally,wearealsoabletosubstantiateourassumptionfromSection3
+7
+ycaruccA
+ycaruccALog-prob of Preferred Completions Log-prob of Preferred Completions
+on MetaMath on MetaMath by Location around Differing Tokens
+0.00
+−0.5 M DPod Oe Pl −0.25 M DPod Oe Pl
+DPO 0.50 DPO 1.0 Location − Reference
+− Before differing tokens 0.75 Location
+Differing tokens − Before differing tokens
+1.5 After differing tokens 1.00 After differing tokens
+− −
+1.25
+−
+0 200 400 600 800 1000 20 10 0 10 20
+− −
+Training Steps Location with respect to differing tokens
+Figure3: DPOfailstotrainonlowedit-distancepairs,yetDPOPperformswell. Left: averagelog-probs
+for912randomly-sampledpreferredtrainsetcompletionsonMetaMathacrosstrainingsteps. ForDPO,the
+log-probsdecreaseastrainingprogresses. Right: averagelog-probdifferenceforpreferredcompletionson
+MetaMathbylocationarounddifferingtokens,after1000trainingsteps. Log-prob‘difference’signifiesthat
+eachmodel’splothasbeenadjustedtohave0log-probatlocation-1;allotherlog-probsareshownrelative
+tothisvaluetoemphasiserelativetrendsatdifferentpointsinthesequence. ForDPO,thereisasignificant
+decreaseafterthedifferingtokens,whileDPOPavoidsthisissue.
+Table 1: Evaluation of the top open-weight models on the HuggingFace Open LLM Leaderboard as of
+February1st,2024. SeeTable3foranextendedcomparison.
+Model Size Avg. ARC HellaSwag MMLU TruthfulQA Winogrande GSM8K
+Smaug-72B(Ours) 72B+ 80.48 76.02 89.27 77.15 76.67 85.08 78.70
+MoMo-72B-lora-1.8.7-DPO 72B+ 78.55 70.82 85.96 77.13 74.71 84.06 78.62
+TomGrc_FusionNet_34Bx2_MoE_v0.1_DPO_f16 72B+ 77.91 74.06 86.74 76.65 72.24 83.35 74.45
+TomGrc_FusionNet_34Bx2_MoE_v0.1_full_linear_DPO 72B+ 77.52 74.06 86.67 76.69 71.32 83.43 72.93
+Truthful_DPO_TomGrc_FusionNet_7Bx2_MoE_13B 72B+ 77.44 74.91 89.30 64.67 78.02 88.24 69.52
+thats ≥ s′;wefindfromouranalysisthatforthebaselinemodel,thetokensaftertheedithaveanaverage
+1 1
+log-likelihoodof−0.37onthepreferredcompletion,butthisdropsto−0.86onthedispreferredcompletion.
+InAppendixE,wepresentadditionalresultsonARCcomparingtheaveragedlog-probsofDPOand
+DPOP on the preferred completion during training; see Figure 6. DPOP once again demonstrates higher
+log-probsthanDPO.
+6 Smaug
+Inthissection,weintroducetheSmaugseriesofmodels. Wetrainmodelsfor7B,34Band72Bparameter
+sizesusingDPOP.Weusethe7BclassforadirectcomparisonofDPOPvs.DPO,includingonexistingand
+widely-usedpairedpreferenced-rankeddatasets. Duetothecomputationalresourcerequirementsinvolvedin
+trainingthelargermodelsizes,weonlyperformDPOPon34Band72Bandcomparetoothermodelsonthe
+HuggingFaceOpenLLMLeaderboard. Forthesamereason,wealsodonotperformanyhyperparameter
+tuning;itispossiblethatevenbetterperformancecanbeachieved,e.g.,withadifferentvalueofλ.
+8
+borp-gol
+egareva
+ecneuqes-rep
+fo
+naeM
+ecnereffid
+borp-gol
+naeM6.1 Smaug-34BandSmaug-72B
+Smaug-34BisamodifiedversionofthebasemodelBagel-34B-v0.2[Durbin,2024a],whichitselfisaSFT
+version of Yi-34B-200k [01.AI, 2024]. We first take Bagel-34B-v0.2 and perform a SFT fine-tune using
+a combination of three datasets: MetaMath [Yu et al., 2023], ORCA-Chat [Es, 2024], and the ShareGPT
+dataset[Z.,2024]. Next,weperformDPOPwithfivedatasets: ourpairwiseMetaMathDPO,ARCDPO,and
+HellaSwagDPOdatasetsdescribedinSection5,theORCADPOdataset[Intel,2024],andtheUltraFeedback
+Binarizeddataset[AllenAI,2024]. Finally,weperformastandardDPOwiththeTruthyDPOdataset[Durbin,
+2024b]. Weruntheseexperimentswith8H100GPUs. Wesetβ = 0.3,λ = 50,alearningrateof5×10−5,
+andtheAdamWoptimizer[LoshchilovandHutter,2017],andwerun1000stepsforallDPOProutines. The
+totaltrainingtimeforallstepstook108hours.
+For72B,westartfromMoMo-72b-lora-1.8.7-DPO[Moreh,2024],whichitselfisafine-tuneofQwen-
+72B[Baietal.,2023]. MoMo-72b-lora-1.8.7-DPOhasalreadyundergoneSFT,sowesimplyrunthefive
+DPOProutinesasinSmaug-34B.Thetotaltrainingtimeis144hours.
+HuggingFaceOpenLLMLeaderboard WeevaluateusingtheHuggingFaceOpenLLMLeaderboard
+[Beechingetal.,2023,Gaoetal.,2021],awidely-usedbenchmarksuitethataggregatessixpopularbench-
+marks: ARC[Clarketal.,2018],GSM8K[Cobbeetal.,2021],HellaSwag[Zellersetal.,2019],MMLU
+[Hendrycksetal.,2021],TruthfulQA[Linetal.,2022],andWinoGrande[Sakaguchietal.,2020]. Weevalu-
+atedirectlyinHuggingFace,whichusestheLLMEvaluationHarness[Gaoetal.,2021]. Itperformsfew-shot
+prompting on the test sets of these tasks and checks if the model emits the correct answer. We compare
+Smaug-72Btotheevaluationscoresofthetopfiveopen-weightLLMsaccordingtotheHuggingFaceOpen
+LLMLeaderboard[Beechingetal.,2023,Gaoetal.,2021]asofFebruary1,2024;seeTable1. Smaug-72B
+achievesanaverageaccuracyof80.48%,becomingthefirstopen-sourceLLMtosurpassanaverageaccuracy
+of80%andimprovingbynearly2%overthesecond-bestopen-sourcemodel. Smaug-34Balsoachieves
+best-in-its-classperformancecomparedtoothermodelsofsimilarorsmallersize(seeAppendixE).
+MT-Bench Next,weevaluateusingMT-Bench[Zhengetal.,2023],achallengingbenchmarkthatuses
+GPT-4[OpenAI,2023]toscorecandidatemodelresponsesacrosseightdifferentcategoriesofperformance.
+Asshowninotherworks[Zhengetal.,2023,Rafailovetal.,2023],strongLLMssuchasGPT-4showgood
+agreementwithhumanpreferences. WerunMT-BenchwiththeLlama-2conversationtemplate[Touvron
+etal.,2023b]. SeeTable2foracomparisonwithstate-of-the-artLLMsaccordingtoArenaEloasofFebruary
+1,2024. Smaug-72BachievesthetopMMLUscoreandthird-bestMT-benchscoreoutoftheopen-source
+modelsinTable2. InAppendixE,wegiveexamplesofSmaug-72BcompletionstoMT-Benchquestions.
+6.2 Comparisonusing7BModel
+Wefine-tuneSmaug-7BfromabaseofLlama2-chat[Touvronetal.,2023b]. SinceLlama2-chathasalready
+undergoneinstructionfine-tuning,weperformDPOandDPOPdirectlyusingthesamedatasetsdescribedin
+theprevioussection. Wetrainfor2000stepson1xGH200.
+MT-Bench WeevaluateSmaug-7BonMT-Benchinthesamesettingasdescribedintheprevioussection.
+WefindthatDPOPachievesafirst-turnscoreof7.275whereasDPOachievesascoreof7.076.
+9Table2: EvaluationofthetopmodelsaccordingtoElo,MT-Bench,andMMLU.
+Model ArenaElo MT-bench MMLU Organization License
+GPT-4-1290-preview 1253 OpenAI Proprietary
+GPT-4-1106-preview 1252 9.32 OpenAI Proprietary
+Bard(GeminiPro) 1224 Google Proprietary
+GPT-4-0314 1190 8.96 86.4 OpenAI Proprietary
+GPT-4-0613 1162 9.18 OpenAI Proprietary
+MistralMedium 1150 8.61 75.3 Mistral Proprietary
+Claude-1 1149 7.9 77 Anthropic Proprietary
+Claude-2.0 1132 8.06 78.5 Anthropic Proprietary
+GeminiPro(DevAPI) 1120 71.8 Google Proprietary
+Claude-2.1 1119 8.18 Anthropic Proprietary
+GPT-3.5-Turbo-0613 1118 8.39 OpenAI Proprietary
+Mixtral-8x7b-Instruct-v0.1 1118 8.3 70.6 Mistral Apache2.0
+Yi-34B-Chat 1115 73.5 01AI YiLicense
+GeminiPro 1114 71.8 Google Proprietary
+Claude-Instant-1 1109 7.85 73.4 Anthropic Proprietary
+GPT-3.5-Turbo-0314 1105 7.94 70 OpenAI Proprietary
+WizardLM-70B-v1.0 1105 7.71 63.7 Microsoft Llama2Community
+Tulu-2-DPO-70B 1104 7.89 AllenAI/UW AI2ImpACTLow-risk
+Vicuna-33B 1093 7.12 59.2 LMSYS Non-commercial
+Starling-LM-7B-alpha 1090 8.09 63.9 UCBerkeley CC-BY-NC-4.0
+Smaug-72B 7.76 77.15 Abacus.AI tongyi-qianwen-license-agreement
+7 Conclusion, Limitations, and Impact
+Inthiswork,wepresentednewtheoreticalandempiricalfindingsonaseverefailuremodeofDPO,inwhich
+fine-tuningcausestheprobabilityofthepreferredexamplestobereduced. Inordertomitigatethisissue,we
+devisedanewtechnique,DPOP,whichweshowovercomesthefailuremodeofDPO—andcanoutperform
+DPOevenoutsidethisfailuremode. ByfinetuningwithDPOPonournewpairwisepreferenceversions
+ofARC,HellaSwag,andMetaMath,wecreateanewLLMthatachievesstate-of-the-artperformance. In
+particular,itisthefirstopen-weightsmodeltosurpassanaverageaccuracyof80%ontheHuggingFaceOpen
+LLMLeaderboard,anditisnearly2%betterthananyprioropen-weightLLM.
+Inthefuture,creatingpairwisepreference-basedversionsofotherdatasets,andrunningDPOPwiththese
+datasets,couldpushtheabilitiesofopen-sourceLLMsevenclosertotheperformanceofproprietarymodels
+suchasGPT-4[OpenAI,2023]. Furthermore,usingDPOPonadditionalmathematicaldatasetsisanexciting
+areaforfuturework,asithasthepotentialtofurtheradvanceLLMs’abilitesinmathematialreasoning.
+Limitations While our work gives theoretical and empirical evidence on a failure mode of DPO and a
+proposedsolution,itstillhaslimitations. First,wewereunabletorunafullablationstudyonour72Bmodel.
+Runningmultiplefine-tuningexperimentsona72Bmodelisinfeasible,aseachonecantakeoverfivedays
+tocomplete. Therefore,weassumethatourablationsonsmallermodelsstillholdupatscale. Furthermore,
+whileweexpectDPOPtoachievestrongperformanceonanypreferencedataset,especiallythosewithsmall
+editdistance,wehaveonlydemonstrateditsperformanceonfiveEnglish-languagedatasets. Wehopethat
+futureworkcanverifyitseffectivenessonmoredatasets,inparticularonnon-Englishdatasets.
+10BroaderImpact Thispaperproposesatechniquetofine-tuneLLMsusingpreferencedata,releasesthree
+preferencedatasetsbasedonmathematicsandreasoning,andreleasesnewLLMsfine-tunedonthepreference
+data. Aswithanypaperthatreleasesafine-tuningtechniqueoranLLM,thereareinherentrisks. Anadversary
+couldusesuchatechniquetocreateamodelfine-tunedtoproduceharmful,toxic,orillegalcontent. However,
+weareoptimisticthatourworkwillhaveanetpositiveimpact. Inparticular,DPOPisespeciallybeneficial
+whenusedwithmathematicalorreasoningdatasets,inwhichonlyafewtokensdifferbetweenthepreferred
+andless-preferredcompletions. Furthermore,wegivetheoreticalintuitiononthefailurecasesofDPO,anda
+methodtoavoidthisfailurecase,thereforemovingtowardsamorecompleteunderstandingofpreference
+optimisation-basedtechniques. WithrecentextensiveeffortstowardsAIsafety[Huangetal.,2023,Yaoetal.,
+2023,Weidingeretal.,2021],wehopethatpreferenceoptimisation-basedtechniqueswillimpactsociety
+positively. Finally,wenotethatthemodelswereleasearelessperformantthanthecurrenttopproprietary
+modelssuchasGPT-4[OpenAI,2023],thereforelesseningthenegativeimpactofreleasingourmodels.
+References
+01.AI. Yi-34b-200k,2024. URLhttps://huggingface.co/01-ai/Yi-34B-200K.
+AllenAI. Ultrafeedback binarized clean, 2024. URL https://huggingface.co/datasets/allenai/
+ultrafeedback_binarized_cleaned.
+ShengnanAn,ZexiongMa,ZeqiLin,NanningZheng,Jian-GuangLou,andWeizhuChen. Learningfrom
+mistakesmakesllmbetterreasoner. arXivpreprintarXiv:2310.20689,2023.
+MohammadGheshlaghiAzar,MarkRowland,BilalPiot,DanielGuo,DanieleCalandriello,MichalValko,
+andRémiMunos. Ageneraltheoreticalparadigmtounderstandlearningfromhumanpreferences,2023.
+JinzeBai,ShuaiBai,YunfeiChu,ZeyuCui,KaiDang,XiaodongDeng,YangFan,WenbinGe,YuHan,Fei
+Huang,etal. Qwentechnicalreport. arXivpreprintarXiv:2309.16609,2023.
+Yuntao Bai, Andy Jones, Kamal Ndousse, Amanda Askell, Anna Chen, Nova DasSarma, Dawn Drain,
+StanislavFort,DeepGanguli,TomHenighan,NicholasJoseph,SauravKadavath,JacksonKernion,Tom
+Conerly,SheerEl-Showk,NelsonElhage,ZacHatfield-Dodds,DannyHernandez,TristanHume,Scott
+Johnston,ShaunaKravec,LianeLovitt,NeelNanda,CatherineOlsson,DarioAmodei,TomBrown,Jack
+Clark, Sam McCandlish, Chris Olah, Ben Mann, and Jared Kaplan. Training a helpful and harmless
+assistantwithreinforcementlearningfromhumanfeedback,2022.
+Edward Beeching, Clémentine Fourrier, Nathan Habib, Sheon Han, Nathan Lambert, Nazneen Rajani,
+OmarSanseviero,LewisTunstall,andThomasWolf. Openllmleaderboard. https://huggingface.co/
+spaces/HuggingFaceH4/open_llm_leaderboard,2023.
+R. A. Bradley and M. E. Terry. Rank analysis of incomplete block designs: I. the method of paired
+comparisons. Biometrika,39(3/4):324–345,1952. doi: 10.2307/2334029.
+TomBrown, BenjaminMann, NickRyder, MelanieSubbiah, JaredDKaplan, PrafullaDhariwal, Arvind
+Neelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsarefew-shotlearners.
+Advancesinneuralinformationprocessingsystems,33:1877–1901,2020.
+11SébastienBubeck,VarunChandrasekaran,RonenEldan,JohannesGehrke,EricHorvitz,EceKamar,Peter
+Lee, Yin Tat Lee, Yuanzhi Li, Scott Lundberg, et al. Sparks of artificial general intelligence: Early
+experimentswithgpt-4. arXivpreprintarXiv:2303.12712,2023.
+TingChen,SimonKornblith,MohammadNorouzi,andGeoffreyHinton. Asimpleframeworkforcontrastive
+learningofvisualrepresentations. InInternationalconferenceonmachinelearning,pages1597–1607.
+PMLR,2020.
+Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng, Zhanghao Wu, Hao Zhang, Lianmin Zheng, Siyuan
+Zhuang,YonghaoZhuang,JosephE.Gonzalez,IonStoica,andEricP.Xing. Vicuna: Anopen-source
+chatbot impressing gpt-4 with 90%* chatgpt quality, March 2023. URL https://lmsys.org/blog/
+2023-03-30-vicuna/.
+AakankshaChowdhery,SharanNarang,JacobDevlin,MaartenBosma,GauravMishra,AdamRoberts,Paul
+Barham,HyungWonChung,CharlesSutton,SebastianGehrmann,etal. Palm: Scalinglanguagemodeling
+withpathways. JournalofMachineLearningResearch,24(240):1–113,2023.
+PaulFChristiano,JanLeike,TomBrown,MiljanMartic,ShaneLegg,andDarioAmodei.Deepreinforcement
+learningfromhumanpreferences. Advancesinneuralinformationprocessingsystems,30,2017.
+HyungWonChung, LeHou, ShayneLongpre, BarretZoph, YiTay, WilliamFedus, YunxuanLi, Xuezhi
+Wang,MostafaDehghani,SiddharthaBrahma,etal. Scalinginstruction-finetunedlanguagemodels. arXiv
+preprintarXiv:2210.11416,2022.
+PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,andOyvind
+Tafjord. Thinkyouhavesolvedquestionanswering? tryarc,theai2reasoningchallenge,2018.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+Plappert,JerryTworek,JacobHilton,ReiichiroNakano,ChristopherHesse,andJohnSchulman. Training
+verifierstosolvemathwordproblems,2021.
+JonDurbin. Bagel-34b-v0.2,2024a. URLhttps://huggingface.co/jondurbin/bagel-34b-v0.2.
+JonDurbin. Truthydpo,2024b. URLhttps://huggingface.co/datasets/jondurbin/truthy-dpo-v0.
+1.
+ShahulEs. Orca-chat,2024. URLhttps://huggingface.co/datasets/shahules786/orca-chat.
+Kawin Ethayarajh, Winnie Xu, Dan Jurafsky, and Douwe Kiela. Human-centered loss functions (halos).
+Technicalreport,ContextualAI,2023.
+LeoGao, JonathanTow, StellaBiderman, SidBlack, AnthonyDiPofi, CharlesFoster, LaurenceGolding,
+JeffreyHsu,KyleMcDonell,NiklasMuennighoff,JasonPhang,LariaReynolds,EricTang,AnishThite,
+BenWang,KevinWang,andAndyZou. Aframeworkforfew-shotlanguagemodelevaluation,September
+2021.
+R.Hadsell,S.Chopra,andY.LeCun. Dimensionalityreductionbylearninganinvariantmapping. In2006
+IEEEComputerSocietyConferenceonComputerVisionandPatternRecognition(CVPR’06),volume2,
+pages1735–1742,2006. doi: 10.1109/CVPR.2006.100.
+12KaimingHe,HaoqiFan,YuxinWu,SainingXie,andRossGirshick. Momentumcontrastforunsupervised
+visualrepresentationlearning. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpattern
+recognition,pages9729–9738,2020.
+DanHendrycks,StevenBasart,SauravKadavath,MantasMazeika,AkulArora,EthanGuo,CollinBurns,
+SamirPuranik,HoraceHe,DawnSong,etal. Measuringcodingchallengecompetencewithapps. arXiv
+preprintarXiv:2105.09938,2021.
+XiaoweiHuang,WenjieRuan,WeiHuang,GaojieJin,YiDong,ChangshunWu,SaddekBensalem,Ronghui
+Mu,YiQi,XingyuZhao,etal. Asurveyofsafetyandtrustworthinessoflargelanguagemodelsthrough
+thelensofverificationandvalidation. arXivpreprintarXiv:2305.11391,2023.
+Intel. Orcadpopairs,2024. URLhttps://huggingface.co/datasets/Intel/orca_dpo_pairs.
+HamishIvison,YizhongWang,ValentinaPyatkin,NathanLambert,MatthewPeters,PradeepDasigi,Joel
+Jang, David Wadden, Noah A Smith, Iz Beltagy, et al. Camels in a changing climate: Enhancing lm
+adaptationwithtulu2. arXivpreprintarXiv:2311.10702,2023.
+AlbertQ.Jiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSinghChaplot,Diego
+delasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,LucileSaulnier,LélioRenardLavaud,
+Marie-AnneLachaux,PierreStock,TevenLeScao,ThibautLavril,ThomasWang,TimothéeLacroix,and
+WilliamElSayed. Mistral7b,2023.
+JuliaKreutzer,JoshuaUyheng,andStefanRiezler. Reliabilityandlearnabilityofhumanbanditfeedbackfor
+sequence-to-sequencereinforcementlearning. arXivpreprintarXiv:1805.10627,2018.
+StephanieLin,JacobHilton,andOwainEvans. Truthfulqa: Measuringhowmodelsmimichumanfalsehoods.
+InProceedingsofthe60thAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1:
+LongPapers),2022.
+IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. arXivpreprintarXiv:1711.05101,
+2017.
+RDuncanLuce. Individualchoicebehavior: Atheoreticalanalysis. CourierCorporation,2005.
+SwaroopMishra,DanielKhashabi,ChittaBaral,andHannanehHajishirzi. Cross-taskgeneralizationvia
+naturallanguagecrowdsourcinginstructions. arXivpreprintarXiv:2104.08773,2021.
+Moreh. Momo-72b-lora-1.8.7-dpo,2024. URLhttps://huggingface.co/moreh/MoMo-72B-lora-1.8.
+7-DPO.
+AaronvandenOord,YazheLi,andOriolVinyals. Representationlearningwithcontrastivepredictivecoding.
+arXivpreprintarXiv:1807.03748,2018.
+OpenAI. Gpt-4technicalreport. TechnicalReport,2023.
+LongOuyang,JeffWu,XuJiang,DiogoAlmeida,CarrollL.Wainwright,PamelaMishkin,ChongZhang,
+SandhiniAgarwal,KatarinaSlama,AlexRay,JohnSchulman,JacobHilton,FraserKelton,LukeMiller,
+MaddieSimens,AmandaAskell,PeterWelinder,PaulChristiano,JanLeike,andRyanLowe. Training
+languagemodelstofollowinstructionswithhumanfeedback,2022.
+13RobinLPlackett. Theanalysisofpermutations. JournaloftheRoyalStatisticalSocietySeriesC:Applied
+Statistics,24(2):193–202,1975.
+AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal. Languagemodels
+areunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+RafaelRafailov,ArchitSharma,EricMitchell,ChristopherDManning,StefanoErmon,andChelseaFinn.
+Direct preference optimization: Your language model is secretly a reward model. Proceedings of the
+AnnualConferenceonNeuralInformationProcessingSystems(NeurIPS),2023.
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: An adversarial
+winogradschemachallengeatscale. ProceedingsoftheAAAIConferenceonArtificialIntelligence,34,
+2020.
+Nikunj Saunshi, Orestis Plevrakis, Sanjeev Arora, Mikhail Khodak, and Hrishikesh Khandeparkar. A
+theoreticalanalysisofcontrastiveunsupervisedrepresentationlearning. InInternationalConferenceon
+MachineLearning,pages5628–5637.PMLR,2019.
+FlorianSchroff,DmitryKalenichenko,andJamesPhilbin. Facenet: Aunifiedembeddingforfacerecognition
+andclustering. In2015IEEEConferenceonComputerVisionandPatternRecognition(CVPR),pages
+815–823,2015. doi: 10.1109/CVPR.2015.7298682.
+NisanStiennon,LongOuyang,JeffreyWu,DanielZiegler,RyanLowe,ChelseaVoss,AlecRadford,Dario
+Amodei, and Paul F Christiano. Learning to summarize with human feedback. In Proceedings of the
+AnnualConferenceonNeuralInformationProcessingSystems(NeurIPS),2020.
+RohanTaori,IshaanGulrajani,TianyiZhang,YannDubois,XuechenLi,CarlosGuestrin,PercyLiang,and
+TatsunoriBHashimoto. Alpaca: Astrong,replicableinstruction-followingmodel. StanfordCenterfor
+ResearchonFoundationModels.https://crfm.stanford.edu/2023/03/13/alpaca.html,3(6):7,2023.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2: Open foundation and
+fine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023a.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei, Nikolay
+Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2: Open foundation and
+fine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023b.
+LewisTunstall,EdwardBeeching,NathanLambert,NazneenRajani,KashifRasul,YounesBelkada,Shengyi
+Huang, Leandro von Werra, Clémentine Fourrier, Nathan Habib, Nathan Sarrazin, Omar Sanseviero,
+AlexanderM.Rush,andThomasWolf. Zephyr: Directdistillationoflmalignment,2023.
+AmosTverskyandDanielKahneman. Advancesinprospecttheory: Cumulativerepresentationofuncertainty.
+JournalofRiskandUncertainty,5(4):297–323,1992.
+Feng Wang and Huaping Liu. Understanding the behaviour of contrastive loss. In Proceedings of the
+IEEE/CVFconferenceoncomputervisionandpatternrecognition,pages2495–2504,2021.
+Peiyi Wang, Lei Li, Liang Chen, Feifan Song, Binghuai Lin, Yunbo Cao, Tianyu Liu, and Zhifang Sui.
+Makinglargelanguagemodelsbetterreasonerswithalignment. arXivpreprintarXiv:2309.02144,2023.
+14TongzhouWangandPhillipIsola. Understandingcontrastiverepresentationlearningthroughalignmentand
+uniformity on the hypersphere. In International Conference on Machine Learning, pages 9929–9939.
+PMLR,2020.
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,BrianIchter,FeiXia,EdChi,QuocLe,and
+DennyZhou. Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels,2023.
+LauraWeidinger,JohnMellor,MaribethRauh,ConorGriffin,JonathanUesato,Po-SenHuang,MyraCheng,
+MiaGlaese,BorjaBalle,AtoosaKasirzadeh,etal. Ethicalandsocialrisksofharmfromlanguagemodels.
+arXivpreprintarXiv:2112.04359,2021.
+Can Xu, Qingfeng Sun, Kai Zheng, Xiubo Geng, Pu Zhao, Jiazhan Feng, Chongyang Tao, and Daxin
+Jiang. Wizardlm: Empowering large language models to follow complex instructions. arXiv preprint
+arXiv:2304.12244,2023.
+HaoranXu,AmrSharaf,YunmoChen,WeitingTan,LingfengShen,BenjaminVanDurme,KentonMurray,
+andYoungJinKim. Contrastivepreferenceoptimization: Pushingtheboundariesofllmperformancein
+machinetranslation. arXivpreprintarXiv:2401.08417,2024.
+YifanYao,JinhaoDuan,KaidiXu,YuanfangCai,EricSun,andYueZhang. Asurveyonlargelanguage
+model(llm)securityandprivacy: Thegood,thebad,andtheugly. arXivpreprintarXiv:2312.02003,2023.
+Longhui Yu, Weisen Jiang, Han Shi, Jincheng Yu, Zhengying Liu, Yu Zhang, James T. Kwok, Zhenguo
+Li,AdrianWeller,andWeiyangLiu. Metamath: Bootstrapyourownmathematicalquestionsforlarge
+languagemodels,2023.
+Z. Sharegpt_vicuna_unfiltered, 2024. URL https://huggingface.co/datasets/anon8231489123/
+ShareGPT_Vicuna_unfiltered.
+RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi. HellaSwag: Canamachinereally
+finishyoursentence? InProceedingsofthe57thAnnualMeetingoftheAssociationforComputational
+Linguistics,pages4791–4800,Florence,Italy,July2019.AssociationforComputationalLinguistics. doi:
+10.18653/v1/P19-1472. URLhttps://www.aclweb.org/anthology/P19-1472.
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+ZhuohanLi,DachengLi,EricXing,etal. Judgingllm-as-a-judgewithmt-benchandchatbotarena. arXiv
+preprintarXiv:2306.05685,2023.
+DanielM.Ziegler,NisanStiennon,JeffreyWu,TomB.Brown,AlecRadford,DarioAmodei,PaulChristiano,
+andGeoffreyIrving. Fine-tuninglanguagemodelsfromhumanpreferences,2020.
+A Related Work Continued
+Inthissection,wecontinueourdiscussionofrelatedworkfromSection2.
+15AFT Wang et al. [2023] seek to align LLMs to correctly ‘score’ (in terms of perplexity) their own
+generations. Theydosobygeneratingmultiplechain-of-thought[Weietal.,2023]responsestoeachprompt,
+whichtheycategoriseaspreferredordispreferredaccordingtowhethertheyanswerthequestioncorrectly.
+Theirproposed‘AlignmentFine-Tuning(AFT)’paradigmaddsanalignmentobjectiveL∗ tothestandard
+A
+finetuningloss,definedas
+(cid:20) (cid:21)
+(cid:88) (cid:88)
+L∗(π ) = log 1+ e(logπ θ(y l|x)−logπ θ(yw|x))
+A θ
+yw∈GW y l∈GL
+whereG isthesetofpreferredexamplesandG isthesetofdispreferredexamples. ByminimisingL∗,the
+p n A
+log-likelihoodsofpreferredexamplesareencouragedtobelargerthanthelog-likelihoodsofdispreferred
+examples,akintoDPO.However,Wangetal.[2023]takesanopposingmotivationtous: theyareparticularly
+concernedwiththeissueofthelog-likelihoodsofdispreferredexamplesbeingpusheddowntoosignificantly
+Our work differs from AFT in three key points. First, although Wang et al. [2023] discusses DPO
+in the appendix, they do not show how their approach would extend to a reformulation of its objective;
+they also focus their experiments solely on supervised fine-tuning. Next, we use a different constraint
+mechanism—theirsisasoftmarginconstraintonthelog-probabilitydistanceofthedispreferredexample
+fromthepreferredexample,whileoursisasoftpenaltyfordeviatingfromareferencemodel. Finally,theyare
+focusedspecificallyonthecaseofself-generatedLLMCoTresponsesandcalibratingtheLLM’sperplexity
+ofitsownresponses.
+HALO Ethayarajhetal.[2023]seektounderstandalignmentmethods,includingDPO,inthecontextof
+‘Human-CentredLossFunctions(HALOs)’. Bydrawinganequivalencebetweenthealignmentmethodsand
+theworkofTverskyandKahneman[1992]inprospecttheory,theyadaptthe‘humanvaluefunction’inthat
+papertotheLLMsetting:
+(cid:104) (cid:105)
+L (π ,π ) = E w(y)(1−hˆ(x,y;β))
+KTO θ ref x,y∼D
+wheretheydefineg(x,y;β)as
+π (y|x)
+βlog θ −E [βKL(π ||π )]
+x′∼D θ ref
+π (y|x)
+ref
+and
+(cid:40)
+σ(g(x,y;β)) ify ∼ y |x
+w
+h(x,y;β) =
+σ(−g(x,y;β)) ify ∼ y|x
+l
+(cid:40)
+λ ify ∼ y |x
+D w
+w(y) =
+λ ify ∼ y|x
+U l
+ThemajordifferenceofthisapproachwithDPOisthatitdoesnotrequirepairedpreferencedata. The
+abovelossfunctioncanbeusedforanydatasetaslongasthelabelsareindividuallymarkedaspositiveor
+negative.
+16CPO Veryrecently,concurrentwork[Xuetal.,2024]proposesaddinganewtermtotheDPOlossfunction
+inordertoallowDPOtobecomebetteratrejecting‘worse’completionsthataregoodqualitybutnotperfect.
+Specifically,theyincludetheterm
+E [logπ (y | x)].
+(x,yw,y l)∼D θ w
+Whilesimilar,theirworkusesadifferentlossfunctionwithdifferentmotivation,andfurthermorethey
+onlyconsideredmachinetranslationmodelsupto13Bparameters.
+B Derivation of logit gradients
+B.1 DerivationforDPO
+Consider two completions of length K with edit (Hamming) distance of 1 which differ at token m with
+1 ≤ m ≤ K. Puty = (t ,...,t )andy = (t ,...,t ,t′ ,t ,...,t ). Puty<r = (t ,...,t )
+w 1 K l 1 m−1 m m+1 K 1 r−1
+andy≥r = (t ,...,t ). NotethatthederivativeofEquation(1)withrespecttoθ isproportionalto:
+r K
+∇ L (π ;π ) ∝ −[∇ logπ (y |x)−∇ logπ (y |x)]
+θ DPO θ ref θ θ w θ θ l
+Bythechainrule,wehave
+K
+(cid:89)
+π (y|x) = π (t |y<k,x)
+θ θ k
+k=1
+andbyusinglogarithmidentities
+K
+(cid:88)
+logπ (y|x) = logπ (t |y<k,x).
+θ θ k
+k=1
+Whenwesubstitutethisinto∇ L ,weobserve
+θ DPO
+(cid:88) (cid:104) (cid:105)
+∇ L (π ;π ) ∝− ∇ logπ (t |y<k,x)−logπ (t |y<k,x) −
+θ DPO θ ref θ θ k w θ k l
+k̸=m
+∇ (cid:2) logπ (t |y<m,x)−logπ (t′ |y<m,x)(cid:3) .
+θ θ m w θ m l
+AssumethatthevocabularylengthoftheLLMisL. Thismeansthatπ (y|x)correspondstoavectorof
+θ
+lengthLandrepresentsthesoftmaxoutputofthefinallayeroftheLLM,i.e., s{x} = π (y|x). Note, we
+θ
+{x}
+maydropthexfromthenotationofsifthecontextisobvious. Therefore,s representstheprobabilityof
+i
+thei-thtokeninthemodel’svocabularygiventheinputcontextx.
+WhiletheLLMmodelparametersθ arenumerous,letusrestrictourattentiontojustthelogits,whichwe
+denoteasθ withj ∈ [L]andaretheinputtothesoftmax. Withthisassumption,weknowthat
+j
+∂
+{x} {x}
+logs = 1{i = j}−s . (4)
+∂θ i j
+j
+Considerthecasewherey andy differonlyatthefirsttoken,i.e.,m = 1. Inthisinstance,wehavethatfor
+w l
+k > 1:
+∇ logπ (t |y<k,x)−∇ logπ (t |y<k,x).
+θ θ k w θ θ k l
+17Withoutlossofgenerality,assumethatt takesvocabularyposition1. ThenfromEquation(4),wehave:
+k
+∇ logπ (t |y<k,x)−∇ logπ (t |y<k,x) = 1{1 = j}−s{y w<k,x} −(1{1 = j}−s{y l<k,x} )
+θj θ k w θj θ k l j j
+{y<k,x} {y<k,x}
+= s l −s w . (5)
+j j
+AswetypicallyrunDPOafterSFTthemodelislikelytobereasonablywelloptimised,soweshouldhave
+{y<k,x} {y<k,x} {y<k,x} {y<k,x}
+s w ≤ s l for j ̸= 1 and s w ≥ s l . Therefore, while this analysis only extends to
+j j 1 1
+gradientswithrespecttothelogits,weseethatthegradientvectorisdecreasinginthecorrectlogitdimension
+and increasing in the wrong logit dimensions. In particular, this derivation suggests that under DPO, all
+tokensthatfollowadifferenceatmatanypointshouldhavereducedprobabilityofemittingthecorrecttoken
+whencomparedtoπ .
+ref
+B.2 DerivationforDPOP
+Wecanfollowasimilarlineofreasoningforcalculating∇ L withrespecttoitslogitswhichwedenote
+θ DPOP
+againbyθ .
+j
+Againtakingtokenpositiont forillustrativepurposesandassumingthatt takesvocabularypositioni,
+k k
+inthecasewhenπ (y|x) < 1,
+ratio
+π (t |y<k,x)
+∇ [logπ (t |y<k,x)−logπ (t |y<k,x)−λmax(0,log ref k w )]
+θj θ k w θ k l π (t |y<k,x)
+θ k w
+π (t |y<k,x)
+= ∇ [logπ (t |y<k,x)−logπ (t |y<k,x)−λlog ref k w ]
+θj θ k w θ k l π (t |y<k,x)
+θ k w
+= ∇ [logπ (t |y<k,x)−logπ (t |y<k,x)+λlogπ (t |y<k,x)]
+θj θ k w θ k l θ k w
+= (1+λ)∇ logπ (t |y<k,x)−∇ logπ (t |y<k,x)
+θj θ k w θj θ k l
+{y<k,x} {y<k,x}
+= (1+λ)(1{i = j}−s w )−(1{i = j}−s l )
+j j
+
+λ(1−s{y w<k,x} )+s{y l<k,x} −s{y w<k,x}
+i = j
+= j j j
+{y<k,x} {y<k,x}
+−(λ+1)s w +s l i ̸= j
+j j
+Inthecasewhenπ (y|x) ≥ 1,thenwehavethestandardgradientfromL .
+ratio DPO
+C Motivation: Contrastive Loss
+WhilethemainmotivationforDPOPistoavoidthefailuremodedescribedinSection3,wealsonoteits
+connectiontocontrastiveloss. Contrastivelearningiswidelyused[WangandLiu,2021,WangandIsola,
+2020,Saunshietal.,2019,Oordetal.,2018,Chenetal.,2020,Heetal.,2020],oftenforembeddinglearning
+applications. The contrastive loss formulation typically includes two main terms: one encouraging the
+proximityofanalogousinputs,theotherencouragingthedivergenceofdistinctclassifiabledata.
+Moreover, the introduction of a margin appended to one of these terms often ensures a more stable
+trainingprocess. Thismarginservesasanindicatorofindifferencetopointdisplacementonceaspecificvalue
+thresholdisexceeded. Themargin,whenattachedtothesimilarpointsterm,establishesaminimumthreshold
+beyondwhichwedonotcareaboutpullingthepointscloser. Alternatively,ifaddedonthedissimilarpoints
+term,themarginsetsamaximumthreshold.
+18We show that the DPO loss is structured such that learning the probabilities during DPO training are
+equivalenttolearningtheembeddingsinacontrastivelossformulation. However,thestandardDPOonlyuses
+thetermcomputingdistancebetweendissimilarpoints,anddoesnotincludethesimilarpointstermorthe
+margin. Consequently,itispredictablethattraditionalDPO’sinefficienciesmirrortheknownshortcomings
+ofcontrastivetrainingwhenoneconstituenttermisabsent. DPOP,ourrefinedDPOformulation,fixesthisby
+addingtheabsenttermandthemargin.
+ContrastivelossisdefinedinHadselletal.[2006]. Ifwekeepthemargininthesimilarpointsterms,it
+canbewrittenasfollows:
+(cid:88) (cid:88)
+L =− D(y ,y )+λ min(D(y ,y )−m,0)
+Cont i j i j
+∀(i,j)ϵP
+d
+∀(i,j)ϵPs
+RecallthatthestandardDPOloss(Equation(1))isasfollows:
+(cid:20) (cid:18) (cid:19)(cid:21)
+π (y |x) π (y |x)
+L (π ;π ) = −E logσ βlog θ w −βlog θ l
+DPO θ ref (x,yw,y l)∼D π (y |x) π (y |x)
+ref w ref l
+SaywedesignateanembeddingfunctionH:
+π (y|x)
+θ
+H(y|x) = .
+π (y|x)
+ref
+AndwedefineadistancefunctionD asfollows:
+D(p ,p ) = log[H(p )]−log[H(p )].
+i j i j
+ThestandardDPOonlyhasthedissimilarpointstermundertheanalogyofthecontrastivelossformulation.
+Formorerobusttrainingweaccommodateforthesimilarembeddingsterm. Weusetheconceptofanchor
+pointsorembeddingsforbothpositiveandnegativepointsasintripletlossSchroffetal.[2015]. Thesepoints
+areknownidealembeddingswewantourpointstoachieve. Theycarryprobabilitiesof1and0respectively
+inourequivalencedependingonwhethertheyarepreferredordispreferredsamples.
+1
+H∗(y|x) =
+p π (y|x)
+ref
+(cid:12)
+H∗(y|x) = ϵ (cid:12) (cid:12)
+n π (y|x)(cid:12)
+ref ϵ→0
+TheDPOPlosscanthusbeformulatedas:
+(cid:20) (cid:18) (cid:19)
+L = [log(H(y |x))−log(H(y |x))]+λ min log(H∗(y |x))−log(H(y |x))−m,0
+DPOP w l p w w
+(cid:21)
++min(log(H∗(y |x))−log(H(y |x))−m,0)
+n l l
+(cid:20) (cid:21) (cid:20) (cid:18) (cid:19)(cid:21)
+π (y |x) π (y |x) 1 π (y |x)
+θ w θ l θ w
+= log −log +λ min log −log −m,0
+π (y |x) π (y |x) π (y |x) π (y |x)
+ref w ref l ref w ref w
+(cid:20) (cid:18) (cid:19)(cid:21)
+ϵ π (y |x)
+θ l
++λ min log −log −m,0
+π (y |x) π (y |x)
+ref l ref l
+19Ifwesetthemarginm = log 1 ,thesecondtermis:
+π ref(yw|x)
+(cid:20) (cid:18) (cid:19)(cid:21)
+π (y |x)
+θ w
+= −λ max log ,0
+π (y |x)
+ref w
+Thischoiceofmarginismathematicallyequivalenttochoosingathresholdwhichensuresthesimilarityterm
+onlycontributestothelosswhenthelearnedmodelperformsworseonthepreferredresponsethanthebase
+model.
+Wecanignorethethirdtermduringtrainingfortwoprimaryreasons. First,itistryingtopushthelog
+probabilityofnegativesamplestonegativeinfinitywhichmaybeunstableduringtraining. Second,inessence,
+itnegativelyimpactsthelikelihoodofthenegativesamples. However,givenourobjectiveofextendingthe
+distancebetweenpositiveandnegativesampleswithoutdiminishingthelikelihoodofpositives,sacrificing
+this signal is acceptable. In the worst-case scenario, while the probability of negatives may be increased,
+theconsequentincreaseintheprobabilityofpositivesisensuredbythefirsttwoterms,thusrenderingthe
+sacrificeacceptable.
+D Details of Datasets
+Inthissection,wegivemoredetailsandexamplesofthethreedatasetswerelease. Wereleasealldatasets
+undertheApache2.0License.
+MetaMath GSM8K[Cobbeetal.,2021]isadatasetofdiversegradeschoolmathswordproblems,which
+hasbeencommonlyadoptedasameasureofthemathandreasoningskillsofLLMs[Chowdheryetal.,2023,
+Touvronetal.,2023b,a,Beechingetal.,2023,Gaoetal.,2021]. TheMetaMathdatasetispartitionedinto
+queriesandresponses,wherethequeryisaquestioninvolvingmathematicalcalculationorreasoning,and
+theresponseisalogicalseriesofstepsandcalculationsthatculminateinafinalanswer. Toconstructour
+paired-preferenceversionofMetaMath,wetakethequeriesaspromptsxandtheresponsesasthepreferred
+completionsy . Wecreatey bymodifyingtheresponsebyrandomlycorruptingoneoftheresultsofan
+w l
+intermediatecalculationsothatitisincorrect;however,weleavetheansweruntouched.
+Anexampleisasfollows: x: “Whatisthetotalcostofpurchasingequipmentforallsixteenplayerson
+thefootballteam,consideringthateachplayerrequiresa$25jersey,a$15.20pairofshorts,andapairof
+sockspricedat$6.80?"y : “Eachplayerrequiresa$25jersey,a$15.20pairofshorts,andapairofsocks
+w
+priced at $6.80. So the total cost for each player is $25 + $15.20 + $6.80 = $47. Since there are sixteen
+playersonthefootballteam,thetotalcostforallofthemis16*$47=$752. ####752Theansweris: 752"
+y : “Eachplayerrequiresa$25jersey,a$15.20pairofshorts,andapairofsockspricedat$6.80. Sothetotal
+l
+costforeachplayeris$25+$15.20+$6.80=$52. Sincetherearesixteenplayersonthefootballteam,the
+totalcostforallofthemis16*$47=$752. ####752Theansweris: 752"
+The dataset contains 393999 training examples and 1000 evaluation examples. Our motivation in
+buildingthisdatasetistoalignmodelstowardsbeingpreciseinintermediatecalculations. Thisdatasethas
+loweditdistance–thenormalisededitdistanceisapproximately6.5%.
+ARC ARC[Clarketal.,2018]isadatasetthatteststhelevelofunderstandingofscienceatapproximately
+grade-schoollevel. Wefocusspecificallyonthe‘Challenge’subsectionofARC,themoredifficultofthe
+twosubsections,whichhasbeenwidelyadoptedasameasureofLLMreasoningandworldunderstanding
+[Chowdheryetal.,2023,Touvronetal.,2023b,a,Beechingetal.,2023,Gaoetal.,2021,Cobbeetal.,2021].
+20Wecreateapairedpreference-rankeddatasetfromthetrainsplitofARC-Challenge. Thedatasetispartitioned
+intoquestionswhichwetakeasourpromptsx,andfourchoicesofresponsestoeachquestionofwhichonly
+oneisthecorrectanswer. Thecorrectresponseistakenasy andtheincorrectresponsesaretakentobey ;
+w l
+astherearethreeincorrectresponsesforeveryprompt,werepeaty multipletimesforeachprompt. The
+w
+datasetcontains3357trainingexamplesand895evaluationexamples. Thisdatasethasahighnormalised
+editdistanceofapproximately90%.
+HellaSwag Finally,weconsidertheHellaSwagdataset[Zellersetal.,2019],adatasetcontainingcommon-
+senseinferencequestionsknowntobehardforLLMs. Anexamplepromptis“Then,themanwritesoverthe
+snowcoveringthewindowofacar,andawomanwearingwinterclothessmiles. then”Andthepotential
+completionsare[",themanaddswaxtothewindshieldandcutsit.",",apersonboardaskilift,whiletwo
+mensupportingtheheadofthepersonwearingwinterclothessnowasthewegirlssled.",",themanputson
+achristmascoat,knittedwithnetting.",",themancontinuesremovingthesnowonhiscar."]Thedataset
+contains119715trainingand30126evaluationexamples.
+E Additional Experiments and Details
+E.1 AdditionalTrainingDetails
+NohyperparametertuningwasdonewhencreatingSmaug-34BorSmaug-72B.DPOPhastwohyperparame-
+ters,β andλ. Wechoseβ = 0.3,similartopriorwork[Rafailovetal.,2023],andwechoseλ = 50without
+tryingothervalues. Itispossiblethatevenbetterperformancecanbeachieved,e.g.,withadifferentvalueof
+λ.
+Here,wegivethelicensesofallmodelsusedtotrainourSmaug-seriesofmodels.
+Smaug-7BstartedfromLlama2-chat[Touvronetal.,2023b]. Therefore,wereleaseitundertheLlama2
+license(https://ai.meta.com/llama/license/).
+Smaug-34BstartedfromBagel-34B-v0.2[Durbin,2024a],whichitselfisaSFTversionofYi-34B-200k
+[01.AI,2024]. Therefore,wereleaseSmaug-34BundertheYiSeriesModelsCommunityLicenseAgreement
+(https://github.com/01-ai/Yi/blob/main/MODEL_LICENSE_AGREEMENT.txt).
+Smaug-72BstartedfromMoMo-72b-lora-1.8.7-DPO[Moreh,2024],whichitselfisafine-tuneofQwen-
+72B[Baietal.,2023]. Therefore,wereleaseSmaug-72BundertheQwenlicense(https://github.com/
+QwenLM/Qwen/blob/main/Tongyi%20Qianwen%20LICENSE%20AGREEMENT).
+E.2 AdditionalResults
+Ablationstudyforβ InSection5,wedescribedanablationstudyonβtorejectonepotentialhypothesisfor
+howdegradationofDPOonMetaMathcouldbepreventedisbymodifyingthestrengthofβ,theregularisation
+parameter. Here,wepresenttheplot; seeFigure4. Wetestβ ∈ {0.1,0.3,1.0}. Althoughalargerβ does
+induceaslowerdecrease,theperformancewithDPOstillplummets. Ontheotherhand,DPOPshowsstrong
+andconsistentperformancewithdifferentvaluesofβ.
+Log-probabilitiesofpreferredcompletions InFigure5,weshowthelog-probabilitiesofthepreferred
+completion of the train and eval sets during training on MetaMath. We plot the log-probabilities in more
+granularitythaninFigure3. WeconfirmourtheoreticalinsightsfromSection4–thelog-probabilitiesofthe
+preferredcompletiondropsubstantiallyinDPO,whereastheyincreaseforDPOP–acrossboththetrainand
+21Ablation with β Trained on MetaMath
+40
+Method
+30 DPOP
+DPO
+20 Beta
+0.1
+0.3
+10
+1.0
+0
+0 200 400 600 800 1000
+Training Steps
+Figure4: EvaluationofDPOvs.DPOPfordifferentvaluesofβ,ontheMetaMathdataset.
+Log-prob of Preferred Completions
+on MetaMath
+75
+−
+Model
+100 DPOP
+−
+DPO
+125
+− split
+train
+150
+− eval
+175
+−
+0 200 400 600 800 1000
+Training Steps
+Figure5: Averagelog-probsforpreferredcompletionsofDPOPandDPOontheMetaMathdatasetshowing
+thefailuremodeofDPO.
+evalsets. ForARC,weseeinFigure6thatDPOPmaintainshightrain-setlog-probs,whileboththetrainand
+evalsetlog-probsdecreaseforDPO.Notably,eventhoughevalsetlog-probsdodecreaseforDPOP,theyare
+stillhigherthanthetrainsetlog-probsofDPO.
+Additionaltables InTable3,wegiveanextensionofTable1(whoseexperimentaldetailsareinSection6).
+InTable4,wegivethesametable,exceptformodelsofsize34Borlower.
+F Example Completions
+Inthissection,wegiveexamplecompletionsbySmaug-72BforquestionsinMT-Bench[Zhengetal.,2023].
+Notethatthesearenotcherry-picked–theyincludeexamplesofbothgoodandbadcompletions.
+22
+ycaruccA
+borp-goL
+egarevALog-prob of Preferred Completions
+on ARC
+10
+−
+Model
+15 DPOP
+−
+DPO
+split
+20
+− train
+eval
+25
+−
+0 200 400 600 800 1000
+Training Steps
+Figure6: Averagelog-probsforpreferredcompletionsofDPOPandDPOontheARCdatasetshowingthe
+failuremodeofDPO.
+Table3: (ExtensionofTable1.) Evaluationofthetopopen-weightmodelsontheHuggingFaceOpenLLM
+LeaderboardasofFebruary1st,2024. Our72Bmodelachievesanaverageaccuracyof80.48%,becoming
+the first open-source LLM to surpass an average accuracy of 80% and improving by nearly 2% over the
+second-bestopen-sourcemodel(otherthanafine-tuneofourownmodel).
+Model Avg. ARC HellaSwag MMLU TruthfulQA Winogrande GSM8K
+Smaug-72B(Ours) 80.48 76.02 89.27 77.15 76.67 85.08 78.70
+MoMo-72B-lora-1.8.7-DPO 78.55 70.82 85.96 77.13 74.71 84.06 78.62
+TomGrc_FusionNet_34Bx2_MoE_v0.1_DPO_f16 77.91 74.06 86.74 76.65 72.24 83.35 74.45
+TomGrc_FusionNet_34Bx2_MoE_v0.1_full_linear_DPO 77.52 74.06 86.67 76.69 71.32 83.43 72.93
+Truthful_DPO_TomGrc_FusionNet_7Bx2_MoE_13B 77.44 74.91 89.30 64.67 78.02 88.24 69.52
+CCK_Asura_v1 77.43 73.89 89.07 75.44 71.75 86.35 68.08
+FusionNet_34Bx2_MoE_v0.1 77.38 73.72 86.46 76.72 71.01 83.35 73.01
+MoMo-72B-lora-1.8.6-DPO 77.29 70.14 86.03 77.40 69.00 84.37 76.80
+Smaug-34B-v0.1(Ours) 77.29 74.23 86.76 76.66 70.22 83.66 72.18
+Truthful_DPO_TomGrc_FusionNet_34Bx2_MoE 77.28 72.87 86.52 76.96 73.28 83.19 70.89
+DARE_TIES_13B 77.10 74.32 89.5 64.47 78.66 88.08 67.55
+13B_MATH_DPO 77.08 74.66 89.51 64.53 78.63 88.08 67.10
+FusionNet_34Bx2_MoE 77.07 72.95 86.22 77.05 71.31 83.98 70.89
+MoE_13B_DPO 77.05 74.32 89.39 64.48 78.47 88.00 67.63
+4bit_quant_TomGrc_FusionNet_34Bx2_MoE_v0.1_DPO 76.95 73.21 86.11 75.44 72.78 82.95 71.19
+MixTAO-7Bx2-MoE-Instruct-v7.0 76.55 74.23 89.37 64.54 74.26 87.77 69.14
+Truthful_DPO_cloudyu_Mixtral_34Bx2_MoE_60B0 76.48 71.25 85.24 77.28 66.74 84.29 74.07
+MoMo-72B-lora-1.8.4-DPO 76.23 69.62 85.35 77.33 64.64 84.14 76.27
+FusionNet_7Bx2_MoE_v0.1 76.16 74.06 88.90 65.00 71.20 87.53 70.28
+MBX-7B-v3-DPO 76.13 73.55 89.11 64.91 74.00 85.56 69.67
+Table4: Evaluationofthetopopen-weightmodelsontheHuggingFaceOpenLLMLeaderboardformodels
+lessthan35BparametersasofFebruary1st,2024. Our34Bmodelachievesbest-in-its-classperformance
+comparedtoothermodelsofsimilarorsmallersize.
+Model Size Avg. ARC HellaSwag MMLU TruthfulQA Winogrande GSM8K
+Smaug-34B-v0.1(Ours) <35B 77.29 74.23 86.76 76.66 70.22 83.66 72.18
+DARE_TIES_13B <35B 77.10 74.32 89.50 64.47 78.66 88.08 67.55
+13B_MATH_DPO <35B 77.08 74.66 89.51 64.53 78.63 88.08 67.10
+MoE_13B_DPO <35B 77.05 74.32 89.39 64.48 78.47 88.00 67.63
+4bit_quant_TomGrc_FusionNet_34Bx2_MoE_v0.1_DPO <35B 76.95 73.21 86.11 75.44 72.78 82.95 71.19
+23
+borp-goL
+egarevAExample1
+Question: Imagine you are writing a blog post comparing two popular smartphone models.
+Developanoutlinefortheblogpost,includingkeypointsandsubheadingstoeffectivelycompare
+andcontrastthefeatures,performance,anduserexperienceofthetwomodels. Pleaseanswerin
+fewerthan200words.
+Outline:
+1. Introductiontothetwosmartphonemodelsbeingcompared(mentionbrandnamesandmodels)
+2. DesignandBuildQuality
+• Comparisonofdimensions,weight,materialsused,andoverallaestheticappeal
+• Wateranddustresistance,ifapplicable
+3. DisplayandScreenQuality
+• Comparisonofscreentechnology(OLED,IPSLCD,etc.)
+• Displayresolution,refreshrate,andbrightnesslevels
+4. PerformanceandHardware
+• Processor,RAM,andstorageconfigurations
+• Comparisonofbenchmarkscores(e.g.,AnTuTu,Geekbench)
+5. CameraSystemandImageQuality
+• Comparisonofprimary,ultra-wide,telephoto,andmacrolenses(ifavailable)
+• Comparisonoflow-lightperformanceandimageprocessingcapabilities
+6. BatteryLifeandCharging
+• Batterycapacityandestimatedusagetime
+• Chargingtechnologies(wired,wireless,fastcharging,reversecharging)
+7. SoftwareandUserExperience
+• Comparisonofoperatingsystems(iOSvs. Android)andtheirfeatures
+• Userinterface,customizationoptions,andappecosystem
+8. AdditionalFeaturesandExtras
+• Comparisonofbiometricauthentication(fingerprint,faceunlock,etc.)
+• AdditionalfeatureslikeNFC,5Gconnectivity,andaudioquality
+9. PricingandValueforMoney
+• Comparisonofretailpricesandcurrentoffers
+• Assessmentofoverallvalueconsideringthefeaturesandperformance
+10. Conclusionandrecommendationforpotentialbuyersbasedontheirpreferences
+24Example2
+Question: Inasurveyconductedatalocalhighschool,preferencesforanewschoolcolorwere
+measured: 58% of students liked the color blue, 45% preferred green, and 22% liked both
+colors. Ifwerandomlypickastudentfromtheschool,what’stheprobabilitythattheywould
+likeneitherbluenorgreen?
+Tofindtheprobabilitythatarandomlypickedstudentwouldlikeneitherbluenorgreen,weneedto
+findthepercentageofstudentswholikeonlyonecolororneithercolor.
+Fromthegiveninformation,weknow:
+• 58%likeblue
+• 45%prefergreen
+• 22%likebothcolors
+Tofindthepercentageofstudentswholikeonlyonecolor,wecansubtractthepercentageofstudents
+wholikebothcolorsfromthesumofstudentswholikeblueandgreen:
+• 58%(blue)+45%(green)-22%(both)=83%
+Now,tofindtheprobabilityofastudentlikingneitherbluenorgreen,wesubtractthepercentageof
+studentswholikeatleastonecolorfrom100%:
+• 100%-83%=17%
+So,theprobabilitythatarandomlypickedstudentwouldlikeneitherbluenorgreenis17%.
+Example3
+Question: Implementaprogramtofindthecommonelementsintwoarrayswithoutusingany
+extradatastructures.
+Findingcommonelementsintwoarrayswithoutusingextradatastructurescanbeachievedbyusing
+asimplealgorithm. Here’saPythonimplementationofthisproblem:
+deffind_common_elements(arr1,arr2):
+common_elements=[]
+fornum1inarr1:
+ifnum1inarr2andnum1notincommon_elements:
+common_elements.append(num1)
+returncommon_elements
+#Exampleusage:
+array1=[1,2,3,4,5]
+array2=[4,5,6,7,8]
+print(find_common_elements(array1,array2))#Output:[4,5]
+This program iterates through the elements of the first array (arr1) and checks if each element is
+presentinthesecondarray(arr2). Ifitis,andtheelementhasn’tbeenaddedtothecommon_elements
+listyet,itisappended. Thefunctionthenreturnsthelistofcommonelements.
+25Example4
+Question: Identifythenamedentities(people,organizations,locations)mentionedinthegiven
+newsarticle. PleasegenerateaJSONdictionarythatliststhenamedentitiesinthreeseparate
+groupsbasedontheirentitytypes. Thekeyisthetypeofentityandthevalueisalistofstrings.
+Yesterday, Adamson Emerson, the CEO of Faraday, and Dieter Zetsche, the CEO of
+DaimlerAG,announcedplanstobuildanewGigafactoryinBerlin. Thefacilitywillbeajoint
+venturebetweenFaradayandDaimler,producingelectricvehiclesandbatterypacksforboth
+companies,creatingthousandsofjobopportunitiesintheregion. EmersonandZetschestated
+thatthestrategiclocationofBerlin,coupledwithitsskilledworkforceandstronginfrastructure,
+makesitanidealchoiceforexpansion. ThenewGigafactoryaimstomeetthegrowingdemand
+forelectricvehiclesinEuropeandcontributetoasustainablefuture. VolkswagenCEOHerbert
+Diesswelcomedthenews,sayinggreatercollaborationwill,benefittheautoindustry’stransition
+toe-mobility.
+{
+"people":["Adamson Emerson","Dieter Zetsche","Herbert Diess"],
+"organizations":["Faraday","Daimler AG","Volkswagen"],
+"locations":["Berlin","Europe"]
+}
+26
