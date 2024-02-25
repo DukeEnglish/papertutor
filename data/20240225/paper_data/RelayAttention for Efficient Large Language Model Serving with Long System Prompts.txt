@@ -1,0 +1,844 @@
+RelayAttention for Efficient Large Language Model Serving
+with Long System Prompts
+LeiZhu1 XinjiangWang2 WayneZhang2 RynsonLau1†
+1 CityUniversityofHongKong 2 SenseTimeResearch
+lzhu68-c@my.cityu.edu.hk, {wangxinjiang,wayne.zhang}@sensetime.com
+Rynson.Lau@cityu.edu.hk
+Abstract
+Practicallargelanguagemodel(LLM)services
+mayinvolvealongsystemprompt,whichspec-
+ifiestheinstructions,examples,andknowledge
+documentsofthetaskandisreusedacrossnu-
+merous requests. However, the long system
+promptcausesthroughput/latencybottlenecks
+asthecostofgeneratingthenexttokengrows
+w.r.t.thesequencelength. Thispaperaimsto
+improve the efficiency of LLM services that
+Cache Context System
+involvelongsystemprompts. Ourkeyobser- Op Attention Attention
+vation is that handling these system prompts 18 160 31
+Kernel launch overhead, 10 Relay Fusion, 3
+requires heavily redundant memory accesses
+Figure1: Llama-30Battentioninferencelatencyw.r.t.
+inexistingcausalattentioncomputationalgo-
+systempromptlength(A40GPU,batchsize32). Weset
+rithms. Specifically,forbatchedrequests,the
+thelengthof(request-specific)contexts,whichinclude
+cachedhiddenstates(i.e.,key-valuepairs)of
+userpromptsandpreviouslygeneratedtokens,to128.
+systempromptsaretransferredfromoff-chip
+DRAMtoon-chipSRAMmultipletimes,each
+substantialobstacletoservingmorepeople(Kwon
+correspondingtoanindividualrequest.Toelim-
+etal.,2023). Itisthereforeimportanttoimprove
+inatesucharedundancy,weproposeRelayAt-
+thehardwareutilizationsothatLLMscanhavea
+tention,anattentionalgorithmthatallowsread-
+ing these hidden states from DRAM exactly higherthroughputwithinafixedhardwarebudget.
+onceforabatchofinputtokens. RelayAtten- LLM services commonly use an application-
+tionisafreelunch: itmaintainsthegeneration specificsystemprompt(OpenAI,2023a)tospecify
+qualitywhilerequiringnomodelretraining,as thetask’sinstructions. Thesystempromptiscon-
+itisbasedonamathematicalreformulationof
+catenated with the user prompt as the full input
+causalattention.
+totheLLMforresponsegenerationandisshared
+1 Introduction by all requests to a service. The system prompt
+becomeslongiftheserviceproviderwantstopro-
+After around one decade of rapid develop-
+vide detailed guidelines and examples for better
+ment(Sutskeveretal.,2014;Vaswanietal.,2017;
+response quality or apply more restrictions/poli-
+Radfordetal.,2018;OpenAI,2023b),wehaveex-
+ciesforethicalsafety. Asthesequencelengththat
+perienced a revolution of large language models
+LLMscanprocessgrows(Anthropic,2023;Chen
+(LLMs)overthepastyear. LLMslikeGPT-4(Ope-
+et al., 2023b; DeepSeek-AI et al., 2024), some
+nAI, 2023b) and Gemini (Google, 2023b) are so
+emergingprofessionalapplications,suchaslegal
+powerfulthattheycannowserveasprogramming
+analysis(Cuietal.,2023;Nayetal.,2023),health-
+copilots(Chenetal.,2021;GitHub,2022),univer-
+care applications (Steinberg et al., 2021; Rasmy
+salchatbots(Google,2023a;OpenAI,2022),com-
+et al., 2021), and the shopping assistant example
+puterassistants(Microsoft,2023a)andotherroles
+showninFig.2,mayincludeoneormoreknowl-
+that penetrate our daily life. However, the high
+edgedocumentstoprovidedomain-specificknowl-
+inferencecostoftheselargemodelshasbecomea
+edge,resultinginevenlongersystemprompts. Al-
+†Correspondingauthor. though long system prompts are beneficial to im-
+1
+4202
+beF
+22
+]LC.sc[
+1v80841.2042:viXra<SYSTEM> tion 3.3). We provide an in-depth analysis of the
+You are a helpful and respectful shopping assistant. For customer
+inquires, provide suggestions faithfully according to the documents theoretic speedup via redundancy reduction with
+provided here. When providing shopping suggestions, also attach
+links to the suggested items. IO-awareness(Section3.4). Ourempiricalresults
+Available items are listed below: furtherverifytheefficiency: integratingRelayAt-
+<DOC>
+Item, status, price, link tentionintovLLM(Kwonetal.,2023),analready
+[Item 1 specs]
+[item 2 specs] highly optimized production-level LLM serving
+System ....
+prompt RTX 4060Ti (16GB), on sale, $399, https://xxxxx/yyy system, we still observe up to 2.2× sustainable
+....
+requestrateand2.0×throughputwiththeLlama2-
+</DOC>
+7B model for a chatbot workload. Similar effi-
+Some conversation examples are given below:
+<DOC> ciencyimprovementsarealsoobservedforseveral
+[conversation example 1]
+[conversation example 2] otherpopularLLMsandareconsistentonseveral
+...
+</DOC> data center GPUs. The efficiency gains continue
+</SYSTEM>
+growingwithlongersystemprompts.
+User
+Please suggest a GPU for deep learning research. My budget is $500.
+prompt Ourkeycontributionscanbesummarizedas:
+LLM RTX 4060 Ti (16GB) may be a good choice. It has 16 GB GDDR6 memory, • WehaveidentifiedaLLMservicebottleneckthat
+which supports running 7B LLMs locally in half-precision. It is now on sale at
+output only $399 ! You can get it [here](https://xxxxx/yyy). has not been studied by existing works: there
+are highly redundant memory accesses caused
+Figure 2: A system prompt may include instructions,
+knowledge documents and few-shot examples. Here, bylongsystemprompts. Weanticipatethatour
+weusetheshoppingassistantasanexampleapplication. analysiswillinspiremoreworksondeeparchi-
+tectureswithIO-awareness(Daoetal.,2022;Gu
+provingthegenerationqualityorenablingnewap-
+andDao,2023).
+plications,theyalsoposeachallengetotheLLM
+• WeproposeRelayAttention,anovelapproachto
+service: theinferencethroughputandlatencyofthe
+computeexactcausalattention. Itallowsaccess-
+service can be heavily degraded, thus increasing
+ingcachedhiddenstatesofthesystempromptex-
+theper-requestcost. Thisisinherentlycausedby
+actlyonceforabatchofrequesttokens. Wecon-
+the causal attention, in which each new token is
+ductanin-depthanalysisofthetheoreticspeedup
+generatedby“lookingat”allprecedentones.
+broughtbyRelayAttention.
+In this paper, we propose a novel approach to • Weempiricallyverifytheend-to-endefficiency
+mitigatetheefficiencyproblemofusinglongsys- improvementbyintegratingRelayAttentioninto
+tem prompts in LLM services. Our key obser- vLLM,aproductionlevelLLM,andobservenon-
+vation is that there are not only redundant mem- trivialefficiencygainsonseveralpopularLLMs
+ory footprint (Kwon et al., 2023) and computa- withdifferentGPUs.
+tions(Gimetal.,2023)correspondingtothesys-
+temprompt,butalsounnecessarymemoryaccesses 2 RelatedWorks
+duringcausalattentioncomputation. Specifically,
+Our approach aims to improve the inference effi-
+whilethesystempromptissharedbyallrequests,
+ciency of transformer-based LLMs (Section 2.1).
+its hidden states (i.e., key-value pairs) are read
+ItisbasedonextendingthewidelyusedKey-Value
+fromDRAMmultipletimesbyexistingattention
+Cache mechanism (Section 2.2). We also briefly
+algorithms such as PagedAttention (Kwon et al.,
+reviewothertechniquesforacceleratingLLMinfer-
+2023)andFlashAttention(Daoetal.,2022;Dao,
+ence,whichmaycomplementours(Section2.3).
+2023),eachforanindividualrequestinthebatch.
+ThisseverelyslowsdownLLMinferences,which
+2.1 InferenceofTransformer-basedLLMs
+areknowntobememory-bound(Section3.2). To
+eliminatesuchredundantmemoryaccess,wepro- Theinferenceofthesetransformer-basedLLMsfol-
+pose RelayAttention, an exact algorithm to com- lowstheiterativenext-token-predictionparadigm.
+putecausalattentionbasedonamathematicalre- Specifically, the next token is generated in each
+formulation of it. The key idea of RelayAtten- timestepbyattendingtoallprecedenttokens. The
+tion is to group the matrix-vector multiplications generatedtokenisthenappendedtotheendofthe
+corresponding to the system prompt into matrix- current sequence. The generation then continues
+matrix multiplications, which allow loading the until a stopping criterion (e.g., the new token is
+hidden states of the system prompt from DRAM <eos>,whichindicatestheendofthesequence)is
+exactlyonceforallrequesttokensinabatch(Sec- met. Abasicapproachtoimplementingsuchagen-
+2erationprocedureistoperformfullself-attention is another technique to optimize LLMs’ through-
+with a casual mask over the entire up-to-present putsonGPUsbyavoidingredundantwrite/readof
+sequence at each time step, just as we do while attention probability matrix into/from DRAM. A
+trainingthemodel(Radfordetal.,2018). Thisway, production-levelLLMservingsystemmayalsoin-
+asinglegenerationsteptakesaquadraticcomplex- cludecontinuousbatching(Yuetal.,2022),which
+ityw.r.t.thelengthoftheup-to-presentsequence. enablesiteration-levelschedulingofrequests,and
+Next,wewilllookathowthiscomplexitycanbe speculativesampling(Chenetal.,2023a;Leviathan
+reducedtolinearusingtheKey-ValueCache. etal.,2023),whichusesasmallermodeltogener-
+ateadraftandthenusesthelargemodeltocheck
+2.2 Key-ValueCache
+and correct it. Our approach can work together
+Basedontheobservationthathistoricaltokensare withthesecomponentswithnoconflicts.
+not affected by the future ones during LLM de-
+3 Methdology
+coding, Key-Value (KV) Cache avoids repetitive
+computationofthehiddenkey-valuepairs(KVs)
+In this section, we elaborate on the proposed ap-
+by caching them on the fly and then reusing the
+proach. We begin with a brief preliminary of the
+cached KVs in every subsequent steps (Yu et al.,
+hardware utilization of operators in Section 3.1,
+2022;Popeetal.,2023). WithKVCache,ineach
+followedbyananalysisofthebottleneckinLLM
+timestep,onlyasingletoken(i.e.,thelatestgener-
+serving in Section 3.2, which shows that the re-
+atedone)isusedasthequery,andthenexttoken
+dundantmemoryaccessslowsdowntheinference
+isproducedbyattendingtothecachedKVs. The
+especially when the system prompt is long. We
+generationcomplexitythusreducesfromquadratic
+thenintroduceRelayAttention,anovelalgorithm
+tolinearw.r.t.theup-to-datesequencelength.
+to compute exact causal attention that allows the
+Some recent research further accelerates LLM
+elimination of the redundancy in Section 3.3. Fi-
+inferences by pruning superfluous KV cache
+nally, we analyze the theoretical acceleration of
+data (Zhang et al., 2023) or compressing it (Liu
+RelayAttentionoverexistingapproachesfromthe
+etal.,2023)toreducekey-valuepairstobecached.
+perspectiveofIO-awareness(Section3.4).
+However,theseapproachesintroducealgebraicdis-
+crepanciesbetweenmodeltrainingandinference. 3.1 Preliminary: TheLatencyofOperators
+Hence,theymayhurtthegenerationqualityand/or
+Toincreasetheutilizationofarithmeticunits,mod-
+require extra finetuning efforts. In contrast, our
+ernprocessorsusepipeliningtoallowconcurrent
+approachmaintainsgenerationqualityandisplug-
+memoryaccessandcomputation. Foraperfectly
+and-play, as it is based on a mathematical refor-
+parallelized operator, which maximizes the over-
+mulation of causal attention . The acceleration
+lapofdatatransferandcomputation,theruntime
+of our approach comes from reducing redundant
+latency is determined by the larger one between
+memory access of the KV cache. Therefore, it
+total memory access time and total computation
+is orthogonal and complementary to prefix shar- time. Givenaprocessorthattakest forper-byte
+m
+inginPagedAttention(Kwonetal.,2023),which access,andt forafloatingoperationonaverage,
+c
+eliminatesredundantmemoryfootprintofsystem
+the ratio r of the total computation time over the
+prompts, and is unlike PromptCache (Gim et al.,
+totalmemoryaccesstimeforanoperatoris:
+2023),whicheliminatestheredundantcomputation
+of the reusable prefix KVs and thus only acceler- t c×#floatingoperations t c
+r = = I × , (1)
+atesthepromptphase(Section3.2). t m×#byteaccess t m
+2.3 OtherOptimizationsforLLMInference whereI isthearithmeticintensityoftheoperator:
+Besides the KV Cache, several other techniques #floatingoperations
+I = . (2)
+optimizeLLMinferenceinapost-trainingmanner.
+#byteaccess
+Forexample,networkquantizationtechniquescan
+also be applied to LLMs as they are architecture- When I < tm, r is less than 1, the operator is
+tc
+agnostic,eventhoughtheymayneedsomeadapta- memory-bound. Thismeansthatthebottleneckof
+tionstoimprovethegenerationstabilityandqual- theoperatorismemoryaccess,andwecanaccel-
+ity(Frantaretal.,2022;Xiaoetal.,2023;Linetal., erateitonlyifwecanreducethememoryaccess
+2023). FlashAttention(Daoetal.,2022;Dao,2023) time. ThespeedofmodernGPUsfaroutpacesthe
+3Ti
+: Query / Output : (Cached) Key / Value
+try : MatMul
+: Attention weights : Data Transfer b/w RAMs
+Feed Forward Network
+...
+KV cache
+...
+K
+KV cache Causal Attention
+V
+Q
+...
+<SYSTEM> You ... <SYSTEM/> Please ... $500 . RTX 4060 ...
+<SYSTEM> You ... <SYSTEM/> How ... ? You can
+Figure3: Adecodingstepduringtheautoregressivegenerationphase. Ontherightside,weprovideacloserview
+oftheattentioncomputationwithIO-awareness. Notethatthefloatingoperationsareexecutedinthefaston-chip
+SRAM,whiletheKVsarecachedintheslowoff-chipDRAM.Ashighlightedwiththedashedboxesandredarrows,
+(1)thecomputationmainlyinvolvesmatrix-vectormultiplications;and(2)whilebeingsharedbyallrequests,the
+systemKVsaretransferredfromDRAMtoSRAMmultipletimes,eachforonerequest.
+bandwidthofitsmemory(i.e., tc ≪ 1),andthus responsegeneration1.
+tm
+ittypicallyrequiresahigharithmeticintensityto InFig.3,wedemonstrateatimestepduringthe
+achievefullutilizationofthecomputingcapability autoregressivegenerationphase,withthebatchsize
+(e.g.,A100-SXM4GPUrequiresatleast38.2). assumedtobe2. Therearetwokeyobservations:
+For a half-precision (2 bytes/element) general 1. The computation of attention is memory-
+matrix multiplication (GEMM) of problem size bound. Thisisbecausetheattentioncomputa-
+(m,n,k): C = ABT, where C ∈ Rm×n, A ∈ tionforarequestmainlyinvolvestwoGEMVs
+Rm×k,B ∈ Rn×k,thearithmeticintensityis: (reddashedboxesinFig.3),withanarithmetic
+intensitylowerthan1. Itthusrequiresmemory
+2mnk accessreductionforacceleration.
+I = < min{m,n,k}.
+gemm
+2(mk+nk+mn) 2. There are redundant memory accesses in
+(3) thetypicalscenarioswhereasharedsystem
+Whenm,n,k arealllarge(e.g.,> 128),theoper- promptisprependedtorequest-specificcon-
+ationcansaturatetheutilizationofthecomputing texts. Specifically, thecachedkey-valuepairs
+capability due to high arithmetic intensity. This ofthesharedsystemprompt(systemKVs)are
+isnormallytrueforlinearprojectionoperationsin readfromoff-chipDRAMmultipletimes,each
+LLMinference,wheremisthenumberoftokens forarequestinthebatch(redarrowsinFig.3).
+inabatch,kistheinputhiddendimension,andnis Such redundancy becomes a substantial over-
+theoutputhiddendimension. However,asaspecial headwhenthesystempromptislong.
+caseofGEMMs,thegeneralmatrix-vectorproduct Section3.3proposesthecoredesignofRelayAt-
+(GEMV) operation, in which there is a vector in tentionforremovingtheredundantmemoryaccess.
+AandB,isalwaysmemory-boundasI < 1.
+gemv
+This is the case for casual attention computation 3.3 LLMServingwithRelayAttention
+withcachedKVs,aswewillshowinSection3.2.
+ThekeyideaofRelayAttentionistogroupmultiple
+matrix-vectormultiplicationsbetweenthebatched
+3.2 BottleneckofLLMServices
+queries and the cached KVs into single matrix-
+Given a batch of user prompts, the LLM infer- matrixmultiplications,asshowninFig.4,allow-
+enceisusuallydividedintotwophases: theprompt ing system KVs to be read from DRAM exactly
+phase,whichcomputesthehiddenstatesofthefull onceperbatch. Algorithm1summarizesthealgo-
+prompts(i.e.,theconcatenationofsystemprompt rithm in Pytorch-like pseudo code. It divides the
+and user prompts) and generates the first new to- computationofacausalattentionlayerintothree
+kens; and the autoregressive generation phase, steps: systemattentionstep,contextattentionstep,
+whichgeneratesallsubsequenttokenssequentially, andrelayfusionstep. Inthesystemattentionand
+one token for each request at a time step. In this contextattentionsteps,wecomputetwointermedi-
+work,wefocusourinvestigationontheautoregres-
+1Besides,thepromptphasecaneffectivelysaturateGPU
+sivegenerationphaseasitcontainsthehotspotof utilizationasitinvolveslargematrixmultiplications.
+4
+...
+...Step 1: System Attention Step 2: Context Attention Step 3: Relay Fusion
+System Context : MatMul
+KV cache KV cache
+: Query / Output
+... : (Cached) Key / Value
+: Attention weights
+...
+... +
+: Data Transfer b/w RAMs
+Figure4: ThecomputationofRelayAttention. ItisamathematicalreformulationofcasualattentioninFig.3,but
+loadtheSystemKVsexactlyonceforabatchofrequests(highlightedwithredarrows).
+Algorithm1PseudocodeforRelayAttention. denotethehiddenkey,valueembeddingoftheto-
+ken at position i ≤ l = s+u+t, and q ∈ Rd
+# INPUT: t
+# q: query tensor for new inputs, (b, m, h, d) denotesthehiddenqueryembeddinginthecurrent
+# k: key tensor for new inputs, (b, m, h, d)
+# v: value tensor for new inputs, (b, m, h, d) step. Thecasualattentionoutputo isdefinedas:
+# kv_cache: context KVs, (N, 2, b, l-s, h, d) t
+# sys_kv_cache: sys. KVs, (N, 2, 1, s, h, d)
+#
+#
+ll _a cy ae cr h_ eid :: tht ehe lei nn gd te hx o of
+f
+cc au cr hr ee dnt kel yay -e vr al, uei ,nt
+int
+o
+t
+= Attention(q t,{k i}l i=1,{v i}l i=1)
+# OUTPUT:
+# o: the output of causal attention (cid:88)l exp(q tkT
+j
+) (4)
+= v ,
+# #
+#
+(n a 2o t )t te e: n tt hei( o1 n) ordw te o errm oeo ftd ui rf cni oe nd tt ehe xt the lo ag ti - tn s et u ne m tr if - oa e nc xe p a( no df lsem su ) yl ; st ti em-head
+j=1
+σ t1→l j
+# attention doesn't matter because of no dependency
+#
+#
+kc .on st ie zext (1)att =en 1ti io nn, aua ts oreif gret sh se ir ve eis gen no eras ty is ot nem php ar so empt where σ tb→e = (cid:80)e j=bexp(q tkT
+j
+) is the sum-exp
+# k.size(1) > 1 in prompt phase betweenthestartpositionbandendpositione > b,
+l_new = l_cache + k.size(1)
+kv_cache[layer_id, 0, l_cache:l_new, ...] = k associated with q t. By splitting the summation
+kv_cache[layer_id, 1, l_cache:l_new, ...] = v
+in Eq. (4) at position s, which is the end system
+o, lse = multihead_attention(
+q, k_cache[layer_id, 0, :l_new, ...], prompt,wehave:
+v_cache[layer_id, 1, :l_new, ...],
+casual_mask=True)
+# system attention
+b qs 1z =, qle .n v, iewnh (e 1a ,d, bszd *im len= ,q. nhs ei az de ,()
+dim) o =
+(cid:88)s exp(q tkT
+j
+)
+v +
+(cid:88)l exp(q tkT
+j
+)
+v .
+k_sys, v_sys = sys_kv_cache[layer_id].unbind(dim=0) t σ1→l j σ1→l j
+o_sys, lse_sys = multihead_attention( j=1 t j=s+1 t
+q1, k_sys, v_sys)
+o_sys = o_sys.view(bsz, len, nhead, dim) (5)
+lse_sys = lse_sys.view(bsz, len, nhead, 1)
+# relay fusion
+alpha_sys = 1 / (1 + exp(lse - lse_sys)) ConsiderthefirsttermontherightsideofEq.(5).
+alpha_usr = 1 - alpha_sys
+o = o * alpha_usr + o_sys * alpha_sys As it is close to the Attention(·,·,·) operation in
+Eq.(4),withonlyadifferenceinthenumerator,it
+canberewrittenasarescaledattention:
+a thte ea shtt ae rn et dio sn yso tu et mpu pt rs oa ms pif t/th re eqL uL esM t-si ps ep cr io fim cp cote nd teb xy
+t
+σ σt1 1→ →s
+l
+(cid:88)s exp σ( 1q →tk sT
+j
+)
+v j. (6)
+only. Intherelayfusionstep,wecomputethefinal t j=1 t
+outputasaconvexcombinationofthetwointerme-
+This rescaling can also be applied to the second
+diateoutputs. Next,weshowthatRelayAttentionis
+term on the right side of Eq. (5), and thus o is a
+computingamathematicalreformulationofcasual t
+convexcombinationoftwoscaledattentionterms:
+attention.
+Withoutlossofgenerality,weconsiderasingle o =αsys Attention(q ,{k }s ,{v }s )+
+t t t i i=1 i i=1
+sequenceinthebatchandasingleattentionhead.
+αctxAttention(q ,{k }l ,{v }l ),
+Formally, given an on-the-fly sequence R at gen- t t i i=s+1 i i=s+1
+(7)
+erationstept,wedivideitintothreesegments(in
+order): (1)thesystempromptoflengths,(2)the
+userpromptoflengthu,and(3)theresponsegen-
+where α tsys = σ σt1 1→ →s
+l
+and α tctx = σ σts+ 1→1→ ll = 1−
+eratedbytheLLMoflengtht−1. Letk ,v ∈ Rd αsys arethecomt binationcoefficients.t
+i i t
+5
+...Discussion. Backtotheviewofabatch,thefirst
+16 Theorectical
+terminEq.(7)forallconcurrentrequests,namely
+14 Practical
+systemattention,canbegroupedtouselargema-
+12
+trixmultiplications. Thisessentiallyeliminatesthe
+10
+redundantaccessofsystemKVsasshowninFig.4.
+In practice, as the sum of exponentials σb→e is 8
+t
+6
+notnumericallystabletocomputedirectly,weuse
+thelog-sum-exptricktoreturnlog(σb→e)inatten- 4
+t
+tioncomputation,
+andthecomputationofαsys
+is
+2
+t
+0 1000 2000 3000 4000
+reformulated accordingly in Algorithm 1. While System Prompt Length (#toks)
+reformulating the casual attention, we did not as- Figure 5: The theoretical and practical speedups for
+casualattentioncomputationwithRelayAttention. We
+sumestept ̸= 1. ThismeansthatRelayAttention
+setthebatchsizeto32andcontextlengthto128,and
+isalsoapplicabletothepromptphase, wherethe
+plotthespeedupw.r.t.thelengthofthesystemprompt.
+inputofarequestisnotasingletokengeneratedin
+A40GPUisused.
+thelaststepbutcontainsmultipletokensfromthe
+userprompt,asreflectedinAlgorithm1. Therefore,thespeeduppis:
+Peripheral adaptations. There are two major
+adaptationsneededtomakeRelayAttentionwork n s+c+2
+p = = . (10)
+betterwithinexistinginferencesystems. First,in- n′ s/b+c+7
+steadofusingasingleKVcacheforboththesys-
+InFig.5,weplotthespeedupbroughtbyusingRe-
+tempromptandtherequest-specificcontext,weuse
+layAttention. Thesmallgapbetweenthepractical
+a separate system KV cache to store system KVs
+andtheoreticalcurvesverifiesouranalysis.
+andfillitofflinebeforemodelserving. Thiscanbe
+ThoughthespeedupofstandaloneRelayAtten-
+viewedasacombinationofprefixsharinginPage-
+tioncanbeanalyzed,itisstillaquestionofhowan
+dAttention, which eliminates redundant memory
+end-to-endLLMservingsystemcanbenefitfrom
+footprintofsystemKVs,andPromptCache(Gim
+RelayAttention. InSection4,weprovideanempir-
+et al., 2023), which eliminates redundant compu-
+icalstudytoanswerthisquestion.
+tationinthepromptphase. Second,asthesystem
+KVsarealreadycomputedoffline,weaddanoffset
+4 Experiments
+of s (i.e., the length of the system prompt) in the
+positionofthoserequest-specificcontexttokensto Inthissection,weconductexperimentstoanswer
+makesureofcorrectpositionembedding. thequestionofhowmuchourapproachcanhelp
+an end-to-end LLM serving system. We provide
+3.4 TheoreticalSpeedup
+theexperimentalsetupinSection4.1. Ourmajor
+Inthissection,toderivethetheoreticalspeedupof evaluationisconductedwithconsiderationoftwo
+RelayAttention by the memory access reduction, scenarios: noninteractive batch processing (Sec-
+weanalyzethememoryaccessduringtheattention tion4.2)andinteractiveservice(Section4.3). We
+computationofanautoregressivegenerationstep. usetheLlama2-7Bmodel(Touvronetal.,2023)for
+Without RelayAttention, given a batch of b re- evaluationunlessstatedotherwise. Wedemonstrate
+questtokens,thenumberofelementsntotransfer theimprovementformoremodelsinSection4.4.
+betweenDRAMandSRAMis:
+4.1 ExperimentalSetup
+n = bd +b(s+c)d+ bd , (8)
+Data. Two datasets are used in our eval-
+(cid:124)(cid:123)(cid:122)(cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124)(cid:123)(cid:122)(cid:125)
+queries cachedKVs outputs uation: ShareGPTv3 (ShareGPT, 2023) and
+MMLU (Hendrycks et al., 2021). SharedG-
+wheredistheembeddingdimension,sisthelength
+PTv3(ShareGPT,2023)contains53krealconver-
+of the shared system prompt, and c is the length
+sionsbetweenusersandChatGPT(OpenAI,2022).
+of request-specific context. With RelayAttention
+enabled,thenumberofelementstoaccessn′ is: MMLUisabenchmarkformeasuringmassivemul-
+titasklanguageunderstandinginfew-shotsettings.
+n′ = (bd+sd+bd)+(bd+bcd+bd)+ 3bd . Itconsistsof57taskscoveringvarioussubjectsand
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124)(cid:123)(cid:122)(cid:125)
+systemattetion contextattention relayfusion domains, such as mathematics, history, law, and
+(9) medicine. Each subject/task contains a series of
+6
+pudeeps
+evitaleRvLLM vLLM-PS vLLM-RA (ours)
+(a) Nvidia A40 throughput (b) A100-PCIE-40GB througput (c) A100-SXM4-80GB throughput
+Figure6: Throughputw.r.t.systempromptlengthduringthenoninteractiveprocessingofShareGPTv3dataset.
+Sys.promptlen. Userpromptlen. Generationlen. Accuracy GPU vLLM vLLM-PS vLLM-RA
+ShareGPTv3 64-2048 4-1024 4-2013 A100-80G 502 336(↓33%) 306(↓39%)
+1-shot 37.6%
+MMLU 379-2895 55-1219 32 A40-48G 1012 675(↓33%) 621(↓39%)
+Table1: Dataforbenchmarking. Lengthsaremeasured 3-shot 41.3% A100-80G 851 378(↓55%) 311(↓63%)
+A40-48G 1751 752(↓57%) 629(↓64%)
+intoken.
+A100-80G 1308 432(↓67%) 316(↓76%)
+5-shot 43.2%
+A40-48G 2660 850(↓68%) 641(↓76%)
+Memory Mem.Band. FP16PeakF. Price
+Table3: MMLUfew-shotacc. andprocessingtime(s).
+A40 48GB 696GB/s 37.4TFLOPs $0.40/hr
+A100-PCIE-40GB 40GB 1,555GB/s 77.9TFLOPs $0.90/hr
+A100-SXM4-80GB 80GB 2,039GB/s 77.9TFLOPs $1.84/hr vLLM-PS,thisversionfurthereliminatesthere-
+Table 2: The specifications of the GPUs used in our dundantmemoryaccessesofsystemKVs,asdis-
+experiments. Pricesarefromvast.ai. cussedinSection3.3.
+single-choicequestions,and5extraquestionswith 4.2 NoninteractiveBatchProcessing
+answers(asfew-shotexamples). Thestatisticsof
+For the non-interactive batch processing scenar-
+thebenchmarkingdataaresummarizedinTable1.
+ioswhereusersjustsubmittheirjobstotheLLM
+Hardware. OurexperimentsinvolvethreeGPUs:
+services and harvest the processing results later,
+A40,A100-PCIE-40GB,andA100-SXM4-80GB.
+weconsiderthethroughput(numberoftokensper
+However,A40isusedunlessstatedotherwise. The
+second)andprocessingtimeasthekeymetrics.
+hardwarespecificationsarelistedinTable2.
+Weplotthethroughputsw.r.t.thelengthofsys-
+ThreeApproachesusedforcomparison:
+tem prompt for processing ShareGPTv3 on the
+• vLLM 2: a state-of-the-art open-source LLM
+threeGPUsinFig.6. ForvLLM,thethroughputs
+inference system designed for high throughput
+degrade heavily as the system prompt becomes
+LLM serving. Note that the core component
+longfortworeasons: (1)thesystempromptoccu-
+of vLLM, PagedAttention (Kwon et al., 2023),
+piestoomuchmemory,andthusheavilylimitsthe
+allows storing the shared system KVs exactly
+batchsize/concurrencyofdecoding;(2)ittakestoo
+oncebytheprefixsharingtechniquementioned
+muchtimetohandlelongsystempromptsduring
+intheirpaper,butthistechniqueisnotincluded
+causalattentioncomputation. Withprefixingshar-
+inthepubliccoderelease. Consideringtheimpor-
+ing,vLLM-PSsolvesthefirstproblemandachieves
+tancetosavememoryforahigherconcurrency,
+upto108%improvementonthethroughput. Our
+weimplementastrongerbaseline,vLLM-PSas
+vLLM-RLfurthersolvesthesecondproblemand
+specifiedbelow.
+increases the throughput to 1.06× to 4.36× of
+• vLLM-PS:theaugmentedversionofvLLMim-
+vLLM.Table3showsresultsofthefew-shottest
+plemented by us. It integrates not only prefix
+on MMLU. We can see that using a long system
+sharingbutalsoPromptCache(Gimetal.,2023),
+prompttoincludemoreexamplesiscrucialforim-
+whichprecomputesthesystemKVsandreuses
+provingaccuracy. Inthecaseofthe5-shottest,our
+themtomitigatetheburdenofthepromptphase.
+vLLM-RAprovidesa76%reductionofprocessing
+Therefore,vLLM-PSeliminatesbothredundant
+timeonbothA40andA100-SXM4-80GBGPUs.
+memoryfootprintandunnecessarycomputations
+ofsystemKVs. 4.3 InteractiveServing
+• vLLM-RA (ours): the modfied vLLM with
+An important LLM application is chatbots (Ope-
+our RelayAttention integrated. Compared with
+nAI, 2022; Google, 2023a), in which interactive
+2https://github.com/vllm-project/vllm LLM services are typically provided. Unlike the
+7
+)s
+/ kot(
+tuphguorhTvLLM vLLM-PS vLLM-RA (ours)
+(a) System prompt length = 512 (b) System prompt length = 1024 (c) System prompt length = 2048
+Figure7: BenchmarkinteractiveservingwithrequestssampledfromtheShareGPTv3dataset.
+noninteractive scenario, though we still expect a vLLM vLLM-PS vLLM-RA
+highthroughputforgoodhardwareutilization,we
+systempromptlength=512
+alsocareaboutthenormalizedlatency(i.e.,average
+Llama2-13B 0.99 1.44(↑45%) 1.71(↑73%)
+per-tokenlatency),whichiscrucialforuserexpe- Llama-30B† 2.15 3.01(↑40%) 3.65(↑70%)
+rience. Following PagedAttention (Kwon et al., Phi-2(2.7B) 5.03 6.29(↑25%) 8.85(↑76%)
+Mistral-7B 3.68 5.40(↑47%) 5.90(↑60%)
+2023),wesample1000requestsfromtheShareG-
+PTv3 dataset to benchmark the efficiency. The systempromptlength=1024
+requestarrivaltimesaregeneratedusingPoisson Llama2-13B 0.66 1.23(↑86%) 1.69(↑156%)
+Llama-30B† 1.52 2.55(↑68%) 3.64(↑139%)
+distributionwithdifferentrequestrates.
+Phi-2(2.7B) 3.54 4.82(↑36%) 8.76(↑147%)
+AsshowninFig.7,astherequestrateincreases,
+Mistral-7B 2.60 4.92(↑89%) 5.85(↑125%)
+the throughput grows gradually until reaching a
+Table4: Throughput(req/s)ofdifferentmodelsduring
+maximum. In contrast, the latency remains low
+thebatchprocessingoftheShareGPTv3dataset. †: the
+at the beginning and then goes up steeply when
+30BmodelishostedontwoA100-SXM4-80GBGPUs.
+the highest throughput is achieved. Around the
+latency of 0.5s/token, where the user experience nothelp. Therefore,RelayAttentionissuitablefor
+and hardware utilization is balanced, vLLM-RA cloud-servingscenarios. Second,whentherequest-
+sustainshigherrequestratesthanbothvLLMand specific contexts (including user prompts and re-
+vLLM-PSwithclearmargins(upto∼ 2.2×when sponses)arelong(e.g.,2×longerthantheshared
+thesystempromptlengthis2048). systemprompt),thecomputationtimeisdominated
+bytheprocessingofthem;thustheefficiencygain
+4.4 TheImprovementforMoreModels willdiminish. However,asthecontextlengthhasa
+To verify the efficiency improvement for more long-taileddistributioninmanyapplications(e.g.,
+models, we choose several other popular LLMs chatbots),wherethemajorityofuserpromptsand
+suchasLlama2-13B,Llama-30B,Phi-2(Microsoft, responsesareshort,theefficiencygainbroughtby
+2023b),andMistral-7B(Jiangetal.,2023)torun RelayAttentionisstillconsiderable. Infuturework,
+thenoninteractivebatchprocessingofShareGPTv3. wewillexploremoreapplicationsbycustomizing
+AsshowninTable4,vLLM-RAalsoprovidescon- aLLMwithlongsystemprompts.
+sistentimprovementsfortheseLLMs.
+6 Conclusion
+5 LimitationsandFutureWork
+Inthispaper,wehaveidentifiedabottleneckofus-
+ThelimitationsofRelayAttentioncanbereflected inglongsystempromptsinLLMservices: thereare
+bythetheoreticalspeedup(Eq.(10)). First,ithelps highlyredundantmemoryaccessescorresponding
+batched inference (b > 1). The larger the batch to those system KVs. We have proposed Relay-
+size, the more efficient RelayAttention is. When Attentiontocomputeexactcausalattentionwhile
+thereisonlyonerequest,whichisthetypicalcase removingtheredundantmemoryaccesses. Ananal-
+ondevice-sideapplications,RelayAttentiondoes ysisofthetheoreticalspeedupofRelayAttention
+8
+tuphguorhT
+ycnetal
+dezilamroN
+)s
+/ qer(
+)nekot/s(isprovided. Extensiveexperimentsoverdifferent QihaoZhu,andYuhengZou.2024. Deepseekllm:
+GPUs,models,anddatasetsempiricallyverifythe Scalingopen-sourcelanguagemodelswithlongter-
+mism.
+efficiencygainsbroughtbyRelayAttention.
+Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and
+Dan Alistarh. 2022. Gptq: Accurate post-training
+References
+quantizationforgenerativepre-trainedtransformers.
+arXivpreprintarXiv:2210.17323.
+Anthropic.2023. https://www.anthropic.com/in
+dex/100k-context-windows.
+InGim,GuojunChen,Seung-seobLee,NikhilSarda,
+Charlie Chen, Sebastian Borgeaud, Geoffrey Irving, AnuragKhandelwal,andLinZhong.2023. Prompt
+Jean-Baptiste Lespiau, Laurent Sifre, and John cache: Modularattentionreuseforlow-latencyinfer-
+Jumper.2023a. Acceleratinglargelanguagemodel ence. arXivpreprintarXiv:2311.04934.
+decodingwithspeculativesampling. arXivpreprint
+arXiv:2302.01318. GitHub.2022. Githubcopilot. https://github.com
+/features/copilot.
+Mark Chen, Jerry Tworek, Heewoo Jun, Qiming
+Yuan,HenriquePondedeOliveiraPinto,JaredKa- Google.2023a. https://bard.google.com.
+plan, HarriEdwards, YuriBurda, NicholasJoseph,
+Greg Brockman, et al. 2021. Evaluating large Google. 2023b. Gemini - google deepmind. https:
+language models trained on code. arXiv preprint //deepmind.google/technologies/gemini.
+arXiv:2107.03374.
+Albert Gu and Tri Dao. 2023. Mamba: Linear-time
+Yukang Chen, Shengju Qian, Haotian Tang, Xin Lai, sequencemodelingwithselectivestatespaces. arXiv
+ZhijianLiu, SongHan, andJiayaJia.2023b. Lon- preprintarXiv:2312.00752.
+glora: Efficientfine-tuningoflong-contextlargelan-
+guagemodels. arXivpreprintarXiv:2309.12307. Dan Hendrycks, Collin Burns, Steven Basart, Andy
+Zou,MantasMazeika,DawnSong,andJacobStein-
+Jiaxi Cui, Zongjian Li, Yang Yan, Bohua Chen, and
+hardt.2021. Measuringmassivemultitasklanguage
+Li Yuan. 2023. Chatlaw: Open-source legal large
+understanding. ProceedingsoftheInternationalCon-
+languagemodelwithintegratedexternalknowledge
+ferenceonLearningRepresentations(ICLR).
+bases. arXivpreprintarXiv:2306.16092.
+Albert Q Jiang, Alexandre Sablayrolles, Arthur Men-
+TriDao.2023. Flashattention-2: Fasterattentionwith
+sch,ChrisBamford,DevendraSinghChaplot,Diego
+better parallelism and work partitioning. arXiv
+delasCasas,FlorianBressand,GiannaLengyel,Guil-
+preprintarXiv:2307.08691.
+laumeLample,LucileSaulnier,etal.2023. Mistral
+Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and 7b. arXivpreprintarXiv:2310.06825.
+Christopher Ré. 2022. Flashattention: Fast and
+memory-efficientexactattentionwithio-awareness. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying
+AdvancesinNeuralInformationProcessingSystems, Sheng,LianminZheng,CodyHaoYu,JosephGon-
+35:16344–16359. zalez, Hao Zhang, and Ion Stoica. 2023. Efficient
+memorymanagementforlargelanguagemodelserv-
+DeepSeek-AI, :, Xiao Bi, Deli Chen, Guanting ingwithpagedattention. InProceedingsofthe29th
+Chen,ShanhuangChen,DamaiDai,ChengqiDeng, SymposiumonOperatingSystemsPrinciples,pages
+Honghui Ding, Kai Dong, Qiushi Du, Zhe Fu, 611–626.
+Huazuo Gao, Kaige Gao, Wenjun Gao, Ruiqi Ge,
+Kang Guan, Daya Guo, Jianzhong Guo, Guangbo Yaniv Leviathan, Matan Kalman, and Yossi Matias.
+Hao, Zhewen Hao, Ying He, Wenjie Hu, Panpan 2023. Fast inference from transformers via spec-
+Huang, Erhang Li, Guowei Li, Jiashi Li, Yao Li, ulative decoding. In International Conference on
+Y. K. Li, Wenfeng Liang, Fangyun Lin, A. X. Liu, MachineLearning,pages19274–19286.PMLR.
+Bo Liu, Wen Liu, Xiaodong Liu, Xin Liu, Yiyuan
+Liu,HaoyuLu,ShanghaoLu,FuliLuo,ShirongMa, Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang,
+XiaotaoNie,TianPei,YishiPiao,JunjieQiu,HuiQu, XingyuDang,andSongHan.2023. Awq:Activation-
+Tongzheng Ren, Zehui Ren, Chong Ruan, Zhangli awareweightquantizationforllmcompressionand
+Sha, Zhihong Shao, Junxiao Song, Xuecheng Su, acceleration. arXivpreprintarXiv:2306.00978.
+JingxiangSun,YaofengSun,MinghuiTang,Bingx-
+uanWang,PeiyiWang,ShiyuWang,YaohuiWang, Yuhan Liu, Hanchen Li, Kuntai Du, Jiayi Yao, Yi-
+YongjiWang,TongWu,Y.Wu,XinXie,ZhendaXie, hua Cheng, Yuyang Huang, Shan Lu, Michael
+Ziwei Xie, Yiliang Xiong, Hanwei Xu, R. X. Xu, Maire,HenryHoffmann,AriHoltzman,etal.2023.
+YanhongXu,DejianYang,YuxiangYou,Shuiping Cachegen: Fastcontextloadingforlanguagemodel
+Yu,XingkaiYu,B.Zhang,HaoweiZhang,Lecong applications. arXivpreprintarXiv:2310.07240.
+Zhang, LiyueZhang, MingchuanZhang, Minghua
+Zhang, Wentao Zhang, Yichao Zhang, Chenggang Microsoft.2023a. https://www.microsoft.com/en
+Zhao, Yao Zhao, Shangyan Zhou, Shunfeng Zhou, -us/windows/copilot-ai-features.
+9Microsoft.2023b. https://www.microsoft.com/en Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu,
+-us/research/blog/phi-2-the-surprising-p JulienDemouth,andSongHan.2023. Smoothquant:
+ower-of-small-language-models/. Accurateandefficientpost-trainingquantizationfor
+largelanguagemodels. InInternationalConference
+JohnJNay,DavidKaramardian,SarahBLawsky,Went- onMachineLearning,pages38087–38099.PMLR.
+ingTao,MeghanaBhat,RaghavJain,AaronTravis
+Lee,JonathanHChoi,andJungoKasai.2023. Large Gyeong-InYu,JooSeongJeong,Geon-WooKim,Soo-
+language models as tax attorneys: A case study jeong Kim, and Byung-Gon Chun. 2022. Orca: A
+in legal capabilities emergence. arXiv preprint distributedservingsystemfor{Transformer-Based}
+arXiv:2306.07075. generative models. In 16th USENIX Symposium
+on Operating Systems Design and Implementation
+OpenAI.2021. https://openai.com/research/tr (OSDI22),pages521–538.
+iton.
+Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong
+Chen,LianminZheng,RuisiCai,ZhaoSong,Yuan-
+OpenAI.2022. https://openai.com/blog/chatgp
+dongTian,ChristopherRé,ClarkBarrett,etal.2023.
+t.
+H_2o: Heavy-hitteroracleforefficientgenerative
+inferenceoflargelanguagemodels. arXivpreprint
+OpenAI.2023a. https://openai.com/blog/custom
+arXiv:2306.14048.
+-instructions-for-chatgpt.
+A ImplementationofRelayAttention
+OpenAI. 2023b. GPT-4 technical report. CoRR,
+abs/2303.08774.
+Reformulation of relay fusion. As mentioned
+in Section 3.3, we use the log-sum-exp trick to
+ReinerPope,SholtoDouglas,AakankshaChowdhery,
+JacobDevlin,JamesBradbury,JonathanHeek,Kefan handlethenumericalinstabilityofthedenominator
+Xiao, Shivani Agrawal, and Jeff Dean. 2023. Effi- inSoftmaxoperation. Thecombinationcoefficient
+cientlyscalingtransformerinference. Proceedings
+for the system attention term in Eq. (7),
+αsys
+, is
+ofMachineLearningandSystems,5. t
+reformulatedaccordinglyas:
+AlecRadford,KarthikNarasimhan,TimSalimans,Ilya
+σ1→s σ1→s
+Sutskever, et al. 2018. Improving language under- αsys = t = t
+standingbygenerativepre-training. t σ1→l σ1→s+σs+1→l
+t t t
+exp(β1→s)
+Laila Rasmy, Yang Xiang, Ziqian Xie, Cui Tao, and = t (11)
+DeguiZhi.2021. Med-bert: pretrainedcontextual- exp(β1→s)+exp(βs+1→l)
+t t
+izedembeddingsonlarge-scalestructuredelectronic 1
+health records for disease prediction. NPJ digital = ,
+medicine,4(1):86. 1+exp(β ts+1→l −β t1→s)
+where
+ShareGPT.2023. https://sharegpt.com/.
+e
+Eth Ca on rbS it ne ,in Sb tee prg h, enK Ren PJ fu on hg l,, aJ na dso Nn igA amFr Hies S, hC aho .n 2o 0r 2K
+1.
+β tb→e = log(σ tb→e) = log((cid:88) exp(q tkT
+j
+)) (12)
+j=b
+Language models are an effective representation
+learningtechniqueforelectronichealthrecorddata.
+isthelog-sum-exp.
+Journalofbiomedicalinformatics,113:103637.
+Implementation details. RelayAttention can be
+Ilya Sutskever, Oriol Vinyals, and Quoc V Le. 2014. builtuponexistingefficientattentionkernelswith
+Sequencetosequencelearningwithneuralnetworks. minimaladaptations. Forthesystemattentionin-
+Advancesinneuralinformationprocessingsystems,
+volving the system prompt of non-growing static
+27.
+length, we use off-the-shelf FlashAttention ker-
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Al- nels (Dao, 2023), which natively return the log-
+bert, Amjad Almahairi, Yasmine Babaei, Nikolay sum-exprequiredforcomputationofcombination
+Bashlykov,SoumyaBatra,PrajjwalBhargava,Shruti
+coefficientsinEq.(7). Forthecontextattentionthat
+Bhosale, et al. 2023. Llama 2: Open founda-
+needstohandlethegrowingrequest-specificcon-
+tion and fine-tuned chat models. arXiv preprint
+arXiv:2307.09288. texts,weusePagedAttention(Kwonetal.,2023)
+kernelsforefficientmemorymanagementandmod-
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob ify these kernels to return log-sum-exp. We im-
+Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+plement a single fused kernel with OpenAI Tri-
+Kaiser,andIlliaPolosukhin.2017. Attentionisall
+ton(OpenAI,2021)fortherelayfusionstep,which
+youneed. Advancesinneuralinformationprocessing
+systems,30. involvesmultipleelement-wiseoperations.
+10vLLM vLLM-PS vLLM-RA (ours)
+(a) user prompt len. 64, generation len. 128 (b) user prompt len. 128, generation len. 256 (c) user prompt len. 256, generation len. 512
+Figure8: Throughputw.r.t.systempromptlengthwithsyntheticworkloads.
+Offline Preparation Online Serving
+: number of layers
+: sys. prompt length Allocate empty KV Run LLM inference
+: number of heads cache blocks w/ PagedAttention
+: head dimension
+Allocate empty KV
+Allocate and prefill cache blocks (for Shift the pos. by ;
+system KV cache request-specific run LLM inference
+contexts) w/ RelayAttention
+Figure 9: Comparison of the system level design of
+vLLM(top)andvLLM-RA(bottom).Themodifications
+ofvLLM-RAarehighlightedinred.
+B SystemLevelDesignofvLLM-RA
+AsmentionedinSection3.3,itiseasytointegrate
+RelayAttentionintoexistinginferencesystemwith
+thereplacementofattentioncomputationfunction
+and several peripheral adaptations. In Fig. 9, we
+summarizethesystemleveldesignofvLLM-RA
+inacomparisonwithvLLM.
+Figure 10: Distribution of the two datasets: ShareG-
+C MoreInformationofTheDatasets
+PTv3(top)andMMLU(bottom).
+The ShareGPTv3 dataset contains both user
+requests. Though this is far from real-world sce-
+promptsandLLMresponses. Thedistributionsof
+narios,itisusefultotestthelimitofanLLMserv-
+thelengthareplottedonthetopofFig.10. Weuse
+ingsystembecausesuchperfectlylength-aligned
+synthesizedsystempromptsduringbenchmarking
+requests eliminate the burden of scheduling. We
+withthisdataset.
+adopt three combinations of user prompt length
+FortheMMLUdataset,weusetheprovidedfew-
+and generation length, (64, 128), (128, 256), and
+shotexamplesassystempromptsandthequestions
+(256, 512) for benchmarking, and plot the trend
+as user prompts. The generation length is set to
+of throughput w.r.t. the system prompt lenth in
+32 and we extract the answer in A, B, C, D as
+Fig. 8. Notably, in the most challenging case
+thefirstcapitalletterintheresponses. Thelength
+wheretherequest-specificcontextshavealength
+distributionsofsystempromptsanduserprompts
+of256+512 = 768,RelayAttentionstillprovides
+areshowninFig.10bottom.
+an up to 2.2× speedup when the system prompt
+D BenchmarkwithSyntheticWorkloads lengthis2048.
+In the section, we benchmark the efficiency with
+syntheticworkloads,wheretheuserpromptlength
+and the generation length are both fixed for all
+11
+)s
+/ kot(
+tuphguorhT
