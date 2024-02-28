@@ -1,0 +1,1580 @@
+Discovering Artificial Viscosity Models for Discontinuous Galerkin
+approximation of Conservation Laws using Physics-Informed
+Machine Learning
+Matteo Caldanaa,∗, Paola F. Antoniettia, Luca Dede’a
+aMOX, Dipartimento di Matematica, Politecnico di Milano, Piazza Leonardo da Vinci 32, 20133 Milano, Italy
+February 27, 2024
+Abstract
+Finite element-based high-order solvers of conservation laws offer large accuracy but face challenges
+neardiscontinuitiesduetotheGibbsphenomenon. Artificialviscosityisapopularandeffectivesolution
+tothisproblembasedonphysicalinsight. Inthiswork,wepresentaphysics-informedmachinelearning
+algorithm to automate the discovery of artificial viscosity models in a non-supervised paradigm. The
+algorithm is inspired by reinforcement learning and trains a neural network acting cell-by-cell (the
+viscosity model) by minimizing a loss defined as the difference with respect to a reference solution
+thanks to automatic differentiation. This enables a dataset-free training procedure. We prove that
+the algorithm is effective by integrating it into a state-of-the-art Runge-Kutta discontinuous Galerkin
+solver. We showcase several numerical tests on scalar and vectorial problems, such as Burgers’ and
+Euler’sequationsinoneandtwodimensions. Resultsdemonstratethattheproposedapproachtrainsa
+modelthatisabletooutperformclassicalviscositymodels. Moreover,weshowthatthelearntartificial
+viscosity model is able to generalize across different problems and parameters.
+Key words: Artificial viscosity, Conservation laws, Discontinuous Galerkin, Physics-informed machine
+learning, Neural networks, Reinforcement learning.
+MSC subject classification: 35L65, 65M60, 68T01
+1 Introduction
+Hyperbolic conservation laws, such as Euler equations or the equations of magnetohydrodynamics, have
+a wide range of applications in Engineering, ranging from aerodynamics, weather predictions, and civil
+engineeringtoastrophysicsandnuclearfusion. TheDiscontinuousGalerkin(DG)method[11,12,15,17,31]
+is a well-established (and continuously growing in popularity) high-order solver that offers conservation of
+physical properties, high-order accuracy, geometric flexibility [2], and parallel efficiency [33, 38]. A known
+drawback of any high-order methods is that in the presence of discontinuities of the solution, the Gibbs
+phenomenon may appear [23], which causes spurious numerical oscillations that invalidate the physical
+meaning of the solution. Indeed, Godunov’s theorem [60] states that any linear monotone numerical scheme
+canbeatmostfirst-orderaccurate. Thisproblemisespeciallyrelevantsinceincertainregionsofthedomain
+continuous initial conditions may lead to a loss of regularity of the solution and thus numerical instability
+appears.
+Several approaches have been developed in the literature to correct and reduce the effect of the Gibbs
+phenomenon for DG methods. A common feature of most of these approaches is that they rely on the
+identification of troubled cells, that is mesh elements where the solution loses regularity. For instance, slope
+limiters [9, 13, 37] are widely used, but they can significantly compromise the global solution accuracy, and
+an improper parameter selection may lead to increased computational costs. Other authors have investi-
+gatedWeightedEssentiallyNon-Oscillatory(WENO)reconstruction[49,50,55],whichmaintainshigh-order
+accuracy but may exhibit a large computational cost. More recently, the Multidimensional Optimal Order
+Detection (MOOD) approach [18] and filtering methods [45] have been proposed. These approaches switch
+theemployedmethodonthetroubledcells: fromahigh-orderDGmethodtoamonotonefirst-ordermethod.
+However, their performance relies on the quality of the indicator and parameter tuning, respectively.
+Instead, in this paper, we focus on a different approach called Artificial Viscosity (AV), which is based
+on the addition of a suitable amount of dissipation near discontinuities so to recover a smooth solution and
+∗Correspondingauthor: matteo.caldana@polimi.it
+1
+4202
+beF
+62
+]AN.htam[
+1v71561.2042:viXrathus high-order accuracy. A common characteristic of artificial viscosity approaches is the definition of a
+metric to evaluate the regularity of the solution. For instance, they may use differential operators that have
+a particular physical meaning [43], the jump of the flux on the element boundaries [7], or the residual in
+the mesh element [27]. Other models instead rely on estimating the average decay rate of modal coefficients
+[34], or just targeting the highest modes [48]. A very successful model is the so-called entropy viscosity
+(EV) model, which employs as a measure of regularity the residual of an entropy pair [24, 64]. A significant
+drawbackofallthesemodelsisthattheiraccuracy, robustness, andstabilitystronglydependonparameters
+tunedbyphysical insight andintuition. Indeed, thelackof anestablished rulefor estimatingoptimal values
+and the fact that parameters must be picked on a problem-dependent basis makes their usage expensive.
+In recent years, a large effort has been poured into overcoming these problems by employing supervised
+learningmethodsandmorespecifically,deeplearning. Inparticular,neuralnetworks(NN)havebeenusedto
+create a universal artificial viscosity model that does not require to be tuned on a problem-dependent basis.
+Indeed, in [16, 54] the authors prove that is possible to train a NN that identifies regions where dissipation
+of numerical oscillations is needed. In [59] the authors use a NN to determine the optimal parameter for the
+SUPGstabilizationmethod. Ingeneral,NNshavebeenproventobeavaluabletooltosurrogatemodelsand
+automate the expensive phase of trial-and-error present in many numerical applications [10, 20, 21, 28, 51].
+Supervised learning however has some limitations. On one hand, building an extensive and high-quality
+dataset demands a considerable investment of time and computational resources. Indeed, in this case, its
+construction entails an expensive phase of parameter tuning of classical viscosity model in order to create
+examples that the NN could mimic. Moreover, supervised learning is not able to generalize beyond what is
+present in the dataset: the NN may generalize to problems not present in the dataset, but it is not possible
+to surpass the accuracy of the best among the classical viscosity models, which do not guarantee optimality.
+Namely, a critical issue of this kind has been exposed in a-posteriori testing of turbulence models trained
+by supervised learning [61]. A possible solution proposed in [44] is to employ reinforcement learning (RL)
+[58]. RLisawell-establishedbutexpensiveparadigmwhereanagentlearnstomakedecisionsbyinteracting
+with an environment, receiving feedback in the form of rewards, and adjusting its behavior to maximize
+cumulative reward over time.
+OurgoalinthispaperistoproposeandtestanalgorithmtotrainaNN-basedartificialviscositymodelin
+anon-supervisedlearningframework. Tothisend,weformulatetheproblemasanRLtaskandweenhanceit
+withphysics-informedmachinelearning(PIML)[26,32]. Namely,thankstoautomaticdifferentiation,wecan
+differentiate through the RL environment, effectively embedding information on the physics of the problem
+into the learning dynamics. The resulting approach shares some similarities with model-based RL such as
+[25], differentiable RL [42], and optimal control. Therefore, our approach overcomes the shortcomings of
+supervisedlearningandischeaperthanRLsincewecanexploitthedifferentiabilityoftheenvironment(the
+DGsolver). Therewardisdefinedasthedissimilarityfromareferencesolutionwiththeadditionofsuitable
+regularization terms. This also enables seamless integration of noisy data obtained from measurements of
+quantities of interest into the loss function, thereby being able to learn new physical models directly from
+data. The NN that we employ is a generalization of the one presented in [16] aimed at increasing flexibility
+and accuracy. An ablation study proves the efficacy of the proposed modifications.
+The paper is organized as follows. Section 2 introduces the mathematical model of conservation laws
+and its semi-discrete and algebraic formulations. In Section 3, we define the classical artificial viscosity
+models and we introduce the NN viscosity model. In Section 4 we introduce the novel training algorithm
+we are proposing and discuss the advantages of physics-informed machine learning. In Section 5 we show
+convergenceresultsforasmoothproblemandwepresentseveralapplicationstoproblemswithdiscontinuous
+solutions. Finally, in Section 6, we draw some conclusions and discuss further developments.
+2 The mathematical model
+In this section, we state the formulation of conservation law under consideration. The problem is defined
+in a bounded open domain in space x ∈ Ω ⊂ Rd (d = 1,2) and for a time t ∈ (0,T], with T > 0 given.
+The unknown of our problem is the vector of m conserved variables u = u(x,t) : Ω×(0,T] → Rm. The
+considered convention-diffusion problem reads as follows:
+(cid:40)
+∂ u+∇·(−µ(u)∇u+f(u))=0 inΩ×(0,T],
+t (1)
+u(x,0)=u (x) inΩ×{0}
+0
+endowed with suitable boundary conditions on ∂Ω×(0,T]. Namely, we either employ periodic boundary
+conditions or mixed Dirichlet-Neumann boundary conditions
+(cid:40)
+u(x,t)=g (x) onΓ ×(0,T],
+D D
+f(u(x,t))n=g (x) onΓ ×(0,T],
+N N
+2where Γ and Γ ̸= ∅ are disjoint sets ˚Γ ∩˚Γ = ∅ such that ∂Ω = Γ ∪Γ and g : Γ → Rm,g :
+N D N D N D D D N
+Γ → Rm are a regular enough boundary datum. In Eq. (1), f : Rm → Rm×d is the advection flux
+N
+and u : Ω → Rm is a given initial condition. The viscous flux is controlled by the viscosity coefficient
+0
+µ:Rm →R that is a positive and bounded function that has the physical meaning of an artificial diffusion
+term.
+2.1 The semi-discrete discontinuous Galerkin formulation
+For the spatial discretization, we employ the discontinuous Galerkin method. Let K be a shape-regular
+h
+family of open, disjoint cells (intervals for d = 1 or triangles for d = 2) K that approximates Ω. Moreover,
+let E be the set of all faces (points for d=1 or edges for d=2). On each face F ∈E , approximating the
+h h
+boundary∂Ω,asingletypeofboundaryconditionisimposedatatime(e.g.onlyDirichletorNeumann). We
+define h=max h , where h denotes the diameter of K. We define the averages on and jumps across
+K∈Kh K K
+the edges for a smooth enough scalar function v : Ω → R and for a smooth enough vector-valued function
+q :Ω→Rn. LetusconsidertwoneighboringelementsK+ andK−,letn+ andn− betheiroutwardnormal
+unit vector and let v±,q± be the restrictions to K±, respectively. In accordance with [3] we define
+• on the set of interior edges (denoted as E˚):
+h
+1 1
+{{v}}= (v−+v+), {{q}}= (q−+q+), [[v]]=v+n++v−n−, [[q]]=q+·n++q−·n−.
+2 2
+• on boundary edges, defined the symmetric outer product q⊙n=(v⊗n+n⊗v)
+{{v}}=v, {{q}}=q, [[v]]=vn, [[q]]=q⊙n.
+Tofurtherstabilizethescheme,asshownin[8,31],werecallthefollowingweightedaverage,whichintroduces
+a stabilizing numerical flux
+[[α]]
+{{q}} ={{f(q)}}+ [[q]] ∀F ∈E ,
+α 2 h
+where α represents a pair of scalars α± associated with the elements K±. For some choices of α we can
+recover already well-known numerical fluxes: if f is the identity and α± = 1 ± 1 we have the upwind
+2 2
+flux [4], if α is the largest eigenvalue (in absolute value) λ of the Jacobian ∂f we have the Rusanov flux
+∂u
+[52]. To construct the semi-discrete formulation, we define for any integer k ≥1 the finite element space of
+discontinuous piecewise polynomial functions as
+Xh ={v ∈L2(Ω):v| ∈Pk(K) ∀K ∈K }, Vh =[Xh]d,
+k K h k k
+wherePk(K)isthespaceofpolynomialsoftotaldegreelessthanorequaltokonK. Hence,thesemi-discrete
+formulation reads as follows: For any t∈(0,T], find u (t)∈Vh such that:
+h k
+(cid:40)
+(u˙ (t),v ) +A (u (t),v )−B (u (t),v )+I (u (t),v )=0 ∀v ∈Vh,
+h h Ω h h h h h h h h h h k (2)
+u (0)=u inΩ×{0},
+h 0h
+where
+• A :Vh×Vh →R is defined by
+h k k
+(cid:90)
+(cid:88)
+A (u ,v )= µ(u )∇u ·∇v
+h h h h h h
+K∈Kh Ω
+(cid:88) τk2 (cid:90) (cid:88)
++ µ(u )[[u ]][[v ]]− {{∇u }}[[v ]]+[[u ]]{{∇v }} ∀u ,v ∈Vh,
+|F| h h h h h h h h h k
+F∈/ΓN F F∈E˚
+h
+whereτ >0isasuitablepenalizationconstantand|F|isthemeasureinthetopologyoftheboundary.
+• B :Vh×Vh →R is defined as
+h k k
+(cid:90) (cid:90)
+(cid:88) (cid:88)
+B (u ,v )= f(u )·∇v − {{f(u )}} ·[[v ]] ∀u ,v ∈Vh.
+h h h h h h λ h h h k
+K∈Kh K F∈E˚
+h
+F
+• I :Vh×Vh →R is a form that includes suitable terms for the boundary conditions.
+h k k
+32.2 Algebraic formulation
+Denote as (φ )I a suitable basis for the discrete space Vh, where I =dim(Vh), then
+i i=1 k k
+I
+(cid:88)
+u (t)= U (t)φ .
+h i i
+i=1
+We collect the coefficients U (t) of the expansions of u (t) in the vector function U : (0,T] → RmI. By
+i h
+defining the mass matrix
+[M] =(φ ,φ ) , ∀i,j =1,...,I
+ij i j Ω
+and the non-linear terms
+[A(U(t))] =A (u ,φ ), [B(U(t))] =B (u ,φ ), [I(U(t))] =I (u ,φ ), ∀i=1,...,I.
+i h h i i h h i i h h i
+We rewrite problem (2) in algebraic form as follows
+(cid:40)
+MU˙ (t)+A(U(t))−B(U(t))+I(U(t))=0 t∈(0,T],
+(3)
+U(0)=U ,
+0
+where U is the projection of the initial datum u on Vh. For the space discretization, we employ a nodal
+0 0 k
+spectralbasisderivedfromamultidimensionalgeneralizationoftheLegendre-Gauss-Lobattopointsasshown
+in [31].
+2.3 Fully-discrete formulation
+System (3) can be solved with various time-marching strategies, like Runge-Kutta schemes, by defining a
+partition of N intervals 0 = t0 < t1 < ... < tN = T. In literature (see [31]), this is usually coupled with an
+adaptive time-step ∆t=∆t(t) determined by the following CFL condition at a time t:
+CFL
+∆t= . (4)
+k h2 m x∈a Ωx(cid:12) (cid:12)f′(u h(x,t))(cid:12) (cid:12)+ hk4
+2
+m x∈a Ωxµ(u h(x,t))
+Specifically, we utilize one of the two following options: a third-order Strong Stability Preserving Runge-
+Kutta (SSPR3) scheme [19] or a fourth-order low-storage explicit Runge-Kutta with five stages [12]. The
+choicebetweenthetwoismadesotominimizethenumberoftotalstageswhilemaintainingastablesolution.
+2.4 Convective flux models
+This study investigates various conservation laws. For one-dimensional (d=1) scenarios, we examine
+• the linear advection equation (m=1):
+f(u)=βu, (5)
+where the transport field β ∈R is constant;
+• the Burgers’ equation (m=1):
+1
+f(u)= u2; (6)
+2
+• the Euler system, namely, given the ideal gas law for pressure p=(γ−1)(e− 1ρ|v|2), where γ =7/5
+2
+is the heat capacity ratio, e is the energy, ρ is the density and v is the velocity, we have (m=3):
+   
+ρ ρv
+u=ρv, f(u)=ρv2+p. (7)
+e v(e+p)
+The two-dimensional (d=2) models we consider are
+• the linear advection equation (m=1):
+f(u)=βu, (8)
+where the transport field β ∈R2 is constant;
+4• theKPProtatingwaveproblem[24,35](m=1),characterizedbyanon-convexfluxineachcomponent
+(cid:20) (cid:21)
+sinu
+f(u)= ; (9)
+cosu
+• the Euler system (m=4), defined as
+   
+ρ ρv ρv
+1 2
+u= ρv 1
+,
+f(u)=
+
+ρv 12+p ρv 22+p 
+, (10)
+ρv 2  ρv 1v 2 ρv 1v 2 
+e v (e+p) v (e+p)
+1 2
+(cid:20) (cid:21)
+v
+where v = 1 is the velocity field, and the pressure p=(γ−1)(e− 1ρ∥v∥2) is defined analogously
+v 2 2
+2
+as before.
+3 Artificial viscosity
+We provide a concise review of classical artificial viscosity models that hold a pivotal role in understanding
+the limitations of current methods. We then present the EV model which is the state-of-the-art model
+serving as the main tool for validating the proposed deep learning physics-informed technique. Finally, we
+introducetheartificialviscositymodelsbasedonneuralnetworks. Forthesakeofsimplicity,wedescribethe
+procedure for scalar problems. The standard way to generalize to systems is to choose one of the variables
+as the representative scalar quantity to be used within the viscosity model.
+3.1 An outline of artificial viscosity
+Most artificial viscosity models are based on a heuristic that may be very different from model to model.
+However, it is still possible to recognize some common features that all artificial viscosity models share:
+• For each element K ∈K , a shock indicator measures the size of the local discontinuities and outputs
+h
+a viscosity µ to be added in that cell. The viscosity µ must be small or null when the solution is
+K K
+smooth, to avoid modifications to the physics of the problem. In the presence of discontinuities, µ
+K
+must be the smallest value that is sufficient to eliminate Gibbs oscillations.
+• Sincelargeviscosityvaluesproduceover-dissipation,renderingthemodelunabletocapturesignificant
+features of the solution, at every time instant t, and for each element K ∈ K we define a viscosity
+h
+threshold
+µb Knd(x,t)=max{m x∈a Kxµ K(x,t),µ max(t)}, µ max(t)=c
+max
+h
+k
+m x∈a Kx(cid:12) (cid:12)f′(u h(x,t))(cid:12) (cid:12), (11)
+where c is a scalar parameter to be tuned for each problem [34, 48] and f′ defines the velocity of
+max
+propagationoftheproblem(form>1weconsidertherestrictiontotheequationoftherepresentative
+variable). Notice that the definition of µ assures that the viscous contribution is at most linear.
+max
+• The viscosity is globally smoothed as outlined in [62]. Despite the existence of advanced techniques
+[1],wefocusonastraightforwardthree-steppiecewiselinearinterpolatorapproach(thisprocedurecan
+easily be generalized to an arbitrary degree):
+1. On each vertex of the discretization K , compute the average viscosity among all the elements
+h
+that share that vertex;
+2. Computetheelement-wiselinearinterpolator,giventheaverageviscositiesonthevertexesofeach
+element;
+3. Evaluate the interpolator on the required points in order to build the algebraic system.
+Our numerical findings and [6] support the thesis that the smoothing mitigates numerical oscillations.
+In this study, we consider updates to the viscosity which are computed at every time step. However, it
+is possible to update the viscosity less frequently in order to decrease the computational cost.
+53.2 Entropy viscosity
+Theentropyviscositymodel[14,24,64]isastate-of-the-artmodelthatproducesaviscositycoefficientbased
+on the local size of entropy production. Namely, it is known [5] that the scalar inviscid continuous initial
+boundary value problem (1) has an unique entropy solution satisfying
+∂ E(u)+∇·F(u)≤0
+t
+where the two functions E :R→R and F :R→Rd are such that
+(cid:90)
+F(w)= E′(w)f′(w)dw, E is convex,
+and are called an entropy pair. We then define the local cell viscosity as
+(cid:18) h(cid:19)2
+max{|D (x,t)|,|H (x,t)|}
+µ (x,t)=c h h (12)
+K K k (cid:13) (cid:13)E(u h)−E(u h)(cid:13) (cid:13)
+∞
+where c is a parameter that must be manually tuned for each problem, E is the spatial integral average of
+K
+the entropy over the domain, D is the residual of the space-time entropy equation
+h
+D (x,t)=∂ E(u (x,t))+∇·F(u (x,t)),
+h t h h
+and H is the effect of the jump of the entropy flux across the element boundaries
+(cid:18) h(cid:19)−1
+H (x,t)= [[F(u (x,t))]]·n.
+h k h
+Finally,weimposeanupperlimitasprescribedby(11). Letusnowusethismodeltomakesomeobservations
+thatactuallyextendtoalmostallAVmodels. Inparticular,wecanoutlinethreemainweaknessesofclassical
+AV models that we would like to overcome:
+(A) The evaluation of the viscosity µbnd may be computationally expensive. In this particular case, com-
+K
+puting D and H is expensive.
+h h
+(B) They depend on parameter(s) that must be chosen manually. Specifically, c and c have to be
+max K
+tuned with trial-and-error. This requires deep know-how of the model or a time-consuming phase of
+trial-and-error.
+(C) They do not guarantee optimality: e.g., the EV model is based on an entropy heuristic argument and
+does not provide any error bound estimate.
+3.3 Basic concepts of Neural networks
+Let N I,N
+O
+∈ N be strictly positive. An artificial neural network is a function F : RNI → RNO that maps
+an input vector x ∈ RNI to an output vector y ∈ RNO and depends on a set of parameters that can be
+thoughttobeorderedintoavectorθ. Inthiswork,weonlyconsiderthesimplestversionofneuralnetworks:
+dense feed-forward neural networks (FNN), which are defined as follows. Fix two positive integers L and Z.
+Let y(0) =x and y(L) =y. An FNN of depth L and width Z is the composition of L functions called layers
+defined by
+y(l) =σ(l)(W(l)y(l−1)+b(l)), l=1,...,L,
+where W(l) ∈ RNl×Nl−1 are matrices of parameters called weights and b(l) ∈ RNl are vectors of parameters
+called biases. Here, N = N , N = N and N = Z for l = 1,...,L−1. Finally, at the end of each
+0 I L O l
+layer, ascalarnon-linearactivationfunctionσ(l) isappliedcomponent-wise. Weemploythesameactivation
+function(tobespecifiedlater,seeSection4.3)forallthelayersapartfromthelastonewhereweuseasoftplus
+activation function to guarantee the positiveness of the output. It can be seen as a smooth approximation
+of the ReLU, namely:
+σ(L)(t)=log(1+et)
+Severallearningstrategiesareavailabletodeterminethevectorofparametersθ. Amongthese,oneofthe
+most popular paradigms is supervised learning. Namely, we define and subsequently minimize a non-linear
+costfunction,calledlossfunctionL. Theoptimizationisusuallyperformedusingagradient-basedoptimizer,
+wherethegradient∇ Liscomputedbymeansofautomaticdifferentiation[46]. Thelossisdefinedbymeans
+θ
+6Localquantities
+Meshelement Inputs HiddenLayers Output
+statistics
+Un
+. . .
+stats(Un)
+i
+U i stats(f(U in)) µb Knd
+Λh˜
+µbnd
+T stats(∇U in) . . K
+. .
+stats(Un−1) . .
+i
+stats([[Un]])
+i
+polynomialdegreek
+Figure1: Schemeoftheonlinephaseoftheneuralviscosityapproach. Theneuralnetworkreturnsasoutputaviscosity
+valueµbnd foreachelementofthemeshindependentlyoftheotherelementsbyextractingrelevantstatisticsstatsof
+K
+thenodalvalues,namelytheminimum,themaximum,themean,andthestandarddeviation. Here,Unistheevaluation
+i
+ofu attimetn inthei-thdegreeoffreedomofK.
+h
+of a given dataset of input target pairs {(x,yˆ)}Ntrain that the NN must learn. Usually, the loss function
+i=1
+takes a form similar to the following
+1 N (cid:88)train
+L(θ)= ∥yˆ−y(x;θ)∥ , (13)
+N p
+train
+i=1
+where ∥·∥ indicates the discrete p-norm, p = 1,2. A sequence of gradient updates made by iterating over
+p
+thedatasetonetimeiscalledanepoch. Evenifwewillproposeanalternativeparadigm,thisiswhatisused
+in literature to train the artificial viscosity model and it is useful to fix this as a benchmark to be compared
+to our approach. Regardless of the paradigm used to train the NN, if properly optimized, neural networks
+are able to generalize, meaning that they make good predictions even for input data not used during the
+training phase. For a comprehensive description of neural networks, we direct the reader to [22, 63].
+3.4 The neural viscosity approach
+Theneuralviscosityapproach,thatistheideaofusingNNsasasurrogateforAVmodels,wasfirstproposed
+in [16, 54]. Indeed, NNs are an attractive substitute for classical AV models since they overcome the
+drawbacks (A) and (B) in the following way:
+(sA) NNs are computationally efficient during the online stage since they involve mainly simple matrix-
+matrixmultiplications. Moreover, inrecentyearslargeeffortwasputintodevelopingefficientlibraries
+and hardware to accelerate these linear algebra operations.
+(sB) NNs can learn highly complex and non-linear functions without the necessity of manually specifying
+parameters after the training. By leveraging the information present in a large dataset during the
+training phase, NNs can learn and generalize beyond a single problem.
+The architecture that we employ for our NN introduces some improvements with respect to the classical
+one. The real novelty of this paper lies in how we tackle the third drawback (C), that is how to train the
+NN and what it learns (or better discovers), which is a matter of Section 4.
+The way neural viscosity works is macroscopically the same in which any AV model works (as described
+in Section 3.1). The NN works independently on each cell, it receives as inputs some local quantities, and
+it outputs an artificial viscosity value µbnd for each cell K and finally, it performs a global smoothing step.
+K
+Letusnowdescribethisprocedureindetail. Thefirstdifferencewithrespecttotheoriginalneuralviscosity
+modelisthat,insteadofbuildingandtrainingadifferentNNforeachpolynomialdegreek >0,webuildjust
+one independently of k, reducing training costs. This is enabled by the fact that instead of feeding the local
+nodal values of the solution Un| (the evaluation of u at time tn in the degrees of freedom of K, which is
+K h
+equaltou | (tn)sinceweareemployinganodalbasis)totheNN,weextractsomerepresentativestatistics
+h K
+of these values, namely the mean and the standard deviation and we add as input also the local polynomial
+degreek. Theinputcanbeenrichedwithotherinformationsuchasthemedian,thequartiles,theminimum,
+or the maximum. In Section 4.3 we present numerical experiments that show the tradeoff between accuracy
+and computational cost of this choice. The second difference is that to accelerate the training, we feed not
+only the current velocity but also the nodal values of
+• the gradient of the velocity;
+7
+]1,1−[nignilacsraenillabolG
+elacseR• the jump of the velocity across the element boundary, since it is a key information to assess the
+smoothness of the current solution;
+• the velocity at the previous time step, to provide information about temporal correlation;
+• flux of the velocity, to provide information about the physics of the problem.
+Then, as in the original neural viscosity model, we apply a linear scaling to map the inputs in the interval
+[−1,1]andalinearrescalingofthetargetsµbnd ofthenetwork. Thisiscommonpracticeforseveralreasons,
+K
+including faster convergence during the training (prevents issues like vanishing or exploding gradients) and
+robustnesstovariationsininputmagnitudes(whichalsoisimprovedgeneralization). Thethirddifferenceis
+that our scaling, instead of being with respect to the local maximum over the element is done with respect
+totheglobalmaximum. Finally,aftertheoutputoftheNN,weapplythefollowingrescalingfortheelement
+K
+y = µ Λb Kn h˜d , where Λ=m Kax(cid:12) (cid:12)f′(u h)(cid:12) (cid:12), h˜ =min{m ∂Kax|[[u h]]|,h}.
+Observe that we denote with y the output of the NN since it is a scalar quantity. Moreover, the scaling is
+timedependent,soitchangesateverytimestep. TheinsightbehindthisrescalingisthatΛmakesthesame
+network work for difference PDEs since it represents the maximum local wave speed, and h˜ provides the
+optimal viscosity scaling hk+1 in the presence of smooth solution [31]. Indeed, even if the NN prescribes low
+dissipation when the solution is regular, due to the nature of the softplus function, it is never zero, which
+prevents the method from having optimal convergence. Instead, h˜ is a parameter-free option that provides
+the following scaling
+(cid:40)
+hk+1 if u is smooth,
+h˜ ∼
+h otherwise
+which enables a correct reduction of the artificial viscosity when the solution is smooth. A complete scheme
+of what we have just described is shown in Figure 1.
+4 Physics-informed machine learning
+Inthissection, wedescribeindetailhowtheneuralnetworkistrained. Weproposeanovelapproachthatis
+inspiredbyreinforcementlearningandisenhancedbyphysics-informedmachinelearning. Namely,thanksto
+automatic differentiation, we can differentiate through the DG solver (the environment in RL terminology)
+and define a loss function (the opposite of the reward) as the norm of the error between a reference solution
+and the solution obtained with the current parameters of the NN (the policy) that surrogates a viscosity
+model (agent). The loss is also enhanced with suitable regularization terms. To conclude the comparison
+with RL terminology, the local statistics extracted from each mesh element are the state and the viscosity
+µbnd theaction theagentchooses. ThemajordifferencewithrespecttoRListhatweareabletodifferentiate
+K
+throughtheenvironment. Thus,byusingagradient-basedoptimizer,wecandirectlycomputeupdatestothe
+parameter of the NN so to minimize the loss (maximize the reward). Hence, this training algorithm enables
+us to discover a new neural viscosity model that has the property of minimizing the norm of the error. This
+approachallowsustoavoidbuildingadatasetwithareferencevalueofartificialviscosity. Indeed,manyRL
+algorithms overcome the problem of a not differentiable environment using a second neural network called
+critic thatsurrogatesit. Thisishoweverexpensive, sincetheenvironmentdynamicmustalsobelearnt, and
+may lead to instabilities due to the interaction of the policy with the critic [39].
+4.1 Loss function
+The definition of the loss function is more important in this context than usual since it steers the optimizer
+toward the discovery of a neural viscosity model with certain properties. To explain how the loss works, let
+us make the following remark. Given the discretized initial condition U0, the solution at the next time step
+U1 depends on the artificial viscosity model we choose, which in return depends on U0. More in general we
+could say that
+Un =Un(µ(Un−1;θ))=Un(µ(µ(Un−2;θ);θ))=...=Un(U0;θ), ∀n>0,
+wherethevariableθ explicitsthedependenceontheparametersoftheNN.Hence,givenadiscretereference
+solution Un , that is the evaluation of a reference solution u :Ω×(0,T]→Rm at the degrees of freedom
+ex ex
+at time tn, by employ automatic differentiation we can compute
+∂ (cid:13) (cid:13)Un(U0;θ)−Un (cid:13) (cid:13) ∀n>0.
+∂θ ex p
+8Environment batch Automatic differentiation
+Data generation
+un
+h
+Random Solver Neural
+Time loop
+parameters DG-FEM viscosity
+µn
+T , k, u ,
+h 0
+N, f, ∆t un ∂L Parameter
+h Regularization ∂θ update
+Reference u ex Error Accumulate Loss L(θ)
+(cid:88) n p n p
+solution ||eh||p+||∇eh||p
+n
+Figure2: Schematicdescriptionoftheproposedtrainingprocedure.
+This is one of the main ingredients of our loss: using an optimizer, we can find the set of parameter θ that
+defines the neural viscosity model that minimizes the error with respect to the reference solution. We define
+the p-loss as follows:
+ 
+N
+L(θ;P)= (cid:88) ∥Un(θ)−Un ex∥p p+w 0∥∇Un(θ)−∇Un ex∥p p+ (cid:88) w rℓp r,p(Un(θ),Un ex), (14)
+n=1 ℓr,p∈R
+where R is a set of regularization terms ℓ in p-norm and
+r,p
+P ={K ,k,N,f,∆t,U0,u }, (15)
+h ex
+is a tuple that uniquely defines a problem. Namely, a triangulation K , polynomial degree of the basis k,
+h
+number of timesteps N, physical flux f, time discretization ∆t, initial condition U0 and the exact solution
+u . Noticethat,forthesakeofsimplicity,wehaveremovedtheexplicitdependenceonU0 ofUn forn>0.
+ex
+Indeed,inthislossfunction,itisimplicitthefactthattheDGsolverdescribedinSection2.2isemployedto
+computeUn fromU0. Noticethatwithaslightabuseofnotation,weapply(linear)differentialandintegral
+operatorstoUn,withthemeaningofconsideringthevectorofcoefficientsdescribingthefunctionsobtained
+by applying said operator to u (x,t). The metrics that we consider are the following:
+h
+• Error:
+ϵ(tn)=∥Un−Un ∥ . (16)
+ex p
+• Gradient of the error:
+∇ϵ(tn)=∥∇Un−∇Un ∥ . (17)
+ex p
+• Jump of the error:
+[[ϵ]](tn)=∥[[Un−Un ]]∥ . (18)
+ex p
+The insight of this term comes from the jump-jump term of the DG formulation: we need to penalize
+large jumps in order to obtain a solution that is not too oscillatory.
+• Overshoot and undershoot (o/u):
+o/u(tn)=(cid:13) (cid:13)Un1 Un>maxUn
+ex
+−maxUn ex(cid:13) (cid:13) p+(cid:13) (cid:13)Un1 Un<minUn
+ex
+−minUn ex(cid:13) (cid:13) p, (19)
+where 1 is the indicator function of a set S. The amplitude of overshoots and undershoots with
+S
+respect to a reference solution is one of the main criteria with which to evaluate a numerical solution
+since it provides insights into the behavior and stability of a system.
+• Mass variation (mv):
+(cid:12)(cid:90) (cid:90) (cid:12)
+mv(tn)=(cid:12) (cid:12) Un− Un−1(cid:12) (cid:12). (20)
+(cid:12) (cid:12)
+Ω Ω
+We employ this term for problems that have zero mass flux through ∂Ω. Checking that this term is
+small is key to verifying that the physics of the problem is preserved.
+9Algorithm 1 Training algorithm
+1: procedure Training({P j}N j=p 1, {Ptest}N j=p 1t, lr, scheduler, N E, N B, θ, L, L max, n test)
+2: θ∗ ←θ,L best ←∞
+3: for e in N E do ▷Loop over each epoch
+4: lr ← scheduler(lr) ▷Update learning rate according to schedule
+5: Randomly permute indexes j in 1,...,N p
+6: for i in N p/N B +mod(N p,N B)>0 do ▷Partitions problems in sets of size NB
+7: Reset gradient accumulation in the optimizer
+8: L=0 ▷Reset the loss for the minibatch
+9: for j in jN B,...,min{N p,(i+1)N B} do ▷For each problem in the batch
+10: L←L+L(θ;P j) ▷L is defined by p and the weights {wi}i∈R, see Eq. (14)
+11: end for
+12: θ ← AdamW(L, θ, lr) ▷Optimization step
+13: end for
+14: if mod(e,n test)=0 then ▷Test outside the automatic differentiation
+15: L test =(cid:80)N j=p 1t L(θ;P jtest)
+16: if L test <L best then
+17: θ∗ ←θ ▷Save model parameters because currently the best
+18: else if L test >L max then
+19: θ ←θ∗ ▷The model is unstable: load last stable model’s parameters
+20: lr ← lr/2 ▷Force learning rate reduction
+21: end if
+22: end if
+23: end for
+24: return θ∗ ▷Parameters of the trained NN
+25: end procedure
+• Viscosity penalization (vp):
+1 (cid:82) µ
+vp(tn)= |K| K , (21)
+∥∇Un∥ +ε
+p
+whereεisasmallnumberusedfornumericalstability,wechooseε=10−8. Thistermmakessurethat
+we add artificial viscosity only when there are large gradients, therefore encouraging the network to
+put the least amount possible of viscosity. This term can be substituted by a “supervised” term of the
+kind |µ −µˆ |, where µˆ is a reference artificial viscosity given by a classical model. In exchange for
+K K K
+a stronger bias on what the NN should learn, this alternative makes the training easier since it steers
+the learning dynamic towards a known good solution. Still, since this is only a weak constraint, the
+network is able to discover something new.
+Not all of them are used in the final version of the loss, indeed we use the minimal number of terms that
+produce a good model since each term has a weight w that needs to be tuned (just once offline). The other
+r
+terms are still used as metrics to assure the quality of the neural viscosity model. Namely, we have found
+that the best approach is to employ the overshoot/undershoot and the viscosity penalization.
+Another key choice is the value of p. We pick p = 1 since it tends to emphasize sparsity in the data,
+meaning it is less sensitive to small values and can be more robust in the presence of outliers. Namely, it is
+more appropriate in the presence of oscillations that have sparse and isolated peaks, which is our case.
+The computations of ∆t through Eq. (4) must be treated carefully. Indeed, the NN tends to increase to
+infinity the viscosity µ in order to have a timestep size ∆t which is zero. Indeed, as T = tN → 0 then the
+loss tends to zero. There are different solutions to this problem: we can leave the computation outside the
+AD, we add a penalization term based on max µ or we can use a fixed ∆t.
+Ω
+4.2 Training algorithm
+Let us now detail the novel algorithm through which the training is performed. In particular, this training
+process does not belong to the paradigm of supervised learning since the explicit value of viscosity that the
+neuralnetworkshouldlearnforacertainvalueofinputsisnevercomputed. Thetrainingalgorithmisstated
+in Algorithm 1 with detailed comments and is summarized in Figure 2. It works as follows. It takes as
+inputs:
+• A list of N tuples of parameters describing the N problems {P }Np on which to train the viscosity
+p p j j=1
+model on, as defined in Eq. (15).
+10Normalized loss during multistep training
+3×101
+N=5 N=99
+2.8×101
+N=9 N=129
+2.6×101 N=39 N=150
+N=69 Tuned EV loss
+2.4×101
+2.2×101
+2×101
+1.8×101
+0 200 400 600 800 1000
+epochs
+Figure3: Exampleofthebehaviorofthelossfortheproposedalgorithmduringthetrainingforthemulti-stepprocedure
+describedinSection4.2foraone-dimensionalproblem.
+• A list of N problems {Ptest}Npt on which to test the algorithm.
+pt j j=1
+• An optimizer with its hyperparameters. For instance, we employ AdamW [41] with learning rate
+lr=1e−3 and default hyperparameters β =0.9,β =0.999,ε=10−8,λ=0.01.
+1 2
+• Alearningratescheduler. Weemployasimple“reduceonplateaus”[47]withpatience30andreduction
+factor equal to 1.
+2
+• N , the number of epochs for which the training lasts.
+E
+• N , the batch size of problems considered in one optimization step (gradient computation).
+B
+• θ, the parameters of the NN. Their shape implicitly defines the architecture of the NN. It is assumed
+they are already initialized with standard random initialization or a pre-training procedure.
+• L, the loss function defined in Eq. (14). It is defined by p and the weights {w } .
+i i∈R
+• L , the maximum value of the loss. If the loss is larger than this threshold the model is considered
+max
+unstable. We use L =1030.
+max
+• n , the frequency with which the model is tested.
+test
+Then, the training algorithm closely resembles a supervised learning loop, where the loss is substituted with
+theonewedescribedintheprevioussection. Namely,wecreateminibatchesofparametersandmakeupdates
+basedontheseparameters. ThekeypointbeingthatwedonothaveatargetvaluethattheNNshouldlearn
+but a loss that describes the physics of the problem through a DG solver. Indeed, the peculiarity of this
+trainingalgorithmisthat, likeinRL,itlearnsfromtheconsequencesoftheactions(choicesofµ )itmakes
+K
+in the DG solver, creating a feedback loop. In particular, the value of artificial viscosity at the timestep n
+influences the solution at n+1 which in turn is used as input of the network to determine the next value of
+the viscosity. This enables the model to learn long-term dependencies and optimal strategies in response to
+evolving scenarios.
+Among the most interesting features of this algorithm is that, compared to the supervised training
+process, we can avoid designing and building a dataset. This is particularly expensive from the point of
+view of human time since it requires tuning the artificial viscosity parameters by hand and picking the best
+choicebyconfrontingthevarioussolutions. Inparticular,differentlyfromtheclassicallossEq.(13),ourloss
+Eq. (14) necessitates only a reference solution, which is much cheaper to build. Coincidentally, this feature
+also solves the aforementioned drawback (C), since the neural network automatically learns the optimal
+viscosity values. Since the problem is highly non-convex, this cannot be a global optimum, however, we
+guarantee that this is at least a local minimum.
+Let us now briefly discuss the choice of hyperparameters for this training algorithm. We observe that we
+obtainbetterresultswithasmallbatchsize, usuallybetweentwoandfour. Abatchsizeequaltooneisalso
+a viable option, however, we notice that if the batch size is too large (N >32) the algorithm stops making
+B
+progressinthelossminimization. Thisissueiseitherrelatedtotheoptimizerornumericalinstabilityinthe
+AD. Moreover, the batches are shuffled between each epoch in order to increase the stochasticity.
+In this training algorithm, it is paramount to choose N properly: if it is too small, the neural network
+does not have enough data to generalize, if it is too large we may incur into exploding gradient problems
+11
+ESM1D initial conditions
+2D initial conditions
+uu uu u00 00 0(( (( (xx xx x)) )) )== == =1 e1 ωω 2 −0[ 141 (s 11i , 1
+2
+0n [3 4 00( − ,(]ω
+x
+51−π | ]x +x
+1
+2−) ),
+ω2
+21
+2
+1|ω )
+[
+51=
+,2
+51 ], +3, ω5
+31 [ 53,1], ωi=−4,6,10
+u u
+u
+u0 0
+0
+0( (
+(
+(x x
+x
+x) )
+)
+)= =
+=
+=
++ω1
+e
+ωω
+−
+2[ 11 2 1 4 111ω ,
+0
+[2 [3 4
+00
+1,∥s ] ,(
+1
+5i
+x
+2n x
+]−
+](( 1 (xω x)
+1 2
+111
+11
+)π [
+)∥
+11 4 1x
+2
+[, [1
+3
+53 4 1) ,] ,1(s 2]xi (n ]2
+x
+(( x) 2ω 2)2 )πx2), ωi=1,3,5
+u
+u
+u
+u0
+0
+0
+0(
+(
+(
+(x
+x
+x
+x)
+)
+)
+)=
+=
+=
+=+s
+(−
+ω
+ω
+1i
+1
+3n
+6s
+(
+((
+i
+x
+x
+(cid:12)
+(cid:12)nω x(π
+−
+−6
+−x
+π
+61)
+65x
+1
+21
+)
+))
+(cid:12)
+(cid:12)1
+1[ 141
+−[
+[[,
+61
+321
+621
+,
+2,,]
+1 3
+65
+)65
+1+
+]
+]]
+,+
+[1si ,ωn
+ω
+32(
+i
+]2
+(x
+=ωπ
+−
+2x ,)
+1 2
+61
+)
+,[
+1
+121 0[, 3143 ,]
+2
+3,
+]
+ω=4,8
+u u0 0( (x x) )=
+=+
+ω+
+iω
+s
+(s
+ωi
+=i3
+n
+n
+11
+(
+(
+−xω[ 235
+5
+1ω
+1π, ,+1 πx5 0]
+)
+x( ,ω1x
+)
+12[
+11
+,1 4
+x)
+[
+4,1
+1 2
+21 2
+,[ −0
+]
+3
+4(5 , ]x1
+5
+( 1
+415 x] )(
+)
+1
+1x
+1
+)
+[2
+[
+1
+1
+4)
+1 4
+[,
+,,
+1 2
+3
+41 2
+,
+]]
+3 4
+(ω
+( x]x
+(i
+12
+x
+)=
+)
+2 1)
+[−
+,
+1
+44
+,3
+4, ω6 ](,
+=
+x1 20
+)5 2,4,8
+4 4
+Table1: Initialconditionsu0 employedinthetrainingphaseforadvectionandBurgers’fluxes.
+102 102
+101 101
+mean std mean std mean std un un un un all
+min max min max [[un]] un un 1
+Q1 Q3 Features
+Statitistics
+Figure4: LossofthetrainedviscositymodeldependingonthenodalquantitiesusedasinputoftheNN(right)andon
+thefunctionsusedtoagglomeratethosevalues(left). SeeSection3.4foracompletedefinitionofthesequantities. The
+resultsareobtainedafteronestepoftherandomsearchrelativetotheNNemployedinthe1Dcases.
+unless the neural network has a proper weight initialization. We propose a multi-step pre-train in which we
+iterate the training Algorithm 1 for increasing values of N for a few epochs, starting from N = N up to
+0
+the desired final N with a certain step N . The increase in number of timesteps N is computed adaptively,
+e e
+namely N =clip(Nmin,Nα,Nmax), where Nα is the largest integer so that the average loss per timestep
+e e e e e
+with N +Nα timesteps is less than a constant (hyperparameter) α >0 multiplied by the average loss per
+e e
+timestep with N timesteps. Once the NN reaches good generalization properties it is observed that the
+average loss per timestep decreases when N increases. Indeed, this shows that the neural viscosity model is
+making accurate predictions of the “future” (data it has never seen before). Figure 3 shows an example of
+the training loss. This process is expensive from a computational point of view, however, it enables the NN
+to discover a viscosity model without any biases.
+Since the magnitude of the loss changes significantly between the start and the end of the optimization
+process,akeyingredienttoincreasethestabilityandefficiencyofthealgorithmisalearningratescheduler. A
+simpleschedulerthatgeometricallyreducestheerroronplateausworkedbestforus,evencomparedtomore
+modernandpopularalternativeslikethecosinescheduler[40]. Thisalsoallowsustohaveanalgorithmthat
+islessinfluencedbythestartingvalueofthelearningratesince, ifitistoolarge, isautomaticallydecreased.
+In our experiments, we employed a starting learning rate of 5·10−2.
+Finally, we stress that, despite all these precautions, it seldom happens that a gradient update produces
+a viscosity model that is not able to handle the Gibbs phenomenon. For this reason, it is important to
+constantly monitor the loss, save the best parameters of the model, and use them for a restart with a
+reduced learning rate. This simple but effective procedure completely eradicates this issue.
+4.3 Training in practice
+Inthissection,weprovidemoredetailsonhowthetrainingiscarriedoutintheone-dimensional(d=1)case.
+This procedure can be easily generalized to different dimensions. The first step is to choose which problems
+to train the neural network on, namely, we need to choose different combinations {P }Np ,{Ptest}Npt of
+j j=1 j j=1
+problemsonwhichtotrainandtest. Thetwosetsarean80-20randomsplitofaunionofcartesianproducts
+of parameter spaces. For the 1D case we consider uniform discretizations of (0,1) with h= 2−i,i=1,...,4,
+10
+degrees k =1,2,4, the flux f of linear advection, Burgers’ equation and Euler system, a constant timestep
+12
+ssol102 102 102
+101 101 101
+ELU GeLU ReLU SiLU Tanh 20 40 60 80 100120140160 4 5 6 7 8 9 10
+Activation ANN Width ANN Depth
+Figure 5: Loss of the trained viscosity model depending on hyperparameters defining the architecture of the NN
+agglomeratedinboxplots. TheresultsareobtainedafteronestepoftherandomsearchrelativetotheNNemployedin
+theone-dimensionalcases.
+∆t that is the largest such that the considered problem is stable (it varies from problem to problem),
+number of timesteps N = 100 for linear advection and appositely chosen as the smallest N ∈ N such that
+shocks and waves appear in Burgers’ and Euler cases. Concerning initial conditions, we use the functions
+reported on the left of Table 1 for advection and Burgers’ problems, and a Sod shock tube problem [57] for
+Euler’s. A representation of the initial conditions is shown in Figure 8. For the 2D case, the problems are
+choseninananalogouswayapartfromthefollowingparameters. Sinceunstructuredgridsofferflexibilityin
+discretizing computational domains, allowing for efficient representation of intricate shapes and unbounded
+regions, we use both structured and unstructured triangulations K to train the NN. Namely, we discretize
+h
+(0,1)2 with h = 2−i,i = 1,...,3. The initial conditions are shown on the right of Table 1 for advection and
+10
+Burgers’ equations. We also add the Euler’s system in the Riemann configuration 4 of [36] to the training
+environment. Moreover,inalltheconsideredproblemstheexactsolutionu iseithertheanalyticalsolution
+ex
+(whenavailable)oranoverkillsolutionobtainedusingtheDGsolveronatriangulationthathasameshsize
+h that is at least eight times smaller.
+Oncetheparametersdefiningthetrainingproblemsarechosen, wepasstohyperparametertuning. Asit
+iscommonlydone,weemployarandomsearch: wespecifytherangeordistributionforeachhyperparameter
+we want to tune, and we define the search space as the cartesian product of these ranges. The model is
+trained using random choices of hyperparameter values, and the loss is used as an evaluation metric. This
+process is repeated while, at each iteration, reducing the search space and increasing the fraction of the
+combinatorial space probed and the number of epochs N .
+E
+Asanoptimizer,weemployAdamW(AdamwithWeightDecay)[41]. Inourexperiments,itsignificantly
+outperformed stochastic gradient descent (SDG) and proved to be less sensitive to the choice of the learning
+rate with respect to Adam.
+We then focus on five hyperparameters that we consider to be particularly relevant, namely the width
+and depth of the NN, the activation function, the local features extracted from each element K, and which
+statistics are extracted from these features. In Figure 4 and 5 we show the results after one iteration of
+random search (about ten thousand combinations were tested). After three iterations of random search we,
+conclude the following (for the one-dimensional case):
+• usingthemean,standarddeviation,minimum,andmaximumofthenodalvaluesasdescribingstatistics
+provides the best balance between computational cost and accuracy;
+• thejumpacrosstheelement, thegradientofthevelocity, andthevelocityattheprevioustimestepare
+all features that significantly help the training;
+• the Gaussian error linear unit (GeLU) [29] is the activation function that performed better when
+comparedtotherectifiedlinearunit(ReLU),exponentiallinearunit(ELU),sigmoidlinearunit(SiLU)
+and hyperbolic tangent (Tanh);
+• a large model with a width greater than 100 seems to perform better, in particular, we choose to use
+120 neurons per layer;
+• models with depth between six and eight (which are neither shallow nor very deep) reach the lowest
+loss on average. In our experiments, we employ seven layers.
+5 Numerical Results
+In this section, our objective is to assess the accuracy of the proposed training algorithm in practice. In
+the following, we present a comprehensive set of numerical results, encompassing both scalar equations and
+13
+ssolFigure 6: Computed errors and convergence rates for Figure7: Errorestimatesandconvergenceratesforthe
+testcaseoflinearadvection(d=1). 2Dsmoothtestcaseoflinearadvection.
+systems,toshowcasetheefficacyofphysics-informedmachinelearning. Allthetestshavebeenimplemented
+in an appositely developed Python library for the solution of conservation laws with the DG method that
+employs Pytorch [47] for automatic differentiation and the implementation of the NNs.
+First, wepresentaconvergencetesttoverifythefunctioningofournumericalsolverandneuralviscosity
+model. Then, we present tests carried out on problems that are not included in the training environment
+and are characterized by different parameters, such as: flux, initial condition, boundary conditions, domain
+discretization, polynomial degree, and CFL. In this way, we can assess the generalization capabilities of the
+trained networks and test the robustness of our algorithm in an impartial way. Our findings consistently
+demonstrateperformancesuperiortotheoptimallytunedEVmodels. Thisisespeciallyrelevantconsidering
+that tuning is itself a significantly expensive operation.
+5.1 Verification tests: convergence rate
+Here, we aim to verify the accuracy of the presented approach. In particular, we assess the ability of the
+neural viscosity model to maintain the expected accuracy for a smooth solution. Indeed, the addition of a
+dissipative term might adversely affect the accuracy. The assessment of the numerical scheme employs the
+L2(Ω)-norm of the discretization error vector, evaluated at the final time T. Namely, theoretical results for
+inviscid hyperbolic problems [30, 31] show that the error
+ϵ=∥u (·,T)−u(·,T)∥ ≲hk+1,
+h L2(Ω)
+wherethehiddenconstantdependsonk, giventhatuissufficientlyregularandaRusanovfluxisemployed.
+5.1.1 Test case 1: one-dimensional smooth problem
+To test the convergence we consider Problem (1) with the linear flux defined by Eq. (5), namely with a
+constant unitary transport field and with the smooth initial conditions
+1
+u (x)= +sin(2πx).
+0 2
+Theproblemisendowedwithperiodicboundaryconditions. Concerningthediscretization,weusethespatial
+domain Ω = (0,1), CFL = 0.05, final time T = 0.4 and Runge-Kutta of the fourth-order. In Figure 6 we
+reportthecomputederrorsintheL2(Ω)-norm,togetherwiththeexpectedratesofconvergenceasafunction
+of the mesh size h and the polynomial degree k. We can notice that we recover the expected convergence
+rate.
+5.1.2 Test case 2: two-dimensional smooth problem
+Similarly,weextendtheprevioustestcaseintwodimensions. Namely,weconsiderProblem(1)withconstant
+unitary transport field β =[1,1]⊤ as defined in Eq. (8) with smooth initial conditions
+1
+u (x ,x )= +sin(2πx )sin(2πx ).
+0 1 2 2 1 2
+The problem is endowed with periodic boundary conditions. Concerning the discretization, we employ a
+√
+structured triangular grid of the domain Ω = (0,1)2 of granularity h = 2 ,i = 1,...,5. In Figure 7 we
+2i10
+report the computed errors in the L2(Ω)-norm and the expected rates of convergence. The NN technique
+achieves the optimal convergence rate. Numerical experiments show also that we obtain the same roc
+independently of the mesh type (structured or unstructured).
+14F thig eu Nre N8 .: Examplesofinitialconditionsu0usedtotrain
+Figure9: Initialconditionu0 fortestcase3and4.
+2.0 ANN 2.0 ANN 2.0 ANN
+EV EV EV
+1.5 EVhigh 1.5 EVhigh 1.5 EVhigh
+1.0
+EVlow
+1.0
+EVlow
+1.0
+EVlow
+Ref Ref Ref
+0.5 0.5 0.5
+0.0 0.0 0.0
+0.5 0.5 0.5
+1.0 1.0 1.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+x x x
+Figure10: Testcase3: solutionatT =0.4fork=1,3,5(fromlefttoright).
+5.2 One-dimensional problems
+To gain more insight into how the algorithm works, we first analyze one-dimensional problems. The fol-
+lowing test cases can be divided into two categories. The first two deal with scalar problems. To test the
+generalization properties of the NN, we consider an initial condition, grid spacing, polynomial degree, and
+CFL not included in the training environment. In particular, we consider Problem (1) with flux defined by
+Eq. (5) and Eq. (6) and we employ as initial condition the function
+
+66x
+(x− 1 3)
+xx∈ ∈( (0
+1
+6, ,1
+6
+1
+3] ],
+,
+u (x)= 2 x∈(1,1], (22)
+0 3 2
+−
+0
+1
+2
+x x∈ ∈( (1
+2
+3, ,13
+4
+)] ,,
+4
+which is represented in Figure 9. Instead, the other two test cases seek validation in a more challenging
+setting. Namely, we consider two common tests for the accuracy of the solution of the Euler equations: the
+Sod shock tube problem [57] and the Shu-Osher problem [56].
+5.2.1 Test case 3: linear advection
+The first test case we consider is a linear advection problem with a highly discontinuous initial condition,
+namely (22) in the Ω = (0,1) domain. The simulation is performed until T = 0.4 with polynomial degrees
+k =1,3,5 and endowed with periodic boundary conditions. To compare solutions with a similar number of
+degreesoffreedomweselecth= 1 , 1 , 1 andCFL=0.2,0.5,0.75,respectively. Thesolutionobtainedwith
+60 30 15
+the neural viscosity model is compared with a tuned EV model (c = 0.6, c = 0.3, see Eq. (11), (12))
+K max
+andtwoinstancesofEVmodelthatarenotoptimallytuned,namelyonecasewheretheinjecteddissipation
+is too small and too large. In Figure 10 we compare the solutions at the final time: we can see that the
+NN based solution is symmetric, essentially non-oscillatory, and well captures the front of the wave. By
+analyzing the space-time plot of the viscosity introduced via the NN, as shown in Figure 11, we notice that
+theNNtendstoaddalargeramountofmorelocalizedviscositywhencomparedwithEV.Morequantitative
+results about the error are shown in Table 2, we notice that the NN always outperforms the EV model in
+terms of L1 error and overshoots/undershoots. It also obtains comparable results when considering mass
+variation (mv), an important metric to asses that the physics of the problem is respected.
+15
+u u uFigure11: Testcase3: comparisonofspace-timeartificialviscosityfork=1,3,5(fromlefttoright).
+k=1 k=3 k=5
+NN EV NN EV NN EV
+ϵ 2.2311e+03 3.1745e+03 1.7990e+03 2.1943e+03 1.5680e+03 1.6753e+03
+∇ϵ 1.7306e+03 1.9666e+03 6.7370e+03 6.9916e+03 1.1302e+04 1.1380e+04
+[[ϵ]] 1.5933e+02 1.1955e+02 4.2461e+01 3.4186e+01 2.0260e+01 2.0562e+01
+o/u 3.4889e+00 1.2134e+01 2.2778e+00 6.2186e+00 2.5903e+00 7.3782e+00
+mv 4.0360e-03 4.5267e-03 1.6535e-03 2.8121e-03 1.4988e-03 1.6169e-03
+Table2: Testcase3: comparisonofcumulativeL1 errormetricsEq.(16)-(20)overalltimestepsfrom0toT.
+1.0 1.0 1.0
+ANN ANN ANN
+0.8 EV 0.8 EV 0.8 EV
+EVhigh EVhigh EVhigh
+0.6 EVlow 0.6 EVlow 0.6 EVlow
+0.4 Ref 0.4 Ref 0.4 Ref
+0.2 0.2 0.2
+0.0 0.0 0.0
+0.2 0.2 0.2
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+x x x
+Figure12: Testcase4: solutionatfinaltimefork=1,3,5(fromlefttoright).
+k=1 k=3 k=5
+NN EV NN EV NN EV
+ϵ 8.7204e+02 1.1423e+03 9.7797e+02 1.3587e+03 2.6155e+03 3.2874e+03
+∇ϵ 5.3064e+02 6.1239e+02 3.1401e+03 3.5330e+03 1.4578e+04 1.7510e+04
+[[ϵ]] 1.0947e+02 1.1138e+02 4.4744e+01 5.0420e+01 3.4530e+01 1.2684e+02
+o/u 6.5979e-01 9.8408e-01 6.5894e-01 1.3003e+00 9.7566e-01 2.5800e+00
+Table3: Testcase4: comparisonofcumulativeL1 errormetricsEq.(16)-(19)overalltimestepsfrom0toT.
+5.2.2 Test case 4: Burgers’ equation
+In this test case, we keep the same parameters of the previous test case but we change the physical flux,
+namely,weemployaquadraticone,andtheCFL=0.15,0.4,0.4. Thesesettingsaremorechallengingdueto
+the fact that as the solution evolves rarefaction fans and shock waves develop and collide. We compare the
+NN solution with a tuned EV model (c =3.0,c =1.0) and two other not optimally tuned EV models.
+K max
+Figure 12 shows that one of the EV models (c =1.0,c =0.5) is not able to add enough viscosity thus
+K max
+leading to large oscillation. The parameters used in this case are not far from the manually tuned: this
+showcaseshowtime-consumingtheparameterselectioncanbe. Inthiscase,theNNmodelisbyfarthebest
+in avoiding overshoots/undershoots while correctly predicting the profile of the wave. The history of the
+viscosity in Figure 13 shows that as in the previous test cases, the NN tends to inject more viscosity than
+the EV model, but in a more localized and less continuous way. For k = 5 in particular, it is possible to
+16
+u u uFigure13: Testcase4: comparisonofspace-timeartificialviscosityfork=1,3,5(fromlefttoright).
+Figure14: Testcase5: densityρatT =0.2fork=1,3,5(fromlefttoright).
+see that the NN also tends to add dissipation in x = 0.2,t = 0.35 where the EV model did not. It remains
+to be investigated if this is a generalization error (since k = 5 was not present in the training problems) or
+a feature of the discovered neural viscosity model. As shown in Table 3, the NN model outperforms all the
+EV models under all the considered metrics. This is an especially interesting result when considering that
+thereductionoftheL1 errorfork =3isof25%, whilealsoreducingovershoots/undershootsofalmost50%.
+5.2.3 Test case 5: Sod shock tube
+WenowconsiderthefirstoftwotestcasesfortheEulerequations, namelytheSodshock-tubeproblem[57].
+The problem is defined by Eq. (7), it prescribes Ω=(0,1), T =0.2 and the initial state
+ ρ  (cid:40)
+0 [1,0,1]⊤ x∈(0,1],
+u 0(x)=v 0=
+[1,0, 1 ]⊤
+x∈(1,2
+1).
+p 0 8 10 2
+It is endowed with constant Dirichlet boundary conditions (cfr. [57]). For the discretization we select three
+cases with k =1,3,5, h= 1 , 1 , 1 , CFL=0.27,0.61,0.88, respectively. This is done to compare solutions
+60 30 15
+with a similar number of degrees of freedom. The discontinuities in the initial conditions give rise to three
+characteristicwaves,demandingrobustnumericalschemestoaccuratelycomputethesolutioninthepresence
+of shock waves and rarefactions. Namely, these are a right-moving contact wave and shock wave, and a left-
+moving rarefaction wave. Classical models aim to add a small amount of viscosity near the contact while
+constantlyintroducingdissipationintheregionclosetotheshock. InFigure14wecomparetheNNsolution
+at final time with the EV tune model with c = 1.0,c = 0.5. The neural viscosity model provides a
+K max
+solution that has much smaller overshoots (see x = 0.2,k = 1 for instance) and that captures with more
+precisionthewavefront(seex=0.7,k =1forinstance). Inthiscase, itisparticularlyinterestingtoanalyze
+thehistoryoftheviscosityshowninFigure15. Namely,herewecannoticealargediscrepancybetweenwhat
+the NN and the EV model aim to do: the EV model stabilizes only the shock, meanwhile the NN wants to
+stabilize all three present waves. This is counterbalanced by injecting a smaller dissipation near the shock.
+Despite being more intrusive, the NN outperforms the EV model under all the considered metrics, as shown
+in Table 4, where we report the error metrics in time and their cumulative value.
+17Figure15: Testcase5: comparisonofspace-timeartificialviscosityfork=1,3,5(fromlefttoright).
+k=1 k=3 k=5
+NN EV NN EV NN EV
+ϵ 5.7046e+01 5.8845e+01 5.8787e+01 7.2200e+01 4.3138e+01 5.7406e+01
+∇ϵ 2.7103e+01 2.7001e+01 1.3087e+02 1.3356e+02 2.0463e+02 2.1445e+02
+[[ϵ]] 1.5025e+00 1.8547e+00 1.0929e+00 1.4114e+00 8.7019e-01 1.0149e+00
+o/u 3.0200e-01 7.5084e-01 2.0631e-01 7.5516e-01 8.7122e-01 1.1302e+00
+Table4: Testcase5: comparisonofcumulativeL1 errormetricsEq.(16)-(19)overalltimestepsfrom0toT.
+Figure16: Testcase6: densityρatT =1.8fork=1,3,5(fromlefttoright).
+k=1 k=3 k=5
+NN EV NN EV NN EV
+ϵ 2.6293e+03 3.0574e+03 2.2953e+03 4.0510e+03 3.7385e+03 5.5862e+03
+∇ϵ 1.7160e+03 1.8731e+03 5.6320e+03 7.8568e+03 1.3576e+04 1.6539e+04
+[[ϵ]] 1.2497e+02 1.0530e+02 9.8602e+01 7.1604e+01 5.2003e+01 5.4259e+01
+o/u 3.1512e+00 3.9106e+00 2.8027e+00 5.7163e+00 3.8023e+00 4.6424e+00
+Table5: Testcase6: comparisonofcumulativeL1 errormetricsEq.(16)-(19)overalltimestepsfrom0toT.
+5.2.4 Test case 6: Shu-Osher problem
+The second Euler problem we consider is the Shu-Osher problem [56]. It deals with a shock front moving
+insideaone-dimensionalinviscidflowwithartificialsinusoidaldensityfluctuations. Thistestcaseisrelevant
+because it benchmarks the ability of the solver to represent both shocks and physical oscillations created
+by a union of smooth and discontinuous initial data. Namely, we consider the flux of Eq. (7), Ω = (−5,5),
+T =1.8 and initial condition
+ ρ  (cid:40)
+0 [3.857143,2.629369,10.333333]⊤ x∈(−5,−4],
+u 0(x)=v 0=
+[1+ 1sin(5x),0,1]⊤ x∈(−4,5).
+p 0 2
+The problem is completed with Dirichlet boundary conditions on the left and Neumann on the right part of
+the boundary (cfr. [56]). Since the solution exhibits a high frequency wave we employ a finer discretization,
+namely h = 1 , 1 , 1 with k = 1,3,5, and CFL = 0.12,0.3,0.4, respectively. From Figure 16, we can
+150 75 50
+18Figure17: Testcase6: comparisonofspace-timeartificialviscosityfork=1,3,5(fromlefttoright).
+k=1 k=3 k=5
+NN EV NN EV NN EV
+ϵ 1.0374e+05 1.2616e+05 4.7333e+04 6.6665e+04 7.3585e+04 8.7204e+04
+∇ϵ 1.0383e+05 1.0916e+05 3.0168e+05 3.4178e+05 8.6089e+05 8.7469e+05
+[[ϵ]] 9.5542e+03 1.0781e+04 4.0133e+03 4.7451e+03 2.4605e+03 2.3712e+03
+o/u 8.9123e+02 1.6955e+03 2.0373e+03 1.1930e+03 5.0116e+02 6.5465e+02
+mv 1.2287e-15 1.3516e-14 8.9032e-14 9.8162e-13 2.3507e-13 2.5857e-13
+Table6: Testcase7: comparisonofcumulativeL1 errormetricsEq.(16)-(20)overalltimestepsfrom0toT.
+see that for the case k = 1 the NN and the EV model produce a rather similar solution. However, the
+quantitative analysis reported in Table 5 shows that the neural viscosity model is slightly more accurate in
+the L1 norm, and when considering overshoots and undershoots. Instead, the cases k = 3,5 show that the
+EV model smooths the solution too much, and thus it is not able to capture the high frequencies. On the
+other hand, the NN shows much better results, namely the solution correctly represents the high-frequency
+wave pack present between x = 0.5 and x = 2.5. This also proves that the neural viscosity model is able
+to exploit the high-order nature of the method, indeed the three considered cases have the same number
+of degrees of freedom. In particular, for k = 3 we have a reduction of the L1 error of 43% and of 51% of
+overshoot/undershoot. The dissipation injected by the NN, as shown in Figure 17, is concentrated on the
+shock and, differently from the EV model, adds also other small patches of viscosity at the boundary of the
+sinusoidal wave pack.
+5.3 Two-dimensional problems
+We analyze now two-dimensional problems. Notice that, to pass to 2D, we do not have to change anything
+about the training algorithm or the neural network architecture: everything is exactly the same as in the
+one-dimensionalcase. However,thephysicsthatgovernstheseproblemsissignificantlydifferentfrombefore.
+Thisrequirestotrainanewneuralnetwork,whichinturnentailsare-tuningofthehyperparameters. Indeed,
+in two dimensions more complex structures appear as a result of the interactions among one-dimensional
+waves. Hence, the differences among the models are more prominent, requiring an NN able to generalize
+better.
+Wechoosethehyperparameterwithaprocedurethatexactlymimicswhatwasdoneintheone-dimensional
+case, as described in Subsection 4.3. Let us remark that this expensive operation of training and hyperpa-
+rameterstuningmustbedonejustonceforallthetwo-dimensionalproblems,meanwhile,traditionalmodels
+must be tuned problem by problem. At the end of this process, we selected a NN with a width of 160 and a
+depthofeight(theotherhyperparametersremainunchanged). Aswehavedonefortheone-dimensionaltest
+cases, we start by showcasing the results on scalar problems and then pass to the Euler system of equations.
+19Figure18: Testcase7: solutionanderroratfinaltimeT =0.25fork=1.
+Figure19: Testcase7: maximumvalueoftheartificialviscosityµintimefork=1.
+5.3.1 Test case 7: linear advection
+The first 2D test case we consider is linear advection f(u) = βu with coefficient β = [1,1]⊤. This simple
+test case is non-trivial when dealing with discontinuous initial condition, namely, we employ
+
+2 x ∈(1,4), i∈{1,2},
+ i 5 5
+u (x ,x )= 1 x ∈(1,3), i∈{1,2},
+0 1 2 i 2
+0
+otherwise.
+Moreover, it gives us the possibility to check the mass conservation properties of the neural viscosity model.
+We solve the problem in Ω = (0,2)2 with a final time T = 0.25 on a structured grid with 7200,1800,450
+triangular elements and k = 1,3,5, CFL = 0.075,0.3,0.32, respectively. We focus on k = 1 since the other
+two cases are analogous. As done in the previous test cases, we compare the neural viscosity model with
+a tuned EV model (c = 1.0,c = 0.5) and two other EV models that inject a sub-optimal amount of
+K max
+dissipation (too large c = 2.0,c = 1.0 and too small c = 0.5,c = 0.25). From Figure 18 we
+K max K max
+clearly see that both the NN and the EV model smooth the discontinuous profile of the initial condition in
+order to avoid oscillations. The NN solution is symmetric and visually exhibits a sharper wavefront. This
+is confirmed by the quantitative analysis of the error reported in Table 6. In particular, it is interesting to
+observethattheNNmodelinjectsmoreviscositythanaclassicalEVmodelbuthasasmallerL1 error. This
+is not an intuitive behavior when comes to the EV model since from both Figure 19 and Table 6 it is clearly
+observable that EV models that inject larger dissipation have smaller overshoots/undershoots but larger L1
+error. Moreover, the solution obtained with the NN conserves the mass better than the one obtained with
+the EV model, showing that also physics is respected. Therefore, in this case, the neural viscosity model is
+effectively learning a new model that has better properties than the EV one.
+5.3.2 Test case 8: KPP rotating wave
+Weconsidernownonlinearscalarconservationequationscharacterizedbythenon-convexflux[sinu,cosu]⊤.
+Specifically, we examine a two-dimensional scalar conservation equation introduced in [24, 35]. This partic-
+20Figure20: Testcase8: solutionanderroratfinaltimeT =0.25fork=1,3.
+Figure21: Testcase8: solutionanderroratfinaltimeT =0.25fork=5.
+ular test poses a challenge to numerous high-order numerical schemes due to its intricate two-dimensional
+composite wave structure in the solution. Namely, we have Ω=(−2,2)2, T =1 and initial condition
+(cid:40)
+7π if ∥x∥ <1,
+u (x)= 2 2
+0 1π otherwise.
+4
+The problem is endowed with periodic boundary conditions. For discretization, we employ a structured
+triangular mesh with 7200,1800,450 elements and k = 1,3,5, CFL = 0.11,0.4,0.48, respectively. We
+compare the neural viscosity model with EV models tuned like in the previous test case. The results
+reported in Figure 20, 21 and show that the neural viscosity model produces more accurate solutions with
+respect to the EV one. In particular, it presents less wriggles and a sharper wave front. To understand the
+behaviorofthemodelwereportalsoinFigure22themaximum, mean,andmedianoftheinjectedviscosity.
+As was the case in 1D, the NN model injects more viscosity than the tuned EV model, but retains a lower
+L1 error, as shown in Table 7.
+5.3.3 Test case 9: Euler equation, Riemann problem
+We now consider a two-dimensional Riemann problem for the Euler system. Namely, we consider the
+configuration12proposedin[36,53]. Theproblemisparticularlychallenginginviewofthepresenceofboth
+contact waves and shocks. The physical domain is Ω = (−1,1)2, the final time is T = 0.25 and the initial
+2 2
+21ANN EV EVlow EVhigh
+max
+0.08 0.08 0.08 0.08 median
+mean
+0.06 0.06 0.06 0.06
+0.04 0.04 0.04 0.04
+0.02 0.02 0.02 0.02
+0.00 0.00 0.00 0.00
+0.0 0.2 0A.4NN0.6 0.8 0.0 0.2 0.E4V 0.6 0.8 0.0 0.2 0E.V4low0.6 0.8 0.0 0.2 E0.V4high0.6 0.8
+time time time time
+0.06 0.06 0.06 0.06
+0.05 0.05 0.05 0.05
+0.04 0.04 0.04 0.04 max
+median
+0.03 0.03 0.03 0.03
+mean
+0.02 0.02 0.02 0.02
+0.01 0.01 0.01 0.01
+0.00 0.00 0.00 0.00
+0.0 0.2 0A.4NN0.6 0.8 0.0 0.2 0.E4V 0.6 0.8 0.0 0.2 0E.V4low0.6 0.8 0.0 0.2 E0.V4high0.6 0.8
+0.08 time 0.08 time 0.08 time 0.08 time
+0.06 0.06 0.06 0.06
+max
+0.04 0.04 0.04 0.04 median
+mean
+0.02 0.02 0.02 0.02
+0.00 0.00 0.00 0.00
+0.0 0.2 0.4 0.6 0.8 0.0 0.2 0.4 0.6 0.8 0.0 0.2 0.4 0.6 0.8 0.0 0.2 0.4 0.6 0.8
+time time time time
+Figure22: Testcase8: maximumvalueoftheartificialviscosityµintimefork=1,3,5(fromtoptobottom).
+k=1 k=3 k=5
+NN EV NN EV NN EV
+ϵ 1.6196e+05 3.9369e+05 1.6956e+05 3.8346e+05 2.5583e+05 2.8887e+05
+∇ϵ 2.4551e+05 4.3755e+05 1.2625e+06 1.7127e+06 2.6152e+06 2.8368e+06
+[[ϵ]] 1.0973e+05 1.4006e+05 8.2736e+04 9.7502e+04 4.4259e+04 6.2624e+04
+o/u 8.0091e+03 1.9289e+04 6.4779e+03 6.8667e+03 4.6155e+03 5.0963e+03
+Table7: Testcase8: comparisonofcumulativeL1 errormetricsEq.(16)-(19)overalltimestepsfrom0toT.
+Figure23: Testcase9: solutionanderroratfinaltimeT =0.25fork=1,3(fromlefttoright).
+conditions are:
+   [0.5313,0,0,0.4]⊤ if x >0,x >0,
+u 0(x 1,x 2)=  v
+vρ
+e1
+2
+00
+, ,0 0 
+=
+[
+[
+[1
+0
+1,
+.
+,80 0,. ,7
+0
+02
+, .0
+77
+,
+26
+1
+7,
+]
+60 ⊤, ,1 1] ]⊤
+⊤
+i
+i
+if
+f
+f
+x
+x
+x1
+1
+1
+<
+<
+>0
+0
+0,
+,
+,x
+x
+x2
+2
+2
+>
+<
+<0
+0
+0,
+,
+.
+1 2
+Since the problem is completed with periodic boundary conditions, we enlarge the domain to Ω =
+(−3,3)2 to avoid contaminations of the solution. The discretization is done with a structured grid with
+2 2
+7200,1800,450 triangular elements and k = 1,3,5, CFL = 0.05,0.18,0.21, respectively. The results are
+reportedinFigure23,24. Aqualitativewaytoevaluatethemodelistochecktheerrordoneinrepresenting
+the fine structures in x = [0,0]⊤ and x = [0.4,0.4]⊤. It is possible to notice that the NN model captures
+22Figure24: Testcase9: solutionanderroratfinaltimeT =0.25fork=5.
+k=1 k=3 k=5
+NN EV NN EV NN EV
+ϵ 1.8409e+04 3.1180e+04 1.2387e+04 2.1667e+04 1.1578e+04 1.7845e+04
+∇ϵ 2.0193e+04 2.9233e+04 7.0429e+04 9.1563e+04 1.3498e+05 1.6098e+05
+[[ϵ]] 5.5618e+03 4.5949e+03 2.3759e+03 1.7313e+03 1.4495e+03 9.8379e+02
+o/u 7.4932e+01 1.7049e+02 6.5138e+01 1.3598e+02 3.9249e+01 7.5978e+01
+Table8: Testcase9: comparisonofcumulativeL1 errormetricsEq.(16)-(19)overalltimestepsfrom0toT.
+better the contact wave, especially for k = 3. This is confirmed by a quantitative analysis of the errors, as
+shown in Table 8.
+6 Conclusions
+In this work, we proposed a novel algorithm to train a NN surrogating an artificial viscosity model in a
+non-supervised way. Seeking to surpass the performance of classical viscosity models, we introduced a new
+approach inspired by RL that, by interacting with a DG solver, is able to discover new viscosity models
+without the necessity of explicitly building a dataset.
+First, wepresentedaNNmodelwitharenewedarchitecturewithrespecttotheonepresentinliterature
+[16]. The modification we have introduced proved to increase the flexibility and accuracy of the network.
+Then, we tested the model trained with the proposed training algorithm on several test cases, ranging from
+problems with smooth to discontinuous solutions and from scalar to vectorial equations. The trained NN
+exhibits favorable generalization properties despite being trained in an environment consisting of relatively
+simple problems. The resulting model proves to maintain the expected order of convergence for smooth
+problems. Furthermore, it outperforms the optimally tuned classical models under the considered metrics.
+Indeed, we have demonstrated that a viscosity model with consolidated reliability, such as EV, may falter
+in generating accurate results unless optimal parameters are carefully selected. The trained model exhibits
+effective shock-capturing properties and identifies areas requiring dissipation of numerical oscillations. This
+feature is more apparent in two-dimensional problems, where the NN can accurately capture multidimen-
+sional waves, fine patterns, and intricate spatial configurations.
+This algorithm also opens the possibility of training models by incorporating data that comes from the
+physical measurement of quantities of interest, such as the velocity or the pressure of a flow field. In future
+works,weaimtotestthatthisintegrationeffectivelyenhancesmodelreliabilitybyincorporatingfundamental
+principles and constraints, leading to more accurate predictions and improved generalization to real-world
+scenarios. Moreover, we plan to apply the proposed algorithm to more domain-specific test cases such as
+the variational multiscale stabilization methods for the approximation of the incompressible Navier-Stokes
+equations.
+Declaration of competing interests. Theauthorsdeclarethattheyhavenoknowncompetingfinancial
+interests or personal relationships that could have appeared to influence the work reported in this paper.
+Funding. M.C., P.F.A. and L.D. are members of the INdAM Research group GNCS. The authors have
+been partially funded by the research projects PRIN 2020 (n. 20204LN5N5) funded by Italian Ministry of
+23University and Research (MUR). P.F.A. is partially funded by the European Union (ERC SyG, NEMESIS,
+project number 101115663). Views and opinions expressed are however those of the authors only and do
+not necessarily reflect those of the European Union or the European Research Council Executive Agency.
+NeithertheEuropeanUnionnorthegrantingauthoritycanbeheldresponsibleforthem. L.D.acknowledges
+thesupportbytheFAIR(FutureArtificialIntelligenceResearch)project,fundedbytheNextGenerationEU
+program within the PNRR-PE-AI scheme (M4C2, investment 1.3, line on Artificial Intelligence), Italy. The
+present research is part of the activities of “Dipartimento di Eccellenza 2023-2027”, MUR, Italy.
+CRediT authorship contribution statement. P.F.A. and L.D.: Conceptualization, Methodology, Re-
+sources, Review and editing, Supervision, Project administration, Funding acquisition. M.C.: Conceptu-
+alization, Methodology, Software, Validation, Formal analysis, Investigation, Data curation, Visualization,
+Original draft.
+References
+[1] H. Abbassi, F. Mashayek, and G. B. Jacobs. Shock capturing with entropy-based artificial viscosity for staggered grid
+discontinuousspectralelementmethod. Computers & Fluids,98:152–163,2014.
+[2] P. F. Antonietti, A. Cangiani, J. Collis, Z. Dong, E. H. Georgoulis, S. Giani, and P. Houston. Review of discontinuous
+Galerkinfiniteelementmethodsforpartialdifferentialequationsoncomplicateddomains. Building bridges: connections
+and challenges in modern approaches to numerical partial differential equations,pages281–310,2016.
+[3] D. N. Arnold, F. Brezzi, B. Cockburn, and L. D. Marini. Unified analysis of discontinuous Galerkin methods for elliptic
+problems. SIAM Journal on Numerical Analysis,39(5):1749–1779,2002.
+[4] B.AyusoandL.D.Marini. DiscontinuousGalerkinmethodsforadvection-diffusion-reactionproblems. SIAMJournalon
+Numerical Analysis,47(2):1391–1420,2009.
+[5] C.Bardos,A.-Y.LeRoux,andJ.-C.N´ed´elec.Firstorderquasilinearequationswithboundaryconditions.Communications
+in Partial Differential Equations,4(9):1017–1034,1979.
+[6] G. E. Barter and D. L. Darmofal. Shock capturing with PDE-based artificial viscosity for DGFEM: Part I. formulation.
+Journal of Computational Physics,229(5):1810–1827,2010.
+[7] F.Bassi,A.Crivellini,A.Ghidoni,andS.Rebay. High-orderdiscontinuousGalerkindiscretizationoftransonicturbulent
+flows. In 47th AIAA Aerospace Sciences Meeting including The New Horizons Forum and Aerospace Exposition, page
+180,2009.
+[8] F. Brezzi, L. D. Marini, and E. Su¨li. Discontinuous Galerkin methods for first-order hyperbolic problems. Mathematical
+Models and Methods in Applied Sciences,14(12):1893–1903,2004.
+[9] A. Burbeau, P. Sagaut, and C.-H. Bruneau. A problem-independent limiter for high-order Runge–Kutta discontinuous
+Galerkinmethods. Journal of Computational Physics,169(1):111–150,2001.
+[10] M.Caldana,P.F.Antonietti,andL.Dede’. Adeeplearningalgorithmtoacceleratealgebraicmultigridmethodsinfinite
+elementsolversof3DellipticPDEs. arXiv preprint arXiv:2304.10832,2023.
+[11] B.Cockburn,G.E.Karniadakis,andC.-W.Shu. DiscontinuousGalerkinmethods: theory,computationandapplications,
+volume11. SpringerScience&BusinessMedia,2012.
+[12] B.Cockburn,S.-Y.Lin,andC.-W.Shu. TVBRunge-KuttalocalprojectiondiscontinuousGalerkinfiniteelementmethod
+forconservationlawsIII:One-dimensionalsystems. Journal of Computational Physics,84(1):90–113,1989.
+[13] B.CockburnandC.-W.Shu. TheRunge–KuttadiscontinuousGalerkinmethodforconservationlawsv: multidimensional
+systems. Journal of Computational Physics,141(2):199–224,1998.
+[14] C.M.DafermosandC.M.Dafermos. Hyperbolic conservation laws in continuum physics,volume3. Springer,2005.
+[15] D. A. Di Pietro and A. Ern. Mathematical aspects of discontinuous Galerkin methods, volume 69. Springer Science &
+BusinessMedia,2011.
+[16] N. Discacciati, J. S. Hesthaven, and D. Ray. Controlling oscillations in high-order discontinuous Galerkin schemes using
+artificialviscositytunedbyneuralnetworks. Journal of Computational Physics,409:109304,2020.
+[17] M. Dumbser and M. Ka¨ser. An arbitrary high-order discontinuous Galerkin method for elastic waves on unstructured
+meshes—II.Thethree-dimensionalisotropiccase. Geophysical Journal International,167(1):319–336,2006.
+[18] M.Dumbser,O.Zanotti,R.Loub`ere,andS.Diot.AposteriorisubcelllimitingofthediscontinuousGalerkinfiniteelement
+methodforhyperbolicconservationlaws. Journal of Computational Physics,278:47–75,2014.
+[19] D. R. Durran. Numerical methods for fluid dynamics: With applications to geophysics, volume 32. Springer Science &
+BusinessMedia,2010.
+[20] M.Eichinger,A.Heinlein,andA.Klawonn. Stationaryflowpredictionsusingconvolutionalneuralnetworks. InNumerical
+Mathematics and Advanced Applications ENUMATH 2019: European Conference, Egmond aan Zee, The Netherlands,
+September 30-October 4,pages541–549.Springer,2020.
+[21] S.Fresca,L.Dede’,andA.Manzoni.Acomprehensivedeeplearning-basedapproachtoreducedordermodelingofnonlinear
+time-dependentparametrizedPDEs. Journal of Scientific Computing,87:1–36,2021.
+[22] I.Goodfellow,Y.Bengio,andA.Courville. Deep Learning. MITpress,2016.
+[23] D.GottliebandC.-W.Shu. OntheGibbsphenomenonanditsresolution. SIAM Review,39(4):644–668,1997.
+[24] J.-L. Guermond, R. Pasquetti, and B. Popov. Entropy viscosity method for nonlinear conservation laws. Journal of
+Computational Physics,230(11):4248–4267,2011.
+[25] D.Hafner,T.Lillicrap,J.Ba,andM.Norouzi.Dreamtocontrol: Learningbehaviorsbylatentimagination.arXivpreprint
+arXiv:1912.01603,2019.
+[26] Z.Hao,S.Liu,Y.Zhang,C.Ying,Y.Feng,H.Su,andJ.Zhu. Physics-informedmachinelearning: Asurveyonproblems,
+methodsandapplications. arXiv preprint arXiv:2211.08064,2022.
+24[27] R. Hartmann. Adaptive discontinuous Galerkin methods with shock-capturing for the compressible Navier–Stokes equa-
+tions. International Journal for Numerical Methods in Fluids,51(9-10):1131–1156,2006.
+[28] A.Heinlein,A.Klawonn,M.Lanser,andJ.Weber. Combiningmachinelearninganddomaindecompositionmethodsfor
+thesolutionofpartialdifferentialequations—areview. GAMM-Mitteilungen,44(1):e202100001,2021.
+[29] D.HendrycksandK.Gimpel. Gaussianerrorlinearunits(GELUs). arXiv preprint arXiv:1606.08415,2016.
+[30] J.S.Hesthaven. Numerical methods for conservation laws: From analysis to algorithms. SIAM,2017.
+[31] J.S.HesthavenandT.Warburton.NodaldiscontinuousGalerkinmethods: algorithms,analysis,andapplications.Springer
+Science&BusinessMedia,2007.
+[32] G. E. Karniadakis, I. G. Kevrekidis, L. Lu, P. Perdikaris, S. Wang, and L. Yang. Physics-informed machine learning.
+Nature Reviews Physics,3(6):422–440,2021.
+[33] A.Kl¨ockner,T.Warburton,J.Bridge,andJ.S.Hesthaven.NodaldiscontinuousGalerkinmethodsongraphicsprocessors.
+Journal of Computational Physics,228(21):7863–7882,2009.
+[34] A. Klo¨ckner, T. Warburton, and J. S. Hesthaven. Viscous shock capturing in a time-explicit discontinuous Galerkin
+method. Mathematical Modelling of Natural Phenomena,6(3):57–83,2011.
+[35] A.Kurganov,G.Petrova,andB.Popov. Adaptivesemidiscretecentral-upwindschemesfornonconvexhyperbolicconser-
+vationlaws. SIAM Journal on Scientific Computing,29(6):2381–2401,2007.
+[36] A.KurganovandE.Tadmor. Solutionoftwo-dimensionalRiemannproblemsforgasdynamicswithoutRiemannproblem
+solvers. Numerical Methods for Partial Differential Equations: An International Journal,18(5):584–608,2002.
+[37] D.Kuzmin. Avertex-basedhierarchicalslopelimiterforp-adaptivediscontinuousGalerkinmethods. Journal of Compu-
+tational and Applied Mathematics,233(12):3077–3085,2010.
+[38] B.Landmann,M.Kessler,S.Wagner,andE.Kr¨amer. Aparallel,high-orderdiscontinuousGalerkincodeforlaminarand
+turbulentflows. Computers & Fluids,37(4):427–438,2008.
+[39] T. P. Lillicrap, J. J. Hunt, A. Pritzel, N. Heess, T. Erez, Y. Tassa, D. Silver, and D. Wierstra. Continuous control with
+deepreinforcementlearning. arXiv preprint arXiv:1509.02971,2015.
+[40] I. Loshchilov and F. Hutter. SGDR: Stochastic gradient descent with warm restarts. arXiv preprint arXiv:1608.03983,
+2016.
+[41] I.LoshchilovandF.Hutter. Decoupledweightdecayregularization. arXiv preprint arXiv:1711.05101,2017.
+[42] M. Lutter, J. Silberbauer, J. Watson, and J. Peters. Differentiable physics models for real-world offline model-based
+reinforcementlearning. In2021 IEEE International Conference on Robotics and Automation (ICRA),pages4163–4170.
+IEEE,2021.
+[43] A.Mani,J.Larsson,andP.Moin. Suitabilityofartificialbulkviscosityforlarge-eddysimulationofturbulentflowswith
+shocks. Journal of Computational Physics,228(19):7368–7374,2009.
+[44] G. Novati, H. L. de Laroussilhe, and P. Koumoutsakos. Automating turbulence modelling by multi-agent reinforcement
+learning. Nature Machine Intelligence,3(1):87–96,2021.
+[45] G.Orlando.AfilteringmonotonizationapproachforDGdiscretizationsofhyperbolicproblems.Computers&Mathematics
+with Applications,129:113–125,2023.
+[46] A.Paszke,S.Gross,S.Chintala,G.Chanan,E.Yang,Z.DeVito,Z.Lin,A.Desmaison,L.Antiga,andA.Lerer.Automatic
+differentiationinPytorch. NIPS 2017 Workshop on Autodiff,2017.
+[47] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen, Z. Lin, N. Gimelshein, L. Antiga, et al.
+Pytorch: Animperativestyle,high-performancedeeplearninglibrary.AdvancesinNeuralInformationProcessingSystems,
+32,2019.
+[48] P.-O. Persson and J. Peraire. Sub-cell shock capturing for discontinuous Galerkin methods. In 44th AIAA Aerospace
+Sciences Meeting and Exhibit,page112,2006.
+[49] J.QiuandC.-W.Shu. HermiteWENOschemesandtheirapplicationaslimitersforRunge–KuttadiscontinuousGalerkin
+method: one-dimensionalcase. Journal of Computational Physics,193(1):115–135,2004.
+[50] J.QiuandC.-W.Shu. Runge–KuttadiscontinuousGalerkinmethodusingWENOlimiters. SIAM Journal on Scientific
+Computing,26(3):907–929,2005.
+[51] D. Ray and J. S. Hesthaven. Detecting troubled-cells on two-dimensional unstructured grids using a neural network.
+Journal of Computational Physics,397:108845,2019.
+[52] V. V. Rusanov. The calculation of the interaction of non-stationary shock waves and obstacles. USSR Computational
+Mathematics and Mathematical Physics,1(2):304–320,1962.
+[53] C.W.Schulz-Rinne. ClassificationoftheRiemannproblemfortwo-dimensionalgasdynamics. SIAM Journal on Mathe-
+matical Analysis,24(1):76–88,1993.
+[54] L.Schwander,D.Ray,andJ.S.Hesthaven.Controllingoscillationsinspectralmethodsbylocalartificialviscositygoverned
+byneuralnetworks. Journal of Computational Physics,431:110144,2021.
+[55] C.-W.Shu. High-orderfinitedifferenceandfinitevolumeWENOschemesanddiscontinuousGalerkinmethodsforCFD.
+International Journal of Computational Fluid Dynamics,17(2):107–118,2003.
+[56] C.-W. Shu and S. Osher. Efficient implementation of essentially non-oscillatory shock-capturing schemes. Journal of
+Computational Physics,77(2):439–471,1988.
+[57] G.A.Sod. Asurveyofseveralfinitedifferencemethodsforsystemsofnonlinearhyperbolicconservationlaws. Journalof
+Computational Physics,27(1):1–31,1978.
+[58] R.S.SuttonandA.G.Barto. Reinforcement learning: An introduction. MITpress,2018.
+[59] T. Tassi, A. Zingaro, et al. A machine learning approach to enhance the SUPG stabilization method for advection-
+dominateddifferentialproblems. Mathematics in Engineering,5(2):1–26,2023.
+[60] P.Wesseling. Principles of computational fluid dynamics,volume29. SpringerScience&BusinessMedia,2009.
+[61] J.-L. Wu, H. Xiao, and E. Paterson. Physics-informed machine learning approach for augmenting turbulence models: A
+comprehensiveframework. Physical Review Fluids,3(7):074602,2018.
+[62] J. Yu and J. S. Hesthaven. A study of several artificial viscosity models within the discontinuous Galerkin framework.
+Communications in Computational Physics,27(5):1309–1343,2020.
+25[63] A.Zhang,Z.C.Lipton,M.Li,andA.J.Smola. Dive into Deep Learning. CambridgeUniversityPress,2023.
+[64] V.Zingan,J.-L.Guermond,J.Morel,andB.Popov.Implementationoftheentropyviscositymethodwiththediscontinuous
+Galerkinmethod. Computer Methods in Applied Mechanics and Engineering,253:479–490,2013.
+26
