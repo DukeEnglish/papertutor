@@ -12,11 +12,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.19467v1 |
+|idx| 2402.19467v2 |
 |title| TV-TREES: Multimodal Entailment Trees for Neuro-Symbolic Video Reasoning |
 |authors| Kate SandersNathaniel WeirBenjamin Van Durme
-|links| http://arxiv.org/abs/2402.19467v1 |
-|updated| 2024-02-29 18:57:01 UTC |
+|links| http://arxiv.org/abs/2402.19467v2 |
+|updated| 2024-03-01 03:06:37 UTC |
 |summary| It is challenging to perform question-answering over complex multimodalcontent such as television clips. This is in part because currentvideo-language models rely on single-modality reasoning have loweredperformance on long inputs and lack interpetability. We propose TV-TREES thefirst multimodal entailment tree generator. TV-TREES serves as an approach tovideo understanding that promotes interpretable joint-modality reasoning byproducing trees of entailment relationships between simple premises directlyentailed by the videos and higher-level conclusions. We then introduce the taskof multimodal entailment tree generation to evaluate the reasoning quality ofsuch methods. Our methods experimental results on the challenging TVQA datasetdemonstrate intepretable state-of-the-art zero-shot performance on full videoclips illustrating a best of both worlds contrast to black-box methods. |
 
 
@@ -74,11 +74,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.19467v1 |
+|idx| 2402.19467v2 |
 |title| TV-TREES: Multimodal Entailment Trees for Neuro-Symbolic Video Reasoning |
 |authors| Kate SandersNathaniel WeirBenjamin Van Durme
-|links| http://arxiv.org/abs/2402.19467v1 |
-|updated| 2024-02-29 18:57:01 UTC |
+|links| http://arxiv.org/abs/2402.19467v2 |
+|updated| 2024-03-01 03:06:37 UTC |
 |summary| It is challenging to perform question-answering over complex multimodalcontent such as television clips. This is in part because currentvideo-language models rely on single-modality reasoning have loweredperformance on long inputs and lack interpetability. We propose TV-TREES thefirst multimodal entailment tree generator. TV-TREES serves as an approach tovideo understanding that promotes interpretable joint-modality reasoning byproducing trees of entailment relationships between simple premises directlyentailed by the videos and higher-level conclusions. We then introduce the taskof multimodal entailment tree generation to evaluate the reasoning quality ofsuch methods. Our methods experimental results on the challenging TVQA datasetdemonstrate intepretable state-of-the-art zero-shot performance on full videoclips illustrating a best of both worlds contrast to black-box methods. |
 
 
@@ -354,11 +354,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2402.17978v1 |
+|idx| 2402.17978v2 |
 |title| Imagine, Initialize, and Explore: An Effective Exploration Method in Multi-Agent Reinforcement Learning |
 |authors| Zeyang LiuLipeng WanXinrui YangZhuoran ChenXingyu ChenXuguang Lan
-|links| http://arxiv.org/abs/2402.17978v1 |
-|updated| 2024-02-28 01:45:01 UTC |
+|links| http://arxiv.org/abs/2402.17978v2 |
+|updated| 2024-03-01 11:08:48 UTC |
 |summary| Effective exploration is crucial to discovering optimal strategies formulti-agent reinforcement learning MARL in complex coordination tasks.Existing methods mainly utilize intrinsic rewards to enable committedexploration or use role-based learning for decomposing joint action spacesinstead of directly conducting a collective search in the entireaction-observation space. However they often face challenges obtainingspecific joint action sequences to reach successful states in long-horizontasks. To address this limitation we propose Imagine Initialize and ExploreIIE a novel method that offers a promising solution for efficientmulti-agent exploration in complex scenarios. IIE employs a transformer modelto imagine how the agents reach a critical state that can influence eachothers transition functions. Then we initialize the environment at this stateusing a simulator before the exploration phase. We formulate the imagination asa sequence modeling problem where the states observations prompts actionsand rewards are predicted autoregressively. The prompt consists oftimestep-to-go return-to-go influence value and one-shot demonstrationspecifying the desired state and trajectory as well as guiding the actiongeneration. By initializing agents at the critical states IIE significantlyincreases the likelihood of discovering potentially important under-exploredregions. Despite its simplicity empirical results demonstrate that our methodoutperforms multi-agent exploration baselines on the StarCraft Multi-AgentChallenge SMAC and SMACv2 environments. Particularly IIE shows improvedperformance in the sparse-reward SMAC tasks and produces more effectivecurricula over the initialized states than other generative methods such asCVAE-GAN and diffusion models. |
 
 
