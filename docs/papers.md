@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03218v1 |
-|title| The WMDP Benchmark: Measuring and Reducing Malicious Use With Unlearning |
-|authors| Nathaniel LiAlexander PanAnjali GopalSummer YueDaniel BerriosAlice GattiJustin D. LiAnn-Kathrin DombrowskiShashwat GoelLong PhanGabriel MukobiNathan Helm-BurgerRassin LababidiLennart JustenAndrew B. LiuMichael ChenIsabelle BarrassOliver ZhangXiaoyuan ZhuRishub TamirisaBhrugu BharathiAdam KhojaAriel Herbert-VossCort B. BreuerAndy ZouMantas MazeikaZifan WangPalash OswalWeiran LiuAdam A. HuntJustin Tienken-HarderKevin Y. ShihKemper TalleyJohn GuanRussell KaplanIan StenekerDavid CampbellBrad JokubaitisAlex LevinsonJean WangWilliam QianKallol Krishna KarmakarSteven BasartStephen FitzMindy LevinePonnurangam KumaraguruUday TupakulaVijay VaradharajanYan ShoshitaishviliJimmy BaKevin M. EsveltAlexandr WangDan Hendrycks
-|links| http://arxiv.org/abs/2403.03218v1 |
-|updated| 2024-03-05 18:59:35 UTC |
-|summary| The White House Executive Order on Artificial Intelligence highlights therisks of large language models LLMs empowering malicious actors in developingbiological cyber and chemical weapons. To measure these risks of malicioususe government institutions and major AI labs are developing evaluations forhazardous capabilities in LLMs. However current evaluations are privatepreventing further research into mitigating risk. Furthermore they focus ononly a few highly specific pathways for malicious use. To fill these gaps wepublicly release the Weapons of Mass Destruction Proxy WMDP benchmark adataset of 4157 multiple-choice questions that serve as a proxy measurement ofhazardous knowledge in biosecurity cybersecurity and chemical security. WMDPwas developed by a consortium of academics and technical consultants and wasstringently filtered to eliminate sensitive information prior to publicrelease. WMDP serves two roles: first as an evaluation for hazardous knowledgein LLMs and second as a benchmark for unlearning methods to remove suchhazardous knowledge. To guide progress on unlearning we develop CUT astate-of-the-art unlearning method based on controlling model representations.CUT reduces model performance on WMDP while maintaining general capabilities inareas such as biology and computer science suggesting that unlearning may be aconcrete path towards reducing malicious use from LLMs. We release ourbenchmark and code publicly at https://wmdp.ai |
+|idx| 2403.04746v1 |
+|title| LLMs in the Imaginarium: Tool Learning through Simulated Trial and Error |
+|authors| Boshi WangHao FangJason EisnerBenjamin Van DurmeYu Su
+|links| http://arxiv.org/abs/2403.04746v1 |
+|updated| 2024-03-07 18:50:51 UTC |
+|summary| Tools are essential for large language models LLMs to acquire up-to-dateinformation and take consequential actions in external environments. Existingwork on tool-augmented LLMs primarily focuses on the broad coverage of toolsand the flexibility of adding new tools. However a critical aspect that hassurprisingly been understudied is simply how accurately an LLM uses tools forwhich it has been trained. We find that existing LLMs including GPT-4 andopen-source LLMs specifically fine-tuned for tool use only reach a correctnessrate in the range of 30 to 60 far from reliable use in practice. We proposea biologically inspired method for tool-augmented LLMs simulated trial anderror STE that orchestrates three key mechanisms for successful tool usebehaviors in the biological system: trial and error imagination and memory.Specifically STE leverages an LLMs imagination to simulate plausiblescenarios for using a tool after which the LLM interacts with the tool tolearn from its execution feedback. Both short-term and long-term memory areemployed to improve the depth and breadth of the exploration respectively.Comprehensive experiments on ToolBench show that STE substantially improvestool learning for LLMs under both in-context learning and fine-tuning settingsbringing a boost of 46.7 to Mistral-Instruct-7B and enabling it to outperformGPT-4. We also show effective continual learning of tools via a simpleexperience replay strategy. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03194v1 |
-|title| MAGID: An Automated Pipeline for Generating Synthetic Multi-modal Datasets |
-|authors| Hossein AboutalebiHwanjun SongYusheng XieArshit GuptaJustin SunHang SuIgor ShalyminovNikolaos PappasSiffi SinghSaab Mansour
-|links| http://arxiv.org/abs/2403.03194v1 |
-|updated| 2024-03-05 18:31:28 UTC |
-|summary| Development of multimodal interactive systems is hindered by the lack ofrich multimodal text images conversational data which is needed in largequantities for LLMs. Previous approaches augment textual dialogues withretrieved images posing privacy diversity and quality constraints. In thiswork we introduce textbfMultimodal textbfAugmented textbfGenerativetextbfImages textbfDialogues MAGID a framework to augment text-onlydialogues with diverse and high-quality images. Subsequently a diffusion modelis applied to craft corresponding images ensuring alignment with theidentified text. Finally MAGID incorporates an innovative feedback loopbetween an image description generation module textual LLM and image qualitymodules addressing aesthetics image-text matching and safety that work intandem to generate high-quality and multi-modal dialogues. We compare MAGID toother SOTA baselines on three dialogue datasets using automated and humanevaluation. Our results show that MAGID is comparable to or better thanbaselines with significant improvements in human evaluation especiallyagainst retrieval baselines where the image database is small. |
+|idx| 2403.04732v1 |
+|title| How Far Are We from Intelligent Visual Deductive Reasoning? |
+|authors| Yizhe ZhangHe BaiRuixiang ZhangJiatao GuShuangfei ZhaiJosh SusskindNavdeep Jaitly
+|links| http://arxiv.org/abs/2403.04732v1 |
+|updated| 2024-03-07 18:35:54 UTC |
+|summary| Vision-Language Models VLMs such as GPT-4V have recently demonstratedincredible strides on diverse vision language tasks. We dig into vision-baseddeductive reasoning a more sophisticated but less explored realm and findpreviously unexposed blindspots in the current SOTA VLMs. Specifically weleverage Ravens Progressive Matrices RPMs to assess VLMs abilities toperform multi-hop relational and deductive reasoning relying solely on visualclues. We perform comprehensive evaluations of several popular VLMs employingstandard strategies such as in-context learning self-consistency andChain-of-thoughts CoT on three diverse datasets including the Mensa IQ testIntelligenceTest and RAVEN. The results reveal that despite the impressivecapabilities of LLMs in text-based reasoning we are still far from achievingcomparable proficiency in visual deductive reasoning. We found that certainstandard strategies that are effective when applied to LLMs do not seamlesslytranslate to the challenges presented by visual reasoning tasks. Moreover adetailed analysis reveals that VLMs struggle to solve these tasks mainlybecause they are unable to perceive and comprehend multiple confoundingabstract patterns in RPM examples. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03187v1 |
-|title| Reliable, Adaptable, and Attributable Language Models with Retrieval |
-|authors| Akari AsaiZexuan ZhongDanqi ChenPang Wei KohLuke ZettlemoyerHannaneh HajishirziWen-tau Yih
-|links| http://arxiv.org/abs/2403.03187v1 |
-|updated| 2024-03-05 18:22:33 UTC |
-|summary| Parametric language models LMs which are trained on vast amounts of webdata exhibit remarkable flexibility and capability. However they still facepractical challenges such as hallucinations difficulty in adapting to new datadistributions and a lack of verifiability. In this position paper we advocatefor retrieval-augmented LMs to replace parametric LMs as the next generation ofLMs. By incorporating large-scale datastores during inferenceretrieval-augmented LMs can be more reliable adaptable and attributable.Despite their potential retrieval-augmented LMs have yet to be widely adopteddue to several obstacles: specifically current retrieval-augmented LMsstruggle to leverage helpful text beyond knowledge-intensive tasks such asquestion answering have limited interaction between retrieval and LMcomponents and lack the infrastructure for scaling. To address these wepropose a roadmap for developing general-purpose retrieval-augmented LMs. Thisinvolves a reconsideration of datastores and retrievers the exploration ofpipelines with improved retriever-LM interaction and significant investment ininfrastructure for efficient training and inference. |
+|idx| 2403.04706v1 |
+|title| Common 7B Language Models Already Possess Strong Math Capabilities |
+|authors| Chen LiWeiqi WangJingcheng HuYixuan WeiNanning ZhengHan HuZheng ZhangHouwen Peng
+|links| http://arxiv.org/abs/2403.04706v1 |
+|updated| 2024-03-07 18:00:40 UTC |
+|summary| Mathematical capabilities were previously believed to emerge in commonlanguage models only at a very large scale or require extensive math-relatedpre-training. This paper shows that the LLaMA-2 7B model with commonpre-training already exhibits strong mathematical abilities as evidenced byits impressive accuracy of 97.7 and 72.0 on the GSM8K and MATH benchmarksrespectively when selecting the best response from 256 random generations. Theprimary issue with the current base model is the difficulty in consistentlyeliciting its inherent mathematical capabilities. Notably the accuracy for thefirst answer drops to 49.5 and 7.9 on the GSM8K and MATH benchmarksrespectively. We find that simply scaling up the SFT data can significantlyenhance the reliability of generating correct answers. However the potentialfor extensive scaling is constrained by the scarcity of publicly available mathquestions. To overcome this limitation we employ synthetic data which provesto be nearly as effective as real data and shows no clear saturation whenscaled up to approximately one million samples. This straightforward approachachieves an accuracy of 82.6 on GSM8K and 40.6 on MATH using LLaMA-2 7Bmodels surpassing previous models by 14.2 and 20.8 respectively. We alsoprovide insights into scaling behaviors across different reasoning complexitiesand error types. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03170v1 |
-|title| SNIFFER: Multimodal Large Language Model for Explainable Out-of-Context Misinformation Detection |
-|authors| Peng QiZehong YanWynne HsuMong Li Lee
-|links| http://arxiv.org/abs/2403.03170v1 |
-|updated| 2024-03-05 18:04:59 UTC |
-|summary| Misinformation is a prevalent societal issue due to its potential high risks.Out-of-context OOC misinformation where authentic images are repurposed withfalse text is one of the easiest and most effective ways to mislead audiences.Current methods focus on assessing image-text consistency but lack convincingexplanations for their judgments which is essential for debunkingmisinformation. While Multimodal Large Language Models MLLMs have richknowledge and innate capability for visual reasoning and explanationgeneration they still lack sophistication in understanding and discovering thesubtle crossmodal differences. In this paper we introduce SNIFFER a novelmultimodal large language model specifically engineered for OOC misinformationdetection and explanation. SNIFFER employs two-stage instruction tuning onInstructBLIP. The first stage refines the models concept alignment of genericobjects with news-domain entities and the second stage leverages language-onlyGPT-4 generated OOC-specific instruction data to fine-tune the modelsdiscriminatory powers. Enhanced by external tools and retrieval SNIFFER notonly detects inconsistencies between text and image but also utilizes externalknowledge for contextual verification. Our experiments show that SNIFFERsurpasses the original MLLM by over 40 and outperforms state-of-the-artmethods in detection accuracy. SNIFFER also provides accurate and persuasiveexplanations as validated by quantitative and human evaluations. |
+|idx| 2403.04696v1 |
+|title| Fact-Checking the Output of Large Language Models via Token-Level Uncertainty Quantification |
+|authors| Ekaterina FadeevaAleksandr RubashevskiiArtem ShelmanovSergey PetrakovHaonan LiHamdy MubarakEvgenii TsymbalovGleb KuzminAlexander PanchenkoTimothy BaldwinPreslav NakovMaxim Panov
+|links| http://arxiv.org/abs/2403.04696v1 |
+|updated| 2024-03-07 17:44:17 UTC |
+|summary| Large language models LLMs are notorious for hallucinating i.e. producingerroneous claims in their output. Such hallucinations can be dangerous asoccasional factual inaccuracies in the generated text might be obscured by therest of the output being generally factual making it extremely hard for theusers to spot them. Current services that leverage LLMs usually do not provideany means for detecting unreliable generations. Here we aim to bridge thisgap. In particular we propose a novel fact-checking and hallucinationdetection pipeline based on token-level uncertainty quantification. Uncertaintyscores leverage information encapsulated in the output of a neural network orits layers to detect unreliable predictions and we show that they can be usedto fact-check the atomic claims in the LLM output. Moreover we present a noveltoken-level uncertainty quantification method that removes the impact ofuncertainty about what claim to generate on the current step and what surfaceform to use. Our method Claim Conditioned Probability CCP measures only theuncertainty of particular claim value expressed by the model. Experiments onthe task of biography generation demonstrate strong improvements for CCPcompared to the baselines for six different LLMs and three languages. Humanevaluation reveals that the fact-checking pipeline based on uncertaintyquantification is competitive with a fact-checking tool that leverages externalknowledge. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03167v1 |
-|title| PARADISE: Evaluating Implicit Planning Skills of Language Models with Procedural Warnings and Tips Dataset |
-|authors| Arda UzunoğluAbdalfatah Rashid SafaGözde Gül Şahin
-|links| http://arxiv.org/abs/2403.03167v1 |
-|updated| 2024-03-05 18:01:59 UTC |
-|summary| Recently there has been growing interest within the community regardingwhether large language models are capable of planning or executing plans.However most prior studies use LLMs to generate high-level plans forsimplified scenarios lacking linguistic complexity and domain diversitylimiting analysis of their planning abilities. These setups constrainevaluation methods e.g. predefined action space architectural choicese.g. only generative models and overlook the linguistic nuances essentialfor realistic analysis. To tackle this we present PARADISE an abductivereasoning task using QA format on practical procedural text sourced fromwikiHow. It involves warning and tip inference tasks directly associated withgoals excluding intermediary steps with the aim of testing the ability of themodels to infer implicit knowledge of the plan solely from the given goal. Ourexperiments utilizing fine-tuned language models and zero-shot promptingreveal the effectiveness of task-specific small models over large languagemodels in most scenarios. Despite advancements all models fall short of humanperformance. Notably our analysis uncovers intriguing insights such asvariations in model behavior with dropped keywords struggles of BERT-familyand GPT-4 with physical and abstract goals and the proposed tasks offeringvaluable prior knowledge for other unseen procedural tasks. The PARADISEdataset and associated resources are publicly available for further researchexploration with https://github.com/GGLAB-KU/paradise. |
+|idx| 2403.04671v1 |
+|title| Greater than the sum of its parts: The role of minority and majority status in collaborative problem-solving communication |
+|authors| Jacqueline G. CavazosNia Nixon
+|links| http://arxiv.org/abs/2403.04671v1 |
+|updated| 2024-03-07 17:17:20 UTC |
+|summary| Collaborative problem-solving CPS is a vital skill used both in theworkplace and in educational environments. CPS is useful in tacklingincreasingly complex global economic and political issues and is considered acentral 21st century skill. The increasingly connected global communitypresents a fruitful opportunity for creative and collaborative problem-solvinginteractions and solutions that involve diverse perspectives. Unfortunatelywomen and underrepresented minorities URMs often face obstacles duringcollaborative interactions that hinder their key participation in theseproblem-solving conversations. Here we explored the communication patterns ofminority and non-minority individuals working together in a CPS task. GroupCommunication Analysis GCA a temporally-sensitive computational linguistictool was used to examine how URM status impacts individuals sociocognitivelinguistic patterns. Results show differences across racial/ethnic groups inkey sociocognitive features that indicate fruitful collaborative interactions.We also investigated how the groups racial/ethnic composition impacts bothindividual and group communication patterns. In general individuals in moredemographically diverse groups displayed more productive communicationbehaviors than individuals who were in majority-dominated groups. We discussthe implications of individual and group diversity on communication patternsthat emerge during CPS and how these patterns can impact collaborativeoutcomes. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03218v1 |
-|title| The WMDP Benchmark: Measuring and Reducing Malicious Use With Unlearning |
-|authors| Nathaniel LiAlexander PanAnjali GopalSummer YueDaniel BerriosAlice GattiJustin D. LiAnn-Kathrin DombrowskiShashwat GoelLong PhanGabriel MukobiNathan Helm-BurgerRassin LababidiLennart JustenAndrew B. LiuMichael ChenIsabelle BarrassOliver ZhangXiaoyuan ZhuRishub TamirisaBhrugu BharathiAdam KhojaAriel Herbert-VossCort B. BreuerAndy ZouMantas MazeikaZifan WangPalash OswalWeiran LiuAdam A. HuntJustin Tienken-HarderKevin Y. ShihKemper TalleyJohn GuanRussell KaplanIan StenekerDavid CampbellBrad JokubaitisAlex LevinsonJean WangWilliam QianKallol Krishna KarmakarSteven BasartStephen FitzMindy LevinePonnurangam KumaraguruUday TupakulaVijay VaradharajanYan ShoshitaishviliJimmy BaKevin M. EsveltAlexandr WangDan Hendrycks
-|links| http://arxiv.org/abs/2403.03218v1 |
-|updated| 2024-03-05 18:59:35 UTC |
-|summary| The White House Executive Order on Artificial Intelligence highlights therisks of large language models LLMs empowering malicious actors in developingbiological cyber and chemical weapons. To measure these risks of malicioususe government institutions and major AI labs are developing evaluations forhazardous capabilities in LLMs. However current evaluations are privatepreventing further research into mitigating risk. Furthermore they focus ononly a few highly specific pathways for malicious use. To fill these gaps wepublicly release the Weapons of Mass Destruction Proxy WMDP benchmark adataset of 4157 multiple-choice questions that serve as a proxy measurement ofhazardous knowledge in biosecurity cybersecurity and chemical security. WMDPwas developed by a consortium of academics and technical consultants and wasstringently filtered to eliminate sensitive information prior to publicrelease. WMDP serves two roles: first as an evaluation for hazardous knowledgein LLMs and second as a benchmark for unlearning methods to remove suchhazardous knowledge. To guide progress on unlearning we develop CUT astate-of-the-art unlearning method based on controlling model representations.CUT reduces model performance on WMDP while maintaining general capabilities inareas such as biology and computer science suggesting that unlearning may be aconcrete path towards reducing malicious use from LLMs. We release ourbenchmark and code publicly at https://wmdp.ai |
+|idx| 2403.04760v1 |
+|title| iScore: Visual Analytics for Interpreting How Language Models Automatically Score Summaries |
+|authors| Adam CosciaLangdon HolmesWesley MorrisJoon Suh ChoiScott CrossleyAlex Endert
+|links| http://dx.doi.org/10.1145/3640543.3645142 |
+|updated| 2024-03-07 18:56:39 UTC |
+|summary| The recent explosion in popularity of large language models LLMs hasinspired learning engineers to incorporate them into adaptive educational toolsthat automatically score summary writing. Understanding and evaluating LLMs isvital before deploying them in critical learning environments yet theirunprecedented size and expanding number of parameters inhibits transparency andimpedes trust when they underperform. Through a collaborative user-centereddesign process with several learning engineers building and deploying summaryscoring LLMs we characterized fundamental design challenges and goals aroundinterpreting their models including aggregating large text inputs trackingscore provenance and scaling LLM interpretability methods. To address theirconcerns we developed iScore an interactive visual analytics tool forlearning engineers to upload score and compare multiple summariessimultaneously. Tightly integrated views allow users to iteratively revise thelanguage in summaries track changes in the resulting LLM scores and visualizemodel weights at multiple levels of abstraction. To validate our approach wedeployed iScore with three learning engineers over the course of a month. Wepresent a case study where interacting with iScore led a learning engineer toimprove their LLMs score accuracy by three percentage points. Finally weconducted qualitative interviews with the learning engineers that revealed howiScore enabled them to understand evaluate and build trust in their LLMsduring deployment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03203v1 |
-|title| CLEVR-POC: Reasoning-Intensive Visual Question Answering in Partially Observable Environments |
-|authors| Savitha Sam AbrahamMarjan AlirezaieLuc De Raedt
-|links| http://arxiv.org/abs/2403.03203v1 |
-|updated| 2024-03-05 18:41:37 UTC |
-|summary| The integration of learning and reasoning is high on the research agenda inAI. Nevertheless there is only a little attention to use existing backgroundknowledge for reasoning about partially observed scenes to answer questionsabout the scene. Yet we as humans use such knowledge frequently to inferplausible answers to visual questions by eliminating all inconsistent ones.Such knowledge often comes in the form of constraints about objects and ittends to be highly domain or environment-specific. We contribute a novelbenchmark called CLEVR-POC for reasoning-intensive visual question answeringVQA in partially observable environments under constraints. In CLEVR-POCknowledge in the form of logical constraints needs to be leveraged to generateplausible answers to questions about a hidden object in a given partial scene.For instance if one has the knowledge that all cups are colored either redgreen or blue and that there is only one green cup it becomes possible todeduce the color of an occluded cup as either red or blue provided that allother cups including the green one are observed. Through experiments weobserve that the low performance of pre-trained vision language models likeCLIP  22 and a large language model LLM like GPT-4  46 on CLEVR-POCascertains the necessity for frameworks that can handle reasoning-intensivetasks where environment-specific background knowledge is available and crucial.Furthermore our demonstration illustrates that a neuro-symbolic model whichintegrates an LLM like GPT-4 with a visual perception network and a formallogical reasoner exhibits exceptional performance on CLEVR-POC. |
+|idx| 2403.04758v1 |
+|title| KnowledgeVIS: Interpreting Language Models by Comparing Fill-in-the-Blank Prompts |
+|authors| Adam CosciaAlex Endert
+|links| http://dx.doi.org/10.1109/TVCG.2023.3346713 |
+|updated| 2024-03-07 18:56:31 UTC |
+|summary| Recent growth in the popularity of large language models has led to theirincreased usage for summarizing predicting and generating text making itvital to help researchers and engineers understand how and why they work. Wepresent KnowledgeVis a human-in-the-loop visual analytics system forinterpreting language models using fill-in-the-blank sentences as prompts. Bycomparing predictions between sentences KnowledgeVis reveals learnedassociations that intuitively connect what language models learn duringtraining to natural language tasks downstream helping users create and testmultiple prompt variations analyze predicted words using a novel semanticclustering technique and discover insights using interactive visualizations.Collectively these visualizations help users identify the likelihood anduniqueness of individual predictions compare sets of predictions betweenprompts and summarize patterns and relationships between predictions acrossall prompts. We demonstrate the capabilities of KnowledgeVis with feedback fromsix NLP experts as well as three different use cases: 1 probing biomedicalknowledge in two domain-adapted models and 2 evaluating harmful identitystereotypes and 3 discovering facts and relationships between threegeneral-purpose models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03188v1 |
-|title| Towards Democratized Flood Risk Management: An Advanced AI Assistant Enabled by GPT-4 for Enhanced Interpretability and Public Engagement |
-|authors| Rafaela MarteloRuo-Qian Wang
-|links| http://arxiv.org/abs/2403.03188v1 |
-|updated| 2024-03-05 18:24:52 UTC |
-|summary| Real-time flood forecasting plays a crucial role in enabling timely andeffective emergency responses. However a significant challenge lies inbridging the gap between complex numerical flood models and practicaldecision-making. Decision-makers often rely on experts to interpret thesemodels for optimizing flood mitigation strategies. And the public requirescomplex techniques to inquiry and understand socio-cultural and institutionalfactors often hinders the publics understanding of flood risks. To overcomethese challenges our study introduces an innovative solution: a customized AIAssistant powered by the GPT-4 Large Language Model. This AI Assistant isdesigned to facilitate effective communication between decision-makers thegeneral public and flood forecasters without the requirement of specializedknowledge. The new framework utilizes GPT-4s advanced natural languageunderstanding and function calling capabilities to provide immediate floodalerts and respond to various flood-related inquiries. Our developed prototypeintegrates real-time flood warnings with flood maps and social vulnerabilitydata. It also effectively translates complex flood zone information intoactionable risk management advice. To assess its performance we evaluated theprototype using six criteria within three main categories: relevance errorresilience and understanding of context. Our research marks a significant steptowards a more accessible and user-friendly approach in flood risk management.This study highlights the potential of advanced AI tools like GPT-4 indemocratizing information and enhancing public engagement in critical socialand environmental issues. |
+|idx| 2403.04747v1 |
+|title| GNN-VPA: A Variance-Preserving Aggregation Strategy for Graph Neural Networks |
+|authors| Lisa SchneckenreiterRichard FreinschlagFlorian SestakJohannes BrandstetterGünter KlambauerAndreas Mayr
+|links| http://arxiv.org/abs/2403.04747v1 |
+|updated| 2024-03-07 18:52:27 UTC |
+|summary| Graph neural networks GNNs and especially message-passing neural networksexcel in various domains such as physics drug discovery and molecularmodeling. The expressivity of GNNs with respect to their ability todiscriminate non-isomorphic graphs critically depends on the functions employedfor message aggregation and graph-level readout. By applying signal propagationtheory we propose a variance-preserving aggregation function VPA thatmaintains expressivity but yields improved forward and backward dynamics.Experiments demonstrate that VPA leads to increased predictive performance forpopular GNN architectures as well as improved learning dynamics. Our resultscould pave the way towards normalizer-free or self-normalizing GNNs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03187v1 |
-|title| Reliable, Adaptable, and Attributable Language Models with Retrieval |
-|authors| Akari AsaiZexuan ZhongDanqi ChenPang Wei KohLuke ZettlemoyerHannaneh HajishirziWen-tau Yih
-|links| http://arxiv.org/abs/2403.03187v1 |
-|updated| 2024-03-05 18:22:33 UTC |
-|summary| Parametric language models LMs which are trained on vast amounts of webdata exhibit remarkable flexibility and capability. However they still facepractical challenges such as hallucinations difficulty in adapting to new datadistributions and a lack of verifiability. In this position paper we advocatefor retrieval-augmented LMs to replace parametric LMs as the next generation ofLMs. By incorporating large-scale datastores during inferenceretrieval-augmented LMs can be more reliable adaptable and attributable.Despite their potential retrieval-augmented LMs have yet to be widely adopteddue to several obstacles: specifically current retrieval-augmented LMsstruggle to leverage helpful text beyond knowledge-intensive tasks such asquestion answering have limited interaction between retrieval and LMcomponents and lack the infrastructure for scaling. To address these wepropose a roadmap for developing general-purpose retrieval-augmented LMs. Thisinvolves a reconsideration of datastores and retrievers the exploration ofpipelines with improved retriever-LM interaction and significant investment ininfrastructure for efficient training and inference. |
+|idx| 2403.04746v1 |
+|title| LLMs in the Imaginarium: Tool Learning through Simulated Trial and Error |
+|authors| Boshi WangHao FangJason EisnerBenjamin Van DurmeYu Su
+|links| http://arxiv.org/abs/2403.04746v1 |
+|updated| 2024-03-07 18:50:51 UTC |
+|summary| Tools are essential for large language models LLMs to acquire up-to-dateinformation and take consequential actions in external environments. Existingwork on tool-augmented LLMs primarily focuses on the broad coverage of toolsand the flexibility of adding new tools. However a critical aspect that hassurprisingly been understudied is simply how accurately an LLM uses tools forwhich it has been trained. We find that existing LLMs including GPT-4 andopen-source LLMs specifically fine-tuned for tool use only reach a correctnessrate in the range of 30 to 60 far from reliable use in practice. We proposea biologically inspired method for tool-augmented LLMs simulated trial anderror STE that orchestrates three key mechanisms for successful tool usebehaviors in the biological system: trial and error imagination and memory.Specifically STE leverages an LLMs imagination to simulate plausiblescenarios for using a tool after which the LLM interacts with the tool tolearn from its execution feedback. Both short-term and long-term memory areemployed to improve the depth and breadth of the exploration respectively.Comprehensive experiments on ToolBench show that STE substantially improvestool learning for LLMs under both in-context learning and fine-tuning settingsbringing a boost of 46.7 to Mistral-Instruct-7B and enabling it to outperformGPT-4. We also show effective continual learning of tools via a simpleexperience replay strategy. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03186v1 |
-|title| Towards General Computer Control: A Multimodal Agent for Red Dead Redemption II as a Case Study |
-|authors| Weihao TanZiluo DingWentao ZhangBoyu LiBohan ZhouJunpeng YueHaochong XiaJiechuan JiangLongtao ZhengXinrun XuYifei BiPengjie GuXinrun WangBörje F. KarlssonBo AnZongqing Lu
-|links| http://arxiv.org/abs/2403.03186v1 |
-|updated| 2024-03-05 18:22:29 UTC |
-|summary| Recent studies have demonstrated the success of foundation agents in specifictasks or scenarios. However existing agents cannot generalize across differentscenarios mainly due to their diverse observation and action spaces andsemantic gaps or reliance on task-specific resources. In this work we proposethe General Computer Control GCC setting: building foundation agents that canmaster any computer task by taking only screen images and possibly audio ofthe computer as input and producing keyboard and mouse operations as outputsimilar to human-computer interaction. To target GCC we propose Cradle anagent framework with strong reasoning abilities including self-reflectiontask inference and skill curation to ensure generalizability andself-improvement across various tasks. To demonstrate the capabilities ofCradle we deploy it in the complex AAA game Red Dead Redemption II serving asa preliminary attempt towards GCC with a challenging target. Our agent canfollow the main storyline and finish real missions in this complex AAA gamewith minimal reliance on prior knowledge and application-specific resources.The project website is at https://baai-agents.github.io/Cradle/. |
+|idx| 2403.04732v1 |
+|title| How Far Are We from Intelligent Visual Deductive Reasoning? |
+|authors| Yizhe ZhangHe BaiRuixiang ZhangJiatao GuShuangfei ZhaiJosh SusskindNavdeep Jaitly
+|links| http://arxiv.org/abs/2403.04732v1 |
+|updated| 2024-03-07 18:35:54 UTC |
+|summary| Vision-Language Models VLMs such as GPT-4V have recently demonstratedincredible strides on diverse vision language tasks. We dig into vision-baseddeductive reasoning a more sophisticated but less explored realm and findpreviously unexposed blindspots in the current SOTA VLMs. Specifically weleverage Ravens Progressive Matrices RPMs to assess VLMs abilities toperform multi-hop relational and deductive reasoning relying solely on visualclues. We perform comprehensive evaluations of several popular VLMs employingstandard strategies such as in-context learning self-consistency andChain-of-thoughts CoT on three diverse datasets including the Mensa IQ testIntelligenceTest and RAVEN. The results reveal that despite the impressivecapabilities of LLMs in text-based reasoning we are still far from achievingcomparable proficiency in visual deductive reasoning. We found that certainstandard strategies that are effective when applied to LLMs do not seamlesslytranslate to the challenges presented by visual reasoning tasks. Moreover adetailed analysis reveals that VLMs struggle to solve these tasks mainlybecause they are unable to perceive and comprehend multiple confoundingabstract patterns in RPM examples. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03219v1 |
-|title| LC-Tsalis-INF: Generalized Best-of-Both-Worlds Linear Contextual Bandits |
-|authors| Masahiro KatoShinji Ito
-|links| http://arxiv.org/abs/2403.03219v1 |
-|updated| 2024-03-05 18:59:47 UTC |
-|summary| This study considers the linear contextual bandit problem with independentand identically distributed i.i.d. contexts. In this problem existingstudies have proposed Best-of-Both-Worlds BoBW algorithms whose regretssatisfy Olog2T for the number of rounds T in a stochastic regime witha suboptimality gap lower-bounded by a positive constant while satisfyingOsqrtT in an adversarial regime. However the dependency on T has roomfor improvement and the suboptimality-gap assumption can be relaxed. For thisissue this study proposes an algorithm whose regret satisfies OlogT inthe setting when the suboptimality gap is lower-bounded. Furthermore weintroduce a margin condition a milder assumption on the suboptimality gap.That condition characterizes the problem difficulty linked to the suboptimalitygap using a parameter beta in 0 infty. We then show that thealgorithms regret satisfiesOleftleftlogTrightfrac1beta2betaTfrac12betaright.Here beta infty corresponds to the case in the existing studies where alower bound exists in the suboptimality gap and our regret satisfiesOlogT in that case. Our proposed algorithm is based on theFollow-The-Regularized-Leader with the Tsallis entropy and referred to as thealpha-Linear-Contextual LC-Tsallis-INF. |
+|idx| 2403.04764v1 |
+|title| Minimizing the Thompson Sampling Regret-to-Sigma Ratio (TS-RSR): a provably efficient algorithm for batch Bayesian Optimization |
+|authors| Zhaolin RenNa Li
+|links| http://arxiv.org/abs/2403.04764v1 |
+|updated| 2024-03-07 18:58:26 UTC |
+|summary| This paper presents a new approach for batch Bayesian Optimization BOwhere the sampling takes place by minimizing a Thompson Sampling approximationof a regret to uncertainty ratio. Our objective is able to coordinate theactions chosen in each batch in a way that minimizes redundancy between pointswhilst focusing on points with high predictive means or high uncertainty. Weprovide high-probability theoretical guarantees on the regret of our algorithm.Finally numerically we demonstrate that our method attains state-of-the-artperformance on a range of nonconvex test functions where it outperformsseveral competitive benchmark batch BO algorithms by an order of magnitude onaverage. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03218v1 |
-|title| The WMDP Benchmark: Measuring and Reducing Malicious Use With Unlearning |
-|authors| Nathaniel LiAlexander PanAnjali GopalSummer YueDaniel BerriosAlice GattiJustin D. LiAnn-Kathrin DombrowskiShashwat GoelLong PhanGabriel MukobiNathan Helm-BurgerRassin LababidiLennart JustenAndrew B. LiuMichael ChenIsabelle BarrassOliver ZhangXiaoyuan ZhuRishub TamirisaBhrugu BharathiAdam KhojaAriel Herbert-VossCort B. BreuerAndy ZouMantas MazeikaZifan WangPalash OswalWeiran LiuAdam A. HuntJustin Tienken-HarderKevin Y. ShihKemper TalleyJohn GuanRussell KaplanIan StenekerDavid CampbellBrad JokubaitisAlex LevinsonJean WangWilliam QianKallol Krishna KarmakarSteven BasartStephen FitzMindy LevinePonnurangam KumaraguruUday TupakulaVijay VaradharajanYan ShoshitaishviliJimmy BaKevin M. EsveltAlexandr WangDan Hendrycks
-|links| http://arxiv.org/abs/2403.03218v1 |
-|updated| 2024-03-05 18:59:35 UTC |
-|summary| The White House Executive Order on Artificial Intelligence highlights therisks of large language models LLMs empowering malicious actors in developingbiological cyber and chemical weapons. To measure these risks of malicioususe government institutions and major AI labs are developing evaluations forhazardous capabilities in LLMs. However current evaluations are privatepreventing further research into mitigating risk. Furthermore they focus ononly a few highly specific pathways for malicious use. To fill these gaps wepublicly release the Weapons of Mass Destruction Proxy WMDP benchmark adataset of 4157 multiple-choice questions that serve as a proxy measurement ofhazardous knowledge in biosecurity cybersecurity and chemical security. WMDPwas developed by a consortium of academics and technical consultants and wasstringently filtered to eliminate sensitive information prior to publicrelease. WMDP serves two roles: first as an evaluation for hazardous knowledgein LLMs and second as a benchmark for unlearning methods to remove suchhazardous knowledge. To guide progress on unlearning we develop CUT astate-of-the-art unlearning method based on controlling model representations.CUT reduces model performance on WMDP while maintaining general capabilities inareas such as biology and computer science suggesting that unlearning may be aconcrete path towards reducing malicious use from LLMs. We release ourbenchmark and code publicly at https://wmdp.ai |
+|idx| 2403.04763v1 |
+|title| BloomGML: Graph Machine Learning through the Lens of Bilevel Optimization |
+|authors| Amber Yijia ZhengTong HeYixuan QiuMinjie WangDavid Wipf
+|links| http://arxiv.org/abs/2403.04763v1 |
+|updated| 2024-03-07 18:57:46 UTC |
+|summary| Bilevel optimization refers to scenarios whereby the optimal solution of alower-level energy function serves as input features to an upper-levelobjective of interest. These optimal features typically depend on tunableparameters of the lower-level energy in such a way that the entire bilevelpipeline can be trained end-to-end. Although not generally presented as suchthis paper demonstrates how a variety of graph learning techniques can berecast as special cases of bilevel optimization or simplifications thereof. Inbrief building on prior work we first derive a more flexible class of energyfunctions that when paired with various descent steps e.g. gradient descentproximal methods momentum etc. form graph neural network GNNmessage-passing layers critically we also carefully unpack where any residualapproximation error lies with respect to the underlying constituentmessage-passing functions. We then probe several simplifications of thisframework to derive close connections with non-GNN-based graph learningapproaches including knowledge graph embeddings various forms of labelpropagation and efficient graph-regularized MLP models. And finally wepresent supporting empirical results that demonstrate the versatility of theproposed bilevel lens which we refer to as BloomGML referencing that BiLevelOptimization Offers More Graph Machine Learning. Our code is available athttps://github.com/amberyzheng/BloomGML. Let graph ML bloom. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03208v1 |
-|title| Active Statistical Inference |
-|authors| Tijana ZrnicEmmanuel J. Candès
-|links| http://arxiv.org/abs/2403.03208v1 |
-|updated| 2024-03-05 18:46:50 UTC |
-|summary| Inspired by the concept of active learning we propose activeinferenceunicodex2013a methodology for statistical inference withmachine-learning-assisted data collection. Assuming a budget on the number oflabels that can be collected the methodology uses a machine learning model toidentify which data points would be most beneficial to label thus effectivelyutilizing the budget. It operates on a simple yet powerful intuition:prioritize the collection of labels for data points where the model exhibitsuncertainty and rely on the models predictions where it is confident. Activeinference constructs provably valid confidence intervals and hypothesis testswhile leveraging any black-box machine learning model and handling any datadistribution. The key point is that it achieves the same level of accuracy withfar fewer samples than existing baselines relying on non-adaptively-collecteddata. This means that for the same number of collected samples activeinference enables smaller confidence intervals and more powerful p-values. Weevaluate active inference on datasets from public opinion research censusanalysis and proteomics. |
+|idx| 2403.04760v1 |
+|title| iScore: Visual Analytics for Interpreting How Language Models Automatically Score Summaries |
+|authors| Adam CosciaLangdon HolmesWesley MorrisJoon Suh ChoiScott CrossleyAlex Endert
+|links| http://dx.doi.org/10.1145/3640543.3645142 |
+|updated| 2024-03-07 18:56:39 UTC |
+|summary| The recent explosion in popularity of large language models LLMs hasinspired learning engineers to incorporate them into adaptive educational toolsthat automatically score summary writing. Understanding and evaluating LLMs isvital before deploying them in critical learning environments yet theirunprecedented size and expanding number of parameters inhibits transparency andimpedes trust when they underperform. Through a collaborative user-centereddesign process with several learning engineers building and deploying summaryscoring LLMs we characterized fundamental design challenges and goals aroundinterpreting their models including aggregating large text inputs trackingscore provenance and scaling LLM interpretability methods. To address theirconcerns we developed iScore an interactive visual analytics tool forlearning engineers to upload score and compare multiple summariessimultaneously. Tightly integrated views allow users to iteratively revise thelanguage in summaries track changes in the resulting LLM scores and visualizemodel weights at multiple levels of abstraction. To validate our approach wedeployed iScore with three learning engineers over the course of a month. Wepresent a case study where interacting with iScore led a learning engineer toimprove their LLMs score accuracy by three percentage points. Finally weconducted qualitative interviews with the learning engineers that revealed howiScore enabled them to understand evaluate and build trust in their LLMsduring deployment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03187v1 |
-|title| Reliable, Adaptable, and Attributable Language Models with Retrieval |
-|authors| Akari AsaiZexuan ZhongDanqi ChenPang Wei KohLuke ZettlemoyerHannaneh HajishirziWen-tau Yih
-|links| http://arxiv.org/abs/2403.03187v1 |
-|updated| 2024-03-05 18:22:33 UTC |
-|summary| Parametric language models LMs which are trained on vast amounts of webdata exhibit remarkable flexibility and capability. However they still facepractical challenges such as hallucinations difficulty in adapting to new datadistributions and a lack of verifiability. In this position paper we advocatefor retrieval-augmented LMs to replace parametric LMs as the next generation ofLMs. By incorporating large-scale datastores during inferenceretrieval-augmented LMs can be more reliable adaptable and attributable.Despite their potential retrieval-augmented LMs have yet to be widely adopteddue to several obstacles: specifically current retrieval-augmented LMsstruggle to leverage helpful text beyond knowledge-intensive tasks such asquestion answering have limited interaction between retrieval and LMcomponents and lack the infrastructure for scaling. To address these wepropose a roadmap for developing general-purpose retrieval-augmented LMs. Thisinvolves a reconsideration of datastores and retrievers the exploration ofpipelines with improved retriever-LM interaction and significant investment ininfrastructure for efficient training and inference. |
+|idx| 2403.04759v1 |
+|title| Lifelong Intelligence Beyond the Edge using Hyperdimensional Computing |
+|authors| Xiaofan YuAnthony ThomasIvannia Gomez MorenoLouis GutierrezTajana Rosing
+|links| http://arxiv.org/abs/2403.04759v1 |
+|updated| 2024-03-07 18:56:33 UTC |
+|summary| On-device learning has emerged as a prevailing trend that avoids the slowresponse time and costly communication of cloud-based learning. The ability tolearn continuously and indefinitely in a changing environment and withresource constraints is critical for real sensor deployments. Howeverexisting designs are inadequate for practical scenarios with i streaming datainput ii lack of supervision and iii limited on-board resources. In thispaper we design and deploy the first on-device lifelong learning system calledLifeHD for general IoT applications with limited supervision. LifeHD isdesigned based on a novel neurally-inspired and lightweight learning paradigmcalled Hyperdimensional Computing HDC. We utilize a two-tier associativememory organization to intelligently store and manage high-dimensionallow-precision vectors which represent the historical patterns as clustercentroids. We additionally propose two variants of LifeHD to cope with scarcelabeled inputs and power constraints. We implement LifeHD on off-the-shelf edgeplatforms and perform extensive evaluations across three scenarios. Ourmeasurements show that LifeHD improves the unsupervised clustering accuracy byup to 74.8 compared to the state-of-the-art NN-based unsupervised lifelonglearning baselines with as much as 34.3x better energy efficiency. Our code isavailable at https://github.com/Orienfish/LifeHD. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03185v1 |
-|title| Preventing Reward Hacking with Occupancy Measure Regularization |
-|authors| Cassidy LaidlawShivam SinghalAnca Dragan
-|links| http://arxiv.org/abs/2403.03185v1 |
-|updated| 2024-03-05 18:22:15 UTC |
-|summary| Reward hacking occurs when an agent performs very well with respect to aproxy reward function which may be hand-specified or learned but poorlywith respect to the unknown true reward. Since ensuring good alignment betweenthe proxy and true reward is extremely difficult one approach to preventreward hacking is optimizing the proxy conservatively. Prior work hasparticularly focused on enforcing the learned policy to behave similarly to asafe policy by penalizing the KL divergence between their actiondistributions AD. However AD regularization doesnt always work well since asmall change in action distribution at a single state can lead to potentiallycalamitous outcomes while large changes might not be indicative of anydangerous activity. Our insight is that when reward hacking the agent visitsdrastically different states from those reached by the safe policy causinglarge deviations in state occupancy measure OM. Thus we propose regularizingbased on the OM divergence between policies instead of AD divergence to preventreward hacking. We theoretically establish that OM regularization can moreeffectively avoid large drops in true reward. Then we empirically demonstratein a variety of realistic environments that OM divergence is superior to ADdivergence for preventing reward hacking by regularizing towards a safe policy.Furthermore we show that occupancy measure divergence can also regularizelearned policies away from reward hacking behavior. Our code and data areavailable at https://github.com/cassidylaidlaw/orpo |
+|idx| 2403.04758v1 |
+|title| KnowledgeVIS: Interpreting Language Models by Comparing Fill-in-the-Blank Prompts |
+|authors| Adam CosciaAlex Endert
+|links| http://dx.doi.org/10.1109/TVCG.2023.3346713 |
+|updated| 2024-03-07 18:56:31 UTC |
+|summary| Recent growth in the popularity of large language models has led to theirincreased usage for summarizing predicting and generating text making itvital to help researchers and engineers understand how and why they work. Wepresent KnowledgeVis a human-in-the-loop visual analytics system forinterpreting language models using fill-in-the-blank sentences as prompts. Bycomparing predictions between sentences KnowledgeVis reveals learnedassociations that intuitively connect what language models learn duringtraining to natural language tasks downstream helping users create and testmultiple prompt variations analyze predicted words using a novel semanticclustering technique and discover insights using interactive visualizations.Collectively these visualizations help users identify the likelihood anduniqueness of individual predictions compare sets of predictions betweenprompts and summarize patterns and relationships between predictions acrossall prompts. We demonstrate the capabilities of KnowledgeVis with feedback fromsix NLP experts as well as three different use cases: 1 probing biomedicalknowledge in two domain-adapted models and 2 evaluating harmful identitystereotypes and 3 discovering facts and relationships between threegeneral-purpose models. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03221v1 |
-|title| FAR: Flexible, Accurate and Robust 6DoF Relative Camera Pose Estimation |
-|authors| Chris RockwellNilesh KulkarniLinyi JinJeong Joon ParkJustin JohnsonDavid F. Fouhey
-|links| http://arxiv.org/abs/2403.03221v1 |
-|updated| 2024-03-05 18:59:51 UTC |
-|summary| Estimating relative camera poses between images has been a central problem incomputer vision. Methods that find correspondences and solve for thefundamental matrix offer high precision in most cases. Conversely methodspredicting pose directly using neural networks are more robust to limitedoverlap and can infer absolute translation scale but at the expense of reducedprecision. We show how to combine the best of both methods our approach yieldsresults that are both precise and robust while also accurately inferringtranslation scales. At the heart of our model lies a Transformer that 1learns to balance between solved and learned pose estimations and 2 providesa prior to guide a solver. A comprehensive analysis supports our design choicesand demonstrates that our method adapts flexibly to various feature extractorsand correspondence estimators showing state-of-the-art performance in 6DoFpose estimation on Matterport3D InteriorNet StreetLearn and Map-freeRelocalization. |
+|idx| 2403.04765v1 |
+|title| Efficient LoFTR: Semi-Dense Local Feature Matching with Sparse-Like Speed |
+|authors| Yifan WangXingyi HeSida PengDongli TanXiaowei Zhou
+|links| http://arxiv.org/abs/2403.04765v1 |
+|updated| 2024-03-07 18:58:40 UTC |
+|summary| We present a novel method for efficiently producing semi-dense matches acrossimages. Previous detector-free matcher LoFTR has shown remarkable matchingcapability in handling large-viewpoint change and texture-poor scenarios butsuffers from low efficiency. We revisit its design choices and derive multipleimprovements for both efficiency and accuracy. One key observation is thatperforming the transformer over the entire feature map is redundant due toshared local information therefore we propose an aggregated attentionmechanism with adaptive token selection for efficiency. Furthermore we findspatial variance exists in LoFTRs fine correlation module which is adverse tomatching accuracy. A novel two-stage correlation layer is proposed to achieveaccurate subpixel correspondences for accuracy improvement. Our efficiencyoptimized model is sim 2.5times faster than LoFTR which can even surpassstate-of-the-art efficient sparse matching pipeline SuperPoint  LightGlue.Moreover extensive experiments show that our method can achieve higheraccuracy compared with competitive semi-dense matchers with considerableefficiency benefits. This opens up exciting prospects for large-scale orlatency-sensitive applications such as image retrieval and 3D reconstruction.Project page: https://zju3dv.github.io/efficientloftr. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03217v1 |
-|title| Self-supervised 3D Patient Modeling with Multi-modal Attentive Fusion |
-|authors| Meng ZhengBenjamin PlancheXuan GongFan YangTerrence ChenZiyan Wu
-|links| http://arxiv.org/abs/2403.03217v1 |
-|updated| 2024-03-05 18:58:55 UTC |
-|summary| 3D patient body modeling is critical to the success of automated patientpositioning for smart medical scanning and operating rooms. Existing CNN-basedend-to-end patient modeling solutions typically require a customized networkdesigns demanding large amount of relevant training data covering extensiverealistic clinical scenarios e.g. patient covered by sheets which leads tosuboptimal generalizability in practical deployment b expensive 3D humanmodel annotations i.e. requiring huge amount of manual effort resulting insystems that scale poorly. To address these issues we propose a genericmodularized 3D patient modeling method consists of a a multi-modal keypointdetection module with attentive fusion for 2D patient joint localization tolearn complementary cross-modality patient body information leading toimproved keypoint localization robustness and generalizability in a widevariety of imaging e.g. CT MRI etc. and clinical scenarios e.g. heavyocclusions and b a self-supervised 3D mesh regression module which does notrequire expensive 3D mesh parameter annotations to train bringing immediatecost benefits for clinical deployment. We demonstrate the efficacy of theproposed method by extensive patient positioning experiments on both public andclinical data. Our evaluation results achieve superior patient positioningperformance across various imaging modalities in real clinical scenarios. |
+|idx| 2403.04755v1 |
+|title| That's My Point: Compact Object-centric LiDAR Pose Estimation for Large-scale Outdoor Localisation |
+|authors| Georgi PramatarovMatthew GaddPaul NewmanDaniele De Martini
+|links| http://arxiv.org/abs/2403.04755v1 |
+|updated| 2024-03-07 18:55:30 UTC |
+|summary| This paper is about 3D pose estimation on LiDAR scans with extremely minimalstorage requirements to enable scalable mapping and localisation. We achievethis by clustering all points of segmented scans into semantic objects andrepresenting them only with their respective centroid and semantic class. Inthis way each LiDAR scan is reduced to a compact collection of four-numbervectors. This abstracts away important structural information from the sceneswhich is crucial for traditional registration approaches. To mitigate this weintroduce an object-matching network based on self- and cross-correlation thatcaptures geometric and semantic relationships between entities. The respectivematches allow us to recover the relative transformation between scans throughweighted Singular Value Decomposition SVD and RANdom SAmple ConsensusRANSAC. We demonstrate that such representation is sufficient for metriclocalisation by registering point clouds taken under different viewpoints onthe KITTI dataset and at different periods of time localising between KITTIand KITTI-360. We achieve accurate metric estimates comparable withstate-of-the-art methods with almost half the representation size specifically1.33 kB on average. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03206v1 |
-|title| Scaling Rectified Flow Transformers for High-Resolution Image Synthesis |
-|authors| Patrick EsserSumith KulalAndreas BlattmannRahim EntezariJonas MüllerHarry SainiYam LeviDominik LorenzAxel SauerFrederic BoeselDustin PodellTim DockhornZion EnglishKyle LaceyAlex GoodwinYannik MarekRobin Rombach
-|links| http://arxiv.org/abs/2403.03206v1 |
-|updated| 2024-03-05 18:45:39 UTC |
-|summary| Diffusion models create data from noise by inverting the forward paths ofdata towards noise and have emerged as a powerful generative modeling techniquefor high-dimensional perceptual data such as images and videos. Rectified flowis a recent generative model formulation that connects data and noise in astraight line. Despite its better theoretical properties and conceptualsimplicity it is not yet decisively established as standard practice. In thiswork we improve existing noise sampling techniques for training rectified flowmodels by biasing them towards perceptually relevant scales. Through alarge-scale study we demonstrate the superior performance of this approachcompared to established diffusion formulations for high-resolutiontext-to-image synthesis. Additionally we present a novel transformer-basedarchitecture for text-to-image generation that uses separate weights for thetwo modalities and enables a bidirectional flow of information between imageand text tokens improving text comprehension typography and human preferenceratings. We demonstrate that this architecture follows predictable scalingtrends and correlates lower validation loss to improved text-to-image synthesisas measured by various metrics and human evaluations. Our largest modelsoutperform state-of-the-art models and we will make our experimental datacode and model weights publicly available. |
+|idx| 2403.04739v1 |
+|title| I Can't Believe It's Not Scene Flow! |
+|authors| Ishan KhatriKyle VedderNeehar PeriDeva RamananJames Hays
+|links| http://arxiv.org/abs/2403.04739v1 |
+|updated| 2024-03-07 18:46:01 UTC |
+|summary| Current scene flow methods broadly fail to describe motion on small objectsand current scene flow evaluation protocols hide this failure by averaging overmany points with most drawn larger objects. To fix this evaluation failure wepropose a new evaluation protocol Bucket Normalized EPE which is class-awareand speed-normalized enabling contextualized error comparisons between objecttypes that move at vastly different speeds. To highlight current methodfailures we propose a frustratingly simple supervised scene flow baselineTrackFlow built by bolting a high-quality pretrained detector trained usingmany class rebalancing techniques onto a simple tracker that producesstate-of-the-art performance on current standard evaluations and largeimprovements over prior art on our new evaluation. Our results make it clearthat all scene flow evaluations must be class and speed aware and supervisedscene flow methods must address point class imbalances. We release theevaluation code publicly athttps://github.com/kylevedder/BucketedSceneFlowEval. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03190v2 |
-|title| Triple-CFN: Restructuring Conceptual Spaces for Enhancing Abstract Reasoning process |
-|authors| Ruizhuo SongBeiming Yuan
-|links| http://arxiv.org/abs/2403.03190v2 |
-|updated| 2024-03-06 04:21:38 UTC |
-|summary| Abstract reasoning problems pose significant challenges to artificialintelligence algorithms demanding cognitive capabilities beyond those requiredfor perception tasks. This study introduces the Triple-CFN approach to tacklethe Bongard-Logo problem achieving notable reasoning accuracy by implicitlyreorganizing the concept space of conflicting instances. Additionally theTriple-CFN paradigm proves effective for the RPM problem with necessarymodifications yielding competitive results. To further enhance performance onthe RPM issue we develop the Meta Triple-CFN network which explicitlystructures the problem space while maintaining interpretability on progressivepatterns. The success of Meta Triple-CFN is attributed to its paradigm ofmodeling the conceptual space equivalent to normalizing reasoning information.Based on this ideology we introduce the Re-space layer enhancing theperformance of both Meta Triple-CFN and Triple-CFN. This paper aims tocontribute to advancements in machine intelligence by exploring innovativenetwork designs for addressing abstract reasoning problems paving the way forfurther breakthroughs in this domain. |
+|idx| 2403.04735v1 |
+|title| SnapNTell: Enhancing Entity-Centric Visual Question Answering with Retrieval Augmented Multimodal LLM |
+|authors| Jielin QiuAndrea MadottoZhaojiang LinPaul A. CrookYifan Ethan XuXin Luna DongChristos FaloutsosLei LiBabak DamavandiSeungwhan Moon
+|links| http://arxiv.org/abs/2403.04735v1 |
+|updated| 2024-03-07 18:38:17 UTC |
+|summary| Vision-extended LLMs have made significant strides in Visual QuestionAnswering VQA. Despite these advancements VLLMs still encounter substantialdifficulties in handling queries involving long-tail entities with a tendencyto produce erroneous or hallucinated responses. In this work we introduce anovel evaluative benchmark named textbfSnapNTell specifically tailored forentity-centric VQA. This task aims to test the models capabilities inidentifying entities and providing detailed entity-specific knowledge. We havedeveloped the textbfSnapNTell Dataset distinct from traditional VQAdatasets: 1 It encompasses a wide range of categorized entities eachrepresented by images and explicitly named in the answers 2 It features QApairs that require extensive knowledge for accurate responses. The dataset isorganized into 22 major categories containing 7568 unique entities in total.For each entity we curated 10 illustrative images and crafted 10knowledge-intensive QA pairs. To address this novel task we devised ascalable efficient and transparent retrieval-augmented multimodal LLM. Ourapproach markedly outperforms existing methods on the SnapNTell datasetachieving a 66.5 improvement in the BELURT score. We will soon make thedataset and the source code publicly accessible. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03173v1 |
-|title| Solving the bongard-logo problem by modeling a probabilistic model |
-|authors| Ruizhuo SongBeiming Yuan
-|links| http://arxiv.org/abs/2403.03173v1 |
-|updated| 2024-03-05 18:08:29 UTC |
-|summary| Abstract reasoning problems challenge the perceptual and cognitive abilitiesof AI algorithms demanding deeper pattern discernment and inductive reasoningbeyond explicit image features. This study introduces PMoC a tailoredprobability model for the Bongard-Logo problem achieving high reasoningaccuracy by constructing independent probability models. Additionally wepresent Pose-Transformer an enhanced Transformer-Encoder designed for complexabstract reasoning tasks including Bongard-Logo RAVEN I-RAVEN and PGM.Pose-Transformer incorporates positional information learning inspired bycapsule networks pose matrices enhancing its focus on local positionalrelationships in image data processing. When integrated with PMoC it furtherimproves reasoning accuracy. Our approach effectively addresses reasoningdifficulties associated with abstract entities positional changesoutperforming previous models on the OIG D3times3 subsets of RAVEN and PGMdatabases. This research contributes to advancing AIs capabilities in abstractreasoning and cognitive pattern recognition. |
+|idx| 2403.04732v1 |
+|title| How Far Are We from Intelligent Visual Deductive Reasoning? |
+|authors| Yizhe ZhangHe BaiRuixiang ZhangJiatao GuShuangfei ZhaiJosh SusskindNavdeep Jaitly
+|links| http://arxiv.org/abs/2403.04732v1 |
+|updated| 2024-03-07 18:35:54 UTC |
+|summary| Vision-Language Models VLMs such as GPT-4V have recently demonstratedincredible strides on diverse vision language tasks. We dig into vision-baseddeductive reasoning a more sophisticated but less explored realm and findpreviously unexposed blindspots in the current SOTA VLMs. Specifically weleverage Ravens Progressive Matrices RPMs to assess VLMs abilities toperform multi-hop relational and deductive reasoning relying solely on visualclues. We perform comprehensive evaluations of several popular VLMs employingstandard strategies such as in-context learning self-consistency andChain-of-thoughts CoT on three diverse datasets including the Mensa IQ testIntelligenceTest and RAVEN. The results reveal that despite the impressivecapabilities of LLMs in text-based reasoning we are still far from achievingcomparable proficiency in visual deductive reasoning. We found that certainstandard strategies that are effective when applied to LLMs do not seamlesslytranslate to the challenges presented by visual reasoning tasks. Moreover adetailed analysis reveals that VLMs struggle to solve these tasks mainlybecause they are unable to perceive and comprehend multiple confoundingabstract patterns in RPM examples. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03219v1 |
-|title| LC-Tsalis-INF: Generalized Best-of-Both-Worlds Linear Contextual Bandits |
-|authors| Masahiro KatoShinji Ito
-|links| http://arxiv.org/abs/2403.03219v1 |
-|updated| 2024-03-05 18:59:47 UTC |
-|summary| This study considers the linear contextual bandit problem with independentand identically distributed i.i.d. contexts. In this problem existingstudies have proposed Best-of-Both-Worlds BoBW algorithms whose regretssatisfy Olog2T for the number of rounds T in a stochastic regime witha suboptimality gap lower-bounded by a positive constant while satisfyingOsqrtT in an adversarial regime. However the dependency on T has roomfor improvement and the suboptimality-gap assumption can be relaxed. For thisissue this study proposes an algorithm whose regret satisfies OlogT inthe setting when the suboptimality gap is lower-bounded. Furthermore weintroduce a margin condition a milder assumption on the suboptimality gap.That condition characterizes the problem difficulty linked to the suboptimalitygap using a parameter beta in 0 infty. We then show that thealgorithms regret satisfiesOleftleftlogTrightfrac1beta2betaTfrac12betaright.Here beta infty corresponds to the case in the existing studies where alower bound exists in the suboptimality gap and our regret satisfiesOlogT in that case. Our proposed algorithm is based on theFollow-The-Regularized-Leader with the Tsallis entropy and referred to as thealpha-Linear-Contextual LC-Tsallis-INF. |
+|idx| 2403.04764v1 |
+|title| Minimizing the Thompson Sampling Regret-to-Sigma Ratio (TS-RSR): a provably efficient algorithm for batch Bayesian Optimization |
+|authors| Zhaolin RenNa Li
+|links| http://arxiv.org/abs/2403.04764v1 |
+|updated| 2024-03-07 18:58:26 UTC |
+|summary| This paper presents a new approach for batch Bayesian Optimization BOwhere the sampling takes place by minimizing a Thompson Sampling approximationof a regret to uncertainty ratio. Our objective is able to coordinate theactions chosen in each batch in a way that minimizes redundancy between pointswhilst focusing on points with high predictive means or high uncertainty. Weprovide high-probability theoretical guarantees on the regret of our algorithm.Finally numerically we demonstrate that our method attains state-of-the-artperformance on a range of nonconvex test functions where it outperformsseveral competitive benchmark batch BO algorithms by an order of magnitude onaverage. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03208v1 |
-|title| Active Statistical Inference |
-|authors| Tijana ZrnicEmmanuel J. Candès
-|links| http://arxiv.org/abs/2403.03208v1 |
-|updated| 2024-03-05 18:46:50 UTC |
-|summary| Inspired by the concept of active learning we propose activeinferenceunicodex2013a methodology for statistical inference withmachine-learning-assisted data collection. Assuming a budget on the number oflabels that can be collected the methodology uses a machine learning model toidentify which data points would be most beneficial to label thus effectivelyutilizing the budget. It operates on a simple yet powerful intuition:prioritize the collection of labels for data points where the model exhibitsuncertainty and rely on the models predictions where it is confident. Activeinference constructs provably valid confidence intervals and hypothesis testswhile leveraging any black-box machine learning model and handling any datadistribution. The key point is that it achieves the same level of accuracy withfar fewer samples than existing baselines relying on non-adaptively-collecteddata. This means that for the same number of collected samples activeinference enables smaller confidence intervals and more powerful p-values. Weevaluate active inference on datasets from public opinion research censusanalysis and proteomics. |
+|idx| 2403.04747v1 |
+|title| GNN-VPA: A Variance-Preserving Aggregation Strategy for Graph Neural Networks |
+|authors| Lisa SchneckenreiterRichard FreinschlagFlorian SestakJohannes BrandstetterGünter KlambauerAndreas Mayr
+|links| http://arxiv.org/abs/2403.04747v1 |
+|updated| 2024-03-07 18:52:27 UTC |
+|summary| Graph neural networks GNNs and especially message-passing neural networksexcel in various domains such as physics drug discovery and molecularmodeling. The expressivity of GNNs with respect to their ability todiscriminate non-isomorphic graphs critically depends on the functions employedfor message aggregation and graph-level readout. By applying signal propagationtheory we propose a variance-preserving aggregation function VPA thatmaintains expressivity but yields improved forward and backward dynamics.Experiments demonstrate that VPA leads to increased predictive performance forpopular GNN architectures as well as improved learning dynamics. Our resultscould pave the way towards normalizer-free or self-normalizing GNNs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03183v1 |
-|title| How Well Can Transformers Emulate In-context Newton's Method? |
-|authors| Angeliki GiannouLiu YangTianhao WangDimitris PapailiopoulosJason D. Lee
-|links| http://arxiv.org/abs/2403.03183v1 |
-|updated| 2024-03-05 18:20:10 UTC |
-|summary| Transformer-based models have demonstrated remarkable in-context learningcapabilities prompting extensive research into its underlying mechanisms.Recent studies have suggested that Transformers can implement first-orderoptimization algorithms for in-context learning and even second order ones forthe case of linear regression. In this work we study whether Transformers canperform higher order optimization methods beyond the case of linearregression. We establish that linear attention Transformers with ReLU layerscan approximate second order optimization algorithms for the task of logisticregression and achieve epsilon error with only a logarithmic to the errormore layers. As a by-product we demonstrate the ability of even linearattention-only Transformers in implementing a single step of Newtons iterationfor matrix inversion with merely two layers. These results suggest the abilityof the Transformer architecture to implement complex algorithms beyondgradient descent. |
+|idx| 2403.04744v1 |
+|title| SQ Lower Bounds for Non-Gaussian Component Analysis with Weaker Assumptions |
+|authors| Ilias DiakonikolasDaniel KaneLisheng RenYuxin Sun
+|links| http://arxiv.org/abs/2403.04744v1 |
+|updated| 2024-03-07 18:49:32 UTC |
+|summary| We study the complexity of Non-Gaussian Component Analysis NGCA in theStatistical Query SQ model. Prior work developed a general methodology toprove SQ lower bounds for this task that have been applicable to a wide rangeof contexts. In particular it was known that for any univariate distributionA satisfying certain conditions distinguishing between a standardmultivariate Gaussian and a distribution that behaves like A in a randomhidden direction and like a standard Gaussian in the orthogonal complement isSQ-hard. The required conditions were that 1 A matches many low-ordermoments with the standard univariate Gaussian and 2 the chi-squared norm ofA with respect to the standard Gaussian is finite. While the moment-matchingcondition is necessary for hardness the chi-squared condition was onlyrequired for technical reasons. In this work we establish that the lattercondition is indeed not necessary. In particular we prove near-optimal SQlower bounds for NGCA under the moment-matching condition only. Our resultnaturally generalizes to the setting of a hidden subspace. Leveraging ourgeneral SQ lower bound we obtain near-optimal SQ lower bounds for a range ofconcrete estimation tasks where existing techniques provide sub-optimal or evenvacuous guarantees. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03071v1 |
-|title| On a Neural Implementation of Brenier's Polar Factorization |
-|authors| Nina VesseronMarco Cuturi
-|links| http://arxiv.org/abs/2403.03071v1 |
-|updated| 2024-03-05 15:59:54 UTC |
-|summary| In 1991 Brenier proved a theorem that generalizes the QR decomposition forsquare matrices -- factored as PSD times unitary -- to any vector fieldF:mathbbRdrightarrow mathbbRd. The theorem known as the polarfactorization theorem states that any field F can be recovered as thecomposition of the gradient of a convex function u with a measure-preservingmap M namely Fnabla u circ M. We propose a practical implementation ofthis far-reaching theoretical result and explore possible uses within machinelearning. The theorem is closely related to optimal transport OT theory andwe borrow from recent advances in the field of neural optimal transport toparameterize the potential u as an input convex neural network. The map Mcan be either evaluated pointwise using u the convex conjugate of uthrough the identity Mnabla u circ F or learned as an auxiliarynetwork. Because M is in general not injective we consider the additionaltask of estimating the ill-posed inverse map that can approximate the pre-imagemeasure M-1 using a stochastic generator. We illustrate possibleapplications of citeauthorBrenier1991PolarFAs polar factorization tonon-convex optimization problems as well as sampling of densities that are notlog-concave. |
+|idx| 2403.04726v1 |
+|title| A Sub-Quadratic Time Algorithm for Robust Sparse Mean Estimation |
+|authors| Ankit Pensia
+|links| http://arxiv.org/abs/2403.04726v1 |
+|updated| 2024-03-07 18:23:51 UTC |
+|summary| We study the algorithmic problem of sparse mean estimation in the presence ofadversarial outliers. Specifically the algorithm observes a emphcorruptedset of samples from mathcalNmumathbfI_d where the unknown meanmu in mathbbRd is constrained to be k-sparse. A series of prior workshas developed efficient algorithms for robust sparse mean estimation withsample complexity mathrmpolyklog d 1/epsilon and runtime d2mathrmpolyklog d1/epsilon where epsilon is the fraction ofcontamination. In particular the fastest runtime of existing algorithms isquadratic Omegad2 which can be prohibitive in high dimensions. Thisquadratic barrier in the runtime stems from the reliance of these algorithms onthe sample covariance matrix which is of size d2. Our main contribution isan algorithm for robust sparse mean estimation which runs inemphsubquadratic time using mathrmpolyklog d1/epsilon samples. Wealso provide analogous results for robust sparse PCA. Our results build onalgorithmic advances in detecting weak correlations a generalized version ofthe light-bulb problem by Valiant. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03069v1 |
-|title| Improving Variational Autoencoder Estimation from Incomplete Data with Mixture Variational Families |
-|authors| Vaidotas SimkusMichael U. Gutmann
-|links| http://arxiv.org/abs/2403.03069v1 |
-|updated| 2024-03-05 15:57:52 UTC |
-|summary| We consider the task of estimating variational autoencoders VAEs when thetraining data is incomplete. We show that missing data increases the complexityof the models posterior distribution over the latent variables compared to thefully-observed case. The increased complexity may adversely affect the fit ofthe model due to a mismatch between the variational and model posteriordistributions. We introduce two strategies based on i finitevariational-mixture and ii imputation-based variational-mixture distributionsto address the increased posterior complexity. Through a comprehensiveevaluation of the proposed approaches we show that variational mixtures areeffective at improving the accuracy of VAE estimation from incomplete data. |
+|idx| 2403.04629v1 |
+|title| Explaining Bayesian Optimization by Shapley Values Facilitates Human-AI Collaboration |
+|authors| Julian RodemannFederico CroppiPhilipp ArensYusuf SaleJulia HerbingerBernd BischlEyke HüllermeierThomas AugustinConor J. WalshGiuseppe Casalicchio
+|links| http://arxiv.org/abs/2403.04629v1 |
+|updated| 2024-03-07 16:13:32 UTC |
+|summary| Bayesian optimization BO with Gaussian processes GP has become anindispensable algorithm for black box optimization problems. Not without a dashof irony BO is often considered a black box itself lacking ways to providereasons as to why certain parameters are proposed to be evaluated. This isparticularly relevant in human-in-the-loop applications of BO such as inrobotics. We address this issue by proposing ShapleyBO a framework forinterpreting BOs proposals by game-theoretic Shapley values.They quantify eachparameters contribution to BOs acquisition function. Exploiting the linearityof Shapley values we are further able to identify how strongly each parameterdrives BOs exploration and exploitation for additive acquisition functionslike the confidence bound. We also show that ShapleyBO can disentangle thecontributions to exploration into those that explore aleatoric and epistemicuncertainty. Moreover our method gives rise to a ShapleyBO-assisted humanmachine interface HMI allowing users to interfere with BO in case proposalsdo not align with human reasoning. We demonstrate this HMIs benefits for theuse case of personalizing wearable robotic devices assistive back exosuits byhuman-in-the-loop BO. Results suggest human-BO teams with access to ShapleyBOcan achieve lower regret than teams without. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03188v1 |
-|title| Towards Democratized Flood Risk Management: An Advanced AI Assistant Enabled by GPT-4 for Enhanced Interpretability and Public Engagement |
-|authors| Rafaela MarteloRuo-Qian Wang
-|links| http://arxiv.org/abs/2403.03188v1 |
-|updated| 2024-03-05 18:24:52 UTC |
-|summary| Real-time flood forecasting plays a crucial role in enabling timely andeffective emergency responses. However a significant challenge lies inbridging the gap between complex numerical flood models and practicaldecision-making. Decision-makers often rely on experts to interpret thesemodels for optimizing flood mitigation strategies. And the public requirescomplex techniques to inquiry and understand socio-cultural and institutionalfactors often hinders the publics understanding of flood risks. To overcomethese challenges our study introduces an innovative solution: a customized AIAssistant powered by the GPT-4 Large Language Model. This AI Assistant isdesigned to facilitate effective communication between decision-makers thegeneral public and flood forecasters without the requirement of specializedknowledge. The new framework utilizes GPT-4s advanced natural languageunderstanding and function calling capabilities to provide immediate floodalerts and respond to various flood-related inquiries. Our developed prototypeintegrates real-time flood warnings with flood maps and social vulnerabilitydata. It also effectively translates complex flood zone information intoactionable risk management advice. To assess its performance we evaluated theprototype using six criteria within three main categories: relevance errorresilience and understanding of context. Our research marks a significant steptowards a more accessible and user-friendly approach in flood risk management.This study highlights the potential of advanced AI tools like GPT-4 indemocratizing information and enhancing public engagement in critical socialand environmental issues. |
+|idx| 2403.04761v1 |
+|title| DeepSee: Multidimensional Visualizations of Seabed Ecosystems |
+|authors| Adam CosciaHaley M. SapersNoah DeutschMalika KhuranaJohn S. MagyarSergio A. ParraDaniel R. UtterRebecca L. WipflerDavid W. CaressEric J. MartinJennifer B. PaduanMaggie HendrieSantiago LombeydaHillary MushkinAlex EndertScott DavidoffVictoria J. Orphan
+|links| http://dx.doi.org/10.1145/3613904.3642001 |
+|updated| 2024-03-07 18:56:47 UTC |
+|summary| Scientists studying deep ocean microbial ecosystems use limited numbers ofsediment samples collected from the seafloor to characterize importantlife-sustaining biogeochemical cycles in the environment. Yet conductingfieldwork to sample these extreme remote environments is both expensive andtime consuming requiring tools that enable scientists to explore the samplinghistory of field sites and predict where taking new samples is likely tomaximize scientific return. We conducted a collaborative user-centered designstudy with a team of scientific researchers to develop DeepSee an interactivedata workspace that visualizes 2D and 3D interpolations of biogeochemical andmicrobial processes in context together with sediment sampling history overlaidon 2D seafloor maps. Based on a field deployment and qualitative interviews wefound that DeepSee increased the scientific return from limited sample sizescatalyzed new research workflows reduced long-term costs of sharing data andsupported teamwork and communication between team members with diverse researchgoals. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03101v1 |
-|title| KnowAgent: Knowledge-Augmented Planning for LLM-Based Agents |
-|authors| Yuqi ZhuShuofei QiaoYixin OuShumin DengNingyu ZhangShiwei LyuYue ShenLei LiangJinjie GuHuajun Chen
-|links| http://arxiv.org/abs/2403.03101v1 |
-|updated| 2024-03-05 16:39:12 UTC |
-|summary| Large Language Models LLMs have demonstrated great potential in complexreasoning tasks yet they fall short when tackling more sophisticatedchallenges especially when interacting with environments through generatingexecutable actions. This inadequacy primarily stems from the lack of built-inaction knowledge in language agents which fails to effectively guide theplanning trajectories during task solving and results in planninghallucination. To address this issue we introduce KnowAgent a novel approachdesigned to enhance the planning capabilities of LLMs by incorporating explicitaction knowledge. Specifically KnowAgent employs an action knowledge base anda knowledgeable self-learning strategy to constrain the action path duringplanning enabling more reasonable trajectory synthesis and thereby enhancingthe planning performance of language agents. Experimental results on HotpotQAand ALFWorld based on various backbone models demonstrate that KnowAgent canachieve comparable or superior performance to existing baselines. Furtheranalysis indicates the effectiveness of KnowAgent in terms of planninghallucinations mitigation. Code is available inhttps://github.com/zjunlp/KnowAgent. |
+|idx| 2403.04760v1 |
+|title| iScore: Visual Analytics for Interpreting How Language Models Automatically Score Summaries |
+|authors| Adam CosciaLangdon HolmesWesley MorrisJoon Suh ChoiScott CrossleyAlex Endert
+|links| http://dx.doi.org/10.1145/3640543.3645142 |
+|updated| 2024-03-07 18:56:39 UTC |
+|summary| The recent explosion in popularity of large language models LLMs hasinspired learning engineers to incorporate them into adaptive educational toolsthat automatically score summary writing. Understanding and evaluating LLMs isvital before deploying them in critical learning environments yet theirunprecedented size and expanding number of parameters inhibits transparency andimpedes trust when they underperform. Through a collaborative user-centereddesign process with several learning engineers building and deploying summaryscoring LLMs we characterized fundamental design challenges and goals aroundinterpreting their models including aggregating large text inputs trackingscore provenance and scaling LLM interpretability methods. To address theirconcerns we developed iScore an interactive visual analytics tool forlearning engineers to upload score and compare multiple summariessimultaneously. Tightly integrated views allow users to iteratively revise thelanguage in summaries track changes in the resulting LLM scores and visualizemodel weights at multiple levels of abstraction. To validate our approach wedeployed iScore with three learning engineers over the course of a month. Wepresent a case study where interacting with iScore led a learning engineer toimprove their LLMs score accuracy by three percentage points. Finally weconducted qualitative interviews with the learning engineers that revealed howiScore enabled them to understand evaluate and build trust in their LLMsduring deployment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03097v2 |
-|title| Tappy: Predicting Tap Accuracy of User-Interface Elements by Reverse-Engineering Webpage Structures |
-|authors| Hiroki UsubaJunichi SatoNaomi SasayaShota YamanakaFumiya Yamashita
-|links| http://arxiv.org/abs/2403.03097v2 |
-|updated| 2024-03-06 02:29:02 UTC |
-|summary| Selecting a UI element is a fundamental operation on webpages and the easeof tapping a target object has a significant impact on usability. It is thusimportant to analyze existing UIs in order to design better ones. Howevertools proposed in previous studies cannot identify whether an element istappable on modern webpages. In this study we developed Tappy that canidentify tappable UI elements on webpages and estimate the tap-success ratebased on the element size. Our interviews of professional designers andengineers showed that Tappy helped discussions of UI design on the basis of itsquantitative metric. Furthermore we have launched this tool to be freelyavailable to external users so readers can access Tappy by visiting thewebsite https://tappy.yahoo.co.jp. |
+|idx| 2403.04758v1 |
+|title| KnowledgeVIS: Interpreting Language Models by Comparing Fill-in-the-Blank Prompts |
+|authors| Adam CosciaAlex Endert
+|links| http://dx.doi.org/10.1109/TVCG.2023.3346713 |
+|updated| 2024-03-07 18:56:31 UTC |
+|summary| Recent growth in the popularity of large language models has led to theirincreased usage for summarizing predicting and generating text making itvital to help researchers and engineers understand how and why they work. Wepresent KnowledgeVis a human-in-the-loop visual analytics system forinterpreting language models using fill-in-the-blank sentences as prompts. Bycomparing predictions between sentences KnowledgeVis reveals learnedassociations that intuitively connect what language models learn duringtraining to natural language tasks downstream helping users create and testmultiple prompt variations analyze predicted words using a novel semanticclustering technique and discover insights using interactive visualizations.Collectively these visualizations help users identify the likelihood anduniqueness of individual predictions compare sets of predictions betweenprompts and summarize patterns and relationships between predictions acrossall prompts. We demonstrate the capabilities of KnowledgeVis with feedback fromsix NLP experts as well as three different use cases: 1 probing biomedicalknowledge in two domain-adapted models and 2 evaluating harmful identitystereotypes and 3 discovering facts and relationships between threegeneral-purpose models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.02974v1 |
-|title| Online Learning of Human Constraints from Feedback in Shared Autonomy |
-|authors| Shibei ZhuTran Nguyen LeSamuel KaskiVille Kyrki
-|links| http://arxiv.org/abs/2403.02974v1 |
-|updated| 2024-03-05 13:53:48 UTC |
-|summary| Real-time collaboration with humans poses challenges due to the differentbehavior patterns of humans resulting from diverse physical constraints.Existing works typically focus on learning safety constraints forcollaboration or how to divide and distribute the subtasks between theparticipating agents to carry out the main task. In contrast we propose tolearn a human constraints model that in addition considers the diversebehaviors of different human operators. We consider a type of collaboration ina shared-autonomy fashion where both a human operator and an assistive robotact simultaneously in the same task space that affects each others actions.The task of the assistive agent is to augment the skill of humans to perform ashared task by supporting humans as much as possible both in terms of reducingthe workload and minimizing the discomfort for the human operator. Thereforewe propose an augmentative assistant agent capable of learning and adapting tohuman physical constraints aligning its actions with the ergonomic preferencesand limitations of the human operator. |
+|idx| 2403.04757v1 |
+|title| Preliminary Guidelines For Combining Data Integration and Visual Data Analysis |
+|authors| Adam CosciaAshley SuhRemco ChangAlex Endert
+|links| http://dx.doi.org/10.1109/TVCG.2023.3334513 |
+|updated| 2024-03-07 18:56:16 UTC |
+|summary| Data integration is often performed to consolidate information from multipledisparate data sources during visual data analysis. However integrationoperations are usually separate from visual analytics operations such as encodeand filter in both interface design and empirical research. We conducted apreliminary user study to investigate whether and how data integration shouldbe incorporated directly into the visual analytics process. We used twointerface alternatives featuring contrasting approaches to the data preparationand analysis workflow: manual file-based ex-situ integration as a separate stepfrom visual analytics operations and automatic UI-based in-situ integrationmerged with visual analytics operations. Participants were asked to completespecific and free-form tasks with each interface browsing for patternsgenerating insights and summarizing relationships between attributesdistributed across multiple files. Analyzing participants interactions andfeedback we found both task completion time and total interactions to besimilar across interfaces and tasks as well as unique integration strategiesbetween interfaces and emergent behaviors related to satisficing and cognitivebias. Participants time spent and interactions revealed that in-situintegration enabled users to spend more time on analysis tasks compared withex-situ integration. Participants integration strategies and analyticalbehaviors revealed differences in interface usage for generating and trackinghypotheses and insights. With these results we synthesized preliminaryguidelines for designing future visual analytics interfaces that can supportintegrating attributes throughout an active analysis process. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.02972v1 |
-|title| Bodioid: philosophical reflections on the hybrid of bodies and artefacts towards post-human |
-|authors| Jiang XuGang SunJingyu XuPujie Su
-|links| http://arxiv.org/abs/2403.02972v1 |
-|updated| 2024-03-05 13:50:25 UTC |
-|summary| The advent of the post-human era has blurred the boundary between the bodyand artifacts. Further external materials and information are more deeplyintegrated into the body making emerging technology a key driving force forshaping post-human existence and promoting bodily evolution. Based on thisthis study analyses the transformation process of three technological formsnamely tools machines and cyborgs and reveals the construction of bodies andartifacts. From the phenomenological perspective the essences of body andartifact existences are reflected upon and the existence is constructionviewpoint is proposed. Furthermore a technological design concept bodioid isproposed to meticulously depict the characteristics of integrating similaritiesand differences towards unity between the body and artifacts based on thetheoretical foundation of technology mediation and the materialization ofmorality. Finally through analogizing the organizational form of language thetwo key forms and specific mechanisms of bodioid construction namely extensionand mirroring are indicated. With this in mind the post-human existencelandscape is discussed with the objective of providing theoretical insightsinto the study of the underlying philosophical principles of technologicaldesign. |
+|idx| 2403.04716v1 |
+|title| QRtree -- Decision Tree dialect specification of QRscript |
+|authors| Stefano ScanzioMatteo RosaniMattia ScamuzziGianluca Cena
+|links| http://arxiv.org/abs/2403.04716v1 |
+|updated| 2024-03-07 18:14:02 UTC |
+|summary| This specification document specifies the syntax and semantics of QRtreewhich is a specific dialect of QRscript particularly suited to representdecision trees without chance nodes. The term dialect identifies one of thepossible sub-languages that can be encoded inside of an eQR code via QRscript.This specification will describe an intermediate representation of QRtree madethrough a language derived by the three-address code. It will then define thetransformation rules from the intermediate representation to a binary code. Thelatter is a binary representation called eQRtreebytecode. These rules can alsobe applied inversely to transform the eQRtreeBytecode into the intermediaterepresentation. This specification document will pay particular attention tothe creation of a compact eQRtreebytecode as the maximum number of bits thatcan be stored in a QR code is at the time of writing equal to 2953 bytes inthe case of QR code version 40 with a low error correction level. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03101v1 |
-|title| KnowAgent: Knowledge-Augmented Planning for LLM-Based Agents |
-|authors| Yuqi ZhuShuofei QiaoYixin OuShumin DengNingyu ZhangShiwei LyuYue ShenLei LiangJinjie GuHuajun Chen
-|links| http://arxiv.org/abs/2403.03101v1 |
-|updated| 2024-03-05 16:39:12 UTC |
-|summary| Large Language Models LLMs have demonstrated great potential in complexreasoning tasks yet they fall short when tackling more sophisticatedchallenges especially when interacting with environments through generatingexecutable actions. This inadequacy primarily stems from the lack of built-inaction knowledge in language agents which fails to effectively guide theplanning trajectories during task solving and results in planninghallucination. To address this issue we introduce KnowAgent a novel approachdesigned to enhance the planning capabilities of LLMs by incorporating explicitaction knowledge. Specifically KnowAgent employs an action knowledge base anda knowledgeable self-learning strategy to constrain the action path duringplanning enabling more reasonable trajectory synthesis and thereby enhancingthe planning performance of language agents. Experimental results on HotpotQAand ALFWorld based on various backbone models demonstrate that KnowAgent canachieve comparable or superior performance to existing baselines. Furtheranalysis indicates the effectiveness of KnowAgent in terms of planninghallucinations mitigation. Code is available inhttps://github.com/zjunlp/KnowAgent. |
+|idx| 2403.04627v1 |
+|title| Distributed Multi-objective Optimization in Cyber-Physical Energy Systems |
+|authors| Sanja StarkEmilie FrostMarvin Nebel-Wenner
+|links| http://arxiv.org/abs/2403.04627v1 |
+|updated| 2024-03-07 16:12:54 UTC |
+|summary| Managing complex Cyber-Physical Energy Systems CPES requires solvingvarious optimization problems with multiple objectives and constraints. Asdistributed control architectures are becoming more popular in CPES for certaintasks due to their flexibility robustness and privacy protectionmulti-objective optimization must also be distributed. For this purpose wepresent MO-COHDA a fully distributed agent-based algorithm for solvingmulti-objective optimization problems of CPES. MO-COHDA allows an easy andflexible adaptation to different use cases and integration of customfunctionality. To evaluate the effectiveness of MO-COHDA we compare it to acentral NSGA-2 algorithm using multi-objective benchmark functions from the ZDTproblem suite. The results show that MO-COHDA can approximate the referencefront of the benchmark problems well and is suitable for solvingmulti-objective optimization problems. In addition an example use case ofscheduling a group of generation units while optimizing three differentobjectives was evaluated to show how MO-COHDA can be easily applied toreal-world optimization problems in CPES. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.03055v1 |
-|title| Distributed Policy Gradient for Linear Quadratic Networked Control with Limited Communication Range |
-|authors| Yuzi YanYuan Shen
-|links| http://arxiv.org/abs/2403.03055v1 |
-|updated| 2024-03-05 15:38:54 UTC |
-|summary| This paper proposes a scalable distributed policy gradient method and provesits convergence to near-optimal solution in multi-agent linear quadraticnetworked systems. The agents engage within a specified network under localcommunication constraints implying that each agent can only exchangeinformation with a limited number of neighboring agents. On the underlyinggraph of the network each agent implements its control input depending on itsnearby neighbors states in the linear quadratic control setting. We show thatit is possible to approximate the exact gradient only using local information.Compared with the centralized optimal controller the performance gap decreasesto zero exponentially as the communication and control ranges increase. We alsodemonstrate how increasing the communication range enhances system stability inthe gradient descent process thereby elucidating a critical trade-off. Thesimulation results verify our theoretical findings. |
+|idx| 2403.04442v1 |
+|title| Cooperative Bayesian Optimization for Imperfect Agents |
+|authors| Ali KhoshvishkaiePetrus MikkolaPierre-Alexandre MurenaSamuel Kaski
+|links| http://dx.doi.org/10.1007/978-3-031-43412-9_28 |
+|updated| 2024-03-07 12:16:51 UTC |
+|summary| We introduce a cooperative Bayesian optimization problem for optimizingblack-box functions of two variables where two agents choose together at whichpoints to query the function but have only control over one variable each. Thissetting is inspired by human-AI teamwork where an AI-assistant helps its humanuser solve a problem in this simplest case collaborative optimization. Weformulate the solution as sequential decision-making where the agent wecontrol models the user as a computationally rational agent with priorknowledge about the function. We show that strategic planning of the queriesenables better identification of the global maximum of the function as long asthe user avoids excessive exploration. This planning is made possible by usingBayes Adaptive Monte Carlo planning and by endowing the agent with a user modelthat accounts for conservative belief updates and exploratory sampling of thepoints to query. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.02227v1 |
-|title| Policy Space Response Oracles: A Survey |
-|authors| Ariyan BighashdelYongzhao WangStephen McAleerRahul SavaniFrans A. Oliehoek
-|links| http://arxiv.org/abs/2403.02227v1 |
-|updated| 2024-03-04 17:15:09 UTC |
-|summary| In game theory a game refers to a model of interaction among rationaldecision-makers or players making choices with the goal of achieving theirindividual objectives. Understanding their behavior in games is often referredto as game reasoning. This survey provides a comprehensive overview of afast-developing game-reasoning framework for large games known as Policy SpaceResponse Oracles PSRO. We first motivate PSRO provide historical contextand position PSRO within game-reasoning approaches. We then focus on thestrategy exploration issue for PSRO the challenge of assembling an effectivestrategy portfolio for modeling the underlying game with minimum computationalcost. We also survey current research directions for enhancing the efficiencyof PSRO and explore the applications of PSRO across various domains. Weconclude by discussing open questions and future research. |
+|idx| 2403.04370v1 |
+|title| Cooperative Task Execution in Multi-Agent Systems |
+|authors| KarishmaShrisha Rao
+|links| http://arxiv.org/abs/2403.04370v1 |
+|updated| 2024-03-07 09:58:59 UTC |
+|summary| We propose a multi-agent system that enables groups of agents to collaborateand work autonomously to execute tasks. Groups can work in a decentralizedmanner and can adapt to dynamic changes in the environment. Groups of agentssolve assigned tasks by exploring the solution space cooperatively based on thehighest reward first. The tasks have a dependency structure associated withthem. We rigorously evaluated the performance of the system and the individualgroup performance using centralized and decentralized control approaches fortask distribution. Based on the results the centralized approach is moreefficient for systems with a less-dependent system G_18 while thedecentralized approach performs better for systems with a highly-dependentsystem G_40. We also evaluated task allocation to groups that do not haveinterdependence. Our findings reveal that there was significantly lessdifference in the number of tasks allocated to each group in a less-dependentsystem than in a highly-dependent one. The experimental results showed that alarge number of small-size cooperative groups of agents unequivocally improvedthe systems performance compared to a small number of large-size cooperativegroups of agents. Therefore it is essential to identify the optimal group sizefor a system to enhance its performance. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.02170v1 |
-|title| VITAMIN: A Compositional Framework for Model Checking of Multi-Agent Systems |
-|authors| Angelo FerrandoVadim Malvone
-|links| http://arxiv.org/abs/2403.02170v1 |
-|updated| 2024-03-04 16:16:30 UTC |
-|summary| The verification of Multi-Agent Systems MAS poses a significant challenge.Various approaches and methodologies exist to address this challenge howevertools that support them are not always readily available. Even when such toolsare accessible they tend to be hard-coded lacking in compositionality andchallenging to use due to a steep learning curve. In this paper we introduce amethodology designed for the formal verification of MAS in a modular andversatile manner along with an initial prototype that we named VITAMIN.Unlike existing verification methodologies and frameworks for MAS VITAMIN isconstructed for easy extension to accommodate various logics for specifyingthe properties to verify and models for determining on what to verify suchproperties. |
+|idx| 2403.04232v1 |
+|title| Generalizing Cooperative Eco-driving via Multi-residual Task Learning |
+|authors| Vindula JayawardanaSirui LiCathy WuYashar FaridKentaro Oguchi
+|links| http://arxiv.org/abs/2403.04232v1 |
+|updated| 2024-03-07 05:25:34 UTC |
+|summary| Conventional control such as model-based control is commonly utilized inautonomous driving due to its efficiency and reliability. However real-worldautonomous driving contends with a multitude of diverse traffic scenarios thatare challenging for these planning algorithms. Model-free Deep ReinforcementLearning DRL presents a promising avenue in this direction but learning DRLcontrol policies that generalize to multiple traffic scenarios is still achallenge. To address this we introduce Multi-residual Task Learning MRTL ageneric learning framework based on multi-task learning that for a set of taskscenarios decomposes the control into nominal components that are effectivelysolved by conventional control methods and residual terms which are solvedusing learning. We employ MRTL for fleet-level emission reduction in mixedtraffic using autonomous vehicles as a means of system control. By analyzingthe performance of MRTL across nearly 600 signalized intersections and 1200traffic scenarios we demonstrate that it emerges as a promising approach tosynergize the strengths of DRL and conventional methods in generalizablecontrol. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.02164v2 |
-|title| Cognition is All You Need -- The Next Layer of AI Above Large Language Models |
-|authors| Nova SpivackSam DouglasMichelle CramesTim Connors
-|links| http://arxiv.org/abs/2403.02164v2 |
-|updated| 2024-03-05 10:23:52 UTC |
-|summary| Recent studies of the applications of conversational AI tools such aschatbots powered by large language models to complex real-world knowledge workhave shown limitations related to reasoning and multi-step problem solving.Specifically while existing chatbots simulate shallow reasoning andunderstanding they are prone to errors as problem complexity increases. Thefailure of these systems to address complex knowledge work is due to the factthat they do not perform any actual cognition. In this position paper wepresent Cognitive AI a higher-level framework for implementingprogrammatically defined neuro-symbolic cognition above and outside of largelanguage models. Specifically we propose a dual-layer functional architecturefor Cognitive AI that serves as a roadmap for AI systems that can performcomplex multi-step knowledge work. We propose that Cognitive AI is a necessaryprecursor for the evolution of higher forms of AI such as AGI andspecifically claim that AGI cannot be achieved by probabilistic approaches ontheir own. We conclude with a discussion of the implications for large languagemodels adoption cycles in AI and commercial Cognitive AI development. |
+|idx| 2403.04202v1 |
+|title| Dynamics of Moral Behavior in Heterogeneous Populations of Learning Agents |
+|authors| Elizaveta TennantStephen HailesMirco Musolesi
+|links| http://arxiv.org/abs/2403.04202v1 |
+|updated| 2024-03-07 04:12:24 UTC |
+|summary| Growing concerns about safety and alignment of AI systems highlight theimportance of embedding moral capabilities in artificial agents. A promisingsolution is the use of learning from experience i.e. Reinforcement Learning.In multi-agent social environments complex population-level phenomena mayemerge from interactions between individual learning agents. Many of theexisting studies rely on simulated social dilemma environments to study theinteractions of independent learning agents. However they tend to ignore themoral heterogeneity that is likely to be present in societies of agents inpractice. For example at different points in time a single learning agent mayface opponents who are consequentialist i.e. caring about maximizing someoutcome over time or norm-based i.e. focusing on conforming to a specificnorm here and now. The extent to which agents co-development may be impactedby such moral heterogeneity in populations is not well understood. In thispaper we present a study of the learning dynamics of morally heterogeneouspopulations interacting in a social dilemma setting. Using a Prisoners Dilemmaenvironment with a partner selection mechanism we investigate the extent towhich the prevalence of diverse moral agents in populations affects individualagents learning behaviors and emergent population-level outcomes. We observeseveral types of non-trivial interactions between pro-social and anti-socialagents and find that certain classes of moral agents are able to steer selfishagents towards more cooperative behavior. |
 
 
