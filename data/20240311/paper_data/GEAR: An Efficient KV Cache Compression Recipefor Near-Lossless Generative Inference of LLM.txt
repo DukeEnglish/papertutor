@@ -1,0 +1,761 @@
+ffi
+GEAR: An E cient KV Cache Compression Recipe
+for Near-Lossless Generative Inference of LLM
+∗ ∗
+Hao Kang , Qingru Zhang , Souvik Kundu, Geonhwa Jeong,
+†
+Zaoxing Liu, Tushar Krishna, Tuo Zhao
+March 11, 2024
+Abstract
+Key-value(KV)cachinghasbecomethede-factotoaccelerategenerationspeedforlarge
+languagemodels(LLMs)inference. However,thegrowingcachedemandwithincreasingsequence
+lengthhastransformedLLMinferencetobeamemoryboundproblem,significantlyconstraining
+thesystemthroughput. Existingmethodsrelyondroppingunimportanttokensorquantizingall
+entriesuniformly. Suchmethods,however,oftenincurhighapproximationerrorstorepresentthe
+compressedmatrices. Theautoregressivedecodingprocessfurthercompoundstheerrorofeach
+step,resultingincriticaldeviationinmodelgenerationanddeteriorationofperformance.Totackle
+thischallenge,weproposeGEAR,anefficientKVcachecompressionframeworkthatachieves
+near-losslesshigh-ratiocompression. GEARfirstappliesquantizationtomajorityofentriesof
+similarmagnitudestoultra-lowprecision. Itthenemploysalow-rankmatrixtoapproximate
+thequantizationerror,andasparsematrixtoremedyindividualerrorsfromoutlierentries. By
+adeptlyintegratingthreetechniques,GEARisabletofullyexploittheirsynergisticpotentials.
+Ourexperimentsdemonstratethatcomparedtoalternatives,GEARachievesnear-lossless4-bit
+KVcachecompressionwithupto2.38×throughputimprovement,whilereducingpeak-memory
+sizeupto2.29×. Ourcodeispubliclyavailableathttps://github.com/HaoKang-Timmy/GEAR.
+1 Introduction
+The advances in large language models (LLMs) have marked a significant milestone in natural
+language processing (NLP) and artificial intelligence (AI) (Vaswani et al., 2017; Brown et al.,
+2020a; OpenAI, 2023). Among these, autoregressive language models have attracted extensive
+attention(Brownetal.,2020b;Zhangetal.,2022;Touvronetal.,2023a,b),showcasingexceptional
+performancesacrossawiderangeofapplications,suchascontentcreationanddialoguesystem
+† HaoKang,QingruZhang,GeonhwaJeong,TusharKrishna,andTuoZhaoareaffiliatedwithGeorgiaTech.Souvik
+KunduisaffiliatedwithIntel.ZaoxingLiuisaffiliatedwiththeUniversityofMaryland.Correspondencetohkang342@
+gatech.edu,qingru.zhang@gatech.edu,souvikk.kundu@intel.com,andtourzhao@gatech.edu.
+*Equalcontributions
+1
+4202
+raM
+8
+]GL.sc[
+1v72550.3042:viXra(a)Approximationerror(GSM8k) (b)Thedifferenceinpredictionlogits (c)GSM8kAccofLLaMA2-7B
+Figure 1: (1a) compares the approximation error when dropping 50% tokens (token dropping) and
+compressingKVcachesto4-bit(othermethods)forLLaMA2-7BonGSM8k. (1b)presentsthediffernce
+inpredictionlogitsfromFP16baselineaftercompressingKVcachesofanexamplefromGSM8k,which
+indicatestheapproximationerrorcanbeseverelycompoundedalonggenerationstepsandsignificantly
+divertmodelgenerations. (1c)showsreducingapproximationerrorcansubstantiallyimproveperformance.
+(Yuanetal.,2022;Thoppilanetal.,2022;Weietal.,2022). WhenservingtheseLLMsforgenerative
+inference,KVcache-inghasbecomearoutinepractice,whichstorespreviouslycomputedKey/Value
+vectors from attention calculation and reuses them for generating current tokens (Pope et al.,
+2022). Assuch,itavoidsintensiverecalculationsofprevioustokenswhengeneratingeachtoken,
+significantlyimprovinggenerationspeed.
+Despiteitsprominence,thememoryconsumptionoftheKVcachegrowsrapidlyasthemodel
+size and sequence length increase, imposing significant constraints on system throughput. For
+instance,inthecaseofa30billion-parametermodelwithaninputlengthof1024andbatchsize
+of 128, the resulting KV cache can occupy as much as 180GB of memory (Zhang et al., 2023).
+ToalleviatethispressureonthelimitedGPUmemory,theinferencesystemresortstooffloading
+(Aminabadietal.,2022;Shengetal.,2023)–transferringtheKVcachetoCPUmemoryorNVMe
+storage. Thisprocess,however,canstillintroducenon-trivialoverheadduetothelimitedPCIe
+bandwidth between GPUs and CPUs on many devices. Therefore, it is crucial to reduce the
+intensivememoryfootprintoftheemergingbottleneckofKVcacheingenerativeinference.
+Toaddressthisissue,tokendroppingmethodshavebeenproposedtocompressthecachesize
+whilemaintainingthegenerativeperformance(Zhangetal.,2023;Liuetal.,2023;Geetal.,2023).
+Theseapproachesharnessthesparsityobservedinattentionpatternstoevictembeddingsofless
+importanttokensfromtheKVcachewhileretainingfrequentlyattendedones. Forexample,H O
+2
+(Zhang et al., 2023) utilizes accumulated attention scores as criteria for token importance and
+effectively reduces the cache size by dropping tokens with lower scores. In addition to token
+dropping,quantizationisanotherwidely-adoptedcompressionschemethatmapsfull-precision
+tensor values into discrete levels and store them at lower precision, typically 8 or 4-bits (Zafrir
+etal.,2019;Dettmersetal.,2022;Shengetal.,2023). Forexample,FlexGen(Shengetal.,2023)
+employsstraightforwarduniformandgroup-wisequantizationapproachstocompressbothmodel
+weights and KV caches to 4-bit, resulting in a substantial improvement in system throughput.
+2However,thefullpotentialofquantizationtocompresstheonlineKVcacheswithhighefficiency
+andnegligibleperformancelossremainslargelyunexplored.
+Themethodsmentionedabovecaneffectivelycompressthecachesizewhileachievinglossless
+performanceonnaturallanguageunderstandingtaskslikemultiple-choiceQAandtextclassifica-
+tion orsimplesummarization task, (e.g.,XSum) (Zhang etal., 2023). However, a stark contrast
+emergeswhenapplyingthesemethodstocomplexgenerativetasksthatrequiremodelstogener-
+ate longer responses or involve reasoning, such as mathematical problem-solving (Cobbe et al.,
+2021)andchain-of-thought(CoT)reasoning(Weietal.,2023). Theirperformancedramatically
+deterioratesunderahighcompressionratio* (e.g.,4-bitquantizationordropping50%tokens,Ge
+etal.(2023)),whichisnoticeableinbothtypesofmethods*. Thisphenomenoncanbeattributedto
+thenon-trivialapproximationerrorinducedbythem,i.e.,differencebetweenoriginalKVvalues
+andcompressedones. Forsimpletasks,modelsarerequiredtogenerateonlyfewtokenswhere
+necessaryinformationforcorrectpredictioncanoftenbederivedfromasmallsetofimportant
+contextual tokens. Consequently, a relatively large approximation error does not significantly
+hinderthegenerationoftargettokens. Incontrast,thecomplextasksrequiremodelstogenerate
+longersequences. Theautoregressivedecodingprocesscancompoundtheapproximationerror
+ateverystep. Consequently,thenegativeeffectofevenarelativelysmallerrorcanbemagnified
+along the generation steps, adversely affecting subsequent generation. As an example, Figure 1
+presentstheapproximationerrorofvariousmethodsonGSM8kandillustratesthedeviationin
+tokengenerationsduetotheaccumulatederror,whichdegeneratetheaccuracyalot. Moreover,
+the complex tasks such as CoT reasoning often involve densely distributed crucial information
+withinprompts. Modelsmustcloselyattendtomostcontextualdetailstogeneratecorrectanswers.
+However,ahighapproximationerrorcanoftencausemodelstoneglectsomecrucialdetails. Sim-
+ilarly,droppingahighratiooftokensrenderstheseinformationdirectlyinvisible,significantly
+impactingtheperformance. Therefore,thecruxoftheissueliesinhighapproximationerrorsof
+thesemethods,especiallyunderhighcompressionratios.
+Toaddressthischallenge,weproposeGEAR(GEnerativeInferencewithApproximationError
+Reduction), an efficient KV cache compression framework that leverages three complementary
+techniquestodecomposeKVmatricesandadeptlyintegratethemtoexploittheirfullpotentials.
+Generallyspeaking,ourframeworkconsistsofthreecompressioncomponents: (i)First,weapply
+the uniform quantization to efficiently compress the majority (e.g., 98%) of entries of similar
+magnitudes to as low as 4-bit precision. (ii) Then, we employ a low-rank matrix to efficiently
+approximate the quantization residuals. (iii) Finally, we introduce a sparse matrix consisting of
+a negligible ratio of entries with large magnitudes to remedy the individual errors caused by
+these outliers. Such a composite approximation decouples the coherent parts from incoherent
+partsoftheapproximationerror: thelow-rankmatrixcapturesthemajorityofcoherentbasisof
+*Wedefinethecompressionratioas FP16tensorsize .
+Tensorsizeincompressedformat
+*PleaserefertoSection4forourempiricalevidence.
+3quantizationerrorwhilethesparsematrixrectifiestheincoherencyexistinginindividualoutliers.
+Assuch,GEARcaneffectivelyreducetheapproximationerrorinahighlyefficientmanner,and
+henceachievenear-losslessperformanceonbothcomplexandsimpletasksespeciallyunderhigh
+compressionratios. Importantly,wefindthatusingallthreecomponentsisnecessaryforGEAR
+toachievegoodperformance. Thissuggeststhatthreecomponentsarecomplementarywitheach
+otherandeachofthemisindispensableforGEARtoachievethenear-losslessperformance. Our
+methodalsorelatestostudiesonweightquantization,whichwefurtherdiscussinSection5.
+Additionally,ascalculationsofsparseandlow-rankmatricesincurextralatency,weincorporate
+astreamingstrategyforGEARtoimproveitsgenerativeinference. Specifically,whengenerating
+longsequences,westoreKVvectorsofnewlygeneratedtokenstoasmallbuffer(e.g.,buffersize
+n =20). Whenthebufferreachesitscapacity,GEARconductstheKVcachecompressioneveryn
+b b
+steps. Assuch,theinferencespeedcanbesignificantlyimprovedbyupto3×atatrivialcostof
+≤2%additionalmemory.
+WeconductexperimentsondiversetasksandmodelstodemonstratetheeffectivenessofGEAR.
+Specifically,weevaluatebothCoTandzero-shotperformanceusingLLaMA2-7B,LLaMA2-13B
+(Touvronetal.,2023b),andMistral-7B(Jiangetal.,2023)ongenerativetasksincludingmathemati-
+calreasoning(GSM8k,Cobbeetal.(2021)),multitasklanguageunderstanding(MMLU,Hendrycks
+etal.(2021)),andsymbolicreasoning(BigBenchHard,Suzgunetal.(2022)). WeshowthatGEAR
+consistently outperforms the baseline methods, especially under high compression ratios. For
+example, when compressing the KV cache to 28% of its FP16 size for LLaMA2-7B on GSM8k
+datasetswithCoTprompts,GEARachievesaremarkable4.5%improvementinaccuracyoverthe
+best-performing baseline. Notably, we are the first to achieve 4-bit KV cache compression with
+near-losslessperformanceonbothcomplexandsimplegenerativetasks. Regardingtheinference
+efficiency,GEARimprovethesystemthroughputupto2.38×comparedtoFP16baseline. Particu-
+larly,GEARcansavepeakmemoryupto2.29×,leadingtoanincreaseofmaximumbatchsizeup
+to1.7×.
+2 Background
+Multi-headattention. AtypicaltransformermodelconsistsofLstackedlayers,whereeachlayer
+contains two submodules: a multi-head attention (MHA) and a fully connected feed-forward
+network (FFN). Given the input token embeddings as X ∈ Rn×d, MHA performs the attention
+functioninparallelhheads:
+(cid:16) (cid:112) (cid:17)
+MHA(X)=Concat(H(1),...,H(h))W , H(i)=Softmax Q(i)K(i)⊤ / d V(i) (1)
+o h
+whereQ(i)=XW ,K(i)=XW ,V(i)=XW areQuery/Key/Valuematrices,andW ,W ,W ∈
+q k v q k v
+i i i i i i
+Rd×d
+h arelearnableprojectionmatricesofheadi. d h istypicallysettod/h.
+AutoregressivedecodingandKVcache. Supposethemodelisrequiredtogeneraten tokens. After
+g
+4thefirstgenerationstep,K(i)andV(i)ateveryheadandeverylayerarecachedforsubsequentgener-
+ation. ThisresultsintheinitialKVCache: K =Concat(K(1),...,K(h)),V =Concat(V(1),...,V(h))
+0 0
+andK ,V ∈Rn×d. Ateachstept (1≤t≤n )ofautoregressivedecoding,themodelpredictsanew
+0 0 g
+tokenx conditionedontheinputandpreviouslygeneratedtokens. Atthefollowingstep,MHA
+t
+onlyneedstocomputetheQuery/Key/Valuevectors* (q ,k ,v ∈Rd)forthenewlygeneratedtoken
+t t t
+x
+t
+andappendsk t,v
+t
+totheKVcache: K
+t
+=K t−1∥k t,V
+t
+=V t−1∥v t. Thenitperformstheattention
+(1)betweenq andK , V only, avoidingtherecalculationsofprevioustokensandsignificantly
+t t t
+enhancinggenerationspeed.
+Uniformquantization. Quantizationmapsafull-precision(FP16/FP32)tensorvaluesintodiscrete
+levels. Specifically, uniform asymmetric quantization (INT8 or INT4, Jacob et al. (2018)) is an
+efficientquantizationmethodwithfriendlyhardwaresupport. GivenatensorX ∈Rn×d inhigh
+precision, such as 32-bit floating point number, the quantization process can be expressed as
+X(cid:98)=Quant (X)with:
+b
+(cid:108) (cid:107)
+Quant (X) = (X −minX)/∆ , ∆=(maxX−minX)/(2b−1) (2)
+b ij ij
+wherebisthequantizationbit-width(e.g.,4inourcase),X(cid:98)isthequantizedtensorinb-bitprecision,
+∆ is the quantization step size and ⌈·⌋ is the rounding function. Such uniform quantization can
+becompletedinhighspeed. However,itusesthemaximumandminimumvaluestocalculate∆
+such that it preserves the outlier entries in X, which can lead to non-trivial quantization error
+(Dettmersetal.,2022)underhighcompressionratios.
+3 Method
+Our method consists of three important components to decompose and compress a KV cache
+matrix: (i)aquantizedmatrixD(cid:98) toserveasacompressedbackbone;(ii)alow-rankmatrixLto
+approximatethequantizationresidual;(iii)asparsematrixS tocapturetheindividualoutliers.
+As discussed in Section 1, the approximation error plays a pivotal role in determining the
+modelperformance. Therefore,givenatensorX ∈{K ,V },ourobjectiveistominimizetheerror
+t t
+of approximating X with its compressed counterpart. A simple strategy is to employ each of
+three compression methods individually and approximate X by minimizing the distance to it.
+Forinstance,constructingLusingthetopsingularvalues/vectorsofX orcomposingS withthe
+entries of largest magnitudes. However, as demonstrated by Figure 2a, solely relying on any of
+thesethreemethodscannotachievehighcompressionratiosbecausetheyallresultinsubstantially
+increasedapproximationerrorunderhighcompressionratios. Additionally,D(cid:98),L,S canfunction
+differentlyinthematrixapproximation,capturingdifferentcomponentsofX. Thesemotivations
+encourageustoexploretheintegrationofthreetechniquestoleveragetheirindividualadvantages
+while exploiting their synergistic potential. To achieve this, our goal becomes minimizing the
+*Forsimplicity,weconcatenatemulti-headembeddingshere.
+5(a)Errorofsinglecomponent (b)Distributionofentries (c)Spectrumoftheresidual (d)GEARv.s.Outlier-R.Q.
+Figure 2: We randomly sample a GSM8k example and analyze its KV caches by LLaMA2-7B. (2a): the
+minimalapproximationerrorofeachindividualtechniquewhenapproximatingtheValuecacheofthefirst
+layer. (2b): theentrydistributionofweightsanditsKVcachesatdifferentlayers. (2c): spectrumofthe
+residualRdecaysrapidly. (2d): low-rankapproximationenablesGEARtoachieveslowererror.
+followingapproximationerror:
+(cid:13) (cid:13)
+min
+(cid:13) (cid:13)X−D(cid:98)−L−S(cid:13)
+(cid:13) . (3)
+F
+D(cid:98),L,S
+Oneinterestingideatominimize(3)isalternatingamongquantization,singular-valuedecomposi-
+tion(SVD)andoutlierextraction,anditerativelyupdatingthreematricesD(cid:98),L,S untilachieving
+minimalerror. ThisideahasbeenintroducedbyLietal.(2023)tooptimizeasimilarobjectivefor
+anaccurateinitializationofweightquantization. However,theinferencesystemhasdemanding
+speedrequirements. Thesignificantlatencycausedbytheseiterativeupdatesisunacceptablefor
+generativeinference. Therefore,weproposeanefficientapproximationsolutiontoapproach(3)
+andcompressonlineKVcachesasfollows.
+Outlier-reducedquantization. Inspiredbytherecentstudyonweightquantization(Kimetal.,
+2023), we observe that the quantized backbone D(cid:98) and the sparse matrix S complement each
+othersignificantlyintheKVcachecompression. Specifically,uniformquantizationcanresultsin
+substantialquantizationerrorduetotheexistenceofoutlierentries. Therefore,asimplestrategyis
+tofilterouttheseoutlierbeforethequantization. GiventheinputtensorX
+∈Rn×d,weextractboth
+s%ofmaximumandminimumvaluesofX infullprecisionintothesparsematrixS =Filter (X):
+2 s
+
+Filter (X)
+= X
+ij
+ifX
+ij
+intoporbottom 2s%,
+(4)
+s ij 
+0 otherwise.
+Then, we perform the uniform quantization for the extracted matrix and obtain the quantized
+backbone:
+D(cid:98)=Quant (X−S). (5)
+b
+The outlier-reduced quantization (5) has been introduced for weight quantization by Kim et al.
+(2023)andachieveexcellentperformanceatlowprecisionofupto3-bit. However,itisimportantto
+notethattheKVcachecompressioncanbefundamentallydifferentfromweightquantization. The
+6KVcachestendtocontainmoreoutliers,makingitsaccuratequantizationmorechallengingthan
+weights(Xiaoetal.,2023). Figure2bshowsthedistributionofentriesinKVcachesandweights,
+whichclearlyillustratesthattheKVvaluesstillspanabroaderrangeevenafterfilteringout10%
+outliers. Consequently,toachievenear-losslessperformanceatultra-lowprecisionsuchas4-bit,
+weoftenneedtoextractalargeportionofoutliers(e.g.,10%asshownbyourresultsinSection4)
+andstorethemasasparsematrix. However,suchasparsematrixresultsintheremainingcache
+sizeequivalenttothatof8-bitquantizationbecauseofitstwoindexvectorsandonevaluevector
+infullprecision. Therefore,outlier-reducedquantizationby(5)stillcannotachievenear-lossless
+high-ratiocompression.
+Low-rankapproximation. Toreducetheapproximationerrormoreefficiently,weresorttolow-
+rank approximation. Specifically, suppose the residual R = X −(D(cid:98)+S) has the singular value
+decomposition as (cid:80)k σ u m⊤ , where σ ≥ ··· ≥ σ are singular values of R and u ,m are the
+i=1 i i i 1 k i i
+correspondingsingularvectors. AsshowninFigure2c,weempiricallyobservethatthespectrum
+oftheresidualmatrixdropsrapidlyatthebeginning. Thisobservationsuggeststheexistenceof
+a coherent component within the residual. This component is represented by the top singular
+values/vectors, and shared among tokens, indicating the token similarity. By leveraging these
+topsingularvaluesandvectors,wecanefficientlycaptureandrecoverthiscoherentinformation,
+leadingtoaneffectiveapproximationofthequantizationresidualR. Tothisend,weintroducea
+low-rankmatrixL:
+⊤
+L=AB =SVDSolver (R) (6)
+r
+whereA∈Rn×r,B∈Rd×r.
+r ismuchsmallerthann,d. Forexample,whenn=2048andd =4096,
+r =5 is adequate to achieve near-lossless, high-ratio compression. For SVDSolver(·), we employ
+anefficientpoweriterationalgorithm(Vogelsetal.(2019)). ThisalgorithmcalculatesA,B rapidly
+whileensuringthatAB⊤
+accuratelyapproximatesthetop-r
+singularvalues/vectors(cid:80)r
+σ u
+m⊤
+i=1 i i i
+(pleaseseeAppendixAforthealgorithmdetails).
+Insummary,GEARintegratesthreecompressiontechniquestoprovideanefficientsolution
+forminimizingtheapproximationerrorin(3). Specifically,thequantizedbackboneD(cid:98) leverages
+theentry-wisesimilarityandcompressesthemajorityofentriestotheultra-lowprecision. The
+low-rankmatrixLcapitalizesontoken-wisesimilaritytoextractthecommonlysharedinformation
+withintheresiduals. ThesparsematrixS compensatesfortheextractionofsparseinformation
+existinginindividualoutliersandcomplimentsthequantizationprocesstightly. Assuch,GEAR
+effectivelyreducestheapproximationerror,achievingnear-losslesshigh-ratiocompressionforKV
+caches.
+Additionally, GEAR introduces a streaming strategy to significantly improve its inference
+throughputbyupto2.88×atanegligiblecostofadditionalmemoryconsumption,e.g.,2%(please
+seeAppendixCformoredetails). Specifically,whenservingthelong-sequencegeneration,GEAR
+storesKVvaluesofnewlygeneratedtokenstoasmallbufferB withthesizeofn . Whenthebuffer
+b
+7reachesitscapacityeveryn steps,GEARrepeatsthecompressionfornewcachesinB alongwith
+b
+previouscaches. WesummarizethedetailedalgorithmofGEARinAlgorithm1.
+Algorithm1GEAR
+1: Input: The initial {K 0,V 0} of each layer, the sparsity ratio s, the bit-width b, the rank r, the
+bufferB,
+2: fort=1,...,n g do
+3: ift modn b =0then
+4: AppendK t =K t−n ∥kB,V t =V t−n ∥vB.
+b b
+5: forX ∈{K t,V t}do
+6: ComputeS =Filter s(X);
+7: ComputeD(cid:98)=Quant b(X−S);
+8: ComputeL=SVDSolver r(X−D(cid:98)−S);
+9: ReplaceX withD(cid:98)+L+S.
+10: endfor
+11: else
+12: Generatenewtokenx t andpush{k t,v t}toB.
+13: endif
+14: endfor
+4 Experiments
+WeuseGEARasaplug-and-playKVcachecompressionforgenerativeinferencewithvariousLLM
+modelsonawidevarietyofgenerativetasksincludingmathematicalreasoning(GSM8k,Cobbe
+etal.(2021)),multitasklanguageunderstanding(MMLU,Hendrycksetal.(2021)),andsymbolic
+reasoning (BigBench Hard (BBH), Suzgun et al. (2022)) both with and without CoT prompting
+(Weietal.,2023).
+Implementationdetails. Weusetheopen-sourcepre-trainedLLMmodelsavailableatHuggingface
+Transformers* (Wolfetal.,2019)andapplyGEARandotheralternativecompressionmethodsto
+ourLLMinferenceframeworkwritteninPyTorch(Paszkeetal.,2019). Inthisworkwefocusonthe
+compressionoftheKVcache,thustounderstanditsimpactonthegenerationperformance,we
+keptallothertensorstoFP16,unlessotherwisementioned.
+Wefocusonthecompressiontoultra-lowprecision. Theimplementationof8-bitisfriendly
+supportedbyhardwareand4-bitcanbeeasilyextendedbasedonit. Henceweprimarilyreport
+theresultsof4-bitKVcachecompression. ForGEAR,weapplyit(Algorithm1)tocompressKV
+cachesbatch-wise,andfixthesparsityratiosas2%. Then,wecontroltherankr ofLbyanother
+hyperparameterρ suchthatr =max{1,ρmin{n,d}}andselectρ from{2%,5%}.
+*https://github.com/huggingface/transformers
+8Baselines. Asfarasweknow,thereislimitedworkthatexhaustivelydemonstratethegenerative
+performancewithKVcachecompressionviaquantization. Therefore,weimplementthreepopular
+quantizationmethodsfromtheliteratureofweightquantizationandcomparewithGEAR.
+•Uniformquantization(Jacobetal.,2018)isthemostcommonapproachthatuniformlyquantize
+allentries. Inspecific,hereweuseuniformasymmetricquantizationforbetteraccuracy.
+• Group-wise quantization (Yao et al., 2022) is an effective approach that quantizes an input
+tensor channel-wise so as to decrease the quantization error. For group-quantization, unless
+otherwisementioned,weusechannel-wisegroupingoverthebatchdimension.
+•Outlier-reducedquantizationhasbeenintroducedby(Kimetal.,2023)forweightquantization,
+whichextractsoutliersbeforethequantizationandachievesexcellentperformance. Inspiredby
+thiswork,weimplementanoutlier-reducedquantizationfortheKVcachetensorwithuniform
+asymmetricquantizationofthenon-outliercomponents.
+•H O(Zhangetal.,2023)isarecenttokendroppingmethodevictingunimportanttokenswith
+2
+loweraccumulatedattentionscores,whichwecomparewithinSection4.4.
+4.1 GenerativePerformancewithCoTPrompting
+Modelsanddatasets. WecomparedifferentcompressionmethodswithLLaMA2-7B,LLaMA2-13B
+(Touvronetal.,2023b)andMistral-7B(Jiangetal.,2023)onthreechallenginggenerativetasks:
+GSM8k,MMLUandBBH.GSM8k(Cobbeetal.,2021)isawidelyusedmathreasoningdatasetsof
+8kproblmesthattestmodels’abilityofarithmeticreasoning. MMLU(Hendrycksetal.,2021)is
+aevaluationsuiteof15kproblemswith57subjectsassessingmodels’knowledgeandreasoning
+athigh-schoolandcollegelevels. BBH(Suzgunetal.,2022)isasuiteoflanguageandsymbolic
+reasoningproblemsconsistingof6.5kproblemswithin23subsets. Giventhecomplexityofthese
+tasks, we use the chain-of-thought prompting to enhance the model performance. Specifically,
+we follow the evaluation approach from Fu et al. (2023) and use the prompts created by them,
+which consist of multiple examples, each involving multi-step reasoning. Notably, improving
+theperformancebyCoTrequiresaccurateKVcachecompressionasmodelsneedfocusonmost
+reasoningstepstogeneratecorrectanswers.
+Implementationdetails. Fortheoutlier-reducedquantization,wefindthatahighsparsityratiois
+requiredtoachievegoodperformance,andhenceselectsfrom{5%,10%}. Itscompressionratiois
+calcuatedas1/( b +3s). GEARdoesnotnecessitateahighsparsityratioaslow-rankapproximation
+16
+efficientlyreducestheerror. Typically,s=2%ors=1%isenoughforGEARandwefixitas2%. We
+selecttheratioρoflow-ranksizefrom{2%,5%},resultinginasmallrankforL(e.g.,5≤r ≤10).
+Itscompressionratiocanbecalculatedas1/( b +3s+ n+d ρ).
+16 max{n,d}
+Mainresults. Table 1 shows experimental results about CoT performance of three models. We
+see that GEAR achieves better or on par performance than baseline approaches on all datasets
+forallmodels. Forexample,underthecompressionratioof2.63×,GEARestablishesanaverage
+improvement of 5.81% over the best-performing baseline (outlier-reduced quantization), and
+9Table1: MainresultsofCoTperformance. HereRatioisthecompressionratio(i.e.,theFP16cache
+sizedividedbytheremainingcachesize). Thebestresultsoneachdatasetareshowninbold.
+Model LLaMA2-7B Mistral-7B LLaMA2-13B All
+GSM8kMMLU BBH GSM8kMMLU BBH GSM8k BBH Avg.
+Method Bitb Ratio
+Acc Acc Acc Acc Acc Acc Acc Acc Acc
+FP16Baseline 16 1× 16.30 44.80 33.58 42.84 59.70 47.92 30.34 40.7939.53
+UniformQuant 4 4× 0 0 0 1.17 7.78 3.60 0.03 0 1.57
+GroupQuant 4 4× 1.36 11.90 2.43 3.72 43.88 37.94 2.12 7.54 13.86
+Outlier-R.Quant(s=10%) 4 1.82× 11.22 40.67 31.50 41.39 58.25 47.53 21.25 36.6936.06
+Outlier-R.Quant(s=5%) 4 2.50× 9.47 34.17 28.26 37.67 57.41 46.43 13.64 32.4632.44
+GEAR(s=2%,ρ=2%) 4 3× 14.17 44.42 31.53 41.39 58.32 46.80 25.92 37.5137.51
+GEAR(s=2%,ρ=5%) 4 2.63× 15.70 44.45 33.01 41.69 58.64 47.12 27.97 37.3838.25
+Table2: Mainresultsofzeroshotperformance. HereRaioisthecompressionratio. Thebestresults
+oneachdatasetareshowninbold.
+Model LLaMA2-7B-chat LLaMA2-7B Mistral-7B
+GSM8k MMLUWikiText-2GSM8kMMLUWikiText-2
+Method Bitb Ratio
+Acc↑ Acc↑ ppl.↓ Acc↑ Acc↑ ppl.↓
+FP16Baseline 16 1× 19.8 29.32 5.14 21.46 58.45 5.25
+UniformQuant 4 4× 0.10 1.62 2536.84 0.42 0.48 100.32
+GroupQuant 4 4× 2.71 3.33 53.21 4.70 38.76 6.56
+Outlier-R.Quant(s=10%) 4 1.82× 17.61 23.66 5.33 7.96 57.95 5.32
+Outlier-R.Quant(s=5%) 4 2.50× 14.52 18.88 5.43 5.00 58.67 5.39
+GEAR(s=2%,ρ=2%) 4 3× 19.13 28.54 5.69 19.03 58.29 5.33
+GEAR(s=2%,ρ=5%) 4 2.63× 19.40 28.54 5.61 19.11 58.34 5.32
+achievesnear-losslessaccuracycomparedtotheFP16baseline. Besides,theaverageaccuracyof
+GEARremainsthebestcomparedtobaselineswhenincreasingthecompressionratioto3×.
+4.2 Zero-shotGenerativePerformance
+Modelsanddatasets. WeperformthezeroshotevaluationonGSM8kandMMLUusingLLaMA2-
+7B,LLaMA2-7B-chat,andMistral-7B.Particularly,LLaMA2-7B-chat,ainstruction-tunedmodel,
+exhibitssignificantlyhigheraccuracythanLLaMA2-7B.Hence,wechoosetoassessitsperformance
+onGSM8k. Additionally,weincludeacomparisononWikitext-2Merityetal.(2016)toevaluate
+thelanguagemodelingabilityafterapplyingKVcompression.
+Main results. We summarize the experimental results in Table 2, where we compare the 4-bit
+10compressionperformance. ThehyperparameterconfigurationarethesameasSection4.1. Wesee
+thatGEARachievesthebestoron-parperformancecomparedwithothercompressionmethods
+onalldatasetsandallmodels. Forexample,underthecompressionratioof2.6×,GEARachieves
+near-losslessperformancecomparedtoFP16baselineonGSM8kandMMLUfortheLLaMAmodels,
+andexhibitstheimprovementof4.88%and9.66%respectivelyoverthebaseline.
+Remark. InbothCoTandzeroshotevaluations,GEARperformsclosetoFP16baselineandachieves
+highcompressionratiosupto3×. Otheralternativecompressionmethodssufferfromanoticeable
+dropinperformanceasthecompressionratioincreases. Thisdeclineinperformanceisparticularly
+evidentintasksthatinvolvereasoning(suchasCoT)andlong-sequencegenerations(e.g.,GSM8k).
+Both types of tasks demand minimal approximation error. The reasoning-related tasks often
+requiremodelstocloselyattendtomostcontextualinformationtogeneratecorrectanswers. The
+longsequencegenerationcanaccumulatetheerrorthroughouttheautoregressivedecodingprocess,
+makingitsensitivetoapproximationerror. Remarkably,aseffectivelyreducingtheerror,GEAR
+yieldsnear-losslessandhigh-ratiocompressiononthesecomplextasks.
+4.3 SystemPerformanceAnalysis
+(a)WeightsandKVcachesize (b)Peakmemorycomparison (c)Zig-zagsystemthroughput
+Figure3: (3a): ComparisonofthememorysizeofmodelweightsandtheKVcache. (3b): Peakmemory(PM)
+usageinpracticalinferencesystem. GEARcanreducepeakmemoryupto2.29×. (3c): GEARsignificantly
+increasesthethroughputsofthezig-zagsystem.
+Inthissection,weanalyzethememoryfootprintandsystemthroughput(i.e.,thenumberof
+processed batches per second) to demonstrate the practical benefits of GEAR on the inference
+system from two perspectives: (i) for the system with adequate memory resource, compressing
+KVcachecanreducethepeakmemoryusage,allowingforlargerbatchsizeandlongergeneration
+length;(ii)forthesystemwithlimitedGPUmemorythatneedstooffloadlargeKVcache,GEAR
+canenhancethesystemthroughputbyupto2.29×duetoitshighcompressionratioandinference
+speedup.
+Figure3apresentsthememoryfootprintofmodelweightsandKVcacheforLLaMA2-7B/13B
+withabatchsizeof30andaninputsequencelengthnof2000. Asshowninthefigure,forboththe
+models,inFP16,KVcachesizedominatesintermsofmemory,comparedtothatofweights. Onthe
+otherhand,GEARwith4-bitquantizationands=2%,ρ=2%achievesupto3.13×reductioninKV
+11memoryrequirements. ForageneralinferencesystemwithoutKVcacheoffloading,GEARyields
+upto2.29×peakmemoryreductionforLLaMAmodelsasshowninFigure3b. Thiscompression
+allows a 1.7× increase in batch size, given a fixed memory budget of 80GB with same sequence
+length as stated above. Alternatively, it facilitates a 1.7× increase of the maximum generation
+length,offeringthecapabilitiesforextendedcontextgeneration.
+In the context of the limited GPU memory resource, the inference system has to resorts to
+offloading. Thestart-of-the-artoptionisthezig-zagschedulingShengetal.(2023),whichcrafts
+thefrequentloadingandoffloadingofmodelweightsandKVcachetooptimizethethroughput.
+Remarkably, the adoption of GEAR to this system significantly diminishes memory bandwidth
+usage. Thisleadstoanimprovementinsystemthroughput,demonstratingtheefficacyoftheGEAR
+compressionmethodinenhancingtheoperationalperformanceofLLMdeployment. Figure3c
+showsthroughputoffourKVcachecompressionschemesonthezig-zagschedulersystem,that
+achieve the similar accuracy. In specific, we use one single RTX Titan with 24GB GPU, 125 GB
+CPU memory respectively. As shown in the figure, GEAR can improve the system throughput
+byupto2.38×innear-losslesscompressionsettingwhileuniform8-bitandoutlier-reduced4-bit
+quantizationcanonlyimprovethethroughputbyupto1.65×and1.32×,respectively.
+4.4 AnalysisandDiscussions
+(a)GSM8kwithCoTprompts (b)MMLUwithoutCoTprompts
+Figure4: ResultsofcompressingKVcachesofLLaMA2-13Btodifferentcompressionratios.
+Differentcompressionratios. Figuer 4 illustrates the experimental results of compressing KV
+caches of LLaMA2-13B to various compression ratios. We see that on both GSM8k and MMLU,
+GEARachievesconsistentperformanceimprovementoverallbaselinemethodsacrossdifferent
+compression ratios. Notably, under high compression ratio, GEAR still can yields near-lossless
+performancewhileothermethodssufferfromacriticaldropinperformance. Forexample,GEAR
+yield43.46%accuracyonMMLUwhilecompressingtoaratioof3.43×,indicatingtheeffectiveness
+ofGEARfornear-losslesshigh-ratiocompression.
+Comparisonwithtokendropping. WeevaluatetheperformanceofH O(Zhangetal.,2023)for
+2
+reducingKVcachesizeonGSM8kwithLLaMA2-7B.Table3presentsitsaccuracywhendropping
+1250% tokens, which suggests H 0 cannot effectively preserve the performance nor achieve high
+2
+compressionratio. Forcomplextasksinvolvingreasoningorlong-sequencegeneration(suchas
+GSM8k),modelsneedtocloselyattendtomostcontextualinformationtogeneratecorrectanswers.
+Token dropping methods, however, can make some information directly invisible, resulting in
+deviationingenerationanddegradationofperformance.
+Table3: AccuracyofH OonGSM8kwithLLaMA2-7B.
+2
+Method Ratio CoTAcc. Zero-shotAcc.
+H O 2× 6.82 5.96
+2
+GEAR 3× 14.17 19.13
+Comparisononfine-tunedmodels. TofurtherevaluatetheeffectivenessofGEARonfine-tuned
+models,wefine-tuneaLLaMA2-7BmodelsonGSM8kfor6epocheswithbatchsizeas16. Table4
+presentstheaccuracyofthisfine-tunedmodelafterapplyingKVcachecompressionmethods. The
+hyperparametersaresetasthesameasSection4.1. WecanseethatGEARstilloutperformsallof
+baselinemethods,yieldinganmanifestaccuracyimprovement.
+Table4: Evaluationwithafine-tunedLLaMA2-7BonGSM8kwhencompressingtheKVcachesto4-bit.
+Method Bitb Ratio Acc.
+FP16Bseline 16 1× 38.10
+UniformQuant 4 4× 4.20
+GroupQuant 4 4× 11.30
+Ourlier-R.Quant(s=5%) 4 2.50× 24.50
+GEAR(s=2%,ρ=2%) 4 3× 27.10
+GEAR(s=2%,ρ=10%) 4 2.37× 37.00
+Ablationstudyonsandρ. WestudythesensitivityofGEARtothesparsityratiosandlow-rank
+ratioρ. Table5presentstheaccuracyofGEARonGSM8kwithCoTwhenvaryingsandρ. Wesee
+thatGEARdoesnotrequireabundantsparseeitherlow-rankcomponents-asmallratio(2%or5%)
+ofsparse/low-rankmatrixisadequateforGEARtoyieldnear-losslessaccuracy. Furtherincreasing
+theratiomayimprovetheperformancebutnotsignificantly,whichhoweverresultsinadditional
+memory consumption. More importantly, discarding either sparse or low-rank component can
+significantlydegeneratetheperformanceofGEAR(lastlineofTable5),whichvalidatesourclaim
+inSection1. Thatis,thethreecomponentsinGEARarecomplementarywitheachotherandeach
+isindispensableforGEARtoachievethenear-losslessperformance.
+13Table5: GEARperformancewithdifferentsandρusingLLaMA2-7BonGSM8kwithCoT.Here
+wechangeonehyperparameterwhilefixinganotherone.
+Hyperparameter Acc. Hyperparameter Acc.
+s=2%,ρ=10% 15.01 ρ=5%,s=10% 15.09
+s=2%,ρ=5% 15.70 ρ=5%,s=5% 15.77
+s=2%,ρ=2% 14.17 ρ=5%,s=2% 15.09
+s=2%,ρ=1% 14.18 ρ=5%,s=1% 13.65
+s=2%,ρ=0% 2.17 ρ=5%,s=0% 2.12
+5 Related Work
+LLMweightscompression. LLMweightcompressioncansignificantlyreducethememoryfoot-
+printanddatatransfercost. GPTQ(Frantaretal.,2023)acceleratedtheoptimalbrainquantization
+forLLMweightsbyordersofmagnitude. SqueezeLLM(Kimetal.,2023)successfullycompressed
+the model weights to 3 bits by extracting the outlier values and quantize the remaining values
+accordingtohessianmatrixwithin10%perplexityincreases. Thesealgorithmsareeffectiveand
+couldcompressweightsto2or3bitswithacceptablelossofaccuracy. However,thesemethods
+oftenrequiresignificantlatencyoverheadandgradientinformationtowork. Thustheirarenot
+fitforKVcachecompressionsinceKVcachedoesnothaveanytrainableparameterandchanges
+everygenerationstage,requiringefficientlight-weightmethodforonlinecompression.
+LLM KV cache compression. Activation and KV cache compression are harder than weight
+compressionsincetheyaremoresensitiveandrelatedtomodelinputs. SmoothQuant(Xiaoetal.,
+2023)achieved8-bitcompressionbothforactivation(KVcachesincluded)andweightsbyadjusting
+thescalingfactorstoreduceoutliererroranddemonstratesnearlosslessperformanceonsimple
+generativetasks. Atom(Zhaoetal.,2023)successfullycompressedKVCacheto4bitsonsimple
+generativetaskswithin5%performancedegradationbycombining4-bitand8-bitchannel-wise
+quantization. AnotherlineofworkexploredKVpruningviatokendroppingbasedonattention
+score analysis. In specific, H O (Zhang et al., 2023) and FastGen (Ge et al., 2023) proposed to
+2
+pruneKVviadroppingtokensbasedonattentionscoretodecreasetheKVcachesize. SparQ(Ribar
+etal.,2023)notonlydroppedtokensaccordingtoattentionscoresparsitybutalsoincorporated
+theerroroftheprunedvaluecache. Thesepruningandquantizationalgorithmsoftenworkwell
+onsummarizingtasksandzero-shotinference. However,forfine-tunedmodels,CoTinference,
+andgenerativereasoningdatasets,attentionscoresaredenserandeachtokencontainsimportant
+informationthatcannotbeignored. Moreover,tokendroppingneedstoweigheachtokenbasedon
+attentionscore,whichmakesthesemethodshardtodeploywithFlashAttention(Daoetal.,2022).
+Additionally,recentworksshowstheattentionsparsitytobeafunctionofthenon-linearitychoice
+ofthemodel(Mirzadehetal.,2023),suggestingitsvulnerabilityasametricforKVcompression.
+146 Conclusions
+InthispaperwepresentGEAR,anearloss-lessKVcachecompressionframeworkforLLMinference
+thatachievesKVcompressioninultra-lowprecisionwithminimalaccuracydrop. Comparedto
+the existing alternatives, GEAR demonstrates SOTA performance on complex generative tasks
+involvingreasoning,whileresultingmuchlowermemoryfootprint. Thesubstantiallylowpeak
+memorydemandofGEAR,enablescateringtomoreinferencerequestscomparedtoFP16baseline.
+Additionally,GEARcanfacilitateathroughputboostofupto2.38×. Wehopeourmethodcanopen
+anewavenueofmemory-efficientLLMinferencefornear-losslesscomplexgenerationserving.
+References
+Aminabadi, R. Y., Rajbhandari, S., Zhang, M., Awan, A. A., Li, C., Li, D., Zheng, E., Rasley, J.,
+Smith,S.,Ruwase,O.andHe,Y.(2022). Deepspeedinference: Enablingefficientinferenceof
+transformermodelsatunprecedentedscale.
+Brown,T.,Mann,B.,Ryder,N.,Subbiah,M.,Kaplan,J.D.,Dhariwal,P.,Neelakantan,A.,Shyam,
+P.,Sastry,G., Askell, A.etal.(2020a). Languagemodelsarefew-shotlearners. Advancesin
+neuralinformationprocessingsystems,331877–1901.
+Brown,T.B.,Mann,B.,Ryder,N.,Subbiah,M.,Kaplan,J.,Dhariwal,P.,Neelakantan,A.,Shyam,
+P.,Sastry,G.,Askell,A.,Agarwal,S.,Herbert-Voss,A.,Krueger,G.,Henighan,T.,Child,R.,
+Ramesh,A.,Ziegler,D.M.,Wu,J.,Winter,C.,Hesse,C.,Chen,M.,Sigler,E.,Litwin,M.,Gray,
+S.,Chess,B.,Clark,J.,Berner,C.,McCandlish,S.,Radford,A.,Sutskever,I.andAmodei,D.
+(2020b). Languagemodelsarefew-shotlearners. CoRR,abs/2005.14165.
+https://arxiv.org/abs/2005.14165
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H., Kaiser, L., Plappert, M., Tworek, J.,
+Hilton,J.,Nakano,R.,Hesse,C.andSchulman,J.(2021). Trainingverifierstosolvemathword
+problems.
+Dao,T.,Fu,D.Y.,Ermon,S.,Rudra,A.andRe´,C.(2022). Flashattention: Fastandmemory-efficient
+exactattentionwithio-awareness.
+Dettmers, T., Lewis, M., Belkada, Y. and Zettlemoyer, L. (2022). Llm. int8 (): 8-bit matrix
+multiplicationfortransformersatscale. arXivpreprintarXiv:2208.07339.
+Frantar, E., Ashkboos, S., Hoefler, T. and Alistarh, D. (2023). Gptq: Accurate post-training
+quantizationforgenerativepre-trainedtransformers.
+Fu, Y., Ou, L., Chen, M., Wan, Y., Peng, H. and Khot, T. (2023). Chain-of-thought hub: A
+continuousefforttomeasurelargelanguagemodels’reasoningperformance.
+15Ge,S.,Zhang,Y.,Liu,L.,Zhang,M.,Han,J.andGao,J.(2023). Modeltellsyouwhattodiscard:
+Adaptivekvcachecompressionforllms.
+Hendrycks,D.,Burns,C.,Basart,S.,Zou,A.,Mazeika,M.,Song,D.andSteinhardt,J.(2021).
+Measuringmassivemultitasklanguageunderstanding.
+Jacob, B., Kligys, S., Chen, B., Zhu, M., Tang, M., Howard, A., Adam, H. and Kalenichenko,
+D. (2018). Quantization and training of neural networks for efficient integer-arithmetic-only
+inference. InProceedingsoftheIEEEconferenceoncomputervisionandpatternrecognition.
+Jiang,A.Q.,Sablayrolles,A.,Mensch,A.,Bamford,C.,Chaplot,D.S.,delasCasas,D.,Bressand,
+F.,Lengyel,G.,Lample,G.,Saulnier,L.,Lavaud,L.R.,Lachaux,M.-A.,Stock,P.,Scao,T.L.,
+Lavril,T.,Wang,T.,Lacroix,T.andSayed,W.E.(2023). Mistral7b.
+Kim, S., Hooper, C., Gholami, A., Dong, Z., Li, X., Shen, S., Mahoney, M. W. and Keutzer, K.
+(2023). Squeezellm: Dense-and-sparsequantization.
+Li,Y.,Yu,Y.,Liang,C.,He,P.,Karampatziakis,N.,Chen,W.andZhao,T.(2023). Loftq: Lora-fine-
+tuning-awarequantizationforlargelanguagemodels.
+Liu,Z.,Desai,A.,Liao,F.,Wang,W.,Xie,V.,Xu,Z.,Kyrillidis,A.andShrivastava,A.(2023). Scis-
+sorhands: ExploitingthepersistenceofimportancehypothesisforLLMKVcachecompressionat
+testtime. InThirty-seventhConferenceonNeuralInformationProcessingSystems.
+https://openreview.net/forum?id=JZfg6wGi6g
+Liu, Z., Yuan, J., Jin, H., Zhong, S., Xu, Z., Braverman, V., Chen, B. and Hu, X. (2024). Kivi: A
+tuning-freeasymmetric2bitquantizationforkvcache. arXivpreprintarXiv:2402.02750.
+Merity,S.,Xiong,C.,Bradbury,J.andSocher,R.(2016). Pointersentinelmixturemodels. arXiv
+preprintarXiv:1609.07843.
+Mirzadeh, I., Alizadeh, K., Mehta, S., Del Mundo, C. C., Tuzel, O., Samei, G., Rastegari, M.
+andFarajtabar,M.(2023). Relustrikesback: Exploitingactivationsparsityinlargelanguage
+models. arXivpreprintarXiv:2310.04564.
+OpenAI(2023). Gpt-4technicalreport.
+Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J., Chanan, G., Killeen, T., Lin, Z.,
+Gimelshein, N., Antiga, L., Desmaison, A., Ko¨pf, A., Yang, E., DeVito, Z., Raison, M., Te-
+jani,A.,Chilamkurthy,S.,Steiner,B.,Fang,L.,Bai,J.andChintala,S.(2019). Pytorch: An
+imperative style, high-performance deep learning library. In Advances in Neural Information
+ProcessingSystems32: AnnualConferenceonNeuralInformationProcessingSystems2019,NeurIPS
+2019,December8-14,2019,Vancouver,BC,Canada(H.M.Wallach,H.Larochelle,A.Beygelzimer,
+F.d’Alche´-Buc,E.B.FoxandR.Garnett,eds.).
+16Pope,R.,Douglas,S.,Chowdhery,A.,Devlin,J.,Bradbury,J.,Levskaya,A.,Heek,J.,Xiao,K.,
+Agrawal,S.andDean,J.(2022). Efficientlyscalingtransformerinference.
+Ribar, L., Chelombiev, I., Hudlass-Galley, L., Blake, C., Luschi, C.andOrr, D.(2023). Sparq
+attention: Bandwidth-efficientllminference.
+Sheng, Y., Zheng, L., Yuan, B., Li, Z., Ryabinin, M., Fu, D. Y., Xie, Z., Chen, B., Barrett, C.,
+Gonzalez,J.E.,Liang,P.,Re´,C.,Stoica,I.andZhang,C.(2023). Flexgen: High-throughput
+generativeinferenceoflargelanguagemodelswithasinglegpu.
+Suzgun, M., Scales, N., Scha¨rli, N., Gehrmann, S., Tay, Y., Chung, H. W., Chowdhery, A.,
+Le, Q. V., Chi, E. H., Zhou, D. and Wei, J. (2022). Challenging big-bench tasks and whether
+chain-of-thoughtcansolvethem.
+Thoppilan,R.,Freitas,D.D.,Hall,J.,Shazeer,N.,Kulshreshtha,A.,Cheng,H.-T.,Jin,A.,Bos,
+T.,Baker,L.,Du,Y.,Li,Y.,Lee,H.,Zheng,H.S.,Ghafouri,A.,Menegali,M.,Huang,Y.,Krikun,
+M.,Lepikhin,D.,Qin,J.,Chen,D.,Xu,Y.,Chen,Z.,Roberts,A.,Bosma,M.,Zhao,V.,Zhou,Y.,
+Chang,C.-C.,Krivokon,I.,Rusch,W.,Pickett,M.,Srinivasan,P.,Man,L.,Meier-Hellstern,
+K.,Morris,M.R.,Doshi,T.,Santos,R.D.,Duke,T.,Soraker,J.,Zevenbergen,B.,Prabhakaran,
+V., Diaz, M., Hutchinson, B., Olson, K., Molina, A., Hoffman-John, E., Lee, J., Aroyo, L.,
+Rajakumar, R., Butryna, A., Lamm, M., Kuzmina, V., Fenton, J., Cohen, A., Bernstein, R.,
+Kurzweil,R.,Aguera-Arcas,B.,Cui,C.,Croak,M.,Chi,E.andLe,Q.(2022). Lamda: Language
+modelsfordialogapplications.
+Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux, M.-A., Lacroix, T., Rozie`re, B.,
+Goyal,N.,Hambro,E.,Azhar,F.,Rodriguez,A.,Joulin,A.,Grave,E.andLample,G.(2023a).
+Llama: Openandefficientfoundationlanguagemodels.
+Touvron,H.,Martin,L.,Stone,K.,Albert,P.,Almahairi,A.,Babaei,Y.,Bashlykov,N.,Batra,S.,
+Bhargava,P.,Bhosale,S.,Bikel,D.,Blecher,L.,Ferrer,C.C.,Chen,M.,Cucurull,G.,Esiobu,
+D., Fernandes, J., Fu, J., Fu, W., Fuller, B., Gao, C., Goswami, V., Goyal, N., Hartshorn, A.,
+Hosseini, S., Hou, R., Inan, H., Kardas, M., Kerkez, V., Khabsa, M., Kloumann, I., Korenev,
+A.,Koura,P.S.,Lachaux,M.-A.,Lavril,T.,Lee,J.,Liskovich,D.,Lu,Y.,Mao,Y.,Martinet,X.,
+Mihaylov,T.,Mishra,P.,Molybog,I.,Nie,Y.,Poulton,A.,Reizenstein,J.,Rungta,R.,Saladi,
+K., Schelten, A., Silva, R., Smith, E. M., Subramanian, R., Tan, X. E., Tang, B., Taylor, R.,
+Williams,A.,Kuan,J.X.,Xu,P.,Yan,Z.,Zarov,I.,Zhang,Y.,Fan,A.,Kambadur,M.,Narang,
+S.,Rodriguez,A.,Stojnic,R.,Edunov,S.andScialom,T.(2023b). Llama2: Openfoundation
+andfine-tunedchatmodels.
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A. N., Kaiser, Ł. and
+Polosukhin,I.(2017). Attentionisallyouneed. Advancesinneuralinformationprocessingsystems,
+30.
+17Vogels, T., Karimireddy, S. P. and Jaggi, M. (2019). Powersgd: Practical low-rank gradient
+compressionfordistributedoptimization. CoRR,abs/1905.13727.
+http://arxiv.org/abs/1905.13727
+Wei,J.,Tay,Y.,Bommasani,R.,Raffel,C.,Zoph,B.,Borgeaud,S.,Yogatama,D.,Bosma,M.,Zhou,
+D.,Metzler,D.,Chi,E.H.,Hashimoto,T.,Vinyals,O.,Liang,P.,Dean,J.andFedus,W.(2022).
+Emergentabilitiesoflargelanguagemodels. TransactionsonMachineLearningResearch. Survey
+Certification.
+https://openreview.net/forum?id=yzkSU5zdwD
+Wei, J., Wang, X., Schuurmans, D., Bosma, M., Ichter, B., Xia, F., Chi, E., Le, Q. and Zhou, D.
+(2023). Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels.
+Wolf, T., Debut, L., Sanh, V., Chaumond, J., Delangue, C., Moi, A., Cistac, P., Rault, T., Louf,
+R.,Funtowicz,M.etal.(2019). Huggingface’stransformers: State-of-the-artnaturallanguage
+processing. arXivpreprintarXiv:1910.03771.
+Xiao,G.,Lin,J.,Seznec,M.,Wu,H.,Demouth,J.andHan,S.(2023). Smoothquant: Accurateand
+efficientpost-trainingquantizationforlargelanguagemodels.
+Yao,Z.,YazdaniAminabadi,R.,Zhang,M.,Wu,X.,Li,C.andHe,Y.(2022). Zeroquant: Efficient
+and affordable post-training quantization for large-scale transformers. Advances in Neural
+InformationProcessingSystems,3527168–27183.
+Yuan,A.,Coenen,A.,Reif,E.andIppolito,D.(2022). Wordcraft: Storywritingwithlargelanguage
+models. In 27th International Conference on Intelligent User Interfaces. IUI ’22, Association for
+ComputingMachinery,NewYork,NY,USA.
+https://doi.org/10.1145/3490099.3511105
+Zafrir,O.,Boudoukh,G.,Izsak,P.andWasserblat,M.(2019). Q8bert: Quantized8bitbert. In
+2019 Fifth Workshop on Energy Efficient Machine Learning and Cognitive Computing - NeurIPS
+Edition(EMC2-NIPS).IEEE.
+http://dx.doi.org/10.1109/EMC2-NIPS53020.2019.00016
+Zhang,S.,Roller,S.,Goyal,N.,Artetxe,M.,Chen,M.,Chen,S.,Dewan,C.,Diab,M.,Li,X.,Lin,
+X.V.,Mihaylov,T.,Ott,M.,Shleifer,S.,Shuster,K.,Simig,D.,Koura,P.S.,Sridhar,A.,Wang,
+T.andZettlemoyer,L.(2022). Opt: Openpre-trainedtransformerlanguagemodels.
+Zhang,Z.,Sheng,Y.,Zhou,T.,Chen,T.,Zheng,L.,Cai,R.,Song,Z.,Tian,Y.,Re´,C.,Barrett,C.,
+Wang,Z.andChen,B.(2023). H o: Heavy-hitteroracleforefficientgenerativeinferenceoflarge
+2
+languagemodels.
+Zhao, Y., Lin, C.-Y., Zhu, K., Ye, Z., Chen, L., Zheng, S., Ceze, L., Krishnamurthy, A., Chen, T.
+andKasikci,B.(2023). Atom: Low-bitquantizationforefficientandaccuratellmserving.
+18A Power Iteration Algorithm
+Algorithm2Lowrankapproximationoftheerrortensor
+Require: InputmatrixX
+∈Rn×d
+loopiterationL,
+lowrankfractionr.
+output :
+A∈Rn×r,B∈Rd×r,AB⊤
+=L
+random initialize(A),
+random initialize(B)
+whilel <Ldo
+ifl ==L−1then
+B←QRdecompostion(B)
+endif
+A=XB
+ifl ==L−1then
+A←QRdecompostion(A)
+endif
+B=XTA
+l ←l+1
+endwhile
+B Discussion on the Prompts
+Figure5: ExampleofGSM8k-CoTprompt. TheRed,Green,andBluecoloredportionscorrespondto
+theexamplequestion,acommonprecedingprompt,andtheexampleanswerprompt,respectively.
+Here,weusethecommonprompttoimprovethereasoningoftheLLM.
+For the GSM8k dataset, there is a fixed prompt for all evaluations. The prompt contains 8
+exampleswithclearguidancestepbystep. FortheMMLUandBBHdataset,thereareindividual
+promptsforeachsubdataset. Figure5showsoneoftheexampleinGSM8Kdataset.
+C Discussion on Throughput Benefit of GEAR
+Inthissection,wepresenttheinferencethroughputbenefitofGEARonageneralsystem. Specif-
+ically, we evaluate with a general inference system with one single 100GB GPU and report the
+19practical maximum batch-size and throughput. We set prefill length to 1000 and a generation
+lengthto100(maximum)inthisexperiment. WeuseLLaMA2-7BmodelwithFP16weights. The
+buffer(n )iskepttoholdmaximum20recenttokens(defaultsettingofGEAR).Aswecanseein
+b
+Table6,withoutanycustomkernelrequirement,atthecostofnegligiblememoryoverhead,GEAR
+improvesthesystemthroughputby2.88×comparedtotheoutlier-reducedquantizationmethod
+yieldingsimilaraccuracy.
+Table6: Generalinferencesystemthroughputonone100GBGPUwithLLaMA2-7B.
+Method MaxBatch-size Throughputs(tokens/s)
+Outlier-R.Quant(b=4,s=10%) 62 32
+GEAR(b=4,s=2%,r=2%,n =20) 104 92
+b
+D Extended Results
+D.1 UnderstandingtheImportanceofKandVError
+“DothequantizationerrorforKandVcacheplayequallycriticalroleortheirimportancearedifferent?”.
+Figure6: AblationwithKandVerrortensorrank.
+Toshedlightonthisintriguingquestion,weconductexperimentsbykeepingtherankofeither
+K or V frozen to a fixed value, while we keep on increasing the rank of other. For both cases,
+we keep the sparsity to 1% in GEAR. Fig. 6 (a) shows results with LLaMA2-7B on GSM8k-CoT.
+The[val1,val2],identifiesthefixedrankandvariableρ,respectively. Fromtheseresults,wecan
+confirmthattheKerrormayplayamorecriticalroleasopposedtoVerrorforcomplexreasoning
+taskslikeGSM8kwheremultipletokensaregeneratedinasequentialway,asweseeconsistently
+improvedperformancewhileincreasingranktorepresenttheformer.
+20D.2 GEARAppliedtoDifferentKVQuantizationSchemes
+HerewepresentresultsofGEARappliedonuniformquantizedKV.AsdemonstratedinFig. 7a
+applicationofGEARevenwithuniformquantizationasitsquantizationscheme,thegenerative
+inferenceperformancesignificantlyimproves. Wechoseuniformquantizationforthisstudy,asit
+isoneofthesimplestquantizationthatdoesnotrequireanycustomsupporttocompensatefor
+operationdelay. Note,hereweused6-bit(asourevaluationsshowthat4-bituniformquantization
+of KV provides near zero accuracy for complex reasoning tasks) quantization scheme with a
+streaminggapof20,meaningatmax20recentK,VtokenswouldbeinFP16format. Inspecific,Fig.
+7ashowsthatforLLaMA2-7BGEARonuniformasymmetricquantizationimprovestheaccuracy
+by up to 86.58% relative to that without GEAR. For LLaMA2-13B the relative improvement is
+80.69%,clearlydemonstratingtheimportanceoftheGEARaswellasitsgeneralizabilityacross
+differentquantizationschemes.
+WefurtherperformedexperimentstoshowefficacyofGEARwithgroupquantization. Wetake
+inspirationfromacontemporaryresearchLiuetal.(2024),thathasshownsignificantimprovement
+withgroupquantizationinyieldingimprovedperformanceoncomplexreasoningtaskslikeGSM8k.
+Inspecific,weusethegroup-wisequantizationofLiuetal.(2024),namelygroupchannel-wise*
+andtoken-wiseastheinherentquantizationofGEAR.AsdemonstratedinFig. 7b,forLLaMA2-7B,
+with4-bitquantizedKVcache,weshowthattheGEARimprovesaccuracyofgroupquantization
+significantlybyupto33.02%.
+(a)Withuniformquantization. (b)Withgroupquantization.
+Figure7: GEARresultswithdifferentquantizationschemes,namelyuniform(asymmetric)and
+groupquantizationonGSM8k-CoT.
+D.3 GEARwithWeightQuantizedModel
+In this section, we present results of GEAR with outlier quantization applied on models with
+weightsquantizedto8-bits. Inspecific,weapply8-bituniformquantizationtothemodelweights
+and applied GEAR to the KV cache to simulate the compression performance. Here we apply
+GEARontopofoutlier-reducedquantizationscheme. AsshowninFig. 8,theresultswithGEAR
+*Note,unlikethechannelgroupingdoneoverthebatchinthemaintext,herewecomputethescalingandshifting
+parametersseparatelyforeachbatchunitfollowingLiuetal.(2024).
+21Figure8: GEARresultswithweightquantizedmodelonGSM8k-CoT.WeuseLLaMA2-7Bforthis
+evaluation.
+significantly outperforms the outlier-reduced quantized KV baselines with significantly higher
+outlier%. Additionally,GEARwithweightquantizedmodelcanyieldsimilarperformanaceas
+thatwiththeFP16weights.
+22

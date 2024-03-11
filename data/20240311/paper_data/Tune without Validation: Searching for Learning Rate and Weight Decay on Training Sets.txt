@@ -1,0 +1,807 @@
+Tune without Validation: Searching for Learning
+Rate and Weight Decay on Training Sets
+Lorenzo Brigato and Stavroula Mougiakakou
+ARTORG, University of Bern, Switzerland
+{name}.{lastname}@unibe.ch
+Abstract. We introduce Tune without Validation (Twin), a pipeline
+for tuning learning rate and weight decay without validation sets. We
+leveragearecenttheoreticalframeworkconcerninglearningphasesinhy-
+pothesis space to devise a heuristic that predicts what hyper-parameter
+(HP) combinations yield better generalization. Twin performs a grid
+search of trials according to an early-/non-early-stopping scheduler and
+thensegmentstheregionthatprovidesthebestresultsintermsoftrain-
+ing loss. Among these trials, the weight norm strongly correlates with
+predicting generalization. To assess the effectiveness of Twin, we run
+extensive experiments on 20 image classification datasets and train sev-
+eralfamiliesofdeepnetworks,includingconvolutional,transformer,and
+feed-forwardmodels.WedemonstrateproperHPselectionwhentraining
+from scratch and fine-tuning, emphasizing small-sample scenarios.
+1 Introduction
+Like most machine learning models, deep networks are configured by a set of
+hyper-parameters (HPs) whose values must be carefully chosen and which of-
+ten considerably impact the final outcome [17,26,60]. Setting up wrong con-
+figurations translates into bad performance, particularly in the most difficult
+optimization scenarios, e.g., large models that overfit on small datasets [4,5,35].
+Traditionally, HP search is performed in two ways, as exemplified in Fig. 1
+(top).Althoughmorecomprehensivemethodologies,suchasmulti-foldormulti-
+round cross-validation [44], exist, they are scarcely employed in training deep
+networks due to their significant computational overhead. When no validation
+setisavailable,thetrainingsetissplitintotwounbalancedsubsetstoperformthe
+HPsearch.Then,the“optimal” HPconfigurationinitializesthefinaltrainingon
+the original collection. In contrast, if the validation set is accessible, ML profes-
+sionalscanexpeditetheHPsearchandsimplifythemodelselectionprocesssince
+the two-step training pipeline is avoided. However, this comes at the expense of
+collectinganadditional10-30%ofsamples.Usecaseswhereacquiringadditional
+data is either expensive or logistically unfeasible, such as medical imaging [50]
+or federated learning [37], challenge the traditional HP selection pipeline. HP
+optimization on small validation sets may have inherent noise [7,35].
+Motivatedbythesechallenges,weintroduceTunewithoutValidation(Twin),
+an innovative HP selection approach inspired by a theoretical framework which
+4202
+raM
+8
+]GL.sc[
+1v23550.3042:viXra2 Brigato and Mougiakakou
+DATA SPLITTING
+HP SEARCH FINAL TRAINING TUNED NETWORK
+HP SEARCH FINAL TRAINING TUNED NETWORK
+TRAINING VALIDATION
+TRAINING SET
+Traditional
+Pipelines
+DATA COLLECTION
+HP SEARCH TUNED NETWORK
+VALIDATION
+TRAINING SET
+HP SEARCH TUNED NETWORK Twin
+TRAINING SET
+Fig.1: Overview. While traditional pipelines need a validation set to tune learning
+rateandweightdecay,Twinperformsthesearchdirectlyonthetrainingset,simplifying
+the process or saving additional data-collection costs.
+aimsatexplainingrepresentationlearningacrossHPsfromphasediagrams[33].
+Twinobviatestheneedforvalidationsetswhentuningoptimizerparameters.In
+particular, Twin enables practitioners to directly select the learning rate (LR)
+and weight decay (WD) from the training set, as sketched in Fig. 1 (bottom).
+Twinperformsagridsearchoveranhypothesisspaceusinganearly-/non-early-
+stopping scheduler and successfully predicts generalizing HP configurations by
+monitoringonlythetrainingloss,asaproxyfortaskperformance,andtheweight
+norm, to measure regularization strength.
+We perform an extensive empirical analysis to demonstrate Twin’s practical
+versatility by training 4,000+ deep models involving 20 datasets and several
+architectures. On a suite of 34 different dataset-architecture configurations with
+networkstrainedfromscratchandwithoutearlystopping,TwinscoresanMAE
+of 1.3% against an Oracle pipeline - the ideal unrealistic scenario - that directly
+selects HPs from testing sets. We summarize the contributions of our paper:
+– We introduce Twin, a simple but effective HP selection pipeline which opti-
+mizes LR and WD, directly from training sets (Sec. 3).
+– WeshowcasetheeffectivenessofTwinacrossawidespectrumofexperimen-
+tal scenarios (Sec. 4.1, Sec. 4.2, Sec. 4.3, Sec. 4.4), encompassing datasets
+fromdifferentdomains(e.g.,natural,medicalimagery)andscales(hundreds
+to thousands of samples) as well as models with various architecture (e.g.,
+ResNet, MLP, CVT) and size (from ∼0.2M to ∼90M params.).
+– WeablateonthedifferentcomponentsandparametersofTwintoprovidead-
+ditionalinsightsregardingtheworkingmechanismsofourpipeline(Sec.4.5).
+2 Related Work
+Image classification. Since the introduction of AlexNet [26], image classi-
+fication has witnessed remarkable advances, propelled by the development ofTwin: Searching for LR and WD on Training Sets 3
+novel neural architectures (e.g., ResNet [16], Vision Transformer (ViT) [11]),
+and large datasets [42]. Large-scale pre-training has favored the application of
+transferlearningtotacklesmall-samplescenarios[24,54].Morerecentworkpro-
+vides insights regarding the training of deep models from scratch on limited
+datasets [1,5,6,8,28,56]. Motivated by the medium-to-small size of datasets ex-
+ploredinthiswork,wemostlytrainconvolutionalnetworks(ConvNets)butalso
+experiment with ViTs and feed-forward networks.
+Hyper-parameter tuning. There is a vast literature tackling the problem of
+HPtuningfordeepnetworks[60],includingworksonimplicitdifferentiation[35],
+data augmentation [10,31], neural-architecture search [12], invariance learn-
+ing [3,21,55], and general-purpose schedulers [29,30]. Concerning optimization-
+related HPs, the seminal work of Goyal et al. [14] popularized the linear scaling
+rule for learning rate and batch size. Yang et al., [58] proposed a parameteriza-
+tion to zero-shot transfer LRs to larger model sizes [58]. Recent work studied
+HP selection as data scales by exploiting SGD symmetries [61,62]. However,
+only a few studies explore HP optimization without employing validation sets,
+mainly focusing on learning invariances. When employing Bayesian inference,
+methods either fail to scale to relatively simple tasks (e.g., CIFAR-10) [43] or
+largernetworksizes(e.g.,ResNet-14)[21].Bentonetal.[3]makestrongassump-
+tions about knowing what HPs help learning invariances in advance. A recent
+method improves scalability issues but still introduces complexity by needing
+data and model partitioning and an additional backward-forward pass [38]. Un-
+likesuchmethods,TwinfocusesonLRandWD,easilyscalestoincreasedmodel
+and data sizes, and simplifies the HP optimization pipeline.
+3 Tune without Validation
+3.1 Preliminaries
+Problem settings. Image classification tasks present a training set D =
+train
+{x ,y } and a testing set D ={x ,y } sampled from a distribution P(X,Y).
+i i test i i
+The learners, in our case, deep neural networks f parameterized by parameters
+θ
+θ, are trained via SGD optimization to minimize the cross-entropy loss over the
+training set, min (L = L(f ,D )). A popular regularization technique to
+θ θ θ train
+avoid over-fitting and improve generalization is L regularization, i.e., min Lˆ
+2 θ θ
+with Lˆ =L(f ,D )+λ· ||θ||2 that features a penalty over the norm of the
+θ θ train 2
+weights controlled by the parameter λ, widely known as WD. For modern scale-
+invariant architectures1, WD does not reduce the complexity of the model but
+rather increases the effective learning rate by reducing the weight norm [48,64],
+and hence can indirectly exert a regularizing effect by means of larger gradient
+noise [22,32,39]. When optimized with momentum SGD, the parameters follow
+theupdateruleθ =θ −µv +α (∇L +λθ )whereα beingtheLRadjusted
+t+1 t t t θ t t
+at each iteration according to a LR schedule and µ the momentum coefficient.
+1 Up to 90% of the parameters in ResNets tend to be scale-invariant, primarily due
+to the influence of Batch Normalization [20].4 Brigato and Mougiakakou
+Cross-validation. To estimate the HPs controlling the model, specifically the
+regularization parameter λ and the learning speed α, we ideally need a surro-
+gate of the test set, which identifies the right model complexity that minimizes
+the test error. As anticipated previously, the simplest (and most popular) op-
+eration is to split the training set into two sub-datasets to deliver a smaller
+training set and a validation set D = {x ,y }, as shown in Fig. 1 (top).
+val i i
+The cardinality of the sub-sampled training and validation sets are respectively
+|Dˆ | = n−m and |Dˆ | = m. Now, we define the expected value and vari-
+train val
+ance of the prediction error over unseen points respectively as δ =E[L(f (x),y]
+θ
+and σ2 = Var[L(f (x),y]. We also refer to the loss computed over the valida-
+θ
+tion set as L(f ,D ) =
+(cid:80)m
+L(f (x ),y ). By applying the linearity prop-
+θ val i=1 θ i i
+erty of the expectation and the previously defined relationships, we derive that
+E[L(f θ,D val)] = δ, Var[L(f θ,D val)] = σ m2, and Std = O(√1 m). Finally, we can
+express that the expected error on the validation set is proportional to the er-
+ror scored over an unseen test sample plus a term depending on the number of
+samples in the validation split, or more formally E[L(f θ,D val)] = δ±O(√1 m).
+The straightforward consequence is that a small validation set does not provide
+a good estimate of the test error; hence, it is unreliable for HP selection.
+Motivation. In classification problems where the independent and identically
+distributed (IID) assumption holds, the search for HPs is less challenging since
+the overlapping among training and testing sets makes the prediction of gener-
+alization relatively easy. In other words, if D , and D are sampled from
+train test
+the same distribution, the expected prediction error δ on unseen test points
+is going to be proportional to the prediction error over the training set, i.e.,
+δ ≈ L(f ,D ). In section Sec. 4.1, we further discuss this claim and indeed
+θ train
+empirically validate it in Fig. 3. On the contrary, distribution shifts, possibly
+caused by a plethora of factors such as corruptions [19] or lack of data [52], in-
+ducetheso-calledout-of-distribution (OOD)learningproblems.Inthiswork,we
+focus on OOD scenarios caused by sample scarcity. As demonstrated in the pre-
+vious paragraph, the number of samples available in the validation set strongly
+impacts the expected prediction error and can bias the search for proper HPs.
+The significance of this observation is the main motivation guiding our work,
+which aims to eliminate the dependency on validation sets and make the search
+for LR and WD more robust. Our paper aims to derive a robust recipe for
+practically predicting HP generalization in IID and OOD settings.
+3.2 Working Principle
+Phases of learning. We rely on a recently introduced theoretical frame-
+workthatexplainsrepresentationlearningandtherecentlyobservedbehaviorof
+grokking [41],aphenomenonwheremodelsgeneralizelongafteroverfittingtheir
+trainingset.Precisely,Liuetal.[33]observe,viaamacroscopicanalysisofphase
+diagrams describing learning performance across HPs, four learning phases: i)
+comprehension, ii) grokking, iii) memorization, and iv) confusion. The last twoTwin: Searching for LR and WD on Training Sets 5
+phasescorrespondtothewell-knownoverfittingandunderfittingscenarios,while
+comprehension tostandardrepresentationlearningandgrokking todelayedgen-
+eralization.2 We leverage the following observations to design Twin [33]:
+– Observation 1(O1):Thecomprehension,grokking,andmemorization phases
+all share the learner to reach a low enough training error.
+– Observation 2 (O2): Out of the three phases of O1, only the comprehension
+and grokking configurations manage to reach a low-enough testing error.
+– Observation 3 (O3): Representation learning (comprehension and grokking)
+occurs only in a “Goldilocks zone” between memorization and confusion.
+Intuition. Our goal is to predict generalizing configurations of LR and WD
+from a defined hypothesis space. Configurations that lie in the comprehension
+or grokking areas provide the best generalization performance. However, the
+definitions to classify learning phases, as proposed in [33], leverage validation
+error, a metric that we are willing to avoid. According to O1, low training er-
+ror excludes the phase with confusion (underfitting). Monitoring the training
+losscanhenceidentifyconfigurationsthatunderfitthetrainingobjectives.How-
+ever,O2predictsthatonlycomprehension andgrokking reachlowtestingerrors.
+Reasonably, the training loss alone can not discern overfitting from generalizing
+solutions.Toidentifymemorization withinthehypothesisspace,weleverageO3
+andrecognizethatthenormofthenetwork’sparametersprovidesasuitablemet-
+ricforassessingthetransitionfromconfusion tomemorization,passingthrough
+comprehension. High WD strongly penalizes the parameter’s norm, leading to
+confusion,whilelowWDcausesmemorization sincethemodelispoorlyregular-
+ized.Insummary,weemploythetraininglossasaproxytoidentifyunderfitting
+configurations. Out of the remaining models, we expect the generalizing config-
+urations to be the ones with the lowest norm of the parameters. Fig. 4 strongly
+supports our hypothesis and shows the predictive power of the parameter norm
+related to model generalization. We next describe Twin’s pipeline in practice.
+3.3 Pipeline
+We show the overview of Twin in Fig. 2. Twin performs a grid search over
+the LR-WD space and optimizes deep networks via gradient-based methods.
+Trials are scheduled according to a first-input-first-output scheduler (no early-
+stopping) or successive-halving-based scheduler that reduces the computational
+burden. Then, a simple cascade of segmentation and filtering modules identifies
+the training loss region where generalization or overfitting happens. Within this
+area, the network with the smallest parameter norm is selected.
+Grid search and trial scheduler. TwinrunsN ·N trialssampledbydefault
+α λ
+from a grid of equally spaced points in logarithmic space for both LR and WD.
+However, Twin also supports different grid densities as ablated in Sec. 4.5.
+2 Notethatgrokking ismostlyobservedinalgorithmictasks,butcanalsobeinduced
+for image classification problems [33,34]6 Brigato and Mougiakakou
+TRIAL TRAIN REGION REGION
+SCHEDULER LOSS SEGMENTATION SELECTION
+GRID SEARCH
+RL ARGMIN(∙)
+WD
+||𝜽||
+OPTIMIZER ||𝜽||
+Fig.2:Twinoverview.Twinemploysagradient-basedoptimizerandatrialscheduler
+toperformagridsearchacrosstheLR-WDspace.Twinlogstrain-lossandparameter-
+norm matrices to identify the network with the lowest norm within the fitting region.
+The parameter norm within this region is a good predictor of generalization (right
+plot). In this figure, we show as an example a WRN-16-10 trained on ciFAIR-10.
+Weexperimentwithtwotypesoftrialschedulers:1)adefaultfirst-input-first-
+output(FIFO)withoutanyformofautomatedtrialstoppingand2)HyperBand
+(HB) [30]. Other trial schedulers (e.g., median stopping rule [13]) and search
+strategies(e.g.,randomsearch)areleftforfutureexploration.DefaultHPsearch
+overvalidationsetsusuallyterminatesafewHPconfigurations,outofwhichthe
+optimalispicked.Conversely,asanticipatedinSec.3.2,Twinneedstodetectthe
+regionintheLR-WDspacewithlowtrainingloss.Trialstoppingtooaggressively
+wouldmakethelosslandscapenoisyandchallengingtosegment.Tothisend,we
+adapted the HB scheduler to our needs. More precisely, we run the original HB
+algorithm until only a certain percentage X of trials is still alive and continue
+such trials without further stopping. In other words, we systematically pass the
+most promising trials to the bottom rung. The asynchronous version of HB,
+Asynchronous Successive Halving Algorithm (ASHA) [29], employs a similar
+mechanismtoexploitparallelism.Weoptforthissolutionratherthanincreasing
+the minimum resources per trial to save compute resources. We refer to our
+adapted HB with HB when X% of the trials are terminated. In Sec. 4.5, we
+X%
+ablateontheimpactofdifferentlevelsofearlystopping,i.e.,X%∈{25%,12%},
+and show that Twin supports aggressive stopping well.
+Region segmentation and selection. The grid search guided by the trial
+scheduleryieldstwologmatricesneededtofindtheoptimalconfiguration:train-
+inglossesandparameternorms.WerefertothefirstmatrixasΨ andthesecond
+as Θ. Note that the matrix elements are logged at different epochs when early
+stopping is employed. In the case of the training losses, we average the values of
+thelastfivetrainingepochstohaveamorereliableestimate.Toidentifythearea
+of the LR-WD space where the best fitting happens, we treat the loss matrix as
+an image and apply the popular Quickshift image segmentation algorithm [51].
+Quickshift proved to be more robust than hand-crafted thresholds that fail to
+generalize across diverse datasets and model configurations. Quickshift needs
+two input parameters, namely kernel_size and max_dist, which control the
+segmentation granularity. We set both parameters to the squared root of theTwin: Searching for LR and WD on Training Sets 7
+Oracle Twin SelTS
+100
+90 20k
+80
+70
+60
+5k
+50
+0.5k
+40
+flowers cub cifair10 clamm euros ia st ic2018 retina breast cifar100 tinyIN derma organc organs blood pneum. organa cifar10 path tissue oct
+Fig.3:Overviewofquantitativeresults.Twinscoresanoverall1.3%MAEagainst
+theOracle pipelineacross34differentdataset-modelconfigurationswhenusingaFIFO
+scheduler.TwincloselymatchestheOracle inIIDandOODscenarios,whileSelTSfails
+to correctly predict HPs that generalize in OOD cases.
+largest grid side to have a more fine-grained segmentation. We ablate on this
+choiceinSec.4.5.Practically,wefirstfilterpossibleoutliers,e.g.,exorbitantloss
+valuesorNaN,stemmingfrominstabilitiesduringtrainingcausedbyextremepa-
+rameter configurations. We consider outliers all points having a z-score larger
+than two. We then scale the values of Ψ to 0-1 range by minmax normalization,
+make the lowest loss the highest value (|1−minmax(Ψ)|), and run Quickshift
+segmentation. We finally take the mean for each predicted region and apply the
+argmax to retrieve the best cluster index.
+Output configuration. The selected grid region is converted into a binary
+mask and applied to the logged Θ matrix. Out of this sub-region, the argmin
+function returns the final output configuration with the lowest norm.
+4 Experiments
+4.1 Overview
+Experimented domains. In selecting datasets for experimentation, we aimed
+to cover diverse domains to thoroughly assess Twin’s capabilities. Firstly, our
+evaluationencompassessmalldatasets,ascenarioparticularlysuitableforTwin,
+given that traditional pipelines struggle with HP selection due to the limited
+dimensions of validation sets, as explained in the paragraph dedicated to cross-
+validation of Sec. 3.1. Additionally, we explore Twin’s potential in the medical
+field, where its ability to mitigate the need for validation sets is particularly
+valuable, considering the complexities and regulations inherent in healthcare
+settings. Finally, we examine Twin’s versatility in dealing with natural images,
+arguablythemostwidelystudieddomainwithinthecomputervisioncommunity.
+Baselines. To assess the relative effectiveness of Twin, we introduce three dif-
+ferent baselines. The Selection from Training Set (SelTS) baseline selects the
+)%(
+ecnamofreP
+ssalc
+rep
+segamI
+.oN8 Brigato and Mougiakakou
+flowers cub cifair10 clamm eurosat isic2018 retinamnist cifar100 organsmnist cifar10 pathmnist
+Fig.4:Qualitativeresults.VisualizationofthevariousstepsofTwinintheLR-WD
+space(firstfourrows)andtherelationshipbetweentheselectedparameternormsand
+testloss(bottomrow).Thedashedgreenlinerepresentsthelowestachievabletestloss.
+HPconfiguration,whichscoresthelowestlossonthetrainingset.TheSelection
+from Validation Set (SelVS) is the more traditional reference point, where HP
+optimization is conducted exclusively on the validation set. The validation set
+can either be subsampled from the training set, as is going to be the case for
+small and natural image datasets, or collected externally, like the case of medi-
+cal data. These two cases indeed correspond to the upper two schemes of Fig. 1.
+SelVScanalsobeperformedwithdifferenttrialschedulers,e.g.,withearlystop-
+ping. Lastly, the Oracle represents the ideal but unrealistic scenario of selecting
+HPsdirectlyfromthetestset.TheOracle alwaysrunsaFIFOscheduler.When
+Twin performs at its absolute best, it yields an MAE of 0% vs the Oracle. All
+baselines select the HPs according to the relevant last-epoch metric with FIFO
+schedulers and the average of the last 5 with early stopping.
+Quantitative results. To provide an overview of the quantitative results, we
+compareTwinagainstourlower(SelTS)andupper(Oracle)boundsinFig.3.In
+particular,weshowtheperformanceperdatasetwithFIFOschedulersaveraged
+across all architectures. The order along the x-axis represents the number of
+images per class per dataset, which increases from left to right. As anticipated
+inSec.3.1,thetraininglossaloneasanHP-selectionmetric(SelTS)fallsshortas
+thealignmentbetweentrainingandtestingdistributionsdecreases,i.e.,whenthe
+IID assumption does not hold because the training set does not fully represent
+the broader testing set [49,52]. On the other hand, we find nearly optimal LR-
+WD configurations across all dataset scales by considering the regularization
+strength and the task-learning performance, as done with Twin (Sec. 3.2).
+Qualitative results. In Fig. 4, we present qualitative results and empirical
+evidence supporting Twin’s ability to predict generalizing HP configurations.
+ssoL
+.mgeS.R
+.leS.R
+||θ||
+ssoltseTTwin: Searching for LR and WD on Training Sets 9
+Method Model CUB ISIC2018 EuroSAT CLaMM Average
+Oracle EN-B0 67.2 66.8 91.0 65.3 72.6
+SelTS EN-B0 62.4 64.0 79.8 56.8 65.8
+SelVS EN-B0 67.0 65.1 86.6 58.0 69.2
+Twin EN-B0 66.2 66.4 89.8 62.6 71.3
+Oracle RN50 72.0 69.4 90.2 74.6 76.6
+SelTS RN50 57.3 65.4 83.8 68.2 68.7
+SelVS† RN50 70.8 64.5 90.6 70.2 74.0
+Twin RN50 70.1 68.8 89.2 73.8 75.5
+Oracle RNX101 73.0 66.7 88.6 75.2 75.9
+SelTS RNX101 54.2 59.8 86.8 62.5 65.8
+SelVS RNX101 72.1 62.4 90.0 70.1 73.7
+Twin RNX101 73.0 65.8 87.6 75.2 75.4
+Table1:Smalldatasets.Theevaluationmetricisthebalancedtestaccuracy(%)[5].
+We allocate 100 and 36 trials for EN-B0/RN50 and RNX101, respectively. Twin and
+SelVSrespectivelyemploytheHB andASHAschedulers.†Valuesaretakenfrom[5].
+25%
+We demonstrate Twin’s consistency across 11 cases involving different models
+(ConvNets, MLPs, and transformers), optimizers (SGD, Adam), and grid den-
+sities (100 and 49 trials). In Fig. 4, the first row displays the training loss at the
+last epoch. Region segmentation and selection steps using Quickshift are shown
+in the second and third rows, respectively. The fourth row illustrates the mask
+application to the parameter norm matrix, while the last row depicts the rela-
+tionshipbetweentheparameternormoftheselectedsub-regionandthetestloss.
+ThedashedgreenlinerepresentsthelowestlossachievedbytheOracle baseline.
+Indeed,despitethebest-fittingregionshowcasingvariouspatternsandpositions
+in the LR-WD space depending on the dataset-architecture configuration, Twin
+can identify it robustly. Furthermore, it is visible that a strong (almost linear)
+relationship exists between the parameter norms extracted from the identified
+region and the test loss.
+4.2 Small Datasets
+Datasets. Weselectthebenchmarkintroducedin[5],whichcontainsfivediffer-
+entdatasetsspanningvariousdomainsanddatatypes.Inparticular,thebench-
+mark contains sub-sampled versions of ciFAIR-10 [2], EuroSAT [18], CLaMM
+[45], all with 50 samples per class, and ISIC 2018, with 80 samples per class [9].
+Also,thewidelyknownCUBdatasetwith30imagespercategoryisincluded[53].
+The spanned image domains of this benchmark hence include RGB natural im-
+ages(ciFAIR-10,CUB),multi-spectralsatellitedata(EuroSAT),RGBskinmed-
+icalimagery(ISIC2018),andgrayscalehand-writtendocuments(CLaMM).For
+EuroSAT,anRGBversionisalsoavailable.Finally,weincludetheOxfordFlow-
+ers dataset in our setup, which comprises 102 categories with 20 images [40].
+Implementation details. Along with the popular ResNet-50 (RN50), which
+was originally evaluated on the benchmark [5], we also employ EfficientNet-B0
+(EN-B0) [46] and ResNeXt-101 (32 × 8d) (RNX101) [57] to cover three classes10 Brigato and Mougiakakou
+Oracle(B.Acc.)
+0.0 0.2 0.4 0.6 0.8 1.0
+Twin(Transfer) 10
+FIFO
+HB25%
+HB12%
+4
+2
+1
+cub flowers eurosat-rgb isic2018 clamm 0
+cub flowers eurosat-rgb isic2018 clamm
+Fig.5: Transfer learning. (Left) Normalized balanced accuracy of the Oracle with
+ImageNetpre-trained(top)orfrom-scratchRN50(bottom).Featureoverlapmakesthe
+best generalization appear with lower regularization, and Twin (with EN-B0, RN50,
+RNX101) plus early stopping identifies this region by scoring a low MAE (right).
+of model scales, respectively tiny, small, and base [47], with 5.3M, 25.6M, and
+88.8M parameters. For the low-resolution images of ciFAIR-10, we employ a
+Wide ResNet 16-10 (WRN-16-10). We refer the reader to the Appendix for
+all the details regarding training-related parameters. We perform squared grid
+searches of 100 trials for RN50 and EN-B0 and 36 trials for RNX101. We set
+the LRs and WDs intervals for the grid search to [5·10−5,5·10−1] to span four
+orders of magnitude. When training from scratch, we report results for Twin
+and SelVS with early stopping, which respectively employ HB and ASHA as
+25%
+schedulers,withthesamenumberoftrials.Fortheparameters,wefollow[5]and
+keep a halving rate of two and a grace period of 5% of the total epoch budget.
+Results from scratch. As visible in Tab. 1, Twin nearly matches the Oracle
+balancedaccuracybyscoringanMAEoflessthan1.5%acrossdifferentdatasets
+and networks. Twin outperforms the traditional HP selection from the valida-
+tion sets (SelVS) by scoring 71.3% versus 69.2% with EN-B0, 75.5% vs 74%
+with RN50, and 75.4 vs 73.7 with RNX101 when averaging performance across
+the CUB, ISIC 2018, EuroSAT, and CLaMM datasets. Indeed, SelVS relies on
+a small validation set, which may lead to sub-optimal HPs given the higher
+variabilityofthepredictionerror.Furthermore,despiteaggressivetrialstopping
+making the optimal region-segmentation step more challenging, Twin still finds
+semi-optimal LR-WD configurations and hence is scalable to computationally
+heavy search tasks that would be prohibitive without early stopping strategies.
+Results with transfer learning. Whendealingwithsmalldatasets,itiscom-
+monpracticetostartfromanetworkpre-trainedonalargeramountofdata(e.g.,
+ImageNet[42]).Therefore,wealsoexperimentwithtransferlearningandrepeat
+theoptimizationrunswithcheckpointsinitializedfromImageNet.InFig.5(left),
+we notice that the generalization of networks as a function of the LR-WD space
+may differ from when training from scratch, and the main cause regards the
+refsnarT
+hctarcS
+)↓(elcarOsvEAMTwin: Searching for LR and WD on Training Sets 11
+Method Path Derma OCT Pneum. Retina Breast Blood Tissue OrganA OrganC OrganS Avg.
+Oracle 91.9 80.8 79.8 92.8 52.5 89.7 97.8 73.2 95.9 94.5 84.4 84.8
+SelTS 91.9 79.7 77.3 90.7 47.8 85.9 97.2 72.8 95.0 94.0 82.8 83.2
+SelVS 90.5 80.3 78.0 92.5 46.0 85.3 96.9 72.8 94.9 94.4 83.5 83.2
+Twin 88.5 80.8 78.6 88.9 46.7 86.5 97.3 72.7 95.3 93.7 83.4 82.9
+Table 2: Medical images. The performance is the test accuracy (%). We allocate a
+100-trial budget per dataset. Both Twin and SelVS employ the FIFO scheduler.
+overlapping between the source and target domains. Expectedly, with a strong
+class(CUBandFlowers)orfeature(EuroSATRGB,ISIC2018)overlap,thebest
+comprehension region shifts towards smaller regularization. To this end, Twin
+struggles,asvisiblefromthehigherMAE(∼5%)inthecasesofCUB,EuroSAT
+RGB, and ISIC 2018. As a solutions, we employ early stopping to terminate the
+mostly regularized trials whose training loss has a slower decay rate. In Fig. 5
+(right), it is indeed visible that Twin with HB reduces the MAE vs the Ora-
+12%
+cle to ≤ 1% for CUB, EuroSAT RGB, and ISIC 2018. Conversely, in the case of
+CLaMM,whichhasnoclassandpoorfeatureoverlap(hand-writtendocuments),
+thepre-trainedcheckpointsdonotaltertheLR-WDlandscapeandenableTwin
+to find good HP configurations (< 2% MAE) with the FIFO and HB sched-
+25%
+ulers. In summary, when applying transfer learning, it is critical to consider the
+level of domain overlap to select the more suitable Twin configuration.
+4.3 Medical Images
+Datasets. We leverage the MedMNIST v2 benchmark [59] to test Twin on
+medical imaging tasks. We focus on 2D classification and select 11 out of 12
+binary/multi-classorordinalregressiontasksoftheMedMNIST2Dsub-collection,
+which covers primary data modalities (e.g., X-ray, OCT, Ultrasound, CT, Elec-
+tron Microscope) and data scales (from 800 to 100,000 samples). The MedM-
+NIST2D benchmark provides held-out validation sets to allow HP tuning. The
+data diversity of this benchmark presents a significant challenge. We select the
+testbedwiththeimagespre-processedto28×28resolutionoutofthefullbench-
+mark to maintain the total computational load under a reasonable budget.
+Implementation details. We use the ResNet-18 (RN18) originally employed
+in the benchmark [59], which consists of four stages, as the version developed
+for ImageNet classification [16], but with a modified stem more suitable for low-
+resolutionimages.WekeepthesameTwinconfigurationstestedonsmalldatasets
+(Sec. 4.2), except for the trial schedulers that we default to FIFO for both Twin
+and SelVS. Refer to the Appendix for additional details on the implementation.
+Results. We summarize the empirical results over MedMNIST2D in Tab. 2.
+The Oracle scores an upper bound 84.8% test accuracy averaged across the 11
+tasks. Twin is comparable to the traditional SelVS (82.9% vs 83.2%). Note also12 Brigato and Mougiakakou
+Dataset Model #Trials Aug. Oracle SelTS SelVS Twin
+C10 MLP-4-256 100 + 66.1 65.1 65.9 65.4
+C10 CCT-2/3×2 49 +++ 87.3 87.3 87.3 86.7
+C10 RNX11 100 + 90.7 90.2 90.6 89.8
+C10 RN20 100 + 92.7 91.8 92.4 90.5
+C10 WRN-40-2 49 ++ 94.0 93.7 93.3 93.6
+C100 MLP-4-512 100 ++ 35.4 35.0 35.1 34.9
+C100 CCT-2/3×2 49 +++ 65.0 64.0 65.0 65.0
+C100 RNX11 100 + 68.8 67.7 68.6 66.8
+C100 RN20 100 + 69.8 67.6 69.0 68.2
+C100 WRN-40-2 49 ++ 74.2 74.2 72.8 72.8
+TinyIN CVT-7/8 36 +++ 58.0 58.0 58.0 58.0
+TinyIN WRN-16-4 49 ++ 61.8 60.8 61.8 61.3
+Average 72.0 71.3 71.6 71.1
+Table 3: Natural Images. The performance is reported in test accuracy (%). FIFO
+scheduler is employed. For the strength of data augmentation, refer to the Appendix.
+that Twin slightly improves its performance in this domain when early stopping
+isemployed(Sec.4.5).TwinfindsproperHPsandsimultaneouslyleadstoacost-
+effective solution by reducing data collection and labeling expenses associated
+with the ∼10% of samples per dataset originally allocated for validation.
+4.4 Natural Images
+Datasets. Finally, we test Twin on popular natural-image datasets such as
+CIFAR-10/100[25]andTinyImagenet[27].Thesedatasetscontain50,000/100,000
+training samples from 10 to 200 classes, with an image resolution of 32×32 for
+CIFAR and 64×64 for TinyImagenet.
+Implementation details. For CIFAR datasets, we employ ConvNets, trans-
+formers, and feed-forward networks. As ConvNets, we select ResNet-20 (RN20)
+[16], ResNeXt-11 (4 x 16d) (RNX11) [57], and a Wide ResNet of depth 40 and
+width two (WRN-40-2) [63]. As transformers, we train architectures specifically
+designed for CIFAR, such as the Compact Convolutional Transformer with two
+encoder and convolutional-stem layers (CCT-2/3×2) [15]. We employ a Multi-
+Layer Perceptron (MLP) with batch normalization, ReLU activations, and hid-
+den layers of constant width as feed-forward networks. We set the depth of the
+MLP to four layers and the width to 256 units for CIFAR-10 and 512 units for
+CIFAR-100 (MLP-4-256 and MLP-4-512). On TinyImagenet, we train a WRN-
+16-4[63]andaCompactVisionTransformer[15]withsevenencoderlayersanda
+patchsizeof8(CVT-7/8).Wevarythedataaugmentationstrengthfrombaseto
+mediumtostrong{+,++,+++}.RefertotheAppendixforadditionaldetails.
+Results. As shown in Tab. 3, Twin is, on average, comparable to SelVS (71.1%
+vs 71.6%), despite not having access to the validation set, and SelTS (71.1% vs
+71.3%),whileconsideringtheregularizationstrengthalongwiththetrainingloss.Twin: Searching for LR and WD on Training Sets 13
+α λ
+kernel_size max_dist MAE [::1] [::2] [::3] [::1] [::2] [::3] MAE
+✓ ✓ 1.3
+√Nα Nα 9.4 ✓ ✓ 1.4
+Nα √Nα 4.2 ✓ ✓ 1.8
+√N Nα
+α
+√N Nα
+α
+1 1. .4
+3 ✓
+✓
+✓ ✓
+✓
+✓
+1
+1
+1.
+.
+.5
+5
+2
+✓ ✓ 1.2
+(a) Quickshift (b) Griddensity
+Table 4: Ablation studies concerning: (a) Quickshift controlling the segmentation
+density and (b) the robustness of Twin against the grid density. The MAE (↓) is
+computed against the Oracle baseline.
+SmallDatasets MedicalDatasets
+Scheduler EN-B0 RN50 RNX101 RN18
+FIFO 71.3 75.2 75.4 82.9
+HB 71.3 75.5 75.4 83.8
+25%
+HB 71.5 74.9 69.8 83.2
+12%
+Table5:AblationonearlystoppingforTwin.Theperformanceistheaveragebalanced
+test accuracy (%) on small datasets and test accuracy (%) on medical datasets.
+Remarkably,wealsonoticethatTwinworksproperlyfortransformersandMLPs,
+confirming that the intuition behind Twin translates well to various network
+architectures. Similarly, Twin is agnostic to the data-augmentation strength.
+4.5 Ablations
+Quickshift. We ablate on the impact of kernel_size and max_dist from
+Quickshift in Tab. 4a. In this analysis, we assume a squared grid (N = N )
+α λ
+andhencereporttheparametersasafunctionofN only.Weconsidermax(N ,
+α α
+N )whenthegridisnotsquared.InTab.4a,itisvisiblethatsetting max_dist
+λ
+aslargeasthesizeofthegridside(i.e.,N )leadstopoorresultsbecauseQuick-
+α
+shift tends to segment the loss matrix into an insufficient number of regions. By
+√
+fixingkernel_sizeandmax_distto N ,weincreasethesegmentationdensity
+α
+which is necessary to identify the best region in terms of task performance.
+Grid density. We systematically test the robustness of Twin against different
+grid densities. We slice the log-spaced intervals of LR (α) and/or WD (λ) by
+sampling values every one, two, or three steps and refer to such operations with
+the python slicing notation [::x]. We average the error of Twin (FIFO sched-
+uler) against the Oracle across 34 different configurations (as Fig. 3) and show
+the analysis in Tab. 4b. The MAE remains almost unaffected and close to 1.3%
+obtained with default settings to show Twin’s support to various grid intervals.14 Brigato and Mougiakakou
+Dataset Model Optim.Setup Performance (M)AE
+SGD 75.0 1.8
+{C10,C100,ES,I2018,c10,CM} {WRN-16-10,RN20,RN50}
+SGDM 75.6 1.2
+C100 CVT-7/8 AdamW 68.8 0.0
+C10 MLP-4-256 Adam 65.5 0.6
+c10 WRN-16-10 Adam 54.5 0.6
+SGDM(piece-wise) 91.0 1.7
+C10 RN20
+SGDM(cosine) 90.5 2.2
+Table 6: Ablationconcerningtheusageofdifferentoptimizationsetups.Performance
+isthe(balanced)testaccuracy.The(M)AE(↓)iscomputedagainsttheOraclebaseline.
+Early stopping. In Tab. 5, we ablate concerning the impact of the early stop-
+ping scheduler. As visible, Twin effectively accommodates HB or HB .
+25% 12%
+Practitionerscouldsafelydefaulttoeitherofthetwo,withHB slightlyahead.
+25%
+The drop in performance for RNX101 with HB is due to the small 7×7 grid
+12%
+employed. We refer to the Appendix for additional comments and guidance.
+Optimizers and schedulers. Inallexperimentsthroughoutthepaper,weem-
+ployed SGD with momentum (SGDM) and cosine scheduler as standard prac-
+tice in deep learning. In this paragraph, we ablate on the possibility of using
+different optimization setups. In particular, we test plain SGD in six configura-
+tions involving RN20 on CIFAR-10/100, WRN-16-10 on ciFAIR-10, and RN50
+on EusoSAT, ISIC 2018, and CLaMM. We also test RN20 with a piece-wise
+LR scheduler. Finally, we train ConvNets, MLPs, and transformers with either
+Adam [23] or AdamW [36], two popular choices when training such models. In
+Tab. 6, we notably observe that Twin also closely follows the Oracle in terms of
+(mean) absolute error (M)AE in such alternative optimization setups.
+5 Conclusions
+We introduced Twin, a simple yet effective HP tuning approach that reliably
+predicts learning rate and weight decay without using validation sets. Twin is
+not only beneficial in practice for simplifying model selection pipelines but also
+provides additional insights into the predictability of generalization for deep
+networks. Twin showed robust performance from a broad suite of experimental
+scenarios,includingvaryingdatasetsizes,imagingdomains,architectures,model
+scales, and training setups. In this paper, we exclusively focused on image clas-
+sification problems. However, future work could explore the application of Twin
+to computer vision tasks and beyond. Moreover, there is potential for extending
+Twin to alternative regularization strategies beyond L penalty.
+2
+References
+1. Barz, B., Denzler, J.: Deep learning on small datasets without pre-training using
+cosineloss.In:IEEE/CVFWinterConferenceonApplicationsofComputerVisionTwin: Searching for LR and WD on Training Sets 15
+(WACV) (2020) 3
+2. Barz,B.,Denzler,J.:Dowetrainontestdata?purgingCIFARofnear-duplicates.
+Journal of Imaging 6(6) (2020). https://doi.org/10.3390/jimaging6060041,
+https://www.mdpi.com/2313-433X/6/6/41 9
+3. Benton, G., Finzi, M., Izmailov, P., Wilson, A.G.: Learning invariances in neural
+networks from training data. Advances in neural information processing systems
+(2020) 3
+4. Brigato,L.,Barz,B.,Iocchi,L.,Denzler,J.:Tuneitordon’tuseit:Benchmarking
+data-efficientimageclassification.In:ProceedingsoftheIEEE/CVFInternational
+Conference on Computer Vision. pp. 1071–1080 (2021) 1
+5. Brigato, L., Barz, B., Iocchi, L., Denzler, J.: Image classification with small
+datasets: overview and benchmark. IEEE Access (2022) 1, 3, 9, 10
+6. Brigato,L.,Iocchi,L.:Acloselookatdeeplearningwithsmalldata.In:202025th
+International Conference on Pattern Recognition (ICPR) (2021) 3
+7. Brigato, L., Mougiakakou, S.: No data augmentation? alternative regularizations
+for effective training on small datasets. In: Proceedings of the IEEE/CVF Inter-
+national Conference on Computer Vision (ICCV) Workshops (2023) 1
+8. Bruintjes,R.J.,Lengyel,A.,Rios,M.B.,Kayhan,O.S.,Zambrano,D.,Tomen,N.,
+van Gemert, J.: Vipriors 3: Visual inductive priors for data-efficient deep learning
+challenges. arXiv preprint arXiv:2305.19688 (2023) 3
+9. Codella, N., Rotemberg, V., Tschandl, P., Celebi, M.E., Dusza, S., Gutman, D.,
+Helba,B.,Kalloo,A.,Liopyris,K.,Marchetti,M.,etal.:Skinlesionanalysistoward
+melanoma detection 2018: A challenge hosted by the international skin imaging
+collaboration (ISIC). arXiv preprint arXiv:1902.03368 (2019) 9
+10. Cubuk,E.D.,Zoph,B.,Mane,D.,Vasudevan,V.,Le,Q.V.:Autoaugment:Learning
+augmentationstrategiesfromdata.In:ProceedingsoftheIEEE/CVFConference
+on Computer Vision and Pattern Recognition (2019) 3
+11. Dosovitskiy,A.,Beyer,L.,Kolesnikov,A.,Weissenborn,D.,Zhai,X.,Unterthiner,
+T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S., et al.: An image is
+worth 16x16 words: Transformers for image recognition at scale. arXiv preprint
+arXiv:2010.11929 (2020) 3
+12. Elsken, T., Metzen, J.H., Hutter, F.: Neural architecture search: A survey. The
+Journal of Machine Learning Research (2019) 3
+13. Golovin, D., Solnik, B., Moitra, S., Kochanski, G., Karro, J.E., Sculley, D. (eds.):
+Google Vizier: A Service for Black-Box Optimization (2017) 6
+14. Goyal,P.,Dollár,P.,Girshick,R.,Noordhuis,P.,Wesolowski,L.,Kyrola,A.,Tul-
+loch, A., Jia, Y., He, K.: Accurate, large minibatch sgd: Training imagenet in 1
+hour. arXiv preprint arXiv:1706.02677 (2017) 3
+15. Hassani, A., Walton, S., Shah, N., Abuduweili, A., Li, J., Shi, H.: Escaping the
+big data paradigm with compact transformers. arXiv preprint arXiv:2104.05704
+(2021) 12
+16. He, K., Zhang, X., Ren, S., Sun, J.: Deep residual learning for image recognition.
+In:IEEEConferenceonComputerVisionandPatternRecognition(CVPR)(2016)
+3, 11, 12
+17. He,T.,Zhang,Z.,Zhang,H.,Zhang,Z.,Xie,J.,Li,M.:Bagoftricksforimageclas-
+sification with convolutional neural networks. In: Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition (2019) 1
+18. Helber,P.,Bischke,B.,Dengel,A.,Borth,D.:EuroSAT:Anoveldatasetanddeep
+learning benchmark for land use and land cover classification. IEEE Journal of
+Selected Topics in Applied Earth Observations and Remote Sensing 12(7), 2217–
+2226 (2019). https://doi.org/10.1109/JSTARS.2019.2918242 916 Brigato and Mougiakakou
+19. Hendrycks,D.,Dietterich,T.G.:Benchmarkingneuralnetworkrobustnesstocom-
+mon corruptions and perturbations. In: 7th International Conference on Learning
+Representations, ICLR 2019, New Orleans, LA, USA, May 6-9, 2019 (2019) 4
+20. Heo,B.,Chun,S.,Oh,S.J.,Han,D.,Yun,S.,Kim,G.,Uh,Y.,Ha,J.W.:Adamp:
+Slowing down the slowdown for momentum optimizers on scale-invariant weights.
+arXiv preprint arXiv:2006.08217 (2020) 3
+21. Immer,A.,vanderOuderaa,T.,Rätsch,G.,Fortuin,V.,vanderWilk,M.:Invari-
+ance learning in deep neural networks with differentiable laplace approximations.
+Advances in Neural Information Processing Systems (2022) 3
+22. Keskar,N.S.,Mudigere,D.,Nocedal,J.,Smelyanskiy,M.,Tang,P.T.P.:Onlarge-
+batch training for deep learning: Generalization gap and sharp minima. arXiv
+preprint arXiv:1609.04836 (2016) 3
+23. Kingma,D.P.,Ba,J.:Adam:Amethodforstochasticoptimization.arXivpreprint
+arXiv:1412.6980 (2014) 14
+24. Kornblith, S., Shlens, J., Le, Q.V.: Do better imagenet models transfer better?
+In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. pp. 2661–2671 (2019) 3
+25. Krizhevsky, A.: Learning multiple layers of features from tiny images (2009) 12
+26. Krizhevsky,A.,Sutskever,I.,Hinton,G.E.:Imagenetclassificationwithdeepcon-
+volutionalneuralnetworks.Advancesinneuralinformationprocessingsystems25
+(2012) 1, 2
+27. Le, Y., Yang, X.: Tiny imagenet visual recognition challenge. CS 231N (2015) 12
+28. Lengyel,A.,Bruintjes,R.J.,Rios,M.B.,Kayhan,O.S.,Zambrano,D.,Tomen,N.,
+van Gemert, J.: Vipriors 2: visual inductive priors for data-efficient deep learning
+challenges. arXiv preprint arXiv:2201.08625 (2022) 3
+29. Li,L.,Jamieson,K.,Rostamizadeh,A.,Gonina,E.,Ben-tzur,J.,Hardt,M.,Recht,
+B.,Talwalkar,A.:Asystemformassivelyparallelhyperparametertuning.Confer-
+ence of Machine Learning and Systems (2020) 3, 6
+30. Li, L., Jamieson, K., DeSalvo, G., Rostamizadeh, A., Talwalkar, A.: Hyperband:
+A novel bandit-based approach to hyperparameter optimization. The journal of
+machine learning research (2017) 3, 6
+31. Li, Y., Hu, G., Wang, Y., Hospedales, T., Robertson, N.M., Yang, Y.: Dada: Dif-
+ferentiable automatic data augmentation. arXiv preprint arXiv:2003.03780 (2020)
+3
+32. Li, Y., Wei, C., Ma, T.: Towards explaining the regularization effect of initial
+large learning rate in training neural networks. Advances in Neural Information
+Processing Systems (2019) 3
+33. Liu,Z.,Kitouni,O.,Nolte,N.S.,Michaud,E.,Tegmark,M.,Williams,M.:Towards
+understanding grokking: An effective theory of representation learning. Advances
+in Neural Information Processing Systems 35, 34651–34663 (2022) 2, 4, 5
+34. Liu, Z., Michaud, E.J., Tegmark, M.: Omnigrok: Grokking beyond algorithmic
+data. In: The Eleventh International Conference on Learning Representations,
+ICLR 2023 (2023) 5
+35. Lorraine, J., Vicol, P., Duvenaud, D.: Optimizing millions of hyperparameters by
+implicit differentiation. In: International conference on artificial intelligence and
+statistics (2020) 1, 3
+36. Loshchilov, I., Hutter, F.: Decoupled weight decay regularization. arXiv preprint
+arXiv:1711.05101 (2017) 14
+37. McMahan, B., Moore, E., Ramage, D., Hampson, S., y Arcas, B.A.:
+Communication-efficient learning of deep networks from decentralized data. In:
+Artificial intelligence and statistics (2017) 1Twin: Searching for LR and WD on Training Sets 17
+38. Mlodozeniec, B., Reisser, M., Louizos, C.: Hyperparameter optimization through
+neural network partitioning. arXiv preprint arXiv:2304.14766 (2023) 3
+39. Neelakantan,A.,Vilnis,L.,Le,Q.V.,Sutskever,I.,Kaiser,L.,Kurach,K.,Martens,
+J.:Addinggradientnoiseimproveslearningforverydeepnetworks.arXivpreprint
+arXiv:1511.06807 (2015) 3
+40. Nilsback,M.E.,Zisserman,A.:Automatedflowerclassificationoveralargenumber
+of classes. In: 2008 Sixth Indian conference on computer vision, graphics & image
+processing. IEEE (2008) 9
+41. Power, A., Burda, Y., Edwards, H., Babuschkin, I., Misra, V.: Grokking: Gen-
+eralization beyond overfitting on small algorithmic datasets. arXiv preprint
+arXiv:2201.02177 (2022) 4
+42. Russakovsky, O., Deng, J., Su, H., Krause, J., Satheesh, S., Ma, S., Huang, Z.,
+Karpathy, A., Khosla, A., Bernstein, M., et al.: Imagenet large scale visual recog-
+nitionchallenge.InternationalJournalofComputerVision(IJCV)115(3),211–252
+(2015) 3, 10
+43. Schwöbel, P., Jørgensen, M., Ober, S.W., Van Der Wilk, M.: Last layer marginal
+likelihood for invariance learning. In: International Conference on Artificial Intel-
+ligence and Statistics (2022) 3
+44. Stone,M.:Cross-validatorychoiceandassessmentofstatisticalpredictions.Journal
+of the royal statistical society: Series B (Methodological) (1974) 1
+45. Stutzmann, D.: Clustering of medieval scripts through computer image analysis:
+towards an evaluation protocol. Digital Medievalist 10 (2016) 9
+46. Tan, M., Le, Q.: Efficientnet: Rethinking model scaling for convolutional neural
+networks. In: International conference on machine learning (2019) 9
+47. Touvron,H.,Cord,M.,Douze,M.,Massa,F.,Sablayrolles,A.,Jégou,H.:Training
+data-efficientimagetransformers&distillationthroughattention.In:International
+conference on machine learning (2021) 10
+48. VanLaarhoven,T.:L2regularizationversusbatchandweightnormalization.arXiv
+preprint arXiv:1706.05350 (2017) 3
+49. Vapnik,V.:Principlesofriskminimizationforlearningtheory.Advancesinneural
+information processing systems (1991) 8
+50. Varoquaux, G., Cheplygina, V.: Machine learning for medical imaging: method-
+ologicalfailuresandrecommendationsforthefuture.NPJdigitalmedicine(2022)
+1
+51. Vedaldi,A.,Soatto,S.:Quickshiftandkernelmethodsformodeseeking.In:10th
+EuropeanConferenceonComputerVision,Marseille,France,October12-18,2008,
+Proceedings, Part IV 10 (2008) 6
+52. Wad,T.,Sun,Q.,Pranata,S.,Jayashree,K.,Zhang,H.:Equivarianceandinvari-
+anceinductivebiasforlearningfrominsufficientdata.In:ComputerVision–ECCV
+2022: 17th European Conference, Tel Aviv, Israel, October 23–27, 2022, Proceed-
+ings, Part XI (2022) 4, 8
+53. Wah, C., Branson, S., Welinder, P., Perona, P., Belongie, S.: The Caltech-UCSD
+Birds-200-2011 Dataset. Tech. Rep. CNS-TR-2011-001, California Institute of
+Technology (2011) 9
+54. Weiss, K., Khoshgoftaar, T.M., Wang, D.: A survey of transfer learning. Journal
+of Big data 3(1), 1–40 (2016) 3
+55. vanderWilk,M.,Bauer,M.,John,S.,Hensman,J.:Learninginvariancesusingthe
+marginallikelihood.AdvancesinNeuralInformationProcessingSystems(2018) 3
+56. Worrall, D.E., Garbin, S.J., Turmukhambetov, D., Brostow, G.J.: Harmonic net-
+works: Deep translation and rotation equivariance. In: Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition (2017) 318 Brigato and Mougiakakou
+57. Xie,S.,Girshick,R.,Dollár,P.,Tu,Z.,He,K.:Aggregatedresidualtransformations
+for deep neural networks. In: Proceedings of the IEEE conference on computer
+vision and pattern recognition (2017) 9, 12
+58. Yang,G.,Hu,E.,Babuschkin,I.,Sidor,S.,Liu,X.,Farhi,D.,Ryder,N.,Pachocki,
+J.,Chen,W.,Gao,J.:Tuninglargeneuralnetworksviazero-shothyperparameter
+transfer. Advances in Neural Information Processing Systems 34, 17084–17097
+(2021) 3
+59. Yang,J.,Shi,R.,Wei,D.,Liu,Z.,Zhao,L.,Ke,B.,Pfister,H.,Ni,B.:Medmnistv2-
+alarge-scalelightweightbenchmarkfor2dand3dbiomedicalimageclassification.
+Scientific Data (2023) 11
+60. Yu,T.,Zhu,H.:Hyper-parameteroptimization:Areviewofalgorithmsandappli-
+cations. arXiv preprint arXiv:2003.05689 (2020) 1, 3
+61. Yun, J., Kim, B., Kim, J.: Weight decay scheduling and knowledge distillation
+for active learning. In: Computer Vision–ECCV 2020: 16th European Conference,
+Glasgow, UK, August 23–28, 2020, Proceedings, Part XXVI 16 (2020) 3
+62. Yun, J., Lee, J., Shon, H., Yi, E., Kim, S.H., Kim, J.: On the angular update and
+hyperparameter tuning of a scale-invariant network. In: European Conference on
+Computer Vision (2022) 3
+63. Zagoruyko, S., Komodakis, N.: Wide residual networks. In: Richard C. Wilson,
+E.R.H., Smith, W.A.P. (eds.) British Machine Vision Conference (BMVC). pp.
+87.1–87.12. BMVA Press (September 2016). https://doi.org/10.5244/C.30.87
+12
+64. Zhang,G.,Wang,C.,Xu,B.,Grosse,R.B.:Threemechanismsofweightdecayreg-
+ularization. In: 7th International Conference on Learning Representations, ICLR
+2019, New Orleans, LA, USA, May 6-9, 2019 (2019) 3
