@@ -1,0 +1,1040 @@
+DAM:DynamicAdapterMergingforContinualVideoQALearning
+DAM: DYNAMIC ADAPTER MERGING FOR CONTIN-
+UAL VIDEO QA LEARNING
+FengCheng† ZiyangWang† Yi-LinSung Yan-BoLin MohitBansal GedasBertasius
+DepartmentofComputerScience,UNCChapelHill
+{fengchan,ziyangw,ylsung,yblin,mbansal,gedas}@cs.unc.edu
+†EqualContribution
+ABSTRACT
+Wepresentaparameter-efficientmethodforcontinualvideoquestion-answering
+(VidQA) learning. Our method, named DAM, uses the proposed Dynamic
+AdapterMergingto(i)mitigatecatastrophicforgetting,(ii)enableefficientadap-
+tationtocontinuallyarrivingdatasets, (iii)handleinputsfromunknowndatasets
+during inference, and (iv) enable knowledge sharing across similar dataset do-
+mains. Given a set of continually streaming VidQA datasets, we sequentially
+train dataset-specific adapters for each dataset while freezing the parameters of
+a large pretrained video-language backbone. During inference, given a video-
+question sample from an unknown domain, our method first uses the proposed
+non-parametric router function to compute a probability for each adapter, re-
+flectinghowrelevantthatadapteristothecurrentvideo-questioninputinstance.
+Subsequently, the proposed dynamic adapter merging scheme aggregates all the
+adapterweightsintoanewadapterinstancetailoredforthatparticulartestsample
+tocomputethefinalVidQAprediction,mitigatingtheimpactofinaccuraterouter
+predictionsandfacilitatingknowledgesharingacrossdomains. OurDAMmodel
+outperforms prior state-of-the-art continual learning approaches by 9.1% while
+exhibiting 1.9% less forgetting on 6 VidQA datasets spanning various domains.
+We further extend DAM to continual image classification and image QA and
+outperform prior methods by a large margin. The code is publicly available at:
+https://github.com/klauscc/DAM.
+1 INTRODUCTION
+The role of video in our lives has increased tremendously over the recent years, with millions of
+hoursofvideouploadedtotheInternetdaily. Duetosuchrapidvideogrowthandtheemergenceof
+video-languagemodels(Yuetal.,2021;Yangetal.,2022;Chengetal.,2023;Wangetal.,2023d),
+videoquestion-answering(VidQA)hasbecomeoneofthemostimportanttasksinvideounderstand-
+ing. However, modern VidQA models often assume static conditions with fixed training datasets.
+Incontrast,manyreal-worldapplicationsincreasinglydemandadaptabilitytodistributionshiftsof
+continuallyarrivingdatasets. Forinstance,aVidQAmodeltrainedonlyonmovievideosmaystrug-
+gle when questioned about instructional or social media videos due to stark domain disparities.
+Additionally, even within a single domain, a model trained on videos collected before 2020 may
+failtoanswerquestionsaboutvideosrecordedin2024duetoasubstantialtimedifferencebetween
+trainingandtestingvideos.
+One could address these issues by fine-tuning a VidQA model each time new data is introduced.
+However,itwouldcausethemodeltoforgetpreviouslyacquiredknowledge–aphenomenoncom-
+monlyreferredtoascatastrophicforgetting(McClellandetal.,1995;McCloskey&Cohen,1989).
+An alternative strategy is to retrain the model by incorporating both existing training data and the
+newly acquired data. However, training the model on the combined data is impractical due to the
+even larger computational cost (Zellers et al., 2021; Fu et al., 2021; Li et al., 2023c; Wang et al.,
+2022a). ThesechallengesunderscorethenecessityforcontinualVidQAlearning,wheretheVidQA
+1
+4202
+raM
+31
+]VC.sc[
+1v55780.3042:viXraDAM:DynamicAdapterMergingforContinualVideoQALearning
+Shared Backbone Dataset-specific Modules Video Dataset Module Aggregator
+Yes
+Do they use onion
+for cooking?
+Train Train Inference
+Barbie
+Who is driving?
+Instructional Movie Cooking
+Videos Videos Videos
+Figure 1: A high-level overview of our proposed Domain-Incremental Learning (DIL) framework
+forVideoQuestions-Answering(VidQA).Ourmodeliscontinuallytrainedonsequentiallyarriving
+datasetsandevaluatedontestsampleswithunknowndatasetidentities. Ourframework(i)incorpo-
+rates dataset-specific modules to allow specialization and mitigate forgetting, (ii) enables efficient
+adaptationtocontinuallystreamingdatasets,(iii)ensuresrobustnesstoincorrectmoduleselections,
+and(iv)facilitatesknowledge-sharingacrosssimilardatasets.
+model gradually learns to incorporate knowledge from continuously evolving video training data
+withminimaltrainingcost.
+Inthiswork,wefocusontheDomain-IncrementalLearning(DIL)subproblemofcontinuallearn-
+ing(Kirkpatricketal.,2017;Wangetal.,2023b),sinceitmatchestheabove-discussedchallengesof
+continuouslyadaptingtodatasetsspanningdifferentdomainsandtimeshifts. Thekeychallengesin
+DILarisefromdistributionshiftsbetweensequentially-arrivingtrainingdatasets. Whenthedistri-
+butionshiftsbetweendatasetsarelarge,theoptimalrepresentationforeachdistributioncanbevery
+different, thusleadingtopoorperformanceamongregularization-basedDILmethods(Kirkpatrick
+etal.,2017;Li&Hoiem,2017),whichusefullysharedparametersacrossdatasets. Recentprompt-
+based approaches (Wang et al., 2022b;e) alleviate this issue by using dataset-specific prompts in-
+dependently trained on each dataset. During inference, these methods rely on a router function to
+predictthedatasetidentityandselectthecorrespondingprompts. However,whendistributionshifts
+betweendatasetsaresubtle,predictingdatasetidentitybecomeschallenging,adverselyaffectingthe
+performanceofsuchmethods. Additionally,selectingindividualdataset-specificpromptsprevents
+knowledge-sharingbetweendatasets,whichmaybesuboptimalwhenthetrainingdatasetsaresimi-
+lar.Thus,asshowninFig.1,anidealDILmethodshould(i)incorporatedataset-specificmodulesto
+allowspecializationandlimitcatastrophicforgetting,(ii)enableefficientadaptationtocontinually
+arriving datasets, (iii) be robust to incorrect dataset-specific module selections, and (iv) facilitate
+knowledge-sharingacrosssimilardomains.
+Motivated by these observations, we propose Dynamic Adapter Merging (DAM), a highly-
+performant, generalizable, and parameter-efficient continual VidQA learning scheme. Our model
+consistsof(i)anadapterforeachcontinuallyarrivingdataset,(ii)anon-parametricrouter,and(iii)
+a dynamic adapter merging module. Given a sequence of VidQA datasets spanning different data
+distributions,webeginbytrainingadataset-specificadapterforeachdatasetwhilefreezingthepre-
+trainedvideo-languagebackbone(e.g.,CLIP(Radfordetal.,2021)andDeBERTa(Heetal.,2020)).
+Afterward,givenatestsamplefromanunknowndatasetduringinference,weuseanon-parametric
+video-languageroutertoestimateprobabilitiesforeachdataset-specificadapter. Theseprobabilities
+reflecttherelevanceofeachadaptertothatparticularvideo-questioninputinstance. Subsequently,
+the proposed dynamic adapter merging module merges all the adapter weights into a new adapter
+instancetailoredforthatparticulartestsampletocomputethefinalVidQAprediction. Asaresult,
+even if the router produces partially inaccurate probabilities, DAM could still answer the VidQA
+problemasourdynamicmergingschemeincorporatesknowledgefrommultipleadapters,oftenin-
+cludingthoseassociatedwiththecorrectdomain.Therefore,theproposeddynamicmergingscheme
+mitigates the impact of inaccurate router predictions and also facilitates knowledge sharing across
+distributions,therebyenhancingVidQAperformance.
+2DAM:DynamicAdapterMergingforContinualVideoQALearning
+OurDAMmethodoutperformspriorprompt-basedDILmodels(Wangetal.,2022b;e)by9.1%on
+6sequentially-introducedVidQAdatasetsfromvariousdomainswhileexhibiting1.9%lessforget-
+ting. DAMcanalsobeeasilyextendedtotaskssuchasimageclassification(+9.32%onCORe50)
+andimagequestion-answering(+4.4%onabenchmarkwith4datasets). Furthermore,weconduct
+extensive ablation studies to analyze the relationship between dynamic merging and router, eluci-
+dating the key success factors of our approach. We will release our code and pretrained models
+toenablethecommunitytodevelopmodelsforthisemergingresearchareaofdomain-incremental
+VidQAlearning.
+2 RELATED WORK
+VideoQuestionAnswering(VidQA)representsafundamentaltaskinvideo-languageunderstand-
+ing,aimingtoanswernaturallanguagequestionsfromvideoinputs. Mostcommonlyusedmethods
+(Yangetal.,2022;Yuetal.,2023;Xiaoetal.,2022;Chengetal.,2023;Leietal.,2021;Lietal.,
+2020; Miech et al., 2019; Sun et al., 2019) leverage video-language models (VLMs) with trans-
+former architecture (Xiao et al., 2022; Lei et al., 2021; Cheng et al., 2023) and large pre-trained
+languagemodels(Yangetal.,2022;Yuetal.,2023). FrozenBiLM(Yangetal.,2022)handlesthe
+multimodal input using a pretrained bidirectional language model and casts VidQA as a masked
+languagemodelingproblem. SeViLA(Yuetal.,2023)buildsuponalargeimage-languagemodel,
+BLIP-2 (Li et al., 2023b), and extends it to accommodate video input for VidQA. However, none
+ofthesemethodsaredesignedtohandlecontinualshiftsintrainingdatadistribution, whichisour
+focusinthiswork.
+Continual Learning (CL) focuses on developing frameworks that can continually learn from
+streaming training datasets. This is a fundamental challenge for many deep learning methods due
+tocatastrophicforgetting(McClellandetal.,1995). Continuallearningmethodscanbecategorized
+into regularization-based approaches (Kirkpatrick et al., 2017; Li & Hoiem, 2017), replay-based
+approaches (Cha et al., 2021a; Riemer et al., 2018), optimization-based approaches (Lopez-Paz
+& Ranzato, 2017; Chaudhry et al., 2018) and representation-based approaches (Gao et al., 2023;
+Foret et al., 2020; Ermis et al., 2022; Douillard et al., 2022). Several recent CL approaches use
+pre-trainedmodelsforthevision-languagedomain, includingCLiMB(Srinivasanetal.,2022)for
+task-incrementallearning,VQACL(Zhangetal.,2023)andCL-CrossVQA(Zhangetal.,2022)for
+rehearsal-basedDomain-IncrementalLearning(DIL).Rehearsal-basedmethodsrequirestoringdata
+ofpreviouslyusedtrainingdatasets,whichmaynotbepossibleinreal-worldsettingsduetoprivacy
+or intellectual property concerns. In contrast, rehearsal-free CL approaches (Li & Hoiem, 2017;
+Smithetal.,2023b;2021;Jungetal.,2023;Lietal.,2023d;Zuoetal.,2024;Wangetal.,2023c;a)
+donotrequirestoringanyprevioustrainingdata. Amongthese,severalrecentprompt-basedmeth-
+ods such as L2P (Wang et al., 2022e), DualPrompt (Wang et al., 2022d), S-Prompts (Wang et al.,
+2022b) and CODA-Prompt (Smith et al., 2023a) used visual prompts (Liu et al., 2023) prepended
+to a pre-trained transformer and extended prompt-based learning for continual learning scenarios.
+Unlikethesepriorprompt-basedDILmethods,weproposedynamicadaptermergingtoalleviatethe
+issuesofinaccuraterouterpredictionsandenablecross-domainknowledgesharing.
+Model Merging aims to merge multiple domain models into a single model that can be used for
+inference on these domains. The work in (Wortsman et al., 2022b; Ilharco et al., 2022b) com-
+putes the merged weights as an element-wise arithmetic mean of the weights of all domain mod-
+els. Subsequently, several methods proposed to improve the performance of the model merging
+usingtechniquessuchasFisherMerging(Matena&Raffel,2022),RegMean(Jinetal.,2022),Git
+Re-Basin(Ainsworthetal.,2022), TaskArithmetic(Ilharcoetal.,2022a)andTIES-Merging(Ya-
+dav et al., 2023). Model merging has been applied to many scenarios, including federated learn-
+ing (McMahan et al., 2017), improving out-of-domain generalization (Cha et al., 2021b), and im-
+provingperformanceonasingletargettask(Guptaetal.,2020;Wortsmanetal.,2022a). Recently,
+themethodin(Guerrero-Pen˜aetal.,2022)proposedaSinkhornre-basinnetworkforreplay-based
+classincrementalcontinuallearningbutonlyexperimentedwithsmallmodels(e.g.,ResNet18(He
+etal.,2016))onsmalldatasets(e.g.,CIFAR-100(Krizhevskyetal.,2009)). Unlikeexistingmodel
+mergingmethodsthatcreateasinglemergedmodelforalldatasets,wedynamicallygenerateanew
+modelinstancetailoredforeachtestsamplewithminimalcomputationaloverhead.
+3DAM:DynamicAdapterMergingforContinualVideoQALearning
+3 TECHNICAL APPROACH
+3.1 UNIFIEDFORMULATION
+WefirstconsolidaterecentDILmethods(Wangetal.,2022b;e)intoaunifiedformulation. Specifi-
+cally,mostexistingDILmethodsshareacommonstructurecomprisingafrozenpretrainedbackbone
+f withparametersθ,dataset-specificmodules(i.e.,prompts)M ={m ,...,m },andarouter. For
+θ 1 T
+the dataset arriving at time t, only the dataset-specific module m is trained, while the backbone
+t
+f andallpreviouslylearnedmodulesm ,...,m arefrozentopreventforgetting. Duringinfer-
+θ 1 t−1
+ence,givenatestsamplexwithanunknowndatasetidentity,theinferenceprocessisformulatedas
+Eqn.1, wheref representsthepretrainedbackboneaugmentedwithadataset-specificmodule
+θ,mi
+m , p is the predicted probability depicting how relevant x to each dataset-specific module, and x
+i
+andydenotetheinputandoutput,respectively.
+p=router(f (x))
+θ
+i=argmax(p) (1)
+y =f (x)
+(θ,mi)
+WeidentifysuboptimalaspectsintheformulationofEqn.1,notably(i)potentialerrorsintroduced
+by the router’s incorrect probability predictions leading to the erroneous selection of a dataset-
+specificmodulem and(ii)thelackofknowledge-sharingamongmodulesm ,...,m .
+i 1 T
+Next, in Eqn. 2, we propose a more general formulation that replaces the argmax operation with
+a composer function. Rather than selecting a single module corresponding to the highest router
+probability,thecomposeraggregatesmultipledataset-specificmodulesintoone,offeringrobustness
+toimperfectrouterpredictionsandenablingknowledgesharingamongdataset-specificmodules.
+p=router(f (x))
+θ
+m′ =composer(M,p) (2)
+y =f (x)
+(θ,m′)
+In the next section, we describe how we instantiate our above-described general formulation with
+specificmodelingcomponents.
+3.2 DAM:DYNAMICADAPTERMERGING
+BasedontheformulationinEqn.2,weproposeDAM,aframeworkthatcanlearntomodelsequen-
+tially streaming data D with little forgetting and minimal computational overhead. As shown in
+t
+Fig.2,ourmethodconsistsoffourmaincomponents: (i)afrozenpretrainedvideo-languageback-
+bone f , (ii) dataset-specific modules m ,...,m implemented as adapters (Houlsby et al., 2019)
+θ 1 T
+foreachtrainingdataset,(iii)anon-parametricvideo-languagerouterthatpredictsprobabilitiesfor
+selectingthemostrelevantadaptersforagiventest-timeVidQAinputinstance,and(iv)adynamic
+adaptermergingschemeasacomposertoaggregatealltheadaptermodules. Wenowdescribeeach
+componentinmoredetail.
+Backbone. Our backbone f is a large-scale pretrained VidQA model (e.g. FrozenBiLM (Yang
+θ
+et al., 2022)), implemented with Transformers (e.g. CLIP ViT-L/14 (Radford et al., 2021) and
+DeBERTa-V2-XL (He et al., 2020)). In practice, our framework can be applied to arbitrary back-
+bonesasshowninSec.4.3.
+Dataset-Specific Modules. We propose implementing our dataset-specific modules m ,...,m
+1 T
+usingadapters(Houlsbyetal.,2019).Theseadaptermodulesarethenusedtolearnfromsequentially
+streamingdataD ,introducedtothemodelattimet.Comparedtovisualprompts,commonlyusedin
+t
+DILmethods(Smithetal.,2023a;Wangetal.,2022b;e),adaptershaveseveralimportantadvantages.
+First, the larger modeling capacity of adapters is beneficial as it enables us to effectively capture
+distribution-specificinformationfromeachdatasetD . Furthermore,thehighparameterefficiency
+t
+ofadapters(e.g., ∼ 3%oftotalparametersinapretrainedbackbone)allowsustoefficientlytrain
+ourframeworkeverytimenewdataD isreceived.
+t
+Specifically,weuseanadapterA ={A(ℓ)}L consistingofLadapterlayersforeachsequentially
+t t ℓ=1
+streamingdatasetD . Weusethestandardadapterstructureasin(Houlsbyetal.,2019;Yangetal.,
+t
+4DAM:DynamicAdapterMergingforContinualVideoQALearning
+Shared frozen Trainable dataset- Dataset Merged
+VL backbone specific adapter layer at time t adapter layer
+Output
+DAM
+DAM
+Router Input
+Time
+(a) Training (b) Inference
+Figure 2: An overview of our Dynamic Adapter Merging (DAM) framework. (a) Our model is
+continually trained on sequentially arriving datasets {D ,...,D }. During training on dataset D ,
+1 T t
+we only train the adapter A = {A(ℓ)}L while keeping previously learned adapters fixed. (b)
+t t ℓ=1
+During inference, given a test sample (a video and a text question), we use the proposed router to
+predicttheprobabilityofeachadapterbeingrelevanttothatparticularinputinstance.Afterward,we
+dynamicallymergemultipledataset-specificadaptersinparameterspacetoreducetheimpactofin-
+correctrouterpredictionsandleveragecross-domainVidQAcues. Finally,thepretrainedbackbone,
+togetherwiththemergedadapter,isusedtomakethefinalVidQApredictions.
+2022), andinsertanadapterlayerA(ℓ) aftereachself-attentionandfeed-forwardnetworklayerin
+t
+ourpretrainedbackbone. DuringtrainingondatasetD ,weonlytrainanadapterA whilekeeping
+t t
+previously learned adapters fixed. This allows each adapter to focus on a single dataset, which is
+advantageousformaximizingdataset-specificperformancewhilealleviatingcatastrophicforgetting.
+Additionally,toinheritpreviouslyacquiredknowledge,weinitializeA withtheweightsofadapter
+t
+A trainedintheprecedingtimestept−1,whichwedenoteascontinualinitialization.
+t−1
+Router. Tohandleunknowndatasetidentityduringinference, weemployanon-parametricrouter
+topredicttheprobabilityforeachadapter, estimatingtheirrelevancetoagivenvideo-questionin-
+put instance from an unknown distribution. Specifically, during training, we calculate the cen-
+troidc = 1 (cid:80)Ns f (xs ) ∈ Rd ofeachdatasetD byaveragingallmultimodalvideo-language
+t Ns i=1 θ t,i t
+t
+features extracted by the frozen pretrained backbone f without adapters. Then, for a test sam-
+θ
+ple x during inference, we calculate adapter-specific probabilities p = exp(lt/τ) . Here,
+t (cid:80)T i=1exp(li/τ)
+l = cos(f (x),c ) is the cosine similarity between a feature f (x) and a centroid c , T is the
+t θ t θ t
+totalnumberofdatasetsuptothecurrentpoint,andτ isthetemperaturehyperparameter. Wefind
+our simple non-parametric router is more effective and computationally cheaper than other more
+complexdesignchoices,includingtheonesusedinpriorDILmethods(Smithetal.,2023a;Wang
+etal.,2022e),aswewillshowinSec.5.2.
+Composer. ToimproveourDILframework’srobustnesstoincorrectrouterpredictionsandenable
+knowledge-sharingacrossdataset-specificmodules,weimplementourcomposerfunctiondrawing
+theideasfromthemodelmergingresearchcommunity(Jinetal.,2022;Ainsworthetal.,2022;Ya-
+davetal.,2023). Inparticular,recentmodelmergingtechniques(Wortsmanetal.,2022a;Jinetal.,
+2022) have demonstrated the effectiveness of merging multiple domain models in the parameter
+space into a single model that generalizes to all the merged domains, thus, effectively eliminating
+the need for dataset identity predictions and naturally leveraging knowledge-sharing. However, a
+singlefixedmodelmaylacktheexpressivenessrequiredtohandlenumerousdomains,asobserved
+in(Yadavetal.,2023),wheretheperformanceofthemergedmodeldropssignificantly(e.g.,>10%)
+whenthenumberofdomainsislarge(e.g.,8domains).
+5DAM:DynamicAdapterMergingforContinualVideoQALearning
+Motivated by these considerations, we implement our composer using our proposed Dynamic
+Adapter Merging (DAM) scheme that dynamically merge multiple dataset-specific adapters for
+eachtest-timeinputinstance(Figure2b). Ourcomposerisimplementedthroughasimpleinstance-
+wiseadapterweightmergingusingsoftrouter-predictedprobabilities. Notethatalldataset-specific
+adapterssharethesamearchitecture,enablingelement-wisemergingofalladaptersintheirparam-
+eterspace. Specifically,givenadapterweightsforallT observeddatasetsA = {A ,...,A },and
+1 T
+input-specific router probabilities p ∈ RT, the merged adapter weights A = (cid:80)T p ·A are
+M t=1 t t
+incorporatedwiththepretrainedbackboneforthefinalVidQAprediction.
+Our dynamic adapter merging scheme is advantageous since it enhances robustness to incorrect
+dataset identity predictions. In particular, even when the router function produces partially incor-
+rectdataset-identityprobabilitypredictionsfortheadapterselection,ourdynamicmergingscheme
+incorporates knowledge from multiple adapters, often including those associated with the correct
+domain. Additionally, such a dynamic adapter merging scheme facilitates knowledge sharing be-
+tweendataset-specificadaptersthroughparameter-spacemerging,provingbeneficialwhenmultiple
+datasets stem from similar domains. Unlike existing model merging techniques (Wortsman et al.,
+2022a;Jinetal.,2022),whichproduceasinglefixedmodelforalltestsamples,ourmethodproduces
+amodelthatisuniquelytailoredforeachtestsample,thus,offeringgreatermodelingexpressivity.
+4 EXPERIMENTS
+4.1 EXPERIMENTALSETUP
+DatasetsandMetrics.Weperformexperimentson9VideoQuestionAnswering(VidQA)datasets,
+which include iVQA (Yang et al., 2021), MSVD-QA (Xu et al., 2017), MSRVTT-QA (Xu et al.,
+2017), LSMDC (Maharaj et al., 2017), ActivityNet-QA (Yu et al., 2019), TGIF-QA (Jang et al.,
+2017), TrafficQA (Xu et al., 2021), EnvQA (Gao et al., 2021) and AGQA (Grunde-McLaughlin
+et al., 2021). MSVD-QA, MSRVTT-QA, and ActivityNet-QA involve social media videos, with
+ActivityNet-QAfeaturingnotablylongervideos(i.e.,onaverage2minutesinlengthversus30sec-
+ondaveragedurationofthevideosinthefirsttwodatasets). iVQA,LSMDC,TGIF-QA,TrafficQA,
+EnvQA, and AGQA represent instructional, movie, short-GIF, traffic, virtual, and indoor human
+videos,respectively. Wetrainthemodelsonthesesequentiallyarrivingdatasets. Aftertrainingthe
+modelonthelastdataset,weevaluatetheresultingcheckpointonthetestsetofalltraineddatasets.
+Duringtheevaluation,thedatasetidentityofeachtestingsampleisassumedtobeunknown.Follow-
+ing(Wangetal.,2022c;b),weusetheaverageaccuracyandforgettingastheevaluationmetrics.
+SeeAppendixBforformaldefinitions.
+DIL Baselines. For all of our continual learning baselines (including our approach), we use the
+recentFrozenBiLM(Yangetal.,2022)VidQAmodel,implementedusingCLIPViT-L/14(Radford
+et al., 2021) and DeBERTa-V2-XL (He et al., 2020) video and language backbones and contain-
+ing 1.2B parameters in total. In our comparisons, we include three recent Prompt-based methods
+L2P(Wangetal.,2022e),CODA-Prompt(Smithetal.,2023a),andS-Prompts(Wangetal.,2022b),
+andtworegularization-basedmethods,EwC(Kirkpatricketal.,2017)andLwF(Li&Hoiem,2017).
+We also incorporate several naive baselines: (i) Zero-Shot, which directly evaluates the pretrained
+modelonalldatasetswithoutanytraining,and(ii)Seq-FT,whichsequentiallyfinetunesthemodel
+on the sequentially arriving datasets. The upper bound performance for the adapter and prompt-
+basedvariantsisobtainedbymultitaskfinetuningjointlyonalltrainingdatasets.
+Model Merging Baselines. We also compare with two model merging methods, Average Merg-
+ing (Wortsman et al., 2022a; Ilharco et al., 2022a) and RegMean (Jin et al., 2022). In our imple-
+mentation,bothmethodsmergeallthedataset-specificadaptersintoasinglefixedadapter,whichis
+thenappliedtoallthetestsamples. Thisisincontrasttoourframework,whichproducesauniquely
+tailoredadaptermoduleforeachtestsample.
+WereferreaderstoAppendixAfordetailedimplementationsofourframeworkandallthebaseline
+methods.
+6DAM:DynamicAdapterMergingforContinualVideoQALearning
+Table 1: Comparison with state-of-the-art on Domain-Incremental VidQA Learning. We obtain
+the upper-bound performance by multitask finetuning jointly on all the datasets. The zero-shot
+baselinedirectlyevaluatesthepretrainedmodelonalldatasetswithoutanytraining,whiletheSeq-
+FT baseline sequentially finetunes a single model on all the datasets. We also reimplement prior
+methods(EwC,LwF,L2P,CODA-Prompt,S-Prompts)usingourstrongvideo-languagebackbone,
+asthesemethodswerenotinitiallydesignedforVidQA.Allcontinuallearningmethodsaretrained
+sequentiallyfromlefttorightinthetable. OurproposedDAMoutperformsthecurrentstate-of-the-
+artby9.1%whileexhibiting1.9%lessforgetting.
+TrainingOrder: iVQA→MSVD→MSR-VTT→LSMDC→ANet→TGIF
+DownstreamVidQAAccuracy(Forgetting)(%)
+Method
+iVQA MSVD MSR-VTT LSMDC ANet TGIF Avg.
+Zero-Shot 26.8 33.0 15.0 51.5 25.5 41.9 32.3
+Seq-FT 28.4 36.0 23.7 52.1 31.2 67.6 39.8
+MultitaskFinetuned(Upper-Bounds)
+Adapters 39.7 56.6 46.7 62.9 42.2 67.8 52.6
+PromptTuning 35.0 49.0 37.1 57.4 33.9 59.2 45.3
+Regularization-basedmethods
+EwC 29.9 39.3 25.5 54.9 32.4 67.5 41.6(-10.9)
+LwF 28.3 38.2 25.8 56.4 33.6 68.5 41.8(-10.7)
+Prompt-basedmethods
+L2P 32.8 43.3 32.1 54.8 27.2 54.4 40.8(-4.6)
+CODA-Prompt 32.9 44.8 28.7 50.7 23.9 54.7 39.6(-5.7)
+S-Prompts 31.8 45.5 30.2 54.9 27.9 56.1 41.1(-4.2)
+DAM(Ours) 39.1 53.6 42.2 63.0 36.3 66.8 50.2(-2.3)
+4.2 COMPARISONWITHSTATE-OF-THE-ART
+ComparisonwithDomain-IncrementalLearning(DIL)Methods. Tab.1comparesourmethod
+andstate-of-the-artDILapproaches. OurfindingsdemonstratethatourproposedDAMschemeout-
+performstheleadingDILmethod,S-Prompts,byasubstantialmarginof9.1%inaverageaccuracy
+while also exhibiting 1.9% less forgetting. Among prompt-based methods, L2P, CODA-Prompt,
+andS-Promptsshowreducedforgettingcomparedtoregularization-basedmethodsEwCandLwF.
+However, these prompt-based methods achieve lower overall accuracy, which can be attributed to
+theirsmallerlearningcapacity. Overall,theseresultsshowtheeffectivenessofourproposedframe-
+work.
+ComparisonwithModelMergingMethods.Next,wecompareourmethodwithtwomodelmerg-
+ing methods, Average Merging (Wortsman et al., 2022a) and RegMean (Jin et al., 2022). For a
+fair comparison, all the methods merge the same set of adapters, each individually fine-tuned on
+each dataset without our continual initialization scheme. As shown in Tab. 2, DAM outperforms
+RegMeanby6.0%andaveragemergingby7.5%inaverageaccuracy. Wehypothesizethatthesig-
+nificantlybetterperformanceofourmodelcomesfromthefactthatDAMproducesacustommodel
+instance for each input instance. This makes our methods a lot more expressive than the existing
+modelmergingmethodsthatuseasinglemergedmodelinstanceforalldatasamples.
+Computational Complexity Analysis. In addition to standard accuracy metrics, we also analyze
+the computational cost of our proposed approach. We note that each dataset-specific adapter in
+DAMcontributes merely 2.5% of the pretrained model’s parameters (CLIP-L/14 + DeBerTa-V2-
+XLarge), totaling 30M parameters. In terms of computational cost, merging adapter parameters
+incursjust0.09GFLOPs(30M*(2k-1), k=2inourcase), notablylowerthanthe162GFLOPsre-
+quiredbyCLIP-L/14forasingleimageprocessing. Therefore,theseresultsshowthatourproposed
+DAMcanefficientlyadapttoareasonablylargenumberofcontinuallyarrivingdatasets.
+7DAM:DynamicAdapterMergingforContinualVideoQALearning
+Table2: Comparisonwithexistingmodelmergingtechniques. Forafaircomparison,allthemeth-
+odsmergethesamesetofadapters,eachindividuallyfine-tunedoneachdatasetwithoutourcontin-
+ualinitializationscheme(i.e., usingrandominitialization). Our DAM outperformsexistingmodel
+mergingmethodsbyalargemarginonaverage.
+Method iVQA MSVD MSR-VTT LSMDC ActivityNet TGIF Avg.
+Multitask(upper-bound) 39.7 56.6 46.7 62.9 42.2 67.8 52.6
+Avg. Merging 38.0 45.7 27.7 54.5 27.0 56.6 41.6
+RegMean 36.6 49.7 32.5 54.0 27.7 57.8 43.1
+DAM(Ours) 36.5 51.6 39.5 63.0 36.5 67.7 49.1
+Table 3: Domain-Incremental Learning on image classification. Our upper-bound is obtained by
+finetuning a shared adapter jointly on all domains. For a fair comparison, we de-emphasize S-
+PromptswithCLIPencodersinceitispretrainedwithmuchmoredatathantheImageNet-pretrained
+ViT-B/16backboneusedbyourmethod.
+Buffersize Avg. Accuracy(%)
+Method Backbone
+CORe50 DomainNet
+Multitask(upper-bound) ViT-B/16 - 94.59±0.21 71.95
+DyTox ViT-B/16 50/class 79.21±0.10 62.94
+LwF ViT-B/16 75.45±0.40 49.19
+L2P ViT-B/16 78.33±0.06 40.15
+0/class
+S-Prompts ViT-B/16 83.13±0.51 50.62
+S-Prompts CLIPViT-B/16 89.06±0.86 67.78
+DAM(Ours) ViT-B/16 0/class 92.45±0.25 69.23
+4.3 GENERALIZATIONTOIMAGES
+To further showcase the generalizability of our approach, we extend DAM to two image tasks: 1)
+imageclassificationand2)imagequestion-answering.
+Image classification. We conduct experiments on two standard DIL benchmarks: CORe50
+(Lomonaco & Maltoni, 2017) and DomainNet (Peng et al., 2019). CORe50 (Lomonaco & Mal-
+toni, 2017) contains 50 categories across 11 domains. Following prior work, we continually train
+themodelon8domains(120Kimages)andevaluatethetrainedmodelontheremaining3domains
+(40Kimages). DomainNetcontains345categoriesacross6domains. TheDILsetuponDomain-
+NetisthesameasWangetal.(2022b);Finietal.(2022). Followingstandardevaluationprotocol,
+weuseViT-B/16(Dosovitskiyetal.,2020)pretrainedonImageNetasourbackbone. Asshownin
+Tab.3,DAMsurpassesthecurrentstate-of-the-artS-Promptsby9.32%and18.61%usingthesame
+ImageNet-pretrained ViT-B/16 backbone on CORe50 and DomainNet, respectively. These results
+suggestthatourmodelcanalsobeeffectivelyappliedtoDILimageclassificationtasks.
+Image question-answering. Next, we also extend our model to the visual question-answering
+(VQA) task on images. We integrate our proposed DAM and the best performing prompt-based
+baseline S-Prompts with the state-of-the-art VQA model, BLIP-2 (Li et al., 2023a), which uses
+CLIP ViT-G/14 (Radford et al., 2021) and FlanT5-XL (Chung et al., 2022) as its vision-language
+backboneandhas4.1Bparametersintotal. Wethencontinuallytrainbothmodelson4mainstream
+VQAdatasets: OK-VQA(Marinoetal.,2019),aOK-VQA(Schwenketal.,2022),GQA(Hudson
+&Manning,2019)andVQAv2(Goyaletal.,2017). TheresultsareshowninTab.4. Ourproposed
+DAMoutperformsS-Promptsby4.4%with1.2%lessforgetting,thus,demonstratingthegenerality
+ofourapproach.
+8DAM:DynamicAdapterMergingforContinualVideoQALearning
+Table4: WeextendourproposedDAMmethodtocontinualvisualquestion-answering(VQA)task
+onimagedatasets. Fortheseexperiments,weusetherecentBLIP-2model(Lietal.,2023b)asour
+visual-languagebackbone. TheproposedDAMoutperformstheexistingstate-of-the-artmethod(S-
+Prompts)by4.4%inaverageaccuracywhileexhibiting1.2%lessforgetting.
+OK-VQA aOK-VQA GQA VQAv2
+Method Avg.
+(test) (val) (val) (val)
+Zero-Shot 40.7 35.7 44.0 63.1 45.9
+Multitask(upper-bound) 49.2 51.8 58.7 76.2 58.8
+S-Prompts 42.9(-5.3) 46.1(-2.2) 47.3(-7.1) 65.3(-6.0) 50.4(-5.2)
+DAM 45.1(-4.1) 50.4(-1.4) 54.1(-4.6) 69.8(-6.4) 54.8(-4.0)
+Table5: Weinvestigatethenumberofdataset-specificadapterstomergeforbestperformance. The
+Top-K adaptersareselectedaccordingtothehighestrouterpredictedprobabilities. Thefirst4rows
+depictthedownstreamVidQAaccuracy, whereasthelastrowistherouteraccuracy. Wehighlight
+the largest accuracy gap between adapter merging and non-merging variants. Merging adapters is
+typicallyusefulwhentheroutermakesmanyincorrectpredictions.
+Top-K MSVD MSR-VTT ActivityNet iVQA TGIF LSMDC
+1(no-merging) 49.0 40.4 37.4 37.5 66.3 62.9
+2 53.6 42.2 36.3(-1.1) 39.1 66.8 63.0
+3 54.6 42.4(+2.0) 34.0 39.3 67.0(+0.7) 63.0
+6(mergeall) 54.9(+5.9) 41.9 33.0 39.6(+2.1) 66.9 63.1(+0.2)
+RouterAcc 51.0 69.6 76.4 81.6 96.1 100
+5 ANALYSIS
+5.1 ADAPTERMERGINGANALYSIS
+In this section, we analyze the effectiveness of dynamic
+adapter merging. Specifically, in Tab. 5, we present a
+1.30
+comprehensive breakdown of downstream VidQA accu-
+1.25
+racyandtherouter’saccuracyoneachdataset,consider-
+1.20
+ingvariousadaptermergingvariants.Thetablehighlights
+1.15
+an intriguing trend: as the router’s accuracy decreases,
+1.10
+the benefits derived from adapter merging become more
+1.05
+pronounced. Specifically, when the router’s accuracy is
+1.00
+at51.0%and69.6%,adaptermergingyieldssubstantial
+0 20 40 60 80 100
+downstream accuracy improvements of 5.9% and 2.0% Router Accuracy (%)
+on the MSVD and MSR-VTT datasets, respectively. In
+contrast, when the router approaches near-perfect accu- Figure 3: We study the normalized
+racy, the gains from adapter merging become less sig- performance gain of dynamic adapter
+nificant (as seen with a marginal 0.2% improvement on merging as a function of router accu-
+LSMDC). racy. Our results show that dynamic
+adapter merging leads to a larger boost
+To further validate this observation, Fig. 3 provides in- whentherouterisinaccurate.
+sights into the average performance gain of dynamic
+adaptermergingovernon-mergingvariantsasafunction
+of router accuracy. The data points are generated by creating a series of routers manually, each
+predicting dataset probabilities with a specified accuracy. The figure confirms the trend in Tab. 5,
+showcasing that adapter merging offers a 30% relative improvement when the router’s accuracy
+dropsto0%.
+Basedontheseresults,wecanconcludethatourproposedDAMisparticularlyadvantageouswhen
+dealing with many datasets. In such complex scenarios, dataset prediction becomes notably chal-
+9
+gnigreM
+retpadA
+fo
+sniaGDAM:DynamicAdapterMergingforContinualVideoQALearning
+Table 6: We study the effectiveness of different router functions. Specifically, we incorporate
+router functions from several prior methods into our DAM method and measure our model’s per-
+formance on the downstream VidQA task with each of these routers. Our results suggest that our
+non-parametricrouterfunctionleadstothebestdownstreamVidQAperformance.
+Router random L2P’s CODA-Prompt’s S-Prompts’ GMM LearnableMLP Ours
+routerAcc. 16.6 67.4 - 76.4 79.0 78.7 79.1
+VidQAAcc. 40.2 48.6 45.3 49.7 49.4 48.9 50.2
+Table 7: Domain-Incremental Learning (DIL) on 4 datasets from different domains. DAM has
+negligibleforgettingrateondatasetswithlargedomaingaps.
+Method LSMDC AGQA Env-QA TrafficQA(1) Avg.
+2
+Upper-Bound 63.0 63.4 32.3 67.8 56.6
+DAM 63.0 63.3 32.0 67.8 56.5
+RouterAcc. ofDAM 100 99.9 99.2 99.7 99.7
+lengingfortherouter. Thesecollectivefindingsunderscorethepracticalsignificanceandscalability
+ofourproposedapproachinreal-worlddomain-incrementalVidQAlearningscenarios.
+5.2 ROUTERANALYSIS
+In this section, we compare our router design with three router designs from prior DIL methods:
+L2P(Wangetal.,2022e),CODA-Prompt(Smithetal.,2023a),aswellasGaussianMixtureModel
+(GMM)andLearnableMLP.WeincorporatetheserouterfunctionsintoourDAMmethodandmea-
+sure our model’s performance on downstream VidQA task with each of these routers. We also
+measuretheaccuracyofeachrouterfunctionforcorrectlyclassifyingthedataset/domainofagiven
+VidQAinputinstance. NotethatwecannotcalculateCODA-Prompts’router’saccuracyasitdoes
+notexplicitlypredictthedomainidentity. FromTab.6,weobservethathigherrouteraccuracytyp-
+ically leads to higher downstream VidQA accuracy, thus indicating the importance of an accurate
+routerfunction. Second,wenoticethatjointlytrainingrouteranddomain-specificmodulesaswas
+doneinpreviousmethods(L2P,CODA-Prompt)leadstoworsedownstreamVidQAaccuracythan
+disjoint training (S-Prompts, Ours). Lastly, our results suggest that despite the simplicity of our
+non-parametricrouterfunction,itproducesthebestperformance.
+5.3 DOMAINANALYSIS
+In this section, we analyze the performance of our method through experiments on datasets with
+bothlargeandsmalldomaingaps.
+Large Domain Gap. To validate the effectiveness of our framework on datasets with large do-
+main/distribution gaps, we experiment with 4 datasets from 4 different domains: movie videos
+(LSMDC-QA),indoorhumanvideos(AGQA),trafficvideos(TrafficQA),andvirtualvideos(Env-
+QA).Tab.7presentsDAM’svidQAaccuracyandtherouter’sdomainidentitypredictionaccuracy.
+WeobservethatDAMexhibitsnegligibleforgettingonthe4datasets.Weattributesuchgoodperfor-
+manceofourmethodto1)dataset-specificadaptersthatcaneffectivelyspecializeformodelingeach
+dataset and 2) the high router’s accuracy across most datasets in this setting. Consequently, these
+results indicate that our proposed DAM can be effectively applied to datasets with large domain
+gaps.
+Small Domain Gap. Next, we evaluate our approach on datasets within the same domain but
+collectedatdifferenttimes. Suchtime-baseddistributionshiftsaretypicallymuchsmallerthanfor
+thepreviouslyconsidereddatasetsspanningentirelydifferentdomains(Tab.7). Thus,suchasetting
+necessitates knowledge sharing and the ability to handle incorrect router predictions. Specifically,
+weevaluateourmodelinthissettingbydividingtheiVQAdatasetinto5non-overlappingsubsets
+basedonthevideouploaddatetoYouTube.Wecontinuallytrainthemodelonthesefivesubsetsand
+10DAM:DynamicAdapterMergingforContinualVideoQALearning
+Table8: Weevaluatetheabilityofourframeworktoadapttosubtletime-distributionshifts. Todo
+this,wedividetheiVQAdatasetinto5subsetsaccordingtothevideouploaddatetoYouTube. We
+thentrainourmodelonthese5sequentiallyarrivingsubsets. Ourresultsindicatethatourdynamic
+adapter merging scheme still works effectively, even when the dataset domains/characteristics are
+quitesimilar.
+Multitask Router DAM DAM DAM
+Method
+(upper-bound) Acc. (nomerging) (mergingtop-k =2) (mergingall)
+VidQAAcc. 39.8 43.8 37.1 38.4 39.3
+Table10: DAMbenefitsfromtheproposedcontinualinitializationscheme.
+Method iVQA MSVD MSR-VTT LSMDC ActivityNet TGIF Avg.
+DAM 39.1 53.6 42.2 63.0 36.3 66.8 50.2
+w/ocontinualinitialization 36.5 51.6 39.5 63.0 36.5 67.7 49.1
+thenevaluateoniVQA’soriginaltestsetthatspans5timedistributions. Tab.8showsthatunlikein
+theprevioussetting,inthiscase,therouterattainsanaccuracyofonly43.8%.Thiscanbeexplained
+by the fact that the dataset/domain-identity prediction problem becomes a lot more challenging
+due to minor distribution shifts between subsets. In this scenario, the model variant that merges
+alladapterssurpassesthevariantwithoutmergingby2.2%andexperiencesonly0.5%forgetting.
+This underscores the effectiveness of dynamic adapter merging and emphasizes the importance of
+knowledgesharinginsettingswheredomainsordatasetsaresimilar.
+5.4 OTHERANALYSES
+Order of the Datasets. In Tab. 9, we study how the order of the training datasets affects our
+model’s performance. We randomly sample 5 different orders and train our framework on those
+orders. Basedontheresults,weobservethattheperformanceofourapproachisquitestableacross
+all5orders(50.56±0.26%). Thisindicatesourmethodisrobusttotheorderoftrainingdatasets.
+ContinualInitializationScheme. InSection3.2,wein- Table 9: Ablations on the order of
+troducedacontinualinitializationschemeforinitializing datasets. We randomly sampled 5 or-
+a current distribution-specific adapter using the weights ders and obtained average accuracies
+of a previously learned adapter. In Tab. 10, we validate for each order. V: iVQA; D: MSVD;
+theeffectivenessofthisschemeandshowthatitleadstoa T: MSR-VTT; L: LSMDC; A: Activi-
+notable1.1%averageaccuracyimprovement. Theseim- tyNet;G:TGIF.
+provements are particularly pronounced for the datasets
+that are used first, such as iVQA and MSVD. We posit
+DomainOrder Avg. Acc(%)
+thatthebenefitsofcontinualinitializationstemfromthe
+factthattheweightsofcontinuallylearnedadaptersreside VDTLAG 50.2
+inamoresimilarparameterspace. Thisphenomenonre- LTGDAV 50.8
+ducesinterferencedisagreementswhenmergingadapters VADGTL 50.4
+(Yadavetal.,2023). GTAVDL 50.9
+VAGDTL 50.5
+6 DISCUSSION AND CONCLUSION
+In this work, we investigate the challenging and rel-
+atively unexplored problem of rehearsal-free domain-
+incrementalVidQAlearning. Ourproposed DAM frameworkoutperformsexistingstate-of-the-art
+by9.1%with1.9%lessforgettingonabenchmarkwithsixdistinctvideodomains. Theproposed
+method DAM is simple and flexible, and we further extend it to image classification tasks and vi-
+sualquestion-answering,demonstratingourmethod’sgeneralizationbeyondvideo-levelscenarios.
+Despite effective results, we also observe a few limitations of our proposed approach. Firstly, our
+approach employs a straightforward weighted averaging technique for merging adapter weights,
+leaving room for more advanced merging methods that could enhance knowledge sharing among
+11DAM:DynamicAdapterMergingforContinualVideoQALearning
+domains. Secondly, ourvalidationencompassesarelativelysmallnumberofdomains(≤ 7inour
+case),consistentwithpreviousdomain-incrementallearningresearch.Itwouldbevaluabletoassess
+the effectiveness of our method and existing domain-incremental learning methods across a more
+extensivedomainspectrum,potentiallyinvolvingasubstantialnumberofdomains(e.g.,100). We
+plantoexploretheseresearchdirectionsinourfuturework.
+Acknowledgements. We thank Md Mohaiminul Islam, Ce Zhang, Yue Yang, and Soumitri Chat-
+topadhyayforhelpfuldiscussions. ThisworkwassupportedbytheSonyFacultyInnovationaward,
+Laboratory for Analytic Sciences via NC State University, ONR Award N00014-23-1-2356, ARO
+Award W911NF2110220, DARPA ECOLE Program No. #HR00112390060, and NSF-AI Engage
+InstituteDRL-2112635. Theviewscontainedinthisarticlearethoseoftheauthorsandnotofthe
+fundingagency.
+APPENDIX
+Inthisappendix,wepresentthefollowing:
+A. Implementationdetails.
+B. EvaluationMetrics.
+C. Extensiontoothertypesofcontinuallearning.
+D. Datasetdescriptions.
+A IMPLEMENTATION DETAILS
+Details of our DAM approach. Our choice for the VidQA model is FrozenBiLM (Yang et al.,
+2022),astate-of-the-art(SOTA)modelintheVidQAdomain. Toalignwiththismodel,weutilizea
+vocabularyencompassingthe3635mostfrequentanswers. AdheringtotheFrozenBiLMapproach,
+weintegrateadaptersintoeachlayeroftheDeBERTa-XL(Heetal.,2020)languagemodel,employ-
+ingadownsamplingrateof8. ThelossfunctionisthesameastheoriginalFrozenBiLMmodel,i.e.,
+thecross-entropylossbetweenthepredictedtokensandground-truthanswertokens. Fortheinitial-
+ization of dataset-specific adapters during the commencement of continual learning (first dataset),
+we use the weights from FrozenBiLM, which is pre-trained on a substantial dataset comprising
+10 million video-text pairs (WebVid10M (Bain et al., 2021)). In the training of domain-specific
+adaptersforeachsubsequentdomain,weconduct20epochsoftrainingwithaninitiallearningrate
+of 5e−5. The learning rate undergoes a linear warm-up for the first 2 epochs, followed by a lin-
+eardecayto0. Ourproposed DAM introducesonlytwohyperparameters. Specifically, wesetthe
+temperatureparameter(τ)to0.01andmergetop-k=2adaptersfortheadaptermergingprocess. We
+normalizetherouter’spredictedprobabilitiesbysettingthesumofthetop-k probabilitiesto1and
+theremainingprobabilitiesto0.
+NetworkStructures: OurfrozenpretrainedbackboneisFrozenBiLM(Bainetal.,2021),compris-
+ingalanguagemodelDeBERTa-XLandavisionmodelCLIP-L/14. Theinputfeaturestotherouter
+consist of the concatenation of the averaged hidden states from the 4th last layer of DeBERTa-
+XL and the averaged hidden states from the last layer of CLIP-L/14, without the incorporation
+of adapters. For each dataset, we employ an adapter comprising L adapter layers, inserting an
+adapterlayeraftereachself-attentionlayerandfeed-forwardnetworklayerinDeBERTa-XL.Fol-
+lowing(Yangetal.,2022;Houlsbyetal.,2019;Yangetal.,2022),eachadapterlayerinourapproach
+includesadownsamplingandanupsamplinglinearlayer,alongwitharesidualconnection. Thelin-
+ear layers are configured with an 8× downsample scale to an intermediate hidden size, and the
+upsamplermapsbacktotheoriginaldimensionality.
+Continual Learning Baselines. Since our work is the very first exploration of continual VidQA
+learning,weimplementanumberofcontinuallearningbaselines(focusedonimageclassification)
+to VidQA task, including three recent Prompt-based methods L2P (Wang et al., 2022e), CODA-
+Prompt (Smith et al., 2023a), and S-Prompts (Wang et al., 2022b)and two regularization-based
+methods EwC (Kirkpatrick et al., 2017) and LwF (Li & Hoiem, 2017). For a fair comparison,
+weusethesamepretrainedmodelandpreservemosthyper-parametersettingswithourapproach.
+12DAM:DynamicAdapterMergingforContinualVideoQALearning
+• L2P(Wangetal.,2022e). Forthepromptsettings,wesetthepromptlengthto10andthe
+size of the prompt pool to 6. The dimension of the prompt key is configured to be 3072,
+matchingthedimensionoftherouterinputfeatureinourmethod.Thepromptdimensionis
+setto1536,aligningwiththeinputdimensionofthefrozenlanguagemodel. Wesweepthe
+learningratebetween1e−2and1e−5withanintervalof3.33×. Thebestperformance
+isachievedwithaninitiallearningrate3e-3.
+• CODA-Prompt (Smith et al., 2023a). For a fair comparison, we adopt the same prompt
+settings as our L2P baseline for CODA-Prompt. Following (Smith et al., 2023a), we
+apply orthogonality initialization to initialize the prompts, their keys, and their attention
+matrices. Thedimensionofpromptattentionissetto3072,consistentwiththedimension
+ofthepromptkey. Foroptimalperformance,weconfigurethelearningrateto1e-3.
+• S-Prompts(Wangetal.,2022b). Weuseexactlythesamepromptsettingsasinourimple-
+mentationforL2P.FortheirK-Meansrouter,wesetK =3asthenumberofcentroidsfor
+eachdomainand1-first-nearestneighborwiththecentroidstosearchforthebestprompts.
+• EwC (Kirkpatrick et al., 2017) and LwF (Li & Hoiem, 2017). We follow their original
+implementations,exceptthattheregularizationisonlyappliedtoadaptersasalltheother
+parametersarefrozen. Asingleadapterissharedforallthedomains.
+B EVALUATION METRICS
+Following(Wangetal.,2022b;d;e;Smithetal.,2023a),weemploystandardevaluationmetrics,in-
+cludingaverageaccuracyandforgetting. Theaverageaccuracymetricevaluatesbothlearningca-
+pacityandcatastrophicforgetting,whereastheforgettingmetricspecificallyaddressescatastrophic
+forgetting. Asanillustration,thepretrainedzero-shotmodelattains0%forgettingbutmayexhibit
+relativelylowaverageaccuracy.
+Formally, let S denote the accuracy on the τ-th dataset after training on the t-th dataset (task).
+t,τ
+After the training on the t-th dataset, we compute the average accuracy A and forgetting F as
+t t
+follows:
+t
+1(cid:88)
+A = S (3)
+t t t,τ
+τ=1
+t
+1(cid:88)
+F = max (S −S ) (4)
+t t τ′∈{1,...,t} τ′,τ t,τ
+τ=1
+UponcompletionoftrainingonallT datasets,wereportthefinalaverageaccuracyA andforget-
+T
+tingF .
+T
+C EXTENSION TO OTHER TYPES OF CONTINUAL LEARNING
+To show the flexibility of our framework, we also extend DAM to two other types of continual
+learning: 1)Class-IncrementalLearning(CIL)and2)Task-IncrementalLearning(TIL)onVidQA.
+CIL.InstandardCIL,therearenooverlappingclassesbetweentasks,andthetrainingofeachsplitor
+datasetistreatedasaseparatetask. TosimulateCIL,wetreateachuniqueanswerasaclass,similar
+totheprotocolcommonlyusedincontinuallearningforimageclassification(Wangetal.,2022e).
+Weconductexperimentsintwodistinctsettings: 1)MSRVTT-QA10subsets,wheretheclassesdo
+not overlap between subsets, and 2) 4-Datasets (iVQA, MSVD, LSMDC, ActivityNet), excluding
+samples with answers that overlap across datasets. In the first setting, the model is continually
+trained on these disjoint subsets of the data, while in the second setting, we train our model on
+the4continuallyarrivingdatasets. Theresults, presentedinTab.11, showthat DAM consistently
+outperformsS-Prompts(Wangetal.,2022b),achieving18.2%and8.5%improvementonaverage
+accuracyonMSRVTT-QA10-tasksand4-Datasetsrespectively.
+13DAM:DynamicAdapterMergingforContinualVideoQALearning
+Table11: Class-IncrementalLearning(CIL)experimentsareconductedundertwosettings: contin-
+uallytrainingourmodelon1)10datasubsetsofMSR-VTTwithoutoverlappingclasses(answers),
+and2)4sequentiallyarrivingdatasets(iVQA,MSVD,LSMDC,ActivityNet)thatdonothaveany
+overlap between their classes (answers). The proposed DAM outperforms S-Prompts by a large
+margininbothsettings.
+MSRVTT-QA10subsets 4-Datasets
+Method AverageAcc. Forgetting AverageAcc. Forgetting
+Multitask(upper-bound) 47.3 - 51.6 -
+S-Prompts 15.4 -23.5 42.2 -3.3
+DAM(Ours) 33.6 -13.7 50.7 -0.9
+Table12: ApplicationofourmodeltoTask-IncrementalLearning(TIL).Ourproposedframework
+generalizeswelltoTILachievingonly0.1%loweraccuracythantheupper-boundmultitasklearning
+baseline.
+Method iVQA MSVD MSR-VTT LSMDC ActivityNet TGIF Avg.
+Multitask(upper-bound) 39.7 56.6 46.7 62.9 42.2 67.8 52.6
+DAM 39.8 54.8 46.7 63.0 42.4 68.0 52.5
+TIL.ToextendourframeworktoTIL,wetreatthetrainingoneachdatasetasatask. UnlikeDIL
+orCIL,inTIL,eachtestsampleduringinferenceisprovidedwithadatasetidentity. Asshownin
+Tab.12,DAMobtainsonly0.1%loweraccuracythantheupper-boundmultitasklearningbaseline.
+Thisisbecauseinthissetting,DAMcanalwaysusethecorrectdataset-specificadapters,whichare
+individuallytrainedontheircorrespondingdatasetsandperformcomparabletomultitasktraining.
+D DATASET DESCRIPTIONS
+Video Question Answering(VidQA). We perform experiments on 9 Video Question Answering
+(VidQA)datasets,whichincludeiVQA(Yangetal.,2021),MSVD-QA(Xuetal.,2017),MSRVTT-
+QA (Xu et al., 2017), LSMDC (Maharaj et al., 2017), ActivityNet-QA (Yu et al., 2019), TGIF-
+QA(Jangetal.,2017),TrafficQA(Xuetal.,2021),EnvQA(Gaoetal.,2021)andAGQA(Grunde-
+McLaughlin et al., 2021). MSVD-QA, MSRVTT-QA, and ActivityNet-QA involve social media
+videos, with ActivityNet-QA featuring notably longer videos (i.e., on average 2 minutes in length
+versus30secondaveragedurationofthevideosinthefirsttwodatasets). iVQA,LSMDC,TGIF-
+QA, TrafficQA, EnvQA, and AGQA represent instructional, movie, short-GIF, traffic, virtual, and
+indoorhumanvideos,respectively.
+• iVQA (Yang et al., 2021) is an open-ended VidQA dataset with reduced language biases
+andhigh-qualityredundantmanualannotations. Itcontains10Kvideoclipsand10Kques-
+tions,splitinto6K/2K/2Kfortraining/validation/testing.
+• MSVD-QA(Xuetal.,2017)isanopen-endedVidQAdatasetbasedonMicrosoftResearch
+Video Description Corpus (Chen & Dolan, 2011). It contains 1.8K video clips and 51K
+question-answerpairs,splitinto32K/6K/13Kfortraining/validation/testing.
+• MSRVTT-QA (Xu et al., 2017) is an open-ended VidQA dataset based on MSR-VTT
+dataset(Xuetal.,2016). Itcontains10Kvideoclipsand243Kquestion-answerpairs,split
+into158K/12K/73Kfortraining/validation/testing.
+• ActivityNet-QA (Yu et al., 2019) is an open-ended VidQA dataset based on long videos
+(Caba Heilbron et al., 2015) (averaging 180 seconds) and human annotation. It contains
+5.8Kvideoclipsand58Kquestion-answerpairs,splitinto32K/18K/8Kfortraining/vali-
+dation/testing.
+• TGIF-QA (Jang et al., 2017) is an open-ended VidQA dataset based on the Tumblr GIF
+(TGIF)dataset(Lietal.,2016). Itcontains46KGIFsand53Kquestion-answerpairs,split
+into39K/13Kfortraining/testing.
+14DAM:DynamicAdapterMergingforContinualVideoQALearning
+• LSMDC-FiB (Maharaj et al., 2017) is an open-ended video-conditioned fill-in-the-blank
+task that consists of predicting masked words in sentences that describe short movie
+clips (Rohrbach et al., 2015). It contains 119K video clips and 349K question-answer
+pairs,splitinto297K/22K/30Kfortraining/validation/testing.
+• Traffic-QA(Xuetal.,2021)isadatasetdesignedforvideoQA,comprising10,080in-the-
+wildvideosandannotatedwith62,535QApairs.Itservesasabenchmarkforassessingthe
+cognitivecapabilityofcausalinferenceandeventunderstandingmodelsincomplextraffic
+scenarios. Our experiments focus on setting-1/2, where the model receives a question-
+answer pair as input and is tasked with predicting the correctness of the answer (yes or
+no).
+• Env-QA(Gaoetal.,2021)isanewvideoQAdatasettoevaluatetheabilityofunderstand-
+ingthecomposition,layout,andstatechangesoftheenvironmentpresentedbytheevents
+invideos.Itcontains23.3KvideoscollectedinAI2-THORsimulatorand85.1Kquestions.
+• AGQA (Grunde-McLaughlin et al., 2021) is a benchmark for compositional spatio-
+temporal reasoning. AGQA contains 192M unbalanced question answer pairs for 9.6K
+videos. We experiment on AGQA-v2 that contains a balanced subset of 2.27M question
+answerpairstomitigatelanguagebias.
+Visual Question Answering(VQA). Follow (Li et al., 2023b), we evaluate our model on 4
+mainstream VQA datasets: OK-VQA (Marino et al., 2019), aOK-VQA (Schwenk et al., 2022),
+GQA(Hudson&Manning,2019)andVQAv2(Goyaletal.,2017).
+• OK-VQA (Marino et al., 2019) is a knowledge-based visual question-answering bench-
+markwith14kimagesand14kquestions.
+• aOK-VQA(Schwenketal.,2022)isanaugmentedsuccessorofOK-VQA(Marinoetal.,
+2019)andcontainsadiversesetof25Kquestionsrequiringabroadbaseofcommonsense
+andworldknowledgetoanswer.
+• GQA(Hudson&Manning,2019)isalarge-scalevisualquestion-answeringdatasetwith
+realimagesfromtheVisualGenome(Krishnaetal.,2017)datasetandbalancedquestion-
+answerpairs.
+• VQAv2(Goyaletal.,2017)consistsof1.1MquestionsaboutCOCOimages(Chenetal.,
+2015)eachwith10answers. ItisthebalancedversionoftheoriginalVQA(Antoletal.,
+2015)dataset.
+REFERENCES
+Samuel K Ainsworth, Jonathan Hayase, and Siddhartha Srinivasa. Git re-basin: Merging models
+modulopermutationsymmetries. arXivpreprintarXiv:2209.04836,2022.
+StanislawAntol,AishwaryaAgrawal,JiasenLu,MargaretMitchell,DhruvBatra,CLawrenceZit-
+nick,andDeviParikh. Vqa:Visualquestionanswering. InProceedingsoftheIEEEinternational
+conferenceoncomputervision,pp.2425–2433,2015.
+Max Bain, Arsha Nagrani, Gu¨l Varol, and Andrew Zisserman. Frozen in time: A joint video and
+imageencoderforend-to-endretrieval.InProceedingsoftheIEEE/CVFInternationalConference
+onComputerVision,pp.1728–1738,2021.
+Fabian Caba Heilbron, Victor Escorcia, Bernard Ghanem, and Juan Carlos Niebles. Activitynet:
+A large-scale video benchmark for human activity understanding. In Proceedings of the ieee
+conferenceoncomputervisionandpatternrecognition,pp.961–970,2015.
+HyuntakCha,JaehoLee,andJinwooShin. Co2l: Contrastivecontinuallearning. InProceedingsof
+theIEEE/CVFInternationalconferenceoncomputervision,pp.9516–9525,2021a.
+JunbumCha,SanghyukChun,KyungjaeLee,Han-CheolCho,SeunghyunPark,YunsungLee,and
+SungraePark. Swad: Domaingeneralizationbyseekingflatminima. AdvancesinNeuralInfor-
+mationProcessingSystems,34:22405–22418,2021b.
+15DAM:DynamicAdapterMergingforContinualVideoQALearning
+Arslan Chaudhry, Marc’Aurelio Ranzato, Marcus Rohrbach, and Mohamed Elhoseiny. Efficient
+lifelonglearningwitha-gem. arXivpreprintarXiv:1812.00420,2018.
+David Chen and William B Dolan. Collecting highly parallel data for paraphrase evaluation. In
+Proceedingsofthe49thannualmeetingoftheassociationforcomputationallinguistics: human
+languagetechnologies,pp.190–200,2011.
+Xinlei Chen, Hao Fang, Tsung-Yi Lin, Ramakrishna Vedantam, Saurabh Gupta, Piotr Dolla´r, and
+C Lawrence Zitnick. Microsoft coco captions: Data collection and evaluation server. arXiv
+preprintarXiv:1504.00325,2015.
+Feng Cheng, Xizi Wang, Jie Lei, David Crandall, Mohit Bansal, and Gedas Bertasius. Vindlu: A
+recipeforeffectivevideo-and-languagepretraining. InProceedingsoftheIEEE/CVFConference
+onComputerVisionandPatternRecognition,pp.10739–10750,2023.
+HyungWonChung,LeHou,ShayneLongpre,BarretZoph,YiTay,WilliamFedus,EricLi,Xuezhi
+Wang,MostafaDehghani,SiddharthaBrahma,etal.Scalinginstruction-finetunedlanguagemod-
+els. arXivpreprintarXiv:2210.11416,2022.
+AlexeyDosovitskiy,LucasBeyer,AlexanderKolesnikov,DirkWeissenborn,XiaohuaZhai,Thomas
+Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly, et al. An
+image is worth 16x16 words: Transformers for image recognition at scale. arXiv preprint
+arXiv:2010.11929,2020.
+ArthurDouillard,AlexandreRame´,GuillaumeCouairon,andMatthieuCord. Dytox: Transformers
+forcontinuallearningwithdynamictokenexpansion. InProceedingsoftheIEEE/CVFConfer-
+enceonComputerVisionandPatternRecognition,pp.9285–9295,2022.
+BeyzaErmis, GiovanniZappella, MartinWistuba, AdityaRawal, andCedricArchambeau. Mem-
+ory efficient continual learning with transformers. Advances in Neural Information Processing
+Systems,35:10629–10642,2022.
+EnricoFini,VictorGTurrisiDaCosta,XavierAlameda-Pineda,ElisaRicci,KarteekAlahari,and
+Julien Mairal. Self-supervised models are continual learners. In Proceedings of the IEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pp.9621–9630,2022.
+PierreForet,ArielKleiner,HosseinMobahi,andBehnamNeyshabur. Sharpness-awareminimiza-
+tionforefficientlyimprovinggeneralization. arXivpreprintarXiv:2010.01412,2020.
+Tsu-JuiFu,LinjieLi,ZheGan,KevinLin,WilliamYangWang,LijuanWang,andZichengLiu. Vi-
+olet:End-to-endvideo-languagetransformerswithmaskedvisual-tokenmodeling.arXivpreprint
+arXiv:2111.12681,2021.
+Difei Gao, Ruiping Wang, Ziyi Bai, and Xilin Chen. Env-qa: A video question answering
+benchmark for comprehensive understanding of dynamic environments. In Proceedings of the
+IEEE/CVFInternationalConferenceonComputerVision,pp.1675–1685,2021.
+Qiankun Gao, Chen Zhao, Yifan Sun, Teng Xi, Gang Zhang, Bernard Ghanem, and Jian Zhang.
+A unified continual learning framework with general parameter-efficient tuning. arXiv preprint
+arXiv:2303.10070,2023.
+YashGoyal,TejasKhot,DouglasSummers-Stay,DhruvBatra,andDeviParikh.Makingthevinvqa
+matter: Elevatingtheroleofimageunderstandinginvisualquestionanswering. InProceedings
+oftheIEEEconferenceoncomputervisionandpatternrecognition,pp.6904–6913,2017.
+Madeleine Grunde-McLaughlin, Ranjay Krishna, and Maneesh Agrawala. Agqa: A benchmark
+for compositional spatio-temporal reasoning. In Proceedings of the IEEE/CVF Conference on
+ComputerVisionandPatternRecognition,pp.11287–11297,2021.
+FidelA.Guerrero-Pen˜a,HeitorR.Medeiros,ThomasDubail,MasihAminbeidokhti,EricGranger,
+andMarcoPedersoli. Re-basinviaimplicitsinkhorndifferentiation. 2023IEEE/CVFConference
+on Computer Vision and Pattern Recognition (CVPR), pp. 20237–20246, 2022. URL https:
+//api.semanticscholar.org/CorpusID:255096607.
+16DAM:DynamicAdapterMergingforContinualVideoQALearning
+VipulGupta,SantiagoAkleSerrano,andDennisDeCoste. Stochasticweightaveraginginparallel:
+Large-batchtrainingthatgeneralizeswell. arXivpreprintarXiv:2001.02312,2020.
+KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun. Deepresiduallearningforimagerecog-
+nition. In Proceedings of the IEEE conference on computer vision and pattern recognition, pp.
+770–778,2016.
+PengchengHe,XiaodongLiu,JianfengGao,andWeizhuChen. Deberta: Decoding-enhancedbert
+withdisentangledattention. arXivpreprintarXiv:2006.03654,2020.
+NeilHoulsby,AndreiGiurgiu,StanislawJastrzebski,BrunaMorrone,QuentinDeLaroussilhe,An-
+dreaGesmundo,MonaAttariyan,andSylvainGelly. Parameter-efficienttransferlearningfornlp.
+InInternationalConferenceonMachineLearning,pp.2790–2799.PMLR,2019.
+DrewAHudsonandChristopherDManning. Gqa: Anewdatasetforreal-worldvisualreasoning
+andcompositionalquestionanswering. InProceedingsoftheIEEE/CVFconferenceoncomputer
+visionandpatternrecognition,pp.6700–6709,2019.
+Gabriel Ilharco, Marco Tulio Ribeiro, Mitchell Wortsman, Suchin Gururangan, Ludwig Schmidt,
+Hannaneh Hajishirzi, and Ali Farhadi. Editing models with task arithmetic. arXiv preprint
+arXiv:2212.04089,2022a.
+GabrielIlharco,MitchellWortsman,SamirYitzhakGadre,ShuranSong,HannanehHajishirzi,Si-
+monKornblith,AliFarhadi,andLudwigSchmidt. Patchingopen-vocabularymodelsbyinterpo-
+latingweights. AdvancesinNeuralInformationProcessingSystems,35:29262–29277,2022b.
+YunseokJang,YaleSong,YoungjaeYu,YoungjinKim,andGunheeKim. Tgif-qa: Towardspatio-
+temporal reasoning in visual question answering. In Proceedings of the IEEE conference on
+computervisionandpatternrecognition,pp.2758–2766,2017.
+XisenJin,XiangRen,DanielPreotiuc-Pietro,andPengxiangCheng. Datalessknowledgefusionby
+mergingweightsoflanguagemodels. arXivpreprintarXiv:2212.09849,2022.
+DahuinJung,DongyoonHan,JihwanBang,andHwanjunSong. Generatinginstance-levelprompts
+forrehearsal-freecontinuallearning. InProceedingsoftheIEEE/CVFInternationalConference
+onComputerVision(ICCV),pp.11847–11857,October2023.
+JamesKirkpatrick,RazvanPascanu,NeilRabinowitz,JoelVeness,GuillaumeDesjardins,AndreiA
+Rusu,KieranMilan,JohnQuan,TiagoRamalho,AgnieszkaGrabska-Barwinska,etal.Overcom-
+ingcatastrophicforgettinginneuralnetworks. Proceedingsofthenationalacademyofsciences,
+114(13):3521–3526,2017.
+Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson, Kenji Hata, Joshua Kravitz, Stephanie
+Chen, Yannis Kalantidis, Li-Jia Li, David A Shamma, et al. Visual genome: Connecting lan-
+guageandvisionusingcrowdsourceddenseimageannotations.Internationaljournalofcomputer
+vision,123:32–73,2017.
+Alex Krizhevsky, Geoffrey Hinton, et al. Learning multiple layers of features from tiny images.
+2009.
+Jie Lei, Linjie Li, Luowei Zhou, Zhe Gan, Tamara L Berg, Mohit Bansal, and Jingjing Liu. Less
+is more: Clipbert for video-and-language learning via sparse sampling. In Proceedings of the
+IEEE/CVFconferenceoncomputervisionandpatternrecognition,pp.7331–7341,2021.
+Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. Blip-2: Bootstrapping language-
+image pre-training with frozen image encoders and large language models. arXiv preprint
+arXiv:2301.12597,2023a.
+Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. BLIP-2: bootstrapping language-image
+pre-trainingwithfrozenimageencodersandlargelanguagemodels. InICML,2023b.
+LinjieLi,Yen-ChunChen,YuCheng,ZheGan,LichengYu,andJingjingLiu. Hero: Hierarchical
+encoderforvideo+languageomni-representationpre-training. arXivpreprintarXiv:2005.00200,
+2020.
+17DAM:DynamicAdapterMergingforContinualVideoQALearning
+LinjieLi,ZheGan,KevinLin,Chung-ChingLin,ZichengLiu,CeLiu,andLijuanWang.Lavender:
+Unifying video-language understanding as masked language modeling. In Proceedings of the
+IEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.23119–23129,2023c.
+Yujie Li, Xin Yang, Hao Wang, Xiangkun Wang, and Tianrui Li. Learning to prompt knowledge
+transferforopen-worldcontinuallearning,2023d.
+Yuncheng Li, Yale Song, Liangliang Cao, Joel Tetreault, Larry Goldberg, Alejandro Jaimes, and
+JieboLuo. Tgif: Anewdatasetandbenchmarkonanimatedgifdescription. InProceedingsof
+theIEEEConferenceonComputerVisionandPatternRecognition,pp.4641–4650,2016.
+ZhizhongLiandDerekHoiem. Learningwithoutforgetting. IEEEtransactionsonpatternanalysis
+andmachineintelligence,40(12):2935–2947,2017.
+PengfeiLiu,WeizheYuan,JinlanFu,ZhengbaoJiang,HiroakiHayashi,andGrahamNeubig. Pre-
+train, prompt, and predict: A systematic survey of prompting methods in natural language pro-
+cessing. ACMComputingSurveys,55(9):1–35,2023.
+Vincenzo Lomonaco and Davide Maltoni. Core50: a new dataset and benchmark for continuous
+objectrecognition. InConferenceonrobotlearning,pp.17–26.PMLR,2017.
+David Lopez-Paz and Marc’Aurelio Ranzato. Gradient episodic memory for continual learning.
+Advancesinneuralinformationprocessingsystems,30,2017.
+Tegan Maharaj, Nicolas Ballas, Anna Rohrbach, Aaron Courville, and Christopher Pal. A dataset
+and exploration of models for understanding video data through fill-in-the-blank question-
+answering. InProceedingsoftheIEEEConferenceonComputerVisionandPatternRecognition,
+pp.6884–6893,2017.
+Kenneth Marino, Mohammad Rastegari, Ali Farhadi, and Roozbeh Mottaghi. Ok-vqa: A visual
+question answering benchmark requiring external knowledge. In Proceedings of the IEEE/cvf
+conferenceoncomputervisionandpatternrecognition,pp.3195–3204,2019.
+MichaelSMatenaandColinARaffel. Mergingmodelswithfisher-weightedaveraging. Advances
+inNeuralInformationProcessingSystems,35:17703–17716,2022.
+JamesLMcClelland,BruceLMcNaughton,andRandallCO’Reilly.Whytherearecomplementary
+learningsystemsinthehippocampusandneocortex: insightsfromthesuccessesandfailuresof
+connectionistmodelsoflearningandmemory. Psychologicalreview,102(3):419,1995.
+Michael McCloskey and Neal J Cohen. Catastrophic interference in connectionist networks: The
+sequentiallearningproblem. InPsychologyoflearningandmotivation,volume24,pp.109–165.
+Elsevier,1989.
+Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas.
+Communication-efficientlearningofdeepnetworksfromdecentralizeddata. InArtificialintelli-
+genceandstatistics,pp.1273–1282.PMLR,2017.
+AntoineMiech,DimitriZhukov,Jean-BaptisteAlayrac,MakarandTapaswi,IvanLaptev,andJosef
+Sivic. Howto100m: Learning a text-video embedding by watching hundred million narrated
+video clips. In Proceedings of the IEEE/CVF international conference on computer vision, pp.
+2630–2640,2019.
+XingchaoPeng,QinxunBai,XideXia,ZijunHuang,KateSaenko,andBoWang.Momentmatching
+for multi-source domain adaptation. In Proceedings of the IEEE/CVF international conference
+oncomputervision,pp.1406–1415,2019.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal,
+Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual
+modelsfromnaturallanguagesupervision. InInternationalconferenceonmachinelearning,pp.
+8748–8763.PMLR,2021.
+18DAM:DynamicAdapterMergingforContinualVideoQALearning
+Matthew Riemer, Ignacio Cases, Robert Ajemian, Miao Liu, Irina Rish, Yuhai Tu, and Gerald
+Tesauro. Learning to learn without forgetting by maximizing transfer and minimizing interfer-
+ence. arXivpreprintarXiv:1810.11910,2018.
+AnnaRohrbach,MarcusRohrbach,NiketTandon,andBerntSchiele. Adatasetformoviedescrip-
+tion. In Proceedings of the IEEE conference on computer vision and pattern recognition, pp.
+3202–3212,2015.
+DustinSchwenk,ApoorvKhandelwal,ChristopherClark,KennethMarino,andRoozbehMottaghi.
+A-okvqa: A benchmark for visual question answering using world knowledge. In European
+ConferenceonComputerVision,pp.146–162.Springer,2022.
+JamesSmith,Yen-ChangHsu,JonathanBalloch,YilinShen,HongxiaJin,andZsoltKira. Always
+be dreaming: A new approach for data-free class-incremental learning. In Proceedings of the
+IEEE/CVFInternationalConferenceonComputerVision,pp.9374–9384,2021.
+James Seale Smith, Leonid Karlinsky, Vyshnavi Gutta, Paola Cascante-Bonilla, Donghyun Kim,
+Assaf Arbelle, Rameswar Panda, Rogerio Feris, and Zsolt Kira. Coda-prompt: Continual de-
+composedattention-basedpromptingforrehearsal-freecontinuallearning. InProceedingsofthe
+IEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.11909–11919,2023a.
+James Seale Smith, Junjiao Tian, Shaunak Halbe, Yen-Chang Hsu, and Zsolt Kira. A closer look
+at rehearsal-free continual learning. In Proceedings of the IEEE/CVF Conference on Computer
+VisionandPatternRecognition,pp.2409–2419,2023b.
+TejasSrinivasan,Ting-YunChang,LeticiaPintoAlva,GeorgiosChochlakis,MohammadRostami,
+and Jesse Thomason. Climb: A continual learning benchmark for vision-and-language tasks.
+AdvancesinNeuralInformationProcessingSystems,35:29440–29453,2022.
+ChenSun,AustinMyers,CarlVondrick,KevinMurphy,andCordeliaSchmid. Videobert: Ajoint
+modelforvideoandlanguagerepresentationlearning. InProceedingsoftheIEEE/CVFinterna-
+tionalconferenceoncomputervision,pp.7464–7473,2019.
+Junke Wang, Dongdong Chen, Zuxuan Wu, Chong Luo, Luowei Zhou, Yucheng Zhao, Yujia Xie,
+Ce Liu, Yu-Gang Jiang, and Lu Yuan. Omnivl: One foundation model for image-language and
+video-languagetasks.Advancesinneuralinformationprocessingsystems,35:5696–5710,2022a.
+LiyuanWang, JingyiXie, XingxingZhang, HangSu, andJunZhu. Towardsageneralframework
+forcontinuallearningwithpre-training,2023a.
+Liyuan Wang, Xingxing Zhang, Hang Su, and Jun Zhu. A comprehensive survey of continual
+learning: Theory,methodandapplication. arXivpreprintarXiv:2302.00487,2023b.
+Xiao Wang, Tianze Chen, Qiming Ge, Han Xia, Rong Bao, Rui Zheng, Qi Zhang, Tao Gui, and
+XuanjingHuang. Orthogonalsubspacelearningforlanguagemodelcontinuallearning,2023c.
+YabinWang,ZhiwuHuang,andXiaopengHong. S-promptslearningwithpre-trainedtransformers:
+Anoccam’srazorfordomainincrementallearning. AdvancesinNeuralInformationProcessing
+Systems,35:5682–5695,2022b.
+ZhenWang,LiuLiu,YiqunDuan,YajingKong,andDachengTao. Continuallearningwithlifelong
+visiontransformer. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pp.171–181,2022c.
+ZifengWang, ZizhaoZhang, SaynaEbrahimi, RuoxiSun, HanZhang, Chen-YuLee, XiaoqiRen,
+Guolong Su, Vincent Perot, Jennifer Dy, et al. Dualprompt: Complementary prompting for
+rehearsal-free continual learning. In European Conference on Computer Vision, pp. 631–648.
+Springer,2022d.
+ZifengWang,ZizhaoZhang,Chen-YuLee,HanZhang,RuoxiSun,XiaoqiRen,GuolongSu,Vin-
+cent Perot, Jennifer Dy, and Tomas Pfister. Learning to prompt for continual learning. In Pro-
+ceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.139–149,
+2022e.
+19DAM:DynamicAdapterMergingforContinualVideoQALearning
+ZiyangWang,Yi-LinSung,FengCheng,GedasBertasius,andMohitBansal.Unifiedcoarse-to-fine
+alignmentforvideo-textretrieval. InProceedingsoftheIEEE/CVFInternationalConferenceon
+ComputerVision(ICCV),pp.2816–2827,October2023d.
+Mitchell Wortsman, Gabriel Ilharco, Samir Ya Gadre, Rebecca Roelofs, Raphael Gontijo-Lopes,
+AriSMorcos, HongseokNamkoong, AliFarhadi, YairCarmon, SimonKornblith, etal. Model
+soups: averaging weights of multiple fine-tuned models improves accuracy without increasing
+inference time. In International Conference on Machine Learning, pp. 23965–23998. PMLR,
+2022a.
+MitchellWortsman,GabrielIlharco,JongWookKim,MikeLi,SimonKornblith,RebeccaRoelofs,
+Raphael Gontijo Lopes, Hannaneh Hajishirzi, Ali Farhadi, Hongseok Namkoong, et al. Robust
+fine-tuningofzero-shotmodels.InProceedingsoftheIEEE/CVFConferenceonComputerVision
+andPatternRecognition,pp.7959–7971,2022b.
+Junbin Xiao, Pan Zhou, Tat-Seng Chua, and Shuicheng Yan. Video graph transformer for video
+questionanswering. InEuropeanConferenceonComputerVision,pp.39–58.Springer,2022.
+Dejing Xu, Zhou Zhao, Jun Xiao, Fei Wu, Hanwang Zhang, Xiangnan He, and Yueting Zhuang.
+Video question answering via gradually refined attention over appearance and motion. In Pro-
+ceedingsofthe25thACMinternationalconferenceonMultimedia,pp.1645–1653,2017.
+JunXu,TaoMei,TingYao,andYongRui. Msr-vtt: Alargevideodescriptiondatasetforbridging
+video and language. In Proceedings of the IEEE conference on computer vision and pattern
+recognition,pp.5288–5296,2016.
+Li Xu, He Huang, and Jun Liu. Sutd-trafficqa: A question answering benchmark and an efficient
+networkforvideoreasoningovertrafficevents. InProceedingsoftheIEEE/CVFConferenceon
+ComputerVisionandPatternRecognition,pp.9878–9888,2021.
+PrateekYadav,DerekTam,LeshemChoshen,ColinRaffel,andMohitBansal. Resolvinginterfer-
+encewhenmergingmodels. arXivpreprintarXiv:2306.01708,2023.
+AntoineYang,AntoineMiech,JosefSivic,IvanLaptev,andCordeliaSchmid. Justask:Learningto
+answerquestionsfrommillionsofnarratedvideos.InProceedingsoftheIEEE/CVFinternational
+conferenceoncomputervision,pp.1686–1697,2021.
+Antoine Yang, Antoine Miech, Josef Sivic, Ivan Laptev, and Cordelia Schmid. Zero-shot video
+question answering via frozen bidirectional language models. Advances in Neural Information
+ProcessingSystems,35:124–141,2022.
+Shoubin Yu, Jaemin Cho, Prateek Yadav, and Mohit Bansal. Self-chained image-language model
+forvideolocalizationandquestionanswering. arXivpreprintarXiv:2305.06988,2023.
+WeijiangYu,HaotengZheng,MengfeiLi,LeiJi,LijunWu,NongXiao,andNanDuan. Learning
+frominside:Self-drivensiamesesamplingandreasoningforvideoquestionanswering.Advances
+inNeuralInformationProcessingSystems,34:26462–26474,2021.
+ZhouYu,DejingXu,JunYu,TingYu,ZhouZhao,YuetingZhuang,andDachengTao. Activitynet-
+qa: Adatasetforunderstandingcomplexwebvideosviaquestionanswering. InProceedingsof
+theAAAIConferenceonArtificialIntelligence,volume33,pp.9127–9134,2019.
+Rowan Zellers, Ximing Lu, Jack Hessel, Youngjae Yu, Jae Sung Park, Jize Cao, Ali Farhadi, and
+YejinChoi.Merlot:Multimodalneuralscriptknowledgemodels.AdvancesinNeuralInformation
+ProcessingSystems,34:23634–23651,2021.
+XiZhang,FeifeiZhang,andChangshengXu. Vqacl: Anovelvisualquestionansweringcontinual
+learning setting. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition,pp.19102–19112,2023.
+YaoZhang,HaokunChen,AhmedFrikha,YeziYang,DenisKrompass,GengyuanZhang,Jindong
+Gu, and Volker Tresp. Cl-crossvqa: A continual learning benchmark for cross-domain visual
+questionanswering. arXivpreprintarXiv:2211.10567,2022.
+YukunZuo,HantaoYao,LuYu,LianshengZhuang,andChangshengXu. Hierarchicalpromptsfor
+rehearsal-freecontinuallearning,2024.
+20
