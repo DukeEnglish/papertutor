@@ -1,0 +1,1168 @@
+Dynamic Memory Compression: Retrofitting LLMs for Accelerated Inference
+PiotrNawrot*QV AdrianŁan´cucki*QK MarcinChochowskiQ DavidTarjanQ EdoardoM.PontiV
+QNVIDIA KUniversityofWrocław VUniversityofEdinburgh
+Abstract
+(append)
+Key-value
+Transformers have emerged as the backbone of cache kvt
+largelanguagemodels(LLMs). However,genera-
+(a) Regular key–value cache with items kv depicted as boxes.
+tionremainsinefficientduetotheneedtostorein i
+Newitemsarealwaysappended.
+memoryacacheofkey–valuerepresentationsfor
+past tokens, whose size scales linearly with the α t=0 (append)
+Key-value
+inputsequencelengthandbatchsize. Asasolu- cache kv
+t
+tion,weproposeDynamicMemoryCompression
+(DMC), a method for on-line key–value cache α=1 (accumulate)
+t
+compressionatinferencetime. Mostimportantly,
+kv
+themodellearnstoapplydifferentcompression t
+weighted
+ratesindifferentheadsandlayers. Weretrofitpre- average
+trainedLLMssuchasLlama2(7B,13Band70B)
+intoDMCTransformers,achievingupto~3.7× (b)DynamicMemoryCompression(DMC)chooseswhetherto
+accumulateorappendcurrentitems,resultinginasmallerkey–
+throughputincreaseduringauto-regressiveinfer-
+valuecache.
+enceonanNVIDIAH100GPU.DMCisapplied
+viacontinuedpre-trainingonanegligiblepercent- Figure1: Key–valuecacheupdatemechanisms.
+ageoftheoriginaldatawithoutaddinganyextra
+parameters.WefindthatDMCpreservestheorigi-
+naldownstreamperformancewithupto4×cache comesprohibitiveduetotheexcessivememoryload. This
+compression,outperformingup-trainedgrouped- issueemergesevenmoreclearlywithlong-contextgenera-
+queryattention(GQA).GQAandDMCcanbe tion(e.g.,indialoguesandstories)orwhenservinglarge
+evencombinedtoobtaincompoundedgains. Asa numbersofuserqueries.
+resultDMCfitslongercontextsandlargerbatches
+Awidespreadsolutiontoincreasethememoryefficiencyof
+withinanygivenmemorybudget.
+TransformersduringinferenceisGroupedQueryAttention
+(GQA;Ainslieetal.,2023;Shazeer,2019),whichusesa
+number of key and value heads inferior to the number of
+1.Introduction
+queryheadsthroughparametersharing. Asanalternative,
+the number of overall tokens in memory can be reduced
+TransformerLargeLanguageModels(LLMs)arethestate
+throughtokenmerging(Zhangetal.,2018;Liuetal.,2018;
+oftheartingenerativeandconversationalAI(Touvronetal.,
+Bolya et al., 2022) or token pruning (Anagnostidis et al.,
+2023; Jiang et al., 2023). Their deployment, however, is
+2023; Kim & Cho, 2020). Nevertheless, these methods
+curtailedinpartbytheirinefficiency. Thisisnotonlydue
+oftenpaythepriceofaseveredegradationindownstream
+tothequadraticcomplexityofattentionlayers(Bahdanau
+performance. Ontheotherhand,hardware/IO-aware(Dao
+etal.,2014;Vaswanietal.,2017): duringgeneration,Trans-
+etal.,2022;Kwonetal.,2023)andsub-quadraticalgorithms
+formersstorethekeysandvaluesofpasttokensinmemory
+forattention(Beltagyetal.,2020;Choromanskietal.,2020)
+toavoidrecomputingthemmultipletimes. Sincethiskey–
+donotalleviatethememoryloadoftheKVcache.
+value(KV)cachegrowslinearlywiththesequencelength
+and batch size, generation with Transformers quickly be- Inourwork,weaimtoachievealosslesscompressionofthe
+KVcacheofLLMs,thusretainingtheirperformancewhile
+*Equalcontribution.
+reducingtheirmemoryload. Tothisend,weproposeDy-
+Correspondenceto:PiotrNawrot<piotr.nawrot@ed.ac.uk>.
+namicMemoryCompression(DMC).AsshowninFigure1,
+during every time step, DMC decides whether to append
+1
+4202
+raM
+41
+]LC.sc[
+1v63690.3042:viXraDynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+thecurrentkeyandvaluerepresentationstothecacheorto
+performaweightedaverageofthemwiththetopitemon √
+thecache. Notethatmemorygrowssub-linearlyinDMC, ah =
+exp(qh i⊤kh j/ d √h)
+, oh
+=(cid:88)i
+ahvh. (4)
+whichthereforefallshalfwaybetweenvanillaTransformers ij (cid:80)i exp(qh⊤kh/ d ) i ij j
+t=1 i t h j=1
+andstatespacelanguagemodels(Fuetal.,2023;Gu&Dao,
+2023),wherememoryisconstant. Finally, the outputs from all heads are concatenated and
+linearlytransformedtoproducethefinaloutputO ∈Rn×d:
+Inourexperiments,weequippre-existingLLMs—suchas
+L Dl Mam Ca b2 y( rT eto rou fivr tto in nge tt ha el m., 2 o0 n2 a3 n) e7 gB li, g1 ib3 lB e, pea rn cd en7 t0 aB ge— ow fti hth
+e
+O =(W o[o1 1,...,on 1h],...,W o[o1 n,...,on nh]) (5)
+original pre-training data (~2% for 2× compression and whereW ∈Rd×d.
+o
+~4%for4×compression)andwithoutaddinganyextrapa-
+rameterstotheoriginalLLM.WeevaluateourDMCmodels
+2.2.KVCachingDuringInference
+onaseriesofdownstreamtaskssuchasMMLU(Hendrycks
+etal.,2021)forfactuality,QAdatasetsforcommon-sense In a Transformer decoder, the generation of sequences is
+reasoning, and HumanEval (Chen et al., 2021) for code. auto-regressive: eachnewtokenispredictedbasedonthe
+WefindthatDMCLLMsretainadownstreamperformance previouslygeneratedones. Toavoidredundantcomputation,
+similartotheoriginalLLM,whereasGQAincurssignifi- it is common to store the keys and values of previously
+cant degradation. Finally, we show that DMC can be hy- computedtokensintheKVcache.Foreachtimestepi,only
+bridized with GQA such that their compression rates are thekeysandvaluesforthecurrenttokenx i arecomputed
+compounded. ForLlama270B,whichispre-trainedwith whereasthoseforx <i areretrievedfromthecache. Thus
+GQA8×,DMC2×achievesatotalcompressionof16×. foreachheadh:
+WeverifythatKVcachecompressiontranslatesintomore Kh =[Kh ,Whx ] (6)
+1:i−1 k i
+efficientgenerationinpractice. WemeasurethatDMC4×
+Vh =[Vh ,Whx ] (7)
+increasestheinferencethroughputbetween340%and370% 1:i−1 v i
+forLlama27Band13BonNVIDIAH100orA100GPUs
+Notethatthisprocessisnotnecessaryforqueriesasonlythe
+withoutlossinperformance. Infact,itallowsustofitlarger
+queryforthecurrenttokenx isneededateachinference
+i
+batchesandlongersequencesintoagivenmemorybudget.
+timestep.
+Finally, compression schemata learned by DMC provide
+insightsintotheinternalstructureoftheLLMs,revealinga Asaconsequence,theKVcachegrowslinearlywitheach
+preferenceforcompressingheadsinhigherlayers. newtoken. Thisprogressiveexpansionleadstosubstantial
+memoryconsumptionandincreasedlatency,especiallyfor
+longinputsequences.Thisissueisfurtherexacerbatedwhen
+2.Background
+serving multiple requests concurrently, as each inference
+2.1.Multi-HeadSelf-Attention processrequiresitsownKVcache,significantlystraining
+thesystem’sresources.
+LetX =(x ,...,x )∈Rn×d denotetheinputsequence
+1 n
+ofhiddenstatesofaTransformerlayer,wherenstandsfor
+3.Method: DynamicMemoryCompression
+thenumberoftokensinasequence,anddforthehidden
+statedimension.AMulti-headSelf-Attention(MHSA)layer
+InferencewithLLMstendstobememoryboundratherthan
+dividestheembeddingsinton differentheads. Afterwards,
+h computebound,asweexplaininAppendixAindetail.This
+theself-attentionprocessisappliedtoeachheadseparately.
+meansthatlatencyscaleslinearlywiththesizeoftheKV
+This enables the model to focus on different parts of the
+cache. WetackletheproblemofreducingthesizeofKV
+input,capturingvarioustypesofrelationshipsinthedata.
+cachewhichbringstwoimmediatebenefits(Zhangetal.,
+Foreachheadh,differentweightmatricesWh,Wh,Wh ∈
+q k v 2023): 1)itlowersthelatencyofauto-regressivegeneration,
+Rd/nh×d/nh are used to project the input sequence into and2)increasesthroughputbysavingGPUmemoryand
+queriesQh,keysKh,andvaluesVh:
+allowingforlargerbatchsizesorsequencelengths.
+Qh =(Whx ,...,Whx ) (1) In this section we introduce Dynamic Memory Compres-
+q 1 q n
+sion(DMC),asimpleandinexpensivemethodforon-line
+Kh =(Whx ,...,Whx ) (2)
+k 1 k n compression of the KV cache at inference time. In what
+Vh =(Whx ,...,Whx ). (3) follows, we first describe the inference-time operation of
+v 1 v n
+DMC,whichconstitutesourendgoal. Next,weillustrate
+Theattentionscoresandoutputsforthei-thtokenarethen howtoteachapre-trainedLLMsuchbehaviorthroughshort,
+computedas continuedpre-training.
+2DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+3.1.Inference 3.2.Training
+Considertheforwardpassofanattentionlayerduringauto- TheDMCinferencealgorithmswitchesbetweenaccumu-
+regressiveinference(Section2.1). InavanillaTransformer, latingandappendingtokenstotheKVcache. Inorderto
+at every time step t, both k and v are appended to the endow LLMs with DMC, we continue pre-training them
+t t
+KVcache(Section2.2). InDMC,ontheotherhand, the onanegligibleamountoftheirpre-trainingdata,gradually
+KVcacheupdateprocedureisdifferent,asdetailedinAl- increasingthecompressionratetowardsatarget. However,
+gorithm1. First,adecisionvariableα ∈{0,1}andimpor- thisposesseriouschallenges. First,weoptforend-to-end
+t
+tancevariableω ∈ [0,1]arepredicted. Inordertoavoid learningviagradientdescentandcontinuousrelaxationof
+t
+addingnewparameters,wereusethefirstneuronfromk the decision variables. As a result, we have to define an
+t
+andq ,respectively,toextractthetwoscores.1 operationforKVcacheupdatingwhen0<α<1,result-
+t
+inginpartlyaggregated,partlyaccumulatedkeyandvalue
+states. Second,toavoidtraining–inferencemismatch,we
+Algorithm1Single-headKVcacheupdatewithDynamic mustsimulatetheDMCbehavioratinferencetimewhile
+MemoryCompression(DMC) parallelizingtrainingacrossasequenceoftokens: asacon-
+1: procedureKV-UPDATE(K,V,q t,k t,v t) sequence the length of K and V is not reduced through
+2: α t ←round(sigmoid(k t[0])) compressionduringtraining;rather,allintermediatestates
+3: ω t ←sigmoid(q t[0]) of keys and values are explicitly kept in memory and an
+4: ifα t =1then ▷ACCUMULATE auxiliary(graduallydiscretized)maskregulatesqueryinter-
+5: z t ←z t−1+ω t actions. Weelaborateonoursolutionstothesechallenges
+6: K ←[K 1:l−1,(k lz t−1+k tω t)/z t] below.
+7: V ←[V 1:l−1,(v lz t−1+v tω t)/z t]
+8: else ▷APPEND GradientEstimationforDiscreteDecisions Thedeci-
+9: z t ←ω t sionwhethertoaccumulateorappendatinferencetimeisa
+10: K ←[K 1:l , k t] discreteone;however,roundingsigmoid(k[0])tothenear-
+11: V ←[V 1:l , v t] estintegerfortrainingwouldresultinanon-differentiable
+12: k t[0]←0 operationwithzerogradients.Hence,weresorttostochastic
+13: q t[0]←0 reparametrizationofthedecisionvariableduringtraining
+14: returnK,V,q t,k t α ∼Gumbel-sigmoid(k[0]−c,τ)∈[0,1], (8)
+t
+whereτ isthetemperature2andcisaconstantsubtractedso
+Basedonα t,adecisionismadewhetherKVrepresentations thateveryα=0attrainingstep0. ThisensuresthatDMC
+k t andv t areappendedtothecacheoraccumulatedwith initially performs no compression and starts the training
+itslastelement(Figure1). Inparticular,foraccumulation behavingjustlikethevanillaTransformer.
+weperformaweightedaveragebasedonapredictedimpor-
+tancescoresωforthecurrenttokenandtherunningsumof Partialaccumulations Aswerelaxourdiscretedecisions,
+importancescoresz t forallthetokenssincethelasttime wenowmustdefineamechanismtoupdatetheKVcache
+stepα=0waspredicted. thatgeneralizesAlgorithm1tocontinuousα. Hence,we
+definepartiallyaccumulatedstatesforα∈[0,1]as:
+In fact, the α variable effectively segments the input se-
+quence: each decision determines if the current segment
+z ←ω , z ←z α +ω ,
+shouldcontinue(α=1)oranewsegmentshouldbeopened 0 0 i i−1 i i
+α k z +k ω
+(α=0). Asaresult,aftertheupdate,thecachelengthfor k ←k , k ← i i−1 i−1 i i,
+DMCisl =(cid:80)t i=1(1−α i)≤t,whereasinvanillaTrans- 0 0 i z i (9)
+α v z +v ω
+formersitisalwaysl=t. Inwhatfollows,wewillreferto v ←v , v ← i i−1 i−1 i i.
+theratiot/lbetweenthelengthtofanuncompressedcache 0 0 i z i
+andthecompressedlengthlastheCompressionRatio(CR).
+Notethatwhenα∈{0,1},Equation(9)defaultstoAlgo-
+Finally,multi-headself-attentioniscalculatedsimilarlyto rithm1.
+vanilla Transformer using KV cache sequences, with the
+exceptionthatKVsequencesfordifferentheadsmighthave Intermediate compression steps Aside from key and
+differentlengths. Algorithm1isappliedtoeveryMHSA valuecomputationsshowninEquation(9),therestofthe
+layerandheadindependently. forwardpasscanbeperformedinparallelforalltokensin
+1Note that this choice is arbitrary as we could use any two 2Low temperatures sharpen α into almost-discrete values
+t
+neuronsfrom{q ,k ,v }. whichaccuratelymimicsinferencebehavior.
+t t t
+3DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+k k k ... k
+0 1 2 n
+q  0 −∞ −∞ ... −∞
+α =1 0
+(a1 ccumulate) q 1  log(1(cid:57)α 1) 0 −∞ −∞ 
+α =1 q log(1(cid:57)α ) log(1(cid:57)α ) 0 −∞
+2 2  1 2 
+( αa 3c =cu 0mulate) . .
+.
+ 
+
+. .
+.
+... . .
+.
+ 
+
+(append) q 5 q log(1(cid:57)α ) log(1(cid:57)α ) log(1(cid:57)α ) ... 0
+n 1 2 3
+α =1
+4
+(accumulate)
+α 5=0 Figure3: Additivemaskappliedduringtrainingtothethe
+(append)
+k k k k k k
+0 1 2 3 4 5 normalizedattentionscorestoblockqueriesfromattending
+intermediateKVstates(aswellasfuturestates).
+Figure2: AnexampleofKVcachegrowthinDMCduring
+inference(left). Duringtraining(right),weretainallinter-
+mediate states seen during inference and gradually block
+accesstosomeofthem(grayarrows)
+ℓ =
+1 ∗max(0,n ln hn
+−(cid:88)nl (cid:88)nh (cid:88)n
+α ).
+CR n n n CR lht
+l h
+l=1h=1t=1
+thesequence. Nonetheless,thiscreatesamismatchbetween (10)
+trainingandevaluation,sinceallintermediatestatesofkeys
+It is added to the language modeling loss term ℓ =
+andvaluesareaccessibleduringself-attention. −(cid:80)n
+logp (x | x ), with the final
+objectiveL oM
+f the
+t=1 θ t <t
+Toillustratethisissue,considertheexampleofaKVcache trainingbeing:
+duringDMCinferenceshowninFigure2forthesequence
+ofdecisionscoresα
+1:5
+=(1,1,0,1,0)(importancescores argmin θℓ LM+ℓ CR. (11)
+ωhavebeenomittedforclarity). ThelastelementoftheKV
+cachechangesateverytimestep. Inordertoproperlysim- Importantly,thetrainingprocedureisdesignedforslowly
+ulatetheinference-timeevolutionoftheKVcacheduring ramping up the desired compression rate and stopping at
+training,wekeepallunrolledintermediateKVcacheitems. will. Thisenablesproducingaseriesofmodelswithdiffer-
+In lieu of an auto-regressive ‘causal’ mask, however, we entcompressionrateswithinasinglerun. Itfollowsthatall
+useanadditivemaskbasedonthesequenceofαvaluesto hyperparameters,likeGumbel-sigmoidsamplingtempera-
+modifytheattentionscoresah fromEquation(4),whichis tureandlearningrate,arenotdecayedandremainconstant
+ij
+showninFigure3.Duringtraining,theαvalues1)naturally throughouttraining.
+convergetowards0or1asthemodelstrivestosatisfythe
+languagemodelingcriterionandreduceuncertainty;2)are 3.3.PracticalConsiderations
+intentionallypushedtoalmost-discretestatesbytheGum-
+Implementingavariable-lengthcachewithoutpadding
+bel noise and low temperature setting. Such binarization
+DMC allows every head to learn a custom compression,
+of α values significantly impacts the attention scores - it
+whichresultsinKVcachesequenceswithvariablelengths
+strengthens the queries interactions with last elements of
+acrossheads. Onecouldimplementthiscachenaïvelywith
+everykey–valuesegment,andweakensthosewiththeinter-
+mediateelements,whicharediscardedduringinference.3 paddedtensors. ForeshadowingourresultsinSection5.2,
+however,thelargestefficiencygainsduringinferencestem
+Infact,whenα∈{0,1},thematrixisfilledwitheither0or
+from the reduced memory footprint, which allows us to
+−∞values,andexactlycorrespondstotheinferencetime
+increasethebatchsizeanddramaticallyimprovethroughput.
+query-to-keyattendancepattern.
+Inordertogetthesebenefits,thememorycannotbewasted
+onstoringKVcacheaspaddedtensors.
+Trainingobjective Themodelisincentivizedtocompress
+Thus, we provide a simple custom implementation of at-
+theKVcachetoacertainCR,andthusincreasethepredicted
+tentioninPyTorch,buildingonFlashAttention(Daoetal.,
+α values. Instead of matching the desired rate for each
+2022) and PagedAttention (Kwon et al., 2023), in which
+append-or-accumulate decision α, we calculate a global
+theheadscanlearnwildlydifferentcompressionratesbut
+one-sidedlossasthedifferencebetweentheexpectedsum
+which does not require padding. As an ablation, we also
+ofKVtokensacrossalllayersl,headshandtimestepst
+study a constrained variant (DMC-C) in which we force
+underthedesiredCompressionRateCRandthesumofall
+theheadsinagivenlayertomaintainsimilarcompression
+decisions,normalizedby(n n n):
+l h
+rates,whichminimizesthepaddingnecessaryinnaïveatten-
+3SeeAppendixFfordetailsonthemaskimplementation. tionimplementations;however,itsignificantlyconstrains
+4
+emit
+ehcac
+eulav-yeKDynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+thelearnedcompressionschemaandleadstoworsemodel Training hyperparameters We follow the training hy-
+quality. perparametersoutlinedbyTouvronetal.(2023). Weem-
+ploy the AdamW optimizer with parameters β = 0.9,
+1
+Windowgroupingapproximation Thecalculationofpar- β 2 = 0.95,andϵ = 1e−5,inconjunctionwithaweight
+tialaccumulations,duringtrainingofDMCmodelsEqua- decayof0.1andgradientclippingof1.0. Thebatchsize
+tion(9),forasequenceofntokensrequiresO(n)sequential is1024withacontextlengthof4096. Weapplyaconstant
+steps,thereforeconsiderablyslowingdownthetraining. In learning rate identical to the final rate from the original
+ordertoimprovethetimecomplexity,wecalculateEqua- Llama2pre-trainingphase: 3×10−4 forthe7Band13B
+tion (9) at every time step t independently over a short models,and1.5×10−4forthe70Bmodel. Finally,weset
+windowofthelastwelementsuptotimet(e.g.,w =12). thewindowsize(Section3.3)to12,andkeeptheGumbel-
+ThisenablesustoreducethespanofcomputationtoO(w), sigmoidtemperatureconstantat0.1throughouttheentire
+providedthatatleastnthreadscanexecutethecomputation training.
+inparallelforeachofthenpositions.
+Trainingschedule Thevolumeofdataforcontinuedpre-
+4.ExperimentalSetup training of DMC is contingent on the targeted KV cache
+compressionratio;alargerCRnecessitatesmoredata. We
+Baselines In our experiments, we evaluate strategies to
+useatrainingschedulewith24B,48B,and72Btokensfor
+retrofit a state-of-the-art Large Language Model (LLM),
+trainingto2×,3×,and4×compression,respectively. In
+Llama2(Touvronetal.,2023),4intoamoreefficientmodel
+AppendixDweincludeanablationwhereweuseaschedule
+acrossvarioussizes: 7B,13B,and70B.Inadditiontocom-
+withtwicelessdata.
+paringthedownstreamperformanceofDMCwiththeorig-
+inalmodel,wealsouseGroupedQueryAttention(GQA) ForDMC,wediscoveredthattheannealingstrategywas
+as a main baseline, as it constitutes the most widespread crucial. Startingthetrainingwithoutcompressionandits
+strategytoensureKVcacheefficiency(Jiangetal.,2023). measuredincreasehelpstopreservetheoriginalperplexity.
+Throughextensiveablations(seeAppendixD),wefound
+thatanysignificantincreaseofperplexity,evenifrecovered
+Checkpoint adaptation To equip the original Llama 2
+duringcontinuedpre-training,preventsthemodelfromre-
+with GQA, we perform the standard checkpoint conver-
+gainingitsperformanceondownstreamtasks. Thetarget
+sionproposedbyAinslieetal.(2023): thekeyandvalue
+CRislinearlyincreasedfrom1×to4×forthe7Band13B
+projection matrices are split by head. Then the resulting
+models,andfrom1×to2×forthe70Bmodel.5.
+sub-matricescorrespondingtoheadsinthesamegroupare
+merged. NotethatthisresultsinafixedCRduringtraining. UponachievingthetargetcompressionratiowiththeDMC
+model,weinitiateafinalsolidifyingphasewhereinwe: 1)
+AsforDMC,weavoidtheintroductionofnewparameters
+continueup-trainingforanadditional8Btokens,2)main-
+byre-purposingthefirstdimensionfromboththek andq
+t t
+tainafixedcompressionratio,and3)implementacosine
+representations,inordertopredictsegmentationdecisions
+learning rate schedule, annealing it down to 10% of the
+andimportancescores. Settingq andk tozerotriggersa
+t t
+initialvalue. Thisphaseaimsatstabilizingthemodelwith
+significantincreaseinlanguagemodelingloss,bydisrupting
+aspecific,fixedcompressionratio.
+the attention scores. To counteract this spike in loss, we
+pre-train the model to disregard the first dimension of k
+t
+andq t intheattentioncalculations. Specifically,weload Evaluation Following Touvron et al. (2023), we eval-
+the raw pre-trained weights and up-train the model for 1 uate models on a series of downstream tasks, including
+billiontokens(250steps),annealingthevaluesofk tandq t MMLU(Hendrycksetal.,2021)forfactuality,HumanEval
+to0accordingtothefollowingformula: (Chenetal.,2021)forPythoncodegeneration,andseveral
+question-answeringdatasetsforcommon-sensereasoning:
+q [0]←q [0]×(1−(t/n )) PIQA(Bisketal.,2020),BoolQ(Clarketal.,2019),Arc-C
+t t t
+(12) and Arc-E (Clark et al., 2018), HellaSwag (Zellers et al.,
+k [0]←k [0]×(1−(t/n ))
+t t t 2019), and WinoGrande (Sakaguchi et al., 2021). We re-
+wheretisthecurrentstepandn =250. Afterthisinitial port the 5-shot performance on MMLU, average pass@1
+t
+phase,whichallowsthemodeltoignorethefirstdimension scoresforHumanEval,andaverage0-shotperformanceon
+ofkeysandvaluesforattentioncalculations, westartthe common-sensebenchmarks(CS-QA).Forpass@1scores
+main retrofitting phase. We set the constant from Equa- weuseatemperatureof0.1andnucleussampling(Holtz-
+tion(8)asc = −5inordertoperformnocompressionat manetal.,2019)withtop-p=0.95.
+thestart.
+5ForLlama270B,wedonotup-trainto4×becausethisLLM
+4Obtainedfromhttps://huggingface.co/meta-llama. isalreadypre-trainedwithGQA8×.
+5DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+7B-GQA 13B-GQA 70B-DMC
+Scale Method CR MMLU CS-QA Human
+7B-DMC 13B-DMC
+Eval
+2× Compression 4× Compression
+– – 44.6 70.5 14.0
+70
+Llama-2 70B
+GQA 39.8 68.9 12.8
+DMC 2× 45.2 70.8 15.2 60
+7B Llama-2 13B Llama-2 13B
+GQA 34.7 68.3 14.0 50
+Llama-2 7B Llama-2 7B
+DMC 4× 43.9 70.2 16.5
+40
+– – 54.5 73.5 17.5
+30
+GQA 50.2 72.7 15.9
+DMC 2× 54.8 74.2 20.7
+13B
+Llama-2 70B
+GQA 48.6 72.2 16.5
+DMC 4× 54.2 73.2 22.0 75 Llama-2 13B Llama-2 13B
+70B∗ – 8×∗ 68.8 78.0 29.6 Llama-2 7B Llama-2 7B
+70
+DMC 16×∗ 68.8 77.9 29.9
+Table1: MMLUaccuracy(Acc.),CommonsenseQuestion 65
+Answering(CS-QA),ExactMatch(EM),andHuman-Eval
+Pass@1forseveralscales(7B,13B,and70B)andcompres- Iteration Iteration
+sionrates(CRs;1×,2×,and4×)ofLlama2.(*)Unlikethe 30
+Llama-2 70B
+7Band13Bmodels,the70BmodelwastrainedwithGQA
+whichcompressestheKVcache8×. Weapplyadditional Llama-2 13B Llama-2 13B
+20
+2×DMCcompressionduringup-trainingtoobtainatotal
+Llama-2 7B Llama-2 7B
+compressionof16×.
+10
+0 5000 10000 15000 5000 10000 15000
+5.Results
+Iteration Iteration
+5.1.MainResults Figure4: SampleefficiencyofDMCandGQA.Horizontal
+linescorrespondtotheperformanceoftheoriginalLlama
+WereporttheperformanceoftheoriginalLLM(equivalent
+2. EveryDMCmodelwastrainedfirstwithincreasingCR,
+to1×CR)andefficientvariants(DMCandGQA)inTable1.
+thenwithconstantCRforthelast2Ksteps(markedwith⋆).
+For the original LLM we use results reproduced in our
+codebaseasdescribedinAppendixB.
+DMC vs Original First, comparing DMC with the origi- widenswhenweincreasetheCR.Thisholdstruebothatthe
+nalLLM,wenotethatitevenincreasestheperformance smaller7Bscale(from+5.4for2×CRto+9.2for4×CR)
+in MMLU and CS-QA at 2× CR for 7B and 13B and in andatthelarger13Bscale(from+4.6for2×CRto+5.6for
+Human-Evalforallmodelscales. Wespeculatethatthisis 4×CR).ForCS-QAandHuman-Eval,ontheotherhand,
+duetotheadditionalup-trainingsteps,whichexposeLLMs we observe comparable gains over GQA across CRs and
+tonewexamples.Fortheothercombinationsofdownstream modelscales. ThesefindingsillustratethatDMCshouldbe
+tasksandscalesat4×CR,DMC-Rincursnegligibledegra- preferredtoGQAforretrofittingLLMsintovariantsthat
+dation: -0.7inMMLUand-0.3inCS-QAfor7B,-0.3in aremoreefficientatinferencetime.
+MMLUandCS-QAfor13B.Thisencouragingfindingsug-
+70B: DMC and GQA However, many widely adopted
+geststhatDMCisrobustacrossdifferentmodelscaleseven
+LLMswerepre-trainedwithGQAwhichleadstotheques-
+for4×CR.Overall,thefactthatDMCisingeneralclose
+tion of whether DMC and GQA can be used together to
+or superior to the original performance makes it suitable
+reapcompoundedbenefits. Toinvestigatethis,weretrofit
+asadrop-inreplacementforKVcachingtoachievehigher
+Llama270B,whichhasbeenpre-trainedwith8×GQA.We
+inferenceefficiency.
+furthercompressitsKVcachewithDMCto2×CR:thisis
+DMC vs GQA Moreover, Table 1 allows for comparing equivalenttoacache16×smallerthanavanillaLLMwith
+DMCwithGQAforequivalentCRs(2×and4×). Overall, neitherGQAnorDMC.Weobservethattheperformance
+DMCsurpassesGQAappliedthroughup-training,inboth remainsunchanged,andconcludethatDMCandGQAcan
+CRsandinbothscales(7Band13B).ForMMLU,thegap beeasilyandsuccessfullycombined.
+6
+ULMM
+AQ-SC
+lavE-namuHDynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+Llama 2 7B + DMC 2x Llama 2 13B + DMC 2x
+Vanilla DMC 2x DMC 4x 0 0
+Llama 2 7B Llama 2 13B Llama 2 70B 4 4 2
+8
+8
+3.4x 3.5x 1.8x 12
+2000 1000 12 16
+4
+16 20
+1.9x 1.9x 200 1.0x
+1000 500 20 24
+1.0x 1.0x 28
+24 32 6
+0 0 0 28 36
+4000 3.5x 2000 3.7x 1.8x
+400 0 4 8 12 16 20 24 28 0 4 8 12 16 20 24 28 32 36 8
+Llama 2 7B + DMC 4x Llama 2 13B + DMC 4x
+1.9x 2.0x 1.0x 0 0
+2000 1000 200 4 4
+1.0x 1.0x 8 10
+8
+12
+0 0 0 12 16
+32 62 114 16 32 60 18 34
+16 20 12
+Batch size 20 24
+28
+(a)Inferencethroughputaveragedoverthegenerationof1Ktokens 24 32 14
+with3Ktokensofcontext(upto4Kintotal). Onthex-axis,we 28 36
+showthemaximumbatchsizethatfitsinmemoryonasingleGPU
+0 4 8 12 16 20 24 28 0 4 8 12 16 20 24 28 32 36
+(7Band13B)ortwoGPUswithtensorparallelism(70B)forthe
+Llama 2 70B + DMC 2x
+Vanilla,DMC2×,andDMC4×models. 0
+4
+Vanilla DMC 4x
+0 4 8 12 16 20 24 28 32 36 40 44 48 52 56 60 64 68 72 76
+Llama 2 7B Llama 2 13B Layer index
+Figure 6: Heatmaps of average compression rates across
+30 32.5
+layers(X-axis)andheads(Y-axis).Headsarearrangedfrom
+30.0 thehighestcompressiontothelowesttop-downforclarity.
+25
+27.5
+0 2000 4000 0 2000 4000
+Context length Context length (at 8K steps) even after more than double the amount of
+fine-tuning (at 17K steps). This applies to both 7B and
+(b)Latencyofnexttokengeneration. Solidlinesdenotemeasure-
+13B scales. Figure 4 also reveals the importance of the
+mentswiththemaximumbatchsizethatfitsonasingleGPU.Dotted
+linesdenoteDMC4×withthesamebatchsizeasthevanillaLLM. fine-tuningphaseinDMC:alimitedamountofextrasteps
+withafixedCRrecoversasignificantamountoftheoriginal
+Figure5: EfficiencymeasurementswiththeMegatron-LM performance(especiallyforhighertargetCRssuchas4×).
+frameworkonNVIDIAA10080GBandH100GPUs.
+5.2.ThroughputandLatencyMeasurements
+ToverifywhetherincreasedCRsresultinconcreteefficiency
+DMC vs DMC-C Finally, in Table 3 in Appendix E, we gains,inFigure5wepresenttheperformancepropertiesof
+compareDMCwithitsConstrainedvariantDMC-C.Ingen- DMC,estimatedwithintheNVIDIAMegatron-LMframe-
+eral,whileremainingsuperiortoGQA,DMC-Cdisplaysa work (Narayanan et al., 2021). Specifically, we run mea-
+significantdegradationinseveralconfigurations,mostno- surementsonasingleGPU(NVIDIAA10080GBSXMor
+tably 7B 4× where it records a drop of −6.4 in MMLU H100SXM)inbfloat16precisionforLlama7Band13B.
+comparedtotheceiling. Ontheotherhand,DMCrecovers For Llama 70B, we run the same measurements on two
+allperformancelossinDMC-C.Whenusedincombination GPUsofthesametypewithtensorparallelism. Wefeedthe
+withcustomattentionimplementationswhichdoesnotre- modelwith2KtokensofEnglishtext,andgenerateaddi-
+quireexcessivepadding,standardDMCshouldthereforebe tional2Ktokensinanauto-regressivemannertoensurethat
+vastlypreferred,asitretainstheoriginalLLMperformance the model properly compresses its own generations. The
+whilereapingtheadvantagesinmemoryefficiencyfully. reportedthroughputconsistsoftheaverageoverthelast1K
+tokens. Welimitthesequenceto4Ktokenstoavoidissues
+SampleEfficiencyToshedlightonthesampleefficiency
+withcontextlengthextrapolation,asthisisthemaximum
+ofDMCandGQA,wereporttheirperformanceonMMLU,
+lengthobservedbyLlama2duringpre-training.
+CS-QA,andCodex-EvalacrossretrofittingstepsinFigure4.
+First,foratargetCRof2×,itemergeshowGQAcannot InordertomaximizetheutilizationoftheGPU,weincrease
+achievetheperformancethatDMCobtainsafterfine-tuning thebatchsizetothemaximumthatfitsintomemory(see
+7
+s/kot
+001A
+s/kot
+001H
+)sm(
+ycnetal
+001H
+daeH
+daeH
+daeHDynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+AppendixAfordetails). ThecompressionoftheKVcache 6.RelatedWork
+withDMCallowsforsubstantialincreasesinbatchsizeand
+Efficient inference in Transformer models is a subject of
+thussignificantthroughputgains. AsshowninFigure5a,
+extensive research, with detailed overviews provided by
+DMC2×translatesintoaneffectiveincreaseintokensper
+severalsurveys(Popeetal.,2022;Trevisoetal.,2022).This
+secondcomparedtotheoriginalLLMof> 1.8×for7B,
+sectionnarrowsitsfocustoadvancementsinTransformer
+13B, and 70B on both A100 and H100 GPUs. Similarly,
+inferenceefficiencythroughKVcachesizereduction.
+DMC4×translatesbetween3.4×and3.7×. Thismeans
+thattheefficiencyboostobservedinpracticeisveryclose GroupedQueryAttention(GQA;Ainslieetal.,2023)rep-
+tothetheoreticallimit. Inaddition,theextramemorysaved resentsthemostwidespreadstrategy,evolvingfromMulti
+withDMCcouldalsobeusedtocachelongercontexts. Query Attention (MQA; Shazeer, 2019). GQA reduces
+the number of KV heads by allocating shared KV repre-
+Finally,wecomparethelatencyoftheoriginalLLMwith
+sentations across subsets of query heads. Prior efforts in
+DMC 4× in Figure 5b. When we fit the largest possible
+token merging (Zhang et al., 2018) condensed the entire
+batchsizeforeithermodel,aftergeneratingapproximately
+past context into a single token, while (Liu et al., 2018;
+2200tokens,theinferencetimebeginstoscalelinearlywith
+Raeetal.,2019)employedstridedconvolutionandmean
+thecontextsizeduetotheincreasinglydominatingcostof
+poolingkernelstoreducethenumberofKVtokens. Sliding
+reading the KV cache from the high bandwidth memory
+window attention techniques (Beltagy et al., 2020; Child
+(HBM). On the other hand, if we choose to maintain the
+etal.,2019)restrictattentiontoamaximumofwpreceding
+samebatchsizeasfortheoriginalLLMalsoforDMC4×,
+tokens. ThougheffectiveinlimitingKVcache,suchmeth-
+thememoryfootprintoftheKVcacheisreducedandlatency
+ods perform fixed-size compression, unlike the presented
+forlongercontextsimprovessignificantly.
+dynamicDMC,whichadaptsthecompressionschemabased
+WhileweacknowledgethatthebehaviorofLLMsatinfer- ontheinputsequence. Thisyieldssuperiorresults,aswe
+encetimedependsonamultitudeoffactorsandimplemen- proveinanablationinAppendixE.
+tationdetails,ourmeasurementsinFigure5offerevidence
+Previous learnable compression methods (Anagnostidis
+thatDMCincreasesthroughputandreducesthelatencyof
+etal.,2023,interalia)decidewhichtokenstodropfrom
+autoregressivegenerationwithLLMs. Wespeculatethatin
+theKVcache. DMCtakesadifferentapproachasinsteadof
+thefuture,DMCmightbeusedtogrowtheKVcachesub-
+droppingtokensitmergesthem. Hence,itpreservescached
+linearly,whichwouldprovideanalternativebetweenvanilla
+informationmorefaithfully. Moreover,theDMCcompres-
+Transformers and State Space Models, where memory is
+sion mechanism has constant complexity with respect to
+constant(Fuetal.,2023;Gu&Dao,2023).
+thecontextlength,whiletheoneproposedbyAnagnostidis
+etal.(2023)islinear. Muetal.(2023)insteadcompresses
+5.3.Per-HeadLearnedCompressionRates
+promptsthroughcostlygenerationwhichlimitstheirinfer-
+Sincethetraininglossdoesnotenforceanycompression encebenefits. Moreover,thismethodisonlyapplicableto
+schemaapriori,asitjustrequirestomatchacertainglobal compressingthemodelinputwhileDMCcompresseson-
+CR,wecaninvestigatewhatschemathemodeldiscoversin the-flytheentiresequence,includingboththemodelinput
+practice. InFigure6,wereporttheCRforeachlayerand andthegeneratedoutput.
+headfordifferentscales(7B,13B,and70B)andCRs(2×
+Non-learnablecacheevictionstrategies(Zhangetal.,2023;
+and 4×). From all schema, it emerges how compressing
+Shengetal.,2023;Liuetal.,2023;Wangetal.,2020;Ge
+deeperlayers(>16for7B,>22for13B,>44for70B)
+etal.,2023)utilizeattentionscoresortokenpropertiesto
+isuniversallythemostpopularstrategy. However,thevery
+filter tokens in the KV cache. These approaches, while
+finallayersarecompressedtoasomewhatreduceddegree.
+bypassingadditionaltraining,relyonheuristicsandlackthe
+Fascinatingly,4×DMCachievesextremelyhighCRsfor
+abilitytolearnthecompressionmechanisms. Incontrast,
+severalheadsalsointhefewlayersaftertheveryfirstone.
+DMCintegratescompressionintoitslearningobjectivein
+Thisiscounter-productiveastokenrepresentationsarenot
+anend-to-endmanner,wherecompressionissynergisticto
+contextualizedyet,whichmakestakingthecorrectdecision
+languagegeneration.
+(whethertoappendoraccumulate)hard.
+Finally,DMCdrawsinspirationfromDynamicTokenPool-
+Thissamepattern(intermsofrelativepreferenceforcom-
+ing (Nawrot et al., 2022), which introduces a learnable
+pressing the certainranges of layers) also corresponds to
+boundarypredictortomergetherepresentationsofgroups
+howthedistributionofCRsacrosslayerschangesthrough-
+oftokensinintermediatelayers. DMCimprovesuponthis
+outtrainingsteps,aswekeepannealingtheauxiliaryloss
+idea by applyingit to the KVcache of and introducinga
+ℓ towards the target CR. Figure 7 in Appendix C illus-
+CR continuousrelaxationofthepoolingdecisionduringtrain-
+trateshowCRincreasesfirstindeeperlayers,theninsome
+ing. Moreover,itenablesretrofittingpre-trainedLLMswith
+non-contiguousintermediateranges.
+8DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+minimalextrastepsratherthantraininglanguagemodels Reasoningaboutphysicalcommonsenseinnaturallan-
+fromscratch. guage. ProceedingsoftheAAAIConferenceonArtificial
+Intelligence,34(05),Apr.2020.
+7.ConclusionsandFutureWork
+Bolya,D.,Fu,C.-Y.,Dai,X.,Zhang,P.,Feichtenhofer,C.,
+and Hoffman, J. Token merging: Your ViT but faster.
+WeproposedDynamicMemoryCompression,amethodto
+ArXiv,abs/2210.09461,2022.
+reducethelengthoftheKVcacheinTransformers,which
+enhances the memory efficiency and speed of LLMs at
+Chen,M.,Tworek,J.,Jun,H.,Yuan,Q.,Ponde,H.,Kaplan,
+inferencetime. Foreverynewtoken,DMClearnsend-to-
+J., Edwards, H., Burda, Y., Joseph, N., Brockman, G.,
+endwhethertoappenditsKVrepresentationstothecache
+Ray, A., Puri, R., Krueger, G., Petrov, M., Khlaaf, H.,
+ormergethemwiththetopelementinthecache. Weshow
+Sastry, G., Mishkin, P., Chan, B., Gray, S., Ryder, N.,
+how to retrofit LLMs such as Llama 2 at different scales
+Pavlov,M.,Power,A.,Kaiser,L.,Bavarian,M.,Winter,
+(7B, 13B, and 70B) into efficient DMC versions with a
+C.,Tillet,P.,Such,F.P.,Cummings,D.W.,Plappert,M.,
+negligibleamountofextradataandwithoutextraparameters.
+Chantzis,F.,Barnes,E.,Herbert-Voss,A.,Guss,W.H.,
+DMCLLMswith2×and4×compressionrates(CRs)retain
+Nichol,A.,Babuschkin,I.,Balaji,S.,Jain,S.,Carr,A.,
+(or even improve upon) the performance of the original
+Leike,J.,Achiam,J.,Misra,V.,Morikawa,E.,Radford,
+LLM. In addition, we demonstrate that, for comparable
+A.,Knight,M.M.,Brundage,M.,Murati,M.,Mayer,K.,
+CRs,DMChassignificantlyhighercontinuedpre-training
+Welinder,P.,McGrew,B.,Amodei,D.,McCandlish,S.,
+performance and sample efficiency than Grouped Query
+Sutskever,I.,andZaremba,W. Evaluatinglargelanguage
+Attention(GQA),awidespreadmethodforKVcachesize
+modelstrainedoncode. ArXiv,abs/2107.03374,2021.
+reduction.
+Child,R.,Gray,S.,Radford,A.,andSutskever,I. Gener-
+ImpactStatement ating long sequences with sparse transformers. ArXiv,
+abs/1904.10509,2019.
+DynamicMemoryCompressioninLargeLanguageModels
+Choromanski,K.,Likhosherstov,V.,Dohan,D.,Song,X.,
+(LLMs) like Llama 2 results in better computational effi-
+Gane, A., Sarlós, T., Hawkins, P., Davis, J., Mohiud-
+ciency,reducingbothoperationalcostsandenvironmental
+din, A., Kaiser, L., Belanger, D., Colwell, L. J., and
+impact(Pattersonetal.,2021). Byenablinghigherthrough-
+Weller,A. RethinkingattentionwithPerformers. ArXiv,
+put and lower latency, DMC democratizes access to ad-
+abs/2009.14794,2020.
+vanced AI, making state-of-the-art models suitable for a
+broaderrangeofhardware. Thismaynotonlyaccelerate
+Clark,C.,Lee,K.,Chang,M.-W.,Kwiatkowski,T.,Collins,
+innovationacrossdiversesectorsbutalsopromoteAIdevel-
+M.,andToutanova,K. BoolQ:Exploringthesurprising
+opmentandapplicationsinanenvironmentallyconscious
+difficulty of natural yes/no questions. In Burstein, J.,
+manner.
+Doran, C., and Solorio, T. (eds.), Proceedings of the
+2019ConferenceoftheNorthAmericanChapterofthe
+References AssociationforComputationalLinguistics,Minneapolis,
+Minnesota, June 2019. Association for Computational
+Ainslie, J., Lee-Thorp, J., de Jong, M., Zemlyanskiy, Y.,
+Linguistics.
+Lebrón, F., and Sanghai, S. K. GQA: Training gener-
+alizedmulti-querytransformermodelsfrommulti-head Clark,P.,Cowhey,I.,Etzioni,O.,Khot,T.,Sabharwal,A.,
+checkpoints. ArXiv,abs/2305.13245,2023. Schoenick, C., andTafjord, O. Thinkyouhavesolved
+questionanswering? tryARC,theAI2reasoningchal-
+Anagnostidis,S.,Pavllo,D.,Biggio,L.,Noci,L.,Lucchi,
+lenge. ArXiv,abs/1803.05457,2018.
+A.,andHofmann,T. Dynamiccontextpruningforeffi-
+cientandinterpretableautoregressivetransformers.ArXiv, Dao,T.,Fu,D.,Ermon,S.,Rudra,A.,andRé,C. FlashAt-
+abs/2305.15805,2023. tention: Fastandmemory-efficientexactattentionwith
+IO-awareness. In Koyejo, S., Mohamed, S., Agarwal,
+Bahdanau, D., Cho, K., and Bengio, Y. Neural machine
+A.,Belgrave,D.,Cho,K.,andOh,A.(eds.),Advances
+translation by jointly learning to align and translate.
+in Neural Information Processing Systems, volume 35.
+ArXiv,abs/1409.0473,2014.
+CurranAssociates,Inc.,2022.
+Beltagy, I., Peters, M. E., and Cohan, A. Longformer:
+Fu,D.Y.,Dao,T.,Saab,K.K.,Thomas,A.W.,Rudra,A.,
+Thelong-documenttransformer. ArXiv,abs/2004.05150,
+and Re, C. Hungry hungry hippos: Towards language
+2020.
+modelingwithstatespacemodels. InTheEleventhInter-
+Bisk,Y.,Zellers,R.,Lebras,R.,Gao,J.,andChoi,Y.PIQA: nationalConferenceonLearningRepresentations,2023.
+9DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+Ge, S., Zhang, Y., Liu, L., Zhang, M., Han, J., and Gao, Patterson,D.A.,Gonzalez,J.,Le,Q.V.,Liang,C.,Munguía,
+J. Modeltellsyouwhattodiscard: Adaptivekvcache L.-M., Rothchild, D., So, D. R., Texier, M., and Dean,
+compressionforllms. ArXiv,abs/2310.01801,2023. J. Carbonemissionsandlargeneuralnetworktraining.
+ArXiv,abs/2104.10350,2021.
+Gu,A.andDao,T.Mamba:Linear-timesequencemodeling
+withselectivestatespaces. ArXiv,abs/2312.00752,2023. Pope,R.,Douglas,S.,Chowdhery,A.,Devlin,J.,Bradbury,
+J., Levskaya, A., Heek, J., Xiao, K., Agrawal, S., and
+Hendrycks,D.,Burns,C.,Basart,S.,Zou,A.,Mazeika,M.,
+Dean,J. Efficientlyscalingtransformerinference. ArXiv,
+Song,D.,andSteinhardt,J. Measuringmassivemultitask
+abs/2211.05102,2022.
+languageunderstanding. InInternationalConferenceon
+LearningRepresentations,2021. Rae,J.W.,Potapenko,A.,Jayakumar,S.M.,andLillicrap,
+T.P. Compressivetransformersforlong-rangesequence
+Holtzman, A., Buys, J., Du, L., Forbes, M., and Choi, Y.
+modelling. ArXiv,abs/1911.05507,2019.
+The curious case of neural text degeneration. ArXiv,
+abs/1904.09751,2019.
+Sakaguchi,K.,Bras,R.L.,Bhagavatula,C.,andChoi,Y.
+WinoGrande: Anadversarialwinogradschemachallenge
+Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford, C.,
+atscale. Commun.ACM,64(9),2021.
+Chaplot,D.S.,delasCasas,D.,Bressand,F.,Lengyel,
+G.,Lample,G.,Saulnier,L.,Lavaud,L.R.,Lachaux,M.-
+Shazeer,N.M. Fasttransformerdecoding: Onewrite-head
+A.,Stock,P.,Scao,T.L.,Lavril,T.,Wang,T.,Lacroix,
+isallyouneed. ArXiv,abs/1911.02150,2019.
+T.,andSayed,W.E. Mistral7B. ArXiv,abs/2310.06825,
+2023. Sheng, Y., Zheng, L., Yuan, B., Li, Z., Ryabinin, M.,
+Fu, D. Y., Xie, Z., Chen, B., Barrett, C. W., Gonzalez,
+Kim,G.andCho,K. Length-adaptiveTransformer: Train
+J., Liang, P., Ré, C., Stoica, I., and Zhang, C. High-
+oncewithlengthdrop,useanytimewithsearch.InAnnual
+throughputgenerativeinferenceoflargelanguagemodels
+MeetingoftheAssociationforComputationalLinguistics,
+withasinglegpu. InInternationalConferenceonMa-
+2020.
+chineLearning,2023.
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+C.H.,Gonzalez,J.E.,Zhang,H.,andStoica,I. Efficient
+A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+memorymanagementforlargelanguagemodelserving
+Bhosale,S.,Bikel,D.,Blecher,L.,Ferrer,C.C.,Chen,
+withpagedattention. Proceedingsofthe29thSymposium
+M.,Cucurull,G.,Esiobu,D.,Fernandes,J.,Fu,J.,Fu,W.,
+onOperatingSystemsPrinciples,2023.
+Fuller,B.,Gao,C.,Goswami,V.,Goyal,N.,Hartshorn,
+Liu, P. J., Saleh, M., Pot, E., Goodrich, B., Sepassi, R., A.,Hosseini,S.,Hou,R.,Inan,H.,Kardas,M.,Kerkez,
+Kaiser,L.,andShazeer,N.M. Generatingwikipediaby V.,Khabsa,M.,Kloumann,I.,Korenev,A.,Koura,P.S.,
+summarizing long sequences. ArXiv, abs/1801.10198, Lachaux,M.-A.,Lavril,T.,Lee,J.,Liskovich,D.,Lu,Y.,
+2018. Mao,Y.,Martinet,X.,Mihaylov,T.,Mishra,P.,Molybog,
+I.,Nie,Y.,Poulton,A.,Reizenstein,J.,Rungta,R.,Saladi,
+Liu,Z.,Desai,A.,Liao,F.,Wang,W.,Xie,V.,Xu,Z.,Kyril-
+K.,Schelten,A.,Silva,R.,Smith,E.M.,Subramanian,R.,
+lidis,A.,andShrivastava,A. Scissorhands: Exploiting
+Tan,X.E.,Tang,B.,Taylor,R.,Williams,A.,Kuan,J.X.,
+thepersistenceofimportancehypothesisforllmkvcache
+Xu,P.,Yan,Z.,Zarov,I.,Zhang,Y.,Fan,A.,Kambadur,
+compressionattesttime. ArXiv,abs/2305.17118,2023.
+M.,Narang,S.,Rodriguez,A.,Stojnic,R.,Edunov,S.,
+Mu,J.,Li,X.L.,andGoodman,N.D.Learningtocompress andScialom,T.Llama2:Openfoundationandfine-tuned
+promptswithgisttokens. ArXiv,abs/2304.08467,2023. chatmodels. ArXiv,abs/2307.09288,2023.
+Narayanan,D.,Shoeybi,M.,Casper,J.,LeGresley,P.,Pat- Treviso, M. V., Ji, T., Lee, J.-U., van Aken, B., Cao, Q.,
+wary,M.,Korthikanti,V.A.,Vainbrand,D.,Kashinkunti, Ciosici,M.R.,Hassid,M.,Heafield,K.,Hooker,S.,Mar-
+P.,Bernauer,J.,Catanzaro,B.,Phanishayee,A.,andZa- tins,P.H.,Martins,A.F.T.,Milder,P.,Raffel,C.,Simp-
+haria,M.A.Efficientlarge-scalelanguagemodeltraining son,E.,Slonim,N.,Balasubramanian,N.,Derczynski,L.,
+ongpuclustersusingmegatron-lm. SC21: International andSchwartz,R. Efficientmethodsfornaturallanguage
+ConferenceforHighPerformanceComputing,Network- processing: Asurvey. TransactionsoftheAssociationfor
+ing,StorageandAnalysis,2021. ComputationalLinguistics,11,2022.
+Nawrot,P.,Chorowski,J.,Lan´cucki,A.,andPonti,E. Effi- Vaswani, A., Shazeer, N. M., Parmar, N., Uszkoreit, J.,
+cienttransformerswithdynamictokenpooling.InAnnual Jones,L.,Gomez,A.N.,Kaiser,L.,andPolosukhin,I.
+MeetingoftheAssociationforComputationalLinguistics, Attentionisallyouneed. InNeuralInformationProcess-
+2022. ingSystems,2017.
+10DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+Wang, H., Zhang, Z., and Han, S. Spatten: Efficient
+sparseattentionarchitecturewithcascadetokenandhead
+pruning. 2021IEEEInternationalSymposiumonHigh-
+PerformanceComputerArchitecture(HPCA),2020.
+Zellers,R.,Holtzman,A.,Bisk,Y.,Farhadi,A.,andChoi,Y.
+HellaSwag: Canamachinereallyfinishyoursentence?
+InKorhonen,A.,Traum,D.,andMàrquez,L.(eds.),Pro-
+ceedingsofthe57thAnnualMeetingoftheAssociation
+forComputationalLinguistics,Florence,Italy,July2019.
+AssociationforComputationalLinguistics.
+Zhang, B., Xiong, D., and Su, J. Accelerating neural
+transformer via an average attention network. ArXiv,
+abs/1805.00631,2018.
+Zhang, Z. A., Sheng, Y., Zhou, T., Chen, T., Zheng, L.,
+Cai,R.,Song,Z.,Tian,Y.,Ré,C.,Barrett,C.W.,Wang,
+Z.,andChen,B. H2o: Heavy-hitteroracleforefficient
+generative inference of large language models. ArXiv,
+abs/2306.14048,2023.
+11DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+Appendix representationsinthesubsequentlayersaremoredefined
+and,possibly,afterseveralattentionlayers,alreadycontain
+A.Memory-BoundOperationsin
+redundant/sharedinformation.
+Transformers
+DuringautoregressivegenerationwithaKVcache,these- 1.17
+quencelengthduringeveryforwardpassisn=1. Thevast
+1.36
+majorityoftimeisspentoncalculationsforlinearlayers
+1.55
+andmulti-headself-attention. Forlinearlayers,theratioof
+FLOPstoinputbytesimprovesasthebatchsizeincreases. 1.74
+Forsmallbatchsizes,theoperationsarememorybounded 1.90
+on reading the weight matrices from HBM. On the other
+2.13
+hand,forMHSAlayersduringinferencetheratioofFLOPs
+2.30
+to input bytes does not change and MHSA layers are al-
+waysmemoryboundedoncurrentGPUs. TheimpactofKV 2.57
+cachecompressionistwo-foldasit1)allowsustodecrease 2.70
+thelatencyofMHSAlayers,and2)allowsustofitlarger
+2.90
+batchsizesinHBM,resultinginbetterthroughputandbetter
+3.08
+utilizationofGPUsduringthecalculationsoflinearlayers.
+3.25
+B.ReplicatingtheOriginalResults 3.42
+3.64
+Tomakesurethatourimplementationiscorrect,foreach
+3.81
+downstreamtaskwecomparetheperformancereportedin
+theoriginalLlama2paper(Touvronetal.,2023)withthose 4.01
+obtainedfromtheHuggingFaceHubcheckpoints. Further- 4.16
+more,weevaluatetheimpactofusingourinternaldatamix- 0 5 10 15 20 25 30
+Layer Number
+tureforup-training,acknowledgingthatvariationsindata
+proportionsandpreprocessingmethodologiescaninfluence
+Figure7:Compressiondistributionacrosslayersatdifferent
+modelbehavior. Inparticular,weup-trainthevanillapre-
+stagesofretrofittingaLlama27Bmodel. Weadheretothe
+trainedLlama-2checkpointfor200trainingsteps,amount-
+conventionwhere,foragivensubplot,alargerspaceabove
+ingto1Btokens,inaccordancewiththeoriginalLlama-2
+agivenlayerindicatesgreatercompressionatthatlayer.
+training schedule. We compute the average and standard
+deviationofcheckpointsafter50,100,150,200steps. In
+our experiments, we replicate the results reported by the
+SequenceLengthversusCompressionRatio DoDMC
+Llama2paperalmostexactly,asshowninTable2.
+modelscompresssequenceswithauniformCRindependent
+fromtheirtotallength? Wefindthatthisisnotthecase. As
+C.AnalysisoftheCompressionSchema showbyFigure8,theCRincreaseslogarithmicallyaswe
+LearnedbyDMC increasethetotalsequencelength. Thisholdstrueacrossall
+globalCRs(includingboth2×and4×).
+Evolution Throughout the Training In Figure 7, we
+illustratehowtheCRchangesforeachlayeroftheLlama
+Absolute Position versus Compression Decision Do
+2 7B model throughout the training from 1× up to 4×
+DMCmodelslearnafixedcompressionschema,ordothey
+globalCR.Eachsubplotcorrespondstoadifferentglobal
+exhibit position biases? In Figure 9, we plot the average
+CRwhichoccursatdifferentstagesofthetraining,going
+valueofthedecisionvariableαacrosspositionsinthese-
+fromthesmallest(1.17)atthetop,tothehighest(4.16)atthe
+quence(0to4096). Ourobservationsrevealthattheaverage
+bottom. Thereisacleartrendsuchthat,forasmallerglobal
+valueofthedecisionvariableαisindependentofatoken’s
+CompressionRatio(i.e. atthebeginningofthetraining),
+positionintheinputsequencewhichdemonstratesthatthe
+themodelemphasizescompressioninthelaterlayers. As
+model does not follow some fixed pattern. This persists
+theglobalCompressionRatioincreases,themodelkeepson
+acrossboth2×and4×compressionratios(CR).
+compressinginfinallayersbutalsostartstocompressthe
+earlierlayers. Wehypothesizethatthetokenrepresentations
+CompressionSchematalearnedbyDMC-C Studying
+in the initial layers do not contain sufficient information
+thecompressionschemainFigure10learnedbyDMC-C,
+to perform any meaningful grouping. Conversely, token
+wefindaverydifferentpatterncomparedtoDMC,dueto
+12DynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+CS-QA MMLU Human-Eval
+7B 13B 70B 7B 13B 70B 7B 13B 70B
+Paper 70.6 73.7 78.5 45.3 54.8 68.9 12.8 18.3 29.9
+Checkpoint 70.6 73.7 78.5 45.7 55.1 69.1 13.4 17.7 30.5
+Up-trained 70.5±0.2 73.5±0.1 78.0±0.1 44.6±0.6 54.5±0.3 68.8±0.3 14.0±1.2 17.5±1.5 29.6±1.6
+Table2: Replicatingtheoriginalup-trainingresults.
+1.17
+0.8
+4.0 1.36
+1.55 0.7
+1.74
+3.5 1.90 0.6
+2.13
+3.0 2.30 0.5
+2.57
+2.70 0.4
+2.5
+2.90
+3.08 0.3
+2.0 3.25
+3.42 0.2
+1.5 3.64
+3.81 0.1 DMC 2x
+1.0 4.01 0.0 DMC 4x
+4.16
+0 512 1024 2048 4096 0 1000 2000 3000 4000
+Sequence Length Sequence Length
+Figure 8: CR achieved by Llama 2 7B for particular se- Figure9: Averagevalueofthedecisionαforpositions(0,
+quencelengthsacrossvariousglobalCRs. 4096)averagedover128samples,headsandlayers.
+theauxiliarylossforcingthemodeltocompresssimilarly
+acrossheadsinthesamelayer. Nevertheless,weobservea
+similarglobalpreferenceforcompressingdeeperlayers. ingtheCRtothetargetduringup-training. InFigure13,we
+compareaSHORTandaLONGregimeforthecontrained
+Interpretability A natural question arises, whether the variantofDMC(DMC-C),whichcontinuouslyincreasethe
+compression schema that the model learns is somehow CRby1every3Kand6Ksteps(12Band24Btokens),re-
+alignedwithhumanintuitionsabouttextsegmentation. We spectively. Itisevidenthowthereexistsatrade-offbetween
+analyzedtheoutputsofLlama213BDMCwithCR4and trainingsteps(hence,time)andperformance. Additionally,
+noticedthatsomeheadscompressaccordingtothebound- Figure13showcasesanotheraspectofthehigherflexibility
+ariesoflinguisticunits,suchaswordsorsyntacticphrases. DMC affords: it is compatible with arbitrary real-valued
+Figure11showsthecompressionschemalearnedbyhead CRs,asopposedtointegerCRsdivisibleby2asinGQA.
+14inlayer0. Inthiscase,themodelmergesthesubwords
+backintowordsrevertingthetokenizer. Interestingly,some
+groupingsoftokenscorrespondtosemanticunits,e.g.,“19
+thcentury”’,“50percent",or“aweekbacklater”. Yet,we
+SchedulesofTargetCR Additionally,weexplorehow
+alsostressthatmanyheadsandlayersarenotinterpretable
+differentschedulesforthetargetCRimpactthemodelper-
+astheirbehaviordoesnotoverlapwithlinguisticunits.
+formance. In the standard setup, this is annealed from 1
+More generally higher layers merge longer tokens se- tothetargetCRthroughoutthedurationoftraining. Here,
+quences, in line with Figure 6. For instance, Figure 12 wecompareitwithasetupwheretheCRusedintheauxil-
+showsthedecisionsoflayer24head2. Weleaveamore iarylossforcompressionissettothetargetfromthestart
+in-depthanalysisofcompressionschematalearnedbyDMC (DMC-immediate). WeshowtheresultsinFigure14. As
+tofuturework. expected, DMC-immediate has a perplexity spike at the
+beginning when the model quickly increases the CR due
+D.TrainingAblations totheauxiliaryloss. Whileperplexityisrecoveredduring
+training,eventoalowerpointthanDMCwithannealing,
+TrainingStepsperIncreaseinCR Anotheradvantageof downstreamaccuracyonMMLUbenchmarkisdegraded
+DMCisitshighflexibility. Infact,basedontheavailability acrosstheboard. Thisshowcaseswhyavoidingperplexity
+ofresources,differentregimescanbechosenwhenanneal- spikesisfundamentaltosuccessfullyretrofitanLLM.
+13
+oitaR
+noisserpmoC
+elbairav
+noisiced
+egarevADynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+Llama 2 7B + DMC-C 2x Llama 2 13B + DMC-C 2x
+0 0
+4 4 2
+8
+8
+12
+12 16
+4
+16 20
+20 24
+28
+24 32 6
+28 36
+0 4 8 12 16 20 24 28 0 4 8 12 16 20 24 28 32 36
+8
+Llama 2 7B + DMC-C 4x Llama 2 13B + DMC-C 4x Figure 11: Compression schema found by Llama 2 13B
+0 0
+DMC4×inlayer0,head14. Tokensthataremergedinthe
+4 4
+8 10 KVcachearemarkedwiththesamecolor.
+8
+12
+12 16
+16 20 12
+20 24
+28
+24
+32 14
+28 36
+0 4 8 12 16 20 24 28 0 4 8 12 16 20 24 28 32 36
+Llama 2 70B + DMC 2x
+0
+4
+0 4 8 12 16 20 24 28 32 36 40 44 48 52 56 60 64 68 72 76
+Layer index
+Figure 12: Compression schema found by Llama 2 13B
+Figure10: Heatmapsofaveragecompressionratesacross DMC4×forlayer24,head2. Tokensthataremergedin
+layers(X-axis)andheads(Y-axis)forDMC-C.Headsare theKVcachearemarkedwiththesamecolor.
+arranged from the highest compression to the lowest top-
+downforclarity.
+In-layer Relaxation We then compare three strategies
+todeterminehowsimilarcompressionschemataforheads
+withineachlayershouldbe(assumingaglobalprior):
+E.DMCAblations
+1. DMC: There are no constraints on the decision and
+FixedvsLearnedMemoryCompression Weassessed
+importancescores,exceptforthegloballossnudging
+theimportanceofdynamicallylearningcompressiondeci-
+themodeltowardsapre-definedCR.
+sionsinDMCbycomparingitwithFixedMemoryPooling,
+whichreducestheoverallnumberoftokensinmemoryby 2. DMC-C: Different heads can have varying decision
+deterministicallyaveragingeveryntokens,whereninthis andimportancescoreswithineachlayer. However,an
+caseisidenticaltothecompressionrate. Theresults,shown auxiliarylossencouragesthemodeltomaintainsimilar
+inFigure14,demonstratethatthedynamiccomponentof CRsamongallheadswithinthelayer.
+DMCiscrucialtoachievelowerperplexityaswellashigher
+3. DMC-HardC: Decision scores α and importance
+downstreamaccuracy. t
+scoresω aresharedacrossheads,leadingtothesame
+t
+shorteningschemawithineachlayeracrossheads.
+GlobalvsLocal(Layer-wise)CompressionPrior We AsperFigure15,thedefaultDMCstrategyshowsaconsis-
+compare two approaches to compression: a Local Prior, tentMMLUperformanceacrossvaryingCRs,whileboth
+whichenforcesapre-specifiedcompressionratio(CR)in DMC-CandDMC-HardCexhibitasharpdropinMMLUas
+eachlayerindependently,requiringeverylayertocompress thecompressionreaches1.9×. Moreover,inTable3were-
+approximatelythesameamount,andaGlobalPriorusedby portamorethoroughcomparisonbetweenDMCandDMC-
+defaultDMC,whichappliesapre-specifiedCRacrossall C.Ingeneral,whileremainingsuperiortoGQA,DMC-C
+layers,givingthemodelthefreedomtoapplydifferentCRs displaysasignificantdegradationinseveralconfigurations
+ineachlayer,providedthattheiraveragecompressionequals whencomparedtoregularDMC.
+theglobalCR.Figure15clearlyindicatesthattheGlobal
+Prior(DMCinFigure15)improvesMMLUperformance ImportanceScores Finally,weassesstheimpactofpre-
+comparedtotheLocalPrior. dictingimportancescoresforaccumulationasopposedto
+14
+daeH
+daeH
+daeHDynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+55 11..31 11..73 1.5 1.7 1.9 2.1 D DM MC C-C D DM MC C- LH oa cr ad lC Prior DMC-C + Uniform Weight
+2.1 2.4 2.6 2.8 3.0 3.1 3.3 3.5 4.0 44 56 11 .. 66 44 02 05
+50 32..63
+4.0
+3.6
+3.8 44 1.6375
+11 .. 31 1.4 1.5 12..64 2.9 3.3 43 1.6350
+45 1.7 1.9 1.9 7 7B B- -S Lh oo nr gt 42 1.6325
+2.1 2.3 13B-Short 41 1.6300
+13B-Long 40 1.6275
+3.2
+40 2.4 3.0 3.7 39 1.6250
+2.8
+2.1 2.7 3.4 3.8 1.2 1.4 1.6 1.8 1.2 1.4 1.6 1.8
+2.5 Compression Ratio Compression Ratio
+2.8
+35 3.2 4.0 4.0 Figure15: ValidationperplexityandtestMMLUaccuracy
+3.6 vscompressionratefordifferenttypesofcompressionpri-
+2000 4000 6000 8000 10000 12000 14000 16000 ors,in-layerrelaxations,andimportancescores. Allmodels
+Iteration followtheSHORTtrainingregimeandaretrainedupto2×
+CR.
+Figure13: Differentup-trainingregimesforDMC-C:Short
+(red) increases CR by 1 every 6K steps, Long (blue) in-
+creasesCRby1every3Ksteps.Horizontallinescorrespond
+forattentionsuchasFlashAttention(Daoetal.,2022). The
+totheperformanceoftheoriginalLlama2.
+log(1−α ) term is calculated as log-sigmoid(−α )
+j+1 j+1
+forbetternumericalprecision.
+DMC DMC-Immediate Fixed
+1.70
+46 G.Limitations
+44 1.68
+This paper is focused on retrofitting existing LLMs into
+42
+40 1.66 DMC variants. In our preliminary experiments with pre-
+38 1.64 trainingLLMswithDMCfromscratchweobtainednegative
+36 resultswhencomparedtothetrainingcurveofGQA.We
+34 1.62 speculatethatthisisduetothemutualdependencyofmodel-
+32 ingandsegmentingdata:whentokenrepresentationsarenot
+0 5 10 15 20 25 0 5 10 15 20 25
+Processed Tokens (in billions) Processed Tokens (in billions) ofsufficientquality,boundarydecisionsareunreliable.Vice
+versa,incorrectboundarydecisionsmayleadtopoortoken
+Figure14: ValidationperplexityandMMLUaccuracyvs
+representations. This creates a vicious cycle which may
+trainingstepsforFixedMemoryPoolingandavariantof
+bebrokenbytechniquesthatfacilitateconvergence,such
+DMCwheretheauxiliarylossCRisimmediatelysettothe
+asanExpectationMaximization-stylealternationbetween
+targetontheonsetoftraining. Allmodelsfollowtheregular
+modelingandsegmenting.
+trainingscheduleandaretrainedupto2×CR.
+uniformlyweightingeachtokeninagroup.Figure15shows
+thatDMC-CwithUniformWeightingisworsethanlearned
+weightingDMC-C.
+F.MaskingImplementationDetails
+Wemasktheunnormalizedattentionscoreforthepair(i,j)
+asfollows:
+q [1:d ]⊤k [1:d ]
+aˆ = i h√ j h +log(1−α ).
+(i,j) j+1
+d
+h
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+attentionscore attentionmask
+WerelyonthememoryefficientimplementationofMHSA
+fromPyTorch,whichallowsaddingarbitrarymaskstotheat-
+tentionscoresbeforesoftmax.Notwithstandingthis,atinfer-
+encetimeDMCremainscompatiblewithefficientlibraries
+15
+ULMM
+ULMM
+ytixelpreP
+noitadilaV
+ULMM
+ytixelpreP
+noitadilaVDynamicMemoryCompression:RetrofittingLLMsforAcceleratedInference
+Scale Method CR MMLU CS-QA Human
+Eval
+– – 44.6 70.5 14.0
+GQA 39.8 68.9 12.8
+DMC 2× 45.2 70.8 15.2
+7B
+DMC-C 45.5 70.6 14.6
+GQA 34.7 68.3 14.0
+DMC 4× 43.9 70.2 16.5
+DMC-C 38.2 69.6 14.6
+– – 54.5 73.5 17.5
+GQA 50.2 72.7 15.9
+DMC 2× 54.8 74.2 20.7
+13B
+DMC-C 54.8 73.9 18.3
+GQA 48.6 72.2 16.5
+DMC 4× 54.2 73.2 22.0
+DMC-C 52.4 72.9 18.3
+– 8×∗ 68.8 78.0 29.6
+70B∗
+DMC 16×∗ 68.8 77.9 29.9
+DMC-C 16×∗ 67.4 78.2 31.1
+Table3: MMLUaccuracy(Acc.),CommonsenseQuestion
+Answering(CS-QA)ExactMatch(EM),andHuman-Eval
+Pass@1forseveralscales(7B,13B,and70B)andcompres-
+sion rates (CRs; 1×, 2×, and 4×) of Llama 2. Here, we
+include an extra DMC variant - DMC-C, which does not
+require custom implementation. (*) The 70B model was
+trainedwithGQAwhichcompressestheKVcache8×.
+16
