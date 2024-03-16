@@ -1,0 +1,1219 @@
+Quiet-STaR: Language Models Can Teach Themselves to
+Think Before Speaking
+EricZelikman GeorgesHarik YijiaShao VarunaJayasiri
+StanfordUniversity NotbadAIInc StanfordUniversity NotbadAIInc
+NickHaber NoahD.Goodman
+StanfordUniversity StanfordUniversity
+Abstract
+When writing and talking, people sometimes pause to think. Although
+reasoning-focused works have often framed reasoning as a method of
+answering questions or completing agentic tasks, reasoning is implicit
+in almost all written text. For example, this applies to the steps not
+stated between the lines of a proof or to the theory of mind underlying
+aconversation. IntheSelf-TaughtReasoner(STaR,Zelikmanetal. 2022),
+usefulthinkingislearnedbyinferringrationalesfromfew-shotexamples
+in question-answering and learning from those that lead to a correct
+answer. Thisisahighlyconstrainedsetting–ideally, alanguagemodel
+could instead learn to infer unstated rationales in arbitrary text. We
+present Quiet-STaR, a generalization of STaR in which LMs learn to
+generaterationalesat eachtokentoexplainfuturetext, improvingtheir
+predictions.Weaddresskeychallenges,including1)thecomputationalcost
+ofgeneratingcontinuations,2)thefactthattheLMdoesnotinitiallyknow
+howtogenerateoruseinternalthoughts,and3)theneedtopredictbeyond
+individualnexttokens. Toresolvethese,weproposeatokenwiseparallel
+samplingalgorithm,usinglearnabletokensindicatingathought’sstartand
+end,andanextendedteacher-forcingtechnique. Encouragingly,generated
+rationalesdisproportionatelyhelpmodeldifficult-to-predicttokensand
+improvetheLM’sabilitytodirectlyanswerdifficultquestions.Inparticular,
+after continued pretraining of an LM on a corpus of internet text with
+Quiet-STaR, we find zero-shot improvements on GSM8K (5.9%→10.9%)
+andCommonsenseQA(36.3%→47.2%)andobserveaperplexityimprove-
+ment of difficult tokens in natural text. Crucially, these improvements
+requirenofine-tuningonthesetasks. Quiet-STaRmarksasteptowards
+LMsthatcanlearntoreasoninamoregeneralandscalableway.
+“Lifecanonlybeunderstoodbackwards;butitmustbelivedforwards.”
+—SrenKierkegaard
+1 Introduction
+Much of the meaning of text is hidden between the lines: without understanding why
+statementsappearinadocument,areaderhasonlyashallowunderstanding. Moreover,
+thishasbeenrepeatedlyshowntobetrueforLMsaswell,inthecontextsoftasksranging
+fromcommonsensereasoningtotheoremprovingtoprogramming(Weietal.,2022b;Nye
+etal.,2021;Zelikmanetal.,2022;2023a;Kojimaetal.,2022). Reasoningaboutimplications
+oftexttopredictlatertexthasconsistentlybeenshowntoimproveLMperformanceona
+varietyoftasks,butmethodsforallowingLMstolearnfromtheirreasoning(e.g.,Zelikman
+etal.2022)havefocusedonsolvingindividualtasksorpredefinedsetsoftasks(e.g.,Wei
+et al. 2021b). These works rely on carefully curated datasets to provide either specific
+reasoningtasksorinsomecases,thereasoningitself. Weinsteadask,ifreasoningisimplicit
+inalltext,whyshouldn’tweleveragethetaskoflanguagemodelingtoteachreasoning?
+1
+4202
+raM
+41
+]LC.sc[
+1v92690.3042:viXraOriginal Text 4 LM 2 LM + LM 1 LM 2 LM = LM 5 LM 4 LM \n
+Thought Thought Thought Thought Thought Thought Thought
+0 1 2 3 4 5 7
+Thought
+1) Think 2) Talk 6 Helps 3) Learn
+Prediction
+LM
+Sampled LM LM LM
+START 2 ++ 22 EENNDD
+Thought Reward
+Harms
+Prediction
+Sampled LM LM LM
+Thought START 4 ++ 11 EENNDD Discard
+Figure1: Quiet-STaR.Wevisualizethealgorithmasappliedduringtrainingtoasingle
+thought. We generate thoughts, in parallel, following all tokens in the text (think). The
+modelproducesamixtureofitsnext-tokenpredictionswithandwithoutathought(talk).
+WeapplyREINFORCE,asinSTaR,toincreasethelikelihoodofthoughtsthathelpthemodel
+predictfuturetextwhilediscardingthoughtsthatmakethefuturetextlesslikely(learn).
+In particular, the Self-Taught Reasoner (STaR, Zelikman et al. 2022) showed that LMs
+can bootstrap their reasoning ability on question-answering (QA) datasets by sampling
+rationalestoattempttoanswerquestions,trainingonrationalesiftheyledtoacorrectfinal
+answer,andthenrepeatingthistoiterativelysolvemoredifficultproblems. Yet,training
+fromcuratedQAdatasetslimitsthescaleandgeneralizabilityoftherationales. QAdatasets,
+especiallyhigh-qualityones,requirethoughtfulcurationandwillinherentlyonlyevercover
+asubsetofreasoningtasks. Thus,weextendSTaR–insteadoftheLMlearningtoreason
+onparticulartaskslikemathematicalQA,wetrainanLMtogeneratereasoningthathelps
+itinferfuturetextfromalargeinternettextcorpus. Asaresult,weallowtheLMtolearn
+fromthediversetaskspresentinlanguage(Weberetal.,2021). Thisbuildsonanintuition
+essentialtothecurrentlanguagemodelingparadigm,namely,that”languagemodelsare
+unsupervisedmultitasklearners”(Radfordetal.,2019). Thus,asinSTaR,weleveragethe
+LM’spre-existingreasoningabilitytogeneraterationalesandtraintheLMonthemwitha
+REINFORCE-basedreward(Williams,1992). WerefertothistechniqueasQuiet-STaR,asit
+canbeunderstoodasapplyingSTaR“quietly”,trainingthemodeltothinkbeforeitspeaks.
+Broadly,Quiet-STaRproceedsbygeneratingrationalesaftereverytokentoexplainfuture
+text(think),mixingthefuture-textpredictionswithandwithoutrationales(talk),andthen
+learning to generate better rationales using REINFORCE (learn). We apply Quiet-STaR
+toMistral7B(Jiangetal.,2023)usingthewebtextdatasetsOpenWebMath(Pasteretal.,
+2023) and Colossal Clean Crawled Corpus (C4, Raffel et al. 2020). We find that, even
+withoutdataset-specificfine-tuning,Quiet-STaRresultsinimprovementstozero-shotdirect-
+reasoningabilitiesonCommonsenseQA(36.3%→47.2%)andGSM8K(5.9%→10.9%),and
+thattheseimprovementsconsistentlyincreasewiththenumberoftokensusedintheLM’s
+internalthoughts. Lastly,wequalitativelyinvestigatepatternsinthegeneratedrationales.
+Insolvingthistask,wemakethefollowingcontributions:
+1. WegeneralizeSTaRtolearnreasoningfromdiverseunstructuredtextdata. Toour
+knowledge,thisisthefirstworkexplicitlytrainingLMstoreasongenerallyfrom
+text,ratherthanoncuratedreasoningtasksorcollectionsofreasoningtasks.
+2. Weproposeandimplementaparallelsamplingalgorithmthatmakesourtraining
+procedurescalable,generatingrationalesfromalltokenpositionsinagivenstring.
+3. Weintroducecustommeta-tokensatthestartandendofeachthoughttoallow
+theLMtolearnthatitshouldbegeneratingarationaleandwhenitshouldmakea
+predictionbasedonthatrationale.
+4. Weapplyamixingheadtoretrospectivelydeterminehowmuchtoincorporatethe
+next-tokenpredictionfromagiventhoughtintothecurrentnext-tokenprediction.
+5. Weshowthatanon-myopicloss,includingmultipletokensaheadforlanguage
+modeling,improvestheeffectofthinking.
+6. Onmultipletasks,wedemonstratethatthinkingallowstheLMtopredictdifficultto-
+kensbetterthanonetrainedonthesamewebtext,improvingwithlongerthoughts.
+211% # Thought, Ahead Tokens # Thought, Ahead Tokens
+24, 12 46% 24, 12
+16, 8 16, 8
+10% 12, 4 44% 12, 4
+10, 4 10, 4
+9% 8, 4 42% 8, 4
+Baseline Baseline
+40%
+8%
+38%
+7%
+36%
+6%
+34%
+10 20 30 40 50 60 70 80 90 100 10 20 30 40 50 60 70 80 90 100
+Training Step Training Step
+(a)GSM8K (b)CommonsenseQA
+Figure 2: Generalization Results. We evaluate the extent to which the model trained
+withQuiet-STaRgeneralizestodirectlyansweringproblemsthatrequirereasoning. The
+leftplot(a)showsthezero-shotaccuracyonGSM8K,whiletherightplot(b)showsthe
+zero-shotaccuracyonCommonsenseQA,withoutanyfine-tuning. Inbothplots,thex-axis
+representstrainingsteps,andeachlinecorrespondstoadifferentnumberofthinkingtokens
+usedduringQuiet-STaRtraining. They-axismeasuresthezero-shotdirectaccuracyonthe
+respectivedatasets. WealsoincludeaninferencenormalizedversionofthisplotinFigure7.
+2 RelatedWork
+2.1 ReasoninginLanguageModels
+Therehavebeenmanyworksontrainingandexploitinglanguagemodelstosolvedifficult
+tasks by first training them to reason through them. For example, Rajani et al. (2019)
+demonstratedthatapre-trainedlanguagemodelfine-tunedtooutputonhumanreasoning
+tracesbeforeansweringmultiple-choicecommonsensereasoningquestionsoutperformed
+onetraineddirectlyonanswers. Shwartzetal.(2020)demonstratedthatlanguagemodels,
+whenprovidedwithsomescaffolding,cangeneratethesehelpfulchain-of-thoughtsolutions
+withoutadditionalsupervision. Later,Nyeetal.(2021)demonstratedthat“scratchpads”
+required less scaffolding when the language models were more capable, a result later
+reinforcedbyWeietal.(2022b),emphasizinginformaltasks,andfurtherstrengthenedby
+Kojimaetal.(2022),demonstratingthisbehaviorcouldbeaccomplishedzero-shot. Most
+recently,Wang&Zhou(2024)showedfurtherthatforcommonsense-questionanswering,
+onecouldforcealanguagemodeltoleveragechain-of-thoughtreasoningbypreventingit
+fromemittinganyvalidanswertokensunlessitwasconfident. However,onceagain,these
+approachesonlyworkforaquestion-answerdataset,andWang&Zhou(2024)relieson
+heuristicstoidentifywhenthemodelhasoutputanswertokens. SomewhatlikeTRICE
+(Phanetal.,2023),weusetherelativeimprovementsinthelog-likelihoodofthetargettext
+acrossrationalesasanestimateofquality,butwesimplysubtractthemeanrewardanddo
+notincorporatemorecomplexcontrolvariates.
+2.2 TrainingLanguageModelstoReason
+Onedirectionthatresearchershaveusedtotrainlanguagemodelstoreasonorimprovetheir
+reasoningistrainingthelanguagemodelonminedreasoningtracesorreasoning-likedata
+(Rajanietal.,2019;Weietal.,2021a;Lewkowyczetal.,2022;Chungetal.,2022;Gunasekar
+etal.,2023). Althoughthisapproachhasbeendemonstratedtobeeffective,itcomeswith
+drawbacks. Itrequireseithermanualannotation,whichissensitivetothecapabilityofthe
+annotatorsandisoff-policyforthelanguagemodel(i.e.,thedistributionofreasoningisnot
+textthatthelanguagemodelwouldotherwiselikelyhavegenerated). Thisapproachisalso
+expensive,difficulttoscale,andprovidesnoclearpathtosolvingproblemsharderthan
+thosethattheannotatorsarecapableofsolving.
+Another direction for teaching reasoning relies on a language model’s own generated
+reasoning,whichcanbeseenasbuildingonalargebodyofliteratureonself-play(Silver
+etal.,2017;Anthonyetal.,2017;Polu&Sutskever,2020). Theseincludemethodssuchasthe
+3
+)%(
+ycaruccA
+K8MSG
+)%(
+ycaruccA
+AQesnesnommoCAlgorithm1:QuietSelf-TaughtReasoner(Quiet-STaR)
+Input: Languagemodelθ ,trainingstepsnum steps,sequencelengthl,thoughtlength
+0
+t,learningrateα,batchsizeb,numberofthoughtsn ,numberofground
+thoughts
+truthtokensusedforsupervisingeachthoughtn
+true
+Output: Languagemodelθthatgeneratesrationalestopredictfuturetext
+fori =0tonum stepsdo
+SamplebatchofsequencesXoflengthl
+hinit ←hidden states (X)
+θi
+forj =1tolinparallelusingattentionmaskdo
+logpinit ←lm head (hinit ) // Predict next tokens
+j:j+ntrue θi j:j+ntrue
+T ←generate tokens ([X ;<start thought>],t,n )// Generate thought
+j θi :j thoughts
+T ← [T;<end thought>]
+j j
+ht jh :jo +u ng th rut
+e
+←hidden states θi([X :j;T j;X j:j+ntrue])
+logpthought ←lm head (hthought) // Predict next tokens w/ thought
+j:j+ntrue θi j:j+ntrue
+w j:j+ntrue ←mixing head θi(ht jh :jo +u ng th rut e,hi jn :ji +t ntrue)
+logpt jalk ← w j:j+ntrue ·logpi jn :ji +t ntrue +(1−w j:j+ntrue)·logpt jh :jo +u ng th rut e // Mix logits
+LN
+j
+LL ← −logpt ja :jl +k ntrue(X j+1:j+ntrue+1)
+r
+j
+=logpt ja :jl +k ntrue(X j+1:j+ntrue+1)−logpt ja :jl +k ntrue(X j+1:j+ntrue+1)
+∇ LREINFORCE ← −r 1[r >0]·∇ logp (T|[X ;<start thought>])
+θ j j j θ θi j :j
+∇ L ← ∇ LNLL+∇ LREINFORCE
+θ j θ j θ j
+θ i+1 ← θ i−α∑l j=1∇ θL j // Update model parameters
+returnθ
+numsteps
+Self-TaughtReasoner(Zelikmanetal.,2022),whichdemonstratedthatalanguagemodel
+iteratively trained on its reasoning that led to correct answers could solve increasingly
+difficultproblems. Laterworkaimedtoleverageadditionalinformationorassumptions
+suchasHuangetal.(2022)whichdemonstratedthatthealgorithmproposedinSTaRcould
+still work if one assumed that the majority-vote answer was correct (although this has
+a lower ultimate performance). Further work has generalized the results of Zelikman
+et al. (2022), such as Uesato et al. (2022) which demonstrated additional usefulness to
+“process-based” supervision where incorrect reasoning traces were filtered, recently V-
+STaR(Hosseinietal.,2024)thatdemonstratesthattrainingaverifiertoguidegeneration
+also improves performance, as well as TRICE (Hoffman et al., 2024) which maximizes
+themarginallikelihoodofthecorrectanswergivenseveralreasoningtracesperproblem.
+Finally,relatedworkhasalsoexploredlearningintermediatereasoningintheconstrained
+settingofmakingmathematicalstatements,wherestatementsinthemodel’sintermediate
+reasoningcouldbeconstrainedtoonlybevalidmathematicalstatements(Poesiaetal.,2023).
+WeincludefurtherdiscussionofrelatedreasoningworksinAppendixF.
+2.3 Meta-tokens
+Recently, a growing body of work has demonstrated the usefulness of custom tokens
+optimizedtoperformspecificfunctionsinthecontextofaneuralnetwork–forthisreason,
+theyhavealsobeenreferredtoas“functionvectors.” (Toddetal.,2023). Oneoftheoriginal
+instantiationsofthiswasprompt-tuning(Lesteretal.,2021)(andrelatedlyprefix-tuning(Li
+&Liang,2021)),wheretheembeddingscorrespondingtothetokensofapromptcouldbe
+optimizedtobetteraccomplishatask. Othershaveappliedmeta-tokenstocompresslong
+prompts(Lietal.,2023;Jung&Kim,2023)forefficiency.Mostrelevanttothiswork,Muetal.
+(2024)optimizedatokensuchthat,whenthetokensafteritcouldnotattendtothetokens
+beforeit(i.e.,acontextcompressiontoken),itwouldprovidesufficientinformationtofuture
+tokens. Although we do not focus on compression, we share the problem of learning a
+4tokenthataffectsattentionandcontrolscomplexdownstreambehavior. Inonerelatedwork,
+Goyaletal.(2023)showthatlearningasingle”pause”token(essentiallyrepresentingeach
+tokenastwotokens)improvesLMperformance. However,unlikethethoughttokensinour
+work,thispausetokendoesnotinitializeathought–instead,itcanbeseenasactingasthe
+entiretyofthethought. Wefindthatreasoninginlanguageissignificantlymorehelpful.
+3 ProblemStatement
+Inthiswork,weintroduceanauxiliary‘rationale’variablebetweeneachpairofobserved
+tokensofthesequence. Wethenaimtooptimizealanguagemodelwithparametersθwith
+thecapacitytogenerateintermediatethoughts(orrationales)suchthat
+θ∗ =argmax E [logp (x |x ,rationale (x ))]
+θ x θ i:n 0:i θ 0:i
+Notethat,inprinciple,thisprovidesnoadvantageoveranoptimallanguagemodelthat
+alreadycorrectlymodelsthelanguage’sdistributionoverstrings. Yet,inpractice,extensive
+priorworkhasshownthatlanguagemodelsbenefitfromintermediaterationalesonreason-
+ingtasks(Nyeetal.,2021;Zelikmanetal.,2022;Weietal.,2022b). Someworkhasaimed
+to explain the effects of chain-of-thought reasoning, namely attributing it to “locality of
+experience”(Prystawskietal.,2024). Morebroadly,reasoningallowsamodeltodecompose
+achallengingcomputationintosmallersteps. Ineffect,wetrainthemodeltolearnwhich
+decompositionandplanningstepsareeffectiveinpredictingfuturetext. Alsonotethatwe
+formulatetheobjectiveasaccuratelypredictingtheremainingsequence,ratherthanonly
+thenexttoken. Onceagain,foranoptimalLMthesewouldbeequivalent. Howeverwefind
+thatthenon-myopicformulationleadstoamoreeffectivelossforlearningrationales.
+4 Quiet-STaR
+4.1 Overview
+Quiet-STaRoperateswiththreemainsteps(Figure1):
+1. Parallelrationalegeneration(think,Subsection4.2): Inparallelacrossntokens
+x inaninputsequencex ,wegeneraterrationalesoflengtht: c = (c ,...,c ),
+i 0:n i i1 it
+resultinginn×rrationalecandidates. Weinsertlearned<|startofthought|>and
+<|endofthought|>tokenstomarkeachrationale’sstartandend.
+2. Mixingpost-rationaleandbasepredictions(talk,Subsection4.3):Fromthehidden
+stateoutputaftereachrationale,wetraina”mixinghead”–ashallowMLPproduc-
+ingaweightdetermininghowmuchthepost-rationalenext-tokenpredictedlogits
+shouldbeincorporatedcomparedtothebaselanguagemodelpredictedlogits. This
+approacheasesdistributionshiftearlyinfinetuning,duetointroducingrationales.
+3. Optimizingrationalegeneration(learn,Subsection4.4):Weoptimizetherationale
+generationparameters(start/endtokensandLMweights)toincreasethelikelihood
+ofrationalesthatmakefuturetextmoreprobable. WeuseREINFORCEtoprovide
+a learning signal to rationales based on their impact on future-token prediction.
+To reduce variance, we apply a teacher-forcing trick to include in the loss the
+likelihoodofpredictingnotonlythetokenafterthethoughtbutalsolatertokens.
+4.2 ParallelGeneration
+AkeychallengeinQuiet-STaRisefficientlygeneratingrationalesateachtokenposition
+intheinputsequence. Naively,thiswouldrequireaseparateforwardpassforeachtoken,
+whichbecomescomputationallyintractableforlongsequences.
+Weallowforhighlyparallelgenerationbyfirstobservingthataninferencepassofalanguage
+modelproducesaprobabilitydistributionoverthenexttokensforallinputtokens.Naturally,
+thisallowsustosampleonenexttokenfromeachtokenintheinput. Ifonehasgenerateda
+successorfromeachtoken,itisnotpossibletosimplycontinuewiththeoriginalsequence.
+Forexample,imaginepredictingthenexttokenaftereachtokenof“< bos >thecatsat”one
+mightgenerate“yesorangesawdown”–eachsuccessorbyitselfisareasonablenexttoken
+5Base Text Thought Token 1
+a b c d a’ b’ c’ d’
+a
+b
+Thought a’’ b’’ c’’ d’’
+Token 2 c
+d
+Thought
+a’ b’ c’ d’ a’
+Token 1
+b’
+c’
+Base a b c d
+d’
+Text
+Generation Paths Parallel Inference Mask
+Figure3: ParallelGeneration. Byconstructinganattentionmaskthatallowsallthought
+tokenstopayattentiontothemselves,allprecedingthoughttokenswithinthesamethought,
+andtheprecedingtext,wecangeneratecontinuationsofallofthethoughtsinparallel. Each
+inferencecallisusedtogenerateoneadditionalthoughttokenforalltexttokens.
+toaprefixofthesequence,butthelistoftokensisasetof“counterfactual”continuationsof
+theseprefixes. Wecan,however,leveragethesecontinuationstogeneratehiddenthoughts
+foreachobservedtoken.
+Todothisefficiently,wecacheeachforwardpassandconcatenateadiagonalattentionmask
+tothepreviousattentionmask: eachgeneratedtokennowattendstoallofthetokensthat
+wereusedtogenerateit,aswellastoitself(butnottotokenonother“counterfactual”paths).
+Moreover,thisparallelizednext-samplingtokenprocedurecanberepeatedarbitrarilymany
+times(oratleast,untilonerunsoutofmemory). WevisualizethisprocedureinFigure3
+andhighlightadditionalwaystomakethisalgorithmfasterinAppendixB.
+4.3 “Mixing”(Residual)Heads
+Whenstartingwithapre-trainedmodel,thoughtswillinitiallybeoutofdistribution,and
+hence harm language modeling performance. To smooth the transition to thinking, we
+introducealearnedinterpolationbetweentheLMpredictionswithandwithoutthoughts.
+Given the end-of-thought token’s hidden state and the hidden state of the original text
+token, the mixing head outputs a weight that determines the extent to which the post-
+thoughtpredictionlogitswillbeused. Weuseashallowmulti-layerperceptronforthis
+head,outputtingascalarforeachtoken. WeincludeimplementationdetailsinAppendixA.
+4.4 OptimizingRationaleGeneration
+4.4.1 OptimizingStart-of-ThoughtandEnd-of-ThoughtTokens
+The<|startofthought|>and<|endofthought|>tokensserveaslearnedmeta-tokensthat
+controlthemodel’srationalegeneration. Optimizingtherepresentationofthesetokens,
+especiallythe<|startofthought|>token,iscrucialbutchallengingduetothediscretenature
+oftherationaletokens. Weinitializethestartandendtokenembeddingstotheembedding
+correspondingtotheemdash,”−−−”,whichoftenappearsintextdatatodenoteapauseor
+thought. Thisleveragesthelanguagemodel’spreexistingknowledge. Inaddition,toallow
+theseembeddingstobeoptimizedmorequickly,weapplya(hyperparameter)weightto
+thegradientsoftheseembeddingsduringtheupdatestep. Intuitively,thestartthought
+tokenscanbeunderstoodasputtingthemodelintoa“thinkingmode”andtheendthought
+tokencanbeunderstoodastellingthemodelwhenit’sdonethinking.
+4.4.2 Non-myopicScoringandTeacher-forcing
+Becausewedonotexpectthoughtstobeusefulinpredictingeverytoken,wewouldprefer
+themodel’srewardtodependlessontheexactnextwordinthetextfollowingthethought
+andmoreonthefollowingsemanticcontent. Therearetwoprimarychallengeshere. First,
+unlikeintypicallanguagemodelingwithtransformers,onlythethoughtscorrespondingto
+6d e f g h
+<t> TTTThhhhoooouuuugggghhhhtttt </t> g h
+Figure4: ForwardPassandTeacherForcing. Wevisualizeasingleforwardpassofour
+algorithm. Solidlinesdenotelanguagemodelcomputation,whiledashedlinesindicate
+tokens are inserted via teacher forcing, and the mixer represents the mixing head. In
+particular, we visualize predicting three tokens ahead. Thought generation is shown in
+moredetailinFigure1andFigure3.
+agivennext-tokenpredictionreceiveagradientfromthatprediction—aconsequenceofour
+parallelsamplingstrategy. Wecouldaddressthisbyaddinglosstermsforfuturetokensby
+samplingthetokensbefore.Howeverthiswouldresultinmuchhigherentropyforlanguage
+modelingingeneralandlower-qualitygeneratedtext,becauseitwouldtraintheLMtopar-
+tiallydisregarditsprecedingtokens. Instead,weusetheparallelattentionmasktocompute
+thelogprobabilitiesofthetruenexttokens,applyingteacherforcingbyassumingthemodel
+selectedthecorrectnextground-truthtoken(asimplicitinnormallanguagemodelingwith
+transformers). Notethatthelossforeachfuturetokenalsodependsonamixingweight
+computedfromtheendthoughttokenandthepreviousobservedtoken. Thenumberof
+futuretokensincludedinthelossisahyper-parameter. Weapplythesameteacher-forcing
+techniquetoinsertthestartandendtokens. WevisualizethisprocedureinFigure4.
+4.4.3 Objective
+WeuseREINFORCEtooptimizethelikelihoodsoftherationalesbasedontheirusefullness:
+thelog-likelihoodofthen truetruenexttokensX j+1:j+ntrue+1underthelanguagemodelgiven
+previousobservedtokensandaparticularrationale(ptalk asshorthandforthemixed
+j:j+ntrue
+predictionprobabilitiesafterthinking,seeAlgorithm1). Toreducevariance,wegenerate
+multiplerationalecontinuationsforeachtokenintheinputsequence(looselyinspiredby
+TRICE,Phanetal.(2023)).Wethusdefinetherewardr foreachrationaleT asthedifference
+j j
+between ptalk andtheaverageacrossrationalesforthattoken(ptalk ):
+j:j+ntrue j:j+ntrue
+r
+j
+=logpt ja :jl +k ntrue(X j+1:j+ntrue+1)−logpt ja :jl +k ntrue(X j+1:j+ntrue+1)
+WethenusethisrewardinaREINFORCElosstermtoupdatethelanguagemodelparame-
+tersθtoincreasethelikelihoodofrationalesthatperformbetterthantheaverage:
+∇ LREINFORCE = −r ·∇ logp (T|[X ;<|startofthought|>])
+θ j j θ θ j :j
+WefounditusefultoexcludethenegativerewardfromtheREINFORCElossterm,asitled
+tomorestabletraining,thoughtitmayintroducesomebias.
+Thislosstermencouragesthemodeltogeneraterationalesthatimproveitspredictionsof
+futuretokenscomparedtotheaveragepredictionacrossallgeneratedrationalesforthat
+token. ThegradientsfromthislossareusedtoupdateboththeLMparametersandthe
+start-of-thoughtandend-of-thoughttokenembeddings,witha(hyperparameter)weight
+appliedtothegradientsofthestart-of-thoughtandend-of-thoughttokenembeddingsto
+acceleratetheiroptimization. Byiterativelyoptimizingtheseparameters,Quiet-STaRtrains
+themodeltogeneratemoreusefulrationalesthroughouttraining. Lastly,wealsoincludea
+log-likelihoodloss,LNLL,toensurethattheLMlearnstooptimizethetalkingheadsand
+j
+alsoreceivesanext-tokenpredictionsignalforthebaseLMhead1.
+1Duetoourlinearmixing,equivalenttoshiftingthemixingweighttowardthebaseprediction.
+7Improvement in Loss Given Thought
+Figure 5: Distribution of changes in log probability. We visualize the distribution of
+changes in log probability resulting from the generated thoughts across the evaluation
+dataset. WevisualizethedensityofchangesinlogprobabilityrelativetotheLMwithout
+thoughts,coloredbasedonlogdensity. Thedistributionisskewed,withmosttokensunaf-
+fected,whileasmallfractionofhardtokensseesubstantialimprovementsfromthethoughts.
+Thismatchesourintuitionthatmosttokensingeneralwebtextdonotrequiresignificant
+reasoningtopredict,butthoughtsaredisproportionatelybeneficialforchallengingtokens.
+5 ExperimentsandResults
+Intuitively, not all tokens require equal amounts of thought. For example, consider the
+sentence“thepersonisrun-”: althoughthereisinevitablysomeprobabilityofthetoken
+beingsomethingotherthan“ing”2,asastandalonesentencewithoutcontext,additional
+thinkingisunlikelytoimproveawell-trainedmodel’sprediction. Indeed,weconjecture
+thatformostchunksofmostonlinetext,additionalthoughthaslittletonoimpact. Indeed,
+earlyinourexplorationweobservedthatQuiet-STaRdoesnotbenefitalltokensequally.
+Thus,wedesignourexperimentstoinvestigatewhetherourapproachisusefulinpredicting
+tokensthatdorequirethought. Weevaluate1)whetherQuiet-STaRimprovesalanguage
+model’sabilitytodirectlypredictanswersindatasetsthatrequirereasoning;and,2)the
+distributionofimpactsresultingfromthinkingtokens. Weconductallofourexperiments
+startingwiththebaseversionofMistral7B(Jiangetal.,2023).
+WeperformmostofourexperimentsbytrainingonOpenWebMath(Pasteretal.,2023),
+acrawlthatemphasizesmoretechnicalwebpages. WeselectedOpenWebMathbecause
+weanticipatedthatitwouldhaveahigherdensityoftokensthatbenefitfromreasoning,
+whichourexperimentssupport. WealsoevaluateQuiet-STaRonC4(Raffeletal.,2020),
+awidelyusedLMpretrainingcorpuswithmorediversetext,andagainshowsignificant
+albeitsmallerbenefits.
+5.1 DownstreamPerformance
+In this subsection, we evaluate the extent to which Quiet-STaR improves the zero-shot
+reasoning capabilities of the language model on CommonsenseQA (Talmor et al., 2018)
+andGSM8K(Cobbeetal.,2021). OnCommonsenseQA,wefindthatQuiet-STaRimproves
+performance by 10.9% compared to the base language model. As shown in Figure 2,
+thisimprovementconsistentlyincreaseswiththenumberoftokensusedinthemodel’s
+rationales,indicatingthatmorethoroughreasoningthroughthethoughttokensistranslating
+tobetterdirectquestion-answeringperformance. Similarly,onGSM8K,Quiet-STaRresults
+ina5.0%boostoverthebasemodel,andonceagain,performancescaleswiththelengthof
+therationalesgeneratedduringQuiet-STaRtraining. Forreference,inFigure2,weinclude
+abaselinecorrespondingtotrainingthesamemodelonthesamedatasetwithoutthought
+tokens. Weobservethatinmultiplecurves,performanceappearstoeventuallydeteriorate
+2Forexample,inthisverytext,thetokenfollowing“run”is“-”
+8
+ssoL
+noitciderP
+nekoT
+lanigirO0icos^2qsin^3q+5cosqsin^4q+isin^5q$
+Then I used the Moivre's theorem and I got: $(cos5q+isin5q)$
+I compared the imaginary parts and I got something like: $sin5q=5cos^4qsinq-10cos^2qsin^3q+sin^5q$
+which is very close to: $(16cos^4q-12cos^2q+1)sinq$ but not the same.
+Where do I make te mistake?
+Thanks for any help! ;)
+(cid:127) Have you tried use $\cos^2\theta+sin^2\theta =1$
+– Fan
+May 15 '17 at 19:13
+(cid:127) You didn't err. You just didn't finish. May 15 '17 at 19:35
+hint
+In your last line, factor by $\sin (\theta),$
+replace
+$\sin^2(\theta)$ by $1-\cos^2 (\theta)$
+Figure6: ContributionVisualization. Weprovideanexampletextwherewevisualizethe
+degreetowhichintroducingthoughtshelpedattokensthroughoutatext. Greenindicates
+thatthethoughtbeforethattokenmadethattokeneasiertopredict,whileyellowindicates
+thatitmadeithardertopredict. Moreimpactfulthoughtshavehigheropacity.
+–weanticipatethatthisisbecausewearenottrainingonthesedownstreamtasks,sothe
+rolesofthethoughttokensmaychangeovertime. Wealsofindabenefitofournon-myopic
+objective,whichwediscussinAppendixD.
+WefindthattrainingwithQuiet-STaRonC4(Raffeletal.,2020)alsoimprovesperformance
+onGSM8K(5.9%→8.1%)andCommonsenseQA(36.3%→42.6%)butbyasmallermargin.
+Specifically,forourC4evaluation,wetrainMistral7Bwith16thoughttokensand4true
+tokensaheadandotherwisethesamesetup.
+Wecancomparetheseimprovementstothoseofferedbypausetokens(Goyaletal.,2023),
+whichcanbeseenasaconstrainedversionofQuiet-STaRwhereeachtokenisrepresentedby
+twotokensandthesecond”pause”tokenactsastheentiretyofthethought.Inparticular,our
+setupismostcomparabletotheirpausetokenfine-tuning,aswealsofinetuneapretrained
+model. Theirresultsindicatethatpausetokenfine-tuningalsoprovidesminorgainsover
+thebasemodelonCommonsenseQA,theyobservedanimprovementfrom26.9%to28.8%;
+on GSM8K, Goyal et al. (2023) found that pause token fine-tuning harms performance.
+Moreover, on both tasks (and the majority of their evaluated tasks), they observed that
+additionalthoughttokensharmedperformance. Moreover,theydiscussthe“lukewarm
+effectofpause-finetuningastandard-pretrainedmodel”(Goyaletal.,2023). Thissuggests
+thatallowingthemodeltogeneratemulti-tokenrationalesleadstomoreeffectivereasoning
+comparedtothesingle-token”pauses”. Notehowever,thatunlikeGoyaletal.(2023),wedo
+notfine-tuneonthedownstreamtasks.
+Overall,thesedownstreamresultsvalidatethattrainingalanguagemodeltopredictthe
+subtext between the lines of general text data can substantially improve its reasoning
+capabilities,evenondatasetsitwasnotexplicitlytrainedon. Thefactthatlongerrationales
+consistently lead to better outcomes, and that Quiet-STaR outperforms the constrained
+pause token approach, supports the notion that Quiet-STaR is successfully teaching the
+modeltoleverageitsowngeneratedthoughtstoreasonmorethoroughlyabouttheinput.
+5.2 ImprovementDistribution
+AsvisualizedinFigure5,wefindthatonaveragethereislittleimprovementintheLM’s
+abilitytopredictarbitrarytokens. But,whenwevisualizethedistributionofrelativeim-
+provements,thereisadisproportionateimprovementonmoredifficulttokens. Thisreflects
+theideathatsometexttokensaresubstantiallyharderandbenefitmorefromcarefulthought.
+InFigure6,weaimtoprovidesomeinsightintothekindsoftokenswheretheimprovements
+occur. Namely,whilethinkingappearstohelpformanytokensintheexample,inspection
+suggestsitdisproportionatelyhelptopredicttokenswhererecallingrelevantinformationis
+useful,suchasthenameofanapplicabletheoremorthestartofthenextstepinaproof.
+Notably,thiswouldalignwellwiththeframingproposedbyPrystawskietal.(2024).
+96 DiscussionandAnalysis
+6.1 HandlingInstability
+Severalaspectsofthistaskhavethepotentialtointroduceinstability. First,andperhaps
+mostimportantly,theutilityofageneratedthought(orthoughttoken)isafunctionofthe
+mappingfromthethoughttoitscontributiontolanguageprediction;however,themapping
+fromthethoughtstothiscontributionislearnedbasedonthethoughtsthemselves. This
+meansthat,evenifoneweretogenerateathoughtthatallowedtheperfectpredictionof
+thenexttoken,thelosscouldreceivenosignalfromitifthemixinghead’sweightonthat
+generationwas0. OnesolutionweexploredwastousetheGumbel-Softmaxtrickwitha
+straight-throughestimatorJangetal.(2016),butwithmanyconsecutivesoftmaxoperations
+weobservedvanishinggradients. Thisintroducesanexploration-exploitationtrade-off,
+a fundamental challenge in reinforcement learning. Approaches like DQN (Mnih et al.,
+2013),PPO(Schulmanetal.,2017),andA3C(Mnihetal.,2016)oftenresolvethesetrade-
+offsbylearningastatevaluefunction,whichestimatestheexpectedfuturerewardfrom
+eachstate. However,therewardfunctionsassociatedwiththisenvironmentareunstable
+(asnotedearlier,duetothealso-changingmixingheads)–consequently,ourpreliminary
+explorationswiththesetechniqueswasnotpromising. Whilewearefarfromthefirstto
+notethatoptimizingrationalesisareinforcement-learningtask(Zelikmanetal.,2022;Zhang
+&Parkes,2023;Phanetal.,2023),theneedfortherationaletoavoidharmingthebasemodel
+performanceintroducesadditionalcomplexity. Essentially,themorecomplexthemapping
+fromLMoutputtothenexttokenprediction,themoreinstabilityweobserved. Ontheother
+hand,whenwetrainedwithoutanyinterpolation,i.e. ablatingthemixingheadandonly
+usingthelanguagemodelpredictionafterthoughts,themodelquicklylearnedtosimply
+ignorethethoughts(andwesawnogeneralizationtoanydownstreamtasks).
+Weexploredtheuseofseparateheadsforthinkingandtalking(here,weusetalkingtorefer
+todirectlyoutputtingahiddenstateorlogits,ratherthanamixingweight). Inparticular,
+weexploredbothlinearlayersfromthehiddenstatesandMLPs,initializedtocontribute0
+residuallytothebaselanguagemodeloutputs,inordertogeneratethoughtsandnext-token
+predictionssimilartowhatthelanguagemodelwouldhaveotherwisegenerated. However,
+weobservedthat,inallinstances,thepreviously-mentionedinstabilitypreventedlearning.
+Consequently,weaimedtoremoveorminimizeallcomponentsthatcouldtransformthe
+language model’s outputs, both with and without its rationales. We also note that our
+choicetousealanguagemodeltooutputaweightcombiningmultiplestates(asdoneby
+ourmixinghead)isessentiallyanattentionmechanismallowingthemodeltoattendtoits
+thinking. ThishassimilaritytotheapproachtakeninBackpacklanguagemodels(Hewitt
+etal.,2023),whichalsolearntopredictweightstoapplytosummedinputembeddingsto
+modelfuturetext,ratherthanallowingthelanguagemodeltooutputarbitraryembeddings.
+Despitethisconstraint,Backpacklanguagemodelsappeartohavecomparableperformance
+totraditionallanguagemodels(Hewittetal.,2023).
+6.2 Examples
+WhilethereisnoexplicitpressureinQuiet-STaRforthoughtstobehuman-interpretable,
+theyaregeneratedfromthesametransformertrainedtomodellanguage,hencelikelyto
+beatleastpartiallyunderstandable. Forreference,weincludeafewexamplesofthoughts
+generatedthatwerehelpfultothemodelinpredictingfuturetokensinOpenWebMath.First,
+inonecase,recallingthatoneshouldstartwithmagnesiumtoproducemagnesiumnitride
+allowsittobetterpredictthatthefirststepoftheprocedureinvolvesheatingmagnesium.
+'<s> # Magnesium reacts with nitrogen to form magnesium nitride. The chemical
+formula for this reaction is Mg+N_2-> MgN_2. What is the product, or what
+are the products, of this reaction?\n\nJan 12, 2016\n\nThe formula for
+magnesium nitride is $M {g}_{3} {N}_{2}$.\n\n#### Explanation:\n\nAs do
+many active metals, magnesium nitride can be<|startofthought|> 1 --, so the
+equation of the reaction that forms magnesium nitride is\n\n$Mg + N_2 \\to
+<|endofthought|> formed by heating the metal (fier'
+10Insomecases,themostusefulthoughtsappeartobenear-continuationsthatcorrespond
+morecloselytothetargettext,e.g.,
+An integer $n$ is odd if $n = 2k+1$ for some integer $k$.\n\nTo prove that $A =
+B$, we must show that $A \\subseteq B$ and $B \\subseteq A$. The first of
+these tends to<|startthought|> in some sense - to be the more difficult<|
+endthought|> trickiest for students
+Lastly,weincludeanexamplefromansweringCommonsenseQA.Notably,thisthought
+occurswhilereadingthequestionandhencewasnotusedtopredictthefinalanswer.
+'<s> Q: Talking to the same person about the same thing over and over again is
+<|startofthought|>\n\n(a) a one-to-one correlation\n\n(b) a one-to<|
+endofthought|> something someone can what?'
+6.3 Quiet-STaRandChain-of-Thought
+Wenotethatwhiletherearenaturalparallelsbetweenchain-of-thoughtpromptingandour
+approach,theyareessentiallyorthogonal. Inchain-of-thoughtauseractivelypromptsthe
+modeltothink‘outloud’,otherwiseusingitsordinaryproductiondistribution;Quiet-STaR
+instead thinks quietly at every token, with a distribution trained to be useful. The two
+methodsarelikelycomplementary. Forexample,inthecontextwhereonemightprompta
+languagemodeltousechain-of-thought,nothingpreventsusfromallowingthemodelto
+thinkbeforeoutputtingeachtokenoftherationale. Weperformapreliminaryexperiment
+onthis,suggestingthatinternalrationalesmayallowthemodeltogeneratemorestructured
+andcoherentchainsofthought,describedinAppendixE.
+7 Limitations
+This work proposes a new framework for learning to reason, and in doing so explores
+solutions to a variety of meta-learning challenges. However, to solve these challenges,
+certainsimplificationswerenecessary. Forexample,itwouldbevaluabletounderstand
+whetherthesetechniquesworkwhenamodelistrainedfromscratch. Wehavealsoonly
+applied Quiet-STaR to a 7 billion parameter model, albeit a powerful one. The same
+techniquesappliedtoabettermodelwouldlikelyyielddisproportionatelybetterresults,as
+hasoftenbeenobservedforgainsfromreasoning(Weietal.,2022a).
+Quiet-STaRresultsinasubstantialoverhead,generatingmanytokensbeforegenerating
+every additional token. (See Appendix C for compute adjusted performance results.)
+However,thiscanalsobeseenasanadvantage:typically,alanguagemodelcangeneratethe
+nexttokenbasedonthecurrentcontext,andwhiletherearetechniquestoimprovesampling
+quality, there is no general way to leverage additional compute to enhance next-token
+prediction. Inthecurrentimplementationwedonotsupportdynamicallypredictingwhen
+togenerate,orend,arationale. However,thiswouldbeanaturalextension. Forinstance,if
+themixingheadwasapredictionfromthebaselanguagemodel,beforeanythought,rather
+thanafterthethought,onecouldapplyathresholdtopreventgeneratingthoughtsthat
+wouldnotbeincorporated. Weexpectthatthisisamoredifficulttask,aspredictingthe
+usefulnessofathoughtissimplerwhenonehasalreadygeneratedthethought.
+8 Conclusion
+Quiet-STaRrepresentsasteptowardslanguagemodelsthatcanlearntoreasoninageneral
+andscalableway. Bytrainingontherichspectrumofreasoningtasksimplicitindiverse
+webtext,ratherthannarrowlyspecializingforparticulardatasets,Quiet-STaRpointsthe
+waytomorerobustandadaptablelanguagemodels. Ourresultsdemonstratethepromise
+ofthisapproach,withQuiet-STaRimprovingdownstreamreasoningperformancewhile
+generatingqualitativelymeaningfulrationales. Webelievethisalsoopensmanypotential
+future directions - for example, one may aim to ensemble thoughts in order to further
+11improvethepredictionsforfuturetokens. Moreover, ifthelanguagemodelcanpredict
+whenthoughtwillbeuseful,forexamplebyputtingthemixingheadbeforetheprediction,
+thenthepredictedmixingweightcouldbeusedtodynamicallyallocatecomputeduring
+generation. Future work can build on these insights to further close the gap between
+languagemodelandhuman-likereasoningcapabilities.
+EthicsStatement
+Thisworkraisessomeimportantethicalquestions,manyofwhichalsoapplytoSTaR.For
+example,itisimpossibletoknowthatthereasoningexpressedbythemodelinlanguage
+accuratelyrepresentstheinternalprocessingofthemodel(i.e.,faithfulness). Inaddition,
+regardless of faithfulness, there are no safeguards against harmful or biased reasoning
+patternsifthemodelfindsthemuseful. Relatedly,wenotethatCommonsenseQAisknown
+tohavemanybiasedquestionsandlow-qualityanswers(Gevaetal.,2019),butweuseitin
+linewithpriorwork(Zelikmanetal.,2022;Goyaletal.,2023). Thus,asidefromimproving
+languagemodeling,itisunclearinwhatcapacitytherationalesthemselvesshouldbeused.
+Acknowledgements
+WeparticularlythankXindiWu,MichaelLi,andQianHuangfortheirhelpfulanddetailed
+comments,aswellasXuechenLi,Jan-PhilippFrnken,YuhuaiWu,WinnieXu,OmarShaikh,
+andWilliamYinforusefuldiscussions. Inaddition,wewouldliketoacknowledgethatthis
+workwassupportedbyNSFGrant#2302701.
+References
+ThomasAnthony,ZhengTian,andDavidBarber.Thinkingfastandslowwithdeeplearning
+andtreesearch. Advancesinneuralinformationprocessingsystems,30,2017.
+BaianChen,ChangShu,EhsanShareghi,NigelCollier,KarthikNarasimhan,andShunyu
+Yao. Fireact: Towardlanguageagentfine-tuning. arXivpreprintarXiv:2310.05915,2023.
+HyungWonChung,LeHou,ShayneLongpre,BarretZoph,YiTay,WilliamFedus,Yunxuan
+Li, Xuezhi Wang, Mostafa Dehghani, Siddhartha Brahma, et al. Scaling instruction-
+finetunedlanguagemodels. arXivpreprintarXiv:2210.11416,2022.
+”Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz
+Kaiser, Matthias Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, Christopher
+Hesse,andJohnSchulman. TrainingVerifierstoSolveMathWordProblems. arXiv,2021.
+eprint: 2110.14168.
+KanishkGandhi,DorsaSadigh,andNoahDGoodman. Strategicreasoningwithlanguage
+models. arXivpreprintarXiv:2305.19165,2023.
+MorGeva,YoavGoldberg,andJonathanBerant. Arewemodelingthetaskortheannotator?
+an investigation of annotator bias in natural language understanding datasets. arXiv
+preprintarXiv:1908.07898,2019.
+Sachin Goyal, Ziwei Ji, Ankit Singh Rawat, Aditya Krishna Menon, Sanjiv Kumar, and
+VaishnavhNagarajan. Thinkbeforeyouspeak: Traininglanguagemodelswithpause
+tokens. arXivpreprintarXiv:2310.02226,2023.
+CaglarGulcehre,TomLePaine,SrivatsanSrinivasan,KseniaKonyushkova,LotteWeerts,
+Abhishek Sharma, Aditya Siddhant, Alex Ahern, Miaosen Wang, Chenjie Gu, et al.
+Reinforced self-training(rest)for languagemodeling. arXiv preprintarXiv:2308.08998,
+2023.
+SuriyaGunasekar,YiZhang,JyotiAneja,CaioCe´sarTeodoroMendes,AllieDelGiorno,
+Sivakanth Gopi, Mojan Javaheripi, Piero Kauffmann, Gustavo de Rosa, Olli Saarikivi,
+etal. Textbooksareallyouneed. arXivpreprintarXiv:2306.11644,2023.
+12Patrick Haluptzok, Matthew Bowers, and Adam Tauman Kalai. Language models can
+teachthemselvestoprogrambetter. InTheEleventhInternationalConferenceonLearning
+Representations,2023. URLhttps://openreview.net/forum?id=SaRj2ka1XZ3.
+JohnHewitt,JohnThickstun,ChristopherDManning,andPercyLiang. Backpacklanguage
+models. arXivpreprintarXiv:2305.16765,2023.
+Namgyu Ho, Laura Schmid, and Se-Young Yun. Large language models are reasoning
+teachers. arXivpreprintarXiv:2212.10071,2022.
+MatthewDouglasHoffman,DuPhan,DavidDohan,SholtoDouglas,TuanAnhLe,Aaron
+Parisi, Pavel Sountsov, Charles Sutton, Sharad Vikram, and Rif A Saurous. Training
+chain-of-thoughtvialatent-variableinference. AdvancesinNeuralInformationProcessing
+Systems,36,2024.
+ArianHosseini,XingdiYuan,NikolayMalkin,AaronCourville,AlessandroSordoni,and
+Rishabh Agarwal. V-star: Training verifiers for self-taught reasoners. arXiv preprint
+arXiv:2402.06457,2024.
+Cheng-YuHsieh,Chun-LiangLi,Chih-KuanYeh,HootanNakhost,YasuhisaFujii,Alexan-
+der Ratner, Ranjay Krishna, Chen-Yu Lee, and Tomas Pfister. Distilling step-by-step!
+outperforminglargerlanguagemodelswithlesstrainingdataandsmallermodelsizes.
+arXivpreprintarXiv:2305.02301,2023.
+JiaxinHuang,ShixiangShaneGu,LeHou,YuexinWu,XuezhiWang,HongkunYu,and
+JiaweiHan. Largelanguagemodelscanself-improve. arXivpreprintarXiv:2210.11610,
+2022.
+EricJang,ShixiangGu,andBenPoole.Categoricalreparameterizationwithgumbel-softmax.
+arXivpreprintarXiv:1611.01144,2016.
+AlbertQJiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSingh
+Chaplot,DiegodelasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,Lucile
+Saulnier,etal. Mistral7b. arXivpreprintarXiv:2310.06825,2023.
+HoyounJungandKyung-JoongKim. Discretepromptcompressionwithreinforcement
+learning. arXivpreprintarXiv:2308.08758,2023.
+OmarKhattab,KeshavSanthanam,XiangLisaLi,DavidHall,PercyLiang,Christopher
+Potts,andMateiZaharia.Demonstrate-search-predict:Composingretrievalandlanguage
+modelsforknowledge-intensivenlp. arXivpreprintarXiv:2212.14024,2022.
+OmarKhattab,ArnavSinghvi,ParidhiMaheshwari,ZhiyuanZhang,KeshavSanthanam,
+SriVardhamanan,SaifulHaq,AshutoshSharma,ThomasTJoshi,HannaMoazam,etal.
+Dspy: Compilingdeclarativelanguagemodelcallsintoself-improvingpipelines. arXiv
+preprintarXiv:2310.03714,2023.
+TakeshiKojima,ShixiangShaneGu,MachelReid,YutakaMatsuo,andYusukeIwasawa.
+LargeLanguageModelsareZero-ShotReasoners,2022. URLhttps://arxiv.org/abs/
+2205.11916.
+Andrew K Lampinen, Ishita Dasgupta, Stephanie CY Chan, Kory Matthewson,
+MichaelHenryTessler,AntoniaCreswell,JamesLMcClelland,JaneXWang,andFelixHill.
+Canlanguagemodelslearnfromexplanationsincontext? arXivpreprintarXiv:2204.02329,
+2022.
+JackLanchantin,ShubhamToshniwal,JasonWeston,SainbayarSukhbaatar,etal. Learning
+toreasonandmemorizewithself-notes. AdvancesinNeuralInformationProcessingSystems,
+36,2024.
+BrianLester,RamiAl-Rfou,andNoahConstant. Thepowerofscaleforparameter-efficient
+prompttuning. arXivpreprintarXiv:2104.08691,2021.
+13AitorLewkowycz,AndersAndreassen,DavidDohan,EthanDyer,HenrykMichalewski,
+Vinay Ramasesh, Ambrose Slone, Cem Anil, Imanol Schlag, Theo Gutman-Solo, et al.
+Solving quantitative reasoning problems with language models. Advances in Neural
+InformationProcessingSystems,35:3843–3857,2022.
+MichaelYLi,EmilyBFox,andNoahDGoodman. Automatedstatisticalmodeldiscovery
+withlanguagemodels. arXivpreprintarXiv:2402.17879,2024.
+ShiyangLi,JianshuChen,YelongShen,ZhiyuChen,XinluZhang,ZekunLi,HongWang,
+JingQian,BaolinPeng,YiMao,etal. Explanationsfromlargelanguagemodelsmake
+smallreasonersbetter. arXivpreprintarXiv:2210.06726,2022.
+XiangLisaLiandPercyLiang.Prefix-tuning:Optimizingcontinuouspromptsforgeneration.
+arXivpreprintarXiv:2101.00190,2021.
+YuchengLi,BoDong,ChenghuaLin,andFrankGuerin. Compressingcontexttoenhance
+inferenceefficiencyoflargelanguagemodels. arXivpreprintarXiv:2310.06201,2023.
+Jiacheng Liu, Ramakanth Pasunuru, Hannaneh Hajishirzi, Yejin Choi, and Asli Celiky-
+ilmaz. Crystal: Introspective reasoners reinforced with self-feedback. arXiv preprint
+arXiv:2310.04921,2023.
+Haipeng Luo, Qingfeng Sun, Can Xu, Pu Zhao, Jianguang Lou, Chongyang Tao, Xiubo
+Geng, Qingwei Lin, Shifeng Chen, and Dongmei Zhang. Wizardmath: Empowering
+mathematicalreasoningforlargelanguagemodelsviareinforcedevol-instruct. arXiv
+preprintarXiv:2308.09583,2023.
+AmanMadaan,NiketTandon,PrakharGupta,SkylerHallinan,LuyuGao,SarahWiegreffe,
+UriAlon,NouhaDziri,ShrimaiPrabhumoye,YimingYang,etal. Self-refine: Iterative
+refinementwithself. Feedback,2023.
+VolodymyrMnih, KorayKavukcuoglu, DavidSilver, AlexGraves, IoannisAntonoglou,
+DaanWierstra,andMartinRiedmiller. Playingatariwithdeepreinforcementlearning.
+arXivpreprintarXiv:1312.5602,2013.
+VolodymyrMnih,AdriaPuigdomenechBadia,MehdiMirza,AlexGraves,TimothyLillicrap,
+Tim Harley, David Silver, and Koray Kavukcuoglu. Asynchronous methods for deep
+reinforcement learning. In International conference on machine learning, pp. 1928–1937.
+PMLR,2016.
+JesseMu,XiangLi,andNoahGoodman. Learningtocompresspromptswithgisttokens.
+AdvancesinNeuralInformationProcessingSystems,36,2024.
+MaxwellNye,AndersJohanAndreassen,GuyGur-Ari,HenrykMichalewski,JacobAustin,
+DavidBieber,DavidDohan,AitorLewkowycz,MaartenBosma,DavidLuan,etal. Show
+your work: Scratchpads for intermediate computation with language models. arXiv
+preprintarXiv:2112.00114,2021.
+AlexanderPan,ErikJones,MeenaJagadeesan,andJacobSteinhardt. Feedbackloopswith
+languagemodelsdrivein-contextrewardhacking. arXivpreprintarXiv:2402.06627,2024.
+KeiranPaster,MarcoDosSantos,ZhangirAzerbayev,andJimmyBa. Openwebmath: An
+opendatasetofhigh-qualitymathematicalwebtext. arXivpreprintarXiv:2310.06786,2023.
+DuPhan,MatthewDouglasHoffman,SholtoDouglas,TuanAnhLe,AaronTParisi,Pavel
+Sountsov,CharlesSutton,SharadVikram,RifASaurous,etal. Trainingchain-of-thought
+vialatent-variableinference. InThirty-seventhConferenceonNeuralInformationProcessing
+Systems,2023.
+GabrielPoesia,KanishkGandhi,EricZelikman,andNoahDGoodman. Certifiedreasoning
+withlanguagemodels. arXivpreprintarXiv:2306.04031,2023.
+14StanislasPoluandIlyaSutskever. GenerativeLanguageModelingforAutomatedTheorem
+Proving. CoRR,abs/2009.03393,2020. URLhttps://arxiv.org/abs/2009.03393. eprint:
+2009.03393.
+Ben Prystawski, Michael Li, and Noah Goodman. Why think step by step? reasoning
+emergesfromthelocalityofexperience. AdvancesinNeuralInformationProcessingSystems,
+36,2024.
+ShuofeiQiao,NingyuZhang,RunnanFang,YujieLuo,WangchunshuZhou,YuchenEleanor
+Jiang,ChengfeiLv,andHuajunChen. Autoact: Automaticagentlearningfromscratch
+viaself-planning. arXivpreprintarXiv:2401.05268,2024.
+LinluQiu,LiweiJiang,XimingLu,MelanieSclar,ValentinaPyatkin,ChandraBhagavatula,
+BailinWang,YoonKim,YejinChoi,NouhaDziri,etal. Phenomenalyetpuzzling: Testing
+inductivereasoningcapabilitiesoflanguagemodelswithhypothesisrefinement. arXiv
+preprintarXiv:2310.08559,2023.
+AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal.
+Languagemodelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,
+Yanqi Zhou, Wei Li, and Peter J Liu. Exploring the limits of transfer learning with a
+unifiedtext-to-texttransformer. Journalofmachinelearningresearch,21(140):1–67,2020.
+Nazneen Fatema Rajani, Bryan McCann, Caiming Xiong, and Richard Socher. Explain
+yourself! leveraginglanguagemodelsforcommonsensereasoning. InProceedingsofthe
+57thAnnualMeetingoftheAssociationforComputationalLinguistics,pp.4932–4942,2019.
+TimoSchick,JaneDwivedi-Yu,RobertoDess`ı,RobertaRaileanu,MariaLomeli,EricHambro,
+LukeZettlemoyer,NicolaCancedda,andThomasScialom. Toolformer: Languagemodels
+canteachthemselvestousetools. AdvancesinNeuralInformationProcessingSystems,36,
+2024.
+JohnSchulman,FilipWolski,PrafullaDhariwal,AlecRadford,andOlegKlimov. Proximal
+policyoptimizationalgorithms. arXivpreprintarXiv:1707.06347,2017.
+Tal Schuster, Ashwin Kalyan, Alex Polozov, and Adam Tauman Kalai. Programming
+Puzzles. In Thirty-fifth Conference on Neural Information Processing Systems, 2021. URL
+https://openreview.net/forum?id=fe hCc4RBrg.
+NoahShinn,FedericoCassano,BeckLabash,AshwinGopinath,KarthikNarasimhan,and
+Shunyu Yao. Reflexion: Language agents with verbal reinforcement learning. arXiv
+preprintarXiv:2303.11366,2023.
+VeredShwartz,PeterWest,RonanLeBras,ChandraBhagavatula,andYejinChoi. Unsuper-
+visedcommonsensequestionansweringwithself-talk.InProceedingsofthe2020Conference
+onEmpiricalMethodsinNaturalLanguageProcessing(EMNLP),pp.4615–4629,2020.
+David Silver, Thomas Hubert, Julian Schrittwieser, Ioannis Antonoglou, Matthew Lai,
+Arthur Guez, Marc Lanctot, Laurent Sifre, Dharshan Kumaran, Thore Graepel, et al.
+Masteringchessandshogibyself-playwithageneralreinforcementlearningalgorithm.
+arXivpreprintarXiv:1712.01815,2017.
+AlonTalmor,JonathanHerzig,NicholasLourie,andJonathanBerant. Commonsenseqa:
+A question answering challenge targeting commonsense knowledge. arXiv preprint
+arXiv:1811.00937,2018.
+EricTodd,MillicentLLi,ArnabSenSharma,AaronMueller,ByronCWallace,andDavid
+Bau. Functionvectorsinlargelanguagemodels. arXivpreprintarXiv:2310.15213,2023.
+JonathanUesato,NateKushman,RamanaKumar,FrancisSong,NoahSiegel,LisaWang,
+AntoniaCreswell,GeoffreyIrving,andIrinaHiggins. Solvingmathwordproblemswith
+process-and outcome-based feedback. Neural Information Processing Systems (NeurIPS
+2022)WorkshoponMATH-AI,2022.
+15Ruocheng Wang, Eric Zelikman, Gabriel Poesia, Yewen Pu, Nick Haber, and Noah D
+Goodman. Hypothesissearch: Inductivereasoningwithlanguagemodels. arXivpreprint
+arXiv:2309.05660,2023.
+XuezhiWangandDennyZhou. Chain-of-thoughtreasoningwithoutprompting. arXiv
+preprintarXiv:2402.10200,2024.
+LucasWeber,JaapJumelet,EliaBruni,andDieuwkeHupkes. Languagemodellingasa
+multi-taskproblem. arXivpreprintarXiv:2101.11287,2021.
+JasonWei,MaartenBosma,VincentZhao,KelvinGuu,AdamsWeiYu,BrianLester,Nan
+Du,AndrewMDai,andQuocVLe. Finetunedlanguagemodelsarezero-shotlearners.
+InInternationalConferenceonLearningRepresentations,2021a.
+JasonWei,MaartenBosma,VincentYZhao,KelvinGuu,AdamsWeiYu,BrianLester,Nan
+Du,AndrewMDai,andQuocVLe. Finetunedlanguagemodelsarezero-shotlearners.
+arXivpreprintarXiv:2109.01652,2021b.
+JasonWei,YiTay,RishiBommasani,ColinRaffel,BarretZoph,SebastianBorgeaud,DaniYo-
+gatama,MaartenBosma,DennyZhou,DonaldMetzler,EdH.Chi,TatsunoriHashimoto,
+OriolVinyals,PercyLiang,JeffDean,andWilliamFedus.EmergentAbilitiesofLargeLan-
+guageModels,October2022a.URLhttp://arxiv.org/abs/2206.07682.arXiv:2206.07682
+[cs].
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,BrianIchter,FeiXia,EdChi,
+Quoc Le, and Denny Zhou. Chain of Thought Prompting Elicits Reasoning in Large
+LanguageModels,2022b. URLhttps://arxiv.org/abs/2201.11903.
+RonaldJWilliams. Simplestatisticalgradient-followingalgorithmsforconnectionistrein-
+forcementlearning. Machinelearning,8:229–256,1992.
+ShunyuYao,JeffreyZhao,DianYu,NanDu,IzhakShafran,KarthikNarasimhan,andYuan
+Cao. React: Synergizingreasoningandactinginlanguagemodels. InternationalConference
+onLearningRepresentations(ICLR2023),2022.
+EricZelikman,YuhuaiWu,JesseMu,andNoahGoodman. Star: Bootstrappingreasoning
+withreasoning. AdvancesinNeuralInformationProcessingSystems,35:15476–15488,2022.
+EricZelikman,QianHuang,GabrielPoesia,NoahD.Goodman,andNickHaber. Parsel:
+Algorithmicreasoningwithlanguagemodelsbycomposingdecompositions,2023a.
+EricZelikman,ElianaLorch,LesterMackey,andAdamTaumanKalai. Self-taughtoptimizer
+(stop): Recursivelyself-improvingcodegeneration. arXivpreprintarXiv:2310.02304,2023b.
+HughZhangandDavidCParkes. Chain-of-thoughtreasoningisapolicyimprovement
+operator. arXivpreprintarXiv:2309.08589,2023.
+TianjunZhang,AmanMadaan,LuyuGao,StevenZheng,SwaroopMishra,YimingYang,
+NiketTandon,andUriAlon. In-contextprinciplelearningfrommistakes. arXivpreprint
+arXiv:2402.05403,2024.
+Zhuosheng Zhang, Aston Zhang, Mu Li, and Alex Smola. Automatic chain of thought
+promptinginlargelanguagemodels. arXivpreprintarXiv:2210.03493,2022.
+Wenting Zhao, Justin T Chiu, Claire Cardie, and Alexander M Rush. Hop, union, gen-
+erate: Explainable multi-hop reasoning without rationale supervision. arXiv preprint
+arXiv:2305.14237,2023.
+HattieZhou, AzadeNova, HugoLarochelle, AaronCourville, BehnamNeyshabur, and
+Hanie Sedghi. Teaching algorithmic reasoning via in-context learning. arXiv preprint
+arXiv:2211.09066,2022.
+ZhaochengZhu,YuanXue,XinyunChen,DennyZhou,JianTang,DaleSchuurmans,and
+HanjunDai. Largelanguagemodelscanlearnrules. arXivpreprintarXiv:2310.07064,2023.
+16Appendix
+A HyperparameterChoices
+OptimizationandEvaluation Foroptimization, weusetheAdamWoptimizerwitha
+warmupof20steps,alearningrateof1e−6,aweightdecayof0.001,andabatchsizeof8
+(alongwithanynecessarygradientaccumulationtokeepthisfixedacrossruns). Moreover,
+our<|startofthought|>and<|endofthought|>embeddinggradientweightis1e2andour
+policyweightis1e6. WesamplewithtemperatureT = 1duringtrainingandusegreedy
+decodingforthethoughtsduringevaluation. Wetreatoursamplesasimportancesamples
+by computing the REINFORCE loss at temperature T = 3. Because we do not prompt
+themodelwithanyexamples,wedirectlycomputetheprobabilityofthecorrectanswer,
+conditionedongeneratingananswer–forexample,formultiplechoicequestionsbetween
+A···E,wecomputetheaccuracyoverthelogitsfortokenscorrespondingto A···E. Lastly,
+forourtraining,weselectarandomspanof256tokensfromeachsample(orpadifthere
+arefewerthan256tokens).
+MixingHead Forourmixinghead,weuseathree-layerMLPwithReLUactivation,taking
+inavectoroftwotimesthesizeofthehiddenstateofthelanguagemodel(asweconcatenate
+thetwopredictionstodeterminetheirweights),andoutputtingascalar. Thisscalaristhem
+usedtoweightthelogitsfromtheLMheadwithandwithoutthinkingtomakeaprediction
+fromagiventoken.
+Computation Wetrainallofourmodelsonasinglenodeofeight80GBH100s.
+B FasterParallelSampling
+Inthissection,wehighlightsomesimplewaystofurtheracceleratetheparallelgeneration
+algorithm. Forexample,notethatonecanreducetheattention’smemorycostbycomputing
+thediagonalattentionsimplyaselementwise(ratherthanpairwise)dot-products. That
+is, given two input embedding sequences of shapes (b,t,l,d) and (b,1,l,d) where t is
+thenumberoftimestepsahead,bisbatchsize,l issequencelength,anddisembedding
+dimension, we do not need to compute their pairwise attention of shape (b,t,l,l), we
+onlyneedtocomputetheattentionforthepairedelementsalongthediagonalofshape
+(b,t,l). Additionally,toavoidgeneratingcontinuationsforallofthetokens(forexample,
+if one wanted to apply a value function to determine where thoughts would be most
+useful), one can index into this generated attention mask. Notably, however, this also
+requiresmanipulationoftheotherinputsduringtheforwardpasssuchasthepositional
+embeddings.
+C Compute-AdjustedPlots
+WealsovisualizeFigure2wherewenormalizebythenumberofthoughtandtalktokens
+usedfortraining.
+D MeasuringtheImpactofMultipleThoughtsPerSequenceand
+MultipleTokensAhead
+Weperformasimpleablationonour12-thought-token-4-aheadbaseline,namelyasking
+whether sampling multiple thoughts per sequence is necessary. We find that although
+simplycomputingtherewardasthedifferencebetweenthelosseswithandwithoutthought
+provestobeastrongbaseline,usingmultiplethoughtsconsistentlyoutperformedit(by
+roughly 0.5% on GSM8K generalization and 3% on CommonsenseQA generalization).
+However, the exact number of thoughts had little impact: varying between 2, 3, and 4
+thoughts per sequence appeared to result in a consistent improvement with additional
+1711%
+46%
+10% 44%
+9% 42%
+# Thought, Ahead Tokens # Thought, Ahead Tokens
+40%
+8% 24, 12 24, 12
+16, 8 16, 8
+38%
+12, 4 12, 4
+7%
+10, 4 36% 10, 4
+8, 4 8, 4
+6% Baseline 34% Baseline
+500 1000 1500 2000 2500 3000 3500 500 1000 1500 2000 2500 3000 3500
+Training Step Training Step
+(a)GSM8K (b)CommonsenseQA
+Figure7: Compute-NormalizedGeneralizationResults. Wevisualizetheperformance
+curvesnormalizedbythenumberofinferencecallsused.
+thoughts, but additional thoughts per sequence beyond two improved performance by
+only0.1-0.3%onbothGSM8KandCommonsenseQA.Similarly,wefoundthatpredicting
+more than one token ahead helped by 0.3% on GSM8K and 3.1% on CommonsenseQA,
+but with 12-thought-tokens, we did not find that additional tokens ahead, beyond two,
+improved performance. However, qualitatively, we found that the rationales appeared
+morecoherentwithadditionaltokens-aheadofsupervision. Thissuggestsaneedformore
+specificevaluationsofgenerationqualityinfuturework.
+E Rationale-AugmentedRationales
+Becausethelanguagemodelcaninsertthoughtsanywhere,weperformapreliminarystudy
+whereweinvestigatethereasoninggeneratedbythelanguagemodelwhenithasaccessto
+internalrationaleswhileitgeneratesexternalrationales(i.e. chains-of-thought)tosolvea
+problem. Becausethesechainsofthoughtarethemselvesgeneratedbychainsofthought,
+onemightrefertothisasanet-of-thought(orNoT).Wecomparefivesolutionsfromthe
+modeltoafixedrandomquestioninGSM8K,lookingatoutputsofthebaseMistral7B,the
+outputsofMistralfine-tunedforthesamenumberofstepsonOpenWebMath(Pasteretal.,
+2023),andtherationalesofourbestQuiet-STaRmodel. Wesamplefromallofthemdirectly,
+attemperaturet =1.
+E.1 BaseMistral7B
+FirstResponse:
+A: Let's think step by step. How many fresh eggs remains after the three her eat for
+breakfast and four goes into the muffin mix for her friends. We can calculate it by
+16-3-4. The amount equals 9 fresh eggs. So, the dollars it makes daily equals what
+multiplied by $2. 12 x 2. The answer is $24.
+SecondResponse:
+Q: Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and
+bakes muffins for her friends every day with four. She sells the remainder at the
+farmers' market daily for $2 per fresh duck egg. How much in dollars does she make
+every day at the farmers' market?
+A: Let's think step by step. She eats 3 daily for breakfast. She bakes 4 daily into
+muffins for her friends. That leaves 9. She sells 9 for \(2\), so \(9\times 2=\$18
+\). So Janet makes $18 selling duck eggs each day.
+18
+)%(
+ycaruccA
+K8MSG
+)%(
+ycaruccA
+AQesnesnommoC66. Janet sells an average of 12 fresh duck eggs daily on the farmers' market. If she
+sells them for $2 per egg how much does she make per week, assuming she sells at
+the farmers' market most every day?A: If Janet sells on average 12 fresh duck eggs
+daily on the farmers' market. This is equal to \(12\times 7\), so 12 \(\times\) 7
+=\(84\). The total amount she would then make would be \(84\times 2\) dollars, or
+168 per week. So Janet makes $168 selling duck eggs per week.
+ThirdResponse:
+Q: Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and
+bakes muffins for her friends every day with four. She sells the remainder at the
+farmers' market daily for $2 per fresh duck egg. How much in dollars does she make
+every day at the farmers' market?
+A: Let's think step by step.
+How many eggs does she have left every day?
+This is important because it will help us find how many eggs she sells each day.
+What can we do to answer the question?
+If we write the relationship between how many duck eggs Janet has left, how many she
+eats, and how many she bakes for the muffins, then we can see how many eggs she has
+left to sell at the farmers' market.
+Let's write an equation to solve our dilemma.
+Subtract an equation for eggs eaten and an equation for eggs baked to find the eggs
+remaining. Let's see what we can find.
+We can see that Janet has 6 eggs leftover each day. $6\times\$2 = \$12$ per day.
+Therefore Janet receives an additional $12 per day for her eggs at the farmer's
+market.
+Remember, this is just for one day, so now she makes $12 per day in additional income,
+because she sells her eggs at the farmer's market each day.
+#### Answer
+$12
+FourthResponse:
+Q: Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and
+bakes muffins for her friends every day with four. She sells the remainder at the
+farmers' market daily for $2 per fresh duck egg. How much in dollars does she make
+every day at the farmers' market?
+A: Let's think step by step. First, you want to find out the number of eggs a total that
+Janet collects each day. Take this many dollars a three and subtract from the
+money she gets per egg, which is $2. The answer to that question is $5.
+FifthResponse
+Q: Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and
+bakes muffins for her friends every day with four. She sells the remainder at the
+farmers' market daily for $2 per fresh duck egg. How much in dollars does she make
+every day at the farmers' market?
+A: Let's think step by step.
+For the first step, let's think of the day as a whole, using some variables to keep
+track of the numbers of eggs. Let $n$ = the number of eggs that Janet's ducks lay
+per day. Then the number of eggs that she eats per day will be $(3)$ = .
+Next, she makes $m$ = muffins. For each muffin, she uses $4$ = eggs, so we can take from
+the eggs Janet's ducks lay to represent the number she uses: $4(m)$=. Now, to get
+her back to our starting number of eggs, we need to add these eggs back on, giving
+us . The eggs Janet sells each day brings her $2$$(n)$ = $. This brings us to our
+next step.
+Now we will break down all the eggs from our starting number, $n$ =, into the pieces
+that we set up previously. For the beginning number, we have: This brings us back
+to our starting number, and we can simplify this expression.
+19Moving from the top line to the second line, we multiply the numbers within each
+parenthetical group. Moving from the second line to the third line, we add the
+products together to find the total. Finally, we can distribute and determine the
+final product: $= 360.$
+So the total number of eggs that Janet's ducks lay per day is $360.$ Since Janet sells
+each egg she has for $2,$ her total earnings at the farmers' market is: $\boxed{\$
+720}.$
+E.2 OpenWebMath-TrainedMistral7B
+FirstResponse:
+<s> Q: Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and
+bakes muffins for her friends every day with four. She sells the remainder at the
+farmers' market daily for $2 per fresh duck egg. How much
+in dollars does she make every day at the farmers' market?
+A: Let's think step by step. How much does she make every day? Well per the question,
+that is $2 per a duck egg. Now, how many duck eggs per day does she sell? Well,
+that's 16 minus the eggs she eats minus the eggs she uses to ma
+ke muffins.
+She eats 3 eggs every morning, so $16-3 = 13$.
+She makes 4 muffins, which uses 4 eggs. $16-3-4= 5$.
+Therefore, the number of duck eggs she is selling is $5$.
+Clearly, 1 duck egg costs $2. Therefore, the total amount she makes selling the eggs is
+$10$ $2$. Now, this can be written as a fraction as, "ten two-dollars," so $10 2 -
+bucks.$
+Converting to a fraction, or "a tenth of ten," so $10 2 - bucks$ = $1$ $10 - bucks$
+[reveal-answer q="fs-id1165135856725"]Show Solution[/reveal-answer]
+[hidden-answer a="fs-id1165135856725"]
+SecondResponse:
+<s> Q: Janet s ducks lay 16 eggs per day. She eats three for breakfast every morning
+and bakes muffins for her friends every day with four. She sells the remainder at
+the farmers' market daily for $2 per fresh duck egg. How much in dollars does she
+make every day at the farmers' market?
+A: Let's think step by step. On what basis can we answer the question affer considering
+the question? What do we know given and how can we use what we're given to arrive
+at an answer. 3 is given, 4 is given, 16 is given, does anyone have any thoughts?
+A: Well 16 minus 3 minus 4 equals 9, and then I subtract 1 from 9 and that is 4 extra so
+five more eggs.
+M: And we know that 2 times 5 is how much?
+A: Ten
+M: Yes.
+A: If she eats 3 duck eggs for breakfast, in the morning equals \(3 \times 2 = 6\). If
+she eat 4 duck eggs baking muffin for her friends equals \(4 \times 2 = 8\), so
+total of money and that she got is $6 plus $8 which equals 14. The weight gain is 5
+because it is 5 is that what you put up there so 5 times 2 ducks and subtract that
+from that from 16 and you got 7 no what did we write down? Are you able to figure
+out now what the question is, and what is what the question really is. You got 14
+the weight loss you, you subtracted that from 16 which equals 2, $14 minus 2,
+remainder is what?
+A: 12.
+M: The question is what is Janets ducks lay 16 eggs, she eats 12 for sale. You
+subtract 3 plus 4 minus 5 so 5 when you eat the muffin equals 5, times two, the 12,
+minus the money so 5 times 2, $-12$. So \(2 \times 9 = 18\) minus $10, so 4 more
+eggs... Still times $2, total comes to to $20.
+A: I understand there is the ones day one 3 plus 4 eats who makes and so on and so on.
+M: But maybe in order to answer it correctly you have to look a little close. Typically
+in the procedures you have that they give you first, I can tell you how here we go.
+20M: Now if you increase the 16, now you have that you would need to determine 16 minus 3
+minus 4 and that adds up to the remainder, which is 9. Then subtract 1 and but you
+have 5. The next answer then, which you do is now 5 times 2, which is 10.
+M: Which is $10, and then 14, which is is the remainder
+M: Is $6 and $8 and that is a total of $14, and now that you subtract 2, and that means
+that you now have 16 minus 5, which is 11.
+M: The next thing is to the yield for the second situation you have got 16 minus 3 plus
+4 and that comes to 9. This is very easy to do instantaneously even the first part,
+16, 3, 4 and 9, and you happen to know what lives, and you just count and you have
+five and five then go ahead. 5 times 2 comes to 10, so $10 then so actually you
+have just added 4.5, now your total is 16 plus $2. But now to this is $10 plus $2
+is $12, so how much you sell from 16 and then minus 12 comes to 4.
+M: So what is the remainder of 16 minus 3 plus 4 minus 5? Matters you see three is
+missing. Four you have. Five eggs. So 5 times 2, so $10 remains at $10, so reduce,
+so what happens now to what happened was added with subtracted the next the
+question is 16 minuses 3 plus 4, and presumably you've done this before, if not
+then you add up 16 minus 3 plus 4 gives us 9 and what is the remainder after 5? So
+what is 5 times 2? So 10. 2, 3, plus 2 = 5 , and so your answer so far is 16 minus
+3 plus 4, and give us the basket minus 2 remains 9 and now you have to determine
+now what is the total for the second part? You have
+ThirdResponse:
+<s> Q: Janet s ducks lay 16 eggs per day. She eats three for breakfast every morning
+and bakes muffins for her friends every day with four. She sells the remainder at
+the farmers' market daily for $2 per fresh duck egg. How much in dollars does she
+make every day at the farmers' market?
+A: Let's think step by step. The "how much in dollars" part means that one egg is worth
+one dollar. So, twelve ducks lay 16 eggs, which means that Janet nets $20 from
+selling them. $16 muffins will give us 4 eggs, which nets us $8. So, we paid $108
+for our ingredients to make 16 muffins. Hence, we lost 96 dollars. Hello, heroine,
+we have to do better than that! Look into averages. Let's say that we pay 5 dollars
+for one egg. Now, $12 is our product and $5 is our investment. Our net wealth will
+be $12-5*12 = 24 dollars. Is that correct?
+FourthResponse:
+<s> Q: Janet s ducks lay 16 eggs per day. She eats three for breakfast every morning
+and bakes muffins for her friends every day with four. She sells the remainder at
+the farmers' market daily for $2 per fresh duck egg. How much in dollars does she
+make every day at the farmers' market?
+A: Let's think step by step. First, Jane's ducks lay 16 eggs perday. So there are 16
+eggs Monday, 16 Tuesday, 16 Wednesday, 16 Thursday, 16 Friday, and so on. Second,
+Janet eats 3 of the 16 eggs that the ducklay ap day for breakfast. She only eats
+the duck eggs, not her baked goods (muffins) or other food. Therefore, she eats 3
+Monday, 3 Tuesday, 3 Wednesday, 3 Thursday, and so on. Third, she only bakes the
+first 4 non-eaten eggs into muffins. Therefore$ she sells the remaining 12 non-
+eaten eggs Monday, 12 Tuesday, 12 Wednesday, 12 Thursday, and so on. Fourth, Janet
+sells duck eggs Monday, Tuesday, Wednesday, Thursday, Friday at the 2 each. Third,
+she eats 3 Monday, 3 Tuesday, 3 Wednesday, 3 Thursday, Friday at the farmers'
+market. Lastly, she makes 12 Monday, 12 Tuesday, 12 Wednesday, 12 Thursday, and so
+on in dollars every day at the farmers' market. The worksheet below summarizes
+these steps. The number formed by the intersection of corresponding row and column
+terms will be the correct answer. The product of the (3, J) term and the (J, 8)
+term is 1,150. So, Janet makes $1,150 per day!
+(Note: Step 3 and Step 8 are repeating, but the (3,7) term in Step 8 is not the same as
+the (3,7) term in Step 3. )
+FifthResponse
+<s> Q: Janet s ducks lay 16 eggs per day. She eats three for breakfast every morning
+and bakes muffins for her friends every day with four. She sells the remainder at
+21the farmers' market daily for $2 per fresh duck egg. How much in dollars does she
+make every day at the farmers' market?
+A: Let's think step by step.
+What do we know?
+- Janet's ducks lay 16 eggs per day.
+- She eats three for breakfast every morning and bakes muffins for her friends every day
+with four.
+From these two facts, we can conclude at least that Janet needs at least seven eggs for
+consumption per day.
+And what do we need to find exactly?
+- We need to find how much in dollars Janet makes every day at the farmers' market.
+Let's write an equation and solve it to find the answer. We know:
+- \(16-3-4=9\)
+So our daily profit is 9 times $2, or \(9\times\$2=\$18\)
+Hence her profits at market on a given day are \($18\).
+Answer: \($18\).
+E.3 Quiet-STaR-TrainedMistral7B
+FirstResponse:
+<s> Q: Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and
+bakes muffins for her friends every day with four. She sells the remainder at the
+farmers' market daily for $2 per fresh duck egg. How much
+in dollars does she make every day at the farmers' market?
+A: Let's think step by step.
+The ducks lay 16 eggs per day.
+This is the total number of eggs.
+3 of the eggs are eaten for breakfast.
+This is the number of eggs that are eaten for breakfast.
+4 of the eggs are used to make muffins.
+This is the number of eggs that are used to make muffins.
+16 - 3 - 4 = 9
+9 is the number of eggs that are sold at the farmers' market.
+9 of the eggs are sold at the farmers' market.
+$2
+The price of each egg is $2.
+$2 \times 9 = 18$
+18 is the total price of the eggs.
+The total price of the eggs is $18.
+SecondResponse:
+22A: Let's think step by step.
+1. The ducks lay 16 eggs per day.
+2. She eats 3 for breakfast every morning.
+3. She bakes muffins for her friends every day with 4.
+4. She sells the remainder at the farmers' market daily for $2 per fresh duck egg.
+5. The number of eggs she sells at the farmers' market is 16 - 3 - 4.
+6. The number of eggs she sells at the farmers' market is 16 - 3 - 4.
+7. The number of eggs she sells at the farmers' market is 16 - 3 - 4.
+8. The number of eggs she sells at the farmers' market is 16 - 3 - 4.
+9. The number of eggs she sells at the farmers' market is 16 - 3 - 4.
+10. The number of eggs she sells at the farmers' market is 16 - 3 - 4.
+11. The number of
+ThirdResponse:
+<s> Q: Janet's ducks lay 16 eggs per day. She eats three for breakfast every morning and
+bakes muffins for her friends every day with four. She sells the remainder at the
+farmers' market daily for $2 per fresh duck egg. How much in dollars does she make
+every day at the farmers' market?
+A: Let's think step by step.
+The ducks lay 16 eggs per day.
+This is the total number of eggs.
+3 is the number of eggs that Janet eats for breakfast every morning.
+4 is the number of eggs that she uses in the muffins that she bakes for her friends
+every day.
+16 - 3 - 4 = 9
+9 is the number of eggs that she sells at the farmers' market daily for $2 per fresh
+duck egg.
+9 $2 = 9 $2
+= 9 $2
+= 9 $2
+= 18
+So, 18 is the amount in dollars that she makes every day at the farmers' market.
+The amount in dollars that she makes every day at the farmers' market is 18.
+A: 18</s>
+FourthResponse:
+A: Let's think step by step.
+The number of eggs that Janet's ducks lay per day is 16.
+Of these, she eats 3 for breakfast every morning.
+This is 3.
+Of these, she bakes muffins for her friends with 4.
+This is 4.
+23The number of eggs that are left over is 16 - 3 - 4.
+This is 16 - 7.
+This is 9.
+The number of eggs that she sells at the farmers' market daily for $2 per egg is 9.
+The total in dollars that she makes every day at the farmers' market is 9 $2.
+This is 9 2.
+This is 18.
+The total in dollars that she makes every day at the farmers' market is 18.
+A: 18
+FifthResponse
+A: Let's think step by step.
+The ducks lay 16 eggs per day.
+This is the total number of eggs.
+3 + 4 + 16 = 23
+3 eggs are eaten for breakfast every morning.
+4 eggs are used to make muffins for her friends every day.
+16 eggs are sold at the farmers' market for $2 each every day.
+The 16 eggs that are sold at the farmers' market are the remaining eggs.
+16 - 3 - 4 = 9
+9 eggs are sold at the farmers' market for $2 each every day.
+9 (2) = 18
+18 is the total in dollars that she makes every day at the farmers' market.
+18 is the answer.
+A: 18
+F AdditionalWorksonLearningtoReason
+Forcompleteness,wehighlightthatmanyotherworkshaveexploredteachinglanguage
+modelstoreason(oftenwithalgorithmssimilartoorinspiredbySTaR),eitherfromtheir
+ownrationales,frominteractionwithanenvironment,orfromahand-constructeddataset.
+Forexample,worksexplorethisinthecontextofmultihopquestionanswering(Zhaoetal.,
+2023),math(Luoetal.,2023;Uesatoetal.,2022),machinetranslation(Gulcehreetal.,2023).
+Several works investigate teaching language model agents to reason in planning (Chen
+etal.,2023;Gandhietal.,2023;Qiaoetal.,2024),ortousespecifictoolsormemory(Yao
+etal.,2022;Lanchantinetal.,2024;Schicketal.,2024),whileothersinvestigatehowonemay
+distillthereasoningfromalargelanguagemodelintoasmallerlanguagemodelHoetal.
+(2022);Lietal.(2022);Hsiehetal.(2023). Notablyhowever,Panetal.(2024)demonstrates
+24that these feedback loops may result in reward hacking. Zelikman et al. (2023b) shows
+howabootstrappingloopcanbeimplementedwhereamodelrepeatedlyimprovesacode-
+improverusingthesamecode-improverandHaluptzoketal.(2023)showshowlanguage
+modelscanbootstraptheirprogrammingabilitywithprogrammingpuzzlesSchusteretal.
+(2021). Otherworkshaveemployedasimilarstrategyforusinglanguagemodelstosolve
+inductivereasoningtasksortomodelreal-worldsystems(Wangetal.,2023;Qiuetal.,2023;
+Zhuetal.,2023;Lietal.,2024).
+Some works have investigated how models can learn from their reasoning mistakes in-
+context(Shinnetal.,2023;Madaanetal.,2023;Zhangetal.,2024;Liuetal.,2023). Many
+studieshavealsofocusedontheabilityofLMstolearnfromin-contextreasoningexamples
+(Lampinenetal.,2022;Zhouetal.,2022)–correspondingly,Khattabetal.(2022)andKhattab
+et al. (2023) show how the sets of examples used to prompt a model to reason can be
+optimizedinthecontextofamulti-stepreasoningpipeline. Furthermore,Zhangetal.(2022)
+demonstratedthatonecanimprovezero-shotquestion-answeringinlanguagemodelsby
+usingavarietyofzero-shotpromptsforreasoning.
+25
