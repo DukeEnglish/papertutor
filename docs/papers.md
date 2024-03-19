@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09636v1 |
-|title| Dynamic Memory Compression: Retrofitting LLMs for Accelerated Inference |
-|authors| Piotr NawrotAdrian ŁańcuckiMarcin ChochowskiDavid TarjanEdoardo M. Ponti
-|links| http://arxiv.org/abs/2403.09636v1 |
-|updated| 2024-03-14 17:59:26 UTC |
-|summary| Transformers have emerged as the backbone of large language models LLMs.However generation remains inefficient due to the need to store in memory acache of key-value representations for past tokens whose size scales linearlywith the input sequence length and batch size. As a solution we proposeDynamic Memory Compression DMC a method for on-line key-value cachecompression at inference time. Most importantly the model learns to applydifferent compression rates in different heads and layers. We retrofitpre-trained LLMs such as Llama 2 7B 13B and 70B into DMC Transformersachieving up to 3.7x throughput increase in auto-regressive inference on aNVIDIA H100 GPU. DMC is applied via continued pre-training on a negligiblepercentage of the original data without adding any extra parameters. We findthat DMC preserves the original downstream performance with up to 4x cachecompression outperforming up-trained grouped-query attention GQA. GQA andDMC can be even combined to obtain compounded gains. As a result DMC fitslonger contexts and larger batches within any given memory budget. |
+|idx| 2403.11621v1 |
+|title| Let's Focus on Neuron: Neuron-Level Supervised Fine-tuning for Large Language Model |
+|authors| Haoyun XuRunzhe ZhanDerek F. WongLidia S. Chao
+|links| http://arxiv.org/abs/2403.11621v1 |
+|updated| 2024-03-18 09:55:01 UTC |
+|summary| Large Language Models LLMs are composed of neurons that exhibit variousbehaviors and roles which become increasingly diversified as models scale.Recent studies have revealed that not all neurons are active across differentdatasets and this sparsity correlates positively with the task-specificability leading to advancements in model pruning and training efficiency.Traditional fine-tuning methods engage all parameters of LLMs which iscomputationally expensive and may not be necessary. In contrastParameter-Efficient Fine-Tuning PEFT approaches aim to minimize the number oftrainable parameters yet they still operate at a relatively macro scale e.g.layer-level. We introduce Neuron-Level Fine-Tuning NeFT a novel approachthat refines the granularity of parameter training down to the individualneuron enabling more precise and computationally efficient model updates. Theexperimental results show that NeFT not only exceeded the performance offull-parameter fine-tuning and PEFT but also provided insights into theanalysis of neurons. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09635v1 |
-|title| Transformers Get Stable: An End-to-End Signal Propagation Theory for Language Models |
-|authors| Akhil KediaMohd Abbas ZaidiSushil KhyaliaJungho JungHarshith GokaHaejun Lee
-|links| http://arxiv.org/abs/2403.09635v1 |
-|updated| 2024-03-14 17:59:14 UTC |
-|summary| In spite of their huge success transformer models remain difficult to scalein depth. In this work we develop a unified signal propagation theory andprovide formulae that govern the moments of the forward and backward signalthrough the transformer model. Our framework can be used to understand andmitigate vanishing/exploding gradients rank collapse and instabilityassociated with high attention scores. We also propose DeepScaleLM aninitialization and scaling scheme that conserves unit output/gradient momentsthroughout the model enabling the training of very deep models with 100s oflayers. We find that transformer models could be much deeper - our deep modelswith fewer parameters outperform shallow models in Language Modeling SpeechTranslation and Image Classification across Encoder-only Decoder-only andEncoder-Decoder variants for both Pre-LN and Post-LN transformers formultiple datasets and model sizes. These improvements also translate intoimproved performance on downstream Question Answering tasks and improvedrobustness for image classification. |
+|idx| 2403.11585v1 |
+|title| Linguacodus: A Synergistic Framework for Transformative Code Generation in Machine Learning Pipelines |
+|authors| Ekaterina TrofimovaEmil SataevAndrey E. Ustyuzhanin
+|links| http://arxiv.org/abs/2403.11585v1 |
+|updated| 2024-03-18 08:58:47 UTC |
+|summary| In the ever-evolving landscape of machine learning seamless translation ofnatural language descriptions into executable code remains a formidablechallenge. This paper introduces Linguacodus an innovative framework designedto tackle this challenge by deploying a dynamic pipeline that iterativelytransforms natural language task descriptions into code through high-leveldata-shaping instructions. The core of Linguacodus is a fine-tuned largelanguage model LLM empowered to evaluate diverse solutions for variousproblems and select the most fitting one for a given task. This paper detailsthe fine-tuning process and sheds light on how natural language descriptionscan be translated into functional code. Linguacodus represents a substantialleap towards automated code generation effectively bridging the gap betweentask descriptions and executable code. It holds great promise for advancingmachine learning applications across diverse domains. Additionally we proposean algorithm capable of transforming a natural description of an ML task intocode with minimal human interaction. In extensive experiments on a vast machinelearning code dataset originating from Kaggle we showcase the effectiveness ofLinguacodus. The investigations highlight its potential applications acrossdiverse domains emphasizing its impact on applied machine learning in variousscientific fields. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09631v1 |
-|title| 3D-VLA: A 3D Vision-Language-Action Generative World Model |
-|authors| Haoyu ZhenXiaowen QiuPeihao ChenJincheng YangXin YanYilun DuYining HongChuang Gan
-|links| http://arxiv.org/abs/2403.09631v1 |
-|updated| 2024-03-14 17:58:41 UTC |
-|summary| Recent vision-language-action VLA models rely on 2D inputs lackingintegration with the broader realm of the 3D physical world. Furthermore theyperform action prediction by learning a direct mapping from perception toaction neglecting the vast dynamics of the world and the relations betweenactions and dynamics. In contrast human beings are endowed with world modelsthat depict imagination about future scenarios to plan actions accordingly. Tothis end we propose 3D-VLA by introducing a new family of embodied foundationmodels that seamlessly link 3D perception reasoning and action through agenerative world model. Specifically 3D-VLA is built on top of a 3D-basedlarge language model LLM and a set of interaction tokens is introduced toengage with the embodied environment. Furthermore to inject generationabilities into the model we train a series of embodied diffusion models andalign them into the LLM for predicting the goal images and point clouds. Totrain our 3D-VLA we curate a large-scale 3D embodied instruction dataset byextracting vast 3D-related information from existing robotics datasets. Ourexperiments on held-in datasets demonstrate that 3D-VLA significantly improvesthe reasoning multimodal generation and planning capabilities in embodiedenvironments showcasing its potential in real-world applications. |
+|idx| 2403.11558v1 |
+|title| Reinforcement Learning with Token-level Feedback for Controllable Text Generation |
+|authors| Wendi LiWei WeiKaihe XuWenfeng XieDangyang ChenYu Cheng
+|links| http://arxiv.org/abs/2403.11558v1 |
+|updated| 2024-03-18 08:18:37 UTC |
+|summary| To meet the requirements of real-world applications it is essential tocontrol generations of large language models LLMs. Prior research has triedto introduce reinforcement learning RL into controllable text generationwhile most existing methods suffer from overfitting issues finetuning-basedmethods or semantic collapse post-processing methods. However current RLmethods are generally guided by coarse-grained sentence/paragraph-levelfeedback which may lead to suboptimal performance owing to semantic twists orprogressions within sentences. To tackle that we propose a novel reinforcementlearning algorithm named TOLE which formulates TOken-LEvel rewards forcontrollable text generation and employs a first-quantize-then-noiseparadigm to enhance the robustness of the RL algorithm.Furthermore TOLE can beflexibly extended to multiple constraints with little computational expense.Experimental results show that our algorithm can achieve superior performanceon both single-attribute and multi-attribute control tasks. We have releasedour codes at https://github.com/WindyLee0822/CTG |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09629v1 |
-|title| Quiet-STaR: Language Models Can Teach Themselves to Think Before Speaking |
-|authors| Eric ZelikmanGeorges HarikYijia ShaoVaruna JayasiriNick HaberNoah D. Goodman
-|links| http://arxiv.org/abs/2403.09629v1 |
-|updated| 2024-03-14 17:58:16 UTC |
-|summary| When writing and talking people sometimes pause to think. Althoughreasoning-focused works have often framed reasoning as a method of answeringquestions or completing agentic tasks reasoning is implicit in almost allwritten text. For example this applies to the steps not stated between thelines of a proof or to the theory of mind underlying a conversation. In theSelf-Taught Reasoner STaR Zelikman et al. 2022 useful thinking is learnedby inferring rationales from few-shot examples in question-answering andlearning from those that lead to a correct answer. This is a highly constrainedsetting -- ideally a language model could instead learn to infer unstatedrationales in arbitrary text. We present Quiet-STaR a generalization of STaRin which LMs learn to generate rationales at each token to explain future textimproving their predictions. We address key challenges including 1 thecomputational cost of generating continuations 2 the fact that the LM doesnot initially know how to generate or use internal thoughts and 3 the need topredict beyond individual next tokens. To resolve these we propose a tokenwiseparallel sampling algorithm using learnable tokens indicating a thoughtsstart and end and an extended teacher-forcing technique. Encouraginglygenerated rationales disproportionately help model difficult-to-predict tokensand improve the LMs ability to directly answer difficult questions. Inparticular after continued pretraining of an LM on a corpus of internet textwith Quiet-STaR we find zero-shot improvements on GSM8K5.9rightarrow10.9 and CommonsenseQA 36.3rightarrow47.2 andobserve a perplexity improvement of difficult tokens in natural text.Crucially these improvements require no fine-tuning on these tasks. Quiet-STaRmarks a step towards LMs that can learn to reason in a more general andscalable way. |
+|idx| 2403.11509v1 |
+|title| DEE: Dual-stage Explainable Evaluation Method for Text Generation |
+|authors| Shenyu ZhangYu LiRui WuXiutian HuangYongrui ChenWenhao XuGuilin Qi
+|links| http://arxiv.org/abs/2403.11509v1 |
+|updated| 2024-03-18 06:30:41 UTC |
+|summary| Automatic methods for evaluating machine-generated texts hold significantimportance due to the expanding applications of generative systems.Conventional methods tend to grapple with a lack of explainability issuing asolitary numerical score to signify the assessment outcome. Recent advancementshave sought to mitigate this limitation by incorporating large language modelsLLMs to offer more detailed error analyses yet their applicability remainsconstrained particularly in industrial contexts where comprehensive errorcoverage and swift detection are paramount. To alleviate these challenges weintroduce DEE a Dual-stage Explainable Evaluation method for estimating thequality of text generation. Built upon Llama 2 DEE follows a dual-stageprinciple guided by stage-specific instructions to perform efficientidentification of errors in generated texts in the initial stage andsubsequently delves into providing comprehensive diagnostic reports in thesecond stage. DEE is fine-tuned on our elaborately assembled dataset AntEvalwhich encompasses 15K examples from 4 real-world applications of Alipay thatemploy generative systems. The dataset concerns newly emerged issues likehallucination and toxicity thereby broadening the scope of DEEs evaluationcriteria. Experimental results affirm that DEEs superiority over existingevaluation methods achieving significant improvements in both humancorrelation as well as efficiency. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09613v1 |
-|title| Reawakening knowledge: Anticipatory recovery from catastrophic interference via structured training |
-|authors| Yanlai YangMatt JonesMichael C. MozerMengye Ren
-|links| http://arxiv.org/abs/2403.09613v1 |
-|updated| 2024-03-14 17:51:54 UTC |
-|summary| We explore the training dynamics of neural networks in a structured non-IIDsetting where documents are presented cyclically in a fixed repeated sequence.Typically networks suffer from catastrophic interference when training on asequence of documents however we discover a curious and remarkable propertyof LLMs fine-tuned sequentially in this setting: they exhibit anticipatorybehavior recovering from the forgetting on documents before encountering themagain. The behavior emerges and becomes more robust as the architecture scalesup its number of parameters. Through comprehensive experiments andvisualizations we uncover new insights into training over-parameterizednetworks in structured environments. |
+|idx| 2403.11473v1 |
+|title| Word Order's Impacts: Insights from Reordering and Generation Analysis |
+|authors| Qinghua ZhaoJiaang LiLei LiZenghui ZhouJunfeng Liu
+|links| http://arxiv.org/abs/2403.11473v1 |
+|updated| 2024-03-18 04:45:44 UTC |
+|summary| Existing works have studied the impacts of the order of words within naturaltext. They usually analyze it by destroying the original order of words tocreate a scrambled sequence and then comparing the models performance betweenthe original and scrambled sequences. The experimental results demonstratemarginal drops. Considering this findings different hypothesis about wordorder is proposed including the order of words is redundant with lexicalsemantics and models do not rely on word order. In this paper werevisit the aforementioned hypotheses by adding a order reconstructionperspective and selecting datasets of different spectrum. Specifically wefirst select four different datasets and then design order reconstruction andcontinuing generation tasks. Empirical findings support that ChatGPT relies onword order to infer but cannot support or negate the redundancy relationsbetween word order lexical semantics. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09635v1 |
-|title| Transformers Get Stable: An End-to-End Signal Propagation Theory for Language Models |
-|authors| Akhil KediaMohd Abbas ZaidiSushil KhyaliaJungho JungHarshith GokaHaejun Lee
-|links| http://arxiv.org/abs/2403.09635v1 |
-|updated| 2024-03-14 17:59:14 UTC |
-|summary| In spite of their huge success transformer models remain difficult to scalein depth. In this work we develop a unified signal propagation theory andprovide formulae that govern the moments of the forward and backward signalthrough the transformer model. Our framework can be used to understand andmitigate vanishing/exploding gradients rank collapse and instabilityassociated with high attention scores. We also propose DeepScaleLM aninitialization and scaling scheme that conserves unit output/gradient momentsthroughout the model enabling the training of very deep models with 100s oflayers. We find that transformer models could be much deeper - our deep modelswith fewer parameters outperform shallow models in Language Modeling SpeechTranslation and Image Classification across Encoder-only Decoder-only andEncoder-Decoder variants for both Pre-LN and Post-LN transformers formultiple datasets and model sizes. These improvements also translate intoimproved performance on downstream Question Answering tasks and improvedrobustness for image classification. |
+|idx| 2403.11703v1 |
+|title| LLaVA-UHD: an LMM Perceiving Any Aspect Ratio and High-Resolution Images |
+|authors| Ruyi XuYuan YaoZonghao GuoJunbo CuiZanlin NiChunjiang GeTat-Seng ChuaZhiyuan LiuMaosong SunGao Huang
+|links| http://arxiv.org/abs/2403.11703v1 |
+|updated| 2024-03-18 12:04:11 UTC |
+|summary| Visual encoding constitutes the basis of large multimodal models LMMs inunderstanding the visual world. Conventional LMMs process images in fixed sizesand limited resolutions while recent explorations in this direction arelimited in adaptivity efficiency and even correctness. In this work we firsttake GPT-4V and LLaVA-1.5 as representative examples and expose systematicflaws rooted in their visual encoding strategy. To address the challenges wepresent LLaVA-UHD a large multimodal model that can efficiently perceiveimages in any aspect ratio and high resolution. LLaVA-UHD includes three keycomponents: 1 An image modularization strategy that divides native-resolutionimages into smaller variable-sized slices for efficient and extensibleencoding 2 a compression module that further condenses image tokens fromvisual encoders and 3 a spatial schema to organize slice tokens for LLMs.Comprehensive experiments show that LLaVA-UHD outperforms established LMMstrained with 2-3 orders of magnitude more data on 9 benchmarks. Notably ourmodel built on LLaVA-1.5 336x336 supports 6 times larger i.e. 672x1088resolution images using only 94 inference computation and achieves 6.4accuracy improvement on TextVQA. Moreover the model can be efficiently trainedin academic settings within 23 hours on 8 A100 GPUs vs. 26 hours ofLLaVA-1.5. We make the data and code publicly available athttps://github.com/thunlp/LLaVA-UHD. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09631v1 |
-|title| 3D-VLA: A 3D Vision-Language-Action Generative World Model |
-|authors| Haoyu ZhenXiaowen QiuPeihao ChenJincheng YangXin YanYilun DuYining HongChuang Gan
-|links| http://arxiv.org/abs/2403.09631v1 |
-|updated| 2024-03-14 17:58:41 UTC |
-|summary| Recent vision-language-action VLA models rely on 2D inputs lackingintegration with the broader realm of the 3D physical world. Furthermore theyperform action prediction by learning a direct mapping from perception toaction neglecting the vast dynamics of the world and the relations betweenactions and dynamics. In contrast human beings are endowed with world modelsthat depict imagination about future scenarios to plan actions accordingly. Tothis end we propose 3D-VLA by introducing a new family of embodied foundationmodels that seamlessly link 3D perception reasoning and action through agenerative world model. Specifically 3D-VLA is built on top of a 3D-basedlarge language model LLM and a set of interaction tokens is introduced toengage with the embodied environment. Furthermore to inject generationabilities into the model we train a series of embodied diffusion models andalign them into the LLM for predicting the goal images and point clouds. Totrain our 3D-VLA we curate a large-scale 3D embodied instruction dataset byextracting vast 3D-related information from existing robotics datasets. Ourexperiments on held-in datasets demonstrate that 3D-VLA significantly improvesthe reasoning multimodal generation and planning capabilities in embodiedenvironments showcasing its potential in real-world applications. |
+|idx| 2403.11671v1 |
+|title| HDLdebugger: Streamlining HDL debugging with Large Language Models |
+|authors| Xufeng YaoHaoyang LiTsz Ho ChanWenyi XiaoMingxuan YuanYu HuangLei ChenBei Yu
+|links| http://arxiv.org/abs/2403.11671v1 |
+|updated| 2024-03-18 11:19:37 UTC |
+|summary| In the domain of chip design Hardware Description Languages HDLs play apivotal role. However due to the complex syntax of HDLs and the limitedavailability of online resources debugging HDL codes remains a difficult andtime-intensive task even for seasoned engineers. Consequently there is apressing need to develop automated HDL code debugging models which canalleviate the burden on hardware engineers. Despite the strong capabilities ofLarge Language Models LLMs in generating completing and debugging softwarecode their utilization in the specialized field of HDL debugging has beenlimited and to date has not yielded satisfactory results. In this paper wepropose an LLM-assisted HDL debugging framework namely HDLdebugger whichconsists of HDL debugging data generation via a reverse engineering approach asearch engine for retrieval-augmented generation and a retrieval-augmented LLMfine-tuning approach. Through the integration of these components HDLdebuggercan automate and streamline HDL debugging for chip design. Our comprehensiveexperiments conducted on an HDL code dataset sourced from Huawei reveal thatHDLdebugger outperforms 13 cutting-edge LLM baselines displaying exceptionaleffectiveness in HDL code debugging. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09629v1 |
-|title| Quiet-STaR: Language Models Can Teach Themselves to Think Before Speaking |
-|authors| Eric ZelikmanGeorges HarikYijia ShaoVaruna JayasiriNick HaberNoah D. Goodman
-|links| http://arxiv.org/abs/2403.09629v1 |
-|updated| 2024-03-14 17:58:16 UTC |
-|summary| When writing and talking people sometimes pause to think. Althoughreasoning-focused works have often framed reasoning as a method of answeringquestions or completing agentic tasks reasoning is implicit in almost allwritten text. For example this applies to the steps not stated between thelines of a proof or to the theory of mind underlying a conversation. In theSelf-Taught Reasoner STaR Zelikman et al. 2022 useful thinking is learnedby inferring rationales from few-shot examples in question-answering andlearning from those that lead to a correct answer. This is a highly constrainedsetting -- ideally a language model could instead learn to infer unstatedrationales in arbitrary text. We present Quiet-STaR a generalization of STaRin which LMs learn to generate rationales at each token to explain future textimproving their predictions. We address key challenges including 1 thecomputational cost of generating continuations 2 the fact that the LM doesnot initially know how to generate or use internal thoughts and 3 the need topredict beyond individual next tokens. To resolve these we propose a tokenwiseparallel sampling algorithm using learnable tokens indicating a thoughtsstart and end and an extended teacher-forcing technique. Encouraginglygenerated rationales disproportionately help model difficult-to-predict tokensand improve the LMs ability to directly answer difficult questions. Inparticular after continued pretraining of an LM on a corpus of internet textwith Quiet-STaR we find zero-shot improvements on GSM8K5.9rightarrow10.9 and CommonsenseQA 36.3rightarrow47.2 andobserve a perplexity improvement of difficult tokens in natural text.Crucially these improvements require no fine-tuning on these tasks. Quiet-STaRmarks a step towards LMs that can learn to reason in a more general andscalable way. |
+|idx| 2403.11642v1 |
+|title| Guiding the generation of counterfactual explanations through temporal background knowledge for Predictive Process Monitoring |
+|authors| Andrei BuligaChiara Di FrancescomarinoChiara GhidiniIvan DonadelloFabrizio Maria Maggi
+|links| http://arxiv.org/abs/2403.11642v1 |
+|updated| 2024-03-18 10:34:40 UTC |
+|summary| Counterfactual explanations suggest what should be different in the inputinstance to change the outcome of an AI system. When dealing withcounterfactual explanations in the field of Predictive Process Monitoringhowever control flow relationships among events have to be carefullyconsidered. A counterfactual indeed should not violate control flowrelationships among activities temporal background knowledege. Within thefield of Explainability in Predictive Process Monitoring there have been aseries of works regarding counterfactual explanations for outcome-basedpredictions. However none of them consider the inclusion of temporalbackground knowledge when generating these counterfactuals. In this work weadapt state-of-the-art techniques for counterfactual generation in the domainof XAI that are based on genetic algorithms to consider a series of temporalconstraints at runtime. We assume that this temporal background knowledge isgiven and we adapt the fitness function as well as the crossover and mutationoperators to maintain the satisfaction of the constraints. The proposedmethods are evaluated with respect to state-of-the-art genetic algorithms forcounterfactual generation and the results are presented. We showcase that theinclusion of temporal background knowledge allows the generation ofcounterfactuals more conformant to the temporal background knowledge withouthowever losing in terms of the counterfactual traditional quality metrics. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09621v1 |
-|title| Minimax Optimal and Computationally Efficient Algorithms for Distributionally Robust Offline Reinforcement Learning |
-|authors| Zhishuai LiuPan Xu
-|links| http://arxiv.org/abs/2403.09621v1 |
-|updated| 2024-03-14 17:55:10 UTC |
-|summary| Distributionally robust offline reinforcement learning RL which seeksrobust policy training against environment perturbation by modeling dynamicsuncertainty calls for function approximations when facing large state-actionspaces. However the consideration of dynamics uncertainty introduces essentialnonlinearity and computational burden posing unique challenges for analyzingand practically employing function approximation. Focusing on a basic settingwhere the nominal model and perturbed models are linearly parameterized wepropose minimax optimal and computationally efficient algorithms realizingfunction approximation and initiate the study on instance-dependentsuboptimality analysis in the context of robust offline RL. Our results uncoverthat function approximation in robust offline RL is essentially distinct fromand probably harder than that in standard offline RL. Our algorithms andtheoretical results crucially depend on a variety of new techniques involvinga novel function approximation mechanism incorporating variance information anew procedure of suboptimality and estimation uncertainty decomposition aquantification of the robust value function shrinkage and a meticulouslydesigned family of hard instances which might be of independent interest. |
+|idx| 2403.11626v1 |
+|title| QEAN: Quaternion-Enhanced Attention Network for Visual Dance Generation |
+|authors| Zhizhen ZhouYejing HuoGuoheng HuangAn ZengXuhang ChenLian HuangZinuo Li
+|links| http://arxiv.org/abs/2403.11626v1 |
+|updated| 2024-03-18 09:58:43 UTC |
+|summary| The study of music-generated dance is a novel and challenging Imagegeneration task. It aims to input a piece of music and seed motions thengenerate natural dance movements for the subsequent music. Transformer-basedmethods face challenges in time series prediction tasks related to humanmovements and music due to their struggle in capturing the nonlinearrelationship and temporal aspects. This can lead to issues like jointdeformation role deviation floating and inconsistencies in dance movementsgenerated in response to the music. In this paper we propose aQuaternion-Enhanced Attention Network QEAN for visual dance synthesis from aquaternion perspective which consists of a Spin Position Embedding SPEmodule and a Quaternion Rotary Attention QRA module. First SPE embedsposition information into self-attention in a rotational manner leading tobetter learning of features of movement sequences and audio sequences andimproved understanding of the connection between music and dance. Second QRArepresents and fuses 3D motion features and audio features in the form of aseries of quaternions enabling the model to better learn the temporalcoordination of music and dance under the complex temporal cycle conditions ofdance generation. Finally we conducted experiments on the dataset AIST andthe results show that our approach achieves better and more robust performancein generating accurate high-quality dance movements. Our source code anddataset can be available from https://github.com/MarasyZZ/QEAN andhttps://google.github.io/aistplusplus_dataset respectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09606v1 |
-|title| Large Language Models and Causal Inference in Collaboration: A Comprehensive Survey |
-|authors| Xiaoyu LiuPaiheng XuJunda WuJiaxin YuanYifan YangYuhang ZhouFuxiao LiuTianrui GuanHaoliang WangTong YuJulian McAuleyWei AiFurong Huang
-|links| http://arxiv.org/abs/2403.09606v1 |
-|updated| 2024-03-14 17:47:20 UTC |
-|summary| Causal inference has shown potential in enhancing the predictive accuracyfairness robustness and explainability of Natural Language Processing NLPmodels by capturing causal relationships among variables. The emergence ofgenerative Large Language Models LLMs has significantly impacted various NLPdomains particularly through their advanced reasoning capabilities. Thissurvey focuses on evaluating and improving LLMs from a causal view in thefollowing areas: understanding and improving the LLMs reasoning capacityaddressing fairness and safety issues in LLMs complementing LLMs withexplanations and handling multimodality. Meanwhile LLMs strong reasoningcapacities can in turn contribute to the field of causal inference by aidingcausal relationship discovery and causal effect estimations. This reviewexplores the interplay between causal inference frameworks and LLMs from bothperspectives emphasizing their collective potential to further the developmentof more advanced and equitable artificial intelligence systems. |
+|idx| 2403.11598v1 |
+|title| Optimal Layout Synthesis for Deep Quantum Circuits on NISQ Processors with 100+ Qubits |
+|authors| Irfansha ShaikJaco van de Pol
+|links| http://arxiv.org/abs/2403.11598v1 |
+|updated| 2024-03-18 09:19:01 UTC |
+|summary| Layout synthesis is mapping a quantum circuit to a quantum processor. SWAPgate insertions are needed for scheduling 2-qubit gates only on connectedphysical qubits. With the ever-increasing number of qubits in NISQ processorsscalable layout synthesis is of utmost importance. With large optimality gapsobserved in heuristic approaches scalable exact methods are needed. Whilerecent exact and near-optimal approaches scale to moderate circuits large deepcircuits are still out of scope.  In this work we propose a SAT encoding based on parallel plans that apply 1SWAP and a group of CNOTs at each time step. Using domain-specific informationwe maintain optimality in parallel plans while scaling to large and deepcircuits. From our results we show the scalability of our approach whichsignificantly outperforms leading exact and near-optimal approaches up to100x. For the first time we can optimally map several 8 14 and 16 qubitcircuits onto 54 80 and 127 qubit platforms with up to 17 SWAPs. While addingoptimal SWAPs we also report near-optimal depth in our mapped circuits. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09635v1 |
-|title| Transformers Get Stable: An End-to-End Signal Propagation Theory for Language Models |
-|authors| Akhil KediaMohd Abbas ZaidiSushil KhyaliaJungho JungHarshith GokaHaejun Lee
-|links| http://arxiv.org/abs/2403.09635v1 |
-|updated| 2024-03-14 17:59:14 UTC |
-|summary| In spite of their huge success transformer models remain difficult to scalein depth. In this work we develop a unified signal propagation theory andprovide formulae that govern the moments of the forward and backward signalthrough the transformer model. Our framework can be used to understand andmitigate vanishing/exploding gradients rank collapse and instabilityassociated with high attention scores. We also propose DeepScaleLM aninitialization and scaling scheme that conserves unit output/gradient momentsthroughout the model enabling the training of very deep models with 100s oflayers. We find that transformer models could be much deeper - our deep modelswith fewer parameters outperform shallow models in Language Modeling SpeechTranslation and Image Classification across Encoder-only Decoder-only andEncoder-Decoder variants for both Pre-LN and Post-LN transformers formultiple datasets and model sizes. These improvements also translate intoimproved performance on downstream Question Answering tasks and improvedrobustness for image classification. |
+|idx| 2403.11722v1 |
+|title| Time Series Compression using Quaternion Valued Neural Networks and Quaternion Backpropagation |
+|authors| Johannes PöppelbaumAndreas Schwung
+|links| http://arxiv.org/abs/2403.11722v1 |
+|updated| 2024-03-18 12:22:11 UTC |
+|summary| We propose a novel quaternionic time-series compression methodology where wedivide a long time-series into segments of data extract the min max mean andstandard deviation of these chunks as representative features and encapsulatethem in a quaternion yielding a quaternion valued time-series. Thistime-series is processed using quaternion valued neural network layers wherewe aim to preserve the relation between these features through the usage of theHamilton product. To train this quaternion neural network we derive quaternionbackpropagation employing the GHR calculus which is required for a validproduct and chain rule in quaternion space. Furthermore we investigate theconnection between the derived update rules and automatic differentiation. Weapply our proposed compression method on the Tennessee Eastman Dataset wherewe perform fault classification using the compressed data in two settings: afully supervised one and in a semi supervised contrastive learning setting.Both times we were able to outperform real valued counterparts as well as twobaseline models: one with the uncompressed time-series as the input and theother with a regular downsampling using the mean. Further we could improve theclassification benchmark set by SimCLR-TS from 81.43 to 83.90. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09629v1 |
-|title| Quiet-STaR: Language Models Can Teach Themselves to Think Before Speaking |
-|authors| Eric ZelikmanGeorges HarikYijia ShaoVaruna JayasiriNick HaberNoah D. Goodman
-|links| http://arxiv.org/abs/2403.09629v1 |
-|updated| 2024-03-14 17:58:16 UTC |
-|summary| When writing and talking people sometimes pause to think. Althoughreasoning-focused works have often framed reasoning as a method of answeringquestions or completing agentic tasks reasoning is implicit in almost allwritten text. For example this applies to the steps not stated between thelines of a proof or to the theory of mind underlying a conversation. In theSelf-Taught Reasoner STaR Zelikman et al. 2022 useful thinking is learnedby inferring rationales from few-shot examples in question-answering andlearning from those that lead to a correct answer. This is a highly constrainedsetting -- ideally a language model could instead learn to infer unstatedrationales in arbitrary text. We present Quiet-STaR a generalization of STaRin which LMs learn to generate rationales at each token to explain future textimproving their predictions. We address key challenges including 1 thecomputational cost of generating continuations 2 the fact that the LM doesnot initially know how to generate or use internal thoughts and 3 the need topredict beyond individual next tokens. To resolve these we propose a tokenwiseparallel sampling algorithm using learnable tokens indicating a thoughtsstart and end and an extended teacher-forcing technique. Encouraginglygenerated rationales disproportionately help model difficult-to-predict tokensand improve the LMs ability to directly answer difficult questions. Inparticular after continued pretraining of an LM on a corpus of internet textwith Quiet-STaR we find zero-shot improvements on GSM8K5.9rightarrow10.9 and CommonsenseQA 36.3rightarrow47.2 andobserve a perplexity improvement of difficult tokens in natural text.Crucially these improvements require no fine-tuning on these tasks. Quiet-STaRmarks a step towards LMs that can learn to reason in a more general andscalable way. |
+|idx| 2403.11706v1 |
+|title| Generalized Multi-Source Inference for Text Conditioned Music Diffusion Models |
+|authors| Emilian PostolacheGiorgio MarianiLuca CosmoEmmanouil BenetosEmanuele Rodolà
+|links| http://arxiv.org/abs/2403.11706v1 |
+|updated| 2024-03-18 12:08:01 UTC |
+|summary| Multi-Source Diffusion Models MSDM allow for compositional musicalgeneration tasks: generating a set of coherent sources creatingaccompaniments and performing source separation. Despite their versatilitythey require estimating the joint distribution over the sources necessitatingpre-separated musical data which is rarely available and fixing the numberand type of sources at training time. This paper generalizes MSDM to arbitrarytime-domain diffusion models conditioned on text embeddings. These models donot require separated data as they are trained on mixtures can parameterize anarbitrary number of sources and allow for rich semantic control. We propose aninference procedure enabling the coherent generation of sources andaccompaniments. Additionally we adapt the Dirac separator of MSDM to performsource separation. We experiment with diffusion models trained on Slakh2100 andMTG-Jamendo showcasing competitive generation and separation results in arelaxed data setting. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09625v1 |
-|title| Make-Your-3D: Fast and Consistent Subject-Driven 3D Content Generation |
-|authors| Fangfu LiuHanyang WangWeiliang ChenHaowen SunYueqi Duan
-|links| http://arxiv.org/abs/2403.09625v1 |
-|updated| 2024-03-14 17:57:04 UTC |
-|summary| Recent years have witnessed the strong power of 3D generation models whichoffer a new level of creative flexibility by allowing users to guide the 3Dcontent generation process through a single image or natural language. Howeverit remains challenging for existing 3D generation methods to createsubject-driven 3D content across diverse prompts. In this paper we introduce anovel 3D customization method dubbed Make-Your-3D that can personalizehigh-fidelity and consistent 3D content from only a single image of a subjectwith text description within 5 minutes. Our key insight is to harmonize thedistributions of a multi-view diffusion model and an identity-specific 2Dgenerative model aligning them with the distribution of the desired 3Dsubject. Specifically we design a co-evolution framework to reduce thevariance of distributions where each model undergoes a process of learningfrom the other through identity-aware optimization and subject-prioroptimization respectively. Extensive experiments demonstrate that our methodcan produce high-quality consistent and subject-specific 3D content withtext-driven modifications that are unseen in subject image. |
+|idx| 2403.11705v1 |
+|title| Coarsening of chiral domains in itinerant electron magnets: A machine learning force field approach |
+|authors| Yunhao FanSheng ZhangGia-Wei Chern
+|links| http://arxiv.org/abs/2403.11705v1 |
+|updated| 2024-03-18 12:07:46 UTC |
+|summary| Frustrated itinerant magnets often exhibit complex noncollinear ornoncoplanar magnetic orders which support topological electronic structures. Acanonical example is the anomalous quantum Hall state with a chiral spin orderstabilized by electron-spin interactions on a triangular lattice. While along-range magnetic order cannot survive thermal fluctuations in twodimensions the chiral order which results from the breaking of a discreteIsing symmetry persists even at finite temperatures. We present a scalablemachine learning ML framework to model the complex electron-mediatedspin-spin interactions that stabilize the chiral magnetic domains in atriangular lattice. Large-scale dynamical simulations enabled by the MLforce-field models are performed to investigate the coarsening of chiraldomains after a thermal quench. While the chiral phase is described by a brokenZ_2 Ising-type symmetry we find that the characteristic size of chiraldomains increases linearly with time in stark contrast to the expectedAllen-Cahn domain growth law for a non-conserved Ising order parameter field.The linear growth of the chiral domains is attributed to the orientationalanisotropy of domain boundaries. Our work also demonstrates the promisingpotential of ML models for large-scale spin dynamics of itinerant magnets. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09621v1 |
-|title| Minimax Optimal and Computationally Efficient Algorithms for Distributionally Robust Offline Reinforcement Learning |
-|authors| Zhishuai LiuPan Xu
-|links| http://arxiv.org/abs/2403.09621v1 |
-|updated| 2024-03-14 17:55:10 UTC |
-|summary| Distributionally robust offline reinforcement learning RL which seeksrobust policy training against environment perturbation by modeling dynamicsuncertainty calls for function approximations when facing large state-actionspaces. However the consideration of dynamics uncertainty introduces essentialnonlinearity and computational burden posing unique challenges for analyzingand practically employing function approximation. Focusing on a basic settingwhere the nominal model and perturbed models are linearly parameterized wepropose minimax optimal and computationally efficient algorithms realizingfunction approximation and initiate the study on instance-dependentsuboptimality analysis in the context of robust offline RL. Our results uncoverthat function approximation in robust offline RL is essentially distinct fromand probably harder than that in standard offline RL. Our algorithms andtheoretical results crucially depend on a variety of new techniques involvinga novel function approximation mechanism incorporating variance information anew procedure of suboptimality and estimation uncertainty decomposition aquantification of the robust value function shrinkage and a meticulouslydesigned family of hard instances which might be of independent interest. |
+|idx| 2403.11696v1 |
+|title| Generalization error of spectral algorithms |
+|authors| Maksim VelikanovMaxim PanovDmitry Yarotsky
+|links| http://arxiv.org/abs/2403.11696v1 |
+|updated| 2024-03-18 11:52:33 UTC |
+|summary| The asymptotically precise estimation of the generalization of kernel methodshas recently received attention due to the parallels between neural networksand their associated kernels. However prior works derive such estimates fortraining by kernel ridge regression KRR whereas neural networks aretypically trained with gradient descent GD. In the present work we considerthe training of kernels with a family of textitspectral algorithmsspecified by profile hlambda and including KRR and GD as special cases.Then we derive the generalization error as a functional of learning profilehlambda for two data models: high-dimensional Gaussian and low-dimensionaltranslation-invariant model. Under power-law assumptions on the spectrum of thekernel and target we use our framework to i give full loss asymptotics forboth noisy and noiseless observations ii show that the loss localizes oncertain spectral scales giving a new perspective on the KRR saturationphenomenon iii conjecture and demonstrate for the considered data modelsthe universality of the loss w.r.t. non-spectral details of the problem butonly in case of noisy observation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09613v1 |
-|title| Reawakening knowledge: Anticipatory recovery from catastrophic interference via structured training |
-|authors| Yanlai YangMatt JonesMichael C. MozerMengye Ren
-|links| http://arxiv.org/abs/2403.09613v1 |
-|updated| 2024-03-14 17:51:54 UTC |
-|summary| We explore the training dynamics of neural networks in a structured non-IIDsetting where documents are presented cyclically in a fixed repeated sequence.Typically networks suffer from catastrophic interference when training on asequence of documents however we discover a curious and remarkable propertyof LLMs fine-tuned sequentially in this setting: they exhibit anticipatorybehavior recovering from the forgetting on documents before encountering themagain. The behavior emerges and becomes more robust as the architecture scalesup its number of parameters. Through comprehensive experiments andvisualizations we uncover new insights into training over-parameterizednetworks in structured environments. |
+|idx| 2403.11687v1 |
+|title| Nonsmooth Implicit Differentiation: Deterministic and Stochastic Convergence Rates |
+|authors| Riccardo GrazziMassimiliano PontilSaverio Salzo
+|links| http://arxiv.org/abs/2403.11687v1 |
+|updated| 2024-03-18 11:37:53 UTC |
+|summary| We study the problem of efficiently computing the derivative of thefixed-point of a parametric non-differentiable contraction map. This problemhas wide applications in machine learning including hyperparameteroptimization meta-learning and data poisoning attacks. We analyze two popularapproaches: iterative differentiation ITD and approximate implicitdifferentiation AID. A key challenge behind the nonsmooth setting is that thechain rule does not hold anymore. Building upon the recent work by Bolte et al.2022 who proved the linear convergence of non-differentiable ITD we providerefined linear convergence rates for both ITD and AID in the deterministiccase. We further introduce NSID a new method to compute the implicitderivative when the fixed point is defined as the composition of an outer mapand an inner map which is accessible only through a stochastic unbiasedestimator. We establish rates for the convergence of NSID to the truederivative encompassing the best available rates in the smooth setting. Wepresent illustrative experiments confirming our analysis. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09639v1 |
-|title| GroupContrast: Semantic-aware Self-supervised Representation Learning for 3D Understanding |
-|authors| Chengyao WangLi JiangXiaoyang WuZhuotao TianBohao PengHengshuang ZhaoJiaya Jia
-|links| http://arxiv.org/abs/2403.09639v1 |
-|updated| 2024-03-14 17:59:59 UTC |
-|summary| Self-supervised 3D representation learning aims to learn effectiverepresentations from large-scale unlabeled point clouds. Most existingapproaches adopt point discrimination as the pretext task which assignsmatched points in two distinct views as positive pairs and unmatched points asnegative pairs. However this approach often results in semantically identicalpoints having dissimilar representations leading to a high number of falsenegatives and introducing a semantic conflict problem. To address this issuewe propose GroupContrast a novel approach that combines segment grouping andsemantic-aware contrastive learning. Segment grouping partitions points intosemantically meaningful regions which enhances semantic coherence and providessemantic guidance for the subsequent contrastive representation learning.Semantic-aware contrastive learning augments the semantic information extractedfrom segment grouping and helps to alleviate the issue of semantic conflict.We conducted extensive experiments on multiple 3D scene understanding tasks.The results demonstrate that GroupContrast learns semantically meaningfulrepresentations and achieves promising transfer learning performance. |
+|idx| 2403.11708v1 |
+|title| Implicit Discriminative Knowledge Learning for Visible-Infrared Person Re-Identification |
+|authors| Kaijie RenLei Zhang
+|links| http://arxiv.org/abs/2403.11708v1 |
+|updated| 2024-03-18 12:12:45 UTC |
+|summary| Visible-Infrared Person Re-identification VI-ReID is a challengingcross-modal pedestrian retrieval task due to significant intra-classvariations and cross-modal discrepancies among different cameras. Existingworks mainly focus on embedding images of different modalities into a unifiedspace to mine modality-shared features. They only seek distinctive informationwithin these shared features while ignoring the identity-aware usefulinformation that is implicit in the modality-specific features. To address thisissue we propose a novel Implicit Discriminative Knowledge Learning IDKLnetwork to uncover and leverage the implicit discriminative informationcontained within the modality-specific. First we extract modality-specific andmodality-shared features using a novel dual-stream network. Then themodality-specific features undergo purification to reduce their modality stylediscrepancies while preserving identity-aware discriminative knowledge.Subsequently this kind of implicit knowledge is distilled into themodality-shared feature to enhance its distinctiveness. Finally an alignmentloss is proposed to minimize modality discrepancy on enhanced modality-sharedfeatures. Extensive experiments on multiple public datasets demonstrate thesuperiority of IDKL network over the state-of-the-art methods. Code isavailable at https://github.com/1KK077/IDKL. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09638v1 |
-|title| SCP-Diff: Photo-Realistic Semantic Image Synthesis with Spatial-Categorical Joint Prior |
-|authors| Huan-ang GaoMingju GaoJiaju LiWenyi LiRong ZhiHao TangHao Zhao
-|links| http://arxiv.org/abs/2403.09638v1 |
-|updated| 2024-03-14 17:59:55 UTC |
-|summary| Semantic image synthesis SIS shows good promises for sensor simulation.However current best practices in this field based on GANs have not yetreached the desired level of quality. As latent diffusion models makesignificant strides in image generation we are prompted to evaluateControlNet a notable method for its dense control capabilities. Ourinvestigation uncovered two primary issues with its results: the presence ofweird sub-structures within large semantic areas and the misalignment ofcontent with the semantic mask. Through empirical study we pinpointed thecause of these problems as a mismatch between the noised training datadistribution and the standard normal prior applied at the inference stage. Toaddress this challenge we developed specific noise priors for SISencompassing spatial categorical and a novel spatial-categorical joint priorfor inference. This approach which we have named SCP-Diff has yieldedexceptional results achieving an FID of 10.53 on Cityscapes and 12.66 onADE20K.The code and models can be accessed via the project page. |
+|idx| 2403.11703v1 |
+|title| LLaVA-UHD: an LMM Perceiving Any Aspect Ratio and High-Resolution Images |
+|authors| Ruyi XuYuan YaoZonghao GuoJunbo CuiZanlin NiChunjiang GeTat-Seng ChuaZhiyuan LiuMaosong SunGao Huang
+|links| http://arxiv.org/abs/2403.11703v1 |
+|updated| 2024-03-18 12:04:11 UTC |
+|summary| Visual encoding constitutes the basis of large multimodal models LMMs inunderstanding the visual world. Conventional LMMs process images in fixed sizesand limited resolutions while recent explorations in this direction arelimited in adaptivity efficiency and even correctness. In this work we firsttake GPT-4V and LLaVA-1.5 as representative examples and expose systematicflaws rooted in their visual encoding strategy. To address the challenges wepresent LLaVA-UHD a large multimodal model that can efficiently perceiveimages in any aspect ratio and high resolution. LLaVA-UHD includes three keycomponents: 1 An image modularization strategy that divides native-resolutionimages into smaller variable-sized slices for efficient and extensibleencoding 2 a compression module that further condenses image tokens fromvisual encoders and 3 a spatial schema to organize slice tokens for LLMs.Comprehensive experiments show that LLaVA-UHD outperforms established LMMstrained with 2-3 orders of magnitude more data on 9 benchmarks. Notably ourmodel built on LLaVA-1.5 336x336 supports 6 times larger i.e. 672x1088resolution images using only 94 inference computation and achieves 6.4accuracy improvement on TextVQA. Moreover the model can be efficiently trainedin academic settings within 23 hours on 8 A100 GPUs vs. 26 hours ofLLaVA-1.5. We make the data and code publicly available athttps://github.com/thunlp/LLaVA-UHD. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09637v1 |
-|title| GaussianGrasper: 3D Language Gaussian Splatting for Open-vocabulary Robotic Grasping |
-|authors| Yuhang ZhengXiangyu ChenYupeng ZhengSongen GuRunyi YangBu JinPengfei LiChengliang ZhongZengmao WangLina LiuChao YangDawei WangZhen ChenXiaoxiao LongMeiqing Wang
-|links| http://arxiv.org/abs/2403.09637v1 |
-|updated| 2024-03-14 17:59:46 UTC |
-|summary| Constructing a 3D scene capable of accommodating open-ended language queriesis a pivotal pursuit particularly within the domain of robotics. Suchtechnology facilitates robots in executing object manipulations based on humanlanguage directives. To tackle this challenge some research efforts have beendedicated to the development of language-embedded implicit fields. Howeverimplicit fields e.g. NeRF encounter limitations due to the necessity ofprocessing a large number of input views for reconstruction coupled with theirinherent inefficiencies in inference. Thus we present the GaussianGrasperwhich utilizes 3D Gaussian Splatting to explicitly represent the scene as acollection of Gaussian primitives. Our approach takes a limited set of RGB-Dviews and employs a tile-based splatting technique to create a feature field.In particular we propose an Efficient Feature Distillation EFD module thatemploys contrastive learning to efficiently and accurately distill languageembeddings derived from foundational models. With the reconstructed geometry ofthe Gaussian field our method enables the pre-trained grasping model togenerate collision-free grasp pose candidates. Furthermore we propose anormal-guided grasp module to select the best grasp pose. Through comprehensivereal-world experiments we demonstrate that GaussianGrasper enables robots toaccurately query and grasp objects with language instructions providing a newsolution for language-guided manipulation tasks. Data and codes can beavailable at https://github.com/MrSecant/GaussianGrasper. |
+|idx| 2403.11699v1 |
+|title| A Spatial-Temporal Progressive Fusion Network for Breast Lesion Segmentation in Ultrasound Videos |
+|authors| Zhengzheng TuZigang ZhuYayang DuanBo JiangQishun WangChaoxue Zhang
+|links| http://arxiv.org/abs/2403.11699v1 |
+|updated| 2024-03-18 11:56:32 UTC |
+|summary| Ultrasound video-based breast lesion segmentation provides a valuableassistance in early breast lesion detection and treatment. However existingworks mainly focus on lesion segmentation based on ultrasound breast imageswhich usually can not be adapted well to obtain desirable results on ultrasoundvideos. The main challenge for ultrasound video-based breast lesionsegmentation is how to exploit the lesion cues of both intra-frame andinter-frame simultaneously. To address this problem we propose a novelSpatial-Temporal Progressive Fusion Network STPFNet for video based breastlesion segmentation problem. The main aspects of the proposed STPFNet arethreefold. First we propose to adopt a unified network architecture to captureboth spatial dependences within each ultrasound frame and temporal correlationsbetween different frames together for ultrasound data representation. Secondwe propose a new fusion module termed Multi-Scale Feature Fusion MSFF tofuse spatial and temporal cues together for lesion detection. MSFF can help todetermine the boundary contour of lesion region to overcome the issue of lesionboundary blurring. Third we propose to exploit the segmentation result ofprevious frame as the prior knowledge to suppress the noisy background andlearn more robust representation. In particular we introduce a new publiclyavailable ultrasound video breast lesion segmentation dataset termed UVBLS200which is specifically dedicated to breast lesion segmentation. It contains 200videos including 80 videos of benign lesions and 120 videos of malignantlesions. Experiments on the proposed dataset demonstrate that the proposedSTPFNet achieves better breast lesion detection performance thanstate-of-the-art methods. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09635v1 |
-|title| Transformers Get Stable: An End-to-End Signal Propagation Theory for Language Models |
-|authors| Akhil KediaMohd Abbas ZaidiSushil KhyaliaJungho JungHarshith GokaHaejun Lee
-|links| http://arxiv.org/abs/2403.09635v1 |
-|updated| 2024-03-14 17:59:14 UTC |
-|summary| In spite of their huge success transformer models remain difficult to scalein depth. In this work we develop a unified signal propagation theory andprovide formulae that govern the moments of the forward and backward signalthrough the transformer model. Our framework can be used to understand andmitigate vanishing/exploding gradients rank collapse and instabilityassociated with high attention scores. We also propose DeepScaleLM aninitialization and scaling scheme that conserves unit output/gradient momentsthroughout the model enabling the training of very deep models with 100s oflayers. We find that transformer models could be much deeper - our deep modelswith fewer parameters outperform shallow models in Language Modeling SpeechTranslation and Image Classification across Encoder-only Decoder-only andEncoder-Decoder variants for both Pre-LN and Post-LN transformers formultiple datasets and model sizes. These improvements also translate intoimproved performance on downstream Question Answering tasks and improvedrobustness for image classification. |
+|idx| 2403.11697v1 |
+|title| Urban Scene Diffusion through Semantic Occupancy Map |
+|authors| Junge ZhangQihang ZhangLi ZhangRamana Rao KompellaGaowen LiuBolei Zhou
+|links| http://arxiv.org/abs/2403.11697v1 |
+|updated| 2024-03-18 11:54:35 UTC |
+|summary| Generating unbounded 3D scenes is crucial for large-scale scene understandingand simulation. Urban scenes unlike natural landscapes consist of variouscomplex man-made objects and structures such as roads traffic signs vehiclesand buildings. To create a realistic and detailed urban scene it is crucial toaccurately represent the geometry and semantics of the underlying objectsgoing beyond their visual appearance. In this work we propose UrbanDiffusiona 3D diffusion model that is conditioned on a Birds-Eye View BEV map andgenerates an urban scene with geometry and semantics in the form of semanticoccupancy map. Our model introduces a novel paradigm that learns the datadistribution of scene-level structures within a latent space and furtherenables the expansion of the synthesized scene into an arbitrary scale. Aftertraining on real-world driving datasets our model can generate a wide range ofdiverse urban scenes given the BEV maps from the held-out set and alsogeneralize to the synthesized maps from a driving simulator. We furtherdemonstrate its application to scene image synthesis with a pretrained imagegenerator as a prior. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09634v1 |
-|title| OneTracker: Unifying Visual Object Tracking with Foundation Models and Efficient Tuning |
-|authors| Lingyi HongShilin YanRenrui ZhangWanyun LiXinyu ZhouPinxue GuoKaixun JiangYiting ChenJinglun LiZhaoyu ChenWenqiang Zhang
-|links| http://arxiv.org/abs/2403.09634v1 |
-|updated| 2024-03-14 17:59:13 UTC |
-|summary| Visual object tracking aims to localize the target object of each frame basedon its initial appearance in the first frame. Depending on the input modilitytracking tasks can be divided into RGB tracking and RGBX e.g. RGBN andRGBD tracking. Despite the different input modalities the core aspect oftracking is the temporal matching. Based on this common ground we present ageneral framework to unify various tracking tasks termed as OneTracker.OneTracker first performs a large-scale pre-training on a RGB tracker calledFoundation Tracker. This pretraining phase equips the Foundation Tracker with astable ability to estimate the location of the target object. Then we regardother modality information as prompt and build Prompt Tracker upon FoundationTracker. Through freezing the Foundation Tracker and only adjusting someadditional trainable parameters Prompt Tracker inhibits the stronglocalization ability from Foundation Tracker and achieves parameter-efficientfinetuning on downstream RGBX tracking tasks. To evaluate the effectiveness ofour general framework OneTracker which is consisted of Foundation Tracker andPrompt Tracker we conduct extensive experiments on 6 popular tracking tasksacross 11 benchmarks and our OneTracker outperforms other models and achievesstate-of-the-art performance. |
+|idx| 2403.11695v1 |
+|title| TrajectoryNAS: A Neural Architecture Search for Trajectory Prediction |
+|authors| Ali Asghar SharifiAli ZoljodiMasoud Daneshtalab
+|links| http://arxiv.org/abs/2403.11695v1 |
+|updated| 2024-03-18 11:48:41 UTC |
+|summary| Autonomous driving systems are a rapidly evolving technology that enablesdriverless car production. Trajectory prediction is a critical component ofautonomous driving systems enabling cars to anticipate the movements ofsurrounding objects for safe navigation. Trajectory prediction using Lidarpoint-cloud data performs better than 2D images due to providing 3Dinformation. However processing point-cloud data is more complicated andtime-consuming than 2D images. Hence state-of-the-art 3D trajectorypredictions using point-cloud data suffer from slow and erroneous predictions.This paper introduces TrajectoryNAS a pioneering method that focuses onutilizing point cloud data for trajectory prediction. By leveraging NeuralArchitecture Search NAS TrajectoryNAS automates the design of trajectoryprediction models encompassing object detection tracking and forecasting ina cohesive manner. This approach not only addresses the complexinterdependencies among these tasks but also emphasizes the importance ofaccuracy and efficiency in trajectory modeling. Through empirical studiesTrajectoryNAS demonstrates its effectiveness in enhancing the performance ofautonomous driving systems marking a significant advancement in thefield.Experimental results reveal that TrajcetoryNAS yield a minimum of 4.8higger accuracy and 1.1 lower latency over competing methods on the NuScenesdataset. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09621v1 |
-|title| Minimax Optimal and Computationally Efficient Algorithms for Distributionally Robust Offline Reinforcement Learning |
-|authors| Zhishuai LiuPan Xu
-|links| http://arxiv.org/abs/2403.09621v1 |
-|updated| 2024-03-14 17:55:10 UTC |
-|summary| Distributionally robust offline reinforcement learning RL which seeksrobust policy training against environment perturbation by modeling dynamicsuncertainty calls for function approximations when facing large state-actionspaces. However the consideration of dynamics uncertainty introduces essentialnonlinearity and computational burden posing unique challenges for analyzingand practically employing function approximation. Focusing on a basic settingwhere the nominal model and perturbed models are linearly parameterized wepropose minimax optimal and computationally efficient algorithms realizingfunction approximation and initiate the study on instance-dependentsuboptimality analysis in the context of robust offline RL. Our results uncoverthat function approximation in robust offline RL is essentially distinct fromand probably harder than that in standard offline RL. Our algorithms andtheoretical results crucially depend on a variety of new techniques involvinga novel function approximation mechanism incorporating variance information anew procedure of suboptimality and estimation uncertainty decomposition aquantification of the robust value function shrinkage and a meticulouslydesigned family of hard instances which might be of independent interest. |
+|idx| 2403.11696v1 |
+|title| Generalization error of spectral algorithms |
+|authors| Maksim VelikanovMaxim PanovDmitry Yarotsky
+|links| http://arxiv.org/abs/2403.11696v1 |
+|updated| 2024-03-18 11:52:33 UTC |
+|summary| The asymptotically precise estimation of the generalization of kernel methodshas recently received attention due to the parallels between neural networksand their associated kernels. However prior works derive such estimates fortraining by kernel ridge regression KRR whereas neural networks aretypically trained with gradient descent GD. In the present work we considerthe training of kernels with a family of textitspectral algorithmsspecified by profile hlambda and including KRR and GD as special cases.Then we derive the generalization error as a functional of learning profilehlambda for two data models: high-dimensional Gaussian and low-dimensionaltranslation-invariant model. Under power-law assumptions on the spectrum of thekernel and target we use our framework to i give full loss asymptotics forboth noisy and noiseless observations ii show that the loss localizes oncertain spectral scales giving a new perspective on the KRR saturationphenomenon iii conjecture and demonstrate for the considered data modelsthe universality of the loss w.r.t. non-spectral details of the problem butonly in case of noisy observation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09604v1 |
-|title| Extremal graphical modeling with latent variables |
-|authors| Sebastian EngelkeArmeen Taeb
-|links| http://arxiv.org/abs/2403.09604v1 |
-|updated| 2024-03-14 17:45:24 UTC |
-|summary| Extremal graphical models encode the conditional independence structure ofmultivariate extremes and provide a powerful tool for quantifying the risk ofrare events. Prior work on learning these graphs from data has focused on thesetting where all relevant variables are observed. For the popular class ofHusler-Reiss models we propose the texttteglatent method a tractableconvex program for learning extremal graphical models in the presence of latentvariables. Our approach decomposes the Husler-Reiss precision matrix into asparse component encoding the graphical structure among the observed variablesafter conditioning on the latent variables and a low-rank component encodingthe effect of a few latent variables on the observed variables. We providefinite-sample guarantees of texttteglatent and show that it consistentlyrecovers the conditional graph as well as the number of latent variables. Wehighlight the improved performances of our approach on synthetic and real data. |
+|idx| 2403.11687v1 |
+|title| Nonsmooth Implicit Differentiation: Deterministic and Stochastic Convergence Rates |
+|authors| Riccardo GrazziMassimiliano PontilSaverio Salzo
+|links| http://arxiv.org/abs/2403.11687v1 |
+|updated| 2024-03-18 11:37:53 UTC |
+|summary| We study the problem of efficiently computing the derivative of thefixed-point of a parametric non-differentiable contraction map. This problemhas wide applications in machine learning including hyperparameteroptimization meta-learning and data poisoning attacks. We analyze two popularapproaches: iterative differentiation ITD and approximate implicitdifferentiation AID. A key challenge behind the nonsmooth setting is that thechain rule does not hold anymore. Building upon the recent work by Bolte et al.2022 who proved the linear convergence of non-differentiable ITD we providerefined linear convergence rates for both ITD and AID in the deterministiccase. We further introduce NSID a new method to compute the implicitderivative when the fixed point is defined as the composition of an outer mapand an inner map which is accessible only through a stochastic unbiasedestimator. We establish rates for the convergence of NSID to the truederivative encompassing the best available rates in the smooth setting. Wepresent illustrative experiments confirming our analysis. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09429v1 |
-|title| Variational Inference with Sequential Sample-Average Approximations |
-|authors| Heiko ZimmermannChristian A. NaessethJan-Willem van de Meent
-|links| http://arxiv.org/abs/2403.09429v1 |
-|updated| 2024-03-14 14:20:22 UTC |
-|summary| We present variational inference with sequential sample-average approximationVISA a method for approximate inference in computationally intensive modelssuch as those based on numerical simulations. VISA extends importance-weightedforward-KL variational inference by employing a sequence of sample-averageapproximations which are considered valid inside a trust region. This makes itpossible to reuse model evaluations across multiple gradient steps therebyreducing computational cost. We perform experiments on high-dimensionalGaussians Lotka-Volterra dynamics and a Pickover attractor which demonstratethat VISA can achieve comparable approximation accuracy to standardimportance-weighted forward-KL variational inference with computational savingsof a factor two or more for conservatively chosen learning rates. |
+|idx| 2403.11637v1 |
+|title| The Value of Reward Lookahead in Reinforcement Learning |
+|authors| Nadav MerlisDorian BaudryVianney Perchet
+|links| http://arxiv.org/abs/2403.11637v1 |
+|updated| 2024-03-18 10:19:52 UTC |
+|summary| In reinforcement learning RL agents sequentially interact with changingenvironments while aiming to maximize the obtained rewards. Usually rewardsare observed only after acting and so the goal is to maximize the expectedcumulative reward. Yet in many practical settings reward information isobserved in advance -- prices are observed before performing transactionsnearby traffic information is partially known and goals are oftentimes givento agents prior to the interaction. In this work we aim to quantifiablyanalyze the value of such future reward information through the lens ofcompetitive analysis. In particular we measure the ratio between the value ofstandard RL agents and that of agents with partial future-reward lookahead. Wecharacterize the worst-case reward distribution and derive exact ratios for theworst-case reward expectations. Surprisingly the resulting ratios relate toknown quantities in offline RL and reward-free exploration. We further providetight bounds for the ratio given the worst-case dynamics. Our results cover thefull spectrum between observing the immediate rewards before acting toobserving all the rewards before the interaction starts. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09416v1 |
-|title| Scalability of Metropolis-within-Gibbs schemes for high-dimensional Bayesian models |
-|authors| Filippo AscolaniGareth O. RobertsGiacomo Zanella
-|links| http://arxiv.org/abs/2403.09416v1 |
-|updated| 2024-03-14 14:04:44 UTC |
-|summary| We study general coordinate-wise MCMC schemes such asMetropolis-within-Gibbs samplers which are commonly used to fit Bayesiannon-conjugate hierarchical models. We relate their convergence properties tothe ones of the corresponding potentially not implementable Gibbs samplerthrough the notion of conditional conductance. This allows us to study theperformances of popular Metropolis-within-Gibbs schemes for non-conjugatehierarchical models in high-dimensional regimes where both number ofdatapoints and parameters increase. Given random data-generating assumptionswe establish dimension-free convergence results which are in close accordancewith numerical evidences. Applications to Bayesian models for binary regressionwith unknown hyperparameters and discretely observed diffusions are alsodiscussed. Motivated by such statistical applications auxiliary results ofindependent interest on approximate conductances and perturbation of Markovoperators are provided. |
+|idx| 2403.11532v1 |
+|title| Out-of-Distribution Detection Should Use Conformal Prediction (and Vice-versa?) |
+|authors| Paul NovelloJoseba DalmauLéo Andeol
+|links| http://arxiv.org/abs/2403.11532v1 |
+|updated| 2024-03-18 07:35:25 UTC |
+|summary| Research on Out-Of-Distribution OOD detection focuses mainly on buildingscores that efficiently distinguish OOD data from In Distribution ID data. Onthe other hand Conformal Prediction CP uses non-conformity scores toconstruct prediction sets with probabilistic coverage guarantees. In this workwe propose to use CP to better assess the efficiency of OOD scores.Specifically we emphasize that in standard OOD benchmark settings evaluationmetrics can be overly optimistic due to the finite sample size of the testdataset. Based on the work of Bates et al. 2022 we define new conformalAUROC and conformal FRPTPR95 metrics which are corrections that provideprobabilistic conservativeness guarantees on the variability of these metrics.We show the effect of these corrections on two reference OOD and anomalydetection benchmarks OpenOOD Yang et al. 2022 and ADBench Han et al.2022. We also show that the benefits of using OOD together with CP apply theother way around by using OOD scores as non-conformity scores which results inimproving upon current CP methods. One of the key messages of thesecontributions is that since OOD is concerned with designing scores and CP withinterpreting these scores the two fields may be inherently intertwined. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09383v1 |
-|title| Pantypes: Diverse Representatives for Self-Explainable Models |
-|authors| Rune KjærsgaardAhcène BoubekkiLine Clemmensen
-|links| http://arxiv.org/abs/2403.09383v1 |
-|updated| 2024-03-14 13:34:30 UTC |
-|summary| Prototypical self-explainable classifiers have emerged to meet the growingdemand for interpretable AI systems. These classifiers are designed toincorporate high transparency in their decisions by basing inference onsimilarity with learned prototypical objects. While these models are designedwith diversity in mind the learned prototypes often do not sufficientlyrepresent all aspects of the input distribution particularly those in lowdensity regions. Such lack of sufficient data representation known asrepresentation bias has been associated with various detrimental propertiesrelated to machine learning diversity and fairness. In light of this weintroduce pantypes a new family of prototypical objects designed to capturethe full diversity of the input distribution through a sparse set of objects.We show that pantypes can empower prototypical self-explainable models byoccupying divergent regions of the latent space and thus fostering highdiversity interpretability and fairness. |
+|idx| 2403.11520v1 |
+|title| State-Separated SARSA: A Practical Sequential Decision-Making Algorithm with Recovering Rewards |
+|authors| Yuto TanimotoKenji Fukumizu
+|links| http://arxiv.org/abs/2403.11520v1 |
+|updated| 2024-03-18 07:14:21 UTC |
+|summary| While many multi-armed bandit algorithms assume that rewards for all arms areconstant across rounds this assumption does not hold in many real-worldscenarios. This paper considers the setting of recovering bandits Pike-Burke Grunewalder 2019 where the reward depends on the number of rounds elapsedsince the last time an arm was pulled. We propose a new reinforcement learningRL algorithm tailored to this setting named the State-Separate SARSASS-SARSA algorithm which treats rounds as states. The SS-SARSA algorithmachieves efficient learning by reducing the number of state combinationsrequired for Q-learning/SARSA which often suffers from combinatorial issuesfor large-scale RL problems. Additionally it makes minimal assumptions aboutthe reward structure and offers lower computational complexity. Furthermore weprove asymptotic convergence to an optimal policy under mild assumptions.Simulation studies demonstrate the superior performance of our algorithm acrossvarious settings. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09615v1 |
-|title| PrompTHis: Visualizing the Process and Influence of Prompt Editing during Text-to-Image Creation |
-|authors| Yuhan GuoHanning ShaoCan LiuKai XuXiaoru Yuan
-|links| http://arxiv.org/abs/2403.09615v1 |
-|updated| 2024-03-14 17:52:17 UTC |
-|summary| Generative text-to-image models which allow users to create appealing imagesthrough a text prompt have seen a dramatic increase in popularity in recentyears. However most users have a limited understanding of how such models workand it often requires many trials and errors to achieve satisfactory results.The prompt history contains a wealth of information that could provide userswith insights into what have been explored and how the prompt changes impactthe output image yet little research attention has been paid to the visualanalysis of such process to support users. We propose the Image Variant Grapha novel visual representation designed to support comparing prompt-image pairsand exploring the editing history. The Image Variant Graph models promptdifferences as edges between corresponding images and presents the distancesbetween images through projection. Based on the graph we developed thePrompTHis system through co-design with artists. Besides Image Variant GraphPrompTHis also incorporates a detailed prompt-image history and a navigationmini-map. Based on the review and analysis of the prompting history users canbetter understand the impact of prompt changes and have a more effectivecontrol of image generation. A quantitative user study with eleven amateurparticipants and qualitative interviews with five professionals and one amateuruser were conducted to evaluate the effectiveness of PrompTHis. The resultsdemonstrate PrompTHis can help users review the prompt history make sense ofthe model and plan their creative process. |
+|idx| 2403.11517v1 |
+|title| Inter-individual and inter-site neural code conversion and image reconstruction without shared stimuli |
+|authors| Haibao WangJun Kai HoFan L. ChengShuntaro C. AokiYusuke MurakiMisato TanakaYukiyasu Kamitani
+|links| http://arxiv.org/abs/2403.11517v1 |
+|updated| 2024-03-18 07:10:52 UTC |
+|summary| The human brain demonstrates substantial inter-individual variability infine-grained functional topography posing challenges in identifying commonneural representations across individuals. Functional alignment has thepotential to harmonize these individual differences. However it typicallyrequires an identical set of stimuli presented to different individuals whichis often unavailable. To address this we propose a content loss-based neuralcode converter designed to convert brain activity from one subject to anotherrepresenting the same content. The converter is optimized so that the sourcesubjects converted brain activity is decoded into a latent imagerepresentation that closely resembles that of the stimulus given to the sourcesubject. We show that converters optimized using hierarchical imagerepresentations achieve conversion accuracy comparable to those optimized bypaired brain activity as in conventional methods. The brain activity convertedfrom a different individual and even from a different site sharing no stimuliproduced reconstructions that approached the quality of within-individualreconstructions. The converted brain activity had a generalizablerepresentation that can be read out by different decoding schemes. Theconverter required much fewer training samples than that typically required fordecoder training to produce recognizable reconstructions. These resultsdemonstrate that our method can effectively combine image representations toconvert brain activity across individuals without the need for shared stimuliproviding a promising tool for flexibly aligning data from complex cognitivetasks and a basis for brain-to-brain communication. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09607v1 |
-|title| pARam: Leveraging Parametric Design in Extended Reality to Support the Personalization of Artifacts for Personal Fabrication |
-|authors| Evgeny StemasovSimon DemharterMax RädlerJan GugenheimerEnrico Rukzio
-|links| http://dx.doi.org/10.1145/3613904.3642083 |
-|updated| 2024-03-14 17:48:30 UTC |
-|summary| Extended Reality XR allows in-situ previewing of designs to be manufacturedthrough Personal Fabrication PF. These in-situ interactions exhibitadvantages for PF like incorporating the environment into the design process.However design-for-fabrication in XR often happens through either highlycomplex 3D-modeling or is reduced to rudimentary adaptations of crowd-sourcedmodels. We present pARam a tool combining parametric designs PDs and XRenabling in-situ configuration of artifacts for PF. In contrast to modeling- orsearch-focused approaches pARam supports customization through embodied andpractical inputs e.g. gestures recommendations and evaluation e.g.lighting estimation without demanding complex 3D-modeling skills. Weimplemented pARam for HoloLens 2 and evaluated it n20 comparing XR anddesktop conditions. Users succeeded in choosing context-related parameters andtook their environment into account for their configuration using pARam. Wereflect on the prospects and challenges of PDs in XR to streamline complexdesign methods for PF while retaining suitable expressivity. |
+|idx| 2403.11485v1 |
+|title| A Browser Extension for in-place Signaling and Assessment of Misinformation |
+|authors| Farnaz JahanbakhshDavid R. Karger
+|links| http://dx.doi.org/10.1145/3613904.3642473 |
+|updated| 2024-03-18 05:29:31 UTC |
+|summary| The status-quo of misinformation moderation is a central authority usuallysocial platforms deciding what content constitutes misinformation and how itshould be handled. However to preserve users autonomy researchers haveexplored democratized misinformation moderation. One proposition is to enableusers to assess content accuracy and specify whose assessments they trust. Weexplore how these affordances can be provided on the web without cooperationfrom the platforms where users consume content. We present a browser extensionthat empowers users to assess the accuracy of any content on the web and showsthe user assessments from their trusted sources in-situ. Through a two-weekuser study we report on how users perceive such a tool the kind of contentusers want to assess and the rationales they use in their assessments. Weidentify implications for designing tools that enable users to moderate contentfor themselves with the help of those they trust. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09592v1 |
-|title| DungeonMaker: Embedding Tangible Creation and Destruction in Hybrid Board Games through Personal Fabrication Technology |
-|authors| Evgeny StemasovTobias WagnerAli AskariJessica JanekOmid RajabiAnja SchikorrJulian FrommelJan GugenheimerEnrico Rukzio
-|links| http://dx.doi.org/10.1145/3613904.3642243 |
-|updated| 2024-03-14 17:35:19 UTC |
-|summary| Hybrid board games HBGs augment their analog origins digitally e.g.through apps and are an increasingly popular pastime activity. Continuousworld and character development and customization known to facilitateengagement in video games remain rare in HBGs. If present they happendigitally or imaginarily often leaving physical aspects generic. We developedDungeonMaker a fabrication-augmented HBG bridging physical and digital gameelements: 1 the setup narrates a story and projects a digital game board ontoa laser cutter 2 DungeonMaker assesses player-crafted artifacts 3DungeonMakers modified laser head senses and moves player- and non-playerfigures and 4 can physically damage figures. An evaluation n4x3 indicatedthat DungeonMaker provides an engaging experience may support playersconnection to their figures and potentially spark novices interest infabrication. DungeonMaker provides a rich constellation to play HBGs byblending aspects of craft and automation to couple the physical and digitalelements of an HBG tightly. |
+|idx| 2403.11386v1 |
+|title| Holistic HMI Design for Automated Vehicles: Bridging In-Vehicle and External Communication |
+|authors| Haoyu DongTram Thi Minh TranPavlo BazilinskyyMarius HoggenmüllerDebargha DeySilvia CazacuMervyn FranssenRuolin Gao
+|links| http://dx.doi.org/10.1145/3581961.3609837 |
+|updated| 2024-03-18 00:23:24 UTC |
+|summary| As the field of automated vehicles AVs advances it has become increasinglycritical to develop human-machine interfaces HMI for both internal andexternal communication. Critical dialogue is emerging around the potentialnecessity for a holistic approach to HMI designs which promotes theintegration of both in-vehicle user and external road user perspectives. Thisapproach aims to create a unified and coherent experience for differentstakeholders interacting with AVs. This workshop seeks to bring togetherdesigners engineers researchers and other stakeholders to delve intorelevant use cases exploring the potential advantages and challenges of thisapproach. The insights generated from this workshop aim to inform furtherdesign and research in the development of coherent HMIs for AVs ultimately formore seamless integration of AVs into existing traffic. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09552v1 |
-|title| "Are You Really Sure?" Understanding the Effects of Human Self-Confidence Calibration in AI-Assisted Decision Making |
-|authors| Shuai MaXinru WangYing LeiChuhan ShiMing YinXiaojuan Ma
-|links| http://arxiv.org/abs/2403.09552v1 |
-|updated| 2024-03-14 16:39:23 UTC |
-|summary| In AI-assisted decision-making it is crucial but challenging for humans toachieve appropriate reliance on AI. This paper approaches this problem from ahuman-centered perspective human self-confidence calibration. We begin byproposing an analytical framework to highlight the importance of calibratedhuman self-confidence. In our first study we explore the relationship betweenhuman self-confidence appropriateness and reliance appropriateness. Then in oursecond study We propose three calibration mechanisms and compare their effectson humans self-confidence and user experience. Subsequently our third studyinvestigates the effects of self-confidence calibration on AI-assisteddecision-making. Results show that calibrating human self-confidence enhanceshuman-AI team performance and encourages more rational reliance on AI in someaspects compared to uncalibrated baselines. Finally we discuss our mainfindings and provide implications for designing future AI-assisteddecision-making interfaces. |
+|idx| 2403.11384v1 |
+|title| A Systematic Review of XR-based Remote Human-Robot Interaction Systems |
+|authors| Xian WangLuyao ShenLik-Hang Lee
+|links| http://arxiv.org/abs/2403.11384v1 |
+|updated| 2024-03-18 00:22:30 UTC |
+|summary| This survey provides an exhaustive review of the applications of extendedreality XR technologies in the field of remote human-computer interactionHRI. We developed a systematic search strategy based on the PRISMAmethodology. From the initial 2561 articles selected 100 research papers thatmet our inclusion criteria were included. We categorized and summarized thedomain in detail delving into XR technologies including augmented realityAR virtual reality VR and mixed reality MR and their applications infacilitating intuitive and effective remote control and interaction withrobotic systems.The survey highlights existing articles on the application ofXR technologies user experience enhancement and various interaction designsfor XR in remote HRI providing insights into current trends and futuredirections. We also identified potential gaps and opportunities for futureresearch to improve remote HRI systems through XR technology to guide andinform future XR and robotics research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09544v1 |
-|title| Effect of external characteristics of a virtual human being during the use of a computer-assisted therapy tool |
-|authors| Navid AshrafiVanessa NeuhausFrancesco VonaNicolina Laura PeperkornYoussef ShibanJan-Niklas Voigt-Antons
-|links| http://arxiv.org/abs/2403.09544v1 |
-|updated| 2024-03-14 16:31:18 UTC |
-|summary| Identification within media whether with real or fictional characterssignificantly impacts users shaping their behavior and enriching their socialand emotional experiences. Immersive media like video games utilize virtualentities such as agents avatars or NPCs to connect users with virtual worldsfostering a heightened sense of immersion and identification. Howeverchallenges arise in visually representing these entities with design decisionscrucial for enhancing user interaction. Recent research highlights thepotential of user-defined design or customization which goes beyond merevisual resemblance to the user. Understanding how identification with virtualavatars influences user experiences especially in psychological interventionsis pivotal. In a study exploring this 22 participants created virtual agentseither similar or dissimilar to themselves which then addressed theirdysfunctional thoughts. Results indicate that similarity between users andvirtual agents not only boosts identification but also positively impactsemotions and motivation enhancing interest and enjoyment. This study shedslight on the significance of customization and identification particularly incomputer-assisted therapy tools underscoring the importance of visual designfor optimizing user experiences. |
+|idx| 2403.11378v1 |
+|title| A Review of Virtual Reality Studies on Autonomous Vehicle--Pedestrian Interaction |
+|authors| Tram Thi Minh TranCallum ParkerMartin Tomitsch
+|links| http://dx.doi.org/10.1109/THMS.2021.3107517 |
+|updated| 2024-03-18 00:08:04 UTC |
+|summary| An increasing number of studies employ virtual reality VR to evaluateinteractions between autonomous vehicles AVs and pedestrians. VR simulatorsare valued for their cost-effectiveness flexibility in developing varioustraffic scenarios safe conduct of user studies and acceptable ecologicalvalidity. Reviewing the literature between 2010 and 2020 we found 31 empiricalstudies using VR as a testing apparatus for both implicit and explicitcommunication. By performing a systematic analysis we identified currentcoverage of critical use cases obtained a comprehensive account of factorsinfluencing pedestrian behavior in simulated traffic scenarios and assessedevaluation measures. Based on the findings we present a set of recommendationsfor implementing VR pedestrian simulators and propose directions for futureresearch. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.09510v1 |
-|title| Trust AI Regulation? Discerning users are vital to build trust and effective AI regulation |
-|authors| Zainab AlalawiPaolo BovaTheodor CimpeanuAlessandro Di StefanoManh Hong DuongElias Fernandez DomingosThe Anh HanMarcus KrellnerBianca OgboSimon T. PowersFilippo Zimmaro
-|links| http://arxiv.org/abs/2403.09510v1 |
-|updated| 2024-03-14 15:56:39 UTC |
-|summary| There is general agreement that some form of regulation is necessary both forAI creators to be incentivised to develop trustworthy systems and for users toactually trust those systems. But there is much debate about what form theseregulations should take and how they should be implemented. Most work in thisarea has been qualitative and has not been able to make formal predictions.Here we propose that evolutionary game theory can be used to quantitativelymodel the dilemmas faced by users AI creators and regulators and provideinsights into the possible effects of different regulatory regimes. We showthat creating trustworthy AI and user trust requires regulators to beincentivised to regulate effectively. We demonstrate the effectiveness of twomechanisms that can achieve this. The first is where governments can recogniseand reward regulators that do a good job. In that case if the AI system is nottoo risky for users then some level of trustworthy development and user trustevolves. We then consider an alternative solution where users can conditiontheir trust decision on the effectiveness of the regulators. This leads toeffective regulation and consequently the development of trustworthy AI anduser trust provided that the cost of implementing regulations is not too high.Our findings highlight the importance of considering the effect of differentregulatory regimes from an evolutionary game theoretic perspective. |
+|idx| 2403.11345v1 |
+|title| Independent RL for Cooperative-Competitive Agents: A Mean-Field Perspective |
+|authors| Muhammad Aneeq uz ZamanAlec KoppelMathieu LaurièreTamer Başar
+|links| http://arxiv.org/abs/2403.11345v1 |
+|updated| 2024-03-17 21:11:55 UTC |
+|summary| We address in this paper Reinforcement Learning RL among agents that aregrouped into teams such that there is cooperation within each team butgeneral-sum non-zero sum competition across different teams. To develop an RLmethod that provably achieves a Nash equilibrium we focus on alinear-quadratic structure. Moreover to tackle the non-stationarity induced bymulti-agent interactions in the finite population setting we consider the casewhere the number of agents within each team is infinite i.e. the mean-fieldsetting. This results in a General-Sum LQ Mean-Field Type Game GS-MFTGs. Wecharacterize the Nash equilibrium NE of the GS-MFTG under a standardinvertibility condition. This MFTG NE is then shown to be mathcalO1/M-NEfor the finite population game where M is a lower bound on the number ofagents in each team. These structural results motivate an algorithm calledMulti-player Receding-horizon Natural Policy Gradient MRPG where each teamminimizes its cumulative cost independently in a receding-horizon manner.Despite the non-convexity of the problem we establish that the resultingalgorithm converges to a global NE through a novel problem decomposition intosub-problems using backward recursive discrete-time Hamilton-Jacobi-IsaacsHJI equations in which independent natural policy gradient is shown toexhibit linear convergence under time-independent diagonal dominance.Experiments illuminate the merits of this approach in practice. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.08984v1 |
-|title| Safe Road-Crossing by Autonomous Wheelchairs: a Novel Dataset and its Experimental Evaluation |
-|authors| Carlo GrigioniFranca CorradiniAlessandro AntonucciJérôme GuzziFrancesco Flammini
-|links| http://arxiv.org/abs/2403.08984v1 |
-|updated| 2024-03-13 22:19:06 UTC |
-|summary| Safe road-crossing by self-driving vehicles is a crucial problem to addressin smart-cities. In this paper we introduce a multi-sensor fusion approach tosupport road-crossing decisions in a system composed by an autonomouswheelchair and a flying drone featuring a robust sensory system made of diverseand redundant components. To that aim we designed an analytical dangerfunction based on explainable physical conditions evaluated by single sensorsincluding those using machine learning and artificial vision. As aproof-of-concept we provide an experimental evaluation in a laboratoryenvironment showing the advantages of using multiple sensors which canimprove decision accuracy and effectively support safety assessment. We madethe dataset available to the scientific community for further experimentation.The work has been developed in the context of an European project namedREXASI-PRO which aims to develop trustworthy artificial intelligence forsocial navigation of people with reduced mobility. |
+|idx| 2403.11304v1 |
+|title| Pioneering SE(2)-Equivariant Trajectory Planning for Automated Driving |
+|authors| Steffen HagedornMarcel MilichAlexandru P. Condurache
+|links| http://arxiv.org/abs/2403.11304v1 |
+|updated| 2024-03-17 18:53:46 UTC |
+|summary| Planning the trajectory of the controlled ego vehicle is a key challenge inautomated driving. As for human drivers predicting the motions of surroundingvehicles is important to plan the own actions. Recent motion prediction methodsutilize equivariant neural networks to exploit geometric symmetries in thescene. However no existing method combines motion prediction and trajectoryplanning in a joint step while guaranteeing equivariance underroto-translations of the input space. We address this gap by proposing alightweight equivariant planning model that generates multi-modal jointpredictions for all vehicles and selects one mode as the ego plan. Theequivariant network design improves sample efficiency guarantees outputstability and reduces model parameters. We further propose equivariant routeattraction to guide the ego vehicle along a high-level route provided by anoff-the-shelf GPS navigation system. This module creates a momentum fromembedded vehicle positions toward the route in latent space while keeping theequivariance property. Route attraction enables goal-oriented behavior withoutforcing the vehicle to stick to the exact route. We conduct experiments on thechallenging nuScenes dataset to investigate the capability of our planner. Theresults show that the planned trajectory is stable under roto-translations ofthe input scene which demonstrates the equivariance of our model. Despite usingonly a small split of the dataset for training our method improves L2 distanceat 3 s by 20.6  and surpasses the state of the art. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.08936v1 |
-|title| Beyond Joint Demonstrations: Personalized Expert Guidance for Efficient Multi-Agent Reinforcement Learning |
-|authors| Peihong YuManav MishraAlec KoppelCarl BusartPriya NarayanDinesh ManochaAmrit BediPratap Tokekar
-|links| http://arxiv.org/abs/2403.08936v1 |
-|updated| 2024-03-13 20:11:20 UTC |
-|summary| Multi-Agent Reinforcement Learning MARL algorithms face the challenge ofefficient exploration due to the exponential increase in the size of the jointstate-action space. While demonstration-guided learning has proven beneficialin single-agent settings its direct applicability to MARL is hindered by thepractical difficulty of obtaining joint expert demonstrations. In this work weintroduce a novel concept of personalized expert demonstrations tailored foreach individual agent or more broadly each individual type of agent within aheterogeneous team. These demonstrations solely pertain to single-agentbehaviors and how each agent can achieve personal goals without encompassingany cooperative elements thus naively imitating them will not achievecooperation due to potential conflicts. To this end we propose an approachthat selectively utilizes personalized expert demonstrations as guidance andallows agents to learn to cooperate namely personalized expert-guided MARLPegMARL. This algorithm utilizes two discriminators: the first providesincentives based on the alignment of policy behavior with demonstrations andthe second regulates incentives based on whether the behavior leads to thedesired objective. We evaluate PegMARL using personalized demonstrations inboth discrete and continuous environments. The results demonstrate that PegMARLlearns near-optimal policies even when provided with suboptimal demonstrationsand outperforms state-of-the-art MARL algorithms in solving coordinated tasks.We also showcase PegMARLs capability to leverage joint demonstrations in theStarCraft scenario and converge effectively even with demonstrations fromnon-co-trained policies. |
+|idx| 2403.11075v1 |
+|title| GOMA: Proactive Embodied Cooperative Communication via Goal-Oriented Mental Alignment |
+|authors| Lance YingKunal JhaShivam AaryaJoshua B. TenenbaumAntonio TorralbaTianmin Shu
+|links| http://arxiv.org/abs/2403.11075v1 |
+|updated| 2024-03-17 03:52:52 UTC |
+|summary| Verbal communication plays a crucial role in human cooperation particularlywhen the partners only have incomplete information about the task environmentand each others mental state. In this paper we propose a novel cooperativecommunication framework Goal-Oriented Mental Alignment GOMA. GOMA formulatesverbal communication as a planning problem that minimizes the misalignmentbetween the parts of agents mental states that are relevant to the goals. Thisapproach enables an embodied assistant to reason about when and how toproactively initialize communication with humans verbally using naturallanguage to help achieve better cooperation. We evaluate our approach againststrong baselines in two challenging environments Overcooked a multiplayergame and VirtualHome a household simulator. Our experimental resultsdemonstrate that large language models struggle with generating meaningfulcommunication that is grounded in the social and physical context. In contrastour approach can successfully generate concise verbal communication for theembodied assistant to effectively boost the performance of the cooperation aswell as human users perception of the assistant. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.08882v1 |
-|title| Cultural evolution in populations of Large Language Models |
-|authors| Jérémy PerezCorentin LégerMarcela Ovando-TellezChris FoulonJoan DussauldPierre-Yves OudeyerClément Moulin-Frier
-|links| http://arxiv.org/abs/2403.08882v1 |
-|updated| 2024-03-13 18:11:17 UTC |
-|summary| Research in cultural evolution aims at providing causal explanations for thechange of culture over time. Over the past decades this field has generated animportant body of knowledge using experimental historical and computationalmethods. While computational models have been very successful at generatingtestable hypotheses about the effects of several factors such as populationstructure or transmission biases some phenomena have so far been more complexto capture using agent-based and formal models. This is in particular the casefor the effect of the transformations of social information induced by evolvedcognitive mechanisms. We here propose that leveraging the capacity of LargeLanguage Models LLMs to mimic human behavior may be fruitful to address thisgap. On top of being an useful approximation of human cultural dynamicsmulti-agents models featuring generative agents are also important to study fortheir own sake. Indeed as artificial agents are bound to participate more andmore to the evolution of culture it is crucial to better understand thedynamics of machine-generated cultural evolution. We here present a frameworkfor simulating cultural evolution in populations of LLMs allowing themanipulation of variables known to be important in cultural evolution such asnetwork structure personality and the way social information is aggregatedand transformed. The software we developed for conducting these simulations isopen-source and features an intuitive user-interface which we hope will helpto build bridges between the fields of cultural evolution and generativeartificial intelligence. |
+|idx| 2403.11034v1 |
+|title| Resilient Fleet Management for Energy-Aware Intra-Factory Logistics |
+|authors| Mithun GouthamStephanie Stockar
+|links| http://arxiv.org/abs/2403.11034v1 |
+|updated| 2024-03-16 22:46:12 UTC |
+|summary| This paper presents a novel fleet management strategy for battery-poweredrobot fleets tasked with intra-factory logistics in an autonomous manufacturingfacility. In this environment repetitive material handling operations aresubject to real-world uncertainties such as blocked passages and equipment orrobot malfunctions. In such cases centralized approaches enhance resilience byimmediately adjusting the task allocation between the robots. To overcome thecomputational expense a two-step methodology is proposed where the nominalproblem is solved a priori using a Monte Carlo Tree Search algorithm for taskallocation resulting in a nominal search tree. When a disruption occurs thenominal search tree is rapidly updated a posteriori with costs to the newproblem while simultaneously generating feasible solutions. Computationalexperiments prove the real-time capability of the proposed algorithm forvarious scenarios and compare it with the case where the search tree is notused and the decentralized approach that does not attempt task reassignment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.08879v1 |
-|title| Multi-Objective Optimization Using Adaptive Distributed Reinforcement Learning |
-|authors| Jing TanRamin KhaliliHolger Karl
-|links| http://arxiv.org/abs/2403.08879v1 |
-|updated| 2024-03-13 18:05:16 UTC |
-|summary| The Intelligent Transportation System ITS environment is known to bedynamic and distributed where participants vehicle users operators etc.have multiple changing and possibly conflicting objectives. AlthoughReinforcement Learning RL algorithms are commonly applied to optimize ITSapplications such as resource management and offloading most RL algorithmsfocus on single objectives. In many situations converting a multi-objectiveproblem into a single-objective one is impossible intractable or insufficientmaking such RL algorithms inapplicable. We propose a multi-objectivemulti-agent reinforcement learning MARL algorithm with high learningefficiency and low computational requirements which automatically triggersadaptive few-shot learning in a dynamic distributed and noisy environment withsparse and delayed reward. We test our algorithm in an ITS environment withedge cloud computing. Empirical results show that the algorithm is quick toadapt to new environments and performs better in all individual and systemmetrics compared to the state-of-the-art benchmark. Our algorithm alsoaddresses various practical concerns with its modularized and asynchronousonline training method. In addition to the cloud simulation we test ouralgorithm on a single-board computer and show that it can make inference in 6milliseconds. |
+|idx| 2403.10996v1 |
+|title| A Scalable and Parallelizable Digital Twin Framework for Sustainable Sim2Real Transition of Multi-Agent Reinforcement Learning Systems |
+|authors| Chinmay Vilas SamakTanmay Vilas SamakVenkat Krovi
+|links| http://arxiv.org/abs/2403.10996v1 |
+|updated| 2024-03-16 18:47:04 UTC |
+|summary| This work presents a sustainable multi-agent deep reinforcement learningframework capable of selectively scaling parallelized training workloadson-demand and transferring the trained policies from simulation to realityusing minimal hardware resources. We introduce AutoDRIVE Ecosystem as anenabling digital twin framework to train deploy and transfer cooperative aswell as competitive multi-agent reinforcement learning policies from simulationto reality. Particularly we first investigate an intersection traversalproblem of 4 cooperative vehicles Nigel that share limited state informationin single as well as multi-agent learning settings using a common policyapproach. We then investigate an adversarial autonomous racing problem of 2vehicles F1TENTH using an individual policy approach. In either set ofexperiments a decentralized learning architecture was adopted which allowedrobust training and testing of the policies in stochastic environments. Theagents were provided with realistically sparse observation spaces and wererestricted to sample control actions that implicitly satisfied the imposedkinodynamic and safety constraints. The experimental results for both problemstatements are reported in terms of quantitative metrics and qualitativeremarks for training as well as deployment phases. We also discuss agent andenvironment parallelization techniques adopted to efficiently accelerate MARLtraining while analyzing their computational performance. Finally wedemonstrate a resource-aware transition of the trained policies from simulationto reality using the proposed digital twin framework. |
 
 
