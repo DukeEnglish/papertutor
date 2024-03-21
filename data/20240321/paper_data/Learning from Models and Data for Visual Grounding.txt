@@ -1,0 +1,1305 @@
+Learning from Models and Data for
+Visual Grounding
+Ruozhen He1, Paola Cascante-Bonilla1, Ziyan Yang1,
+Alexander C. Berg2, and Vicente Ordonez1
+1 Department of Computer Science, Rice University, USA
+{catherine.he,pc51,zy47,vicenteor}@rice.edu
+2 Department of Computer Science, University of California, Irvine, USA
+bergac@uci.edu
+Abstract. WeintroduceSynGround,anovelframeworkthatcombines
+data-drivenlearningandknowledgetransferfromvariouslarge-scalepre-
+trained models to enhance the visual grounding capabilities of a pre-
+trained vision-and-language model. The knowledge transfer from the
+models initiates the generation of image descriptions through an image
+description generator. These descriptions serve dual purposes: they act
+as prompts for synthesizing images through a text-to-image generator,
+and as queries for synthesizing text, from which phrases are extracted
+using a large language model. Finally, we leverage an open-vocabulary
+object detector to generate synthetic bounding boxes for the synthetic
+images and texts. We finetune a pretrained vision-and-language model
+on this dataset by optimizing a mask-attention consistency objective
+that aligns region annotations with gradient-based model explanations.
+The resulting model improves the grounding capabilities of an off-the-
+shelf vision-and-language model. Particularly, SynGround improves the
+pointinggameaccuracyofALBEFontheFlickr30kdatasetfrom79.38%
+to 87.26%, and on RefCOCO+ Test A from 69.35% to 79.06% and on
+RefCOCO+ Test B from 53.77% to 63.67%.
+Keywords: Visual Grounding · Vision and Language
+1 Introduction
+Vision-and-language models (VLM) pretrained on image and text pairs have
+becomeinstrumentalacrossvarioustasks[30,40,42,60],rangingfromobjectde-
+tection[23,87]tocomplexvisualreasoning[9,41,47].Byleveragingweb-sourced
+datasets, these models showcase a strong ability to comprehend and process an
+extensive vocabulary of objects and scenes, demonstrating remarkable perfor-
+mance even without task-specific tuning.
+Among these, the ALBEF model [40] shows a remarkable capability to lo-
+calize objects in images when using visual explanation methods such as Grad-
+CAM [72], allowing visual grounding through gradient-based explanations. In
+addition, existing work has incorporated strategies to improve this grounding
+4202
+raM
+02
+]VC.sc[
+1v40831.3042:viXra2 R. He et al.
+Learning from Data Learning from Data and Models
+Data Data
+61.16 %
+Learning from Models RefCOCO+ B
+LLM LLM
+Image Image 63.67%
+Generator Generator RefCOCO+ B
+56.35 %
+Object RefCOCO+ B Object
+Detector Detector
+Fig.1: Dataiseffectiveforlearningvisualgrounding,butexpensivetocurateatscale.
+Incontrast,learningfromrelatedmodelsismoreflexibleyetlesseffective.Ourproposed
+paradigm leverages the benefits of training using both data and models, improving
+performance for visual grounding.
+capability,finetuningthebasemodelwithdatasetscontainingmanuallycurated
+box annotations [84], or leveraging pretrained object detectors or box proposal
+networks [9,18,24,31,43,84]. The latter circumvents the need for manual anno-
+tations,whichareparticularlyexpensivetoobtain.Ourworkgoesastepfurther
+andproposesinvestigatingthepotentialofusinglarge-scalepretrainedmodelsto
+compensate for the restricted scale of real data by expanding it with affordable
+syntheticdataforvisualgrounding.Thisparadigmshift,fromlearningfromdata
+to learning from data and models, facilitates knowledge transfer across models,
+leading to higher flexibility and effectiveness in visual grounding (Fig. 1).
+Recentadvancementsinmodel-basedlearningfocusongeneratingimage-text
+pairs for image recognition [4,19,26,71,76,77]. Learning from generative models
+has shown promising results when training or tuning representation learners by
+augmenting real datasets with synthetic data [4], or creating synthetic datasets
+derived from real data [77]. Some work further improves the purity of synthetic
+data [71,76] by generating synthetic images based on synthetic captions. How-
+ever, the synthetic captions used for image synthesis in these studies are gener-
+allydesignedtodescribetheimageasawholeratherthanspecificregions.These
+image-leveldescriptionsareusuallylesseffectiveforvisualgrounding[27],which
+instead benefits from object-centric annotations.
+In this work, we introduce a pragmatic framework for image-text-box syn-
+thesis tailored for visual grounding. To the best of our knowledge, this paper is
+the first to study to which extent learning from models impacts the capability
+of a pre-trained vision-and-language model to localize objects in an image given
+a visual explanation. We navigate from lower to higher synthetic purity levels,
+and break down our investigation of synthetic image-text-box generation into
+image-text pairs and image-text-box synthesis. Our method, SynGround, lever-
+ages a captioning model to generate dense textual descriptions, used for image
+synthesis. The generated image descriptions are fed into an LLM for text syn-
+thesis. Finally, the image-text-box generation is complemented with syntheticLearning from Models and Data for Visual Grounding 3
+a cat
+LLM Ψt a couch
+a white stuffed teddy bear
+a white towel
+the cat
+...
+T
+In the image, a cat is laying on a couch,
+surrounded by a white stuffed teddy bear
+Image and a white towel. The cat is resting
+D Ge es nc eri rp at ti oo rn p ae na imce af
+l
+u all ny
+d
+to on
+w
+eth
+l
+ne
+e
+ac ro bu yc
+.
+h
+T
+hw
+e
+i sth
+c
+enth ee cos ntu vf efe yd
+s
+Detector Ψd
+Ψc a sense of coziness and relaxation, as the
+cat enjoys its time on the couch.
+Generated Image
+Description <I, T, B>
+Image Generator Ψg
+I
+Fig.2:Overviewofourimage-text-boxsynthesispipeline.Weuseanimagedescription
+generatorΨ ,whichoutputsadescriptionthatservesasaprompttoanimagegenerator
+c
+Ψ to obtain synthetic image I. We also use this description to obtain text phrases T
+g
+bypromptinganLLMΨ .Finally,weinputthesynthetictextandimageintoanobject
+t
+detector Ψ to obtain synthetic boxes B.
+d
+bounding boxes from an open-vocabulary object detector. Remarkably, finetun-
+ingabasepretrainedvision-and-languagemodelonsuchsyntheticsetleadstoa
+substantial performance gain, showcasing the potential of learning from models.
+More importantly, it reaches new heights when learning from models and data
+by finetuning on both real and synthetic data.
+Our key contributions are summarized as follows.
+– We propose a learning from models and data paradigm for visual grounding
+throughimage-text-boxsynthesis,utilizingexhaustiveimagedescriptionsfor
+image synthesis, an LLM for text synthesis from phrase extraction, and an
+open-vocabulary object detector for bounding box generation.
+– We investigate a feasible way to generate expandable and effective synthetic
+image-text-boxes at a higher synthetic purity level.
+– We show the effectiveness of our method by outperforming a model exclu-
+sively learned from data, contributing to 7.88% improvement on Flickr30k,
+9.71% and 9.90% improvement on RefCOCO+ Test A and B, respectively.
+2 Related Work
+2.1 Visual Grounding
+Visual grounding associates textual descriptions with relevant regions within
+images.Supervisedmethodsaretypicallytrainedwithimage-text-boxpairs[14,
+15,18,32,84],orintegratepretrainedobjectdetectors[25,62]toidentifythemost
+relevant regions with the textual descriptions [9,13,21,24,48,81]. While weakly-
+supervisedmethodseschewtheneedforboundingboxes[3,27,73,74],theyrelyon
+datasets such as Visual Genome [36], which provide multiple phrases describing
+variousregionsineachimage.However,theprocessofmanuallyannotatingdense
+textual descriptions and their corresponding bounding boxes is time-consuming
+and labor-intensive.4 R. He et al.
+Relatedtogroundingapproachesincorporatingvisualexplanationtuning[27,
+40,82,84], we explore visual grounding in a generalized context, aiming to lo-
+calize phrases using gradient-based model explanations rather than generating
+boundingboxes[42].WeleverageGradCAM[72],aheatmapthatdenotesspatial
+relevance, to pinpoint phrases within images. Compared to boxes, heatmap pro-
+vides a more flexible representation for general grounding, especially for visual
+contentthatisnoteasilyencapsulatedbyboxes,suchasscenariosinvolvingmul-
+tipleobjects.Thestate-of-the-artmethodAMC[84]proposesanattentionmask
+consistencyobjectivetooptimizethegradient-basedexplanationsofbase-model
+ALBEF[40]toimprovelocalizationperformance.Similarly,weadoptALBEFas
+our base model and tune it with AMC objectives on image-text-box pairs, em-
+ployingagradient-basedstrategy.Thispaperdelvesintotheefficacyofsynthetic
+image-text-box in a general visual grounding setting.
+2.2 Learning from Synthetic Data
+The utilization of synthetic data has been widely explored across various com-
+puter vision tasks, including image classification [20,52,58], semantic segmenta-
+tion [10,63,65], object detection [57,68], human pose estimation [34,80], action
+recognition [79], autonomous driving [1], and many other domains [12,28,37,
+50,51,53,66,67,78,83,85]. In contrast to works that derive synthetic data from
+3D-rendereddatasets[22,88]utilizingphysicallyrealisticengines[6,7,17,20,49],
+our approach aligns more closely with research adopting open-source diffusion
+models. He et al. [26] use GLIDE [54] generated synthetic images to improve
+pretrained CLIP [60] in zero-shot and few-shot classification, while its perfor-
+mance is adversely affected when trained from scratch on synthetic data. Azizi
+et al. [4] fine-tune Imagen [70] on ImageNet [69] and subsequently leverage its
+synthetic data to augment the real ImageNet training set, resulting in initial
+improvement followed by degradation upon scaling up. Fan et al. [19] inves-
+tigate the scaling laws of synthetic images and identify related factors. Sta-
+bleRep [77] propose a self-supervised method with a multi-positive contrastive
+loss that learns representations from synthetic images generated for captions in
+large-scale datasets [8,16], thereby boosting linear probing image classification
+performance.SynCLR[76]furtheradvancesthesyntheticlevelbyutilizingLLM-
+generated synthetic captions. Our research not only generates image-text pairs
+butalsoprovidescorrespondingsyntheticboxes,facilitatingacomprehensiveex-
+plorationoftheefficacyofsyntheticimage-text-boxtripletsinvisualgrounding.
+3 Method
+This paper studies generating effective synthetic image-text-boxes ⟨I,T,B⟩ to
+improve the visual grounding ability of a base vision-and-language model. The
+base model consists of a text encoder ϕ , a visual encoder ϕ , and a multimodal
+t v
+fusionencoderϕ .Section3.1introducestheobjectivesthattunethebasemodel
+f
+onimage-textpairs⟨I,T⟩andimage-text-boxtriplets⟨I,T,B⟩.Section3.2intro-
+duces the first step in the synthesis process that uses an image description gen-
+eratorΨ togenerateinputcaptions.Section3.3introducesimage-textsynthesis
+cLearning from Models and Data for Visual Grounding 5
+with an image generation model Ψ and a large language model Ψ . Section 3.4
+g t
+describes box synthesis through an object detector Ψ .
+d
+3.1 Visual Grounding Objectives: Preliminaries
+Vision-language Objectives. We adopt ALBEF [40] as the base model, in-
+corporatingvision-languageobjectivesincludingastandardimage-textmatching
+loss(L ),animage-textcontrastiveloss(L )andamaskinglanguagemodel-
+itm itc
+ingloss(L ).Theimage-textmatchingloss(L )evaluatesthecompatibility
+mlm itm
+between an image and a text by analyzing the output of [CLS] tokens. Essen-
+tially, this loss measures how well the model can predict whether a given image
+and text pair match, using a cross-entropy loss between the prediction and a
+one-hot vector indicating whether an image-text pair ⟨I,T⟩ match. Next, the
+image-textcontrastiveloss(L )isdesignedtofine-tunethealignmentbetween
+itc
+visual and textual representations. It exploits contrastive learning with a set of
+negative samples and a temperature scaling parameter to normalize the scores.
+Finally, the masking language modeling loss (L ) uses both visual inputs and
+mlm
+textualcontexttopredictmaskedtokensfromthemaskedinputtext.Theoverall
+vision-language objective to tune the base model on image-text pairs for repre-
+sentation learning is L =L +L +L .
+vl itm itc mlm
+Attention Map Consistency Objective.Additionally,weleverageanatten-
+tionmapconsistencyobjectivewhichwasrecentlyproposedbyYangetal.[84]to
+add box supervision. This objective leverages gradient-based explanation maps
+(heatmap) G by calculating the gradient of the intermediate feature map in a
+multimodal fusion encoder ϕ and maximizes the consistency between this map
+f
+andregionannotations.Thisobjectiveconsiderstwoterms.ThefirsttermL
+max
+encourages the maximum value of the heatmap G inside the target box B to
+surpass the maximum value outside by a margin δ .
+1
+(cid:20) (cid:21)
+L = E max(0, max((1−B )G )−max(B G )+δ ) , (1)
+max (I,T,B)∼D i,j i,j i,j i,j 1
+i,j i,j
+where B is 1 when the pixel location i,j is inside the box, and zero otherwise.
+i,j
+The second term L encourages the mean value of the heatmap G inside the
+mean
+box to be larger than the mean value outside by a margin δ .
+2
+(cid:20) (cid:80) (1−B )G (cid:80) B G (cid:21)
+L
+mean
+=E
+(I,T,B)∼D
+max(0, (cid:80)i,j (1−i B,j )i,j − (cid:80)i,j (i B,j i ),j +δ 2) . (2)
+i,j i,j i,j i,j
+The full L objective is L = λ · L + λ · L , where λ , λ are
+amc amc 1 max 2 mean 1 2
+trade-offhyperparameters.ThebasemodelistunedwithboththeL andL
+vl amc
+objectives.
+3.2 Generating Input Captions
+Ourimage-text-boxsynthesisprocessinitiateswithanimagedescriptiongenera-
+torΨ ,aimingtogeneratetextconditionsforimagesynthesisandqueriesfortext
+c6 R. He et al.
+Image Captioning In the image, a cat is laying on a couch, surrounded by a white stuffed teddy bear and a white
+towel. The cat is resting peacefully on the couch with the stuffed animal and towel nearby. The
+Model scene conveys a sense of coziness and relaxation, as the cat enjoys its time on the couch.
+Q: [“cat”, “building”]
+A: [“The image features a sleek black cat sitting on the edge of a tall building. The cat looks
+Concepts LLM poised and alert, its ears perked up and its tail twitching. Behind the cat, there is a row of
+windows that stretch up to the top of the building, providing a view of the interior. The building
+itself is modern and made of concrete and glass, with an angular design.”]
+In-context examples
+Q: [“woman”, “car”]
+A: [“In the image, there are a woman walking down the sidewalk, a fire hydrant located next to her, and a building behind her. The woman appears to
+be carrying a handbag. Additionally, there is a car parked on the street in the background.”]
+…
+Fig.3: Two approaches for generating image descriptions (Ψ ) to use for image syn-
+C
+thesis and from which to extract phrases. The top pipeline relies more on real data,
+applyinganimagecaptioningmodeltorealimages.Thebottompipelinesamplescon-
+cepts from a predefined list and uses an LLM with in-context learning to generate
+image descriptions.
+synthesis. As shown in Fig. 3, we consider two strategies for image description
+generation.Thefirststrategy,Image2Text,appliesanimagecaptioningmodelon
+arealimageIR promptedtoobtaineddetaileddescriptions.Thesecondstrategy,
+Concept2Text, starts with concept sampling from a predefined concept list and
+anin-contextlearningexampledatabaseofdetailedcaptions.Theconceptlistis
+collected from the real text TR, while the in-context-learning example database
+is built through image captioning on a small subset of real images IR. This sec-
+ond strategy relies less on real data by using the in-context learning ability of
+an LLM Ψ which is used to generate more captions.
+t
+3.3 Generating Text and Images
+This section explores a crucial aspect of image-text-box synthesis: generating
+effective image-text pairs tailored for visual grounding. To investigate a model-
+basedparadigminvisualgrounding,wefirstdelveintoanapproachtosynthesize
+image-textpairsthatarenotonlyalignedbutalsoinherentlyequippedforvisual
+grounding. As illustrated in Fig. 4, we investigate three distinct alternatives for
+conditioning a text-to-image generation model Ψ .
+g
+The first strategy, Concatenation, involves merging all captions associated
+with a real image I, using this concatenated text as a prompt for text-to-image
+generation model Ψ . Given common restrictions on the number of input tokens
+g
+fortheinputtextprompt[60]inΨ ,weproposeasecondstrategy,Text2Text,by
+g
+drafting a succinct summary through an LLM Ψ . In contrast to the strategies
+t
+abovethatderivetextpromptsfromexistingtextualcontent,wealsoconsideran
+alternative,Image2Text,thatemploysanimagecaptioningmodelΨ togenerate
+c
+new captions for real images IR as input prompts for Ψ .
+g
+3.4 Generating Boxes
+Building upon image-text synthesis, this section supplements the paradigm for
+image-text-box synthesis (See Fig. 2). It further translates input captions forLearning from Models and Data for Visual Grounding 7
+Concatenation
+a small girl wearing orange, a little girl holding a teddy bear, little girl in a red dress, a person, a hand person, a small girl, a
+black and white teddy bear, a floor, a blue carpet floor, a blue carpet, some presents, a room, orange toys, a girl, a teddy bear TR I
+Text2Text
+mI
+a b a c o Imae r s as ra m pm n ar, e ga
+g
+a t el l il eltl t f tg 2lg l oe oii Tyr r olg sl ,
+e
+r ,,iw ar xal e a tb ina g la r ib ri a cn ll ,uk g r e a e a o d tn ecr da ad d n rr dw peg yh ese i bs tt, ,e , e a aa st e o r li p dt mt e dle er ys g bo pi n er rl e, a h sra , eo ah nld a tfi sln n o ,g d o a ra p , e a rt ore s b od o l mud n ey ,, TR
+A
+youngL L gM
+irl is sitting on the
+fa b d p loe er oes a r rs sm r , s o
+a
+a , n
+n
+al ,l
+d
+aa g
+h
+l sii tr omtl pl le de ah ir nlo lsg gl god i r ini arln l, g bi n laa
+a
+ca kt he ad ar ned nddy
+d
+noitareneG le eg da
+oM
+I
+white teddy bear. She appears to be playing with toys as
+Image Captioning she holds the stuffed bear. The room has several chairs of
+Model various sizes, a couch in the background, and a potted plant I
+placed near the girl. There are also multiple presents
+IR scattered around the area, adding to the festive atmosphere.
+Fig.4: Illustration of various approaches for image and image description synthesis.
+ImagedescriptionscanbegeneratedbyconcatenatingrealtextTR,LLMsummaryon
+realtextTR,andimagecaptioningonrealimageIR.SyntheticimagesI areobtained
+through an image generator model conditioned on image descriptions.
+generating images I to synthetic text phrases T suitable for visual grounding,
+and facilitates the synthesis of corresponding bounding boxes B. To convert a
+detailed description paragraph from the image captioning model into a series of
+region-specific phrases conducive to visual grounding, we prompt the LLM Ψ
+t
+with four manually crafted in-context learning examples for phrase extraction.
+Followingphraseextraction,weexploitalarge-scalepretrainedopen-vocabulary
+object detector Ψ , to generate bounding boxes B for each extracted phrase T.
+d
+With this process, we synthesize image-text-box triplets ⟨I,T,B⟩.
+4 Experiments
+4.1 Implementation Details
+Image-Text-Box Synthesis. To favor reproducibility and accessibility, we
+adopt Stable Diffusion 2.1 [64] with guidance scale 10.0 as the text-to-image
+generator Ψ , an open-source LLM Vicuna-13B [11] as Ψ , and GLIP [42] as the
+g t
+object detector Ψ . We select the box with top-1 confidence if it is greater than
+d
+the default confidence threshold (0.7) in the official implementation. For image
+description generation Ψ , we experiment with BLIP-2 [38] and LLaVA [46] for
+c
+the Image2Text strategy. For the Concept2Text variant, we use Vicuna-13B [11]
+to generate image descriptions from a two-concept query with four randomly
+sampled in-context examples. The concept list contains nouns extracted from
+real VG captions. The in-context learning example database encompasses 500
+randomly sampled LLaVA-generated image captions.
+Visual Grounding Tuning. We employ ALBEF-14M [40] as our base model
+foritsreportedvisualgroundingperformancethroughGradCAM[72].ALBEFis
+pretrained on image-text pairs from Conceptual Captions [8], ImageNet-1k [69],
+MS-COCO [45], SBU Captions [56] and Visual Genome [36]. Tuning for visual
+groundingappliesL onimage-textpairsandacombinationofL andL on
+vl vl amc8 R. He et al.
+Table 1: Learningfromdataandmodels.Wecomparethevisualgroundingimprove-
+ments for the off-the-shelf base model (row 1) by learning from the real data (row 2),
+models (row 3), and both (row 4).
+RefCOCO+
+Method Source Num. Flickr30k ∆
+avg
+Test A Test B
+ALBEF [40] Off-the-Shelf – 69.35 53.77 79.38 -
+AMC [84] Data 1,649,546 78.89 61.16 86.46 +8.00
+SynGround Models 998,406 73.70 56.35 86.89 +4.81
+M
+SynGround Data&Models 2,627,952 79.06 63.67 87.26 +9.16
+image-text-box triplets, adhering to the coefficient settings δ = 0.5, δ = 0.1,
+1 2
+λ =0.8, and λ =0.2 as originally proposed in Yang et al. [84].
+1 2
+Thetrainingisconductedonasinglenodewith8NVIDIAA40GPUs.Input
+images undergo resizing to 256×256 pixels and benefit from a suite of aug-
+mentations, including color jittering, horizontal flipping, and random grayscale
+conversion. All experiments use an Adam optimizer [35] with a learning rate set
+to 1e-5 and a batch size of 512.
+Visual Grounding Evaluation. Following prior works [2,40,84], our evalua-
+tion uses pointing game accuracy, which measures the proportion of instances
+where the maximal activation point within the generated heatmaps correctly
+falls within the annotated ground-truth bounding box regions. We utilize point-
+ing game accuracy as a metric across several benchmark datasets, including
+RefCOCO+ [86] and Flickr30k [59].
+4.2 Learning from Models and Data
+Table 1 presents comparisons among learning exclusively from data, from mod-
+els,andacombinationofboth.Thebaselineperformance(row1)issignificantly
+enhancedbyincorporatingsyntheticdatageneratedthroughmodel-basedlearn-
+ing, yielding an average improvement of 4.81% (row 3). While it falls short of
+the gains achieved through learning from data (row 2), our proposed method,
+SynGround,excelsbyintegratingbothsources,resultinginanaverageimprove-
+ment of 9.16%. SynGround outperforms the state-of-the-art AMC [84] on Ref-
+COCO+ [86] Test A and B, and Flickr30k [59] benchmarks.
+4.3 Synthetic Image-Text Pairs with Vision-language Objectives
+In this section, we compare the effectiveness of various synthetic image-text
+synthesisstrategiesonvisualgroundingperformance.Consideringthegeneration
+of regional phrases and images containing multiple objects as key steps toward
+image-text-box synthesis, we tune our base model on synthetic image-text pairs
+usingvision-languageobjectives.Althoughthevision-languageobjectivesarenotLearning from Models and Data for Visual Grounding 9
+Table 2: Comparisons of image and text synthesis strategies. We assess the effective-
+nessofsyntheticimage-textpairsfromtextconcatenation,Text2Text,andImage2Text
+pipelines, by evaluating the performance change of tuning a base model.
+RefCOCO+
+Category Image Text Num. Flickr30k ∆
+avg
+Test A Test B
+Off-the-Shelf - - – 69.35 53.77 79.38 -
+Real VG VG 1,649,546 71.41 54.06 79.90 +0.96
+Concatenation Syn-C VG 1,649,546 67.57 53.14 76.99 -1.60
+Syn-V VG 1,649,546 67.41 52.14 77.80 -1.72
+Text2Text
+Syn-V LLM 530,233 70.28 52.08 78.97 -0.39
+C
+Syn-B VG 1,649,546 56.88 48.48 73.93 -7.74
+Syn-B BLIP-2 267,199 68.15 51.50 78.30 -1.52
+C
+Syn-L VG 1,649,546 65.35 50.28 76.85 -3.34
+Image2Text Syn-L LLaVA 384,455 70.22 52.30 78.34 -0.55
+P
+Syn-L LLaVA 716,198 69.94 53.26 78.83 -0.16
+C
+Syn-L LLaVA 680,093 69.84 53.61 79.44 +0.13
+L
+Syn-L LLaVA 1,031,521 70.31 52.55 80.73 +0.36
+S
+designed specifically for visual grounding, we notice that well-aligned regional
+phrases with images containing rich content from VG can improve the visual
+grounding performance by 0.96% on average (Table 2, row 2).
+Table 2 presents a comparative analysis of three synthetic image-text gen-
+eration strategies: Concatenation, Text2Text, and Image2Text, as outlined in
+Section3.3.ByconcatenatingallVGcaptionstosynthesizeimages(Syn-C),the
+concatenation strategy degrades the average grounding performance by 1.60%.
+It indicates that our text-to-image generation model Ψ fails to generate all vi-
+g
+sual content from the long yet potentially redundant prompts. To shorten the
+prompt,weutilizeanLLMΨ tosummarizeattributesforthesameobjects.The
+t
+4th row shows the misalignment between the Text2Text synthetic image (Syn-
+V) and the original VG captions. The 5th row shows that tuning the model on
+Syn-V and object-centric phrases from splitting the LLM summary by comma
+(LLM ) is not effective.
+C
+AsfortheImage2Textstrategy,weexperimentwithtwodistinctstylesofim-
+agecaptioningmodels:BLIP-2[38]thatyieldscondensedphrases,andLLaVA[46]
+that produces detailed paragraphs. Both BLIP-2 and LLaVA prompted images
+(Syn-BandSyn-L,respectively),whenpairedwithoriginalVGcaptions(rows6
+and8)showthattheinformationbetweenthemanuallycraftedtextsandmodel-
+generated texts does not completely overlap. Notably, an opposite influence is
+observed when Syn-B and Syn-L are paired with phrases extracted from their
+generatedimagecaptions.SinceBLIP-2generatedcaptionsusuallyincludeshort
+object-centricphrases(e.g."adog,acat"),weconvertthecaptionsintophrases10 R. He et al.
+(BLIP-2 )for visual grounding through comma separation. Although compared
+C
+to the Syn-B and VG caption result (row 6), using BLIP-2 leads to better
+C
+performance, possibly due to better cross-modal alignment, it is still below the
+baseline.
+Conversely, images synthesized via LLaVA (Syn-L) and paired with phrases
+extracted from LLaVA captions can enhance grounding performance (rows 11
+and 12), indicating that detailed prompts are better suited to the text-to-image
+synthesis model. We compare four ways to partition the LLaVA captions into
+phrases: LLaVA and LLaVA , segmented by periods and commas, respec-
+P C
+tively,whileLLaVA forlongerLLMextractedphrasesandLLaVA forshorter
+L S
+phrases. Our experiments demonstrate that the Image2Text strategy, particu-
+larly when integrating the LLaVA captioner and LLM for phrase extraction,
+yields the most effective synthetic image-text pairs for visual grounding.
+4.4 Synthetic Image-Text-Boxes with AMC Objectives
+In this section, we discuss two pipelines for image-text-box synthesis as detailed
+in Table 3. The first involves an open vocabulary object detector GLIP [42] to
+generateregionalannotationsforeachsynthetictextphrase(seeFig.3),building
+upon the success of Image2Text in Section 4.3. For this pipeline, we compare
+pairing the synthetic images with shorter phrases (LLaVA ), longer phrases
+S
+(LLaVA ), and both (LLaVA ). The shorter phrases outperform others (row
+L S,L
+3), leading to an average performance gain of 4.81% (row 3). However, merging
+shorter and longer phrases (LLaVA ) –despite increasing the amount of data–
+S,L
+doesnotfurtherimproveperformance,suggestingredundancyintheinformation
+conveyed by the different phrase lengths.
+Our alternative strategy leverages the layout-conditioned generative model
+GLIGEN [44], synthesizing images conditioned on the text and corresponding
+bounding boxes. Directly inputting all real VG texts and boxes (row 6) results
+in a modest increase of 2.58% compared to the baseline (row 1). We observe the
+ineffectiveness in regions with multiple textual descriptions, tending to generate
+unrealistic or implausible visual content. To address it, we explore three strate-
+gies:Randomselectionoftext-boxinputs(Random),reductionbasedonaverage
+CLIP [60] text dissimilarity (Text), and the largest collection of boxes with IoU
+below 0.5. The random selection keeps at most 10 boxes per image, resulting in
+around 50% data amount reduction. The Random text-box synthesized images
+Syn-R (row 8) outperforms the all-text-box conditioned variant (Syn-A, row 6).
+Also,pairingSyn-Rwithalltext-boxdatafromRealVG(row7)doesnotmatch
+theeffectivenessofeitherSyn-Awithalltext-boxesorSyn-Rwithselectedtext-
+boxes, underscoring the importance of image-text-box alignment. Sorting by
+CLIP text dissimilarity to select at most top-10 inputs (Syn-T) marginally im-
+proves the random selection. Yet, the most significant improvement stems from
+selecting as many boxes as possible with an IoU below 0.5. The images (Syn-I)
+generatedwiththisstrategymatchthebestpracticeintheGLIP-basedpipeline
+(row 3).
+Ourresultsshowthepotentialofusingalayout-conditionedgenerativemodel
+for image-text-box synthesis. However, either generating non-overlapping andLearning from Models and Data for Visual Grounding 11
+Table 3: Effectiveness of synthetic image-text-boxes generated from two strategies.
+The GLIP strategy involves obtaining boxes through an object detector on synthetic
+images, while GLIGEN represents generating images conditioned on text and boxes.
+RefCOCO+
+Category Image Text Num. Flickr30k ∆
+avg
+Test A Test B
+Off-the-Shelf - - – 69.35 53.77 79.38 -
+Real VG VG 1,649,546 78.89 61.16 86.46 +8.00
+Syn-L LLaVA 998,406 73.70 56.35 86.89 +4.81
+S
+GLIP Syn-L LLaVA 659,927 72.39 55.94 86.53 +4.12
+L
+Syn-L LLaVA 1,658,333 72.25 57.05 86.71 +4.50
+S,L
+Syn-A VG 1,649,546 68.79 56.88 84.57 +2.58
+Syn-R VG 1,649,546 68.25 55.78 84.59 +2.04
+GLIGEN Syn-R Random 725,974 71.66 56.15 84.84 +3.38
+Syn-T Text 725,974 71.80 56.68 84.73 +3.57
+Syn-I IoU 652,657 73.05 58.38 84.39 +4.44
+natural layouts or generating text for visually coherent layouts poses a sub-
+stantial challenge, limiting the advancement to a higher synthetic purity level
+without real image-text-box data. Even with layout generation models [29,33],
+strong constraints of natural composition and non-overlapping bounding boxes
+detract from their efficiency and effectiveness compared to the object detector
+approach.
+4.5 Feasibility of Using Higher Synthetic Purity
+Inthissection,weinvestigatethefeasibilityofsynthesizingimage-text-boxesata
+higher level of synthetic purity, aiming to achieve comparable performance with
+ourlower-puritycounterparts.Purityrefersheretohowmuchdowerelyonreal
+data in the prompting of various models in order to generate synthetic data.
+SynGroundH achieves a higher level of synthetic purity by incorporating the
+imagedescriptiongeneratorthatrelieslessonrealdata.Itsubstitutesrealimages
+and the image captioning model with an extracted concept list, an in-context
+learning example database, and an LLM (see Fig. 3). As shown in Table 8, this
+highersyntheticpuritystrategy(SynGroundH,SynGroundH)notonlyrivalsbut
+M
+matches the performance of the lower synthetic purity variant on benchmarks.
+Thisincludesscenarioswherelearningexclusivelyfrommodels(rows3,4)aswell
+as learning from both data and models (rows 5, 6). It indicates the potential of
+learning from data and models in a more scalable and flexible setting.
+4.6 Factors Causing the Performance Gap with the Real Data
+Table 5 analyzes the factors contributing to the performance gap between syn-
+theticandrealdata.ExperimentIistheoff-the-shelfALBEFperformance,serv-12 R. He et al.
+Table 4: Performance comparisons with pipelines at different synthetic purity levels
+due to different image description generators. SynGround and SynGround are of
+M
+lowerpurityforrelyingonrealimages,whereasSynGroundH andSynGroundH achieve
+M
+higher purity through the utilization of a concept list and in-context examples.
+RefCOCO+
+Method Source Num. Flickr30k ∆
+avg
+Test A Test B
+ALBEF [40] Off-the-Shelf – 69.35 53.77 79.38 -
+AMC [84] Data 1,649,546 78.89 61.16 86.46 +8.00
+SynGround Models 998,406 73.70 56.35 86.89 +4.81
+M
+SynGroundH Models 979,861 72.18 55.92 86.30 +3.97
+M
+SynGround Data&Models 2,627,952 79.06 63.67 87.26 +9.16
+SynGroundH Data&Models 2,629,407 79.10 62.94 86.93 +8.82
+ing as a baseline. In experiment II, we provide the results from training on real
+VG image-text-boxes, leading to an average improvement of 8%. Experiment
+III retains real images and texts from VG, but employs GLIP-generated boxes.
+The1.02%decreaseinperformancecomparedtoexperimentIIsuggeststhatthe
+syntheticboxes,whileeffective,maylacktheprecisionofhand-annotatedequiv-
+alents.ExperimentIVfurtherreplacestherealVGcaptionswithsyntheticones
+from SynGround (i.e. LLaVA ), resulting in an additional average reduction
+S
+of 1.83%. This decline could stem from a reduction in the number of captions
+(∼600Kfewer)ordiscrepanciesinvisual-textualalignment,coverage,anddiver-
+sity compared to manually curated captions. Intriguingly, the performance on
+Flick30k is enhanced by 1.03% over the real data setting (II), showing a poten-
+tial distribution shift from synthetic captions. In experiment V, the paradigm
+shiftsentirelytosyntheticimage-text-boxdata,eliminatingrealimagesfromthe
+dataset. Compared to IV, it modestly drops another 0.34%. This minor decre-
+ment, relative to the changes observed with synthetic texts and boxes, indicates
+thatsyntheticimagesmaintainalevelofeffectivenessforvisualgroundingtasks
+comparable to their real counterparts.
+4.7 Alternative Paradigm Design
+Table. 6 compares two strategies of distinct sequence on phrase extraction (See
+Fig. 5). The "Caption" strategy adopted in SynGround obtains the synthetic
+phrasesforvisualgroundingbyapplyingLLMphraseextractiononcaptionsde-
+rived from captioning the real VG images (row 2). Alternatively, "ReCaption"
+extracts phrases from paragraphs captioned on synthetic images. The core com-
+parison between the "Caption" and "ReCaption" paradigms essentially boils
+down to evaluating the visual-textual misalignment introduced by image syn-
+thesis via a text-to-image model ("Caption") against the misalignment from anLearning from Models and Data for Visual Grounding 13
+Table 5: Factors causing the performance gap with the real data. We investigate
+how each model caused the ineffectiveness compared to the real data. I is the off-the-
+shelf performance of our base model. II is learning from real data. From III to V, we
+sequentially replace the real box, text, and image with synthetic variants.
+RefCOCO+
+Exp. Image Text Box Num. Flickr30k ∆
+avg
+Test A Test B
+I - - - – 69.35 53.77 79.38 -
+II VG VG VG 1,649,546 78.89 61.16 86.46 +8.00
+III VG VG GLIP 1,599,633 76.88 59.79 86.76 +6.98
+IV VG LLaVA GLIP 1,000,634 73.11 57.35 87.49 +5.15
+S
+V Syn-L LLaVA GLIP 998,406 73.70 56.35 86.89 +4.81
+S
+image captioning model ("ReCaption"). Table. 6 reveals a consistent observa-
+tion with Table 5 that information loss or misalignment stems from the text
+synthesis, specifically image captioning on synthetic images in this experiment,
+rather than the image synthesis.
+Table6:Datasynthesiscomparisons."Re-
+Caption" denotes applying an image cap- Detector Detector
+tioningmodeltosyntheticimages,whereas
+LLM LLM
+"Caption" is applied on real images.
+Image Generation Model Image Captioning Model
+Paradigm RefCOCO+ Flickr30k
+Image Captioning Model Image Generation Model
+Test A Test B
+Caption ReCaption
+ReCaption 73.09 56.33 86.80 Fig.5: Comparativeoverviewofthe"Cap-
+Caption 73.70 56.35 86.89 tion" and "ReCaption" strategies.
+4.8 Qualitative Examples of Synthetic Image-Text-Boxes
+Fig. 6 shows qualitative examples of our synthetic image-text-boxes. The first
+columnincludesobjectphraseswithspecificdescriptions(e.g."aSiamesecat"),
+showcasing our system’s ability to produce specific and recognizable entities.
+Thesecondrowpresentsacomplexscenariowithacompositesubject(e.g."rice
+beans and meat"). The third column shows a synthetic person while gener-
+ally depicted with accurate form, exhibits some unrealistic features, suggesting
+the varying success in capturing human likeness. This finding aligns with the
+observed improvements on RefCOCO+ Test A (a person-only subset) and in-
+dicates that the resolution of object details may not be pivotal for the task of
+visual grounding. Finally, the fourth column showcases the creative liberties of14 R. He et al.
+Fig.6: Qualitative examplesofsyntheticimage-text-boxes. Theimagesare generated
+by a text-to-image synthesis model. The phrases are generated by an LLM, and the
+bounding boxes are generated by an object detector model.
+the system in generating objects with unusual attributes, such as a coffee table
+in an unconventional pink color, which shows the diversity in synthetic data.
+More qualitative examples are presented in the supplementary material.
+5 Conclusion
+This paper proposes a novel framework that learns from data and models to
+improve the visual grounding ability of a base vision-and-language model. By
+leveraging exhaustive image descriptions for image synthesis, utilizing an LLM
+for phrase extraction, and adopting an open-vocabulary object detector for box
+synthesis,wedemonstratetheefficacyofsyntheticimage-text-boxesinimproving
+grounding performance. More importantly, integrating the synthetic data with
+real data yields further performance boosts. Furthermore, we investigate the
+feasibility of a potentially scalable paradigm at a higher synthetic purity level
+that relies on LLMs for image description generation.
+Limitations and Future Work.WhileSynGroundlearnsfromasuiteofpow-
+erful large-scale pretrained models, it also inherits their limitations, resulting in
+certain degradations compared to real data. Future improvements could stem
+from integrating more advanced models, such as GPT-4 [55] or DALLE-3 [5].
+Additionally,thisworkhasnotyetexploredtheintegrationoflayout-conditioned
+image synthesis models at higher levels of synthetic purity, considering the suc-
+cessandefficiencyofSynGround.Althoughtheproposedhigher-syntheticpurity
+paradigm empirically shows the capability to generate unlimited data, practical
+limitations in computational resources limit our ability to generate and train on
+data at a much larger scale. Future studies should investigate the scaling laws
+applicable at high-synthetic purity levels.
+Broader Impact. Training from synthetic data mitigates privacy issues asso-
+ciated with using real images, since the identities of real individuals are unlikely
+to be depicted in the data. However, learning from models for visual ground-
+ing raises ethical concerns, particularly regarding the amplification of implicit
+biases in the source data used to train these models we learn from. Such biases
+may manifest in the oversampling of specific skin colors and genders, such as in
+certain caption descriptions.Learning from Models and Data for Visual Grounding 15
+References
+1. Abu Alhaija, H., Mustikovela, S.K., Mescheder, L., Geiger, A., Rother, C.: Aug-
+mented reality meets computer vision: Efficient data generation for urban driving
+scenes. International Journal of Computer Vision 126, 961–972 (2018) 4
+2. Akbari,H.,Karaman,S.,Bhargava,S.,Chen,B.,Vondrick,C.,Chang,S.F.:Multi-
+levelmultimodalcommonsemanticspaceforimage-phrasegrounding.In:Proceed-
+ingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition.pp.
+12476–12486 (2019) 8
+3. Arbelle, A., Doveh, S., Alfassy, A., Shtok, J., Lev, G., Schwartz, E., Kuehne, H.,
+Levi,H.B.,Sattigeri,P.,Panda,R.,etal.:Detector-freeweaklysupervisedground-
+ing by separation. In: Proceedings of the IEEE/CVF International Conference on
+Computer Vision. pp. 1801–1812 (2021) 3
+4. Azizi,S.,Kornblith,S.,Saharia,C.,Norouzi,M.,Fleet,D.J.:Syntheticdatafrom
+diffusionmodelsimprovesimagenetclassification.arXivpreprintarXiv:2304.08466
+(2023) 2, 4
+5. Betker,J.,Goh,G.,Jing,L.,Brooks,T.,Wang,J.,Li,L.,Ouyang,L.,Zhuang,J.,
+Lee,J.,Guo,Y.,etal.:Improvingimagegenerationwithbettercaptions.Computer
+Science. https://cdn. openai. com/papers/dall-e-3. pdf 2(3), 8 (2023) 14
+6. Cascante-Bonilla, P., Shehada, K., Smith, J.S., Doveh, S., Kim, D., Panda, R.,
+Varol, G., Oliva, A., Ordonez, V., Feris, R., et al.: Going beyond nouns with vi-
+sion & language models using synthetic data. In: Proceedings of the IEEE/CVF
+International Conference on Computer Vision. pp. 20155–20165 (2023) 4
+7. Cascante-Bonilla,P.,Wu,H.,Wang,L.,Feris,R.S.,Ordonez,V.:Simvqa:Explor-
+ing simulated environments for visual question answering. In: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 5056–
+5066 (2022) 4
+8. Changpinyo,S.,Sharma,P.,Ding,N.,Soricut,R.:Conceptual12m:Pushingweb-
+scaleimage-textpre-trainingtorecognizelong-tailvisualconcepts.In:Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp.
+3558–3568 (2021) 4, 7
+9. Chen, Y.C., Li, L., Yu, L., El Kholy, A., Ahmed, F., Gan, Z., Cheng, Y., Liu, J.:
+Uniter: Universal image-text representation learning. In: European conference on
+computer vision. pp. 104–120. Springer (2020) 1, 2, 3
+10. Chen, Y., Li, W., Chen, X., Gool, L.V.: Learning semantic segmentation from
+syntheticdata:Ageometricallyguidedinput-outputadaptationapproach.In:Pro-
+ceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition.
+pp. 1841–1850 (2019) 4
+11. Chiang,W.L.,Li,Z.,Lin,Z.,Sheng,Y.,Wu,Z.,Zhang,H.,Zheng,L.,Zhuang,S.,
+Zhuang,Y.,Gonzalez,J.E.,Stoica,I.,Xing,E.P.:Vicuna:Anopen-sourcechatbot
+impressing gpt-4 with 90%* chatgpt quality (March 2023), https://lmsys.org/
+blog/2023-03-30-vicuna/ 7, 21
+12. Dan, Y., Zhao, Y., Li, X., Li, S., Hu, M., Hu, J.: Generative adversarial networks
+(gan) based efficient sampling of chemical composition space for inverse design of
+inorganic materials. npj Computational Materials 6(1), 84 (2020) 4
+13. Datta,S.,Sikka,K.,Roy,A.,Ahuja,K.,Parikh,D.,Divakaran,A.:Align2ground:
+Weakly supervised phrase grounding guided by image-caption alignment. In: Pro-
+ceedingsoftheIEEE/CVFinternationalconferenceoncomputervision.pp.2601–
+2610 (2019) 316 R. He et al.
+14. Deng, C., Wu, Q., Wu, Q., Hu, F., Lyu, F., Tan, M.: Visual grounding via accu-
+mulatedattention.In:ProceedingsoftheIEEEconferenceoncomputervisionand
+pattern recognition. pp. 7746–7755 (2018) 3
+15. Deng,J.,Yang,Z.,Chen,T.,Zhou,W.,Li,H.:Transvg:End-to-endvisualground-
+ingwithtransformers.In:ProceedingsoftheIEEE/CVFInternationalConference
+on Computer Vision. pp. 1769–1779 (2021) 3
+16. Desai,K.,Kaul,G.,Aysola,Z.,Johnson,J.:Redcaps:Web-curatedimage-textdata
+created by the people, for the people. arXiv preprint arXiv:2111.11431 (2021) 4
+17. Dosovitskiy, A., Ros, G., Codevilla, F., Lopez, A., Koltun, V.: Carla: An open
+urbandrivingsimulator.In:Conferenceonrobotlearning.pp.1–16.PMLR(2017)
+4
+18. Dou, Z.Y., Peng, N.: Improving pre-trained vision-and-language embeddings for
+phrase grounding. In: Proceedings of the 2021 Conference on Empirical Methods
+in Natural Language Processing. pp. 6362–6371 (2021) 2, 3
+19. Fan, L., Chen, K., Krishnan, D., Katabi, D., Isola, P., Tian, Y.: Scaling laws of
+synthetic images for model training... for now. arXiv preprint arXiv:2312.04567
+(2023) 2, 4
+20. Gan,C.,Schwartz,J.,Alter,S.,Mrowca,D.,Schrimpf,M.,Traer,J.,DeFreitas,J.,
+Kubilius, J., Bhandwaldar, A., Haber, N., et al.: Threedworld: A platform for in-
+teractivemulti-modalphysicalsimulation.arXivpreprintarXiv:2007.04954(2020)
+4
+21. Gomel, E., Shaharbany, T., Wolf, L.: Box-based refinement for weakly supervised
+and unsupervised localization tasks. In: Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision. pp. 16044–16054 (2023) 3
+22. Greff, K., Belletti, F., Beyer, L., Doersch, C., Du, Y., Duckworth, D., Fleet, D.J.,
+Gnanapragasam,D.,Golemo,F.,Herrmann,C.,etal.:Kubric:Ascalabledataset
+generator.In:ProceedingsoftheIEEE/CVFConferenceonComputerVisionand
+Pattern Recognition. pp. 3749–3761 (2022) 4
+23. Gu,X., Lin, T.Y., Kuo, W., Cui, Y.: Open-vocabulary object detection via vision
+and language knowledge distillation. arXiv preprint arXiv:2104.13921 (2021) 1
+24. Gupta, T., Vahdat, A., Chechik, G., Yang, X., Kautz, J., Hoiem, D.: Contrastive
+learningforweaklysupervisedphrasegrounding.In:EuropeanConferenceonCom-
+puter Vision. pp. 752–768. Springer (2020) 2, 3
+25. He, K., Gkioxari, G., Dollár, P., Girshick, R.: Mask r-cnn. In: Proceedings of the
+IEEE international conference on computer vision. pp. 2961–2969 (2017) 3
+26. He, R., Sun, S., Yu, X., Xue, C., Zhang, W., Torr, P., Bai, S., Qi, X.: Is syn-
+thetic data from generative models ready for image recognition? arXiv preprint
+arXiv:2210.07574 (2022) 2, 4
+27. He, R., Cascante-Bonilla, P., Yang, Z., Berg, A.C., Ordonez, V.: Improved visual
+grounding through self-consistent explanations. arXiv preprint arXiv:2312.04554
+(2023) 2, 3, 4, 27
+28. He, X., Nassar, I., Kiros, J., Haffari, G., Norouzi, M.: Generate, annotate, and
+learn: Nlp with synthetic text. Transactions of the Association for Computational
+Linguistics 10, 826–842 (2022) 4
+29. Inoue,N.,Kikuchi,K.,Simo-Serra,E.,Otani,M.,Yamaguchi,K.:Layoutdm:Dis-
+crete diffusion model for controllable layout generation. In: Proceedings of the
+IEEE/CVFConferenceonComputerVisionandPatternRecognition.pp.10167–
+10176 (2023) 11
+30. Jia, C., Yang, Y., Xia, Y., Chen, Y.T., Parekh, Z., Pham, H., Le, Q., Sung, Y.H.,
+Li, Z., Duerig, T.: Scaling up visual and vision-language representation learningLearning from Models and Data for Visual Grounding 17
+with noisy text supervision. In: International conference on machine learning. pp.
+4904–4916. PMLR (2021) 1
+31. Kamath, A., Singh, M., LeCun, Y., Synnaeve, G., Misra, I., Carion, N.: Mdetr-
+modulated detection for end-to-end multi-modal understanding. In: Proceedings
+of the IEEE/CVF International Conference on Computer Vision. pp. 1780–1790
+(2021) 2
+32. Kamath, A., Singh, M., LeCun, Y., Synnaeve, G., Misra, I., Carion, N.: Mdetr-
+modulated detection for end-to-end multi-modal understanding. In: Proceedings
+of the IEEE/CVF International Conference on Computer Vision. pp. 1780–1790
+(2021) 3
+33. Kikuchi,K.,Simo-Serra,E.,Otani,M.,Yamaguchi,K.:Constrainedgraphiclayout
+generationvialatentoptimization.In:Proceedingsofthe29thACMInternational
+Conference on Multimedia. pp. 88–96 (2021) 11
+34. Kim, D., Wang, K., Saenko, K., Betke, M., Sclaroff, S.: A unified framework for
+domain adaptive pose estimation. In: European Conference on Computer Vision.
+pp. 603–620. Springer (2022) 4
+35. Kingma,D.P.,Ba,J.:Adam:Amethodforstochasticoptimization.arXivpreprint
+arXiv:1412.6980 (2014) 8
+36. Krishna, R., Zhu, Y., Groth, O., Johnson, J., Hata, K., Kravitz, J., Chen, S.,
+Kalantidis,Y.,Li,L.J.,Shamma,D.A.,etal.:Visualgenome:Connectinglanguage
+and vision using crowdsourced dense image annotations. International journal of
+computer vision 123, 32–73 (2017) 3, 7, 21, 26
+37. Kumar, V., Choudhary, A., Cho, E.: Data augmentation using pre-trained trans-
+former models. arXiv preprint arXiv:2003.02245 (2020) 4
+38. Li, J., Li, D., Savarese, S., Hoi, S.: Blip-2: Bootstrapping language-image pre-
+training with frozen image encoders and large language models. arXiv preprint
+arXiv:2301.12597 (2023) 7, 9, 25
+39. Li, J., Li, D., Xiong, C., Hoi, S.: Blip: Bootstrapping language-image pre-training
+forunifiedvision-languageunderstandingandgeneration.In:Internationalconfer-
+ence on machine learning. pp. 12888–12900. PMLR (2022) 25
+40. Li,J.,Selvaraju,R.,Gotmare,A.,Joty,S.,Xiong,C.,Hoi,S.C.H.:Alignbeforefuse:
+Visionandlanguagerepresentationlearningwithmomentumdistillation.Advances
+in neural information processing systems 34, 9694–9705 (2021) 1, 4, 5, 7, 8, 12,
+22, 25, 27
+41. Li, L.H., Yatskar, M., Yin, D., Hsieh, C.J., Chang, K.W.: Visualbert: A simple
+andperformantbaselineforvisionandlanguage.arXivpreprintarXiv:1908.03557
+(2019) 1
+42. Li, L.H., Zhang, P., Zhang, H., Yang, J., Li, C., Zhong, Y., Wang, L., Yuan, L.,
+Zhang,L.,Hwang,J.N.,etal.:Groundedlanguage-imagepre-training.In:Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+pp. 10965–10975 (2022) 1, 4, 7, 10
+43. Li, L.H., Zhang, P., Zhang, H., Yang, J., Li, C., Zhong, Y., Wang, L., Yuan, L.,
+Zhang,L.,Hwang,J.N.,etal.:Groundedlanguage-imagepre-training.In:Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+pp. 10965–10975 (2022) 2, 26
+44. Li,Y.,Liu,H.,Wu,Q.,Mu,F.,Yang,J.,Gao,J.,Li,C.,Lee,Y.J.:Gligen:Open-set
+groundedtext-to-imagegeneration.In:ProceedingsoftheIEEE/CVFConference
+on Computer Vision and Pattern Recognition. pp. 22511–22521 (2023) 10
+45. Lin, T.Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., Dollár, P.,
+Zitnick, C.L.: Microsoft coco: Common objects in context. In: Computer Vision–18 R. He et al.
+ECCV 2014: 13th European Conference, Zurich, Switzerland, September 6-12,
+2014, Proceedings, Part V 13. pp. 740–755. Springer (2014) 7
+46. Liu, H., Li, C., Wu, Q., Lee, Y.J.: Visual instruction tuning. Advances in neural
+information processing systems 36 (2024) 7, 9, 21
+47. Lu,J.,Batra,D.,Parikh,D.,Lee,S.:Vilbert:Pretrainingtask-agnosticvisiolinguis-
+tic representations for vision-and-language tasks. Advances in neural information
+processing systems 32 (2019) 1
+48. Lu,J.,Goswami,V.,Rohrbach,M.,Parikh,D.,Lee,S.:12-in-1:Multi-taskvision
+andlanguagerepresentationlearning.In:ProceedingsoftheIEEE/CVFconference
+on computer vision and pattern recognition. pp. 10437–10446 (2020) 3
+49. de Melo, C.M., Torralba, A., Guibas, L., DiCarlo, J., Chellappa, R., Hodgins, J.:
+Next-generation deep learning based on simulators and synthetic data. Trends in
+cognitive sciences (2022) 4
+50. Meng, Y., Huang, J., Zhang, Y., Han, J.: Generating training data with language
+models: Towards zero-shot language understanding. Advances in Neural Informa-
+tion Processing Systems 35, 462–477 (2022) 4
+51. Mimura,M.,Ueno,S.,Inaguma,H.,Sakai,S.,Kawahara,T.:Leveragingsequence-
+to-sequence speech synthesis for enhancing acoustic-to-word speech recognition.
+In:2018IEEESpokenLanguageTechnologyWorkshop(SLT).pp.477–484.IEEE
+(2018) 4
+52. Mishra, S., Panda, R., Phoo, C.P., Chen, C.F.R., Karlinsky, L., Saenko, K.,
+Saligrama, V., Feris, R.S.: Task2sim: Towards effective pre-training and transfer
+from synthetic data. In: Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition. pp. 9194–9204 (2022) 4
+53. Moreau, A., Piasco, N., Tsishkou, D., Stanciulescu, B., de La Fortelle, A.: Lens:
+Localization enhanced by nerf synthesis. In: Conference on Robot Learning. pp.
+1347–1356. PMLR (2022) 4
+54. Nichol, A., Dhariwal, P., Ramesh, A., Shyam, P., Mishkin, P., McGrew, B.,
+Sutskever,I.,Chen,M.:Glide:Towardsphotorealisticimagegenerationandediting
+with text-guided diffusion models. arXiv preprint arXiv:2112.10741 (2021) 4
+55. OpenAI: Gpt-4 technical report. ArXiv abs/2303.08774 (2023), https://api.
+semanticscholar.org/CorpusID:257532815 14
+56. Ordonez, V., Kulkarni, G., Berg, T.: Im2text: Describing images using 1 mil-
+lion captioned photographs. Advances in neural information processing systems
+24 (2011) 7
+57. Peng, X., Sun, B., Ali, K., Saenko, K.: Learning deep object detectors from 3d
+models. In: Proceedings of the IEEE international conference on computer vision.
+pp. 1278–1286 (2015) 4
+58. Peng,X.,Usman,B.,Kaushik,N.,Hoffman,J.,Wang,D.,Saenko,K.:Visda:The
+visual domain adaptation challenge. arXiv preprint arXiv:1710.06924 (2017) 4
+59. Plummer,B.A.,Wang,L.,Cervantes,C.M.,Caicedo,J.C.,Hockenmaier,J.,Lazeb-
+nik, S.: Flickr30k entities: Collecting region-to-phrase correspondences for richer
+image-to-sentencemodels.In:ProceedingsoftheIEEEinternationalconferenceon
+computer vision. pp. 2641–2649 (2015) 8, 27, 28
+60. Radford,A.,Kim,J.W.,Hallacy,C.,Ramesh,A.,Goh,G.,Agarwal,S.,Sastry,G.,
+Askell, A., Mishkin, P., Clark, J., et al.: Learning transferable visual models from
+naturallanguagesupervision.In:Internationalconferenceonmachinelearning.pp.
+8748–8763. PMLR (2021) 1, 4, 6, 10
+61. Reimers,N.,Gurevych,I.:Sentence-bert:Sentenceembeddingsusingsiamesebert-
+networks. arXiv preprint arXiv:1908.10084 (2019) 24, 25Learning from Models and Data for Visual Grounding 19
+62. Ren, S., He, K., Girshick, R., Sun, J.: Faster r-cnn: Towards real-time object de-
+tection with region proposal networks. Advances in neural information processing
+systems 28 (2015) 3
+63. Richter,S.R.,Vineet,V.,Roth,S.,Koltun,V.:Playingfordata:Groundtruthfrom
+computer games. In: Computer Vision–ECCV 2016: 14th European Conference,
+Amsterdam, The Netherlands, October 11-14, 2016, Proceedings, Part II 14. pp.
+102–118. Springer (2016) 4
+64. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution
+image synthesis with latent diffusion models. In: Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition. pp. 10684–10695 (2022) 7
+65. Ros, G., Sellart, L., Materzynska, J., Vazquez, D., Lopez, A.M.: The synthia
+dataset:Alargecollectionofsyntheticimagesforsemanticsegmentationofurban
+scenes. In: Proceedings of the IEEE conference on computer vision and pattern
+recognition. pp. 3234–3243 (2016) 4
+66. Rosenberg, A., Zhang, Y., Ramabhadran, B., Jia, Y., Moreno, P., Wu, Y., Wu,
+Z.: Speech recognition with augmented synthesized speech. In: 2019 IEEE au-
+tomatic speech recognition and understanding workshop (ASRU). pp. 996–1002.
+IEEE (2019) 4
+67. Rossenbach, N., Zeyer, A., Schlüter, R., Ney, H.: Generating synthetic audio data
+for attention-based speech recognition systems. In: ICASSP 2020-2020 IEEE In-
+ternationalConferenceonAcoustics,SpeechandSignalProcessing(ICASSP).pp.
+7069–7073. IEEE (2020) 4
+68. Rozantsev,A.,Lepetit,V.,Fua,P.:Onrenderingsyntheticimagesfortrainingan
+object detector. Computer Vision and Image Understanding 137, 24–37 (2015) 4
+69. Russakovsky, O., Deng, J., Su, H., Krause, J., Satheesh, S., Ma, S., Huang, Z.,
+Karpathy, A., Khosla, A., Bernstein, M., et al.: Imagenet large scale visual recog-
+nition challenge. International journal of computer vision 115, 211–252 (2015) 4,
+7
+70. Saharia,C.,Chan,W.,Saxena,S.,Li,L.,Whang,J.,Denton,E.L.,Ghasemipour,
+K., Gontijo Lopes, R., Karagol Ayan, B., Salimans, T., et al.: Photorealistic text-
+to-image diffusion models with deep language understanding. Advances in Neural
+Information Processing Systems 35, 36479–36494 (2022) 4
+71. Sariyildiz, M.B., Alahari, K., Larlus, D., Kalantidis, Y.: Fake it till you make it:
+Learning transferable representations from synthetic imagenet clones. In: CVPR
+2023–IEEE/CVFConferenceonComputerVisionandPatternRecognition(2023)
+2
+72. Selvaraju,R.R.,Cogswell,M.,Das,A.,Vedantam,R.,Parikh,D.,Batra,D.:Grad-
+cam: Visual explanations from deep networks via gradient-based localization. In:
+ProceedingsoftheIEEEinternationalconferenceoncomputervision.pp.618–626
+(2017) 1, 4, 7
+73. Shaharabany,T.,Tewel,Y.,Wolf,L.:Whatiswherebylooking:Weakly-supervised
+open-worldphrase-groundingwithouttextinputs.AdvancesinNeuralInformation
+Processing Systems 35, 28222–28237 (2022) 3
+74. Shaharabany, T., Wolf, L.: Similarity maps for self-training weakly-supervised
+phrase grounding. In: Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition. pp. 6925–6934 (2023) 3
+75. Sharma, P., Ding, N., Goodman, S., Soricut, R.: Conceptual captions: A cleaned,
+hypernymed, image alt-text dataset for automatic image captioning. In: Proceed-
+ingsofthe56thAnnualMeetingoftheAssociationforComputationalLinguistics
+(Volume 1: Long Papers). pp. 2556–2565 (2018) 26, 2720 R. He et al.
+76. Tian, Y., Fan, L., Chen, K., Katabi, D., Krishnan, D., Isola, P.: Learning vi-
+sionfrommodelsrivalslearningvisionfromdata.arXivpreprintarXiv:2312.17742
+(2023) 2, 4, 21
+77. Tian, Y., Fan, L., Isola, P., Chang, H., Krishnan, D.: Stablerep: Synthetic images
+from text-to-image models make strong visual representation learners. Advances
+in Neural Information Processing Systems 36 (2024) 2, 4
+78. Tucker, A., Wang, Z., Rotalinti, Y., Myles, P.: Generating high-fidelity syn-
+theticpatientdataforassessingmachinelearninghealthcaresoftware.NPJdigital
+medicine 3(1), 1–13 (2020) 4
+79. Varol,G.,Laptev,I.,Schmid,C.,Zisserman,A.:Synthetichumansforactionrecog-
+nition from unseen viewpoints. International Journal of Computer Vision 129(7),
+2264–2287 (2021) 4
+80. Varol,G.,Romero,J.,Martin,X.,Mahmood,N.,Black,M.J.,Laptev,I.,Schmid,
+C.: Learning from synthetic humans. In: Proceedings of the IEEE conference on
+computer vision and pattern recognition. pp. 109–117 (2017) 4
+81. Wang, J., Specia, L.: Phrase localization without paired training examples. In:
+Proceedings of theIEEE/CVF InternationalConference on ComputerVision. pp.
+4663–4672 (2019) 3
+82. Xiao,F.,Sigal,L.,JaeLee,Y.:Weakly-supervisedvisualgroundingofphraseswith
+linguisticstructures.In:ProceedingsoftheIEEEConferenceonComputerVision
+and Pattern Recognition. pp. 5945–5954 (2017) 4
+83. Yang, Y., Malaviya, C., Fernandez, J., Swayamdipta, S., Bras, R.L., Wang, J.P.,
+Bhagavatula, C., Choi, Y., Downey, D.: Generative data augmentation for com-
+monsense reasoning. arXiv preprint arXiv:2004.11546 (2020) 4
+84. Yang, Z., Kafle, K., Dernoncourt, F., Ordonez, V.: Improving visual grounding
+by encouraging consistent gradient-based explanations. In: Proceedings of the
+IEEE/CVFConferenceonComputerVisionandPatternRecognition.pp.19165–
+19174 (2023) 2, 3, 4, 5, 8, 12, 22, 27
+85. Yen-Chen,L.,Florence,P.,Barron,J.T.,Lin,T.Y.,Rodriguez,A.,Isola,P.:Nerf-
+supervision:Learningdenseobjectdescriptorsfromneuralradiancefields.In:2022
+International Conference on Robotics and Automation (ICRA). pp. 6496–6503.
+IEEE (2022) 4
+86. Yu,L.,Poirson,P.,Yang,S.,Berg,A.C.,Berg,T.L.:Modelingcontextinreferring
+expressions. In: Computer Vision–ECCV 2016: 14th European Conference, Ams-
+terdam,TheNetherlands,October11-14,2016,Proceedings,PartII14.pp.69–85.
+Springer (2016) 8, 27, 28
+87. Zareian,A.,Rosa,K.D.,Hu,D.H.,Chang,S.F.:Open-vocabularyobjectdetection
+usingcaptions.In:ProceedingsoftheIEEE/CVFConferenceonComputerVision
+and Pattern Recognition. pp. 14393–14402 (2021) 1
+88. Zheng, J., Zhang, J., Li, J., Tang, R., Gao, S., Zhou, Z.: Structured3d: A large
+photo-realistic dataset for structured 3d modeling. In: Computer Vision–ECCV
+2020:16thEuropeanConference,Glasgow,UK,August23–28,2020,Proceedings,
+Part IX 16. pp. 519–535. Springer (2020) 4Learning from Models and Data for Visual Grounding 21
+In this section, we provide additional implementation details in Section A,
+justification of base model selection in Section B, analysis of synthetic text in
+SectionC,comparisonsbetweenoursyntheticdataandweb-crawleddatainSec-
+tion D, performance trend across different scales of synthetic data in Section E,
+and more qualitative examples in Section F.
+A Implementation Details
+This section presents implementation details, including concept list sampling,
+as well as LLM prompts used for generating image descriptions, summarizing
+captions, and extracting text phrases.
+A.1 Concept2Text: Concept List and In-Context Examples
+Following previous work [76], we assume access to a list of concepts and their
+distribution in real text TR (captions from the VG dataset [36]). The concept
+list curation involves tokenizing the real text TR and identifying nouns by their
+part-of-speech (POS) tags. To ensure keeping the relevant information provided
+inaqueryforimagedescriptiongeneration,weexcludeapredefinedsetofnouns
+commonlyusedinpromptsorspatialpositions:"scene","scenery","view","pic-
+ture","image","photo","left","right","back","front","top","bottom","mid-
+dle", "center", "side", "background", "frontmost", "leftmost", "rightmost".
+We sample two concepts per query for each image description generation
+by their frequency in real text TR. As shown in Fig. 7, an in-context learning
+example consists of a two-noun query ("Q") and an image description ("A").
+The image descriptions are generated by an image captioning model [46] on 500
+randomly sampled real images IR. Then we use POS to randomly extract two
+nouns as their query. The Caption2Text image description generation uses four
+random in-context learning examples with a random two-noun query.
+A.2 Text2Text: LLM Summary
+In the Text2Text strategy, we prompt an LLM [11] to condense the potentially
+redundant VG captions TR for the same image IR into a summarized version.
+We include four examples in our prompts, as detailed in Fig. 8. Note that,
+for each query "Q" and expected answer "A" , all orange rows correspond to
+images generated using the captions from the VG dataset ("Q"); as a counter-
+part,theyellowrowsshowimagesgeneratedbythesummarizedcaptions("A").
+Compared to directly concatenating all VG captions, the images generated for
+summary tend to include more salient objects in the prompts (e.g. surfboards
+in the 2nd row and the girl in the 4th row), enrich the contextual details (e.g.
+poles in the 6th row), and remain effective for originally concise captions (e.g.
+the window and wall in the 8th row).22 R. He et al.
+Q:["cup","table"]
+A:["Theimageshowcasesawoodendiningtablewithvariousfooditemsandtablewarearrangedonit.Ateapotis
+positionedonthetable,alongwithakettleandacup.Threedonutsarealsopresentonthetable,withonedonut
+placednearthecenter,anotherontheleftside,andthethirdontherightside."]
+Q:["couch","video"]
+A:["Intheimage,therearetwopeopleplayingavideogametogether.Awomanisfocusedonthegame,holdinga
+videogameremoteinherhand,whileamanstandsbehindher,watchingherplay.Thereisalsoacouchinthe
+room,providingacomfortableseatingareaforthetwoindividuals.Additionally,thereisaclockonthewall."]
+Q:["trees","clock"]
+A:["Theimagefeaturesatall,multi-storybuildingwithaprominentclocktoweratthetop.Theclockislargeandcan
+beseeninthecenterofthetower.Thebuildingissurroundedbytreesandhasalargeclockononeofitssides,
+visibletowardstheleftsideofthestructure.Theoverallsceneshowcasesaclocktowerthatstandsoutamongthe
+surroundingenvironment."]
+Q:["chair","vase"]
+A:["Theimagefeaturesaclean,well-furnishedapartmentwithtwocouches,achair,andacoffeetable.Theliving
+roomareaisbrightandopen,andalargewindowallowsnaturallighttofillthespace.Onthecoffeetable,thereisa
+vasewithapottedplant,andabookisplacedononeofthecouches."]
+Q:["cars","trucks"]
+A:["Inthisscene,agroupofpeopleisgatheredatabusystreetcornerwithseveralvehicles,includingcarsand
+trucks,surroundingthearea.Therearemultiplepolicecarsparkedonthesideofthestreet,aswellasothercars
+andtrucksscatteredthroughoutthescene.Twopeopleareholdingcellphones,likelycommunicatingwithothersor
+checkingforupdates."]
+Fig.7: Random examples from the in-context learning database. The query "Q" con-
+tains two nouns, while the expected answer "A" is a crafted image description incor-
+porating the queried nouns.
+A.3 Image2Text and Concept2Text: Text Phrase Extraction
+Unlike image descriptions obtained from Concatenation or Text2Text strate-
+gies, which consist of a list of phrases, the variants in Image2Text and Con-
+cept2Text areexpressedasparagraphs.Duetotheineffectivenessofthe“period”
+or“comma” segment(refertoTable.2inthemainpaper),weexperimentedwith
+partitioning the sentences by phrase extraction through an LLM. We randomly
+samplefoursentences(i.e.segmentedby“period”)andextractphrasesmanually
+asin-contextexamples.Fig.9presentsexamplesofshorterphrases,whileFig.10
+shows examples of longer phrases.
+B Selection of Base Model
+We select ALBEF [40] as our base model due to its reported off-the-shelf vi-
+sual grounding performance and success in further improvement with an atten-
+tion mask consistency objective [84]. Table 7 provides pointing game accuracy
+comparisonsoftwootheroff-the-shelfvision-and-languagemodels,withALBEF
+outperforming other models by a large margin.
+C Synthetic Text Analysis
+Thissectionsupplementstheanalysisofthefactorscausingtheperformancegap
+with the real data in Section 4.6 of the main paper. Specifically, here we focusLearning from Models and Data for Visual Grounding 23
+Q: ["blue metal bike on ground, brown grass fence panel, bicycle parked against the
+wall, a blue bicycle parked at the railing, a railing of metal pipes and rods, straw fence
+along the railing, a wood and tan surf board, a tan wood, a red blue and yellow
+surfboard, a blue and metal bike, an old and rusty bike, a wall, a brown fence panel, a
+blue surfboard, a surfboard, a white surfboard, a writing, a fence, a boggy board, flame
+stripes, a brown and boggy board, a blue bicycle, a bicycle, a tan and blue surf board,
+a railing, a wooden brown and vertical surfboard, metal pipes, a straw fence, a
+balcony"]
+A: ["blue metal old rusty bike, a wooden brown and vertical surfboard, a red blue and
+yellow surfboard, a tan and blue surfboard, straw fence along the railing, brown and
+boggy board, flame stripes, balcony, a railing of metal pipes and rods"]
+Q: ["this is a person, the cat is black and white, black cat laying on beige carpet, girl
+playing with cat, fireplace behind the girl, a screen in front of the fireplace, a here
+person, a here and black cat, a grey and light ground, a girl, a stone fireplace"]
+A: ["a girl playing with cat, a black and white cat laying on beige carpet, a grey and light
+ground, a stone fireplace, a screen in front of the fireplace"]
+Q: ["men riding horses on set, two men riding horses on a cobblestone road, two horses
+have riders but two do not, it is a daytime scene, it is an outdoor scene, there are several
+people in the photo, there are several horses in the photo, a large brown building, two
+men on horseback, 2 men and 4 horses, 3 men looking at a motorcycle, 2 men ponying 2
+horses, telephone poles on village street, a total of eight people are in this picture, four
+brown horses with white markings, a man, a horse, some men, some horses, some
+riders, a daytime, a scene, an outdoor, a sunny, some seems, a sky, some people, a
+photo, a motorcycle, a motorycle, some whites, a top, a cowboy, a brown, a cement, a
+building, a rider, a parked, a street, a road, a horseback, a rocky, a motorbike"]
+A: ["two men riding horses on a cobblestone road, four brown horses with white
+markings, eight people, a large brown building, a motorcycle, telephone poles on village
+street"]
+Q: ["a scene in an old building, a window with green trim, a tan painted brick wall, an a,
+a window, a top"]
+A: ["an old building, a window with green trim, a tan painted brick wall"]
+Fig.8: LLM prompts that summarizes real captions in Text2Text strategy. Each ex-
+amplecomprisesaquery"Q"inorangeanditsexpectedanswer"A"inyellow."Q"is
+concatenated real text for an image, and "A" is our crafted summary.24 R. He et al.
+Q: ["there are several cars parked on the street, one of which is a red car near the crosswalk"]
+A: ["several cars", "the street", "a red car", "the crosswalk"]
+Q: ["on the countertop, there is a white plate and a bowl, two cups, a spoon, and a bottle"]
+A: ["the countertop", "a white plate", "a bowl", "two cups", "a spoon", "a bottle"]
+Q: ["the image features a cluttered home office desk with a variety of objects"]
+A: ["a cluttered home office desk", "a variety of objects on the desk"]
+Q: ["a computer monitor is situated towards the left side of the desk, accompanied by a
+keyboard and a mouse placed directly in front of it"]
+A: ["a computer monitor", "the left side of the desk", "a keyboard", "a mouse"]
+Fig.9: LLM prompts for shorter text phrase T extraction. "Q" is the example query
+sentence, and "A" is the expected shorter phrase output.
+Q: ["there are several cars parked on the street, one of which is a red car near the crosswalk"]
+A: ["there are several cars parked on the street", "a red car near the crosswalk"]
+Q: ["on the countertop, there is a white plate and a bowl, two cups, a spoon, and a bottle"]
+A: ["a white plate on the countertop", "a bowl on the countertop", "two cups on the countertop",
+"a spoon on the countertop", "a bottle on the countertop"]
+Q: ["the image features a cluttered home office desk with a variety of objects"]
+A: ["a cluttered home office desk", "a variety of objects on the office desk"]
+Q: ["a computer monitor is situated towards the left side of the desk, accompanied by a
+keyboard and a mouse placed directly in front of it"]
+A: ["a computer monitor is situated towards the left side of the desk", "a keyboard and a
+mouse placed directly in front of the monitor"]
+Fig.10: LLM prompts for longer text phrase T extraction. "Q" is the example query
+sentence, and "A" is the expected longer phrase output.
+4000
+3500
+3000
+2500
+2000
+1500
+1000
+500
+0
+0.0 0.2 0.4 0.6 0.8 1.0
+S-BERT Based Similarity between Synthetic Text and Real Text for Each Image
+Fig.11:Distributionofimage-wiseaverageSentence-BERT[61]basedcosinesimilarity
+between synthetic and real text.
+ycneuqerFLearning from Models and Data for Visual Grounding 25
+Table 7: Comparisons of off-the-shelf visual grounding performance with pointing
+game accuracy.
+RefCOCO+
+Method Flickr30k
+Test A Test B
+BLIP-2 [38] 50.09 42.26 64.86
+BLIP [39] 61.23 41.07 60.56
+ALBEF [40] 69.35 53.77 79.38
+Real Text
+6000
+Synthetic Text
+5000
+4000
+3000
+2000
+1000
+0
+0.0 0.2 0.4 0.6 0.8 1.0
+Type-Token Ratio (TTR) for Synthetic Text and Real Text for Each Image
+Fig.12: Distribution of image-wise type-token ratio for synthetic and real text.
+on analyzing the similarity, diversity, and coverage of synthetic text T and real
+text TR.
+To compute the text similarity, we adopt a pretrained Sentence-BERT [61]
+to encode text into embeddings. Cosine similarity is then calculated between
+the embeddings of synthetic and real text corresponding to each image. We
+determine the text similarity for each synthetic caption by selecting the highest
+similarityamongtherealtextembeddings,andthentracktheaveragesimilarity
+foreachimage.Thedistributionoftheaveragesimilaritybetweensyntheticand
+realtextforeachimageisdepictedinFig.11,wherethehighestfrequencyshows
+ascoreofaround0.6.Thedissimilaritybetweenthesyntheticandrealtextaligns
+with the observation of degradation from text synthesis compared to real text
+(Table 5, main paper).
+To delve deeper into the distinctions between synthetic and real texts, we
+compare their text diversity and coverage. Text diversity is measured using the
+Type-Token Ratio (TTR), which calculates the ratio of unique token types to
+the total number of tokens in a text. As shown in Fig. 12, our synthetic text T
+generally has greater diversity than the real text TR from VG, indicating more
+ycneuqerF26 R. He et al.
+6000
+5000
+4000
+3000
+2000
+1000
+0
+0.0 0.2 0.4 0.6 0.8 1.0
+Overlap Coefficient between Synthetic Text and Real Text for Each Image
+Fig.13:Distributionofimage-wiseoverlapcoefficientbetweensyntheticandrealtext.
+elaborate descriptions that, however, may risk including irrelevant words to the
+visual content. Additionally, we calculate the overlap coefficient between the
+unique words in synthetic and real text, assessing the coverage and intersection
+ofvocabulary,peakingataround0.3(SeeFig.13).Thisrelativelylowcoefficient
+reveals the difference in word usage or content focus between the synthetic text
+T and the real text TR.
+The observation of a higher TTR in synthetic texts T with a modestoverlap
+coefficient with real texts TR suggests a trade-off for synthesizing more effective
+texts for visual grounding. Although the broader vocabulary in synthetic texts
+T suggests richer and more diverse word usage as well as lower repetition when
+describing an image, the low overlap score implies a divergence from human-
+annotatedcontent.Moreover,thepresenceofapproximately600Kfewertextsin
+the synthetic data may indicate that paraphrasing in real data plays a crucial
+role.
+D Synthetic Data vs. Web-Crawled Data
+To showcase the challenge and necessity of generating effective synthetic data
+tailoredforvisualgrounding,Table8presentscomparisonsofoursyntheticdata
+and web-crawled data. The first row is the off-the-shelf performance of our base
+model,andthesecondrowisitsperformanceaftertuningonrealVisualGenome
+data [36]. For fair comparisons, we randomly sample 1M web-crawled data from
+Conceptual Captions (CC) [75], approximately matching the scale of our syn-
+thetic data. As data derived from CC only encompasses images and texts, we
+add synthetic boxes on top of it from an open-vocabulary detector [43], which
+is the same box synthesis strategy in our method. Tuning the base model on it
+achieves (row 3) a 1.82% average performance gain. Additionally, experiments
+ycneuqerFLearning from Models and Data for Visual Grounding 27
+Table8:Comparisonsofoursyntheticdatawithweb-crawleddata.Thefirstrowisthe
+off-the-shelf base model performance, and the second is the performance after tuning
+onrealdata.Thethirdrow("CC")tunesthebasemodelonasubsetofCC[75]image-
+textpairswithgeneratedsyntheticboxes,while"CC "furtherprocessesthetext
+Phrase
+throughLLMphraseextraction.SynGroundH andSynGround refertotuningonour
+M M
+synthetic data, relying on less or more on the real data during synthesis, respectively.
+RefCOCO+
+Method Data Num. Flickr30k ∆
+avg
+Test A Test B
+ALBEF [40] - – 69.35 53.77 79.38 -
+AMC [84] Real 1,649,546 78.89 61.16 86.46 +8.00
+CC Web-Crawled 1,000,000 69.05 54.96 83.94 +1.82
+CC Web-Crawled 1,000,000 70.35 55.31 85.43 +2.86
+Phrase
+SynGroundH Synthetic 979,861 72.18 55.92 86.30 +3.97
+M
+SynGround Synthetic 998,406 73.70 56.35 86.89 +4.81
+M
+in Table 2 of the main paper and other work [27] find that the visual ground-
+ing ability can be enhanced more significantly with object-centric short phrases
+rather than generic image descriptions. Considering the text in CC might de-
+scribe the entire scenario, we further apply our LLM phrase extraction (row
+4) and generate synthetic boxes for the synthetic text phrases, leading to a
+greater average improvement of 2.86%. However, to our best effort, we can not
+maketheweb-crawleddatareachasimilarenhancementwithoursyntheticdata
+(SynGroundH, SynGround ). Our experimental results indicate that it is non-
+M M
+trivial to curate or synthesize image-text-boxes for visual grounding. The image
+and text favored by visual grounding seem to have specific properties, such as
+images with multiple objects and text for region descriptions.
+E Trend of Scaling Up
+This section explores the potential for scaling synthetic data. Given the limited
+computation resources to synthesize data and tune a base model, we adopt a
+downsampling strategy to assess the scaling-up ability of our synthetic data.
+Specifically, we randomly sample subsets of 25%, 50%, and 75% from our syn-
+theticdata,andperform3timesforeachscaletoreducerandomness.Fig.14il-
+lustratestheaveragepointinggameaccuracyimprovementacrossRefCOCO+[86]
+and Flickr30k [59] benchmarks. We plot the mean improvement at each scale
+with lines and their standard deviation with shadows. The observed upward
+trend indicates a promising scaling-up ability of our synthetic data.28 R. He et al.
++4.80
++4.70
++4.60
++4.50
++4.40
++4.30
++4.20
++4.10
+25% 50% 75% 100%
+Percentage of Synthetic Data
+Fig.14: Average pointing game accuracy improvement on RefCOCO+ [86] and
+Flickr30k [59] benchmarks at various scales of synthetic data. The line denotes the
+mean improvement across 3 sampled subsets at each data scale, and the shadow is
+their standard deviation.
+Fig.15: Qualitative examples of our synthetic image-text-boxes. The images are syn-
+thesizedbyatext-to-imagegenerativemodel.ThetextsaregeneratedbyanLLM,and
+their corresponding boxes are obtained from an open-vocabulary object detector.
+tnemevorpmI
+egarevALearning from Models and Data for Visual Grounding 29
+F Qualitative Examples
+In this section, we supplement additional qualitative examples of our synthetic
+image-text-boxes. For better display, we randomly present a text phrase if there
+aremultiplephrasesforoverlappingboxes(IoU≥0.95).Thefulldatasetwillbe
+released upon publication.
+In Fig. 15, the first row showcases indoor scenes, the second row features
+human-relatedscenes,andthethirdrowdepictsoutdoorscenes.Intriguingly,our
+synthetic data shows diversity, such as unconventional design (e.g. "the lamp")
+or color (e.g. "a green chair", "chairs with a floral pattern", "red pillows") of
+furniture in the first row. Despite the presence of artifacts, synthetic humans
+generally have human-like shapes (row 2). Considering the experimental results
+(refer to Table 1 in the main paper) that tuning on synthetic data improves
+grounding performance on the RefCOCO+ Test A, a person-only benchmark,
+thesynthetichumanwithartifactsstillbenefitsvisualgrounding.Thethirdrow
+presentssomechallengingscenarios,includingsmallobjects(e.g.,"trafficlights,"
+"a train"), detailed descriptions (e.g., "a well-maintained grassy yard"), and
+complex grammatical structures (e.g., "covered with snow"). In Fig. 16, similar
+propertiesarealsofoundinsyntheticdatageneratedatahighersyntheticpurity
+level (Section 4.5 of the main paper). Overall, synthetic data with artifacts is
+abletoimprovevisualgroundingperformancebasedonourresult,butweexpect
+learningfrommoreadvancedimage-generativemodelsortext-generativemodels
+can lead to further enhancement.30 R. He et al.
+Fig.16: Qualitativeexamplesofoursyntheticimage-text-boxesgeneratedatahigher
+synthetic purity level that relies less on the real data. The images are synthesized
+according to LLM-generated image descriptions through a text-to-image generative
+model.ThetextsaregeneratedbyanLLM,andtheircorrespondingboxesareobtained
+from an open-vocabulary object detector.

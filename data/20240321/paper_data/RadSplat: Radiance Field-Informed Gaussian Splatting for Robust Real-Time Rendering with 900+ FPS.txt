@@ -1,0 +1,737 @@
+RadSplat: Radiance Field-Informed Gaussian
+Splatting for Robust Real-Time Rendering with
+900+ FPS
+Michael Niemeyer, Fabian Manhardt, Marie-Julie Rakotosaona, Michael
+Oechsle, Daniel Duckworth, Rama Gosula, Keisuke Tateno, John Bates,
+Dominik Kaeser, and Federico Tombari
+Google
+https://m-niemeyer.github.io/radsplat/
+Abstract. Recent advances in view synthesis and real-time rendering
+haveachievedphotorealisticqualityatimpressiverenderingspeeds.While
+Radiance Field-based methods achieve state-of-the-art quality in chal-
+lengingscenariossuchasin-the-wildcapturesandlarge-scalescenes,they
+often suffer from excessively high compute requirements linked to volu-
+metricrendering.GaussianSplatting-basedmethods,ontheotherhand,
+relyonrasterizationandnaturallyachievereal-timerenderingbutsuffer
+frombrittleoptimizationheuristicsthatunderperformonmorechalleng-
+ing scenes. In this work, we present RadSplat, a lightweight method for
+robust real-time rendering of complex scenes. Our main contributions
+are threefold. First, we use radiance fields as a prior and supervision
+signal for optimizing point-based scene representations, leading to im-
+proved quality and more robust optimization. Next, we develop a novel
+pruning technique reducing the overall point count while maintaining
+highquality,leadingtosmallerandmorecompactscenerepresentations
+withfasterinferencespeeds.Finally,weproposeanoveltest-timefilter-
+ing approach that further accelerates rendering and allows to scale to
+larger,house-sizedscenes.Wefindthatourmethodenablesstate-of-the-
+art synthesis of complex captures at 900+ FPS.
+Keywords: real-time rendering · gaussian splatting · neural fields
+1 Introduction
+Neural fields [6,31,42,69] have emerged as one of the most popular repre-
+sentations for 3D vision due to their simple design, stable optimization, and
+state-of-the-art performance. After their introduction in the context of 3D re-
+construction [6,31,42,69], neural fields have been widely adopted and set new
+standards in tasks such as view synthesis [1,2,32], 3D and 4D reconstruc-
+tion [25,39,43,44,46,73], and generative modeling [27,38,47,59,64]. While
+neural field methods have achieved unprecedented view synthesis quality even
+for challenging real-world captures [2,28,32], most approaches are limited by
+4202
+raM
+02
+]VC.sc[
+1v60831.3042:viXra2 Niemeyer et al.
+625 FPS 0.25 FPS 811 FPS
+3D Gaussian Splatting Zip-NeRF Ours
+Fig.1: RadSplat enables high-quality real-time view synthesis for large-scale house-
+levelscenes[2]atover900framespersecond(top).Incontrastto3DGaussianSplat-
+ting [21], our method allows for robust synthesis of complex captures while rendering
+3,000×fasterthanthestate-of-the-artinofflineviewsynthesis,Zip-NeRF[2](bottom).
+the high compute costs of volumetric rendering. In order to achieve real-time
+framerates,recentworksreducenetworkcomplexity[12,35],cacheintermediate
+outputs [10,56], or extract 3D meshes [41,53,72,73]. Nevertheless, all methods
+essentiallytradereducedqualityandincreasedstoragecostsforfasterrendering,
+and are incapable of maintaining state-of-the-art quality in real-time – the goal
+of this work.
+Recently,rasterization-based3DGaussianSplatting(3DGS)[21]hasemerged
+as a natural alternative to neural fields. The representation admits real-time
+frame rates with view synthesis quality rivaling the state-of-the-art in neural
+fields. 3DGS, however, suffers from a challenging optimization landscape and
+an unbounded model size. The number of Gaussian primitives is not known
+a priori, and carefully-tuned merging, splitting, and pruning heuristics are re-
+quired to achieve satisfactory results. The brittleness of these heuristics become
+particularly evident in large scenes where phenomena such as exposure varia-
+tion, motion blur, and moving objects are unavoidable. An increasing number
+of primitives further leads to a potentially-unmanageable memory footprint and
+reduced rendering speed, strongly limiting model quality for larger scenes.
+In this work, we present RadSplat, a lightweight method for robust real-
+timerenderingofcomplexreal-worldscenes.Ourmethodachievessmallermodel
+sizes and faster rendering than 3DGS while strongly exceeding reconstruction
+quality.Ourkeyideaistocombinethestableoptimizationandqualityofneural
+fieldstoactasapriorandsupervisionsignalfortheoptimizationofpoint-based
+scenerepresentations.Wefurtherintroduceanovelpruningprocedureandtest-RadSplat: Radiance Field-Informed Gaussian Splatting 3
+time visibility rendering strategies to significantly reduce memory usage and
+increase rendering speed without a corresponding loss in quality. In summary,
+our contributions are as follows:
+1. The use of radiance fields as a prior and to handle the complexity of real-
+world data when optimizing point-based 3DGS representations.
+2. AnovelpruningstrategythatreducesthenumberofGaussianprimitivesby
+up to 10x whilst improving quality and rendering speed.
+3. A novel post-processing step enabling viewpoint-based filtering, further ac-
+celerating rendering speed without any reduction in quality.
+Ourmethodexhibitsstate-of-the-artreconstructionqualityonbothmediumand
+large scenes, with PSNR up to 1.87 dB higher than 3DGS and SSIM exceeding
+Zip-NeRF, the current state-of-the-art in offline view synthesis (see Fig. 1). At
+thesametime,ourmethodrendersupto907framespersecond,over3.6×faster
+than 3DGS and more than 3,000× faster than Zip-NeRF.
+2 Related Work
+Neural Fields. Since their introduction in the context of 3D reconstruction [6,
+31,42,69], neural fields have become one of the most promising methods for
+many 3D vision tasks including 3D/4D reconstruction [25,39,43,44,46,73], 3D
+generativemodeling[4,27,38,47,59,64],andviewsynthesis[1,2,32].Keytotheir
+success is among others simplicity, state-of-the-art performance, and robust op-
+timization[69].Incontrasttopreviousrepresentationssuchaspoint-[45,48,50],
+voxel-[30,49],ormesh-based[17,65]representations,neuralfieldsdonotusually
+requirecomplexregularization,hand-tunedinitializationoroptimizationcontrol
+modules as they admit end-to-end optimization and can be queried at arbitrary
+spatial locations. In the context of view synthesis, Neural Radiance Fields [32]
+(NeRF) in particular have revolutionized the field by leveraging volumetric ren-
+dering, which has proven more robust than prior surface-based rendering ap-
+proaches [40,61,74]. In this work, we employ the robustness and simplicity of
+neural fields to enable real-time rendering for complex scenes at high quality.
+More specifically, we use the state-of-the-art radiance field Zip-NeRF [2] to act
+as a robust prior and source of reliable supervision to train a point-based repre-
+sentation better suited for real-time rendering.
+Neural Fields for Real-Time Rendering.NeRF-basedmodelsleadtostate-
+of-the-art view synthesis but are typically slow to render so that a variety of
+works are proposed for speeding up training and inference. While neural fields
+were initially built on large, compute-heavy multi-layer perceptrons (MLPs) [6,
+31,32,42], recent works propose the use of voxel representations and interpo-
+lation to enable fast training and rendering [12,35,55,77]. Instant NGP [35],
+for example, demonstrates that a multi-resolution hash grid backbone enables
+higher quality whilst reducing training time to seconds. However, these works
+relyonpowerfulGPUsandoftendonotachievereal-timerenderingforarbitrary4 Niemeyer et al.
+scenes. Another line of work aims to represent neural fields as meshes, either as
+a post-processing step [53,63] or by direct optimization [5,18,54,66,73]. These
+approachescanachievehighframeratesbuttheirqualitylagsbehindvolumetric
+approaches. More recently, another line of work [10,13,19,56] aims to represent
+a neural field as a set of easily-cacheable assets such as sparse voxel grids, tri-
+planes, and occupancy grids. These methods retain their high quality but often
+exhibit large storage requirements, are slower to render on smaller devices, and
+relyoncomplexcustomrenderingimplementations[10].Incontrast,weoptimize
+lightweight point-based representations that achieve state-of-the-art quality, are
+easily compressed, and naturally integrate with graphics software following a
+rasterization pipeline.
+Point-Based Representations. First works propose to render point sets as
+independent geometry samples [15,16], which can be implemented efficiently
+in graphics software [57] and highly parallelized on GPU hardware [22,58]. To
+eliminate holes when rendering incomplete surfaces, a line of works explores the
+“splatting” ofpointswithextentslargerthanapixel,e.g.withcircularorelliptic
+shapes [67,76]. The recent work 3D Gaussian Splatting (3DGS) [21] achieves
+unprecedented quality and fast training and rendering speed by introducing
+adaptive density control in combination with efficient rasterization kernels. As
+consequence,3DGSisusedinavarietyofapplications,including3Dhuman[79]
+and avatar reconstruction [9,33,51], 3D generation [8,26,62,75], SLAM sys-
+tems[24,29,70],4Dreconstruction[68],andopen-setsegmentation[52,60].Fur-
+ther, works are proposed to address aliasing [71,78] and point densification [7]
+in the 3DGS representation. Finally, a recent line of works investigate com-
+pression for 3DGS [11,23,34,36,37] leading to more compact scenes and faster
+rendering. In this work, we combine a NeRF prior for stable optimization with
+a point-based 3DGS representation for real-time rendering of complex scenes.
+Compared to prior works, we enable high-quality view synthesis even for com-
+plex real-world captures that might contain lighting and exposure variations.
+Further, we develop pruning and test-time visibility rendering strategies leading
+to10×fewerGaussianprimitivesathigherqualitycomparedto3DGSandwith
+inference times of 900+ FPS.
+3 Method
+Our goal is to develop a lightweight, real-time view synthesis method that is
+robustevenforcomplexreal-worldcaptures.Inthefollowing,wediscussthekey
+componentsforachievingthis.First,weoptimizeradiancefieldsasarobustprior
+forcomplexdata(Sec.3.1).Next,weusetheradiancefieldtofirstinitializeand
+then to supervise the optimization of point-based 3DGS representations (Sec.
+3.2.) We develop a novel pruning technique leading to a significant point count
+reduction while maintaining high quality (Sec. 3.3). Finally, we cluster input
+cameras and perform visibility filtering, further accelerating rendering speed to
+up to 900+ FPS (Sec. 3.4). We show an overview of our method in Fig. 2.RadSplat: Radiance Field-Informed Gaussian Splatting 5
+Fig.2:Overview.1.Givenposedinputimagesofacomplexreal-worldscene,wetrain
+a robust neural radiance field with GLO embeddings l . 2. We use the radiance field
+i
+priortoinitializeandsuperviseourpoint-based3DGSrepresentationthatweoptimize
+with a novel pruning technique for more compact, high-quality scenes. 3. We perform
+viewpoint-based visibility filtering to further accelerate test-time rendering speed.
+3.1 Neural Radiance Fields as a Robust Prior
+NeuralRadianceFields.Aradiancefieldf isacontinuousfunctionthatmaps
+a 3D point x ∈ R3 and a viewing direction d ∈ S2 to a volume density σ ∈ R+
+and an RGB color value c ∈ R3. Inspired by classical volume rendering [20],
+a pixel’s final color prediction is obtained by approximating the integral via
+quadrature using sample points:
+(cid:88)Ns j (cid:89)−1
+c = τ α c where τ = (1−α ), α =1−e−σjδj (1)
+NeRF j j j j k j
+j=1 k=1
+where τ is the transmittance, α the alpha value for x , and δ =||x −x ||
+j j j j j+1 j 2
+thedistancebetweenneighboringsamplepoints.InNeuralRadianceFields[32],
+f isparameterizedasanMLPwithReLUactivationf andthenetworkparam-
+θ
+eters θ are optimized using gradient descent on the reconstruction loss:
+(cid:88)
+L(θ)= ∥cθ (r)−c (r)∥2 (2)
+NeRF GT 2
+r∈Rbatch
+where r ∈ R are batches of rays sampled from the set of all pixels / rays
+batch
+R. To further boost training time and quality, Zip-NeRF [2] uses multisampling
+and an efficient multi-resolution grid backbone [35]. Due to the state-of-the-art
+performance, we adopt Zip-NeRF as our radiance field prior.
+Robust Optimization on Real-World Data.Real-worldcapturesoftencon-
+tain effects such as lighting and exposure variation or motion blur. Crucial for6 Niemeyer et al.
+the success of neural fields on such in-the-wild data [28] is the use of Generative
+Latent Optimization [3] (GLO) embedding vectors or related techniques. More
+specifically, a per-image latent vector is optimized along with the neural field
+that enables explaining away these view-dependent effects
+(cid:88)
+L(θ,{l }N )= ∥cθ,li (r )−c (r )∥2 (3)
+i i=1 NeRF i GT i 2
+ri∈Rbatch
+where {l }N indicates the set of GLO vectors and N the number of input im-
+i i=1
+ages.Thisallowsthemodeltoexpressappearancechangescapturedintheinput
+images without introducing wrong geometry such as floating artifacts. At test
+time, images can be rendered with a constant latent vector (usually the zero
+vector)toobtainstableandhigh-qualityviewsynthesis.Forallexperiments,we
+follow[2]andoptimizeaper-imagelatentvectorrepresentinganaffinetransfor-
+mation for the bottleneck vector in the Zip-NeRF representation.
+3.2 Radiance Field-Informed Gaussian Splatting
+Gaussian Splatting.Incontrasttoneuralfields,in3DGaussianSplatting[21]
+an explicit point-based scene representation is optimized. More specifically, the
+sceneisrepresentedaspointsthatareassociatedwithapositionp∈R3,opacity
+o ∈ [0,1], third-degree spherical harmonics (SH) coefficients k ∈ R16, 3D scale
+s∈R3, and the 3D rotation R∈SO(3) represented by 4D quaternions q∈R4.
+Similar to (1), such a representation can be rendered to the image plane for a
+camera and a list of correctly-sorted points as
+Np j−1
+(cid:88) (cid:89)
+c = c α τ where τ = (1−α ) (4)
+GS j j i i i
+j=1 i=1
+where c is the color predicted using the SH coefficients k and α is obtained
+j j
+by evaluating the projected 2D Gaussian with covariance Σ′ = JMΣMTJT,
+multiplied by the per-point opacity o [21], with M being the viewing transfor-
+mation, J denoting the Jacobian of the affine approximation of the projective
+transformation [80], and Σ denoting the 3D covariance matrix. To ensure that
+Σ is a positive semi-definite matrix, it is expressed using the per-point scale
+matrix S =diag(s ,s ,s ) and rotation R according to Σ =RSSTRT [21]. The
+1 2 3
+scene is optimized with a reconstruction loss on the input images and regular
+densification steps consisting of splitting, merging, and pruning points based on
+gradient and opacity values.
+Radiance Field-based Initialization. A key strength of radiance fields lies
+in the volume rendering paradigm [32], as opposed to prior surface rendering
+techniques[40,61,74],enablingtheabilitytoinitialize,remove,andchangeden-
+sityfreelyin3Dspace.Incontrast,explicitpoint-basedrepresentationscanonly
+provide a gradient signal to already existing geometry prediction due to theRadSplat: Radiance Field-Informed Gaussian Splatting 7
+rasterization-based approach. The initialization of this representation is hence a
+crucial property in its optimization process.
+We propose to use the radiance field prior for obtaining a suitable initializa-
+tion. More specifically, for each pixel / ray r from the set of all rays R, we first
+render the median depth from our NeRF model
+(cid:88)Nz
+z = α ∥x ∥ where τ ≥0.5 and τ <0.5 (5)
+median i i 2 Nz Nz−1
+i=1
+where x are the ray sampling points. We project all pixels / rays into 3D space
+i
+to obtain our initial point set
+P ={p } with p =r (i)+d ·z (r(i)) (6)
+init i i∈Krandom i 0 r(i) median
+where K are uniformly randomly-sampled indices for the list of all rays
+random
+/ pixels, r (·) indicates the ray origin and d the normalized ray direction.
+0 r(·)
+We found the median depth estimation to perform better than other common
+choices such as expected depth by being exact sampling point estimates, and
+we found setting |K | to 1 million for all scenes to work well in practice.
+random
+Further, we initialize
+k =(k1:3,k4:16) where k1:3 =c (r(i)),k4:16 =0
+i i i i NeRF i
+(7)
+s =(s ,s ,s ) where s = min ∥p −p∥
+i i i i i i 2
+p∈{p̸=pi|p∈Pinit}
+andseto =0.1andq totheidentityrotation.1Thus,foreachsceneweoptimize
+i i
+ϕ={(p ,k ,s ,o ,q )}Ninit (8)
+i i i i i i=1
+Radiance Field-based Supervision. Radiance fields have been shown to ex-
+cel even on real-world captures where images contain challenging exposure and
+lighting variations [2,28]. We leverage this strength of radiance fields to factor
+out this complexity and noise of the data to provide a more cleaned up supervi-
+sionsignalthanthepossiblycorruptedinputimages.Morespecifically,werender
+all input images with our NeRF model f and with a constant zero GLO vector
+θ
+I ={Ij}N where Ij ={cθ,lzero(r (i))}H×W (9)
+f f j=1 f NeRF j i=1
+wherel indicatesthezeroGLOvector,H theheightandW thewidthofthe
+zero
+images, and r (·) the rays belonging to the j-th image. We can then use these
+j
+renderings I to train our point-based representations
+f
+L(ϕ)=(1−λ)∥Ii −Ii∥2+λSSIM(Ii,Ii) with i∼U(N) (10)
+f ϕ 2 f ϕ
+1 Wesetonlyk1:3 aswefoundtoprogressivelyoptimizekleadstobetterresults[21].8 Niemeyer et al.
+whereU istheuniformdistributionandweusethedefaultvalueλ=0.2.Another
+practical benefit of this approach is that we can train from arbitrary camera
+lens types due to NeRF’s flexible ray casting, while the 3D Gaussian Splatting
+gradient formulation assumes a pinhole camera model and it is unclear how this
+can be efficiently extended to e.g. fisheye or more complex lens types.
+3.3 Ray Contribution-Based Pruning
+While 3DGS representations can be efficiently rendered thanks to rasterization,
+real-time performance still requires a powerful GPU and is not yet achieved on
+allplatforms.Themostimportantpropertyfortherenderingperformanceisthe
+number of points in the scene that need to be rendered.
+Importance Score. To obtain a more lightweight representation that can be
+renderedfasteracrossplatforms,wedevelopanovelpruningtechniquetoreduce
+the number of Gaussians in the scene whilst maintaining high quality. More
+specifically,weintroduceapruningstepduringoptimizationthatremovespoints
+that do not contribute significantly to any training view. To this end, we define
+an importance score by aggregating the ray contribution of Gaussian p along
+i
+all rays of all input images
+h(p )= max αrτr (11)
+i i i
+If∈If,r∈If
+where αrτr indicates the ray contribution for the pixel’s final color prediction
+i i
+in(4)ofGaussianp alongrayr.Wefindthatthisformulationleadstoimproved
+i
+results compared to concurrent works that investigate similar ideas [11,23] as
+we use the exact ray contribution (as opposed to e.g. the opacity) as well as the
+max operator (instead of e.g. the mean) which is independent of the number of
+input images, hence more robust to different types of scene coverage.
+Pruning.Weuseourimportancescoreduringoptimizationtoreducetheoverall
+pointcountinthescenewhilemaintaininghighquality.Morespecifically,weadd
+a pruning step where we calculate mask values as
+m =m(p )=1(h(p )<t ) where t ∈[0,1] (12)
+i i i prune prune
+and we remove all Gaussians from our scene that have a mask value of one. We
+apply the pruning step twice over the the course of optimization similar to [11].
+The threshold t provides a control mechanism over the number of points
+prune
+that are used to represent the scene. In our experiments, we define two values,
+one value for our default model, and a higher value for a lightweight variant.
+3.4 Viewpoint-Based Visibility Filtering
+Our pruning technique ensures a compact scene representation with a small
+overallpointcount.Toscaletolarger,morecomplexscenessuchasentirehousesRadSplat: Radiance Field-Informed Gaussian Splatting 9
+orapartments,weintroduceanovelviewpoint-basedfilteringaspost-processing
+step that further speeds up test-time rendering without a quality drop.
+Input Camera Clustering. First, we group input cameras together to obtain
+a meaningful tessellation of the scene space. More specifically, let (xi )N
+cam i=1
+denotetheinputcameralocationsforthesetofinputimagesI.Werunk-means
+clustering on the input camera locations to obtain k cluster centers (xi )k
+cluster i=1
+and assign the input cameras to the respective cluster centers.
+Visibility Filtering.Next,foreachclustercenterxj ,weselectallassigned
+cluster
+input cameras, render the images from these viewpoints, and, similar to (11),
+calculate an importance score and the respective visibility indicator list
+hcluster(p )= max αrτr, mcluster =1(cid:0) hcluster(p )>t (cid:1) (13)
+j i i i j j i cluster
+I∈Ii,r∈I
+c
+where Ii is the set of images whose camera positions are assigned to the the
+c
+cluster center xi and t is a threshold that controls the contribution
+cluster cluster
+value of points that should be filtered out (we found setting t = 0.001 to
+cluster
+work well in practice). Note that we are not restricted to the input views for
+calculating these masks. In practice, we hence add random camera samples to
+Ii to ensure robustness to test views. We calculate the indicator list mcluster for
+c j
+each cluster center as a post-processing step after scene optimization.
+Visibility List-Based Rendering. To render an arbitrary viewpoint, we first
+assignitscameracenterxtest tothenearestclustercenterxi .Next,weselect
+cam cluster
+the respective indicator list mcluster. Finally, we perform default rasterization
+i
+while only considering the points that are marked as active for the respective
+cluster. This results in a significant FPS increase without any drop in quality.
+3.5 Implementation Details
+We set the number of initial points N to 1 million in all experiments. For
+init
+threshold value t , we use 0.01 and 0.25 for our default and lightweight
+prune
+models, respectively, and for the large Zip-NeRF scenes, we use 0.005 and 0.03.
+We perform pruning after 16 and 24 thousand steps. We follow [21] and use the
+same densification parameters except for the densification gradient threshold
+valuewhichwelowerto8.6e−5 fortheZip-NeRFdataset.Wetrainourradiance
+fieldson8V100GPUs(∼1h)andour3DGSmodelsonaA100GPU(∼1h).For
+the visibility filtering, we use k = 64 clusters and we found a small threshold
+t > 0 to work well in practice and set it to 0.001 for all scenes. For the
+cluster
+radiance field training, we follow [2] and use default parameters for all scenes.
+4 Experiments
+Datasets.WereportresultsontheMipNeRF360dataset[1],themostcommon
+viewsynthesisbenchmarkconsistingof9unboundedindoorandoutdoorscenes.10 Niemeyer et al.
+Wefurtherreportresultson theZip-NeRFdataset[2]consistingof4 large-scale
+scenes (apartments and houses) with challenging captures that partly contain
+lighting and exposure variations.
+Baselines.Onalldatasets,wecompareagainst3DGS[21]aswellasMERF[56]
+and SMERF [10] as the state-of-the-art volumetric approaches that construct
+efficient voxel and triplane representations together with accelerating structures
+for empty space skipping. On MipNeRF360, we further compare against mesh-
+based BakedSDF [73], hash-grid based INGP [35], and point-based approaches
+LightGaussian[11],CompactGaussian[23],andEAGLES[14].Forreference,we
+always report Zip-NeRF [2], the state-of-the-art offline view synthesis method.
+Metrics and Evaluation. We follow common practice and report the view
+synthesis metrics PSNR, SSIM, and LPIPS. While using techniques such as
+GLOvectorsisessentialforhighqualityonreal-worldcaptures(seeSec.3.1),the
+evaluation of such models is an open problem such that recent methods [1,2,10]
+traintwoseparatemodels,oneforvisualizations,andone(withoutGLOvectors)
+purely for the quantitative comparison. In this work, we always train a single
+modelthatisrobustthankstotheradiancefieldprior.Forevaluation,wesimply
+finetune the trained models on the original image data to match potential color
+shifts and to ensure a fair comparison. Next to measuring quality, we report
+the rendering speed in frames per second (FPS) on a RTX 3090 GPU and the
+number of Gaussians in the scenes (only applicable for point-based methods).
+4.1 Real-Time View Synthesis
+SSIM↑PSNR↑LPIPS↓FPS↑#G(M)↓
+INGP[35] 0.705 25.68 0.302 9.26 -
+BakedSDF[73] 0.697 24.51 0.309 539 -
+MERF[56] 0.722 25.24 0.311 171 -
+SMERF[10] 0.818 27.99 0.211 228 - SSIM↑PSNR↑LPIPS↓FPS↑
+CompactG[23] 0.798 27.08 0.247 128 1.388 MERF[56] 0.747 23.49 0.445 318
+LightG[11] 0.799 26.99 0.25 209 1.046 SMERF[10](K=1) 0.776 25.44 0.412 356
+EAGLES[14] 0.809 27.16 0.238 137 1.712 SMERF[10](K=5) 0.829 27.28 0.340 221
+3DGS[21] 0.815 27.20 0.214 251 3.161 3DGS[21] 0.809 25.50 0.369 470
+OursLight 0.826 27.56 0.213 907 0.370 OursLight 0.838 26.11 0.368 748
+Ours 0.843 28.14 0.171 410 1.924 Ours 0.839 26.17 0.364 630
+Zip-NeRF[2] 0.836 28.54 0.177 0.25 - Zip-NeRF[2] 0.836 27.37 0.305 0.25
+(a) Mip-NeRF360dataset[1] (b) Zip-NeRFdataset[2]
+Table 1: Quantitative Comparison.Wecompareagainsttop-performingreal-time
+rendering approaches and report offline method ZipNeRF as reference. Our models
+outperformbothNeRF-andGS-basedapproaches,achievingstate-of-the-artviewsyn-
+thesis at higher FPS. Ours Light achieves a 10× point count reduction (shown as #G
+in mio.) compared to 3DGS [21] while improving quality (1a). Our default model im-
+proves even over Zip-NeRF [2] in SSIM and LPIPS while rendering 3,600× faster. On
+thelarge-scalescenesin1b,ourmodelsproducethehighestSSIMvalueswhilerender-
+ing up to 3.3× faster than top-performing real-time methods such as SMERF [10].RadSplat: Radiance Field-Informed Gaussian Splatting 11
+Bicycle
+Kitchen
+Flowers
+Room
+Berlin
+NYC
+London GT Ours Zip-NeRF[2] 3DGS[21]
+Fig.3: Qualitative Comparison.Weshowresultsonthemip-NeRF360dataset[1]
+(top four) and Zip-NeRF dataset [2] (bottom three). Compared to Zip-NeRF, our
+methodbettercaptureshigh-frequencytexturedetails(e.g.,tableclothinKitchenand
+carpet in Room) and geometric details (e.g., leaves in Flowers and bicycle spokes in
+Berlin).Comparedto3DGS,weobtainsharper(e.g.,grassbelowbenchinBicycleand
+shinysurfacesinLondon)andmorestablereconstructions(e.g.,colorshiftinKitchen).12 Niemeyer et al.
+Unbounded Scenes. We observe in Tab. 1a that our method leads to the best
+quantitative results while achieving faster rendering times than prior state-of-
+the-art real-time methods such as SMERF [10]. Notably, our model even out-
+performs the state-of-the-art non-real-time method Zip-NeRF [2] in both SSIM
+andLPIPSwhilerendering1,600×faster.Ourlightweightvariant(“OursLight”)
+alsoexceedspriorworkswithameanrenderingspeedof907FPSoutpacingeven
+state-of-the-art mesh-based methods such as BakedSDF [73]. Also qualitatively
+inFig.3,weobservethatourmodelachievesthebestresults.ComparedtoZip-
+NeRF, our method better captures high-frequency textures (e.g., see tablecloth
+in “Kitchen” scene in Fig. 3) and fine geometric details (e.g., see bicycle spokes
+in “Bicycle” scene in Fig. 3). Compared to 3DGS, we find that our reconstruc-
+tions are sharper and more stable while achieving a 2× and 10× overall point
+count reduction with our default and lightweight variant, respectively.
+(a) 3DGS (b) 3DGSw/exposuremodule (c) Ours
+Fig.4:Robustness.Oncomplexcaptureswithlightingvariations,3DGS[21]leadsto
+degradedresults(4a).Whenequippedwithexposurehandlingmodules[10,21],results
+improveyetstillsufferfromfloatingartifactsandareoverlysmooth(4b).Ourradiance
+field-informedapproachinsteadachieveshighqualityevenforchallengingcaptures(4c).
+Large-Scale Scenes. For the Zip-NeRF dataset [2], we observe a similar trend
+inTab.1b.Ourdefaultandlightweightvariantoutperformtop-performingreal-
+timeSMERFandnon-real-timeZip-NeRFinSSIMwhilerenderingsignificantly
+faster. Notably, our lightweight variant achieves high quality with a mean SSIM
+of 0.838 while rendering on average at 748 FPS. In contrast, the state-of-the-art
+real time method for large scenes, i.e. the large variant of SMERF [10] with
+53 = 125 submodels, achieves a slightly lower SSIM of 0.829 with a rendering
+speedof221FPS.AlsoqualitativelyinFig.3,weobservethatourmodelachieves
+high visual appeal with sharper and more stable reconstructions. In contrast to
+3DGS [21], we find that our method is more robust on challenging captures as
+showninFig.4where3DGSleadstoheavilydegradedresultsonthe“Alameda”
+scene. Note that results still contain floating artifacts, even when equipped with
+a per-image module that can handle exposure and lighting variations [10,21].
+Our method enables high-quality synthesis even for in-the-wild data.RadSplat: Radiance Field-Informed Gaussian Splatting 13
+GT Ours w/oNeRF-basedInitialization
+(a) QualitativeAblationStudyoftheNeRF-basedInitialization.
+GT Ours w/oNeRF-basedSupervision
+(b) QualitativeAblationStudyoftheNeRF-basedSupervision.
+SSIM↑PSNR↑LPIPS↓#Gaus.(M)↓
+Ours 0.839 26.17 0.364 2.022
+w/oNeRFInititialization 0.830 25.71 0.382 1.583
+w/oNeRFSupervision 0.835 25.79 0.372 1.849
+w/oPruning 0.839 26.14 0.364 3.049
+(c) QuantitativeAblationStudyontheZip-NeRFDataset.
+Fig.5: Ablation Study. Without (w/o) the NeRF-based initialization, geometric
+andtexturedetailsmightgetlost(5a).WithouttheNeRF-basedsupervision,floating
+artifactsappeariftheviewsexhibitlightingorexposurechanges(5b),andw/opruning,
+the scene point count is significantly larger without any quality improvements (5c).
+4.2 Ablation Study and Limitations
+NeRF-based Initialization. The NeRF-based initialization leads to better
+quantitativeandqualitativeresults(seeFig.5).Inparticular,smallergeometric
+andtexturedetailsmightgetlost,suchasthebackofthechair,thebooksbehind
+the monitor, or the sticky notes on the wall in Fig. 5a.
+NeRF-based Supervision. The NeRF-based supervision leads to improved
+results compared to optimizing the scene representation on the input views di-
+rectly. In particular, for scenes where the input views exhibit exposure or light-
+ing variations, floating artifacts are introduced to model these effects as shown
+inFig.5b.Incontrast,ourstrategytooptimizewrt.theNeRF-basedsupervision
+is more stable and leads to better reconstructions for real-world captures.
+Pruning. In Tab. 5c, we find that our model without pruning leads to similar
+quantitative results while exhibiting a significantly larger point count. As a re-
+sult, our pruning technique enables more compact scene representations while
+maintaining high quality. In Fig. 6 we show that we can match the quality of
+3DGS on the “Bicycle” scene, despite having roughly 10× less Gaussians in the14 Niemeyer et al.
+0.80#4.20m #1.26m 0.8 Converged 3D GS #0.68m
+0.75 3D GS (#5.66m) #0.36m 0.7
+0.6
+0.70 #0.17m 0.5
+0.4 00..6655 Ours
+0.3 3D GS
+#0.07m
+0.60 0.1 0.2 0.3 0.4 0.5 0.2 2 4 6 8 10 12
+Pruning Threshold Iteration (Thousand)
+(a) SSIMagainstPruningThreshold. (b) SSIMagainstIteration(inThousand).
+Fig.6: Pruning and Optimization Behavior. We show in 6a that lower pruning
+thresholdsupto0.1canmaintainqualitywhilereducingthepointcountby4×forthe
+“Bicycle” scene.Wematchthe3DGSquality(0.77)witha10×pointreduction(5.66m
+vs. 0.59m). In 6b, we compare the initial optimization progression of 3DGS and our
+defaultmodel(pruningthresholdof0.01)onthe“Bicycle” scene.Weobserveasteeper
+incline in SSIM and can match the quality of 3DGS after less than 8k steps.
+scene.Further,weobserveafasterincreaseinSSIMoverthefirstiterationssuch
+thatourdefaultmodelcanmatchthe3DGSqualityevenafteronly8kiterations.
+SSIM↑PSNR↑LPIPS↓FPS↑ SSIM↑PSNR↑LPIPS↓FPS↑
+Ours 0.843 28.14 0.171 410 Ours 0.839 26.17 0.364 630
+w/oVis.Fil. 0.843 28.14 0.171 373 w/oVis.Fil. 0.839 26.17 0.364 435
+Ours Light 0.826 27.56 0.213 907 Ours Light 0.838 26.11 0.368 748
+w/oVis.Fil. 0.826 27.56 0.213 887 w/oVis.Fil. 0.838 26.11 0.368 607
+(a) mip-NeRF360dataset[1] (b) Zip-NeRFdataset[2]
+Table 2: Visibility Filtering. With this postprocessing, we achieve up to 10% FPS
+increase on scenes with a central object focus (2a) and up to 45% improvement in
+renderingspeedwhenscalingtolarger-scalescenes(2b)whilekeepingthequalityfixed.
+Visibility List-Based Rendering. Our visibility list-based rendering enables
+upto10%meanFPSspeeduponthecentralobject-focusedMipNeRF360scenes
+andaupto45%FPSincreaseonthelargerhouseandapartment-levelZipNeRF
+scenes (see Tab. 2). We conclude that this post-processing step is in particular
+important when scaling to more complex larger-scale scenes.
+Limitations. We optimize a radiance field and a 3DGS representation. While
+achieving state-of-the-art performance with 900+ FPS, our training time (ap-
+prox.2h)islongercomparedtosingle-representationmodels(0.5h-1h).Further,
+despite outperforming prior works on the MipNeRF360 dataset, we observe a
+small gap to ZipNeRF in PSNR and LPIPS on the large-scale ZipNeRF scenes.
+We aim to investigate how to achieve faster training and higher quality on large
+house- and district-level scenes.
+)MISS(
+ytilauQ
+egamI
+)MISS(
+ytilauQ
+egamIRadSplat: Radiance Field-Informed Gaussian Splatting 15
+5 Conclusion
+WepresentedRadSplat,amethodcombiningthestrengthsofradiancefieldsand
+Gaussian Splatting for robust real-time rendering of complex scenes with 900+
+frames per second. We demonstrated that using radiance fields to act as a prior
+andsupervisionsignalleadstoimprovedresultsandmorestableoptimizationof
+point-based 3DGS representations. Our novel pruning technique leads to more
+compactsceneswithasignificantlysmallerpointcount,whilstimprovingquality.
+Finally, our novel test-time filtering further improves rendering speed without a
+quality drop. We showed that our method achieves state-of-the-art on common
+benchmarks while rendering up to 3,000× faster than prior works.
+Acknowledgements.WewouldliketothankGeorgiosKopanas,PeterZhizhin,
+PeterHedman,andJonBarronforfruitfuldiscussionsandadvice,CengizOztireli
+for reviewing the draft, and Zhiwen Fan and Kevin Wang for sharing additional
+baseline results.
+References
+1. Barron, J.T., Mildenhall, B., Verbin, D., Srinivasan, P.P., Hedman, P.: Mip-nerf
+360: Unbounded anti-aliased neural radiance fields. In: CVPR (2022)
+2. Barron, J.T., Mildenhall, B., Verbin, D., Srinivasan, P.P., Hedman, P.: Zip-nerf:
+Anti-aliased grid-based neural radiance fields. In: ICCV (2023)
+3. Bojanowski,P.,Joulin,A.,Lopez-Paz,D.,Szlam,A.:Optimizingthelatentspace
+of generative networks. In: ICML (2018)
+4. Chan, E.R., Lin, C.Z., Chan, M.A., Nagano, K., Pan, B., Mello, S.D., Gallo, O.,
+Guibas,L.,Tremblay,J.,Khamis,S.,Karras,T.,Wetzstein,G.:Efficientgeometry-
+aware 3D generative adversarial networks. In: CVPR (2022)
+5. Chen, Z., Funkhouser, T., Hedman, P., Tagliasacchi, A.: Mobilenerf: Exploiting
+the polygon rasterization pipeline for efficient neural field rendering on mobile
+architectures. In: ICCV (2023)
+6. Chen, Z., Zhang, H.: Learning implicit fields for generative shape modeling. In:
+CVPR (2019)
+7. Cheng, K., Long, X., Yang, K., Yao, Y., Yin, W., Ma, Y., Wang, W., Chen, X.:
+Gaussianpro: 3d gaussian splatting with progressive propagation. arXiv (2024)
+8. Chung, J., Lee, S., Nam, H., Lee, J., Lee, K.M.: Luciddreamer: Domain-free gen-
+eration of 3d gaussian splatting scenes. arXiv (2023)
+9. Dhamo, H., Nie, Y., Moreau, A., Song, J., Shaw, R., Zhou, Y., Pérez-Pellitero,
+E.: Headgas: Real-time animatable head avatars via 3d gaussian splatting. arXiv
+(2023)
+10. Duckworth,D.,Hedman,P.,Reiser,C.,Zhizhin,P.,Thibert,J.,Lucic,M.,Szeliski,
+R.,Barron,J.T.:SMERF:streamablememoryefficientradiancefieldsforreal-time
+large-scene exploration. arXiv (2023)
+11. Fan,Z.,Wang,K.,Wen,K.,Zhu,Z.,Xu,D.,Wang,Z.:Lightgaussian:Unbounded
+3d gaussian compression with 15x reduction and 200+ FPS. arXiv (2023)
+12. Fridovich-KeilandYu,Tancik,M.,Chen,Q.,Recht,B.,Kanazawa,A.:Plenoxels:
+Radiance fields without neural networks. In: CVPR (2022)
+13. Garbin,S.J.,Kowalski,M.,Johnson,M.,Shotton,J.,Valentin,J.:Fastnerf:High-
+fidelity neural rendering at 200fps. In: ICCV (2021)16 Niemeyer et al.
+14. Girish, S., Gupta, K., Shrivastava, A.: Eagles: Efficient accelerated 3d gaussians
+with lightweight encodings. arXiv (2023)
+15. Gross, M., Pfister, H.: Point-based graphics. Elsevier (2011)
+16. Grossman, J.P., Dally, W.J.: Point sample rendering. In: Rendering Techniques
+(1998)
+17. Groueix, T., Fisher, M., Kim, V.G., Russell, B.C., Aubry, M.: A papier-mâché
+approach to learning 3d surface generation. In: CVPR (2018)
+18. Guo, Y.C., Cao, Y.P., Wang, C., He, Y., Shan, Y., Zhang, S.H.: Vmesh: Hy-
+bridvolume-meshrepresentationforefficientviewsynthesis.In:SIGGRAPHAsia
+(2023)
+19. Hedman, P., Srinivasan, P.P., Mildenhall, B., Barron, J.T., Debevec, P.: Baking
+neural radiance fields for real-time view synthesis. In: ICCV (2021)
+20. Kajiya,J.T.,Herzen,B.V.:Raytracingvolumedensities.In:Christiansen,H.(ed.)
+SIGGRAPH (1984)
+21. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G.: 3d gaussian splatting for
+real-time radiance field rendering. SIGGRAPH (2023)
+22. Laine, S., Karras, T.: High-performance software rasterization on gpus. In: SIG-
+GRAPH (2011)
+23. Lee,J.,Rho,D.,Sun,X.,Ko,J.H.,Park,E.:Compact3dgaussianrepresentation
+for radiance field. arXiv (2023)
+24. Li, M., Liu, S., Zhou, H.: Sgs-slam: Semantic gaussian splatting for neural dense
+slam. arXiv (2024)
+25. Li, Z., Müller, T., Evans, A., Taylor, R.H., Unberath, M., Liu, M.Y., Lin, C.H.:
+Neuralangelo: High-fidelity neural surface reconstruction. In: CVPR (2023)
+26. Liang, Y., Yang, X., Lin, J., Li, H., Xu, X., Chen, Y.: Luciddreamer: Towards
+high-fidelity text-to-3d generation via interval score matching. In: CVPR (2024)
+27. Lin,C.,Gao,J.,Tang,L.,Takikawa,T.,Zeng,X.,Huang,X.,Kreis,K.,Fidler,S.,
+Liu, M., Lin, T.: Magic3d: High-resolution text-to-3d content creation. In: CVPR
+(2023)
+28. Martin-Brualla, R., Radwan, N., Sajjadi, M.S.M., Barron, J.T., Dosovitskiy, A.,
+Duckworth, D.: Nerf in the wild: Neural radiance fields for unconstrained photo
+collections. In: CVPR (2021)
+29. Matsuki, H., Murai, R., Kelly, P.H., Davison, A.J.: Gaussian splatting slam. In:
+CVPR (2024)
+30. Maturana,D.,Scherer,S.:Voxnet:A3dconvolutionalneuralnetworkforreal-time
+object recognition. In: IROS (2015)
+31. Mescheder, L., Oechsle, M., Niemeyer, M., Nowozin, S., Geiger, A.: Occupancy
+networks: Learning 3d reconstruction in function space. In: CVPR (2019)
+32. Mildenhall, B., Srinivasan, P.P., Tancik, M., Barron, J.T., Ramamoorthi, R., Ng,
+R.:Nerf:Representingscenesasneuralradiancefieldsforviewsynthesis.In:ECCV
+(2020)
+33. Moreau,A.,Song,J.,Dhamo,H.,Shaw,R.,Zhou,Y.,Pérez-Pellitero,E.:Human
+gaussian splatting: Real-time rendering of animatable avatars. In: CVPR (2024)
+34. Morgenstern, W., Barthel, F., Hilsmann, A., Eisert, P.: Compact 3d scene repre-
+sentation via self-organizing gaussian grids. arXiv (2023)
+35. Müller, T., Evans, A., Schied, C., Keller, A.: Instant neural graphics primitives
+with a multiresolution hash encoding. SIGGRAPH (2022)
+36. Navaneet, K., Meibodi, K.P., Koohpayegani, S.A., Pirsiavash, H.: Compact3d:
+Compressing gaussian splat radiance field models with vector quantization. arXiv
+(2023)RadSplat: Radiance Field-Informed Gaussian Splatting 17
+37. Niedermayr, S., Stumpfegger, J., Westermann, R.: Compressed 3d gaussian splat-
+ting for accelerated novel view synthesis. arXiv (2023)
+38. Niemeyer,M.,Geiger,A.:Giraffe:Representingscenesascompositionalgenerative
+neural feature fields. In: CVPR (2021)
+39. Niemeyer, M., Mescheder, L., Oechsle, M., Geiger, A.: Occupancy flow: 4d recon-
+struction by learning particle dynamics. In: CVPR (2019)
+40. Niemeyer,M.,Mescheder,L.M.,Oechsle,M.,Geiger,A.:Differentiablevolumetric
+rendering:Learningimplicit3drepresentationswithout3dsupervision.In:CVPR
+(2020)
+41. Oechsle, M., Peng, S., Geiger, A.: Unisurf: Unifying neural implicit surfaces and
+radiance fields for multi-view reconstruction. In: ICCV (2021)
+42. Park,J.J.,Florence,P.,Straub,J.,Newcombe,R.,Lovegrove,S.:Deepsdf:Learning
+continuous signed distance functions for shape representation. In: CVPR (2019)
+43. Park,K.,Sinha,U.,Barron,J.T.,Bouaziz,S.,Goldman,D.B.,Seitz,S.M.,Martin-
+Brualla, R.: Nerfies: Deformable neural radiance fields. In: ICCV (2021)
+44. Park,K.,Sinha,U.,Hedman,P.,Barron,J.T.,Bouaziz,S.,Goldman,D.B.,Martin-
+Brualla,R.,Seitz,S.M.:Hypernerf:Ahigher-dimensionalrepresentationfortopo-
+logically varying neural radiance fields. SIGGRAPH (2021)
+45. Peng, S., Jiang, C., Liao, Y., Niemeyer, M., Pollefeys, M., Geiger, A.: Shape as
+points: A differentiable poisson solver. NeurIPS (2021)
+46. Peng, S., Niemeyer, M., Mescheder, L., Pollefeys, M., Geiger, A.: Convolutional
+occupancy networks. In: ECCV (2020)
+47. Poole, B., Jain, A., Barron, J.T., Mildenhall, B.: Dreamfusion: Text-to-3d using
+2d diffusion. In: ICLR (2022)
+48. Qi, C.R., Su, H., Mo, K., Guibas, L.J.: Pointnet: Deep learning on point sets for
+3d classification and segmentation. In: CVPR (2017)
+49. Qi, C.R., Su, H., Nießner, M., Dai, A., Yan, M., Guibas, L.J.: Volumetric and
+multi-view cnns for object classification on 3d data. In: CVPR (2016)
+50. Qi,C.R.,Yi,L.,Su,H.,Guibas,L.J.:Pointnet++:Deephierarchicalfeaturelearn-
+ing on point sets in a metric space. In: NeurIPS (2017)
+51. Qian, S., Kirschstein, T., Schoneveld, L., Davoli, D., Giebenhain, S., Nießner, M.:
+Gaussianavatars: Photorealistic head avatars with rigged 3d gaussians. In: CVPR
+(2024)
+52. Qin, M., Li, W., Zhou, J., Wang, H., Pfister, H.: Langsplat: 3d language gaussian
+splatting. In: CVPR (2024)
+53. Rakotosaona, M.J., Manhardt, F., Arroyo, D.M., Niemeyer, M., Kundu, A.,
+Tombari, F.: Nerfmeshing: Distilling neural radiance fields into geometrically-
+accurate 3d meshes. In: 3DV (2024)
+54. Reiser,C.,Garbin,S.,Srinivasan,P.P.,Verbin,D.,Szeliski,R.,Mildenhall,B.,Bar-
+ron, J.T., Hedman, P., Geiger, A.: Binary opacity grids: Capturing fine geometric
+detail for mesh-based view synthesis. arXiv (2024)
+55. Reiser, C., Peng, S., Liao, Y., Geiger, A.: Kilonerf: Speeding up neural radiance
+fields with thousands of tiny mlps. In: ICCV (2021)
+56. Reiser, C., Szeliski, R., Verbin, D., Srinivasan, P.P., Mildenhall, B., Geiger, A.,
+Barron, J.T., Hedman, P.: MERF: memory-efficient radiance fields for real-time
+view synthesis in unbounded scenes. SIGGRAPH (2023)
+57. Sainz,M.,Pajarola,R.:Point-basedrenderingtechniques.Computers&Graphics
+(2004)
+58. Schütz, M., Kerbl, B., Wimmer, M.: Software rasterization of 2 billion points in
+real time. CGIT (2022)18 Niemeyer et al.
+59. Schwarz, K., Liao, Y., Niemeyer, M., Geiger, A.: Graf: Generative radiance fields
+for 3d-aware image synthesis. In: NeurIPS (2020)
+60. Shi, J.C., Wang, M., Duan, H.B., Guan, S.H.: Language embedded 3d gaussians
+for open-vocabulary scene understanding. In: CVPR (2024)
+61. Sitzmann, V., Zollhöfer, M., Wetzstein, G.: Scene representation networks: Con-
+tinuous 3d-structure-aware neural scene representations. In: NeurIPS (2019)
+62. Tang,J.,Ren,J.,Zhou,H.,Liu,Z.,Zeng,G.:Dreamgaussian:Generativegaussian
+splatting for efficient 3d content creation. In: ICLR (2024)
+63. Tang, J., Zhou, H., Chen, X., Hu, T., Ding, E., Wang, J., Zeng, G.: Delicate
+textured mesh recovery from nerf via adaptive surface refinement. arXiv (2022)
+64. Tsalicoglou,C.,Manhardt,F.,Tonioni,A.,Niemeyer,M.,Tombari,F.:Textmesh:
+Generation of realistic 3d meshes from text prompts. arXiv (2023)
+65. Wang,N.,Zhang,Y.,Li,Z.,Fu,Y.,Liu,W.,Jiang,Y.G.:Pixel2mesh:Generating
+3d mesh models from single rgb images. In: ECCV (2018)
+66. Wang, Z., Shen, T., Nimier-David, M., Sharp, N., Gao, J., Keller, A., Fidler, S.,
+Müller,T.,Gojcic,Z.:Adaptiveshellsforefficientneuralradiancefieldrendering.
+In: SIGGRAPH Asia (2023)
+67. Wiles,O.,Gkioxari,G.,Szeliski,R.,Johnson,J.:Synsin:End-to-endviewsynthesis
+from a single image. In: CVPR (2020)
+68. Wu,G.,Yi,T.,Fang,J.,Xie,L.,Zhang,X.,Wei,W.,Liu,W.,Tian,Q.,Xinggang,
+W.:4dgaussiansplattingforreal-timedynamicscenerendering.In:CVPR(2024)
+69. Xie,Y.,Takikawa,T.,Saito,S.,Litany,O.,Yan,S.,Khan,N.,Tombari,F.,Tomp-
+kin, J., Sitzmann, V., Sridhar, S.: Neural fields in visual computing and beyond.
+In: CFG (2022)
+70. Yan, C., Qu, D., Wang, D., Xu, D., Wang, Z., Zhao, B., Li, X.: Gs-slam: Dense
+visual slam with 3d gaussian splatting. arXiv (2023)
+71. Yan, Z., Low, W.F., Chen, Y., Lee, G.H.: Multi-scale 3d gaussian splatting for
+anti-aliased rendering. arXiv (2023)
+72. Yariv, L., Gu, J., Kasten, Y., Lipman, Y.: Volume rendering of neural implicit
+surfaces. In: NeurIPS (2021)
+73. Yariv,L.,Hedman,P.,Reiser,C.,Verbin,D.,Srinivasan,P.P.,Szeliski,R.,Barron,
+J.T., Mildenhall, B.: Bakedsdf: Meshing neural sdfs for real-time view synthesis.
+In: SIGGRAPH (2023)
+74. Yariv,L.,Kasten,Y.,Moran,D.,Galun,M.,Atzmon,M.,Ronen,B.,Lipman,Y.:
+Multiview neural surface reconstruction by disentangling geometry and appear-
+ance. In: NeurIPS (2020)
+75. Yi, T., Fang, J., Wang, J., Wu, G., Xie, L., Zhang, X., Liu, W., Tian, Q., Wang,
+X.: Gaussiandreamer: Fast generation from text to 3d gaussians by bridging 2d
+and 3d diffusion models. In: CVPR (2024)
+76. Yifan, W., Serena, F., Wu, S., Öztireli, C., Sorkine-Hornung, O.: Differentiable
+surface splatting for point-based geometry processing. SIGGRAPH (2019)
+77. Yu,A.,Li,R.,Tancik,M.,Li,H.,Ng,R.,Kanazawa,A.:Plenoctreesforreal-time
+rendering of neural radiance fields. In: CVPR (2021)
+78. Yu, Z., Chen, A., Huang, B., Sattler, T., Geiger, A.: Mip-splatting: Alias-free 3d
+gaussian splatting. arXiv (2023)
+79. Zheng, S., Zhou, B., Shao, R., Liu, B., Zhang, S., Nie, L., Liu, Y.: Gps-gaussian:
+Generalizablepixel-wise3dgaussiansplattingforreal-timehumannovelviewsyn-
+thesis. In: CVPR (2024)
+80. Zwicker, M., Pfister, H., Van Baar, J., Gross, M.: Ewa volume splatting. In: VIS
+(2001)
