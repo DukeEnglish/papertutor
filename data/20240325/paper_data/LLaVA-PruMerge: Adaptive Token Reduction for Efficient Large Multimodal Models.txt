@@ -1,0 +1,589 @@
+LLaVA-PruMerge:
+Adaptive Token Reduction for Efficient Large
+Multimodal Models
+YuzhangShang1,2,∗ MuCai1,∗ BingxinXu2 YongJaeLee1,† YanYan2,†
+1UniversityofWisconsin–Madison 2IllinoisInstituteofTechnology
+https://llava-prumerge.github.io
+Abstract
+LargeMultimodalModels(LMMs)haveshownsignificantreasoningcapabilities
+by connecting a visual encoder and a large language model. LMMs typically
+use a fixed amount of visual tokens, such as the penultimate layer features in
+theCLIPvisualencoder,astheprefixcontent. RecentLMMsincorporatemore
+complexvisualinputs,suchashigh-resolutionimagesandvideos,whichincrease
+the number of visual tokens significantly. However, due to the design of the
+Transformerarchitecture,computationalcostsassociatedwiththesemodelstendto
+increasequadraticallywiththenumberofinputtokens. Totacklethisproblem,we
+exploreatokenreductionmechanismandfind,similartopriorwork,thatmany
+visualtokensarespatiallyredundant. Basedonthis,weproposePruMerge,anovel
+adaptivevisualtokenreductionapproach, whichlargelyreducesthenumberof
+visualtokenswhilemaintainingcomparablemodelperformance. Wefirstselect
+the unpruned visual tokens based on their similarity to class tokens and spatial
+tokens. We then cluster the pruned tokens based on key similarity and merge
+the clustered tokens with the unpruned tokens to supplement their information.
+Empirically, when applied to LLaVA-1.5 [Liu et al., 2023a], our approach can
+compress the visual tokens by 14.4 times on average, and achieve comparable
+performanceacrossdiversevisualquestion-answeringandreasoningtasks. Code
+andcheckpointswillbereleased.
+1 Introduction
+LargeLanguageModels(LLMs)[OpenAI,2023b,Teametal.,2023,Jiangetal.,2023,Touvron
+etal.,2023]haveshownstrongreasoningabilities. LLMsareusuallyhigh-capacityTransformers
+pretrainedwithalarge-scaletextcorpus. LargeMultimodalModels(LMMs),inherittheLLMsfor
+textgeneration,butalsoleverageavisualencodersuchasCLIP-ViT[Radfordetal.,2021]toembed
+imagepatchesintovisualtokensastheprefixvisualcontext.
+LMMsneedsubstantialcomputationtoconductinference.TheLLMistheprimaryfactorforthehigh
+computationcost,sincethevisualencoderisusuallyquitesmallrelativetotheLLM.Forexample,
+thecommonlyusedCLIPvisualencoder,ViT-L,onlyhas0.3Bparameters,whilethecorresponding
+LLMsuchasLLaMA[Touvronetal.,2023]orVicuna[Vicuna,2023]canhave7Bor13Bparameters.
+Asaresult,reducingtheLLM’sinferencecostisthekeytoachievinglowLMMinferencecost.
+Priorworks[Chuetal.,2023,2024,Yuanetal.,2023a]mainlyfocusonreplacingtheLLMbackbone
+withasmallerlanguagemodelwithlessparameters,suchasPhi-2[Javaheripietal.,2023]. However,
+suchapproachessacrificethereasoningabilitiesofLLMs, leadingtoalargeperformancegapin
+∗EqualContribution.†EqualAdvisingAuthor.WorkdoneduringYuzhang’svisittoUW-Madison.
+4202
+raM
+22
+]VC.sc[
+1v88351.3042:viXraLanguage Response 𝒀
+𝒂
+Language Model 𝒇
+𝜽
+𝑯 𝑯
+𝒗 𝒒
+Projector 𝑾 Tokenizer
+𝒁′ Language Instruction
+𝒗
+𝑿
+𝒒
+Token PruMerge
+𝒁
+𝒗
+Vision Encoder
+Vision Input 𝑿
+𝒗
+(a)MainideaofLLaVA-PruMerge. (b)PruMergedTokenVisualization.
+Figure1: (a)Wepruneandmergethevisualtokenscomingfromthevisionencoder,whilekeeping
+allotherproceduresoftheLMMthesame. Byreducingthenumberofvisualtokens,ourproposed
+method,PruMerge,significantlyreducesthecomputationcostfortextgenerationinLMMs. (b)The
+visualizationsoftheattentivetokens. Wedesignatokenreductionmethodtoadaptivelyselectvisual
+tokensbasedontheinformationdensityofthevisualinput,enablingtheLLMtoperceivevisual
+inputeffectivelyandefficiently. Moreattentivetokensaresampledincompleximagessuchasones
+withtext,whilefeweraresampledonsimplerimages. Besides,suchattentivetokensareusually
+locatedattheregionswithdenseinformation.
+visual question-answering and reasoning such as VQAv2 and MM-Bench [Chu et al., 2024]. A
+similarapproachistoapplyquantizationforLLMs[Liuetal.,2023b,Yuanetal.,2024].
+However,thecostofLLMscomesfromnotonlyitslargenumberofparameters,butalsothelength
+oftheinputcontextduetothequadraticcomplexityoftheTransformer’sattentionoperation. The
+contextlengthinLMMsisespeciallyimportant,whereafixedamountofvisualtokensservesas
+theprefixedtokens. Forexample,inLLaVA-1.5,576visualtokensareappended,leadingtohigh
+trainingandinferencecosts. Thus,anintriguingquestionis: Canwereducethenumberofprefix
+visualtokenswhilemaintainingcomparableperformance?
+Inourstudy,wefindthatsuchvisualtokensareredundant,similartofindingsinpreviousrelated
+work Bolya et al. [2023], Liu et al. [2022], and most of the visual tokens can be pruned without
+largelysacrificingtheperformance. Inparticular,wefindthattheactivationsareverysparseupon
+thesimilaritymatrixbetweentheclasstokenandspatialpatches,whichindicatesthatonlyasmall
+amountofthevisualtokensarerelatedtothekeyvisualinformationintheimage. Motivatedbythis,
+weusethissimilaritytoselectimportantvisualtokens. Specifically,weleveragetheInterquartile
+Range(IQR)[Boukercheetal.,2020]scoringfunctioninoutlierdetectiontoprunethevisualtokens.
+Moreover,wemergethevisualtokensusingk-nearestneighborandupdatethesampledvisualtokens
+viaweightedaveraging,whichfurtherenhancesperformance. Finally,weoptionallyfinetunethe
+LLMtoletthemodelbetteradapttoourtokendeductiondesign.
+Empirically,LLaVA-PruMergecaneffectivelyandadaptivelyprunethevisualtokensineachimage
+inLLaVA-1.5[Liuetal.,2023a],wherewithjust6.9%ofvisualtokens,whichisaround40tokenson
+average,ourmodelcanmaintaincomparableperformancewiththatofretainingall576tokensacross
+diversebenchmarks. Ourworkdemonstratestheeffectivenessofbuildingefficientlargemultimodal
+modelsfromtheperspectiveofvisualtokenpruningandpavestheroadforfurtherresearch.
+2 RelatedWork
+2.1 LargeMultimodalModels(LMMs)
+LargeLanguageModels(LLMs)suchasGPT-4[OpenAI,2023b],LLaMA[Touvronetal.,2023],
+Mistral [Jiang et al., 2023], and Gemini [Team et al., 2023] have demonstrated strong question
+2answeringandreasoningcapabilitiesovertext. LargeMultimodalModels(LMMs)[Liuetal.,2023b,
+Zhuetal.,2023,Yinetal.,2023,Zhangetal.,2024]extendthesereasoningcapabilitiestoimages,
+wheregivenanimageandanassociatedquestion,avisionencoderandanLLMareleveragedto
+generate text responses in a chat format. More recent works extend whole-image understanding
+intoregion-levelunderstanding[Caietal.,2024,Zhangetal.,2023b,Pengetal.,2023,Chenetal.,
+2023],videounderstanding[Linetal.,2023,Zhangetal.,2023a]and3Dsceneunderstanding[Hong
+etal.,2023]. SuchworkstypicallyfeedthevisualtokensdirectlyintotheLLMasprefixtokens,via
+eitherMLP[Liuetal.,2023a],Qformer[Daietal.,2023,Zhuetal.,2023],orresampler[Alayrac
+etal.,2022]. Thenumberofvisualtokenscanbeprohibitivelylong,especiallywhentheimages
+arehigh-resolution[Liuetal.,2024,OpenAI,2023a]. Inthispaper,wereducethenumberofvisual
+tokensbyleveragingthesimilaritybetweentheclasstokenandthespatialpatchtokens.
+2.2 EfficientLMMs
+Theneedforcross-modalcapabilitiesinresource-limitedscenarioshasbecomeincreasinglyimpor-
+tant. DespiteadvancementsinLMMs,theirlarge-scaletraininganddeploymentincursignificant
+computationalcosts,necessitatingefficientparalleldeviceimplementations. Google’sGemini[Team
+etal.,2023]isaleaderinefficientLMMs,achievingstate-of-the-artperformanceonmultimodal
+benchmarksandintroducingmobile-scaleLMMssuitableforlow-memorydevices.However,Gemini
+remainsclosed-source. Open-sourceinitiatives,likeLLaVA-1.5[Liuetal.,2023a],utilizeadvanced
+compression techniques, such as 4/8 bit quantization [Dettmers et al., 2022, Shang et al., 2024].
+FurthereffortstowardsefficientLMMsincludeMobileVLM[Chuetal.,2023],whichdevelopsa
+compactLLMandanefficientmultimodalfeatureprojector,anditssuccessor,MobileVLM-v2[Chu
+etal.,2024],whichexploresimprovedtrainingstrategiesformobilescenarios. TinyGPT-V[Yuan
+et al., 2023a] leverages the advanced Phi-2 [Javaheripi et al., 2023] LLM to surpass the perfor-
+manceofsignificantlylargermodels. Similarly,LLaVA-Phi[Zhuetal.,2024]andVary-toy[Wei
+etal.,2024]introducesmallerbackbonesandenhancedvocabulariesforbroadergeneralizability.
+TinyLLaVA[Zhouetal.,2024]investigatestheimpactsofarchitecturalchoices,dataquality,and
+training strategies, demonstrating that smaller LMMs can match the performance of their larger
+counterpartswithoptimizeddataandtraining. MoE-LLaVA[Linetal.,2024]adaptsMixtureof
+Experts(MoE)tomitigatemodeldegradationduetosparsity.
+2.3 TokenReduction
+The notorious squared complexity in Transformers [Vaswani et al., 2017] is a well-known prob-
+lem, as it is one of the key bottlenecks in scaling the sequence length. Sparse attention such as
+Linformer[Wangetal.,2020]andReFormer[Kitaevetal.,2020]reducethequadraticattention
+complexitybyconductingattentionoperationswithinacertainregionratherthanthefullcontext.
+Tokenmerging[Bolyaetal.,2023]utilizesfullattentionbutgraduallyreducesthenumberoftokens
+ineachtransformerblockbyselectingthemostrepresentativetokenswithbipartitematching. In
+recentLMMs[Liuetal.,2023b,Zhuetal.,2023],prefixvisualtokensserveasafixedbudgetfor
+context, whichbecomesoneoftheleadingfactorsfortheirefficiency. Inourstudy, wefindthat
+bysimplypruningandmergingvisualtokensbasedontheirsimilarity,wecanachievecomparable
+performanceusinglessthanonetenthoftheoriginaltokens.
+3 Method: TokenPru-Merging
+Inthissection,wefirstreviewthebasicimplementationoflargemutilmodalmodels(LMMs),with
+a particular focus on the visual encoder component (i.e., Vision Transformer). We highlight the
+directcorrelationbetweenthenumberofvisualtokensandtheefficiencyofLMMs(Sec.3.1). Next,
+wepresentaplug-and-playtokenreductionmethodspecificallydesignedforLMMs,calledtoken
+PruMerge. Ourmethodfeaturestwokeycomponents:(1)AdaptiveImportantTokenSelection(AITS)
+via Outlier Detection which adaptively determines the optimal number of visual tokens to retain
+based on the unique characteristics of the image (Sec. 3.2); and (2) Token Supplement (TS) via
+SimilarKeyClustering,whichfacilitatesmoreefficientprocessingwithoutcompromisingthemodel’s
+performancebymaintainingtheintegrityandrichnessofthevisualinformation(Sec.3.3).
+3Guide Guide
+Class First Step: Final Step:
+Token 𝑾 𝒒 𝑸 Class A Sed la ep ctt ii nve g W Clue sig teh rt e Cd enter
+Attention Attentive Update for
+𝑨𝒕𝒕𝒏 Tokens Merging Token 𝑛
+𝑚
+Vis𝑛 ual 𝑾 𝒌 𝑲 𝒁 FFN M Ve isr ug ae ld
+Tokens Self- Self-similarity Tokens
+Sim Matrix of Key
+Second Step:
+𝑾 𝒗 𝑽 Clustering for
+Token Merging
+Guide
+Figure2: TheconceptualideaofLLaVA-PruMerge. Ourapproachhas3steps: (1)Sampleimportant
+tokensaccordingtothesimilaritiesbetweentheclasstokensandspatialvisualtokens;(2)Cluster
+the visual tokens via k-nearest neighbor; and (3) Adjust the sampled visual tokens via weighted
+averagingforeachcluster. Heremdenotesthevisualtokencompressionratio.
+3.1 Preliminaries
+VisionTransformers(ViTs)[Dosovitskiyetal.,2020]arethemostwidelyusedvisionencoderfor
+largemultimodalmodels,inwhichtheinputimageisconvertedintoasequenceofrepresentative
+tokensbytheViT,andthenfeedintoanLLMforunderstanding[Liuetal.,2024,Zhuetal.,2023,
+Hongetal.,2023,Zhangetal.,2024]. ViTsperformtokenizationbydividinganinputimageinto
+patchesandprojectingeachpatchintoatokenembedding. Anextraclasstoken[CLS]isaddedto
+thesetofimagetokensandisresponsibleforaggregatingglobalimageinformationandperforming
+classification.Letndenotethenumberofinputtokens(imagepatches)totheViT.ViTsarecomposed
+ofaseriesoftransformerblocks. Anassemblyofseveralkeycomponentscomposeseachtransformer
+block: amulti-headself-attentionlayer,afeed-forwardneuralnetwork(FFN),shortcutconnections,
+andlayernormalization[Baetal.,2016],allofwhichworktogethertoenhancethemodel’sabilityto
+captureandinterpretvisualinformation[Hanetal.,2022]. Intheself-attentionlayer,aninputtoken
+isprojectedintothreedistinctvectors: thequeryvectorq,thekeyvectork,andthevaluevectorv,
+utilizingthreelineartransformationmatricesW ,W ,andW . Thesevectors,correspondingto
+q k v
+differentinputs,areassembledintomatricesQ,K,andV. Theself-attentionmechanismcomputes
+therelevanceofeachitemtootheritemsasfollows:
+Y =Self-Attention(Q,K,V)=A·V (3.1)
+(cid:16) (cid:17)
+whereattentionmatrixA=softmax Q √·K dkT andd
+k
+representsthedimensionofq,k,v. Inthelast
+encoderlayerofViT,the[CLS]tokenisusedforclassification. Similarly,theattentionbetween
+[CLS]tokenandothervisualtokensareperformedviatheattentionmechanism:
+(cid:18)
+q
+·KT(cid:19)
+a =softmax cl√s . (3.2)
+cls
+d
+k
+Themulti-headself-attentionframeworkallowsforsimultaneousfocusonmultiplepositions,offering
+diverse representation subspaces. This is achieved by employing distinct query, key, and value
+matricesfordifferentheads,whichprojecttheinputvectorsintovariedrepresentationsubspaces.
+Subsequenttotheself-attentionlayersisthefeed-forwardnetwork(FFN).Thisnetworkconsistsof
+twolineartransformationlayersseparatedbyanonlinearactivationfunctionandisrepresentedas:
+FFN(X)=W σ(W X) (3.3)
+2 1
+withW andW beingtheparametermatricesofthelineartransformationlayersandσdenoting
+1 2
+thenonlinearactivationfunction,suchasGELU[Hendrycks&Gimpel,2016]. Thegeneralforward
+passofViTisillustratedintheleftpartofFigure2.
+LargeMultimodalModels(LMMs). FollowingtheforwardpassthroughaVisionTransformer
+(ViT),aseriesofvisualtokensisgenerated. Thesetokensarethenprocessedbytheinputprojector
+Θ ,whichisresponsibleformappingtheencodedfeaturesfromothermodalitiesF intothe
+X→T X
+text feature space T. The aligned features and the text prompts P are then fed into the LLM
+T
+416
+14
+12
+10
+8
+6
+4
+2
+0
+0 100 200 300 400 500
+Visual Token Index
+Figure3: Thedistributionofattentionvaluesbetweenthe[cls]tokenandvisualtokens. Thevaluesinthe
+y-axisarelogarithmicvalues.Notably,mostofthespatialvisualtokenshavenear-zeroattentionvalueswiththe
+classtoken.
+backbone [Zhang et al., 2024]. The overall architecture of LMMs is depicted in Figure 1. It
+is important to note that the computational cost associated with these models tends to increase
+quadraticallywiththenumberofinputtokensfedintotheLLMbackbone[Tayetal.,2022]. There
+isanincreasingdemandfortheprocessingofhigh-resolutionimagesandvideos,whichincreases
+thenumberofvisualtokens,furtherexacerbatingcomputationcosts. Thereductionofvisualtokens
+presents a promising approach to improving the efficiency of LMMs by reducing the escalating
+computationalrequirements.
+3.2 AdaptiveImportantTokenSelectionviaOutlierDetection
+Themoststraight-forwardsolutiontoimprovetheefficiencyofvisualtokenutilizationinLMMsisto
+prunetheredundantvisualtokens[Liuetal.,2022,Yinetal.,2022,Liangetal.,2022]. Torealize
+tokenpruning,weneedtoaddressapivotalquestion: Howdowedeterminetheimportanceofeach
+visualtoken?
+AsdiscussedinSec.3.1,LMMstypicallyleverageanextensivestackofvisualtokenstorepresent
+the visual information. On the other hand, self-/weakly-supervised learning paradigms, such as
+CLIP[Radfordetal.,2021]simplifythiscomplexitybyrepresentinganentireimagewithasingle
+[cls] token, regarded as the most information-condensed token. To balance those two extreme
+paradigms,weinvestigatetheKey-Queryattentionbetween[cls]tokenandvisualtokens,i.e.,a
+cls
+inEquation3.2. Observingthedistributionpatternsofattentionbetweenthe[cls]tokenandvisual
+tokensunveilsasparselandscape,asdepictedinFigure3. Thissparsedistributionunderpinsour
+methodologyforidentifyingcrucialvisualtokens. Byemployingoutlierdetectionalgorithms,we
+aimtoadaptivelyselectvisualtokensthatbestrepresentanimage’sfeatureseffectively.
+InterquartileRange(IQR)Methodforoutlierdetection. Toidentifyoutlierswithinclassattention
+values,weadopttheInterquartileRange(IQR)method[Boukercheetal.,2020],astatisticaltechnique
+knownforitsrobustnessinoutlierdetection. TheessenceoftheIQRmethodliesinitscapability
+to establish a boundary or “fence” that delineates the normal range of data. This is achieved by
+calculating the IQR (the difference between the third quartile Q3 and the first quartile Q1) and
+subsequentlydefiningtheouterlimitsofthenormalrangeas1.5timestheIQRaboveQ3andbelow
+Q1. Specifically,thecomputationisasfollows: the“lowerfence”issetat1.5×IQRbelowQ1,and
+the“upperfence”issetat1.5×IQRaboveQ3. Anyattentionvaluesresidingoutsidethesefences
+areclassifiedasoutliers. Throughthismethod,wecanadaptivelyidentifyandselectthevisualtokens
+foreachimagethatexhibitoutlierattentionvalues,i.e.,thoseplayingasignificantroleinrepresenting
+theimagewithintheLMMcontext.
+AsshowninFigure1b,thesampledvisualtokensdemonstratetwobehaviors: (1)Thenumberof
+attentivetokensareproportionaltothecomplexityoftheimage. Simplerimagessuchas”Billboard
+amongbluesky”ownsfewertokenswhileimageswithrichinformationsuchasascreenwithdense
+textsownmoretokens. (2)Thesampledtokensarespatiallyalignedwiththeimportantdetails,while
+5
+)eulaV
+noitnettA
+ssalC(goLAlgorithm1TokenPruMergealgorithmforreducingthenumberofvisualtokens.
+Require: Key and Query matrices of ViT’s penultimate layer, K = {k ,···k } and Q =
+1 n
+{q ,···q }. The penultimate layer’s output tokens, Y = {y ,···y }. n is the number
+1 n 1 n
+ofinputvisualtokens.
+Ensure: RefineYtom(adaptive)visualtokenY′ ={y′,···y′ },inwhichm≪n.
+1 m
+1: TokenPruMerge:
+2: Calculateattentionbetweenvisualtokenandclasstokena usingEquation3.2.
+[cls]
+3: UsetheoutlierdetectionalgorithmIQRtoadaptivelyselectmimportantvisualtokens’index
+{i ,··· ,i }basedona (seeSec.3.2).
+1 m [cls]
+4: forp={i 1,··· ,i m}do
+5: Calculatethedistancebetweenselectedtokeny pandothervisualtokens,y {1,···,n}/p;
+6: Usey pasclustercenterandrunk-nearestneighboralgorithmtofindksimilartokens,with
+indices{j ,··· ,j } ;
+1 k p
+7: Updateclustercentertokenwithweightedsum: y p′ =(cid:80)k q=1a[j q]·y jq;
+8: endfor
+9: (seeSec.3.3).
+10: OutputarefinedstackofvisualtokenY′ ={y′,···y′ }.
+1 m
+lesstokensareassignedforthebackground. Suchvisualizationsalignwithourvisualtokensampling
+design.
+3.3 TokenSupplementviaSimilarKeyClustering
+Followingtheselectionofmoreinformativevisualtokens,wenextoptimizetheutilizationofthe
+remainingtokens. Whileprunedtokensmayinitiallyseemextraneous,theyholdpotentialvaluefor
+theperceptioncapabilitiesoftheLLMbackbone. Thispotentialarisesparticularlyincaseswhere
+animagecontainslargeobjectpartsthatdominatethescene. Insuchscenarios,overlyaggressive
+pruningcouldinadvertentlydiminishthemodel’sabilitytorepresenttheimagecomprehensively.
+Toaddressthis,wedeviseatokenmergingmethodaimedatenhancingtherepresentationalcapacity
+oftheselectedunprunedtokens. Thismethodinvolvesthestrategicfusionofcurrentlyprunedtokens,
+asdepictedinFigure2. Tochoosetheprunedtokenstomerge,weneedawaytomeasuresimilarity
+betweenvisualtokens. Luckily,transformersnativelysolvethisproblemwithQKVself-attention.
+Specifically,thekeys(K)alreadysummarizetheinformationcontainedineachtokenforuseindot
+productsimilarity. Thus,weuseadotproductsimilaritymetric(e.g.,cosinesimilarity)betweenthe
+keysofeachtokentodeterminewhichtokenscontainsimilarvisualinformation[Bolyaetal.,2023].
+Specifically,thesimilaritybetweenvisualtokensiscomputedas
+Sim(y ,y )=k ·kT, (3.4)
+i j i j
+whichyieldsKKT(i,j)fortokensi,j invectorizationformforthesetofalltokens1,2,··· ,n.
+Withthesimilaritiesbetweenvisualtokensestablished,wesimplyfindthek-nearestneighborsfor
+eachunprunedtoken,whichactastheclustercenters. Theintegrationofprunedtokensintothese
+clustersisguidedbytheirrespectiveclassattentionsa[i],enablingarefinedrepresentationofeach
+unprunedtokenthroughaweightedsum. ThisprocedureisoutlinedinAlgorithm1.
+4 Experiments
+WefirstshowtheempiricalperformanceofourapproachwhenappliedtoLLaVA-1.5inSec4.1. We
+thendemonstratetheeffectivenessofeachcomponentinourmodelinSec4.3.
+4.1 MainResults
+WeapplyourmethodtoLLaVA-1.5[Liuetal.,2023a],arecentstate-of-the-artLMM.Wefurther
+finetune LLaVA-1.5 using LoRA [Hu et al., 2022] for 1 epoch using the LLaVA-1.5 instruction
+fine-tuningdata[Liuetal.,2023a]withourreducedvisualtokens.
+6Table1: Comparisonwithlargemultimodalmodelsonsixbenchmarks. Ourproposedapproach
+LLaVA-PruMergecanadaptivelypruneandmergevisualtokens,whichusesonly6.9%visualtokens
+onaverageandachievescompetitiveperformancecomparedtotheoriginalLLaVA-1.5model.
+Method LLM Res. PT IT VQAv2 SQAI VQAT POPE MME MMB
+BLIP-2 Vicuna-13B 224 129M - 41.0 61 42.5 85.3 1293.8 -
+InstructBLIP Vicuna-7B 224 129M 1.2M - 60.5 50.1 - - 36
+InstructBLIP Vicuna-13B 224 129M 1.2M - 63.1 50.7 78.9 1212.8 -
+Shikra Vicuna-13B 224 600K 5.5M 77.4 - - - - 58.8
+IDEFICS-9B LLaMA-7B 224 353M 1M 50.9 - 25.9 - - 48.2
+IDEFICS-80B LLaMA-65B 224 353M 1M 60.0 - 30.9 - - 54.5
+Qwen-VL Qwen-7B 448 1.4B 50M 78.8 67.1 63.8 - - 38.2
+Qwen-VL-Chat Qwen-7B 448 1.4B 50M 78.2 68.2 61.5 - 1487.5 60.6
+LLaVA-1.5 Vicuna-7B 336 558K 665K 78.5 66.8 58.2 85.9 1510.7 64.3
+LLaVA-1.5+Ours Vicuna-7B 336 558K 665K 72.0 68.5 56.0 86.3 1350.3 60.9
+LLaVA-1.5 Vicuna-13B 336 558K 665K 80.0 71.6 61.3 85.9 1531.3 67.7
+LLaVA-1.5+Ours Vicuna-13B 336 558K 665K 72.8 71.0 58.4 86.2 1428.2 62.3
+Weevaluateondiversevisualquestion-answeringandreasoningbenchmarksincludingVQAv2[Goyal
+et al., 2017], ScienceQA [Lu et al., 2022], TextVQA [Singh et al., 2019], POPE hallucination
+bench[Lietal.,2023b],MME[Fuetal.,2023],andMMBench[Liuetal.,2023c]. Asshownin
+Table1,ourapproachachievescomparableperformancewithLLaVA-1.5whileperformingbetter
+thanpreviousworkssuchasBLIP2[Lietal.,2023a]andInstructBLIP[Daietal.,2023]. Specifically,
+inPOPEandSQA,ourapproachevenshowsbetterperformancethanLLaVA-1.5.
+4.2 EfficiencyAnalysis
+ToelucidatethecomputationalefficiencyaffordedbyPruMerge,weutilizetheroofline-basedLLM-
+Vieweranalysisasdevelopedin[Yuanetal.,2024]. Ourinvestigationisgroundedinatheoretical
+scenariotailoredtohighlighttheimpactofPruMergeonprocessingefficiencywithinLMMs.Consider
+atypicalscenariowhereanimageofdimensions336×336pixelsisprocessedusingaCLIP-ViT
+model,resultingin576visualtokens. Accompanyingthisimageisatextprompt,assumedtocontain
+40tokensforthesakeofthisanalysis. ThroughtheapplicationofPruMerge,weachieveadramatic
+reductioninthenumberofvisualtokens,decreasingtheoriginalcountbyapproximately14.4times
+tomatchthetokencountofthetextprompt(576/14.4≈40). Theimplicationsofthisreductionare
+significant,asdemonstratedinTable2,whichoutlinesthecomputationalcostassociatedwiththe
+LMMprefillprocess. Notably,PruMergenotonlyenhancesthespeedoftheLLMprefillprocess
+byreducingtherequiredfloating-pointoperations(FLOPs)butalsocontributestoareductionin
+computationalmemorydemands.
+Table 2: Computation Cost Analysis. The development device is TESLA V100 GPU, and time
+estimatedbytherooflinemodelrepresentsthetheoreticalperformancethatthehardwarecanachieve.
+LLM FLOPs Prefill Total Storing
+Method Quantization
+Backbone (T) Time(ms) Memory(G) Activation(G)
+LLaVA-1.5 Vicuna-7B FP16 9.3 88.6 23.3 4.60
+LLaVA-1.5w/PruMerge Vicuna-7B FP16 0.91 15.3 13.7 0.28
+LLaVA-1.5 Vicuna-7B INT4 2.3 151.6 5.9 1.20
+LLaVA-1.5w/PruMerge Vicuna-7B INT4 0.28 14.9 3.5 0.07
+LLaVA-1.5 Vicuna-13B FP16 18.2 170.5 41.6 7.30
+LLaVA-1.5w/PruMerge Vicuna-13B FP16 1.80 29.5 26.6 0.44
+LLaVA-1.5 Vicuna-13B INT4 4.6 294.9 10.5 1.80
+LLaVA-1.5w/PruMerge Vicuna-13B INT4 0.45 29.0 6.8 0.11
+ItisimportanttoemphasizethatthebenefitsofPruMerge extendbeyondmereefficiencygains. Our
+tokenreductionstrategycancomplementotherLLMaccelerationtechniques,suchasquantization
+andfactorization[Yuanetal.,2023b]. Thisorthogonalrelationshipunderscorestheversatilepotential
+ofPruMergetocontributetoabroaderspectrumofefficiency-enhancingstrategies.
+74.3 AblationStudy
+4.3.1 TokenSamplingStrategyAnalysis
+Hereweshowhowourapproachperformsbetterthanthevanillavisualtokensamplingstrategy,
+includingsequentialsamplingandspatialsampling.
+LLaVA-PruMerge: Our approach dynamically samples key visual tokens (see Sec. 3.2), which
+resultsin40visualtokensperimageonaverage. ThevisualizationisshowninFigure4(b).
+Sequentialsampling: WesampleN tokensintheflattedvisualtokens,showninFigure4(c). Here
+thefirst40tokensaresampledforanapple-to-applecomparison.
+Spatialsampling: SampledN tokensarespatiallydistributedevenlyacrosstheimage,asshownin
+Figure4(d-h). Westudydiversesettings,including6×6(36tokens),5×8(40tokens),8×5(40
+tokens),6×7(36tokens),and7×6(42tokens).
+(a) Original Image (b) Ours (c) Sequential (40) (d) Spatial 6×6=36
+(e) Spatial 5×8=40 (f) Spatial 8×5=40 (g) Spatial 6×7=42 (h) Spatial 7×6=42
+Figure4: Thevisualizationofthedifferentvisualtokenssamplingstrategy.
+Notethatalltheexperimentsaredoneviathetraining-freemanner.AsshowninTable3,ourapproach
+is consistently better than sequential sampling and spatial sampling across all downstream tasks,
+whichdemonstratestheeffectivenessofthesamplingmechanismofLLaVA-PruMerge. Besides,we
+observethatLLaVA-PruMergeshowsmuchbetterperformanceonTextVQA[Singhetal.,2019].
+SuchOpticalCharacterRecognition(OCR)taskrequiresdetailedinformationaboutthetext,which
+demonstratesthatLLaVA-PruMergeextractsthekeyinformationintheimageswithenoughdetails.
+ThisquantitativeresultalignswiththevisualizationofLLaVA-PruMergeattentivetokensinFigure1a
+(b),wheremoreattentivetokensaredistributedontheforegroundtextintheimages.
+Table3: Ablationontrainingfreeandfine-tuningforourapproach. Withfurtherfine-tuning,the
+performanceofLLaVA-PruMergecanbefurtherenhanced.
+Approach NumberofVisualTokens SQA TextVQA POPE MME
+Sequential 40 64.60 42.72 13.2 703.60
+6×6=36 66.58 46.84 67.9 1169.10
+5×8=40 66.19 46.85 70.4 1180.23
+Spatial 8×5=40 68.12 47.42 71.1 1142.32
+6×7=42 67.08 47.96 72.5 1220.89
+7×6=42 66.53 47.49 71.6 1199.10
+LLaVA-PruMerge 40 68.07 54.00 76.2 1250.07
+84.3.2 EffectivenessofEachModuleinPruMerge
+Table 4: Ablation Studies for Adaptive Important Token Selection (AITS, Sec. 3.2) and Token
+Supplement(TS,Sec.3.3). Withthesemodules,thedownstreamperformancecanbeprogressively
+improved.
+Method LLM SQAI VQAT POPE MME
+LLaVA-1.5 Vicuna-7B 66.8 58.2 85.9 1510.7
+LLaVA-1.5w/AITS Vicuna-7B 66.5 54.8 85.7 1221.6
+LLaVA-1.5w/AITS&TS Vicuna-7B 68.5 56.0 86.3 1350.3
+Here, we study the effectiveness of each module in our design based on LLaVA-1.5. Note that
+we maintain the same amount of visual tokens (6.9%, 40 tokens) across all settings. As shown
+inTable4,afterprogressivelyaddingtheproposedmodules,includingAdaptiveImportantToken
+Selection(AITS)andTokenSupplement(TS),thedownstreamperformancecanbefurtherenhanced.
+4.3.3 TrainingAnalysis: Training-freev.s. Fine-tuning
+LLaVA-PruMergecanbeconductedbothintraining-freeandtraining-neededmanners. Withfine-
+tuning,thelargelanguagemodelcanadapttothenewstructureofvisualtokens,whichcouldfurther
+enhance the performance on vision-language tasks. As shown in Table 5, with fine-tuning, our
+approachdoesbringbetterperformancefordiversetasks,includingScienceQA[Luetal.,2022],
+TextVQA[Singhetal.,2019],POPE[Lietal.,2023b],andMME[Fuetal.,2023].
+Table5: Ablationontrainingfreeandfine-tuningforourapproach. Withfurtherfine-tuning,the
+performanceofLLaVA-PruMergecanbefurtherenhanced.
+Method LLM SQAI VQAT POPE MME
+LLaVA-1.5 Vicuna-7B 66.8 58.2 85.9 1510.7
+LLaVA-PruMergew.o.fine-tuning Vicuna-7B 68.0 54.0 76.2 1250.1
+LLaVA-PruMergew.fine-tuning Vicuna-7B 68.5 56.0 86.3 1350.3
+5 Conclusion
+Inthispaper,weimprovetheefficiencyofLargeMultimodalModels(LMMs)fromtheperspective
+ofreducingthequantityofvisualtokens. Byleveragingthespatialredundancyinvisualtokens,we
+proposedaplug-and-playtokenreductionmodulethatemploysthesimilaritybetweentheclasstoken
+andspatialtokensasakeycriterionforpruningandmergingvisualtokens.
+Our approach, applied to LLaVA-1.5, demonstrated that by utilizing only 6.9% of visual tokens
+onaverage,theprunedtokenscanmaintaincomparableperformanceacrossawiderangeofvisual
+question-answeringandreasoningtasks. Notably,ourworkhighlightsthepotentialforsignificant
+computationalsavingswithoutsacrificingthereasoningcapabilitiesofLMMs. Wehopeourwork
+inspiresfurtherexplorationintotheinterplaybetweenefficiencyandperformanceinLMMs.
+6 LimitationandFutureWork
+OurexplorationofLLaVA-PruMergehastwoprimarylimitations. First,thevisualtokencompres-
+sion,whileefficient,isnotentirelylossless. Thisresultsinamarginalperformancegapbetween
+theoriginalmodel(LLaVA)andouroptimizedversionLLaVA-PruMerge. Wearecommittedto
+advancingourresearchtowardsachievingafullylosslesstokencompressionalgorithm,aimingto
+closetheseperformancegaps. Second,thescopeofourvalidationeffortsissomewhatconstrainedby
+thecomputationalresourcestypicallyavailableinacademicsettings. Thislimitationhasprecluded
+acomprehensiveassessmentofPruMerge’sapplicabilitytolarger-scalemodels,suchasthoseenvi-
+sionedintheLLaVA-Next[Liuetal.,2023a]frameworkwithaLLaMA-2-34Bbackbone. Future
+investigationswillseektoextendourmethodologytothesemoreexpansivemodelarchitectures,
+exploringitspotentialforgeneralizationandbroaderimpact.
+9Acknowledgement
+ThisworkwassupportedinpartbyNSFCAREERIIS2150012,andInstituteofInformation&com-
+municationsTechnologyPlanning&Evaluation(IITP)grantsfundedbytheKoreagovernment(MSIT)
+(No. 2022-0-00871,DevelopmentofAIAutonomyandKnowledgeEnhancementforAIAgentCol-
+laboration)and(No. RS2022-00187238,DevelopmentofLargeKoreanLanguageModelTechnology
+forEfficientPre-training),andMicrosoftAccelerateFoundationModelsResearchProgram.
+10References
+Jean-BaptisteAlayrac,JeffDonahue,PaulineLuc,AntoineMiech,IainBarr,YanaHasson,KarelLenc,Arthur
+Mensch,KatherineMillican,MalcolmReynolds,etal. Flamingo: avisuallanguagemodelforfew-shot
+learning. NeurIPS,35:23716–23736,2022.
+JimmyLeiBa,JamieRyanKiros,andGeoffreyEHinton.Layernormalization.arXivpreprintarXiv:1607.06450,
+2016.
+DanielBolya,Cheng-YangFu,XiaoliangDai,PeizhaoZhang,ChristophFeichtenhofer,andJudyHoffman.
+Tokenmerging:YourViTbutfaster. InInternationalConferenceonLearningRepresentations,2023.
+AzzedineBoukerche,LiningZheng,andOmarAlfandi. Outlierdetection:Methods,models,andclassification.
+ACMComputingSurveys(CSUR),2020.
+MuCai,HaotianLiu,SivaKarthikMustikovela,GregoryP.Meyer,YuningChai,DennisPark,andYongJaeLee.
+Makinglargemultimodalmodelsunderstandarbitraryvisualprompts. InIEEEConferenceonComputer
+VisionandPatternRecognition,2024.
+KeqinChen,ZhaoZhang,WeiliZeng,RichongZhang,FengZhu,andRuiZhao.Shikra:Unleashingmultimodal
+llm’sreferentialdialoguemagic. arXivpreprintarXiv:2306.15195,2023.
+XiangxiangChu,LimengQiao,XinyangLin,ShuangXu,YangYang,YimingHu,FeiWei,XinyuZhang,
+BoZhang,XiaolinWei,etal.Mobilevlm:Afast,reproducibleandstrongvisionlanguageassistantformobile
+devices. arXivpreprintarXiv:2312.16886,2023.
+XiangxiangChu, LimengQiao, XinyuZhang, ShuangXu, FeiWei, YangYang, XiaofeiSun, YimingHu,
+XinyangLin,BoZhang,etal. Mobilevlmv2:Fasterandstrongerbaselineforvisionlanguagemodel. arXiv
+preprintarXiv:2402.03766,2024.
+WenliangDai,JunnanLi,DongxuLi,AnthonyMengHuatTiong,JunqiZhao,WeishengWang,BoyangLi,
+PascaleFung,andStevenHoi.Instructblip:Towardsgeneral-purposevision-languagemodelswithinstruction
+tuning,2023.
+TimDettmers,MikeLewis,YounesBelkada,andLukeZettlemoyer. Gpt3.int8():8-bitmatrixmultiplication
+fortransformersatscale. AdvancesinNeuralInformationProcessingSystems,35:30318–30332,2022.
+AlexeyDosovitskiy,LucasBeyer,AlexanderKolesnikov,DirkWeissenborn,XiaohuaZhai,ThomasUnterthiner,
+MostafaDehghani,MatthiasMinderer,GeorgHeigold,SylvainGelly,etal. Animageisworth16x16words:
+Transformersforimagerecognitionatscale. arXivpreprintarXiv:2010.11929,2020.
+ChaoyouFu,PeixianChen,YunhangShen,YuleiQin,MengdanZhang,XuLin,ZhenyuQiu,WeiLin,Jinrui
+Yang,XiawuZheng,etal. Mme: Acomprehensiveevaluationbenchmarkformultimodallargelanguage
+models. arXivpreprintarXiv:2306.13394,2023.
+YashGoyal,TejasKhot,DouglasSummers-Stay,DhruvBatra,andDeviParikh. Makingthevinvqamatter:
+Elevatingtheroleofimageunderstandinginvisualquestionanswering.InProceedingsoftheIEEEconference
+oncomputervisionandpatternrecognition,pp.6904–6913,2017.
+KaiHan, YunheWang, HantingChen, XinghaoChen, JianyuanGuo, ZhenhuaLiu, YehuiTang, AnXiao,
+ChunjingXu,YixingXu,etal. Asurveyonvisiontransformer. TPAMI,2022.
+DanHendrycksandKevinGimpel. Gaussianerrorlinearunits(gelus). arXivpreprintarXiv:1606.08415,2016.
+YiningHong,HaoyuZhen,PeihaoChen,ShuhongZheng,YilunDu,ZhenfangChen,andChuangGan. 3d-llm:
+Injectingthe3dworldintolargelanguagemodels. NeurIPS,2023.
+EdwardJHu,YelongShen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,andWeizhu
+Chen. LoRA:Low-rankadaptationoflargelanguagemodels. InInternationalConferenceonLearning
+Representations,2022. URLhttps://openreview.net/forum?id=nZeVKeeFYf9.
+MojanJavaheripi,Se´bastienBubeck,MarahAbdin,JyotiAneja,SebastienBubeck,CaioCe´sarTeodoroMendes,
+WeizhuChen,AllieDelGiorno,RonenEldan,SivakanthGopi,etal. Phi-2:Thesurprisingpowerofsmall
+languagemodels. MicrosoftResearchBlog,2023.
+AlbertQJiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSinghChaplot,Diegodelas
+Casas, FlorianBressand, GiannaLengyel, GuillaumeLample, LucileSaulnier, etal. Mistral7b. arXiv
+preprintarXiv:2310.06825,2023.
+11NikitaKitaev,LukaszKaiser,andAnselmLevskaya. Reformer:Theefficienttransformer. InInternationalCon-
+ferenceonLearningRepresentations,2020. URLhttps://openreview.net/forum?id=rkgNKkHtvB.
+JunnanLi,DongxuLi,SilvioSavarese,andStevenC.H.Hoi.Blip-2:Bootstrappinglanguage-imagepre-training
+withfrozenimageencodersandlargelanguagemodels. InInternationalConferenceonMachineLearning,
+2023a. URLhttps://api.semanticscholar.org/CorpusID:256390509.
+YifanLi,YifanDu,KunZhou,JinpengWang,WayneXinZhao,andJi-RongWen. Evaluatingobjecthallucina-
+tioninlargevision-languagemodels. arXivpreprintarXiv:2305.10355,2023b.
+YouweiLiang,ChongjianGe,ZhanTong,YibingSong,JueWang,andPengtaoXie. Notallpatchesarewhat
+youneed:Expeditingvisiontransformersviatokenreorganizations. arXivpreprintarXiv:2202.07800,2022.
+Bin Lin, Bin Zhu, Yang Ye, Munan Ning, Peng Jin, and Li Yuan. Video-llava: Learning united visual
+representationbyalignmentbeforeprojection. arXivpreprintarXiv:2311.10122,2023.
+Bin Lin, Zhenyu Tang, Yang Ye, Jiaxi Cui, Bin Zhu, Peng Jin, Junwu Zhang, Munan Ning, and Li Yuan.
+Moe-llava:Mixtureofexpertsforlargevision-languagemodels. arXivpreprintarXiv:2401.15947,2024.
+HaotianLiu,ChunyuanLi,YuhengLi,andYongJaeLee. Improvedbaselineswithvisualinstructiontuning,
+2023a.
+HaotianLiu,ChunyuanLi,QingyangWu,andYongJaeLee. Visualinstructiontuning. arXiv:2304.08485,
+2023b.
+HaotianLiu,ChunyuanLi,YuhengLi,BoLi,YuanhanZhang,ShengShen,andYongJaeLee. Llava-next:
+Improvedreasoning,ocr,andworldknowledge. 2024.
+XiangchengLiu,TianyiWu,andGuodongGuo. Adaptivesparsevit:Towardslearnableadaptivetokenpruning
+byfullyexploitingself-attention. arXivpreprintarXiv:2209.13802,2022.
+YuanLiu,HaodongDuan,YuanhanZhang,BoLi,SongyangZhang,WangboZhao,YikeYuan,JiaqiWang,
+ConghuiHe,ZiweiLiu,etal. Mmbench:Isyourmulti-modalmodelanall-aroundplayer? arXivpreprint
+arXiv:2307.06281,2023c.
+PanLu,SwaroopMishra,TanglinXia,LiangQiu,Kai-WeiChang,Song-ChunZhu,OyvindTafjord,Peter
+Clark,andAshwinKalyan. Learntoexplain:Multimodalreasoningviathoughtchainsforsciencequestion
+answering. AdvancesinNeuralInformationProcessingSystems,2022.
+OpenAI. Gpt-4v(ision)systemcard. https://cdn.openai.com/papers/GPTV_System_Card.pdf,2023a.
+OpenAI. Gpt-4technicalreport. 2023b.
+ZhiliangPeng,WenhuiWang,LiDong,YaruHao,ShaohanHuang,ShumingMa,andFuruWei. Kosmos-2:
+Groundingmultimodallargelanguagemodelstotheworld. arXivpreprintarXiv:2306.14824,2023.
+AlecRadford,JongWookKim,ChrisHallacy,AdityaRamesh,GabrielGoh,SandhiniAgarwal,GirishSastry,
+AmandaAskell,PamelaMishkin,JackClark,etal.Learningtransferablevisualmodelsfromnaturallanguage
+supervision. InInternationalconferenceonmachinelearning,pp.8748–8763.PMLR,2021.
+YuzhangShang,ZhihangYuan,andZhenDong. Pb-llm:Partiallybinarizedlargelanguagemodels. InICLR,
+2024.
+AmanpreetSingh,VivekNatarajan,MeetShah,YuJiang,XinleiChen,DhruvBatra,DeviParikh,andMarcus
+Rohrbach. Towardsvqamodelsthatcanread. InProceedingsoftheIEEE/CVFconferenceoncomputer
+visionandpatternrecognition,pp.8317–8326,2019.
+YiTay,MostafaDehghani,DaraBahri,andDonaldMetzler. Efficienttransformers:Asurvey. ACMComputing
+Surveys,2022.
+GeminiTeam,RohanAnil,SebastianBorgeaud,YonghuiWu,Jean-BaptisteAlayrac,JiahuiYu,RaduSoricut,
+JohanSchalkwyk,AndrewMDai,AnjaHauth,etal. Gemini:afamilyofhighlycapablemultimodalmodels.
+arXivpreprintarXiv:2312.11805,2023.
+HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,Timothe´eLacroix,
+BaptisteRozie`re,NamanGoyal,EricHambro,FaisalAzhar,etal. Llama: Openandefficientfoundation
+languagemodels. arXivpreprintarXiv:2302.13971,2023.
+12AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,ŁukaszKaiser,
+andIlliaPolosukhin. Attentionisallyouneed. InAdvancesinNeuralInformationProcessingSystems,pp.
+5998–6008,2017.
+Vicuna. Vicuna: Anopen-sourcechatbotimpressinggpt-4with90%*chatgptquality. https://vicuna.
+lmsys.org/,2023.
+SinongWang,BelindaZ.Li,MadianKhabsa,HanFang,andHaoMa. Linformer:Self-attentionwithlinear
+complexity,2020.
+HaoranWei,LingyuKong,JinyueChen,LiangZhao,ZhengGe,EnYu,JianjianSun,ChunruiHan,andXiangyu
+Zhang. Smalllanguagemodelmeetswithreinforcedvisionvocabulary. arXivpreprintarXiv:2401.12503,
+2024.
+HongxuYin,ArashVahdat,JoseMAlvarez,ArunMallya,JanKautz,andPavloMolchanov. A-vit:Adaptive
+tokensforefficientvisiontransformer. InProceedingsoftheIEEE/CVFConferenceonComputerVisionand
+PatternRecognition,pp.10809–10818,2022.
+ShukangYin,ChaoyouFu,SiruiZhao,KeLi,XingSun,TongXu,andEnhongChen. Asurveyonmultimodal
+largelanguagemodels. arXivpreprintarXiv:2306.13549,2023.
+ZhengqingYuan,ZhaoxuLi,andLichaoSun. Tinygpt-v:Efficientmultimodallargelanguagemodelviasmall
+backbones. arXivpreprintarXiv:2312.16862,2023a.
+ZhihangYuan,YuzhangShang,YueSong,QiangWu,YanYan,andGuangyuSun. Asvd: Activation-aware
+singularvaluedecompositionforcompressinglargelanguagemodels. arXivpreprintarXiv:2312.05821,
+2023b.
+ZhihangYuan,YuzhangShang,YangZhou,ZhenDong,ChenhaoXue,BingzheWu,ZhikaiLi,QingyiGu,
+YongJaeLee,YanYan,etal. Llminferenceunveiled:Surveyandrooflinemodelinsights. arXivpreprint
+arXiv:2402.16363,2024.
+DuzhenZhang,YahanYu,ChenxingLi,JiahuaDong,DanSu,ChenhuiChu,andDongYu. Mm-llms:Recent
+advancesinmultimodallargelanguagemodels. arXivpreprintarXiv:2401.13601,2024.
+HangZhang,XinLi,andLidongBing. Video-llama: Aninstruction-tunedaudio-visuallanguagemodelfor
+videounderstanding. arXivpreprintarXiv:2306.02858,2023a.
+ShilongZhang,PeizeSun,ShoufaChen,MinXiao,WenqiShao,WenweiZhang,KaiChen,andPingLuo.
+Gpt4roi:Instructiontuninglargelanguagemodelonregion-of-interest. arXivpreprintarXiv:2307.03601,
+2023b.
+BaichuanZhou, YingHu, XiWeng, JunlongJia, JieLuo, XienLiu, JiWu, andLeiHuang. Tinyllava: A
+frameworkofsmall-scalelargemultimodalmodels. arXivpreprintarXiv:2402.14289,2024.
+DeyaoZhu, JunChen, XiaoqianShen, XiangLi, andMohamedElhoseiny. Minigpt-4: Enhancingvision-
+languageunderstandingwithadvancedlargelanguagemodels. arXivpreprintarXiv:2304.10592,2023.
+YichenZhu,MinjieZhu,NingLiu,ZhicaiOu,XiaofengMou,andJianTang. Llava-phi:Efficientmulti-modal
+assistantwithsmalllanguagemodel. arXivpreprintarXiv:2401.02330,2024.
+13

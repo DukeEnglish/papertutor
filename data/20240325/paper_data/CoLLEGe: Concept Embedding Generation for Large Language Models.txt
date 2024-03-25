@@ -1,0 +1,860 @@
+CoLLEGe: Concept Embedding Generation
+for Large Language Models
+Ryan Teehan, Brenden M. Lake, Mengye Ren
+New York University
+{rst306,brenden,mengye}@nyu.edu
+Abstract
+Currentlanguagemodelsareunabletoquicklylearnnewconceptsonthefly,oftenrequiringamorein-
+volvedfinetuningprocesstolearnrobustly. Promptingin-contextisnotrobusttocontextdistractions,and
+oftenfailstoconfermuchinformationaboutthenewconcepts. Classicmethodsforfew-shotwordlearning
+inNLP,relyingonglobalwordvectors,arelessapplicabletolargelanguagemodels. Inthispaper,weintro-
+duce a novel approach named CoLLEGe (Concept Learning with Language Embedding Generation) to
+modernizefew-shotconceptlearning. CoLLEGeisameta-learningframeworkcapableofgeneratingflexible
+embeddingsfornewconceptsusingasmallnumberofexamplesentencesordefinitions. Ourprimarymeta-
+learningobjectiveissimplytofacilitatealanguagemodeltomakenextwordpredictionsinforthcomingsen-
+tences,makingitcompatiblewithlanguagemodelpretraining. Wedesignaseriesoftaskstotestnewcon-
+cept learning in challenging real-world scenarios, including new word acquisition, definition inference, and
+verbal reasoning, and demonstrate that our method succeeds in each setting without task-specific training.
+1 Introduction
+Imagine a student first attending a philosophy lecture on epistemology, wherein their professor discusses
+and critiques the positions of idealists, pragmatists, and foundationalists, among others. Some concepts and
+terms, such as idealism or pragmatism, may be familiar from past experience but in this new and unfamiliar
+context they seem to have taken on new meaning. Other concepts may be entirely new, including the concept
+of “epistemology” itself. During the lecture, the examples the professor provides for each concept, as well as
+the sentences they use when discussing them, allow the student to form an initial sense of their meaning and
+usage. With time, additional examples, and using the concepts directly in writing, the student’s knowledge
+solidifies and what was once unfamiliar is now intuitive.
+Building intuitions about the meaning of unfamiliar concepts in this way, with only a few examples of
+their usage, is common in real-world human learning, but remains difficult for language models, particularly
+when we want to consolidate this knowledge into discrete tokens. Providing a few in-context examples of how
+to use these new tokens can be a stopgap, but is often less powerful, leads to increased context length, and
+the additional examples can at times serve as distractors that confuse the language model, to say nothing
+about how unnatural it is (imagine if, each time the professor wanted the student to answer a question about
+epistemological idealism, they began by repeating a few sentences containing “idealism”). Instead, with a few
+examples showing how a concept is used, language models should know general semantic knowledge about
+this new concept, similar to the knowledge encoded in their pretrained representations. We frame this as
+a few-shot learning problem, where, given a few example sentences, the goal is generate an embedding for
+a new concept token with expressive and task-general semantic information.
+Prior work on few-shot word learning in natural language focused on leveraging the seminal works on
+global word vector representations (Mikolov et al., 2013; Pennington et al., 2014; Khodak et al., 2018;
+Lampinen & McClelland, 2017). However, these methods are less well suited to augmenting the knowledge of
+contemporary large language models. First, the embeddings generated from methods based on global word
+vector representations may be difficult to adapt to the representation space of contemporary language models.
+Additionally, learned contextual representations from pretrained language models provide a more powerful
+1
+4202
+raM
+22
+]LC.sc[
+1v26351.3042:viXraThe emerald ? , delicately hanging from
+Concept
+her neck, shimmered under the soft glow of
+Embedding
+the chandelier.
+CoLLEGe
+The delicate diamond ? sparkled
+beautifully on her chest, catching the light in a
+mesmerizing dance of colors.
+a piece of jewelry
+Pretrained LLM The definition of ? is
+worn around the neck.
+Figure 1: Our model generates an embedding for an unseen token given two example sentences. The ground
+truth word is pendant, and the model is able to generate an accurate definition using the embedding produced
+by CoLLEGe.
+and semantically rich source for few-shot concept learning, allowing for complex usage of new concepts using
+embeddings generated from only a few examples.
+Furthermore, prior evaluation methods for new concept learning were limited to noisy proxy measures,
+such as the correlation between embedding cosine similarity and human similarity judgements (Lazaridou
+et al., 2017), or the cosine similarity between the few-shot concept embeddings and “ground truth” Word2Vec
+embeddings (e.g. the definitional nonce in Herbelot & Baroni (2017)). Current language models are able to
+use language in highly sophisticated and complex ways; true evaluation of few-shot concept learning in this
+setting should assess whether new concepts can be used in similarly complex and sophisticated ways. What
+older evaluations measure (e.g. correlation with human similarities or with ground-truth embeddings) tell us
+little about how well language models can use learned concepts. How well can they define a concept given
+only a few examples? Can they correctly answer fill-in-the-blank questions for difficult words? We can, and
+often do, ask humans the same questions to determine how well they have internalized a new concept. Our
+evaluations of language models should follow suit.
+In this paper, we present CoLLEGe, a novel and conceptually simple framework to enable large language
+models to quickly learn new concept tokens. To evaluate our method, we develop a suite of tasks to directly
+evaluate how wellthese conceptsare learned, including GRE-stylefill-in-the-blankverbal reasoning, definition
+inference and generation, and Internet slang usage. Our method leverages the vast amount of pre-training
+data and learning can be seamlessly embedded in the model pre-training process. We discover that training
+techniques such as an example buffer, negative example sampling, and knowledge distillation contributed
+significantly to the model’s concept learning performance. Moreover, thanks to our general pre-training
+procedure, our model is able to transfer to these concept learning tasks in a zero-shot manner with no
+additional task-specific training needed, while maintaining the LLM’s original performance on regular data.
+In summary, our contributions are:
+• A simple add-on learnable module for few-shot, LLM concept learning;
+• Anapproachtotrainingouralgorithmwhichcombinesanexamplebuffer,negativesampling,andknowledge
+distillation. We show that each of these components plays an important role in learning;
+• Challenging datasets to measure the effectiveness of few-shot concept learning methods for LLMs. They
+test both general and complex concept knowledge, naturalistic acquisition of new concepts, and relational
+abstraction;
+• Experiments showing that, by training an embedding generation modules in a task-general manner, we can
+generate embeddings that, without additional training, allow a pretrained LLM to: a) generate plausible
+definitions for new concepts, b) correctly solve fill-in-the-blank tasks for difficult words, and c) correctly
+identify the meaning of new slang terms.
+2Concept Embedding
+Autoregressive Generation
+Aggregation binge watching short videos.
+Output Token Embedding
+Transformer Encoder
+Pretrained LLM
+Pretrained MLM
+Sequence Encoder
+Input Token Embedding
+My beige_flag is complaining I never
+have any time to relax.
+My sister said my beige_flag is
+Support Sequences Query Sequence
+Figure2: OurproposedCoLLEGeframeworkforconceptembeddinggeneration. Supportsequencesareembed-
+ded by a pretrained masked language model (MLM) (e.g. RoBERTa) with an additional Transformer encoder
+to produce pooled sequence embeddings for each support sequence. These are aggregated and projected into
+the input and output embedding space for the pretrained LLM (e.g. LLaMA). According to UrbanDictionary,
+beige flag, an Internet slang appeared in mid-2023, means “a benign but annoying trait or habit.”2
+2 Related Work
+Few-Shot Word Learning: A classic and related task in NLP is rare word learning (Luong et al., 2015).
+Lazaridou et al. (2017) create the synthetic “chimera” concepts and provide early evidence that summation
+over (global) word vectors in the context surrounding a new or rare word can produce a useful embedding.
+Khodak et al. (2018) build on this, presenting a method which includes a learned linear transformation to
+account for shared features across global word vectors. Lampinen & McClelland (2017) present an even
+simpler method, involving freezing the majority of the weights of the network and using gradient descent
+to tune only the weights related to the new word(s). For a more complex approach, Herbelot & Baroni
+(2017) modify the Word2Vec algorithm for more effective few-shot learning. More modern approaches include
+HiCE (Hu et al., 2019), which uses Transformer layers to induce a new word embedding from Word2Vec
+embeddings, and Mem2Vec (Sun et al., 2018), which uses a long-term memory system. Similarly, Weston
+et al. (2015) model new words by using contextual examples from memory. They store a bag-of-words for
+the left and right context surrounding the new word, and simulate new word learning with a fixed percent
+of words encountered during training. By contrast, we use a frozen MLM to learn a representation for the
+new concept token. Other approaches incorporate morphological information (Luong et al., 2013; Schick &
+Schu¨tze, 2019). While these methods are useful, particlarly for learning global word vector representations,
+they are less useful for augmenting the embeddings of pretrained LLMs. In part, this is because global
+word vectors do not map easily to the pretrained LLM embedding space. Additionally, global word vector
+representations are often less informative than the pretrained representations from BERT-style models.
+Meta-Learning: Matching Networks (Vinyals et al., 2016) and Prototypical Networks (Snell et al., 2017)
+both approach few-shot learning as a meta-learning problem. Online prototypical networks (Ren et al., 2020)
+build on the latter for novel concept learning in an online and continual fashion. Our approach is also related
+tofast-weightnetworks(Schmidhuber,1992),sinceweusethesupportsequencestogenerateafastembedding
+weight for the new concept.
+For language, meta-learning is often used for knowledge augmentation (Hu et al., 2023), task adaptation
+2https://www.urbandictionary.com/define.php?term=Beige%20flag
+3
+Linear
+Linear(Chen et al., 2022; Zhong et al., 2021; Bansal et al., 2020), domain adaptation (Qian & Yu, 2019; Li et al.,
+2020; Geng et al., 2019), rare word recognition (Lux & Vu, 2021) (in ASR), and word sense disambiguation
+Holla et al. (2020), among other applications (Lee et al., 2022). Some recent methods frame meta-learning as
+a sequence modeling problem, drawing inspiration from in-context learning (Chen et al., 2022; Fifty et al.,
+2023). Finally, Lake&Baroni(2023)recentlydevelopedamethodforlearningcompositionalconcepts. Inour
+work, context sentences are encoded to generate a new embedding, conceptually similar to a prototype for the
+new concept, to optimize a general language modeling objective, rather than a collection of task objectives.
+Compression: A number of methods exist to compress sentences into new embeddings or tokens. Prior
+work in NLP developed methods for generating task-general embeddings from natural language sentences
+(Conneau et al., 2017; Kiros et al., 2015; Wang et al., 2020). ReadOnce (Lin et al., 2021) is a more recent
+methodforgeneratingcompresseddocumentrepresentationswhichcanbeusedacrossavarietyofdownstream
+tasks. Similarly, recent methods compress prompts (Chevalier et al., 2023; Ge et al., 2024; Mu et al., 2024) or
+documentsXuetal.(2024)intosummaryvectorseitherasaformofmemoryoramethodforre-usingprompts
+(e.g. when specifying instructions). RMT (Bulatov et al., 2022) learns memory tokens during pretraining in
+order to extend the effective context window. Nugget (Qin & Van Durme, 2023) dynamically chooses which
+tokens are aggregated into the encoded representation. Rather than compressing the entire meaning of each
+context sentence, our method extracts and aggregates information relevant to the new concept.
+3 CoLLEGe: Concept Learning with Language Embedding
+Generation
+In this section, we describe our proposed approach for enabling LLMs to quickly learn new concept tokens.
+Given a new word or concept and a set of example sentences containing that word or concept, we want to
+produce an embedding that captures its semantically meaningful features.
+Framing this as a few-shot learning problem, we use a set of K support sequences {s ,...,s }, containing
+1 K
+a new token, <nonce> to produce a useful embedding for this new token. The new embedding can then be
+used to augment the knowledge of a frozen autoregressive language model. During training, we encourage the
+LM to use the new embedding to correctly generate a query sequence q.
+Concept Embedding Generation: To do this, the new token is replaced with a <mask> token in each
+support sequence, and each is embedded with a frozen masked language model (MLM) used for feature
+extraction. The contextual embeddings for each sequence are then passed through an additional Transformer
+self-attention layer to process the contextual embeddings for each sequence to obtain {h }. These are then
+i,t
+aggregated using mean pooling, producing k sequence embeddings {e ,...,e }:
+1 k
+1
+(cid:88)ni
+e = h , (1)
+i n i,t
+i
+t=1
+where n is the length of each sequence. The sequence embeddings are aggregated once more using mean
+i
+pooling, producing a single output embedding e :
+new
+K
+1 (cid:88)
+e = e . (2)
+new K i
+i=1
+Mean pooling can also facilitate incremental consolidation of new concepts without having to store past
+examples. To integrate the embedding with a frozen autoregressive LM, we apply two distinct linear layers
+to produce an input and output embedding for the new token e and e :
+in out
+[e ,e ]=Linear(e ). (3)
+in out new
+4The autoregressive LM’s input and output token embedding matrices are then expanded with these generated
+embeddings, and used to model the query sequence.
+W =[W ,e ], (4)
+embin,new embin in
+W =[W ,e ]. (5)
+embout,new embout out
+We visualize this process for a simple language modeling example in Figure 2.
+Sampling Few-Shot Learning Episodes: One novel aspect of our framework is that, unlike many
+meta-learning approaches, our training procedure follows the same style as pretraining by directly leveraging
+text data from the pretraining datasets. We hypothesize that a good way to rapidly learn new concept is
+to actually “use” the concept in another sentence—we let an LLM consume the newly learned embedding
+to generate another sentence. Moreover, the autoregressive cross entropy loss is the same as the pretraining
+objective, so, in theory, our meta-learning procedure can be perfectly blended into the pretraining stage.
+Toefficientlysamplesupportandquerysequences,wesavesentencescontaininganewtokeninanexample
+buffer to serve as support sequences, and when we encounter the same token being used again in the training
+corpus, we will use the sequence as a query sequence. The query sequence can then be saved in the example
+buffer and used as a support sequence again. We find that reusing query sequences as support sequences
+is helpful for training and allows the model to make use of examples it has already learning when learning
+new examples. Often, query sequences are longer, comprising a few sentences or a paragraph of text. The
+sentence which contains the new token is extracted from each and used as a support sequence for a different
+query sequence concerning the same concept. Not every such sequence ends up in the final set, however, since
+we filter and rank the examples, see Section 4 for details.
+Negative Examples: Initial experiments training on only positive examples, i.e. examples containing the
+newtoken,tendedtoyieldgeneratedembeddingswithabnormallyhighnormcomparedtootherLLMinputor
+outputtokenembeddings. Onehypothesiswasthat,sinceeveryexamplethemodelhastolearncontainsanew
+token,itconvergestoanabnormallyhighnormembedding, toensurethatthenewtokenappearsinthequery
+sequence. During normal pretraining, few tokens are shared across all sequences, and language models learn
+bothwhentogenerateandwhennottogenerateeachtoken. Tolikewiseteachourmodelwhennottogenerate
+anewtoken,wesampleasequencewithoutanewtoken,whichwecallanegative example,andtakethesum
+ofthecrossentropylossonthepositiveexample, L+, andthecrossentropylossonthenegativeexample, L−.
+ce ce
+Knowledge Distillation: Since the pretrained LLM has already seen all the words before, we know the
+“true”languagemodelembeddingsandlogitsfortheremainderofthesequence. Ideally,wewantthegenerated
+embeddingsfromourmodeltomatchthegroundtruthembeddingsandlogitsasfaithfullyaspossible,tobetter
+approximate the underlying language model distribution. To do this, we retain the original sequence, before
+masking a word with a new token, and compute the output embeddings and logits for the rest of the sequence
+with a non-augmented version of our pretrained autoregressive model. We then compute the cosine distance
+between those output embeddings and the output embeddings from CoLLEGe, L , as well as the MSE
+cos
+between the CoLLEGe LLM logits and the “true” LLM logits using the original embeddings, L . Using a
+mse
+morestandardobjectivewithadistillationtemperature(Hintonetal.,2015)waslesseffectiveduringtraining.
+In order to compute these two distillation loss terms, we define the positive example token sequence as
+t ,....,t andoriginalexampletokensequenceast ,....,t ,andadditionallyconstructadeterministic
+1,+ n,+ 1,orig l,orig
+mappingσ :N→Nthatmapsatokenatindexiinthepositiveexampletoitscorrespondingtokenatindexk
+in the original sequence. The tokens following the new token in the positive sequence are guaranteed to have
+a match in the original example sequence, by definition, but the index may be different (if, for example, the
+word replaced with <nonce> is subtokenized in the original example sequence). We compute our distillation
+loss terms using:
+1 (cid:88)
+L = 1−cos(e ,e ), (6)
+cos n−|I | tk,+ tσ(k),orig
+new
+k̸∈Inew
+1 (cid:88)
+L = (ℓ −ℓ )2, (7)
+mse n−|I | tk,+ tσ(k),orig
+new
+k̸∈Inew
+5Source Num. Examples
+Pile-CC 79,606
+Books3 51,850
+BooksCorpus2 3,436
+Table 1: The top Pile subsets represented in our dataset.
+whereI isthesetofnewtokenindicesinthepositiveexamplesequence,E denotestheoutputembedding
+new i,·
+at token position i for the positive or negative example sequence, and ℓ denotes the logit vector at token
+i,·
+position i for the positive or negative example sequence.
+Final Loss: Our final training loss is simply a sum of these individual loss terms. We explored using a
+linear combination of the loss terms to weight each differently, but found it to be at best no more effective
+than an unweighted sum and at times worse. Our final loss, L , is:
+total
+L = L+ +L− + L +L . (8)
+total ce ce cos mse
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+CrossEntropyLosses DistillationLosses
+4 Datasets for Training CoLLEGe
+In contrast to many other meta-learning methods, which use a specific set of tasks during training, we adopt
+a training approach that mirrors general-purpose pretraining. In a sense, we treat each query sequence, and
+each new token in turn, as its own “task” to solve. Pretrained language model representations are highly
+adaptable,andcanbesuccessfullyappliedtoavarietyoftaskswithsimplepromptingstrategies. Byadopting
+atask-generaltrainingmethod,wetrainamodulethatcanproducesimilarlyadaptableembeddingsonthefly.
+Because CoLLEGe is designed to learn a single new token per sequence, and the LLM is frozen, training
+is highly sensitive to data quality, both for the support and query sequences. Additionally, three forms
+of mismatch between support and query sequences are important to guard against: language, contextual
+meaning, and knowledge mismatch. The first case is mostly self-explanatory, non-English support sequences
+for an English query sequence cause difficulties in training. Contextual meaning mismatch was particularly
+important to avoid when training with the Pile (Gao et al., 2020), whose examples are drawn from a variety
+of sources. Creating support and query sequences from WikiText, as in HiCE, often implicitly controls for
+contextual meaning (all examples are from one sources (Wikipedia), and support and query sequences for a
+word are often unintentionally drawn from the same article and thus share contextual meaning). Likewise,
+knowledge mismatch is more prominent when training with the Pile, since it contains more diverse sources. If
+one, or many, support sequences are more confusing than the query sequence, this can destabilize training.
+UsingtheSqueakily3 library,wefilteredforEnglishtextatthreshold0.90usingtheFastText(Joulinetal.,
+2016) model for language identification, applied perplexity filtering at threshold 1000 (filtering examples
+above 1000 perplexity) using KenLM, following de la Rosa et al. (2022). We also filtered examples with
+too much character repetition as well as examples with words flagged as obscene. Afterwards, we cleaned
+examples by normalizing white space and punctuation. Each query sequence is constructed from 4 sentence,
+non-overlapping, chunks of the text examples from the Pile samples.
+To build a set of support sequences for each query sequence, we first split all examples into individual
+sentences, and matched each query sequence with sentences that use the same new word. We removed
+sentences that appear in the query sequence, examples with a large number of newline characters (these
+often were article titles, tables of contents, or lists), and examples with fewer than 15 words. In earlier
+experiments, we found it helpful to embed each query sequence and candidate set of support sequences
+with DistilRoBERTa (Sanh et al., 2019), extract the contextual embedding of the new word from both the
+query sequence and each candidate, and score candidates by the cosine similarity of the embeddings, in
+order to reduce contextual meaning mismatch. Later analysis revealed that the majority of these low-quality
+or mixed-meaning examples came from FreeLaw, USPTO, PubMed, or NIH ExPorter, which often have
+3https://github.com/CarperAI/squeakily
+6WithoutDefinition WithDefinition
+Method 1-Shot 2-Shot 3-Shot 4-Shot Def+1-Shot Def+2-Shot Def+3-Shot Def+4-Shot
+TT-1 6.8±0.0 6.8±0.0 6.8±0.0 6.8±0.0 10.9±3.0 8.6±3.1 8.1±3.9 8.8±4.3
+TT-2 6.8±0.0 6.8±0.0 6.8±0.0 6.8±0.0 12.3±3.5 9.3±2.5 8.1±5.3 7.6±2.5
+HiCE 11.5±5.0 12.5±2.7 13.1±3.6 16.1±4.2 19.3±3.5 15.9±8.2 11.4±2.3 10.6±1.3
+Additive 13.6±2.3 9.1±3.9 13.6±3.9 11.4±0.0 12.9±1.3 10.6±6.6 12.9±3.5 7.6±1.3
+Prompting 13.9±4.3 17.7±3.0 19.8±4.2 21.8±3.0 21.6±5.7 20.5±6.8 19.3±4.8 24.0±4.7
+CoLLEGew/oKD/Neg.Ex. 32.2±5.2 37.7±4.9 38.6±2.9 42.2±3.1 40.0±6.6 49.3±5.8 49.6±3.5 48.0±5.0
+CoLLEGew/oKD 25.9±4.7 33.6±5.0 35.0±4.7 35.7±3.2 40.5±1.9 40.2±3.8 43.2±3.5 42.3±3.2
+CoLLEGew/oNeg.Ex. 28.9±6.0 31.6±5.1 34.1±4.8 33.6±4.3 37.5±6.2 38.4±4.8 42.5±4.6 44.1±4.6
+CoLLEGe 35.0±5.6 40.5±4.3 42.7±3.9 44.5±3.9 42.5±3.9 46.8±3.7 45.2±3.2 49.3±1.5
+Table 2: Accuracy in percentage on the GRE Verbal Reasoning task, averaged over 10 trials. In each trial, a
+new set of K example sentences are sampled and used for the K-shot task. For Token Tuning, we use LR =
+1e-3, as that gave the best performance.
+specialized meaning and formatting. Excluding those from the samples made the filtering process much more
+straightforward. Table 1 summarizes the top subsets from the Pile represented in our dataset.
+5 Experiments
+In this section, we show experimental results on four different evaluation tasks that we designed: GRE verbal
+reasoning, definition generation, and slang identification. Note that CoLLEGe is a task-general concept
+embedding generation network, and all of the evaluations are performed zero-shot, without further training or
+fine-tuning, just like pretrained LLMs. In the following, we first discuss implementation and training details,
+then describe the baseline methods. Afterwards, we present the core results in Subsections 5.1-??.
+Implementation Details: As our pretrained MLM model for the Sequence Encoder, we use RoBERTa-
+Large (Liu et al., 2019), and apply a trainable Transformer Encoder layer to encode the RoBERTa sequence
+embeddings. These embeddings are aggregated using mean-pooling to produce a single embedding per
+sequence, which is further mean-pooled into our Concept Embedding. We use a pretrained LLaMA-2 7B
+model (Touvron et al., 2023) as the pretrained autoregressive language model in all our experiments.
+During training, we provide 1 support sequence for each query sequence and generalize to K >1 during
+testing. We train our model for 28000 steps at batch size 32, with a learning rate of 1e-3, a linear learning
+rate schedule with warmup, and using the AdamW optimizer (Loshchilov & Hutter, 2019) with weight decay
+= 0.1 and default beta values. We experimented with different beta values during training, but found they
+had little effect. During training we clip gradients to a norm of 1.0. We save checkpoints based on both LM
+loss on the test set as well as cross entropy loss on new tokens in the test set. The final model checkpoint
+is selected based on its GRE score.
+UsingthedefaultinitializationforourEncoderproducesinputandoutputembeddingsthataresignificantly
+largerinnormthanthoseofthepretrainedLLaMAmodel. Duringtrainingwiththedefaultinitialization,alot
+of training time is spent reducing the norm. To address this inefficiency, we apply a Layer Normalization (Ba
+et al., 2016) layer before the input and output linear layers, and initialize those layers so that the expected
+norm is as close to the average input or output token embedding norm as possible.
+Baselines: In order to evaluate the effectivness of our method, evaluate against baselines from prior work
+on new concept learnign as well as prompting and gradient descent tuning. More details on implementation
+for the baselines can be found in Appendix C.
+• Token Tuning (TT) (Lampinen & McClelland, 2017) finetunes only the new token embedding(s) using
+gradient descent. The support sequences are treated as the training batch for each step. TT-N denotes N
+gradient descent steps. Unlike Lampinen & McClelland (2017), N is kept small here since we found that a
+large N results in degraded performance. A similar approach has been proposed in Textual Inversion (Gal
+et al., 2023) for image few-shot learning and generation.
+• HiCE (Hu et al., 2019) consists of a Transformer sequence encoder as well as a Transformer layer to
+aggregate the sequence embeddings. It is trained to output an embedding with minimal cosine distance
+7to the true Word2Vec embedding.
+• Additive (Lazaridou et al., 2017) is a simple baseline that consists of summing the Word2Vec embeddings
+for all tokens in the context that are not the new token.
+• Prompting uses randomly initialized new token embeddings and includes the support sequences in the
+prompt. It is a strong baseline with direct context access. Since prompting allows the LM to reason over
+the tokens in context, it can be combined with our embedding generation approach (see Appendix D for
+additional experiments). However, prompting original sentences can also make the context window too
+long and distracting.
+5.1 GRE Verbal Reasoning
+The GRE verbal reasoning task is a challenging type of question appearing in Graduate Record Examinations
+that not only tests the understanding of rare vocabulary but also their logical placement in a sentence. We
+increase the difficulty here by making each multiple choice answer an unknown vocabulary word with a
+few example sentences as hints. We test whether the CoLLEGe generated concept embeddings can directly
+support downstream verbal reasoning.
+Dataset: Using actual GRE practice questions from a Kaplan GRE prep book (Kaplan, 2019), we design
+a task where a language model has to either select the top or top-2 choices for a sequence with blanks.
+Examples for each of these questions are provided in Table 7 in Appendix A. Questions were hand-annotated
+from the Kaplan book and details about the cleaning process can be found in Appendix B. We produce a
+high-quality selection of 43 GRE Verbal Reasoning problems with a single blank (i.e. not multi-part). On
+an version of this task without new tokens, a pretrained LLaMa-2 7B scores 75%, which serves as an upper
+bound on our potential performance.
+To evaluate, we create a version of the sequence for each possible choice, and calculate the log probability
+of each such sequence. The highest log probability sequence is selected as the chosen answer. The final scores
+reflect the average accuracy over 10 trials of sampling different example sentences from GPT-4.
+Results: Results are reported in Table 2, with additional results for “Prompting+...” reported in Table 8 in
+Appendix D.1. Token tuning does not seem to help much, and even sometimes hurts performance. Prompting
+by including the definition of each term alongside the example sentences improves performance for the
+baselines the most, but CoLLEGe significantly outperforms by between 4% and 19%. Model performance
+also increases with more examples, showing effective utilization of multiple example sentences. By contrast,
+more examples can sometimes harm Prompting, and Prompting+CoLLEGe, performance, likely due to the
+additional in-context examples distracting the LLaMA model. We note that, although our model outperforms
+the baselines with and without support sentences provided in-context, it performs better without them. We
+hypothesize that not including instruction-tuning data during the pretraining process for the new embedding
+reduces performance when prompted.
+5.2 Definition Generation
+To probe how well our model understands a new word, we prompt the LLM to generate a definition for the
+word given a few example sentences, as shown in Figure 1.
+Dataset: To construct the dataset for evaluation, we selected 954 words from WordNet (Miller, 1994). We
+then prompt GPT-4 (OpenAI, 2023) to generate an example sentence for the word using the prompt: Give
+me a unique, descriptive sentence using the word “[WORD]” without defining it or making it obvious what
+the word means. Without the latter half of the prompt, many generated examples rephrased the definition.
+Examples are generated at temperature = 0.8. Since both our model and the baselines continue to generate
+text, we select the first sentence generated as the definition for scoring.
+8Example Sentence CoLLEGe Definition True Definition Word/
+Phrase
+Theeeriecreakoftheatticdoor, coupled afeelingofunease,usually feelings of uneasiness willies
+withtheflickeringcandlelight,wasenough in the stomach, caused by
+to give anyone the <nonce>. anxiety or fear.
+Intrigued by holistic therapies, she found a substance that is used treatmentofsymptomsby acupressure
+herselflyingonasoftmatasthetherapist tohealorsootheapartof applyingpressurewiththe
+applied <nonce> to various points on her the body. fingerstospecificpressure
+body to alleviate her chronic migraines. points on the body
+Nestled in the far corner of the bustling apersonwhowritesored- someone employed to copyist
+newsroom, the diligent <nonce> worked itsforanewspaper,maga- make written copies
+tirelessly, transcribing reporter’s notes zine, or other publication. of documents and
+into clean, easy-to-read articles. manuscripts
+The delicate <nonce> sprouted from the a plant that resembles a a fungus composed of sev- Wynnea
+forestfloor,addingatouchofalienbeauty mushroom. eral apothecia that look americana
+to the woodland scene. like elongated rabbit ears;
+Table 3: Definitions generated with CoLLEGe, using the prompt “The word |<nonce>| is defined as”. Each
+definition is generated using the single example sentence shown. None of the example sentences are provided
+in-context to the model.
+Results: Generation examples are reported in Table 3. The generated embeddings often capture high-
+and low-level semantic details of the example sentences. Sometimes this is fairly precise, for example the
+generated definition for willies is exactly correct and similarly with copyist. CoLLEGe is also able to identify
+Wynnea americana as a mushroom. Even when the definition is not quite right, it may capture general
+features of the concept correctly, and may reflect the limited information contained in the example sentence.
+The definition for acupressure, for example, is not exactly correct but a very good inference based on the
+example provided. Additional generated definitions, including those generated using more than one example
+sentence, are shown in Table 11 in Appendix E.1. We also show side-by-side comparisons with the baselines
+(without prompting) in Table 12 in Appendix E.2. Some failure cases are described in Appendix E.3.
+In order to evaluate the quality of generated definitions, we compare a definition generated from our
+modeltoonegeneratedfromabaselinemodelaswellastoagroundtruthdefinition. Forcomparisonbetween
+models, we simulate a head-to-head competition and compute the ELO score (Elo, 1978) of each model.
+Specifically, for each example in the task dataset, we choose a k-shot setting and sample a baseline at random.
+We then compare the definition generated by CoLLEGe with the one generated by the baseline. Based on
+the result—win, lose, or tie—we update the ELO score, starting with an initial score of 1000 for all models.
+To choose a winner in each “round”, we use the Outlines package4, we ask GPT-3.5 to select which definition
+is best for the word in question or if they are tied. The order of the choices (both generated definitions and
+“tie”) are randomized. We compute ELO separately for Table 9. We also compare the generated definitions
+with ground truth definitions for each word. Using the ground truth definition as the reference and the
+generateddefinitionasthecandidate, wecomputetheBERTScoreF1andreportaveragevaluesforourmodel
+as well as each baseline. In both quantitative evaluations, CoLLEGe outperforms the baselines. Qualitatively,
+only Prompting produces generated definitions that are somewhat competitive. Definitions generated by the
+other baselines are often incoherent, generating repetitive text or unrelated words and characters.
+5.3 Twitter Slang
+To emulate new word learning in a more natural setting, we construct a task based on identifying the correct
+definition for a slang term, using Tweets as example sentences.
+Dataset: We hand-curate a set of 80 recent slang terms as well as their definitions. Alongside each term is
+alistofupto8high-qualityexampleTweetswhichusetheterminaninformativeway. Forthishand-curated
+4https://github.com/outlines-dev/outlines
+9Model BERTScore F1 ELO
+TT-1 0.752 ± 0.081 980.78 ± 18.48
+TT-2 0.752 ± 0.081 978.49 ± 18.42
+HiCE 0.767 ± 0.022 975.64 ± 7.86
+Additive 0.801 ± 0.023 967.22 ± 8.50
+Prompting 0.825 ± 0.028 1032.28 ± 28.27
+CoLLEGe 0.848 ± 0.023 1065.57 ± 24.01
+Table 4: Results for the definition generation task. We compare the model generated definitions with a
+reference definition generated by GPT-4 using BERTScore. Additionally, we simulate random challenges
+between CoLLEGe and each baseline and compute and ELO rating. For Token Tuning, we report results for
+LR = 3e-4, as that yielded the best results.
+Model 1-Shot 2-Shot 3-Shot 4-Shot
+TT-1 32.2 ± 1.4 32.1 ± 2.6 32.6 ± 1.3 34.5 ± 0.4
+TT-2 32.3 ± 1.6 32.8 ± 3.9 33.1 ± 0.2 32.5 ± 3.0
+Additive 27.0 ± 1.0 28.3 ± 1.9 28.0 ± 0.7 29.0 ± 1.0
+HiCE 34.0 ± 1.1 32.7 ± 1.9 31.3 ± 2.3 32.8 ± 1.0
+Prompting 41.0 ± 1.0 47.0 ± 2.1 51.7 ± 1.8 53.8 ± 1.4
+CoLLEGe 49.3 ± 1.0 53.2 ± 1.6 54.8 ± 2.6 60.0 ± 0.7
+Table 5: Accuracy in percentage on the Twitter Slang task.
+set, example tweets are predominantly from 2022 and 2023. Definitions are taken from UrbanDictionary,
+Dictionary.com’s Pop Culture and Slang sections, the recent American Dialect Society meeting, Bark, and
+Wiktionary. To supplement these, we then sample 120 additional slang terms from UrbanDictionary and the
+Online Slang Dictionary. We select example tweets from the Twitter archive, using the downloading and
+processing pipeline from Hu et al. (2022). Some examples from the hand-crafted set are shown in Table 6.
+More information about the filtering process for this dataset can be found in Appendix B and links to the
+websites and curation details can be found Appendix F.
+To evaluate the different models on this task, we select the true slang term, its example tweets, and
+its true definition. We then select 3 different incorrect slang terms and their examples. We score the log
+probability of the true definition conditioned on each set of examples. The highest probability is selected as
+the “choice”. If it corresponds to the correct combination definition for the slang term, that is counted as a
+correct choice, otherwise not. We score the model based on its accuracy across the whole set of slang terms.
+Results: Results are presented in Table 5. Without providing example tweets in-context, CoLLEGe
+outperforms each baseline. In fact, CoLLEGe is able to outperform prompting directly, showing that in novel
+contexts (such as Twitter slang), in-context examples may be more confusing than a concise embedding
+representation. Notably, when including example tweets in-context, the baselines hurt performance compared
+to a simple prompting baseline. Only using the CoLLEGe generated embeddings in this setting improve
+performance over prompting with randomly initialized new token embeddings. We also compare CoLLEGe to
+our baselines in the prompting setting in Table 10.
+6 Conclusion and Discussion
+In this paper we present CoLLEGe, a few-shot learning framework for new concept acquisition and knowledge
+augmentation for pretrained LLMs. We model our meta-learning approach on the original pretraining task
+by sampling few-shot learning episodes directly from language model pretraining datasets (e.g. the Pile) and
+use next-word prediction, the pretraining objective, as our primary meta-learning objective.
+We find that training CoLLEGe with a single support sequence for each query sequence generalizes well
+to multiple support sequences at test time, and that the generated embeddings contain rich and task-general
+semantic information. To thoroughly evaluate the quality of these embeddings, we propose three challenging
+10Slang Term Definition Example Tweet
+rizz The ability to confidently approach people Imaginehavingsolittlerizz thateventheAIgirlfriend
+and talk to them, in a more romantic or rejects you. Just complete negative game.
+flirty way.
+hits different When something is significantly better gettingcalledprettyinpersonjusthitsdifferent. peo-
+than usual or is way better under certain ple be making my day.
+circumstances.
+gorpcore A fashion style that is similar to that of AnanecdotefrommycoverageofGorpcore asatrend:
+hiking/wilderness/utility tech wear. Thisvintagesellerput4Gore-Texhatsupforsaleon
+his website at $135....
+Table 6: Examples from the Twitter Slang task, showing the slang term, its definition, and an example tweet.
+tasks including verbal reasoning, definition generation, and slang identification. We find that the generated
+embeddings transfer directly to these tasks zero-shot, without additional finetuning or training, and are
+particularly useful for more complex reasoning tasks.
+While CoLLEGe achieves the best performance in all of the benchmarks, we summarize a few limitations
+in our current framework. First, the generated embeddings sometimes miss precise details in the examples,
+instead encoding higher level semantic information. This can be seen in some incorrect generated definitions,
+where general features of the unknown concept are correctly inferred even though specific details are missed.
+Second, we find the averaging mechanism cannot fully achieve parity with pretrained embeddings, even with
+more support sequences. For example, our best score on the few-shot GRE Verbal Reasoning task is still
+lower than the 75% accuracy LLaMA achieves on the task without new tokens. Additionally, Token Tuning
+may be more useful when we initialize the new token embedding with the embedding generated by CoLLEGe,
+but we do not investigate that in this paper.
+Our work points to a number of future research directions. In the short term, work needs to be done
+to investigate different data mixes for training CoLLEGe and understand the effect of data sources on the
+generated embeddings (e.g. inclusion/exclusion of instruction-tuning data, non-English text, code data, etc.).
+More broadly, CoLLEGe only scratches the surface of exciting research in concept learning. This research
+is a first step in an exciting direction for future research: online continual concept acquisition performed
+jointly with pretraining—incrementally identifying and compressing new concepts from an online stream of
+sequential experience. Furthermore, this approach can be expanded towards grouping of composite novel
+concepts for more flexible and hierarchical organization of knowledge.
+Acknowledgment
+We would like to thank the Microsoft Accelerating Foundation Models Research program for providing cloud
+compute credits for running some parts of our LLM experiments. The compute was also supported by the
+NYU High Performance Computing resources, services, and staff expertise.
+References
+Ba, J. L., Kiros, J. R., and Hinton, G. E. Layer normalization. arXiv preprint arXiv:1607.06450, 2016.
+Bansal, T., Jha, R., and McCallum, A. Learning to few-shot learn across diverse natural language clas-
+sification tasks. In Scott, D., Bel, N., and Zong, C. (eds.), Proceedings of the 28th International Con-
+ference on Computational Linguistics, pp. 5108–5123, Barcelona, Spain (Online), December 2020. In-
+ternational Committee on Computational Linguistics. doi: 10.18653/v1/2020.coling-main.448. URL
+https://aclanthology.org/2020.coling-main.448.
+Bulatov, A., Kuratov, Y., and Burtsev, M. Recurrent memory transformer. Advances in Neural Information
+Processing Systems, 35:11079–11091, 2022.
+11Chen, Y., Zhong, R., Zha, S., Karypis, G., and He, H. Meta-learning via language model in-context
+tuning. In Muresan, S., Nakov, P., and Villavicencio, A. (eds.), Proceedings of the 60th Annual Meeting
+of the Association for Computational Linguistics (Volume 1: Long Papers), pp. 719–730, Dublin, Ireland,
+May 2022. Association for Computational Linguistics. doi: 10.18653/v1/2022.acl-long.53. URL https:
+//aclanthology.org/2022.acl-long.53.
+Chevalier,A.,Wettig,A.,Ajith,A.,andChen,D.Adaptinglanguagemodelstocompresscontexts.InBouamor,
+H., Pino, J., and Bali, K. (eds.), Proceedings of the 2023 Conference on Empirical Methods in Natural
+Language Processing, pp. 3829–3846, Singapore, December 2023. Association for Computational Linguistics.
+doi: 10.18653/v1/2023.emnlp-main.232. URL https://aclanthology.org/2023.emnlp-main.232.
+Conneau, A., Kiela, D., Schwenk, H., Barrault, L., and Bordes, A. Supervised learning of universal
+sentence representations from natural language inference data. In Palmer, M., Hwa, R., and Riedel,
+S. (eds.), Proceedings of the 2017 Conference on Empirical Methods in Natural Language Processing,
+pp. 670–680, Copenhagen, Denmark, September 2017. Association for Computational Linguistics. doi:
+10.18653/v1/D17-1070. URL https://aclanthology.org/D17-1070.
+de la Rosa, J., uardo Gonza´lez Ponferrada, E., Villegas, P., de Prado Salas, P. G., Romero, M., and Grandury,
+M. Bertin: Efficient pre-training of a spanish language model using perplexity sampling. Proces. del Leng.
+Natural, 68:13–23, 2022. URL https://api.semanticscholar.org/CorpusID:250526558.
+Elo, A. E. The Rating of Chessplayers, Past and Present. Arco Pub., New York, 1978. ISBN 0668047216
+9780668047210. URL http://www.amazon.com/Rating-Chess-Players-Past-Present/dp/0668047216.
+Fifty,C.,Duan,D.,Junkins,R.G.,Amid,E.,Leskovec,J.,R´e,C.,andThrun,S. Context-awaremeta-learning.
+arXiv preprint arXiv:2310.10971, 2023.
+Gal, R., Alaluf, Y., Atzmon, Y., Patashnik, O., Bermano, A. H., Chechik, G., and Cohen-or, D. An
+image is worth one word: Personalizing text-to-image generation using textual inversion. In The Eleventh
+International Conference on Learning Representations, 2023. URL https://openreview.net/forum?id=
+NAQvF08TcyG.
+Gao, L., Biderman, S., Black, S., Golding, L., Hoppe, T., Foster, C., Phang, J., He, H., Thite, A., Nabeshima,
+N.,etal. Thepile: An800gbdatasetofdiversetextforlanguagemodeling. arXivpreprintarXiv:2101.00027,
+2020.
+Ge,T.,Jing,H.,Wang,L.,Wang,X.,Chen,S.-Q.,andWei,F. In-contextautoencoderforcontextcompression
+in a large language model. In The Twelfth International Conference on Learning Representations, 2024.
+URL https://openreview.net/forum?id=uREj4ZuGJE.
+Geng, R., Li, B., Li, Y., Zhu, X., Jian, P., and Sun, J. Induction networks for few-shot text classification. In
+Inui, K., Jiang, J., Ng, V., andWan, X.(eds.), Proceedings of the 2019 Conference on Empirical Methods in
+Natural Language Processing and the 9th International Joint Conference on Natural Language Processing
+(EMNLP-IJCNLP), pp. 3904–3913, Hong Kong, China, November 2019. Association for Computational
+Linguistics. doi: 10.18653/v1/D19-1403. URL https://aclanthology.org/D19-1403.
+Herbelot, A. and Baroni, M. High-risk learning: acquiring new word vectors from tiny data. In Palmer,
+M., Hwa, R., and Riedel, S. (eds.), Proceedings of the 2017 Conference on Empirical Methods in Natural
+Language Processing, pp. 304–309, Copenhagen, Denmark, September 2017. Association for Computational
+Linguistics. doi: 10.18653/v1/D17-1030. URL https://aclanthology.org/D17-1030.
+Hinton, G., Vinyals, O., and Dean, J. Distilling the knowledge in a neural network. arXiv preprint
+arXiv:1503.02531, 2015.
+Holla, N., Mishra, P., Yannakoudakis, H., and Shutova, E. Learning to learn to disambiguate: Meta-
+learning for few-shot word sense disambiguation. In Cohn, T., He, Y., and Liu, Y. (eds.), Findings of
+the Association for Computational Linguistics: EMNLP 2020, pp. 4517–4533, Online, November 2020.
+Association for Computational Linguistics. doi: 10.18653/v1/2020.findings-emnlp.405. URL https:
+//aclanthology.org/2020.findings-emnlp.405.
+12Hu, H., Sener, O., Sha, F., and Koltun, V. Drinking from a firehose: Continual learning with web-scale
+natural language. IEEE Transactions on Pattern Analysis and Machine Intelligence, 45(5):5684–5696,
+2022.
+Hu, N. Z., Mitchell, E., Manning, C. D., and Finn, C. Meta-learning online adaptation of language
+models. In The 2023 Conference on Empirical Methods in Natural Language Processing, 2023. URL
+https://openreview.net/forum?id=jPrl18r4RA.
+Hu, Z., Chen, T., Chang, K.-W., and Sun, Y. Few-shot representation learning for out-of-vocabulary words.
+In Korhonen, A., Traum, D., and M`arquez, L. (eds.), Proceedings of the 57th Annual Meeting of the
+Association for Computational Linguistics, pp. 4102–4112, Florence, Italy, July 2019. Association for
+Computational Linguistics. doi: 10.18653/v1/P19-1402. URL https://aclanthology.org/P19-1402.
+Joulin, A., Grave, E., Bojanowski, P., Douze, M., J´egou, H., and Mikolov, T. Fasttext.zip: Compressing text
+classification models. arXiv preprint arXiv:1612.03651, 2016.
+Kaplan. GRE Prep 2019. Kaplan Publishing, New York, 2019.
+Khodak, M., Saunshi, N., Liang, Y., Ma, T., Stewart, B., and Arora, S. A la carte embedding: Cheap but
+effective induction of semantic feature vectors. In Gurevych, I. and Miyao, Y. (eds.), Proceedings of the
+56th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pp. 12–22,
+Melbourne, Australia, July 2018. Association for Computational Linguistics. doi: 10.18653/v1/P18-1002.
+URL https://aclanthology.org/P18-1002.
+Kiros, R., Zhu, Y., Salakhutdinov, R. R., Zemel, R., Urtasun, R., Torralba, A., and Fidler, S. Skip-thought
+vectors. Advances in neural information processing systems, 28, 2015.
+Lake, B. and Baroni, M. Human-like systematic generalization through a meta-learning neural network.
+Nature, 623:115–121, 2023.
+Lampinen, A. K. and McClelland, J. L. One-shot and few-shot learning of word embeddings. arXiv preprint
+arXiv:1710.10280, 2017.
+Lazaridou, A., Marelli, M., and Baroni, M. Multimodal word meaning induction from minimal exposure
+to natural text. Cognitive science, 41 Suppl 4:677–705, 2017. URL https://api.semanticscholar.org/
+CorpusID:205032138.
+Lee, H.-y., Li, S.-W., and Vu, N. T. Meta learning for natural language processing: A survey. arXiv preprint
+arXiv:2205.01500, 2022.
+Li, R., Wang, X., and Yu, H. Metamt, a meta learning method leveraging multiple domain data for low
+resource machine translation. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 34,
+pp. 8245–8252, 2020.
+Lin, S.-T., Sabharwal, A., and Khot, T. ReadOnce transformers: Reusable representations of text for
+transformers. In Zong, C., Xia, F., Li, W., and Navigli, R. (eds.), Proceedings of the 59th Annual Meeting
+of the Association for Computational Linguistics and the 11th International Joint Conference on Natural
+Language Processing (Volume 1: Long Papers), pp. 7129–7141, Online, August 2021. Association for
+Computational Linguistics. doi: 10.18653/v1/2021.acl-long.554. URL https://aclanthology.org/2021.
+acl-long.554.
+Liu, Y., Ott, M., Goyal, N., Du, J., Joshi, M., Chen, D., Levy, O., Lewis, M., Zettlemoyer, L., and Stoyanov,
+V. Roberta: A robustly optimized bert pretraining approach. arXiv preprint arXiv:1907.11692, 2019.
+Loshchilov, I.andHutter, F. Decoupledweightdecayregularization. InInternational Conference on Learning
+Representations, 2019. URL https://openreview.net/forum?id=Bkg6RiCqY7.
+Luong, T., Socher, R., and Manning, C. Better word representations with recursive neural networks for
+morphology. In Hockenmaier, J. and Riedel, S. (eds.), Proceedings of the Seventeenth Conference on
+Computational Natural Language Learning, pp. 104–113, Sofia, Bulgaria, August 2013. Association for
+Computational Linguistics. URL https://aclanthology.org/W13-3512.
+13Luong, T., Sutskever, I., Le, Q., Vinyals, O., and Zaremba, W. Addressing the rare word problem in neural
+machine translation. In Zong, C. and Strube, M. (eds.), Proceedings of the 53rd Annual Meeting of the
+Association for Computational Linguistics and the 7th International Joint Conference on Natural Language
+Processing (Volume 1: Long Papers), pp. 11–19, Beijing, China, July 2015. Association for Computational
+Linguistics. doi: 10.3115/v1/P15-1002. URL https://aclanthology.org/P15-1002.
+Lux, F. and Vu, N. T. Meta-learning for improving rare word recognition in end-to-end asr. In ICASSP
+2021-2021 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP), pp.
+5974–5978. IEEE, 2021.
+Mikolov,T.,Chen,K.,Corrado,G.S.,andDean,J.Efficientestimationofwordrepresentationsinvectorspace.
+In International Conference on Learning Representations, 2013. URL https://api.semanticscholar.
+org/CorpusID:5959482.
+Miller, G. A. WordNet: A lexical database for English. In Human Language Technology: Proceedings of a
+Workshop held at Plainsboro, New Jersey, March 8-11, 1994, 1994. URL https://aclanthology.org/
+H94-1111.
+Mu, J., Li, X., and Goodman, N. Learning to compress prompts with gist tokens. Advances in Neural
+Information Processing Systems, 36, 2024.
+OpenAI. Gpt-4 technical report. 2023. URL https://api.semanticscholar.org/CorpusID:257532815.
+Pennington, J., Socher, R., and Manning, C. GloVe: Global vectors for word representation. In Moschitti, A.,
+Pang, B., and Daelemans, W. (eds.), Proceedings of the 2014 Conference on Empirical Methods in Natural
+Language Processing (EMNLP), pp. 1532–1543, Doha, Qatar, October 2014. Association for Computational
+Linguistics. doi: 10.3115/v1/D14-1162. URL https://aclanthology.org/D14-1162.
+Qian, K. and Yu, Z. Domain adaptive dialog generation via meta learning. In Korhonen, A., Traum, D.,
+and M`arquez, L. (eds.), Proceedings of the 57th Annual Meeting of the Association for Computational
+Linguistics, pp. 2639–2649, Florence, Italy, July 2019. Association for Computational Linguistics. doi:
+10.18653/v1/P19-1253. URL https://aclanthology.org/P19-1253.
+Qin, G. and Van Durme, B. Nugget: Neural agglomerative embeddings of text. In Krause, A., Brunskill, E.,
+Cho,K.,Engelhardt,B.,Sabato,S.,andScarlett,J.(eds.),Proceedings of the 40th International Conference
+on Machine Learning, volume 202 of Proceedings of Machine Learning Research, pp. 28337–28350. PMLR,
+23–29 Jul 2023. URL https://proceedings.mlr.press/v202/qin23a.html.
+Ren, M., Iuzzolino, M. L., Mozer, M. C., and Zemel, R. S. Wandering within a world: Online contextualized
+few-shot learning. ArXiv, abs/2007.04546, 2020. URL https://api.semanticscholar.org/CorpusID:
+220424770.
+Sanh, V., Debut, L., Chaumond, J., and Wolf, T. Distilbert, a distilled version of bert: smaller, faster,
+cheaper and lighter. ArXiv, abs/1910.01108, 2019.
+Schick, T. and Schu¨tze, H. Learning semantic representations for novel words: Leveraging both form and
+context. Proceedings of the AAAI Conference on Artificial Intelligence, 33(01):6965–6973, Jul. 2019. doi:
+10.1609/aaai.v33i01.33016965. URL https://ojs.aaai.org/index.php/AAAI/article/view/4675.
+Schmidhuber, J. Learning to control fast-weight memories: An alternative to dynamic recurrent networks.
+Neural Computation, 4:131–139, 1992. URL https://api.semanticscholar.org/CorpusID:16683347.
+Snell, J., Swersky, K., and Zemel, R. Prototypical networks for few-shot learning. Advances in neural
+information processing systems, 30, 2017.
+Sun, J., Wang, S., and Zong, C. Memory, show the way: Memory based few shot word representation
+learning. In Riloff, E., Chiang, D., Hockenmaier, J., and Tsujii, J. (eds.), Proceedings of the 2018
+Conference on Empirical Methods in Natural Language Processing, pp. 1435–1444, Brussels, Belgium,
+October-November 2018. Association for Computational Linguistics. doi: 10.18653/v1/D18-1173. URL
+https://aclanthology.org/D18-1173.
+14Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi, A., Babaei, Y., Bashlykov, N., Batra, S.,
+Bhargava, P., Bhosale, S., et al. Llama 2: Open foundation and fine-tuned chat models. arXiv preprint
+arXiv:2307.09288, 2023.
+Vinyals, O., Blundell, C., Lillicrap, T., Wierstra, D., etal. Matchingnetworksforoneshotlearning. Advances
+in neural information processing systems, 29, 2016.
+Wang, S., Fang, Y., Sun, S., Gan, Z., Cheng, Y., Liu, J., and Jiang, J. Cross-thought for sentence
+encoder pre-training. In Webber, B., Cohn, T., He, Y., and Liu, Y. (eds.), Proceedings of the 2020
+ConferenceonEmpiricalMethodsinNaturalLanguageProcessing(EMNLP),pp.412–421,Online,November
+2020. Association for Computational Linguistics. doi: 10.18653/v1/2020.emnlp-main.30. URL https:
+//aclanthology.org/2020.emnlp-main.30.
+Weston, J., Chopra, S., and Bordes, A. Memory networks. In Bengio, Y. and LeCun, Y. (eds.), 3rd
+International Conference on Learning Representations, ICLR 2015, San Diego, CA, USA, May 7-9, 2015,
+Conference Track Proceedings, 2015. URL http://arxiv.org/abs/1410.3916.
+Xu, F., Shi, W., and Choi, E. RECOMP: Improving retrieval-augmented LMs with context compression and
+selective augmentation. In The Twelfth International Conference on Learning Representations, 2024. URL
+https://openreview.net/forum?id=mlJLVigNHp.
+Zhong, R., Lee, K., Zhang, Z., and Klein, D. Adapting language models for zero-shot learning by meta-tuning
+on dataset and prompt collections. In Conference on Empirical Methods in Natural Language Processing,
+2021. URL https://api.semanticscholar.org/CorpusID:237304362.
+15A GRE Verbal Reasoning Examples
+The GRE task consists of two different types of fill-in-the-blank questions. The first type asks you to select
+the best possible choice to complete the provided sentence, so it serves as a test of the top-1 prediction. The
+second type asks for which two words best complete the sentence. Often these words are similar, but distinct.
+It tests how the top-2 predictions of the LLM.
+Question Answer Correct Evaluation Type
+Choices Answer(s)
+Mary’s former classmates were taken a) gregarious d) reticent Choose the word for each blank
+abackbyher[BLANK]behavioratthe b) discourteous that best fits the meaning of the
+reunion for, during her school years, c) obsequious sentence as a whole.
+shewasfrequentlyreprimandedforcre- d) reticent
+ating disturbances with her exuberant e) scurrilous
+outbursts and playful antics.
+The firefighter, desperate to save the a) stalwart b) precarious Select the two answer choices
+childrenonthesecondfloorofthefiery b) precarious e) tottering that, when inserted into the sen-
+house, rushed into their bedroom; his c) stout tence, fit the meaning of the sen-
+colleagues,morewaryofthe[BLANK] d) irrefragable tence as a whole and yield com-
+structure, remained outside. e) tottering plete sentences that are similar
+f) fecund in meaning.
+Table 7: Examples of both types of questions for the GRE task dataset
+B Data Processing
+We provide further details on cleaning and processing for some of our task datasets.
+GRE: The cleaning process for the GRE dataset involved normalizing the different formats for blanks
+(i.e. empty spaces, underlines, “(a)”, etc.), removing artifacts from the conversion to text from PDF, and
+associating each question with its answer from the answer key.
+Twitter Slang: We filter examples from this archive for flagged obscene words using Squeakily, but it is
+important to note that online slang is often obscene. This is especially true for the sources used to define the
+slang terms (UrbanDictionary in particular).
+C Baseline Implementations
+Hice: To train HiCE, we follow the method outlined in the paper, and use the WikiText-103 dataset to
+train the model with a morphology network. We use hyperparameters from the authors’ implementation.
+Word2Vec Projection: For the Additive baseline as well as HiCE, the baseline outputs a Word2Vec
+embedding. To make this compatable with LLaMa, we train a linear layer on shared tokens between LLaMa
+and Word2Vec to map between the embedding spaces.
+Token Tuning: For Token Tuning, I treat the example sentences as a ”batch” and perform N=1,2 steps of
+gradient descent on only the input and output embeddings for the new token.
+16D Results for Prompting+
+Since our Prompting baseline provides all the support sentences in the context window, allowing the LM to
+attend to the new token embeddings directly, we also show using CoLLEGe-generated embeddings improves
+performance over random initialization and our other baselines (denoted “Prompting+...”).
+D.1 GRE Results for Prompting+
+We show results for the GRE task when prompting with examples in-context, using embeddings for the new
+token generated by the model or baseline following the “+”.
+WithoutDefinition WithDefinition
+Method 1-Shot 2-Shot 3-Shot 4-Shot Def+1-Shot Def+2-Shot Def+3-Shot Def+4-Shot
+Prompting 13.9±4.3 17.7±3.0 19.8±4.2 21.8±3.0 21.6±5.7 20.5±6.8 19.3±4.8 24.0±4.7
++CoLLEGew/oKD/Neg.Ex. 25.7±3.9 31.1±3.9 32.7±5.7 32.1±6.1 35.4±4.3 31.8±3.8 33.4±4.8 33.4±5.8
++CoLLEGew/oKD 26.1±4.5 29.6±3.4 31.8±4.7 29.1±4.0 33.9±4.7 28.9±4.1 33.9±4.7 35.7±2.3
++CoLLEGew/oNeg.Ex. 35.0±3.7 33.2±2.3 31.4±3.6 25.9±10.3 31.1±7.1 31.1±4.6 28.6±3.7 28.4±4.9
++CoLLEGe 34.3±4.3 33.0±5.6 34.8±3.4 33.6±3.6 37.5±5.6 34.1±3.8 30.5±4.6 33.4±4.6
+Table8: AccuracyinpercentageontheGREVerbalReasoningtaskwhenpromptingwithexamplesin-context,
+using new token embeddings generated by each model or baseline. Results for prompting with randomly
+initialized embeddings are reproduced here for clarity.
+All CoLLEGe models outperform the Prompting baseline, where new token embeddings are randomly
+initialized. Each “Prompting+CoLLEGe” model performs worse than the unprompted version, which we
+hypothesize is due to a lack of instruction tuning data in the training dataset.
+D.2 Definition Generation Results for Prompting+
+We present results for our definition generation task with examples presented in-context, using our baselines
+or CoLLEGe to generate the new token embedding. ELO scores are calculated separately from those in Table
+4 by sampling a random baseline challenger to the “Prompting+CoLLEGe” model.
+Model BERTScore F1 ELO
+Prompting 0.825 ± 0.028 1002.09 ± 22.87
++ TT-1 0.762 ± 0.035 959.88 ± 17.22
++ TT-2 0.763 ± 0.045 962.10 ± 12.65
++ HiCE 0.740 ± 0.098 949.32 ± 10.77
++ Additive 0.735 ± 0.098 950.61 ± 3.48
++ CoLLEGe 0.858 ± 0.029 1176.00 ± 12.69
+Table 9: Results for the definition generation task, when prompting with examples in-context. We compare
+themodelgenerateddefinitionswithareferencedefinitiongeneratedbyGPT-4usingBERTScoreandsimulate
+random challenges between CoLLEGe and each baseline and compute and ELO rating. Token Tuning results
+are for LR = 3e-4, as in the main paper.
+Generated definitions improve with in-context examples, and we note that our model far outperforms the
+baselines. The only competitive baseline is prompting with randomly initialized embeddings.
+D.3 Twitter Results for Prompting+
+When examples Tweets are provided in-context, our CoLLEGe model’s accuracy on the slang identification
+task increases. For other baselines, aside from prompting with randomly initialized embeddings, however,
+performance either degrades or remains about the same. With the Word2Vec-based baselines, this may be
+duetothedifficultyofmappingbetweenWord2VecembeddingsandtheLLaMAinputandoutputembedding
+space.
+17Model 1-Shot 2-Shot 3-Shot 4-Shot
+Prompting 41.0 ± 1.0 47.0 ± 2.1 51.7 ± 1.8 53.8 ± 1.4
++ TT-1 30.5 ± 3.5 28.2 ± 2.9 26.0 ± 1.4 24.1 ± 1.2
++ TT-2 29.3 ± 3.0 28.3 ± 2.7 25.8 ± 3.1 24.0 ± 1.6
++ Additive 30.7 ± 3.8 25.2 ± 0.4 24.5 ± 1.2 24.1 ± 1.7
++ HiCE 25.0 ± 4.9 26.0 ± 1.1 27.8 ± 3.0 25.5 ± 0.8
++ CoLLEGe 56.5 ± 2.0 60.5 ± 2.1 67.4 ± 1.0 69.8 ± 0.8
+Table 10: Accuracy in percentage on the Twitter Slang task, where example Tweets are provided in-context.
+E Generated Definitions
+E.1 Additional CoLLEGe Definitions
+We show additional definitions generated from CoLLEGe, including definitions generated with more than
+one example. CoLLEGe is able to generate plausible definitions that capture important features of the new
+word. In some cases, the CoLLEGe definition is incorrect, but plausible based on the examples provided.
+For example, the generated definition for opera company is incorrect, but reasonable in light of the example
+sentences.
+Example Sentence CoLLEGe Definition True Definition Word/
+Phrase
+During the complex abdominal surgery, a surgical procedure in a fold of peritoneum sup- omentum
+the surgeon carefully moved the <nonce> which a portion of the in- porting the viscera
+asidetogainbetteraccesstothepatient’s testineisbroughtthrough
+damaged organs. anopeningintheabdomi-
+nal wall.
+The yellow blooms of the <nonce> added ”a plant of the genus Fi- aromatic evergreen or de- Lindera
+a vibrant contrast to the green canvas of cus, having a milky sap ciduous dioecious shrubs
+the wetlands. and large, often edible, or trees of eastern Asia
+fruit.” and North America
+Theprestigious<nonce>,cladinelaborate a person who is skilled in a company that produces opera
+costumes,filledtheauditoriumwiththeir the art of dancing. operas company
+mesmerizingharmoniesanddramaticper-
+formances.
+After months of rigorous rehearsals, the
+<nonce> finally brought their magnum
+opustolife,fillingtheornatetheaterwith
+powerful harmonies that resonated with
+every member of the riveted audience.
+Despite countless imitations flooding the the most beautiful or per- informalusageattributing real McCoy
+market, only her grandmother’s secret fect specimen of its kind. authenticity
+recipe for apple pie was the <nonce>.
+Aftertastingmanyalternatives,hefinally
+found the <nonce> of artisanal cheeses in
+a quaint little shop in Paris.
+Despite all the replica paintings she had
+seen, it was breathtaking to stand before
+the <nonce> in the museum.
+Table11: Additional definitions generatedwith CoLLEGe, using theprompt“The word |<nonce>| isdefined
+as”. Each definition is generated using the examples. None of the example sentences are provided in-context
+to the model.
+18E.2 Qualitative Comparison of Generated Definitions
+We present a side-by-side comparison of definitions generated by CoLLEGe as well as the baselines in Table
+12. Definitions generated by the baselines (with the exception of Prompting) are essentially unusable.
+Word/ True CoLLEGe HiCE Additive TT-1 TT-2
+Phrase Definition
+horsecar an early form of a “motorized vehicle a word” “the that the follows. follows.
+streetcarthatwas with a cabin and a a word a” is a place where
+drawn by horses platform for passen- you are the
+gers to stand on.” place.
+popishly like the Pope; in in a manner that is a ” a “a” a a that the ’the oppo- the op-
+a popish manner intended to attract wordaworda same. site of the posite of
+attention or admira- a a word ” ” in the word,
+tion. the dictio-
+nary
+Table 12: Side-by-side comparison between CoLLEGe-generated definitions and definitions generated by the
+baselines without prompting.
+E.3 Failures of Generated Definitions
+Word2Vec Baselines: Both Word2Vec baselines tended to produce embeddings that were unusable for
+generating definitions.
+CoLLEGe Failures: When analyzing generated definitions, it is clear that there are some “default”
+definitions the model will generate when the embedding for the new token is not informative enough.
+Some of these common “default” definitions, listed in order of frequency, are:
+• a person who is not a member of a particular group or class
+• a place of refuge or shelter
+• a person who is a source of annoyance or irritation
+• a noun
+F Slang Sources
+To build the dataset of slang terms and definitions, we used UrbanDictionary5 Dictionary.com’s Pop Culture6
+and Slang7 sections, the recent American Dialect Society meeting8, Bark 9, Wiktionary10, and the Online
+Slang Dictionary11.
+5https://www.urbandictionary.com/
+6https://www.dictionary.com/e/pop-culture/
+7https://www.dictionary.com/e/slang/
+8https://americandialect.org/nominations-for-words-of-the-year-2023/
+9bark.us
+10https://www.wiktionary.org/
+11http://onlineslangdictionary.com/
+19
