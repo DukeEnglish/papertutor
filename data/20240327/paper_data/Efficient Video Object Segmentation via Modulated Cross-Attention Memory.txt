@@ -1,0 +1,846 @@
+Efficient Video Object Segmentation via
+Modulated Cross-Attention Memory
+Abdelrahman Shaker1, Syed Talal1, Martin Danelljan2, Salman Khan1,
+Ming-Hsuan Yang3,4,5, and Fahad Shahbaz Khan1,6
+1 Mohamed Bin Zayed University of Artificial Intelligence
+2 ETH Zürich
+3 University of California, Merced
+4 Yonsei University
+5 Google Research
+6 Linkoping University
+Abstract. Recently,transformer-basedapproacheshaveshownpromis-
+ingresultsforsemi-supervisedvideoobjectsegmentation.However,these
+approachestypicallystruggleonlongvideosduetoincreasedGPUmem-
+ory demands, as they frequently expand the memory bank every few
+frames.Weproposeatransformer-basedapproach,namedMAVOS,that
+introducesanoptimizedanddynamiclong-termmodulatedcross-attention
+(MCA) memory to model temporal smoothness without requiring fre-
+quent memory expansion. The proposed MCA effectively encodes both
+local and global features at various levels of granularity while efficiently
+maintainingconsistentspeedregardlessofthevideolength.Extensiveex-
+perimentsonmultiplebenchmarks,LVOS,Long-TimeVideo,andDAVIS
+2017,demonstratetheeffectivenessofourproposedcontributionsleading
+to real-time inference and markedly reduced memory demands without
+any degradation in segmentation accuracy on long videos. Compared
+to the best existing transformer-based approach, our MAVOS increases
+the speed by 7.6×, while significantly reducing the GPU memory by
+87%withcomparablesegmentationperformanceonshortandlongvideo
+datasets. Notably on the LVOS dataset, our MAVOS achieves a J&F
+score of 63.3% while operating at 37 frames per second (FPS) on a
+single V100 GPU. Our code and models will be publicly available at:
+https://github.com/Amshaker/MAVOS.
+Keywords: Video Object Segmentation · Memory Efficient Video Seg-
+mentation · Real-time Video Segmentation
+1 Introduction
+Video object segmentation (VOS) is a challenging problem that received sig-
+nificant attention in recent years and has numerous real-world applications, in-
+cluding autonomous driving [19], video editing [36], and augmented reality [34].
+The problem involves tracking specific objects in an image sequence to gain a
+4202
+raM
+62
+]VC.sc[
+1v73971.3042:viXra2 Shaker et al.
+40 0.9GB 3.3GB 4.9GB F #r 00a 000m 001e 1 (Input) #0000F 02r 71ame 54 #00F 001r 46a 6me 293 #000F 03r 74a 1me 748 #00F 003r 75a 6me 751
+1.1GB 3.6GB 5.1GB
+30 2.0GB Method DAVISJ L& VF O↑ SLTV
+AOT-L[60] 83.8 60.3 NA
+20 4.3GB DeAOT-L[62] 84.5 61.1 87.9
+MAVOS 84.4 60.9 87.4
+MAVOS(R50) 85.6 63.3 87.5 Frame 1 (Input) Frame 146 Frame 490 Frame 2360 Frame 3581
+#01947 #02385 #03417 #09027 #12690
+10
+24.6GB
+38.6GB
+59.7GB
+OOM
+0 DAVIS LVOS LTV
+102 103
+MeanFramesperVideo
+Fig.1: Left: Comparison of our proposed MAVOS with recent transformer-based
+methods using the same backbone in terms of speed (FPS) and mean frames per
+video, along with GPU memory consumption (in GB) and VOS performance on the
+graph. Recent transformer-based approaches exhibit a substantial reduction in speed
+andmemoryexplosionforlongvideos,whileMAVOSmodelsmaintainconsistentspeed
+withoutGPUmemoryissuesandnosignificantperformancedegradationinbothshort
+(DAVIS[40])andlong-videodatasets(LVOS[50],LTV[23]).FPSismeasuredusinga
+V100GPU.Right:MAVOSresultsonlongvideosfromLVOS(top)andLTV(bottom)
+datasets, showcasing robust performance with more than 120 seconds for LVOS and
+more than 3500 frames for LTV. Additional results are presented in suppl. material.
+deeperunderstandingofhowtheseobjectsinteractwitheachother.Inthesemi-
+supervisedVOSsetting,thegoalistoaccuratelyidentifyandtrackthespecified
+targets throughout the entire video, given the reference frame containing one
+or more object masks. Due to the inherent nature of the VOS problem, it is
+desired to develop methods that are accurate and operate in real-time, while
+maintaining a small memory footprint, especially when processing long videos.
+MostexistingVOSmethodscanberoughlydividedintotemplatematching-
+based[3,50,52,58,59],recurrent-based[16,21,39,48],memory-based[4,6,37,45],
+and transformer-based [9,32,60,62]. Template matching-based approaches usu-
+ally use predefined object templates to match and identify objects in the entire
+video. Such approaches may struggle with object deformation and variations
+in appearance [4]. Further, they incur significant computation costs when ap-
+plied to long videos, adding to their overall complexity. On the other hand,
+recurrent-based methods involve conveying information from the recent frames
+using hidden representations or masks for individual object instances at each
+step of the recurrence process. Although these methods can process single [55]
+as well multiple [48] objects, they often encounter issues such as drifting, sen-
+sitivity to occlusions, and high computational demands, which can limit their
+suitabilityforpracticalreal-timeapplications.Memory-basedmethods,exempli-
+fied by STM [37], heavily rely on a memory network to save and retrieve target
+features from all past frames. Owing to the success of transformers in several
+vision domains, transformer-based approaches have been introduced for VOS.
+)SPF(sdnoceSrePemarFEfficient Video Object Segmentation via Modulated Cross-Attention Memory 3
+These approaches are usually based on applying an attention mechanism be-
+tween current and past frames. Recent transformer-based VOS methods [60,62]
+have explored hierarchical propagation, allowing for an association of multiple
+objects and improved VOS capabilities.
+While the aforementioned transformer-based VOS approaches have shown
+promisebyeffectivelyencodinglong-rangedependenciesbetweenthetargetand
+past frames, these models are often designed for short-term videos and typically
+strugglewithmemoryrequirementswhenprocessinglong-termvideos(e.g.,more
+than 60 seconds). This is due to the memory bank constantly increasing every
+few frames, which becomes prohibitive in case of long videos as the GPU mem-
+ory can not meet the ever-increasing memory demands. For instance, Fig. 1
+showsthattheGPUmemoryrequirementsoftherecenttransformer-basedVOS
+method [62], DeAOT-L, increase dramatically from 2.0 GB to 24.6 GB, when
+increasingthenumberofframesfrom69tomorethan500pervideo.Thisresults
+in reducing the speed by 6× (from around 30 to 5 FPS). A potential strategy to
+addressthisissueistoutilizeacompactmemorybank,asusedinmemory-based
+VOS methods [4,23]. However, we empirically observe such a strategy to lead
+to significant deterioration in accuracy on long videos likely due to struggling
+with low-level pixel matching. In this work, we tackle the challenge of the speed
+and GPU memory overflow in transformer-based methods for long videos. We
+explore an efficient design that maintains consistent memory and speed across
+various video lengths without sacrificing performance, especially on long videos.
+Contributions:Weproposeanefficienttransformer-basedVOSapproach,named
+MAVOS,thatutilizesanoveloptimizedanddynamiclong-termmodulatedcross-
+attention (MCA) memory. Our MCA effectively encodes the temporal smooth-
+ness from the past frames. It captures both local and global features, at various
+levels of granularity. Unlike existing transformer-based VOS designs, the pro-
+posed MCA avoids the need to expand memory and allows us to propagate
+target information based on the temporal changes of the past frames, without
+increasingmemoryusage.Thissubstantiallyreducesthecomputationalcomplex-
+ity, enabling real-time segmentation with consistent GPU memory cost, while
+preserving the characteristic accuracy of a transformer-based design.
+ExperimentsonthreeVOSbenchmarks,LVOS[50],Long-TimeVideo(LTV)[23],
+and DAVIS 2017 [40], reveal the merits of our proposed contributions for short
+andlongvideos.OurMAVOSsignificantlyoutperformsrecenttransformer-based
+VOS methods (see Fig. 1) in terms of speed and GPU memory consumption,
+while achieving comparable accuracy. On the LTV dataset, MAVOS achieves a
+J&F scoreof87.4%whileoperatingataround40FPSandconsuming87%less
+GPUmemorycomparedtothebestexistingtransformer-basedVOSmethod[62].
+2 Related Work
+Video Object Segmentation (VOS) has received much attention over the past
+decade[65].EarlyVOSmethodsreliedontraditionaloptimizationmethodsand4 Shaker et al.
+graph representations, such as [28,41,49]. Recent VOS methods [4,15,60,62]
+leverage deep neural networks for improved performance.
+Online Learning Approaches: Online learning methods either train or fine-
+tune networks during test time [2,30,51]. These involve fine-tuning the pre-
+trained segmentation networks during test time to guide the network’s focus on
+the specified object. Examples include OSVOS [2] and MoNet [53], advocating
+thefine-tuningofpre-trainednetworksbasedonannotationsfromthefirstframe.
+Extending this strategy, OnAVOS [51] introduces an online adaptation mecha-
+nism.Similarly,MaskTrack[39]andPReM[29]furtherdevelopthesetechniques
+by integrating optical flow to aid in the propagation of the segmentation mask
+acrossconsecutiveframes.Despiterecentimprovementsinefficiency[1,33,38,42],
+theseapproachesstillrelyononlineadaptationshowingsensitivitytoinputand
+diminishing returns with increased training data.
+Template-based Approaches: To avoid test-time fine-tuning, several works
+use the annotated frames as templates and explore techniques for alignment.
+OSMN [58] utilizes a network for extracting object embedding and another
+for predicting segmentation based on the derived embedding. PML [3] focuses
+on learning pixel-wise embedding using the nearest neighbor classifier, whereas
+VideoMatch [17] incorporates a matching layer to correlate pixels between the
+currentandannotatedframesinalearnedembeddingspace.FEELVOS[50]and
+CFBI(+) [59,61] enhance the pixel-level matching by including local matching
+with the previous frame. RPCM [56] introduces a correction module to enhance
+the reliability of pixel-level matching. LWL [1] proposes employing an online
+few-shot learner to acquire the capability of decoding object segmentation.
+Memory-based Approaches: Recent approaches [21–23] are based on pixel-
+level matching to propagate target information, with compact global context
+modules.Althoughthesemethodshaveconstantmemoryrequirements,theystill
+struggle to keep track after a long period of target disappearance in challenging
+long-termvideos.XMem[4]introducesanarchitectureforlongvideosinspiredby
+theAtkinson-Shiffrinmemorymodel.Itemploysmultipleinterconnectedfeature
+memory stores, including a rapidly updated sensory memory, a high-resolution
+working memory, and a compact sustained long-term memory. Although XMem
+showspromisingperformanceonthelong-timevideodataset[23],itstrugglesto
+generalizetootherchallenginglongvideodatasets,suchasLVOS[50].Recently,
+DDMemory [50] has been proposed to effectively encode temporal context and
+maintain fixed-size memory using three complementary memory banks.
+Transformer-basedApproaches:Methodsthatrelyonattentionmechanisms
+employdiversestrategies,suchassimilarityortemplatematchingalgorithms,to
+determinethememoryframes[8,11,18,37,64].Numerousworkshaveexploredde-
+veloping models to leverage local/pixel-to-pixel information, thereby enhancing
+mask quality. This improvement is achieved through different strategies, includ-
+ingtheuseofkernels[45],opticalflow[54,63]andtransformers[20,31,63].There-
+cently introduced transformer-based method, AOT [60], tackles semi-supervised
+VOS in multi-object scenarios by introducing Associating Objects with Trans-
+formers (AOT). Unlike existing methods, AOT associates multiple targets intoEfficient Video Object Segmentation via Modulated Cross-Attention Memory 5
+the same high-dimensional embedding space using an identification mechanism,
+enabling simultaneous processing of multiple object matching and segmentation
+decoding.ALongShort-TermTransformerisdesignedforhierarchicalmatching
+and propagation from the memory to the target. Although it achieves promis-
+ing results on short video benchmarks, it struggles to achieve real-time speed.
+DeAOT [62] extends AOT and introduces decoupling features in hierarchical
+propagation, separating object-agnostic and object-specific embeddings in two
+branches based on the Gated Propagation Module (GPM). The design of GPM
+is based on efficient single-head attention, compared to the heavy multi-head
+attentionofAOT.TherecentDeAOTperformsbetterthanAOTsincetheprob-
+lem of losing object-agnostic visual information is resolved using decoupling the
+propagation of the visual and ID embeddings using two independent branches.
+Although DeAOT achieves promising accuracy on multiple short video bench-
+marks[40,55],itslong-termmemorydesignisnotsuitableforlongvideossinceit
+stores all past memory frames. This leads to ever-expanding memory and lower
+FPS when handling long-term videos with thousands of frames.
+3 Method
+Motivation: To motivate our proposed method, we identify two key factors to
+consider when developing an efficient and accurate approach for VOS.
+Optimized Memory: As discussed earlier, most existing transformer-based
+variants often struggle to segment long videos due to increasing demand for
+feature memory banks. Generally, these VOS models expand the memory with
+frame representation every few frames, rendering them impractical for videos
+withthousandsofframesduetotheheightenedGPUmemoryusage.Conversely,
+other works [9,31] ignore long-term memory and focus only on short-term fea-
+tures. This omission limits the ability to encode long-term contextual informa-
+tion, hindering performance in challenging scenarios such as occlusion. Unlike
+these approaches, an optimized long-term memory bank with consistent cost
+that can be flexibly integrated into a transformer-based VOS approach is de-
+sired. Such an optimized long-term memory bank is expected to capture the
+continuityoftemporalcontextswhilemaintainingconsistentGPUmemorycon-
+sumption and speed, regardless of the number of frames.
+Effective Memory Encoding:Inadditionto highspeedandconsistentmem-
+ory footprint, an effective long-term memory bank becomes crucial for precise
+mask prediction in long videos. To meet this requirement, the encoding mech-
+anism of the memory should represent the features effectively and concisely.
+The goal is to establish meaningful and concise connections between memory
+framesatvarioustimestepstoeffectivelypropagatethetargetinformationfrom
+pastframes.Thisapproachenablesretentionofrelevantmemoryelementswhile
+progressively discarding irrelevant features from long-term memory over time.6 Shaker et al.
+𝐹! 𝑀! 𝑀"
+𝐹! 𝐹"#! 𝐹" Input New Memory Memory Context
+…… 𝐹!%& LN MM emCA ory 𝐵𝑥𝑁 Q𝑥𝐷 ueries 𝐵𝑥𝑁𝑥 K𝐷 eys Valu𝐵 e𝑥 s𝑁𝑥(𝐷+𝐺)
+𝐵𝑥𝐷𝑥𝐻𝑥𝑊 B x G𝑥𝐻𝑥𝑊
+Encoder Encoder Encoder pS rh oo pr at g-t ae tr iom n pL ro on pg a- gt ae tr im on ✕𝑇𝑟𝑎𝑛𝑠𝑝𝑜𝑠𝑒 CoH ntie er xa turc ah lii zc aa tl i on Gate
+E-LSTT + E-LSTT + E-LSTT 𝐵𝑥𝑁𝑥𝑁 Context Gate
+L ✕ + At Mte an pti son
+ID Decoder Decoder 𝐵𝑥𝐷𝑥𝐻𝑥𝑊
+LN Modulator
+ID ✕ 𝐵𝑥𝑁𝑥𝐷
+Self-propagation
+𝐵𝑥𝑁𝑥𝐷
+Given Prediction t-1 Prediction t + Output
+𝑀#"$
+(a) Overall Architecture (b) E-LSTT Block (c) Modulated Cross-Attention (MCA) Memory
+Fig.2: Overview of the proposed MAVOS.(a)Anillustrationfortheoverallar-
+chitecture.Thevideoframesarepassedtothelightweightencodertoextracttheframe
+features,followedbytheproposedE-LSTTblocktohandlethelong-termmemoryeffi-
+ciently,followedbythedecodertogeneratethemasks.(b)ThedetailsoftheE-LSTT
+block. It mainly consists of short-term, long-term, and self-propagations to propagate
+the target information from the previous frames. The long-term propagation is based
+ontheproposedModulatedCross-Attention(MCA)memory.(c)OurproposedMCA
+memory.Thenewmemoryisprojectedtoqueries,andthememorycontextisprojected
+to keys and values. We apply hierarchical contextualization using depth-wise convolu-
+tion to generate the local context and multiply it by learnable gates. The aggregated
+context is projected and multiplied by the attention maps to generate the output.
+3.1 MAVOS Architecture
+OverallArchitecture:Fig.2(a)showstheoverallarchitectureofourMAVOS,
+which is built on the recent transformer-based framework [62]. Given the video
+framesandthereferencemask,thevisualembeddingsareextractedusingthevi-
+sual encoder. The identification assignment (ID) transfers the target masks into
+anidentificationembedding.Bothvisualandidentificationembeddingsareprop-
+agated to the two branches of the proposed Efficient Long Short-Term Trans-
+former (E-LSTT) block. The visual branch matches objects and gathers visual
+featuresfrompastframes.TheIDbranchreusestheattentionmapsofthevisual
+branch to propagate the ID embedding from past frames to the current frame.
+Masks are predicted through the decoder with the same FPN [24], as in [62].
+E-LSTT Block As shown in Fig. 2 (b), E-LSTT mainly consists of short-term
+propagation, long-term propagation, and self-propagation based on the gated
+propagation function of [62]. Short-term propagation is responsible for aggre-
+gating the spatial information of the target from the previous frame Ft−1. As
+discussed earlier, the baseline [62] employs long-term propagation to aggregate
+information about the target from all the stored previous frames; they append
+a new memory frame representation for each δ number of frames (set to 2/5 for
+training/testing). In contrast, here, the long-term propagation is re-designed toEfficient Video Object Segmentation via Modulated Cross-Attention Memory 7
+efficientlyaggregatetheinformationofthetargetfromourMCAmemory,which
+contains only the reference frame and single dynamic frame representation. As-
+sume the long-term memory contains a memory representation of the reference
+frame Mr ∈ RH×W×D, where H and W are the height and width of the fea-
+ture map, respectively, and D is the dimension of each token. After δ frames,
+a new memory representation Mt ∈ RH×W×D added to the long-term memory
+bank, resulting [Mr,Mt]. At frame t+δ, we update the long-term memory by
+replacing Mt with Mt+δ based on following:
+Mt+δ =MCA(Mt+δ,Mt) (1)
+Finally, a self-propagation module is employed to learn the correlations among
+the targets within the current frame Ft.
+ModulatedCross-Attention(MCA)Memory TheobjectiveofMCAmem-
+ory is to propagate the information from the past frames to the target using a
+newfusionoperatorthatcaneffectivelyhandlebothlocalandglobalfeaturesat
+various levels of granularity. With this objective, cross-attention [47] and focal
+modulation[57]canbepotentialchoices.Thecross-attentionmechanism[47]isa
+bidirectionalinteractionbetweentwosequences;itallowsthemodeltoestablish
+relationships and dependencies between the elements in two input sequences.
+Given the new memory frame Mt and the memory context Mc, it uses a First
+Interaction Last Aggregation (FILA) process that initially involves producing
+queries from Mt and keys and values from the context memory Mc. Attention
+scores are then calculated through the query and key interaction, followed by
+aggregation over the context. Focal-Modulation [57], on the other hand, is a re-
+cent method for modeling token interactions that follows an early aggregation
+process by the first aggregation last interaction (FALI) mechanism.
+Essentially, both self-attention and focal modulation involve the interaction
+and aggregation operations but differ in the sequence of function. In focal mod-
+ulation, the context aggregation is performed first to Mc through hierarchical
+contextualization and gated aggregation, followed by interaction I between the
+queries of Mt and the aggregated features. The output of the aggregation is
+known as the modulator, which encodes the surrounding context for queries.
+Note that the focal modulation is based on a hierarchy of convolutions that ex-
+tracts localized features at various levels of granularity. However, this does limit
+the operator’s capability to model global features as in cross-attention.
+Given the above-mentioned limitations of cross-attention and focal modu-
+lation, we propose a new fusion operator, named modulated cross-attention
+(MCA), that can handle local and global features at various levels of granu-
+larity. Consider the cross-attention formulation in Eq. 2,
+(cid:18) f (Mt)f (Mc)⊤(cid:19)
+CA(Mt,Mc)=Softmax q √k f (Mc), (2)
+v
+dk
+where CA indicates the cross-attention operator, f , f and f are the query,
+√ q k v
+key, and value projections, respectively, and 1/ dk is the scaling factor.8 Shaker et al.
+Similarly, we consider the focal modulation formulation, encompassing two
+steps: hierarchical contextualization, and gated aggregation, as shown in Eq. 3:
+FM(Mt,Mc)=f (Mt)◦f (GA(HC(Mc))), (3)
+q fm
+where, FM is the focal modulation operator, f is the focal modulation pro-
+fm
+jection, HC represents hierarchical contextualization and GA represents gated
+aggregation. In hierarchical contextualization, the memory context Mc is first
+projected by a linear layer Z0 = f (Mc) ∈ RH×W×D. Then, a series of depth-
+z
+wise convolutions are applied to the projected feature map Z0 to produce L
+refined feature maps, known as focal levels, as shown in Eq. 4:
+Zℓ =GeLU(DWConv(Zℓ−1))∈RH×W×D, (4)
+where Zℓ is the feature map at focal level ℓ, GeLU is the activation function,
+and DWConv is the depth-wise convolution operator. An additional global fea-
+ture is obtained by average pooling the feature map ℓ = L, given as ZL+1 =
+Avg-Pool(ZL). These feature maps are combined through a gated aggregation.
+Gating weights are obtained by a linear projection of the memory context Mc
+given by: G = f (Mc) ∈ RH×W×(L+1), where f is the gating projection. The
+g g
+gates G are then multiplied with the feature maps at each focal level, followed
+by a summation to produce the aggregated feature map Zout as given in Eq. 5:
+L+1
+(cid:88)
+Zout = Gℓ◦Zℓ ∈RH×W×D, (5)
+ℓ=1
+OurproposedMCAmechanismutilizesadualaggregation designalongwitha
+cross-attentionglobal interaction styletoeffectivelymodelbothlocalandglobal
+features. Specifically, the MCA can be rewritten as Eq. 6:
+(cid:18) f (Mt)f (Mc)⊤(cid:19)
+MCA(Mt,Mc)=Softmax q √k f (Zout), (6)
+fm
+dk
+where, MCA indicates the modulated cross-attention operator, f and f are
+q k
+the query and key projections used to calculate the attention matrix, f is the
+fm
+modulator projection, and Zout =GA(HC(Mc)) as given in Eq. 5.
+The proposed MCA is an efficient memory mechanism with consistent mem-
+ory usage and superior FPS, regardless of the number of frames. It enables
+the propagation of target information based on temporal changes in the past
+frames.TheMCAmemoryencodesbothlocalandglobalfeaturesatvariouslev-
+elsofgranularity.Thishelpsestablisheffectiveconnectionsbetweenthememory
+frames and the target at different time steps, thereby facilitating target object
+segmentationinchallengingsituations.TointerpretourMCAmemory,weshow
+in Fig. 3 the visual representation of its dynamic frame. It illustrates that the
+MCA memory effectively encodes temporal smoothness over time.Efficient Video Object Segmentation via Modulated Cross-Attention Memory 9
+𝑇
+Image
+MCA
+Memory
+Fig.3: Interpretation of the MCA memory. Interpreting the dynamic frame of
+the MCA memory reveals its ability to encode temporal smoothness over time along
+the boundary of the black swan.
+4 Experiments
+4.1 Setup
+WeevaluateourMAVOSandthemostcommonVOSmethodsonthreepopular
+VOS benchmarks: DAVIS 2017 [40] for short videos, LVOS [50], and Long-Time
+Video [23] for long videos. For a fair comparison, 480p resolution is used by
+default for all methods. We report the results using the three common evalua-
+tion metrics for VOS, Jaccard index J (similarity between predicted masks and
+ground truth), F score (average contour accuracy), and J&F (the average of
+both values as the final score). We use the same pre-trained weights as DeAOT-
+L [62], which is trained on the following static images [7,10,12,25,46]. Then,
+we train our models on the same VOS benchmarks [40,55] using 4 A100 GPUs.
+AdamW[27]optimizerisusedfor100,000stepswithabatchsizeof16,andase-
+quencelengthof8samplesduringtraining.Thelossfunctionisbasedequallyon
+acombinationofBCEloss[50]andsoftJaccardloss[35].Theinitiallearningrate
+issetto1×10−4 forDAVISandLTVdatasets,and1×10−5 forLVOS.MAVOS
+updates the MCA memory per δ (set to 2/10 for training/testing) frames. Fol-
+lowing [4,50,60,62], we report the FPS using a single V100 GPU. The total
+training time is less than 25 hours.
+4.2 Datasets
+Webrieflydescribetheutilizeddatasets,highlightingthetotalnumberofvideos,
+meanframespervideo,numberofuniqueannotatedobjects,andtotalnumberof
+annotations across the entire dataset. The statistics are summarized in Table 1.
+Long-term Video Object Segmentation (LVOS): This benchmark ad-
+dressesthelimitationsofexistingshort-videobenchmarksbyintroducingamore
+challenginglong-videoobjectsegmentationdataset.Comprising220videoswith10 Shaker et al.
+Table1:Statisticalcomparisonofthepopularshortvideo(DAVIS2017[40])andlong
+video (LTV [23] and LVOS [50]) VOS benchmarks. The largest value is in bold.
+Dataset Videos Mean Frames per Video Objects Annotations
+DAVIS [40] 90 ∼69 205 13,543
+LTV [23] 3 ∼2,470 3 60
+LVOS [50] 220 ∼574 282 156,432
+Table 2: Quantitative comparison with state-of-the-art models on LVOS validation
+set. MB denotes the kind of memory bank. OD, R+P, A, C, and MCA denote online
+adaption, reference and previous frames, all frames, compressed memory bank, and
+our modulated cross-attention memory, respectively. All methods are evaluated using
+a V100 GPU for a fair comparison. We report results in zero-shot settings on the
+validation set of LVOS. Our MAVOS performs favorably in terms of accuracy with
+superior speed against existing transformers-based methods.
+Method Backbone Design MB J&F↑ J ↑ F↑ FPS↑
+LWL[1] ResNet-50[14] Template-based OD 54.1 49.6 58.6 14.1
+CFBI[59] ResNet-101[14] Template-based R+P 50.0 45.0 55.1 5.2
+STCN[6] ResNet-50[14] Memory-based A 45.8 41.1 50.5 22.1
+AFB-URR[23] ResNet-50[14] Memory-based C 34.8 31.3 38.2 4.8
+RDE[21] ResNet-50[14] Memory-based C 52.9 47.7 58.1 22.2
+XMem[4] ResNet-50[14] Memory-based C 50.0 45.5 54.4 28.6
+DDMemory[15] MobileNet-V2[43] Memory-based C 60.7 55.0 66.3 30.3
+AOT-B[60] MobileNet-V2[43] Transformer-based R+P 53.4 47.7 52.1 26.6
+AOT-L[60] MobileNet-V2[43] Transformer-based A 60.3 54.6 66.0 2.1
+DeAOT-L[62] MobileNet-V2[43] Transformer-based A 61.1 55.2 67.1 5.0
+MAVOS (Ours) MobileNet-V2[43] Transformer-based MCA 60.9 54.6 67.1 38.2
+MAVOS (Ours) ResNet-50[14] Transformer-based MCA 63.3 57.6 69.0 37.1
+MAVOS (Ours) Swin-Base[26] Transformer-based MCA 64.8 58.7 70.9 22.3
+421minutes,LVOSisthefirstdenselyannotatedlong-termVOSdataset.Anav-
+erage video duration of 1.59 minutes presents practical challenges, such as long-
+term object reappearing and cross-temporal similarities. Each video in LVOS
+consists of an average of 574 frames, encompassing 282 unique object categories
+and a total of 156,432 annotations. Furthermore, LVOS introduces highly chal-
+lenging scenarios, including occlusion, absent objects, and different scales for
+objects, adding a layer of complexity to the evaluation. This dataset not only
+fills a crucial gap in long-term video object segmentation but also pushes algo-
+rithmic performance boundaries by simulating real-world conditions.
+Long-TimeVideo(LTV):Itcontainsthreevideoswithmorethan7000frames
+in total. Compared to the existing VOS benchmarks, this benchmark presents
+a significant contrast in scale per video. However, it lacks reliability with high
+variancesofperformancessinceitcontainsonlythreevideos.Eachvideo,withan
+averagedurationof2470frames,isevaluatedbasedon20annotatedframessam-Efficient Video Object Segmentation via Modulated Cross-Attention Memory 11
+𝑇 Image AOT-L DeAOT-L XMem MAVOS (Ours) GT
+GT
+FPS@2.1 FPS@5.0 FPS@28.6 FPS@38.2
+Fig.4:QualitativecomparisonbetweenMAVOSandtheSOTAmethodson
+LVOSvalsetwiththesamebackbone.WhilethemasksofAOT-LandDeAOT-L
+with infinite memory banks are promising, their real-time performance is hindered by
+alowFPS.Ontheotherhand,XMemexhibitsgoodFPSbutstrugglesinchallenging
+scenarios (marked in red dashed box). In the third row, XMem fails to recover the
+personoccludedbythewallsinthepastfewframes.Inthefourthrow,itconfusesthe
+person with the skateboard due to another disappearance. In contrast, our MAVOS
+accuratelysegmentsthetargetsdespitetheabsenceandocclusionwithreal-timeFPS.
+pled.Thisscarcityextendstothenumberofuniqueannotatedobjects,amount-
+ing to only three (one per video), with 60 annotations across the entire dataset.
+DAVIS 2017: It is one of the most used benchmarks in VOS. It is consid-
+ered a short-term video object segmentation dataset since each video lasts a
+few seconds. The benchmark encompasses 90 training and validation videos,
+each comprising approximately 69 frames. With a focus on diverse challenges
+likeocclusionsandmotionblur,DAVISboasts205uniqueobject categoriesand
+around13,543annotationsintotal.Thesignificanceofthedatasetliesinprovid-
+ing high-quality, challenging, and multiple objects of interest. It is accompanied
+by densely annotated, pixel-accurate ground truth segmentation for each frame.
+4.3 Results on LVOS
+We compare our MAVOS with current state-of-the-art methods in Table 2 in
+terms of visual backbone, memory design, memory bank, J&F, and FPS. Our
+MAVOSachieves60.9%J&F score,withanFPSof38.2.Incontrast,DeAOT-L
+achieves slightly higher J&F at 61.1%, with an FPS of only 5.0, and exploded
+GPUmemory(seeFig.1).WithResNet-50,MAVOSachieves63.3%J&F score
+at 37.1 FPS, which is significantly better than XMem by 13.3% and 25% faster.
+Compared to the state-of-the-art DDMemory, our MAVOS with the same back-
+bone is 1.3× faster with better accuracy. Our SwinB variant of MAVOS outper-
+forms all previous state-of-the-art methods by at least 3.7% J&F. We show a
+qualitative comparison for AOT, DeAOT-L, XMem, and our MAVOS in Fig. 4.12 Shaker et al.
+4.4 Results on LTV
+In addition to LVOS, we compare our MAVOS models with the current SOTA
+onLTV[23]inTable3.Amongexistingworks,XMem[4]runsat23.7FPSwith
+superior performance of 89.8% J&F score. Our MAVOS with SwinB achieves
+90.3% J&F while running at 22.0 FPS. However, it is worth mentioning that
+LTV dataset consists of three videos only with 60 annotated frames. Compared
+to the baseline transformers-based DeAOT-L, MAVOS achieves 87.4% J&F
+score, and reduces the GPU memory consumption from 38.6 GB to 4.9 GB.
+Also, the FPS increased from 4.1 to 38.9, without performance degradation.
+Table 3: Quantitativecomparisonwithstate-of-the-artmodelsonthethreevideosof
+the Long-Time Video benchmark. FPS is measured using V100 GPU.
+Method J&F↑ J↑ F↑ FPS ↑
+CFBI+ [61] 50.9 47.9 53.8 4.5
+CFBI [59] 53.5 50.9 56.1 3.8
+STM [37] 80.6 79.9 81.3 -
+MiVOS [5] 81.1 80.2 82.0 -
+AFB-URR [23] 83.7 82.9 84.5 3.6
+STCN [6] 87.3 85.4 89.2 20.1
+XMem [4] 89.8 88.0 91.6 23.7
+DeAOT-L [62] 87.9 86.0 89.8 4.1
+MAVOS (Ours) 87.4 85.7 89.0 38.9
+R50-MAVOS (Ours) 87.5 86.1 88.9 38.2
+SwinB-MAVOS (Ours) 90.3 87.7 92.9 22.0
+Table 4: Quantitative comparison with state-of-the-art models on DAVIS 2017 vali-
+dation set. FPS is measured using V100 GPU.
+Method J&F ↑ J ↑ F ↑ FPS ↑
+CFBI [59] 81.9 79.3 84.5 5.9
+CFBI+ [61] 82.9 80.1 85.7 7.2
+STCN [6] 85.4 82.2 88.6 19.5
+DDMemory [50] 84.2 81.3 87.1 28.1
+XMem [4] 86.2 82.9 89.5 24.2
+AOT-L [60] 83.8 81.1 86.4 20.3
+DeAOT-L [62] 84.5 81.6 87.4 29.3
+MAVOS (Ours) 84.4 81.5 87.2 39.2
+R50-MAVOS (Ours) 85.6 82.6 88.5 37.6
+SwinB-MAVOS (Ours) 86.4 83.2 89.6 21.8Efficient Video Object Segmentation via Modulated Cross-Attention Memory 13
+Frame 1 (input) Frame 466 Frame 891 Frame 1581 Frame 1 (input) Frame 289 Frame 748
+Image
+DeAOT-L
+(2F)
+DeAOT-L
+(6F)
+MAVOS
+(Ours)
+GT
+Fig.5: Qualitative comparison between MAVOS and baseline DeAOT-L on
+LVOSvalset.Left:Withtwomemoryframes,thebaselinestrugglestocorrectlyseg-
+ment the target when it disappeared at frame 891 and reappears at frame 1581. Even
+with six memory frames, the baseline exhibits confusion between the target (small ze-
+bra) and potentially its mother (middle zebra) at frame 1581. Right: At frames 289
+and 748, the baseline with two memory frames confuses both kites due to occlusion,
+andwithsixmemoryframesitover-segmentsthetails.Incontrast,MAVOSshowsim-
+pressiveperformance,accuratelydelineatingtargetsdespitetheabsenceandocclusion.
+4.5 Results on DAVIS 2017
+To show that MAVOS also performs well on short videos, we further report
+results on the DAVIS 2017 [40] dataset in Table 4. Our MAVOS achieves faster
+inference by nearly 10 FPS compared to the baseline DeAOT-L [62], with only
+a negligible 0.1 drop in J&F score. Similarly, our R50-MAVOS and SwinB-
+MAVOS achieves 85.6% and 86.4% J&F score, respectively. This shows the
+generalizationcapabilityofMAVOS,whichcanmodelbothshort-termandlong-
+termdependencies,allowingforstrongperformanceonshortandlong-termvideo
+datasets at a significantly higher FPS and less GPU memory consumption.
+4.6 Ablations
+In this section, we ablate three sets of experiments to show the effectiveness of
+ourMCAmemory.InTable5,weupdatethelong-termmemorybankofAOT-L
+andthebaselineDeAOT-Ltocontaintwoframes(reference+previous)andsix
+memory frames as proposed in [50]. It is clear that with two memory frames,
+the performance of AOT-L and DeaOT-L is limited, specifically for long-term
+videos. With six memory frames, the performance of DeAOT-L is improved.
+However, our MAVOS, based on two memory frames, is even better than the
+baseline DeAOT-L with six memory frames on long-video datasets, with higher
+FPS. We also demonstrate that qualitatively in Fig. 5.
+InTable6,forallexperiments,weusethedesignoftwomemoryframes(the
+reference frame and the dynamic memory frame) over the baseline DeAOT-L.14 Shaker et al.
+Table5:AblationwithAOT-LandDeAOT-Lwithdifferentnumberofmemoryframes
+on short and long-term benchmarks. FPS and memory are based on LVOS val set.
+J&F ↑
+Method FPS ↑ Mem (GB)↓
+DAVIS LTV LVOS
+AOT-L-2F 81.7 61.8 49.8 29.5 3.4
+AOT-L-6F 83.2 84.4 59.4 16.7 4.1
+DeAOT-L-2F 82.5 81.2 57.2 39.1 3.3
+DeAOT-L-6F 84.5 86.0 59.6 26.3 3.7
+MAVOS (Ours) 84.4 87.4 60.9 38.2 3.3
+Table 6: Module-Level comparisons between our proposed MCA and other encoding
+methods on three short and long-term benchmarks.
+J&F ↑
+Method
+DAVIS LTV LVOS
+Cross-Attention [47] 84.3 84.3 56.6
+Focal-Modulation [57] 82.5 83.2 51.6
+GCVIT [13] 83.4 84.9 55.1
+MAVOS (Ours) 84.4 87.4 60.9
+Table 7: Ablationwithdifferentmemoryframesonshortandlong-termbenchmarks.
+J&F ↑
+Memory Frames FPS ↑ Mem (GB)↓
+DAVIS LTV LVOS
+Reference 81.1 79.5 54.6 42.5 3.2
+Previous 80.2 74.6 37.3 42.9 3.2
+Reference + Previous 82.5 81.2 57.2 39.1 3.3
+MCA (Reference + Dynamic) 84.4 87.4 60.9 38.2 3.3Efficient Video Object Segmentation via Modulated Cross-Attention Memory 15
+First, when we replace MCA memory with cross-attention, it achieves compa-
+rable performance on DAVIS 2017 val. However, there is a significant decrease
+in performance on long-term video datasets LTV and LVOS by 3.1% and 4.3%,
+respectively.Secondly,usingonlyfocalmodulationblockswithtwolevelsinstead
+of MCA memory results in decreased performance across all datasets, empha-
+sizing the importance of the attention mechanism between target and memory
+frames.Lastly,wecomparetheMCAmemorywithGCVIT[13],acommontech-
+nique for global-local feature encoding, and we show that MCA is better in the
+contextofVOS.WealsoablateinTable7theeffectofdifferentlong-termmem-
+ory frames. The proposed MAVOS, based on MCA memory, achieves promising
+performance across all datasets compared to other memory frames.
+5 Conclusion
+Transformers have gained popularity in VOS applications due to their effective
+long-term modeling and propagation. However, with ever-increasing long-term
+memory, the GPU memory is exploding with very low FPS. In this work, we
+proposeanovelmechanismtohandlethelong-termmemoryefficiently,whileen-
+codingusefultemporalsmoothnessforthepastmemoryframes.OurModulated
+Cross-Attention(MCA)memoryencodesonlyrelevantinformationregardingthe
+targetandfadesawaytheirrelevantinformation.OurMAVOSvariantnetworks
+achieve favorable performance and generalize well on three VOS benchmarks
+(LVOS, LTV, and DAVIS 2017) with superior inference speed and less GPU
+memory consumption compared to other methods. Although MAVOS demon-
+strates effective segmentation in many scenarios, it may encounter challenges in
+accurately segmenting targets that are identical or highly similar, especially in
+cases involving sudden disappearance or severe occlusion. Addressing this spe-
+cific challenge remains an area for future improvement.
+6 Acknowledgment
+ThecomputationswereenabledbyresourcesprovidedbytheNationalAcademic
+InfrastructureforSupercomputinginSweden(NAISS)atAlvispartiallyfunded
+by the Swedish Research Council through grant agreement no. 2022-06725, the
+LUMI supercomputer hosted by CSC (Finland) and the LUMI consortium, and
+bytheBerzeliusresourceprovidedbytheKnutandAliceWallenbergFoundation
+at the National Supercomputer Centre.
+References
+1. Bhat, G., Lawin, F.J., Danelljan, M., Robinson, A., Felsberg, M., Gool, L.V.,
+Timofte, R.: Learning what to learn for video object segmentation. In: ECCV
+(2020)
+2. Caelles, S., Maninis, K.K., Pont-Tuset, J., Leal-Taixé, L., Cremers, D., Van Gool,
+L.: One-shot video object segmentation. In: CVPR (2017)16 Shaker et al.
+3. Chen, Y., Pont-Tuset, J., Montes, A., Van Gool, L.: Blazingly fast video object
+segmentation with pixel-wise metric learning. In: CVPR (2018)
+4. Cheng, H.K., Schwing, A.G.: XMem: Long-term video object segmentation with
+an atkinson-shiffrin memory model. In: ECCV (2022)
+5. Cheng, H.K., Tai, Y.W., Tang, C.K.: Modular interactive video object segmen-
+tation: Interaction-to-mask, propagation and difference-aware fusion. In: CVPR
+(2021)
+6. Cheng, H.K., Tai, Y.W., Tang, C.K.: Rethinking space-time networks with im-
+proved memory coverage for efficient video object segmentation. NeurIPS (2021)
+7. Cheng,M.M.,Mitra,N.J.,Huang,X.,Torr,P.H.,Hu,S.M.:Globalcontrastbased
+salient region detection. TPAMI (2014)
+8. Duarte,K.,Rawat,Y.S.,Shah,M.:Capsulevos:Semi-supervisedvideoobjectseg-
+mentation using capsule routing. In: ICCV (2019)
+9. Duke,B.,Ahmed,A.,Wolf,C.,Aarabi,P.,Taylor,G.W.:Sstvos:Sparsespatiotem-
+poral transformers for video object segmentation. In: CVPR (2021)
+10. Everingham,M.,VanGool,L.,Williams,C.K.,Winn,J.,Zisserman,A.:Thepascal
+visual object classes (voc) challenge. IJCV (2010)
+11. Ge, W., Lu, X., Shen, J.: Video object segmentation using global and instance
+embedding learning. In: CVPR (2021)
+12. Hariharan, B., Arbeláez, P., Bourdev, L., Maji, S., Malik, J.: Semantic contours
+from inverse detectors. In: ICCV (2011)
+13. Hatamizadeh, A., Yin, H., Heinrich, G., Kautz, J., Molchanov, P.: Global context
+vision transformers. In: ICML (2023)
+14. He, K., Zhang, X., Ren, S., Sun, J.: Deep residual learning for image recognition.
+In: CVPR (2016)
+15. Hong, L., Chen, W., Liu, Z., Zhang, W., Guo, P., Chen, Z., Zhang, W.: Lvos: A
+benchmark for long-term video object segmentation. In: ICCV (October 2023)
+16. Hu,Y.T.,Huang,J.B.,Schwing,A.:Maskrnn:Instancelevelvideoobjectsegmen-
+tation. In: NeurIPS (2017)
+17. Hu, Y.T., Huang, J.B., Schwing, A.G.: Videomatch: Matching based video object
+segmentation. In: ECCV (2018)
+18. Huang, X., Xu, J., Tai, Y.W., Tang, C.K.: Fast video object segmentation with
+temporal aggregation network and dynamic template matching. In: CVPR (2020)
+19. Janai,J.,Güney,F.,Behl,A.,Geiger,A.:Computervisionforautonomousvehicles:
+Problems, datasets and state of the art. arXiv:1704.05519 (2021)
+20. Lan, M., Zhang, J., Zhang, L., Tao, D.: Learning to learn better for video object
+segmentation. In: AAAI (2023)
+21. Li, M., Hu, L., Xiong, Z., Zhang, B., Pan, P., Liu, D.: Recurrent dynamic embed-
+ding for video object segmentation. In: CVPR (2022)
+22. Li,Y.,Shen,Z.,Shan,Y.:Fastvideoobjectsegmentationusingtheglobalcontext
+module. In: ECCV (2020)
+23. Liang, Y., Li, X., Jafari, N., Chen, J.: Video object segmentation with adaptive
+feature bank and uncertain-region refinement. In: NeurIPS (2020)
+24. Lin, T.Y., Dollár, P., Girshick, R., He, K., Hariharan, B., Belongie, S.: Feature
+pyramid networks for object detection. In: CVPR (2017)
+25. Lin, T.Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., Dollár, P.,
+Zitnick, C.L.: Microsoft coco: Common objects in context. In: ECCV (2014)
+26. Liu,Z.,Lin,Y.,Cao,Y.,Hu,H.,Wei,Y.,Zhang,Z.,Lin,S.,Guo,B.:SwinTrans-
+former: Hierarchical vision transformer using shifted windows. In: ICCV (2021)
+27. Loshchilov,I.,Hutter,F.:Decoupledweightdecayregularization.In:ICLR(2019)Efficient Video Object Segmentation via Modulated Cross-Attention Memory 17
+28. Lu, X., Wang, W., Martin, D., Zhou, T., Shen, J., Luc, V.G.: Video object seg-
+mentation with episodic graph memory networks. In: ECCV (2020)
+29. Luiten, J., Voigtlaender, P., Leibe, B.: Premvos: Proposal-generation, refinement
+and merging for video object segmentation. In: ACCV (2018)
+30. Maninis, K.K., Caelles, S., Chen, Y., Pont-Tuset, J., Leal-Taixé, L., Cremers, D.,
+VanGool,L.:Videoobjectsegmentationwithouttemporalinformation.In:PAMI
+(2018)
+31. Mao, Y., Wang, N., Zhou, W., Li, H.: Joint inductive and transductive learning
+for video object segmentation. In: ICCV (2021)
+32. Mei,J.,Wang,M.,Lin,Y.,Yuan,Y.,Liu,Y.:Transvos:Videoobjectsegmentation
+with transformers. arXiv:2106.00588 (2021)
+33. Meinhardt, T., Leal-Taixé, L.: Make one-shot video object segmentation efficient
+again. In: NeurIPS (2020)
+34. Ngan, K.N., Li, H.: Video segmentation and its applications. Springer Science &
+Business Media (2011)
+35. Nowozin, S.: Optimal decisions from probabilistic models: The intersection-over-
+union case. In: CVPR (2014)
+36. Oh, S.W., Lee, J.Y., Sunkavalli, K., Joo Kim, S.: Fast video object segmentation
+by reference-guided mask propagation. In: CVPR (2018)
+37. Oh,S.W.,Lee,J.Y.,Xu,N.,Kim,S.J.:Videoobjectsegmentationusingspace-time
+memory networks. In: ICCV (2019)
+38. Park, H., Yoo, J., Jeong, S., Venkatesh, G., Kwak, N.: Learning dynamic network
+usingareusegatefunctioninsemi-supervisedvideoobjectsegmentation.In:CVPR
+(2021)
+39. Perazzi,F.,Khoreva,A.,Benenson,R.,Schiele,B.,Sorkine-Hornung,A.:Learning
+video object segmentation from static images. In: CVPR (2017)
+40. Pont-Tuset, J., Perazzi, F., Caelles, S., Arbeláez, P., Sorkine-Hornung, A., Van
+Gool,L.:The2017davischallengeonvideoobjectsegmentation.arXiv:1704.00675
+(2017)
+41. Ramakanth, S.A., Babu, R.V.: Seamseg: Video object segmentation using patch
+seams. In: CVPR (2014)
+42. Robinson, A., Lawin, F.J., Danelljan, M., Khan, F.S., Felsberg, M.: Learning fast
+and robust target models for video object segmentation. In: CVPR (2020)
+43. Sandler, M., Howard, A., Zhu, M., Zhmoginov, A., Chen, L.C.: Mobilenetv2: In-
+verted residuals and linear bottlenecks. In: CVPR (2018)
+44. Sandler, M., Howard, A., Zhu, M., Zhmoginov, A., Chen, L.C.: Mobilenetv2: In-
+verted residuals and linear bottlenecks. CVPR (2018)
+45. Seong, H., Hyun, J., Kim, E.: Kernelized memory network for video object seg-
+mentation. In: ECCV (2020)
+46. Shi,J.,Yan,Q.,Xu,L.,Jia,J.:Hierarchicalimagesaliencydetectiononextended
+cssd. TPAMI (2015)
+47. Vaswani,A.,Shazeer,N.,Parmar,N.,Uszkoreit,J.,Jones,L.,Gomez,A.N.,Kaiser,
+L.u., Polosukhin, I.: Attention is all you need. In: NeurIPS (2017)
+48. Ventura, C., Bellver, M., Girbau, A., Salvador, A., Marques, F., Giro-i Nieto,
+X.: Rvos: End-to-end recurrent network for video object segmentation. In: CVPR
+(2019)
+49. Vijayanarasimhan, S., Grauman, K.: Active frame selection for label propagation
+in videos. In: ECCV (2012)
+50. Voigtlaender, P., Chai, Y., Schroff, F., Adam, H., Leibe, B., Chen, L.C.: Feelvos:
+Fast end-to-end embedding learning for video object segmentation. In: CVPR
+(2019)18 Shaker et al.
+51. Voigtlaender,P.,Leibe,B.:Onlineadaptationofconvolutionalneuralnetworksfor
+video object segmentation. In: BMVC (2017)
+52. Wang,Z.,Xu,J.,Liu,L.,Zhu,F.,Shao,L.:Ranet:Rankingattentionnetworkfor
+fast video object segmentation. In: ICCV (2019)
+53. Xiao, H., Feng, J., Lin, G., Liu, Y., Zhang, M.: Monet: Deep motion exploitation
+for video object segmentation. In: CVPR (2018)
+54. Xie,H.,Yao,H.,Zhou,S.,Zhang,S.,Sun,W.:Efficientregionalmemorynetwork
+for video object segmentation. In: CVPR (2021)
+55. Xu, N., Yang, L., Fan, Y., Yang, J., Yue, D., Liang, Y., Price, B., Cohen, S.,
+Huang, T.: Youtube-vos: Sequence-to-sequence video object segmentation. In:
+ECCV (2018)
+56. Xu, X., Wang, J., Li, X., Lu, Y.: Reliable propagation-correction modulation for
+video object segmentation. In: AAAI (2022)
+57. Yang, J., Li, C., Dai, X., Gao, J.: Focal modulation networks. In: NeurIPS (2022)
+58. Yang,L.,Wang,Y.,Xiong,X.,Yang,J.,Katsaggelos,A.K.:Efficientvideoobject
+segmentation via network modulation. In: CVPR (2018)
+59. Yang, Z., Wei, Y., Yang, Y.: Collaborative video object segmentation by
+foreground-background integration. In: ECCV (2020)
+60. Yang,Z.,Wei,Y.,Yang,Y.:Associatingobjectswithtransformersforvideoobject
+segmentation. In: NeurIPS (2021)
+61. Yang,Z.,Wei,Y.,Yang,Y.:Collaborativevideoobjectsegmentationbymulti-scale
+foreground-background integration. TPAMI (2021)
+62. Yang,Z.,Yang,Y.:Decouplingfeaturesinhierarchicalpropagationforvideoobject
+segmentation. In: NeurIPS (2022)
+63. Yu, Y., Yuan, J., Mittal, G., Fuxin, L., Chen, M.: Batman: Bilateral attention
+transformerinmotion-appearanceneighboringspaceforvideoobjectsegmentation.
+In: ECCV (2022)
+64. Zhang, Y., Wu, Z., Peng, H., Lin, S.: A transductive approach for video object
+segmentation. In: CVPR (2020)
+65. Zhou, T., Porikli, F., Crandall, D.J., Van Gool, L., Wang, W.: A survey on deep
+learning technique for video segmentation. TPAMI (2023)Efficient Video Object Segmentation via Modulated Cross-Attention Memory 1
+Supplementary Material
+We provide additional details regarding:
+– Architecture Details of MAVOS
+– Additional Ablation
+– More Qualitative Results
+– Limitations
+– Discussion
+1 Architecture Details of MAVOS
+ThebaselineDeAOT[62]isdesignedwithfournetworkvariants.DeAOT-T/S/B
+are tailored for short videos, they consider only the reference frame as the long-
+term memory, leading to consistent FPS and memory but poor accuracy on
+long videos because the temporal context is limited. DeAOT-L is designed for
+both short and long-term videos, it updates long-term memory by appending a
+new memory frame representation for each δ number of frames (set to 2/5 for
+training/testing).Sinceourmotivationistoproposeanefficientmethodforlong-
+term videos, we introduce a single efficient network, called MAVOS, equivalent
+toDeAOT-Lintermsofallhyper-parametersandthenumberofLSTT/E-LSTT
+blocks, which are set to three blocks.
+We propose three variants of MAVOS based on three visual encoders (Mo-
+bileNet V2 [44], ResNet-50 [14], and Swin-Base [26]). Identification assignment
+(ID)of [62]isusedtotransferthetargetmasksintoanidentificationembedding.
+Bothvisualandidentificationembeddingsarepropagatedtothetwobranchesof
+the proposed Efficient Long Short-Term Transformer (E-LSTT) block. The vi-
+sualbranchmatchesobjectsandpropagatesvisualfeaturesfrompreviousframes.
+The ID branch reuses the attention maps of the visual branch to propagate the
+ID embedding from past frames to the current frame. The masks are predicted
+through the decoder using the same Feature Pyramid Network (FPN) [24], as
+in [62].
+2 Additional Ablation
+In our evaluation on the LVOS validation set [50] presented in Table 8, we con-
+duct an ablation to examine the impact of varying the number of focal stages
+in the proposed MCA memory. When employing two focal levels, R50-MAVOS
+achieves a performance of 63.3% with a processing speed of 37.1 FPS. Notably,
+reducing the number of focal levels to one results in a marginal increase in FPS
+(1.4 FPS); however, this improvement is accompanied by a 0.8% drop in per-
+formance. The introduction of a third focal level leads to a further decrease in
+FPS. This trend suggests that employing three focal levels may be less advanta-
+geous, potentially diverting attention towards high-level features at the expense
+of low-level features. This is less helpful here, since the MCA memory already
+encodes high-level features through the attention mechanism.2 Shaker et al.
+Table 8: Ablation for the number of focal levels in MCA memory of R50-MAVOS on
+LVOS validation set. The largest value is in bold.
+Focal Levels J&F ↑ FPS ↑
+1 62.5% 38.5
+2 63.3% 37.1
+3 63.1% 35.4
+Frame 1 (Input) Frame 846 Frame 1275 Frame 1552 Frame 2148
+#00180 #06429 #09852 #11643 #14196
+Fig.6: Qualitative result for R50-MAVOS on the Long-Time Video
+dataset [23]. Our R50-MAVOS demonstrates good segmentation performance for se-
+quences with more than two thousand frames at 38 FPS, accurately segmenting the
+target despite the fast movement.
+3 More Qualitative Results
+We show in Fig. 6 more qualitative results for R50-MAVOS on the Long-Time
+Video dataset [23]. Our MAVOS demonstrates favorable segmentation perfor-
+mance for a long sequence (more than two thousand frames), and runs at 37
+FPS. MAVOS accurately segments the target despite the fast movement of the
+boyandocclusionwithotherobjectsbetweentheframes.Inaddition,wepresent
+inFig.7morequalitativeresultsontheLVOSdataset[50].Inthefirsttworows,
+the given mask contains four different objects for segmentation throughout the
+video. Despite objects sometimes blocking each other and some disappearing
+and reappearing, Our MAVOS demonstrates promising performance for multi-
+objectvisualsegmentation.Inthelasttworows,thegoalistosegmentamoving
+ship across the video. This is challenging because, firstly, the ship often moves
+far away, making it appear smaller. Secondly, the quality of this video is poor.
+Despite these challenges, our MAVOS is able to accurately segment the ship,
+whether it’s close to the camera or far away, showing the effectiveness of our
+method.Efficient Video Object Segmentation via Modulated Cross-Attention Memory 3
+Frame 1 (Input) Frame 45 Frame 161 Frame 355 Frame 423
+#0001 #0221 #0801 #1776 #2111
+Frame 1 (Input) Frame 155 Frame 207 Frame 317 Frame 379
+#0001 #0776 #1031 #1581 #1891
+Fig.7: Qualitative results for R50-MAVOS on two videos from LVOS vali-
+dation set. In the first two rows, the targets to segment are four basketball players
+in action. In the last two rows, the target is to segment the moving ship throughout
+the video. MAVOS showcases robust segmentation performance in both scenarios, ac-
+curately delineating targets despite occlusion and blocking in the first two rows, and
+coping with varying scaling factors in the last two rows.
+4 Limitations
+WeobservethatMAVOSoftenfailstosegmenttargetswhentheyareidenticalor
+highly similar after disappearance or severe occlusion occurs. We demonstrate
+this case in Fig. 8. This is a common problem not only for MAVOS but also
+for other state-of-the-art methods, including the baseline DeAOT-L [62] and
+XMem [4]. This is likely due to the lack of encoding sufficient discriminative
+features for the targets due to the high similarity between them. As shown in
+Fig. 8, in the first column, two masks of almost identical flags are given in the
+referenceframe.Atframe181,theflagwiththeredmaskoverridestheflagwith
+the green mask. DeAOT and XMem confuse both flags, while MAVOS partially
+segmentsthemcorrectly.Atframe631,MAVOSaswellasDeAOT-LandXMem
+fail to discriminate both flags after the severe occlusion between both of them
+due to high similarity between both flags. We argue that this is likely due to4 Shaker et al.
+Image DeAOT-L XMem MAVOS (Ours) GT
+Frame 1
+(input)
+Frame 181
+Frame 631
+Fig.8:QualitativeexampleforfailurecasefromLVOSvalidationset.MAVOS
+as well as the state-of-the-art methods fail to segment highly similar targets (almost
+identical) after severe occlusion. Both targets are marked with green dashed boxes,
+failure segmentations are marked with red dashed circles.
+the lack of discriminative features from the visual encoder and the short-term
+memory.
+5 Discussion
+Vision Transformers as end-to-end networks have gained popularity in video
+object segmentation applications due to their effective long-term modeling and
+propagation. However, their long-term memory is ever-increasing with exploded
+GPU memory and very low FPS. MAVOS runs at 38.2 FPS and achieves 60.9%
+J&F score. Our Modulated Cross-Attention memory is based on two memory
+frames only: the reference frame and one dynamic frame that encodes only rele-
+vantinformationregardingthetargetandfadesawaytheirrelevantinformation.
+OurMAVOSvariantnetworksachievenewstate-of-the-artperformanceonthree
+VOS benchmarks (LVOS, LTV, and DAVIS 2017) with superior run-time speed
+and significantly less GPU memory compared to the existing methods.

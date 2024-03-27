@@ -1,0 +1,786 @@
+LISA: Layerwise Importance Sampling for Memory-Efficient
+Large Language Model Fine-Tuning
+RuiPan♡∗, XiangLiu♡∗ ShizheDiao♡, RenjiePi♡, JipengZhang♡,
+ChiHan♠, TongZhang♠
+♡TheHongKongUniversityofScienceandTechnology
+♠UniversityofIllinoisUrbana-Champaign
+{rpan, sdiaoaa, rpi, jzhanggr}@ust.hk xliu886@connect.hkust-gz.edu.cn
+{chihan3, tozhang}@illinois.edu
+March27,2024
+Abstract
+Themachinelearningcommunityhaswitnessedimpressiveadvancementssincethefirstappearanceof
+largelanguagemodels(LLMs),yettheirhugememoryconsumptionhasbecomeamajorroadblocktolarge-
+scaletraining.ParameterEfficientFine-TuningtechniquessuchasLow-RankAdaptation(LoRA)havebeen
+proposedtoalleviatethisproblem,buttheirperformancestillfailstomatchfullparametertraininginmost
+large-scalefine-tuningsettings.Attemptingtocomplementthisdeficiency,weinvestigatelayerwiseproperties
+ofLoRAonfine-tuningtasksandobserveanuncommonskewnessofweightnormsacrossdifferentlayers.
+Utilizingthiskeyobservation,asurprisinglysimpletrainingstrategyisdiscovered,whichoutperformsboth
+LoRAandfullparametertraininginawiderangeofsettingswithmemorycostsaslowasLoRA.Wenameit
+LayerwiseImportanceSampledAdamW(LISA),apromisingalternativeforLoRA,whichappliestheideaof
+importancesamplingtodifferentlayersinLLMsandrandomlyfreezemostmiddlelayersduringoptimization.
+ExperimentalresultsshowthatwithsimilarorlessGPUmemoryconsumption,LISAsurpassesLoRAoreven
+fullparametertuningindownstreamfine-tuningtasks,whereLISAconsistentlyoutperformsLoRAbyover
+11%-37%intermsofMT-Benchscores.Onlargemodels,specificallyLLaMA-2-70B,LISAachieveson-par
+orbetterperformancethanLoRAonMT-Bench,GSM8K,andPubMedQA,demonstratingitseffectiveness
+acrossdifferentdomains.
+1 Introduction
+Large language models like ChatGPT excel in tasks
+such as writing documents, generating complex code, an-
+swering questions, and conducting human-like conversa-
+tions(Ouyangetal.,2022). WithLLMsbeingincreasingly
+appliedindiversetaskdomains,domain-specificfine-tuning
+hasemergedasakeystrategytoenhancetheirdownstream
+capabilities(Raffeletal.,2020;Chowdheryetal.,2022;Roz-
+ièreetal.,2023;OpenAIetal.,2023). Nevertheless,these
+methodsarenotablyexpensive,introducingmajorobstacles
+indevelopinglarge-scalemodels. Aimingtoreducethecost,
+Parameter-Efficient Fine-Tuning (PEFT) techniques, like
+adapterweights(Houlsbyetal.,2019),promptweights(Li
+Figure1:TraininglossofLLaMA-2-7Bmodelon
+and Liang, 2021), and LoRA (Hu et al., 2022) have been
+AlpacaGPT-4datasetwithFullParameterTrain-
+proposed to minimize the number of trainable parameters.
+ing(FT),LoRA,andLISA.
+Amongthem,LoRAisoneofthemostwidelyadoptedPEFT
+techniques,duetoitsnicepropertyofallowingtheadaptor
+*EqualContribution.
+1
+4202
+raM
+62
+]GL.sc[
+1v91971.3042:viXratobemergedbacktothebasemodelparameters. However,LoRA’ssuperiorperformanceinfine-tuningtasks
+hasyettoreachapointthatuniversallysurpassesfullparameterfine-tuninginallsettings(Dingetal.,2022;
+Dettmersetal.,2023). Inparticular,ithasbeenobservedthatLoRAtendstofalteronlarge-scaledatasetsduring
+continualpre-training(Lialinetal.,2023),whichraisesdoubtsabouttheeffectivenessofLoRAunderthose
+circumstances. WeattributethistothemuchfewertrainableparametersofLoRAcomparedtothebasemodel,
+whichlimitstherepresentationpowerofLoRAtraining.
+Toovercomethisshortcoming,wedelveintoLoRA’strainingstatisticsineachlayer,aspiringtobridgethe
+differencebetweenLoRAandfull-parameterfine-tuning. Surprisingly,wediscoverthatLoRA’slayerwiseweight
+normshaveanuncommonlyskeweddistribution,wherethebottomlayerand/orthetoplayeroccupythemajority
+ofweightsduringtheupdate,whiletheotherself-attentionlayersonlyaccountforasmallamount,whichmeans
+differentlayershavedifferentimportancewhenupdating. Thiskeyobservationinspiresusto“sample”different
+layersbytheirimportance,whichexactlymatchestheideaofimportancesampling(KloekandVanDijk,1978;
+ZhaoandZhang,2015).
+As a natural consequence, this strategy brings forth our Layerwise Importance Sampled Adam (LISA)
+algorithm,wherebyselectivelyupdatingonlyessentialLLMlayersandleavingothersuntouched,LISAenables
+traininglarge-scalelanguagemodels(≥65Bparameters)withlessorsimilarmemoryconsumptionasLoRA.
+Furthermore,fine-tunedondownstreamtasks,LISAoutperformedbothLoRAandconventionalfull-parameter
+fine-tuningapproachesbyalargemargin,indicatingthelargepotentialofLISAasapromisingalternativeto
+LoRA.
+Wesummarizeourkeycontributionsasfollows,
+• Wediscoverthephenomenonofskewedweight-normdistributionacrosslayersinbothLoRAandfull
+parameterfine-tuning,whichimpliesthevariedimportanceofdifferentlayersinlarge-scaleLLMtraining.
+• WeproposetheLayerwiseImportanceSampledAdamW(LISA)algorithm,asimpleoptimizationmethod
+thatiscapableofscalinguptoover70BLLMswithlessorsimilarmemorycostasLoRA.
+• WedemonstrateLISA’seffectivenessinfine-tuningtasksformodernLLMs,whereitoutperformsLoRA
+by8%-36%inMT-Benchandexhibitsmuchbetterconvergencebehaviors. LISAevenoutperformsfull
+parameterstrainingundercertainsettings. Similarperformancegainisobservedacrossdifferentsized
+models(7B-70B)anddifferenttasks,includinginstructionfollowing,medicalQA,andmathproblems.
+2 Related Work
+2.1 LargeLanguageModels
+In the realm of natural language processing (NLP), the Transformer architecture has been a revolutionary
+technique, initiallyknownforitseffectivenessinmachinetranslationtasks(Vaswanietal.,2017). Withthe
+inceptionofmodelslikeBERT(Devlinetal.,2019)andGPT-2(Radfordetal.,2019), theapproachshifted
+towardspre-trainingonextensivecorpora,whichledtosignificantperformanceenhancementsindownstream
+fine-tuning tasks (Brown et al., 2020; Raffel et al., 2020; Zhang et al., 2022; Scao et al., 2022; Almazrouei
+etal.,2023;Touvronetal.,2023a,b;Chiangetal.,2023;Bidermanetal.,2023;Jiangetal.,2024). However,
+thegrowingnumberofparametersinthesemodelsresultsinahugeGPUmemoryconsumption,renderingthe
+fine-tuningoflargescalemodels(≥65B)infeasibleunderlowresourcescenarios. Thishaspromptedashift
+towardsmoreefficienttrainingofLLMs.
+2.2 Parameter-EffieientFine-Tuning
+Parameter-efficientfine-tuning(PEFT)methodsadaptpre-trainedmodelsbyfine-tuningonlyasubsetofparame-
+ters. Ingeneral,PEFTmethodscanbegroupedintothreeclasses:1)PromptLearningmethods(Hambardzumyan
+etal.,2021;Zhongetal.,2021;Hanetal.,2021;LiandLiang,2021;QinandEisner,2021;Liuetal.,2021a;
+Diao et al., 2022), 2) Adapter methods (Houlsby et al., 2019; Diao et al., 2021; Hu et al., 2022; Diao et al.,
+2023c),and3)Selectivemethods(Liuetal.,2021b,b;Lietal.,2023a). Promptlearningmethodsemphasize
+optimization of the input token or input embedding with frozen model parameters, which generally has the
+leasttrainingcostamongallthreetypes. Adaptermethodsnormallyintroduceanauxiliarymodulewithmuch
+fewer parameters than the original model, where updates will only be applied to the adapter module during
+training. Comparedwiththem,selectivemethodsaremorecloselyrelatedtoLISA,whichfocusesonoptimizing
+2afractionofthemodel’sparameterswithoutappendingextramodules. Recentadvancesinthisdomainhave
+introducedseveralnotabletechniquesthroughlayerfreezing. AutoFreeze(Liuetal.,2021b)offersanadaptive
+mechanismtoidentifylayersforfreezingautomaticallyandacceleratesthetrainingprocess. FreezeOut(Brock
+etal.,2017)progressivelyfreezesintermediatelayers,resultinginsignificanttrainingtimereductionswithout
+notablyaffectingaccuracy. TheSmartFRZ(Lietal.,2023a)frameworkutilizesanattention-basedpredictorfor
+layerselection,substantiallycuttingcomputationandtrainingtimewhilemaintainingaccuracy. However,none
+oftheselayer-freezingstrategieshasbeenwidelyadoptedinthecontextofLargeLanguageModelsduetotheir
+inherentcomplexityornon-compatibilitywithmodernmemoryreductiontechniques(Rajbhandarietal.,2020;
+Rasleyetal.,2020)forLLMs.
+2.3 Low-RankAdaptation(LoRA)
+Incontrast,theLow-RankAdaptation(LoRA)techniqueismuchmorepopularincommonpracticesofLLM
+training(Huetal.,2022). Byemployinglow-rankmatrices,LoRAreducesthenumberoftrainableparameters,
+therebylesseningthecomputationalburdenandmemorycost. OnekeystrengthofLoRAisitscompatibility
+with models featuring linear layers, where the decomposed low-rank matrices can be merged back into the
+originalmodel. Thisallowsforefficientdeploymentwithoutchangingthemodelarchitecture. Asaresult,LoRA
+can be seamlessly combined with other techniques, such as quantization (Dettmers et al., 2023) or Mixture
+ofExperts(Gouetal.,2023). Despitetheseadvantages,LoRA’sperformanceisnotuniversallycomparable
+withfullparameterfine-tuning. TherehavebeentasksinDingetal.(2022)thatLoRAachievesmuchworse
+performancethanfullparametertrainingon. Thisphenomenonisespeciallyevidentinlarge-scalepre-training
+settings(Lialinetal.,2023),wheretothebestofourknowledge,onlyfullparametertrainingwasadoptedfor
+successfulopen-sourceLLMs(Almazroueietal.,2023;Touvronetal.,2023a,b;Jiangetal.,2023;Zhangetal.,
+2024;Jiangetal.,2024).
+2.4 Large-scaleOptimizationAlgorithms
+Besidesapproachesthatchangemodelarchitectures,therehavealsobeeneffortstoimprovetheefficiencyof
+optimizationalgorithmsforLLMs.Onebranchofsuchislayerwiseoptimization,whoseorigincanbetracedback
+todecadesago,whereHintonetal.(2006)pioneeredaneffectivelayer-by-layerpre-trainingmethodforDeep
+BeliefNetworks(DBN),provingthebenefitsofsequentiallayeroptimization. Bengioetal.(2007)furtheredthis
+conceptbyshowcasingtheadvantagesofagreedy,unsupervisedapproachforpre-trainingeachlayerindeep
+networks. Forlargebatchsettings,Youetal.(2017,2019)proposeLARSandLAMB,providingimprovements
+ingeneralizationbehaviorstoavoidperformancedegradationincurredbylargebatchsizes. Nevertheless,in
+mostsettingsinvolvingLLMs,Adam(KingmaandBa,2014;Reddietal.,2019),andAdamW(Loshchilovand
+Hutter,2017)arestillthedominantoptimizationmethodscurrently.
+Recently,therehavealsobeenotherattemptstoreducethetrainingcostofLLMs. Forexample,MeZO(Mal-
+ladietal.,2023)adoptedzerothorderoptimizationthatbroughtsignificantmemorysavingsduringtraining.
+However,italsoincurredahugeperformancedropinmultiplebenchmarks,particularlyincomplexfine-tuning
+scenarios. Intermsofacceleration, Sophia(Liuetal.,2023)incorporatesclippedsecond-orderinformation
+intotheoptimization, obtainingnon-trivialspeeduponLLMtraining. Themajordownsidesareitsintrinsic
+complexityofHessianestimationandunverifiedempiricalperformanceinlarge-sizemodels(e.g.,≥65B).In
+parallel to our work, Zhao et al. (2024) proposed GaLore, a memory-efficient training strategy that reduces
+memorycostbyprojectinggradientsintoalow-rankcompactspace. Yettheperformancehasstillnotsurpassed
+full-parametertraininginfine-tuningsettings. Tosumup,LoRA-variantmethods(Huetal.,2022;Dettmers
+etal.,2023;Zhaoetal.,2024)withAdamW(LoshchilovandHutter,2017)isstillthedominantparadigmfor
+large-sizeLLMfine-tuning,theperformanceofwhichstilldemandsfurtherimprovements.
+3 Method
+3.1 Motivation
+To understand how LoRA achieves effective training with only a tiny portion of parameters, we carried out
+empiricalstudiesonmultiplemodels,speciallyobservingtheweightnormsacrossvariouslayers. Wefine-tuneit
+ontheAlpaca-GPT4dataset(Pengetal.,2023). Duringthetraining,wemeticulouslyrecordedthemeanweight
+normsofeachlayerℓateverysteptafterupdates,i.e.
+3T
+w(ℓ) ≜mean-weight-norm(ℓ)= 1 (cid:88) ∥θ(ℓ)∥
+T t 2
+t=1
+Figure2presentsthesefindings,withthex-axisrepresentingthelayerid,fromembeddingweightstothe
+finallayer,andthey-axisquantifyingtheweightnorm. Thevisualizationrevealsonekeytrend:
+• Theembeddinglayer(wteandwpelayersforGPT2)orthelanguagemodel(LM)headlayerexhibited
+significantlylargerweightnormscomparedtointermediarylayersinLoRA,oftenbyafactorofhundreds.
+Thisphenomenon,however,wasnotsalientunderfull-parametertrainingsettings.
+Figure2: Layer-wiseweightnormsduringtrainingofGPT2andLLaMA-2-7BModelwithLoRAandFull
+Parameterstraining.
+ThisobservationindicatesthattheupdateemphasisofLoRAandfullparametertrainingdiffersignificantly,
+whichcanbeattributedtothedifferenceintheirlearnedknowledge. Forexample,inembeddinglayers,tokens
+withsimilarmeanings,i.e. synonyms,canbeprojectedintothesameembeddingspaceandconvertedtosimilar
+embeddings. LoRA may capture this similarity in language and “group” them in the low-dimension space,
+allowingfrequentfeaturesoflanguagemeaningstobepromptlyidentifiedandoptimized. ThepriceisLoRA’s
+limitedrepresentationpowerrestrictedbyitsintrinsiclow-rankspace. Otherpossibleexplanationscanalso
+justifythisphenomenon. Despitevariousinterpretationsofthisobservation,onefactremainsclear: LoRAvalues
+layerwiseimportancedifferentlyfromfullparametertuning.
+3.2 LayerwiseImportanceSampledAdamW(LISA)
+Toexploittheaforementioneddiscovery,weaspiretosimulateLoRA’supdatingpatternviasamplingdifferent
+layerstofreeze. Thisway,wecanavoidLoRA’sinherentdeficiencyoflimitedlow-rankrepresentationability
+andalsoemulateitsfastlearningprocess. Intuitively,giventhesamegloballearningratesacrosslayers,layers
+withsmallweightnormsinLoRAshouldalsohavesmallsamplingprobabilitiestounfreezeinfull-parameter
+settings,sotheexpectedlearningratesacrossiterationscanstaythesame. Thisisexactlytheideaofimportance
+sampling(KloekandVanDijk,1978;ZhaoandZhang,2015),whereinsteadofapplyinglayerwisedifferent
+learningrates{η }infull-parametersettingstoemulateLoRA’supdates{η˜},weapplysamplinginstead
+t t
+w˜(ℓ) w˜(ℓ)
+η(ℓ) =η˜(ℓ)· ⇒ η(ℓ) =η(ℓ),p(ℓ) =
+t t w(ℓ) t w(ℓ)
+This gives rise to our Layerwise Importance Sampling AdamW method, as illustrated in Algorithm 1. In
+practice,sincealllayersexceptthebottomandtoplayerhavesmallweightnormsinLoRA,weadopt{p }NL =
+ℓ ℓ=1
+{1.0,γ/N ,γ/N ,...,γ/N ,1.0}inpractice,whereγ controlstheexpectednumberofunfreezelayersduring
+L L L
+optimization. Intuitively,γ servesasacompensationfactortobridgethedifferencebetweenLoRAandfull
+parameter tuning, letting LISA emulate a similar layerwise update pattern as LoRA. To further control the
+memoryconsumptioninpracticalsettings,weinsteadrandomlysampleγ layerseverytimetoupper-boundthe
+maximumnumberofunfrozenlayersduringtraining.
+4Algorithm1LayerwiseImportanceSamplingAdamW(LISA)
+Require: number of layers N , number of iterations T, sampling period K, sampling probability {p }NL,
+L ℓ ℓ=1
+initiallearningrateη
+0
+1: fori←0toT/K−1do
+2: forℓ←1toN Ldo
+3: if U(0,1)>p ℓthen
+4: Freezelayerℓ
+5: endif
+6: endfor
+7: RunAdamWforK iterationswith{η t}i tk =+ ikk−1
+8: endfor
+VANILLA LORARANK LISAACTIVATELAYERS
+MODEL - 128 256 512 E+H E+H+2L E+H+4L
+GPT2-SMALL 3.8G 3.3G 3.5G 3.7G 3.3G 3.3G 3.4G
+TINYLLAMA 13G 7.9G 8.6G 10G 7.4G 8.0G 8.3G
+PHI-2 28G 14.3G 15.5G 18G 13.5G 14.6G 15G
+MISTRAL-7B 59G 23G 26G 28G 21G 23G 24G
+LLAMA-2-7B 59G 23G 26G 28G 21G 23G 24G
+LLAMA-2-70B* OOM 79G OOM OOM 71G 75G 79G
+Table1: ThechartillustratespeakGPUmemoryconsumptionforvariousmodelarchitecturesandconfigurations,
+highlightingdifferencesacrossmodels. Inthetable,theLISAconfigurationisspecificallylabeled: “E”denotes
+theembeddinglayer,“H”representsthelanguagemodelheadlayer,and“2L”indicatestwoadditionalstandard
+layers. *: Modelparallelismisappliedforthe70Bmodel.
+4 Experimental Results
+4.1 MemoryEfficiency
+TodemonstratethememoryefficiencyofLISA,showcasingthatithasacomparableorlowermemorycostthan
+LoRA,weconductedpeakGPUmemoryexperiments.
+Settings Toproduceareasonableestimationofthe
+memory cost, we randomly sample a prompt from
+the Alpaca dataset (Taori et al., 2023) and limit the
+maximumoutputtokenlengthto1024. Ourfocusis
+ontwokeyhyperparameters:LoRA’srankandLISA’s
+number of activation layers. For other hyperparam-
+eters, a mini-batch size of 1 was consistently used
+acrossallfivemodelsinTable3,deliberatelyexclud-
+ing other GPU memory-saving techniques such as
+gradient checkpointing (Chen et al., 2016), offload-
+ing(Renetal.,2021),andflashattention(Daoetal.,
+2022;Dao,2023).Allmemory-efficiencyexperiments
+areconductedon4×NVIDIAAmpereArchitecture
+GPUswith80Gmemory.
+Results UponexaminingTable1,itisevidentthat
+Figure3: GPUmemoryconsumptionofLLaMA-2-7B
+theLISAconfiguration,particularlywhenenhanced
+withdifferentmethodsandbatchsize1.
+withboththeembeddinglayer(E)andtwoadditional
+layers(E+H+2L),demonstratesaconsiderablereduc-
+tion in GPU memory usage when fine-tuning the
+LLaMA-2-70B model, as compared to the LoRA method. Specifically, the LISA E+H+2L configuration
+5showsadecreaseto75GofpeakGPUmemoryfromthe79GrequiredbytheLoRARank128configuration.
+Thisefficiencygainisnotanisolatedincident;asystematicmemoryusagedecreaseisobservedacrossvarious
+modelarchitectures,suggestingthatLISA’smethodofactivatinglayersisinherentlymorememory-efficient.
+InFigure3,itisworthnoticingthatthememory
+reductioninLISAallowsLLaMA-2-7Btobetrained
+on a single RTX4090 (24GB) GPU, which makes
+high-qualityfine-tuningaffordableevenonalaptop
+computer. Inparticular,LISArequiresmuchlessacti-
+vationmemoryconsumptionthanLoRAsinceitdoes
+not introduce additional parameters brought by the
+adaptor. LISA’s activation memory is even slightly
+lessthanfullparametertrainingsincepytorch(Paszke
+etal.,2019)withdeepspeed(Rasleyetal.,2020)al-
+lows deletion of redundant activations before back-
+propagation.
+On topof that, a reduction inmemory footprint
+from LISA also leads to an acceleration in speed.
+As shown in Figure 4, LISA provides almost 2.9×
+speedupwhencomparedwithfull-parametertuning, Figure 4: Single-iteration time cost of LLaMA-2-7B
+and∼2×speedupagainstLoRA,partiallyduetothe withdifferentmethodsandbatchsize1.
+removal of adaptor structures. It is worth noticing
+thatthereductionofmemoryfootprintinbothLoRAandLISAleadstoasignificantaccelerationofforward
+propagation,whichemphasizestheimportanceofmemory-efficienttraining.
+4.2 ModerateScaleFine-Tuning
+LISAisabletoachievethissignificantmemorysaving
+DATASET #TRAIN #TEST
+whilestillobtainingcompetitiveperformanceinfine-
+ALPACAGPT-4(PENGETAL.,2023) 52,000 -
+tuningtasks.
+MT-BENCH(ZHENGETAL.,2023) - 80
+GSM8K(COBBEETAL.,2021) 7,473 1,319
+Settings To demonstrate the superiority of LISA PUBMEDQA(JINETAL.,2019) 211,269 1,000
+overLoRA,weemploytheinstruction-followingfine-
+tuningtaskwithAlpacaGPT-4dataset,whichconsists Table2: Thestatisticsofdatasets. #TRAINand#TEST
+of52kinstancesgeneratedbyGPT-4(OpenAIetal., denotethenumberoftrainingandtestsamplesrespec-
+2023)basedoninputsfromAlpaca(Taorietal.,2023). tively.
+Theeffectivenessoffine-tuningwasevaluatedwith
+MT-Bench (Zheng et al., 2023), featuring 80 high-
+quality,multi-turnquestionsdesignedtoassessLLMsonmultipleaspects.
+Inourexperiments,weassessedfivebaselinemodels: GPT2-Small(Radfordetal.,2019),TinyLlama(Zhang
+etal.,2024),Phi-2(Lietal.,2023b),Mistral-7B(Jiangetal.,2023),LLaMA-2-7B,andLLaMA-2-70B(Touvron
+et al., 2023b). These models, varying in size with parameters ranging from 124M to 70B, were selected to
+provideadiverserepresentationofdecodermodels. DetailedspecificationsofeachmodelareprovidedinTable3.
+Forhyperparameters,weadoptrank128forLoRAandE+H+2LforLISAinthissectionofexperiments,with
+fulldetailsavailableinAppendixA.
+Results Table4offersacomprehensiveevaluation
+Total Model
+of three fine-tuning methods—Full Parameter Fine- ModelName Layers Heads
+Params Dim
+Tuning(FT),Low-RankAdaptation(LoRA),andLay-
+erwiseImportanceSamplingAdamW(LISA)—across GPT2-Small 124M 12 768 12
+TinyLlama 1.1B 22 2048 32
+a diverse set of tasks including Writing, Roleplay,
+Phi-2 2.7B 32 2560 32
+Reasoning,Math,Extraction,STEM,andHumanities
+Mistral-7B 7B 32 4096 32
+withintheMT-Benchbenchmark. Theresultsclearly
+LLaMA-2-7B 7B 32 4096 32
+demonstrateLISA’ssuperiorperformance,whichsur-
+LLaMA-2-70B 70B 80 8192 64
+passesLoRAandfullparametertuninginmostset-
+tings. Notably,LISAconsistentlyoutperformsLoRA
+andfullparametertuningindomainssuchasWriting, Table3: BaselineModelSpecifications
+6STEM,andHumanities. ThisimpliesthatLISAcanbebeneficialfortasksinvolvingmemorization,whileLoRA
+partiallyfavorsreasoningtasks.
+MT-BENCH
+MODEL&METHOD WRITING ROLEPLAY REASONING MATH EXTRACTION STEM HUMANITIES AVG.↑
+TINYLLAMA(VANILLA) 1.05 2.25 1.25 1.00 1.00 1.45 1.00 1.28
+TINYLLAMA(FT) 3.27 3.95 1.35 1.33 1.73 2.69 2.35 2.38
+TINYLLAMA(LORA) 2.77 4.05 1.35 1.40 1.00 1.55 2.15 2.03
+TINYLLAMA(LISA) 3.30 4.40 2.65 1.30 1.75 3.00 3.05 2.78
+MISTRAL-7B(VANILLA) 5.25 3.20 4.50 2.70 6.50 6.17 4.65 4.71
+MISTRAL-7B(FT) 5.50 4.45 5.45 3.25 5.78 4.75 5.45 4.94
+MISTRAL-7B(LORA) 5.30 4.40 4.65 3.30 5.50 5.55 4.30 4.71
+MISTRAL-7B(LISA) 6.84 3.65 5.45 2.75 5.65 5.95 6.35 5.23
+LLAMA-2-7B(VANILLA) 2.75 4.40 2.80 1.80 3.20 5.25 4.60 3.54
+LLAMA-2-7B(FT) 5.55 6.45 3.60 2.00 4.70 6.45 7.50 5.10
+LLAMA-2-7B(LORA) 6.30 5.65 4.05 1.45 4.17 6.20 6.20 4.86
+LLAMA-2-7B(LISA) 6.55 6.90 3.45 2.16 4.50 6.75 7.65 5.42
+Table4: ComparisonofLanguageModelFine-TuningMethodsontheMT-Benchscore.
+4.3 LargeScaleFine-Tuning
+TofurtherdemonstrateLISA’sscalabilityonlarge-sizedLLMs,weconductadditionalexperimentsonLLaMA-
+2-70B(Touvronetal.,2023b).
+Settings Ontopoftheaforementionedinstruction-
+following tasks in Section 4.2, we introduce an ex-
+MT-BENCH GSM8K PUBMEDQA
+trasetofdomain-specificfine-tuningtasksonmath-
+ematicsandmedicalQAbenchmarks. TheGSM8K VANILLA 5.69 54.8 83.0
+FT 6.66 67.1 90.8
+dataset(Cobbeetal.,2021),comprising7473training
+instancesand1319testinstances,wasutilizedforthe LORA 6.52 59.4 90.8
+mathematicsdomain. Forthemedicaldomain,wese- LISA 7.05 61.1 91.6
+lectedthePubMedQAdataset(Jinetal.,2019),which
+includes211.3KartificiallygeneratedQAtrainingin-
+stancesand1Ktestinstances. Table5: MT-Bench,GSM8K,andPubMedQAscorefor
+Thestatisticsofthesedatasetsaresummarizedin LLaMA-2-70Bwiththreefine-tuningmethods.
+Table 2. Evaluation on the PubMedQA dataset (Jin et al., 2019) utilized a 5-shot prompt setting, while the
+GSM8Kdataset(Cobbeetal.,2021)assessmentwasconductedusingaChainofThought(CoT)prompt,as
+suggestedbyrecentstudies(Weietal.,2022;Shumetal.,2023;Diaoetal.,2023b). Regardinghyperparameters,
+weadoptrank256forLoRAandE+H+4LforLISA,wherefurtherdetailscanbefoundinAppendixA.
+Results As shown in Table 5, LISA consistently
+produces better or on-par performance when com-
+paredwithLoRA.Furthermore,ininstruction-tuning
+tasks,LISAagainsurpassesfull-parametertraining,
+rendering it a competitive method for this setting.
+Specifically, Figure5highlightsthemodel’sperfor-
+manceinvariousaspects,particularlyLISA’ssuperi-
+orityoverallmethodsinaspectsofWriting,Roleplay,
+andSTEM.Ontopofthat,LISAdisplaysconsistently
+higher performance than LoRA on all subtasks, un-
+derscoringLISA’seffectivenessacrossdiversetasks.
+The chart also contrasts the yellow LoRA line with
+the purple Vanilla line, revealing that in large mod-
+elslikethe70B,LoRAdoesnotperformaswellas
+expected, showing only marginal improvements on
+specificaspects. Morefine-tuningexperimentsresult
+intheAppendixB.1. Figure5: DifferentaspectsofLLaMA-2-70Bmodelon
+MT-Bench.
+74.4 AblationStudies
+Hyperparameters of LISA The number of sam-
+MT-Bench Sampling Sampling
+pling layers γ and sampling period K are the two Models
+Score Layersγ FrequencyK
+keyhyperparametersofLISA.Toobtainintuitiveand
+TinyLlama 2.59 8 1
+empiricalguidanceofthosehyperparameterchoices,
+2.81 8 5
+weconductablationstudiesusingTinyLlama(Zhang
+2.73 2 5
+etal.,2024)andLLaMA-2-7B(Touvronetal.,2023b)
+2.64 2 25
+models with the Alpaca-GPT4 dataset. The config-
+2.26 2 122
+urationsforγ,suchasE+H+2L,E+H+8L,werede-
+LLaMA-2-7B 4.94 8 1
+noted as γ = 2 and γ = 8. As for the sampling
+5.11 8 5
+period—thenumberofupdatespersamplinginterval
+4.91 2 5
+—valueswerechosenfrom{1,5,25,122},with122
+4.88 2 25
+representing the maximum training step within our 4.64 2 122
+experimentalframework. Thefindings,presentedin
+Table6,revealthatbothγ andK markedlyaffectthe
+Table6: TheMT-Benchscoresderivedfromdifferent
+LISAalgorithm’sperformance. Specifically,ahigher
+LISAhyperparameterscombination. Allsettingsadopt
+γ valueincreasesthequantityoftrainableparameters,
+learningrateη =10−5.
+albeitwithhighermemorycosts. Ontheotherhand, 0
+an optimal K value facilitates more frequent layer switching, thereby improving performance to a certain
+threshold,beyondwhichtheperformancemaydeteriorate. Generally,theruleofthumbis: Moresamplinglayers
+andhighersamplingperiodleadtobetterperformance. ForadetailedexaminationoflosscurvesandMT-Bench
+results,refertoAppendixC.
+SensitivenessofLISA AsLISAisalgorithmically
+Seed TinyLlama LLaMA-2-7B Mistral-7B
+dependentonthesamplingsequenceoflayers,itisin-
+triguingtoseehowstableLISA’sperformanceisunder 1 2.65 5.42 5.23
+theeffectofrandomness. Forthispurpose,wefurther 2 2.75 5.31 5.12
+investigate LISA’s performance variance over three 3 2.78 5.35 5.18
+distinct runs, each with a different random seed for
+layerselection. HereweadoptTinyLlama,LLaMA-
+Table 7: The MT-Bench scores derived from varying
+2-7B,andMistral-7BmodelswiththeAlpaca-GPT4
+randomseedsforlayerselection.
+dataset,whilekeepingallotherhyperparameterscon-
+sistentwiththoseusedintheinstructionfollowingexperimentsinsection4.2. AsshowninTable7,LISAis
+quiteresilienttodifferentrandomseeds,wheretheperformancegapacrossthreerunsiswithin0.13,asmall
+valuewhencomparedwiththeperformancegainsoverbaselinemethods.
+5 Discussion
+TheoreticalPropertiesofLISA ComparedwithLoRA,whichintroducesadditionalparametersandleads
+tochangesinlossobjectives,layerwiseimportancesamplingmethodsenjoyniceconvergenceguaranteesin
+the original loss. For layerwise importance sampled SGD, similar to gradient sparsification (Wangni et al.,
+2018),theconvergencecanstillbeguaranteedforunbiasedestimationofgradientswithincreasedvariance. The
+convergencebehaviorcanbefurtherimprovedbyreducingthevariancewithappropriatelydefinedimportance
+samplingstrategy(ZhaoandZhang,2015). ForlayerwiseimportancesampledAdam,therehavebeentheoretical
+resultsin(Zhouetal.,2020)provingitsconvergenceinconvexobjectives. Ifwedenotef asthelossfunction
+andassumethatthestochasticgradientsarebounded,thenbasedonLoshchilovandHutter(2017),weknowthat
+AdamWoptimizingf alignswithAdamoptimizingf withascaledregularizer,whichcanbewrittenas
+1
+freg(w)≜f(w)+ w⊤Sw,
+2
+where S is a finite positive semidefinite diagonal matrix. Following existing convergence results of RBC-
+Adam(Corollary1inZhouetal.(2020)),wehavetheconvergenceguaranteeofLISAinTheorem1.
+Theorem1 Letthelossfunctionf beconvexandsmooth. Ifthealgorithmrunsinaboundedconvexsetandthe
+stochasticgradientsarebounded,thesequence{w }T generatedbyLISAadmitsthefollowingconvergence
+t t=1
+8rate:
+T (cid:18) (cid:19)
+1 (cid:88) 1
+freg(w )−freg ≤O √ ,
+T t ∗ T
+t=1
+wherefreg denotestheoptimumvalueoffreg.
+∗
+BetterImportanceSamplingStrategies Assuggestedbythetheoreticalintuition,thestrategyofE+H+2L
+inSection4.2andE+H+4LinSection4.3maynotbetheoptimalimportancesamplingstrategy,givenitstill
+sampledintermediatelayersinauniformlyrandomfashion. Weanticipatetheoptimizer’sefficiencytobefurther
+improvedwhentakingdatasourcesandmodelarchitectureintoaccountintheimportancesamplingprocedure.
+6 Conclusion
+In this paper, we propose Layerwise Importance Sampled AdamW (LISA), an optimization algorithm that
+randomlyfreezeslayersofLLMbasedonagivenprobability. InspiredfromobservationsofLoRA’sskewed
+weightnormdistribution,asimpleandmemory-efficientfreezingparadigmisintroducedforLLMtraining,which
+achievessignificantperformanceimprovementsoverLoRAondownstreamfine-tuningtaskswithvariousmodels,
+includingLLaMA-2-70B.Furtherexperimentsondomain-specifictrainingalsodemonstrateitseffectiveness,
+showingLISA’shugepotentialasapromisingalternativetoLoRAforLLMtraining.
+Limitations
+ThemajorbottleneckofLISAisthesameasLoRA,whereduringoptimizationtheforwardpassstillrequires
+themodeltobepresentedinthememory, leadingtosignificantmemoryconsumption. Thislimitationshall
+becompensatedbyapproachessimilartoQLoRA(Dettmersetal.,2023),whereweintendtoconductfurther
+experimentstoverifyitsperformance.
+References
+EbtesamAlmazrouei,HamzaAlobeidli,AbdulazizAlshamsi,AlessandroCappelli,RuxandraCojocaru,Maitha
+Alhammadi,MazzottaDaniele,DanielHeslow,JulienLaunay,QuentinMalartic,BadreddineNoune,Baptiste
+Pannier,andGuilhermePenedo.2023. Thefalconseriesoflanguagemodels: Towardsopenfrontiermodels.
+YoshuaBengio,PascalLamblin,DanPopovici,andHugoLarochelle.2007. GreedyLayer-WiseTrainingof
+DeepNetworks,page153–160.
+StellaBiderman,HaileySchoelkopf,QuentinGregoryAnthony,HerbieBradley,KyleO’Brien,EricHallahan,
+MohammadAflahKhan,ShivanshuPurohit,USVSNSaiPrashanth,EdwardRaff,etal.2023. Pythia: Asuite
+foranalyzinglargelanguagemodelsacrosstrainingandscaling. InInternationalConferenceonMachine
+Learning,pages2397–2430.PMLR.
+AndrewBrock,TheodoreLim,JamesM.Ritchie,andNickWeston.2017. Freezeout: Acceleratetrainingby
+progressivelyfreezinglayers. CoRR,abs/1706.04983.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan,PranavShyam,GirishSastry,AmandaAskell,SandhiniAgarwal,ArielHerbert-Voss,Gretchen
+Krueger,TomHenighan,RewonChild,AdityaRamesh,DanielZiegler,JeffreyWu,ClemensWinter,Chris
+Hesse,MarkChen,EricSigler,MateuszLitwin,ScottGray,BenjaminChess,JackClark,ChristopherBerner,
+SamMcCandlish,AlecRadford,IlyaSutskever,andDarioAmodei.2020. LanguageModelsareFew-Shot
+Learners. In Advances in Neural Information Processing Systems, volume 33, pages 1877–1901. Curran
+Associates,Inc.
+TianqiChen,BingXu,ChiyuanZhang,andCarlosGuestrin.2016. Trainingdeepnetswithsublinearmemory
+cost. arXivpreprintarXiv:1604.06174.
+9Wei-LinChiang,ZhuohanLi,ZiLin,YingSheng,ZhanghaoWu,HaoZhang,LianminZheng,SiyuanZhuang,
+YonghaoZhuang,JosephE.Gonzalez,IonStoica,andEricP.Xing.2023. Vicuna: Anopen-sourcechatbot
+impressinggpt-4with90%*chatgptquality.
+AakankshaChowdhery,SharanNarang,JacobDevlin,MaartenBosma,GauravMishra,AdamRoberts,Paul
+Barham, Hyung Won Chung, Charles Sutton, Sebastian Gehrmann, Parker Schuh, Kensen Shi, Sasha
+Tsvyashchenko, Joshua Maynez, Abhishek Rao, Parker Barnes, Yi Tay, Noam M. Shazeer, Vinodkumar
+Prabhakaran, Emily Reif, Nan Du, Benton C. Hutchinson, Reiner Pope, James Bradbury, Jacob Austin,
+MichaelIsard,GuyGur-Ari,PengchengYin,TojuDuke,AnselmLevskaya,SanjayGhemawat,SunipaDev,
+Henryk Michalewski, Xavier García, Vedant Misra, Kevin Robinson, Liam Fedus, Denny Zhou, Daphne
+Ippolito, David Luan, Hyeontaek Lim, Barret Zoph, Alexander Spiridonov, Ryan Sepassi, David Dohan,
+ShivaniAgrawal,MarkOmernick,AndrewM.Dai,ThanumalayanSankaranarayanaPillai,MariePellat,Aitor
+Lewkowycz,EricaMoreira,RewonChild,OleksandrPolozov,KatherineLee,ZongweiZhou,XuezhiWang,
+BrennanSaeta,MarkDíaz,OrhanFirat,MicheleCatasta,JasonWei,KathleenS.Meier-Hellstern,Douglas
+Eck,JeffDean,SlavPetrov,andNoahFiedel.2022. Palm: Scalinglanguagemodelingwithpathways. J.
+Mach.Learn.Res.,24:240:1–240:113.
+KarlCobbe,VineetKosaraju,MohammadBavarian,MarkChen,HeewooJun,LukaszKaiser,MatthiasPlappert,
+JerryTworek,JacobHilton,ReiichiroNakano,ChristopherHesse,andJohnSchulman.2021.Trainingverifiers
+tosolvemathwordproblems.
+TriDao.2023. FlashAttention-2: Fasterattentionwithbetterparallelismandworkpartitioning.
+Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022. FlashAttention: Fast and
+memory-efficientexactattentionwithIO-awareness. InAdvancesinNeuralInformationProcessingSystems.
+TimDettmers,ArtidoroPagnoni,AriHoltzman,andLukeZettlemoyer.2023. Qlora: Efficientfinetuningof
+quantizedllms. arXivpreprintarXiv:2305.14314.
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. 2019. BERT: Pre-training of deep
+bidirectionaltransformersforlanguageunderstanding. InProceedingsofthe2019ConferenceoftheNorth
+AmericanChapteroftheAssociationforComputationalLinguistics: HumanLanguageTechnologies,Volume
+1 (Long and Short Papers), pages 4171–4186, Minneapolis, Minnesota. Association for Computational
+Linguistics.
+ShizheDiao,ZhichaoHuang,RuijiaXu,XuechunLi,LINYong,XiaoZhou,andTongZhang.2022. Black-box
+promptlearningforpre-trainedlanguagemodels. TransactionsonMachineLearningResearch.
+ShizheDiao,RuiPan,HanzeDong,KaShunShum,JipengZhang,WeiXiong,andTongZhang.2023a. Lmflow:
+Anextensibletoolkitforfinetuningandinferenceoflargefoundationmodels.arXivpreprintarXiv:2306.12420.
+ShizheDiao,PengchengWang,YongLin,andTongZhang.2023b. Activepromptingwithchain-of-thoughtfor
+largelanguagemodels.
+ShizheDiao,RuijiaXu,HongjinSu,YileiJiang,YanSong,andTongZhang.2021. Tamingpre-trainedlanguage
+modelswithn-gramrepresentationsforlow-resourcedomainadaptation. InProceedingsofthe59thAnnual
+MeetingoftheAssociationforComputationalLinguisticsandthe11thInternationalJointConferenceon
+NaturalLanguageProcessing(Volume1: LongPapers),pages3336–3349.
+Shizhe Diao, Tianyang Xu, Ruijia Xu, Jiawei Wang, and Tong Zhang. 2023c. Mixture-of-domain-adapters:
+Decoupling and injecting domain knowledge to pre-trained language models memories. arXiv preprint
+arXiv:2306.05406.
+Ning Ding, Yujia Qin, Guang Yang, Fuchao Wei, Zonghan Yang, Yusheng Su, Shengding Hu, Yulin Chen,
+Chi-MinChan,WeizeChen,etal.2022. Deltatuning: Acomprehensivestudyofparameterefficientmethods
+forpre-trainedlanguagemodels. arXivpreprintarXiv:2203.06904.
+YunhaoGou,ZhiliLiu,KaiChen,LanqingHong,HangXu,AoxueLi,Dit-YanYeung,JamesTKwok,and
+YuZhang.2023. Mixtureofcluster-conditionalloraexpertsforvision-languageinstructiontuning. arXiv
+preprintarXiv:2312.12379.
+10KarenHambardzumyan,HrantKhachatrian,andJonathanMay.2021. WARP:Word-levelAdversarialRePro-
+gramming. InProceedingsofthe59thAnnualMeetingoftheAssociationforComputationalLinguisticsand
+the11thInternationalJointConferenceonNaturalLanguageProcessing(Volume1: LongPapers),pages
+4921–4933,Online.AssociationforComputationalLinguistics.
+XuHan,WeilinZhao,NingDing,ZhiyuanLiu,andMaosongSun.2021. PTR:PromptTuningwithRulesfor
+TextClassification. ArXivpreprint,abs/2105.11259.
+GeoffreyE.Hinton,SimonOsindero,andYee-WhyeTeh.2006. Afastlearningalgorithmfordeepbeliefnets.
+NeuralComputation,page1527–1554.
+NeilHoulsby,AndreiGiurgiu,StanislawJastrzebski,BrunaMorrone,QuentinDeLaroussilhe,AndreaGesmundo,
+Mona Attariyan, and Sylvain Gelly. 2019. Parameter-efficient transfer learning for nlp. In International
+ConferenceonMachineLearning,pages2790–2799.PMLR.
+EdwardJHu,yelongshen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,andWeizhu
+Chen.2022. LoRA:Low-rankadaptationoflargelanguagemodels. InInternationalConferenceonLearning
+Representations.
+Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot, Diego
+delasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,LucileSaulnier,LélioRenardLavaud,
+Marie-AnneLachaux,PierreStock,TevenLeScao,ThibautLavril,ThomasWang,TimothéeLacroix,and
+WilliamElSayed.2023. Mistral7b.
+Albert Q Jiang, Alexandre Sablayrolles, Antoine Roux, Arthur Mensch, Blanche Savary, Chris Bamford,
+DevendraSinghChaplot,DiegodelasCasas,EmmaBouHanna,FlorianBressand,etal.2024. Mixtralof
+experts. arXivpreprintarXiv:2401.04088.
+QiaoJin,BhuwanDhingra,ZhengpingLiu,WilliamCohen,andXinghuaLu.2019. Pubmedqa: Adatasetfor
+biomedicalresearchquestionanswering. InProceedingsofthe2019ConferenceonEmpiricalMethodsin
+NaturalLanguageProcessingandthe9thInternationalJointConferenceonNaturalLanguageProcessing
+(EMNLP-IJCNLP),pages2567–2577.
+Diederik P Kingma and Jimmy Ba. 2014. Adam: A method for stochastic optimization. arXiv preprint
+arXiv:1412.6980.
+TeunKloekandHermanKVanDijk.1978. Bayesianestimatesofequationsystemparameters: anapplicationof
+integrationbymontecarlo. Econometrica: JournaloftheEconometricSociety,pages1–19.
+ShengLi,GengYuan,YueDai,YoutaoZhang,YanzhiWang,andXulongTang.2023a. SmartFRZ:Anefficient
+trainingframeworkusingattention-basedlayerfreezing.InTheEleventhInternationalConferenceonLearning
+Representations.
+XiangLisaLiandPercyLiang.2021. Prefix-tuning: Optimizingcontinuouspromptsforgeneration. arXiv
+preprintarXiv:2101.00190.
+Yuanzhi Li, Sébastien Bubeck, Ronen Eldan, Allie Del Giorno, Suriya Gunasekar, and Yin Tat Lee. 2023b.
+Textbooksareallyouneedii: phi-1.5technicalreport.
+Vladislav Lialin, Namrata Shivagunde, Sherin Muckatira, and Anna Rumshisky. 2023. Relora: High-rank
+trainingthroughlow-rankupdates.
+HongLiu,ZhiyuanLi,DavidHall,PercyLiang,andTengyuMa.2023. Sophia: Ascalablestochasticsecond-
+orderoptimizerforlanguagemodelpre-training. arXivpreprintarXiv:2305.14342.
+Xiao Liu, Yanan Zheng, Zhengxiao Du, Ming Ding, Yujie Qian, Zhilin Yang, and Jie Tang. 2021a. Gpt
+understands,too. arXivpreprintarXiv:2103.10385.
+YuhanLiu,SaurabhAgarwal,andShivaramVenkataraman.2021b. Autofreeze: Automaticallyfreezingmodel
+blockstoacceleratefine-tuning.
+Ilya Loshchilov and Frank Hutter. 2017. Decoupled weight decay regularization. arXiv preprint
+arXiv:1711.05101.
+11SadhikaMalladi,TianyuGao,EshaanNichani,AlexDamian,JasonD.Lee,DanqiChen,andSanjeevArora.
+2023. Fine-tuning language models with just forward passes. In Thirty-seventh Conference on Neural
+InformationProcessingSystems.
+OpenAI,JoshAchiam,StevenAdler,SandhiniAgarwal,LamaAhmad,IlgeAkkaya,FlorenciaLeoniAleman,
+DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,RedAvila,IgorBabuschkin,Suchir
+Balaji,ValerieBalcom,PaulBaltescu,HaimingBao,MoBavarian,JeffBelgum,IrwanBello,JakeBerdine,
+GabrielBernadett-Shapiro,ChristopherBerner,LennyBogdonoff,OlegBoiko,MadelaineBoyd,Anna-Luisa
+Brakman,GregBrockman,TimBrooks,MilesBrundage,KevinButton,TrevorCai,RosieCampbell,Andrew
+Cann,BrittanyCarey,ChelseaCarlson,RoryCarmichael,BrookeChan,CheChang,FotisChantzis,Derek
+Chen,SullyChen,RubyChen,JasonChen,MarkChen,BenChess,ChesterCho,CaseyChu,HyungWon
+Chung,DaveCummings,JeremiahCurrier,YunxingDai,CoryDecareaux,ThomasDegry,NoahDeutsch,
+DamienDeville,ArkaDhar,DavidDohan,SteveDowling,SheilaDunning,AdrienEcoffet,AttyEleti,Tyna
+Eloundou, David Farhi, Liam Fedus, Niko Felix, Simón Posada Fishman, Juston Forte, Isabella Fulford,
+LeoGao,ElieGeorges,ChristianGibson,VikGoel,TarunGogineni,GabrielGoh,RaphaGontijo-Lopes,
+Jonathan Gordon, Morgan Grafstein, Scott Gray, Ryan Greene, Joshua Gross, Shixiang Shane Gu, Yufei
+Guo,ChrisHallacy,JesseHan,JeffHarris,YuchenHe,MikeHeaton,JohannesHeidecke,ChrisHesse,Alan
+Hickey,WadeHickey,PeterHoeschele,BrandonHoughton,KennyHsu,ShengliHu,XinHu,JoostHuizinga,
+ShantanuJain,ShawnJain,JoanneJang,AngelaJiang,RogerJiang,HaozhunJin,DennyJin,ShinoJomoto,
+BillieJonn,HeewooJun,TomerKaftan,ŁukaszKaiser,AliKamali,IngmarKanitscheider,NitishShirish
+Keskar,TabarakKhan,LoganKilpatrick,JongWookKim,ChristinaKim,YongjikKim,HendrikKirchner,
+JamieKiros,MattKnight,DanielKokotajlo,ŁukaszKondraciuk,AndrewKondrich,ArisKonstantinidis,Kyle
+Kosic,GretchenKrueger,VishalKuo,MichaelLampe,IkaiLan,TeddyLee,JanLeike,JadeLeung,Daniel
+Levy,ChakMingLi,RachelLim,MollyLin,StephanieLin,MateuszLitwin,TheresaLopez,RyanLowe,
+PatriciaLue,AnnaMakanju,KimMalfacini,SamManning,TodorMarkov,YanivMarkovski,BiancaMartin,
+KatieMayer,AndrewMayne,BobMcGrew,ScottMayerMcKinney,ChristineMcLeavey,PaulMcMillan,
+JakeMcNeil,DavidMedina,AalokMehta,JacobMenick,LukeMetz,AndreyMishchenko,PamelaMishkin,
+VinnieMonaco,EvanMorikawa,DanielMossing,TongMu,MiraMurati,OlegMurk,DavidMély,Ashvin
+Nair,ReiichiroNakano,RajeevNayak,ArvindNeelakantan,RichardNgo,HyeonwooNoh,LongOuyang,
+CullenO’Keefe,JakubPachocki,AlexPaino,JoePalermo,AshleyPantuliano,GiambattistaParascandolo,
+JoelParish, EmyParparita, AlexPassos, MikhailPavlov, AndrewPeng, AdamPerelman, FilipedeAvila
+BelbutePeres,MichaelPetrov,HenriquePondedeOliveiraPinto,Michael,Pokorny,MichellePokrass,Vitchyr
+Pong,TollyPowell,AletheaPower,BorisPower,ElizabethProehl,RaulPuri,AlecRadford,JackRae,Aditya
+Ramesh,CameronRaymond,FrancisReal,KendraRimbach,CarlRoss,BobRotsted,HenriRoussez,Nick
+Ryder, Mario Saltarelli, Ted Sanders, Shibani Santurkar, Girish Sastry, Heather Schmidt, David Schnurr,
+JohnSchulman,DanielSelsam,KylaSheppard,TokiSherbakov,JessicaShieh,SarahShoker,PranavShyam,
+SzymonSidor,EricSigler,MaddieSimens,JordanSitkin,KatarinaSlama,IanSohl,BenjaminSokolowsky,
+YangSong,NatalieStaudacher,FelipePetroskiSuch,NatalieSummers,IlyaSutskever,JieTang,Nikolas
+Tezak,MadeleineThompson,PhilTillet,AminTootoonchian,ElizabethTseng,PrestonTuggle,NickTurley,
+JerryTworek,JuanFelipeCerónUribe,AndreaVallone,ArunVijayvergiya,ChelseaVoss,CarrollWainwright,
+JustinJayWang,AlvinWang,BenWang,JonathanWard,JasonWei,CJWeinmann,AkilaWelihinda,Peter
+Welinder,JiayiWeng,LilianWeng,MattWiethoff,DaveWillner,ClemensWinter,SamuelWolrich,Hannah
+Wong,LaurenWorkman,SherwinWu,JeffWu,MichaelWu,KaiXiao,TaoXu,SarahYoo,KevinYu,Qiming
+Yuan, Wojciech Zaremba, Rowan Zellers, Chong Zhang, Marvin Zhang, Shengjia Zhao, Tianhao Zheng,
+JuntangZhuang,WilliamZhuk,andBarretZoph.2023. Gpt-4technicalreport.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller,
+MaddieSimens,AmandaAskell,PeterWelinder,PaulFChristiano,JanLeike,andRyanLowe.2022. Training
+languagemodelstofollowinstructionswithhumanfeedback. InAdvancesinNeuralInformationProcessing
+Systems,volume35,pages27730–27744.CurranAssociates,Inc.
+AdamPaszke,SamGross,FranciscoMassa,AdamLerer,JamesBradbury,GregoryChanan,TrevorKilleen,
+ZemingLin,NataliaGimelshein,LucaAntiga,etal.2019. Pytorch: Animperativestyle,high-performance
+deeplearninglibrary. Advancesinneuralinformationprocessingsystems,32.
+BaolinPeng,ChunyuanLi,PengchengHe,MichelGalley,andJianfengGao.2023. Instructiontuningwithgpt-4.
+arXivpreprintarXiv:2304.03277.
+12GuanghuiQinandJasonEisner.2021. Learninghowtoask: QueryingLMswithmixturesofsoftprompts. In
+Proceedingsofthe2021ConferenceoftheNorthAmericanChapteroftheAssociationforComputational
+Linguistics: Human Language Technologies, pages 5203–5212, Online. Association for Computational
+Linguistics.
+AlecRadford,JeffWu,RewonChild,DavidLuan,DarioAmodei,andIlyaSutskever.2019. Languagemodels
+areunsupervisedmultitasklearners.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,YanqiZhou,Wei
+Li,andPeterJ.Liu.2020. Exploringthelimitsoftransferlearningwithaunifiedtext-to-texttransformer. J.
+Mach.Learn.Res.,21(1).
+SamyamRajbhandari,JeffRasley,OlatunjiRuwase,andYuxiongHe.2020. Zero: Memoryoptimizationstoward
+trainingtrillionparametermodels. InSC20: InternationalConferenceforHighPerformanceComputing,
+Networking,StorageandAnalysis,pages1–16.IEEE.
+JeffRasley,SamyamRajbhandari,OlatunjiRuwase,andYuxiongHe.2020. Deepspeed: Systemoptimizations
+enable training deep learning models with over 100 billion parameters. In Proceedings of the 26th ACM
+SIGKDDInternationalConferenceonKnowledgeDiscovery&DataMining,pages3505–3506.
+SashankJReddi,SatyenKale,andSanjivKumar.2019. Ontheconvergenceofadamandbeyond. arXivpreprint
+arXiv:1904.09237.
+JieRen,SamyamRajbhandari,RezaYazdaniAminabadi,OlatunjiRuwase,ShuangyanYang,MinjiaZhang,
+DongLi,andYuxiongHe.2021. Zero-offload: Democratizingbillion-scalemodeltraining.
+Baptiste Rozière, Jonas Gehring, Fabian Gloeckle, Sten Sootla, Itai Gat, Xiaoqing Ellen Tan, Yossi Adi,
+JingyuLiu,TalRemez,JérémyRapin,ArtyomKozhevnikov,IvanEvtimov,JoannaBitton,ManishBhatt,
+CristianCantonFerrer, AaronGrattafiori, WenhanXiong, AlexandreDéfossez, JadeCopet, FaisalAzhar,
+HugoTouvron,LouisMartin,NicolasUsunier,ThomasScialom,andGabrielSynnaeve.2023. Codellama:
+Openfoundationmodelsforcode.
+TevenLeScao,AngelaFan,ChristopherAkiki,ElliePavlick,SuzanaIlic´,DanielHesslow,RomanCastagné,
+AlexandraSashaLuccioni,FrançoisYvon,etal.2022. Bloom: A176b-parameteropen-accessmultilingual
+languagemodel. arXivpreprintarXiv:2211.05100.
+KashunShum,ShizheDiao,andTongZhang.2023. Automaticpromptaugmentationandselectionwithchain-
+of-thoughtfromlabeleddata. InFindingsoftheAssociationforComputationalLinguistics: EMNLP2023,
+pages12113–12139.
+RohanTaori,IshaanGulrajani,TianyiZhang,YannDubois,XuechenLi,CarlosGuestrin,PercyLiang,and
+TatsunoriB.Hashimoto.2023. Stanfordalpaca: Aninstruction-followingllamamodel. https://github.
+com/tatsu-lab/stanford_alpaca.
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée Lacroix,
+Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal Azhar, et al. 2023a. Llama: Open and efficient
+foundationlanguagemodels. arXivpreprintarXiv:2302.13971.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,NikolayBashlykov,
+SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal.2023b. Llama2: Openfoundationandfine-tunedchat
+models. arXivpreprintarXiv:2307.09288.
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanN.Gomez,LukaszKaiser,and
+IlliaPolosukhin.2017. Attentionisallyouneed. NeuralInformationProcessingSystems,NeuralInformation
+ProcessingSystems.
+JianqiaoWangni,JialeiWang,JiLiu,andTongZhang.2018. Gradientsparsificationforcommunication-efficient
+distributedoptimization. AdvancesinNeuralInformationProcessingSystems,31.
+JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,DennyZhou,etal.
+2022. Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels. AdvancesinNeuralInformation
+ProcessingSystems,35:24824–24837.
+13Yang You, Igor Gitman, and Boris Ginsburg. 2017. Large batch training of convolutional networks. arXiv
+preprintarXiv:1708.03888.
+YangYou,JingLi,SashankReddi,JonathanHseu,SanjivKumar,SrinadhBhojanapalli,XiaodanSong,James
+Demmel,KurtKeutzer,andCho-JuiHsieh.2019. Largebatchoptimizationfordeeplearning: Trainingbertin
+76minutes. arXivpreprintarXiv:1904.00962.
+PeiyuanZhang,GuangtaoZeng,TianduoWang,andWeiLu.2024. Tinyllama: Anopen-sourcesmalllanguage
+model.
+SusanZhang,StephenRoller,NamanGoyal,MikelArtetxe,MoyaChen,ShuohuiChen,ChristopherDewan,
+MonaDiab,XianLi,XiVictoriaLin,etal.2022. Opt: Openpre-trainedtransformerlanguagemodels. arXiv
+preprintarXiv:2205.01068.
+JiaweiZhao,ZhenyuZhang,BeidiChen,ZhangyangWang,AnimaAnandkumar,andYuandongTian.2024.
+Galore: Memory-efficientllmtrainingbygradientlow-rankprojection. arXivpreprintarXiv:2403.03507.
+Peilin Zhao and Tong Zhang. 2015. Stochastic optimization with importance sampling for regularized loss
+minimization. Ininternationalconferenceonmachinelearning,pages1–9.PMLR.
+LianminZheng,Wei-LinChiang,YingSheng,SiyuanZhuang,ZhanghaoWu,YonghaoZhuang,ZiLin,Zhuohan
+Li,DachengLi,Eric.PXing,HaoZhang,JosephE.Gonzalez,andIonStoica.2023. Judgingllm-as-a-judge
+withmt-benchandchatbotarena.
+Zexuan Zhong, Dan Friedman, and Danqi Chen. 2021. Factual probing is [MASK]: Learning vs. learning
+to recall. In Proceedings of the 2021 Conference of the North American Chapter of the Association for
+Computational Linguistics: Human Language Technologies, pages 5017–5033, Online. Association for
+ComputationalLinguistics.
+YangfanZhou,MingchuanZhang,JunlongZhu,RuijuanZheng,andQingtaoWu.2020. Arandomizedblock-
+coordinateadamonlinelearningoptimizationalgorithm. NeuralComputingandApplications,32(16):12671–
+12684.
+A Training Setup and Hyperparameters
+A.1 TrainingSetup
+Inourexperiments,weemploytheLMFlowtoolkit(Diaoetal.,2023a)*forconductingfullparameterfine-tuning,
+LoRAtuning,andLISAtuning. Wesettheepochnumberto1forbothfine-tuningandcontinualpre-training
+scenarios. Additionally,weutilizedDeepSpeedoffloadtechnology(Renetal.,2021)toefficientlyruntheLLMs.
+Allexperimentswereconductedon8×NVIDIAAmpereArchitectureGPUwith48GBmemory.
+Inourstudy,weexploredarangeoflearningratesfrom5×10−6to3×10−4,applyingthisspectrumtoFull
+ParameterTraining,LoRA,andLISAmethods. ForLoRA,weadjustedtherankrtoeither128or256tovary
+thenumberoftrainableparameters,applyingLoRAacrossalllinearlayers. Regardingthenumberofsampling
+layersγ,ourselectionswereguidedbyGPUmemoryconsiderationsasreportedinLoRAstudies(Huetal.,
+2022);FortheLISAalgorithm,weselectedγ =2,andforexperimentsinvolvingthe70Bmodel,weoptedfor
+γ =4. Thesamplingperiod(K),definedasthenumberofupdatestepspersamplinginterval,rangedfrom1to
+50. Thisrangewasinfluencedbyvariablessuchasthesizeofthedataset,thebatchsize,andthetotalnumberof
+trainingsteps. Tomanagethiseffectively,wepartitionedtheentiretrainingdatasetintoK segments,thereby
+enablingpreciseregulationofthetrainingstepswithineachsamplingperiod.
+A.2 Hyperparametersearch
+*https://github.com/OptimalScale/LMFlow
+14Wecommencedourstudywithagridsearchcovering
+(i) learning rate, (ii) number of sampling layers γ,
+FP LoRA LISA
+and (iii) sampling period K. Noting the effective
+Model lr lr Rank lr γ K
+performance of the LoRA method, we set the rank
+GPT2-Small 3×10−4 6×10−4 128 6×10−4 2 3
+valuetoeitherr =128orr =256. TinyLlama 5×10−6 5×10−5 128 5×10−5 2 10
+The optimal learning rate was explored within Phi-2 5×10−6 5×10−5 128 5×10−5 2 3
+Mistral-7B 5×10−6 5×10−5 128 5×10−5 2 3
+therange{5×10−6,10−5,5×10−5,6×10−4,3×
+LLaMA-2-7B 5×10−6 5×10−5 128 5×10−5 2 3
+10−4}, applicabletofullparametertraining, LoRA, LLaMA-2-70B 5×10−6 5×10−5 128 5×10−5 4 50
+andLISA.
+Table8: Thehyperparametersearchidentifiedoptimal
+Regarding the number of sampling layers γ, in
+settingsforeachmethod: FP(FullParameterTraining),
+alignment with Table 1, we selected values that
+LoRA,andLISA.
+matched or were lower than LoRA’s GPU memory
+cost. Consequently,γ =2waspredominantlyusedintheLISAexperiments,whileγ =4waschosenforthe
+70Bmodelexperiments.
+ForthesamplingperiodK,weexaminedvalueswithin1,3,5,10,50,80,aimingtomaintainthemodel’s
+updatestepswithinarangeof10to50persamplinginstance. Thisselectionwasinformedbyfactorssuchas
+datasetsize,batchsize,andtotaltrainingsteps.
+Thecomprehensiveresultsofourhyperparametersearch,detailingtheoptimalvaluesforeachconfiguration,
+arepresentedinTable8.
+B Additional Experimental Results
+B.1 InstructionFollowingFine-tuning
+MT-BENCH
+MODEL&METHOD WRITING ROLEPLAY REASONING MATH EXTRACTION STEM HUMANITIES AVG.↑
+LLAMA-2-70B(VANILLA) 7.77 5.52 2.95 1.70 6.40 7.42 8.07 5.69
+LLAMA-2-70B(FT) 6.45 7.50 5.50 2.15 7.55 8.10 9.40 6.66
+LLAMA-2-70B(LORA) 7.55 7.00 5.30 2.60 6.55 8.00 8.70 6.52
+LLAMA-2-70B(LISA) 8.18 7.90 5.45 2.75 7.45 8.60 9.05 7.05
+Table9: Meanscoreofthreefine-tuningmethodsoverthreeseedsforLLaMA-2-70BontheMT-Bench.
+Table9providesdetailedMT-BenchscoresfortheLLaMA-2-70BmodeldiscussedinSection4.3,demon-
+stratingLISA’ssuperiorperformanceoverLoRAinallaspectsunderlarge-scaletrainingscenarios. Furthermore,
+inFigure6,weobservethatLISAalwaysexhibitson-parorfasterconvergencespeedthanLoRAacrossdifferent
+models,whichprovidesstrongevidenceforLISA’ssuperiorityinpractice.
+It is also intriguing to observe from Figure 5 that Vanilla LLaMA-2-70B excelled in Writing, but full-
+parameterfine-tuningledtoadeclineintheseareas,aphenomenonknownasthe“AlignmentTax”(Ouyang
+etal.,2022). Thistaxhighlightsthetrade-offsbetweenperformanceandhumanalignmentininstructiontuning.
+LISA,however,maintainsstrongperformanceacrossvariousdomainswithalower”AlignmentTax“.
+C Ablation Experiments
+C.1 SamplingLayersγ
+WeconductedanablationstudyontheLLaMA-2-7BmodeltrainedwiththeAlpaca-GPT4dataset,settingthe
+samplingperiodK =13,sothenumberofsamplingsisexactly10. Thestudyexploreddifferentconfigurations
+ofsamplinglayersγ including{E+H+2L,E+H+4L,E+H+8L}. Figure7depictstheimpactofthenumberof
+samplinglayersγ onthetrainingdynamicsofthemodel. Threescenarioswereanalyzed: γ = 2(blueline),
+γ =4(greenline),andγ =8(redline),throughout120trainingsteps. Initially,allthreeconfigurationsexhibita
+steepdecreaseinloss,signalingrapidinitialimprovementsinmodelperformance. it’sclearthatthescenario
+withγ = 8consistentlymaintainsalowerlosscomparedtotheγ = 2andγ = 4configurations,suggesting
+thatahigherγ valueleadstobetterperformanceinthiscontext. TheradargraphoftheMT-Benchscorealso
+indicatesthattheγ8configurationyieldsthebestconversationalabilityofthemodelinthisablationexperiment.
+15Figure6: LosscurvesforLoRA,LISAandfull-parametertuningontheAlpaca-GPT4datasetacrossdifferent
+models.
+Figure7: Comparisonoflosscurvesfortheγ (numberofsamplinglayers)ablationexperiment.
+Figure8: ComparisonoflosscurvesforthesamplingperiodK ablationexperiment.
+16Figure9: Comparisonoflosscurvesforrandomvarianceablationexperiment,indicatingthelossmetricover
+steps.
+C.2 SamplingPeriodK
+Figure8displaystheeffectsofvaryingsamplingPeriodK ontraininga7B-sizedmodelusingthe52K-entry
+Alpaca-GPT4dataset. ThisgraphcontrastslosscurvesfordifferentsamplingperiodK values: K =122(green
+line),K = 25(redline),andK = 13(blueline)across122trainingsteps. Theresultsindicatethatalthough
+eachK valueresultsindistincttrainingtrajectories,theirconvergencepointsareremarkablysimilar. Thisfinding
+impliesthatfora7Bmodeltrainedonadatasetof52Kinstructionconversationpairs, asamplingperiodof
+K =13isoptimalforachievingthebestlosscurveandcorrespondingMT-Benchscoreradargraph.
+C.3 SensitivenesstoRandomness
+LLaMA-2-7BonAlpaca-GPT4withupdatesteppersamplingperiodK =13,andsamplinglayersγ =2,run3
+timeswithdifferentrandomlayerpick.Figure9showsthatdifferentrandomselectionsoflayersslightlyaffectthe
+trainingprocessbutconvergesimilarly. Despiteinitialfluctuations,thelosstrendsofthreeruns—distinguished
+byblue,green,andredlines—demonstratethatthemodelconsistentlyreachesastablestate,underscoringthe
+robustnessofthetrainingagainsttherandomnessinlayerselection.
+D Licenses
+Forinstructionfollowinganddomain-specificfine-tuningtasks,allthedatasetsincludingAlpaca(Taorietal.,
+2023),GSM8k(Cobbeetal.,2021)andPubMedQA(Jinetal.,2019)arereleasedunderMITlicense. ForGPT-4,
+thegenerateddatasetisonlyforresearchpurposes,whichshallnotviolateitstermsofuse.
+17
