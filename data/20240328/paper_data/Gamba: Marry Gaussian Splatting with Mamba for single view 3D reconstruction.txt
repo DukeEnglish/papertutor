@@ -1,0 +1,698 @@
+TechniqueReportforGamba
+GAMBA: MARRY GAUSSIAN SPLATTING WITH
+MAMBA FOR SINGLE-VIEW 3D RECONSTRUCTION
+QiuhongShen1∗ XuanyuYi3∗ ZikeWu3∗ PanZhou2,4† HanwangZhang3,5
+ShuichengYan5 XinchaoWang1†
+1NationalUniversityofSingapore 2SingaporeManagementUniversity
+3NanyangTechnologyUniversity 4SeaAILab 5SkyworkAI
+ABSTRACT
+Wetacklethechallengeofefficientlyreconstructinga3Dassetfromasingleim-
+agewithgrowingdemandsforautomated3Dcontentcreationpipelines. Previous
+methods primarily rely on Score Distillation Sampling (SDS) and Neural Radi-
+anceFields(NeRF).Despitetheirsignificantsuccess,theseapproachesencounter
+practicallimitationsduetolengthyoptimizationandconsiderablememoryusage.
+In this report, we introduce Gamba, an end-to-end amortized 3D reconstruction
+modelfromsingle-viewimages,emphasizingtwomaininsights:(1)3Drepresen-
+tation: leveraging a large number of 3D Gaussians for an efficient 3D Gaussian
+splatting process; (2) Backbone design: introducing a Mamba-based sequential
+network that facilitates context-dependent reasoning and linear scalability with
+the sequence (token) length, accommodating a substantial number of Gaussians.
+Gamba incorporates significant advancements in data preprocessing, regulariza-
+tion design, and training methodologies. We assessed Gamba against existing
+optimization-based and feed-forward 3D generation approaches using the real-
+world scanned OmniObject3D dataset. Here, Gamba demonstrates competitive
+generation capabilities, both qualitatively and quantitatively, while achieving re-
+markablespeed,approximately0.6secondonasingleNVIDIAA100GPU.
+1 INTRODUCTION
+Wetacklethechallengeofefficientlyextractinga3Dassetfromasingleimage, anendeavorwith
+substantialimplicationsacrossdiverseindustrialsectors. ThisendeavorfacilitatesAR/VRcontent
+generationfromasinglesnapshotandaidsinthedevelopmentofautonomousvehiclepathplanning
+throughmonocularperceptionSunetal.(2023);Guletal.(2019);Yietal.(2023).
+Previous approaches to single-view 3D reconstruction have mainly been achieved through Score
+Distillation Sampling (SDS) Poole et al. (2022), which leverages pre-trained 2D diffusion mod-
+elsGraikosetal.(2022);Rombachetal.(2022)toguideoptimizationoftheunderlyingrepresenta-
+tionsof3Dassets. Theseoptimization-basedapproacheshaveachievedremarkablesuccess,known
+fortheirhigh-fidelityandgeneralizability.However,theyrequireatime-consumingper-instanceop-
+timizationprocessTang(2022);Wangetal.(2023d);Wuetal.(2024)togenerateasingleobjectand
+alsosufferfromartifactssuchasthe“multi-face”problemarisingfrombiasinpre-trained2Ddif-
+fusionmodelsHongetal.(2023a). Ontheotherhand,previousapproachespredominantlyutilized
+neuralradiancefields(NeRF)Mildenhalletal.(2021);Barronetal.(2021),whichareequippedwith
+high-dimensionalmulti-layerperception(MLP)andinefficientvolumerenderingMildenhalletal.
+(2021). This computational complexity significantly limits practical applications on limited com-
+putebudgets. Forinstance,theLargereconstructionModel(LRM)Hongetal.(2023b)isconfined
+toaresolutionof32usingatriplane-NeRFShueetal.(2023)representation,andtheresolutionof
+renderingsislimitedto128duetothebottleneckofonlinevolumerendering.
+Toaddressthesechallengesandthusachieveefficient single-view3Dreconstruction, weareseek-
+ing an amortized generative framework with the groundbreaking 3D Gaussian Splatting, notable
+*EqualContribution
+†Correspondingauthor:XinchaoWang(xinchao@nus.edu.sg)andPanZhou(panzhou@smu.edu.sg)
+‡Workinprogress,partiallydoneinSeaAILaband2050Research,SkyworkAI
+1
+4202
+raM
+72
+]VC.sc[
+1v59781.3042:viXraTechniqueReportforGamba
+Input Image 3D Gaussians 2D Rendering
+. . .
+Clone Optimization
+Predict Splat
+1s 6ms
+Gamba . . . Split Optimization
+Novel View Sythesis
+. . .
+Iterative Block
+? ? ?
+(a) Previous Token Sequential Generated Token (b)
+Figure1: (a): WeproposeGamba,anend-to-end,feed-forwardsingle-viewreconstructionpipeline,
+whichmarries3DGaussianSplattingwithMambatoachievefastreconstruction. (b): Therelation-
+shipbetweenthe3DGSgenerationprocessandtheMambasequentialpredictingpattern.
+foritsmemory-efficientandhigh-fidelitytiledrenderingKerbletal.(2023);Zwickeretal.(2002);
+Chen&Wang(2024);Wangetal.(2024). DespiterecentexcitingprogressTangetal.(2023),how
+to properly and immediately generate 3D Gaussians remains a less studied topic. Recent preva-
+lent 3D amortized generative models Hong et al. (2023b); Wang et al. (2023b); Xu et al. (2024;
+2023);Zouetal.(2023);Lietal.(2023)predominantlyusetransformer-basedarchitectureastheir
+backbones Vaswani et al. (2017); Peebles & Xie (2023), but we argue that these widely used ar-
+chitectures are sub-optimal for generating 3DGS. The crucial challenge stems from the fact that
+3DGS requires a sufficient number of 3D Gaussians to accurately represent a 3D model or scene.
+However,thespatio-temporalcomplexityofTransformersincreasesquadratic-allywiththenumber
+of tokens Vaswani et al. (2017), which limits the expressiveness of the 3DGS due to the insuffi-
+cienttokencountsfor3DGaussians. Furthermore,the3DGSparameterspossessspecificphysical
+meanings,makingthesimultaneousgenerationof3DGSparametersamorechallengingtask.
+Totackletheabovechallenges,westartbyrevisitingthe3DGSreconstructionprocessfrommulti-
+viewimages. Theanalysispresentedinfig1(b)revealsthat3DGSdensificationduringtherecon-
+struction process can be conceptualized as a sequential generation based on previously generated
+tokens. Withthisinsight,weintroduceanovelarchitectureforend-to-end3DGSgenerationdubbed
+Gaussian Mamba (Gamba), which is built upon a new scalable sequential network, Mamba Gu &
+Dao (2023a). Our Gamba enables context-dependent reasoning and scales linearly with sequence
+(token) length, allowing it to efficiently mimic the inherent process of 3DGS reconstruction when
+generating 3D assets enriched with a sufficient number of 3D Gaussians. Due to its feed-forward
+architecture and efficient rendering, Gamba is exceptionally fast, requiring only about 1 seconds
+to generate a 3D asset and 6 ms for novel view synthesis, which is 5000× faster than previous
+optimization-basedmethodsWuetal.(2024);Wengetal.(2023);Qianetal.(2023)whileachieving
+comparablegenerationquality.
+We demonstrate the superiority of Gamba on the OmniObject3D dataset Wu et al. (2023). Both
+qualitative and quantitative experiments clearly indicate that Gamba can instantly generate high-
+qualityanddiverse3Dassetsfromasingleimage,continuouslyoutperformingotherstate-of-the-art
+methods. Insummary,wemakethree-foldcontributions:
+• WeintroduceGambaFormer,asimplestatespacemodeltoprocess3DGaussianSplatting,
+whichhasglobalreceptivefieldswithlinearcomplexity.
+• IntegratedwiththeGambaFormer,wepresentGamba,anamortized,end-to-end3DGaus-
+sianSplattingGenerationpipelineforfastandhigh-qualitysingle-viewreconstruction.
+• ExtensiveexperimentsshowthatGambaoutperformsthestate-of-the-artbaselinesinterms
+ofreconstructionqualityandspeed.
+2
+noitcurtsnoceR
+SGD3
+noitareneG
+SGD3
+-rednU
+-rednU
+noitcurtsnoceR
+noitcurtsnoceRTechniqueReportforGamba
+2 RELATED WORKS
+Amortized 3D Generation. Amortized 3D generation is able to instantly generate 3D assets in a
+feed-forwardmanneraftertrainingonlarge-scale3DdatasetsWuetal.(2023);Deitkeetal.(2023);
+Yuetal.(2023),incontrasttotediousSDS-basedoptimizationmethodsWuetal.(2024);Linetal.
+(2023); Weng et al. (2023); Guo et al. (2023); Tang (2022). Previous works Nichol et al. (2022);
+Nashetal.(2020)marriedde-noisingdiffusionmodelswithvarious3Dexplicitrepresentations(e.g.,
+pointcloudandmesh),whichsuffersfromlackofgeneralizablityandlowtexturequality. Recently,
+pioneered by LRM Hong et al. (2023b), several works utilize the capacity and scalability of the
+transformerPeebles&Xie(2023)andproposeafulltransformer-basedregressionmodeltodecode
+a NeRF representation from triplane features. The following works extend LRM to predict multi-
+view images Li et al. (2023), combine with diffusion Xu et al. (2023), and pose estimation Wang
+et al. (2023b). However, their triplane NeRF-based representation is restricted to inefficient vol-
+umerenderingandrelativelylowresolutionwithblurredtextures. Gambainsteadseekstotrainan
+efficient feed-forward model marrying Gaussian splatting with Mamba for single-view 3D recon-
+struction.
+GaussianSplattingfor3DGeneration.Theexplicitnatureof3DGSfacilitatesreal-timerendering
+capabilitiesandunprecedentedlevelsofcontrolandeditability,makingithighlyrelevantfor3Dgen-
+eration. Several works have effectively utilized 3DGS in conjunction with optimization-based 3D
+generationWuetal.(2024);Pooleetal.(2022);Linetal.(2023).Forexample,DreamGaussianTang
+et al. (2023) utilizes 3D Gaussian as an efficient 3D representation that supports real-time high-
+resolutionrenderingviarasterization.Despitetheaccelerationachieved,generatinghigh-fidelity3D
+Gaussiansusingsuchoptimization-basedmethodsstillrequiresseveralminutesandalargecompu-
+tationalmemorydemand. TriplaneGaussianZouetal.(2023)extendstheLRMarchitecturewitha
+hybridtriplane-Gaussianrepresentation. AGGXuetal.(2024)decomposesthegeometryandtex-
+turegenerationtasktoproducecoarse3DGaussians,furtherimprovingitsfidelitythroughGaussian
+SuperResolution. SplatterimageSzymanowiczetal.(2023)andPixelSplatCharatanetal.(2023)
+proposetopredict3DGaussiansaspixelsontheoutputfeaturemapoftwo-viewimages.LGMTang
+etal.(2024)generateshigh-resolution3DGaussiansbyfusinginformationfrommulti-viewimages
+generated by existing multi-view diffusion models Shi et al. (2023); Wang & Shi (2023) with an
+asymmetric U-Net. Among them, our Gamba demonstrates its superiority and structural elegance
+withsingleimageasinputandanend-to-end,single-stage,feed-forwardmanner.
+StateSpaceModels.UtilizingideasfromthecontroltheoryGlasser(1985),theintegrationoflinear
+statespaceequationswithdeeplearninghasbeenwidelyemployedtotacklethemodelingofsequen-
+tialdata. Thepromisingpropertyoflinearlyscalingwithsequencelengthinlong-rangedependency
+modelinghasattractedgreatinterestfromsearchers.PioneeredbyLSSLGuetal.(2021b)andS4Gu
+etal.(2021a),whichutilizelinearstatespaceequationsforsequencedatamodeling,follow-upworks
+mainlyfocusonmemoryefficiencyGuetal.(2021a),fasttrainingspeedGuetal.(2022b;a)andbet-
+terperformanceMehtaetal.(2022);Wangetal.(2023a).Morerecently,MambaGu&Dao(2023b)
+integratesaselectivemechanismandefficienthardwaredesign,outperformsTransformersVaswani
+etal.(2017)onnaturallanguageandenjoyslinearscalingwithinputlength.Buildingonthesuccess
+ofMamba,VisionMambaZhuetal.(2024)andVMambaLiuetal.(2024)leveragethebidirectional
+VimBlockandtheCross-ScanModulerespectivelytogaindata-dependentglobalvisualcontextfor
+visualrepresentation;U-MambaMaetal.(2024)andVm-unetRuan&Xiang(2024)furtherbring
+Mambaintothefieldofmedicalimagesegmentation. PointMambaLiangetal.(2024a)andPoint
+CloudMamba Zhangetal.(2024)adaptMambaforpointcloudunderstandingthroughreordering
+andserializationstrategy. Inthismanuscript,weexplorethecapabilitiesofMambainsingle-view
+3DreconstructionandintroduceGamba.
+3 PRELIMINARY
+3.1 3DGAUSSIANSPLATTING
+3DGaussianSplatting(3DGS)Kerbletal.(2023)hasgainedprominenceasanefficientexplicit
+3D representation, using anisotropic 3D Gaussians to achieve intricate modeling. Each Gaussian,
+denoted as G, is defined by its mean µ ∈ R3, covariance matrix Σ, associated color c ∈ R3, and
+opacityα∈R. Tobebetteroptimized,thecovariancematrixΣisconstructedfromascalingmatrix
+3TechniqueReportforGamba
+S ∈R3andarotationmatrixR∈R3×3asfollows:
+Σ=RSSTRT. (1)
+ThisformulationallowsfortheoptimizationofGaussianparametersseparatelywhileensuringthat
+Σremainspositivesemi-definite. AGaussianwithmeanµisdefinedasfollows:
+(cid:18) (cid:19)
+1
+G(x)=exp − xTΣ−1x , (2)
+2
+wherexrepresentstheoffsetfromµtoagivenpointx.Intheblendingphase,thecoloraccumulation
+C iscalculatedby:
+i−1
+(cid:88) (cid:89)
+C = c α G(x ) (1−α G(x )). (3)
+i i i j j
+i∈N j=1
+3DGSutilizesatile-basedrasterizertofacilitatereal-timerenderingandintegratesGaussianparam-
+eteroptimizationwithadynamicdensitycontrolstrategy. Thisapproachallowsforthemodulation
+ofGaussiancountsthroughbothdensificationandpruningoperations.
+3.2 STATESPACEMODELS
+StateSpaceModels(SSMs)Guetal.(2021a)haveemergedasapowerfultoolformodelingand
+analyzing complex physical systems, particularly those that exhibit linear time-invariant (LTI) be-
+havior. The core idea behind SSMs is to represent a system using a set of first-order differential
+equationsthatcapturethedynamicsofthesystem’sstatevariables. Thisrepresentationallowsfor
+a concise and intuitive description of the system’s behavior, making SSMs well-suited for a wide
+rangeofapplications. ThegeneralformofanSSMcanbeexpressedasfollows:
+h˙(t)=Ah(t)+Bx(t),
+(4)
+y(t)=Ch(t)+Dx(t).
+where h(t) denotes the state vector of the system at time t, while h˙(t) denotes its time derivative.
+ThematricesA,B,C,andDencodetherelationshipsbetweenthestatevector,theinputsignalx(t),
+andtheoutputsignaly(t). Thesematricesplayacrucialroleindeterminingthesystem’sresponse
+tovariousinputsanditsoverallbehavior.
+One of the challenges in applying SSMs to real-world problems is that they are designed to oper-
+ateoncontinuous-timesignals,whereasmanypracticalapplicationsinvolvediscrete-timedata. To
+bridgethisgap,itisnecessarytodiscretizetheSSM,convertingitfromacontinuous-timerepresen-
+tationtoadiscrete-timeone. ThediscretizedformofanSSMcanbewrittenas:
+h =A¯h +B¯x ,
+k k−1 k
+(5)
+y =C¯h +D¯x .
+k k k
+Here, k represents the discrete time step, and the matrices A¯, B¯, C¯, and D¯ are the discretized
+counterpartsoftheircontinuous-timeequivalents. Thediscretizationprocessinvolvessamplingthe
+continuous-timeinputsignalx(t)atregularintervals,withasamplingperiodof∆. Thisleadstothe
+followingrelationshipsbetweenthecontinuous-timeanddiscrete-timematrices:
+A¯=(I−∆/2·A)−1(I+∆/2·A),
+B¯ =(I−∆/2·A)−1∆B, (6)
+C¯ =C.
+SelectiveStateSpaceModelsGu&Dao(2023a)areproposedtoaddressthelimitationsoftradi-
+tionalSSMsinadaptingtovaryinginputsequencesandcapturingcomplex,input-dependentdynam-
+ics. ThekeyinnovationinSelectiveSSMsistheintroductionofaselectionmechanismthatallows
+the model to efficiently select data in an input-dependent manner, enabling it to focus on relevant
+informationandignoreirrelevantinputs. Theselectionmechanismisimplementedbyparameteriz-
+ing the SSM matrices B¯, C¯, and ∆ based on the input x . This allows the model to dynamically
+k
+adjustitsbehaviordependingontheinputsequence,effectivelyfilteringoutirrelevantinformation
+andrememberingrelevantinformationindefinitely.
+4TechniqueReportforGamba
+cameraposetoken
+… conditionimagetokens
+Novelviews
+learnable3DGStokens
+Image
+Tokenizer
+(DINO)
+3DGS
+…
+Render
+Cam
+3DGS
+pose
+params
+Figure2: OverallarchitectureofGamba.
+4 METHOD
+In this section, we detail our proposed single-view 3D reconstruction pipeline with 3D Gaussian
+Splatting(Fig.2),called“Gamba”,whosecoremechanismistheGambaFormertopredict3DGaus-
+sianfromasingleinputimage(Section4.2). WedesignanelaborateGaussianparameterconstrain
+robusttrainingpipeline(Section4.3)toensurestabilityandhighquality.
+4.1 OVERALLTRAININGPIPELINE
+Given a set of multi-view images and their corresponding camera pose pairs {x,π} of an object,
+Gamba first transforms the reference image x and pose π into learnable tokens, which are
+ref ref
+then concatenated with the initial positional embedding to predict a set of 3D Gaussians. Subse-
+quently, the predicted 3D Gaussians are rendered into 2D multi-view images with differentiable
+renderer Kerbl et al. (2023), which are directly supervised by the provided ground-truth images
+{x,π}atbothreferenceandnovelposesthroughimage-spacereconstructionloss.
+4.2 GAMBAFORMER
+Image Tokenizer. Parallel to previous work Hong et al. (2023b), the reference RGB image x ∈
+Rc×H×W istokenizedwithavisualtransformer(ViT)modelDINOv2Oquabetal.(2023),which
+hasdemonstratedrobustfeatureextractioncapabilitythroughself-supervisedpre-training,toextract
+both semantic and spatial representations of a sequence of tokens X ∈ RL×C, with a length of L
+andchanneldimensionsasC.
+Camera Condition. As the camera poses π of the reference images vary across sampled 3D
+ref
+objectsintrainingphase,weneedtoembedthecamerafeaturesasaconditionforourGambaFormer.
+Weconstructthecameramatrixwiththe12parameterscontainingtherotationandtranslationofthe
+cameraextrinsicand4parameters[fx,fy,cx,cy]denotingthecameraintrinsic,whicharefurther
+transformed into a high-dimensional camera embedding T with a multi-layer perceptron (MLP).
+NotethatGambadoesnotdependonanycanonicalpose,andthegroundtruthπ isonlyappliedas
+inputduringtrainingformulti-viewsupervision.
+Predicting from 3DGS tokens. In the GambaFormer architecture, as shown in Fig.2, inputs are
+segmented into three distinct segments: the camera embedding T, reference image tokens X, and
+asetoflearnable3DGSembeddingsE ∈ RN×D, withN representingthetotalnumberof3DGS
+tokens,typicallysettoN =16384,andDisthehiddendimensionofeachGambablocks.
+DetailsoftheGambablockareshowninFig.3, alongsidetheoriginalMambablockarchitecture.
+The Mamba block is capable of efficiently processing long sequences of tokens; we note that the
+current Mamba variants Liu et al. (2024); Zhu et al. (2024); Liang et al. (2024b) do not involve
+traditionalcross-attentionsintheirmethods. Therefore, theuseofcross-attentionwithMambare-
+5
+GambaBlock𝐿! GambaBlock𝐿"
+GambaBlock𝐿#$"
+3DGSDecoderTechniqueReportforGamba
+𝑂
+!
+Drop
+MambaBlock
+Prepend
+Type equation here.
+Linear
+𝑂
+!"#
+cameraposetoken
+conditionimagetokens
+learnable3DGStokens
+a)GambaBlock b)MambaBlock
+Figure3:SingleGambablock,wherelayernormalization(LN),SSM,depth-wiseconvolutionChol-
+let(2017),andresidualconnectionsareemployed.
+mains unexplored. Given the inherent unidirectional scan order of Mamba, we propose using this
+characteristictoachieveconditionalprediction. Specifically, theGambablockconsistsofasingle
+Mambablock,twolinearprojections,andsimpleprependoperations:
+H =M (Prepend(P T,P X),O )
+i i c x i−1
+(7)
+O =Drop(H ,Index(P T,P X))
+i i c x
+where P ∈ RD×16 and P ∈ RD×C denote the learnable camera projection and image token
+c x
+projection,respectively.Prependreferstotheoperationofprependingprojectedcameraembeddings
+andimagetokensbeforethehidden3DGStokenfeaturesineachGambalayer. Dropreferstothe
+operationofremovingthepreviouslyprependedtokensfromtheoutputH oftheMambablockM ,
+i i
+basedontheirindex.
+GaussianDecoder. WithstackedGambalayers,ourGambaFormeriscapableofretrievinghidden
+featuresforeach3DGStokenassociatedwiththetargetobject. Subsequently,itpredictsthedetails
+of3DGaussianSplattingparametersusingadedicatedGaussianDecoder. TheGaussianDecoder
+initially processes the output from the GambaFormer, employing several MLP layers in a feed-
+forwardmanner. Thenituseslinearlayerstoseparatelypredicttheattributesofeach3DGaussian
+G : thecenterpositionm ∈ R3,opacityo ∈ R,andcolorc ∈ R12,giventheadoptionoffirst-
+j j j j
+ordersphericalharmonics. Thepositionm ispredictedasadiscreteprobabilitydistributionandis
+j
+bound within the range of [−1,1] analogously to previous work in objection detection Duan et al.
+(2019).
+4.3 ROBUSTAMORTIZEDTRAINING.
+Gaussian Parameter Constraint. Parallel to AGG Xu et al. (2024), our amortized framework
+involves training a generator to concurrently produce 3D Gaussians for a broad array of objects
+from various categories, diverging from the traditional 3D Gaussian splatting approach where 3D
+Gaussiansareindividuallyoptimizedforeachobject. Therefore,weadopttheGaussianparameter
+constraint mechanism to fit our feed-forward setting. Specifically, we use a fixed number of 3D
+GaussianssincetheMambablocksonlysupportafixedtokenlength. Fortheconstraintonthepre-
+dictedpositions,ourapproachleveragesanovel2DGaussianconstraintinsteadofdirectlyutilizing
+pointcloudsfromthe3DsurfaceforseparatingZouetal.(2023)positionsof3DGaussianorwarm-
+6TechniqueReportforGamba
+upXuetal.(2024),whosepointcloudconstraintlargelylimitsthescalabilityofthepre-trained3D
+reconstructionmodel.
+Ourkeyinsightisthat,thoughthegivenmulti-viewimagesetscannotdepicttheaccurate3Dsurface,
+itcandefinearough3Drangeoftheobject. Basedonthisinsight, wedeviseamorescalableap-
+proachforGauusianpositionconstraintusingonlymulti-viewimagesetsintraining.Specifically,as
+illustratedinFig.4,whentheprojected2DGaussiancenterisoutsidetheobject’scontours,weim-
+poseanexplicitconstrainttopullitinside. Thisconstraintisformulatedasminimizingthedistance
+betweenthe2DGaussiancenterandthecorrespondingcontourpositionatthesameradialangles.
+Forafastapproximationofeach2DGaussian’scontourposition,objectmasksarediscretizedinto
+radialpolygonsbyraycasting,thenfollowedbylinearinterpolationbetweencontinuousangles. By
+explicitly constraining projected 2D Gaussians with multi-view image sets, the Gaussian Decoder
+canquicklyconvergetopredictrough3Dshapes.
+Data Augmentation. Gamba primarily emphasizes re-
+constructingforegroundobjects,ratherthanmodelingthe
+background. Althoughourtrainingdataconsistofsingle
+images with pure color backgrounds, we have observed
+thatthe2Drenderingsduringinferenceoftenpresentclut-
+teredbackgrounds. Toavoidover-fittingthispattern,we
+implementarandomcolorstrategyforbackgroundgener-
+ation. Furthermore,weemployasemantic-awarefilterYi
+etal.(2022)basedontheCLIPsimilaritymetricRadford Figure 4: Radial polygon mask. Ob-
+etal.(2021),toselectthecanonicalposeasthereference ject masks are divided into polygon
+viewfortrainingstabilityandfasterconvergence. masks by 2D ray casting from the im-
+agecentertothecontours.
+Training Objective. Taking advantage of the efficient
+tiled rasterizer Kerbl et al. (2023) for 3D Gaussians,
+Gamba is trained in an end-to-end manner with image-space reconstruction loss at both reference
+andnovelviews. Ourfinalobjectivecomprisesfourkeyterms:
+L=L +λ ·L +λ ·L +λ ·L , (8)
+MSE mask mask lpips lpips dist dist
+where L is the mean square error (MSE) loss in RGB space; L and L refer to the alpha
+rgb mask lpips
+mask loss and the VGG-based LPIPS loss Zhang et al. (2018), respectively. The last term, L ,
+dist
+imposesanexplicitconstraintontheprojected2DGaussians,alsoimplementedasMSE,whichis
+onlyadoptedduringinitialtrainingasthistermconvergesexceptionallyquickly.
+5 EXPERIMENTS
+5.1 IMPLEMENTATIONDETAILS
+Datasets. WeusedafilteredOmniObject3DWuetal.(2023)datasetforGambapre-training,which
+containshigh-qualityscansofreal-world3Dobjects.FollowingAGGXuetal.(2024),wediscarded
+tailcategorieswithfewerthanfiveobjectsandconstructedourtrainingsetusing5463objectsfrom
+197categoriesintotal. Thetestsetiscomposedof394objects,withtwoleft-outobjectspercate-
+gory. WeusedBlendertorendertheRGBimagewithitsalphamaskfrom48anchorviewpointsat
+aresolutionof512×512forbothtrainingandtesting.
+NetworkArchitecture. WeleveragedDINOv2Oquabetal.(2023)asourinputimagetokenizer,
+whichextracts768-dimensionfeaturetokensfromreferenceimage. TheGambaFormerconsistsof
+10gambablockswithhiddendimensions1024,wherelayernormalization(LN),SSM,depth-wise
+convolutionShenetal.(2021),andresidualconnectionsareemployed. Thepositionalembeddings
+of the GambaFormer consist of 16384 tokens, each with 512 dimensions, corresponding to 16384
+3D Gaussians. The Gaussian Decoder is an multi-layer perceptron (MLP) with 10 layers and 64
+hiddendimensions,whichdecodestheoutput3DGaussianofshape(16384,23)forsplatting.
+Pre-training. WetrainedGambaon8NVIDIAA100(80G)GPUswithbatchsize256forabout3
+days. We applied the AdamW optimizer Loshchilov & Hutter (2017) with a learning rate of 1e-4
+andaweightdecayof0.05. Foreachtrainingobject,werandomlysamplesixviewsamongthe48
+renderedviewstosupervisethereconstructionwiththeinputviewfilteredthroughCLIPsimilarity.
+7TechniqueReportforGamba
+Input LRM TGS Gamba
+Figure5: Comparisonwithfeed-forwardsingle-view3Dreconstructionmethods.
+Wesetthelossweightλ = 0.01andλ = 0.1, respectively. FollowingTangetal.(2024),
+mask lpips
+weclipthegradientwithamaximumnormof1.0.
+Inference. Gambaisanend-to-endfeed-forwardpipelinethatonlytakesabout8GBofGPUmem-
+ory and less than 1 second on a single NVIDIA A100 (80G) GPU during inference, facilitating
+online deployment. Note that Gamba takes an arbitrary RGBA image as input with assumed nor-
+malizedcamerapose, andtheoutputis16384numbersof3DGaussiansforfurthersplattingfrom
+anygivenpose.
+5.2 EXPERIMENTALPROTOCOL
+Baseline. WecompareourGambawithpreviousstate-of-the-artsingle-viewreconstructionmeth-
+ods. Therearemainlytwostreams: (1)Optimization-basedmethods,includingOne-2345Liuetal.
+(2023a)andDreamGaussianTangetal.(2023). One-2345leveragesZero123Liuetal.(2023b)and
+utilizes SparseNeuS Wang et al. (2021; 2023c) to fuse information from noisy multi-view genera-
+tions; DreamGaussian * combines Zero123 Liu et al. (2023b) with 3DGS for efficient 3D genera-
+tion.(2)Feed-forwardmethods,includingTriplane-GaussianZouetal.(2023)andLRMHongetal.
+(2023b)†,whicharetransformer-basedreconstructionmodelswith3DGSandtriplane-NeRFasthe
+output 3D representation, respectively. Note that AGG Xu et al. (2024) has not been included for
+comparisoninthecurrentversion,asnocodehasbeenpubliclyreleased.
+Evaluation Metrics. In the context of single-view 3D reconstruction, an outstanding 3D model
+should not only faithfully replicate the reference image but also preserve a consistent relationship
+withthereferenceandyieldbelievableoutcomesfromvariousviewpoints. Asthesingle-viewinput
+can lead to various 3D objects as plausible outputs, we do not evaluate precise matches with the
+3Dgroundtruthinthenovelview. Accordingto Xuetal.(2024), weevaluatedGambausingthe
+testsetofOmniObject3Dforaquantitativeanalysis,employingPSNRandLPIPSmetricstoassess
+reconstructionqualityandtheCLIPdistancedefinedintheimageembeddingtoreflectthehigh-level
+imagesimilarityinmultiviewrenderings.
+*WeonlydevisethefirststageofDreamGaussianwithoutmeshrefinementformorefaircomparisonwith
+thesame3Drepresentation.
+†LRMisimplementedbasedontheopen-sourceopenlrm-mix-base-1.1model.
+8TechniqueReportforGamba
+Input DreamGaussian One2345 Gamba
+Figure6: Comparisonwithoptimization-basedsingle-view3Dreconstructionmethods.
+Qualitative Comparisons. Fig. 5 and Fig. 6 demonstrate that Gamba maintains reasonable ge-
+ometry understanding and plausible texture in most scenarios. On the contrary, the generation re-
+sultsfrommostbaselines,eventhosethatusescoredistillationsampling(SDS)andmoreadvanced
+Zero123-XLLiuetal.(2023b),areplaguedbymulti-viewinconsistency,geometricdistortion,and
+textureambiguity. Inparticular,whenthereferenceimagecomesacrosswithanuncanonicalview
+(e.g., theshoescaseinthefourthlineofFig.6, optimization-basedmethodsstruggletoproducea
+propergeometrystructureduetothebiasin2Ddiffusionmodels. Suchanobservationleadsusto
+apotentialtwo-stage3Dgenerationpattern,thatis,afeed-forwardmodel,e.g.,Gamba,firstgener-
+atesreasonableandconsistentgeometryandthenanoptimization-basedmethod,e.g.,Consistent3D,
+furtherrefinestheintricatetextureandlocaldetailswithsmallerdiffusiontime-stepguidance. See
+Appendixformoredetailsoftheabovetwo-stagepattern.
+QuantitativeComparisons.Table1revealsthatGambaiscompetitiveagainstothermethodsacross
+allevaluatedmetrics,highlightingitsexceptionalcapabilitiesinbothreconstructionquality(PSNR,
+LPIPS)and3Dconsistency(CLIPDistance). Specifically,GambamatchesDreamGaussian,which
+employsadirectreferenceviewreconstructionsupervisionwithlargelossweight,inreconstructing
+thereferenceviewandsubstantiallyoutperformsOne-2345. Regardingviewconsistency,evaluated
+by CLIP Distance, Gamba notably exceeds LRM by a considerable margin. The principal incon-
+sistencyfoundinLRMisattributedtothedisparityinedgesbetweenconcealedandexposedareas,
+whichresultsinvisibleseamswithblurredtextures.
+Table1: Quantitativeresults. WeshowquantitativeresultsintermsofCLIPDistance(CLIP-D)↓
+/PSNR↑/LPIPS↓. TheaboveresultsareshownontheOmniObject3Ddatasets.
+Metrics\Methods LRM One-2345 DreamGaussian Gamba
+CLIP-D↓ 0.59 0.61 0.41 0.39
+PSNR↑ 15.80 15.24 23.24 20.19
+LPIPS↓ 0.49 0.51 0.08 0.15
+9TechniqueReportforGamba
+Input Novel View Synthesis with Gamba
+Figure7: Failure casesofGamba. Our observationsuggeststhatGambastrugglesto generate 3D
+assetswithextremelyintricatetextureandout-of-distributionreferenceinputs.
+5.3 INFERENCERUNTIME
+We showcase the inference runtime required to generate a 3D asset in Table 2, where the timing
+is recorded using the default hyper-parameters for each method on a single NVIDIA A100 GPU
+(80G).Remarkably,ourGambaoutperformsoptimization-basedapproachesintermsofspeed,being
+several orders of magnitude faster than those optimization-based methods and surpass other feed-
+forwardmodelsaswell,thankstotheefficientbackbonedesign.
+Table2: Comparisonsagainstbaselinemethodsregardinginferenceruntime.
+Metrics\Methods LRM One-2345 DreamGaussian Gamba
+Runtime(s) 5 48 72 0.6
+6 ABLATION AND DISCUSSION
+Q1: What impacts performance of Gamba in terms of component-wise contributions? We dis-
+cardedeachcorecomponentofGambatovalidateitscomponent-wiseeffectiveness. Theresultsare
+describedinTable3bycomparingtheirpredictionswith 3Dgroundtruthonthetestset.
+A1: Inanend-to-end,multi-componentpipeline,weobservedthattheexclusionofanycomponent
+from Gamba resulted in a significant degradation in performance. In particular, we first replace
+theproposedGambaFormerblockwiththetraditionaltransformer-basedstructureutilizingadaptive
+layernorm(adaLN)andcross-attentionforconditioncontrol. Such“w/oMambaBlock”islimited
+inthenumberoftokens(3DGassians),thusdeliveringgeometricirregularitiesandexcessivetexture
+detailswithextremelylowerPSNRandSSIM.Inaddition,the“w/oRobustTraining”appearswith
+morefloatersandworsegeometry,asitiseasiertogetstuckinthelocalminimumanddimensional
+collapse, resulting in 3DGS parameters with little standard deviation. In contrast, integrated with
+the mamba block and robust training, Gamba showcases the best rendering outcomes in the novel
+view. MorequalitativecomparisonswillbeincludedinAppendix.
+Q2:HowaboutthefailurecaseofGamba? AsshowninFig.7,wemanuallyselectedsomefailure
+casefromtheGambagenerationresults.
+10TechniqueReportforGamba
+Table 3: Ablation Studies. We validate the effectiveness of our proposed structure and training
+design.
+Models\Metrics PSNR↑ SSIM↑ LPIPS↓
+w/oMambaBlock 11.28 0.60 0.22
+w/oRobustTraining 15.44 0.69 0.21
+Gamba 19.20 0.82 0.19
+A2: Tobehonest,ourGambadoesnotalwaysyieldplausibleresults. First,Gambastruggleswith
+generatingsharptexturesforoccludedareas,particularlywhendealingwithcomplextextures. We
+hypothesize that this issue arises from two main factors: (1) As highlighted in LRM Hong et al.
+(2023b), the task of single-view 3D reconstruction is inherently probabilistic, suggesting multiple
+potentialsolutionsforunseenareas.Nonetheless,ourmodeloperatesonadeterministicbasis,likely
+leading to the production of averaged representations for these unseen regions. (2) Gamba simul-
+taneouslypredictsandsupervisesbothgeometric(e.g.,position)andappearanceinformation(e.g.,
+sphericalharmonics),whichhindersitsabilitytoaccuratelymodelintricatetexturesandsceneillu-
+mination. Second, given that Gamba has only been pre-trained on the OmniObject3D dataset Wu
+etal.(2023)—whichissignificantlysmallerthanthewidely-adoptedObjaversedatasetDeitkeetal.
+(2023)—itstrugglestoaccuratelyreconstruct’unseen’3Dassetsthatexhibitalargedomaindispar-
+ityfromthescannedobjectsinOmniObject3D.WeplantoreleaseanenhancedversionofGamba,
+pre-trainedonthefilteredsubsetofObjaverse-XLinthenearfuture.
+7 CONCLUSION
+In this technique report, we present Gamba, an end-to-end, amortized 3D reconstruction model
+from single-view image. Our proposed Gamba, different from previous methods reliant on SDS
+and NeRF, marries 3D Gaussian splatting and Mamba to address the challenges of high memory
+requirements and heavy rendering process. Our key insight is the relationship between the 3DGS
+generationprocessandthesequentialmechanismofMamba.Additionally,Gambaintegratesseveral
+techniques for training stability. Through extensive qualitative comparisons and quantitative eval-
+uations, we show that our Gamba is promising and competitive with several orders of magnitude
+speedupinsingle-view3Dreconstruction.
+REFERENCES
+JonathanTBarron, BenMildenhall, MatthewTancik, PeterHedman, RicardoMartin-Brualla, and
+PratulPSrinivasan.Mip-nerf:Amultiscalerepresentationforanti-aliasingneuralradiancefields.
+InProceedingsoftheIEEE/CVFInternationalConferenceonComputerVision,pp.5855–5864,
+2021.
+DavidCharatan,SizheLi,AndreaTagliasacchi,andVincentSitzmann.pixelsplat:3dgaussiansplats
+fromimagepairsforscalablegeneralizable3dreconstruction. arXivpreprintarXiv:2312.12337,
+2023.
+Guikun Chen and Wenguan Wang. A survey on 3d gaussian splatting. arXiv preprint
+arXiv:2401.03890,2024.
+Franc¸oisChollet. Xception: Deeplearningwithdepthwiseseparableconvolutions. InProceedings
+oftheIEEEconferenceoncomputervisionandpatternrecognition,pp.1251–1258,2017.
+MattDeitke, DustinSchwenk, JordiSalvador, LucaWeihs, OscarMichel, EliVanderBilt, Ludwig
+Schmidt,KianaEhsani,AniruddhaKembhavi,andAliFarhadi. Objaverse: Auniverseofanno-
+tated3dobjects. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pp.13142–13153,2023.
+Kaiwen Duan, Song Bai, Lingxi Xie, Honggang Qi, Qingming Huang, and Qi Tian. Centernet:
+Keypointtripletsforobjectdetection. InProceedingsoftheIEEE/CVFinternationalconference
+oncomputervision,pp.6569–6578,2019.
+11TechniqueReportforGamba
+WilliamGlasser. Controltheory. HarperandRowNewYork,1985.
+Alexandros Graikos, Nikolay Malkin, Nebojsa Jojic, and Dimitris Samaras. Diffusion models as
+plug-and-play priors. Advances in Neural Information Processing Systems, 35:14715–14728,
+2022.
+AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestatespaces. arXiv
+preprintarXiv:2312.00752,2023a.
+AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestatespaces. arXiv
+preprintarXiv:2312.00752,2023b.
+Albert Gu, Karan Goel, and Christopher Re´. Efficiently modeling long sequences with structured
+statespaces. arXivpreprintarXiv:2111.00396,2021a.
+AlbertGu,IsysJohnson,KaranGoel,KhaledSaab,TriDao,AtriRudra,andChristopherRe´. Com-
+bining recurrent, convolutional, and continuous-time models with linear state space layers. Ad-
+vancesinneuralinformationprocessingsystems,34:572–585,2021b.
+AlbertGu,KaranGoel,AnkitGupta,andChristopherRe´.Ontheparameterizationandinitialization
+ofdiagonalstatespacemodels. AdvancesinNeuralInformationProcessingSystems,35:35971–
+35983,2022a.
+Albert Gu, Isys Johnson, Aman Timalsina, Atri Rudra, and Christopher Re´. How to train
+your hippo: State space models with generalized orthogonal basis projections. arXiv preprint
+arXiv:2206.12037,2022b.
+FaizaGul,WanRahiman,andSyedSahalNazliAlhady.Acomprehensivestudyforrobotnavigation
+techniques. CogentEngineering,6(1):1632046,2019.
+Yuan-Chen Guo, Ying-Tian Liu, Ruizhi Shao, Christian Laforte, Vikram Voleti, Guan Luo, Chia-
+HaoChen, Zi-XinZou,ChenWang, Yan-PeiCao,andSong-HaiZhang. threestudio: Aunified
+frameworkfor3dcontentgeneration. https://github.com/threestudio-project/
+threestudio,2023.
+SusungHong,DonghoonAhn,andSeungryongKim. Debiasingscoresandpromptsof2ddiffusion
+forrobusttext-to-3dgeneration. arXivpreprintarXiv:2303.15413,2023a.
+YicongHong,KaiZhang,JiuxiangGu,SaiBi,YangZhou,DifanLiu,FengLiu,KalyanSunkavalli,
+TrungBui,andHaoTan. Lrm: Largereconstructionmodelforsingleimageto3d. arXivpreprint
+arXiv:2311.04400,2023b.
+BernhardKerbl,GeorgiosKopanas,ThomasLeimku¨hler,andGeorgeDrettakis. 3dgaussiansplat-
+ting for real-time radiance field rendering. ACM Transactions on Graphics (ToG), 42(4):1–14,
+2023.
+Jiahao Li, Hao Tan, Kai Zhang, Zexiang Xu, Fujun Luan, Yinghao Xu, Yicong Hong, Kalyan
+Sunkavalli, Greg Shakhnarovich, and Sai Bi. Instant3d: Fast text-to-3d with sparse-view gen-
+erationandlargereconstructionmodel. arXivpreprintarXiv:2311.06214,2023.
+Dingkang Liang, Xin Zhou, Xinyu Wang, Xingkui Zhu, Wei Xu, Zhikang Zou, Xiaoqing Ye, and
+Xiang Bai. Pointmamba: A simple state space model for point cloud analysis. arXiv preprint
+arXiv:2402.10739,2024a.
+Dingkang Liang, Xin Zhou, Xinyu Wang, Xingkui Zhu, Wei Xu, Zhikang Zou, Xiaoqing Ye, and
+Xiang Bai. Pointmamba: A simple state space model for point cloud analysis. arXiv preprint
+arXiv:2402.10739,2024b.
+Chen-Hsuan Lin, Jun Gao, Luming Tang, Towaki Takikawa, Xiaohui Zeng, Xun Huang, Karsten
+Kreis,SanjaFidler,Ming-YuLiu,andTsung-YiLin. Magic3d: High-resolutiontext-to-3dcon-
+tent creation. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition,pp.300–309,2023.
+12TechniqueReportforGamba
+Minghua Liu, Chao Xu, Haian Jin, Linghao Chen, Zexiang Xu, Hao Su, et al. One-2-3-45:
+Any single image to 3d mesh in 45 seconds without per-shape optimization. arXiv preprint
+arXiv:2306.16928,2023a.
+RuoshiLiu,RundiWu,BasileVanHoorick,PavelTokmakov,SergeyZakharov,andCarlVondrick.
+Zero-1-to-3: Zero-shot one image to 3d object. In Proceedings of the IEEE/CVF International
+ConferenceonComputerVision,pp.9298–9309,2023b.
+Yue Liu, Yunjie Tian, Yuzhong Zhao, Hongtian Yu, Lingxi Xie, Yaowei Wang, Qixiang Ye, and
+YunfanLiu. Vmamba: Visualstatespacemodel. arXivpreprintarXiv:2401.10166,2024.
+Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. arXiv preprint
+arXiv:1711.05101,2017.
+Jun Ma, Feifei Li, and Bo Wang. U-mamba: Enhancing long-range dependency for biomedical
+imagesegmentation. arXivpreprintarXiv:2401.04722,2024.
+HarshMehta,AnkitGupta,AshokCutkosky,andBehnamNeyshabur. Longrangelanguagemodel-
+ingviagatedstatespaces. arXivpreprintarXiv:2206.13947,2022.
+BenMildenhall,PratulPSrinivasan,MatthewTancik,JonathanTBarron,RaviRamamoorthi,and
+RenNg. Nerf:Representingscenesasneuralradiancefieldsforviewsynthesis. Communications
+oftheACM,65(1):99–106,2021.
+Charlie Nash, Yaroslav Ganin, SM Ali Eslami, and Peter Battaglia. Polygen: An autoregressive
+generativemodelof3dmeshes.InInternationalconferenceonmachinelearning,pp.7220–7229.
+PMLR,2020.
+AlexNichol,HeewooJun,PrafullaDhariwal,PamelaMishkin,andMarkChen. Point-e: Asystem
+forgenerating3dpointcloudsfromcomplexprompts. arXivpreprintarXiv:2212.08751,2022.
+MaximeOquab,Timothe´eDarcet,TheoMoutakanni,HuyV.Vo,MarcSzafraniec,VasilKhalidov,
+PierreFernandez,DanielHaziza,FranciscoMassa,AlaaeldinEl-Nouby,RussellHowes,Po-Yao
+Huang, Hu Xu, Vasu Sharma, Shang-Wen Li, Wojciech Galuba, Mike Rabbat, Mido Assran,
+NicolasBallas,GabrielSynnaeve,IshanMisra,HerveJegou,JulienMairal,PatrickLabatut,Ar-
+mandJoulin,andPiotrBojanowski. Dinov2:Learningrobustvisualfeatureswithoutsupervision,
+2023.
+WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InProceedingsof
+theIEEE/CVFInternationalConferenceonComputerVision,pp.4195–4205,2023.
+BenPoole,AjayJain,JonathanTBarron,andBenMildenhall. Dreamfusion: Text-to-3dusing2d
+diffusion. arXivpreprintarXiv:2209.14988,2022.
+Guocheng Qian, Jinjie Mai, Abdullah Hamdi, Jian Ren, Aliaksandr Siarohin, Bing Li, Hsin-
+Ying Lee, Ivan Skorokhodov, Peter Wonka, Sergey Tulyakov, et al. Magic123: One image
+to high-quality 3d object generation using both 2d and 3d diffusion priors. arXiv preprint
+arXiv:2306.17843,2023.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal,
+Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual
+modelsfromnaturallanguagesupervision. InInternationalconferenceonmachinelearning,pp.
+8748–8763.PMLR,2021.
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Bjo¨rn Ommer. High-
+resolutionimagesynthesiswithlatentdiffusionmodels. InProceedingsoftheIEEE/CVFconfer-
+enceoncomputervisionandpatternrecognition,pp.10684–10695,2022.
+JiachengRuanandSunchengXiang.Vm-unet:Visionmambaunetformedicalimagesegmentation.
+arXivpreprintarXiv:2402.02491,2024.
+TianchangShen,JunGao,KangxueYin,Ming-YuLiu,andSanjaFidler. Deepmarchingtetrahedra:
+ahybridrepresentationforhigh-resolution3dshapesynthesis. AdvancesinNeuralInformation
+ProcessingSystems,34:6087–6101,2021.
+13TechniqueReportforGamba
+YichunShi,PengWang,JianglongYe,MaiLong,KejieLi,andXiaoYang. Mvdream: Multi-view
+diffusionfor3dgeneration. arXivpreprintarXiv:2308.16512,2023.
+J. Ryan Shue, Eric Ryan Chan, Ryan Po, Zachary Ankner, Jiajun Wu, and Gordon Wetzstein. 3d
+neuralfieldgenerationusingtriplanediffusion. InProceedingsoftheIEEE/CVFConferenceon
+ComputerVisionandPatternRecognition(CVPR),pp.20875–20886,June2023.
+Tianyu Sun, Guodong Zhang, Wenming Yang, Jing-Hao Xue, and Guijin Wang. Trosd: A new
+rgb-ddatasetfortransparentandreflectiveobjectsegmentationinpractice. IEEETransactionson
+CircuitsandSystemsforVideoTechnology,2023.
+Stanislaw Szymanowicz, Christian Rupprecht, and Andrea Vedaldi. Splatter image: Ultra-fast
+single-view3dreconstruction. arXivpreprintarXiv:2312.13150,2023.
+Jiaxiang Tang. Stable-dreamfusion: Text-to-3d with stable-diffusion, 2022.
+https://github.com/ashawkey/stable-dreamfusion.
+Jiaxiang Tang, Jiawei Ren, Hang Zhou, Ziwei Liu, and Gang Zeng. Dreamgaussian: Generative
+gaussiansplattingforefficient3dcontentcreation. arXivpreprintarXiv:2309.16653,2023.
+Jiaxiang Tang, Zhaoxi Chen, Xiaokang Chen, Tengfei Wang, Gang Zeng, and Ziwei Liu. Lgm:
+Large multi-view gaussian model for high-resolution 3d content creation. arXiv preprint
+arXiv:2402.05054,2024.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
+Łukasz Kaiser, and Illia Polosukhin. Attention is all you need. Advances in neural informa-
+tionprocessingsystems,30,2017.
+JueWang, WentaoZhu, PichaoWang, XiangYu, LindaLiu, MohamedOmar, andRaffayHamid.
+Selective structured state-spaces for long-form video understanding. In Proceedings of the
+IEEE/CVFConferenceonComputerVisionandPatternRecognition,pp.6387–6397,2023a.
+Peng Wang and Yichun Shi. Imagedream: Image-prompt multi-view diffusion for 3d generation.
+arXivpreprintarXiv:2312.02201,2023.
+PengWang, LingjieLiu, YuanLiu, ChristianTheobalt, TakuKomura, andWenpingWang. Neus:
+Learning neural implicit surfaces by volume rendering for multi-view reconstruction. arXiv
+preprintarXiv:2106.10689,2021.
+PengWang, HaoTan, SaiBi, YinghaoXu, FujunLuan, KalyanSunkavalli, WenpingWang, Zexi-
+ang Xu, and Kai Zhang. Pf-lrm: Pose-free large reconstruction model for joint pose and shape
+prediction. arXivpreprintarXiv:2311.12024,2023b.
+YimingWang,QinHan,MarcHabermann,KostasDaniilidis,ChristianTheobalt,andLingjieLiu.
+Neus2: Fastlearningofneuralimplicitsurfacesformulti-viewreconstruction. InProceedingsof
+theIEEE/CVFInternationalConferenceonComputerVision,pp.3295–3306,2023c.
+YuxuanWang,XuanyuYi,ZikeWu,NaZhao,LongChen,andHanwangZhang. View-consistent
+3deditingwithgaussiansplatting. arXivpreprintarXiv:2403.11868,2024.
+ZhengyiWang,ChengLu,YikaiWang,FanBao,ChongxuanLi,HangSu,andJunZhu. Prolific-
+dreamer: High-fidelityanddiversetext-to-3dgenerationwithvariationalscoredistillation. arXiv
+preprintarXiv:2305.16213,2023d.
+Haohan Weng, Tianyu Yang, Jianan Wang, Yu Li, Tong Zhang, CL Chen, and Lei Zhang.
+Consistent123: Improve consistency for one image to 3d object synthesis. arXiv preprint
+arXiv:2310.08092,2023.
+TongWu,JiaruiZhang,XiaoFu,YuxinWang,JiaweiRen,LiangPan,WayneWu,LeiYang,Jiaqi
+Wang,ChenQian,etal. Omniobject3d: Large-vocabulary3dobjectdatasetforrealisticpercep-
+tion, reconstruction and generation. In Proceedings of the IEEE/CVF Conference on Computer
+VisionandPatternRecognition,pp.803–814,2023.
+14TechniqueReportforGamba
+Zike Wu, Pan Zhou, Xuanyu Yi, Xiaoding Yuan, and Hanwang Zhang. Consistent3d: Towards
+consistent high-fidelity text-to-3d generation with deterministic sampling prior. arXiv preprint
+arXiv:2401.09050,2024.
+DejiaXu,YeYuan,MortezaMardani,SifeiLiu,JiamingSong,ZhangyangWang,andArashVahdat.
+Agg:Amortizedgenerative3dgaussiansforsingleimageto3d.arXivpreprintarXiv:2401.04099,
+2024.
+Yinghao Xu, Hao Tan, Fujun Luan, Sai Bi, Peng Wang, Jiahao Li, Zifan Shi, Kalyan Sunkavalli,
+Gordon Wetzstein, Zexiang Xu, et al. Dmv3d: Denoising multi-view diffusion using 3d large
+reconstructionmodel. arXivpreprintarXiv:2311.09217,2023.
+XuanyuYi,KaihuaTang,Xian-ShengHua,Joo-HweeLim,andHanwangZhang. Identifyinghard
+noiseinlong-tailedsampledistribution. InEuropeanConferenceonComputerVision,pp.739–
+756.Springer,2022.
+XuanyuYi, JiajunDeng, QianruSun, Xian-ShengHua, Joo-HweeLim, andHanwangZhang. In-
+varianttraining2d-3djointhardsamplesforfew-shotpointcloudrecognition. InProceedingsof
+theIEEE/CVFInternationalConferenceonComputerVision,pp.14463–14474,2023.
+Xianggang Yu, Mutian Xu, Yidan Zhang, Haolin Liu, Chongjie Ye, Yushuang Wu, Zizheng Yan,
+Chenming Zhu, Zhangyang Xiong, Tianyou Liang, et al. Mvimgnet: A large-scale dataset of
+multi-viewimages.InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pp.9150–9161,2023.
+RichardZhang,PhillipIsola,AlexeiAEfros,EliShechtman,andOliverWang. Theunreasonable
+effectivenessofdeepfeaturesasaperceptualmetric. InProceedingsoftheIEEEconferenceon
+computervisionandpatternrecognition,pp.586–595,2018.
+TaoZhang,XiangtaiLi,HaoboYuan,ShunpingJi,andShuichengYan. Pointcouldmamba: Point
+cloudlearningviastatespacemodel,2024.
+LianghuiZhu,BenchengLiao,QianZhang,XinlongWang,WenyuLiu,andXinggangWang. Vi-
+sionmamba: Efficientvisualrepresentationlearningwithbidirectionalstatespacemodel. arXiv
+preprintarXiv:2401.09417,2024.
+Zi-XinZou,ZhipengYu,Yuan-ChenGuo,YangguangLi,DingLiang,Yan-PeiCao,andSong-Hai
+Zhang. Triplanemeetsgaussiansplatting: Fastandgeneralizablesingle-view3dreconstruction
+withtransformers. arXivpreprintarXiv:2312.09147,2023.
+Matthias Zwicker, Hanspeter Pfister, Jeroen Van Baar, and Markus Gross. Ewa splatting. IEEE
+TransactionsonVisualizationandComputerGraphics,8(3):223–238,2002.
+15
