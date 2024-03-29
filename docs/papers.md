@@ -2,315 +2,355 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18814v1 |
-|title| Mini-Gemini: Mining the Potential of Multi-modality Vision Language Models |
-|authors| Yanwei LiYuechen ZhangChengyao WangZhisheng ZhongYixin ChenRuihang ChuShaoteng LiuJiaya Jia
-|links| http://arxiv.org/abs/2403.18814v1 |
-|updated| 2024-03-27 17:59:04 UTC |
-|summary| In this work we introduce Mini-Gemini a simple and effective frameworkenhancing multi-modality Vision Language Models VLMs. Despite theadvancements in VLMs facilitating basic visual dialog and reasoning aperformance gap persists compared to advanced models like GPT-4 and Gemini. Wetry to narrow the gap by mining the potential of VLMs for better performanceand any-to-any workflow from three aspects i.e. high-resolution visualtokens high-quality data and VLM-guided generation. To enhance visual tokenswe propose to utilize an additional visual encoder for high-resolutionrefinement without increasing the visual token count. We further construct ahigh-quality dataset that promotes precise image comprehension andreasoning-based generation expanding the operational scope of current VLMs. Ingeneral Mini-Gemini further mines the potential of VLMs and empowers currentframeworks with image understanding reasoning and generation simultaneously.Mini-Gemini supports a series of dense and MoE Large Language Models LLMsfrom 2B to 34B. It is demonstrated to achieve leading performance in severalzero-shot benchmarks and even surpasses the developed private models. Code andmodels are available at https://github.com/dvlab-research/MiniGemini. |
+|idx| 2403.19651v1 |
+|title| MagicLens: Self-Supervised Image Retrieval with Open-Ended Instructions |
+|authors| Kai ZhangYi LuanHexiang HuKenton LeeSiyuan QiaoWenhu ChenYu SuMing-Wei Chang
+|links| http://arxiv.org/abs/2403.19651v1 |
+|updated| 2024-03-28 17:59:20 UTC |
+|summary| Image retrieval i.e. finding desired images given a reference imageinherently encompasses rich multi-faceted search intents that are difficult tocapture solely using image-based measures. Recent work leverages textinstructions to allow users to more freely express their search intents.However existing work primarily focuses on image pairs that are visuallysimilar and/or can be characterized by a small set of pre-defined relations.The core thesis of this paper is that text instructions can enable retrievingimages with richer relations beyond visual similarity. To show this weintroduce MagicLens a series of self-supervised image retrieval models thatsupport open-ended instructions. MagicLens is built on a key novel insight:image pairs that naturally occur on the same web pages contain a wide range ofimplicit relations e.g. inside view of and we can bring those implicitrelations explicit by synthesizing instructions via large multimodal modelsLMMs and large language models LLMs. Trained on 36.7M query imageinstruction target image triplets with rich semantic relations mined from theweb MagicLens achieves comparable or better results on eight benchmarks ofvarious image retrieval tasks than prior state-of-the-art SOTA methods.Remarkably it outperforms previous SOTA but with a 50X smaller model size onmultiple benchmarks. Additional human analyses on a 1.4M-image unseen corpusfurther demonstrate the diversity of search intents supported by MagicLens. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18804v1 |
-|title| Is Modularity Transferable? A Case Study through the Lens of Knowledge Distillation |
-|authors| Mateusz KlimaszewskiPiotr AndruszkiewiczAlexandra Birch
-|links| http://arxiv.org/abs/2403.18804v1 |
-|updated| 2024-03-27 17:50:00 UTC |
-|summary| The rise of Modular Deep Learning showcases its potential in various NaturalLanguage Processing applications. Parameter-efficient fine-tuning PEFTmodularity has been shown to work for various use cases from domain adaptationto multilingual setups. However all this work covers the case where themodular components are trained and deployed within one single Pre-trainedLanguage Model PLM. This model-specific setup is a substantial limitation onthe very modularity that modular architectures are trying to achieve. We askwhether current modular approaches are transferable between models and whetherwe can transfer the modules from more robust and larger PLMs to smaller ones.In this work we aim to fill this gap via a lens of Knowledge Distillationcommonly used for model compression and present an extremely straightforwardapproach to transferring pre-trained task-specific PEFT modules betweensame-family PLMs. Moreover we propose a method that allows the transfer ofmodules between incompatible PLMs without any change in the inferencecomplexity. The experiments on Named Entity Recognition Natural LanguageInference and Paraphrase Identification tasks over multiple languages and PEFTmethods showcase the initial potential of transferable modularity. |
+|idx| 2403.19647v1 |
+|title| Sparse Feature Circuits: Discovering and Editing Interpretable Causal Graphs in Language Models |
+|authors| Samuel MarksCan RagerEric J. MichaudYonatan BelinkovDavid BauAaron Mueller
+|links| http://arxiv.org/abs/2403.19647v1 |
+|updated| 2024-03-28 17:56:07 UTC |
+|summary| We introduce methods for discovering and applying sparse feature circuits.These are causally implicated subnetworks of human-interpretable features forexplaining language model behaviors. Circuits identified in prior work consistof polysemantic and difficult-to-interpret units like attention heads orneurons rendering them unsuitable for many downstream applications. Incontrast sparse feature circuits enable detailed understanding ofunanticipated mechanisms. Because they are based on fine-grained units sparsefeature circuits are useful for downstream tasks: We introduce SHIFT where weimprove the generalization of a classifier by ablating features that a humanjudges to be task-irrelevant. Finally we demonstrate an entirely unsupervisedand scalable interpretability pipeline by discovering thousands of sparsefeature circuits for automatically discovered model behaviors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18803v1 |
-|title| Projective Methods for Mitigating Gender Bias in Pre-trained Language Models |
-|authors| Hillary DawkinsIsar NejadgholiDaniel GillisJudi McCuaig
-|links| http://arxiv.org/abs/2403.18803v1 |
-|updated| 2024-03-27 17:49:31 UTC |
-|summary| Mitigation of gender bias in NLP has a long history tied to debiasing staticword embeddings. More recently attention has shifted to debiasing pre-trainedlanguage models. We study to what extent the simplest projective debiasingmethods developed for word embeddings can help when applied to BERTsinternal representations. Projective methods are fast to implement use a smallnumber of saved parameters and make no updates to the existing modelparameters. We evaluate the efficacy of the methods in reducing both intrinsicbias as measured by BERTs next sentence prediction task and in mitigatingobserved bias in a downstream setting when fine-tuned. To this end we alsoprovide a critical analysis of a popular gender-bias assessment test forquantifying intrinsic bias resulting in an enhanced test set and new biasmeasures. We find that projective methods can be effective at both intrinsicbias and downstream bias mitigation but that the two outcomes are notnecessarily correlated. This finding serves as a warning that intrinsic biastest sets based either on language modeling tasks or next sentence predictionshould not be the only benchmark in developing a debiased language model. |
+|idx| 2403.19634v1 |
+|title| Asymmetric and trial-dependent modeling: the contribution of LIA to SdSV Challenge Task 2 |
+|authors| Pierre-Michel BousquetMickael Rouvier
+|links| http://arxiv.org/abs/2403.19634v1 |
+|updated| 2024-03-28 17:49:31 UTC |
+|summary| The SdSv challenge Task 2 provided an opportunity to assess efficiency androbustness of modern text-independent speaker verification systems. But it alsomade it possible to test new approaches capable of taking into account themain issues of this challenge duration language .... This paper describesthe contributions of our laboratory to the speaker recognition field. Thesecontributions highlight two other challenges in addition to short-duration andlanguage: the mismatch between enrollment and test data and the one betweensubsets of the evaluation trial dataset. The proposed approaches experimentallyshow their relevance and efficiency on the SdSv evaluation and could be ofinterest in many real-life applications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18802v1 |
-|title| Long-form factuality in large language models |
-|authors| Jerry WeiChengrun YangXinying SongYifeng LuNathan HuDustin TranDaiyi PengRuibo LiuDa HuangCosmo DuQuoc V. Le
-|links| http://arxiv.org/abs/2403.18802v1 |
-|updated| 2024-03-27 17:48:55 UTC |
-|summary| Large language models LLMs often generate content that contains factualerrors when responding to fact-seeking prompts on open-ended topics. Tobenchmark a models long-form factuality in open domains we first use GPT-4 togenerate LongFact a prompt set comprising thousands of questions spanning 38topics. We then propose that LLM agents can be used as automated evaluators forlong-form factuality through a method which we call Search-Augmented FactualityEvaluator SAFE. SAFE utilizes an LLM to break down a long-form response intoa set of individual facts and to evaluate the accuracy of each fact using amulti-step reasoning process comprising sending search queries to Google Searchand determining whether a fact is supported by the search results. Furthermorewe propose extending F1 score as an aggregated metric for long-form factuality.To do so we balance the percentage of supported facts in a responseprecision with the percentage of provided facts relative to a hyperparameterrepresenting a users preferred response length recall.  Empirically we demonstrate that LLM agents can achieve superhuman ratingperformance - on a set of 16k individual facts SAFE agrees with crowdsourcedhuman annotators 72 of the time and on a random subset of 100 disagreementcases SAFE wins 76 of the time. At the same time SAFE is more than 20 timescheaper than human annotators. We also benchmark thirteen language models onLongFact across four model families Gemini GPT Claude and PaLM-2 findingthat larger language models generally achieve better long-form factuality.LongFact SAFE and all experimental code are available athttps://github.com/google-deepmind/long-form-factuality. |
+|idx| 2403.19631v1 |
+|title| Retrieval-Enhanced Knowledge Editing for Multi-Hop Question Answering in Language Models |
+|authors| Yucheng ShiQiaoyu TanXuansheng WuShaochen ZhongKaixiong ZhouNinghao Liu
+|links| http://arxiv.org/abs/2403.19631v1 |
+|updated| 2024-03-28 17:47:19 UTC |
+|summary| Large Language Models LLMs have shown proficiency in question-answeringtasks but often struggle to integrate real-time knowledge updates leading topotentially outdated or inaccurate responses. This problem becomes even morechallenging when dealing with multi-hop questions since they require LLMs toupdate and integrate multiple knowledge pieces relevant to the questions. Totackle the problem we propose the Retrieval-Augmented model Editing RAEframework tailored for multi-hop question answering. RAE first retrieves editedfacts and then refines the language model through in-context learning.Specifically our retrieval approach based on mutual information maximizationleverages the reasoning abilities of LLMs to identify chain facts that naivesimilarity-based searches might miss. Additionally our framework incorporatesa pruning strategy to eliminate redundant information from the retrieved factswhich enhances the editing accuracy and mitigates the hallucination problem.Our framework is supported by theoretical justification for its fact retrievalefficacy. Finally comprehensive evaluation across various LLMs validates RAEsability in providing accurate answers with updated knowledge. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18783v1 |
-|title| Towards a World-English Language Model for On-Device Virtual Assistants |
-|authors| Rricha JalotaLyan VerwimpMarkus Nussbaum-ThomAmr MousaArturo ArguetaYoussef Oualil
-|links| http://dx.doi.org/10.1109/ICASSP48485.2024.10448018 |
-|updated| 2024-03-27 17:31:39 UTC |
-|summary| Neural Network Language Models NNLMs for Virtual Assistants VAs aregenerally language- region- and in some cases device-dependent whichincreases the effort to scale and maintain them. Combining NNLMs for one ormore of the categories is one way to improve scalability. In this work wecombine regional variants of English to build a World English NNLM foron-device VAs. In particular we investigate the application of adapterbottlenecks to model dialect-specific characteristics in our existingproduction NNLMs and enhance the multi-dialect baselines. We find thatadapter modules are more effective in modeling dialects than specializingentire sub-networks. Based on this insight and leveraging the design of ourproduction models we introduce a new architecture for World English NNLM thatmeets the accuracy latency and memory constraints of our single-dialectmodels. |
+|idx| 2403.19603v1 |
+|title| Semantic Map-based Generation of Navigation Instructions |
+|authors| Chengzu LiChao ZhangSimone TeufelRama Sanand DoddipatlaSvetlana Stoyanchev
+|links| http://arxiv.org/abs/2403.19603v1 |
+|updated| 2024-03-28 17:27:44 UTC |
+|summary| We are interested in the generation of navigation instructions either intheir own right or as training material for robotic navigation task. In thispaper we propose a new approach to navigation instruction generation byframing the problem as an image captioning task using semantic maps as visualinput. Conventional approaches employ a sequence of panorama images to generatenavigation instructions. Semantic maps abstract away from visual details andfuse the information in multiple panorama images into a single top-downrepresentation thereby reducing computational complexity to process the input.We present a benchmark dataset for instruction generation using semantic mapspropose an initial model and ask human subjects to manually assess the qualityof generated instructions. Our initial investigations show promise in usingsemantic maps for instruction generation instead of a sequence of panoramaimages but there is vast scope for improvement. We release the code for datapreparation and model training at https://github.com/chengzu-li/VLGen. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18814v1 |
-|title| Mini-Gemini: Mining the Potential of Multi-modality Vision Language Models |
-|authors| Yanwei LiYuechen ZhangChengyao WangZhisheng ZhongYixin ChenRuihang ChuShaoteng LiuJiaya Jia
-|links| http://arxiv.org/abs/2403.18814v1 |
-|updated| 2024-03-27 17:59:04 UTC |
-|summary| In this work we introduce Mini-Gemini a simple and effective frameworkenhancing multi-modality Vision Language Models VLMs. Despite theadvancements in VLMs facilitating basic visual dialog and reasoning aperformance gap persists compared to advanced models like GPT-4 and Gemini. Wetry to narrow the gap by mining the potential of VLMs for better performanceand any-to-any workflow from three aspects i.e. high-resolution visualtokens high-quality data and VLM-guided generation. To enhance visual tokenswe propose to utilize an additional visual encoder for high-resolutionrefinement without increasing the visual token count. We further construct ahigh-quality dataset that promotes precise image comprehension andreasoning-based generation expanding the operational scope of current VLMs. Ingeneral Mini-Gemini further mines the potential of VLMs and empowers currentframeworks with image understanding reasoning and generation simultaneously.Mini-Gemini supports a series of dense and MoE Large Language Models LLMsfrom 2B to 34B. It is demonstrated to achieve leading performance in severalzero-shot benchmarks and even surpasses the developed private models. Code andmodels are available at https://github.com/dvlab-research/MiniGemini. |
+|idx| 2403.19652v1 |
+|title| InterDreamer: Zero-Shot Text to 3D Dynamic Human-Object Interaction |
+|authors| Sirui XuZiyin WangYu-Xiong WangLiang-Yan Gui
+|links| http://arxiv.org/abs/2403.19652v1 |
+|updated| 2024-03-28 17:59:30 UTC |
+|summary| Text-conditioned human motion generation has experienced significantadvancements with diffusion models trained on extensive motion capture data andcorresponding textual annotations. However extending such success to 3Ddynamic human-object interaction HOI generation faces notable challengesprimarily due to the lack of large-scale interaction data and comprehensivedescriptions that align with these interactions. This paper takes theinitiative and showcases the potential of generating human-object interactionswithout direct training on text-interaction pair data. Our key insight inachieving this is that interaction semantics and dynamics can be decoupled.Being unable to learn interaction semantics through supervised training weinstead leverage pre-trained large models synergizing knowledge from a largelanguage model and a text-to-motion model. While such knowledge offershigh-level control over interaction semantics it cannot grasp the intricaciesof low-level interaction dynamics. To overcome this issue we further introducea world model designed to comprehend simple physics modeling how human actionsinfluence object motion. By integrating these components our novel frameworkInterDreamer is able to generate text-aligned 3D HOI sequences in a zero-shotmanner. We apply InterDreamer to the BEHAVE and CHAIRS datasets and ourcomprehensive experimental analysis demonstrates its capability to generaterealistic and coherent interaction sequences that seamlessly align with thetext directives. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18807v1 |
-|title| ECoDepth: Effective Conditioning of Diffusion Models for Monocular Depth Estimation |
-|authors| Suraj PatniAradhye AgarwalChetan Arora
-|links| http://arxiv.org/abs/2403.18807v1 |
-|updated| 2024-03-27 17:53:30 UTC |
-|summary| In the absence of parallax cues a learning-based single image depthestimation SIDE model relies heavily on shading and contextual cues in theimage. While this simplicity is attractive it is necessary to train suchmodels on large and varied datasets which are difficult to capture. It hasbeen shown that using embeddings from pre-trained foundational models such asCLIP improves zero shot transfer in several applications. Taking inspirationfrom this in our paper we explore the use of global image priors generatedfrom a pre-trained ViT model to provide more detailed contextual information.We argue that the embedding vector from a ViT model pre-trained on a largedataset captures greater relevant information for SIDE than the usual route ofgenerating pseudo image captions followed by CLIP based text embeddings. Basedon this idea we propose a new SIDE model using a diffusion backbone which isconditioned on ViT embeddings. Our proposed design establishes a newstate-of-the-art SOTA for SIDE on NYUv2 dataset achieving Abs Rel error of0.05914 improvement compared to 0.069 by the current SOTA VPD. And onKITTI dataset achieving Sq Rel error of 0.139 2 improvement compared to0.142 by the current SOTA GEDepth. For zero-shot transfer with a modeltrained on NYUv2 we report mean relative improvement of 20 23 81 25over NeWCRFs on Sun-RGBD iBims1 DIODE HyperSim datasets compared to 1618 45 9 by ZoeDepth. The code is available athttps://github.com/Aradhye2002/EcoDepth. |
+|idx| 2403.19651v1 |
+|title| MagicLens: Self-Supervised Image Retrieval with Open-Ended Instructions |
+|authors| Kai ZhangYi LuanHexiang HuKenton LeeSiyuan QiaoWenhu ChenYu SuMing-Wei Chang
+|links| http://arxiv.org/abs/2403.19651v1 |
+|updated| 2024-03-28 17:59:20 UTC |
+|summary| Image retrieval i.e. finding desired images given a reference imageinherently encompasses rich multi-faceted search intents that are difficult tocapture solely using image-based measures. Recent work leverages textinstructions to allow users to more freely express their search intents.However existing work primarily focuses on image pairs that are visuallysimilar and/or can be characterized by a small set of pre-defined relations.The core thesis of this paper is that text instructions can enable retrievingimages with richer relations beyond visual similarity. To show this weintroduce MagicLens a series of self-supervised image retrieval models thatsupport open-ended instructions. MagicLens is built on a key novel insight:image pairs that naturally occur on the same web pages contain a wide range ofimplicit relations e.g. inside view of and we can bring those implicitrelations explicit by synthesizing instructions via large multimodal modelsLMMs and large language models LLMs. Trained on 36.7M query imageinstruction target image triplets with rich semantic relations mined from theweb MagicLens achieves comparable or better results on eight benchmarks ofvarious image retrieval tasks than prior state-of-the-art SOTA methods.Remarkably it outperforms previous SOTA but with a 50X smaller model size onmultiple benchmarks. Additional human analyses on a 1.4M-image unseen corpusfurther demonstrate the diversity of search intents supported by MagicLens. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18802v1 |
-|title| Long-form factuality in large language models |
-|authors| Jerry WeiChengrun YangXinying SongYifeng LuNathan HuDustin TranDaiyi PengRuibo LiuDa HuangCosmo DuQuoc V. Le
-|links| http://arxiv.org/abs/2403.18802v1 |
-|updated| 2024-03-27 17:48:55 UTC |
-|summary| Large language models LLMs often generate content that contains factualerrors when responding to fact-seeking prompts on open-ended topics. Tobenchmark a models long-form factuality in open domains we first use GPT-4 togenerate LongFact a prompt set comprising thousands of questions spanning 38topics. We then propose that LLM agents can be used as automated evaluators forlong-form factuality through a method which we call Search-Augmented FactualityEvaluator SAFE. SAFE utilizes an LLM to break down a long-form response intoa set of individual facts and to evaluate the accuracy of each fact using amulti-step reasoning process comprising sending search queries to Google Searchand determining whether a fact is supported by the search results. Furthermorewe propose extending F1 score as an aggregated metric for long-form factuality.To do so we balance the percentage of supported facts in a responseprecision with the percentage of provided facts relative to a hyperparameterrepresenting a users preferred response length recall.  Empirically we demonstrate that LLM agents can achieve superhuman ratingperformance - on a set of 16k individual facts SAFE agrees with crowdsourcedhuman annotators 72 of the time and on a random subset of 100 disagreementcases SAFE wins 76 of the time. At the same time SAFE is more than 20 timescheaper than human annotators. We also benchmark thirteen language models onLongFact across four model families Gemini GPT Claude and PaLM-2 findingthat larger language models generally achieve better long-form factuality.LongFact SAFE and all experimental code are available athttps://github.com/google-deepmind/long-form-factuality. |
+|idx| 2403.19648v1 |
+|title| Human-compatible driving partners through data-regularized self-play reinforcement learning |
+|authors| Daphne CornelisseEugene Vinitsky
+|links| http://arxiv.org/abs/2403.19648v1 |
+|updated| 2024-03-28 17:56:56 UTC |
+|summary| A central challenge for autonomous vehicles is coordinating with humans.Therefore incorporating realistic human agents is essential for scalabletraining and evaluation of autonomous driving systems in simulation. Simulationagents are typically developed by imitating large-scale high-quality datasetsof human driving. However pure imitation learning agents empirically have highcollision rates when executed in a multi-agent closed-loop setting. To buildagents that are realistic and effective in closed-loop settings we proposeHuman-Regularized PPO HR-PPO a multi-agent algorithm where agents aretrained through self-play with a small penalty for deviating from a humanreference policy. In contrast to prior work our approach is RL-first and onlyuses 30 minutes of imperfect human demonstrations. We evaluate agents in alarge set of multi-agent traffic scenes. Results show our HR-PPO agents arehighly effective in achieving goals with a success rate of 93 an off-roadrate of 3.5 and a collision rate of 3. At the same time the agents drive ina human-like manner as measured by their similarity to existing human drivinglogs. We also find that HR-PPO agents show considerable improvements on proxymeasures for coordination with human driving particularly in highlyinteractive scenarios. We open-source our code and trained agents athttps://github.com/Emerge-Lab/nocturne_lab and provide demonstrations of agentbehaviors at https://sites.google.com/view/driving-partners. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18795v1 |
-|title| Gamba: Marry Gaussian Splatting with Mamba for single view 3D reconstruction |
-|authors| Qiuhong ShenXuanyu YiZike WuPan ZhouHanwang ZhangShuicheng YanXinchao Wang
-|links| http://arxiv.org/abs/2403.18795v1 |
-|updated| 2024-03-27 17:40:14 UTC |
-|summary| We tackle the challenge of efficiently reconstructing a 3D asset from asingle image with growing demands for automated 3D content creation pipelines.Previous methods primarily rely on Score Distillation Sampling SDS and NeuralRadiance Fields NeRF. Despite their significant success these approachesencounter practical limitations due to lengthy optimization and considerablememory usage. In this report we introduce Gamba an end-to-end amortized 3Dreconstruction model from single-view images emphasizing two main insights:1 3D representation: leveraging a large number of 3D Gaussians for anefficient 3D Gaussian splatting process 2 Backbone design: introducing aMamba-based sequential network that facilitates context-dependent reasoning andlinear scalability with the sequence token length accommodating asubstantial number of Gaussians. Gamba incorporates significant advancements indata preprocessing regularization design and training methodologies. Weassessed Gamba against existing optimization-based and feed-forward 3Dgeneration approaches using the real-world scanned OmniObject3D dataset. HereGamba demonstrates competitive generation capabilities both qualitatively andquantitatively while achieving remarkable speed approximately 0.6 second on asingle NVIDIA A100 GPU. |
+|idx| 2403.19647v1 |
+|title| Sparse Feature Circuits: Discovering and Editing Interpretable Causal Graphs in Language Models |
+|authors| Samuel MarksCan RagerEric J. MichaudYonatan BelinkovDavid BauAaron Mueller
+|links| http://arxiv.org/abs/2403.19647v1 |
+|updated| 2024-03-28 17:56:07 UTC |
+|summary| We introduce methods for discovering and applying sparse feature circuits.These are causally implicated subnetworks of human-interpretable features forexplaining language model behaviors. Circuits identified in prior work consistof polysemantic and difficult-to-interpret units like attention heads orneurons rendering them unsuitable for many downstream applications. Incontrast sparse feature circuits enable detailed understanding ofunanticipated mechanisms. Because they are based on fine-grained units sparsefeature circuits are useful for downstream tasks: We introduce SHIFT where weimprove the generalization of a classifier by ablating features that a humanjudges to be task-irrelevant. Finally we demonstrate an entirely unsupervisedand scalable interpretability pipeline by discovering thousands of sparsefeature circuits for automatically discovered model behaviors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18775v1 |
-|title| ImageNet-D: Benchmarking Neural Network Robustness on Diffusion Synthetic Object |
-|authors| Chenshuang ZhangFei PanJunmo KimIn So KweonChengzhi Mao
-|links| http://arxiv.org/abs/2403.18775v1 |
-|updated| 2024-03-27 17:23:39 UTC |
-|summary| We establish rigorous benchmarks for visual perception robustness. Syntheticimages such as ImageNet-C ImageNet-9 and Stylized ImageNet provide specifictype of evaluation over synthetic corruptions backgrounds and textures yetthose robustness benchmarks are restricted in specified variations and have lowsynthetic quality. In this work we introduce generative model as a data sourcefor synthesizing hard images that benchmark deep models robustness. Leveragingdiffusion models we are able to generate images with more diversifiedbackgrounds textures and materials than any prior work where we term thisbenchmark as ImageNet-D. Experimental results show that ImageNet-D results in asignificant accuracy drop to a range of vision models from the standard ResNetvisual classifier to the latest foundation models like CLIP and MiniGPT-4significantly reducing their accuracy by up to 60. Our work suggests thatdiffusion models can be an effective source to test vision models. The code anddataset are available at https://github.com/chenshuang-zhang/imagenet_d. |
+|idx| 2403.19631v1 |
+|title| Retrieval-Enhanced Knowledge Editing for Multi-Hop Question Answering in Language Models |
+|authors| Yucheng ShiQiaoyu TanXuansheng WuShaochen ZhongKaixiong ZhouNinghao Liu
+|links| http://arxiv.org/abs/2403.19631v1 |
+|updated| 2024-03-28 17:47:19 UTC |
+|summary| Large Language Models LLMs have shown proficiency in question-answeringtasks but often struggle to integrate real-time knowledge updates leading topotentially outdated or inaccurate responses. This problem becomes even morechallenging when dealing with multi-hop questions since they require LLMs toupdate and integrate multiple knowledge pieces relevant to the questions. Totackle the problem we propose the Retrieval-Augmented model Editing RAEframework tailored for multi-hop question answering. RAE first retrieves editedfacts and then refines the language model through in-context learning.Specifically our retrieval approach based on mutual information maximizationleverages the reasoning abilities of LLMs to identify chain facts that naivesimilarity-based searches might miss. Additionally our framework incorporatesa pruning strategy to eliminate redundant information from the retrieved factswhich enhances the editing accuracy and mitigates the hallucination problem.Our framework is supported by theoretical justification for its fact retrievalefficacy. Finally comprehensive evaluation across various LLMs validates RAEsability in providing accurate answers with updated knowledge. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18807v1 |
-|title| ECoDepth: Effective Conditioning of Diffusion Models for Monocular Depth Estimation |
-|authors| Suraj PatniAradhye AgarwalChetan Arora
-|links| http://arxiv.org/abs/2403.18807v1 |
-|updated| 2024-03-27 17:53:30 UTC |
-|summary| In the absence of parallax cues a learning-based single image depthestimation SIDE model relies heavily on shading and contextual cues in theimage. While this simplicity is attractive it is necessary to train suchmodels on large and varied datasets which are difficult to capture. It hasbeen shown that using embeddings from pre-trained foundational models such asCLIP improves zero shot transfer in several applications. Taking inspirationfrom this in our paper we explore the use of global image priors generatedfrom a pre-trained ViT model to provide more detailed contextual information.We argue that the embedding vector from a ViT model pre-trained on a largedataset captures greater relevant information for SIDE than the usual route ofgenerating pseudo image captions followed by CLIP based text embeddings. Basedon this idea we propose a new SIDE model using a diffusion backbone which isconditioned on ViT embeddings. Our proposed design establishes a newstate-of-the-art SOTA for SIDE on NYUv2 dataset achieving Abs Rel error of0.05914 improvement compared to 0.069 by the current SOTA VPD. And onKITTI dataset achieving Sq Rel error of 0.139 2 improvement compared to0.142 by the current SOTA GEDepth. For zero-shot transfer with a modeltrained on NYUv2 we report mean relative improvement of 20 23 81 25over NeWCRFs on Sun-RGBD iBims1 DIODE HyperSim datasets compared to 1618 45 9 by ZoeDepth. The code is available athttps://github.com/Aradhye2002/EcoDepth. |
+|idx| 2403.19648v1 |
+|title| Human-compatible driving partners through data-regularized self-play reinforcement learning |
+|authors| Daphne CornelisseEugene Vinitsky
+|links| http://arxiv.org/abs/2403.19648v1 |
+|updated| 2024-03-28 17:56:56 UTC |
+|summary| A central challenge for autonomous vehicles is coordinating with humans.Therefore incorporating realistic human agents is essential for scalabletraining and evaluation of autonomous driving systems in simulation. Simulationagents are typically developed by imitating large-scale high-quality datasetsof human driving. However pure imitation learning agents empirically have highcollision rates when executed in a multi-agent closed-loop setting. To buildagents that are realistic and effective in closed-loop settings we proposeHuman-Regularized PPO HR-PPO a multi-agent algorithm where agents aretrained through self-play with a small penalty for deviating from a humanreference policy. In contrast to prior work our approach is RL-first and onlyuses 30 minutes of imperfect human demonstrations. We evaluate agents in alarge set of multi-agent traffic scenes. Results show our HR-PPO agents arehighly effective in achieving goals with a success rate of 93 an off-roadrate of 3.5 and a collision rate of 3. At the same time the agents drive ina human-like manner as measured by their similarity to existing human drivinglogs. We also find that HR-PPO agents show considerable improvements on proxymeasures for coordination with human driving particularly in highlyinteractive scenarios. We open-source our code and trained agents athttps://github.com/Emerge-Lab/nocturne_lab and provide demonstrations of agentbehaviors at https://sites.google.com/view/driving-partners. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18802v1 |
-|title| Long-form factuality in large language models |
-|authors| Jerry WeiChengrun YangXinying SongYifeng LuNathan HuDustin TranDaiyi PengRuibo LiuDa HuangCosmo DuQuoc V. Le
-|links| http://arxiv.org/abs/2403.18802v1 |
-|updated| 2024-03-27 17:48:55 UTC |
-|summary| Large language models LLMs often generate content that contains factualerrors when responding to fact-seeking prompts on open-ended topics. Tobenchmark a models long-form factuality in open domains we first use GPT-4 togenerate LongFact a prompt set comprising thousands of questions spanning 38topics. We then propose that LLM agents can be used as automated evaluators forlong-form factuality through a method which we call Search-Augmented FactualityEvaluator SAFE. SAFE utilizes an LLM to break down a long-form response intoa set of individual facts and to evaluate the accuracy of each fact using amulti-step reasoning process comprising sending search queries to Google Searchand determining whether a fact is supported by the search results. Furthermorewe propose extending F1 score as an aggregated metric for long-form factuality.To do so we balance the percentage of supported facts in a responseprecision with the percentage of provided facts relative to a hyperparameterrepresenting a users preferred response length recall.  Empirically we demonstrate that LLM agents can achieve superhuman ratingperformance - on a set of 16k individual facts SAFE agrees with crowdsourcedhuman annotators 72 of the time and on a random subset of 100 disagreementcases SAFE wins 76 of the time. At the same time SAFE is more than 20 timescheaper than human annotators. We also benchmark thirteen language models onLongFact across four model families Gemini GPT Claude and PaLM-2 findingthat larger language models generally achieve better long-form factuality.LongFact SAFE and all experimental code are available athttps://github.com/google-deepmind/long-form-factuality. |
+|idx| 2403.19647v1 |
+|title| Sparse Feature Circuits: Discovering and Editing Interpretable Causal Graphs in Language Models |
+|authors| Samuel MarksCan RagerEric J. MichaudYonatan BelinkovDavid BauAaron Mueller
+|links| http://arxiv.org/abs/2403.19647v1 |
+|updated| 2024-03-28 17:56:07 UTC |
+|summary| We introduce methods for discovering and applying sparse feature circuits.These are causally implicated subnetworks of human-interpretable features forexplaining language model behaviors. Circuits identified in prior work consistof polysemantic and difficult-to-interpret units like attention heads orneurons rendering them unsuitable for many downstream applications. Incontrast sparse feature circuits enable detailed understanding ofunanticipated mechanisms. Because they are based on fine-grained units sparsefeature circuits are useful for downstream tasks: We introduce SHIFT where weimprove the generalization of a classifier by ablating features that a humanjudges to be task-irrelevant. Finally we demonstrate an entirely unsupervisedand scalable interpretability pipeline by discovering thousands of sparsefeature circuits for automatically discovered model behaviors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18775v1 |
-|title| ImageNet-D: Benchmarking Neural Network Robustness on Diffusion Synthetic Object |
-|authors| Chenshuang ZhangFei PanJunmo KimIn So KweonChengzhi Mao
-|links| http://arxiv.org/abs/2403.18775v1 |
-|updated| 2024-03-27 17:23:39 UTC |
-|summary| We establish rigorous benchmarks for visual perception robustness. Syntheticimages such as ImageNet-C ImageNet-9 and Stylized ImageNet provide specifictype of evaluation over synthetic corruptions backgrounds and textures yetthose robustness benchmarks are restricted in specified variations and have lowsynthetic quality. In this work we introduce generative model as a data sourcefor synthesizing hard images that benchmark deep models robustness. Leveragingdiffusion models we are able to generate images with more diversifiedbackgrounds textures and materials than any prior work where we term thisbenchmark as ImageNet-D. Experimental results show that ImageNet-D results in asignificant accuracy drop to a range of vision models from the standard ResNetvisual classifier to the latest foundation models like CLIP and MiniGPT-4significantly reducing their accuracy by up to 60. Our work suggests thatdiffusion models can be an effective source to test vision models. The code anddataset are available at https://github.com/chenshuang-zhang/imagenet_d. |
+|idx| 2403.19631v1 |
+|title| Retrieval-Enhanced Knowledge Editing for Multi-Hop Question Answering in Language Models |
+|authors| Yucheng ShiQiaoyu TanXuansheng WuShaochen ZhongKaixiong ZhouNinghao Liu
+|links| http://arxiv.org/abs/2403.19631v1 |
+|updated| 2024-03-28 17:47:19 UTC |
+|summary| Large Language Models LLMs have shown proficiency in question-answeringtasks but often struggle to integrate real-time knowledge updates leading topotentially outdated or inaccurate responses. This problem becomes even morechallenging when dealing with multi-hop questions since they require LLMs toupdate and integrate multiple knowledge pieces relevant to the questions. Totackle the problem we propose the Retrieval-Augmented model Editing RAEframework tailored for multi-hop question answering. RAE first retrieves editedfacts and then refines the language model through in-context learning.Specifically our retrieval approach based on mutual information maximizationleverages the reasoning abilities of LLMs to identify chain facts that naivesimilarity-based searches might miss. Additionally our framework incorporatesa pruning strategy to eliminate redundant information from the retrieved factswhich enhances the editing accuracy and mitigates the hallucination problem.Our framework is supported by theoretical justification for its fact retrievalefficacy. Finally comprehensive evaluation across various LLMs validates RAEsability in providing accurate answers with updated knowledge. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18766v1 |
-|title| Superior Parallel Big Data Clustering through Competitive Stochastic Sample Size Optimization in Big-means |
-|authors| Rustam MussabayevRavil Mussabayev
-|links| http://arxiv.org/abs/2403.18766v1 |
-|updated| 2024-03-27 17:05:03 UTC |
-|summary| This paper introduces a novel K-means clustering algorithm an advancement onthe conventional Big-means methodology. The proposed method efficientlyintegrates parallel processing stochastic sampling and competitiveoptimization to create a scalable variant designed for big data applications.It addresses scalability and computation time challenges typically faced withtraditional techniques. The algorithm adjusts sample sizes dynamically for eachworker during execution optimizing performance. Data from these sample sizesare continually analyzed facilitating the identification of the most efficientconfiguration. By incorporating a competitive element among workers usingdifferent sample sizes efficiency within the Big-means algorithm is furtherstimulated. In essence the algorithm balances computational time andclustering quality by employing a stochastic competitive sampling strategy ina parallel computing setting. |
+|idx| 2403.19629v1 |
+|title| Metric Learning from Limited Pairwise Preference Comparisons |
+|authors| Zhi WangGeelon SoRamya Korlakai Vinayak
+|links| http://arxiv.org/abs/2403.19629v1 |
+|updated| 2024-03-28 17:46:25 UTC |
+|summary| We study metric learning from preference comparisons under the ideal pointmodel in which a user prefers an item over another if it is closer to theirlatent ideal item. These items are embedded into mathbbRd equipped withan unknown Mahalanobis distance shared across users. While recent work showsthat it is possible to simultaneously recover the metric and ideal items givenmathcalOd pairwise comparisons per user in practice we often have alimited budget of od comparisons. We study whether the metric can still berecovered even though it is known that learning individual ideal items is nowno longer possible. We show that in general od comparisons reveals noinformation about the metric even with infinitely many users. However whencomparisons are made over items that exhibit low-dimensional structure eachuser can contribute to learning the metric restricted to a low-dimensionalsubspace so that the metric can be jointly identified. We present adivide-and-conquer approach that achieves this and provide theoreticalrecovery guarantees and empirical validation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18765v1 |
-|title| CaT: Constraints as Terminations for Legged Locomotion Reinforcement Learning |
-|authors| Elliot Chane-SanePierre-Alexandre LeziartThomas FlayolsOlivier StassePhilippe SouèresNicolas Mansard
-|links| http://arxiv.org/abs/2403.18765v1 |
-|updated| 2024-03-27 17:03:31 UTC |
-|summary| Deep Reinforcement Learning RL has demonstrated impressive results insolving complex robotic tasks such as quadruped locomotion. Yet currentsolvers fail to produce efficient policies respecting hard constraints. In thiswork we advocate for integrating constraints into robot learning and presentConstraints as Terminations CaT a novel constrained RL algorithm. Departingfrom classical constrained RL formulations we reformulate constraints throughstochastic terminations during policy learning: any violation of a constrainttriggers a probability of terminating potential future rewards the RL agentcould attain. We propose an algorithmic approach to this formulation byminimally modifying widely used off-the-shelf RL algorithms in robot learningsuch as Proximal Policy Optimization. Our approach leads to excellentconstraint adherence without introducing undue complexity and computationaloverhead thus mitigating barriers to broader adoption. Through empiricalevaluation on the real quadruped robot Solo crossing challenging obstacles wedemonstrate that CaT provides a compelling solution for incorporatingconstraints into RL frameworks. Videos and code are available athttps://constraints-as-terminations.github.io. |
+|idx| 2403.19625v1 |
+|title| Top-$k$ Classification and Cardinality-Aware Prediction |
+|authors| Anqi MaoMehryar MohriYutao Zhong
+|links| http://arxiv.org/abs/2403.19625v1 |
+|updated| 2024-03-28 17:45:03 UTC |
+|summary| We present a detailed study of top-k classification the task of predictingthe k most probable classes for an input extending beyond single-classprediction. We demonstrate that several prevalent surrogate loss functions inmulti-class classification such as comp-sum and constrained losses aresupported by H-consistency bounds with respect to the top-k loss. Thesebounds guarantee consistency in relation to the hypothesis set H providingstronger guarantees than Bayes-consistency due to their non-asymptotic andhypothesis-set specific nature. To address the trade-off between accuracy andcardinality k we further introduce cardinality-aware loss functions throughinstance-dependent cost-sensitive learning. For these functions we derivecost-sensitive comp-sum and constrained surrogate losses establishing theirH-consistency bounds and Bayes-consistency. Minimizing these losses leads tonew cardinality-aware algorithms for top-k classification. We report theresults of extensive experiments on CIFAR-100 ImageNet CIFAR-10 and SVHNdatasets demonstrating the effectiveness and benefit of these algorithms. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18821v1 |
-|title| Real Acoustic Fields: An Audio-Visual Room Acoustics Dataset and Benchmark |
-|authors| Ziyang ChenIsrael D. GebruChristian RichardtAnurag KumarWilliam LaneyAndrew OwensAlexander Richard
-|links| http://arxiv.org/abs/2403.18821v1 |
-|updated| 2024-03-27 17:59:56 UTC |
-|summary| We present a new dataset called Real Acoustic Fields RAF that captures realacoustic room data from multiple modalities. The dataset includes high-qualityand densely captured room impulse response data paired with multi-view imagesand precise 6DoF pose tracking data for sound emitters and listeners in therooms. We used this dataset to evaluate existing methods for novel-viewacoustic synthesis and impulse response generation which previously relied onsynthetic data. In our evaluation we thoroughly assessed existing audio andaudio-visual models against multiple criteria and proposed settings to enhancetheir performance on real-world data. We also conducted experiments toinvestigate the impact of incorporating visual data i.e. images and depthinto neural acoustic field models. Additionally we demonstrated theeffectiveness of a simple sim2real approach where a model is pre-trained withsimulated data and fine-tuned with sparse real-world data resulting insignificant improvements in the few-shot learning approach. RAF is the firstdataset to provide densely captured room acoustic data making it an idealresource for researchers working on audio and audio-visual neural acousticfield modeling techniques. Demos and datasets are available on our projectpage: https://facebookresearch.github.io/real-acoustic-fields/ |
+|idx| 2403.19655v1 |
+|title| GaussianCube: Structuring Gaussian Splatting using Optimal Transport for 3D Generative Modeling |
+|authors| Bowen ZhangYiji ChengJiaolong YangChunyu WangFeng ZhaoYansong TangDong ChenBaining Guo
+|links| http://arxiv.org/abs/2403.19655v1 |
+|updated| 2024-03-28 17:59:50 UTC |
+|summary| 3D Gaussian Splatting GS have achieved considerable improvement over NeuralRadiance Fields in terms of 3D fitting fidelity and rendering speed. Howeverthis unstructured representation with scattered Gaussians poses a significantchallenge for generative modeling. To address the problem we introduceGaussianCube a structured GS representation that is both powerful andefficient for generative modeling. We achieve this by first proposing amodified densification-constrained GS fitting algorithm which can yieldhigh-quality fitting results using a fixed number of free Gaussians and thenre-arranging the Gaussians into a predefined voxel grid via Optimal Transport.The structured grid representation allows us to use standard 3D U-Net as ourbackbone in diffusion generative modeling without elaborate designs. Extensiveexperiments conducted on ShapeNet and OmniObject3D show that our model achievesstate-of-the-art generation results both qualitatively and quantitativelyunderscoring the potential of GaussianCube as a powerful and versatile 3Drepresentation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18820v1 |
-|title| MetaCap: Meta-learning Priors from Multi-View Imagery for Sparse-view Human Performance Capture and Rendering |
-|authors| Guoxing SunRishabh DabralPascal FuaChristian TheobaltMarc Habermann
-|links| http://arxiv.org/abs/2403.18820v1 |
-|updated| 2024-03-27 17:59:54 UTC |
-|summary| Faithful human performance capture and free-view rendering from sparse RGBobservations is a long-standing problem in Vision and Graphics. The mainchallenges are the lack of observations and the inherent ambiguities of thesetting e.g. occlusions and depth ambiguity. As a result radiance fieldswhich have shown great promise in capturing high-frequency appearance andgeometry details in dense setups perform poorly when naively supervisingthem on sparse camera views as the field simply overfits to the sparse-viewinputs. To address this we propose MetaCap a method for efficient andhigh-quality geometry recovery and novel view synthesis given very sparse oreven a single view of the human. Our key idea is to meta-learn the radiancefield weights solely from potentially sparse multi-view videos which can serveas a prior when fine-tuning them on sparse imagery depicting the human. Thisprior provides a good network weight initialization thereby effectivelyaddressing ambiguities in sparse-view capture. Due to the articulated structureof the human body and motion-induced surface deformations learning such aprior is non-trivial. Therefore we propose to meta-learn the field weights ina pose-canonicalized space which reduces the spatial feature range and makesfeature learning more effective. Consequently one can fine-tune our fieldparameters to quickly generalize to unseen poses novel illumination conditionsas well as novel and sparse even monocular camera views. For evaluating ourmethod under different scenarios we collect a new dataset WildDynaCap whichcontains subjects captured in both a dense camera dome and in-the-wild sparsecamera rigs and demonstrate superior results compared to recentstate-of-the-art methods on both public and WildDynaCap dataset. |
+|idx| 2403.19654v1 |
+|title| RSMamba: Remote Sensing Image Classification with State Space Model |
+|authors| Keyan ChenBowen ChenChenyang LiuWenyuan LiZhengxia ZouZhenwei Shi
+|links| http://arxiv.org/abs/2403.19654v1 |
+|updated| 2024-03-28 17:59:49 UTC |
+|summary| Remote sensing image classification forms the foundation of variousunderstanding tasks serving a crucial function in remote sensing imageinterpretation. The recent advancements of Convolutional Neural Networks CNNsand Transformers have markedly enhanced classification accuracy. Nonethelessremote sensing scene classification remains a significant challenge especiallygiven the complexity and diversity of remote sensing scenarios and thevariability of spatiotemporal resolutions. The capacity for whole-imageunderstanding can provide more precise semantic cues for scene discrimination.In this paper we introduce RSMamba a novel architecture for remote sensingimage classification. RSMamba is based on the State Space Model SSM andincorporates an efficient hardware-aware design known as the Mamba. Itintegrates the advantages of both a global receptive field and linear modelingcomplexity. To overcome the limitation of the vanilla Mamba which can onlymodel causal sequences and is not adaptable to two-dimensional image data wepropose a dynamic multi-path activation mechanism to augment Mambas capacityto model non-causal data. Notably RSMamba maintains the inherent modelingmechanism of the vanilla Mamba yet exhibits superior performance acrossmultiple remote sensing image classification datasets. This indicates thatRSMamba holds significant potential to function as the backbone of futurevisual foundation models. The code will be available aturlhttps://github.com/KyanChen/RSMamba. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18819v1 |
-|title| Benchmarking Object Detectors with COCO: A New Path Forward |
-|authors| Shweta SinghAayan YadavJitesh JainHumphrey ShiJustin JohnsonKaran Desai
-|links| http://arxiv.org/abs/2403.18819v1 |
-|updated| 2024-03-27 17:59:53 UTC |
-|summary| The Common Objects in Context COCO dataset has been instrumental inbenchmarking object detectors over the past decade. Like every dataset COCOcontains subtle errors and imperfections stemming from its annotationprocedure. With the advent of high-performing models we ask whether theseerrors of COCO are hindering its utility in reliably benchmarking furtherprogress. In search for an answer we inspect thousands of masks from COCO2017 version and uncover different types of errors such as imprecise maskboundaries non-exhaustively annotated instances and mislabeled masks. Due tothe prevalence of COCO we choose to correct these errors to maintaincontinuity with prior research. We develop COCO-ReM Refined Masks a cleanerset of annotations with visibly better mask quality than COCO-2017. We evaluatefifty object detectors and find that models that predict visually sharper masksscore higher on COCO-ReM affirming that they were being incorrectly penalizeddue to errors in COCO-2017. Moreover our models trained using COCO-ReMconverge faster and score higher than their larger variants trained usingCOCO-2017 highlighting the importance of data quality in improving objectdetectors. With these findings we advocate using COCO-ReM for future objectdetection research. Our dataset is available at https://cocorem.xyz |
+|idx| 2403.19653v1 |
+|title| Detecting Image Attribution for Text-to-Image Diffusion Models in RGB and Beyond |
+|authors| Katherine XuLingzhi ZhangJianbo Shi
+|links| http://arxiv.org/abs/2403.19653v1 |
+|updated| 2024-03-28 17:59:42 UTC |
+|summary| Modern text-to-image T2I diffusion models can generate images withremarkable realism and creativity. These advancements have sparked research infake image detection and attribution yet prior studies have not fully exploredthe practical and scientific dimensions of this task. In addition toattributing images to 12 state-of-the-art T2I generators we provide extensiveanalyses on what inference stage hyperparameters and image modifications arediscernible. Our experiments reveal that initialization seeds are highlydetectable along with other subtle variations in the image generation processto some extent. We further investigate what visual traces are leveraged inimage attribution by perturbing high-frequency details and employing mid-levelrepresentations of image style and structure. Notably altering high-frequencyinformation causes only slight reductions in accuracy and training anattributor on style representations outperforms training on RGB images. Ouranalyses underscore that fake images are detectable and attributable at variouslevels of visual granularity than previously explored. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18818v1 |
-|title| ObjectDrop: Bootstrapping Counterfactuals for Photorealistic Object Removal and Insertion |
-|authors| Daniel WinterMatan CohenShlomi FruchterYael PritchAlex Rav-AchaYedid Hoshen
-|links| http://arxiv.org/abs/2403.18818v1 |
-|updated| 2024-03-27 17:59:52 UTC |
-|summary| Diffusion models have revolutionized image editing but often generate imagesthat violate physical laws particularly the effects of objects on the scenee.g. occlusions shadows and reflections. By analyzing the limitations ofself-supervised approaches we propose a practical solution centered on aqcounterfactual dataset. Our method involves capturing a scene before andafter removing a single object while minimizing other changes. By fine-tuninga diffusion model on this dataset we are able to not only remove objects butalso their effects on the scene. However we find that applying this approachfor photorealistic object insertion requires an impractically large dataset. Totackle this challenge we propose bootstrap supervision leveraging our objectremoval model trained on a small counterfactual dataset we syntheticallyexpand this dataset considerably. Our approach significantly outperforms priormethods in photorealistic object removal and insertion particularly atmodeling the effects of objects on the scene. |
+|idx| 2403.19652v1 |
+|title| InterDreamer: Zero-Shot Text to 3D Dynamic Human-Object Interaction |
+|authors| Sirui XuZiyin WangYu-Xiong WangLiang-Yan Gui
+|links| http://arxiv.org/abs/2403.19652v1 |
+|updated| 2024-03-28 17:59:30 UTC |
+|summary| Text-conditioned human motion generation has experienced significantadvancements with diffusion models trained on extensive motion capture data andcorresponding textual annotations. However extending such success to 3Ddynamic human-object interaction HOI generation faces notable challengesprimarily due to the lack of large-scale interaction data and comprehensivedescriptions that align with these interactions. This paper takes theinitiative and showcases the potential of generating human-object interactionswithout direct training on text-interaction pair data. Our key insight inachieving this is that interaction semantics and dynamics can be decoupled.Being unable to learn interaction semantics through supervised training weinstead leverage pre-trained large models synergizing knowledge from a largelanguage model and a text-to-motion model. While such knowledge offershigh-level control over interaction semantics it cannot grasp the intricaciesof low-level interaction dynamics. To overcome this issue we further introducea world model designed to comprehend simple physics modeling how human actionsinfluence object motion. By integrating these components our novel frameworkInterDreamer is able to generate text-aligned 3D HOI sequences in a zero-shotmanner. We apply InterDreamer to the BEHAVE and CHAIRS datasets and ourcomprehensive experimental analysis demonstrates its capability to generaterealistic and coherent interaction sequences that seamlessly align with thetext directives. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18816v1 |
-|title| Garment3DGen: 3D Garment Stylization and Texture Generation |
-|authors| Nikolaos SarafianosTuur StuyckXiaoyu XiangYilei LiJovan PopovicRakesh Ranjan
-|links| http://arxiv.org/abs/2403.18816v1 |
-|updated| 2024-03-27 17:59:33 UTC |
-|summary| We introduce Garment3DGen a new method to synthesize 3D garment assets from abase mesh given a single input image as guidance. Our proposed approach allowsusers to generate 3D textured clothes based on both real and synthetic imagessuch as those generated by text prompts. The generated assets can be directlydraped and simulated on human bodies. First we leverage the recent progress ofimage to 3D diffusion methods to generate 3D garment geometries. However sincethese geometries cannot be utilized directly for downstream tasks we proposeto use them as pseudo ground-truth and set up a mesh deformation optimizationprocedure that deforms a base template mesh to match the generated 3D target.Second we introduce carefully designed losses that allow the input base meshto freely deform towards the desired target yet preserve mesh quality andtopology such that they can be simulated. Finally a texture estimation modulegenerates high-fidelity texture maps that are globally and locally consistentand faithfully capture the input guidance allowing us to render the generated3D assets. With Garment3DGen users can generate the textured 3D garment oftheir choice without the need of artist intervention. One can provide a textualprompt describing the garment they desire to generate a simulation-ready 3Dasset. We present a plethora of quantitative and qualitative comparisons onvarious assets both real and generated and provide use-cases of how one cangenerate simulation-ready 3D garments. |
+|idx| 2403.19651v1 |
+|title| MagicLens: Self-Supervised Image Retrieval with Open-Ended Instructions |
+|authors| Kai ZhangYi LuanHexiang HuKenton LeeSiyuan QiaoWenhu ChenYu SuMing-Wei Chang
+|links| http://arxiv.org/abs/2403.19651v1 |
+|updated| 2024-03-28 17:59:20 UTC |
+|summary| Image retrieval i.e. finding desired images given a reference imageinherently encompasses rich multi-faceted search intents that are difficult tocapture solely using image-based measures. Recent work leverages textinstructions to allow users to more freely express their search intents.However existing work primarily focuses on image pairs that are visuallysimilar and/or can be characterized by a small set of pre-defined relations.The core thesis of this paper is that text instructions can enable retrievingimages with richer relations beyond visual similarity. To show this weintroduce MagicLens a series of self-supervised image retrieval models thatsupport open-ended instructions. MagicLens is built on a key novel insight:image pairs that naturally occur on the same web pages contain a wide range ofimplicit relations e.g. inside view of and we can bring those implicitrelations explicit by synthesizing instructions via large multimodal modelsLMMs and large language models LLMs. Trained on 36.7M query imageinstruction target image triplets with rich semantic relations mined from theweb MagicLens achieves comparable or better results on eight benchmarks ofvarious image retrieval tasks than prior state-of-the-art SOTA methods.Remarkably it outperforms previous SOTA but with a 50X smaller model size onmultiple benchmarks. Additional human analyses on a 1.4M-image unseen corpusfurther demonstrate the diversity of search intents supported by MagicLens. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18739v1 |
-|title| Usage-Specific Survival Modeling Based on Operational Data and Neural Networks |
-|authors| Olov HolmerMattias KrysanderErik Frisk
-|links| http://arxiv.org/abs/2403.18739v1 |
-|updated| 2024-03-27 16:32:32 UTC |
-|summary| Accurate predictions of when a component will fail are crucial when planningmaintenance and by modeling the distribution of these failure times survivalmodels have shown to be particularly useful in this context. The presentedmethodology is based on conventional neural network-based survival models thatare trained using data that is continuously gathered and stored at specifictimes called snapshots. An important property of this type of training data isthat it can contain more than one snapshot from a specific individual whichresults in that standard maximum likelihood training can not be directlyapplied since the data is not independent. However the papers show that if thedata is in a specific format where all snapshot times are the same for allindividuals called homogeneously sampled maximum likelihood training can beapplied and produce desirable results. In many cases the data is nothomogeneously sampled and in this case it is proposed to resample the data tomake it homogeneously sampled. How densely the dataset is sampled turns out tobe an important parameter it should be chosen large enough to produce goodresults but this also increases the size of the dataset which makes trainingslow. To reduce the number of samples needed during training the paper alsoproposes a technique to instead of resampling the dataset once before thetraining starts randomly resample the dataset at the start of each epochduring the training. The proposed methodology is evaluated on both a simulateddataset and an experimental dataset of starter battery failures. The resultsshow that if the data is homogeneously sampled the methodology works asintended and produces accurate survival models. The results also show thatrandomly resampling the dataset on each epoch is an effective way to reduce thesize of the training data. |
+|idx| 2403.19629v1 |
+|title| Metric Learning from Limited Pairwise Preference Comparisons |
+|authors| Zhi WangGeelon SoRamya Korlakai Vinayak
+|links| http://arxiv.org/abs/2403.19629v1 |
+|updated| 2024-03-28 17:46:25 UTC |
+|summary| We study metric learning from preference comparisons under the ideal pointmodel in which a user prefers an item over another if it is closer to theirlatent ideal item. These items are embedded into mathbbRd equipped withan unknown Mahalanobis distance shared across users. While recent work showsthat it is possible to simultaneously recover the metric and ideal items givenmathcalOd pairwise comparisons per user in practice we often have alimited budget of od comparisons. We study whether the metric can still berecovered even though it is known that learning individual ideal items is nowno longer possible. We show that in general od comparisons reveals noinformation about the metric even with infinitely many users. However whencomparisons are made over items that exhibit low-dimensional structure eachuser can contribute to learning the metric restricted to a low-dimensionalsubspace so that the metric can be jointly identified. We present adivide-and-conquer approach that achieves this and provide theoreticalrecovery guarantees and empirical validation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18717v1 |
-|title| Semi-Supervised Learning for Deep Causal Generative Models |
-|authors| Yasin IbrahimHermione WarrKonstantinos Kamnitsas
-|links| http://arxiv.org/abs/2403.18717v1 |
-|updated| 2024-03-27 16:06:37 UTC |
-|summary| Developing models that can answer questions of the form How would x changeif y had been z is fundamental for advancing medical image analysis.Training causal generative models that address such counterfactual questionsthough currently requires that all relevant variables have been observed andthat corresponding labels are available in training data. However clinicaldata may not have complete records for all patients and state of the art causalgenerative models are unable to take full advantage of this. We thus developfor the first time a semi-supervised deep causal generative model thatexploits the causal relationships between variables to maximise the use of allavailable data. We explore this in the setting where each sample is eitherfully labelled or fully unlabelled as well as the more clinically realisticcase of having different labels missing for each sample. We leverage techniquesfrom causal inference to infer missing values and subsequently generaterealistic counterfactuals even for samples with incomplete labels. |
+|idx| 2403.19625v1 |
+|title| Top-$k$ Classification and Cardinality-Aware Prediction |
+|authors| Anqi MaoMehryar MohriYutao Zhong
+|links| http://arxiv.org/abs/2403.19625v1 |
+|updated| 2024-03-28 17:45:03 UTC |
+|summary| We present a detailed study of top-k classification the task of predictingthe k most probable classes for an input extending beyond single-classprediction. We demonstrate that several prevalent surrogate loss functions inmulti-class classification such as comp-sum and constrained losses aresupported by H-consistency bounds with respect to the top-k loss. Thesebounds guarantee consistency in relation to the hypothesis set H providingstronger guarantees than Bayes-consistency due to their non-asymptotic andhypothesis-set specific nature. To address the trade-off between accuracy andcardinality k we further introduce cardinality-aware loss functions throughinstance-dependent cost-sensitive learning. For these functions we derivecost-sensitive comp-sum and constrained surrogate losses establishing theirH-consistency bounds and Bayes-consistency. Minimizing these losses leads tonew cardinality-aware algorithms for top-k classification. We report theresults of extensive experiments on CIFAR-100 ImageNet CIFAR-10 and SVHNdatasets demonstrating the effectiveness and benefit of these algorithms. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18668v1 |
-|title| Aiming for Relevance |
-|authors| Bar Eini PoratDanny EytanUri Shalit
-|links| http://arxiv.org/abs/2403.18668v1 |
-|updated| 2024-03-27 15:11:07 UTC |
-|summary| Vital signs are crucial in intensive care units ICUs. They are used totrack the patients state and to identify clinically significant changes.Predicting vital sign trajectories is valuable for early detection of adverseevents. However conventional machine learning metrics like RMSE often fail tocapture the true clinical relevance of such predictions. We introduce novelvital sign prediction performance metrics that align with clinical contextsfocusing on deviations from clinical norms overall trends and trenddeviations. These metrics are derived from empirical utility curves obtained ina previous study through interviews with ICU clinicians. We validate themetrics usefulness using simulated and real clinical datasets MIMIC andeICU. Furthermore we employ these metrics as loss functions for neuralnetworks resulting in models that excel in predicting clinically significantevents. This research paves the way for clinically relevant machine learningmodel evaluation and optimization promising to improve ICU patient care. 10pages 9 figures. |
+|idx| 2403.19587v1 |
+|title| Taming the Interactive Particle Langevin Algorithm -- the superlinear case |
+|authors| Tim JohnstonNikolaos MakrasSotirios Sabanis
+|links| http://arxiv.org/abs/2403.19587v1 |
+|updated| 2024-03-28 17:11:25 UTC |
+|summary| Recent advances in stochastic optimization have yielded the interactiveparticle Langevin algorithm IPLA which leverages the notion of interactingparticle systems IPS to efficiently sample from approximate posteriordensities. This becomes particularly crucial within the framework ofExpectation-Maximization EM where the E-step is computationally challengingor even intractable. Although prior research has focused on scenarios involvingconvex cases with gradients of log densities that grow at most linearly ourwork extends this framework to include polynomial growth. Taming techniques areemployed to produce an explicit discretization scheme that yields a new classof stable under such non-linearities algorithms which are called tamedinteractive particle Langevin algorithms tIPLA. We obtain non-asymptoticconvergence error estimates in Wasserstein-2 distance for the new class underan optimal rate. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18664v1 |
-|title| Neural Network-Based Piecewise Survival Models |
-|authors| Olov HolmerErik FriskMattias Krysander
-|links| http://arxiv.org/abs/2403.18664v1 |
-|updated| 2024-03-27 15:08:00 UTC |
-|summary| In this paper a family of neural network-based survival models is presented.The models are specified based on piecewise definitions of the hazard functionand the density function on a partitioning of the time both constant andlinear piecewise definitions are presented resulting in a family of fourmodels. The models can be seen as an extension of the commonly useddiscrete-time and piecewise exponential models and thereby add flexibility tothis set of standard models. Using a simulated dataset the models are shown toperform well compared to the highly expressive state-of-the-art energy-basedmodel while only requiring a fraction of the computation time. |
+|idx| 2403.19516v1 |
+|title| Maximum Likelihood Estimation on Stochastic Blockmodels for Directed Graph Clustering |
+|authors| Mihai CucuringuXiaowen DongNing Zhang
+|links| http://arxiv.org/abs/2403.19516v1 |
+|updated| 2024-03-28 15:47:13 UTC |
+|summary| This paper studies the directed graph clustering problem through the lens ofstatistics where we formulate clustering as estimating underlying communitiesin the directed stochastic block model DSBM. We conduct the maximumlikelihood estimation MLE on the DSBM and thereby ascertain the most probablecommunity assignment given the observed graph structure. In addition to thestatistical point of view we further establish the equivalence between thisMLE formulation and a novel flow optimization heuristic which jointlyconsiders two important directed graph statistics: edge density and edgeorientation. Building on this new formulation of directed clustering weintroduce two efficient and interpretable directed clustering algorithms aspectral clustering algorithm and a semidefinite programming based clusteringalgorithm. We provide a theoretical upper bound on the number of misclusteredvertices of the spectral clustering algorithm using tools from matrixperturbation theory. We compare both quantitatively and qualitatively ourproposed algorithms with existing directed clustering methods on both syntheticand real-world data thus providing further ground to our theoreticalcontributions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18658v1 |
-|title| Theoretical Guarantees for the Subspace-Constrained Tyler's Estimator |
-|authors| Gilad LermanFeng YuTeng Zhang
-|links| http://arxiv.org/abs/2403.18658v1 |
-|updated| 2024-03-27 15:03:29 UTC |
-|summary| This work analyzes the subspace-constrained Tylers estimator STE designedfor recovering a low-dimensional subspace within a dataset that may be highlycorrupted with outliers. It assumes a weak inlier-outlier model and allows thefraction of inliers to be smaller than a fraction that leads to computationalhardness of the robust subspace recovery problem. It shows that in thissetting if the initialization of STE which is an iterative algorithmsatisfies a certain condition then STE can effectively recover the underlyingsubspace. It further shows that under the generalized haystack model STEinitialized by the Tylers M-estimator TME can recover the subspace when thefraction of iniliers is too small for TME to handle. |
+|idx| 2403.19500v1 |
+|title| Tensor Network-Constrained Kernel Machines as Gaussian Processes |
+|authors| Frederiek WeselKim Batselier
+|links| http://arxiv.org/abs/2403.19500v1 |
+|updated| 2024-03-28 15:29:30 UTC |
+|summary| Tensor Networks TNs have recently been used to speed up kernel machines byconstraining the model weights yielding exponential computational and storagesavings. In this paper we prove that the outputs of Canonical PolyadicDecomposition CPD and Tensor Train TT-constrained kernel machines recover aGaussian Process GP which we fully characterize when placing i.i.d. priorsover their parameters. We analyze the convergence of both CPD andTT-constrained models and show how TT yields models exhibiting more GPbehavior compared to CPD for the same number of model parameters. Weempirically observe this behavior in two numerical experiments where werespectively analyze the convergence to the GP and the performance atprediction. We thereby establish a connection between TN-constrained kernelmachines and GPs. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18797v1 |
-|title| SolderlessPCB: Reusing Electronic Components in PCB Prototyping through Detachable 3D Printed Housings |
-|authors| Zeyu YanJiasheng LiZining ZhangHuaishu Peng
-|links| http://dx.doi.org/10.1145/3613904.3642765 |
-|updated| 2024-03-27 17:44:29 UTC |
-|summary| The iterative prototyping process for printed circuit boards PCBsfrequently employs surface-mounted device SMD components which are oftendiscarded rather than reused due to the challenges associated with desolderingleading to unnecessary electronic waste. This paper introduces SolderlessPCB acollection of techniques for solder-free PCB prototyping specifically designedto promote the recycling and reuse of electronic components. Central to thisapproach are custom 3D-printable housings that allow SMD components to bemounted onto PCBs without soldering. We detail the design of SolderlessPCB andthe experiments conducted to evaluate its design parameters electricalperformance and durability. To illustrate the potential for reusing SMDcomponents with SolderlessPCB we discuss two scenarios: the reuse ofcomponents from earlier design iterations and from obsolete prototypes. We alsoprovide examples demonstrating that SolderlessPCB can handle high-currentapplications and is suitable for high-speed data transmission. The paperconcludes by discussing the limitations of our approach and suggesting futuredirections to overcome these challenges. |
+|idx| 2403.19620v1 |
+|title| Collaborative Interactive Evolution of Art in the Latent Space of Deep Generative Models |
+|authors| Ole HallAnil Yaman
+|links| http://arxiv.org/abs/2403.19620v1 |
+|updated| 2024-03-28 17:40:15 UTC |
+|summary| Generative Adversarial Networks GANs have shown great success in generatinghigh quality images and are thus used as one of the main approaches to generateart images. However usually the image generation process involves samplingfrom the latent space of the learned art representations allowing littlecontrol over the output. In this work we first employ GANs that are trained toproduce creative images using an architecture known as Creative AdversarialNetworks CANs then we employ an evolutionary approach to navigate withinthe latent space of the models to discover images. We use automatic aestheticand collaborative interactive human evaluation metrics to assess the generatedimages. In the human interactive evaluation case we propose a collaborativeevaluation based on the assessments of several participants. Furthermore wealso experiment with an intelligent mutation operator that aims to improve thequality of the images through local search based on an aesthetic measure. Weevaluate the effectiveness of this approach by comparing the results producedby the automatic and collaborative interactive evolution. The results show thatthe proposed approach can generate highly attractive art images when theevolution is guided by collaborative human feedback. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18692v1 |
-|title| Teaching Introductory HRI: UChicago Course "Human-Robot Interaction: Research and Practice" |
-|authors| Sarah Sebo
-|links| http://arxiv.org/abs/2403.18692v1 |
-|updated| 2024-03-27 15:42:01 UTC |
-|summary| In 2020 I designed the course CMSC 20630/30630 Human-Robot Interaction:Research and Practice as a hands-on introduction to human-robot interactionHRI research for both undergraduate and graduate students at the Universityof Chicago. Since 2020 I have taught and refined this course each academicyear. Human-Robot Interaction: Research and Practice focuses on the coreconcepts and cutting-edge research in the field of human-robot interactionHRI covering topics that include: nonverbal robot behavior verbal robotbehavior social dynamics norms  ethics collaboration  learning groupinteractions applications and future challenges of HRI. Course meetingsinvolve students in the class leading discussions about cutting-edgepeer-reviewed research HRI publications. Students also participate in aquarter-long collaborative research project where they pursue an HRI researchquestion that often involves conducing their own human-subjects research studywhere they recruit human subjects to interact with a robot. In this paper Idetail the structure of the course and its learning goals as well as myreflections and student feedback on the course. |
+|idx| 2403.19560v1 |
+|title| Exploring Communication Dynamics: Eye-tracking Analysis in Pair Programming of Computer Science Education |
+|authors| Wunmin JangHong GaoTilman MichaeliEnkelejda Kasneci
+|links| http://dx.doi.org/10.1145/3649902.3653942 |
+|updated| 2024-03-28 16:44:20 UTC |
+|summary| Pair programming is widely recognized as an effective educational tool incomputer science that promotes collaborative learning and mirrors real-worldwork dynamics. However communication breakdowns within pairs significantlychallenge this learning process. In this study we use eye-tracking datarecorded during pair programming sessions to study communication dynamicsbetween various pair programming roles across different student expert andmixed group cohorts containing 19 participants. By combining eye-tracking dataanalysis with focus group interviews and questionnaires we provide insightsinto communications multifaceted nature in pair programming. Our findingshighlight distinct eye-tracking patterns indicating changes in communicationskills across group compositions with participants prioritizing codeexploration over communication especially during challenging tasks. Furtherstudents showed a preference for pairing with experts emphasizing theimportance of understanding group formation in pair programming scenarios.These insights emphasize the importance of understanding group dynamics andenhancing communication skills through pair programming for successful outcomesin computer science education. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18679v1 |
-|title| An Exploratory Study on Upper-Level Computing Students' Use of Large Language Models as Tools in a Semester-Long Project |
-|authors| Ben Arie TanayLexy ArinzeSiddhant S. JoshiKirsten A. DavisJames C. Davis
-|links| http://arxiv.org/abs/2403.18679v1 |
-|updated| 2024-03-27 15:21:58 UTC |
-|summary| Background: Large Language Models LLMs such as ChatGPT and CoPilot areinfluencing software engineering practice. Software engineering educators mustteach future software engineers how to use such tools well. As of yet therehave been few studies that report on the use of LLMs in the classroom. It istherefore important to evaluate students perception of LLMs and possible waysof adapting the computing curriculum to these shifting paradigms.  Purpose: The purpose of this study is to explore computing studentsexperiences and approaches to using LLMs during a semester-long softwareengineering project.  Design/Method: We collected data from a senior-level software engineeringcourse at Purdue University. This course uses a project-based learning PBLdesign. The students used LLMs such as ChatGPT and Copilot in their projects. Asample of these student teams were interviewed to understand 1 how they usedLLMs in their projects and 2 whether and how their perspectives on LLMschanged over the course of the semester. We analyzed the data to identifythemes related to students usage patterns and learning outcomes.  Results/Discussion: When computing students utilize LLMs within a projecttheir use cases cover both technical and professional applications. Inaddition these students perceive LLMs to be efficient tools in obtaininginformation and completion of tasks. However there were concerns about theresponsible use of LLMs without being detrimental to their own learningoutcomes. Based on our findings we recommend future research to investigatethe usage of LLMs in lower-level computer engineering courses to understandwhether and how LLMs can be integrated as a learning aid without hurting thelearning outcomes. |
+|idx| 2403.19506v1 |
+|title| LLMs as Academic Reading Companions: Extending HCI Through Synthetic Personae |
+|authors| Celia ChenAlex Leitch
+|links| http://arxiv.org/abs/2403.19506v1 |
+|updated| 2024-03-28 15:37:10 UTC |
+|summary| This position paper argues that large language models LLMs constitutepromising yet underutilized academic reading companions capable of enhancinglearning. We detail an exploratory study examining Claude.ai from Anthropic anLLM-based interactive assistant that helps students comprehend complexqualitative literature content. The study compares quantitative survey data andqualitative interviews assessing outcomes between a control group and anexperimental group leveraging Claude.ai over a semester across two graduatecourses. Initial findings demonstrate tangible improvements in readingcomprehension and engagement among participants using the AI agent versusunsupported independent study. However there is potential for overreliance andethical considerations that warrant continued investigation. By documenting anearly integration of an LLM reading companion into an educational context thiswork contributes pragmatic insights to guide development of synthetic personaesupporting learning. Broader impacts compel policy and industry actions touphold responsible design in order to maximize benefits of AI integration whileprioritizing student wellbeing. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18668v1 |
-|title| Aiming for Relevance |
-|authors| Bar Eini PoratDanny EytanUri Shalit
-|links| http://arxiv.org/abs/2403.18668v1 |
-|updated| 2024-03-27 15:11:07 UTC |
-|summary| Vital signs are crucial in intensive care units ICUs. They are used totrack the patients state and to identify clinically significant changes.Predicting vital sign trajectories is valuable for early detection of adverseevents. However conventional machine learning metrics like RMSE often fail tocapture the true clinical relevance of such predictions. We introduce novelvital sign prediction performance metrics that align with clinical contextsfocusing on deviations from clinical norms overall trends and trenddeviations. These metrics are derived from empirical utility curves obtained ina previous study through interviews with ICU clinicians. We validate themetrics usefulness using simulated and real clinical datasets MIMIC andeICU. Furthermore we employ these metrics as loss functions for neuralnetworks resulting in models that excel in predicting clinically significantevents. This research paves the way for clinically relevant machine learningmodel evaluation and optimization promising to improve ICU patient care. 10pages 9 figures. |
+|idx| 2403.19475v1 |
+|title| A theoretical framework for the design and analysis of computational thinking problems in education |
+|authors| Giorgia AdorniAlberto PiattiEngin BumbacherLucio NegriniFrancesco MondadaDorit AssafFrancesca MangiliLuca Gambardella
+|links| http://arxiv.org/abs/2403.19475v1 |
+|updated| 2024-03-28 15:02:28 UTC |
+|summary| The field of computational thinking education has grown in recent years asresearchers and educators have sought to develop and assess studentscomputational thinking abilities. While much of the research in this area hasfocused on defining computational thinking the competencies it involves andhow to assess them in teaching and learning contexts this work takes adifferent approach. We provide a more situated perspective on computationalthinking focusing on the types of problems that require computational thinkingskills to be solved and the features that support these processes. We develop aframework for analysing existing computational thinking problems in aneducational context. We conduct a comprehensive literature review to identifyprototypical activities from areas where computational thinking is typicallypursued in education. We identify the main components and characteristics ofthese activities along with their influence on activating computationalthinking competencies. The framework provides a catalogue of computationalthinking skills that can be used to understand the relationship between problemfeatures and competencies activated. This study contributes to the field ofcomputational thinking education by offering a tool for evaluating and revisingexisting problems to activate specific skills and for assisting in designingnew problems that target the development of particular competencies. Theresults of this study may be of interest to researchers and educators workingin computational thinking education. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2403.18623v1 |
-|title| Antitrust, Amazon, and Algorithmic Auditing |
-|authors| Abhisek DashAbhijnan ChakrabortySaptarshi GhoshAnimesh MukherjeeJens FrankenreiterStefan BechtoldKrishna P. Gummadi
-|links| http://arxiv.org/abs/2403.18623v1 |
-|updated| 2024-03-27 14:34:22 UTC |
-|summary| In digital markets antitrust law and special regulations aim to ensure thatmarkets remain competitive despite the dominating role that digital platformsplay today in everyones life. Unlike traditional markets market participantbehavior is easily observable in these markets. We present a series ofempirical investigations into the extent to which Amazon engages in practicesthat are typically described as self-preferencing. We discuss how the computerscience tools used in this paper can be used in a regulatory environment thatis based on algorithmic auditing and requires regulating digital markets atscale. |
+|idx| 2403.19436v1 |
+|title| "At the end of the day, I am accountable": Gig Workers' Self-Tracking for Multi-Dimensional Accountability Management |
+|authors| Rie HeleneHernandezQiurong SongYubo KouXinning Gui
+|links| http://arxiv.org/abs/2403.19436v1 |
+|updated| 2024-03-28 14:04:30 UTC |
+|summary| Tracking is inherent in and central to the gig economy. Platforms track gigworkers performance through metrics such as acceptance rate and punctualitywhile gig workers themselves engage in self-tracking. Although prior researchhas extensively examined how gig platforms track workers through metrics --with some studies briefly acknowledging the phenomenon of self-tracking amongworkers -- there is a dearth of studies that explore how and why gig workerstrack themselves. To address this we conducted 25 semi-structured interviewsrevealing how gig workers self-tracking to manage accountabilities tothemselves and external entities across three identities: the holistic selfthe entrepreneurial self and the platformized self. We connect our findings toneoliberalism through which we contextualize gig workers self-accountabilityand the invisible labor of self-tracking. We further discuss how self-trackingmitigates information and power asymmetries in gig work and offer designimplications to support gig workers multi-dimensional self-tracking. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2403.19648v1 |
+|title| Human-compatible driving partners through data-regularized self-play reinforcement learning |
+|authors| Daphne CornelisseEugene Vinitsky
+|links| http://arxiv.org/abs/2403.19648v1 |
+|updated| 2024-03-28 17:56:56 UTC |
+|summary| A central challenge for autonomous vehicles is coordinating with humans.Therefore incorporating realistic human agents is essential for scalabletraining and evaluation of autonomous driving systems in simulation. Simulationagents are typically developed by imitating large-scale high-quality datasetsof human driving. However pure imitation learning agents empirically have highcollision rates when executed in a multi-agent closed-loop setting. To buildagents that are realistic and effective in closed-loop settings we proposeHuman-Regularized PPO HR-PPO a multi-agent algorithm where agents aretrained through self-play with a small penalty for deviating from a humanreference policy. In contrast to prior work our approach is RL-first and onlyuses 30 minutes of imperfect human demonstrations. We evaluate agents in alarge set of multi-agent traffic scenes. Results show our HR-PPO agents arehighly effective in achieving goals with a success rate of 93 an off-roadrate of 3.5 and a collision rate of 3. At the same time the agents drive ina human-like manner as measured by their similarity to existing human drivinglogs. We also find that HR-PPO agents show considerable improvements on proxymeasures for coordination with human driving particularly in highlyinteractive scenarios. We open-source our code and trained agents athttps://github.com/Emerge-Lab/nocturne_lab and provide demonstrations of agentbehaviors at https://sites.google.com/view/driving-partners. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2403.19375v1 |
+|title| Multi-Agent Team Access Monitoring: Environments that Benefit from Target Information Sharing |
+|authors| Andrew DudashScott JamesRyan Rubel
+|links| http://arxiv.org/abs/2403.19375v1 |
+|updated| 2024-03-28 12:37:11 UTC |
+|summary| Robotic access monitoring of multiple target areas has applications includingcheckpoint enforcement surveillance and containment of fire and flood hazards.Monitoring access for a single target region has been successfully modeled as aminimum-cut problem. We generalize this model to support multiple target areasusing two approaches: iterating on individual targets and examining thecollections of targets holistically. Through simulation we measure theperformance of each approach on different scenarios. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2403.19253v1 |
+|title| Inferring Latent Temporal Sparse Coordination Graph for Multi-Agent Reinforcement Learning |
+|authors| Wei DuanJie LuJunyu Xuan
+|links| http://arxiv.org/abs/2403.19253v1 |
+|updated| 2024-03-28 09:20:15 UTC |
+|summary| Effective agent coordination is crucial in cooperative Multi-AgentReinforcement Learning MARL. While agent cooperation can be represented bygraph structures prevailing graph learning methods in MARL are limited. Theyrely solely on one-step observations neglecting crucial historicalexperiences leading to deficient graphs that foster redundant or detrimentalinformation exchanges. Additionally high computational demands for action-paircalculations in dense graphs impede scalability. To address these challengeswe propose inferring a Latent Temporal Sparse Coordination Graph LTS-CG forMARL. The LTS-CG leverages agents historical observations to calculate anagent-pair probability matrix where a sparse graph is sampled from and usedfor knowledge exchange between agents thereby simultaneously capturing agentdependencies and relation uncertainty. The computational complexity of thisprocedure is only related to the number of agents. This graph learning processis further augmented by two innovative characteristics: Predict-Future whichenables agents to foresee upcoming observations and Infer-Present ensuring athorough grasp of the environmental context from limited data. These featuresallow LTS-CG to construct temporal graphs from historical and real-timeinformation promoting knowledge exchange during policy learning and effectivecollaboration. Graph learning and agent training occur simultaneously in anend-to-end manner. Our demonstrated results on the StarCraft II benchmarkunderscore LTS-CGs superior performance. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2403.18985v1 |
+|title| Robustness and Visual Explanation for Black Box Image, Video, and ECG Signal Classification with Reinforcement Learning |
+|authors| Soumyendu SarkarAshwin Ramesh BabuSajad MousaviVineet GundechaAvisek NaugSahand Ghorbanpour
+|links| http://dx.doi.org/10.1609/aaai.v38i21.30579 |
+|updated| 2024-03-27 20:07:39 UTC |
+|summary| We present a generic Reinforcement Learning RL framework optimized forcrafting adversarial attacks on different model types spanning from ECG signalanalysis 1D image classification 2D and video classification 3D. Theframework focuses on identifying sensitive regions and inducingmisclassifications with minimal distortions and various distortion types. Thenovel RL method outperforms state-of-the-art methods for all threeapplications proving its efficiency. Our RL approach produces superiorlocalization masks enhancing interpretability for image classification and ECGanalysis models. For applications such as ECG analysis our platform highlightscritical ECG segments for clinicians while ensuring resilience againstprevalent distortions. This comprehensive tool aims to bolster both resiliencewith adversarial training and transparency across varied applications and datatypes. |
+
 
 | Item |Content|
 | --- |---|
@@ -320,45 +360,5 @@
 |links| http://arxiv.org/abs/2403.18591v1 |
 |updated| 2024-03-27 14:17:33 UTC |
 |summary| We study networks of processes that all execute the same finite protocol andcommunicate synchronously in two different ways: a process can broadcast onemessage to all other processes or send it to at most one other process. In bothcases if no process can receive the message it will still be sent. Weestablish a precise complexity class for two coverability problems with aparameterised number of processes: the state coverability problem and theconfiguration coverability problem. It is already known that these problems areAckermann-hard but decidable in the general case. We show that when theprotocol is Wait-Only i.e. it has no state from which a process can send andreceive messages the complexity drops to P and PSPACE respectively. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2403.18166v1 |
-|title| Incentive-Compatible Vertiport Reservation in Advanced Air Mobility: An Auction-Based Approach |
-|authors| Pan-Yang SuChinmay MaheshwariVictoria TuckShankar Sastry
-|links| http://arxiv.org/abs/2403.18166v1 |
-|updated| 2024-03-27 00:21:49 UTC |
-|summary| The rise of advanced air mobility AAM is expected to become amultibillion-dollar industry in the near future. Market-based mechanisms aretouted to be an integral part of AAM operations which comprise heterogeneousoperators with private valuations. In this work we study the problem ofdesigning a mechanism to coordinate the movement of electric vertical take-offand landing eVTOL aircraft operated by multiple operators each havingheterogeneous valuations associated with their fleet between vertiports whileenforcing the arrival departure and parking constraints at vertiports.Particularly we propose an incentive-compatible and individually rationalvertiport reservation mechanism that maximizes a social welfare metric whichencapsulates the objective of maximizing the overall valuations of alloperators while minimizing the congestion at vertiports. Additionally weimprove the computational tractability of designing the reservation mechanismby proposing a mixed binary linear programming approach that is based onconstructing network flow graph corresponding to the underlying problem. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2403.18145v1 |
-|title| A Real-Time Rescheduling Algorithm for Multi-robot Plan Execution |
-|authors| Ying FengAdittyo PaulZhe ChenJiaoyang Li
-|links| http://arxiv.org/abs/2403.18145v1 |
-|updated| 2024-03-26 23:10:41 UTC |
-|summary| One area of research in multi-agent path finding is to determine howreplanning can be efficiently achieved in the case of agents being delayedduring execution. One option is to reschedule the passing order of agentsi.e. the sequence in which agents visit the same location. In response wepropose Switchable-Edge Search SES an A-style algorithm designed to findoptimal passing orders. We prove the optimality of SES and evaluate itsefficiency via simulations. The best variant of SES takes less than 1 secondfor small- and medium-sized problems and runs up to 4 times faster thanbaselines for large-sized problems. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2403.17916v1 |
-|title| CMP: Cooperative Motion Prediction with Multi-Agent Communication |
-|authors| Zhuoyuan WuYuping WangHengbo MaZhaowei LiHang QiuJiachen Li
-|links| http://arxiv.org/abs/2403.17916v1 |
-|updated| 2024-03-26 17:53:27 UTC |
-|summary| The confluence of the advancement of Autonomous Vehicles AVs and thematurity of Vehicle-to-Everything V2X communication has enabled thecapability of cooperative connected and automated vehicles CAVs. Building ontop of cooperative perception this paper explores the feasibility andeffectiveness of cooperative motion prediction. Our method CMP takes LiDARsignals as input to enhance tracking and prediction capabilities. Unlikeprevious work that focuses separately on either cooperative perception ormotion prediction our framework to the best of our knowledge is the first toaddress the unified problem where CAVs share information in both perception andprediction modules. Incorporated into our design is the unique capability totolerate realistic V2X bandwidth limitations and transmission delays whiledealing with bulky perception representations. We also propose a predictionaggregation module which unifies the predictions obtained by different CAVsand generates the final prediction. Through extensive experiments and ablationstudies we demonstrate the effectiveness of our method in cooperativeperception tracking and motion prediction tasks. In particular CMP reducesthe average prediction error by 17.2 with fewer missing detections comparedwith the no cooperation setting. Our work marks a significant step forward inthe cooperative capabilities of CAVs showcasing enhanced performance incomplex scenarios. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2403.17805v1 |
-|title| Scenario-Based Curriculum Generation for Multi-Agent Autonomous Driving |
-|authors| Axel BrunnbauerLuigi BerducciPeter PrillerDejan NickovicRadu Grosu
-|links| http://arxiv.org/abs/2403.17805v1 |
-|updated| 2024-03-26 15:42:04 UTC |
-|summary| The automated generation of diverse and complex training scenarios has beenan important ingredient in many complex learning tasks. Especially inreal-world application domains such as autonomous driving auto-curriculumgeneration is considered vital for obtaining robust and general policies.However crafting traffic scenarios with multiple heterogeneous agents istypically considered as a tedious and time-consuming task especially in morecomplex simulation environments. In our work we introduce MATS-Gym aMulti-Agent Traffic Scenario framework to train agents in CARLA ahigh-fidelity driving simulator. MATS-Gym is a multi-agent training frameworkfor autonomous driving that uses partial scenario specifications to generatetraffic scenarios with variable numbers of agents. This paper unifies variousexisting approaches to traffic scenario description into a single trainingframework and demonstrates how it can be integrated with techniques fromunsupervised environment design to automate the generation of adaptiveauto-curricula. The code is available athttps://github.com/AutonomousDrivingExaminer/mats-gym. |
 
 
