@@ -1,0 +1,905 @@
+Linear Attention Sequence Parallelism
+WeigaoSun*1 ZhenQin*2 DongLi1 XuyangShen1 YuQiao1 YiranZhong1
+Abstract exertsignificantstrainoncontemporaryGPUhardwarebe-
+causethememoryofasingleGPUconfinesthemaximum
+SequenceParallel(SP)servesasaprevalentstrat-
+sequencelengthofalanguagemodel. Totacklethisissue,
+egy to handle long sequences that exceed the
+theSequenceParallelism(SP)techniques(Lietal.,2022;
+memorylimitofasingleGPU.However,existing Korthikantietal.,2022)areoftenutilizedtodividealong
+SPmethodsdonottakeadvantageoflinearatten-
+sequenceintoseveralsub-sequencesandtrainthemonmul-
+tionfeatures,resultinginsub-optimalparallelism
+tipleGPUsseparately. Unfortunately,existingSPmethods
+efficiencyandusabilityforlinearattention-based
+donotfullyleveragethebenefitsoflinearattentionfeatures,
+language models. In this paper, we introduce
+leadingtosuboptimalparallelismefficiencyandusability.
+Linear Attention Sequence Parallel (LASP), an
+efficient SP method tailored to linear attention- In this paper, we present the Linear Attention Sequence
+basedlanguagemodels. Specifically,wedesign Parallel(LASP)techniqueforefficientsequenceparallelism
+anefficientpoint-to-pointcommunicationmech- onlineartransformers. Ourapproachincludesasophisti-
+anism to leverage the right-product kernel trick catedcommunicationmechanismbasedonpoint-to-point
+of linear attention, which sharply decreases the (P2P) communication for exchanging intermediate states
+communicationoverheadofSP.Wealsoenhance duringforwardandbackwardpassesamongGPUswithin
+the practical efficiency of LASP by perform- a node or across multiple nodes. This design maximizes
+ingkernelfusionandintermediatestatecaching, theutilizationofright-productkerneltricks(Katharopou-
+makingtheimplementationofLASPhardware- los et al., 2020; Qin et al., 2023b; 2024b) in linear atten-
+friendlyonGPUclusters. Furthermore,wemetic- tion. Notably, our technique is independent of attention
+ulously ensure the compatibility of sequence- headspartitioning,whichallowsittobeappliedtomodels
+level LASP with all types of batch-level data withvaryingnumbersorstylesofattentionheads,suchas
+parallel methods, which is vital for distributed multi-head,multi-query,andgrouped-queryattentions.This
+training on large clusters with long sequences flexibilityexceedsthecapabilitiesofexistingSPmethods
+andlargebatches. Weconductextensiveexperi- inMegatron-LM(Shoeybietal.,2019;Korthikantietal.,
+mentsontwolinearattention-basedmodelswith 2022)orDeepSpeed(Jacobsetal.,2023).
+varyingsequencelengthsandGPUclustersizes.
+Our implementation of LASP incorporates system engi-
+LASP scales sequence length up to 4096K us-
+neeringoptimizationssuchaskernelfusionandKVState
+ing128A10080GGPUson1Bmodels,which
+caching,resultinginsignificantlyenhancedexecutioneffi-
+is8×longerthanexistingSPmethodswhilebe-
+ciency. Furthermore,wehavetakencareinensuringcom-
+ingsignificantlyfaster. Thecodeisavailableat
+patibilityofLASPwithvarious(sharded)distributeddata-
+https://github.com/OpenNLPLab/LASP.
+parallel (DDP) (Li et al., 2020; Sun et al., 2024) training
+methodsduringtheimplementation,whichwerefertoas
+1.Introduction the data-sequence hybrid parallelism. Through extensive
+experiments with models of different parameters, cluster
+Recently,linearattention-basedmodels(Qinetal.,2024a; sizes, and sequence lengths, we demonstrate LASP’s im-
+2022a;Choromanskietal.,2020)arebecomingincreasingly pressiveperformanceandefficiencywhenusedwiththese
+popular due to their faster processing speed and compa- DDP instances. Specifically, LASP is significantly faster
+rablelanguagemodelingperformancetovanillaSoftmax thanexistingSPmethodsandcanextendsequencelength
+transformers(Vaswanietal.,2017). Meanwhile,thegrow- 8×longerunderthesamehardwareconstraints.
+ingsizeoflargelanguagemodels(LLMs)(Touvronetal.,
+Ourprimarycontributionscanbesummarizedasfollows:
+2023a;b; Tang et al., 2024) and longer sequence lengths
+• AnewSPstrategythatistailoredtolinearattention.
+*Equalcontribution 1ShanghaiAILaboratory2TapTap.Corre-
+Enabling linear attention-based models to scale for
+spondenceto:YiranZhong<zhongyiran@gmail.com>.
+longsequenceswithoutbeinglimitedbyasingleGPU.
+Preliminarywork.,Copyright2024bytheauthor(s). • Sequence length-independent communication over-
+1
+4202
+rpA
+3
+]GL.sc[
+1v28820.4042:viXraLASP
+head. Ourelegantcommunicationmechanismlever- Device 𝑖 Device 𝑖+1
+ages right-product kernel trick of linear attention to
+ensurethattheexchangingoflinearattentioninterme-
+diatestatesissequencelength-independent. GL GL
+• GPUfriendlyimplementation. WeoptimizeLASP’s U U
+𝑈 𝑉 𝑈 𝑉
+executiononGPUsthroughmeticuloussystemengi-
+neering,includingkernelfusionandKVStatecaching.
+• Data-parallelcompatibility. LASPiscompatiblewith Norm Norm
+allbatch-levelDDPmethods,suchasPyTorch/Legacy
+DDP,FSDP,andZeRO-seriesoptimizers.
+2.Method 𝑔
+2.1.Preliminary
+𝑄 𝐾 𝑉 𝑄 𝐾 𝑉
+Softmax Attention. Consider the standard attention
+(Vaswani et al., 2017) computation with causal masking
+Norm Norm
+inthetransformerarchitecture,formulatedas:
+√
+O=Softmax(QK⊤/ d⊙M)V, (1)
+… …
+where d denotes the hidden dimension. The matrices 𝑋 𝑋
+! !"#
+Q,K,V ∈ RN×d represent query, key, and value matri-
+ces,respectively. Thesematricesarelinearprojectionsof
+the input X ∈ RN×d, i.e., Q = XW , K = XW , Figure1.Visualization of LASP. We illustrate a typical linear
+Q K
+V =XW . TheoutputmatrixisdenotedasO∈RN×d, transformer layer to explain the mechanism of LASP. X as an
+V
+andM ∈ RN×N representsthecausalmaskmatrix. The inputsequenceispartitionedintomultiplesub-sequencechunks,
+whicharethenfedintodifferentmodelcopiesondiscretedevices.
+Softmax(·)operationintroducesquadratictimecomplexity
+grepresentsconjugatecommunicationoperationsinforwardand
+relativetotheinputsequencelengthN,limitingthescala-
+backwardpasses.Inforwardpass,gisSend&Recvfromdevice
+bilityofvanillatransformerstoextendedinputsequences. ito(i+1). Whileinbackwardpass,gisSend&Recvfrom
+device (i+1) to i. The communication operations exchange
+LinearAttention. Linearattentionisoriginallyproposed
+intermediatestatesKVanddKVduringforwardandbackward
+in (Katharopoulos et al., 2020), with the elimination of
+passestoinsuretheperformanceofSP.
+Softmaxoperation(Vaswanietal.,2017). Qinetal.(2022a;
+2023a) propose to replace the Softmax operation with a
+challengeofachievingzero-redundancy(onsequencelevel)
+normalizationoperationNorm(·),whichturnstoaconcise
+trainingforsuchlongsequencesusinglinearattention-based
+formulationas:
+O=Norm((QK⊤⊙M)V). (2) LLMsacrossGPUclustersremainsanopenproblem. Fur-
+thermore,thecomplexityofaddressingthisissueinacasual
+Whenconsideringbidirectionaltasks,theaboveformulation
+settingfurtherintensifiesthechallenge. Toaddressthis,we
+can be simplified as O = Norm((QK⊤)V). Then by
+proposeLASPasasolutionforparallelizinglinearattention
+performing the associativity property of matrix products,
+trainingatthesequencelevel,eveninacasualsetting.
+it can be mathematically equivalently transformed into a
+right-productversion:
+2.2.LASP
+O=Norm(Q(K⊤V)). (3)
+LASPtilessequenceoverthecluster. Followthethought-
+Thislinearattentionformulationfacilitatesrecurrentpredic-
+of-tiling,LASPpartitionstheinputsequencesintomultiple
+tionwithacomputationalcomplexityofO(Nd2). Andthe
+sub-sequencechunks,distributingthesechunksindividually
+recurrentupdateofK⊤Vwithoutneedingtocomputethe
+acrossdifferentGPUs. Forlinearattentioninacasualset-
+entireattentionmatrixmakesitsinferenceefficient.
+ting,inordertofullyexploittheadvantageofright-product
+While linear complexity offers significant advantages in inlinearattention,wecategorizetheattentioncomputation
+termsofcomputationalefficiencyandmemoryoptimization forsub-sequencesintotwodistincttypes: intra-chunksand
+for linear attention, it still incurs a proportional increase inter-chunks. Intra-chunksinvolveconventionalattention
+in computation and memory utilization on a single GPU computation,whileinter-chunksleveragethekerneltricks
+as the sequence length N grows. This can lead to mem- associatedwithlinearattention’sright-product. Furtherde-
+ory constraints on a single GPU, such as the 80GB limit tailsregardingtheintricatemechanismsofLASPindatadis-
+inNVIDIAA100,forexceptionallylongsequences. The tribution,forwardpass,andbackwardpassareexpounded
+uponbelow. AvisualizationofLASPispresentedinFig. 1.
+2
+ULG
+noitnettA
+raeniLLASP
+Algorithm1LASPDataDistribution
+Seq1 Sub-seq0 Sub-seq1 Sub-seq2 Sub-seq3
+1: Input: AninputsequenceinembeddingspaceX ∈ RN×d
+Seq0 Sub-seq0 Sub-seq1 Sub-seq2 Sub-seq3
+withsequencelengthN andhiddendimensiond,distributed
+worldsizeW andsequenceparallelsizeT.
+2: ObtainnumberofsequenceparallelgroupsG=W/T.
+3: Obtainsub-sequencelength(orchunksize)C =N/T.
+4: GetglobalranklistR=get_global_rank(). GPU 0 1 2 3 4 5 6 7
+5: ObtainsequenceparallelsourceranklistR =⌊R/T⌋∗T.
+src
+6: Along sequence dimension, split X into T chunks SP-Group0 SP-Group1
+{X ,X ,...X },ofsizeC×dforeach. Figure2.ExampleofLASPDataDistribution. Inthisillustra-
+1 2 T
+7: Transfercopiesofdatachunks{X 1,X 2,··· ,X T}toGPUs tion,thedistributedworldsizeischaracterizedbyW = 8,the
+withrankindicesinR src. sequenceparallelsizebyT =4,thenumberofsequenceparallel
+8: Scatter{X 1,X 2,··· ,X T}fromR src toallranksinre- groupsbyG = 2,andthesequenceparallelsourceranklistby
+spectivesequenceparallelgroups.
+R
+src
+= [0,4]. Forthefirstbatch SEQ0, theinputsequenceX
+Data Distribution. LASP is designed for training long undergoespartitioningintoT chunks{X 1,X 2,...X T}alongthe
+sequencedimension,subsequentlytransmittedtothefirstrankin
+sequencesonlineartransformersinadistributedenviron-
+thefirstSPgroupdenotedasSP-GROUP0,whichcorrespondsto
+ment,achievedbypartitioningtheinputdataalongitsse-
+globalrank0.Thedatachunksonglobalrank0arethenscattered
+quencedimension. Inthissituation,eachGPUwithinthe
+toglobalranks0,1,2,3within SP-GROUP0,whereeachrank
+distributedenvironmentundertakesthetrainingofasubset
+onlyretainsasinglechunk.ThesubsequentbatchSEQ1followsa
+ofsub-sequences,whichservestodiminishthelargemem-
+similarallocationprocedure,beingassignedtoglobalranks4,5,
+oryfootprintassociatedwithactivationduringthetraining 6,7withinSP-GROUP1.
+of long sequences. Communication operations are intro-
+ducedbetweenGPUstotransmitintermediatestates. The outputcanbeformulatedas
+finaltrainedmodelassimilatestheknowledgederivedfrom o⊤ =q⊤(cid:88) λs−ik v⊤. (4)
+s s i i
+theentiretyofthelongsequences.
+i≤s
+For an input sequence of length N, we establish its em- Rewriteinarecursiveform(Katharopoulosetal.,2020),we
+beddingspacerepresentationdenotedasX ∈ RN×d with have
+a feature dimension of d. In the LASP framework, X is kv 0 =0∈Rd×d,
+evenly partitioned into T chunks, where T is called the kv =λkv +k v⊤, (5)
+s s−1 s s
+sequenceparallelsize,whichmustbedivisiblebythedis- o⊤ =q⊤(kv ),
+s s s
+tributedworldsizeW. Thesesegmenteddatachunksare
+where
+subsequentlyassignedtotherespectiveGPUs. Itisessen- kv s =(cid:80) i≤sλs−ik iv i⊤ (6)
+tialtonotethatdifferentsequenceparallelgroupsreceive istheactivationstateintheforwardcomputationoflinear
+dissimilardatabatches. However,withinthesamegroup, attentionwiths-thinput.
+alldatachunksoriginatefromanidenticalbatchofdata. A
+Inthesequenceparallelismscenario,givendatachunkX
+comprehensivedepictionofthedatadistributionprocessin t
+onranki,thequery,keyandvaluecorrespondingtoX is
+LASPisprovidedinAlgorithm1. Additionally,anillustra- t
+Q =X W ,K =X W ,V =X W .Notethatwe
+tiveexampleofdatadistributioninLASPispresentedin t t Q t t K t t V
+assumeT =W here,theirindicesarethusequivalent,i.e.,
+Fig. 2,consideringanodewith8GPUsandthepartitioning
+t=i. Theoutputwithinthet-thchunkcanbecalculatedas
+of2sequencesinto4sub-sequencechunks.
+O =[(Q K⊤)⊙M]V . (7)
+t,intra t t t
+Forward Pass. To streamline derivations, the Norm(·)
+The intra-chunk computation has no dependencies with
+operator in Eq. (2) is temporarily omitted. Additionally,
+other chunks on other GPUs, so it can be calculated par-
+weconsideranormalcasewhereW =T,indicatingG=
+allelized on all ranks in the distributed world. However,
+W/T =1. Inthisscenario,GPUwithrank0consolidates
+this result does not consider the impact of the previous
+allsplitsub-sequencesinabatch,subsequentlydistributing
+1 ∼ (t − 1) chunks on the t-th chunk, which is called
+themtoallGPUsacrosstheentiredistributedworld. Itis
+aninter-chunk. Tocalculateinter-chunk, letusrearrange
+noteworthy that the scenario where the sequence parallel
+Eq.(4)as
+sizeisnotequaltoworldsizeisdiscussedin2.5.
+o⊤ =q⊤ (cid:88) λs+C−ik v⊤
+s+C s+C i i
+WefirstdefinetwosymbolskvandKVwhichareimpor-
+i≤s+C
+tant in the right-product computation procedure of linear C+s (8)
+attention. Withoutlossofgenerality,weaddλasthedecay =q⊤ (cid:88) λs+C−ik v⊤+λsq⊤ (cid:88) λC−ik v⊤.
+s+C i i s+C i i
+rateinlinearattentionwithcasualmask, choosingλ = 1 i=C+1 i≤C
+yields the ordinary linear attention. In the forward pass Thefirstpart(beforetheplussign)inEq.(8)correspondsto
+oflinearattentioncomputationwithcasualmask,thes-th thecomputationonintra-chunk,andthesecondpart(after
+3LASP
+Algorithm2LASPForwardPass Algorithm3LASPBackwardPass
+1: Input:inputsequenceinembeddingspaceX∈RN×dwith 1: Input: Sequence Length N, Distributed world size
+sequencelengthN andhiddendimensiond,distributedworld W, sequence parallel size T, decay rate λ ∈ R+,
+sizeW,sequenceparallelsizeT =W,decayrateλ∈R+. Q t,K t,V t,O t,dO t ∈RC×dfort∈{1,2,··· ,T}.
+2: DistributeinputsequenceXaccordingtoAlgorithm1. 2: Obtainsub-sequencelength(orchunksize)C =N/T.
+3: Obtainsub-sequencelength(orchunksize)C =N/T. 3: InitializemaskM ∈ RC×C,whereM ij = λi−j,ifi ≥ j,
+4: InitializemaskM ∈ RC×C,whereM ij = λi−j,ifi ≥ j, elseM ij =0.
+elseM =0. 4: InitializeΛ=diag{λ,λ2,··· ,λC}∈RC×C .
+ij
+5: InitializeΛ=diag{λ,λ2,··· ,λC}∈RC×C. 5: InitializedKV=0∈Rd×d.
+6: InitializeactivationstateKV=0∈Rd×d. 6: fort∈{1,2,··· ,T}atranki∈{1,2,··· ,W}inparallel
+7: forchunkt∈{1,··· ,T}atranki∈{1,··· ,W}inparallel do
+do 7: ComputedQ t,intra =[(dO tV t⊤)⊙M]K t.
+8: CalculateQ t = X tW Q,K t = X tW K,V t = X tW V 8: ComputedQ t,inter =ΛdO tKV⊤ t−1.
+accordingtoitsowndatachunk,ofsizeC×dforeach. 9: ComputedK =[(dO V⊤)⊙M]⊤Q .
+9: ComputeO
+t,intra
+=[(Q tK⊤
+t
+)⊙M]V t.
+10:
+ComputedVt,intra
+=[(Q
+Kt ⊤t )⊙M]⊤dOt
+.
+10: endfor t,intra t t t
+11: endfor
+11: forchunkt∈{1,··· ,T}atranki∈{1,··· ,W}do
+12: fort∈{T,··· ,2,1}atranki∈{W,··· ,2,1}do
+12: RecvactivationKV fromrank(i−1).
+t−1 13: RecvactivationdKV fromrank(i+1).
+13: SaveKV asKV onrankiforbackwardcomputation. t+1
+t−1 i 14: ComputedK =(λCΛ−1V )dKV⊤ .
+14: ComputeO =ΛQ KV . t,inter t t+1
+15: ComputeOt,i =nte Or +t O t−1 asOoft-thchunk. 15: ComputedV t,inter =(λCΛ−1K t)dKV t+1.
+t t,intra t,inter
+16: UpdateKV =λCKV +(λCΛ−1K )⊤V . 16: LoadKV iasKV tonranki.
+t t−1 t t 17: Combineintra-andinter-chunksofdQ ,dK ,dV :
+17: SendactivationKV torank(i+1). t t t
+t
+18: endfor dQ t =dQ t,intra+dQ t,inter,
+19: returnO=[O t],witht∈{1,··· ,T}. dK
+t
+=dK t,intra+dK t,inter,
+theplussign)correspondstothecomputationoninter-chunk. dV t =dV t,intra+dV t,inter.
+Insequenceparallelismscenario,Eq.(8)canberewrittenin 18: ComputedKV =λCdKV +(ΛQ )⊤dO .
+t t+1 t t
+thechunkformasfollows: 19: SendactivationdKV ttoranki.
+O =ΛQ KV , (9) 20: endfor
+t,inter t t−1
+21: return dQ = [dQ ], dK = [dK ], dV = [dV ], with
+t t t
+where t∈{1,2,··· ,T}.
+KV =kv . (10)
+t tC
+Itisworthnotingthatthecalculationoftheinterpartfor Integratingboththeintraandinterparts,thefinalforward
+thet-thchunkdependsontheactivationstateofprevious outputisasfollows:
+(t−1) chunk, i.e., KV , which is calculated on rank O =O +O (12)
+t−1 t t,intra t,inter
+(i−1). ThusaP2PcommunicationoperationRecvshould
+We present the complete expression of forward pass for
+be performed to pull KV from rank (i − 1) to rank
+t−1 LASPwithW =T inAlgorithm2.
+i. Then the activation state KV should be updated for
+t
+subsequentinter-chunkattentioncomputationat(t+1)-th
+BackwardPass. Forthebackwardpass,letusexamine
+chunk. TheupdateruleofKV att-thchunkis
+t
+KV = (cid:88) λtC−sk v⊤ theinverseprocedure. Wefirstdefinedkv tforsubsequent
+t s s analysis. Givendo ,wehave(Katharopoulosetal.,2020)
+s
+s≤tC
+dq⊤ =do⊤kv⊤ ∈R1×d,
+tC s s s
+=λC (cid:88) λ(t−1)C−sk sv s⊤+ (cid:88) λtC−sk sv s⊤ dk⊤
+s
+=v s⊤dkv⊤
+s
+∈R1×d,
+(11)
+s≤(t−1)C s=(t−1)C+1 dv⊤ =k⊤dkv ∈R1×d, (13)
+(cid:16) (cid:17)⊤ s s s
+=λCKV t−1+ diag{λC−1,...,1}K t V t dkv =(cid:88) λi−sq do⊤ ∈Rd×d.
+s i i
+(cid:16) (cid:17)⊤ i≥s
+=λCKV + λCΛ−1K V .
+t−1 t t Bywritingdkv inarecursiveform,wehave
+s
+IncorrespondencetotheprecedingRecvoperation,another dkv =0∈Rd×d,
+n+1
+P2PcommunicationoperationSendisexecutedtotransmit (14)
+dkv =λdkv +q do⊤ .
+theacquiredKV inEq.(11)tothesubsequentrank(i+1) s−1 s s−1 s−1
+t
+In the sequence parallelism scenario, we have
+foritsinter-chunkcomputation.
+{Q ,K ,V ,O ,dO } which corresponds to the t-
+t t t t t
+Itisnoteworthythatinthebackwardpass,thet-thchunk th sub-sequence chunk on rank i, where t ∈ {1,··· ,T}
+necessitatesKV t−1asactivationtocalculategradients. To and i ∈ {1,··· ,W}. Same with the forward pass, the
+minimizecommunicationoperations,wecacheKV t−1on followingderivationsassumet=i,T =W.
+High-BandwidthMemory(HBM)toacceleratecomputation.
+WefirstcalculatedQwithrespectivetothet-thdatachunk,
+4LASP
+whichyields: Table1.CommunicationVolumeComparison.Lastcolumn:we
+dQ =[(dO V⊤)⊙M]K . (15) eliminatethecommonfactorsBdforeaseofcomparison.
+t,intra t t t
+Full Simplified
+SincethecomputationofdQ isindependent,itscalcu- Method
+t,intra Formulation Formulation
+lationcanbeparallelizedonallGPUs.Whilethecalculation
+ofdQ reflectstheinter-dependenceofchunks1tot−1 LASP Bd2/h d/h
+t,inter
+DeepSpeed-Ulysses 4BNd/T 4N/T
+onchunkt. Inordertocomputetheinterpart,wetransform
+Megatron-SP 2BNd+4BNd/T 2N +4N/T
+Eq.(13)as
+dq⊤ =do⊤ (cid:88) λs+C−iv k⊤
+s+C s+C i i AgainwetransformEq.(13)as:
+i≤s+C
+=do⊤
+s+C
+C (cid:88)+s λs+C−iv ik⊤
+i
++λsdo⊤ s+C(cid:88) λC−iv ik⊤
+i
+.
+dv⊤
+s
+=k⊤
+s
+(cid:88) i≥sλi−sq ido⊤
+i
+(23)
+i=C+1 i≤C C
+(16) =k⊤(cid:88) λi−sq do⊤+λC−sk⊤ (cid:88) λi−Cq do⊤.
+s i i s i i
+Thefirstpart(beforetheplussign)inEq.(16)corresponds
+i=s i≥C+1
+totheintra-chunk,whilethesecondpart(aftertheplussign) Thefirstandsecondterms(beforeandaftertheplussign)
+corresponds to the inter-chunk. In sequence parallelism corresponds to the computation of the intra- and inter-
+scenario,wecancalculatedQ t,interas chunks, respectively. In sequence parallelism, dV
+t,inter
+dQ =ΛdO KV⊤ . (17) canbecalculatedas:
+t,inter t t−1
+dV =λCΛ−1K dKV . (24)
+NotethatKV hasalreadybeencomputedandcacheddur- t,inter t t+1
+t
+ingtheforwardpass,sonocommunicationisrequiredhere Combinetheintraandinterpart,weobtainthefinalresults
+to obtain KV . Benefit from the KV state caching, the ofdQ ,dK anddV :
+t t t t
+calculationofdQ canalsobeexecutedinparallel. dQ =dQ +dQ ,
+t,inter t t,intra t,inter
+Next,letustakedKintoconsideration,dKwithinthet-th dK t =dK t,intra+dK t,inter, (25)
+chunkcanbecalculatedinparallelas dV t =dV t,intra+dV t,inter.
+dK =[(dO V⊤)⊙M]⊤Q . (18) Weprovidethecomprehensiveformulationofthebackward
+t,intra t t t
+passforLASPwithW =T inAlgorithm3.
+ThenwetransformEq.(13)as
+dk⊤ =v⊤(cid:88) λi−sdo q⊤
+s s i i 2.3.CommunicationAnalysis
+i≥s
+C (19) When examining the LASP algorithm, it is important to
+=v s⊤(cid:88) λi−sdo iq⊤ i +λC−sv s⊤ (cid:88) λi−Cdo iq⊤ i , notethattheforwardpassrequirescommunicationforthe
+i=s i≥C+1 KVactivationineachlinearattentionmodulelayer. The
+wherethefirstterm(beforetheplussign)correspondsto communicationvolumeisdeterminedbyBd2/h,whereB
+the intra-chunk, and the second term (after the plus sign) is the batch size and h is the number of heads. In com-
+correspondstotheinter-chunk. Theaboveequationcanbe parison,sequenceparallelisminMegatron-LMutilizesall-
+rewrittenintermsofchunksasfollow: gatheroperationstwiceaftertwolayernormalizationlayers
+dK t,inter =λCΛ−1V tdKV⊤ t+1. (20) withineachtransformerlayer,andareduce-scatteropera-
+Here a Recv operation is required here to pull dKV tion after the attention and Feedforward Neural Network
+t+1
+fromthe(t+1)-thchunk. TheninordertocomputedKV (FFN)layers. Thisresultsinacommunicationvolumeof
+forthe(t−1)-thchunk,dKVshouldbeupdatedas: 2BNd+4BNd/T. DeepSpeed uses all-to-all collective
+dKV = (cid:88) λs−tCq do⊤ communication operation (Thakur et al., 2005) for input
+t s s Q,K,V,andoutputOofeachattentionmodulelayer,re-
+s>tC
+sultinginacommunicationvolumeof4BNd/T.
+(t+1)C
+=λC (cid:88) λs−(t+1)Cq⊤ sdo s+(cid:88) λs−tCq sdo⊤ s Table1displaysacomparisonofcommunicationvolumes
+s>(t+1)C s=tC+1 acrossthreeframeworks. d/histheheaddimensionwhich
+=λCdKV t+1+(ΛQ t)⊤dO t. issetat128asusual (Lanetal.,2020). Inpracticalapplica-
+(21) tionswhereN/T ≥32,LASPisabletoachievethelowest
+ThenaSendoperationisperformedtopushdKV torank
+t theoreticalcommunicationvolume. Furthermore,thecom-
+(i−1).
+munication volume of LASP is not impacted by changes
+Finally,fordV,itsintrapartcanbecalculatedas insequencelengthN orsub-sequencelengthC,whichis
+ahugeadvantageforextremelylongsequenceparallelism
+dV =[(Q K⊤)⊙M]⊤dO . (22)
+t,intra t t t
+acrosslargeGPUclusters.
+5LASP
+2.4.SystemEngineeringOptimization multiplyingkeysandvaluesbeforetacklingthecomputa-
+tionallyintensiven×nmatrixmultiplication. Forinstance,
+KernelFusion.ToimprovetheefficiencyofLASPonGPU,
+Katharopoulosetal.(2020)use1+eluactivationfunction,
+weperformkernelfusioninboththeintra-chunkandinter-
+Qinetal.(2022b)utilizesthecosinefunctiontoimitateSoft-
+chunkcomputations,andalsofusedtheupdatesofKVand
+maxcharacteristics,and Choromanskietal.(2020);Zheng
+dKVintotheintra-chunkandinter-chunkcomputations.
+etal.(2022;2023)leveragesamplingtechniquestoclosely
+KVStateCaching. ToavoidrecomputingactivationKV replicatetheSoftmaxprocessareallstrategiesemployedto
+duringthebackwardpass,wechoosetostoreitintheHBM achievethis.
+oftheGPUrightaftercomputingitintheforwardpass.Dur-
+Memory-EfficientAttention. Rabe&Staats(2021)first
+ingthesubsequentbackwardpass,LASPdirectlyaccesses
+employstheonlineSoftmaxtechniquetoefficientlycompute
+KVforuse. ItisimportanttonotethatthesizeoftheKV
+numericallystableattentionscoressequentially,resulting
+activationcachedinHBMisd×d,whichisnotaffectedby
+inalinearmemoryforattention,yetstillneedsquadratic
+thesequencelengthN. WhentheinputsequencelengthN
+timecomplexity. WhileFlashAttention(Daoetal.,2022;
+isexceptionallylarge,thememoryusageofKVbecomes
+Dao,2023)employstilingtominimizethenumberofmem-
+insignificant.
+oryreads/writesbetweenGPU’shighbandwidthmemory
+(HBM)andon-chipSRAMtoreducetimeandmemoryin
+2.5.Data-SequenceHybridParallelism
+the training process, PagedAttention (Kwon et al., 2023)
+The technique of Data Parallelism is commonly used to optimizestheutilizationoftheKVcachememorybyreduc-
+splitinputdataalongthebatchdimensionforlarge-scale ingwasteandenablingadaptablesharingamongbatched
+distributeddeeplearning. However,LASPoffersadifferent requestsduringinference. RingAttention(Liuetal.,2023)
+approachbydividingdataalongthesequencedimension, reducesmemoryrequirementsforTransformermodelswhen
+whichmakesiteasiertointegratewithDataParallelism. As handlinglongsequencesbydistributingsequencesacross
+explained in Section 2.2 and illustrated in Fig. 2, LASP multiple devices and overlapping the communication of
+allowsforthespecificationofasmallersequenceparallel key-valueblockswithblockwiseattentioncomputation.
+sizethatisdivisiblebythedistributedworldsize. Thiscon-
+SequenceParallelism. Sequenceparallelismisawidely
+figurationresultsintheinputdatabeingsplitalongboththe
+usedmethodtotrainlongsequencesforneuralprocesslan-
+batchandsequencedimensions,whichisatypeofhybrid
+guage(NLP)tasks. Thistechniquehasbeenintegratedinto
+parallelismcalleddata-sequencehybridparallelism.
+manylargemodeltrainingframeworks,includingMegatron-
+Emerging as significant distributed training techniques, LM, DeepSpeed, and Colossal-AI. Megatron-LM imple-
+sharded data parallelism methodologies aim to mitigate ments SP along with model (tensor) parallelism (MP) to
+GPU memory usage during the training of large models. performlargematrixmultiplicationsonGPUs. However,
+TheZeRO-seriesoptimizers(Rajbhandarietal.,2020)in MP partitions the attention heads, which limits the maxi-
+DeepSpeedandFSDP(Zhaoetal.,2023)inPyTorchpro- mumparallelismdegreetobelessthanthenumberofat-
+pose to distribute model states, which include optimizer tentionheads. DeepSpeed-Ulyssesusesanall-to-allcom-
+states, gradients, and model parameters, across all GPUs municationprimitivetoreducecommunicationvolume,but
+withinthedistributedenvironment. Thisstrategicdistribu- also partitions attention heads and faces similar issues as
+tionsignificantlyreducesmemoryutilizationonindividual Megatron-LM.Colossal-AIintegratesring-stylecommuni-
+GPUs. As variants of data parallelism, these techniques cationcalledRingSelf-Attention(RSA)inSPtoefficiently
+seamlesslyalignwithLASP.However,theirfocusonmini- computeattentionscoresacrossdevices. RecentLightSeq
+mizingthememoryofmodelstatescomplementsLASP’s (Li et al., 2023) introduces SP with load balancing and
+objectiveofreducingactivationmemoryoneachGPU.By communicationoverlapscheduling,andagradientcheck-
+combiningthesemethods,traininglargemodelswithlong pointingstrategytoreduceactivationmemoryfurther.
+sequencelengthsbecomesmorefeasible.
+4.Experiments
+3.RelatedWork
+WeevaluateLASPontworepresentativelinearattention-
+LinearAttention. LinearTransformermodelsbypassthe basedmodels: TransNormerLLM(TNL)(Qinetal.,2024a)
+useofSoftmaxattentionbyadoptingvariousapproximation andLinearTransformer(Katharopoulosetal.,2020). TNL
+methods (Katharopoulosetal.,2020;Choromanskietal., is the latest large language model purely built upon lin-
+2020; Peng et al., 2021; Qin et al., 2022b;a; Yang et al., ear attention, while Linear Transformer is a classical lin-
+2023;Qin&Zhong,2023;Qinetal.,2024c)instead. The eartransformermodelrecognizedinthecommunity. Our
+centralconceptinvolvesusingthe"kerneltrick"tospeed assessment focuses on three key areas: I) the ability of
+up the calculation of the attention matrix, specifically by LASP to scale up sequence length on scaling-out GPUs,
+6LASP
+1e5 TNL-1B, FSDP Backend 1e5 TNL-1B, DDP Backend
+8
+16 GPUs 6 16 GPUs
+32 GPUs 32 GPUs
+6 64 GPUs 64 GPUs
+4
+128 GPUs 128 GPUs
+4
+2
+2
+0 2K 4K 8K 16K 32K 64K 128K 256K 512K 1024K2048K4096K 0 2K 4K 8K 16K 32K 64K 128K 256K 512K 1024K 2048K
+Sequence Length Sequence Length
+TNL-1B, FSDP Backend TNL-1B, DDP Backend
+80 80 8 GPUs 8 GPUs
+70 70
+16 GPUs 16 GPUs
+60 32 GPUs 60 32 GPUs
+50 64 GPUs 50 64 GPUs 40
+128 GPUs 40 128 GPUs
+30
+30
+20
+20
+10
+2K 4K 8K 16K 32K 64K 128K 256K 512K 1024K2048K4096K8192K 10 2K 4K 8K 16K 32K 64K 128K 256K 512K 1024K 2048K 4096K
+Sequence Length Sequence Length
+Figure3.ScalabilityEvaluationofLASPonThroughput(tokens/sec)andMemoryUsage.Left:IntegrationofLASPwithFSDP
+backend;Right:IntegrationofLASPwithDDPbackend.TheTNL-1Bmodelisused,withabatchsizeof1acrossupto128A10080GB
+GPUs.Thesign"×"withadottedlinerepresentsoccurringanOutofMemory(OOM).
+II)theconvergencewhenusingLASP,andIII)speedeval- 81e5 TNL-1B
+uation when using LASP and its comparison with other LASP
+SP methods. No Activation Checkpointing (AC) (Ko- 6 DeepSpeed-Ulysses
+Megatron-SP
+rthikanti et al., 2022) techniques are used in following 4
+experiments to reduce activation memory, except experi- 2
+ments in Section 4.3. This is because although the adop- 0
+2K 4K 8K 16K 32K 64K 128K 256K 512K 1024K 2048K 4096K
+tionofACwillfurtherenableslongersequencelengths,it Sequence Length
+will cover up the ability of our sequence parallel method 1e4 TNL-7B
+LASP. All experiments are conducted on a GPU cluster LASP
+4 DeepSpeed-Ulysses
+equippedwith128A10080GGPUs. Ourimplementation Megatron-SP
+isbuiltonMetaSeq(Zhangetal.,2022),aPyTorch-based 2
+sequence modeling framework with FairScale (FairScale
+authors,2021)integrated. Formoredetailsofhardwareand 0
+2K 4K 8K 16K 32K 64K 128K 256K 512K 1024K
+software,seeAppendixA.1. Sequence Length
+Figure4.Speed Comparison (tokens/sec) of LASP Against
+Experimental Setup. The training configuration is set DeepSpeed-UlyssesandMegatron-SP.Thesign"×"withadot-
+with specific hyperparameters: a learning rate of 0.0005 ted line represents occurring an Out of Memory (OOM). The
+tocontrolthestepsize,acapof50,000updatestodefine evaluationutilizestheTNL-1Band7Bmodelswithabatchsize
+of1on64A10080GBGPUs.Theparallelismsizeforthesethree
+thetrainingduration,anda2,000-updatewarmupperiodto
+methodsisconfiguredto64.
+stabilizeearlytrainingbygraduallyadjustingthelearning
+rate(Zhouetal.,2020). Additionally,aweightdecayrate
+with1Bparameters,on128GPUs.
+of0.01isusedforregularizationtoavoidover-fitting. The
+Adamoptimizer,withbetavaluesof0.9and0.999,ischo- Importantly,theimplementationofLASPallowsforalinear
+senformanagingthemomentumandscalingofgradients, increaseinthemaximumsequencelengthcapacity,directly
+aidingineffectiveandstabletrainingconvergence. Differ- proportional(linear)tothenumberofGPUsused. Forin-
+entDDPbackends,includingPyTorchDDP(abbr. DDP), stance,asequencelengthof512Kcanbetrainedusing16
+Legacy DDP, FSDP, ZeRO-series, are selected in experi- GPUs,while64GPUs(4×)hasisabletotrain2048K(4×)
+mentsforcross-validationofcompatibilitywithLASP. sequencelength. EnablingLASPmaintainsahighthrough-
+putlevelevenwithmoreGPUsused. Furthermore,LASP
+4.1.ScalabilityandSpeedComparison demonstratesconsistentscalabilityperformanceunderboth
+theFSDPandDDPbackends. Formorequantitativescala-
+The scalability results regarding throughput and memory bilityresultsofLASP,seeTable4inAppendixA.2.
+usagewithvaryingsequencelengthsandnumberofGPUs
+Wefurthermoreconductedacomparisonofsequencepar-
+areillustratedinFig. 3. ByusingLASP,wesuccessfully
+allelism on TNL 1B and 7B models against two existing
+scale the sequence length up to 4096K using the FSDP
+SPmethods: DeepSpeed-Ulysses(Jacobsetal.,2023)and
+backendand2048KwiththeDDPbackendonaTNLmodel
+7
+tuphguorhT
+)BG(
+UPG
+reP
+yromeM
+tuphguorhT
+)BG(
+UPG
+reP
+yromeM
+tuphguorhT
+tuphguorhTLASP
+Table2.Convergence Performance of LASP. All experiments use 8 A100 80G GPUs, 16K sequence length, and batch size of 1.
+The results cover various DDP backends in conjunction with LASP. We explore the performance of two linear attention models:
+TransNormerLLM(TNL)andLinearTransformer,bothwith0.4Bparameters,across50Kupdates.
+Model Parameters Method Loss Method Loss
+DDP 3.719 LASP+DDP 3.715
+LegacyDDP 3.709 LASP+LegacyDDP 3.705
+TNL FSDP 3.717 LASP+FSDP 3.714
+0.4B
+(Qinetal.,2024a) ZeRO-1 3.653 LASP+ZeRO-1 3.653
+ZeRO-2 3.655 LASP+ZeRO-2 3.649
+ZeRO-3 3.656 LASP+ZeRO-3 3.649
+DDP 5.419 LASP+DDP 5.408
+LegacyDDP 5.425 LASP+LegacyDDP 5.413
+Linear
+FSDP 5.428 LASP+FSDP 5.441
+Transformer 0.4B
+ZeRO-1 5.114 LASP+ZeRO-1 5.118
+(Katharopoulosetal.,2020)
+ZeRO-2 5.105 LASP+ZeRO-2 5.120
+ZeRO-3 5.110 LASP+ZeRO-3 5.123
+Megatron-SP(Korthikantietal.,2022).Allresultspresented sequencelengthmarkedly,butencountersslightlythrough-
+inFig. 4areobtainedon64GPUs. Wekeepusingafixed putreduction. Thedistinctionisthescaling-upperformance
+batchsizeof1,inordertohighlighttheabilityofLASPto of LASP is directly proportional to the number of GPUs
+handleextremelylonesequences. used.BycombiningACandLASP,wecanobtainsurprising
+maximumsequencelengths496Kand768Konsinglenode
+LASPdemonstratesanotableenhancementinthroughput
+withusingDDPandFSDPbackends,respectively.
+forlinearattention,primarilyduetoitsefficientcommuni-
+cation design that facilitates the exchange of linear atten-
+Table3.AblationonActivationReducingMethods.BothDDP
+tion intermediate states. Specifically, LASP outperforms
+andFSDPbackendsaretested. Asinglenodeequippedwith8
+DeepSpeed-Ulysses by 38% and Megatron by 136% in
+A10080GGPUsisusedtotrainaTNL-1Bmodel, stillwitha
+termsofthroughputat256Ksequencelengthon1Bmodel,
+batchsizeof1forallexperiments.
+withtheperformancegapwideningasthesequencelength
+Maximum Throughput
+increases. Additionally, system optimizations like kernel Method
+SequenceLength (tokens/sec)
+fusionandKVStatecachingenableLASPtosupportthe
+DDP 12K 131286.0
+longestsequencelengthswithinthesamecluster,achieving
+DDP+AC 64K 117429.5
+2048Kforthe1Bmodeland512Kforthe7Bmodel.
+DDP+LASP 96K 126829.4
+DDP+AC+LASP 496K 100837.8
+4.2.Convergence FSDP 16K 145303.6
+FSDP+AC 96K 114464.0
+Table2presentsconvergenceresultsoftwolinear-attention
+FSDP+LASP 120K 138598.8
+basedmodels: TNLandLinearTransformer,evaluatedon FSDP+AC+LASP 768K 106578.3
+anepoch-by-epochbasis. Theexperimentswereconducted
+usingthesametrainingcorpus: thePile(Gaoetal.,2020).
+5.Conclusion
+Bothlinearmodelshas0.4Bparameters,demonstratedcon-
+sistentlossvalueswhentrainingwithorwithoutLASP.All WepresentedLASP,effectivelyaddressingthelimitations
+experimentsundergoes50Ksteps. Theuniformlosscon- ofexistingSPmethodsonlineartransformersbyleverag-
+vergenceacrossvariousDDPbackendsdemonstratesthat ing the specific features of linear attention, which signif-
+LASPdoesnotnegativelyaffectmodelconvergence. icantly enhanced parallelism efficiency and usability for
+linearattention-basedlanguagemodels. Throughtheimple-
+4.3.AblationonActivationReducingMethods mentationofanefficientP2Pcommunicationmechanism
+and engineering optimizations such as kernel fusion and
+LASP prominently reduces the activation memory usage
+KV state caching, LASP achieved a notable reduction in
+duringtrainingprocessonperGPU,whichisorthometric
+communicationtrafficandimprovedhardwareutilization
+withanotheractivationmemoryreducingmethod:activation
+onGPUclusters. Compatibilitywithalltypesofbatch-level
+checkpointing. Followingweconductablationexperiments
+DDPmethodsensuredthepracticabilityofLASPforlarge-
+onACandLASPtorevealtheirperformanceonmemoryre-
+scaledistributedtraining. Ourexperimentshighlightedthe
+duction. WithpureDDPandFSDP,themaximumsequence
+advantagesofLASPonscalability,speed,memoryusage
+lengthsareabletotrainon8GPUsare12Kand16K,re-
+andconvergenceperformanceforlineartransformers,com-
+spectively. BothACandLASPcanenlargethemaximum
+paringwithexistingSPmethodsinout-of-boxframeworks.
+8LASP
+BroaderImpact with linear attention. In International Conference on
+MachineLearning,pp.5156–5165.PMLR,2020.
+Thisworkpresentsasignificantadvancementinthefieldof
+artificialintelligenceandmachinelearning,particularlyin Korthikanti,V.,Casper,J.,Lym,S.,McAfee,L.,Andersch,
+enhancingtheefficiencyandscalabilityoflinearattention- M.,Shoeybi,M.,andCatanzaro,B. Reducingactivation
+based language models. By enabling the processing of recomputationinlargetransformermodels,2022.
+sequencesuptosignificantlylongerthancurrentmethods
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu,
+andacceleratingcomputationalspeed,LASPhasthepoten-
+C.H.,Gonzalez,J.E.,Zhang,H.,andStoica,I. Efficient
+tialtovastlyimprovetheperformanceinnaturallanguage
+memorymanagementforlargelanguagemodelserving
+understanding,genomicsequenceanalysis,time-seriesfore-
+withpagedattention,2023.
+casting,andmore. However,theincreasedcapabilityand
+efficiencymayalsoraiseethicalandsocietalconcerns,such Lan,Z.,Chen,M.,Goodman,S.,Gimpel,K.,Sharma,P.,
+as potential misuse in creating persuasive but misleading andSoricut,R.ALBERT:AliteBERTforself-supervised
+information, orinsurveillancetechnology. Despitethese learningoflanguagerepresentations,2020.
+concerns,thecontributionsofLASPonreducingcomputa-
+Li, D., Shao, R., Xie, A., Xing, E. P., Gonzalez, J. E.,
+tionalcostsandenergyconsumptionintraininglargemodels
+Stoica, I., Ma, X., andZhang, H. LightSeq: Sequence
+couldhavepositiveenvironmentalimplications.
+levelparallelismfordistributedtrainingoflongcontext
+transformers,2023.
+Acknowledgement
+Li, S., Zhao, Y., Varma, R., Salpekar, O., Noordhuis, P.,
+ThisworkispartiallysupportedbytheNationalKeyR&D
+Li,T.,Paszke,A.,Smith,J.,Vaughan,B.,Damania,P.,
+ProgramofChina(NO.2022ZD0160100).
+and Chintala, S. Pytorch Distributed: Experiences on
+acceleratingdataparalleltraining,2020.
+References
+Li,S.,Xue,F.,Baranwal,C.,Li,Y.,andYou,Y. Sequence
+Choromanski,K.,Likhosherstov,V.,Dohan,D.,Song,X., Parallelism:Longsequencetrainingfromsystemperspec-
+Gane, A., Sarlós, T., Hawkins, P., Davis, J., Mohiud- tive,2022.
+din, A., Kaiser, L., Belanger, D., Colwell, L. J., and
+Liu, H., Zaharia, M., and Abbeel, P. Ring attention with
+Weller,A. Rethinkingattentionwithperformers. ArXiv,
+blockwisetransformersfornear-infinitecontext,2023.
+abs/2009.14794,2020.
+Peng,H.,Pappas,N.,Yogatama,D.,Schwartz,R.,Smith,
+Dao, T. FlashAttention-2: Faster attention with bet-
+N. A., and Kong, L. Random feature attention. In
+ter parallelism and work partitioning. arXiv preprint
+9th International Conference on Learning Representa-
+arXiv:2307.08691,2023.
+tions,ICLR2021,VirtualEvent,Austria,May3-7,2021.
+Dao,T.,Fu,D.Y.,Ermon,S.,Rudra,A.,andRé,C.FlashAt- OpenReview.net,2021.URLhttps://openreview.
+tention: Fastandmemory-efficientexactattentionwith net/forum?id=QtTKTdVrFBB.
+IO-awareness. InAdvancesinNeuralInformationPro-
+Qin,Z.andZhong,Y. Acceleratingtoeplitzneuralnetwork
+cessingSystems,2022.
+withconstant-timeinferencecomplexity. InProceedings
+ofthe2023ConferenceonEmpiricalMethodsinNatu-
+FairScale authors. Fairscale: A general purpose
+modular pytorch library for high performance and
+ralLanguageProcessing.AssociationforComputational
+large scale training. https://github.com/ Linguistics,December2023.
+facebookresearch/fairscale,2021.
+Qin, Z., Han, X., Sun, W., Li, D., Kong, L., Barnes, N.,
+andZhong, Y. Thedevilinlineartransformer. InPro-
+Gao,L.,Biderman,S.,Black,S.,Golding,L.,Hoppe,T.,
+ceedingsofthe2022ConferenceonEmpiricalMethods
+Foster,C.,Phang,J.,He,H.,Thite,A.,Nabeshima,N.,
+in Natural Language Processing, pp. 7025–7041, Abu
+Presser,S.,andLeahy,C. ThePile: An800gbdatasetof
+Dhabi,UnitedArabEmirates,December2022a.Associ-
+diversetextforlanguagemodeling,2020.
+ationforComputationalLinguistics. URLhttps://
+Jacobs, S. A., Tanaka, M., Zhang, C., Zhang, M., Song, aclanthology.org/2022.emnlp-main.473.
+S.L., Rajbhandari, S., andHe, Y. DeepspeedUlysses:
+Qin, Z., Sun, W., Deng, H., Li, D., Wei, Y., Lv, B.,
+System optimizations for enabling training of extreme
+Yan, J., Kong, L., and Zhong, Y. cosFormer: Rethink-
+longsequencetransformermodels,2023.
+ing softmax in attention. In International Conference
+Katharopoulos, A., Vyas, A., Pappas, N., and Fleuret, F. on Learning Representations, 2022b. URL https:
+TransformersareRNNs:Fastautoregressivetransformers //openreview.net/forum?id=Bl8CQrx2Up4.
+9LASP
+Qin,Z.,Li,D.,Sun,W.,Sun,W.,Shen,X.,Han,X.,Wei, Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+Y.,Lv,B.,Yuan,F.,Luo,X.,etal. Scalingtransnormerto A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+175billionparameters. arXivpreprintarXiv:2307.14995, Bhosale,S.,Bikel,D.,Blecher,L.,Ferrer,C.C.,Chen,
+2023a. M.,Cucurull,G.,Esiobu,D.,Fernandes,J.,Fu,J.,Fu,W.,
+Fuller,B.,Gao,C.,Goswami,V.,Goyal,N.,Hartshorn,
+Qin,Z.,Sun,W.,Lu,K.,Deng,H.,Li,D.,Han,X.,Dai,Y., A.,Hosseini,S.,Hou,R.,Inan,H.,Kardas,M.,Kerkez,
+Kong,L.,andZhong,Y. Linearizedrelativepositional V.,Khabsa,M.,Kloumann,I.,Korenev,A.,Koura,P.S.,
+encoding. TransactionsonMachineLearningResearch, Lachaux,M.-A.,Lavril,T.,Lee,J.,Liskovich,D.,Lu,Y.,
+2023b. Mao,Y.,Martinet,X.,Mihaylov,T.,Mishra,P.,Molybog,
+I.,Nie,Y.,Poulton,A.,Reizenstein,J.,Rungta,R.,Saladi,
+Qin,Z.,Li,D.,Sun,W.,Sun,W.,Shen,X.,Han,X.,Wei,
+K.,Schelten,A.,Silva,R.,Smith,E.M.,Subramanian,R.,
+Y.,Lv,B.,Luo,X.,Qiao,Y.,andZhong,Y. TransNormer-
+Tan,X.E.,Tang,B.,Taylor,R.,Williams,A.,Kuan,J.X.,
+LLM: A faster and better large language model with
+Xu,P.,Yan,Z.,Zarov,I.,Zhang,Y.,Fan,A.,Kambadur,
+improvedtransnormer,2024a.
+M.,Narang,S.,Rodriguez,A.,Stojnic,R.,Edunov,S.,
+andScialom,T.Llama2:Openfoundationandfine-tuned
+Qin, Z., Sun, W., Li, D., Shen, X., Sun, W., and Zhong,
+chatmodels,2023b.
+Y. Lightning Attention-2: A free lunch for handling
+unlimited sequence lengths in large language models,
+Vaswani,A.,Shazeer,N.,Parmar,N.,Uszkoreit,J.,Jones,
+2024b.
+L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. At-
+tentionisallyouneed. Advancesinneuralinformation
+Qin,Z.,Yang,S.,andZhong,Y. Hierarchicallygatedrecur-
+processingsystems,30,2017.
+rentneuralnetworkforsequencemodeling. Advancesin
+NeuralInformationProcessingSystems,36,2024c.
+Yang,S.,Wang,B.,Shen,Y.,Panda,R.,andKim,Y. Gated
+linearattentiontransformerswithhardware-efficienttrain-
+Rabe, M. N. and Staats, C. Self-attention does not need
+ing. arXivpreprintarXiv:2312.06635,2023.
+o(n2) memory. CoRR, abs/2112.05682, 2021. URL
+https://arxiv.org/abs/2112.05682.
+Zhang, S., Roller, S., Goyal, N., Artetxe, M., Chen, M.,
+Chen, S., Dewan, C., Diab, M., Li, X., Lin, X. V., Mi-
+Rajbhandari,S.,Rasley,J.,Ruwase,O.,andHe,Y. Zero:
+haylov,T.,Ott,M.,Shleifer,S.,Shuster,K.,Simig,D.,
+Memoryoptimizationstowardtrainingtrillionparameter
+Koura, P. S., Sridhar, A., Wang, T., and Zettlemoyer,
+models,2020.
+L. OPT:Openpre-trainedtransformerlanguagemodels,
+2022.
+Shoeybi,M.,Patwary,M.,Puri,R.,LeGresley,P.,Casper,
+J., and Catanzaro, B. Megatron-LM: Training multi-
+Zhao,Y.,Gu,A.,Varma,R.,Luo,L.,Huang,C.-C.,Xu,M.,
+billion parameter language models using model paral-
+Wright, L., Shojanazeri, H., Ott, M., Shleifer, S., et al.
+lelism. arXivpreprintarXiv:1909.08053,2019.
+PytorchFSDP:experiencesonscalingfullyshardeddata
+parallel. arXivpreprintarXiv:2304.11277,2023.
+Sun,W.,Qin,Z.,Sun,W.,Li,S.,Li,D.,Shen,X.,Qiao,Y.,
+andZhong,Y. CO2: Efficientdistributedtrainingwith Zheng,L.,Wang,C.,andKong,L. Linearcomplexityran-
+fullcommunication-computationoverlap. arXivpreprint domizedself-attentionmechanism. InInternationalCon-
+arXiv:2401.16265,2024. ferenceonMachineLearning,pp.27011–27041.PMLR,
+2022.
+Tang,X.,Sun,W.,Hu,S.,Sun,Y.,andGuo,Y. MS-Net: A
+multi-pathsparsemodelformotionpredictioninmulti- Zheng, L., Yuan, J., Wang, C., and Kong, L. Efficient
+scenes. IEEE Robotics and Automation Letters, 9(1): attentionviacontrolvariates.InInternationalConference
+891–898,2024. doi: 10.1109/LRA.2023.3338414. on Learning Representations, 2023. URL https://
+openreview.net/forum?id=G-uNfHKrj46.
+Thakur,R.,Rabenseifner,R.,andGropp,W. Optimization
+ofcollectivecommunicationoperationsinmpich. The Zhou,B.,Liu,J.,Sun,W.,Chen,R.,Tomlin,C.J.,andYuan,
+InternationalJournalofHighPerformanceComputing Y. pbSGD:Poweredstochasticgradientdescentmethods
+Applications,19(1):49–66,2005. foracceleratednon-convexoptimization. InIJCAI,pp.
+3258–3266,2020.
+Touvron,H.,Lavril,T.,Izacard,G.,Martinet,X.,Lachaux,
+M.-A.,Lacroix,T.,Rozière,B.,Goyal,N.,Hambro,E.,
+Azhar,F.,Rodriguez,A.,Joulin,A.,Grave,E.,andLam-
+ple,G. LLaMA:Openandefficientfoundationlanguage
+models. arXivpreprintarXiv:2302.13971,2023a.
+10LASP
+A.Appendix
+A.1.HardwareandSoftware
+Hardware. Ourexperimentalconfigurationinvolvesamaximumof16DGX-A100servers,eachequippedwith8A100
+GPUs,theseGPUsareinterconnectedthroughNVSwitch,ensuringaninter-GPUbandwidthof600GBps. Forinter-node
+communication,weemployRoCE(RDMAoverConvergedEthernet)technology,utilizing8RoCERDMAadaptersineach
+server. Thissetupfacilitatesefficientinter-servercommunicationwithabandwidthcapacityof800Gbps.
+Software. ExperimentsareimplementedinPyTorch2.1.1andTriton2.0.0withCUDA11.7,cuDNN8.0,andNCCL
+2.14.3. OuralgorithmisdevelopeduponMetaseq0.0.1. TheLinearTransformerexperimentsbuildonhttps://github.
+com/idiap/fast-transformers.
+A.2.AdditionalExperimentResults
+SeeTable4innextpage.
+11LASP
+Table4.QuantitativeScalabilityResultsofLASPonThroughput(tokens/sec)andMemoryUsagePerGPU(GB).Experimentsare
+performedonTNL-1B,scalingsequencelengthfrom2Kto4096Kwithabatchsizeof1.BothDDPandFSDPbackendsaretested.
+LASP+DDP LASP+FSDP
+SequenceLength GPUs
+Throughput Memory Throughput Memory
+16 1893.3 22.5 1780.5 6.9
+32 1645.4 22.5 1671.2 6.6
+2K
+64 1639.7 22.5 1589.8 6.4
+128 1610.9 22.5 1566.2 6.2
+16 3686.9 22.5 3519.9 6.9
+32 3458.4 22.5 3304.4 6.6
+4K
+64 3245.3 22.5 3152.2 6.4
+128 3211.5 22.5 3075.7 6.2
+16 7076.9 22.5 6924.8 6.9
+32 7319.3 22.5 6472.9 6.6
+8K
+64 6869.1 22.5 6459.4 6.4
+128 6793.6 22.5 6398.4 6.2
+16 14036.8 22.5 13513.7 6.9
+32 14671.7 22.5 12978.9 6.6
+16K
+64 13828.6 22.5 12569.4 6.4
+128 13484.5 22.5 12184.5 6.2
+16 28354.6 24.4 25727.2 6.9
+32 27863.6 22.5 26646.4 6.6
+32K
+64 25275.9 22.5 25201.4 6.4
+128 24523.8 22.5 25638.9 6.2
+16 52993.1 28.3 48542.8 11
+32 53393.2 24.4 49648.6 6.6
+64K
+64 52024.2 22.5 49780.5 6.4
+128 51983.3 22.5 49833.3 6.2
+16 107682 36.1 84901.9 19
+32 93371.5 28.3 92718.8 10.6
+128K
+64 100046 24.4 96771.6 6.4
+128 95828.5 22.5 98975.9 6.2
+16 202057 51.7 136765 35.2
+32 190675 36.1 159326 18.7
+256K
+64 193341 28.3 170996 10.4
+128 187347.7 24.4 178628.4 6.3
+16 OOM OOM 201791 67.5
+32 323596 51.7 250663 34.8
+512K
+64 304366 36.1 284803 18.5
+128 295128.5 28.3 298755 10.1
+16 OOM OOM OOM OOM
+32 OOM OOM 358478 67.1
+1024K
+64 523119 51.7 437728 34.6
+128 508383 36.1 459794 18.2
+16 OOM OOM OOM OOM
+32 OOM OOM OOM OOM
+2048K
+64 OOM OOM 585326 66.9
+128 658432 51.7 597953 33.8
+16 OOM OOM OOM OOM
+32 OOM OOM OOM OOM
+4096K
+64 OOM OOM OOM OOM
+128 OOM OOM 792705 66.2
+12

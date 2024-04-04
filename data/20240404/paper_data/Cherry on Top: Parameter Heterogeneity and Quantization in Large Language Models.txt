@@ -1,0 +1,560 @@
+Cherry on Top: Parameter Heterogeneity and Quantization in
+Large Language Models
+Wanyun Cui*, Qianle Wang∗
+Shanghai University of Finance and Economics
+cui.wanyun@sufe.edu.cn, wql20000111@stu.sufe.edu.cn
+April 4, 2024
+Abstract
+This paper reveals the phenomenon of parameter heterogeneity in large language models
+(LLMs). We find that a small subset of ”cherry” parameters exhibit a disproportionately large
+influenceonmodelperformance,whilethevastmajorityofparametershaveminimalimpact. This
+heterogeneityisfoundtobeprevalentacrossdifferentmodelfamilies,scales,andtypes. Motivated
+bythisobservation,weproposeCherryQ,anovelquantizationmethodthatunifiestheoptimization
+of mixed-precision parameters. CherryQ identifies and preserves the critical cherry parameters in
+highprecisionwhileaggressivelyquantizingtheremainingparameterstolowprecision. Extensive
+experimentsdemonstratetheeffectivenessofCherryQ.CherryQoutperformsexistingquantization
+approaches in terms of perplexity and downstream task performance. Notably, our 3-bit quan-
+tized Vicuna-1.5 exhibits competitive performance compared to their 16-bit counterparts. These
+findings highlight the potential of CherryQ for enabling efficient deployment of LLMs by taking
+advantage of parameter heterogeneity.
+1 Introduction
+Therapiddevelopmentoflargelanguagemodels(LLMs)hasincreasedthedemandofefficientdeploy-
+ment in various environments [1, 23, 12, 2]. However, the parameter size poses significant challenges
+for GPU memory requirements. Quantization, which reduces the bit-width of model parameters, has
+emerged as a solution to alleviate memory constraints of LLM deployment [14, 13, 24, 25, 18].
+Quantizing parameters from higher bits to the integer points in the lower-bit space inevitably per-
+turbs the parameters from its optimum, leading to a degradation in performance (i.e. quantization
+error). To mitigate this error, various approaches have been proposed, such as iterative block-wise
+quantization ([15, 10, 8]), gradient approximation ([18, 3]), and low-rank approximation of pertur-
+bations ([9]). However, existing approaches still cause clear performance degradation, especially for
+extreme low bits (e.g. 3-bit).
+Before investigating how to further mitigate the performance degradation, we raise a more fun-
+damental question: To what extent can quantization errors be mitigated? Our study shows that the
+answer is more complex than expected. For the vast majority (>99%) of parameters, their quantiza-
+tion errors are minimal and thus can be alleviated or ignored. Nonetheless, there exists a small subset
+of parameters (<1%) for which the quantization errors are substantial and hard to mitigate.
+ConsiderFigure1aasanexample. Weshowthescatterplotofimpactsonquantizationerrorwhen
+perturbing each individual parameters in a parameter matrix from LLaMA2-7b [23]. The derivation
+of impacts are detailed in § 3. As 99% of parameters are in the range of (0,0.1), a small subset of
+“cherry” parameters exhibit a disproportionately large influence in the range of (5,30), with 50-300
+times greater than the maximum value of the remaining 99% parameters.
+This phenomenon is not an isolated occurrence. We observed similar patterns across different
+LLM scales (Figure 1a1b), different LLM families, including Mistral [12] (Figure 1c) and Gemma [22]
+(Figure 1d), and both base models and chat models (Vicuna-1.5 [5] Figure 1e1f). The consistent
+∗Equalcontribution
+1
+4202
+rpA
+3
+]LC.sc[
+1v73820.4042:viXra123 840 ... 000 000 ... 012
+0 2000
+40091 09%
+%
+45 .. 00 00 .. 000 .36
+0 0 2000
+40091 09%
+%
+12 50 00 .. 00 013 ... 050
+0 2000
+40091 09%
+%
+3.0 100.0
+12.0 2.0
+50.0
+6.0 1.0
+0.0 0.0 0.0
+0 1000 2000 3000 4000 0 1000 2000 3000 4000 0 1000 2000 3000 4000
+Parameter Index Parameter Index Parameter Index
+(a) LLaMA2 7B (b) LLaMA2 13B (c) Mistral 7B
+layers.15.self attn.v proj layers.15.self attn.v proj layers.15.self attn.q proj
+2.8 0.1
+800.0 6.0 60.0 0.4 1% 0.05 1%
+600.0 03 .. 00 91 9% % 45.0 00 .. 02 0 2000 4009 09% 2.1 0.0 0 2000 4009 09%
+0 2000 4000
+1.4
+400.0 30.0
+200.0 15.0 0.7
+0.0 0.0 0.0
+0 1000 2000 3000 4000 0 1000 2000 3000 4000 0 1000 2000 3000 4000
+Parameter Index Parameter Index Parameter Index
+(d) Gemma 7B (e) Vicuna-1.5 7B (f) Vicuna-1.5 13B
+layers.25.mlp.down proj layers.15.self attn.v proj layers.16.self attn.v proj
+Figure1: ScatterplotofparameterimpactsindifferentLLMs. Werandomlysampled4096parameters
+from the corresponding parameter matrix. Each point represents the impact of an individual param-
+eter. Insets show the zoomed-in y-axis. The heterogeneity is found in different model scales (1a,1b),
+different model families (1c, 1d), and both base models and chat models (1e, 1f).
+presence suggests that it is an inherent characteristic of LLMs. We will elaborate the evidences from
+a more macro view in § 5. Based on these findings, we introduce the phenomenon of parameter
+heterogeneity:
+Parameter Heterogeneity in LLMs: Consider the impact of parameter perturbations on the
+model’s behavior, a small set of “cherry” parameters have a disproportionately large influence. In
+contrast, the vast majority of normal parameters have a minimal impact.
+We emphasize that the parameter impact is heterogeneous, as it exhibits a more severe imbalance
+compared to the commonly observed imbalance in LLMs [18, 17, 6, 7]. As a contrast, in § 5, we
+demonstrate that the parameter impact is much more heterogeneous than the parameter magnitude,
+although the latter one is also found to be imbalanced [7, 18]. This stark difference highlights the
+significance of considering parameter impact when optimizing and quantizing LLMs.
+The parameter heterogeneity poses new challenges for conventional quantization strategies. Al-
+though quantizing most normal parameters will cause little performance degradation, cherry param-
+eters are highly sensitive to quantization-induced perturbations. However, existing strategies usually
+fail to preserve the delicate structure of these critical parameters [8, 18].
+Addressing this challenge is not trivial. One straightforward way is to employ a mixed-precision
+quantization[13],representingcherryparametersandnormalparameterswithhighandlowprecisions,
+respectively. However, the simultaneous optimization of both types of parameters becomes a major
+challenge. In the widely used GPTQ [8] approach and PTQ framework, the optimal values of the
+early quantized parameters may change as the cherry parameters are updated. However, parameters
+cannotbeupdatedoncetheyarequantizedinPTQ,whichlimitstheearlyquantizedparametersfrom
+reaching their optimal values.
+To address this challenge, we employ the quantization-aware training (QAT) framework to handle
+parameter heterogeneity. Our quantization optimize the mixed-precision parameters with a unified
+backpropagation. Forthecherryparameters, wemaintaintheir16-bitrepresentationsandapplystan-
+2
+tcapmI
+tcapmI
+tcapmI
+tcapmI
+tcapmI
+tcapmIdard gradient descent. For the normal parameters, we apply an extra Straight-Through Estimator
+(STE) trick [3] for gradient descent. Therefore, all parameters are continuously and uniformly opti-
+mized. We denote the approach as CherryQ (Cherry parameter and Quantization-aware training).
+ExtensiveexperimentsondifferentmodelsandbenchmarksdemonstratetheefficacyofCherryQ.It
+consistentlyyieldsthelowestperplexityonmostsettings. Notably,our3-bitVicuna-1.5modelexhibit
+performance on par with the 16-bit counterpart on Vicuna-bench [5].
+We believe that our work opens up new avenues for understanding and harnessing the complex
+interplay of parameters in LLMs. The heterogeneity offers a novel perspective to navigate the trade-
+off between parameter efficiency and performance.
+2 Related Work
+Quantization Strategies for LLMs Various quantization strategies have been proposed in the
+literature to reduce the precision of weights and activations while maintaining acceptable accuracy.
+These strategies can be broadly categorized into post-training quantization and quantization-aware
+training [14]. Post-training quantization methods, such as OBD, OBS, and GPTQ, directly quantize
+the pre-trained model without fine-tuning [15, 10, 8]. On the other hand, quantization-aware training
+methods, such as LLM-QAT [18], incorporate quantization operations into the training process to
+jointly optimize the quantized model. Some works also explore mixed-precision quantization [13] and
+adaptive quantization bins [7] to achieve a better trade-off between accuracy and efficiency.
+Outliers in Language Model Quantization The idea of modeling parameter outliers in LLM
+quantization is not new. The exploration of outliers primarily includes the perspectives of magni-
+tude [18, 7] and activations [4, 6]. For example, from the magnitude perspective, QLoRA assumes
+thatparametersfollowaGaussiandistribution[7]anddesignsinformation-theoreticallyoptimalquan-
+tized bins based on this assumption. [18] keeps outlier parameters in 16-bit precision. From the
+activationperspective,[17]migratestheoutlieramplifiertosubsequentmodulesthroughanequivalent
+transformation. Additionally, SqueezeLLM also measures outliers from the perspective of parameter
+impact [13]. To the best of our knowledge, our work is the first to systematically reveal the outliers
+(heterogeneity) of parameter impact across different models, and we show a more pronounced im-
+balance in parameter impacts compared to magnitudes (§ 6.4). Furthermore, we propose a method
+to unify outlier (cherry) parameter optimization and normal parameter optimization, addressing the
+optimization challenges of heterogeneous parameters.
+3 Quantifying the Impact of Parameters on Model Perfor-
+mance
+Theimpactofparametersonmodelperformanceisquantifiedbytheincreaseofthetraininglosswhen
+perturbingtheparameterweight,whichiswidelyusedinpost-trainingquantizationapproaches[15,10,
+8]. We adopt a second-order Taylor approximation of the training loss w.r.t. parameter perturbation.
+Given a parameter w and a small perturbation ∆ applied to it, such that w ← w +∆, the change
+i i i
+in the training loss can be expressed as:
+1
+L(w +∆)−L(w )=g ∆+ H ∆2+O(|∆|3) (1)
+i i i 2 ii
+where g = E[∂L] represents the expected gradient of the loss with respect to w , and H = E[∂2L]
+i ∂wi i ii ∂w i2
+denotes the i-th value of the Hessian matrix of the loss. Since the target model is a well-converged
+model, we can assume that g ≈0, simplifying the expression to:
+i
+1
+L(w +∆)−L(w )≈ H ∆2 (2)
+i i 2 ii
+Therefore, H quantify the impact of quantization-induced perturbations on the model’s training
+ii
+loss. ParameterswithlargervaluesofH exhibithighersensitivitytoquantizationandrequirecareful
+ii
+treatment to maintain model performance. We denote H as the impact of w .
+ii i
+Efficient Computation Computing H of the diagonal of Hessian matrix for each parameter is
+ii
+computationallyexpensive,particularlyforlarge-scalemodels. Toovercomethischallenge,wepropose
+3an efficient approximation using the Fisher Information Matrix (F). Since H is the Hessian matrix of
+a negative log-likelihood loss, H is equal to Fisher information matrix [16]. For the diagonal of the
+Hessian matrix, we have:
+H =F =E[g2] (3)
+ii ii i
+4 Unified Mixed-Precision Training
+The insights gained from Figure 1 highlights the heterogeneity in model parameters. The cherry
+parameters,despiteconstitutinglessthan1%ofthetotalparametercount,exertasubstantialinfluence
+on the model. Indiscriminately quantizing these cherry parameters alongside the normal parameters
+may lead to a significant deterioration in model performance.
+To mitigate the impact of cherry parameters on quantization, we propose to preserve their high-
+precision values during the quantization process. By maintaining the fidelity of these critical parame-
+ters, we ensure that the essential information they capture is not compromised.
+Optimizing mixed-precision parameters in LLMs presents a unique challenge. The widely adopted
+GPTQapproach[8],whichfallsunderthePost-TrainingQuantization(PTQ)framework[14],struggles
+to simultaneously optimize high-precision cherry parameters and low-precision normal parameters.
+ThisisbecauseupdatingthecherryparametersduringthePTQprocesssignificantlyaffectsthemodel,
+causing the optimal values of the normal parameters to vary. However, in the PTQ framework, once
+the parameters are quantized, they cannot be updated further. This limitation prevents the early-
+stage quantized parameters from reaching their optimal values. On the other hand, if we do not allow
+the updates of the cherry parameters during the PTQ process [17], the quantized model will lose the
+flexibility provided by these critical parameters.
+To address this challenge, we propose a novel approach that unifies the optimization of mixed-
+precision parameters. Our method leverages a QAT framework, which allows for the simultaneous
+optimization of both cherry parameters and normal parameters. During backpropagation, the high-
+precision cherry parameters are updated using standard gradient descent, while the low-precision
+normal parameters employ the Straight-Through Estimator (STE) trick [3] for low precision gradient
+descent. Thisunifiedbackpropagationenablesend-to-endoptimizationofbothcherryparametersand
+normal parameters, enhancing the overall optimization effect. We show the quantization in Algo-
+rithm 1.
+Algorithm 1 Cherry Parameter and Quantization-aware Training (CherryQ)
+Require: Model parameters W, quantization function Quant(·), threshold τ, learning rate η
+Ensure: Quantized model parameters
+1: C←{w i ∈W|H ii >τ} ▷ Identify cherry parameters
+2: N←W\C ▷ Identify normal parameters
+3: for each training batch x do
+4: L←model(x;C∪Quant(N)) ▷ Compute loss
+5: C←C−η∂L ▷ Standard gradient descent
+∂C
+6: N←N−η·STE(∂L) ▷ Gradient descent with gradient approximation by STE
+∂N
+7: end for
+8: return C∪Quant(N)
+5 Prevalence of Parameter Heterogeneity in LLMs
+While Figure 1 showcases the heterogeneity of selected parameter matrices in different LLMs, it is
+crucialtoinvestigatewhetherthisphenomenonispervasiveacrossthehundredsofparametermatrices
+within each LLM. In this section, we conduct a comprehensive analysis of parameter heterogeneity
+from a macro perspective.
+Toquantifythedegreeofheterogeneityinaparametermatrix,weintroducetheheterogeneityscore
+of the matrix. Inspired by the observation in Figure 1, where a small subset of parameters exhibits
+significantly higher impacts compared to the maximum of the majority, we define the heterogeneity
+scoreastheratioofthemeanimpactofthetop1%parameterstothemaximumimpactofthebottom
+499% parameters, as shown in Equation (4). A higher heterogeneity score indicates a more pronounced
+disparity in parameter importance within the matrix.
+Mean(H )
+Heterogeneity Score= iitop1% (4)
+Max(H )
+iibottom99%
+For comparison, we also include the heterogeneity scores based on the magnitude of parameters,
+a commonly used measure of parameter importance [11]. The magnitude-based heterogeneity score is
+calculated using Equation (5).
+Mean(|w | )
+Magnitude Heterogeneity Score= i top1% (5)
+Max(|w | )
+i bottom99%
+To provide a comprehensive view of parameter heterogeneity across different matrices, we plot the
+scatter distribution of heterogeneity scores for all parameter matrices of each model in Figure 2. It
+clearly reveals that the parameter matrices across different LLMs exhibit high heterogeneity scores,
+especiallywhencomparingwithparametermagnitudes. Thisfindingstronglysuggeststhatparameter
+heterogeneity is not an isolated occurrence but rather a widespread phenomenon in LLMs.
+The pervasiveness of parameter heterogeneity highlights the need for quantization strategies that
+caneffectivelyhandlethedisparateimportanceofparameters,ensuringthatthecherryparametersare
+preserved with higher precision while allowing for more aggressive quantization of the less influential
+normal parameters.
+102 102 102
+Impact Impact Impact
+Magnitude Magnitude Magnitude
+101 101 101
+100 100 100
+0 50 100 150 200 0 50 100 150 200 250 0 50 100 150 200
+Matrix Index Matrix Index Matrix Index
+(a) LLaMA-2 7B (b) LLaMA-2 13B (c) Mistral 7B
+102 102 102
+Impact Impact Impact
+Magnitude Magnitude Magnitude
+101 101 101
+100 100 100
+0 50 100 150 200 0 50 100 150 200 0 50 100 150 200 250
+Matrix Index Matrix Index Matrix Index
+(d) Gemma 7B (e) Vicuna-1.5 7B (f) Vicuna-1.5 13B
+Figure 2: Scatter distribution of heterogeneity scores for different parameter matrices in LLMs. Each
+pointrepresentsaparametermatrix,withthex-axisindicatesthematrixindexandthey-axisshowing
+the heterogeneity score.
+6 Quantization Experiments
+In the experimental section, we demonstrate the effectiveness of the CherryQ for both base LLMs and
+chatLLMs. Wealsocomparedifferentcherryparameterselectioncriteriatohighlighttheimpact-based
+heterogeneity.
+5
+erocS
+ytienegoreteH
+erocS
+ytienegoreteH
+erocS
+ytienegoreteH
+erocS
+ytienegoreteH
+erocS
+ytienegoreteH
+erocS
+ytienegoreteH6.1 Implementation Details
+Parameter Representation: Based on the observation that cherry parameters occupy a very small
+proportion, for each row of parameters in each parameter matrix, we only consider the top 1/256 pa-
+rameterswiththehighestimpactascherryparametersandretaintheirFP16precisions. Forexample,
+the parameter matrix size of LLaMA2-7B is 4096×4096. So we select 16 parameters with the highest
+impact for each row, which results in 4096×16 parameters as cherry parameters. Additionally, to
+recover the complete parameter matrix, an INT16 is required to record the column index for each
+cherry parameter. So each cherry parameter need 32 bits.
+For normal parameters, we employ full range symmetric MinMax quantization to quantize their
+weights[14]. Specifically,anFP16valueismappedtotherangeof[−2k−1,2k−1−1]andsymmetrically
+distributed on both sides of the coordinate axis. The quantization of an FP16 tensor XFP16 to k bits
+is computed by:
+XFP16
+XIntk =⌊Clip( ,−2k−1+ϵ,2k−1−ϵ)−0.5⌉ (6)
+S
+where ⌊·⌉ denotes the round function, S is the quantization scaling factor S =
+Max(|XFP16|),
+and ϵ is
+2k−1
+a very small positive number (= 0.01 in our setting) to ensure that XIntk falls into the target range.
+Dequantization restores the quantized integer values based on the scaling factor:
+Dequant(S,XIntk)=S(XIntk+0.5) (7)
+Tofurtherimprovethequantizationaccuracy,weadoptawidely-usedparametergroupingstrategy.
+Specifically, the parameters are divided into groups in order, and each group independently calculates
+its scaling factor. For example, if we divide a parameter matrix W ∈Rr×c that needs to be quantized
+with a group size of B, we will obtain a total of r×(c/B) groups.
+Quantization Datasets: For the quantization of the base LLMs, we follow [8] to use C4 [20] as
+thetrainingdata. Weselectthefirst4partitionsofC4andchoosedatawithalengthof≥2048tokens,
+resulting in a total of 50k samples of 2048 token. For the chat LLMs, since Vicuna-1.5 [5] is obtained
+by supervised fine-tuning based on ShareGPT [5], we also use the ShareGPT dataset for training. We
+utilize a total of 20k training samples from ShareGPT for QAT and Cherry.
+Baselines We compare our method with various quantization methods, including QAT [18],
+GPTQ [8], SqueezeLLM [13], OminiQuant [21], and AWQ [17]. For OminiQuant and AWQ, we use
+their results reported in [21]. For SqueezeLLM, we use the results in its original paper [13]. For
+GPTQ, its 4-bit model is obtained from the open-source 1. Due to the lack of a 3-bit GPTQ model,
+we quantize the model ourselves via the implementation of Auto-GPTQ 2. Since CherryQ is based on
+QAT, for fair comparisons, the implementation of QAT is the same as CherryQ, except that it does
+not handle cherry parameters.
+6.2 Effect of Base LLM Quantization
+In this section, we present the main experimental results demonstrating the effectiveness of CherryQ
+on LLaMA2 [23]. We evaluate CherryQ with both perplexity and downstream tasks, comparing its
+performance against state-of-the-art quantization methods.
+6.2.1 Perplexity Results
+Wefollow[8,21]toevaluatetheperplexityofCherryQontwowidely-usedcorpora: C4andWikiText-
+2[19]. WeusethevalidationsplitofC4toavoiddataleakage. Weshowtheresultsof3-bitquantization
+using different quantization approaches in Table 1. We show the results of different model scales and
+different group sizes.
+From the results, CherryQ consistently outperforms all other approaches across both model sizes
+(7B and 13B) and grouping sizes (64 and 128), achieving the lowest perplexity on both the C4 and
+WikiText-2 datasets. Notably, CherryQ’s perplexity is significantly closer to the full-precision (FP16)
+baseline compared to other methods, highlighting its ability to preserve model performance after
+quantization.
+1https://huggingface.co/TheBloke
+2https://github.com/AutoGPTQ/AutoGPTQ
+6Table 2 compares different 4-bit quantization methods. Again, CherryQ achieves the lowest per-
+plexity scores in most settings, demonstrating its effectiveness in higher-bit quantization settings.
+6.2.2 Downstream Task Performance
+To further validate the effectiveness on specific tasks, we evaluate the quantized models on various
+downstream tasks from the HuggingFace OpenLLM Leaderboard. Table 3 presents the performance
+comparison of different 3-bit quantization methods for LLaMA2. CherryQ consistently outper-
+formsothermethodsacrossalmostalltasks,achievingthehighestaveragescore. Thisshowcases
+CherryQ’s ability to maintain the model’s generalization capabilities for downstream tasks.
+Table 1: Perplexity (↓) of 3-bit quantization on LLaMA2 models . gX means the group size is X. The
+results of OminiQuant and AWQ are from [21]. The results of SqueezeLLM are from [13].
+Method 7B-3bit-g128 7B-3bit-g64 13B-3bit-g128 13B-3bit-g64
+c4 wiki2 c4 wiki2 c4 wiki2 c4 wiki2
+FP16 6.97 5.47 6.97 5.47 6.47 4.88 6.47 4.88
+QAT 9.25 6.90 8.74 7.13 7.19 5.63 7.02 5.48
+GPTQ 8.28 6.74 8.20 6.62 7.24 5.63 7.10 5.56
+OminiQuant 7.75 6.03 - - 6.98 5.28 - -
+AWQ 7.84 6.24 - - 6.94 5.32 - -
+SqueezeLLM 7.51 5.96 - - 6.82 5.23 - -
+CherryQ 7.39 5.92 7.34 5.86 6.80 5.26 6.76 5.21
+Table 4 extends the comparison to 4-bit quantization. CherryQ continues to excel, achieving the
+highest scores on most individual tasks and the highest average score overall. These results highlight
+the generalization ability of CherryQ across different quantization bits and model sizes.
+Table 2: Perplexity (↓) of 4-bit quantization on LLaMA2 models.
+Method 7B-4bit-g128 13B-4bit-g128
+c4 wiki2 c4 wiki2
+FP16 6.47 4.88 6.47 4.88
+QAT 7.29 5.81 6.67 5.12
+GPTQ 7.30 5.73 6.63 4.97
+OminiQuant 7.12 5.58 6.56 4.95
+AWQ 7.19 5.68 6.62 5.05
+CherryQ 7.07 5.58 6.56 4.99
+6.3 Effect of Chat LLM Quantization
+We conduct experiments on Vicuna-1.5 [5]. We apply 3-bit quantization with group size=128 for
+CherryQ and other baselines.
+EvaluationToassesstheperformanceofquantizedopen-endedchatmodels,weemployapairwise
+comparison on the Vicuna-bench [26], which consists of 80 test samples. We compare the responses
+generated by the quantized models against those generated by the original 16-bit Vicuna-1.5. The
+evaluationisperformedusingGPT-4,whichautomaticallyclassifiesthequantizedmodel’sresponseas
+“win”, “tie”, or “lose” relative to the FP16 model’s response. To get rid of the ordering effect of the
+evaluation, we follow [17] to compare the responses with both orders, leading to 160 trials.
+Figure 3 presents the results of the pairwise comparison for each quantized model against its
+FP16counterpart. TheresultsdemonstratethatCherryQconsistentlyoutperformsotherquantization
+baselines in preserving the performance of chat models. It achieves the highest number of wins and
+ties against the FP16 models, while minimizing the number of losses.
+7Table3: Performanceofdifferent3-bitquantizationmethodsonHuggingfaceOpenLLMforLLaMA2-
+7B and LLaMA2-13B.
+Method Hellaswag Winogrande ARC TruthfulQA GSM8K MMLU Average (↑)
+LLaMA2-7B-3bit-g64
+FP16 78.6 74.0 53.2 38.8 14.5 46.7 51.0
+QAT 75.5 71.6 49.2 37.3 7.3 40.6 46.9
+GPTQ 73.9 71.7 48.6 38.8 8.1 39.4 46.8
+CherryQ 77.0 71.8 50.6 38.6 10.4 43.9 48.7
+LLaMA2-7B-3bit-g128
+FP16 78.6 74.0 53.2 38.8 14.5 46.7 51.0
+QAT 75.4 70.8 48.2 37.7 6.7 39.0 46.3
+GPTQ 72.9 70.8 48.6 39.1 5.4 38.2 45.8
+CherryQ 76.3 72.4 49.7 38.1 8.8 41.6 47.8
+LLaMA2-13B-3bit-g64
+FP16 82.1 76.6 59.4 37.4 22.5 55.7 55.6
+QAT 80.7 75.1 55.5 39.0 16.8 52.9 53.3
+GPTQ 79.2 74.4 56.5 36.0 16.4 52.4 52.5
+CherryQ 81.1 76.2 57.3 38.0 18.4 53.5 54.1
+LLaMA2-13B-3bit-g128
+FP16 82.1 76.6 59.4 37.4 22.5 55.7 55.6
+QAT 80.7 75.5 55.3 38.8 16.0 51.9 53.0
+GPTQ 79.1 75.4 54.1 34.9 15.6 50.3 51.6
+CherryQ 81.0 75.4 56.7 38.9 17.8 52.5 53.7
+Quantized Win Tie Quantized Lost
+QAT 54 35 71 QAT 64 33 63
+GPTQ 40 34 86 GPTQ 24 37 99
+CherryQ 61 47 52 CherryQ 64 36 60
+0 40 80 120 160 0 40 80 120 160
+Figure 3: Comparison of 3-bit quantized models to FP16 Vicuna-1.5. (Left) Comparisons to Vicuna-
+1.5-7B. (Right) Comparisons to Vicuna-1.5-13B. CherryQ even shows competitive quality compared
+to the 16-bit counterpart.
+Notably, 3-bit CherryQ achieves a slightly better win-tie-lose ratio over the FP16 Vi-
+cuna model, indicating that the 3-bit quantized model performs on par with or even better than
+the FP16 model. As intuitively CherryQ cannot surpass the target 16 bit model, we think the result
+suggests that CherryQ maintains almost all its performance even at 3 bit, making GPT-4 hard to
+distinguish the quality of low-bit and FP16 models.
+6.4 Comparison of Parameter Selection Criteria
+To evaluate the effectiveness of our proposed impact-based parameter selection criterion, we conduct
+experimentscomparingitwiththecommonlyusedmagnitude-basedcriterion[18]. Table5presentsthe
+perplexityofLLaMA2-7B-3bitandLLaMA2-13B-3bitmodels,usingbothcriteriaforcherryparameter
+selection.
+Fromtheresults,itisevidentthattheimpact-basedcriterionconsistentlyoutperformsthemagnitude-
+basedcriterionacrossallsettings. Theseresultsdemonstratethatourproposedimpact-basedcriterion
+is a more effective measure of parameter importance compared to the magnitude-based criterion. The
+impacts identify and preserve the most critical parameters during the quantization process. We think
+8Table 4: Performance comparison of different 4-bit quantization methods for LLaMA2-7B and
+LLaMA2-13B models over Huggingface OpenLLM Leaderboard.
+Method Hellaswag Winogrande ARC TruthfulQA GSM8K MMLU Average (↑)
+LLaMA2-7B-4bit-g128
+FP16 78.6 74.0 53.2 38.8 14.5 46.7 51.0
+QAT 77.5 72.2 52.0 39.0 10.6 43.7 49.2
+GPTQ 77.6 72.9 52.0 39.1 11.1 43.8 49.4
+CherryQ 77.8 73.5 51.5 39.5 12.9 44.4 49.9
+LLaMA2-13B-4bit-g128
+FP16 82.1 76.6 59.4 37.4 22.5 55.7 55.6
+QAT 81.9 75.7 57.9 38.9 19.6 54.2 54.7
+GPTQ 81.5 76.8 57.4 36.1 20.4 54.6 54.5
+CherryQ 82.0 77.0 58.6 38.8 21.0 54.6 55.3
+this justify the heterogeneity of parameter impacts against parameter magnitudes as we highlighted
+in § 5.
+Table 5: Perplexity (↓) of different parameter selection criteria.
+Method LLaMA2-7B-3bit LLaMA2-13B-3bit
+c4 wiki2 c4 wiki2
+Magnitude-g64 7.93 6.40 6.91 5.35
+Impact-g64 7.34 5.86 6.76 5.21
+Magnitude-g128 8.12 6.58 6.94 5.37
+Impact-g128 7.39 5.92 6.80 5.26
+LLaMA2-7B-4bit LLaMA2-13B-4bit
+Magnitude-g128 7.19 5.68 6.62 5.05
+Impact-g128 7.07 5.58 6.56 4.99
+The extensive experimental results presented in this section clearly demonstrate the superiority of
+CherryQ compared to existing quantization methods. By effectively identifying the critical cherry
+parameters and unifying the mixed-precision parameter optimization, CherryQ achieves state-of-the-
+art performance for both base LLMs and chat LLMs.
+7 Conclusion
+In this paper, we investigated the parameter heterogeneity phenomenon in LLMs. Our experiments
+on LLaMA2, Mistral, Gemma, and Vicuna models, consistently demonstrated that a small subset
+of parameters plays a crucial role in maintaining the model’s performance, while the majority of
+parameters can be quantized to ultra-low precision without significant degradation. This finding
+highlights the potential for efficient model compression and quantization techniques that take into
+account the heterogeneous nature of parameter importance.
+Motivated by this observation, we proposed a novel impact-based parameter selection criterion
+for quantization. Our method effectively identifies and preserves the most critical cherry parameters
+during the quantization process. We use a QAT framework for unified optimization of both cherry
+parametersandnormalparameters. ExtensiveexperimentsdemonstratethatCherryQoutperformsthe
+commonly used magnitude-based criterion, achieving significantly lower perplexity scores and better
+downstream performance. The heterogeneity and proposed approach pave the way for more efficient
+deployment of LLMs in resource-constrained environments.
+9References
+[1] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama Ahmad, Ilge Akkaya, Florencia Leoni Ale-
+man,DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,etal. Gpt-4technical
+report. arXiv preprint arXiv:2303.08774, 2023.
+[2] Jinze Bai, Shuai Bai, Yunfei Chu, Zeyu Cui, Kai Dang, Xiaodong Deng, Yang Fan, Wenbin Ge,
+Yu Han, Fei Huang, et al. Qwen technical report. arXiv preprint arXiv:2309.16609, 2023.
+[3] Yoshua Bengio, Nicholas L´eonard, and Aaron Courville. Estimating or propagating gradients
+through stochastic neurons for conditional computation. arXiv preprint arXiv:1308.3432, 2013.
+[4] Yelysei Bondarenko, Markus Nagel, and Tijmen Blankevoort. Understanding and overcoming
+the challenges of efficient transformer quantization. In Proceedings of the 2021 Conference on
+Empirical Methods in Natural Language Processing, pages 7947–7969, 2021.
+[5] Wei-Lin Chiang, Zhuohan Li, Zi Lin, Ying Sheng, Zhanghao Wu, Hao Zhang, Lianmin Zheng,
+Siyuan Zhuang, Yonghao Zhuang, Joseph E Gonzalez, et al. Vicuna: An open-source chatbot
+impressing gpt-4 with 90%* chatgpt quality, march 2023. URL https://lmsys. org/blog/2023-03-
+30-vicuna, 3(5), 2023.
+[6] Tim Dettmers, Mike Lewis, Younes Belkada, and Luke Zettlemoyer. Gpt3. int8 (): 8-bit matrix
+multiplication for transformers at scale. Advances in Neural Information Processing Systems,
+35:30318–30332, 2022.
+[7] Tim Dettmers, Artidoro Pagnoni, Ari Holtzman, and Luke Zettlemoyer. Qlora: Efficient finetun-
+ing of quantized llms. Advances in Neural Information Processing Systems, 36, 2024.
+[8] Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh. Gptq: Accurate post-training
+quantization for generative pre-trained transformers. In The Eleventh International Conference
+on Learning Representations, 2023.
+[9] Han Guo, Philip Greengard, Eric P Xing, and Yoon Kim. Lq-lora: Low-rank plus quantized
+matrix decomposition for efficient language model finetuning. arXiv preprint arXiv:2311.12023,
+2023.
+[10] Babak Hassibi, David G Stork, and Gregory J Wolff. Optimal brain surgeon and general network
+pruning. In IEEE international conference on neural networks, pages 293–299. IEEE, 1993.
+[11] John A Hertz. Introduction to the theory of neural computation. 2018.
+[12] AlbertQJiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSinghChaplot,
+Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, et al.
+Mistral 7b. arXiv preprint arXiv:2310.06825, 2023.
+[13] Sehoon Kim, Coleman Hooper, Amir Gholami, Zhen Dong, Xiuyu Li, Sheng Shen, Michael W
+Mahoney, and Kurt Keutzer. Squeezellm: Dense-and-sparse quantization. arXiv preprint
+arXiv:2306.07629, 2023.
+[14] Raghuraman Krishnamoorthi. Quantizing deep convolutional networks for efficient inference: A
+whitepaper. arXiv preprint arXiv:1806.08342, 2018.
+[15] YannLeCun,JohnDenker,andSaraSolla.Optimalbraindamage.Advancesinneuralinformation
+processing systems, 2, 1989.
+[16] Yuhang Li, Ruihao Gong, Xu Tan, Yang Yang, Peng Hu, Qi Zhang, Fengwei Yu, Wei Wang,
+and Shi Gu. Brecq: Pushing the limit of post-training quantization by block reconstruction. In
+International Conference on Learning Representations, 2020.
+[17] JiLin,JiamingTang,HaotianTang,ShangYang,XingyuDang,andSongHan. Awq: Activation-
+awareweightquantizationforllmcompressionandacceleration. arXivpreprintarXiv:2306.00978,
+2023.
+10[18] Zechun Liu, Barlas Oguz, Changsheng Zhao, Ernie Chang, Pierre Stock, Yashar Mehdad,
+Yangyang Shi, Raghuraman Krishnamoorthi, and Vikas Chandra. Llm-qat: Data-free quanti-
+zation aware training for large language models. arXiv preprint arXiv:2305.17888, 2023.
+[19] Stephen Merity, Caiming Xiong, James Bradbury, and Richard Socher. Pointer sentinel mixture
+models. arXiv preprint arXiv:1609.07843, 2016.
+[20] Colin Raffel, Noam Shazeer, Adam Roberts, Katherine Lee, Sharan Narang, Michael Matena,
+Yanqi Zhou, Wei Li, and Peter J Liu. Exploring the limits of transfer learning with a unified
+text-to-text transformer. Journal of machine learning research, 21(140):1–67, 2020.
+[21] WenqiShao,MengzhaoChen,ZhaoyangZhang,PengXu,LiruiZhao,ZhiqianLi,KaipengZhang,
+Peng Gao, Yu Qiao, and Ping Luo. Omniquant: Omnidirectionally calibrated quantization for
+large language models. In The Twelfth International Conference on Learning Representations,
+2023.
+[22] Gemma Team, Thomas Mesnard, Cassidy Hardin, Robert Dadashi, Surya Bhupatiraju, Shreya
+Pathak, Laurent Sifre, Morgane Rivi`ere, Mihir Sanjay Kale, Juliette Love, et al. Gemma: Open
+models based on gemini research and technology. arXiv preprint arXiv:2403.08295, 2024.
+[23] Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei,
+Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2: Open
+foundation and fine-tuned chat models. arXiv preprint arXiv:2307.09288, 2023.
+[24] Xiuying Wei, Yunchen Zhang, Xiangguo Zhang, Ruihao Gong, Shanghang Zhang, Qi Zhang,
+Fengwei Yu, and Xianglong Liu. Outlier suppression: Pushing the limit of low-bit transformer
+language models. Advances in Neural Information Processing Systems, 35:17402–17414, 2022.
+[25] GuangxuanXiao,JiLin,MickaelSeznec,HaoWu,JulienDemouth,andSongHan. Smoothquant:
+Accurate and efficient post-training quantization for large language models. In International
+Conference on Machine Learning, pages 38087–38099. PMLR, 2023.
+[26] Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang,
+Zi Lin, Zhuohan Li, Dacheng Li, Eric Xing, et al. Judging llm-as-a-judge with mt-bench and
+chatbot arena. Advances in Neural Information Processing Systems, 36, 2024.
+A Effect of Chat LLM Quantization on MMLU
+WefurtherevaluatetheperformanceofCherryQontheMMLUbenchmarkbyquantizingtheVicuna1.5
+model. AsshowninTable6,CherryQoutperformsbothQATandGPTQintermsofaverageaccuracy
+across almost all categories.
+Table 6: Comparison of different 3-bit quantization methods on zero-shot MMLU accuracy applied to
+Vicuna-1.5.
+Method Humanities STEM Social Sciences Other Average
+Vicuna1.5-7B-3bit-g128
+FP16 46.8 39.4 57.9 56.3 49.9
+QAT 43.4 37.7 53.0 52.4 46.4
+GPTQ 42.7 37.3 53.0 51.0 45.7
+CherryQ 43.8 37.2 54.3 53.5 46.9
+Vicuna1.5-13B-3bit-g128
+FP16 50.2 43.5 63.0 62.0 54.3
+QAT 47.8 40.1 58.6 58.1 50.9
+GPTQ 46.1 39.4 57.6 55.2 49.3
+CherryQ 49.0 40.6 60.2 58.8 51.9
+11
