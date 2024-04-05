@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02904v1 |
-|title| ALOHa: A New Measure for Hallucination in Captioning Models |
-|authors| Suzanne PetrykDavid M. ChanAnish KachinthayaHaodi ZouJohn CannyJoseph E. GonzalezTrevor Darrell
-|links| http://arxiv.org/abs/2404.02904v1 |
-|updated| 2024-04-03 17:59:36 UTC |
-|summary| Despite recent advances in multimodal pre-training for visual descriptionstate-of-the-art models still produce captions containing errors such ashallucinating objects not present in a scene. The existing prominent metric forobject hallucination CHAIR is limited to a fixed set of MS COCO objects andsynonyms. In this work we propose a modernized open-vocabulary metric ALOHawhich leverages large language models LLMs to measure object hallucinations.Specifically we use an LLM to extract groundable objects from a candidatecaption measure their semantic similarity to reference objects from captionsand object detections and use Hungarian matching to produce a finalhallucination score. We show that ALOHa correctly identifies 13.6 morehallucinated objects than CHAIR on HAT a new gold-standard subset of MS COCOCaptions annotated for hallucinations and 30.8 more on nocaps where objectsextend beyond MS COCO categories. Our code is available athttps://davidmchan.github.io/aloha/. |
+|idx| 2404.03653v1 |
+|title| CoMat: Aligning Text-to-Image Diffusion Model with Image-to-Text Concept Matching |
+|authors| Dongzhi JiangGuanglu SongXiaoshi WuRenrui ZhangDazhong ShenZhuofan ZongYu LiuHongsheng Li
+|links| http://arxiv.org/abs/2404.03653v1 |
+|updated| 2024-04-04 17:59:46 UTC |
+|summary| Diffusion models have demonstrated great success in the field oftext-to-image generation. However alleviating the misalignment between thetext prompts and images is still challenging. The root reason behind themisalignment has not been extensively investigated. We observe that themisalignment is caused by inadequate token attention activation. We furtherattribute this phenomenon to the diffusion models insufficient conditionutilization which is caused by its training paradigm. To address the issue wepropose CoMat an end-to-end diffusion model fine-tuning strategy with animage-to-text concept matching mechanism. We leverage an image captioning modelto measure image-to-text alignment and guide the diffusion model to revisitignored tokens. A novel attribute concentration module is also proposed toaddress the attribute binding problem. Without any image or human preferencedata we use only 20K text prompts to fine-tune SDXL to obtain CoMat-SDXL.Extensive experiments show that CoMat-SDXL significantly outperforms thebaseline model SDXL in two text-to-image alignment benchmarks and achievesstart-of-the-art performance. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02893v1 |
-|title| ChatGLM-Math: Improving Math Problem-Solving in Large Language Models with a Self-Critique Pipeline |
-|authors| Yifan XuXiao LiuXinghan LiuZhenyu HouYueyan LiXiaohan ZhangZihan WangAohan ZengZhengxiao DuWenyi ZhaoJie TangYuxiao Dong
-|links| http://arxiv.org/abs/2404.02893v1 |
-|updated| 2024-04-03 17:51:18 UTC |
-|summary| Large language models LLMs have shown excellent mastering of humanlanguage but still struggle in real-world applications that requiremathematical problem-solving. While many strategies and datasets to enhanceLLMs mathematics are developed it remains a challenge to simultaneouslymaintain and improve both language and mathematical capabilities in deployedLLM systems.In this work we tailor the Self-Critique pipeline which addressesthe challenge in the feedback learning stage of LLM alignment. We first train ageneral Math-Critique model from the LLM itself to provide feedback signals.Then we sequentially employ rejective fine-tuning and direct preferenceoptimization over the LLMs own generations for data collection. Based onChatGLM3-32B we conduct a series of experiments on both academic and our newlycreated challenging dataset MathUserEval. Results show that our pipelinesignificantly enhances the LLMs mathematical problem-solving while stillimproving its language ability outperforming LLMs that could be two timeslarger. Related techniques have been deployed toChatGLMfootnoteurlhttps://chatglm.cn an online serving LLM. Relatedevaluation dataset and scripts are released aturlhttps://github.com/THUDM/ChatGLM-Math. |
+|idx| 2404.03648v1 |
+|title| AutoWebGLM: Bootstrap And Reinforce A Large Language Model-based Web Navigating Agent |
+|authors| Hanyu LaiXiao LiuIat Long IongShuntian YaoYuxuan ChenPengbo ShenHao YuHanchen ZhangXiaohan ZhangYuxiao DongJie Tang
+|links| http://arxiv.org/abs/2404.03648v1 |
+|updated| 2024-04-04 17:58:40 UTC |
+|summary| Large language models LLMs have fueled many intelligent agent tasks suchas web navigation -- but most existing agents perform far from satisfying inreal-world webpages due to three factors: 1 the versatility of actions onwebpages 2 HTML text exceeding model processing capacity and 3 thecomplexity of decision-making due to the open-domain nature of web. In light ofthe challenge we develop AutoWebGLM a GPT-4-outperforming automated webnavigation agent built upon ChatGLM3-6B. Inspired by human browsing patternswe design an HTML simplification algorithm to represent webpages preservingvital information succinctly. We employ a hybrid human-AI method to build webbrowsing data for curriculum training. Then we bootstrap the model byreinforcement learning and rejection sampling to further facilitate webpagecomprehension browser operations and efficient task decomposition by itself.For testing we establish a bilingual benchmark -- AutoWebBench -- forreal-world web browsing tasks. We evaluate AutoWebGLM across diverse webnavigation benchmarks revealing its improvements but also underlyingchallenges to tackle real environments. Related code model and data will bereleased at urlhttps://github.com/THUDM/AutoWebGLM. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02882v1 |
-|title| Linear Attention Sequence Parallelism |
-|authors| Weigao SunZhen QinDong LiXuyang ShenYu QiaoYiran Zhong
-|links| http://arxiv.org/abs/2404.02882v1 |
-|updated| 2024-04-03 17:33:21 UTC |
-|summary| Sequence Parallel SP serves as a prevalent strategy to handle longsequences that exceed the memory limit of a single GPU. However existing SPmethods do not take advantage of linear attention features resulting insub-optimal parallelism efficiency and usability for linear attention-basedlanguage models. In this paper we introduce Linear Attention Sequence ParallelLASP an efficient SP method tailored to linear attention-based languagemodels. Specifically we design an efficient point-to-point communicationmechanism to leverage the right-product kernel trick of linear attention whichsharply decreases the communication overhead of SP. We also enhance thepractical efficiency of LASP by performing kernel fusion and intermediate statecaching making the implementation of LASP hardware-friendly on GPU clusters.Furthermore we meticulously ensure the compatibility of sequence-level LASPwith all types of batch-level data parallel methods which is vital fordistributed training on large clusters with long sequences and large batches.We conduct extensive experiments on two linear attention-based models withvarying sequence lengths and GPU cluster sizes. LASP scales sequence length upto 4096K using 128 A100 80G GPUs on 1B models which is 8 times longer thanexisting SP methods while being significantly faster. The code is available athttps://github.com/OpenNLPLab/LASP. |
+|idx| 2404.03646v1 |
+|title| Locating and Editing Factual Associations in Mamba |
+|authors| Arnab Sen SharmaDavid AtkinsonDavid Bau
+|links| http://arxiv.org/abs/2404.03646v1 |
+|updated| 2024-04-04 17:58:31 UTC |
+|summary| We investigate the mechanisms of factual recall in the Mamba state spacemodel. Our work is inspired by previous findings in autoregressive transformerlanguage models suggesting that their knowledge recall is localized toparticular modules at specific token locations we therefore ask whetherfactual recall in Mamba can be similarly localized. To investigate this weconduct four lines of experiments on Mamba. First we apply causal tracing orinterchange interventions to localize key components inside Mamba that areresponsible for recalling facts revealing that specific components withinmiddle layers show strong causal effects at the last token of the subjectwhile the causal effect of intervening on later layers is most pronounced atthe last token of the prompt matching previous findings on autoregressivetransformers. Second we show that rank-one model editing methods cansuccessfully insert facts at specific locations again resembling findings ontransformer models. Third we examine the linearity of Mambas representationsof factual relations. Finally we adapt attention-knockout techniques to Mambato dissect information flow during factual recall. We compare Mamba directly toa similar-sized transformer and conclude that despite significant differencesin architectural approach when it comes to factual recall the twoarchitectures share many similarities. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02837v1 |
-|title| Cherry on Top: Parameter Heterogeneity and Quantization in Large Language Models |
-|authors| Wanyun CuiQianle Wang
-|links| http://arxiv.org/abs/2404.02837v1 |
-|updated| 2024-04-03 16:16:31 UTC |
-|summary| This paper reveals the phenomenon of parameter heterogeneity in largelanguage models LLMs. We find that a small subset of cherry parametersexhibit a disproportionately large influence on model performance while thevast majority of parameters have minimal impact. This heterogeneity is found tobe prevalent across different model families scales and types. Motivated bythis observation we propose CherryQ a novel quantization method that unifiesthe optimization of mixed-precision parameters. CherryQ identifies andpreserves the critical cherry parameters in high precision while aggressivelyquantizing the remaining parameters to low precision. Extensive experimentsdemonstrate the effectiveness of CherryQ. CherryQ outperforms existingquantization approaches in terms of perplexity and downstream task performance.Notably our 3-bit quantized Vicuna-1.5 exhibits competitive performancecompared to their 16-bit counterparts. These findings highlight the potentialof CherryQ for enabling efficient deployment of LLMs by taking advantage ofparameter heterogeneity. |
+|idx| 2404.03635v1 |
+|title| WorDepth: Variational Language Prior for Monocular Depth Estimation |
+|authors| Ziyao ZengDaniel WangFengyu YangHyoungseob ParkYangchao WuStefano SoattoByung-Woo HongDong LaoAlex Wong
+|links| http://arxiv.org/abs/2404.03635v1 |
+|updated| 2024-04-04 17:54:33 UTC |
+|summary| Three-dimensional 3D reconstruction from a single image is an ill-posedproblem with inherent ambiguities i.e. scale. Predicting a 3D scene from textdescriptions is similarly ill-posed i.e. spatial arrangements of objectsdescribed. We investigate the question of whether two inherently ambiguousmodalities can be used in conjunction to produce metric-scaled reconstructions.To test this we focus on monocular depth estimation the problem of predictinga dense depth map from a single image but with an additional text captiondescribing the scene. To this end we begin by encoding the text caption as amean and standard deviation using a variational framework we learn thedistribution of the plausible metric reconstructions of 3D scenes correspondingto the text captions as a prior. To select a specific reconstruction or depthmap we encode the given image through a conditional sampler that samples fromthe latent space of the variational text encoder which is then decoded to theoutput depth map. Our approach is trained alternatingly between the text andimage branches: in one optimization step we predict the mean and standarddeviation from the text description and sample from a standard Gaussian and inthe other we sample using a image conditional sampler. Once trained wedirectly predict depth from the encoded text using the conditional sampler. Wedemonstrate our approach on indoor NYUv2 and outdoor KITTI scenarios wherewe show that language can consistently improve performance in both. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02835v1 |
-|title| Retrieving Examples from Memory for Retrieval Augmented Neural Machine Translation: A Systematic Comparison |
-|authors| Maxime BouthorsJosep CregoFrancois Yvon
-|links| http://arxiv.org/abs/2404.02835v1 |
-|updated| 2024-04-03 16:13:29 UTC |
-|summary| Retrieval-Augmented Neural Machine Translation RAMT architectures retrieveexamples from memory to guide the generation process. While most works in thistrend explore new ways to exploit the retrieved examples the upstreamretrieval step is mostly unexplored. In this paper we study the effect ofvarying retrieval methods for several translation architectures to betterunderstand the interplay between these two processes. We conduct experiments intwo language pairs in a multi-domain setting and consider several downstreamarchitectures based on a standard autoregressive model an edit-based modeland a large language model with in-context learning. Our experiments show thatthe choice of the retrieval technique impacts the translation scores withvariance across architectures. We also discuss the effects of increasing thenumber and diversity of examples which are mostly positive across the board. |
+|idx| 2404.03626v1 |
+|title| Training LLMs over Neurally Compressed Text |
+|authors| Brian LesterJaehoon LeeAlex AlemiJeffrey PenningtonAdam RobertsJascha Sohl-DicksteinNoah Constant
+|links| http://arxiv.org/abs/2404.03626v1 |
+|updated| 2024-04-04 17:48:28 UTC |
+|summary| In this paper we explore the idea of training large language models LLMsover highly compressed text. While standard subword tokenizers compress text bya small factor neural text compressors can achieve much higher rates ofcompression. If it were possible to train LLMs directly over neurallycompressed text this would confer advantages in training and servingefficiency as well as easier handling of long text spans. The main obstacle tothis goal is that strong compression tends to produce opaque outputs that arenot well-suited for learning. In particular we find that text naivelycompressed via Arithmetic Coding is not readily learnable by LLMs. To overcomethis we propose Equal-Info Windows a novel compression technique whereby textis segmented into blocks that each compress to the same bit length. Using thismethod we demonstrate effective learning over neurally compressed text thatimproves with scale and outperforms byte-level baselines by a wide margin onperplexity and inference speed benchmarks. While our method delivers worseperplexity than subword tokenizers for models trained with the same parametercount it has the benefit of shorter sequence lengths. Shorter sequence lengthsrequire fewer autoregressive generation steps and reduce latency. Finally weprovide extensive analysis of the properties that contribute to learnabilityand offer concrete suggestions for how to further improve the performance ofhigh-compression tokenizers. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02905v1 |
-|title| Visual Autoregressive Modeling: Scalable Image Generation via Next-Scale Prediction |
-|authors| Keyu TianYi JiangZehuan YuanBingyue PengLiwei Wang
-|links| http://arxiv.org/abs/2404.02905v1 |
-|updated| 2024-04-03 17:59:53 UTC |
-|summary| We present Visual AutoRegressive modeling VAR a new generation paradigmthat redefines the autoregressive learning on images as coarse-to-finenext-scale prediction or next-resolution prediction diverging from thestandard raster-scan next-token prediction. This simple intuitivemethodology allows autoregressive AR transformers to learn visualdistributions fast and generalize well: VAR for the first time makes ARmodels surpass diffusion transformers in image generation. On ImageNet 256x256benchmark VAR significantly improve AR baseline by improving Frechet inceptiondistance FID from 18.65 to 1.80 inception score IS from 80.4 to 356.4with around 20x faster inference speed. It is also empirically verified thatVAR outperforms the Diffusion Transformer DiT in multiple dimensionsincluding image quality inference speed data efficiency and scalability.Scaling up VAR models exhibits clear power-law scaling laws similar to thoseobserved in LLMs with linear correlation coefficients near -0.998 as solidevidence. VAR further showcases zero-shot generalization ability in downstreamtasks including image in-painting out-painting and editing. These resultssuggest VAR has initially emulated the two important properties of LLMs:Scaling Laws and zero-shot task generalization. We have released all models andcodes to promote the exploration of AR/VAR models for visual generation andunified learning. |
+|idx| 2404.03657v1 |
+|title| OW-VISCap: Open-World Video Instance Segmentation and Captioning |
+|authors| Anwesa ChoudhuriGirish ChowdharyAlexander G. Schwing
+|links| http://arxiv.org/abs/2404.03657v1 |
+|updated| 2024-04-04 17:59:58 UTC |
+|summary| Open-world video instance segmentation is an important video understandingtask. Yet most methods either operate in a closed-world setting require anadditional user-input or use classic region-based proposals to identify neverbefore seen objects. Further these methods only assign a one-word label todetected objects and dont generate rich object-centric descriptions. Theyalso often suffer from highly overlapping predictions. To address these issueswe propose Open-World Video Instance Segmentation and Captioning OW-VISCapan approach to jointly segment track and caption previously seen or unseenobjects in a video. For this we introduce open-world object queries todiscover never before seen objects without additional user-input. We generaterich and descriptive object-centric captions for each detected object via amasked attention augmented LLM input. We introduce an inter-query contrastiveloss to ensure that the object queries differ from one another. Our generalizedapproach matches or surpasses state-of-the-art on three tasks: open-world videoinstance segmentation on the BURST dataset dense video object captioning onthe VidSTG dataset and closed-world video instance segmentation on the OVISdataset. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02904v1 |
-|title| ALOHa: A New Measure for Hallucination in Captioning Models |
-|authors| Suzanne PetrykDavid M. ChanAnish KachinthayaHaodi ZouJohn CannyJoseph E. GonzalezTrevor Darrell
-|links| http://arxiv.org/abs/2404.02904v1 |
-|updated| 2024-04-03 17:59:36 UTC |
-|summary| Despite recent advances in multimodal pre-training for visual descriptionstate-of-the-art models still produce captions containing errors such ashallucinating objects not present in a scene. The existing prominent metric forobject hallucination CHAIR is limited to a fixed set of MS COCO objects andsynonyms. In this work we propose a modernized open-vocabulary metric ALOHawhich leverages large language models LLMs to measure object hallucinations.Specifically we use an LLM to extract groundable objects from a candidatecaption measure their semantic similarity to reference objects from captionsand object detections and use Hungarian matching to produce a finalhallucination score. We show that ALOHa correctly identifies 13.6 morehallucinated objects than CHAIR on HAT a new gold-standard subset of MS COCOCaptions annotated for hallucinations and 30.8 more on nocaps where objectsextend beyond MS COCO categories. Our code is available athttps://davidmchan.github.io/aloha/. |
+|idx| 2404.03653v1 |
+|title| CoMat: Aligning Text-to-Image Diffusion Model with Image-to-Text Concept Matching |
+|authors| Dongzhi JiangGuanglu SongXiaoshi WuRenrui ZhangDazhong ShenZhuofan ZongYu LiuHongsheng Li
+|links| http://arxiv.org/abs/2404.03653v1 |
+|updated| 2024-04-04 17:59:46 UTC |
+|summary| Diffusion models have demonstrated great success in the field oftext-to-image generation. However alleviating the misalignment between thetext prompts and images is still challenging. The root reason behind themisalignment has not been extensively investigated. We observe that themisalignment is caused by inadequate token attention activation. We furtherattribute this phenomenon to the diffusion models insufficient conditionutilization which is caused by its training paradigm. To address the issue wepropose CoMat an end-to-end diffusion model fine-tuning strategy with animage-to-text concept matching mechanism. We leverage an image captioning modelto measure image-to-text alignment and guide the diffusion model to revisitignored tokens. A novel attribute concentration module is also proposed toaddress the attribute binding problem. Without any image or human preferencedata we use only 20K text prompts to fine-tune SDXL to obtain CoMat-SDXL.Extensive experiments show that CoMat-SDXL significantly outperforms thebaseline model SDXL in two text-to-image alignment benchmarks and achievesstart-of-the-art performance. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02900v1 |
-|title| DeiT-LT Distillation Strikes Back for Vision Transformer Training on Long-Tailed Datasets |
-|authors| Harsh RangwaniPradipto MondalMayank MishraAshish Ramayee AsokanR. Venkatesh Babu
-|links| http://arxiv.org/abs/2404.02900v1 |
-|updated| 2024-04-03 17:58:21 UTC |
-|summary| Vision Transformer ViT has emerged as a prominent architecture for variouscomputer vision tasks. In ViT we divide the input image into patch tokens andprocess them through a stack of self attention blocks. However unlikeConvolutional Neural Networks CNN ViTs simple architecture has noinformative inductive bias e.g. localityetc. . Due to this ViT requires alarge amount of data for pre-training. Various data efficient approaches DeiThave been proposed to train ViT on balanced datasets effectively. Howeverlimited literature discusses the use of ViT for datasets with long-tailedimbalances. In this work we introduce DeiT-LT to tackle the problem oftraining ViTs from scratch on long-tailed datasets. In DeiT-LT we introduce anefficient and effective way of distillation from CNN via distillation DISTtoken by using out-of-distribution images and re-weighting the distillationloss to enhance focus on tail classes. This leads to the learning of localCNN-like features in early ViT blocks improving generalization for tailclasses. Further to mitigate overfitting we propose distilling from a flatCNN teacher which leads to learning low-rank generalizable features for DISTtokens across all ViT blocks. With the proposed DeiT-LT scheme thedistillation DIST token becomes an expert on the tail classes and theclassifier CLS token becomes an expert on the head classes. The experts help toeffectively learn features corresponding to both the majority and minorityclasses using a distinct set of tokens within the same ViT architecture. Weshow the effectiveness of DeiT-LT for training ViT from scratch on datasetsranging from small-scale CIFAR-10 LT to large-scale iNaturalist-2018. |
+|idx| 2404.03647v1 |
+|title| Capabilities of Large Language Models in Control Engineering: A Benchmark Study on GPT-4, Claude 3 Opus, and Gemini 1.0 Ultra |
+|authors| Darioush KevianUsman SyedXingang GuoAaron HavensGeir DullerudPeter SeilerLianhui QinBin Hu
+|links| http://arxiv.org/abs/2404.03647v1 |
+|updated| 2024-04-04 17:58:38 UTC |
+|summary| In this paper we explore the capabilities of state-of-the-art large languagemodels LLMs such as GPT-4 Claude 3 Opus and Gemini 1.0 Ultra in solvingundergraduate-level control problems. Controls provides an interesting casestudy for LLM reasoning due to its combination of mathematical theory andengineering design. We introduce ControlBench a benchmark dataset tailored toreflect the breadth depth and complexity of classical control design. We usethis dataset to study and evaluate the problem-solving abilities of these LLMsin the context of control engineering. We present evaluations conducted by apanel of human experts providing insights into the accuracy reasoning andexplanatory prowess of LLMs in control engineering. Our analysis reveals thestrengths and limitations of each LLM in the context of classical control andour results imply that Claude 3 Opus has become the state-of-the-art LLM forsolving undergraduate control problems. Our study serves as an initial steptowards the broader goal of employing artificial general intelligence incontrol engineering. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02883v1 |
-|title| On the Scalability of Diffusion-based Text-to-Image Generation |
-|authors| Hao LiYang ZouYing WangOrchid MajumderYusheng XieR. ManmathaAshwin SwaminathanZhuowen TuStefano ErmonStefano Soatto
-|links| http://arxiv.org/abs/2404.02883v1 |
-|updated| 2024-04-03 17:34:28 UTC |
-|summary| Scaling up model and data size has been quite successful for the evolution ofLLMs. However the scaling law for the diffusion based text-to-image T2Imodels is not fully explored. It is also unclear how to efficiently scale themodel for better performance at reduced cost. The different training settingsand expensive training cost make a fair model comparison extremely difficult.In this work we empirically study the scaling properties of diffusion basedT2I models by performing extensive and rigours ablations on scaling bothdenoising backbones and training set including training scaled UNet andTransformer variants ranging from 0.4B to 4B parameters on datasets upto 600Mimages. For model scaling we find the location and amount of cross attentiondistinguishes the performance of existing UNet designs. And increasing thetransformer blocks is more parameter-efficient for improving text-imagealignment than increasing channel numbers. We then identify an efficient UNetvariant which is 45 smaller and 28 faster than SDXLs UNet. On the datascaling side we show the quality and diversity of the training set mattersmore than simply dataset size. Increasing caption density and diversityimproves text-image alignment performance and the learning efficiency. Finallywe provide scaling functions to predict the text-image alignment performance asfunctions of the scale of model size compute and dataset size. |
+|idx| 2404.03635v1 |
+|title| WorDepth: Variational Language Prior for Monocular Depth Estimation |
+|authors| Ziyao ZengDaniel WangFengyu YangHyoungseob ParkYangchao WuStefano SoattoByung-Woo HongDong LaoAlex Wong
+|links| http://arxiv.org/abs/2404.03635v1 |
+|updated| 2024-04-04 17:54:33 UTC |
+|summary| Three-dimensional 3D reconstruction from a single image is an ill-posedproblem with inherent ambiguities i.e. scale. Predicting a 3D scene from textdescriptions is similarly ill-posed i.e. spatial arrangements of objectsdescribed. We investigate the question of whether two inherently ambiguousmodalities can be used in conjunction to produce metric-scaled reconstructions.To test this we focus on monocular depth estimation the problem of predictinga dense depth map from a single image but with an additional text captiondescribing the scene. To this end we begin by encoding the text caption as amean and standard deviation using a variational framework we learn thedistribution of the plausible metric reconstructions of 3D scenes correspondingto the text captions as a prior. To select a specific reconstruction or depthmap we encode the given image through a conditional sampler that samples fromthe latent space of the variational text encoder which is then decoded to theoutput depth map. Our approach is trained alternatingly between the text andimage branches: in one optimization step we predict the mean and standarddeviation from the text description and sample from a standard Gaussian and inthe other we sample using a image conditional sampler. Once trained wedirectly predict depth from the encoded text using the conditional sampler. Wedemonstrate our approach on indoor NYUv2 and outdoor KITTI scenarios wherewe show that language can consistently improve performance in both. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02877v1 |
-|title| FlightScope: A Deep Comprehensive Assessment of Aircraft Detection Algorithms in Satellite Imagery |
-|authors| Safouane El GhazoualiArnaud GucciardiNicola VenturiMichael RueegseggerUmberto Michelucci
-|links| http://arxiv.org/abs/2404.02877v1 |
-|updated| 2024-04-03 17:24:27 UTC |
-|summary| Object detection in remotely sensed satellite pictures is fundamental in manyfields such as biophysical and environmental monitoring. While deep learningalgorithms are constantly evolving they have been mostly implemented andtested on popular ground-based taken photos. This paper critically evaluatesand compares a suite of advanced object detection algorithms customized for thetask of identifying aircraft within satellite imagery. Using the largeHRPlanesV2 dataset together with a rigorous validation with the GDIT datasetthis research encompasses an array of methodologies including YOLO versions 5and 8 Faster RCNN CenterNet RetinaNet RTMDet and DETR all trained fromscratch. This exhaustive training and validation study reveal YOLOv5 as thepreeminent model for the specific case of identifying airplanes from remotesensing data showcasing high precision and adaptability across diverse imagingconditions. This research highlight the nuanced performance landscapes of thesealgorithms with YOLOv5 emerging as a robust solution for aerial objectdetection underlining its importance through superior mean average precisionRecall and Intersection over Union scores. The findings described hereunderscore the fundamental role of algorithm selection aligned with thespecific demands of satellite imagery analysis and extend a comprehensiveframework to evaluate model efficacy. The benchmark toolkit and codesavailable via https://github.com/toelt-llc/FlightScope_Bench aims to furtherexploration and innovation in the realm of remote sensing object detectionpaving the way for improved analytical methodologies in satellite imageryapplications. |
+|idx| 2404.03624v1 |
+|title| Standardizing Knowledge Engineering Practices with a Reference Architecture |
+|authors| Bradley P. AllenFilip Ilievski
+|links| http://arxiv.org/abs/2404.03624v1 |
+|updated| 2024-04-04 17:46:32 UTC |
+|summary| Knowledge engineering is the process of creating and maintainingknowledge-producing systems. Throughout the history of computer science and AIknowledge engineering workflows have been widely used given the importance ofhigh-quality knowledge for reliable intelligent agents. Meanwhile the scope ofknowledge engineering as apparent from its target tasks and use cases hasbeen shifting together with its paradigms such as expert systems semanticweb and language modeling. The intended use cases and supported userrequirements between these paradigms have not been analyzed globally as newparadigms often satisfy prior pain points while possibly introducing new ones.The recent abstraction of systemic patterns into a boxology provides an openingfor aligning the requirements and use cases of knowledge engineering with thesystems components and software that can satisfy them best. This paperproposes a vision of harmonizing the best practices in the field of knowledgeengineering by leveraging the software engineering methodology of creatingreference architectures. We describe how a reference architecture can beiteratively designed and implemented to associate user needs with recurringsystemic patterns building on top of existing knowledge engineering workflowsand boxologies. We provide a six-step roadmap that can enable the developmentof such an architecture providing an initial design and outcome of thedefinition of architectural scope selection of information sources andanalysis. We expect that following through on this vision will lead towell-grounded reference architectures for knowledge engineering will advancethe ongoing initiatives of organizing the neurosymbolic knowledge engineeringspace and will build new links to the software architectures and data sciencecommunities. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02904v1 |
-|title| ALOHa: A New Measure for Hallucination in Captioning Models |
-|authors| Suzanne PetrykDavid M. ChanAnish KachinthayaHaodi ZouJohn CannyJoseph E. GonzalezTrevor Darrell
-|links| http://arxiv.org/abs/2404.02904v1 |
-|updated| 2024-04-03 17:59:36 UTC |
-|summary| Despite recent advances in multimodal pre-training for visual descriptionstate-of-the-art models still produce captions containing errors such ashallucinating objects not present in a scene. The existing prominent metric forobject hallucination CHAIR is limited to a fixed set of MS COCO objects andsynonyms. In this work we propose a modernized open-vocabulary metric ALOHawhich leverages large language models LLMs to measure object hallucinations.Specifically we use an LLM to extract groundable objects from a candidatecaption measure their semantic similarity to reference objects from captionsand object detections and use Hungarian matching to produce a finalhallucination score. We show that ALOHa correctly identifies 13.6 morehallucinated objects than CHAIR on HAT a new gold-standard subset of MS COCOCaptions annotated for hallucinations and 30.8 more on nocaps where objectsextend beyond MS COCO categories. Our code is available athttps://davidmchan.github.io/aloha/. |
+|idx| 2404.03647v1 |
+|title| Capabilities of Large Language Models in Control Engineering: A Benchmark Study on GPT-4, Claude 3 Opus, and Gemini 1.0 Ultra |
+|authors| Darioush KevianUsman SyedXingang GuoAaron HavensGeir DullerudPeter SeilerLianhui QinBin Hu
+|links| http://arxiv.org/abs/2404.03647v1 |
+|updated| 2024-04-04 17:58:38 UTC |
+|summary| In this paper we explore the capabilities of state-of-the-art large languagemodels LLMs such as GPT-4 Claude 3 Opus and Gemini 1.0 Ultra in solvingundergraduate-level control problems. Controls provides an interesting casestudy for LLM reasoning due to its combination of mathematical theory andengineering design. We introduce ControlBench a benchmark dataset tailored toreflect the breadth depth and complexity of classical control design. We usethis dataset to study and evaluate the problem-solving abilities of these LLMsin the context of control engineering. We present evaluations conducted by apanel of human experts providing insights into the accuracy reasoning andexplanatory prowess of LLMs in control engineering. Our analysis reveals thestrengths and limitations of each LLM in the context of classical control andour results imply that Claude 3 Opus has become the state-of-the-art LLM forsolving undergraduate control problems. Our study serves as an initial steptowards the broader goal of employing artificial general intelligence incontrol engineering. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02900v1 |
-|title| DeiT-LT Distillation Strikes Back for Vision Transformer Training on Long-Tailed Datasets |
-|authors| Harsh RangwaniPradipto MondalMayank MishraAshish Ramayee AsokanR. Venkatesh Babu
-|links| http://arxiv.org/abs/2404.02900v1 |
-|updated| 2024-04-03 17:58:21 UTC |
-|summary| Vision Transformer ViT has emerged as a prominent architecture for variouscomputer vision tasks. In ViT we divide the input image into patch tokens andprocess them through a stack of self attention blocks. However unlikeConvolutional Neural Networks CNN ViTs simple architecture has noinformative inductive bias e.g. localityetc. . Due to this ViT requires alarge amount of data for pre-training. Various data efficient approaches DeiThave been proposed to train ViT on balanced datasets effectively. Howeverlimited literature discusses the use of ViT for datasets with long-tailedimbalances. In this work we introduce DeiT-LT to tackle the problem oftraining ViTs from scratch on long-tailed datasets. In DeiT-LT we introduce anefficient and effective way of distillation from CNN via distillation DISTtoken by using out-of-distribution images and re-weighting the distillationloss to enhance focus on tail classes. This leads to the learning of localCNN-like features in early ViT blocks improving generalization for tailclasses. Further to mitigate overfitting we propose distilling from a flatCNN teacher which leads to learning low-rank generalizable features for DISTtokens across all ViT blocks. With the proposed DeiT-LT scheme thedistillation DIST token becomes an expert on the tail classes and theclassifier CLS token becomes an expert on the head classes. The experts help toeffectively learn features corresponding to both the majority and minorityclasses using a distinct set of tokens within the same ViT architecture. Weshow the effectiveness of DeiT-LT for training ViT from scratch on datasetsranging from small-scale CIFAR-10 LT to large-scale iNaturalist-2018. |
+|idx| 2404.03635v1 |
+|title| WorDepth: Variational Language Prior for Monocular Depth Estimation |
+|authors| Ziyao ZengDaniel WangFengyu YangHyoungseob ParkYangchao WuStefano SoattoByung-Woo HongDong LaoAlex Wong
+|links| http://arxiv.org/abs/2404.03635v1 |
+|updated| 2024-04-04 17:54:33 UTC |
+|summary| Three-dimensional 3D reconstruction from a single image is an ill-posedproblem with inherent ambiguities i.e. scale. Predicting a 3D scene from textdescriptions is similarly ill-posed i.e. spatial arrangements of objectsdescribed. We investigate the question of whether two inherently ambiguousmodalities can be used in conjunction to produce metric-scaled reconstructions.To test this we focus on monocular depth estimation the problem of predictinga dense depth map from a single image but with an additional text captiondescribing the scene. To this end we begin by encoding the text caption as amean and standard deviation using a variational framework we learn thedistribution of the plausible metric reconstructions of 3D scenes correspondingto the text captions as a prior. To select a specific reconstruction or depthmap we encode the given image through a conditional sampler that samples fromthe latent space of the variational text encoder which is then decoded to theoutput depth map. Our approach is trained alternatingly between the text andimage branches: in one optimization step we predict the mean and standarddeviation from the text description and sample from a standard Gaussian and inthe other we sample using a image conditional sampler. Once trained wedirectly predict depth from the encoded text using the conditional sampler. Wedemonstrate our approach on indoor NYUv2 and outdoor KITTI scenarios wherewe show that language can consistently improve performance in both. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02896v1 |
-|title| Comment on "Machine learning conservation laws from differential equations" |
-|authors| Michael F. Zimmer
-|links| http://arxiv.org/abs/2404.02896v1 |
-|updated| 2024-04-03 17:53:32 UTC |
-|summary| In lieu of abstract first paragraph reads: Six months after the authorderived a constant of motion for a 1D damped harmonic oscillator 1 a similarresult appeared by Liu Madhavan and Tegmark 2 3 without citing theauthor. However their derivation contained six serious errors causing boththeir method and result to be incorrect. In this Comment those errors arereviewed. |
+|idx| 2404.03626v1 |
+|title| Training LLMs over Neurally Compressed Text |
+|authors| Brian LesterJaehoon LeeAlex AlemiJeffrey PenningtonAdam RobertsJascha Sohl-DicksteinNoah Constant
+|links| http://arxiv.org/abs/2404.03626v1 |
+|updated| 2024-04-04 17:48:28 UTC |
+|summary| In this paper we explore the idea of training large language models LLMsover highly compressed text. While standard subword tokenizers compress text bya small factor neural text compressors can achieve much higher rates ofcompression. If it were possible to train LLMs directly over neurallycompressed text this would confer advantages in training and servingefficiency as well as easier handling of long text spans. The main obstacle tothis goal is that strong compression tends to produce opaque outputs that arenot well-suited for learning. In particular we find that text naivelycompressed via Arithmetic Coding is not readily learnable by LLMs. To overcomethis we propose Equal-Info Windows a novel compression technique whereby textis segmented into blocks that each compress to the same bit length. Using thismethod we demonstrate effective learning over neurally compressed text thatimproves with scale and outperforms byte-level baselines by a wide margin onperplexity and inference speed benchmarks. While our method delivers worseperplexity than subword tokenizers for models trained with the same parametercount it has the benefit of shorter sequence lengths. Shorter sequence lengthsrequire fewer autoregressive generation steps and reduce latency. Finally weprovide extensive analysis of the properties that contribute to learnabilityand offer concrete suggestions for how to further improve the performance ofhigh-compression tokenizers. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02892v1 |
-|title| MODNO: Multi Operator Learning With Distributed Neural Operators |
-|authors| Zecheng Zhang
-|links| http://arxiv.org/abs/2404.02892v1 |
-|updated| 2024-04-03 17:49:41 UTC |
-|summary| The study of operator learning involves the utilization of neural networks toapproximate operators. Traditionally the focus has been on single-operatorlearning SOL. However recent advances have rapidly expanded this to includethe approximation of multiple operators using foundation models equipped withmillions or billions of trainable parameters leading to the research ofmulti-operator learning MOL. In this paper we present a novel distributedtraining approach aimed at enabling a single neural operator with significantlyfewer parameters to effectively tackle multi-operator learning challenges allwithout incurring additional average costs. Our method is applicable to variousChen-Chen-type neural operators such as Deep Operator Neural Networks DON.The core idea is to independently learn the output basis functions for eachoperator using its dedicated data while simultaneously centralizing thelearning of the input function encoding shared by all operators using theentire dataset. Through a systematic study of five numerical examples wecompare the accuracy and cost of training a single neural operator for eachoperator independently versus training a MOL model using our proposed method.Our results demonstrate enhanced efficiency and satisfactory accuracy.Moreover our approach illustrates that some operators with limited data can bemore effectively constructed with the aid of data from analogous operatorsthrough MOL learning. This highlights another MOLs potential to bolsteroperator learning. |
+|idx| 2404.03617v1 |
+|title| On the Efficiency of Convolutional Neural Networks |
+|authors| Andrew Lavin
+|links| http://arxiv.org/abs/2404.03617v1 |
+|updated| 2024-04-04 17:39:41 UTC |
+|summary| Since the breakthrough performance of AlexNet in 2012 convolutional neuralnetworks convnets have grown into extremely powerful vision models. Deeplearning researchers have used convnets to produce accurate results that wereunachievable a decade ago. Yet computer scientists make computationalefficiency their primary objective. Accuracy with exorbitant cost is notacceptable an algorithm must also minimize its computational requirements.Confronted with the daunting computation that convnets use deep learningresearchers also became interested in efficiency. Researchers appliedtremendous effort to find the convnet architectures that have the greatestefficiency. However skepticism grew among researchers and engineers alikeabout the relevance of arithmetic complexity. Contrary to the prevailing viewthat latency and arithmetic complexity are irreconcilable a simple formularelates both through computational efficiency. This insight enabled us toco-optimize the separate factors that determine latency. We observed that thedegenerate conv2d layers that produce the best accuracy-complexity trade-offalso have low operational intensity. Therefore kernels that implement theselayers use significant memory resources. We solved this optimization problemwith block-fusion kernels that implement all layers of a residual blockthereby creating temporal locality avoiding communication and reducingworkspace size. Our ConvFirst model with block-fusion kernels ran approximatelyfour times as fast as the ConvNeXt baseline with PyTorch Inductor at equalaccuracy on the ImageNet-1K classification task. Our unified approach toconvnet efficiency envisions a new era of models and kernels that achievegreater accuracy at lower cost. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02883v1 |
-|title| On the Scalability of Diffusion-based Text-to-Image Generation |
-|authors| Hao LiYang ZouYing WangOrchid MajumderYusheng XieR. ManmathaAshwin SwaminathanZhuowen TuStefano ErmonStefano Soatto
-|links| http://arxiv.org/abs/2404.02883v1 |
-|updated| 2024-04-03 17:34:28 UTC |
-|summary| Scaling up model and data size has been quite successful for the evolution ofLLMs. However the scaling law for the diffusion based text-to-image T2Imodels is not fully explored. It is also unclear how to efficiently scale themodel for better performance at reduced cost. The different training settingsand expensive training cost make a fair model comparison extremely difficult.In this work we empirically study the scaling properties of diffusion basedT2I models by performing extensive and rigours ablations on scaling bothdenoising backbones and training set including training scaled UNet andTransformer variants ranging from 0.4B to 4B parameters on datasets upto 600Mimages. For model scaling we find the location and amount of cross attentiondistinguishes the performance of existing UNet designs. And increasing thetransformer blocks is more parameter-efficient for improving text-imagealignment than increasing channel numbers. We then identify an efficient UNetvariant which is 45 smaller and 28 faster than SDXLs UNet. On the datascaling side we show the quality and diversity of the training set mattersmore than simply dataset size. Increasing caption density and diversityimproves text-image alignment performance and the learning efficiency. Finallywe provide scaling functions to predict the text-image alignment performance asfunctions of the scale of model size compute and dataset size. |
+|idx| 2404.03605v1 |
+|title| Mitigating the Impact of Outlier Channels for Language Model Quantization with Activation Regularization |
+|authors| Aniruddha NrusimhaMayank MishraNaigang WangDan AlistarhRameswar PandaYoon Kim
+|links| http://arxiv.org/abs/2404.03605v1 |
+|updated| 2024-04-04 17:25:30 UTC |
+|summary| We consider the problem of accurate quantization for language models whereboth the weights and activations are uniformly quantized to 4 bits perparameter the lowest bitwidth format natively supported by GPU hardware. Inthis context the key challenge is activation quantization: it is known thatlanguage models contain outlier channels whose values on average are orders ofmagnitude higher than than other channels which prevents accurate low-bitwidthquantization with known techniques. We systematically study this phenomena andfind that these outlier channels emerge early in training and that they occurmore frequently in layers with residual streams. We then propose a simplestrategy which regularizes a layers inputs via quantization-aware trainingQAT and its outputs via activation kurtosis regularization. We show thatregularizing both the inputs and outputs is crucial for preventing a modelsmigrating the difficulty in input quantization to the weights which makespost-training quantization PTQ of weights more difficult. When combined withweight PTQ we show that our approach can obtain a W4A4 model that performscompetitively to the standard-precision W16A16 baseline. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02905v1 |
-|title| Visual Autoregressive Modeling: Scalable Image Generation via Next-Scale Prediction |
-|authors| Keyu TianYi JiangZehuan YuanBingyue PengLiwei Wang
-|links| http://arxiv.org/abs/2404.02905v1 |
-|updated| 2024-04-03 17:59:53 UTC |
-|summary| We present Visual AutoRegressive modeling VAR a new generation paradigmthat redefines the autoregressive learning on images as coarse-to-finenext-scale prediction or next-resolution prediction diverging from thestandard raster-scan next-token prediction. This simple intuitivemethodology allows autoregressive AR transformers to learn visualdistributions fast and generalize well: VAR for the first time makes ARmodels surpass diffusion transformers in image generation. On ImageNet 256x256benchmark VAR significantly improve AR baseline by improving Frechet inceptiondistance FID from 18.65 to 1.80 inception score IS from 80.4 to 356.4with around 20x faster inference speed. It is also empirically verified thatVAR outperforms the Diffusion Transformer DiT in multiple dimensionsincluding image quality inference speed data efficiency and scalability.Scaling up VAR models exhibits clear power-law scaling laws similar to thoseobserved in LLMs with linear correlation coefficients near -0.998 as solidevidence. VAR further showcases zero-shot generalization ability in downstreamtasks including image in-painting out-painting and editing. These resultssuggest VAR has initially emulated the two important properties of LLMs:Scaling Laws and zero-shot task generalization. We have released all models andcodes to promote the exploration of AR/VAR models for visual generation andunified learning. |
+|idx| 2404.03658v1 |
+|title| Know Your Neighbors: Improving Single-View Reconstruction via Spatial Vision-Language Reasoning |
+|authors| Rui LiTobias FischerMattia SeguMarc PollefeysLuc Van GoolFederico Tombari
+|links| http://arxiv.org/abs/2404.03658v1 |
+|updated| 2024-04-04 17:59:59 UTC |
+|summary| Recovering the 3D scene geometry from a single view is a fundamental yetill-posed problem in computer vision. While classical depth estimation methodsinfer only a 2.5D scene representation limited to the image plane recentapproaches based on radiance fields reconstruct a full 3D representation.However these methods still struggle with occluded regions since inferringgeometry without visual observation requires i semantic knowledge of thesurroundings and ii reasoning about spatial context. We propose KYN a novelmethod for single-view scene reconstruction that reasons about semantic andspatial context to predict each points density. We introduce a vision-languagemodulation module to enrich point features with fine-grained semanticinformation. We aggregate point representations across the scene through alanguage-guided spatial attention mechanism to yield per-point densitypredictions aware of the 3D semantic context. We show that KYN improves 3Dshape recovery compared to predicting density for each 3D point in isolation.We achieve state-of-the-art results in scene and object reconstruction onKITTI-360 and show improved zero-shot generalization compared to prior work.Project page: https://ruili3.github.io/kyn. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02904v1 |
-|title| ALOHa: A New Measure for Hallucination in Captioning Models |
-|authors| Suzanne PetrykDavid M. ChanAnish KachinthayaHaodi ZouJohn CannyJoseph E. GonzalezTrevor Darrell
-|links| http://arxiv.org/abs/2404.02904v1 |
-|updated| 2024-04-03 17:59:36 UTC |
-|summary| Despite recent advances in multimodal pre-training for visual descriptionstate-of-the-art models still produce captions containing errors such ashallucinating objects not present in a scene. The existing prominent metric forobject hallucination CHAIR is limited to a fixed set of MS COCO objects andsynonyms. In this work we propose a modernized open-vocabulary metric ALOHawhich leverages large language models LLMs to measure object hallucinations.Specifically we use an LLM to extract groundable objects from a candidatecaption measure their semantic similarity to reference objects from captionsand object detections and use Hungarian matching to produce a finalhallucination score. We show that ALOHa correctly identifies 13.6 morehallucinated objects than CHAIR on HAT a new gold-standard subset of MS COCOCaptions annotated for hallucinations and 30.8 more on nocaps where objectsextend beyond MS COCO categories. Our code is available athttps://davidmchan.github.io/aloha/. |
+|idx| 2404.03657v1 |
+|title| OW-VISCap: Open-World Video Instance Segmentation and Captioning |
+|authors| Anwesa ChoudhuriGirish ChowdharyAlexander G. Schwing
+|links| http://arxiv.org/abs/2404.03657v1 |
+|updated| 2024-04-04 17:59:58 UTC |
+|summary| Open-world video instance segmentation is an important video understandingtask. Yet most methods either operate in a closed-world setting require anadditional user-input or use classic region-based proposals to identify neverbefore seen objects. Further these methods only assign a one-word label todetected objects and dont generate rich object-centric descriptions. Theyalso often suffer from highly overlapping predictions. To address these issueswe propose Open-World Video Instance Segmentation and Captioning OW-VISCapan approach to jointly segment track and caption previously seen or unseenobjects in a video. For this we introduce open-world object queries todiscover never before seen objects without additional user-input. We generaterich and descriptive object-centric captions for each detected object via amasked attention augmented LLM input. We introduce an inter-query contrastiveloss to ensure that the object queries differ from one another. Our generalizedapproach matches or surpasses state-of-the-art on three tasks: open-world videoinstance segmentation on the BURST dataset dense video object captioning onthe VidSTG dataset and closed-world video instance segmentation on the OVISdataset. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02903v1 |
-|title| LidarDM: Generative LiDAR Simulation in a Generated World |
-|authors| Vlas ZyrianovHenry CheZhijian LiuShenlong Wang
-|links| http://arxiv.org/abs/2404.02903v1 |
-|updated| 2024-04-03 17:59:28 UTC |
-|summary| We present LidarDM a novel LiDAR generative model capable of producingrealistic layout-aware physically plausible and temporally coherent LiDARvideos. LidarDM stands out with two unprecedented capabilities in LiDARgenerative modeling: i LiDAR generation guided by driving scenarios offeringsignificant potential for autonomous driving simulations and ii 4D LiDARpoint cloud generation enabling the creation of realistic and temporallycoherent sequences. At the heart of our model is a novel integrated 4D worldgeneration framework. Specifically we employ latent diffusion models togenerate the 3D scene combine it with dynamic actors to form the underlying 4Dworld and subsequently produce realistic sensory observations within thisvirtual environment. Our experiments indicate that our approach outperformscompeting algorithms in realism temporal coherency and layout consistency. Weadditionally show that LidarDM can be used as a generative world modelsimulator for training and testing perception models. |
+|idx| 2404.03656v1 |
+|title| MVD-Fusion: Single-view 3D via Depth-consistent Multi-view Generation |
+|authors| Hanzhe HuZhizhuo ZhouVarun JampaniShubham Tulsiani
+|links| http://arxiv.org/abs/2404.03656v1 |
+|updated| 2024-04-04 17:59:57 UTC |
+|summary| We present MVD-Fusion: a method for single-view 3D inference via generativemodeling of multi-view-consistent RGB-D images. While recent methods pursuing3D inference advocate learning novel-view generative models these generationsare not 3D-consistent and require a distillation process to generate a 3Doutput. We instead cast the task of 3D inference as directly generatingmutually-consistent multiple views and build on the insight that additionallyinferring depth can provide a mechanism for enforcing this consistency.Specifically we train a denoising diffusion model to generate multi-view RGB-Dimages given a single RGB input image and leverage the intermediate noisydepth estimates to obtain reprojection-based conditioning to maintainmulti-view consistency. We train our model using large-scale synthetic datasetObajverse as well as the real-world CO3D dataset comprising of generic cameraviewpoints. We demonstrate that our approach can yield more accurate synthesiscompared to recent state-of-the-art including distillation-based 3D inferenceand prior multi-view generation methods. We also evaluate the geometry inducedby our multi-view depth prediction and find that it yields a more accuraterepresentation than other direct 3D inference approaches. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02900v1 |
-|title| DeiT-LT Distillation Strikes Back for Vision Transformer Training on Long-Tailed Datasets |
-|authors| Harsh RangwaniPradipto MondalMayank MishraAshish Ramayee AsokanR. Venkatesh Babu
-|links| http://arxiv.org/abs/2404.02900v1 |
-|updated| 2024-04-03 17:58:21 UTC |
-|summary| Vision Transformer ViT has emerged as a prominent architecture for variouscomputer vision tasks. In ViT we divide the input image into patch tokens andprocess them through a stack of self attention blocks. However unlikeConvolutional Neural Networks CNN ViTs simple architecture has noinformative inductive bias e.g. localityetc. . Due to this ViT requires alarge amount of data for pre-training. Various data efficient approaches DeiThave been proposed to train ViT on balanced datasets effectively. Howeverlimited literature discusses the use of ViT for datasets with long-tailedimbalances. In this work we introduce DeiT-LT to tackle the problem oftraining ViTs from scratch on long-tailed datasets. In DeiT-LT we introduce anefficient and effective way of distillation from CNN via distillation DISTtoken by using out-of-distribution images and re-weighting the distillationloss to enhance focus on tail classes. This leads to the learning of localCNN-like features in early ViT blocks improving generalization for tailclasses. Further to mitigate overfitting we propose distilling from a flatCNN teacher which leads to learning low-rank generalizable features for DISTtokens across all ViT blocks. With the proposed DeiT-LT scheme thedistillation DIST token becomes an expert on the tail classes and theclassifier CLS token becomes an expert on the head classes. The experts help toeffectively learn features corresponding to both the majority and minorityclasses using a distinct set of tokens within the same ViT architecture. Weshow the effectiveness of DeiT-LT for training ViT from scratch on datasetsranging from small-scale CIFAR-10 LT to large-scale iNaturalist-2018. |
+|idx| 2404.03654v1 |
+|title| RaFE: Generative Radiance Fields Restoration |
+|authors| Zhongkai WuZiyu WanJing ZhangJing LiaoDong Xu
+|links| http://arxiv.org/abs/2404.03654v1 |
+|updated| 2024-04-04 17:59:50 UTC |
+|summary| NeRF Neural Radiance Fields has demonstrated tremendous potential in novelview synthesis and 3D reconstruction but its performance is sensitive to inputimage quality which struggles to achieve high-fidelity rendering when providedwith low-quality sparse input viewpoints. Previous methods for NeRF restorationare tailored for specific degradation type ignoring the generality ofrestoration. To overcome this limitation we propose a generic radiance fieldsrestoration pipeline named RaFE which applies to various types ofdegradations such as low resolution blurriness noise compression artifactsor their combinations. Our approach leverages the success of off-the-shelf 2Drestoration methods to recover the multi-view images individually. Instead ofreconstructing a blurred NeRF by averaging inconsistencies we introduce anovel approach using Generative Adversarial Networks GANs for NeRF generationto better accommodate the geometric and appearance inconsistencies present inthe multi-view images. Specifically we adopt a two-level tri-planearchitecture where the coarse level remains fixed to represent the low-qualityNeRF and a fine-level residual tri-plane to be added to the coarse level ismodeled as a distribution with GAN to capture potential variations inrestoration. We validate RaFE on both synthetic and real cases for variousrestoration tasks demonstrating superior performance in both quantitative andqualitative evaluations surpassing other 3D restoration methods specific tosingle task. Please see our project websitehttps://zkaiwu.github.io/RaFE-Project/. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02899v1 |
-|title| MatAtlas: Text-driven Consistent Geometry Texturing and Material Assignment |
-|authors| Duygu CeylanValentin DeschaintreThibault GroueixRosalie MartinChun-Hao HuangRomain RouffetVladimir KimGaëtan Lassagne
-|links| http://arxiv.org/abs/2404.02899v1 |
-|updated| 2024-04-03 17:57:15 UTC |
-|summary| We present MatAtlas a method for consistent text-guided 3D model texturing.Following recent progress we leverage a large scale text-to-image generationmodel e.g. Stable Diffusion as a prior to texture a 3D model. We carefullydesign an RGB texturing pipeline that leverages a grid pattern diffusiondriven by depth and edges. By proposing a multi-step texture refinementprocess we significantly improve the quality and 3D consistency of thetexturing output. To further address the problem of baked-in lighting we movebeyond RGB colors and pursue assigning parametric materials to the assets.Given the high-quality initial RGB texture we propose a novel materialretrieval method capitalized on Large Language Models LLM enablingeditabiliy and relightability. We evaluate our method on a wide variety ofgeometries and show that our method significantly outperform prior arts. Wealso analyze the role of each component through a detailed ablation study. |
+|idx| 2404.03653v1 |
+|title| CoMat: Aligning Text-to-Image Diffusion Model with Image-to-Text Concept Matching |
+|authors| Dongzhi JiangGuanglu SongXiaoshi WuRenrui ZhangDazhong ShenZhuofan ZongYu LiuHongsheng Li
+|links| http://arxiv.org/abs/2404.03653v1 |
+|updated| 2024-04-04 17:59:46 UTC |
+|summary| Diffusion models have demonstrated great success in the field oftext-to-image generation. However alleviating the misalignment between thetext prompts and images is still challenging. The root reason behind themisalignment has not been extensively investigated. We observe that themisalignment is caused by inadequate token attention activation. We furtherattribute this phenomenon to the diffusion models insufficient conditionutilization which is caused by its training paradigm. To address the issue wepropose CoMat an end-to-end diffusion model fine-tuning strategy with animage-to-text concept matching mechanism. We leverage an image captioning modelto measure image-to-text alignment and guide the diffusion model to revisitignored tokens. A novel attribute concentration module is also proposed toaddress the attribute binding problem. Without any image or human preferencedata we use only 20K text prompts to fine-tune SDXL to obtain CoMat-SDXL.Extensive experiments show that CoMat-SDXL significantly outperforms thebaseline model SDXL in two text-to-image alignment benchmarks and achievesstart-of-the-art performance. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02873v1 |
-|title| Gaussian Process Regression with Soft Inequality and Monotonicity Constraints |
-|authors| Didem KochanXiu Yang
-|links| http://arxiv.org/abs/2404.02873v1 |
-|updated| 2024-04-03 17:09:25 UTC |
-|summary| Gaussian process GP regression is a non-parametric Bayesian framework toapproximate complex models. Standard GP regression can lead to an unboundedmodel in which some points can take infeasible values. We introduce a new GPmethod that enforces the physical constraints in a probabilistic manner. ThisGP model is trained by the quantum-inspired Hamiltonian Monte Carlo QHMC.QHMC is an efficient way to sample from a broad class of distributions. Unlikethe standard Hamiltonian Monte Carlo algorithm in which a particle has a fixedmass QHMC allows a particle to have a random mass matrix with a probabilitydistribution. Introducing the QHMC method to the inequality and monotonicityconstrained GP regression in the probabilistic sense our approach improves theaccuracy and reduces the variance in the resulting GP model. According to ourexperiments on several datasets the proposed approach serves as an efficientmethod as it accelerates the sampling process while maintaining the accuracyand it is applicable to high dimensional problems. |
+|idx| 2404.03586v1 |
+|title| Leveraging Interpolation Models and Error Bounds for Verifiable Scientific Machine Learning |
+|authors| Tyler ChangAndrew GilletteRomit Maulik
+|links| http://arxiv.org/abs/2404.03586v1 |
+|updated| 2024-04-04 16:52:17 UTC |
+|summary| Effective verification and validation techniques for modern scientificmachine learning workflows are challenging to devise. Statistical methods areabundant and easily deployed but often rely on speculative assumptions aboutthe data and methods involved. Error bounds for classical interpolationtechniques can provide mathematically rigorous estimates of accuracy but oftenare difficult or impractical to determine computationally. In this work wepresent a best-of-both-worlds approach to verifiable scientific machinelearning by demonstrating that 1 multiple standard interpolation techniqueshave informative error bounds that can be computed or estimated efficiently2 comparative performance among distinct interpolants can aid in validationgoals 3 deploying interpolation methods on latent spaces generated by deeplearning techniques enables some interpretability for black-box models. Wepresent a detailed case study of our approach for predicting lift-drag ratiosfrom airfoil images. Code developed for this work is available in a publicGithub repository. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02866v1 |
-|title| Guarantees of confidentiality via Hammersley-Chapman-Robbins bounds |
-|authors| Kamalika ChaudhuriChuan GuoLaurens van der MaatenSaeed MahloujifarMark Tygert
-|links| http://arxiv.org/abs/2404.02866v1 |
-|updated| 2024-04-03 16:58:03 UTC |
-|summary| Protecting privacy during inference with deep neural networks is possible byadding noise to the activations in the last layers prior to the finalclassifiers or other task-specific layers. The activations in such layers areknown as features or less commonly as embeddings or featureembeddings. The added noise helps prevent reconstruction of the inputs fromthe noisy features. Lower bounding the variance of every possible unbiasedestimator of the inputs quantifies the confidentiality arising from such addednoise. Convenient computationally tractable bounds are available from classicinequalities of Hammersley and of Chapman and Robbins -- the HCR bounds.Numerical experiments indicate that the HCR bounds are on the precipice ofbeing effectual for small neural nets with the data sets MNIST andCIFAR-10 which contain 10 classes each for image classification. The HCRbounds appear to be insufficient on their own to guarantee confidentiality ofthe inputs to inference with standard deep neural nets ResNet-18 andSwin-T pre-trained on the data set ImageNet-1000 which contains 1000classes. Supplementing the addition of noise to features with other methods forproviding confidentiality may be warranted in the case of ImageNet. In allcases the results reported here limit consideration to amounts of added noisethat incur little degradation in the accuracy of classification from the noisyfeatures. Thus the added noise enhances confidentiality without much reductionin the accuracy on the task of image classification. |
+|idx| 2404.03578v1 |
+|title| Distributionally Robust Reinforcement Learning with Interactive Data Collection: Fundamental Hardness and Near-Optimal Algorithm |
+|authors| Miao LuHan ZhongTong ZhangJose Blanchet
+|links| http://arxiv.org/abs/2404.03578v1 |
+|updated| 2024-04-04 16:40:22 UTC |
+|summary| The sim-to-real gap which represents the disparity between training andtesting environments poses a significant challenge in reinforcement learningRL. A promising approach to addressing this challenge is distributionallyrobust RL often framed as a robust Markov decision process RMDP. In thisframework the objective is to find a robust policy that achieves goodperformance under the worst-case scenario among all environments within apre-specified uncertainty set centered around the training environment. Unlikeprevious work which relies on a generative model or a pre-collected offlinedataset enjoying good coverage of the deployment environment we tackle robustRL via interactive data collection where the learner interacts with thetraining environment only and refines the policy through trial and error. Inthis robust RL paradigm two main challenges emerge: managing distributionalrobustness while striking a balance between exploration and exploitation duringdata collection. Initially we establish that sample-efficient learning withoutadditional assumptions is unattainable owing to the curse of support shifti.e. the potential disjointedness of the distributional supports between thetraining and testing environments. To circumvent such a hardness result weintroduce the vanishing minimal value assumption to RMDPs with atotal-variation TV distance robust set postulating that the minimal value ofthe optimal robust value function is zero. We prove that such an assumptioneffectively eliminates the support shift issue for RMDPs with a TV distancerobust set and present an algorithm with a provable sample complexityguarantee. Our work makes the initial step to uncovering the inherentdifficulty of robust RL via interactive data collection and sufficientconditions for designing a sample-efficient algorithm accompanied by sharpsample complexity analysis. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02591v1 |
-|title| Adaptive Sampling Policies Imply Biased Beliefs: A Generalization of the Hot Stove Effect |
-|authors| Jerker Denrell
-|links| http://arxiv.org/abs/2404.02591v1 |
-|updated| 2024-04-03 09:15:38 UTC |
-|summary| The Hot Stove Effect is a negativity bias resulting from the adaptivecharacter of learning. The mechanism is that learning algorithms that pursuealternatives with positive estimated values but avoid alternatives withnegative estimated values will correct errors of overestimation but fail tocorrect errors of underestimation. Here we generalize the theory behind theHot Stove Effect to settings in which negative estimates do not necessarilylead to avoidance but to a smaller sample size i.e. a learner selects fewerof alternative B if B is believed to be inferior but does not entirely avoidB. We formally demonstrate that the negativity bias remains in this set-up. Wealso show there is a negativity bias for Bayesian learners in the sense thatmost such learners underestimate the expected value of an alternative. |
+|idx| 2404.03524v1 |
+|title| Approximate Gradient Coding for Privacy-Flexible Federated Learning with Non-IID Data |
+|authors| Okko MakkonenSampo NiemeläCamilla HollantiSerge Kas Hanna
+|links| http://arxiv.org/abs/2404.03524v1 |
+|updated| 2024-04-04 15:29:50 UTC |
+|summary| This work focuses on the challenges of non-IID data and stragglers/dropoutsin federated learning. We introduce and explore a privacy-flexible paradigmthat models parts of the clients local data as non-private offering a moreversatile and business-oriented perspective on privacy. Within this frameworkwe propose a data-driven strategy for mitigating the effects of labelheterogeneity and client straggling on federated learning. Our solutioncombines both offline data sharing and approximate gradient coding techniques.Through numerical simulations using the MNIST dataset we demonstrate that ourapproach enables achieving a deliberate trade-off between privacy and utilityleading to improved model convergence and accuracy while using an adaptableportion of non-private data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02538v1 |
-|title| Convergence Analysis of Flow Matching in Latent Space with Transformers |
-|authors| Yuling JiaoYanming LaiYang WangBokai Yan
-|links| http://arxiv.org/abs/2404.02538v1 |
-|updated| 2024-04-03 07:50:53 UTC |
-|summary| We present theoretical convergence guarantees for ODE-based generativemodels specifically flow matching. We use a pre-trained autoencoder network tomap high-dimensional original inputs to a low-dimensional latent space where atransformer network is trained to predict the velocity field of thetransformation from a standard normal distribution to the target latentdistribution. Our error analysis demonstrates the effectiveness of thisapproach showing that the distribution of samples generated via estimated ODEflow converges to the target distribution in the Wasserstein-2 distance undermild and practical assumptions. Furthermore we show that arbitrary smoothfunctions can be effectively approximated by transformer networks withLipschitz continuity which may be of independent interest. |
+|idx| 2404.03506v1 |
+|title| CountARFactuals -- Generating plausible model-agnostic counterfactual explanations with adversarial random forests |
+|authors| Susanne DandlKristin BleschTimo FreieslebenGunnar KönigJan KaparBernd BischlMarvin Wright
+|links| http://arxiv.org/abs/2404.03506v1 |
+|updated| 2024-04-04 15:10:13 UTC |
+|summary| Counterfactual explanations elucidate algorithmic decisions by pointing toscenarios that would have led to an alternative desired outcome. Givinginsight into the models behavior they hint users towards possible actions andgive grounds for contesting decisions. As a crucial factor in achieving thesegoals counterfactuals must be plausible i.e. describing realisticalternative scenarios within the data manifold. This paper leverages a recentlydeveloped generative modeling technique -- adversarial random forests ARFs --to efficiently generate plausible counterfactuals in a model-agnostic way. ARFscan serve as a plausibility measure or directly generate counterfactualexplanations. Our ARF-based approach surpasses the limitations of existingmethods that aim to generate plausible counterfactual explanations: It is easyto train and computationally highly efficient handles continuous andcategorical data naturally and allows integrating additional desiderata suchas sparsity in a straightforward manner. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02446v1 |
-|title| Masked Completion via Structured Diffusion with White-Box Transformers |
-|authors| Druv PaiZiyang WuSam BuchananYaodong YuYi Ma
-|links| http://arxiv.org/abs/2404.02446v1 |
-|updated| 2024-04-03 04:23:01 UTC |
-|summary| Modern learning frameworks often train deep neural networks with massiveamounts of unlabeled data to learn representations by solving simple pretexttasks then use the representations as foundations for downstream tasks. Thesenetworks are empirically designed as such they are usually not interpretabletheir representations are not structured and their designs are potentiallyredundant. White-box deep networks in which each layer explicitly identifiesand transforms structures in the data present a promising alternative.However existing white-box architectures have only been shown to work at scalein supervised settings with labeled data such as classification. In this workwe provide the first instantiation of the white-box design paradigm that can beapplied to large-scale unsupervised representation learning. We do this byexploiting a fundamental connection between diffusion compression andmasked completion deriving a deep transformer-like masked autoencoderarchitecture called CRATE-MAE in which the role of each layer ismathematically fully interpretable: they transform the data distribution to andfrom a structured representation. Extensive empirical evaluations confirm ouranalytical insights. CRATE-MAE demonstrates highly promising performance onlarge-scale imagery datasets while using only 30 of the parameters comparedto the standard masked autoencoder with the same model configuration. Therepresentations learned by CRATE-MAE have explicit structure and also containsemantic meaning. Code is available at https://github.com/Ma-Lab-Berkeley/CRATE . |
+|idx| 2404.03331v1 |
+|title| LancBiO: dynamic Lanczos-aided bilevel optimization via Krylov subspace |
+|authors| Bin GaoYan YangYa-xiang Yuan
+|links| http://arxiv.org/abs/2404.03331v1 |
+|updated| 2024-04-04 09:57:29 UTC |
+|summary| Bilevel optimization with broad applications in machine learning has anintricate hierarchical structure. Gradient-based methods have emerged as acommon approach to large-scale bilevel problems. However the computation ofthe hyper-gradient which involves a Hessian inverse vector product confinesthe efficiency and is regarded as a bottleneck. To circumvent the inverse weconstruct a sequence of low-dimensional approximate Krylov subspaces with theaid of the Lanczos process. As a result the constructed subspace is able todynamically and incrementally approximate the Hessian inverse vector productwith less effort and thus leads to a favorable estimate of the hyper-gradient.Moreover we propose aprovable subspace-based framework for bilevel problemswhere one central step is to solve a small-size tridiagonal linear system. Tothe best of our knowledge this is the first time that subspace techniques areincorporated into bilevel optimization. This successful trial not only enjoysmathcalOepsilon-1 convergence rate but also demonstrates efficiencyin a synthetic problem and two deep learning tasks. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02880v1 |
-|title| Fragmented Moments, Balanced Choices: How Do People Make Use of Their Waiting Time? |
-|authors| Jian ZhengGe Gao
-|links| http://dx.doi.org/10.1145/3613904.3642608 |
-|updated| 2024-04-03 17:32:50 UTC |
-|summary| Everyone spends some time waiting every day. HCI research has developed toolsfor boosting productivity while waiting. However little is known about howpeople naturally spend their waiting time. We conducted an experience samplingstudy with 21 working adults who used a mobile app to report their dailywaiting time activities over two weeks. The aim of this study is to understandthe activities people do while waiting and the effect of situational factors.We found that participants spent about 60 of their waiting time on leisureactivities 20 on productive activities and 20 on maintenance activities.These choices are sensitive to situational factors including accessibledevice location and certain routines of the day. Our study complementsprevious ones by demonstrating that people purpose waiting time for variousgoals beyond productivity and to maintain work-life balance. Our findings shedlight on future empirical research and system design for time management. |
+|idx| 2404.03612v1 |
+|title| Creator Hearts: Investigating the Impact Positive Signals from YouTube Creators in Shaping Comment Section Behavior |
+|authors| Frederick ChoiCharlotte LambertVinay KoshySowmya PratipatiTue DoEshwar Chandrasekharan
+|links| http://arxiv.org/abs/2404.03612v1 |
+|updated| 2024-04-04 17:34:35 UTC |
+|summary| Much of the research in online moderation focuses on punitive actions.However emerging research has shown that positive reinforcement is effectiveat encouraging desirable behavior on online platforms. We extend this researchby studying the creator heart feature on YouTube quantifying their primaryeffects on comments that receive hearts and on videos where hearts have beengiven. We find that creator hearts increased the visibility of comments andincreased the amount of positive engagement they received from other users. Wealso find that the presence of a creator hearted comment soon after a video ispublished can incentivize viewers to comment increasing the total engagementwith the video over time. We discuss the potential for creators to use heartsto shape behavior in their communities by highlighting rewarding andincentivizing desirable behaviors from users. We discuss avenues for extendingour study to understanding positive signals from moderators on other platforms. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02806v1 |
-|title| The RealHumanEval: Evaluating Large Language Models' Abilities to Support Programmers |
-|authors| Hussein MozannarValerie ChenMohammed AlsobaySubhro DasSebastian ZhaoDennis WeiManish NagireddyPrasanna SattigeriAmeet TalwalkarDavid Sontag
-|links| http://arxiv.org/abs/2404.02806v1 |
-|updated| 2024-04-03 15:20:57 UTC |
-|summary| Evaluation of large language models LLMs for code has primarily relied onstatic benchmarks including HumanEval Chen et al. 2021 which measure theability of LLMs to generate complete code that passes unit tests. As LLMs areincreasingly used as programmer assistants we study whether gains on existingbenchmarks translate to gains in programmer productivity when coding with LLMsincluding time spent coding. In addition to static benchmarks we investigatethe utility of preference metrics that might be used as proxies to measure LLMhelpfulness such as code acceptance or copy rates. To do so we introduceRealHumanEval a web interface to measure the ability of LLMs to assistprogrammers through either autocomplete or chat support. We conducted a userstudy N213 using RealHumanEval in which users interacted with six LLMs ofvarying base model performance. Despite static benchmarks not incorporatinghumans-in-the-loop we find that improvements in benchmark performance lead toincreased programmer productivity however gaps in benchmark versus humanperformance are not proportional -- a trend that holds across both forms of LLMsupport. In contrast we find that programmer preferences do not correlate withtheir actual performance motivating the need for better human-centric proxysignals. We also open-source RealHumanEval to enable human-centric evaluationof new models and the study data to facilitate efforts to improve code models. |
+|idx| 2404.03498v1 |
+|title| Integrating Large Language Models with Multimodal Virtual Reality Interfaces to Support Collaborative Human-Robot Construction Work |
+|authors| Somin ParkCarol C. MenassaVineet R. Kamat
+|links| http://arxiv.org/abs/2404.03498v1 |
+|updated| 2024-04-04 14:56:41 UTC |
+|summary| In the construction industry where work environments are complexunstructured and often dangerous the implementation of Human-RobotCollaboration HRC is emerging as a promising advancement. This underlines thecritical need for intuitive communication interfaces that enable constructionworkers to collaborate seamlessly with robotic assistants. This studyintroduces a conversational Virtual Reality VR interface integratingmultimodal interaction to enhance intuitive communication between constructionworkers and robots. By integrating voice and controller inputs with the RobotOperating System ROS Building Information Modeling BIM and a game enginefeaturing a chat interface powered by a Large Language Model LLM theproposed system enables intuitive and precise interaction within a VR setting.Evaluated by twelve construction workers through a drywall installation casestudy the proposed system demonstrated its low workload and high usabilitywith succinct command inputs. The proposed multimodal interaction systemsuggests that such technological integration can substantially advance theintegration of robotic assistants in the construction industry. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02798v1 |
-|title| AI and personalized learning: bridging the gap with modern educational goals |
-|authors| Kristjan-Julius LaakJaan Aru
-|links| http://arxiv.org/abs/2404.02798v1 |
-|updated| 2024-04-03 15:07:00 UTC |
-|summary| Personalized learning PL aspires to provide an alternative to theone-size-fits-all approach in education. Technology-based PL solutions haveshown notable effectiveness in enhancing learning performance. However theiralignment with the broader goals of modern education is inconsistent acrosstechnologies and research areas. In this paper we examine the characteristicsof AI-driven PL solutions in light of the OECD Learning Compass 2030 goals. Ouranalysis indicates a gap between the objectives of modern education and thecurrent direction of PL. We identify areas where most present-day PLtechnologies could better embrace essential elements of contemporary educationsuch as collaboration cognitive engagement and the development of generalcompetencies. While the present PL solutions are instrumental in aidinglearning processes the PL envisioned by educational experts extends beyondsimple technological tools and requires a holistic change in the educationalsystem. Finally we explore the potential of large language models such asChatGPT and propose a hybrid model that blends artificial intelligence with acollaborative teacher-facilitated approach to personalized learning. |
+|idx| 2404.03356v1 |
+|title| Agora Elevator Bodily Sensation Study -- a report |
+|authors| Rebekah Rousi
+|links| http://arxiv.org/abs/2404.03356v1 |
+|updated| 2024-04-04 10:50:41 UTC |
+|summary| This study set out to examine the relationship between expressed socialemotions i.e. that what people say they are feeling and physical sensationsthe connection between emotion and bodily experience. It additionally providedthe opportunity to investigate how the neurological findings of genderdifferences can be observed in practice what difference does it make inbehaviour and judgment that we have varying levels of mirror neuron activityThe following report documents the study procedure results and findings. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02743v1 |
-|title| IEEE VIS Workshop on Visualization for Climate Action and Sustainability |
-|authors| Benjamin BachFanny ChevalierHelen-Nicole KostisMark SubbaroYvonne JansenRobert Soden
-|links| http://arxiv.org/abs/2404.02743v1 |
-|updated| 2024-04-03 13:39:59 UTC |
-|summary| This first workshop on visualization for climate action and sustainabilityaims to explore and consolidate the role of data visualization in acceleratingaction towards addressing the current environmental crisis. Given the urgencyand impact of the environmental crisis we ask how our skills researchmethods and innovations can help by empowering people and organizations. Webelieve visualization holds an enormous power to aid understanding decisionmaking communication discussion participation education and exploration ofcomplex topics around climate action and sustainability. Hence this workshopinvites submissions and discussion around these topics with the goal ofestablishing a visible and actionable link between these fields and theirrespective stakeholders. The workshop solicits work-in-progress and researchpapers as well as pictorials and interactive demos from the whole range ofvisualization research dashboards interactive spaces scientificvisualization storytelling visual analytics explainability etc. within thecontext of environmentalism climate science sustainability energy circulareconomy biodiversity etc. and across a range of scenarios from publicawareness and understanding visual analysis expert decision making sciencecommunication personal decision making etc. After presentations ofsubmissions the workshop will feature dedicated discussion groups around datadriven interactive experiences for the public and tools for personal andprofessional decision making. |
+|idx| 2404.03337v1 |
+|title| Influence of Gameplay Duration, Hand Tracking, and Controller Based Control Methods on UX in VR |
+|authors| Tanja KojićMaurizio VergariSimon KnuthMaximilian WarsinkeSebastian MöllerJan-Niklas Voigt-Antons
+|links| http://dx.doi.org/10.1145/3652212.3652222 |
+|updated| 2024-04-04 10:06:45 UTC |
+|summary| Inside-out tracking is growing popular in consumer VR enhancingaccessibility. It uses HMD camera data and neural networks for effective handtracking. However limited user experience studies have compared this method totraditional controllers with no consensus on the optimal control technique.This paper investigates the impact of control methods and gaming duration on VRuser experience hypothesizing hand tracking might be preferred for shortsessions and by users new to VR due to its simplicity. Through a lab study withtwenty participants evaluating presence emotional response UX quality andflow findings revealed control type and session length affect user experiencewithout significant interaction. Controllers were generally superiorattributed to their reliability and longer sessions increased presence andrealism. The study found that individuals with more VR experience were moreinclined to recommend hand tracking to others which contradicted predictions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02718v1 |
-|title| Evolving Agents: Interactive Simulation of Dynamic and Diverse Human Personalities |
-|authors| Jiale LiJiayang LiJiahao ChenYifan LiShijie WangHugo ZhouMinjun YeYunsheng Su
-|links| http://arxiv.org/abs/2404.02718v1 |
-|updated| 2024-04-03 13:20:36 UTC |
-|summary| Human-like Agents with diverse and dynamic personality could serve as animportant design probe in the process of user-centered design thereby enablingdesigners to enhance the user experience of interactive application.In thisarticle we introduce Evolving Agents a novel agent architecture that consistsof two systems: Personality and Behavior. The Personality system includes threemodules: Cognition Emotion and Character Growth. The Behavior system comprisestwo modules: Planning and Action. We also build a simulation platform thatenables agents to interact with the environment and other agents. EvolvingAgents can simulate the human personality evolution process. Compared to itsinitial state agents personality and behavior patterns undergo believabledevelopment after several days of simulation. Agents reflect on their behaviorto reason and develop new personality traits. These traits in turn generatenew behavior patterns forming a feedback loop-like personality evolution.Inour experiment we utilized simulation platform with 10 agents for evaluation.During the evaluation these agents experienced believable and inspirationalpersonality evolution. Through ablation and control experiments wedemonstrated the outstanding effectiveness of agent personality evolution andall modules of our agent architecture contribute to creating believablehuman-like agents with diverse and dynamic personalities. We also demonstratedthrough workshops how Evolving Agents could inspire designers. |
+|idx| 2404.03239v1 |
+|title| Exploring Emotions in Multi-componential Space using Interactive VR Games |
+|authors| Rukshani SomarathnaGelareh Mohammadi
+|links| http://arxiv.org/abs/2404.03239v1 |
+|updated| 2024-04-04 06:54:44 UTC |
+|summary| Emotion understanding is a complex process that involves multiple components.The ability to recognise emotions not only leads to new context awarenessmethods but also enhances system interactions effectiveness by perceiving andexpressing emotions. Despite the attention to discrete and dimensional modelsneuroscientific evidence supports those emotions as being complex andmulti-faceted. One framework that resonated well with such findings is theComponent Process Model CPM a theory that considers the complexity ofemotions with five interconnected components: appraisal expressionmotivation physiology and feeling. However the relationship between CPM anddiscrete emotions has not yet been fully explored. Therefore to betterunderstand emotions underlying processes we operationalised a data-drivenapproach using interactive Virtual Reality VR games and collected multimodalmeasures self-reports physiological and facial signals from 39 participants.We used Machine Learning ML methods to identify the unique contributions ofeach component to emotion differentiation. Our results showed the role ofdifferent components in emotion differentiation with the model including allcomponents demonstrating the most significant contribution. Moreover we foundthat at least five dimensions are needed to represent the variation of emotionsin our dataset. These findings also have implications for using VR environmentsin emotion research and highlight the role of physiological signals in emotionrecognition within such environments. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02448v1 |
-|title| Electric Vehicle Routing Problem for Emergency Power Supply: Towards Telecom Base Station Relief |
-|authors| Daisuke KikutaHiroki IkeuchiKengo TajiriYuta ToyamaYuusuke Nakano
-|links| http://arxiv.org/abs/2404.02448v1 |
-|updated| 2024-04-03 04:27:07 UTC |
-|summary| As a telecom provider our company has a critical mission to maintain telecomservices even during power outages. To accomplish the mission it is essentialto maintain the power of the telecom base stations. Here we consider a solutionwhere electric vehicles EVs directly supply power to base stations bytraveling to their locations. The goal is to find EV routes that minimize boththe total travel distance of all EVs and the number of downed base stations. Inthis paper we formulate this routing problem as a new variant of the ElectricVehicle Routing Problem EVRP and propose a solver that combines a rule-basedvehicle selector and a reinforcement learning RL-based node selector. Therule of the vehicle selector ensures the exact environmental states when theselected EV starts to move. In addition the node selection by the RL modelenables fast route generation which is critical in emergencies. We evaluateour solver on both synthetic datasets and real datasets. The results show thatour solver outperforms baselines in terms of the objective value andcomputation time. Moreover we analyze the generalization and scalability ofour solver demonstrating the capability toward unseen settings and large-scaleproblems. Check also our project page: https://ntt-dkiku.github.io/rl-evrpeps. |
+|idx| 2404.03596v1 |
+|title| Laser Learning Environment: A new environment for coordination-critical multi-agent tasks |
+|authors| Yannick MolinghenRaphaël AvalosMark Van AchterAnn NowéTom Lenaerts
+|links| http://arxiv.org/abs/2404.03596v1 |
+|updated| 2024-04-04 17:05:42 UTC |
+|summary| We introduce the Laser Learning Environment LLE a collaborativemulti-agent reinforcement learning environment in which coordination iscentral. In LLE agents depend on each other to make progressinterdependence must jointly take specific sequences of actions to succeedperfect coordination and accomplishing those joint actions does not yieldany intermediate reward zero-incentive dynamics. The challenge of suchproblems lies in the difficulty of escaping state space bottlenecks caused byinterdependence steps since escaping those bottlenecks is not rewarded. We testmultiple state-of-the-art value-based MARL algorithms against LLE and show thatthey consistently fail at the collaborative task because of their inability toescape state space bottlenecks even though they successfully achieve perfectcoordination. We show that Q-learning extensions such as prioritized experiencereplay and n-steps return hinder exploration in environments withzero-incentive dynamics and find that intrinsic curiosity with random networkdistillation is not sufficient to escape those bottlenecks. We demonstrate theneed for novel methods to solve this problem and the relevance of LLE ascooperative MARL benchmark. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02361v1 |
-|title| EnergAIze: Multi Agent Deep Deterministic Policy Gradient for Vehicle to Grid Energy Management |
-|authors| Tiago FonsecaLuis FerreiraBernardo CabralRicardo SeverinoIsabel Praca
-|links| http://arxiv.org/abs/2404.02361v1 |
-|updated| 2024-04-02 23:16:17 UTC |
-|summary| This paper investigates the increasing roles of Renewable Energy SourcesRES and Electric Vehicles EVs. While indicating a new era of sustainableenergy these also introduce complex challenges including the need to balancesupply and demand and smooth peak consumptions amidst rising EV adoption rates.Addressing these challenges requires innovative solutions such as DemandResponse DR energy flexibility management Renewable Energy CommunitiesRECs and more specifically for EVs Vehicle-to-Grid V2G. However existingV2G approaches often fall short in real-world adaptability global RECoptimization with other flexible assets scalability and user engagement. Tobridge this gap this paper introduces EnergAIze a Multi-Agent ReinforcementLearning MARL energy management framework leveraging the Multi-Agent DeepDeterministic Policy Gradient MADDPG algorithm. EnergAIze enablesuser-centric and multi-objective energy management by allowing each prosumer toselect from a range of personal management objectives thus encouragingengagement. Additionally it architects data protection and ownership throughdecentralized computing where each prosumer can situate an energy managementoptimization node directly at their own dwelling. The local node not onlymanages local energy assets but also fosters REC wide optimization. Theefficacy of EnergAIze was evaluated through case studies employing theCityLearn simulation framework. These simulations were instrumental indemonstrating EnergAIzes adeptness at implementing V2G technology within a RECand other energy assets. The results show reduction in peak loads rampingcarbon emissions and electricity costs at the REC level while optimizing forindividual prosumers objectives. |
+|idx| 2404.03554v1 |
+|title| No Panacea in Planning: Algorithm Selection for Suboptimal Multi-Agent Path Finding |
+|authors| Weizhe ChenZhihan WangJiaoyang LiSven KoenigBistra Dilkina
+|links| http://arxiv.org/abs/2404.03554v1 |
+|updated| 2024-04-04 16:06:39 UTC |
+|summary| Since more and more algorithms are proposed for multi-agent path findingMAPF and each of them has its strengths choosing the correct one for aspecific scenario that fulfills some specified requirements is an importanttask. Previous research in algorithm selection for MAPF built a standardworkflow and showed that machine learning can help. In this paper we studygeneral solvers for MAPF which further include suboptimal algorithms. Wepropose different groups of optimization objectives and learning tasks tohandle the new tradeoff between runtime and solution quality. We conductextensive experiments to show that the same loss can not be used for differentgroups of optimization objectives and that standard computer vision models areno worse than customized architecture. We also provide insightful discussionson how feature-sensitive pre-processing is needed for learning for MAPF andhow different learning metrics are correlated to different learning tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02289v1 |
-|title| Federated Multi-Agent Mapping for Planetary Exploration |
-|authors| Tiberiu-Ioan SzatmariAbhishek Cauligi
-|links| http://arxiv.org/abs/2404.02289v1 |
-|updated| 2024-04-02 20:32:32 UTC |
-|summary| In multi-agent robotic exploration managing and effectively utilizing thevast heterogeneous data generated from dynamic environments poses asignificant challenge. Federated learning FL is a promising approach fordistributed mapping addressing the challenges of decentralized data incollaborative learning. FL enables joint model training across multiple agentswithout requiring the centralization or sharing of raw data overcomingbandwidth and storage constraints. Our approach leverages implicit neuralmapping representing maps as continuous functions learned by neural networksfor compact and adaptable representations. We further enhance this approachwith meta-initialization on Earth datasets pre-training the network to quicklylearn new map structures. This combination demonstrates strong generalizationto diverse domains like Martian terrain and glaciers. We rigorously evaluatethis approach demonstrating its effectiveness for real-world deployment inmulti-agent exploration scenarios. |
+|idx| 2404.03431v1 |
+|title| MEDIATE: Mutually Endorsed Distributed Incentive Acknowledgment Token Exchange |
+|authors| Philipp AltmannKatharina WinterMichael KölleMaximilian ZornThomy PhanClaudia Linnhoff-Popien
+|links| http://arxiv.org/abs/2404.03431v1 |
+|updated| 2024-04-04 13:24:33 UTC |
+|summary| Recent advances in multi-agent systems MAS have shown that incorporatingpeer incentivization PI mechanisms vastly improves cooperation. Especially insocial dilemmas communication between the agents helps to overcome sub-optimalNash equilibria. However incentivization tokens need to be carefully selected.Furthermore real-world applications might yield increased privacy requirementsand limited exchange. Therefore we extend the PI protocol for mutualacknowledgment token exchange MATE and provide additional analysis on theimpact of the chosen tokens. Building upon those insights we propose mutuallyendorsed distributed incentive acknowledgment token exchange MEDIATE anextended PI architecture employing automatic token derivation via decentralizedconsensus. Empirical results show the stable agreement on appropriate tokensyielding superior performance compared to static tokens and state-of-the-artapproaches in different social dilemma environments with various rewarddistributions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.01999v1 |
-|title| Emergence of Chemotactic Strategies with Multi-Agent Reinforcement Learning |
-|authors| Samuel ToveyChristoph LohrmannChristian Holm
-|links| http://arxiv.org/abs/2404.01999v1 |
-|updated| 2024-04-02 14:42:52 UTC |
-|summary| Reinforcement learning RL is a flexible and efficient method forprogramming micro-robots in complex environments. Here we investigate whetherreinforcement learning can provide insights into biological systems whentrained to perform chemotaxis. Namely whether we can learn about howintelligent agents process given information in order to swim towards a target.We run simulations covering a range of agent shapes sizes and swim speeds todetermine if the physical constraints on biological swimmers namely Brownianmotion lead to regions where reinforcement learners training fails. We findthat the RL agents can perform chemotaxis as soon as it is physically possibleand in some cases even before the active swimming overpowers the stochasticenvironment. We study the efficiency of the emergent policy and identifyconvergence in agent size and swim speeds. Finally we study the strategyadopted by the reinforcement learning algorithm to explain how the agentsperform their tasks. To this end we identify three emerging dominantstrategies and several rare approaches taken. These strategies whilstproducing almost identical trajectories in simulation are distinct and giveinsight into the possible mechanisms behind which biological agents exploretheir environment and respond to changing conditions. |
+|idx| 2404.03101v1 |
+|title| MARL-LNS: Cooperative Multi-agent Reinforcement Learning via Large Neighborhoods Search |
+|authors| Weizhe ChenSven KoenigBistra Dilkina
+|links| http://arxiv.org/abs/2404.03101v1 |
+|updated| 2024-04-03 22:51:54 UTC |
+|summary| Cooperative multi-agent reinforcement learning MARL has been anincreasingly important research topic in the last half-decade because of itsgreat potential for real-world applications. Because of the curse ofdimensionality the popular centralized training decentralized executionframework requires a long time in training yet still cannot convergeefficiently. In this paper we propose a general training framework MARL-LNSto algorithmically address these issues by training on alternating subsets ofagents using existing deep MARL algorithms as low-level trainers while notinvolving any additional parameters to be trained. Based on this framework weprovide three algorithm variants based on the framework: random largeneighborhood search RLNS batch large neighborhood search BLNS andadaptive large neighborhood search ALNS which alternate the subsets ofagents differently. We test our algorithms on both the StarCraft Multi-AgentChallenge and Google Research Football showing that our algorithms canautomatically reduce at least 10 of training time while reaching the samefinal skill level as the original algorithm. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.02183v1 |
-|title| Self-Organized Agents: A LLM Multi-Agent Framework toward Ultra Large-Scale Code Generation and Optimization |
-|authors| Yoichi IshibashiYoshimasa Nishimura
-|links| http://arxiv.org/abs/2404.02183v1 |
-|updated| 2024-04-02 13:37:28 UTC |
-|summary| Recent advancements in automatic code generation using large language modelLLM agent have brought us closer to the future of automated softwaredevelopment. However existing single-agent approaches face limitations ingenerating and improving large-scale complex codebases due to constraints incontext length. To tackle this challenge we propose Self-Organized multi-Agentframework SoA a novel multi-agent framework that enables the scalable andefficient generation and optimization of large-scale code. In SoAself-organized agents operate independently to generate and modify codecomponents while seamlessly collaborating to construct the overall codebase. Akey feature of our framework is the automatic multiplication of agents based onproblem complexity allowing for dynamic scalability. This enables the overallcode volume to be increased indefinitely according to the number of agentswhile the amount of code managed by each agent remains constant. We evaluateSoA on the HumanEval benchmark and demonstrate that compared to a single-agentsystem each agent in SoA handles significantly less code yet the overallgenerated code is substantially greater. Moreover SoA surpasses the powerfulsingle-agent baseline by 5 in terms of Pass1 accuracy. |
+|idx| 2404.03066v1 |
+|title| Traffic Divergence Theory: An Analysis Formalism for Dynamic Networks |
+|authors| Matin MacktoobianZhan ShuQing Zhao
+|links| http://dx.doi.org/10.1109/ACCESS.2024.3383436 |
+|updated| 2024-04-03 21:13:15 UTC |
+|summary| Traffic dynamics is universally crucial in analyzing and designing almost anynetwork. This article introduces a novel theoretical approach to analyzingnetwork traffic dynamics. This theorys machinery is based on the notion oftraffic divergence which captures the flow imbalance of network nodes andlinks. It features various analytical probes to investigate both spatial andtemporal traffic dynamics. In particular the maximal traffic distribution in anetwork can be characterized by spatial traffic divergence rate which revealsthe relative difference among node traffic divergence. To illustrate theusefulness we apply the theory to two network-driven problems: throughputestimation of data center networks and power-optimized communication planningfor robot networks and show the merits of the proposed theory throughsimulations. |
 
 
