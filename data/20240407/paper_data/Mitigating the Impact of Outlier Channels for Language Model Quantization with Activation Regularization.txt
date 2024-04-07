@@ -1,0 +1,831 @@
+Preprint
+Mitigating the Impact of Outlier Channels for Language
+Model Quantization with Activation Regularization
+AniruddhaNrusimha1 MayankMishra2 NaigangWang3
+DanAlistarh4,5 RameswarPanda2 YoonKim1
+1MassachusettsInstituteofTechnology 2MIT-IBMWatsonAILab
+3IBMResearch 4ISTAustria 5NeuralMagic
+anin@mit.edu
+Abstract
+We consider the problem of accurate quantization for language models,
+where both the weights and activations are quantized to 4 bits per pa-
+rameterwithuniformquantization,thelowestbitwidthformatnatively
+supportedbyexistingGPUhardware. Inthiscontext,thekeychallenge
+isactivationquantization: itisknownthatlanguagemodelscontainoutlier
+channelswhosevaluesonaverageareordersofmagnitudehigherthan
+thanotherchannels,whichpreventsaccuratelow-bitwidthquantization
+withknowntechniques. Wesystematicallystudythisphenomenaandfind
+thattheseoutlierchannelsemergeearlyintraining, andthattheyoccur
+morefrequentlyinlayerswithresidualstreams. Wethenproposeasimple
+strategywhich regularizesalayer’sinputs viaquantization-awaretrain-
+ing(QAT)anditsoutputsviaactivationkurtosisregularization. Weshow
+thatregularizingboththeinputsandoutputsiscrucialforpreventinga
+model’s “migrating” the difficulty in input quantization to the weights,
+whichmakespost-trainingquantization(PTQ)ofweightsmoredifficult.
+WhencombinedwithweightPTQ,weshowthatourapproachcanobtain
+aW4A4modelwithintegerquantizationthatperformscompetitivelyto
+thestandard-precisionW16A16baseline.1
+1 Introduction
+Large language models (LLM) have been shown to contain outlier channels, i.e., feature
+dimensionswhosevaluesareordersofmagnitudehigherthantheothers. Theseoutlier
+channels are known to be crucial for strong model performance (Kovaleva et al., 2021;
+Puccettietal.,2022),butposesignificantchallengesfromamodelcompressionperspective,
+forinstanceviapost-trainingquantization(PTQ)(Dettmersetal.,2022;Xiaoetal.,2023;Wei
+etal.,2022). Concretely,toenabletheuseoflow-bitwidthintegermatrixmultiplications—
+whichcanleadtosignificantspeed-ups—boththeactivationsandtheweightsneedtobe
+quantized. Howeverthepresenceofhighoutliervaluesinthemodelactivationsresultsin
+highquantizationerrors,andthusoverallpoorPTQaccuracy(see,e.g.,Xiaoetal.(2023)).
+Tomitigatetheeffectofoutlierchannelsforactivationquantizationattheper-tensorlevel,
+existingworkshaveexploredvariousapproaches,includingkeepingsomeofthecomputa-
+tionsinhigherprecision(Dettmersetal.,2022;Ashkboosetal.,2023;Zhaoetal.,2023),or
+“migrating”thedifficultyofquantizingoutlierchannelstootherpartsofthemodel(Xiao
+etal.,2023;Weietal.,2023;Liuetal.,2023). Whiletheabovestrategieshavebeeneffective
+forachievingINT8activationquantization,INT4quantizationwithPTQmethodsremains
+anopenchallenge,withcurrentmethodsstillfacingnontrivialdegradationsinperplexity
+(Wuetal.,2023;Shaoetal.,2023;Yuanetal.,2023).
+In this work, we perform an empirical study of outlier channel phenomena from a pre-
+trainingperspective. Wefindthatdimensionswithoutlierchannelsemergerelativelyearly
+intraining(seefig.1(a),top),suggestingthattheirmitigationrequiresearlyintervention.
+Theseoutlierchannelsareparticularlyprevalentintheoutputprojectionlayerofthefirst
+layer,aswellasthequery-key-valueprojectionlayersoftheotherlayers. Next,weexplore
+1Codeisavailableathttps://github.com/aninrusimha/qat-pretrain
+1
+4202
+rpA
+4
+]GL.sc[
+1v50630.4042:viXraPreprint
+(a) Baseline Activations (b) QAT Activations (c) QAT+Kurtosis Regularization Activations
+11
+02 5050
+Average
+Value
+of
+Channel
+12 000
+Average
+Value
+of
+Channel
+1
+01 505
+Average
+Value
+of
+Channel
+15 15 15
+0 C5 h0 an0
+n1 e0 l0 #0
+1500
+2000
+51 T0 okens (B) 0 C5 ha0 n0
+n1 e0 l0 #0
+1500
+51 T0 okens (B) 0 C5 h0 an0
+n1 e0 l0 #0
+1500
+2000
+51 T0 okens (B)
+Weights Weights Weights
+000 ... 001 570 050
+meter
+Value
+001 ... 570 050
+meter
+Value
+000 ... 001 570 050
+meter
+Value
+00 .. 00 02 05 Para 00 .. 02 05 Para 00 .. 00 02 05 Para
+In0 pu5 t 0 C0 h1 a0 n0 ne0 1 l 5 #00 2000 05 Ou0 t1 p0 ut 01 C5 ha0 nnel # In0 pu5 t 0 C0 h1 a0 n0 ne0 1 l 5 #00 2000 05 Ou0 t1 p0 ut 01 C5 ha0 nnel # In0 pu5 t 0 C0 h1 a0 n0 ne0 1 l 5 #00 2000 05 Ou0 t1 p0 ut 01 C5 ha0 nnel #
+Figure1:(Top)AverageoftheabsoluteactivationvaluesofaKVprojectionlayerfora1Blanguage
+modeltrainedwith(a)standardtraining,(b)QATwithlearnedclippingvaluesintheinputlayer,and
+(c)QATontheinputsandkurtosisregularizationonthelayer’soutputs.FortheQATruns,weshow
+thelearnedclipvalueasagreen2dmanifold.(Bottom)Parametervaluesofindividualweightsinthe
+KVprojectionofthesamelayercorrespondingtoeachmodelaftertraining.QAT-onlytrainingresults
+inthemodel’sweights’becominghardertoquantize,whereaskurtosisregularizationmitigatesthis.
+asimplestrategythatregularizesalayer’sinputandoutput. Ontheinputside,weshow
+thataquantization-awaretraining(QAT)approachwhichlearnstheclippingvaluesforeach
+activationlayer(Choietal.,2018;Bhalgatetal.,2020)iseffectiveatcontrollingthenumberof
+outlierchannels,inadditiontomitigatingtheeffectofoutliersthroughclipping(seefig.1(b),
+top). However,whilethisapproachcantrainaW16A4modelthathassimilarperplexitytoa
+W16A16model,post-trainingweightquantizationtoW4A4resultsinnontrivialperplexity
+degradations, due to the model’s weights now becoming more difficult to quantize (see
+fig.1(b),bottom). Wethusadditionallyregularizethekurtosisofalayer’soutput,which
+discourages the creation of outliers wholesale. Specifically, this discourages the layer’s
+weightshavingpathologicallylargerows(fig.1(c),bottom).
+Puttingalltheseelementstogether,weshowthatwecantrainalanguagemodelatmoderate
+scale(1billionparametermodelstrainedon20billiontokens)whoseW4A4perplexityis
+competitivetothestandard-precisionW16A16baseline.
+2 BackgroundandRelatedWork
+2.1 UniformQuantization&QuantizedMatmuls
+Wefocusonuniformquantization,wherethequantizedvaluesareevenlyspacedbetween
+anintervalrange. Formally,foragivenmatrixA∈Rn×n thatwewishtoquantizetobbits,
+letc− andc+ bethepre-defined(orlearned)clippingvalues. Thequantizationfunction
+Q :Rn×m →Zn×m isthengivenby,
+Q(A) =round(s×clamp(A,c− ,c+)+z),
+wheres = 2b−1 isthescalefactorandz =round(s×c−)isthe(optional)zero-pointoffset.
+c+−c−
+Thisfunction,whichcanbegeneralizedtodifferentgranularitiesofA(e.g.,rows,columns
+orsubgroups)transformstheentriesofAintointegersbetween[0,2b−1].
+ThequantizedmatrixQ = Q(A)canbeutilizedintwodifferentways. First,thevalue
+A
+canbedequantizedtoitsoriginalprecisionviaA(cid:98) = 1 s(Q A−z)beforemultiplication. This
+method is typically used by pure weight quantization schemes, which multiply in the
+precisionthemodelwastrainedin. Weight-onlyquantizationcanreduceamodel’smemory
+footprint,andinsofarasLLMinferenceisoftenmemorybound,itcanalsoenablefaster
+inferencebyreducingtheamountoftimespentonmemoryoperationsduringtheforward
+pass(Linetal.,2023;Frantar&Alistarh,2024). However,thefactthattheactualmatmulis
+doneinhighprecisionisafundamentallimitationofweight-onlyquantization.
+Second,thequantizedvaluescanbedirectlyusedforthematrixmultiplication. LetQ =
+U
+Q(U),Q = Q(V)bethequantizedversionsofU∈Rn×k,V∈Rk×m withtherespective
+V
+2Preprint
+Proportion of outlier channels Proportion of outlier channels Proportion of outlier channels
+over layer depth over time per layer type over time, Layer 1 per layer type over time, Layers 2-24
+0.0175 0.05 0.004
+0.0150 0.04
+Layer 1 0.003
+000 ... 000 011 702 505 L L L L La a a a ay y y y ye e e e er r r r r 5 9 1 1 23 7 1 00 .. 00 23 Q A M MtK L LtnV P P PI I Pn nr rop p oju u j It t In np pu ut t 0.002 Q A M MtK L LtnV P P PI I Pn nr rop p oju u j It t In np pu ut t
+0.0050 Layer 24 0.01 0.001
+0.0025
+0.0000 0.00 0.000
+0 10 20 30 40 50 0 10 20 30 40 50 0 10 20 30 40
+Train tokens (B) Train tokens (B) Train tokens (B)
+Figure 2: Frequency of outlier channels over the course of training. (Left) Proportion of outlier
+channelsbylayerdepth.Layer1hashighestoccurrenceofoutlierchannels.(Middle)Inlayer1inputs
+totheattentionprojectionlayerhavethemostoutlierchannels.(Right)Thisisgenerallynotthecase
+fortheotherlayers,wheretheinputtotheQKVprojectlayerhasthemostoutlierchannels.
+scalingfactorss ,s andoffsetsz ,z . WecanapproximateUVwith
+U V U V
+1
+UV≈U(cid:98)V(cid:98) = ×(Q U−z U)(Q V−z V),
+s s
+U V
+wherewecanmakeuseoflow-precisionmatmulsfor(Q −z )(Q −z ). Incaseswhere
+U U V V
+therowsofUandcolumnsofVarequantizedseparatelywiththecorrespondingscaling
+vectorss ∈ Rn,s ∈ Rm andoffsetvectorsz ∈ Zn,z ∈ Zm,wecanstillmakeuseof
+U V U V
+integermatmulssinceU(cid:98)V(cid:98) isgivenby
+diag(s )−1(Q −z ⊗1 )(Q −1 ⊗z )diag(s )−1
+U U U k V k V V
+where1 ∈Zk isavectorof1sand⊗istheouterproduct.2 Note,however,lower-precision
+k
+matmulscannotstraightfowardlybeusediftheUisquantizedatthecolumnlevel.
+Thissecondstrategywhichmakesuseoflower-precisionmatmulscansignificantlyimprove
+inferencelatencyandenergyefficiencyonsupportedhardware. Forexample,INT4tensor
+corematmulscanbeuptofourtimesfasterthanFP16tensorcorematmulsontheNVIDIA
+Amperearchitecture,3whilefromahardware-efficiencyperspective,dedicatedhardware
+forintegeroperationsrequiremuchlessareaandenergyusagethantheirfloating-point
+counterparts(Jouppietal.,2021;vanBaalenetal.,2023).
+2.2 ChallengesinLLMQuantization
+InLLMs,themajorityofFLOPsarespentondensematmulsoftheformXWwhereX ∈
+RL×din are the input activations (for L input tokens) and W ∈ Rdin×dout are the model
+weights. FortheTransformerarchitectureinparticularthiscorrespondstothekey,query,
+value projection layers, as well as the FFN layers. Given the sheer number of FLOPs in
+LLMs,inferenceefficiencycanbeimprovedsignificantlythroughlower-precisionmatmuls.
+Whiletherehasbeenmuchworkonpost-trainingweight-onlyquantizationforpretrained
+LLMs(Frantaretal.,2022;Dettmers&Zettlemoyer,2023;Linetal.,2023;Kimetal.,2023;
+Dettmersetal.,2023;Cheeetal.,2023;Leeetal.,2023;Egiazarianetal.,2024,interalia),PTQ
+foractivationsremainsdifficultduetothepresenceofoutlierchannelsinLLMstrained
+withstandardprecision(Dettmersetal.,2022;Xiaoetal.,2023). Informally,outlierchannels
+areasetofinputchannels(i.e.,columnsofX)whosevaluesaremanyordersofmagnitudes
+higherthantheothers,andhavebeenshowntobecrucialforperformance(Kovalevaetal.,
+2021). IfonewerejustinterestedinquantizingXindependently,outlierchannelscouldbe
+managedbyquantizingeachcolumnofXseparatelysuchthatthescalingfactorassociated
+withanoutlierchanneliscommensurate. However,asoutlinedintheprevioussectionthis
+wouldnotenabletheuseoflower-precisionmatmuls,whichrequiresXtobequantizedby
+(atmost)rows;unfortunatelyrow-level(i.e.,per-token)quantizationresultsinsignificant
+performancedegradations(Xiaoetal.,2023).
+2.3 Quantization-AwareTraining
+Quantization-awaretraining(QAT)describesaclassoftechniqueswhichaimstoenable
+better quantization by simulating quantization during training (Zhou et al., 2016; Jacob
+2Iftheoffsetvectorsarenotintegerswecanexpandtheexpressionandstilluseintegermatmuls
+forQ UQ V.Forthecrosstermswecanusetheidentity(zu⊗1 k)Q
+V
+=zu⊗(1⊤
+k
+Q V),andthuswecan
+stillmakeuseofintegermatmulsformostoftheFLOPs.
+3https://developer.nvidia.com/blog/nvidia-ampere-architecture-in-depth/
+3
+slennahC
+reiltuO fo noitroporP
+slennahC
+reiltuO fo noitroporP
+slennahC
+reiltuO fo noitroporPPreprint
+Layer 1 QKV Input Layer 1 Attn Proj Input Layer 1 MLP Input Layer 1 MLP Proj Input
+500001 01 ..... 0. 25702 050505
+Average
+Value of
+Channel
+50
+00000 .... 0. 1234
+Average
+Value of
+Channel
+501 01 505
+Average
+Value of
+Channel
+500123
+Average
+Value of
+Channel
+40 40 40 40
+0 C5 h0 a0 nn1 e0 l0 #015002000 10203 To0 kens (B) 0 C5 h0 a0 nn1 e0 l0 #015002000 10203 To0 kens (B) 0 C5 h0 a0 nn1 e0 l0 #015002000 10203 To0 kens (B) 0 C2 h0 a0 n0 n4 e0 l0 #060008000 10203 To0 kens (B)
+Layer 9 QKV Input Layer 9 Attn Proj Input Layer 9 MLP Input Layer 9 MLP Proj Input
+5011
+02 5050
+Average
+Value
+of
+Channel
+50
+00000
+....
+0. 2468
+Average
+Value
+of
+Channel
+501
+01 505
+Average
+Value
+of
+Channel
+50
+0000
+...
+0. 246
+Average
+Value
+of
+Channel
+40 40 40 40
+0 C5 h0 a0 nn1 e0 l0 #015002000 10203 To0 kens (B) 0 C5 h0 a0 nn1 e0 l0 #015002000 10203 To0 kens (B) 0 C5 h0 an0 n1 e0 l0 #01500 10203 To0 kens (B) 0 C2 h0 a0 n0 n4 e0 l0 #060008000 10203 To0 kens (B)
+Layer 17 QKV Input Layer 17 Attn Proj Input Layer 17 MLP Input Layer 17 MLP Proj Input
+50112 02 50505
+Average
+Value of
+Channel
+50
+0000 ... 0. 246
+Average
+Value of
+Channel
+501 01 505
+Average
+Value of
+Channel
+50
+0000 .... 0246
+Average
+Value of
+Channel
+40 40 40 40
+0 C5 h0 an0 n1 e0 l0 #01500 10203 To0 kens (B) 0 C5 h0 an0 n1 e0 l0 #01500 10203 To0 kens (B) 0 C5 h0 an0 n1 e0 l0 #01500 10203 To0 kens (B) 0 C2 h0 a0 n0 n4 e0 l0 #060008000 10203 To0 kens (B)
+Figure3:Trajectoryofachannel’sactivationsacross50Btokensoftraining.Weshoweachchannel’s
+absoluteactivationvalueaveragedacross500Ktokens.
+etal.,2018;Zhangetal.,2018;Jungetal.,2019;Jainetal.,2020,interalia). Whilethereare
+manymethodsforQAT,weuseasimplemodifiedversionofPACT(Choietal.,2018)and
+LSQ(Bhalgatetal.,2020),whichlearntheclipvaluesc− andc+ fortheactivations. This
+approachusesthelearnedclipvaluestoperformquantizationduringtheforwardpass,and
+usesthestraight-throughestimatorforthegradientswithrespecttotheclipvalues. While
+QAThasbeenstudiedextensivelyinthecontextof(typicallysmaller)visionmodels,QAT
+forpretraininglanguagemodelswithmorethanabillionparametersremainslessexplored.
+3 MotivatingStudy: OutlierChannelsinLanguageModels
+Wefirstconductapreliminaryanalysistostudytheemergenceofoutlierchannelsduring
+pretraining,withbothourownandopen-sourcemodels. Forourownpretrainedmodels,
+weusethestandard“pre-LayerNorm”Transformerarchitecture(Xiongetal.,2020),where
+givenlayerl’sinputX(l) ∈RL×d weobtainthenextlayerX(l+1) via,
+Y =LayerNorm(X(l)), Q,K,V=Y W , Y =softmax(QK⊤⊙M)V,
+1 1 QKV 2
+Z=X+Y W , Y =LayerNorm(X+Y W ), Y = σ(Y W ), X(l+1) =Z+Y W .
+2 O 3 2 O 4 2 1 4 2
+HereW ∈Rd×3d,W ∈Rd×d,W ∈Rd×4d,W ∈R4d×d arelearnablematrices,andthe
+QKV O 1 2
+biasvectorsareomittedforbrevity. Ourstudyfocusesonthefollowingactivationsthat
+havebeenpreviouslyfoundtocontainoutlierchannels: QKVInput(Y ),AttnProjInput(Y ),
+1 2
+MLPInput(Y ),MLPProjInput(Y ). Wetrain1billionparameter(24-layermodelwith1920
+3 4
+dimensions)on50billiontokensfromtheSlimPajamadataset(Sobolevaetal.,2023). We
+periodicallycollectactivationstatisticsforalllayersbyrunningmodelcheckpointson(the
+same)500KtokensfromtheC4dataset.
+First,weattempttomeasuretheprevalenceofoutlierchannelsaggregatedbylayertypeand
+depth.Forthepurposesofthisanalysis,wenameachannelanoutlieriftheaverageabsolute
+valueofthechannelisoversixtimestheaverageabsolutevalueofalltheinputactivations.
+Thisdefinitionofanoutlierchannelissomewhatarbitrary,butsimilardefinitionsinthe
+literaturebasedontheothermetrics(Kovalevaetal.,2021)generatesimilarresults;weuse
+thisdefinitionasopposedtodefinitionsontheabsolutevalues(Dettmersetal.,2022)to
+enablecomparisonacrossdifferentlayers.Theresultsofthisanalysisareinfig.2.Ourresults
+generallyfollowwhathasbeenestablishedintheliterature: whileoutliersaredistributed
+4Preprint
+Channel 600 in Layer 8 Channel 872 in Layer 8 Channel 914 in Layer 8
+P ro0.75 P ro0.4 P ro0.6
+b b b
+a b ility0 0. .5 20
+5
+a b ility0.2 a b ility0 0. .4
+2
+0.00 0.0 0.0
+Token
+s
+C
+(B)h2 a0
+0
+nnel
+6C2 0. h5
+a
+0n0 in. n0
+e l
+L
+V2 aa. y5
+lu ee
+r 16
+Token
+s
+C
+(B)h4 20
+a0
+0
+nnel
+8C
+7h2
+a
+20
+n in ne l
+L
+V
+aa0
+ylu ee
+r 16
+Token
+s
+C
+(B)h4 20
+a0
+0
+nnel
+9C5
+1ha 4n in ne l
+L0
+V aa ylu ee
+r 16
+P P P
+ro0.6 ro0.4 ro0.4
+b b b
+a b ility0 0. .4
+2
+a b ility0.2 a b ility0.2
+0.0 0.0 0.0
+Token
+s
+(B)4 20
+0
+0 C2 h.5 an0 n.0
+el
+2 V. a5 lu5 e.0
+Token
+s
+(B)4 20
+0
+0 C1 h0 annel0
+Value
+Token
+s
+(B)4 20
+0
+0 Cha2 n0
+nel
+Valu0
+e
+Figure4:Thedistributionofactivationsoverofanon-outlierchannel(left)andtwooutlierchannels
+(middle,right)overtraining.
+Layer 7 QKV Proj Input, Pythia 6.9B Layer 7 MLP Proj Input, Pythia Layer 7 QKV Proj Input, OLMo 7B Layer 7 MLP Proj Input, OLMo 7B
+0 C1 h0 a0 n02 n0 e0 l 0 #30004000 510 To1 ke5 n2 s 0
+(1
+B1 02
+5
+)050
+Average
+Value of
+Channel
+0 C5 h0 an0 n0 1 e0 l #000 15000 7.1 501 .02 T1 o. k5 51 e. n7 0 s .
+(000
+5001
+B.
+).... 0. 24680
+Average
+Value of
+Channel
+0 C1 h0 a0 n02 n0 e0 l 0 #30004000 0204 To0 k6 en0 s
+(B02
+)46
+Average
+Value of
+Channel
+02 C5 h0 a0 n5 n0 e0 l0 7 #50100000 0204 To0 k6 en0 s
+000
+(011
+..
+B...
+0
+). 25702 050505
+Average
+Value of
+Channel
+Figure5: Activationdevelopmentintwoopen-sourcemodels: Pythia6.9b(Bidermanetal.,2023)
+andOLMo7B(Groeneveldetal.,2024).Weshowactiviationsforalayerthatreadsfromtheresidual
+stream(QKV Input)andonethatdoesnot(MLP Proj Input). NotethattheOLModataincludesa
+step-0checkpoint(i.e.,atinitialization).
+throughoutdepth,thelayerswhichtendtohavethemostoutlierchannelsintheirinput
+arethosewhoseinputsaretheresidualstreamofthenetwork. Interestingly,wefindthat
+outlierchannelsemergeearlyintraining,andrapidlybecomenumerous. Theproportionof
+outlierchannelswithinalayerthendecreasesgraduallyandeventuallyplateaus.
+Wenextperformamoregranularanalysis,whereweanalyzetheaverageabsolutevalueof
+channelsoverthetrainingofa1Bmodelwith50Btokens. Thisisshowninfig.3. Within
+channels,weobservethatthedevelopmentofoutliersoccursearlyonduringtraining. In
+mostcasesoutliersprimarilyoccurinlayersthattakeasinputtheresidualstream,although
+thereisstillsignificantvariationintheaveragemagnitudeofchannelsintheinputtoother
+layers. Wetakeacloserexaminationofthedevelopmentofsomethelargestindividual
+outlierchannelsforaparticularlayerinfig.4. Channel600,whichisnotanoutlierchannel,
+haschannelvaluesthataredistributedroughlyasaGaussianwithameanofzero. The
+outlierchannels,incomparison,havemeanvaluesthataresignificantlydifferentfromzero.
+Thisinitialexaminationsuggeststhatoutlierchannelsarenotscaleddifferentlythannon
+outlierchannels,buthaveashifteddistribution. Thispotentiallyindicateswhyscalingand
+shifting methods, like OmniQuant (Shao et al., 2023), outperform scaling-only methods
+suchasSmoothQuant(Xiaoetal.,2023).
+Open-source Models. To validate the generality of our observations, we perform our
+analysisontwopubliclyavailable7Bmodelswithpubliccheckpoints,Pythia(Biderman
+etal.,2023)andOLMo(Groeneveldetal.,2024). Infig.5wecanseethedevelopmentof
+activationoutliersearlyoninthetrainingofbothmodels,althoughtheoutliersinOLMo
+takelongertodevelop. Furthermore,weconfirmapatternfoundacrosstheliterature,that
+theprimaryplacewhereoutliersdevelopisnotbetweenlayersinagivenattentionorMLP
+blockbutintheresidualstreambetweenblocks. Thatis,thetypesoflayersthatdoordo
+notdevelopoutliersarethesameinbothourmodelandthepretrainedmodels(e.g.,QKV
+Inputactivationshaveoutlierchannels,whileMLPProjInputactivationsdonot).
+5Preprint
+Algorithm1QATforwardpass Algorithm2QATbackwardpass
+Require: A,c−,c+,b,align zero; Require: A,c−,c+,b,s,∇A(cid:98);
+s= 2b−1 Q=s×(A−c−)
+c+−c−
+ifalign zerothen E=(Q−round(Q))/(2b−1)
+z=round(s×c−) (cid:40) 0 ifA >c+orA <c−
+els ze
+=0
+∇A
+ij
+=
+
+∇A(cid:98)ij
+otheij
+rwise
+ij
+endif ∇A(cid:98)ij ifA ij >c+
+Q A =round(s× clamp(A,c−,c+)+z) C i+ j = −E ij×∇A(cid:98)ij elifA ij >c−
+A(cid:98) = 1 s(Q A−z) 0 otherwise
+
+return A(cid:98) −E ij×∇A(cid:98)ij ifA
+ij
+<c+
+C i−
+j
+= ∇A(cid:98)ij elifA
+ij
+<c−
+Figure6:Theforwardandbackwardpassesof 0 otherwise
+QAT. Here A is the activation tensor, b is the ∇c+ =∑ C+ , ∇c− =∑ C−
+bitwidth,c−andc+arethelearnedclipvalues, ij ij ij ij
+and∇A(cid:98) isthegradientwithrespecttoA(cid:98).
+return ∇A,∇c+,∇c−
+4 MitigatingOutlierChannelswithActivationRegularization
+Basedoninsightsfromtheprevioussection,weproposeasimpleregularizationstrategyfor
+quantizingtheactivationsofthelinearlayers,whereweuseQATontheinputactivations
+andsimultaneouslypenalizethekurtosisofthelayer’soutputs.
+4.1 InputActivations: QATwithLearnedClipValues
+Asevidentfrom§2.1, theclipvalues c− and c+ playakeyroleinuniformquantization.
+FollowingPACT(Choietal.,2018)andLSQ(Bhalgatetal.,2020),wetreatthesequantization
+parametersaslearnableparametersandoptimizethemwithgradientdescent. Concretely,
+duringtheforwardpasswerunthequantization/dequantizationstep,asshowninalgo-
+rithm1. Forthebackwardpass,weuseastraight-throughestimatortoobtain∇A,∇c+,
+∇c− from ∇A(cid:98) (the gradients with respect to the quantized/dequantized layer). This is
+showninalgorithm2. Wewillshowinourexperimentsthatquantizingduringtrainingis
+crucialfor4-bitquantization;justclampingtheactivationswithoutquantizationleadsto
+poorperformance.
+4.2 OutputActivations: KurtosisRegularization
+InourinitialexperimentswefoundthatQATonalayer’sinputissufficienttotrainaW16A4
+modelthatmatchestheperformanceofaW16A16. However,sincewedonotperformQAT
+fortheweights,efficientdeploymentrequirespost-trainingweightquantizationto4bits.
+Whileexistingworkhasshownthatweight-onlyPTQto4bits(i.e.,W16A16→W4A16)
+canbedonealmostlosslessly(Frantaretal.,2022;Shaoetal.,2023),weobservedthisto
+notbethecasewithQATmodels,withW16A4→W4A4resultinginnontrivialperplexity
+degradations. This is due to the fact that a model can essentially “migrate” the outlier
+channelstothecorrespondingrowsoftheweightmatrix,whichmakesper-columnweight
+PTQmoredifficult(asshowninfig.1(b),bottom).
+Oneapproachtomitigatingtheseoutlierweightswouldbetodirectlyregularizetheweights
+viaQATorsomeotherapproach(e.g.,ℓ∞-normregularization). However,wefoundthese
+direct regularization approaches to result in much worse performance and/or unstable
+training. We thus adopt a more indirect regularization strategy, exploiting the fact that
+high input channel weights typically lead to a layer’s outputs having outliers, i.e., the
+outputdistributionisheavy-tailed(seefig.1). Ourapproachthusregularizestheoutput
+distribution’skurtosis. whichmeasureshowheavy-tailedadistributionis. Anestimate
+ofthekurtosisofasetofvaluesx∈Rd isgivenby,Kurtosis(d) = ∑ ik(xi−µ)4 ,whereµand
+σ4+ϵ
+σarerespectivelytheempiricalmeanandstandarddeviationofx,andϵisasmallterm
+fornumericalstability. Wemultiplythesumofthekurtosisestimatesforeachtokenwith
+hyperparameterλ,andaddtheresulttothecross-entropyloss. Whilepriorworkhasshown
+thebenefitsofregularizingthekurtosisofalayer’sactivationdistributiontobecloseto
+thatofauniformdistribution(Chmieletal.,2020),regularizingtheoutputdistribution’s
+kurtosistomakeitlessheavy-tailedhasnotbeenexploredbeforetoourknowledge.
+6Preprint
+NativeActivations 4-bitActivations
+WeightPrecision 16 4 4 4 3 3
+WeightQuantizer None GPTQ GPTQ RTN GPTQ RTN
+Baseline 23.57 24.10 113233 11855 11755 17187
+ActivationClamping 23.73 24.85 378 423 568 663
+KurtosisRegularization 23.72 24.57 8720 8140 10235 19665
+QAT 24.30 25.32 25.32 27.76 32.56 46.47
+QAT+KurtosisRegularization 24.10 24.57 24.57 24.90 26.83 30.46
+Baseline 25.70 26.16 8430 10028 9107 14498
+ActivationClamping 26.38 27.60 32378 6852 26120 15908
+KurtosisRegularization 26.28 26.95 7319 6852 9066 15908
+QAT 26.72 27.86 27.87 32.70 64.61 58.81
+QAT+KurtosisRegularization 26.11 26.56 26.56 27.13 30.12 33.46
+Table1: Perplexityof1BmodelsonC4(top)andPTB(bottom). Nativeactivationare16bitsfor
+Baseline,ActivationClamping,KurtosisRegularization;and4bitsforQAT, QAT+KurtosisRegularization.
+4.3 Post-trainingWeightQuantization
+After training the model to W16A4 with activation regularization on both the in-
+puts/outputs, we experiment with two methods for quantizating the weights to 4 bits.
+Thesimplestbaselineweuseisround-to-nearest(RTN)quantization,whichforourpur-
+poses implies per-token (for activations)4 or per-output-channel (for weights) uniform
+min-maxquantization. WhiletheunderperformanceofRTNweightquantizationversus
+moresophisticatedquantizationstrategiesthatusecalibrationdataiswidelyknown,we
+deliberatelyincludethissimpledata-agnosticbaselinetoshowthatactivationregularization
+resultsinweightsthatarealsoeasiertoquantize(i.e.,lessperplexitydegradationwithRTN).
+OursecondapproachappliesGPTQ(Frantaretal.,2022),whichusesasmallamountof
+calibrationdatatoquantizetheweights,andisstillnearthestate-of-the-artfor4-bitweight
+quantization.
+5 EmpiricalStudy
+5.1 ExperimentalSetup
+WeusetheMegatron-LM(Shoeybietal.,2020)codebaseandtrainontheSlimPajamadataset
+(Sobolevaetal.,2023). Whilethetrajectoryanalysesin§3weredonefor50Btokens,dueto
+limitedcomputewetrainfor20Btokensfortheseexperiments.
+Baselines. In order to isolate the contributions of each component of our method, we
+compareagainstseveralbaselines,ontopofthestandard-precisionbaseline. Theactivation
+clampingbaselineusesstatic,per-layerclippingvaluestoclamptheinputactivations. To
+advantagethisapproachasmuchaspossible,weusean“oracle”clippingvaluesobtained
+fromQATtodecidetheper-layerclippingvalues,whichwasfoundtobemoreeffective
+thangrid-searchingontheclippingvalues. Inactivationclampingtheactivationsarenot
+quantizedduringtraining, andthusthisbaselineisolatestheeffectofQAT.Thekurtosis
+regularizationbaselineapplieskurtosisregularizationjustontheoutputs,withoutQAT.The
+QAT-onlybaselinejustappliesQATintheinputactivations.
+Hyperparameters. Allhyperparametersweretunedforour1BW16A16baselineandkept
+constant throughout experiments, except for weight decay where we selected between
+{0.1,0.01}forallmethods. Weuseabatchsizeof1Mtokens,learningrateof1.5e-4,cosine
+learningdecay, andFP16precision. ForQATweinitializeourclippingvaluesto ±4for
+clippingvalueinitializations,unlessthelayer’sinputisbounded. Weusethesamelearning
+ratebutnomomentumorweightdecayforclipvalues. Forkurtosisweuse1e-5asthe
+regularizationstrength.
+Evaluation. WeevaluatetheperplexityofeachmodelontheC4andPTBdatasets. We
+testmodelsinthreedifferentweightquantizationcategories: 16bits,4bits,and3bits. The
+4-bitand3-bitexperimentstestwithbothRTNandGPTQ.Foractivations,wetestinnative
+4Whiletherearemoresophisticatedactiviationquantizationapproaches(Yuanetal.,2023;Chee
+etal.,2023),thesetypicallyhaveadditionaloverhead(forlow-precisionmatmuls)andarethusnotas
+fastassimpleRTNintegerquantization.
+7Preprint
+Model Setting HellaSwag PIQA ARC-easy
+Baseline W16A16 32.13% 65.51% 48.32%
+QAT W16A4 31.79% 65.56% 47.85%
+QAT+KurtosisRegularization W16A4 31.50% 64.96% 48.36%
+Table2:Downstreamevaluationofour1BmodelsonHellaSwag,PIQA,andARC-easy.
+NativeActivations 4bActivations
+WeightPrecision 16 4 4 4 3 3
+WeightQuantizer None GPTQ GPTQ RTN GPTQ RTN
+Baseline 29.23 30.36 4288 3864 4820.5 3923.96
+QAT 30.25 31.30 31.30 32.55 36.47 44.73
+QAT+KurtosisRegularization 29.95 30.83 30.83 31.73 35.47 45.04
+Baseline 32.61 34.12 2974 2896 3767 2950
+QAT 33.56 34.83 34.83 34.24 47.51 51.22
+QAT+KurtosisRegularization 33.14 34.23 34.23 34.55 40.74 52.63
+Table3:Perplexityof300MmodelsonC4(top)andPTB(bottom).Nativeactivationare16bitsfor
+Baseline,ActivationClamping,KurtosisRegularization;and4bitsforQAT,QAT+KurtosisRegularization.
+precision(16bitsfornon-QATmodels,and4bitsfortheQATmodels)aswellasin4bits.
+ForGPTQweuseasmallamountofC4dataforcalibration.
+5.2 Results
+Wereporttheresultsofour1BexperimentsontheC4andPTBdatasetintable1.Weobserve
+thatourapproachcanlearnaW4A4modelthathasrespectableperformancecompared
+totheW16A16baseline. WealsoobservethatthegapbetweentheQATmodelwithand
+withoutkurtosisexpandsasweightsarequantizedmoreandmore. Atfullprecision,the
+gapislessthan1%. At4bits,thisexpandstobetween3%and4%,andat3bitsthisgap
+widensto21%.Allnon-QATmethodhavecatastrophicperformancedegradationswith4-bit
+activations. Activationclampingistheonlymethodthatachieveslessthantwoordersof
+magnitudeincreaseinperplexity. Intable2weperformexperimentsondownstreamtasks
+forselectmodelstovalidateourusageofperplexityasaproxyfordownstreamperformance.
+Weobservethatmodelswithsimilarperplexityexhibitsimilardownstreamperformance.
+Wealsoperformasuiteofexperimentsatthe300Mscale,wherewejustexperimentwith
+theQATbaselines. Thisisshownin table3. Welargelyobservethesametrends,withone
+exception: thegapbetweentheQATandQAT+KurtosisRegularizationmodelissmaller
+thanatthe1Bscale.
+5.3 Analysis
+Post-TrainingQuantizationofActivations. OurmethodshowsthatQATfromscratch
+iseffectivefortrainingamodelwith4-bitactivations. However,giventhatmostavailable
+pretrainedmodelsarenottrainedwith4-bitactivations,itwouldbeidealifwecouldtake
+a16-bitactivationmodelandthenfinetuneitwithQATto4bits. Totestforwhetherthis
+ispossible,weperformedanextensivehyperparametersearchforQATfinetuningonthe
+pretrained300Mbaselinemodel,wherewefinetunewithQATfor1Btokens. Evenwith
+extensivehyperparametertuning,QATfinetuningresultedinaW4A4modelwitha16%
+degradationinperplexityovertheW16A16baseline. Uponfurtherinvestigation,wefound
+thatwhileourQAT-pretrainedmodelswereabletolearntoclipoutlierswithouthurting
+performance,theQATfinetuningmodelsstruggledtodoso. Finetuningthemodellonger
+than1billiontokensdidnotimproveresults.
+We also tried applying OmniQuant (Shao et al., 2023), a state-of-the-art weight-and-
+activation method for PTQ, to go from W16A16 to W4A4. We found this approach to
+not perform well, with a significant degradation in perplexity with the 1B model (74.99
+on C4 and 107.29 on PTB). Our degradation is larger than what has been reported for
+pretrained models in the original paper, which could potentially be due to our use of a
+smaller model (which are typically harder to quantize). Given that the outlier channels
+seemtoemergeearlyintraining(§3),thesenegativeresultshighlighttheimportanceof
+early-traininginterventionsforachieving4-bitactivationmodels.
+8Preprint
+Modelsize Batchsize Baseline QAT(torch.compile) QAT(ourcustomCUDAkernel)
+1B 1Mtokens 41913 20195 37510
+3B 2Mtokens 15161 7519 13142
+Table4:Throughputintermsoftokenspersecond(TPS)onasinglenodewitheightH100s(higheris
+better).Thebaselineachievesapproximately50%meanFLOPsutilization(MFU),whileourkernel
+achieves45%.
+Direct Approaches for Weight Regularization. Our use of kurtosis regularization on
+the output activations to mitigate the effect of “quantization difficulty migration” from
+the activations to the weights is admittedly indirect. We also experimented with more
+directmethodsforcontrollingtheoutliersintheweights: regularizingthekurtosisofthe
+weightsinstead(atthetensor-leveloratthecolumn-level);andregularizingtheweight’sl∞
+norm. Despiteanextensivehyperparametersearch,thesemethodsledtounstabletraining,
+andwewereunabletogetthesemodelstoconverge(unlesstheregularization-strength
+hyperparameter was so low that there was effectively no regularization). QAT on the
+weightsalsoprovedunsuccesful,withQAT-weightmodelsunderperformingbaselinesbya
+significantmargin.
+Throughput. OurQATapproachrequiresmodifyingtheforwardandbackwardpasses,
+whichaddsnontrivialoverheadwithanunoptimized,torch.compile-onlyimplementation.
+Thisismainlyduetothereductionstepintheclipvalgradientinthebackwardpass. We
+thusimplementedourownCUDAkernelsthatperformablockwisereductionfollowed
+byatomicadditionstoenablefasterthroughput. Thethroughputofourcustomkernelson
+asingleH100node(witheightGPUs)isshownintable4. Wefindthatwhilethereisstill
+somereductioninthroughput,itisclosertothebaselinesettingthanthetorch.compile
+implementation. Giventhatthenumbersintable4arefromasinglenode,weanticipate
+thattheactualthroughputdifferenceswouldbeevensmallerwhentakingintoaccountthe
+necessaryoverheadsofdistributedtraining.
+6 Limitations&Discussion
+Thereareseverallimitationstoourstudy. Whileweexperimentwithlanguagemodeling
+atmoderatescale,wewereunabletoperformexperimentsonlargermodels(andtrainfor
+longer)duetolimitedcomputeresources. However,wenotethatwhilethe300Mparameter
+modelsdidnotbenefitasmuchfromthekurtosisinterventionontopofQAT,at1Bthere
+wasquitealargebenefit;thisgivesusoptimismfortheutilityofourmethodsatlargerscale.
+Ourstudytargetsintegerquantizationto4bitstoenabletheuseofINT4matmuls,whichis
+supportedbytheAmperearchitectureGPUs. ThemorerecentGPUarchitectures(Hopper,
+Blackwell)unfortunatelydonotnativelysupportINT4matmuls,whichlimittheapplicabil-
+ityofourapproachontheseGPUs. However,thelatestBlackwellarchitecturesupportsFP4
+computations,5anditispossiblethatQATmayimproveFP4-trainingandmoreoverenable
+evenlower-precisionquantization.
+Finally,ourstudyfocusesonquantizingonlytheactivationsofinputstolinearlayers,since
+linearmatmulsconsumesthemajorityofFLOPsduringLLMinference(onmoderate-length
+sequences). FutureworkcouldconsiderapplyingQATtoquantizetheactivationsinvolved
+intheattentioncomputations,whichcouldbeextremelyusefulinlong-contextsettings.
+7 Conclusion
+Westudyoutlierchannelsinlanguagemodelsfromapretrainingperspective. Weshow
+thatthesechannelsemergeearlyinpretraining,andaremoreoverparticularlynumerousin
+activationswithresidualstreams. Basedonthesefindings,weproposeasimplestrategy
+for mitigating the effect of these outlier channels through activation regularization. We
+regularizetheinputactivationswithQATpluslearnedclipvalues,andwefurtherregularize
+theoutputactivationsviathekurtosis. OurapproachisabletolearnaW4A4language
+modelatreasonablescale(1billionparameterstrainedon20Btokens)thatiscompetitive
+withthestandard-precisionW16A16baseline.
+5https://www.nvidia.com/en-us/data-center/technologies/blackwell-architecture/
+9Preprint
+Acknowledgments
+ThisstudywassupportedbyfundsfromanMIT-IBMWatsonAIgrant.
+References
+Saleh Ashkboos, Ilia Markov, Elias Frantar, Tingxuan Zhong, Xincheng Wang, Jie Ren,
+TorstenHoefler,andDanAlistarh. Towardsend-to-end4-bitinferenceongenerativelarge
+languagemodels. arXivpreprintarXiv:2310.09259,2023.
+Yash Bhalgat, Jinwon Lee, Markus Nagel, Tijmen Blankevoort, and Nojun Kwak. Lsq+:
+Improvinglow-bitquantizationthroughlearnableoffsetsandbetterinitialization,2020.
+StellaBiderman,HaileySchoelkopf,QuentinAnthony,HerbieBradley,KyleO’Brien,Eric
+Hallahan,MohammadAflahKhan,ShivanshuPurohit,USVSNSaiPrashanth,Edward
+Raff, Aviya Skowron, Lintang Sutawika, and Oskar van der Wal. Pythia: A suite for
+analyzinglargelanguagemodelsacrosstrainingandscaling,2023.
+JerryChee,YaohuiCai,VolodymyrKuleshov,andChristopherDeSa. Quip: 2-bitquantiza-
+tionoflargelanguagemodelswithguarantees,2023.
+BrianChmiel,RonBanner,GilShomron,YuryNahshan,AlexBronstein,UriWeiser,etal.
+Robustquantization: Onemodeltorulethemall. Advancesinneuralinformationprocessing
+systems,33:5308–5317,2020.
+JungwookChoi,ZhuoWang,SwagathVenkataramani,PierceI-JenChuang,Vijayalakshmi
+Srinivasan, and Kailash Gopalakrishnan. Pact: Parameterized clipping activation for
+quantizedneuralnetworks,2018.
+TimDettmersandLukeZettlemoyer. Thecasefor4-bitprecision: k-bitinferencescaling
+laws. InInternationalConferenceonMachineLearning,pp.7750–7774.PMLR,2023.
+TimDettmers,MikeLewis,YounesBelkada,andLukeZettlemoyer. Llm.int8(): 8-bitmatrix
+multiplicationfortransformersatscale,2022.
+TimDettmers,RuslanSvirschevski,VageEgiazarian,DenisKuznedelev,EliasFrantar,Saleh
+Ashkboos, Alexander Borzunov, Torsten Hoefler, and Dan Alistarh. Spqr: A sparse-
+quantizedrepresentationfornear-losslessllmweightcompression,2023.
+VageEgiazarian,AndreiPanferov,DenisKuznedelev,EliasFrantar,ArtemBabenko,and
+DanAlistarh. Extremecompressionoflargelanguagemodelsviaadditivequantization.
+arXivpreprintarXiv:2401.06118,2024.
+EliasFrantarandDanAlistarh. Marlin: afast4-bitinferencekernelformediumbatchsizes.
+https://github.com/IST-DASLab/marlin,2024.
+Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh. GPTQ: Accurate
+post-training compression for generative pretrained transformers. arXiv preprint
+arXiv:2210.17323,2022.
+DirkGroeneveld,IzBeltagy,PeteWalsh,AkshitaBhagia,RodneyKinney,OyvindTafjord,
+AnanyaHarshJha,HamishIvison,IanMagnusson,YizhongWang,ShaneArora,David
+Atkinson, Russell Authur, Khyathi Raghavi Chandu, Arman Cohan, Jennifer Dumas,
+YanaiElazar,YulingGu,JackHessel,TusharKhot,WilliamMerrill,JacobMorrison,Niklas
+Muennighoff,AakankshaNaik,CrystalNam,MatthewE.Peters,ValentinaPyatkin,Ab-
+hilashaRavichander,DustinSchwenk,SaurabhShah,WillSmith,EmmaStrubell,Nishant
+Subramani, Mitchell Wortsman, Pradeep Dasigi, Nathan Lambert, Kyle Richardson,
+LukeZettlemoyer,JesseDodge,KyleLo,LucaSoldaini,NoahA.Smith,andHannaneh
+Hajishirzi. Olmo: Acceleratingthescienceoflanguagemodels,2024.
+BenoitJacob,SkirmantasKligys,BoChen,MenglongZhu,MatthewTang,AndrewHoward,
+HartwigAdam,andDmitryKalenichenko. Quantizationandtrainingofneuralnetworks
+for efficient integer-arithmetic-only inference. In Proceedings of the IEEE conference on
+computervisionandpatternrecognition,pp.2704–2713,2018.
+10Preprint
+SambhavJain,AlbertGural,MichaelWu,andChrisDick. Trainedquantizationthresholds
+foraccurateandefficientfixed-pointinferenceofdeepneuralnetworks. Proceedingsof
+MachineLearningandSystems,2:112–128,2020.
+NormanPJouppi,DoeHyunYoon,MatthewAshcraft,MarkGottscho,ThomasBJablin,
+GeorgeKurian,JamesLaudon,ShengLi,PeterMa,XiaoyuMa,etal. Tenlessonsfrom
+threegenerationsshapedgoogle’stpuv4i: Industrialproduct. In2021ACM/IEEE48th
+AnnualInternationalSymposiumonComputerArchitecture(ISCA),pp.1–14.IEEE,2021.
+SangilJung,ChangyongSon,SeohyungLee,JinwooSon,Jae-JoonHan,YoungjunKwak,
+SungJuHwang,andChangkyuChoi. Learningtoquantizedeepnetworksbyoptimizing
+quantizationintervalswithtaskloss.InProceedingsoftheIEEE/CVFConferenceonComputer
+VisionandPatternRecognition,pp.4350–4359,2019.
+Sehoon Kim, Coleman Hooper, Amir Gholami, Zhen Dong, Xiuyu Li, Sheng Shen,
+MichaelW.Mahoney,andKurtKeutzer. Squeezellm: Dense-and-sparsequantization,
+2023.
+OlgaKovaleva,SaurabhKulshreshtha,AnnaRogers,andAnnaRumshisky. Bertbusters:
+Outlierdimensionsthatdisrupttransformers. arXivpreprintarXiv:2105.06990,2021.
+ChanghunLee,JungyuJin,TaesuKim,HyungjunKim,andEunhyeokPark. Owq: Lessons
+learnedfromactivationoutliersforweightquantizationinlargelanguagemodels. arXiv
+preprintarXiv:2306.02272,2023.
+JiLin,JiamingTang,HaotianTang,ShangYang,XingyuDang,ChuangGan,andSongHan.
+Awq: Activation-awareweightquantizationforllmcompressionandacceleration,2023.
+JingLiu,RuihaoGong,XiuyingWei,ZhiweiDong,JianfeiCai,andBohanZhuang. Qllm:
+Accurateandefficientlow-bitwidthquantizationforlargelanguagemodels,2023.
+GiovanniPuccetti,AnnaRogers,AleksandrDrozd,andFeliceDell’Orletta. Outlierdimen-
+sions that disrupt transformers are driven by frequency. In Yoav Goldberg, Zornitsa
+Kozareva,andYueZhang(eds.),FindingsoftheAssociationforComputationalLinguistics:
+EMNLP2022,pp.1286–1304,AbuDhabi,UnitedArabEmirates,December2022.Asso-
+ciationforComputationalLinguistics. doi: 10.18653/v1/2022.findings-emnlp.93. URL
+https://aclanthology.org/2022.findings-emnlp.93.
+WenqiShao,MengzhaoChen,ZhaoyangZhang,PengXu,LiruiZhao,ZhiqianLi,Kaipeng
+Zhang, Peng Gao, Yu Qiao, and Ping Luo. Omniquant: Omnidirectionally calibrated
+quantizationforlargelanguagemodels. arXivpreprintarXiv:2308.13137,2023.
+Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Patrick LeGresley, Jared Casper, and
+BryanCatanzaro. Megatron-lm: Trainingmulti-billionparameterlanguagemodelsusing
+modelparallelism,2020.
+Daria Soboleva, Faisal Al-Khateeb, Robert Myers, Jacob R Steeves, Joel
+Hestness, and Nolan Dey. SlimPajama: A 627B token cleaned and
+deduplicated version of RedPajama. https://www.cerebras.net/blog/
+slimpajama-a-627b-token-cleaned-and-deduplicated-version-of-redpajama, 2023.
+URLhttps://huggingface.co/datasets/cerebras/SlimPajama-627B.
+MartvanBaalen,AndreyKuzmin,SuparnaSNair,YuweiRen,EricMahurin,ChiragPatel,
+SundarSubramanian,SanghyukLee,MarkusNagel,JosephSoriaga,etal. Fp8versus
+int8forefficientdeeplearninginference. arXivpreprintarXiv:2303.17951,2023.
+XiuyingWei,YunchenZhang,XiangguoZhang,RuihaoGong,ShanghangZhang,QiZhang,
+Fengwei Yu, and Xianglong Liu. Outlier suppression: Pushing the limit of low-bit
+transformerlanguagemodels. InProceedingsofNeurIPS,2022.
+XiuyingWei,YunchenZhang,YuhangLi,XiangguoZhang,RuihaoGong,JinyangGuo,and
+XianglongLiu. Outliersuppression+: Accuratequantizationoflargelanguagemodelsby
+equivalentandoptimalshiftingandscaling,2023.
+11Preprint
+XiaoxiaWu,ChengLi,RezaYazdaniAminabadi,ZheweiYao,andYuxiongHe. Understand-
+ingint4quantizationforlanguagemodels: Latencyspeedup,composability,andfailure
+cases. InProceedingsofthe40thInternationalConferenceonMachineLearning,Proceedings
+ofMachineLearningResearch,pp.37524–37539,2023.
+Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu, Julien Demouth, and Song Han.
+Smoothquant: Accurateandefficientpost-trainingquantizationforlargelanguagemod-
+els,2023.
+Ruibin Xiong, Yunchang Yang, Di He, Kai Zheng, Shuxin Zheng, Chen Xing, Huishuai
+Zhang,YanyanLan,LiweiWang,andTieyanLiu. Onlayernormalizationinthetrans-
+former architecture. In International Conference on Machine Learning, pp. 10524–10533.
+PMLR,2020.
+ZhihangYuan,LinNiu,JiaweiLiu,WenyuLiu,XinggangWang,YuzhangShang,Guangyu
+Sun, Qiang Wu, Jiaxiang Wu, and Bingzhe Wu. Rptq: Reorder-based post-training
+quantizationforlargelanguagemodels. arXivpreprintarXiv:2304.01089,2023.
+DongqingZhang,JiaolongYang,DongqiangziYe,andGangHua. Lq-nets: Learnedquan-
+tization for highly accurate and compact deep neural networks. In Proceedings of the
+EuropeanConferenceonComputerVision(ECCV),September2018.
+YilongZhao,Chien-YuLin,KanZhu,ZihaoYe,LequnChen,SizeZheng,LuisCeze,Arvind
+Krishnamurthy,TianqiChen,andBarisKasikci. Atom: Low-bitquantizationforefficient
+andaccuratellmserving. arXivpreprintarXiv:2310.19102,2023.
+ShuchangZhou,YuxinWu,ZekunNi,XinyuZhou,HeWen,andYuhengZou. Dorefa-net:
+Traininglowbitwidthconvolutionalneuralnetworkswithlowbitwidthgradients. arXiv
+preprintarXiv:1606.06160,2016.
+12

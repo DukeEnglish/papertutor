@@ -1,0 +1,1892 @@
+Training LLMs over Neurally Compressed Text
+BrianLestera JaehoonLeea AlexAlemia JeffreyPenningtona
+AdamRobertsa JaschaSohl-Dicksteinb∗ NoahConstanta
+aGoogleDeepMind bAnthropic
+{brianlester,nconstant}@google.com
+Abstract
+Inthispaper,weexploretheideaoftraininglargelanguagemodels(LLMs)over
+highlycompressedtext. Whilestandardsubwordtokenizerscompresstextbya
+smallfactor,neuraltextcompressorscanachievemuchhigherratesofcompression.
+IfitwerepossibletotrainLLMsdirectlyoverneurallycompressedtext,thiswould
+conferadvantagesintrainingandservingefficiency,aswellaseasierhandlingof
+longtextspans. Themainobstacletothisgoalisthatstrongcompressiontends
+toproduceopaqueoutputsthatarenotwell-suitedforlearning. Inparticular,we
+findthattextnaïvelycompressedviaArithmeticCodingisnotreadilylearnableby
+LLMs. Toovercomethis,weproposeEqual-InfoWindows,anovelcompression
+techniquewherebytextissegmentedintoblocksthateachcompresstothesame
+bit length. Using this method, we demonstrate effective learning over neurally
+compressedtextthatimproveswithscale,andoutperformsbyte-levelbaselinesby
+awidemarginonperplexityandinferencespeedbenchmarks. Whileourmethod
+deliversworseperplexitythansubwordtokenizersformodelstrainedwiththesame
+parametercount,ithasthebenefitofshortersequencelengths. Shortersequence
+lengthsrequirefewerautoregressivegenerationsteps,andreducelatency. Finally,
+weprovideextensiveanalysisofthepropertiesthatcontributetolearnability,and
+offerconcretesuggestionsforhowtofurtherimprovetheperformanceofhigh-
+compressiontokenizers.
+1 Introduction
+Today’slargelanguagemodels(LLMs)arealmostexclusivelytrainedoversubwordtokens. The
+tokenizersusedtoproducethesetokens—oftenBPE[23,56]orUnigram[37],asimplementedbythe
+SentencePiecelibrary[38]—arecompressorsthattypicallyachieve~4×compressionovernatural
+languagetext[74].1 Whilethesetokenizers“hide”thecharacter-levelmakeupofeachtokenfromthe
+LLM[74,44],thisdownsideiswidelyseenasoutweighedbythesignificantbenefitsofcompression.
+Comparedtorawbyte-levelmodels,anLLMtrainedoversubwordtokenssees~4×moretextper
+token,allowingittomodellonger-distancedependencies,ingestmorepretrainingdata,andpredict
+moretextatinferencetime,allwithoutincreasingcompute.2
+Given these advantages, it raises the question, could we compress text further to achieve even
+greater gains? It is well known that autoregressive language models can be turned into lossless
+∗WorkdonewhileatGoogleDeepMind.
+1We refer here to “token-level” compression rate, i.e., the length reduction between a raw UTF-8 byte
+sequenceandthecorrespondingsequenceofsubwordtokens.Ifinsteadwemeasurethenumberofbitsrequired
+toencodethetwosequences,subwordcompressiontypicallydelivers~2×orlesscompression,dependingon
+vocabularysize,whichtypicallyrangesfrom32kto256k.SeeSection3.4fordiscussion.
+2Theincreasedcostoftheinputembeddingandfinalsoftmaxlayersduetoincreasedvocabularysizeis
+negligibleforallbutthesmallestmodels.
+Preprint.
+4202
+rpA
+4
+]LC.sc[
+1v62630.4042:viXranext byte
+M1 probabilities
+Neural compr
+LM over bytes
+eoiau
+Neural compression
+Compression Algorithm
+can lead to better
+(e.g. Arithmetic Coding)
+LLM tokenizers
+compressed text 010000110011101010111100
+as bits 100000100110000101111101
+chunk into
+token IDs
+compressed text
+67 58 188 130 97 125
+as tokens
+next token
+M2
+probabilities
+LM over
+compressed text
+2170 49955
+Figure1: AnoverviewofourapproachfortraininganLLM(M2)overneurallycompressedtext.
+First,M1istrainedasastandardbyte-levellanguagemodel—givenaleftwardcontext,M1assignsa
+probabilitytoeachpossiblefollowingbyte. Next,corpustextiscompressedintoabitstreamusing
+M1asacompressor. Specifically,theprobabilitiesthatM1assignsateachtextpositionarefedinto
+acompressionalgorithmlikeArithmeticCodingthatsupportsusingdynamicsymbolprobabilities.
+Finally,thisbitstreamischunkedintotokens(e.g.,8-bitchunks),andM2istrainedasalanguage
+modelovercompressedtext.
+textcompressors,andrecentworkhasshownthatLLMscaneasilyachieve12×compressionover
+Englishtext[16].3 CanwesimplytrainanLLMoverthisneurallycompressedtext?
+In this paper we explore various options for doing so, focusing primarily on the idea of using
+Arithmetic Coding (AC) [73], which is known to reach the near-optimal compression rate for a
+particularmodelthatassignsprobabilitiestotextcontinuations. Figure1presentsourhigh-level
+approach. First,asmalllanguagemodel“M1”istrainedoverrawbytesequences. Next,thisfrozen
+modelisusedtocompresspretrainingcorpustextbyapplyingastandardcompressionalgorithmlike
+AC. Theresultingcompressedbitstreamisthenchunkedintotokens,whichareusedtotrain“M2”,a
+languagemodelthatdirectlyreadsandwritesneural-compressedtext.
+Givenaperfectprobabilisticmodeloftherawbytesequence,thecompressionstepwouldoutputa
+fully-compressedbitstreamthatwouldbeindistinguishablefromrandomnoise,andhenceunlearnable
+by M2. In reality, M1 can never be perfect [78], so the M1-compressed output will still contain
+learnablepatterns. WeexplorewhetherusingcompressionpoweredbyarelativelysmallM1isable
+to “remove” the simple structure that M1 understands from the input—e.g., patterns of spelling,
+word frequency, and basic grammar—while retaining any higher-level structure that M1 fails to
+model—e.g.,patternsrequiring“deeper”reasoningandlongrangecoherence. AlargerM2would
+thenlearntomodelthishigher-levelstructure, withoutneedingtorelearnthelow-levelstructure
+removedbyM1.4 Intheory,thisprocesscouldberepeatedbytraininganeven-largerM3modelon
+textcompressedbyM2,andsoon.
+Inpractice,wefindthattextcompressedviaArithmeticCodingisnotreadilylearnablebyastandard
+transformer-basedLLM,withresultingmodelspredictingtokensatchance. Interestingly,thisresult
+holds even when M1 is reduced to a context-free unigram model, suggesting that the challenge
+3Specifically,theauthorsshowthatChincilla70B[30]cancompress2048-bytesubspansofenwik9ata12×
+bit-levelcompressionrate.
+4Intuitively,trainingM2couldbeseenasanalogoustofittingtheresidualsofM1[21].
+2of modeling AC-compressed text stems from the difficulty of learning the AC compression and
+decompression process itself. We verify this hypothesis by showing that even the sub-tasks of
+AC-compressingandAC-decompressingtextarenotlearnedwellbeyondafewinitialtokens.
+Toaidlearnability,weproposecompressionviaEqual-InfoWindows,asimpletechniquethatbreaks
+textintocontiguouswindowsandcompressesthemviaArithmeticCodingindependently. Rather
+than splitting text into windows of equal text length, we track the number of bits output by the
+compressor,andcloseeachwindowjustbeforeitexceedsasetinformationthreshold(e.g.,32bitsof
+information). ThishastheadvantagethatwhenchunkingthesubsequentbitstreamintoM2tokens,
+thereisastablemappingfromNtokenstoonewindow(e.g.,four8-bittokens⇒one32-bitwindow).
+Ateachwindowboundary,weresetbothACalgorithmandtheM1modelcontext. Thisensuresthat
+eachwindowmaybemappedbackontorawtextwithoutanyadditionalinformation.
+ThroughablationsonwindowsizeandM2vocabularysize,wefindthatEqual-InfoWindowsmake
+learning of AC-compressed text possible across a range of settings. However, we also observe
+that learning progresses gradually, starting with tokens at the left edge of each window, and for
+longerwindows,themodellearnslittleaboutthetokensneartherightedge. Ourbest-performing
+settingusesshort16-bitwindowsthateachcorrespondtoasingle16-bitM2token. Despiteresetting
+thecompressionalgorithmevery16bits,westillachieve~5.3×token-levelcompressionoverall,
+whichexceedsstandardsubwordtokenizers. Remarkably,ourbestM2modelsoutperformbyte-level
+baselinesonperplexitybenchmarks(bits/byte)forfixedcomputationbudget(FLOPs/byte). This
+showsthatlearningoverneural-compressedtextcanbeeffective.
+Atthesametime,ourbestM2modelsunderperformsubwordbaselines. Wesuspectthisisdueat
+leastinparttotherelativelyunstablemappingsourneuraltokenizersinducebetweenwordsand
+tokens. Bycontrast,standardsubwordtokenizersinduceessentiallystableword-to-tokenmappings,
+whichlikelymakesthetokensequencestheyoutputwell-suitedforLLMtraining.5 Weillustrate
+this contrast through qualitative examples. Whether a neural tokenizer can reach a high level of
+compressionwhilemaintaininghighlearnabilityforLLMtrainingisaninterestingquestionforfuture
+research.
+Ourmaincontributionsareasfollows: (1)Outlineadvantagesandchallengesoftrainingoverneural
+compressed text. (2) Compare LLMs trained over different tokenizers along two axes: bits/byte
+andFLOPs/byte. (3)ShowthatstandardLLMscan’tlearntomodelvanillaAC-compressedtext.
+(4)ShowthatGZip-compressedtextislearnablebystandardLLMs,butnotcompetitive. (5)Propose
+compressionviaEqual-InfoWindows,andshowthatitenableslearningoverneuralcompressedtext.
+2 MotivationandBackground
+2.1 AdvantagesofTrainingoverNeural-CompressedText
+TrainingLLMsovercompressedtextisappealingformanyreasons. Wediscussthreeadvantagesin
+detailbelow.
+Efficiency Themoststraightforwardadvantageisefficiency. Bycompressingthesametextinto
+a shorter token sequence, the model can process more text for the same computational cost. In
+particular,amodeltrainedoverC×compressedtextwillseeC×moretextduringtrainingcompared
+toamodeltrainedoverrawtext,givenanequalcomputebudget. Increasingtheamountofdataseen
+inpretrainingisoftenaneffectivemeansofimprovingperformance[35,30]. Processingtextmore
+efficientlyalsoconfersbenefitsatinferencetime,reducingtheservingcostforhandlingarequestofa
+givenpromptandcontinuationlength. Inadditiontoreducingtherawcomputeneededforinference,
+compressioncanalsoimproveinferencelatency,sincegeneratingbetter-compressedoutputrequires
+fewersequentialautoregressivesteps.
+LongerContext Asecondadvantageisthatworkingwithcompressedtextallowsmodelinglonger
+contextualdependencies. Invanillatransformer-basedmodels,computationfortheself-attention
+layerscalesquadraticallywiththesequencelength,O(n2d). Thishaslimitedthesequencelengths
+5SeeAppendixLforsomecounterexamplestosubwordtokenizersproducingstableword-to-tokenmappings.
+3usedbysuchmodelsinpracticalsettingsto~10ktokens.6 If,viacompression,eachtokenrepresents
+(onaverage)C bytesofrawtext,thentheresultingLLMcanmodeldependenciesacrossC×longer
+distances compared to a raw text model operating over the same token sequence length. While
+thebenefitsofmodelinglongercontext(beyond~1,000bytes)aremodestwhenviewedmerelyas
+perplexitygains[51],theabilitytoconditiononlongcontextiscriticalformanyapplications,such
+asretrievingcontentfromadocument,oransweringacodingquestionprovideddocumentation.
+Distribution of Compute A third potential advantage of training over compressed text is that
+informationwillbespreadmoreuniformlyacrossthesequence. Bythenatureofcompression,a
+text span that is relatively predictable (e.g., a boilerplate notice) will be more compressible than
+aspanwithhighperplexity(e.g.,auniqueproductserialnumber). WhenanLLMistrainedover
+well-compressedtext,eachtokenwillrepresentroughlyanequalamountofinformation. Sincethe
+LLMallocatesequalcomputetoeachtoken,thisamountstoallocatingmorecomputefor“harder”
+textspans. Thisadaptivityissimilarinspiritto“AdaptiveComputationTime”(ACT)[27],which
+learnstoallocateadditionalcomputeatsomesequencepositionsinanend-to-endmanner,butwith
+theadvantagethatinourcasethecomputationremains“dense”—identicaloperationsareappliedat
+eachposition.7
+2.2 ChallengesofTrainingoverCompressedText
+Learnability Itisnotatallobviouswhattypesofcompressionare“transparent”enoughtobe
+learnablethroughastandardLLMtrainingprocess. Strongcompressioncanbeseenasremovingas
+muchredundantorpredictableinformationfromasequenceaspossible. Consequently,thebitstream
+outputbyagoodcompressorisinherentlyhardtodistinguishfromrandomnoise. Inthiswork,we
+explorethesettingwhereM2—themodeltrainedovercompressedtext—hasalargercapacitythan
+M1,themodelusedforcompression. Inprinciple,thissetupshouldallowM2toextractadditional
+information from the signal even after M1 has compressed it. However, for strong enough M1
+compression,theresultingbitstreammaybetoonoisytodetectanysignal.
+AsaprerequisiteforM2toeffectivelypredictcontinuationsofcompressedtext,weanticipatethatit
+isnecessaryforM2tohavetheabilitytodecompressbits→textandcompresstext→bits. These
+sub-tasksarechallengingintheirownright. First,M2needstoaccurately“simulate”M1inorderto
+knowtheprobabilitiesitassignstothetext,whichdeterminetheoutputofcompression.8 Training
+modelstomimicothermodelscanbedifficult[41],andeveninsettingswheremodelsdolearnto
+copythebehaviorofanothernetwork[29],thisisoftenonlywhenlookingatwhichsymbolwas
+assignedthehighestprobability—theactualprobabilitiesassignedoftendiffer[60]. Second,M2
+needs to learn the compression procedure itself. In our case, this means tracking the Arithmetic
+Codingalgorithm,whichrequiresmaintaininghigh-precisionnumericalstateacrosslongcontexts.
+Weinvestigatethesesub-tasksindetailinSection5.2.
+Afurtherlearnabilitychallengeisthehighlevelofcontextsensitivityneededtointerpretabitstream
+ofcompressedtext. Whenchunkedintotokens,aparticularbitsubsequence(e.g.,10111001)can
+mapontothesametokendespitehavingnostable“meaning”acrossoccurrences. Weshowexamples
+inSection6.1,whereatokenmapstomanydifferentunderlyingtextforms,necessitatingstrong
+contextualunderstanding. WhileLLMsarerobusttosomelevelofpolysemy,ashighlightedbythe
+successofHashEmbeddings[62]wheremultipleunrelatedwordsshareasingletokenrepresentation,
+wesuspectthishasitslimits.
+NumericalStability Anadditionaltechnicalchallengeisthatcompressionmethodscanbesensitive
+totheprecisemodelprobabilitiesused. Toachievelosslesscompressioninoursetup,itiscriticalthat
+6Exploringsub-quadraticattentionmechanismsisanareaofactiveresearch[1,70,36,75,5,9,etalia].
+However,regardlessofthecostofattention,compressingtheinputincreasestheeffectivecontext“forfree”.
+7ItshouldbenotedthatACTlearnstoallocatemorecomputewhereitisuseful,asopposedtomerelywhere
+thepredictionsarehard.Forexample,ACTlearnstonotwastecomputeoninherentlyunpredictabletextspans.
+Weexpectthatasaheuristic,allocatingmorecomputetohigher-perplexitytextspansisvaluable,butleavethis
+tofutureworktoverify.
+8ForArithmeticCoding,notonlywouldM2needtoknowtheprobabilitiesM1assignstotheobserved
+text,butitwouldalsoneedtoknowtheprobabilitiesassignedtomanyunobservedsymbols.Thisisbecause
+ArithmeticCodingoperatesovercumulativeprobabilities,i.e.,theprobabilitythatthenextsymboliseorany
+alphabeticallyprecedingsymbol.
+4theM1probabilitiesmatchduringcompressionanddecompression. Thiscanbehardtoguaranteein
+practice,astherearemanysourcesofnumericalnoiseinLLMinference,especiallywhenrunningon
+parallelhardware. AnexpandeddiscussionofnumericalstabilityissuescanbefoundinSection3.7.
+Multi-ModelInference Finally,aspecificchallengeoftrainingoverneuralcompressedtextisthat
+multiplemodelsneedtobestoredandrunside-by-sideinordertoperforminference. Weassumethat
+ifM1isrelativelysmall,thisadditionaloverheadisnotasignificantdrawbackcomparedtoastandard
+tokenizer,whichisalsoaseparatemodelthatisneededtotokenizetextinputanddetokenizeLLM
+outputs. Inevaluatingourapproach,weincludeM1computeinourcalculationsoftotalinference
+cost(FLOPs/byte).
+2.3 Compression
+Inthiswork,wefocusonlosslesscompression,whichaimstoencodeasequenceofinputsymbols,
+x = {x ,x ,...,x } ∈ X|V|, into a bitstream while minimizing the expected length of the
+0:N 0 1 N
+bitstream. Compressionmethodsareoftenfactoredintoa“modeling”componentanda“coding”
+component[45]. Theinputsequencecanbeviewedasasamplefromatruedistributionp,x ∼ p,
+0:N
+withastandardautoregressivedecomposition,p(x
+)=(cid:81)N
+p(x |x ,...,x ). The“modeling”
+0:N i=1 i 0 i−1
+component aims to approximate p with pˆ. While some compression algorithms assume static
+probabilitiesforeachsymbol,strongeralgorithmsare“adaptive”,meaningthatsymbolprobabilities
+maychangebasedoncontext. Inthiswork,weusecontext-awaretransformer-basedlanguagemodels
+torepresentpˆ.
+The“coding”componentofacompressionalgorithmconvertstheinputsequencetoabitstreamof
+lengthℓ(x ). Tomaximizecompression,wewantacodingalgorithmthatminimizestheexpected
+0:N
+number of bits in the bitstream, L := E [ℓ(x )]. This is done by assigning shorter bit
+x0:N∼p 0:N
+sequencestocommonsymbolsandlongersequencestolesscommonones.9 Theexpectedlengthis
+lowerboundedbyL≥H(p)whereH(p):=E [−log p(x)][57]. Thismeansthat,givena
+x0:N∼p 2
+near-optimalcodingalgorithm,theachievablelevelofcompressionderivesfromhowwellthemodel
+pˆapproximatesp.
+2.4 ArithmeticCoding
+ArithmeticCoding[53,49]usesamodelpˆtocompressesasequencex toabitstream,whichis
+0:N
+thebinaryexpansionofafloatf ∈ [0,1). Thefloatf isfoundbyassigningsuccessivelysmaller
+sub-intervalstoeachsymbolx ∈x ,withthefinalintervalenclosingf. Anintervalismadeofan
+i 0:N
+upperandlowerbound,I =[l ,u )anditssizeisgivenbyu −l . StartingwithI =[0,1),ateach
+i i i i i 0
+stepofencoding,theintervalforthesymbolx iscreatedbypartitioningtheintervalI basedon
+i i−1
+thecumulativedistributionofpˆgiventhepreviouscontext,pˆ (x |x ). Thesizeofthisintervalis
+cdf i <i
+givenbysize(I )∗pˆ(x |x ). Thus:
+i−1 i <i
+(cid:2) (cid:1)
+I (x ):= l +size(I )∗pˆ (w|x ),l +size(I )∗pˆ (x |x ) ,
+i i i−1 i−1 cdf <i i−1 i−1 cdf i <i
+wherew ∈X isthesymbolbeforex inastrictorderingofX,i.e.,wistheprevioustokeninthe
+i
+vocabulary. Finally,thebitstreamofminimallengththatrepresentsthebinaryexpansionofanumber
+insidethefinalintervalf ∈I (x )isusedasthecompressedrepresentation.
+N 0:N
+Equivalently, the binary expansion can be seen as maintaining a bitstream prefix b and creating
+successiveintervalsB (b,x ∈ {0,1}) := [bl ,bu )bypartitioningthecurrentintervalinhalf. If
+j j j
+thefirstintervalischosen,a0bitisappendedtothebitstreamprefixb,whilechoosingthesecond
+intervalappendsa1.
+(cid:2) (cid:1)
+B (b,0):= bl ,bl +size(B )∗0.5
+j j−1 j−1 j−1
+(cid:2) (cid:1)
+B (b,1):= bl +size(B )∗0.5,bu
+j j−1 j−1 j−1
+9Thisprocesscanresultinextremelyuncommonsequencesbecominglongerundercompression,asnoalgo-
+rithmcancompressallpossibleinputstrings[45].Inpractice,naturallanguageinputsarehighlycompressible
+andtheseedgecasesareinputsthatonewouldnotrecognizeasnaturallanguage.
+5OncethefinalintervalI iscomputed,smallerandsmallerbitintervalsarecreateduntilreachinga
+N
+bitintervalB (b)thatisfullyenclosedbyI . Atthispoint,thecorrespondingbitstreambisthe
+T N
+finalcompressedrepresentation.
+The coding component of Arithmetic Coding is nearly optimal: the output bitstream will have a
+lengthof−⌈logpˆ(x )⌉+1bitswhenusinginfiniteprecision. Inthefiniteprecisionsettingusing
+0:N
+β bits, an extra O(N2−β) bits are added [31]. See [73] for an example implementation. In our
+experiments,weuseprecisionβ =14. Thepracticaleffectofusingafiniteprecisionimplementation
+ofArithmeticCodingisthatthemodel’scumulativedistributiongetsquantizedtointegersusingβ
+bits. Thisresultsinaminimumprobabilityof2−β beingassignedtoalltokens.
+2.5 RelatedWork
+Recentworkhaslookedatusinglargelanguagemodelsforcompression,buthasnottoourknowledge
+attemptedtotrainsubsequentmodelsovertheresultingcompressedoutput. Workslike[16]usea
+transformerlanguagemodelasthemodelingcomponentofArithmeticCoding,buttheydonottrain
+overcompressedoutputnordotheymakemodificationstothecompressionalgorithmtofacilitate
+learnabilitybydownstreammodels. Additionally,theyfocusonthesettingofcompressingfixed-size
+sequences of bytes. By contrast, our models operate over input sequences of fixed token length.
+Thisallowsformodelswithhighercompressionratestoleveragelongercontexts,asmorebytesare
+includedintheinput.
+[63]proposeschangestoArithmeticCodingtomakeitmoreamenabletousewithLLMs—namely,
+theyranksortthelogitsfromthemodelbeforecreatingtextintervals, I (x ). Thiscouldhelp
+i 0:N
+alleviateissuesstemmingfromerrorsinM2’ssimulationofM1. However,theydonottrainmodels
+ontopoftheircompressedoutput.
+Someapproachesto“token-free”(i.e., purelycharacter-orbyte-level)languagemodelingdown-
+sampletheinputsequenceviaconvolutions[13,61],whichcouldbeseenasaformofend-to-end
+neuraltokenization. Howeveroneimportantdistinctionisthattheresultingtokenizationis“soft”—
+outputtinghigh-dimensionalvectorsandnotimplyingadiscretesegmentation—incontrasttoour
+tokenizationthatoutputsdiscretetokens.
+Methodsforlearningdiscretetokenizationend-to-endhavealsobeenproposed[11,25]. Inthecase
+ofMANTa[25],thelearnedsegmentationappearstobefairlysemantic(i.e.,respectingwordand
+morphemeboundaries),whichcouldbeanadvantageoverourapproach. However,theylackourbias
+towardsencodinganequalamountofinformationpertoken.
+Inmodelingaudio,itiscommonpracticetouselearnedtokenizersthatcompresstherawinputsignal
+to discrete tokens from a fixed-size codebook [64, 3, 12, 6]. However, this compression is lossy,
+whereaswefocusonlosslesscompression.
+Otherrecentworkfocusesonusingthe“modeling”componentfromwell-knowncompressorstodo
+othertasks. [34]usesthemodelfromGZiptoperformtextclassification. [68]usestheArithmetic
+DecodingalgorithmwithanLLMasthemodeltododiverseparallelsamplingfromthatLLM. One
+couldimaginethatthe“model”ofourcompressors(M1)isateacherforM2,butunliketheseother
+applications,theM1valuesarenotusedoutsideofcompression.
+[40]alsoexploreslearningovercompressedtext,butwithseveralkeydifferences. First,theyuse
+n-gramlanguagemodels[57]whileweuseLLMs. Second,theirmodelisconditionedoncompressed
+bitstreamsbutproducesadistributionovertheraw,uncompressed,byteswhileourM2modelspredict
+directlyinthecompressedspace. Additionally,theyonlyconsiderstaticHuffmancoding[32]asthe
+algorithmtocompressmodelinputs. Whilethisavoidsthecontextsensitivityissuesweoutlinein
+Section2.2,itresultsinafarworsecompressionratecomparedtotheadaptivecompressionmethods
+we use. One important distinction is that their equal-information windows are overlapping, and
+usedasaslidingwindowtoprovidecontexttotheirn-gramlanguagemodel. Bycontrastourequal-
+informationwindowsarenon-overlapping,andusedtosegmenttextintoaseriesofequal-length
+bitstringsthatcanbeinterpretedindependentlybyM2,andwhoseboundariesareeasilyidentifiable,
+astheymaptoafixednumberofM2tokens.
+Concurrently,[26]exploreshowthecompressionperformanceofatokenizercorrelateswithdown-
+streammodelperformance. Theyfindthattokenizersthatcompressbetterperformbetter, which
+generallyalignswithourfindings,particularlyinthelargevocabularysetting,seeFig.6. However,
+6wefindthatusingthestrongestcompressorsisdetrimentaltolearnability,asseenintheAClinein
+Fig.3. Theseconflictingresultslikelystemfromdifferencesintokenizationstrategy. Theirwork
+isrestrictedtoBPE-basedcompressorswhileweexplorestrongercompressorsbuiltonLLMsand
+ArithmeticCoding. Thequalitativedifferencesbetweentheseclassesoftokenizersareexploredmore
+inSection6.1.
+3 Methods
+Foreachexperiment,wecompresslongcontiguoussequencesoftrainingdatausingdifferentmethods.
+Forseveral,weuseM1—abyte-levellanguagemodel—aspˆinthecompressionalgorithm. Wethen
+chunkthecompressedoutputintotokensandtrainM2modelsoverthosetokens.
+3.1 TrainingData
+AlltrainingdatausedisEnglishwebtextfromC4(en3.1.0)[52]. Aftertokenization,eachdocument
+inC4hasan<EOS>tokenappendedtoit. Weconcatenate128documentstogethertogeneratea
+longsequenceoftext. UsingUTF-8byte-leveltokenization,theaveragedocumentlengthis2,170
+bytes,thustheselongsequenceshaveanaveragelengthof277,760bytes. Despitethedocument
+breaks,weconsidertheselongsequences“continguous”forthetrainingoflanguagemodels. These
+sequencesarethensplitintoindividualexamples,whichareshuffledusingthedeterministicdataset
+functionalityfromSeqIO[54].
+3.2 TrainingM1
+Themodelusedforcompressionisadecoder-onlyTransformermodel[67]. Itusesthe3msizeseen
+inTable4andacontextlengthof1,024. Weuseabatchsizeof128,anrsqrtdecaylearningrate
+√
+schedule(1/ steps)startingat1.0with10,000warmupsteps,andaz-lossof0.0001. Themodelis
+trainedfor2,500,000stepsusingtheAdafactor[59]optimizer. Thefeed-forwardlayersuseReLU
+activations[47,22],andweusedistinctlearnablerelativeattentionembeddings[58]ateachlayer.
+WeuseadeterministicSeqIOdatasetandtrainusingJax[7],Flax[28],andT5X[54]. Thefinal
+validationperformanceoftheM1modelis1.457bits/byte,astandardmeasureofperplexity,see
+Section3.8. M1andM2arebothtrainedontheC4trainingdata,butthefinalvalidationdatausedto
+evaluateM2isunseenduringM1training,thereforethereisnoinformationleakage. Thisissimilar
+tohowLLMtokenizersareoftentrainedonsamedatasetthattheLLMissubsequentlytrainedon.
+3.3 CompressionMethods
+WhencompressingC4trainingdata,weuseanexamplelengthof10,240bytesandapplyoneofthe
+followingcompressiontechniques(seeAppendixHformoremethodsweconsidered). Thisresults
+incompressedexamplesthatare,onaverage,muchlongerthanourtargetsequencelengthof512
+M2tokens. Thus,eachexamplefillsornearlyfillsthemodel’scontextwindowwithacompressed
+sequencemadefromcontiguousrawbytes. Wecompress51,200,000examplesusingeachmethod,
+allowingustotraineachM2modelfor200,000stepswithoutrepeatingdata.
+ArithmeticCoding: Inthissetting,weuseadecoder-onlytransformerlanguagemodeltomodelpˆ,
+thatis,whencreatingtheintervalI (x ),thepartitionsforeachpossiblecharacter,pˆ(x |x ),are
+i 0:N i <i
+calculatedusingtheprobabilitiesforthenexttokenoutputbythetransformer.
+Thecompressormodelisrunovercontiguoustextsequencesof10,240bytes.Thegeneratedlogitsare
+usedasthemodeldistributionforArithmeticCoding. WeusetheRangeEncoding(afinite-precision
+implementationofArithmeticCoding)implementationfromTensorFlowCompression[4]witha
+precisionof14. Therangeencodingimplementationusesintegerswithprecision+2bits. Thisis
+enoughtoencode16-bitfloatlogits,soshouldnotcausenumericalissuesasourmodelsaretrained
+usingbfloat16. Whilethecompressormodelisonlytrainedonsequencesoflength1,024,ituses
+relativepositionembeddingsinitsattentionlayers. Thus,itcanbeappliedtolongersequences. Some
+worksobservedecreasedperformanceasinputsarescaledtolengthsbeyondthoseseenintraining
+[66, 51], but we find that compression performance is similar in the two settings. Compressing
+sequencesoflength1,024yieldsacompressionratioof5.46whilecompressingsequencesoflength
+710,240yieldsaratioof5.49. Thissuggeststheperformancedropfromlongsequenceshasminimal
+effectoncompression,orthattheincreasedcontextualinformationmakesupthisdifference.
+WewillseethattextcompressedinthisstraightforwardmannerisnotreadilylearnablebyM2. Thus,
+weexplorealternativecompressionmethodsthatmodifythe“modeling”and“coding”components
+forbetterlearnability. Table2showshowourdifferentapproachesaffectthecompressionratio.
+StaticLogitsArithmeticCoding:Onepotentialdifficultyoflearningovercompressedtextisthatthe
+“modeling”componentofthecompressionalgorithmishardtolearn—thatis,thesecondlanguage
+model(M2)hastroublelearningtosimulatetheprobabilitiesthecompressormodel(M1)assignsto
+bytes.
+To weaken the compressor model, we replace the context-sensitive LM model with a static byte
+unigrammodel—thatis, themodel’sdistributionisthesameforallbytetokensintheinput, i.e.,
+pˆ(x |x ,...,x )=pˆ(x ). Thisdistributionisestimatedusingthebyteunigramstatisticsfromthe
+i 0 i−1 i
+C4trainingdata.
+EqualInformationWindows: Thedifficultyinmodelingcompressedtextcouldalsobebecausethe
+“coding”componentofthecompressionalgorithmishardtolearn. Thatis,thelanguagemodelisnot
+abletotrackthestatevariablesusedinArithmeticCoding.
+The_three_currently_living_species_are...
+M1 AC 0011101011101000 ⇔ The_thr
+ree_currently_living_species_are:_African...
+M1 AC 1100100011001001 ⇔ ree_c
+urrently_living_species_are:_African_savanna...
+M1 AC 1111000011110011 ⇔ urrently_l
+The_three_currently_living_species_are:_African_savanna_eleph
+ants,_African_forest_elephants,_and_the_Asian_elephants.
+0011101011101000110010001100100111110000111100111001000111111
+0001101100001000100000011000111010000110010111110000111011...
+Figure2: Under“Equal-InfoWindows”,textisencodedintoaseriesofN-bitwindows. Todetermine
+eachsuccessivewindow,theremainingtextisencodedbyte-by-byteviaArithmeticCodinguntilno
+morebytescanbeaddedwithoutexceedingthetargetbitthreshold,here16bits. BothM1andthe
+ACalgorithmareresetateachstep,sonoinformationpersistsacrosswindows.
+OurproposedmethodofweakeningthecodingcomponentofArithmeticCodingcompressionisto
+resettheACencoderonceithasoutputasetnumberofbits,creatingwindowsoffixedsizewhere
+eachwindowisanindependentlyAC-compressedsequence. ThisprocessisillustratedinFig.2.
+Windowswillrepresentavariableamountoftext,butaseachwindowiscreatedviacompression,we
+expectroughlythesameamountofinformationperwindow.
+InadditiontoresettingtheACencoder,wealsoresettheM1model’scontext. Thismeansthateach
+W bitsofoutputcanbedecodedindependently,atthecostofaweakerM1modelduetothelackof
+context. Aseachwindowisfullyself-contained,themodelnolongerhastolearntotrackArithmetic
+Codingstatevariablesoverlongdistances.
+Incaseswhere“sparebits”areavailableattheendofawindow(butnotenoughtoaddanadditional
+symboloftext),wepadwithzeros. Thiscomplicatesthedecodingalgorithm,butthecompression
+8Table1: “Token”vs.“bit”compressionratios. Largervocabulariesrequiremorebitstostoreeach
+token,andthusincuracostintermsofabsolutecompression. However,whentryingtominimizethe
+computeanLLMusestoprocessagivenpieceoftext,tokensequencelengthiswhatmatters.
+Method TokenCompressionRatio BitCompressionRatio
+SentencePiece 4.28 2.28
+AC[v=256] 5.49 5.49
+AC[v=65k] 10.98 5.49
+schemeremainslossless. SeeAppendixIforfurtherdiscussionandanalternativepaddingapproach
+thatgivessimilarresults.
+WhencompressinganadditionalcharacterwouldresultinabitstreamthatisgreaterthanW bits
+long, i.e., more than W binary expansions are needed to create an interval that is enclosed by
+I (x ),thebitstream(paddedtoW bitsasnecessary)representingtheinputuptoandincluding
+i+1 0:i+1
+characteriisemitted. ThenboththeACencoderandM1modelarereset. Thatis,I (x )
+i+1 i+1:N
+iscalculatedasifI (x ) = [0,1);thebitintervalisalsoresettoB (b = “”) := [0,1). Similarly,
+i 0:i j
+M1 is only conditioned on inputs that are part of the current window, the inputs after i. That is,
+pˆ(x |x )≈pˆ(x |x ).
+j <j j i...j
+We use b to denote the bits per window, and v for the vocabulary size of M2. For example,
+EqualInfoAC[(b)its=16, (v)ocab=256]representsACencodingwith16-bitEqualInfoWindows
+and8-bitM2tokens(vocabulary256).
+GZip: Asabaseline,wealsoexploretrainingovertextcompressedusingGZip[17]asimplemented
+in the Python [65] zlib library using the default compression level. GZip uses the DEFLATE
+algorithm—a combination of Huffman Trees [32] and LZ77 [77]. First LZ77 is used to replace
+repeatedsubstringsinthetextwithpointersbacktotheoriginalsubstring. ThenaHuffmanTreeis
+builtforthecurrent—LZ77compressed—exampleandusedtocompressit. Notethatthissetting
+isdynamic,astheHuffmantree,andhencethebinarycodesforeachcharacter,areuniquetothe
+example. Theseexperimentsexploreasettingwhereboththemodelingandcodingcomponentsof
+compressionaredifferentfromArithmeticCoding.
+3.4 TokenizationofCompressedText
+Mostcompressionmethodsoutputabitstream,buttrainingM2directlyoverbitswouldnotbeideal.
+AsM1wastrainedoverUTF-8bytes,thebit-leveloutputofcompressionwouldresultinM2being
+appliedtomuchlongersequences. Additionally,modelsaregenerallytrainedwithvocabularysizes
+muchlargerthantwo. Thus,weneedamethodtosegmentthebitstreamintotokens,creatingamore
+standardsequencefortraininglanguagemodels.
+WeconvertthebitstreamintoatokensequencebygroupingeveryN bitsintoatoken—resultingina
+vocabularysizeof2N. WeexploresettingsofN ∈{8,16},resultinginvocabularysizesofv=256
+andv=65,536. Asthetokensarecreatedfromthecompressedbitstream,weexpectthedistribution
+oftokenstobemoreuniformthantheusualZipfian[76]distributionofwordorsubwordtokens,
+allowingustouselargervocabularieswithoutencounteringissuesofrareorunattestedtokens.
+Throughoutthiswork,wefocusonthe“tokencompressionratio”L /L —theratiobetweenthe
+iT oT
+inputandoutputtokensequencelengths. Itisimportanttonotethatthemeaningof“token”candiffer
+betweentheinputandoutputsequences. Generally,theinputsequenceisonebytepertoken,while
+outputtokensrepresentmultiplebytes. Thisisincontrasttothemorestandard“bitcompressionratio”
+L /L —theratioofinputbitstooutputbits. Asweaimtoreducethecomputationaloverhead
+ib ob
+ofrunningLLMsbytrainingthemoncompressedinput,wearemoreconcernedwithreducingthe
+numberoftokensthatM2consumes. ThisdifferenceiselucidatedinTable1. WhileSentencePiece
+resultsinasequencelengthreductionof4.28×,thelargervocabularymeansthat15bitsarerequired
+torepresenteachtoken. Assuch,thebitcompressionratioisonly2.28,whichismuchlowerthan
+ourAC-basedcompressors. Similarly,creating16-bittokensfromtheoutputofArithmeticCoding
+doesnotchangethebitcompressionratio—thetotalnumberofbitsisunchanged—butitdoesreduce
+thenumberoftokensinthesequence,andthusthenumberoftokenstheLLMmustprocess. We
+computecompressionratiosovertheC4devset,whichisunseenduringM1training.
+9Table2: Weakeningthe“model”or“coding”componentofArithmeticCodingreducesthecompres-
+sionrate. ThereductionofM1toastaticunigramdistributionresultsintheworstcompressionratio.
+WhenusingEqualInfoAC,M1isweaker,asithaslesscontext,andcodingisweaker,aspaddingis
+oftenrequiredattheendofwindows. Thecompressionratioimproveswithlargerwindowsizes.
+Method CompressionRatio
+AC[v=256] 5.49
+StaticAC[v=256] 1.73
+EqualInfoAC[b=16, v=256] 2.66
+EqualInfoAC[b=32, v=256] 3.49
+EqualInfoAC[b=64, v=256] 4.16
+EqualInfoAC[b=128, v=256] 4.61
+Tohighlightthedifferencesbetweenthetokenizationmethodsabove,wemeasuretheperformance
+(asbits/byteonasampleoftheC4validationset)oftwotrivialmodelsforeachtokenizerinTable3.
+The“uniform”modelnaïvelyassignsequalprobabilitytoeachtoken,regardlessofcontext. The
+“unigram”modelalsoignorescontext,butassignsprobabilitiesbasedontheglobaltokenfrequencies
+observedinthetrainingdata. Withbyte-leveltokenization,eachUTF-8byteencodestoasingle8-bit
+token,sotheuniformmodelachieves8bits/byte. Formorepowerfultokenizers,theuniformmodel
+isstronger,indicatingthatthetokenizeritselfhassomelanguagemodelingability. Weobservethat
+ourcompression-basedtokenizers(AC,EqualInfoACandGZip)outputanear-uniformdistribution
+oftokensacrosstheirvocabulary. Thisisreflectedinthenear-zerogainover“uniform”achievedby
+modelingunigramstatistics.
+Table3: Bits/byte(↓)performanceoftwotrivialmodelsacrosstokenizers. “Uniform”assignsequal
+probabilitytoeachtoken. “Unigram”assignsprobabilitiesbasedontheempiricaltokenfrequencies.
+Asthecompression-basedtokenizersoutputnear-uniformdistributionsovertokens,thereislittlegain
+inmodelingunigramstatistics. Thus,learningoverthisdatarequiresmodelinglongercontexts.
+Uniform Unigram
+Method bits/byte bits/byte ∆
+Bytes 8.000 4.602 3.398
+SentencePiece 3.497 2.443 1.054
+AC[v=256] 1.457 1.457 0.000
+StaticAC[v=256] 4.624 4.624 0.000
+EqualInfoAC[b=16, v=256] 3.008 2.976 0.032
+EqualInfoAC[b=32, v=256] 2.292 2.285 0.007
+EqualInfoAC[b=64, v=256] 1.923 1.921 0.002
+EqualInfoAC[b=128, v=256] 1.735 1.735 0.000
+GZip[v=256] 3.587 3.586 0.001
+3.5 TrainingM2onCompressedData
+Each M2 model is trained for 200,000 steps with a batch size of 256 and a sequence length of
+512. Thuseachmodeltrainson26.2billiontokens. Ofthese,thevastmajority(over98.9%)are
+non-paddingtokens;seeAppendixCfordetailsandTable13fortheexactsizeofeachdataset. As
+methodswithhighercompressionratioscovermorerawtextpertoken, wealsoincludethetotal
+numberofbytesineachdataset. Shufflingoftrainingsetsisseeded,anddatasetstateischeckpointed
+duringtraining,soeachtrainingrunresultsinthemodelseeingeachexampleexactlyonce.
+Modelsaretrainedatfoursizes,asshowninTable4,with25m,113m,403m,and2bparameters,
+excludingembeddingparameters. Whenthecompressedbitstreamischunkedinto8-bittokens,the
+M2modelhasavocabularysizeof256. With16-bittokensthevocabularyincreasesto65,536. All
+M2modelshaveasequencelengthof512tokens. Thus,whentrainingon16-bittokens,twiceas
+many bytes are seen per example and in training overall, as compared to 8-bit tokens. All other
+hyperparametersmatchthoseusedinM1.
+10Table4: Modelsizesusedinourexperiments,andcorrespondinghyperparametersettings. Note,
+modelparametercountsexcludeembeddingtableparameters.
+ParameterCount EmbeddingDim #Heads #Layers HeadDim MLPDim
+3m 256 4 3 64 1024
+25m 512 8 6 64 2048
+113m 768 12 12 64 3072
+403m 1024 16 24 64 4096
+2b 2048 32 24 64 8192
+3.6 Baselines
+WecompareourM2modelsagainstbaselinemodelstrainedwithtwostandardtokenizationmethods,
+describedbelow. Allhyperparameters,includingsequencelength(512),matchthoseusedforourM2
+trainingabove.
+Bytes ThesebaselinestraindirectlyoverUTF-8bytes,usingthebytetokenizerfromByT5[74].
+Themodelssee26.2billionbytestotal(seeTable13).
+SentencePiece ThesebaselinestrainontexttokenizedwiththeSentencePiecevocabularyof32,000
+tokensfromT5[52]. Themodelssee112billionbytestotal(seeTable13).
+3.7 NumericalStability
+ArithmeticCodingdependsonthecreationof“intervals”thatcovereachsymbolinthevocabulary
+basedonthequantizedcumulativedistributionofamodel’slogitswhenpredictingthenexttoken.
+As such, a small change in the logits due to numerical noise can result in vastly different output
+bitstreams. This can make the practical use of neural language models in compression difficult.
+Commonsourcesofnoiseincludechangesinbatchsize,parallelcomputation,changestocompute
+infrastructure(CPUvs.GPUvs.TPU,differentTPUtopology,etc.),changestoinference(computing
+thelogitsforthewholesequenceatoncevs.computinglogitsforasingletokenatatimeusingKV
+caches),andchangestothelongestsequencelengthinthebatch.
+Methods like the rank-sorted algorithm used in LLMZip [63] may help alleviate these issues as
+onlytheorderoftokensneedstomatchbetweensettings. Thedevelopmentofalternatemethodsof
+LLM-basedcompressionshouldkeepnumericalstabilityissuesinmindandideallyalleviatethese
+issuesinthedesignofthealgorithm. Increasingthelevelofquantizationcouldalsohelpreduce
+numericalnoiseissues,asdifferenceswouldmostlybelostinquantization,butthiswouldhavea
+negativeimpactonthecompressionratio.
+3.8 Evaluation
+As the tokenization scheme varies across the approaches we consider, models cannot be di-
+rectly compared on “per-token” metrics such as negative log likelihood loss ℓ. Rather, fol-
+lowing previous work [14, 2, 10, 24, et alia], we report perplexity in terms of “bits-per-byte”,
+[bits/byte]=(L /L )ℓ/ln(2),whichscalesthemodel’slossbythetoken-levelcompressionrate.
+oT iT
+Wealsocomparemodelsonhowmuchcomputation(FLOPs)isrequiredtoperforminferenceover
+agivenlengthofrawtext(bytes). Morespecifically,wecalculateM2’sexpectedFLOPs/byteby
+scalingFLOPs/token—approximatedby2 × params(excludingembeddingparameters)following
+[35]—bythetoken-levelcompressionrate(astokens/byte). FormethodsusinganM1modelduring
+compression,theFLOPs/bytecostofM1isadded.10 Formoredetailsontheevaluationmetricssee
+AppendixG.
+WeevaluatemodelsonasampleoftheC4validationset. Duringevaluation,themodelisrunover
+20batchesor~2.6milliontokens. Thesetokensrepresentdifferentamountsoftextbasedonthe
+10WhilethereisacomputationalcosttorunningGZipovertheinputtext,weignoreitasitisinsubstantial
+comparedtothecostofrunningM2modelinference.
+1110
+Bytes SentencePiece
+ArithmeticCoding[v=256] ArithmeticCoding[v=65k]
+StaticAC[v=256] StaticAC[v=65k]
+EqualInfoAC[b=16,v=256] EqualInfoAC[b=16,v=65k]
+GZip[v=256] GZip[v=65k]
+5
+1
+107 108 109
+Inference FLOPs/byte
+Figure 3: Models trained over compressed text are compared against baseline models in terms
+ofbits/byte(↓)andinferenceFLOPs/bytes(↓). TheArithmeticCodingandStaticACsettingsare
+essentially unlearnable, with models failing to outperform naïve baselines (dashed lines) that as-
+signequalprobabilitytoalltokens. EqualInfoACandGZipoutperformnaïvebaselinesandshow
+improvement with scale. EqualInfoAC is the strongest of the compression-based methods, with
+EqualInfoAC[b=16, v=65k] outperforming the Bytes baseline at all sizes. While SentencePiece
+performsthebest,thegapbetweenEqualInfoACandSentencePiecenarrowswithscale. SeeAp-
+pendixAfortheexactvaluesusedinthisandothergraphs.
+compressionmethod,makingitimpracticaltorunevaluationonthesamesequenceofbytesforall
+methods. To confirm that our validation samples are large enough to be representative, for each
+method,wetrainfive25mparametermodelswithdifferentseeds. Wefindthefinalperformanceto
+beextremelystable,withthelargeststandarddeviationinbits/bytebeing0.0061. Thus,thevariance
+introducedfromsamplingthevalidationsetisnegligible. SeeAppendixBformoreinformation
+aboutvariance.
+4 Results
+Simplemethodsoftrainingoverneural-compressedtextfail AsseeninFig.3,themostobvious
+approach—compressionusingArithmeticCodingwithM1assigningnext-tokenprobabilities—fails
+tolearnanything. Regardlessofscale,themodelonlylearnstooutputauniformdistributionover
+tokens,theperformanceofwhichisdenotedbythedashedline. AstheArithmeticCodingprocedure
+isnearoptimal[45],thecompressionratioisessentiallydeterminedbythelossofM1. Thus,even
+thoughtheM2modellearnsnothinguseful,whenscaledbythecompressionrate,thissettingends
+upwiththesameperformanceastheM1model. Similarly,modelstrainedoverdatacompressedwith
+StaticAC—whereM1isreplacedwithastaticunigrammodel—failtolearn. Thisresultsuggeststhat
+thedifficultlyinlearningstemsfromthecomplexityorbrittlenessoftheArithmeticCodingprocess
+itself,ratherthanfromM2’sinabilitytomodelM1. Notethattheweak“modeling”componentofthis
+compressionschemeresultsinamuchlowercompressionrateandthusworsebits/byteperformance,
+despitethemodelalsolearningauniformdistribution.
+SentencePieceisastrongbaseline OurSentencePiecebaselineoutperformsallothermethods,
+includingourBytesbaseline,acrossallmodelsizes. Onthesurface,thisresultseemstoruncounter
+12
+etyb/stibBytes
+SentencePiece
+4
+ArithmeticCoding[v=256]
+StaticAC[v=256]
+EqualInfoAC[b=16,v=256]
+GZip[v=256]
+ArithmeticCoding[v=65k]
+StaticAC[v=65k]
+2 EqualInfoAC[b=16,v=65k]
+GZip[v=65k]
+1
+1 2 4 8
+bytes/step
+Figure4: Comparingmodelsintermsofbits/byte(↓)andbytes/step(↑). Asdecoderstepscanbea
+practicalbottleneckforsystemlatency,amodelwithhigherFLOPs/byteorworsebits/bytemaybe
+preferredinordertoachieveshortersequencelengths. Thedashedline( )isanexamplePareto
+frontier,showinghowapractitionermightvaluethetrade-offbetweenbits/byteandbytes/step. Our2
+billionparameterEqualInfoAC[b=16, v=65k]modelisonthisfrontier.
+totherecentfindingsof[16],wheretheirbyte-levelmodelsoutperformedsubword(BPE)modelsat
+mediumandlargescales. Thediscrepancyisduetoprioritizingdifferentmetrics. Theyreportthe
+model’sbitcompressionrateonfixed-length(2,048byte)sequences. Whilethisisonetypeof“fair”
+comparison,itdisadvantagessubwordmodels,astheyaretrainedtomodeldependencieslongerthan
+2,048bytes(butneverevaluatedonthisability),andareallottedfewerinferenceFLOPstoprocess
+thesametext,ascomparedtothebyte-levelmodels. Additionally,bitcompressionratiopenalizes
+subwordmodelsforhavinglargervocabularysizes. Bycontrast,ourevaluationtestswhatperplexity
+models achieve on sequences of the same length they were trained on, and compares models at
+matchingFLOPs/bytecost. Thisalignswithourendgoal,whichistotrainanLLMthatachieves
+thebestperplexityatwhateversequencelengthitcanhandle,givenafixedbudgetfortrainingand
+inference.
+Equal-InfoWindowsmakeAClearnable Fig.3showsthatEqualInfoAC[b=16, v=256]outper-
+formsthebyte-levelbaselineatmostmodelsizes,withthegainsincreasingwithscale. Inaddition
+to better bits/byte performance, training over compressed data has the advantage of using fewer
+FLOPs/byteforagivenmodelsize—seenintheleftwardshiftoftheEqualInfoAC[b=16, v=256]
+curvecomparedtotheBytescurve—duetoshortersequencelengths.
+Using16-bittokens(65kvocabulary)increasesperformancefurther. EqualInfoAC[b=16, v=65k]
+outperformstheBytesbaselineatallmodelsizes. ItunderperformstheSentencePiecebaseline,but
+thegapdiminisheswithscale.
+However, EqualInfoAC[b=16, v=65k] outperforms the SentencePiece baseline in terms of to-
+kens/byte. ModelsusingEqualInfoAC[b=16, v=65k]takefewerautoregressivestepstogeneratethe
+sametextthanmodelsusingSentencePieceencoding. Thishasthepotentialtoreducegeneration
+latency,atthecostofreducedcomputeefficiency. Thisisatradeoffthatisoftenworthmakingin
+production. Forinstance,speculativedecoding[42]isapopularapproachthatperformsredundant
+computationinordertopotentiallyaccelerateauto-regressivesteps.
+ItisnoteworthythattheEqualInfoACM2modelslearnwelldespitebeingtrainedondatathathas
+nearlyuniformunigramstatistics,aswesawinTable3. Inthebestcase,our2billionparameter
+M2 model achieves 0.94 bits/byte. This is a large gain over the naïve uniform (3.01 bits/byte)
+13
+etyb/stib8
+2
+7
+6
+1.5 5
+4
+EqualInfoAC[b=16,v=256]
+EqualInfoAC[b=32,v=256]
+EqualInfoAC[b=64,v=256] 3
+1 EqualInfoAC[b=128,v=256]
+108 109 108 109
+Inference FLOPs/byte Inference FLOPs/token
+(a)ControllingforCompressionRatio (b)IgnoringCompressionRatio
+Figure5: PerformanceofEqualInfoACacrossvariouswindowsizes,b∈{16,32,64,128}. When
+evaluatingbits/byte(left)tocontrolforcompressionratio,weseeanunintuitivetrendwhereformost
+modelsizesb = 16isbestbutb = 128issecond-best. Thisisduetothehighercompressionrate
+achievedbylongerEqualInfoWindows. Whenevaluatingtokens/byte(right),amonotonictrend
+emerges,showingthatshorterwindowsareeasiertolearn.
+andempiricalunigram(2.98bits/byte)modelsfromTable3,andapproachestheperformanceofa
+parameter-matchedSentencePiecemodel(0.87bits/byte),despiteusing23%fewerFLOPs/byte.
+ItisapparentfromFig.3thatifFLOPs/bytewereheldconstant,SentencePiecewouldachieveslightly
+betterbits/bytethanEqualInfoAC. HoweverthereisanotheraxisalongwhichEqualInfoACmay
+stillbepreferred. SettingasideinferenceFLOPs,allourSentencePiecemodelsrequire23%longer
+sequencestoencodethesametextwhencomparedtoourbestEqualInfoACsetting(b=16,v=65k).
+ThismeansthatregardlessofFLOPsused,theSentencePiecemodelswilltakemoredecodersteps
+at inference time. It is up to the practitioner whether it is “worth it” to trade off some bits/byte
+performanceinordertoachieveshortersequences. Inmanyservingscenarios,decoderstepsarea
+practicalbottleneckfordeterminingsystemlatency,andtherearecaseswhereonemaybewillingto
+incurextrainferencecosttoreducelatency(e.g.,speculativedecoding[43]). Tothisend,itmaybe
+advantageoustoscaleupanEqualInfoAC[b=16, v=65k]modeltorecoverbits/byteperformance
+whileretainingthereducedlatency. ThiscanbeseenvisuallyinFig.4.
+GZip is not competitive Training over GZip-compressed text is relatively ineffective. M2’s
+performancewhentrainedoverGZiphighlightsacounter-intuitivetrend. WhiletheGZipM2models
+actually learn, it would still be preferable to train over AC-compressed text—even though those
+modelsdonotlearn. ThisisduetotheweakcompressionofferedbyGZip. Thepoorcompression
+rate,coupledwithweaklearning,meansthattheGZipM2models’bits/byteperformancelagsbehind
+eventhe3mparameterM1model.
+Short windows are the best We see a similar effect in Fig. 5, which ablates the EqualInfoAC
+window size. In terms of bits/byte, the shortest 16-bit windows perform the best. However, the
+next-bestsettingisthelongest128-bitwindows,despitethefactthattheseM2modelsfailtolearn
+almostanythingbeyondtheuniformdistribution.Thisunintuitivetrendstemsfromthefactthatlonger
+windowstranslatetobettercompressionrates(seeTable2). Ifweremovetheeffectofcompression
+ratebylookingatbits-per-token(Fig.5b),weseeaclearermonotonictrend—increasingwindow
+lengthmakesithardertolearn,aswemoveclosertosimplyrunningArithmeticCodingoverthe
+wholesequence. For64and128-bitwindows,performanceimprovementswithscalearesmall,but
+present;seeTable10forexactnumbers.
+LargerM2vocabularyishelpful Tokenizingcompressedtextusingalarger16-bitvocabulary
+(v=65k) results in a 2× higher token compression rate, seen in the leftward shift of each curve
+14
+etyb/stib nekot/stib3 EqualInfoAC[b=16,v=256]
+EqualInfoAC[b=32,v=256]
+GZip[v=256]
+EqualInfoAC[b=16,v=65k]
+EqualInfoAC[b=32,v=65k]
+GZip[v=65k]
+2
+1
+107 108 109
+Inference FLOPs/byte
+Figure6: UsingalargervocabularyforArithmeticCodingderivedmethodsimprovesbothperplexity
+(lowerbits/byte)aswellastokencompressionrate(lowerFLOPs/byte). Amongsettingswherethe
+M2modelactuallylearns,trainingoverGZip-compresseddataistheonlycasewhereincreasing
+vocabularysizeto65kdoesnothelpperformance.
+inFig.6.11 ForArithmeticCodingmethods,largervocabularyalsoimprovesbits/byte,seenasa
+downwardshiftinthecurves. However,forGZip,weseetheoppositetrend. ArithmeticCodingand
+GZipdifferthemostintheircodingcomponent,whichsuggeststhatthereasonforthisdifference
+couldliethere. NotethattheheaderandfooterpresentinGZip-compresseddatadonotexplainthis
+difference,seeAppendixE. ForEqualInfoAC[b=16],movingfromv=256tov=65kresultsineach
+windowcorrespondingtoasingletoken,whichincreasesthe“stability”ofthetoken→textmapping.
+Thiscouldbeonereasonfortheperformancegain;seeSection6.1formorediscussionof“stability”.
+Emergencewithscaleisunlikely Giventherecentfindingsof[55],weanticipatethatcontinuing
+toscalemodelsbeyond2billionparametersisunlikelytodeliveran“emergent”abilitytolearnover
+AC-compressedtext,sincethebits/bytemetricweuseissmooth.
+Results persist under “scaling laws” paradigm When scaling models, [30] recommend that
+trainingtokensshouldbescaledlinearlywithmodelsize. However,inourexperimentsabove,all
+modelsseethesamenumberoftokens,regardlessofmodelsize. Consequently,ourlargestmodels
+maybesomewhat“undertrained”.12 Totestwhetherfollowingthe“scalinglaws”recommendation
+influencesourresults,wereevaluateourmodelsatearliercheckpointsselectedtomaintainaconstant
+ratiooftrainingdatatomodelsize. Wefindthatallcoretrendsareunchangedinthissetting. See
+AppendixDfordetails.
+5 AdditionalExperiments
+Atthispoint,wehaveestablishedthatwhilethesimplestapproachestotrainingovercompressedtext
+fail,therearealternatecompressionschemesthatarelearnable. Inthissection,weconductadditional
+experimentstoshedlightonwhichaspectsofdifferentcompressionmethodsaredifficulttolearn
+andwhatcontributestotheirlearnability.
+11Thesametrendholdsforlarger64and128-bitwindows,buttheperformanceincreasewithscaleissoslight
+thatweomitthemfromthegraph.SeeTable10fortheexactvalues.
+12Theundertrainingofour2bmodelsisalsovisibleintheirvalidationlosscurves,whichstillhaveasignificant
+decreasingslopeat200,000steps,showingthemodelshavenotyetconverged.
+15
+etyb/stib5.1 Bitstreamtokenizationisnotthemainsourceofdifficulty
+Thecompressionalgorithmsweconsideroutputabitstream,whichwelaterchunkintotokensofa
+fixedbitdepth(e.g.,8-bittokens). Assuch,itiscommonforthebitsrepresentingasinglecharacter
+orUTF-8bytetobesplitacrossmultipletokens. Compoundingthisissueisthatthevalueofthese
+tokensarecontextuallydeterminedandmaydifferdependingonthesurroundingbytes.
+Thefactthatboth8-bitand16-bittokenchunkingstrategiesworksuggeststhatthisisnottoomuchof
+anissueforthemodel. Tofurtherinvestigatethis,wetraintwomodels—one25mandone403m—on
+therawbitstreamoutputbyArithmeticCompression, i.e., eachtokeniseithera1ora0andthe
+vocabularyhasasizeof2. WeusethesamehyperparametersasinSection3. Workingatthebitlevel
+meansthattheoutputsequenceisnowlongerthantheinputsequence,whichwasUTF-8bytes. As
+such,thissettingisnotpracticalintherealworld.
+When trained to convergence, the two models have cross entropy losses of 0.693 for the 25m
+parametermodeland0.6928forthe403mmodel—notmeaningfullybetterthanthenaïveuniform
+distribution,whichyieldsalossof0.693. ThisfailuremodeisthesameasinFig.3,whichsuggests
+thatACencodingitselfisthemainsourceofdifficulty,asopposedtoanyissuearoundtokenization
+orvocabularysize.
+5.2 TransformersstruggletolearnArithmeticCoding
+ArithmeticCodingisasequentialalgorithmthatinvolvestrackingmultiplestatevariablesastheinput
+(byte)sequenceisconsumed. Eachtokenintheoutputsequencerepresentsmultipletransformations
+ofthesevariables,e.g.,8transformationswhenusing8-bittokenchunking. Theoretically,only10
+transformerlayersareneededtohaveacomputationalpaththroughthemodellayersthatcanprocess
+asequenceof1,024tokensasachain,whereeachtokenconditionsonthepreviousone. Whilemost
+ofourtransformershavethecapacitytomodelthesesequences—onlyour25mmodelhasfewer
+layers—weseeinpracticethattheArithmeticCodingalgorithmisstilldifficulttolearn.
+Table5: Transformersstruggle tolearn ArithmeticCoding. Inthe sequence-to-sequencesetting,
+amodelthatlearnsACcompression/decompressionshouldhaveanaccuracyof100. Ourmodels
+perform much worse. When tasked with decompression in a sequence-to-sequence format, our
+transformer’simprovementoverpurelanguagemodelingofthetargetswasnotstatisticallysignificant
+(p=0.07). Thus,themodelisnotabletoleveragethecompressedinput. Similarly,ACcompression
+isonlylearnedto1.7%accuracy.
+Task Accuracy CrossEntropy
+Decompression 76.98 0.751±0.005
+ByteLevelLM 76.86 0.755±0.001
+Compression 1.7 2.489
+To directly diagnose the ability to track Arithmetic Coding, we format AC compression and de-
+compression as sequence-to-sequence tasks. The input provides the model with the true text, so
+weexpectamodelthatisabletolearnArithmeticCodingshouldachieveanaccuracyof100. We
+compresssequencesof1,024bytesusingM1andArithmeticCoding.13 Weconcatenatethebytes
+andACoutputtokenstocreatethecompressiontask. Forthedecompressiontask,wesimplyflipthe
+order—ACoutputtokensfirstandthenbytes. Thetargettokens(bytesortokens)areshiftedbythe
+inputvocabularysize,ensuringthattheyhavedistinctvalues. Weuseadecoder-onlytransformeras
+ourmodelwithacausalattentionmask,i.e.,evenduringtheinputsequence,futuretokensarehidden
+fromthemodel. Wetrainmodelswith113mparameters. Loss,gradients,andevaluationmetricsare
+onlycomputedonthetargettokens.
+Inthedecompressiontask, thetargettokensarebytes. Byignoringtheinputsandjustmodeling
+theoutputs,thedecompressionmodelcanachievedecentperformancewithoutactuallyleveraging
+theinputdata. Tocontrolforthis,wealsotrainabyte-levellanguagemodelbaselineonthesame
+sequence-to-sequence data, excluding the input tokens. If the decompression model is actually
+13Weuseshorterrawtextsequencestokeepthefinalsequencelengthofinputs+targetsmanageable.
+16learningtodecompressArithmeticCoding,wewouldexpectstrongerperformancethanthebyte-level
+baseline. AsweseeinTable5,thebaselinemodel,whichdoesnotseetheinputtokens,hasthesame
+performanceasthedecompressionmodel.14 Clearly,themodelstrainedfordecompressionarenot
+actuallylearningtododecompression.
+Themodeltrainedforcompressionactuallyshowssomesignsoflearning. Trainingalanguagemodel
+directlyonthecompressedoutputresultsinthemodellearningauniformdistributionovertokens,
+seeFig.3. Whenthemodelisabletoattendtotheinputtext,weseethattheperformanceinTable5
+isbetterthantheuniformdistribution(whichwouldhaveacrossentropylossof5.545). Whilethis
+methodshowssomehopeforthelearnabilityofArithmeticCoding,theneedtoincludetheinput
+sequencenegatesthemainadvantageofcompression,i.e.,applyingthemodeltoashortersequence.
+Additionally,thecompressor’sperformanceisfarfromthe100itshouldbeabletoachieve.
+Wealsofindtrainingonthesesequence-to-sequencedatasetstobelessstablethantrainingonthe
+languagemodelingdatasets. Inourexperiments, largeperformanceswingsanddivergencewere
+relativelycommon.
+5.3 Largervocabularyhelpsbeyondincreasingthecompressionratio
+OurbestresultstrainingovercompressedtextuseEqualInfoACwith16-bitwindowsandvocabulary
+sizeateither65k(best)or256(second-best). Oneclearadvantageofthev=65kmodelisthatithasa
+2×bettertokencompressionrate,soseestwiceasmuchrawtextduringtraining. Toassesswhether
+itsperformancegainisdueentirelytothisadvantage,wetraina25mparameterM2modeloverthe
+samedataset,butreduceitssequencelengthfrom512→256. Thismodeltrainsonhalfasmany
+tokens,butseesthesameamountofunderlyingtextasthev=256model.15
+Table6showsthateveninthissetting,themodelwithlargervocabularyisstronger.16 Infact,most
+ofthebits/bytegain(84%absolute)isduetothestructuralchangeintokenization,asopposedto
+the additional text seen. One possible explanation for its strong performance is that the v=65k
+modelusesexactlyonetokentorepresenteachequal-infowindow. We’llseeinthenextsection
+that in EqualInfoAC settings with multiple tokens per window, any non-initial tokens are highly
+context-dependent,andlearningproceedsonacurriculumfromthe“easy”window-initialtokensto
+the“harder”window-finaltokens.
+Table6:Mostofthegainofincreasingvocabularyfrom256to65kremainseveninthe“bytematched”
+setting,wherethemodelstrainoverthesamenumberofrawbytes. Performancegainsseenbetween
+settingsareallstatisticallysignificant.
+Tokenization Comparison Bits/Byte
+EqualInfoAC[b=16, v=256] 1.472±0.004
+EqualInfoAC[b=16, v=65k] bytematched 1.287±0.003
+EqualInfoAC[b=16, v=65k] tokenmatched 1.251±0.003
+6 Analysis
+Inthissectionweexaminehowneuralcompressionbasedtokenizersdifferfromstandardtokenizers,
+and conduct additional analysis on training dynamics and learnability of compressed data. This
+analysisleadsustoseveralrecommendationsforfutureworkdevelopingnewcompressionschemes
+thataimtobelearnablebytransformermodelswhiledeliveringstrongercompressionthansubword
+tokenizers.
+14Theslightgainisstatisticallyinsignificant,(p=0.07).
+15Tocompensateforthesmallernumberoftokensinasampleof20batchesfromvalidationsetwheneach
+exampleis256tokens,wecomputeourevaluationmetricsover40batches.
+16Itmaybepossibletoachievefurthergainsbyincreasingthetokenbitdepthfurther.However,mostdeep
+learningframeworksdonotsupportusingunsigneddatatypesforinputs,andtheresultinglargevocabularysize
+cancauseacomputationalbottleneckinthefinalsoftmaxlayer.
+176.1 EqualInfoACislessstableandlesssemanticthanSentencePiece
+Table 7: Comparing tokenization under SentencePiece vs. EqualInfoAC. SentencePiece gives a
+fairlystabletext→tokenmapping. Forinstance,eachoccurrenceof“elephants”mapstothesame
+two-tokensequence: [ elephant][s]. Bycontrast,EqualInfoAC[b=16, v=65k]islessstableand
+lesssemantic. Eachoccurrenceof“elephants”mapstodifferenttokens,andmosttokensfailto
+alignwithmeaningfullinguisticboundaries(e.g.,wordormorpheme).
+InputText The three currently living species are: African savanna
+elephants, African forest elephants, and the Asian
+elephants.
+SentencePiece [The] [ three] [ currently] [ living] [ species] [ are]
+Tokens [:] [ African] [ ] [s] [a] [v] [anna] [ elephant] [s]
+[,] [ African] [forest] [ elephant] [s] [,] [ and] [ the]
+[ Asian] [ elephant] [s] [.]
+EqualInfoAC [The th] [ree c] [urrently l] [iving ] [species] [ are]
+[b=16,v=65k] [: A] [frica] [n sav] [anna] [ ele] [pha] [nts, ] [Afr]
+Tokens [ican ] [forest ] [eleph] [ants, ] [and the ] [Asi] [an e]
+[lep] [hant] [s.]
+WhiletheperformanceofourEqualInfoAC[b=16, v=65k]modelapproachesthatofourSentence-
+Piecebaseline,qualitativeanalysisshowsthatthetwotokenizationschemesdifferinmanyregards.
+Table7illustratessomeofthesedifferences.
+First, we observe that SentencePiece produces a relatively stable text→token mapping.17 For
+example,“elephants”appearsthreetimesinthesentence,andmapsstablytothesametwo-token
+sequence in all cases: [ elephant][s]. Similarly, both occurrences of “African” map to the
+sametoken: [ African]. Bycomparison,theEqualInfoACtokenizationisrelativelyunstable,with
+eachoccurrenceofthesewordsbeingsegmentedinadifferentwayandyieldingadifferenttoken
+sequence.
+Second,wefindthattheSentencePiecetokenizationismore“semantic”,bywhichwemeanthat
+thesegmentationitinducesalignsbetterwithmeaningfullinguisticunits—wordsandmorphemes.
+Whiletherearesomeexceptions,e.g.“savanna”beingparsedas[s][a][v][anna],themore
+commoncaseiswholewordsbeingparsedassingletokens(e.g.,currently),orintomeaningful
+morphemes (e.g., elephant-s). By comparison, EqualInfoAC tokenization appears to almost
+entirelydisregardwordandmorphemeboundaries. Asoneexample,wesee“Asian elephants.”
+parsedas[Asi][an e][lep][hant][s.].
+Despite these differences, there is an important similarity between SentencePiece and
+EqualInfoAC[b=16, v=65k]:theyarebothstableinthetoken→textdirection. Thatis,agiventoken
+ID,e.g.,token#500,willalwaysmaptothesameoutputtext. This“transparentdecoding”property
+likelymakesiteasierforadownstreammodeltolearnoverthesetokens.18
+When we move to versions of EqualInfoAC that contain multiple tokens per window, such as
+EqualInfoAC[b=16, v=256],thistransparencyisdestroyedforallnon-initialtokenswithinawindow.
+ThisisillustratedinTable8. Whenthesametokenappearswindow-initiallyindifferentcontexts,
+we see the window text has a stable prefix—e.g., token #151 always maps to the prefix “le-”.
+However,whenoccurringasthesecond tokenwithinatwo-tokenwindow,therearenoapparent
+correspondencesbetweenwindowtext.19 AsEqualInfoACwindowlengthincreases,theproportion
+oftokensthatarestabledecreases. Thismayexplaintheobserveddifficultyoflearningoverlonger
+windows. ThewindowtextforallinstancesofthesetokenscanbeseeninAppendixM.
+17SeeAppendixLforsomecornercaseswherethisisnotthecase.
+18Paddingtoreachaspecificwindowsizecanrequireextracomputationtodiscernbetweenpaddingand
+charactersthatcompresstoallzeros,howeverwefindinAppendixIthatitisnotanissueforM2models.
+19Arepeatedtextsubstringthathappenstobealignedwithawindowmultipletimesisoneofthefewcases
+wherethesecondtokenwillrepresentthesametext.
+18Table8: Window-initialtokenshavestabletoken→textmappings,whilenon-initialtokenshavecon-
+textualmeaningandarethusunstable. Wetokenize20documentswithEqualInfoAC[b=16, v=256]
+andshowthefullwindowtextinarandomsampleofcaseswhereaspecifictokenappearsatthefirst
+orsecondpositionwithinthewindow.
+Window
+Token Position WindowText
+151 1 [lew ]/[lea]/[led]/[len]/[less]/[led]/[les]/[lew ]
+2 [thoug]/[ust]/[ this]/[etti]/[npo]/[thoug]/[ un]/[imag]
+185 1 [ord a]/[or k]/[ord]/[or f]/[or al]/[or a ]/[ore i]/[ora]
+2 [ery]/[s may]/[cian]/[onte]/[h de]/[cri]/[opp]/[ides]
+[240, 243] [145, 248] [216, 68]
+... 1111000011110011 1001000111111000 1101100001000100 ...
+The_th|ree_c|urrently_l|iving_|species|_are|:_A
+|frica|n_sav|anna|_ele|pha|nts,_|Afr|ican_|forest_
+|eleph|ants,_|and_the_|Asi|an_e|lep|hant|s.|
+Figure7: Anillustrationofthemappingbetweencharacters(bottom),bits(middle)andtokens(top)
+intheEqualInfoAC[b=16, v=256]setting. Eachequal-infowindowcorrespondsto16bitsofAC
+output, which are chunked into two 8-bit M2 tokens from a vocabulary of 256. Colors indicate
+whethereachcharactercontributestothefirsttoken,secondtoken,orbothtokenswithinawindow.
+Wenotethatwindow-initialcharactersarenotwellcompressed,sotheinitial8-bittokentendsto
+onlycoveroneortwocharacters.
+Note that Table 8 examines window→text, as opposed to token→text correspondences. This
+is because for multi-token windows, the mapping from tokens to text is not well defined. More
+specifically,eachcharactermapstoaparticularsubsequenceofthecompressedbitstream,butthese
+maynotalignwithtokenboundaries.20 Fig.7illustratesthemappingbetweencharacters,bits,and
+tokens. Wefindthatmanywindowscontainacharacter(showninpurple)whosebitsaresplitacross
+two8-bittokens.
+Fig.7alsohighlightsthatwindow-initialcharactersarenotbeingwellcompressed,withthewindow-
+initialtokenoftenonlycoveringoneortwocharacters. ThisisduetoourEqualInfoACprocedure
+fullyresettingM1’scontextateverywindowboundary. Withnocontext,M1cannotmakeconfident
+predictions,leadingtomorebitsbeingneededtorepresenttheinitialcharacter. Onthepositiveside,
+thissetupguaranteesthatawindowcanbedecodedinisolation,whichshouldaidlearning. However
+itisworthexploringinfutureworkwhethermaintainingsomeM1contextacrosswindowscould
+improvethecompressionratiowithouthurtinglearnability.
+6.2 ACdecodingislearnedstep-by-step
+AsArithmeticCodingisasequential(left-to-right)andcontextualalgorithm,thetextrepresentedby
+agiventokenwilldifferbasedontheprevioustoken. Assuch,amodelshouldperformbetterona
+tokenifithasastrongunderstandingofthetokenbeforeit. WhenusingEqualInfoACcompression,
+eachwindowrepresentsanindependentArithmeticCodingdocument. Aswemovedeeperintothe
+window,moreandmoreACdecompressionmustbedonetounderstandthetoken.
+To understand how a token’s position within a window affects learning, we track across train-
+ing the average accuracy at each position within the 8-token windows of a 403m parameter
+20Thiscanbeasourceofinstability,eveninwindow-initialtokens,seeAppendixL.
+198 8 Token
+1
+6 6 2
+3
+4 4 4
+5
+2
+2 6
+7
+0
+0 8
+0 20000 40000 60000 0 20000 40000 60000
+Step Step
+(a)Accuracypertokenposition (b)Increaseover“trivial”accuracypertokenposition
+Figure8: Earliertokenswithinthe8-tokenwindowofanEqualInfoAC[b=64, v=256]modelare
+learnedearlierintraining. Astrainingprogresses,themodel“unlocks”theabilitytomodeltokens
+deeperanddeeperintothewindow. Theplotontherightshowstheincreaseover“trivial”accuracy—
+which we define as the maximum accuracy achieved in the first 2,000 steps of training. (Note,
+window-finalpaddingmakestrivialaccuracyhigherforlaterpositions.) Fortokens#1–3,latertokens
+reachhigheraccuracy(3>2>1),likelyduetothebenefitoflocalcontext. Fortokens#4–8,accuracy
+deteriorates,indicatingthatthemodelhastroubletrackingtheACalgorithmformorethan~32bits.
+EqualInfoAC[b=64, v=256] model.21 Fig. 8 shows both raw accuracy (left) as well as the in-
+creaseover“trivial”accuracy(right),whichwedefineasthemaximumaccuracyachievedinthefirst
+2,000stepsoftraining. Lookingataccuracyincreasehighlightsthe“sequentiallearning”trendbydis-
+countinganypartofaccuracythatistextindependent. Inparticular,wenotethatwindow-finaltokens
+haveanon-uniformdistributionduetotheuseofwindow-finalpaddingbits(seeourEqualInfoAC
+formulationinSection3.3),whichcanbelearnedwithoutanyunderstandingofthetext.
+We observe two interesting trends. First, there is a clear ordering as to when the model starts to
+makemeaningful(non-trivial)progressonagivenposition. Theinitialtoken(#1)islearnedfirst,
+followedfairlyquicklyby#2andthen#3. Latertokensareonly“unlocked”after10,000training
+steps,suggestingthattheabilitytomodelthesetokensbuildsonafoundationofunderstandingthe
+precedingtokenswithinthewindow.
+Thesecondtrendconcernstheaccuracyreachedateachposition. Here,weobserveanincreasein
+accuracyfrom#1<#2<#3,followedbyadecreasefrom#3<#4<#5andsoon.22 Weinterpretthe
+increaseacrossthefirstthreepositionsasduetothebenefitofextraleftwardcontext. Thisisakinto
+theinitialbyteinawordbeinghardertopredictthanthefollowingbytes.Thedecreasingperformance
+attokens#4andbeyondsuggeststhemodelisunabletotrackACdecompressionindefinitely. While
+themodelclearlylearnstodecompresslongersequencesastrainingprogresses,reliablydecoding
+past32bitsofACoutputappearstobeachallenge.
+6.3 Learnabledistributionsarelessuniform
+Awell-knownresultinthecompressionliteratureisthattherecanbenorecursivecompression[45].
+Thecompressionalgorithmremovesinformationcapturedbyitsmodel,resultinginauniformoutput
+thatappearsrandomtotheoriginalmodel. However,oursettingisnotrecursivecompression. Instead,
+aseparateandlargermodelistrainedonthecompressedoutput,whichshouldbeabletocapturenew
+patternsinthebitstream.
+Despitethis,theoutputofcompressionusingM1appearsveryuniform,asevidencedbytheminimal
+gainsfrommodelingtheunigramtokendistributioninTable3. Therefore,itseemsreasonablethat
+thisuniformitycouldmakeithardforM2tolearn(asallpatternsmustbecontextual). Weinvestigate
+21TheabsoluteaccuracyoftheEqualInfoAC[b=64, v=256]modelisrelativelypoor,butitsrelativelylong
+windowprovidestheclearestillustrationofthepositionaltrends.Weobservesimilartrendsforshorterwindows
+wherethemodelhasstrongerperformance.
+22Thefinaltoken#8alsofitsthistrendwhenlookingattheincreaseovernon-trivialaccuracy. Theraw
+accuracyinthispositionishigherthanprevioustokens#4–7,duetotheskeweddistributionintroducedby
+window-finalpadding.
+20
+ycaruccA
+esaercnI
+ycaruccA10 1
+10 1
+10 3
+10 3
+10 5
+10 5
+10 7 RNG 10 7
+ArithmeticCoding[v=256]
+10 9 StaticAC[v=256] 10 9
+GZip[v=256]
+10 11 EqualInfoAC[b=16] 10 11
+EqualInfoAC[b=64]
+2 4 6 8 10 12 14 16 2 4 6 8 10 12 14 16
+Bit N-grams N-Bit Tokens
+(a)bitn-gramscountingalloverlappingoccurrences (b)n-bittokensfollowingourM2tokenization
+Figure9: Asthebitstreamisgroupedintolargerunits,theempiricaldistributionmovesawayfrom
+uniform. WeplotKLdivergenceofobservedn-gramdistributionsfromtheuniformdistribution,
+acrossvariousn-gramsizes.WhileACcompresseddatawouldbedifficulttodistinguishfromrandom
+data,wefindtherearestillpatternstocapturewhenusingothercompressionschemes,particularly
+forGZipandshorterEqualInfoACwindows. Comparedtotheleftplot,wefindthatthetokenized
+bitstream(seeSection3.4)hasevenmoreinformationforM2tocapture.
+thisbyplottingtheKLdivergence[39]betweentheobservedempiricaldistributionandauniform
+distributionfordifferentsegmentationsofthebitstream. Iftheunderlyingdistributionofbitswas
+trulyrandomandindependent,thenthedistributionofunigramsforsomebitstreamsegmentation
+shouldremainuniformasp(b ,...,b
+)=(cid:81)i+n(p(b
+))andthereforetheKLdivergenceshould
+i i+n j=i j
+remainclosetozero. Ontheotherhand,ifthedistributiondivergesfromuniform,thereiscontextual
+informationtobelearnedwhentraininganLLMtomodelp(b |b ,...,b ).
+n i i+n−1
+Wesegmentthebitstreameitherintobitn-grams,wheresuccessiven-gramsareallowedtooverlap,
+or into n-bit tokens, following our M2 tokenization procedure—see Section 3.4. We only plot
+tokenizationinton-bitsthatarefactorsof16,otherwisetokenswouldcrosswindowboundariesin
+theEqualInfoAC[b=16]setting.
+Asabaseline,weusedthecryptographicsecretspackageinPythontogeneratebitstreamsthat
+should be truly random and independent. As such, the KL divergence should remain at 0 when
+segmentedinthesamewayasthecompresseddata. ThereasonthisdoesnotholdinFig.9isthatthe
+maximumlikelihoodestimateofentropy,Hˆ =−(cid:80) pˆ(x)log pˆ(x),isnegativelybiased[48]. In
+x∈Xˆ 2
+Fig.13weseethatwhenusingaMiller-Madowestimator[46]tocorrectforthisbias,theexpected
+KLof0iswellwithinsamplingnoisebounds. Toaccountfornoiseintheentropyestimation,we
+plot90thpercentileintervalsoftheKLdivergencebetweentheobservedentropyfrom100disjoint
+samplesofthedataandtheuniformdistribution.23
+The AC and RNG lines in Fig. 9 are very similar and their sampling noise intervals have large
+overlaps. ThissuggeststhatthedatageneratedbyACcompressionwithM1isdifficulttodistinguish
+fromrandomdata.24 ThisisapossibleexplanationforwhyM2modelstrainedonACdataonlylearn
+tooutputauniformdistribution,asseeninFig.3.
+InFig.9,weseethatGZipistheleastuniform,whichisexpectedasithastheworstcompression
+rate among these settings. However, the segmentation into tokens does not result in much extra
+information. Thisisagainsuggestivethatthedifferencesbetweenthe“coding”componentsofGZip
+23Asthenumberofbitsinasegmentationgrow,thevocabularysizeincreasesexponentially,requiringmany
+moresamples.Thusweexpectnoiseintheentropyestimatetogrowwithn.Thisholds,butitisobfuscatedby
+thelogscalinginFig.9.Infact,themagnitudeofthenoiseforsettingssuchasGZipandEqualInfoACislarger
+thanforACorRNG.ThisnoisebehaviorisseeninFig.12.SeeAppendixJformoreinformationonentropy
+estimationandbiascorrection.
+24Forn>2,theACentropyisstatisticallysignificantlylessthantheRNGentropy,however,differencesin
+themeanentropyonlystarttoappearafter~8decimalplaces.
+21
+)mrofinu
+||
+devresbo(LK
+)mrofinu
+||
+devresbo(LKandArithmeticCodingareimportantforlearnability. ItisalsoapossibleexplanationofwhyGZipis
+theonesettingwhereusing16-bittokensdoesnotimproveperformance.
+Similarly, Fig.9showsthatEqualInfoAC[b=16]hasthemostinformationamongtheArithmetic
+Codingapproaches.Giventhatthisisthemostlearnablesetting,itsuggeststhatnon-uniformityofthe
+bitstreammaybeimportantforlearning. Wealsoseealargeincreasewhenmovingto16-bittokens,
+providingafurtherpossibleexplanationforwhylargervocabularyishelpful(seeSection5.3).Finally,
+wenotethatStaticAChaslessinformationthanEqualInfoAC[b=16],suggestingthatweakeningthe
+“coding”componentofArithmeticCodingisamoreeffectivewaytoretaininformationandincrease
+learnabilityforM2.
+7 Conclusion
+WehaveshownthereispromiseintheideaoftrainingLLMsoverneural-compressedtext. Inthe
+bestcase,thiswillallowtrainingovertextthatisbettercompressedthanstandardsubwordtoken
+sequences,whilemaintaininglearnability. Thisanappealingprospect,asmodelsthatreadandwrite
+moretextpertokenaremoreefficienttotrainandserve,andcanmodellongerdependencies.
+Whilethe“verysimplest”approachdoesnotwork(trainingdirectlyoveratokenizedAC-encoded
+bitstream),weshowedthatarelativelysimplemodification—compressionviaEqualInfoWindows—
+alreadybringsuswithinstrikingdistanceofpopulartokenizers.Whenmeasuredintermsofperplexity
+achievableatfixedinferencecost(FLOPs/byte),wefindthatourmethodoutperformsrawbyte-level
+models, andcomesincreasinglyclosetotheperformanceofSentencePiecetokenizationasscale
+increasesto2billionparameters.
+Whilebespokecompressionmethodshavedevelopedarounddifferentmodalities(e.g.,text,audio,
+images,video)anddifferentapplications(e.g.,delta-of-deltaforregularrepeatingtimestamps[50]),
+to our knowledge, no efficient compression methods have been designed specifically for use as
+LLMtokenizers. Weareoptimisticthatfutureworkwillcreatesuchmethods. Comparedtotoday’s
+subwordtokenizers,weexpectthesemethods(i)willdeliverhighercompressionrates,(ii)willcome
+closertoequalinformationpertoken,thusallocatingcomputemoreeffectively,and(iii)willgive
+modelsamoredirectviewoftheunderlyingrawtext,thushelpingonspellingandpronunciationtasks.
+Asatradeoff,weexpecttheseneuraltokenizerswillbesomewhatlessstableintheirtext↔token
+mapping, but perhaps not so unstable as our approach here. In particular, we think it is worth
+exploringmethodsunderwhichagivenwordtypicallymapstoarelativelysmallnumber(tensnot
+thousands)ofrelatabletokensequences.
+Onedirectionweleftunexploredistheideaofpassinginformationbetweenthecompressingmodel
+(M1)andtheLLMtrainedovercompressedtext(M2). SomeadditionalsignalofM1’sinternalstate
+oroutputmaybehelpfulforM2toaccuratelysimulateM1, whichisaprerequisitetoflawlessly
+encodinganddecodingM1-compressedtext.
+For hill-climbing in this space, we found it useful to iterate on the sequence-to-sequence sub-
+tasksofcompressionanddecompression,whichshould,intheory,belearnablewithhighaccuracy.
+Specifically,iffutureworkcandeviseastrong(~10×)compressorthatatransformercanbetrained
+toaccuratelyencodeanddecode,weexpectthatthiswillbeanidealcandidatefortokenizingtextfor
+LLMs.
+Acknowledgements
+WewouldliketothankBenAdlam,GrégoireDelétang,RosanneLiu,andColinRaffelfordetailed
+commentsonanearlierdraft. We’realsogratefultoPeterLiu,bothforhelpfuldiscussion,aswellas
+forbuildingsomeoftheinfrastructurethatmadeourexperimentseasiertorun. Finally,wethank
+DougEck,NoahFiedel,andthePAGIteamforongoingguidanceandfeedback.
+Bibliography
+[1] J. Ainslie, S. Ontanon, C. Alberti, V. Cvicek, Z. Fisher, P. Pham, A. Ravula, S. Sanghai,
+Q. Wang, and L. Yang. ETC: Encoding Long and Structured Inputs in Transformers. In
+B. Webber, T. Cohn, Y. He, and Y. Liu, editors, Proceedings of the 2020 Conference on
+22EmpiricalMethodsinNaturalLanguageProcessing(EMNLP),pages268–284,Online,Nov.
+2020.AssociationforComputationalLinguistics.
+[2] R.Al-Rfou,D.Choe,N.Constant,M.Guo,andL.Jones. Character-LevelLanguageModeling
+withDeeperSelf-Attention. ProceedingsoftheAAAIConferenceonArtificialIntelligence,
+33(01):3159–3166,Jul.2019.
+[3] A. Baevski, H. Zhou, A. Mohamed, and M. Auli. wav2vec 2.0: A Framework for Self-
+Supervised Learning of Speech Representations. In Proceedings of the 34th International
+Conference on Neural Information Processing Systems, NeurIPS’20, Red Hook, NY, USA,
+2020.CurranAssociatesInc.
+[4] J.Ballé,S.J.Hwang,andE.Agustsson. TensorFlowCompression: LearnedDataCompression,
+2024.
+[5] I.Beltagy,M.E.Peters,andA.Cohan. Longformer: TheLong-DocumentTransformer,Dec.
+2020.
+[6] Z.Borsos,R.Marinier,D.Vincent,E.Kharitonov,O.Pietquin,M.Sharifi,D.Roblek,O.Teboul,
+D.Grangier,M.Tagliasacchi,andN.Zeghidour. AudioLM:ALanguageModelingApproach
+toAudioGeneration. IEEE/ACMTransactionsonAudio,Speech,andLanguageProcessing,
+31:2523–2533,2023.
+[7] J.Bradbury,R.Frostig,P.Hawkins,M.J.Johnson,C.Leary,D.Maclaurin,G.Necula,A.Paszke,
+J. VanderPlas, S. Wanderman-Milne, and Q. Zhang. JAX: composable transformations of
+Python+NumPyprograms,2018.
+[8] P.F.Brown,V.J.D.Pietra,S.A.D.Pietra,andR.L.Mercer. TheMathematicsofStatistical
+MachineTranslation: ParameterEstimation. Comput.Linguist.,19(2):263–311,jun1993.
+[9] R. Child, S. Gray, A. Radford, and I. Sutskever. Generating Long Sequences with Sparse
+Transformers,Apr.2019.
+[10] D.Choe,R.Al-Rfou,M.Guo,H.Lee,andN.Constant. BridgingtheGapforTokenizer-Free
+LanguageModels. CoRR,abs/1908.10322,2019.
+[11] J. Chung, S. Ahn, and Y. Bengio. Hierarchical Multiscale Recurrent Neural Networks. In
+InternationalConferenceonLearningRepresentations,2017.
+[12] Y.-A.Chung,Y.Zhang,W.Han,C.-C.Chiu,J.Qin,R.Pang,andY.Wu.w2v-BERT:Combining
+ContrastiveLearningandMaskedLanguageModelingforSelf-SupervisedSpeechPre-Training.
+In 2021 IEEE Automatic Speech Recognition and Understanding Workshop (ASRU), pages
+244–250,2021.
+[13] J.H.Clark,D.Garrette,I.Turc,andJ.Wieting. Canine: Pre-traininganEfficientTokenization-
+FreeEncoderforLanguageRepresentation. TransactionsoftheAssociationforComputational
+Linguistics,10:73–91,2022.
+[14] Z.Dai,Z.Yang,Y.Yang,J.Carbonell,Q.Le,andR.Salakhutdinov. Transformer-XL:Attentive
+LanguageModelsbeyondaFixed-LengthContext. InProceedingsofthe57thAnnualMeeting
+oftheAssociationforComputationalLinguistics,pages2978–2988,Florence,Italy,July2019.
+AssociationforComputationalLinguistics.
+[15] S.DeDeo,R.X.D.Hawkins,S.Klingenstein,andT.Hitchcock. BootstrapMethodsforthe
+EmpiricalStudyofDecision-MakingandInformationFlowsinSocialSystems. Entropy.An
+InternationalandInterdisciplinaryJournalofEntropyandInformationStudies,15(6):2246–
+2276,2013.
+[16] G. Delétang, A. Ruoss, P.-A. Duquenne, E. Catt, T. Genewein, C. Mattern, J. Grau-Moya,
+L.K.Wenliang,M.Aitchison,L.Orseau,M.Hutter,andJ.Veness. LanguageModelingIs
+Compression. InICLR,2024.
+[17] P.Deutsch. GZIPfileformatspecification. RFC1952,May1996.
+23[18] P.DeutschandJ.-L.Gailly. ZLIBCompressedDataFormatSpecification. RFC1950,May
+1996.
+[19] J.Duda. AsymmetricNumeralSystems:EntropyCodingCombiningSpeedofHuffmanCoding
+withCompressionRateofArithmeticCoding,Jan.2014.
+[20] B.Efron.BootstrapMethods:AnotherLookattheJackknife.TheAnnalsofStatistics,7(1):1–26,
+1979.
+[21] J.H.Friedman. GreedyFunctionApproximation: AGradientBoostingMachine. TheAnnals
+ofStatistics,29(5):1189–1232,2001.
+[22] K. Fukushima. Cognitron: A Self-Organizing Multilayered Neural Network. Biological
+Cybernetics,20:121–136,1975.
+[23] P.Gage. ANewAlgorithmforDataCompression. CUsersJournal,12(2):23–38,1994.
+[24] L.Gao, S.Biderman, S.Black, L.Golding, T.Hoppe, C.Foster, J.Phang, H.He, A.Thite,
+N. Nabeshima, S. Presser, and C. Leahy. The Pile: An 800GB Dataset of Diverse Text for
+LanguageModeling,Dec.2020.
+[25] N.Godey,R.Castagné,É.delaClergerie,andB.Sagot. MANTa: EfficientGradient-Based
+TokenizationforEnd-to-EndRobustLanguageModeling. InFindingsoftheAssociationfor
+ComputationalLinguistics:EMNLP2022,pages2859–2870,AbuDhabi,UnitedArabEmirates,
+Dec.2022.AssociationforComputationalLinguistics.
+[26] O. Goldman, A. Caciularu, M. Eyal, K. Cao, I. Szpektor, and R. Tsarfaty. Unpacking Tok-
+enization: Evaluating Text Compression and its Correlation with Model Performance, Mar.
+2024.
+[27] A.Graves. AdaptiveComputationTimeforRecurrentNeuralNetworks,Feb.2017.
+[28] J.Heek,A.Levskaya,A.Oliver,M.Ritter,B.Rondepierre,A.Steiner,andM.vanZee. Flax: A
+neuralnetworklibraryandecosystemforJAX,2020.
+[29] G.Hinton,O.Vinyals,andJ.Dean. DistillingtheKnowledgeinaNeuralNetwork,Mar.2015.
+[30] J.Hoffmann,S.Borgeaud,A.Mensch,E.Buchatskaya,T.Cai,E.Rutherford,D.delasCasas,
+L.A.Hendricks,J.Welbl,A.Clark,T.Hennigan,E.Noland,K.Millican,G.vandenDriessche,
+B.Damoc,A.Guy,S.Osindero,K.Simonyan,E.Elsen,O.Vinyals,J.W.Rae,andL.Sifre.
+Training Compute-Optimal Large Language Models. In Advances in Neural Information
+ProcessingSystems,2022.
+[31] P.G.HowardandJ.S.Vitter.AnalysisofArithmeticCodingforDataCompression.Information
+Processing&Management,28(6):749–763,1992.
+[32] D.A.Huffman. AMethodfortheConstructionofMinimum-RedundancyCodes. Proceedings
+oftheIRE,40(9):1098–1101,1952.
+[33] J.D.Hunter. Matplotlib: A2DGraphicsEnvironment. ComputinginScience&Engineering,
+9(3):90–95,2007.
+[34] Z.Jiang,M.Y.R.Yang,M.Tsirlin,R.Tang,andJ.Lin. LessisMore: Parameter-FreeText
+ClassificationwithGzip,Dec.2022.
+[35] J.Kaplan,S.McCandlish,T.Henighan,T.B.Brown,B.Chess,R.Child,S.Gray,A.Radford,
+J.Wu,andD.Amodei. ScalingLawsforNeuralLanguageModels,Jan.2020.
+[36] N.Kitaev,L.Kaiser,andA.Levskaya. Reformer: TheEfficientTransformer. InInternational
+ConferenceonLearningRepresentations,2020.
+[37] T. Kudo. Subword Regularization: Improving Neural Network Translation Models with
+MultipleSubwordCandidates. InProceedingsofthe56thAnnualMeetingoftheAssociation
+forComputationalLinguistics(Volume1: LongPapers),pages66–75,Melbourne,Australia,
+July2018.AssociationforComputationalLinguistics.
+24[38] T.KudoandJ.Richardson. SentencePiece: ASimpleandLanguageIndependentSubword
+TokenizerandDetokenizerforNeuralTextProcessing. InProceedingsofthe2018Conference
+onEmpiricalMethodsinNaturalLanguageProcessing: SystemDemonstrations,pages66–71,
+Brussels,Belgium,Nov.2018.AssociationforComputationalLinguistics.
+[39] S.KullbackandR.A.Leibler. OnInformationandSufficiency. TheAnnalsofMathematical
+Statistics,22(1):79–86,1951.
+[40] M.O.Külekci. CompressedContextModelingforTextCompression. In2011DataCompres-
+sionConference,pages373–382,2011.
+[41] B. Lester, J. Yurtsever, S. Shakeri, and N. Constant. Reducing Retraining by Recycling
+Parameter-EfficientPrompts. arXivpreprintarXiv:2208.05577,aug2022.
+[42] Y. Leviathan, M. Kalman, and Y. Matias. Fast inference from transformers via speculative
+decoding,2023.
+[43] Y.Leviathan,M.Kalman,andY.Matias. FastInferencefromTransformersviaSpeculative
+Decoding. InProceedingsofthe40thInternationalConferenceonMachineLearning,volume
+202ofProceedingsofMachineLearningResearch,pages19274–19286.PMLR,23–29Jul
+2023.
+[44] R.Liu,D.Garrette,C.Saharia,W.Chan,A.Roberts,S.Narang,I.Blok,R.Mical,M.Norouzi,
+andN.Constant. Character-AwareModelsImproveVisualTextRendering. InProceedings
+ofthe61stAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1: Long
+Papers), pages 16270–16297, Toronto, Canada, July 2023. Association for Computational
+Linguistics.
+[45] M.Mahoney. DataCompressionExplained. 2013.
+[46] G.Miller. NoteontheBiasofInformationEstimates. InInformationTheoryinPsychology:
+ProblemsandMethods,pages95–100.FreePress,1955.
+[47] V.NairandG.E.Hinton. RectifiedLinearUnitsImproveRestrictedBoltzmannMachines. In
+Proceedingsof the 27thInternational Conference onInternational Conferenceon Machine
+Learning,ICML’10,pages807–814,Madison,WI,USA,2010.Omnipress.
+[48] L.Paninski. EstimationofEntropyandMutualInformation. NeuralComputation,15(6):1191–
+1253,June2003.
+[49] R.Pasco. SourceCodingAlgorithmsforFastDataCompression(Ph.D.ThesisAbstr.). IEEE
+TransactionsonInformationTheory,23(4):548–548,1977.
+[50] T.Pelkonen,S.Franklin,J.Teller,P.Cavallaro,Q.Huang,J.Meza,andK.Veeraraghavan. Go-
+rilla:aFast,Scalable,In-MemoryTimeSeriesDatabase.Proc.VLDBEndow.,8(12):1816–1827,
+aug2015.
+[51] O.Press,N.Smith,andM.Lewis. TrainShort,TestLong:AttentionwithLinearBiasesEnables
+InputLengthExtrapolation. InInternationalConferenceonLearningRepresentations,2022.
+[52] C.Raffel,N.Shazeer,A.Roberts,K.Lee,S.Narang,M.Matena,Y.Zhou,W.Li,andP.J.Liu.
+ExploringtheLimitsofTransferLearningwithaUnifiedText-to-TextTransformer. Journalof
+MachineLearningResearch(JMLR2020),21(140):1–67,2020.
+[53] J.J.Rissanen. GeneralizedKraftInequalityandArithmeticCoding. IBMJournalofResearch
+andDevelopment,20(3):198–203,1976.
+[54] A.Roberts,H.W.Chung,G.Mishra,A.Levskaya,J.Bradbury,D.Andor,S.Narang,B.Lester,
+C.Gaffney,A.Mohiuddin,C.Hawthorne,A.Lewkowycz,A.Salcianu,M.vanZee,J.Austin,
+S.Goodman,L.B.Soares,H.Hu,S.Tsvyashchenko,A.Chowdhery,J.Bastings,J.Bulian,
+X.Garcia,J.Ni,A.Chen,K.Kenealy,K.Han,M.Casbon,J.H.Clark,S.Lee,D.Garrette,
+J. Lee-Thorp, C. Raffel, N. Shazeer, M. Ritter, M. Bosma, A. Passos, J. Maitin-Shepard,
+N.Fiedel,M.Omernick,B.Saeta,R.Sepassi,A.Spiridonov,J.Newlan,andA.Gesmundo.
+ScalingUpModelsandDatawitht5xandseqio. JournalofMachineLearningResearch,
+24(377):1–8,2023.
+25[55] R.Schaeffer,B.Miranda,andS.Koyejo. AreEmergentAbilitiesofLargeLanguageModelsa
+Mirage? InThirty-SeventhConferenceonNeuralInformationProcessingSystems,2023.
+[56] R. Sennrich, B. Haddow, and A. Birch. Neural Machine Translation of Rare Words with
+SubwordUnits. InProceedingsofthe54thAnnualMeetingoftheAssociationforComputa-
+tionalLinguistics(Volume1: LongPapers),pages1715–1725,Berlin,Germany,Aug.2016.
+AssociationforComputationalLinguistics.
+[57] C.E.Shannon. AMathematicalTheoryofCommunication. TheBellSystemTechnicalJournal,
+27:379–423,1948.
+[58] P.Shaw,J.Uszkoreit,andA.Vaswani. Self-AttentionwithRelativePositionRepresentations.
+InProceedingsofthe2018ConferenceoftheNorthAmericanChapteroftheAssociationfor
+ComputationalLinguistics: HumanLanguageTechnologies,Volume2(ShortPapers),pages
+464–468,NewOrleans,Louisiana,June2018.AssociationforComputationalLinguistics.
+[59] N.ShazeerandM.Stern. Adafactor: AdaptiveLearningRateswithSublinearMemoryCost.
+In Proceedings of the 35th International Conference on Machine Learning, volume 80 of
+ProceedingsofMachineLearningResearch,pages4596–4604.PMLR,July2018.
+[60] S.Stanton,P.Izmailov,P.Kirichenko,A.Alemi,andA.G.Wilson.DoesKnowledgeDistillation
+ReallyWork? 2021.
+[61] Y. Tay, V. Q. Tran, S. Ruder, J. Gupta, H. W. Chung, D. Bahri, Z. Qin, S. Baumgartner,
+C.Yu,andD.Metzler. Charformer: FastCharacterTransformersviaGradient-basedSubword
+Tokenization. InInternationalConferenceonLearningRepresentations,2022.
+[62] D.TitoSvenstrup,J.Hansen,andO.Winther. HashEmbeddingsforEfficientWordRepresenta-
+tions. InAdvancesinNeuralInformationProcessingSystems,volume30.CurranAssociates,
+Inc.,2017.
+[63] C.S.K.Valmeekam,K.Narayanan,D.Kalathil,J.-F.Chamberland,andS.Shakkottai.LLMZip:
+LosslessTextCompressionusingLargeLanguageModels,June2023.
+[64] A.vandenOord,O.Vinyals,andK.Kavukcuoglu. NeuralDiscreteRepresentationLearning.
+InProceedingsofthe31stInternationalConferenceonNeuralInformationProcessingSystems,
+NeurIPS’17,page6309–6318,RedHook,NY,USA,2017.CurranAssociatesInc.
+[65] G.VanRossumandF.L.Drake. Python3ReferenceManual. CreateSpace,ScottsValley,CA,
+2009.
+[66] D. Varis and O. Bojar. Sequence Length is a Domain: Length-based Overfitting in Trans-
+former Models. In Proceedings of the 2021 Conference on Empirical Methods in Natural
+LanguageProcessing,pages8246–8257,OnlineandPuntaCana,DominicanRepublic,Nov.
+2021.AssociationforComputationalLinguistics.
+[67] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and
+I. Polosukhin. Attention Is All You Need. In Advances in Neural Information Processing
+Systems30,pages5998–6008.CurranAssociates,Inc.,2017.
+[68] L. Vilnis, Y. Zemlyanskiy, P. Murray, A. T. Passos, and S. Sanghai. Arithmetic Sampling:
+ParallelDiverseDecodingforLargeLanguageModels. InProceedingsofthe40thInternational
+ConferenceonMachineLearning,volume202ofProceedingsofMachineLearningResearch,
+pages35120–35136.PMLR,23–29Jul2023.
+[69] P.Virtanen,R.Gommers,T.E.Oliphant,M.Haberland,T.Reddy,D.Cournapeau,E.Burovski,
+P.Peterson,W.Weckesser,J.Bright,S.J.vanderWalt,M.Brett,J.Wilson,K.J.Millman,
+N. Mayorov, A. R. J. Nelson, E. Jones, R. Kern, E. Larson, C. J. Carey, ˙I. Polat, Y. Feng,
+E.W.Moore,J.VanderPlas,D.Laxalde,J.Perktold,R.Cimrman,I.Henriksen,E.A.Quintero,
+C.R.Harris,A.M.Archibald,A.H.Ribeiro,F.Pedregosa,P.vanMulbregt,andSciPy1.0
+Contributors. SciPy1.0: FundamentalAlgorithmsforScientificComputinginPython. Nature
+Methods,17:261–272,2020.
+26[70] S.Wang,B.Z.Li,M.Khabsa,H.Fang,andH.Ma. Linformer: Self-AttentionwithLinear
+Complexity,2020.
+[71] M.L.Waskom. Seaborn: StatisticalDataVisualization. JournalofOpenSourceSoftware,
+6(60):3021,2021.
+[72] B.L.Welch. TheGeneralizationof“Student’s”ProblemwhenSeveralDifferentPopulation
+VariancesareInvolved. Biometrika,34(1/2):28–35,1947.
+[73] I.H.Witten,R.M.Neal,andJ.G.Cleary. ArithmeticCodingforDataCompression. Commu-
+nicationsofTheAcm,30(6):520–540,June1987.
+[74] L.Xue, A.Barua, N.Constant, R.Al-Rfou, S.Narang, M.Kale, A.Roberts, andC.Raffel.
+ByT5: TowardsaToken-FreeFuturewithPre-trainedByte-to-ByteModels. Transactionsofthe
+AssociationforComputationalLinguistics,10:291–306,2022.
+[75] M.Zaheer,G.Guruganesh,K.A.Dubey,J.Ainslie,C.Alberti,S.Ontanon,P.Pham,A.Ravula,
+Q.Wang,L.Yang,etal. Bigbird: Transformersforlongersequences. AdvancesinNeural
+InformationProcessingSystems,33,2020.
+[76] G.K.Zipf. ThePsycho-BiologyofLanguage. HoughtonMifflin,1935.
+[77] J. Ziv and A. Lempel. A Universal Algorithm for Sequential Data Compression. IEEE
+TransactionsonInformationTheory,23(3):337–343,1977.
+[78] A. Zvonkin and L. Levin. The Complexity of Finite Objects and the Development of the
+ConceptsofInformationandRandomnessbyMeansoftheTheoryofAlgorithms. Russian
+MathematicalSurveys,25:83,102007.
+A NumericalValues
+Table9includesthespecificvaluesusedtocreateFig.3. Similarly,Table10includesthevaluesused
+tocreateFig.5. ThenumericalvaluesfromFig.6canbefoundacrossTable9andTable10. Table11
+includesthenumericalvaluesfromFig.11.
+B Variance
+Samplingfromthevalidationsetwasseeded. Foragivenseed,thesamebatchesaresampledateach
+evaluationstepwithinatrainingrun. Similarly,whenmodelsofadifferentsizearetrainedonthe
+samecompresseddata,thesameevaluationbatchesaresampled,allowingforfaircomparison. Asthe
+BytesandSentencePiecebaselinesusedeterministicdatasets,thevalidationseedisnotused. Instead
+the“start_step”isincrementedby20togetanewsampleof20batches.
+Modelinitializationandtheorderofthetrainingdataiscontrolledbythetrainingseed. Thisseed
+wasalsochangedduringvariancetesting. Duringtraining,thedatasetischeckpointedandtherefore
+eachexampleisseenexactlyonce. Theexactorderofthetrainingdataisdeterminedbytheseed. As
+theBytesandSentencePiecebaselinesusedeterministicdatasets,thetrainingorderisfixed.
+5modelswith25mparametersweretrainedwithdifferentseeds(bothvalidationandtraining)for
+eachcompressionmethodandthetwobaselines. Themeanandstandarddeviationcanbefound
+inTable12. Thevarianceissolowthatweonlyreportsinglevaluesformostotherexperimental
+settings,suchaslargermodels.
+Trainingmodelsofsize403mand2boverdatacompressedwithEqualInfoAC[b=64, v=256]and
+EqualInfoAC[b=128, v=256],aswellasa2bmodelwithEqualInfoAC[b=128, v=65k],occasion-
+allydiverged,collapsingtoasimplemodelthatjustoutputtheuniformdistribution. Thenumbersfor
+thesesettingsexcludethesedivergentruns. Thisresultedin7re-runsinthemostproblematiccase.
+27Table 9: Numerical values from Fig. 3. Methods that use 16-bit tokens (v=65k) have the same
+uniformdistributionperformanceasthe8-bitversion(v=265). Note: Onethousandmillionisused
+overonebilliontomakecomparisonofFLOPs/bytevalueseasier.
+Dataset Size bits/byte FLOPs/byte
+Bytes 25m 1.29 50.00M
+113m 1.16 226.00M
+403m 1.08 806.00M
+2b 1.03 4,000.00M
+uniform 8.00 -
+SentencePiece 25m 1.12 11.69M
+113m 1.01 52.82M
+403m 0.94 188.37M
+2b 0.87 934.84M
+uniform 3.47 -
+AC[v=256] 25m 1.46 15.11M
+113m 1.46 47.17M
+403m 1.46 152.81M
+2b 1.46 734.60M
+uniform 1.46 -
+AC[v=65k] 25m 1.46 10.55M
+113m 1.46 26.58M
+403m 1.46 79.41M
+2b 1.46 370.30M
+StaticAC[v=256] 25m 4.61 28.90M
+113m 4.61 130.64M
+403m 4.61 465.90M
+2b 4.61 2,310.00M
+uniform 4.62 -
+StaticAC[v=65k] 25m 4.60 14.45M
+113m 4.60 65.32M
+403m 4.62 232.95M
+2b 4.62 1,160.00M
+EqualInfoAC[b=16, v=256] 25m 1.47 24.80M
+113m 1.23 90.96M
+403m 1.09 309.01M
+2b 0.99 1,510.00M
+uniform 3.01 -
+EqualInfoAC[b=16, v=65k] 25m 1.25 15.42M
+113m 1.12 48.56M
+403m 1.02 157.79M
+2b 0.94 759.30M
+GZip[v=256] 25m 2.34 22.42M
+113m 1.93 101.35M
+403m 1.69 361.43M
+2b 1.56 1,790.00M
+uniform 3.59 -
+GZip[v=65k] 25m 2.92 11.19M
+113m 2.69 50.56M
+403m 2.48 180.31M
+2b 2.26 894.85M
+C TheAmountofRawTextBytesSeenbyM2
+Table13showsthenumberoftokensandbytesfoundinthetrainingdatasetforeachcompression
+method. Duringthedatagenerationprocess,sequencesof10,240—generatedbyconcatenating128
+C4byte-tokenizeddocumentstogether—arecompressed. Someofthesesequences,namelythefinal
+28Table 10: Numerical values from Fig. 5. Values for EqualInfoAC[b=16, v=256] and
+EqualInfoAC[b=16, v=65k]canbefoundinTable9. Note,EqualInfoAC[b=128, v=256]showed
+slightimprovementsbeyondthesignificantdigitsshownhereasthemodelscales.
+Dataset Size bits/byte FLOPs/byte
+EqualInfoAC[b=32, v=256] 25m 2.05 20.33M
+113m 1.94 70.76M
+403m 1.83 236.95M
+2b 1.65 1,150.00M
+EqualInfoAC[b=32, v=65k] 25m 1.95 13.17M
+113m 1.85 38.42M
+403m 1.74 121.64M
+2b 1.63 579.89M
+EqualInfoAC[b=64, v=256] 25m 1.85 18.02M
+113m 1.82 60.33M
+403m 1.80 199.75M
+2b 1.79 967.54M
+EqualInfoAC[b=64, v=65k] 25m 1.82 12.00M
+113m 1.80 33.13M
+403m 1.79 102.76M
+2b 1.76 486.19M
+EqualInfoAC[b=128, v=256] 25m 1.71 16.85M
+113m 1.71 55.02M
+403m 1.71 180.84M
+2b 1.71 873.68M
+EqualInfoAC[b=128, v=65k] 25m 1.70 11.42M
+113m 1.69 30.51M
+403m 1.68 93.42M
+2b 1.67 439.84M
+Table11: NumericalvaluesfromFig.11,comparingourmultipleimplementationsofEqualInfoAC.
+Compression
+Dataset Ratio Size bits/byte FLOPs/byte
+EqualInfoAC[b=16, v=256] 2.66 25m 1.47 24.80M
+113m 1.23 90.96M
+403m 1.09 309.01M
+2b 0.99 1,510.00M
+EqualInfoAC[b=16, v=256]Zero 2.20 25m 1.50 28.73M
+113m 1.25 108.73M
+403m 1.11 372.36M
+2b 1.00 1,820.00M
+EqualInfoAC[b=16, v=65k] 5.31 25m 1.25 15.42M
+113m 1.12 48.56M
+403m 1.02 157.79M
+2b 0.94 789.30M
+EqualInfoAC[b=16, v=65k]Zero 4.40 25m 1.23 17.36M
+113m 1.11 57.36M
+403m 1.01 190.18M
+2b 0.93 915.09M
+sequencecreatedfromthetailoftheconcatenateddocs,aretooshorttobecompressedtothetarget
+lengthof512. Thus,theexactnumberoftokensinthedatasetcanvaryslightly. Withnopadding,
+eachdatasetwouldhavebeentrainedon26,214,400,000tokens,weseeallsettingsareclosetothis
+value,withthemaximumdeviationbeingEqualInfoAC[b=128, v=65k]with1.06%fewertokens.
+All compression datasets are created from the same source sequences, thus the underlying byte
+29Table12: Varianceinperformanceislow. Evenwithmaximumchangesbetweenruns—different
+evaluationsamples,differenttrainingorders,anddifferentparameterinitialization—thereisvery
+littlevarianceinfinalperformance. Statisticswerecalculatedover5different25mparametertraining
+runsforeachmethod.
+Method bits/byte
+Bytes 1.2899±0.0020
+SentencePiece 1.1171±0.0006
+AC[v=256] 1.4573±0.0001
+StaticAC[v=256] 4.6936±0.0005
+EqualInfoAC[b=16, v=256] 1.4724±0.0044
+EqualInfoAC[b=32, v=256] 2.0457±0.0058
+EqualInfoAC[b=64, v=256] 1.8494±0.0052
+EqualInfoAC[b=128, v=256] 1.7121±0.0003
+GZip[v=256] 2.3374±0.0061
+sequencescompressedbyweakermethodsareprefixesoftheunderlyingsequencescompressedby
+strongermethods.
+Table13: Compressionratios(bytes/tokens)achievedbyvariousmethods. ForEqualInfoAC,the
+compressionratioincreaseswithincreasedwindowsize. Smalldifferencesinthenumberofnon-
+paddingtokensareduetonoiseinthedatagenerationprocess—somerandomlyselecteddocuments
+aretooshorttobecompressedtothetargetlengthof512.
+Compression
+Method Ratio Tokens Bytes
+Bytes 1.0 26,188,185,600 26,188,185,600
+SentencePiece 4.28 26,112,163,840 111,728,726,639
+AC[v=256] 5.49 26,083,328,000 143,197,470,720
+StaticAC[v=256] 1.73 26,175,078,400 45,282,885,632
+GZip[v=256] 2.23 26,175,209,472 58,370,424,832
+EqualInfoAC[b=16, v=256] 2.66 26,154,106,880 69,569,924,301
+EqualInfoAC[b=32, v=256] 3.49 26,109,542,400 91,122,302,976
+EqualInfoAC[b=64, v=256] 4.16 26,110,853,120 108,621,148,979
+EqualInfoAC[b=128, v=256] 4.61 26,078,085,120 120,219,972,403
+AC[v=65k] 10.98 25,952,256,000 284,955,770,880
+StaticAC[v=65k] 3.46 26,133,135,360 90,420,648,346
+GZip[v=65k] 4.47 26,122,649,600 116,768,243,712
+EqualInfoAC[b=16, v=65k] 5.31 26,091,192,320 138,544,231,219
+EqualInfoAC[b=32, v=65k] 6.97 26,049,249,280 181,563,267,482
+EqualInfoAC[b=64, v=65k] 8.33 26,004,684,800 216,619,024,384
+EqualInfoAC[b=128, v=65k] 9.22 25,936,527,360 239,134,782,259
+D ScalingCurveswithScaledTrainingData
+[30]foundthatwhenscalingmodels,thetrainingdatashouldbescaledwiththemodelsize. Assuch,
+whencomparingsettingswithconstanttrainingFLOPs,alargepartoftheFLOPsbudgetshouldbe
+usedbyaddingmoretrainingdata. Weapplythistechniquetocompensateforour2bmodelsbeing
+under-trainedbyplottingthescalingcurvesinFig.10,wherethesmallermodelsaretrainedwithless
+data,proportionaltotheirsize. Modelswith25mparametersonlytrainfor3ksteps,113mfor11k,
+403mfor40k,and2bfor200ksteps. Otherwise,thesettingsmatchthoseinFig.3. Numericalvalues
+usedinthegraphcanbefoundinTable14.
+3010
+Bytes SentencePiece
+ArithmeticCoding[v=256] ArithmeticCoding[v=65k]
+StaticAC[v=256] StaticAC[v=65k]
+EqualInfoAC[b=16,v=256] EqualInfoAC[b=16,v=65k]
+GZip[v=256] GZip[v=65k]
+5
+1
+107 108 109
+Inference FLOPs/byte
+Figure10: Traininglanguagemodelsovercompressedtextwhilescalingtrainingdatawithmodel
+size results in steeper slopes. When scaling model size, it has been found that the training data
+shouldbescaledproportionally[30]. Weapplythisscalingtechniquebyplottingvaluesforsmaller
+modelsatearliertrainingsteps. ThetrendsaresimilartoFig.3,evendowntothingslikewherethe
+EqualInfoAC[b=16, v=256]linecrossestheBytesbaseline(betweenthe25mand113mparameter
+models).
+Scalingthetrainingdataadjuststheabsoluteslopesofthelinesforallmodelsthatlearn. Models
+thatdonotlearnstillonlypredictauniformdistribution. Thetrendsbetweensettingsareunchanged.
+Thusweopttoplottheversionswheretrainingdataisheldconstantacrossmodelsizes.
+E GZipHeadersandFooters
+GZipcompresseddocumentshavebothaheader—twobytesthatidentifythefiletype—andafooter—
+twobytesrepresentingtheAdler-32checksum[18]oftheinput. WetrainedM2modelsonversions
+ofthedatasetwheretheheader/footerareremovedandversionswhereitiskept. Weseethatwhile
+includingtheheader/footeroffersaslightperformanceincrease—whichisunsurprisingastheheader
+specificallyisconsistentacrossexamples—itisnotenoughtochangeGZipcompressionplacement
+amongcompressionmethods. NordoesitexplainwhyGZipistheonlycompressionmethodwhere
+the16-bitvocabularydoesnothelp. Inthiswork,weusetheversionofGZipdatasetsthatinclude
+theheaderandfooters.
+F ArithmeticCodingDetails
+WhileitiseasiesttoimaginethenarrowingofthebitintervalprocessinArithmeticCodingasa
+secondstepafterthecharacterintervalI isfound,itisalsopossibletocalculateB (b)intervals“on
+n j
+thefly”,astheregularintervalsarebeingcalculated. WhenabitstreamintervalB (b,x)enclosesthe
+j
+mostrecentintervalI ,thatintervalisselectedasthecontinuationofthebitstream,b—lockingin
+i
+thevalueofthebitstream. Atthispoint,thebitstreamisthecompressedvalueofthesequenceuntil
+characterx . IfthemostrecentintervalI overlapswithbothB (b,0)andB (b,1),oroneintervalis
+i i j j
+enclosedbyI ,thenthenextintervalI needstobecalculated. Afterthat,morebitintervalsB
+i i+1 >j
+31
+etyb/stibTable14: NumericalvaluesfromFig.10. ValuesfortheuniformdistributionandFLOPs/bytevalues
+canbefoundinTable9.
+Dataset Size Step bits/byte
+Bytes 25m 3k 1.62
+113m 11k 1.36
+403m 40k 1.18
+2b 200k 1.03
+SentencePiece 25m 3k 1.35
+113m 11k 1.15
+403m 40k 1.00
+2b 200k 0.87
+AC[v=256] 25m 3k 1.46
+113m 11k 1.46
+403m 40k 1.46
+2b 200k 1.46
+AC[v=65k] 25m 3k 1.46
+113m 11k 1.46
+403m 40k 1.46
+2b 200k 1.46
+StaticAC[v=256] 25m 3k 4.62
+113m 11k 4.62
+403m 40k 4.62
+2b 200k 4.62
+StaticAC[v=65k] 25m 3k 4.62
+113m 11k 4.62
+403m 40k 4.61
+2b 200k 4.61
+EqualInfoAC[b=16, v=256] 25m 3k 1.86
+113m 11k 1.50
+403m 40k 1.21
+2b 200k 0.99
+EqualInfoAC[b=16, v=65k] 25m 3k 1.62
+113m 11k 1.31
+403m 40k 1.10
+2b 200k 0.94
+GZip[v=256] 25m 3k 2.95
+113m 11k 2.48
+403m 40k 1.97
+2b 200k 1.56
+GZip[v=65k] 25m 3k 3.30
+113m 11k 3.08
+403m 40k 2.72
+2b 200k 2.26
+Table15: RemovaloftheGZipheaderandfooterresultsinminimalperformancedifferences.
+Method bits/byte
+GZip[v=256] 2.33
+−header/footer 2.35
+GZip[v=65k] 2.91
+−header/footer 2.92
+arecalculateduntilabitintervalisenclosedbyI ortheoverlapconditionsoutlinedabovehappen
+i+1
+again. Thisisrepeateduntilabitintervalthatisenclosedbythefinalintervalisfound.
+32Thisfactiscriticalinfiniteprecisionimplementations. Onceabitislockedin,itcanbeemitted. This
+allowsfortherescalingofthecurrentintervalandishowover/underflowisavoided.
+G EvaluationDetails
+Inourexperiments,differentsettingshavedifferentvocabularysize,tokenization,andhasadifferent
+amountofunderlyingtextduetovariationsincompressionrate. Thus,theyarenotdirectlycom-
+parableusing“per-token”versionsmetricslikethecross-entropy,negativeloglikelihoodloss,or
+perplexity. Toaddressthis,weconvertourtoken-levelnegativeloglikelihoodloss,ℓ,tobyte-level
+negativeloglikelihoodlossbydividingthelossbythatcompressionmethod’sspecifictoken-level
+compressionrate,ℓ = ℓ/(L /L ) = ℓ(L /L ). Notethatweuse“perbyte”metricsover
+byte iT oT oT iT
+“percharacter”metricsasthereisambiguityastowhatcountsasacharacterwhenworkingwith
+UTF-8Unicode.
+Asiscommoninevaluationofworkrelatedtocompression,insteadofthenegativeloglikelihoodloss
+ℓ (intheunitof“nats”)perbyte,weusebits/byte. Thiswouldrequireusinglogbasetwoinstead
+byte
+ofthenaturallogduringthenegativeloglikelihoodcalculation,butthisconversioncanbedoneafter
+thefact,bits/byte=log 2(eℓbyte)=ℓ byte/ln(2). Notethatthisresultsinthesameconversionusedin
+[24],bits/byte=ℓ /ln(2)=(L /L )ℓ/ln(2),whentheinputtokensrepresentbytes.
+byte oT iT
+AsoneofthemainadvantagesofanM2modelthatprocessescompressedtextisthatitneedsto
+berunoverfewertokens,wealsocomparemodelsbasedontheamountofFLOPsrequiredduring
+inference. DifferentcompressionmethodsresultindifferentsequencelengthsfortheM2model
+to process. Therefore, we need to standardize our FLOPs measurement to the byte-level so that
+itiscomparableacrossmethods. WestartwithFLOPs/token—approximatedby2×num_params
+(notincludingembeddingparameters)following[35]—anddivideitbythatmethod’stoken-level
+compressionratetogettheFLOPs/byte,justlikethebits/byteconversion. Formethodsthatrequire
+runninganM1modelovereachbyte,theFLOPs/bytecostoftheM1modelisadded. Note,while
+thereisacomputationalcosttorunningGZipovertheinputtext,weignoreitasitisinsubstantial
+comparedtothecostofrunningmodelinference.
+Evaluationoflanguagemodelsisoftendonebyrunningthemodelontheentirevalidationset,moving
+theslidingwindowformedbythemodel’scontextwindowbyasingletokenateachstep. Thisyields
+strongermodelsbyprovidingthemostcontextpossiblewhenmakingpredictionsforatoken. As
+wecareaboutrelativeperformancesbetweenmethods,opposedtoabsoluteperformance,weoptto
+evaluatethemodelonasampleoftheC4validationset. Duringevaluation,themodelisrunover20
+batches,resultinginpredictionsfor2,621,440tokens. Thesetokensrepresentdifferentamountsof
+textbasedonthecompressionmethod,thusitwouldhavebeenimpossibletorunevaluationonthe
+samebytesforallmethods.Wetrainedfive25mparametermodelswithdifferentseedsandfoundthat
+thefinalperformanceisverystable. Thelargeststandarddeviationwas0.0061. Thus,thevariance
+introducedfromsamplingthevalidationsetisnegligible. SeeAppendixBformoreinformation.
+H AlternativeCompressionMethods
+H.1 Equal-TextWindows
+WealsoconsideredwhatisessentiallytheinverseofEqual-InfoWindows—Equal-TextWindows.
+Insteadofconsumingavariableamountoftextandoutputtingaconsistentnumberofbits,Equal-Text
+WindowsfeedaconsistentamountoftextintotheArithmeticCoderwhichiscompressedtoavariable
+numberofbits.
+Todealwiththisvariability,wethoughtM2wouldrequiredelimitertokensbetweenwindowsin
+ordertotellwhichtokensarepartofthesameindependentlycompressedchunk. Wethoughtthis
+wouldhurtthecompressionratetoomuch,especiallyfortheshortACcompressedwindowsthatwe
+foundmosteffectiveinFig.5.
+Furtherexplorationofthismethod,especiallytoseeifthedelimitersareactuallyrequired,would
+beinterestingfutureworkastheEqual-TextWindowsalgorithmismuchsimplerthanEqual-Info
+Windows.
+33H.2 HuffmanCoding
+WealsoconsideredusingHuffmanCoding[32]asabaselinecompressionimplementation. Asmost
+implementationsusestaticprobabilitiesforcharacters,wethoughtthecompressionratewouldbe
+toolowtobecompetitive. WithstaticHuffmanCoding,itismucheasiertocreateamapbetween
+bitstreamsubsequencesandcharacters,whichmayresultinbeingmorelearnablebyM2models.
+However, this is because the coding component assigns each character a whole number of bits,
+resultinginalessoptimalcodingcomparedtoArithmeticCoding. HuffmanCodingcanbemade
+adaptivebyupdatingtheinducedcodebookperiodically,basedonnewerdata. Whenconsidering
+bit-levelcompression,adaptiveHuffmanCodingperformssimilartostaticHuffmanCoding[45].
+However,whenconsideringtoken-levelcompression,andthefactthattheadaptivedistributionwill
+comefromM1,notunigramsoftherecentdata,trainingM2modelsonadaptiveHuffmanCoding
+couldbeinterestingfuturework. AsHuffmancodingispartoftheGZipalgorithm,weoptedtonot
+exploreusingjustHuffmanCoding.
+H.3 AsymmetricNumeralSystems
+AnothercompressionalgorithmweconsideredwasAsymmetricNumeralSystems(ANS)[19]. ANS
+hasstrongcodingperformanceandisamenabletoadaptiveprobabilities. Theinternalstateisonlya
+singlenaturalnumber,whichmaybeeasierforanLLMtotrackthanthetworealnumbersusedin
+AC.However,theencodinganddecodingalgorithmaremorelikeastack,wheretheencoderruns
+lefttorightwhilethedecoderrunsrighttoleft. Bythetimethefullinputisseen,therearenomore
+computationstepsfortheLLMtoactuallydecode. Thus,weoptedtonotexploreANSinthiswork.
+However,thesimplerstateisappealingandusingANSforcompressionwouldbeofinterestasfuture
+work.
+I M2CanHandlePaddingZerosattheEndofaWindow
+In the implementation of EqualInfoAC[b=W], each output window must end up being W bits.
+Therefore,whenthecompressionofanadditionalcharacterwouldresultinabitstreamofmorethan
+W bits,paddingofthecompressedbitstreamwithoutthatadditionalcharactermustbedone.
+Incaseswherethefinalcharacterinthewindowonlyaddszerostothebitstream,itisunclearat
+firstglanceifthatfinalcharacterwasincludedinthewindow,orifitwasomittedandthetrailing
+zerosareallpadding. However,thecompressionschemeisstilllosslessifweareconsistentinour
+encoding. Byalwaysincludingthemostinputcharacterspossibleineachwindow,weknowthat,
+duringdecoding,iftheadditionofafinalcharacter(whichiscompressedtoallzeros)stillresults
+inthesamecompressedbitstream,thenthatfinalcharacterispartofthatwindow. Thedecoding
+algorithmalsoknowswhentostopaddingcharacterstoinput—whentheadditionofanewcharacter
+wouldgeneratemorethanW bits.
+ThiskindofpaddingispresentinmanyArithmeticCodingimplementationsandisgenerallysolved
+byeithergivingtheACdecodertheoriginalinputsequencelengthandthecompressedmessage,or
+bytheACdecoderusingaspecialterminationcharacter. Thesefixesaimtoidentifypaddingina
+singlerunoftheACdecoder,butwouldbedifficulttoapplyinoursetting. Passingthenumberof
+tokenspresentinawindowtoM2wouldbepossibleduringtraining,butitwouldmakeinference
+muchmorecomplex(requiringasolutionsuchasM2generatingfertilityscoresthatspecifyhow
+manycharactersthegeneratedtokensrepresent[8]). Assuch,weachievelosslesscompressionby
+allowingtheACdecodertoberunmultipletimesasthedecodingalgorithmnearstheendoftheinput,
+incrementingthesequencelengthuntilwefindthesequencethatmatchesthecompressedoutput.
+This window decoding algorithm is not well aligned with how transformers processes data. It
+essentiallyinvolvesalook-aheadwheretheACdecoderisrunoverprospectiveinputsandifthey
+areinconsistentwiththecompressedtokens,backtrackingisdoneanddecisionsabouttheprevious
+tokens are made. In contrast, the transformer has a fairly fixed budget when processing a single
+window,justthelayersinthemodelandthepartofthesequencethatisinsidethatwindow.
+Analternativewindowedcompressionschememoreinlinewithtransformercomputationistoavoid
+input characters that compress to all zeros. During compression, when a window is about to be
+emittedandanadditionalcharacterwouldfitintothewindow,butcompressestoallzeros,weopt
+tonotincludethischaracter. Thatis,wecompressasmanycharactersintothewindowaspossible,
+34whileensuringthateachnewcharacterresultsinachangeinthebitstreamcomparedtotheprevious
+value(pluspadding). Thisresultsinamuchsimplerdecodingalgorithmwherenewinputcharacters
+areaddeduntilthecorrectcompressedbitstreamisemitted. Aswealwaysincludetheleastnumberof
+charactersthatcanpossiblyoutputthisbitstream,weknowtheinputwithoutneedingtolook-ahead
+attheresultofcompressingthenextcharacter. Asournormalimplementationcompressesthemost
+numberoftokenspossibleintothecurrentwindow,thisversionresultsinareductionincompression
+rate,droppingfrom2.66to2.20.
+1.6 1.6
+EqualInfoAC[b=16,v=256]
+1.5 1.5
+EqualInfoAC[b=16,v=256] (Zero)
+1.4 EqualInfoAC[b=16,v=65k] 1.4
+EqualInfoAC[b=16,v=65k] (Zero)
+1.3 1.3
+1.2 1.2
+1.1
+1.1
+1.0
+1.0
+108 109 2 4 6
+Inference FLOPs/byte bytes/step
+Figure11: Themodelisabletoeffectivelydiscernbetweenpaddingandtrailingzerosthatrepresent
+aninputcharacterinourimplementationofEqualInfoAC.WhenusingEqualInfoAC[b=16, v=256],
+M2 models trained on data compressed with our original implementation perform better. Using
+EqualInfoAC[b=16, v=65k],theabsolutebits/byteperformanceisgreaterusingthenewimplemen-
+tation, but thereduction incompression ratemeans theoriginal implementationis stillpreferred
+whentheinferencecostisconsidered. Thisisespeciallyclearintherightgraph,wheretheoriginal
+implementation’ssuperiorcompressionrateisobvious.
+InFig.11weseeacomparisonwhentrainingM2modelsoverdatacompressedwitheachmethod.
+We see that when using the new implementation with EqualInfoAC[b=16, v=256], our default
+implementationismuchbetter. Interestingly,whiletheEqualInfoAC[b=16, v=256]versionfails
+toimprove,whenusingEqualInfoAC[b=16, v=65k],thenewcompressionimplementationmakes
+slight,butstillgreaterthanonestandarddeviation,improvementintermsofbits/byte. However,the
+reductioninthecompressionratiomeanstrainingmodelsoverthisimplementationwilllosesomeof
+thecomputationaladvantagesthattrainingovercompressedtextyields. Thus,itfailstofullyeclipse
+theoriginalimplementation. NumericalvaluescanbefoundinTable11. Itisclearthatthemodelis
+abletodiscernbetweentrailingzerosthatrepresentcharactersandthosetherepresentpadding. Thus,
+weopttousetheimplementationthatmaximizedthecompressionratiothroughoutthiswork.
+J EntropyEstimation
+Toaccountfornoiseintheentropyestimation,wepartitionthedatainto100disjointsamples. This
+resultsineachpartitionbeingasampleof~2billionsymbolsforn-gramsand~130millionfortokens.
+WethencalculatetheentropyforeachpartitionandtheKLdivergencebetweentheentropyofthe
+0.5,0.50,and0.95quantilepointsandauniformdistribution. Thesequantilesarethenplottedon
+Fig.9 toillustratesampling noise—90% ofsampled entropiesfallwithin thesebounds. Thelog
+scalingofFig.9hidessomeofthenoisetrends,namelythatthenoisegrowswithnandthatsettings
+likeGZipandEqualInfoACarenoisierthanACandRNG.ThesetrendsareseeninFig.12wherethe
+entropyhasbeennormalizedbasedonthemeanentropycalculatedacrossthepartitions.
+Themaximumlikelihood,orplug-in,estimatorofentropy,Hˆ = −(cid:80) pˆ(x)log pˆ(x),isnega-
+x∈X 2
+tivelybiased—infact,allentropyestimatorsarebiased[48]. TheMiller-Madowestimatorattempts
+35
+etyb/stib etyb/stib1e 5 1e 5
+1.00
+0.75 0.75
+0.50 0.50
+0.25 0.25
+0.00 0.00
+0.25 RNG 0.25
+ArithmeticCoding[v=256]
+0.50 StaticAC[v=256] 0.50
+GZip[v=256]
+0.75 0.75
+EqualInfoAC[b=16]
+1.00 EqualInfoAC[b=64] 1.00
+2 4 6 8 10 12 14 16 2 4 6 8 10 12 14 16
+Bit N-grams N-Bit Tokens
+(a)bitn-gramscountingalloverlappingoccurrences (b)n-bittokensfollowingourM2tokenization
+Figure12: Theamountofnoiseintheentropyestimategrowsasthelengthofbitsegmentsgrow.
+Largersegmentationsofthebitstreamresultinlargervocabulariesandthereforerequirelargersample
+sizes for accurate entropy estimates. For each setting, we plot the 5%, 50%, and 95% percentile
+intervalsfortheentropy,normalizedbytheaverageentropyacrosspartitions. Weseethatthenoise
+growswithnandthatsettingslikeEqualInfoAC[b=16]arenoisierthanAC,despitethisnotbeing
+apparentinFig.9.
+10 1
+RNG
+ArithmeticCoding[v=256] 10 1
+10 3 StaticAC[v=256]
+GZip[v=256]
+10 3
+EqualInfoAC[b=16]
+10 5 EqualInfoAC[b=64]
+10 5
+10 7
+10 7
+10 9
+10 9
+2 4 6 8 10 12 14 16 2 4 6 8 10 12 14 16
+Bit N-grams N-Bit Tokens
+(a)N-Grams (b)Tokens
+Figure13:BiascorrectedKLdivergencebetweentheobservedanduniformdistributionsfordifferent
+segmentationsofthebitstream. ThisplotissimilartoFig.9,however,theKLdivergencecalculations
+usetheentropyoftheobserveddistributionafterapplyingtheMiller-Madowbiascorrection. After
+applyingbiascorrection, weseethattheexpected0KLdivergencefortheRNGbaselineisnow
+withinthe90thpercentilebounds. However,thiscanresultsinan,incorrect,negativeKLdivergence
+whichisremovedfromthegraph. ThustheRNG50thpercentileisshownasascatterplotrather
+thanabrokenline. Inthissettingitisclearthatthe50thpercentileforAC[v=65k]sabovethe50th
+percentileforRNG,however,itishardtodisentanglethetwoastheir5thpercentilelinesaresimilar.
+tocorrectforthisbiasbyaddingtheapproximatebias,casedbysampling,totheplug-inestimator.25
+The Miller-Madow estimator is given by Hˆ = Hˆ + |Vˆ|−1. In this case, m is the size of the
+MM 2m
+ˆ
+sampleusedtoestimateentropyand|V|istheestimatedvocabularysize. Insomeapplications,the
+vocabularymayoftenneedtobeestimated—forexamplenewwordsmaybeaddedtolanguages—but
+inthiscaseourvocabularysizeisalways2nwherenisthesizeofthecurrentsegmentation.
+25Thereareothermethodsforentropybiascorrectionsuchas[15]basedonbootstrapping[20],however,with
+thesizeoftheC4trainingdata,therequiredresamplingwasnotpossible.Thus,weuseMiller-Madowinthis
+work.
+36
+yportnE
+dezilamroN
+)mrofinu
+||
+devresbo(LK
+yportnE
+dezilamroN
+)mrofinu
+||
+devresbo(LKWhen we plot the KL divergence between the Miller-Madow estimated entropy and the uniform
+distribution,weseethatthepercentileintervalfortheRNGbaselinenowincludes0,theKLdivergence
+weexpectgiventhedatawasgeneratedfromrandomandindependentbits. Asbiascorrectionis
+approximate,itispossiblethat,foragivensample,thecorrectionwillresultinanentropygreater
+thanthemaximumentropypossibleforagivenvocabularysize. GiventhatKLdivergencebetweena
+distributionP andtheuniformdistributionU simplifiestotheentropyofU minustheentropyofP,
+KL(P||U)=H[U]−Hˆ[P]=log |V|−Hˆ[p],thisresultsinanegativeKLdivergence,whichisnot
+2
+allowed. Thesepointsgetremovedfromthegraphduringlogscalingandtheresulting50%percentile
+line for RNG data looks strange. Therefore, we only plot points with positive KL divergence in
+Fig.13. TheMiller-Madowestimationofentropymakesitclearthatthe0.5entropyquantileforAC
+compresseddataismuchhigherthanthe50%percentileforRNGdata. Additionally,forn>2,the
+ACentropyisstatisticallysignificantlylessthantheRNGentropy;however,differencesinthemean
+entropyonlystarttoappearafter~8decimalplaces. Thisslightdifferenceinmean,coupledwith
+thefactthatthe5%percentilesaresimilar,meanswecannotconfidentlyassertthemodelwillbe
+abletoeasilydistinguishtheACcompresseddatafromrandomdata. Giventhatwecareaboutthe
+differencesbetweentheentropyofdatacompressedwithdifferentmethods—whichisinvariantto
+bias—andthestrangeplotswhenvaluesarelessthan0,weopttoplottheplug-inestimatorinFig.9
+insteadoftheMiller-Madowestimator.
+K AnalysisImplementation
+Matplolib[33]andSeaborn[71]wereusedtomakealltheincludedgraphs.
+Statistical significance tests were done using Welch’s t-test [72] using the function
+scipy.stats.ttest_ind_from_stats from SciPy [69]. We used p < 0.05 as the statistical
+significancethreshold.
+L CornerCasesofTokenizationleadtoUnstableMappings
+TherearesomecaseswhereSentencePiecedoesnothavestabletext→tokenmappingswhenlooking
+atvarioussubstrings. Thisgenerallyoccurswhenasingularandpluralversionofanounareboth
+common enough to be tokenized into a single token. An example from the T5 vocabulary [52]
+is“chair”→[3533]and“chairs”→[6406]. Whenyoulookatthesurfacetextsubstring“chair”,
+it seems to map to multiple tokens, however when you look at the full surface term “chairs” the
+stabilityreturns. Thisisincontrasttoabyte-levelvocabularywherethetext“chair”alwaysmapsto
+[102, 107, 100, 108, 117],evenaspartofthetext“chairs”whereanextra[118]isappended
+totheend. Whilethelossofsharedrepresentationsofclearlyrelatedconceptsinunfortunate,the
+performanceofmodernmodelsbasedonthiskindoftokenizationshowsthatitiswellhandledbythe
+model. Whiletheseedgecasesexist,theyarerareenoughthattheSentencePiecetokenizershouldbe
+consideredstable.
+Similarly,therearecaseswheretheinitialtoken→textmappinginaEqualInfoACwindowcanbe
+unstable. Inthecasewherethereisacharacterwhosebitstreamcrossesthetokenboundary—the
+purplecharactersinFig.7—onlytheprefixthatispartoftheinitialtokenwilldeterminethevalue
+of that token. It is possible that there may be other places in the input text where the characters
+whollycontainedwithintheinitialtokenmatchbutthecharacterthatcrossesthetokenboundary
+maybedifferent. Iftheprefixofthatcharacter’sbitstream,whichispartoftheinitialtoken,matches
+thepreviouscasebutofthebitstream,whichisinthefollowingtoken,donotitispossibletohave
+thesameinitialtokenwhiletheunderlyingtextisdifferent. Whenthishappens,thetextprefixis
+stillstableandthenotionofmappingacompressedtokentoexactcharactersisnotwelldefined,as
+therearealwayscasesthereacharacterisspreadacrosstwotokens. Note,thisonlyoccursattoken
+boundaries;EqualInfoAC[b=16, v=65k]isstableasnocharacterscrosswindows. Therefore,we
+considerEqualInfoACstableenoughtoenablelearnabilitybyM2.
+Interestingly,[40]pointoutthissameissue,whereafixedsizeviewofavariablelengthstreamcan
+causefalseequivalencieswhenprefixesmatch. Similartoourfindings,theyfindthemodelsdohave
+somelimitedabilitytodealwiththesesituations.
+37M WindowTextPatternsandTokenPositions
+Wetokenize20documentsoflength1,024withEqualInfoAC[b=16, v=256]andfindthatall256
+possible token values occur multiple times, both as the first and as the second token within the
+window. WhentokenizedwithEqualInfoAC[b=16, v=65k],34.5%ofattestedtokensappearmore
+thanonce. Table16showsallthewindowtextforrepeatedtokens.
+Table 16: The deduplicated window text from all instances of tokens that appear multiple
+times when we tokenized 20 documents of length 1,024 (20,480 compressed tokens) with
+EqualInfoAC[b=16, v=256].
+Window
+Token Position WindowText
+185 1 [or ]/[or a ]/[or ac]/[or al]/[or cr]/[or d]/[or f]/[or h]
+[or hi]/[or i]/[or k]/[or ma]/[or pr]/[or r]/[or s]/[or se]
+[or su]/[or t]/[or to]/[or v]/[or wha]/[or y]/[or yo]/[or, t]
+[or-]/[or.] /[ora]/[orc]/[orce ]/[ord]/[ord a]/[order]
+[ore a]/[ore e]/[ore ev]/[ore g]/[ore i]
+2 [ 4]/[ of F]/[ records ]/[. Lo]/[Alt]/[OI]/[ase ]/[at y]
+[cian]/[cri]/[d. I]/[ery]/[h de]/[hen s]/[ides]/[n ne]
+[oft]/[om i]/[onte]/[opp]/[pir]/[rev]/[reve]/[s may]
+[tion a]/[y do]/[y t]
+151 1 [le]/[le s]/[le t]/[le. ] /[lea]/[lec]/[led]/[led ]
+[led t]/[leg]/[lege]/[leh]/[lem ]/[leme]/[lems]/[len]
+[ler]/[les]/[less]/[let]/[lett]/[level]/[lew ]/[ley]/[lf ]
+2 [ all ]/[ nut]/[ this]/[ un]/[. I w]/[Ni]/[as t]/[ceed ]
+[choos]/[e Mi]/[e-li]/[etti]/[imag]/[ion a]/[k a]/[ne a]
+[ng up]/[niversi]/[npo]/[nt pr]/[pi]/[rvices]/[s T]/[s your]
+[s?] /[so c]/[stag]/[thou]/[thoug]/[ust]/[ust ]
+38
