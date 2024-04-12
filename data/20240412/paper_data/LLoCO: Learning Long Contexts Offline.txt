@@ -1,0 +1,723 @@
+Preprint
+LLoCO: Learning Long Contexts Offline
+SijunTan*,XiuyuLi*,ShishirPatil,ZiyangWu,TianjunZhang,
+KurtKeutzer,JosephE.Gonzalez,RalucaAdaPopa
+UCBerkeley
+∗{sijuntan, xiuyu}@berkeley.edu
+Abstract
+Processinglongcontextsremainsachallengeforlargelanguagemodels
+(LLMs)duetothequadraticcomputationalandmemoryoverheadofthe
+self-attentionmechanismandthesubstantialKVcachesizesduringgener-
+ation. Weproposeanovelapproachtoaddressthisproblembylearning
+contextsofflinethroughcontextcompressionandin-domainparameter-
+efficientfinetuning. OurmethodenablesanLLMtocreateaconciserepre-
+sentationoftheoriginalcontextandefficientlyretrieverelevantinformation
+toanswerquestionsaccurately. WeintroduceLLoCO,atechniquethatcom-
+bines context compression, retrieval, and parameter-efficient finetuning
+usingLoRA.Ourapproachextendstheeffectivecontextwindowofa4k
+tokenLLaMA2-7Bmodeltohandleupto128ktokens. Weevaluateourap-
+proachonseverallong-contextquestion-answeringdatasets,demonstrating
+thatLLoCOsignificantlyoutperformsin-contextlearningwhileusing30×
+fewertokensduringinference. LLoCOachievesupto7.62×speed-upand
+substantiallyreducesthecostoflongdocumentquestionanswering,mak-
+ingitapromisingsolutionforefficientlongcontextprocessing. Ourcode
+ispubliclyavailableathttps://github.com/jeffreysijuntan/lloco.
+1 Introduction
+Largelanguagemodels(LLMs)havedemonstratedremarkableperformanceacrossawide
+rangeoftasks(Touvronetal.,2023;Jiangetal.,2023a). ManyofthesetasksrequireLLMsto
+understandandreasonaboutlongcontexts. Forinstance,documentquestionanswering
+is one of the most common applications of LLMs, where the model is presented with a
+documentascontextandaskedtorespondtorelatedquestionsorsummarizethetext.These
+documents may range from lengthy articles to entire books, potentially surpassing the
+contextwindowlimitofLLMs. Consequently,thereisagrowingtrendinbothacademia
+and industry to enhance LLMs’ capability to process longer contexts effectively (Chen
+etal.,2023b;Jiangetal.,2023a;Pengetal.,2024;Chenetal.,2024). Thisneedhasdriven
+innovationamongLLMproviderslikeOpenAIandAnthropictodevelopmodelsthatcan
+handleincreasinglylengthytextsconsistingofseveralthousandsoftokens.
+DespitetheimpressiveprogressmadebytheLLMmodelproviders,scalingthesemodelsto
+adeptlymanageextendedcontextsremainsaformidablechallenge,bothtechnicallyand
+financially. Duetotheself-attentionmechanism,transformer-basedLLMsincuraquadratic
+computationalandmemoryoverheadassequencelengthincreases.Manylong-contexttasks
+requirerepeatedlyprocessingoverthesameprompt,whichincursextralatencyoverhead
+andsubstantialcosts,asmostcommercialLLMsoperateonapricingmodelthatisdirectly
+tiedtothenumberoftokensprocessed.Forexample,asingleinferencerunwithadocument
+thathas100ktokenswouldtake1.5USDonClaude3Opus1and1USDonGPT-4-turbo2.
+*Equalcontribution
+1https://www.anthropic.com/api
+2https://openai.com/pricing
+1
+4202
+rpA
+11
+]LC.sc[
+1v97970.4042:viXraPreprint
+Assistant: This article talks about …
+Assistant: This article talks about …
+LLM Decoder LoRA
+LLM Decoder
+…
+…… Context Encoder User: Please summarize the article.
+Example long context……. User: Please summarize the article.
+……
+Example long context…….
+Figure1: ThearchitectureofregularLLM(left)vsLLoCO(right). InregularLLM,thelong
+contextgetsappendedtothepromptdirectly. InLLoCO,thelongcontextgoesthroughthe
+contextencoderfirst. Theoutputsummarytokenembeddings,whichgetprependedtothe
+LLM’sprompt,aresignificantlyshorterthantheoriginaltokenembeddings.
+Orthogonaltotheexitingeffortsofexpandingthecontextwindowlimit,ourstudyintro-
+ducesaninnovativestrategytotacklethelongcontextchallenge. Weproposeamethod
+wherecontextinformationiscondensedofflinethroughfinetuning,enablingthemodelto
+provideaccurateresponsesduringinferencewithstreamlinedcontextualrepresentations.
+Toillustrateouridea,considerananalogy: envisionanLLMasastudentpreparingforanexam,
+wherewe,theresearchers,aretheexaminersprovidingstudymaterialsandquestions. Traditional
+in-contextlearningwithfullcontextorRetrieval-AugmentedGeneration(RAG)resembles
+anopen-bookexam,wheretheLLMhasaccesstoallmaterialswhileansweringquestions.
+Incontrast,ourapproachisakintoasemi-closed-bookexam,wheretheLLMcannotbring
+theentirebookbutisallowedtobringacheatsheet. Toexcelintheexam,thestudentmust
+1)studyefficientlytodistillaconciseyetinformativecheatsheet,and2)effectivelyretrieve
+relevantinformationfromthecheatsheettoaccuratelyanswerexamquestions. Namely,
+1)Howcanwetrainamodeltoproduceacompactrepresentationoftheoriginalcontext
+thattheLLMcaninterpretandutilizeeffectively? 2)HowtoenabletheLLMtoproficiently
+navigateandextractpertinentdetailsfromthisrepresentationduringinference?
+Regardingthefirstquestion,wefindtheformulationcloselyresemblestheexistingresearch
+directiononcontextcompression. Priorworks(Chevalieretal.,2023;Muetal.,2023;Ge
+etal.,2023)haveproposedcompressorsthataimtodistilltheessenceoftheoriginaltexts
+intocompactrepresentationsthatarealignedwithLLMs.Ourworkprimarilyfocusesonthe
+secondquestion–we’veobservedthatdespitetheprogressincontextcompression,LLMs
+oftenstruggletoaccuratelyreadsuch“cheatsheets”andtendtohallucinatewhenapplying
+themtoanswerqueries. Toaddressthisissue,weemployin-domainparameter-efficient
+finetuningdirectlyonthecompactedcontext(cheatsheet)withoutalteringitscontent,which
+significantlyimprovestheLLM’sabilitytoaccuratelyextractandutilizeinformationfrom
+thesecompressedrepresentations. Inthisway,wecansteertheLLMtoprocesslongcontext
+more efficiently and accurately. This approach allows us to extend the effective context
+windowofa4kLLaMA2-7Bmodeltohandleupto128ktokens. Moreover, weachieve
+state-of-the-artresultsthatmatchorevensurpasstheperformanceofaLLaMA2-7B-32k
+modelwithfullcontextonlongcontextbenchmarks,whileusing30timesfewertokens.
+ThisinsighthasledustointroduceLLoCO,apipelinethatlearnscontextsofflinethrough
+thecombinationofcontextcompressionandparameter-efficientfinetuning. Ourpipeline
+consistsofthreestages: preprocessing,finetuning,andserving. First,wepreprocessthe
+documentsinto“cheatsheets”. Then,weemployLow-RankAdaptation(LoRA)(Huetal.,
+2022)toperformparameter-efficientfinetuningonthese“cheatsheets”ingroups. During
+modelserving,weuseastandardRAGretrievertoretrievethecompresseddocumentas
+wellasthemostrelevantLoRAmodule, andapplythemtotheLLMforinference. The
+contributionsofourworkcouldbesummarizedasfollows:
+• Weinvestigatehowtolearnlongcontextseffectivelyanddemonstratethatthrough
+a novel combination of context compression and instruction finetuning, we can
+extendthecontextwindowofa4kLLaMA2-7Btohandlecontextlengthsofupto
+2Preprint
+128ktokens,whileachievingperformancethatgreatlysurpassesin-contextlearning
+with30timesfewertokensand8.34×latencyspeed-up.
+• WeproposeLLoCO,anovelpipelinethatcombinescontextcompression,retrieval,
+andparameter-efficientfinetuning. Thispipelinecouldbedeployedtosignificantly
+speedupandreducethecostoflongdocumentquestionanswering.
+2 Relatedwork
+Long-contextLLMsRecently,therehavebeeneffortstoincreasetheLLMs’contextwindow
+sizesefficientlywithcontinualpretrainingorfinetuning.Onelineofworkfocusesonscaling
+theRotaryPositionEmbeddings(RoPE)(Suetal.,2021),achievinglongercontextsupto
+128k(Chenetal.,2023b;2024;Pengetal.,2024). Mistral(Jiangetal.,2023a)proposessliding
+window attention that only attends to part of tokens from the previous layer, reducing
+compute and enabling pretraining with long-context to 30k. Nevertheless, as the auto-
+regressivegenerationinLLMsislargelymemory-bound(Kwonetal.,2023),storingtheKV
+cacheoflongercontextsslowsdowntheinferenceandrequireslargeGPUVRAMs.
+ContextcompressionAcloselyrelatedtopiciscontextcompression,whichaimstotrain
+ageneralcompressorthatcancompressanyinputprompts. GIST(Muetal.,2023),Auto-
+Compressor(Chevalieretal.,2023), andICAE(Geetal.,2023)finetuneLLMsina“soft
+prompt-tuning”manner,eitherapplyingspecificregularizationinattentionmasksoruti-
+lizingdedicated“memorytokens”tocompresscontextsintoembeddingswithsignificant
+shorter lengths. LLMLingua family (Jiang et al., 2023c;b; Pan et al., 2024) proposes a
+question-awareframeworktocompresspromptsinnaturallanguagesforblack-boxLLM
+APIs. AnotherlineofworkemploysKVcachecompressionbyeviction(Zhangetal.,2024b;
+Xiao et al., 2024), which only keeps informative keys and values for generation during
+inference, or quantization (Sheng et al., 2023b; Hooper et al., 2024). However, all those
+approachesaimtocompressanyinputs,whichusuallyincursrapidperformancedropsas
+thecompressionratioexceedsacertainlimit(e.g. 2-4×),especiallyforout-of-distribution
+texts, hindering their practical applications. In this work, we mainly focus on extreme
+compressionofin-distributiondocumentsofinterest,goingupto30×compressionrates.
+Retrieval-augmented Generation Retrieval enhances the performance of LLMs in
+knowledge-intensivetaskssuchasquestionansweringwithlongdocumentsorinopen-
+domain. RAGtechniquesareeffectivebothinfinetunedscenariosandwhenappliedto
+off-the-shelf LLMs (Guu et al., 2020; Lewis et al., 2020; Zhang et al., 2024a), and have
+seenmanyadvancementsrecently,emphasizingimprovedexternalknowledgeintegration,
+broaderquerysupport,andenhancedcontentclarity(Jiangetal.,2023d;Schicketal.,2023;
+Asaietal.,2023).Despitetheimprovedperformancefromretrieval,challengesstillremainin
+termsofruntimeefficiency(Mallenetal.,2022)andeffectivefilteringofirrelevantparts(Shi
+etal.,2023;Xuetal.,2024). Ourproposedmethodopensupnewopportunitiesforcapturing
+importantinformationwhileensuringefficientgeneration.
+Parameter-efficient Finetuning Parameter-efficient finetuning methods (Hu et al., 2022;
+Lesteretal.,2021;Liuetal.,2024b)freezethemajorityofthemodelweightsandonlyupdate
+a small subset to finetune large models efficiently. LoRA (Hu et al., 2022) is one of the
+mostwidelyadoptedtechniques,andrecentadvancements(Shengetal.,2023a;Chenetal.,
+2023a)havefocusedonenhancingthesystemperformancefordeployingLoRAadaptors. In
+particular,Shengetal.(2023a)hasachievedthedeploymentofthousandsofLoRAinstances
+onasingleNvidiaA100GPU.LLoCO,whichutilizesLoRAforfinetuning,couldbenefit
+fromthoseimprovementstodeployLoRAadaptorsefficientlyinlongcontextscenarios.
+3 LLoCO
+3.1 ArchitectureOverview
+Figure1illustratesourproposedarchitecture,whichconsistsoftwocomponents: acontext
+encoder and an LLM decoder. In a typical instruction-finetuned LLM, the prompts can
+3Preprint
+becategorizedintosystem,user,andassistantprompts. Thesystempromptcontainstask
+instructionsandrulestheLLMshouldfollow,aswellasrelevantcontexts. Theuserprompt
+isaquestionaskedbytheuser,andtheassistantpromptistheanswergeneratedbytheLLM.
+Thecontextinformationinthesystempromptcanincludetheuser’sinteractionhistoryor
+documentsrelatedtotheuser’squestion. Thesecontextscanbecomeverylong,potentially
+surpassingtheLLM’scontextwindowlimit.
+Toovercomethecontextwindowlimitation,weproposeusingacontextencodertocompress
+theoriginallongcontextsintoamuchmorecompactrepresentation. Thecontextencoder
+itselfisalanguagemodelthattakesasequenceoftokensasinputandoutputsasequenceof
+tokenembeddings. Theseoutputtokenembeddings,whichwecallsummaryembeddings,
+shouldbesignificantlyshorterthantheoriginalcontext. Thesummaryembeddingsare
+thenprependedtotheLLMdecoderandserveastheLLM’ssystemprompt. Theuser’s
+promptisprocessednormallythroughtheLLMdecoder’stokenizer,andtheLLMgenerates
+answers(theassistantprompt)conditionedonthesummaryembeddingsanduserprompts.
+In our design, the context encoder can be any model capable of producing a compact
+representationalignedwiththeLLMdecoder. Thesummaryembeddingscanbeviewedas
+pseudo-wordsintheLLMdecoder’stextembeddingspace,representingabstractconcepts
+orsummaries. Forourexperiments,weselectAutoCompressorforLLaMA2-7B(Chevalier
+etal.,2023),acontextcompressorfinetunedonLLaMA2-7Bwiththedualabilitytogenerate
+summary tokens from long contexts and perform text completions conditioned on the
+summarytokens. Thecompressorgroupsthedocumentintochunksof1536tokensand
+recursively compresses each chunk to 50 summary embeddings. To ensure alignment
+betweenthesummaryembeddingsandthedecoderLLM,wechooseLLaMA2-7Basour
+decoderLLMbutusetheAutoCompressor’sfinetunedweightsasthemodelweights.
+WhilethereareotheravailablecompressorsforLLaMA2-7B(Geetal.,2023;Muetal.,2023),
+we find AutoCompressor to be most suited for our intended use cases given that it can
+1)supportcompressingverylongcontextduetoitsrecursivetrainingprocedure,and2)
+achieveagreatcompressionratioof30:1. Weconsidertheconstructionofcontextencoders
+(compressors) to be an important and orthogonal research direction. Developing more
+performantanduniversalcontextencodersinastreamlinedfashioncanfurtherenhancethe
+efficiencyandeffectivenessofLLoCO,denotingcrucialfuturework.
+3.2 PipelineforOfflineContextLearning
+The pipeline of LLoCO consists of three primary stages: the preprocessing stage, the
+finetuningstage,andtheservingstage. Inthissection,weintroducethepipelineandhow
+tocombineitwithanexistingRAGsystemtoenableretrieval-augmenteddocumentQA
+withcompressedcontext.
+Preprocessing The preprocessing step in a traditional RAG system involves building a
+vectordatabasetoindexacollectionofdocuments. Thisprocesstypicallyincludesthree
+main steps: 1) chunking the documents into passages if they exceed a certain length, 2)
+generating sentence embeddings of the passages using a text embedding model, and 3)
+indexingthepassagesusingtheseembeddings. Theresultofthepreprocessingstepisa
+key-valuemapthatassociateseachpassagewithitscorrespondingembedding.
+InLLoCO,weintroduceanadditionalpreprocessingstepthatleveragesourcontextencoder
+toprocesstheoriginaldocuments.SinceweuseAutoCompressorasourcontextencoder,we
+followitspracticeofdividingthedocumentsintochunksof1536tokensandpassingthem
+throughthecontextencoder.Thecontextencoderoutputs50summaryembeddingsforeach
+chunkrecursively,witheachembeddinghavingadimensionof4096. Thesesummarytoken
+embeddingsarestoredalongsidetheoriginalpassagesinthevectordatabase,indexedby
+thesentenceembeddingofeachpassage.
+FinetuningDuringthefinetuningstage,wefirstsegmentthedocumentsintogroupsbased
+ontheirtype(e.g.,academicpapers,news)orthetasksthatuserswanttoperformonthem
+(e.g.,QA,summarization). Foreachgroupofdocuments,weperformparameter-efficient
+finetuningusingaLoRAadaptor. Thefinetuningdatacanbein-domaininstructionpairs
+4Preprint
+providedbythemodelprovider. Ifsuchadatasetdoesnotexist,itcouldalsobegenerated
+usingself-instruct(Wangetal.,2022)techniquesordistilledfromamorepowerfulmodellike
+GPT-4. Attheendofthefinetuningprocess,weobtainafinetunedLoRAadaptorforeach
+groupofdocuments. Inthevectordatabase,westoreanidentifierforthecorresponding
+LoRA module alongside each passage entry. Additionally, we create a separate LoRA
+databasetostorealltheLoRAadaptors.
+Serving In a traditional RAG system, when a user asks a question, the system employs
+aretrievertofetchthetopkrelevantdocuments/passagesfromthevectordatabaseand
+concatenatesthemtotheprompttoserveastherelevantcontext.
+Apply the most relevant LoRA module
+LoRA
++
+LoRA Database
+Retriever
+Append top K docs’
+summary embeddings
+Preprocessed Documents
+LLM
+Decoder
+User’s prompt
+Context Encoder
+Documents
+Figure2: TheservingstageofLLoCO’spipeline.
+InFigure2,weillustrateLLoCO’sservingpipeline. Insteadofretrievingtheactualpassages,
+weusetheretrievertoretrievethecompressedtokenembeddingsofthepassages. These
+token-embeddingsareconcatenatedandprependedtothedecoderLLM.Additionally,the
+systemsearchesforthecorrespondingLoRAadaptorinthedatabaseandappliesittothe
+decoderLLM.ApplyingaLoRAadaptorincursminimaloverheadtothesystemcost (Hu
+etal.,2022). ByleveragingrecentworkonservingmultipleLoRAadaptors(Shengetal.,
+2023a;Chenetal.,2023a),wecanparallelizeLoRAadaptorservingandsimultaneously
+serverequestsfordocumentsassociatedwiththousandsofLoRAadaptorsonasingleGPU.
+Inourcurrentsystem,weassumethatallthepassagesretrievedfromthevectordatabase
+for a given user query belong to the same document group, allowing us to use a single
+dedicatedLoRAadaptor. However,ourapproachcanbeextendedtohandlecaseswhere
+theretrievedpassagesspanmultipledocumentgroups. Forinstance,itisfeasibletodesign
+algorithmstodynamicallyselectthemostrelevantLoRAadaptorbasedonthemajorityof
+theretrieveddocumentsorweightthecontributionsofdifferentLoRAadaptorsaccording
+totheirrelevancetothequery(Muqeethetal.,2024). Anotherinterestingandorthogonal
+researchdirectionistoexplorecomposingmultipleLoRAmodulestogether(Huangetal.,
+2023),andweleaveitasfuturework.
+4 Experiments
+In the experiment section, we aim to investigate the following aspects of LLoCO: (1) its
+effectivenessincomprehendingcompressedlongcontexts,(2)theextenttowhichsummary
+embeddingscanpreserveessentialinformation,and(3)theassociatedsystemcosts.
+DatasetsWeselectfourdatasetsdedicatedtoquestion-answeringtasks—QuALITY(Pang
+et al., 2021), Qasper (Dasigi et al., 2021), NarrativeQA (Kocˇisky` et al., 2018), and Hot-
+5
+…Preprint
+potQA(Yangetal.,2018)—alongwithoneforsummarization,QMSum(Zhongetal.,2021).
+Alldatasetshavelongdocumentsascontexts. Forallthedatasets,weusetheirvalidation
+setforevaluation. Wefollowtheofficialmetricsforeachdataset. ForQuALITY,wereport
+theexactmatch(EM)score. ForQMSum,wereportthegeometricmeanofROUGEscores.
+Fortheremainingdatasets(Qasper,NarrativeQA,andHotpotQA),wereporttheF1scores.
+MoredetailsonthesedatasetscanbefoundinAppendixA.2
+ModelConfigurationInthisstudy,weconsidertwobasemodels. Thefirstistheoriginal
+LLaMA2-7B-chat(Touvronetal.,2023),whichhasacontextwindowof4096tokens. The
+secondisLongchat-7b-v1.5-32k(Lietal.,2023),afinetunedLLaMA2modelwithanextended
+context window of 32,000 tokens via position interpolation. From now on, we will use
+LLaMA2-7B-4ktorefertothepriormodelandLLaMA2-7B-32ktodenotethelatterone.
+Unlessotherwisespecified,wesettheLoRArankto8forourexperiments. AllLLoCO’s
+modelsarefinetunedonAutoCompressor,whichisitselffinetunedonLLaMA2-7B.
+4.1 LongDocumentQA
+ToevaluatetheeffectivenessofLLoCOontheaforementionedlongcontextdatasets,we
+considerthefollowingscenarios:
+1. LLaMA-2-7B-4k/32k without Context. In this setting, we do not provide any
+documentstotheLLMinthesystemprompt.
+2. LLaMA-2-7B-4k/32kwithContext. Inthissetting,weprovidetheLLMswiththe
+ground truth document. We truncate the documents if their length exceeds the
+contextwindowlimit. Thissettingservesasthebaseline.
+3. LLaMA-2-7B-4k/32kwithRetrieval. Retrievalisastandardbaselinecompression
+methodforlongdocumentquestionanswering. Foreachdocument,wechunkit
+intopassagesof512tokensanduseContriever(Izacardetal.,2021)toretrievethe
+top5passagesfromthisdocumentandconcatenatethemtoformthecontext.
+4. AutoCompressor. Inthissetting,weuseAutoCompressor(Chevalieretal.,2023)
+to compress the contexts into summary embeddings and prepend them to the
+LLM,withoutperforminganyin-domainfinetuning. Thisisequivalenttousingan
+AutoCompressorstraightoutofthebox. TheAutoCompressorcompressesachunk
+of1536tokensinto50summarytokens,resultinginaneffectivecontextwindowof
+roughly128ktokens. Wedonottruncatethecontextunlessitexceedsthislimit.
+5. LLoCO (ours). LLoCO is our proposed system for long document question an-
+swering. Foreachdatasetweevaluate,weperforminstructionfinetuningusing
+thequestion-answeringpairsfromthetrainingset. Duringbothfinetuningand
+inference,weprependthesummaryembeddingsofthecorrespondinggroundtruth
+documenttotheLLM.Wedonottruncatethecontextunlessitexceedsthe128k
+contextwindowlimit.
+Our results are summarized in Table 1. When AutoCompressor is used out of the box
+withoutanyin-domainfinetuning,itsperformancesometimesfallsshortofthebaseline
+where no context is appended. In contrast, by combining compression and finetuning,
+LLoCOsignificantlyoutperformsthebaselineonalldatasetsbyasubstantialmarginwhile
+using30timesfewertokens. Notably,forNarrativeQA,LLoCOachievesanF1scoreof28.34
+comparedto14.42forthebaseline,showcasingtheefficacyofourproposedtechnique.
+Furthermore,theeffectivenessofLLoCOisparticularlyevidentinthecaseoftheNarra-
+tiveQAdataset,wheretheaveragedocumentlengthis84,770tokens,significantlyexceeding
+thecontextwindowlimitofLLaMA2-7B.Bycompressingthecontextsintoapproximately
+2,600tokensonaverage,LLoCOisabletofitthecompressedrepresentationswithinthe
+contextwindowlimit. ThisenablesLLoCOtoleveragealltheavailablecontext,resultingin
+impressiveF1scoresonthischallengingdataset.
+6Preprint
+Setup CtxSize τ QuA QAS QM NQA HQA Avg.
+LLaMA2-7B
+4kw.o.Context 4k 1x 32.16 7.68 12.73 10.85 22.22 17.13
+32kw.o.Context 32k 1x 31.74 6.30 12.79 10.61 20.03 16.29
+4kw.Context 4k 1x 40.45 16.67 14.62 14.42 32.47 23.44
+32kw.Context 32k 1x 38.88 21.72 14.58 16.76 31.58 24.70
+CompressionMethods
+LLaMA2-7B-4kw.Retrieval 4k 1.6x 38.73 18.29 14.33 22.28 27.95 24.31
+LLaMA2-7B-32kw.Retrieval 32k 12.8x 36.48 24.92 15.40 19.32 22.32 23.68
+AutoCompressor 128k 30x 33.51 15.03 12.53 11.66 21.01 18.75
+LLoCOw.FullContext(ours) 128k 30x 41.51 29.01 16.68 28.34 37.83 30.67
+Table1: ExperimentresultsonlongdocumentQAdatasets. τ indicatesthecompression
+ratio. ForLLaMA2-7B-4k/32kwithretrieval,thecompressionratioisobtainedbydividing
+themodel’scontextwindowlimit(4k/32k)bythelengthoftheretrievedpassages,whichis
+fixedat2560tokens.
+4.2 AblationStudy
+Finetuning LLaMA with Original Context One interesting question is how well LoRA
+finetuning works over original uncompressed context, and how does that compare to
+LLoCO’s approach. To investigate this, we conduct additional finetuning experiments
+onLLaMA-7B-4k/32k,whereweappendtheoriginaluncompressedcontextasasystem
+promptduringfinetuning. ThesemodelsarefinetunedfollowingthesamesetupasLLoCO.
+AsshowninTable2,bothLLaMA-7B-4kandLLaMA-7B-32kexhibitnotableperformance
+improvementsafterfinetuning, withincreasesof2.88%and6.62%respectively. Despite
+theseimprovements,theperformanceofLLoCOremainscomparabletothatofthefinetuned
+LLaMA-7B-32kmodel. Thisfindingsuggeststhatfinetuninginacompressedcontextis
+justaseffectiveasfinetuningintheoriginalcontext. Comparedtofull-contextfinetuning,
+LLoCO’sfinetuningstepisconsiderablyfasterandmorecost-efficientduetotheuseof
+a significantly shorter context (see 4.5). This makes LLoCO a more practical finetuning
+solutionforlongdocumentquestion-answeringtasks.
+Setup QuA QAS QM NQA HQA Avg.
+LLaMA-7B-4k 40.45 16.67 14.62 14.42 32.47 23.44
+LLaMA-7B-32k 38.88 21.72 14.58 16.76 31.58 24.70
+LLaMA-7B-4kw. Finetuning 35.00 17.80 15.49 21.41 41.89 26.32(+2.88%)
+LLaMA-7B-32kw. Finetuning 40.12 29.71 16.36 28.72 41.68 31.32(+6.62%)
+LLoCO 41.51 29.01 16.68 28.34 37.83 30.67
+Table2: ComparisonofLLoCOwithLLaMA-7Bbaselinesafterin-domainfinetuning.
+CombinedInstructionFinetuningInourpreviousexperiments,wefinetunedLLoCOon
+eachdatasetseparately. Inthisablationstudy,weinvestigateLLoCO’sperformancewhen
+wecombineallthetrainingdataandfinetuneageneralmodel. Tobalancethedataset,we
+sample10,000examplesfromNarrativeQAandHotpotQAanduseallexamplesfromthe
+otherthreedatasetstoformourfinaltrainingset.
+As shown in Table 3, LLoCO with combined finetuning surpasses baseline methods on
+alldatasetsexceptQMSum. ThelowerperformanceonQMSumcanbeattributedtothe
+fact that it is a summarization task that favors longer, more detailed answers, but the
+combinedfinetuningprocesslikelyshiftstheLLM’sbehaviortowardsgeneratingshorter,
+morefocusedanswers,whichmaynotbeoptimalforthesummarizationtask.
+7Preprint
+Compared to in-domain finetuning, combined finetuning generally yields lower perfor-
+mance, with the exception of QuALITY. QuALITY questions heavily rely on the LLM’s
+reasoningabilities, whereastheotherdatasetsprimarilyfocusontheLLM’scapacityto
+retrieverelevantinformationfromlongcontexts. Wehypothesizethattheadditionalfine-
+tuningondiversedatasetsenhancestheLLM’sabilitytoreasonaboutlongcontexts,leading
+toimprovedperformanceonQuALITY.Overall,thecombinedfinetuningapproachdemon-
+stratesthepotentialforknowledgetransferacrossdifferenttasks.
+Setup QuA QAS QM NQA HQA Avg.
+LLoCOw. SeparateFinetuning 41.51 29.01 16.68 28.34 37.82 30.67
+LLoCOw. CombinedFinetuning 47.07 24.95 12.77 27.93 35.55 29.65
+Table3: ComparisonofLLoCOwithin-domainfinetuningandcombinedfinetuning.
+4.3 EvaluationonLongBench
+WefurtherevaluateLLoCOonLongBench(Baietal.,2023),whichconsistsof6subtasks.
+GiventhattheprimaryapplicationsofLLoCOaredocumentquestionansweringandsum-
+marization,ourevaluationfocusesontheSingleDocQA,MultiDocQA,andSummarization
+tasks. Thesethreetasksoverlapwithsomedatasets(e.g. Qasper,QMSum)weevaluatedin
+Section4.1. However,thevalidationsetsdifferasLongBenchsamplesaspecificsubsetof
+examplesforeachdataset. WehaverigorouslyensuredthatLongBenchdoesnotfeatureany
+questionsthatoverlapwiththoseusedintheLLoCOtraining,therebycompletelyremoving
+any risk of data leakage. To achieve the best performance of LLoCO, we choose LoRA
+adaptorstailoredforeachparticularcategory/datasetinourevaluation.
+Specifically,fortheSingleDoctasks,weusetheNQALLoCOandQasperLLoCoforthe
+NQAandQAStasks,respectively. ForMultiField-En(MFE) (Baietal.,2023),weuseGPT-
+4-turbotogeneratequestion-answeringpairsfromthetrainingdocumentsandfinetune
+LLoCO using these pairs. For MultiDoc tasks, we use the combined finetuned LLoCO
+fromSection4.2,whichworkswellforalltasks. FortheSummarizationtasks,wecreate
+atrainingdatasetbycombiningtheentireQMSum(Zhongetal.,2021)trainingdatawith
+5,000randomlysampledexamplesfromtheMultiNews(Fabbrietal.,2019)trainingdata.
+WethenfinetuneLLoCOonthiscombineddataset.
+SingleDoc MultiDoc Summarization
+NQA QAS MFE HQA WMQA MSQ Gov QMS MNews Avg.
+LLaMA-2-7B-4k 18.7 19.2 36.8 25.4 32.8 9.4 27.3 20.8 25.8 24.0
+LLaMA-2-7B-32k 16.9 27.7 41.4 32.5 20.6 9.7 30.8 22.7 26.4 25.4
+LLoCO 23.1 26.1 26.3 46.2 35.6 27.3 17.6 23.4 25.0 27.8
+Table 4: Evaluation results on LongBench for SingleDoc, MultiDoc and Summariza-
+tion. Numbers for LLaMA-2-7B-4k/32k are taken from the official LongBench’s repos-
+itory(THUDM,2023)
+OurevaluationresultsshowthatLLoCOoutperformstheLLaMA2baselineon5outofthe
+9datasets. Inparticular,LLoCOexcelsintheMultiDocQAtask,achievingsignificantly
+betterresultsonallthreedatasets. LLoCOalsodemonstratescomparableperformancein
+two datasets (MultiNews, Qasper), but falls short in the GovReport Huang et al. (2021)
+andMultiField-Endatasets. TheGovReportdatasetisasummarizationtaskthatrequires
+themodeltogenerateaone-pagesummary. WefoundthatLLoCOdoesnotperformwell
+whenthegeneratedcontentislengthy,whichisalimitationofourapproach. Thelower
+performance on the MultiField-En dataset could be attributed to the data being out-of-
+distributioncomparedtoourtrainingdata,asthisdatasetdoesnotprovideanytraining
+examples. Despitetheselimitations,theaveragescoreofLLoCOacrossalldatasetsishigher
+thanthatoftheLLaMA2baseline,demonstratingtheoveralleffectivenessofourapproach.
+8Preprint
+4.4 NeedleInAHaystack
+WefurtherinvestigateLLoCO’sproficiencytoretrieveinformationacrossdifferentposi-
+tionsofcontextwindowwithvaryinglengthsusingtherenownedNeedleInAHaystack
+task (gkamradt, 2023). Tailoring this to our pipeline, we randomly select a long article
+exceeding32ktokensfromtheNarrativeQAdatasetasthe“haystack”. Thisarticleisused
+totesttheLLoCOmodel,whichhasbeenfinetunedonthisdatasetasdiscussedin§4.1.
+Single Fixed Needle Our initial evaluation focuses on a straightforward scenario: the
+insertion of a consistent fixed “needle”. Figure 3 shows that our LLoCO successfully
+retrievestheneedlein∼80%acrossalltestedcontextsizes,indicatingrobustperformance
+withnodegradationatlongercontexts,whileLLaMA2-7B-32kexhibitssubstantiallylower
+effectivenessinthistask.
+10 10
+0% 0%
+9 9
+100% 100%
+11% 8 11% 8
+22% 7 22% 7
+33% 6 33% 6
+44% 5 44% 5
+56% 4 56% 4
+67% 67%
+3 3
+78% 78%
+2 2
+89% 89%
+1000 4444 7889 11333 14778 18222 21667 25111 28556 32000 1 1000 4444 7889 11333 14778 18222 21667 25111 28556 32000 1
+Token Limit Token Limit
+(a)LLaMA2-7B-32k (b)LLoCO
+Figure3: Fixedneedleretrievaltask. Thesampledarticle(”haystack”)startswith”Mary,
+..., a gentle, fashionable girl...”, and a context-relevant needle was curated
+as ”Mary’s favorite fashion designer was Coco Chanel when she was a teenager.
+Who was Mary’s favorite fashion designer when she was a teenager?”
+RandomNeedlesAdditionally,weexamineLLoCO’scapabilityinamorecomplexscenario
+byemployingaunique“needle”ineachtrial. FollowingLiuetal.(2024a),werandomly
+chooseadesignatedcitytoserveastheneedleforeachposition. Toadapttothischallenge,
+weenhancetheNQALLoCOmodelthroughcontinualfinetuningwithasyntheticsmall-
+scaledatasetcomprisingcitiesnotencounteredduringevaluations. Figure4revealsthat
+althoughtheNQA-finetunedmodelstrugglesinitially,furtherfinetuningwiththeLLoCO
+pipelinesubstantiallyelevatessuccessratesto∼80%. Thisimprovementunderscoresthe
+efficacyofourmethodinhandlingtheNeedleInAHaystacktask.
+10 10
+0% 0%
+100% 100%
+8 8
+11% 11%
+22% 22%
+6 6 33% 33%
+44% 44%
+4 4
+56% 56%
+67% 67%
+2 2
+78% 78%
+89% 89%
+1000 4444 7889 11333 14778 18222 21667 25111 28556 32000 0 1000 4444 7889 11333 14778 18222 21667 25111 28556 32000 0
+Token Limit Token Limit
+(a)LLoCO(nofinetuning) (b)LLoCO(withfinetuning)
+Figure4: Randomneedleretrievalwithcity-wordpairs.
+9
+tnecreP
+htpeD
+tnecreP
+htpeD
+erocS
+erocS
+tnecreP
+htpeD
+tnecreP
+htpeD
+erocS
+erocSPreprint
+4.5 InferenceLatency&FinetuningThroughput
+In this section, We evaluate the inference latency improvements of our LLoCO method.
+The experiments are run on a single A100-80G-SXM GPU and a RTX A6000 GPU, both
+withabatchsizeof1andagenerationtokencountsetto16. Wemeasuredtheper-token
+latencywithvariouscontextsizes. AsillustratedinFigure5,LLoCOrealizesspeed-ups
+ofupto7.62×onA100and7.19×onA6000whencomparedtotheLLaMA2-7Bbaseline
+withoutcompression,underidenticalcontextconditions. WhilethebaselineexceedsGPU
+VRAMlimitsforsequenceslongerthan32ktokens,LLoCOmaintainsefficientgeneration
+forsequencesupto128ktokens. Notably, LLoCOachievesthebaseline’s4klatencyfor
+sequences that are 16× longer (64k) on the A100 and 32× longer (128k) on the A6000.
+Furthermore,LLoCOcanprocess32ksequencesonA6000asfastasbaseline’s4konA100.
+Additionally, we assess the finetuning throughput on the NarrativeQA dataset, which
+mainlyconsistsofsamplesexceeding32ktokens. Wecomparethe7B32kbaselinefinetuned
+on8A100sandourLLoCOfinetunedonboth8A100sand8A6000s,allwithaper-device
+batchsizeof1andaglobalbatchsizeof32,using4gradientaccumulationsteps. Figure5
+shows that our LLoCO achieves 11.52× and 6.82× throughput on A100s and A6000s,
+respectively. ThishighlightsthatLLoCOnotonlyachievescompetitiveresults,butalso
+improvesperformancewithmuchgreaterefficiencycomparedtofinetuningthebaseline
+withfullcontext(asshownin§4.2).
+NarrativeQA Finetuning Throughput
+6.00
+5.564
+4.50
+7.62x 3.00 3.296
+7.19x
+1.50
+0.483
+0.00
+LLaMA-A100 LLoCO-A100 LLoCO-A6000
+Figure 5: Left: End-to-end decoding per-token latency (ms) on A100 and A6000 GPUs.
+LLaMA2withoutcompressionrunsoutofVRAMforsequencesof64kand128konA100,
+aswellasfor32ksequencesonA6000. Right: Trainsamplespersecondwhenfinetuningon
+NarrativeQAforLLaMA2-7B-32kwithoutcompressionandLLoCO.
+5 Conclusion
+WeproposeLLoCO,anewparadigmthataddressesthelong-contextchallengebyprepro-
+cessingthecontextbeforeinferencethroughparameter-efficientfinetuning. Ourapproach
+extendstheeffectivecontextwindowofaLLaMA2-7Bmodelwitha4ktokenscontextsizeto
+handleupto128ktokens. Evaluationsonseverallong-contextquestion-answeringdatasets
+showthatLLoCOsignificantlyoutperformsin-contextlearningwhileusing30timesfewer
+tokensduringinference,makingitapromisingsolutionforefficientlongcontextprocessing.
+AcknowledgementWethankMichaelLuo,ShengShen,ChengleiSiandSiyuanZhuangfor
+theirhelpfulcommentsanddiscussion. WealsothankBAIR,BerkeleyDeepDrive,Intel
+Corporation, and NVIDIA for supporting this research, as well as Hyperbolic Labs3 for
+providingtheAIinfrastructureforourexperiments.
+3https://www.hyperbolic.xyz/
+10
+s
+/
+selpmaS
+niarTPreprint
+References
+Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannaneh Hajishirzi. Self-rag:
+Learningtoretrieve,generate,andcritiquethroughself-reflection. arXivpreprintarXiv:
+2310.11511,2023.
+YushiBai,XinLv,JiajieZhang,HongchangLyu,JiankaiTang,ZhidianHuang,Zhengxiao
+Du,XiaoLiu,AohanZeng,LeiHou,etal. Longbench: Abilingual,multitaskbenchmark
+forlongcontextunderstanding. arXivpreprintarXiv:2308.14508,2023.
+LequnChen,ZihaoYe,YongjiWu,DanyangZhuo,LuisCeze,andArvindKrishnamurthy.
+Punica: Multi-TenantLoRAServing,2023a. URLhttps://arxiv.org/abs/2310.18547.
+ShouyuanChen,ShermanWong,LiangjianChen,andYuandongTian. Extendingcontext
+window of large language models via positional interpolation. arXiv preprint arXiv:
+2306.15595,2023b.
+YukangChen,ShengjuQian,HaotianTang,XinLai,ZhijianLiu,SongHan,andJiayaJia.
+LongloRA:Efficientfine-tuningoflong-contextlargelanguagemodels. InTheTwelfth
+InternationalConferenceonLearningRepresentations,2024. URLhttps://openreview.net/
+forum?id=6PmJoRfdaK.
+AlexisChevalier,AlexanderWettig,AnirudhAjith,andDanqiChen. Adaptinglanguage
+modelstocompresscontexts. arXivpreprintarXiv:2305.14788,2023.
+PradeepDasigi,KyleLo,IzBeltagy,ArmanCohan,NoahASmith,andMattGardner. A
+datasetofinformation-seekingquestionsandanswersanchoredinresearchpapers. arXiv
+preprintarXiv:2105.03011,2021.
+AlexanderR.Fabbri,IreneLi,TianweiShe,SuyiLi,andDragomirR.Radev. Multi-news: a
+large-scalemulti-documentsummarizationdatasetandabstractivehierarchicalmodel,
+2019.
+TaoGe,JingHu,LeiWang,XunWang,Si-QingChen,andFuruWei.In-contextAutoencoder
+forContextCompressioninaLargeLanguageModel,October2023. URLhttp://arxiv.
+org/abs/2307.06945. arXiv:2307.06945[cs].
+gkamradt. Needleinahaystack-pressuretestingllms.,2023. URLhttps://github.com/
+gkamradt/LLMTest_NeedleInAHaystack. [Accessed26-03-2024].
+Kelvin Guu, Kenton Lee, Z. Tung, Panupong Pasupat, and Ming-Wei Chang. Realm:
+Retrieval-augmentedlanguagemodelpre-training. InternationalConferenceonMachine
+Learning,2020.
+ColemanHooper,SehoonKim,HivaMohammadzadeh,MichaelW.Mahoney,YakunSophia
+Shao,KurtKeutzer,andAmirGholami. Kvquant: Towards10millioncontextlengthllm
+inferencewithkvcachequantization. arXivpreprintarXiv: 2401.18079,2024.
+EdwardJ.Hu,YelongShen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,
+LuWang,andWeizhuChen. Lora: Low-rankadaptationoflargelanguagemodels. InThe
+TenthInternationalConferenceonLearningRepresentations,2022. URLhttps://openreview.
+net/forum?id=nZeVKeeFYf9.
+ChengsongHuang,QianLiu,BillYuchenLin,TianyuPang,ChaoDu,andMinLin.Lorahub:
+Efficientcross-taskgeneralizationviadynamicloracomposition. arXivpreprintarXiv:
+2307.13269,2023.
+LuyangHuang,ShuyangCao,NikolausParulian,HengJi,andLuWang.Efficientattentions
+forlongdocumentsummarization. arXivpreprintarXiv:2104.02112,2021.
+GautierIzacard,MathildeCaron,LucasHosseini,SebastianRiedel,PiotrBojanowski,Ar-
+mandJoulin,andEdouardGrave. Unsuperviseddenseinformationretrievalwithcon-
+trastivelearning,2021. URLhttps://arxiv.org/abs/2112.09118.
+11Preprint
+AlbertQ.Jiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSingh
+Chaplot,DiegodelasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,Lucile
+Saulnier,Le´lioRenardLavaud,Marie-AnneLachaux,PierreStock,TevenLeScao,Thibaut
+Lavril,ThomasWang,Timothe´eLacroix,andWilliamElSayed. Mistral7b. arXivpreprint
+arXiv: 2310.06825,2023a.
+HuiqiangJiang,QianhuiWu,,XufangLuo,DongshengLi,Chin-YewLin,YuqingYang,and
+LiliQiu. Longllmlingua: Acceleratingandenhancingllmsinlongcontextscenariosvia
+promptcompression. ArXivpreprint,abs/2310.06839,2023b. URLhttps://arxiv.org/
+abs/2310.06839.
+HuiqiangJiang,QianhuiWu,Chin-YewLin,YuqingYang,andLiliQiu. Llmlingua: Com-
+pressingpromptsforacceleratedinferenceoflargelanguagemodels. InProceedingsof
+the2023ConferenceonEmpiricalMethodsinNaturalLanguageProcessing.Associationfor
+ComputationalLinguistics,December2023c. URLhttps://arxiv.org/abs/2310.05736.
+Zhengbao Jiang, Frank F. Xu, Luyu Gao, Zhiqing Sun, Qian Liu, Jane Dwivedi-Yu,
+Yiming Yang, Jamie Callan, and Graham Neubig. Active retrieval augmented gen-
+eration. Conference on Empirical Methods in Natural Language Processing, 2023d. doi:
+10.48550/arXiv.2305.06983.
+Toma´sˇKocˇisky`,JonathanSchwarz,PhilBlunsom,ChrisDyer,KarlMoritzHermann,Ga´bor
+Melis, and Edward Grefenstette. The narrativeqa reading comprehension challenge.
+TransactionsoftheAssociationforComputationalLinguistics,6:317–328,2018.
+WoosukKwon,ZhuohanLi,SiyuanZhuang,YingSheng,LianminZheng,CodyHaoYu,
+JosephGonzalez,HaoZhang,andIonStoica. Efficientmemorymanagementforlarge
+language model serving with pagedattention. In Proceedings of the 29th Symposium on
+OperatingSystemsPrinciples,pp.611–626,2023.
+BrianLester,RamiAl-Rfou,andNoahConstant. Thepowerofscaleforparameter-efficient
+prompttuning. InProceedingsofthe2021ConferenceonEmpiricalMethodsinNaturalLan-
+guageProcessing,pp.3045–3059,OnlineandPuntaCana,DominicanRepublic,November
+2021.AssociationforComputationalLinguistics.
+PatrickLewis,EthanPerez,AleksandaraPiktus,FabioPetroni,VladimirKarpukhin,Naman
+Goyal,HeinrichKuttler,M.Lewis,WentauYih,TimRockta¨schel,SebastianRiedel,and
+DouweKiela. Retrieval-augmentedgenerationforknowledge-intensivenlptasks. Neural
+InformationProcessingSystems,2020.
+DachengLi,RulinShao,AnzeXie,YingSheng,LianminZheng,JosephGonzalez,IonStoica,
+XuezheMa,andHaoZhang. Howlongcancontextlengthofopen-sourceLLMstruly
+promise? InNeurIPS2023WorkshoponInstructionTuningandInstructionFollowing,2023.
+URLhttps://openreview.net/forum?id=LywifFNXV5.
+HaoLiu,WilsonYan,MateiZaharia,andPieterAbbeel. Worldmodelonmillion-length
+videoandlanguagewithblockwiseringattention. arXivpreprintarXiv: 2402.08268,2024a.
+Shih-YangLiu, Chien-YiWang, HongxuYin, PavloMolchanov, Yu-ChiangFrankWang,
+Kwang-TingCheng,andMin-HungChen. Dora: Weight-decomposedlow-rankadapta-
+tion. arXivpreprintarXiv:2402.09353,2024b.
+Alex Mallen, Akari Asai, Victor Zhong, Rajarshi Das, Hannaneh Hajishirzi, and Daniel
+Khashabi. Whennottotrustlanguagemodels: Investigatingeffectivenessofparamet-
+ric and non-parametric memories. Annual Meeting of the Association for Computational
+Linguistics,2022. doi: 10.18653/v1/2023.acl-long.546.
+JesseMu,XiangLisaLi,andNoahD.Goodman. Learningtocompresspromptswithgist
+tokens. NeuralInformationProcessingSystems,2023. doi: 10.48550/arXiv.2304.08467.
+MohammedMuqeeth,HaokunLiu,YufanLiu,andColinRaffel. Learningtorouteamong
+specializedexpertsforzero-shotgeneralization. arXivpreprintarXiv: 2402.05859,2024.
+12Preprint
+ZhuoshiPan,QianhuiWu,HuiqiangJiang,MenglinXia,XufangLuo,JueZhang,Qingwei
+Lin,VictorRuhle,YuqingYang,Chin-YewLin,H.VickyZhao,LiliQiu,andDongmei
+Zhang. LLMLingua-2: Datadistillationforefficientandfaithfultask-agnosticprompt
+compression. ArXivpreprint,abs/2403.12968,2024. URLhttps://arxiv.org/abs/2403.
+12968.
+RichardYuanzhePang,AliciaParrish,NitishJoshi,NikitaNangia,JasonPhang,Angelica
+Chen, VishakhPadmakumar, JohnnyMa, JanaThompson, HeHe, andSamBowman.
+Quality: Questionansweringwithlonginputtexts,yes! NorthAmericanChapterofthe
+AssociationforComputationalLinguistics,2021. doi: 10.18653/v1/2022.naacl-main.391.
+BowenPeng,JeffreyQuesnelle,HongluFan,andEnricoShippole. YaRN:Efficientcontext
+windowextensionoflargelanguagemodels. InTheTwelfthInternationalConferenceon
+LearningRepresentations,2024. URLhttps://openreview.net/forum?id=wHBfxhZu1u.
+Timo Schick, Jane Dwivedi-Yu, Roberto Dess`ı, Roberta Raileanu, Maria Lomeli, Luke
+Zettlemoyer,NicolaCancedda,andThomasScialom. Toolformer: Languagemodelscan
+teachthemselvestousetools. NeuralInformationProcessingSystems,2023.
+YingSheng,ShiyiCao,DachengLi,ColemanHooper,NicholasLee,ShuoYang,Christopher
+Chou,BanghuaZhu,LianminZheng,KurtKeutzer,JosephE.Gonzalez,andIonStoica.
+S-LoRA: Serving Thousands of Concurrent LoRA Adapters, November 2023a. URL
+http://arxiv.org/abs/2311.03285. arXiv:2311.03285[cs].
+YingSheng,LianminZheng,BinhangYuan,ZhuohanLi,MaxRyabinin,BeidiChen,Percy
+Liang,ChristopherRe´,IonStoica,andCeZhang. Flexgen: High-throughputgenerative
+inference of large language models with a single gpu. In International Conference on
+MachineLearning,pp.31094–31116.PMLR,2023b.
+FredaShi,XinyunChen,KanishkaMisra,NathanScales,DavidDohan,E.Chi,Nathanael
+Scharli,andDennyZhou. Largelanguagemodelscanbeeasilydistractedbyirrelevant
+context. InternationalConferenceonMachineLearning,2023. doi: 10.48550/arXiv.2302.00093.
+JianlinSu,YuLu,ShengfengPan,BoWen,andYunfengLiu. Roformer: Enhancedtrans-
+former with rotary position embedding. NEUROCOMPUTING, 2021. doi: 10.1016/j.
+neucom.2023.127063.
+THUDM. Longbench: Abenchmarkforlong-rangelanguagemodels. https://github.
+com/THUDM/LongBench,2023.
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux,
+Timothe´e Lacroix, Baptiste Rozie`re, Naman Goyal, Eric Hambro, Faisal Azhar, et al.
+Llama: Openandefficientfoundationlanguagemodels. arXivpreprintarXiv:2302.13971,
+2023.
+YizhongWang,YeganehKordi,SwaroopMishra,AlisaLiu,NoahASmith,DanielKhashabi,
+andHannanehHajishirzi. Self-instruct: Aligninglanguagemodelswithself-generated
+instructions. arXivpreprintarXiv:2212.10560,2022.
+GuangxuanXiao,YuandongTian,BeidiChen,SongHan,andMikeLewis. Efficientstream-
+ing language models with attention sinks. In The Twelfth International Conference on
+LearningRepresentations,2024. URLhttps://openreview.net/forum?id=NG7sS51zVF.
+Fangyuan Xu, Weijia Shi, and Eunsol Choi. RECOMP: Improving retrieval-augmented
+LMswithcontextcompressionandselectiveaugmentation. InTheTwelfthInternational
+ConferenceonLearningRepresentations,2024. URLhttps://openreview.net/forum?id=
+mlJLVigNHp.
+ZhilinYang,PengQi,SaizhengZhang,YoshuaBengio,WilliamWCohen,RuslanSalakhutdi-
+nov,andChristopherDManning. Hotpotqa: Adatasetfordiverse,explainablemulti-hop
+questionanswering. arXivpreprintarXiv:1809.09600,2018.
+13Preprint
+TianjunZhang,ShishirGPatil,NamanJain,ShengShen,MateiZaharia,IonStoica,and
+JosephEGonzalez. Raft: Adaptinglanguagemodeltodomainspecificrag. arXivpreprint
+arXiv:2403.10131,2024a.
+ZhenyuZhang,YingSheng,TianyiZhou,TianlongChen,LianminZheng,RuisiCai,Zhao
+Song,YuandongTian,ChristopherRe´,ClarkBarrett,ZhangyangWang,andBeidiChen.
+H2o: Heavy-hitter oracle for efficient generative inference of large language models.
+AdvancesinNeuralInformationProcessingSystems,36,2024b.
+MingZhong,DaYin,TaoYu,AhmadZaidi,MutethiaMutuma,RahulJha,AhmedHassan
+Awadallah,AsliCelikyilmaz,YangLiu,XipengQiu,etal. Qmsum: Anewbenchmarkfor
+query-basedmulti-domainmeetingsummarization. arXivpreprintarXiv:2104.05938,2021.
+14Preprint
+A Appendix
+A.1 ExtendedExperimentalSettings
+In this part, we provide details of our experimental settings in the main text. For the
+experimentspresentedinSec4.1,wesummarizethehyperparametersettingsinTable5.
+Weuseallsamplesfromthetrainsplitofeachdatasetforfinetuning,exceptforHotpotQA,
+fromwhichwerandomlyselect20,000samplesfromitstrainsplit.
+Hyperparameters QuA QAS QM NQA HQA
+LoRARankr 8
+Optimizer AdamW
+WeightDecay 0.00
+LearningRate 2×10−5
+LRScheduler cosineannealing
+BatchSize 8 8 8 32 32
+WarmupRatio 0.04
+Epoch 3 3 3 1 3
+Table5: Hyperparametersettingsofexperiments.
+A.2 MoreDetailsonDatasets
+Hereweprovidemoredetaileddescriptionsofthe5maindatasetsusedforevaluation:
+• QuALITY(Pangetal.,2021)isamultiple-choicequestion-answeringdatasetover
+longcontexts. Itcontains150articleswithanaveragelengthof5000tokens,with
+6737questionsintotal. Thisdatasetisparticularlysuitedtoevaluatemodelsina
+long-contextsetting.
+• Qasper(Dasigietal.,2021)isadatasetforansweringquestionsaboutNLPresearch
+papers, sourced from the Semantic Scholar Open Research Corpus. It includes
+varioustypesofquestions,rangingfromdetailedexplanationstosimpleyes/no
+answers,basedonprovideddocuments.
+• QMSum(Zhongetal.,2021)featuressummariesandtranscriptsfrommeetings
+acrossvarioussectors,includingacademiaandindustry,focusingonquery-based
+summarization. Participantsaretaskedwithcondensingdialoguetranscriptsbased
+onspecificqueries.
+• NarrativeQA(Kocˇisky` etal.,2018)isaquestion-answeringdatasetderivedfrom
+completetextsofbooksfromProjectGutenbergandmoviescriptsfromvarious
+sources. Thechallengehereinvolvesgeneratingaconciseanswerfromlongand
+potentiallydisorderlytextssourcedfrombooks.
+• HotpotQA(Yangetal.,2018))isaWikipedia-baseddatasetthatchallengesusersto
+deriveanswersthroughmulti-hopreasoningacrossseveraldocuments,featuringa
+broadrangeofquestionsbeyondspecificknowledgebases.
+15
