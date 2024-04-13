@@ -326,7 +326,7 @@
 | --- |---|
 |idx| 2404.07838v1 |
 |title| The Role of Confidence for Trust-based Resilient Consensus (Extended Version) |
-|authors| Luca Ballotta. Michal Yemini
+|authors| Luca BallottaMichal Yemini
 |links| http://arxiv.org/abs/2404.07838v1 |
 |updated| 2024-04-11 15:27:14 UTC |
 |summary| We consider a multi-agent system where agents aim to achieve a consensusdespite interactions with malicious agents that communicate misleadinginformation. Physical channels supporting communication in cyberphysicalsystems offer attractive opportunities to detect malicious agentsnevertheless trustworthiness indications coming from the channel are subjectto uncertainty and need to be treated with this in mind. We propose a resilientconsensus protocol that incorporates trust observations from the channel andweighs them with a parameter that accounts for how confident an agent isregarding its understanding of the legitimacy of other agents in the networkwith no need for the initial observation window T_0 that has been utilized inprevious works. Analytical and numerical results show that i our protocolachieves a resilient consensus in the presence of malicious agents and ii thesteady-state deviation from nominal consensus can be minimized by a suitablechoice of the confidence parameter that depends on the statistics of trustobservations. |
