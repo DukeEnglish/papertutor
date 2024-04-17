@@ -1,0 +1,1365 @@
+Confidential Federated Computations
+HubertEichner*,DanielRamage*,KallistaBonawitz,DzmitryHuba,TizianoSantoro,Brett
+McLarnon,TimonVanOverveldt,NovaFallen,PeterKairouz,AlbertCheu,KatharineDaly,
+AdriaGascon,MarcoGruteser,andBrendanMcMahan
+GoogleResearch
+Abstract
+Federated Learning and Analytics (FLA) have seen widespread adoption by technology platforms
+forprocessingsensitiveon-devicedata. However,basicFLAsystemshaveprivacylimitations: theydo
+not necessarily require anonymization mechanisms like differential privacy (DP), and provide limited
+protectionsagainstapotentiallymaliciousserviceprovider. AddingDPtoabasicFLAsystemcurrently
+requireseitheraddingexcessivenoisetoeachdevice’supdates,orassuminganhonestserviceprovider
+thatcorrectlyimplementsthemechanismandonlyusestheprivatizedoutputs. Securemultipartycom-
+putation(SMPC)-basedobliviousaggregationscanlimittheserviceprovider’saccesstoindividualuser
+updatesandimproveDPtradeoffs,butthetradeoffsarestillsuboptimal,andtheysufferfromscalability
+challenges and susceptibility to Sybil attacks. This paper introduces a novel system architecture that
+leverages trusted execution environments (TEEs) and open-sourcing to both ensure confidentiality of
+server-sidecomputationsandprovideexternallyverifiableprivacyproperties,bolsteringtherobustness
+andtrustworthinessofprivatefederatedcomputations.
+1 Introduction
+Since its introduction in 2017 [48, 42], federated learning (FL) has seen adoption by technology platforms
+workingwithprivateon-devicedata(cross-devicefederatedlearning)orproprietaryserver-sidedata(cross-
+silo federated learning). FL’s appeal has been driven by its straightforward privacy advantages: raw data
+stays in the control of participating entities, with only focused updates sent for immediate aggregation,
+visible to the service provider. Systems that realize federated learning [18, 35, 51] run at scale today,
+reducing privacy risks in sensitive applications like mobile keyboards [33, 63, 21, 53] and voice assistants
+[12,34].
+However, basic federated learning offers an incomplete privacy story [19]: updates sent to the service
+provider can reveal private data unless updates are aggregated obliviously, and aggregated updates can en-
+code individual data unless trained with a differentially private (DP) learning algorithm [30]. A dishonest
+serviceprovidermightlogorinspectunaggregatedmessages,fromwhichagreatdealofinformationabout
+an individual participant can be learned [15, 57]. This risk has been addressed with oblivious aggrega-
+tion schemes that guarantee the service provider cannot inspect unaggregated messages, including secure
+multiparty computation (SMPC) from cohorts of honest devices [17], non-colluding SMPC-based secure
+aggregators [58], or hardware trusted execution environments (TEEs) [35]. Recent work in training pro-
+duction FL models with device-level1 DP has shown the potential of training high utility models with the
+*HubertEichnerandDanielRamageconceived,coordinated,andeditedthiswork. Correspondencetohuberte@google.
+comanddramage@google.com.
+1Foruserswithasingledevice,device-levelDPcorrespondsdirectlytouser-levelDP.
+1
+4202
+rpA
+61
+]RC.sc[
+1v46701.4042:viXrastrong guarantee that model parameters are statistically similar whether or not they contain any one device
+[61, 62]. And despite work showing how DP models can be trained atop oblivious aggregation protocols
+[43, 8], substantial gaps remain between the best guarantees a model might offer with a trusted aggregator
+versuswithSMPC-basedsecureaggregation. Thisisbecausestate-of-the-artDPmechanismseitherrequire
+sophisticated random device sampling schemes2 or require statefulness [22, 44], making their distributed
+implementation challenging. This has led to utility gaps between central DP and distributed DP training3.
+Further, robustness to Sybil attacks [29], where the service provider sends specially constructed messages
+through the oblivious aggregator designed to maximize information about a targeted individual, continues
+tobeamajorchallengeforSMPC-basedsecureaggregationschemes.
+Inthispaper,weintroduceanewsystemarchitectureforfederatedlearningandanalytics[52],designed
+to enable confidentiality of server-side computations and provide externally verifiable privacy properties.
+In short, a long lived, TEE hosted service holds the keys to uploaded encrypted data from client devices,
+andcontrolsaccesstothatdatabyTEE-hosteddataprocessingpipelinesviadataaccesstrackingandpolicy
+enforcement. TEE hosted processing is subject to confidentiality, integrity, and external verifiability. The
+system enables a fleet of participating devices to keep control of their data, with individual uploads to the
+system tagged with a complete and closed set of computations in which the data may ever participate.
+Participating devices may further verify the privacy properties of the algorithms (e.g. a federated learning
+algorithm), as well as the properties of any unencrypted values released by the algorithm to the service
+provider (e.g., a specific DP guarantee). All uploaded messages and all intermediate results are encrypted
+with keys that are inaccessible to the service operator, so long as the TEEs’ confidentiality and integrity
+propertieshold. OursystemdesignadmitsfutureopportunitiestointegrateSMPCasadefenseagainstTEE
+failureorleakage,whereapplicable.
+In order to prove to the device that uploaded data is released to the service provider only as part of a
+differentiallyprivateaggregate,oursystemisdesignedsothatitcan:
+1. Prove to the device that the server is running binaries built from source code which exhibits the
+behaviorsbelow,viaremoteattestationandopen-sourcing-seeSection3.8forcodepointers.
+2. Provetothedevicethatuploadeddataisprocessedonlybyapre-declaredseriesofoperations,where
+intermediate results are encrypted, with the service provider only able to access explicitly released
+values. InSection3wedescribethedesignofaledger,whosegoalistoenforcethisproperty.
+3. Prove to verifiers that the pre-declared series of operations corresponds to an algorithm with an ap-
+propriatenotionofprivacyforthetaskathand. Wefocusonthecanonicalcase,wherethealgorithm
+computesadifferentiallyprivateaggregatesummaryacrossmanydevices’data,withknownDPprop-
+erties,althoughothernotionsofprivacycanbesupported.
+4. Prove to verifiers that the algorithm’s privacy properties hold when it is run by the service provider
+across a collection of devices’ input data. For DP algorithms, this includes correctness of the aggre-
+gationandaccountingimplementations,andtherequirementthattheservicecannotre-runasegment
+of a DP algorithm multiple times with independent noise. Depending on the algorithm, it may also
+requireprovingthatdataisprocessedandcombinedunderconstraintssuchasshufflingorsampling.
+To the best of our knowledge, the system we have designed is the first to offer verifiable privacy in the
+senseoutlinedabove. Thisenablesnewfrontiersinprivatelearningandanalyticsonfederateddata. Forex-
+2FordistributedDPimplementationsthatusesecureaggregation,leveragingrandomdevicesamplingalsorequireshidingthe
+secrecyofthesample.Thiscanbedoneusingprivaterelays[58].
+3Seefigures1and2in[44]wheretheperformanceofunamplifiedDP-SGD(achievableviadistributedDP)iscomparedtothe
+performanceofstatefulmechanismslikeDP-FTRL.
+2ample,federatedlearningwithverifiableDPguaranteesthatarerobusttoSybilattackscanbeimplemented
+as a series of server-side processing steps that begin with per-client model updates. Similarly, models far
+largerthancanbesentoverthenetwork,includingLLM-sizedmodels,cannowbeefficientlyandprivately
+trainedonaTEE-hostedsubsetoffederateddata. Weexploreseveralmoresuchapplications,theirprivacy
+properties,andthedesignofthesysteminthesectionsthatfollow.
+2 Threat Model
+To precisely define the privacy and security guarantees of our proposed system, we begin by outlining
+anticipated threats and their potential impact. This involves identifying adversarial actors (both intentional
+and unintentional) and the technical capabilities they might employ. Recognizing that perfect security is
+unattainable,wethendistinguishbetweenthreatsourdesigncanmitigateandthoseconsideredoutofscope.
+Our primary privacy objective is to offer proof to each end user (here: device owners) that the only
+waythattheirdatacanbeusedisinaccordancewithpre-approvedprivacy-preservinganalyses. Anyother
+use by actors who might interact with our system constitutes a potential threat. In general, our trust model
+considersadversarieswhocanspanmultipleoftherolesbelow.
+2.1 PotentialAdversariesandCapabilities
+Datascientists Anyindividualorgroupactinginthecapacityofadatascientistisabletoauthorqueries
+foranalyzingdataortrainingmachinelearningmodels. Inappropriatelystructuredqueriesmightnotreflect
+the privacy properties we hope to enforce; for example, an inappropriate query might not offer enough (or
+any)differentialprivacy, whichcouldconflictwiththeprivacypromisemadetotheenduser. Suchqueries
+might be used to extract targeted information about individuals or groups. We require a system that offers
+verifiableproofthatananalysiswillonlybeexecutedifitmeetstherequireddataprivacycriteria.
+Even if each analysis submitted by a data scientist is individually acceptable, the aggregate collection
+ofanalysesmightnotmeetthedesiredprivacystandards. Differentialprivacy,whichmandatestheaddition
+of random noise, illustrates this challenge. If a data scientist can execute the same query repeatedly, each
+with fresh noise, they could potentially ’triangulate’ the results (by averaging out the noise). This would
+allowthemtoinferthetrue,un-noisedvaluewithgreateraccuracythanasingledifferentialprivacyanalysis
+suggests. Consequently, a system offering verifiable proof of the maximum number of times a particular
+analysiscanbeexecutedisessential.
+Data access policy author Data access policies place codified limits on what computations (and how
+many) are allowed to run on user data, in particular the properties of the released outputs provided to the
+data scientist using the system. For example, the policy can specify specific DP parameters or aggrega-
+tion requirements; when we refer to “privacy guarantees” or “privacy properties” in this work, we mean
+specificallythoseprovidedbyanappropriatedataaccesspolicy. However,evaluatingtheacceptabilityofa
+dataprocessingworkloadagainstapolicyisonlymeaningfulifthepolicyitselfiswell-defined,alignswith
+end-user expectations, and is resistant to unauthorized modification. Therefore, our system must ensure
+transparency regarding the access policy enforced upon data upload and provide verifiable proof that this
+policycannotbecovertlyalteredafterdatacollection. Thatis, ifthedataaccesspolicyauthorismalicious
+ormakesamistake,theprivacyguaranteesofoursystemmaynotbeadequate,butendusersorauditorswill
+beablereliablydetectthisshortcoming.
+3Otherendusers Werequireoursystem’sprivacyandsecuritypropertiestobeverifiabletoeachenduser,
+regardlessofthebehaviorofotherendusers.
+Platformsoftwareauthor Server-sideplatformsoftwareauthorshaveagreatdealofflexibilityoverwhat
+code will interact with user data. Intentional or unintentional deviations from expected behavior can have
+huge impacts on the resulting privacy, ranging from producing insufficient levels of differential privacy
+throughdirectlyexposingindividualdata. Inoursystem,werequirethatallcodenecessarytoreasonabout
+the privacy properties of a given data processing workload is backed by verifiable proof of exactly what
+codehasrun. Notethatthismaynotbeallthecodeinthesystem;forexample,aportionofthesystemthat
+schedules when to run an analysis may not need to be backed by verifiable proof, so long as the workload
+itselfwouldmeettheaccesspolicywheneveritdoesgetrun.
+Platform software operator Any individual or group acting to operate the platform software also has
+significantcapabilitiestocauseintentionalandunintentionaldeviationsfromthedataaccesspolicy,oftenin
+subtleways. Forexample,aplatformoperatormightcauseasingleanalysistobeexecutedmultipletimes,
+therebycircumventingexpectedDPprotectionsasdiscussedabove,underDatascientists.
+The platform operator might also be able to control which users’ data is supplied as input to which
+analyses,whichcanformthebasisforseveralattacks. Forexample,thedifferentialprivacyattackfromthe
+Data scientists section supposes that different DP noise would be added each time an analysis is executed;
+mightitbeenoughtoguaranteethateverytimeananalysisisexecuted,thesameDPnoiseisadded? Inthe
+presence of an adversary who can control which users’ data is supplied to the analysis, the answer is no:
+such an adversary could run the analysis once including a target user’s data, a second time excluding that
+targetuser’sdata, andcontrasttheresults(e.g. subtractonefromtheother)torecoverjustthetargetuser’s
+contribution. Werequireasystemthatverifiablypreventsthisformofattack.
+Ifasingleenduser’sdatacanbecopiedmanytimesandallthecopiessuppliedtoananalysis(asifthey
+camefrommanyusers),thentheanalysiswillbefarmoresensitivetothetargetedusers’datathanexpected;
+ifDPisbeingused,thethus-inaccuratesensitivityanalysiswouldleadtoinsufficientDPnoisebeingadded.
+Werequireasystemthatpreventsthiskindofinputreplayattack.
+A malicious platform operator might instead simulate many end users, using known data for each end
+user. Forexample,iftheanalysisisintendedtobeasimplesumandthedataaccesspolicyrequiresacertain
+number of users’ data to be aggregated in that sum, then a malicious platform operator might include a
+single real users’ data while simulating the rest of users as all holding the value zero—thereby producing
+a sum that is equal to the targeted user’s data. These Sybil attacks [29] can make it particularly difficult
+to provide verifiable proof of privacy in the face of potentially malicious platform operators. We require a
+systemthatcanprotectagainstSybilattacks,forexamplebyensuringthatanendusersubmittingtheirdata
+tothesystemcanverifythattheanalysiswillbedifferentiallyprivateevenifallotherendusersareactually
+fakeorcontrolledbyanadversary.
+Many distributed systems include capabilities to persist or otherwise externalize portions of their oper-
+atingstate. Forexample, asystemmightsupportsomeformofstatesnapshotthatcouldenablerecovering
+partial progress in the event that a process unexpectedly terminates, migrating an executing process from
+onemachinetoanother,pausingandlaterresumingtheprocess,andsoon. Thesecapabilitiesandotherscan
+beextremelyvaluable,butcanalsoleadtovariouskindsofrollbackattacks: whereaportionoftheplatform
+system is forced to return to a previous state, either by changing the state of a live piece of the system,
+or by pausing and resuming from a previous state. These capabilities can sometimes also lead to forking
+attacks, where multiple copies of a piece of the system begin executing from some previously valid state,
+4but wherein each copy behaves as if it were the only copy. Forking and rollback attacks can lead to wide
+rangesofprivacy-compromisingbehavior,oftenbyenablingpreviouslydiscussedattacks. Forexample,ifa
+systemcanproduceananalysis,thenberolledbacktoastatefrombeforetheanalysiswasperformed,itcan
+be compelled to produce the analysis multiple times. Alternatively, if the system can be forked before the
+analysisisperformed,theneachfork(behavingasifitweretheonlycopyofthesystem)mightperformthe
+analysisseparately. Assuch,werequireoursystemtoprovideverifiableproofagainstforkingandrollback
+attacks,despitethecarefulconsiderationthiswillrequireinarobustandscalabledistributedsystem.
+Data center operator The platform software operator might choose to deploy the system on hardware
+directly controlled by a third party, for example Amazon AWS or Google Cloud; this is the party that
+directlysuppliesandoperatestheTEEsatthecoreofoursystem. Suchdatacenteroperatorshavefullaccess
+totheplatforminfrastructureinsoftware,andcouldpotentiallyexecutemanyoftheattacksabove,including
+attemptingtocauseunexpectedsoftwaretoexecute,dynamicallycontrollingthenetworktopology,starting
+/ stopping / migrating workloads from one machine to another, and so on. A data center operator typically
+runs the host operating system on which the platform workloads will run, controls the hypervisor on that
+system, and can observe various aspects of interaction between the analysis platform and the rest of the
+system. Thedatacenteroperatoralsohasdirectaccesstothephysicalsystemhardware,includingtheCPU
+andmemory.
+Oursystemassumesaccesstopotentiallyinsecuredatacenterstoragefor(encrypted)intermediatestate
+oftheprivatecomputations. Similarlytotheplatformsoftwareoperator,datacenterstorageoperatorscould
+attempttoread,modify,delete,inject,orrollbackanydatapersistedintotheirstoragesystems. Werequire
+our system to resist any such attack, e.g. by using various cryptographic measures to protect the confiden-
+tialityandintegrityofanyexternalizeddata
+Ourgoalistoprovidedefenseagainstthepotentialattacksaboveundertheassumptionthattheconfiden-
+tialityandintegritypropertiesofTEEsaremaintained. Specifically, weconsiderattacksbasedonphysical
+accesstotheTEEhardware(e.g.,powercycling,bussniffing,etc.) tobeoutofscope,astheattacksrequire
+a very high degree of sophistication and there is no known mitigation for them. Side channel attacks (e.g.,
+monitoring memory access patterns, timing of operations, message sizes, etc.) offer an interesting line of
+research that is out of scope in the current system, but will be revisited in future work—see the discussion
+in Section 5.4. Finally, potential TEE failure due to vulnerabilities in the CPU or the hosted software [56]
+constituteknownthreatsthatadatacenteroperatormaybeabletoexploit. Thesealsoremainoutofscope
+for the first version of our system presented here, which is thus not fully robust to a malicious data center
+operatorinthepresenceofsuchvulnerabilities. Weaimthoughforthedesigntobeamenabletotheuseof
+securemulti-partycomputationandrelatedtechniquesthatcouldaddresssuchattacksgoingforward.
+DuetotheseknownfailuremodesofTEEtechnology,weconsiderthecombinationofTEEtechnology
+withSecureMultipartyComputationsanimportantfuturedirection(seeSection5).
+2.2 Approach: Distributed Trust, Trusted Execution Environments, and Hardware Manu-
+facturers
+Defense against the attacks within the scope of our threat model become tractable when we are able to
+distribute trust between multiple parties wherein non-collusion between those parties is a believable as-
+sumption. Thereexistmanymechanismsfordistributingtrust;forexample,inthecryptographicliterature,
+weseeSMPCasonesuchmechanism.
+Inthispaper,wewillbeusinghardware-basedTrustedExecutionEnvironmentsasthebasisofourdis-
+5tributed trust. In essence, we will distribute trust between the TEE hardware designer/manufacturer and
+remainderoftheplatform(composedoftheplatformsoftwareauthorandoperator,andthedatacenterstor-
+ageandhardwareoperators). Specifically,wearguethatthatsolongaseither thehardwaremanufacturers’
+guaranteesholdortheremainderoftheplatformisuncompromised4, theprivacyclaimshold. Theprivacy
+properties of our system will depend only on the code running inside the TEEs; any compromise of this
+codewilleitherbepubliclydetectable(duetotheexternalverifiabilitypropertiesoftheTEEs),orelsewill
+requireboththeTEEtofailtodeliveratleastoneofitsconfidentiality/integrity/verifiabilitypromisesand
+requireanadditionalcompromisedoperatortoactivelyexploitthatvulnerability.
+2.3 RelatedWork
+Federatedlearningandanalytics(FLA)havebeenthesubjectofextensiveresearch. Inthispaper,wefocus
+specificallyonpriorworkrelevanttolarge-scaleFLAinfrastructureandtheintegrationoftrustedcomputing
+techniqueswithdifferentialprivacy.
+Privacy enforcement is at the heart of private data processing, and ideally the whole mechanism is
+both confidential and verifiable. Apple [51] relies on encryption with ephemeral per round keys and in-
+memory aggregation with DP; however, neither client nor server side portions have been open-sourced.
+Papaya[35]leveragesTEEstoimplementsecureaggregationthroughrandomadditivenoisebasedonuser
+suppliedencryptedrandomseeds,butdoesnotprovideexternalverifiability. Bonawitzetal.[18]usessecure
+aggregationandhasextensivelyopen-sourcedinfrastructure[39],butdoesnotprovideexternalverifiability
+beyondopen-sourcing,andsecureaggregationdoesnotofferprotectionsagainstSybilattacks.
+ElephantDP [41], unlike previous systems, provides a fully confidential and verifiable privacy budget
+mechanism and relies on the Narrator architecture [49], which provides state continuity via a distributed
+system similar to ROTE [47] or Nimble [10], to enable fault tolerance and rollback protection. The Ele-
+phantDPsystemisclosesttoourworkinthatitenablesrunningaseriesofDPqueriesoverprivatedataina
+TEE,inamannerresistanttorollbackorforkingattacks. Themaincontributionsofoursystemascompared
+toElephantDParethefollowing. Weconsiderasettinginwhichthereisnotasingledataowner,butmany
+client devices, which must all upload data in a secure yet scalable manner. We also consider a setting in
+whichthecomputerequiredtoruntheDPqueriesishigherthanthatwhichcanexecuteonasingleTEEina
+reasonabletimeframe. Finally,weconsidertheimpactofrunningqueriescontainingsomeproprietarycode
+ontheprivacypropertiesofthesystem.
+3 Architecture
+Inthissectionwefirstoutlinethedesignprinciplesthatmotivateourarchitecturalchoices. Wethenproceed
+todescribethedataflowandvarioussystemcomponentsofourconfidentialfederatedcomputationplatform.
+3.1 GeneralDesignPrinciples
+Data anonymization The results released by the system to the “untrusted” space are subject to data
+anonymization. WechooseDPasthegoldstandard,butotherapplicationworkload-appropriateanonymiza-
+tionmethodscanbesupported.
+4E.g.becausestandardbestpracticesforsoftwaresystemssecurityhavebeenenforced.
+6Data minimization Throughout the lifetime and placement of sensitive data, from data collection to ag-
+gregation,dataminimizationtechniquesareappliedtolimitasfaraspossiblewhatdataexistswhere,when,
+andwhohasaccesstoit. Thisencompassesawiderangeoftechniques,fromfocuseddatacollection,reduc-
+ingtheamountofcollecteddatatothenecessaryminimum,toconsistentencryptionofnon-DP-aggregated
+data.
+Defense in depth A secure data processing system should rely on multiple security mechanisms in case
+oneormoreofthesemechanismsarebreached. Throughoutthestackwethereforeemployvarioussecurity
+bestpracticestominimizetheriskofprivacyleakage(someoftheseembodydataminimization):
+1. Principleofleastprivilege—limitthelevelofaccess,andthesetofindividualsorcomponentswith
+that access to the minimum necessary to operate the system. This is implemented through a variety
+ofmechanismssuchasAccessControlLists. Anotableapplicationofthisprincipleisminimizingthe
+APIsurfacebetweentrustedanduntrustedcomponentstopreventattacksontrustedcomponents,and
+leakageofprivatedatafromcompromisedtrustedcomponents.
+2. LimitunilateralaccesstoresourcesviaMulti-partyauthorization,thuselevatingtheriskfromindi-
+vidualmaliciousorcompromisedactorstomultiplecolludingactors. Thisisfurtherstrengthenedby
+SeparationofDuties,theconceptofassigningindividualstonon-overlappingrolesrequiredtofulfill
+atask(e.g. ensurethatdatascientistsanddatacenteroperatorsarenotthesameindividual).
+3. Increasediscoverabilityofattacksthroughloggingaccessesand(manualorautomated)auditing—a
+reactivemethoddesignedtoactasadeterrent.
+4. Employsafedefaultswhereverpossible,suchasautomaticdatadeletionafterdefinedretentionperi-
+ods.
+3.2 TrustedComputingSpecificDesignPrinciples
+Trustedvs. untrustedspace Awelldefineddecisionboundaryforwhatfunctionalityexecutesintrusted
+and in untrusted space is key to scalable and verifiable application of trusted computing in data processing
+systems. We follow the design philosophy of reducing TEE-hosted functionality to the logic necessary for
+providingprivacyguarantees—notably,codepathsthathandleunanonymizeduserdata. Thisapproach:
+1. LimitstheattacksurfaceofTEEhostedsoftware.
+2. Allows for improved composition with existing, untrusted infrastructure for e.g. data storage, trans-
+port, and orchestration of computations; and further facilitates portability / reuse in other operating
+environments.
+3. Reducesoperatingcosts/improvesperformanceduetoTEEoverhead(seeSection5.2).
+4. Aidsauditabilitybyreducingthetrustedcomputingbase—notablytheamountandscopeofsoftware
+componentsthatneedtobeanalyzed.
+External verifiability One of our key motivations for using TEEs is to provide verifiability of claims
+aboutprivatedataprocessingontheserversidetooutsideparties. Inparticular,itshouldbeeasyforexternal
+auditorstoverifyorfalsifyourclaims. Foralistofpropertieswewouldliketoprove,pleaseseeSection1.
+Herewesummarizeprerequisitesandtechnologiesthatweconsiderkeytoprovidingthisverifiability:
+71. Proving what source code is being run in a TEE, requiring remote attestation to client devices and
+theirusersonwhatbinariesarebeingruninaTEE,withthehardware(e.g. CPU)manufacturerbeing
+theroot-of-trust. WeprovidemoredetailonourapproachinSection3.6.
+2. Establishing what source code this binary refers to, via open-sourcing the code, publishing build
+instructions (see Section 3.8), build provenance, and reproducible builds (alternative—use of trusted
+buildinfrastructure).
+3. Provide high readability of the published code. While reducing Trusted Computing Base [54] code
+size(whichinthiscontextmeansthecodethatisincludedinthebinaryrunningintheTEE)andcom-
+plexityaregoodgeneralguidelines,thesestepsmaybeatoddswithflexibilityandperformance(e.g.
+considerexecutinghigh-performanceMLworkloadsinaTEE);furthermore,thereuseofextensively
+studiedinfrastructuresuchastheLinuxkernelmayimprovereadability/verifiabilityovere.g. custom
+kernelswithsmallerTCBsizebutlittletonoexistingauditing.
+Atthistime,weuseTEEstoprovideverifiabilityoftheprivacysensitivecodepathsweexecuteonthe
+serverside. Onthedeviceside,wefacethechallengethatTEEsarenotwidelyavailable,andthatthecode
+needstobeintegratedintoexistingappsthatmaybeproprietaryorbuiltnon-reproduciblybythirdparties;
+wethereforecontinuetoprovidedevicesidetransparencythroughopen-sourcingthecode(seeSection3.8).
+Chain-of-trust Most real world, large scale applications of TEEs for data processing will require dis-
+tributingtheworkovermultipleTEEsbothtoprovidea)fault-toleranceforstatefulcomponentssuchaskey
+management,andb)parallelizationandpipeliningforprocessinglargeamountsofdata. Ratherthanhaving
+devices remotely attest each TEE involved in this distributed system, we propose the concept of a chain
+of trust—devices establish trust with a specific binary, and that binary in turn will establish trust (through
+remote attestation, much like end user devices) with other binaries that will further handle the data, and so
+on. ThisisausefulabstractionmechanismtocombinemultiplebinariesandTEEsintoadistributedsystem
+while retaining full external verifiability of that system; our architecture presented in the next section will
+helpillustratethisidea.
+3.3 Overview
+We begin our architectural description with a brief outline of the lifecycle of a trusted data processing
+pipeline,illustratedbydescribingtheflowofdataoriginatingfromenduserdevicesthroughthesystemup
+to release of an anonymous aggregate, briefly touching on each of the involved components. We will then
+describeeachcomponentingreaterdetailindedicatedsections.
+Thefirststepisstartingupaserver-sidetrustedcomponentwecalltheledger—alonglivedservicethat
+literally“holdsthekeys”touploadedencrypteddatafromclientdevices,andcontrolsaccesstothatdataby
+othertrustedcomponentsviadataaccesstrackingandpolicyenforcement.
+Client devices store data locally, and retrieve three artifacts from the server—a query, a data access
+policy,andanattestationreportfromtheledger(includingitspublickey). Thedevicetestswhetherthedata
+access policy—a description of how query results will be processed by server side pipelines—conforms
+to its settings (e.g. user preferences), including what computations can process the data, what the privacy
+budgets are etc. The device also verifies the attestation report; only after passing these checks, the data is
+encryptedwiththeledger’spublickeyanduploadedtoserversidestorage.
+Separately, a data processing pipeline such as a Map-Reduce style histogram computation is executed
+on the server. This pipeline orchestrates (spins up, chains) TEE hosted data transformations to operate on
+8SELECT WITH DP
+SUM(*)
+FROM (
+SELECT str
+FROM db
+WHERE ... )
+1 4 Dataflow
+Pipeline
+SELECT *
+FROM
+5 6
+Storage Storage
+SELECT *
+DP_SUM
+FROM
+3
+SELECT *
+FROM
+Replication & Sharding
+2
+Public Key Ledger Ledger Unwrapping Keys
+user1L:e cdogunetr1 user5L:e cdogunetr5
+u .s .u
+u
+.e .s
+s .u
+uu
+u
+.re
+e .s
+ss
+s
+.2r
+re
+ee
+e
+.:1
+2r
+rr
+r
+L:
+:1
+21 2cL e
+:
+:: :oe c cd ud o
+oc
+cc cng gu
+uo
+oo ote n ne
+u
+uu u2r t
+tn
+nn nr1
+2t
+tt
+t1
+21
+2
+u .s .u
+u
+.e .s
+s .u
+uu
+u
+.re
+e .s
+ss
+s
+.6r
+re
+ee
+e
+.:5
+6r
+rr
+r
+L:
+:5
+61 2cL e
+:
+:: :oe c cd ud o
+oc
+cc cng gu
+uo
+oo ote n ne
+u
+uu u6r t
+tn
+nn nr5
+6t
+tt
+t5
+61
+2
+... ...
+Figure1: Highleveloverviewofclient,TEE,andserverdataprocessinproposedarchitecture.
+the uploaded private data; these workloads request decryption keys from the ledger which may approve or
+deny the request subject to the access policy cryptographically bound to the data, and records the usage.
+Communication between these workloads is also encrypted. Finally, a data transformation workload may
+releaseaggregateresultstountrustedspacesubjecttodifferentialprivacyguarantees.
+3.4 TrustedInfrastructurePrimer
+In order to be able to make externally verifiable claims about what happens to user data once it reaches
+the TEE, we need to be able to prove that the code running in the TEE was built from a specific open-
+source commit, without the need to “just take our word for it.” For this, we leverage Project Oak [6], a
+framework that provides hardware-based remote attestation bound to signing and encryption keys, and a
+layeredarchitecturethatallowsverifyingtheentiretyofthesoftwarestackrunningintheTEE.
+Atthebottomlayer,aTEEusuallyonlyprovidesasingleremoteattestationprimitivethatbindstogether
+the measurement of the initial state of the TEE VM memory and some application-provided data. The
+measurement of the initial state of the VM corresponds to the digest of the compiled firmware binary (e.g.
+BIOS)withwhichtheVMisbooted. Oakprovidesacustomfirmware(called“stage0”)thatallowsbooting
+eitherLinuxoracustomkernel;Oakstage0isintentionallyveryminimal(fullyauditablebyasingleexpert
+reviewer),writtenasmuchaspossibleinRust,andreproduciblybuildablefromtheOakgitrepository. This
+allows external reviewers to confirm that the initial TEE measurement indeed corresponds to the specific
+codethattheycanreadandauditontheOakrepository. OakthenusestheDICEprotocol[31]torecursively
+measuretherestofthebootchain,includingthekernel,uptotheapplication. Atthistime,webuildontop
+ofAMDSEV-SNP[37],andplantosupportIntelTDX[26]inthefuture.
+Atthehigherlevelsinthestack,Oakofferstwoalternatives:
+• Oak Restricted Kernel: for high security use cases (with a minimal TCB, which does not include
+Linux),butrelativelylowperformanceandhighmigrationoverhead
+• Oak Containers: for high performance use cases, easy migration of existing workloads, access to
+9hardwareaccelerators,atthecostofalargerTCB(includingaLinuxkernelanddistribution)
+Oakisimplementedasasplitarchitecture,inwhichonlythesubsetofthelogicthatneedstobetrusted
+runsintheTEE(andthereforecontributestotheTCB)andhasaccesstothedecryptionkeys,whiletherest
+ofthelogicthatonlydealswithencrypteddataanddoesnothaveaccesstothedecryptionkeysrunsoutside
+of the TEE. The trusted and untrusted components communicate with each other over a communication
+channelintheformofaUDSsocket. Thisallowsbetterseparationofconcerns,andonlygrantingprivileges
+totheminimalamountoflogicthatrequiresit.
+The client (e.g. Android phone) obtains all this information from the server, and uses it to determine
+whethertheserverinstanceistrustworthy. Therearethreekeypiecesofinformationthatitusestothisend
+(basedontheRATSarchitecture[14]terminology):
+• evidence: claims signed by the TEE instance, binding together the state of the TEE, the identity of
+thecoderunninginit,andapplicationleveldata(usuallypublickeys);producedbytheTEEinstance
+atruntime.
+• endorsements: additionaldatausedtoestablishthetrustworthinessoftheevidence(e.g.,intermediate
+certificates,signatures,inclusionproofs);producedorcachedbytheuntrustedhostrunningtheTEE.
+• reference values: the policy that determines the acceptable range of values that the client trusts
+(e.g., TCB version number, individual measurements, etc.); usually hardcoded in the client code, or
+obtainedoversometrustworthychannel.
+Oak provides a client library that allows a client to determine the trustworthiness of the TEE evidence
+accordingtoalocalsetofreferencevalues,takingintoaccountanyavailableendorsements. Iftheclientis
+satisfied with the TEE evidence, it then extracts the public keys of the application, and uses them to verify
+signaturesfromand/orencryptdatatotheapplication.
+3.5 Ledger
+The ledger is the TEE-hosted application that enables the device, after verifying the identity of software
+in the TEE, to reason about the full set of downstream uses in which any uploaded data may participate.
+Conceptually, the ledger combines a key store (holding keys needed to decrypt any uploaded data) with
+a stateful policy engine (that enforces that keys are given out only to other TEE-hosted applications with
+approvedaccess).
+Inmoretechnicalterms,theledgerisakeyunwrappingservicethatenforcesstatefuluse-basedprivacy
+policies. This service allows secure asynchronous communication between data producers and consumers
+using pre-existing channels, such as uploads with HTTP POST or processing with Apache Beam [59]. At
+a high level, a publisher—in our case, an end user device or subsequently a TEE in a data processing
+pipeline—encryptsitsdatausingauthenticatedencryptionwithassociateddata(AEAD)withanephemeral
+key, wraps the ephemeral key with a ledger-generated public key using single-shot hybrid public key en-
+cryption (HPKE), then transmits the encrypted data and wrapped key using a channel of its choice. To
+decryptthedata,aconsumer—inourcase,aTEEinadataprocessingpipeline—providesthewrappedkey
+and the identity of its TEE hosted data transformation; if the consumer is authorized under the data’s ac-
+cess policy, the ledger unwraps the key and returns it to the TEE hosted data transformation over a secure
+channel. Unless that transformation is a terminal step in the data processing pipeline, it will then act as a
+data producer and re-encrypt the processed data before exposing it outside the TEE (see Section 3.7). The
+10SELECT * DP_SUM
+FROM ε≤1 δ≤10-15
+1 time 1 time
+I O
+Figure2: Anexampleaccesspolicyforthepipelineinfigure1allowingtheinitialdatatobeprocessedfirst
+by a TEE that performs a SELECT operation, then by a TEE that implements a DP sum with ε ≤ 1 and
+δ ≤ 10−15. Eachstagemayonlyaccessthedataonce,andnootheraccessisallowed.
+ledgermaintainsmultipleHPKEkeyssothatkeyscanberotatedwithoutturningupordownservers;these
+HPKEkeysaresignedbyanapplication-levelkeyintheOakevidencetobindthemtotheTEEinstancethat
+generatedthem.
+Thereareseveralimportantconsequencesofthissystem:
+• Sincetheledgeronlyperformskeyunwrapping,itsloaddoesnotscalewiththesizeoftheencrypted
+data.
+• Data producers do not need to verify every data transformation workload in the processing pipeline
+themselves. Instead, they can verify the ledger and the data access policy, entrusting verification of
+subsequent data access to the ledger. As a result, data producers and consumers do not need to run
+concurrently.
+• Data producers do not need to directly communicate with the ledger. Instead, they can obtain the
+ledger-generatedpublickey,theledger’sevidenceandendorsements,andthedataaccesspolicyfrom
+an untrusted intermediary such as a Content Delivery Network. As a result, the ledger is not in the
+criticalpathfordataproduction,relaxingitslatencyandavailabilityrequirements.
+• ThewrappedkeycanonlybeunwrappediftheledgerstillholdsthecorrespondingHPKEprivatekey.
+Cryptographic erasure of uploaded data can be achieved by intentionally deleting the HPKE private
+key. Additionally,whentheHPKEprivatekeyisdeleted,allassociateddataaccessrecordscansafely
+beforgottenaswell,boundingtheamountofstatethatneedstobetracked. WrappingtheAEADkey
+for encrypted derived data with the same HPKE key as the source data ensures that the derived data
+cannotoutlivethecryptographicerasureofthesourcedata.
+• Separating data access policy enforcement from data processing allows existing processing systems
+tobeaugmentedwithexternalverifiability.
+3.5.1 DataAccessPolicies
+DataaccesspoliciesspecifythesequenceofTEEhostedtransformationsthatcanaccessthedata;theaccess
+policy is indelibly bound to the corresponding encrypted data by including it in the associated data (AD)
+usedwhenwrappingtheencrypteddata’sencryptionkeywithHPKE.Theaccesspolicycanberepresented
+asadirectedgraphwhereeachedgedescribesaccessconditionssuchasthespecificTEEhostedbinary,the
+othercomponentsintheTEE(e.g. kernelandsystemimage),andanyprivacy-orsecurity-relevantaspects
+of the binary’s configuration (e.g. (ε,δ) values for a DP aggregator). By combining the specific set of
+binaries that are able to access the data with knowledge of their source code, it is possible to reason about
+theoverallserver-sideusageofthedata.
+11Data access policies are stateful: they specify not only which consumers can access the data but also
+how many times (e.g. only once). As described in Section 2, limiting usage allows reasoning about the
+differentialprivacypropertiesofthesystemandisnecessarytopreventdenoisingviatriangulation. Tracking
+pastdataaccessessignificantlyincreasestheamountofstatemaintainedbytheledger,butbycolocatingthat
+state with the corresponding HPKE private key, we ensure that the private key and access records have the
+samelifespan: attemptingtowipeoutaccesshistorybyrestartingtheledgerwouldalsowipeouttheprivate
+key, rendering the associated client data unreadable. This state also needs to be resistant to forking and
+rollbacks,whichisstraightforwardwhenthestateismaintainedinthememoryofasingleserverandmore
+involvedinamulti-serverorfault-tolerantenvironment(seeSection5.1).
+3.5.2 LimitingDataRetentionviaCryptographicErasure
+HPKEkeysgeneratedbytheledgerhaveexpirationtimesafterwhichtheledgerwillforgetabouttheHPKE
+keyandallassociatedaccessrecords—thuscrypto-erasingalluploadeddataprotectedbythatkey. However,
+aswewilldescribeinSection5.5,accessingasecuretimesourcefromwithinaTEEisdifficult,especiallyat
+highQPS.Soinsteadofusingasecuretimesource,theledgerusesaninsecurebutmonotonicallyincreasing
+time source that is exposed to clients in the issued at and expiration times of all generated HPKE
+keys. Clientdeviceswillnotuploaddataiftheledger’stimeistooskewed: iftheledger’sclockisrunning
+significantly behind the current time, its HPKE keys will already be expired, and if the ledger’s clock is
+runningsignificantlyaheadofthecurrenttime,theissued attimewillnotyetbereached. SeeSection5.5
+forpotentialfutureimprovementsinthisspace.
+Toprovidedefenseindepth,allencrypteddataisalsosubjecttostorage-leveltime-to-livelimits(TTLs),
+thoughthesearenotexternallyverifiable.
+3.6 ClientSideArchitecture
+Clients(enduserdevices)participateinaconfidentialcomputationusingamulti-stepprocessthattypically
+starts by collecting and storing data into an on-device database over a period of time; then, after checking
+in with the server, they perform a data summarization and result upload step. In cases where further data
+minimizationisdesirableorrequired,persistingdataondevicesmaybeskipped.
+3.6.1 ClientSummarizationTasks
+Whenaclientconnectstotheserver,theserverprovidesitwithalistofallcurrentlyavailableclientsumma-
+rizationtasks,alongwithasetofoptionaleligibilitycriteriadescribingtheclientrequirementsforeachtask.
+Summarizationtasksdescribehowclientsshouldpreprocessandcondensedatabeforeuploadingresults;in
+our current system, we support SQL queries that select a filtered projection of the on-device database, and
+machinelearningworkloadsthatcomputemodelupdatesandmetricsonthatdata. Thispreprocessingsum-
+marizationoffersflexibilityandembodiesthedataminimizationprinciple.
+Before executing a summarization task, clients first determine whether they’re eligible to run it by
+inspecting their local state using the aforementioned eligibility criteria. For example, sampling-without-
+replacement (SWOR) eligibility criteria inspect a clients’ Operational Stats (OpStats) database, a log of a
+client’sprevioustaskcontributionswhichiskeptbytheFederatedComputeclientlibrary. SWOReligibility
+criteria can be used to ensure that a client does not contribute data more than once per task-defined period
+(e.g. no more than once every 24 hours, or only once in the lifetime of a task), which is a useful primitive
+forprovidingDPguarantees(seeSection4.1).
+123.6.2 LedgerAttestationVerificationandUploadingEncryptedResults
+Once clients have run a summarization task and produced a result, the server provides clients with the
+ledger’sattestationevidence,andapublicencryptionkeygeneratedandsignedbytheledgerbinary. Clients
+thenperformtwokeychecks:
+1. Verifying attestation evidence, ensuring that it is rooted in a hardware root of trust such as AMD
+SEV-SNP, and that the stage0 firmware, kernel, and application binary hashes are all valid and that
+the provided encryption key was produced by the attested application binary. A valid binary hash is
+onethatoccursinanout-of-bandprovidedallowlistofknownhashes, oronethathasbeenendorsed
+by both Google and a 3rd party such as Rekor [2]. For the time being, we are using allowlist-based
+binaryverification,butweexpecttomovetoanendorsement-basedapproachinthefuture.
+2. Validating the data access policy that was provided alongside the task assignment. Currently we
+allowonlyapredeterminedsetofaccesspolicies,butweexpecttosupportmoreadvancedvalidation
+processesinthefuture.
+Ifbothcheckspasstheclientprintsanattestationverificationrecordcontainingtheattestationevidence
+anddataaccesspolicy(seenextsection). OnAndroid,thisrecordiscurrentlysenttologcat[1].
+TheclientthenencryptsitsdatausingtheencryptionkeyandtheHPKE-basedprocessdescribedearlier,
+and uploads the encrypted data to a server-specified URI, at which point the encrypted data can be further
+processed server-side with TEE-hosted processing, subject to the ledger limiting access according to the
+dataaccesspolicyasdescribedearlier.
+3.6.3 EnablingExternalVerifiabilityoftheDataProcessing
+By printing out the attestation verification record, we make it possible for someone (e.g. a security re-
+searcher) to gather such logs from their own device, and to redo the same verification steps that the client
+performed. Inspectingtheloggedattestationevidenceallowsonetoverifyexactlywhichledgerbinarygen-
+erated the public key, and therefore which binary is protecting access to the corresponding decryption key.
+TheevidencealsoprovesthattheledgerisrunninginaTEEprotectedbyahardwareroot-of-trustlikeAMD
+SEV-SNP. By inspecting the data access policy one can determine exactly how the uploaded data will be
+processed. SeeSection3.8formoredetails.
+Note that we expect this approach to evolve in the future, e.g. by logging the attestation verification
+record to more suitable and accessible locations than the logcat buffer, and by making it easier to trigger
+one’sdevicetoparticipateinthecurrentlyavailableconfidentialcomputations.
+3.7 DataProcessing
+When clients upload data, the encrypted data is written to storage, but as described in 3.5, the data can
+only be decrypted with an in-memory key held in the ledger. This allows for processing of the data asyn-
+chronouslyfromtheuploadstep,andthatdecouplingofferssimplicityandflexibilitybenefitsoversystems
+suchas[18].
+Theoretically,theentiretyofthedatamightbeprocessedinasingleTEE;however,forthetypeofscale
+ofworkloadsweaimtosupport,thiswouldbeinfeasibleintermsofcomputeandmemory,andsuggeststhe
+useofagraphofTEEsforparallelandpipelinedprocessingofdata. Ourarchitecturedistinguishesbetween
+13orchestration,whichonlyeveroperatesonencrypteddataandthuscanrunonhardwarewithoutconfidential
+computingprotectionsenabled,anddatatransformations,whichrequiredecryptingthedataandthusmust
+runinTEEs. Wedefineadataprocessingworkloadasconsistingofuntrustedinfrastructureorchestratinga
+graphofdatatransformationsthatruninTEEs.
+3.7.1 Orchestration
+Theseparationbetweenuntrustedorchestrationandtrusteddatatransformationallowsustoleverageexist-
+ing systems that are optimized for executing particular workloads. For example, for batch and streaming
+analytics workloads, orchestration can be performed by existing, widely used frameworks for writing and
+runningmap-reducestylepipelines,likeApacheBeam[59].
+The orchestration layer starts up the TEEs that will execute the data processing. TEEs may have a
+highstartupoverheadduetothepotentiallyexpensiveoperationsofVMmemoryvalidationandattestation
+evidence generation, which the TEE infrastructure must perform prior to being able to execute workload-
+specificcodeinatrustworthymanner. ItthendistributestheworkloadacrosstheavailableTEEstoexecute
+thedesiredtransformationsbypassingconfigurationandencrypteddatatotheTEEs. Finally,theorchestra-
+tionlayermusthandleTEEfailuresinamanneracceptabletotheworkloadanddatausagepolicies.
+3.7.2 TrustedApplications
+As is the case for orchestration, the data transformations all have different implementations depending on
+the workload, but the TEEs that execute the data transformations all have common responsibilities. Data
+transformations are implemented by a trusted application running in a TEE, which is launched by an un-
+trusted companion application. On startup, a communication channel is established between these two
+applications, which is the only way for the trusted application to perform I/O. Given that communication
+betweenthetrustedapplicationrunningthedatatransformationandtheledgerismediatedbytheuntrusted
+companionapplication,theprotocolmustberesistanttodelayed,inserted,andreplayedmessages.
+After startup, the untrusted companion application provides the trusted application with any workload-
+specific configuration. The trusted application then generates a keypair to be used for decryption, and
+signs the public key and privacy-critical configuration properties with a key rooted in the attestation. The
+untrusted companion application can then provide the signed public key and configuration properties and
+the attestation of the trusted application to the ledger in order to request access to data provided by the
+orchestrationlayer. Thedetailsofhowcommunicationsbetweentheledgerandthetrustedapplicationsare
+securedcryptographicallyaredescribedinmoredetailinSection3.5.
+When the trusted application receives data to be processed that has been authorized by the ledger, it
+decryptsthedatausingtheprivatekeythatitgeneratedatconfigurationtime,thenpassesthedecrypteddata
+totheworkload-specificdatatransformationcode. Noncesuniquelyidentifyauthorizationsfromtheledger,
+thuspreventingreplayingofmessagesbetweenledgerandthetrustedapplication(e.g. effortstoprocessthe
+samedatatwice).
+Executionofthetransformationoverdatamustnotbevulnerabletorollbackorforkingattacksthatcould
+compromiseprivacy. WeusehardwarethataimstoprotecttheintegrityofVMmemoryagainstamalicious
+hypervisor [37]. However, if the TEE crashes before the data transformation completes, any in-memory
+stateislost. ForthisreasonweconsiderdatatransformationTEEstobeephemeral. Faulttoleranceisnota
+propertyofthedatatransformationsthemselves,butdatatransformationscanberetriedbytheorchestration
+layerinordertoprovidefaulttoleranceatahigherlevelofthestack;forfurtherdiscussion,seeSection5.3.
+14Data processing steps may either produce encrypted, intermediate results intended for further process-
+inginTEEs,or—forterminalstepsinadataprocessingpipeline—theymayattempttoreleaseunencrypted
+results such as statistics, model weights etc. to the untrusted environment. For any output that is still con-
+sidered private, the trusted application encrypts the output following the cryptographic protocol with the
+ledger,sothattheoutputissubjecttotheusageconstraintsthatareencodedinthedataaccesspolicy. Only
+thenistheencryptedoutputbepassedoutsideoftheTEEboundarytotheuntrustedcompanionapplication
+inordertobeusedinfurtherprocessingsteps. Forterminalstepsinthepipeline,thetrustedapplicationonly
+releasesunencryptedoutputsthathavebeenproducedbyaprivacypreservingprocess, subjecttotheguar-
+anteesoutlinedinthedataaccesspolicy(recallthatthetrustedapplicationispartofthechainoftrust,given
+that it has attested to the ledger and the ledger has verified that its attestation and configuration properties
+matchthedataaccesspolicy).
+Asinthecaseoforchestration, datatransformationcodecanbenefitfromusinglibrariesoptimizedfor
+runningparticularworkloads, suchasSQLenginesfor analytics, andTensorFloworXLAfortrainingML
+models. However, since the transformations operate within TEEs on private data, the code implementing
+transformations should be subject to increased scrutiny, as claims that the data is handled in a privacy-
+preserving manner are only as strong as the code that implements those privacy protections. The use of
+existinglibrarieswithindatatransformationTEEshasthebenefitofenablingmoreadvanceddataprocessing
+patterns, but comes with the drawback of increasing the size of the TCB and thus the code that must be
+verifiedinordertoacceptthattheTEEisperformingagivenoperation.
+3.7.3 ProprietaryFunctionsandUser-LevelDP
+Open-sourcing of code is the foundation of external verifiability, so a particular challenge to proving that
+data is handled in a privacy-preserving manner arises for workloads that have a requirement to run some
+proprietary code over data. Open-sourcing of all data transformation code enables making privacy guaran-
+teesthatarebasednotonlyonformalDPproperties,butalsoonempiricalobservationsoftheprivacylossof
+thegivenworkload[9]againstweaker-than-worst-caseadversaries. Open-sourcingtheentireworkloadalso
+providesthemostflexibilityintheprocessingpatternwhilestillguaranteeingprivacyproperties. Despitethe
+advantages to fully open-sourced data processing workloads, in order to enable broad applicability of our
+privacy-preserving infrastructure we must contend with the fact that many workloads contain proprietary
+portions,suchasaproprietaryqueryormodelarchitecture. Inthesecases,arequirementtoopen-sourcethe
+entiretyofthedatatransformationcodecouldpreventadoptionoftheprivacyprotectionsforuserdatathat
+oursystemoffers.
+To contend with this challenge, we consider the proprietary portions of the workload to be untrusted
+functionsthatmightrunoveruserdata,andreasonabouthowwemightlimitthepowerofsuchfunctionsto
+influencetheprivacyoftheoutputoftheoveralldataprocessingworkload. Weobservethatbythedefinition
+ofdifferentialprivacy[30],user-leveldifferentialprivacyboundsholdregardlessofthecontentsofthedata
+from each user. Thus, even if an untrusted function independently modifies each user’s data before the
+DP algorithm is carried out, we can still make formal guarantees about the amount of information that can
+be learned about a user from an output artifact. What this means in practice is that if our data processing
+workloads ensure that a given user’s data can be modified by proprietary code only before executing a DP
+algorithm on the modified data (such an algorithm may include DP contribution bounding, aggregation,
+noising,etc.) wecanstillmakeaverifiableclaimthatthevalueoftheDPεcontrolstheadversary’sability
+to distinguish between a dataset containing a given user’s data and a dataset without that user. Figure 3
+shows the sequencing of DP operations relative to proprietary code that is required to preserve the desired
+properties.
+15Example workflow: Private
+Abstract model
+Heavy Hitters
+On-device upload logic ensures
+Participation control each user will upload at most once
+until privacy budget refresh
+Per-user function Per-user SQL query
+Contribution bounding L0, L1, L-Infinity norm clipping
+Legend
+Proprietary
+Aggregation Grouping Sum
+Open-source
+Independent Gaussian or
+Noise addition
+Laplace noise, thresholding
+Post-processing Data format conversion
+Figure 3: Ordering of DP operations relative to proprietary code and example Private Heavy Hitters appli-
+cationwhichwillbediscussedinSection4.1.
+Notethatthisobservationonlyholdsiftheuntrustedfunctionhaslimitedpower: thefunctionmustonly
+executeononeuser’sdataatatimeandproduceasingleoutputforthatuser. Consideranuntrustedfunction
+that rather than taking an input from one user and producing one output, takes inputs from N users and
+producesNoutputs. AnadversarialversionofthisfunctioncouldproduceNoutputsthatallcorrespondto
+one of the input users, breaking the DP algorithm’s assumption that each input corresponds to a different
+user. The same attack could be carried out if the untrusted function has the ability to save state between
+executions on inputs from different users. Thus, when writing trusted applications that execute proprietary
+data transformations, the externally verifiable open-source code must ensure that state is cleared between
+executionsoftheproprietarycode.
+This data processing pattern of per-user execution followed by aggregation is similar in structure to
+traditional federated algorithms. For this reason, we expect many data processing workloads will continue
+to use a federated processing pattern, even for workloads where the bulk of data processing logic might
+executeontheserver-sidewithinTEEs.
+3.7.4 AggregationCores
+Given the expected prevalence of workloads where aggregation with DP is critical to the overall privacy
+guarantees, we believe it is important to build reusable and externally verifiable primitives for aggregation
+with DP. For this reason we are developing a library of aggregation cores, which implement aggregation
+overarraysofdataandDPoperationsonthosearrays. Aggregationcoresaredesignedtobeperformantso
+thattheycanbeusedforaggregatingoverbillionsofinputsoraggregatinginputscontainingmultiplegiga-
+bytes of data. An explicit non-goal of the aggregation cores is flexibility. Unlike libraries like TensorFlow
+[7] or SQLite which are designed for expressibility, aggregation cores will support only a minimal set of
+aggregationprimitiveswithfewconfigurationparameters,tofacilitatereasoningaboutthepropertiesofthe
+16privacy-criticalDPaggregationstep.
+3.8 OSSRepositories
+TEE-hosted kernel binaries and container images The Project Oak repository [6] contains the source
+code for container images and kernels used to run TEE-hosted application binaries, as well as instructions
+for mapping a kernel-layer or container-layer binary hash in the attestation evidence to a specific kernel
+versionorcontainerimage.
+TEE-hostedapplicationbinaries TheConfidentialFederatedCompute[38]repositorycontainsthesource
+codefortheledgerbinaryandanumberofdataprocessingpipelinebinaries,moredetaileddocumentation
+oftheirimplementations,andinstructionsformappinganattestationverificationrecordloggedbytheclient
+library to the various binaries that record attests to (e.g. to map an application-layer binary hash in the
+attestationevidencetoaspecific,reproduciblybuildablebinary).
+Client-side code The code that runs on end-users devices and performs the verification of attestation
+evidence,loggingofexternallyinspectableattestationverificationrecords,andencryptionofclientpayloads
+canbefoundintheFederatedComputePlatform[39]repository.
+Attestation verification library The Oak Attestation Verification library [6] is used by both the client-
+sidecodeandtheledgerbinariestoverifytheattestationevidenceforTEE-hostedapplications. Theclient-
+side code verifies the TEE-hosted ledger binary, while the ledger binary verifies other TEE-hosted data
+processingbinariesasallowedbythedataaccesspolicy.
+4 Applications
+Thissectionaimstoillustratetheuseoftheplatformwithtwocommontypesoffederatedcomputations—
+opensethistograms,andon-devicelearning—followedbyabriefoutlookonextendedusagepatterns.
+4.1 DifferentiallyPrivateHeavyHitters(PHH)
+Aninitialusecaseweareexploringforthearchitecturedescribedaboveistheprivacy-preservingdiscovery
+ofheavyhitters[24,64],morepreciselyopensethistogramswithdifferentialprivacyguarantees5. Devices
+maintain counts of items (each item being identified by a unique key) and our objective is to compute the
+aggregatecountsacrossdeviceswithadifferentialprivacyguarantee.
+Torealizethisontheplatform,datascientistsdefinetwotasks,whichmaybeexpressedinSQL:
+clientsummarizationquery The client summarization task is responsible for selecting data from an on-
+devicedatabaseanduploadingthedevice’skey/countpairstotheintermediatestoragelocationasan
+encryptedblob.
+5Forthisapplication,weareconsideringdevice-levelDPwitha“replace-one”adjacencynotionwhereonedevice’sdatacan
+bechangedarbitrarily.
+17server-sideworkload The server-side workload specifies TEE-hosted transformations that apply a differ-
+entially private aggregation of the counts. Data scientists can use an extension of GoogleSQL’s dif-
+ferential privacy SQL options syntax to define a PHH query with specific DP parameters. This gets
+compiled into a protobuf configuration message consumable by a PHH-specific Aggregation Core
+implementation.
+Listing1showsanexampleserver-sideworkloaddefinitionforaquerythatgeneratestwohistograms: one
+for the number of items purchased on weekdays and one for the number of items purchased on weekends
+(both keyed by color and food). A PHH COUNT query can be conveniently expressed via a more general
+SUMprimitive, whichalsoallowshandlingthecasewheredevicescancontributeacountgreaterthanone
+peritem. Notehowthecross-deviceaggregationisasumofcounts,notacount;moregenerally,oursystem
+supportsdifferentiallyprivatesummationofnumericalvaluesassociatedwithkeys.
+Listing1: Server-sideworkloadqueryexample
+SELECT WITH DIFFERENTIAL PRIVACY OPTIONS
+(epsilon=1, delta=1e−8, max groups contributed=2)
+color , food ,
+SUM(num purchased weekdays) @{L inf = 3} AS total num purchased weekdays ,
+SUM(num purchased weekends) @{L inf = 4.5, L 1 = 8, L 2 = 6}
+AS total num purchased weekends ,
+FROM
+−− table representing all uploaded data with columns
+−− color , food , num purchased weekdays , num purchased weekends
+uploaded device data
+GROUP BY
+color , food;
+Notethattheserver-sideworkloaddefinitionspecifiesaprivacybudgetintermsofepsilonanddelta(ε,
+δ), which is the maximum privacy loss that the server-side workload will incur. The platform will match
+thequeryagainsttherequireddataaccesspoliciesassociatedwiththeuserdatabeingaccessed(notshown).
+Beforereleasinganyuploadedclientdatatotheserver-sideprocessingpipeline, theplatformconfirmsthat
+the server-side workload definition conforms with the access policy. In this example, a data access policy
+requiring (ε∗,δ∗)-DP or stronger would permit the query from Listing 1 to run as long as 1 ≤ ε∗ and
+10−8 ≤ δ∗. The access policy can also limit how often the data is used, for example specifying that any
+uploaded client data will be processed at most once by a TEE hosted binary containing PHH Aggregation
+Cores.
+In addition to the privacy budget, there are four additional DP parameters that the PHH Aggregation
+CoreimplementationusesandthatdatascientistsareabletosetusingSQLhints. Theseclippingparameters
+definethedifferentialprivacysensitivity. Theyinstructtheaggregationcoretoclipper-devicedatatothese
+bounds and are also used to determine the differential privacy noise setting and the key release threshold.
+Theseparametersthereforeprimarilyaffecttheutilityoftheresultingdata. Theyare:
+• max groups contributed (ℓ ): Each device is only allowed to contribute to a maximum of ℓ
+0 0
+keys.
+• L inf(ℓ ): Eachdeviceisonlyallowedtocontributeavalbelowℓ toagivenkey.
+∞ ∞
+• L 1(ℓ ): Eachdeviceisonlyallowedtocontributeatotalvalbelowℓ acrossallkeys.
+1 1
+18• L 2 (ℓ ): Each device is only allowed to contribute values for whom the root of the sum of squared
+2
+valuesacrossallkeysisbelowℓ .
+2
+FormoredetailsonhowtheseparametersareappliedtoprovideDPguarantees,seeAppendixA.
+Theapproachdescribedaboverequiresclippingparameterstobespecifiedupfrontbythequeryauthor.
+Obtaining the best choice of parameters demands nontrivial knowledge about the distribution of the data:
+anoverlysmallchoiceofℓ ,forexample,wouldintroducesignificantbiasineachaggregatewhileoverly
+∞
+large values would cause the DP noise to have overly large variance. Future work will explore a two-
+pass approach, where the first pass searches for clipping parameters without releasing a histogram6 and
+the second pass applies the query with the identified parameters. Depending on the use case and the data
+analyst’sneeds,thedataaccesspolicymayrequirethecomputation(andrelease)oftheparameterswithDP.
+Thecurrentalgorithmoperatesinabatched-input-and-single-outputsetting,whereuserdataforaspec-
+ified time period, say a week, is uploaded only once via the use of on-device SWOR (see Section 3.6), all
+user data is accessible at once, and only one differentially private report is required. In future applications
+weplantosupportmultipleuploadsper-clientandstreamingreleases,whilecontinuingtoensureuser-level
+differentialprivacy.
+4.2 Cross-DeviceFederatedLearning
+Another use case of interest is cross-device federated learning [48], which has been the focus of Google’s
+existingsystem[18]. Akeypropertyofthearchitectureproposedhereisthedecouplingofdevicesidepro-
+cessing(computingsummarystatistics,gradients,uploadingresults)fromsubsequentserversideprocessing
+(e.g. aggregationoverlargeamountsofdataorlongerperiodsoftime). Thisisanaturalandscalablesolu-
+tion for analytics use cases where client summaries are independent of each other (i.e. one client’s results
+donotdependonotherclients);learningusecasesontheotherhandtendtobeiterativeinnature,requiring
+feeding back results such as the latest model from the aggregation pipeline to devices running the gradient
+computation.
+Thereareroughlytwostrategiesforhowtoorchestratelearningcomputationsthathavesuchafeedback
+loop. OneisasynchronousFL,notablytheTEEbasedapproachpioneeredbyPapaya[35]—theaggregation
+pipelineemitsresults(newmodels)thatareimmediatelyservedtonewlyconnectingclients,andclientcon-
+tributionsare(subjecttostalenesschecks)immediatelyincorporatedintothecurrentlyrunningaggregation.
+Thisprocessingstrategyisstraightforwardtosupportinourproposedarchitecture.
+The other strategy is synchronous FL—running a sequence of “rounds,” each operating on a closed
+set of devices (a cohort)—which is the approach used in the original federated learning paper [48] and
+systemarchitecture[18]. Thisapproachmayincreasesystemcomplexity[35,42],butsynchronousFLhas
+been highly successful in the academic literature as well as existing use cases at Google, thus motivating
+continuedsupportbyournewarchitecture.
+While on-device computations do not change, round progression for synchronous FL workloads must
+beorchestrateddifferentlyinthenewarchitecture,asillustratedinfigure4.
+In the original system, rounds are orchestrated by the Coordinator object (see Section 4.2 and Figure 3
+in [18] for more detail). In contrast, in our new TEE-based architecture, a novel Federated Program [40]
+component is the orchestration layer responsible for deciding when to request work from a new round of
+clients and when to run server-processing logic over a set of encrypted client uploads. When sending task
+6Thiscanalsobedonebycomputingcertainquantilesonquantitieslike“numberofitemsperuser”andusingthosetosetthe
+parameters.
+19SysML ‘19 Architecture TEE-based Architecture
+Data Scientist Data Scientist
+task definition Federated Program
+configures a multi-round
+task definition initiates next round by triggers server-side
+configuring a single-round processing and
+Config DB Coordinator task definition receives result
+monitors
+initiates
+next round
+Aggregator Config DB
+forwards device fetches Server-Side
+uploads for processing Storage Processing
+Selector Selector
+upload results attests
+devices receive work devices
+and upload results receive work
+Devices Devices Ledger
+attests
+Component Data TEE /
+Device Server
+Legend: Scientist Encrypted
+Figure4: TheproposedarchitectureusesaFederatedProgramtoorchestrateroundprogressioninsteadofa
+Coordinator.
+configurationupdates(e.g. start/stop/slow)totheConfigDB,theFederatedProgramcanincorporatecustom
+signals, such as monitoring the rate and number of uploads received by the intermediate storage location.
+TheFederatedProgramcanalsotakeavarietyofapproacheswithrunningtheserver-sideprocessinglogic.
+Processing a fixed set of client uploads that are all associated with the current round is simplest, however
+incorporatingclientuploadsinastreamingmannerorincorporatingstragglerclientuploadsthatwereasso-
+ciatedwithpreviousroundsarepossibilitiestoo. Ingeneral,aimingforhighclientresourceutility(i.e. not
+wastingworkperformedbyclients)viatheFederatedProgramorchestrationlayerispreferable.
+Inbothorchestrationapproachesshownabove,theper-clientgradientsarecomputedon-device,meaning
+an identical amount of data is being uploaded from the client to the server and existing data minimization
+practices are upheld. However, the two approaches differ in the lifetime and storage properties of pre-
+aggregateddataontheserver. Intheprevioussystem,clientuploadsareimmediatelyaggregatedin-memory,
+whereasintheTEEbasedarchitecture,ledger-encryptedclientuploadsarestoredinanintermediatelocation
+priortobeingaccessedbyaserver-sideprocessingpipelinelaunchedbytheFederatedProgram. Underour
+threatmodeldescribedearlier,storingledger-encryptedpre-aggregatesine.g. aramdiskorpersistentstorage
+prior to aggregation does not meaningfully increase the attack surface compared to immediate in-memory
+aggregation;whenpairedwiththeexternallyverifiableDPaggregation,webelievethearchitectureprovides
+strongerprivacyguarantees.
+4.3 FutureApplications
+Thedescribedarchitectureenablesamultitudeofotherapplicationsweareyettoexplore:
+• Cross-silo federated learning could be drastically simplified by processing data centrally in TEEs,
+instead of a training infrastructure that is distributed across independent and possibly mutually dis-
+trustingorganizations.
+• ModeltrainingcouldtakeplaceinTEEs;thiswouldallowthemtopushtheenvelopeofFLtomodels
+20that do not fit into the resource envelope of end user devices (in memory, bandwidth, or compute),
+and generally reduce resource use and system health concerns on edge devices. Such a setup may
+alsoenablenovelalgorithmssuchasjoinswithserver-sidedata(requiringprivatejoinswhenthejoin
+itselfcanleaksensitiveinformation)andhyperparametersearch(DPandlearningparameters).
+• Today’s differentially private learning algorithms must be designed to take into account that inter-
+mediate model updates are “public” (visible to end user devices, where the next set of gradients is
+computed); a TEE learning pipeline on the other hand will emit only the final result to the untrusted
+environment and may therefore provide significantly better empirical and formal differential privacy
+guarantees.
+5 Open Problems and Future Work
+5.1 ScalabilityandRobustnessChallenges
+Forapplicationsthatprocesslimitedamountsofdataanddonotneedtoprovidehighavailability,executing
+the entire trusted logic—key management, data processing, aggregation—within one physical TEE may
+be a compelling option due to its architectural simplicity. For most real world applications however, that
+approach
+1. Doesnotscaleinspaceandtimetolargerworkloads.
+2. Doesnotprovidesufficientfaulttolerance.
+3. Doesnotprovidecomposability/flexibility.
+The majority of use cases and scales thus require distributed systems of TEEs. We have already seen
+howchains-of-trustcanenableparallelandpipelinedprocessing;however,variousperformanceandsecurity
+concernsremain,andwewillbrieflytouchontheminthefollowingsections.
+5.2 Per-TEEOverheadandLimits
+Besidestheexpectedoverheadofmemoryencryption,applicationsrunningconfidentialVMsbasedonTEE
+technology incur overhead (relative to traditional VMs) due to copying input data from shared to private
+memory, followedbydecryption, aswellasthecostofprotectionsformemoryintegrityandisolation, e.g.
+theRMPchecksinAMDSEV-SNP.
+OurtargetapplicationsrequirethatVMsingestsignificantamountsofdata. ThisresultsinI/Ointensive
+workloads,whicharethetypeofworkloadexpectedtoshowmoredelays[5]. Thisismostlyduetorepeated
+copyingfromsharedtoprivatememory, andtheoverheadofthecorrespondingtransitionsbetweentrusted
+anduntrustedspace. Ourpreliminarymeasurementsmatchthisexpectation,withoverheadinCPUintensive
+workloads being significantly smaller than the one observed in I/O intensive workloads. Overcoming this
+limitationinvolvesacarefulconfigurationofVMdevicestomaximizeCPUutilization,andbatchingonthe
+untrustedside.
+CPUsinandbythemselvesmayposeanotherscalabilityconcern—modernmachinelearningisrelying
+heavily on accelerators such as GPUs or TPUs, but availability of Trusted Computing support on these
+processorsisverylimitedatthistime,andfurtherinfrastructureinvestmenttointegratethemsecurelywith
+CPUTEEswillbeneeded.
+215.3 RobustnessandScalingofStatefulComponents
+The state stored in the ledger includes the history of data usage, which if rolled back or forked could lead
+to surpassing the privacy budget for that data. In order to guarantee privacy in the face of a malicious and
+colluding platform software operator and data center storage operator, while also guaranteeing liveness of
+thestateinthefaceofTEEfailuresthatwouldoccurduringnormaloperationofasystem, thisstatehasto
+beprotectedfromrollback,forkingandreplayattacks. Specializedhardwaremightbeanattractiveoption,
+however it lacks desirable properties, namely external verifiability and reproducibility, ease of hardware
+provisioning and performance. Therefore our solution opted into using the TEEs available in commodity
+hardware to preserve integrity and confidentiality during computation through the utilization of techniques
+such asmemory isolation, encryption, and remoteattestation. TEEserves as a fundamentalbuilding block
+forprivacymechanismsthatcanbeexternallyverified. However,usingittopowerprivacyfocusedcompu-
+tationsatGooglescalerequirescarefulbalanceofsecurity,scalabilityandresourcecosts,thatwearegoing
+tobrieflydescribe(withthefulldetailsexploredinanupcomingpaper).
+A physical TEE has inherent limitations of the memory and computation capabilities of the host ma-
+chine. Wearguethattoaddressthescaleoftargetworkloadstheselimitationsmustbesolvedinconjunction
+with the mitigations of failures and active attacks (for example, an attempt to solve memory limitation via
+swappingintosealedstoragecreatesnewopportunitiesforstaterollbackattacks).
+First, we start by addressing the fault tolerance and active attacks. Our focus on commodity hardware
+(instead of specialized hardware) leads us to the distributed systems solution. Specifically, we leverage
+physical TEE properties and hardened Raft consensus protocol to address fault tolerance and protect from
+rollback, forking and replay attacks. The Raft consensus protocol emerges as an optimal choice for essen-
+tiallytrustedreplicatedstatemachines(TRSM),owingtoitsemphasisonsimplicityandcomprehensibility.
+Second, we need to address the challenge posed by substantial data volumes and processing costs.
+TRSM enables stateful fault tolerant confidential computations, however they are still limited by the host
+machinecapabilities. Specificallyitisnotfeasibletoeitherholdorprocessallthestateinareplicatedstate
+machine. At scale, cost factors escalate significantly, including memory demands for state storage, net-
+work bandwidth required for write replication and state snapshot distribution, computational requirements
+for data processing and privacy mechanisms, and the potential impact of failure recovery time. Therefore
+thereplicatedstatemachinemustmanageminimumrequiredstateandperformminimumprocessing,while
+offloadingthestoragetoanon-TEEpersistentblobstoreandthecomputationtonon-replicatedTEEnodes.
+Third, we focus on the granularity of private state updates. Fine reads and writes incur high persistent
+blob storage overhead (lots of small blob reads and writes) as well as privacy overhead (remote attestation
+and encryption). The coarse reads and writes are crucial for the cost amortization. Therefore private data
+isorganizedandprocessedascoarseatomicunits,thusreducingthestatemaintainedbythereplicatedstate
+machine.
+Please see Appendices B and C for further pointers to related work in confidential rollback protection
+andfaulttolerance.
+5.4 SideChannelAttacks
+Offerings such as AMD SEV and Intel TDX aim at providing integrity and confidentiality even in the
+presence of an untrusted hypervisor and host system. Generally speaking, this kind of adversary tries to
+infer information from a given confidential workload/guest by manipulating the state and availability of
+shared resources handled by the host system, such as for example (cache) memory. A common source of
+22attacks is side-channels, which traditionally include timing and memory access patterns, in addition to the
+more advanced speculative execution side channels. Both AMD SEV-SNP and Intel TDX mitigate side-
+channels by means of constant time cryptographic implementations, and data-independent access patterns.
+In both cases, the guest software is responsible for doing the same for sensitive operations. For reference,
+see[25].
+Itisworthnotingthattheprivacyguaranteesofourplatformcruciallyrelyonsecrecyofboth(i)private
+cryptographic keys generated/held by a TEE, as well as (ii) noise samples and intermediate values in dif-
+ferentially private mechanisms such as the ones in the applications described above. Side-channel leakage
+mightenableanadversarialhypervisororhostsystemtomountanattacktodegradetheprivacyguarantees
+ofthesystem,byleakinginformationabout(i)or(ii). Whileourimplementationdoesnotcurrentlyinclude
+application-levelmitigationstoarchitecturalsidechannels,thisisanareatoberevisitedinthefuture. Next,
+wedescribesomeofthetraditionalsidechannelsinthecontextofthetargetguaranteesofoursystem,and
+potentialmitigations.
+Memory activity and ciphertext leakage A common side channel leveraged by many attacks is the so-
+calledpage-faultcontrolledsidechannel. AMDSEV-SNPdoesnotprovidemitigationsagainsttrackingVM
+access patterns through page tables (see Table 1 in [36]), and recommends that Guest code mitigates this
+leakage by means of implementations that avoid secret-dependent memory access patterns. In our setting,
+this corresponds to access patterns that might either leak information about (i) or (ii) above. A mitigation
+consideredinboththeliteratureandreal-worlddeploymentsofTEEtechnology[23,16]isObliviousRan-
+dom Access Memory (ORAM), an abstraction layer over memory that randomizes arbitrary sequences of
+access patterns to effectively make arbitrary code data-independent (regarding memory patterns). While
+ORAM has been used in practice, it has significant overhead. Both tweaking existing constructions to
+match production needs/requirements, e.g. when choosing parameters, and designing application specific
+data-obliviousalgorithms,e.g. forthesortofusesdiscussedinSection4,areinterestingvenuesforfurther
+researchtoimprovethesystem.
+Additionally, a related side-channel in AMD SEV-SNP worth mentioning is ciphertext leakage: AMD
+usesAESformemoryencryption,withtheXOR-Encrypt-XORmodeusingthephysicalmemorylocationas
+tweakvalues. Thisessentiallyresultsinadeterministicformofencryption,whereanadversarywithaccess
+to encrypted memory, e.g. a corrupted host, might observe whether a given access to a memory location
+changestheunderlyingplaintext. See[36]foradetaileddescriptionandsuggestedmitigationstrategies.
+Timingandpayloadsizes Runtimeandpayloadsthatdependonsecretdataareknowntobeexploitable
+to extract secret keys in cryptographic implementations. This sort of leakage might be also relevant in
+the context of differential privacy, as discussed in previous works [16, 32]. An important observation is
+that in a system that aims to provide a DP-style guarantee, mitigations might be formalized in the same
+framework. Thisistheapproachtakenin[16]toaddresspayloadsizeleakage. Anotherrecurrentoperation
+thatmightbesubjecttoside-channelanalysisbyanattackerisnoisesampling. Evenbeyondside-channels,
+implementation of DP mechanisms has subtleties: it has been shown implementations of floating point
+arithmeticaswellasroundingschemesmightresultinunintendedleakage[28].
+The space of side-channels is complex and evolving. As discussed in Section 2, we did not implement
+specific mitigations in the current version, but this is an area that we expect to evolve with feedback from
+thebroadersecurityandprivacycommunity.
+235.5 ExternallyverifiableTTLs,TrustedClocks,andRemoteDeletion
+As discussed in Section 3.5, a limitation of Trusted Execution Environments is their lack of access to a
+trusted time source. The current version of our system mitigates this limitation through a few avenues.
+Firstly, we limit how data can be used through policies that rely on concrete usage count limitations rather
+thanjustTTLs. Secondly,asmentionedinSection3.5,clientsruntheirownvalidationthatthetimereported
+by the ledger is close enough to the real time before uploading data. However, neither of these prevent
+encrypted data from being accessible for longer than was promised to the client by the HPKE key TTL,
+if the untrusted portions of the stack provide the ledger with out-of-date timestamps after client data has
+already been uploaded. As discussed in [11], even if a TEE establishes secure communication with an
+NTP server, which should be trusted to provide the correct time, an attacker with control of the network
+or hypervisor can delay the response packets. Roughtime [3] aims to solve this by incorporating nonces
+intotheprotocolbetweenclientandNTPserver,sothatbyvirtueofthefactthattheclient-generatednonce
+is signed along with the response, the client knows the Roughtime server generated the response after the
+client sent the request. The client need not trust a single server, either, as the protocol supports contacting
+multiple servers to obtain cryptographic proof that a server is misrepresenting the time. In the future we
+would like to consider integrating the ledger with Roughtime or similar systems in order to provide more
+accurateguaranteesabouthowlongdataremainsaccessibleontheserver. However,Roughtimeremainsat
+anearlystageinwhichthenumberandavailabilityofserversislimited. Additionally,giventheinteractive
+natureoftheRoughtimeprotocolandthepotentiallyhighQPStotheledgerfromdataprocessingworkloads,
+wewouldneedtodetermineastrategyforlimitingtheloadontheRoughtimeserverswhilestillmaintaining
+arelativelyaccuratecurrenttimestamp.
+Eventually, it may be desirable to offer client devices the capability to remotely delete data that was
+previously uploaded to the server, if the device owner decides the data should be deleted before the TTL
+expires. In some respects, this is simple to support with the protocols described so far, as the ledger can
+simplyrecordthatnoremainingusageisallowedforthedata. Therearethreemainchallengesthatareleft
+asfutureimprovements:
+1. It is desirable to verify that the deletion request is originating from the client that produced the data,
+whichrequiresintroducingclientidentity.
+2. Remote deletion requires proof that the deletion was successfully processed by the same ledger in-
+stance that was entrusted with the original data—even if the HPKE key has already expired. This
+requiresintroducingledgeridentitythatoutlivesasingleHPKEkey.
+3. Since remote deletion requires interactive communication between client devices and the ledger, the
+ledgermustbemaderobustandscalableenoughtoservetrafficfromclientdevicesinadditiontothe
+trafficarisingfromdataprocessingworkloads.
+A related capability is allowing client devices to extend the lifetime of uploaded data beyond the orig-
+inal TTL. Combined with shorter TTLs, this capability would allow uploaded data to be deleted quickly
+unlessclientsactivelysentkeep-alivemessages. SincetheAEADwrappingoccursindependentlyfromdata
+encryption,thiscanbescalablyimplementedbyre-wrappingtheAEADkeywithanewerHPKEkey—but
+like remote deletion, it requires client identity to ensure that the requestor is authorized to extend the data
+TTL.
+245.6 CombiningTEEswithSMPC
+Secure Multi-Party Computation (SMPC) can be intuitively understood as a branch of cryptography that
+allows two or more parties to collectively simulate a trusted third party, through the use of distributed
+cryptographic protocols. SMPC is often seen as an alternative answer to TEEs for the question of how to
+effectivelydistributetrust;solongasa(protocol-dependent)fractionofthepartiesparticipatinginanSMPC
+computation behave honestly, the entire simulated trusted third party can be proven to behave as specified.
+AnimportantaspectofthenotionofsecurityprovidedbySMPCprotocols,isthatnoparty(orvalidcoalition
+underthethreatmodel)inasecureprotocolexecutionhasunilateralaccesstotherawdata. Thisisbecause,
+inSMPCprotocols,dataismanipulatedeitherunderencryptionorsecret-shared,thereforeavoidingasingle
+pointoffailure.
+WhileSMPCandTEEsaregenerallyviewedasalternatives, webelievethatitisafruitfulresearchdi-
+rectiontoconsiderlayeringthesetwotechnologiestogetherinordertoachievebest-of-both-worldsdefense-
+in-depth solutions. While the overhead of SMPC protocols that can withstand an active adversary is still
+significant(asopposedtosemi-honestsecurity),TEEsprovideexternalverifiabilitythatcanstrengthenthe
+semi-honestsecurityguarantee. ForanyoperationofthesystemthatcanbeimplementedasanSMPCpro-
+tocol over a small number of parties, we could implement each of those parties in its own TEE hardware,
+suchthatonewouldhavetocompromisemultipleTEEs(inmanycases,amajority)inordertocompromise
+theSMPCprotocolitself.
+Inthesimplestcase,alltheTEEsimplementingtheprotocolcouldbeidenticalandrunninginthesame
+datacenter. However,wecanfurtherimproveresiliencebyusingTEEsfrommultiplemanufacturers(mean-
+ing that more than one hardware manufacturer/designer would need to be compromised to break security).
+We can also run those TEEs in multiple datacenters, potentially operated by different operators, each with
+their own implementations of best practice security and resilience protocols against insider adversaries or
+coercion.
+We believe that the ledger and the core aggregation routines would be particularly amenable to these
+defense-in-depth practices, drawing on experience with e.g. 2-party SMPC protocols such as Prio [27],
+andbasicprimitivesamenabletoefficientevaluationinMPClikedistributed(threshold)keygenerationand
+signing.
+6 Conclusion
+WepresentedasystemarchitectureforexecutingfederatedcomputationsleveragingTEEs,accompaniedby
+open-sourcing the relevant code paths running in TEEs and on end user devices. This architecture allows
+for improved DP-utility trade-offs, a more scalable system design, and robustness to Sybil attacks. To the
+bestofourknowledge,thisisthefirsttimethattheserversideprivacypropertiesoffederatedcomputations
+are externally verifiable. We are excited about the progress and opportunities this enables, and expect
+ongoing and future research, development and exchange with the academic community to further improve
+therobustnessofthesystem.
+7 Acknowledgements
+Likemostlargescalesystemefforts,therearemanymorecontributorsthantheauthorsofthispaper. Thefol-
+lowingpeoplehavedirectlycontributedtocoordination,design,implementationandreviews: TomBinder,
+25Zachary Charles, Stanislav Chiknavaryan, Allie Culp, Sarah de Haas, Stefan Dierauf, Prem Eruvbetine,
+Zachary Garrett, Emily Glanz, Zoe Gong, Conrad Grobler, Steve He, Mira Holford, Wei Huang, Ulyana
+Kurylo, Artem Lagzdin, Katsiaryna Naliuka, Grace Ni, Ernesto Ocampo, Ivan Petrov, Juliette Pluto, Edo
+Roth,AndriSaar,MayaSpivak,RakshitaTandon,YuXiao,ZhengXu,ChunxiangZheng.
+References
+[1] Logcatcommand-linetool. URLhttps://developer.android.com/tools/logcat.
+[2] sigstorerekor. URLhttps://docs.sigstore.dev/logging/overview/.
+[3] Roughtime. URLhttps://roughtime.googlesource.com/roughtime/.
+[4] Delta calculation for thresholding, 2020. URL https://github.com/google/
+differential-privacy/blob/main/common_docs/Delta_For_Thresholding.pdf.
+[5] Performance Considerations of Intel® Trust Domain Extensions on 4th Generation Intel® Xeon® Scalable
+Processors, September 2023. URL https://www.intel.com/content/www/us/en/developer/
+articles/technical/trust-domain-extensions-on-4th-gen-xeon-processors.
+html.
+[6] ProjectOak,2024. URLhttps://github.com/project-oak/oak.
+[7] Mart´ın Abadi, Ashish Agarwal, Paul Barham, Eugene Brevdo, Zhifeng Chen, Craig Citro, Greg S. Corrado,
+AndyDavis,JeffreyDean,MatthieuDevin,SanjayGhemawat,IanGoodfellow,AndrewHarp,GeoffreyIrving,
+Michael Isard, Yangqing Jia, Rafal Jozefowicz, Lukasz Kaiser, Manjunath Kudlur, Josh Levenberg, Dande-
+lion Mane´, Rajat Monga, Sherry Moore, Derek Murray, Chris Olah, Mike Schuster, Jonathon Shlens, Benoit
+Steiner, Ilya Sutskever, Kunal Talwar, Paul Tucker, Vincent Vanhoucke, Vijay Vasudevan, Fernanda Vie´gas,
+Oriol Vinyals, Pete Warden, Martin Wattenberg, Martin Wicke, Yuan Yu, and Xiaoqiang Zheng. TensorFlow:
+Large-scalemachinelearningonheterogeneoussystems, 2015. URLhttps://www.tensorflow.org/.
+Softwareavailablefromtensorflow.org.
+[8] Naman Agarwal, Peter Kairouz, and Ziyu Liu. The skellam mechanism for differentially private federated
+learning. AdvancesinNeuralInformationProcessingSystems,34:5052–5064,2021.
+[9] GalenAndrew,PeterKairouz,SewoongOh,AlinaOprea,H.BrendanMcMahan,andVinithSuriyakumar. One-
+shotempiricalprivacyestimationforfederatedlearning,2023.
+[10] SebastianAngel,AdityaBasu,WeidongCui,TrentJaeger,StellaLau,SrinathSetty,andSudheeshSinganamalla.
+Nimble: Rollback protection for confidential cloud services (extended version). Cryptology ePrint Archive,
+Paper 2023/761, 2023. URL https://eprint.iacr.org/2023/761. https://eprint.iacr.
+org/2023/761.
+[11] FatimaM.AnwarandManiSrivastava.Applicationsandchallengesinsecuringtime.In12thUSENIXWorkshop
+onCyberSecurityExperimentationandTest(CSET19),SantaClara,CA,August2019.USENIXAssociation.
+URLhttps://www.usenix.org/conference/cset19/presentation/anwar.
+[12] Apple. Designingforprivacy(videoandslidedeck). AppleWWDC,https://developer.apple.com/
+videos/play/wwdc2019/708,2019.
+[13] Maurice Bailleu, Dimitra Giantsidi, Vasilis Gavrielatos, Do Le Quoc, Vijay Nagarajan, and Pramod Bhatotia.
+Avocado: A secure In-Memory distributed storage system. In 2021 USENIX Annual Technical Conference
+(USENIXATC21), pages65–79.USENIXAssociation, July2021. ISBN978-1-939133-23-6. URLhttps:
+//www.usenix.org/conference/atc21/presentation/bailleu.
+26[14] Henk Birkholz, Dave Thaler, Michael Richardson, Ned Smith, and Wei Pan. Remote ATtestation proce-
+dureS (RATS) Architecture. RFC 9334, January 2023. URL https://www.rfc-editor.org/info/
+rfc9334.
+[15] Franziska Boenisch, Adam Dziedzic, Roei Schuster, Ali Shahin Shamsabadi, Ilia Shumailov, and Nicolas Pa-
+pernot. When the curious abandon honesty: Federated learning is not private. In 2023 IEEE 8th European
+SymposiumonSecurityandPrivacy(EuroS&P),pages175–199.IEEE,2023.
+[16] Dmytro Bogatov, Georgios Kellaris, George Kollios, Kobbi Nissim, and Adam O’Neill. Epsolute: Efficiently
+queryingdatabaseswhileprovidingdifferentialprivacy. InProceedingsofthe2021ACMSIGSACConference
+on Computer and Communications Security. ACM, November 2021. doi: 10.1145/3460120.3484786. URL
+http://dx.doi.org/10.1145/3460120.3484786.
+[17] Kallista Bonawitz, Vladimir Ivanov, Ben Kreuter, Antonio Marcedone, H Brendan McMahan, Sarvar Patel,
+DanielRamage,AaronSegal,andKarnSeth. Practicalsecureaggregationforprivacy-preservingmachinelearn-
+ing. In proceedings of the 2017 ACM SIGSAC Conference on Computer and Communications Security, pages
+1175–1191,2017.
+[18] Kallista Bonawitz, Hubert Eichner, Wolfgang Grieskamp, Dzmitry Huba, Alex Ingerman, Vladimir Ivanov,
+Chloe Kiddon, Jakub Konecˇny`, Stefano Mazzocchi, H Brendan McMahan, et al. Towards federated learning
+atscale: Systemdesign. arXivpreprintarXiv:1902.01046,2019.
+[19] Kallista Bonawitz, Peter Kairouz, Brendan McMahan, and Daniel Ramage. Federated learning and privacy.
+CommunicationsoftheACM,65(4):90–97,2022.
+[20] MarkBun,KobbiNissim,andUriStemmer. Simultaneousprivatelearningofmultipleconcepts. InProceedings
+ofthe2016ACMConferenceonInnovationsinTheoreticalComputerScience, ITCS’16.ACM,January2016.
+doi: 10.1145/2840728.2840747. URLhttp://dx.doi.org/10.1145/2840728.2840747.
+[21] MingqingChen,RajivMathews,TomOuyang,andFranc¸oiseBeaufays.Federatedlearningofout-of-vocabulary
+words. arXivpreprint1903.10635,2019. URLhttp://arxiv.org/abs/1903.10635.
+[22] Christopher A Choquette-Choo, Arun Ganesh, Ryan McKenna, H Brendan McMahan, John Rush, Abhradeep
+GuhaThakurta,andZhengXu. (amplified)bandedmatrixfactorization: Aunifiedapproachtoprivatetraining.
+AdvancesinNeuralInformationProcessingSystems,36,2024.
+[23] Graeme Connell. Technology deep dive: Building a faster ORAM layer for enclaves, August 2022. URL
+https://signal.org/blog/building-faster-oram/.
+[24] GrahamCormode,FlipKorn,ShanmugavelayuthamMuthukrishnan,andDiveshSrivastava.Findinghierarchical
+heavyhittersindatastreams. InProceedings2003VLDBConference,pages464–475.Elsevier,2003.
+[25] Intel Corporation. Guidelines for mitigating timing side channels against cryptographic im-
+plementations, June 2022. URL https://www.intel.com/content/www/us/en/
+developer/articles/technical/software-security-guidance/secure-coding/
+mitigate-timing-side-channel-crypto-implementation.html.
+[26] IntelCorporation. Intel®TrustDomainExtensions(Intel®TDX),February2023.
+[27] HenryCorrigan-GibbsandDanBoneh. Prio: Private, robust, andscalablecomputationofaggregatestatistics.
+In 14th USENIX Symposium on Networked Systems Design and Implementation (NSDI 17), pages 259–282,
+Boston,MA,March2017.USENIXAssociation. ISBN978-1-931971-37-9. URLhttps://www.usenix.
+org/conference/nsdi17/technical-sessions/presentation/corrigan-gibbs.
+[28] Damien Desfontaines. Tiny bits matter: precision-based attacks on dif-
+ferential privacy, July 2022. URL https://www.tmlt.io/resources/
+tiny-bits-matter-precision-based-attacks-on-differential-privacy.
+27[29] JohnRDouceur. Thesybilattack. InInternationalworkshoponpeer-to-peersystems,pages251–260.Springer,
+2002.
+[30] Cynthia Dwork. Differential privacy. In Michele Bugliesi, Bart Preneel, Vladimiro Sassone, and Ingo We-
+gener,editors,Automata,LanguagesandProgramming,pages1–12,Berlin,Heidelberg,2006.SpringerBerlin
+Heidelberg. ISBN978-3-540-35908-1.
+[31] Trusted Computing Group. DICE attestation architecture, 2020. URL https://
+trustedcomputinggroup.org/wp-content/uploads/TCG_DICE_Attestation_
+Architecture_r22_02dec2020.pdf.
+[32] Andreas Haeberlen, Benjamin C. Pierce, and Arjun Narayan. Differential privacy under fire.
+In 20th USENIX Security Symposium (USENIX Security 11), San Francisco, CA, August 2011.
+USENIX Association. URL https://www.usenix.org/conference/usenix-security-11/
+differential-privacy-under-fire.
+[33] Andrew Hard, Kanishka Rao, Rajiv Mathews, Franc¸oise Beaufays, Sean Augenstein, Hubert Eichner, Chloe´
+Kiddon, and Daniel Ramage. Federated learning for mobile keyboard prediction. arXiv preprint 1811.03604,
+2018.
+[34] AndrewHard,KurtPartridge,CameronNguyen,NiranjanSubrahmanya,AishaneeShah,PaiZhu,IgnacioLopez
+Moreno,andRajivMathews. Trainingkeywordspottingmodelsonnon-iiddatawithfederatedlearning,2020.
+[35] Dzmitry Huba, John Nguyen, Kshitiz Malik, Ruiyu Zhu, Mike Rabbat, Ashkan Yousefpour, Carole-Jean Wu,
+Hongyuan Zhan, Pavel Ustinov, Harish Srinivas, Kaikai Wang, Anthony Shoumikhin, Jesik Min, and Mani
+Malek. Papaya:Practical,private,andscalablefederatedlearning. CoRR,abs/2111.04877,2021. URLhttps:
+//arxiv.org/abs/2111.04877.
+[36] Advanced Micro Devices Inc. Technical guidance for mitigating effects of ciphertext visibility under amd
+sev. URL https://www.amd.com/system/files/documents/221404394-a_security_wp_
+final.pdf.
+[37] Advanced Micro Devices Inc. AMD SEV-SNP: Strengthening VM isolation with
+integrity protection and more, January 2020. URL https://www.amd.com/
+content/dam/amd/en/documents/epyc-business-docs/solution-briefs/
+amd-secure-encrypted-virtualization-solution-brief.pdf.
+[38] Google Inc. Confidential federated compute, 2024. URL https://github.com/google-parfait/
+confidential-federated-compute.
+[39] Google Inc. Federated compute platform, 2024. URL https://github.com/google-parfait/
+federated-compute.
+[40] GoogleInc.Tensorflowfederated:Federatedprogram,2024.URLhttps://github.com/tensorflow/
+federated/blob/main/docs/program/federated_program.md.
+[41] Jiankai Jin, Chitchanok Chuengsatiansup, Toby Murray, Benjamin I. P. Rubinstein, Yuval Yarom, and Olga
+Ohrimenko. Elephantsdonotforget: Differentialprivacywithstatecontinuityforprivacybudget,2024.
+[42] Peter Kairouz, H Brendan McMahan, Brendan Avent, Aure´lien Bellet, Mehdi Bennis, Arjun Nitin Bhagoji,
+KallistaBonawitz,ZacharyCharles,GrahamCormode,RachelCummings,etal. Advancesandopenproblems
+infederatedlearning. arXivpreprintarXiv:1912.04977,2019.
+[43] PeterKairouz,ZiyuLiu,andThomasSteinke. Thedistributeddiscretegaussianmechanismforfederatedlearn-
+ingwithsecureaggregation. arXivpreprintarXiv:2102.06387,2021.
+[44] PeterKairouz,BrendanMcMahan,ShuangSong,OmThakkar,AbhradeepThakurta,andZhengXu. Practical
+andprivate(deep)learningwithoutsamplingorshuffling. InProceedingsofthe38thInternationalConference
+onMachineLearning,pages5213–5225,2021.
+28[45] AleksandraKorolova,KrishnaramKenthapadi,NinaMishra,andAlexandrosNtoulas. Releasingsearchqueries
+andclicksprivately. InProceedingsofthe18thInternationalConferenceonWorldWideWeb,WWW’09,page
+171–180, New York, NY, USA, 2009. Association for Computing Machinery. ISBN 9781605584874. doi:
+10.1145/1526709.1526733. URLhttps://doi.org/10.1145/1526709.1526733.
+[46] N.A.LynchandA.A.Shvartsman. Robustemulationofsharedmemoryusingdynamicquorum-acknowledged
+broadcasts.InProceedingsofIEEE27thInternationalSymposiumonFaultTolerantComputing,pages272–281,
+1997. doi: 10.1109/FTCS.1997.614100.
+[47] Sinisa Matetic, Mansoor Ahmed, Kari Kostiainen, Aritra Dhar, David Sommer, Arthur Gervais, Ari Juels,
+and Srdjan Capkun. ROTE: Rollback protection for trusted execution. In 26th USENIX Security Sym-
+posium (USENIX Security 17), pages 1289–1306, Vancouver, BC, August 2017. USENIX Association.
+ISBN 978-1-931971-40-9. URL https://www.usenix.org/conference/usenixsecurity17/
+technical-sessions/presentation/matetic.
+[48] BrendanMcMahan,EiderMoore,DanielRamage,SethHampson,andBlaiseAguerayArcas. Communication-
+efficientlearningofdeepnetworksfromdecentralizeddata. InArtificialintelligenceandstatistics,pages1273–
+1282.PMLR,2017.
+[49] Jianyu Niu, Wei Peng, Xiaokuan Zhang, and Yinqian Zhang. Narrator: Secure and practical state continuity
+for trusted execution in the cloud. In Proceedings of the 2022 ACM SIGSAC Conference on Computer and
+CommunicationsSecurity, CCS’22, page2385–2399, NewYork, NY,USA,2022.AssociationforComputing
+Machinery. ISBN9781450394505. doi: 10.1145/3548606.3560620. URLhttps://doi.org/10.1145/
+3548606.3560620.
+[50] DiegoOngaroandJohnOusterhout. Insearchofanunderstandableconsensusalgorithm. InProceedingsofthe
+2014 USENIX Conference on USENIX Annual Technical Conference, USENIX ATC’14, page 305–320, USA,
+2014.USENIXAssociation. ISBN9781931971102.
+[51] Matthias Paulik, Matt Seigel, Henry Mason, Dominic Telaar, Joris Kluivers, Rogier van Dalen, Chi Wai Lau,
+LukeCarlson,FilipGranqvist,ChrisVandevelde,etal. Federatedevaluationandtuningforon-devicepersonal-
+ization: Systemdesign&applications. arXivpreprintarXiv:2102.08503,2021.
+[52] Daniel Ramage and Stefano Mazzocchi. Federated analytics: Collaborative data science
+without data collection, May 2020. URL https://ai.googleblog.com/2020/05/
+federated-analytics-collaborative-data.html. GoogleAIBlog.
+[53] Swaroop Ramaswamy, Rajiv Mathews, Kanishka Rao, and Franc¸oise Beaufays. Federated learning for emoji
+predictioninamobilekeyboard. arXivpreprint1906.04329,2019.
+[54] J.M.Rushby.Designandverificationofsecuresystems.SIGOPSOper.Syst.Rev.,15(5):12–21,dec1981.ISSN
+0163-5980. doi: 10.1145/1067627.806586. URLhttps://doi.org/10.1145/1067627.806586.
+[55] MarkRussinovich,EdwardAshton,ChristineAvanessians,MiguelCastro,AmauryChamayou,SylvanClebsch,
+ManuelCosta,Ce´dricFournet,MatthewKerner,SidKrishna,JulienMaffre,ThomasMoscibroda,KartikNayak,
+OlyaOhrimenko,FelixSchuster,RoySchwartz,AlexShamis,OlgaVrousgou,andChristophM.Wintersteiger.
+Ccf: A framework for building confidential verifiable replicated services. Technical Report MSR-TR-2019-
+16,Microsoft,April2019.URLhttps://www.microsoft.com/en-us/research/publication/
+ccf-a-framework-for-building-confidential-verifiable-replicated-services/.
+[56] BenedictSchlu¨ter,SuprajaSridhara,AndrinBertschi,andShwetaShinde. WeSee: Usingmalicious#VCinter-
+ruptstobreakAMDSEV-SNP,2024.
+[57] Mohamed Suliman and Douglas Leith. Two models are better than one: Federated learning is not private for
+googlegboardnextwordprediction.InEuropeanSymposiumonResearchinComputerSecurity,pages105–122.
+Springer,2023.
+29[58] KunalTalwar, ShanWang, AudraMcMillan, VojtaJina, VitalyFeldman, BaileyBasile, AineCahill, YiSheng
+Chan,MikeChatzidakis,JunyeChen,etal. Samplableanonymousaggregationforprivatefederateddataanaly-
+sis. arXivpreprintarXiv:2307.15017,2023.
+[59] TheApacheSoftwareFoundation. ApacheBeam©. URLhttps://beam.apache.org.
+[60] Weili Wang, Sen Deng, Jianyu Niu, Michael K. Reiter, and Yinqian Zhang. Engraft: Enclave-guarded raft on
+byzantine faulty nodes. In Proceedings of the 2022 ACM SIGSAC Conference on Computer and Communica-
+tionsSecurity, CCS’22, page2841–2855, NewYork, NY,USA,2022.AssociationforComputingMachinery.
+ISBN9781450394505. doi: 10.1145/3548606.3560639. URLhttps://doi.org/10.1145/3548606.
+3560639.
+[61] Zheng Xu and Yanxiang Zhang. Advances in private training for pro-
+duction on-device language models. https://research.google/blog/
+advances-in-private-training-for-production-on-device-language-models,
+2017.
+[62] ZhengXu,YanxiangZhang,GalenAndrew,ChristopherAChoquette-Choo,PeterKairouz,HBrendanMcMa-
+han, Jesse Rosenstock, and Yuanbo Zhang. Federated learning of gboard language models with differential
+privacy. arXivpreprintarXiv:2305.18465,2023.
+[63] Timothy Yang, Galen Andrew, Hubert Eichner, Haicheng Sun, Wei Li, Nicholas Kong, Daniel Ramage, and
+Franc¸oiseBeaufays. Appliedfederatedlearning: ImprovingGooglekeyboardquerysuggestions. arXivpreprint
+1812.02903,2018.
+[64] WennanZhu,PeterKairouz,BrendanMcMahan,HaichengSun,andWeiLi. Federatedheavyhittersdiscovery
+withdifferentialprivacy,2020.
+A PHH Algorithm Details
+AsisstandardforopendomainDPhistogramalgorithms, weboundthecontributionsofclients, aggregate
+the bounded contributions, then add noise followed by thresholding. By controlling how much any single
+clientcaninfluencetheaggregation, thenoiseweaddwillmaskthesignalfromanysingleclient. Variants
+ofthealgorithmweusearewell-establishedintheacademicliterature(Algorithm1in[20];Algorithm1in
+[45];[4]). Wesummarizeitbelowforthesakeofcompleteness.
+CompositeKey Value1(weight) Value2(price)
+Key1(color) Key2(food)
+green eggs 3.2 2.99
+red apple 3 3.99
+white grape 2 3.49
+red apple 1 2.99
+1. Foreachclient’stableofdata,suchastheoneabove
+(a) Create the local histogram, in effect a table with de-duplicated composite keys. In the above
+example, the local histogram would have three rows, one of which is a “red apple” row with
+weight4 = 3+1andprice6.98 = 3.99+2.99.
+(b) Performcontributionboundingonthelocalhistogram,usingtheparametersinthequery:
+30i. max groups contributedlimitshowmanyrowsareinthelocalhistogram(i.e. how
+manydistinctcompositekeysareimpactedbyoneclient),chosenatrandom;ifthevalueis
+2,wewouldhaveatablewithtworows. Thecontentsofthesurvivingrowsareuntouched.
+(cid:80)
+ii. Whengivenasatypehintto value ,ℓ boundsthemagnitudeofasinglevalueinthe
+j ∞
+j-thcolumnofthelocalhistogram. IntheWeightcolumnoftheaboveexample,theweight
+of 3.2 exceeds the ℓ bound of 3 in the query, so it would be replaced by 3. Meanwhile
+∞
+inthePricecolumn,theaggregate6.98wouldbereplacedby4.5. Allotherdatawouldbe
+untouched.
+iii. ℓ and ℓ are parameters that can be given to bound client data further and thereby reduce
+1 2
+thescaleofnoise,butDPcanbeachievedwithoutthem.
+2. Perform a GROUP-BY SUM on the local histograms to produce a cross-client histogram H, where
+thegroupingisbythekeysandthesumisoverthevalues.
+3. AddnoisetoeveryaggregatedvalueinH:
+(a) The scale of noise grows with max groups contributed · ℓ , which captures the total
+∞
+influenceofasingleclient’slocalhistogram. Ifthedatascientistprovidesanℓ valuethatisless
+1
+thanmax groups contributed·ℓ ,itisusedinstead. Thesameholdsforℓ .
+∞ 2
+(b) Iftherearepsetsofvaluesbeingaggregated—columnsinH thatdonotholdkeys—thescaleof
+noisegrowswith(p/ε). Intherunningexample,p=2becausetheonlyvaluecolumnsareprice
+andweight.
+(c) The distribution of noise is either Laplace or Gaussian, whichever will result in lower variance
+forthegivenparameters.
+4. Drop a row from H if any of its noisy values have magnitude less than t , where t is a threshold
+j j
+computedfromthealgorithm’sparametersincolumnj (ε,δ,max groups contributed,ℓ ,ℓ ,
+∞ 1
+ℓ ). This step is necessary for DP because we must protect the set of composite keys as well as the
+2
+sumofvalues: replacingoneclient’sdatacanaffectwhetherornot“greeneggs”ispresentinthedata,
+sothedecisiontoincludearowofdataintheoutputshouldbenoisy.
+B Related Work on Rollback Protection
+Privacy mechanisms are stateful (tracking data or user privacy budget, storing privacy algorithm state and
+intermediate results, etc.). TEEs protect in-memory data through isolation, encryption and integrity mech-
+anisms, however it doesn’t provide fault tolerance (data is lost in case of failures or restarts). Many TEEs
+provide sealing capabilities to offload encrypted and signed state to disk that combined with monotonic
+hardware counters can be used to implement rollback protection. However this approach suffers from low
+performance, weaksecurityandquickexhaustionofthehardwarecounters. Thereforeanumberofrelated
+works (including ours) followed a distributed systems approach, where a group of TEEs provide rollback
+protection. ROTE [47] provides monotonic counter service running in a group of TEEs and using the ma-
+joritytoperformreadsandwriteswithconflictresolution. Nimble[10]focusesonmaintainingnamedhash
+chains (ledgers) using the majority of TEEs with witness co-signing. Unlike ROTE, Nimble provides a
+reconfigurationmechanismthatiscriticalforproductionsystems. Themaindifferencefromrelatedworkis
+our holistic focus on private data processing rather than rollback protection alone, including an end-to-end
+verifiablechainoftrust.
+31C Related Work on Fault Tolerant Confidential Computations
+Confidential computations are typically long running and must be resilient to unexpected failures and
+planned maintenance. CCF [55] and EngRAFT [60] are using replicated state machines based on Raft
+consensus protocol running in a group of TEEs, both support reconfiguration. EngRAFT provides roll-
+back protection for the Raft [50] state using a mechanism similar to ROTE. Avocado [13] focuses on an
+in-memory key/value store running ABD [46] protocol in groups of TEEs. Avocado leverages key inde-
+pendencetoachievehighperformance(operationsarelinearizableonaperkeybasis),unlikeourworkthat
+focuses on providing linearizable transactions across an arbitrary number of keys (potentially entire data
+set). Our work relies on replicated state machines based on Raft protocol and likewise benefits from its
+simplicity,theoreticalsoundnessandflexibility(comprehensivesemantic).
+32
