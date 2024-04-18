@@ -1,0 +1,2597 @@
+Decomposing and Editing Predictions
+by Modeling Model Computation
+HarshayShah AndrewIlyas AleksanderMa˛dry
+harshay@mit.edu ailyas@mit.edu madry@mit.edu
+MIT MIT MIT
+Abstract
+Howdoestheinternalcomputationofamachinelearningmodeltransforminputsintopredictions?
+Inthispaper,weintroduceataskcalledcomponentmodelingthataimstoaddressthisquestion.
+The goal of component modeling is to decompose an ML model’s prediction in terms of its
+components—simplefunctions(e.g.,convolutionfilters,attentionheads)thatarethe“building
+blocks” of model computation. We focus on a special case of this task, component attribution,
+where the goal is to estimate the counterfactual impact of individual components on a given
+prediction.WethenpresentCOAR,ascalablealgorithmforestimatingcomponentattributions;
+wedemonstrateitseffectivenessacrossmodels,datasets,andmodalities.Finally,weshowthat
+componentattributionsestimatedwith COAR directlyenablemodeleditingacrossfivetasks,
+namely: fixingmodelerrors,“forgetting”specificclasses,boostingsubpopulationrobustness,
+localizing backdoor attacks, and improving robustness to typographic attacks. We provide
+codeforCOARathttps://github.com/MadryLab/modelcomponents.
+1 Introduction
+Despitetheirpredictivepower,large-scalemachinelearning(ML)modelsremainblackboxes. In
+particular, the complex internal computation that these models perform to transform inputs into
+predictionsmakesitdifficulttounderstandmodelbehaviorand,asaresult,detectfailuremodes
+priortodeployment[BVP18;SCN+19;GJM+20].
+Inresponsetothisdifficulty,alineofworkinMLinterpretabilityaimstoshedlightonmodel
+computation by analyzing model components—intuitively “grouped” model parameters such as
+convolutional filters or attention heads. For example, feature visualization methods [SVZ13;
+ZF14; GKB+22] identify components in vision models that detect visual concepts such as curves
+[OCS+20a] and objects [BZS+20]. Representation-based probes [AB16] identify groups of com-
+ponentsinlanguagemodelsthatencodesentiment[RJS17],part-of-speechtags[BLZ18],andsyn-
+tacticstructure[HL19]. Finally,mechanisticinterpretabilityanalyses[WVC+22;NCL+23]uncover
+specificcomponentsthatencodeamodelbehaviorofinterest,e.g.,“knowledgeneurons”[DDH+21]
+and “induction heads” [OEN+22]. Broadly, these works leverage different tools to answer the
+question: Howdoindividualmodelcomponentsshapemodelbehavior?
+Inthiswork,weproposeanew(andcomplementary)approachtostudyingthisquestion. Our
+pointofstartistorephrasethequestion,insteadasking:
+Howdochangestomodelcomponentscollectivelychangeindividualmodelpredictions?
+Weturnthisrephrasedquestionintoaconcretetaskcalledcomponentmodeling. Inthistask,the
+goalistobuildaninterpretablecounterfactualestimatorofhowamodel’soutputwouldchangein
+1
+4202
+rpA
+71
+]GL.sc[
+1v43511.4042:viXraFigure1: Asummaryofthecomponentmodelingframework.
+responsetointerventionsmadetoitscomponents. Intherestofthepaper,wepresentageneralap-
+proachtobuildingsuchestimators,whichturnouttobehighlypredictiveinlarge-scalesettings.
+Beyond shedding light on how model components collectively contribute to a given prediction,
+theseestimatorsenableeffectivemodelediting,allowingustodesigntargetedinterventionsthat
+inducecertaindesirablemodelpredictions.
+Roadmap&contributions. Themaincontributionofourworkisaframeworkfordecomposing
+modelpredictionsintermsofmodelcomponents,whichweshowhasdirectapplicationstomodel
+editing. Figure1summarizesthesecontributions. Specifically,inthispaperwe:
+1. Introduce the component modeling framework: We formalize our goal of understanding
+how model components shape ML predictions as a concrete task called component modeling
+(Definition 1). The objective of this task is to learn a counterfactual estimator, or component
+model,thataccuratelypredictstheeffectofablatingasubsetofmodelcomponentsonagiven
+model prediction (Equation 1). Intuitively, this task operationalizes the idea that if we can
+“understand”howmodelcomponentsshapeaprediction,weshouldalsobeabletoestimate
+howthepredictionwouldchangeifweweretoablateasubsetofcomponents.
+2. Instantiate the framework via component attribution: We focus our attention on a special
+“linear” case of component modeling called component attribution, where we assign a score
+to each component, and estimate the counterfactual effect of ablating a set of components
+asthesumoftheircorrespondingscores(Definition2). Componentattributionsallowusto
+2directlyreadoffthe“contribution”ofeverycomponenttoaprediction,abstractingawaythe
+complexityofthemodel’sinternalcomputation.
+3. Proposeanalgorithmforefficientcomponentattribution: Wedevelop COAR (component
+attribution via regression), a scalable way to estimate component attributions (Section 3).
+Through experiments on both image classifiers and language models, we show that COAR
+yieldscomponentattributionsthatcanaccuratelypredicthowmodelpredictionschangein
+responsetocomponent-levelablations(Section4).
+4. Demonstrate that component attributions enable model editing: Component attributions
+from COAR directly enable edits to large-scale classifiers without additional training (Sec-
+tion 5). Specifically, we propose an editing procedure (COAR-EDIT) that designs targeted
+ablations by using COAR attributions as a counterfactual estimator—given an objective,
+COAR-EDIT findsablationsforwhichestimatedmodeloutputsperformwell. Westress-test
+COAR-EDIT through five editing tasks: fixing model errors (§5.1), selectively “forgetting”
+anentireclass(§5.2),boostingsubpopulationrobustness(§5.3),localizingbackdoorattacks
+(§5.4),andmitigatingtypographicattacks(§5.5).
+Paperorganization. Webeginbyformalizingthecomponentmodelingtaskanditsspecialcase,
+componentattribution, inSection2. Wethendescribeourmethod, COAR, forestimatingcompo-
+nentattributionsinSection3,anddemonstrateitseffectivenessonlarge-scalemodelsinSection4.
+Finally,westress-testthepracticalutilityof COARattributionsformodeleditinginSection5.
+2 Setup and Problem Statement
+Consider a typical supervised learning setup. We have a set S of input-label pairs (or examples)
+z = (x ,y ), and a trained model M that maps inputs x to predicted labels M(x). We define the
+i i i
+modeloutputfunction f (z) ∈ R asanystatisticthatquantifiesthecorrectnessofmodel M onthe
+M
+example z. For instance, the model output f (z) can be the cross-entropy loss in a classification
+M
+task,orthesquaredlossinaregressiontask.
+In this work, we will think of the model M not as a black box, but instead as the output
+of a computation graph G [Bau74]. Each parameterized node of this graph—which we call a
+M
+component—is a function mapping its incoming edges to an outgoing edge. For example, a d-
+dimensionallinearmodel M naturallyadmitsacomputationgraph G withdcomponents—one
+M
+component C(z) = w ·z for each parameter w—followed by a summation that combines the
+i i i
+componentsintoanoutput.
+For more complex models, there are often multiple valid computation graphs G we could
+M
+consider. For example, if M is a Transformer [VSP+17], the components might be multi-head
+attention blocks, individual attention heads, or even individual parameters. In general, the com-
+ponentsetdependsonthemodelarchitectureandthelevelofgranularitythatwewishtostudy.
+Component modeling. Our goal in this work is to understand the behavior of the model M
+in terms of its components. By viewing the model M as a computation graph G over a set of
+M
+componentsC,wecanrestateourgoalasfollows:
+Givenamodel Mandexamplez,howdoindividualcomponentsc ∈ C
+combinetoyieldthemodeloutput f (z)?
+M
+3Of course, there is a trivial answer to this question: the components c ∈ C combine through the
+verycomputationgraphusedtodefineC. Thisansweriscorrectbutnotsatisfying,asitdoesnot
+getusclosertoourconceptualgoalofunderstandingmodelbehaviorintermsofcomponents.
+Whatwearetrulyafterisasimple,interpretablefunctioncapturinghowcomponentsinCimpact
+f (z). Tomakethismoreprecise,wedefinethecomponentcounterfactualfunction f (z,C′)as
+M M
+f (z,C′) := modeloutput f (z)onexamplezafterablatingcomponentsC′ ⊆ C, (1)
+M M
+where “ablating” here corresponds to any intervention that overrides or patches the parameters
+correspondingtocomponentsc ∈ C′(e.g.,bysettingthemtozero[OEN+22]orbyaddingrandom
+noise[MBA+22]).
+Equation(1)allowsustooperationalizeourgoalasacounterfactualestimationtask. Inthistask,
+we want to estimate component counterfactuals f (z,C′) using a much simpler function, which
+M
+wecallacomponentmodel.
+Definition1(Componentmodeling). Fixamodel Mwithcomputationgraph G ,componentsetC =
+M
+{c 1,...,c N}, and model output function f M. For any subset of model components C′ ⊆ C, let 0 C′ be the
+correspondingablationvectorofC′,definedasa N-dimensionalvectorwhere
+(cid:40)
+0 ifc ∈ C′
+(0 C′)
+i
+= i
+1 otherwise.
+Givenanexample z,acomponentmodelfor z isafunction g(z) : {0,1}N → Rthatmapsablationvectors
+ofsubsetsC′ toestimatesofthecounterfactual f (z,C′).
+M
+In other words, the high-level goal of component modeling is to build an estimator that can di-
+rectlyanswercounterfactualquestionslike“whatwouldhappentomyclassifier’spredictiononagiven
+imageifIablatedaspecificsetofcomponentsC′ ⊆ C?” withouthavingtointerveneonthecomputa-
+tiongraphG andablatecomponentsinC′.
+M
+Component attribution. In this work, we consider a subcase of component modeling—which
+we call component attribution—where the function g(z) is linear in its input. That is, a component
+attributionforexamplezassignsascorew(z)
+toeachcomponentc ∈ C,andpredictstheeffectof
+i i
+ablatingC′ ⊂ CasthesumofthescorescorrespondingtocomponentsinC\C′.
+Definition2(Componentattribution). Fixamodel Mwithoutputfunction f andcomponentsetC =
+M
+{c ,...,c }. A component attribution for example z is a set of parameters θ(z) := {w(z) ,...,w(z) ,b(z)}
+1 N 1 N
+whichparameterizealinearcomponentmodel,i.e.,afunction g(z) suchthat
+f M(z;C′) ≈ g(z)(0 C′) := 0 C⊤ ′w(z)+b(z)
+Componentattributionsatisfiesourgoaloffindingasimple,interpretableaccountofhowmodel
+components combine to form predictions. In particular, a component attribution for example z
+(z)
+decomposesamodel’soutputonzintothecontributionsw ofeachindividualcomponentc .
+i i
+Remark1(Linearityandmisspecification). ModernMLmodelscomprisecomplexcomputationgraphs
+with highly non-linear interactions among model components. For such models, it is unclear a priori why
+the effect of ablating components on model outputs (i.e., component counterfactuals (1)) should be well-
+approximated by linear component attributions (2), which sum fixed additive effects of individual compo-
+nents. Still, despite this evident misspecification, our results on large-scale vision and language models in
+Section4showthatcomponentattributionscanaccuratelypredictcomponentcounterfactuals.
+43 Component attribution with COAR
+In Section 2, we formalized our high-level goal of understanding how models internally process
+examples into a counterfactual estimation task called component modeling (Definition 1), of which
+we study a special (linear) case called component attribution (Definition 2). Now, we show how to
+estimatecomponentattributionsθ(z) bycastingthecounterfactualestimationtaskasaregression
+problem. Specifically, we now describe COAR (component attribution via regression), a general
+componentattributionmethodformodelsrangingfromrandomforeststodeepneuralnetworks.
+Approach. Consider a fixed model output f (·) of interest, and a corresponding computation
+M
+graph G thatencodesthemodelcomponentsC atthedesiredlevelofgranularity. Additionally,
+M
+wefixanablationmethod,i.e.,aprocedurefor“overriding”orpatchinganygivensubsetC′ ⊂ Cof
+themodelcomponentsinthecomputationgraphG .
+M
+Our method COAR takes in an example z and outputs a corresponding component attribu-
+tion vector θ(z) ∈ R|C|+1 (Definition 2). To do so, COAR casts the task of predicting component
+counterfactualsasasupervisedlearningproblem,whichwesolveintwosteps:
+1. Construct a component dataset. We construct a dataset D(z) of component counterfactuals
+for the example z. Each “datapoint” in D(z) consists of a component subset C ⊆ C and its
+i
+corresponding counterfactual f (z,C) (see (1))—we evaluate the latter by simply ablating
+M i
+thecomponentsinC andevaluatingthemodelonexamplez.
+i
+Inthiswork,wechoosethecomponentsubsetsC toberandomα -fractionsubsetsofthe
+i train
+componentset C,foraablationfractionhyperparameter α > 0.1 Theoutputofthisstep
+train
+isacomponentdataset
+D(z) := {(C , f (z,C )),...,(C , f (z,C ))}, (2)
+1 M 1 m M m
+whereC ∼ Uniform({C′ ⊂ C: |C′| = α |C|}). Westudytheeffectofvaryingtheablation
+i train
+fractionαon COARinAppendixE.1.
+2. Fitalinearestimator. Wethenusethedataset D(z) tofitcomponentattributionparameters
+θ(z)foreachexamplez(seeDefinition2). Morespecifically,foreachexamplez,weminimize
+thesquaredlossbetweenthecomponentcounterfactualsfromStep1andtheircorrespond-
+ingattribution-basedpredictionsbysolvingthefollowinglinearregressionproblem:
+(cid:18) (cid:19)2
+θ(z) := arg min ∑ b+0⊤ w− f (z,C) , (3)
+b∈R,w∈R|C|
+(Ci,fM(z,Ci))∈D(z)
+Ci M i
+whereagain0 istheablationvectorofC (Definition1). Ourcomponentmodelisthen
+Ci i
+g(z)(0 C′) := 0 C⊤ ′w(z)+b(z) . (4)
+We provide pseudocode for COAR in Appendix A.1. As we discussed in Section 2, the resulting
+componentattributionθ(z) := (w(z),b(z))isinterpretableinthatthecoefficientw(z) estimateshow
+j
+the model output on example z would change if we were to ablate component c . We can thus
+j
+viewthiscoefficientasthe(estimated)additivecontributionofcomponentc tothemodeloutput.
+j
+1Weoptforthisrandomα-fractionsamplingmethodforsimplicity—itmaybepossibletomakeCOARmorestatis-
+ticallyefficientbychoosingthesubsetsC morecarefully.
+i
+5Theabovetwo-stepapproachissimpleandhighlyscalable—wecanconstructthedatasetD(z)
+withjustforwardpassesonthegivenmodeltocomputecomponentcounterfactuals,andoptimize
+thelinearregressionproblem(eq.3)withoff-the-shelfGPU-basedsolvers—seeAppendixA.4for
+details. This enables us to apply COAR on large-scale models (e.g., ViT [DBK+21]) and datasets
+(e.g.,ImageNet[DDS+09]),asshowninthenextsection.
+Instantiating COAR for classifiers. Our method COAR is general in that we can use it to study
+any machine learning model M that has a corresponding output function f and computation
+M
+graphG M. Inthiswork,weprimarilyuseCOARtoanalyzemodelstrainedonclassificationtasks.
+Although the computation graph G will vary based on the specific model architecture we are
+M
+studying,acrossallmodelsweusethestandardcorrect-classmargin[IPE+22]asthemodeloutput
+f ,i.e.,
+M
+f (z) := (logitforcorrectclass)−(highestlogitforincorrectclass). (5)
+M
+a quantity whose sign indicates the correctness of model M on the example z. For the latter, we
+choose to ablate component subsets C′ ⊂ S by simply setting the parameters of the components
+in C′ to zero [WVC+22; OEN+22]. We use COAR with alternative model output functions and
+ablationmethodsinAppendixE.3andAppendixE.2respectively.
+Remark2(Ablationisnotremoval). Asnotedinpriorwork[CGG+22],ablationmethods(e.g.,setting
+weights or activations to zero) do not “remove” model components from the computation graph. Instead,
+suchablationsshifttheactivationsoff-distributioninasystematicway—thegoalofcomponentattribution
+(Definition 2) is to predict the change in model outputs induced by this shift. We use zero-ablation as our
+ablationmethodbecauseitisacommonchoiceintheliterature[OEN+22;WVC+22]. InAppendixE.2,we
+showthatCOARcanestimatecomponentattributionswithalternativeablationmethodsaswell.
+4 Does COAR learn accurate component attributions?
+WenowevaluatewhetherCOAR-estimatedattributionsaccuratelypredictcomponentcounterfac-
+tuals(asin(1))fordeepneuralnetworkstrainedonimageclassificationandlanguagemodeling.
+Datasets, models, and components. We apply COAR to compute component attributions in
+threedifferentsetups:
+• Setup A: A ResNet-18 [HZR+15] trained on the CIFAR-10 dataset [Kri09], with a compu-
+tation graph G comprising |C| = 2,306 components. Specifically, each model component
+A
+c ∈ C corresponds to a convolutional filter in the model, and ablating a set of components
+i
+C′ ⊂ Cmeanssettingalltheweightsinthecorrespondingfilterstozero.
+• SetupB:AResNet-50trainedontheImageNetdataset[DDS+09],withacomputationgraph
+G comprising |C| = 22,720 components. Again, each component here corresponds to a
+B
+convolutionalfilterinoneofthe49convolutionlayersoftheResNet-50.
+• SetupC:AVisionTransformer(ViT-B/16)[DBK+21]trainedonImageNet,whosecomputa-
+tiongraphG comprises82,944components. Eachcomponentherecorrespondstoarowof
+C
+aweightmatrixinoneof12transformerblocksoftheViT,andablatingasetofcomponents
+meanssettingthecorrespondingrowstozero.
+WeprovideadditionaldetailsonthemodelsanddatasetsinAppendixA.2.
+6Applying COAR. We use COAR to obtain component attributions (one for each test example)
+in each setup. Specifically, for a given model, we first construct a component dataset D(z) for
+each example z (as in Step 1 of Section 3) by randomly ablating α fraction of all components
+train
+andevaluatingtheresultingcorrect-classmargin(5)onz,whereα = {10%,5%,5%}forsetup
+train
+{A,B,C} above. We repeat this m times, yielding a component dataset D(z) of size m for each
+example z—we use m = {50000,100000,200000} for setup {A,B,C} above. We then run linear
+regressions on the resulting datasets (as in Step 2 of Section 3) to yield the final component attri-
+butions. WedeferimplementationdetailstoAppendixA.4andstudytheeffectofthedatasetsize
+mandablationfractionα ontheresultingattributionsinAppendicesC.4andC.5.
+train
+Evaluationmetric. Weevaluatecomponentattributionsbasedontheirabilitytoestimateunseen
+component counterfactuals (1), i.e., the result of ablating component subsets C′ not observed at
+trainingtime. Specifically,wesampleanewcollectionofkcomponentsubsets
+D(z) := {C′ ,C′ ,...,C }, where C′ ∼ Unif({C′ ⊂ C : |C′| = α |C|}),
+test 1 2 k i test
+where 0 < α < 1 is the ablation fraction used at evaluation time. Varying α allows us
+test test
+to evaluate attributions on in-distribution (α = α ) and out-of-distribution (α ̸= α )
+test train test train
+componentcounterfactuals.
+(z)
+To quantify the predictiveness of component attributions, we use D to measure the Pear-
+test
+soncorrelationbetweencomponentcounterfactuals f (z,C′)andtheircorrespondingattribution-
+M i
+basedestimates g(z)(0 C′)(eq.4.),i.e.,
+i
+(cid:16) (cid:17)
+ρ(z) := Pearson-ρ {f M(z,C 1′),..., f M(z,C k′)},{g(z)(0 C′),...,g(z)(0 C′)} . (6)
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) 1 (cid:123)(cid:122) k (cid:125)
+ground-truthcounterfactuals attribution-basedestimates
+Baselines. We use the evaluation metric described above (Equation 6) to compare COAR attri-
+butions with four baselines, two adapted from related work and two natural baselines. We defer
+implementationdetailstoAppendixA.3.
+• Adaptedbaselines(NC,II):Weadaptneuronconductance(NC)[DSY18]andinternalinflu-
+ence (II) [LSD+18] to the component attribution setting. Both methods use integrated gra-
+dients [STY17] (an input-space feature attribution method) to compute importance scores
+for each component c i. To compare these methods to COAR, we apply NC and II to model
+(z)
+outputsonexamplez,andinterprettheresultingscoresastheattributioncoefficientsw .
+i
+• Specialized baselines (LOO, GP): We also consider two other baselines. First, leave-one-out
+(LOO)ablatesindividualcomponentsc andestimatesthecorrespondingcoefficientbasedon
+i
+the effect of the ablation, setting w(z) = f (z,{c })− f (z,∅). We also consider gradient-
+i M i M
+times-parameter(GP),whichapproximatestheleave-one-outeffectofeachcomponentusing
+afirst-orderTaylorapproximation,settingw(z) = ∇ f (z,∅)·δ ,whereδ istheparameter-
+i ci M ci ci
+spacechangeinc inducedbytheablationmethodofchoice.
+i
+Remark 3 (Relation between baselines and patching). Readers familiar with the field of mechanistic
+interpretabilitymayobservethattheleave-one-out(LOO)baselineresemblesactivationpatching[VGB+20;
+MBA+22; ZN23] and the gradient-times-parameter (GP) baseline resembles attribution patching [SRC23;
+KLS+24]. Indeed,activationpatchingablatesindividualactivationstoestimatetheireffect,andattribution
+patching considers a first-order gradient-based approximation. The key difference is that the ablations we
+considerareinparameterspaceratherthanactivationspace,andthatwestudyadifferentmodeloutput.
+7Setup A: ResNet-18 trained on CIFAR-10
+4 Corr. (z)=0.80 0.8 Fraction of components ablated 0.710.75
+0.7 0.68 Line x=y 0.15 0.125 0.1*
+2 0.6
+0.52
+0.5
+0 0.42
+0.4 0.38
+Example z
+0.3
+2 0.24
+0.2 0.150.18
+4 0.1
+0.060.090.11
+0.000.010.01
+0.0
+4 2 0 2 4 Internal Infl. Neuron Cond. Grad Param Leave-one-out COAR
+True counterfactuals fM(z,0C) on example z [II] [NC] [GP] [LOO] [Ours]
+Setup B: ResNet-50 trained on ImageNet
+0.7
+4 Corr. (z)=0.70 Fraction of components ablated 0.65
+Line x=y 0.6 0.1 0.075 0.05* 0.57
+2 0.5 0.48
+0.4
+0.34
+0 Example z 0.3
+0.2 0.17 0.18
+2 0.1 0.08 0.10
+0.04
+0.010.000.00 0.000.000.00
+0.0
+2 0 2 4 Internal Infl. Neuron Cond. Grad Param Leave-one-out COAR
+True counterfactuals fM(z,0C) on example z [II] [NC] [GP] [LOO] [Ours]
+Setup C: ViT-B/16 trained on ImageNet
+0.8 0.76
+Corr. (z)=0.81 Fraction of components ablated
+0.69
+2 Line x=y 0.7 0.1 0.075 0.05* 0.65
+0.6 0.58
+0.54
+0.52
+0 0.5 0.42
+0.4 0.39
+Example z 0.31
+2 0.3
+0.2
+4 0.1
+0.010.020.02
+0.050.060.07
+0.0
+4 2 0 2 Internal Infl. Neuron Cond. Grad Param Leave-one-out COAR
+True counterfactuals fM(z,0C) on example z [II] [NC] [GP] [LOO] [Ours]
+Figure2: EvaluatingCOARattributions. Weevaluatewhethercomponentattributionscomputed
+usingourprocedure COAR accuratelypredictcomponentcounterfactuals(1). Wecompare COAR
+to four baselines (described in Section 4) on three image classification setups (one per row). The
+subfigures on the left each focus on a single example z (visualized in the bottom-right corner of
+each plot), and show that for each setup, the ground-truth component counterfactuals f (z,·)
+M
+(x-axis)andattribution-basedestimates g(z)(·)(y-axis)exhibithighcorrelationρ(z). Ontheright,
+we observe that COAR attributions exhibit high average correlation E z[ρ(z)] over test examples,
+outperformingallbaselinesineachtaskandforallablationfractionsα . Theasterisk(*)ineach
+test
+legenddenotesα ,theablationfractionusedtofitthecomponentattributions.
+train
+4.1 Results
+Wenowusethesetupdescribedabovetotestwhether COAR learnsaccuratecomponentattribu-
+tions for setups {A,B,C}. For each task, we first use COAR to estimate a component attribution
+foreveryexamplezinthecorrespondingtestset. Wethenevaluatethesecomponentattributions
+usingthecorrelationmetricρ(z)definedinEquation6. Figure2depictsourresults.
+8
+)C0()z(g
+etamitse
+RAOC
+)C0()z(g
+etamitse
+RAOC
+)C0()z(g
+etamitse
+RAOC
+])z(
+[zE
+noitalerroc
+egarevA
+])z(
+[zE
+noitalerroc
+egarevA
+])z(
+[zE
+noitalerroc
+egarevAExample-level analysis. On the left side of each row in Figure 2, we focus on an individual test
+example z from each task. For each example z, we ablate random component subsets C′ ⊂ C
+of size α ·|C| (for α = α ) from the model and estimate the correlation ρ(z) from Equa-
+test test train
+tion 6. Across all three tasks, we observe that COAR learns accurate component attributions for
+theselectedtestexamples. InAppendixC.6,weprovideadditional(randomlyselected)example-
+specificcorrelationplots,aswellasanalogousplotsforallbaselinesdescribedabove.
+Aggregateanalysis. TherightsideofeachrowinFigure2plotstheaveragecorrelationbetween
+theground-truthcounterfactualsandattribution-basedestimatesovertestexamples,i.e.,E [ρ(z)].
+z
+Wealsoanalyzetheeffectofablationfractionα ontheaveragecorrelation,findingthat:
+test
+(a) COAR outperforms baselines by a large margin across datasets, models, and ablation frac-
+tionsα . Forexample,whenablatingα = 5%ofcomponentsintheImageNetResNet50
+test test
+(setupB),attribution-basedestimatesusingCOARandthebest-performingbaseline(LOO)ex-
+hibit0.65and0.34correlationwithground-truthcounterfactuals,respectively. Additionally,
+the adapted baselines, NC and II, exhibit low correlation with the ground-truth counterfac-
+tualsinallthreesetups.
+(b) The correlation between ground-truth counterfactuals and attribution-based estimates de-
+cays gracefully on larger out-of-distribution component subsets, i.e., as α increases. For
+test
+example,increasingα from10%(equaltoα )to12.5%and15%onCIFAR-10(setupA)
+test train
+only decreases the average correlation of COAR-based estimates from 0.74 to 0.70 and 0.68
+respectively.
+Applying COAR to language models. Although we focus on vision models in this work, our
+attributionmethod COAR isgeneralandmodality-agnostic. InAppendixB,weshowthat COAR,
+withoutanymodification,yieldspredictivecomponentattributionsforlanguagemodelsaswell.
+First, we apply COAR to GPT-2 [RWC+19] evaluated on the next-token prediction task using the
+TinyStories dataset [EL23] (§B.1). Then, we turn to the zero-shot classification setting and apply
+COARtoPhi-2[LBE+23]evaluatedontheBoolQquestion-answeringtask[CLC+19](§B.2).
+Additionalanalysis. InAppendixC,weshowthat COAR attributionsarepredictiveforout-of-
+distribution inputs (§C.1), additional architectures (§C.2), additional tasks (§C.3), and different
+train-time ablation fractions (§C.4). We also show that COAR outperform baselines when trained
+with2-5×fewersamplesinAppendixC.5,andprovidequalitativeanalysisinAppendixC.7.
+5 Do COAR attributions enable model editing?
+In the last section, we showed that COAR attributions accurately predict how model outputs
+change in response to component-level interventions. We now evaluate the practical utility of
+COARbyapplyingittotheproblemofmodelediting. Thatis,weask:
+IsablatingmodelcomponentsidentifiedviaCOARattributionsaneffectivewaytoeditmodels?
+Toanswerthisquestion,wefirstdefinemodeleditinginourcontextandprovideasimplemethod,
+COAR-EDIT, for translating component attributions into model edits. We apply this approach
+to edit model behavior on individual examples (§5.1), classes (§5.2), subpopulations (§5.3), and
+concepts(§5.4,§5.5). Ourfindingsindicatethat COARdirectlyenablesmodelediting.
+9Problemsetup. Consideramachinelearningmodel M,atargetdistributionoverexamplesD ,
+T
+andareferencedistribution D . Amodelediton M isaninterventionthataimstomodifyperfor-
+R
+manceonthetargetexamplesz ∼ D inaspecificway,whileleavingbehavioronreferenceexam-
+T
+plesz ∼ D unchanged. Initsmostgeneralversion,modeleditingcaninvolveadditionaltraining
+R
+(e.g.,constrainedfine-tuning[ZRZ+20]orrank-oneparameterupdates[BLW+20]),targetedmod-
+ifications to model parameters (e.g., weight pruning [DSH+21] or hypernetworks [MLB+21]), or
+evenarchitecturalmodifications(e.g.,adaptors[HSP+22]oraddingneurons[HSZ+23])
+Sinceourgoalistostudymodelpredictionsintermsofmodelcomponents,werestrictmodel
+edits to ablation-based interventions in this work. That is, we only consider interventions whose
+output can be expressed as component counterfactuals (see Equation 1). The goal of an editing
+method, then, is to identify a subset of model components whose ablation changes performance
+on a given target set of examples S , without impacting model behavior on a reference set of
+T
+examplesS . Definition3turnsthisintuitionintoaprecisedefinitionoftheablation-basedmodel
+R
+editingproblem.
+Definition3(Editingmodelsbyablatingcomponents). Consideramodel Mwithcomputationgraph
+G , component set C = {c ,...,c }, and model output function f . Let D and D denote target
+M 1 N M T R
+andreferencedistributionsoverexamples, respectively. An (ϵ,δ)-effectivemodeleditfor D and D isan
+R T
+interventionthatablatesasubsetofcomponentsC ∈ 2C suchthat
+edit
+E [|f (z,C )− f (z,∅)|] ≤ ϵ and E [|f (z,C )− f (z,∅)|] ≥ δ, (7)
+D R M edit M D T M edit M
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Effectofeditonreferenceexamplesissmall Effectofeditontargetexamplesislarge
+where f (z,C)denotesthecomponentcounterfactualfunction(1),i.e.,modeloutputfunction f evaluated
+M M
+onexamplezafterablatingcomponentsC.
+AsperDefinition3,eachcomponentsubsetC′ ⊂ 2C definesapotentialmodeledit. Thatis,effec-
+tivelyeditingthemodel(asin(7))requiresidentifyingasubsetC′that,whenablated,significantly
+changes model outputs on the target distribution but not on the reference distribution. A naive
+approach to this task would thus require searching over the (combinatorial) space of all possible
+componentsubsets. Isthereabetterway?
+An attribution-based approach to model editing. In this section, our goal is to show that an
+effectivecomponentattributionmethod(suchasCOAR)candirectlyserveasaguideforidentify-
+ing effective model edits. Key to this utility is a fundamental connection between the attribution
+problem and the editing problem. In particular, the former answers questions of the form, “how
+wouldthemodeloutputschangeifweweretoablateasubsetofcomponents?” whilethelatterinvertsthis
+question to ask “which components, when ablated, would change model outputs in a specific way?” By
+identifyingthemodelcomponentsthataremost“important”tothedesiredmodeloutputs,anat-
+tributionmethodcanthusidentifyasubsetofmodelcomponentstotargetthroughablation-based
+editing(seeDefinition3).
+Tomakethisconcrete,weproposeCOAR-EDIT,asimplethree-stepeditingapproachbasedon
+COARattributions. Specifically,givenamodel MwithasetofmodelcomponentsC,asetoftarget
+examplesS
+T
+sampledfromD T,andasetofreferenceexamplesS
+R
+sampledfromD R,COAR-EDIT
+identifiesamodeledit(7)inthreesteps:
+1. Estimate COAR attributions θ(z) := (w(z),b(z)) where w(z) ∈ R|C| and b(z) ∈ R for every
+targetandreferenceexamplez ∈ S ∪S .
+T R
+102. Foreachmodelcomponentc ∈ C,useasimplet-testinordertoquantifythe“importance”
+i
+ofcomponentc tosetoftargetexamplesS relativetothesetofreferenceexamplesS :
+i T R
+
+τ(c ) :=
+µ i(S T)−µ i(S R)
+, where
+µ i(S) = |S1
+|
+∑ z∈Sw i(z)
+(8)
+i (cid:114) σ i2(ST) + σ i2(SR) σ i2(S) = |S1 | ∑ z∈S(w i(z) −µ(S))2.
+|ST| |SR|
+3. Toincreasemodeloutputsontargetexamples,ablateasetofcomponentsC thatcontains
+edit
+thekmostnegativescoresτ,i.e.,set
+i
+C = argbottom-k({τ(c ) : c ∈ C}), (9)
+edit i i
+wherethenumberofablatedcomponents k isahyperparameterwhichonecanset, e.g., by
+cross-validation. Similarly,ifthegoalistodecreasemodeloutputsonS ,wereplacebottom-k
+T
+withtop-kin(9).
+To make sense of the approach above, note that for every component c and a set of examples S,
+i
+µ(S) in Equation 8 leverages attributions to directly estimate µ (S), the average effect of ablating
+i
+c on model predictions for samples in set S. Similarly, the term σ2(S) captures the variation
+i i
+(across examples) of this effect. As a result, the score τ(c ) in Equation 8 exactly corresponds to
+i
+thetwo-sample t-teststatistic,withanullhypothesisthatthecomponent c hasanequalaverage
+i
+effect on the target distribution D and the reference distribution D . We then use these scores
+T R
+{τ(c ) : c ∈ C} in Equation 9 in order to identify components that, when ablated, would change
+i i
+outputsontargetexamplesthemostrelativetothechangeintheoutputsofreferenceexamples.
+Remark 4 (Ablation-based edits). Our restriction of model edits to ablations of component subsets in
+COAR-EDIT is a significant one. In particular, simply ablating model components is likely not the most
+effective way of editing a model. Our goal in this section, however, is not to propose a state-of-the-art
+model editing method, but rather to answer two questions. First, we want to assess the practical utility of
+COARforinformingmodeledits. Second,wewanttoshedlightonwhetherlarge-scalemodelsareamenable
+to zeroth-order editing, i.e., without gradient information. Leveraging COAR attributions in conjunction
+with editing techniques based on fine-tuning in order to make finer-grained model edits is an interesting
+directionforfuturework.
+Next, we use COAR-EDIT to edit large-scale models trained on classification tasks, where we
+use correct-class margin (5) as the model output function. Specifically, we conduct five exper-
+iments to evaluate the effectiveness of COAR-EDIT in editing model behavior using only a few
+examplesandwithoutrequiringadditionaltraining.
+(a) InSection5.1,wecorrectindividualmodelerrorswithoutimpactingoverallperformance;
+(b) In Section 5.2, we selectively “forget” a specific class while preserving model performance
+onotherclasses;
+(c) InSection5.3,westartwithamodelthatperformsdisparatelyacrossasetofsubpopulations,
+andeditthemodeltoimproveitsaccuracyonunderperformingsubpopulations;
+(d) In Section 5.4, we localize (known) backdoor attacks and mitigate them by ablating a small
+numberofcomponents;
+(e) InSection5.5,weeditCLIPclassifierstobemorerobusttotypographicattacks.
+Forallexperiments,weprovideadditionaldetailsandanalysesinAppendixD.
+11(a) Editing a misclassified ImageNet example (b) Effect of edit on ImageNet val examples (c) Effect of edits on overall performance
+Train set (avg) Val set (avg) Example z Examples on which margin does not change Model accuracy
+0.0 0.0 0.0 Before edit: 86.09%
+4 After edit: 85.93% (median)
+3
+American dipper Cliff Teddy bear
+2 Examples on which margin increases
++3.59 +3.49 +2.70 80 81 82 83 84 85 86
+1 Accuracy on train set
+0 Model accuracy
+Train example z T-shirt Hand-held computer Quill Before edit: 75.36%
+1 Examples on which margin decreases After edit: 75.18% (median)
+-5.44 -5.32 -5.09
+Before: "Keyboard"
+2
+After: "Ballpoint Pen"
+3
+0 1 2 3 4 5 6 7 8 Crossword Crossword Crossword 70 71 72 73 74 75
+Number of model components ablated Accuracy on val set
+Figure3: Editingindividualmodelpredictionswith COAR-EDIT. WeeditaResNet50modelto
+correctamisclassifiedImageNetexamplezshownontheleft. Specifically,ablatingafewcompo-
+nents via COAR-EDIT (see (9)) increases the correct-class margin (5) on example z (red) without
+changingtheaveragemarginonthetrainset(lightblue)orvalidationset(darkblue). Inthecenter
+panel, we observe that the examples on which model outputs change the least (top row) due to
+theeditarevisuallydissimilartoexample z aswellasexamplesonwhichmodeloutputschange
+most positively (middle row) and negatively (bottom row). On the right, we find that individu-
+ally performing model edits to correct every misclassified example in the validation set incurs a
+medianaccuracydropofatmost0.2%onthetrainset(toprow)andvalidationset(bottomrow).
+5.1 Editingindividualmodelpredictions
+In this section, we test whether COAR-EDIT can modify individual predictions of an ImageNet
+ResNet50classifier(SetupBinSection4)withoutimpactingitsoverallperformance. Specifically,
+we study the case where the target distribution D is a singleton example on which we want to
+T
+improve performance. An effective model edit in this context (Definition 3) would increase the
+model’smargin(5)onztobegreaterthanzerowithoutaffectingaggregatemodelperformance.
+Results. WeapplyCOAR-EDITtoeditindividualmisclassifiedexamplesz,settingS
+T
+= {z}and
+S tobeasmallsetofrandomsamplesfromtheImageNetdataset. WepresentourfindingsinFig-
+R
+ure3. Figure3aillustratesasinglesuchedit,wherewecorrectthemodel’spredictiononaspecific
+ImageNet example from “keyboard” to “ballpoint pen” by ablating k = 3 components (0.01%
+of all components). Specifically, increasing the number of ablated components k consistently im-
+proves the correct-class margin on target example z (red) without changing the average margin
+over the training set (light blue) or validation set (dark blue). Figure 3b then visualizes (again,
+forthespecificexamplebeingeditedinFigure3a)theexamplesonwhichmodeloutputschanges
+most(andleast)drastically. Aqualitativeinspectionheresuggeststhatexampleswithunchanged
+marginsaredissimilartoz(firstrow),whereasexamplesthataremostpositively(secondrow)or
+negatively(thirdrow)impactedsharesimilarvisualfeatureswithz,e.g.,pen-likeobjects. Finally,
+Figure3cshowsthatwecanindividuallyfixeverymisclassificationintheImageNetvalidationset
+while incurring a median accuracy drop of 0.2% on the training set (top row) and validation set
+(bottomrow). WedeferexperimentdetailsandadditionalresultstoAppendixD.1.
+12
+)(Mf
+nigram
+ssalc-tcerroC
+ytisneD
+ytisneD(a) Editing to "forget" an ImageNet class (b) Effect of edit on ImageNet classes (c) Edit generalizes to OOD ImageNet data
+100 Accuracy over 100 All classes Dataset: ImageNet-Sketch
+Train set Test set Class "chain fence" 90 Class "chain fence" before edit 60 54.9% Before edit
+90 Class "chain fence" after edit After edit 40
+80
+80 27.5% 24.5% 24.5%
+70 20
+70
+60 0
+60 Class "chain fence" All classes
+50 Dataset: ImageNet*
+50 -46% 80 70.3%
+40 60.8% 60.8% 60
+40
+30 42.9%
+40
+30
+20 20
+20
+10 0
+0 1 2 3 4 5 6 7 8 10 20 30 40 50 60 70 80 90 100 Class "chain fence" All classes
+Number of model components ablated Class-level accuracy before edit (%)
+Figure 4: “Forgetting” a class with COAR-EDIT. We edit an ImageNet-trained ResNet-50 (Setup
+B from Section 4) to selectively degrade performance on the “chain-link fence” class. On the left,
+weobservethatincreasingthenumberofcomponentskablatedvia COAR-EDIT decreasesmodel
+accuracy on the “chain-link fence” class (red) while preserving overall accuracy on the train and
+validationset. Inthecenterpanel,wecompareclass-wiseaccuraciesbeforeandafterperforming
+the model edit and observe a significant accuracy drop on the “chain-link fence” class but not
+on other classes. On the right, we find that the edit transfers to distribution-shifted versions of
+ImageNet(ImageNet-Sketch[WGX+19]andImageNet⋆[VJE+23])astargeted,i.e.,degradingper-
+formanceonthe“chain-linkfence”classwithoutchangingaverageperformance.
+5.2 “Forgetting”aclass
+We now consider “selective forgetting” problem [WYS+23], where the goal is to impair model
+performance on (only) a specific set of examples. In this experiment, we edit the same ImageNet
+ResNet-50 model (Setup B) as in Section 5.1, with the goal of forgetting the entire “chain-link
+fence” class. Like before, we use our editing approach COAR-EDIT (see (8) and (9)) to identify
+components that, when ablated, decrease the model’s correct-class margin on examples from the
+“chain-linkfence”class,butnotonreferenceexamplesfromotherclasses.
+Results. Figure4summarizesourfindings. InFigure4a,weshowthatablatingjusteight(outof
+22,720) model components degrades accuracy on the “chain fence” class from 66% to 20% while
+preserving overall accuracy on the train and validation set. Then, in Figure 4b, a comparison of
+class-wise accuracies before and after the edit shows that our approach specifically targets the
+“chain fence” class without impacting performance on any other class. Finally, in Figure 4c, we
+evaluatemodelperformanceonImageNet-Sketch[WGX+19](top)andImageNet⋆[VJE+23](bot-
+tom) datasets to show that the our edit is robust to distribution shifts in both the target and ref-
+erence distribution. Through additional experiments in Appendix D.2, we highlight that (a) our
+approach is sample-efficient, not needing many samples from the target and reference distribu-
+tionstofindeffectiveedits;and(b)ourfindingsarerobusttothechoiceofclasstoforget.
+13
+)%(
+ycarucca
+ledoM
+)%(
+tide
+retfa
+ycarucca
+level-ssalC
+)%(
+ycaruccA
+)%(
+ycaruccA(a) Waterbirds dataset (b) CelebA dataset
+95
+90
+90
+85 85
+80 85%
+80
+83% 75
+75 70
+65
+70 60
+64%
+65 55 47%
+50
+60 45
+0 30 60 90 120 150 180 210 0 2 4 6 8 10 12 14 16 18 20 22 24 26
+Number of model components ablated Number of model components ablated
+Averaged over examples Averaged over subpopulations On worst-performing subpopulation.
+Figure5: ImprovingsubpopulationrobustnesswithCOAR-EDIT. Weeditpre-trainedResNet-50
+models to improve their worst-subpopulation accuracy on two benchmark datasets: Waterbirds
+[SKH+20]andCelebA[LLW+15]. Beforeapplying COAR-EDIT,modelsfine-tunedonWaterbirds
+and CelebA attain 87% and 96% test accuracy but only 64% and 47% accuracy on their worst-
+performing subpopulations, respectively. On the left, applying COAR-EDIT by ablating 210 of
+22,720 components in the Waterbirds model increases worst-subpopulation accuracy from 64%
+to 83% without degrading its accuracy averaged over examples (light blue) and subpopulations
+(dark blue). Similarly, on the right, editing the CelebA model by ablating a targeted subset of 26
+componentsimprovesworst-subpopulationaccuracyfrom47%to85%.
+5.3 Improvingsubpopulationrobustness
+Machinelearningmodelsoftenlatchontospuriouscorrelationsinthetrainingdataset[GRM+19;
+STR+20; HMF+23], resulting in subpar performance on subpopulations where these correlations
+do not hold [BG18; ODC+20]. In this section, we test whether our editing approach can boost
+performanceonsuchunderperformingsubpopulationswithoutdegradingoverallperformance.
+Inparticular,weevaluateCOAR-EDITontwobenchmarkdatasets—Waterbirds[SKH+20]and
+CelebA [LLW+15]—where models fare poorly on subpopulations that are underrepresented in
+the training data. On both datasets, our goal is to improve a given model’s worst-subpopulation
+accuracy—wedeferexperimentdetailstoAppendixD.3.
+Results. On both datasets, COAR successfully identifies component subsets that correspond to
+effective model edits. Figure 5 depicts our results. On Waterbirds (Figure 5a), ablating 210 com-
+ponents(0.9%ofallcomponents)improvesworst-subpopulationaccuracyfrom64%to83%(red)
+without degrading its accuracy averaged uniformly over examples (light blue) and subpopula-
+tions (dark blue). On CelebA, Figure 5b demonstrates that zeroing out 26 of 22,720 model com-
+ponents improves worst-subpopulation accuracy from 47% to 85% and average-subpopulation
+accuracyfrom84%to90%whileonlyincurringa5%dropintestsetaccuracy.
+Before continuing, we make two observations. First, on both datasets, our editing-based ap-
+proachissample-efficient—itdoesnotrequiresubpopulation-levelannotationsforthetrainingset,
+and only uses 20 random training examples from each subpopulation to find effective model
+edits. Second, our results indicate that simply ablating a few components from models trained
+via“standard”empiricalriskminimization(ERM)canachieveworst-subpopulationaccuracyim-
+provements that are comparable to gains from specialized methods (e.g., based on robust opti-
+mization[SKH+20],datasetbalancing[IAP+22],andgenerativemodeling[GGL+20]).
+14
+)%(
+ycarucca
+tseT
+)%(
+ycarucca
+tseT(a) Effect of backdoor trigger on model predictions (b) Editing to "remove" the trigger (c) Effect of edit on model outputs
+CIFAR-10 training data with airplane-specific trigger 90 88% Model outputs before edit
+6
+89%
+80 84%
+car horse airplane airplane
+CIFAR-10 test data without trigger (89% accuracy) 70 =0.41
+-6
+-4 Examples w/o trigger 4
+60
+Model outputs after edit
+frog ship horse airplane 4
+CIFAR-10 test data with trigger (37% accuracy) 50
+Model accuracy on
+Test data without trigger
+40
+37% Test data with trigger =0.92
+-4
+airplane airplane airplane airplane
+0 5 10 15 20 25 -4 Examples w/o trigger 4
+Number of model components ablated
+Figure6: Localizingbackdoorattackswith COAR-EDIT. WeeditaResNet18modeltrainedona
+backdooredCIFAR-10datasetinwhichhalfofalltrainingexamplesinthe“airplane”classcontain
+a planted blue-squared trigger. On the left, we find that the model is sensitive to the trigger—
+backdoor attacks that add the trigger to examples drop test accuracy from 89% (middle row) to
+37% (bottom row). In the center panel, we apply COAR-EDIT to identify 25 backdoor-specific
+components that, when ablated, boost accuracy on examples with the trigger (red) from 37% to
+84%withoutimpactingaccuracyonexampleswithoutthetrigger(blue). Ontheright,wefindthat
+the edit suppresses sensitivity to the trigger even at the example level—the correlation between
+modeloutputsonpairedexampleswithandwithoutthetriggerincreasesfrom0.41to0.92.
+5.4 Localizingbackdoorattacks
+WenowuseCOAR-EDITtoanalyzethesensitivityofmodelpredictionstobackdoorattacks[BNL12;
+GDG17],whereanadversaryplantsaspuriouscorrelationinthetrainingdatasetandusesitasa
+triggertooverridepredictionsattesttime. Inthisexperiment,wefirsttrainaResNet18modelon
+a modified CIFAR-10 dataset in which half of the training examples in the “airplane” class con-
+tainaplantedblue-squaredtrigger, asshowninFigure6a. Then, using COAR-EDIT, weevaluate
+whether the effect of this trigger on predictions can be localized to a few components, which, if
+ablated,inducesmodelrobustnesstobackdoorattackswithoutdegradingoverallperformance.
+Results. Figure 6 summarizes our findings. Figure 6a shows that prior to editing, the model
+trained on the modified CIFAR-10 dataset (top row) is sensitive to backdoor attacks—simply
+adding the “airplane” trigger to test examples drops model accuracy from 89% (middle row)
+to 37% (bottom row). To localize the effect of the trigger, we use COAR-EDIT over ten paired
+examples—i.e., examples with and without the backdoor trigger—to identify a few components
+that,whenablated,correctthemisclassificationsinducedbythetriggerwithoutimpactingpredic-
+tionsontestexampleswithoutthetrigger. InFigure6b,wefindthateditingthemodelbyablating
+25 components (1%) is sufficient to boost accuracy on test examples with the trigger (red) from
+37%to84%withoutimpactingaccuracyonexampleswithoutthetrigger(blue)bymorethan1%.
+Figure 6cshows that theedit suppresses theeffect of thetrigger at theexample level aswell, im-
+proving correlation between model outputs on examples with and without the trigger from 0.41
+(toprow)to0.92(bottomrow). WedeferadditionaldetailsandanalysestoAppendixD.4.
+15
+)%(
+ycarucca
+ledoM
+reggirt
+/w
+selpmaxE
+reggirt
+/w
+selpmaxE(a) Effect of attacks on model predictions (b) Improving robustness to synthetic attacks (c) Robustness transfers to real attacks
+Test data
+95 95
+85 85
+heater books hat
++ synthetic typographic attacks
+75 75
+Model accuracy on
+65 65 Test data
+taxi twitter EU + all attacks (averaged)
++ real typographic attacks + "twitter" attack
+55 55
++ "taxi" attack
++ "EU" attack
+45 45 + "iPad" attack
+taxi twitter EU
+0 50 100 150 200 250 300 0 50 100 150 200 250 300
+Number of model components ablated Number of model components ablated
+Figure 7: Improving robustness to typographic attacks with COAR-EDIT. We edit a zero-shot
+CLIP ViT-B/16 classifier to improve its robustness to typographic attacks [GCV+21]. On the left,
+we find that predictions on images of household objects (top row) can be manipulated to “taxi”,
+“twitter”, or “EU” via synthetic (middle row) and real (last row) typographic attacks. In the
+center panel, we use COAR-EDIT to identify components that, when ablated, improve average
+accuracyonexampleswithsynthetictypographicattacks(red)from51%to89%whilemaintaining
+accuracyonexampleswithoutattacks(blue). Similarly,ontheright,wefindthattheedittransfers
+robustnesstorealtypographicattacksaswell,improvingaverageaccuracyfrom54%to86%.
+5.5 Improvingrobustnesstotypographicattacks
+Zero-shotCLIPclassifiersarevulnerabletotypographicattacks[GCV+21]thatsimplyinserttext
+to images in order to induce misclassifications. In this experiment, we evaluate whether our
+editing approach can improve the robustness of a zero-shot CLIP ViT-B/16 classifier using a
+dataset [MTB22] comprising 180 images with and without multiple typographic attacks. Specifi-
+cally, we use COAR-EDIT to identify a subset of components that, when ablated, correct the mis-
+classificationsinducedbysynthetictypographicattackswithoutimpactingpredictionsonimages
+withoutattacks. WedeferadditionaldetailstoAppendixD.5.
+Results. Figure7summarizesourfindings. InFigure7a,weshowthatthepredictionsofazero-
+shot CLIP ViT-B/16 classifier on images of household objects (top row) can be manipulated to
+“taxi”,“twitter”,or“EU”viasynthetic(middlerow)orreal(lastrow)typographicattacks. More
+quantitatively,wefindthatthezero-shotaccuracyonimageswithsyntheticandrealtypographic
+attacks drops from 95% to 51% and 54%, respectively. Figure 7b shows that ablating a subset of
+300components(0.4%)identifiedviaCOAR-EDITimprovestheaccuracyonheld-outimageswith
+synthetic typographic attacks from 51% to 89% on average (red), without impacting accuracy on
+images without attacks (dark blue). Furthermore, in Figure 7c, we find that our edit transfers
+robustnesstorealtypographicattacksaswell, improvingaccuracyonheld-outimagesfrom54%
+to86%onaverage. Similartopreviousexperiments,ourapproachissample-efficientinthatitonly
+requires 15 pairs of target and reference examples with and without synthetic attacks to identify
+theeditdescribedabove.
+Tosummarize,simplyablatingtargetedsubsetsofcomponentsidentifiedvia COAR-EDIT can
+inducespecificmodelbehaviorwithoutrequiringadditionaltraining. Morebroadly,ourfindings
+highlighthowaccuratecomponentattributionalonecandirectlyinformmodelediting.
+16
+)%(
+ycarucca
+ledoM
+)%(
+ycarucca
+ledoM6 Related work
+Ourworkrelatestomultipletopicsininterpretability, whichwecategorizeintoworksthatfocus
+on localizing model behavior, interpreting individual components, editing models, and approxi-
+matingfunctionalbehaviorviainterpretableproxies.
+Localizingmodelbehavior. Onelineofworkinmechanisticinterpretabilityattemptstoidentify
+“circuits” [OCS+20b] or “subnetworks” [CSR21] within neural networks that are responsible for
+specificcapabilitiesorbiasessuchasfactualrecall[MBA+22],genderbias[VGB+20],orarithmetic
+reasoning [SBS23]. Building on this, several works focus on automated localization of behavior
+using techniques such as fine-tuning [PSZ+23], activation patching [CML+23; GMS+23], or dif-
+ferentiable masking [BFC+23; DSH+21; CTJ23]. More recent studies evaluate these methods in
+terms of their sensitivity to design choices [ZN23], usefulness for model editing [HBK+23], and
+ability to characterize functional behavior [WLL+23]. Other works develop metrics to quantify
+the “importance” of individual components (e.g., [DSY18; LSD+18; GZ20]), which we adapt as
+baselinesinSection4. Ratherthanlocalizinghuman-definedbehaviortospecificcomponents,the
+componentmodelingtask(Definition2)aimstoexplicitlymodelthecollectivefunctionmapping
+componentablationstopredictions.
+Interpreting specific model components. The works discussed above aim to localize specific
+model behavior to components; another line of work studies the reverse direction, and intro-
+duces methods for uncovering the functionality corresponding to a specific model component.
+Such methods include feature visualization [ZF14; GKB+22], activation maps [BZK+17; MA20],
+ablations [ZSB+18], saliency maps [OSJ+18], probing [DDS+19; DSD+20], and natural language
+descriptions [HSB+21; OW22; BCM+23]. Subsequent analyses use these methods to identify
+and ascribe meaning to specific model components by labeling them as, e.g., “curve detectors”
+[CGC+20],“knowledgeneurons”[DDH+21],“multimodalneurons”[GCV+21],or“syntaxunits”
+[LKD+19]. More recent work revisits the reliability and robustness of such methods [GZB+23;
+BPY+21;HEK+18;SJN21;HL19;AB21;HGD+23]. Here,ourgoalisnottointerpretspecificmodel
+components,butrathertostudyhowallcomponentsjointlyinfluencemodelpredictionsthrough
+thelensofcomponentmodeling(Definition1).
+Editingmodelbehavior. Anotherrelatedlineofworkfocusesonmodelediting,thegoalofwhich
+is to make small, targeted changes to model representations in order to induce or suppress a
+specific behavior. Model editing methods include “hypernetworks” [DAT21; MLB+21], rank-one
+updates to model parameters [BLW+20; STE+21; MBA+22], constrained fine-tuning [ZRZ+20],
+and weight interpolation [IRW+22; ZPC+23], among other methods. Recent work has also stud-
+ied erasing concepts and suppressing spurious correlations from models using layer-wise linear
+probing [RTG+22], CLIP-specific methods [GES23; CYV+23], and fine-tuning variants [GMF+23;
+KIW22]. Inthiswork,weintroduce COAR-EDIT toshowthateffectivecomponentattributioncan
+directlyenablemodeleditingatthelevelofexamples(§5.1),classes(§5.2),subpopulations(§5.3),
+andspuriousconcepts(§5.4,§5.5)byzeroingouttargetedsubsetsofcomponents.
+Understanding machine learning models by proxy. More generally, our approach connects to
+a line of research that aims to understand machine learning models by constructing interpretable
+proxies. For example, feature attribution methods like LIME [RSG16] approximate a given ML
+modelwithalinearmodelininputspace. Similarly,datamodeling[IPE+22]approximatesagiven
+learning algorithm by a linear model in “dataset space.” Another line of work analyzes the be-
+haviorofdeepnetworksviahigh-levelcausalabstractions[GLI+21;GPI23],user-specifiedcausal
+graphsovertask-specificvariables.
+177 Discussion
+Inthissection,wediscussconnectionsbetweencomponentattributionandmodelediting,discuss
+directionsforfuturework,andoutlinekeylimitationsof COAR.
+Does localization help with model editing? The extent to which localizing specific model be-
+havior to a subset of model components helps with model editing remains contested. On one
+hand,Haseetal.[HBK+23]showthatlocalizingfactualassociationsinlanguagemodelsdoesnot
+necessarily help with editing these associations. More broadly, recent evaluation studies suggest
+that model editing can degrade robustness to distribution shifts [BGN+23] and may not mod-
+ify model behavior in a consistent manner [CBY+23]. On the other hand, recent work shows
+that some localization methods can in fact recover ground-truth localization in controlled set-
+tings [CTJ23] and improve calibration of fine-tuned language models [PSZ+23]. Our findings in
+Section 5 substantiate the latter view, as COAR-EDIT uses component attributions to identify a
+targetsubsetofcomponentsthat,whenablated,modifymodelbehaviorasintended.
+Future work. We highlight three directions that, while outside the scope of this work, may be
+interestingavenuesforfuturework.
+• Analyzingneuralnetworkrepresentations. Aninterestingdirectionforfutureworkcouldbe
+to use component attribution (and component models, more generally) to study empirically
+documentedphenomenaindeeplearning. Thereareaplethoraofquestionstoaskherewhich,
+althoughbeyondthescopeofthiswork,arenaturalapplicationsofcomponentattributions. For
+example,extendingourresultsfromSection5.1,canweusecomponentattributiontobetteriso-
+late“opposingsignals”[RR23]foragiventask,andtounderstandtheirroleinshapingmodel
+predictions? Can we use component attributions to study how model predictions change due
+to adversarial perturbations [GSS15], or over the course of training [KKN+19]? Similarly, can
+wedevelopimprovedmethodsforlocalizingmemorizedinputstospecificmodelcomponents
+[FZ20;MMS+23]? Giventhatcomponentattributionsarecausallymeaningful,canweusethem
+asakernelwithwhichtocomparedifferentmodels[KNL+19]orlearningalgorithms[SPI+23]?
+• Attributinggenerativemodels. Whilewefocusonvisionmodelsinthiswork, COAR isagen-
+eralmethodthatcanestimatecomponentattributionsforanymachinelearningmodel. Future
+workmightthusexplorepossiblemodeloutputfunctions(andtheircorrespondingcomponent
+attributions)forgenerativemodels. Fordiffusion-basedgenerativemodels,onemightstudythe
+denoisingerrorforafixedtimestep,asin[GVS+23;ZPD+23]. Forlanguagemodels,apossible
+point of start (following Park et al. [PGI+23]) would be to use the average correct-class mar-
+gin (5) of a sequence of tokens as the model output function. Our preliminary experiments
+in Appendix B show that COAR learns accurate component attributions for language models
+suchasGPT-2[RWC+19]andPhi-2[LBE+23]. Ingeneral,estimatingandapplyingcomponent
+attributionsforgenerativemodelsisapromisingavenueforfuturework.
+• Beyond linear component attribution. The fact that component attributions’ predictiveness
+decreases on out-of-distribution component subsets, i.e., when α ̸= α , suggests that the
+test train
+linearformofcomponentattributionsmightnotbeexpressiveenoughtofullycapturethemap
+betweenmodelcomponentsandoutputs. Giventhegeneralityof COAR,aninterestingavenue
+for future work would be to explore whether non-linear component models such as decision
+trees or kernel methods predict component counterfactuals more accurately, and as a result,
+improvemodelediting.
+18Limitations. Ourattribution-basedapproachfordecomposingandeditingmodelpredictionsis
+not without its limitations. First, estimating COAR attributions involves constructing datasets of
+ground-truth counterfactuals (Equation 2), which can require a large number of forward passes
+through the model. In Appendix C.5, we show that simply using 2-5× fewer samples can sig-
+nificantly speed up COAR without impacting the quality of the resulting attributions. Mitigating
+thiscomputationalbottleneckfurtherthroughbettersamplingorapproximationtechniquesisan
+interestingavenueforfuturework. Second, COAR requiresspecifyinganablationmethod(Equa-
+tion1). Whileweusezeroablationsinthiswork(Remark2),onecouldalsouse COAR withabla-
+tion methods (e.g., Chan et al. [CGG+22]) that account for distribution shifts in activation space.
+Forexample,inAppendixC.4,weshowthatCOARyieldspredictiveattributionswithanotherab-
+lationmethodthatsimplyscalesdowntheactivationsofablatedcomponentsbyasmallconstant
+factor instead of setting them to zero. Finally, as noted in Remark 4, our model editing approach
+COARiscoarse-grainedinthatitmodifiesmodelbehaviorbysimplyablatingatargetedsubsetof
+components. UsingCOARinconjunctionwithgradient-basededitingtechniquesinordertomake
+finer-grainedmodeleditsisaninterestingavenueforfuturework.
+8 Conclusion
+Wefirstformalizetheproblemofdecomposingmodelpredictionsintermsofmodelcomponents
+throughthecomponentmodelingtask. Wespecificallyfocusonaspecialcaseofcomponentmodel-
+ing, component attribution, where the goal is to predict the counterfactual impact of every compo-
+nent on a given prediction. We then propose COAR, a scalable method for estimating predictive
+component attributions, and demonstrate its effectiveness across model architectures, datasets,
+and tasks. Finally, through a series of five experiments, we also stress-test the utility of COAR
+attributionsindirectlyeditingmodelbehaviorwithoutrequiringadditionaltraining.
+Acknowledgements
+The authors would like to thank Benjamin Cohen-Wang, Logan Engstrom, Alaa Khaddaj, and
+KristianGeorgievforhelpfuldiscussionsandcommentsonanearlierdraftofthismanuscript.
+Work supported in part by the NSF grant DMS-2134108. This material is based upon work
+supported by the Defense Advanced Research Projects Agency (DARPA) under Contract No.
+HR001120C0015.
+19References
+[AB16] GuillaumeAlainandYoshuaBengio.“Understandingintermediatelayersusinglin-
+earclassifierprobes”.In:arXivpreprintarXiv:1610.01644(2016).
+[AB21] Omer Antverg and Yonatan Belinkov. “On the pitfalls of analyzing individual neu-
+ronsinlanguagemodels”.In:arXivpreprintarXiv:2110.07483(2021).
+[Bau74] FriedrichLBauer.“Computationalgraphsandroundingerror”.In:SIAMJournalon
+NumericalAnalysis.Vol.11.1.SIAM,1974,pp.87–96.
+[BCM+23] Steven Bills, Nick Cammarata, Dan Mossing, Henk Tillman, Leo Gao, Gabriel Goh,
+Ilya Sutskever, Jan Leike, Jeff Wu, and William Saunders. “Language models can
+explainneuronsinlanguagemodels”.In:URLhttps://openaipublic.blob.core.windows.
+net/neuron-explainer/paper/index.html.(Dateaccessed:14.05.2023)(2023).
+[BFC+23] Deniz Bayazit, Negar Foroutan, Zeming Chen, Gail Weiss, and Antoine Bosselut.
+“DiscoveringKnowledge-CriticalSubnetworksinPretrainedLanguageModels”.In:
+arXivpreprintarXiv:2310.03084(2023).
+[BG18] JoyBuolamwiniandTimnitGebru.“Gendershades:Intersectionalaccuracydispar-
+itiesincommercialgenderclassification”.In:Conferenceonfairness,accountabilityand
+transparency(FAccT).2018.
+[BGN+23] Davis Brown, Charles Godfrey, Cody A. Nizinski, Jonathan Tu, and Henry Kvinge.
+“Robustnessofeditedneuralnetworks”.In:ArXivabs/2303.00046(2023).
+[BLW+20] DavidBau,StevenLiu,TongzhouWang,Jun-YanZhu,andAntonioTorralba.“Rewrit-
+ing a deep generative model”. In: European Conference on Computer Vision (ECCV).
+2020.
+[BLZ18] Terra Blevins, Omer Levy, and Luke Zettlemoyer. “Deep RNNs encode soft hierar-
+chicalsyntax”.In:arXivpreprintarXiv:1805.04218(2018).
+[BNL12] BattistaBiggio,BlaineNelson,andPavelLaskov.“Poisoningattacksagainstsupport
+vectormachines”.In:InternationalConferenceonMachineLearning.2012.
+[BPY+21] TolgaBolukbasi,AdamPearce,AnnYuan,AndyCoenen,EmilyReif,FernandaVié-
+gas,andMartinWattenberg.“Aninterpretabilityillusionforbert”.In:arXivpreprint
+arXiv:2104.07143(2021).
+[BVP18] SaraBeery,GrantVanHorn,andPietroPerona.“Recognitioninterraincognita”.In:
+EuropeanConferenceonComputerVision(ECCV).2018.
+[BZK+17] DavidBau,BoleiZhou,AdityaKhosla,AudeOliva,andAntonioTorralba.“Network
+dissection:Quantifyinginterpretabilityofdeepvisualrepresentations”.In:Computer
+VisionandPatternRecognition(CVPR).2017.
+[BZS+20] DavidBau,Jun-YanZhu,HendrikStrobelt,AgataLapedriza,BoleiZhou,andAnto-
+nioTorralba.“Understandingtheroleofindividualunitsinadeepneuralnetwork”.
+In:ProceedingsoftheNationalAcademyofSciences(PNAS)(2020).
+[CBY+23] RoiCohen,EdenBiran,OriYoran,AmirGloberson,andMorGeva.“Evaluatingthe
+RippleEffectsofKnowledgeEditinginLanguageModels”.In:ArXivabs/2307.12976
+(2023).
+[CGC+20] Nick Cammarata, Gabriel Goh, Shan Carter, Ludwig Schubert, Michael Petrov, and
+ChrisOlah.“Curvedetectors”.In:Distill5.6(2020),e00024–003.
+20[CGG+22] LawrenceChan,AdriàGarriga-Alonso,NicholasGoldowsky-Dill,RyanGreenblatt,
+JennyNitishinskaya,AnshRadhakrishnan,BuckShlegeris,andNateThomas.“Causal
+scrubbing:Amethodforrigorouslytestinginterpretabilityhypotheses”.In:2022.
+[CLC+19] ChristopherClark,KentonLee,Ming-WeiChang,TomKwiatkowski,MichaelCollins,
+andKristinaToutanova.“BoolQ:Exploringthesurprisingdifficultyofnaturalyes/no
+questions”.In:arXivpreprintarXiv:1905.10044(2019).
+[CML+23] Arthur Conmy, Augustine N Mavor-Parker, Aengus Lynch, Stefan Heimersheim,
+and Adrià Garriga-Alonso. “Towards automated circuit discovery for mechanistic
+interpretability”.In:arXivpreprintarXiv:2304.14997(2023).
+[CSR21] StevenCao,VictorSanh,andAlexanderMRush.“Low-complexityprobingviafind-
+ingsubnetworks”.In:arXivpreprintarXiv:2104.03514(2021).
+[CTJ23] Ting-YunChang,JesseThomason,andRobinJia.“DoLocalizationMethodsActually
+LocalizeMemorizedDatainLLMs?”In:arXivpreprintarXiv:2311.09060(2023).
+[CYV+23] Haozhe Chen, Junfeng Yang, Carl Vondrick, and Chengzhi Mao. “Interpreting and
+ControllingVisionFoundationModelsviaTextExplanations”.In:arXivpreprintarXiv:2310.10591
+(2023).
+[DAT21] NicolaDeCao,WilkerAziz,andIvanTitov.“Editingfactualknowledgeinlanguage
+models”.In:arXivpreprintarXiv:2104.08164(2021).
+[DBK+21] AlexeyDosovitskiy,LucasBeyer,AlexanderKolesnikov,DirkWeissenborn,Xiaohua
+Zhai, Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold,
+SylvainGelly,etal.“Animageisworth16x16words:Transformersforimagerecog-
+nitionatscale”.In:InternationalConferenceonLearningRepresentations(ICLR).2021.
+[DDH+21] DamaiDai,LiDong,YaruHao,ZhifangSui,BaobaoChang,andFuruWei.“Knowl-
+edgeneuronsinpretrainedtransformers”.In:arXivpreprintarXiv:2104.08696(2021).
+[DDS+09] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. “Imagenet: A
+large-scale hierarchical image database”. In: Computer Vision and Pattern Recognition
+(CVPR).2009.
+[DDS+19] Fahim Dalvi, Nadir Durrani, Hassan Sajjad, Yonatan Belinkov, Anthony Bau, and
+JamesGlass.“Whatisonegrainofsandinthedesert?analyzingindividualneurons
+in deep nlp models”. In: Proceedings of the AAAI Conference on Artificial Intelligence.
+Vol.33.01.2019,pp.6309–6317.
+[DSD+20] NadirDurrani,HassanSajjad,FahimDalvi,andYonatanBelinkov.“Analyzingindi-
+vidual neurons in pre-trained language models”. In: arXiv preprint arXiv:2010.02695
+(2020).
+[DSH+21] Nicola De Cao, Leon Schmid, Dieuwke Hupkes, and Ivan Titov. “Sparse interven-
+tionsinlanguagemodelswithdifferentiablemasking”.In:arXivpreprintarXiv:2112.06837
+(2021).
+[DSY18] KedarDhamdhere,MukundSundararajan,andQiqiYan.“Howimportantisaneu-
+ron?”In:arXivpreprintarXiv:1805.12233(2018).
+[EHO+22] Nelson Elhage, Tristan Hume, Catherine Olsson, Nicholas Schiefer, Tom Henighan,
+ShaunaKravec,ZacHatfield-Dodds,RobertLasenby,DawnDrain,CarolChen,etal.
+“Toymodelsofsuperposition”.In:arXivpreprintarXiv:2209.10652(2022).
+21[EL23] Ronen Eldan and Yuanzhi Li. “TinyStories: How Small Can Language Models Be
+andStillSpeakCoherentEnglish?”In:arXivpreprintarXiv:2305.07759(2023).
+[FZ20] Vitaly Feldman and Chiyuan Zhang. “What Neural Networks Memorize and Why:
+Discovering the Long Tail via Influence Estimation”. In: Advances in Neural Informa-
+tionProcessingSystems(NeurIPS).Vol.33.2020,pp.2881–2891.
+[GCV+21] Gabriel Goh, Nick Cammarata, Chelsea Voss, Shan Carter, Michael Petrov, Ludwig
+Schubert, Alec Radford, and Chris Olah. “Multimodal neurons in artificial neural
+networks”.In:Distill(2021).
+[GDG17] Tianyu Gu, Brendan Dolan-Gavitt, and Siddharth Garg. “Badnets: Identifying Vul-
+nerabilitiesintheMachineLearningModelSupplyChain”.In:arXivpreprintarXiv:1708.06733
+(2017).
+[GES23] YossiGandelsman,AlexeiAEfros,andJacobSteinhardt.“InterpretingCLIP’sImage
+Representation via Text-Based Decomposition”. In: arXiv preprint arXiv:2310.05916
+(2023).
+[GGL+20] KaranGoel,AlbertGu,YixuanLi,andChristopherRé.“Modelpatching:Closingthe
+subgroupperformancegapwithdataaugmentation”.In:arXivpreprintarXiv:2008.06775
+(2020).
+[GJM+20] Robert Geirhos, Jörn-Henrik Jacobsen, Claudio Michaelis, Richard Zemel, Wieland
+Brendel,MatthiasBethge,andFelixAWichmann.“Shortcutlearningindeepneural
+networks”.In:NatureMachineIntelligence.2020.
+[GKB+22] Amin Ghiasi, Hamid Kazemi, Eitan Borgnia, Steven Reich, Manli Shu, Micah Gold-
+blum, Andrew Gordon Wilson, and Tom Goldstein. “What do vision transformers
+learn?avisualexploration”.In:arXivpreprintarXiv:2212.06727(2022).
+[GLI+21] Atticus Geiger, Hanson Lu, Thomas Icard, and Christopher Potts. “Causal abstrac-
+tions of neural networks”. In: Advances in Neural Information Processing Systems 34
+(2021),pp.9574–9586.
+[GMF+23] RohitGandikota,JoannaMaterzynska,JadenFiotto-Kaufman,andDavidBau.“Eras-
+ingconceptsfromdiffusionmodels”.In:arXivpreprintarXiv:2303.07345(2023).
+[GMS+23] NicholasGoldowsky-Dill,ChrisMacLeod,LucasSato,andAryamanArora.“Local-
+izingmodelbehaviorwithpathpatching”.In:arXivpreprintarXiv:2304.05969(2023).
+[GPI23] AtticusGeiger,ChrisPotts,andThomasIcard.“Causalabstractionforfaithfulmodel
+interpretation”.In:arXivpreprintarXiv:2301.04709(2023).
+[GRM+19] RobertGeirhos,PatriciaRubisch,ClaudioMichaelis,MatthiasBethge,FelixA.Wich-
+mann, and Wieland Brendel. “ImageNet-trained CNNs are biased towards texture;
+increasingshapebiasimprovesaccuracyandrobustness.”In:InternationalConference
+onLearningRepresentations(ICLR).2019.
+[GSS15] Ian J Goodfellow, Jonathon Shlens, and Christian Szegedy. “Explaining and Har-
+nessing Adversarial Examples”. In: International Conference on Learning Representa-
+tions(ICLR).2015.
+22[GTA+23] Leo Gao, Jonathan Tow, Baber Abbasi, Stella Biderman, Sid Black, Anthony DiPofi,
+Charles Foster, Laurence Golding, Jeffrey Hsu, Alain Le Noac’h, Haonan Li, Kyle
+McDonell, Niklas Muennighoff, Chris Ociepa, Jason Phang, Laria Reynolds, Hailey
+Schoelkopf, Aviya Skowron, Lintang Sutawika, Eric Tang, Anish Thite, Ben Wang,
+Kevin Wang, and Andy Zou. A framework for few-shot language model evaluation. Ver-
+sionv0.4.0.Dec.2023. DOI:10.5281/zenodo.10256836. URL:https://zenodo.org/
+records/10256836.
+[GVS+23] Kristian Georgiev, Joshua Vendrow, Hadi Salman, Sung Min Park, and Aleksander
+Madry. “The journey, not the destination: How data guides diffusion models”. In:
+arXivpreprintarXiv:2312.06205(2023).
+[GZ20] AmirataGhorbaniandJamesYZou.“Neuronshapley:Discoveringtheresponsible
+neurons”. In: Advances in neural information processing systems 33 (2020), pp. 5922–
+5932.
+[GZB+23] RobertGeirhos,RolandSZimmermann,BlairBilodeau,WielandBrendel,andBeen
+Kim.“Don’ttrustyoureyes:onthe(un)reliabilityoffeaturevisualizations”.In:arXiv
+preprintarXiv:2306.04719(2023).
+[HBK+23] PeterHase,MohitBansal,BeenKim,andAsmaGhandeharioun.“Doeslocalization
+informediting?surprisingdifferencesincausality-basedlocalizationvs.knowledge
+editinginlanguagemodels”.In:arXivpreprintarXiv:2301.04213(2023).
+[HD19] DanHendrycksandThomasG.Dietterich.“BenchmarkingNeuralNetworkRobust-
+nesstoCommonCorruptionsandSurfaceVariations”.In:InternationalConferenceon
+LearningRepresentations(ICLR).2019.
+[HEK+18] SaraHooker,DumitruErhan,Pieter-JanKindermans,andBeenKim.“Abenchmark
+forinterpretabilitymethodsindeepneuralnetworks”.In:arXivpreprintarXiv:1806.10758
+(2018).
+[HGD+23] Jing Huang, Atticus Geiger, Karel D’Oosterlinck, Zhengxuan Wu, and Christopher
+Potts.“RigorouslyAssessingNaturalLanguageExplanationsofNeurons”.In:arXiv
+preprintarXiv:2309.10312(2023).
+[HL19] JohnHewittandPercyLiang.“Designingandinterpretingprobeswithcontroltasks”.
+In:arXivpreprintarXiv:1909.03368(2019).
+[HMF+23] KatherineLHermann,HosseinMobahi,ThomasFel,andMichaelCMozer.“Onthe
+FoundationsofShortcutLearning”.In:arXivpreprintarXiv:2310.16228(2023).
+[HSB+21] Evan Hernandez, Sarah Schwettmann, David Bau, Teona Bagashvili, Antonio Tor-
+ralba, and Jacob Andreas. “Natural language descriptions of deep visual features”.
+In:InternationalConferenceonLearningRepresentations.2021.
+[HSP+22] ThomasHartvigsen,SwamiSankaranarayanan,HamidPalangi,YoonKim,andMarzyeh
+Ghassemi. “Aging with GRACE: Lifelong Model Editing with Discrete Key-Value
+Adaptors”.In:arXivpreprintarXiv:2211.11031(2022).
+[HSZ+23] ZeyuHuang,YikangShen,XiaofengZhang,JieZhou,WengeRong,andZhangXiong.
+“Transformer-Patcher:OneMistakeworthOneNeuron”.In:arXivpreprintarXiv:2301.09785
+(2023).
+[HZR+15] KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun.DeepResidualLearningfor
+ImageRecognition.2015.
+23[IAP+22] Badr Youbi Idrissi, Martin Arjovsky, Mohammad Pezeshki, and David Lopez-Paz.
+“Simple data balancing achieves competitive worst-group-accuracy”. In: Conference
+onCausalLearningandReasoning.PMLR.2022,pp.336–351.
+[IPE+22] AndrewIlyas,SungMinPark,LoganEngstrom,GuillaumeLeclerc,andAleksander
+Madry. “Datamodels: Predicting Predictions from Training Data”. In: International
+ConferenceonMachineLearning(ICML).2022.
+[IRW+22] Gabriel Ilharco, Marco Tulio Ribeiro, Mitchell Wortsman, Suchin Gururangan, Lud-
+wigSchmidt,HannanehHajishirzi,andAliFarhadi.“Editingmodelswithtaskarith-
+metic”.In:arXivpreprintarXiv:2212.04089(2022).
+[JB23] Mojan Javaheripi and Sébastien Bubeck. Phi-2: The surprising power of small language
+models. Dec. 2023. URL: https://www.microsoft.com/en-us/research/blog/phi-
+2-the-surprising-power-of-small-language-models/.
+[JPG+19] Alistair EW Johnson, Tom J Pollard, Nathaniel R Greenbaum, Matthew P Lungren,
+Chih-ying Deng, Yifan Peng, Zhiyong Lu, Roger G Mark, Seth J Berkowitz, and
+StevenHorng.“MIMIC-CXR-JPG,alargepubliclyavailabledatabaseoflabeledchest
+radiographs”.In:arXivpreprintarXiv:1901.07042(2019).
+[KIW22] PolinaKirichenko,PavelIzmailov,andAndrewGordonWilson.“Lastlayerre-training
+issufficientforrobustnesstospuriouscorrelations”.In:arXivpreprintarXiv:2204.02937
+(2022).
+[KKN+19] DimitrisKalimeris,GalKaplun,PreetumNakkiran,BenjaminEdelman,TristanYang,
+Boaz Barak, and Haofeng Zhang. “Sgd on neural networks learns functions of in-
+creasingcomplexity”.In:Advancesinneuralinformationprocessingsystems32(2019).
+[KLS+24] JánosKramár,TomLieberum,RohinShah,andNeelNanda.“AtP*:Anefficientand
+scalable method for localizing LLM behaviour to components”. In: arXiv preprint
+arXiv:2403.00745(2024).
+[KMM+20] Narine Kokhlikyan, Vivek Miglani, Miguel Martin, Edward Wang, Bilal Alsallakh,
+JonathanReynolds,AlexanderMelnikov,NataliaKliushkina,CarlosAraya,SiqiYan,
+etal.“Captum:Aunifiedandgenericmodelinterpretabilitylibraryforpytorch”.In:
+arXivpreprintarXiv:2009.07896(2020).
+[KNL+19] Simon Kornblith, Mohammad Norouzi, Honglak Lee, and Geoffrey Hinton. “Simi-
+larityofNeuralNetworkRepresentationsRevisited”.In:Proceedingsofthe36thInter-
+nationalConferenceonMachineLearning(ICML).2019.
+[Kri09] AlexKrizhevsky.“LearningMultipleLayersofFeaturesfromTinyImages”.In:Tech-
+nicalreport.2009.
+[LBE+23] YuanzhiLi,SébastienBubeck,RonenEldan,AllieDelGiorno,SuriyaGunasekar,and
+YinTatLee.“Textbooksareallyouneedii:phi-1.5technicalreport”.In:arXivpreprint
+arXiv:2309.05463(2023).
+[LIE+22] Guillaume Leclerc, Andrew Ilyas, Logan Engstrom, Sung Min Park, Hadi Salman,
+andAleksanderMadry.ffcv.https://github.com/libffcv/ffcv/.2022.
+[LKD+19] YairLakretz,GermanKruszewski,TheoDesbordes,DieuwkeHupkes,StanislasDe-
+haene, and Marco Baroni. “The emergence of number and syntax units in LSTM
+languagemodels”.In:arXivpreprintarXiv:1903.07435(2019).
+[LLW+15] Ziwei Liu, Ping Luo, Xiaogang Wang, and Xiaoou Tang. “Deep Learning Face At-
+tributesintheWild”.In:InternationalConferenceonComputerVision(ICCV).2015.
+24[LSD+18] Klas Leino, Shayak Sen, Anupam Datta, Matt Fredrikson, and Linyi Li. “Influence-
+directed explanations for deep convolutional networks”. In: 2018 IEEE international
+testconference(ITC).IEEE.2018,pp.1–8.
+[LYS+20] YuezunLi,XinYang,PuSun,HonggangQi,andSiweiLyu.“Celeb-df:Alarge-scale
+challengingdatasetfordeepfakeforensics”.In:ProceedingsoftheIEEE/CVFconference
+oncomputervisionandpatternrecognition.2020,pp.3207–3216.
+[MA20] JesseMuandJacobAndreas.“Compositionalexplanationsofneurons”.In:Advances
+inNeuralInformationProcessingSystems33(2020),pp.17153–17163.
+[MBA+22] KevinMeng,DavidBau,AlexAndonian,andYonatanBelinkov.“LocatingandEdit-
+ing Factual Associations in GPT”. In: Advances in Neural Information Processing Sys-
+tems36(2022).
+[MLB+21] EricMitchell,CharlesLin,AntoineBosselut,ChelseaFinn,andChristopherDMan-
+ning.“Fastmodeleditingatscale”.In:arXivpreprintarXiv:2110.11309(2021).
+[MMS+23] Pratyush Maini, Michael C Mozer, Hanie Sedghi, Zachary C Lipton, J Zico Kolter,
+and Chiyuan Zhang. “Can Neural Network Memorization Be Localized?” In: Inter-
+nationalConferenceonMachineLearning.2023.
+[MTB22] Joanna Materzyn´ska, Antonio Torralba, and David Bau. “Disentangling visual and
+written concepts in clip”. In: Proceedings of the IEEE/CVF Conference on Computer Vi-
+sionandPatternRecognition.2022,pp.16410–16419.
+[NCL+23] NeelNanda,LawrenceChan,TomLiberum,JessSmith,andJacobSteinhardt.“Progress
+measuresforgrokkingviamechanisticinterpretability”.In:arXivpreprintarXiv:2301.05217
+(2023).
+[OCS+20a] Chris Olah, Nick Cammarata, Ludwig Schubert, Gabriel Goh, Michael Petrov, and
+Shan Carter. “An Overview of Early Vision in InceptionV1”. In: Distill (2020). DOI:
+10.23915/distill.00024.002.
+[OCS+20b] Chris Olah, Nick Cammarata, Ludwig Schubert, Gabriel Goh, Michael Petrov, and
+Shan Carter. “Zoom In: An Introduction to Circuits”. In: Distill (2020). DOI: 10.
+23915/distill.00024.001.
+[ODC+20] Lauren Oakden-Rayner, Jared Dunnmon, Gustavo Carneiro, and Christopher Ré.
+“Hidden stratification causes clinically meaningful failures in machine learning for
+medicalimaging”.In:ProceedingsoftheACMconferenceonhealth,inference,andlearn-
+ing.2020.
+[OEN+22] Catherine Olsson, Nelson Elhage, Neel Nanda, Nicholas Joseph, Nova DasSarma,
+TomHenighan,BenMann,AmandaAskell,YuntaoBai,AnnaChen,etal.“In-context
+learningandinductionheads”.In:arXivpreprintarXiv:2209.11895(2022).
+[OSJ+18] ChrisOlah,ArvindSatyanarayan,IanJohnson,ShanCarter,LudwigSchubert,Kather-
+ine Ye, and Alexander Mordvintsev. “The Building Blocks of Interpretability”. In:
+Distill.2018.
+[OW22] TuomasOikarinenandTsui-WeiWeng.“Clip-dissect:Automaticdescriptionofneu-
+ron representations in deep vision networks”. In: arXiv preprint arXiv:2204.10965
+(2022).
+[PGI+23] SungMinPark,KristianGeorgiev,AndrewIlyas,GuillaumeLeclerc,andAleksander
+Madry.“TRAK:AttributingModelBehavioratScale”.In:ArxivpreprintarXiv:2303.14186.
+2023.
+25[PSZ+23] AbhishekPanigrahi,NikunjSaunshi,HaoyuZhao,andSanjeevArora.“Task-Specific
+SkillLocalizationinFine-tunedLanguageModels”.In:arXivpreprintarXiv:2302.06600
+(2023).
+[RJS17] Alec Radford, Rafal Jozefowicz, and Ilya Sutskever. “Learning to generate reviews
+anddiscoveringsentiment”.In:arXivpreprintarXiv:1704.01444(2017).
+[RKH+21] AlecRadford,JongWookKim,ChrisHallacy,AdityaRamesh,GabrielGoh,Sandhini
+Agarwal, Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. “Learn-
+ingtransferablevisualmodelsfromnaturallanguagesupervision”.In:arXivpreprint
+arXiv:2103.00020.2021.
+[RR23] ElanRosenfeldandAndrejRisteski.“OutlierswithOpposingSignalsHaveanOut-
+sized Effect on Neural Network Optimization”. In: arXiv preprint arXiv:2311.04163
+(2023).
+[RSG16] MarcoTulioRibeiro,SameerSingh,andCarlosGuestrin.“"WhyshouldItrustyou?"
+Explainingthepredictionsofanyclassifier”.In:InternationalConferenceonKnowledge
+DiscoveryandDataMining(KDD).2016.
+[RTG+22] ShauliRavfogel,MichaelTwiton,YoavGoldberg,andRyanDCotterell.“Linearad-
+versarial concept erasure”. In: International Conference on Machine Learning. PMLR.
+2022,pp.18400–18421.
+[RWC+19] AlecRadford,JeffWu,RewonChild,DavidLuan,DarioAmodei,andIlyaSutskever.
+“LanguageModelsareUnsupervisedMultitaskLearners”.In:(2019).
+[SBS23] AlessandroStolfo,YonatanBelinkov,andMrinmayaSachan.“UnderstandingArith-
+metic Reasoning in Language Models using Causal Mediation Analysis”. In: arXiv
+preprintarXiv:2305.15054(2023).
+[SCN+19] EmilySheng,Kai-WeiChang,PremkumarNatarajan,andNanyunPeng.“Thewoman
+workedasababysitter:Onbiasesinlanguagegeneration”.In:arXivpreprintarXiv:1909.01326
+(2019).
+[SJN21] HarshayShah,PrateekJain,andPraneethNetrapalli.“DoInputGradientsHighlight
+Discriminative Features?” In: Advances in Neural Information Processing Systems 34
+(2021).
+[SKH+20] Shiori Sagawa, Pang Wei Koh, Tatsunori B. Hashimoto, and Percy Liang. “Distri-
+butionally Robust Neural Networks for Group Shifts: On the Importance of Reg-
+ularization for Worst-Case Generalization”. In: International Conference on Learning
+Representations.2020.
+[SPI+23] Harshay Shah, Sung Min Park, Andrew Ilyas, and Aleksander Madry. “Modeldiff:
+Aframeworkforcomparinglearningalgorithms”.In:InternationalConferenceonMa-
+chineLearning.PMLR.2023,pp.30646–30688.
+[SRC23] Aaquib Syed, Can Rager, and Arthur Conmy. “Attribution Patching Outperforms
+AutomatedCircuitDiscovery”.In:arXivpreprintarXiv:2310.10348(2023).
+[STE+21] Shibani Santurkar, Dimitris Tsipras, Mahalaxmi Elango, David Bau, Antonio Tor-
+ralba,andAleksanderMadry.“Editingaclassifierbyrewritingitspredictionrules”.
+In:Preprint.2021.
+[STR+20] HarshayShah,KaustavTamuly,AditiRaghunathan,PrateekJain,andPraneethNe-
+trapalli. “The pitfalls of simplicity bias in neural networks”. In: Advances in Neural
+InformationProcessingSystems33(2020),pp.9573–9585.
+26[STY17] Mukund Sundararajan, Ankur Taly, and Qiqi Yan. “Axiomatic attribution for deep
+networks”.In:InternationalConferenceonMachineLearning(ICML).2017.
+[SVZ13] Karen Simonyan, Andrea Vedaldi, and Andrew Zisserman. “Deep inside convo-
+lutional networks: Visualising image classification models and saliency maps”. In:
+arXivpreprintarXiv:1312.6034(2013).
+[VGB+20] JesseVig,SebastianGehrmann,YonatanBelinkov,SharonQian,DanielNevo,Yaron
+Singer, and Stuart Shieber. “Investigating gender bias in language models using
+causal mediation analysis”. In: Advances in neural information processing systems 33
+(2020),pp.12388–12401.
+[VJE+23] JoshuaVendrow,SaachiJain,LoganEngstrom,andAleksanderMadry.“Datasetin-
+terfaces: Diagnosing model failures using controllable counterfactual generation”.
+In:arXivpreprintarXiv:2302.07865(2023).
+[VSP+17] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanN
+Gomez, Łukasz Kaiser, and Illia Polosukhin. “Attention is All you Need”. In: Ad-
+vancesinNeuralInformationProcessingSystems(2017).
+[WBW+11] Catherine Wah, Steve Branson, Peter Welinder, Pietro Perona, and Serge Belongie.
+“Thecaltech-ucsdbirds-200-2011dataset”.In:(2011).
+[WGX+19] Haohan Wang, Songwei Ge, Eric P Xing, and Zachary C Lipton. “Learning robust
+global representations by penalizing local predictive power”. In: Neural Information
+ProcessingSystems(NeurIPS)(2019).
+[WLL+23] Kaiyue Wen, Yuchen Li, Bingbin Liu, and Andrej Risteski. “Transformers are unin-
+terpretable with myopic methods: a case study with bounded Dyck grammars”. In:
+arXivpreprintarXiv:2312.01429(2023).
+[WVC+22] KevinWang,AlexandreVariengien,ArthurConmy,BuckShlegeris,andJacobStein-
+hardt. Interpretability in the Wild: a Circuit for Indirect Object Identification in GPT-2
+small.2022. DOI:10.48550/ARXIV.2211.00593. URL:https://arxiv.org/abs/2211.
+00593.
+[WYS+23] Zhenyi Wang, Enneng Yang, Li Shen, and Heng Huang. “A comprehensive sur-
+vey of forgetting in deep learning beyond continual learning”. In: arXiv preprint
+arXiv:2307.09218(2023).
+[ZF14] Matthew D Zeiler and Rob Fergus. “Visualizing and understanding convolutional
+networks”.In:Europeanconferenceoncomputervision.Springer.2014,pp.818–833.
+[ZLK+17] Bolei Zhou, Agata Lapedriza, Aditya Khosla, Aude Oliva, and Antonio Torralba.
+“Places:A10millionimagedatabaseforscenerecognition”.In:IEEEtransactionson
+patternanalysisandmachineintelligence.2017.
+[ZN23] FredZhangandNeelNanda.“TowardsBestPracticesofActivationPatchinginLan-
+guageModels:MetricsandMethods”.In:arXivpreprintarXiv:2309.16042(2023).
+[ZPC+23] Andy Zou, Long Phan, Sarah Chen, James Campbell, Phillip Guo, Richard Ren,
+AlexanderPan,XuwangYin,MantasMazeika,Ann-KathrinDombrowski,etal.“Rep-
+resentationengineering:Atop-downapproachtoaitransparency”.In:arXivpreprint
+arXiv:2310.01405(2023).
+[ZPD+23] Xiaosen Zheng, Tianyu Pang, Chao Du, Jing Jiang, and Min Lin. “Intriguing Prop-
+erties of Data Attribution on Diffusion Models”. In: arXiv preprint arXiv:2311.00500
+(2023).
+27[ZRZ+20] ChenZhu,AnkitSinghRawat,ManzilZaheer,SrinadhBhojanapalli,DaliangLi,Fe-
+lix Yu, and Sanjiv Kumar. “Modifying memories in transformer models”. In: arXiv
+preprintarXiv:2012.00363(2020).
+[ZSB+18] BoleiZhou,YiyouSun,DavidBau,andAntonioTorralba.“Revisitingtheimportance
+ofindividualunitsincnnsviaablation”.In:arXivpreprintarXiv:1806.02891(2018).
+28Appendices
+A Evaluationsetup 30
+A.1 Pseudocode . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30
+A.2 Datasetsandmodels. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30
+A.3 Baselines . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31
+A.4 Implementationdetails . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32
+B ApplyingCOARtolanguagemodels 34
+B.1 EvaluatingGPT-2ontheTinyStoriesdataset . . . . . . . . . . . . . . . . . . . . . . 34
+B.2 EvaluatingPhi-2ontheBoolQdataset . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+C AdditionalevaluationofCOAR 37
+C.1 EvaluatingCOARonadditionaldatasets . . . . . . . . . . . . . . . . . . . . . . . . . 37
+C.2 EvaluatingCOARonadditionalmodelarchitectures . . . . . . . . . . . . . . . . . . 37
+C.3 EvaluatingCOARonadditionaltasks. . . . . . . . . . . . . . . . . . . . . . . . . . . 37
+C.4 ComparingCOARattributionsestimatedwithdifferentablationfractions . . . . . 38
+C.5 ComparingCOARattributionsestimatedwithdifferentsamplesizes . . . . . . . . 38
+C.6 AnalyzingCOARattributionsattheexamplelevel . . . . . . . . . . . . . . . . . . . 38
+C.7 QualitativelyanalyzingCOARattributions . . . . . . . . . . . . . . . . . . . . . . . 38
+D AdditionalevaluationofCOAR-EDIT 48
+D.1 Editingindividualpredictions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48
+D.2 Forgettingaclass . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48
+D.3 Improvingsubpopulationrobustness. . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+D.4 Mitigatingbackdoorattacks. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+D.5 Improvingrobustnesstotypographicattacks. . . . . . . . . . . . . . . . . . . . . . . 50
+E AnalyzingdesignchoicesinCOAR 57
+E.1 Effectofablationfraction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 57
+E.2 Effectofablationmethod. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 57
+E.3 Effectofmodeloutputfunction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 58
+29A Evaluation setup
+In this section, we outline the experiment setup—datasets, models, baselines, implementation
+details—usedinSection4toevaluatewhetherCOARattributionscanaccuratelyestimateground-
+truthcomponentcounterfactuals.
+A.1 Pseudocode
+Algorithm1Anoutlineforestimatingcomponentattributionswith COAR.
+1: procedure COAR(example z, model M with output function f M and components C, ablation
+frac. α)
+2: Set D(z) ← [] ▷initializecomponentdataset(2)
+3: fori ∈ {1,...,m}do ▷ mdenotesdatasetsize
+4: SampleasubsetC i ⊂ CfromD C where|C i| = α·|C|
+5: Sety i ← f M(z,C i) ▷computecomponentcounterfactual(1)
+6: Define0 Ci ∈ {0,1}|C|as(0 Ci) j = 0ifc j ∈ C i else1
+7: Update D(z) ← D(z)+[(0 Ci,y i)] ▷updatecomponentdataset
+8: θ(z),b(z) ← LINEARREGRESSION(D(z)) ▷estimatecomponentattributionsviaEquation3
+9:
+returnθ(z),b(z)
+A.2 Datasetsandmodels.
+Wenowoutlinethedatasetsandmodelsusedtoevaluate COAR(§4)and COAR-EDIT(§5).
+CIFAR-10. WeusethestandardCIFAR-10[Kri09]imageclassificationdatasettoevaluate COAR
+attributions (Section 4, Appendix C.2) and for an editing task (Section 5.4). We train ResNet,
+ViT, and MLP models that attain test accuracies of 91%, 83% and 56% respectively. We specify
+a computation graph over 2,344 components for the ResNet-18 model, 31,728 components for
+the ViT model, and 3,072 components for the MLP model. Each component in the ResNet-18
+modelcorrespondstoaconvolutionfilter. Similarly,eachcomponentintheViTandMLPmodels
+correspondstoaneuron.
+ImageNet. We use the standard ImageNet [DDS+09] image classification dataset to evaluate
+COAR attributions in Section 4 and for editing tasks in Section 5.2. We use ImageNet-Sketch
+[WGX+19] and five random shifts from ImageNet⋆ [VJE+23]—“in the water”, “at dusk simple”,
+“orange”,“pencilsketch”,“green”—toevaluatetheout-of-distributionperformanceofeditedIm-
+ageNetmodelsinSection5.2. Weusethepre-trainedResNet50andViT-B/16models2 thatattain
+testaccuracies of75.4% and80.7% respectively. Forthe ResNet-50model, wespecify acomputa-
+tion graph over 22,720 components, each corresponding to a convolution filter. Similarly, for the
+ViT-B/16model,wespecifyacomputationgraphover82,944components,eachcorrespondingto
+aneuron.
+2Modelandpre-trainedweightstakenfromtorchvision:https://pytorch.org/vision/stable/models.html
+30Waterbirds. The Waterbirds dataset [SKH+20] comprises images of birds taken from the CUB
+dataset [WBW+11] and pasted on backgrounds from the Places dataset [ZLK+17]. The task here
+is to classify “waterbirds” and “landbirds” in the presence of spurious correlated “land” and
+“water” backgrounds in the training dataset. Sagawa et al. [SKH+20] introduce Waterbirds as
+a benchmark to improve model performance under subpopulation shifts induced by spurious
+correlations. Weusethisdatasettoevaluatewhether COAR-EDIT canimprovesubpopulationro-
+bustness via model editing. In this experiment, we fine-tune an ImageNet ResNet50 model and
+useacomputationgraphover22,720components,eachcorrespondingtoaconvolutionfilter.
+CelebA. The CelebA dataset [LYS+20] comprises images of celebrities with binary attributes
+such as “smiling”, “wearing hat”, “wearing lipstick”, etc. Similar to previous work on subpopu-
+lationrobustness(e.g., [SKH+20]),werepurposeCelebAasabinaryclassificationtaskwherethe
+goalistopredictwhetherapersoninagivenimagehasblondhair. Theattributes“haircolor”and
+“gender” are spuriously correlated in the training dataset, resulting in models that latch on to a
+“gender→blondhair”shortcutandunderperformonthe“blondmales”subpopulation. Similar
+to the Waterbirds setting, we fine-tune an ImageNet ResNet50 model and specify a computation
+graphover22,720components,eachcorrespondingtoaconvolutionfilter.
+Typographic attacks dataset. We use a dataset of typographic attacks [MTB22] for an editing
+taskinSection5.5. Thisdatasetcomprises180imagesofhouseholdobjectswithandwithouteight
+typographic attacks such as “taxi”, “twitter”, “EU”, and “iPad”. We visualize some examples
+from this dataset in Figure 7. Our experiment in Section 5.5 uses this dataset along with a zero-
+shot CLIP ViT-B/16 classifier [RKH+21]. For this model, we specify a computation graph over
+all 82,944 components, corresponding to the set of all weight vectors (individual rows in weight
+matrices)inallself-attentionandMLPmodules. SeeAppendixD.5formoredetails.
+TinyStories. WeusetheTinyStoriesdataset[EL23]toevaluateCOARattributionsovertheGPT-
+2 language model (Appendix B). This dataset contains short stories synthetically generated by
+GPT-3.5 and GPT-4. To compute component attributions for GPT-2, we specify a computation
+graph over 64,512 components, which correspond to the set of all weight vectors, i.e., in every
+self-attention module and feed-forward module of the model. See Appendix B.1 for experiment
+detailsandfindings.
+BoolQ. We use the BoolQ dataset [CLC+19] to evaluate COAR attributions for the Phi-2 model
+[LBE+23]. Each example in this dataset comprises a passage of text, a question, and a binary
+answer. We evaluate the zero-shot performance of Phi-2 using the prompting and evaluation
+procedurefromGaoetal.[GTA+23]3. GiventhesizeofthePhi-2model,wespecifyacomputation
+graph over 55,552 components, each corresponding to a contiguous block of 10 weight vectors
+in every self-attention module and feed-forward module of the model. See Appendix B.2 for
+experimentdetailsandfindings.
+A.3 Baselines
+InSection4,wecompare COAR againstfourbaselinemethodsforestimatingcomponentattribu-
+tions: Leave-One-Out(LOO),Gradient-times-parameters(GP),NeuronConductance(NC),andInter-
+nal Influence (II). Each baseline computes an attribution vector w(z) ∈ R|C| for a given example
+3https://github.com/EleutherAI/lm-evaluation-harness/
+31zbyassigningan“importance”scorew(z)
+toeachcomponentc ∈ C. Then,asperEquation4,we
+j j
+estimateacomponentcounterfactual f (z,C′)asthesumofimportancescoresofcomponentsin
+M
+C\C′, i.e., scores of components that are not ablated. We describe each baseline in more detail
+below:
+• Leave-One-Out(LOO):Thismethodablateseachcomponentc ∈ C andsetsthecoefficientθ(z)
+j j
+tothechangeinmodeloutput f (z)beforeandafterablation:
+M
+w(z) = f (z,{c })− f (z,∅)
+j M j M
+• Gradient-times-Parameters(GP):Thismethodapproximatestheleave-one-outestimatedescribed
+above. Specifically,itestimatestheleave-one-outeffectofeachcomponentc ∈ C usingafirst-
+j
+orderTaylorapproximationof f (z,{c })around f (z,∅):
+M j M
+w(z) = ∇ f (z,∅)·δ
+j cj M cj
+whereδ istheparameter-spacechangeinc inducedbytheablationmethodofchoice.
+cj j
+• Neuron Conductance (NC) [DSY18]: This method extends the Integrated Gradients method
+[STY17]—an input-space feature attribution method—to compute importance scores for each
+componentc ∈ C. Intuitively,NCmodifiesthecomputationinIntegratedGradientsinorderto
+j
+quantify the “flow” through each component c ∈ C. See Equation 3 in [DSY18] for a formal
+j
+description.
+• Internal Influence (II) [LSD+18]: Similar to NC, this method also adapts Integrated Gradi-
+ents [STY17] to compute importance scores. At a high level, II directly applies Integrated
+Gradients to layerwise activations by treating the output of each layer as an input to subse-
+quentlayers. SeeDefinition1in[LSD+18]foraformaldescription.
+We implement the first two baselines (LOO and GP) from scratch4 and use the captum library
+[KMM+20] 5 to implement NC and II. As per Definition 2, we estimate the component counter-
+factual f (z,C′)usingthesebaselinesbysettingthebiastermb(z) tozeroandtakingthesumover
+M
+attributionscoresofcomponentsthatarenotablated.
+A.4 Implementationdetails
+Sample size for component attribution estimation. The computational cost of our approach
+linearlyscaleswiththesamplesizemusedtoestimatecomponentattributions(seeAlgorithm1).
+Each sample in the component dataset D(z) corresponds to a single forward pass through the
+model M in order to compute the counterfactual f (z,C′) (1), i.e., model output f (z) after ab-
+M M
+lating a subset of components C′ ⊂ C. The setups {A,B,C} considered in Section 4 use sample
+size m = {50000,100000,200000} respectively. In Appendix C.5, we show that the sample size m
+used in Section 4 can be reduced by 2-5×, resulting in a direct speedup while only reducing the
+predictivepowerof COARattributionsbyasmallamount.
+Dataloading. WeusetheFFCVlibrary6 [LIE+22]totrainandevaluatemodels. FFCVremovesthe
+dataloading bottleneckfor smallmodels, givesa 3-4× improvementin throughputcompared to
+standardPyTorchdataloading.
+4Ourcodeisavailableathttps://github.com/MadryLab/modelcomponents
+5Githubrepository:https://github.com/pytorch/captum
+6Githubrepository:https://github.com/libffcv/ffcv
+32Speedingupregression. Thesecondstepof COAR—fittingcomponentattributionstothecom-
+ponent dataset (2)—requires solving a linear regression problem (Equation 3) for each example
+z. We parallelize this step by using the fast-l1 package7, a SAGA-based GPU solver for linear
+regression.
+Computingresources. Wetrainourmodelsandcompute COAR attributionsonaclusterofma-
+chines,eachwith9NVIDIAA100orV100GPUsand96CPUcores. Wealsousehalf-precisionto
+increasetrainingspeed.
+7Githubrepository:https://github.com/MadryLab/fast_l1
+33B Applying COAR to language models
+In Section 4 and Appendix C, we showed that our proposed method COAR attributions accu-
+rately estimate component counterfactuals (1) on large-scale vision tasks across several datasets
+and model architectures. In this section, we apply COAR to language models. Specifically, we
+consider two experiments: (a) GPT-2 [RWC+19] evaluated on the next-token prediction task and
+(b)Phi-2[LBE+23]evaluatedonazero-shotclassificationtask. Inbothcases,weshowthat COAR
+attributionsaccuratelypredicthowmodeloutputschangeinresponsetocomponentablations.
+B.1 EvaluatingGPT-2ontheTinyStoriesdataset
+Task and model output function. We apply COAR to the next-token prediction task. Follow-
+ing Park et al. [PGI+23], we interpret this task as a sequence as a v-way classification problem,
+where v is the vocabulary size, and set the model output function to be the average correct-class
+margin(5)overalltokensinagivensequence.
+Model and dataset. In this experiment, we consider the GPT-2 model8 [RWC+19], with a com-
+putationgraph over64,512components. These componentscorrespondto thesetof weightvec-
+tors in every self-attention module and feed-forward module in the model. We evaluate model
+performance on the next-token prediction task using the TinyStories dataset9 [EL23], where each
+sequencecorrespondstoasyntheticallygeneratedshortstory.
+Computing COAR attributions. We apply COAR (without any modifications) to compute com-
+ponentattributionsforarandomsubsetof1000examplesintheTinyStoriesvalidationsetusinga
+componentdatasetof200,000componentcounterfactuals(2)andaablationfractionofα = 2.5%.
+Evaluating COAR attributions. SimilartotheresultsinSection4, COAR attributionsarepredic-
+tiveinthelanguagemodelingsettingaswell. Specifically,theseattributionsaccuratelypredictthe
+effectofablatingcomponentsontheaveragecorrect-classmarginofGPT-2onexamplesfromthe
+TinyStories validation set. In Figure 8a, we pick a random example z from the TinyStories vali-
+dationsetandcomputethecorrelationbetweenground-truthcomponentcounterfactuals f (z,·)
+M
+and the corresponding estimate (4) using its COAR attributions θ(z), as defined in Equation 6.
+InFigure8b, weplotahistogramoverexample-levelcorrelationsof1000examplesandfindthat
+COARattributionsattainanaveragecorrelationof{0.83,0.85,0.89}withground-truthcomponent
+counterfactualssampledusingablationfractionα = {5%,2.5%,1%}respectively.
+B.2 EvaluatingPhi-2ontheBoolQdataset
+Taskandmodeloutputfunction. Wenowturntoareadingcomprehensiontask,wherethegoal
+is to answer a question given a passage of text. We evaluate this classification task in a zero-shot
+manner: thelanguagemodelispromptedwithapassageoftextandaquestion,andthegoalisto
+outputthecorrectanswerfrom{yes,no}. Likeinvisiontasks(Section4),weusethecorrect-class
+margin(5)asthemodeloutputfunctionforthiszero-shotbinaryclassificationtask.
+8https://huggingface.co/gpt2
+9https://huggingface.co/datasets/roneneldan/TinyStories
+34Model and dataset. We consider the Phi-2 model10 [LBE+23] and specify a computation graph
+over 55,552 components. Here, each component corresponds to a contiguous block of 10 weight
+vectorsinthemodel. WeevaluatethismodelontheBoolQdataset11 [CLC+19],whereeachexam-
+ple consists of a passage of text, a question, and a binary {yes, no} answer. Using the prompting
+andevaluationprocedurefromtheGaoetal.[GTA+23]12,Phi-2attainsan83.6%accuracyonthis
+task.
+Computing COAR attributions. Like in Appendix B.1, we apply compute COAR attributions
+for a random subset of 500 examples in the BoolQ validation set using a component dataset of
+m = 100,000componentcounterfactuals(2)andaablationfractionofα = 0.025.
+Evaluating COAR attributions. We find that COAR attributions are predictive of unseen com-
+ponentcounterfactualsonthistaskaswell. Figure9aplotsthecorrelationbetweenground-truth
+componentcounterfactuals f M(z,·)andthecorresponding COAR estimate(4)ofarandomBoolQ
+examplez. ThehistogramsinFigure9bshowthatCOARattributionsattainanaveragecorrelation
+of{0.58,0.66,0.66}withground-truthcomponentcounterfactualssampledusingablationfraction
+α = {5%,2.5%,1%}respectively.
+10https://huggingface.co/microsoft/phi-2
+11https://huggingface.co/datasets/google/boolq
+12https://github.com/EleutherAI/lm-evaluation-harness
+35Attributing GPT-2 on TinyStories | Next-token prediction task
+Example: Once there was a yellow place. In the yellow place... COAR evaluation
+2 120
+Correlation: 0.84 Ablation fraction
+5.0% (r=0.83)
+100 2.5% (r=0.85)
+0
+1.0% (r=0.89)
+80
+2
+60
+4
+40
+6 20
+0
+6 5 4 3 2 1 0 1 0.65 0.70 0.75 0.80 0.85 0.90 0.95
+Ground-truth model output (avg margin over tokens) Average model output correlation
+Figure 8: Evaluating COAR on GPT-2. We apply COAR to the GPT-2 model [RWC+19] on the
+TinyStories dataset [EL23]. The resulting component attributions are predictive of component
+counterfactuals. Theleftplotshowsthatcomponentattributionscanestimatetheeffectofablating
+componentsontheaveragecorrect-classmargin(overtokensinasequence)ofGPT-2onarandom
+TinyStories example with high correlation. The histograms in the right plot show that COAR
+attributionsattainhighaveragecorrelationformultiplevaluesofablationfractionα.
+Attributing Phi-2 on BoolQ | Zero-shot classification
+Example: does the queen stay at st james palace? COAR evaluation
+Correlation: 0.65 Ablation fraction
+2 70 5.0% (r=0.58)
+2.5% (r=0.66)
+60 1.0% (r=0.66)
+1
+50
+0
+40
+1 30
+20
+2
+10
+3
+0
+3 2 1 0 1 2 0.45 0.50 0.55 0.60 0.65 0.70 0.75
+Ground-truth model output (correct-class margin) Average model output correlation
+Figure 9: Evaluating COAR on Phi-2. We apply COAR to the Phi-2 model [JB23] on the BoolQ
+dataset[CLC+19]. Theresultingcomponentattributionsarepredictiveofcomponentcounterfac-
+tuals. The left plot shows that component attributions can estimate the effect of ablating compo-
+nentsontheaveragecorrect-classmarginofPhi-2onarandomBoolQexamplewithhighcorrela-
+tion. ThehistogramsintherightplotshowthatCOARattributionsattainhighaveragecorrelation
+formultiplevaluesofablationfractionα.
+36
+RAOC
+aiv
+tuptuo
+ledom
+detamitsE
+RAOC
+aiv
+tuptuo
+ledom
+detamitsE
+tnuoC
+tnuoCC Additional evaluation of COAR
+In this section, we first show that COAR learns accurate component attributions on additional
+datasets, model architectures, and tasks (Appendices C.1 to C.3). This supplements our findings
+in Section 4, where we showed that COAR learns component attributions that accurately predict
+component counterfactuals (1) on three image classification setups: CIFAR-10 ResNet-18, Ima-
+geNet ResNet-50, and ImageNet ViT-B/16. Then, we show that COAR attributions retain its pre-
+dictivepowerwhenestimatedwithfewersamples(AppendixC.5)orwithdifferentablationfrac-
+tions(AppendixC.4). Finally,wesupplementourexample-levelevaluationof COAR attributions
+inSection4withadditionalexample-levelcomparisonsofground-truthcomponentcounterfactu-
+alsandattribution-basedestimates(AppendixC.6).
+C.1 Evaluating COAR onadditionaldatasets
+Our experiments in Section 4 evaluated the predictiveness of COAR attributions corresponding
+to in-distribution test examples from the CIFAR-10 and ImageNet datasets. Now, we show that
+COARattributionsremainpredictiveontrainingexamplesaswellasout-of-distributionexamples.
+Specifically, we apply COAR to compute attributions of ResNet-18 predictions on the CIFAR-10
+trainingsetandonsixcorruptedversionsoftheCIFAR-10testset[HD19]. asshowninFigure10,
+COAR attributions exhibit high correlation on average (between 0.6 and 0.8) depending on the
+ablation fraction α used to ablate random α-fraction sized components subsets. Note that the
+correlationismaximumwhenα = 0.05becausethecomponentattributinsareestimatedwiththe
+sameablationfraction,i.e.,α = 0.05.
+train
+C.2 Evaluating COAR onadditionalmodelarchitectures
+Recallthat COAR ismodel-agnosticinthatitisnottiedtoanyspecificmodelarchitecture. InSec-
+tion 4, we applied COAR to ResNets trained on CIFAR-10 and ImageNet and a ViT-B/16 model
+trained on ImageNet. In this section, we apply COAR to two additional model architectures: a
+ViT model trained on CIFAR-10 (83% accuracy) and a one-layer fully-connected network trained
+onCIFAR-10(56%accuracy). Figure11showsthat COAR attributionsonbotharchitecturesyield
+accurateestimatesofhowmodeloutputschangeinresponsetoablatingrandom α-fractionsized
+components subsets, with correlation 0.65 and 0.85 for the ViT and MLP models when α = α
+train
+respectively.
+C.3 Evaluating COAR onadditionaltasks
+Wenowevaluate COARattributionsonfouradditionaltasks:
+• First,weapplyCOARtopre-trainedImageNetResNet50modelfine-tunedontwodatasets—
+WaterbirdsandCelebA—thatweuseinSection5.3—seefirstrowofFigure12. Wefindthat
+COARattributionsarepredictiveonbothdatasets,attaininghighercorrelationwithground-
+truthcomponentcounterfactualswhenαisclosertoα = 0.05.
+train
+• Second, we apply COAR to a pre-trained ImageNet ResNet50 model fine-tuned on MIMIC-
+CXR[JPG+19],adatasetoflabeledchestradiographs. Inthiscase,wesetthemodeloutput
+function to be the logit of the “Cardiomegaly” class instead of correct-class margin that we
+use in Section 4. Figure 12 shows that COAR attributions attain a correlation of 0.7 and 0.6
+withground-truthlogitswhenα = α = 0.05andα = 0.10respectively.
+train
+37• The fourth plot in Figure 12 corresponds to the CLIP setting considered in Section 5. In
+this setting, we take the zero-shot CLIP ViT-B/16 classifier and evaluate it on a dataset of
+imageswithandwithouttypographicattacks[MTB22]. Asshownintheplot,thecorrelation
+betweenCOARattributionsandground-truthmarginsiscloseto0.7whenα = α
+train
+= 0.03,
+i.e.,ablating3%ofthecomponentsintheCLIPmodel.
+C.4 Comparing COAR attributionsestimatedwithdifferentablationfractions
+Wenowanalyzehowchangingtheablationfractionα trainusedtofitCOARattributionsaffectstheir
+predictivenessoverdifferentablationfractionsattesttime. Specifically,weconsidertheImageNet
+ResNet-50 setting from Section 4 and compute two sets of COAR attributions, corresponding to
+twovaluesof α : 0.05and0.10. Then,foreachofthesetwosetsofattributions,weevaluateits
+train
+correlationwithground-truthcomponentcounterfactualsoverarangeofablationfractionsα. As
+shown in Figure 13, the correlation “profile” over α depends on the value of α used to fit the
+train
+attributions. Whenαissmall,thecorrelationishigherforattributionsestimatedwithα = 0.05.
+train
+Analogously,whenαislarge,thecorrelationishigherforattributionsestimatedwithα = 0.10.
+train
+Thisisbecausethecomponentattributionsfarebetterascounterfactualpredictorsoncomponent
+counterfactualsthatare“similar”totheonesusedtofitthem—i.e.,whenα ≈ α .
+test train
+C.5 Comparing COAR attributionsestimatedwithdifferentsamplesizes
+In Section 4, we computed COAR attributions using sample sizes m = 50000 for the ResNet-18
+model trained on CIFAR-10 and m = 100000 for the ResNet-50 model trained on ImageNet. Re-
+callthatthesamplesizemherecorrespondstothenumberofcomponentcounterfactualsusedto
+fit the component attributions. In this section, we vary the sample size m and show that COAR
+attributions remain predictive even when trained on k× fewer examples, where k ∈ {2,5,10}.
+Specifically, the left column of Figure 14 shows that COAR attributions estimated on CIFAR-10
+and ImageNet data with sample size m and m/k have high cosine similarity on average, with
+the similarity increasing as k decreases. The right column of Figure 14 shows that decreasing the
+sample size m by a factor of k ∈ {2,5,10} does not significantly impact the correlation between
+COARattributionsandground-truthcomponentcounterfactuals. Forexample,reducingthesam-
+ple size by 5× only reduces the correlation from 0.7 to 0.65 in the CIFAR-10 ResNet-18 setting.
+Additionally, we observe that COAR attributions fare better than attributions estimated with the
+best-performing baseline (LOO) even when trained on 10× fewer examples on CIFAR-10 and 5×
+fewerexamplesonImageNet.
+C.6 Analyzing COAR attributionsattheexamplelevel
+TosupplementourevaluationinSection4,weprovideadditionalexample-levelscatterplotcom-
+parisons between ground-truth component counterfactuals and the corresponding estimates ob-
+tained using component attributions estimated with COAR and all baselines from Section 4. We
+plot these comparisons on CIFAR-10 examples in Figure 15 and on ImageNet examples in Fig-
+ure 16. Our findings further substantiate that COAR attributions exhibit higher correlation with
+ground-truthcomponentcounterfactualsthanallfourbaseliensonbothCIFAR-10andImageNet.
+C.7 Qualitativelyanalyzing COAR attributions
+Wequalitativelyanalyze COARattributionsusingtwovisualizationtechniques:
+38Visualizingcomponent-specificattributionsacrossexamples. Givenexamples{z ,...,z }with
+1 n
+correspondingcomponentattributions{θ(z 1),...,θ(zn)},weanalyzehowtheattributionestimates
+of individual components vary across the set of examples. Specifically, for a component c ∈ C,
+i
+(z)
+wevisualizetheexampleswiththemostpositiveattributionvalues θ forcomponent c . Inthis
+i i
+experiment, we visualize a random subset of components from the ImageNet ResNet-50 model
+(setupBinSection4). AsshowninFigure17,theexampleswiththemostpositiveattributionsfor
+agivencomponentexhibithighvisualsimilarityatdifferentlevelsofgranularity:
+• Thefirst,thirdandfifthrowinFigure17showthattheexampleswiththemostpositiveattri-
+butions for layer4.0.conv3[477] and layer4.2.conv3[53] contain purple flowers, watch
+faces,andglass-shapedobjectsrespectively.
+• However, consistent with recent work on superposition in deep networks [EHO+22], we
+observe that some components such as layer4.2.conv2[336] in the second row as well as
+layer3.1.conv3[655]inthelastrowcansurfacedissimilarsubsetsofexamplesanddonot
+readilymaptoasinglesemanticconcept.
+Visualizingnearestneighborsinattributionspace. Wealsousecomponentattributionsasfea-
+ture embeddings in order to visualize the nearest neighbors of a given example in “component
+attribution”space. Intuitively,thistechniqueallowsustoidentifyexamplesonwhichmodelout-
+putschangesimilarlyinresponsetocomponentablations. Inthisexperiment,wevisualizearan-
+domsubsetofexamplesfromtheCelebAdatasetalongwiththeir5nearestneighborsusingCOAR
+attributions of a fine-tuned ImageNet ResNet-50 model. Figure 18 shows that the nearest neigh-
+borsofagivenexampleinattributionspacehighvisualsimilarity,i.e.,similarfacialattributessuch
+asbackground(firstrow),haircolor(secondandfourthrow),accessories(thirdrow),oreventhe
+samepersonindifferentposes(lastrow).
+39Dataset = Train Dataset = Test Dataset = Brightness corruption
+0.8 0.8 0.8
+0.6 0.6 0.6
+0.4 0.4 0.4
+0.2 0.2 0.2
+0.0 0.0 0.0
+0.2 0.1 0.05* 0.03 0.01 0.2 0.1 0.05* 0.03 0.01 0.2 0.1 0.05* 0.03 0.01
+Dataset = Gaussian Blur corruption Dataset = Gaussian Noise corruption Dataset = Snow corruption
+0.8 0.8 0.8
+0.6 0.6 0.6
+0.4 0.4 0.4
+0.2 0.2 0.2
+0.0 0.0 0.0
+0.2 0.1 0.05* 0.03 0.01 0.2 0.1 0.05* 0.03 0.01 0.2 0.1 0.05* 0.03 0.01
+Ablation fraction Ablation fraction Ablation fraction
+Figure10: DoCOARattributionsgeneralizetoout-of-distributionexamples? COARattributions
+remainpredictiveontheCIFAR-10trainingsetandonsixcorruptedversionsoftheCIFAR-10test
+set[HD19]overarangeofablationfractionsα. SeeAppendixC.1formoredetails.
+Evaluating Coar on a CIFAR-10 ViT Evaluating Coar on a CIFAR-10 MLP
+0.6
+0.8
+0.5
+0.6
+0.4
+0.3 0.4
+0.2
+0.2
+0.1
+0.0 0.0
+0.05 0.1* 0.15 0.2 0.1 0.25 0.5* 0.8
+Ablation fraction Ablation fraction
+Figure 11: Do COAR attributions generalize to other model architectures? COAR attributions
+yield accurate estimates of component counterfactuals on two additional model architectures:
+a ViT-based model (left) and a one-layer fully-connected network (right) trained on CIFAR-10.
+SeeAppendixC.2formoredetails.
+40
+noitalerroC
+tuptuO
+ledoM
+.gvA
+noitalerroC
+tuptuO
+ledoM
+.gvA
+noitalerroC
+tuptuO
+ledoM
+.gvA
+noitalerroC
+tuptuO
+ledoM
+.gvAImageNet ResNet50 fine-tuned on Waterbirds ImageNet ResNet50 fine-tuned on CelebA
+0.8
+0.7
+0.7
+0.6
+0.6
+0.5
+0.5
+0.4
+0.4
+0.3
+0.3
+0.2 0.2
+0.1 0.1
+0.0 0.0
+0.01 0.03 0.05* 0.1 0.15 0.03 0.05* 0.1 0.15
+Ablation fraction Ablation fraction
+ImageNet ResNet50 fine-tuned on MIMIC-CXR Zero-shot CLIP ViT-B/16 classifier evaluated
+("Cardiomegaly" logit as model output) on images with typographic attacks
+0.7
+0.7
+0.6
+0.6
+0.5
+0.5
+0.4
+0.4
+0.3 0.3
+0.2 0.2
+0.1 0.1
+0.0 0.0
+0.03 0.05* 0.1 0.15 0.01 0.03 0.05* 0.1
+Ablation fraction Ablation fraction
+Figure 12: Evaluating COAR attributions on additional tasks. We find that component attri-
+butions estimated using COAR are predictive on four additional tasks: fine-tuning ImageNet
+ResNet50 on Waterbirds, CelebA and MIMIC-CXR, and a zero-shot CLIP ViT-B/16 classification
+task on a dataset containing typographic attacks (Section 5.5). Note that the MIMIC-CXR setting
+uses the logit of the “Cardiomegaly” class as the model output function. See Appendix C.3 for
+additionalinformationaboutthesetasks.
+41
+noitalerroc
+tuptuo
+ledoM
+noitalerroc
+tuptuo
+ledoM
+noitalerroc
+tuptuo
+ledoM
+noitalerroc
+tuptuo
+ledoMEffect of train-time ablation fraction
+on model output correlation
+Train-time ablation fraction
+0.6
+=0.10 =0.05
+0.5
+0.4
+0.3
+0.2
+0.1
+0.0
+0.3 0.2 0.1 0.05 0.03 0.01
+Ablation fraction used at evaluation time
+Figure 13: Comparing COAR attributions estimated with different ablation fractions α. COAR
+attributions estimated with different ablation fractions α attain a different correlation “pro-
+train
+file” over α at test time. The correlation between ground-truth component counterfactuals and
+attribution-basedestimatesishigherforattributionsestimatedwithα = 0.05whenαissmall,
+train
+and higher for attributions estimated with α = 0.10 when α is large. This empirically shows
+train
+thatCOARattributionsaremorepredictiveoncomponentcounterfactualsthatare“similar”tothe
+onesusedtofitthem—i.e.,whenα ≈ α . SeeAppendixC.4formoredetails.
+test train
+42
+noitalerroc
+tuptuo
+ledom
+egarevAComparing CIFAR-10 attributions Evaluating CIFAR-10 attributions estimated with
+estimated with different sample sizes different sample sizes (ablation fraction 0.1)
+50000
+Sample size m Best baseline (LOO): 0.52
+0.7
+5000
+40000 10000 0.6
+15000
+20000 0.5
+30000 25000
+30000 0.4
+35000
+20000 40000 0.3
+45000
+50000 0.2
+10000
+0.1
+0 0.0
+0.70 0.75 0.80 0.85 0.90 0.95 1.00 5000 10000 25000 50000
+Cosine similarity with attributions trained with 50000 samples Sample size used to compute attributions
+Comparing ImageNet attributions Evaluating ImageNet attributions estimated with
+estimated with different sample sizes different sample sizes (ablation fraction 0.05)
+Sample size m Best baseline (LOO): 0.34
+10000 0.5
+40000 20000
+30000
+0.4
+40000
+30000 50000
+60000 0.3
+70000
+20000 80000
+0.2
+90000
+10000
+0.1
+0 0.0
+0.4 0.5 0.6 0.7 0.8 0.9 1.0 10000 20000 50000 100000
+Cosine similarity with attributions trained with 100000 samples Sample size used to compute attributions
+Figure14: Comparing COAR attributionsestimatedwithdifferentsamplesizes. COAR attribu-
+tionsforCIFAR-10ResNet-18andImageNetResNet-50(SetupAandBrespectivelyinSection4)
+estimated with smaller sample sizes m are still predictive of component counterfactuals. On the
+left, we show that COAR attributions estimated with sample size m and m/k have high cosine
+similarityonaverage,withthesimilarityincreasingaskdecreases. Ontheright,weshowthatde-
+creasingthesamplesizembyafactorofk ∈ {2,5,10}doesnotsignificantlyaffectthecorrelation
+between COAR attributions and ground-truth component counterfactuals. In particular, COAR
+outperforms the best-performing baseline (LOO) even with 10× fewer samples on CIFAR-10 (top
+row)and5×fewersamplesonImageNet(bottomrow).
+43
+tnuoC
+tnuoC
+noitalerroc
+tuptuo
+ledom
+egarevA
+noitalerroc
+tuptuo
+ledom
+egarevAExample-level evaluation of component attributions | CIFAR-10 ResNet-18
+Coar | #6820 Leave-one-out | #6820 Grad-times-param | #6820 Neuron cond. | #6820 Int. Infl. | #6820
+Corr. 0.80 3 Corr. 0.56 2 Corr. 0.35 Corr. 0.29 2 Corr. 0.01
+2 2 2
+1 1
+1 1
+0 0 0
+0 0
+2 1 1 1 1
+2 2 2 2
+2.5 0.0 2.5 2 0 2 2 0 2 2 0 2 0 2
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #8458 Leave-one-out | #8458 Grad-times-param | #8458 Neuron cond. | #8458 Int. Infl. | #8458
+2 Corr. 0.81 2 Corr. 0.69 2 Corr. 0.33 2 Corr. 0.05 2 Corr. 0.13
+1 1 1 1
+0 0 0 0 0
+1 1 1
+1
+2 2 2 2
+2
+3
+2.5 0.0 2.5 2.5 0.0 2.5 2 0 2 2 0 2 2.5 0.0 2.5
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #4756 Leave-one-out | #4756 Grad-times-param | #4756 Neuron cond. | #4756 Int. Infl. | #4756
+Corr. 0.78 2 Corr. 0.56 2 Corr. 0.28 2 Corr. -0.06 3 Corr. 0.15
+2 1 2
+1 1
+0 1
+0 0 0 1 0
+1
+1 2 1
+2 2
+2 3 2
+2.5 0.0 2.5 2 0 2 2 0 2 2 0 2 2 0 2
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #4518 Leave-one-out | #4518 Grad-times-param | #4518 Neuron cond. | #4518 Int. Infl. | #4518
+Corr. 0.82 Corr. 0.65 Corr. 0.25 2 Corr. 0.21 2 Corr. 0.09
+2 2
+2 1 1
+1
+0 0 0
+0 0 1
+1
+1
+2 2
+2 2
+2 3
+2.5 0.0 2.5 2 0 2 2 0 2 2 0 2 2.5 0.0 2.5
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #7168 Leave-one-out | #7168 Grad-times-param | #7168 Neuron cond. | #7168 Int. Infl. | #7168
+Corr. 0.78 Corr. 0.71 2 Corr. 0.40 Corr. 0.03 3 Corr. -0.00
+2
+2
+2 1 1 2
+0 0 0 1
+0 1 1 0
+2 2 1
+2 2
+3 2
+2.5 0.0 2.5 2.5 0.0 2.5 2 0 2 2 0 2 0 2
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Figure 15: Additional example-level evaluation of component attributions on CIFAR-10. Each
+row corresponds to a different example z randomly picked from the CIFAR-10 test set and each
+columncorrespondstoadifferentattributionmethod. Theleft-mostsubfigureineachrowshows
+that COAR attributions and the corresponding ground-truth component counterfactuals exhibit
+high correlation on example z. In comparison, the other subfigures in each row, one for baseline
+method,consistentlyexhibitlowercorrelation. SeeAppendixC.5formoredetails.
+44
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoCExample-level evaluation of component attributions | ImageNet ResNet-50
+Coar | #4838 Leave-one-out | #4838 Grad-times-param | #4838 Neuron cond. | #4838 Int. Infl. | #4838
+Corr. 0.70 Corr. 0.47 Corr. 0.41 Corr. 0.02 Corr. -0.00
+2 2 2
+2 2
+0 0 0
+0 0
+2
+2 2
+2 2
+4
+2.5 0.0 2.5 2.5 0.0 2.5 2.5 0.0 2.5 2.5 0.0 2.5 0 5
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #9960 Leave-one-out | #9960 Grad-times-param | #9960 Neuron cond. | #9960 Int. Infl. | #9960
+Corr. 0.73 Corr. 0.59 Corr. 0.34 Corr. 0.08 Corr. -0.01
+2 2
+2 2
+2
+0 0 0 0 0
+2 2
+2 2 2
+2.5 0.0 2.5 2.5 0.0 2.5 2.5 0.0 2.5 2.5 0.0 2.5 2.5 0.0 2.5
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #8630 Leave-one-out | #8630 Grad-times-param | #8630 Neuron cond. | #8630 Int. Infl. | #8630
+3
+Corr. 0.67 Corr. 0.39 Corr. 0.20 Corr. -0.06 Corr. -0.02
+2 2
+2 2 2
+1
+0
+0 0 0
+0 2 1
+2 2
+2
+4 2
+5 0 2 0 2 2.5 0.0 2.5 0.0 2.5 2.5 0.0 2.5
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #9788 Leave-one-out | #9788 Grad-times-param | #9788 Neuron cond. | #9788 Int. Infl. | #9788
+Corr. 0.77 Corr. 0.61 Corr. 0.50 Corr. 0.01 Corr. 0.04
+2
+2 2 2 2
+1
+0 0 0 0 0
+1
+2 2 2 2 2
+2.5 0.0 2.5 2 0 2 2.5 0.0 2.5 2.5 0.0 2.5 2.5 0.0 2.5
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Coar | #4871 Leave-one-out | #4871 Grad-times-param | #4871 Neuron cond. | #4871 Int. Infl. | #4871
+3
+Corr. 0.66 Corr. 0.28 Corr. 0.22 Corr. 0.01 Corr. 0.03
+2 2 2 2 2
+0 1
+0 0 0 0
+2
+1
+4 2 2 2
+2
+2.5 0.0 2.5 2 0 2 2.5 0.0 2.5 2.5 0.0 2.5 5 0
+Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin Ground-truth margin
+Figure16: Additionalexample-levelevaluationofcomponentattributionsonImageNet. Simi-
+lartotheresultsinFigure15,eachrowcorrespondstoadifferentexamplezrandomlypickedfrom
+theImageNettestset. Theleft-mostsubfigureineachrowshowsthat COAR attributionsandthe
+correspondingground-truthcomponentcounterfactualsexhibithighcorrelationonexamplez. In
+comparison, the other subfigures in each row, corresponding to a baseline method, consistently
+exhibitworsecorrelation. SeeAppendixC.5formoredetails.
+45
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC
+etamitse
+raoC0.019 0.018 0.018 0.018 0.017 0.017 0.017
+0.025 0.023 0.023 0.022 0.021 0.021 0.017
+0.025 0.023 0.022 0.021 0.021 0.021 0.021
+0.042 0.04 0.033 0.029 0.026 0.024 0.023
+0.038 0.032 0.03 0.027 0.025 0.025 0.023
+0.041 0.034 0.028 0.028 0.027 0.027 0.027
+Figure 17: Visualizing component-specific attributions across examples. We sample a random
+set of components from the ImageNet ResNet-50 model (setup B in Section 4) and visualize the
+examples with the most positive attributions for each component. In general, the examples with
+themostpositiveattributionsforagivencomponentexhibitvisualsimilarityatdifferentlevelsof
+granularity. For example, the first, third and fifth row in Figure 17 show that the examples with
+the most positive attributions for layer4.0.conv3[477] and layer4.2.conv3[53] contain pur-
+ple flowers, watch faces, and glass-shaped objects respectively. However, consistent with recent
+work on superposition in deep networks [EHO+22], we observe that some components such as
+layer4.2.conv2[336] (second row) and layer3.1.conv3[655] (last row) can surface dissimilar
+subsetsofexamplesordonotreadilymaptoasinglesemanticconcept.
+46
+]774[3vnoc.0.4reyal
+]633[2vnoc.2.4reyal
+]35[3vnoc.2.4reyal
+]44[2vnoc.5.3reyal
+]5611[3vnoc.0.4reyal
+]556[3vnoc.1.3reyalQuery Neighbor #1 Neighbor #2 Neighbor #3 Neighbor #4 Neighbor #5
+Figure 18: Visualizing nearest neighbors in COAR attribution space. We also use component
+attributions as feature embeddings in order to visualize the five nearest neighbors of examples
+fromtheCelebAdatasetin“componentattribution”space. Intuitively,thistechniqueallowsusto
+identifyexamplesonwhichmodeloutputschangesimilarlyinresponsetocomponentablations.
+In general, we observe that the nearest neighbors of a given example in attribution space high
+visual similarity, e.g, similar facial attributes such as background (first row), hair color (second
+andfourthrow),accessories(thirdrow),oreventhesamepersonindifferentposes(lastrow).
+47D Additional evaluation of COAR-EDIT
+We use COAR-EDIT in five different editing tasks: correcting misclassifications (§5.1); forgetting
+a class (§5.2); improving subpopulation robustness (§5.3); localizing backdoor attacks (§5.4); and
+improvingrobustnesstotypographicattacks(§5.5). Inthissection,weprovideadditionaldetails
+and/orsupplementaryexperimentsforeachtask.
+D.1 Editingindividualpredictions
+Experimentdetails. InSection5.1,weuse COAR-EDIT tocorrectmisclassificationsofaResNet-
+50modelonImageNetexamples. Inthisexperiment,wesetthe“target”exampletobeamisclas-
+sifiedImageNetexampleandthe“reference”exampletoasetof50randomlyselectedImageNet
+examples. Then, we use these examples to identify and ablate components (9) that increase the
+correct-classmargin(5)ofthetargetexamplewithoutimpactingtheaveragemarginovertheref-
+erenceexamples.
+Additionalexperiments. WefirstshowthatCOAR-EDITisnotsensitivetothechoiceofmisclas-
+sified examples, model, or dataset. In Figure 20, we reproduce the experiment in Section 5.1 on
+additional ImageNet examples misclassified by a ResNet-50 model. In Figure 19, we use COAR-
+EDITtosimilarlyfixmisclassificationsofaResNet-18modelontheCIFAR-10dataset. InFigure21,
+weshowthatCOAR-EDITcanalsobeusedtoadversariallyinducemisclassificationsonImageNet
+examplesbyablatingthetop-kcomponentscorrespondingtothe“target”example. Similartoour
+findingsinSection5.1,weobservethatablatingafewcomponentsvia COAR-EDIT issufficientto
+changetheindividualexample-levelpredictionwithoutchangingoverallmodelperformance.
+Additional analysis. Which components does COAR-EDIT ablate to correct misclassifications?
+To answer this question, we first aggregate all components ablated by COAR-EDIT in order to
+(individually) correct ImageNet examples misclassified by a ResNet-50 model. Then, we plot
+the most common convolution layers corresponding to these ablated components in Figure 22.
+We find that COAR-EDIT primarily targets convolution filters from the last few layers (closet
+to the output) of the ResNet-50 model in order to make fine-grained edits that do not impact
+overall model performance. For example, more than 25% of the ablated components belong to
+layer4.{0,1,2}.conv3—the last convolution layer in the first three residual blocks of the last
+layergroupoftheResNet-50model.
+D.2 Forgettingaclass
+Experimentdetails. InSection5.2,weuseCOAR-EDITtoselectivelyforgetaclassofaResNet-50
+modelonImageNet. Inthisexperiment,wesetthe“target”examplestobesetof10examplesfrom
+theclasstobeforgottenandthe“reference”examplestobeasetof50randomlyselectedImageNet
+examples. Using these examples, we use COAR-EDIT to ablate components (9) that decrease the
+averagecorrect-classmargin(5)ofthetargetexampleswithoutimpactingtheaveragemarginover
+thereferenceexamples.
+Additional experiments We show that COAR-EDIT can be used to selectively forget additional
+ImageNet classes. Specifically, in Figure 23, we reproduce the COAR-EDIT experiment in Sec-
+tion5.2onthreeadditionalImageNetclasses: “foldingchair”,“militaryuniform”,and“revolver”.
+48Like in Figure 4, we again observe that COAR-EDIT can specifically degrade the accuracy on the
+target class without impacting the average accuracy over the train or test set by ablating a few
+components(convolutionfilters)intheResNet-50model.
+D.3 Improvingsubpopulationrobustness.
+Experiment details. In Section 5.3, we use COAR-EDIT to improve subpopulation robustness
+of models trained on two benchmark datasets: Waterbirds and CelebA. In both cases, we fine-
+tuneanResNet-50modelviastandard“empiricalriskminimization”usingSGDhyperparameters
+taken from Sagawa et al. [SKH+20]. The resulting fine-tuned models attain 64% and 47% worst-
+subpopulationaccuracyontheWaterbirdsandCelebAtestsets,respectively. Toimprovesubpop-
+ulationrobustnessonWaterbirds,wesetthe“target”examplestoasetof10randomtrainingex-
+amplesfromthe“waterbirdsonland”(theworst-performingsubpopulation)andthe“reference”
+examplestobe10randomexamplesfromothersubpopulations. Analogously,forCelebA,weset
+the“target”examplestothesetof20randomexamplesfromthe“blondmale”worst-performing
+subpopulationandthe“reference”examplesto20randomexamplesfromothersubpopulations.
+Then,weuseCOAR-EDITtoidentifycomponentsthat,whenablated,increasetheaveragecorrect-
+class margin (5) of the target examples without impacting the average margin over the reference
+examples. In both cases, the number of components to ablate is a hyperparameter that we select
+bytrackingtheworst-subpopulationaccuracyonavalidationset.
+D.4 Mitigatingbackdoorattacks.
+Experimentdetails. WenowdescribetheexperimentsetupinSection5.4,whereweusedCOAR-
+EDIT to mitigate the effect of a backdoor attack on a ResNet-18 model trained on a backdoored
+CIFAR-10 dataset. The CIFAR-10 dataset is modified by adding a small blue-squared trigger to
+the upper left corner of 50% of examples in the “airplane” class. Training a model with standard
+SGDhyperparameteronthisdatasetcausesthemodeltospuriouslyassociatethetriggerwiththe
+“airplane” class, leading to a backdoor attack. That is, while the resulting model attains 89% test
+accuracy, applying the attack to examples in the test set causes the model to misclassify them as
+“airplanes”, resulting in 37% accuracy on test examples with the trigger. To mitigate the effect
+of the backdoor attack, we first sample ten examples from the training set. Then, we set the
+“target” examples to these two examples with the trigger and the “reference” examples to these
+twoexampleswithoutthetrigger. Then,weuseCOAR-EDITtoablatecomponents(9)thatincrease
+thecorrect-classmargin(5)ofthetargetexampleswithoutimpactingtheaveragemarginoverthe
+referenceexamples.
+Additionalanalysis. RecallthatourexperimentinSection5.4showsthatCOAR-EDITcansignif-
+icantlymitigatetheeffectofabackdoorattackonaResNet-18modelbyablatingafewbackdoor-
+specific components. We now qualitatively analyze the components ablated via COAR-EDIT to
+mitigatetheeffectofabackdoorattackinFigure24. Specifically,wevisualizetheablatedcompo-
+nents (convolution filters in this case) using the input-times-gradient saliency map method from
+the Captum library [KMM+20]. As shown in Figure 24, these visualizations suggest that the ab-
+latedcomponentsaresensitivetotheblue-squaredtrigger.
+49D.5 Improvingrobustnesstotypographicattacks.
+Experiment details. In Section 5.5 and Figure 7 in particular, we show that COAR-EDIT can be
+used to improve robustness of zero-shot CLIP classifiers to typographic attacks. In this exper-
+iment, we consider a zero-shot CLIP ViT-B/16 classifier [RKH+21] and specify a computation
+graphover82,944components,whereeachcomponentcorrespondstoaweightvectorintheViT
+(across all layers). We evaluate the robustness of this model in a zero-shot setting on 180 images
+and four real-world typographic attacks—“taxi”, “twitter”, “EU”, and “iPad”—taken from the
+dataset in [MTB22]. We also consider synthetic typographic attacks, where we render a blob of
+textonawhitebackgroundandplaceitinthecenterofagivenimage. Thezero-shotperformance
+oftheCLIPmodeldropsfrom95%to51%and54%ontherealandsynthetictypographicattacks,
+respectively. Toimproverobustness,wesetthe“target”examplestobethe25exampleswitharan-
+domly picked synthetic attack and the “reference” examples to the same set of examples without
+any attack. Then, we use COAR-EDIT to ablate components (9) that increase the average correct-
+class margin (5) of the target examples without impacting the average margin over the reference
+examples. We use a validation set comprising examples with and without the synthetic attack to
+selectthenumberofcomponentstoablatefromthemodel.
+50Figure 19: Correcting misclassified CIFAR-10 examples via COAR-EDIT. We reproduce the
+COAR-EDIT experiment from Section 5.1 on the CIFAR-10 dataset. Specifically, each row corre-
+sponds to CIFAR-10 test example that is misclassified by a ResNet-18 model. The left subplot in
+eachrowshowshowapplyingCOAR-EDIT(byablatingcomponents(9))increasesthecorrect-class
+margin (5) of the misclassified example without impacting the average margin over the train or
+test set. The right subplot reports the drop in overall test accuracy and visualizes examples with
+correct-classmarginsthatchangethemostorleastduetotheedit.
+51Figure 20: Correcting misclassified ImageNet examples via COAR-EDIT. We reproduce the
+COAR-EDIT experiment from Section 5.1 on additional ImageNet examples (one per row) mis-
+classified by a ResNet-50 model. The left subplot shows that applying COAR-EDIT (by ablating
+components (9)) increases the correct-class margin (5) of the misclassified example without im-
+pactingtheaveragemarginoverthetrainortestset. (Right)Therightsubplotvisualizesexamples
+withmarginsthatchangethemostorleastduetotheedit.
+52Figure 21: Adversarially inducing misclassifications on ImageNet examples via COAR-EDIT.
+Each row corresponds to an ImageNet test example that is correctly classified by a ResNet-50
+model. In the left subplot of each row, we show that applying COAR-EDIT (by ablating the top-k
+components(9))decreasesthecorrect-classmargin(5)ofthecorrectlyclassifiedexamplewithout
+impacting the average margin over the train or test set. On the right, we shw that the edit does
+notimpactvisuallydissimilarexamples,butdoesincreaseordecreasethecorrect-classmarginof
+examplescontainingvisuallysimilarobjects,e.g.,tennisballsinthesecondrow.
+53Layers from which Coar-Edit ablates
+components in order to fix model errors
+layer4.0.conv3
+layer4.1.conv3
+layer4.2.conv3
+layer4.2.conv1
+layer4.0.conv1
+layer4.0.conv2
+layer3.0.conv3
+layer4.2.conv2
+layer4.1.conv2
+layer4.1.conv1
+layer3.1.conv3
+layer3.2.conv3
+layer3.3.conv3
+layer3.4.conv3
+layer3.5.conv3
+layer3.0.conv1
+layer3.5.conv1
+layer3.5.conv2
+layer3.0.conv2
+layer2.0.conv3
+layer2.1.conv3
+layer3.4.conv1
+layer3.4.conv2
+layer3.1.conv2
+layer3.2.conv2
+layer3.3.conv2
+Percent
+layer3.3.conv1 2
+4
+layer2.2.conv3
+6
+layer3.1.conv1 8
+layer2.3.conv3 10
+0 2 4 6 8 10 12
+Percent of ablated components from the given layer
+Figure22: Whichcomponentsdoes COAR-EDIT targettofixmodelerrors? Weanalyzethespe-
+cific convolution layers from which COAR-EDIT ablates components (convolution filters) to cor-
+rect ImageNet examples misclassified by a ResNet-50 model. On the y-axis, we plot the 30 most
+commonconvolutionlayerscorrespondingtotheablatedcomponents. Onthe x-axis,weplotthe
+percentageofablatedcomponentsthatbelongtoeachconvolutionlayer. WefindthatCOAR-EDIT
+primarily targets convolution filters from the last few layers (closet to the output) of the ResNet-
+50 model in order to make fine-grained edits that do not impact overall model performance. For
+example, more than 25% of the ablated components belong to layer4.{0,1,2}.conv3—the last
+convolutionlayerinthefirstthreeresidualblocksofthelastlayergroupoftheResNet-50model.
+54
+ledom
+05teNseR
+teNegamI
+ni
+reyaL
+noitulovnoCForgetting ImageNet classes via Coar-Edit
+Class: "folding chair" Class: "military uniform"
+0.8 0.8
+0.7
+0.7
+Train set Train set
+0.6
+Val set Val set
+0.6
+Class "folding chair" Class "military uniform"
+0.5
+0.5
+0.4
+0.4
+0.3
+0 2 4 6 8 10 12 14 0 2 4 6 8 10 12 14
+Number of model components ablated Number of model components ablated
+Class: "chain-link fence" Class: "revolver"
+0.8 0.85
+0.7 0.80
+0.6 0.75 Train set
+0.5 Val set 0.70
+Class "chain-link fence"
+0.4
+0.65
+0.3
+0.60 Train set
+0.2 Val set
+0.55
+Class "revolver"
+0.1
+0 2 4 6 8 10 12 14 0 2 4 6 8 10 12 14
+Number of model components ablated Number of model components ablated
+Figure 23: Forgetting ImageNet classes via COAR-EDIT. We reproduce the COAR-EDIT exper-
+iment from Section 5.2 on additional ImageNet classes (one per subplot). Specifically, in each
+subplot,wefindthatablating15of22,720convolutionfilters(identifiedvia COAR-EDIT)suffices
+tosignificantlydegradetheaccuracyofaResNet-50modelonaspecificclass(ingreen). Thisedit
+istargetedinthatitdoesnotimpacttheaverageaccuracyoverthetrainset(inblue)ortestset(in
+orange).
+55
+ycaruccA
+ycaruccA ycaruccA
+ycaruccACIFAR-10 examples with backdoor patch
+(1) block2.conv1:120
+(2) block1.conv2:134
+(3) block3.conv1:98
+(4) block1.conv1:99
+(5) block2.conv2:118
+(6) block2.conv1:177
+(7) block1.conv2:33
+(8) block2.conv2:31
+Figure24: VisualizingcomponentsablatedviaCOAR-EDITtomitigateabackdoorattack. Recall
+thatinSection5.4,weusedCOAR-EDITtomitigatetheeffectofabackdoorattack(ablue-squared
+spurious trigger) on a ResNet-18 model trained on a backdoored CIFAR-10 dataset. Here, we
+visualizethecomponentsablatedvia COAR-EDIT toreducethemodel’srelianceonthisspurious
+feature. The first row shows a set of random examples from the modified CIFAR-10 test set that
+contain the trigger. Each subsequent row corresponds to an ablated component—a convolution
+filter of the ResNet-18 model in this case. In each of these rows, we use the input-times-gradient
+saliencymapmethodfromtheCaptumlibrary[KMM+20]to(qualitatively)highlightpartsofthe
+examplesthataremost“important”fortheablatedcomponent’soutput. Thesemapssuggestthat
+allablatedcomponentsaresensitivetotheblue-squaredtrigger.
+56E Analyzing design choices in COAR
+In this section, we analyze three design choices in COAR: (a) the train-time ablation fraction α
+used to sample a subset of components C′ ⊂ C of size α|C|, (b) the ablation method (Remark 2)
+usedtointerveneonthesampledcomponentsC′,and(c)thespecificmodeloutputfunctionused
+to compute component counterfactuals f (·,C′) (1), i.e., model output f (·) after ablating the
+M M
+componentsubsetC′.
+E.1 Effectofablationfraction
+ThefirststepofCOAR—constructingacomponentdataset(Equation2)—requireschoosingaabla-
+tionfractionα ∈ (0,1). Thishyperparameterdeterminesthesizeoftherandomα-fractionsubsets
+C′ ⊂ Cusedtocomputecomponentcounterfactuals. Apriori,however,itisnotclearwhichabla-
+tion fraction α is best suited for learning accurate component attributions. For example, ablating
+too large a component subset (large α) can induce a significant drop in model performance to a
+pointwheretheablatedmodelisnolongerrepresentativeoftheoriginalmodel.
+Effectoftrain-timeablationfractionα Weusetwometricstoquantifytheeffectofablation
+train
+fractionαonmodeloutputs:
+• Changeinmodelperformance. Wemeasuretheeffectofablatingrandomα-fractionsubsets
+C′ ⊂ Cofcomponentsonmodelperformance,e.g.,testaccuracy.
+• Correlation between example-level model outputs. We measure the correlation between
+modeloutputsbeforeandafterablation,e.g.,logitsormargins.
+We use these (heuristic) metrics to ensure that the ablations are not too severe to nullify model
+performance and that the outputs of the ablated models are still predictive of the outputs of the
+originalmodel.
+Effect of train-time ablation fraction α . Figure 25 evaluates how varying the train-time ab-
+train
+lation fraction α changes both metrics—model performance and correlation between model
+train
+outputs—forallthreesettingsconsideredinSection4: CIFAR-10ResNet-18,ImageNetResNet-50,
+andImageNetViT-B/16. Inallthreesettings,wefindthatmodelaccuracyandmargincorrelation
+decreaseastheablationfractionαincreases. Forinstance,ablating15%ofcomponents(α = 0.15)
+results in a significant accuracy drop for ResNets, but not for ViTs. On the other hand, ablating
+1% of all components (α = 0.01) results in a small drop in accuracy and correlation, e.g., for the
+ResNet-18modeltrainedonCIFAR-10(firstrowofFigure25). Therefore,ourexperimentsinSec-
+tion 4 use α = 0.10 for the CIFAR-10 model and α = 0.05 for both ImageNet models. These
+findingsalsosuggestthatthechoiceofαdependsonthemodelarchitectureandthetaskathand,
+e.g.,ViTsaremorerobusttozeroablationsthanResNets.
+E.2 Effectofablationmethod
+As discussed in Remark 2, we use a simple ablation method that sets the weights/activations of
+a subset of components C′ ⊂ C to zero. However, our method COAR is not dependent on any
+specificablationmethod,andcanbeusedtocomputecomponentattributionswithotherablation
+methodsaswell.
+57Alternativeablationmethodbasedonscaling. Inthissection,weconsideranalternativeabla-
+tion method that scales down the activations of a component by a factor of γ ∈ [0,1]. Note that
+setting γ = 0 corresponds to the zero ablation method described in Remark 2; we use γ = 0.5 in
+ourexperiments.
+Experiment results. We find that the alternative scaling-based ablation maintains high correla-
+tion between model outputs before and after ablations, resulting in accurate component attribu-
+tions. Specifically,wemakethreekeyobservations.
+• WefirstobservethatonaResNet-18modeltrainedonCIFAR-10,thescaling-basedablation
+methoddescribedabovemaintainshighcorrelationbetweenmodeloutputsbeforeandafter
+ablation,evenathighablationfractionsα ∈ {0.30,...,0.05}(fourthrowofFigure25).
+• Then, in Figure 26, we apply COAR with the scaling-based ablation method to a CIFAR-
+10 ResNet-18 model. The resulting component attributions attain an average correlation of
+more than 0.75 for most ablation fractions α ∈ {0.40,...,0.01}. The correlation between
+COARattributionestimatesandground-truthcounterfactualsishighacrossarangeofabla-
+tionfractionsαfrom0.01to0.45.
+• In Figure 27, we compare COAR attributions computed with the scaling ablations to attri-
+butions computed with zero-ablations. We find that (a) these attributions exhibit high co-
+sinesimilarity(Figure27a)andthat(b)attributionslearnedwithscaling-basedablationsare
+predictiveofground-truthcomponentcounterfactualscomputedusingzero-ablations(Fig-
+ure 27b). This indicates that both ablations—scaling down the activations of a component
+by a factor of γ = 0.5 and setting the activations of a component to zero—change model
+outputsinasimilarmanner.
+E.3 Effectofmodeloutputfunction
+RecallthatinSection4,weusethecorrect-classmargin(5)asthemodeloutputfunctiontoestimate
+COAR attributions for classification tasks. However, our approach is not tied to a specific model
+outputfunction. Dependingonthetaskathand,onecanuseanalternativemodeloutputfunction
+to estimate COAR attributions. For example, in a multi-label classification task, we can also use
+the logit of a fixed class of interest as the model output function to estimate COAR attributions.
+In Figure 12, we apply COAR to a pre-trained ImageNet ResNet50 model fine-tuned on MIMIC-
+CXR [JPG+19]—a dataset of labeled chest radiographs—and set the model output function to be
+thelogitofthe“Cardiomegaly”class. Ourresultsshowthat COAR attributionsremainpredictive
+with this model output function, and attain a correlation of 0.7 and 0.6 with the ground-truth
+counterfactuals on “Cardiomegaly” logits when α = α = 0.05 and α = 0.10 respectively.
+train
+Additionally, in Appendix B, we also apply COAR to the next-token prediction task in language
+modeling, using average correct-class margin over all tokens in a given sequence as the model
+outputfunction.
+58Effect of ablation fraction on model outputs
+Setting: ResNet-10 trained on CIFAR-10 Setting: ResNet-10 trained on CIFAR-10
+1.0
+0.8 0.8
+0.6
+0.6
+0.4 0.4
+0.2 0.2
+0.0 0.0
+0.01 0.05 0.1 0.15 0.01 0.05 0.1 0.15
+Ablation fraction Ablation fraction
+Setting: ResNet-50 trained on ImageNet Setting: ResNet-50 trained on ImageNet
+0.6 0.8
+0.6
+0.4
+0.4
+0.2
+0.2
+0.0 0.0
+0.01 0.025 0.05 0.1 0.01 0.025 0.05 0.1
+Ablation fraction Ablation fraction
+Setting: VIT-B/16 trained on ImageNet Setting: VIT-B/16 trained on ImageNet
+0.8 1.0
+0.8
+0.6
+0.6
+0.4
+0.4
+0.2
+0.2
+0.0 0.0
+0.01 0.025 0.05 0.1 0.01 0.025 0.05 0.1
+Ablation fraction Ablation fraction
+Setting: ResNet-10 trained on CIFAR-10 Setting: ResNet-10 trained on CIFAR-10
+with alternative ablation method with alternative ablation method
+1.0
+0.8 0.8
+0.6
+0.6
+0.4 0.4
+0.2 0.2
+0.0 0.0
+0.05 0.1 0.15 0.2 0.25 0.3 0.05 0.1 0.15 0.2 0.25 0.3
+Ablation fraction Ablation fraction
+Figure 25: Effect of ablation fraction α on model outputs. We evaluate the effect of ablating α-
+fractionsubsets C′ ⊂ C ofcomponents(x-axis)onmodelaccuracy(y-axisintheleftcolumn)and
+thecorrelationbetweenmodeloutputsbeforeandafterablation(y-axisintherightcolumn). Inall
+settingsconsideredinSection4(oneperrow),wefindthatmodelaccuracyandmargincorrelation
+graduallydecreaseastheablationfractionαincreases. SeeAppendixE.1formoredetails.
+59
+ycarucca
+ledoM
+ycarucca
+ledoM
+ycarucca
+ledoM
+ycarucca
+ledoM
+noitalerroc
+nigraM
+noitalerroc
+nigraM
+noitalerroc
+nigraM
+noitalerroc
+nigraMEvaluating COAR attributions | CIFAR-10 ResNet-18 | Alternative ablation method
+0.8
+0.6
+0.4
+0.2
+0.0
+0.01 0.03 0.05 0.10 0.15 0.20* 0.25 0.30 0.35 0.40
+Ablation fraction
+Figure26: EffectofablationmethodonCOARattributions. WeestimateCOARattributionsfora
+CIFAR-10ResNet-18modelusinganalternativeablationmethodthatscalesdowntheactivations
+ofasubsetofcomponentsC′ ⊂ C byafactorofγ(0.5inthiscase)insteadofsettingthemtozero.
+Theresultingattribution-derivedestimates(4)exhibithighcorrelation(y-axis)withground-truth
+componentcounterfactuals. SeeAppendixE.2formoredetails.
+Effect of ablation method | CIFAR-10 ResNet-18
+Comparing CIFAR-10 attributions Predicting 0x-ablation counterfactuals
+corresp. to 0x and 0.5x ablation methods using 0.5x-ablation attributions
+120 0.7
+0.6
+100
+0.5
+80
+0.4
+60
+0.3
+40
+0.2
+20 0.1
+0 0.0
+0.50 0.55 0.60 0.65 0.70 0.75 0.80 0.01 0.03 0.05 0.10 0.15
+Cosine similarity Ablation fraction
+Figure 27: Comparing COAR attributions estimated with different ablation methods. We
+compare COAR attributions on a CIFAR-10 ResNet18 model computed with the zero-ablation
+method Remark 2 to attributions computed with the alternative ablation method described in
+Appendix E.2. The left plot shows that the paired attributions (corresponding to each example)
+exhibithighcosinesimilarity. Therightplotshowsthatthecounterfactualestimates(4)computed
+usingattributionsfromthealternativeablationmethodarepredictiveofground-truthcomponent
+counterfactualscomputedusingthezeroablationmethod. SeeAppendixE.2formoredetails.
+60
+noitalerroC
+tnuoC
+noitalerroC61

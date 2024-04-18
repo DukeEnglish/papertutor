@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10774v1 |
-|title| MiniCheck: Efficient Fact-Checking of LLMs on Grounding Documents |
-|authors| Liyan TangPhilippe LabanGreg Durrett
-|links| http://arxiv.org/abs/2404.10774v1 |
-|updated| 2024-04-16 17:59:10 UTC |
-|summary| Recognizing if LLM output can be grounded in evidence is central to manytasks in NLP: retrieval-augmented generation summarization document-groundeddialogue and more. Current approaches to this kind of fact-checking arebased on verifying each piece of a model generation against potential evidenceusing an LLM. However this process can be very computationally expensiverequiring many calls to LLMs to check a single response. In this work we showhow to build small models that have GPT-4-level performance but for 400x lowercost. We do this by constructing synthetic training data with GPT-4 whichinvolves creating realistic yet challenging instances of factual errors via astructured generation procedure. Training on this data teaches models to checkeach fact in the claim and recognize synthesis of information across sentences.For evaluation we unify pre-existing datasets into a benchmark LLM-AggreFactcollected from recent work on fact-checking and grounding LLM generations. Ourbest system MiniCheck-FT5 770M parameters outperforms all systems ofcomparable size and reaches GPT-4 accuracy. We release LLM-AggreFact code fordata synthesis and models. |
+|idx| 2404.11588v1 |
+|title| Related Work and Citation Text Generation: A Survey |
+|authors| Xiangci LiJessica Ouyang
+|links| http://arxiv.org/abs/2404.11588v1 |
+|updated| 2024-04-17 17:37:30 UTC |
+|summary| To convince readers of the novelty of their research paper authors mustperform a literature review and compose a coherent story that connects andrelates prior works to the current work. This challenging nature of literaturereview writing makes automatic related work generation RWG academically andcomputationally interesting and also makes it an excellent test bed forexamining the capability of SOTA natural language processing NLP models.Since the initial proposal of the RWG task its popularity has waxed and wanedfollowing the capabilities of mainstream NLP approaches. In this work wesurvey the zoo of RWG historical works summarizing the key approaches and taskdefinitions and discussing the ongoing challenges of RWG. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10763v1 |
-|title| LaDiC: Are Diffusion Models Really Inferior to Autoregressive Counterparts for Image-to-Text Generation? |
-|authors| Yuchi WangShuhuai RenRundong GaoLinli YaoQingyan GuoKaikai AnJianhong BaiXu Sun
-|links| http://arxiv.org/abs/2404.10763v1 |
-|updated| 2024-04-16 17:47:16 UTC |
-|summary| Diffusion models have exhibited remarkable capabilities in text-to-imagegeneration. However their performance in image-to-text generationspecifically image captioning has lagged behind Auto-Regressive AR modelscasting doubt on their applicability for such tasks. In this work we revisitdiffusion models highlighting their capacity for holistic context modeling andparallel decoding. With these benefits diffusion models can alleviate theinherent limitations of AR methods including their slow inference speed errorpropagation and unidirectional constraints. Furthermore we identify the priorunderperformance of diffusion models stemming from the absence of an effectivelatent space for image-text alignment and the discrepancy between continuousdiffusion processes and discrete textual data. In response we introduce anovel architecture LaDiC which utilizes a split BERT to create a dedicatedlatent space for captions and integrates a regularization module to managevarying text lengths. Our framework also includes a diffuser for semanticimage-to-text conversion and a BackRefine technique to enhance tokeninteractivity during inference. LaDiC achieves state-of-the-art performance fordiffusion-based methods on the MS COCO dataset with 38.2 BLEU4 and 126.2CIDEr demonstrating exceptional performance without pre-training or ancillarymodules. This indicates strong competitiveness with AR models revealing thepreviously untapped potential of diffusion models in image-to-text generation. |
+|idx| 2404.11584v1 |
+|title| The Landscape of Emerging AI Agent Architectures for Reasoning, Planning, and Tool Calling: A Survey |
+|authors| Tula MastermanSandi BesenMason SawtellAlex Chao
+|links| http://arxiv.org/abs/2404.11584v1 |
+|updated| 2024-04-17 17:32:41 UTC |
+|summary| This survey paper examines the recent advancements in AI agentimplementations with a focus on their ability to achieve complex goals thatrequire enhanced reasoning planning and tool execution capabilities. Theprimary objectives of this work are to a communicate the current capabilitiesand limitations of existing AI agent implementations b share insights gainedfrom our observations of these systems in action and c suggest importantconsiderations for future developments in AI agent design. We achieve this byproviding overviews of single-agent and multi-agent architectures identifyingkey patterns and divergences in design choices and evaluating their overallimpact on accomplishing a provided goal. Our contribution outlines key themeswhen selecting an agentic architecture the impact of leadership on agentsystems agent communication styles and key phases for planning executionand reflection that enable robust AI agent systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10757v1 |
-|title| Deep Learning and LLM-based Methods Applied to Stellar Lightcurve Classification |
-|authors| Yu-Yang LiYu BaiCunshi WangMengwei QuZiteng LuRoberto SoriaJifeng Liu
-|links| http://arxiv.org/abs/2404.10757v1 |
-|updated| 2024-04-16 17:35:25 UTC |
-|summary| Light curves serve as a valuable source of information on stellar formationand evolution. With the rapid advancement of machine learning techniques itcan be effectively processed to extract astronomical patterns and information.In this study we present a comprehensive evaluation of deep-learning and largelanguage model LLM based models for the automatic classification of variablestar light curves based on large datasets from the Kepler and K2 missions.Special emphasis is placed on Cepheids RR Lyrae and eclipsing binariesexamining the influence of observational cadence and phase distribution onclassification precision. Employing AutoDL optimization we achieve strikingperformance with the 1D-ConvolutionBiLSTM architecture and the SwinTransformer hitting accuracies of 94 and 99 correspondingly with thelatter demonstrating a notable 83 accuracy in discerning the elusive Type IICepheids-comprising merely 0.02 of the total dataset.We unveil StarWhisperLightCurve LC an innovative Series comprising three LLM-based models: LLMmultimodal large language model MLLM and Large Audio Language Model LALM.Each model is fine-tuned with strategic prompt engineering and customizedtraining methods to explore the emergent abilities of these models forastronomical data. Remarkably StarWhisper LC Series exhibit high accuraciesaround 90 significantly reducing the need for explicit feature engineeringthereby paving the way for streamlined parallel data processing and theprogression of multifaceted multimodal models in astronomical applications. Thestudy furnishes two detailed catalogs illustrating the impacts of phase andsampling intervals on deep learning classification accuracy showing that asubstantial decrease of up to 14 in observation duration and 21 in samplingpoints can be realized without compromising accuracy by more than 10. |
+|idx| 2404.11553v1 |
+|title| Quantifying Multilingual Performance of Large Language Models Across Languages |
+|authors| Zihao LiYucheng ShiZirui LiuFan YangNinghao LiuMengnan Du
+|links| http://arxiv.org/abs/2404.11553v1 |
+|updated| 2024-04-17 16:53:16 UTC |
+|summary| The training process of Large Language Models LLMs requires extensive textcorpus. However these data are often unevenly distributed in differentlanguages. As a result LLMs perform well on common languages such as EnglishGerman and French but perform poorly on low-resource languages. Howevercurrently there is no work to quantitatively measure the performance of LLMs inlow-resource languages. To fill this gap we proposed the Language Ranker thataims to benchmark and rank different languages according to the performance ofLLMs on those languages. We employ the LLMs performance on the English corpusas a baseline to compare the performances of different languages and English.We have the following three findings: 1. The performance rankings of differentLLMs in all languages are roughly the same. 2. LLMs with different sizes havethe same partial order of performance. 3. There is a strong correlation betweenLlaMa2s performance in different languages and the proportion of thepre-training corpus. These findings illustrate that the Language Ranker can beused as an indicator to measure the language performance of LLMs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10719v1 |
-|title| Is DPO Superior to PPO for LLM Alignment? A Comprehensive Study |
-|authors| Shusheng XuWei FuJiaxuan GaoWenjie YeWeilin LiuZhiyu MeiGuangju WangChao YuYi Wu
-|links| http://arxiv.org/abs/2404.10719v1 |
-|updated| 2024-04-16 16:51:53 UTC |
-|summary| Reinforcement Learning from Human Feedback RLHF is currently the mostwidely used method to align large language models LLMs with humanpreferences. Existing RLHF methods can be roughly categorized as eitherreward-based or reward-free. Novel applications such as ChatGPT and Claudeleverage reward-based methods that first learn a reward model and applyactor-critic algorithms such as Proximal Policy Optimization PPO. Howeverin academic benchmarks state-of-the-art results are often achieved viareward-free methods such as Direct Preference Optimization DPO. Is DPO trulysuperior to PPO Why does PPO perform poorly on these benchmarks In thispaper we first conduct both theoretical and empirical studies on thealgorithmic properties of DPO and show that DPO may have fundamentallimitations. Moreover we also comprehensively examine PPO and reveal the keyfactors for the best performances of PPO in fine-tuning LLMs. Finally webenchmark DPO and PPO across various a collection of RLHF testbeds rangingfrom dialogue to code generation. Experiment results demonstrate that PPO isable to surpass other alignment methods in all cases and achievestate-of-the-art results in challenging code competitions. |
+|idx| 2404.11539v1 |
+|title| Evaluating Span Extraction in Generative Paradigm: A Reflection on Aspect-Based Sentiment Analysis |
+|authors| Soyoung YangWon Ik Cho
+|links| http://arxiv.org/abs/2404.11539v1 |
+|updated| 2024-04-17 16:33:22 UTC |
+|summary| In the era of rapid evolution of generative language models within the realmof natural language processing there is an imperative call to revisit andreformulate evaluation methodologies especially in the domain of aspect-basedsentiment analysis ABSA. This paper addresses the emerging challengesintroduced by the generative paradigm which has moderately blurred traditionalboundaries between understanding and generation tasks. Building upon prevailingpractices in the field we analyze the advantages and shortcomings associatedwith the prevalent ABSA evaluation paradigms. Through an in-depth examinationsupplemented by illustrative examples we highlight the intricacies involved inaligning generative outputs with other evaluative metrics specifically thosederived from other tasks including question answering. While we steer clear ofadvocating for a singular and definitive metric our contribution lies inpaving the path for a comprehensive guideline tailored for ABSA evaluations inthis generative paradigm. In this position paper we aim to providepractitioners with profound reflections offering insights and directions thatcan aid in navigating this evolving landscape ensuring evaluations that areboth accurate and reflective of generative capabilities. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10710v1 |
-|title| Dual Modalities of Text: Visual and Textual Generative Pre-training |
-|authors| Yekun ChaiQingyi LiuJingwu XiaoShuohuan WangYu SunHua Wu
-|links| http://arxiv.org/abs/2404.10710v1 |
-|updated| 2024-04-16 16:36:50 UTC |
-|summary| Harnessing visual texts represents a burgeoning frontier in the evolution oflanguage modeling. In this paper we introduce a novel pre-training frameworkfor a suite of pixel-based autoregressive language models pre-training on acorpus of over 400 million documents rendered as RGB images. Our approach ischaracterized by a dual-modality training regimen engaging both visual datathrough next patch prediction with a regression head and textual data via nexttoken prediction with a classification head. This study is particularly focusedon investigating the synergistic interplay between visual and textualmodalities of language. Our comprehensive evaluation across a diverse array ofbenchmarks reveals that the confluence of visual and textual data substantiallyaugments the efficacy of pixel-based language models. Notably our findingsshow that a unidirectional pixel-based model devoid of textual data duringtraining can match the performance levels of advanced bidirectionalpixel-based models on various language understanding benchmarks. This workhighlights the considerable untapped potential of integrating visual andtextual information for language modeling purposes. We will release our codedata and checkpoints to inspire further research advancement. |
+|idx| 2404.11538v1 |
+|title| GenFighter: A Generative and Evolutive Textual Attack Removal |
+|authors| Md Athikul IslamEdoardo SerraSushil Jajodia
+|links| http://arxiv.org/abs/2404.11538v1 |
+|updated| 2024-04-17 16:32:13 UTC |
+|summary| Adversarial attacks pose significant challenges to deep neural networksDNNs such as Transformer models in natural language processing NLP. Thispaper introduces a novel defense strategy called GenFighter which enhancesadversarial robustness by learning and reasoning on the training classificationdistribution. GenFighter identifies potentially malicious instances deviatingfrom the distribution transforms them into semantically equivalent instancesaligned with the training data and employs ensemble techniques for a unifiedand robust response. By conducting extensive experiments we show thatGenFighter outperforms state-of-the-art defenses in accuracy under attack andattack success rate metrics. Additionally it requires a high number of queriesper attack making the attack more challenging in real scenarios. The ablationstudy shows that our approach integrates transfer learning agenerative/evolutive procedure and an ensemble method providing an effectivedefense against NLP adversarial attacks. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10775v1 |
-|title| COMBO: Compositional World Models for Embodied Multi-Agent Cooperation |
-|authors| Hongxin ZhangZeyuan WangQiushi LyuZheyuan ZhangSunli ChenTianmin ShuYilun DuChuang Gan
-|links| http://arxiv.org/abs/2404.10775v1 |
-|updated| 2024-04-16 17:59:11 UTC |
-|summary| In this paper we investigate the problem of embodied multi-agentcooperation where decentralized agents must cooperate given only partialegocentric views of the world. To effectively plan in this setting in contrastto learning world dynamics in a single-agent scenario we must simulate worlddynamics conditioned on an arbitrary number of agents actions given onlypartial egocentric visual observations of the world. To address this issue ofpartial observability we first train generative models to estimate the overallworld state given partial egocentric observations. To enable accuratesimulation of multiple sets of actions on this world state we then propose tolearn a compositional world model for multi-agent cooperation by factorizingthe naturally composable joint actions of multiple agents and compositionallygenerating the video. By leveraging this compositional world model incombination with Vision Language Models to infer the actions of other agentswe can use a tree search procedure to integrate these modules and facilitateonline cooperative planning. To evaluate the efficacy of our methods we createtwo challenging embodied multi-agent long-horizon cooperation tasks using theThreeDWorld simulator and conduct experiments with 2-4 agents. The results showour compositional world model is effective and the framework enables theembodied agents to cooperate efficiently with different agents across varioustasks and an arbitrary number of agents showing the promising future of ourproposed framework. More videos can be found athttps://vis-www.cs.umass.edu/combo/. |
+|idx| 2404.11606v1 |
+|title| Learning to Solve the Constrained Most Probable Explanation Task in Probabilistic Graphical Models |
+|authors| Shivvrat AryaTahrima RahmanVibhav Gogate
+|links| http://arxiv.org/abs/2404.11606v1 |
+|updated| 2024-04-17 17:55:17 UTC |
+|summary| We propose a self-supervised learning approach for solving the followingconstrained optimization task in log-linear models or Markov networks. Let fand g be two log-linear models defined over the sets mathbfX andmathbfY of random variables respectively. Given an assignment mathbfxto all variables in mathbfX evidence and a real number q theconstrained most-probable explanation CMPE task seeks to find an assignmentmathbfy to all variables in mathbfY such that fmathbfxmathbfy is maximized and gmathbfx mathbfyleq q. In ourproposed self-supervised approach given assignments mathbfx tomathbfX data we train a deep neural network that learns to outputnear-optimal solutions to the CMPE problem without requiring access to anypre-computed solutions. The key idea in our approach is to use first principlesand approximate inference methods for CMPE to derive novel loss functions thatseek to push infeasible solutions towards feasible ones and feasible solutionstowards optimal ones. We analyze the properties of our proposed method andexperimentally demonstrate its efficacy on several benchmark problems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10774v1 |
-|title| MiniCheck: Efficient Fact-Checking of LLMs on Grounding Documents |
-|authors| Liyan TangPhilippe LabanGreg Durrett
-|links| http://arxiv.org/abs/2404.10774v1 |
-|updated| 2024-04-16 17:59:10 UTC |
-|summary| Recognizing if LLM output can be grounded in evidence is central to manytasks in NLP: retrieval-augmented generation summarization document-groundeddialogue and more. Current approaches to this kind of fact-checking arebased on verifying each piece of a model generation against potential evidenceusing an LLM. However this process can be very computationally expensiverequiring many calls to LLMs to check a single response. In this work we showhow to build small models that have GPT-4-level performance but for 400x lowercost. We do this by constructing synthetic training data with GPT-4 whichinvolves creating realistic yet challenging instances of factual errors via astructured generation procedure. Training on this data teaches models to checkeach fact in the claim and recognize synthesis of information across sentences.For evaluation we unify pre-existing datasets into a benchmark LLM-AggreFactcollected from recent work on fact-checking and grounding LLM generations. Ourbest system MiniCheck-FT5 770M parameters outperforms all systems ofcomparable size and reaches GPT-4 accuracy. We release LLM-AggreFact code fordata synthesis and models. |
+|idx| 2404.11605v1 |
+|title| VG4D: Vision-Language Model Goes 4D Video Recognition |
+|authors| Zhichao DengXiangtai LiXia LiYunhai TongShen ZhaoMengyuan Liu
+|links| http://arxiv.org/abs/2404.11605v1 |
+|updated| 2024-04-17 17:54:49 UTC |
+|summary| Understanding the real world through point cloud video is a crucial aspect ofrobotics and autonomous driving systems. However prevailing methods for 4Dpoint cloud recognition have limitations due to sensor resolution which leadsto a lack of detailed information. Recent advances have shown thatVision-Language Models VLM pre-trained on web-scale text-image datasets canlearn fine-grained visual concepts that can be transferred to variousdownstream tasks. However effectively integrating VLM into the domain of 4Dpoint clouds remains an unresolved problem. In this work we propose theVision-Language Models Goes 4D VG4D framework to transfer VLM knowledge fromvisual-text pre-trained models to a 4D point cloud network. Our approachinvolves aligning the 4D encoders representation with a VLM to learn a sharedvisual and text space from training on large-scale image-text pairs. Bytransferring the knowledge of the VLM to the 4D encoder and combining the VLMour VG4D achieves improved recognition performance. To enhance the 4D encoderwe modernize the classic dynamic point cloud backbone and propose an improvedversion of PSTNet im-PSTNet which can efficiently model point cloud videos.Experiments demonstrate that our method achieves state-of-the-art performancefor action recognition on both the NTU RGBD 60 dataset and the NTU RGBD 120dataset. Code is available at urlhttps://github.com/Shark0-0/VG4D. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10763v1 |
-|title| LaDiC: Are Diffusion Models Really Inferior to Autoregressive Counterparts for Image-to-Text Generation? |
-|authors| Yuchi WangShuhuai RenRundong GaoLinli YaoQingyan GuoKaikai AnJianhong BaiXu Sun
-|links| http://arxiv.org/abs/2404.10763v1 |
-|updated| 2024-04-16 17:47:16 UTC |
-|summary| Diffusion models have exhibited remarkable capabilities in text-to-imagegeneration. However their performance in image-to-text generationspecifically image captioning has lagged behind Auto-Regressive AR modelscasting doubt on their applicability for such tasks. In this work we revisitdiffusion models highlighting their capacity for holistic context modeling andparallel decoding. With these benefits diffusion models can alleviate theinherent limitations of AR methods including their slow inference speed errorpropagation and unidirectional constraints. Furthermore we identify the priorunderperformance of diffusion models stemming from the absence of an effectivelatent space for image-text alignment and the discrepancy between continuousdiffusion processes and discrete textual data. In response we introduce anovel architecture LaDiC which utilizes a split BERT to create a dedicatedlatent space for captions and integrates a regularization module to managevarying text lengths. Our framework also includes a diffuser for semanticimage-to-text conversion and a BackRefine technique to enhance tokeninteractivity during inference. LaDiC achieves state-of-the-art performance fordiffusion-based methods on the MS COCO dataset with 38.2 BLEU4 and 126.2CIDEr demonstrating exceptional performance without pre-training or ancillarymodules. This indicates strong competitiveness with AR models revealing thepreviously untapped potential of diffusion models in image-to-text generation. |
+|idx| 2404.11597v1 |
+|title| Explainable Artificial Intelligence Techniques for Accurate Fault Detection and Diagnosis: A Review |
+|authors| Ahmed MagedSalah HaridyHerman Shen
+|links| http://arxiv.org/abs/2404.11597v1 |
+|updated| 2024-04-17 17:49:38 UTC |
+|summary| As the manufacturing industry advances with sensor integration andautomation the opaque nature of deep learning models in machine learning posesa significant challenge for fault detection and diagnosis. And despite therelated predictive insights Artificial Intelligence AI can deliver advancedmachine learning engines often remain a black box. This paper reviews theeXplainable AI XAI tools and techniques in this context. We explore variousXAI methodologies focusing on their role in making AI decision-makingtransparent particularly in critical scenarios where humans are involved. Wealso discuss current limitations and potential future research that aims tobalance explainability with model performance while improving trustworthinessin the context of AI applications for critical industrial use cases. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10740v1 |
-|title| N-Agent Ad Hoc Teamwork |
-|authors| Caroline WangArrasy RahmanIshan DurugkarElad LiebmanPeter Stone
-|links| http://arxiv.org/abs/2404.10740v1 |
-|updated| 2024-04-16 17:13:08 UTC |
-|summary| Current approaches to learning cooperative behaviors in multi-agent settingsassume relatively restrictive settings. In standard fully cooperativemulti-agent reinforcement learning the learning algorithm controlstextitall agents in the scenario while in ad hoc teamwork the learningalgorithm usually assumes control over only a textitsingle agent in thescenario. However many cooperative settings in the real world are much lessrestrictive. For example in an autonomous driving scenario a company mighttrain its cars with the same learning algorithm yet once on the road thesecars must cooperate with cars from another company. Towards generalizing theclass of scenarios that cooperative learning methods can address we introduceN-agent ad hoc teamwork in which a set of autonomous agents must interactand cooperate with dynamically varying numbers and types of teammates atevaluation time. This paper formalizes the problem and proposes thetextitPolicy Optimization with Agent Modelling POAM algorithm. POAM is apolicy gradient multi-agent reinforcement learning approach to the NAHTproblem that enables adaptation to diverse teammate behaviors by learningrepresentations of teammate behaviors. Empirical evaluation on StarCraft IItasks shows that POAM improves cooperative task returns compared to baselineapproaches and enables out-of-distribution generalization to unseen teammates. |
+|idx| 2404.11589v1 |
+|title| Prompt Optimizer of Text-to-Image Diffusion Models for Abstract Concept Understanding |
+|authors| Zezhong FanXiaohan LiChenhao FangTopojoy BiswasKaushiki NagJianpeng XuKannan Achan
+|links| http://dx.doi.org/10.1145/3589335.3651927 |
+|updated| 2024-04-17 17:38:56 UTC |
+|summary| The rapid evolution of text-to-image diffusion models has opened the door ofgenerative AI enabling the translation of textual descriptions into visuallycompelling images with remarkable quality. However a persistent challengewithin this domain is the optimization of prompts to effectively conveyabstract concepts into concrete objects. For example text encoders can hardlyexpress peace while can easily illustrate olive branches and white doves.This paper introduces a novel approach named Prompt Optimizer for AbstractConcepts POAC specifically designed to enhance the performance oftext-to-image diffusion models in interpreting and generating images fromabstract concepts. We propose a Prompt Language Model PLM which isinitialized from a pre-trained language model and then fine-tuned with acurated dataset of abstract concept prompts. The dataset is created with GPT-4to extend the abstract concept to a scene and concrete objects. Our frameworkemploys a Reinforcement Learning RL-based optimization strategy focusing onthe alignment between the generated images by a stable diffusion model andoptimized prompts. Through extensive experiments we demonstrate that ourproposed POAC significantly improves the accuracy and aesthetic quality ofgenerated images particularly in the description of abstract concepts andalignment with optimized prompts. We also present a comprehensive analysis ofour models performance across diffusion models under different settingsshowcasing its versatility and effectiveness in enhancing abstract conceptrepresentation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10733v1 |
-|title| Bootstrapping Linear Models for Fast Online Adaptation in Human-Agent Collaboration |
-|authors| Benjamin A NewmanChris PaxtonKris KitaniHenny Admoni
-|links| http://arxiv.org/abs/2404.10733v1 |
-|updated| 2024-04-16 17:05:43 UTC |
-|summary| Agents that assist people need to have well-initialized policies that canadapt quickly to align with their partners reward functions. Initializingpolicies to maximize performance with unknown partners can be achieved bybootstrapping nonlinear models using imitation learning over large offlinedatasets. Such policies can require prohibitive computation to fine-tunein-situ and therefore may miss critical run-time information about a partnersreward function as expressed through their immediate behavior. In contrastonline logistic regression using low-capacity models performs rapid inferenceand fine-tuning updates and thus can make effective use of immediate in-taskbehavior for reward function alignment. However these low-capacity modelscannot be bootstrapped as effectively by offline datasets and thus have poorinitializations. We propose BLR-HAC Bootstrapped Logistic Regression for HumanAgent Collaboration which bootstraps large nonlinear models to learn theparameters of a low-capacity model which then uses online logistic regressionfor updates during collaboration. We test BLR-HAC in a simulated surfacerearrangement task and demonstrate that it achieves higher zero-shot accuracythan shallow methods and takes far less computation to adapt online while stillachieving similar performance to fine-tuned large nonlinear models. For codeplease see our project page https://sites.google.com/view/blr-hac. |
+|idx| 2404.11585v1 |
+|title| Spatial Context-based Self-Supervised Learning for Handwritten Text Recognition |
+|authors| Carlos PenarrubiaCarlos Garrido-MunozJose J. Valero-MasJorge Calvo-Zaragoza
+|links| http://arxiv.org/abs/2404.11585v1 |
+|updated| 2024-04-17 17:33:32 UTC |
+|summary| Handwritten Text Recognition HTR is a relevant problem in computer visionand implies unique challenges owing to its inherent variability and the richcontextualization required for its interpretation. Despite the success ofSelf-Supervised Learning SSL in computer vision its application to HTR hasbeen rather scattered leaving key SSL methodologies unexplored. This workfocuses on one of them namely Spatial Context-based SSL. We investigate howthis family of approaches can be adapted and optimized for HTR and propose newworkflows that leverage the unique features of handwritten text. Ourexperiments demonstrate that the methods considered lead to advancements in thestate-of-the-art of SSL for HTR in a number of benchmark cases. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10776v1 |
-|title| Nearly Optimal Algorithms for Contextual Dueling Bandits from Adversarial Feedback |
-|authors| Qiwei DiJiafan HeQuanquan Gu
-|links| http://arxiv.org/abs/2404.10776v1 |
-|updated| 2024-04-16 17:59:55 UTC |
-|summary| Learning from human feedback plays an important role in aligning generativemodels such as large language models LLM. However the effectiveness of thisapproach can be influenced by adversaries who may intentionally providemisleading preferences to manipulate the output in an undesirable or harmfuldirection. To tackle this challenge we study a specific model within thisproblem domain--contextual dueling bandits with adversarial feedback where thetrue preference label can be flipped by an adversary. We propose an algorithmnamely robust contextual dueling bandit algo which is based onuncertainty-weighted maximum likelihood estimation. Our algorithm achieves antilde OdsqrtTdC regret bound where T is the number of rounds dis the dimension of the context and  0 le C le T is the total number ofadversarial feedback. We also prove a lower bound to show that our regret boundis nearly optimal both in scenarios with and without C0 adversarialfeedback. Additionally we conduct experiments to evaluate our proposedalgorithm against various types of adversarial feedback. Experimental resultsdemonstrate its superiority over the state-of-the-art dueling bandit algorithmsin the presence of adversarial feedback. |
+|idx| 2404.11606v1 |
+|title| Learning to Solve the Constrained Most Probable Explanation Task in Probabilistic Graphical Models |
+|authors| Shivvrat AryaTahrima RahmanVibhav Gogate
+|links| http://arxiv.org/abs/2404.11606v1 |
+|updated| 2024-04-17 17:55:17 UTC |
+|summary| We propose a self-supervised learning approach for solving the followingconstrained optimization task in log-linear models or Markov networks. Let fand g be two log-linear models defined over the sets mathbfX andmathbfY of random variables respectively. Given an assignment mathbfxto all variables in mathbfX evidence and a real number q theconstrained most-probable explanation CMPE task seeks to find an assignmentmathbfy to all variables in mathbfY such that fmathbfxmathbfy is maximized and gmathbfx mathbfyleq q. In ourproposed self-supervised approach given assignments mathbfx tomathbfX data we train a deep neural network that learns to outputnear-optimal solutions to the CMPE problem without requiring access to anypre-computed solutions. The key idea in our approach is to use first principlesand approximate inference methods for CMPE to derive novel loss functions thatseek to push infeasible solutions towards feasible ones and feasible solutionstowards optimal ones. We analyze the properties of our proposed method andexperimentally demonstrate its efficacy on several benchmark problems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10771v1 |
-|title| TENG: Time-Evolving Natural Gradient for Solving PDEs with Deep Neural Net |
-|authors| Zhuo ChenJacob McCarranEsteban VizcainoMarin SoljačićDi Luo
-|links| http://arxiv.org/abs/2404.10771v1 |
-|updated| 2024-04-16 17:55:31 UTC |
-|summary| Partial differential equations PDEs are instrumental for modeling dynamicalsystems in science and engineering. The advent of neural networks has initiateda significant shift in tackling these complexities though challenges inaccuracy persist especially for initial value problems. In this paper weintroduce the textitTime-Evolving Natural Gradient TENG generalizingtime-dependent variational principles and optimization-based time integrationleveraging natural gradient optimization to obtain high accuracy inneural-network-based PDE solutions. Our comprehensive development includesalgorithms like TENG-Euler and its high-order variants such as TENG-Heuntailored for enhanced precision and efficiency. TENGs effectiveness is furthervalidated through its performance surpassing current leading methods andachieving machine precision in step-by-step optimizations across a spectrum ofPDEs including the heat equation Allen-Cahn equation and Burgers equation. |
+|idx| 2404.11599v1 |
+|title| Variational Bayesian Last Layers |
+|authors| James HarrisonJohn WillesJasper Snoek
+|links| http://arxiv.org/abs/2404.11599v1 |
+|updated| 2024-04-17 17:50:24 UTC |
+|summary| We introduce a deterministic variational formulation for training Bayesianlast layer neural networks. This yields a sampling-free single-pass model andloss that effectively improves uncertainty estimation. Our variational Bayesianlast layer VBLL can be trained and evaluated with only quadratic complexityin last layer width and is thus nearly computationally free to add tostandard architectures. We experimentally investigate VBLLs and show that theyimprove predictive accuracy calibration and out of distribution detectionover baselines across both regression and classification. Finally weinvestigate combining VBLL layers with variational Bayesian feature learningyielding a lower variance collapsed variational inference method for Bayesianneural networks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10769v1 |
-|title| Finite-dimensional approximations of push-forwards on locally analytic functionals and truncation of least-squares polynomials |
-|authors| Isao Ishikawa
-|links| http://arxiv.org/abs/2404.10769v1 |
-|updated| 2024-04-16 17:53:59 UTC |
-|summary| This paper introduces a theoretical framework for investigating analytic mapsfrom finite discrete data elucidating mathematical machinery underlying thepolynomial approximation with least-squares in multivariate situations. Ourapproach is to consider the push-forward on the space of locally analyticfunctionals instead of directly handling the analytic map itself. We establisha methodology enabling appropriate finite-dimensional approximation of thepush-forward from finite discrete data through the theory of theFourier--Borel transform and the Fock space. Moreover we prove a rigorousconvergence result with a convergence rate. As an application we prove that itis not the least-squares polynomial but the polynomial obtained by truncatingits higher-degree terms that approximates analytic functions and furtherallows for approximation beyond the support of the data distribution. Oneadvantage of our theory is that it enables us to apply linear algebraicoperations to the finite-dimensional approximation of the push-forward.Utilizing this we prove the convergence of a method for approximating ananalytic vector field from finite data of the flow map of an ordinarydifferential equation. |
+|idx| 2404.11597v1 |
+|title| Explainable Artificial Intelligence Techniques for Accurate Fault Detection and Diagnosis: A Review |
+|authors| Ahmed MagedSalah HaridyHerman Shen
+|links| http://arxiv.org/abs/2404.11597v1 |
+|updated| 2024-04-17 17:49:38 UTC |
+|summary| As the manufacturing industry advances with sensor integration andautomation the opaque nature of deep learning models in machine learning posesa significant challenge for fault detection and diagnosis. And despite therelated predictive insights Artificial Intelligence AI can deliver advancedmachine learning engines often remain a black box. This paper reviews theeXplainable AI XAI tools and techniques in this context. We explore variousXAI methodologies focusing on their role in making AI decision-makingtransparent particularly in critical scenarios where humans are involved. Wealso discuss current limitations and potential future research that aims tobalance explainability with model performance while improving trustworthinessin the context of AI applications for critical industrial use cases. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10764v1 |
-|title| Confidential Federated Computations |
-|authors| Hubert EichnerDaniel RamageKallista BonawitzDzmitry HubaTiziano SantoroBrett McLarnonTimon Van OverveldtNova FallenPeter KairouzAlbert CheuKatharine DalyAdria GasconMarco GruteserBrendan McMahan
-|links| http://arxiv.org/abs/2404.10764v1 |
-|updated| 2024-04-16 17:47:27 UTC |
-|summary| Federated Learning and Analytics FLA have seen widespread adoption bytechnology platforms for processing sensitive on-device data. However basicFLA systems have privacy limitations: they do not necessarily requireanonymization mechanisms like differential privacy DP and provide limitedprotections against a potentially malicious service provider. Adding DP to abasic FLA system currently requires either adding excessive noise to eachdevices updates or assuming an honest service provider that correctlyimplements the mechanism and only uses the privatized outputs. Securemultiparty computation SMPC -based oblivious aggregations can limit theservice providers access to individual user updates and improve DP tradeoffsbut the tradeoffs are still suboptimal and they suffer from scalabilitychallenges and susceptibility to Sybil attacks. This paper introduces a novelsystem architecture that leverages trusted execution environments TEEs andopen-sourcing to both ensure confidentiality of server-side computations andprovide externally verifiable privacy properties bolstering the robustness andtrustworthiness of private federated computations. |
+|idx| 2404.11589v1 |
+|title| Prompt Optimizer of Text-to-Image Diffusion Models for Abstract Concept Understanding |
+|authors| Zezhong FanXiaohan LiChenhao FangTopojoy BiswasKaushiki NagJianpeng XuKannan Achan
+|links| http://dx.doi.org/10.1145/3589335.3651927 |
+|updated| 2024-04-17 17:38:56 UTC |
+|summary| The rapid evolution of text-to-image diffusion models has opened the door ofgenerative AI enabling the translation of textual descriptions into visuallycompelling images with remarkable quality. However a persistent challengewithin this domain is the optimization of prompts to effectively conveyabstract concepts into concrete objects. For example text encoders can hardlyexpress peace while can easily illustrate olive branches and white doves.This paper introduces a novel approach named Prompt Optimizer for AbstractConcepts POAC specifically designed to enhance the performance oftext-to-image diffusion models in interpreting and generating images fromabstract concepts. We propose a Prompt Language Model PLM which isinitialized from a pre-trained language model and then fine-tuned with acurated dataset of abstract concept prompts. The dataset is created with GPT-4to extend the abstract concept to a scene and concrete objects. Our frameworkemploys a Reinforcement Learning RL-based optimization strategy focusing onthe alignment between the generated images by a stable diffusion model andoptimized prompts. Through extensive experiments we demonstrate that ourproposed POAC significantly improves the accuracy and aesthetic quality ofgenerated images particularly in the description of abstract concepts andalignment with optimized prompts. We also present a comprehensive analysis ofour models performance across diffusion models under different settingsshowcasing its versatility and effectiveness in enhancing abstract conceptrepresentation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10761v1 |
-|title| TorchSurv: A Lightweight Package for Deep Survival Analysis |
-|authors| Melodie MonodPeter KruscheQian CaoBerkman SahinerNicholas PetrickDavid OhlssenThibaud Coroller
-|links| http://arxiv.org/abs/2404.10761v1 |
-|updated| 2024-04-16 17:41:17 UTC |
-|summary| TorchSurv is a Python package that serves as a companion tool to perform deepsurvival modeling within the PyTorch environment. Unlike existing librariesthat impose specific parametric forms TorchSurv enables the use of customPyTorch-based deep survival mod- els. With its lightweight design minimalinput requirements full PyTorch backend and freedom from restrictive survivalmodel parameterizations TorchSurv facilitates efficient deep survival modelimplementation and is particularly beneficial for high-dimensional and complexinput data scenarios |
+|idx| 2404.11578v1 |
+|title| Deep Policy Optimization with Temporal Logic Constraints |
+|authors| Ameesh ShahCameron VoloshinChenxi YangAbhinav VermaSwarat ChaudhuriSanjit A. Seshia
+|links| http://arxiv.org/abs/2404.11578v1 |
+|updated| 2024-04-17 17:24:44 UTC |
+|summary| Temporal logics such as linear temporal logic LTL offer a precise meansof specifying tasks for deep reinforcement learning RL agents. In our workwe consider the setting where the task is specified by an LTL objective andthere is an additional scalar reward that we need to optimize. Previous worksfocus either on learning a LTL task-satisfying policy alone or are restrictedto finite state spaces. We make two contributions: First we introduce anRL-friendly approach to this setting by formulating this problem as a singleoptimization objective. Our formulation guarantees that an optimal policy willbe reward-maximal from the set of policies that maximize the likelihood ofsatisfying the LTL specification. Second we address a sparsity issue thatoften arises for LTL-guided Deep RL policies by introducing Cycle ExperienceReplay CyclER a technique that automatically guides RL agents towards thesatisfaction of an LTL specification. Our experiments demonstrate the efficacyof CyclER in finding performant deep RL policies in both continuous anddiscrete experimental domains. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10775v1 |
-|title| COMBO: Compositional World Models for Embodied Multi-Agent Cooperation |
-|authors| Hongxin ZhangZeyuan WangQiushi LyuZheyuan ZhangSunli ChenTianmin ShuYilun DuChuang Gan
-|links| http://arxiv.org/abs/2404.10775v1 |
-|updated| 2024-04-16 17:59:11 UTC |
-|summary| In this paper we investigate the problem of embodied multi-agentcooperation where decentralized agents must cooperate given only partialegocentric views of the world. To effectively plan in this setting in contrastto learning world dynamics in a single-agent scenario we must simulate worlddynamics conditioned on an arbitrary number of agents actions given onlypartial egocentric visual observations of the world. To address this issue ofpartial observability we first train generative models to estimate the overallworld state given partial egocentric observations. To enable accuratesimulation of multiple sets of actions on this world state we then propose tolearn a compositional world model for multi-agent cooperation by factorizingthe naturally composable joint actions of multiple agents and compositionallygenerating the video. By leveraging this compositional world model incombination with Vision Language Models to infer the actions of other agentswe can use a tree search procedure to integrate these modules and facilitateonline cooperative planning. To evaluate the efficacy of our methods we createtwo challenging embodied multi-agent long-horizon cooperation tasks using theThreeDWorld simulator and conduct experiments with 2-4 agents. The results showour compositional world model is effective and the framework enables theembodied agents to cooperate efficiently with different agents across varioustasks and an arbitrary number of agents showing the promising future of ourproposed framework. More videos can be found athttps://vis-www.cs.umass.edu/combo/. |
+|idx| 2404.11615v1 |
+|title| Factorized Diffusion: Perceptual Illusions by Noise Decomposition |
+|authors| Daniel GengInbum ParkAndrew Owens
+|links| http://arxiv.org/abs/2404.11615v1 |
+|updated| 2024-04-17 17:59:59 UTC |
+|summary| Given a factorization of an image into a sum of linear components we presenta zero-shot method to control each individual component through diffusion modelsampling. For example we can decompose an image into low and high spatialfrequencies and condition these components on different text prompts. Thisproduces hybrid images which change appearance depending on viewing distance.By decomposing an image into three frequency subbands we can generate hybridimages with three prompts. We also use a decomposition into grayscale and colorcomponents to produce images whose appearance changes when they are viewed ingrayscale a phenomena that naturally occurs under dim lighting. And we explorea decomposition by a motion blur kernel which produces images that changeappearance under motion blurring. Our method works by denoising with acomposite noise estimate built from the components of noise estimatesconditioned on different prompts. We also show that for certain decompositionsour method recovers prior approaches to compositional generation and spatialcontrol. Finally we show that we can extend our approach to generate hybridimages from real images. We do this by holding one component fixed andgenerating the remaining components effectively solving an inverse problem. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10772v1 |
-|title| Gaussian Opacity Fields: Efficient and Compact Surface Reconstruction in Unbounded Scenes |
-|authors| Zehao YuTorsten SattlerAndreas Geiger
-|links| http://arxiv.org/abs/2404.10772v1 |
-|updated| 2024-04-16 17:57:19 UTC |
-|summary| Recently 3D Gaussian Splatting 3DGS has demonstrated impressive novel viewsynthesis results while allowing the rendering of high-resolution images inreal-time. However leveraging 3D Gaussians for surface reconstruction posessignificant challenges due to the explicit and disconnected nature of 3DGaussians. In this work we present Gaussian Opacity Fields GOF a novelapproach for efficient high-quality and compact surface reconstruction inunbounded scenes. Our GOF is derived from ray-tracing-based volume rendering of3D Gaussians enabling direct geometry extraction from 3D Gaussians byidentifying its levelset without resorting to Poisson reconstruction or TSDFfusion as in previous work. We approximate the surface normal of Gaussians asthe normal of the ray-Gaussian intersection plane enabling the application ofregularization that significantly enhances geometry. Furthermore we develop anefficient geometry extraction method utilizing marching tetrahedra where thetetrahedral grids are induced from 3D Gaussians and thus adapt to the scenescomplexity. Our evaluations reveal that GOF surpasses existing 3DGS-basedmethods in surface reconstruction and novel view synthesis. Further itcompares favorably to or even outperforms neural implicit methods in bothquality and speed. |
+|idx| 2404.11614v1 |
+|title| Dynamic Typography: Bringing Words to Life |
+|authors| Zichen LiuYihao MengHao OuyangYue YuBolin ZhaoDaniel Cohen-OrHuamin Qu
+|links| http://arxiv.org/abs/2404.11614v1 |
+|updated| 2024-04-17 17:59:55 UTC |
+|summary| Text animation serves as an expressive medium transforming staticcommunication into dynamic experiences by infusing words with motion to evokeemotions emphasize meanings and construct compelling narratives. Craftinganimations that are semantically aware poses significant challenges demandingexpertise in graphic design and animation. We present an automated textanimation scheme termed Dynamic Typography which combines two challengingtasks. It deforms letters to convey semantic meaning and infuses them withvibrant movements based on user prompts. Our technique harnesses vectorgraphics representations and an end-to-end optimization-based framework. Thisframework employs neural displacement fields to convert letters into baseshapes and applies per-frame motion encouraging coherence with the intendedtextual concept. Shape preservation techniques and perceptual lossregularization are employed to maintain legibility and structural integritythroughout the animation process. We demonstrate the generalizability of ourapproach across various text-to-video models and highlight the superiority ofour end-to-end methodology over baseline methods which might comprise separatetasks. Through quantitative and qualitative evaluations we demonstrate theeffectiveness of our framework in generating coherent text animations thatfaithfully interpret user prompts while maintaining readability. Our code isavailable at: https://animate-your-word.github.io/demo/. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10766v1 |
-|title| RapidVol: Rapid Reconstruction of 3D Ultrasound Volumes from Sensorless 2D Scans |
-|authors| Mark C. EidPak-Hei YeungMadeleine K. WyburdJoão F. HenriquesAna I. L. Namburete
-|links| http://arxiv.org/abs/2404.10766v1 |
-|updated| 2024-04-16 17:50:09 UTC |
-|summary| Two-dimensional 2D freehand ultrasonography is one of the most commonlyused medical imaging modalities particularly in obstetrics and gynaecology.However it only captures 2D cross-sectional views of inherently 3D anatomieslosing valuable contextual information. As an alternative to requiring costlyand complex 3D ultrasound scanners 3D volumes can be constructed from 2D scansusing machine learning. However this usually requires long computational time.Here we propose RapidVol: a neural representation framework to speed upslice-to-volume ultrasound reconstruction. We use tensor-rank decomposition todecompose the typical 3D volume into sets of tri-planes and store thoseinstead as well as a small neural network. A set of 2D ultrasound scans withtheir ground truth or estimated 3D position and orientation pose is allthat is required to form a complete 3D reconstruction. Reconstructions areformed from real fetal brain scans and then evaluated by requesting novelcross-sectional views. When compared to prior approaches based on fullyimplicit representation e.g. neural radiance fields our method is over 3xquicker 46 more accurate and if given inaccurate poses is more robust.Further speed-up is also possible by reconstructing from a structural priorrather than from scratch. |
+|idx| 2404.11613v1 |
+|title| InFusion: Inpainting 3D Gaussians via Learning Depth Completion from Diffusion Prior |
+|authors| Zhiheng LiuHao OuyangQiuyu WangKa Leong ChengJie XiaoKai ZhuNan XueYu LiuYujun ShenYang Cao
+|links| http://arxiv.org/abs/2404.11613v1 |
+|updated| 2024-04-17 17:59:53 UTC |
+|summary| 3D Gaussians have recently emerged as an efficient representation for novelview synthesis. This work studies its editability with a particular focus onthe inpainting task which aims to supplement an incomplete set of 3D Gaussianswith additional points for visually harmonious rendering. Compared to 2Dinpainting the crux of inpainting 3D Gaussians is to figure out therendering-relevant properties of the introduced points whose optimizationlargely benefits from their initial 3D positions. To this end we propose toguide the point initialization with an image-conditioned depth completionmodel which learns to directly restore the depth map based on the observedimage. Such a design allows our model to fill in depth values at an alignedscale with the original depth and also to harness strong generalizability fromlargescale diffusion prior. Thanks to the more accurate depth completion ourapproach dubbed InFusion surpasses existing alternatives with sufficientlybetter fidelity and efficiency under various complex scenarios. We furtherdemonstrate the effectiveness of InFusion with several practical applicationssuch as inpainting with user-specific texture or with novel object insertion. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10765v1 |
-|title| RefFusion: Reference Adapted Diffusion Models for 3D Scene Inpainting |
-|authors| Ashkan MirzaeiRiccardo De LutioSeung Wook KimDavid AcunaJonathan KellySanja FidlerIgor GilitschenskiZan Gojcic
-|links| http://arxiv.org/abs/2404.10765v1 |
-|updated| 2024-04-16 17:50:02 UTC |
-|summary| Neural reconstruction approaches are rapidly emerging as the preferredrepresentation for 3D scenes but their limited editability is still posing achallenge. In this work we propose an approach for 3D scene inpainting -- thetask of coherently replacing parts of the reconstructed scene with desiredcontent. Scene inpainting is an inherently ill-posed task as there exist manysolutions that plausibly replace the missing content. A good inpainting methodshould therefore not only enable high-quality synthesis but also a high degreeof control. Based on this observation we focus on enabling explicit controlover the inpainted content and leverage a reference image as an efficient meansto achieve this goal. Specifically we introduce RefFusion a novel 3Dinpainting method based on a multi-scale personalization of an image inpaintingdiffusion model to the given reference view. The personalization effectivelyadapts the prior distribution to the target scene resulting in a lowervariance of score distillation objective and hence significantly sharperdetails. Our framework achieves state-of-the-art results for object removalwhile maintaining high controllability. We further demonstrate the generalityof our formulation on other downstream tasks such as object insertion sceneoutpainting and sparse view reconstruction. |
+|idx| 2404.11605v1 |
+|title| VG4D: Vision-Language Model Goes 4D Video Recognition |
+|authors| Zhichao DengXiangtai LiXia LiYunhai TongShen ZhaoMengyuan Liu
+|links| http://arxiv.org/abs/2404.11605v1 |
+|updated| 2024-04-17 17:54:49 UTC |
+|summary| Understanding the real world through point cloud video is a crucial aspect ofrobotics and autonomous driving systems. However prevailing methods for 4Dpoint cloud recognition have limitations due to sensor resolution which leadsto a lack of detailed information. Recent advances have shown thatVision-Language Models VLM pre-trained on web-scale text-image datasets canlearn fine-grained visual concepts that can be transferred to variousdownstream tasks. However effectively integrating VLM into the domain of 4Dpoint clouds remains an unresolved problem. In this work we propose theVision-Language Models Goes 4D VG4D framework to transfer VLM knowledge fromvisual-text pre-trained models to a 4D point cloud network. Our approachinvolves aligning the 4D encoders representation with a VLM to learn a sharedvisual and text space from training on large-scale image-text pairs. Bytransferring the knowledge of the VLM to the 4D encoder and combining the VLMour VG4D achieves improved recognition performance. To enhance the 4D encoderwe modernize the classic dynamic point cloud backbone and propose an improvedversion of PSTNet im-PSTNet which can efficiently model point cloud videos.Experiments demonstrate that our method achieves state-of-the-art performancefor action recognition on both the NTU RGBD 60 dataset and the NTU RGBD 120dataset. Code is available at urlhttps://github.com/Shark0-0/VG4D. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10763v1 |
-|title| LaDiC: Are Diffusion Models Really Inferior to Autoregressive Counterparts for Image-to-Text Generation? |
-|authors| Yuchi WangShuhuai RenRundong GaoLinli YaoQingyan GuoKaikai AnJianhong BaiXu Sun
-|links| http://arxiv.org/abs/2404.10763v1 |
-|updated| 2024-04-16 17:47:16 UTC |
-|summary| Diffusion models have exhibited remarkable capabilities in text-to-imagegeneration. However their performance in image-to-text generationspecifically image captioning has lagged behind Auto-Regressive AR modelscasting doubt on their applicability for such tasks. In this work we revisitdiffusion models highlighting their capacity for holistic context modeling andparallel decoding. With these benefits diffusion models can alleviate theinherent limitations of AR methods including their slow inference speed errorpropagation and unidirectional constraints. Furthermore we identify the priorunderperformance of diffusion models stemming from the absence of an effectivelatent space for image-text alignment and the discrepancy between continuousdiffusion processes and discrete textual data. In response we introduce anovel architecture LaDiC which utilizes a split BERT to create a dedicatedlatent space for captions and integrates a regularization module to managevarying text lengths. Our framework also includes a diffuser for semanticimage-to-text conversion and a BackRefine technique to enhance tokeninteractivity during inference. LaDiC achieves state-of-the-art performance fordiffusion-based methods on the MS COCO dataset with 38.2 BLEU4 and 126.2CIDEr demonstrating exceptional performance without pre-training or ancillarymodules. This indicates strong competitiveness with AR models revealing thepreviously untapped potential of diffusion models in image-to-text generation. |
+|idx| 2404.11599v1 |
+|title| Variational Bayesian Last Layers |
+|authors| James HarrisonJohn WillesJasper Snoek
+|links| http://arxiv.org/abs/2404.11599v1 |
+|updated| 2024-04-17 17:50:24 UTC |
+|summary| We introduce a deterministic variational formulation for training Bayesianlast layer neural networks. This yields a sampling-free single-pass model andloss that effectively improves uncertainty estimation. Our variational Bayesianlast layer VBLL can be trained and evaluated with only quadratic complexityin last layer width and is thus nearly computationally free to add tostandard architectures. We experimentally investigate VBLLs and show that theyimprove predictive accuracy calibration and out of distribution detectionover baselines across both regression and classification. Finally weinvestigate combining VBLL layers with variational Bayesian feature learningyielding a lower variance collapsed variational inference method for Bayesianneural networks. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10759v1 |
-|title| Laplace-HDC: Understanding the geometry of binary hyperdimensional computing |
-|authors| Saeid PourmandWyatt D. WhitingAlireza AghasiNicholas F. Marshall
-|links| http://arxiv.org/abs/2404.10759v1 |
-|updated| 2024-04-16 17:36:21 UTC |
-|summary| This paper studies the geometry of binary hyperdimensional computing HDC acomputational scheme in which data are encoded using high-dimensional binaryvectors. We establish a result about the similarity structure induced by theHDC binding operator and show that the Laplace kernel naturally arises in thissetting motivating our new encoding method Laplace-HDC which improves uponprevious methods. We describe how our results indicate limitations of binaryHDC in encoding spatial information from images and discuss potentialsolutions including using Haar convolutional features and the definition of atranslation-equivariant HDC encoding. Several numerical experimentshighlighting the improved accuracy of Laplace-HDC in contrast to alternativemethods are presented. We also numerically study other aspects of the proposedframework such as robustness and the underlying translation-equivariantencoding. |
+|idx| 2404.11599v1 |
+|title| Variational Bayesian Last Layers |
+|authors| James HarrisonJohn WillesJasper Snoek
+|links| http://arxiv.org/abs/2404.11599v1 |
+|updated| 2024-04-17 17:50:24 UTC |
+|summary| We introduce a deterministic variational formulation for training Bayesianlast layer neural networks. This yields a sampling-free single-pass model andloss that effectively improves uncertainty estimation. Our variational Bayesianlast layer VBLL can be trained and evaluated with only quadratic complexityin last layer width and is thus nearly computationally free to add tostandard architectures. We experimentally investigate VBLLs and show that theyimprove predictive accuracy calibration and out of distribution detectionover baselines across both regression and classification. Finally weinvestigate combining VBLL layers with variational Bayesian feature learningyielding a lower variance collapsed variational inference method for Bayesianneural networks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10728v1 |
-|title| Randomized Exploration in Cooperative Multi-Agent Reinforcement Learning |
-|authors| Hao-Lun HsuWeixin WangMiroslav PajicPan Xu
-|links| http://arxiv.org/abs/2404.10728v1 |
-|updated| 2024-04-16 17:01:38 UTC |
-|summary| We present the first study on provably efficient randomized exploration incooperative multi-agent reinforcement learning MARL. We propose a unifiedalgorithm framework for randomized exploration in parallel Markov DecisionProcesses MDPs and two Thompson Sampling TS-type algorithms CoopTS-PHEand CoopTS-LMC incorporating the perturbed-history exploration PHE strategyand the Langevin Monte Carlo exploration LMC strategy respectively which areflexible in design and easy to implement in practice. For a special class ofparallel MDPs where the transition is approximately linear we theoreticallyprove that both CoopTS-PHE and CoopTS-LMC achieve awidetildemathcalOd3/2H2sqrtMK regret bound with communicationcomplexity widetildemathcalOdHM2 where d is the featuredimension H is the horizon length M is the number of agents and K isthe number of episodes. This is the first theoretical result for randomizedexploration in cooperative MARL. We evaluate our proposed method on multipleparallel RL environments including a deep exploration problem textiti.e.N-chain a video game and a real-world problem in energy systems. Ourexperimental results support that our framework can achieve better performanceeven under conditions of misspecified transition models. Additionally weestablish a connection between our unified framework and the practicalapplication of federated learning. |
+|idx| 2404.11534v1 |
+|title| Decomposing and Editing Predictions by Modeling Model Computation |
+|authors| Harshay ShahAndrew IlyasAleksander Madry
+|links| http://arxiv.org/abs/2404.11534v1 |
+|updated| 2024-04-17 16:28:08 UTC |
+|summary| How does the internal computation of a machine learning model transforminputs into predictions In this paper we introduce a task called componentmodeling that aims to address this question. The goal of component modeling isto decompose an ML models prediction in terms of its components -- simplefunctions e.g. convolution filters attention heads that are the buildingblocks of model computation. We focus on a special case of this taskcomponent attribution where the goal is to estimate the counterfactual impactof individual components on a given prediction. We then present COAR ascalable algorithm for estimating component attributions we demonstrate itseffectiveness across models datasets and modalities. Finally we show thatcomponent attributions estimated with COAR directly enable model editing acrossfive tasks namely: fixing model errors forgetting specific classesboosting subpopulation robustness localizing backdoor attacks and improvingrobustness to typographic attacks. We provide code for COAR athttps://github.com/MadryLab/modelcomponents . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10727v1 |
-|title| How Deep Networks Learn Sparse and Hierarchical Data: the Sparse Random Hierarchy Model |
-|authors| Umberto TomasiniMatthieu Wyart
-|links| http://arxiv.org/abs/2404.10727v1 |
-|updated| 2024-04-16 17:01:27 UTC |
-|summary| Understanding what makes high-dimensional data learnable is a fundamentalquestion in machine learning. On the one hand it is believed that the successof deep learning lies in its ability to build a hierarchy of representationsthat become increasingly more abstract with depth going from simple featureslike edges to more complex concepts. On the other hand learning to beinsensitive to invariances of the task such as smooth transformations forimage datasets has been argued to be important for deep networks and itstrongly correlates with their performance. In this work we aim to explainthis correlation and unify these two viewpoints. We show that by introducingsparsity to generative hierarchical models of data the task acquiresinsensitivity to spatial transformations that are discrete versions of smoothtransformations. In particular we introduce the Sparse Random Hierarchy ModelSRHM where we observe and rationalize that a hierarchical representationmirroring the hierarchical model is learnt precisely when such insensitivity islearnt thereby explaining the strong correlation between the latter andperformance. Moreover we quantify how the sample complexity of CNNs learningthe SRHM depends on both the sparsity and hierarchical structure of the task. |
+|idx| 2404.11509v1 |
+|title| VC Theory for Inventory Policies |
+|authors| Yaqi XieWill MaLinwei Xin
+|links| http://arxiv.org/abs/2404.11509v1 |
+|updated| 2024-04-17 16:05:03 UTC |
+|summary| Advances in computational power and AI have increased interest inreinforcement learning approaches to inventory management. This paper providesa theoretical foundation for these approaches and investigates the benefits ofrestricting to policy structures that are well-established by decades ofinventory theory. In particular we prove generalization guarantees forlearning several well-known classes of inventory policies including base-stockand s S policies by leveraging the celebrated Vapnik-Chervonenkis VCtheory. We apply the concepts of the Pseudo-dimension and Fat-shatteringdimension from VC theory to determine the generalizability of inventorypolicies that is the difference between an inventory policys performance ontraining data and its expected performance on unseen data. We focus on aclassical setting without contexts but allow for an arbitrary distributionover demand sequences and do not make any assumptions such as independence overtime. We corroborate our supervised learning results using numericalsimulations.  Managerially our theory and simulations translate to the following insights.First there is a principle of learning less is more in inventory management:depending on the amount of data available it may be beneficial to restrictoneself to a simpler albeit suboptimal class of inventory policies tominimize overfitting errors. Second the number of parameters in a policy classmay not be the correct measure of overfitting error: in fact the class ofpolicies defined by T time-varying base-stock levels exhibits a generalizationerror comparable to that of the two-parameter s S policy class. Finally ourresearch suggests situations in which it could be beneficial to incorporate theconcepts of base-stock and inventory position into black-box learning machinesinstead of having these machines directly learn the order quantity actions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10561v1 |
-|title| HiGraphDTI: Hierarchical Graph Representation Learning for Drug-Target Interaction Prediction |
-|authors| Bin LiuSiqi WuJin WangXin DengAo Zhou
-|links| http://arxiv.org/abs/2404.10561v1 |
-|updated| 2024-04-16 13:35:24 UTC |
-|summary| The discovery of drug-target interactions DTIs plays a crucial role inpharmaceutical development. The deep learning model achieves more accurateresults in DTI prediction due to its ability to extract robust and expressivefeatures from drug and target chemical structures. However existing deeplearning methods typically generate drug features via aggregating molecularatom representations ignoring the chemical properties carried by motifs i.e.substructures of the molecular graph. The atom-drug double-level molecularrepresentation learning can not fully exploit structure information and failsto interpret the DTI mechanism from the motif perspective. In additionsequential model-based target feature extraction either fuses limitedcontextual information or requires expensive computational resources. To tacklethe above issues we propose a hierarchical graph representation learning-basedDTI prediction method HiGraphDTI. Specifically HiGraphDTI learnshierarchical drug representations from triple-level molecular graphs tothoroughly exploit chemical information embedded in atoms motifs andmolecules. Then an attentional feature fusion module incorporates informationfrom different receptive fields to extract expressive target features.Last thehierarchical attention mechanism identifies crucial molecular segments whichoffers complementary views for interpreting interaction mechanisms. Theexperiment results not only demonstrate the superiority of HiGraphDTI to thestate-of-the-art methods but also confirm the practical ability of our modelin interaction interpretation and new DTI discovery. |
+|idx| 2404.11487v1 |
+|title| Randomly Pivoted Partial Cholesky: Random How? |
+|authors| Stefan Steinerberger
+|links| http://arxiv.org/abs/2404.11487v1 |
+|updated| 2024-04-17 15:45:31 UTC |
+|summary| We consider the problem of finding good low rank approximations of symmetricpositive-definite A in mathbbRn times n. Chen-Epperly-Tropp-Webbershowed among many other things that the randomly pivoted partial Choleskyalgorithm that chooses the i-th row with probability proportional to thediagonal entry A_ii leads to a universal contraction of the trace norm theSchatten 1-norm in expectation for each step. We show that if one chooses thei-th row with likelihood proportional to A_ii2 one obtains the sameresult in the Frobenius norm the Schatten 2-norm. Implications for the greedypivoting rule and pivot selection strategies are discussed. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10550v1 |
-|title| Analytical Approximation of the ELBO Gradient in the Context of the Clutter Problem |
-|authors| Roumen Nikolaev Popov
-|links| http://arxiv.org/abs/2404.10550v1 |
-|updated| 2024-04-16 13:19:46 UTC |
-|summary| We propose an analytical solution for approximating the gradient of theEvidence Lower Bound ELBO in variational inference problems where thestatistical model is a Bayesian network consisting of observations drawn from amixture of a Gaussian distribution embedded in unrelated clutter known as theclutter problem. The method employs the reparameterization trick to move thegradient operator inside the expectation and relies on the assumption thatbecause the likelihood factorizes over the observed data the variationaldistribution is generally more compactly supported than the Gaussiandistribution in the likelihood factors. This allows efficient localapproximation of the individual likelihood factors which leads to ananalytical solution for the integral defining the gradient expectation. Weintegrate the proposed gradient approximation as the expectation step in an EMExpectation Maximization algorithm for maximizing ELBO and test againstclassical deterministic approaches in Bayesian inference such as the Laplaceapproximation Expectation Propagation and Mean-Field Variational Inference.The proposed method demonstrates good accuracy and rate of convergence togetherwith linear computational complexity. |
+|idx| 2404.11341v1 |
+|title| The Causal Chambers: Real Physical Systems as a Testbed for AI Methodology |
+|authors| Juan L. GamellaJonas PetersPeter Bühlmann
+|links| http://arxiv.org/abs/2404.11341v1 |
+|updated| 2024-04-17 13:00:52 UTC |
+|summary| In some fields of AI machine learning and statistics the validation of newmethods and algorithms is often hindered by the scarcity of suitable real-worlddatasets. Researchers must often turn to simulated data which yields limitedinformation about the applicability of the proposed methods to real problems.As a step forward we have constructed two devices that allow us to quickly andinexpensively produce large datasets from non-trivial but well-understoodphysical systems. The devices which we call causal chambers arecomputer-controlled laboratories that allow us to manipulate and measure anarray of variables from these physical systems providing a rich testbed foralgorithms from a variety of fields. We illustrate potential applicationsthrough a series of case studies in fields such as causal discoveryout-of-distribution generalization change point detection independentcomponent analysis and symbolic regression. For applications to causalinference the chambers allow us to carefully perform interventions. We alsoprovide and empirically validate a causal model of each chamber which can beused as ground truth for different tasks. All hardware and software is madeopen source and the datasets are publicly available at causalchamber.org orthrough the Python package causalchamber. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10754v1 |
-|title| A Systematic Survey of the Gemini Principles for Digital Twin Ontologies |
-|authors| James Michael ToothNilufer TuptukJeremy Daniel McKendrick Watson
-|links| http://arxiv.org/abs/2404.10754v1 |
-|updated| 2024-04-16 17:34:24 UTC |
-|summary| Ontologies are widely used for achieving interoperable Digital Twins DTwsyet competing DTw definitions compound interoperability issues. Semanticallylinking these differing twins is feasible through ontologies and CognitiveDigital Twins CDTws. However it is often unclear how ontology use bolstersbroader DTw advancements. This article presents a systematic survey followingthe PRISMA method to explore the potential of ontologies to support DTws tomeet the Centre for Digital Built Britains Gemini Principles and aims to linkprogress in ontologies to this framework. The Gemini Principles focus on commonDTw requirements considering: Purpose for 1 Public Good 2 Value Creationand 3 Insight Trustworthiness with sufficient 4 Security 5 Openness and6 Quality and appropriate Functionality of 7 Federation 8 Curation and 9Evolution. This systematic literature review examines the role of ontologies infacilitating each principle. Existing research uses ontologies to solve DTwchallenges within these principles particularly by connecting DTws optimisingdecisionmaking and reasoning governance policies. Furthermore analysing thesectoral distribution of literature found that research encompassing thecrossover of ontologies DTws and the Gemini Principles is emerging and thatmost innovation is predominantly within manufacturing and built environmentsectors. Critical gaps for researchers industry practitioners andpolicymakers are subsequently identified. |
+|idx| 2404.11602v1 |
+|title| Interaction Techniques for Exploratory Data Visualization on Mobile Devices |
+|authors| Luke S. SnyderRyan A. RossiEunyee KohJeffrey HeerJane Hoffswell
+|links| http://arxiv.org/abs/2404.11602v1 |
+|updated| 2024-04-17 17:51:15 UTC |
+|summary| The ubiquity and on-the-go availability of mobile devices makes them centralto many tasks such as interpersonal communication and media consumption.However despite the potential of mobile devices for on-demand exploratory datavisualization existing mobile interactions are difficult often using highlycustom interactions complex gestures or multi-modal input. We synthesizelimitations from the literature and outline four motivating principles forimproved mobile interaction: leverage ubiquitous modalities prioritizediscoverability enable rapid in-context data exploration and promote gracefulrecovery. We then contribute thirteen interaction candidates and conduct aformative study with twelve participants who experienced our interactions in atestbed prototype. Based on these interviews we discuss design considerationsand tradeoffs from four main themes: precise and rapid inspection focusednavigation single-touch and fixed orientation interaction and judicious useof motion. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10733v1 |
-|title| Bootstrapping Linear Models for Fast Online Adaptation in Human-Agent Collaboration |
-|authors| Benjamin A NewmanChris PaxtonKris KitaniHenny Admoni
-|links| http://arxiv.org/abs/2404.10733v1 |
-|updated| 2024-04-16 17:05:43 UTC |
-|summary| Agents that assist people need to have well-initialized policies that canadapt quickly to align with their partners reward functions. Initializingpolicies to maximize performance with unknown partners can be achieved bybootstrapping nonlinear models using imitation learning over large offlinedatasets. Such policies can require prohibitive computation to fine-tunein-situ and therefore may miss critical run-time information about a partnersreward function as expressed through their immediate behavior. In contrastonline logistic regression using low-capacity models performs rapid inferenceand fine-tuning updates and thus can make effective use of immediate in-taskbehavior for reward function alignment. However these low-capacity modelscannot be bootstrapped as effectively by offline datasets and thus have poorinitializations. We propose BLR-HAC Bootstrapped Logistic Regression for HumanAgent Collaboration which bootstraps large nonlinear models to learn theparameters of a low-capacity model which then uses online logistic regressionfor updates during collaboration. We test BLR-HAC in a simulated surfacerearrangement task and demonstrate that it achieves higher zero-shot accuracythan shallow methods and takes far less computation to adapt online while stillachieving similar performance to fine-tuned large nonlinear models. For codeplease see our project page https://sites.google.com/view/blr-hac. |
+|idx| 2404.11515v1 |
+|title| Embedding Privacy in Computational Social Science and Artificial Intelligence Research |
+|authors| Keenan JonesFatima ZahrahJason R. C. Nurse
+|links| http://arxiv.org/abs/2404.11515v1 |
+|updated| 2024-04-17 16:07:53 UTC |
+|summary| Privacy is a human right. It ensures that individuals are free to engage indiscussions participate in groups and form relationships online or offlinewithout fear of their data being inappropriately harvested analyzed orotherwise used to harm them. Preserving privacy has emerged as a criticalfactor in research particularly in the computational social science CSSartificial intelligence AI and data science domains given their reliance onindividuals data for novel insights. The increasing use of advancedcomputational models stands to exacerbate privacy concerns because ifinappropriately used they can quickly infringe privacy rights and lead toadverse effects for individuals - especially vulnerable groups - and society.We have already witnessed a host of privacy issues emerge with the advent oflarge language models LLMs such as ChatGPT which further demonstrate theimportance of embedding privacy from the start. This article contributes to thefield by discussing the role of privacy and the primary issues that researchersworking in CSS AI data science and related domains are likely to face. Itthen presents several key considerations for researchers to ensure participantprivacy is best preserved in their research design data collection and useanalysis and dissemination of research results. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10732v1 |
-|title| Attention-Aware Visualization: Tracking and Responding to User Perception Over Time |
-|authors| Arvind SrinivasanJohannes EllemosePeter W. S. ButcherPanagiotis D. RitsosNiklas Elmqvist
-|links| http://arxiv.org/abs/2404.10732v1 |
-|updated| 2024-04-16 17:04:32 UTC |
-|summary| We propose the notion of Attention-Aware Visualizations AAVs that track theusers perception of a visual representation over time and feed thisinformation back to the visualization. Such context awareness is particularlyuseful for ubiquitous and immersive analytics where knowing which embeddedvisualizations the user is looking at can be used to make visualizations reactappropriately to the users attention: for example by highlighting data theuser has not yet seen. We can separate the approach into three components: 1measuring the users gaze on a visualization and its parts 2 tracking theusers attention over time and 3 reactively modifying the visualrepresentation based on the current attention metric. In this paper we presenttwo separate implementations of AAV: a 2D data-agnostic method for web-basedvisualizations that can use an embodied eyetracker to capture the users gazeand a 3D data-aware one that uses the stencil buffer to track the visibility ofeach individual mark in a visualization. Both methods provide similarmechanisms for accumulating attention over time and changing the appearance ofmarks in response. We also present results from a qualitative evaluationstudying visual feedback and triggering mechanisms for capturing andrevisualizing attention. |
+|idx| 2404.11514v1 |
+|title| Frameworking for a Community-led Feminist Ethics |
+|authors| Ana O HenriquesHugo NicolauKyle Montague
+|links| http://arxiv.org/abs/2404.11514v1 |
+|updated| 2024-04-17 16:07:25 UTC |
+|summary| This paper introduces a relational perspective on ethics within the contextof Feminist Digital Civics and community-led design. Ethics work in HCI hasprimarily focused on prescriptive machine ethics and bioethics principlesrather than people. In response we advocate for a community-led processualapproach to ethics acknowledging power dynamics and local contexts. We thuspropose a multidimensional adaptive model for ethics in HCI design integratingan intersectional feminist ethical lens. This framework embraces feministepistemologies methods and methodologies fostering a reflexive practice. Byweaving together situated knowledges standpoint theory intersectionalityparticipatory methods and care ethics our approach offers a holisticfoundation for ethics in HCI aiming to advance community-led practices andenrich the discourse surrounding ethics within this field. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10706v1 |
-|title| Cross-Language Evolution of Divergent Collective Memory Around the Arab Spring |
-|authors| H. Laurie JonesBrian C. Keegan
-|links| http://arxiv.org/abs/2404.10706v1 |
-|updated| 2024-04-16 16:30:27 UTC |
-|summary| The Arab Spring was a historic set of protests beginning in 2011 that toppledgovernments and led to major conflicts. Collective memories of events likethese can vary significantly across social contexts in response to politicalcultural and linguistic factors. While Wikipedia plays an important role indocumenting both historic and current events little attention has been givento how Wikipedia articles created in the aftermath of major events continueto evolve over years or decades. Using the archived content of ArabSpring-related topics across the Arabic and English Wikipedias between 2011 and2024 we define and evaluate multilingual measures of event saliencedeliberation contextualization and consolidation of collective memorysurrounding the Arab Spring. Our findings about the temporal evolution of theWikipedia articles content similarity across languages has implications fortheorizing about online collective memory processes and evaluating linguisticmodels trained on these data. |
+|idx| 2404.11469v1 |
+|title| Designing Touchscreen Menu Interfaces for In-Vehicle Infotainment Systems: the Effect of Depth and Breadth Trade-off and Task Types on Visual-Manual Distraction |
+|authors| Louveton NicolasMcCall RodEngel Thomas
+|links| http://arxiv.org/abs/2404.11469v1 |
+|updated| 2024-04-17 15:17:57 UTC |
+|summary| Multitasking with a touch screen user-interface while driving is known toimpact negatively driving performance and safety. Literature shows that listscrolling interfaces generate more visual-manual distraction than structuredmenus and sequential navigation. Depth and breadth trade-offs for structurednavigation have been studied. However little is known on how secondary taskcharacteristics interact with those trade-offs. In this study we make thehypothesis that both menus depth and task complexity interact in generatingvisual-manual distraction. Using a driving simulation setup we collectedtelemetry and eye-tracking data to evaluate driving performance. Participantswere multitasking with a mobile app presenting a range of eight depth andbreadth trade-offs under three types of secondary tasks involving differentcognitive operations Systematic reading Search for an item Memorize itemsstate. The results confirm our hypothesis. Systematic interaction with menuitems generated a visual demand that increased with menus depth while visualdemand reach an optimum for Search and Memory tasks. We discuss implicationsfor design: In a multitasking context display design effectiveness must beassessed while considering menus layout but also cognitive processes involved. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10690v1 |
-|title| MathWriting: A Dataset For Handwritten Mathematical Expression Recognition |
-|authors| Philippe GervaisAsya FadeevaAndrii Maksai
-|links| http://arxiv.org/abs/2404.10690v1 |
-|updated| 2024-04-16 16:10:23 UTC |
-|summary| We introduce MathWriting the largest online handwritten mathematicalexpression dataset to date. It consists of 230k human-written samples and anadditional 400k synthetic ones. MathWriting can also be used for offline HMErecognition and is larger than all existing offline HME datasets likeIM2LATEX-100K. We introduce a benchmark based on MathWriting data in order toadvance research on both online and offline HME recognition. |
+|idx| 2404.11461v1 |
+|title| Using Game Engines and Machine Learning to Create Synthetic Satellite Imagery for a Tabletop Verification Exercise |
+|authors| Johannes HosterSara Al-SayedFelix BiessmannAlexander GlaserKristian HildebrandIgor MoricTuong Vy Nguyen
+|links| http://arxiv.org/abs/2404.11461v1 |
+|updated| 2024-04-17 15:09:31 UTC |
+|summary| Satellite imagery is regarded as a great opportunity for citizen-basedmonitoring of activities of interest. Relevant imagery may however not beavailable at sufficiently high resolution quality or cadence -- let alone beuniformly accessible to open-source analysts. This limits an assessment of thetrue long-term potential of citizen-based monitoring of nuclear activitiesusing publicly available satellite imagery. In this article we demonstrate howmodern game engines combined with advanced machine-learning techniques can beused to generate synthetic imagery of sites of interest with the ability tochoose relevant parameters upon request these include time of day cloudcover season or level of activity onsite. At the same time resolution andoff-nadir angle can be adjusted to simulate different characteristics of thesatellite. While there are several possible use-cases for synthetic imageryhere we focus on its usefulness to support tabletop exercises in which simplemonitoring scenarios can be examined to better understand verificationcapabilities enabled by new satellite constellations and very short revisittimes. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10775v1 |
-|title| COMBO: Compositional World Models for Embodied Multi-Agent Cooperation |
-|authors| Hongxin ZhangZeyuan WangQiushi LyuZheyuan ZhangSunli ChenTianmin ShuYilun DuChuang Gan
-|links| http://arxiv.org/abs/2404.10775v1 |
-|updated| 2024-04-16 17:59:11 UTC |
-|summary| In this paper we investigate the problem of embodied multi-agentcooperation where decentralized agents must cooperate given only partialegocentric views of the world. To effectively plan in this setting in contrastto learning world dynamics in a single-agent scenario we must simulate worlddynamics conditioned on an arbitrary number of agents actions given onlypartial egocentric visual observations of the world. To address this issue ofpartial observability we first train generative models to estimate the overallworld state given partial egocentric observations. To enable accuratesimulation of multiple sets of actions on this world state we then propose tolearn a compositional world model for multi-agent cooperation by factorizingthe naturally composable joint actions of multiple agents and compositionallygenerating the video. By leveraging this compositional world model incombination with Vision Language Models to infer the actions of other agentswe can use a tree search procedure to integrate these modules and facilitateonline cooperative planning. To evaluate the efficacy of our methods we createtwo challenging embodied multi-agent long-horizon cooperation tasks using theThreeDWorld simulator and conduct experiments with 2-4 agents. The results showour compositional world model is effective and the framework enables theembodied agents to cooperate efficiently with different agents across varioustasks and an arbitrary number of agents showing the promising future of ourproposed framework. More videos can be found athttps://vis-www.cs.umass.edu/combo/. |
+|idx| 2404.11354v1 |
+|title| Distributed Fractional Bayesian Learning for Adaptive Optimization |
+|authors| Yaqun YangJinlong LeiGuanghui WenYiguang Hong
+|links| http://arxiv.org/abs/2404.11354v1 |
+|updated| 2024-04-17 13:09:33 UTC |
+|summary| This paper considers a distributed adaptive optimization problem where allagents only have access to their local cost functions with a common unknownparameter whereas they mean to collaboratively estimate the true parameter andfind the optimal solution over a connected network. A general mathematicalframework for such a problem has not been studied yet. We aim to providevaluable insights for addressing parameter uncertainty in distributedoptimization problems and simultaneously find the optimal solution. Thus wepropose a novel Prediction while Optimization scheme which utilizesdistributed fractional Bayesian learning through weighted averaging on thelog-beliefs to update the beliefs of unknown parameters and distributedgradient descent for renewing the estimation of the optimal solution. Thenunder suitable assumptions we prove that all agents beliefs and decisionvariables converge almost surely to the true parameter and the optimal solutionunder the true parameter respectively. We further establish a sublinearconvergence rate for the belief sequence. Finally numerical experiments areimplemented to corroborate the theoretical analysis. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10684v1 |
-|title| Driver Fatigue Prediction using Randomly Activated Neural Networks for Smart Ridesharing Platforms |
-|authors| Sree Pooja AkulaMukund TelukuntaVenkata Sriram Siddhardh Nadendla
-|links| http://arxiv.org/abs/2404.10684v1 |
-|updated| 2024-04-16 16:04:11 UTC |
-|summary| Drivers in ridesharing platforms exhibit cognitive atrophy and fatigue asthey accept ride offers along the day which can have a significant impact onthe overall efficiency of the ridesharing platform. In contrast to the currentliterature which focuses primarily on modeling and learning driverspreferences across different ride offers this paper proposes a novel DynamicDiscounted Satisficing DDS heuristic to model and predict drivers sequentialride decisions during a given shift. Based on DDS heuristic a novel stochasticneural network with random activations is proposed to model DDS heuristic andpredict the final decision made by a given driver. The presence of randomactivations in the network necessitated the development of a novel trainingalgorithm called Sampling-Based Back Propagation Through Time SBPTT wheregradients are computed for independent instances of neural networks obtainedvia sampling the distribution of activation threshold and aggregated to updatethe network parameters. Using both simulation experiments as well as on realChicago taxi dataset this paper demonstrates the improved performance of theproposed approach when compared to state-of-the-art methods. |
+|idx| 2404.11351v1 |
+|title| Circular Distribution of Agents using Convex Layers |
+|authors| Gautam KumarAshwini Ratnoo
+|links| http://arxiv.org/abs/2404.11351v1 |
+|updated| 2024-04-17 13:08:49 UTC |
+|summary| This paper considers the problem of conflict-free distribution of agents on acircular periphery encompassing all agents. The two key elements of theproposed policy include the construction of a set of convex layers nestedconvex polygons using the initial positions of the agents and a novel searchspace region for each of the agents. The search space for an agent on a convexlayer is defined as the region enclosed between the lines passing through theagents position and normal to its supporting edges. Guaranteeingcollision-free paths a goal assignment policy designates a unique goalposition within the search space of an agent. In contrast to the existingliterature this work presents a one-shot collision-free solution to thecircular distribution problem by utilizing only the initial positions of theagents. Illustrative examples demonstrate the effectiveness of the proposedpolicy. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10641v1 |
-|title| A Cloud Resources Portfolio Optimization Business Model - From Theory to Practice |
-|authors| Valentin HaagMaximilian KiesslerBenedikt PittlErich Schikuta
-|links| http://arxiv.org/abs/2404.10641v1 |
-|updated| 2024-04-16 15:15:59 UTC |
-|summary| Cloud resources have become increasingly important with many businessesusing cloud solutions to supplement or outright replace their existing ITinfrastructure. However as there is a plethora of providers with varyingproducts services and markets it has become increasingly more challenging tokeep track of the best solutions for each application. Cloud serviceintermediaries aim to alleviate this problem by offering services that helpusers meet their requirements.  This paper aims to lay the groundwork for developing a cloud portfoliomanagement platform and its business model defined via a business modelcanvas. Furthermore a prototype of a platform is developed offering a cloudportfolio optimization service using two algorithms developed in previousresearch to create suitable and well-utilized allocations for a customersapplications. |
+|idx| 2404.11144v1 |
+|title| Self-adaptive PSRO: Towards an Automatic Population-based Game Solver |
+|authors| Pengdeng LiShuxin LiChang YangXinrun WangXiao HuangHau ChanBo An
+|links| http://arxiv.org/abs/2404.11144v1 |
+|updated| 2024-04-17 07:40:57 UTC |
+|summary| Policy-Space Response Oracles PSRO as a general algorithmic framework hasachieved state-of-the-art performance in learning equilibrium policies oftwo-player zero-sum games. However the hand-crafted hyperparameter valueselection in most of the existing works requires extensive domain knowledgeforming the main barrier to applying PSRO to different games. In this work wemake the first attempt to investigate the possibility of self-adaptivelydetermining the optimal hyperparameter values in the PSRO framework. Ourcontributions are three-fold: 1 Using several hyperparameters we propose aparametric PSRO that unifies the gradient descent ascent GDA and differentPSRO variants. 2 We propose the self-adaptive PSRO SPSRO by casting thehyperparameter value selection of the parametric PSRO as a hyperparameteroptimization HPO problem where our objective is to learn an HPO policy thatcan self-adaptively determine the optimal hyperparameter values during therunning of the parametric PSRO. 3 To overcome the poor performance of onlineHPO methods we propose a novel offline HPO approach to optimize the HPO policybased on the Transformer architecture. Experiments on various two-playerzero-sum games demonstrate the superiority of SPSRO over different baselines. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10421v1 |
-|title| Concurrency Model of BDI Programming Frameworks: Why Should We Control It? |
-|authors| Martina BaiardiSamuele BurattiniGiovanni CiattoDanilo PianiniAndrea OmiciniAlessandro Ricci
-|links| http://arxiv.org/abs/2404.10421v1 |
-|updated| 2024-04-16 09:38:40 UTC |
-|summary| We provide a taxonomy of concurrency models for BDI frameworks elicited byanalysing state-of-the-art technologies and aimed at helping both BDIdesigners and developers in making informed decisions. Comparison among BDItechnologies w.r.t. concurrency models reveals heterogeneous support and lowcustomisability. |
+|idx| 2404.11014v1 |
+|title| Towards Multi-agent Reinforcement Learning based Traffic Signal Control through Spatio-temporal Hypergraphs |
+|authors| Kang WangZhishu ShenZhen LeiTiehua Zhang
+|links| http://arxiv.org/abs/2404.11014v1 |
+|updated| 2024-04-17 02:46:18 UTC |
+|summary| Traffic signal control systems TSCSs are integral to intelligent trafficmanagement fostering efficient vehicle flow. Traditional approaches oftensimplify road networks into standard graphs which results in a failure toconsider the dynamic nature of traffic data at neighboring intersectionsthereby neglecting higher-order interconnections necessary for real-timecontrol. To address this we propose a novel TSCS framework to realizeintelligent traffic control. This framework collaborates with multipleneighboring edge computing servers to collect traffic information across theroad network. To elevate the efficiency of traffic signal control we havecrafted a multi-agent soft actor-critic MA-SAC reinforcement learningalgorithm. Within this algorithm individual agents are deployed at eachintersection with a mandate to optimize traffic flow across the entire roadnetwork collectively. Furthermore we introduce hypergraph learning into thecritic network of MA-SAC to enable the spatio-temporal interactions frommultiple intersections in the road network. This method fuses hypergraph andspatio-temporal graph structures to encode traffic data and capture the complexspatial and temporal correlations between multiple intersections. Our empiricalevaluation tested on varied datasets demonstrates the superiority of ourframework in minimizing average vehicle travel times and sustaininghigh-throughput performance. This work facilitates the development of moreintelligent and reactive urban traffic management solutions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.10397v1 |
-|title| On the external concurrency of current BDI frameworks for MAS |
-|authors| Martina BaiardiSamuele BurattiniGiovanni CiattoDanilo PianiniAlessandro RicciAndrea Omicini
-|links| http://arxiv.org/abs/2404.10397v1 |
-|updated| 2024-04-16 08:55:46 UTC |
-|summary| The execution of Belief-Desire-Intention BDI agents in a Multi-Agent SystemMAS can be practically implemented on top of low-level concurrency mechanismsthat impact on efficiency determinism and reproducibility. We argue thatdevelopers should specify the MAS behaviour independently of the executionmodel and choose or configure the concurrency model later on according totheir target domains specific needs leaving the MAS specification unaffected.We identify patterns for mapping the agent execution over the underlyingconcurrency abstractions and investigate which concurrency models aresupported by some of the most commonly used BDI platforms. Although mostframeworks support multiple concurrency models we find that they tend to hidethem under the hood making them opaque to the developer and effectivelylimiting the possibility of fine-tuning the MAS. |
+|idx| 2404.10976v1 |
+|title| Group-Aware Coordination Graph for Multi-Agent Reinforcement Learning |
+|authors| Wei DuanJie LuJunyu Xuan
+|links| http://arxiv.org/abs/2404.10976v1 |
+|updated| 2024-04-17 01:17:10 UTC |
+|summary| Cooperative Multi-Agent Reinforcement Learning MARL necessitates seamlesscollaboration among agents often represented by an underlying relation graph.Existing methods for learning this graph primarily focus on agent-pairrelations neglecting higher-order relationships. While several approachesattempt to extend cooperation modelling to encompass behaviour similaritieswithin groups they commonly fall short in concurrently learning the latentgraph thereby constraining the information exchange among partially observedagents. To overcome these limitations we present a novel approach to infer theGroup-Aware Coordination Graph GACG which is designed to capture both thecooperation between agent pairs based on current observations and group-leveldependencies from behaviour patterns observed across trajectories. This graphis further used in graph convolution for information exchange between agentsduring decision-making. To further ensure behavioural consistency among agentswithin the same group we introduce a group distance loss which promotes groupcohesion and encourages specialization between groups. Our evaluationsconducted on StarCraft II micromanagement tasks demonstrate GACGs superiorperformance. An ablation study further provides experimental evidence of theeffectiveness of each component of our method. |
 
 
