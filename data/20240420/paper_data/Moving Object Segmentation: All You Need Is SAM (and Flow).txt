@@ -1,0 +1,1118 @@
+Moving Object Segmentation:
+All You Need Is SAM (and Flow)
+Junyu Xie1, Charig Yang1, Weidi Xie1,2, and Andrew Zisserman1
+1 Visual Geometry Group, University of Oxford
+2 CMIC, Shanghai Jiao Tong University
+{jyx,charig,weidi,az}@robots.ox.ac.uk
+https://www.robots.ox.ac.uk/~vgg/research/flowsam/
+Abstract. Theobjectiveofthispaperismotionsegmentation–discov-
+eringandsegmentingthemovingobjectsinavideo.Thisisamuchstud-
+iedareawithnumerouscareful,andsometimescomplex,approachesand
+training schemes including: self-supervised learning, learning from syn-
+thetic datasets, object-centric representations, amodal representations,
+and many more. Our interest in this paper is to determine if the Seg-
+ment Anything model (SAM) can contribute to this task.
+WeinvestigatetwomodelsforcombiningSAMwithopticalflowthathar-
+nessthesegmentationpowerofSAMwiththeabilityofflowtodiscover
+andgroupmovingobjects.Inthefirstmodel,weadaptSAMtotakeop-
+ticalflow,ratherthanRGB,asaninput.Inthesecond,SAMtakesRGB
+as an input, and flow is used as a segmentation prompt. These surpris-
+inglysimplemethods,withoutanyfurthermodifications,outperformall
+previous approaches by a considerable margin in both single and multi-
+object benchmarks. We also extend these frame-level segmentations to
+sequence-level segmentations that maintain object identity. Again, this
+simple model outperforms previous methods on multiple video object
+segmentation benchmarks.
+Keywords: MotionSegmentation·VideoObjectSegmentation·Motion-
+based Object Discovery
+1 Introduction
+Recent research in image segmentation has been transformative, with the Seg-
+mentAnythingModel(SAM)[12]emergingasasignificantbreakthrough.Lever-
+aginglarge-scaledatasetsandscalableself-labelling,SAMenablesflexibleimage-
+level segmentation across many scenarios [4,23,34,36,42,53], facilitated by user
+prompts such as boxes, texts, and points. In videos, optical flow has played
+an important and successful role for moving object segmentation – in that it
+can (i) discover moving objects, (ii) provide crisp boundaries for segmentation,
+and (iii) group parts of objects together if they move together. It has formed
+the basis for numerous methods of moving object discovery by self-supervised
+learning[10,15,25,26,35,43,47].However,itfacessegmentationchallengesifob-
+jects are momentarily motionless, and in distinguishing foreground objects from
+4202
+rpA
+81
+]VC.sc[
+1v98321.4042:viXra2 J. Xie et al.
+(a) FlowI-SAM (c) Sequence-level Mask Associa�on
+Op�cal flow eI nm ca og de er deM ca os dk e r Output masks Sequence-level
+mask (t-1)
+Flow-based
+Sequence-level
+(b) FlowP-SAM warping mask (t)
+RGB eI nm ca og de er deM ca os dk e r Output masks Frame-level Op�cal flow M su ell e� c-m �oa nsk
+masks
+(t, t-1, t+1, ...) Flow-based
+Prompt warping
+...
+Op�cal Flow
+flow transformer
+Fig.1:AdaptingSAMforVideoObjectSegmentationbyincorporatingflow.
+(a)Flow-as-Input:FlowI-SAMtakesinopticalflowonly andpredictsframe-levelseg-
+mentation masks. (b) Flow-as-Prompt: FlowP-SAM takes in RGB and applies flow
+informationasapromptforframe-levelsegmentation.(c) Sequence-level mask as-
+sociation:asapost-processingstep,themulti-maskselectionmoduleautoregressively
+transformsframe-level maskoutputsfromFlowI-SAMand/orFlowP-SAMandproduces
+sequence-level masksinwhichobjectidentitiesareconsistentthroughoutthesequence.
+background‘noise’.Thisnaturallyraisesthequestion:“Howcanweleveragethe
+power of SAM with flow for moving object segmentation in videos?”.
+To this end, we explore two distinct yet simple variants to effectively tailor
+SAMformotionsegmentation.First,weintroduceFlowI-SAM(Fig.1a),anadap-
+tionoftheoriginalSAMthatdirectlyprocessesopticalflowasathree-channelin-
+putimageforsegmentation,wherepointsonauniformgridareusedasprompts.
+This approach leverages the ability of SAM to accurately segment moving ob-
+jectsagainstthestaticbackground,byexploitingthedistincttexturesandclear
+boundaries present in optical flow fields. However, it has less success in scenes
+where the optical flow arises from multiple interacting objects as the flow only
+containslimitedinformationforseparatingthem.Second,buildingonthestrong
+ability of SAM on RGB image segmentation, we propose FlowP-SAM (Fig. 1b)
+where the input is an RGB frame, and flow guides SAM for moving object seg-
+mentation as prompts, produced by a trainable prompt generator. This method
+effectively leverages the ability of SAM on RGB image segmentation, with flow
+information acting as a selector of moving objects/regions within a frame. Ad-
+ditionally, we extend these methods from frame-level to sequence-level video
+segmentation (Fig. 1c) so that object identities are consistent throughout the
+sequence. We do this by introducing a matching module that auto-regressively
+chooses whether to select a new object or propagate the old one based on tem-
+poral consistency.
+Insummary,thispaperintroducesandexplorestwomodelstoleverageSAM
+formovingobjectsegmentationinvideos,enablingtheprincipalmovingobjects
+to be discriminated from background motions. Our contributions are threefold:
+• The FlowI-SAM model, which utilises optical flow as a three-channel input
+image for precise per-frame segmentation and moving object identification.Moving Object Segmentation: All You Need Is SAM (and Flow) 3
+• The FlowP-SAM model, a novel combination of dual-stream (RGB and flow)
+data,thatemploysopticalflowtogenerateprompts,guidingSAMtoidentify
+and localise the moving objects in RGB images.
+• New state-of-the-art performance by a large margin on moving object seg-
+mentation benchmarks, including DAVIS, YTVOS, and MoCA, at both
+frame and sequence levels.
+2 Related Work
+Videoobjectsegmentation(VOS)isanextensivelystudiedtaskincomputer
+vision. The objective is to segment the primary object(s) in a video sequence.
+Numerous benchmarks are developed for evaluating VOS performance, catering
+tobothsingle-object[16,18,29,31]andmulti-object[33,46]scenarios.Twomajor
+protocols are widely explored in VOS research, namely unsupervised [8,19–22,
+38,47,49] and semi-supervised VOS [2,6,11,13,14,27,30,39,40,50]. Notably,
+theterm“unsupervised” exclusivelyindicatesthatnogroundtruthannotationis
+used during inference time (i.e., no inference-time supervision). In contrast, the
+semi-supervised VOS employs first-frame groundtruth annotations to initiate
+the object tracking and mask propagation in subsequent frames. This paper
+focusesonunsupervisedVOStasksandutilisesmotionasacrucialcueforobject
+discovery.
+Motion Segmentationfocusesondiscoveringobjectsthroughtheirmovement
+andgeneratingcorrespondingsegmentationmasks.Existingbenchmarksformo-
+tionsegmentationlargelyoverlapwiththoseusedforVOSevaluation,especially
+inthesingle-objectcase.Formulti-objectmotionsegmentation,datasets[43,44]
+have been specifically curated from VOS benchmarks to exclusively focus on se-
+quences with dominant locomotion. There are two major setups in the motion
+segmentationliterature:onethatreliesonmotioninformationonly todistinguish
+moving elements from the background through spatial clustering [25,26,47] or
+explicit supervision [15,43]; the other [1,10,24,32,44,48] that enhances motion-
+basedobjectdiscoverybyincorporatingappearanceinformation.Wetermthese
+two approaches “flow-only” and “RGB-based” segmentation, respectively, and
+explore both setups in this work.
+Segment Anything Model (SAM) [12] has demonstrated impressive ability
+on image segmentation across various scenarios. It was trained on the SA-1B
+datasets with over one billion self-labelled masks and 11 million images. Such
+large-scale training renders it a strong zero-shot generalisability to unseen do-
+mains. Many works adapt the SAM model to perform different tasks, such as
+tracking [7], change detection [56], and 3D segmentation [3]. Some other works
+extend SAM towards more promptability [58], more efficient models [45,51,55],
+or more domains [4,23,34,42]. Our work extends the robust SAM framework
+to moving object segmentation by adapting it with optical flow inputs and flow
+prompts.4 J. Xie et al.
+(a) (b)
+Op�cal flows Predicted masks Image
+encoder Predicted
+... ... mask
+Op�cal Avg. Mask
+flows decoder Foreground
+FlowI-SAM object IoU
+Uniform grid (fIoU)
+point prompts Repeat for each Foreground
+point prompt obj (e fIc ot U Io )Us p tP r ooo kmi en npt t O tm ou kat ep s nu k st tf oIo keU n
+Fig.2:OverviewofFlowI-SAM.(a)InferencepipelineofFlowI-SAM.(b)Architecture
+of FlowI-SAMwith trainable parameters labelled. The point prompt token is generated
+by a frozen prompt encoder.
+3 SAM Preliminaries
+TheSegmentAnythingModel(SAM)isengineeredforhigh-precisionimageseg-
+mentation,accommodatingbothuser-specifiedpromptsandafullyautonomous
+operation mode. When guided by user input, SAM accepts various forms of
+prompts including points, boxes, masks, or textual descriptions to accurately
+delineate the segmentation targets. Alternatively, in its automatic mode, SAM
+uses points on a uniform grid as prompts, to propose all plausible segmentation
+masks that capture objects and their hierarchical subdivisions—objects, parts,
+and subparts. In this case, the inference is repeated for each prompt of the grid,
+generatingmasksforeachpromptinturn,andthefinalmaskselectionisguided
+by the predicted mask IoU scores.
+Architecturally, SAM is underpinned by three foundational components: (i)
+Image encoder extracts strong image features via a heavy Vision Transformer
+(ViT) backbone, which is pre-trained by the Masked Auto-Encoder (MAE) ap-
+proach; (ii) The prompt encoder converts the input prompts into positional
+information which helps with locating the segmentation target; (iii) Mask de-
+coderfeaturesalight-weighttwo-waytransformerthattakesinacombinationof
+encoded prompt tokens, learnable mask tokens, and an IoU prediction token as
+input queries. These queries iteratively interact with the dense spatial features
+from image encoder, leading to the final mask predictions and IoU estimations.
+In the next sections, we describe two distinct, yet simple variants to effectively
+tailor SAM for motion segmentation.
+4 Frame-Level Segmentation I: Flow as Input
+Inthissection,wefocusondiscoveringmovingobjectsfromindividualframesby
+exploiting motion information only, to yield corresponding segmentation masks.
+Formally, given the optical flow input F ∈ RH×W×3 at frame t, we aim to
+t
+predict a segmentation mask Mi ∈ RH×W together with a foreground object
+t
+IoU (fIoU) score si ∈R1 for each object i,
+fIoU,t
+{Mi,si }N =Φ (F ) (1)
+t fIoU,t i=0 FlowI-SAM tMoving Object Segmentation: All You Need Is SAM (and Flow) 5
+To adapt SAM for this new task, we formulate FlowI-SAM (Φ ) by fine-
+FlowI-SAM
+tuning it on optical Flow Inputs, and re-purpose the original IoU prediction
+head to instead predict the fIoU, as illustrated in Fig. 2b.
+Flow Inputs with Multiple Frame Gaps. To mitigate the effect of noisy
+optical flow, i.e. complicated flow fields due to stationary parts, articulated mo-
+tion, and object interactions, etc., we consider multiple flow inputs {F } with
+t,g
+different frame gaps (e.g., g ∈ {(1,-1),(2,-2)}) for both training and evaluation
+stages.Thesemulti-gapflowinputsareindependently processedbytheimage
+encodertoobtaindensespatialfeatures{d }atalowerresolutionh×w,which
+t,g
+are then combined by averaging the spatial feature maps across different flow
+gaps, i.e., d =Average ({d })∈Rh×w×d.
+t g t,g
+FlowI-SAM Inference. To discover all moving objects from flow input, the
+FlowI-SAM model is prompted by points on a uniform grid. Each point prompt
+outputs a pair of mask and objectness score predictions. This mechanism is the
+same as in the original SAM formulation, and is illustrated in Fig. 2a. The final
+segmentation is selected using Non-Maximum Suppression (NMS) based on the
+predicted fIoU and overlap ratio.
+FlowI-SAM Training. To adapt the pre-trained SAM model for optical flow
+inputs, we finetune the lightweight mask decoder, while the image encoder and
+the prompt encoder remain frozen. The overall loss is formulated as:
+N,T
+L =
+1 (cid:88)(cid:16)
+L (Mi,Mˆi)+λ ∥si −sˆi
+∥2(cid:17)
+(2)
+FlowI-SAM NT BCE t t f fIoU,t fIoU,t
+i,t
+whereMˆi andsˆi denotethegroundtruthsegmentationmasksandfIoU,and
+t fIoU,t
+λ is a scale factor.
+f
+5 Frame-Level Segmentation II: Flow as Prompt
+In this section, we adapt SAM to video object segmentation by processing
+RGB frames, with optical flow as a prompt. We term this frame-level segmen-
+tation architecture FlowP-SAM for Flow as Prompt SAM. As shown in Fig. 3b,
+FlowP-SAM encompasses two major modules, namely the flow prompt generator
+and the segmentation module. The flow prompt generator takes optical flow as
+inputs, and produces flow prompts that can be used as supplemental queries to
+infer frame-level segmentation masks Mi from RGB inputs I . Formally,
+t t
+{Mi, si , si }N =Φ (F ,I ) (3)
+t fIoU,t MOS,t i=0 FlowP-SAM t t
+where si indicates the moving object score (MOS) predicted by the flow
+MOS,t
+prompt generator, while si denotes the foreground object IoU (fIoU) es-
+fIoU,t
+timated by the segmentation module. Specifically, MOS specifies whether the
+input point prompt belongs to moving objects (si = 1) or the stationary
+MOS,t
+region (si = 0). On the other hand, fIoU follows the same formulation as
+MOS,t6 J. Xie et al.
+(a) (b) (c) Flow transformer
+RGB
+Pr med ai sc kt sed
+RGB
+deM ca os dk
+e r
+P mre ad si kc t sM coo rv ein (g M o Ob Sj. )
+Repeat for each ... ... eI nm ca og de er IF oo Ure (. f Io ob Uj. ) Sco hre e ap dred.
+point prompt
+Uniform grid FlowP-SAM F oo br je eg cr to Iou Und s Seg Mm oe dn uta le�on p tP r ooo kmi en npt t O tm ou kat ep s nu k st p torF ol ko m ew np st tf oIo keU n p torF ol ko m ew np st tM okO eS n
+point prompts (fIoU)
+Prompt objM eco tv si cn og
+r es
+O flp o� wc sal Avg. tranF sl fo ow rm er oM b (Mjo . sv Oci Sn o )g re fO efl ap to� uwc ra el
+s
+k,v Tra dn es cf oo dr em re r
+Op�cal flows (MOS) Image q
+encoder
+Fl Go ew n P err ao tm orpt p tP r ooo kmi en npt t p torF ol ko m ew np st tM okO eS n p tP r ooo kmi en npt t p torF ol ko m ew np st tM okO eS n
+Fig.3:OverviewofFlowP-SAM.(a)InferencepipelineofFlowP-SAM.(b)Architecture
+of FlowP-SAM. The flow prompt generator produces flow prompts to be injected into
+a SAM-like RGB-based segmentation module. Both modules take in the same point
+prompttoken,whichisobtainedfromafrozenpromptencoder.(c)Detailedarchitec-
+tureoftheflowtransformer.Theinputtokensfunctionasquerieswithinalightweight
+transformer decoder, iteratively attending to dense flow features. The output moving
+object score (MOS) token is then processed by an MLP-based head to predict a score
+indicating whether the input point prompt corresponds to a moving object.
+in the FlowI-SAM, i.e., predicting IoUs for foreground objects and yielding 0 for
+background regions.
+Flow Prompt Generator consists of (i) a frozen SAM image encoder, where
+the dense spatial features are extracted from optical flow inputs at different
+frame gaps, followed by an averaging across frame gaps; (ii) a flow transformer,
+withthedetailedarchitecturedepictedinFig.3c,wherewefirstconcatenatethe
+input point prompt (i.e., a positional embedding) with learnable flow prompts
+and moving object score (MOS) tokens to form queries. These queries then
+iteratively attend to dense flow features in a lightweight transformer decoder.
+There are two outputs from the flow prompt generator, namely, the refined flow
+prompts,andanMOStoken,whichissubsequentlyprocessedbyanMLP-based
+head to yield a final moving object score.
+Segmentation Module. The overall structure of the segmentation module re-
+semblestheoriginalSAM,exceptfortwoadaptions:(i)TheIoU-predictionhead
+isre-purposedtopredictforegroundobjectscores(fIoU)(sameastheFlowI-SAM);
+(ii) The outputs tokens from flow prompt generator are injected as additional
+query inputs.
+FlowP-SAMInference.SimilartoFlowI-SAM,weprompt FlowP-SAM withsingle
+point prompts from a uniform grid to iteratively predict possible segmentation
+masks, together with MOS and fIoU estimations. These predicted scores are
+averaged, i.e., (si +si )/2, and then utilised to guide post-processing
+MOS,t fIoU,t
+which involves the NMS and overlay of selected masks.
+FlowP-SAM Training.WetrainFlowP-SAMinanend-to-endfashionwhilekeep-
+ing the SAM pre-trained prompt encoder and image encoders frozen. The flow
+transformer is trained from scratch, and the mask decoder in the segmentation
+module is finetuned on top of the pre-trained SAM. The overall loss is:Moving Object Segmentation: All You Need Is SAM (and Flow) 7
+N,T
+L =
+1 (cid:88)(cid:16)
+L (Mi,Mˆi)
+FlowP-SAM NT BCE t t
+i,t
+(cid:17)
++λ L (si ,sˆi )+λ ∥si −sˆi ∥2 (4)
+m BCE MOS,t MOS,t f fIoU,t fIoU,t
+where Mˆi corresponds to the groundtruth mask. sˆi and sˆi indicate the
+t MOS,t fIoU,t
+groundtruth of two predicted scores, with λ and λ being the scale factors.
+m f
+6 Sequence-level Mask Association
+In this section, we outline our method for linking the frame-wise predictions for
+eachmovingobjectintoacontinuoustrackthroughoutthesequence.Specifically,
+wecomputetwotypesofmasks:frame-wisemasksM atthecurrentframeusing
+the model (FlowI-SAM and/or FlowP-SAM); and sequence-level masks M, that
+are obtained by propagating the initial frame prediction with optical flow, we
+thenupdatethemaskofthecurrentframebymakingacomparisonbetweenthe
+two. The following section details our update mechanism.
+UpdateMechanism.Thisprocessaimstoassociateobjectmasksacrossframes,
+as well as to determine whether the sequence-level results at a particular frame
+should be obtained directly from frame-level predictions at that frame or by
+propagating from previous frame results.
+Specifically, given a sequence-level mask for object i at frame t − 1 (i.e.,
+Mi ), we first warp it to frame t using optical flow,
+t−1
+Mi =warp(Mi ,F ) (5)
+t←t−1 t−1 t−1
+We then consider three sets of masks: (i) the warped masks {Mi }; (ii)
+t←t−1
+theframe-levelpredictions{Mi}atframet;(iii)theframe-levelpredictionsfrom
+t
+neighboringframes(with∆tgap)afteraligningthemtothecurrentframeusing
+opticalflow(i.e.,{Mi }). Foreachpairofmasksets,weperformapairwise
+t←t+∆t
+Hungarian matching based on the IoU score, resulting in three pairings in total.
+The Hungarian matched pairs can then reflect the temporal consistency across
+thesepredictionsbasedonthetransitivity principle,i.e.ifobjectiin(i)matches
+with object j in (ii) and object k in (iii), then the latter two objects must also
+match with each other. If such transitivity holds, we set the consistency score
+c =1, and c =0 otherwise.
+i i
+This matching process is repeated for ∆t ∈ {1,2,−1,−2}, resulting in an
+averaged consistency score c¯, which guides the following mask update:
+i
+(cid:40)
+Mi if c¯ ≥0.5
+Mi = t i (6)
+t Mi if c¯ <0.5
+t←t−1 i
+where Mi denotes the sequence-level mask prediction for object i at frame t.
+t8 J. Xie et al.
+The rationale behind this is that the two methods have their own strengths
+and drawbacks: propagation is safe in preserving the object identity, but the
+mask quality degrades over time, whereas updating ensures high-quality masks
+but comes with the risk of mis-associating object identities. Thus, if the current
+frame-wise mask is temporally consistent, then we can be reasonably confident
+to update the mask, if not, then we choose the safer option and propagate the
+previous mask.
+Notethatwedothisseparatelyforeachobjecti∈N,soeachobjectgetsup-
+datedorpropagatedindependently.Welastlylayeralltheobjectsbacktogether
+(toitsoriginalorder)andremoveanyoverlapstoobtainthefinalsequence-level
+predictions.
+7 Experiments
+7.1 Datasets
+Single-ObjectBenchmarks.Forsingle-objectmotionsegmentation,weadopt
+standard datasets, including DAVIS2016 [31], SegTrackv2 [18], FBMS-59 [28],
+and MoCA [16]. Although SegTrackv2 and FBMS-59 include a few multi-object
+sequences,followingthecommonpractice[15,47],wetreatthemassingle-object
+benchmarksbygroupingallmovingobjectsintoasingleforegroundmask.MoCA
+stands for Moving Camouflaged Animals, designed as a camouflaged object de-
+tection benchmark. Following [15,43,47], we adopt a filtered MoCA dataset by
+excluding videos with predominantly no locomotion.
+Multi-Object Benchmarks.Intermsofmulti-objectsegmentation,wereport
+the performance on DAVIS2017 [33], DAVIS2017-motion [33,43], and YouTube-
+VOS2018-motion [44,46], where DAVIS2017 is characterised by predominantly
+movingobjects,eachannotatedasdistinctentities.Forexample,amanridinga
+horsewouldbeseparatelylabelled.Incontrast,DAVIS2017-motionre-annotates
+theobjectsbasedontheirjointmovementssuchthatobjectswithsharedmotion
+are annotated as a single entity. For example, a man riding a horse is annotated
+as a single entity due to their shared motion.
+TheYouTubeVOS2018-motion[44]datasetisacuratedsubsetoftheoriginal
+YouTubeVOS2018 [46]. It specifically excludes video sequences involving com-
+mon motion, severe partial motion, and stationary objects, making it ideally
+suited for motion segmentation evaluation. Whereas, the original dataset also
+annotates many stationary objects and only provides partial annotations for a
+subset of moving objects.
+Summary of Evaluation Datasets. To investigate the role of motion in ob-
+jectdiscoveryandsegmentation,weadoptallaforementionedbenchmarks,which
+consist of only predominantly moving object sequences. Notably, for the evalu-
+ation of FlowI-SAM, we exclude the class-labelled DAVIS2017 dataset, as com-
+monly moving objects cannot be separated solely based on motion cues.
+Training Datasets.ToadapttheRGBpre-trainedSAMformovingobjectdis-
+covery and motion segmentation, we train both FlowI-SAM and FlowP-SAM firstMoving Object Segmentation: All You Need Is SAM (and Flow) 9
+on the synthetic dataset introduced by [43], as described below, and then on
+real-world video datasets, including DAVIS2016, DAVIS2017, and DAVIS2017-
+motion.
+7.2 Evaluation Metrics
+To assess the accuracy of predicted masks, we report intersection-over-union
+(J), except for MoCA where only the ground-truth bounding boxes are given,
+we instead follow the literature [47] and report the detection success rate (SR).
+Regardingmulti-objectbenchmarks,weadditionallyreportthecontouraccuracy
+(F) in Appendix D.
+In this work, we differentiate between the frame-level and sequence-level
+methods,andadopttwodistinctevaluationprotocols:(i)Sinceframe-levelmeth-
+odsgeneratethesegmentationindependently foreachframe,weapplyper-frame
+Hungarian matching to match the object masks between predictions with the
+groundtruth, before the evaluation; (ii) Conversely, sequence-level methods em-
+ploy an extra step to link object masks across frames. As a result, the Hungar-
+ian matching is conducted globally for each sequence, i.e., the object IDs be-
+tween predicted and groundtruth masks are matched once per sequence. Given
+the added complexity and potential errors during frame-wise object association,
+sequence-level predictions are often considered a greater challenge.
+7.3 Implementation Details
+In this section, we summarise the experimental setting in our frame-level seg-
+mentation models. For more information regarding detailed architectures, hy-
+perparameter settings, and sequence-level mask associations, please refer to Ap-
+pendix A.
+Flow Computation. We adopt an off-the-shelf method (RAFT [37]) to es-
+timate optical flow with multiple frame gaps at (1,-1) and (2,-2), except for
+YTVOS18-m and FBMS-59, where higher frame gaps at (3,-3) and (6,-6) are
+used to compensate for slow motion.
+Model Settings. For both FlowI-SAM and FlowP-SAM, we follow the default
+SAM setting and adopt the first output mask token (out of four) for mask
+predictions. For FlowI-SAM, we deploy two versions of the pre-trained SAM
+image encoder, specifically ViT-B and ViT-H, to extract optical flow features.
+RegardingFlowP-SAM,forefficiencyreasons,weutiliseViT-Btoencodeopti-
+cal flows and employ ViT-H as the image encoder for RGB frames. We initialise
+the flow prompt generator with 4 learnable flow prompt tokens, which are sub-
+sequently processed by a light-weight two-layer transformer decoder in the flow
+transformer module.
+Evaluation Settings. At inference time, for FlowI-SAM with flow-only in-
+puts, we input independent point prompts over a 10×10 uniform grid, while
+forFlowP-SAM,totakeaccountformorecomplicatedRGBtextures,weconsider
+a large grid size of 20×20.10 J. Xie et al.
+Mask Selection over Multiple Point Prompts.Duringpost-processing,we
+utilise the predicted scores (fIoU for FlowI-SAM, and an average of MOS and
+fIoUforFlowP-SAM)asguidancethroughoutthemaskselectionprocess:(i)Non-
+Maximum Suppression (NMS) is applied to filter out repeating masks and keep
+theoneswithhigherscores;(ii)Theremainingmasksarethenrankedaccording
+to their scores and top-n masks are retained (n=5 for FlowI-SAM, and n=10
+forFlowP-SAM);(iii)Thesenmasksareoverlaidbyallocatingmaskswithhigher
+scores at the front.
+Training Settings. The training is performed in two stages, which involves
+synthetic pre-training on the dataset proposed by [43], followed by finetuning
+on the real DAVIS sequences, as detailed in Appendix A.1. YTVOS is not used
+for fine-tuning as there is only a low proportion of moving object sequences.
+We train both models in an end-to-end manner using the Adam Optimiser at
+a learning rate of 3e−5. The training was conducted on a single NVIDIA A40
+GPU, with each mode taking roughly 3 days to reach full convergence.
+7.4 Ablation Study
+Wepresentaseriesofablationstudiesonkeydesignsintheper-frameFlowI-SAM
+and FlowP-SAM models, as well as on our sequence-level method. For a more
+detailed ablation analysis, we refer the reader to Appendix B.
+Opticalflow DAVIS17-m DAVIS16 Flowfeatures DAVIS17-m DAVIS16
+framegaps J ↑ J ↑ combination J ↑ J ↑
+1,-1 64.5 78.0 Takingmax 65.0 78.2
+2,-2 65.3 77.7 Averaging 65.7 79.1
+1,-1,2,-2 65.7 79.1
+Table 2: The combination of dense
+Table 1: The frame gaps of op- flow features in FlowI-SAM. The SAM
+tical flow inputs to FlowI-SAM. The ViT-Himageencoderisadopted.There-
+SAM ViT-H image encoder is adopted. sults are shown for frame-level predic-
+Theresultsareshownforframe-levelpre- tions.
+dictions.
+Ablation Studies for FlowI-SAM. Below are the investigations focusing on
+input optical flows and how the dense flow features are combined.
+• Optical Flow Frame Gaps. As demonstrated in Table 1, utilizing optical
+flow inputs with multiple frame gaps (i.e., 1,-1,2,-2) results in noticeable
+performance boosts across both multi- and single-object benchmarks. This
+improvement is attributed to the consistency of motion information over
+extended temporal ranges, which effectively mitigates the impact of noise in
+optical flow inputs caused by slow movements, partial motions, etc.
+• CombinationofFlowFeatures.Wehaveexploredtwocombinationschemes:
+(i) taking the maximum; and (ii) averaging across different frame gaps. Ac-
+cording to Table 2, the averaging approach yields superior results.Moving Object Segmentation: All You Need Is SAM (and Flow) 11
+Predictedscores Flow FTmask DAVIS17 DAVIS16
+Stage
+forpost-processing prompt decoder J ↑ J ↑
+IoU ✗ ✗ 25.2 30.3
+Trainflowprompt IoU ✓ ✗ 61.9 80.6
++
+generator (MOS+IoU)/2 ✓ ✗ 63.7 81.4
+Finetunesegment (MOS+IoU)/2 ✓ ✓ 65.5 81.5
++
+-ationmodule (MOS+fIoU)/2 ✓ ✓ 69.9 86.1
+Table 3: Ablation analysis of FlowP-SAM. The study starts from the vanilla SAM
+checkpoint and progressively introduces new components (labelled in blue). “MOS” is
+shortforthemovingobjectscore,and“fIoU” indicatestheforegroundobjectIoU.The
+results are shown for frame-level predictions.
+Ablation Studies for FlowP-SAM. As illustrated in Table 3, we start from
+the vanilla SAM and progressively add our proposed components. Note that,
+we adopt the same inference pipeline (i.e., the same point prompts and post-
+processing steps) for all predictions shown. Since the foreground object IoU
+(fIoU) is not predicted by the vanilla SAM, we instead apply default IoU pre-
+dictions to guide the mask selection.
+We train the flow prompt generator to simultaneously predict flow prompt
+tokens and moving object scores (MOS). The injection of flow prompts into the
+standard RGB-based SAM architecture results in notable enhancements, verify-
+ing the value of motion information for accurately determining object positions
+andshapes.Additionally,employingMOSasadditionalpost-processingguidance
+yields further improvements.
+Upon finetuning the segmentation module, we observe a slight enhancement
+inperformance.Finally,substitutingthedefaultIoUpredictionswithfIoUscores
+achieves more precise mask selection, as evidenced by the improved results.
+7.5 Quantitative Results
+GiventhedistinctevaluationprotocolsoutlinedinSec.7.2,wereportourmethod
+separately, with a frame-level analysis for FlowI-SAM (introduced in Sec. 4)
+and FlowP-SAM (introduced in Sec. 5), followed by a sequence-level evaluation.
+Frame-LevelPerformance.Table4distinguishesbetweenflow-onlyandRGB-
+basedmethods,wheretheformeradoptsopticalflowastheonlyinputmodality,
+and the latter takes in RGB frames with optional flow inputs. Note that, the
+performance for some recent self-supervised methods is also reported, owing to
+the lack of the supervised baselines.
+In terms of the flow-only segmentation, our FlowI-SAM (with both SAM im-
+age encoders) outperforms the previous methods by a large margin (>10%).
+Regarding the RGB-based segmentation, our FlowP-SAM also achieves state-of-
+the-artperformance,particularlyexcellingatmulti-objectbenchmarks.Bycom-
+bining these two frame-level predictions (FlowI-SAM+FlowP-SAM), we observe
+further performance boosts. This suggests the complementary roles of the flow
+and RGB modalities in frame-level segmentation, particularly when there are12 J. Xie et al.
+Multi-objectbenchmarks Single-objectbenchmarks
+YTVOS18-m DAVIS17-m DAVIS17 DAVIS16 STv2 FBMS MoCA
+Model Flow RGB J ↑ J ↑ J ↑ J ↑ J ↑ J ↑ SR↑
+Flow-only methods
+COD[16] ✓ ✗ − − − 65.3 − − 0.236
+†MG[47] ✓ ✗ 37.0 38.4 − 68.3 58.6 53.1 0.484
+†EM[25] ✓ ✗ − − − 69.3 55.5 57.8 −
+FlowI-SAM(ViT-B) ✓ ✗ 56.7 63.2 − 79.4 69.0 72.9 0.628
+FlowI-SAM(ViT-H) ✓ ✗ 58.6 65.7 − 79.1 70.1 75.1 0.625
+RGB-based methods
+†VideoCutLER[41] ✗ ✓ 59.0 57.4 41.7 − − − −
+†Safadoustetal.[35] ✗ ✓ − 59.3 − − − − −
+MATNet[57] ✓ ✓ − − 56.7 82.4 50.4 76.1 0.544
+DystaB[48] ✗ ✓ − − − 82.8 74.2 75.8 −
+TransportNet[52] ✓ ✓ − − − 84.5 − 78.7 −
+TMO[9] ✓ ✓ − − − 85.6 − 79.9 −
+FlowP-SAM ✓ ✓ 76.9 78.5 69.9 86.1 83.9 87.9 0.645
+FlowP-SAM+FlowI-SAM ✓ ✓ 77.4 80.0 71.6 86.2 84.2 88.7 0.645
+Table4:Frame-levelcomparisononvideoobjectsegmentationbenchmarks.
+“†” indicatesmodelsthataretrainedwithouthumanannotations.Fortheresultsinthe
+lastrow,wecombineframe-levelpredictionsfromFlowP-SAMandFlowI-SAM(ViT-H).
+Multi-objectbenchmarks Single-objectbenchmarks
+YTVOS18-m DAVIS17-m DAVIS17 DAVIS16 STv2 FBMS MoCA
+Model Flow RGB J ↑ J ↑ J ↑ J ↑ J ↑ J ↑ SR↑
+Flow-onlymethods
+†SIMO[15] ✓ ✗ − − − 67.8 62.0 − 0.566
+†Meunieretal.[26] ✓ ✗ − − − 73.2 55.0 59.4 −
+†OCLR[43] ✓ ✗ 46.5 54.5 − 72.1 67.6 70.0 0.599
+OCLR-real[43] ✓ ✗ 49.5 55.7 − 73.3 65.9 70.5 0.605
+FlowI-SAM(seq,ViT-B) ✓ ✗ 51.9 60.0 − 78.4 66.9 69.0 0.615
+FlowI-SAM(seq,ViT-H) ✓ ✗ 53.8 61.5 − 78.0 67.7 71.5 0.604
+RGB-basedmethods
+UnOVOST[22] ✗ ✓ − − 66.4 − − − −
+Propose-Reduce[20] ✗ ✓ − − 67.0 − − − −
+OCLR-flow[43]+SAM[12] ✓ ✓ 57.0 62.0 − 80.6 71.5 79.2 −
+PMN[17] ✓ ✓ − − − 85.6 − 77.8 −
+Xieetal.[44]+SAM[12] ✓ ✓ 71.1 70.9 − 86.6 81.3 85.7 −
+DEVA[5] ✗ ✓ − − 70.4 87.6 − − −
+FlowP-SAM+FlowI-SAM(seq) ✓ ✓ 74.7 74.3 71.0 87.7 80.1 82.8 0.647
+Table 5: Sequence-level comparison on video object segmentation bench-
+marks. “†” indicates models that are trained without human annotations. “seq” indi-
+catesthatoursequence-levelpredictionswithobjectmasksmatchedacrossframes.We
+adopt FlowP-SAM and FlowI-SAM (ViT-H) to obtain the results in the last row.
+multiplemovingobjectsinvolved.Inparticular,weshowthatusingbothmodels
+intandembylayeringFlowI-SAM’spredictionsbehindthatofFlowP-SAMallows
+the model to fill in on missed predictions (such as motion blur, poor lighting, or
+small objects).
+Sequence-Level Performance. For flow-based segmentation, we apply the
+mask association technique introduced in Sec. 6 to obtain sequence-level pre-
+dictions from per-frame FlowI-SAM results. To ensure a fair comparison, weMoving Object Segmentation: All You Need Is SAM (and Flow) 13
+DAVIS YTVOS MoCA
+Flow
+OCLR-
+real
+FlowI-
+SAM
+(seq)
+GT
+Fig.4: Qualitative comparison of flow-only segmentation methodsonDAVIS
+(left), YTVOS (middle), and MoCA (right) sequences. Our FlowI-SAM (seq) success-
+fully identifies moving objects from noisy optical flow background (e.g., the ducks in
+the fourth column).
+additionally finetune the synthetic-trained OCLR [43] model on the real-world
+dataset (DAVIS) with groundtruth annotations provided, resulting in “OCLR-
+real” results.AsshownbythetoppartofTable5,FlowI-SAM(seq)demonstrates
+superiorperformanceagainstOCLR-real,benefitingfromtherobustpriorknowl-
+edge in pre-trained SAM.
+For RGB-based segmentation, we obtain our sequence-level predictions by
+FlowI-SAM+FlowP-SAM. As can be seen from the lower part of Table 5, our
+method achieves outstanding performance across both single- and multi-object
+benchmarks.
+7.6 Qualitative Visualisations
+In this section, example visualisations are provided across multiple datasets,
+where we mainly present sequence-level results, owing to their marginal differ-
+encesfromframe-levelpredictions.Morevisualisationsacrossdifferentevaluation
+datasets can be found in Appendix E.
+Fig. 4 illustrates the segmentation predictions based on only optical flow
+inputs. Compared to OCLR-real, our FlowI-SAM accurately identifies and dis-
+entangles the moving objects from the noisy backgrounds (e.g., the person in
+the first column and the ducks in the fourth column), as well as extracts fine
+structures (e.g., the camouflaged insect in the fifth column) from optical flow.
+Fig. 5 further provides the visualisations of the RGB-based method, where
+thepriorwork(Xieetal.[44]+SAM[12])sometimesfailsto(i)identifythemov-
+ing objects (e.g., missing leopard in the fifth column); (ii) distinguish between
+multiple objects (e.g., entangled object segmentation in the second and fourth
+columns), while our FlowI-SAM+FlowP-SAM (seq) incorporates RGB-based pre-
+diction with flow prompts, resulting in the accurate localisation and segmenta-
+tion of moving objects.14 J. Xie et al.
+DAVIS YTVOS STv2
+RGB
+Flow
+Xie et al.
++ SAM
+FlowP-SAM
++ Flow-I SAM
+(seq)
+GT
+Fig.5: Qualitative comparison of RGB-based segmentation methods on
+DAVIS (left), YTVOS (middle), and SegTrackv2 (right). While the previous method
+(thethirdrow)strugglestodisentanglemultiplemovingobjects(e.g.,mixedgoldfishes
+inthesecondcolumn),ourFlowP-SAM+FlowI-SAM(seq)accuratelyseparatesandseg-
+ments all moving objects.
+8 Conclusion
+Inthispaper,wefocusonmovingobjectsegmentationinreal-worldvideos,byin-
+corporatingper-frameSAMwithmotioninformation(opticalflow)intwoways:
+(i) for flow-only segmentation, we introduce FlowI-SAM that directly takes in
+optical flow as inputs; (ii) for RGB-based segmentation, we utilise motion infor-
+mation to generate flow prompts as guidance. Both approaches deliver state-of-
+the-art performance in frame-level segmentation across single- and multi-object
+benchmarks. Additionally, we develop a frame-wise association method that
+amalgamatespredictionsfromFlowI-SAM and FlowP-SAM,achievingsequence-
+levelsegmentationpredictionsthatoutperformallpriormethodsontheDAVIS,
+YTVOS, and MoCA benchmarks.
+The major limitation of this work is its extended running time, attributed
+to the computationally heavy image encoder in the vanilla SAM. However, our
+approach is generally applicable to other prompt-based segmentation models.
+WiththeemergenceofmoreefficientversionsofSAM,weanticipateasignificant
+reduction in inference time.
+Acknowledgements
+This research is supported by the UK EPSRC CDT in AIMS (EP/S024050/1),
+the Clarendon Scholarship, and the UK EPSRC Programme Grant Visual AI
+(EP/T028572/1).Moving Object Segmentation: All You Need Is SAM (and Flow) 15
+References
+1. Bideau,P.,Learned-Miller,E.:It’smoving!aprobabilisticmodelforcausalmotion
+segmentation in moving camera videos. In: ECCV (2016) 3
+2. Caron, M., Touvron, H., Misra, I., Jégou, H., Mairal, J., Bojanowski, P., Joulin,
+A.: Emerging properties in self-supervised vision transformers. In: ICCV (2021) 3
+3. Cen, J., Fang, J., Yang, C., Xie, L., Zhang, X., Shen, W., Tian, Q.: Segment any
+3d gaussians. arXiv preprint arXiv:2312.00860 (2023) 3
+4. Chen, T., Zhu, L., Ding, C., Cao, R., Zhang, S., Wang, Y., Li, Z., Sun, L., Mao,
+P.,Zang,Y.:Sam-adapter:Adaptingsegmentanythinginunderperformedscenes.
+In: ICCV Workshop (2023) 1, 3
+5. Cheng,H.K.,Oh,S.W.,Price,B.,Schwing,A.,Lee,J.Y.:Trackinganythingwith
+decoupled video segmentation. In: ICCV (2023) 12, 24
+6. Cheng, H.K., Schwing, A.G.: XMem: Long-term video object segmentation with
+an atkinson-shiffrin memory model. In: ECCV (2022) 3
+7. Cheng, Y., Li, L., Xu, Y., Li, X., Yang, Z., Wang, W., Yang, Y.: Segment and
+track anything. arXiv preprint arXiv:2305.06558 (2023) 3
+8. Cho,D.,Hong,S.,Kang,S.,Kim,J.:Keyinstanceselectionforunsupervisedvideo
+object segmentation. arXiv preprint arXiv:1906.07851 (2019) 3
+9. Cho,S.,Lee,M.,Lee,S.,Park,C.,Kim,D.,Lee,S.:Treatingmotionasoptionto
+reducemotiondependencyinunsupervisedvideoobjectsegmentation.In:WACV
+(2023) 12
+10. Choudhury, S., Karazija, L., Laina, I., Vedaldi, A., Rupprecht, C.: Guess What
+Moves: Unsupervised Video and Image Segmentation by Anticipating Motion. In:
+BMVC (2022) 1, 3
+11. Jabri, A., Owens, A., Efros, A.A.: Space-time correspondence as a contrastive
+random walk. In: NeurIPS (2020) 3
+12. Kirillov, A., Mintun, E., Ravi, N., Mao, H., Rolland, C., Gustafson, L., Xiao, T.,
+Whitehead, S., Berg, A.C., Lo, W.Y., Dollar, P., Girshick, R.: Segment anything.
+In: ICCV (2023) 1, 3, 12, 13, 20, 21, 24
+13. Lai, Z., Lu, E., Xie, W.: Mast: A memory-augmented self-supervised tracker. In:
+CVPR (2020) 3
+14. Lai,Z.,Xie,W.:Self-supervisedlearningforvideocorrespondenceflow.In:BMVC
+(2019) 3
+15. Lamdouar, H., Xie, W., Zisserman, A.: Segmenting invisible moving objects. In:
+BMVC (2021) 1, 3, 8, 12
+16. Lamdouar,H.,Yang,C.,Xie,W.,Zisserman,A.:Betrayedbymotion:Camouflaged
+object discovery via motion segmentation. In: ACCV (2020) 3, 8, 12
+17. Lee,M.,Cho,S.,Lee,S.,Park,C.,Lee,S.:Unsupervisedvideoobjectsegmentation
+via prototype memory network. In: WACV (2023) 12
+18. Li,F.,Kim,T.,Humayun,A.,Tsai,D.,Rehg,J.M.:Videosegmentationbytracking
+many figure-ground segments. In: ICCV (2013) 3, 8
+19. Li, S., Seybold, B., Vorobyov, A., Fathi, A., Huang, Q., Kuo, C.C.J.: Instance
+embedding transfer to unsupervised video object segmentation. In: CVPR (2018)
+3
+20. Lin,H.,Wu,R.,Liu,S.,Lu,J.,Jia,J.:Videoinstancesegmentationwithapropose-
+reduce paradigm. In: ICCV (2021) 3, 12, 24
+21. Lu, X., Wang, W., Ma, C., Shen, J., Shao, L., Porikli, F.: See more, know more:
+Unsupervised video object segmentation with co-attention siamese networks. In:
+CVPR (2019) 316 J. Xie et al.
+22. Luiten, J., Zulfikar, I.E., Leibe, B.: Unovost: Unsupervised offline video object
+segmentation and tracking. In: WACV (2020) 3, 12, 24
+23. Ma, J., He, Y., Li, F., Han, L., You, C., Wang, B.: Segment anything in medical
+images. Nature Communications (2024) 1, 3
+24. Mahendran,A.,Thewlis,J.,Vedaldi,A.:Self-supervisedsegmentationbygrouping
+optical-flow. In: ECCV (2018) 3
+25. Meunier, E., Badoual, A., Bouthemy, P.: Em-driven unsupervised learning for ef-
+ficient motion segmentation. IEEE TPAMI (2022) 1, 3, 12
+26. Meunier, E., Bouthemy, P.: Unsupervised space-time network for temporally-
+consistent segmentation of multiple motions. In: CVPR (2023) 1, 3, 12
+27. Miao, B., Bennamoun, M., Gao, Y., Mian, A.: Self-supervised video object seg-
+mentation by motion-aware mask propagation. In: ICME (2022) 3
+28. Ochs, P., Malik, J., Brox, T.: Segmentation of moving objects by long term video
+analysis. IEEE TPAMI (2014) 8
+29. Ochs, P., Brox, T.: Object segmentation in video: a hierarchical variational ap-
+proach for turning point trajectories into dense regions. In: ICCV (2011) 3
+30. Oh,S.W.,Lee,J.Y.,Xu,N.,Kim,S.J.:Videoobjectsegmentationusingspace-time
+memory networks. In: ICCV (2019) 3
+31. Perazzi, F., Pont-Tuset, J., McWilliams, B., Van Gool, L., Gross, M., Sorkine-
+Hornung, A.: A benchmark dataset and evaluation methodology for video object
+segmentation. In: CVPR (2016) 3, 8
+32. Ponimatkin, G., Samet, N., Xiao, Y., Du, Y., Marlet, R., Lepetit, V.: A simple
+and powerful global optimization for unsupervised video object segmentation. In:
+WACV (2023) 3
+33. Pont-Tuset, J., Perazzi, F., Caelles, S., Arbeláez, P., Sorkine-Hornung, A., Gool,
+L.V.: The 2017 davis challenge on video object segmentation. arXiv preprint
+arXiv:1704.00675 (2017) 3, 8
+34. Ren, S., Luzi, F., Lahrichi, S., Kassaw, K., Collins, L.M., Bradbury, K., Malof,
+J.M.: Segment anything, from space? In: WACV (2024) 1, 3
+35. Safadoust,S.,Güney,F.:Multi-objectdiscoverybylow-dimensionalobjectmotion.
+In: ICCV (2023) 1, 12, 24
+36. Tang, L., Xiao, H., Li, B.: Can sam segment anything? when sam meets camou-
+flaged object detection. arXiv preprint arXiv:2304.04709 (2023) 1
+37. Teed, Z., Deng, J.: Raft: Recurrent all-pairs field transforms for optical flow. In:
+ECCV (2020) 9, 19, 20
+38. Ventura, C., Bellver, M., Girbau, A., Salvador, A., Marques, F., Giro-i Nieto, X.:
+RVOS: End-to-end recurrent network for video object segmentation. In: CVPR
+(2019) 3
+39. Vondrick, C., Shrivastava, A., Fathi, A., Guadarrama, S., Murphy, K.: Tracking
+emerges by colorizing videos. In: ECCV (2018) 3
+40. Wang, X., Jabri, A., Efros, A.A.: Learning correspondence from the cycle-
+consistency of time. In: CVPR (2019) 3
+41. Wang, X., Misra, I., Zeng, Z., Girdhar, R., Darrell, T.: Videocutler: Surprisingly
+simpleunsupervisedvideoinstancesegmentation.arXivpreprintarXiv:2308.14710
+(2023) 12, 24
+42. Wu, J., Ji, W., Liu, Y., Fu, H., Xu, M., Xu, Y., Jin, Y.: Medical sam adapter:
+Adaptingsegmentanythingmodelformedicalimagesegmentation.arXivpreprint
+arXiv:2304.12620 (2023) 1, 3
+43. Xie, J., Xie, W., Zisserman, A.: Segmenting moving objects via an object-centric
+layered representation. In: NeurIPS (2022) 1, 3, 8, 9, 10, 12, 13, 18, 19, 24Moving Object Segmentation: All You Need Is SAM (and Flow) 17
+44. Xie, J., Xie, W., Zisserman, A.: Appearance-based refinement for object-centric
+motion segmentation. arXiv:2312.11463 (2023) 3, 8, 12, 13, 24
+45. Xiong, Y., Varadarajan, B., Wu, L., Xiang, X., Xiao, F., Zhu, C., Dai, X., Wang,
+D.,Sun,F.,Iandola,F.,Krishnamoorthi,R.,Chandra,V.:Efficientsam:Leveraged
+masked image pretraining for efficient segment anything. arXiv:2312.00863 (2023)
+3
+46. Xu, N., Yang, L., Fan, Y., Yue, D., Liang, Y., Yang, J., Huang, T.: Youtube-vos:
+A large-scale video object segmentation benchmark. In: ECCV (2018) 3, 8
+47. Yang, C., Lamdouar, H., Lu, E., Zisserman, A., Xie, W.: Self-supervised video
+object segmentation by motion grouping. In: ICCV (2021) 1, 3, 8, 9, 12, 19, 24
+48. Yang, Y., Lai, B., Soatto, S.: Dystab: Unsupervised object segmentation via
+dynamic-static bootstrapping. In: CVPR (2021) 3, 12
+49. Yang, Z., Wang, Q., Bertinetto, L., Bai, S., Hu, W., Torr, P.H.: Anchor diffusion
+for unsupervised video object segmentation. In: ICCV (2019) 3
+50. Yang,Z.,Yang,Y.:Decouplingfeaturesinhierarchicalpropagationforvideoobject
+segmentation. In: NeurIPS (2022) 3
+51. Zhang, C., Han, D., Qiao, Y., Kim, J.U., Bae, S.H., Lee, S., Hong, C.S.: Faster
+segmentanything:Towardslightweightsamformobileapplications.arXivpreprint
+arXiv:2306.14289 (2023) 3
+52. Zhang, K., Zhao, Z., Liu, D., Liu, Q., Liu, B.: Deep transport network for unsu-
+pervised video object segmentation. In: ICCV (2021) 12
+53. Zhang,X.,Gu,C.,Zhu,S.:Sam-helps-shadow:whensegmentanythingmodelmeet
+shadow removal. arXiv preprint arXiv:2306.06113 (2023) 1
+54. Zhao, S., Sheng, Y., Dong, Y., Chang, E.I.C., Xu, Y.: Maskflownet: Asymmetric
+feature matching with learnable occlusion mask. In: CVPR (2020) 20
+55. Zhao, X., Ding, W., An, Y., Du, Y., Yu, T., Li, M., Tang, M., Wang, J.: Fast
+segment anything. arXiv preprint arXiv:2306.12156 (2023) 3
+56. Zheng,Z.,Zhong,Y.,Zhang,L.,Ermon,S.:Segmentanychange.arXiv:2402.01188
+(2024) 3
+57. Zhou,T.,Wang,S.,Zhou,Y.,Yao,Y.,Li,J.,Shao,L.:Motion-attentivetransition
+for zero-shot video object segmentation. In: AAAI (2020) 12, 24
+58. Zou,X.,Yang,J.,Zhang,H.,Li,F.,Li,L.,Gao,J.,Lee,Y.J.:Segmenteverything
+everywhere all at once. arXiv preprint arXiv:2304.06718 (2023) 318 J. Xie et al.
+Appendix
+This Appendix consists of the following sections: (i) In Appendix A, we provide
+implementation detailsregardingarchitecturaldesignsandexperimentalset-
+tings;(ii)InAppendixB,weconductcomprehensiveablation studiesforboth
+frame-level and sequence-level segmentation; (iii) In Appendix C (combining
+motion segmentation with motion-guided segmentation),wediscussthe
+rationaleofcombiningresultsfromFlowI-SAMandFlowP-SAMintoasinglepre-
+diction with some example cases; (iv) In Appendix D, additional quantitative
+comparisons are provided; (v) In Appendix E, visualisations and failure
+cases are discussed.
+A Implementation Details
+In this section, we summarise the experimental settings in our models, includ-
+inghyperparameterchoices,architecturedetails,andtrainingdatasets,withthe
+detailed settings for frame-level and sequence-level segmentation separately dis-
+cussed. The official code will be released upon acceptance.
+A.1 Frame-Level Segmentation
+Training and Evaluation Datasets. For both FlowI-SAM and FlowP-SAM,
+there are two major training stages: a synthetic pre-training on the simulated
+dataset proposed by [43], followed by finetuning on the real DAVIS sequences.
+Thesetwodatasetsareadoptedowingtotheirpredominantlymovingobjectsin
+their training sequences. A more detailed summary of the training datasets and
+corresponding evaluation benchmarks is listed in Table 6. For evaluation, apart
+from the DAVIS validation sequences, we assess the zero-shot performance on
+YTVOS18-m, STv2, FBMS, and MoCA datasets. Notably, owing to occasional
+multi-objectsequencesinSTv2andFBMS,weevaluatethemodelthatistrained
+on multi-object DAVIS sequences.
+Model Training datasets Evaluation datasets
+Syn+DAVIS16 DAVIS16, MoCA
+FlowI-SAM
+Syn+DAVIS17-m DAVIS17-m, YTVOS18-m, STv2, FBMS
+Syn+DAVIS16 DAVIS16, MoCA
+FlowP-SAM Syn+DAVIS17 DAVIS17, YTVOS18-m, STv2, FBMS
+Syn+DAVIS17-m DAVIS17-m
+Table 6: Training datasets and corresponding evaluation benchmarks.
+Datasets in italic indicate zero-shot generalisation during evaluation.Moving Object Segmentation: All You Need Is SAM (and Flow) 19
+Architectural Details. For FlowI-SAM, we preserve the architecture of the
+original SAM and directly finetune it with optical flow inputs. For FlowP-SAM,
+as detailed in the main text, a new flow prompt generator is introduced, with
+the details provided in Algorithm 1.
+Algorithm 1 Pseudo Code for Flow Prompt Generator
+# Number of frame gaps g = 4 (for 1,-1,2,-2)
+# Image resolution H = W = 1024; Image channel size C = 3
+# Feature resolution h = w = 64; Feature channel size c = 256
+""" Flow feature encoding """
+f = SAM_image_encoder(F) # b g C H W (input flow F)
+# b g c h w (dense flow features f)
+f = Average(f) # b c h w, averaging over frame gaps
+""" Point Prompt encoding """
+pp = SAM_prompt_encoder(p) # b 2 (point coordinates p)
+# b c (point prompt token pp)
+""" Query initialisation """
+mos = Embedding(b, c) # b c (learnable moving object score token mos)
+fp = Embedding(b, 4, c) # b 4 c (4 learnable flow prompt tokens fp)
+q = Concat(mos, fp, pp) # b 6 c, concatenating all tokens to form queries q
+""" Flow transformer """
+for i in range(2): # Two layers
+# A standard transformer decoder layer with query, key, value inputs
+# Feed-forward layer dimension = 512; Number of heads = 8
+q = transformer_decoder_layer(q, f, f) # b 6 c
+mos, fp, _ = q # Output tokens
+# Output flow prompt token fp (b 4 c) will be injected into the segmentation module.
+# A three-layer MLP with a sigmoid function as the last activation function
+# Feed-forward layer dimension = 256
+mos_score = MLP(mos) # b 1 (moving object score estimation mos_score)
+Hyperparameter Settings. Regarding the input resolutions, we follow the
+default SAM settings to pad and resize the images to 1024×1024. After the
+frozen SAM encoder, the resultant dense spatial features are of size 64×64,
+with feature dimensions at 256. During training of FlowI-SAM, we adopt a loss
+factor λ = 0.01 for fIoU loss. For FlowP-SAM, we set both loss factors (λ for
+f f
+fIoU loss and λ for MOS loss) to 0.01.
+f
+A.2 Sequence-Level Association
+In this section, we present the code snip used for sequence-level association
+(Algorithm 2). We will release the full code upon publication.
+B Ablation Study
+B.1 Frame-Level Segmentation: FlowI-SAM
+Optical Flow Estimation Method. To ensure a fair comparison, we follow
+priorworks[43,47]andapplyRAFT[37]astheflowestimationmethod.Table720 J. Xie et al.
+Algorithm 2 Pseudo Code for Sequence-Level Association
+def threeway_hungarian(m1, m2, m3):
+ious_23 = iou(m2, m3)
+_, idx_23 = linear_sum_assignment(-ious_23)
+m3_aligned = m3[idx_23]
+ious_13 = iou(m1, m3_aligned)
+ious_12 = iou(m1, m2)
+_, idx_13 = linear_sum_assignment(-ious_13)
+_, idx_12 = linear_sum_assignment(-ious_12)
+return m2[idx_12], (idx_12 == idx_13)
+def temp_consistency(p, m, b1, b2, f1, f2):
+m_aligned, c1 = threeway_hungarian(p, m, b1)
+_, c2 = threeway_hungarian(p, m, b2)
+_, c3 = threeway_hungarian(p, m, f1)
+_, c4 = threeway_hungarian(p, m, f2)
+c = ((c1+c2+c3+c4)/4 >= 0.5)
+return m_aligned * c + p * (1-c)
+demonstrates how the input flow quality affects the segmentation results, which
+also verifies our default choice of RAFT for flow estimation.
+Optical flow DAVIS17-m DAVIS16
+method J ↑ J ↑
+MaskFlownet [54] 61.7 76.1
+RAFT [37] 65.7 79.1
+Table7:Comparisonofopticalflowmethods.Theresultsarepredictedbyframe-
+level FlowI-SAM, where the SAM ViT-H image encoder is adopted to encode optical
+flowwithframegaps{1,-1,2,-2}.WeadoptRAFTasthedefaultopticalflowestimation
+method.
+B.2 Frame-Level Segmentation: FlowP-SAM
+Comparison with SAM [12]. Since the vanilla SAM is not trained to explic-
+itly identify moving foreground objects, for a fair comparison, we consider an
+alternative setup by specifying the objects with their groundtruth centroids as
+point prompt inputs. We apply this setting to both SAM and FlowP-SAM, with
+the performance summarised in Table 8.
+Notably,theoriginalSAMformulationemploysfourmasktokenstogenerate
+masksatdifferentsemanticlevels,includingdefault,sub-parts,parts,andwhole.
+For object-level segmentation, we examine the performance of the 1st (default)
+and 4th (whole) output mask channels. According to Table 8, while the 4th
+output channel shows a superior performance in SAM, we observe an opposite
+trend for FlowP-SAM, where the 1st mask token yields better results. Therefore,
+the 1st output mask token is adopted as our default setting.
+Comparison with FlowI-SAM + SAM [12]. An alternative method for mov-
+ing object segmentation is to apply SAM to refine the flow-predicted masksMoving Object Segmentation: All You Need Is SAM (and Flow) 21
+by FlowI-SAM. However, such a two-stage method prevents the interaction be-
+tween RGB and flow information, leading to inferior performance compared to
+the end-to-end FlowP-SAM, as can be seen in Table 9.
+Number of Transformer Decoder Layers. We further investigate the ef-
+fects of the number of transformer decoder layers in the flow prompt generator
+(in FlowP-SAM). As can be observed from Table 10, increasing the layer number
+from 2 (default) to 4 does not contribute to a noticeable performance change.
+B.3 Sequence-Level Mask Association
+In this section, we conduct ablation studies on our sequence-level mask asso-
+ciation module. We show comparison against two baselines that constitute our
+method: (i) propagating the previous mask only, and (ii) Hungarian-matching
+betweenpastandpresentmasksonly.Wealsoperformablationstoshowtheper-
+formance gains by averaging the confidence scores across different neighbouring
+frames as compared to picking one neighbouring frame. The results are shown
+in Table 11.
+We observe that (i) Hungarian matching alone presents a strong baseline for
+RGB-basedtracking(usingFlowP-SAM+FlowI-SAM),whereframe-levelpredic-
+tions are largely consistent; (ii) However, in flow-only cases (using FlowI-SAM)
+Output mask DAVIS17-m DAVIS17 DAVIS16
+Model
+token/channel J ↑ J ↑ J ↑
+SAM [12] 1st 46.6 48.3 42.7
+SAM [12] 4th 71.4 68.0 73.6
+FlowP-SAM 4th 79.5 72.6 82.9
+FlowP-SAM 1st 80.0 73.4 85.6
+Table 8: Quantitative comparison when the centroid of each groundtruth
+object mask is provided as a point prompt. Both SAM and FlowP-SAM are
+evaluatedfollowingthissetting.Theresultsareshownforframe-levelpredictions,and
+our default FlowP-SAM utilises the 1st mask token.
+DAVIS17-m DAVIS16
+Method
+J ↑ J ↑
+FlowI-SAM + SAM [12] 72.6 82.4
+FlowP-SAM 78.5 86.1
+Table9:Comparisonwithatwo-stagemethod.Theresultsareshownforframe-
+level predictions.
+Transformer DAVIS17-m DAVIS17 DAVIS16
+decoder layers J ↑ J ↑ J ↑
+2 78.5 69.9 86.1
+4 79.2 69.1 85.1
+Table 10: The number of layers in the transformer decoder of flow prompt
+generator in FlowP-SAM. The results are shown for frame-level predictions, and by
+default, we adopt 2 transformer decoder layers.22 J. Xie et al.
+where object identities might disappear, Hungarian matching is prone to lose
+track of the object. This issue of losing track can be solved using our temporal
+consistencymethod,wherechoosingtopropagateappropriatemaskshelpsmain-
+tain object permanence. We observe that flow-only method (using FlowI-SAM)
+benefitsconsiderablyfromthis.Wepostulatefurtherthatusingmoreframesmay
+help even further, but this will involve computing new optical flows, whereas we
+only currently use those that are already used as input to FlowI-SAM and/or
+FlowP-SAM.
+RGB-based Flow-only
+DAVIS17 J ↑ DAVIS17-m J ↑
+Propagation only 34.9 29.3
+Hungarian only 68.1 48.5
+Temporal consistency (−1) 69.0 48.7
+Temporal consistency (±1) 69.4 51.7
+Temporal consistency (±1, ±2) 71.0 61.5
+Table 11: Ablation study on sequence-level mask association. The frame-
+wise masks are predicted by FlowP-SAM + FlowI-SAM (ViT-H) for RGB-based, and
+FlowI-SAM (ViT-H) for flow-only segmentation, with different methods for sequence-
+level mask association.
+C Combining Motion Segmentation with Motion-Guided
+Segmentation
+In the main paper, we have quantitatively shown that combining the results of
+FlowI-SAMandFlowP-SAMsimplybylayeringthelatterbehindtheformeryields
+better results. Here, we discuss the reason why this is the case, and also provide
+visualisation examples.
+We observe that one of the main failure modes of FlowP-SAM (and other
+RGB-based methods) is when the model completely fails to identify the object
+duetopoorappearance,suchasocclusion,camouflage,motionblur,smallobject
+size, or bad lighting conditions. In these cases, FlowI-SAM (and other flow-only
+methods) shine as they are agnostic to appearance and objectness.
+In such cases, layering the motion segmentation masks behind RGB-based
+segmentation masks is a very simple and sensible solution. Specifically, we con-
+catenate the FlowI-SAM predictions behind that of FlowP-SAM, followed by re-
+moving any overlaps. In this way, the regions predicted by both models will
+always belong to FlowP-SAM.
+We show the effectiveness of this method in Figure 6. In each example case,
+the predicted mask from FlowP-SAM missed an object, whereas the predicted
+mask from FlowI-SAM grouped all moving objects as a single object. We show
+that layering these two masks together allows the prediction from FlowI-SAM toMoving Object Segmentation: All You Need Is SAM (and Flow) 23
+‘fill in’ the gap that FlowP-SAM failed to predict. Notably, the object identities
+are also correctly separated. This is because FlowI-SAM , being layered behind,
+does not over-segment regions that are already segmented by FlowP-SAM.
+RGB
+Flow
+Ours
+(P-SAM)
+Ours
+(I-SAM)
+Ours
+(Both)
+GT
+Fig.6: Combining FlowI-SAM and FlowP-SAM. This example shows combining the
+two predictions by layering FlowI-SAM’s prediction behind FlowP-SAM allows recovery
+oflostobjectsundetectedbyFlowP-SAMduetosmallobject(left),occlusion(middle),
+and motion blur (right). Note that both models individually make wrong predictions.
+D Quantitative Results
+For multi-object segmentation, we report the performance on both IoU (J) and
+contour accuracy (F), with Table 12 and Table 13 comparing across frame-level
+and sequence-level methods, respectively.
+E Qualitative Results and Failure Cases
+Additional visualisations are provided for our sequence-level segmentation re-
+sults on various datasets, including DAVIS17 (Fig. 7), YTVOS18-m (Fig. 8),
+MoCA (Fig. 9), STv2 (Fig. 10), and FBMS (Fig. 11). Note that, we adopt
+FlowI-SAM (seq) as the flow-only method, and FlowP-SAM + FlowI-SAM (seq)
+for RGB-based segmentation.
+Failure Cases. For FlowI-SAM, one common failure case is related to the unin-
+formative optical flow inputs. For instance, in the third sequence in Fig. 8 and
+the second sequence in Fig. 11, (partially) stationary objects are not captured24 J. Xie et al.
+YTVOS18-m DAVIS17-m DAVIS17
+Flow RGB J&F ↑ J ↑ F ↑ J&F ↑ J ↑ F ↑ J&F ↑ J ↑ F ↑
+Flow-only methods
+†MG[47] ✓ ✗ 33.3 37.0 29.6 35.8 38.4 33.2 − − −
+FlowI-SAM(ViT-B) ✓ ✗ 53.9 56.7 51.2 62.3 63.2 61.3 − − −
+FlowI-SAM(ViT-H) ✓ ✗ 56.4 58.6 54.2 64.8 65.7 63.9 − − −
+RGB-based methods
+†VideoCutLER[41] ✗ ✓ 57.0 59.0 55.1 57.3 57.4 57.2 43.6 41.7 45.5
+†Safadoustetal.[35] ✗ ✓ − − − 59.2 59.3 59.2 − − −
+MATNet[57] ✓ ✓ − − − − − − 58.6 56.7 60.4
+FlowP-SAM ✓ ✓ 76.7 76.9 76.4 78.9 78.5 79.3 72.7 69.9 75.4
+FlowP-SAM+FlowI-SAM ✓ ✓ 77.4 77.4 77.5 80.1 80.0 80.2 74.6 71.6 77.6
+Table 12: Frame-level comparison on multi-object segmentation
+benchmarks. “†” indicates models that are trained without human anno-
+tations. For the results in the last row, we combine frame-level predictions
+from FlowP-SAM and FlowI-SAM (ViT-H).
+YTVOS18-m DAVIS17-m DAVIS17
+Flow RGB J&F ↑ J ↑ F ↑ J&F ↑ J ↑ F ↑ J&F ↑ J ↑ F ↑
+Flow-onlymethods
+†OCLR[43] ✓ ✗ 45.3 46.5 44.1 55.1 54.5 55.7 − − −
+OCLR-real[43] ✓ ✗ 47.5 49.5 45.5 56.2 55.7 56.7 − − −
+FlowI-SAM(seq,ViT-B) ✓ ✗ 50.2 51.9 48.4 59.3 60.0 58.6 − − −
+FlowI-SAM(seq,ViT-H) ✓ ✗ 52.1 53.8 50.3 61.0 61.5 60.5 − − −
+RGB-basedmethods
+UnOVOST[22] ✗ ✓ − − − − − − 67.9 66.4 69.3
+Propose-Reduce[20] ✗ ✓ − − − − − − 70.4 67.0 73.8
+OCLR-flow[43]+SAM[12] ✓ ✓ 58.5 57.0 60.0 64.2 62.0 66.4 − − −
+Xieetal.[44]+SAM[12] ✓ ✓ 70.6 71.1 70.2 71.5 70.9 72.1 − − −
+DEVA[5] ✗ ✓ − − − − − − 73.4 70.4 76.4
+FlowP-SAM+FlowI-SAM(seq) ✓ ✓ 75.2 74.7 75.7 75.0 74.3 75.6 73.6 71.0 76.1
+Table 13: Sequence-level comparison on multi-object segmentation bench-
+marks. “†” indicates models that are trained without human annotations. “seq” indi-
+catesthatoursequence-levelpredictionswithobjectmasksmatchedacrossframes.We
+adopt FlowP-SAM and FlowI-SAM (ViT-H) to obtain the results in the last row.
+by the motion fields, therefore leading to missing objects/parts in the resultant
+flow-only segmentation.
+Another limitation in this work is that the sequence-wise association fails in
+some cases, as shown in Fig. 12. Here, the occlusion is long (10 frames), and
+the model has lost track of the object. This can indeed be improved by giving
+a longer temporal context in the temporal consistency, though our method does
+provide a strong baseline.Moving Object Segmentation: All You Need Is SAM (and Flow) 25
+RGB
+Flow
+Ours
+(Flow-
+only)
+Ours
+(RGB-
+based)
+GT
+RGB
+Flow
+Ours
+(Flow-
+only)
+Ours
+(RGB-
+based)
+GT
+Fig.7: Qualitative visualisation on DAVIS sequences. The sequence-level pre-
+dictionsareshown,withFlowI-SAM(seq)andFlowP-SAM+FlowI-SAM(seq)beingour
+flow-onlyandRGB-basedmethods,respectively.Ourflow-onlymethodcorrectlyiden-
+tifiesmultiplemovingobjectsbasedonnoisyopticalflowinputs(e.g.,threepigsinthe
+bottomleft),whileourRGB-basedmethodyieldsmoreaccuratesegmentationmasks.26 J. Xie et al.
+RGB
+Flow
+Ours
+(Flow-
+only)
+Ours
+(RGB-
+based)
+GT
+Fig.8: Qualitative visualisation on YTVOS sequences. The last sequence pro-
+videsapartialmotionexample,whereflow-onlysegmentationfailstorecoverthewhole
+object mask.
+RGB
+Flow
+Ours
+(Flow-
+only)
+Ours
+(RGB-
+based)
+GT
+Fig.9:QualitativevisualisationonMoCAsequences.Bothflow-onlyandRGB-
+based methods (with flow prompts) are capable of discovering the camouflaged object
+by leveraging motion information.Moving Object Segmentation: All You Need Is SAM (and Flow) 27
+RGB
+Flow
+Ours
+(Flow-
+only)
+Ours
+(RGB-
+based)
+GT
+Fig.10: Qualitative visualisation on STv2 sequences. With the predominant
+object locomotion (therefore clean optical flow fields), both flow-only and RGB-based
+methods yield accurate segmentation masks.
+RGB
+Flow
+Ours
+(Flow-
+only)
+Ours
+(RGB-
+based)
+GT
+Fig.11: Qualitative visualisation on FBMS sequences. As shown in the sec-
+ond sequence (i.e., the giraffes), the flow-only method is not capable of discovering
+the occasionally stationary object (the little giraffe), whereas the RGB-based method
+identifies both foreground giraffes correctly.
+Frame 60 Frame 80 Frame 120 Frame 140 Frame 160 Frame 180
+RGB
+Ours
+(RGB-
+based)
+GT
+Fig.12: A failure case.ThisexamplesequenceisfromFBMS.Foraclearerdemon-
+stration, the occluder (a horse foot) is labelled with the red box, and the object ID
+mis-matching is indicated by different colours (orange and green) of object masks.
