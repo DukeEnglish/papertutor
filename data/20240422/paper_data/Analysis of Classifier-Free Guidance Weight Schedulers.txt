@@ -1,0 +1,1279 @@
+Analysis of Classifier-Free Guidance Weight Schedulers
+Xi Wang1, Nicolas Dufour1,2, Nefeli Andreou1,3, Marie-Paule Cani1,
+Victoria Fernández Abrevaya4, David Picard*2, and Vicky Kalogeiton*1
+1LIX, Ecole Polytechnique, CNRS, IPP 2LIGM, Ecole des Ponts, UGE, CNRS
+3University of Cyprus 4MPI, Tübingen *Denotes equal supervision
+Low static guidance:
+w=2.0
+fortinrange(1,T):
+eps_c=model(x,T-t,c)
+eps_u=model(x,T-t,0)
+eps=(w+1)*eps_c-w*eps_u
+x=denoise(x,eps,T-t)
+✗Fuzzyimages,butmanydetails and
+textures
+High static guidance:
+w=14.0
+fortinrange(1,T):
+eps_c=model(x,T-t,c)
+eps_u=model(x,T-t,0)
+eps=(w+1)*eps_c-w*eps_u
+x=denoise(x,eps,T-t)
+✗Sharpimages,butlackof details
+andsolidcolors
+Dynamic guidance:
+w0=14.0
+fortinrange(1,T):
+eps_c=model(x,T-t,c)
+eps_u=model(x,T-t,0)
+#clamp-linearscheduler
+w=max(1,w0*2*t/T)
+eps=(w+1)*eps_c-w*eps_u
+x=denoise(x,eps,T-t)
+✓Sharpimageswithmanydetailsand
+textures,withoutextracost.
+“fullbody,acatdressedasaViking,withweaponsinhispaws,onaVikingship,
+battlecoloring,glowhyper-detail,hyper-realism,cinematic,trendingonartstation”
+Fig.1: Classifier-Free Guidance introduces a trade-off between detailed but fuzzy im-
+ages(lowguidance,top)andsharpbutsimplisticimages(highguidance,middle).Using
+a guidance scheduler (bottom) is simple yet very effective in improving this trade-off.
+Abstract. Classifier-Free Guidance (CFG) enhances the quality and
+condition adherence of text-to-image diffusion models. It operates by
+combining the conditional and unconditional predictions using a fixed
+weight (Fig. 1). However, recent works vary the weights throughout the
+diffusion process, reporting superior results but without providing any
+rationaleoranalysis.Byconductingcomprehensiveexperiments,thispa-
+per provides insights into CFG weight schedulers. Our findings suggest
+thatsimple,monotonicallyincreasingweightschedulersconsistentlylead
+toimprovedperformances,requiringmerelyasinglelineofcode.Inaddi-
+tion,morecomplexparametrizedschedulerscanbeoptimizedforfurther
+improvement, but do not generalize across different models and tasks.
+4202
+rpA
+91
+]VC.sc[
+1v04031.4042:viXra2 Xi Wang et al.
+1 Introduction
+Diffusionmodelshavedemonstratedprominentgenerativecapabilitiesinvarious
+domains e.g. images [1], videos [2], acoustic signals [3], or 3D avatars [4]. Con-
+ditional generation with diffusion (e.g. text-conditioned image generation) has
+been explored in numerous works [5–7], and is achieved in its simplest form by
+addinganextraconditioninputtothemodel[8].Toincreasetheinfluenceofthe
+condition on the generation process, Classifier Guidance [9] proposes to linearly
+combinethegradientsofaseparatelytrainedimageclassifierwiththoseofadif-
+fusion model. Alternatively, Classifier-Free Guidance (CFG) [10] simultaneously
+trains conditional and unconditional models, and exploits a Bayesian implicit
+classifier to achieve condition reliance without requiring an external classifier.
+In both cases, a weighting parameter ω controls the importance of the gen-
+erative and guidance terms and is directly applied at all timesteps. Varying ω
+is a trade-off between fidelity and condition reliance, as an increase in condition
+reliance often results in a decline in both fidelity and diversity. In some recent
+literature, the concept of dynamic guidance instead of constant one has been
+mentioned:MUSE[11]observedthatalinearlyincreasingguidanceweightcould
+enhance performance and potentially increase diversity. This approach has been
+adoptedinsubsequentworks,suchasinStableVideoDiffusion[12],andfurther
+mentionedin[13]throughanexhaustivesearchforaparameterizedcosine-based
+curve (pcs4) that performs very well on a specific pair of model and task. In-
+triguingly, despite the recent appearance of this topic in the literature, none of
+the referenced studies has conducted any empirical experiments or analyses to
+substantiatetheuseofaguidanceweightscheduler.Forinstance,theconceptof
+linearguidanceisbrieflymentionedinMUSE[11],aroundEq.1:"we reduce the
+hit to diversity by linearly increasing the guidance scale t [...] allowing early to-
+kens to be sampled more freely". Similarly, the pcs4 approach [13] is only briefly
+discussedintheappendix,withoutanydetailedablationorcomparisontostatic
+guidance baselines. Thus, to the best of our knowledge, a comprehensive guide
+to dynamic guidance weight schedulers does not exist at the moment.
+Inthispaper,webridgethisgapbydelvingintothebehaviorofdiffusionguid-
+anceandsystematicallyexaminingitsinfluenceonthegeneration,discussingthe
+mechanism behind dynamic schedulers and the rationale for their enhancement.
+We explore various heuristic dynamic schedulers and present a comprehensive
+benchmark of both heuristic and parameterized dynamic schedulers across dif-
+ferent tasks, focusing on fidelity, diversity, and textual adherence. Our analysis
+is supported by quantitative, and qualitative results and user studies.
+Ourfindingsarethefollowing:First,weshowthattoomuchguidanceatthe
+beginning of the denoising process is harmful and that monotonically increas-
+ing guidance schedulers are performing the best. Second, we show that a simple
+linearly increasing scheduler always improves the results over the basic static
+guidance, while costing no additional computational cost, requiring no addi-
+tionaltuning,andbeingextremelysimpletoimplement.Third,aparameterized
+scheduler, like clamping a linear scheduler below a carefully chosen threshold
+(Figure 1) can significantly further improve the results, but the choice of theAnalysis of Classifier-Free Guidance Weight Schedulers 3
+Fig.2:ExamplesofheuristicsandparameterizedonSDXL.Increasingheuristics
+(linear and cosine) show better fidelity, textual adherence and diversity.
+optimal parameter does not generalize across models and tasks and has thus to
+be carefully tuned for the target model and task. All our findings constitute a
+guidetoCFGschedulersthatwillbenefitandimproveallworksrelyingonCFG.
+2 Related Work
+Generative and Diffusion Models. Before the advent of diffusion models,
+severalgenerativemodelsweredevelopedtocreatenewdatathatmimicsagiven
+dataset, either unconditionally or with conditional guidance. Notable achieve-
+mentsincludeVariationalAutoEncoders(VAEs)[14]andGenerativeAdversarial
+Networks(GANs)[15],whichhaverecordedsignificantprogressinvariousgener-
+ative tasks [16–19]. Recently, diffusion models have demonstrated a remarkable
+capacitytoproducehigh-qualityanddiversesamples.Theyhaveachievedstate-
+of-the-art results in several generation tasks, notably in image synthesis [1,20],
+text-to-image applications [9,21–23] and text-to-motion [4].
+Guidance in Diffusion and Text-to-Image. Making generative models con-
+trollable and capable of producing user-aligned outputs requires making the
+generationconditionalonagiveninput.Conditioneddiffusionmodelshavebeen
+vastlyexplored[5–7].Theconditionisachievedinitssimplestformbyaddingex-
+trainput,typicallywithresidualconnections[8].Toreinforcethemodel’sfidelity
+tospecificconditions,twomainapproachesprevail:ClassifierGuidance(CG)[9],
+which involves training an image classifier externally, and Classifier-Free Guid-4 Xi Wang et al.
+Fig.3: Qualitative results of fidelity for different guidance schedulers compared
+with static baseline. linear and cosine schedulers show better image details (flower
+petal, figurine engraving), more natural color (pink corridor), and better textual ad-
+herence (bad weather for the two birds image, key-chain of the figurine).
+ance (CFG) [10], that relies on an implicit classifier through joint training of
+conditional and unconditional models (using dropout on the condition).
+Particularly, CFG has catalyzed advancements in text-conditional genera-
+tion, a domain where training a noisy text classifier is less convenient and per-
+formsworse.Thisapproachbreathednewlifeintothetext-to-imageapplication,
+initially proposed in several works such as [24,25]. Numerous works [21,26–28]
+haveleveragedtext-to-imagegenerationwithCFGdiffusionmodelsconditioned
+on text encoders like CLIP [29], showcasing significant progress in the field, e.g.
+theLatentDiffusionModel[9]andStableDiffusion[21]employVAElatentspace
+diffusion with CFG with CLIP encoder. SDXL, an enhanced version, leverages
+a larger model and an additional text encoder for high-resolution synthesis.
+Improvements on Diffusion Guidance. In Classifier Guidance (CG), the
+classifier’s gradient tends to vanish towards the early and final stages due to
+overconfidence.Tocounteractthiseffect,[30]leveragestheentropyoftheoutput
+distribution as an indication of vanishing gradient and rescales the gradient
+accordingly. To prevent such adversarial behaviors, [31] explored using multiple
+class conditions, guiding the image generation from a noise state towards an
+average of image classes before focusing on the desired class with an empiricalAnalysis of Classifier-Free Guidance Weight Schedulers 5
+Fig.4: Qualitative results of diversity of different guidance schedulers compared
+with static baseline. Heuristic schedulers show better diversity: more composition and
+richer background types for the teddy bear example, as well as the gesture, lighting,
+color and compositions in the astronaut image.
+scheduler.Subsequently,[32]identifiedandquantifiedgradientconflictsemerging
+from the guidance and suggested gradient projection as a solution.
+In Classifier-Free Guidance (CFG), [33] used CFG to recover a zero-shot
+classifier by sampling across timesteps and averaging the guidance magnitude
+fordifferentlabels,withthelowestmagnitudecorrespondingtothemostproba-
+blelabel.However,theyobservedadiscrepancyinperformanceacrosstimesteps
+with early stages yielding lower accuracy than intermediate ones. [11] observed
+that a linear increase in guidance scale enhances diversity. Similarly, [13] devel-
+oped a parameterized power-cosine-like curve, optimizing a specific parameter
+fortheirdatasetandmethod.Buttheselinearandpower-cosineschedulershave
+been suggested as improvements over constant static guidance without rigor-
+ous analysis or testing. To this end, we provide an extensive study of dynamic
+guidance for both heuristic and parametrized schedulers across several tasks.
+3 Background on Guidance
+Following DDPM [1], diffusion consists in training a network ϵ to denoise a
+θ
+noisy input to recover the original data at different noise levels, driven by a
+noisescheduler.Moreformally,thegoalistorecoverx ,theoriginalimagefrom
+0
+(cid:112) (cid:112)
+x = γ(t)x + 1−γ(t)ϵ, where γ(t)∈[0,1] is a monotonically decreasing noise
+t 0
+scheduler function of the timestep t and applied to a standard Gaussian noise6 Xi Wang et al.
+ϵ∼N(0,1). In practice, [1] observed that predicting the added noise instead of
+x yielded better performance. The neural network ϵ is then trained with the
+0 θ
+loss: L =E [∥ϵ (x )−ϵ∥] based on the target image
+simple x0∼pdata,ϵ∼N(0,1),t∼U[0,1] θ t
+distribution p with U uniform distributions.
+data
+Once the network is trained, we can sample from p by setting x =ϵ ∼
+data T
+N(0,1)(withγ(T)=0),andgraduallydenoisingtoreachthedatapointx ∼p
+0 data
+with different types of samplers e.g., DDPM [1] or DDIM [20]. To leverage a
+condition c and instead sample from p(x |c), [9] propose Classifier Guidance
+t
+(CG) that uses a pretrained classifier p(c|x ), forming:
+t
+∇ logp(x |c)=∇ logp(x )+∇ logp(c|x ) , (1)
+xt t xt t xt t
+accordingtoBayesrule.ThisleadstothefollowingClassifierGuidance equation,
+with a scalar ω>0 controlling the amount of guidance towards the condition c:
+ϵˆ (x ,c)=ϵ (x )+(ω+1)∇ logp(c|x ) . (2)
+θ t θ t xt t
+However,thisrequirestraininganoise-dependentclassifierexternally,whichcan
+be cumbersome and impractical for novel classes or more complex conditions
+e.g. textual prompts. For this reason, with an implicit classifier from Bayes rule
+∇ logp(c|x )=∇ logp(x ,c)−∇ logp(x ), [10] propose to train a diffusion
+xt t xt t xt t
+network on the joint distribution of data and condition by replacing ϵ (x ) with
+θ t
+ϵ (x ,c)inL .Bydroppingtheconditionduringtraining,theyemployasin-
+θ t simple
+gle network for both ∇ logp(x ,c) and ∇ logp(x ). This gives the Classifier-
+xt t xt t
+Free Guidance (CFG), also controlled by ω:
+ϵˆ (x ,c)=ϵ (x ,c)+ω(ϵ (x ,c)−ϵ (x )) . (3)
+θ t θ t θ t θ t
+We can reformulate the above two equations into two terms: a generation term
+ϵ (x )∝∇ logp(x ) and a guidance term ∇ logp(c|x ). The guidance term
+θ t xt t xt t
+can be derived either from a pre-trained classifier or an implicit one, with ω
+balancing between generation and guidance.
+4 Dynamic Guidance: Heuristic Schedulers
+Instead of using a static weight ω for CFG like in [9,10], recent works have pro-
+posed dynamic weight guidance that evolves throughout the denoising diffusion
+process [11,12,19]. In that case, the CFG Equation 3 is rewritten as follows:
+ϵˆ (x ,c)=ϵ (x ,c)+ω(t)(ϵ (x ,c)−ϵ (x )) . (4)
+θ t θ t θ t θ t
+Toshedlightonthis,weinvestigatesixsimpleheuristicschedulersasdynamic
+guidance ω(t), split into three groups depending on the shape of their curve:
+(a) increasing functions (linear, cosine); (b) decreasing functions (inverse linear,
+sine); (c) non-monotonic functions (linear V-shape, linear Λ-shape), defined as:Analysis of Classifier-Free Guidance Weight Schedulers 7
+linear: ω(t)=1−t/T,
+invlinear :ω(t)=t/T,
+cosine: ω(t)=cos(πt/T)+1,
+sine: ω(t)=sin(πt/T −π/2)+1,
+V-shape: ω(t)=invlinear(t) if t<T/2, linear(t) else,
+Λ-shape: ω(t)= linear(t) if t<T/2, invlinear(t) else.
+To allow for a direct comparison between the effect of these schedulers and the
+static guidance ω, we normalize each scheduler by the area under the curve.
+This ensures that the same amount of total guidance is applied over the entire
+denoising process, and allows users to rescale the scheduler to obtain a behavior
+similartothatofincreasingωinstaticguidance.Moreformally,thiscorresponds
+(cid:82)T
+to the following constraint: ω(t)dt = ωT. For example, this normalization
+0
+leads to the corresponding normalized linear scheduler ω(t) = 2(1−t/T)ω. We
+show in Figure 5a (left) the different normalized curves of the 6 schedulers.
+4.1 Class-conditional image generation with heuristic schedulers
+Heuristic Schedulers Analysis. We first study the 6 previously defined heuris-
+tic schedulers ω(t) on the CIFAR-10 dataset: a 60,000 images dataset with
+a resolution of 32 × 32 pixels, distributed across 10 classes. Our first anal-
+ysis relies on the original DDPM method [1] denoising on pixel space, and
+CFG [10] for class-conditional synthesis. To assess the performance, we use
+the Frechet Inception Distance (FID) and Inception Score (IS) metrics, com-
+puted over 50,000 inferences conducted through a 50-step DDIM [20]. In this
+experiment,weevaluatetheimpactofarangeofdifferentguidancetotalweight:
+[1.1,1.15,1.2,1.25,1.3,1.35],tostudyitsinfluenceovertheimagequalityvsclass
+adherencetrade-off.WeshowtheresultsinFigure5a,middlepanel.Weobserve
+that both increasing schedulers (linear and cosine) significantly improve over
+the static baseline, whereas decreasing schedulers (invlinear and sine) are sig-
+nificantly worse than the static. The V-shape and Λ-shape schedulers perform
+respectively better and worse than the static baseline, but only marginally.
+Negative Perturbation Analysis. Here, we use the same CIFAR-10-DDPM setup
+as above and investigate the importance of guidance at different timestep inter-
+vals. We use static guidance with a scale ω = 1.15 and independently set the
+guidance to zero within different intervals of 50 timesteps (20 intervals in total
+across all timesteps). We compute the FID for each of the resulting piece-wise
+zero-ed schedulers and show the results in Figure 5b. We observe that zero-ing
+the guidance at earlier stages of denoising improves the FID, whereas zero-ing
+theguidanceatthelaterstagesignificantlydegradesit.Thisobservationisinline
+with the results of the previous section where monotonically increasing sched-
+ulers were performing the best and comforts the choice of increasing schedulers.8 Xi Wang et al.
+HeursitcsWeightsvsTimesteps HeuristicsFIDvsIS
+3.0 4.0 NegativeTestonCIFAR-10
+baseline-static sine baseline-static sine
+2.5 l ii nn ve la inr ear ⇤ V- -s sh ha ap pe e 3.8 l ii nn ve la inr ear ⇤ V- -s sh ha ap pe e 3.3 b na egse al ti in ve epertubation
+cosine 3.6 cosine
+2.0 3.2
+3.4
+1.5 3.1
+3.2
+1.0
+3.0 3.0
+0.5 2.8
+2.9
+0.0 0 200 400 600 800 1000 2.6 9.6 9.7 9.8 0 200 400 600 800
+Timesteps InceptionScore Timestep
+(a) ExperimentonDifferentHeuristics (b) NegativePerturbation
+Fig.5: Preliminary Analysis on CIFAR-10(a) Various heuristic curveswith
+theircorrespondingFIDvs.ISperformances.(b) Negative perturbationbysetting
+theguidancescaleto0acrossdistinctintervalswhilepreservingstaticguidancetothe
+rest.Byeliminatingtheweightattheinitial stage(T =800),theloweredFIDshows
+an enhancement, whereas removing guidance at higher timesteps leads to worse FID.
+Preliminary Conclusion. Both previous analyses point to the same conclusion:
+monotonically increasing guidance schedulers achieve improved perfor-
+mances, revealing that the limitation of static CFG primarily comes from over-
+shooting the guidance in the initial stages of the process. In the remainder of
+this work, we only consider monotonically increasing schedulers, as we consider
+these findings sufficient to avoid examining all other schedulers on other tasks.
+ExperimentsonImageNet. OnImageNet,weexplorethelinearandcosinesched-
+ulers that performed best on CIFAR-10. In Figure 6d, we observe that the lin-
+ear and cosine schedulers lead to a significant improvement over the baseline,
+especially at higher guidance weights, enabling a better FID/Inception Score
+trade-off. More experiments in sup. mat. lead to a similar conclusion.
+4.2 Text-to-image generation with heuristic schedulers
+We study the linear and the cosine scheduler on text-to-image generation. The
+results for all proposed heuristics are in sup. mat. Tables 11 and 13, where we
+observeasimilartrendasbefore:heuristicfunctionswithincreasingshapereport
+the largest gains on both SD1.5 and SDXL.
+DatasetandMetrics.Weusetext-to-imagemodelspre-trainedonLAION[34],
+whichcontains5Bhigh-qualityimageswithpairedtextualdescriptions.Foreval-
+uation, we use the COCO [35] val set with 30,000 text-image paired data.
+We use three metrics: (i) Fréchet inception distance (FID) for the fidelity of
+generatedimages;(ii)CLIP-Score(CS)[29]toassessthealignmentsbetweenthe
+images and their corresponding text prompts; (iii) Diversity (Div) to measure
+the model’s capacity to yield varied content. For this, we compute the standard
+deviationofimageembeddingsviaDino-v2[36]frommultiplegenerationsofthe
+same prompt (more details for Diversity in sup. mat. ).
+We compute FID and CS for a sample set of 10,000 images against the COCO
+sthgieW
+DIF DIFAnalysis of Classifier-Free Guidance Weight Schedulers 9
+0.250 0.275
+40
+20 20 75% Realism Scheduler
+50% Baseline
+18 1.2 25%
+16 75% Diversity
+1.1 50%
+14 baseline 25%
+12 l c wi on =se i 7a n .r e
+5SD1.5
+1.0 - -S
+L
+257 505 %%% Textalignment
+1 00 .255 0.260 0.265 0.270 0.275 0.280 0.26 0.27 0.28 linear cosine
+CLIP-Score CLIP-Score
+(a) SD1.5:FIDandDiv-CS (b)SD1.5:UserStudy
+50 0.26 0.28 SDXLFIDvs.CS SDXLDivvs.CS CIN-256
+2534
+1.1 8 baseilne
+32
+30 1.0 6
+28
+baseline
+26 l ci on se ia nr e 0.9 -S 4
+24 w=8forSDXL -L
+0.2650 0.2675 0.2700 0.2725 0.2750 0.2775 0.2800 0.2825 0.2850 0.27 0.28 200 250 300
+CLIP-Score CLIP-Score InceptionScore
+(c) SDXL:FID-CS (d) CIN-256:FID-IS
+Fig.6: Class-conditioned and text-to-image generation results of
+monotonically-increasing heuristic schedulers (linear and cosine). (a)
+FID and Div vs. CS for SD1.5 [21]. We highlight the gain of FID and CLIP-Score
+compared with the default ω = 7.5 with black arrows, diversity is shown on the
+right that the heuristic guidance performs better than static baseline guidance; (b)
+our user study also reveals that images generated with schedulers are consistently
+preferred than the baseline in realism, diversity and text alignment; (c) results for
+SDXL [22] on FID and Div vs. CS with similar setup to (a) and (d) CIN-256
+LDM [9] are assessed with FID vs. IS. Heuristic schedulers outperform the baseline
+static guidance on fidelity and diversity across multiple models.
+datasetinazero-shotfashion[5,21].Fordiversity,weresorttotwotextdescrip-
+tion subsets from COCO: 1000 longest captions and shortest captions each (-L
+and -S in Figure 6a) to represent varying descriptiveness levels; longer captions
+provide more specific conditions than shorter ones, presumably leading to less
+diversity. We produce 10 images for each prompt using varied sampling noise.
+Model. We experiment with two models: (1) Stable Diffusion (SD) [21], which
+uses the CLIP [29] text encoder to transform text inputs to embeddings. We
+use the public checkpoint of SD v1.5 1 and employ DDIM sampler with 50
+steps. (2) SDXL [22], which is a larger, advanced version of SD [21], generating
+images with resolutions up to 1024 pixels. It leverages LDM [9] with larger U-
+Net architectures, an additional text-encoder (OpenCLIP ViT-bigG), and other
+conditioningenhancements.WeusetheSDXL-base-1.02(SDXL)versionwithout
+refiner, sampling with DPM-Solver++ [37] of 25 steps.
+1 https://huggingface.co/runwayml/stable-diffusion-v1-5
+2 https://github.com/Stability-AI/generative-models
+DIF
+DIF
+ytisreviD
+ytisreviD
+etaRecnereferP10 Xi Wang et al.
+Results. We display the FID vs. CS curves in Figure 6a for SD, and Figure 6c
+for SDXL (see also sup. mat. for detailed tables). We expect an optimal balance
+between a high CS and a low FID (right-down corner of the graph).
+Analysis on SD (Figure 6a). For FID vs CS, the baseline [21] yields inferior
+results compared to the linear and cosine heuristics with linear recording lower
+FID. The baseline regresses FID fast when CS is high, but generates the best
+FID when CS is low, i.e., low condition level. This, however, is usually not used
+forrealapplications,e.g.,therecommendedω valueis7.5forSD1.5,highlighted
+by the dotted line in Figure 6a with the black solid arrow representing the
+gainofheuristicschedulersonFIDandCSrespectively.ForDivvsCS,heuristic
+schedulersoutperformthebaseline[21]onbothshort(S)andlong(L)captionsat
+differentguidancescales.Also,cosineshowssuperiorityacrossthemajorityofthe
+CLIP-Score range. Overall, heuristic schedulers achieve improved performances
+in FID and Diversity, recording 2.71(17%) gain on FID and 0.004(16%) gain (of
+max CS-min CS of baseline) on CS over ω=7.5 default guidance in SD. Note,
+this gain is achieved without hyperparameter tuning or retraining.
+AnalysisonSDXL(Figure6c).InFID,boththelinearandcosineschedulers
+achievebetterFID-CSthanthebaseline[22].InDiversity,linearisslightlylower
+than cosine, and they are both better than static baseline. Additionally, unlike
+thebaseline(bluecurves)wherehigherguidancetypicallyresultsincompromised
+FID, heuristic schedulers counter this.
+User study. We present users with a pair of mosaics of 9 generated images
+and ask them to vote for the best in terms of realism, diversity and text-image
+alignment. Each pair compares static baseline generations against cosine and
+linear schedulers. Figure 6b reports the results. We observe that over 60% of
+usersconsiderscheduler-generatedimagesmorerealisticandbetteralignedwith
+thetextprompt,whileapproximately80%findguidanceschedulersresultsmore
+diverse. This corroborates our hypothesis that static weighting is perceptually
+inferior to dynamic weighting. More details in sup. mat. .
+Qualitative results. Figure 3 depicts the fidelity of various sets of text-to-image
+generationsfromSDandSDXL.Weobservethatheuristicschedulers(linearand
+cosine)enhancethefidelityoftheimage:betterdetailsinpetalsandleavesofthe
+flower images, as well as the texture of bird features. In the arches example, we
+observemorenaturalcolourshadingaswellasmoredetailedfigurineswithreflec-
+tive effects. Figure 4 showcases the diversity of outputs in terms of composition,
+color palette, art style and image quality by refining shades and enriching tex-
+tures. Notably, the teddy bear shows various compositions and better-coloured
+results than the baseline, which collapsed into similar compositions. Similarly,
+in the astronaut example, the baseline generates similar images while heuristic
+schedulers reach more diverse character gestures, lighting and compositions.
+4.3 Findings with heuristic schedulers
+Insummary,wemakethefollowingobservations:monotonicallyincreasingheuris-
+tic schedulers (such as linear and cosine) (a) improve generation performancesAnalysis of Classifier-Free Guidance Weight Schedulers 11
+Fig.7: Qualitative comparison among baseline, heuristic linear and clamp-
+linearonSDXL.Bothlinearandclamp-lineararebetterthanthebaseline,andclamp-
+linear with c=4 outperforms them all, showcasing the most details and higher fidelity.
+over static baseline, (b) outperform decreasing guidance schedulers and (b) im-
+prove image fidelity (texture, details), diversity (composition, colors, style) and
+image quality (lighting, gestures). We note that this gain is achieved without
+hyperparameter tuning, model retraining or extra computational cost.
+5 Dynamic Guidance: Parametrized Schedulers
+We investigate two parameterized schedulers that provide an additional param-
+eter that can be tuned to maximize performance: a power-cosine curve family
+(introduced in MDT [13]) and two clamping families (linear and cosine).
+Theparameterizedfamilyofpowered-cosinecurves(pcs)iscontrolledbythe
+power parameter s and is defined as:
+1−cosπ(cid:0)T−t(cid:1)s
+w = T w . (5)
+t
+2
+The clamping parametrized family (clamp) clamps the scheduler below the
+parameter c and is defined as:
+ω =max(c,ω ) . (6)
+t t12 Xi Wang et al.
+FIDvsIS FIDvsIS
+3.2 b l ci la n as e me al prin -le in( es ata rt (i cc =) 1.005) c c pl l ca a sm m (p p s=- -l li i 0n n .e e 1a a )r r( (c c= =1 1. .0 01 1) 5) p p pc c cs s s( ( (s s s= = =1 2 4) ) ) 8 b l ci la n as e me al prin -le in( es ata rt (i cc =) 1.005) c c pl l ca a sm m (p p s=- -l li i 0n n .e e 1a a )r r( (c c= =1 1. .1 3) ) p p pc c cs s s( ( (s s s= = =1 2 4) ) )
+3.0 6
+2.8 4
+9.55 9.60 9.65 9.70 9.75 9.80 9.85 9.90 150 175 200 225 250 275 300 325
+InceptionScore InceptionScore
+(a) CIFAR-10-DDPM (b) CIN-256-LDM
+Fig.8: Class-conditioned generation results of parameterized clamp-linear
+and pcson(a)CIFAR-10-DDPMand(b)CIN-256-LDM.Optimisingparametersim-
+provesperformancesbuttheseparametersdonotgeneralizeacrossmodelsanddatasets.
+Inourwork,weuseclamp-linearbutthisfamilycanbeextendedtoothersched-
+ulers (more in sup. mat. ). Our motivation lies in our observation that excessive
+muting of guidance weights at the initial stages can compromise the structural
+integrityofprominentfeatures.ThiscontributestobadFIDatlowervaluesofω
+in Figure 6a, suggesting a trade-off between model guidance and image quality.
+However, reducing guidance intensity early in the diffusion process is also the
+origin of enhanced performances, as shown in Section 4. This family represents
+a trade-off between diversity and fidelity while giving users precise control.
+5.1 Class-conditional image generation with parametrized
+schedulers
+We experiment with two parameterized schedulers: clamp-linear and pcs on
+CIFAR10-DDPM(Figure8a)andImageNet(CIN)256-LDM(Figure8b).Weob-
+serve that, for both families, tuning parameters improves performances over
+baselineandheuristicschedulers.Theoptimalparametersarec=1.01forclamp-
+linear and s=4 for pcs on CIFAR10-DDPM, vs c=1.1 for clamp-linear and s=2
+for pcs on CIN-256. Overall, parameterized schedulers improve performances;
+however, the optimal parameters do not apply across datasets and models.
+5.2 Text-to-image generation with parametrized schedulers
+We experiment with two parameterized schedulers: clamp-linear (clamp-cosine
+insup.mat.)andpcs,withtheirguidancecurvesinFigures9a,9d,respectively.
+ForSD1.5[21],theFIDvs.CLIP-ScoreresultsaredepictedinFigures9band
+9e. The pcs family struggles to achieve low FID, except when s=1. Conversely,
+theclampfamilyexhibitsoptimalperformancearoundc=2,achievingthebest
+FID and CLIP-score balance while outperforming all pcs values.
+For SDXL [22], the FID vs. CLIP-Score results are depicted in Figures 9c
+and 9f. The pcs family shows the best performance at s = 0.1. Clamp-linear
+achieves optimal results at c=4 (FID 18.2), significantly improving FID across
+theentireCLIP-scorerangecomparedtoboththebaseline(FID24.9,i.e.about
+30% gain) and the linear scheduler.
+DIF DIFAnalysis of Classifier-Free Guidance Weight Schedulers 13
+15 constantω=7.5 20 baseline clamp-linear(c=3) 50 baseline clamp-linear(c=4)
+clamp-linear(c=1) linear clamp-linear(c=4) linear clamp-linear(c=6)
+clamp-linear(c=2) 18 clamp-linear(c=1) w=7.5SD1.5 40 clamp-linear(c=2) w=8forSDXL
+10 clamp-linear(c=3) clamp-linear(c=2)
+clamp-linear(c=4) 16
+5 14 30
+12
+20
+0 250 500 750 1000 0.260 0.265 0.270 0.275 0.280 0.265 0.270 0.275 0.280 0.285
+Timestep CLIP-Score CLIP-Score
+(a) ω(t):clamp-linear (b) SD1.5:clamp-linear (c) SDXL:clamp-linear
+50
+40 c po cn ss (t sa =nt 0.ω 1)=7.5
+22.5
+b pa csse (l sin =e
+1)
+p pc cs s( (s s= =2 0)
+.1)
+b pa csse (l sin =e
+1)
+p pc cs s( (s s= =2 0)
+.1)
+30 p pc cs s( (s s= =1 2) ) 20.0 pcs(s=4) w=7.5SD1.5 40 pcs(s=4) w=8forSDXL
+20 pcs(s=4) 17.5
+30
+10 15.0
+0 12.5 20
+0 250 500 750 1000 0.25 0.26 0.27 0.28 0.24 0.25 0.26 0.27 0.28
+Timestep CLIP-Score CLIP-Score
+(d) ω(t):pcs (e) SD1.5:pcs (f) SDXL:pcs
+Fig.9: Text-to-image generation performance for two parameterized sched-
+ulers: clamp-linear and pcs. For clamp-linear, (a) shows the parameterized guid-
+ance curves for different parameters and (b,c) display the FID vs. CS for SD1.5 and
+SDXL, respectively. For pcs, (d) shows the guidance curves and (e,f) depict the FID
+vs. CS for SD1.5 and SDXL. Optimal parameters for either clamp or pcs outperform
+the static baseline for both SD1.5 and SDXL.
+Overall, we observe that the optimal parameters of clamp-linear (resp. pcs)
+are not the same for both models, i.e. c=2 for SD1.5 and c=4 for SDXL (resp.
+s=1 and s=0.1 for pcs). This reveals the lack of generalizability of this family.
+Qualitative results. The results of Figure 7 further underscore the significance
+of choosing the right clamping parameter. This choice markedly enhances gen-
+eration performance, as evidenced by improved fidelity (e.g., in images of a dog
+eatingicecreamandasquirrel),textualcomprehension(e.g.,inthe‘FrenchFries
+Big Ben’ image), and attention to detail (e.g., in the ‘Pikachu’ image).
+Figure10comparestwoparameterizedfamilies:(i)clampandpcs[13],where
+the clamp reaches its best performance at c = 4 and the pcs at s = 1. We
+observe that the clamp-linear c = 4 demonstrates better details (e.g., mug,
+alien), more realistic photos (e.g., car, storm in the cup), and better-textured
+backgrounds (e.g., mug, car). Although s = 4 for pcs leads to the best results
+forclass-conditionedimagegeneration,weobservethattext-to-imagegeneration
+tendstoover-simplifyandproducefuzzyimages(e.g.,mug)anddeconstructthe
+composition.Thishighlightsthefactthatoptimalparametersdonotnecessarily
+generalize across datasets or tasks.
+5.3 Findings with parametrized schedulers
+Our observations are: (a) tuning the parameters of parametrized functions im-
+provestheperformanceforbothgenerationtasks,(b)tuningclamp-linearseems
+)5.7=ωtnatsnoc()t(ωdelacs
+)5.7=ωtnatsnoc()t(ωdelacs
+DIF
+DIF
+DIF
+DIF14 Xi Wang et al.
+Fig.10: Qualitativeresultsforparametrizedschedulersclamp-linearandpcs.Overall,
+c=4 for clamp-linear gives the most visually pleasing results.
+easier than tuning pcs, as its performance demonstrates fewer variations, and
+(c)theoptimalparametersforonemethoddonotgeneralizeacrossdifferentset-
+tings. Thus, each scheduler requires a specialized tuning process for each model
+and task, leading to extensive grid searches and increased computational load.
+6 Conclusion
+We analyzed dynamic schedulers for the weight parameter in Classifier-Free
+Guidance by systematically comparing heuristic and parameterized schedulers.
+We experiment on two tasks (class-conditioned generation and text-to-image
+generation), several models (DDPM, SD1.5 and SDXL) and various datasets.
+Discussion. Our findings are: (1) a simple monotonically increasing scheduler
+systematically improves the performance compared to a constant static guid-
+ance, at no extra computational cost and with no hyper-parameter search. (2)
+parameterized schedulers with tuned parameters per task, model and dataset,
+improve the results. They, however, do not generalize well to other models and
+datasets as there is no universal parameter that suits all tasks.
+For practitioners who target state-of-the-art performances, we recommend
+searching or optimizing for the best clamping parameter. For those not willing
+to manually tune parameters per case, we suggest using heuristics, specifically
+linear or cosine.Analysis of Classifier-Free Guidance Weight Schedulers 15
+References
+1. J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,” Adv.
+Neural Inform. Process. Syst., 2020. 2, 3, 5, 6, 7, 18
+2. Z. Luo, D. Chen, Y. Zhang, Y. Huang, L. Wang, Y. Shen, D. Zhao, J. Zhou,
+and T. Tan, “Videofusion: Decomposed diffusion models for high-quality video
+generation,” in IEEE Conf. Comput. Vis. Pattern Recog., 2023. 2
+3. M.Kang,D.Min,andS.J.Hwang,“Grad-stylespeech:Any-speakeradaptivetext-
+to-speechsynthesiswithdiffusionmodels,” inIEEEInt.Conf.onAcoustics,Speech
+and Signal Processing, 2023. 2
+4. X. Chen, B. Jiang, W. Liu, Z. Huang, B. Fu, T. Chen, and G. Yu, “Executing
+yourcommandsviamotiondiffusioninlatentspace,” inIEEEConf.Comput.Vis.
+Pattern Recog., 2023. 2, 3
+5. C.Saharia,W.Chan,S.Saxena,L.Li,J.Whang,E.L.Denton,K.Ghasemipour,
+R. Gontijo Lopes, B. Karagol Ayan, T. Salimans, et al., “Photorealistic text-to-
+image diffusion models with deep language understanding,” Adv. Neural Inform.
+Process. Syst., 2022. 2, 3, 9
+6. N. Ruiz, Y. Li, V. Jampani, Y. Pritch, M. Rubinstein, and K. Aberman, “Dream-
+booth: Fine tuning text-to-image diffusion models for subject-driven generation,”
+in IEEE Conf. Comput. Vis. Pattern Recog., 2023. 2, 3
+7. Y. Balaji, S. Nah, X. Huang, A. Vahdat, J. Song, K. Kreis, M. Aittala, T. Aila,
+S. Laine, B. Catanzaro, et al., “ediffi: Text-to-image diffusion models with an en-
+semble of expert denoisers,” arXiv preprint arXiv:2211.01324, 2022. 2, 3
+8. A.Q.NicholandP.Dhariwal,“Improveddenoisingdiffusionprobabilisticmodels,”
+in Int. Conf. on Machine Learning, 2021. 2, 3
+9. P.DhariwalandA.Nichol,“Diffusionmodelsbeatgansonimagesynthesis,” Adv.
+Neural Inform. Process. Syst., 2021. 2, 3, 4, 6, 9, 19
+10. J.HoandT.Salimans,“Classifier-freediffusionguidance,” inNeurIPS-WonDeep
+Generative Models and Downstream Applications, 2021. 2, 4, 6, 7, 18, 19
+11. H. Chang, H. Zhang, J. Barber, A. Maschinot, J. Lezama, L. Jiang, M.-H. Yang,
+K.Murphy,W.T.Freeman,M.Rubinstein,etal.,“Muse:Text-to-imagegeneration
+via masked generative transformers,” in Int. Conf. on Machine Learning, 2023. 2,
+5, 6
+12. A. Blattmann, T. Dockhorn, S. Kulal, D. Mendelevitch, M. Kilian, D. Lorenz,
+Y. Levi, Z. English, V. Voleti, A. Letts, et al., “Stable video diffusion: Scaling
+latent video diffusion models to large datasets,” arXiv preprint arXiv:2311.15127,
+2023. 2, 6
+13. S. Gao, P. Zhou, M.-M. Cheng, and S. Yan, “Masked diffusion transformer is a
+strong image synthesizer,” in Int. Conf. Comput. Vis., 2023. 2, 5, 11, 13, 19
+14. D. P. Kingma and M. Welling, “Auto-encoding variational bayes,” stat, 2014. 3
+15. I. Goodfellow, J. Pouget-Abadie, M. Mirza, B. Xu, D. Warde-Farley, S. Ozair,
+A.Courville,andY.Bengio,“Generativeadversarialnets,” inAdv.NeuralInform.
+Process. Syst., 2014. 3
+16. A.Brock,J.Donahue,andK.Simonyan,“Largescalegantrainingforhighfidelity
+natural image synthesis,” in Int. Conf. Learn. Represent., 2018. 3
+17. M. Kang, J.-Y. Zhu, R. Zhang, J. Park, E. Shechtman, S. Paris, and T. Park,
+“Scalingupgansfortext-to-imagesynthesis,” inIEEEConf.Comput.Vis.Pattern
+Recog., 2023. 3
+18. N. Dufour, D. Picard, and V. Kalogeiton, “Scam! transferring humans between
+images with semantic cross attention modulation,” in Eur. Conf. Comput. Vis.,
+Springer, 2022. 316 Xi Wang et al.
+19. C. Donahue, J. McAuley, and M. Puckette, “Adversarial audio synthesis,” in Int.
+Conf. Learn. Represent., 2018. 3, 6
+20. J. Song, C. Meng, and S. Ermon, “Denoising diffusion implicit models,” in Int.
+Conf. Learn. Represent., 2020. 3, 6, 7, 23
+21. R.Rombach,A.Blattmann,D.Lorenz,P.Esser,andB.Ommer,“High-resolution
+imagesynthesiswithlatentdiffusionmodels,” inIEEEConf.Comput.Vis.Pattern
+Recog., 2022. 3, 4, 9, 10, 12, 23, 27
+22. D.Podell,Z.English,K.Lacey,A.Blattmann,T.Dockhorn,J.Müller,J.Penna,
+and R. Rombach, “Sdxl: Improving latent diffusion models for high-resolution im-
+age synthesis,” arXiv preprint arXiv:2307.01952, 2023. 3, 9, 10, 12, 23
+23. P. Pernias, D. Rampas, and M. Aubreville, “Wuerstchen: Efficient pretraining of
+text-to-image models,” arXiv preprint arXiv:2306.00637, 2023. 3
+24. S. Reed, Z. Akata, X. Yan, L. Logeswaran, B. Schiele, and H. Lee, “Generative
+adversarial text to image synthesis,” in Int. Conf. on Machine Learning, PMLR,
+2016. 4
+25. E. Mansimov, E. Parisotto, J. L. Ba, and R. Salakhutdinov, “Generating images
+from captions with attention,” arXiv preprint arXiv:1511.02793, 2015. 4
+26. A. Ramesh, P. Dhariwal, A. Nichol, P. Shyam, P. Mishkin, B. McGrew, and
+I. Sutskever, “Hierarchical text-conditional image generation with clip latents,”
+arXiv preprint arXiv:2204.06125, 2022. 4
+27. A. Q. Nichol, P. Dhariwal, A. Ramesh, P. Shyam, P. Mishkin, B. Mcgrew,
+I. Sutskever, and M. Chen, “Glide: Towards photorealistic image generation and
+editing with text-guided diffusion models,” in Int. Conf. on Machine Learning,
+PMLR, 2022. 4
+28. O.Avrahami,D.Lischinski,andO.Fried,“Blendeddiffusionfortext-drivenediting
+of natural images,” in IEEE Conf. Comput. Vis. Pattern Recog., 2022. 4
+29. A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry,
+A. Askell, P. Mishkin, J. Clark, et al., “Learning transferable visual models from
+natural language supervision,” in Int. Conf. on Machine Learning, PMLR, 2021.
+4, 8, 9, 27
+30. G. Zheng, S. Li, H. Wang, T. Yao, Y. Chen, S. Ding, and X. Li, “Entropy-driven
+sampling and training scheme for conditional diffusion generation,” in Eur. Conf.
+on Comput. Vis., Springer, 2022. 4, 19
+31. A.-D. Dinh, D. Liu, and C. Xu, “Rethinking conditional diffusion sampling with
+progressive guidance,” in Adv. Neural Inform. Process. Syst., 2023. 4, 19
+32. A.-D. Dinh, D. Liu, and C. Xu, “Pixelasparam: A gradient view on diffusion sam-
+pling with guidance,” in Int. Conf. on Machine Learning, PMLR, 2023. 5
+33. A. C. Li, M. Prabhudesai, S. Duggal, E. Brown, and D. Pathak, “Your diffusion
+model is secretly a zero-shot classifier,” in Int. Conf. Comput. Vis., 2023. 5, 19
+34. C. Schuhmann, R. Beaumont, R. Vencu, C. Gordon, R. Wightman, M. Cherti,
+T.Coombes,A.Katta,C.Mullis,M.Wortsman,et al.,“Laion-5b:Anopenlarge-
+scaledatasetfortrainingnextgenerationimage-textmodels,” Adv.NeuralInform.
+Process. Syst., 2022. 8
+35. T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan, P. Dollár,
+andC.L.Zitnick,“Microsoftcoco:Commonobjectsincontext,” inEur. Conf. on
+Comput. Vis., Springer, 2014. 8
+36. M. Oquab, T. Darcet, T. Moutakanni, H. Vo, M. Szafraniec, V. Khalidov, P. Fer-
+nandez,D.Haziza,F.Massa,A.El-Nouby,et al.,“Dinov2:Learningrobustvisual
+features without supervision,” arXiv preprint arXiv:2304.07193, 2023. 8, 27Analysis of Classifier-Free Guidance Weight Schedulers 17
+37. C. Lu, Y. Zhou, F. Bao, J. Chen, C. Li, and J. Zhu, “Dpm-solver++: Fast
+solver for guided sampling of diffusion probabilistic models,” arXiv preprint
+arXiv:2211.01095, 2022. 9
+38. N.KambhatlaandT.K.Leen,“Dimensionreductionbylocalprincipalcomponent
+analysis,” Neural computation, 1997. 18
+39. C.Lu,Y.Zhou,F.Bao,J.Chen,C.Li,andJ.Zhu,“Dpm-solver:Afastodesolver
+fordiffusionprobabilisticmodelsamplinginaround10steps,” Adv.NeuralInform.
+Process. Syst., 2022. 23, 2718 Xi Wang et al.
+Appendix
+In this appendix, we provide additional content covering: (i) a toy example to
+explain the mechanism and rationale of the dynamic weighted scheduler; (ii)
+an additional comparison of parameterized function-based dynamic schedulers;
+(iii) more qualitative results; (iv) ablation experiments on different aspects of
+dynamic weighting schedulers; (v) a list of tables of all results demonstrated;
+(vi) detailed design of user study. Following is the table of contents:
+1. A toy example of fidelity vs condition adherence
+2. Comparison of Parameterized Schedulers
+3. Qualitative Results
+4. Ablation on Robustness and Generalization
+5. Detailed Table of Experiments
+6. User Study
+A A toy example of fidelity vs condition adherence
+Knowing the equation of CFG can be written as a combination between a gen-
+eration term and a guidance term, with the second term controlled by guidance
+weight ω:
+ϵˆ (x ,c)=ϵ (x ,c)+ω(ϵ (x ,c)−ϵ (x )) . (7)
+θ t θ t θ t θ t
+To better understand the problems in diffusion guidance, we present a toy
+example, where we first train a diffusion model on a synthetic dataset of 50,000
+images(32×32)fromtwodistinctGaussiandistributions:onesampledwithlow
+values of intensity (dark noisy images in the bottom-left of Figure 11), and the
+other with high-intensities (bright noisy images). The top-left part in Figure 11
+shows the PCA [38]-visualised distribution of the two sets, and the bottom-left
+partshowssomeground-truthimages.Tofitthesetwolabelleddistributions,we
+employ DDPM [1] with CFG [10] conditioned on intensity labels.
+Upon completion of the training, we can adjust the guidance scale ω to bal-
+ancebetweenthesamplefidelityandconditionadherence,illustratedintheright
+part of Figure 11. The first row depicts the variations in generated distributions
+ondifferentω (from0to100),visualizedbythesamePCAparameters.Thesec-
+ondrowshowstheentirediffusiontrajectoryforsampleddatapoints(sameseeds
+across different ω): progressing from a random sample (i.e., standard Gaussian)
+when t=T to the generated data (blue or red in Figure 11) when t=0.
+Emerging issues and explainable factors. As ω increases, the two generated dis-
+tributionsdivergeduetoguidance term inEq.7shiftingthegenerationtowards
+different labels at a fidelity cost (see Figure 11 first row).
+AsshowninFigure11(secondrow),twoissuesarise:(i)repeated trajectories
+that diverge from the expected convergence path before redirecting to it; and
+(ii) shaky motions that wander along the trajectory.Analysis of Classifier-Free Guidance Weight Schedulers 19
+Fig.11:Two-GaussiansExample.WeemployDDPMwithCFGtofittwoGaussian
+distributions, a bright one (red) and a darker one (blue). The middle panel showcases
+samples of generation trajectories at different guidance scales ω, using PCA visual-
+ization. Increasing guidance scale ω raises two issues: repeated trajectory: when ω=50
+thegenerationdivergesfromitsexpecteddirectionbeforeconvergingagain,andshaky
+motion: when ω=100 some trajectories wander aimlessly.
+These two issues can be attributed to two factors: (1) incorrect classification
+prediction,and(2)theconflictsbetweenguidance andgeneration termsinEq.7.
+For the former, optimal guidance requires a flawless classifier, whether explicit
+for CG or implicit for CFG. In reality, discerning between two noisy data is
+challenging and incorrect classification may steer the generation in the wrong
+direction,generatingshakytrajectories.Asimilarobservationisreportedin[30,
+31]forCG andin[33]forCFG.Forthelatter,duetothestrongincentiveofthe
+classifier to increase the distance with respect to the other classes, trajectories
+often show a U-turn before gravitating to convergence (repeated trajectory in
+Figure 11). We argue that this anomaly is due to the conflict between guidance
+and generation terms in Eq. 7.
+In conclusion, along the generation, the guidance can steer suboptimally
+(especially when t → T), and even impede generation. We argue that these
+erratic behaviours contribute to the performance dichotomy between
+fidelity and condition adherence [9,10].
+B Comparison of Parameterized Schedulers
+B.1 Parameterized Comparison on Class-Conditioned Generation
+ForCIFAR-10-DDPM,weshowinFigure12upperpanels(seealldatainTable4,
+5, 6) the comparison of two parameterized functions families: (i) clamp family
+on linear and cosine and (ii) pcs family mentioned in [13].
+The ImageNet-256 and Latent Diffusion Model (LDM) results are presented
+in Figure 12 lower panels and (data in Table 8, 9, 10).
+The conclusion of these parts is as follows: (i) optimising both groups of pa-
+rameterizedfunctionhelpsimprovetheperformanceofFID-CS;(ii)theoptimal20 Xi Wang et al.
+FIDvsISCIFAR
+3.3
+baseline(static) clamp-linear(c=1.01) baseline(static) clamp-cosine(c=1.01) baseline(static) pcs(s=2)
+3.2 linear clamp-linear(c=1.015) 3.2 cosine clamp-cosine(c=1.015) pcs(s=0.1) pcs(s=4)
+clamp-linear(c=1.005) clamp-cosine(c=1.005) 3.2 pcs(s=1)
+3.1 3.1 3.1
+3.0 3.0 3.0
+2.9
+2.9 2.9
+2.8
+2.8 2.8 2.7
+9.6 9.7 9.8 9.9 9.6 9.7 9.8 9.9 9.6 9.7 9.8 9.9
+InceptionScore FIDIncvesptIiSonCSIcNor-e256 InceptionScore
+9 baseline(static) clamp-linear(c=1.1) 9 baseline(static) clamp-cos(c=1.1) 9 baseline(static) pcs(s=2)
+linear clamp-linear(c=1.3) cosine clamp-cos(c=1.3) pcs(s=0.1) pcs(s=4)
+8 clamp-linear(c=1.005) 8 clamp-cos(c=1.005) 8 pcs(s=1)
+7 7 7
+6 6 6
+5 5 5
+4 4 4
+3 3 3
+200 250 300 200 250 300 150 200 250 300
+InceptionScore InceptionScore InceptionScore
+Fig.12: Class-conditioned image generation results of two parameterized
+families (clamp-linear, clamp-cosine and pcs) on CIFAR-10 and CIN-256.
+Optimising parameters of guidance results in performance gains, however, these pa-
+rameters do not generalize across models and datasets.
+parameters for different models are very different and fail to generalize across
+models and datasets.
+B.2 Parameterized Comparison on Text-to-image Generation
+We then show the FID vs. CS and Diversity vs. CS performance of the param-
+eterized method in Figure 13. The conclusion is coherent with the main paper:
+all parameterized functions can enhance performance on both FID and diver-
+sity, provided that the parameters are well-selected. Moreover, for the clamp
+family, it appears that the clamp parameter also adjusts the degree of diversity
+of the generated images; lowering the clamp parameter increases the diversity.
+We recommend that users tune this parameter according to the specific model
+and task. For SDXL, the clamp-cosine is shown in Figure 14, and also reaches a
+similar conclusion.
+C Qualitative Results
+More Results of Parameterized Functions on SDXL InFigure15,weshowmore
+examplesofdifferentparameterizedfunctions.Itappearsthatcarefullyselecting
+theparameter(c=4),especiallyfortheclamp-linearmethod,achievesimprove-
+mentinimagequalityintermsofcomposition(e.g.,templateandguitar),detail
+(e.g.,cat),andrealism(e.g.,dogstatue).However,forSDXL,thismethodshows
+onlymarginalimprovementswiththepcsfamily,whichtendstoproduceimages
+with incorrect structures and compositions, leading to fuzzy images.
+DIF
+DIF
+DIF
+DIF
+DIF
+DIFAnalysis of Classifier-Free Guidance Weight Schedulers 21
+15 20 baseline clamp-linear(c=3) 1.25
+linear clamp-linear(c=4)
+18 clamp-linear(c=1) w=7.5SD1.5 1.20
+10 16 clamp-linear(c=2) 1.15
+5 14 1.10
+12 1.05
+1.00
+0 250 500 750 1000 0.260 0.265 0.270 0.275 0.280 0.26 0.27 0.28
+Timestep CLIP-Score CLIP-Score
+(a) clamp-linear
+15 20 baseline[38] clamp-cosine(c=3) 1.25
+cos clamp-cosine(c=4)
+18 clamp-cosine(c=1) w=7.5SD1.5 1.20
+10 16 clamp-cosine(c=2) 1.15
+5 14 1.10
+12 1.05
+1.00
+0 250 500 750 1000 0.255 0.260 0.265 0.270 0.275 0.280 0.26 0.27 0.28
+Timestep CLIP-Score CLIP-Score
+(b) clamp-cosine
+1.3 40 baseline pcs(s=2)
+22.5
+pcs(s=1) pcs(s=0.1)
+30 20.0 pcs(s=4) w=7.5SD1.5 1.2
+20 17.5
+15.0 1.1
+10
+12.5
+0 1.0
+0 250 500 750 1000 0.245 0.250 0.255 0.260 0.265 0.270 0.275 0.280 0.25 0.26 0.27 0.28
+Timestep CLIP-Score CLIP-Score
+(c) pcsFamily
+Fig.13:Text-to-imagegenerationFIDanddiversityofalltwoparameterized
+families (clamp with clamp-linear, clamp-cosine and pcs) on SD1.5 (left to
+right): (a) parameterized scheduler curves; (b) FID vs. CS of SD1.5 and (c)
+FID vs. Div. of SD1.5. We show that in terms of diversity, the clamp family still
+achieves more diverse results than the baseline, though it reduces along the clamping
+parameter, as the beginning stage of the diffusion is muted.
+Stable Diffusion v1.5. Figure 16 shows qualitative results of using increasing
+shaped methods: linear, cosine compared against the baseline. It shows clearly
+thattheincreasinglyshapedheuristicguidancegeneratesmorediversityandthe
+baseline suffers from a collapsing problem, i.e., different sampling of the same
+prompt seems only to generate similar results. In some figures, e.g., Figure 16
+withanexampleofthemailbox,wecanseethatthebaselineignoresgraffitiand
+increasing heuristic guidance methods can correctly retrieve this information
+and illustrate it in the generated images. We also see in M&M’s that heuristic
+guidance methods show more diversity in terms of colour and materials. with
+much richer variance and image composition. However some negative examples
+can also be found in Figure 16, in particular, the foot of horses in the prompt: a
+person riding a horse while the sun sets. We posit the reason for these artefacts
+)5.7=ωtnatsnoc()t(ωdelacs
+)5.7=ωtnatsnoc()t(ωdelacs
+)5.7=ωtnatsnoc()t(ωdelacs
+DIF
+DIF
+DIF
+ytisreviD
+ytisreviD
+ytisreviD22 Xi Wang et al.
+FIDvsCSclamp-linear FIDvsCSclamp-cosine FIDvsCSpcsfamily
+50 50 50
+linear cosine pcs(s=1)
+45 b cla as mel pin le inear(c=2) 45 b cla as mel pin ce os(c=2) 45 b pa csse (l sin =e 4)
+clamplinear(c=4) clampcos(c=4) pcs(s=2)
+40 clamplinear(c=6) 40 clampcos(c=6) 40 pcs(s=0.1)
+w=8forSDXL w=8forSDXL w=8forSDXL
+35 35 35
+30 30 30
+25 25 25
+20 20 20
+0.265 0.270 0.275 0.280 0.285 0.265 0.270 0.275 0.280 0.285 0.24 0.25 0.26 0.27 0.28
+CLIP-Score CLIP-Score CLIP-Score
+Fig.14: Text-to-image generation results of two parameterized families
+(clamp-linear, clamp-cosine and pcs) on SDXL. Both clamps reach their best
+FID-CSatc=4vss=0.1forpcs,whichdifferfromtheoptimalparametersforSD1.5.
+Fig.15: Qualitative comparison clamp vs. pcs family, we see clearly that clamping at
+c=4 gives the best visual qualitative results.
+DIF DIF DIFAnalysis of Classifier-Free Guidance Weight Schedulers 23
+is due to the overmuting of the initial stage and overshooting the final stage
+during the generation, which can be rectified by the clamping method.
+SDXL. The SDXL [22] shows better diversity and image quality comparing to
+itsprecedent.Whereassomerepetitiveconceptsarestillpresentinthegenerated
+results: see Figure 17, that first row "A single horse leaning against a wooden
+fence" the baseline method generate only brown horses whereas all heuristic
+methods give a variety of horse colours. A similar repetitive concept can also be
+foundinthe"A person stands on water skies in the water" withthecolorofthe
+character. For the spatial combination diversity, please refer to the example in
+Figure 18: "A cobble stone courtyard surrounded by buildings and clock tower."
+whereweseethatheuristicmethodsyieldmoreviewangleandspatialcomposi-
+tion.Similarbehaviourcanbefoundintheexampleof"bowl shelf" inFigure17
+and "teddy bear" in Figure 17.
+D Ablation on Robustness and Generalization
+Different DDIM steps. DDIM sampler allows for accelerated sampling (e.g.,
+50 steps as opposed to 1000) with only a marginal compromise in generation
+performance. In this ablation study, we evaluate the effectiveness of our dy-
+namic weighting schedulers across different sampling steps. We use the CIN256-
+LDM codebase, with the same configuration as our prior experiments of class-
+conditionedgeneration.Weconducttestswith50,100,and200steps,forbaseline
+and two heuristics (linear and cosine), all operating at their optimal guidance
+scale in Tab 7. The results, FID vs. IS for each sampling step, are presented
+in Tab. 1. We observe that the performance of dynamic weighting schedulers
+remains stable across different timesteps.
+Table 1: Ablation on sampling steps DDIM.ExperimentonCIN-256andLatent
+Diffusion Model
+baseline(static) linear cosine
+steps FID↓ IS↑ FID↓ IS↑ FID↓ IS↑
+50 3.393 220.6 3.090 225.0 2.985 252.4
+100 3.216 229.8 2.817225.2 2.818 255.3
+200 3.222 229.5 2.791 223.2 2.801254.3
+Different Solvers. To validate the generalizability of our proposed method be-
+yondtheDDIM[20]samplerusedintheexperimentSection,wefurtherevaluated
+its performance using the more advanced DPM-Solver [39] sampler (3rd order).
+This sampler is capable of facilitating diffusion generation with fewer steps and
+enhanced efficiency compared to DDIM. The experiment setup is similar to the
+text-to-image generation approach using Stable Diffusion [21] v1.5. The results
+of this experiment are reported in Table 2 and visually illustrated in Figure 19.24 Xi Wang et al.
+Fig.16: Qualitative SD1.5Analysis of Classifier-Free Guidance Weight Schedulers 25
+Fig.17: Qualitative SDXL (1)26 Xi Wang et al.
+Fig.18: Qualitative SDXL (2)Analysis of Classifier-Free Guidance Weight Schedulers 27
+FIDvsCS
+26 baseline
+24 cosine
+22 linear
+w=7.5forSD1.5,EqualClipScoreLine
+20
+w=7.5forSD1.5,EqualFIDline
+18
+16
+14
+12
+10
+0.255 0.260 0.265 0.270 0.275 0.280 0.285
+CLIP-Score
+Fig.19: FID vs. CLIP-Score generated by SDv1.5 [21] with DPM-Solver [39]
+Table 2: TableofFIDandCLIP-ScoregeneratedbyStableDiffusionv1.5withDPM-
+Solver [39]
+w 1 3 5 7 9 11 13 15 20
+clip-score 0.22870.26920.27460.27670.27820.27910.27970.28020.2805
+baseline(static)
+FID 28.18810.84313.69616.23217.93319.13619.93020.53821.709
+clip-score 0.22870.26460.27130.27430.27620.27740.27850.27920.2813
+linear
+FID 28.18813.03211.82612.18112.83013.46113.98414.54115.943
+clip-score 0.22870.26430.27120.27410.27620.27780.27890.27970.2812
+cosine
+FID 28.18812.58711.81012.40013.19713.96814.71715.36616.901
+As depicted in Figure 19: our proposed methods continue to outperform
+the baseline (static guidance) approach. Substantial improvements are seen in
+both FID and CLIP-Score metrics, compared to baseline (w=7.5) for example.
+Notably,these gains become morepronouncedas the guidance weight increases,
+a trend that remains consistent with all other experiments observed across the
+paper.
+Diversity Diversity plays a pivotal role in textual-based generation tasks. Given
+similartext-imagematchinglevels(usuallyindicatedbyCLIP-Score),higherdi-
+versity gives users more choices of generated content. Most applications require
+higher diversity to prevent the undesirable phenomenon of content collapsing,
+wheremultiplesamplingsofthesamepromptyieldnearlyidenticalorverysimi-
+lar results. We utilize the standard deviation within the image embedding space
+asameasureofdiversity.ThismetriccanbederivedusingmodelssuchasDino-
+v2 [36] or CLIP [29]. Figure 20 provides a side-by-side comparison of diversities
+computed using both Dino-v2 and CLIP, numerical results are also reported in
+Table.15.ItisevidentthatDino-v2yieldsmorediscriminativeresultscompared
+to the CLIP embedding. While both embeddings exhibit similar trends, we no-
+ticethatCLIPoccasionallyproducesanarrowergapbetweenlongcaptions(-L)
+and short captions (-S). In some instances, as depicted in Figure 20, CLIP even
+reversestheorder,anobservationnotapparentwiththeDino-v2model.Inboth
+cases, our methods are consistently outperforming the baseline on both metrics.
+DIF28 Xi Wang et al.
+CLIPscorevsCLIP-basedDiversityforSD CLIPscorevsDinov2-basedDiversityforSD
+0.32
+1.2
+0.30
+1.1
+0.28
+0.26 b ba as se el li in ne e( (s st ta at ti ic c) )- -S
+L
+l ci on se -a Sr-L 1.0
+linear-S cos-L
+0.255 0.260 0.265 0.270 0.275 0.280 0.255 0.260 0.265 0.270 0.275 0.280
+CLIPscore CLIPscore
+Fig.20: Experiment on Stable Diffusion on two types of diversity. Zero-shot
+COCO 10k CLIP-Score vs. Diversity computed by CLIP and Dino-v2 respectively.
+E Detailed Table of Experiments
+In this section, we show detailed tables of all experiments relevant to the paper:
+– CIFAR-10-DDPM: results of different shapes of heuristics (Table 3), re-
+sults of parameterized methods (Table 4, Table 5, Table 6)
+– CIN (ImageNet) 256-LDM: results of different shapes of heuristics (Ta-
+ble 7) and results of parameterized methods (Table 8, Table 8, Table 10)
+– Stable Diffusion 1.5: results of different shapes of heuristics in Table 11
+and results of parameterized methods in Table 12.
+– Stable Diffusion XL: results of different shapes of heuristics in Table 13
+and results of parameterized methods in Table 14.
+Table3:ExperimentofdifferentHeuristicsonCIFAR-10DDPM.Weevaluate
+the FID and IS results for the baseline, all heuristic methods (green for increasing,
+red for decreasing and purple for non-linear) of 50K images. Best FID and IS are
+highlighted. We see clearly that the increasing shapes outperform all the others.
+GuidanceScale b Fa Is Deline(s It Satic) FIDlinear IS FIDcos IS Fi In Dvlinea ISr FIDsin IS FΛ ID-shap Ie S FV ID-shap Ie S
+1.10 2.966 9.564 2.893 9.595 2.875 9.606 3.033 9.554 3.068 9.550 3.017 9.615 3.005 9.550
+1.15 2.947 9.645 2.853 9.666 2.824 9.670 3.050 9.628 3.086 9.612 3.040 9.698 2.954 9.596
+1.20 2.971 9.690 2.854 9.729 2.813 9.726 3.106 9.643 3.149 9.645 3.119 9.738 2.928 9.644
+1.25 3.025 9.733 2.897 9.799 2.850 9.794 3.192 9.675 3.261 9.660 3.251 9.746 2.930 9.677
+1.30 3.111 9.764 2.968 9.833 2.933 9.838 3.311 9.689 3.389 9.664 3.407 9.774 2.951 9.725
+1.35 3.233 9.787 3.062 9.872 3.026 9.882 3.460 9.700 3.543 9.678 3.606 9.804 2.985 9.763
+F User Study
+Inthissection,weelaborateonthespecificsofouruserstudysetupcorrespond-
+ing to Figure 3. (b) in our main manuscript.
+DIF viDAnalysis of Classifier-Free Guidance Weight Schedulers 29
+Table 4: Experiment of clamp-linear on CIFAR-10 DDPM. We evaluate the
+FID and IS results for the baseline, parameterized method as clamp-linear of 50K
+imagesFID.BestFIDandISarehighlighted,theoptimalparameterseemsatc=1.1.
+baseline(static) linear linear(c=1.05) linear(c=1.1) linear(c=1.15)
+GuidanceScale
+FID IS FID IS FID IS FID IS FID IS
+1.10 2.966 9.564 2.893 9.595 2.852 9.622 2.856 9.638 2.876 9.647
+1.15 2.947 9.645 2.8539.666 2.816 9.693 2.793 9.696 2.832 9.693
+1.20 2.971 9.690 2.854 9.729 2.822 9.757 2.820 9.755 2.834 9.750
+1.25 3.025 9.733 2.897 9.799 2.863 9.809 2.863 9.809 2.863 9.809
+1.30 3.111 9.764 2.968 9.833 2.929 9.870 2.922 9.863 2.929 9.867
+1.35 3.233 9.787 3.062 9.872 3.025 9.913 3.021 9.910 3.018 9.908
+Table 5: Experiment of clamp-cosine on CIFAR-10 DDPM. We evaluate the
+FID and IS results for the baseline, parameterized method as clamping on the cosine
+increasingheuristic(clamp-cosine)of50Kimages.BestFIDandISarehighlighted.It
+seestheoptimisingclampingparameterhelpstoimprovetheFID-ISperformance,the
+optimal parameter seems at c=1.05.
+baseline(static) cos cos(c=1.05) cos(c=1.1) cos(c=1.15)
+GuidanceScale
+FID IS FID IS FID IS FID IS FID IS
+1.10 2.966 9.564 2.875 9.606 2.824 9.632 2.839 9.651 2.963 9.633
+1.15 2.947 9.645 2.824 9.670 2.781 9.712 2.794 9.710 2.917 9.689
+1.20 2.971 9.690 2.8139.726 2.771 9.781 2.7869.774 2.901 9.753
+1.25 3.025 9.733 2.850 9.794 2.810 9.828 2.819 9.823 2.913 9.821
+1.30 3.111 9.764 2.933 9.838 2.880 9.884 2.888 9.885 2.976 9.865
+1.35 3.233 9.787 3.026 9.882 2.963 9.933 2.969 9.941 3.052 9.923
+Table 6: Experiment of pcs family on CIFAR-10 DDPM.WeevaluatetheFID
+andISresultsforthebaseline,parameterizedpcsmethodof50KimageFID.BestFID
+andISarehighlighted.Itseestheoptimisingclampingparameterhelpstoimprovethe
+FID-IS performance, the optimal parameter seems at s=4.
+baseline(static) pcs(s=4) pcs(s=2) pcs(s=1) pcs(s=0.1)
+GuidanceScale
+FID IS FID IS FID IS FID IS FID IS
+1.10 2.966 9.564 2.920 9.600 2.969 9.614 2.875 9.606 3.010 9.572
+1.15 2.947 9.645 2.818 9.663 2.886 9.670 2.824 9.670 2.9839.657
+1.20 2.971 9.690 2.748 9.726 2.8449.729 2.8139.726 3.010 9.706
+1.25 3.025 9.733 2.714 9.782 2.839 9.782 2.850 9.794 3.065 9.733
+1.30 3.111 9.764 2.7009.834 2.858 9.847 2.933 9.838 3.157 9.770
+1.35 3.233 9.787 2.711 9.885 2.902 9.889 3.026 9.882 3.276 9.786
+Table 7: Experiment of different Heuristics on CIN-256-LDM. We evaluate
+the FID and IS results for the baseline, all heuristic methods (green for increasing,
+red for decreasing and purple for non-linear) of 50K images FID. Best FID and IS are
+highlighted. We see clearly that the increasing shapes outperform all the others.
+guidance Fb IDaselin Ie S FIDlinear IS FIDcos IS Fin IDvlinea ISr FIDsin IS FΛ ID-shap Ie S FV ID-shap Ie S
+1.4 4.117 181.2 4.136 178.3 4.311 175.4 4.323 180.7 4.405 180.2 3.444207.8 6.118 146.2
+1.6 3.393 225.0 3.090 220.6 3.083 216.2 3.974222.7 4.176221.7 3.694 256.5 4.450 176.8
+1.8 3.940 260.8 3.143 257.5 2.985 252.4 4.797 257.3 5.087 254.8 4.922 294.9 3.763206.1
+2.0 5.072 291.4 3.858 288.9 3.459 283.3 6.085 284.2 6.398 281.2 6.517 324.8 3.806 232.2
+2.2 6.404 315.8 4.888 315.1 4.256 310.1 7.517 306.9 7.835 303.4 8.164 346.2 4.293 255.7
+2.4 8.950 335.9 6.032 336.5 5.215 331.2 8.978 325.5 9.291 321.3 9.664 362.9 5.051 277.030 Xi Wang et al.
+Table 8: Experiment of clamp-linear family on CIN-256-LDM. We evaluate
+theFIDandISresultsforthebaseline,parameterizedclamp-linearon50KimagesFID.
+BestFIDandISarehighlighted.Itseestheoptimisingparameterhelpstoimprovethe
+FID-IS performance, the optimal parameter seems at c=1.005.
+baseline linear linear(c=1.005) linear(c=1.1) linear(c=1.3)
+guidance
+FID IS FID IS FID IS FID IS FID IS
+1.4 4.12 181.2 4.14 178.3 4.16 177.8 4.18 178.1 3.95 184.6
+1.6 3.39 225.0 3.09 220.6 3.06 219.6 3.13 219.2 3.14 222.7
+1.8 3.94 260.8 3.14 257.5 3.18 255.9 3.18 257.2 3.24 259.0
+2.0 5.07 291.4 3.86 288.9 3.88 287.0 3.86 288.7 3.92 289.6
+2.2 6.40 315.8 4.89 315.1 4.91 312.4 4.87 313.8 4.92 314.9
+2.4 8.95 335.9 6.03 336.5 6.00 334.3 5.97 336.8 6.01 337.2
+Table 9: Experiment of clamp-cosine family on CIN-256-LDM. We evaluate
+theFIDandISresultsforthebaseline,parameterizedmethodofclamp-cosinemethod
+on50Kimages.BestFIDandISarehighlighted.Itseestheoptimisingparameterhelps
+to improve the FID-IS performance, the optimal parameter seems at c=1.005.
+baseline cosine cosine(c=1.005) cosine(c=1.1) cosine(c=1.3)
+guidance
+FID IS FID IS FID IS FID IS FID IS
+1.4 4.12 181.24 4.31 175.4 4.24 176.0 4.24 177.1 3.82 188.2
+1.6 3.39 224.96 3.08 216.2 3.06 217.0 3.08 217.1 3.09 224.6
+1.8 3.94 260.85 2.98 252.4 2.91 251.8 3.01 253.2 3.13 258.4
+2.0 5.07 291.37 3.46 283.3 3.47 282.5 3.48 284.1 3.67 288.2
+2.2 6.40 315.84 4.26 310.1 4.27 307.9 4.28 310.5 4.49 313.1
+2.4 8.95 335.86 5.22 331.2 5.23 329.7 5.24 331.3 5.44 334.1
+Table 10: Experiment of pcs family on CIN-256-LDM. We evaluate the FID
+andISresultsforthebaseline,parameterizedmethodofthepcsfamilyof50Kimages.
+BestFIDandISarehighlighted.Itseestheoptimisingparameterhelpstoimprovethe
+FID-IS performance, the optimal parameter seems at s=2 for FID. Interestingly, the
+pcsfamilypresentsaworseISmetric,thanbaselineandclamp-linear/cosinemethods.
+baseline pcs(s=4) pcs(s=2) pcs(s=1) pcs(s=0.1)
+guidance
+FID IS FID IS FID IS FID IS FID IS
+1.4 4.12 181.24 6.94 144.98 6.10 150.49 4.31 175.40 4.09 181.00
+1.6 3.39 224.96 5.69 162.99 4.27 180.52 3.08 216.21 3.43 225.31
+1.8 3.94 260.85 4.80 179.71 3.29 208.86 2.98 252.37 3.96 264.03
+2.0 5.07 291.37 4.18 195.75 2.88 234.09 3.46 283.32 5.08 294.77
+2.2 6.40 315.84 3.73 210.60 2.81 257.22 4.26 310.14 6.44 319.97
+2.4 8.95 335.86 3.457 224.4 2.98 278.14 5.22 331.17 7.85 339.05Analysis of Classifier-Free Guidance Weight Schedulers 31
+Table 11: Different Heuristic Modes of SD1.5, we show FID vs. CLIP-score
+of 10K images. we highlight different range of clip-score by low (∼ 0.272), mid (∼
+0.277) and high (∼ 0.280) by pink, orange and blue colors. We see that increasing
+modesdemonstratethebestperformanceathighw,whereasdecreasingmodesregress
+on the performance. non-linear modes, especially Λ-shape also demonstrate improved
+performance to baseline but worse than increasing shapes.
+w 2 4 6 8 10 12 14
+clip-score 0.25930.27190.27570.27750.27900.27960.2803
+baseline
+FID 11.74511.88714.63916.77718.41919.52820.462
+clip-score 0.25650.26970.27410.27630.27800.27880.2799
+linear
+FID 14.64911.26012.05613.14714.17915.03215.663
+clip-score 0.25530.26860.27280.27510.27700.27820.2793
+cos
+FID 15.72511.84612.00912.79613.62914.28215.058
+clip-score 0.261 0.272 0.27540.27730.27800.27870.2793
+sin
+FID 10.61914.61818.32320.82922.38023.53424.561
+clip-score 0.26080.27230.27570.27730.27810.27890.2793
+invlinear
+FID 10.64914.19217.81020.20621.87722.96224.128
+clip-score 0.26030.27190.27560.27740.27850.27940.2802
+Λ-shape
+FID 11.94012.10614.18316.10017.53018.66319.723
+clip-score 0.25690.27060.27470.27640.27730.27830.2789
+V-shap
+FID 11.79012.40715.91218.22019.79620.99221.905
+Table 12: Different parameterized functions of SD1.5, we show FID vs. CLIP-
+score of 10K images. we highlight different range of clip-score by low (∼ 0.272), mid
+(∼0.277)andhigh(∼0.280)bypink,orangeandbluecolors.Weseethatforthepcs
+family the optimal parameter is at s = 1, whereas for clamp-linear and clamp-cosine
+methods, they are at c=2.
+w 2 4 6 8 10 12 14
+clip-score 0.2593 0.27190.27570.27750.27900.27960.2803
+baseline
+FID 11.745 11.88714.63916.77718.41919.52820.462
+clip-score 0.2453 0.25820.26370.26680.26910.27060.2720
+pcs(s=4)
+FID 23.875 19.73419.16719.62720.51322.02223.585
+clip-score 0.2591 0.26420.26910.27200.27400.27540.2766
+pcs(s=2)
+FID 18.026 14.41413.50313.65214.17514.80615.480
+clip-score 0.2553 0.26860.27280.27510.27700.27820.2793
+pcs(s=1)
+FID 15.725 11.84612.00912.79613.62914.28215.058
+clip-score 0.2507 0.26420.27550.27720.27850.27960.2800
+pcs(s=0.1)
+FID 19.532 14.41414.77016.90118.31219.34920.271
+clip-score 0.2613 0.27050.27450.27660.27810.27900.2798
+linear(c=1)
+FID 11.444811.01112.13013.21114.21915.12915.888
+clip-score 0.2679 0.27170.27510.27690.27830.27950.2800
+linear(c=2)
+FID 10.738211.16912.16813.21114.16614.94616.041
+clip-score 0.2719 0.27320.27560.27710.27830.27980.2800
+linear(c=3)
+FID 12.128412.32813.01913.91614.70116.10916.420
+clip-score 0.2742 0.27460.27610.27750.27860.27940.2802
+linear(c=4)
+FID 13.768 13.81314.21314.76515.31115.83416.422
+clip-score 0.2618 0.27030.27400.27620.27750.27870.2795
+cos(c=1)
+FID 11.386 10.98611.73212.60813.46014.28814.978
+clip-score 0.2682 0.27220.27510.27690.27800.27890.2800
+cos(c=2)
+FID 10.816 11.30912.05512.90813.60214.32615.008
+clip-score 0.2719 0.27360.27570.27720.27920.27920.2800
+cos(c=3)
+FID 12.121 12.36312.95613.63114.26314.86915.385
+clip-score 0.2742 0.27480.27640.27760.27860.27950.2802
+cos(c=4)
+FID 13.734 13.82714.22214.69015.09015.56015.91632 Xi Wang et al.
+Table 13: Different Heuristic Modes of SDXL, we show FID vs. CLIP-score of
+10Kimages.wehighlightdifferentrangeofclip-scorebylow(∼0.2770),mid(∼0.280)
+and high (∼ 0.2830) by pink, orange and blue colors. We see that increasing modes
+demonstratethebestperformanceathighw,whereasdecreasingmodesregressonthe
+performance.non-linearmodes,especiallyΛ-shapedemonstrateimprovedperformance
+against baseline but regress fast when the ω is high.
+w 1 3 5 7 9 11 13 15 20
+clip-score 0.2248 0.2712 0.2767 0.2791 0.2806 0.2817 0.2826 0.2832 0.2836
+baseline
+FID 59.248024.363424.929625.708026.165427.230827.462828.053829.6868
+clip-score 0.2248 0.2653 0.2732 0.2773 0.2798 0.2810 0.2821 0.2828 0.2840
+linear
+FID 59.248029.091725.027624.450024.670525.128625.548825.845726.5993
+clip-score 0.2248 0.2621 0.2708 0.2751 0.2776 0.2794 0.2803 0.2817 0.2830
+cosine
+FID 59.248032.826427.000425.546825.433125.524425.737525.875826.8427
+clip-score 0.2248 0.2739 0.2783 0.2800 0.2814 0.2826 0.2823 0.2807 0.2730
+invlinear
+FID 59.248023.819625.433526.145827.896929.619431.897035.260047.8467
+clip-score 0.2248 0.2741 0.2786 0.2803 0.2816 0.2823 0.2816 0.2794 0.2713
+sin
+FID 59.248023.914725.420326.313728.175629.357130.531436.304951.6672
+clip-score 0.2248 0.2721 0.2782 0.2809 0.2826 0.2831 0.2837 0.2846 0.2849
+Λ-shape
+FID 59.248022.392724.078525.684526.701927.509528.205832.187034.9896
+clip-score 0.2248 0.2688 0.2747 0.2770 0.2785 0.2793 0.2795 0.2786 0.2736
+V-shape
+FID 59.248021.656022.704223.665924.055025.407326.299327.658035.2935
+Table14:DifferentparameterizedresultsinSDXL,weshowFIDvs.CLIP-Score
+ofpcsfamilyandclampfamilyof10Kimages:pcsfamilyrecordsbestperformanceat
+s=0.1,clamp-linearandclamp-cosinestrategiesallrecordbestperformanceatc=4.
+w 1 3 5 7 9 11 13 15 20
+clip-score 0.2248 0.2712 0.2767 0.2791 0.2806 0.2817 0.2826 0.2832 0.2836
+baseline
+FID 59.248024.363424.929625.708026.165427.230827.462828.053829.6868
+clip-score 0.2248 0.2336 0.2396 0.2440 0.2470 0.2494 0.2513 0.2527 0.2549
+pcs(s=4)
+FID 59.248055.240252.073150.333548.998048.451648.014647.702548.9481
+clip-score 0.2248 0.2486 0.2581 0.2638 0.2673 0.2704 0.2722 0.2738 0.2765
+pcs(s=2)
+FID 59.248035.200228.750024.812022.851821.709822.106123.083323.5282
+clip-score 0.2248 0.2621 0.2708 0.2751 0.2776 0.2794 0.2803 0.2817 0.2830
+pcs(s=1)
+FID 59.248032.826427.000425.546825.433125.524425.737525.875826.8427
+clip-score 0.2248 0.2710 0.2769 0.2798 0.2812 0.2823 0.2830 0.2836 0.2844
+pcs(s=0.1)
+FID 59.248018.589418.897519.865820.543321.125721.624821.911823.7671
+clip-score 0.2248 0.2717 0.2752 0.2781 0.2798 0.2810 0.2822 0.2830 0.2840
+linear(c=2)
+FID 59.248024.308423.836124.024124.480624.675924.933625.649826.6398
+clip-score 0.2248 0.2773 0.2778 0.2792 0.2805 0.2818 0.2827 0.2831 0.2845
+linear(c=4)
+FID 59.248018.232118.251718.267818.367518.590218.835619.139519.9400
+clip-score 0.2248 0.2798 0.2799 0.2803 0.2811 0.2819 0.2825 0.2832 0.2846
+linear(c=6)
+FID 59.248019.330919.329519.271619.280119.295519.429819.563520.1577
+clip-score 0.2248 0.2720 0.2748 0.2775 0.2794 0.2806 0.2816 0.2822 0.2836
+cosine(c=2)
+FID 59.248024.276823.936723.844224.149324.351624.691725.077925.8126
+clip-score 0.2248 0.2773 0.2780 0.2793 0.2806 0.2816 0.2825 0.2832 0.2843
+cosine(c=4)
+FID 59.248018.232118.233618.276418.236418.337218.567818.892519.6065
+clip-score 0.2248 0.2798 0.2799 0.2805 0.2813 0.2821 0.2826 0.2830 0.2843
+cosine(c=6)
+FID 59.248019.294319.270119.226119.265619.271119.274319.267019.7355Analysis of Classifier-Free Guidance Weight Schedulers 33
+Table 15: Experiment on SD1.5 with Diversity measuresof10Kimages,com-
+parison between the baseline and two increasing heuristic shapes, linear and cosine.
+w 2 4 6 8 10 12 14 20 25
+clip-score 0.25930.27190.27570.27750.27900.27960.28030.28130.2817
+FID 11.74511.88714.63916.77718.41919.52820.46222.46323.810
+Div-CLIP-L 0.315 0.289 0.275 0.267 0.260 0.257 0.254 0.250 0.251
+baseline
+Div-Dinov2-L 1.188 1.083 1.033 1.007 0.987 0.976 0.967 0.951 0.948
+Div-CLIP-S 0.317 0.288 0.273 0.263 0.256 0.252 0.249 0.246 0.246
+Div-Dinov2-S 1.241 1.131 1.082 1.051 1.031 1.019 1.006 0.992 0.986
+clip-score 0.25650.26970.27410.27630.27800.27880.27990.28170.2826
+FID 14.64911.26012.05613.14714.17915.03215.66317.47818.718
+Div-CLIP-L 0.320 0.300 0.289 0.281 0.275 0.271 0.268 0.262 0.259
+linear
+Div-Dinov2-L 1.209 1.119 1.076 1.048 1.030 1.016 1.006 0.986 0.979
+Div-CLIP-S 0.324 0.302 0.291 0.282 0.277 0.271 0.270 0.263 0.261
+Div-Dinov2-S 1.262 1.172 1.129 1.099 1.082 1.060 1.057 1.038 1.027
+clip-score 0.25530.26860.27280.27510.27700.27820.27930.28120.2821
+FID 15.72511.84612.00912.79613.62914.28215.05816.90118.448
+Div-CLIP-L 0.322 0.304 0.293 0.287 0.282 0.278 0.275 0.268 0.265
+cos
+Div-Dinov2-L 1.215 1.134 1.092 1.068 1.051 1.039 1.030 1.008 1.001
+Div-CLIP-S 0.326 0.307 0.296 0.290 0.285 0.282 0.278 0.272 0.269
+Div-Dinov2-S 1.266 1.186 1.145 1.120 1.104 1.093 1.081 1.063 1.054
+Table 16: Experiment on SDXL with Diversity.,wepresentFIDvs.CLIP-Score
+(CS) for SDXL of 10K images, and we see the similar trending to Table 15 that the
+heuristic methods outperform the baseline, both on FID and Diversity.
+w 3 5 7 8 9 11 13 15 20
+clip-score 0.2712 0.2767 0.2791 0.2799 0.2806 0.2817 0.2826 0.2832 0.2836
+FID 24.36 24.93 25.71 26.06 26.17 27.23 27.46 28.05 29.69
+baseline
+Div-Dinov2-L 0.951 0.886 0.857 0.850 0.841 0.831 0.827 0.829 0.853
+Div-Dinov2-S 1.052 0.985 0.950 0.940 0.934 0.920 0.916 0.912 0.927
+clip-score 0.2653 0.2732 0.2773 0.2789 0.2798 0.2810 0.2821 0.2828 0.2840
+FID 29.09 25.03 24.45 24.52 24.67 25.13 25.55 25.85 26.60
+linear
+Div-Dinov2-L 0.999 0.949 0.916 0.904 0.897 0.881 0.873 0.863 0.854
+Div-Dinov2-S 1.123 1.064 1.030 1.018 1.007 0.989 0.980 0.973 0.956
+clip-score 0.2621 0.2708 0.2751 0.2764 0.2776 0.2794 0.2803 0.2817 0.2830
+FID 32.83 27.00 25.55 25.41 25.43 25.52 25.74 25.88 26.84
+cosine
+Div-Dinov2-L 1.017 0.969 0.941 0.932 0.922 0.908 0.899 0.893 0.879
+Div-Dinov2-S 1.143 1.095 1.066 1.056 1.045 1.031 1.020 1.008 0.99434 Xi Wang et al.
+For the evaluation, each participant was presented with a total of 10 image
+sets. Each set comprised 9 images. Within each set, three pairwise comparisons
+were made: linear vs. baseline, and cosine vs. baseline. Throughout the study,
+two distinct image sets (20 images for each method) were utilized. We carried
+out two tests for results generated with stable diffusion v1.5 and each image are
+generated to make sure that their CLIP-Score are similar.
+Subsequently,participantswerepromptedwiththreequestionsforeachcom-
+parison:
+1. Which set of images is more realistic or visually appealing?
+2. Which set of images is more diverse?
+3. Which set of images aligns better with the provided text description?
+In total, we recorded 54 participants with each participant responding to
+90 questions. We analyzed the results by examining responses to each question
+individually, summarizing the collective feedback.
