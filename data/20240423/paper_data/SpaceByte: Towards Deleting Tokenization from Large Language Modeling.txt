@@ -1,0 +1,937 @@
+SpaceByte: Towards Deleting Tokenization
+from Large Language Modeling
+KevinSlagle
+RiceUniversity
+kevin.slagle@rice.edu
+Abstract
+Tokenization is widely used in large language models because it significantly
+improvesperformance. However,tokenizationimposesseveraldisadvantages,such
+as performance biases, increased adversarial vulnerability, decreased character-
+levelmodelingperformance,andincreasedmodelingcomplexity. Toaddressthese
+disadvantageswithoutsacrificingperformance, weproposeSpaceByte,anovel
+byte-leveldecoderarchitecturethatclosestheperformancegapbetweenbyte-level
+andsubwordautoregressivelanguagemodeling. SpaceByteconsistsofabyte-level
+Transformermodel,butwithextralargertransformerblocksinsertedinthemiddle
+ofthelayers. Wefindthatperformanceissignificantlyimprovedbyapplyingthese
+largerblocksonlyaftercertainbytes, suchasspacecharacters, whichtypically
+denote word boundaries. Our experiments show that for a fixed training and
+inferencecomputebudget,SpaceByteoutperformsotherbyte-levelarchitectures
+androughlymatchestheperformanceoftokenizedTransformerarchitectures.
+1 Introduction
+Mostlanguagemodelsaretrainedusingtokenization,whichpartitionstextintotokensthattypically
+consistofwordsorsubwords. Tokenizationisusefulbecauseitsignificantlydecreasestheinference
+and training computational costs of large language models. However, tokenization also imposes
+severaldisadvantages,includingaperformancepenaltyontextdistributionsdifferentfromwhatthe
+tokenizerwastrainedon[1];increasedvulnerabilitytoadversarialattacks[2];worsecharacter-level
+modelingperformance[3],andadditionalmodelcomplexity.1
+Recently, MegaByte[4], MambaByte[5], andmore[6,7]havebeenproposedasnewbyte-level
+autoregressive language models that model bytes instead of tokens. (See [8–14] for encoder
+and encoder-decoder byte-level modeling.) To address the longer context size resulting from
+modelingbytesinsteadoftokens,MegaByteusesmultiscalemodeling(whichismorechallengingfor
+autoregressivemodelsthanTransformerencoders[15,16]),whileMambaByteusesMambablocks
+[17]insteadofTransformerblocks. ButalthoughMegaByteandMambaBytehavebeenshownto
+performbetterthanastandardbyte-levelTransformer,toourknowledge,nobyte-levelautoregressive
+largelanguagemodelarchitecturehasbeenshowntomatchtheperformanceoftokenizedmodels
+whencontrollingforcomputecosts.
+In this work, we study the performance of byte-level and subword-level autoregressive models
+when trained using a fixed compute budget. We measure the performance in terms of the cross
+entropy(measuredinbits-per-byte),whichhasbeenshowntobeastrongpredictorofdown-stream
+performance [18]. In addition to controlling for training compute, we also control for inference
+computecosts(measuredinFLOPs). Wefindthatbyte-levelTransformerandMegaBytemodels
+1See also Andrej Karpathy’s tweet twitter.com/karpathy/status/1657949234535211009 and video
+youtube.com/watch?v=zduSFxRajkE&t=6725sonthedisadvantagesoftokenization.
+Preprint.Underreview.
+4202
+rpA
+22
+]LC.sc[
+1v80441.4042:viXras p a c e _ i s _ a l l _ y
+de-embedding
+L (2 ) ⨉ local transformer blocks
+local
+L ⨉global transformer blocks
+global
+L (1 ) ⨉ local transformer blocks
+local
+embedding
+_ s p a c e _ i s _ a l l _
+Figure1: AnoverviewoftheSpaceBytearchitecture. Theembedding,localtransformerblocks,and
+de-embedding(i.e. alayernormandlinear)arethestandardTransformerdecoderlayers. SpaceByte
+modifiesthestandardtransformerbyapplying“global”transformerblocksonlyaftercertainbytes,
+suchasspacecharacters. Theintuitionisthatthefirstcharacterofawordistypicallythehardest
+topredict;thusthispositioningoftheglobalblocksshouldmakethebestuseoftheglobalblocks
+(whichusealargermodeldimension).
+canrequireroughly10timesmoretrainingFLOPstoachievethesameperformanceasasubword-
+levelTransformer. Toclosethissubstantialperformancegap,weproposeanewbyte-leveldecoder
+architecture: SpaceByte.
+SpaceBytealsoutilizesmultiscalemodelingtoimproveefficiencybygroupingbytesintopatches.But
+unlikeMegaByte,whichusesafixedpatchsize,SpaceByteusesasimpleruletodynamicallypartition
+thebytesintopatchesthatarealignedwithwordandotherlanguageboundaries. (Asimilartechnique
+was also explored by Thawani et al. [6].) Our experiments show that this simple modification is
+crucialforperformance,allowingSpaceBytetooutperformotherbyte-levelarchitecturesandroughly
+matchtheperformanceofsubwordTransformersacrossavarietyoftextmodalities.
+OurexperimentsareperformedondatasetsconsistingofEnglishbooks, LaTeXformattedarXiv
+papers,andopen-sourcecode. Forotherdatamodalities,SpaceBytewithoursimplepatchingrule
+mightnotbeaseffective.
+2 SpaceByte
+The SpaceByte architecture is summarized in Figure 1. In a nutshell, SpaceByte can be thought
+of as a byte-level Transformer model, but with extra “global” transformer blocks (with a larger
+modeldimension)insertedinthemiddle,whichareonlyappliedafractionofthetime. Whilethe
+MegaBytearchitectureappliestheglobaltransformerblockseveryP ∼8bytes,wehypothesizethat
+thisfixedspacinghindersperformance. Ourintuitionisthatthefirstcharacterofawordistypically
+significantlyhardertopredictthanthefollowingcharacters. Wethereforeexpectthatperformance
+canbeimprovedbyapplyingtheglobalblocksprimarilyatwordboundaries.
+GlobalBlockInsertionRuleInthiswork,weconsideraverysimpleruletodynamicallydecide
+whentoapplytheglobalblocks.WeassumethatthetextbytesareencodedusingtheUTF-8encoding.
+Wedefineabytetobespacelikeifthebytedoesnotencodealetter,number,orUTF-8continuation
+byte2. Weapplytheglobalblocksafteranyspacelikebytethatisnotprecededbyanotherspacelike
+byte(andafteranyBOStoken). SeeFigure2forexamples.
+Themostcommonspacelikebyteisthespacecharacter. Thus,theglobalblocksareappliedmost
+frequentlytopredictthefirstcharacterofaword,whichweexpectisthehardestcharactertopredict
+inagivenword. Withfixedpatchsize(e.g. asinMegaByte),theglobalblocksaretypicallyinserted
+inthemiddleaword,whichweexpectisinefficientbecausepredictingtherestofthewordcould
+likelybemoreefficientlyaccomplishedusingthelocalblocks. Wedefinecontinuationbytestobe
+spacelikesothatlanguagesthatdonotusespacesbetweenwordscanstillbenefitfromtheglobal
+blocksbetweenmulti-bytecharacters(e.g. ChinesecharactersconsistsofthreebytesinUTF-8).
+2UTF-8usesavariablenumberofbytestoencodeacharacter.Englishlettersornumbersconsistofasingle
+byte.Charactersthatareencodedusingmultiplebytesareencodedusingaleadingbyte(whichisspacelikeby
+ourdefinition)followedbyoneormorecontinuationbytes(whicharenotspacelike).
+2PG-19:
+the↓enemy!”•• he exclaimed. “••Their capture must be prevented. Come with
+arXiv:
+where $q_1=q_2=\dots=q_\kappa$ and $V_1=V_2=\dots V_\kappa$. In this way,
+Github:
+exp += 2;↓↓ mbf[3] = exp;↓ mbf[2] = sign | (ieee[2] & 0x7f);↓
+Figure2: Examplesofpatchboundariesfromdatasetsthatwestudy. Spacelikebytesareunderlined
+andcoloredblue. Patchesboundariesaredrawnabovethetext. Eachpatchendsafteraspacelike
+bytethatisnotprecededbyanotherspacelikebyte. Consequently,eachpatchbeginswithzeroor
+morespacelikebytes,followedbyoneormorenon-spacelikebytes,andendswithasinglespacelike
+byte. Theglobalblockspredictthefirstcharacterofeachpatch. Thedownwardarrow(↓)denotesa
+newlinebyte. Theleftandrightquotationcharacters,(“)and(”)inthePG-19example,areencoded
+usingthreebytesinUTF-8. Thefirstofthethreebytesisspacelike,whilethelatertwobytesare
+UTF-8continuationbytes,whicharenotspacelikeandareeachdenotedusingabulletpoint(•)above.
+Although this very simple “spacelike” rule is likely not the optimal rule, we find that it works
+surprisinglywellinpracticeforEnglishtext,LaTeXformattedpapers,andcode. Nevertheless,a
+criticalfuturedirectionistooptimizebetterrulesusingdataratherthanoursimpleheuristic.
+ImportantDetailsSincetheglobalblocksarenotappliedasoftenasthelocaltransformerblocks,it
+isadvantageoustousealargermodeldimensionfortheglobaltransformerblocks. Toincreasethe
+dimensionsofanactivationvectorbeforetheglobalblocks,wesimplypadtheactivationvectorwith
+zeros. Todecreasethedimension,wetruncatetheactivationvector.
+Inourexperiments,weuseasignificantlylargercontextsizethanthemodeldimensionD ofthe
+local
+localtransformerblocks. Topreventtheattentionmechanismfromdominatingthecomputecostsfor
+thelocalmodel,weuseanattentionwindow[19–21]oflengthD forthelocaltransformerblocks.
+local
+See Appendix C for pseudocode. Additional details specific to our experiments are provided in
+Sections4.1and4.2andAppendixA.
+3 RelatedWork
+Themoststraight-forwardconsequenceofmodelingbytesinsteadofsubwordtokensisthatthelength
+ofasequencetypicallyincreasesbyaboutafactoroffour. Thisincreasedsequencelengthincreases
+thetrainingandinferencecomputecostformodelingagivenlongsequenceoftextforaTransformer
+duetothequadraticscalingofattention.
+MegaByteTheMegaBytearchitecturestrivestousemultiscaleTransformermodelingtolessenthese
+performanceissues. Inparticular,MegaBytegroupsbytesintopatchesofafixedpatchsizeP. Each
+patchofbytesisvectorizedandthenfedintoa“global”Transformermodel. Theoutputoftheglobal
+modelisthenfedintoa“local”Transformermodelthatautoregressivelyoutputsbyte-levellogits. [4]
+ForacontextsizeofT bytes,MegaByte’sglobalTransformermodelcompressesthecontextintoonly
+T/P patches,whichcansignificantlydecreasethecomputecostformodelinglongsequences.Similar
+toYuetal.[4],wealsofindthatMegaByteoutperformsastandardbyte-levelTransformer. However,
+we find that MegaByte’s performance is remarkably close to a stronger byte-level Transformer
+baselinethatsimplyusesaslidingwindowattentionmechanism[19–21]toincreasethecontextsize
+withoutincreasingthecomputecosts.
+Yu et al. [4] do not compare MegaByte to subword-level Transformer in compute controlled
+experiments. In our compute controlled experiments, we find that MegaByte’s performance
+significantlylagsbehindasubword-levelTransformer.
+3ComparedtoMegaByte,SpaceBytemakesthecrucialchangethatpatchesaredynamicallysizedtobe
+commensuratewiththetext,e.g. withwordboundaries. Wealsoaddanadditionallocalmodelbefore
+theglobalmodel(whileMegaByteonlyutilizesasinglelocalmodelaftertheglobalmodel)tohelp
+themodeldealwiththedynamicalpatchsizes. Wealsousesignificantlylongerattentionwindows
+forourlocalmodels. WefindthatthesechangesallowSpaceBytetosignificantlyimproveuponthe
+performanceofMegaByteandroughlymatchtheperformanceofsubword-levelTransformers.
+MambaByteTheMambaBytearchitecture[5]takesanalternativeapproachtoavoidingthequadratic
+computescalingoftheattentionmechanismbyreplacingtheTransformerblockwithaMambablock
+[17]. Wangetal.[5]findthattheirbyte-levelMambaBytemodelsoutperformbyte-levelTransformer
+andbyte-levelMegaBytemodels. Theyperformonecontrolledexperimentwithasubwordmodel,
+wheretheyfindthatMambaByteslightlyoutperformsMamba(usingtokens)whencontrollingforthe
+amountofmodelparametersandtrainingdata(whichwas14epochsofthePG-19dataset). Butthis
+experimentwasnotcontrolledforcomputeasMambaBytewastrainedusingroughlyfourtimesas
+muchcomputethanMamba. WeviewtheMambaandMambaBytearchitecturesascomplementary
+to our work, as the Mamba block could be integrated into SpaceByte (or MegaByte) in place of
+Transformerblocks.
+Layer Skipping SpaceByte could be though of as a Transformer that employs a novel kind of
+text-dependentlayerskipping[22–28]onthemiddlelayers.
+WordBoundaryUsingwordboundariestopartitionpatchesinautoregressivelanguagemodeling
+was explored by Thawani et al. [6] (and also Edman et al. [12] for encoder-decoder modeling).
+However,theirexperimentmethodologydifferedverysignificantlyfromours. Whilewestudylarge
+languagemodelperplexity(viabits-per-byte)incompute-limitedsettings,Thawanietal.[6]study
+modelstrainedonsmalldatasets(∼ 5MB)over100epochsandevaluatedusingwordprediction
+accuracies. ThedesignoftheirlocalblocksalsodifferfromSpaceByteastheirlocalblocksdonot
+attendacrosswordboundariesandtheyusenon-causalattentionforthelocalblocksthatpreceedthe
+globalblocks.
+4 ExperimentSetup
+Our experiments compare the performance of our byte-level SpaceByte architecture to subword-
+levelTransformerandbyte-levelTransformerandMegaBytearchitectures. Tofairlycomparethe
+performancebetweenthebyteandsubwordlevelmodels,wemeasurethecross-entropyofthetest
+datasetintermsofbits-per-byte.3 Giventhesubstantialvariationininferencecomputecostsacross
+themodelswestudy,wealsocomparetheirinferencecomputecoststoprovideamorecomprehensive
+evaluation. We use FLOPs-per-byte as a simple software and hardware–independent proxy for
+inferencecomputecosts,whichisthenumberofFLOPs(seeAppendixA.1)requiredtomodelabyte
+oftext.4
+NotethatbycontrollingforbothtotaltrainingcomputeandFLOPs-per-byte,wearealsocontrolling
+fortheamountoftrainingdatasince(bytestrained)=(trainingFLOPs)/(trainingFLOPs-per-byte).
+TheFLOPs-per-byteduringtrainingisequaltothreetimestheFLOPs-per-byteduringinference(due
+tothebackwardspassduringtraining).
+WethereforestudytheParetofrontieroflowestbits-per-byteandlowestFLOPs-per-byte. Wetrain
+allmodelsusingacompute-controlledsetup,usingeither1018or1019FLOPs. Inordertoeffectively
+explorethisParetofrontier,wetrainmodelsusingagridofdifferentmodeldimensionsandnumbers
+oflayers,asspecifiedinAppendixB.3.
+DatasetsFollowingtheMegaByte[4]andMambaByte[5]experiments,webenchmarkourmodels
+onadiverserangeoflong-formdatasets: PG-19(English-languagebookswrittenbefore1919)[31];
+arXiv(papersfromArXivwritteninLaTeX,extractedfromthearXivcomponentofThePile[32]);
+andGithub(open-sourcecoderepositories,extractedfromtheGithubcomponentofThePile[32]).
+3Thebits-per-byte(BPB)isequaltoBPB=XEN /(N ln2),i.e.thecrossentropypertoken(XE)
+tokens bytes
+timesthenumberoftokensperbyte(N /N )dividedbyln2(toconvertnatstobits).N andN
+tokens bytes tokens bytes
+arethenumberoftokensandbytesinthedataset,respectively. Forbyte-levelmodels,N =N since
+tokens bytes
+bytesareusedinplaceoftokens.
+4Wenotethatinorderformemorybandwidthtonotbeabottleneckduringinference,thebatchsizemustbe
+sufficientlylargeande.g.grouped-queryattention[29,30]mustbeused.
+44.1 Models
+Themodelswestudytendtoperformbestwhenthecomputecostisroughlyevenlysplitbetweenthe
+attentionandfeedforwardlayers. Toensurethis,wefixthecontextsize(orattentionwindow)tobe
+equaltothemodeldimensionforeverylayer. Wedetailourmodelsetupbelow.
+NotationForallmodels,weuseT todenotethecontextlength,andDtobethemodeldimension
+(oftheglobalmodelforSpaceByteandMegaByte).
+ForSpaceByteandMegaByte,D isthedimensionofthelocalmodel,andT isthemaximum
+local global
+contextsizefortheglobalmodel. ThepatchsizeP isthenumberofbytesbetweenglobalblocks. If
+thepatchsizeisfixed(whichisalwaysthecaseforMegaByte),wenaturallysetthecontextsizetobe
+T =PT .
+global
+Below,wedescribeeachofthemodelarchitecturesthatwecompareinourexperiments.
+SpaceByteWefixtheglobalcontextsizeandglobalmodeldimensiontobeequal,T =D,and
+global
+wesetthelocalattentionwindowW equaltothelocalmodeldimension,W = D . For
+local local local
+thePG-19andarXivdatasets,theaveragepatchsizeisroughly6,sowetakeT =6T forthese
+global
+datasets;fortheGithubdataset,theaveragepatchsizeisroughly8,soweinsteadtakeT =8T
+global
+fortheGithubdataset.
+Forsimplicity,wefixthenumberofglobaltransformerblocksL tobeequaltothetotalnumber
+global
+oflocalblocks,L(1) +L(2) ,andweevenlysplitthenumberoflocalblocksbefore(L(1) )andafter
+local local local
+(L(2) )theglobalblocks,i.e. wefixL(1) =L(2) = 1L .
+local local local 2 global
+SpaceByte (fixed patches) To clearly demonstrate the utility of dynamically aligning patch
+boundariesinSpaceByte,wealsotrainasimplifiedversionSpaceBytewherethepatchesallhavea
+fixedsize. InordertoroughlymatchSpaceByte’saveragepatchsize,wetakethefixedpatchsize
+tobeP = 6foralldatasetsexceptfortheGithubdataset,forwhichweuseP = 8. Weagainuse
+T =DandT =PT .
+global global
+Byte-levelTransformerForasimplebaselinecomparison(followingYuetal.[4]),wetrainbyte-
+levelTransformermodels. Wetakethecontextsizetobeequaltothemodeldimension,T =D.
+Notethatinoursetup,aTransformerwithmodeldimensionDonlyseesacontextsizeofD,which
+issignificantlysmallerthanthecontextsizeofPDforSpaceByte(andMegaByte)withpatchsizeP.
+Byte-levelTransformer(WindowAttention)Sinceashortercontextisasignificantdisadvantage
+forlong-formdatasets,wealsocompareagainstastrongerTransformerbaselinethatusesasliding
+windowattention[19–21]toefficientlyincreasethecontextsizewithoutincreasingcomputecosts.
+WetraineachwindowattentionenhancedTransformerusingacontextsizeT =PDandasliding
+attentionwindowsizeequaltoD,withP =6foralldatasetsexceptfortheGithubdatasetforwhich
+P =8.5
+MegaByteWealsocomparetoMegaByte[4]. AlthoughMegaBytewasoriginallytrainedusinga
+patchsizeofP = 8,wefoundthatapatchsizeofP = 4wasoftenbetterinoursetup. Wethus
+includebothofthesepatchsizes(4and8)inourhyperparametergridforMegaByte. Forsimplicity,
+wefixthenumberoflayersintheglobalandlocalblockstobeequal,L =L ,whichisclose
+global local
+towhatwasusedbyYuetal.[4]. SimilartoSpaceByte,wesetthecontextsizetoT =PD,where
+Distheglobalmodeldimension.
+SubwordTransformersOurmostimportantbaselineisthestandardsubwordTransformer. Wetrain
+subwordTransformersusingtwodifferenttokenizers(bothwithavocabularysizeof50,257): (1)the
+GPT2tokenizer[33],and(2)aSentencePiece[34]tokenizerusingabyte-pair-encodingmodel[35]
+thatwasseparatelytrainedforeachdataset. Asusual,wesetthecontextsizetobeequaltothemodel
+dimension,T =D.
+5WealsotriedasimplifiedSparseTransformer[20]wherethefirstattentionlayerusesaslidingattention
+windowofsizeD;thesecondattentionlayerusesastridedattentionwithstrideP;andtheremaininglayers
+continuetoalternatebetweenslidingandstridedattention. Howeverinoursetup,wefoundthistoperform
+worsethanjustusingaslidingwindowattention.
+5Table1: Bestbits-per-byte. Lowestbits-per-byte3foreachmodelarchitecturewhentrainedusing
+1019FLOPsondifferenttextmodalities. Thelowestbits-per-byteforeachdatasetareunderlined;and
+thelowestwithin2.5%arebolded. Thelargeststatisticalerror(duetoafinitenumberofevaluation
+samples)is0.4%. SpaceBytesignificantlyoutperformsotherbyte-levelarchitecturesandperforms
+onparwiththeSentencePiecesubwordTransformer.
+Model PG-19 arXiv Github
+Transformer(GPT2tokenizer) 1.013 0.796 0.554
+Transformer(SentencePiece) 0.989 0.768 0.508
+Transformer 1.138 0.909 0.655
+Transformer(WindowAttention) 1.089 0.818 0.560
+MegaByte 1.083 0.822 0.570
+SpaceByte(fixedP) 1.112 0.804 0.552
+SpaceByte 1.009 0.748 0.500
+4.2 MoreDetails
+We use fairly standard Pre-LN [36, 20, 37] Transformer [38] blocks with no bias terms. Since
+MegaByteusesRotaryPositionEmbedding(RoPE)[39],wealsouseRoPEforallmodels(which
+slightlyimprovestheloss). Topreventlossdivergencesduringtraining,weuseqk-layernorm[40,41]
+(whichwestronglyrecommend)forallmodels;i.e. weaddanextralayer-normalizationtothequery
+andkeyvectorsintheself-attentionlayers.
+Allhyperparametershavebeencarefullytunedusinggridandrandomsearches. SeeAppendicesA
+andBformoredetails.6
+5 Results
+We now present our experimental data comparing the different model architectures in compute-
+controlledsettings. Figure3plotstheParetofrontieroflowestcross-entropybits-per-byteandlowest
+FLOPs-per-byte(i.e. inferencecomputecost)foreacharchitectureandtrainingcomputebudget.
+WeassumethattheParetofrontierisconvex. Thus,foreacharchitectureandcomputebudget,we
+performagridsearchovermodeldimensionandnumberoflayers;wethendrawapiecewise-linear
+lineconnectingthebest(i.e. minimalsubsetof)modelssuchthatallothermodels(notshownin
+figure)lieaboveandtotherightoftheline. Table1summarizestheresultsforthelowestoverall
+bits-per-byteforeacharchitecture.
+Acrossalldatasets,trainingcomputebudgets,andinferencecomputebudgets(i.e. FLOPs-per-byte),
+SpaceBytesignificantlyoutperformsallotherbyte-levelarchitectures. SpaceBytealsoconsistently
+outperforms the subword Transformer when using GPT2 tokens, and by a wide margin on the
+arXivandGithubdatasets. SpaceByteroughlymatchestheperformanceofthemostcompetitive
+baseline,thesubwordTransformerusingtheSentencePiecetokenizer,withSpaceByteperforming
+slightlybetteronthearXivandGithubdatasets. Figure3alsosuggeststhatSpaceByte’sperformance
+improvesfasterthanthesubwordTransformerasthetrainingcomputebudgetincreases.
+Byte-levelarchitecturesotherthanSpaceByteperformsignificantlyworsethanSpaceByteorthe
+SentencePiece Transformer. For example, for PG-19, the next best byte-level architecture is
+MegaByte;however,MegaBytetrainedusing1019FLOPs(thickgreenlineinFigure3a)performs
+worseacrossnearlytheentireParetofrontierthantheSentencePieceTransformertrainedusingonly
+10%asmanytrainingFLOPs(thinblackline). Althoughthestandardbyte-leveltransformer(which
+istheprimarybaselineusedbyYuetal.[4], blueinFigure3)performssignificantlyworsethan
+theotherbyte-levelmodels,wenotethatbysimplyusingaslidingwindowattentionmechanism
+toincreasethecontextsizetomorecloselymatchthatoftheotherbyte-levelmodels,thisstronger
+baseline(purple)performsalmostaswellasMegaByte. Nevertheless,SpaceBytestillsignificantly
+outperformsthisstrongerbaseline.
+6Ourtrainingcodeanddatareproductionstepscanbefoundatgithub.com/kjslag/spacebyte
+6
+drowbus
+level-etyb1.4
+subword-level:
+1.4
+Transformer
+1.3 (GPT2 tokenizer)
+Transformer
+1.2 (SentencePiece)
+1.2 byte-level:
+Transformer
+1.2
+Transformer
+(Window Attention)
+1.1
+MegaByte
+SpaceByte
+1.1 (fixed P)
+SpaceByte
+1.0
+107 108
+inference FLOPs-per-byte
+(a)PG-19dataset
+subword-level:
+Transformer
+(GPT2 tokenizer)
+Transformer
+1.0 (SentencePiece)
+byte-level:
+Transformer
+0.9 Transformer
+(Window Attention)
+MegaByte
+SpaceByte
+0.8 (fixed P)
+SpaceByte
+107 108
+inference FLOPs-per-byte
+(b)arXivdataset
+1.0
+subword-level:
+0.9 Transformer
+(GPT2 tokenizer)
+Transformer
+0.8 (SentencePiece)
+byte-level:
+0.7 Transformer
+Transformer
+(Window Attention)
+0.6 MegaByte
+SpaceByte
+(fixed P)
+SpaceByte
+0.5
+107 108
+inference FLOPs-per-byte
+(c)Githubdataset
+Figure 3: Pareto frontier of the cross-entropy bits-per-byte3 vs FLOPs-per-byte during inference
+(details in Appendix A.1) for each model architecture (different colors) trained using 1018 (thin
+lines)or1019(thicklines)FLOPsondifferentdatasets(onalog-logscale). Lowerandtotheleftis
+better. SpaceByte(red)outperformsallotherbyte-levelarchitecturesacrosstheentireParetofrontier
+for all datasets. SpaceByte roughly matches the performance of the subword Transformer using
+SentencePiecetokens,andoutperformsthesubwordTransformerusingGPT2tokens.
+7
+)etyb-rep-stib(
+yportne-ssorc
+)etyb-rep-stib(
+yportne-ssorc
+)etyb-rep-stib(
+yportne-ssorcTable2: Comparisonwithotherworks. WecompareSpaceBytetobyte-levelmodelstrainedin
+otherworks,alongwithasubwordtransformerthatwetrain. Allmodelsaretrainedusingroughly
+thesameinferenceFLOPs-per-byte(≈728M).Thebits-per-bytefortheTransformer,PerceiverAR,
+andMegaBytemodelsaretakenfromYuetal.[4],whileMambaByteresultsaretakenfromWang
+etal.[5]. Thebestbits-per-byteforeachdatasetareunderlined;andthelowestwithin3%arebolded.
+Thelargest1-sigmastatisticalerror(duetoafinitenumberofevaluationsamples)forthemodelswe
+trainislessthan0.001. SpaceByteistheoverallbestperformingbyte-levelmodelandconsistently
+performswithinafewpercentofthesubwordTransformer.
+†Thesemodelsusedslightlydifferentdatasetsfortrainingand/ortesting. ForMambaByte-353M,
+weestimatethatthisdifferenceveryroughlyamountstoanextra3%statisticalerror.
+Context Data Testbits-per-byte↓
+Model
+size trained
+PG-19 Stories arXiv Github
+2048
+tokens ≈30B∗
+Transformer-1B 0.908 0.809 0.666 0.400
+∼8192 bytes
+bytes
+Transformer-320M[4] 1024 80B 1.057 1.064 0.816† 0.575†
+PerceiverAR-248M[4] 8192 80B 1.104 1.070 0.791† 0.546†
+MegaByte-758M+262M[4] 8192 80B 1.000 0.978 0.678† 0.411†
+MambaByte-353M[5] 8192 30B∗ 0.930 0.908† 0.663† 0.396†
+SpaceByte-793M+184M 8192 30B∗ 0.918 0.833 0.663 0.411
+(bytes) (bytes)
+ToverifytheimportanceofdynamicpatchsizesforSpaceByte’sperformance,wecompareSpaceByte
+toavariantofSpaceBytewithfixedpatchsizes(orangeinFigure3). Weobservethatfixingthepatch
+sizesignificantlydegradestheperformanceofSpaceByte.
+NotethatonthearXivandGithubdatasets,thesubwordTransformerperformssignificantlyworse
+whenusingGPT2tokens(whichweretrainedonWebText[33])thanSentencePiecetokens(which
+weretrainedusingthespecificdataset). Thisexemplifiesthebiasthattokenizationcanintroduceon
+datadistributionsdifferentfromwhatthetokenizerwastrainedon.
+6 ComparisonwithOtherWorks
+WealsocompareSpaceByteperformancetobyte-levelmodelstrainedinotherworks. Yuetal.[4]
+trainedTransformer,PerceiverAR,andMegaBytemodels,eachusingthesameamountofcompute,
+FLOPs-per-byte,anddata(80Bbytes).Wangetal.[5]additionallytrainedaMambaBytemodelusing
+thesameFLOPs-per-bytebutonly30Bbytesofdata. WetrainSpaceByte-793M+184M(D =1536,
+D =768,L =26,L =28)usingroughlythesameinferenceFLOPs-per-byte(728M)
+local local global
+butalsoonly30Bbytesofdata(followingWangetal.[5]). Trainingthesemodelsthusrequires
+roughly3×728MFLOPs-per-byte×30Bbytes ≈ 6.5×1019 FLOPS,wherethefactorofthree
+comesfromconvertinginferenceFLOPs-per-bytetotrainingFLOPs-per-byte(whichadditionally
+requiresabackwardspass). Forthisexperiment,wesetthecontextsizeofSpaceByteto8192bytes
+tofollowthepriorworks. SeeAppendixAformoredetails.
+WealsotrainsubwordTransformer-1B(D =1536)modelsusingtheSentencePiecetokenizer(except
+fortheStoriesdataset,forwhichweusetheGPT2tokenizer). Theaveragenumberofbytespertoken
+forthePG-19,Stories,arXiv,andGithubdatasetsare4.05,4.39,3.73,and3.31,respectively. To
+matchtheFLOPs-per-byteofthesubwordTransformer-1Bmodelstothebyte-levelmodels,weset
+thenumberoflayersto40,44,37,or31,forTransformer-1Bonthesefourrespectivedatasets.
+ResultsareshowninTable2. WeshowexperimentsforthePG-19[31],Stories[42],arXiv(extracted
+fromThePile[32]),andGithub(extractedfromThePile[32])datasets.7 Yuetal.[4]usedproprietary
+7Yuetal.[4]andWangetal.[5]alsoshowresultsfora“Books”dataset[32]derivedfromBooks3(whichis
+similartoPG-19butalsoincludesmodernbooks).However,thelegalityofobtainingBooks3isquestionable
+duetocopyrights.Weconsequentlyexcludecomparisonstothisdataset.
+8
+drowbus
+level-etyb“arXiv”and“Code”datasets,whichwedonothaveaccessto. FollowingWangetal.[5],wecompare
+Yuetal.[4]’sresultstothesimilar(butlikelyslightlydifferent)arXivandGithubcomponentsof
+ThePile[32]. However,Wangetal.[5]usetheirowntestsplitstoevaluateMambaByte-353Mon
+Stories,arXiv,andGithub. Duetotherathersmalltestsplits(∼100MBforthearXivandGithub
+datasets),thisdifferencecanbesignificant. Forexample,thevalidation(andtest)bits-per-bytefor
+SpaceByte-793M+184MontheStories,arXiv,andGithubdatasetsare0.877(0.833),0.658(0.663)
+and0.397(0.411), whichdifferby+5%, −1%, and−3%, respectively. Giventhisvariation, the
+bits-per-byteofMambaByte-353MandSpaceByte-793M+184Marenotstatisticallydifferentonthe
+arXivorGithubdatasets.
+Overall,wefindthatSpaceByteoutperformsthebyte-levelmodelstrainedinotherworks. SpaceByte
+outperformsMegaByte,eventhoughMegaBytewastrainedusing2.7timesasmuchcomputeand
+data. Moreover,SpaceByte’sperformanceiscompetitivewiththesubwordTransformer-1B.
+7 Conclusion
+Wehaveproposedanewbyte-levelTransformerdecoderarchitecture, SpaceByte. Ourcompute-
+controlledexperimentsshowthatSpaceByteoutperformsallotherbyte-levelarchitecturesandroughly
+matchestheperformanceofsub-wordlevelTransformers.
+For future work, it would be fruitful to investigate if Mamba blocks [17] could further improve
+SpaceByte’sperformance. Itwouldalsobedesirabletoimproveuponandgeneralizeoursimple
+globalblockinsertionrule.
+SpaceByteusesmultiscalemodelingwherethelocalmodeloperatesonbyteswhiletheglobalmodel
+typicallyoperatesonwords. Anothernaturalextensionofourworkistotryrecursivelyapplying
+multiscalemodelingatevenlongerscales,suchasthesentenceorparagraphlevel.
+AcknowledgmentsandDisclosureofFunding
+WethankTushaarGangavarapu,JunxiongWang,andLiliYuforhelpfulconversations. Thiswork
+wassupportedinpartbytheNSFCampusCyberinfrastructuregrantCC*Compute: InteractiveData
+AnalysisPlatformOAC-2019007andbyRiceUniversity’sCenterforResearchComputing(CRC).
+References
+[1] J.PourmostafaRoshanSharami,D.Shterionov,andP.Spronck. ASystematicAnalysisofVocabularyand
+BPESettingsforOptimalFine-tuningofNMT:ACaseStudyofIn-domainTranslation. March2023. doi:
+10.48550/arXiv.2303.00722.
+[2] JessicaRumbelowandmwatkins.Solidgoldmagikarp(plus,promptgeneration),2023.URLhttps://www.
+lesswrong.com/posts/aPeJE8bSo6rAFoLqg/solidgoldmagikarp-plus-prompt-generation.
+[3] PeterWelinder,May2022. URLhttps://twitter.com/npew/status/1525900849888866307.
+[4] LiliYu,DanielSimig,ColinFlaherty,ArmenAghajanyan,LukeZettlemoyer,andMikeLewis. MegaByte:
+PredictingMillion-byteSequenceswithMultiscaleTransformers. InThirty-seventhConferenceonNeural
+InformationProcessingSystems,2023. URLhttps://openreview.net/forum?id=JTmO2V9Xpz.
+[5] JunxiongWang,TushaarGangavarapu,JingNathanYan,andAlexanderMRush. MambaByte:Token-free
+SelectiveStateSpaceModel. January2024. doi:10.48550/arXiv.2401.13660.
+[6] AvijitThawani,SaurabhGhanekar,XiaoyuanZhu,andJayPujara. Learnyourtokens: Word-pooled
+tokenizationforlanguagemodeling.InConferenceonEmpiricalMethodsinNaturalLanguageProcessing,
+2023. URLhttps://openreview.net/forum?id=O9zrG7NB3X.
+[7] BrianLester,JaehoonLee,AlexAlemi,JeffreyPennington,AdamRoberts,JaschaSohl-Dickstein,and
+NoahConstant. TrainingLLMsoverNeurallyCompressedText. art.arXiv:2404.03626,April2024.
+[8] LintingXue,AdityaBarua,NoahConstant,RamiAl-Rfou,SharanNarang,MihirKale,AdamRoberts,
+andColinRaffel. ByT5:Towardsatoken-freefuturewithpre-trainedbyte-to-bytemodels. Transactions
+oftheAssociationforComputationalLinguistics,10:291–306,2022. doi:10.1162/tacl_a_00461. URL
+https://aclanthology.org/2022.tacl-1.17.
+9[9] Jonathan H. Clark, Dan Garrette, Iulia Turc, and John Wieting. CANINE: Pre-training an Efficient
+Tokenization-Free Encoder for Language Representation. art. arXiv:2103.06874, March 2021. doi:
+10.48550/arXiv.2103.06874.
+[10] Hicham El Boukkouri, Olivier Ferret, Thomas Lavergne, Hiroshi Noji, Pierre Zweigenbaum, and
+Jun’ichi Tsujii. CharacterBERT: Reconciling ELMo and BERT for word-level open-vocabulary
+representationsfromcharacters. InInternationalCommitteeonComputationalLinguistics,pages6903–
+6915, Barcelona, Spain (Online), December 2020. doi: 10.18653/v1/2020.coling-main.609. URL
+https://aclanthology.org/2020.coling-main.609.
+[11] YiTay,VinhQ.Tran,SebastianRuder,JaiGupta,HyungWonChung,DaraBahri,ZhenQin,Simon
+Baumgartner,CongYu,andDonaldMetzler. Charformer:FastCharacterTransformersviaGradient-based
+SubwordTokenization. art.arXiv:2106.12672,June2021. doi:10.48550/arXiv.2106.12672.
+[12] LukasEdman,AntonioToral,andGertjanvanNoord. Subword-DelimitedDownsamplingforBetter
+Character-LevelTranslation. arXive-prints,art.arXiv:2212.01304,December2022. doi:10.48550/arXiv.
+2212.01304.
+[13] MakeshNarsimhanSreedhar,XiangpengWan,YuCheng,andJunjieHu. Localbytefusionforneural
+machinetranslation.InAssociationforComputationalLinguistics,pages7199–7214,Toronto,Canada,July
+2023. doi:10.18653/v1/2023.acl-long.397. URLhttps://aclanthology.org/2023.acl-long.397.
+[14] LukasEdman,GabrieleSarti,AntonioToral,GertjanvanNoord,andAriannaBisazza.AreCharacter-level
+TranslationsWorththeWait?ComparingByT5andmT5forMachineTranslation. art.arXiv:2302.14220,
+February2023. doi:10.48550/arXiv.2302.14220.
+[15] PiotrNawrot,SzymonTworkowski,MichałTyrolski,LukaszKaiser,YuhuaiWu,ChristianSzegedy,and
+HenrykMichalewski. Hierarchicaltransformersaremoreefficientlanguagemodels. InAssociationfor
+ComputationalLinguistics,pages1559–1571,Seattle,UnitedStates,July2022. doi:10.18653/v1/2022.
+findings-naacl.117. URLhttps://aclanthology.org/2022.findings-naacl.117.
+[16] ZihangDai,GuokunLai,YimingYang,andQuocV.Le. Funnel-Transformer:FilteringoutSequential
+RedundancyforEfficientLanguageProcessing. art.arXiv:2006.03236,June2020. doi:10.48550/arXiv.
+2006.03236.
+[17] AlbertGuandTriDao. Mamba:Linear-timesequencemodelingwithselectivestatespaces,2024. URL
+https://openreview.net/forum?id=AL1fq05o7H.
+[18] YuzhenHuang,JinghanZhang,ZifeiShan,andJunxianHe.CompressionRepresentsIntelligenceLinearly.
+arXive-prints,art.arXiv:2404.09937,April2024. doi:10.48550/arXiv.2404.09937.
+[19] IzBeltagy,MatthewE.Peters,andArmanCohan. Longformer:TheLong-DocumentTransformer. April
+2020. doi:10.48550/arXiv.2004.05150.
+[20] RewonChild,ScottGray,AlecRadford,andIlyaSutskever. GeneratingLongSequenceswithSparse
+Transformers. April2019. doi:10.48550/arXiv.1904.10509.
+[21] OfirPress,NoahA.Smith,andMikeLewis. Shortformer:Betterlanguagemodelingusingshorterinputs.
+InAssociationforComputationalLinguistics,pages5493–5505,August2021. doi:10.18653/v1/2021.
+acl-long.427. URLhttps://aclanthology.org/2021.acl-long.427.
+[22] AlexGraves. AdaptiveComputationTimeforRecurrentNeuralNetworks. art.arXiv:1603.08983,March
+2016. doi:10.48550/arXiv.1603.08983.
+[23] XinWang,FisherYu,Zi-YiDou,TrevorDarrell,andJosephE.Gonzalez. SkipNet:LearningDynamic
+RoutinginConvolutionalNetworks. art.arXiv:1711.09485,November2017. doi:10.48550/arXiv.1711.
+09485.
+[24] Andreas Veit and Serge Belongie. Convolutional Networks with Adaptive Inference Graphs. art.
+arXiv:1711.11503,November2017. doi:10.48550/arXiv.1711.11503.
+[25] ZuxuanWu,TusharNagarajan,AbhishekKumar,StevenRennie,LarryS.Davis,KristenGrauman,and
+Rogerio Feris. BlockDrop: Dynamic Inference Paths in Residual Networks. art. arXiv:1711.08393,
+November2017. doi:10.48550/arXiv.1711.08393.
+[26] TalSchuster,AdamFisch,TommiJaakkola,andReginaBarzilay. Consistentacceleratedinferencevia
+confidentadaptivetransformers. InAssociationforComputationalLinguistics,pages4962–4979,Online
+andPuntaCana,DominicanRepublic,November2021. doi:10.18653/v1/2021.emnlp-main.406. URL
+https://aclanthology.org/2021.emnlp-main.406.
+10[27] YizengHan,GaoHuang,ShijiSong,LeYang,HonghuiWang,andYulinWang.DynamicNeuralNetworks:
+ASurvey. art.arXiv:2102.04906,February2021. doi:10.48550/arXiv.2102.04906.
+[28] DavidRaposo,SamRitter,BlakeRichards,TimothyLillicrap,PeterConwayHumphreys,andAdam
+Santoro. Mixture-of-Depths:Dynamicallyallocatingcomputeintransformer-basedlanguagemodels. art.
+arXiv:2404.02258,April2024.
+[29] NoamShazeer. FastTransformerDecoding: OneWrite-HeadisAllYouNeed. art.arXiv:1911.02150,
+November2019. doi:10.48550/arXiv.1911.02150.
+[30] Joshua Ainslie, James Lee-Thorp, Michiel de Jong, Yury Zemlyanskiy, Federico Lebron, and Sumit
+Sanghai. GQA: Training generalized multi-query transformer models from multi-head checkpoints.
+In Association for Computational Linguistics, pages 4895–4901, Singapore, December 2023. doi:
+10.18653/v1/2023.emnlp-main.298. URLhttps://aclanthology.org/2023.emnlp-main.298.
+[31] Jack W. Rae, Anna Potapenko, Siddhant M. Jayakumar, Chloe Hillier, and Timothy P. Lillicrap.
+Compressivetransformersforlong-rangesequencemodelling. InInternationalConferenceonLearning
+Representations,2020. URLhttps://openreview.net/forum?id=SylKikSYDH.
+[32] LeoGao,StellaBiderman,SidBlack,LaurenceGolding,TravisHoppe,CharlesFoster,JasonPhang,
+HoraceHe,AnishThite,NoaNabeshima,ShawnPresser,andConnorLeahy.ThePile:An800GBDataset
+ofDiverseTextforLanguageModeling. December2020. doi:10.48550/arXiv.2101.00027.
+[33] AlecRadford,JeffWu,RewonChild,DavidLuan,DarioAmodei,andIlyaSutskever.Languagemodelsare
+unsupervisedmultitasklearners. 2019. URLhttps://cdn.openai.com/better-language-models/
+language_models_are_unsupervised_multitask_learners.pdf.
+[34] TakuKudoandJohnRichardson. SentencePiece:Asimpleandlanguageindependentsubwordtokenizer
+anddetokenizerforNeuralTextProcessing. InAssociationforComputationalLinguistics,pages66–71,
+nov2018. doi:10.18653/v1/D18-2012. URLhttps://aclanthology.org/D18-2012.
+[35] Rico Sennrich, BarryHaddow, andAlexandra Birch. Neuralmachine translationof rarewords with
+subword units. In Association for Computational Linguistics, pages 1715–1725, August 2016. doi:
+10.18653/v1/P16-1162. URLhttps://aclanthology.org/P16-1162.
+[36] Alexei Baevski and Michael Auli. Adaptive input representations for neural language modeling. In
+InternationalConferenceonLearningRepresentations,2019. URLhttps://openreview.net/forum?
+id=ByxZX20qFQ.
+[37] QiangWang,BeiLi,TongXiao,JingboZhu,ChangliangLi,DerekF.Wong,andLidiaS.Chao. Learning
+deeptransformermodelsformachinetranslation. InAssociationforComputationalLinguistics,pages
+1810–1822,July2019. doi:10.18653/v1/P19-1176. URLhttps://aclanthology.org/P19-1176.
+[38] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,Łukasz
+Kaiser,andIlliaPolosukhin. Attentionisallyouneed. InAdvancesinNeuralInformationProcessing
+Systems,volume30,2017.
+[39] JianlinSu,YuLu,ShengfengPan,AhmedMurtadha,BoWen,andYunfengLiu. RoFormer:Enhanced
+TransformerwithRotaryPositionEmbedding. April2021. doi:10.48550/arXiv.2104.09864.
+[40] MostafaDehghani,JosipDjolonga,BasilMustafa,PiotrPadlewski,JonathanHeek,JustinGilmer,Andreas
+Steiner, Mathilde Caron, Robert Geirhos, Ibrahim Alabdulmohsin, Rodolphe Jenatton, Lucas Beyer,
+MichaelTschannen,AnuragArnab,XiaoWang,CarlosRiquelme,MatthiasMinderer,JoanPuigcerver,
+UtkuEvci,ManojKumar,SjoerdvanSteenkiste,GamaleldinF.Elsayed,AravindhMahendran,FisherYu,
+AvitalOliver,FantineHuot,JasmijnBastings,MarkPatrickCollier,AlexeyGritsenko,VighneshBirodkar,
+CristinaVasconcelos,YiTay,ThomasMensink,AlexanderKolesnikov,FilipPavetic´,DustinTran,Thomas
+Kipf,MarioLucˇic´,XiaohuaZhai,DanielKeysers,JeremiahHarmsen,andNeilHoulsby. ScalingVision
+Transformersto22BillionParameters. February2023. doi:10.48550/arXiv.2302.05442.
+[41] MitchellWortsman,PeterJLiu,LechaoXiao,KatieEEverett,AlexanderAAlemi,BenAdlam,JohnDCo-
+Reyes,IzzeddinGur,AbhishekKumar,RomanNovak,JeffreyPennington,JaschaSohl-Dickstein,Kelvin
+Xu,JaehoonLee,JustinGilmer,andSimonKornblith. Small-scaleproxiesforlarge-scaletransformer
+traininginstabilities. InTheTwelfthInternationalConferenceonLearningRepresentations,2024. URL
+https://openreview.net/forum?id=d8w0pmvXbZ.
+[42] TrieuH.TrinhandQuocV.Le. ASimpleMethodforCommonsenseReasoning. arXive-prints,art.
+arXiv:1806.02847,June2018. doi:10.48550/arXiv.1806.02847.
+11[43] OfirPressandLiorWolf. UsingtheOutputEmbeddingtoImproveLanguageModels. August2016. doi:
+10.48550/arXiv.1608.05859.
+[44] IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. InInternationalConferenceon
+LearningRepresentations,2019. URLhttps://openreview.net/forum?id=Bkg6RiCqY7.
+[45] RazvanPascanu,TomasMikolov,andYoshuaBengio. OnthedifficultyoftrainingRecurrentNeural
+Networks. art.arXiv:1211.5063,November2012. doi:10.48550/arXiv.1211.5063.
+[46] TriDao,DanielYFu,StefanoErmon,AtriRudra,andChristopherRe. Flashattention:Fastandmemory-
+efficientexactattentionwithIO-awareness. InAdvancesinNeuralInformationProcessingSystems,2022.
+URLhttps://openreview.net/forum?id=H4DqfPSibmx.
+[47] TriDao. Flashattention-2:Fasterattentionwithbetterparallelismandworkpartitioning. InTheTwelfth
+InternationalConferenceonLearningRepresentations,2024. URLhttps://openreview.net/forum?
+id=mZn2Xyh9Ec.
+[48] YoavLevine,NoamWies,OrSharir,HofitBata,andAmnonShashua. TheDepth-to-WidthInterplayin
+Self-Attention. art.arXiv:2006.12467,June2020. doi:10.48550/arXiv.2006.12467.
+12Table3: Modelhyperparameters. HyperparametersformodelsshowninTable1.
+Hyperparameters
+FLOPs- L D
+Model Dataset Parameters T
+per-byte (L /L ) (D/D )
+global local local
+PG-19 454M 279M 32 1024 1024
+Transformer
+arXiv 253M 202M 16 1024 1024
+(GPT2tokenizer)
+Github 253M 253M 16 1024 1024
+PG-19 454M 260M 32 1024 1024
+Transformer
+arXiv 253M 155M 16 1024 1024
+(SentencePiece)
+Github 253M 182M 16 1024 1024
+PG-19 202M 470M 16 1024 1024
+Transformer arXiv 202M 470M 16 1024 1024
+Github 202M 470M 16 1024 1024
+PG-19 227M 529M 32 768 4608
+Transformer
+arXiv 202M 470M 16 1024 6144
+(WindowAttention)
+Github 202M 470M 16 1024 8192
+PG-19 201M+51M 219M 16/16 1024/512 4096
+MegaByte arXiv 201M+51M 219M 16/16 1024/512 4096
+Github 201M+51M 219M 16/16 1024/512 4096
+PG-19 201M+113M 343M 16/16 1024/768 6144
+SpaceByte
+arXiv 201M+113M 343M 16/16 1024/768 6144
+(fixedP)
+Github 201M+113M 323M 16/16 1024/768 8192
+PG-19 201M+50M 196M 16/16 1024/512 6144
+SpaceByte arXiv 201M+50M 196M 16/16 1024/512 6144
+Github 151M+38M 132M 12/12 1024/512 8192
+Table 4: Model hyperparameters. Hyperparameters for models shown in Table 2. In order to
+roughlymatchtheFLOPs-per-byteoftheothermodels,forthesubword-levelTransformer-1B,we
+used40,44,37,and31layersforthePG-19,Stories,arXiv,andGithubdatasets,respectively.
+Hyperparameters
+FLOPs- L D
+Model Parameters Others
+per-byte (L /L ) (D/D )
+global local local
+Transformer 1B ≈730M 40,44,37,or31 1536 subword-level
+Transformer 320M[4] 732M 22 1024 byte-level
+PerceiverAR 248M[4] 17 1024 latents=1024
+MegaByte 758M+262M[4] 729M 14/18 2048/1024 P =8
+MambaByte 353M[5] 713M 53 1024 n =16
+state
+SpaceByte 793M+184M 728M 28/26 1536/768 T =1344
+global
+A ModelDetails
+HyperparametersformodelsshowninTable1andTable2aresummarizedinTable3andTable4,
+respectively. InFigure4,weshowanotherperspectiveofFigure3whereweplotthebits-per-bytevs
+thebytestraineddividedbythenumberofmodelparameters.
+Forthesubwordmodels(butnotthebyte-levelmodels),wetietheinputembeddingweightswith
+theoutputlinearmatrixweights[43]. Inself-attentionlayers,weuseakeydimensionequalto64.
+AlthoughweapplyRoPEembeddings,wealsoincludedtrainedpositionembeddings.
+SpaceByte For SpaceByte, we include trained position embeddings just before the first local
+transformerblock,andjustbeforethefirstglobaltransformerblock.
+13Table5: Modelnon-embeddingparametercounts. ForMegaByteandSpaceByte,weseparatethe
+numberofparameters(m)intotheglobal(m )andlocal(m )modelcontributions. Weignore
+global local
+embeddingsandsubleadingparameters,suchaslayernorms,butincludede-embeddingparameters.
+SeeSectionA.1forsymboldefinitions.
+Architecture Parameters(non-embedding) Component
+m=L×4D2 Multi-headattention
+Transformer + L×2e D2 Feed-forward
+ff
++ DV De-embedding
+m =L ×4D2 Globalmulti-headattention
+global global
++L ×2e D2 Globalfeed-forward
+global ff
+m =D D Global-to-localprojection
+MegaByte local localP
++L ×4D2 Localmulti-headattention
+local local
++L ×2e D2 Localfeed-forward
+local ff local
++D V De-embedding
+local
+m =L ×4D2 Globalmulti-headattention
+global global
++L ×2e D2 Globalfeed-forward
+global ff
+SpaceByte m =L ×4D2 Localmulti-headattention
+local local local
++L ×2e D2 Localfeed-forward
+local ff local
++D V De-embedding
+local
+Table6: TrainingandinferenceFLOPs-per-token. WecalculatetheinferenceFLOPs-per-tokenin
+termsofthenumbersofparameters(m),showninTable5. SeeSectionA.1forsymboldefinitions.
+Architecture inferenceFLOPs-per-token
+Transformer 2m+2L(2WD)
+2m 1 +2L (2TD)1+
+MegaByte globalP global P P
+2m +2L (2PD )
+local local local
+2m Tglobal +2L (2T D)Tglobal+
+SpaceByte global Tlocal global global Tlocal
+2m +2L (2W D )
+local local local local
+Justliketheothermodels,SpaceByteistrainedusingafixedcontextsizeofT bytes. Atthesame
+time,wealsofixthemaximumglobalcontextsizeofT patches. However,thenumberofpatches
+global
+inagivencontextofT bytesisusuallynotexactlyequaltoT . Tohandlethismismatchduring
+global
+training,ifthenumberofpatchesfromapplyingthepatchingrule(seee.g. Figure2)toacontextofT
+bytesisgreaterT ,thenwesimplyignorethebyteswithintheseextrapatcheswhencalculatingthe
+global
+crossentropy. Alternatively,ifthenumberofpatchesislessthanT ,thenwepadtheactivations
+global
+fortheglobaltransformerblockswithzeroesandignoretheoutputoftheseglobalblocks. Thus,
+theinputactivationstotheglobalblocksisalwaysatensorofsameshapeforeachiteration. This
+discrepancybetweenthemaximalglobalcontextsizeT andtheactualnumberofpatchesresults
+global
+inasmallfractonofwastedcomputeduringtraining,whichweroughlyminimizebyroughlytuning
+T/T . SeeAppendixCforpseudocode.
+global
+Duringinference,themodelmuststoppredictingtokensbeforeeitherthemaxnumberofbytes(T)
+orthemaxnumberofpatches(T )isreached.
+global
+A.1 FLOPs
+The inference FLOPs-per-byte is the number of FLOPs required to output a byte of text during
+inference. WecalculatetheFLOPs-per-byteastheFLOPs-per-tokendividedbytheaveragenumber
+ofbytespertoken(whichisequalto1forbyte-levelmodels).
+TheFLOPs-per-tokenisthenumberofFLOPsrequiredtooutputatokenoftextduringinference(or
+byteoftextforbyte-levelmodels). TheFLOPs-per-tokenforthevariousarchitecturesisshownin
+Table6.
+14NotationForallarchitectures,T isthecontextlength;Disthemodeldimension(oftheglobalmodel
+forSpaceByteandMegaByte);e = 4isthemodeldimensionexpansionfactorforfeed-forward
+ff
+layers;andV isthevocabularysize(whichis256forbyte-levelmodelsand50257foroursubword
+models). For the transformer architecture, L is the number of transformer blocks, and W is the
+attentionwindowsize(whichisequaltoT ifwindowattentionisnotused). ForSpaceByteand
+MegaByte,D isthedimensionofthelocalmodel;L isthenumberoflocaltransformerblocks;
+local local
+andL isthenumberofglobaltransformerblocks. ForSpaceByte,T isthemaximumcontext
+global global
+sizefortheglobalmodel,andW (whichwesettoD )istheattentionwindowsizeforthelocal
+local local
+blocks. ForMegaByte,P isthepatchsize.
+B TrainingDetails
+B.1 Data
+EachdatasetpreparedbydownloadeditfromHuggingFace8,concatenatingsequencestogether,and
+separatingsequenceswithaspecialBOStoken. Whenpreparingatrainingsamplewithcontextsize
+T,weuniformlyandrandomlysampleasub-sequenceoflengthT fromtheconcatenateddataset. If
+aBOStokenisfoundinthissubset,wealignthecontextwiththefirstBOStokenfound;i.e. wetake
+thecontexttobethefirstBOStokenfollowedbythenextT −1tokensintheconcatenateddataset. If
+aBOStokenisnotfoundinthesubset,weprependaBOStokentothecontext. Thecontextwindow
+isalwaysfullandalwaysbeginswithaBOStoken.
+FortheSpaceBytemodels,wealwaysinsertglobalblocksafteraBOStoken.AvalidUTF-8encoding
+nevermakesuseofthebytevalues254or255. Weuse255toencodetheBOStoken.
+WetraintheSentencePiecetokenizersusingthefollowingcommand:
+spm_train --input=train.txt --model_prefix=sp --model_type=bpe
+--vocab_size=50257 --num_threads=32 --byte_fallback=True
+--allow_whitespace_only_pieces=True --remove_extra_whitespaces=False
+--normalization_rule_name=identity --input_sentence_size=10000000
+B.2 Training
+AllmodelsaretrainedusingAdamW[44]withβ =0.9,β =0.98,batchsize64,weightdecayof
+1 2
+0.01,andgradientclipping[45]withamaximumnormof1.0. Trainableparametersarerandomly
+initializedusinganormaldistributionwithstandarddeviationσ
+init
+= 1forallparam√etersexcept
+forlinearweightmatrices,whichareinitializedwithstandarddeviationofσ = 1/ d ,where
+init in
+d istheinputdimensionforthelinearlayer. Wescalethelearningrateforeachparameterbyits
+in
+initializationstandarddeviationσ .
+init
+With this setup, we found in our early hyperparameter search experiments that the optimal max
+learningrateforallmodelsisapproximatelyγ = 0.005B−0.5 = 0.000625,whereB = 64isthe
+batch size. We therefore used γ = 0.000625 as the max learning rate for all models trained in
+this work. We applied a linear learning rate warmup over the first 1% of training iterations. We
+alsomultiply thelearningrateby a“half-cosine”learning ratedecayfunction cos(πx/2), where
+0≤x≤1isthefractionoftrainingiterationscompleted.9
+EachmodelwastrainedusingPyTorchonasingle40GBNvidiaA40andA100GPUswithmixed-
+precision(bfloat16andfloat32)trainingandFlashAttention[46,47]. SpaceByte-793M+184Mtook
+thelongesttotrain,requiringabout10daysonaA100GPU.10
+8https://huggingface.co/datasets/pg19
+https://huggingface.co/datasets/lucadiliello/STORIES
+https://huggingface.co/datasets/monology/pile-uncopyrighted
+9Inoursetup,wefoundcos(πx/2)toslightlyoutperformthemorestandardcosinedecayfrom1to0.1.
+10Weveryroughlyestimatethatadditionalpreliminaryandfailedexperimentsnotshowninthisworkrequired
+roughlyasmanyFLOPsastheexperimentsshowninthiswork.
+151.4
+subword-level:
+1.4
+Transformer
+1.3 (GPT2 tokenizer)
+Transformer
+1.2 (SentencePiece)
+1.2 byte-level:
+Transformer
+1.2
+Transformer
+(Window Attention)
+1.1
+MegaByte
+SpaceByte
+1.1 (fixed P)
+SpaceByte
+1.0
+102 103
+trained bytes / parameters (non-embedding)
+(a)PG-19dataset
+subword-level:
+Transformer
+(GPT2 tokenizer)
+Transformer
+1.0 (SentencePiece)
+byte-level:
+Transformer
+0.9 Transformer
+(Window Attention)
+MegaByte
+SpaceByte
+0.8 (fixed P)
+SpaceByte
+101 102 103
+trained bytes / parameters (non-embedding)
+(b)arXivdataset
+1.0
+subword-level:
+0.9 Transformer
+(GPT2 tokenizer)
+Transformer
+0.8 (SentencePiece)
+byte-level:
+0.7 Transformer
+Transformer
+(Window Attention)
+0.6 MegaByte
+SpaceByte
+(fixed P)
+SpaceByte
+0.5
+101 102 103
+trained bytes / parameters (non-embedding)
+(c)Githubdataset
+Figure4: TheParetofrontiermodelsfromFigure3,whereweplotthebits-per-bytevsthenumberof
+bytesusedfortrainingdividedbythenumberofnon-embeddingparameters(definedinTable5).
+16
+)etyb-rep-stib(
+yportne-ssorc
+)etyb-rep-stib(
+yportne-ssorc
+)etyb-rep-stib(
+yportne-ssorcB.3 HyperparameterGrid
+We train models using a grid of different model dimensions and numbers of layers. In our early
+small-scaleexperiments,wefoundthatthehyperparametergriddescribedbeloweffectivelyexplores
+thebits-per-byteandFLOPs-per-byteParetofrontierforallmodels. Tosimplifythehyperparameter
+grid,werestrictourselvestomodeldimensionsandlayernumberstohalf-powersoftwo,i.e. apower
+oftwotimes1or 3.
+2
+Formodelstrainedusing1018FLOPs,wetrainmodeldimensionsD ∈{384,512,768}. Formodels
+trainedusing1019FLOPs,wetrainmodeldimensionsD ∈{512,768,1024}.
+For SpaceByte and MegaByte, D is the global model dimension. The local model dimension is
+chosenfromD ∈{1D,3D}ifDisapoweroftwo,orD ∈{1D,2D}ifDisapowerof
+local 2 4 local 2 3
+twotimes 3. However,inordertoavoidexcessivelylowFLOPutilization,werestrictD ≥256
+2 local
+(orD ≥384)formodelstrainedusing1018FLOPs(or1019FLOPs).
+local
+Tosetthenumberoflayers,weroughlyfollowLevineetal.[48],whofoundthatthecompute-optimal
+numberoflayersforaTransformerroughlyfollowsL∼12.5log (D/154). Weroundthisnumber
+2
+tothenearesthalf-poweroftwotoobtainL ,forwhichL = 16,L = 24,L = 32,and
+D 384 512 768
+L =32. ForTransformermodels,wechoosethenumberoflayersfromL∈{1L ,L }.
+1024 2 D D
+For SpaceByte and MegaByte models, we choose the number of local and global layers from
+L =L ∈{3L ,1L }ifL isapoweroftwo,orL =L ∈{1L ,1L }ifL is
+local global 8 D 2 D D local global 3 D 2 D D
+apoweroftwotimes 3.
+2
+C Pseudocode
+SeeListing1forPytorchpseudocodefortheSpaceByteforwardmethod. Theimplementationof
+SpaceBytethatweusedinourexperimentscanbefoundatgithub.com/kjslag/spacebyte.
+17Listing1: PytorchpseudocodeforSpaceByte
+def forward(self, tokens, targets=None):
+B, T = tokens.shape # batch size, context size
+T_global = self.global_context_size
+D_local = self.local_model_dimension
+D = self.global_model_dimension
+# embedding:
+x = self.token_embedding(tokens)
+x = x + self.local_position_encoding
+# initial local transformer blocks:
+for block in self.initial_blocks:
+x = block(x)
+# global block insertion rule:
+use_global = ( # not a letter, number, or UTF-8 continuation byte
+(tokens < ord(’0’)) |
+((ord(’9’) < tokens) & (tokens < ord(’A’))) |
+((ord(’Z’) < tokens) & (tokens < ord(’a’))) |
+((ord(’z’) < tokens) & (tokens < 0b1000_0000)) |
+(0b1100_0000 <= tokens) )
+use_global[:, 1:] &= use_global[:, :-1].bitwise_not() # not
+preceded by another spacelike byte
+use_global |= tokens == self.BOS_token # always use global blocks
+after BOS tokens
+# calculate global block indices:
+num_global = torch.full((B,), -1) # number of global blocks used
+global_idx = torch.full((B, T_global), T-1) # global block indices
+for b in range(B):
+idx, = use_global[b].nonzero(as_tuple=True)
+if targets is not None and len(idx) > T_global:
+# ignore targets with insufficient global blocks:
+targets[b, idx[T_global]:] = -1
+num_global[b] = len(idx[:T_global])
+global_idx[b, :num_global[b]] = idx[:T_global]
+# select activations for global blocks:
+y = x.gather(1, global_idx[:,:,None].expand(B, T_global, D_local))
+# expand model dimension by padding with zeros:
+y = torch.cat([torch.zeros(B, T_global, D - D_local), y], -1)
+# global transformer blocks:
+y = y + self.global_position_encoding
+for block in self.global_blocks:
+y = block(y)
+# add global block activations to local blocks:
+x = torch.stack([
+x[b].index_add(0, global_idx[b, :n], y[b, :n, -D_local:])
+for b, n in enumerate(num_global) ])
+# final local transformer blocks:
+for block in self.final_blocks:
+x = block(x)
+# de-embedding:
+logits = self.logits_linear(self.layer_norm(x))
+cross_entropy_loss = None
+if targets is not None:
+cross_entropy_loss = torch.nn.functional.cross_entropy(
+logits.view(B*T, 256), targets.view(B*T),
+ignore_index=-1).view(B, T)
+return logits, cross_entropy_loss
+18
