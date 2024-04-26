@@ -1,0 +1,919 @@
+Make Your LLM Fully Utilize the Context
+ShengnanAn∗♢,♣, ZexiongMa∗♡,♣, ZeqiLin†♣,
+NanningZheng†♢, Jian-GuangLou♣
+♢IAIR,Xi’anJiaotongUniversity, ♣Microsoft, ♡PekingUniversity
+♢{an1006634493@stu, nnzheng@mail}.xjtu.edu.cn,
+♡mazexiong@stu.pku.edu.cn,♣{Zeqi.Lin, jlou}@microsoft.com
+Abstract
+While many contemporary large language models (LLMs) can process lengthy
+input,theystillstruggletofullyutilizeinformationwithinthelongcontext,known
+asthelost-in-the-middlechallenge. Wehypothesizethatitstemsfrominsufficient
+explicit supervision during the long-context training, which fails to emphasize
+that any position in a long context can hold crucial information. Based on this
+intuition, our study presents INformation-INtensive (IN2) training, a purely
+data-driven solution to overcome lost-in-the-middle. Specifically, IN2 training
+leveragesasynthesizedlong-contextquestion-answerdataset,wheretheanswer
+requires(1)fine-grainedinformationawarenessonashortsegment(∼128tokens)
+withinasynthesizedlongcontext(4K−32Ktokens),and(2)theintegrationand
+reasoningofinformationfromtwoormoreshortsegments. Throughapplying
+thisinformation-intensivetrainingonMistral-7B,wepresent FILM-7B (FILl-
+in-the-Middle). Tothoroughlyassesstheabilityof FILM-7B forutilizinglong
+contexts, we design three probing tasks that encompass various context styles
+(document,code,andstructured-datacontext)andinformationretrievalpatterns
+(forward,backward,andbi-directionalretrieval). Theprobingresultsdemonstrate
+thatFILM-7Bcanrobustlyretrieveinformationfromdifferentpositionsinits32K
+contextwindow. Beyondtheseprobingtasks, FILM-7B significantlyimproves
+theperformanceonreal-worldlong-contexttasks(e.g.,23.5→26.9F1scoreon
+NarrativeQA),whilemaintainingacomparableperformanceonshort-contexttasks
+(e.g.,59.3→59.2accuracyonMMLU).GithubLink: github.com/microsoft/FILM.
+Document Sentence Retrieval (Bi-Direction) Code Function Retrieval (Backward) Database Entity Retrieval (Forward)
+1.0 1.0 1.0
+0.9
+0.8 0.8
+0.8
+0.6 0.6
+0.7
+0.4 0.4
+0.6
+0.2
+0.2
+0.5 FILM-7B (Ours)
+Mistral-7B-Instruct-v0.2
+GPT4-Turbo 0.0
+0.4 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 0.0 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750
+Relative Positions in 800 Sentences Relative Positions in 800 Functions Relative Positions in 750 Entities
+Figure1: PerformanceofFILM-7B,Mistral-7B-Instruct-v0.2,andGPT4-Turboonourthreeprobing
+tasks. FILM-7Bsignificantlyovercomestheproblemofinformationlossinthemiddleofthecontext.
+∗ WorkdoneduringtheinternshipatMicrosoftResearchAsia.
+† Correspondingauthors.
+Preprint.
+4202
+rpA
+52
+]LC.sc[
+1v11861.4042:viXra
+)%(
+ecnamrofreP1 Introduction
+Toagreatmind,nothingislittle.
+—ArthurConanDoyle
+Long-contextlargelanguagemodels(LLMs)haverecentlyreceivedsignificantattentionwithinthe
+open-sourcecommunity(Jiangetal.,2023;Duetal.,2022;Lietal.,2023a;Shietal.,2023;Team
+etal.,2023;Team,2023;Chenetal.,2023a;Songetal.,2023;Liuetal.,2023;Pengetal.,2023b;
+Chenetal.,2023b;Xiongetal.,2023;Tworkowskietal.,2024;AIetal.,2024;Dingetal.,2024;
+Mohtashami&Jaggi,2024;Fuetal.,2024;Caietal.,2024;Baietal.,2024;Lvetal.,2024). The
+trainingcontextwindowsofmanycontemporaryLLMshavebeenexpandedtotensofthousandsof
+tokens,therebyenablingthesemodelstoprocessextensivecontextasinput. Thisextendedtraining
+context window can enhance many real-world downstream tasks such as long-context question
+answering(Kocˇisky` etal.,2018;Dasigietal.,2021;Baietal.,2023)andsummarization(Fabbri
+etal.,2019;Huangetal.,2021;Zhongetal.,2021).
+However, recent studies have revealed that these long-context LLMs struggle to effectively and
+robustlyutilizealltheinformationprovidedinthecontext, knownasthelost-in-the-middlechal-
+lenge(Liuetal.,2024;Xuetal.,2023).ItimpliesthatwhiletheLLMcancomprehendtheinformation
+atthebeginningandendofthelongcontext,itoftenoverlookstheinformationinthemiddle. This
+challengecouldsignificantlyhinderthedevelopmentoflong-contextLLMs,astheyevenoftenfail
+topasssimpleprobingtaskssuchasNeedle-in-the-Haystackandpasskeyretrieval(Mohtashami&
+Jaggi,2024). Consequently,apressingresearchquestionarises: howcanwemakelong-contextLLMs
+fullyutilizetheinformationinthelongcontext?
+Wehypothesizethattherootcauseoflost-in-the-middlestemsfromtheunintentionalbiashidden
+inthegeneraltrainingdata. Inauto-regressivepre-training,thelossonpredictingthenexttokenis
+morelikelytobeinfluencedbyafewnearbypre-tokensratherthanlong-distancetokens(Sharan
+et al., 2018; Sun et al., 2021). For supervised fine-tuning and alignment, the system message,
+whichstronglyinfluencesthegenerationoftheresponse,istypicallypresentedatthebeginningof
+thecontext(Touvronetal.,2023;Caietal.,2024). Asaresult,thegeneraltrainingprocessmay
+inadvertentlyintroduceapositionbias,suggestingthatimportantinformationisalwayslocatedatthe
+beginningandendofthecontext.
+Basedonthishypothesis,ourworkintroducesINformation-INtensive(IN2)trainingtoexplicitly
+teachthemodelthatthecrucialinformationcanbeintensivelypresentthroughoutthecontext,
+not just at the beginning and end. IN2 training is a purely data-driven solution that utilizes a
+synthesizedlong-contextquestion-answerdataset. Thelongcontext(rangingfrom4Kto32Ktokens)
+isconcatenatedfrommanyshortsegments(∼128tokens),andthequestion-answer(QA)pairsask
+fortheinformationcontainedinoneormoresegmentswhicharerandomlyplacedinthelongcontext.
+Specifically,wegeneratetwotypesofquestions,requiring(1)fine-grainedinformationawareness
+onexactlyoneshortsegment,and(2)theintegrationandreasoningofinformationfromtwoor
+moresegments. TheseQApairsaregeneratedbypromptingGPT-4-Turbo(OpenAI,2023b)withthe
+designedinstructionsandtherawsegments.
+Byapplyingthisinformation-intensivetrainingonMistral-7B(Jiangetal.,2023),wepresentFILM-
+7B(FILl-in-the-Middle). Tothoroughlyassessthelong-contextinformationawarenessofFILM-7B,
+wedesignthreeprobingtasksencompassingvariouscontextstyles(document,code,andstructured-
+data context) and information retrieval patterns (forward, backward, and bi-directional retrieval).
+Theprobingresults(Figure1)demonstratethatIN2trainingsignificantlyovercomesthelost-in-the-
+middleproblemforthebackbonemodel. Moreover,itcanenhancetheopen-sourcemodeltoachieve
+comparableorevenmorerobustperformancecomparedwithproprietaryLLMssuchasGPT-4-Turbo.
+Beyondtheseprobingtasks, theperformanceof FILM-7B onreal-worldlong-contexttasksalso
+exhibitssignificantimprovements(e.g.,23.5→26.9F1scoreonNarrativeQA(Kocˇisky` etal.,2018)).
+Thisdemonstratesthattrainingonsynthesizedlong-contextdatacanbegeneralizedtoreal-world
+scenarios.Moreover,FILM-7Bmaintainsacomparableperformanceonshort-contexttaskscompared
+withthevanillabackbonemodel(e.g.,59.3→59.2accuracyonMMLU(Hendrycksetal.,2020)).
+Thisindicatesthattheshort-contextcapabilityofFILM-7Bisnotcompromisedduringtraining.
+The main contents of this paper are organized as follows. Section 2 introduces our IN2 training
+withdetailsonthedataconstructionandtrainingprocess. Section3introducesthedesignofour
+2Raw Text Single Segment Local Information QA Long Context
+𝓒 𝒊 Split by 128 Tokens 𝒔 𝒊 Prompting GPT-4 𝒂𝒒 𝒊 …
+𝒊
+𝒔
+𝒊
+Concatenate with Random Segments
+…
+Fine-Grained Information Awareness
+Raw Text Multiple Segments Multi-Hop QA Long Context
+𝒔𝟏 …
+𝒊
+𝓒 𝒊 Split by 128 Tokens 𝒔 𝒊𝟐 Prompting GPT-4 𝒂𝒒 𝒊 𝒔 𝒊𝟏
+𝒊
+𝒔 𝒊𝟑 𝒔𝟐
+𝒊
+Concatenate with Random Segments 𝒔𝟑
+𝒊
+…
+Integration and Reasoning of Information
+Figure 2: The data construction process for IN2 training, aimed at enhancing the fine-grained
+informationawareness(upper),andtheintegrationandreasoningofinformation(lower).
+long-contextprobingtasksandthecomparisonwithsomeexistingprobingtasks. Section4.2shows
+theexperimentalresultsonthreeprobingtasks,ninereal-worldlong-contexttasks,andeightshort-
+contexttasks. Section4.3providesfurtherinsightsforthelong-contexttrainingstrategies. Section5
+discussestherelatedwork.
+2 Information-IntensiveTraining
+This section introduces the construction of the dataset for IN2 training and the detailed training
+processofourmodelFILM-7B.
+2.1 TrainingDataConstruction
+Overview. TheIN2trainingaimstoexplicitlyteachthemodelthatanypositioninalongcontext
+cancontaincrucialinformation. Toachievethisgoal,weconstructalong-contextquestion-answer
+trainingdatasetD = {L ,q ,a },wheretheanswera tothequestionq requirestheinformation
+i i i i i
+containedinsomeshortsegmentsthatarerandomlyplacedinthewholelongcontextL .
+i
+Figure2illustratesanoverviewofthedataconstructionprocess. Specifically,thetrainingdataD
+is constructed based on a general natural language corpus C. Given a raw text C ∈ C, we first
+i
+generateaquestion-answerpair(q ,a )usingapowerfulLLM,thensynthesizealongcontextL that
+i i i
+includesthenecessaryinformationfromC andotherrandomlysampledtextsfromC. Wegenerate
+i
+twotypesofquestion-answerpairsthatrequire(1)theawarenessoffine-grainedinformationinthe
+longcontext,and(2)theintegrationandreasoningofinformationappearingatdifferentpositionsin
+thelongcontext. WetaketherealnewslikesubsetfromtheC4corpus(Raffeletal.,2020)asC,
+andtakeGPT-4-Turbo(OpenAI,2023b)astheLLMtogenerateQApairs.
+Fine-grainedinformationawareness. Weconsidera128-tokensegmentastheminimuminforma-
+tionunitofthecontext3. GivenarawtextC ,wefirstrandomlyextracta128-tokensegments from
+i i
+it,thengeneratetheq ,a andL accordingly,
+i i i
+(q ,a )∼Prompting(s ,I ;LLM), L =⊕{Shuffle(s ,[r ])}, (1)
+i i i f i i j
+3Therawtextsinrealnewslikehaveanaveragelengthof∼600tokenswiththeMistraltokenizer.
+3Document Sentence Retrieval (Bi-Direction) Code Function Retrieval (Backward) Database Entity Retrieval (Forward)
+### Context: ### Context: ### Context:
+… … …
+This crucially distinguishes our algorithms from the … def get_clause:\n llen = len(lineup)\n clause = ''\n if … <id: Q2486402, label: New York State Route 191, … >
+Specifically, our modality-missing-aware prompts can … def updateData:\n if self.train:\n if self.inplace:\n self. … <id: Q80329096, label: Transverse abdominal incision … >
+These results demonstrate that there are still a large ... def save_comments:\n for comment in comments:\n … <id: Q70559114, label: Monitoring plasma level of … >
+We design better optimizers, a crucial engineering … def plot_patio:\n ax = plt.subplot(111)\n passo_x = 1 / … <id: Q91568218, label: Progression of the first stage … >
+We present a study of modern architectures applied … def encode_label:\n Label record format:\n Total: 5 … <id: Q84088820, label: Historical perspective of low- … >
+This scalability issue is to use of consensus algorithms … def _parse_array:\n array = []\n for child in node. … <id: Q63952215, label: Online action-to-perception … >
+Extensive experiments are conducted to validate the def serve_rpc:\n plugins = [QuarkAsyncPlugin()]\n rpc =… <id: Q40241868, label: Alpha-1-C-octyl-1-deoxynoji-
+effectiveness of our proposed method, achieving new def createStrip:\n story = fetchVign(config)\n rimycin as a pharmacological chaperone for Gaucher
+state-of-the-art performance on all four benchmarks if specialPlatform== 'android':\n except Exception as err: disease, description: scientific article published on 21
+with a notable gain. def breed_childern:\n self.mutation(first_child)\n self. … August 2006>
+Notably, we achieved the top in highly competitive … def get_module_depth:\n Parameters\n depth_image: … <id: Q5651247, label: Wer, wenn nicht wir, descript … >
+With this, it is shown how approximate FP64x2 GEMM … def run_layout:\n if settings is None:\n if settings. … <id: Q42133313, label: UnZIPping mechanisms of … >
+It is challenging to address widespread and … def register:\n user = None\n if user_id:\n if request … <id: Q74650195, label: Pursued by genetics: an auto … >
+To verify the effectiveness of the proposed method … def test_list_ddl:\n cursor = con.cursor()\n result = list( … <id: Q38835253, label: Neurological Aspects of … >
+The results show that \\emph{GCMiner} significantly … def with_laps:\n with Stopwatch() as sw:\n for i in … <id: Q64358411, label: Unity for Change, description: … >
+Our experimental results on all common benchmark … def config_iq_stream:\n bwActual = c_double(0)\n … <id: Q24110047, label: Hypothetical protein SM_b20 … >
+… … …
+### Instruction: ### Instruction: ### Instruction:
+In above context, which sentence contains the piece In above context, which function contains the code snip In above context , what is the label and description for
+"achieving new state-of-the-art performance on all four"? "if specialPlatform== 'android':" ? the query where the id is Q40241868 ?
+Figure3: ThreetasksinVALProbing. Theretrievalpatternsaredeterminedbytherelativepositions
+betweenthe retrievalkeywords andtheinformationtoberetrieved.
+where(q ,a )issampledbypromptingthepowerfulLLMwiththesegments andtheinstructionI ,
+i i i f
+⊕{·}representstheconcatenationofthecontainedsegments,and[r ]arerandomlysampledfrom
+j
+128-tokensegmentsinC. NotethatI instructstheLLMtomakethequestion-answerpairhighly
+f
+specifictotheinformationprovidedins .
+i
+Integrationandreasoningofinformation. Beyondutilizingeachsinglesegment,weconsiderto
+generatequestion-answerpairsforinformationcontainedintwoormoresegments. Followingthe
+settingoftheminimuminformationunitabove,wesplitafulltextC intoasetof128-tokensegments
+i
+[s ],thengeneratetheq ,a andL accordingly,
+i i i i
+(q ,a )∼Prompting([s ],I ;LLM), L =⊕{Shuffle([s ],[r ])}, (2)
+i i i r i i j
+whereI instructstheLLMtogenerateamulti-hopquestion-answerpairthatrequirestheinformation
+r
+withinatleasttwosegmentsin[s ]. Allsegmentsin[s ]and[r ]arejointlyshuffled,sotherequired
+i i j
+segmentsmayappearfarapartinthecontext.
+Contextlengthbalanceanddatamixture. TopreventlengthbiasduringIN2training,weensure
+the length of the long context L is evenly distributed from 4K to 32K tokens. Such a length
+i
+balancestrategycanbeimplementedwithrejectsamplingon[r ],accordingtoEquation1and2.
+j
+Toalleviatecatastrophicforgettingonshort-contextcapabilities,weretain∼10%question-answer
+pairswiththeoriginaltextsC insteadofconvertingthemintoalongercontext,andaddsomegeneral
+i
+instruction-tuningdatafromtheOpenOrca(Lianetal.,2023)dataset.
+Overall,ourdatasetforIN2trainingcontains1.1Mlong-contextdataforthefine-grainedinformation
+awareness(∼63%),300Klong-contextdatafortheintegrationandreasoningofinformation(∼17%),
+150Kshort-contextquestion-answerdata(∼9%),and200Kgeneralinstruction-tuningdata(∼11%).
+AppendixDcontainsthehandcraftinstructionsfordatageneration. AppendixBillustratessome
+examplesofourconstructedlong-contextQAdata. AppendixAdescribesthefilteringstrategyto
+avoiddatacontaminationforevaluation.
+2.2 TrainingDetails
+Usingthetrainingdataconstructedabove,wefurtherfine-tunetheMistral-7B-Instruct-v0.24(Jiang
+etal.,2023)togetourFILM-7B(FILl-in-the-Middle). WeperformIN2trainingintheinstruction-
+tuningparadigm: thelongcontextsandquestionsareusedasinstructions,andthelossontheanswer
+partsareusedtoupdatethemodel. AppendixDcontainsthesystemtemplateusedforformatting
+thetrainingdata. Forhyper-parameters,wesettheglobalbatchsizeas128andconductone-epoch
+training with ∼14K training steps. We use the cosine learning rate decay with a 1e-6 maximum
+4https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.2.
+4Document Sentence Retrieval (Bi-Direction) Code Function Retrieval (Backward) Database Entity Retrieval (Forward)
+1.0 1.0
+1.0
+0.9
+0.8 0.8
+0.8
+0.6 0.6
+0.7
+0.4 0.4
+0.6
+FILM-7B (Ours)
+0.5 M Mi is st tr ra al l- -7 7B B- -I In ns st tr ru uc ct t- -v v0 0. .2 1 0.2 0.2
+0.4 0.0 0.0
+50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750
+Relative Positions in 800 Sentences Relative Positions in 800 Functions Relative Positions in 750 Entities
+(a)PerformanceofFILM-7B,Mistral-7B-Instruct-v0.1,andMistral-7B-Instruct-v0.2.
+Document Sentence Retrieval (Bi-Direction) Code Function Retrieval (Backward) Database Entity Retrieval (Forward)
+1.0 1.0
+1.0
+0.9
+0.8 0.8
+0.8
+0.6 0.6
+0.7
+0.4 0.4
+0.6
+0.5 FILM-7B (Ours) 0.2 0.2
+LongAlign-13B-64K
+LongAlign-7B-64K
+0.4 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 0.0 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 0.0 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750
+Relative Positions in 800 Sentences Relative Positions in 800 Functions Relative Positions in 750 Entities
+(b)PerformanceofFILM-7B,LongAlign-7B-64K,andLongAlign-13B-64K.
+Document Sentence Retrieval (Bi-Direction) Code Function Retrieval (Backward) Database Entity Retrieval (Forward)
+1.0 1.0 1.0
+0.9
+0.8 0.8
+0.8
+0.6 0.6
+0.7
+0.4 0.4
+0.6
+0.5 FILM-7B (Ours) 0.2 0.2
+InternLM2-chat-20B
+InternLM2-chat-7B
+0.4 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 0.0 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 0.0 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750
+Relative Positions in 800 Sentences Relative Positions in 800 Functions Relative Positions in 750 Entities
+(c)PerformanceofFILM-7B,InternLM2-chat-7B,andInternLM2-chat-20B.
+Figure 4: Performance of FILM-7B on VAL Probing and the comparisons with (a) Mistral, (b)
+LongAlign,and(c)InternLM2. TheX-axisistherelativepositioninthecontext(∼32Ktokens).
+learningrateand3%warm-upsteps. Thetrainingprocessisconductedon16nodesof8x80GA100
+GPUswiththefullshardingstrategyandcpuoffloadstrategyimplementedbypytorchFSDP(Zhao
+etal.,2023). Theentiretrainingprocessconsumes∼300GPUdays.
+3 Long-ContextProbing
+Inthissection,wefirstshowthepreliminaryevaluationofFILM-7BontheNeedle-in-the-Haystack
+anddiscussabouttheinadequaciesofthisprobingtask. Subsequently,tocomprehensivelyevaluate
+thelong-contextinformationawarenessofFILM-7B,weintroduceVAriousLong-context(VAL)
+Probing. Thisincludesthreetasksthatcovervariouscontextstyles(document,code,andstructured-
+datacontext)andinformationretrievalpatterns(forward,backward,andbi-directionalretrieval).
+5
+)%(
+ecnamrofreP
+)%(
+ecnamrofreP
+)%(
+ecnamrofrePTable1: QuantifiedperformancesofvariousmodelsonVALProbing.
+Document Code Database All
+Model
+Avg Gap↓ Avg Gap↓ Avg Gap↓ Avg Gap↓
+Mistral-7B-Instruct-v0.1(Jiangetal.,2023) 44.8 29.9 6.8 53.2 8.8 74.5 20.1 52.5
+Mistral-7B-Instruct-v0.2(Jiangetal.,2023) 74.2 32.1 20.3 59.5 47.5 77.0 47.3 56.2
+LongAlign-7B-64K(Baietal.,2024) 65.3 16.9 39.3 56.0 55.0 36.2 53.2 36.4
+LongAlign-13B-64K(Baietal.,2024) 71.7 13.4 50.8 40.8 82.9 27.0 68.5 27.1
+InternLM2-chat-7B(Caietal.,2024) 68.8 18.7 50.2 44.1 61.2 57.1 60.1 40.0
+InternLM2-chat-20B(Caietal.,2024) 66.4 27.2 63.4 45.5 74.9 57.2 68.2 43.3
+GPT-4-Turbo(OpenAI,2023b) 81.3 31.7 66.1 46.5 89.6 18.0 79.0 32.1
+FILM-7B(ours) 85.4 6.1 83.3 18.7 89.0 16.8 85.9 13.9
+3.1 Near-PerfectPerformanceonNeedle-in-the-Haystack: AreWeThereYet?
+TheNeedle-in-the-Haystack5taskiswidelyusedtoassesshowrobustlyamodelutilizesinformation
+positionedinthelongcontext. ItrevealsthatevensomepowerfulproprietaryLLMs,suchasGPT-4
+andClaude2.1(Anthropic,2023),struggletofullyexploittheinformationwithinthelongcontext.
+We use the Needle-in-the-Haystack task to preliminarily evaluate the long-context capability of
+FILM-7B.AppendixCdemonstratesthatFILM-7Bhasachievednear-perfectperformanceonthis
+task. Thisresultisnotsurprisingasrecentopen-sourceLLMs,suchasLongAlign(Baietal.,2024)
+andInternLM2(Caietal.,2024),havealsoshownnear-perfectperformanceonthistask.
+However,wearguethatthenear-perfectperformanceonNeedle-in-the-Haystackmayoverestimate
+thelong-contextcapabilitiesofLLMs,basedonthefollowingtwoconsiderations:
+• Needle-in-the-Haystackemploysadocument-stylecontext,whichLLMscouldbequitefamiliar
+withduetothepre-trainingonnaturallanguagecorpora.
+• TheforwardretrievalpatterninNeedle-in-the-Haystackmaysimplifythedifficultyofinformation
+seekinginthelongcontext.
+The “forward retrieval” means that the information being retrieved directly follows the retrieval
+keyword in a long context. For example, the default question used in Needle-in-the-Haystack is
+"WhatisthebestthingtodoinSanFrancisco?"andtheansweriscontainedin"Thebestthingtodo
+inSanFranciscoiseatasandwichandsitinDoloresParkonasunnyday."Theretrievedinformation
+"eat a sandwich and ..." just follows the retrieval keywords "best thing to do in San Francisco".
+Accordingtothemechanismofinductionhead(Olssonetal.,2022),suchafollowing-upcopyingis
+aneasilylearnedpatternforLLMs,thuslesschallengingforevaluatinglongcontextutilization.
+Given these considerations, we suggest that performances on Needle-in-the-Haystack may not
+adequatelyreflectthelong-contextcapabilitiesofLLMs. Therefore,weproposeVALProbingfora
+morecomprehensiveevaluationinvolvingvariouscontextstylesandretrievalpatterns.
+3.2 VALProbing
+Ourretrieval-basedVALProbingconsidersthreecontextstyles(document,code,andstructured-data
+context)andthreeretrievalpatterns(forward,backward,andbi-directionalretrieval). Eachcontext
+in VAL Probing contains ∼32K tokens, and each task contains ∼3K examples. Figure 3 briefly
+illustratesthecontextsandretrievalinstructionsinVALProbing.
+DocumentSentenceRetrieval(Bi-Direction). Thecontextsconsistofnumerousnaturallanguage
+sentences, and the instruction aims to retrieve a single sentence containing a given piece. The
+sentencesaresampledfromtheabstractsofpapersonarXiv6. Thistaskfollowsthebi-directional
+retrievalpattern,astheexpectedretrievalresultscontainwordsbothbeforeandafterthegivenpiece
+inthecontext. Theevaluationmetricistheword-levelrecallscore.
+5https://github.com/gkamradt/LLMTest_NeedleInAHaystack.
+6https://info.arxiv.org/help/api/basics.html.
+6Table2: Performancesofvariousmodelsonreal-worldlong-contexttasks. Resultsofmodelswith∗
+arereportedinBaietal.(2023)andLvetal.(2024).
+Model NarrativeQAQasperMultiFQAHotpotQA2WikiMQAMuSiQueGovReportQMSumMultiNews Avg
+Close-Source
+GPT-4-Turbo(OpenAI,2023b) 33.0 50.7 52.7 68.5 64.3 49.1 33.9 25.4 24.9 44.7
+GPT-3.5-Turbo∗(OpenAI,2023a) 23.6 43.3 52.3 51.6 37.7 26.9 29.5 23.4 26.7 35.0
+Open-Source
+LongChat-v1.5-7B-32K∗(Lietal.,2023a) 16.9 27.7 41.4 31.5 20.6 9.7 30.8 22.7 26.4 25.3
+ChatGLM2-6B-32K∗(Duetal.,2022) 21.1 31.5 46.2 25.3 20.8 9.8 32.4 24.0 26.5 26.4
+LongAlign-7B-64K(Baietal.,2024) 18.7 33.8 49.1 28.6 23.4 12.5 30.6 23.7 27.5 27.5
+Mistral-7B-Instruct-v0.1(Jiangetal.,2023) 19.6 33.2 38.8 42.9 31.2 17.4 27.5 22.4 26.6 28.9
+Mistral-7B-Instruct-v0.2(Jiangetal.,2023) 23.5 33.8 45.9 42.4 24.3 20.8 33.3 24.8 26.8 30.6
+Yi-6B-200K∗(AIetal.,2024) 12.4 26.4 36.8 46.6 40.4 25.8 29.3 20.7 27.1 29.5
+ChatGLM3-6B-32K∗(Duetal.,2022) 9.2 43.1 50.9 55.3 43.7 38.9 36.0 24.7 27.4 36.6
+InternLM2-chat-7B(Caietal.,2024) 24.4 35.4 50.2 52.4 48.2 30.5 33.6 25.3 29.0 36.5
+InternLM2-7B-LongWanjuan∗(Lvetal.,2024) 29.9 39.6 50.2 53.7 42.3 32.1 33.0 25.5 27.8 37.1
+FILM-7B(ours) 26.9 42.2 56.0 62.1 47.0 39.0 33.8 25.1 26.9 39.9
+CodeFunctionRetrieval(Backward). ThecontextsconsistofPythonfunctions,andtheinstruc-
+tionaimstoretrievethefunctionnameforagivenlineofcodewithinthefunctiondefinition. The
+rawcodefunctionsaresampledfromtheStarCoder(Lietal.,2023c)dataset7. Werandomlyselect
+threelinesofdefinitionsforeachfunction. Thistaskfollowsthebackwardretrievalpattern,asthe
+functionnamealwaysprecedesthedefinition. Theevaluationmetricistheexact-matchaccuracy.
+DatabaseEntityRetrieval(Forward). Thecontextscontainlistsofstructuredentities,eachwith
+threefields:ID,label,anddescription. Thequeryaimstoretrievethelabelanddescriptionforagiven
+ID.TheentitiesaresampledfromWikidata8. Thistaskfollowstheforwardretrievalpattern,asthe
+labelanddescriptionfollowtheID.Wetakearelaxedexact-matchaccuracyasthemetric: a1score
+isgivenifeitherthelabelorthedescriptionisexactlymatchedintheresponse,otherwisea0score.
+4 ExperimentsandAnalysis
+Weassessthelong-contextcapabilityofFILM-7Bonbothprobingtasksandreal-worldlong-context
+tasks. Moreover,weinvestigateiftheperformanceinshort-contextscenariosisaffected.
+4.1 ExperimentalSetup
+Models. We mainly compare FILM-7B with long-context open-source models that have been
+trainedwith≥32Kcontextwindows,includingtheMistral(Jiangetal.,2023),LongChat(Lietal.,
+2023a),ChatGLM(Duetal.,2022),LongAlign(Baietal.,2024),LongWanjuan(Lvetal.,2024),
+Yi(AIetal.,2024)andInternLM2(Caietal.,2024). Weutilizetheinstruct/chatversionsofthese
+modelsasmostofourevaluationtasksareunderthezero-shotinstruction-followingparadigm. We
+alsodrawcomparisonswithpopularproprietaryLLMssuchasGPT-3.5-Turbo(OpenAI,2023a)and
+GPT-4-Turbo(OpenAI,2023b). Allmodelsandtasksemploygreedydecoding. Forprobingtasks,
+weprimarilycompareFILM-7BwithLongAlignandInternLM2series,asthesemodelshaveshown
+near-perfectperformancesonNeedle-in-the-Haystack.
+Real-worldlong-contexttasks. Wetake9tasksfromtheLongBench(Baietal.,2023)collectionto
+evaluatethelong-contextcapabilityonreal-worldscenarios. Thesetasksencompasslong-document
+question answering (NarrativeQA (Kocˇisky` et al., 2018), Qasper (Dasigi et al., 2021) and Multi-
+FieldQA(MultiFQA)(Baietal.,2023),multi-documentmulti-hopreasoning(HotpotQA(Yangetal.,
+2018),2WikiMultihopQA(2WikiMQA)(Hoetal.,2020)andMuSiQue(Trivedietal.,2022)),and
+long-context summarization (GovReport (Huang et al., 2021), QMSum (Zhong et al., 2021) and
+MultiNews(Fabbrietal.,2019)). WeemploythemiddletruncationstrategyinLongBenchtolimit
+theinputwithin32Ktokens. WereportROUGE-L(Lin,2004)forsummarizationtasksandF1scores
+forothertasks. Theevaluationmetricsarecomputedusingtheofficialevaluationscripts9.
+7https://huggingface.co/datasets/bigcode/starcoderdata.
+8https://www.wikidata.org/wiki/Wikidata:Data_access.
+9https://github.com/THUDM/LongBench.
+7Mistral-7B-Instruct-v0.2 FILM-7B
+100
+85.4 87.7 83.6
+)% 80 70.0 75.3 79.1
+(
+e c n 60 59.3 59.2 55.9 52.5
+a m 46.0 45.6 40.4 44.5
+ro 40
+fre
+P
+20 8.7 11.3
+0
+MMLU BoolQ RACE-H CSQA ARC-C HellaSwag GSM8K MATH
+Figure5: PerformancesofFILM-7Bandthebackbonemodelonshort-contexttasks.
+Short-contexttasks. Weselect8short-contexttaskscommonlyusedforevaluatingthegeneral
+capabilitiesofmodels. TheseincludeMMLU(Hendrycksetal.,2020),BoolQ(Clarketal.,2019),
+RACE-High(RACE-H)(Laietal.,2017),CommonsenseQA(CSQA)(Talmoretal.,2019),ARC-
+Challenge(ARC-C)(Clarketal.,2018),HellaSwag(Zellersetal.,2019),GSM8K(Cobbeetal.,
+2021),andMATH(Hendrycksetal.,2021). Weuse5-shotforMMLU,8-shotforGSM8K,4-shotfor
+MATH,and0-shotforothertasks. Weutilizethelm_eval10fortheevaluationsonMMLU,BoolQ,
+RACE-H,ARC-CandHellaSwag,andusetheevaluationscriptsfromAnetal.(2024)forothertasks.
+4.2 MainResults
+FILM-7Bsignificantlymitigatesthelost-in-the-middleproblem. Figure4apresentstheprobing
+resultsforbothFILM-7Bandthebackbonemodel,Mistral-7B-Instruct-v0.2. Inallthreeprobing
+taskswithinVALProbing,thevanillaMistralmodelexperiencessubstantialinformationlossatthe
+middlepositionsinthelongcontexts. Incontrast,ourFILM-7Bmodelconsistentlyexhibitsrobust
+performanceacrossdifferentpositionswithinthewholecontext. Thisstarkcomparisonillustrates
+thatthelost-in-the-middleproblemcanbeeffectivelyaddressedusingourIN2training.
+FILM-7Bachievesperformancecomparableto,orevenoutperforming,thatofGPT-4-Turbo.
+Figure 1 illustrates the comparison between FILM-7B and GPT-4-Turbo on our probing tasks.
+Beyondaqualitativecomparisonbetweentheperformancecurvesoftwomodels,wequantifythe
+long-contextperformancesonVALProbingusingtwometrics:
+• Average score (Avg). We compute the average performances across the entire context length,
+reflectingtheoveralllong-contextutilization.
+• Min-max gap (Gap). We calculate the differences between the maximum and minimum per-
+formancesinFigure3. Asmallerperformancegapsignifiesgreaterrobustnessacrossdifferent
+positions.
+Table1presentsthequantifiedperformancesonVALProbing. ItrevealsthatFILM-7Bhascompara-
+bleperformancewithGPT-4-Turboonthedatabaseprobingtask,andexhibitsbetterrobustnessin
+documentandcodeprobingtasks. Theseresultsindicateagreatpotentialforthedevelopmentof
+open-sourcelong-contextmodelstoclosethegapwithproprietarymodels.
+VALProbingpresentsamorechallengingtestsuiteforlong-contextmodels. Figure4band4c
+showtheprobingresultsofLongAlignandInternLM2, twostate-of-the-artlong-contextmodels.
+Despitetheirextendedtrainingcontextwindows,thesemodelsstillencounterthelost-in-the-middle
+problem. Thisisparticularlynoteworthygiventheirnear-perfectperformanceontheNeedle-in-the-
+Haystacktask. ThiscomparisonsuggeststhatVALProbingprovidesamorechallengingevaluation
+forlong-contextmodels.
+Inparticular,theresultsondocumentanddatabasetasksin VAL Probingdemonstrateclearcom-
+parisonswithNeedle-in-the-Haystack. ComparedtoNeedle-in-the-Haystackwhichusesforward
+retrievalonnaturallanguagecontext,thedocumenttaskemploysnaturallanguagecontextbutwith
+bi-directionalretrieval,andthedatabasetaskusesforwardretrievalbutwithstructured-datacontext.
+10https://github.com/EleutherAI/lm-evaluation-harness.
+8Document Sentence Retrieval (Bi-Direction) Code Function Retrieval (Backward) Database Entity Retrieval (Forward)
+1.0 1.0
+1.0
+0.9
+0.8
+0.8
+0.8
+0.6 0.6
+0.7
+0.4 0.4
+0.6
+FILM-7B (20%)
+0.5 F FI IL LM M- -7 7B B ( (2 20 0% %) ) + + S SW W ( (I PN T2 -I) N2) 0.2 0.2
+0.4 0.0 0.0
+50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750 800 50 100 150 200 250 300 350 400 450 500 550 600 650 700 750
+Relative Positions in 800 Sentences Relative Positions in 800 Functions Relative Positions in 750 Entities
+Figure 6: Performance of FILM-7B with a 4K sliding window (SW). PT-IN2: apply the sliding
+windowinbothpre-trainingandIN2training. IN2: applytheslidingwindowonlyinIN2training.
+Table3: PerformanceofFILM-7BwithdifferentRoPEbaseθduringIN2training.
+Document Code Database All
+Model RoPEBaseθ
+Avg Gap↓ Avg Gap↓ Avg Gap↓ Avg Gap↓
+1.0×106(default) 82.9 11.5 74.5 27.7 83.5 31.6 80.3 23.6
+2.0×106 83.9 9.3 79.8 27.1 87.7 13.2 83.8 16.5
+FILM-7B(20%)
+1.0×107 83.7 7.6 81.7 18.4 89.4 16.8 84.9 14.3
+1.0×108 84.6 6.6 81.4 22.3 87.7 13.2 84.6 14.0
+Thesecomparisonshighlightthatbothcontextstylesandretrievalpatternssignificantlycontributeto
+thehardnessoftheprobingtasks.
+Trainingonsynthesizedlong-contextdataeffectivelygeneralizestoreal-worldscenarios. Ta-
+ble 2 contains the results on various real-world long-context tasks. It shows that FILM-7B also
+significantlyimprovestheperformanceofthebackbonemodelinreal-worldlong-contextscenarios.
+Moreover,italsoachievesSOTA-levelperformancesonthesetasksamong∼7Bsizeopen-source
+models. Notably, thelongcontextsusedin IN2 trainingareallsynthesizedfromshortsegments.
+Theseimprovementssuggestthatthelong-contextcapabilitieslearnedfromthesynthesizeddatacan
+besuccessfullyappliedtoreal-worldtasks.
+FILM-7B maintainstheperformanceonshort-contexttasks. Figure5illustratestheperfor-
+mancesofFILM-7Bandthevanillabackbonemodelonshort-contexttasks. Itrevealsthattheoverall
+performances on short-context tasks are almost comparable with minor variances. These results
+confirmthatFILM-7Bdoesnotcompromisetheshort-contextcapabilitiesofthebackbonemodel.
+4.3 TrainingStrategyAnalysis
+ExperimentalresultsinSection4.2demonstratethefeasibilityofIN2training. Weaimtoexplorefur-
+therintoenhancingtheeffectivenessandefficiencyofIN2training,particularlyfromtheperspective
+oftrainingstrategies. Wearespecificallyinterestedininvestigatingtheimpactofthefollowingtwo
+trainingstrategies: applyingtheslidingwindowandadjustingthepositionencoding. Consideringthe
+highcostoftraining,thefollowingexperimentsuse20%ofalltrainingexamples.
+Modelsusingslidingwindowscannoteffectivelycapturethelongdistanceinformation. Our
+experimentsinvolvingMistralmodels,asshowninFigure4a,revealthattheperformanceofMistral-
+7B-Instruct-v0.1isawfulwhentheinformationispositionedatalongdistance. It’sworthnoting
+thatMistral-7B-Instruct-v0.1employstheslidingwindowstrategywhileMistral-7B-Instruct-v0.2
+doesnot. Consequently,weareinterestedindeterminingwhetherourIN2trainingcanstillalleviate
+thelost-in-the-middleproblemundertheslidingwindowstrategy. Weconductthefollowingtwo
+experimentswitha4Kslidingwindowduringtraining:
+9
+)%(
+ecnamrofreP• Apply the sliding window in both pre-training and IN2 training. We take the Mistral-7B-
+Instruct-v0.1asthebackbonemodelandconductIN2trainingwiththesamewindowsize(4K).
+• ApplytheslidingwindowonlyduringtheIN2training. WetaketheMistral-7B-Instruct-v0.2as
+thebackbonemodelandadditionallyapplya4KslidingwindowduringIN2training.
+Figure 6 illustrates the performances of models with sliding windows. It shows that in both two
+settingswithslidingwindows,theperformancesdropdramaticallywhenthedistancebetweenthe
+retrievalquestionandinformationislongerthantheslidingwindowsize. Itrevealsthatthesliding
+windowstrategygreatlyhurtsthelong-contextcapabilityofmodels.
+TrainingwithhigherinformationintensityrequiresalargerRoPEbaseθ. Thetrainingstage
+in Section 2 follows the RoPE settings configured for the backbone model. Previous studies on
+contextextensionsuggestthattrainingwithanextendedcontextlengthnecessitatesalargerRoPE
+baseθ (Roziereetal.,2023;Xiongetal.,2023;Caietal.,2024). Inthecaseofour IN2 training,
+thecontextlengthremainsunchanged,buttheinformationintensityissignificantlyincreased. Asa
+result,weareinterestedinexploringwhethertheRoPEsettingsshouldalsobeadjustedtofurther
+enhancetheIN2training. Table3showstheresultswithincreasingtheRoPEbaseθfrom1.0×106
+to1.0×108. ItshowsthatincreasingthedefaultRoPEbaseθofthebackbonemodelleadstobetter
+performancesonVALProbing. Wesuggesttousea10timesofthedefaultRoPEbaseθtoconduct
+IN2training.
+5 RelatedWork
+Long-contextLLMs. Recentresearchhassignificantlycontributedtotheexplorationoftraining
+largemodelswithextendedcontextwindows(Jiangetal.,2023;Duetal.,2022;Lietal.,2023a;
+Teametal.,2023;Team,2023;Xiongetal.,2023;Songetal.,2023;Tworkowskietal.,2024;AI
+etal.,2024;Caietal.,2024). Thereareprimarilytwodirectionsinthedevelopmentoflong-context
+LLMs. (1)Dataengineering,whichemphasizestheconstructionoflong-contextdatafortraining
+theLLMs. Thisincludesdatabalancing(Fuetal.,2024),dataorderarrangement(Shietal.,2023),
+instructiondatacollection(Baietal.,2024),anddataqualitymeasurement(Lvetal.,2024). Our
+IN2trainingcanbecategorizedintothisfield. (2)Effectiveandefficienttraining,whichinvestigates
+methodstooptimizethetrainingofalong-contextmodel. Thisencompassesthedesignofposition
+encoding (Chen et al., 2023a; Liu et al., 2023; Peng et al., 2023b; Ding et al., 2024), batching
+strategy(Baietal.,2024),parameter-efficienttraining(Chenetal.,2023b),andthedevelopmentof
+newmodelarchitectures(Pengetal.,2023a;Gu&Dao,2023).
+Long-contextevaluations. Existingbenchmarksforevaluatinglong-contextmodelscanbedivided
+intotwocategories. (1)Real-worldbenchmarksthatassessgenerallong-contextcapabilities(e.g.,
+long-context QA, summarization, and language modeling), such as NarrativeQA (Kocˇisky` et al.,
+2018), LongBench (Bai et al., 2023), ZeroSCROLLS (Shaham et al., 2023), L-Eval (An et al.,
+2023),Loogle(Lietal.,2023b),∞Bench(Zhangetal.,2024),andaseriesofworkonperplexity
+evaluation(Beltagyetal.,2020;Royetal.,2021;Pressetal.,2021;Chenetal.,2023a;Liuetal.,2023;
+Pengetal.,2023b;Chenetal.,2023b;Dingetal.,2024;Mohtashami&Jaggi,2024). (2)Probing
+tasksthatprovideamoreconcisereflectionofthelong-contextutilizationacrossdifferentcontext
+lengthsandpositions. TheseincludeNeedle-in-the-Haystack,passkeyretrieval(Mohtashami&Jaggi,
+2024),synthesizeddocumentQA(Liuetal.,2024),Discovery(Lietal.,2024),RULER(Hsiehetal.,
+2024),andtheVALProbingproposedinthisstudy. Amongtheseprobingtasks,ourVALProbingis
+thefirsttoexplicitlyincorporateavarietyofretrievalpatterns.
+6 Conclusion
+Thisworkintroduces IN2 trainingtoovercomethelost-in-the-middleproblem. Byapplying IN2
+trainingontheopen-sourcemodel,ourFILM-7Bexhibitssignificantimprovementsonprobingtasks
+andreal-worldlong-contexttaskswhiledoesnotcompromisetheshort-contextperformance.
+10Acknowledgments
+ShengnanAnandNanningZhengweresupportedinpartbyNSFCundergrantNo. 62088102. Thank
+youtoarXivforuseofitsopenaccessinteroperability.
+References
+01.AI,:,AlexYoung,BeiChen,ChaoLi,ChengenHuang,GeZhang,GuanweiZhang,HengLi,
+JiangchengZhu,JianqunChen,JingChang,KaidongYu,PengLiu,QiangLiu,ShawnYue,Senbin
+Yang,ShimingYang,TaoYu,WenXie,WenhaoHuang,XiaohuiHu,XiaoyiRen,XinyaoNiu,
+PengchengNie,YuchiXu,YudongLiu,YueWang,YuxuanCai,ZhenyuGu,ZhiyuanLiu,and
+ZonghongDai. Yi: Openfoundationmodelsby01.ai,2024.
+ChenxinAn,ShansanGong,MingZhong,MukaiLi,JunZhang,LingpengKong,andXipengQiu.
+L-eval: Instituting standardized evaluation for long context language models. arXiv preprint
+arXiv:2307.11088,2023.
+ShengnanAn,ZexiongMa,ZeqiLin,NanningZheng,Jian-GuangLou,andWeizhuChen. Learning
+frommistakesmakesllmbetterreasoner,2024.
+Anthropic. Model card and evaluations for claude models, 2023. URL https://www-files.
+anthropic.com/production/images/Model-Card-Claude-2.pdf.
+YushiBai,XinLv,JiajieZhang,HongchangLyu,JiankaiTang,ZhidianHuang,ZhengxiaoDu,Xiao
+Liu,AohanZeng,LeiHou,etal. Longbench: Abilingual,multitaskbenchmarkforlongcontext
+understanding. arXivpreprintarXiv:2308.14508,2023.
+Yushi Bai, Xin Lv, Jiajie Zhang, Yuze He, Ji Qi, Lei Hou, Jie Tang, Yuxiao Dong, and Juanzi
+Li. Longalign: A recipe for long context alignment of large language models. arXiv preprint
+arXiv:2401.18058,2024.
+IzBeltagy, MatthewEPeters, andArmanCohan. Longformer: Thelong-documenttransformer.
+arXivpreprintarXiv:2004.05150,2020.
+ZhengCai,MaosongCao,HaojiongChen,KaiChen,KeyuChen,XinChen,XunChen,ZehuiChen,
+ZhiChen,PeiChu,etal. Internlm2technicalreport. arXivpreprintarXiv:2403.17297,2024.
+ShouyuanChen,ShermanWong,LiangjianChen,andYuandongTian. Extendingcontextwindowof
+largelanguagemodelsviapositionalinterpolation. arXivpreprintarXiv:2306.15595,2023a.
+YukangChen,ShengjuQian,HaotianTang,XinLai,ZhijianLiu,SongHan,andJiayaJia. Lon-
+glora: Efficientfine-tuningoflong-contextlargelanguagemodels. InTheTwelfthInternational
+ConferenceonLearningRepresentations,2023b.
+ChristopherClark,KentonLee,Ming-WeiChang,TomKwiatkowski,MichaelCollins,andKristina
+Toutanova. Boolq: Exploringthesurprisingdifficultyofnaturalyes/noquestions. InProceedings
+of the 2019 Conference of the North American Chapter of the Association for Computational
+Linguistics: HumanLanguageTechnologies,Volume1(LongandShortPapers),pp.2924–2936,
+2019.
+PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,and
+OyvindTafjord. Thinkyouhavesolvedquestionanswering? tryarc,theai2reasoningchallenge.
+arXivpreprintarXiv:1803.05457,2018.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+MatthiasPlappert,JerryTworek,JacobHilton,ReiichiroNakano,etal. Trainingverifierstosolve
+mathwordproblems. arXivpreprintarXiv:2110.14168,2021.
+PradeepDasigi,KyleLo,IzBeltagy,ArmanCohan,NoahASmith,andMattGardner. Adataset
+of information-seeking questions and answers anchored in research papers. In Proceedings
+of the 2021 Conference of the North American Chapter of the Association for Computational
+Linguistics: HumanLanguageTechnologies,pp.4599–4610,2021.
+11YiranDing,LiLynaZhang,ChengruidongZhang,YuanyuanXu,NingShang,JiahangXu,FanYang,
+andMaoYang. Longrope: Extendingllmcontextwindowbeyond2milliontokens. arXivpreprint
+arXiv:2402.13753,2024.
+ZhengxiaoDu,YujieQian,XiaoLiu,MingDing,JiezhongQiu,ZhilinYang,andJieTang. Glm:
+Generallanguagemodelpretrainingwithautoregressiveblankinfilling. InProceedingsofthe60th
+AnnualMeetingoftheAssociationforComputationalLinguistics(Volume1: LongPapers),pp.
+320–335,2022.
+AlexanderFabbri,IreneLi,TianweiShe,SuyiLi,andDragomirRadev. Multi-news: Alarge-scale
+multi-documentsummarizationdatasetandabstractivehierarchicalmodel. InProceedingsofthe
+57thAnnualMeetingoftheAssociationforComputationalLinguistics,pp.1074.Associationfor
+ComputationalLinguistics,2019.
+YaoFu,RameswarPanda,XinyaoNiu,XiangYue,HannanehHajishirzi,YoonKim,andHaoPeng.
+Dataengineeringforscalinglanguagemodelsto128kcontext,2024.
+AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestatespaces,2023.
+DanHendrycks,CollinBurns,StevenBasart,AndyZou,MantasMazeika,DawnSong,andJacob
+Steinhardt. Measuringmassivemultitasklanguageunderstanding. InInternationalConferenceon
+LearningRepresentations,2020.
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn
+Song, and Jacob Steinhardt. Measuring mathematical problem solving with the math dataset.
+InThirty-fifthConferenceonNeuralInformationProcessingSystemsDatasetsandBenchmarks
+Track(Round2),2021.
+XanhHo,Anh-KhoaDuongNguyen,SakuSugawara,andAkikoAizawa.Constructingamulti-hopqa
+datasetforcomprehensiveevaluationofreasoningsteps. InProceedingsofthe28thInternational
+ConferenceonComputationalLinguistics,pp.6609–6625,2020.
+Cheng-PingHsieh, SimengSun, SamuelKriman, ShantanuAcharya, DimaRekesh, FeiJia, and
+BorisGinsburg. Ruler: What’stherealcontextsizeofyourlong-contextlanguagemodels?,2024.
+Luyang Huang, Shuyang Cao, Nikolaus Parulian, Heng Ji, and Lu Wang. Efficient attentions
+for long document summarization. In 2021 Conference of the North American Chapter of the
+AssociationforComputationalLinguistics: HumanLanguageTechnologies,NAACL-HLT2021,
+pp.1419–1436.AssociationforComputationalLinguistics(ACL),2021.
+AlbertQJiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSinghChaplot,
+DiegodelasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,LucileSaulnier,etal.
+Mistral7b. arXivpreprintarXiv:2310.06825,2023.
+TomášKocˇisky`,JonathanSchwarz,PhilBlunsom,ChrisDyer,KarlMoritzHermann,GáborMelis,
+andEdwardGrefenstette. Thenarrativeqareadingcomprehensionchallenge. Transactionsofthe
+AssociationforComputationalLinguistics,6:317–328,2018.
+GuokunLai,QizheXie,HanxiaoLiu,YimingYang,andEduardHovy. Race: Large-scalereading
+comprehensiondatasetfromexaminations. InProceedingsofthe2017ConferenceonEmpirical
+MethodsinNaturalLanguageProcessing,pp.785–794,2017.
+Dacheng Li, Rulin Shao, Anze Xie, Ying Sheng, Lianmin Zheng, Joseph Gonzalez, Ion Stoica,
+XuezheMa,andHaoZhang. Howlongcancontextlengthofopen-sourcellmstrulypromise? In
+NeurIPS2023WorkshoponInstructionTuningandInstructionFollowing,2023a.
+JiaqiLi,MengmengWang,ZilongZheng,andMuhanZhang. Loogle: Canlong-contextlanguage
+modelsunderstandlongcontexts? arXivpreprintarXiv:2311.04939,2023b.
+RaymondLi, YangtianZi, NiklasMuennighoff, DenisKocetkov, ChenghaoMou, MarcMarone,
+ChristopherAkiki,LIJia,JennyChim,QianLiu,etal. Starcoder: maythesourcebewithyou!
+TransactionsonMachineLearningResearch,2023c.
+12TianleLi,GeZhang,QuyDucDo,XiangYue,andWenhuChen. Long-contextllmsstrugglewith
+longin-contextlearning,2024.
+Wing Lian, Bleys Goodson, Eugene Pentland, Austin Cook, Chanvichet Vong, and "Teknium".
+Openorca: An open dataset of gpt augmented flan reasoning traces. https://https://
+huggingface.co/Open-Orca/OpenOrca,2023.
+Chin-YewLin. Rouge: Apackageforautomaticevaluationofsummaries. InTextsummarization
+branchesout,pp.74–81,2004.
+NelsonFLiu,KevinLin,JohnHewitt,AshwinParanjape,MicheleBevilacqua,FabioPetroni,and
+PercyLiang. Lostinthemiddle: Howlanguagemodelsuselongcontexts. Transactionsofthe
+AssociationforComputationalLinguistics,12:157–173,2024.
+Xiaoran Liu, Hang Yan, Chenxin An, Xipeng Qiu, and Dahua Lin. Scaling laws of rope-based
+extrapolation. InTheTwelfthInternationalConferenceonLearningRepresentations,2023.
+KaiLv,XiaoranLiu,QipengGuo,HangYan,ConghuiHe,XipengQiu,andDahuaLin.Longwanjuan:
+Towardssystematicmeasurementforlongtextquality. arXivpreprintarXiv:2402.13583,2024.
+AmirkeivanMohtashamiandMartinJaggi. Random-accessinfinitecontextlengthfortransformers.
+AdvancesinNeuralInformationProcessingSystems,36,2024.
+CatherineOlsson,NelsonElhage,NeelNanda,NicholasJoseph,NovaDasSarma,TomHenighan,
+BenMann,AmandaAskell,YuntaoBai,AnnaChen,TomConerly,DawnDrain,DeepGanguli,
+Zac Hatfield-Dodds, Danny Hernandez, Scott Johnston, Andy Jones, Jackson Kernion, Liane
+Lovitt,KamalNdousse,DarioAmodei,TomBrown,JackClark,JaredKaplan,SamMcCandlish,
+andChrisOlah. In-contextlearningandinductionheads,2022.
+OpenAI. Gpt-3.5 turbo fine-tuning and api updates, 2023a. URL https://openai.com/blog/
+gpt-3-5-turbo-fine-tuning-and-\api-updates.
+OpenAI. Gpt-4technicalreport,2023b.
+BoPeng,EricAlcaide,QuentinAnthony,AlonAlbalak,SamuelArcadinho,StellaBiderman,Huanqi
+Cao, Xin Cheng, Michael Chung, Leon Derczynski, et al. Rwkv: Reinventing rnns for the
+transformerera. InFindingsoftheAssociationforComputationalLinguistics: EMNLP2023,pp.
+14048–14077,2023a.
+Bowen Peng, Jeffrey Quesnelle, Honglu Fan, and Enrico Shippole. Yarn: Efficient context win-
+dowextensionoflargelanguagemodels. InTheTwelfthInternationalConferenceonLearning
+Representations,2023b.
+OfirPress,NoahSmith,andMikeLewis. Trainshort,testlong: Attentionwithlinearbiasesenables
+inputlengthextrapolation. InInternationalConferenceonLearningRepresentations,2021.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,Yanqi
+Zhou,WeiLi,andPeterJLiu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-text
+transformer. Journalofmachinelearningresearch,21(140):1–67,2020.
+Aurko Roy, Mohammad Saffar, Ashish Vaswani, and David Grangier. Efficient content-based
+sparse attention with routing transformers. Transactions of the Association for Computational
+Linguistics,9:53–68,2021.
+BaptisteRoziere,JonasGehring,FabianGloeckle,StenSootla,ItaiGat,XiaoqingEllenTan,Yossi
+Adi,JingyuLiu,TalRemez,JérémyRapin,etal. Codellama: Openfoundationmodelsforcode.
+arXivpreprintarXiv:2308.12950,2023.
+UriShaham,MaorIvgi,AviaEfrat,JonathanBerant,andOmerLevy. Zeroscrolls:Azero-shotbench-
+markforlongtextunderstanding. InFindingsoftheAssociationforComputationalLinguistics:
+EMNLP2023,pp.7977–7989,2023.
+VatsalSharan,ShamKakade,PercyLiang,andGregoryValiant. Predictionwithashortmemory.
+In Proceedings of the 50th Annual ACM SIGACT Symposium on Theory of Computing, pp.
+1074–1087,2018.
+13Weijia Shi, Sewon Min, Maria Lomeli, Chunting Zhou, Margaret Li, Xi Victoria Lin, Noah A
+Smith, Luke Zettlemoyer, Wen-tau Yih, and Mike Lewis. In-context pretraining: Language
+modeling beyond document boundaries. In The Twelfth International Conference on Learning
+Representations,2023.
+WoominSong,SeunghyukOh,SangwooMo,JaehyungKim,SukminYun,Jung-WooHa,andJinwoo
+Shin. Hierarchicalcontextmerging: Betterlongcontextunderstandingforpre-trainedllms. InThe
+TwelfthInternationalConferenceonLearningRepresentations,2023.
+SimengSun,KalpeshKrishna,AndrewMattarella-Micke,andMohitIyyer. Dolong-rangelanguage
+models actually uselong-range context? In Proceedings of the 2021 Conference on Empirical
+MethodsinNaturalLanguageProcessing,pp.807–822,2021.
+AlonTalmor,JonathanHerzig,NicholasLourie,andJonathanBerant. CommonsenseQA:Aquestion
+answeringchallengetargetingcommonsenseknowledge.InProceedingsofthe2019Conferenceof
+theNorthAmericanChapteroftheAssociationforComputationalLinguistics:HumanLanguage
+Technologies,Volume1(LongandShortPapers),pp.4149–4158,Minneapolis,Minnesota,June
+2019. Association for Computational Linguistics. doi: 10.18653/v1/N19-1421. URL https:
+//aclanthology.org/N19-1421.
+MosaicMLNLPTeametal.Introducingmpt-30b:Raisingthebarforopen-sourcefoundationmodels,
+2023.
+Together Team. Together 32k, 2023. URL https://huggingface.co/togethercomputer/
+LLaMA-2-7B-32K.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+Bashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Openfoundation
+andfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+HarshTrivedi,NiranjanBalasubramanian,TusharKhot,andAshishSabharwal. Musique: Multihop
+questionsviasingle-hopquestioncomposition. TransactionsoftheAssociationforComputational
+Linguistics,10:539–554,2022.
+SzymonTworkowski,KonradStaniszewski,MikołajPacek,YuhuaiWu,HenrykMichalewski,and
+PiotrMiłos´. Focusedtransformer: Contrastivetrainingforcontextscaling. AdvancesinNeural
+InformationProcessingSystems,36,2024.
+WenhanXiong,JingyuLiu,IgorMolybog,HejiaZhang,PrajjwalBhargava,RuiHou,LouisMartin,
+RashiRungta,KarthikAbinavSankararaman,BarlasOguz,MadianKhabsa,HanFang,Yashar
+Mehdad,SharanNarang,KshitizMalik,AngelaFan,ShrutiBhosale,SergeyEdunov,MikeLewis,
+SinongWang,andHaoMa. Effectivelong-contextscalingoffoundationmodels,2023.
+PengXu,WeiPing,XianchaoWu,LawrenceMcAfee,ChenZhu,ZihanLiu,SandeepSubramanian,
+EvelinaBakhturina,MohammadShoeybi,andBryanCatanzaro. Retrievalmeetslongcontextlarge
+languagemodels. InTheTwelfthInternationalConferenceonLearningRepresentations,2023.
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William Cohen, Ruslan Salakhutdinov,
+andChristopherDManning. Hotpotqa: Adatasetfordiverse, explainablemulti-hopquestion
+answering. InProceedingsofthe2018ConferenceonEmpiricalMethodsinNaturalLanguage
+Processing,pp.2369–2380,2018.
+RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi. Hellaswag: Canamachine
+reallyfinishyoursentence? InProceedingsofthe57thAnnualMeetingoftheAssociationfor
+ComputationalLinguistics,pp.4791–4800,2019.
+XinrongZhang,YingfaChen,ShengdingHu,ZihangXu,JunhaoChen,MooKhaiHao,XuHan,
+ZhenLengThai,ShuoWang,ZhiyuanLiu,andMaosongSun. ∞bench: Extendinglongcontext
+evaluationbeyond100ktokens,2024.
+YanliZhao,AndrewGu,RohanVarma,LiangLuo,Chien-ChinHuang,MinXu,LessWright,Hamid
+Shojanazeri,MyleOtt,SamShleifer,etal. Pytorchfsdp: experiencesonscalingfullyshardeddata
+parallel. arXivpreprintarXiv:2304.11277,2023.
+14MingZhong,DaYin,TaoYu,AhmadZaidi,MutethiaMutuma,RahulJha,AhmedHassan,Asli
+Celikyilmaz, YangLiu, XipengQiu, etal. Qmsum: Anewbenchmarkforquery-basedmulti-
+domainmeetingsummarization. InProceedingsofthe2021ConferenceoftheNorthAmerican
+Chapter of the Association for Computational Linguistics: Human Language Technologies, pp.
+5905–5921,2021.
+15ThisistheAppendixofthepaper: MakeYourLLMFullyUtilizetheContext.
+A DataFilteringStrategy
+ToavoiddatacontaminationfortheevaluationstageinSection4,weapplyapre-filteringstrategy
+during sampling the raw texts for constructing the dataset of IN2 training. Specifically, during
+samplingC forgeneratingdata,ifthesampledC hasa10-gramoverlapwithanyexampleinallof
+i i
+ourevaluationdata(includingprobingtasks,real-worldtasksandshort-contexttasks),itwillnotbe
+usedforneithergeneratingquestion-answerpairsnorservingastherandomsegments[r ].
+j
+B TrainingExamplesfor IN2 Training
+Example1:Fine-GrainedInformationAwareness(1)
+Segment:
+LastsummerItookacross-countryroadtripwithagroupofpeopledrivingdifferenttypesofelectricvehicles.
+Itwasanamazingexperience,andourtrip,ouradventures,andourmisadventureswereportrayedinthe
+documentaryKickGas.Thatexperiencegavemetheideatotakemyownroadtriptoexperiencethefreedom
+oftravelingaloneonanelectricmotorcycle. Mygoalsweresimple: ridethegreatmotorcycleroadsof
+America,meetotherelectricmotorcycleriders,andvisitfriends...
+Question:
+Whatweretheprimarygoalsoftheindividual’ssoloroadtriponanelectricmotorcycle?
+Answer:
+Theindividual’sprimarygoalsforthesoloroadtriponanelectricmotorcycleweretoridethegreatmotorcycle
+roadsofAmerica,meetotherelectricmotorcycleriders,andvisitfriends.
+Example2:Fine-GrainedInformationAwareness(2)
+Segment:
+Anotheradditiontothekernelisthear5523driver,whichwasstartedoverfiveyearsagofortheAtheros
+USBchipsetofthesamename.ExtensionsforsupportingmorechipsandWLANadapterswereaddedtoa
+numberofotherdrivers;thebrcmsmacWLANdriver,forexample,nowsupportstheBCM43224Broadcom
+chip,whilethert2800usbRaLinkdriversupportstheSweexLW323USBWLANadapter...
+Question:
+WhatnewadditiontothekernelsupportstheBCM43224Broadcomchip?
+Answer:
+ThenewadditiontothekernelthatsupportstheBCM43224BroadcomchipisthebrcmsmacWLANdriver.
+Example3:Fine-GrainedInformationAwareness(3)
+Segment:
+TheArlingtonCountyBoardplanstovoteSaturdayafternoonongivingAmazon$23millionandother
+incentivestobuildaheadquarterscampusinCrystalCity,butonlyafterhearingscoresofnorthernVirginia
+residentsandadvocatestestifyfororagainsttheproject.Thefive-memberboardisexpectedtosupportthe
+plan,whichwasannouncedamidmuchhooplaonNov.13.Theproposedcountyincentivesarepartofan
+agreementinwhichAmazonwouldoccupysignificantofficespaceandbringatleast25,000high-paying
+jobstoArlingtonincomingyears.Opponentshopetopostponethevoteuntilafteradditionalpublichearings,
+wheretheywantrepresentativesoftheonlineretailgianttoanswerquestionsdirectlyfromanyoneinthe
+community.
+Question:
+WhatistheArlingtonCountyBoard’splanregardingAmazon’sproposedheadquartersinCrystalCity?
+Answer:
+TheArlingtonCountyBoardisplanningtovoteonprovidingAmazonwith$23millionandotherincentives
+toconstructaheadquarterscampusinCrystalCity.However,thisvotewillonlytakeplaceafterlisteningto
+theopinionsofnumerousresidentsandadvocatesfromnorthernVirginia.Theboard,whichconsistsoffive
+members,isanticipatedtoendorsethisplan.TheproposalincludesAmazonoccupyingasignificantamount
+ofofficespaceandintroducingatleast25,000high-payingjobstoArlingtonintheforthcomingyears.
+16Example4:IntegrationandReasoningofInformation(1)
+Segment1:
+CloudCruiser’sutilizationanalyticsapplicationenablesuserstomanageandoptimizepublic,privateand
+hybridcloudusageandspending...
+Segment2:
+ThisreducestheriskoforganizationsinvestingtoomuchortoolittleinIT,eliminatesunusedcapacityand
+freesupvaluableITresourcesfornewvalue-addingprojects...
+Segment3:
+AsaCloudCruisercustomer,wehaveseenfirsthandthevaluethatCloudCruiser’stechnologycreatesby
+enablingHPEFlexibleCapacitytometerandbillforusageofon-premiseITinfrastructureinapay-as-you-go
+model...
+Question:
+WhatbenefitsdoestheacquisitionofCloudCruiserbringtoHPEanditsFlexibleCapacitybusiness?
+Answer:
+The acquisition of Cloud Cruiser enriches HPE’s Flexible Capacity business by providing a utilization
+analytics application that allows users to manage and optimize their cloud usage and spending. Cloud
+Cruiser’ssoftwarealsofacilitatesthemeteringandbillingforcustomers’ITconsumption.ThisenablesHPE
+toofferitscustomersanon-premisephysicalITinfrastructureatthecostofcloudservices,effectivelyarental
+agreement. Moreover,itreducestheriskoforganizationseitherunderoroverinvestinginIT,eliminates
+unusedcapacity,andfreesupITresourcesfornewprojects...
+Example5:IntegrationandReasoningofInformation(2)
+Segment1:
+JulieAnnetteWasden,45,of38RolesSt.,HainesCity,waschargedwithretailtheftatBeall’sat5998
+CypressGardensBlvd...
+Segment2:
+KatherineD.CollazoSantos,18,of108HilltopDrive,WinterHaven,waschargedwithretailtheftatMacy’s
+at700ThirdSt.,S.W....
+Question:
+WhowaschargedwithretailtheftatBeall’sandwhowaschargedwiththesamecrimeatMacy’s?
+Answer:
+JulieAnnetteWasdenandKatherineD.CollazoSantos
+Example6:IntegrationandReasoningofInformation(3)
+Segment1:
+AcourtpresidedbyMagistrateJosephMifsudexplainedinitsjudgementof17August,2016inThePolicev
+EebisGetu,thatthechargesofafalsecriminalreportandcalumniousaccusationsmaybefactuallysimilar,
+however,fromalegalpointofviewtheyaretwoseparateanddistinctcharges.Theaccused,EebisGetuwas
+chargedwithhavingfiledafalsepolicereportandwithnotobeyingalegitimateorder.Sheadmittedthese
+charges...
+Segment2:
+Inpassingjudgementthecourttookintoconsiderationthattheaccusedadmittedtothechargesimmediately
+andalsothatshedidwhatshedidinordertobewithherhusbandinMalta. MagistrateMifsudreferred
+towhatPopeFrancissaidlastJune,wheretoday2˘019sinformationtechnologybringssufferingofothers
+instantly,butwealsobecomeimmunetotragediesandsufferings...
+Question:
+WhatwerethetwochargesEebisGetuadmittedto,andwhatwasherreasonforcommittingtheseactions
+accordingtothecourt’sjudgement?
+Answer:
+Filingafalsepolicereportandnotobeyingalegitimateorder;tobewithherhusbandinMalta.
+C PerformanceonNeedle-in-the-Haystack
+Figure7showstheperformanceofFILM-7BonNeedle-in-the-Haystack. ItshowsthatFILM-7B
+hasachievednear-perfectperformanceonNeedle-in-the-Haystackwithinits32Kcontextwindow.
+17Needle In A HayStack
+10
+0
+10
+8
+20
+30
+40 6
+50
+60 4
+70
+80
+2
+90
+100
+0
+0 2000 4000 6000 8000 10000 12000 14000 16000 18000 20000 22000 24000 26000 28000 30000
+Token Limit
+Figure7: PerformancesofFILM-7BonNeedle-in-the-Haystack.
+D PromptsForDataGenerationandTraining
+Example7:PromptForEquation1
+Generateonequestionandtheanswerfromthegivencontext.Thequestionshouldbehighlyspecifictothe
+informationprovidedinthecontext.Itshouldnotbeageneralquestionthatsuitsanycontext.
+Rulestofollowwhengeneratethequestion:
+1.Thequestionshouldbefullyanswerablefrominformationpresentingivencontext.
+2.Makesurethequestionisclearandunambiguous.
+3.Phraseslike’basedontheprovidedcontext’,’accordingtothecontext’,etc,arenotallowedtoappearin
+thequestion.
+Rulestofollowwhengeneratetheanswer:
+1.Theanswermustusetheinformationprovidedinthecontext.
+2.Donotjustcopywordsfromthecontext.Answerthequestioninyourownwords.
+###Context###:
+s
+i
+###Question###:
+{completion}
+Example8:PromptForEquation2
+Generateonequestionandtheanswerfromthegivencontext.Thecontextcontainsseveralpieces.Answering
+thequestionshouldrequirethereadertomakemultiplelogicalconnectionsorinferencesusing**atleasttwo
+pieces**.
+Rulestofollowwhengeneratethequestion:
+1.Thequestionshouldbefullyanswerablefrominformationpresentingivencontext.
+2.Makesurethequestionisclearandunambiguous.
+3.Phraseslike’basedontheprovidedcontext’,’accordingtothecontext’,etc,arenotallowedtoappearin
+thequestion.
+Rulestofollowwhengeneratetheanswer:
+1.Theanswermustusetheinformationprovidedinthecontext.
+2.Donotjustcopywordsfromthecontext.Answerthequestioninyourownwords.
+###Context###:
+#Piece1:s1
+i
+#Piece2:s2
+i
+...
+###Question###:
+{completion}
+18
+tnecreP
+htpeD
+erocSExample9:TrainingTemplate
+Input:
+[INST]Belowisacontextandaninstruction. Basedontheinformationprovidedinthecontext,writea
+responsefortheinstruction.
+###Context:
+L
+i
+###Instruction:
+q [/INST]
+i
+Output:
+a
+i
+19

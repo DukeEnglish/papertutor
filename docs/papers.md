@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15272v1 |
-|title| CT-GLIP: 3D Grounded Language-Image Pretraining with CT Scans and Radiology Reports for Full-Body Scenarios |
-|authors| Jingyang LinYingda XiaJianpeng ZhangKe YanLe LuJiebo LuoLing Zhang
-|links| http://arxiv.org/abs/2404.15272v1 |
-|updated| 2024-04-23 17:59:01 UTC |
-|summary| Medical Vision-Language Pretraining Med-VLP establishes a connectionbetween visual content from medical images and the relevant textualdescriptions. Existing Med-VLP methods primarily focus on 2D images depicting asingle body part notably chest X-rays. In this paper we extend the scope ofMed-VLP to encompass 3D images specifically targeting full-body scenarios byusing a multimodal dataset of CT images and reports. Compared with the 2Dcounterpart 3D VLP is required to effectively capture essential semantics fromsignificantly sparser representation in 3D imaging. In this paper we introduceCT-GLIP Grounded Language-Image Pretraining with CT scans a novel methodthat constructs organ-level image-text pairs to enhance multimodal contrastivelearning aligning grounded visual features with precise diagnostic text.Additionally we developed an abnormality dictionary to augment contrastivelearning with diverse negative samples. Our method trained on a multimodal CTdataset comprising 44011 organ-level vision-text pairs from 17702 patientsacross 104 organs demonstrates it can identify organs and abnormalities in azero-shot manner using natural languages. The performance of CT-GLIP isvalidated on a separate test set of 1130 patients focusing on the 16 mostfrequent abnormalities across 7 organs. The experimental results show ourmodels superior performance over the standard CLIP framework across zero-shotand fine-tuning scenarios using both CNN and ViT architectures. |
+|idx| 2404.16829v1 |
+|title| Make-it-Real: Unleashing Large Multimodal Model's Ability for Painting 3D Objects with Realistic Materials |
+|authors| Ye FangZeyi SunTong WuJiaqi WangZiwei LiuGordon WetzsteinDahua Lin
+|links| http://arxiv.org/abs/2404.16829v1 |
+|updated| 2024-04-25 17:59:58 UTC |
+|summary| Physically realistic materials are pivotal in augmenting the realism of 3Dassets across various applications and lighting conditions. However existing3D assets and generative models often lack authentic material properties.Manual assignment of materials using graphic software is a tedious andtime-consuming task. In this paper we exploit advancements in Multimodal LargeLanguage Models MLLMs particularly GPT-4V to present a novel approachMake-it-Real: 1 We demonstrate that GPT-4V can effectively recognize anddescribe materials allowing the construction of a detailed material library.2 Utilizing a combination of visual cues and hierarchical text prompts GPT-4Vprecisely identifies and aligns materials with the corresponding components of3D objects. 3 The correctly matched materials are then meticulously applied asreference for the new SVBRDF material generation according to the originaldiffuse map significantly enhancing their visual authenticity. Make-it-Realoffers a streamlined integration into the 3D content creation workflowshowcasing its utility as an essential tool for developers of 3D assets. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15271v1 |
-|title| Automatic Layout Planning for Visually-Rich Documents with Instruction-Following Models |
-|authors| Wanrong ZhuJennifer HealeyRuiyi ZhangWilliam Yang WangTong Sun
-|links| http://arxiv.org/abs/2404.15271v1 |
-|updated| 2024-04-23 17:58:33 UTC |
-|summary| Recent advancements in instruction-following models have made userinteractions with models more user-friendly and efficient broadening theirapplicability. In graphic design non-professional users often struggle tocreate visually appealing layouts due to limited skills and resources. In thiswork we introduce a novel multimodal instruction-following framework forlayout planning allowing users to easily arrange visual elements into tailoredlayouts by specifying canvas size and design purpose such as for book coversposters brochures or menus. We developed three layout reasoning tasks totrain the model in understanding and executing layout instructions. Experimentson two benchmarks show that our method not only simplifies the design processfor non-professionals but also surpasses the performance of few-shot GPT-4Vmodels with mIoU higher by 12 on Crello. This progress highlights thepotential of multimodal instruction-following models to automate and simplifythe design process providing an approachable solution for a wide range ofdesign tasks on visually-rich documents. |
+|idx| 2404.16816v1 |
+|title| IndicGenBench: A Multilingual Benchmark to Evaluate Generation Capabilities of LLMs on Indic Languages |
+|authors| Harman SinghNitish GuptaShikhar BharadwajDinesh TewariPartha Talukdar
+|links| http://arxiv.org/abs/2404.16816v1 |
+|updated| 2024-04-25 17:57:36 UTC |
+|summary| As large language models LLMs see increasing adoption across the globe itis imperative for LLMs to be representative of the linguistic diversity of theworld. India is a linguistically diverse country of 1.4 Billion people. Tofacilitate research on multilingual LLM evaluation we release IndicGenBench -the largest benchmark for evaluating LLMs on user-facing generation tasksacross a diverse set 29 of Indic languages covering 13 scripts and 4 languagefamilies. IndicGenBench is composed of diverse generation tasks likecross-lingual summarization machine translation and cross-lingual questionanswering. IndicGenBench extends existing benchmarks to many Indic languagesthrough human curation providing multi-way parallel evaluation data for manyunder-represented Indic languages for the first time. We evaluate a wide rangeof proprietary and open-source LLMs including GPT-3.5 GPT-4 PaLM-2 mT5Gemma BLOOM and LLaMA on IndicGenBench in a variety of settings. The largestPaLM-2 models performs the best on most tasks however there is a significantperformance gap in all languages compared to English showing that furtherresearch is needed for the development of more inclusive multilingual languagemodels. IndicGenBench is released atwww.github.com/google-research-datasets/indic-gen-bench |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15269v1 |
-|title| Aligning LLM Agents by Learning Latent Preference from User Edits |
-|authors| Ge GaoAlexey TaymanovEduardo SalinasPaul MineiroDipendra Misra
-|links| http://arxiv.org/abs/2404.15269v1 |
-|updated| 2024-04-23 17:57:47 UTC |
-|summary| We study interactive learning of language agents based on user edits made tothe agents output. In a typical setting such as writing assistants the userinteracts with a language agent to generate a response given a context and mayoptionally edit the agent response to personalize it based on their latentpreference in addition to improving the correctness. The edit feedback isnaturally generated making it a suitable candidate for improving the agentsalignment with the users preference and for reducing the cost of user editsover time. We propose a learning framework PRELUDE that infers a descriptionof the users latent preference based on historic edit data and using it todefine a prompt policy that drives future response generation. This avoidsfine-tuning the agent which is costly challenging to scale with the number ofusers and may even degrade its performance on other tasks. Furthermorelearning descriptive preference improves interpretability allowing the user toview and modify the learned preference. However user preference can be complexand vary based on context making it challenging to learn. To address this wepropose a simple yet effective algorithm named CIPHER that leverages a largelanguage model LLM to infer the user preference for a given context based onuser edits. In the future CIPHER retrieves inferred preferences from thek-closest contexts in the history and forms an aggregate preference forresponse generation. We introduce two interactive environments -- summarizationand email writing for evaluation using a GPT-4 simulated user. We compare withalgorithms that directly retrieve user edits but do not learn descriptivepreference and algorithms that learn context-agnostic preference. On bothtasks CIPHER achieves the lowest edit distance cost and learns preferencesthat show significant similarity to the ground truth preferences |
+|idx| 2404.16811v1 |
+|title| Make Your LLM Fully Utilize the Context |
+|authors| Shengnan AnZexiong MaZeqi LinNanning ZhengJian-Guang Lou
+|links| http://arxiv.org/abs/2404.16811v1 |
+|updated| 2024-04-25 17:55:14 UTC |
+|summary| While many contemporary large language models LLMs can process lengthyinput they still struggle to fully utilize information within the longcontext known as the lost-in-the-middle challenge. We hypothesize that itstems from insufficient explicit supervision during the long-context trainingwhich fails to emphasize that any position in a long context can hold crucialinformation. Based on this intuition our study presents information-intensiveIN2 training a purely data-driven solution to overcome lost-in-the-middle.Specifically IN2 training leverages a synthesized long-context question-answerdataset where the answer requires 1 fine-grained information awareness on ashort segment 128 tokens within a synthesized long context 4K-32K tokensand 2 the integration and reasoning of information from two or more shortsegments. Through applying this information-intensive training on Mistral-7Bwe present FILM-7B FILl-in-the-Middle. To thoroughly assess the ability ofFILM-7B for utilizing long contexts we design three probing tasks thatencompass various context styles document code and structured-data contextand information retrieval patterns forward backward and bi-directionalretrieval. The probing results demonstrate that FILM-7B can robustly retrieveinformation from different positions in its 32K context window. Beyond theseprobing tasks FILM-7B significantly improves the performance on real-worldlong-context tasks e.g. 23.5-26.9 F1 score on NarrativeQA whilemaintaining a comparable performance on short-context tasks e.g. 59.3-59.2accuracy on MMLU. Github Link: https://github.com/microsoft/FILM. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15247v1 |
-|title| XFT: Unlocking the Power of Code Instruction Tuning by Simply Merging Upcycled Mixture-of-Experts |
-|authors| Yifeng DingJiawei LiuYuxiang WeiTerry Yue ZhuoLingming Zhang
-|links| http://arxiv.org/abs/2404.15247v1 |
-|updated| 2024-04-23 17:32:24 UTC |
-|summary| We introduce XFT a simple yet powerful training scheme by simply mergingupcycled Mixture-of-Experts MoE to unleash the performance limit ofinstruction-tuned code Large Language Models LLMs. While vanilla sparseupcycling fails to improve instruction tuning XFT introduces a shared expertmechanism with a novel routing weight normalization strategy into sparseupcycling which significantly boosts instruction tuning. After fine-tuning theupcycled MoE model XFT introduces a learnable model merging mechanism tocompile the upcycled MoE model back to a dense model achieving upcycledMoE-level performance with only dense-model compute. By applying XFT to a 1.3Bmodel we create a new state-of-the-art tiny code LLM 3B with 67.1 and 64.6pass1 on HumanEval and HumanEval respectively. With the same data and modelarchitecture XFT improves supervised fine-tuning SFT by 13 on HumanEvalalong with consistent improvements from 2 to 13 on MBPP MultiPL-E andDS-1000 demonstrating its generalizability. XFT is fully orthogonal toexisting techniques such as Evol-Instruct and OSS-Instruct opening a newdimension for improving code instruction tuning. Codes are available athttps://github.com/ise-uiuc/xft . |
+|idx| 2404.16807v1 |
+|title| Improving Diversity of Commonsense Generation by Large Language Models via In-Context Learning |
+|authors| Tianhui ZhangBei PengDanushka Bollegala
+|links| http://arxiv.org/abs/2404.16807v1 |
+|updated| 2024-04-25 17:52:39 UTC |
+|summary| Generative Commonsense Reasoning GCR requires a model to reason about asituation using commonsense knowledge while generating coherent sentences.Although the quality of the generated sentences is crucial the diversity ofthe generation is equally important because it reflects the models ability touse a range of commonsense knowledge facts. Large Language Models LLMs haveshown proficiency in enhancing the generation quality across various tasksthrough in-context learning ICL using given examples without the need for anyfine-tuning. However the diversity aspect in LLM outputs has not beensystematically studied before. To address this we propose a simple method thatdiversifies the LLM generations while preserving their quality. Experimentalresults on three benchmark GCR datasets show that our method achieves an idealbalance between the quality and diversity. Moreover the sentences generated byour proposed method can be used as training data to improve diversity inexisting commonsense generators. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15238v1 |
-|title| CultureBank: An Online Community-Driven Knowledge Base Towards Culturally Aware Language Technologies |
-|authors| Weiyan ShiRyan LiYutong ZhangCaleb ZiemsChunhua yuRaya HoreshRogério Abreu de PaulaDiyi Yang
-|links| http://arxiv.org/abs/2404.15238v1 |
-|updated| 2024-04-23 17:16:08 UTC |
-|summary| To enhance language models cultural awareness we design a generalizablepipeline to construct cultural knowledge bases from different onlinecommunities on a massive scale. With the pipeline we construct CultureBank aknowledge base built upon users self-narratives with 12K cultural descriptorssourced from TikTok and 11K from Reddit. Unlike previous cultural knowledgeresources CultureBank contains diverse views on cultural descriptors to allowflexible interpretation of cultural knowledge and contextualized culturalscenarios to help grounded evaluation. With CultureBank we evaluate differentLLMs cultural awareness and identify areas for improvement. We also fine-tunea language model on CultureBank: experiments show that it achieves betterperformances on two downstream cultural tasks in a zero-shot setting. Finallywe offer recommendations based on our findings for future culturally awarelanguage technologies. The project page is https://culturebank.github.io . Thecode and model is at https://github.com/SALT-NLP/CultureBank . The releasedCultureBank dataset is at https://huggingface.co/datasets/SALT-NLP/CultureBank . |
+|idx| 2404.16792v1 |
+|title| Weak-to-Strong Extrapolation Expedites Alignment |
+|authors| Chujie ZhengZiqi WangHeng JiMinlie HuangNanyun Peng
+|links| http://arxiv.org/abs/2404.16792v1 |
+|updated| 2024-04-25 17:39:50 UTC |
+|summary| Although the capabilities of large language models LLMs ideally scale upwith increasing data and compute they are inevitably constrained by limitedresources in reality. Suppose we have a moderately trained LLM e.g. trainedto align with human preference in hand can we further exploit its potentialand cheaply acquire a stronger model In this paper we propose a simple methodcalled ExPO to boost LLMs alignment with human preference. ExPO assumes that amedium-aligned model can be interpolated between a less-aligned weaker modele.g. the initial SFT model and a better-aligned stronger one therebydirectly obtaining this stronger model by extrapolating from the weights of theformer two relatively weaker models. On the AlpacaEval 2.0 benchmark we showthat ExPO pushes models trained with less preference data e.g. 10 or 20 toreach and even surpass the fully-trained one without any additional training.Furthermore ExPO also significantly improves off-the-shelf DPO/RLHF models andexhibits decent scalability across model sizes from 7B to 70B. Our workdemonstrates the efficacy of model extrapolation in exploiting LLMscapabilities suggesting a promising direction that deserves futureexploration. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15276v1 |
-|title| SMPLer: Taming Transformers for Monocular 3D Human Shape and Pose Estimation |
-|authors| Xiangyu XuLijuan LiuShuicheng Yan
-|links| http://arxiv.org/abs/2404.15276v1 |
-|updated| 2024-04-23 17:59:59 UTC |
-|summary| Existing Transformers for monocular 3D human shape and pose estimationtypically have a quadratic computation and memory complexity with respect tothe feature length which hinders the exploitation of fine-grained informationin high-resolution features that is beneficial for accurate reconstruction. Inthis work we propose an SMPL-based Transformer framework SMPLer to addressthis issue. SMPLer incorporates two key ingredients: a decoupled attentionoperation and an SMPL-based target representation which allow effectiveutilization of high-resolution features in the Transformer. In addition basedon these two designs we also introduce several novel modules including amulti-scale attention and a joint-aware attention to further boost thereconstruction performance. Extensive experiments demonstrate the effectivenessof SMPLer against existing 3D human shape and pose estimation methods bothquantitatively and qualitatively. Notably the proposed algorithm achieves anMPJPE of 45.2 mm on the Human3.6M dataset improving upon Mesh Graphormer bymore than 10 with fewer than one-third of the parameters. Code and pretrainedmodels are available at https://github.com/xuxy09/SMPLer. |
+|idx| 2404.16829v1 |
+|title| Make-it-Real: Unleashing Large Multimodal Model's Ability for Painting 3D Objects with Realistic Materials |
+|authors| Ye FangZeyi SunTong WuJiaqi WangZiwei LiuGordon WetzsteinDahua Lin
+|links| http://arxiv.org/abs/2404.16829v1 |
+|updated| 2024-04-25 17:59:58 UTC |
+|summary| Physically realistic materials are pivotal in augmenting the realism of 3Dassets across various applications and lighting conditions. However existing3D assets and generative models often lack authentic material properties.Manual assignment of materials using graphic software is a tedious andtime-consuming task. In this paper we exploit advancements in Multimodal LargeLanguage Models MLLMs particularly GPT-4V to present a novel approachMake-it-Real: 1 We demonstrate that GPT-4V can effectively recognize anddescribe materials allowing the construction of a detailed material library.2 Utilizing a combination of visual cues and hierarchical text prompts GPT-4Vprecisely identifies and aligns materials with the corresponding components of3D objects. 3 The correctly matched materials are then meticulously applied asreference for the new SVBRDF material generation according to the originaldiffuse map significantly enhancing their visual authenticity. Make-it-Realoffers a streamlined integration into the 3D content creation workflowshowcasing its utility as an essential tool for developers of 3D assets. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15272v1 |
-|title| CT-GLIP: 3D Grounded Language-Image Pretraining with CT Scans and Radiology Reports for Full-Body Scenarios |
-|authors| Jingyang LinYingda XiaJianpeng ZhangKe YanLe LuJiebo LuoLing Zhang
-|links| http://arxiv.org/abs/2404.15272v1 |
-|updated| 2024-04-23 17:59:01 UTC |
-|summary| Medical Vision-Language Pretraining Med-VLP establishes a connectionbetween visual content from medical images and the relevant textualdescriptions. Existing Med-VLP methods primarily focus on 2D images depicting asingle body part notably chest X-rays. In this paper we extend the scope ofMed-VLP to encompass 3D images specifically targeting full-body scenarios byusing a multimodal dataset of CT images and reports. Compared with the 2Dcounterpart 3D VLP is required to effectively capture essential semantics fromsignificantly sparser representation in 3D imaging. In this paper we introduceCT-GLIP Grounded Language-Image Pretraining with CT scans a novel methodthat constructs organ-level image-text pairs to enhance multimodal contrastivelearning aligning grounded visual features with precise diagnostic text.Additionally we developed an abnormality dictionary to augment contrastivelearning with diverse negative samples. Our method trained on a multimodal CTdataset comprising 44011 organ-level vision-text pairs from 17702 patientsacross 104 organs demonstrates it can identify organs and abnormalities in azero-shot manner using natural languages. The performance of CT-GLIP isvalidated on a separate test set of 1130 patients focusing on the 16 mostfrequent abnormalities across 7 organs. The experimental results show ourmodels superior performance over the standard CLIP framework across zero-shotand fine-tuning scenarios using both CNN and ViT architectures. |
+|idx| 2404.16823v1 |
+|title| Learning Visuotactile Skills with Two Multifingered Hands |
+|authors| Toru LinYu ZhangQiyang LiHaozhi QiBrent YiSergey LevineJitendra Malik
+|links| http://arxiv.org/abs/2404.16823v1 |
+|updated| 2024-04-25 17:59:41 UTC |
+|summary| Aiming to replicate human-like dexterity perceptual experiences and motionpatterns we explore learning from human demonstrations using a bimanual systemwith multifingered hands and visuotactile data. Two significant challengesexist: the lack of an affordable and accessible teleoperation system suitablefor a dual-arm setup with multifingered hands and the scarcity ofmultifingered hand hardware equipped with touch sensing. To tackle the firstchallenge we develop HATO a low-cost hands-arms teleoperation system thatleverages off-the-shelf electronics complemented with a software suite thatenables efficient data collection the comprehensive software suite alsosupports multimodal data processing scalable policy learning and smoothpolicy deployment. To tackle the latter challenge we introduce a novelhardware adaptation by repurposing two prosthetic hands equipped with touchsensors for research. Using visuotactile data collected from our system welearn skills to complete long-horizon high-precision tasks which are difficultto achieve without multifingered dexterity and touch feedback. Furthermore weempirically investigate the effects of dataset size sensing modality andvisual input preprocessing on policy learning. Our results mark a promisingstep forward in bimanual multifingered manipulation from visuotactile data.Videos code and datasets can be found at https://toruowo.github.io/hato/ . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15271v1 |
-|title| Automatic Layout Planning for Visually-Rich Documents with Instruction-Following Models |
-|authors| Wanrong ZhuJennifer HealeyRuiyi ZhangWilliam Yang WangTong Sun
-|links| http://arxiv.org/abs/2404.15271v1 |
-|updated| 2024-04-23 17:58:33 UTC |
-|summary| Recent advancements in instruction-following models have made userinteractions with models more user-friendly and efficient broadening theirapplicability. In graphic design non-professional users often struggle tocreate visually appealing layouts due to limited skills and resources. In thiswork we introduce a novel multimodal instruction-following framework forlayout planning allowing users to easily arrange visual elements into tailoredlayouts by specifying canvas size and design purpose such as for book coversposters brochures or menus. We developed three layout reasoning tasks totrain the model in understanding and executing layout instructions. Experimentson two benchmarks show that our method not only simplifies the design processfor non-professionals but also surpasses the performance of few-shot GPT-4Vmodels with mIoU higher by 12 on Crello. This progress highlights thepotential of multimodal instruction-following models to automate and simplifythe design process providing an approachable solution for a wide range ofdesign tasks on visually-rich documents. |
+|idx| 2404.16811v1 |
+|title| Make Your LLM Fully Utilize the Context |
+|authors| Shengnan AnZexiong MaZeqi LinNanning ZhengJian-Guang Lou
+|links| http://arxiv.org/abs/2404.16811v1 |
+|updated| 2024-04-25 17:55:14 UTC |
+|summary| While many contemporary large language models LLMs can process lengthyinput they still struggle to fully utilize information within the longcontext known as the lost-in-the-middle challenge. We hypothesize that itstems from insufficient explicit supervision during the long-context trainingwhich fails to emphasize that any position in a long context can hold crucialinformation. Based on this intuition our study presents information-intensiveIN2 training a purely data-driven solution to overcome lost-in-the-middle.Specifically IN2 training leverages a synthesized long-context question-answerdataset where the answer requires 1 fine-grained information awareness on ashort segment 128 tokens within a synthesized long context 4K-32K tokensand 2 the integration and reasoning of information from two or more shortsegments. Through applying this information-intensive training on Mistral-7Bwe present FILM-7B FILl-in-the-Middle. To thoroughly assess the ability ofFILM-7B for utilizing long contexts we design three probing tasks thatencompass various context styles document code and structured-data contextand information retrieval patterns forward backward and bi-directionalretrieval. The probing results demonstrate that FILM-7B can robustly retrieveinformation from different positions in its 32K context window. Beyond theseprobing tasks FILM-7B significantly improves the performance on real-worldlong-context tasks e.g. 23.5-26.9 F1 score on NarrativeQA whilemaintaining a comparable performance on short-context tasks e.g. 59.3-59.2accuracy on MMLU. Github Link: https://github.com/microsoft/FILM. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15269v1 |
-|title| Aligning LLM Agents by Learning Latent Preference from User Edits |
-|authors| Ge GaoAlexey TaymanovEduardo SalinasPaul MineiroDipendra Misra
-|links| http://arxiv.org/abs/2404.15269v1 |
-|updated| 2024-04-23 17:57:47 UTC |
-|summary| We study interactive learning of language agents based on user edits made tothe agents output. In a typical setting such as writing assistants the userinteracts with a language agent to generate a response given a context and mayoptionally edit the agent response to personalize it based on their latentpreference in addition to improving the correctness. The edit feedback isnaturally generated making it a suitable candidate for improving the agentsalignment with the users preference and for reducing the cost of user editsover time. We propose a learning framework PRELUDE that infers a descriptionof the users latent preference based on historic edit data and using it todefine a prompt policy that drives future response generation. This avoidsfine-tuning the agent which is costly challenging to scale with the number ofusers and may even degrade its performance on other tasks. Furthermorelearning descriptive preference improves interpretability allowing the user toview and modify the learned preference. However user preference can be complexand vary based on context making it challenging to learn. To address this wepropose a simple yet effective algorithm named CIPHER that leverages a largelanguage model LLM to infer the user preference for a given context based onuser edits. In the future CIPHER retrieves inferred preferences from thek-closest contexts in the history and forms an aggregate preference forresponse generation. We introduce two interactive environments -- summarizationand email writing for evaluation using a GPT-4 simulated user. We compare withalgorithms that directly retrieve user edits but do not learn descriptivepreference and algorithms that learn context-agnostic preference. On bothtasks CIPHER achieves the lowest edit distance cost and learns preferencesthat show significant similarity to the ground truth preferences |
+|idx| 2404.16804v1 |
+|title| AAPL: Adding Attributes to Prompt Learning for Vision-Language Models |
+|authors| Gahyeon KimSohee KimSeokju Lee
+|links| http://arxiv.org/abs/2404.16804v1 |
+|updated| 2024-04-25 17:51:10 UTC |
+|summary| Recent advances in large pre-trained vision-language models have demonstratedremarkable performance on zero-shot downstream tasks. Building upon thisrecent studies such as CoOp and CoCoOp have proposed the use of promptlearning where context within a prompt is replaced with learnable vectorsleading to significant improvements over manually crafted prompts. However theperformance improvement for unseen classes is still marginal and to tacklethis problem data augmentation has been frequently used in traditionalzero-shot learning techniques. Through our experiments we have identifiedimportant issues in CoOp and CoCoOp: the context learned through traditionalimage augmentation is biased toward seen classes negatively impactinggeneralization to unseen classes. To address this problem we proposeadversarial token embedding to disentangle low-level visual augmentationfeatures from high-level class information when inducing bias in learnableprompts. Through our novel mechanism called Adding Attributes to PromptLearning AAPL we guide the learnable context to effectively extract textfeatures by focusing on high-level features for unseen classes. We haveconducted experiments across 11 datasets and overall AAPL shows favorableperformances compared to the existing methods in few-shot learning zero-shotlearning cross-dataset and domain generalization tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15256v1 |
-|title| TOP-Nav: Legged Navigation Integrating Terrain, Obstacle and Proprioception Estimation |
-|authors| Junli RenYikai LiuYingru DaiGuijin Wang
-|links| http://arxiv.org/abs/2404.15256v1 |
-|updated| 2024-04-23 17:42:45 UTC |
-|summary| Legged navigation is typically examined within open-world off-road andchallenging environments. In these scenarios estimating external disturbancesrequires a complex synthesis of multi-modal information. This underlines amajor limitation in existing works that primarily focus on avoiding obstacles.In this work we propose TOP-Nav a novel legged navigation framework thatintegrates a comprehensive path planner with Terrain awareness Obstacleavoidance and close-loop Proprioception. TOP-Nav underscores the synergiesbetween vision and proprioception in both path and motion planning. Within thepath planner we present and integrate a terrain estimator that enables therobot to select waypoints on terrains with higher traversability whileeffectively avoiding obstacles. In the motion planning level we not onlyimplement a locomotion controller to track the navigation commands but alsoconstruct a proprioception advisor to provide motion evaluations for the pathplanner. Based on the close-loop motion feedback we make online correctionsfor the vision-based terrain and obstacle estimations. Consequently TOP-Navachieves open-world navigation that the robot can handle terrains ordisturbances beyond the distribution of prior knowledge and overcomesconstraints imposed by visual conditions. Building upon extensive experimentsconducted in both simulation and real-world environments TOP-Nav demonstratessuperior performance in open-world navigation compared to existing methods. |
+|idx| 2404.16792v1 |
+|title| Weak-to-Strong Extrapolation Expedites Alignment |
+|authors| Chujie ZhengZiqi WangHeng JiMinlie HuangNanyun Peng
+|links| http://arxiv.org/abs/2404.16792v1 |
+|updated| 2024-04-25 17:39:50 UTC |
+|summary| Although the capabilities of large language models LLMs ideally scale upwith increasing data and compute they are inevitably constrained by limitedresources in reality. Suppose we have a moderately trained LLM e.g. trainedto align with human preference in hand can we further exploit its potentialand cheaply acquire a stronger model In this paper we propose a simple methodcalled ExPO to boost LLMs alignment with human preference. ExPO assumes that amedium-aligned model can be interpolated between a less-aligned weaker modele.g. the initial SFT model and a better-aligned stronger one therebydirectly obtaining this stronger model by extrapolating from the weights of theformer two relatively weaker models. On the AlpacaEval 2.0 benchmark we showthat ExPO pushes models trained with less preference data e.g. 10 or 20 toreach and even surpass the fully-trained one without any additional training.Furthermore ExPO also significantly improves off-the-shelf DPO/RLHF models andexhibits decent scalability across model sizes from 7B to 70B. Our workdemonstrates the efficacy of model extrapolation in exploiting LLMscapabilities suggesting a promising direction that deserves futureexploration. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15276v1 |
-|title| SMPLer: Taming Transformers for Monocular 3D Human Shape and Pose Estimation |
-|authors| Xiangyu XuLijuan LiuShuicheng Yan
-|links| http://arxiv.org/abs/2404.15276v1 |
-|updated| 2024-04-23 17:59:59 UTC |
-|summary| Existing Transformers for monocular 3D human shape and pose estimationtypically have a quadratic computation and memory complexity with respect tothe feature length which hinders the exploitation of fine-grained informationin high-resolution features that is beneficial for accurate reconstruction. Inthis work we propose an SMPL-based Transformer framework SMPLer to addressthis issue. SMPLer incorporates two key ingredients: a decoupled attentionoperation and an SMPL-based target representation which allow effectiveutilization of high-resolution features in the Transformer. In addition basedon these two designs we also introduce several novel modules including amulti-scale attention and a joint-aware attention to further boost thereconstruction performance. Extensive experiments demonstrate the effectivenessof SMPLer against existing 3D human shape and pose estimation methods bothquantitatively and qualitatively. Notably the proposed algorithm achieves anMPJPE of 45.2 mm on the Human3.6M dataset improving upon Mesh Graphormer bymore than 10 with fewer than one-third of the parameters. Code and pretrainedmodels are available at https://github.com/xuxy09/SMPLer. |
+|idx| 2404.16828v1 |
+|title| Made to Order: Discovering monotonic temporal changes via self-supervised video ordering |
+|authors| Charig YangWeidi XieAndrew Zisserman
+|links| http://arxiv.org/abs/2404.16828v1 |
+|updated| 2024-04-25 17:59:56 UTC |
+|summary| Our objective is to discover and localize monotonic temporal changes in asequence of images. To achieve this we exploit a simple proxy task of orderinga shuffled image sequence with time serving as a supervisory signal sinceonly changes that are monotonic with time can give rise to the correctordering. We also introduce a flexible transformer-based model forgeneral-purpose ordering of image sequences of arbitrary length with built-inattribution maps. After training the model successfully discovers andlocalizes monotonic changes while ignoring cyclic and stochastic ones. Wedemonstrate applications of the model in multiple video settings coveringdifferent scene and object types discovering both object-level andenvironmental changes in unseen sequences. We also demonstrate that theattention-based attribution maps function as effective prompts for segmentingthe changing regions and that the learned representations can be used fordownstream applications. Finally we show that the model achieves the state ofthe art on standard benchmarks for ordering a set of images. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15274v1 |
-|title| Metric-guided Image Reconstruction Bounds via Conformal Prediction |
-|authors| Matt Y CheungTucker J NethertonLaurence E CourtAshok VeeraraghavanGuha Balakrishnan
-|links| http://arxiv.org/abs/2404.15274v1 |
-|updated| 2024-04-23 17:59:12 UTC |
-|summary| Recent advancements in machine learning have led to novel imaging systems andalgorithms that address ill-posed problems. Assessing their trustworthiness andunderstanding how to deploy them safely at test time remains an important andopen problem. We propose a method that leverages conformal prediction toretrieve upper/lower bounds and statistical inliers/outliers of reconstructionsbased on the prediction intervals of downstream metrics. We apply our method tosparse-view CT for downstream radiotherapy planning and show 1 thatmetric-guided bounds have valid coverage for downstream metrics whileconventional pixel-wise bounds do not and 2 anatomical differences ofupper/lower bounds between metric-guided and pixel-wise methods. Our work pavesthe way for more meaningful reconstruction bounds. Code available athttps://github.com/matthewyccheung/conformal-metric |
+|idx| 2404.16823v1 |
+|title| Learning Visuotactile Skills with Two Multifingered Hands |
+|authors| Toru LinYu ZhangQiyang LiHaozhi QiBrent YiSergey LevineJitendra Malik
+|links| http://arxiv.org/abs/2404.16823v1 |
+|updated| 2024-04-25 17:59:41 UTC |
+|summary| Aiming to replicate human-like dexterity perceptual experiences and motionpatterns we explore learning from human demonstrations using a bimanual systemwith multifingered hands and visuotactile data. Two significant challengesexist: the lack of an affordable and accessible teleoperation system suitablefor a dual-arm setup with multifingered hands and the scarcity ofmultifingered hand hardware equipped with touch sensing. To tackle the firstchallenge we develop HATO a low-cost hands-arms teleoperation system thatleverages off-the-shelf electronics complemented with a software suite thatenables efficient data collection the comprehensive software suite alsosupports multimodal data processing scalable policy learning and smoothpolicy deployment. To tackle the latter challenge we introduce a novelhardware adaptation by repurposing two prosthetic hands equipped with touchsensors for research. Using visuotactile data collected from our system welearn skills to complete long-horizon high-precision tasks which are difficultto achieve without multifingered dexterity and touch feedback. Furthermore weempirically investigate the effects of dataset size sensing modality andvisual input preprocessing on policy learning. Our results mark a promisingstep forward in bimanual multifingered manipulation from visuotactile data.Videos code and datasets can be found at https://toruowo.github.io/hato/ . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15273v1 |
-|title| Estimation Network Design framework for efficient distributed optimization |
-|authors| Mattia BianchiSergio Grammatico
-|links| http://arxiv.org/abs/2404.15273v1 |
-|updated| 2024-04-23 17:59:09 UTC |
-|summary| Distributed decision problems features a group of agents that can onlycommunicate over a peer-to-peer network without a central memory. Inapplications such as network control and data ranking each agent is onlyaffected by a small portion of the decision vector: this sparsity is typicallyignored in distributed algorithms while it could be leveraged to improveefficiency and scalability. To address this issue our recent paper introducesEstimation Network Design END a graph theoretical language for the analysisand design of distributed iterations. END algorithms can be tuned to exploitthe sparsity of specific problem instances reducing communication overhead andminimizing redundancy yet without requiring case-by-case convergence analysis.In this paper we showcase the flexility of END in the context of distributedoptimization. In particular we study the sparsity-aware version of manyestablished methods including ADMM AugDGM and Push-Sum DGD. Simulations on anestimation problem in sensor networks demonstrate that END algorithms can boostconvergence speed and greatly reduce the communication and memory cost. |
+|idx| 2404.16814v1 |
+|title| Meta-Transfer Derm-Diagnosis: Exploring Few-Shot Learning and Transfer Learning for Skin Disease Classification in Long-Tail Distribution |
+|authors| Zeynep ÖzdemirHacer Yalim KelesÖmer Özgür Tanrıöver
+|links| http://arxiv.org/abs/2404.16814v1 |
+|updated| 2024-04-25 17:56:45 UTC |
+|summary| Addressing the challenges of rare diseases is difficult especially with thelimited number of reference images and a small patient population. This is moreevident in rare skin diseases where we encounter long-tailed datadistributions that make it difficult to develop unbiased and broadly effectivemodels. The diverse ways in which image datasets are gathered and theirdistinct purposes also add to these challenges. Our study conducts a detailedexamination of the benefits and drawbacks of episodic and conventional trainingmethodologies adopting a few-shot learning approach alongside transferlearning. We evaluated our models using the ISIC2018 Derm7pt and SD-198datasets. With minimal labeled examples our models showed substantialinformation gains and better performance compared to previously trained models.Our research emphasizes the improved ability to represent features inDenseNet121 and MobileNetV2 models achieved by using pre-trained models onImageNet to increase similarities within classes. Moreover our experimentsranging from 2-way to 5-way classifications with up to 10 examples showed agrowing success rate for traditional transfer learning methods as the number ofexamples increased. The addition of data augmentation techniques significantlyimproved our transfer learning based model performance leading to higherperformances than existing methods especially in the SD-198 and ISIC2018datasets. All source code related to this work will be made publicly availablesoon at the provided URL. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15269v1 |
-|title| Aligning LLM Agents by Learning Latent Preference from User Edits |
-|authors| Ge GaoAlexey TaymanovEduardo SalinasPaul MineiroDipendra Misra
-|links| http://arxiv.org/abs/2404.15269v1 |
-|updated| 2024-04-23 17:57:47 UTC |
-|summary| We study interactive learning of language agents based on user edits made tothe agents output. In a typical setting such as writing assistants the userinteracts with a language agent to generate a response given a context and mayoptionally edit the agent response to personalize it based on their latentpreference in addition to improving the correctness. The edit feedback isnaturally generated making it a suitable candidate for improving the agentsalignment with the users preference and for reducing the cost of user editsover time. We propose a learning framework PRELUDE that infers a descriptionof the users latent preference based on historic edit data and using it todefine a prompt policy that drives future response generation. This avoidsfine-tuning the agent which is costly challenging to scale with the number ofusers and may even degrade its performance on other tasks. Furthermorelearning descriptive preference improves interpretability allowing the user toview and modify the learned preference. However user preference can be complexand vary based on context making it challenging to learn. To address this wepropose a simple yet effective algorithm named CIPHER that leverages a largelanguage model LLM to infer the user preference for a given context based onuser edits. In the future CIPHER retrieves inferred preferences from thek-closest contexts in the history and forms an aggregate preference forresponse generation. We introduce two interactive environments -- summarizationand email writing for evaluation using a GPT-4 simulated user. We compare withalgorithms that directly retrieve user edits but do not learn descriptivepreference and algorithms that learn context-agnostic preference. On bothtasks CIPHER achieves the lowest edit distance cost and learns preferencesthat show significant similarity to the ground truth preferences |
+|idx| 2404.16804v1 |
+|title| AAPL: Adding Attributes to Prompt Learning for Vision-Language Models |
+|authors| Gahyeon KimSohee KimSeokju Lee
+|links| http://arxiv.org/abs/2404.16804v1 |
+|updated| 2024-04-25 17:51:10 UTC |
+|summary| Recent advances in large pre-trained vision-language models have demonstratedremarkable performance on zero-shot downstream tasks. Building upon thisrecent studies such as CoOp and CoCoOp have proposed the use of promptlearning where context within a prompt is replaced with learnable vectorsleading to significant improvements over manually crafted prompts. However theperformance improvement for unseen classes is still marginal and to tacklethis problem data augmentation has been frequently used in traditionalzero-shot learning techniques. Through our experiments we have identifiedimportant issues in CoOp and CoCoOp: the context learned through traditionalimage augmentation is biased toward seen classes negatively impactinggeneralization to unseen classes. To address this problem we proposeadversarial token embedding to disentangle low-level visual augmentationfeatures from high-level class information when inducing bias in learnableprompts. Through our novel mechanism called Adding Attributes to PromptLearning AAPL we guide the learnable context to effectively extract textfeatures by focusing on high-level features for unseen classes. We haveconducted experiments across 11 datasets and overall AAPL shows favorableperformances compared to the existing methods in few-shot learning zero-shotlearning cross-dataset and domain generalization tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15261v1 |
-|title| All You Need is Resistance: On the Equivalence of Effective Resistance and Certain Optimal Transport Problems on Graphs |
-|authors| Sawyer RobertsonZhengchao WanAlexander Cloninger
-|links| http://arxiv.org/abs/2404.15261v1 |
-|updated| 2024-04-23 17:50:52 UTC |
-|summary| The fields of effective resistance and optimal transport on graphs are filledwith rich connections to combinatorics geometry machine learning and beyond.In this article we put forth a bold claim: that the two fields should beunderstood as one and the same up to a choice of p. We make this claimprecise by introducing the parameterized family of p-Beckmann distances forprobability measures on graphs and relate them sharply to certain Wassersteindistances. Then we break open a suite of results including explicitconnections to optimal stopping times and random walks on graphs graph Sobolevspaces and a Benamou-Brenier type formula for 2-Beckmann distance. Wefurther explore empirical implications in the world of unsupervised learningfor graph data and propose further study of the usage of these metrics whereWasserstein distance may produce computational bottlenecks. |
+|idx| 2404.16795v1 |
+|title| In-Context Freeze-Thaw Bayesian Optimization for Hyperparameter Optimization |
+|authors| Herilalaina RakotoarisonSteven AdriaensenNeeratyoy MallikSamir GaribovEdward BergmanFrank Hutter
+|links| http://arxiv.org/abs/2404.16795v1 |
+|updated| 2024-04-25 17:40:52 UTC |
+|summary| With the increasing computational costs associated with deep learningautomated hyperparameter optimization methods strongly relying on black-boxBayesian optimization BO face limitations. Freeze-thaw BO offers a promisinggrey-box alternative strategically allocating scarce resources incrementallyto different configurations. However the frequent surrogate model updatesinherent to this approach pose challenges for existing methods requiringretraining or fine-tuning their neural network surrogates online introducingoverhead instability and hyper-hyperparameters. In this work we proposeFT-PFN a novel surrogate for Freeze-thaw style BO. FT-PFN is a prior-datafitted network PFN that leverages the transformers in-context learningability to efficiently and reliably do Bayesian learning curve extrapolation ina single forward pass. Our empirical analysis across three benchmark suitesshows that the predictions made by FT-PFN are more accurate and 10-100 timesfaster than those of the deep Gaussian process and deep ensemble surrogatesused in previous work. Furthermore we show that when combined with our novelacquisition mechanism MFPI-random the resulting in-context freeze-thaw BOmethod ifBO yields new state-of-the-art performance in the same threefamilies of deep learning HPO benchmarks considered in prior work. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15276v1 |
-|title| SMPLer: Taming Transformers for Monocular 3D Human Shape and Pose Estimation |
-|authors| Xiangyu XuLijuan LiuShuicheng Yan
-|links| http://arxiv.org/abs/2404.15276v1 |
-|updated| 2024-04-23 17:59:59 UTC |
-|summary| Existing Transformers for monocular 3D human shape and pose estimationtypically have a quadratic computation and memory complexity with respect tothe feature length which hinders the exploitation of fine-grained informationin high-resolution features that is beneficial for accurate reconstruction. Inthis work we propose an SMPL-based Transformer framework SMPLer to addressthis issue. SMPLer incorporates two key ingredients: a decoupled attentionoperation and an SMPL-based target representation which allow effectiveutilization of high-resolution features in the Transformer. In addition basedon these two designs we also introduce several novel modules including amulti-scale attention and a joint-aware attention to further boost thereconstruction performance. Extensive experiments demonstrate the effectivenessof SMPLer against existing 3D human shape and pose estimation methods bothquantitatively and qualitatively. Notably the proposed algorithm achieves anMPJPE of 45.2 mm on the Human3.6M dataset improving upon Mesh Graphormer bymore than 10 with fewer than one-third of the parameters. Code and pretrainedmodels are available at https://github.com/xuxy09/SMPLer. |
+|idx| 2404.16831v1 |
+|title| The Third Monocular Depth Estimation Challenge |
+|authors| Jaime SpencerFabio TosiMatteo PoggiRipudaman Singh AroraChris RussellSimon HadfieldRichard BowdenGuangYuan ZhouZhengXin LiQiang RaoYiPing BaoXiao LiuDohyeong KimJinseong KimMyunghyun KimMykola LavreniukRui LiQing MaoJiang WuYu ZhuJinqiu SunYanning ZhangSuraj PatniAradhye AgarwalChetan AroraPihai SunKui JiangGang WuJian LiuXianming LiuJunjun JiangXidan ZhangJianing WeiFangjun WangZhiming TanJiabao WangAlbert LuginovMuhammad ShahzadSeyed HosseiniAleksander TrajcevskiJames H. Elder
+|links| http://arxiv.org/abs/2404.16831v1 |
+|updated| 2024-04-25 17:59:59 UTC |
+|summary| This paper discusses the results of the third edition of the Monocular DepthEstimation Challenge MDEC. The challenge focuses on zero-shot generalizationto the challenging SYNS-Patches dataset featuring complex scenes in naturaland indoor settings. As with the previous edition methods can use any form ofsupervision i.e. supervised or self-supervised. The challenge received a totalof 19 submissions outperforming the baseline on the test set: 10 among themsubmitted a report describing their approach highlighting a diffused use offoundational models such as Depth Anything at the core of their method. Thechallenge winners drastically improved 3D F-Score performance from 17.51 to23.72. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15275v1 |
-|title| ID-Animator: Zero-Shot Identity-Preserving Human Video Generation |
-|authors| Xuanhua HeQuande LiuShengju QianXin WangTao HuKe CaoKeyu YanMan ZhouJie Zhang
-|links| http://arxiv.org/abs/2404.15275v1 |
-|updated| 2024-04-23 17:59:43 UTC |
-|summary| Generating high fidelity human video with specified identities has attractedsignificant attention in the content generation community. However existingtechniques struggle to strike a balance between training efficiency andidentity preservation either requiring tedious case-by-case finetuning orusually missing the identity details in video generation process. In thisstudy we present ID-Animator a zero-shot human-video generation approach thatcan perform personalized video generation given single reference facial imagewithout further training. ID-Animator inherits existing diffusion-based videogeneration backbones with a face adapter to encode the ID-relevant embeddingsfrom learnable facial latent queries. To facilitate the extraction of identityinformation in video generation we introduce an ID-oriented datasetconstruction pipeline which incorporates decoupled human attribute and actioncaptioning technique from a constructed facial image pool. Based on thispipeline a random face reference training method is further devised toprecisely capture the ID-relevant embeddings from reference images thusimproving the fidelity and generalization capacity of our model for ID-specificvideo generation. Extensive experiments demonstrate the superiority ofID-Animator to generate personalized human videos over previous models.Moreover our method is highly compatible with popular pre-trained T2V modelslike animatediff and various community backbone models showing highextendability in real-world applications for video generation where identitypreservation is highly desired. Our codes and checkpoints will be released athttps://github.com/ID-Animator/ID-Animator. |
+|idx| 2404.16829v1 |
+|title| Make-it-Real: Unleashing Large Multimodal Model's Ability for Painting 3D Objects with Realistic Materials |
+|authors| Ye FangZeyi SunTong WuJiaqi WangZiwei LiuGordon WetzsteinDahua Lin
+|links| http://arxiv.org/abs/2404.16829v1 |
+|updated| 2024-04-25 17:59:58 UTC |
+|summary| Physically realistic materials are pivotal in augmenting the realism of 3Dassets across various applications and lighting conditions. However existing3D assets and generative models often lack authentic material properties.Manual assignment of materials using graphic software is a tedious andtime-consuming task. In this paper we exploit advancements in Multimodal LargeLanguage Models MLLMs particularly GPT-4V to present a novel approachMake-it-Real: 1 We demonstrate that GPT-4V can effectively recognize anddescribe materials allowing the construction of a detailed material library.2 Utilizing a combination of visual cues and hierarchical text prompts GPT-4Vprecisely identifies and aligns materials with the corresponding components of3D objects. 3 The correctly matched materials are then meticulously applied asreference for the new SVBRDF material generation according to the originaldiffuse map significantly enhancing their visual authenticity. Make-it-Realoffers a streamlined integration into the 3D content creation workflowshowcasing its utility as an essential tool for developers of 3D assets. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15274v1 |
-|title| Metric-guided Image Reconstruction Bounds via Conformal Prediction |
-|authors| Matt Y CheungTucker J NethertonLaurence E CourtAshok VeeraraghavanGuha Balakrishnan
-|links| http://arxiv.org/abs/2404.15274v1 |
-|updated| 2024-04-23 17:59:12 UTC |
-|summary| Recent advancements in machine learning have led to novel imaging systems andalgorithms that address ill-posed problems. Assessing their trustworthiness andunderstanding how to deploy them safely at test time remains an important andopen problem. We propose a method that leverages conformal prediction toretrieve upper/lower bounds and statistical inliers/outliers of reconstructionsbased on the prediction intervals of downstream metrics. We apply our method tosparse-view CT for downstream radiotherapy planning and show 1 thatmetric-guided bounds have valid coverage for downstream metrics whileconventional pixel-wise bounds do not and 2 anatomical differences ofupper/lower bounds between metric-guided and pixel-wise methods. Our work pavesthe way for more meaningful reconstruction bounds. Code available athttps://github.com/matthewyccheung/conformal-metric |
+|idx| 2404.16828v1 |
+|title| Made to Order: Discovering monotonic temporal changes via self-supervised video ordering |
+|authors| Charig YangWeidi XieAndrew Zisserman
+|links| http://arxiv.org/abs/2404.16828v1 |
+|updated| 2024-04-25 17:59:56 UTC |
+|summary| Our objective is to discover and localize monotonic temporal changes in asequence of images. To achieve this we exploit a simple proxy task of orderinga shuffled image sequence with time serving as a supervisory signal sinceonly changes that are monotonic with time can give rise to the correctordering. We also introduce a flexible transformer-based model forgeneral-purpose ordering of image sequences of arbitrary length with built-inattribution maps. After training the model successfully discovers andlocalizes monotonic changes while ignoring cyclic and stochastic ones. Wedemonstrate applications of the model in multiple video settings coveringdifferent scene and object types discovering both object-level andenvironmental changes in unseen sequences. We also demonstrate that theattention-based attribution maps function as effective prompts for segmentingthe changing regions and that the learned representations can be used fordownstream applications. Finally we show that the model achieves the state ofthe art on standard benchmarks for ordering a set of images. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15272v1 |
-|title| CT-GLIP: 3D Grounded Language-Image Pretraining with CT Scans and Radiology Reports for Full-Body Scenarios |
-|authors| Jingyang LinYingda XiaJianpeng ZhangKe YanLe LuJiebo LuoLing Zhang
-|links| http://arxiv.org/abs/2404.15272v1 |
-|updated| 2024-04-23 17:59:01 UTC |
-|summary| Medical Vision-Language Pretraining Med-VLP establishes a connectionbetween visual content from medical images and the relevant textualdescriptions. Existing Med-VLP methods primarily focus on 2D images depicting asingle body part notably chest X-rays. In this paper we extend the scope ofMed-VLP to encompass 3D images specifically targeting full-body scenarios byusing a multimodal dataset of CT images and reports. Compared with the 2Dcounterpart 3D VLP is required to effectively capture essential semantics fromsignificantly sparser representation in 3D imaging. In this paper we introduceCT-GLIP Grounded Language-Image Pretraining with CT scans a novel methodthat constructs organ-level image-text pairs to enhance multimodal contrastivelearning aligning grounded visual features with precise diagnostic text.Additionally we developed an abnormality dictionary to augment contrastivelearning with diverse negative samples. Our method trained on a multimodal CTdataset comprising 44011 organ-level vision-text pairs from 17702 patientsacross 104 organs demonstrates it can identify organs and abnormalities in azero-shot manner using natural languages. The performance of CT-GLIP isvalidated on a separate test set of 1130 patients focusing on the 16 mostfrequent abnormalities across 7 organs. The experimental results show ourmodels superior performance over the standard CLIP framework across zero-shotand fine-tuning scenarios using both CNN and ViT architectures. |
+|idx| 2404.16825v1 |
+|title| ResVR: Joint Rescaling and Viewport Rendering of Omnidirectional Images |
+|authors| Weiqi LiShijie ZhaoBin ChenXinhua ChengJunlin LiLi ZhangJian Zhang
+|links| http://arxiv.org/abs/2404.16825v1 |
+|updated| 2024-04-25 17:59:46 UTC |
+|summary| With the advent of virtual reality technology omnidirectional image ODIrescaling techniques are increasingly embraced for reducing transmitted andstored file sizes while preserving high image quality. Despite this progresscurrent ODI rescaling methods predominantly focus on enhancing the quality ofimages in equirectangular projection ERP format which overlooks the factthat the content viewed on head mounted displays HMDs is actually a renderedviewport instead of an ERP image. In this work we emphasize that focusingsolely on ERP quality results in inferior viewport visual experiences forusers. Thus we propose ResVR which is the first comprehensive framework forthe joint Rescaling and Viewport Rendering of ODIs. ResVR allows obtaining LRERP images for transmission while rendering high-quality viewports for users towatch on HMDs. In our ResVR a novel discrete pixel sampling strategy isdeveloped to tackle the complex mapping between the viewport and ERP enablingend-to-end training of ResVR pipeline. Furthermore a spherical pixel shaperepresentation technique is innovatively derived from spherical differentiationto significantly improve the visual quality of rendered viewports. Extensiveexperiments demonstrate that our ResVR outperforms existing methods in viewportrendering tasks across different fields of view resolutions and viewdirections while keeping a low transmission overhead. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15271v1 |
-|title| Automatic Layout Planning for Visually-Rich Documents with Instruction-Following Models |
-|authors| Wanrong ZhuJennifer HealeyRuiyi ZhangWilliam Yang WangTong Sun
-|links| http://arxiv.org/abs/2404.15271v1 |
-|updated| 2024-04-23 17:58:33 UTC |
-|summary| Recent advancements in instruction-following models have made userinteractions with models more user-friendly and efficient broadening theirapplicability. In graphic design non-professional users often struggle tocreate visually appealing layouts due to limited skills and resources. In thiswork we introduce a novel multimodal instruction-following framework forlayout planning allowing users to easily arrange visual elements into tailoredlayouts by specifying canvas size and design purpose such as for book coversposters brochures or menus. We developed three layout reasoning tasks totrain the model in understanding and executing layout instructions. Experimentson two benchmarks show that our method not only simplifies the design processfor non-professionals but also surpasses the performance of few-shot GPT-4Vmodels with mIoU higher by 12 on Crello. This progress highlights thepotential of multimodal instruction-following models to automate and simplifythe design process providing an approachable solution for a wide range ofdesign tasks on visually-rich documents. |
+|idx| 2404.16824v1 |
+|title| V2A-Mark: Versatile Deep Visual-Audio Watermarking for Manipulation Localization and Copyright Protection |
+|authors| Xuanyu ZhangYoumin XuRunyi LiJiwen YuWeiqi LiZhipei XuJian Zhang
+|links| http://arxiv.org/abs/2404.16824v1 |
+|updated| 2024-04-25 17:59:45 UTC |
+|summary| AI-generated video has revolutionized short video production filmmaking andpersonalized media making video local editing an essential tool. However thisprogress also blurs the line between reality and fiction posing challenges inmultimedia forensics. To solve this urgent issue V2A-Mark is proposed toaddress the limitations of current video tampering forensics such as poorgeneralizability singular function and single modality focus. Combining thefragility of video-into-video steganography with deep robust watermarking ourmethod can embed invisible visual-audio localization watermarks and copyrightwatermarks into the original video frames and audio enabling precisemanipulation localization and copyright protection. We also design a temporalalignment and fusion module and degradation prompt learning to enhance thelocalization accuracy and decoding robustness. Meanwhile we introduce asample-level audio localization method and a cross-modal copyright extractionmechanism to couple the information of audio and video frames. Theeffectiveness of V2A-Mark has been verified on a visual-audio tamperingdataset emphasizing its superiority in localization precision and copyrightaccuracy crucial for the sustainable development of video editing in the AIGCvideo era. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15258v1 |
-|title| Score matching for sub-Riemannian bridge sampling |
-|authors| Erlend GrongKaren HabermannStefan Sommer
-|links| http://arxiv.org/abs/2404.15258v1 |
-|updated| 2024-04-23 17:45:53 UTC |
-|summary| Simulation of conditioned diffusion processes is an essential tool ininference for stochastic processes data imputation generative modelling andgeometric statistics. Whilst simulating diffusion bridge processes is alreadydifficult on Euclidean spaces when considering diffusion processes onRiemannian manifolds the geometry brings in further complications. In evenhigher generality advancing from Riemannian to sub-Riemannian geometriesintroduces hypoellipticity and the possibility of finding appropriate explicitapproximations for the score of the diffusion process is removed. We handlethese challenges and construct a method for bridge simulation on sub-Riemannianmanifolds by demonstrating how recent progress in machine learning can bemodified to allow for training of score approximators on sub-Riemannianmanifolds. Since gradients dependent on the horizontal distribution wegeneralise the usual notion of denoising loss to work with non-holonomic framesusing a stochastic Taylor expansion and we demonstrate the resulting schemeboth explicitly on the Heisenberg group and more generally using adaptedcoordinates. We perform numerical experiments exemplifying samples from thebridge process on the Heisenberg group and the concentration of this processfor small time. |
+|idx| 2404.16746v1 |
+|title| Estimating the Number of Components in Finite Mixture Models via Variational Approximation |
+|authors| Chenyang WangYun Yang
+|links| http://arxiv.org/abs/2404.16746v1 |
+|updated| 2024-04-25 17:00:24 UTC |
+|summary| This work introduces a new method for selecting the number of components infinite mixture models FMMs using variational Bayes inspired by thelarge-sample properties of the Evidence Lower Bound ELBO derived frommean-field MF variational approximation. Specifically we establish matchingupper and lower bounds for the ELBO without assuming conjugate priorssuggesting the consistency of model selection for FMMs based on maximizing theELBO. As a by-product of our proof we demonstrate that the MF approximationinherits the stable behavior benefited from model singularity of theposterior distribution which tends to eliminate the extra components undermodel misspecification where the number of mixture components isover-specified. This stable behavior also leads to the n-1/2 convergencerate for parameter estimation up to a logarithmic factor under this modeloverspecification. Empirical experiments are conducted to validate ourtheoretical findings and compare with other state-of-the-art methods forselecting the number of components in FMMs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15253v1 |
-|title| GIST: Gibbs self-tuning for locally adaptive Hamiltonian Monte Carlo |
-|authors| Nawaf Bou-RabeeBob CarpenterMilo Marsden
-|links| http://arxiv.org/abs/2404.15253v1 |
-|updated| 2024-04-23 17:39:20 UTC |
-|summary| We present a novel and flexible framework for localized tuning of HamiltonianMonte Carlo samplers by sampling the algorithms tuning parametersconditionally based on the position and momentum at each step. For adaptivelysampling path lengths we show that randomized Hamiltonian Monte Carlo theNo-U-Turn Sampler and the Apogee-to-Apogee Path Sampler all fit within thisunified framework as special cases. The framework is illustrated with a simplealternative to the No-U-Turn Sampler for locally adapting path lengths. |
+|idx| 2404.16610v1 |
+|title| Conformalized Ordinal Classification with Marginal and Conditional Coverage |
+|authors| Subhrasish ChakrabortyChhavi TyagiHaiyan QiaoWenge Guo
+|links| http://arxiv.org/abs/2404.16610v1 |
+|updated| 2024-04-25 13:49:59 UTC |
+|summary| Conformal prediction is a general distribution-free approach for constructingprediction sets combined with any machine learning algorithm that achieve validmarginal or conditional coverage in finite samples. Ordinal classification iscommon in real applications where the target variable has natural orderingamong the class labels. In this paper we discuss constructingdistribution-free prediction sets for such ordinal classification problems byleveraging the ideas of conformal prediction and multiple testing with FWERcontrol. Newer conformal prediction methods are developed for constructingcontiguous and non-contiguous prediction sets based on marginal and conditionalclass-specific conformal p-values respectively. Theoretically we provethat the proposed methods respectively achieve satisfactory levels of marginaland class-specific conditional coverages. Through simulation study and realdata analysis these proposed methods show promising performance compared tothe existing conformal method. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15225v1 |
-|title| PHLP: Sole Persistent Homology for Link Prediction -- Interpretable Feature Extraction |
-|authors| Junwon YouEunwoo HeoJae-Hun Jung
-|links| http://arxiv.org/abs/2404.15225v1 |
-|updated| 2024-04-23 16:54:56 UTC |
-|summary| Link prediction LP inferring the connectivity between nodes is asignificant research area in graph data where a link represents essentialinformation on relationships between nodes. Although graph neural networkGNN-based models have achieved high performance in LP understanding why theyperform well is challenging because most comprise complex neural networks. Weemploy persistent homology PH a topological data analysis method that helpsanalyze the topological information of graphs to explain the reasons for thehigh performance. We propose a novel method that employs PH for LP PHLPfocusing on how the presence or absence of target links influences the overalltopology. The PHLP utilizes the angle hop subgraph and new node labeling calleddegree double radius node labeling Degree DRNL distinguishing theinformation of graphs better than DRNL. Using only a classifier PHLP performssimilarly to state-of-the-art SOTA models on most benchmark datasets.Incorporating the outputs calculated using PHLP into the existing GNN-basedSOTA models improves performance across all benchmark datasets. To the best ofour knowledge PHLP is the first method of applying PH to LP without GNNs. Theproposed approach employing PH while not relying on neural networks enablesthe identification of crucial factors for improving performance. |
+|idx| 2404.16560v1 |
+|title| Automated Model Selection for Generalized Linear Models |
+|authors| Benjamin SchwendingerFlorian SchwendingerLaura Vana-Gür
+|links| http://arxiv.org/abs/2404.16560v1 |
+|updated| 2024-04-25 12:16:58 UTC |
+|summary| In this paper we show how mixed-integer conic optimization can be used tocombine feature subset selection with holistic generalized linear models tofully automate the model selection process. Concretely we directly optimizefor the Akaike and Bayesian information criteria while imposing constraintsdesigned to deal with multicollinearity in the feature selection task.Specifically we propose a novel pairwise correlation constraint that combinesthe sign coherence constraint with ideas from classical statistical models likeRidge regression and the OSCAR model. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15018v1 |
-|title| Conformal Predictive Systems Under Covariate Shift |
-|authors| Jef JonkersGlenn Van WallendaelLuc DuchateauSofie Van Hoecke
-|links| http://arxiv.org/abs/2404.15018v1 |
-|updated| 2024-04-23 13:23:27 UTC |
-|summary| Conformal Predictive Systems CPS offer a versatile framework forconstructing predictive distributions allowing for calibrated inference andinformative decision-making. However their applicability has been limited toscenarios adhering to the Independent and Identically Distributed IID modelassumption. This paper extends CPS to accommodate scenarios characterized bycovariate shifts. We therefore propose Weighted CPS WCPS akin to WeightedConformal Prediction WCP leveraging likelihood ratios between training andtesting covariate distributions. This extension enables the construction ofnonparametric predictive distributions capable of handling covariate shifts. Wepresent theoretical underpinnings and conjectures regarding the validity andefficacy of WCPS and demonstrate its utility through empirical evaluations onboth synthetic and real-world datasets. Our simulation experiments indicatethat WCPS are probabilistically calibrated under covariate shift. |
+|idx| 2404.16444v1 |
+|title| Automating the Discovery of Partial Differential Equations in Dynamical Systems |
+|authors| Weizhen LiRui Carvalho
+|links| http://arxiv.org/abs/2404.16444v1 |
+|updated| 2024-04-25 09:23:03 UTC |
+|summary| Identifying partial differential equations PDEs from data is crucial forunderstanding the governing mechanisms of natural phenomena yet it remains achallenging task. We present an extension to the ARGOS framework ARGOS-RALwhich leverages sparse regression with the recurrent adaptive lasso to identifyPDEs from limited prior knowledge automatically. Our method automatescalculating partial derivatives constructing a candidate library andestimating a sparse model. We rigorously evaluate the performance of ARGOS-RALin identifying canonical PDEs under various noise levels and sample sizesdemonstrating its robustness in handling noisy and non-uniformly distributeddata. We also test the algorithms performance on datasets consisting solely ofrandom noise to simulate scenarios with severely compromised data quality. Ourresults show that ARGOS-RAL effectively and reliably identifies the underlyingPDEs from data outperforming the sequential threshold ridge regression methodin most cases. We highlight the potential of combining statistical methodsmachine learning and dynamical systems theory to automatically discovergoverning equations from collected data streamlining the scientific modelingprocess. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.14873v1 |
-|title| Estimating the Distribution of Parameters in Differential Equations with Repeated Cross-Sectional Data |
-|authors| Hyeontae JoSung Woong ChoHyung Ju Hwang
-|links| http://arxiv.org/abs/2404.14873v1 |
-|updated| 2024-04-23 10:01:43 UTC |
-|summary| Differential equations are pivotal in modeling and understanding the dynamicsof various systems offering insights into their future states throughparameter estimation fitted to time series data. In fields such as economypolitics and biology the observation data points in the time series are oftenindependently obtained i.e. Repeated Cross-Sectional RCS data. With RCSdata we found that traditional methods for parameter estimation indifferential equations such as using mean values of time trajectories orGaussian Process-based trajectory generation have limitations in estimatingthe shape of parameter distributions often leading to a significant loss ofdata information. To address this issue we introduce a novel methodEstimation of Parameter Distribution EPD providing accurate distribution ofparameters without loss of data information. EPD operates in three main steps:generating synthetic time trajectories by randomly selecting observed values ateach time point estimating parameters of a differential equation that minimizethe discrepancy between these trajectories and the true solution of theequation and selecting the parameters depending on the scale of discrepancy.We then evaluated the performance of EPD across several models includingexponential growth logistic population models and target cell-limited modelswith delayed virus production demonstrating its superiority in capturing theshape of parameter distributions. Furthermore we applied EPD to real-worlddatasets capturing various shapes of parameter distributions rather than anormal distribution. These results effectively address the heterogeneity withinsystems marking a substantial progression in accurately modeling systems usingRCS data. |
+|idx| 2404.16328v1 |
+|title| Distributionally Robust Safe Screening |
+|authors| Hiroyuki HanadaSatoshi AkahaneTatsuya AoyamaTomonari TanakaYoshito OkuraYu InatsuNoriaki HashimotoTaro MurayamaLee HanjuShinya KojimaIchiro Takeuchi
+|links| http://arxiv.org/abs/2404.16328v1 |
+|updated| 2024-04-25 04:29:25 UTC |
+|summary| In this study we propose a method Distributionally Robust Safe ScreeningDRSS for identifying unnecessary samples and features within a DR covariateshift setting. This method effectively combines DR learning a paradigm aimedat enhancing model robustness against variations in data distribution withsafe screening SS a sparse optimization technique designed to identifyirrelevant samples and features prior to model training. The core concept ofthe DRSS method involves reformulating the DR covariate-shift problem as aweighted empirical risk minimization problem where the weights are subject touncertainty within a predetermined range. By extending the SS technique toaccommodate this weight uncertainty the DRSS method is capable of reliablyidentifying unnecessary samples and features under any future distributionwithin a specified range. We provide a theoretical guarantee of the DRSS methodand validate its performance through numerical experiments on both syntheticand real-world datasets. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15239v1 |
-|title| Augmented Voices: An Augmented Reality Experience Highlighting the Social Injustices of Gender-Based Violence in the Muslim South-Asian Diaspora |
-|authors| Hamida Khatri
-|links| http://arxiv.org/abs/2404.15239v1 |
-|updated| 2024-04-23 17:17:52 UTC |
-|summary| This paper delves into the distressing prevalence of gender-based violenceGBV and its deep-seated psychological ramifications particularly amongMuslim South Asian women living in diasporic communities. Despite the gravityof GBV these women often face formidable barriers in voicing their experiencesand accessing support. Augmented Voices emerges as a technological beaconharnessing the potential of augmented reality AR to bridge the digital andphysical realms through mobile devices enhancing the visibility of theseoften-silenced voices. With its technological motivation firmly anchored in theconvergence of AR and real-world interactions Augmented Voices offers adigital platform where storytelling acts as a catalyst bringing to the forethe experiences shared by these women. By superimposing their narratives ontophysical locations via Geographic Information System GIS Mapping theapplication augments their voices in the diaspora providing a conduit forexpression and solidarity. This project currently at its developmental stageaspires to elevate the stories of GBV victims to a level where their strugglesare not just heard but felt forging a powerful connection between the user andthe narrative. It is designed to transcend the limitations of conventionalstorytelling creating an augmented reality where voices that are often mutedby societal constraints can resonate powerfully. The project underscores theurgent imperative to confront GBV catalyzing societal transformation andfostering robust support networks for those in the margins. It is a pioneeringexample of how technology can become a formidable ally in the fight for socialjustice and the empowerment of the oppressed. Additionally this paper delvesinto the AR workflow illustrating its relevance and contribution to the broadertheme of site-specific AR for social justice. |
+|idx| 2404.16717v1 |
+|title| Embracing Diversity: Interpretable Zero-shot classification beyond one vector per class |
+|authors| Mazda MoayeriMichael RabbatMark IbrahimDiane Bouchacourt
+|links| http://dx.doi.org/10.1145/3630106.3659039 |
+|updated| 2024-04-25 16:29:06 UTC |
+|summary| Vision-language models enable open-world classification of objects withoutthe need for any retraining. While this zero-shot paradigm marks a significantadvance even todays best models exhibit skewed performance when objects aredissimilar from their typical depiction. Real world objects such as pearsappear in a variety of forms -- from diced to whole on a table or in a bowl --yet standard VLM classifiers map all instances of a class to a itsinglevector based on the class label. We argue that to represent this richdiversity within a class zero-shot classification should move beyond a singlevector. We propose a method to encode and account for diversity within a classusing inferred attributes still in the zero-shot setting without retraining.We find our method consistently outperforms standard zero-shot classificationover a large suite of datasets encompassing hierarchies diverse object statesand real-world geographic diversity as well finer-grained datasets whereintra-class diversity may be less prevalent. Importantly our method isinherently interpretable offering faithful explanations for each inference tofacilitate model debugging and enhance transparency. We also find our methodscales efficiently to a large number of attributes to account for diversity --leading to more accurate predictions for atypical instances. Finally wecharacterize a principled trade-off between overall and worst class accuracywhich can be tuned via a hyperparameter of our method. We hope this work spursfurther research into the promise of zero-shot classification beyond a singleclass vector for capturing diversity in the world and building transparent AIsystems without compromising performance. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15187v1 |
-|title| Evaluating Physician-AI Interaction for Cancer Management: Paving the Path towards Precision Oncology |
-|authors| Zeshan HussainBarbara D. LamFernando A. Acosta-PerezIrbaz Bin RiazMaia JacobsAndrew J. YeeDavid Sontag
-|links| http://arxiv.org/abs/2404.15187v1 |
-|updated| 2024-04-23 16:28:03 UTC |
-|summary| We evaluated how clinicians approach clinical decision-making when givenfindings from both randomized controlled trials RCTs and machine learningML models. To do so we designed a clinical decision support system CDSSthat displays survival curves and adverse event information from a syntheticRCT and ML model for 12 patients with multiple myeloma. We conducted aninterventional study in a simulated setting to evaluate how clinicianssynthesized the available data to make treatment decisions. Participants wereinvited to participate in a follow-up interview to discuss their choices in anopen-ended format. When ML model results were concordant with RCT resultsphysicians had increased confidence in treatment choice compared to when theywere given RCT results alone. When ML model results were discordant with RCTresults the majority of physicians followed the ML model recommendation intheir treatment selection. Perceived reliability of the ML model wasconsistently higher after physicians were provided with data on how it wastrained and validated. Follow-up interviews revealed four major themes: 1variability in what variables participants used for decision-making 2perceived advantages to an ML model over RCT data 3 uncertainty arounddecision-making when the ML model quality was poor and 4 perception thatthis type of study is an important thought exercise for clinicians. OverallML-based CDSSs have the potential to change treatment decisions in cancermanagement. However meticulous development and validation of these systems aswell as clinician training are required before deployment. |
+|idx| 2404.16660v1 |
+|title| Benchmarking Mobile Device Control Agents across Diverse Configurations |
+|authors| Juyong LeeTaywon MinMinyong AnChangyeon KimKimin Lee
+|links| http://arxiv.org/abs/2404.16660v1 |
+|updated| 2024-04-25 14:56:32 UTC |
+|summary| Developing autonomous agents for mobile devices can significantly enhanceuser interactions by offering increased efficiency and accessibility. Howeverdespite the growing interest in mobile device control agents the absence of acommonly adopted benchmark makes it challenging to quantify scientific progressin this area. In this work we introduce B-MoCA: a novel benchmark designedspecifically for evaluating mobile device control agents. To create a realisticbenchmark we develop B-MoCA based on the Android operating system and define60 common daily tasks. Importantly we incorporate a randomization feature thatchanges various aspects of mobile devices including user interface layouts andlanguage settings to assess generalization performance. We benchmark diverseagents including agents employing large language models LLMs or multi-modalLLMs as well as agents trained from scratch using human expert demonstrations.While these agents demonstrate proficiency in executing straightforward taskstheir poor performance on complex tasks highlights significant opportunitiesfor future research to enhance their effectiveness. Our source code is publiclyavailable at https://b-moca.github.io. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15176v1 |
-|title| Voice Passing : a Non-Binary Voice Gender Prediction System for evaluating Transgender voice transition |
-|authors| David DoukhanSimon DevauchelleLucile Girard-MonneronMía Chávez RuzV. ChaddoukIsabelle WagnerAlbert Rilliard
-|links| http://dx.doi.org/10.21437/Interspeech.2023-1835 |
-|updated| 2024-04-23 16:15:39 UTC |
-|summary| This paper presents a software allowing to describe voices using a continuousVoice Femininity Percentage VFP. This system is intended for transgenderspeakers during their voice transition and for voice therapists supporting themin this process. A corpus of 41 French cis- and transgender speakers wasrecorded. A perceptual evaluation allowed 57 participants to estimate the VFPfor each voice. Binary gender classification models were trained on externalgender-balanced data and used on overlapping windows to obtain average genderprediction estimates which were calibrated to predict VFP and obtained higheraccuracy than F_0 or vocal track length-based models. Training data speakingstyle and DNN architecture were shown to impact VFP estimation. Accuracy of themodels was affected by speakers age. This highlights the importance of styleage and the conception of gender as binary or not to build adequatestatistical representations of cultural concepts. |
+|idx| 2404.16487v1 |
+|title| Comparing Continuous and Retrospective Emotion Ratings in Remote VR Study |
+|authors| Maximilian WarsinkeTanja KojićMaurizio VergariRobert SpangJan-Niklas Voigt-AntonsSebastian Möller
+|links| http://arxiv.org/abs/2404.16487v1 |
+|updated| 2024-04-25 10:19:44 UTC |
+|summary| This study investigates the feasibility of remote virtual reality VRstudies conducted at home using VR headsets and video conferencing by deployingan experiment on emotion ratings. 20 participants used head-mounted displays toimmerse themselves in 360deg videos selected to evoke emotional responses.The research compares continuous ratings using a graphical interface toretrospective questionnaires on a digitized Likert Scale for measuring arousaland valence both based on the self-assessment manikin SAM. It washypothesized that the two different rating methods would lead to significantlydifferent values for both valence and arousal. The goal was to investigatewhether continuous ratings during the experience would better reflect usersemotions compared to the post-questionnaire by mitigating biases such as thepeak-end rule. The results show significant differences with moderate to strongeffect sizes for valence and no significant differences for arousal with low tomoderate effect sizes. This indicates the need for further investigation of themethods used to assess emotion ratings in VR studies. Overall this study is anexample of a remotely conducted VR experiment offering insights into methodsfor emotion elicitation in VR by varying the timing and interface of therating. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15150v1 |
-|title| Lost in Magnitudes: Exploring the Design Space for Visualizing Data with Large Value Ranges |
-|authors| Katerina BatziakoudiFlorent CabricStéphanie ReyJean-Daniel Fekete
-|links| http://arxiv.org/abs/2404.15150v1 |
-|updated| 2024-04-23 15:52:53 UTC |
-|summary| We explore the design space for the static visualization of datasets withquantitative attributes that vary over multiple orders of magnitude-we callthese attributes Orders of Magnitude Values OMVs-and provide designguidelines and recommendations on effective visual encodings for OMVs. Currentcharts rely on linear or logarithmic scales to visualize values leading tolimitations in performing simple tasks for OMVs. In particular linear scalesprevent the reading of smaller magnitudes and their comparisons whilelogarithmic scales are challenging for the general public to understand. Ourdesign space leverages the approach of dividing OMVs into two different parts:mantissa and exponent in a way similar to scientific notation. This separationallows for a visual encoding of both parts. For our exploration we use fourdatasets each with two attributes: an OMV divided into mantissa and exponentand a second attribute that is nominal ordinal time or quantitative. Westart from the original design space described by the Grammar of Graphics andsystematically generate all possible visualizations for these datasetsemploying different marks and visual channels. We refine this design space byenforcing integrity constraints from visualization and graphical perceptionliterature. Through a qualitative assessment of all viable combinations wediscuss the most effective visualizations for OMVs focusing on channel andtask effectiveness. The articles main contributions are 1 the presentation ofthe design space of OMVs 2 the generation of a large number of OMVvisualizations among which some are novel and effective 3 the refineddefinition of a scale that we call EM for OMVs and 4 guidelines andrecommendations for designing effective OMV visualizations. These efforts aimto enrich visualization systems to better support data with OMVs and guidefuture research. |
+|idx| 2404.16482v1 |
+|title| CoCoG: Controllable Visual Stimuli Generation based on Human Concept Representations |
+|authors| Chen WeiJiachen ZouDietmar HeinkeQuanying Liu
+|links| http://arxiv.org/abs/2404.16482v1 |
+|updated| 2024-04-25 10:10:48 UTC |
+|summary| A central question for cognitive science is to understand how humans processvisual objects i.e to uncover human low-dimensional concept representationspace from high-dimensional visual stimuli. Generating visual stimuli withcontrolling concepts is the key. However there are currently no generativemodels in AI to solve this problem. Here we present the Concept basedControllable Generation CoCoG framework. CoCoG consists of two components asimple yet efficient AI agent for extracting interpretable concept andpredicting human decision-making in visual similarity judgment tasks and aconditional generation model for generating visual stimuli given the concepts.We quantify the performance of CoCoG from two aspects the human behaviorprediction accuracy and the controllable generation ability. The experimentswith CoCoG indicate that 1 the reliable concept embeddings in CoCoG allows topredict human behavior with 64.07 accuracy in the THINGS-similarity dataset2 CoCoG can generate diverse objects through the control of concepts 3 CoCoGcan manipulate human similarity judgment behavior by intervening key concepts.CoCoG offers visual objects with controlling concepts to advance ourunderstanding of causality in human cognition. The code of CoCoG is availableat urlhttps://github.com/ncclab-sustech/CoCoG. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15108v1 |
-|title| Virtual Takeovers in the Metaverse: Interrogating Power in Our Past and Future(s) with Multi-Layered Narratives |
-|authors| Heather Snyder QuinnJessa Dickinson
-|links| http://arxiv.org/abs/2404.15108v1 |
-|updated| 2024-04-23 15:02:31 UTC |
-|summary| Mariah is an augmented reality AR mobile application that exposes powerstructures e.g. capitalism patriarchy white supremacy through storytellingand celebrates acts of resistance against them. People can use Mariah tolegally trespass the metaverse as a form of protest. Mariah provideshistorical context to the users physical surroundings by superimposing imagesand playing stories about people who have experienced and resisted injustice.We share two implementations of Mariah that raise questions about free speechand property rights in the metaverse: 1 a protest against museums acceptingdirty money from the opioid epidemic and 2 a commemoration of sites wherepeople have resisted power structures. Mariah is a case study for howexperimenting with a technology in non-sanctioned ways i.e. hacking canexpose ways that it might interact with and potentially amplify existingpower structures. |
+|idx| 2404.16479v1 |
+|title| The Impact of Social Environment and Interaction Focus on User Experience and Social Acceptability of an Augmented Reality Game |
+|authors| Lorenzo CocchiaMaurizio VergariTanja KojicFrancesco VonaSebastian MollerFranca GarzottoJan-Niklas Voigt-Antons
+|links| http://arxiv.org/abs/2404.16479v1 |
+|updated| 2024-04-25 10:04:36 UTC |
+|summary| One of the most promising technologies inside the Extended Reality XRspectrum is Augmented Reality. This technology is already in peoples pocketsregarding Mobile Augmented Reality with their smartphones. The scientificcommunity still needs answers about how humans could and should interact inenvironments where perceived stimuli are different from fully physical ordigital circumstances. Moreover it is still being determined if people acceptthese new technologies in different social environments and interactionsettings or if some obstacles could exist. This paper explores the impact ofthe Social Environment and the Focus of social interaction on users whileplaying a location-based augmented reality game measuring it with userexperience and social acceptance indicators. An empirical study in awithin-subject fashion was performed in different social environments and underdifferent settings of social interaction focus with N  28 participantscompiling self-reported questionnaires after playing a Scavenger Hunt inAugmented Reality. The measures from two different Social Environments Crowdedvs. Uncrowded resulted in statistically relevant mean differences withindicators from the Social Acceptability dimension. Moreover the analyses showstatistically relevant differences between the variances from different degreesof Social Interaction Focus with Overall Social Presence PerceivedPsychological Engagement Perceived Attentional Engagement and PerceivedEmotional Contagion. The results suggest that a location-based AR game playedin different social environments and settings can influence the userexperiences social dimension. Therefore they should be carefully consideredwhile designing immersive technological experiences in public spaces involvingsocial interactions between players. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15273v1 |
-|title| Estimation Network Design framework for efficient distributed optimization |
-|authors| Mattia BianchiSergio Grammatico
-|links| http://arxiv.org/abs/2404.15273v1 |
-|updated| 2024-04-23 17:59:09 UTC |
-|summary| Distributed decision problems features a group of agents that can onlycommunicate over a peer-to-peer network without a central memory. Inapplications such as network control and data ranking each agent is onlyaffected by a small portion of the decision vector: this sparsity is typicallyignored in distributed algorithms while it could be leveraged to improveefficiency and scalability. To address this issue our recent paper introducesEstimation Network Design END a graph theoretical language for the analysisand design of distributed iterations. END algorithms can be tuned to exploitthe sparsity of specific problem instances reducing communication overhead andminimizing redundancy yet without requiring case-by-case convergence analysis.In this paper we showcase the flexility of END in the context of distributedoptimization. In particular we study the sparsity-aware version of manyestablished methods including ADMM AugDGM and Push-Sum DGD. Simulations on anestimation problem in sensor networks demonstrate that END algorithms can boostconvergence speed and greatly reduce the communication and memory cost. |
+|idx| 2404.16388v1 |
+|title| SwarmRL: Building the Future of Smart Active Systems |
+|authors| Samuel ToveyChristoph LohrmannTobias MerktDavid ZimmerKonstantin NikolaouSimon KoppenhöferAnna BushmakinaJonas ScheunemannChristian Holm
+|links| http://arxiv.org/abs/2404.16388v1 |
+|updated| 2024-04-25 07:57:11 UTC |
+|summary| This work introduces SwarmRL a Python package designed to study intelligentactive particles. SwarmRL provides an easy-to-use interface for developingmodels to control microscopic colloids using classical control and deepreinforcement learning approaches. These models may be deployed in simulationsor real-world environments under a common framework. We explain the structureof the software and its key features and demonstrate how it can be used toaccelerate research. With SwarmRL we aim to streamline research intomicro-robotic control while bridging the gap between experimental andsimulation-driven sciences. SwarmRL is available open-source on GitHub athttps://github.com/SwarmRL/SwarmRL. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.15137v1 |
-|title| From Space-Time to Space-Order: Directly Planning a Temporal Planning Graph by Redefining CBS |
-|authors| Yu WuRishi VeerapaneniJiaoyang LiMaxim Likhachev
-|links| http://arxiv.org/abs/2404.15137v1 |
-|updated| 2024-04-23 15:42:31 UTC |
-|summary| The majority of multi-agent path finding MAPF methods computecollision-free space-time paths which require agents to be at a specificlocation at a specific discretized timestep. However executing thesespace-time paths directly on robotic systems is infeasible due to real-timeexecution differences e.g. delays which can lead to collisions. To combatthis current methods translate the space-time paths into a temporal plan graphTPG that only requires that agents observe the order in which they navigatethrough locations where their paths cross. However planning space-time pathsand then post-processing them into a TPG does not reduce the requiredagent-to-agent coordination which is fixed once the space-time paths arecomputed. To that end we propose a novel algorithm Space-Order CBS that candirectly plan a TPG and explicitly minimize coordination. Our main theoreticalinsight is our novel perspective on viewing a TPG as a set of space-visitationorder paths where agents visit locations in relative orders e.g. 1st vs 2ndas opposed to specific timesteps. We redefine unique conflicts and constraintsfor adapting CBS for space-order planning. We experimentally validate howSpace-Order CBS can return TPGs which significantly reduce coordination thussubsequently reducing the amount of agent-agent communication and leading tomore robustness to delays during execution. |
+|idx| 2404.16379v1 |
+|title| Optimal and Bounded Suboptimal Any-Angle Multi-agent Pathfinding |
+|authors| Konstantin YakovlevAnton AndreychukRoni Stern
+|links| http://arxiv.org/abs/2404.16379v1 |
+|updated| 2024-04-25 07:41:47 UTC |
+|summary| Multi-agent pathfinding MAPF is the problem of finding a set ofconflict-free paths for a set of agents. Typically the agents moves arelimited to a pre-defined graph of possible locations and allowed transitionsbetween them e.g. a 4-neighborhood grid. We explore how to solve MAPF problemswhen each agent can move between any pair of possible locations as long astraversing the line segment connecting them does not lead to the collision withthe obstacles. This is known as any-angle pathfinding. We present the firstoptimal any-angle multi-agent pathfinding algorithm. Our planner is based onthe Continuous Conflict-based Search CCBS algorithm and an optimal any-anglevariant of the Safe Interval Path Planning TO-AA-SIPP. The straightforwardcombination of those however scales poorly since any-angle path findinginduces search trees with a very large branching factor. To mitigate this weadapt two techniques from classical MAPF to the any-angle setting namelyDisjoint Splitting and Multi-Constraints. Experimental results on differentcombinations of these techniques show they enable solving over 30 moreproblems than the vanilla combination of CCBS and TO-AA-SIPP. In addition wepresent a bounded-suboptimal variant of our algorithm that enables tradingruntime for solution cost in a controlled manner. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.14789v1 |
-|title| Opinion Update in a Subjective Logic Model for Social Networks |
-|authors| Mário S. AlvimSophia KnightJosé C. Oliveira
-|links| http://arxiv.org/abs/2404.14789v1 |
-|updated| 2024-04-23 07:02:00 UTC |
-|summary| Subjective Logic SL is a logic incorporating uncertainty and opinions foragents in dynamic systems. In this work we investigate the use of subjectivelogic to model opinions and belief change in social networks. In particular wework toward the development of a subjective logic belief/opinion updatefunction appropriate for modeling belief change as communication occurs insocial networks. We found through experiments that an update function withbelief fusion from SL does not have ideal properties to represent a rationalupdate. Even without these properties we found that an update function withcumulative belief fusion can describe behaviors not explored by the socialnetwork model defined by Alvim Knight and Valencia 2019. |
+|idx| 2404.16376v1 |
+|title| A Hypergraph Approach to Distributed Broadcast |
+|authors| Qi CaoYulin ShaoFan Yang
+|links| http://arxiv.org/abs/2404.16376v1 |
+|updated| 2024-04-25 07:31:42 UTC |
+|summary| This paper explores the distributed broadcast problem within the context ofnetwork communications a critical challenge in decentralized informationdissemination. We put forth a novel hypergraph-based approach to address thisissue focusing on minimizing the number of broadcasts to ensure comprehensivedata sharing among all network users. A key contribution of our work is theestablishment of a general lower bound for the problem using the min-cutcapacity of hypergraphs. Additionally we present the distributed broadcast forquasi-trees DBQT algorithm tailored for the unique structure of quasi-treeswhich is proven to be optimal. This paper advances both network communicationstrategies and hypergraph theory with implications for a wide range ofreal-world applications from vehicular and sensor networks to distributedstorage systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.14388v1 |
-|title| STROOBnet Optimization via GPU-Accelerated Proximal Recurrence Strategies |
-|authors| Ted Edward HolmbergMahdi AbdelguerfiElias Ioup
-|links| http://dx.doi.org/10.1109/BigData59044.2023.10386774 |
-|updated| 2024-04-22 17:46:29 UTC |
-|summary| Spatiotemporal networks observational capabilities are crucial for accuratedata gathering and informed decisions across multiple sectors. This studyfocuses on the Spatiotemporal Ranged Observer-Observable Bipartite NetworkSTROOBnet linking observational nodes e.g. surveillance cameras to eventswithin defined geographical regions enabling efficient monitoring. Using datafrom Real-Time Crime Camera RTCC systems and Calls for Service CFS in NewOrleans where RTCC combats rising crime amidst reduced police presence weaddress the networks initial observational imbalances. Aiming for uniformobservational efficacy we propose the Proximal Recurrence approach. Itoutperformed traditional clustering methods like k-means and DBSCAN by offeringholistic event frequency and spatial consideration enhancing observationalcoverage. |
+|idx| 2404.16312v1 |
+|title| 3D Guidance Law for Maximal Coverage and Target Enclosing with Inherent Safety |
+|authors| Praveen Kumar RanjanAbhinav SinhaYongcan Cao
+|links| http://arxiv.org/abs/2404.16312v1 |
+|updated| 2024-04-25 03:38:07 UTC |
+|summary| In this paper we address the problem of enclosing an arbitrarily movingtarget in three dimensions by a single pursuer which is an unmanned aerialvehicle UAV for maximum coverage while also ensuring the pursuers safety bypreventing collisions with the target. The proposed guidance strategy steersthe pursuer to a safe region of space surrounding the target allowing it tomaintain a certain distance from the latter while offering greater flexibilityin positioning and converging to any orbit within this safe zone. Our approachis distinguished by the use of nonholonomic constraints to model vehicles withaccelerations serving as control inputs and coupled engagement kinematics tocraft the pursuers guidance law meticulously. Furthermore we leverage theconcept of the Lyapunov Barrier Function as a powerful tool to constrain thedistance between the pursuer and the target within asymmetric bounds therebyensuring the pursuers safety within the predefined region. To validate theefficacy and robustness of our algorithm we conduct experimental tests byimplementing a high-fidelity quadrotor model within Software-in-the-loop SITLsimulations encompassing various challenging target maneuver scenarios. Theresults obtained showcase the resilience of the proposed guidance laweffectively handling arbitrarily maneuvering targets vehicle/autopilotdynamics and external disturbances. Our method consistently delivers stableglobal enclosing behaviors even in response to aggressive target maneuversand requires only relative information for successful execution. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2404.14357v1 |
-|title| A Stochastic Geo-spatiotemporal Bipartite Network to Optimize GCOOS Sensor Placement Strategies |
-|authors| Ted Edward HolmbergElias IoupMahdi Abdelguerfi
-|links| http://dx.doi.org/10.1109/BigData55660.2022.10020928 |
-|updated| 2024-04-22 17:12:06 UTC |
-|summary| This paper proposes two new measures applicable in a spatial bipartitenetwork model: coverage and coverage robustness. The bipartite network mustconsist of observer nodes observable nodes and edges that connect observernodes to observable nodes. The coverage and coverage robustness scores evaluatethe effectiveness of the observer node placements. This measure is beneficialfor stochastic data as it may be coupled with Monte Carlo simulations toidentify optimal placements for new observer nodes. In this paper we constructa Geo-SpatioTemporal Bipartite Network GSTBN within the stochastic anddynamical environment of the Gulf of Mexico. This GSTBN consists of GCOOSsensor nodes and HYCOM Region of Interest RoI event nodes. The goal is toidentify optimal placements to expand GCOOS to improve the forecasting outcomesby the HYCOM ocean prediction model. |
+|idx| 2404.16240v1 |
+|title| A communication protocol based on NK boolean networks for coordinating collective action |
+|authors| Yori Ong
+|links| http://arxiv.org/abs/2404.16240v1 |
+|updated| 2024-04-24 22:56:26 UTC |
+|summary| In this paper I describe a digital social communication protocol Gridtbased on Kauffmans NK boolean networks. The main assertion is that acommunication network with this topology supports infinitely scalableself-organization of collective action without requiring hierarchy or centralcontrol. The paper presents the functionality of this protocol andsubstantiates the following propositions about its function and implications:1 Communication via NK boolean networks facilitates coordination oncollective action games for any variable number of users and justifies theassumption that the games payoff structure is common knowledge 2 Use ofthis protocol increases its users transfer empowerment a form of intrinsicmotivation that motivates coordinated action independent of the task oroutcome 3 Communication via this network can be considered cheap talk andbenefits the strategy of players with aligned interests but not of playerswith conflicting interests 4 Absence of significant barriers for itsrealization warrants a timely and continuing discussion on the ethics andimplications of this technology 5 Full realization of the technologyspotential calls for a free-to-use service with maximal transparency of designand associated economic incentives. |
 
 
