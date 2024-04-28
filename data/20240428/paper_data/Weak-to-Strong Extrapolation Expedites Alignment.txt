@@ -1,0 +1,725 @@
+Weak-to-Strong Extrapolation Expedites Alignment
+ChujieZheng1,2∗ ZiqiWang3 HengJi3 MinlieHuang1† NanyunPeng2†
+1TheCoAIGroup,DCST,BNRist,TsinghuaUniversity
+2UniversityofCalifornia,LosAngeles 3UniversityofIllinoisUrbana-Champaign
+chujiezhengchn@gmail.com aihuang@tsinghua.edu.cn violetpeng@cs.ucla.edu
+Abstract
+Althoughthecapabilitiesoflargelanguagemodels(LLMs)ideallyscaleupwith
+increasingdataandcompute,theyareinevitablyconstrainedbylimitedresources
+inreality. SupposewehaveamoderatelytrainedLLM(e.g.,trainedtoalignwith
+humanpreference)inhand,canwefurtherexploititspotentialandcheaplyacquire
+astrongermodel?Inthispaper,weproposeasimplemethodcalledEXPOtoboost
+LLMs’alignmentwithhumanpreference. EXPOassumesthatamedium-aligned
+modelcanbeinterpolatedbetweenaless-aligned(weaker)model,e.g.,theinitial
+SFT model, and a better-aligned (stronger) one, thereby directly obtaining this
+stronger model by extrapolating from the weights of the former two relatively
+weakermodels. OntheAlpacaEval2.0benchmark,weshowthatEXPOpushes
+models trained with less preference data (e.g., 10% or 20%) to reach and even
+surpassthefully-trainedone,withoutanyadditionaltraining. Furthermore,EXPO
+alsosignificantlyimprovesoff-the-shelfDPO/RLHFmodelsandexhibitsdecent
+scalabilityacrossmodelsizesfrom7Bto70B.Ourworkdemonstratestheefficacy
+ofmodelextrapolationinexploitingLLMs’capabilities,suggestingapromising
+directionthatdeservesfutureexploration.
+Figure1: AlpacaEval2.0[22]evaluationresults,wherewereportthelength-controlled(LC)win
+rates[9]overtheGPT-4baseline. Left:Withnoadditionaltraining,EXPObooststhemodelstrained
+withlesspreferencedatatocompete(10%data)andevenoutperform(20%data)thefully-trained
+model. Middle: EXPOalsoremarkablyimprovesoff-the-shelf DPO/RLHFmodels(byupto6.8%).
+Right: TheimprovementbyEXPOscalesupwiththeincreasingmodelsize(from7Bto70B),as
+verifiedontheTulu-2[18]modelsuite.
+∗WorkdoneduringChujie’svisittoUCLA.Projectrepository: https://github.com/chujiezheng/
+LLM-Extrapolation.
+†Correspondingauthors.
+Preprint.
+4202
+rpA
+52
+]GL.sc[
+1v29761.4042:viXra1 Introduction
+Modernlargelanguagemodels(LLM)typicallyundergoadditionalfine-tuningtoalignwithhuman
+expectations [29, 27, 28], including both supervised fine-tuning (SFT) on demonstration outputs
+[33,40]andalignmenttrainingwithhumanpreference[5,31]. Similartothepre-trainingphase
+[15],thealignmentofLLMscanalsobecontinuouslyimprovedbyincreasingdataandtrainingsteps
+[8,5,42]. However,inreality,alignmenttrainingisinevitablyconstrainedbyavailableresourcesand
+thuscannotgrowindefinitely. Supposewehaveamoderately-trainedLLMinhand,isitpossibleto
+furtherexploititspotentialandcheaplyacquireastrongermodel?
+Wedrawinspirationfromtheliteratureofmodelinterpolation,alsoknownasmodel/weightaveraging.
+It aims to integrate different models fine-tuned from the same base model into a unified one by
+interpolatingbetweentheirweights[38,19,41],relyingonthemodeconnectivityofneuralnetworks
+[11, 10]. Previous work showed that with the basic uniform interpolation (i.e., using the same
+interpolationratioforallthemodelmodules),theobtainednewmodelusuallyachievestrade-off
+performancebetweentheoriginalones[26,41,23]. Wesimilarlyobservethisphenomenonwhen
+weinterpolatebetweenanSFTmodelandamodelfurthertrainedbydirectpreferenceoptimization
+(DPO)[31]orreinforcementlearningfromhumanfeedback(RLHF)[49],asshowninFigure2.
+Interpolation Extrapolation
+Figure2: Calculatingtherewardscores(§3.1)ontheUltraFeedback[7]developmentset,weobserve
+thatmodelinterpolationusuallygivestrade-offperformancebetweenthetwooriginalmodels(e.g.,an
+SFTmodelandthemodelfurthertrainedbyDPO/RLHF),assimilarlyobservedinpreviousliterature
+[26,41,23]. ThisobservationmotivatesourproposalofEXPOthatcheaplyobtainsastrongermodel
+fromweakermodelsviamodelextrapolation.
+Weareintriguedbyanotherquestion: IfwetreattheDPO/RLHFmodelasanintermediateresultof
+interpolationbetweentheSFTmodelandsomestrongermodel,canweobtainthisstrongermodelby
+reverselyextrapolatingfromtheformertwomodels’weights? Ifso,wecanactuallystartwithtwo
+relativelyweakermodelsfromthetrainingprocessandstraightforwardlyobtainastrongerone. As
+indicatedbythegrayarrowinFigure2,thiscouldalsoimproveoff-the-shelfalready-alignedmodels,
+suchasthemanyopen-sourcedLLMsonHuggingFace.
+Basedontheabovemotivation,weproposeasimplemethodcalledEXPO(modelextrapolation)
+toboostLLMs’alignmentwithhumanpreference(§2). EXPOassumesamedium-alignedmodel
+canbeinterpolatedfromaless-aligned(weaker)model (e.g.,theSFTmodel)andabetter-
+w
+M M
+aligned(stronger)one . Then,wecandirectlyobtainthisstrongermodel byextrapolating
+s s
+M M
+fromtheweightsofthetworelativelyweakermodels and ,withoutanyadditionaltraining
+w
+M M
+ontopofthem.
+Despiteitssimplicity,wedemonstratethatEXPOisquiteeffectiveinimprovingthealignmentof
+variousLLMs,assummarizedinFigure1. Specifically,forstandardDPOtraining,weshowthat
+EXPOpushesthemodelstrainedwithlessdata(e.g.,10%or20%)toreachandevensurpassthe
+fully-trainedone,asevaluatedontheAlpacaEval2.0benchmark[22,9](§3). Furthermore,EXPO
+alsoremarkablyimprovesoff-the-shelfDPO/RLHFmodels,byupto6.8%onAlpacaEval2.0(§4),
+andmanifestssatisfactoryscalabilityacrossmodelsizesfrom7Bto70B.Ourworkdemonstrates
+modelextrapolationasapromisingmethodforboostingLLMs’alignmentwithhumanpreference
+andbetterexploitingthecapabilitiesofLLMs,whichwebelievedeservesmorefutureexploration.
+22 Methodology
+2.1 Overview
+InspiredbytheobservationinFigure2,wemakethefollowingassumption:
+Amodel canbeinterpolatedbetweenaweakermodel andastrongermodel ,which
+w s
+M M M
+satisfytherelationshipintermsoftheiralignmentwithhumanpreference: < < .
+w s
+M M M
+Specifically, we suppose the medium-aligned model (parameterized by θ) to be one that has
+M
+beenmoderatelytrainedforhumanpreferencealignment. Wealsosupposetheless-alignedweaker
+model (parameterizedbyθ )simplytobetheSFTmodelusedforinitializing . Theabove
+w w
+M M
+assumptionsuggeststhatthereexistsabetter-alignedstrongermodel (parameterizedbyθ )and
+s s
+M
+aninterpolationcoefficientγ [0,1]suchthat:
+∈
+θ =(1 γ)θ +γθ . (1)
+w s
+−
+Hereweconsiderthesimplestformofuniformlinearinterpolation. Withthesubstitutionofα =
+1/γ 1 [0,+ ), we can obtain the assumed stronger model by extrapolating from the
+s
+− ∈ ∞ M
+weights of the relatively weaker and (i.e., weak-to-strong extrapolation). Our proposed
+w
+M M
+EXPOmethodisformulatedasfollows:
+θ =(1+α)θ αθ =θ+α(θ θ )=θ+α∆θ, (2)
+s w w
+− −
+wherethecoefficientαservesasthehyperparameterthatcontrolsthelengthofextrapolation. In
+practice,αcanbecheaplytunedasadecodinghyperparameter(likethesamplingtemperature)ona
+developmentsetwithnomodeltraininginvolved.
+2.2 InsightsonEXPO
+WefirstuseFigure3foranintuitiveillustrationofEXPO.
+Specifically,EXPOcanbeviewedasa“globalgradient ∆θ α∆θ
+update”,basedontheglobalweightchange∆θ =θ θ
+w
+−
+fromtheinitial tothefinal . Theweightchange
+w
+M M
+∆θindicatesadirectionintheparameterspace,inwhich
+themodel’salignmentwithhumanpreferenceisimproved
+(measuredbyarewardscore). Hence,EXPOessentially
+aims to amplify the learned reward signal through the Mw M Ms
+extrapolationα∆θ. Figure 3: EXPO can be viewed as a
+“globalgradientupdate”thatmovesthe
+Basedontheaboveillustration,weidentifytwoprereq-
+modelweightalongthedirectionof∆θ
+uisitesfor EXPO.First,themodel shouldhavenot
+M inwhichthemodel’salignmentwithhu-
+yet been trained to its optimality. This prerequisite is
+man preference is improved (measured
+generallyvalid,asevidencedbythemostpowerfulLLMs
+byarewardscore).
+suchasGPT-4andClaudethatareundergoingconstant
+optimization for better alignment. We will show in §4
+thateventheopen-sourcemodelsthathavebeenextensivelytrainedforhumanpreferencealignment
+stillhavesignificantroomforfurtherimprovement.
+Second,alsomoreimportantly,theweightchange∆θfrom to shouldbeof“highquality”,
+w
+M M
+meaningitshouldasaccuratelyaspossibleindicateanextrapolationdirectioninwhichthealignment
+can get improved. In mainstream preference alignment algorithms such as DPO or RLHF, this
+prerequisitecanalsobegenerallyestablished,as isinitializedfrom (theSFTmodel)andis
+w
+M M
+essentiallytrainedtomaximizetherewardsignalofhumanpreference,eitherfrompreferencedataor
+rewardmodels. Nonetheless,the“quality”of∆θcanvarydependingonthetrainingconfigurationof
+andthecapabilityof ,aswewilldiscussin§3.3and4.2.
+w
+M M
+Combiningthetwoprerequisites,whenthemodel initializedfromitsSFTcheckpoint has
+w
+M M
+undergone moderate alignment training, it can potentially get better aligned by EXPO. We will
+experimentallyverifythisin§3and4. However,othermodelcombinationsfor and ,suchas
+w
+M M
+aBaseandanSFTmodelsortwoseparately-trainedRLHFmodels,usuallycannotguaranteethe
+secondprerequisite. Wewilldiscussthismorein§4.3inconjunctionwithempiricalresults.
+32.3 Highlights
+WeunderlinethefollowingappealingpropertiesofEXPO:
+• Simplicity: EXPOisextremelysimpleandquicktoimplement. Itmerelyinvolvesperforming
+extrapolationbasedontheweightsoftwocheckpoints and ,whichcanbeaccomplished
+s
+M M
+withinjustafewlinesofcode.
+• Efficiency: EXPOneedsnoadditionalmodeltrainingontopof
+s
+and . Theonlyhyper-
+M M
+parameterαisalsocheaptotuneasnotrainingwillbeinvolved. Moreover,webelievemore
+efficientmeansofhyperparametersearchcanbedevelopedinfuturework,asevidencedbythe
+advancesinadaptivemodelinterpolation[17,23].
+• Scalability: EXPO isinprincipleapplicabletovariousLLMs, includingthoseoflargesizes
+orthathavebeenextensivelytrainedforhumanpreferencealignment. Wewillshowin§4that
+EXPOcanimproveoff-the-shelfalready-alignedmodelsofvaryingsizesandcapabilities.
+3 Experiments
+WefirstdemonstratetheeffectivenessofEXPOinacontrolledsetting,i.e.,trainingthemodel
+M
+withlesspreferencedata,sowecanknowinadvancethat stillhasroomforfurtherimprovement
+M
+(correspondingtothefirstprerequisitein§2.2). Weshowthat EXPO endowsthemodelstrained
+usinglessdata(e.g.,10%or20%)withequivalentorsuperiorperformancetothefully-trainedone.
+3.1 ExperimentalSetup
+Models Totrainmodelsforhumanpreferencealignment,werefertothealignmenthandbook3
+[36],awidely-usedcodebasereleasedbyHuggingFaceforalignmenttrainingofLLMs. Wefollow
+thetheirsetupoftrainingtheMistral-based[20]zephyr-7b-sft-fullandzephyr-7b-dpo-full
+models [37]. Specifically, we use the same preference dataset but varying data sizes to train the
+models. WeemploythesamemainstreamDPO[31]algorithmforalignmenttraining,wheretheSFT
+modelzephyr-7b-sft-fullisusedasthereferencemodelinDPOandalsousedforinitializing
+thepolicymodels. Weadoptthesamehyperparameterconfigurationaszephyr-7b-dpo-full(see
+AppendixB)andtrainallthemodelson4A10080GBGPUs. Weusezephyr-7b-dpo-fullasthe
+fully-trainedbaseline(i.e.,trainedwith100%data).
+Data WeusethesamepreprocessedUltraFeedback4[7]datasetforDPOtraining. UltraFeedback
+isalarge-scalepreferencedataset,containingdiverseinstructionsandresponsepairswithGPT-4-
+annotatedpreferencelabels. Ithasbeenpopularlyusedbytheopen-sourcecommunityfortraining
+alignedLLMs[18,37,48]. ThepreprocessedversionprovidedbyHuggingFacecontains61Kand1K
+preferencedatainthetraininganddevelopmentset,respectively. Eachdataconsistsofaninstruction
+andapairofresponses,withonelabeledaspreferred.
+Evaluation WeevaluatethemodelsonAlpacaEval2.0[22],aleadingandpopularbenchmarkthat
+assessesLLMs’alignmentwithhumanpreference. Itcontains805instructionsrepresentativeof
+realusercases. Foreachinstruction,theresponseoftheevaluatedmodeliscomparedhead-to-head
+withthatoftheGPT-4baseline. AnevaluatorbasedonGPT-4(itsversionisgpt-4-1106-preview
+during our work) produces the probability of preferring the evaluated model, which provides an
+affordableandreplicablealternativetohumanpreferenceannotation. Then,thewinrateoverthe
+GPT-4baselineiscomputedastheexpectedpreferenceprobabilityonallthe805instructions.
+Recently,AlpacaEval2.0hasintroducedthenewlength-controlled(LC)winratemetric[9],which
+aims to alleviate the length bias of the GPT-4 evaluator (i.e., the prior preference toward longer
+responses) [30]. According to [9], the LC win rate metric currently has the highest correlation
+(aSpearmancorrelationof0.98)withreal-worldhumanevaluation[47],whichconsolidatesthe
+reliabilityofAlpacaEval2.0evaluation.
+3https://github.com/huggingface/alignment-handbook
+4https://huggingface.co/datasets/HuggingFaceH4/ultrafeedback_binarized
+4ForEXPO,wedecidetheoptimalαbasedontheperformanceontheUltraFeedbackdevelopment
+set,asevaluatedbyanopen-sourcerewardmodel5. ItranksamongthetoponRewardBench6[21],a
+leaderboardthatassessestheperformanceofrewardmodels. Moreimportantly,thisrewardmodelis
+notinvolvedineitherpreferenceannotationorRLHFtrainingofallthemodelsweexperimentwith
+inthiswork,thusreducingtheriskofrewardhacking. Inourexperiments,wealsoreporttheaverage
+scoresproducedbytherewardmodelonthe805AlpacaEval2.0instructionsasareference.
+3.2 Results
+Table1: AlpacaEval2.0evaluationresultsofmodelstrainedwithlesspreferencedata. TheDPO
+modelsareallinitializedfromtheSFTmodelzephyr-7b-sft-full.
+Reward WinRate LCWinRate
+SFT 3.42 4.7% 8.7%
+DPO(fulldata) 6.16 14.7% 17.3%
++EXPO,notraining 6.52(+0.36) 18.0%(+3.3%) 20.2%(+2.9%)
+DPO(10%data) 3.97 5.9% 10.4%
++EXPO,notraining 6.57(+2.60) 17.9%(+12.0%) 16.3%(+5.9%)
+DPO(20%data) 4.70 8.6% 12.9%
++EXPO,notraining 6.95(+2.25) 22.7%(+14.1%) 21.3%(+8.4%)
+InTable1,weshowtheperformanceofthemodelstrained
+withless(10%and20%)preferencedataaswellasthere- α∆θ
+1
+sultsoffurtherapplyingEXPOontopofthem. Asexpected,
+θ
+training with less preference data results in lower-tier per- 1
+α∆θ
+formance,asindicatedbytheirLCwinratesonAlpacaEval 2
+2.0. Forinstance,comparedtothe17.3%ofusing100%data, θ
+2
+using10%and20%onlyachievestheperformanceof10.4%
+and 12.9%, respectively. However, after applying EXPO,
+usingonly10%datacanachievecompetitiveperformanceto
+Figure 4: The “quality” of ∆θ and
+thefully-trainedmodel(16.3%vs. 17.3%),whileusing20%
+the effectiveness of EXPO can vary
+ofthedataalreadyachievesbeyondthat(21.3%),givinga
+dependingonthetrainingconfigura-
+remarkableadvantageof21.3%-17.3%=4%.
+tionsof . Here,∆θ indicatesasu-
+2
+M
+Wealsoobservethatthemodeltrainedwith20%dataobtains periorextrapolationdirectionto∆θ 1.
+a greater improvement from EXPO than that trained with
+10%data(8.4%vs. 5.9%). Itimpliesthattheformergivesasuperiorextrapolationdirection∆θto
+thelatter,asillustratedinFigure4. However,the“quality”of∆θisnotsimplycorrelatedwiththe
+amountofdata,asshowninTable1whereusing20%dataslightlyoutperformsusingfulldatawhen
+bothapplyingEXPO(21.3%vs. 20.2%). Thisisbecausetheincreasingsizecanalsoamplifythe
+biasesinthepreferencedata,whichbecomesmorelikelytobelearnedbythemodel asshortcuts.
+M
+Wenextanalyzetheimpactof ’strainingconfigurationon∆θindetail.
+M
+3.3 Analysis
+ComparisonbetweenDataSizes Figure5presentstherewardscoresandoutputlengthsonthe
+UltraFeedbackdevelopmentsetversustheextrapolationcoefficientαvaluesinEXPO.Wehavetwo
+mainobservations. Firstly, forthemodels trainedwithdifferentdatasizes, theoptimalα of
+M
+EXPOvariesandgenerallydecreasesasthedatasizeincreases,asindicatedbytheverticaldashed
+linesintheleftpartofFigure5.Thisisbecausethelargerdatasizeusuallyleadstothemorethorough
+convergenceoftraining,evenifonlytoalocaloptimum,whichnaturallynarrowstheviablerangeof
+theextrapolationcoefficientα.
+Secondly,theglobaloptimalrewardscore(6.08)achievedbyEXPOisobtainedwithamediumsize
+(20%)oftrainingdata,ratherthanthesmaller(5%or10%)orlarger(40%)ones. Fortheformer(5%
+5https://huggingface.co/weqweasdas/RM-Mistral-7B
+6https://huggingface.co/spaces/allenai/reward-bench
+5and10%data),althoughExPOsignificantlyimprovestheperformance(fromtherewardscore3.13
+to4.79,and3.59to5.82,respectively),thelimiteddatastillcannotprovideanaccurate∆θ,thus
+cappingthepotentialperformanceaftermodelextrapolation. Forthelatter(40%data),weconjecture
+thatthemodelmayhavelearnedthespuriousfeaturesinpreferencedataasshortcuts,especiallythe
+lengthbias7 [30]wherethepreferredresponsesareusuallylonger. Asshownintherightpartof
+Figure5,forthemodeltrainedwith40%data,usingaverysmallαresultsinadramaticincrease
+intheoutputlength. Inthiscase,∆θbecomesmorelikelytocontainthespuriousfeatures,andin
+particular,thelengthbiascanbeamplifiedbymodelextrapolation. Butthisdoesnotleadtosustained
+improvement of performance, as shown in the right part of Figure 5, where the optimal rewards
+typicallycorrespondtomoderateoutputlengthsrangingbetween500and600.
+Figure5: Forthemodels trainedwithvaryingdatasizes,weplottherewardscores(left)and
+M
+outputlengths(right)ontheUltraFeedbackdevelopmentsetversusvaryingαvaluesinEXPO.
+ComparisonwithHyperparameterTuning AsEXPOcanbeviewedasa“globalgradientupdate”
+(§2.2),wealsocomparewithsimplytuningthetraininghyperparameters. Specifically,weusethe
+same20%trainingdatabutincreasethelearningrateortrainingepochs. FromtheleftpartofFigure
+6,weobservethatincreasingthetwohyperparametersindeedsomewhatimprovestheoriginalreward
+score. However,itisstillinferiortotheoptimalrewardscoreachievedbyEXPOunderthedefault
+configuration,andalsonoticeablyimpairsthegainsfrommodelextrapolation(thepeakpointsare
+lowerthanthatofthedefaultconfiguration). Thisisprobablybecausethemodelisoverfittedtothe
+trainingdataandsimilarlylearnsthespuriousfeatures(likethelengthbias),thusfailingtoprovide
+anaccurate∆θ. TheoverfittingissuecanalsobeevidencedbytherightpartofFigure6. Themodels
+trainedwithlargerlearningratesorformoreepochsbecomepronetogeneratinglongeroutputswith
+asmallα,butdonotobtainnoticeablerewardimprovement(theleftpartofFigure6),implyingthat
+∆θisverylikelytocontainthespuriouslengthfeatureratherthanthetruehumanpreference.
+Figure6: Forthemodelstrainedusing20%databutwithlargerlearningratesorformoreepochs,we
+plottherewardscores(left)andoutputlengths(right)ontheUltraFeedbackdevelopmentsetversus
+varyingαvaluesinEXPO.
+Basedontheaboveempiricalanalysis,weemphasizethecriticalroleof∆θinEXPO.Particularly,
+weshowthatthe“quality”of∆θrequirestheappropriatechoiceofthetrainingconfigurationfor
+,includingboththepreferencedataandthetraininghyperparameters. Inthesubsequent§4.2,we
+M
+willfurtherdiscusstheimpactof w’scapabilityontheeffectivenessofEXPO.
+M
+7TheaveragelengthsofthepreferredandunpreferredresponsesintheUltraFeedbacktrainingsetare319
+and277tokens,respectively.
+64 ModelExtrapolationBoostsOff-the-ShelfModels
+WenextdemonstratetheimpressiveefficacyofEXPOinimprovingoff-the-shelf already-aligned
+LLMsfromHuggingFace,basedontheirSFTandDPO/RLHFcheckpoints. Weparticularlyunder-
+scorethescalabilityofEXPOacrossdifferentmodelsizesandcapabilities.
+4.1 ExperimentalSetup
+Whenselectingopen-sourceLLMsforexperiments,wefoundthatmanywell-knownalignedLLMs,
+such as LLaMA-2/3 [35, 1], Gemma [34], and Qwen [4], do not release the corresponding SFT
+checkpoints. Suchanopacityhindersthefeasibilityofexperimentingwiththesemorerepresentative
+models. Tofacilitatereproducibleresearch,weselectthefollowingopen-sourceDPO/RLHFmodels
+that(1)havealsopubliclyaccessibleSFTcheckpoints,(2)havedisclosedthetrainingdata,and(3)are
+popularlydownloadedonHuggingFaceorhavebeenevaluatedontheAlpacaEval2.0leaderboard:
+• tulu-2-dpo-7/13/70b [18], a LLaMA-2-based model suite. Since the three-sized models
+undergothesameSFTandDPOtrainingprocesses(includingboththedataandconfiguration),
+theycanserveasareasonabletestbedforthescalabilityofEXPOacrossdifferentmodelsizes.
+• zephyr-7b-alpha/betaandzephyr-7b-dpo-full[37],threeMistral-basedmodels. They
+aretrainedwithdifferenthyperparameterconfigurationsandonslightlydifferentpreferencedata.
+• Starling-LM-7B-alpha/beta[48],twoMistral-basedmodels. TheyaretrainedbytheRLHF
+algorithmwithdifferentrewardmodels.
+Similarto§3.1,weselecttheoptimalαfrom[0.1,0.2,0.3,0.4,0.5]basedontheperformanceonthe
+UltraFeedbackdevelopmentset,asevaluatedbytheaforementionedrewardmodel.
+4.2 Results
+Table2: AlpacaEval2.0evaluationresultsofoff-the-shelfDPO/RLHFmodels. Thegraymodels’
+scoresarecopiedfromtheofficialleaderboardforreference. Forthemodelsthathavebeenofficially
+evaluated,wereportthehigheronebetweenourreproducedscore†andthatfromtheleaderboard‡.
+Reward WinRate LCWinRate
+Llama-2-70b-chat-hf - 13.9% 17.4%
+gpt-3.5-turbo-0613 - 14.1% 22.7%
+Gemini Pro - 18.2% 24.4%
+claude-2.1 - 15.7% 25.3%
+tulu-2-dpo-7b 5.09 8.5%† 10.2%†
++EXPO 5.42(+0.33) 11.5%(+3.0%) 11.7%(+1.5%)
+tulu-2-dpo-13b 5.37 11.2%† 15.5%†
++EXPO 5.89(+0.52) 15.6%(+4.4%) 17.6%(+2.1%)
+tulu-2-dpo-70b 5.84 16.0%‡ 21.2%‡
++EXPO 6.12(+0.28) 23.0%(+7.0%) 25.7%(+4.5%)
+zephyr-7b-alpha 4.68 8.4%‡ 10.3%‡
++EXPO 4.87(+0.19) 10.6%(+2.2%) 13.6%(+3.3%)
+zephyr-7b-beta 5.31 11.0%‡ 13.2%‡
++EXPO 5.40(+0.09) 11.1%(+0.1%) 14.0%(+0.8%)
+zephyr-7b-dpo-full 6.16 14.7% 17.3%
++EXPO 6.52(+0.36) 18.0%(+3.3%) 20.2%(+2.9%)
+Starling-LM-7B-alpha 5.80 15.0%† 18.3%†
++EXPO 5.98(+0.18) 18.2%(+3.2%) 19.5%(+1.2%)
+Starling-LM-7B-beta 7.12 26.6% 25.8%
++EXPO 7.40(+0.28) 29.6%(+3.0%) 26.4%(+0.6%)
+7TheresultsinTable2demonstratethatEXPOenhancestheperformanceofthealready-alignedLLMs,
+byimpressiveincreasesofupto6.8%LCwinrateand10.5%basicwinrateonAlpacaEval2.0.
+TheimprovementismadeacrossLLMsofvariouscapabilities,fromtheweakestzephyr-7b-alpha
+andtulu-2-dpo-7btothestrongestStarling-LM-7B-betaandtulu-2-dpo-70b. Itsuggests
+thatmostopen-sourceLLMshavenotbeenalignedwithhumanpreferenceoptimally,andEXPO
+enablesthefurtherexploitationofthesemodels’capabilities.
+SpecificallyforthemodelsuiteTulu-2,wherethe7B/13B/70Bmodelsaretrainedusingthesame
+preferencedataandconfiguration,theenhancementbyEXPOnicelyscalesupwiththeincreasing
+modelsize. Weconjecturethatthisisbecausethelarger/stronger enablesthebetterlearning
+w
+M
+oftherewardsignalinthepreferencedataorrewardmodels,leadingtobothastronger anda
+M
+moreaccurate∆θ,whichtogetherresultinthegreaterimprovementfor aftermodelextrapolation.
+M
+Therefore,withthesamepreferencedataandtrainingconfiguration,weoptimisticallyexpectthe
+improvementbyEXPOcanalsoscaleupasthecapabilityof
+w
+increases.
+M
+4.3 Discussion
+Finally,wediscusstheimpactofmodelchoicesfor
+w
+and ontheeffectivenessofEXPO.In
+M M
+previousanalysesandexperiments,wechoose asanSFTmodel,and asthemodelfurther
+w
+M M
+trainedforhumanpreferencealignmentontopof . Canothertypesofmodelcombination
+w w
+M M
+and , such as a Base and an SFT model, or two separately-trained RLHF models, be able to
+M
+producemeaningfulextrapolatedmodels? Weexperimentwiththefollowingtypesofcombinations:
+• Base+SFT:Mistral-7B-v0.1[20]as andMistral-7B-Instruct-v0.1as .
+w
+M M
+• SFT1+SFT2(trainedfromdifferentbasemodels): Mistral-7B-Instruct-v0.1as
+w
+M
+andMistral-7B-Instruct-v0.2as .
+M
+• SFT1+SFT2(samebase): openchat_3.5[39]as andopenchat-3.5-0106as .
+w
+M M
+• RLHF1 +RLHF 2(same base): gemma-7b-it[34] as and gemma-1.1-7b-itas .
+w
+M M
+NotethatitisnotdisclosedwhetherthetwomodelsareinitializedfromthesameSFTmodel.
+SFT 1 + SFT 2
+Base + SFT (same base)
+SFT 1 + SFT 2 RLHF 1 + RLHF 2 θ
+(different base) (same base) 1
+6 θ α∆θ
+2
+4
+2
+Figure8: Extrapolationfromtwoseparately-
+Model 1 Model 2 0.1 0.2 0.3 0.4 0.5 trainedmodelsmaynotimprovealignment,
+Figure 7: Reward scores of other types of model astheirweightdifference(∆θ)usuallycan-
+combinationsontheUltraFeedbackdevelopmentset, not guarantee a direction along which the
+withαvaryingfrom0.1to0.5. rewardsignalcangetfurtheramplified.
+FromtheresultsshowninFigure7,wefindthatextrapolatingfromtwoSFTmodelsthataretrained
+from different base models can easily lead to the model collapse, probably because they do not
+meettherequirementofmodeconnectivity[11,10],namely,thesameorcloseinitialization. For
+thecombinationofBaseandSFT,extrapolationdegradestheperformance. Onecauseisthatthe
+trainingfromBasetoSFTdoesnotnaturallyreflecthumanpreference,whichisexactlywhyweneed
+additionalpreferencealignmenttraining. AnothercauseisthatcomparedtotheBasemodel,theSFT
+oneacquirestheinstruction-followingabilityandisalsoadaptedtospecifiedinput/outputformats
+[45]. EXPOcanamplifybothlearnedfeatures(§2.2),butthelatterdoesnotaidinalignmentandmay
+insteadsimilarlyleadtomodelcollapse. Forthetwoseparately-trainedSFTorRLHFmodels,we
+findthattheyalsocannotbenefitfrommodelextrapolation. Wespeculatethatthisisbecause is
+M
+notinitializedfrom ,sothepathintheparameterspacefromθ toθisnotinthedirectionalong
+w w
+M
+whichtherewardsignalcanbeamplified. AsillustratedinFigure8,eventhough (θ )hasnotyet
+2
+M
+achievedoptimalityonitsownoptimizationpath,itstillcannotbeimprovedinanotherdirectionof
+8
+draweR∆θ. Overall,ourmethodEXPOiscurrentlyapplicabletothecombinationofanSFTmodel
+w
+M
+andamodel furthertrainedontopoftheformer,whichisaveryrealisticcombinationchoice,as
+M
+modernLLMsthataretrainedtoalignwithhumanpreferencearealmostallinitializedfromtheir
+SFTcheckpoints.
+5 RelatedWork
+LLMAlignment ModernLLMsaretypicallyfirstpre-trainedonmassivetextualcorpora(resulting
+in a Base model) [6, 35, 1] and then trained to align with human expectations [27, 28, 35]. The
+alignmentprocessgenerallycontainstwostages. Inthefirststage,anLLMissupervisedlyfine-tuned
+(SFT)ondemonstrationoutputsandlearnstofollowhumaninstructions[40,33]. Inthesecondstage,
+theLLMistrainedtolearnhumanpreferenceandassignhigherprobabilitiestohuman-preferred
+outputsoverthedisfavoredones.Thisisusuallyimplementedinthefashionofreinforcementlearning
+(RL)[29,5]orcontrastivelearning[44,46,31],asexemplifiedbythereinforcementlearningfrom
+humanfeedback(RLHF)[49]anddirectpreferenceoptimization(DPO)[31]algorithms,respectively.
+Similartothescalinglawinthepre-trainingphase[15],recentworkalsorevealedthatthecapabilities
+of aligned models can also be constantly improved by scaling up the amount of alignment data
+[40,33,8]andincreasingthetrainingstepsoriterationsforhumanpreferencealignment[5,42,14].
+However,thedataandcomputationresourcesavailableinrealityarealwaysfinite,whichmayprevent
+thefullexploitationofmodels’capabilities. OurworkproposestheEXPOmethodtoboostLLMs’
+alignmentwithhumanpreferenceinasimple,efficient,andscalablemanner.
+Model Merging and Interpolation Model merging is a recently focal technique for building
+powerfulLLMsbasedonexistingones[2,3]. Itaimstointegratemultiplemodelsfine-tunedfromthe
+samebasemodelintoaunifiedonethatretainstherespectivestrengths[43,12]. Thesimplestform
+ofmodelmergingismodelinterpolation,alsoknownasmodel/weightaveraging[26,41,23],which
+buildsuponthemodeconnectivityofneuralnetworks[11,10]. Inpractice,theuniforminterpolation
+usuallyresultsintrade-offperformancebetweenthetwooriginalmodels,asobservedinprevious
+literature [26, 41, 23] and our experiments in Figure 2. One approach to addressing this issue is
+toadaptivelyadjusttheinterpolationcoefficientfordifferentmodelmodules(e.g.,differentmodel
+layers)[17,23]. OurproposedEXPOmethod(§2)hasasimilarideaofblendingmodelweightsto
+improvethemodelcapability,butworksunderadistinctpremiseandgoal. Ratherthanintegrating
+multiplestrongmodelsintoageneralist,ourmethodaimstousetworelativelyweakermodelsto
+produceastrongermodelthatcanevensurpassthelimitsofthefully-trainedone(§3and4).
+6 Conclusion
+WepresentEXPO,asimplemethodtoboostLLMs’alignmentwithhumanpreference. Byextrapo-
+latingfromtheweightsofanSFTmodel
+w
+andafurthertrainedone ,EXPOenablesdirectly
+M M
+obtainingabetter-alignedmodelwithoutanyadditionaltraining. Wedemonstratetheefficacyof
+EXPO acrossvariousLLMs, fromthosetrainedwithlimitedpreferencedatatotheoff-the-shelf
+onesfromHuggingFace,whereEXPOmanifestsdecentscalabilityacrossvaryingmodelsizesand
+capabilities. Givenitssimplicity,efficiency,andscalability,werecommendEXPOasapromising
+approachforbetterexploitingLLMs’capabilities,whichdeservesmorefutureexploration.
+Limitations&FutureWork Ourworkislimitedbythepublicaccessibilitytothecheckpoints
+of the SFT and DPO/RLHF models. Thus unfortunately, we are unable to experiment with the
+morerepresentativeLLMslikeLLaMA-2/3[35,1],Gemma[34],andQwen[4]. Wehopeformore
+open-sourceeffortsinincreasingLLMs’transparencyandaccessibility. Outsidethescopeofthis
+study, thereareseveralproblemsthatmayattractfutureresearch. First,since EXPO isbasedon
+thesimplestuniformlinearextrapolation(Equation2,usingthesameαforallthemodelmodules),
+futureworkmaydevisemethodstoadaptivelysearchoptimalαfordifferentmodelmodules. Second,
+whilewecurrentlyrelyonanexternalrewardmodelforsearchingα,futureworkmaygetridofsuch
+reliancebyresortingtothecapabilityofthemodels and themselves. Third,althoughour
+w
+M M
+workprovidesintuitiveillustrationsforEXPOandempiricallydemonstratesitseffectiveness,future
+workmayestablishtheoreticalexplanationsandanalysesforitsunderlyingmechanisms. Finally,it
+wouldalsobeinterestingtoapplyEXPOtomulti-modalLLMslikeLLaVA[24]andothermodel
+architectureslikeMamba[13].
+9Acknowledgements
+Wethanktheopen-sourcecommunity,includingtheHuggingFace,AllenAI,andNexusflowteams,
+forpromotingthetransparencyofLLMsbyreleasingmodelcheckpointsanddisclosingtraining
+details. Thisworkwouldnotbepossiblewithouttheseeffortsfromtheopen-sourcecommunity. We
+thankWeiXiongforreleasingtherewardmodelsandforthevaluablediscussion.
+References
+[1] AI@Meta. Llama3modelcard,2024.
+[2] SamuelAinsworth,JonathanHayase,andSiddharthaSrinivasa. Gitre-basin: Mergingmodels
+modulo permutation symmetries. In The Eleventh International Conference on Learning
+Representations,2023.
+[3] TakuyaAkiba,MakotoShing,YujinTang,QiSun,andDavidHa. Evolutionaryoptimizationof
+modelmergingrecipes. arXivpreprintarXiv:2403.13187,2024.
+[4] JinzeBai,ShuaiBai,YunfeiChu,ZeyuCui,KaiDang,XiaodongDeng,YangFan,WenbinGe,
+YuHan,FeiHuang,etal. Qwentechnicalreport. arXivpreprintarXiv:2309.16609,2023.
+[5] YuntaoBai,AndyJones,KamalNdousse,AmandaAskell,AnnaChen,NovaDasSarma,Dawn
+Drain,StanislavFort,DeepGanguli,TomHenighan,etal. Trainingahelpfulandharmless
+assistantwithreinforcementlearningfromhumanfeedback. arXivpreprintarXiv:2204.05862,
+2022.
+[6] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsare
+few-shotlearners. InAdvancesinneuralinformationprocessingsystems,volume33,pages
+1877–1901,2020.
+[7] GanquCui,LifanYuan,NingDing,GuanmingYao,WeiZhu,YuanNi,GuotongXie,Zhiyuan
+Liu,andMaosongSun. Ultrafeedback: Boostinglanguagemodelswithhigh-qualityfeedback.
+arXivpreprintarXiv:2310.01377,2023.
+[8] NingDing,YulinChen,BokaiXu,YujiaQin,ShengdingHu,ZhiyuanLiu,MaosongSun,and
+BowenZhou. Enhancingchatlanguagemodelsbyscalinghigh-qualityinstructionalconver-
+sations. InProceedingsofthe2023ConferenceonEmpiricalMethodsinNaturalLanguage
+Processing, pages 3029–3051, Singapore, December 2023. Association for Computational
+Linguistics.
+[9] YannDubois,BalázsGalambosi,PercyLiang,andTatsunoriBHashimoto. Length-controlled
+alpacaeval: Asimplewaytodebiasautomaticevaluators. arXivpreprintarXiv:2404.04475,
+2024.
+[10] RahimEntezari,HanieSedghi,OlgaSaukh,andBehnamNeyshabur. Theroleofpermutation
+invariance in linear mode connectivity of neural networks. In International Conference on
+LearningRepresentations,2022.
+[11] Timur Garipov, Pavel Izmailov, Dmitrii Podoprikhin, Dmitry P Vetrov, and Andrew G Wil-
+son. Losssurfaces,modeconnectivity,andfastensemblingofdnns. InAdvancesinneural
+informationprocessingsystems,volume31,2018.
+[12] CharlesGoddard,ShamaneSiriwardhana,MalikehEhghaghi,LukeMeyers,VladKarpukhin,
+BrianBenedict,MarkMcQuade,andJacobSolawetz. Arcee’smergekit: Atoolkitformerging
+largelanguagemodels. arXivpreprintarXiv:2403.13257,2024.
+[13] AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestatespaces.
+arXivpreprintarXiv:2312.00752,2023.
+[14] ShangminGuo,BiaoZhang,TianlinLiu,TianqiLiu,MishaKhalman,FelipeLlinares,Alexan-
+dreRame,ThomasMesnard,YaoZhao,BilalPiot,etal. Directlanguagemodelalignmentfrom
+onlineaifeedback. arXivpreprintarXiv:2402.04792,2024.
+10[15] JordanHoffmann,SebastianBorgeaud,ArthurMensch,ElenaBuchatskaya,TrevorCai,Eliza
+Rutherford, DiegodeLasCasas, LisaAnneHendricks, JohannesWelbl, AidanClark, etal.
+Trainingcompute-optimallargelanguagemodels. arXivpreprintarXiv:2203.15556,2022.
+[16] AriHoltzman,JanBuys,LiDu,MaxwellForbes,andYejinChoi. Thecuriouscaseofneural
+textdegeneration. InInternationalConferenceonLearningRepresentations,2020.
+[17] GabrielIlharco, MarcoTulioRibeiro, MitchellWortsman, LudwigSchmidt, HannanehHa-
+jishirzi,andAliFarhadi. Editingmodelswithtaskarithmetic. InTheEleventhInternational
+ConferenceonLearningRepresentations,2023.
+[18] HamishIvison,YizhongWang,ValentinaPyatkin,NathanLambert,MatthewPeters,Pradeep
+Dasigi, Joel Jang, David Wadden, Noah A Smith, Iz Beltagy, et al. Camels in a changing
+climate: Enhancinglmadaptationwithtulu2. arXivpreprintarXiv:2311.10702,2023.
+[19] PIzmailov,AGWilson,DPodoprikhin,DVetrov,andTGaripov. Averagingweightsleads
+to wider optima and better generalization. In 34th Conference on Uncertainty in Artificial
+Intelligence2018,UAI2018,pages876–885,2018.
+[20] Albert Q Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh
+Chaplot,DiegodelasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,Lucile
+Saulnier,etal. Mistral7b. arXivpreprintarXiv:2310.06825,2023.
+[21] NathanLambert,ValentinaPyatkin,JacobMorrison,LJMiranda,BillYuchenLin,Khyathi
+Chandu,NouhaDziri,SachinKumar,TomZick,YejinChoi,etal. Rewardbench: Evaluating
+rewardmodelsforlanguagemodeling. arXivpreprintarXiv:2403.13787,2024.
+[22] XuechenLi,TianyiZhang,YannDubois,RohanTaori,IshaanGulrajani,CarlosGuestrin,Percy
+Liang,andTatsunoriB.Hashimoto.Alpacaeval:Anautomaticevaluatorofinstruction-following
+models. https://github.com/tatsu-lab/alpaca_eval,2023.
+[23] Yong Lin, Hangyu Lin, Wei Xiong, Shizhe Diao, Jianmeng Liu, Jipeng Zhang, Rui Pan,
+HaoxiangWang,WenbinHu,HanningZhang,HanzeDong,RenjiePi,HanZhao,NanJiang,
+HengJi,YuanYao,andTongZhang. Mitigatingthealignmenttaxofrlhf,2023.
+[24] HaotianLiu, ChunyuanLi, QingyangWu, andYongJaeLee. Visualinstructiontuning. In
+Thirty-seventhConferenceonNeuralInformationProcessingSystems,2023.
+[25] IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. InInternational
+ConferenceonLearningRepresentations,2019.
+[26] BehnamNeyshabur,HanieSedghi,andChiyuanZhang. Whatisbeingtransferredintransfer
+learning? InAdvancesinneuralinformationprocessingsystems,volume33,pages512–523,
+2020.
+[27] OpenAI. https://chat.openai.com.chat,2022.
+[28] OpenAI. Gpt-4technicalreport. arXivpreprintarXiv:2303.08774,2023.
+[29] LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,
+ChongZhang,SandhiniAgarwal,KatarinaSlama,AlexRay,etal. Traininglanguagemodelsto
+followinstructionswithhumanfeedback. Advancesinneuralinformationprocessingsystems,
+35:27730–27744,2022.
+[30] Ryan Park, Rafael Rafailov, Stefano Ermon, and Chelsea Finn. Disentangling length from
+qualityindirectpreferenceoptimization. arXivpreprintarXiv:2403.19159,2024.
+[31] RafaelRafailov,ArchitSharma,EricMitchell,ChristopherDManning,StefanoErmon,and
+ChelseaFinn. Directpreferenceoptimization: Yourlanguagemodelissecretlyarewardmodel.
+InThirty-seventhConferenceonNeuralInformationProcessingSystems,2023.
+[32] SamyamRajbhandari,JeffRasley,OlatunjiRuwase,andYuxiongHe. Zero: memoryoptimiza-
+tionstowardtrainingtrillionparametermodels. InProceedingsoftheInternationalConference
+forHighPerformanceComputing,Networking,StorageandAnalysis,pages1–16,2020.
+11[33] RohanTaori,IshaanGulrajani,TianyiZhang,YannDubois,XuechenLi,CarlosGuestrin,Percy
+Liang,andTatsunoriB.Hashimoto. Stanfordalpaca: Aninstruction-followingllamamodel.
+https://github.com/tatsu-lab/stanford_alpaca,2023.
+[34] GemmaTeam,ThomasMesnard,CassidyHardin,RobertDadashi,SuryaBhupatiraju,Shreya
+Pathak,LaurentSifre,MorganeRivière,MihirSanjayKale,JulietteLove,etal. Gemma: Open
+modelsbasedongeminiresearchandtechnology. arXivpreprintarXiv:2403.08295,2024.
+[35] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,
+NikolayBashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Open
+foundationandfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+[36] LewisTunstall,EdwardBeeching,NathanLambert,NazneenRajani,ShengyiHuang,Kashif
+Rasul,AlexanderM.Rush,andThomasWolf. Thealignmenthandbook. https://github.
+com/huggingface/alignment-handbook,2023.
+[37] LewisTunstall,EdwardBeeching,NathanLambert,NazneenRajani,KashifRasul,Younes
+Belkada,ShengyiHuang,LeandrovonWerra,ClémentineFourrier,NathanHabib,etal.Zephyr:
+Directdistillationoflmalignment. arXivpreprintarXiv:2310.16944,2023.
+[38] Joachim Utans. Weight averaging for neural networks and local resampling schemes. In
+Proc.AAAI-96WorkshoponIntegratingMultipleLearnedModels.AAAIPress,pages133–138.
+Citeseer,1996.
+[39] GuanWang,SijieCheng,XianyuanZhan,XiangangLi,SenSong,andYangLiu. Openchat:
+Advancingopen-sourcelanguagemodelswithmixed-qualitydata. InTheTwelfthInternational
+ConferenceonLearningRepresentations,2024.
+[40] YizhongWang,YeganehKordi,SwaroopMishra,AlisaLiu,NoahA.Smith,DanielKhashabi,
+and Hannaneh Hajishirzi. Self-instruct: Aligning language models with self-generated in-
+structions. InProceedingsofthe61stAnnualMeetingoftheAssociationforComputational
+Linguistics(Volume1: LongPapers),pages13484–13508,Toronto,Canada,July2023.Associ-
+ationforComputationalLinguistics.
+[41] MitchellWortsman,GabrielIlharco,SamirYaGadre,RebeccaRoelofs,RaphaelGontijo-Lopes,
+AriSMorcos,HongseokNamkoong,AliFarhadi,YairCarmon,SimonKornblith,etal. Model
+soups: averagingweightsofmultiplefine-tunedmodelsimprovesaccuracywithoutincreasing
+inferencetime. InInternationalconferenceonmachinelearning,pages23965–23998.PMLR,
+2022.
+[42] WeiXiong,HanzeDong,ChenluYe,ZiqiWang,HanZhong,HengJi,NanJiang,andTong
+Zhang. Iterative preference learning from human feedback: Bridging theory and practice
+for RLHF under KL-constraint. In ICLR 2024 Workshop on Mathematical and Empirical
+UnderstandingofFoundationModels,2024.
+[43] LeYu,BowenYu,HaiyangYu,FeiHuang,andYongbinLi. Languagemodelsaresupermario:
+Absorbingabilitiesfromhomologousmodelsasafreelunch. arXivpreprintarXiv:2311.03099,
+2023.
+[44] YaoZhao,MikhailKhalman,RishabhJoshi,ShashiNarayan,MohammadSaleh,andPeterJ
+Liu.Calibratingsequencelikelihoodimprovesconditionallanguagegeneration.InTheEleventh
+InternationalConferenceonLearningRepresentations,2023.
+[45] ChujieZheng. Chattemplatesforhuggingfacelargelanguagemodels. https://github.com/
+chujiezheng/chat_templates,2024.
+[46] ChujieZheng,PeiKe,ZhengZhang,andMinlieHuang. Click: Controllabletextgeneration
+with sequence likelihood contrastive learning. In Findings of the Association for Computa-
+tionalLinguistics: ACL2023,pages1022–1040,Toronto,Canada,July2023.Associationfor
+ComputationalLinguistics.
+12[47] LianminZheng,Wei-LinChiang,YingSheng,SiyuanZhuang,ZhanghaoWu,YonghaoZhuang,
+ZiLin,ZhuohanLi,DachengLi,EricXing,HaoZhang,JosephE.Gonzalez,andIonStoica.
+JudgingLLM-as-a-judgewithMT-benchandchatbotarena. InThirty-seventhConferenceon
+NeuralInformationProcessingSystemsDatasetsandBenchmarksTrack,2023.
+[48] BanghuaZhu,EvanFrick,TianhaoWu,HanlinZhu,KarthikGanesan,Wei-LinChiang,Jian
+Zhang,andJiantaoJiao. Starling-7b: Improvingllmhelpfulness&harmlessnesswithrlaif,
+November2023.
+[49] DanielMZiegler,NisanStiennon,JeffreyWu,TomBBrown,AlecRadford,DarioAmodei,
+PaulChristiano,andGeoffreyIrving. Fine-tuninglanguagemodelsfromhumanpreferences.
+arXivpreprintarXiv:1909.08593,2019.
+13A Open-SourceModelsUsedinThisWork
+Model URL
+RM-Mistral-7B https://huggingface.co/weqweasdas/
+RM-Mistral-7B
+tulu-2-7b https://huggingface.co/allenai/tulu-2-7b
+tulu-2-dpo-7b https://huggingface.co/allenai/tulu-2-dpo-7b
+tulu-2-13b https://huggingface.co/allenai/tulu-2-13b
+tulu-2-dpo-13b https://huggingface.co/allenai/
+tulu-2-dpo-13b
+tulu-2-70b https://huggingface.co/allenai/tulu-2-70b
+tulu-2-dpo-70b https://huggingface.co/allenai/
+tulu-2-dpo-70b
+mistral-7b-sft-alpha https://huggingface.co/HuggingFaceH4/
+mistral-7b-sft-alpha
+zephyr-7b-alpha https://huggingface.co/HuggingFaceH4/
+zephyr-7b-alpha
+mistral-7b-sft-beta https://huggingface.co/HuggingFaceH4/
+mistral-7b-sft-beta
+zephyr-7b-beta https://huggingface.co/HuggingFaceH4/
+zephyr-7b-beta
+zephyr-7b-sft-full https://huggingface.co/alignment-handbook/
+zephyr-7b-sft-full
+zephyr-7b-dpo-full https://huggingface.co/alignment-handbook/
+zephyr-7b-dpo-full
+openchat_3.5 https://huggingface.co/openchat/openchat_3.5
+Starling-LM-7B-alpha https://huggingface.co/berkeley-nest/
+Starling-LM-7B-alpha
+openchat-3.5-0106 https://huggingface.co/openchat/openchat-3.
+5-0106
+Starling-LM-7B-beta https://huggingface.co/Nexusflow/
+Starling-LM-7B-beta
+Mistral-7B-v0.1 https://huggingface.co/mistralai/
+Mistral-7B-v0.1
+Mistral-7B-Instruct-v0.1 https://huggingface.co/mistralai/
+Mistral-7B-Instruct-v0.1
+Mistral-7B-Instruct-v0.2 https://huggingface.co/mistralai/
+Mistral-7B-Instruct-v0.2
+gemma-7b-it https://huggingface.co/google/gemma-7b-it
+gemma-1.1-7b-it https://huggingface.co/google/gemma-1.
+1-7b-it
+B MoreImplementationDetails
+For model training in §3, we adopt the global batch size 128 and gradient accumulation steps 4.
+Wetrainthemodelson4A10080GBGPUs,withZeRO-3offload[32]andgradientcheckpointing
+forreducingGPUmemoryusage. Wesetthelearningrateto5e-7,withthecosineschedulingand
+14warmupratioof0.1,andusetheAdamW[25]optimizertotrainthemodelsforoneepoch. ForDPO,
+wefollowzephyr-7b-dpo-fullandsetthecoefficientβ to0.01.
+Forresponsegeneration,weemploythevllmlibraryforhigh-throughputinference. Weusetop-k
+(k = 40) and nucleus sampling [16] (p = 0.9) with a temperature of 0.7. To avoid repetition in
+generatedtexts,wesetboththefactorsofpresencepenaltyandfrequencypenaltyto0.1.
+Forhyperparametersearch,wemanuallytrydifferentvaluesofα. Weusetheobtainedmodelto
+generateresponsesontheUltraFeedbackdevelopmentset,scoretheresponseswiththerewardmodel,
+andchoosetheoptimalαcorrespondingtothehighestaveragescore. WelistinTable3thesearch
+rangeandtheoptimalαinourexperiments.
+Table3: Summaryofhyperparametersearchresults.
+SFTModel DPO/RLHFModel SearchRange Optimalα
+zephyr-7b-sft-full DPO(10%data) [2,5,7,8,9,10] 8
+zephyr-7b-sft-full DPO(20%data) [1.0,2.0,2.5,3.0] 2.5
+tulu-2-7b tulu-2-dpo-7b [0.1,0.3,0.4,0.5] 0.5
+tulu-2-13b tulu-2-dpo-13b [0.1,0.3,0.4,0.5] 0.5
+tulu-2-70b tulu-2-dpo-70b [0.1,0.3,0.4,0.5] 0.5
+mistral-7b-sft-alpha zephyr-7b-alpha [0.1,0.2,0.3,0.4,0.5] 0.3
+mistral-7b-sft-beta zephyr-7b-beta [0.1,0.2,0.3,0.5] 0.1
+zephyr-7b-sft-full zephyr-7b-dpo-full [0.1,0.2,0.3,0.4,0.5] 0.3
+openchat_3.5 Starling-LM-7B-alpha [0.1,0.2,0.3,0.5] 0.2
+openchat-3.5-0106 Starling-LM-7B-beta [0.1,0.3,0.4,0.5] 0.5
+15
