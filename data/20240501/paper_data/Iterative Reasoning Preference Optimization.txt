@@ -1,0 +1,591 @@
+Iterative Reasoning Preference Optimization
+RichardYuanzhePang1,2 WeizheYuan1,2 KyunghyunCho2
+HeHe2 SainbayarSukhbaatar1∗ JasonWeston1,2∗
+1FAIRatMeta 2NewYorkUniversity
+Abstract
+Iterativepreferenceoptimizationmethodshaverecentlybeenshowntoperform
+wellforgeneralinstructiontuningtasks,buttypicallymakelittleimprovementon
+reasoningtasks[Yuanetal.,2024,Chenetal.,2024]. Inthisworkwedevelop
+aniterativeapproachthatoptimizesthepreferencebetweencompetinggenerated
+Chain-of-Thought(CoT)candidatesbyoptimizingforwinningvs. losingreason-
+ing steps that lead to the correct answer. We train using a modified DPO loss
+[Rafailovetal.,2023]withanadditionalnegativelog-likelihoodterm,whichwe
+findtobecrucial. Weshowreasoningimprovesacrossrepeatediterationsofthis
+scheme. Whileonlyrelyingonexamplesinthetrainingset,ourapproachresults
+inincreasingaccuracyforLlama-2-70B-Chatfrom55.6%to81.6%onGSM8K
+(and 88.7% with majority voting out of 32 samples), from 12.5% to 20.8% on
+MATH,andfrom77.8%to86.7%onARC-Challenge,whichoutperformsother
+Llama-2-basedmodelsnotrelyingonadditionallysourceddatasets.
+1 Introduction
+Preferenceoptimizationhasproventogivelargegainswhenaligningpre-trainedlanguagemodels
+to human requirements compared to supervised fine-tuning alone [Ziegler et al., 2019, Stiennon
+etal.,2020]. OfflinemethodssuchasDPO[Rafailovetal.,2023]arebecomingmorepopularfor
+theirsimplicityandefficiency. Recentresultshaveshownthatiterativeapplicationofsuchanoffline
+procedureisbeneficial,wherebytheupdatedmodelisusedtoconstructnewpreferencerelations
+thataremoreinformative,andhenceimproveresultsfurther. ThesemethodsincludeIterativeDPO
+[Xuetal.,2023,Xiongetal.,2023],Self-RewardingLLMs[Yuanetal.,2024],SPIN[Chenetal.,
+2024],andothermethods[Rossetetal.,2024]. Commontotheseapproachesisthattheyhavebeen
+showntoperformwellongeneralinstructiontuningtasks,buttheyeithermakeonlymoderategains
+orevendecreasetheperformanceonstandardreasoningtasks. Whileotherkindsofiterativetraining
+methodshavebeenappliedsuccessfullytoreasoning,particularlyinvolvingiterationofsupervised
+fine-tuning(SFT)suchasSTaR[Zelikmanetal.,2022],RestEM [Singhetal.,2023],andV-STaR
+[Hosseinietal.,2024]1,usingpreferenceoptimizationtotrainthegenerativereasoningmodelisnot
+appliedinthesemethods.
+Inthisworkwedevelopanapproachtoapplyiterativepreferenceoptimizationtoreasoningtasks,
+withaparticularfocusonChain-of-Thought(CoT)reasoning[Wuetal.,2023]. Oneachiterationwe
+samplemultiplechain-of-thoughtreasoningstepsandfinalanswersovertrainingprompts,andthen
+constructpreferencepairssuchthatpairwinnershavecorrectanswersandpairlosershavewrong
+answers. WethentrainavariantofDPOthatincludesanegativelog-likelihood(NLL)losstermfor
+thepairwinners,whichalsoprovescrucialforperformance. Giventhenewlytrainedmodel,wethen
+iteratetheprocedurebygeneratingnewpairs,andtrainingagain,startingfromthepreviouslytrained
+∗Equalcontribution.
+1V-STaRdoesusepreferenceoptimization,butfortrainingaseparateverifiermodel.
+Preprint.
+4202
+rpA
+03
+]LC.sc[
+1v33791.4042:viXraChain-of-Thought & Answer Generation Preference Optimization
+Training Seed model Generate Generate Compute Preference
+prompts (for t=1) CoTs & answers rew (foa
+r
+yr )d s pairs
+reward DPO+NLL
+model select training
+Next iteration model
+Figure 1: IterativeReasoningPreferenceOptimization. Our iterative preference optimization
+method consists of two steps: (i) Chain-of-Thought & Answer Generation: training prompts are
+usedtogeneratecandidatereasoningstepsandanswersfrommodelM ,andthentheanswersare
+t
+evaluatedforcorrectnessbyagivenrewardmodel. (ii)Preferenceoptimization: preferencepairsare
+selectedfromthegenerateddata,whichareusedfortrainingviaaDPO+NLLobjective,resultingin
+modelM . Thiswholeprocedureistheniteratedresultinginimprovedreasoningabilityonthe
+t+1
+nextiteration,untilperformancesaturates.
+model. We find that reasoning performance improves over multiple iterations until it eventually
+saturates.
+We show that our approach, termed IterativeReasoningPreferenceOptimization (IterativeRPO),
+outperforms a number of baselines, including SFT or applying standard DPO, as well as other
+baselines from the literature. We see an improvement from 55.6% of zero-shot performance on
+GSM8Kto81.6%afterourIterativeRPOtraining(orfrom70.7%to88.7%withmajorityvotingout
+of32samples),from77.8%to86.7%onARC-Challenge(withoutusingtheprovidedARCCorpus),
+andfrom12.5%to20.8%onMATH(withoutusingtheprovidedpretrainingcorpusinMATH).We
+provideablationsthatindicatethecomponentsthatleadtotheseimprovements. Overall,ourmethod
+providesasimplerecipethathasthepotentialtoimprovethereasoningabilityofLLMsoverawide
+rangeoftasks.
+2 IterativeReasoningPreferenceOptimization
+Ourapproachfirstassumesaccesstoabase,typicallypretrainedorinstruction-tuned,languagemodel,
+asetoftraininginputs,andtheabilitytojudgethecorrectnessofthefinaloutputs. Givenatraining
+input,thelanguagemodelisexpectedtogenerate(i)asetofreasoningsteps(Chain-of-Thought),
+followedby(ii)afinalanswertothegivenproblem. Weassumethatwehaveaccesstoacorrectness
+measureforthefinalanswer,andnotforthecorrectnessofthereasoningstepsusedtoreachthat
+answer. Inourexperiments,wethusconsiderdatasetswheregoldlabelsareprovidedfortraining
+inputs,andabinaryrewardisderivedbytheexactmatchbetweentheselabelsandthefinalanswer
+generations. However, our approach could also be applied to settings with more general reward
+models.
+Oneachiteration,ourmethodconsistsoftwosteps,(i)Chain-of-Thought&AnswerGenerationand
+(ii)PreferenceOptimization,asshowninFigure1. Forthetthiteration,weusethecurrentmodelM
+t
+instep(i)togeneratenewdatafortrainingthenextiteration’smodelM instep(ii).
+t+1
+Initialization We assume we are given an initial model M , and a training set D = {x ,y }
+0 i i
+containingquestionsx andtheircorrectanswersy . Themodelwillbetrainedandupdatedateach
+i i
+iteration,resultinginmodelsM ,M ,...M .
+0 1 T
+Chain-of-Thought&AnswerGeneration GiventhecurrentmodelM ,wegenerateN different
+t
+responses for every input, where each response consists of CoT reasoning c followed by a final
+answery:
+(cn,yn)∼M (x ) forallx ∈Dandn∈[1,N].
+i i t i i
+Inthegeneralversionofourapproach,onethencomputestherewardrnforeachoftheseresponses
+i
+based on the correctness of their answers, i.e., rn = R(yn,y ). In our experiments this simply
+i i i
+correspondstorn =1ifyn =y ,and0otherwise;i.e.,whetherthepredictionmatchestheanswer
+i i i
+2providedinthetrainingdataset. Thuswehaveconstructedasetofgeneratedresponsesaugmented
+withrewards:
+G ={cn,yn,rn} .
+i i i i n∈[1,N]
+Preference Optimization In the next step, we first construct a dataset of response pairs Dpairs
+t
+basedonthegenerationsG fromthecurrentmodelM . Thepaireddataisconstructedsuchthat
+i t
+chosen(winning)responseshavehigherrewardsthanrejected(losing)responses. Thisdataisthen
+usedforpreferenceoptimization. Ingeneral,thiscanbedonebyselectingtworesponsesforthesame
+input,suchthatonehashigherrewardthantheother,andsettingtheonewithhigherrewardasthe
+winner. Inthebinaryrewardcase,wecansplitthegeneratedresponsesG intotwosetsbasedon
+i
+theirrewards:
+Gw ={cn,yn|rn =1} and Gl ={cn,yn|rn =0}.
+i i i i i i i i
+Nextwebuildadatasetofpreferencepairsbyselectingawinnerresponse(cw,yw)fromGw,anda
+i i i
+loserresponse(cl,yl)fromGl. Inparticular,wesimplyiterateoverGw andGl simultaneously2to
+i i i i i
+produceK pairs{w ,l },inordertoensureweuseasmuchofthedataaspossible.
+k k
+Dpairs ={(cwk,ywk),(clk,ylk)|forallx ∈Dandk ∈[1,K]}.
+t i i i i i
+Giventhepreferencepairs,wecannowtrainanewmodelM thatwillbecomeournextmodelM .
+θ t+1
+TheparametersθareinitializedfrommodelM ,andupdatedwithalossfunctionthatcombinesthe
+t
+DPOloss[Rafailovetal.,2023]forlearningfromthepreferencepairs,andthenegativelog-likelihood
+(NLL)lossforlearningoverthewinningresponsefromeachpair. Thelosscorrespondingtoeach
+preferencepairisasfollows:
+L =L (x ,cw,yw)+αL (cw,yw,cl,yl|x )
+DPO+NLL NLL i i i DPO i i i i i
+logM (x ,cw,yw) (cid:18) logM (cw,yw|x ) logM (cl,yl|x )(cid:19)
+=− θ i i i −αlogσ β θ i i i −β θ i i i . (1)
+|x |+|cw|+|yw| logM(cw,yw|x ) logM(cl,yl|x )
+i i i t i i i t i i i
+HereM(x)denotestheprobabilityofsequencexunderthemodelM,andσisthesigmoidfunction.
+Weusethepreviousiteration’smodelM asthereferencemodelinthedenominatoroftheDPOterm.
+t
+NotethattheNLLtermisnormalizedbythetotalsequencelength. Thehyperparameterαbalances
+thetwolossterms. Forbrevityweomittedthepairindexk,butweoptimizethislossoneachofthe
+k ∈[1,K]pairsgeneratedforeveryinputsample. Attheendofthistraining,wethusobtainournext
+modelM =M ,whichwillbethenusedtobuilddataforthesubsequentiteration.
+t+1 θ
+Iterative Training Our overall procedure trains a series of models M ,...,M where each
+1 T
+successivemodelt+1usespreferencedataDpairscreatedbythetthmodel.
+t
+Inourexperiments,wedefinethemodels,andthetrainingdatatheyuseasfollows:
+M : BaseLLM;inourexperimentsweinitializewithafine-tunedinstructionfollowingmodel.
+0
+M : InitializedwithM ,thentrainedwithDpairsusingL .
+1 0 0 DPO+NLL
+M : InitializedwithM ,thentrainedwithDpairsusingL .
+2 1 1 DPO+NLL
+M : InitializedwithM ,thentrainedwithDpairsusingL .
+3 2 2 DPO+NLL
+Thisapproachcanbeseenasasimilar,butsimpler,instanceoftheSelf-RewardingLLMtraining
+scheme proposed in Yuan et al. [2024], with three differences. Firstly, on each iteration in Self-
+Rewarding a new set of prompts is created to explore the input distribution, but in our approach
+we use the same fixed set of prompts. Secondly, due to this choice our experimental setup does
+notrequireasophisticatedrewardmodeltojudgethemodelgenerations,asweassumethetraining
+promptshaveprovidedgoldlabelswhichwecompareto. Thesetwoomittedstepsarechallenging
+forreasoningtasksbecausetheyrequirealanguagemodeltoverifycorrectness,whichisknownto
+bedifficult[Huangetal.,2023]. Thirdly,weshowthatourDPO+NLLobjectiveisimportantforour
+reasoningtasks,whereasSelf-RewardingLLM’susedthestandardDPOobjective.
+OurapproachisalsorelatedtotheiterativetrainingintheSelf-TaughtReasoning(STaR)method[Ze-
+likmanetal.,2022],exceptthattheirapproachusesSFTtraining,ratherthanpreferenceoptimization
+2Iftheiterationreachestheendofaset,itrestartsfromthefirstelement.
+3Table 1: GSM8K results comparing IterativeReasoningPreferenceOptimization (IterativeRPO)
+againstotherbaselinesthatarebasedonthesamebasemodelandtrainingdata. Wereporttheexact
+matchaccuracyfromasinglegeneration(usinggreedydecoding),aswellasmajorityvotingover32
+generations(throughsamplingwithtemperature0.8).
+Model TestAccuracy(%)
+IterativeRPO(initializedfromLlama-2-70b-chat)
+Iteration1 73.1
+Iteration2 78.0
+Iteration3 81.1
+w/majorityvotingusing32samples 88.2
+Iteration4 81.6
+w/majorityvotingusing32samples 88.7
+OtherLlama-2-70b-chat-initializedmethods
+Zero-shotCoT 55.6
+w/majorityvotingusing32samples 70.7
+DPOinitializedfromLlama-2-70b-chat 61.8
+DPOinitializedfromSFTtrainedonIteration1chosenseqs 60.3
+SFTongoldCoTexamples 63.5
+STaR(1iteration) 65.2
+STaR(1iteration,butontwiceasmuchdata) 66.9
+IterativeRPO(1iteration,butinitializedfromSFTtrainedonchosenseqs) 73.1
+IterativeRPO(1iteration,butontwiceasmuchdata) 74.8
+usingDPO-liketraining. Preferenceoptimizationallowstheuseofnegativeexamplesofreasoning
+chainsandanswers,whichweshowimprovesperformance. SeeSection4formorediscussionof
+relatedwork.
+3 Experiments
+3.1 Mathwordproblems: GSM8K
+Inourfirstsetofexperiments,weusetheGSM8Kdataset[Cobbeetal.,2021]thatcontainsreal
+grade-school math word problems. Each problem contains a question x , gold chain-of-thought
+i
+solutionc ,andafinalnumericalanswery . Forourentiretrainingprocess,weonlyusethetraining
+i i
+setofaround7.5kproblemswithoutanyextradata.
+AsaseedmodelM weusethechatversionofLlama-270Bmodel[Touvronetal.,2023],whichis
+0
+instructionfinetuned. Weuseazero-shotpromptcontainingthequestiontogetherwithinstructionsto
+produceachain-of-thoughtandtofollowaspecificformatsothefinalanswercanbeeasilyextracted
+(theexactpromptisgiveninAppendixA.1). Ineachiteration,wegenerateN =30solutionsper
+problemusingsamplingwithtemperature0.8foriterations1–2andtemperature1.3foriterations
+3–4 (hoping that there is a significant number of incorrect generations in later iterations). Since
+someproblemsmightnothaveanymodel-generatedcorrectsolution,weincludethegoldhuman
+writtensolution(c ,y )inthewinningsetGw soitisnotempty. ThenwegenerateK = 10pairs
+i i i
+perproblemfortrainingwithourlossinEquation1,andfilteredoutexamplesthatweretoolong
+intermsofoverflowingthecontextlengthorelsedonothaveanyincorrectgenerations. Thisgave
+around55–60kpairsfortraining,periteration.
+Intotal,weperformed4iterations,producingmodelsM ,M ,M andM . Foreachiteration,we
+1 2 3 4
+trainamaximumof5000steps,thenselectthebestcheckpointusingaheld-out1ksamplesfrom
+thetrainingset. Wethenretrainincludingthose1ksamplesfortheselectednumberofsteps. The
+coefficientαistunedin{0.5,1,2,4}whentrainingM1,andweendupusing1forallexperiments
+inthepaper. Weusedabatchsizeof16andalearningrate7e-7.
+OverallresultsaregiveninTable1,wherewegivetheexactmatchaccuracyontheGSM8Ktestset.
+40 0
+200 200
+400 400
+600 600
+DPO chosen DPO chosen
+DPO rejected DPO rejected
+DPO+NLL chosen DPO+NLL chosen
+800 800
+DPO+NLL rejected DPO+NLL rejected
+0 500 1000 1500 2000 2500 3000 0 500 1000 1500 2000 2500 3000
+Training steps Training steps
+(a)InitializedfromLlama (b)InitializedfromSFTtrainedonchosenseqs
+Figure2: EffectofNLLlosstermonDPOtraining. InourGSM8Kexperimentsweobservethe
+logprobabilityofchosensequencesinstandardDPOwithoutNLLloss(solidorange)decreasesover
+trainingsteps,especiallyifthemodelisinitializedfromSFTtrainingonchosensequences(right).
+However,theyincreaseovertrainingstepswhenusingDPOwithNLLloss(solidblue). Inallfour
+settings,themarginbetweenthetwocurvescontinuesincreasing. WefindthatDPO+NLLlossgives
+superiortestaccuracyinourexperiments.
+IterativeRPO improvesoverbaselines WefindthatIterativeRPOoutperformszero-shotCoT,
+supervisedfinetuning(SFT)onthegoldCoTsolutionsandvariantsofDPObyawidemargin. SFT
+givesaboostinperformancecomparedtozero-shotCoTfrom55.6%to63.5%,butthisisstillfar
+fromthe81.6%ofIterativeRPO. WeapplystandardDPOtothesamesetofpreferencepairsDpairs
+0
+asusedinthefirstiterationofourmethod. WhetherinitializingfromLlama-2-70b-chat(M )or
+0
+fromSFTtrainingonthechosen(winner)examples,wefindthatDPOperformance,whilebeing
+better than zero-shot CoT, is no better than the SFT model, with accuracies of 61.8% or 60.3%
+respectively. WealsoshowthatSFTononlythechosenCoTsolutions,whichcorrespondstothefirst
+iterationoftheSTaRmethod,improvesresultsto65.2%overSFTonthegoldsolutionsalone,but
+stillfallsshortoftheperformanceofthefirstiterationofIterativeRPO. Onehypothesisforthese
+improvementsisthenecessityofincludingtherejectedsequencesinthetrainingobjective,otherwise
+theirprobabilityincreasesalongwiththechosensamples,seeFigure3. Wenotethisobservationhas
+alsobeenreportedinconcurrentwork[Hongetal.,2024]. Alloftheresultsreportedaboveareusing
+asinglegenerationattesttimeusinggreedydecoding. Ifweusemajorityvotingover32samples
+(samplingwithtemperature0.8),astandardapproachtoimproveperformanceintheliterature,we
+canimprovetheaccuracyofourapproachfrom81.1%to88.2%foriteration3,andfrom81.6%to
+88.7%foriteration4ofIterativeRPO.
+Iterations of IterativeRPO yield improve reasoning We observe that IterativeRPO provides
+improvementsoveritstrainingiterations,increasingthebasemodelaccuracyby47%(from55.6%to
+81.6%)intotal. Incontrast,supervisedtrainingusingthegoldCoTonlybringsabouta14%accuracy
+boost. Weseeperformanceimprovesacrosseachiteration,from73.1%to78.0%to81.1%to81.6%.
+However,thegaindecaysacrosstheiterations(17.5%,4.9%,3.1%,0.5%),indicatinganupperlimit
+onlearningacrossiterations,especiallyasweareiteratingacrossafixednumberofprompts,i.e.,only
+fromthetrainingsamples.Wealsoshowthatitistheiterationsofupdatingthemodel(i.e.,initializing
+fromthepreviousmodel)thatarehelping,notjustbecausethereismoredataintheformofnew
+pairsgeneratedfromthefixedtrainingset. TotestthiswerunthefirstiterationofIterativeRPObut
+ontwiceasmuchpaireddata,aswellastheSTaRmethodfirstiterationwithtwiceasmuchdataas
+well. Inbothcasesperformanceimprovescomparedtolessdata,butnotasmuchasperformingtwo
+iterations. IterativeRPOwithtwiceasmuchdataobtains74.8%(animprovementover73.1%using
+theoriginaldatasetsize);however,trainingfortwoiterationsobtains78.0%. ForSTaR,trainingon
+twiceasmuchdataobtains66.9%,comparedto65.2%withtheoriginaldata,whichisstillamuch
+lowerperformancethanIterativeRPO.
+NLLlossisnecessaryinourmethod: DPOwithNLLvs. DPOwithoutNLL Thefirstiteration
+ofourmethodcanbecomparedtostandardDPOtraining,whichusesthesamepreferencedata,as
+reportedinTable1. Weseealargeperformancedrop(73.1%vs. 61.8%)usingDPOcomparedtoour
+5
+ytilibaborp
+goL
+ytilibaborp
+goL0
+200
+400
+600
+SFT chosen
+SFT rejected
+DPO+NLL chosen
+800
+DPO+NLL rejected
+0 500 1000 1500 2000 2500 3000
+Training steps
+Figure3:EffectofSFTtraining:althoughSFTtraining(solidgreen)isonchosensequencesonly,
+therejectedsequenceprobabilityalsoincreasesandisclosetothechosensequenceprobability.
+We show the log probability vs. number of training steps for SFT training (on only the chosen
+examplesfromDpairs)onGSM8K.Thesolidcurveshowsthelogprobabilitiesofsequencesused
+0
+fortraining. Thedottedcurveshowsthelogprobabilitiesoftherejectedsequences. Althoughthose
+sequencesarenotusedforSFTtraining,thelogprobabilitiesofthoselower-qualitysequencesalso
+increase. Incontrast,ourDPO+NLLtraining(blue)managestodecreasetherejectedprobabilities
+whileincreasingthechosenprobabilities. ThisobservationcouldpotentiallyhelpexplainwhySFT-
+onlyperformancelagssignificantlybehindIterativeRPOIteration1performance.
+methodafter1iteration. ThegapremainslargeevenwhenthestandardDPOtrainingstartsfromthe
+superiorSFT-tunedmodel,whichithasbeenarguedimprovesDPO’sperformance[Rafailovetal.,
+2023,2024]. OurresultssupporttheneedoftheNLLlossterminourtraining,notjustusingSFT
+forinitialization. Tofurtherunderstandthis,weplotthesequence-levellogprobabilityovertraining
+stepsforthesemethodsinFigure2. WeseethatforDPOwithoutNLLlossthereisadecreaseover
+trainingforthechosensequences,whereasforDPOwithNLLthereisnot,whichmayhelpexplain
+theimprovedperformanceofthelatter. Wenotethatrelatedobservationshavebeenmadeelsewhere
+invarioussettings[Paletal.,2024,Xuetal.,2024]. Further,wenotethatwhetherweinitializewith
+Llama-2-70b-chatorSFTonchosenforIterativeRPO,accuracyresultsoffirstiterationtrainingdo
+notseemtodeviate(bothobtainthesamescore73.1%).
+Other results in the literature We can compare our results to others in the literature, even if
+theirexperimentsareindifferentsettings. Touvronetal.[2023]reportsanaccuracyof56.8%for
+8-shotLlama-2-70b,whichisclosetoourzero-shotCoTresultsforLlama-2-70b-chat. Intermsof
+closed-sourceproprietarylanguagemodels,someresultsaresuperiorresultstoours,whileothers
+arenot,forexampleGPT-4obtains92.0%(5-shotchain-of-thought)[Achiametal.,2023],Claude2
+obtains88.0%[AnthropicTeam,2023],PaLM2obtains80.7%[Aniletal.,2023],whileGPT-3.5
+obtains57.1%(5-shot)[Achiametal.,2023]. Wenotethatthesize(numberofparameters)andthe
+makeupofthetrainingsetofsomeofthesemodelshavenotbeenfullydisclosed. Forresultsthat
+usethesamesizeandclassmodel,Llama-2-70b,MetaMath[Yuetal.,2023]reportsanaccuracyof
+82.3%,whileWizardMathreports81.6%[Luoetal.,2023]. Theselasttworesultsuseadditional
+augmentedtrainingdata,whereasourmethoddoesnotuseadditionalprompts. Wenotethatsuch
+approachesshouldbeorthogonaltoours,andbothcanprovidebenefits.
+3.2 ARC-Challengetask
+Totestreasoningcapabilitiesoutsideofmathematics,weemployARC[Clarketal.,2018]which
+coversmultiplesciencesubjects. Thedatasetcontains7.7kmultiple-choicequestionssplitintoeasy
+andchallengesets. WereportresultsontheARC-Challengetestsetwhichhas1172examples. There
+isnogoldchain-of-thoughtreasoningprovidedfortrainingexamplesinthistask,whichinanycaseis
+notrequiredinourmethod,asweonlycomputerewardsbasedonthefinalanswer. Oneconsequence
+isthatifthereisnomodel-generatedcorrectsolutionforaquestion,thenthatquestionisnotincluded
+inourtraining. Wethusfollowthesamesetupasbeforetofirstgeneratereasoningandthenafinal
+answerbythemodels(seeAppendixA.1forprompt)toconstructdataforiterationsofIterativeRPO.
+WeonlytrainonthetrainingsetanddonotutilizeARCCorpus.
+6
+ytilibaborp
+goLTable 2: ARC and MATH results. We compare Iterative Reasoning Preference Optimization
+(IterativeRPO)againstotherbaselinesthatarebasedonthesamebasemodelandtrainingdata.
+ARC-Challenge MATH
+Model (0-shot) (4-shot)
+TestAccuracy(%) TestAccuracy(%)
+IterativeRPO(initializedfromLlama-2-70b-chat)
+Iteration1 84.8 17.7
+Iteration2 86.2 19.9
+Iteration3 86.7 20.8
+OtherLlama-2-70b-chat-initializedmethods
+CoT 77.8 12.5
+SFTonchosensequences 79.8 16.8
+DPOinitializedfromLlama-2-70b-chat 82.8 12.4
+DPOinitfromSFTmodeltrainedonchosenseqs 83.5 10.5
+Specifically, in each iteration, we generate N = 30 solutions per problem using sampling with
+temperature0.8foriterations1–2andtemperature1.3foriteration3. WeselectK = 20pairsof
+solutionsperproblem. Weendupwitharound20kexamplepairsforiteration1,11kexamplepairs
+foriteration2,and5kexamplepairsforiteration3. Thedecreaseinthenumberofexamplesisdueto
+thelackofincorrectsamplesforanumberofquestionsinlateriterations. Eachiterationistrainedon
+amaximumof4000steps. Thehyperparametertuningreliesontheprovideddevelopmentset.
+WehenceperformexperimentsusingaverysimilarsetuptotheonepreviouslydescribedforGSM8K.
+OverallresultsaregiveninTable2. WeagainfindthatIterativeRPOprovidesincreasedperformance
+acrossiterations(84.8%,86.2%,86.7%)overthreeiterations. Majorityvotingusingthemodelin
+thethirditeration(32samples,temperature0.8)leadstoanothersmallboost(87.9%). Theseresults
+outperformzero-shotCoT(77.8%),SFTonchosensequences(79.8%)andstandardDPO(83.5%).
+EventhoughwearriveatsimilarconclusionstotheonesfromGSM8K,wefindtheseresultsespecially
+noteworthyduetothemultiple-choicenatureofthetask. Astherearetypicallyonlyfourpossible
+answers,thegenerateddatainstep(i)ofIterativeRPOmayprovideaCoTandafinalanswerthatis
+correctbyluck(asrandomguessingiscorrect25%ofthetime). Hence,thenatureofthetaskmay
+introduceasignificantamountofnoiseintheCoTgenerationsusedinpreferenceoptimizationin
+step(ii). Nevertheless,themethodseemsrobusttothisissueandwestillobserveperformancegains.
+3.3 MATHtask
+WealsoexperimentwithmoreadvancedmathproblemsusingtheMATH[Hendrycksetal.,2021]
+datasetthatiscomposedof12,500competitionproblems. Thetestsethas5,000examples. Similar
+to the GSM8K dataset, a gold CoT solution is provided for each problem, and the gold answers
+canbematcheduniquelytopredictedanswersafternormalizationtocomputerewards. Wedonot
+usetheaccompanyingpretrainingdata. ForeachMATHquestion,weuseafew-shotpromptgiven
+inAppendixA.1astheinputtothelanguagemodel. Inparticular,thepromptincludesfourfixed
+in-contextexampleschosenfromthetrainingset. Thelanguagemodelneedsthesedemonstrationsso
+thatthefinalanswerscanbeproperlyformattedinLATEX.
+Ineachiteration,wegenerateN =20solutionsperproblemusingsamplingwithtemperature0.8for
+iterations1–2andtemperature1.0foriteration3. WeselectK =15pairsofsolutionsperproblem,
+andafterfilteringoutpairswithoverlylonggenerations,foreachiterationwerandomlyselectaround
+75k example pairs. We train a maximum of 5000 steps per iteration; other details are similar to
+GSM8Ksetups.
+ResultsaregiveninTable2. WeagainfindthatIterativeRPOprovidesincreasedperformanceacross
+iterations,from17.7%to19.9%to20.8%overthreeiterations. Theseresultsoutperformfew-shot
+CoT(12.5%),SFTonchosensequences(16.8%)andstandardDPO(12.4%). Inparticular,DPO
+degradestheperformancecomparedtoinitialization.
+7Overall,wefindonallthreedistincttaskswetried,fromsimplertomoredifficult,similarobservations
+abouttheperformancegainsexhibitedbyourmethod.
+4 RelatedWork
+GeneralIterativeAlignmentMethods Severalworkshaveimplementediterativereinforcement
+learningfrom humanfeedback (RLHF)witha human-in-the-loopto provideadditional labelsto
+retraintherewardmodelateachiteration,e.g.,viaProximalPolicyOptimization(PPO)[Schulman
+et al., 2017], reporting improvements across iterations [Bai et al., 2022, Touvron et al., 2023].
+Recently,approacheshavebeenproposedtoperformiterativealignmentwithoutahuman-in-the-loop.
+IterativeDPO[Xuetal.,2023,Xiongetal.,2023]optimizespreferencepairsusingDPO[Rafailov
+et al., 2023] at each iteration, and then constructs new preference pairs for the next iteration by
+generatingthemusingtheupdatedmodel,andscoringthemusingarewardmodel. Otheriterative
+methodsthanDPOexistaswell,suchastheCringeloss[Adolphsetal.,2023],PairwiseCringeLoss
+[Xuetal.,2023]andReST[Gulcehreetal.,2023].
+SPIN[Chenetal.,2024]isanIterativeDPO-likeframeworkthatuseshumanlabelsasthewinning
+responseinapair,andthelastiteration’sgenerationsasthelosingresponseinthepair. Theauthors
+note this has the limitation that once the model generations reach human performance, they are
+bottlenecked. Further, each input prompt is required to have a human-annotated generation. In
+contrast,ourworkonlyrequiresthefinalanswer,butnotthereasoningsteps,andcruciallyusesthe
+modeltogeneratebothwinningandlosingChain-of-Thoughts. Onlymodestgainsonreasoning
+tasksarereportedintheirwork.
+Self-RewardingLLMs[Yuanetal.,2024]alsouseIterativeDPOwiththeLLMitselfusedasareward
+modeltoconstructpairsforeachsuccessiveiteration. Boththatwork,andtheworkofRossetetal.
+[2024]andSnorkelAITeam[2023]whichdosimilariterationsbutwithexternalrewardmodels,
+showsignificantgainsongeneralinstructionfollowingtasks. However,again,onlymodestgainson
+reasoningtasksarereported.
+MethodsImprovingReasoningAbility Whileanumberofapproacheshavebeendevelopedto
+curateordistilltrainingdataforreasoningtasks[Yuetal.,2023,Toshniwaletal.,2024],inthiswork
+wefocus onlearning algorithmswhich isan orthogonalaxis. Expert Iteration assumesa reward
+model,andrepeatedlyusesrejectionsamplingtofiltergenerationsandtrainonthem,whichisfound
+tomatchthesamplecomplexityofPPO[Havrillaetal.,2024]. STaR[Zelikmanetal.,2022]relies
+on a similar loop: generate rationales to answer many questions, prompted with a few rationale
+examples; ifthegeneratedanswersarewrong, tryagaintogeneratearationalegiventhecorrect
+answer;andthenfine-tuneonalltherationalesthatultimatelyyieldedcorrectanswers;andrepeat.
+ReSTEM [Singhetal.,2023]assumesagroundtruthverifierandalsofine-tunesonfilteredsamples
+inarepeatedfashion. Allthesemethodsrelyonfindinghigh-qualitysamplesforSFT-liketraining,
+ratherthanusingDPO-likepairwisepreferenceoptimizationasinourwork.
+TheV-STaRmethod[Hosseinietal.,2024]trainsaverifierusingDPOandusesthistofilterthe
+generationsofamodeltrainedbySFT,ratherthanusingDPOtotrainthegenerator,aswedo. MAPO
+[Sheetal.,2024]alsorecentlyutilizesDPObutformultilingualreasoningtasks,wheretheytranslate
+acrosslanguages.
+5 Conclusion
+We proposed an iterative training algorithm, IterativeReasoningPreferenceOptimization, for im-
+provingchain-of-thought-basedreasoningtaskperformanceinLLMs. Ineachiteration,wegenerate
+multipleresponsesandbuildpreferencepairsbasedonthecorrectnessoftheirfinalanswers,and
+then use a modified DPO loss with an additional NLL term for training. Our method does not
+requirehuman-in-the-looporextratrainingdata,andremainssimpleandefficienttoimplement. The
+experimentalresultsshowlargeimprovementsonGMS8K,MATH,andARC-Challengeovervarious
+baselinesusingthesamebasemodelandtrainingdata. Theseresultsindicatetheeffectivenessofour
+recipeofiterativetraininginimprovingthereasoningcapabilitiesofLLMs.
+8Acknowledgments
+WethankcolleaguesatMetaandNYUforvaluablediscussion: inparticular,AngelicaChen,Jing
+Xu,AbulhairSaparov,VishakhPadmakumar,NicholasLourie,andNitishJoshi.
+References
+JoshAchiam,StevenAdler,SandhiniAgarwal,LamaAhmad,IlgeAkkaya,FlorenciaLeoniAleman,
+DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,etal.GPT-4technicalreport.
+arXivpreprintarXiv:2303.08774,2023.
+Leonard Adolphs, Tianyu Gao, Jing Xu, Kurt Shuster, Sainbayar Sukhbaatar, and Jason Weston.
+TheCRINGEloss: Learningwhatlanguagenottomodel. InAnnaRogers,JordanBoyd-Graber,
+and Naoaki Okazaki, editors, Proceedings of the 61st Annual Meeting of the Association for
+ComputationalLinguistics(Volume1: LongPapers),pages8854–8874,Toronto,Canada,July
+2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.acl-long.493. URL
+https://aclanthology.org/2023.acl-long.493.
+Rohan Anil, Andrew M Dai, Orhan Firat, Melvin Johnson, Dmitry Lepikhin, Alexandre Passos,
+SiamakShakeri,EmanuelTaropa,PaigeBailey,ZhifengChen,etal. Palm2technicalreport. arXiv
+preprintarXiv:2305.10403,2023.
+Anthropic Team. Claude 2, 2023. URL https://www.anthropic.com/news/claude-2. Ac-
+cessed: 2023-04-24.
+YuntaoBai,AndyJones,KamalNdousse,AmandaAskell,AnnaChen,NovaDasSarma,DawnDrain,
+StanislavFort,DeepGanguli,TomHenighan,etal. Trainingahelpfulandharmlessassistantwith
+reinforcementlearningfromhumanfeedback. arXivpreprintarXiv:2204.05862,2022.
+Zixiang Chen, Yihe Deng, Huizhuo Yuan, Kaixuan Ji, and Quanquan Gu. Self-play fine-tuning
+convertsweaklanguagemodelstostronglanguagemodels. arXivpreprintarXiv:2401.01335,
+2024.
+PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,and
+OyvindTafjord. Thinkyouhavesolvedquestionanswering? tryarc,theai2reasoningchallenge.
+arXivpreprintarXiv:1803.05457,2018.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+MatthiasPlappert,JerryTworek,JacobHilton,ReiichiroNakano,ChristopherHesse,andJohn
+Schulman. Trainingverifierstosolvemathwordproblems. arXivpreprintarXiv:2110.14168,
+2021.
+CaglarGulcehre,TomLePaine,SrivatsanSrinivasan,KseniaKonyushkova,LotteWeerts,Abhishek
+Sharma,AdityaSiddhant,AlexAhern,MiaosenWang,ChenjieGu,etal. Reinforcedself-training
+(rest)forlanguagemodeling. arXivpreprintarXiv:2308.08998,2023.
+AlexHavrilla,YuqingDu,SharathChandraRaparthy,ChristoforosNalmpantis,JaneDwivedi-Yu,
+MaksymZhuravinskyi,EricHambro,SainbayarSukhbaatar,andRobertaRaileanu. Teachinglarge
+languagemodelstoreasonwithreinforcementlearning. arXivpreprintarXiv:2403.04642,2024.
+DanHendrycks,CollinBurns,SauravKadavath,AkulArora,StevenBasart,EricTang,DawnSong,
+andJacobSteinhardt. Measuringmathematicalproblemsolvingwiththemathdataset. NeurIPS,
+2021.
+JiwooHong,NoahLee,andJamesThorne. Reference-freemonolithicpreferenceoptimizationwith
+oddsratio. arXivpreprintarXiv:2403.07691,2024.
+ArianHosseini,XingdiYuan,NikolayMalkin,AaronCourville,AlessandroSordoni,andRishabh
+Agarwal. V-star: Trainingverifiersforself-taughtreasoners. arXivpreprintarXiv:2402.06457,
+2024.
+9JieHuang,XinyunChen,SwaroopMishra,HuaixiuStevenZheng,AdamsWeiYu,XinyingSong,
+and Denny Zhou. Large language models cannot self-correct reasoning yet. arXiv preprint
+arXiv:2310.01798,2023.
+Haipeng Luo, Qingfeng Sun, Can Xu, Pu Zhao, Jianguang Lou, Chongyang Tao, Xiubo Geng,
+Qingwei Lin, Shifeng Chen, and Dongmei Zhang. Wizardmath: Empowering mathematical
+reasoningforlargelanguagemodelsviareinforcedevol-instruct. arXivpreprintarXiv:2308.09583,
+2023.
+Arka Pal, Deep Karkhanis, Samuel Dooley, Manley Roberts, Siddartha Naidu, and Colin White.
+Smaug: Fixing failure modes of preference optimisation with dpo-positive. arXiv preprint
+arXiv:2402.13228,2024.
+RafaelRafailov,ArchitSharma,EricMitchell,ChristopherDManning,StefanoErmon,andChelsea
+Finn. Direct preference optimization: Your language model is secretly a reward model. In
+Thirty-seventh Conference on Neural Information Processing Systems, 2023. URL https://
+openreview.net/forum?id=HPuSIXJaa9.
+RafaelRafailov,JoeyHejna,RyanPark,andChelseaFinn. Fromrtoq∗: Yourlanguagemodelis
+secretlyaq-function,2024.
+Corby Rosset, Ching-An Cheng, Arindam Mitra, Michael Santacroce, Ahmed Awadallah, and
+TengyangXie. Directnashoptimization: Teachinglanguagemodelstoself-improvewithgeneral
+preferences. arXivpreprintarXiv:2404.03715,2024.
+JohnSchulman,FilipWolski,PrafullaDhariwal,AlecRadford,andOlegKlimov. Proximalpolicy
+optimizationalgorithms. arXivpreprintarXiv:1707.06347,2017.
+ShuaijieShe,ShujianHuang,WeiZou,WenhaoZhu,XiangLiu,XiangGeng,andJiajunChen.Mapo:
+Advancing multilingual reasoning through multilingual alignment-as-preference optimization.
+arXivpreprintarXiv:2401.06838,2024.
+AviSingh,JohnDCo-Reyes,RishabhAgarwal,AnkeshAnand,PiyushPatil,PeterJLiu,James
+Harrison,JaehoonLee,KelvinXu,AaronParisi,etal. Beyondhumandata: Scalingself-training
+forproblem-solvingwithlanguagemodels. arXivpreprintarXiv:2312.06585,2023.
+Snorkel AI Team. Snorkel-mistral-pairrm-dpo. https://huggingface.co/snorkelai/
+Snorkel-Mistral-PairRM-DPO,2023. Accessed: 2024-04-15.
+NisanStiennon,LongOuyang,JeffreyWu,DanielZiegler,RyanLowe,ChelseaVoss,AlecRadford,
+DarioAmodei,andPaulFChristiano. Learningtosummarizewithhumanfeedback. Advancesin
+NeuralInformationProcessingSystems,33:3008–3021,2020.
+Shubham Toshniwal, Ivan Moshkov, Sean Narenthiran, Daria Gitman, Fei Jia, and Igor Git-
+man. Openmathinstruct-1: A 1.8 million math instruction tuning dataset. arXiv preprint
+arXiv:2402.10176,2024.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+Bashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Openfoundation
+andfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+Dingjun Wu, Jing Zhang, and Xinmei Huang. Chain of thought prompting elicits knowledge
+augmentation. InAnnaRogers,JordanBoyd-Graber,andNaoakiOkazaki,editors,Findingsofthe
+AssociationforComputationalLinguistics: ACL2023,pages6519–6534,Toronto,Canada,July
+2023.AssociationforComputationalLinguistics. doi: 10.18653/v1/2023.findings-acl.408. URL
+https://aclanthology.org/2023.findings-acl.408.
+WeiXiong,HanzeDong,ChenluYe,HanZhong,NanJiang,andTongZhang. Gibbssamplingfrom
+humanfeedback: Aprovablekl-constrainedframeworkforrlhf. arXivpreprintarXiv:2312.11456,
+2023.
+HaoranXu,AmrSharaf,YunmoChen,WeitingTan,LingfengShen,BenjaminVanDurme,Kenton
+Murray,andYoungJinKim. Contrastivepreferenceoptimization: Pushingtheboundariesofllm
+performanceinmachinetranslation. arXivpreprintarXiv:2401.08417,2024.
+10JingXu,AndrewLee,SainbayarSukhbaatar,andJasonWeston. Somethingsaremorecringethan
+others: Preferenceoptimizationwiththepairwisecringeloss. arXivpreprintarXiv:2312.16682,
+2023.
+LonghuiYu,WeisenJiang,HanShi,JinchengYu,ZhengyingLiu,YuZhang,JamesTKwok,Zhenguo
+Li,AdrianWeller,andWeiyangLiu. Metamath: Bootstrapyourownmathematicalquestionsfor
+largelanguagemodels. arXivpreprintarXiv:2309.12284,2023.
+WeizheYuan,RichardYuanzhePang,KyunghyunCho,SainbayarSukhbaatar,JingXu,andJason
+Weston. Self-rewardinglanguagemodels. arXivpreprintarXiv:2401.10020,2024.
+Eric Zelikman, Yuhuai Wu, Jesse Mu, and Noah Goodman. Star: Bootstrapping reasoning with
+reasoning. AdvancesinNeuralInformationProcessingSystems,35:15476–15488,2022.
+DanielMZiegler,NisanStiennon,JeffreyWu,TomBBrown,AlecRadford,DarioAmodei,Paul
+Christiano,andGeoffreyIrving. Fine-tuninglanguagemodelsfromhumanpreferences. arXiv
+preprintarXiv:1909.08593,2019.
+A MoreDetailsonExperimentalSetup
+A.1 Prompts
+GSM8K. ForeachGSM8Kquestion,weusethefollowingpromptastheinputtothelanguage
+model:
+Yourtaskistoanswerthequestionbelow.Givestepbystepreasoningbeforeyouanswer,
+andwhenyou’rereadytoanswer,pleaseusetheformat"Finalanswer:..."
+Question:[questionhere]
+Solution:
+MATH. ForeachMATHquestion,weusethefollowingpromptastheinputtothelanguagemodel.
+In particular, the prompt includes four fixed in-context examples chosen from the training set of
+MATH.Thelanguagemodelneedsthesedemonstrationssothatthefinalanswerscanbeproperly
+formattedinLATEX.
+Yourtaskistoanswerthelastquestionbelow. Givestepbystepreasoningbeforeyou
+answer,andwhenyou’rereadytoanswer,pleasewrapyouranswerin\boxed,andconclude
+usingtheformat"Finalanswer:..."
+Question:[questionforthefirstexample]
+Solution:[solutionforthefirstexample]
+Finalanswer:[answer(e.g.,number,formula)here]
+Question:[questionforthesecondexample]
+Solution:[solutionforthesecondexample]
+Finalanswer:[answerhere]
+Question:[questionforthethirdexample]
+Solution:[solutionforthethirdexample]
+Finalanswer:[answerhere]
+Question:[questionforthefourthexample]
+Solution:[solutionforthefourthexample]
+Finalanswer:[answerhere]
+Question:[thequestiontobesolved]
+Solution:
+11ARC. ForeachARCquestion,weusethefollowingpromptastheinputtothelanguagemodel,
+assumingthequestionhasfouroptions(eachquestionhasthreetofiveoptions).
+Yourtaskistoanswerthequestionbelow.Givestepbystepreasoningbeforeyouanswer,
+andwhenyou’rereadytoanswer,concludeusingtheformat"Finalanswer:(insertletter
+here)"
+Question:[questionhere]
+(A)[optionAhere]
+(B)[optionBhere]
+(C)[optionChere]
+(D)[optionDhere]
+Solution:
+12
