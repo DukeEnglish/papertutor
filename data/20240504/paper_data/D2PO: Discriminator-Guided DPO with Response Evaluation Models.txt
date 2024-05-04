@@ -1,0 +1,1163 @@
+D2PO: Discriminator-Guided DPO
+with Response Evaluation Models
+♡ ♠ ♣ ♢ ♡
+PrasannSinghal ,NathanLambert ,ScottNiekum ,TanyaGoyal ,GregDurrett
+♡ ♠
+TheUniversityofTexasatAustin, AllenInstituteforArtificialIntelligence
+♣ ♢
+UniversityofMassachusettsAmherst, PrincetonUniversity
+prasanns@cs.utexas.edu
+Abstract
+Variedapproachesforaligninglanguagemodelshavebeenproposed,in-
+cludingsupervisedfine-tuning,RLHF,anddirectoptimizationmethods
+such as DPO. Although DPO has rapidly gained popularity due to its
+straightforwardtrainingprocessandcompetitiveresults,thereisanopen
+questionofwhetherthereremainpracticaladvantagesofusingadiscrim-
+inator, like a reward model, to evaluate responses. We propose D2PO,
+discriminator-guidedDPO,anapproachfortheonlinesettingwherepref-
+erencesarebeingcollectedthroughoutlearning. Aswecollectgoldprefer-
+ences,weusethesenotonlytotrainourpolicy,buttotrainadiscriminative
+response evaluation model to silver-label even more synthetic data for
+policy training. We explore this approach across a set of diverse tasks,
+includingarealisticchatsetting,wefindthatourapproachleadstohigher-
+qualityoutputscomparedtoDPOwiththesamedatabudget,andgreater
+efficiencyintermsofpreferencedatarequirements. Furthermore,weshow
+conditionsunderwhichsilverlabelingismosthelpful: itismosteffective
+whentrainingthepolicywithDPO,outperformingtraditionalPPO,and
+benefitsfrommaintainingaseparatediscriminatorfromthepolicymodel.
+1 Introduction
+Learningfromhumanpreferencesistheprevailingmethodforlargelanguagemodel(LLM)
+alignment,includingapproacheslikereinforcementlearningfromhumanfeedback(RLHF)
+(Ouyangetal.,2022;Baietal.,2022),DirectPreferenceOptimization(DPO)(Rafailovetal.,
+2023),andseveralrecentalternatives(Azaretal.,2023;Ethayarajhetal.,2024;Hongetal.,
+2024). Akeyideainthislineofwork,introducedbyDPO,isthattherewardobjectivecanbe
+expressedintermsoftheoptimalpolicyandreferencepolicy,allowingustotrainamodel
+frompreferencedatawithoutlearningaseparaterewardmodelorsamplingfromthepolicy
+duringlearning.
+However, the theoretical guarantees of DPO may not apply in practice. Preferences are
+notnecessarilyobtainedoverasetofoutputsthatarein-distributionforthefinalaligned
+model. Forexample, preferencesmaybelabeledoverinitialmodeloutputsofacertain
+length,butthedistributionofthepolicymodelmayshiftduringtrainingtoproducelonger
+responses(Singhaletal.,2023). Inthiscase,thepreferencedatadoesnotuniquelyspecify
+anoptimalpolicy,sodifferentalgorithmsmayleadtodifferentsolutionsinpractice. At
+thesametime,recentapproacheshaveexploredcollectingpreferencesfromtheshifting
+distributionofthemodelthroughouttraining(Touvronetal.,2023;Yuanetal.,2024b). Itis
+notcleartheoreticallynorempiricallywhichapproachisbestgivenalimitedbudgetfor
+preferencelabelinginthisonlinesetting.
+Thispaperinvestigatestheroleofanexplicitdiscriminativemodelduringthealignment
+process. Ourcentralhypothesisisthatwhenpreferencedataislimited,amodeldiscrimina-
+tivelytrainedtoevaluateresponses(likearewardmodel)canlearntoassessthemmore
+1
+4202
+yaM
+2
+]LC.sc[
+1v11510.5042:viXraPolicy model Sta$c Preference Data Discrimina$ve response Online Output Pairs
+π t(y∣x) 𝒫={(x i,y i+,y i−)} eva Rlu (a x$ ,o yn ) m →od rel x y 1,y 2
+Train Train Lab Re Ml w/ pT ora lii cn y Gold Label Update
+πt(y|x) R(x,y) R
+t=0 t=T t=0 t=T
+(a) Standard DPO (b) OPO (c) D2PO (ours)
+discriminative evaluation for silver labeling,
+plus online labeling of preferences
+Figure 1: Comparison of standard DPO, online preference optimization methods (with
+rewardmodel-labeleddata),andourproposedD2POmethod. Thekeyadditionin(c)is
+theonlinelearningoftherewardmodelonnewpreferencesduringpolicyoptimization.
+easilythanamodelcanlearntoproducethem. Thisdiscriminativeresponseevaluation
+modelcanthenbeusedtosilver-labelsamplesfromourpolicytogiveadditionaldatafor
+policytraining.
+WeoperationalizethisapproachinaamethodcalledD2PO(Figure1). D2POalternates
+betweentwophases: first,collectingpreferencelabelstotrainthediscriminativeresponse
+evaluationmodel(blue),andsecond,usingthatdiscriminatortolabelalargernumberof
+outputs from the policy model (teal). We use the discriminator as a pairwise preference
+labelerandtrainthepolicyusingtheDPOobjective,whichwefindworksbetterthana
+conventionalPPOsetup(Schulmanetal.,2017). Finally,bydecouplingthediscriminator
+fromthepolicy,itcanbelearnedoverhuman-labeledpreferencedataonly,whilethepolicy
+modelcanlearnfromalargeramountofnoisily-labeledon-policydata.
+Ourresultsstudybotharealisticchatbenchmark(UltraFeedback(Cuietal.,2023))aswell
+asseveralsimpletextgenerationtaskswhereweexplicitlydefinegoldrewardfunctions.
+Weshowseveralkeyfindings. First,weshowthattheonlinepreferencecollectionsetting
+indeedworksbetterthanhavingonlystaticpreferencescollectedfromtheinitialpolicy
+model. We then show that, given the same budget of preference updates as baselines,
+D2POonseveralsettingsachieveshigherrewardmorequicklythananonlineversionof
+DPOandthanbasicPPO.Finally,westudyhowadiscriminativerewardevaluationmodel
+behavesoverthecourseoftraining. Receivingnewlabeleddataiscrucialforittobeableto
+makeaccuratejudgmentsaboutnewsampledresponses. CombinedwithcontrolledD2PO
+experimentstestingdifferenttypesofdiscriminators,includingusingthepolicyasitsown
+discriminator,weestablishthatinthesettingwediscuss,aseparatediscriminatormaystill
+beausefulingredientinLLMalignment.
+Taken together, we make the following contributions. (1) We propose a new approach,
+discriminator-guidedDPO,forthesettingwherepreferencesarebeingcollectedonline. (2)
+Weshow,onadiversesetoftasks,thatmaintainingadiscriminativeresponseevaluation
+modelandusingittosilverlabelnewsampledresponsesimprovespolicytraining. (3)We
+1
+willreleasecode andourdiversetasksettingstosupportthetestinganddevelopmentof
+futurealignmentalgorithms.
+2 Background/Setup
+Let π(y ∣ x) be an LM that places a probability distribution over a response y given an
++ −
+inputx. LetD={(x,y ,y )}beadatasetofhumanpreferencejudgments,withoutputs
+i i i
++ −
+y preferredtoalternativesy . Thesepreferencesareassumedtobederivedfromascalar
+i i
+∗
+rewardmodelR (x,y)reflectinghumanutility,whichwedonothaveaccessto. Thegoal
+1 Codeavailableathttps://github.com/PrasannS/d2po
+2ofLMalignmenttrainingistomaximizethisreward,optionallystartingfromasupervised
+fine-tunedpolicyπ (y∣ x).
+sft
+InstandardRLHF(PPO;(Schulmanetal.,2017)),first,aBradley-TerryrewardmodelR(x,y)
+is learned using preference data. To train the policy, online rollouts are then iteratively
+sampledfromthepolicyπ ateachtrainingiteration,andthelossoptimizationdepends
+t
+ontherewardscoresassignedtotheseoutputsbythelearnedrewardmodel,allowingthe
+policytolearnfromtheserolloutsundertheassumptionthattherewardmodelproduces
+accurate rewards. Direct Preference Optimization (DPO; Rafailov et al. (2023)), another
+popularapproach,examinestrainingthepolicydirectly,offline,onjusttheinitialpreference
+data using a discriminative loss, removing the separate discriminator. However, later
+work(Liuetal.,2023;Leeetal.,2024),hasexploredincorporatingonlinesamplingwith
+discriminativeobjectives. Webroadlycallthisworkonlinepreferenceoptimization(OPO).
+Whilesuchmethodsareonlinewithrespecttothepolicy,theyarenotonlinewithrespect
+topreferences,whichareusuallycollectedfromafixeddistributionsuchasπ . Thus,as
+sft
+distributionπ changesovertraining,thesignalofarewardmodeloradiscriminatormay
+t
+degradeinquality,limitingimprovement. Somework(Touvronetal.,2023;Guoetal.,2024)
+explorescollectingpreferencesatanadditionalintermediatetrainingsteptoaddressthis
+issue. However,theintermediatesteps,data,andobjectivesforthisprocessareoftenchosen
+inanad-hocmanner.
+3 D2PO:UsingaDiscriminatorinPolicyTraining
+Oursetting Thisworkfocusesonthesettingwherewecollectadditionalgoldpreference
+judgments during policy learning. We define the total gold-labeled preference budget,
+typicallyfromhumansorfromLLM-as-a-judge,asP. Inmostapproaches,likeDPOand
++ −
+OPO,allpreferencesD ={(x,y ,y )}arecollectedoffline(P=∣D ∣)fromasingleinitial
+0 i i i 0
+distribution. IniterativeversionsofDPO,includingourproposedmethod D2PO,gold
+preferencedataiscollectedatT differentstagesduringtraining. Thetotalpreferencedata
+P
+isthereforeD∶ {D 0,D 1⋯D TP},andP=∑ t∶0∶TP∣D t∣.
+We hypothesize that online up- D2PO parameteriza+on
+dates to discriminators, with a Ini,al human-labeled
+highnumberT P ofpreferencecol- preference data eR ve as lp uo a,ns oe n Policy model
+lection steps, will help solve the
+distribution shift issue and im-
+model πt(y|x)
+proveperformance. However,as
+preferencedatamaybeexpensive, D2PO itera+on (every N/Tp steps) 4 u. pH du am tea sn t- hla eb re el se pd o d na st ea
+wewanttodosowithminimalP. 1. Sample prompts 2. S fa rm ompl e p oo lu ict yputs evalua,on model
+The question then becomes how You first should... 4. All labels
+touseasmallPtomaximallyim- “Tell me how to…” Don’t… up pd oat lie c ythe
+prove our policy with respect to “What is the sum of…” The answer is 10
+∗
+R . To address this, D2PO com- The answer is 12 3. A small amount
+binestwoideas: (1)thecompara- fol“ loS wum inm g a pr ai sz se a t gh ee … ” The passage says… lo af b d ela et da , i ts h h eu rm esa tn i- s
+tive advantage in data efficiency Nothing to summarize… silver-labeled.
+ofonlinedata;(2)theabilityofdis-
+criminatorstogeneralizequickly
+Figure2: D2POtrainsaninitialpolicymodelandre-
+onnewdataandhelpsilver-label
+sponseevaluationmodelfromgoldpreferences. Itthen
+data for a policy, reducing the
+samplesprompts,samplesoutputsofthoseprompts,
+needforcostlygoldpreferences.
+andusesamixofhumanlabelingandsilverlabeling
+Algorithm We detail our ap- toproducepolicytrainingdata. Onlyhuman-labeled
+proach,D2PO,inAlgorithm1and dataisusedtoupdatetheresponseevaluationmodel.
+Figure2. Thealgorithm,froman
+initializedpolicyanddiscriminator,runsfor N iterations. Ineachiteration,thefirststep
+(L3-8)istosampleabatchofpairedoutputsfromthepolicyπ ,thengetpreferencelabels
+t
+withourdiscriminator,anddoDPOupdatesonthesenewsilverpreferences. Notethispart
+ofthealgorithmdirectlycorrespondstoseveralbaselineswe’llcompareagainst: ifweomit
+3Algorithm1D2PO
+∗
+Input: Policymodelπ,DiscriminatorR,promptsetX,goldpreferencesourceR ,hyperparameters:
+policyrolloutbudgetN,goldpreferencebudgetP
+1: D candidates←{}
+2: fort∈[0,N]do
+3: //UpdatepolicyusingonlinerolloutsandpreferencesderivedfromdiscriminatorR.
+4: samplex∈X //sampleprompt
+5: y 1,y 2←π(x),π(x) //get2rolloutsfrompolicyusingprompt
+6: D candidates←D candidates∪(x,y 1,y 2)
++ −
+7 8:
+:
+y π←,y π← +▽ar Lg Dm Pa Ox (y π∈ ,(y y1+,y ,2 y) −R )(x, /y /), Dar Pg Om uin py d∈ a(y te1,y w2) itR h( nx, ey w) pr/ e/ ferg ee nt cs eil sverlabelsfromR
+9: ift (mod N/T p)==0then
+10: //subsamplefromD ,goldpreferencesandupdatediscriminatorR.
+candidates
+11: D selected←argtopk (x,y1,y2)∈Dcandidates−∣R(x,y 1)−R(x,y 2)∣,where∣D selected∣=P/T P
+12: ford∈D do
+ca∗ndidates ∗
+13: d g ←R (d) //labelpreferencewithannotatorwithgoldannotatorR
+14: R←R+▽L BT(R,d g) //updaterewardmodel
+15: π←π+▽L DPO(π,d g) //policyisalsoupdatedwithnewlabels
+16: endfor
+17: D candidates←{} //Resetoutputsamples
+18: endif
+19: endfor
+therestofthealgorithm,thisonitsownisOPOwithastaticRM(seebelow). Ifwethen
+∗
+replaceRwithR here,gettinggoldlabelsinstead,thisbecomesanOPOwithgoldbaseline.
+Lastly,ifinsteadofusingπ wefixtherolloutdistributiontobeπ ,thisgivesusDPO.
+t sft
+Every N/T steps, wecollectgoldannotationandupdatethediscriminator(L11-17). In
+p
+practicewecanupdatethepolicywiththeselabels,thoughthisisasparsesetofstepssince
+thenumberofpreferencesPismuchlessthanthenumberofpolicytrainingiterationsN.
+ThisisthestepdepictedinFigure2. ThesubsamplingstepofD canuseastrategy
+candidates
+suchasconfidencesampling(Lewis&Gale,1994),shownhere,wherewechoosepreference
+pairswiththelowestgapindiscriminatorreward,orrandomsampling,wherewerandomly
+select P pairs. We generally find these to perform similarly. We report with confidence
+samplinginmostsettings,exceptContrastiveDistillationwherewefindrandomsampling
+toworkbetter.
+Importantly,wethenupdateourrewardmodelwiththesepreferences,allowingustocollect
+automatic preference labels on a larger set of rollouts for “free” (in terms of annotation
+cost),takingadvantageofthediscriminator’sabilitytogeneralizetootherexamplesfrom
+asimilardistribution. Notethatouralgorithmisflexibleintheformofthediscriminator,
+whichistreatedasablackbox. WeuseaBradley-Terryrewardmodelbydefault,butin
+Section6.2,weinvestigateiftheDPOmodelitselforaseparatecopyofitcanbeusedasthe
+discriminatorinstead.
+Theprimaryadvantageofthisapproachliesinitsefficiency: usingpurelygoldrollouts
+canbeeffective,butalsoslow. Byupdatingtherewardmodelsparsely,theseupdatescan
+generalizetonewexamplesonthetrainingdistributionateachstep,allowingmoreefficient
+collectionandusageofpreferenceswithequivalentperformance.
+3.1 Baselines
+Totestourhypotheses,wecompareourapproachtoseveralbaselines,includingadetailed
+breakdownofthedataconditionsfordifferentapproachesinTable1(correspondingtoFig-
+ure3). Notethatweholdtotalgoldpreferencesused,includingthoseusedforinitialization
+(AppendixA),constantacrossallapproacheswithineachsetting,thoughtotalnumberof
+preferences(gold+silverlabeledusingthediscriminator)mayvarybysetting.
+4GOLDPREFS GOLDPREFS SILVERPOLICY DISCRIM POLICY DISCRIMUPDATES(ONLINE)
+(OFFLINE) (ONLINE) PREFS(ONLINE) MODEL LOSS GOLD SILVER
+PPO(staticRM) 2.6k/5.6k/3.6k/3.6k 0 64k RM PPO NO NO
+DPO 2.6k/5.6k/3.6k/3.6k 0 0 − DPO NO NO
+OPO(staticRM) 2.6k/5.6k/3.6k/3.6k 0 64k RM DPO NO NO
+OPO(gold) 1.6k 1k/4k/2k/2k * − DPO NO NO
+D2PO(ours) 1.6k 1k/4k/2k/2k 16k/64k/64k/32k RM DPO YES NO
+w/DPOdiscrim 1.6k 1k/4k/2k/2k 16k/64k/64k/32k DPO DPO YES NO
+w/Selfdiscrim 1.6k 1k/4k/2k/2k 16k/64k/64k/32k policy(DPO) DPO YES YES
+w/PPOupdate 1.6k 1k/4k/2k/2k 16k/64k/64k/32k RM PPO YES NO
+Table1: Summaryofourdataandmodelconditions. Totalnumberofpreferencesconstant
+acrossapproaches(exceptinexperimentswhereweexplicitlystateotherwise),whilevary-
+ingsilverdata, policylossfunction, typeofdiscriminator, andwhetherdiscriminatoris
+updatedornot. SlashesindicatepreferencesizesacrossourUniqueNouns,WordCollector,
+ContrastiveDistillation,andMathsettings,respectively.
+Wefirstcompareagainstapproachesusingastaticsetofpreferenceslabeledoveroutputs
+fromtheinitialpolicy. WecompareDPO,PPO(staticRM)andOPO(staticRM),thelatter
+two of which train a reward model over the preference data and use it during training,
+eitherasarewardinPPOoralabelingfunctioninOPO(seeFigure1). Notethatalthough
+weintroducethetermOPOinthiswork,theimplementationissimilartoLiuetal.(2023).
+TheprimarydifferencefromPPOistheuseoftheDPOlossfunction. Wefurthercompare
+theseapproachesinahigherdata(50K)goldpreferencesettingtoexaminebehaviorwith
+manymorepreferences(Table2).
+WealsocompareagainstOPO(gold),whereonlyonlinegoldpreferencelabelsareusedto
+updatethepolicy,withoutanysilverlabeling. Tomakethenumberofpolicyupdatesmore
+comparablewithD2PO,wetraineachbatchwiththeDPOobjectivefor4epochs;wetuned
+thishyperparametertooptimizeperformance(AppendixA).
+Finally,wecompareagainstvariantsofourapproachthatusebothonlinegoldandsilver
+labels,includingaversionwhereweuseanindependently-optimizedDPOevaluatorfor
+ourresponseevaluationmodelandaversionwhereweusethepolicyitself(selfevaluator).
+Weviewthislattercaseasupdatingboththepolicyaswellastheresponseevaluationmodel
+withsilverlabels. Finally,wecompareagainstaversionwhereweusePPOupdatesgiven
+ourrewardmodel;thisissimplyPPOwitharewardmodelbeingupdatedonline.
+Ourmethodshavetwonotionsoftrainingprogress,followingFigure1: howmanyonline
+goldpreferenceswehaveusedfromourbudgetT andhowmanysilverupdateshavebeen
+P
+appliedtoourpolicyT . Sincehumanpreferencesaremorecostly,we’remainlyinterested
+N
+inT ,wherewe’llholdx-axesconstantacrossapproacheswithrespecttopreferencesused.
+P
+4 ExperimentalSetup
+4.1 Tasks
+Toevaluateourpolicyoptimizationmethods,weevaluateonadiversesetoftaskswith
+∗
+distinctR thatwecanderiverelativepreferencesfrom. Examplequestionsandoutputsare
+inAppendixD).Weusefoursynthetictasks,designedtoexhibitdifferentproperties,where
+∗ ∗
+weknowthegroundtruthrewardfunctionR ,plusonerealistictaskwithtwoR settings.
+WordCollector: Wecomputethetop30contentwordsintheUltraFeedback(Cuietal.,
+2023)dataset. GivenanUltraChatprompt(Dingetal.,2023),thegoalistogeneratea50
+wordoutputwithasmanyofthesewordsaspossible,wherethepresenceofeachword
+gives+1reward,foramaximumof30. Thissimulateshavingdifferentsparse“positive”
+featuresthatnaturallymaynotoccurtogether,andlearningtoincorporatemultipleinsingle
+outputs. WesubsampleourinitialpreferencedatasetfromUltraFeedback. Wefindthat
+thistaskallowsforrealisticoutputsthatachievehighreward,whileatthesametimebeing
+challengingtooptimizeandshowingvariationamongthetrainingmethodswecompare.
+5UniqueNouns: Insteadofmaximizingwordcoverage,herewemaximizethenumberof
+unique nouns, detectedwith spaCy(Honnibal etal., 2020)in a50 tokenoutput. Thisis
+an example of a much denser reward function. We get our initial preference dataset by
+subsamplingfromUltraFeedback. Thisrewardfunctionisthemosteasilyoptimizedof
+thoseweconsiderandhelpsmeasurehowquicklypolicylearningcanbe“steered”bythe
+reward.
+ContrastiveDistillation: Givenalarger θ (OPT-1.3b, Zhangetal.(2022a))andsmaller
+L
+model θ (OPT-125m), the R∗ is the difference of log probabilities log(p(y∣x;θ ))−
+S L
+log(p(y∣x;θ )); wereceivemorerewardforsequenceslikelyunderthelargemodeland
+S
+unlikelyunderthesmallmodel. Thistaskisrepresentsalikelihood-basedgroundtruth
+reward,similartohowDPO’simplicitrewardisconstructed. Wegetourinitialpreference
+datasetwithOPT125msamplesontruncatedWikipediaprompts(Foundation).
+MathExpressions: Theinputisamathexpressionrandomlygeneratedasatreeofupto
+twolayersdeep. Fromhere,thereisasinglegoldsequence,whichisachain-of-thought
+style sequence where the deepest, left-most sub-expression is solved one at a time (e.g.,
+“((5+1)*2)=(6*2)=12”). Then,givenapredictionsuchas“((5+1)*2)=(6*2)=13”,
+∗
+we can iterate through each step, where R is -1 multiplied with the total edit distance
+betweensolutionandpredictionsateachstep. Thistaskhasasinglesolutionandrequires
+mathematicalreasoning.
+UltraFeedback: Finally, for a realistic setting where a “true” ground truth reward is
+unknown,weusethepopularUltraFeedback(Cuietal.,2023)dataset,wherewecanuse
+theirGPT-4based(gpt-4-0613)labelingscheme(whichreturnsascorebetween1-5)asour
+∗
+R . WejustusesubsampledUltraFeedbackforourinitialdata. Wefurtherrunanalternate
+settingusingEurusRM(Yuanetal.,2024a),thecurrentbestrewardmodelonRewardBench
+(Lambertetal.,2024),asanalternativegoldreward.
+4.2 Implementation
+WebuildontopoftheHuggingfaceTRLframework(vonWerraetal.,2020)withhyperpa-
+rameterswefindtoworkbestbasedonrewardconvergenceanddownstreamevaluation:
+λ=0.05,batchsize64;moredetailsinAppendixA.WeuseLlama-2-7Bmodelsasourbase
+forrealisticexperiments,OPT-1.3bforthemathsetting,andOPT-125mforoursyntheticex-
+periments(Zhangetal.,2022a),anduseLoRA(rank=16)(Huetal.,2021)toenabletraining
+withasmallerGPUfootprint,findingittonotaffectinitialexperimentalDPO/RMresults.
+We use the Tu¨lu SFT models for UltraFeedback (Ivison et al., 2023), an OPT-1.3b model
+fine-tunedon500kexamplemathexpressions,andOPT-125mforotherexperiments. For
+eachtask,weevaluatetherewardoverthetimestepsoftraining. Periodicallythroughout
+learning,weuseourpolicytocomputegoldrewardoveraheld-outdevsetofprompts.
+5 Results
+5.1 Comparinglossobjectives(DPOvsPPO)
+Before evaluating the potential of our full
+D2PO model,wefirstcomparethreediffer-
+NOUN WC CDIST MATH
+entbaselineapproachesinofflinesettings,i.e.,
+usingonlyinitialpreferencedataorstaticdis- DPO 12 6.9 0.08 -17.1
+criminators. Wecompare: (1)standardDPO, PPO(staticRM) 24.9 6.7 -0.20 -13.2
+OPO(staticRM) 33.2 7.8 0.22 -3.5
+(2)OPOw/staticRM,whichusestheDPO
+loss for paired policy updates, and (3) PPO
+w/ static RM, i.e. standard PPO. We use a Table2: ComparisonofDPO,OPOandPPO
+largepreferencedataset(50Kexamples)for withP 0 =50K. OPOw/staticRMperforms
+theseexperiments. bestamongstthesebaselines.
+Results: Table2reportsthegoldfinalreward
+oftrainingrunsforthethreebaselineapproaches. WefindthatOPOw/staticRMoutper-
+6Unique Nouns Word Collector Contrastive Distill Math
+44 05 12 80 D O2 POPO w/ gold 0.6 D O2 POPO w/ gold 42
+33 05 11 46 D OP PO O w/ RM 0.4 D OP PO O w/ RM 86
+122 505 D
+O D
+O2
+PP POO
+OPO
+w w/
+/
+g Ro Mld
+11 02
+68
+00 .. 02 1111 6420 D
+O D
+O2
+PP POO
+OPO
+w w/
+/
+g Ro Mld
+10 0 200 Pref4e00rences 6U00sed 800 1000 0 500 1000Pre150f0eren20c00es U25s00ed3000 3500 4000 0.2 0 250 500Pre75f0eren10c00es U12s50ed1500 1750 2000 18 0 250 500Pre75f0eren10c00es U12s50ed1500 1750 2000
+Figure3: Amountofgoldpreferencedata(x-axis;correspondstoprogressthroughtraining,
+notcountinginitial1.6kofflineprefs)vs.resultinggoldreward,averagedover3runs. We
+compareD2POagainstOPOwithgolddataonly,aswellas“basic”DPOandOPOwith
+anRMtrainedoninitialdata(notethatthisisasmallersetthaninTable2). Ourmethod
+reacheshigherrewardinWordCollectorandContrastiveDistillation,andmaxesoutfaster
+atUniqueNouns.
+formsstandardDPOinallsettings,eventhoughtheseusethesamelossobjective. This
+highlightsthebenefitsofsamplingonlinerolloutsduringpolicytraining,asopposedtoa
+fixedpreferenceset.OurresultsalsoshowthatPPOw/staticRMisgenerallyoutperformed
+byOPO,andevenstandardDPOfortwooutoffoursettings. WegenerallyfindtheDPO
+objectivetobemorestablethanPPO,andusetheformerforallourexperiments. Finally,
+theseresultsgivelowerrewardthanwewillseeinSection5.2fromusingonlinerewards,
+showinghoweffectiveonlinerewardupdatesare.
+5.2 ComparingD2POagainstbaselines
+Setup: Tocomparetheseforequivalentgoldpreferences,wereportmodelperformance
+quantifiedbythegoldrewardon200held-outdatapoints(y-axis)againstthenumberof
+goldpreferencesusedfortraining(x-axis). Thatis,wereportstandardDPOandOPOw/
+staticRMperformanceonthesamepreferencebudgetasthetotalbudgetoveralltimesteps
+ofouronlineD2POandOPOw/goldmethods. Note,however,thatthenumberofpolicy
+updatesmaydifferbetweentheseapproaches(seeTable1). Wereportaggregatedresults
+across3seedruns.
+Resultsonsynthetictasks: WecompareourproposedapproachD2POandbaselinesin
+Figure3. First,weimportantlynotethatpriormethodslikeDPOandOPO(stars),whichare
+offlinewithrespecttopreferences,domuchworsethantheonlinepreferenceapproaches,
+evenwithmuchmoredata. Next,comparingtheonlineapproaches,wefindthatonthree
+settings,D2POleadstooverallimprovementsinefficiencyofdata,eitherreachinghigher
+finalrewardorhigherintermediaterewardsusingalowerpreferencebudgets.
+Forinstance,onWordCollector,D2POreachesarewardscoreof∼ 35withapreference
+budgetofP=100whereOPOw/goldrequiresP=300togivethesameperformance. This
+suggeststhatsilver-labellingusinganiterativelyimprovingRMisaneffectivestrategyto
+offsetthehighannotationcostsofonlinegoldannotations. Notethatthisisnotasclear
+ontheMathsetting,suggestingefficiencygainsmaydependonthesetting,we’llexplore
+this more in Section 6. Overall, our results suggest that both online preferences and an
+on-distributionRMcancontributetoincreasedperformanceanddataefficiency.
+Resultsonrealistictask:Next,wereportresultsonourrealisticsettingsonUltraFeedbackin
+Figure4. OntheGPT-4annotation-basedsetting(UltraFeedback),wecompareapproaches
+assumingaccesstoasmallpreferencebudgetof500onlinepreferences;goldannotationin
+thissettingusingGPT-4costs$60perrun. Wealsoreportresultswhenweuseabudgetof
+∗
+3kpreferencesontheEurusRMbasedR setting.
+We include a plot (Figure 4) showing average of a sliding window of size 50 over gold
+rewardfrompreferencetraininggivenabudgetof500forUltraFeedback. TheEurusreward
+plotiscomputedacrosscheckpointsonafixedevalsetof200inputs.Overall,wefindD2PO
+gets further in optimization than other approaches within the small preference budget.
+Whilethisissmaller-scale,theseresultsgiveusinitialevidencesuggestingthatD2POmay
+haveefficiencyandperformancebenefitsinpracticalchatsettings.
+7
+draweR
+dloG
+draweR
+dloG
+draweR
+dloG
+draweR
+dloGUltraFeedback Eurus RM
+4.4 D2PO D2PO
+OPO (gold) OPO w/ gold
+600
+4.3
+4.2 400
+4.1 200
+4.0
+0
+3.9
+0 100 200 300 400 500 0 500 1000 1500 2000 2500 3000
+Preferences Used Preferences Used
+Figure 4: (Left) Gold reward over training on UltraFeedback, (Right) Eurus RM D2PO
+vsOPObaselinewithabudgetof500preferences. DashedlinerepresentsUltraFeedback
+reward for the highest reward point with OPO with the initial model. D2PO seems to
+performwellonthissetting.
+Unique Nouns Word Collector Contrastive Distill Math
+0.80 OPO w/ RM 1.0 OPT (static RM) 0.65 OPT (static RM) 0.9 OPO w/ RM
+0.75 0.9 0.60 0.8
+00 .. 67 50 0.8 00 .. 55 05 0.7
+0.60 0.7 0.45 0.6
+0.55 0.6 0.40 0.5
+0.50 0.5
+0 100 20P0olicy Step3s00 400 500 0 100 200 Po30l0icy Step40s0 500 600 700 0 250 500 750Policy10 0S0teps1250 1500 1750 2000 0 200 40P0olicy Step6s00 800 1000
+Figure 5: Reward model accuracy (y-axis) vs. training progress (x-axis) for our datasets
+usingOPO(static,50kRM).Thediscriminativecapabilityoftherewardmodeldegrades
+substantiallyastrainingprogresses,endingupnearrandomchance.
+APEVAL
+Forextrareference,wereportlength-controlledAlpacaEval
+2.0 (Dubois et al., 2024) in Table 3 compared with gpt-4- INITIAL 7.34
+turbo,asawinratepercentageoutof100%,usingthehigh- OPO(RM) 8.10
+est reward checkpoint for OPO, and a D2PO checkpoint
+OPO(GPT-4) 6.37
+chosenbasedondiscriminatorreward(notshown,butwe
+D2PO(GPT-4) 8.26
+findthistocorrelatewellwithgoldreward,thusservinga
+goodstoppingcriterion).Wedonotfindastrongconsistent OPO(EURUS) 10.43
+patternbetweenourresultsandthisevaluation,whichwe D2PO(EURUS) 6.34
+attributetothefactthatourrewardmodelssuchasEurus
+arenotnecessarilyalignedwithit. However,wenotethat Table3: Length-ControlledAl-
+performanceatleastdoesnotdegradebyoptimizingfor pacaEvalonmodelsfromdif-
+theseobjectives,whichoccursincasesofoveroptimization. ferent approaches. We note
+∗
+thatourgoldR objectivesdo
+notnecessarilyalignwithLC
+6 AnalyzingDiscrimination AlpacaEval;however,wefind
+thatperformancedoesnotde-
+gradebyoptimizingforthem.
+6.1 RewardModelAccuracyunderDistributionShift
+OurpreviousresultsestablishthatmethodslikeD2POthat
+useaniterativelyupdateddiscriminatoroutperformthose
+with static discriminator (e.g. OPO w/ static RM). We hypothesize this difference in
+performanceisbecauseasthedistributionofthepolicyshiftsduringtraining,theper-
+formanceofthestaticdiscriminatoronrolloutpairssampledfromthisnewdistribution
+degrades. Thisresultsinlessreliablerewardsandlessreliablelabelingofnewpreference
+data,degradingtheimprovementfromadditionalpolicytraining.
+WeplotRMaccuracyacrosspolicytraining,computedasthefractionoftimesthepreference
+∗
+labelfromtherewardmodelRissameasthatfromthegoldrewardR forpairsofrollouts
+∗
+sampledfromthecurrentpolicy(R tiesthownout). Figure5showsourresults. Across
+settings,wefindthatrewardaccuracygenerallydecreasesaspolicytrainingproceeds,
+especiallyonWordCollectorandMath. Infact,weseethattherewardaccuracyis∼50%at
+somepointsduringtraining,effectivelyrandomchance.
+8
+ycaruccA
+draweR
+draweR
+dloG
+ycaruccA
+draweR
+draweR
+dloG
+ycaruccA
+draweR
+ycaruccA
+draweRUnique Nouns Word Collector Contrastive Distill Math
+00000 ..... 67788 50505
+D
+S
+Dt2 2aP PtO
+Oic
+R
+(R
+pM
+M olicy reward)
+00000 ..... 67788 50505 D S Dt2 2aP PtO Oic R (R pM M
+olicy reward)
+00000 ..... 56677 50505 D S Dt2 2aP PtO Oic R (R pM M
+olicy reward)
+0000 .... 5566 0505 D S Dt2 2aP PtO Oic R (R pM M
+olicy reward)
+0.60 0.60 0.50
+0.55 0.55 0.45 0.45
+0.50 0.50 0.40 0.40
+0 200 P4r00eferenc6e00s 800 1000 0 500 1000 15P00refe2r00e0nce2s500 3000 3500 4000 0 250 500 7P50refe1r00e0nce1s250 1500 1750 2000 0 250 500 7P50refe1r00e0nce1s250 1500 1750 2000
+Figure 6: Reward model accuracy when using D2PO (red), accuracy of the initial static
+rewardmodel(blue)andtheDPOimplicitrewardmodelaccuracy(green)ofthepolicyat
+differentpointsintraining. D2POsuccessfullyavoidsrewarddegradation.
+Unique Nouns Word Collector Contrastive Distill Math
+234 000
+D D D2 2 2P P PO O O D seP lO f-reward
+111112 024680 D D D2 2 2P P PO O
+O
+R D seM P lO
+f-reward
+0000 .... 2468 D D D2 2 2P P PO O
+O
+D seP lO
+f-reward
+11
+20752 ..... 50505
+D D2 2P PO O DPO
+10 68 00 .. 20 211 075 ... 050
+0 200 Pref4e00rences 6U00sed 800 1000 0 500 1000Pre150f0eren20c00es U25s00ed3000 3500 4000 0 250 500Pre75f0eren10c00es U12s50ed1500 1750 2000 0 250 500Pre75f0eren10c00es U12s50ed1500 1750 2000
+Figure7: Comparingtheperformanceof D2PO withdifferentchoicesofdiscriminators
+againsttheamountofgoldpreferencedataused(x-axis).WeobservethatD2PO-self-reward,
+wherethethepolicyitselfisusedasadiscriminator,performsworsethanotherapproaches
+(we observe high instability and low rewards on the omitted math self-reward setting);
+separatediscriminators(eitherDPO-trainedorRMs)doabitbetter.
+D2PO requires a discriminator to label preferences, but isn’t dependent on a partic-
+ular parameterization of discriminator, letting us treat it as a black box. We thus
+seek to answer the following question: how important is the choice of discriminator?
+D2POdiscriminatoraccuracydoesnotdegrade: Wethen
+Eurus RM
+askhowthiscomparestowhenusingD2PO.InFigure6
+0.65
+weshowaccuracyofD2PO’sRMfromrolloutsetsacross
+trainingasdistributionshifts(red). Weincludetheaccura- 0.60
+ciesoftheDPOrewardformulationofthepolicyatsimilar 0.55
+pointsintraining(green),andthestartingstaticRM(blue). 0.50
+D2PO RM
+Despitethedistributionshiftandmuchsmalleramountsof Static RM
+0.45
+0 500 1000 1500 2000 2500 3000
+data,D2POallowsforrewardsignaltostaynon-random Preferences
+andevenimproveoverthecourseoftraining,whichex- Figure8:EurusRMD2PORM
+plainstheeffectivenessofthesilver-labellingasweseein accuracyvsstaticstartingRM
+Figure3before,wherethestaticRMgenerallyseemstodo accuracy (y-axis) across roll-
+worse.Wefurthernotethattheaccuracyofthepolicy(using outsfromtraining(x-axis).
+DPOimplicitreward)oftenlagsbehindthediscriminator’s
+accuracy, giving some evidence that the discriminator is
+consistentlyabletoprovideinformationthepolicymaynotcaptureonitsown, evenas
+rewardofgenerationsimproves. OntherealisticEurusRMsetting(Figure8),wefindD2PO
+improvesoverastaticRMearlierintraining,thoughnottothesameextent.
+6.2 AnalyzingtheRoleofDiscriminators
+Setup: Wetestthreechoicesofdiscriminators: (1)D2PO-RM:Ourstandardconditionof
+D2POwithaBradley-Terryrewardmodel(usedinSection5.2and6.2),(2)D2PO-DPO:an
+independentDPOdiscriminator-onlymodel,startingfromtheπ andtrainedonlyonthe
+SFT
+goldpreferencedata. Thisseesthesametrainingdataastherewardmodelin(1)butusesa
+2
+differentlossformulation. (3)D2PO-self-evaluator: a“self-rewarding” DPOdiscriminator
+wheretheD2PO’spolicyisusedbothastheresponseevaluationmodelandthegenerator
+ofrollouts. Weensureoverallamountsofdataareheldconstantacrossapproaches.
+2
+Notethatinself-rewardingsettingslikeYuanetal.(2024b),themodelispromptedtogiverewards;
+here,weuseitslikelihoods,whichgiveusableresultsevenformodelsthatarenotstrongzero-shot
+evaluatorsoftheirownoutputswhenusingprompting.
+9
+ycaruccA
+draweR
+draweR
+dloG
+ycaruccA
+draweR
+draweR
+dloG
+ycaruccA
+draweR
+draweR
+dloG
+ycaruccA
+draweR
+ycaruccA
+draweR
+draweR
+dloGResults: We find (Figure 7) that the DPO and RM discriminators do similarly overall.
+The self-rewarding baseline fails to converge on Nouns and Math, and does poorly on
+WordCollector,butisbestonContrastiveDistillation,wherewenotesmallerratiosofgold
+preferencesleadtotrainingfailure;wehypothesizethatthisismainlybecausethenoisy
+labelsbeingfedbackintothepolicycancontaminatethediscriminativeobjective,hence
+thevalueoftheseparately-traineddiscriminator. WedoafurtherstudyonDPOvsRMsin
+AppendixB.
+7 RelatedWork
+PreferenceOptimization: Aligninginstruction-tunedlanguagemodelswithpreference
+datahasbeenreportedtoimproveperformance,bothforproprietary(Ouyangetal.,2022;
+Touvronetal.,2023)andopensourcemodels(Ivisonetal.,2023;Tunstalletal.,2023).Several
+preferencedatasetshavebeenreleasedrecentlytofacilitatefurtherresearchinthisspace
+(Ethayarajhetal.,2022;Baietal.,2022;Cuietal.,2023). Fromanalgorithmperspective,
+recentworkhasproposedseveral“simpler”variantsofstandardRLHF,suchasreward-free
+methodsthatdirectlyoptimizewithinitiallycollectedpreferencedata(Rafailovetal.,2023;
+Azaretal.,2023;Ethayarajhetal.,2024)oriterativelyupdatingthepreferencedatausing
+goldannotators(Guoetal.,2024;Touvronetal.,2023). Incontrast,recentworkhasalso
+exploredalternateannotatingstrategiesusingalearntrewardmodel(Zhaoetal.,2023;Liu
+etal.,2023;Calandrielloetal.,2024)orthepolicymodelitselfforpreferencelabelling(Lee
+etal.,2024;Yuanetal.,2024b). Ahmadianetal.(2024)studiestheperformanceofmore
+stableRLalgorithms. However,thesemethodseitherignorethedistributionshiftofpolicy
+modelsandit’simpactonrewardmodelperformance,orrelypurelyonexpensivegold
+annotations during training. Our work bridges this gap by introducing a cost efficient
+methodtoensurerewardmodeldoesnotdegradeduringpolicytraining.
+ReinforcementLearning: Ourrewardgeneralizationhypothesisdrawsfromthenotion
+ofrewardextrapolationinreinforcementlearningliterature(Brownetal.,2019). Here,we
+expectourresponseevaluationmodel,trainedonline,tobeabletoeffectivelylabelsilver
+datadrawnfromthesame(evolving)distribution. Likewise,severalresultshavesupported
+thebenefitofonlineoverofflinemethods(Medirattaetal.,2023;Lietal.,2023).
+Active Learning: The notion of actively collecting samples to improve models during
+optimizationoriginateswithactivelearning(Cohnetal.,1996;Zhangetal.,2022b). Inthe
+contextofLLMtrainingspecifically,activeapproachesforpromptselectionandoff-policy
+rewardtraininghavestartedtogetexplored(Dasetal.,2024;Dwaracherlaetal.,2024). We
+donotclaiminnovationonthesideofactivelycollectingpreferences;ourfocusisonthe
+utilityofrespondevaluationmodelsratherthanactiveselectionstrategies.
+8 Conclusion
+Inthispaper,wepresentD2PO,amethodforlearningfromonlinepreferencesforLLM
+alignment. Wefindthatourapproach,acrossdiversesettings,canimproveperformance
+whilereducingoverallpreferencesneeded,usingfewerhuman-labeledpreferencesthan
+alternatives. Weanalyzetheviabilityofsilverlabelingwithdiscriminativeresponseevalua-
+tionmodels,andfindthatwhenupdatedwithgoldpreferencesinanonlinesetting,these
+discriminatorscanprovidereliablelabels. Webelievefurtherworkonimprovingreward
+modelingandonlinetrainingcangivefurthergainsinrealisticsettings.
+9 Acknowledgments
+ThankstomembersoftheTAURlabandSCALARlabforhelpfuldiscussiononthiswork.
+ThisworkwassupportedbyNSFCAREERAwardIIS-2145280,theNSFAIInstitutefor
+FoundationsofMachineLearning(IFML),andagrantfromOpenPhilanthropy.
+10References
+ArashAhmadian,ChrisCremer,MatthiasGalle´,MarziehFadaee,JuliaKreutzer,Ahmet
+U¨stu¨n,andSaraHooker. Backtobasics: RevisitingREINFORCEstyleoptimizationfor
+learningfromhumanfeedbackinLLMs. arXivpreprintarXiv:2402.14740,2024.
+Mohammad Gheshlaghi Azar, Mark Rowland, Bilal Piot, Daniel Guo, Daniele Calan-
+driello, Michal Valko, and Re´mi Munos. A general theoretical paradigm to under-
+stand learning from human preferences. ArXiv, abs/2310.12036, 2023. URL https:
+//api.semanticscholar.org/CorpusID:264288854.
+YuntaoBai,AndyJones,KamalNdousse,AmandaAskell,AnnaChen,NovaDasSarma,
+DawnDrain,StanislavFort,DeepGanguli,T.J.Henighan,NicholasJoseph,SauravKada-
+vath,JohnKernion,TomConerly,SheerEl-Showk,NelsonElhage,ZacHatfield-Dodds,
+Danny Hernandez, Tristan Hume, Scott Johnston, Shauna Kravec, Liane Lovitt, Neel
+Nanda,CatherineOlsson,DarioAmodei,TomB.Brown,JackClark,SamMcCandlish,
+ChristopherOlah,BenjaminMann,andJaredKaplan. Trainingahelpfulandharmless
+assistantwithreinforcementlearningfromhumanfeedback. ArXiv,abs/2204.05862,2022.
+URLhttps://api.semanticscholar.org/CorpusID:248118878.
+DanielBrown,WonjoonGoo,PrabhatNagarajan,andScottNiekum. Extrapolatingbeyond
+suboptimal demonstrations via inverse reinforcement learning from observations. In
+KamalikaChaudhuriandRuslanSalakhutdinov(eds.),Proceedingsofthe36thInternational
+ConferenceonMachineLearning,volume97ofProceedingsofMachineLearningResearch,pp.
+783–792.PMLR,09–15Jun2019. URLhttps://proceedings.mlr.press/v97/brown19a.
+html.
+Daniele Calandriello, Daniel Guo, Re´mi Munos, Mark Rowland, Yunhao Tang,
+Bernardo A´vila Pires, Pierre H. Richemond, Charline Le Lan, Michal Valko, Tianqi
+Liu, Rishabh Joshi, Zeyu Zheng, and Bilal Piot. Human alignment of large language
+models through online preference optimisation. ArXiv, abs/2403.08635, 2024. URL
+https://api.semanticscholar.org/CorpusID:268379170.
+DavidA.Cohn,ZoubinGhahramani,andMichaelI.Jordan. Activelearningwithstatistical
+models. InAdvancesinNeuralInformationProcessingSystems,volumecs.AI/9603104,1996.
+URLhttps://api.semanticscholar.org/CorpusID:9242771.
+Ganqu Cui, Lifan Yuan, Ning Ding, Guanming Yao, Wei Zhu, Yuan Ni, Guotong Xie,
+ZhiyuanLiu,andMaosongSun. Ultrafeedback: Boostinglanguagemodelswithhigh-
+quality feedback. ArXiv, abs/2310.01377, 2023. URL https://api.semanticscholar.
+org/CorpusID:263605623.
+NirjharDas,SouradipChakraborty,AldoPacchiano,andSayakRayChowdhury. Provably
+sampleefficientrlhfviaactivepreferenceoptimization. ArXiv,abs/2402.10500,2024. URL
+https://api.semanticscholar.org/CorpusID:267740535.
+Ning Ding, Yulin Chen, Bokai Xu, Yujia Qin, Zhi Zheng, Shengding Hu, Zhiyuan Liu,
+MaosongSun,andBowenZhou.Enhancingchatlanguagemodelsbyscalinghigh-quality
+instructionalconversations. arXivpreprintarXiv:2305.14233,2023.
+Yann Dubois, Balazs Galambosi, Percy Liang, and Tatsunori B. Hashimoto. Length-
+CorrectedAlpacaEval: ASimpleDebiasingofAutomaticEvaluators. https://github.
+com/tatsu-lab/alpaca_eval,2024.
+VikranthReddyDwaracherla,SeyedMohammadAsghari,BotaoHao,andBenjaminVan
+Roy. EfficientexplorationforLLMs. ArXiv,abs/2402.00396,2024. URLhttps://api.
+semanticscholar.org/CorpusID:267364948.
+KawinEthayarajh,YejinChoi,andSwabhaSwayamdipta. Understandingdatasetdifficulty
+withV-usableinformation. InKamalikaChaudhuri, StefanieJegelka, LeSong, Csaba
+Szepesvari,GangNiu,andSivanSabato(eds.),Proceedingsofthe39thInternationalCon-
+ferenceonMachineLearning,volume162ofProceedingsofMachineLearningResearch,pp.
+5988–6008.PMLR,17–23Jul2022.
+11KawinEthayarajh,WinnieXu,NiklasMuennighoff,DanJurafsky,andDouweKiela. KTO:
+Modelalignmentasprospecttheoreticoptimization. ArXiv,abs/2402.01306,2024. URL
+https://api.semanticscholar.org/CorpusID:267406810.
+WikimediaFoundation. Wikimediadownloads. URLhttps://dumps.wikimedia.org.
+Shangmin Guo, Biao Zhang, Tianlin Liu, Tianqi Liu, Misha Khalman, Felipe Llinares,
+AlexandreRame,ThomasMesnard,YaoZhao,BilalPiot,etal. Directlanguagemodel
+alignmentfromonlineAIfeedback. arXivpreprintarXiv:2402.04792,2024.
+JiwooHong,NoahLee,andJamesThorne. ORPO:Monolithicpreferenceoptimizationwith-
+outreferencemodel. ArXiv,abs/2403.07691,2024. URLhttps://api.semanticscholar.
+org/CorpusID:268363309.
+Matthew Honnibal, Ines Montani, Sofie Van Landeghem, and Adriane Boyd. spaCy:
+Industrial-strengthNaturalLanguageProcessinginPython,2020. https://spacy.io.
+J.EdwardHu,YelongShen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,
+and Weizhu Chen. LoRA: Low-Rank Adaptation of Large Language Models. ArXiv,
+abs/2106.09685,2021. URLhttps://api.semanticscholar.org/CorpusID:235458009.
+Hamish Ivison, Yizhong Wang, Valentina Pyatkin, Nathan Lambert, Matthew Peters,
+PradeepDasigi,JoelJang,DavidWadden,NoahASmith,IzBeltagy,etal. Camelsina
+changingclimate: EnhancingLMadaptationwithTulu2. arXivpreprintarXiv:2311.10702,
+2023.
+NathanLambert,ValentinaPyatkin,JacobDanielMorrison,LesterJamesValidadMiranda,
+BillYuchenLin,KhyathiRaghaviChandu,NouhaDziri,SachinKumar,TomZick,Yejin
+Choi,NoahA.Smith,andHannaHajishirzi.RewardBench:Evaluatingrewardmodelsfor
+languagemodeling. ArXiv,abs/2403.13787,2024. URLhttps://api.semanticscholar.
+org/CorpusID:268537409.
+Sangkyu Lee, Sungdong Kim, Ashkan Yousefpour, Minjoon Seo, Kang Min Yoo, and
+Youngjae Yu. Aligning large language models by on-policy self-judgment. ArXiv,
+abs/2402.11253,2024. URLhttps://api.semanticscholar.org/CorpusID:267751124.
+DavidD.LewisandWilliamA.Gale. Asequentialalgorithmfortrainingtextclassifiers.
+In Proceedings of the 17th Annual International ACM SIGIR Conference on Research and
+DevelopmentinInformationRetrieval,SIGIR’94,pp.3–12,Berlin,Heidelberg,1994.Springer-
+Verlag. ISBN038719889X.
+Ziniu Li, Tian Xu, and Yang Yu. Policy optimization in RLHF: The impact of out-of-
+preference data. ArXiv, abs/2312.10584, 2023. URL https://api.semanticscholar.
+org/CorpusID:266348517.
+TianqiLiu,YaoZhao,RishabhJoshi,MishaKhalman,MohammadSaleh,PeterJLiu,and
+JialuLiu. Statisticalrejectionsamplingimprovespreferenceoptimization. arXivpreprint
+arXiv:2309.06657,2023.
+Ishita Mediratta, Qingfei You, Minqi Jiang, and Roberta Raileanu. The generalization
+gapinofflinereinforcementlearning. ArXiv,abs/2312.05742,2023. URLhttps://api.
+semanticscholar.org/CorpusID:266163081.
+LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,
+ChongZhang, SandhiniAgarwal, KatarinaSlama, AlexRay, etal. Traininglanguage
+models to follow instructions with human feedback. Advances in neural information
+processingsystems,35:27730–27744,2022.
+RafaelRafailov,ArchitSharma,EricMitchell,ChristopherDManning,StefanoErmon,and
+ChelseaFinn. Directpreferenceoptimization: Yourlanguagemodelissecretlyareward
+model. AdvancesinNeuralInformationProcessingSystems,36,2023.
+12JohnSchulman, FilipWolski, PrafullaDhariwal, AlecRadford, andOlegKlimov. Proxi-
+malpolicyoptimizationalgorithms. ArXiv, abs/1707.06347, 2017. URLhttps://api.
+semanticscholar.org/CorpusID:28695052.
+Prasann Singhal, Tanya Goyal, Jiacheng Xu, and Greg Durrett. A Long Way to Go: In-
+vestigating Length Correlations in RLHF. ArXiv, abs/2310.03716, 2023. URL https:
+//api.semanticscholar.org/CorpusID:263672200.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,
+Nikolay Bashlykov, Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al. Llama 2:
+Openfoundationandfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+LewisTunstall,EdwardBeeching,NathanLambert,NazneenRajani,KashifRasul,Younes
+Belkada,ShengyiHuang,LeandrovonWerra,Cle´mentineFourrier,NathanHabib,etal.
+Zephyr: DirectdistillationofLMalignment. arXivpreprintarXiv:2310.16944,2023.
+Leandro von Werra, Younes Belkada, Lewis Tunstall, Edward Beeching, Tristan Thrush,
+NathanLambert,andShengyiHuang. TRL:TransformerReinforcementLearning. https:
+//github.com/huggingface/trl,2020.
+Lifan Yuan, Ganqu Cui, Hanbin Wang, Ning Ding, Xingyao Wang, Jia Deng, Boji Shan,
+HuiminChen,RuobingXie,YankaiLin,ZhenghaoLiu,BowenZhou,HaoPeng,Zhiyuan
+Liu, and Maosong Sun. Advancing LLM reasoning generalists with preference trees.
+2024a. URLhttps://api.semanticscholar.org/CorpusID:268856805.
+WeizheYuan,RichardYuanzhePang,KyunghyunCho,SainbayarSukhbaatar,JingXu,and
+JasonWeston. Self-rewardinglanguagemodels. arXivpreprintarXiv:2401.10020,2024b.
+SusanZhang,StephenRoller,NamanGoyal,MikelArtetxe,MoyaChen,ShuohuiChen,
+ChristopherDewan,MonaT.Diab,XianLi,XiVictoriaLin,TodorMihaylov,MyleOtt,
+Sam Shleifer, Kurt Shuster, Daniel Simig, Punit Singh Koura, Anjali Sridhar, Tianlu
+Wang, and Luke Zettlemoyer. OPT: Open pre-trained transformer language mod-
+els. ArXiv,abs/2205.01068,2022a. URLhttps://api.semanticscholar.org/CorpusID:
+248496292.
+Zhisong Zhang, Emma Strubell, and Eduard Hovy. A survey of active learning for
+natural language processing. In Yoav Goldberg, Zornitsa Kozareva, and Yue Zhang
+(eds.), Proceedings of the 2022 Conference on Empirical Methods in Natural Language Pro-
+cessing, pp. 6166–6190, Abu Dhabi, United Arab Emirates, December 2022b. Associ-
+ation for Computational Linguistics. doi: 10.18653/v1/2022.emnlp-main.414. URL
+https://aclanthology.org/2022.emnlp-main.414.
+Yao Zhao, Rishabh Joshi, Tianqi Liu, Misha Khalman, Mohammad Saleh, and Peter J
+Liu. SLiC-HF: Sequence likelihood calibration with human feedback. arXiv preprint
+arXiv:2305.10425,2023.
+A Training/HyperparameterDetails
+A.1 RewardModels/PolicyInitializations
+Forallour D2PO experimentsweinitializerewardmodelsbytrainingthemonasmall
+setof1.6kexamplesfromtheoff-policydistribution. Whilethisreducesabitofnoise,and
+helpssimulateasettingwherewemayhaveaccesstosomelabeleddatafromtheinitial
+distribution,wefoundthatthisinitializationchoicedoesnotaffectrelativeperformanceof
+ourapproachcomparedtobaselines.
+WeinitializethepolicymodelsinasimilarfashionbydoingDPOontheexactsame1.6k
+example sets, with similar findings as above. We note that the accuracies of the reward
+models and DPO models are similar. We train for up to 5 epochs each on this dataset,
+optimizedforheld-outevaluation.
+13Priorworkfindsthatrewardmodeltrainingforjust1epochismosteffectivetoavoidover-
+fitting;however,forsomeofourpreferencedatainterventions,wenotethatconvergence
+takes longer. Overall, this ends up with usually 1-3 epochs of training at most for the
+checkpointsthatweuse. Weusebfloat16,learningrateof1e-4,andbatchsizeof2with2
+gradientaccumulationsteps.
+A.2 PolicyTraining
+ForourRLHFsetup,weuseLoRAforthepolicyandrewardmodels,sincetheTRLtraining
+configurationrequireshavingallusedmodelsoneachdeviceusedfortraining. Wemerge
+rewardmodelandgenerationmodelswithLoRAadaptersbeforePPO.Wefoundthatsetting
+therightKLcoefficient(λ)andbatchsizewerethemostimportantforstableconvergence.
+We additionally modify the TRL PPOTrainer code to run OPO. For D2PO, we
+implement it by running a separate Flask API server with the discriminator
+model, and then make API calls from the policy training code to get rewards.
+POLICYDATA REWARD
+OPO(1update) 4k 12.1
+A.3 Hyperparameters
+OPO(2update) 8k 14.9
+OPO(4update,used) 16k 16.2
+OnWordCollector,weset N/T P = 32 OPO(8update) 32k 12.3
+(32 examples used to update the pol- OPO(16update) 64k 2.1
+icyperstep), P/T = 2(2goldprefer- OPO(2XPR,last128) 12k 14.5
+P
+encelabelscollectedperstep),P=4000 OPO(2XPR,last512) 12k 12.1
+OPO(4XPR,last128) 20k 11.2
+(totalamountofgoldpreferencedata
+used). OnContrastiveDistillation,we
+set N/T = 160, P/T = 5, P = 2000. Table 4: Generated reward / policy steps with
+P P
+OnnounswesetN/T =64,P/T =4, somedifferenthyper-parameterandapproachcon-
+P P
+P=1000. OnmathwesetN/T =160, figurationsonwordcollectortask,givenabudget
+P
+P/T = 10, P = 2000. Across these 3 of 4k preferences. For our main OPO with gold
+P
+settingswesetafixedpreferencebud- baseline,weusetheconfigurationwefindworks
+getof2000,whichwethenholdcom- the best compared to other configurations, and
+parablewithourbaselines. OnUltra- wevalidatethatexperiencereplay(XPR)doesnot
+Feedback we report with a run with qualitativelyimprovethings.
+N/T = 1280 and P/T = 100, where
+P P
+we collect a total of 500 preferences.
+Wenotesimilarresultsonarunwith
+N/T =160,P/T =10,whichweuse
+P P
+with3000preferencesfortheEurusRM
+setting. Acrossourapproaches,weuselearningrateof5e-5forpolicies,and1e-4forreward
+modelsandDPOdiscrimination.
+Importantly,wenotethattheOPOwithgoldbaseline,whileusingacomparablenumber
+ofpreferences,isnotcomparabletoD2POinthenumberofpolicyupdates. Weincrease
+thenumberofepochsoneachbatchoftheDPOlosstoaddressthis,finding4epochsto
+workwellonourdifferentsettings. Doingmorepolicyupdatesimpairsconvergence: on
+WordCollector, settingitto8leadstomuchsmallerfinalvalue(12)withinbudget, and
+setting it to 16, which is comparable in policy updates, leads to convergence failing. In
+comparison,ourmethodisabletoperformupdatesondiversedata,thusbehavingmuch
+morestablyevenatverylowratiosofPto M. Totestwhetherourgainsmaybetheresult
+ofmorediversepolicyupdatesasopposedtomultipleepochsonthesamebatch,wefurther
+includeanexperiencereplaybaseline,wherewemodifythealgorithmforOPOwithgold
+tore-usesomelastOoldpreferencesfromtrainingforeverybatchof8. Weincluderesults
+fordifferentconfigurationsinTable4,andusethebestconfiguration(wevalidatethisleads
+toimprovementsoverthe1updatebaselineinnounsandcontrastivedistillationaswell).
+Notethatwefind,withrealisticsettings(UltraFeedback,EurusRM),thatalowervalueof2
+ismoresuitableforupdateepochsperbatch.
+14Nouns Word Collector Contrastive Distill
+001 ... 890 D D D3 3 2P P PO O
+O
+( (s De Pl Of-r )eward) 00 .. 89 01 .. 80
+0.7 0.7
+0.6 0.6 0.6 0.5 0.5
+0.4 0.4 0.4
+00 .. 23 00 .. 23 D D D3 3 2P P PO O O ( (s De Pl Of-r )eward) 0.2 D D D3 3 2P P PO O O ( (s De Pl Of-r )eward)
+0 100 200 300Policy40 0Steps500 600 700 800 0 500 1000 1500Policy20 0S0teps2500 3000 3500 4000 0 250 500 750Policy10 0S0teps1250 1500 1750 2000
+Figure 9: Reward model accuracy when using D2PO with an RM (red), self-rewarding
+(blue)andaseparateDPO(green)asdiscriminators.
+A.4 Hardware
+Allexperimentswereconductedonaserverwith8NVIDIAA40GPUs. However,allofour
+individualexperimentswererunacrossatmost3GPUs. Inthisconfiguration,traininga
+runofD2POtakesaround2.5hourswithOPT125Mfor2000stepsofbatchsize64(which
+isstandardizedformostofourruns). TrainingatLlama7Bscaletakesaround18hoursfor
+200stepsatsimilarscaleandbatchsizes,withmaximumsequenceoutputlengthof256.
+B DistributionAdaptabilityofDPOvsRMs
+Weconductedanadditionalexperimenttoinvestigatehowquicklyourdiscriminatorsadapt
+whengivennewdata. ThisisrepresentativeofthesettingofD2PO,wheredistributionis
+constantlyshifting,andweneedadiscriminatortogeneralizeasquicklyandaccuratelyas
+possibletoallowthesilver-labelqualitytobehighenoughforpolicyoptimizationtobe
+effective.
+We take rollouts from the first 6.25% (INIT)
+of D2PO runs on our tasks, then sample 5
+WC CDIST NOUN
+randommini-trainsetsofsize5and50respec-
+INIT OOD INIT OOD INIT OOD
+tively.Wethengetadifferentsampletestsetof
+size250preferencesfromthissectionoftrain- DPO+0 56 56 44 44 54 41
+DPO+5 56 56 44 44 54 41
+ing, aswellasfromthenext6.25%(OOD)of
+DPO+50 56.5 56 44 44 54 41
+training. Wethenrunmultipletrainingruns
+RM,+0 60 57 43 53 48 48
+withbothourrewardmodelandDPOmodel
+RM,+5 61 59.5 57 57 56.5 56
+(whichthemselvesweretrainedonthesame
+RM,+50 62 60 57 55 56 56
+initialdata,andreachthesameevaluationac-
+curaciesonoff-policyheld-outtestsets),and
+Table 5: Testing, from initial distribution,
+reportaveragenumbersinTable5.
+howquicklyDPO,RMdiscriminatorsup-
+This experiment gives us initial, though not datetonewdistribution. INITisthedistri-
+conclusive,resultsforafewpotentialpoints. butionofnewtrainingdata,OODisslightly
+First,wefindthat,whilepurerewardmodel latersamplesfromtraining. Overall, RM
+variantsstarthigheringeneralizationandare discriminatorsseemtoadaptmorequickly.
+more likely to improve, DPO variants often
+changemoreslowlyfromasmallersubsetof
+examples. Giventhattheinitializationanddataarecomparableforthesemethods, this
+is initial evidence supporting that RMs may be somewhat more adaptable, which we
+hypothesizeisbecausetheRMobjectiveismorepurelyfocusedonthediscriminativetask
+withoutdependingonthelength-normalizationoflogitvaluesasinDPO.
+C ExtraPlots
+Weincludesomeextraplotsbelowwithadditionalresults.
+15
+ycaruccA
+draweR
+ycaruccA
+draweR
+ycaruccA
+draweRContrastive Distill
+1.2 S S1 2
+1.0 S3
+OPO w/ gold 0.8
+0.6
+0.4
+0.2
+0.0
+0.2
+0 250 500 750Prefe1r00e0nces1250 1500 1750 2000
+Figure 10: Some different seeds when running DPO on contrastive distillation. Overall,
+especiallyatthebeginning,improvementsseemconsistentoverall.
+Figure11: KLdivergencefrominitialpolicyonD2POrunsfromoursettings. Plotsarefora
+simplervariantofnountask(samenouncancountmultipletimes),WordCollector,and
+ContrastiveDistillation,inthatorder.
+Figure12: KLdivergencefrominitialpolicyonOPO(gold)runsfromoursettings. Plots
+areforsimplervariantofnountask(samenouncancountmultipletimes),WordCollector,
+andContrastiveDistillation,inthatorder. ThesearethesameorderofmagnitudeasD2PO
+althoughtheshapesdiffersomewhat.
+D Examples
+Weincludesomeexamplesinthissectionfromthetasksweaddressinthispaper.
+16
+draweR
+dloGQuestion Response Gold
+Re-
+ward
+Usingarecordingdeviceorsoftware,captureanaudiofileofaconver- I have provided the following in- 18.0
+sationwhereacustomerengagesinadetaileddiscussionwithasales formationtohelpunderstandyour
+representativeaboutthespecificsofaproduct,includingbutnotlimited questionandprovidetheappropri-
+toitstechnicalspecifications,availablefeatures,andpossibleadd-ons ateinformationtocreateasafeand
+oralternativeconfigurations.Theconversationshouldbepoliteandre- enjoyableexperiencetoensurethe
+spectfulonbothsides,withthesalesrepresentativeusingclearlanguage bestpossibleexperiencetogenerate
+andprovidingrelevantexamples,whilethecustomerasksrelevantand thebestpossibledatatogeneratethe
+informedquestions,andseeksclarificationswherenecessary.Makesure firstbestdatatocreatethefirstand
+toobtaininformedconsentfrombothpartiesbeforebeginningtherecord-
+ing,andensurethattherecordingdevicecapturesclearandcomplete
+audiowithoutanybackgroundnoiseorinterruptions.
+Usingarecordingdeviceorsoftware,captureanaudiofileofaconver- Ihavesharedthefollowinginforma- 13.0
+sationwhereacustomerengagesinadetaileddiscussionwithasales tionwiththefollowinglinktogive
+representativeaboutthespecificsofaproduct,includingbutnotlimited youthebestexperienceandprovide
+toitstechnicalspecifications,availablefeatures,andpossibleadd-ons theappropriateinformationtocre-
+oralternativeconfigurations.Theconversationshouldbepoliteandre- ateasafeandsuccessfulexperience
+spectfulonbothsides,withthesalesrepresentativeusingclearlanguage toensurethebestpossibleexperi-
+andprovidingrelevantexamples,whilethecustomerasksrelevantand ence to generate the best possible
+informedquestions,andseeksclarificationswherenecessary.Makesure datatoensurethebestpossibleex-
+toobtaininformedconsentfrombothpartiesbeforebeginningtherecord- periencetogeneratethe
+ing,andensurethattherecordingdevicecapturesclearandcomplete
+audiowithoutanybackgroundnoiseorinterruptions.
+Draftamemooutliningthelegalrequirementsforterminatinganem- Iunderstandyoucanaccommodate 6.0
+ployee. myquestionandIamsincerelysorry
+forthequestionsyouask,Iwillen-
+surethattheinformationyoupro-
+videiscorrectandconfidentialtoen-
+sureaproductivediscussion,Iwill
+ensurethatthisinformationrepre-
+sentsyourinterests
+CreateaPHP-basedwebapplicationthatfeaturesuserregistration,login I have taken the information you 7.0
+capabilities,andcommentingfunctionalitythatarespecificallydesigned haveprovidedtoprovidethebest
+forarticlesandblogposts.Ensurethattheapplicationadherestoaclean, knowledgeandIwillprovidethe
+user-friendlystyleandthatitincludesfeaturestoallowuserstoedit bestoptiontoadviseyoutoprovide
+theirprofilesandcomments,subscribetoemailnotifications,andshare thecorrectinformationtoensureno
+contentonsocialmedia. questionhasbeenadhybaltoensure
+yourquestionconnectswithourex-
+pertswholistenand
+CreateaPHP-basedwebapplicationthatfeaturesuserregistration,login IhaveprovidedtheinformationI 10.0
+capabilities,andcommentingfunctionalitythatarespecificallydesigned needtounderstandyourquestion
+forarticlesandblogposts.Ensurethattheapplicationadherestoaclean, toensureweunderstandyourcon-
+user-friendlystyleandthatitincludesfeaturestoallowuserstoedit cernsandprovidethebestpossible
+theirprofilesandcomments,subscribetoemailnotifications,andshare solution for your question, I will
+contentonsocialmedia. allow you to encourage the infor-
+mation that you provided to pro-
+videthebestpossibleoptionstohelp
+makesurethat
+Draftamemooutliningthelegalrequirementsforterminatinganem- Iunderstandyourquestions,Ican 8.0
+ployee. provideyouwithyourinformation
+toassistyoutounderstandthepoint
+youmake,Ihavereallyappreciated
+yourhelptohelpyouunderstand
+thedataGuideandensurethatIam
+correctinmyanswers.Ishoulden-
+sure
+Table6: ExamplesforWordCollectorTask
+17Question Response Gold
+Re-
+ward
+WhatroledowomenplayintheeconomyofMexico,andhowhasthis This was a text fielded by Mar- 11.0
+changedinrecentyears? tinMenardinmidSeptember2015.
+The tariffs were going into effect
+on March 1 2016 and all Mexico-
+Americans,exceptforEUpartners,
+faceallorpartofnotariffs. Toen-
+surethesetariffs
+WhatroledowomenplayintheeconomyofMexico,andhowhasthis Mexicansplayavitalroleintheecon- 12.0
+changedinrecentyears? omyofMexico.Peopledefendtheir
+ownneighborhoodshowtodefend
+andfight,andhelpkeepproperty
+and families safe. They form re-
+gionalagreementsduringtheurban-
+izationphaseofadvancingtheeco-
+nomicdevelopmentofMexican
+InwhatwaysdoesLovejoyusevisualsymbolismtoconveyitsstoryor Dr.MichaelFosterLibrary-college 21.0
+message? ofIFTechistheperfectlocationfor
+theWorldDayonChildhoodatthe
+CenterofAutism;ResearchCenter
+oftheGlobalInstituteofNational
+ScienceforBiomedicalEngineering
+andEducation,UNTSE
+InwhatwaysdoesLovejoyusevisualsymbolismtoconveyitsstoryor MaterialsBnessmetcentennialCen- 19.0
+message? ter50-4-2008,DahliaPark,ParkCity,
+TKU-OfficeofInformationTechnol-
+ogyCareerSchoolsInformationSci-
+ence,InnovativeTechnologyPortfo-
+lioProgram
+Networking
+Software
+CreateavisuallyappealingtimetrackerapplicationusingFlutterframe- DataStripsConstructionInstrumen- 40.0
+workthatallowsuserstoeasilytracktheirtimespentondifferenttasks, tationStoreVideoPoliceTeamTools
+projectsoractivities. Theappshouldbeuser-friendly,witheasilyun- ExplorationProductConnectionDe-
+derstandableselectionofoptionsforthedifferentprojects,tasksand tail Desk Inventory Gallery Fire-
+activities.Theapplicationshouldincludeatimerthatstartswhenthe worksQuickLaunchOfficeSoftware
+userbeginsataskandstopswhentheyswitchtoanothertaskorstop ToolKitsJobOverviewVideoPlogle
+workingaltogether.Additionally,theappshouldallowuserstogenerate Options Battery Slider Main Site
+conciseyetinformativereportsandinvoiceswithdetailssuchasthe AutoovenUpdateBlogProjectTuto-
+amountoftimespentonaparticulartaskorproject,thehourlyratefor rialExampleBaseProjectLogEnc
+work,andmore.
+CreateavisuallyappealingtimetrackerapplicationusingFlutterframe- ArchivesAuditSystemSetArchive 35.0
+workthatallowsuserstoeasilytracktheirtimespentondifferenttasks, DatabaseDatabaseUnderstandCli-
+projectsoractivities. Theappshouldbeuser-friendly,witheasilyun- mate Distribution Services Chat-
+derstandableselectionofoptionsforthedifferentprojects,tasksand ter Trailer Push Graph Archives
+activities.Theapplicationshouldincludeatimerthatstartswhenthe GridNetworkDatabaseWorkTools
+userbeginsataskandstopswhentheyswitchtoanothertaskorstop Researchers Catalog Comparison
+workingaltogether.Additionally,theappshouldallowuserstogenerate Chart Inventory Database Backup
+conciseyetinformativereportsandinvoiceswithdetailssuchasthe DatabaseDatabaseStorageLicense
+amountoftimespentonaparticulartaskorproject,thehourlyratefor AddComponentsAddArraysEnd
+work,andmore. User Actions Data Data System
+EventsSwapInventory
+Table7: ExamplesforUniqueNounsTask
+18Question Response Gold
+Re-
+ward
+(((9+7)*(8*1))-(7+8))= ((16*(8*1))-(7+8))=((16*8)-(7+ -1.0
+8))=((16*8)-15)=(128-15)=103
+(8-15)=-7=-7=-7=-7=-7=
+(((9+7)*(8*1))-(7+8))= (16*(8*1))-(7+8)=(16*8)-(7+ -20.0
+8)=(16*8)-21=72
+(((3*7)-5)-(4*(2-6)))= ((21-5)-(4*(2-6)))=((21-5)-(4 -3.0
+*-4))=(18-(4*-4))=(18--16)=34
+(88
+(((3*7)-5)-(4*(2-6)))= ((21-5)-(4*(2-6)))=((21-5)-(4* -1.0
+-4))=(16-(4*-4))=(16--16)=36
+(((5+1)*(3+8))*3)= ((6*(3+8))*3)=((6*11)*3)=(66* 0.0
+3)=198
+(((5+1)*(3+8))*3)= ((6*(3+8))*3)=((6*11)*3)=(66* 0.0
+3)=198
+Table8: ExamplesforMathTask
+Question Response Gold
+Re-
+ward
+Heextendedhisinfluencebeyondhisinheritedlands,as wellasthe2007seasoncompletely, -0.1875
+providingthetraumaandlossofa
+lotofthelegendaryplayersaswell.
+Somuchforcavemen
+Heextendedhisinfluencebeyondhisinheritedlands,as didmanyhisminions.Hesureain’t -0.25
+theonlyTrumparoundMaybeI’m
+justwaitingfortherighttimeyet,
+butIjustwanttoarguehe’ssome-
+how interacting with our culture.
+I’m
+Accordingtothe2020UnitedStatesCensus,the onlywaytowingames. Unfortu- 0.0625
+nately.
+Accordingtothe2020UnitedStatesCensus,the cursing.Maybeitwasthesecages 0.25
+Thecountyseatandlargestcityis ............ 0.41
+Thecountyseatandlargestcityis ......... 0.34
+Table9: ExamplesforContrastiveDistillTask
+19Question Response Gold
+Re-
+ward
+Can you provide Sure!HereisabreakdownofOsaka’spopulationdemographicscomparedtoTokyo 3.0
+a breakdown of andKyoto:
+Osaka’s population -Osaka:Osakahasanurbanpopulationofapproximately19.35millionpeople.The
+demographics com- populationconsistsofroughly7.49millionmalesand11.86millionfemales. The
+pared to Tokyo or populationdensityinOsakais4,640peoplepersquarekilometer.
+Kyoto? -Tokyo:Tokyohasanurbanpopulationofapproximately13.6millionpeople.Thepop-
+ulationconsistsofroughly6.69millionmalesand7.91millionfemales.Thepopulation
+densityinTokyois6,197peoplepersquarekilometer.
+-Kyoto: Kyotohasanurbanpopulationofapproximately1.53millionpeople. The
+populationconsistsofroughly756,681malesand789,394females. Thepopulation
+densityinKyotois1,175peoplepersquarekilometer.
+Intermsofagedistribution,Osaka’spopulationhasaslightlyhigherproportionof
+individualsaged20-29,followedbythe30-39and40-
+Compare and con- Thereareseveraltypesofpaymentplansthatonlinestorescanoffertotheircustomers. 5.0
+trastdifferenttypesof Thekeydifferencesbetweentheseplansinclude:
+paymentplansforon- 1. PaymentUpfront-Thisplaninvolvescustomerspayingtheentireamountfora
+linestores. productupfront.Whileitcanattractcustomerswhoprefertopayinfull,itmaynot
+appealtothosewhopreferinstallmentplans.
+2. PaymentinInstallments-Underthisplan,customerscanpayforaproductin
+multipleinstallments. Theyaregivenanoptiontochoosethenumberofmonthsor
+weekstheywanttopay. Thisplancanbebeneficialforcustomerswhohaveatight
+budgetorwanttospreadthecostoftheirpurchaseoveralongerperiod.
+3.SubscriptionPlans-Someonlinestoresoffersubscriptionplans,wherecustomers
+payonaregularbasistoreceiveproductsorservices.Subscriptionplansareidealfor
+customerswhoneedregularsuppliesofaproductandprefertopayinadvance.
+4.Pay-in-FullDiscounts-Someonlinestoresofferdiscountsonproductstocustomers
+whopaythefullamountupfront.Thisplancanattractcustomerswhowanttotake
+advantageoflowerpricesbutmaynotbeidealforcustomerswhoprefertopayin
+installments.
+Compare and con- Paymentplansareanessentialaspectofonlinestoresthatallowcustomerstopay 4.0
+trastdifferenttypesof fortheirpurchasesininstallmentsratherthanupfront. Therearedifferenttypesof
+paymentplansforon- paymentplansthatareofferedbyonlinestores,eachwithuniquecharacteristicsand
+linestores. advantages.Inthisarticle,wewillcompareandcontrastthreepopularpaymentplan
+options: interest-bearingpaymentplans,deferredpaymentplans,andnointerest
+paymentplans.
+Interest-BearingPaymentPlans:...[RESTOMITTED]
+Interest-bearingpaymentplanshelpcustomersbyprovidingaflexiblepaymentoption.
+Theyallowcustomerstospreadthecostsoftheproductoveralongerperiod,which
+canmakethepurchasemoreaffordable.Inaddition,these
+Please reach out to Dearfriend,Iapologizefortheconfusionearlier,itappearsthatmypreviousresponse 4.5
+the planning depart- wasnotabletoassistyouwiththisspecificrequest.Withregardstoyourinquiryabout
+mentofyourlocality economicdevelopmentprojectsandinitiativesinyourlocalcommunity,Iwouldsuggest
+andinquireaboutthe reachingouttotheplanningdepartmentinyourarea.Theyshouldhaveinformation
+current and future aboutcurrentprojectsandupcominginitiativesthatmaybeofinteresttoyou.
+projectsrelatedtoeco- Toinquireabouteconomicdevelopmentinitiatives,youcancallthelocalplanning
+nomic development departmentorvisittheirwebsiteforthelatestupdates. Youmayalsoaskifthey
+in the community. haveanyresourcesorfundingopportunitiesavailableforbusinessesorentrepreneurs
+Kindly ask if there lookingtostartorgrowtheiroperationsinthecommunity.Additionally,youcanalso
+are any upcoming considerattendinganycommunitymeetingsoreventsrelatedtoeconomicdevelopment
+initiativesorfunding whereyoumaybeabletoaskquestionsandlearnmoreaboutthelocaleconomy.
+opportunities aimed Ihopethisinformationishelpful.LetmeknowifthereisanythingelseIcanassistyou
+at promoting com- with.
+mercial growth and
+jobcreation.
+Please reach out to AsanAIlanguagemodel,Iamnotabletomakephonecallsorvisitwebsiteson 4.5
+the planning depart- myown. However,Icanprovideyouwithsomesamplelanguagethatyoucanuse
+mentofyourlocality whenreachingouttotheplanningdepartmentofyourlocalityregardingeconomic
+andinquireaboutthe development.Here’sanexampleemailyoucansend:
+current and future Subject:InquiryaboutEconomicDevelopmentProjects
+projectsrelatedtoeco- Dear[PlanningDepartment],
+nomic development Iamwritingtoinquireaboutthecurrentandfutureprojectsrelatedtoeconomic
+in the community. developmentinthecommunity.Iaminterestedinknowingifthereareanyupcoming
+Kindly ask if there initiativesorfundingopportunitiesaimedatpromotingcommercialgrowthandjob
+are any upcoming creation.
+initiativesorfunding [RESTOMITTED]
+opportunities aimed
+at promoting com-
+mercial growth and
+jobcreation.
+Table10: ExamplesforUltraFeedback
+20
