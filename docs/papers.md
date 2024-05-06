@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01535v1 |
-|title| Prometheus 2: An Open Source Language Model Specialized in Evaluating Other Language Models |
-|authors| Seungone KimJuyoung SukShayne LongpreBill Yuchen LinJamin ShinSean WelleckGraham NeubigMoontae LeeKyungjae LeeMinjoon Seo
-|links| http://arxiv.org/abs/2405.01535v1 |
-|updated| 2024-05-02 17:59:35 UTC |
-|summary| Proprietary LMs such as GPT-4 are often employed to assess the quality ofresponses from various LMs. However concerns including transparencycontrollability and affordability strongly motivate the development ofopen-source LMs specialized in evaluations. On the other hand existing openevaluator LMs exhibit critical shortcomings: 1 they issue scores thatsignificantly diverge from those assigned by humans and 2 they lack theflexibility to perform both direct assessment and pairwise ranking the twomost prevalent forms of assessment. Additionally they do not possess theability to evaluate based on custom evaluation criteria focusing instead ongeneral attributes like helpfulness and harmlessness. To address these issueswe introduce Prometheus 2 a more powerful evaluator LM than its predecessorthat closely mirrors human and GPT-4 judgements. Moreover it is capable ofprocessing both direct assessment and pair-wise ranking formats grouped with auser-defined evaluation criteria. On four direct assessment benchmarks and fourpairwise ranking benchmarks Prometheus 2 scores the highest correlation andagreement with humans and proprietary LM judges among all tested open evaluatorLMs. Our models code and data are all publicly available athttps://github.com/prometheus-eval/prometheus-eval. |
+|idx| 2405.02287v1 |
+|title| Vibe-Eval: A hard evaluation suite for measuring progress of multimodal language models |
+|authors| Piotr PadlewskiMax BainMatthew HendersonZhongkai ZhuNishant RelanHai PhamDonovan OngKaloyan AleksievAitor OrmazabalSamuel PhuaEthan YeoEugenie LamprechtQi LiuYuqi WangEric ChenDeyu FuLei LiChe ZhengCyprien de Masson d'AutumeDani YogatamaMikel ArtetxeYi Tay
+|links| http://arxiv.org/abs/2405.02287v1 |
+|updated| 2024-05-03 17:59:55 UTC |
+|summary| We introduce Vibe-Eval: a new open benchmark and framework for evaluatingmultimodal chat models. Vibe-Eval consists of 269 visual understanding promptsincluding 100 of hard difficulty complete with gold-standard responsesauthored by experts. Vibe-Eval is open-ended and challenging with dualobjectives: i vibe checking multimodal chat models for day-to-day tasks andii rigorously testing and probing the capabilities of present frontiermodels. Notably our hard set contains 50 questions that all frontier modelsanswer incorrectly. We explore the nuances of designing evaluating andranking models on ultra challenging prompts. We also discuss trade-offs betweenhuman and automatic evaluation and show that automatic model evaluation usingReka Core roughly correlates to human judgment. We offer free API access forthe purpose of lightweight evaluation and plan to conduct formal humanevaluations for public models that perform well on the Vibe-Evals automaticscores. We release the evaluation code and data seehttps://github.com/reka-ai/reka-vibe-eval |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01525v1 |
-|title| FLAME: Factuality-Aware Alignment for Large Language Models |
-|authors| Sheng-Chieh LinLuyu GaoBarlas OguzWenhan XiongJimmy LinWen-tau YihXilun Chen
-|links| http://arxiv.org/abs/2405.01525v1 |
-|updated| 2024-05-02 17:54:54 UTC |
-|summary| Alignment is a standard procedure to fine-tune pre-trained large languagemodels LLMs to follow natural language instructions and serve as helpful AIassistants. We have observed however that the conventional alignment processfails to enhance the factual accuracy of LLMs and often leads to thegeneration of more false facts i.e. hallucination. In this paper we studyhow to make the LLM alignment process more factual by first identifyingfactors that lead to hallucination in both alignment steps: supervisedfine-tuning SFT and reinforcement learning RL. In particular we find thattraining the LLM on new knowledge or unfamiliar texts can encouragehallucination. This makes SFT less factual as it trains on human labeled datathat may be novel to the LLM. Furthermore reward functions used in standard RLcan also encourage hallucination because it guides the LLM to provide morehelpful responses on a diverse set of instructions often preferring longer andmore detailed responses. Based on these observations we proposefactuality-aware alignment comprised of factuality-aware SFT andfactuality-aware RL through direct preference optimization. Experiments showthat our proposed factuality-aware alignment guides LLMs to output more factualresponses while maintaining instruction-following capability. |
+|idx| 2405.02267v1 |
+|title| Structural Pruning of Pre-trained Language Models via Neural Architecture Search |
+|authors| Aaron KleinJacek GolebiowskiXingchen MaValerio PerroneCedric Archambeau
+|links| http://arxiv.org/abs/2405.02267v1 |
+|updated| 2024-05-03 17:34:57 UTC |
+|summary| Pre-trained language models PLM for example BERT or RoBERTa mark thestate-of-the-art for natural language understanding task when fine-tuned onlabeled data. However their large size poses challenges in deploying them forinference in real-world applications due to significant GPU memoryrequirements and high inference latency. This paper explores neuralarchitecture search NAS for structural pruning to find sub-parts of thefine-tuned network that optimally trade-off efficiency for example in terms ofmodel size or latency and generalization performance. We also show how we canutilize more recently developed two-stage weight-sharing NAS approaches in thissetting to accelerate the search process. Unlike traditional pruning methodswith fixed thresholds we propose to adopt a multi-objective approach thatidentifies the Pareto optimal set of sub-networks allowing for a more flexibleand automated compression process. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01511v1 |
-|title| D2PO: Discriminator-Guided DPO with Response Evaluation Models |
-|authors| Prasann SinghalNathan LambertScott NiekumTanya GoyalGreg Durrett
-|links| http://arxiv.org/abs/2405.01511v1 |
-|updated| 2024-05-02 17:44:41 UTC |
-|summary| Varied approaches for aligning language models have been proposed includingsupervised fine-tuning RLHF and direct optimization methods such as DPO.Although DPO has rapidly gained popularity due to its straightforward trainingprocess and competitive results there is an open question of whether thereremain practical advantages of using a discriminator like a reward model toevaluate responses. We propose D2PO discriminator-guided DPO an approach forthe online setting where preferences are being collected throughout learning.As we collect gold preferences we use these not only to train our policy butto train a discriminative response evaluation model to silver-label even moresynthetic data for policy training. We explore this approach across a set ofdiverse tasks including a realistic chat setting we find that our approachleads to higher-quality outputs compared to DPO with the same data budget andgreater efficiency in terms of preference data requirements. Furthermore weshow conditions under which silver labeling is most helpful: it is mosteffective when training the policy with DPO outperforming traditional PPO andbenefits from maintaining a separate discriminator from the policy model. |
+|idx| 2405.02228v1 |
+|title| REASONS: A benchmark for REtrieval and Automated citationS Of scieNtific Sentences using Public and Proprietary LLMs |
+|authors| Deepa TilwaniYash SaxenaAli MohammadiEdward RaffAmit ShethSrinivasan ParthasarathyManas Gaur
+|links| http://arxiv.org/abs/2405.02228v1 |
+|updated| 2024-05-03 16:38:51 UTC |
+|summary| Automatic citation generation for sentences in a document or report isparamount for intelligence analysts cybersecurity news agencies andeducation personnel. In this research we investigate whether large languagemodels LLMs are capable of generating references based on two forms ofsentence queries: a Direct Queries LLMs are asked to provide author names ofthe given research article and b Indirect Queries LLMs are asked to providethe title of a mentioned article when given a sentence from a differentarticle. To demonstrate where LLM stands in this task we introduce a largedataset called REASONS comprising abstracts of the 12 most popular domains ofscientific research on arXiv. From around 20K research articles we make thefollowing deductions on public and proprietary LLMs: a State-of-the-artoften called anthropomorphic GPT-4 and GPT-3.5 suffers from high passpercentage PP to minimize the hallucination rate HR. When tested withPerplexity.ai 7B they unexpectedly made more errors b Augmenting relevantmetadata lowered the PP and gave the lowest HR c Advance retrieval-augmentedgeneration RAG using Mistral demonstrates consistent and robust citationsupport on indirect queries and matched performance to GPT-3.5 and GPT-4. TheHR across all domains and models decreased by an average of 41.93 and the PPwas reduced to 0 in most cases. In terms of generation quality the average F1Score and BLEU were 68.09 and 57.51 respectively d Testing withadversarial samples showed that LLMs including the Advance RAG Mistralstruggle to understand context but the extent of this issue was small inMistral and GPT-4-Preview. Our study con tributes valuable insights into thereliability of RAG for automated citation generation tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01502v1 |
-|title| Analyzing the Role of Semantic Representations in the Era of Large Language Models |
-|authors| Zhijing JinYuen ChenFernando GonzalezJiarui LiuJiayi ZhangJulian MichaelBernhard SchölkopfMona Diab
-|links| http://arxiv.org/abs/2405.01502v1 |
-|updated| 2024-05-02 17:32:59 UTC |
-|summary| Traditionally natural language processing NLP models often use a rich setof features created by linguistic expertise such as semantic representations.However in the era of large language models LLMs more and more tasks areturned into generic end-to-end sequence generation problems. In this paper weinvestigate the question: what is the role of semantic representations in theera of LLMs Specifically we investigate the effect of Abstract MeaningRepresentation AMR across five diverse NLP tasks. We propose an AMR-drivenchain-of-thought prompting method which we call AMRCoT and find that itgenerally hurts performance more than it helps. To investigate what AMR mayhave to offer on these tasks we conduct a series of analysis experiments. Wefind that it is difficult to predict which input examples AMR may help or hurton but errors tend to arise with multi-word expressions named entities andin the final inference step where the LLM must connect its reasoning over theAMR to its prediction. We recommend focusing on these areas for future work insemantic representations for LLMs. Our code:https://github.com/causalNLP/amr_llm. |
+|idx| 2405.02195v1 |
+|title| Impact of emoji exclusion on the performance of Arabic sarcasm detection models |
+|authors| Ghalyah H. AleryaniWael DeabesKhaled AlbishreAlaa E. Abdel-Hakim
+|links| http://arxiv.org/abs/2405.02195v1 |
+|updated| 2024-05-03 15:51:02 UTC |
+|summary| The complex challenge of detecting sarcasm in Arabic speech on social mediais increased by the language diversity and the nature of sarcastic expressions.There is a significant gap in the capability of existing models to effectivelyinterpret sarcasm in Arabic which mandates the necessity for moresophisticated and precise detection methods. In this paper we investigate theimpact of a fundamental preprocessing component on sarcasm speech detection.While emojis play a crucial role in mitigating the absence effect of bodylanguage and facial expressions in modern communication their impact onautomated text analysis particularly in sarcasm detection remainsunderexplored. We investigate the impact of emoji exclusion from datasets onthe performance of sarcasm detection models in social media content for Arabicas a vocabulary-super rich language. This investigation includes the adaptationand enhancement of AraBERT pre-training models specifically by excludingemojis to improve sarcasm detection capabilities. We use AraBERT pre-trainingto refine the specified models demonstrating that the removal of emojis cansignificantly boost the accuracy of sarcasm detection. This approachfacilitates a more refined interpretation of language eliminating thepotential confusion introduced by non-textual elements. The evaluated AraBERTmodels through the focused strategy of emoji removal adeptly navigate thecomplexities of Arabic sarcasm. This study establishes new benchmarks in Arabicnatural language processing and presents valuable insights for social mediaplatforms. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01490v1 |
-|title| Controllable Text Generation in the Instruction-Tuning Era |
-|authors| Dhananjay AshokBarnabas Poczos
-|links| http://arxiv.org/abs/2405.01490v1 |
-|updated| 2024-05-02 17:24:30 UTC |
-|summary| While most research on controllable text generation has focused on steeringbase Language Models the emerging instruction-tuning and prompting paradigmoffers an alternate approach to controllability. We compile and releaseConGenBench a testbed of 17 different controllable generation tasks using asubset of it to benchmark the performance of 9 different baselines and methodson Instruction-tuned Language Models. To our surprise we find thatprompting-based approaches outperform controllable text generation methods onmost datasets and tasks highlighting a need for research on controllable textgeneration with Instruction-tuned Language Models in specific. Prompt-basedapproaches match human performance on most stylistic tasks while lagging onstructural tasks foregrounding a need to study more varied constraints andmore challenging stylistic tasks. To facilitate such research we provide analgorithm that uses only a task dataset and a Large Language Model within-context capabilities to automatically generate a constraint dataset. Thismethod eliminates the fields dependence on pre-curated constraint datasetshence vastly expanding the range of constraints that can be studied in thefuture. |
+|idx| 2405.02178v1 |
+|title| Assessing and Verifying Task Utility in LLM-Powered Applications |
+|authors| Negar ArabzadehSiging HuoNikhil MehtaQinqyun WuChi WangAhmed AwadallahCharles L. A. ClarkeJulia Kiseleva
+|links| http://arxiv.org/abs/2405.02178v1 |
+|updated| 2024-05-03 15:26:27 UTC |
+|summary| The rapid development of Large Language Models LLMs has led to a surge inapplications that facilitate collaboration among multiple agents assistinghumans in their daily tasks. However a significant gap remains in assessing towhat extent LLM-powered applications genuinely enhance user experience and taskexecution efficiency. This highlights the need to verify utility of LLM-poweredapplications particularly by ensuring alignment between the applicationsfunctionality and end-user needs. We introduce AgentEval a novel frameworkdesigned to simplify the utility verification process by automaticallyproposing a set of criteria tailored to the unique purpose of any givenapplication. This allows for a comprehensive assessment quantifying theutility of an application against the suggested criteria. We present acomprehensive analysis of the effectiveness and robustness of AgentEval for twoopen source datasets including Math Problem solving and ALFWorld House-holdrelated tasks. For reproducibility purposes we make the data code and all thelogs publicly available at https://bit.ly/3w3yKcS . |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01534v1 |
-|title| Plan-Seq-Learn: Language Model Guided RL for Solving Long Horizon Robotics Tasks |
-|authors| Murtaza DalalTarun ChiruvoluDevendra ChaplotRuslan Salakhutdinov
-|links| http://arxiv.org/abs/2405.01534v1 |
-|updated| 2024-05-02 17:59:31 UTC |
-|summary| Large Language Models LLMs have been shown to be capable of performinghigh-level planning for long-horizon robotics tasks yet existing methodsrequire access to a pre-defined skill library e.g. picking placing pullingpushing navigating. However LLM planning does not address how to design orlearn those behaviors which remains challenging particularly in long-horizonsettings. Furthermore for many tasks of interest the robot needs to be ableto adjust its behavior in a fine-grained manner requiring the agent to becapable of modifying low-level control actions. Can we instead use theinternet-scale knowledge from LLMs for high-level policies guidingreinforcement learning RL policies to efficiently solve robotic control tasksonline without requiring a pre-determined set of skills In this paper wepropose Plan-Seq-Learn PSL: a modular approach that uses motion planning tobridge the gap between abstract language and learned low-level control forsolving long-horizon robotics tasks from scratch. We demonstrate that PSLachieves state-of-the-art results on over 25 challenging robotics tasks with upto 10 stages. PSL solves long-horizon tasks from raw visual input spanning fourbenchmarks at success rates of over 85 out-performing language-basedclassical and end-to-end approaches. Video results and code athttps://mihdalal.github.io/planseqlearn/ |
+|idx| 2405.02287v1 |
+|title| Vibe-Eval: A hard evaluation suite for measuring progress of multimodal language models |
+|authors| Piotr PadlewskiMax BainMatthew HendersonZhongkai ZhuNishant RelanHai PhamDonovan OngKaloyan AleksievAitor OrmazabalSamuel PhuaEthan YeoEugenie LamprechtQi LiuYuqi WangEric ChenDeyu FuLei LiChe ZhengCyprien de Masson d'AutumeDani YogatamaMikel ArtetxeYi Tay
+|links| http://arxiv.org/abs/2405.02287v1 |
+|updated| 2024-05-03 17:59:55 UTC |
+|summary| We introduce Vibe-Eval: a new open benchmark and framework for evaluatingmultimodal chat models. Vibe-Eval consists of 269 visual understanding promptsincluding 100 of hard difficulty complete with gold-standard responsesauthored by experts. Vibe-Eval is open-ended and challenging with dualobjectives: i vibe checking multimodal chat models for day-to-day tasks andii rigorously testing and probing the capabilities of present frontiermodels. Notably our hard set contains 50 questions that all frontier modelsanswer incorrectly. We explore the nuances of designing evaluating andranking models on ultra challenging prompts. We also discuss trade-offs betweenhuman and automatic evaluation and show that automatic model evaluation usingReka Core roughly correlates to human judgment. We offer free API access forthe purpose of lightweight evaluation and plan to conduct formal humanevaluations for public models that perform well on the Vibe-Evals automaticscores. We release the evaluation code and data seehttps://github.com/reka-ai/reka-vibe-eval |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01531v1 |
-|title| Improving Intervention Efficacy via Concept Realignment in Concept Bottleneck Models |
-|authors| Nishad SinghiJae Myung KimKarsten RothZeynep Akata
-|links| http://arxiv.org/abs/2405.01531v1 |
-|updated| 2024-05-02 17:59:01 UTC |
-|summary| Concept Bottleneck Models CBMs ground image classification onhuman-understandable concepts to allow for interpretable model decisions.Crucially the CBM design inherently allows for human interventions in whichexpert users are given the ability to modify potentially misaligned conceptchoices to influence the decision behavior of the model in an interpretablefashion. However existing approaches often require numerous humaninterventions per image to achieve strong performances posing practicalchallenges in scenarios where obtaining human feedback is expensive. In thispaper we find that this is noticeably driven by an independent treatment ofconcepts during intervention wherein a change of one concept does notinfluence the use of other ones in the models final decision. To address thisissue we introduce a trainable concept intervention realignment module whichleverages concept relations to realign concept assignments post-intervention.Across standard real-world benchmarks we find that concept realignment cansignificantly improve intervention efficacy significantly reducing the numberof interventions needed to reach a target classification performance or conceptprediction accuracy. In addition it easily integrates into existingconcept-based architectures without requiring changes to the models themselves.This reduced cost of human-model collaboration is crucial to enhancing thefeasibility of CBMs in resource-constrained environments. |
+|idx| 2405.02246v1 |
+|title| What matters when building vision-language models? |
+|authors| Hugo LaurençonLéo TronchonMatthieu CordVictor Sanh
+|links| http://arxiv.org/abs/2405.02246v1 |
+|updated| 2024-05-03 17:00:00 UTC |
+|summary| The growing interest in vision-language models VLMs has been driven byimprovements in large language models and vision transformers. Despite theabundance of literature on this subject we observe that critical decisionsregarding the design of VLMs are often not justified. We argue that theseunsupported decisions impede progress in the field by making it difficult toidentify which choices improve model performance. To address this issue weconduct extensive experiments around pre-trained models architecture choicedata and training methods. Our consolidation of findings includes thedevelopment of Idefics2 an efficient foundational VLM of 8 billion parameters.Idefics2 achieves state-of-the-art performance within its size category acrossvarious multimodal benchmarks and is often on par with models four times itssize. We release the model base instructed and chat along with the datasetscreated for its training. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01525v1 |
-|title| FLAME: Factuality-Aware Alignment for Large Language Models |
-|authors| Sheng-Chieh LinLuyu GaoBarlas OguzWenhan XiongJimmy LinWen-tau YihXilun Chen
-|links| http://arxiv.org/abs/2405.01525v1 |
-|updated| 2024-05-02 17:54:54 UTC |
-|summary| Alignment is a standard procedure to fine-tune pre-trained large languagemodels LLMs to follow natural language instructions and serve as helpful AIassistants. We have observed however that the conventional alignment processfails to enhance the factual accuracy of LLMs and often leads to thegeneration of more false facts i.e. hallucination. In this paper we studyhow to make the LLM alignment process more factual by first identifyingfactors that lead to hallucination in both alignment steps: supervisedfine-tuning SFT and reinforcement learning RL. In particular we find thattraining the LLM on new knowledge or unfamiliar texts can encouragehallucination. This makes SFT less factual as it trains on human labeled datathat may be novel to the LLM. Furthermore reward functions used in standard RLcan also encourage hallucination because it guides the LLM to provide morehelpful responses on a diverse set of instructions often preferring longer andmore detailed responses. Based on these observations we proposefactuality-aware alignment comprised of factuality-aware SFT andfactuality-aware RL through direct preference optimization. Experiments showthat our proposed factuality-aware alignment guides LLMs to output more factualresponses while maintaining instruction-following capability. |
+|idx| 2405.02228v1 |
+|title| REASONS: A benchmark for REtrieval and Automated citationS Of scieNtific Sentences using Public and Proprietary LLMs |
+|authors| Deepa TilwaniYash SaxenaAli MohammadiEdward RaffAmit ShethSrinivasan ParthasarathyManas Gaur
+|links| http://arxiv.org/abs/2405.02228v1 |
+|updated| 2024-05-03 16:38:51 UTC |
+|summary| Automatic citation generation for sentences in a document or report isparamount for intelligence analysts cybersecurity news agencies andeducation personnel. In this research we investigate whether large languagemodels LLMs are capable of generating references based on two forms ofsentence queries: a Direct Queries LLMs are asked to provide author names ofthe given research article and b Indirect Queries LLMs are asked to providethe title of a mentioned article when given a sentence from a differentarticle. To demonstrate where LLM stands in this task we introduce a largedataset called REASONS comprising abstracts of the 12 most popular domains ofscientific research on arXiv. From around 20K research articles we make thefollowing deductions on public and proprietary LLMs: a State-of-the-artoften called anthropomorphic GPT-4 and GPT-3.5 suffers from high passpercentage PP to minimize the hallucination rate HR. When tested withPerplexity.ai 7B they unexpectedly made more errors b Augmenting relevantmetadata lowered the PP and gave the lowest HR c Advance retrieval-augmentedgeneration RAG using Mistral demonstrates consistent and robust citationsupport on indirect queries and matched performance to GPT-3.5 and GPT-4. TheHR across all domains and models decreased by an average of 41.93 and the PPwas reduced to 0 in most cases. In terms of generation quality the average F1Score and BLEU were 68.09 and 57.51 respectively d Testing withadversarial samples showed that LLMs including the Advance RAG Mistralstruggle to understand context but the extent of this issue was small inMistral and GPT-4-Preview. Our study con tributes valuable insights into thereliability of RAG for automated citation generation tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01524v1 |
-|title| A separability-based approach to quantifying generalization: which layer is best? |
-|authors| Luciano DyballaEvan GerritzSteven W. Zucker
-|links| http://arxiv.org/abs/2405.01524v1 |
-|updated| 2024-05-02 17:54:35 UTC |
-|summary| Generalization to unseen data remains poorly understood for deep learningclassification and foundation models. How can one assess the ability ofnetworks to adapt to new or extended versions of their input space in thespirit of few-shot learning out-of-distribution generalization and domainadaptation Which layers of a network are likely to generalize best We providea new method for evaluating the capacity of networks to represent a sampleddomain regardless of whether the network has been trained on all classes inthe domain. Our approach is the following: after fine-tuning state-of-the-artpre-trained models for visual classification on a particular domain we assesstheir performance on data from related but distinct variations in that domain.Generalization power is quantified as a function of the latent embeddings ofunseen data from intermediate layers for both unsupervised and supervisedsettings. Working throughout all stages of the network we find that i highclassification accuracy does not imply high generalizability and ii deeperlayers in a model do not always generalize the best which has implications forpruning. Since the trends observed across datasets are largely consistent weconclude that our approach reveals a function of the intrinsic capacity ofthe different layers of a model to generalize. |
+|idx| 2405.02225v1 |
+|title| Fair Risk Control: A Generalized Framework for Calibrating Multi-group Fairness Risks |
+|authors| Lujing ZhangAaron RothLinjun Zhang
+|links| http://arxiv.org/abs/2405.02225v1 |
+|updated| 2024-05-03 16:32:09 UTC |
+|summary| This paper introduces a framework for post-processing machine learning modelsso that their predictions satisfy multi-group fairness guarantees. Based on thecelebrated notion of multicalibration we introduce mathbfsmathcalGalpha-GMC Generalized Multi-Dimensional Multicalibration formulti-dimensional mappings mathbfs constraint set mathcalG and apre-specified threshold level alpha. We propose associated algorithms toachieve this notion in general settings. This framework is then applied todiverse scenarios encompassing different fairness concerns including falsenegative rate control in image segmentation prediction set conditionaluncertainty quantification in hierarchical classification and de-biased textgeneration in language models. We conduct numerical studies on several datasetsand tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01502v1 |
-|title| Analyzing the Role of Semantic Representations in the Era of Large Language Models |
-|authors| Zhijing JinYuen ChenFernando GonzalezJiarui LiuJiayi ZhangJulian MichaelBernhard SchölkopfMona Diab
-|links| http://arxiv.org/abs/2405.01502v1 |
-|updated| 2024-05-02 17:32:59 UTC |
-|summary| Traditionally natural language processing NLP models often use a rich setof features created by linguistic expertise such as semantic representations.However in the era of large language models LLMs more and more tasks areturned into generic end-to-end sequence generation problems. In this paper weinvestigate the question: what is the role of semantic representations in theera of LLMs Specifically we investigate the effect of Abstract MeaningRepresentation AMR across five diverse NLP tasks. We propose an AMR-drivenchain-of-thought prompting method which we call AMRCoT and find that itgenerally hurts performance more than it helps. To investigate what AMR mayhave to offer on these tasks we conduct a series of analysis experiments. Wefind that it is difficult to predict which input examples AMR may help or hurton but errors tend to arise with multi-word expressions named entities andin the final inference step where the LLM must connect its reasoning over theAMR to its prediction. We recommend focusing on these areas for future work insemantic representations for LLMs. Our code:https://github.com/causalNLP/amr_llm. |
+|idx| 2405.02213v1 |
+|title| Automatic Programming: Large Language Models and Beyond |
+|authors| Michael R. LyuBaishakhi RayAbhik RoychoudhuryShin Hwei TanPatanamon Thongtanunam
+|links| http://arxiv.org/abs/2405.02213v1 |
+|updated| 2024-05-03 16:19:24 UTC |
+|summary| Automatic programming has seen increasing popularity due to the emergence oftools like GitHub Copilot which rely on Large Language Models LLMs. At thesame time automatically generated code faces challenges during deployment dueto concerns around quality and trust. In this article we study automatedcoding in a general sense and study the concerns around code quality securityand related issues of programmer responsibility. These are key issues fororganizations while deciding on the usage of automatically generated code. Wediscuss how advances in software engineering such as program repair andanalysis can enable automatic programming. We conclude with a forward lookingview focusing on the programming environment of the near future whereprogrammers may need to switch to different roles to fully utilize the power ofautomatic programming. Automated repair of automatically generated programsfrom LLMs can help produce higher assurance code from LLMs along withevidence of assurance |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01538v1 |
-|title| Multi-Space Alignments Towards Universal LiDAR Segmentation |
-|authors| Youquan LiuLingdong KongXiaoyang WuRunnan ChenXin LiLiang PanZiwei LiuYuexin Ma
-|links| http://arxiv.org/abs/2405.01538v1 |
-|updated| 2024-05-02 17:59:57 UTC |
-|summary| A unified and versatile LiDAR segmentation model with strong robustness andgeneralizability is desirable for safe autonomous driving perception. This workpresents M3Net a one-of-a-kind framework for fulfilling multi-taskmulti-dataset multi-modality LiDAR segmentation in a universal manner usingjust a single set of parameters. To better exploit data volume and diversitywe first combine large-scale driving datasets acquired by different types ofsensors from diverse scenes and then conduct alignments in three spaces namelydata feature and label spaces during the training. As a result M3Net iscapable of taming heterogeneous data for training state-of-the-art LiDARsegmentation models. Extensive experiments on twelve LiDAR segmentationdatasets verify our effectiveness. Notably using a shared set of parametersM3Net achieves 75.1 83.1 and 72.4 mIoU scores respectively on theofficial benchmarks of SemanticKITTI nuScenes and Waymo Open. |
+|idx| 2405.02267v1 |
+|title| Structural Pruning of Pre-trained Language Models via Neural Architecture Search |
+|authors| Aaron KleinJacek GolebiowskiXingchen MaValerio PerroneCedric Archambeau
+|links| http://arxiv.org/abs/2405.02267v1 |
+|updated| 2024-05-03 17:34:57 UTC |
+|summary| Pre-trained language models PLM for example BERT or RoBERTa mark thestate-of-the-art for natural language understanding task when fine-tuned onlabeled data. However their large size poses challenges in deploying them forinference in real-world applications due to significant GPU memoryrequirements and high inference latency. This paper explores neuralarchitecture search NAS for structural pruning to find sub-parts of thefine-tuned network that optimally trade-off efficiency for example in terms ofmodel size or latency and generalization performance. We also show how we canutilize more recently developed two-stage weight-sharing NAS approaches in thissetting to accelerate the search process. Unlike traditional pruning methodswith fixed thresholds we propose to adopt a multi-objective approach thatidentifies the Pareto optimal set of sub-networks allowing for a more flexibleand automated compression process. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01536v1 |
-|title| Customizing Text-to-Image Models with a Single Image Pair |
-|authors| Maxwell JonesSheng-Yu WangNupur KumariDavid BauJun-Yan Zhu
-|links| http://arxiv.org/abs/2405.01536v1 |
-|updated| 2024-05-02 17:59:52 UTC |
-|summary| Art reinterpretation is the practice of creating a variation of a referencework making a paired artwork that exhibits a distinct artistic style. We askif such an image pair can be used to customize a generative model to capturethe demonstrated stylistic difference. We propose Pair Customization a newcustomization method that learns stylistic difference from a single image pairand then applies the acquired style to the generation process. Unlike existingmethods that learn to mimic a single concept from a collection of images ourmethod captures the stylistic difference between paired images. This allows usto apply a stylistic change without overfitting to the specific image contentin the examples. To address this new task we employ a joint optimizationmethod that explicitly separates the style and content into distinct LoRAweight spaces. We optimize these style and content weights to reproduce thestyle and content images while encouraging their orthogonality. Duringinference we modify the diffusion process via a new style guidance based onour learned weights. Both qualitative and quantitative experiments show thatour method can effectively learn style while avoiding overfitting to imagecontent highlighting the potential of modeling such stylistic differences froma single image pair. |
+|idx| 2405.02240v1 |
+|title| Subgraph2vec: A random walk-based algorithm for embedding knowledge graphs |
+|authors| Elika BozorgiSaber SoleimaniSakher Khalil AlqaiidiHamid Reza ArabniaKrzysztof Kochut
+|links| http://arxiv.org/abs/2405.02240v1 |
+|updated| 2024-05-03 16:51:18 UTC |
+|summary| Graph is an important data representation which occurs naturally in the realworld applications citegoyal2018graph. Therefore analyzing graphs providesusers with better insights in different areas such as anomaly detectioncitema2021comprehensive decision making citefan2023graph clusteringcitetsitsulin2023graph classification citewang2021mixup and etc.However most of these methods require high levels of computational time andspace. We can use other ways like embedding to reduce these costs. Knowledgegraph KG embedding is a technique that aims to achieve the vectorrepresentation of a KG. It represents entities and relations of a KG in alow-dimensional space while maintaining the semantic meanings of them. Thereare different methods for embedding graphs including random walk-based methodssuch as node2vec metapath2vec and regpattern2vec. However most of thesemethods bias the walks based on a rigid pattern usually hard-coded in thealgorithm. In this work we introduce textitsubgraph2vec for embedding KGswhere walks are run inside a user-defined subgraph. We use this embedding forlink prediction and prove our method has better performance in most cases incomparison with the previous ones. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01534v1 |
-|title| Plan-Seq-Learn: Language Model Guided RL for Solving Long Horizon Robotics Tasks |
-|authors| Murtaza DalalTarun ChiruvoluDevendra ChaplotRuslan Salakhutdinov
-|links| http://arxiv.org/abs/2405.01534v1 |
-|updated| 2024-05-02 17:59:31 UTC |
-|summary| Large Language Models LLMs have been shown to be capable of performinghigh-level planning for long-horizon robotics tasks yet existing methodsrequire access to a pre-defined skill library e.g. picking placing pullingpushing navigating. However LLM planning does not address how to design orlearn those behaviors which remains challenging particularly in long-horizonsettings. Furthermore for many tasks of interest the robot needs to be ableto adjust its behavior in a fine-grained manner requiring the agent to becapable of modifying low-level control actions. Can we instead use theinternet-scale knowledge from LLMs for high-level policies guidingreinforcement learning RL policies to efficiently solve robotic control tasksonline without requiring a pre-determined set of skills In this paper wepropose Plan-Seq-Learn PSL: a modular approach that uses motion planning tobridge the gap between abstract language and learned low-level control forsolving long-horizon robotics tasks from scratch. We demonstrate that PSLachieves state-of-the-art results on over 25 challenging robotics tasks with upto 10 stages. PSL solves long-horizon tasks from raw visual input spanning fourbenchmarks at success rates of over 85 out-performing language-basedclassical and end-to-end approaches. Video results and code athttps://mihdalal.github.io/planseqlearn/ |
+|idx| 2405.02235v1 |
+|title| Learning Optimal Deterministic Policies with Stochastic Policy Gradients |
+|authors| Alessandro MontenegroMarco MussiAlberto Maria MetelliMatteo Papini
+|links| http://arxiv.org/abs/2405.02235v1 |
+|updated| 2024-05-03 16:45:15 UTC |
+|summary| Policy gradient PG methods are successful approaches to deal withcontinuous reinforcement learning RL problems. They learn stochasticparametric hyperpolicies by either exploring in the space of actions or inthe space of parameters. Stochastic controllers however are often undesirablefrom a practical perspective because of their lack of robustness safety andtraceability. In common practice stochastic hyperpolicies are learned onlyto deploy their deterministic version. In this paper we make a step towardsthe theoretical understanding of this practice. After introducing a novelframework for modeling this scenario we study the global convergence to thebest deterministic policy under weak gradient domination assumptions. Thenwe illustrate how to tune the exploration level used for learning to optimizethe trade-off between the sample complexity and the performance of the deployeddeterministic policy. Finally we quantitatively compare action-based andparameter-based exploration giving a formal guise to intuitive results. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01531v1 |
-|title| Improving Intervention Efficacy via Concept Realignment in Concept Bottleneck Models |
-|authors| Nishad SinghiJae Myung KimKarsten RothZeynep Akata
-|links| http://arxiv.org/abs/2405.01531v1 |
-|updated| 2024-05-02 17:59:01 UTC |
-|summary| Concept Bottleneck Models CBMs ground image classification onhuman-understandable concepts to allow for interpretable model decisions.Crucially the CBM design inherently allows for human interventions in whichexpert users are given the ability to modify potentially misaligned conceptchoices to influence the decision behavior of the model in an interpretablefashion. However existing approaches often require numerous humaninterventions per image to achieve strong performances posing practicalchallenges in scenarios where obtaining human feedback is expensive. In thispaper we find that this is noticeably driven by an independent treatment ofconcepts during intervention wherein a change of one concept does notinfluence the use of other ones in the models final decision. To address thisissue we introduce a trainable concept intervention realignment module whichleverages concept relations to realign concept assignments post-intervention.Across standard real-world benchmarks we find that concept realignment cansignificantly improve intervention efficacy significantly reducing the numberof interventions needed to reach a target classification performance or conceptprediction accuracy. In addition it easily integrates into existingconcept-based architectures without requiring changes to the models themselves.This reduced cost of human-model collaboration is crucial to enhancing thefeasibility of CBMs in resource-constrained environments. |
+|idx| 2405.02225v1 |
+|title| Fair Risk Control: A Generalized Framework for Calibrating Multi-group Fairness Risks |
+|authors| Lujing ZhangAaron RothLinjun Zhang
+|links| http://arxiv.org/abs/2405.02225v1 |
+|updated| 2024-05-03 16:32:09 UTC |
+|summary| This paper introduces a framework for post-processing machine learning modelsso that their predictions satisfy multi-group fairness guarantees. Based on thecelebrated notion of multicalibration we introduce mathbfsmathcalGalpha-GMC Generalized Multi-Dimensional Multicalibration formulti-dimensional mappings mathbfs constraint set mathcalG and apre-specified threshold level alpha. We propose associated algorithms toachieve this notion in general settings. This framework is then applied todiverse scenarios encompassing different fairness concerns including falsenegative rate control in image segmentation prediction set conditionaluncertainty quantification in hierarchical classification and de-biased textgeneration in language models. We conduct numerical studies on several datasetsand tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01524v1 |
-|title| A separability-based approach to quantifying generalization: which layer is best? |
-|authors| Luciano DyballaEvan GerritzSteven W. Zucker
-|links| http://arxiv.org/abs/2405.01524v1 |
-|updated| 2024-05-02 17:54:35 UTC |
-|summary| Generalization to unseen data remains poorly understood for deep learningclassification and foundation models. How can one assess the ability ofnetworks to adapt to new or extended versions of their input space in thespirit of few-shot learning out-of-distribution generalization and domainadaptation Which layers of a network are likely to generalize best We providea new method for evaluating the capacity of networks to represent a sampleddomain regardless of whether the network has been trained on all classes inthe domain. Our approach is the following: after fine-tuning state-of-the-artpre-trained models for visual classification on a particular domain we assesstheir performance on data from related but distinct variations in that domain.Generalization power is quantified as a function of the latent embeddings ofunseen data from intermediate layers for both unsupervised and supervisedsettings. Working throughout all stages of the network we find that i highclassification accuracy does not imply high generalizability and ii deeperlayers in a model do not always generalize the best which has implications forpruning. Since the trends observed across datasets are largely consistent weconclude that our approach reveals a function of the intrinsic capacity ofthe different layers of a model to generalize. |
+|idx| 2405.02221v1 |
+|title| Discretization Error of Fourier Neural Operators |
+|authors| Samuel LanthalerAndrew M. StuartMargaret Trautner
+|links| http://arxiv.org/abs/2405.02221v1 |
+|updated| 2024-05-03 16:28:05 UTC |
+|summary| Operator learning is a variant of machine learning that is designed toapproximate maps between function spaces from data. The Fourier Neural OperatorFNO is a common model architecture used for operator learning. The FNOcombines pointwise linear and nonlinear operations in physical space withpointwise linear operations in Fourier space leading to a parameterized mapacting between function spaces. Although FNOs formally involve convolutions offunctions on a continuum in practice the computations are performed on adiscretized grid allowing efficient implementation via the FFT. In this paperthe aliasing error that results from such a discretization is quantified andalgebraic rates of convergence in terms of the grid resolution are obtained asa function of the regularity of the input. Numerical experiments that validatethe theory and describe model stability are performed. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01538v1 |
-|title| Multi-Space Alignments Towards Universal LiDAR Segmentation |
-|authors| Youquan LiuLingdong KongXiaoyang WuRunnan ChenXin LiLiang PanZiwei LiuYuexin Ma
-|links| http://arxiv.org/abs/2405.01538v1 |
-|updated| 2024-05-02 17:59:57 UTC |
-|summary| A unified and versatile LiDAR segmentation model with strong robustness andgeneralizability is desirable for safe autonomous driving perception. This workpresents M3Net a one-of-a-kind framework for fulfilling multi-taskmulti-dataset multi-modality LiDAR segmentation in a universal manner usingjust a single set of parameters. To better exploit data volume and diversitywe first combine large-scale driving datasets acquired by different types ofsensors from diverse scenes and then conduct alignments in three spaces namelydata feature and label spaces during the training. As a result M3Net iscapable of taming heterogeneous data for training state-of-the-art LiDARsegmentation models. Extensive experiments on twelve LiDAR segmentationdatasets verify our effectiveness. Notably using a shared set of parametersM3Net achieves 75.1 83.1 and 72.4 mIoU scores respectively on theofficial benchmarks of SemanticKITTI nuScenes and Waymo Open. |
+|idx| 2405.02287v1 |
+|title| Vibe-Eval: A hard evaluation suite for measuring progress of multimodal language models |
+|authors| Piotr PadlewskiMax BainMatthew HendersonZhongkai ZhuNishant RelanHai PhamDonovan OngKaloyan AleksievAitor OrmazabalSamuel PhuaEthan YeoEugenie LamprechtQi LiuYuqi WangEric ChenDeyu FuLei LiChe ZhengCyprien de Masson d'AutumeDani YogatamaMikel ArtetxeYi Tay
+|links| http://arxiv.org/abs/2405.02287v1 |
+|updated| 2024-05-03 17:59:55 UTC |
+|summary| We introduce Vibe-Eval: a new open benchmark and framework for evaluatingmultimodal chat models. Vibe-Eval consists of 269 visual understanding promptsincluding 100 of hard difficulty complete with gold-standard responsesauthored by experts. Vibe-Eval is open-ended and challenging with dualobjectives: i vibe checking multimodal chat models for day-to-day tasks andii rigorously testing and probing the capabilities of present frontiermodels. Notably our hard set contains 50 questions that all frontier modelsanswer incorrectly. We explore the nuances of designing evaluating andranking models on ultra challenging prompts. We also discuss trade-offs betweenhuman and automatic evaluation and show that automatic model evaluation usingReka Core roughly correlates to human judgment. We offer free API access forthe purpose of lightweight evaluation and plan to conduct formal humanevaluations for public models that perform well on the Vibe-Evals automaticscores. We release the evaluation code and data seehttps://github.com/reka-ai/reka-vibe-eval |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01536v1 |
-|title| Customizing Text-to-Image Models with a Single Image Pair |
-|authors| Maxwell JonesSheng-Yu WangNupur KumariDavid BauJun-Yan Zhu
-|links| http://arxiv.org/abs/2405.01536v1 |
-|updated| 2024-05-02 17:59:52 UTC |
-|summary| Art reinterpretation is the practice of creating a variation of a referencework making a paired artwork that exhibits a distinct artistic style. We askif such an image pair can be used to customize a generative model to capturethe demonstrated stylistic difference. We propose Pair Customization a newcustomization method that learns stylistic difference from a single image pairand then applies the acquired style to the generation process. Unlike existingmethods that learn to mimic a single concept from a collection of images ourmethod captures the stylistic difference between paired images. This allows usto apply a stylistic change without overfitting to the specific image contentin the examples. To address this new task we employ a joint optimizationmethod that explicitly separates the style and content into distinct LoRAweight spaces. We optimize these style and content weights to reproduce thestyle and content images while encouraging their orthogonality. Duringinference we modify the diffusion process via a new style guidance based onour learned weights. Both qualitative and quantitative experiments show thatour method can effectively learn style while avoiding overfitting to imagecontent highlighting the potential of modeling such stylistic differences froma single image pair. |
+|idx| 2405.02280v1 |
+|title| DreamScene4D: Dynamic Multi-Object Scene Generation from Monocular Videos |
+|authors| Wen-Hsuan ChuLei KeKaterina Fragkiadaki
+|links| http://arxiv.org/abs/2405.02280v1 |
+|updated| 2024-05-03 17:55:34 UTC |
+|summary| Existing VLMs can track in-the-wild 2D video objects while current generativemodels provide powerful visual priors for synthesizing novel views for thehighly under-constrained 2D-to-3D object lifting. Building upon this excitingprogress we present DreamScene4D the first approach that can generatethree-dimensional dynamic scenes of multiple objects from monocular in-the-wildvideos with large object motion across occlusions and novel viewpoints. Our keyinsight is to design a decompose-then-recompose scheme to factorize both thewhole video scene and each objects 3D motion. We first decompose the videoscene by using open-vocabulary mask trackers and an adapted image diffusionmodel to segment track and amodally complete the objects and background inthe video. Each object track is mapped to a set of 3D Gaussians that deform andmove in space and time. We also factorize the observed motion into multiplecomponents to handle fast motion. The camera motion can be inferred byre-rendering the background to match the video frames. For the object motionwe first model the object-centric deformation of the objects by leveragingrendering losses and multi-view generative priors in an object-centric framethen optimize object-centric to world-frame transformations by comparing therendered outputs against the perceived pixel and optical flow. Finally werecompose the background and objects and optimize for relative object scalesusing monocular depth prediction guidance. We show extensive results on thechallenging DAVIS Kubric and self-captured videos detail some limitationsand provide future directions. Besides 4D scene generation our results showthat DreamScene4D enables accurate 2D point motion tracking by projecting theinferred 3D trajectories to 2D while never explicitly trained to do so. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01534v1 |
-|title| Plan-Seq-Learn: Language Model Guided RL for Solving Long Horizon Robotics Tasks |
-|authors| Murtaza DalalTarun ChiruvoluDevendra ChaplotRuslan Salakhutdinov
-|links| http://arxiv.org/abs/2405.01534v1 |
-|updated| 2024-05-02 17:59:31 UTC |
-|summary| Large Language Models LLMs have been shown to be capable of performinghigh-level planning for long-horizon robotics tasks yet existing methodsrequire access to a pre-defined skill library e.g. picking placing pullingpushing navigating. However LLM planning does not address how to design orlearn those behaviors which remains challenging particularly in long-horizonsettings. Furthermore for many tasks of interest the robot needs to be ableto adjust its behavior in a fine-grained manner requiring the agent to becapable of modifying low-level control actions. Can we instead use theinternet-scale knowledge from LLMs for high-level policies guidingreinforcement learning RL policies to efficiently solve robotic control tasksonline without requiring a pre-determined set of skills In this paper wepropose Plan-Seq-Learn PSL: a modular approach that uses motion planning tobridge the gap between abstract language and learned low-level control forsolving long-horizon robotics tasks from scratch. We demonstrate that PSLachieves state-of-the-art results on over 25 challenging robotics tasks with upto 10 stages. PSL solves long-horizon tasks from raw visual input spanning fourbenchmarks at success rates of over 85 out-performing language-basedclassical and end-to-end approaches. Video results and code athttps://mihdalal.github.io/planseqlearn/ |
+|idx| 2405.02266v1 |
+|title| On the test-time zero-shot generalization of vision-language models: Do we really need prompt learning? |
+|authors| Maxime ZanellaIsmail Ben Ayed
+|links| http://arxiv.org/abs/2405.02266v1 |
+|updated| 2024-05-03 17:34:02 UTC |
+|summary| The development of large vision-language models notably CLIP has catalyzedresearch into effective adaptation techniques with a particular focus on softprompt tuning. Conjointly test-time augmentation which utilizes multipleaugmented views of a single image to enhance zero-shot generalization isemerging as a significant area of interest. This has predominantly directedresearch efforts toward test-time prompt tuning. In contrast we introduce arobust MeanShift for Test-time Augmentation MTA which surpasses prompt-basedmethods without requiring this intensive training procedure. This positions MTAas an ideal solution for both standalone and API-based applications.Additionally our method does not rely on ad hoc rules e.g. confidencethreshold used in some previous test-time augmentation techniques to filterthe augmented views. Instead MTA incorporates a quality assessment variablefor each view directly into its optimization process termed as the inliernessscore. This score is jointly optimized with a density mode seeking processleading to an efficient training- and hyperparameter-free approach. Weextensively benchmark our method on 15 datasets and demonstrate MTAssuperiority and computational efficiency. Deployed easily as plug-and-playmodule on top of zero-shot models and state-of-the-art few-shot methods MTAshows systematic and consistent improvements. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01533v1 |
-|title| OmniDrive: A Holistic LLM-Agent Framework for Autonomous Driving with 3D Perception, Reasoning and Planning |
-|authors| Shihao WangZhiding YuXiaohui JiangShiyi LanMin ShiNadine ChangJan KautzYing LiJose M. Alvarez
-|links| http://arxiv.org/abs/2405.01533v1 |
-|updated| 2024-05-02 17:59:24 UTC |
-|summary| The advances in multimodal large language models MLLMs have led to growinginterests in LLM-based autonomous driving agents to leverage their strongreasoning capabilities. However capitalizing on MLLMs strong reasoningcapabilities for improved planning behavior is challenging since planningrequires full 3D situational awareness beyond 2D reasoning. To address thischallenge our work proposes a holistic framework for strong alignment betweenagent models and 3D driving tasks. Our framework starts with a novel 3D MLLMarchitecture that uses sparse queries to lift and compress visualrepresentations into 3D before feeding them into an LLM. This query-basedrepresentation allows us to jointly encode dynamic objects and static mapelements e.g. traffic lanes providing a condensed world model forperception-action alignment in 3D. We further propose OmniDrive-nuScenes a newvisual question-answering dataset challenging the true 3D situational awarenessof a model with comprehensive visual question-answering VQA tasks includingscene description traffic regulation 3D grounding counterfactual reasoningdecision making and planning. Extensive studies show the effectiveness of theproposed architecture as well as the importance of the VQA tasks for reasoningand planning in complex 3D scenes. |
+|idx| 2405.02246v1 |
+|title| What matters when building vision-language models? |
+|authors| Hugo LaurençonLéo TronchonMatthieu CordVictor Sanh
+|links| http://arxiv.org/abs/2405.02246v1 |
+|updated| 2024-05-03 17:00:00 UTC |
+|summary| The growing interest in vision-language models VLMs has been driven byimprovements in large language models and vision transformers. Despite theabundance of literature on this subject we observe that critical decisionsregarding the design of VLMs are often not justified. We argue that theseunsupported decisions impede progress in the field by making it difficult toidentify which choices improve model performance. To address this issue weconduct extensive experiments around pre-trained models architecture choicedata and training methods. Our consolidation of findings includes thedevelopment of Idefics2 an efficient foundational VLM of 8 billion parameters.Idefics2 achieves state-of-the-art performance within its size category acrossvarious multimodal benchmarks and is often on par with models four times itssize. We release the model base instructed and chat along with the datasetscreated for its training. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01531v1 |
-|title| Improving Intervention Efficacy via Concept Realignment in Concept Bottleneck Models |
-|authors| Nishad SinghiJae Myung KimKarsten RothZeynep Akata
-|links| http://arxiv.org/abs/2405.01531v1 |
-|updated| 2024-05-02 17:59:01 UTC |
-|summary| Concept Bottleneck Models CBMs ground image classification onhuman-understandable concepts to allow for interpretable model decisions.Crucially the CBM design inherently allows for human interventions in whichexpert users are given the ability to modify potentially misaligned conceptchoices to influence the decision behavior of the model in an interpretablefashion. However existing approaches often require numerous humaninterventions per image to achieve strong performances posing practicalchallenges in scenarios where obtaining human feedback is expensive. In thispaper we find that this is noticeably driven by an independent treatment ofconcepts during intervention wherein a change of one concept does notinfluence the use of other ones in the models final decision. To address thisissue we introduce a trainable concept intervention realignment module whichleverages concept relations to realign concept assignments post-intervention.Across standard real-world benchmarks we find that concept realignment cansignificantly improve intervention efficacy significantly reducing the numberof interventions needed to reach a target classification performance or conceptprediction accuracy. In addition it easily integrates into existingconcept-based architectures without requiring changes to the models themselves.This reduced cost of human-model collaboration is crucial to enhancing thefeasibility of CBMs in resource-constrained environments. |
+|idx| 2405.02220v1 |
+|title| Designed Dithering Sign Activation for Binary Neural Networks |
+|authors| Brayan MonroyJuan EstupiñanTatiana Gelvez-BarreraJorge BaccaHenry Arguello
+|links| http://arxiv.org/abs/2405.02220v1 |
+|updated| 2024-05-03 16:27:39 UTC |
+|summary| Binary Neural Networks emerged as a cost-effective and energy-efficientsolution for computer vision tasks by binarizing either network weights oractivations. However common binary activations such as the Sign activationfunction abruptly binarize the values with a single threshold losingfine-grained details in the feature outputs. This work proposes an activationthat applies multiple thresholds following dithering principles shifting theSign activation function for each pixel according to a spatially periodicthreshold kernel. Unlike literature methods the shifting is defined jointlyfor a set of adjacent pixels taking advantage of spatial correlations.Experiments over the classification task demonstrate the effectiveness of thedesigned dithering Sign activation function as an alternative activation forbinary neural networks without increasing the computational cost. FurtherDeSign balances the preservation of details with the efficiency of binaryoperations. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01507v1 |
-|title| Accelerating Convergence in Bayesian Few-Shot Classification |
-|authors| Tianjun KeHaoqun CaoFeng Zhou
-|links| http://arxiv.org/abs/2405.01507v1 |
-|updated| 2024-05-02 17:37:39 UTC |
-|summary| Bayesian few-shot classification has been a focal point in the field offew-shot learning. This paper seamlessly integrates mirror descent-basedvariational inference into Gaussian process-based few-shot classificationaddressing the challenge of non-conjugate inference. By leveragingnon-Euclidean geometry mirror descent achieves accelerated convergence byproviding the steepest descent direction along the corresponding manifold. Italso exhibits the parameterization invariance property concerning thevariational distribution. Experimental results demonstrate competitiveclassification accuracy improved uncertainty quantification and fasterconvergence compared to baseline models. Additionally we investigate theimpact of hyperparameters and components. Code is publicly available athttps://github.com/keanson/MD-BSFC. |
+|idx| 2405.02225v1 |
+|title| Fair Risk Control: A Generalized Framework for Calibrating Multi-group Fairness Risks |
+|authors| Lujing ZhangAaron RothLinjun Zhang
+|links| http://arxiv.org/abs/2405.02225v1 |
+|updated| 2024-05-03 16:32:09 UTC |
+|summary| This paper introduces a framework for post-processing machine learning modelsso that their predictions satisfy multi-group fairness guarantees. Based on thecelebrated notion of multicalibration we introduce mathbfsmathcalGalpha-GMC Generalized Multi-Dimensional Multicalibration formulti-dimensional mappings mathbfs constraint set mathcalG and apre-specified threshold level alpha. We propose associated algorithms toachieve this notion in general settings. This framework is then applied todiverse scenarios encompassing different fairness concerns including falsenegative rate control in image segmentation prediction set conditionaluncertainty quantification in hierarchical classification and de-biased textgeneration in language models. We conduct numerical studies on several datasetsand tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01488v1 |
-|title| Digital Twin Generators for Disease Modeling |
-|authors| Nameyeh AlamJake BasilicoDaniele BertoliniSatish Casie ChettyHeather D'AngeloRyan DouglasCharles K. FisherFranklin FullerMelissa GomesRishabh GuptaAlex LangAnton LoukianovRachel Mak-McCullyCary MurrayHanalei PhamSusanna QiaoElena Ryapolova-WebbAaron SmithDimitri TheoharatosAnil TolwaniEric W. TramelAnna VidovszkyJudy ViduyaJonathan R. Walsh
-|links| http://arxiv.org/abs/2405.01488v1 |
-|updated| 2024-05-02 17:23:04 UTC |
-|summary| A patients digital twin is a computational model that describes theevolution of their health over time. Digital twins have the potential torevolutionize medicine by enabling individual-level computer simulations ofhuman health which can be used to conduct more efficient clinical trials or torecommend personalized treatment options. Due to the overwhelming complexity ofhuman biology machine learning approaches that leverage large datasets ofhistorical patients longitudinal health records to generate patients digitaltwins are more tractable than potential mechanistic models. In this manuscriptwe describe a neural network architecture that can learn conditional generativemodels of clinical trajectories which we call Digital Twin Generators DTGsthat can create digital twins of individual patients. We show that the sameneural network architecture can be trained to generate accurate digital twinsfor patients across 13 different indications simply by changing the trainingset and tuning hyperparameters. By introducing a general purpose architecturewe aim to unlock the ability to scale machine learning approaches to largerdatasets and across more indications so that a digital twin could be createdfor any patient in the world. |
+|idx| 2405.02200v1 |
+|title| Position Paper: Rethinking Empirical Research in Machine Learning: Addressing Epistemic and Methodological Challenges of Experimentation |
+|authors| Moritz HerrmannF. Julian D. LangeKatharina EggenspergerGiuseppe CasalicchioMarcel WeverMatthias FeurerDavid RügamerEyke HüllermeierAnne-Laure BoulesteixBernd Bischl
+|links| http://arxiv.org/abs/2405.02200v1 |
+|updated| 2024-05-03 15:57:22 UTC |
+|summary| We warn against a common but incomplete understanding of empirical researchin machine learning ML that leads to non-replicable results makes findingsunreliable and threatens to undermine progress in the field. To overcome thisalarming situation we call for more awareness of the plurality of ways ofgaining knowledge experimentally but also of some epistemic limitations. Inparticular we argue most current empirical ML research is fashioned asconfirmatory research while it should rather be considered exploratory. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01484v1 |
-|title| Designing Algorithmic Recommendations to Achieve Human-AI Complementarity |
-|authors| Bryce McLaughlinJann Spiess
-|links| http://arxiv.org/abs/2405.01484v1 |
-|updated| 2024-05-02 17:15:30 UTC |
-|summary| Algorithms frequently assist rather than replace human decision-makers.However the design and analysis of algorithms often focus on predictingoutcomes and do not explicitly model their effect on human decisions. Thisdiscrepancy between the design and role of algorithmic assistants becomes ofparticular concern in light of empirical evidence that suggests thatalgorithmic assistants again and again fail to improve human decisions. In thisarticle we formalize the design of recommendation algorithms that assist humandecision-makers without making restrictive ex-ante assumptions about howrecommendations affect decisions. We formulate an algorithmic-design problemthat leverages the potential-outcomes framework from causal inference to modelthe effect of recommendations on a human decision-makers binary treatmentchoice. Within this model we introduce a monotonicity assumption that leads toan intuitive classification of human responses to the algorithm. Under thismonotonicity assumption we can express the humans response to algorithmicrecommendations in terms of their compliance with the algorithm and thedecision they would take if the algorithm sends no recommendation. We showcasethe utility of our framework using an online experiment that simulates a hiringtask. We argue that our approach explains the relative performance of differentrecommendation algorithms in the experiment and can help design solutions thatrealize human-AI complementarity. |
+|idx| 2405.02188v1 |
+|title| Optimistic Regret Bounds for Online Learning in Adversarial Markov Decision Processes |
+|authors| Sang Bin MoonAbolfazl Hashemi
+|links| http://arxiv.org/abs/2405.02188v1 |
+|updated| 2024-05-03 15:44:31 UTC |
+|summary| The Adversarial Markov Decision Process AMDP is a learning framework thatdeals with unknown and varying tasks in decision-making applications likerobotics and recommendation systems. A major limitation of the AMDP formalismhowever is pessimistic regret analysis results in the sense that although thecost function can change from one episode to the next the evolution in manysettings is not adversarial. To address this we introduce and study a newvariant of AMDP which aims to minimize regret while utilizing a set of costpredictors. For this setting we develop a new policy search method thatachieves a sublinear optimistic regret with high probability that is a regretbound which gracefully degrades with the estimation power of the costpredictors. Establishing such optimistic regret bounds is nontrivial given thati as we demonstrate the existing importance-weighted cost estimators cannotestablish optimistic bounds and ii the feedback model of AMDP is differentand more realistic than the existing optimistic online learning works. Ourresult in particular hinges upon developing a novel optimistically biasedcost estimator that leverages cost predictors and enables a high-probabilityregret analysis without imposing restrictive assumptions. We further discusspractical extensions of the proposed scheme and demonstrate its efficacynumerically. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01425v1 |
-|title| In-and-Out: Algorithmic Diffusion for Sampling Convex Bodies |
-|authors| Yunbum KookSantosh S. VempalaMatthew S. Zhang
-|links| http://arxiv.org/abs/2405.01425v1 |
-|updated| 2024-05-02 16:15:46 UTC |
-|summary| We present a new random walk for uniformly sampling high-dimensional convexbodies. It achieves state-of-the-art runtime complexity with strongerguarantees on the output than previously known namely in Renyi divergencewhich implies TV mathcalW_2 KL chi2. The proof departs from knownapproaches for polytime algorithms for the problem -- we utilize a stochasticdiffusion perspective to show contraction to the target distribution with therate of convergence determined by functional isoperimetric constants of thestationary density. |
+|idx| 2405.02183v1 |
+|title| Metalearners for Ranking Treatment Effects |
+|authors| Toon VanderschuerenWouter VerbekeFelipe MoraesHugo Manuel Proença
+|links| http://arxiv.org/abs/2405.02183v1 |
+|updated| 2024-05-03 15:31:18 UTC |
+|summary| Efficiently allocating treatments with a budget constraint constitutes animportant challenge across various domains. In marketing for example the useof promotions to target potential customers and boost conversions is limited bythe available budget. While much research focuses on estimating causal effectsthere is relatively limited work on learning to allocate treatments whileconsidering the operational context. Existing methods for uplift modeling orcausal inference primarily estimate treatment effects without considering howthis relates to a profit maximizing allocation policy that respects budgetconstraints. The potential downside of using these methods is that theresulting predictive model is not aligned with the operational context.Therefore prediction errors are propagated to the optimization of the budgetallocation problem subsequently leading to a suboptimal allocation policy. Wepropose an alternative approach based on learning to rank. Our proposedmethodology directly learns an allocation policy by prioritizing instances interms of their incremental profit. We propose an efficient sampling procedurefor the optimization of the ranking model to scale our methodology tolarge-scale data sets. Theoretically we show how learning to rank can maximizethe area under a policys incremental profit curve. Empirically we validateour methodology and show its effectiveness in practice through a series ofexperiments on both synthetic and real-world data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01404v1 |
-|title| Random Pareto front surfaces |
-|authors| Ben TuNikolas KantasRobert M. LeeBehrang Shafei
-|links| http://arxiv.org/abs/2405.01404v1 |
-|updated| 2024-05-02 15:54:46 UTC |
-|summary| The Pareto front of a set of vectors is the subset which is comprised solelyof all of the best trade-off points. By interpolating this subset we obtainthe optimal trade-off surface. In this work we prove a very useful resultwhich states that all Pareto front surfaces can be explicitly parametrisedusing polar coordinates. In particular our polar parametrisation result tellsus that we can fully characterise any Pareto front surface using the lengthfunction which is a scalar-valued function that returns the projected lengthalong any positive radial direction. Consequently by exploiting thisrepresentation we show how it is possible to generalise many useful conceptsfrom linear algebra probability and statistics and decision theory tofunction over the space of Pareto front surfaces. Notably we focus ourattention on the stochastic setting where the Pareto front surface itself is astochastic process. Among other things we showcase how it is possible todefine and estimate many statistical quantities of interest such as theexpectation covariance and quantile of any Pareto front surface distribution.As a motivating example we investigate how these statistics can be used withina design of experiments setting where the goal is to both infer and use thePareto front surface distribution in order to make effective decisions. Besidesthis we also illustrate how these Pareto front ideas can be used within thecontext of extreme value theory. Finally as a numerical example we appliedsome of our new methodology on a real-world air pollution data set. |
+|idx| 2405.02140v1 |
+|title| An Information Theoretic Perspective on Conformal Prediction |
+|authors| Alvaro H. C. CorreiaFabio Valerio MassoliChristos LouizosArash Behboodi
+|links| http://arxiv.org/abs/2405.02140v1 |
+|updated| 2024-05-03 14:43:07 UTC |
+|summary| Conformal Prediction CP is a distribution-free uncertainty estimationframework that constructs prediction sets guaranteed to contain the true answerwith a user-specified probability. Intuitively the size of the prediction setencodes a general notion of uncertainty with larger sets associated withhigher degrees of uncertainty. In this work we leverage information theory toconnect conformal prediction to other notions of uncertainty. More preciselywe prove three different ways to upper bound the intrinsic uncertainty asdescribed by the conditional entropy of the target variable given the inputsby combining CP with information theoretical inequalities. Moreover wedemonstrate two direct and useful applications of such connection betweenconformal prediction and information theory: i more principled and effectiveconformal training objectives that generalize previous approaches and enableend-to-end training of machine learning models from scratch and ii a naturalmechanism to incorporate side information into conformal prediction. Weempirically validate both applications in centralized and federated learningsettings showing our theoretical results translate to lower inefficiencyaverage prediction set size for popular CP methods. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01501v1 |
-|title| Supporting Business Document Workflows via Collection-Centric Information Foraging with Large Language Models |
-|authors| Raymond FokNedim LipkaTong SunAlexa Siu
-|links| http://arxiv.org/abs/2405.01501v1 |
-|updated| 2024-05-02 17:32:38 UTC |
-|summary| Knowledge workers often need to extract and analyze information from acollection of documents to solve complex information tasks in the workplacee.g. hiring managers reviewing resumes or analysts assessing risk incontracts. However foraging for relevant information can become tedious andrepetitive over many documents and criteria of interest. We introduce Marco amixed-initiative workspace supporting sensemaking over diverse businessdocument collections. Through collection-centric assistance Marco reduces thecognitive costs of extracting and structuring information allowing users toprioritize comparative synthesis and decision making processes. Usersinteractively communicate their information needs to an AI assistant usingnatural language and compose schemas that provide an overview of a documentcollection. Findings from a usability study n16 demonstrate that when usingMarco users complete sensemaking tasks 16 more quickly with less effort andwithout diminishing accuracy. A design probe with seven domain expertsidentifies how Marco can benefit various real-world workflows. |
+|idx| 2405.02260v1 |
+|title| Leveraging Large Language Models to Enhance Domain Expert Inclusion in Data Science Workflows |
+|authors| Jasmine Y. ShihVishal MohantyYannis KatsisHariharan Subramonyam
+|links| http://arxiv.org/abs/2405.02260v1 |
+|updated| 2024-05-03 17:22:15 UTC |
+|summary| Domain experts can play a crucial role in guiding data scientists to optimizemachine learning models while ensuring contextual relevance for downstream use.However in current workflows such collaboration is challenging due todiffering expertise abstract documentation practices and lack of access andvisibility into low-level implementation artifacts. To address these challengesand enable domain expert participation we introduce CellSync a collaborationframework comprising 1 a Jupyter Notebook extension that continuously trackschanges to dataframes and model metrics and 2 a Large Language Model poweredvisualization dashboard that makes those changes interpretable to domainexperts. Through CellSyncs cell-level dataset visualization with codesummaries domain experts can interactively examine how individual data andmodeling operations impact different data segments. The chat features enabledata-centric conversations and targeted feedback to data scientists. Ourpreliminary evaluation shows that CellSync provides transparency and promotescritical discussions about the intents and implications of data operations. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01484v1 |
-|title| Designing Algorithmic Recommendations to Achieve Human-AI Complementarity |
-|authors| Bryce McLaughlinJann Spiess
-|links| http://arxiv.org/abs/2405.01484v1 |
-|updated| 2024-05-02 17:15:30 UTC |
-|summary| Algorithms frequently assist rather than replace human decision-makers.However the design and analysis of algorithms often focus on predictingoutcomes and do not explicitly model their effect on human decisions. Thisdiscrepancy between the design and role of algorithmic assistants becomes ofparticular concern in light of empirical evidence that suggests thatalgorithmic assistants again and again fail to improve human decisions. In thisarticle we formalize the design of recommendation algorithms that assist humandecision-makers without making restrictive ex-ante assumptions about howrecommendations affect decisions. We formulate an algorithmic-design problemthat leverages the potential-outcomes framework from causal inference to modelthe effect of recommendations on a human decision-makers binary treatmentchoice. Within this model we introduce a monotonicity assumption that leads toan intuitive classification of human responses to the algorithm. Under thismonotonicity assumption we can express the humans response to algorithmicrecommendations in terms of their compliance with the algorithm and thedecision they would take if the algorithm sends no recommendation. We showcasethe utility of our framework using an online experiment that simulates a hiringtask. We argue that our approach explains the relative performance of differentrecommendation algorithms in the experiment and can help design solutions thatrealize human-AI complementarity. |
+|idx| 2405.02229v1 |
+|title| On the Utility of External Agent Intention Predictor for Human-AI Coordination |
+|authors| Chenxu WangZilong ChenAngelo CangelosiHuaping Liu
+|links| http://arxiv.org/abs/2405.02229v1 |
+|updated| 2024-05-03 16:39:20 UTC |
+|summary| Reaching a consensus on the team plans is vital to human-AI coordination.Although previous studies provide approaches through communications in variousways it could still be hard to coordinate when the AI has no explainable planto communicate. To cover this gap we suggest incorporating external models toassist humans in understanding the intentions of AI agents. In this paper wepropose a two-stage paradigm that first trains a Theory of Mind ToM modelfrom collected offline trajectories of the target agent and utilizes the modelin the process of human-AI collaboration by real-timely displaying the futureaction predictions of the target agent. Such a paradigm leaves the AI agent asa black box and thus is available for improving any agents. To test ourparadigm we further implement a transformer-based predictor as the ToM modeland develop an extended online human-AI collaboration platform for experiments.The comprehensive experimental results verify that human-AI teams can achievebetter performance with the help of our model. A user assessment attached tothe experiment further demonstrates that our paradigm can significantly enhancethe situational awareness of humans. Our study presents the potential toaugment the ability of humans via external assistance in human-AIcollaboration which may further inspire future research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01467v1 |
-|title| Student Reflections on Self-Initiated GenAI Use in HCI Education |
-|authors| Hauke SandhausMaria Teresa ParreiraWendy Ju
-|links| http://arxiv.org/abs/2405.01467v1 |
-|updated| 2024-05-02 16:58:17 UTC |
-|summary| This study explores students self-initiated use of Generative ArtificialIntelligence GenAI tools in an interactive systems design class. Through 12group interviews students revealed the dual nature of GenAI in 1 stimulatingcreativity and 2 speeding up design iterations alongside concerns over itspotential to cause shallow learning and reliance. GenAIs benefits werepronounced in the execution phase of design aiding rapid prototyping andideation while its use in initial insight generation posed risks to depth andreflective practice. This reflection highlights the complex role of GenAI inHuman-Computer Interaction education emphasizing the need for balancedintegration to leverage its advantages without compromising fundamentallearning outcomes. |
+|idx| 2405.02173v1 |
+|title| Task Synthesis for Elementary Visual Programming in XLogoOnline Environment |
+|authors| Chao WenAhana GhoshJacqueline StaubAdish Singla
+|links| http://arxiv.org/abs/2405.02173v1 |
+|updated| 2024-05-03 15:22:46 UTC |
+|summary| In recent years the XLogoOnline programming platform has gained popularityamong novice learners. It integrates the Logo programming language with visualprogramming providing a visual interface for learning computing concepts.However XLogoOnline offers only a limited set of tasks which are inadequatefor learners to master the computing concepts that require sufficient practice.To address this we introduce XLogoSyn a novel technique for synthesizinghigh-quality tasks for varying difficulty levels. Given a reference taskXLogoSyn can generate practice tasks at varying difficulty levels that cater tothe varied needs and abilities of different learners. XLogoSyn achieves this bycombining symbolic execution and constraint satisfaction techniques. Our expertstudy demonstrates the effectiveness of XLogoSyn. We have also deployedsynthesized practice tasks into XLogoOnline highlighting the educationalbenefits of these synthesized practice tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01354v1 |
-|title| Human-Robot Interaction Conversational User Enjoyment Scale (HRI CUES) |
-|authors| Bahar IrfanJura MiniotaSofia ThunbergErik LagerstedtSanna KuoppamäkiGabriel SkantzeAndré Pereira
-|links| http://arxiv.org/abs/2405.01354v1 |
-|updated| 2024-05-02 15:01:43 UTC |
-|summary| Understanding user enjoyment is crucial in human-robot interaction HRI asit can impact interaction quality and influence user acceptance and long-termengagement with robots particularly in the context of conversations withsocial robots. However current assessment methods rely solely on self-reportedquestionnaires failing to capture interaction dynamics. This work introducesthe Human-Robot Interaction Conversational User Enjoyment Scale HRI CUES anovel scale for assessing user enjoyment from an external perspective duringconversations with a robot. Developed through rigorous evaluations anddiscussions of three annotators with relevant expertise the scale provides astructured framework for assessing enjoyment in each conversation exchangeturn alongside overall interaction levels. It aims to complementself-reported enjoyment from users and holds the potential for autonomouslyidentifying user enjoyment in real-time HRI. The scale was validated on 25older adults open-domain dialogue with a companion robot that was powered by alarge language model for conversations corresponding to 174 minutes of datashowing moderate to good alignment. Additionally the study offers insightsinto understanding the nuances and challenges of assessing user enjoyment inrobot interactions and provides guidelines on applying the scale to otherdomains. |
+|idx| 2405.02045v1 |
+|title| Are We in The Zone? Exploring The Features and Method of Detecting Simultaneous Flow Experiences Based on EEG Signals |
+|authors| Baiqiao ZhangXiangxian LiYunfan ZhouJuan LiuWeiying LiuChao ZhouYulong Bian
+|links| http://arxiv.org/abs/2405.02045v1 |
+|updated| 2024-05-03 12:22:35 UTC |
+|summary| When executing interdependent personal tasks for the teams purposesimultaneous individual flowsimultaneous flow is the antecedent condition ofachieving shared team flow. Detecting simultaneous flow helps betterunderstanding the status of team members which is thus important foroptimizing multi-user interaction systems. However there is currently a lackexploration on objective features and methods for detecting simultaneous flow.Based on brain mechanism of flow in teamwork and previous studies onelectroencephalogram EEG-based individual flow detection this study aims toexplore the significant EEG features related to simultaneous flow as well aseffective detection methods based on EEG signals. First a two-playersimultaneous flow task is designed based on which we construct the firstmulti-EEG signals dataset of simultaneous flow. Then we explore the potentialEEG signal features that may be related to individual and simultaneous flow andvalidate their effectiveness in simultaneous flow detection with variousmachine learning models. The results show that 1 the inter-brain synchronyfeatures are relevant to simultaneous flow due to enhancing the modelsperformance in detecting different types of simultaneous flow 2 the featuresfrom the frontal lobe area seem to be given priority attention when detectingsimultaneous flows 3 Random Forests performed best in binary classificationwhile Neural Network and Deep Neural Network3 performed best in ternaryclassification. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01277v1 |
-|title| Quantifying Spatial Domain Explanations in BCI using Earth Mover's Distance |
-|authors| Param RajpuraHubert CecottiYogesh Kumar Meena
-|links| http://arxiv.org/abs/2405.01277v1 |
-|updated| 2024-05-02 13:35:15 UTC |
-|summary| Brain-computer interface BCI systems facilitate unique communicationbetween humans and computers benefiting severely disabled individuals. Despitedecades of research BCIs are not fully integrated into clinical and commercialsettings. Its crucial to assess and explain BCI performance offering clearexplanations for potential users to avoid frustration when it doesnt work asexpected. This work investigates the efficacy of different deep learning andRiemannian geometry-based classification models in the context of motor imageryMI based BCI using electroencephalography EEG. We then propose an optimaltransport theory-based approach using earth movers distance EMD to quantifythe comparison of the feature relevance map with the domain knowledge ofneuroscience. For this we utilized explainable AI XAI techniques forgenerating feature relevance in the spatial domain to identify importantchannels for model outcomes. Three state-of-the-art models are implemented - 1Riemannian geometry-based classifier 2 EEGNet and 3 EEG Conformer and theobserved trend in the models accuracy across different architectures on thedataset correlates with the proposed feature relevance metrics. The models withdiverse architectures perform significantly better when trained on channelsrelevant to motor imagery than data-driven channel selection. This work focusesattention on the necessity for interpretability and incorporating metricsbeyond accuracy underscores the value of combining domain knowledge andquantifying model interpretations with data-driven approaches in creatingreliable and robust Brain-Computer Interfaces BCIs. |
+|idx| 2405.02016v1 |
+|title| Adversarial Botometer: Adversarial Analysis for Social Bot Detection |
+|authors| Shaghayegh NajariDavood RafieeMostafa SalehiReza Farahbakhsh
+|links| http://arxiv.org/abs/2405.02016v1 |
+|updated| 2024-05-03 11:28:21 UTC |
+|summary| Social bots play a significant role in many online social networks OSN asthey imitate human behavior. This fact raises difficult questions about theircapabilities and potential risks. Given the recent advances in Generative AIGenAI social bots are capable of producing highly realistic and complexcontent that mimics human creativity. As the malicious social bots emerge todeceive people with their unrealistic content identifying them anddistinguishing the content they produce has become an actual challenge fornumerous social platforms. Several approaches to this problem have already beenproposed in the literature but the proposed solutions have not been widelyevaluated. To address this issue we evaluate the behavior of a text-based botdetector in a competitive environment where some scenarios are proposed:textitFirst the tug-of-war between a bot and a bot detector is examined. Itis interesting to analyze which party is more likely to prevail and whichcircumstances influence these expectations. In this regard we model theproblem as a synthetic adversarial game in which a conversational bot and a botdetector are engaged in strategic online interactions. textitSecond the botdetection model is evaluated under attack examples generated by a social botto this end we poison the dataset with attack examples and evaluate the modelperformance under this condition. textitFinally to investigate the impactof the dataset a cross-domain analysis is performed. Through our comprehensiveevaluation of different categories of social bots using two benchmark datasetswe were able to demonstrate some achivement that could be utilized in futureworks. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01260v1 |
-|title| Causal Influence in Federated Edge Inference |
-|authors| Mert KayaalpYunus InanVisa KoivunenAli H. Sayed
-|links| http://arxiv.org/abs/2405.01260v1 |
-|updated| 2024-05-02 13:06:50 UTC |
-|summary| In this paper we consider a setting where heterogeneous agents withconnectivity are performing inference using unlabeled streaming data. Observeddata are only partially informative about the target variable of interest. Inorder to overcome the uncertainty agents cooperate with each other byexchanging their local inferences with and through a fusion center. To evaluatehow each agent influences the overall decision we adopt a causal framework inorder to distinguish the actual influence of agents from mere correlationswithin the decision-making process. Various scenarios reflecting differentagent participation patterns and fusion center policies are investigated. Wederive expressions to quantify the causal impact of each agent on the jointdecision which could be beneficial for anticipating and addressing atypicalscenarios such as adversarial attacks or system malfunctions. We validate ourtheoretical results with numerical simulations and a real-world application ofmulti-camera crowd counting. |
+|idx| 2405.02229v1 |
+|title| On the Utility of External Agent Intention Predictor for Human-AI Coordination |
+|authors| Chenxu WangZilong ChenAngelo CangelosiHuaping Liu
+|links| http://arxiv.org/abs/2405.02229v1 |
+|updated| 2024-05-03 16:39:20 UTC |
+|summary| Reaching a consensus on the team plans is vital to human-AI coordination.Although previous studies provide approaches through communications in variousways it could still be hard to coordinate when the AI has no explainable planto communicate. To cover this gap we suggest incorporating external models toassist humans in understanding the intentions of AI agents. In this paper wepropose a two-stage paradigm that first trains a Theory of Mind ToM modelfrom collected offline trajectories of the target agent and utilizes the modelin the process of human-AI collaboration by real-timely displaying the futureaction predictions of the target agent. Such a paradigm leaves the AI agent asa black box and thus is available for improving any agents. To test ourparadigm we further implement a transformer-based predictor as the ToM modeland develop an extended online human-AI collaboration platform for experiments.The comprehensive experimental results verify that human-AI teams can achievebetter performance with the help of our model. A user assessment attached tothe experiment further demonstrates that our paradigm can significantly enhancethe situational awareness of humans. Our study presents the potential toaugment the ability of humans via external assistance in human-AIcollaboration which may further inspire future research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.01107v1 |
-|title| CoViS-Net: A Cooperative Visual Spatial Foundation Model for Multi-Robot Applications |
-|authors| Jan BlumenkampSteven MoradJennifer GielisAmanda Prorok
-|links| http://arxiv.org/abs/2405.01107v1 |
-|updated| 2024-05-02 09:14:41 UTC |
-|summary| Spatial understanding from vision is crucial for robots operating inunstructured environments. In the real world spatial understanding is often anill-posed problem. There are a number of powerful classical methods thataccurately regress relative pose however these approaches often lack theability to leverage data-derived priors to resolve ambiguities. In multi-robotsystems these challenges are exacerbated by the need for accurate and frequentposition estimates of cooperating agents. To this end we propose CoViS-Net acooperative multi-robot visual spatial foundation model that learns spatialpriors from data. Unlike prior work evaluated primarily on offline datasets wedesign our model specifically for online evaluation and real-world deploymenton cooperative robots. Our model is completely decentralized platformagnostic executable in real-time using onboard compute and does not requireexisting network infrastructure. In this work we focus on relative poseestimation and local Birds Eye View BEV prediction tasks. Unlike classicalapproaches we show that our model can accurately predict relative poseswithout requiring camera overlap and predict BEVs of regions not visible tothe ego-agent. We demonstrate our model on a multi-robot formation control taskoutside the confines of the laboratory. |
+|idx| 2405.02198v1 |
+|title| The Cambridge RoboMaster: An Agile Multi-Robot Research Platform |
+|authors| Jan BlumenkampAjay ShankarMatteo BettiniJoshua BirdAmanda Prorok
+|links| http://arxiv.org/abs/2405.02198v1 |
+|updated| 2024-05-03 15:54:20 UTC |
+|summary| Compact robotic platforms with powerful compute and actuation capabilitiesare key enablers for practical real-world deployments of multi-agent research.This article introduces a tightly integrated hardware control and simulationsoftware stack on a fleet of holonomic ground robot platforms designed withthis motivation. Our robots a fleet of customised DJI Robomaster S1 vehiclesoffer a balance between small robots that do not possess sufficient compute oractuation capabilities and larger robots that are unsuitable for indoormulti-robot tests. They run a modular ROS2-based optimal estimation and controlstack for full onboard autonomy contain ad-hoc peer-to-peer communicationinfrastructure and can zero-shot run multi-agent reinforcement learning MARLpolicies trained in our vectorized multi-agent simulation framework. We presentan in-depth review of other platforms currently available showcase newexperimental validation of our systems capabilities and introduce casestudies that highlight the versatility and reliabilty of our system as atestbed for a wide range of research demonstrations. Our system as well assupplementary material is available online:https://proroklab.github.io/cambridge-robomaster |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.00940v1 |
-|title| Computing Threshold Circuits with Bimolecular Void Reactions in Step Chemical Reaction Networks |
-|authors| Rachel AndersonBin FuAiden MassieGourab MukhopadhyayAdrian SalinasRobert SchwellerEvan TomaiTim Wylie
-|links| http://arxiv.org/abs/2405.00940v1 |
-|updated| 2024-05-02 01:55:48 UTC |
-|summary| Step Chemical Reaction Networks step CRNs are an augmentation of theChemical Reaction Network CRN model where additional species may beintroduced to the system in a sequence of steps. We study step CRN systemsusing a weak subset of reaction rules emphvoid rules in which molecularspecies can only be deleted. We demonstrate that step CRNs with only void rulesof size 20 can simulate threshold formulas TFs under linear resources.These limited systems can also simulate threshold emphcircuits TCs bymodifying the volume of the system to be exponential. We then prove a matchingexponential lower bound on the required volume for simulating thresholdcircuits in a step CRN with 20-size rules under a restrictedemphgate-wise simulation thus showing our construction is optimal forsimulating circuits in this way. |
+|idx| 2405.02161v1 |
+|title| Simulating the economic impact of rationality through reinforcement learning and agent-based modelling |
+|authors| Simone BrusatinTommaso PadoanAndrea ColettaDomenico Delli GattiAldo Glielmo
+|links| http://arxiv.org/abs/2405.02161v1 |
+|updated| 2024-05-03 15:08:25 UTC |
+|summary| Agent-based models ABMs are simulation models used in economics to overcomesome of the limitations of traditional frameworks based on general equilibriumassumptions. However agents within an ABM follow predetermined not fullyrational behavioural rules which can be cumbersome to design and difficult tojustify. Here we leverage multi-agent reinforcement learning RL to expand thecapabilities of ABMs with the introduction of fully rational agents that learntheir policy by interacting with the environment and maximising a rewardfunction. Specifically we propose a Rational macro ABM R-MABM framework byextending a paradigmatic macro ABM from the economic literature. We show thatgradually substituting ABM firms in the model with RL agents trained tomaximise profits allows for a thorough study of the impact of rationality onthe economy. We find that RL agents spontaneously learn three distinctstrategies for maximising profits with the optimal strategy depending on thelevel of market competition and rationality. We also find that RL agents withindependent policies and without the ability to communicate with each otherspontaneously learn to segregate into different strategic groups thusincreasing market power and overall profits. Finally we find that a higherdegree of rationality in the economy always improves the macroeconomicenvironment as measured by total output depending on the specific rationalpolicy this can come at the cost of higher instability. Our R-MABM frameworkis general it allows for stable multi-agent learning and represents aprincipled and robust direction to extend existing economic simulators. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.00921v1 |
-|title| Verification of Population Protocols with Unordered Data |
-|authors| Steffen van BergeremRoland GuttenbergSandra KieferCorto MascleNicolas WaldburgerChana Weil-Kennedy
-|links| http://arxiv.org/abs/2405.00921v1 |
-|updated| 2024-05-02 00:32:02 UTC |
-|summary| Population protocols are a well-studied model of distributed computation inwhich a group of anonymous finite-state agents communicates via pairwiseinteractions. Together they decide whether their initial configuration thatis the initial distribution of agents in the states satisfies a property. Asan extension in order to express properties of multisets over an infinite datadomain Blondin and Ladouceur ICALP23 introduced population protocols withunordered data PPUD. In PPUD each agent carries a fixed data value and theinteractions between agents depend on whether their data are equal or not.Blondin and Ladouceur also identified the interesting subclass of immediateobservation PPUD IOPPUD where in every transition one of the two agentsremains passive and does not move and they characterised its expressive power.  We study the decidability and complexity of formally verifying theseprotocols. The main verification problem for population protocols iswell-specification that is checking whether the given PPUD computes somefunction. We show that well-specification is undecidable in general. Bycontrast for IOPPUD we exhibit a large yet natural class of problems whichincludes well-specification among other classic problems and establish thatthese problems are in EXPSPACE. We also provide a lower complexity boundnamely coNEXPTIME-hardness. |
+|idx| 2405.02133v1 |
+|title| Learning from Evolution: Improving Collective Decision-Making Mechanisms using Insights from Evolutionary Robotics |
+|authors| Tanja Katharina Kaiser
+|links| http://dx.doi.org/10.1145/3638529.3653988 |
+|updated| 2024-05-03 14:37:17 UTC |
+|summary| Collective decision-making enables multi-robot systems to act autonomously inreal-world environments. Existing collective decision-making mechanisms sufferfrom the so-called speed versus accuracy trade-off or rely on high complexitye.g. by including global communication. Recent work has shown that moreefficient collective decision-making mechanisms based on artificial neuralnetworks can be generated using methods from evolutionary computation. A majordrawback of these decision-making neural networks is their limitedinterpretability. Analyzing evolved decision-making mechanisms can help usimprove the efficiency of hand-coded decision-making mechanisms whilemaintaining a higher interpretability. In this paper we analyze evolvedcollective decision-making mechanisms in detail and hand-code two newdecision-making mechanisms based on the insights gained. In benchmarkexperiments we show that the newly implemented collective decision-makingmechanisms are more efficient than the state-of-the-art collectivedecision-making mechanisms voter model and majority rule. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.00902v1 |
-|title| MESA: Cooperative Meta-Exploration in Multi-Agent Learning through Exploiting State-Action Space Structure |
-|authors| Zhicheng ZhangYancheng LiangYi WuFei Fang
-|links| http://arxiv.org/abs/2405.00902v1 |
-|updated| 2024-05-01 23:19:48 UTC |
-|summary| Multi-agent reinforcement learning MARL algorithms often struggle to findstrategies close to Pareto optimal Nash Equilibrium owing largely to the lackof efficient exploration. The problem is exacerbated in sparse-reward settingscaused by the larger variance exhibited in policy learning. This paperintroduces MESA a novel meta-exploration method for cooperative multi-agentlearning. It learns to explore by first identifying the agents high-rewardingjoint state-action subspace from training tasks and then learning a set ofdiverse exploration policies to cover the subspace. These trained explorationpolicies can be integrated with any off-policy MARL algorithm for test-timetasks. We first showcase MESAs advantage in a multi-step matrix game.Furthermore experiments show that with learned exploration policies MESAachieves significantly better performance in sparse-reward tasks in severalmulti-agent particle environments and multi-agent MuJoCo environments andexhibits the ability to generalize to more challenging tasks at test time. |
+|idx| 2405.01870v1 |
+|title| Detecting and Deterring Manipulation in a Cognitive Hierarchy |
+|authors| Nitay AlonLion SchulzJoseph M. BarnbyJeffrey S. RosenscheinPeter Dayan
+|links| http://arxiv.org/abs/2405.01870v1 |
+|updated| 2024-05-03 05:53:09 UTC |
+|summary| Social agents with finitely nested opponent models are vulnerable tomanipulation by agents with deeper reasoning and more sophisticated opponentmodelling. This imbalance rooted in logic and the theory of recursivemodelling frameworks cannot be solved directly. We propose a computationalframework aleph-IPOMDP augmenting model-based RL agents Bayesianinference with an anomaly detection algorithm and an out-of-belief policy. Ourmechanism allows agents to realize they are being deceived even if they cannotunderstand how and to deter opponents via a credible threat. We test thisframework in both a mixed-motive and zero-sum game. Our results show thealeph mechanisms effectiveness leading to more equitable outcomes and lessexploitation by more sophisticated agents. We discuss implications for AIsafety cybersecurity cognitive science and psychiatry. |
 
 

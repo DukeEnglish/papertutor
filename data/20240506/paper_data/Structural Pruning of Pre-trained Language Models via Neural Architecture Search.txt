@@ -1,0 +1,1210 @@
+Structural Pruning of Pre-trained Language Models via Neu-
+ral Architecture Search
+Aaron Klein kleiaaro@amazon.com
+Amazon Web Services
+Jacek Golebiowski jacekgo@amazon.com
+Amazon Web Services
+Xingchen Ma xgchenma@amazon.com
+Amazon Web Services
+Valerio Perrone vperrone@amazon.com
+Amazon Web Services
+Cedric Archambeau cedric.archambeau@helsing.ai
+Helsing
+Abstract
+Pre-trainedlanguagemodels(PLM),forexampleBERTorRoBERTa,markthestate-of-the-
+artfornaturallanguageunderstandingtaskwhenfine-tunedonlabeleddata. However,their
+large size poses challenges in deploying them for inference in real-world applications, due
+to significant GPU memory requirements and high inference latency. This paper explores
+neural architecture search (NAS) for structural pruning to find sub-parts of the fine-tuned
+networkthatoptimallytrade-offefficiency,forexampleintermsofmodelsizeorlatency,and
+generalization performance. We also show how we can utilize more recently developed two-
+stageweight-sharingNASapproachesinthissettingtoacceleratethesearchprocess. Unlike
+traditional pruning methods with fixed thresholds, we propose to adopt a multi-objective
+approach that identifies the Pareto optimal set of sub-networks, allowing for a more flexible
+and automated compression process.
+1 Introduction
+Pre-trainedlanguagemodels(PLMs)suchasBERT(Devlinetal.,2019)orRoBERTa(Liuetal.,2019b)are
+widelyusedfornaturallanguageunderstanding(NLU)taskswhenlargeamountoflabelleddataisavailable
+for fine-tuning. However, deploying PLMs for inference can be challenging due to their large parameter
+count. They demand significant GPU memory and exhibit high inference latency, making them impractical
+formanyreal-worldapplications, forexamplewhenusedinanend-pointforawebserviceordeployedonan
+embedded systems. Recent work (Blalock et al., 2020; Kwon et al., 2022; Michel et al., 2019; Sajjad et al.,
+2022) demonstrated that in many cases only a subset of the pre-trained model’s parameters significantly
+contributes to the downstream task performance. This allows for compressing the model by pruning parts
+of the network while minimizing performance deterioration.
+Unstructured pruning (Blalock et al., 2020) computes a score for each weight in the network, such as the
+weight’s magnitude, and removes weights with scores below a predetermined threshold. This approach of-
+ten achieves high pruning rates with minimal performance degradation, but it also leads to sparse weight
+matrices, which are not well-supported by commonly used machine learning frameworks. Structured prun-
+ing (Michel et al., 2019; Sajjad et al., 2022) removes larger components of the network, such as layers or
+heads. Althoughittypicallydoesnotachievethesamepruningratesasunstructuredpruning,itonlyprunes
+1
+4202
+yaM
+3
+]GL.sc[
+1v76220.5042:viXraFFNLayer FFNMask
+MHALayer
+x
+FFNLayer
+MHALayer
+FFNLayer
+x
+MHALayer
+FFNLayer
+MHALayer MHAMask
+Pre-TrainedNetwork Sub-Network
+(a) Extracting sub-networks from pre-trained network. (b) Pareto front of sub-networks.
+Figure 1: Illustration of our approach. a) We fine-tune the pre-trained architecture by updating only sub-
+networks, which we select by placing a binary mask over heads and units in each MHA and FFN layer. b)
+Afterwards,werunamulti-objectivesearchtoselecttheoptimalsetofsub-networksthatbalanceparameter
+count and validation error.
+entirecolumns/rowsoftheweightmatrix, makingitcompatiblewithpopulardeeplearningframeworksand
+hardware.
+Neural architecture search (Zoph & Le, 2017; Real et al., 2017; Bergstra et al., 2013) (NAS) finds more
+resourceefficientneuralnetworkarchitecturesinadata-drivenwaybycastingitasanoptimizationproblem.
+ToreducethecomputationalburdenofvanillaNAS,whichneedstotrainandvalidatemultiplearchitectures,
+weight-sharing-based neural architecture search (Pham et al., 2018; Liu et al., 2019b; Elsken et al., 2018)
+first trains a single large network, called the super-network, and then searches for sub-networks within the
+super-network.
+We propose to use NAS for structural pruning of pre-trained networks, to find sub-networks that sustain
+performance of the pre-trained network after fine-tuning (see Figure 1 for an illustration). Most structural
+pruning approaches prune the networks based on a predefined threshold on the pruning ratio. In scenarios
+where there is no strict constraint on model size, it can be challenging to define such a fixed threshold in
+advance. NASoffersadistinctadvantageoverotherpruningstrategiesbyenablingamulti-objectiveapproach
+toidentifytheParetooptimalsetofsub-networks, whichcapturesthenonlinear relationship betweenmodel
+sizeandperformanceinsteadofjustobtainingasinglesolution. Thisallowsustoautomatethecompression
+process and to select the best model that meets our requirements post-hoc after observing the non-linear
+Pareto front, instead of running the pruning process multiple rounds to find the right threshold parameter.
+While there is a considerable literature on improving the efficiency of PLMs, to the best of our knowledge
+thereisnoworkyetthatexploredthepotentialofNASforpruning fine-tunedPLMs. Ourcontributionsare
+the following:
+• We discuss the intricate relationship between NAS and structural pruning and present a NAS ap-
+proachthatcompressesPLMsforinferenceafterfine-tuningondownstreamtasks,whileminimizing
+performance deterioration. Our focus lies not in proposing a novel NAS method per se, but rather
+inofferingapractical use-case forNASinthecontextofPLMthatworkscompetitivelytostructural
+pruning methods from the literature.
+• WeproposefourdifferentsearchspacestoprunecomponentsoftransformerbasedPLManddiscuss
+theircomplexityandhowtheyaffectthestructureofsub-networks. Wealsomapexistingstructural
+pruning approaches to two of these search spaces and explain how they explore them.
+• We contributed a benchmarking suite for multi-objective NAS. We also show how we can apply
+recently proposed weight-sharing based NAS methods in this setting. Based on our benchmarking
+suite, weperformathoroughablationstudyofstandardandweight-sharingbasedNAS.Inthelong
+run we anticipate that our work will drive the development of future NAS methods.
+2We present an overview of related work in Section 2 and describe our methodology in Section 3. Section 4
+providesanempiricalcomparisonofourproposedapproachwithotherstructuralpruningmethodsfromthe
+literature, along with an in-depth ablation study.
+2 Related Work
+Neural Architecture Search (NAS) (see Elsken et al. (2018) for an overview) automates the design
+of neural network architectures to maximize generalization performance and efficiency (e.g., in terms of
+latency, model size or memory consumption). The limiting factor of convential NAS is the computational
+burden of the search, which requires multiple rounds of training and validating neural network architectures
+(Zoph & Le, 2017; Real et al., 2017). To mitigate this cost, various approaches have been proposed to
+accelerate the search process. For example, some of these methods early terminate the training process for
+poorly performing configurations (Li et al., 2018) or extrapolating learning curves (White et al., 2021b).
+Weight-sharing NAS (Pham et al., 2018; Liu et al., 2019a) addresses the cost issue by training a single
+super-network consisting of all architectures in the search space, such that each path represent a unique
+architecture. Initially, Liu et al. (2019a) framed this as a bi-level optimization problem, where the inner
+objective involves the optimization of the network weights, and the outer objective the selection of the
+architecture. After training the super-network, the best architecture is selected based on the shared weights
+andthenre-trainedfromscratch. However,severalpapers(Li&Talwalkar,2020;Yangetal.,2020)reported
+that this formulation heavily relies on the search space and does not yield better results than just randomly
+sampling architectures. To address this limitation, Yu et al. (2020) proposed a two-stage NAS process. In
+the first stage, the super-network is trained by updating individual sub-networks in each iteration, instead
+of updating the entire super-network. After training, the final model is selected by performing gradient-free
+optimization based on the shared weights of the super-network, without any further training. Concurrently,
+Cai et al. (2020) applies a similar approach for convolutional neural networks in the multi-objective setting
+by first training a single super-network and then searching for sub-networks to minimize latency on some
+target devices. Related to our work is also the work by Xu et al. (2021), which searches for more efficient
+BERT architectures during the pre-training phase.
+StructuralPruninginvolvesremovingpartsofatrainedneuralnetwork,suchasheads(Micheletal.,2019),
+orentirelayers(Sajjadetal.,2022),toreducetheoverallnumberofparameterswhilepreservingperformance.
+Individual components are pruned based on a specific scoring function, using a manually defined threshold.
+For transformer-based architectures, Michel et al. (2019) observed that a significant number of heads, up to
+a single head in a multi-head attention layer, can be deleted after fine-tuning without causing a significant
+loss in performance. Voita et al. (2019) proposed L0 regularization as a means to prune individual heads in
+a multi-head attention layer. Kwon et al. (2022) prunes individual heads and units in the fully-connected
+layers after fine-tuning according to the Fisher information matrix. Sajjad et al. (2022) demonstrated that
+it is even possible to remove entire layers of a pre-trained network prior to fine-tuning, with minimal impact
+on performance. In comparison to our data-driven approach, Sajjad et al. (2022) suggested using predefined
+heuristics (e.g., deleting top / odd / even layers) to determine layers to prune. However, as shown in our
+experiments, the appropriate architecture depends on the specific task, and more data-driven methods are
+necessary to accurately identify the best layers to prune.
+Distillation (Hinton et al., 2015) trains a smaller student model to mimic the predictions of a pre-trained
+teachermodel. Forinstance, Sanhetal.(2020)usedthisapproachtodistillapre-trainedBERTmodel(De-
+vlin et al., 2019) into a smaller model for fine-tuning. Jiao et al. (2019) proposed a knowledge distillation
+approach specifically for transformer-based models, which first distills from a pre-trained teacher into a
+smaller model and then performs task-specific distillation in a second step based on a task augmented
+dataset. Related to our method is also AdaBERT (Chen et al., 2020) which trains task-specific convolu-
+tional neural networks based on differentiable NAS (Liu et al., 2019a) by distilling the knowledge of a PTL
+such as BERT.
+Unlike pruning-based methods, distillation allows for complete architectural changes beyond merely drop-
+ping individual components. However, from a practical standpoint, determining the optimal structure and
+capacity of the student network needed to match the performance of the teacher network also amounts to a
+3hyperparameter and neural architecture search problem. Additionally, training a student network requires
+a significant amount of computational resources. For example, Sanh et al. (2020) was trained for around
+90 hours on 8 16GB V100 GPUs. This cost can be amortized by fine-tuning the student model to solve
+many different tasks, but, depending on the downstream tasks, it potentially requires a substantial amount
+of iterations which is not always desirable for practitioners who aim to solve a single specific task. This is
+especially important in the multi-objective setting where many networks need to be distilled to cover the
+full size/accuracy Pareto front.
+Quantization (Dettmers et al., 2022; Dettmers & Zettlemoyer, 2023) reduces the precision of model pa-
+rametersfromfloating-pointnumberstolowerbitrepresentations(e.g., 8-bitintegers). Themainadvantage
+ofquantizationisthereductioninmemoryfootprint. However, asweshowintheAppendixF,thisdoesnot
+necessarily lead to faster latency. Quantization is independent of our NAS approach and can be employed
+on the pruned network to further decrease memory usage.
+3 Structural Pruning via Neural Architecture Search
+We first provide a multi-objective problem definition for structural pruning of fine-tuned PLMs via neural
+architecture search. Afterwards, we describe how we can apply weight-sharing based NAS. At the end,
+we present four search spaces to prune transformer-based architectures, which exhibit a different degree of
+pruning.
+3.1 Multi-Objective Sub-Network Selection
+We consider a pre-trained transformer model based on an encoder-only architecture, such as for example
+BERT(Vaswanietal.,2017),withLnon-embeddinglayers,eachcomposedofamulti-headattention(MHA)
+layerfollowedbyafullyconnectedfeedforward(FFN)layer. However,allmethodspresentedherecanalsobe
+applied to decoder or encoder-decoder based architectures. Given an input sequence X ∈Rn×dmodel, where
+n represents the sequence length and d the size of the token embedding, the MHA layer is defined
+model
+by: MHA(X) = PHAtt(W(i),W(i),W(i),W(i),X) where W(i),W(i),W(i) ∈ Rdmodel×d and W(i) ∈
+i Q K V O Q K V O
+RHd×dmodel areweightmatrices. Att(·)isadotproductattentionhead(Bahdanauetal.,2015)andH isthe
+number of heads. The output is then computed by X =LN(X+MHA(X)), where LN denotes layer
+MHA
+normalization(Baetal.,2016). TheFFNlayerisdefinedbyFFN(X)=W 1σ(W 0X),withW
+0
+∈RI×dmodel
+andW
+1
+∈Rdmodel×I,whereI denotestheintermediatesizeandσ(·)isanon-linearactivationfunction. Also
+here we use a residual connection to compute the final output: x =LN(X +FFN(X )).
+FFN MHA MHA
+We define a binary mask M ∈ {0,1}L×H for each head in the multi-head attention layer and a binary
+head
+mask M ∈ {0,1}L×U for each neuron in the fully-connected layers. The output of the l-th MHA
+neuron
+layer and FFN layer is computed by MHA (X) =
+PHM
+[i,l]◦Att(·) and FFN (X) = M [l]◦
+l i head l neuron
+W σ(W X), respectively.
+1 0
+Now, let’s define a search space θ ∈ Θ that contains a finite set of configurations to define possible sub-
+networks sliced from the pre-trained network. We define a function CREATEMASK that maps from a configu-
+ration θ → M ,M to binary masks. Let’s denote the function f : Θ → R as the validation error
+head neuron 0
+of the sub-network defined by configuration θ after fine-tuning on some downstream task. To compute the
+validationscoreinducedbyθweplacecorrespondingmasksM ,M overthenetwork. Additionally,
+head neuron
+we define the total number of trainable parameter f : Θ → N of the sub-network. Our goal is to solve the
+1
+following multi-objective optimisation problem:
+min (f (θ),f (θ)). (1)
+θ∈Θ 0 1
+In the multi-objective setting, there is no single θ ∈ Θ that simultaneously optimizes all M objectives.
+⋆
+Let’s define θ ≻θ′ iff f (θ)≤f (θ′),∀i∈[M] and ∃i∈[k]:f (θ)<f (θ′). We aim to find the Pareto Set:
+i i i i
+P = {θ ∈ Θ|∄θ′ ∈ Θ : θ′ ≻ θ} of points that dominate all other points in the search space in at least one
+f
+objective.
+4To solve this optimization problem, we can utilize standard multi-objective search methods that are com-
+monly used for NAS, such as random search. Here each function evaluation consists of fine-tuning a sub-
+network θ initialized with the pre-trained weights instead of random weights. We can also directly adopt
+more advanced strategies, such as multi-fidelity NAS, for example MO-ASHA (Schmucker et al., 2021) to
+accelerate the search process.
+3.2 Weight-sharing based Neural Architecture Search
+Following previous work (Yu et al., 2020; Wang et al., 2021), our weight-sharing based NAS approach
+consists of two stages: the first stage is to treat the pre-trained model as super-network and fine-tune it on
+thedownstreamtask. Weexploredifferentsuper-networktrainingstrategiesfromtheliteraturethatupdate
+only parts of the network in each step, to avoid co-adaption of sub-networks. The second stage, utilizes
+multi-objective search strategies to approximate the Pareto-optimal set of sub-networks.
+3.2.1 Super-Network Training
+In the standard NAS setting, we would evaluate f (θ) by first fine-tuning the sub-network defined by θ on
+0
+the training data before evaluating on the validation data. The weights of the sub-network are initialize
+based on the pre-trained weights. While more recent NAS approaches (Li & Talwalkar, 2020; Klein et al.,
+2020) accelerate the search process by early stopping poorly performing sub-networks, this still amounts to
+an optimization process that requires the compute of multiple independent fine-tuning runs.
+The idea of two-stage weight-sharing-based NAS (Yu et al., 2020) is to train a single-set of shared weights,
+dubbed super-network, that contains all possible networks in the search space. After training the super-
+networks, evaluating f (θ) only requires a single pass over the validation data.
+0
+We consider the pre-trained network as super-network with shared weights that contains all possible sub-
+networks θ ∈ Θ. To avoid that sub-networks co-adapt and still work outside the super-network, previous
+work(Yuetal.,2020;Wangetal.,2021)suggestedtoupdateonlyasubsetofsub-networksineachstochastic
+gradientdescentstep,insteadofupdatingallweightsjointly. Weadaptthisstrategyandsamplesub-networks
+accordingtothesandwichrule(Yuetal.,2020;Wangetal.,2021)ineachupdatestep,whichalwaysupdates
+the smallest, the largest and k random sub-networks. The smallest and largest sub-network correspond to
+the lower and upper bound of Θ, respectively. For all search spaces Θ define below, the upper bound is
+equal to full network architecture, i.e, the super-network and the lower bound removes all layer except the
+embedding and classification layer.
+Additionally, weusein-placeknowledgedistillation(Yuetal.,2019)whichacceleratethetrainingprocessof
+sub-networks. Giventhelogitsπ (x)ofthesuper-network,whichweobtainforfreewiththesandwich
+supernet
+rule,andthelogitsofasub-networkπ (x),thelossfunctiontoobtaingradientsforthesub-networksfollows
+θ
+the idea of knowledge distillation:
+(cid:16) π π (cid:17)
+L =L +D σ( supernet),σ( θ) , (2)
+KD CE KL T T
+where D (·) denotes the Kullback-Leibler divergence between the logits of the super-network and the
+KL
+sub-network, T a temperature parameter, σ(·) the softmax function and L is the cross-entropy loss.
+CE
+3.2.2 Sub-network selection
+After training the super-network, we compute the validation error f (θ) by applying M and M
+0 head neuron
+to the shared weights and performing a single pass over the validation data. This substantially reduces the
+computational cost involved in the multi-objective problem stated in Equation 1. To solve this problem,
+we essentially can use the same multi-objective approaches as for standard NAS, except for multi-fidelity
+approaches such as MO-ASHA, because we do not perform any additional training anymore.
+53.3 Search Space
+The search space Θ defines sub-networks of the pre-trained network architecture. An expressive Θ allows
+forfine-grainedpruningbutmightalsobecomeinfeasibletoexplore. Weproposethefollowingsearchspaces
+that exhibit different levels of complexity. For each search space we provide pseudo code to define the
+CREATEMASK function in Appendix B.
+• SMALL: We define the number of heads H =[0,H], the number of units U =[0,U] and the total
+number of layers L = [0,L], such that Θ = H ×U ×L. Compared to the other search spaces,
+the dimensionality of this search space remains fixed with different model sizes, and only its upper
+bound increases. For each layer, we always keep the first h∈H heads and u∈U units, respectively,
+to enforce that CREATEMASK is a bijective mapping (see Appendix B).
+• LAYER: Inspired by Sajjad et al. (2022), we prune individual attention and fully-connected layers
+instead of single heads and neurons. We define a search space Θ={0,1}L that contains one binary
+hyperparameter for each layer that determines if the corresponding layer is removed.
+• MEDIUM: Based on the previous search space, we allow for a flexible number of heads / units
+per layer. For each layer l ∈[0,L], we define H =[0,H] and U =[0,U], such that the final search
+l l
+space is Θ=H ×U ...H ×U . As for the SMALL search space we also keep the first heads and
+0 0 L L
+units in each layer.
+• LARGE:Foreachheadandneuroninthefully-connectedlayerwedefineasinglebinaryΘ ={0,1}
+i
+which is combined to form the search space Θ = Θ ×...×Θ . This is the most expressive
+0 L(H+I)
+search space, but also grows quickly with the model size. The search space is also commonly used
+by other structural pruning approaches (Kwon et al., 2022). It might not be very useful in practice,
+because we cannot easily remove single rows/columns of the weight matrix with most transformer
+implementations and hence it will not necessarily reduce the inference latency. However, it provides
+usareferenceintermsofpredictiveperformancesthatcanberetainedunderacertainpruningratio.
+Each search space induces a different pattern for M and M that we place over the super-network
+head neuron
+toselectsub-networks(seeFigure2forsomeexamples). Toseehowthiseffectsthedistributionoverparam-
+eter count and hence the sampling during the super-network training, we sample N = 500 configurations
+{θ ,...,θ } uniformly at random and compute the number of trainable parameters {f (θ ),...,f (θ } for
+0 N 1 i 1 N
+allfoursearchspaces(seeFigure3). TheSMALLsearchspaceissomewhatbiasedtosmallernetworks. The
+MEDIUM search space, even though more expressive, is highly biased towards mid-size networks, since on
+average half of the heads / neurons are masked out. For the two binary search spaces LAYER and LARGE,
+we can achieve a uniform distribution over the number of parameters, by using the following sampling pro-
+cess. We first sample an integer k ∼U(0,K), where k =L for the LAYER search space, and k =L(H +I)
+for the LARGE search space. Afterwards, we randomly select k entries of the binary vector θ ∈ Θ and set
+them to 1.
+4 Experiments
+WeevaluatedifferenttypesofNASforstructuralpruningoneighttextclassificationtasks,includingtextual
+entailment, sentiment analysis and multiple-choice question / answering. We provide a detailed description
+of each task in Appendix C. All tasks come with a predefined training and evaluation set with labels and
+a hold-out test set without labels. We split the training set into a training and validation set (70%/30%
+split) and use the evaluation set as test set. We fine-tune every network, sub-network or super-network, for
+5 epochs on a single GPU. For all multi-objective search methods, we use Syne Tune (Salinas et al., 2022)
+on a single GPU instance. We use BERT-base (Devlin et al., 2019) (cased) and RoBERTa-base (Liu et al.,
+2019b) as pre-trained network, which consists of L = 12 layers, I = 3072 units and H = 12 heads (other
+hyperparametersaredescribedinAppendixA).Whilearguablyrathersmallfortoday’sstandards,theystill
+achieve competitive performance on these benchmarks and allow for a more thorough evaluation. We also
+present a comparison to quantization in Appendix F.
+6SMALL MEDIUM LAYER LARGE
+1 1 1 1
+2 2 2 2
+3 3 3 3
+4 4 4 4
+5 5 5 5
+6 6 6 6
+7 7 7 7
+8 8 8 8
+9 9 9 9
+10 10 10 10
+11 11 11 11
+12 12 12 12
+1 2 3 4 5 6 7 8 9 10 11 12 1 2 3 4 5 6 7 8 9 10 11 12 1 2 3 4 5 6 7 8 9 10 11 12 1 2 3 4 5 6 7 8 9 10 11 12
+head head head head
+Figure 2: Examples of head masks M sampled uniformly at random from different search spaces. Dark
+head
+color indicates that the corresponding head is masked. The same pattern can be observed for M
+neuron
+SMALL MEDIUM LAYER LARGE
+400
+160 70
+350 140 400 60
+300 120
+250 100 300 50
+200 80 40
+150 60 200 30
+100 40 100 20
+50 20 10
+0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 00.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+relative number of parameters relative number of parameters relative number of parameters relative number of parameters
+Figure 3: Distribution of the parameter count f (θ) for uniformly sampled θ ∼Θ.
+1
+4.1 Benchmarking Neural Architecture Search
+We now present an evaluation of different multi-objective NAS approaches on our benchmarking suite.
+To quantify the performance of a Pareto set, we compute for each Pareto set the Hypervolume (Zitzler
+et al., 2003) and report the regret, i e. the difference to the best possible Hypervolume averaged across all
+repetitions. To compute the Hypervolume, we first normalize each objective based on all observed values
+acrossallmethodsandrepetitionsviaQuantilenormalization. Thisresultsinauniformdistributionbetween
+[0,1], and we use (2,2) as reference point, which means the highest possible Hypervolume would be 4. We
+evaluate each method with 10 different seeds for the random number generation.
+4.1.1 Search Space
+First, we compare the search spaces definitions from Section 3.3 using weight-sharing based NAS. We fine-
+tune the super-network as described in Section 3.2 and sample 100 sub-networks uniformly at random to
+compute the hypervolume. Within this budget (see Figure 4), the SMALL search space achieves the best
+performance across all datasets, except for COLA. Interestingly, even though the MEDIUM search space
+allowsforamorefine-grainedperlayerpruning,itleadstoworseresults. Weattributethistothenon-uniform
+distribution of parameter count as described in Section 3.3. The LAYER search space often out-performs
+the MEDIUM and LARGE search space, but, except for COLA, leads to Pareto sets that under-perform
+compared to the SMALL search space. The LARGE search space, which is a superset of the other search
+spaces, seems infeasible to explore with random sampling over so few observations. We use the SMALL
+search space for the remaining experiments.
+4.1.2 Standard Neural Architecture Search
+We compare the following multi-objective search methods to tackle the NAS problem described in Sec-
+tion3whereeachsub-networkisfine-tunedinisolation: asimplemulti-objectivelocalsearch(LS)described
+in Appendix D. This is inspired by the work of White et al. (2021a), which showed that local search of-
+ten performs competitively on NAS problems. Random search (RS) (Bergstra & Bengio, 2012) samples
+7
+reyal reyal reyal reyalRTE MRPC STSB COLA
+3.9 3.85 3.8 3.80
+3.8 3.80
+3.7 3.75 3.7 3.75
+3.6 3.70 3.6 3.70
+3.65
+3.5 3.60 3.5 3.65
+3.4 3.55
+3.4 3.60
+3.3 3.50
+Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large
+searchspace searchspace searchspace searchspace
+IMDB SST2 SWAG QNLI
+3.9
+3.65 3.8 3.7 3.7
+3.60
+3.55 3.7 3.6 3.6
+3.50 3.6
+3.45 3.5 3.5 3.5
+3.40
+3.4
+3.35 3.4 3.4
+3.30 3.3
+Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large
+searchspace searchspace searchspace searchspace
+RTE MRPC STSB COLA
+3.5 3.35 3.35
+3.4 3.35
+3.30 3.30
+3.3 3.30 3.25
+3.2 3.25 3.20 3.25
+3.1 3.20 3.15 3.20
+3.0 3.10
+2.9 3.15 3.05 3.15
+2.8 3.10 3.00 3.10
+Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large
+searchspace searchspace searchspace searchspace
+IMDB SST2 SWAG QNLI
+3.4 3.4
+3.4 3.4
+3.3 3.3
+3.3 3.3 3.2
+3.2 3.1 3.2 3.2
+3.1 3.0 3.1 3.1
+2.9
+3.0 3.0
+3.0
+2.8
+Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large Layer Medium Small Large
+searchspace searchspace searchspace searchspace
+Figure 4: Comparison of the four different search spaces using weight-sharing based NAS. We sample 100
+random sub-networks uniformly at random using the fine-tuned weights of the super-network. The SMALL
+search space dominates the other search spaces except for the COLA dataset. While SMALL is a subset
+of MEDIUM and LARGE, these spaces are too high-dimensional to be explored with a sensible compute
+budget. First two rows show results for BERT-base-cased and last two rows for RoBERTa-base.
+BERT-BASE-CASED ROBERTA-BASE BERT-BASE-CASED ROBERTA-BASE
+3.5 E L M MSH O OV - -A RI S EH AA 3.5 E L M MSH O OV - -A RI S EH AA 2.8 E L M RSH SOV -RI EA 23 .. 80 E L M RSH SOV -RI EA
+3.0 RS 3.0 RS 2.6 2.6
+2.5 2.4 2.4
+2.5
+2.0 2.2
+2.2
+1.5 2.0 2.0
+2.0 1.8
+1.0 1.5
+0 20 40 60 80 100 0 20 40 60 80 100 0 20 40 60 80 100 0 20 40 60 80 100
+time steps time steps timesteps timesteps
+(a) Ranks Standard-NAS Search (b) Ranks WS-NAS Search
+architectures uniformly at random from the search space. A multi-objective version of the regularized
+evolution algorithm (Real et al., 2019), frequently used in the NAS literature. Compared to the original
+singe-objective algorithm, we sort elements in the population via non-dominated sorting. Expected Hy-
+pervolume Improvement (EHVI) (Daulton et al., 2020) is a multi-objective Bayesian optimization strategy
+that samples candidate points using a Gaussian process model of the objective function. Lastly, we in-
+8
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+knar
+egareva
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+knar
+egareva
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+knaregareva
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+knaregarevaclude MO-ASHA (Schmucker et al., 2021), a multi-objective version of asynchronous successive halving (Li
+& Talwalkar, 2020; Jamieson & Talwalkar, 2016) that terminates the training process of poorly perform-
+ing candidates early to accelerate the overall optimization process. While MO-ASHA could potentially be
+combined with a model-based approach, as commonly done for single-objective optimization (Falkner et al.,
+2018; Klein et al., 2020), here we followed the original algorithm and sample candidate uniformly at random
+from the search space.
+Following common experimental practice from the HPO literature, we aggregate results by computing the
+average ranks of each methods across repetitions, datasets and time steps. Following Feurer et al. (2015),
+we sample 1000 bootstrap samples across all repetitions and tasks, to compute the rank of each method and
+average across all samples. Results are shown in Figure 5a. We shows results for each individual task in
+Appendix E.
+Somewhat surprisingly RS is a strong baseline on these benchmarks, outperforming more sophisticated
+approaches such as EHVI or MO-REA. Fine-tuning these models is often unstable (Mosbach et al., 2021)
+especially on smaller datasets, resulting in high observation noise. For the RoBERTa-base model, LS often
+performs competitively to RS given a sufficient large budget. MO-ASHA quickly stops the evaluation of
+poorly performing sub-networks and hence outperforms RS on average. However, on small datasets such as
+RTE, fine-tuning is faster than the non-dominated sorting of MO-ASHA, such that it converges slower than
+RS (see Appendix E).
+4.1.3 Weight-sharing based Neural Architecture Search
+Next, we evaluate different techniques for two-stage NAS for this problem. We distinguish between, fine-
+tuning the super-network and multi-objective search.
+Super-network fine-tuning: First, we compare the following strategies to fine-tune the super-network
+from the literature. To compare these methods, after fine-tuning the super-network, we sample 100 sub-
+networks uniformly at random from the SMALLsearchspace to estimatethe Pareto set and report here the
+Hypervolume. We repeat this process 10 times with a different seed for the random number generation. For
+each repetition we use the exact same set of random sub-networks for all super-network training strategies.
+• standard: Which trains all weights of super-network in the standard fine-tuning setting
+• random: Samples a single random sub-network in each update steps
+• random-linear: Inspired by Bender et al. (2018), we either sample a random sub-network with
+probabilityporthefull-networkwithprobabilityof1−pineachupdatestep. Thereby, pislinearly
+increased from 0 to 1 after each update step over the course of training.
+• sandwich: The super-network is updated according to the sandwich rule (Yu et al., 2020; Wang
+et al., 2021) described in Section 3.2. We set the number of random sub-networks in each update
+step to k =2.
+• kd: Update k = 2 random sub-networks using in-place knowledge distillation (Yu et al., 2020;
+Wang et al., 2021) according to Equation 2.
+• full: Implements the training protocol described in Section 3.2, i.e it combines the sandwich rule
+with in-place knowledge distillation to update sub-networks.
+Figure 6 shows the Hypervolume across all task for BERT-base and RoBERTa-base, respectively. Standard
+fine-tuning and just randomly sampling a sub-network leads to poorly performing Pareto set compared to
+other methods. The only exception is the COLA dataset, where standard fine-tuning sometimes works best.
+However, we also observe high variation across runs on this datasets. Linearly increasing the probability of
+sampling a random sub-networks improves to just random sampling. Better results are achieved by using
+the sandwich rule or knowledge distillation. Thereby, combining both slightly improves results further.
+9RTE MRPC STSB COLA
+3.9 3.8 3.8
+3.75
+3.8 3.7 3.6
+3.7 3.6 3.70
+3.5 3.65 3.4
+3.6 3.4 3.60 3.2
+3.5 3.3
+3.2 3.55 3.0
+3.4
+3.1 3.50
+2.8
+standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd
+super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy
+IMDB SST2 SWAG QNLI
+3.7 3.9 3.7 3.7
+3.6 3.8
+3.6 3.6
+3.5 3.7
+3.6 3.5 3.5
+3.4
+3.5 3.4
+3.3 3.4
+3.4
+3.2 3.3
+3.3 3.3
+3.1 3.2 3.2
+3.2
+standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd
+super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy
+RTE MRPC STSB COLA
+3.3
+3.4 3.2 3.2 3.4
+3.3 33 .. 01 3.1 3.2
+3.0
+3.2 2.9 3.0
+2.8 2.9
+3.1 2.7 2.8 2.8
+3.0 22 .. 56 2.7 2.6
+2.6
+standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd
+super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy
+IMDB SST2 SWAG QNLI
+3.3 3.2 3.3 3.3
+3.2 3.2 3.2
+3.1 3.0 3.1 3.1
+3.0 3.0
+2.8 3.0
+2.9 2.9
+2.9
+2.8 2.6 2.8
+2.7 2.8 2.7
+2.4
+standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd standardrandom linear sandwich full inplace-kd
+super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy super-networktrainingstrategy
+Figure6: Comparisonofdifferentstrategiestofine-tunethesuper-network. FirsttworowsshowBERT-base
+and last two rows show RoBERTa-base.
+Multi-Objective Search Lastly,wecompareinFigure5branksofthesamemulti-objectivesearchmeth-
+ods as for standard-NAS. We do not include MO-ASHA in this setting, since each function evaluation only
+consists of validating a sub-network based on the shared weights of the super-network after fine-tuning
+and hence does not allow for a multi-fidelity approach. Optimization trajectories for all datasets are in
+Appendix E. As for standard NAS, RS is a surprisingly strong baseline. EHVI performs better at early
+time-steps. We found using a the shared weights of the super-networks for evaluation results in a much
+smallerobservationnoisethanfine-tuningeachsub-networkinisolation,whichislessdeceivingfortheprob-
+abilistic model of EHVI. Given enough time, LS starts outperform RS and EHVI on RoBERTa-base model
+and competitively to EHVI on the BERT-base model.
+4.2 Comparison to other Structural Pruning Approaches
+We now present a comparison against other structural pruning approaches. For NAS we use the SMALL
+search space defined in Section 3.3 based on our ablation study in Section 4.1. We compare the following
+methods:
+• Head-Pruning (HP) (Michel et al., 2019) prunes heads greedily using a proxy score for the impor-
+tance of each head for final performance based on the gradient of the loss function.
+10
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh
+emulovrepyh• Retraining Free Pruning (RFP) (Kwon et al., 2022) uses a three-phased pruning strategy that,
+based on a threshold α, prunes individual heads in the MHA layer and units in the FFN layer.
+The first phase computes a binary mask for heads and units by computing the diagonal Fisher
+information matrix. The matrix is then rearranged by a block-approximated Fisher information
+matrix. In the last step, the masked is further tuned by minimizing the layer-wise reconstruction
+error. This method operates in the LARGE search space described in Section 3.3. We run RFP
+with different values for α∈{0.1,0.2,...,0.9} to obtain a Pareto set of architectures.
+• Layer Dropping(LD):FollowingSajjadetal.(2022)wefirstremovethetopn∈1,...,L−1layers
+and fine-tune the remaining layers directly on the downstream task. To obtain a Pareto set of N
+points, we fine-tune N models with different amount of layers removed. This method serves as a
+simple heuristic to explore the LAYER search space.
+• Standard NAS (S-NAS): As for the previous experiments, we used standard NAS using random
+search where each sub-network is initialized with the pre-trained weights and then fine-tuned inde-
+pendently.
+• Weight-sharing NAS(WS-NAS):Followsthetwo-stageweightsharingbasedNASapproachout-
+lined in Section 3.2. We use sandwich rule and in-place knowledge distillation to train the super-
+network and EHVI to search for the Pareto optimal set of sub-networks.
+To compare results, we normalize the number of parameters to [0,1] and bin results based on different
+thresholds β ∈ {0.2,...0.9}. Note that roughly 20% of the parameters of BERT-base / RoBERTa-base are
+included in the embedding and classification head, and hence cannot be trivially pruned without changing
+the embedding dimension or the number of classes. For each bin, we report the best performance of the
+solution with ≤ β parameters. We discuss the relationship between parameter count and model inference
+time in F.
+Figure7showstheparametercount(horizontalaxis)andthetesterror(verticalaxis)relativetotheunpruned
+network for all datasets. For reference, we indicate 95% and 90% relative performance to the unpruned
+network as well as the original performance by dashed lines. We sort dataset by their size from left to right.
+We make the following two observations: First, both S-NAS and WS-NAS achieve competitive performance
+to structural pruning methods. Especially for higher pruning ratios, NAS outperforms RFP and HP even
+thoughtheyoperateintheLARGEsearchspace,whichismuchhigherdimensionalthantheSMALLsearch
+space used for NAS. This indicates that these methods cannot rigorously handle such high dimensional
+spaces. Second, NAS methods seems to perform better for larger datasets. Given a sufficient amount of
+budget, simple LD, which operates in the LAYER search space, also achieves competitive results. This is
+in-line with our results in Section 4.1.1, showing that the LAYER search space can still provide sensible
+results compared to more expressive search spaces.
+For a qualitative comparison, we show the results for a single run on three datasets in Figure 8 right. More
+example runs are shown in Appendix E.
+4.3 Conclusions
+WeproposeNASforstructuralpruningoffine-tunedPLMs. Byutilisingamulti-objectiveapproach,wecan
+findtheParetooptimalsetofsub-networksthatbalancebetweenmodelsizeandvalidationerror. Returning
+a Pareto set of sub-networks allows practitioners to select the optimal network without running the pruning
+process multiple times with different thresholds. We also provide an in-depth analysis of recently developed
+two-stage weight-sharing approaches in this setting, which require only a single fine-tuning run of the PLM.
+Futureworkcouldexploretheinstructiontuning(Weietal.,2022)setting,wherethefinalmodelisevaluated
+in a few-shot setting. Our approach samples sub-networks uniformly at random, which allocates the same
+amount of update steps to all sub-networks on average. Future work could explore more complex sampling
+distribution biased towards sub-networks closer to the Pareto set.
+11RTE MRPC STSB COLA
+0.95
+0.92 0.90 0.6
+0.65
+0.90 0.85 0.5
+0.60 0.88 0.80 0.4
+0.75
+0.55 0.86 0.70 0.3
+HP 0.84 HP 0.65 HP 0.2 HP
+0.50 L W R SD -FS NP- AN SAS 0.82 L W R SD -FS NP- AN SAS 00 .. 56 50 L W R SD -FS NP- AN SAS 00 .. 01 L W R SD -FS NP- AN SAS
+5% 14% 23% 32% 42% 51% 60% 70% 0.80 5% 14% 23% 32% 42% 51% 60% 70% 0.50 5% 14% 23% 32% 42% 51% 60% 70% 5% 14% 23% 32% 42% 51% 60% 70%
+number of parameters pruned number of parameters pruned number of parameters pruned number of parameters pruned
+IMDB SST2 SWAG QNLI
+0.92 0.94 0.9
+0.90 0.7
+0.92
+0.88 0.8
+0.86 0.90 0.6
+0.84 0.88 0.5 0.7
+0.82 0.86
+0.80 H LDP 0.84 H LDP 0.4 H LDP 0.6 H LDP
+00 .. 77 68 W R S-FS NP- AN SAS 0.82 W R S-FS NP- AN SAS 0.3 W R S-FS NP- AN SAS 0.5 W R S-FS NP- AN SAS
+5% 14% 23% 32% 42% 51% 60% 70% 0.80 5% 14% 23% 32% 42% 51% 60% 70% 5% 14% 23% 32% 42% 51% 60% 70% 5% 14% 23% 32% 42% 51% 60% 70%
+number of parameters pruned number of parameters pruned number of parameters pruned number of parameters pruned
+RTE MRPC STSB COLA
+0.95 0.6
+0.75 0.92 0.90 0.5
+0.70 0.90 0.85
+0.65 0.88 0.80 0.4
+0.75 0.3
+0.60 0.86 0.70 0.2
+00 .. 55 05 H L
+W
+RD FP
+S P-NAS
+00 .. 88 24 H L
+W
+RD FP
+S P-NAS
+000 ... 566 505 H L
+W
+RD FP
+S P-NAS
+00 .. 01 H L
+W
+RD FP
+S P-NAS
+0.45 5%S-NAS 14% 23% 32% 42% 51% 60% 70% 0.80 5%S-NAS 14% 23% 32% 42% 51% 60% 70% 0.50 5%S-NAS 14% 23% 32% 42% 51% 60% 70% 5%S-NAS 14% 23% 32% 42% 51% 60% 70%
+number of parameters pruned number of parameters pruned number of parameters pruned number of parameters pruned
+IMDB SST2 SWAG QNLI
+0.92 0.94 0.8
+0.90 0.9
+0.88 0.92 0.7
+0.86 0.90 0.6 0.8
+0.84 0.88 0.7
+0.5
+0.82 0.86
+0.80 H LDP 0.84 H LDP 0.4 H LDP 0.6 H LDP
+0.78 W RFS P-NAS 0.82 W RFS P-NAS 0.3 W RFS P-NAS 0.5 W RFS P-NAS
+0.76 S-NAS S-NAS S-NAS S-NAS
+5% 14% 23% 32% 42% 51% 60% 70% 0.80 5% 14% 23% 32% 42% 51% 60% 70% 5% 14% 23% 32% 42% 51% 60% 70% 5% 14% 23% 32% 42% 51% 60% 70%
+number of parameters pruned number of parameters pruned number of parameters pruned number of parameters pruned
+Figure 7: Loss in test performance versus the parameter count relative to the un-pruned model on all 8 text
+classification datasets. First two rows show BERT-base and last two rows show RoBERTa-base.
+SST2 IMDB QNLI
+0.5 unpruned network 0.50 unpruned network 0.5 unpruned network
+WS-NAS WS-NAS WS-NAS
+RFP 0.45 RFP RFP
+S-NAS S-NAS S-NAS
+0.4 L HD P 0.40 L HD P 0.4 L HD P
+0.35
+0.3 0.3 0.30
+0.25
+0.2 0.2
+0.20
+0.15
+0.1 0.1
+0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+# parameters # parameters # parameters
+Figure 8: Pareto fronts of single runs for each method for SST2, IMDB and QNLI dataset.
+References
+J. L. Ba, J. R. Kiros, and G. E. Hinton. Layer normalization. arXiv:1607.06450 [stat.ML], 2016.
+D.Bahdanau, K.Cho, andY.Bengio. Neuralmachinetranslationbyjointlylearningtoalignandtranslate.
+In International Conference on Learning Representations (ICLR’15), 2015.
+12
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+rorre
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+rorre
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+rorre
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tset
+ecnamrofrep
+tsetG. Bender, P. Kindermans, B. Zoph, V. Vasudevan, and Q. Le. Understanding and simplifying one-shot
+architecturesearch. InProceedings of the 35th International Conference on Machine Learning (ICML’18),
+2018.
+J. Bergstra and Y. Bengio. Random search for hyper-parameter optimization. Journal of Machine Learning
+Research (JMLR-12), 2012.
+J. Bergstra, D. Yamins, and D. Cox. Making a science of model search: Hyperparameter optimization in
+hundreds of dimensions for vision architectures. In Proceedings of the 30th International Conference on
+Machine Learning (ICML’13), 2013.
+D. Blalock, J. J. G. Ortiz, J. Frankle, and J. Guttag. What is the state of neural network pruning?
+arXiv:2003.03033 [cs.LG], 2020.
+H. Cai, C. Gan, T. Wang, Z. Zhang, and S. Han. Once-for-all: Train one network and specialize it for
+efficient deployment. In International Conference on Learning Representations (ICLR’20), 2020.
+D. Chen, Y. Li, M. Qiu, Z. Wang, B. Li, B. Ding, H. Deng, J. Huang, W. Lin, and J. Zhou. Adabert:
+Task-adaptive bert compression with differentiable neural architecture search. In Proceedings of the 29th
+International Joint Conference on Artificial Intelligence (IJCAI’20), 2020.
+S. Daulton, M. Balandat, and E. Bakshy. Differentiable expected hypervolume improvement for parallel
+multi-objective bayesian optimization. In Proceedings of the 34th International Conference on Advances
+in Neural Information Processing Systems (NeuRIPS’20), 2020.
+T.DettmersandL.Zettlemoyer. Thecasefor4-bitprecision: k-bitinferencescalinglaws. arXiv:2212.09720
+[cs.LG], 2023.
+T. Dettmers, M. Lewis, Y. Belkada, and L. Zettlemoyer. Llm.int8(): 8-bit matrix multiplication for trans-
+formers at scale. In Proceedings of the 36th International Conference on Advances in Neural Information
+Processing Systems (NeuRIPS’22), 2022.
+J. Devlin, M. Chang, K. Lee, and K. Toutanova. BERT: Pre-training of deep bidirectional transformers for
+language understanding. In Proceedings of the 2019 Conference of the North American Chapter of the
+Association for Computational Linguistics: Human Language Technologies, 2019.
+T. Elsken, J. H. Metzen, and F. Hutter. Neural architecture search: A survey. arXiv:1808.05377 [stat.ML],
+2018.
+S. Falkner, A. Klein, and F. Hutter. BOHB: Robust and efficient hyperparameter optimization at scale. In
+Proceedings of the 35th International Conference on Machine Learning (ICML 2018), 2018.
+M. Feurer, T. Springenberg, and F. Hutter. Initializing bayesian hyperparameter optimization via meta-
+learning. In Proceedings of the 29th National Conference on Artificial Intelligence (AAAI’15), 2015.
+G. Hinton, O. Vinyals, and J. Dean. Distilling the knowledge in a neural network. arXiv:1503.02531
+[stat.ML], 2015.
+K.JamiesonandA.Talwalkar. Non-stochasticbestarmidentificationandhyperparameteroptimization. In
+Proceedings of the 17th International Conference on Artificial Intelligence and Statistics (AISTATS’16),
+2016.
+X. Jiao, Y. Yin, L. Shang, X. Jiang, X. Chen, L. Li, F. Wang, and Q. Liu. Tinybert: Distilling bert for
+natural language understanding. arXiv:1909.10351 [cs.CL], 2019.
+A.Klein,L.C.Tiao,T.Lienart,C.Archambeau,andM.Seeger. Model-basedasynchronoushyperparameter
+optimization. arXiv:2003.10865 [cs.LG], 2020.
+W. Kwon, S. Kim, M. W. Mahoney, J. Hassoun, K. Keutzer, and A. Gholami. A fast post-training pruning
+framework for transformers. arXiv:2204.09656 [cs.CL], 2022.
+13L. Li and A. Talwalkar. Random search and reproducibility for neural architecture search. In Proceedings
+of The 35th Uncertainty in Artificial Intelligence Conference, 2020.
+L. Li, K. Jamieson, A. Rostamizadeh, K. Gonina, M. Hardt, B. Recht, and A. Talwalkar. Massively parallel
+hyperparameter tuning. arXiv:1810.05934 [cs.LG], 2018.
+H. Liu, K. Simonyan, and Y. Yang. DARTS: Differentiable architecture search. In International Conference
+on Learning Representations (ICLR’19), 2019a.
+Y. Liu, M. Ott, N. Goyal, J. Du, M. Joshi, D. Chen, O. Levy, M. Lewis, L. Zettlemoyer, and V. Stoyanov.
+Roberta: A robustly optimized bert pretraining approach. arXiv:1907.11692 [cs.CL], 2019b.
+P. Michel, O. Levy, and G. Neubig. Are sixteen heads really better than one? In Proceedings of the 32th
+International Conference on Advances in Neural Information Processing Systems (NeurIPS’19), 2019.
+M. Mosbach, M. Andriushchenko, and D. Klakow. On the stability of fine-tuning bert: Misconceptions,
+explanations, and strong baselines. In International Conference on Learning Representations (ICLR’21),
+2021.
+H.Pham,M.Guan,B.Zoph,Q.Le,andJ.Dean. Efficientneuralarchitecturesearchviaparameterssharing.
+In Proceedings of the 35th International Conference on Machine Learning (ICML’18), 2018.
+E. Real, S. Moore, A. Selle, S. Saxena, Y. L. Suematsu, J. Tan, Q. V. Le, and A. Kurakin. Large-scale
+evolution of image classifiers. In Proceedings of the 34th International Conference on Machine Learning
+(ICML’17), 2017.
+E. Real, A. Aggarwal, Y. Huang, and Q. V. Le. Regularized Evolution for Image Classifier Architecture
+Search. In Proceedings of the Conference on Artificial Intelligence (AAAI’19), 2019.
+H. Sajjad, F. Dalvi, N. Durrani, and P. Nakov. On the effect of dropping layers of pre-trained transformer
+models. arXiv:2004.03844 [cs.CL], 2022.
+D. Salinas, M. Seeger, A. Klein, V. Perrone, M. Wistuba, and C. Archambeau. Syne tune: A library for
+large scale hyperparameter tuning and reproducible research. In First Conference on Automated Machine
+Learning (Main Track), 2022.
+V.Sanh,L.Debut,J.Chaumond,andT.Wolf. Distilbert,adistilledversionofbert: smaller,faster,cheaper
+and lighter. arXiv:1910.01108 [cs.CL], 2020.
+R. Schmucker, M. Donini, M. B. Zafar, D. Salinas, and C. Archambeau. Multi-objective asynchronous
+successive halving. arXiv:2106.12639 [stat.ML], 2021.
+A.Vaswani,N.Shazeer,N.Parmar,J.Uszkoreit,L.Jones,A.Gomez,L.Kaiser,andI.Polosukhin.Attention
+is all you need. In Advances in Neural Information Processing Systems (NeurIPS’17), 2017.
+E. Voita, D. Talbot, F. Moiseev, R. Sennrich, and I. Titov. Analyzing multi-head self-attention: Specialized
+heads do the heavy lifting, the rest can be pruned. In Proceedings of the 57th Annual Meeting of the
+Association for Computational Linguistics, 2019.
+D. Wang, M. Li, C. Gong, and V. Chandra. AttentiveNAS: Improving Neural Architecture Search via
+Attentive Sampling. arXiv:2011.09011 [cs.CV], 2021.
+J.Wei,M.Bosma,V.Zhao,K.Guu,A.W.Yu,B.Lester,N.Du,A.M.Dai,andQ.VLe.Finetunedlanguage
+models are zero-shot learners. In International Conference on Learning Representations (ICLR’22), 2022.
+C.White,S.Nolen,andY.Savani. Exploringthelosslandscapeinneuralarchitecturesearch. InProceedings
+of the 37th conference on Uncertainty in Artificial Intelligence (UAI’21), 2021a.
+C. White, A. Zela, R. Ru, Y. Liu, and F. Hutter. How powerful are performance predictors in neural archi-
+tecture search? In Proceedings of the 35th International Conference on Advances in Neural Information
+Processing Systems (NeuRIPS’21), 2021b.
+14J. Xu, X. Tan, R. Luo, K. Song, J. Li, T. Qin, and T. Liu. NAS-BERT: task-agnostic and adaptive-size
+bertcompressionwithneuralarchitecturesearch. InProceedings of the 27th ACM SIGKDD International
+Conference on Knowledge Discovery & Data Mining (KDD’21), 2021.
+A. Yang, P. M. Esperança, and F. M. Carlucci. NAS valuation is frustratingly hard. In International
+Conference on Learning Representations (ICLR’20), 2020.
+J. Yu, L. Yang, N. Xu, J. Yang, and T. Huang. Slimmable neural networks. In International Conference on
+Learning Representations (ICLR’19), 2019.
+J.Yu,P.Jin,H.Liu,G.Bender,P.J.Kindermans,M.Tan,T.Huang,X.Song,R.Pang,andQ.Le. BigNAS:
+Scaling Up Neural Architecture Search with Big Single-Stage Models. In The European Conference on
+Computer Vision (ECCV’20), 2020.
+E. Zitzler, L. Thiele, M. Laumanns, C. M. Fonseca, and V. G. Da Fonseca. Performance assessment of
+multiobjective optimizers: An analysis and review. IEEE Transactions on evolutionary computation,
+2003.
+B. Zoph and Q. V. Le. Neural architecture search with reinforcement learning. In International Conference
+on Learning Representations (ICLR’17), 2017.
+A Hyperparameters
+Table A shows the hyperparameters for fine-tuning the super-network. We largely follow default hyperpa-
+rameters recommended by the HuggingFace transformers library. For all multi-objective search method, we
+follow the default hyperparameter of Syne Tune.
+Hyperparameter Value
+Learning Rate 0.00002
+Number of random sub-networks k 2
+Temperature T 10
+Batch Size 4
+B Masking
+Algorithm 1, 2, 3 and 4 show pseudo code for the LAYER, SMALL, MEDIUM and LARGE search space,
+respectively. Note that, 1 indicates a vector of ones. For a matrix M, we write M[:,:N] to denote the first
+N columns for all rows and, vice versa, M[:N,:] for the first N rows.
+input : sub-network configuration θ ∈{0,1}L
+output: M ,M
+head neuron
+M ←[0]L×H;
+head
+M ←[0]L×I;
+neuron
+for l=0,...,L−1 do
+M [l,:]←θ[l];
+head
+M [l,:]←θ[l];
+neuron
+end
+Algorithm 1: CREATEMASK function for LAYER search space
+15input : sub-network configuration θ ∈H ×U ...H ×U
+0 0 L L
+output: M ,M
+head neuron
+M ←[0]L×H;
+head
+M ←[0]L×I;
+neuron
+for l=0,...,L−1 do
+h=θ[2∗l] ; /* number of heads in layer l */
+u=θ[2∗l+1] ; /* number of units in layer l */
+M [l,:h]←1;
+head
+M [l,:u]←1;
+neuron
+end
+Algorithm 2: CREATEMASK function for MEDIUM search space
+input : sub-network configuration θ ∈H×U ×L
+output: M ,M
+head neuron
+h=θ[0] ; /* number of heads */
+u=θ[1] ; /* number of units */
+l=θ[2] ; /* number of layers */
+M ←[0]L×H;
+head
+M ←[0]L×I;
+neuron
+M [:l,:h]←1;
+head
+M [:l,:u]←1;
+neuron
+Algorithm 3: CREATEMASK function for SMALL search space
+input : sub-network configuration θ ∈{0,1}L∗(H+U)
+output: M ,M
+head neuron
+M ←θ[:,:H];
+head
+M ←θ[:,H :];
+neuron
+Algorithm 4: CREATEMASK function for LARGE search space
+C Datasets
+We use the following 10 dataset test classification datasets. All dataset are classification task, except for
+STSB, which is a regression dataset.
+• The Recognizing Textual Entailment (RTE) dataset aims to identify the textual entailment of two
+sentences.
+• The Microsoft Research Paraphrase Corpus (MRPC) dataset consists of sentence pairs extracted
+from online news sources. The task is to predicts if these pairs are semantically equivalent to each
+other.
+• The Semantic Textual Similarity Benchmark (STSB) consists of sentences pairs that are scored
+between 1 and 5 based on their similarity.
+• TheCorpusofLinguisticsAcceptability(COLA)datasetcontainsEnglishsentencesthatarelabeled
+as grammatically correct or not.
+• The IMDB dataset for sentiment classification (positive / negative) of movie reviews.
+• The Stanford Sentiment Treebank (SST2) datasets classifies the positive / negative sentiment of
+sentences extracted from movie reviews.
+• Situations With Adversarial Generations (SWAG) dataset for multiple-choice question / answering.
+• QNLI is a modified version of the Stanford Question Answering Dataset which is a collection of
+question / answer pairs where question are written by human annotators and answers are extracted
+from Wikipedia. The task is to predict whether the answers is correct.
+16D Multi-objective Local Search
+Previous work (White et al., 2021a) has demonstrated that simple local search often performs competitively
+compared to more advanced NAS methods. We propose a straightforward multi-objective local search
+approach. StartingfromthecurrentParetofrontP ,whichisinitializedbysomestartingpoint,werandomly
+f
+sampleanelementθ ∼P andthengeneratearandomneighborpointbypermutingasinglerandomentry
+⋆ f
+of θ .
+⋆
+input : Search space Θ, number of iteration T, starting point θ
+start
+output: Pareto front P
+/* evaluate starting point */
+P ←{θ };
+0 start
+y =[f (θ ),f (θ ];
+start 0 start 1 start
+Y ←{y };
+start
+/* main loop */
+for t=1,...,T do
+/* sample random element from the population */
+θ ∼U(P );
+t t−1
+/* mutate */
+d∼U(0,|θ |); // sample random dimension
+t
+θˆ←copy(θ );
+t
+θˆ[d]←U(Θ ); // sample a new value from the search space
+d
+/* evaluate */
+y =[f (θˆ ),f (θˆ)];
+t 0 1
+Y ←Y ∪y
+t
+/* update population */
+S(Y)={y′ ∈Y :{y′′ ∈Y :y′′ ≻y′,y′ ̸=y′′}=∅}; // Pareto front
+P ←{θ :y(θ)∈S(Y)};
+t
+end
+Algorithm 5: Local Search
+E Additional Results
+InthissectionwepresentadditionalresultsfromtheexperimentsdescribedinSection4. Figure9showsthe
+Pareto front of randomly chosen runs for each dataset for BERT-base, sorted by the training dataset size.
+RTE and MRCP are small datasets compared to other datasets, leading often to an unstable fine-tuning
+process.
+Figure 10 and 11 shows the optimization trajectories for each methods using standard NAS and weight-
+sharing based NAS, respectively. Solid lines indicate the mean and shaded area the standard devication.
+F Quantization
+Quantization(Dettmersetal.,2022;Dettmers&Zettlemoyer,2023)isapowerfultechniquethatsignificantly
+reducesthememoryfootprintofneuralnetworks. However,itsimpactonlatencyisnotimmediate,especially
+when dealing with batch sizes that can not fit into the cache of the device Dettmers & Zettlemoyer (2023).
+With our flexible NAS framework we can simply replace objectives and directly optimize latency on the
+target device instead of parameter count.
+Figure 12 left shows the Pareto set obtained with our NAS approach, where we optimize latency instead of
+parameter count on the COLA dataset across 3 different GPU types. Additionally, we evaluate the perfor-
+manceoftheunprunedsuper-networkwith8-bit(Dettmersetal.,2022)and4-bit(Dettmers&Zettlemoyer,
+2023) quantization. While quantization substantially reduces the memory footprint (Figure 12 right), it ac-
+tuallyleadstoworselatency. Whilequantizationintroducesasmalloverheadduetotheadditionalrounding
+17RTE MRPC STSB 1.0 COLA
+00 .. 45 50 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network 000 ... 122 802 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network 01 .. 80 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network 00 .. 89 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network
+0.6
+0.7 0.40 0.16
+0.14 0.4 0.6
+0.35
+0.12 0.2 0.5
+0.30
+0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.100.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.40.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+# parameters # parameters # parameters # parameters
+IMDB SST2 SWAG QNLI
+000 ... 445 050 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network 00 .. 45 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network 00 .. 67 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network 00 .. 45 u W R S L HDn -F PS Np P- Ar Nu SAn Sed network
+0.35
+0.30 0.3 0.5 0.3
+0.25 0.4
+0.2 0.2
+0.20
+0.3
+0.15 0.1 0.1
+0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+# parameters # parameters # parameters # parameters
+Figure 9: Single Pareto fronts of random run for each method on all 8 GLUE datasets.
+steps, the latency could potentially be reduced by optimizing the low-level CUDA implementation. Some-
+what surprisingly using a int-8bit quantization leads to high performance drop on some hardware. NAS
+effectively reduces the sizes of weight matrices, leading to reduced GPU computation and, thus, is less
+hardware depend.
+Wecanalsoapplyquantizationtosub-networks,makingitorthogonaltoourNASmethodologyandoffering
+further improvements to the memory footprint. Overall, these findings shed light on the trade-offs between
+memory footprint reduction and latency optimization. We leave it to future work to explore the connection
+between NAS and quantization.
+18
+rorre
+tset
+rorre
+tset
+rorre
+tset
+rorre
+tset
+rorre
+tset
+rorre
+tset
+rorre
+tset
+rorre
+tset000 ... 666 025 050 RTE E L M M RSH SO OV - -A RI S EH AA 000 ... 778 570 050 MRPC E L M M RSH SO OV - -A RI S EH AA 00 .. 34 50 STSB E L M M RSH SO OV - -A RI S EH AA 00 .. 67 50 COLA E L M M RSH SO OV - -A RI S EH AA
+0.575 0.725 0.30 0.60
+0.550 0.700
+0.525 0.675 0.25 0.55
+0.500 0.650 0.20 0.50
+0.475 0.625
+0.4500 500 1000 1500 2000 2500 0.6000 500 1000 1500 2000 2500 3000 3500 0.15 1000 2000 3000 4000 5000 0.450 1000 2000 3000 4000 5000 6000 7000
+runtime runtime runtime runtime
+0000 .... 3445 5050 IMDB E L M M RSH SO OV - -A RI S EH AA 000 ... 334 050 SST2 E L M M RSH SO OV - -A RI S EH AA 000 ... 667 050 SWAG E L M M RSH SO OV - -A RI S EH AA 000 ... 344 505 QNLI E L M M RSH SO OV - -A RI S EH AA
+0.25
+0.30 0.55
+0.25 0.20 0.50 0.30
+0.20 0.15 0.25
+0.15 0.10 0.45
+0.20
+0.100 5000 10000 15000 20000 25000 30000 0.05 10000 20000 30000 40000 50000 0.40 6000 8000 10000 12000 14000 10000 20000 30000 40000 50000 60000 70000
+runtime runtime runtime runtime
+11 .. 68 RTE E L M M RSH SO OV - -A RI S EH AA 00 .. 89 MRPC E L M M RSH SO OV - -A RI S EH AA 00 .. 34 50 STSB E L M M RSH SO OV - -A RI S EH AA 111 ... 012 COLA E L M M RSH SO OV - -A RI S EH AA
+1.4 0.7 0.30 0.9
+1.2
+0.6 0.25 0.8
+1.0 0.7
+0.20
+0.8 0.5 0.6
+0.15 0.5
+0.60 500 1000 1500 2000 2500 0.40 500 1000 1500 2000 2500 3000 3500 1000 2000 3000 4000 5000 0 1000 2000 3000 4000 5000 6000 7000
+runtime runtime runtime runtime
+000 ... 334 050 IMDB E L M M RSH SO OV - -A RI S EH AA 00 .. 23 50 SST2 E L M M RSH SO OV - -A RI S EH AA 0000 .... 6778 5050 SWAG E L M M RSH SO OV - -A RI S EH AA 000 ... 445 050 QNLI E L M M RSH SO OV - -A RI S EH AA
+0.20 0.35
+0.25 0.60
+0.30
+0.20 0.15 0.55
+0.50 0.25
+0.15 0.10 0.45 0.20
+0.100 5000 10000 15000 20000 25000 30000 0.05 10000 20000 30000 40000 50000 0.40 6000 8000 10000 12000 14000 0.15 10000 20000 30000 40000 50000 60000 70000
+runtime runtime runtime runtime
+Figure10: HypervolumeofstandardNASmethodsonBERT-base-cased(firsttworows)andRoBERTa-base
+(last two rows).
+19
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+terger
+emulovrepyh
+tergerRTE MRPC STSB COLA
+000 ... 334 570 050 E L M RSH SOV -RI EA 000 ... 556 050 E L M RSH SOV -RI EA 000 ... 667 050 E L M RSH SOV -RI EA 00 .. 56 50 E L M RSH SOV -RI EA
+0.325 0.45 0.55 0.50
+0.300 0.40 0.50 0.45
+0.275 0.35 0.45 0.40
+0.250 0.30 0.40
+0.225 0.25 0.35 0.35
+0.200100 150 200 250 300 350 400 0.20 100 150 200 250 300 350 400 450 500 0.30 200 400 600 800 1000 0.30 200 400 600 800 1000
+runtime(seconds) runtime(seconds) runtime(seconds) runtime(seconds)
+IMDB SST2 SWAG QNLI
+00 .. 56 70 50 E L M RSH SOV -RI EA 00 .. 34 70 50 E L M RSH SOV -RI EA 00 .. 56 50 E L M RSH SOV -RI EA 00 .. 56 50 E L M RSH SOV -RI EA
+0.550 0.350
+0.50 0.50
+0.525 0.325
+0.500 0.300 0.45 0.45
+0.475 0.275 0.40 0.40
+0.450 0.250
+0.35 0.35
+0.425 0.225
+0.400 2000 4000 6000 8000 10000 0.200 200 400 600 800 1000 0.30 1000 2000 3000 4000 5000 0.30 250 500 750 1000 1250 1500 1750 2000
+runtime(seconds) runtime(seconds) runtime(seconds) runtime(seconds)
+RTE MRPC STSB COLA
+00 .. 78 70 50 E L M RSH SOV -RI EA 01 .. 90 70 50 E L M RSH SOV -RI EA 01 .. 90 50 E L M RSH SOV -RI EA 00 .. 99 02 E L M RSH SOV -RI EA
+0.750 0.950
+0.725 0.925 0.90 0.88
+0.700 0.900 0.86
+0.675 0.875 0.85
+0.84
+0.650 0.850
+0.625 0.825 0.80 0.82
+0.600100 150 200 250 300 350 400 0.800 100 150 200 250 300 350 400 450 500 0.75 200 400 600 800 1000 0.80 200 400 600 800 1000
+runtime(seconds) runtime(seconds) runtime(seconds) runtime(seconds)
+IMDB SST2 SWAG QNLI
+00 .. 89 70 50 E L M RSH SOV -RI EA 01 .. 90 80 E L M RSH SOV -RI EA 00 .. 89 80 E L M RSH SOV -RI EA 00 .. 89 70 50 E L M RSH SOV -RI EA
+0.850 0.96 0.850
+0.86
+0.825 0.94 0.84 0.825
+0.800 0.92 0.82 0.800
+0.775 0.90 0.80 0.775
+0.750 0.750
+0.88 0.78
+0.725 0.725
+0.86 0.76
+0.700 2000 4000 6000 8000 10000 200 400 600 800 1000 1000 2000 3000 4000 5000 0.700 250 500 750 1000 1250 1500 1750 2000
+runtime(seconds) runtime(seconds) runtime(seconds) runtime(seconds)
+Figure 11: Hypervolume of search methods for weight-sharing based NAS on BERT-base-cased (first two
+rows) and RoBERTa-base (last two rows).
+COLA COLA
+1.0 1.0
+8bit 8bit
+0.9 0.9
+0.8 0.8
+0.7 0.7
+0.6 0.6 T4
+A10
+0.5 4bit 0.5 V100 4bit
+108 2×108 3×108 4×108 100 101 102
+memory footprint latency (milli-seconds)
+Figure 12: Test error versus memory footprint (left) and latency (right) on 3 different GPU types for the
+Pareto front found by our NAS strategy and the un-pruned network with 8bit and 4bit quantization.
+20
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+rorre
+tset
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+rorre
+tset
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
+emulovrepyhterger
