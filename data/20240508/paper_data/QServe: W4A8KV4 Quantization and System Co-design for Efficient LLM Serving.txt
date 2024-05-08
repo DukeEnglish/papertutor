@@ -1,0 +1,1257 @@
+QServe: W4A8KV4 Quantization and System
+Co-design for Efficient LLM Serving
+Yujun Lin*,1, Haotian Tang*,1, Shang Yang*,1, Zhekai Zhang1, Guangxuan Xiao1, Chuang Gan3,4, Song Han1,2
+MIT1, NVIDIA2, UMass Amherst3, MIT-IBM Watson AI Lab4
+{yujunlin,kentang,shangy,songhan}@mit.edu
+https://github.com/mit-han-lab/qserve
+Abstract—Quantization can accelerate large language model return by mapping its computations onto high-throughput 4-
+(LLM)inference.GoingbeyondINT8quantization,theresearch bit tensor cores. Unfortunately, this anticipated performance
+community is actively exploring even lower precision, such as
+boost has not been consistently observed across current GPU
+INT4.Nonetheless,state-of-the-artINT4quantizationtechniques
+platforms. For instance, the state-of-the-art W4A4 serving
+onlyacceleratelow-batch,edgeLLMinference,failingtodeliver
+performancegainsinlarge-batch,cloud-basedLLMserving.We system, Atom [44], exhibits 20-25% lower performance than
+uncover a critical issue: existing INT4 quantization methods its W4A16 and W8A8 counterpart in TensorRT-LLM when
+suffer from significant runtime overhead (20-90%) when de- runningtheLlama-2-7B[34]modelonA100GPUs.Thatsaid,
+quantizing either weights or partial sums on GPUs. To address
+theresearchcommunityhasyettofindaprecisioncombination
+this challenge, we introduce QoQ, a W4A8KV4 quantization
+superiortoW4A16andW8A8forefficientcloudLLMserving.
+algorithmwith4-bitweight,8-bitactivation,and4-bitKVcache.
+QoQstandsforquattuor-octo¯-quattuor,whichrepresents4-8-4in In this paper, we reveal a critical observation: current 4-bit
+Latin.QoQisimplementedbytheQServeinferencelibrarythat integer quantization methods experience significant overhead,
+achieves measured speedup. The key insight driving QServe is ranging from 20% to 90%, during the dequantization of
+thattheefficiencyofLLMservingonGPUsiscriticallyinfluenced
+weights or partial sums on current-generation GPUs. This
+byoperationsonlow-throughputCUDAcores.Buildinguponthis
+overheadhinderstheservingthroughputofW4A4quantization
+insight, in QoQ algorithm, we introduce progressive quantization
+that can allow low dequantization overhead in W4A8 GEMM. methods.Theprimarycauseofthisoverheadisthat,toachieve
+Additionally, we develop SmoothAttention to effectively mitigate reasonable accuracy, W4A4 methods must apply per-group
+the accuracy degradation incurred by 4-bit KV quantization. In quantization to both weights and activation, sharing FP16
+theQServesystem,weperformcompute-awareweightreordering
+scaling factors on a sub-channel basis. For example, the state-
+andtakeadvantageofregister-levelparallelismtoreducedequan-
+of-the-art W4A4 quantization method, QuaRot [2], reports a
+tization latency. We also make fused attention memory-bound,
+harnessing the performance gain brought by KV4 quantization. significant0.2perplexitydegradationafterswitchingfromper-
+As a result, QServe improves the maximum achievable serving group quantization to per-channel quantization. Rouhani et
+throughput of Llama-3-8B by 1.2× on A100, 1.4× on L40S; al. [28] also show that MXFP4 weight and activation post-
+andQwen1.5-72Bby2.4×onA100,3.5×onL40S,comparedto
+training quantization leads to up to 10% accuracy drop for
+TensorRT-LLM.Remarkably,QServeonL40SGPUcanachieve
+Llama-7B. This per-group quantization design requires an
+even higher throughput than TensorRT-LLM on A100. Thus,
+QServe effectively reduces the dollar cost of LLM serving by integer to floating-point dequantization, which operates on
+3×. Code is released at https://github.com/mit-han-lab/qserve. the slower CUDA cores within the sequential main loop of
+W4A4GEMM.OndatacenterGPUslikeA100,aCUDAcore
+I. INTRODUCTION
+operation is as expensive as 50 INT4 tensor core operations.
+Large language models (LLMs) have demonstrated remark- Therefore, reducing overhead on CUDA cores is crucial for
+able capability across a broad spectrum of tasks, exerting a achieving optimal throughput in LLM serving. Guided by this
+profound influence on our daily lives. principle, we introduce QoQ (Quattuor-Octo¯-Quattuor, or 4-
+However, the colossal size of LLMs makes their deploy- 8-4 in Latin) algorithm which quantizes LLMs to W4A8KV4
+ment extremely challenging, necessitating the adoption of precision:4-bitweights,8-bitactivationsand4-bitKVcaches.
+quantization techniques for efficient inference. State-of-the- Additionally, we present QServe, which provides efficient
+art integer quantization algorithms can be divided into three system support for W4A8KV4 quantization.
+categories: 8-bit weight and 8-bit activation (W8A8), 4-bit In the QoQ algorithm, we introduce progressive group
+weight and 16-bit activation (W4A16), 4-bit weight 4-bit quantization. This method first quantizes weights to 8 bits
+activation (W4A4) quantization. The former two methods are using per-channel FP16 scales, then quantizes these 8-bit
+considered nearly lossless in terms of accuracy. In contrast, intermediatesto4bits.ThisapproachensuresthatallGEMMs
+W4A4 quantizationintroduces anotableaccuracy degradation, areperformedonINT8tensorcores.Additionally,wemitigate
+although it is anticipated to offer superior throughput in accuracylossfromKV4quantizationthroughSmoothAttention,
+whichshiftsthechallengeofactivationquantizationfromkeys
+*: The first three authors contribute equally to this project and are listed
+to queries, the latter of which are not quantized.
+inthealphabeticalorder.YujunLinleadsthequantizationalgorithm,Haotian
+TangandShangYangleadtheGPUkernelsandtheservingsystem. In the QServe system, the protective range in progres-
+1
+4202
+yaM
+7
+]LC.sc[
+1v23540.5042:viXra3500 In attention blocks, x first undergoes linear projection to
+Llama-3-8B
+• ProgressiQ veo GQ r oA ulg po Qri uth am ntization 2800 L Ll la am ma a- -2 2- -7 1B 3B obtain q ∈ RN×HD,k,v ∈ RN×HKVD, where H KV is the
+• SmoothAttention 2100 Llama-30B number of key/value heads. We have H = H KV in the stan-
+• Activation-aware Channel Reordering 1400 dard multi-head attention (MHA), while recent methods [17],
+700 [18], [34] also employ grouped-query attention (GQA) [1]
+QServe System 0 with H = rH (r ∈ Z). We concatenate k,v with pre-
+TRT-LLM QServe KV
+• Compute-aware Weight Reordering on A100 on L40S computed KV cache features of S previous tokens to obtain
+• Efficient Dequantization (Mul → Sub) save K,V∈R(S+N)×HKVD and compute attention using:
+• Make Fused Attention Memory-bound cost
+by 3× $25K $8K
+F Li lg am. a1: mQ oS dee lr sve onac Lhi 4e 0v Ses coh mig ph ae rr edthr wo iu thgh Tpu ent sow rh Re Tn -Lr Lu Mnni on ng o
+h
+=softmax(cid:32) q h √K DT hKV (cid:33) V hKV, h
+KV
+=(cid:22) h r(cid:23) . (1)
+A100,effectivelysavesthedollarcostforLLMservingby3×
+throughsystem-algorithmcodesign.SeeTableIVforabsolute The result o is multiplied with an output projection matrix
+throughput numbers and precision choices in TensorRT-LLM. W ∈RHD×HD,andtheproductisaddedtoxastheinputof
+O
+FFN.TheFFNiscomposedoflinearprojectionandactivation
+layers and it does not mix features between tokens.
+sive group quantization enables full register-level parallelism
+during INT4 to INT8 dequantization, using a subtraction B. Integer Quantization
+after multiplication computation order. Furthermore, we pro-
+pose compute-aware weight reordering to minimize pointer Integer quantization maps high-precision numbers to dis-
+arithmetic overhead on CUDA cores during W4A8 GEMM crete levels. The process can be formulated as:
+operations. Additionally, we delay the turning point of the (cid:24) (cid:23) (cid:24) (cid:23)
+X+z X −X X
+CUDA core roofline and decrease the computational intensity Q X = s ,s= qmax −q min,z= q min− m sin , (2)
+of KV4 attention at the same time. This ensures that the max min
+attention operator remains within the memory-bound region, whereXisthefloatingpointtensor,Q isitsn-bitquantized
+X
+wherelow-bitquantizationcaneffectivelyenhancethroughput. counterpart,sisthescalingfactorandzisthezeropoint.Thus,
+We evaluate seven widely-used LLMs using QServe on the dequantized tensor can be represented as,
+A100 and L40S GPUs, and compare their maximum achiev-
+Xˆ =Q(X)=(Q −z)·s (3)
+able throughput against state-of-the-art systems, including X
+TensorRT-LLM(inFP16,W8A8,andW4A16configurations),
+This is known as asymmetric quantization, where X =
+Atom [44] (in W4A4), and QuaRot [2] (in W4A4). On A100 max
+max(X),X = min(X), and q −q = 2n −1 for
+GPUs, QServe achieves 1.2-2.4× higher throughput over the min max min
+integer quantization. Equation 2 can be further simplied to
+best-performing configuration of TensorRT-LLM, and 2.5-
+symmetric quantization, where z = 0, X = −X =
+2.9× higher throughput compared to Atom and QuaRot. On max min
+max|X|, and q −q =2n−2 .
+L40S GPUs, QServe records an even more significant 1.5- max min
+Inthispaper,wedenotex-bitweight,y-bitactivationandz-
+3.5× throughput improvement over TensorRT-LLM. Notably,
+bitKVcachequantizationinLLMsasWxAyKVz,andusethe
+we manage to accommodate the same batch size on the L40S
+abbreviated notation WxAy if y=z. Apart from bit precision,
+while consistently achieving higher serving throughput than
+quantization can also be applied at various granularities. Per-
+TensorRT-LLM on A100 for six of the eight models tested,
+tensor quantization shares s and z across the entire tensor.
+thereby significantly reducing LLM serving cost by 3×.
+Per-channelquantizationforweightsorper-tokenquantization
+for activations means that s and z are shared within each row
+II. BACKGROUND
+of tensor. Per-group quantization further reduces the degree
+A. Large Language Models of parameter sharing by using different s and z for every g
+columns within each row, where g is the group size.
+Large Language Models (LLMs) are a family of causal
+transformer models with multiple identically-structured lay-
+III. MOTIVATION
+ers. Each layer combines an attention block, a feed-forward
+network (FFN) and normalization layers. The input of each Weight and KV cache quantization (e.g. W4, KV4) can
+layer,x,isanN×HDtensor,whereN isthenumberofinput reducethememoryfootprintinLLMserving.Quantizingboth
+tokens, H represents the number of attention heads, and D is weight and activation (e.g. W8A8) can also improve the peak
+the hidden dimension for each head. Serving LLMs involves computationthroughput.ChoosingtherightprecisionforLLM
+two stages: the prefilling stage, where all prompt tokens are deploymentisadifficulttask.Existingsolutionscanbedivided
+presented simultaneously (N > 1 for each request), and the into three categories: W4A16 (per-group), W8A8 (per-channel
+decoding stage, where the model only processes one token at weight + per-token activation), W4A4 (per-group). We will
+a time for each prompt (N =1 for each request). demonstrateinthissectionwhyW4A8KV4isasuperiorchoice.
+2
+s/snekoTAttention Others GEMM TRT-FP16 TRT-W4A16 TRT-W8A8 ⋯Block MN-⋯1 Iter K-1
+100 At 2om 20-W 04A4 QuaRo 2t ,- 1W 044A4 n Block 1 ⋯ I It te er r 1 K-1
+75 Iter 0 50 1650 1,468 1,474 k Block 0 ⋯IteIrt e1r K-1 FP16 ⋯
+2 05 1 51 50 00 986 817 k Iter 0IteIrt e0r 1 FP16 FP16 FP32⋯ FP⋯32 Y0
+1 2 B4 atch8 Size16 32 64
+0
+m W0 FP16 FP16
+FP32
+FP16
+(a) Latency ratio of attention and GEMM (b) Llama-2-7B system throughput on A100
+Ym×n=Xm×kWT
+n×k X0
+Fig.2:Left:BothattentionandGEMMarecrucialforend-to-
+end LLM latency. Right: Despite 2× higher theoretical peak
+Fig. 4: Illustration of m × n × k GPU GEMM: m,n
+performance, W4A4 systems significantly lag behind TRT-
+are parallel dimensions and the reduction dimension k has
+LLM-W8A8 in efficiency.
+a sequential main loop. In LLM serving, m is small and n,k
+are large. Thus, the main loop is long.
+800
+W4A8 W8A8
+KV Cache Wgts×Acts
+Sweet Sweet
+FP16 FP16×FP16 Region Region
+INT8 600 INT8×INT8 batch sizes. This is clearly demonstrated in Figure 3, as long
+INT4 INT4×FP16
+INT4×INT8 as we can perform all computation on INT8 tensor cores.
+400 W4A16 Why KV4: attention workloads in LLM decoding can be
+Sweet formulated as a sequence of batched GEMV operations, with
+Region
+a computation intensity of 1 MAC / element regardless of
+200
+input batch sizes. As in Equation 1, the memory traffic is
+weight-only
+quantization dominated by KV cache access, since S ≫ N = 1 for
+0
+0 1 2 0 32 64 96 128 160 192 each sequence. Quantizing the KV cache can be viewed as
+Computation Intensity (MACs/Element) effectively increasing the memory bandwidth. Therefore, KV4
+(i.e., batch size for GEMM, 1 for ATTN in decoding, sequence length for ATTN in prefilling)
+offers 2× peak performance for attention over KV8. This
+Fig. 3: A100 roofline for LLM serving: for GEMM layers,
+improvement offers decent end-to-end speedup opportunities,
+the W4A8 roofline dominates both W4A16 and W8A8 across
+since attention accounts for more than 50% of total runtime
+different batch sizes; for attention layers, 4-bit quantization
+at batch=64 in Figure 2a.
+improves theoretical peak performance.
+B. Why Not W4A4KV4: Main Loop Overhead in GEMM
+A natural follow-up question would be: “Why do we not
+A. W4A8KV4 Has Superior Roofline Over W8A8, W4A16 choose the even more aggressive W4A4?” W4A4 starts to
+achieve better theoretical GEMM performance when m, the
+We begin our exploration through roofline analysis. As in
+number of input sequences, exceeds 78, as 4-bit tensor cores
+Figure 2a, when considering real-world conversations with
+are twice as performant compared to their 8-bit counterparts.
+1024inputtokensand512outputtokens,attentionandGEMM
+However, apart from the significant accuracy degradation,
+account for most of the runtime when deploying LLMs. Fur-
+which will be discussed in Section VI, we demonstrate that
+thermore, the runtime of the decoding stage is approximately
+such theoretical performance gains cannot be realized on
+6×thatoftheprefillingstage.Therefore,wefocusouranalysis
+existingGPUarchitectures(AmpereandHopper).AsinFigure
+on the attention and GEMM within the decoding stage.
+2b,existingW4A4servingsystemsAtom[44]andQuaRot[2]
+For an m × n × k GEMM problem, the computation
+are even significantly slower than the W16A16 solution from
+intensity(definedasMACs/element)isapproximatelymwhen
+TensorRT-LLM.
+n,k are much larger than m. This situation applies to LLM
+While this performance gap can be partially explained by
+decoding stage, since m is number of sequences and n,k are
+channel sizes. According to the A100 roofline1 in Figure 3, the inefficient runtime in these two systems, the inherent
+difficulty in mapping per-group quantized W4A4 GEMM on
+W4A16 has a higher theoretical throughput when m < 78,
+GPUshasbeenoverlookedinpreviousliterature.State-of-the-
+while W8A8 performs better when m > 78. When the input
+art systems implement tensor core GEMM with an output
+batch size is small, GEMMs in LLMs are memory bound,
+stationary dataflow shown in Figure 4. For an m × n × k
+and the memory bandwidth is dominated by weight traffic.
+problem, each thread block computes a t ×t output tile by
+Therefore, the smaller memory footprint of W4A16 leads to m n
+iterating sequentially through the reduction dimension k. This
+better performance. However, when m is large, the problem
+sequential loop is referred to as the main loop. The main loop
+is compute bound. Thus, W8A8 has faster speed thanks to the
+comprisesmorethan100iterationsanddominatestheruntime
+higherthroughputfromINT8tensorcores.Intuitively,onecan
+of the GEMM kernel. In both FP16 and W8A8 GEMM
+expect W4A8 to combine the best of both worlds across all
+(Figure 5a), the main loop is executed entirely on tensor
+cores. TensorRT-LLM-W4A16 (Figure 5b) and Atom-W4A4
+1A100 has a peak FP16/INT8/INT4 tensor core performance of
+312/624/1248TOPSandaDRAMbandwidthof2TB/s. (Figure5c)bothrequiredequantizationoperationsinthemain
+3
+)SPOT(
+ecnamrofreP
+tuphguorhT
+001A
+)ces
+/ snekot(⋯ ⋯
+Iter K-1 Iter K-1
+Iter 1 INT32 FP16 Iter 1 INT32
+Iter 0 ⋯
+QY FPto
+1 6
+QY
+sW sX
+Y
+Iter 0 IN tT o3 2
+FPto
+1 6 ⋯
+Y
+QW0 INT IN8
+T8
+QY0
+INT32
+CUDACore
+QW0 INT IN4
+T4
+QY0 I FN PtT o 13 62 FP16 QY0 FP s1 W6
+0 sX0
+Y0
+FP32
+QX0 QX0
+TensorCore TensorCore CUDACore
+(a) TensorRT-LLM (INT8 Weights and INT8 Activations) (c) ATOM (INT4 Weights and INT4 Activations)
+⋯ ⋯
+Iter K-1 Iter K-1
+Iter 1 INT4 Iter 1 INT32
+Iter 0 INT4
+FPto
+1 6
+Y
+Iter 0
+QY FPto
+1 6
+QY
+to ⋯ ⋯
+QW0 FIN PtoT 1 4 6 FP16 QW0 FP1 S6 W0 ZW0 W0 FP F1 P6 16 Y0 FP32 Q( W1) 0 INT S4 ( W1) 0 Z( WI 1N ) 0T8 Q( W0) 0 INT IN8 T8 QY0 INT32 CUDACore s s( W X0) FP16
+X0 QX0
+Y
+CUDACore TensorCore CUDACore TensorCore
+(b) TensorRT-LLM (INT4 Weights and FP16 Activations) (d) Ours (INT4 Weights and INT8 Activations)
+Fig. 5: Quantized GEMM on GPUs: W8A8 is fast because its main loop only contains tensor core operations and all
+dequantization operations are present in the epilogue. Atom-W4A4 and TensorRT-LLM-W4A16 suffer from significant partial
+sum or weight dequantization overhead in the main loop. Thanks to the two-level progressive quantiation algorithm, QServe-
+W4A8 reduces main loop dequantization overhead by introducing register-level parallelism.
+loop, which is running on the CUDA cores. W4A16 requires withsuchlow-bitquantizationremainsasignificantchallenge.
+INT4toFP16weightconversion,whileAtom-W4A4requires TounleashthefullpotentialofW4A8KV4withoutcompromis-
+INT32 to FP32 partial sum conversion and accumulation. ing the efficacy of large language models, we propose QoQ
+The dequantization process in Atom’s main loop leads to algorithmfeaturingprogressivegroupquantization,SmoothAt-
+two substantial efficiency bottlenecks. Firstly, on modern data tention, and various general quantization optimizations.
+center GPUs like the A100 and H100, the peak performance
+of FP32 CUDA cores is merely 2% of their INT4 tensor A. Progressive Group Quantization
+core counterparts. That said, de-quantizing one single partial
+To enhance the accuracy of low-bit quantization, group
+suminAtomisequivalentto50tensorcoreMACs.Therefore,
+quantizationiscommonlyutilized[12],[23],[44].However,as
+the main loop is dominated by slow CUDA core operations
+outlined in Section III-B, the dequantization overhead in the
+ratherthanfasttensorcoreoperations.Secondly,Atomcreates
+system implementation can negate these accuracy improve-
+two sets of registers (one for FP32 and one for INT32) to
+ments. To tackle this issue, we introduce progressive group
+hold partial sums. Larger GEMM problems (e.g., prefilling
+quantization, as depicted in Figure 6.
+stage) are typically register-bound on GPUs due to the nature
+Given the weight tensor W ∈ Rk×n, we first apply per-
+oftheoutputstationarydataflow,whichresultsinhighregister
+channel symmetric INT8 quantization:
+consumption for storing partial sums. Consuming a large
+number of registers within each warp limits the number of
+Wˆ =Q (0)·s(0) , (4)
+warps that can be executed simultaneously on the streaming Ws8 fp16
+multiprocessor. It is important to note that GPUs rely on low-
+where Q (0) ∈ Nn×k is the intermediate 8-bit quantized
+cost context switching between a large number of in-flight Ws8
+weight tensor, and s(0) ∈ Rn×1 is the channel-wise quanti-
+warps to hide latency. Consequently, a smaller number of fp16
+zation scales. We then further employ per-group asymmetric
+concurrentlyexecutedwarpslimitstheopportunityforlatency
+INT4 quantization on the intermediate weight tensor:
+hiding, further exacerbating the main loop overhead.
+We preview our QServe’s W4A8 per-group quantized
+GEMM kernel design in Figure 5d. We employ a two-level Q W( s0 8) =(Q Wu4−z u4)·s( u1 8), (5)
+progressive group quantization approach to ensure that all
+where Q ∈ Nn×k is the unsigned 4-bit quantized
+computations are performed on INT8 tensor cores. We opt Wu4
+weight tensor, z ∈Nn×k/g is the unsigned 4-bit group-wise
+for weight dequantization over partial sum dequantization u4
+quantization zero points, and s(1) ∈ Nn×k/g is the unsigned
+due to its lower register pressure. Furthermore, we apply 4- u8
+way register-level parallelism to decode four INT4 weights 8-bit group-wise quantization scales.
+For W4A8 GEMM computation, the 4-bit quantized weight
+simultaneously, further reducing the main loop overhead.
+tensor Q will be first dequantized into intermediate 8-
+Wu4
+IV. QOQQUANTIZATION bit quantized weight tensor Q (0) following Equation 5, and
+Ws8
+Tothisend,wehavediscussedwhyW4A8KV4isasuperior then perform INT8 matrix multiplication as if it was W8A8
+quantization precision choice. Yet, preserving model accuracy per-channel quantization.
+4- - -0 1 0. . .2 1 70 0
+0
+… … …-0 10. ..6 230 00 ❶ ❷ s q( w(0 0 0) ) ,0= =⌊|w wq s(m 0| 0,m a )0xa ⌉x= =⌈|8 −1 0. 1 01 .09 .0 2 7| 0 ⌋= =0 −.0 37 - -1 1-3 6
+0
+… …
+…
+1 3-7 9
+4
+❶ ❷ ❸ s z q( w1 0) ,0= = =⌊ ⌊ ⌊−q q sw wq q (1( 0( m m sw 00 ),( 0a a )) ( m 1x x 0 )i) +n− − ⌉ zq q ⌉w m( m i0 ni) n⌉= = =⌊ ⌊ ⌊−1 − 24 1 − 35− 21 +− 6− 8⌋01 ⌉6 ⌉= = =2 8 7 17 0 3 5 8Q zW… … … … 00 1 19 0 4 1 3 q(ŵ0 0) ,0=(qw0,0−z)⋅s(1)=(7−8) - -1 1⋅ -2 6 02 = … … …−2 1 3-8 39
+-1 6. .0 40 0W… …0 4. .8 20 0 8-bit Quant W -915 4Q( W… …0) 12 13 9 4-b (git r Q ouu pa en dt )QW 2 1s 0( …1) 13 4 D (e gq rou ua pnt e dQ )( W0) -1 94 0 … … 12 14 7 ✓ ComIN puT t8 a tion
+4 8. .2 10 0 … …-2 0. .1 30 0 W=Q( W0)⋅s(0) 16 12 9 … … 6 -0 9 Q( W0) 0=(QW0−z 0)⋅s 0(1) 1 11 5QW… …1 8 0 16 20 0 … … 6 -3 9 W INi Tth 8i n R ange
+-7.22 …2.40 -106 … 68 Q( W0) 1=(QW1−z 1)⋅s 1(1) 0 … 9 -105 … 72
+0.07s(0) 0.04 7 z 1 1
+15 s(1) 9
+1
+0.07 s(0)0.04
+- -0 1. .2 10
+0
+… …-0 0. .6 30
+0
+❶ ❷
+❸
+s z qw0,0= = =⌊ ⌊w q − wm m s0a a wx x ,0m s− − i +nw q ⌉ zmm ⌉ii nn= = =⌊ ⌊1 −. −0 1 0− 005 .− 1..1 21− 4− . 04101 ⌉ +.1 8⌉= = =0 8 7.14 17 0 3
+5
+8Q zW… … …
+…
+00 1 19 0 5
+1
+3
+❶ ❷ s s 0(0 ,0) (1)= =⌊| qs ss 0 (m| 0,m 0a )xa ⌉x = =⌊|1 −2 0. 5 01 .05 .4 1 1| 4 ⌉= =0 1. 601 17 0 3
+5
+8Q zW… … …
+…
+00 1 19 0 5
+1
+3
+q(ŵ0 0) ,0=(qw0,0−z)⋅s(1)=(7−8 -1)
+-1
+2⋅
+6
+816=
+…
+…−
+-2
+11
+5
+26
+2
+6
+- -0 1 6. . .7 0 40 0 0W… … …1 0 4. . .2 8 20 0
+0
+4-b (git
+r
+oQ uu pa en dt
+)
+W 0.14
+1
+s 0 …0.1 10
+5
+16 1s 0( …1) 4 12
+5
+D (e gq rou ua pnt
+e
+dQ )( W0) -1 7- 18 620
+2
+… … …15 3 70 3 74 6
+8
+ComIN puT t8
+a tion
+-4 8 7. . .2 1 20 0
+2
+… … …-2 20. ..1 430 00 W W0 1= =( (Q QW W0 1− −z z 10 )) ⋅⋅ ss 10 1.1 1 01 5
+0
+27Q szW 1… …
+…
+11 0.38 0
+9
+01
+8
+s
+s-
+0
+1b ==it ssQ
+10
+((
+11u
+))
+⋅⋅a ssn
+((
+00t
+))
+S 11 1 21 5
+0
+7
+7Q
+sz
+1(W… …
+…
+1
+1)1 128 0
+9
+1
+7
+1 -05 810 868
+9
+… … …1-8 018 129 67 O INu Tt 8 o Rf a nge
+0.01 s(0)0.30
+Fig. 6: Progressive Group Quantization first employs per-channel INT8 quantization with protective range [-119, 119],
+followed by per-group INT4 quantization, so that the dequantized intermediate values remain within the INT8 range for
+computation. Bottom: prior methods directly applies per-group INT4 quantization on weights, followed by per-channel INT8
+quantization on scale factors. Thus the dequantized intermediate values may exceed the INT8 range, necessitating further
+dequantization to floating-point values for computation.
+a) Protective Quantization Range: na¨ıvely applying b) Compared to previous two-level quantization: pro-
+Equation 4 and 5 does not guarantee that the intermediate gressive group quantization introduces two levels of scales
+dequantizedweightsperfectlylieinthe8-bitintegerrepresen- s(0) and s(1). Prior studies such as VSQuant and Double-
+fp16 u8
+tationrange.Forexample,afterINT8quantization,agroupof Quant in QLoRA [9] also introduce two levels of scales to
+8-bitweightsliein[−113,120].4-bitasymmetricquantization reduce the memory footprint of group-wise scaling factors. In
+will yield a scale factor of ⌈(120−−113)/(15−0)⌋ = 16 contrasttoourquantizationflow,previousapproachesdirectly
+and a zero point of ⌈0−−113/16⌋ = 7. Thus value 120 is apply group quantization with the target precision and then
+quantized into ⌈120/16+7⌋=15. It will be dequantized into perform per-channel quantization on the group-wise floating-
+(15−7)∗16 = 128 which is beyond the max 8-bit integer point scaling factors, as shown in the bottom of Figure 6:
+127. One straightforward solution is to turn on the saturation
+option in the arithmetic instructions during dequantization. Wˆ =Q ·s , ˆs =s(1)·s(0) (6)
+Ws4 fp16 fp16 u8 fp16
+However,simplyapplyingsaturationwillseverelydamagethe
+computation throughput, reducing speed by as much as 67%. Therefore, using the group-wise scaling factors s( u1 8) to de-
+quantizeQ cannotyieldthe8-bitweighttensor.Duringthe
+We reconsider the dequantization process. Take Equation 2 Ws4
+computation on GPUs, these approaches usually first dequan-
+into Equation 5, we have,
+tize the scales and, subsequently, the weights into floating-
+q 1 point values, which ultimately limits the peak throughput.
+qˆ =⌊ s8⌉·s ≤q + s .
+s8 s u8 s8 2 u8 DGQ[43]alsofollowsthequantizationschemeofVSQuant
+u8
+and DoubleQuant, but enforces restrictions on scaling factors
+Since s u8 = qq us8 4m ma ax x− −q qs u8 4m mi in
+n
+≤ 127− 15( −− 0128) =17, we have, tt eo nm soa rke cos ru er se .t Hha ot wa ell vec ro ,m thp euta Dti Gon Qca sn erb ve ingma sp yp se ted mon st eo pI arN aT te8
+s
+dequantization kernel with the GEMM kernel. Consequently,
+1
+qˆ ≤127→q ≤127− s →q ≤119.5 theend-to-endlatencyofW4A8GEMMinDGQisevenslower
+s8 s8 2 u8 s8
+than the W8A8 GEMM in cuBLAS, failing to demonstrate the
+Therefore, we shrink the INT8 symmetric quantization memory bandwidth advantage of 4-bit weight quantization.
+range from [-127, 127] to a protective range [-119, 119] in In contrast, our QoQ introduces a protective range, allowing
+order to avoid the dequantization overflow, as shown in the us to fuse dequantization operations into the W4A8 GEMM
+top of Figure 6. kernel with full register-level parallelism, minimizing CUDA
+5Linear LayerY=XWT Activations QQT
+=I
+Previous Block Current Block
+X =W QTr 0 Wot
+0
+=XX WW T 0r 0o QtT ∥V V∥ ∥X XW WT 0 T 0Q Q∥ =W W1r 1o Qt XW ∥T 0 XQ WQ T 0T ∥WT 1
+FFN down_proj RMSNorm Inputs are ATTN qkv_proj
+Channel
+Token
+Channel
+Token
+Channel
+Token ATTN out_proj rotated by Q FFN up_proj
+Layer 24 post-RoPE Keys Layer 24 post-RoPE Keys Layer 24 Values Fig. 8: Rotate the block input activations to suppress the
+(Original) (SmoothAttention)
+outliers:sincerotationisaunitarytransformation,therotation
+Fig. 7: SmoothAttention effectively smooths the outliers in
+matrixQcanbeabsorbedbytheweightsoftheoutputmodule
+Keys. Values doesn’t suffer from outliers.
+in the previous block.
+Linear LayerY=XWT Activations Λ is diagonal
+core overhead. Thus, our QServe’s W4A8 per-group GEMM
+achieves 1.5× speedup over the W8A8 cuBLAS GEMM. =W Λs 0 Tm Woo 0th XWT 0Λ F(V) =F F( (X XW WT 0 T 0)Λ Λ) =W Ws 1m 1Λoo −th T F(XWT 0)ΛΛ−1WT 1
+B. SmoothAttention FFN up_proj ActFunc Intermediates are FFN down_proj
+ATTN v_proj (e.g., SwiGLU) smoothed by Λ ATTN out_proj
+As illustrated in Figure 16, directly reducing the KV cache
+Fig. 9: Smooth the block intermediate activations, migrat-
+to4bitssignificantlydegradestheLLMaccuracy.Wevisualize
+ing the quantization difficulty to weights: since smoothing
+the magnitude distributions of the sampled Key and Value
+is channel-independent, the smooth matrix Λ is diagonal and
+cache activations in Figure 7. We observe that: the Value
+can be absorbed by the weights of the previous modules.
+matrices show no significant outlier pattern, whereas Key
+matrices tend to have fixed outlier channels in each head.
+Theseoutliersare∼10×largerthanmostofactivationvalues.
+C. General LLM Quantization Optimizations
+Though they can be easily handled KV8 quantization in prior
+works[38],itplaceschallengingobstacletoKV4quantization One of the key challenges of low-bit LLM quantization
+due to less quantization levels. is the activation outliers for every linear layers. We apply
+Inspired by SmoothQuant [38], we propose SmoothAtten- different optimizations for different types of linear layers as
+tion to scale down the outlier channels in Key cache by a discussed below.
+per-channel factor λ: 1) BlockInputModuleRotation: Intransformerblocks,we
+define the components that take in the block inputs as input
+Z=(QΛ)·(cid:0) KΛ−1(cid:1)T
+, Λ=diag(λ) (7)
+modules, such as the QKV Projection Layer and the FFN
+SmoothQuant migrates the quantization difficulty from ac- 1st Layer. As shown in Figure 8, inspired by [2], [4], we
+tivations to weights, and thus requires a dedicate balance rotate the block input activations by multiplying the rotation
+between activation and weight quantization by searching the matrix.Tokeepmathematicalequivalenceoflinearlayers,we
+migration strength. In contrast, since we do not quantize rotate the corresponding weights accordingly in the reversed
+Queries, we only need to concentrate on the Keys and simply direction. After rotation, each channel’s activations are linear
+choose the SmoothAttention scale factor as, combinations of all other channels, and thus outlier channels
+are effectively suppressed. Furthermore, since rotation is a
+λ =max(|K |)α. (8) unitary transformation, we can fuse the rotation matrix with
+i i
+the previous linear layers’ weights. We simply choose the
+In practice, α = 0.5 is good enough. As shown in the
+scaled Hadamard matrix as the rotation matrix.
+rightmost of Figure 7, after SmoothAttention, the outliers in
+2) Block Output Module Smoothing: Output modules refer
+Key cache have been greatly smoothed.
+tothoselayersthatgenerateblockoutputs,suchastheOutput
+In order to eliminate the extra kernel call overhead for
+Projection Layer and FFN 2nd Layer. As shown in Figure 9,
+SmoothAttentionscaling,fusingthescaleintoprecedinglinear
+inspiredby[38],wesmooththeblockintermediateactivations
+layer’s weights is preferred. However, modern LLMs employ
+through dividing them by a per-channel smoothing factor.
+the rotary positional embedding (RoPE) to both Keys and
+OriginalSmoothQuantdoesnotsmooththeblockintermediate
+Queries, which needs extra handling. In practice, rotary po-
+sitional embedding pairs channel i with channel i+D within activations; moreover, if we directly smooth these modules
+2 with the same migration strength as input modules (e.g.,
+each head. Consequently, to make SmoothAttention scaling
+q_proj, up_proj), the evaluated Wikitext-2 perplexity of
+commutative in terms of RoPE, we add a hard constraint that
+the Llama-2-7B model will drop by as much as 0.05. In
+λ =λ , and accordingly,
+i i+D
+2 practice, we find that the migration strength α should be near
+(cid:16) (cid:16) (cid:17)(cid:17)α 0. That is, the smoothing factor λ is mostly determined by
+λ =λ =max max(|K |),max |K | (9)
+i i+D i i+D weights instead of activations, which is very different from
+2 2
+Afterwards, we can easily fuse the SmoothAttention scale the observations in SmoothQuant.
+Λ into previous layers’ weights following W =ΛW and 3) Activation-Aware Channel Reordering: Both AWQ [23]
+Q Q
+W =Λ−1W . and Atom [44] have observed that maintaining the salient
+K K
+6Weights Wn×k Reordered Weights Wn×k
+FP16
+0.2 -0.5 0.2 0.5 -0.7 0.6 1.2 0.8 0.6 -0.5 0.2 0.8 1.2 -0.7 0.2 0.5 LayerNorm
+Reorder INT8
+… … … … … … … … … … … … … … … …
+INT4
+Q K V
+0.1 -0.6 0.8 0.6 -0.1 0.5 -0.8-1.1 0.5 -0.6 0.1 -1.1-0.8-0.1 0.8 0.6
+Inputs Xm×k Reorder Index KV Cache LayerNorm
+-1.2-1.0 0.4 0.2 -0.7 9.2 -0.2-1.4 5 1 0 7 6 4 2 3
+Attention FFN 1st Layer
+… … … … … … … … ArgSort
+AbsMax
+-0.8-5.0-0.2 0.3 -0.1 1.0 -0.8 1.1 1.9 5.0 0.5 0.4 0.7 9.2 0.8 1.6 Projection FFN 2nd Layer
+Salience
+Large Small
+Fig.10:Reorderweightinputchannelsbasedontheirsalience
+in group quantization. Channel salience can be determined by Fig. 11: QServe’s precision mapping for an FP16 in, FP16
+the magnitude of input activations. out LLM block. All GEMM operators take in W4A8 inputs
+and produce FP16 outputs. Activation quantization happens
+in normalization and activation layers.
+weights in FP16 can significantly improve model accuracy.
+These salient weights can be identified by the activation dis-
+tribution. Instead of introducing mixed-precision quantization second FFN layer. Furthermore, a separate quantization node
+usedbyAtom,weproposeactivation-awarechannelreordering is inserted before output projection in the attention block.
+as shown in Figure 10. We use max(|X|) to determine the KV Cache Management.Toavoidmemoryfragmentation,
+channel salience, and then reorder channels so that channels we follow vLLM [21] and TensorRT-LLM [25] to adopt
+with similar salience are in the same quantization group. pagedKVcaches.Incontrasttothesetwoframeworks,which
+4) Weight Clipping: Weight clipping is another popu- perform per-tensor, static quantization (i.e., scaling factors
+lar quantization optimization technique. It applies a clip computed offline) on KV caches, QServe requires per-head,
+ratio α to the dynamic range in Equation 2 by letting dynamic KV quantization to maintain competitive accuracy
+W max = αmax(W) and W min = αmin(W). Previous due to the lower bit precision (4 vs. 8). We therefore store
+approaches [2], [12], [23], [44] grid search the clip ratio α FP16 scaling factors and zero points for each head im-
+to minimize either quantization error of tensor itself (i.e., mediately following the quantized KV features in each KV
+∥W−Q(W;α)∥)oroutputmeansquareerror(i.e.,∥XWT−
+cache page, allowing these values to be updated on-the-fly.
+XQ(cid:0) WT;α(cid:1)
+∥.InQServe,weminimizethelayeroutputerror QServe also supports in-flight batching, similar to vLLM and
+for all linear layers, expect for q_proj and k_proj, for TensorRT-LLM.
+which we optimize block output mean square error:
+B. W4A8 GEMM in QServe
+argmin∥Block(X;W)−Block(X;Q(W;α))∥. (10)
+α AsdiscussedinSectionIII,themainloopoverheadposesa
+V. QSERVESERVINGSYSTEM significantobstacleinallowingquantizedGEMMstoattainthe
+theoretical performance gains projected by the roofline model
+To this end, we have presented the QoQ quantization
+(Figure 3). Therefore, the focus of QServe W4A8 GEMM is
+algorithm, which aims to minimize accuracy loss incurred
+by W4A8KV4 quantization. However, realizing the theoretical to reduce main loop overhead. Specifically, we address the
+costsofpointerarithmeticoperationsthroughcompute-aware
+throughput benefits in Figure 3 remains challenging. Thus,
+weight reorder, and reduce dequantization overhead through
+in this section, we will delve into the QServe system design,
+a subtraction after multiplication computation order and
+whichisguidedbytwoimportantprinciples:I.Reducingmain
+register-level parallelism.
+loop overhead in GEMM kernels; II. Making fused attention
+kernels memory bound. 1) Compute-AwareWeightReorder: Priortodequantization
+and tensor core computation, the operands must be loaded
+A. QServe System Runtime
+from global memory into the L1 shared memory during each
+We start by introducing the QServe runtime in Figure main loop iteration. This loading process is non-trivial since
+11. All GEMM layers in QServe operate on W4A8 inputs, the tensor core GEMM intrisics require a strided layout for
+perform computation on INT8 tensor cores, and generate eachthreadincomputation,asdemonstratedinFigure12a.For
+FP16 outputs. All attention layers perform computation in instance, instead of loading consecutive eight INT8 weights,
+FP16 on CUDA cores. Consequently, each LLM block in thread 0 first loads input channels 0-3, then skips ahead
+QServe has FP16 inputs and FP16 outputs. to input channels 16-19. That said, a naive weight loading
+ActivationQuantization.ToensurethateachGEMMtakes implementationwouldrequireoneaddresscalculationperfour
+in INT8 activation, we fuse activation quantization into the channels, leading to two efficiency issues. First, pointer arith-
+preceding layernorm for the QKV projection and the first metic operations are performed on CUDA cores, which have
+FFN layer, or into the preceding activation kernel for the 32×lowerthroughputthantheINT8tensorcoreontheA100.
+7Input Channels Input Channels 8bit Wlow =Wpack & 0x0F0F0F0F 4bit
+T0 T0 T1 T2 T3 T8 T0 T1 T2 T3 Wlow 0 w15 … w2 0 w1 0 w0
+T1 T4 T5 T6 T7 T9 T4 T5 T6 T7 127 Unpacking w0-15 0
+… … … … … … … … … … Wlow w31 w15 … w2 w17 w1 w16 w0
+T7 T12 T13 T14 T15 T15 T28 T29 T30 T31 127 Unpacking w16-31 0
+4xINT8 Tiles needed by T0 for compute Tiles obtained by T0 from ldmatrix Wlow 0 w31 … w18 0 w17 0 w16
+(a) The ldmatrix instruction ensures that each thread gets what it needs for compute in W8A8 GEMM 127 Whigh = (Wpack >> 4) & 0x0F0F0F0F 0
+Input Channels Fig. 13: QServe exploits register-level parallelism to signif-
+T0 T0 T1 T2 T3 T0 T1 T2 T3 icantly reduce the number of required logical operations in
+T1 T4 T5 T6 T7 T4 T5 T6 T7
+… T8 T9 T10 T11 T8 T9 T10 T11 UINT4 to UINT8 weight unpacking.
+T7 T12 T13 T14 T15 T12 T13 T14 T15
+4xINT4 Tiles needed by T0 for compute Tiles obtained by T0 from ldmatrix
+(b) However, the ldmatrix instruction fails for W4A8 GEMM due to storage-compute mismatch
+reduces the pointer arithmetic overhead to the same level as
+Input Channels Input Channels
+ldmatrixbutalsoguaranteeshigh-bandwidth128-bit/thread
+T0 … T3 T0 … T3 T0 T0 T0 T0 …
+… Offline T3 T3 T3 T3 … memory transactions. We apply this reordering to zero points
+T T2 08 … … T T3 31 T T2 08 … … T T3 31 Reorder … and scales as well to mitigate dequantization overhead.
+T28 … T31… T28 … T31 T T2 38 1 T T2 38 1 T T2 38 1 T T2 38 1 … 2) Fast Dequantization in Per-Channel W4A8 GEMM:
+(c) Our solution: compute-aware weight reorder As illustrated in Figure 5d, dequantizing weights within the
+Fig. 12: QServe applies compute-aware weight reoder to main loop becomes necessary when the bit precisions for
+minimize the pointer arithmetics in W4A8 GEMM main loop. weightsandactivationsdiffer.Inthecaseofper-channelW4A8
+quantization, second-level scaling factors are omitted, and
+first-level FP16 scaling is efficiently fused into the GEMM
+Consequently, the address calculation overhead becomes non- epilogue. We therefore focus our discussion on the efficient
+negligible. Second, strided memory access prevents achieving conversionfromZINT4(i.e.,unsigned4-bitintegerswithzero
+the highest HBM bandwidth through packed 128-bit loading, points)toSINT8withinthemainloop.Wefurtherdecompose
+further slowing down the memory pipeline. This issue is this conversion into two steps: UINT4 to UINT8 (weight
+addressedbytheldmatrixinstructionwhenthestorageand unpacking)andUINT8toSINT8(zeropointsubtraction).As
+computedatatypesarethesame.AsillustratedinFigure12a, depicted in Figure 13, we reorder every 32 UINT4 weights
+thread i loads a consecutive 128 bits in output channel i%8, w 0,w 1,...,w 31 into w 0,w 16,w 1,w 17,... This allows us to
+and the ldmatrix instruction automatically distributes the exploit register-level parallelism and efficientlyunpack them
+data in a strided manner, ensuring that each thread eventually into UINT8 numbers with only three logical operations.
+obtains the required data for INT8 tensor core computation. For the conversion from UINT8 to SINT8, the most intu-
+Unfortunately, the ldmatrix instruction will not work itive approach is to introduce integer subtraction instructions
+when the data types used for storage and computation differ within the main loop, which we refer to as subtraction be-
+(like in W4A8). Specifically, in Figure 12b, ldmatrix en- fore multiplication. Although straightforward, this approach
+sures that each thread obtains the same number of bytes, not inevitably introduces additional cost to the main loop, which
+the same number of elements, after data permutation in the is undesirable. Instead, we adopt a subtraction after multi-
+register file. Consequently, thread 0 obtains the tiles needed plication approach to minimize the main loop overhead.
+by both itself and thread 1, while thread 1 obtains the tiles Specifically, a GEMM layer with per-channel quantized
+needed by thread 2 and thread 3 in the subsequent INT8 operands can be expressed as:
+tensor core computation. This creates a mismatch between
+the data obtained by each thread and used in computation. O=XˆWˆ =(Q X⊙S X)((Q W−Z W)⊙S W), (11)
+That said, ldmatrix cannot be used for W4A8 GEMM and
+where Q (Q ) is the quantized weight (activation), Z
+theaforementionedpointerarithmeticoverheadpersists.Worse W X W
+expands the zero point vector z of size n (output channels)
+still, memory bandwidth utilization deteriorates further as we W
+to k × n (k is input channels) and S , S are similarly
+consecutively load only 16 bits for 4-bit weights. W X
+obtained from scaling vectors s ,s . We denote Z ⊙S
+We address this challenge through compute-aware weight W X W W
+as ZS , then we rewrite Equation 11 as:
+reordering (Figure 12c). The key insight is to store the W
+weights in the order they are used during computation. We
+divide the entire GEMM problem into multiple 32×32 tiles. O=(Q ⊙S )(Q ⊙S −ZS )
+X X W W W
+(12)
+Within each tile, thread 0 utilizes input channels 0-3 and 16-
+=(Q Q )⊙(s ×s )−(Q ⊙S )ZS .
+X W W X X X W
+19 for output channels 0, 8, 16, and 24 (output channels 16-
+31 are omitted in Figure 12c). Consequently, we concatenate The first term, (Q Q )⊙(s ×s ), is analogous to the
+X W W X
+these 32 channels into a single128-bit word. The 32 channels W8A8 GEMM in TensorRT-LLM, where the s ×s outer
+W X
+used by thread 1 are stored immediately following thread 0’s product scaling is performed in the epilogue. For the second
+32 channels. Since weights are static, such reordering does term, we first replace Q S (Xˆ) with the unquantized X.
+X X
+not introduce any runtime overhead. Additionally, it not only We then notice that:
+8
+slennahC
+tuptuO
+slennahC
+tuptuO
+slennahC
+tuptuOTABLEI:AnaiveKV4attentionimplementationis1.7×faster
+7 0 3 15 0x070x000x030x0F 7 0 3 15 0x070x000x030x0F
+onL40SthanTRT-LLM-KV8,butis1.1-1.2×sloweronA100
+z = -8 vadd4 0xF8F8F8F8 s = 2 mul 0x00000002
+due to earlier CUDA core roofline turning point.
+-1 -8 -5 7 0xFF0xF80xF10x07 14 0 6 30 0x0E0x000x060x1E
+-1 -8 -5 7 0xFF0xF80xF10x07 14 0 6 30 0x0E0x000x060x1E Seq len 8-bitKV 4-bitKV(Naive) 4-bitKV(Ours)
+s = 2 mul 0x00000002 z = -16 vadd4 0xF8F8F8F8
+128 0.09ms 0.10ms(0.87×) 0.07ms(1.29×)
+-2 -16 -10 14 0xFF0xF10xE20x0E -2 -16 -10 14 0xFE0xF00xF60x0E 256 0.14ms 0.16ms(0.86×) 0.11ms(1.32×)
+Subtraction before multiplication Subtraction after multiplication
+512 0.23ms 0.27ms(0.87×) 0.16ms(1.44×)
+(a) Overflow fails register level parallelism (b) Progressive Quantization guarantees RLP
+1024 0.42ms 0.48ms(0.88×) 0.28ms(1.49×)
+Fig. 14: Our progressive quantization algorithm ensures that 1536 0.62ms 0.69ms(0.90×) 0.41ms(1.51×)
+all intermediate results in the subtraction after multiplica-
+tion computation order will not overflow, thereby enabling
+register-level parallelism and reducing main loop overhead. quantization algorithm ensures that the result of the initial
+multiplicationstepneverexceedstheINT8range.Thisallows
+for fully leveraging the performance benefits of RLP in both
+multiplication and subtraction.
+X(ZS W)=t X×(z W⊙s W), (13) 4) General Optimizations: In our W4A8 kernel, we also
+employ general techniques for GEMM optimization. On the
+wheret =X1 ,i.e.,summingallinputchannelsforeach
+X k
+memory side, we apply multi-stage software pipelining and
+token. We observe that Equation 13 has a form similar to
+asynchronous memory copy to better overlap memory access
+the outer product of scaling factors. Therefore, it can also be
+with computation. Additionally, we swizzle the layout of the
+fused into the epilogue of the W4A8 GEMM, analogous to
+L1sharedmemorytoeliminatebankconflicts.ToimproveL2
+the first term in Equation 12. To this end, we move the zero-
+cacheutilization,wepermutethecomputationpartitionacross
+point subtraction from the main loop to the epilogue, thereby
+different thread blocks, allowing adjacent blocks to reuse the
+largely eliminating its overhead in the GEMM kernel. This
+same weight. On the compute side, when the number of input
+formulation of subtraction after multiplication necessitates
+tokens (m) is small, we found it beneficial to partition the
+precomputing t . Fortunately, each W4A8 kernel is always
+X
+reduction dimension k into multiple slices and reduce the
+preceded by a memory-bound kernel, allowing us to fuse the
+partial sums across different warps in the L1 shared memory.
+precomputationkernelintoitwithnegligiblelatencyoverhead.
+3) Fast Dequantization in Per-Group W4A8 GEMM: The
+C. KV4 Attention in QServe
+primary distinction between the per-group W4A8 GEMM and
+its per-channel counterpart lies in the second-level dequan- Attentionaccountsfor30-50%ofthetotalLLMruntime,as
+tization process in Figure 5d. Firstly, since zero points are depicted in Figure 2a. Although the roofline model in Figure
+now defined on a per-group basis, it is no longer possible to 5 suggests that quantizing the KV cache to INT4 should
+merge zero point subtraction into the epilogue, as was done automatically yield a 2× speedup over the 8-bit KV baseline,
+in the previous section. Secondly, due to the presence of level this is not the case in real-world implementation.
+2 scales, an additional INT8 multiplication is required for WestartwiththeKV8-attentiondecodingstagekernelfrom
+each weight. Akin to the previous section, we must determine TensorRT-LLM as our baseline and replace all static, per-
+whether to apply multiplication (scales) or subtraction (zeros) tensor quantized 8-bit KV cache accesses and conversions
+first during level 2 dequantization. with their dynamic, per-head quantized 4-bit counterparts.
+In this context, we contend that performing subtraction This direct replacement immediately leads to 1.7× speedup
+after multiplication remains the advantageous approach be- on L40S, but results in 1.2× slowdown on A100 (Table I),
+cause it enables register-level parallelism (RLP). As shown compared to the KV8 baseline.
+in Figure 14, NVIDIA GPUs provide the vadd4 instruction Onceagain,ouranalysisrevealsthatthedevilisintheslow
+thatperformsfourINT8additionswithasingleINT32ALU CUDAcores,whichareresponsibleforexecutingtheattention
+operation.However,thereisnoinstructionthatrealizessimilar kernels during the decoding stage. While each individual
+effect for 4-way INT8 multiplication. Consequently, in order batched GEMV has a computation intensity of 1 MAC /
+to achieve RLP, one has to simulate this by padding 24 zeros element, the computation intensity escalates significantly for
+to the most significant bits (MSBs) of the 8-bit scaling factor. a fused attention kernel that combines all the arithmetics and
+However, this simulation is valid only when the result of each KV cache updates. As an illustration, naively dequantizing a
+INT8 multiplication remains within the INT8 range. This single INT4 number from the KV cache necessitates 5 ALU
+condition is not met for the subtraction-before-multiplication Ops.Thisincludesmaskandshiftoperationstoisolatethe
+computation order. As illustrated in Figure 14a, the result operand, type conversion from integer to floating-point repre-
+of the scale multiplication overflows, leading to an incorrect sentation, and floating point mul and sub to obtain the final
+output. In the subtraction-before-multiplication approach, we results. It is crucial to note that the roofline turning point for
+can only perform multiplication one by one, which is ex- A100 FP32 CUDA cores is merely 9.8 Ops/Byte. That said,
+tremely inefficient. On the other hand, with the subtraction- thedequantizationofKVoperandsalonealreadysaturatesthis
+after-multiplication computation order, our progressive group bound,leadingtothesurprisingobservationthatthefusedKV4
+9attention kernel can become compute-bound on datacenter and evaluated on PIQA [3] (PQ), ARC [5], HellaSwag [42]
+GPUs like A100. In fact, similar observations hold in other (HS) and WinoGrande [29] (WG) with lm_eval [13].
+systems like QuaRot [2] and Atom [44]. Specifically, QuaRot b) Baselines: We compared QoQ to widely used post-
+introduces compute-intensive Hadamard transformation [4] in training LLM quantization techiniques, SmoothQuant [38],
+the attention operator, making it difficult to hard to achieve GPTQ [12], AWQ [23], and recently released state-of-the-art
+real speedup over TRT-LLM-KV8 with 4-bit quantized KV 4-bit weight-activation quantization frameworks, Atom [44]
+caches. and QuaRot [2]. For SmoothQuant, we uses static per-tensor
+Tomitigatethecompute-boundbottleneck,itisimportantto symmetric 8-bit quantization for KV cache following the
+shift the decoding stage KV4 attention kernels away from the settings in the TensorRT-LLM [25]. For GPTQ, we use their
+compute-bound region. We accomplish this objective through latestversionwith“reorder”trick,denotedas“GPTQ-R”.For
+a bidirectional approach: Firstly, delaying the onset of the QuaRot and Atom, we mainly evaluated using Pile validation
+rooflineturningpoint,andsecondly,concurrentlyreducingthe dataset as calibration dataset. We also report their results with
+computation intensity within the fused kernel. For the first WikiText2ascalibrationdatasetingraycolor.For“W4A8KV4
+part, we replace all FP32 operations in the original TensorRT- g128” setting, both QuaRot and Atom does not support
+LLM kernel with their FP16 counterpart, effectively doubling progressive group quantization, and thus we evaluated them
+the computation roof. For the second part, we observe that usingordinarygroupweightquantization(i.e.,eachgrouphas
+the arithmetic intensity of dequantization can be significantly one FP16 scale factor). Unsupported models and quantization
+reduced to 2 operations per element by applying bit tricks settings will be reported as NaN.
+proposed in [20]. Furthermore, we note that simplifying the c) WikiText2perplexity: TableIIcomparestheWikitext2
+control logic and prefetching the scaling factors and zero perplexity results between QoQ and other baselines. For
+values, thereby simplifying address calculations, contribute Llama-2-7B, compared to W8A8 SmoothQuant and W4A16
+to performance improvements. After incorporating these en- AWQ,QoQonlyincreasedperplexitybyupto0.16QoQcon-
+hancements, we observe a 1.5× speedup over TensorRT- sistently outperformed Atom with either W4A4 or W4A8KV4
+LLM’s KV8 kernel on A100. quantizationprecision.QoQalsoshowedupto0.49perplexity
+improvement compared to W4A4 Quarot.
+VI. EVALUATION d) Zero-shot accuracy: we report the zero-shot accuracy
+of five common sense tasks in Table III. QoQ significantly
+A. Evaluation Setup
+outperformed other 4-bit quantization methods. Especially on
+a) Algorithm: TheQoQquantizationalgorithmisimple-
+the Winogrande task, compared to Quarot, QoQ accuracy
+mented using HuggingFace [37] on top of PyTorch [26]. We
+is 4.82% higher. Compared to FP16, QoQ only introduced
+use per-channel symmetric INT8 quantization on activations,
+1.03%, 0.89% and 0.40% accuracy loss for Llama-2 at 7B,
+and per-token asymmetric INT4 group quantization on KV
+13B and 70B size.
+cache. “W4A8KV4 g128” refers to the case where QServe
+used progressive group quantization on weights: per-channel C. Efficiency Evaluation
+symmetric INT8 quantization followed by asymmetric INT4
+We assessed the efficiency of QServe on A100-80G-SXM4
+quantization with a group size of 128, while “W4A8KV4” is
+and L40S-48G GPUs by comparing it against TensorRT-
+the per-channel counterpart for weight quantization. LLM (using FP16, W8A8, and W4A16 precisions), Atom
+b) System: QServeservingsystemisimplementedusing (W4A4), and QuaRot (W4A4). The primary metric for system
+CUDAandPTXassemblyforhigh-performanceGPUkernels. evaluation is the maximum achievable throughput within the
+We also provide a purely PyTorch-based front-end framework same memory constraints, where we use an input sequence
+for better flexibility. For the throughput benchmarking, we length of 1024 and output sequence length of 512. We notice
+performallexperimentsunderPyTorch2.2.0withCUDA12.2, that Atom only supports Llama-2-7B, and QuaRot does not
+unless otherwise specified. The throughput numbers reported support GQA. Therefore, we skip these unsupported models
+are real measurements on NVIDIA GPUs. For baseline sys- when measuring the performance of baseline systems.
+tems, we use TensorRT-LLM v0.9.0 and latest main branches We present relative performance comparisons in Figure 15
+fromQuaRotandAtomasofApril18th,2024.Pagedattention
+and absolute throughput values in Table IV. We use per-
+isenabledforallsystemsexceptQuaRot,whichdoesnotoffer channel quantization for A100 and per-group quantization
+corresponding support. for L40S. This is because L40S has stronger CUDA cores
+for dequantization. Relative to the best-performing config-
+B. Accuracy Evaluation
+uration of TensorRT-LLM, QServe demonstrates significant
+a) Benchmarks: WeevaluatedQoQontheLlama-1[33], improvements on A100: it achieves 2× higher throughput
+Llama-2 [34], Llama-3 families, Mistral-7B [17], Mixtral- for Llama-1-30B, 1.2-1.4× higher throughput for Llama-2
+8x7B [18] and Yi-34B [39] models. Following previous lit- models, 1.2× higher throughput for Mistral and Yi, and 2.4×
+erature [2], [8], [12], [23], [38], [44], we evaluated QoQ- higher throughput for Qwen-1.5. The performance improve-
+quantized models on language modeling and zero-shot tasks. ments are particularly notable on the L40S GPUs, where we
+Specifically, we evaluated on WikiText2 [24] for perplexity, observed a throughput improvement ranging from 1.47× to
+10TABLE II: WikiText2 perplexity with 2048 sequence length. The lower is the better.
+WikiText2Perplexity↓ Llama-3 Llama-2 Llama Mistral Mixtral Yi
+Precision Algorithm 8B 7B 13B 70B 7B 13B 30B 7B 8x7B 34B
+FP16 - 6.14 5.47 4.88 3.32 5.68 5.09 4.10 5.25 3.84 4.60
+W8A8 SmoothQuant 6.28 5.54 4.95 3.36 5.73 5.13 4.23 5.29 3.89 4.69
+W4A16 GPTQ-R 6.56 5.63 4.99 3.43 5.83 5.20 4.22 5.39 4.08 4.68
+g128 AWQ 6.54 5.60 4.97 3.41 5.78 5.19 4.21 5.37 4.02 4.67
+8.20 6.10 5.40 3.79 6.26 5.55 4.60 5.71 NaN NaN
+W4A4 QuaRot
+8.33 6.19 5.45 3.83 6.34 5.58 4.64 5.77 NaN NaN
+† 7.32 5.93 5.26 3.61 6.06 5.40 4.44 5.54 NaN NaN
+QuaRot
+W4A4 7.51 6.00 5.31 3.64 6.13 5.43 4.48 5.58 NaN NaN
+g128
+† 7.57 6.03 5.27 3.69 6.16 5.46 4.55 5.66 4.42 4.92
+Atom
+7.76 6.12 5.31 3.73 6.25 5.52 4.61 5.76 4.48 4.97
+RTN 9.50 6.51 5.40 3.90 6.51 5.71 4.91 6.18 5.02 6.52
+AWQ 7.90 6.28 5.25 3.68 6.33 5.59 4.61 5.92 4.58 5.26
+W4A8KV4 Quarot 6.75 5.73 5.07 3.46 5.93 5.29 4.32 5.41 NaN NaN
+Atom 7.37 5.91 5.16 3.60 6.03 5.41 4.49 5.55 NaN 4.84
+QoQ 6.89 5.75 5.12 3.52 5.93 5.28 4.34 5.45 4.18 4.74
+RTN 7.25 5.99 5.19 3.70 6.23 5.46 4.56 5.59 4.39 5.49
+AWQ 6.94 5.83 5.12 3.51 5.93 5.36 4.39 5.50 4.23 4.78
+W4A8KV4 Quarot‡ 6.68 5.71 5.06 3.45 5.91 5.26 4.30 5.39 NaN NaN
+g128 Atom‡ 7.04 5.80 5.10 3.53 5.95 5.36 4.41 5.47 4.22 4.75
+QoQ 6.76 5.70 5.08 3.47 5.89 5.25 4.28 5.42 4.14 4.76
+*GrayedresultsuseWikitext2ascalibarationdataset.
+†QuaRotandAtomapplygroupquantizationtoactivationsaswell.
+‡QuaRotandAtomuseordinarygroupquantizationwhereeachgrouphasoneFP16scalefactor.
+TRT-LLM-FP16 TRT-LLM-W4A16 TRT-LLM-W8A8 Atom-W4A4 QuaRot-W4A4 QServe-W4A8KV4 (Ours)
+2.55 3.11 3.51 2.59 3.60 3.41 2.74 2.40 3.47 3.00
+1.84 1.87 1.76
+0.931.00 0.651.00 1.18 1.071.00 1.001.19 1.12 1.000.83 0.90 1.001.15 1.00 1.00 0.87 0.631.001.38 1.01
+0.25
+Llama3-8B Llama2-7B Mistral-7B Llama2-13B Llama-30B Yi-34B Llama2-70B Qwen1.5-72B Geomean
+1.88 2.00 2.13 2.37
+1.061.001.01 1.27 1.001.001.51 0.750.88 0.991.001.01 1.24 0.561.001.47 0.34 0.231.001.02 0.76 0.241.001.09 1.35 1.00 0.66 1.17 1.00 0.37 0.47 0.571.000.94 0.571.62
+Llama3-8B Llama2-7B Mistral-7B Llama2-13B Llama-30B Yi-34B Llama2-70B Qwen1.5-72B Geomean
+Fig. 15: QServe significantly outperforms existing large language model (LLM) serving frameworks in batched generation
+tasksacrossdifferentLLMs,rangingfrom7Bto72Bmodels.Itachievesanaveragespeedupof2.36×overthestate-of-the-art
+LLMservingsystem,TensorRT-LLMv0.9.0,ontheL40SGPU,anditisalso1.68×fasterontheA100GPU.Allexperiments
+were conducted under the same device memory budget (i.e. 80GB on A100 and 48GB on L40S). We omit the geometric mean
+speedup of Atom since it only supports Llama2-7B. For absolute values, see Table IV.
+3.47× acrossall sevenmodelsevaluated. Remarkably,despite Llama-2-7B,theonlymodelsupportedbytheirsystemdespite
+theL40S’ssignificantlysmallermemorycapacitycomparedto thefactthatweusehigherquantizationprecision.Besides,the
+theA100,QServeeffectivelymaintainsthesamebatchsizeas accuracy achieved by QServe is much better than Atom, as
+TensorRT-LLMontheA100.Thisachievementisattributedto indicated in Table III.
+our aggressive 4-bit quantization applied to both weights and
+the KV cache. By examining Table IV, we clearly observe D. Analysis and Discussion.
+that serving five of seven models under 34B on L40S with
+a) Ablation study on quantization techniques: we exam-
+QServe achieves even higher throughput than serving them
+ine the impact on accuracy of various quantization techniques
+on A100 using TensorRT-LLM. Our performance gain over
+implemented in QoQ. Our analysis begins with round-to-
+AtomandQuaRotonA100isevenmoreprominentsincethese
+nearest(RTN)W8A8quantizationonLlama-2-7B(per-channel
+systemsdidnotoutperformTensorRT-LLM.OnL40S,QServe
++ per-token). We then lower the quantization precision and
+stillachieves10%higherthroughputthanAtomwhenrunning
+apply different techniques step-by-step. For each step, we
+11
+S04L
+001A
+deepS
+.mroN
+deepS
+.mroN
+.S.N
+.S.N
+.S.N
+.S.N
+.S.N
+.S.N
+.S.N
+.S.N
+.S.N
+.S.N
+MOO .S.N
+.S.N
+MOO .S.N
+.S.N
+.S.N
+.S.N
+MOO
+MOO
+MOO .S.N
+.S.N
+.S.N
+.S.N
+MOO
+MOO
+MOO .S.N
+.S.NTABLE III: Zero-shot accuracy on five common sense tasks with 2048 sequence length.
+Zero-shotAccuracy↑
+Llama-2 Precision Method
+PQ ARC-e ARC-c HS WG Avg.
+FP16 - 79.05 74.58 46.25 76.05 68.98 68.98
+W4A4 Quarot 76.77 69.87 40.87 72.16 63.77 64.69
+7B W4A4g128 Atom 75.14 52.99 38.40 69.37 62.75 59.73
+W4A8KV4 QoQ 77.64 72.81 43.60 74.00 68.03 67.22
+W4A8KV4g128 QoQ 78.07 73.32 44.80 74.98 68.59 67.95
+FP16 - 80.52 77.44 49.06 79.38 72.22 71.72
+W4A4 Quarot 78.89 72.98 46.59 76.37 70.24 69.01
+13B W4A4g128 Atom 76.50 57.49 42.32 73.84 67.40 63.51
+W4A8KV4 QoQ 79.71 75.97 48.38 77.80 70.96 70.56
+W4A8KV4g128 QoQ 79.43 77.06 48.81 78.35 70.48 70.83
+FP16 - 82.70 81.02 57.34 83.82 77.98 76.57
+W4A4 Quarot 82.43 80.43 56.23 81.82 76.24 75.43
+70B W4A4g128 Atom 79.92 58.25 46.08 79.06 74.27 67.52
+W4A8KV4 QoQ 82.64 79.80 56.83 82.78 77.51 75.91
+W4A8KV4g128 QoQ 82.92 80.93 56.40 83.28 78.45 76.40
+*Forreference,usingMX-FP4forW4A4quantizingLlama-7Bmodelwilldecreasethe
+accuracyfrom72.9to63.7onARCeasyandfrom44.7to35.5onARCchallengetask.[28]
+TABLE IV: The absolute token generation throughput of QServe and TensorRT-LLM in Fig. 15. *: we calculate the speedup
+overhighestachieveablethroughputfromTensorRT-LLMacrossallthreeprecisionconfigurations.OurQServesystemachieves
+competitivethroughputonL40SGPUcomparedtoTensorRT-LLMonA100,effectivelyreducingthedollarcostofLLMserving
+by 3×. Unit: tokens/second.
+Llama-3 Llama-2 Mistral LLama-2 LLaMA Yi Llama-2 Qwen1.5
+Device System
+8B 7B 7B 13B 30B 34B 70B 72B
+TRT-LLM-FP16 1326 444 1566 92 OOM OOM OOM OOM
+TRT-LLM-W4A16 1431 681 1457 368 148 313 119 17
+L40S TRT-LLM-W8A8 2634 1271 2569 440 123 364 OOM OOM
+QServe(Ours) 3656 2394 3774 1327 504 869 286 59
+Speedup* 1.39× 1.88× 1.47× 3.02× 3.41× 2.39× 2.40× 3.47×
+TRT-LLM-FP16 2503 1549 2371 488 80 145 OOM OOM
+TRT-LLM-W4A16 2370 1549 2403 871 352 569 358 143
+A100 TRT-LLM-W8A8 2396 2334 2427 1277 361 649 234 53
+QServe(Ours) 3005 2908 2970 1741 749 797 419 340
+Speedup* 1.20× 1.25× 1.22× 1.36× 2.07× 1.23× 1.17× 2.38×
+evaluated the WikiText2 perplexity and end-to-end inference although it substantially enhanced the end-to-end inference
+performance on L40S with 64 requests of 1024 input tokens throughputby1.47×andhalvedGPUmemoryusage.Tosolve
+and 512 output tokens. The results are detailed in Figure 16. this problem, SmoothAttention reduced perplexity by 0.05,
+Weseethatreducingtheweightprecisionto4bitssignificantly without adding system overhead. Progressive group quanti-
+impaired the model performance, though it increased end- zation further improved perplexity by an additional 0.02, with
+to-end processing speed by 1.12× and saved 3.5GB GPU only a negligible increase in dequantization overhead. Lastly,
+memory.Rotatingtheblockinputmoduleshelpedsuppressthe activation-aware channel reordering enhanced perplexity by
+activation outliers, resulting in 0.18 perplexity improvement. 0.03.
+Inaddition,minimizingtheblockoutputMSEthroughweight
+b) Ablation study on QServe system: Dequantization
+clipping further decreased the perplexity by 0.16. Conse-
+overhead: We measure the dequantization overhead of per-
+quently, our W4A8 configuration has achieved a perplexity
+groupQServe-W4A8GEMMandotherbaselinesinFigure18.
+comparable to that of W4A16. However, quantizing KV cache
+Our dequantization overhead is comparable with TRT-LLM-
+to 4 bits again deteriorated model performance by 0.14,
+W4A16, but since we perform computation on INT8 tensor
+128-bit Quant. (W8A8KV8) 5.58 1367
++ 4-bit Weight Quant. (W4A8KV8) 6.00 1538
++ Block Rotation and Smoothing 5.82
++ Block-MSE-based Weight Clip 5.66
++ 4-bit KV Quant. (W4A8KV4) 5.80 2254
++ SmoothAttention 5.75
++ Progressive Group Quant. 5.73 2190
++ Activation-aware Reorder 5.70
+State-of- Atom (W4A4KV4) 6.12 1732 Weights
+the-Art QuaRot (W4A4KV4) 6.19 688 KV Cache
+5.55 5.65 5.75 5.85 5.95 6.05 0 400 800 1200 1600 2000 2400 0 8 16 24 32
+Wikitext-2 Perplexity Throughput on L40S (tokens/s) GPU Memory (GB)
+Fig. 16: Ablation study on quantization techniques used in QoQ and the impact of serving throughput, GPU memory
+consumption in QServe. The model used here is Llama-2-7B.
+TRT-LLM-FP16 TRT-LLM-W4A16 TRT-LLM-W8A8 Atom-W4A4 QuaRot-W4A4 QServe-W4A8KV4 (Per-CHN) QServe-W4A8KV4 (Per-Group)
+1.11 1.00 1.021.00 1.011.00 1.021.00 1.021.00 1.041.00 0.97 1.031.00 1.031.00 1.031.00 1.031.00 1.031.00 1.031.00 0.88 0.670.65 0.640.570.63 0.510.600.67 0.570.71 0.580.78 0.570.600.69 0.61 0.81 0.60 0.66 0.56 0.480.57 0.71 0.58
+0.37 0.11 0.34 0.12 0.35 0.15 0.38 0.21 0.31 0.35 0.17 0.32 0.13 0.32 0.14 0.15 0.19 0.25 0.32 0.16
+Batch=4 Batch=8 Batch=16 Batch=32 Batch=64 Geomean Batch=2 Batch=4 Batch=8 Batch=16 Batch=32 Geomean
+Fig. 17: Same-batch throughput comparison between QServe and baseline systems on L40S. We use an input sequence length
+of 1024 and output sequence length of 512.
+Achieved Speed Dequant Overhead end-to-end improvement of 1.7×.
+100%
+75% VII. RELATEDWORK
+50%
+Quantization of LLMs. Quantization reduces the size
+25%
+of LLMs and speedup inference. There are two primary
+0%
+8 163264128 8 163264128 8 163264128 8 163264128 quantization strategies: (1) Weight-only quantization [10],
+W8A8 W4A16 W4A4 W4A8 (Ours)
+[12], [19], [23] benefits edge devices where the workload
+Fig. 18: The dequantization overhead in QServe is much is memory-bound, improving weight-loading speed. However,
+smaller than that in Atom-W4A4 (up to 90%). for cloud services with high user traffic and required batch
+processing, this method falls short as it does not acceler-
+ate computation in compute-bound scenarios. (2) Weight-
+cores, we enjoy 2× higher throughput. activation quantization accelerates computation in batch
+Comparisons under the same batches: We demonstrate processing by quantizing both weights and activations [8],
+speedup results under the same batch sizes in Figure 17. For [36],[38].OmniQuant[30]andAtom[44]exploringmoreag-
+Llama-2-7B,weshowthatthe1.88×speedupoverTRT-LLM gressivequantizations(W4A4, W4A8)andmixedprecisionto
+can be broken down to two parts: 1.45× from same batch enhancemodelqualityandefficiency,thoughthesecanimpact
+speedup and 1.3× from the enlarged batch size. For larger model accuracy and reduce serving throughput. QuaRot [2]
+modelslikeLlama-2-13B,scalingupthebatchsizeandsingle further refines W4A4 by rotating weights and activations at
+batch speedup are equally important (1.7× improvement). thecostofincreasedcomputationaloverheadduetoadditional
+Improvement breakdown for KV4 attention: We detail transformations required during inference.
+the enhancements from attention optimizations in Section LLM serving systems. Numerous systems have been pro-
+Section V-C. Starting with the basic KV4 implementation, posed for efficient LLM deployment. Orca [40] employs
+which exhibits an A100 latency of 0.48ms for a 64×1024 iteration-level scheduling and selective batching in distributed
+input, the application of bit tricks from [20] reduces the systems. vLLM [22] features virtual memory-inspired Page-
+kernel latency to 0.44ms. Further improvements are achieved dAttention, optimizing KV cache management. SGLang [45]
+by simplifying the control flow, which reduces latency by an enhances LLM programming with advanced primitives and
+additional 0.05ms. Subsequently, converting the QK and SV RadixAttention. LMDeploy [7] offers persistent batching and
+productstoFP16eachcontributesa0.03mslatencyreduction. blocked KV cache features to improve deployment efficiency.
+Asynchronous prefetching of dequantization parameters at the LightLLM [6] manages GPU memory with token-wise KV
+start of the attention kernel further enhances performance, cache control via Token Attention, increasing throughput.
+ultimately reducing the latency to 0.28ms and achieving an MLC-LLM [32] utilizes compiler acceleration for versatile
+13
+B7-2-amalL deepS
+.mroN MOO MOO MOO
+B31-2-amalL deepS
+.mroN .S.N .S.N .S.N MOO .S.N MOO MOO MOO .S.N .S.NLLM deployment across edge devices. TensorRT-LLM [25] is [6] L.Contributors,“Lightllm:Alightandfastinferenceserviceforllm,”
+the leading industry solution and the most important baseline https://github.com/ModelTC/lightllm,2023.
+[7] L.Contributors,“Lmdeploy:Atoolkitforcompressing,deploying,and
+in this paper.
+servingllm,”https://github.com/InternLM/lmdeploy,2023.
+LLM Accelerators. Transformers and LLMs have also [8] T.Dettmers,M.Lewis,Y.Belkada,andL.Zettlemoyer,“GPT3.int8():
+generated considerable research interest in domain-specific 8-bit matrix multiplication for transformers at scale,” in Advances
+acceleratordesign.Severalworks,suchasA3[14],ELSA[15], in Neural Information Processing Systems, A. H. Oh, A. Agarwal,
+D.Belgrave,andK.Cho,Eds.,2022.
+and SpAtten [35], have applied pruning techniques to the [9] T. Dettmers, A. Pagnoni, A. Holtzman, and L. Zettlemoyer, “Qlora:
+attentionmodule,whileGOBO[41]andEdgeBERT[31]have Efficientfinetuningofquantizedllms,”arXivpreprintarXiv:2305.14314,
+2023.
+investigatedquantizationapproaches.Additionally,DOTA[27]
+[10] T.Dettmers,R.Svirschevski,V.Egiazarian,D.Kuznedelev,E.Frantar,
+introduces a lightweight, runtime detector for omitting weak S.Ashkboos,A.Borzunov,T.Hoefler,andD.Alistarh,“Spqr:Asparse-
+attention connections, coupled with specialized accelerators quantized representation for near-lossless llm weight compression,”
+2023.
+for transformer inference. Apart from attention optimiza-
+[11] C.Fang,A.Zhou,andZ.Wang,“Analgorithm–hardwareco-optimized
+tions, STA [11] leverages N:M sparsity and specialized framework for accelerating n: M sparse transformers,” IEEE Transac-
+softmaxmoduletoreduceoff-chipcommunication.Moreover, tions on Very Large Scale Integration (VLSI) Systems, vol. 30, no. 11,
+pp.1573–1586,2022.
+DFX [16] exploits model parallelism and optimized dataflow
+[12] E.Frantar,S.Ashkboos,T.Hoefler,andD.Alistarh,“GPTQ:Accurate
+for low-latency generation. However, these accelerators have post-trainingcompressionforgenerativepretrainedtransformers,”arXiv
+yettobescaleduptorecentLLMswithbillionsofparameters. preprintarXiv:2210.17323,2022.
+[13] L. Gao, J. Tow, B. Abbasi, S. Biderman, S. Black, A. DiPofi,
+C. Foster, L. Golding, J. Hsu, A. Le Noac’h, H. Li, K. McDonell,
+VIII. CONCLUSION
+N. Muennighoff, C. Ociepa, J. Phang, L. Reynolds, H. Schoelkopf,
+We introduce QServe, an algorithm and system co-design A. Skowron, L. Sutawika, E. Tang, A. Thite, B. Wang, K. Wang, and
+A. Zou, “A framework for few-shot language model evaluation,” 12
+frameworktailoredtoquantizelargelanguagemodels(LLMs)
+2023.[Online].Available:https://zenodo.org/records/10256836
+to W4A8KV4 precision, facilitating their efficient deployment [14] T. J. Ham, S. J. Jung, S. Kim, Y. H. Oh, Y. Park, Y. Song, J.-H.
+on GPUs. On the algorithmic front, we design the QoQ Park, S. Lee, K. Park, J. W. Lee et al., “Aˆ 3: Accelerating attention
+mechanisms in neural networks with approximation,” in 2020 IEEE
+quantization method that features progressive quantization,
+International Symposium on High Performance Computer Architecture
+enabling W4A8 GEMM operations to be executed on INT8 (HPCA). IEEE,2020,pp.328–341.
+tensor cores, and SmoothAttention, which significantly re- [15] T. J. Ham, Y. Lee, S. H. Seo, S. Kim, H. Choi, S. J. Jung, and J. W.
+Lee,“Elsa:Hardware-softwareco-designforefficient,lightweightself-
+duces accuracy loss resulting from KV4 quantization. Corre-
+attention mechanism in neural networks,” in 2021 ACM/IEEE 48th
+spondingly, in the QServe system, we leverage the protective Annual International Symposium on Computer Architecture (ISCA).
+range established in the first level of progressive quantization IEEE,2021,pp.692–705.
+[16] S.Hong,S.Moon,J.Kim,S.Lee,M.Kim,D.Lee,andJ.-Y.Kim,“Dfx:
+to enable INT4 to INT8 dequantization. This process uti-
+A low-latency multi-fpga appliance for accelerating transformer-based
+lizes full register-level parallelism and employs a subtraction- textgeneration,”in202255thIEEE/ACMInternationalSymposiumon
+after-multiplication computation sequence. Additionally, we Microarchitecture(MICRO). IEEE,2022,pp.616–630.
+[17] A. Q. Jiang, A. Sablayrolles, A. Mensch, C. Bamford, D. S. Chaplot,
+implement compute-aware weight reordering to minimize the
+D.d.l.Casas,F.Bressand,G.Lengyel,G.Lample,L.Saulnieretal.,
+overheadassociatedwithpointerarithmetic.Asaresult,when “Mistral7b,”arXivpreprintarXiv:2310.06825,2023.
+serving seven representative LLMs on A100 and L40S GPUs, [18] A.Q.Jiang,A.Sablayrolles,A.Roux,A.Mensch,B.Savary,C.Bam-
+ford, D. S. Chaplot, D. d. l. Casas, E. B. Hanna, F. Bressand et al.,
+QServe achieves up to 2.4-3.5× higher throughput over the
+“Mixtralofexperts,”arXivpreprintarXiv:2401.04088,2024.
+industrial standard for LLM serving, TensorRT-LLM. [19] S. Kim, C. Hooper, A. Gholami, Z. Dong, X. Li, S. Shen, M. W.
+Mahoney,andK.Keutzer,“Squeezellm:Dense-and-sparsequantization,”
+ACKNOWLEDGEMENTS 2024.
+[20] Y.J.Kim,R.Henry,R.Fahim,andH.H.Awadalla,“Whosayselephants
+We thank MIT-IBM Watson AI Lab, MIT AI Hardware can’trun:Bringinglargescalemoemodelsintocloudscaleproduction,”
+Program, MIT Amazon Science Hub, and NSF for supporting arXivpreprintarXiv:2211.10017,2022.
+[21] W.Kwon,Z.Li,S.Zhuang,Y.Sheng,L.Zheng,C.H.Yu,J.Gonzalez,
+this research. We also thank Julien Demouth, Jun Yang, and
+H. Zhang, and I. Stoica, “Efficient memory management for large
+Dongxu Yang from NVIDIA for their helpful discussions. languagemodelservingwithpagedattention,”inProceedingsofthe29th
+SymposiumonOperatingSystemsPrinciples,2023,pp.611–626.
+REFERENCES [22] W. Kwon, Z. Li, S. Zhuang, Y. Sheng, L. Zheng, C. H. Yu, J. E.
+Gonzalez,H.Zhang,andI.Stoica,“Efficientmemorymanagementfor
+[1] J. Ainslie, J. Lee-Thorp, M. de Jong, Y. Zemlyanskiy, F. Lebro´n, and large language model serving with pagedattention,” in Proceedings of
+S.Sanghai,“Gqa:Traininggeneralizedmulti-querytransformermodels the ACM SIGOPS 29th Symposium on Operating Systems Principles,
+frommulti-headcheckpoints,”arXivpreprintarXiv:2305.13245,2023. 2023.
+[2] S.Ashkboos,A.Mohtashami,M.L.Croci,B.Li,M.Jaggi,D.Alistarh, [23] J.Lin,J.Tang,H.Tang,S.Yang,W.-M.Chen,W.-C.Wang,G.Xiao,
+T. Hoefler, and J. Hensman, “Quarot: Outlier-free 4-bit inference in X. Dang, C. Gan, and S. Han, “Awq: Activation-aware weight quanti-
+rotatedllms,”arXivpreprintarXiv:2404.00456,2024. zationforllmcompressionandacceleration,”inMLSys,2024.
+[3] Y.Bisk,R.Zellers,R.L.Bras,J.Gao,andY.Choi,“Piqa:Reasoning [24] S. Merity, C. Xiong, J. Bradbury, and R. Socher, “Pointer sentinel
+about physical commonsense in natural language,” in Thirty-Fourth mixturemodels,”2016.
+AAAIConferenceonArtificialIntelligence,2020. [25] NVIDIA, “TensorRT-LLM: A TensorRT Toolbox for Optimized
+[4] J. Chee, Y. Cai, V. Kuleshov, and C. D. Sa, “Quip: 2-bit quantization Large Language Model Inference,” 2023. [Online]. Available: https:
+oflargelanguagemodelswithguarantees,”2024. //github.com/NVIDIA/TensorRT-LLM
+[5] P.Clark,I.Cowhey,O.Etzioni,T.Khot,A.Sabharwal,C.Schoenick, [26] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan,
+and O. Tafjord, “Think you have solved question answering? try arc, T.Killeen,Z.Lin,N.Gimelshein,L.Antiga,A.Desmaison,A.Ko¨pf,
+theai2reasoningchallenge,”2018. E.Yang,Z.DeVito,M.Raison,A.Tejani,S.Chilamkurthy,B.Steiner,
+14L. Fang, J. Bai, and S. Chintala, “Pytorch: An imperative style, high-
+performancedeeplearninglibrary,”2019.
+[27] Z.Qu,L.Liu,F.Tu,Z.Chen,Y.Ding,andY.Xie,“Dota:detectandomit
+weak attentions for scalable transformer acceleration,” in Proceedings
+ofthe27thACMInternationalConferenceonArchitecturalSupportfor
+ProgrammingLanguagesandOperatingSystems,2022,pp.14–26.
+[28] B.D.Rouhani,R.Zhao,A.More,M.Hall,A.Khodamoradi,S.Deng,
+D.Choudhary,M.Cornea,E.Dellinger,K.Denolfetal.,“Microscaling
+dataformatsfordeeplearning,”arXivpreprintarXiv:2310.10537,2023.
+[29] K.Sakaguchi,R.L.Bras,C.Bhagavatula,andY.Choi,“Winogrande:
+An adversarial winograd schema challenge at scale,” arXiv preprint
+arXiv:1907.10641,2019.
+[30] W.Shao,M.Chen,Z.Zhang,P.Xu,L.Zhao,Z.Li,K.Z.Zhang,P.Gao,
+Y. Qiao, and P. Luo, “Omniquant: Omnidirectionally calibrated quan-
+tization for large language models,” arXiv preprint arXiv:2308.13137,
+2023.
+[31] T. Tambe, C. Hooper, L. Pentecost, T. Jia, E.-Y. Yang, M. Donato,
+V. Sanh, P. Whatmough, A. M. Rush, D. Brooks et al., “Edgebert:
+Sentence-level energy optimizations for latency-aware multi-task nlp
+inference,” in MICRO-54: 54th Annual IEEE/ACM International Sym-
+posiumonMicroarchitecture,2021,pp.830–844.
+[32] M. team, “MLC-LLM,” 2023. [Online]. Available: https://github.com/
+mlc-ai/mlc-llm
+[33] H. Touvron, T. Lavril, G. Izacard, X. Martinet, M.-A. Lachaux,
+T.Lacroix,B.Rozie`re,N.Goyal,E.Hambro,F.Azhar,A.Rodriguez,
+A. Joulin, E. Grave, and G. Lample, “Llama: Open and efficient
+foundationlanguagemodels,”2023.
+[34] H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei,
+N. Bashlykov, S. Batra, P. Bhargava, S. Bhosale et al., “Llama
+2: Open foundation and fine-tuned chat models,” arXiv preprint
+arXiv:2307.09288,2023.
+[35] H. Wang, Z. Zhang, and S. Han, “Spatten: Efficient sparse attention
+architecture with cascade token and head pruning,” in 2021 IEEE
+International Symposium on High-Performance Computer Architecture
+(HPCA). IEEE,2021,pp.97–110.
+[36] X.Wei,Y.Zhang,X.Zhang,R.Gong,S.Zhang,Q.Zhang,F.Yu,and
+X. Liu, “Outlier suppression: Pushing the limit of low-bit transformer
+languagemodels,”arXivpreprintarXiv:2209.13325,2022.
+[37] T. Wolf, L. Debut, V. Sanh, J. Chaumond, C. Delangue, A. Moi,
+P. Cistac, T. Rault, R. Louf, M. Funtowicz, J. Davison, S. Shleifer,
+P.vonPlaten,C.Ma,Y.Jernite,J.Plu,C.Xu,T.L.Scao,S.Gugger,
+M. Drame, Q. Lhoest, and A. M. Rush, “Huggingface’s transformers:
+State-of-the-artnaturallanguageprocessing,”2020.
+[38] G. Xiao, J. Lin, M. Seznec, H. Wu, J. Demouth, and S. Han,
+“SmoothQuant: Accurate and efficient post-training quantization for
+largelanguagemodels,”inProceedingsofthe40thInternationalCon-
+ferenceonMachineLearning,2023.
+[39] A.Young,B.Chen,C.Li,C.Huang,G.Zhang,G.Zhang,H.Li,J.Zhu,
+J. Chen, J. Chang, K. Yu, P. Liu, Q. Liu, S. Yue, S. Yang, S. Yang,
+T.Yu,W.Xie,W.Huang,X.Hu,X.Ren,X.Niu,P.Nie,Y.Xu,Y.Liu,
+Y.Wang,Y.Cai,Z.Gu,Z.Liu,andZ.Dai,“Yi:Openfoundationmodels
+by01.ai,”2024.
+[40] G.-I. Yu, J. S. Jeong, G.-W. Kim, S. Kim, and B.-G. Chun,
+“Orca: A distributed serving system for Transformer-Based generative
+models,” in 16th USENIX Symposium on Operating Systems Design
+andImplementation(OSDI22). Carlsbad,CA:USENIXAssociation,
+Jul. 2022, pp. 521–538. [Online]. Available: https://www.usenix.org/
+conference/osdi22/presentation/yu
+[41] A. H. Zadeh, I. Edo, O. M. Awad, and A. Moshovos, “Gobo: Quan-
+tizing attention-based nlp models for low latency and energy efficient
+inference,” in 2020 53rd Annual IEEE/ACM International Symposium
+onMicroarchitecture(MICRO). IEEE,2020,pp.811–824.
+[42] R.Zellers,A.Holtzman,Y.Bisk,A.Farhadi,andY.Choi,“Hellaswag:
+Canamachinereallyfinishyoursentence?”CoRR,vol.abs/1905.07830,
+2019.[Online].Available:http://arxiv.org/abs/1905.07830
+[43] L.Zhang,W.Fei,W.Wu,Y.He,Z.Lou,andH.Zhou,“Dualgrained
+quantization:Efficientfine-grainedquantizationforllm,”arXivpreprint
+arXiv:2310.04836,2023.
+[44] Y. Zhao, C.-Y. Lin, K. Zhu, Z. Ye, L. Chen, S. Zheng, L. Ceze,
+A.Krishnamurthy,T.Chen,andB.Kasikci,“Atom:Low-bitquantization
+forefficientandaccuratellmserving,”inMLSys,2023.
+[45] L. Zheng, L. Yin, Z. Xie, J. Huang, C. Sun, C. H. Yu, S. Cao,
+C. Kozyrakis, I. Stoica, J. E. Gonzalez, C. Barrett, and Y. Sheng,
+“Efficientlyprogramminglargelanguagemodelsusingsglang,”2023.
+15
