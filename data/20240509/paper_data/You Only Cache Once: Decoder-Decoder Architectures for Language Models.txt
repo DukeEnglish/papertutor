@@ -1,0 +1,1018 @@
+You Only Cache Once:
+Decoder-Decoder Architectures for Language Models
+YutaoSun∗†‡ LiDong∗† YiZhu† ShaohanHuang†
+WenhuiWang† ShumingMa† QuanluZhang† JianyongWang‡ FuruWei†⋄
+†MicrosoftResearch ‡TsinghuaUniversity
+https://aka.ms/GeneralAI
+Abstract
+Weintroduceadecoder-decoderarchitecture,YOCO,forlargelanguagemodels,
+whichonlycacheskey-valuepairsonce. Itconsistsoftwocomponents,i.e.,across-
+decoderstackeduponaself-decoder. Theself-decoderefficientlyencodesglobal
+key-value(KV)cachesthatarereusedbythecross-decoderviacross-attention.
+The overall model behaves like a decoder-only Transformer, although YOCO
+onlycachesonce. ThedesignsubstantiallyreducesGPUmemorydemands,yet
+retains global attention capability. Additionally, the computation flow enables
+prefilling to early exit without changing the final output, thereby significantly
+speedinguptheprefillstage.ExperimentalresultsdemonstratethatYOCOachieves
+favorable performance compared to Transformer in various settings of scaling
+up model size and number of training tokens. We also extend YOCO to 1M
+contextlengthwithnear-perfectneedleretrievalaccuracy. Theprofilingresults
+showthatYOCOimprovesinferencememory,prefilllatency,andthroughputby
+ordersofmagnitudeacrosscontextlengthsandmodelsizes. Codeisavailableat
+https://aka.ms/YOCO.
+Decoder-Decoder LLM Inference Cost (@512k)
+9.6X
+You Only Cache Once 60 180
+40
+40 120
+e
+h Cross-Decoder
+c 20
+a C 20 6.4X 60
+V Self-Decoder 30.3X
+K
+0 0 0
+<s> You Only Cache GPU Memory ↓ Throughput ↑ Prefilling Latency ↓
+(GB) (wps) (s)
+Transformer YOCO
+Figure1: Weproposeadecoder-decoderarchitecture,YOCO,forlargelanguagemodel,whichonly
+cacheskey/valueonce. YOCOmarkedlyreducestheKVcachememoryandtheprefillingtime,while
+being scalable in terms of training tokens, model size, and context length. The inference cost is
+reportedtobe512Kasthecontextlength,andFigures7–10presentmoreresultsfordifferentlengths.
+∗Equalcontribution.⋄Correspondingauthor.
+4202
+yaM
+8
+]LC.sc[
+1v45250.5042:viXra1 Introduction
+Thedecoder-onlyTransformer[VSP+17]hasbecomethedefactoarchitectureforlanguagemodels.
+Numerouseffortshavecontinuedtodevelopsuitablearchitecturesforlanguagemodeling. Therehave
+beenmainstrandsofexplorations. First,encoder-onlylanguagemodels,suchasBERT[DCLT19],
+bidirectionallyencodetheinputsequence. Second,encoder-decodermodels,suchasT5[RSR+20],
+useabidirectionalencodertoencodeinputandaunidirectionaldecodertogenerateoutput. Both
+of the above layouts struggle with autoregressive generation due to bidirectionality. Specifically,
+encoders have to encode the whole input and output tokens again for the next generation step.
+Althoughencoder-decodercanuseonlydecodertogenerate,theoutputtokensdonotfullyleverage
+the parameters of encoder, especially for multi-turn conversation. Third, decoder-only language
+models, such as GPT [BMR+20], generate tokens autoregressively. By caching the previously
+computedkey/valuevectors,themodelcanreusethemforthecurrentgenerationstep. Thekey-value
+(KV)cacheavoidsencodingthehistoryagainforeachtoken,greatlyimprovingtheinferencespeed.
+Thiscompellingfeatureestablishesthedecoder-onlylanguagemodelasthestandardoption.
+However,asthenumberofservingtokensincreases,theKVcachesoccupyalotofGPUmemory,
+renderingtheinferenceoflargelanguagemodelsmemory-bounded[PDC+22]. Fortheexample
+of a 65B-size language model (augmented with grouped-query attention [ALTdJ+23] and 8-bit
+KVquantization),512Ktokensoccupyabout86GBGPUmemory,whichisevenlargerthanthe
+capacity of one H100-80GB GPU. In addition, the prefilling latency of long-sequence input is
+extremely high. For instance, using four H100 GPUs, the 7B language model (augmented with
+Flash-Decoding[DHMS23]andkernelfusion)requiresabout110secondstoprefill450Ktokens,and
+380secondsfor1Mlength. Theabovebottlenecksmakeitdifficulttodeploylong-contextlanguage
+modelsinpractice.
+Inthiswork,weproposeadecoder-decoderarchitecture,YOCO,forlargelanguagemodels,which
+onlycachesKVpairsonce. Specifically,westackcross-decoderuponself-decoder. Givenaninput
+sequence,theself-decoderutilizesefficientself-attentiontoobtainKVcaches.Thenthecross-decoder
+layersemploycross-attentiontoreusethesharedKVcaches. Thedecoder-decoderarchitectureis
+conceptually similar to encoder-decoder, but the whole model behaves more like a decoder-only
+model from the external view. So, it naturally fits into autoregressive generation tasks, such as
+languagemodeling. First,becauseYOCOonlycachesonce2,theGPUmemoryconsumptionofKV
+cachesissignificantlyreduced. Second,thecomputationflowofthedecoder-decoderarchitecture
+enablesprefillingtoearlyexitbeforeenteringtheself-decoder. Thenicepropertyspeedsuptheprefill
+stage dramatically, improving user experience for long-context language models. Third, YOCO
+allows for more efficient system design for distributed long-sequence training. In addition, we
+proposegatedretentionforself-decoder,whichaugmentsretention[SDH+23]withadata-controlled
+gatingmechanism.
+WeconductextensiveexperimentstoshowthatYOCOachievesfavorablelanguagemodelingperfor-
+manceandhasmanyadvantagesintermsofinferenceefficiency. Experimentalresultsdemonstrate
+thatYOCOcanbescaledupwithmoretrainingtokens,largermodelsize,andlongercontextlength.
+Specifically,wescaleupthe3BYOCOmodeltotrillionsoftrainingtokens,attainingresultsonpar
+withprominentTransformerlanguagemodels,suchasStableLM[TBMR]. Moreover,thescaling
+curvesrangingfrom160Mto13BshowthatYOCOarecompetitivecomparedtoTransformer. We
+alsoextendthecontextlengthofYOCOto1Mtokens,achievingnearperfectneedleretrievalaccuracy.
+Inthemulti-needletest,YOCOobtainscompetitiveresultsevencomparedtolargerTransformers.
+Inadditiontogoodperformanceonvarioustasks,theprofilingresultsshowthatYOCOimprovesthe
+GPUmemoryfootprint,prefilllatency,throughput,andservingcapacity. Inparticular,thememoryof
+KVcachescanbereducedbyabout80×for65Bmodels. Evenfora3Bmodel,theoverallinference
+memoryconsumptioncanbereducedbytwotimesfor32Ktokensandbymorethanninetimesfor
+1Mtokens. Theprefillstageisspeededupby71.8×forthe1Mcontextand2.87×forthe32Kinput.
+Forexample,fora512Kcontext,YOCOreducestheTransformerprefillinglatencyfrom180seconds
+tolessthansixseconds. TheresultspositionYOCOasastrongcandidatemodelarchitecturefor
+futurelargelanguagemodelswithnativelong-sequencesupport.
+2Theword“once”referstoglobalKVcache.Strictly,self-decoderalsoneedstostoreacertainnumberof
+caches.Astheself-decoderutilizesanefficientattentionmodule,thecachesizeisboundedtoaconstant,which
+canbeignoredcomparedtoglobalcacheswhenthesequencelengthislarge.
+2Figure2: Overviewofthedecoder-decoderarchitecture. Self-decodergeneratestheglobalKVcache.
+Thencross-decoderemployscross-attentiontoreusethesharedKVcaches. Bothself-decoderand
+cross-decoderusecausalmasking. Theoverallarchitecturebehaveslikeadecoder-onlyTransformer,
+autoregressivelygeneratingtokens.
+2 YouOnlyCacheOnce(YOCO)
+Theproposedarchitecture,namedYOCO,isdesignedforautoregressivemodeling,suchaslarge
+languagemodels(LLMs). AsshowninFigure2,thedecoder-decoderarchitecturehastwoparts,i.e.,
+self-decoderandcross-decoder. Specifically,YOCOisstackedwithLblocks,wherethefirst L layers
+2
+areself-decoderwhiletherestmodulesarecross-decoder. Givenaninputsequencex=x ···x ,
+1 |x|
+the input embeddings are packed into X0 = [x 1,··· ,x |x|] ∈ R|x|×dmodel, where d
+model
+is hidden
+dimension. WefirstobtaincontextualizedvectorrepresentationsXl = Self-Decoder(Xl−1),l ∈
+[1,L], where XL/2 is used to produce KV caches Kˆ,Vˆ for cross-decoder. Then we compute
+2
+Xl =Cross-Decoder(Xl−1,Kˆ,Vˆ),l∈[L +1,L]togettheoutputvectorsXL.
+2
+Bothself-andcross-decoderfollowasimilarblocklayout(i.e.,interleavedattentionandfeed-forward
+network)asinTransformer[VSP+17]. Wealsoincludepre-RMSNorm[ZS19],SwiGLU[Sha20],
+andgrouped-queryattention[ALTdJ+23]asimprovements. Thedifferencebetweenthetwoparts
+liesinattentionmodules. Self-decoder(Section2.1)usesefficientself-attention(e.g.,sliding-window
+attention). Incomparison,cross-decoder(Section2.2)usesglobalcross-attentiontoattendtothe
+sharedKVcachesproducedbytheoutputoftheself-decoder.
+2.1 Self-Decoder
+Self-decodertakestokenembeddingsX0asinputandcomputeintermediatevectorrepresentation
+M =XL/2:
+Yl =ESA(LN(Xl))+Xl
+(1)
+Xl+1 =SwiGLU(LN(Yl))+Yl
+whereESA(·)representsefficientself-attention,SwiGLU(X)=(swish(XW )⊙XW )W ,and
+G 1 2
+RMSNorm[ZS19]isusedforLN(·). Causalmaskingisusedforefficientself-attention.
+3Prefilling Generation
+then generate new
+Cross-Decoder
+KVCacheMemory
+Cross-Decoder
+(Skipped)
+Transformer O(LND)
+KV Cache YOCO O((N +L)D)
+Self-Decoder Table1: InferencememorycomplexityofKV
+caches. N,L,Darethesequencelength,num-
+beroflayers,andhiddendimension.
+Pre- filling context and then generate PrefillingTime
+Figure3: YOCOInference. Prefill: encodeinputto- Transformer O(LN2D)
+kensinparallel. Generation: decodeoutputtokens YOCO O(LND)
+one by one. The computation flow enables prefill-
+ingtoearlyexitwithoutchangingthefinaloutput,Table2: Prefillingtimecomplexityofattention
+therebysignificantlyspeedinguptheprefillstage. modules. N,L,Darethesameasabove.
+The key property of the efficient self-attention module is O(1) inference memory, i.e., constant
+numberofKVcaches. Forexample,thecachesizeofsliding-windowattention[CGRS19]depends
+onthewindowsizeinsteadoftheinputlength. Moredesignchoices(e.g.,gatedretention)ofthe
+efficientself-attentionmodulearedetailedinSection3.
+2.2 Cross-Decoder
+First,theoutputoftheself-decoderXL/2generatesglobalKVcachesKˆ,Vˆ forcross-decoder:
+Kˆ =LN(XL/2)W , Vˆ =LN(XL/2)W (2)
+K V
+where W ,W ∈ Rd×d are learnable weights. Then, cross-decoder layers are stacked after the
+K V
+self-decodertoobtainthefinaloutputvectorsXL. TheKVcachesKˆ,Vˆ arereusedbyallthe L
+2
+cross-decodermodules:
+Qˆl =LN(Xl)Wl
+Q
+Yl =Attention(Qˆl,Kˆ,Vˆ)+Xl
+(3)
+Xl+1 =SwiGLU(LN(Yl))+Yl
+where Attention(·) is standard multi-head attention [VSP+17], and Wl ∈ Rd×d is a learnable
+Q
+matrix. Causalmaskingisalsousedforcross-attention. Becausecross-attentioniscompatiblewith
+group query attention [ALTdJ+23], we can further save the memory consumption of KV caches.
+AfterobtainingXL,asoftmaxclassifierperformsnext-tokenprediction.
+2.3 InferenceAdvantages
+Inadditiontocompetitivelanguagemodelingresults,YOCOsignificantlyreducesservingcostsand
+improvesinferenceperformance. WereportdetailedinferencecomparisonsinSection4.4.
+Saving GPU Memory and Serving More Tokens. Table 1 compares the memory complexity
+betweenTransformersandYOCO.Specifically,becauseglobalKVcachesarereusedandefficient
+self-attentionneedsconstantcaches, thenumberofcachesisO(N +CL), whereN istheinput
+length,C isaconstant(e.g.,slidingwindowsize),andListhenumberoflayers. Forlongsequences,
+CLismuchsmallerthanN,soaboutO(N)cachesarerequired,i.e.,youonlycacheonce.
+Incomparison, TransformerdecodershavetostoreN ×Lkeysandvaluesduringinference. So
+YOCOroughlysavesLtimesGPUmemoryforcachescomparedtoTransformerdecoders. Because
+theinferencecapacitybottleneckbecomesKVcaches(Figure7b),ourmethodenablesustoserve
+4manymoretokenswithoutbeingoutofGPUmemory. Theincreasedbatchsizeisalsobeneficialto
+inferencethroughput.
+Reducing Prefilling Time and Improving Throughput. As shown in Figure 3, because the
+cross-decoderreusestheoutputsofself-decoder,wecanexitearlybeforeenteringthecross-decoder
+duringtheprefillstage. Theintriguingpropertyofcomputationdependencygreatlyacceleratesthe
+prefillingspeed.
+First,onlyhalfthelayersareneededforforwardcomputation,i.e.,atleasthalfprefillinglatency
+reduction.Second,theefficientattentionmodulesoftheself-decoderareusuallyfast.Fortheexample
+of512Kcontextlength,wecandecreasetheprefillinglatencyfrom180seconds(Transformerwith
+optimizedinference,suchasFlash-Decodingandkernelfusion)tolessthan6seconds(Figure9).
+Even for 32K length, YOCO has about three times speedup in terms of prefilling time. Table 2
+comparesprefillingtimecomplexityofattentionmodulesbetweenTransformerandYOCO.
+3 DesignChoicesofSelf-Decoder
+Wecanchoosevariousefficientself-attentionmethodsforself-decoder. Aslongasthemoduleonly
+requiresconstantinferencememory,thecachememorycomplexityoftheself-decoderdependson
+thenumberoflayers. Moreover,agoodmodulechoiceimprovesbothtraininganddeploymentcosts.
+Inthiswork,weusegatedretention(Section3.1)orsliding-windowattention(Section3.2).
+3.1 GatedRetention
+Gatedretention(gRet,akagRetNetorRetNet-3)augmentsretention[SDH+23]withadata-dependent
+gatingmechanism,whichachievestrainingparallelism,goodperformance,andlowinferencecost
+simultaneouslyforsequencemodeling. WeusegRetasthedefaultefficientself-attentionmodule
+intheexperiments. Themethodunifiestheparallel,recurrent,andchunkwiserecurrentcomputa-
+tionparadigms. Thesethreerepresentationsareequivalentandcanobtainthesamecomputation
+results. Thetrainingprocessusuallyusestheparallelorchunkwiserecurrentparadigms,whilethe
+inferencestagecanemploytherecurrentparadigmforconstantKVmemory. Wedescribethethree
+representationsasfollows:
+TheParallelRepresentation Thegatedretentionisdefinedas:
+Q=(XW )⊙Θ, K =(XW )⊙Θ, V =XW , Θ =einθ
+Q K V n
+ n
+(cid:89)
+γ =sigmoid(XW )1/τ, D
+= γ i, n≥m
+(4)
+γ nm i=m+1
+
+0, n<m
+⊺
+gRet(X)=(QK ⊙D)V
+whereW ,W ,W ∈Rd×dandW ∈Rd×1arelearnableweights,andthetemperaturetermτ en-
+Q K V γ
+couragesγ to1forbettermemorization[YWS+23]. Thedata-controlleddecayishead-wise[Kat23]
+ratherthanelement-wisesothatthecomputationcanfullyutilizeNVIDIAtensorcores. Referto
+[SDH+23]formoredetailsabouttheotherdesigns.
+TheRecurrentRepresentation BeingequivalenttoEquation(4),theoutputofgatedretentioncan
+becomputedrecurrently. Forthen-thtimestep,theoutputisobtainedvia:
+⊺
+S =γ S +K V
+n n n−1 n n
+gRet(X )=Q S , n=1,··· ,|x| (5)
+n n n
+whereQ,K,V,γ arethesameasinEquation(4). Duringauto-regressiveinference,theself-decoder
+maintainsS astheintermediatestateforanefficientgeneration.
+n
+TheChunkwiseRecurrentRepresentation Thechunk-wiserepresentationisaunifiedformulation
+ofrecurrentandparallelrepresentations. GivenchunksizeB,theoutputsarecomputedchunkby
+chunk. Thecomputationisdividedintoinner-chunkandcross-chunkparts. Denote[i]asthei-th
+5chunk,i.e.,x =x ,··· ,x ,wecomputethei-thchunkas:
+[i] (i−1)B+1 iB
+(i−1)B+j
+(cid:89) β (i−1)B+k
+β = γ , D (j,k)= if j ≤k else 0
+(i−1)B+j k [i] β
+(i−1)B+j
+k=(i−1)B+1
+β
+R =K⊺ (V ⊙ iB)+β R , β (j,k)=β (6)
+i [i] [i] β iB i−1 [i] (i−1)B+j
+[i]
+⊺
+gRet(X)=(Q K ⊙D )V +(Q R )⊙β
+[i] [i] [i] [i] [i] i−1 [i]
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Inner-Chunk Cross-Chunk
+whereR istheintermediatestateofthei-thchunk,andβ summarizesthedata-controlleddecayγ.
+i
+TheproofinAppendixBshowstheequivalencebetweenthecomputationparadigms. Thechunkwise
+paradigmcombinesthebestofparallelismandrecurrence,i.e.,savingFLOPscomparedwithfully
+parallel computation and reducing the iterations compared to recurrent computation. During the
+training and prefill stages, the chunk-wise representation increases throughput and reduces GPU
+memoryconsumption.
+Multi-HeadGatedRetention Similartomulti-headattention[VSP+17]andmulti-scalereten-
+tion[SDH+23],weapplygatedretentiontoeachheadandcombinetheoutputstogether:
+head =gRet(X)
+i
+Y =GroupNorm (Concat(head ,··· ,head )) (7)
+h 1 n
+MHGR(X)=(swish(XW )⊙Y)W
+G O
+where W ,W ∈ Rd×d are learnable matrices, and GroupNorm [WH18] normalizes each
+G O
+head[WMH+23]. Wealsoapplyswishgatetoincreasenon-linearity[SDH+23].
+3.2 Sliding-WindowAttention
+Sliding-window attention [CGRS19] restricts the attention range into a fixed window size C. In
+contrast,vanillaTransformerdecodersattendtoallprevioustokens. Duringinference,theKVcache
+memorycomplexitycanbereducedfromO(N)toO(C),i.e.,thememoryusageisconstantrather
+thanincreasingwithsequencelength. Similartomulti-headself-attention[VSP+17],wecompute
+theoutputofsliding-windowattentionvia:
+Q=XW , K =XW , V =XW
+Q K V
+⊺
+head =softmax(Q K +B)V
+i [i] [i]
+(cid:26)0, i−C <j ≤i
+B =
+ij −∞, otherwise (8)
+Y =Concat(head ,··· ,head )
+1 h
+SWA(X)=YW
+O
+whereW ,W ,W ,W ∈Rd×darelearnablematrices,andthewindowcausalmaskBcontrols
+Q K V O
+eachqueryonlyattendstothepreviouskeyswhosedistancesarelessthanC. Thepre-normalization
+andresidualconnectionarealsoappliedtothemodule.
+4 Experiments
+WeevaluateYOCOforlargelanguagemodelsfromthefollowingperspectives. First,wefollowthe
+settingofStableLM-3B-4E1T[TBMR]toscaleuptrainingtokens(Section4.1). Second,wepresent
+thescalingcurvesoftheproposedarchitectures(Section4.2). Third,wescaleuptheYOCOmodel
+to1Mcontextlengthandevaluateitslong-sequencemodelingcapability(Section4.3). Fourth,we
+analyzethedeploymentadvantages,includingGPUmemoryfootprint,servingcapacity,prefilling
+time, and throughput (Section 4.4). Experimental results show that YOCO achieves competitive
+performanceacrossvariousevaluationmetrics. Moreimportantly,theproposedmethodsignificantly
+reducestheinferencecost.
+6Model ARC-C ARC-E BoolQ Hellaswag OBQA PIQA Winogrande SciQ Avg
+Trainingwith1Ttokens
+OpenLLaMA-3B-v2 0.339 0.676 0.657 0.700 0.260 0.767 0.629 0.924 0.619
+StableLM-base-alpha-3B-v2 0.324 0.673 0.646 0.686 0.264 0.760 0.621 0.921 0.612
+StableLM-3B-4E1T — 0.666 — — — 0.768 0.632 0.914 —
+YOCO-3B 0.379 0.731 0.645 0.689 0.298 0.763 0.639 0.924 0.634
+Trainingwith1.6Ttokens
+StableLM-3B-4E1T — 0.688 — — — 0.762 0.627 0.913 —
+YOCO-3B 0.396 0.733 0.644 0.698 0.300 0.764 0.631 0.921 0.636
+Extendingcontextlengthto1Mtokens
+YOCO-3B-1M 0.413 0.747 0.638 0.705 0.300 0.773 0.651 0.932 0.645
+Table3: EvalHarness[GTA+23]resultscomparedwithpreviouswell-trainedTransformerlanguage
+models[TBMR,Tow,GL23]. Wescalethe3Bmodelto1.6trilliontrainingtokens. The1Tand
+1.6TresultsofStableLM-3B-4E1Taretakenfromitstechnicalreport[TBMR]. YOCO-3B-1Mis
+extendedtothecontextlengthof1Mtokens.
+4.1 LanguageModelingEvaluation
+Wetraina3B-sizeYOCOlanguagemodelsbyscalingupthenumberoftrainingtokens. Thenwe
+comparethecheckpointswithstrongTransformer-basedlanguagemodels.
+Setup We use a similar training recipe as in StableLM-3B-4E1T [TBMR]. We adjust the head
+dimensionto128insteadof80asinStableLMforbetterkernelsupport. Inordertokeepthemodel
+size unchanged, we set the hidden size to 3072 and the number of layers to 26. Grouped-query
+attention[ALTdJ+23]isused,wherethenumberofqueryheadsis24,andthenumberofkey-value
+heads is 8. We train YOCO with gated retention (Section 3.1). The non-embedding parameter
+countis2.8B.Incomparison,StableLM-3B-4E1Tis2.7BandOpenLLaMA-v2-3B[GL23]is3.2B.
+Thetrainingsequencelengthis4096. Thebatchsizeis4Mtokens. WeusetheAdamW[LH19]
+optimizerwithβ =0.9,0.95. Themaximallearningrateis3.2e-4with1000warmupstepsandlinear
+decayto1.28e-5. Thetotalscheduleissetto5Ttokens. Wetrainthemodelwith400ksteps(i.e.,
+1.6Ttokens)giventheresourcebudget. Thecuratedtrainingcorpusissimilarto[TBMR]. Weuse
+tiktoken-cl100k_baseasthetokenizer. DetailedhyperparametersaredescribedinAppendixC.
+Results Table3comparestheYOCOcheckpointswithOpenLLaMA-v2-3B[GL23],StableLM-
+base-alpha-3B-v2[Tow],andStableLM-3B-4E1T[TBMR]. WeuseLMEvalHarness[GTA+23]to
+evaluatethezero-shotperformanceonvariousdownstreamtasks.OpenLLaMA-v2-3BandStableLM-
+base-alpha-3B-v2 are trained with 1T tokens. The intermediate numbers of StableLM-3B-4E1T
+are taken from its technical report [TBMR]. Experimental results across end tasks indicate that
+YOCOachievescomparableresultswithpreviouswell-tunedTransformerlanguagemodels. Boththe
+checkpointstrainedwith1Ttokensand1.6Ttokensobtainconsistenttrend. Moreover,theresults
+showthatYOCOisscalableintermsoftrainingtokens.
+4.2 ScalabilityComparedwithTransformers
+We compare the scaling curves between 3.6
+Llama Transformer [VSP+17, TLI+23], Transformer
+3.5 YOCOSWA
+YOCOwithgatedretention(YOCO ;Sec-
+gRet YOCOgRet
+tion 3.1), and YOCO with sliding-window 3.4
+attention(YOCO ;Section3.2). Wetrain
+SWA 3.3
+languagemodelsofvarioussizes(i.e.,160M,
+3.2
+400M,830M,1.4B,2.7B,6.8B,and13B)us-
+ingthesametrainingdataandsettings. The 3.1
+validationlossisusedastheevaluationmet-
+3.0
+ric. Thescalinglaw[KMH+20]issupposed
+toextrapolatelarger-sizeperformance. 2.9
+Setup WeaugmenttheTransformerarchi- 100 101
+tecturewithLlama[TLI+23]improvements, #Parameters (B)
+Figure4: LMlossdecreasesalongwithscalingup
+suchasRMSNorm[ZS19],SwiGLU[Sha20],
+themodelsize(rangingfrom160Mto13B).
+andremovingbias. Theslidingwindowsize
+7
+ssoLNeedle Retrieval Across 1M Context ("Needle In A HayStack")
+0 1.0
+9
+18 0.8
+27
+36
+0.6
+45
+54
+0.4
+63
+72
+81 0.2
+90
+100 0.0
+128K 256K 384K 512K 640K 768K 896K 1M
+Context Length
+Figure5: Needle-in-a-haystackresultsin1Mlength.
+Model Size N =1 N =2 N =4 N =8
+YaRN-Mistral-128K[PQFS23] 7B 0.02 0.12 0.08 0.20
+LWM-1M-text[LYZA24] 7B 1.00 0.90 0.76 0.62
+MiniCPM-128K[HTH+24] 2.4B 1.00 1.00 0.54 0.56
+ChatGLM3-128K[ZLD+22] 6B 0.94 0.72 0.52 0.44
+YOCO-3B-1M 3B 0.98 0.98 0.84 0.56
+Table4: Multi-needleretrievalaccuracy. N indicatesthenumberofneedles. N =1issingle-needle
+retrievalusedasareference,andN >1indicatesthemulti-needletest. Theevaluationisconducted
+in128Klength,becausemostpreviouslong-contextmodelsaretunedwiththislength.
+of YOCO is 1,024. We align the number of parameters by adjusting the FFN intermediate
+SWA
+dimension. Thetrainingbatchsizeis0.25Mtokenswitha2ksequencelength. Wetrainthemodels
+with40ksteps,i.e.,10Btokens. Inpractice,wefindthatthesettingiseffectiveforlossconvergence,
+andthescalinglawscanbewell-fitted. MorehyperparametersaredetailedinAppendixD.
+Results Figure4reportsthevalidationlosswithvariousparametercounts. Wealsofitthescaling
+curvesasin[KMH+20].YOCOobtainscomparableperformancefrom160Mto13Bcomparedtothe
+Llama-optimizedtransformerarchitecture. ThefindingsdemonstratethatYOCOscaleseffectively
+with respect to model size. Moreover, YOCO outperforms Transformer and YOCO . The
+gRet SWA
+gainscomefromhybridarchitecturesofattentionandretention,whoseinductivebiasestendtobe
+complementarytoeachother. Weobservedsimilargainsbyinterleavingtheattentionandretention
+modules(1:3). Recenthybridarchitectures[LLB+24]alsoconfirmsimilarfindings.
+4.3 Long-ContextEvaluation
+WeextendthecontextlengthofYOCO-3B(Section4.1)to1Mtokens. Weevaluatelong-context
+modelsonneedleretrievalandlanguagemodelingtasks.
+Wecontinuethemodeltrainingwithlongerlengthsprogressively. Thelengthscheduleis64K,256K,
+and1Mtokens. Thebatchsizeiskeptthesameasbefore. ThelearningrateandRoPE[SLP+21]
+θaresetasinTable7. Trainingdataisup-sampledaccordingtosequencelength[FPN+24]. Fora
+faircomparison,wedonotuselong-instructiontuningdata. Moretrainingdetailsaredescribedin
+AppendixE.AchunkparallelismalgorithmforYOCOisproposedinAppendixA,whichreduces
+communicationoverheadandGPUmemoryfragmentationinourexperimentsof1Mlength.
+NeedleInAHaystack Thepressuretestevaluateswhethermodelscanretrieve“needles”fromalong
+document[Kam23]. WefollowtheevaluationsettingofGemini1.5[RST+24]andLWM[LYZA24].
+The needles are constructed as a city with a magic number. We run 10 times at the same depth
+and length. The averaged accuracy is reported. Figure 5 shows that YOCO-3B-1M passes the
+Needle-In-A-Haystacktestwithnearperfectaccuracy. TheresultsindicatethatYOCOhasstrong
+long-contextmodelingcapability.
+8
+)%(
+htpeD
+erocS(a)Bookdata. (b)Repository-levelcodedata.
+Figure6: Cumulativeaveragenegativelog-likelihoodonbookandrepository-levelcode. Wefilter
+thevalidationexamplesthatarelongerthan1Mtokens. YOCOachievesimprovedperformancewith
+longercontext,i.e.,utilizinglong-distanceinformationforlanguagemodeling.
+Multi-Needle Retrieval Besides the above single-needle retrieval, we conduct a multi-needle
+evaluation. We compare YOCO-3B-1M with previous long-context language models, including
+MiniCPM-128K [HTH+24], ChatGLM3-128K [ZLD+22], YaRN-Mistral-128K [PQFS23], and
+LWM-1M-text [LYZA24]. The evaluation is conducted in 128K sequence length, because most
+previousmodelsaretunedwiththislength.
+Table4reportstheaccuracywithN needles.Amongthesemodels,LWM-1M-textandYOCO-3B-1M
+aretrainedwitha1Mcontextlength,whiletheothersarein128Klength. AlthoughLWM-1M-text
+continuestrainingofLlama-2-7B,YOCO-3B-1Mcanstillachievecomparableperformancewith
+half the model size. Moreover, the 7B-size YaRN-Mistral-128K [PQFS23] obtained by postion
+interpolationlagsbehindtheothermodels. ComparedtoMiniCPM-128KandChatGLM3-128K,
+YOCO-3B-1Malsooutperformsthesewell-trainedlanguagemodels.
+PerplexityoverLongSequences Figure6showsthecumulativeaveragenegativelog-likelihood
+(NLL)asafunctionofcontextlength. Weevaluatebothbookandrepository-levelcodedata. We
+follow the setting of [RST+24] and filter validation data that are longer than 1M tokens. NLL
+decreasesconsistentlywithlongersequencelength. TheresultsindicatethatYOCOcaneffectively
+utilizelong-distancedependencyforlanguagemodeling. WealsoobservethattheNLL-lengthcurves
+tendtofitthepowerlaw,wherethegapsareaffectedbythenoisewithinthevalidationexamples.
+4.4 InferenceAdvantages
+Weanalyzeinferenceefficiencyfromvariousperspectives,suchasGPUmemoryfootprint,prefilling
+latency, throughput, and serving capacity. We demonstrate that YOCO reduces the deployment
+cost by orders of magnitude, especially for long-sequence inference. More importantly, the user
+experience(suchaslatency)isimprovedwhilemaintaininggoodperformanceandreducingexpenses.
+We compare YOCO with Transformer. The default model configuration follows Section 4.1.
+gRet
+NoticethatTransformerusesgrouped-queryattention[ALTdJ+23],Flash-Decoding[DHMS23],and
+kernelfusionforafaircomparison. AsdescribedinSection3.1, gatedretentionusesthechunk-
+recurrentrepresentationintheprefillstage,andtherecurrentrepresentationinthegenerationstage.
+Thechunksizeissetto256.WeimplementaTriton[TC19]kernelforgatedretention.Theevaluation
+sequencelengthisrangingfrom32Kto1M.Thelast1,024tokensaresupposedtobegenerated,
+whiletheprevioustokensaregiveninputcontext. TheexperimentsareconductedwithH100-80GB
+GPUcards.
+GPUMemory Theinferencememoryconsumptionismadeupofthreeparts,namelymodelweights,
+intermediateactivation,andKVcache. Figure7bpresentsthebreakdownmemoryprofilingresults.
+Alongwithanincreaseincontextlength,themainmemorybottleneckbecomesKVcaches,while
+modelweightsconsumeconstantmemory. TheresultsshowthatYOCO alleviatestheactivation
+gRet
+costandKVcachememoryfootprint.
+9120
+30 Transformer 120
+KV Cache
+100 YOCO Weight
+15 2.32x 3.01x 100 Other 1.95x
+80 80
+0
+32K 64K 128K 9.38x 9.38x
+60 60
+40
+40 6.39x
+4.16x 20
+20
+Transformer YOCO
+32K 256K 512K 1M
+(b) Breakdown memory con-
+Length
+sumptionin1Mcontextlength.
+(a)InferencememoryofTransformerandYOCOacrossvariouslengths.
+Figure7: GPUmemoryconsumptionduringinference.
+Transformer
+600
+YOCO
+500
+400
+80x
+300
+200 64x
+100 40x
+32x
+24x
+12x
+0
+1.2B 2.5B 6.4B 13B 30B 65B
+Model Size
+Figure8: GPUmemoryconsumptionofKVcacheforeachtokenwithdifferentmodelsize. YOCO
+cansavemoreforlargermodelsize.
+AsshowninFigure7a,thememorycostissignificantlyreducedusingYOCO.Moreover,thememory
+consumptionofYOCOincreasesslowlyalongthesequencelength. Forexampleof1Mlength,the
+overallinferencememoryusageisonly12.4GB,whileTransformersoccupy9.4×GPUmemory.
+YOCOmakesitfeasibletodeploylong-sequencemodelingoncustomer-levelGPUs. Evenwith
+a 32K sequence length, YOCO requires about 2× less memory than Transformer. Although we
+compare3B-sizemodelshere,thereductionratiobecomeslargerasthenumberoflayersincreases.
+Figure8reportstheGPUmemoryconsumptionofKVcacheforeachtoken. AsYOCOonlycaches
+onelayerofglobalkey-valuepairs,itneedsroughlyLtimesfewermemorycomparedtoTransformer.
+For example, YOCO can serve 128K tokens with 1GB GPU memory, while Transformer with
+GQA[ALTdJ+23]canonlysupport1.6Ktokensat65Bmodelsize.
+PrefillingLatency Intheprefillstage,themodelencodesinputtokensinparallel. Asshownin
+Figure9,theprefillinglatencyisapainpointofuserexperienceforlong-contextmodels. For512K-
+and1M-lengthinputsequences,Transformerneedsabout180secondsand300seconds,respectively.
+ThecomputationalcomplexityofTransformerisO(N2),whichrequiresalargenumberofFLOPs
+forlongcontext. Incontrast,YOCO’sprefillingtimeisO(N),growinglinearly(Section2.3)along
+thesequencelength.
+Figure9showsthatYOCOreducestheTransformerprefillingtimefrom180secondstolessthan6
+secondsfor512Kcontext. AsdescribedinSection2.3,theprefillstagecanearlyexitbeforeentering
+cross-decoder. So,thereisatleasttwotimesspeedupofprefillinglatencyevenforshortcontext. For
+example,YOCOis2.87×fasterthanTransformerfor32Klength.
+10
+)BG(
+yromeM
+UPG
+noitpmusnoC
+yromeM
+ehcaC
+VK
+)nekoT
+/
+BK(
+)BG(
+yromeM
+UPGTransformer
+300
+YOCO
+40
+250 8.36x
+20 5.05x
+2.87x
+200
+0
+32K 64K 128K 71.82x
+150
+100 30.3x
+50 15.55x
+0
+32K 256K 512K 1M
+Length
+Figure9: Prefillinglatencyfordifferentlength,i.e.,theencodingtimeofgiveninputpromptbefore
+generatingthefirsttoken. Transformer’stimegrowsquadraticallywhileYOCO’sgrowslinearly.
+Evenforashortinputlength,suchas32K,YOCOcanstillaccelerate2.87×.
+2.72x
+600 Transformer
+YOCO
+500
+400
+2.57x
+300
+200
+2.77x
+100 4.37x
+9.56x
+0
+32K 64K 128K 256K 512K
+Context Length
+Figure10: InferencethroughputofTransformerandYOCOvaryingthecontextlength.
+Throughput Thethroughputindicateshowmanytokensthemodelcanprocesspersecond,involving
+bothpre-fillingandgenerationtime. Figure10showsthatYOCOachieveshigherthroughputacross
+contextlengthscomparedtoTransformer.Fortheexampleof512Kqueries,Transformer’sthroughput
+is4.5token/swhileYOCOreaches43.1token/s,i.e,achieving9.6×speedup. Thethroughputis
+improved for the following reasons. First, YOCO decreases the time required for prefilling as
+previouslydemonstrated. Second,asthememoryconsumptionisreduced,wecanuselargerbatch
+sizeforinference,whichalsocontributestothethroughputimprovement.
+5 Conclusion
+In this work, we propose a decoder-decoder architecture (YOCO) for large language modeling.
+YOCOachievessignificantlybetterinferenceefficiencyandcompetitiveperformancecomparedwith
+Transformers. Experimental results demonstrate that YOCO achieves favorable results for large
+languagemodelsundervarioussettings,i.e.,scalingupnumberoftrainingtokens,scalingupmodel
+size,andscalingupcontextlengthto1Mtokens. ProfilingresultsalsoshowthatYOCOimproves
+inferenceefficiencybyordersofmagnitude,especiallyforlong-sequencemodeling.
+Theworkcanbeadvancedfromthefollowingperspectives:
+• YOCO+BitNet+Groq. GroqachievesveryhighthroughputbyputtingallthingswithinSRAM.
+However, the memory capacity bottleneck limits the model size and input token count. Now,
+hundredsofchipsareconnectedtohostjustonemodel. Asasolution,YOCOreducesKVcache
+11
+)s(
+emiT
+gnilliferP
+)s/nekot(
+tuphguorhTmemory,andBitNetreducesmodelweightmemory. TheLLMdeploymentcostisexpectedtobe
+reducedbyordersofmagnitudeusingtheabovecombination.
+• YOCOforMultimodalLargeLanguageModels. TheYOCOlayoutisgeneraltotheuseof
+multipleself-decoders. Thecross-attentionlayersarenaturalformultimodalfusion[BWD+22,
+WBD+22]. Thecausaldependencyofself-decodersalsoperfectlyfitsinstreamingvideo. The
+asyncmultimodallargelanguagemodelscanavoiddifferentdatasteamsblockeachother,whichis
+criticalforreal-timeapplications,suchasrobotics.
+• OptimizedMechanismforKVCacheModule. Figure2explicitlyhighlightsKVcache,which
+opens up new opportunities to develop native memory mechanisms. First, we can integrate
+a cache compression mechanism to obtain more compact memory. Second, we can build an
+index [WDC+23] for efficient key-value retrieval. As YOCO reuses caches, it enables us to
+maintain only one index rather than creating an index for each layer. Third, the disentangled
+modelingsupportspre-cachingcontext,whichispotentiallyusefulfornativeRAGandLLM-native
+searchengines.
+Acknowledgement
+WewouldliketoacknowledgeBenHuntleyformaintainingtheGPUcluster. Thelong-sequence
+trainingutilizesCUBE,whichisaninternalversionof[LML+23]. WeimplementtheTritonkernelof
+gatedretentionbasedonFLA[YZ24].
+References
+[AET+23] SimranArora,SabriEyuboglu,AmanTimalsina,IsysJohnson,MichaelPoli,James
+Zou,AtriRudra,andChristopherRé. Zoology: Measuringandimprovingrecallin
+efficientlanguagemodels. arXivpreprintarXiv:2312.04927,2023.
+[ALTdJ+23] Joshua Ainslie, James Lee-Thorp, Michiel de Jong, Yury Zemlyanskiy, Federico
+Lebrón,andSumitSanghai. Traininggeneralizedmulti-querytransformermodelsfrom
+multi-headcheckpoints. arXivpreprintarXiv:2305.13245,2023.
+[BMR+20] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,Prafulla
+Dhariwal,ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,Sand-
+hiniAgarwal,ArielHerbert-Voss,GretchenKrueger,TomHenighan,RewonChild,
+AdityaRamesh,DanielZiegler,JeffreyWu,ClemensWinter,ChrisHesse,MarkChen,
+Eric Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess, Jack Clark, Christopher
+Berner,SamMcCandlish,AlecRadford,IlyaSutskever,andDarioAmodei. Language
+modelsarefew-shotlearners. InAdvancesinNeuralInformationProcessingSystems,
+volume33,pages1877–1901.CurranAssociates,Inc.,2020.
+[BWD+22] HangboBao,WenhuiWang,LiDong,QiangLiu,OwaisKhanMohammed,KritiAggar-
+wal,SubhojitSom,SonghaoPiao,andFuruWei. VLMo: Unifiedvision-languagepre-
+trainingwithmixture-of-modality-experts. InAliceH.Oh,AlekhAgarwal,Danielle
+Belgrave,andKyunghyunCho,editors,AdvancesinNeuralInformationProcessing
+Systems,2022.
+[CGRS19] RewonChild,ScottGray,AlecRadford,andIlyaSutskever.Generatinglongsequences
+withsparseTransformers. URLhttps://openai.com/blog/sparse-transformers,2019.
+[DCLT19] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. BERT: Pre-
+trainingofdeepbidirectionaltransformersforlanguageunderstanding. InProceedings
+ofthe2019ConferenceoftheNorthAmericanChapteroftheAssociationforComputa-
+tionalLinguistics: HumanLanguageTechnologies,Volume1(LongandShortPapers),
+pages4171–4186,Minneapolis,Minnesota,June2019.AssociationforComputational
+Linguistics.
+[DFS+22] TriDao,DanielYFu,KhaledKSaab,ArminWThomas,AtriRudra,andChristopher
+Ré.Hungryhungryhippos:Towardslanguagemodelingwithstatespacemodels.arXiv
+preprintarXiv:2212.14052,2022.
+12[DHMS23] TriDao,DanielHaziza,FranciscoMassa,andGrigorySizov. Flash-Decodingforlong-
+contextinference. https://crfm.stanford.edu/2023/10/12/flashdecoding.
+html,2023.
+[DMD+23] JiayuDing,ShumingMa,LiDong,XingxingZhang,ShaohanHuang,WenhuiWang,
+NanningZheng,andFuruWei. Longnet: Scalingtransformersto1,000,000,000tokens.
+arXivpreprintarXiv:2307.02486,2023.
+[FPN+24] YaoFu,RameswarPanda,XinyaoNiu,XiangYue,HannaHajishirzi,YoonKim,and
+Hao Peng. Data engineering for scaling language models to 128k context. ArXiv,
+abs/2402.10171,2024.
+[GD23] AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestate
+spaces. arXivpreprintarXiv:2312.00752,2023.
+[GL23] XinyangGengandHaoLiu. OpenLLaMA:AnopenreproductionofLLaMA. https:
+//github.com/openlm-research/open_llama,2023.
+[GTA+23] LeoGao,JonathanTow,BaberAbbasi,StellaBiderman,SidBlack,AnthonyDiPofi,
+CharlesFoster, LaurenceGolding, JeffreyHsu, AlainLeNoac’h, HaonanLi, Kyle
+McDonell,NiklasMuennighoff,ChrisOciepa,JasonPhang,LariaReynolds,Hailey
+Schoelkopf,AviyaSkowron,LintangSutawika,EricTang,AnishThite,BenWang,
+KevinWang,andAndyZou. Aframeworkforfew-shotlanguagemodelevaluation,12
+2023.
+[HTH+24] ShengdingHu,YugeTu,XuHan,ChaoqunHe,GanquCui,XiangLong,ZhiZheng,
+Yewei Fang, Yuxiang Huang, Weilin Zhao, et al. Minicpm: Unveiling the po-
+tential of small language models with scalable training strategies. arXiv preprint
+arXiv:2404.06395,2024.
+[Kam23] GregKamradt. NeedleinaHaystack-pressuretestingllms. https://github.com/
+gkamradt/LLMTest_NeedleInAHaystack/tree/main,2023.
+[Kat23] TobiasKatsch.Gateloop:Fullydata-controlledlinearrecurrenceforsequencemodeling.
+arXivpreprintarXiv:2311.01927,2023.
+[KMH+20] Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess,
+RewonChild,ScottGray,AlecRadford,JeffreyWu,andDarioAmodei. Scalinglaws
+forneurallanguagemodels. CoRR,abs/2001.08361,2020.
+[LH19] IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. InInterna-
+tionalConferenceonLearningRepresentations,2019.
+[LLB+24] Opher Lieber, Barak Lenz, Hofit Bata, Gal Cohen, Jhonathan Osin, Itay Dalmedi-
+gos, Erez Safahi, Shaked Meirom, Yonatan Belinkov, Shai Shalev-Shwartz, Omri
+Abend,RazAlon,TomerAsida,AmirBergman,RomanGlozman,MichaelGokhman,
+Avashalom Manevich, Nir Ratner, Noam Rozen, Erez Shwartz, Mor Zusman, and
+Yoav Shoham. Jamba: A hybrid Transformer-Mamba language model. CoRR,
+abs/2403.19887,2024.
+[LML+23] Zhiqi Lin, Youshan Miao, Guodong Liu, Xiaoxiang Shi, Quanlu Zhang, Fan Yang,
+SaeedMaleki,YiZhu,XuCao,ChengLi,MaoYang,LintaoZhang,andLidongZhou.
+SuperScaler: SupportingflexibleDNNparallelizationviaaunifiedabstraction,2023.
+[LXLY21] ShengguiLi,FuzhaoXue,YongbinLi,andYangYou. Sequenceparallelism: Making
+4dparallelismpossible. arXivpreprintarXiv:2105.13120,2021.
+[LYZA24] HaoLiu,WilsonYan,MateiZaharia,andPieterAbbeel.Worldmodelonmillion-length
+videoandlanguagewithringattention. arXivpreprintarXiv:2402.08268,2024.
+[LZA23] HaoLiu,MateiZaharia,andPieterAbbeel. Ringattentionwithblockwisetransformers
+fornear-infinitecontext. arXivpreprintarXiv:2310.01889,2023.
+13[PDC+22] Reiner Pope, Sholto Douglas, Aakanksha Chowdhery, Jacob Devlin, James Brad-
+bury,AnselmLevskaya,JonathanHeek,KefanXiao,ShivaniAgrawal,andJeffDean.
+EfficientlyscalingTransformerinference. ArXiv,abs/2211.05102,2022.
+[PQFS23] BowenPeng, JeffreyQuesnelle, HongluFan, andEnricoShippole. Yarn: Efficient
+contextwindowextensionoflargelanguagemodels. arXivpreprintarXiv:2309.00071,
+2023.
+[RSR+20] ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,Michael
+Matena,YanqiZhou,WeiLi,andPeterJ.Liu. Exploringthelimitsoftransferlearn-
+ingwithaunifiedtext-to-texttransformer. JournalofMachineLearningResearch,
+21(140):1–67,2020.
+[RST+24] MachelReid,NikolaySavinov,DenisTeplyashin,DmitryLepikhin,TimothyLillicrap,
+Jean-baptisteAlayrac,RaduSoricut,AngelikiLazaridou,OrhanFirat,JulianSchrit-
+twieser,etal. Gemini1.5: Unlockingmultimodalunderstandingacrossmillionsof
+tokensofcontext. arXivpreprintarXiv:2403.05530,2024.
+[SDH+23] YutaoSun,LiDong,ShaohanHuang,ShumingMa,YuqingXia,JilongXue,Jianyong
+Wang,andFuruWei. Retentivenetwork: Asuccessortotransformerforlargelanguage
+models. arXivpreprintarXiv:2307.08621,2023.
+[Sha20] NoamShazeer. Gluvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,
+2020.
+[SIE+23] UriShaham,MaorIvgi,AviaEfrat,JonathanBerant,andOmerLevy. Zeroscrolls: A
+zero-shotbenchmarkforlongtextunderstanding. arXivpreprintarXiv:2305.14196,
+2023.
+[SLP+21] JianlinSu,YuLu,ShengfengPan,BoWen,andYunfengLiu. Roformer: Enhanced
+transformerwithrotarypositionembedding. arXivpreprintarXiv:2104.09864,2021.
+[TBMR] JonathanTow,MarcoBellagente,DakotaMahan,andCarlosRiquelme. StableLM3B
+4E1T. https://aka.ms/StableLM-3B-4E1T.
+[TC19] PhilippeTilletandDavidCox. Triton: anintermediatelanguageandcompilerfortiled
+neuralnetworkcomputations. InProceedingsofthe3rdACMSIGPLANInternational
+WorkshoponMachineLearningandProgrammingLanguages,pages10–19,2019.
+[TLI+23] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,
+Timothée Lacroix, Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal Azhar,
+et al. Llama: Open and efficient foundation language models. arXiv preprint
+arXiv:2302.13971,2023.
+[Tow] Jonathan Tow. StableLM Alpha v2 models. https://huggingface.co/
+stabilityai/stablelm-base-alpha-3b-v2.
+[VSP+17] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanN.
+Gomez,LukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. InAdvancesin
+NeuralInformationProcessingSystems30: AnnualConferenceonNeuralInformation
+ProcessingSystems2017,4-9December2017,LongBeach,CA,USA,pages6000–
+6010,2017.
+[WBD+22] WenhuiWang,HangboBao,LiDong,JohanBjorck,ZhiliangPeng,QiangLiu,Kriti
+Aggarwal,OwaisKhanMohammed,SakshamSinghal,SubhojitSom,etal. Imageas
+aforeignlanguage: BEiTpretrainingforallvisionandvision-languagetasks. arXiv
+preprintarXiv:2208.10442,2022.
+[WDC+23] WeizhiWang,LiDong,HaoCheng,XiaodongLiu,XifengYan,JianfengGao,and
+FuruWei. Augmentinglanguagemodelswithlong-termmemory. InThirty-seventh
+ConferenceonNeuralInformationProcessingSystems,2023.
+[WH18] YuxinWuandKaimingHe. Groupnormalization. InProceedingsoftheEuropean
+conferenceoncomputervision(ECCV),pages3–19,2018.
+14[WMH+23] Hongyu Wang, Shuming Ma, Shaohan Huang, Li Dong, Wenhui Wang, Zhiliang
+Peng,YuWu,PayalBajaj,SakshamSinghal,AlonBenhaim,BarunPatra,ZhunLiu,
+VishravChaudhary,XiaSong,andFuruWei. Magneto: AfoundationTransformer. In
+Proceedingsofthe40thInternationalConferenceonMachineLearning,volume202,
+pages36077–36092,2023.
+[XLM+23] Wenhan Xiong, Jingyu Liu, Igor Molybog, Hejia Zhang, Prajjwal Bhargava, Rui
+Hou,LouisMartin,RashiRungta,KarthikAbinavSankararaman,BarlasOguz,etal.
+Effectivelong-contextscalingoffoundationmodels. arXivpreprintarXiv:2309.16039,
+2023.
+[YWS+23] Songlin Yang, Bailin Wang, Yikang Shen, Rameswar Panda, and Yoon Kim.
+Gatedlinearattentiontransformerswithhardware-efficienttraining. arXivpreprint
+arXiv:2312.06635,2023.
+[YZ24] SonglinYangandYuZhang. FLA:ATriton-basedlibraryforhardware-efficientimple-
+mentationsoflinearattentionmechanism. https://github.com/sustcsonglin/
+flash-linear-attention,2024.
+[ZLD+22] AohanZeng,XiaoLiu,ZhengxiaoDu,ZihanWang,HanyuLai,MingDing,Zhuoyi
+Yang,YifanXu,WendiZheng,XiaoXia,etal. GLM-130B:Anopenbilingualpre-
+trainedmodel. arXivpreprintarXiv:2210.02414,2022.
+[ZS19] BiaoZhangandRicoSennrich. Rootmeansquarelayernormalization. Advancesin
+NeuralInformationProcessingSystems,32,2019.
+15A ChunkParallelismforLong-SequenceTrainingofYOCO
+WeintroducechunkparallelismforYOCOtoreducethecommunicationfrequency, accelerating
+long-sequencetraining. Dividinglongsequencesintodifferentdevicesisessentialwhenthetraining
+lengthisextremelylong[LXLY21,DMD+23]. However,theoverallthroughputtendstobebounded
+by GPU communication [LZA23]. Cross-decoder disentangles self-attention dependency while
+preservingmodelingcapability,bringingintriguingadvantagestodistributedlong-sequencetraining.
+GPU 1 GPU 2
+𝑂 𝑂
+1 2
+𝐾 𝑉
+Cross-Decoder
+All-Gather Once
+𝑄 𝐾 𝑉 𝐾 𝑉 𝑄
+1 1 1 2 2 2
+Project
+𝑀 1 𝑀 2
+Self-Decoder
+𝑋 𝑋
+1 2
+Split
+𝑋
+Figure11: ChunkparallelismofYOCOtrainingontwoGPUdevices. Thetrainingstrategyisto
+partitionthesequenceintodifferentchunks. M denotestheintermediaterepresentationXL/2,i.e.,
+theoutputofself-decoder. Thekeysandvaluesinthecross-decoderareonlygatheredonce.
+Inself-decoder,thedependencyonlyexistsintheadjacentdevices. Forexample,gatedretention
+onlyrequiresthehiddenstateS inEquation(5),andsliding-windowattentionattendstotokens
+n
+withinthecontextwindow. Therefore,thecommunicationamountofself-decoderisrelativelysmall.
+Inthecross-decoder,theall-gatheroperationisonlytriggeredoncefortheKVcache,ratherthan
+communicatingineachlayer. Thehardware-friendlyarchitecturegivesmoreflexibilitytodistributed
+long-sequencetraining.
+B Chunk-wiseRepresentationofGatedRetention
+Weillustratetheequivalencebetweenrecurrentrepresentationandchunkwiserecurrentrepresentation
+ofgatedretention. FortheoutputO ,ncanbesplitasn=kB+rwhereBisthechunksize:
+n
+n n n n kB n
+(cid:88) (cid:89) ⊺ (cid:88) (cid:89) ⊺ (cid:88) (cid:89) ⊺
+O = γ Q K V = γ Q K V + γ Q K V
+n i n m m i n m m i n m m
+m=1i=m+1 m=kB+1i=m+1 m=1i=m+1
+n n
+(cid:88) (cid:89) ⊺ ⊺
+γ Q K V =(Q K ⊙Γ )V
+i n m m n kB+1:n kB+1:n kB+1:n
+m=kB+1i=m+1
+kB n n k−1 B (c+1)B kB
+(cid:88) (cid:89) ⊺ (cid:89) (cid:88) (cid:88) ⊺ (cid:89) (cid:89)
+γ Q K V =(Q γ ) (K V γ ) γ
+i n m m n i m+cB m+cB i i
+m=1i=m+1 i=kB+1 c=0m=1 i=m+cB+1 i=(c+1)B+1
+n−1 k k
+(cid:89) (cid:88) ⊺ (cid:89)
+=(Q γ ) (K (V ⊙ζ )) α
+n i [c] [c] [c] i
+i=kB+1 c=1 i=c+1
+n−1
+(cid:89)
+=(Q γ )R
+n i i−1
+i=kB+1
+(9)
+16whereΓ
+=(cid:81)n
+γ ,ζ
+(j,k)=(cid:81)cB
+γ ,α
+=(cid:81)iB
+γ ,[i]indicatesthei-th
+i k=i+1 i [c] i=(c−1)B+j+1 i i j=(i−1)B+1 j
+chunk,i.e.,x =[x ,··· ,x ]. R iswrittenasarecurrentfunction:
+[i] (i−1)B+1 iB n
+⊺
+R i =K [i](V [i]⊙ζ [i])+α iR i−1 (10)
+Denote [i] as the i-th chunk, i.e., x = [x ,··· ,x ], β =
+(cid:81)(i−1)B+j
+,
+[i] (i−1)B+1 iB (i−1)B+j k=(i−1)B+1
+β (j,k)=β ,Weconcatenatetheoutputinablocktogether:
+[i] (i−1)B+j
+[n] kB n
+(cid:88) ⊺ (cid:88) (cid:89) ⊺
+O = β Q K V + β Q γ K V
+[n] [n] [n] m m [n] [n] i m m
+m=kB+1 m=1 i=m+1
+[n]
+(cid:88) ⊺ ⊺ β (n−1)B+k
+β Q K V =(Q K ⊙D )V , D (j,k)= if j ≤k else 0
+[n] [n] m m [n] [n] [n] [n] [n] β
+(n−1)B+j
+m=kB+1
+kB n
+(cid:88) β Q (cid:89) γ K⊺ V =β Q R , R =K⊺ (V ⊙ β iB)+β R ,
+[n] [n] i m m [n] [n] i−1 i [i] [i] β iB i−1
+[i]
+m=1 i=m+1
+⊺
+O =(Q K ⊙D )V +(Q R )⊙β
+[n] [n] [n] [n] [n] [n] n−1 [n]
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Inner-Chunk Cross-Chunk
+(11)
+Finally,weshowthatthechunkwiserecurrentrepresentationofgatedretentionisequivalenttothe
+othertworepresentations.
+C HyperparametersforYOCO-3B
+WedescribethehyperparametersusedforSection4.1. Thehiddendimensionissetto3072. The
+numberoflayersis26. Thenumberofqueryheadsis24,andthenumberofkey/valueheadsis8with
+grouped-queryattention[ALTdJ+23]. Thetotalnumberofparameterswithoutembeddingis2.83B.
+Thetrainingbatchsizeis4Mtokens. Weuse4096traininglength. TheoptimizerisAdamW[LH19]
+withβ =(0.9,0.95). Thelearningrateis3.2×10−4 with1000warmupsteps. Weseta5T-token
+learningrateschedulewithlineardecayto1.28×10−5.
+Params Values
+Layers 26
+Hiddensize 3072
+FFNsize 8192
+Vocabsize 100,288
+Heads 24
+Key-valueheads 8
+Adamβ (0.9,0.95)
+LR 3.2×10−4
+Batchsize 4M
+Warmupsteps 1000
+Weightdecay 0.1
+Dropout 0.0
+Table5: HyperparamtersusedfortheYOCO-3BmodelinSection4.1.
+D HyperparametersforScalingCurves
+WedescribethehyperparametersusedforSection4.2. Table6reportsthehiddendimension,number
+oflayers,andnumberofheadsusedfordifferentmodelsizes. Theheaddimensionofgatedretention
+issetto256. Toalignthenumberofparameters,theFFNsizeforTransformeris 8dwhiletheFFN
+3
+17sizeforYOCOis3d. Thetraininglengthissetto2048. Thebatchsizeissetto0.25Mtokens. We
+usetheAdamW[LH19]optimizerwithβ = 0.9,β = 0.98. Thelearningrateis1.5×10−4 for
+1 2
+160Mto1.4Bsizesand7.5×10−5for2.7Bto13Bsizes. Thewarmupstepis375withlinearrate
+decay. Theweightdecayissetto0.05. Wetrainthemodelswith40ksteps,i.e.,10Btokens.
+Size HiddenDim. #Layers #Heads
+160M 768 12 12
+400M 1024 24 16
+830M 1536 24 12
+1.4B 2048 24 16
+2.7B 2560 32 20
+6.8B 4096 32 32
+13B 5120 40 40
+Table6: Modelsizeandhyper-parametersusedforscalingcurvesinSection4.2.
+E HyperparametersforLengthExtension
+Weprogressivelyextendthecontextlengthto1MtokensinSection4.3. Thelengthscheduleis64K,
+256K,and1M.Weup-samplethedocumentsthatarelongerthanthetraininglength. Table7shows
+thatweusedifferentRoPEθandlearningrateforeachstage.
+TrainingLength 65,536 262,144 1,048,576
+LearningRate 8×10−5 4×10−5 2×10−5
+RoPEθ 640K 5M 80M
+TrainingTokens 6B 4B 1.5B
+Table7: HyperparamtersusedforlengthextensioninSection4.3.
+F PseudoCodeofGatedRetention
+Wepresentpseudocodeforthethreecomputationparadigmsofgatedretention(Section3.1). Parallel
+implementationenablestrainingparallelismtofullyutilizeGPUs. Therecurrentparadigmenables
+low-costinference. Chunkwiseretentioncombinestheaboveadvantages(i.e.,parallelwithineach
+chunkandrecurrentacrosschunks),whichhaslinearmemorycomplexityforlongsequences.
+def ParallelRetention(
+q, # bsz ∗ num_head ∗ len ∗ dim
+k, # bsz ∗ num_head ∗ len ∗ dim
+v, # bsz ∗ num_head ∗ len ∗ dim
+gt): # bsz ∗ num_head ∗ len
+retention = q @ k.transpose(−1, −2)
+causal_mask = torch.full([q.shape[−2], q.shape[−2]], float("−inf"), device=q.device).
+triu(1).type_as(q)
+gt = F.logsigmoid(gt).cumsum(−1) / gate_logit_normalizer
+mask = (g[..., None] − g[..., None, :] + causal_mask).exp()
+retention = retention ∗ mask
+output = retention @ v
+output = group_norm(output)
+return output
+18def RecurrentRetention(
+q, k, v, # bsz ∗ num_head ∗ dim
+past_kv, # bsz ∗ num_head ∗ dim ∗ dim
+gt # bsz ∗ num_head ∗ 1 ∗ 1
+):
+gt = F.logsigmoid(gt) / gate_logit_normalizer
+current_kv = gt.exp() ∗ past_kv + k.unsqueeze(−1) ∗ v.unsqueeze(−2)
+output = torch.sum(q.unsqueeze(−1) ∗ current_kv, dim=−2)
+output = group_norm(output)
+return output, current_kv
+def ChunkwiseRetention(
+q, k, v, # bsz ∗ num_head ∗ chunk_size ∗ dim
+past_kv, # bsz ∗ num_head ∗ dim ∗ dim
+gt): # bsz ∗ num_head ∗ chunk_size
+gt = F.logsigmoid(gt).cumsum(−1) / gate_logit_normalizer
+cross_retention = (q @ past_kv) ∗ gt[..., None].exp()
+inner_retention = ParallelRetention(q, k, v, gt)
+retention = inner_retention + cross_retention
+output = group_norm(retention)
+value_decay = (−gt + gt[:, :, :, −1, None]).exp()[..., None]
+chunk_decay = gt[..., −1].exp()
+current_kv = chunk_decay ∗ past_kv + k.transpose(−1, −2) @ (v ∗ value_decay)
+return output, current_kv
+G ComparisonswithTransformerVariants
+WecompareYOCO andYOCO withTransformerandothervariants,includingH3[DFS+22],
+gRet SWA
+RetNet[SDH+23],Mamba[GD23],andgRetNet(Section3.1). Allmodelshave160Mparameters
+with 12 layers and a hidden dimension of 768. The weights of word embedding and softmax
+projectionareshared. ForMamba,wefollowallthedetailsinthepaper[GD23],wheredouble-SSM
+layersareimplementedinsteadof“SSM+SwiGLU”.ForH3,theexperimentusesahybridversion
+followingtheoriginalpaper[DFS+22],whereattentionlayersareinsertedintothesecondlayerand
+the L+1layer. ForRetNetandgRetNet,thevaluedimensionisdinsteadof2d,andtheintermediate
+2
+dimensionofSwiGLUis 7dtomatchthenumberofparameters.
+3
+G.1 Fine-GrainedLMPerplexityResults
+Table 8 reports the validation perplexity for language modeling. Following Zoology [AET+23],
+wedividetheperplexityintoAr-Hit,wherethepredictedtokenisabigrampreviouslyseeninthe
+previouscontext,andFirst-Occur,wherethepredictedtokencannotberecalledfromthecontext.
+Valid. Set AR-Hit First-Occur
+Mamba[GD23] 3.645 1.555 4.126
+RetNet[SDH+23] 3.633 1.466 4.131
+HybridH3[DFS+22] 3.591 1.251 4.130
+gRetNet 3.600 1.354 4.116
+Transformer 3.564 1.219 4.104
+YOCO 3.553 1.202 4.094
+SWA
+YOCO 3.530 1.199 4.067
+gRet
+Table8: Fine-grainedperplexityresultsonlanguagemodeling. Wereportperplexityonboththe
+overall validation set and the fine-grained diagnosis sets [AET+23], i.e., “AR-Hit” evaluates the
+associativerecallcapability,and“First-Occur”indicatestheregularlanguagemodelingperformance.
+19G.2 Long-ContextEvaluation
+We evaluate the long-context modeling for the above architectures on four tasks of the Zero-
+SCROLLS[SIE+23]benchmark. Wecontinuetrainingthe160MmodelsinTable8aslong-context
+models. Specifically,wefurthertrainthemodelswith2Btokensin16,384length. Therotationbase
+scaling[XLM+23]isalsousedforlengthextension. ForsparseTransformer, wekeepthe2,048
+contextwindowanddonotchangetherotationbase(i.e.,RoPEθ).
+Qasper GovReport
+4.0 3.0
+3.5 2.8
+3.0 2.6
+2.5
+4096 8192 12288 16384 4096 8192 12288 16384
+Length Length
+QMSum NarrativeQA
+4.0
+6.0
+3.9
+5.5
+3.8
+5.0
+3.7
+4.5
+4096 8192 12288 16384 4096 8192 12288 16384
+Length Length
+Mamba Sparse TRM Hybrid H3 Transformer YOCOgRet
+Figure12: Longsequencetaskperplexitydecreasesalongwiththeincreasinginputlength.
+Figure 12 reports the perplexity of the answers with different input lengths. Among all these
+architectures, YOCO and Transformer consistently perform better than others across tasks and
+lengths.
+20
+LPP
+LPP
+LPP
+LPP

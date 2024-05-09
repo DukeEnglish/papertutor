@@ -1,0 +1,1485 @@
+Multi-fidelity Hamiltonian Monte Carlo
+Dhruv V. Patela, Jonghyun Leeb, Matthew W. Farthingc, Peter K. Kitanidisd, Eric F.
+Darvea
+aDepartment of Mechanical Engineering, Stanford University, Stanford, CA, USA
+bDepartment of Civil and Environmental Engineering, University of Hawai‘i at Manoa, Honolulu, HI, USA
+cU.S. Army Engineering Research and Development Center, Vicksburg, MS, USA
+dDepartment of Civil and Environmental Engineering, Stanford University, Stanford, CA, USA
+Abstract
+Numerousapplicationsinbiology, statistics, science, andengineeringrequiregeneratingsam-
+ples from complex, high-dimensional probability distributions. In recent years, the Hamil-
+tonian Monte Carlo (HMC) method has emerged as a state-of-the-art Markov chain Monte
+Carlo (MCMC) technique, exploiting the shape of such high-dimensional target distribu-
+tions to efficiently generate samples. Despite its impressive empirical success and increasing
+popularity, its wide-scale adoption remains limited due to the high computational cost of
+gradient calculation. Moreover, applying this method is impossible when the gradient of the
+posterior cannot be computed (forexample, with black-boxforward model simulators and/or
+with non-differentiable priors). To overcome these challenges, we propose a novel two-stage
+Hamiltonian Monte Carlo algorithm with a surrogate model that supports cost-effective gra-
+dient computation. In this multi-fidelity algorithm, the acceptance probability is computed
+in the first stage via a standard HMC proposal using an inexpensive differentiable surrogate
+model (which can be based on deep learning (DL)-based surrogate), and, if the proposal is
+accepted, theposteriorisevaluatedinthesecondstageusingthehigh-fidelity(HF)numerical
+solver. Splitting the standard HMC algorithm into these two stages allows for approximating
+the gradient of the posterior efficiently (thus retaining advantages of HMC, such as scalabil-
+ity to high dimensions and faster convergence), while producing accurate posterior samples
+by using HF numerical solvers in the second stage. We demonstrate the effectiveness of this
+algorithm for a range of problems, including linear and nonlinear Bayesian inverse problems
+with in-silico data and a nonlinear hydraulic tomography problem using experimental data.
+The proposed algorithm is shown to seamlessly integrate with various low-fidelity (LF) and
+HF models, priors, and datasets, highlighting its broad versatility and practical applicabil-
+ity. Remarkably, our proposed method outperforms the traditional HMC algorithm in both
+computational and statistical efficiency by several orders of magnitude, all while retaining or
+improving the accuracy in computed posterior statistics. This suggests an enticing potential
+for its adoption as a viable substitute for HMC, even within a white-box setting.
+Keywords: Hamiltonian Monte Carlo, Multi-fidelity modeling, Uncertainty quantification,
+Bayesian inference, Inverse problems
+Preprint submitted to Computer Methods in Applied Mechanics and Engineering May 9, 2024
+4202
+yaM
+8
+]EC.sc[
+1v33050.5042:viXra1. Introduction
+The ability to sample from a probability distribution (which might be known only up to a
+normalizing constant) has wide applications in science and engineering. This capability is of
+paramount importance in biology for generating equilibrium configurations of bio-molecules
+(Boomsma et al., 2013; Habeck et al., 2005). In chemistry, sampling techniques are integral
+to molecular dynamics simulations and the estimation of chemical reaction rates, crucial for
+advancingdrugandmaterialdevelopment(Carteretal.,1989;Rossoetal.,2002;Zhengetal.,
+2013). Sampling methods are also instrumental for computing high-dimensional integrals
+in statistics (Gelfand and Smith, 1990; Brooks et al., 2011) and machine learning (Andrieu
+etal.,2003),forcountingandvolumecomputation(Dyeretal.,1991),andfordeepgenerative
+modeling tasks (Koller and Friedman, 2009; Nijkamp et al., 2019; Ho et al., 2020). In finance,
+sampling is used to find the expected return of portfolio (Detemple et al., 2003). Sampling
+is also key for developing robust optimizers to escape local minima/saddle points and avoid
+overfitting (Welling and Teh, 2011; Dauphin et al., 2014). Lastly, sampling methodologies
+are indispensable for solving Bayesian inverse problems (Dashti and Stuart, 2017; Martin
+et al., 2012; Kaipio and Somersalo, 2006).
+Markov Chain Monte Carlo (MCMC) is a popular method for generating samples from
+unnormalized probability distributions (Gelman et al., 2014). The strength of this method
+lies in the fact that it can produce unbiased samples with convergence guarantees for the
+Quantities of Interest (QoIs) with minimal requirements on the target distribution. There
+exist a variety of MCMC algorithms, such as random-walk Metropolis (Metropolis et al.,
+1953), Gibbs sampling (Geman and Geman, 1984), adaptive Metropolis Hastings (Haario
+et al., 2001). All of these algorithms come with convergence guarantees, but this guarantee
+comes at a price of extremely slow convergence—exploring all the relevant parts of the
+parameter space that has non-negligible probability mass under the given distribution may
+take an unacceptably long time, as these vanilla MCMC methods typically proceed by taking
+random jumps around the current position without taking into account the shape of the
+target distribution.
+Over the years, a variety of methods have been developed to overcome the challenges
+associated with slow convergence. Many of these methods (Roberts and Tweedie, 1996;
+Girolami and Calderhead, 2011; Martin et al., 2012) achieve faster convergence by exploiting
+the geometry of the target probability density. In this manuscript, we limit ourselves to one
+suchmethod—theHamiltonian(orHybrid)MonteCarlo(HMC)method(Duaneetal.,1987;
+Gelman et al., 2014), which is a state-of-the-art MCMC method that utilizes the gradient
+information of the target probability density to improve the overall convergence rate. HMC
+is able to suppress the random walk behavior of vanilla MCMC methods by the clever trick
+of introducing an auxiliary variable scheme that transforms the problem of sampling from a
+target distribution into the problem of simulating Hamiltonian dynamics. HMC has shown
+tremendous promise in a variety of application domains due to its ability to characterize
+high-dimensional probability densities at a faster convergence rate. The cost of HMC per
+independent sample from a target density of dimension D is roughly O(D5/4), which stands
+in sharp contrast with the O(D2) cost of random-walk Metropolis (Creutz, 1988; Hoffman
+2et al., 2014).
+Despite its promising features, several hindrances still impede the widespread adoption of
+HMC for science and engineering problems. Firstly, a major barrier to its universal adoption
+isthestringentrequirementofnecessitatingthegradientofthetargetprobabilitydensity. For
+most practical problems of interest, the analytical formula for this gradient is unavailable,
+mandating its numerical computation. However, computing such a numerical gradient is
+often impossible in many practical settings, such as those involving black-box forward model
+simulators and/or non-differentiable priors. In such scenarios, practitioners must resort to
+other inefficient MCMC methods that do not require gradient computations. Secondly, even
+in application settings where the gradient can be computed with reasonable accuracy (i.e., in
+a white-box setting), the actual gradient computation can be expensive. This is particularly
+true for problems governed by partial differential equations (PDEs), (like the ones considered
+in this manuscript). For such problems, evaluating one gradient typically entails solving two
+PDE problems (a forward and an adjoint problem) (Plessix, 2006), rendering the algorithm
+computationally demanding. As HMC is often run for many steps (on the order of 103–
+105), and each step requires two PDE solves, the computational burden can be significant.
+Finally, the overall efficiency of HMC is highly sensitive to its hyperparameters: the step
+size (ϵ) and the number of leapfrog steps (L). Tuning these parameters for better statistical
+efficiency (higher effective sample size (ESS)) often results in a degradation of computational
+efficiency(Betancourt,2017), asitrequiresagreaternumberofsamples(i.e., morenumberof
+expensiveforwardandadjointsolves). Forexample, whilealongertrajectorylength(= ϵ×L)
+theoretically yields uncorrelated samples and thus improved statistical efficiency (i.e., higher
+ESS), however, it typically comes with a lower acceptance rate for many practical problems,
+necessitating more evaluations of the target density (and its gradient), thereby decreasing
+overall computational efficiency.
+Toovercomethesechallengesinthismanuscript,weproposeanovelMulti-FidelityHamil-
+tonian Monte Carlo (MFHMC) algorithm, which leverages a surrogate forward model with
+aneasy-to-computegradientalongwithahigh-fidelity(HF)numericalsolver. Thistwo-stage
+algorithm enables efficient and accurate sampling while being significantly computationally
+less expensive. While the algorithm proposed in this manuscript is valid for any application
+of generating samples from an un-normalized probability distribution, here we focus on the
+problem of generating samples from the posterior density of a Bayesian inverse problem,
+where the forward model is typically defined by a PDE. Within this context, the method
+proposed here proceeds in two steps:
+1. In the first step, a surrogate model is developed for the forward map (mapping param-
+eter to solution field). One can use any surrogate model, such as a proper orthogonal
+decomposition (POD)-based surrogate or Deep Neural Network (DNN)-based surro-
+gate model for this offline step. The only criteria for this low-fidelity (LF) surrogate
+model is its gradient should be computable cheaply. However, it does not necessarily
+have to be very accurate.
+2. In the second step, this surrogate model is used in the proposed MFHMC algorithm to
+generate samples from the target posterior density. This algorithm, which is the novel
+3contribution of this manuscript, is described briefly below.
+The key idea of the proposed multi-fidelity algorithm (outlined in fig. 1) is to split the
+standard HMC algorithm into two stages:
+MFHMC sampler
+Forward Surrogate forward model Gradient
+Reject
+Update step in HMC proposed
+Markov chain state
+Stage 1
+Accept
+Forward HF numerical solver
+Accept Reject
+Metropolis-Hastings
+proposed state
+Stage 2
+Figure 1: Outline of the proposed two-stage MFHMC algorithm: In the first stage of the algorithm a
+surrogate forward model (with an easy-to-compute gradient) is used in the standard HMC step. If a given
+sample is accepted by this first stage, then it is passed to the second stage, where a high-fidelity numerical
+solver is used in the Metropolis-Hastings step (for which only a forward model evaluation is required with
+no gradient requirement) to produce accurate posterior samples. If a sample is rejected in either stages, we
+stay at the current Markov chain state.
+Stage 1. In the first stage, the surrogate forward model is used (in the likelihood term)
+to propose samples following the standard HMC proposal. Since this surrogate
+model is selected in such a way that its gradient can be computed cheaply, it
+allows the use of the HMC algorithm (which in turn enables scalability to high-
+dimensional parameter space and a faster convergence rate). DNN-based models
+are a particularly appealing choice for such surrogate models, as (by leveraging
+automaticdifferentiationcapabilitiesofmodernmachinelearninglibraries)itallows
+for computing gradients accurately at almost no additional cost.
+Stage 2. The samples accepted by the first stage are passed to the second stage, where the
+HF numerical simulator is used in the Metropolis-Hastings (MH) MCMC step. The
+acceptance ratio for this stage is modified to take into account the first stage. Since
+the MH step does not require any gradient, it opens up the opportunity of using HF
+black-box simulators in this stage to correct errors introduced by the LF surrogate
+model in the first stage and produce accurate posterior samples as output.
+4We note that two-stage MCMC algorithms have been proposed in the past (Christen and
+Fox, 2005; Efendiev et al., 2006). However, these algorithms were developed for random walk
+Metropolis-Hastings MCMC algorithms, which fail to scale to high-dimensional parameter
+space, thus limiting their practical utility. Unlike those works, this manuscript proposes a
+two-stagealgorithmforHMC,thecurrentstate-of-the-artMCMCalgorithmandaworkhorse
+for numerous high-dimensional practical inference problems (as mentioned in the references
+in (Betancourt et al., 2017)).
+The main features/contributions/advantages of the proposed method are summarized
+below:
+1. Black-box simulators: For many applications in science and engineering, the for-
+ward model is defined via a “black-box” simulation code. While these sophisticated
+black-box simulators deliver high-fidelity solutions, unfortunately, they are ill-suited
+when it comes to integrating with HMC. Here, the term “black-box simulator” refers
+to forward model simulators or computer programs (f). These simulators take various
+problem parameters x as input (such as geometric descriptions of the domain, bound-
+ary conditions, initial conditions, and material property distributions), and produce
+corresponding solutions y = f(x). However, their limitations become apparent in
+their inability to provide gradients of the simulator’s output with respect to its inputs,
+i.e., ∂y/∂x remains unavailable. This constraint primarily arises from the complex and
+optimized nature of these simulators, which are often developed over years by multiple
+researchers, utilizing legacy programming languages (such as C or Fortran 77) and
+heavily optimized for forward computations, sometimes with parallel implementations
+(Harbaugh, 2005; Keyes et al., 2013; Hammond et al., 2014). These characteristics
+make it challenging to seamlessly integrate these simulators with modern automatic
+differentiation libraries or require substantial manual intervention to incorporate gra-
+dient functionality in them. This bottleneck prevents the use of the standard HMC
+algorithm for such applications, as it requires reasonably accurate gradient informa-
+tion for robust performance. The method proposed in this manuscript, on the other
+hand, is perfectly suitable for such scenarios, as it can use such black-box simulator in
+conjunction with an appropriate differentiable surrogate model for efficient sampling.
+2. Computation cost: When applied to Bayesian inverse problems with PDE-based for-
+wardmodels, eachstepofastandardHMCalgorithmrequires2×LPDEsolves(where,
+L=no. of leapfrog steps, and the factor of 2 accounts for one forward and one adjoint
+solve required for computing the gradient of the posterior). This can be computation-
+ally prohibitive for many practical problems. In contrast, the algorithm proposed in
+this manuscript can use a DNN-based surrogate model in the first stage and hence can
+leverage its automatic differentiation capabilities to accurately compute the required
+gradient at no additional cost. This approach is not only computationally cheaper but
+also much faster. Furthermore, the acceptance rate of the standard HMC algorithm is
+around 60–70% (Beskos et al., 2013), (i.e., 30 to 40% of samples are discarded). This
+amounts to 2×0.3×L×N to 2×0.4×L×N “wasted” PDE solves (where N=no. of HMC
+samples). As demonstrated in the results section, our proposed algorithm significantly
+5improves the acceptance rate, thus reducing the number of rejected samples and, as a
+result, significantly reducing the number of “wasted” PDE solves.
+3. Statistical efficiency: The proposed two-stage algorithm facilitates a longer Hamil-
+tonian trajectory (without sacrificing acceptance rate) at each step due to the compu-
+tationally inexpensive surrogate model in the first stage. This results in bigger jumps
+andawell-mixedMarkovchain. Duetolongerjumps, theeffectivesamplesize(ESS)of
+the resulting Markov chain is significantly larger. This means the samples are more un-
+correlated, and hence it produces low-variance statistical estimates. This is something
+that is not practically feasible with the traditional HMC algorithm, as taking longer
+jumps often results in a significantly lower acceptance rate, which in turn increases the
+number of high-fidelity simulations required significantly, making it computationally
+prohibitive. Thus, for a given fixed compute budget of HF solves, with traditional
+HMC, one must choose between achieving a better ESS or a better acceptance rate.
+In contrast, MFHMC offers significantly (often orders of magnitude) better ESS and
+acceptance rate simultaneously. This numerical superiority is demonstrated across a
+series of problems in the results section.
+4. Non-differentiable priors: In many applications the use of non-differentiable priors
+is widespread. This include image denoising (Rudin et al., 1992; Chambolle et al.,
+2010), deblurring(BeckandTeboulle,2009), multi-framesuperresolution(Farsiuetal.,
+1996). Other than this, Laplace priors used in Bayesian Lasso regression (Park and
+Casella, 2012), sample-based priors used in Bayesian inversion (Vauhkonen et al., 1997;
+Patel and Oberai, 2019), Total-Variation and Bernoulli-Laplace priors used in sparse
+regularization (Chaari et al., 2013; JJ, 2004; Lee and Kitanidis, 2013) are popular
+examples of such priors. The lack of differentiability of resulting posterior distribution
+prevents using the HMC method for posterior exploration with such priors. This
+leads to two sub-optimal design choices: (i) selecting a non-gradient-based MCMC
+method for posterior exploration and/or (ii) selecting a second-choice prior, which is
+differentiable. In contrast, the method proposed in this manuscript does not face any
+such difficulties and can easily be deployed with non-differentiable priors.
+The remainder of this paper is organized as follows: first, we provide relevant background
+on the HMC algorithm and highlight some of the key features and challenges of this tra-
+ditional HMC algorithm in Section 2. Then we propose our novel MFHMC algorithm in
+Section 3 and show how samples produced by it form a valid Markov Chain in Section 3.1.
+In Section 4 we provide numerical results on a range of test problems involving synthetic
+and experimental data to demonstrate the proposed algorithm’s effectiveness and versatility.
+Finally, we conclude the paper in Section 5 with a brief summary of the paper with potential
+future directions.
+2. Background
+The method proposed in this manuscript is applicable to any sampling (from an unnor-
+malized probability) task. However, to make ideas more concrete, we limit our focus on the
+6sampling problem arising in Bayesian inverse problems. To this end, we first introduce the
+classical Bayesian inverse problem and relevant notations below and then explain how such
+problems can be solved using the traditional single-stage HMC algorithm, followed by our
+proposed two-stage MFHMC algorithm.
+2.1. Bayesian Inverse Problem and Markov Chain Monte Carlo
+Consider the following direct/forward problem
+y˜ = fHF(x)+η, x ∈ Ω ⊂ RN, y˜ ∈ Ω ⊂ RM, (1)
+X Y
+where y˜ is the measured response to some input parameter x, fHF is the direct/forward
+model(oftendescribedviaPDE),andη representsmeasurementand/ormodelingerror. The
+inverse problem aims to recover the unknown parameter x from the noisy and possibly par-
+tial measurement of y˜. Bayesian inference provides a principled probabilistic framework for
+solving such ill-posed problems with quantified uncertainty estimates. Within this approach,
+both the inferred field and the observation are modeled as a realization of random variables,
+X and Y, respectively. Next, a prior probability density pprior(x), which captures all the con-
+X
+straintsandthedomainknowledgeabouttheparametertobeinferred(X)prior toobserving
+measurement (y˜) is assumed. Then this prior probability density is used in conjunction with
+the forward model (fHF) to define the likelihood distribution of observing measurement
+Y = y˜ given X = x, that is plike(y˜|x). For additive measurement noise model, as described
+Y
+in eq. (1), this likelihood distribution could be written as plike(y˜|x) = p (y˜−fHF(x)). Using
+Y η
+Bayes’ rule this yields the following expression for the posterior distribution of X
+plike(y˜|x)pprior(x)
+ppost(x|y˜) = Y X ∝ p (y˜−fHF(x))pprior(x), (2)
+X p (y˜) η X
+Y
+wherep (y˜)iscalledtheevidenceterm,whichnormalizestheposteriordistributionppost(x|y˜)
+Y X
+so that (cid:82) ppost(x|y˜)dx = 1. Ideally, we would like to have access to the full posterior
+X X
+distribution as output to the Bayesian inference. However, since we lack the appropriate
+tools to visualize and understand this high-dimensional probability density, in practice, we
+mostly focus on computing lower-dimensional quantities of the posterior, such as the mean
+x¯ = E [x] = (cid:82) xppost(x|y˜)dx or higher order moments, marginals, and confidence
+x∼ppost X X
+intervals. X
+For PDE-based inverse problems, however, this is problematic as for most of such prob-
+lems the dimension of X is typically equal to the number of nodes (number of degrees
+of freedom to be more precise) in the numerical discretization scheme (such as finite ele-
+ment or finite volume method). For complex real-world problems, this could be as high as
+O(103)–O(109) due to fine spatio-temporal discretization. Computing integral over such a
+high-dimensional space is simply infeasible using numerical integration (such as quadrature-
+based) techniques and the analytical treatment of this integral is not possible (unless for
+a simple and not-so-practical conjugate prior case). This motivates using MCMC methods
+that perform random walks in the parameters space and can generate samples according to
+the posterior probability distribution. Once these samples are generated, a simple Monte
+Carlo sum can be taken of these samples to approximate the integral.
+72.2. MCMC methods and Metropolis-Hastings
+Markov Chain Monte Carlo (MCMC) methods can generate samples from any unnor-
+malized probability distribution, such as pU(post)(x|y˜) := p (y˜−fHF(x))pprior(x). For this,
+X η X
+MCMC methods construct a Markov Chain whose stationary distribution is the target un-
+normalized posterior density. This is achieved by assuming an initial distribution π and a
+0
+transition kernel K, and constructing the following sequence of random variables:
+X ∼ π , X ∼ K(·|X ). (3)
+0 0 t+1 t
+In order for the pU(post) to be the stationary distribution of the Markov Chain, three condi-
+X
+tions must be satisfied: the kernel K must be irreducible and aperiodic (these are usually
+mild conditions and are satisfied) and pU(post) has to be a fixed point of K. This last con-
+X
+dition can be expressed as: p(x′) = (cid:82) K(x′|x)pU(post)(x)dx. This condition is often satisfied
+X
+by satisfying the detailed balance equation described as: p(x′)K(x|x′) = p(x)K(x′|x).
+Givenanyproposaldistributionq,wecaneasilyconstructatransitionkernelthatrespects
+detailed balance using Metropolis-Hastings accept/reject rules. More formally, starting from
+x ∼ π , ateachstept, wesamplex′ fromageneraltransitionprobailitydistributionq(·|X ),
+0 0 t
+and with probability
+(cid:18) p(x′)q(x |x′)(cid:19)
+α(x′|x ) = min 1, t ,
+t p(x )q(x′|x )
+t t
+accept x′ as the next sample x in the chain and reject the sample x′ with the probability
+t+1
+1 − α(x′|x ) and retain the previous state, i.e., x = x . For typical proposals, this
+t t+1 t
+algorithm converges to the target density in an asymptotic sense. However, this comes
+at the cost of very slow mixing (very slow traversal along the parameter space) as these
+algorithms are simply taking random jumps without considering the target distribution’s
+geometry. Hamiltonian Monte Carlo (HMC) method tackles this problem of slow mixing by
+exploiting the geometry of the target density. Specifically, it uses the gradient information of
+the target density to make bigger proposal jumps in the parameter space along the regions
+of high probability.
+2.3. Hamiltonian Monte Carlo
+In the Hamiltonian Monte Carlo algorithm (first introduced as “Hybrid Monte Carlo”
+in Duane et al. (1987)), the state space to be inferred (x) is augmented with a fictitious
+momentum variable ξ ∈ RN. Then the canonical joint posterior density is defined as
+ppost(x,ξ|y˜) ∝ exp{−H(x,ξ)},
+where
+∥ξ∥2
+H(x,ξ) := −log ppost(x|y˜)+
+2
+is the Hamiltonian of the system. Here, the Hamiltonian H(x,ξ) := U(x) + K(ξ), where
+the potential energy U(x) := −log ppost(x|y˜) is a function of x only and the kinetic energy
+K(ξ) := ∥ξ∥2 is a function of ξ only. This separation of variables helps in defining the
+2
+8Algorithm 1: Single Stage Hamiltonian Monte Carlo Algorithm
+Input: U(x) = −logppost(x|y˜),K(ξ) = ξTξ/2, step size (ϵ), number of leapfrog
+steps (L), number of HMC steps (m)
+Result: x ,x ,··· ,x
+1 2 m
+Choose a starting point x
+1
+for i = 1, ···, m-1 do
+Set x(0) = x
+i i
+Draw ξ ∼ N(0,1)
+0
+Make half-step update of ξ
+ξ(0) = ξ −ϵ∇ U(x(0))/2
+0 x i
+for l = 1, ···, L-1 do
+Make full-step update of x
+x(l) = x(l−1) +ϵξ(l−1)
+i i
+Make full-step update of ξ
+ξ(l) = ξ(l−1) −ϵ∇ U(x(l))
+x i
+end
+Make final update of x
+x(L) = x(L−1) +ϵξ(L−1)
+i i
+Make final half-step update of ξ
+ξ(L) = ξ(L−1) −ϵ∇ U(x(L))/2
+x i
+Negate momentum at the end of trajectory to make the proposal symmetric
+ξ(L) = −ξ(L)
+Compute acceptance probability
+(cid:110) (cid:111)
+α(x(0),x(L)) = min 1,exp(−U(x(L))−K(ξ(L))+U(x(0))+K(ξ(0)))
+i i i i
+Set x to
+i+1
+(cid:40)
+x(L), with probability α(x(0),x(L))
+x = i i i
+i+1 x(0), with probability 1−α(x(0),x(L))
+i i i
+end
+Return x ,x ,··· ,x
+1 2 m
+9update rule for each variable. Interested readers are referred to Neal (2012) for a more
+detailed discussion on HMC.
+ThedetailedalgorithmforHMCisprovidedinAlg. 1. Ashighlightedinthisalgorithm(in
+magenta)asinglestepofHMCrequiresmultipleevaluationsof∇ U(x). Thisrequireshaving
+x
+access to the gradient of the posterior distribution since ∇ U(x) = −∇ logppost(x|y˜).
+x x X
+This, in turn, requires expensive computation of the gradient of the forward model since
+−∇ logppost(x|y˜) = −∇ logpprior(x)−∇ logplike(y˜−fHF(x)). This is not tractable for
+x X x X x Y
+black-box/expensive forward models. The two-stage Multi-fidelity HMC algorithm proposed
+below tackles this problem.
+3. Multi-fidelity HMC (MFHMC)
+Let fLF denote the surrogate forward model for fHF, and let ppost(LF)(x|y˜) ∝ p (y˜ −
+η
+fLF(x))pprior(x) and ppost(HF)(x|y˜) ∝ p (y˜−fHF(x))pprior(x) denote the posterior density
+X η X
+induced by the surrogate forward model and the high-fidelity forward model, respectively.
+Typical examples of fHF may include forward models defined by accurate numerical solvers
+(based on finite element or finite volume methods, for example), while fLF may include
+computationally inexpensive and relatively less accurate surrogate models (based on proper
+orthogonal decomposition or deep neural networks, for example).
+The overall idea of the proposed two-stage MFHMC algorithm as outlined in Section 1
+and fig. 1 is as follows:
+Stage 1. We use fLF (and corresponding ppost(LF)(x|y˜)) in a standard HMC iteration (de-
+scribed above) as the first stage. So, at ith iteration/step of MFHMC (with x as
+i−1
+current inferred variable state and ξ as momentum variable), we propose (xLF,ξ)
+0
+by following the Hamiltonian dynamics steps. And we set xHF to
+(cid:40)
+xLF, with probability αLF(x ,xLF)
+xHF = i−1 (4)
+x , with probability 1−αLF(x ,xLF)
+i−1 i−1
+where, αLF(x ,xLF) is the acceptance probability for this first (LF) stage and is
+i−1
+defined as
+(cid:8) (cid:9)
+αLF(x ,xLF) = min 1,exp(−U(LF)(xLF)−K(ξ)+U(LF)(x )+K(ξ ))
+i−1 i−1 0
+(5)
+Note that this is the standard acceptance probability for HMC (as also shown in
+Section 2.3). The only difference being the potential energy is computed using fLF,
+i.e., U(LF)(x) := −logppost(LF)(x).
+Stage 2. Next, we accept xHF as a sample with probability
+(cid:26) ppost(HF)(xHF|y˜)ppost(LF)(x |y˜)(cid:27)
+αHF(x ,xHF) = min 1, i−1 (6)
+i−1 ppost(HF)(x |y˜)ppost(LF)(xHF|y˜)
+i−1
+i.e., set x = xHF with probability αHF(x ,xHF) and x = x with probabil-
+i i−1 i i−1
+ity 1−αHF(x ,xHF).
+i−1
+10Algorithm 2: Multi-fidelity Hamiltonian Monte Carlo (MFHMC) Algorithm
+Input: ppost(HF)(x|y˜), ppost(LF)(x|y˜), step size (ϵ), number of leapfrog steps (L),
+number of HMC steps (m), U(LF)(x) := −logppost(LF), K(ξ) := ξTξ/2
+Result: x ,x ,··· ,x
+1 2 m
+Choose a starting point x
+0
+for i = 1, ···, m do
+xLF = x First Stage
+i−1
+Draw ξ ∼ N(0,1)
+0
+Make half-step update of ξ
+ξ = ξ −ϵ∇ U(LF)(xLF)/2
+0 x
+for l = 1, ···, L-1 do
+Make full step update of x
+xLF = xLF +ϵξ
+Make full step update of ξ
+ξ = ξ −ϵ∇ U(LF)(xLF)
+x
+end
+Make last half-step update of x
+xLF = xLF +ϵξ
+Make half-step update of ξ
+ξ = ξ −ϵ∇ U(LF)(xLF)/2
+x
+Negate momentum at the end of trajectory to make the proposal symmetric
+ξ = −ξ
+Compute acceptance probability for the first (LF) stage
+(cid:8) (cid:9)
+αLF(x ,xLF) = min 1,exp(−U(LF)(xLF)−K(ξ)+U(LF)(x )+K(ξ ))
+i−1 i−1 0
+Set xHF to
+(cid:40)
+xLF, with probability αLF(x ,xLF)
+xHF = i−1
+x , with probability 1−αLF(x ,xLF)
+i−1 i−1
+Compute acceptance probability for the second (HF) model Second Stage
+(cid:110) (cid:111)
+αHF(x ,xHF) = min 1, ppost(HF)(xHF|y˜)ppost(LF)(x i−1|y˜)
+i−1 ppost(HF)(x |y˜)ppost(LF)(xHF|y˜)
+i−1
+Set sample x to
+i
+(cid:40)
+xHF, with probability αHF(x ,xHF)
+i−1
+x =
+i x , with probability 1−αHF(x ,xHF)
+i−1 i−1
+end
+Return x , x , ···, x
+1 2 m
+11Note that in the above two-stage algorithm, if the proposed sample at the end of Hamil-
+tonian trajectory xLF is rejected by the first stage, x will be sent to the second stage
+i−1
+(i.e., xHF = x ). Now, since αHF(x ,x ) = 1, no further high-fidelity computation
+i−1 i−1 i−1
+is needed in the second stage and we can simply set x = x . Thus, the expensive high-
+i i−1
+fidelity solve can be avoided for the samples which are unlikely to be accepted. In contrast,
+traditional HMC (Section 2.3) require 2×L high-fidelity evaluation for every proposed state
+even if that proposed state is rejected in the end.
+Moreover, in this two-stage algorithm, gradient computation is solely required in the first
+stage (for the HMC proposal step), where the surrogate model fLF is used. This surrogate
+is selected in such a way that its gradient can be computed in an expensive yet fast manner
+(using automatic differentiation, for example), whereas in the second stage (Metropolis-
+Hastings step) where fHF is used, no gradient calculation is required. Hence, accurate
+black-box forward model simulators can also be used for this stage. One can think of the
+first stage of the MFHMC algorithm as a first-pass filter that filters out “bad” samples, which
+are less likely to be accepted and thus saves expensive high-fidelity solves for them, whereas
+the second stage corrects the error introduced by the use of the surrogate model in the first
+stage for posterior calculation and results in accurate sampling from the true posterior. This
+is ensured by the acceptance probability for the second stage (eq. (6)). We show in the next
+section that this acceptance probability (αHF(·,·)) satisfies the detailed equation (eq. (10))
+and results in a valid Markov chain. The detailed two-stage MFHMC algorithm is provided
+in Alg. 2.
+3.1. Analysis of MFHMC
+Next, we will analyze the MFHMC algorithm in more detail following (Efendiev et al.,
+2006). Denote
+E = {(x,ξ);ppost(HF)(x,ξ) > 0},
+E∗ = {(x,ξ);ppost(LF)(x,ξ) > 0},
+D = {(x,ξ);q(x,ξ|x ,ξ ) > 0 for some (x ,ξ ) ∈ E}.
+i−1 i−1 i−1 i−1
+The set E is the support of the target posterior distribution ppost(HF)(x,ξ). It contains
+all the possible tuples of the inferred variable and momentum variable (x,ξ) which has a
+positive probability of being accepted as a sample. Similarly, E∗ is the support of the low
+fidelity posterior distribution ppost(LF)(x,ξ), which contains all tuples (x,ξ) which can be
+accepted by the first stage of our algorithm. D contains proposals which can be generated by
+the proposal distribution q(x,ξ|x ,ξ ). For the MFHMC algorithm to work properly,
+i−1 i−1
+the following two conditions must hold all the time: E ⊆ D and E ⊆ E∗. If one of these
+conditions is not true, for example, say, E ̸⊆ E∗, then there will exist a subset K ⊂ (E\E∗)
+such that
+(cid:90) (cid:90)
+ppost(HF)(K) = ppost(HF)(x,ξ)dxdξ > 0 and ppost(LF)(K) = ppost(LF)(x,ξ)dxdξ = 0
+K K
+12which means no elements of K can pass the first stage of MFHMC and K will never be
+visited by the final chain despite its samples having a positive probability of being accepted
+by ppost(HF) and hence the resulting Markov chain will not be sampled properly.
+For most practical purposes, the conditions E,E∗ ⊂ D can be naturally satisfied by
+selection of appropriate proposal distribution q(x,ξ|x ,ξ ). By choosing the appropriate
+i−1 i−1
+value of the likelihood variance in ppost(LF) the condition E ⊂ E∗ can also be satisfied. Thus
+E ⊂ E∗ ⊂ D. In this case, E∗ is identical to the support of the transition probability
+distribution Q(x,ξ|x ,ξ ) = α(LF)((x ,ξ ),(x,ξ))q(x,ξ|x ,ξ ):
+i−1 i−1 i−1 i−1 i−1 i−1
+E∗ = {(x,ξ);Q(x,ξ|x ,ξ ) > 0 for some (x ,ξ ) ∈ E}.
+i−1 i−1 i−1 i−1
+Due to the very high dimension of the joint field (x,ξ), the support E of the tar-
+get distribution ppost(HF) is much smaller than the support D of the proposal distribution
+q(x,ξ|x ,ξ ). For all the proposed samples (x,ξ) ∈ (D\E), they will never be accepted
+i−1 i−1
+as valid samples in the final Markov chain in the traditional single-stage HMC algorithm
+resulting in huge computation waste since ppost(HF)(x,ξ) = 0. In the proposed MFHMC
+algorithm, however, the transition probability distribution Q(x,ξ|x ,ξ ) (which acts as
+i−1 i−1
+an effective proposal distribution for the second stage) samples from a much smaller support
+E∗, hence avoids solving expensive HF problem for all (x,ξ) ∈ D\E∗. For each iteration, the
+MFHMC algorithm only requires the HF simulation r times in average, where
+(cid:90)
+r = α(LF)((x ,ξ ),(x,ξ))q(x,ξ|x ,ξ ) < 1.
+i−1 i−1 i−1 i−1
+E∗
+Note that (cid:82) q(x,ξ|x ,ξ ) = 1 and α(LF)((x ,ξ ),(x,ξ)) ≤ 1. If E∗ is close to
+D i−1 i−1 i−1 i−1
+E and hence much smaller than D, then r ≪ 1. Therefore, the proposed MFHMC method
+requires much fewer HF simulations while approximately still accepting the same amount of
+proposals. In other words, the MFHMC algorithm can achieve a much higher acceptance
+rate for each HF simulation (as also demonstrated via numerical experiments in Section 4).
+Detailed balance for MFHMC
+Next we will discuss the stability properties of the MFHMC algorithm and show that
+it shares the same convergence property as the traditional HMC algorithm. For this, we
+will show that the resulting Markov chain is ergodic, irreducible, and aperiodic by proving
+the satisfaction of the detailed balance equation. Denote by K the transition kernel of
+the Markov chain {x } generated by the MFHMC algorithm and let augmented variable
+i
+s := (x,ξ) denote the current state of both inferred variable x and momentum variable ξ.
+Since the effective proposal distribution is given by
+(cid:18) (cid:90) (cid:19)
+Q(s|s ) = α(LF)(s ,s)q(s|s )+ 1− α(LF)(s ,s)q(s|s ) δ (s) (7)
+i−1 i−1 i−1 i−1 i−1 si−1
+The transition kernel of the overall Markov chain is given by
+K(s ,s) = α(HF)(s ,s)Q(s|s ) for s ̸= s (8)
+i−1 i−1 i−1 i−1
+(cid:90)
+K(s ,{s}) = 1− α(HF)(s ,s)Q(s|s ) for s = s (9)
+i−1 i−1 i−1 i−1
+s̸=si−1
+13It is easy to show that this transition kernel satisfies the detailed balance equation
+ppost(HF)(s )K(s ,s) = ppost(HF)(s)K(s,s ) (10)
+i−1 i−1 i−1
+for any s,s ∈ E. The above equality is obviously true when s = s . When s ̸= s
+i−1 i−1 i−1
+then from the definition of the transition kernel of the overall Markov chain eq. (8) we have
+ppost(HF)(s )K(s ,s) = ppost(HF)(s )α(HF)(s ,s)Q(s|s )
+i−1 i−1 i−1 i−1 i−1
+(cid:26) ppost(HF)(s)ppost(LF)(s )(cid:27)
+= ppost(HF)(s )Q(s|s )min 1, i−1
+i−1 i−1 ppost(HF)(s )ppost(LF)(s)
+i−1
+(cid:8) (cid:9)
+= min Q(s|s )ppost(HF)(s ),Q(s |s)ppost(HF)(s))
+i−1 i−1 i−1
+(cid:26) Q(s|s )ppost(HF)(s ) (cid:27)
+= min i−1 i−1 ,1 Q(s |s)ppost(HF)(s))
+Q(s |s)ppost(HF)(s)) i−1
+i−1
+= α(HF)(s,s )Q(s |s)ppost(HF)(s))
+i−1 i−1
+= ppost(HF)(s)K(s,s ).
+i−1
+So the detailed balance is always satisfied. Using the above relation, we can easily show that
+(cid:90)
+ppost(HF)(A) = K(s,A)ds
+for any A ∈ B(A), where B denotes all the Borel measurable subset of E and hence ppost(HF)
+is indeed the stationary distribution of K.
+4. Numerical Validation and Results
+In this section, we present the numerical results obtained through the application of the
+proposed MFHMC algorithm. We initiate this exploration with a systematic study focused
+on an analytically tractable high-dimensional target distribution. Through careful selection
+of various low-fidelity models, we conduct performance comparisons between MFHMC and
+HMC across different computational budgets, as determined by the number of target density
+evaluations. Subsequently, we consider both linear as well as non-linear Bayesian inverse
+problems commonly encountered in computational science and engineering.
+Inference problems and datasets: We investigate four distinct inference problems to
+showcasetheversatilityandapplicabilityoftheMFHMCalgorithmacrossdifferentscenarios:
+(i) Sampling from a 250-dimensional ill-conditioned multi-variate normal distribution (Sec-
+tion 4.1), (ii) Initial condition inversion problem for the transient diffusion equation (Section
+4.2), (iii) Coefficient inversion problem for an elliptical PDE (Section 4.3), (iv) Hydraulic
+tomography (a coefficient inversion problem in Darcy’s flow with mixed boundary condition
+(Section 4.4)). Our experimentation embraces diverse high- and low-fidelity forward models,
+diverse prior models, and real-world datasets, ensuring a comprehensive assessment:
+1. High-fidelity (HF) forward models encompass finite difference-based (Section 4.2) and
+finite element-based (Section 4.3, 4.4) solvers, mirroring common practices in scientific
+and engineering domains.
+14Metric Formula Descriptive details
+No. of accepted moves Accepted moves = # of accepted HF
+Accepted moves/n
+per HF evaluation hf moves; n = # of HF evaluations
+hf
+Effective sample size
+ESS/n Eq.(11)
+per HF evaluation hf
+Relative Error in v is a posterior statistic
+||vMCMC−vtrue||2 ×100%
+posterior stat. (in %) ||vtrue||2 such as mean or covariance
+Expected Squared Jump
+ESJD/n Eq.(12)
+Distance per HF eval. hf
+Table 1: Performance evaluation metrics
+2. Low-fidelity (LF) forward models include truncated SVD-based (Section 4.2.1, 4.2.2)
+and deep learning-based surrogate models leveraging fully connected (Section 4.2.2)
+and convolutional networks (Section 4.3, 4.4).
+3. Different prior models such as Gaussian priors (Section 4.2.1) and data-driven/deep
+generative priors (Section 4.2.2, 4.3, 4.4) offer insights into different Bayesian modeling
+strategies.
+4. Diverse Datasets for the inferred and measured field for different problems includ-
+ing parametric (rectangular) dataset with simulated measurement (Section 4.2, 4.3.1),
+channelized flow dataset mimicking subsurface groundwater channel with simulated
+measurement (Section 4.3.2), and the experimental dataset obtained from a lab-scale
+study (Section 4.4) ensure robust validation across different scenarios.
+This methodical diversity substantiates the algorithm’s adaptability and extends the rele-
+vance of our findings to broad practical contexts.
+Baseline: For baseline we consider a single-stage HMC algorithm, which is currently
+one of the state-of-the-art MCMC algorithms. For both HMC and MFHMC we use burn-in
+period of 0.25.
+Performance evaluation metrics: In order to compare the relative performance of
+the proposed MFHMC algorithm to the baseline standard single-stage HMC algorithm, we
+consider four different metrics for computational efficiency and accuracy. These are: the
+number of accepted moves per HF evaluations (Accepted moves/n ), effective sample size
+hf
+per HF evaluations (ESS/n ), the relative error in posterior statistics, and the ESJD (ex-
+hf
+pected square jump distance) per HF evaluations (ESJD/n ). A detailed description of
+hf
+these metrics is provided below.
+Effective Sample Size:
+M
+ESS/n = min (11)
+hf (cid:16) (cid:17)
+d={1,···,D} n 1+2(cid:80)M−1(1− s )ρd
+hf s=1 M s
+15where,
+ρd = Cov(xd,xd )/Var(xd)
+s t t+s t
+Here, x ,x ,··· ,x refers to the post burn-in samples of an MCMC chain of length M
+1 2 M
+and dimension D, and n refers to the number of HF evaluations. Cov(·) and Var(·) refers
+hf
+to covariance and variance.
+Note that following (Parno and Marzouk, 2018), while the autocorrelation calculation
+(ρd) in eq. (11) uses only the samples produced after the burn-in period, the normalized
+s
+values of ESS reported in all numerical experiments (ESS/n ) use all HF evaluations (for
+hf
+n value). Thus, the cost of burn-in is reflected in these normalized performance metric.
+hf
+Additionally, the minimum value of ESS is reported across the dimensions D of the Markov
+chainasaconservativeestimateoftheoveralleffectivesamplesize,asthisdimensiontypically
+determines the overall convergence and reliability of the Markov chain.
+Expected Squared Jump distance:
+E [∥x −x ∥2]
+ESJD/n = π t+1 t (12)
+hf
+n
+hf
+where π refers to the distribution or measure, which represents the underlying probability
+distribution of the Markov Chain.
+4.1. 250-dimensional ill-conditioned multivariate normal (MVN)
+This study aims to systematically quantitatively evaluate MFHMC versus HMC across
+various fixed computation budgets. To achieve this, we focus on a problem where the target
+distribution(alongwithitsmomentssuchasmeanandcovariance)isknown. Thisknowledge
+enables the computation and comparison of the accuracy of these moments.
+Specifically, we consider a 250-dimensional ill-conditioned multivariate Gaussian distri-
+bution with zero mean and a known precision matrix AHF, i.e.,
+(cid:18) (cid:19)
+1
+ppost(HF)(x) := N(0,ΣHF = AHF−1 ) ∝ exp − xTAHFx . (13)
+2
+The matrix AHF was generated from Wishart distribution with an identity scale matrix
+and 250 degrees of freedom. This yields a target distribution with a strongly correlated
+covariance matrix (ΣHF = AHF−1). A similar target distribution is used in previous studies
+(Hoffman et al., 2014, 2021).
+We consider multiple LF target distributions to assess the effect of the fidelity of the LF
+model on the overall performance of MFHMC. These different LF distributions are param-
+eterized by a scalar parameter γ as follows:
+γ
+ΣLF := ΣHF + ×trace(ΣHF)×I(d).
+d
+where d = 250 is the dimension of x and I(d) denotes identity matrix of dimension 250.
+Thus, by changing the value of γ, we get different ΣLF and as a consequence different
+ppost(LF)(x) := N(0,ΣLF = ALF−1 ).
+16We consider four different LF models by selecting γ = [10−4,10−5,10−6,10−7] which corre-
+sponds to [17.65%,2.14%,0.22%,0.02%] relative error in precision matrix respectively (de-
+(cid:16) (cid:17)
+fined as ALF−AHF ×100).
+AHF
+Figure2: ComparisonofthenumberofacceptedmovesperHFevaluationforHMCandMFHMCatdifferent
+computation budgets (as defined by the number of HF target distribution evaluations (n )). To minimize
+hf
+the influence of randomness, each experiment was performed with five different random seeds. Each data
+point in the figure represents the average value of these five experiments.
+Figures 2 and 3 present a relative comparison between the HMC and MFHMC algorithms
+(utilizingdifferentLFmodels)concerningbothcomputationalandstatisticalefficiency, while
+fig. 4 provides a comparison of their accuracy. These comparisons are conducted across
+various trajectory lengths (ϵ × L) and fixed computation budgets defined by the number
+of HF target density (eq. (13)) evaluations (n ), ranging from n = [1×104,2×104,3×
+hf hf
+104,4×104,5×104].
+From these figures, it can be observed that for very small trajectory lengths, both HMC
+and MFHMC make very small jumps. Consequently, they can only explore a small region
+of the parameter space within the given fixed maximum compute budget of n = 5×104,
+hf
+leading to high errors in posterior covariance estimates. Furthermore, the samples exhibit
+high correlation due to these smaller jumps, resulting in lower values of ESS/n for both
+hf
+methods (with slightly better ESS/n for MFHMC compared to HMC).
+hf
+However, the distinction between the two algorithms becomes evident when we increase
+the values of ϵ and L to reasonable trajectory lengths. For these longer trajectories, both
+algorithms make substantial jumps in the parameter space. However, with HMC, most
+samples are rejected due to the sampler often venturing into low-probability regions of the
+17Figure 3: Comparison of effective sample size (ESS) per HF evaluation for HMC and MFHMC at different
+computation budgets (as defined by the number of HF target distribution evaluations (n )). To minimize
+hf
+the influence of randomness, each experiment was performed with five different random seeds. Each data
+point in the figure represents the average value of these five experiments.
+18Figure 4: Comparison of relative error in covariance (in %) for HMC and MFHMC at different computation
+budgets (as defined by the number of HF target distribution evaluations (n )). To minimize the influence
+hf
+of randomness, each experiment was performed with five different random seeds. Each data point in the
+figure represents the average value of these five experiments.
+19parameter space with such large jumps. This results in a very small number of accepted
+moves/n value across all compute budgets. Posterior covariance statistics computed with
+hf
+such few samples naturally lead to very high errors, as depicted in fig. 4.
+In contrast, MFHMC does not face these challenges with long trajectory lengths due
+to its two-stage structure. Consider a scenario where a jump leads into a low-probability
+region. The first (LF) stage of MFHMC will likely reject such samples, reducing the need
+for expensive HF evaluations for such “bad” samples. Consequently, most samples passed to
+the second stage for HF evaluation are likely in high-probability regions and are eventually
+accepted (provided the LF model is sufficiently close to the HF model). This results in a
+high number of accepted moves per n for MFHMC, as shown in fig. 2.
+hf
+Furthermore, since MFHMC achieves a high acceptance rate for the second stage, it
+generates many more accepted samples for any given fixed compute budget. This improves
+the approximation of the target posterior significantly, leading to a substantial reduction in
+the error of posterior covariance estimates compared to HMC ( fig. 4). Additionally, as the
+samples accepted by MFHMC are less correlated, it yields a significantly higher ESS per n
+hf
+value across all compute budgets compared to HMC, almost an order of magnitude better.
+This underscores an important feature of MFHMC: it achieves significantly better ESS
+and acceptance rates simultaneously while selecting (ϵ,L) for longer jumps, eliminating
+the trade-off faced with traditional HMC between achieving a better acceptance rate (with
+shorter jumps) or a better effective sample size (with longer jumps)
+Another intriguing observation from these figures is that in MFHMC, as the fidelity of
+the LF model increases (moving from γ = 1e − 4 to 1e − 7), the overall performance of
+MFHMC improves. This improvement is reflected in higher accepted moves per n , higher
+hf
+ESS per n , and reduced error in the posterior. This observation is intuitive since a more
+hf
+accurate LF model better mimics the behavior of the HF model. Consequently, it does a
+better job of filtering out bad samples in the first stage and passing good samples to the
+second stage, increasing the likelihood of acceptance by the HF model. This underscores the
+importance of using an accurate LF surrogate model in MFHMC.
+4.2. Initial condition inversion
+We next consider the problem of inferring the initial condition for the transient heat
+conduction problem given the noisy temperature measurement at some later time.
+∇·(α∇u(s,t)) = ∂u(s,t)/∂t s ∈ Ω,t ∈ (0,T] (14)
+u(s,0) = m(s) s ∈ Ω (15)
+u(s,t) = g(s,t) s ∈ ∂Ω,t ∈ (0,T] (16)
+where Ω ⊂ R2 is a square domain with length = 2π units and α = 0.64 unit is thermal
+diffusivity. u(s,t) is temperature at location s at time t, and m(s) is the initial condition
+for temperature. Here, the parameter to infer x is the nodal values of initial condition m(s)
+and the measurement y is the nodal values of final temperature u(s,T). The corresponding
+inverse problem is given noisy temperature-field measurements y˜ at later time t = T = 1
+unit infer the posterior distribution corresponding to the initial condition of temperature
+20x. This is an ill-posed problem as significant information is lost via diffusion as we move
+forward in time.
+We choose the second-order finite difference scheme in the spatial domain and backward
+Euler scheme in the temporal domain to solve the forward problem in (14) numerically. This
+leads to the following linear forward problem relating the inferred field (initial condition,
+m(s)) to the measured field (final temperature, u(s,T))
+y = Fx, (17)
+where x is a vector of nodal values of initial condition m(s) and y is a vector of nodal values
+of final temperature field u(s,T). For our numerical experiment, we discretize the spatial
+domain in 32 nodal points in each direction and the temporal domain in 100 time steps.
+This will act as our forward model for HMC and the HF model for MFHMC.
+In Bayesian inversion, we are interested in inferring the posterior density
+ppost(x|y˜) ∝ plike(y˜|x)pprior(x)
+X Y X
+To test the universality of the proposed algorithm, we consider two different prior distribu-
+tions pprior(x): (i) Gaussian priors, and (ii) Generative Adversarial Network (GAN)-based
+X
+priors(Patel et al., 2022).
+4.2.1. Gaussian priors
+In this section, we select a Gaussian distribution for
+prior and likelihood distribution with zero mean and
+constant variance. Specifically, we select pprior(x) =
+X
+plike(y˜|x) = N(0,σ2I ) with σ = 0.1. While selecting
+Y N
+a Gaussian distribution for likelihood is relatively com-
+mon, it is not common to select a Gaussian distribution
+for the prior for such problem. However, here, we select a
+Gaussian for a conjugate prior case allowing an analytical
+solution for the resulting posterior distribution. This, in
+turn, will allow us to compare the posterior QoIs obtained
+by our proposed two-stage HMC algorithm with the “true”
+QoIs. We again use the single-stage HMC algorithm as a Figure 5: True initial condition (x).
+baselinetocompareourmethod’scomputationalefficiency
+and accuracy. For this Gaussian prior case, we use a truncated singular value decomposition
+(TSVD) model as a surrogate (fLF) forward model. We consider five different surrogate
+forward models based on five different numbers of retained modes in TSVD: 25, 50, 75, 100,
+200. Figure5showsthe“true” (discretized)initialconditionfield. Usingthisinitialcondition
+in Eq.(17), the final temperature at time t = T is obtained, and then uncorrelated Gaussian
+noise (with zero mean and 0.01 variance) is added to it (to avoid inverse crime) to obtain
+the synthetic measured temperature field (shown in fig. 6 (leftmost panel)).
+Next, we use this measured temperature field y˜ to obtain the posterior distribution
+ppost(x|y˜) and compute its mean. We first compute the analytical solution for the mean for
+X
+21this conjugate prior case. This is shown in the second column of fig. 6. Next, we compute the
+posterior mean using the samples produced by the single-stage HMC algorithm (described
+in Section 2). The results for this case are shown in the third column of fig. 6. Finally, we
+compute the posterior mean using the multi-fidelity HMC algorithm. We report results for
+all five surrogate models (model 1: 25 modes, model 2: 50 modes, model 3: 75 modes, model
+4: 100 modes, model 5: 200 modes) in the last five columns of fig. 6. As can be observed
+from these subplots, the computed mean with the proposed method is in good qualitative
+agreement with the analytical solution as well as the solution obtained from the benchmark.
+Both single-stage and two-stage HMC algorithms were run for a fixed number of (20,000)
+MCMC steps, and the step size and the number of leapfrog steps were tuned to obtain the
+target acceptance ratio in the range of 0.6–0.7 following the recommendations of (Beskos
+et al., 2013).
+Figure 6: Qualitative comparison of the posterior mean for a Gaussian prior case. First column: measured
+field. Second column Analytical solution. Third column: posterior mean computed using the single-stage
+HMC.4–8column: posteriormeancomputedusingtheproposedMFHMCalgorithmwithdifferentsurrogate
+models. Each of these models is based on truncated SVD with a different number of retained modes. Model
+1: 25 modes, Model 2: 50 modes, Model 3: 75 modes, Model 4: 100 modes, Model 5: 200 modes.
+Next, we compare the proposed algorithm quantitatively with the single-stage HMC
+algorithm in table 2. We can observe the following points from table 2:
+• Significant improvement in the acceptance ratio can be achieved with the two-stage
+algorithm. This translates into a smaller number of wasted HF simulations. This is
+Table 2: Quantitative comparison of HMC and different MFHMC models (for Gaussian prior with TSVD-
+based surrogate model)
+Acceptance rate Acceptance rate No. of HF No. of rejected Error in
+Model Modes
+(LF) (HF) evaluations HF evaluations mean (%)
+Model 1 25 0.59 0.76 11845 2885 4.03
+Model 2 50 0.58 0.98 11664 213 3.47
+Model 3 75 0.59 0.99 11779 33 3.17
+Model 4 100 0.59 0.99 11720 5 3.13
+Model 5 200 0.59 1.0 11775 0 3.31
+Model 2a 50 0.02 0.98 445 5 3.65
+Model 5a 200 0.02 1.0 447 0 3.33
+1 stage HMC 900 (all) — 0.59 400000 163500 3.21
+22possible because most of the “bad” samples are filtered out by the first stage (without
+needing expensive an HF simulation and thus achieving considerable computational
+saving). And most of the samples passed to the second stage by the surrogate model
+are already of high quality and so they are retained by the second stage with high
+probability. This is not the case with the single-stage HMC algorithm, where there is
+no such filtering mechanism, and hence, all samples are evaluated by the HF model.
+• The number of HF evaluations required by the single-stage HMC algorithm is very
+high. This is due to the fact that each HMC step requires solving the forward and
+the adjoint problem, where each forward and adjoint problem requires L (number of
+leapfrog steps) number of HF evaluations (i.e., 2L number of total HF evaluations for
+a single HMC step). Whereas, in our proposed MFHMC algorithm, only a single HF
+evaluation (in the second stage) is required for samples accepted in the first stage and
+no HF evaluation is required for samples rejected in the first stage.
+• As the fidelity of the low fidelity (LF) model improves, the acceptance rate of the HF
+model improves dramatically. This is not surprising since as the fidelity of the LF
+model improves, it becomes more and more similar to the HF model and hence the
+majority of the samples accepted by the LF model are eventually accepted by the HF
+model boosting its acceptance rate and reducing wasted HF evaluations.
+• The error of our proposed method is similar (or better) to the single-stage HMC algo-
+rithm. Furthermore, the accuracy can further be increased by using a high-quality LF
+model.
+• We did two additional experiments with Model 2 and Model 5 as LF model (denoted as
+Model 2a and Model 5a in table 2), where we tuned the HMC hyper-parameters (step
+size and the number of leapfrog steps) to achieve a longer trajectory length for the
+Hamiltonian dynamics for the proposed algorithm. This translates to very low accep-
+tancerateforthefirststageandhighlyuncorrelatedsamplesforthisproblem, resulting
+in orders of magnitude fewer HF evaluations required. Even with such fewer HF eval-
+uations and not fully converged chains, MFHMC can achieve accuracy comparable to
+a single-stage HMC for this simple problem.
+4.2.2. GAN-based priors
+While the Gaussian prior is useful for verification purposes, it is not necessarily the
+best prior for the given inferred field (as can be observed by comparing the true inferred
+field in fig. 5 with the inferred means of fig. 6). Recently, various deep generative models
+have shown tremendous promise as prior for accurate inference in Bayesian inversion. A
+particularly promising model among them is the Generative Adversarial Network (GAN)
+(Goodfellow et al., 2014). The most appealing features of this model are (i) its ability to
+map high-dimensional data into a low-dimensional latent space, and (ii) the ability to learn
+and model complex probability distributions. By leveraging these two features, in recent
+23years GANs have shown impressive results as priors in various domains such as geoscience,
+physics, and computer vision (Mosser et al., 2019; Patel and Oberai, 2021).
+This section considers using GAN-based priors for the initial condition inversion problem.
+We consider two different surrogate forward models: (i) TSVD as before and (ii) a deep
+neural network that maps the initial condition m(s) to the final temperature field u(s,T).
+Moreover, we consider the scenario where the compute budget (defined as the number of HF
+evaluations) is fixed and compare the relative performance. We use same step size (ϵ = 0.01)
+and number of leapfrog steps (L = 10) for both HMC and MFHMC for all cases. To avoid
+the influence of randomness on final comparision, we ran all experiments with five different
+random seeds and report the average results in all cases. The detailed architectures of the
+generator and the discriminator used for GAN-prior are shown in fig. A.17.
+TSVD-based surrogate. Figure 7 shows results for Bayesian inversion with GAN-based prior
+andTSVD-basedsurrogatemodelfordifferentcomputebudgets(asdefinedbythenumberof
+high fidelity evaluations n ) and different fidelities of the surrogate model (as defined by the
+hf
+number of retained modes n ). As a benchmark comparison, we again consider a single-
+modes
+stage HMC algorithm with HF forward model as described in Eq.(17). As evidenced by the
+qualitative comparison in fig. 7, it is discernible that the posterior mean obtained through
+the employment of MFHMC with all surrogate models significantly better approximates the
+true inferred field ( fig. 5) compared to HMC within an equivalent computational budget.
+The same trend continues at different numbers of high-fidelity evaluations. This observation
+underscores the efficacy of a two-stage algorithm in consistently and reliably estimating
+posterior statistics.
+Detailedquantitativecomparisonofthesamecaseisdepictedinfig.8. Ascanbeobserved
+from fig. 8, MFHMC (with all different surrogate models) has almost an order of magnitude
+higher ESS/n and Accepted moves/n compared to HMC at all computation budgets.
+hf hf
+Figure 8 also highlights that this better computational and statistical efficiency of MFHMC
+is not coming at the cost of accuracy, as it consistently shows lower relative error in posterior
+mean compared to HMC at all computation budgets. It is remarkable to note that even with
+10,000 forward solves HMC has a higher error compared to any MFHMC model at 2,000
+forward solves (as can also be observed from fig. 7). Such a virtuous combination of better
+efficiency and accuracy of MFHMC is due to its two-stage nature, which allows taking bigger
+jumps (resulting in higher ESS/n ), while only accepting better quality samples with its
+hf
+first stage filtering mechanism (resulting in lower relative error in posterior statistics). This
+also entails that most of the samples passed to the second stage (where only fHF comes
+into picture for MFHMC) are accepted (resulting in higher Accepted moves/n ). Figure 8
+hf
+also shows that MFHMC (with all surrogate models) has significantly better uncertainty
+coverage than HMC at all computation budgets demostrating its superiority for uncertainty
+quantification. (Note: Coverage is defined as the ratio of the number of nodes (pixels) where
+the true value lies within the 95% confidence interval (CI) determined by the posterior mean
+and standard deviation to the total number of nodes). It can be observed from fig. 8 that
+as the accuracy of the LF model increases (i.e., n increases), the relative performance
+modes
+of MFHMC also improves, which again is not surprising.
+24Figure7: QualitativecomparisonofposteriormeanforinitialconditioninversionwithGAN-basedpriorand
+TSVD-based LF surrogate models. Top row: posterior mean obtained using HMC at different numbers of
+HFevaluations. Second to fifth row: posteriormeanobtainedusingdifferentLFsurrogatemodels(n =
+modes
+5,25,50,100 respectively) at different compute budget.
+25Figure 8: Quantitative comparison of the initial condition inversion problem using GAN-based prior and
+TSVD-basedLFsurrogatemodels. Tominimizetheinfluenceofrandomness,eachexperimentwasperformed
+with five different random seeds. Each data point in the figure represents the average value of these five
+experiments.
+DNN-based surrogate. Up to now, we have considered TSVD-based surrogate forward mod-
+els for which the gradient (in the first stage of the MFHMC algorithm) can be computed
+analytically. While this is an ideal surrogate model that shows excellent results for the
+linear initial condition inversion problem considered here, a TSVD-based surrogate model
+might not be sufficient for more complex and nonlinear forward problems due to its linear
+nature. In recent years, DNNs have emerged as powerful tools for building surrogates for
+highly nonlinear and complex forward models (Zhu et al., 2019). Moreover, the automatic
+differentiation capabilities of modern machine learning libraries enable gradient calculations
+with a high degree of accuracy at almost no additional cost. This feature is particularly
+useful in the first stage of the MFHMC algorithm. We test the effectiveness of such a DNN-
+based surrogate forward model in our proposed algorithm for the initial condition inversion
+problem described earlier in a controlled experiment.
+For this, we first train a 4-layer deep fully connected neural network (with ReLU activa-
+tion function in all layers except the last layer) as a surrogate (f ) mapping the vector
+DNN
+of the initial condition field (x) to the vector of the final temperature field (y) in an offline
+stage. This DNN was trained by minimizing the mean square error loss using the Adam
+optimizer (Kingma and Ba, 2014) with a batch size of 1024 and learning rate of 0.001 over
+2×103 pair-wise training data (of the initial condition and final temperature generated using
+the HF numerical solver) for 1000 epochs. Figure 9 shows the final temperature prediction
+of the trained DNN for four initial conditions sampled from the validation set. The relative
+error (measured in the L sense) of the trained DNN on the validation set is 0.55%.
+2
+Once the DNN is trained in an offline stage, it is then used as a surrogate forward
+26Figure 9: DNN-based surrogate model predictions for four different samples from the validation set. First
+column: initial condition samples from the validation set. Second column: true final temperature field
+obtained using the HF numerical solver. Third column: final temperature field prediction by the trained
+DNN-based surrogate. Fourth column: difference between the true and predicted temperature fields.
+27model in the likelihood term of the first stage of the MFHMC method, and the gradient
+of the resulting posterior is computed using automatic differentiation. In the second stage
+of the MFHMC algorithm, we use the HF numerical solver as before. Figure 10 shows the
+qualitative comparison of the posterior mean for HMC and MFHMC with this DNN-based
+surrogate for different compute budgets. As can be observed from this figure, the posterior
+mean obtained by MFHMC significantly better approximates the true inferred field (fig. 5)
+compared to HMC within an equivalent computational budget. The same observations
+Figure 10: Qualitative comparison of posterior mean for initial condition inversion with GAN-based prior
+andDNN-basedLFsurrogatemodels. Top row: posteriormeanobtainedusingHMCatdifferentnumbersof
+HFevaluations. Second to fifth row: posteriormeanobtainedusingdifferentLFsurrogatemodels(n =
+modes
+5,25,50,100 respectively) at different compute budget.
+can be made from fig. 11, which shows a quantitative comparison of HMC and MFHMC
+for the same case. In the bottom-left subplot, it is evident that the relative error in the
+posterior mean of HMC is significantly higher than that of MFHMC at all computational
+budgets. Moreover, the number of Accepted moves/n and ESS/n (shown in the top
+hf hf
+subplots) for MFHMC is again almost an order of magnitude higher than for HMC at
+all computational budgets, indicating its superior computational and statistical efficiency.
+Similarly, the coverage of MFHMC (bottom-right subplot) is significantly better than that of
+HMC at all computational budgets. Note that the number of HF solutions used for training
+the DNN-based surrogate is not included in fig. 11, as training is a one-time offline cost that
+can be amortized over multiple inferences. However, even if we include that training cost
+(n = 2000), MFHMC still significantly outperforms HMC at all compute budget in all
+hf
+metrics. This emphasizes the highly promising potential of MFHMC, showcasing its ability
+topotentiallyreplaceHMCeveninawhite-boxsettingduetoitssuperiorcomputationaland
+statistical efficiency and accuracy, even when factoring in the training cost. We anticipate
+that with the ongoing advancements in accurate deep learning-based surrogates (Lu et al.,
+2021; Li et al., 2020; Patel et al., 2024), MFHMC could become a preferred choice over HMC
+across various applications in the future.
+4.3. Coefficient inversion
+This is a non-linear coefficient inversion problem for an elliptic PDE which arises in
+many fields such as subsurface flow modeling (Iglesias et al., 2013), electrical impedance
+28Figure 11: Quantitative comparison of the initial condition inversion problem using GAN-based prior and
+DNN-basedLFsurrogatemodels. Tominimizetheinfluenceofrandomness,eachexperimentwasperformed
+with five different random seeds. Each data point in the figure represents the average value of these five
+experiments.
+tomography (Kaipio and Somersalo, 2006), and inverse heat conduction (Kaipio and Fox,
+2011). Here,thegoalistoinferthecoefficientofthePDE(permeability/thermalconductivity
+field) given noisy measurements of the pressure/temperature field. For this problem, the
+forward model is described as:
+−∇·(κ(s)∇u(s)) = b(s), s = (s ,s ) ∈ Ω
+1 2 (18)
+u(s) = 0, s = (s ,s ) ∈ ∂Ω
+1 2
+where Ω ⊂ R2 is a square domain with length = 1 unit, and b(s) = 103 units denotes the
+heat source. The goal is to infer the posterior QoIs of permeability/conductivity field κ,
+given a noisy, and potentially partial, measurement of pressure/temperature field u. The
+nodal values of the pressure/temperature field are stored in the vector y, and those of the
+permeability/conductivity field are stored in the vector x.
+In this experiment, we consider two different datasets: a parametric (rectangular) dataset
+and a channelized flow dataset. The first dataset corresponds to the inverse heat conduc-
+tion problem, while the second corresponds to the permeability inversion problem commonly
+encountered in geophysics. We further evaluate two separate scenarios for each dataset to
+assess their performance. For the rectangular dataset (inverse heat conduction problem),
+we explore the scenario with a fixed number of MCMC steps and for the channelized flow
+dataset (permeability inversion problem), we examine a scenario with a fixed computational
+budget for HF evaluations. GAN-based priors are considered for both datasets. The de-
+tailed architectures of the generator and the discriminator used for GAN-prior are shown
+in fig. A.18.
+294.3.1. Inverse heat conduction
+Figure 12: Comparison of the posterior QoIs for the proposed MFHMC algorithm (second row) with the
+single stage HMC algorithm (first row) for the fixed statistical error scenario.
+Inthisexperiment, weutilizetheparametricrectangulardatasetdiscussedintheprevious
+section and used in earlier studies for similar inverse problems (Dasgupta et al., 2024). We
+use a convolutional neural network (CNN)-based surrogate as LF and use finite element
+solution of eq. (18) with linear finite elements as HF model. The detailed architecture of the
+LFmodelisprovidedinfig.A.18. WeexaminethescenarioofafixednumberofMCMCsteps
+(i.e., approximately same statistical error in the posterior statistics for both algorithms) to
+compare the relative performance of both. Figure 12 shows the posterior statistics for both
+algorithms. As observed in this figure, the posterior statistics are more or less the same
+for both algorithms, but MFHMC needs significantly fewer HF evaluations (as indicated in
+table 3).
+Table 3: Comparison of HMC and MFHMC algorithm for the rectangular dataset
+Quantity of Interest HMC MFHMC
+No. of HF evaluations (n ) ↓ 13,450 4,797
+hf
+ESS/n ↑ O(10−5) O(10−4)
+hf
+ESJD/n ↑ O(10) O(100)
+hf
+QuantitativecomparisonofHMCandMFHMCisprovidedintable3. Ascanbeobserved
+from this table, MFHMC offers an order of magnitude improvement over HMC in normalized
+ESS and ESJD value while requiring significantly less HF evaluations.
+4.3.2. Permeability inversion
+For this experiment, we use a channelized flow dataset which is popular in geophysics.
+Again we use a CNN-based surrogate as LF model and use finite element solution of eq. (18)
+30Figure 13: Comparison of the posterior QoIs for the proposed MFHMC algorithm (second row) with the
+single stage HMC algorithm (first row) for the fixed number of HF simulations.
+with linear finite elements as HF model. The LF model was trained using 4,000 training
+samples(ofpairwisedataofpermeabilityandpressurefields)usingAdamoptimizerandMSE
+loss function. The detailed architecture of the LF model is provided in fig. A.18. We further
+consider the scenario where we have a fixed computational budget of 10,000 HF simulations
+andransingle-stageHMCandMFHMCalgorithmsandcomputedposteriorstatisticssuchas
+mean and standard deviation. Figure 13 shows these posterior statistics. As can be observed
+from these figures, compared to HMC, the mean of the proposed algorithm is much closer
+to the ground truth and the standard deviation plot captures the regions of uncertainty. In
+table 4, we compare the two algorithms quantitatively. We consider the coverage and the
+error in the posterior mean as our evaluation metric. For error computation, we use the true
+value of the permeability field as our reference value.
+Table 4: Comparison of HMC and MFHMC algorithm for the channelized flow dataset
+Quantity of Interest HMC MFHMC
+Error in mean (in %) ↓ 51.4 31.4
+Coverage (95% CI) ↑ 0.62 0.89
+4.4. Laboratory-scale hydraulic tomography
+In this section, we demonstrate the effectiveness of our proposed algorithm with a real-
+world experimental dataset. Specifically, we consider a laboratory-scale hydraulic tomog-
+raphy experiment where the pressure/hydraulic head changes are recorded from a series of
+pumping tests in order to reconstruct the spatially distributed hydraulic conductivity field
+of a lab-scale sandbox. The experiments were conducted at the University of Iowa by Walter
+31Figure 14: Left panel: Front view of the Sandbox used in the hydraulic tomography experiment. Right
+panel: Schematic of the sandbox with the dimensions of various sand blocks and the sensor locations. The
+numbered nodes (1–48) indicates the location of pressure sensor. The red circle indicates the location of
+source sensor. Figure reused from (Liu and Kitanidis, 2011). The details of the sandbox flow-through tests
+can be found in Illman et al. (2007)
+Illman and colleagues, and the same set of data have been used previously in various studies
+(Illman et al., 2007; Liu and Kitanidis, 2011).
+Figure 14 shows the front view (left panel) and schematic (right panel) of the sandbox
+used in this experiment, respectively. The dimensions of the sandbox are 161 cm long and 81
+cm high. Four different kinds of commercially available sands (denoted by F-85, F-75, 4030,
+and 20/30 in fig. 14 (left panel)) were used to construct the sandbox. The box is composed of
+finer sand, and the background is made of coarser sand. In particular, eight rectangular slots
+(indicated by F-85, F-75, 4030) were packed with the sand with low permeability, whereas
+the background (20/30) was packed with sand with higher permeability. The true value
+of permeability at different locations is shown in fig. 16. On the back of the sandbox 48
+pressure sensors were installed at locations indicated by solid dots with numbers in fig. 14
+(right panel) to measure the hydraulic head. Nine different experiments were conducted for
+hydraulic survey (at the locations indicated by red circled and squared ports in fig. 14 (right
+panel)) resulting in 9 x 47 = 423 measurements in total. Data from all nine experiments
+were used for inference.
+The governing problem for this hydraulic survey is given by
+−∇·(κ(s)∇u(s)) = f δ(s−a), s = (s ,s ) ∈ Ω
+i 1 2
+u(s) = g , s = (s ,s ) ∈ ∂Ω (19)
+i 1 2 g
+κ(s)∇u(s) = h , s = (s ,s ) ∈ ∂Ω
+i 1 2 h
+where κ, u, and a indicate hydraulic conductivity, hydraulic head, and circled ports’ loca-
+tions, respectively. f , g , and h indicate source, Dirichlet boundary condition, and the flux
+i i i
+boundary condition for ith experiment with i = {1,2,...,9}.
+In order to perform the inference, we use the GAN-based priors. The detailed architec-
+tures of the generator and the discriminator are provided in fig. A.19. This prior was trained
+by varying the horizontal and vertical location of the eight sand blocks. Figure 15 shows the
+realizations of hydraulic tomography from the training set used to train the GAN-prior and
+32Figure15: ThirtysixrealizationsofthehydraulicconductivityfromthetrainingsetusedtotraintheGAN-
+prior (left panel) and corresponding realizations generated by the trained GAN-prior (right panel).
+corresponding realizations from the trained GAN. For the LF model, a CNN-based surrogate
+model was used to map the hydraulic conductivity image to 432 hydraulic head measure-
+ments corresponding the 47 head measurements for all nine experiments. The architecure
+of this surrogate is provided in fig. A.19. For the HF model, a finite element solution of
+eq. (19) was used through FEniCS (Alnaes et al., 2015). Again, we use HMC as a baseline
+method for comparison. We run both HMC and MFHMC for the fixed compute budget
+of n = 1000 with step size and number of leapfrog steps set to 0.01 and 10 respectively.
+hf
+Figure 16 shows the posterior distribution’s mean and standard deviation inferred using the
+Figure 16: Inverting permeability for the hydraulic tomography problem. True hydraulic conductivity field
+fromtheexperiment(topleftpanel). Themeasuredpressurefieldvaluesatthesensornodesfromoneofthe
+nineexperiments(bottomleftpanel). ThemeanoftheposteriordistributioninferredusingtheMFHMC(top
+middle panel) and HMC (bottom middle) algorithm respectively. The standard deviation of the posterior
+distribution inferred using the MFHMC (top right panel) and HMC (bottom right panel) respectively.
+MFHMC and HMC algorithm. As can be observed, the mean estimate of MFHMC is able
+to capture the location of all the boxes quite well except for the top sandbox. It can also
+accurately infer the value of hydraulic conductivity for all the sandboxes except the top
+one. We hypothesize the difficulty in capturing the exact value of hydraulic conductivity
+for this box is probably due to the noisy measurement from the top sensors. In comparison
+HMC seems to have sharper and slightly erroneous mean estimate. This can be observed
+quantitatively from table 5 with HMC’s higher error in mean estimate. The bottom middle
+33panel in fig. 16 shows the standard deviation of the posterior distribution obtained using
+MFHMC algorithm. This standard deviation field, which is our measure of uncertainty, is
+elevated along the edges of the sandboxes. This is expected as perturbing the location of
+the sandbox slightly will not have any significant effect on measurements and hence leads
+to high uncertainty (e.g., Lee and Kitanidis, 2013). Moreover, uncertainty is highest for the
+top sandbox where mean estimate fails to accurately capture the true field, which aligns
+well with the intuition. In comparison HMC’s uncertainty estimates are not quite accurate
+as also depicted by its lower coverage in table 5. Finally, MFHMC has two orders of mag-
+nitude higher number of accepted moves/n compared to HMC for this specific problem.
+hf
+Better reconstruction results along with its superior efficiency highlight MFHMC’s relative
+effectiveness in dealing with such noisy experimental data.
+Table 5: Comparison of HMC and MFHMC algorithm for the hydraulic tomography problem
+Quantity of Interest HMC MFHMC
+Error in mean (in %) ↓ 34.8 26.9
+Coverage (95% CI) ↑ 0.30 0.77
+Accepted moves/n ↑ O(10−3) O(10−1)
+hf
+5. Conclusion
+HMC is a powerful method for generating samples from an unnormalized probability
+distribution. By exploiting the geometry of the target density, it can achieve a faster conver-
+genceratethantraditionalMCMCmethodsandiswell-suitedforscalingtohigh-dimensional
+parameter spaces. However, using an HMC algorithm for many PDE-driven Bayesian inverse
+problems is infeasible or computationally impractical due to the black-box nature of many
+forward model simulators and/or expensive gradient computations.
+In this manuscript, we have proposed a novel “gradient-free” HMC algorithm, which does
+not require gradient of the posterior and as a result is compatible with black-box simulators
+and non-differentiable priors while enjoying the favorable properties of HMC (faster con-
+vergence, scalability to high dimensions). The effectiveness and versatility of the proposed
+algorithm is demonstrated through a series of numerical experiments involving both simu-
+lated and experimental data as well as variety of forward model surrogates. All numerical
+experiments indicate the method performs superior to the traditional HMC algorithm in
+terms of both computational and statistical efficiency (sometimes by orders of magnitude)
+while maintaining high accuracy. Furthermore, the proposed algorithm appears more ro-
+bust to the choice of hyperparameters (number of leapfrog steps and step size) compared to
+HMC. It also enables a longer trajectory length (larger jumps) and a higher acceptance rate
+simultaneously.
+There are several interesting avenues for further study in this area. On the theo-
+retical front, investigating the optimal acceptance rate for MFHMC (similar to that for
+HMC (Beskos et al., 2013)) and its dependence on the accuracy of the surrogate model used
+34in the first stage would be valuable. On the methodological side, extending the proposed
+multi-fidelity strategy to advanced versions of HMC algorithms such as Riemannian Man-
+ifold Hamiltonian Monte Carlo (RMHMC)(Girolami and Calderhead, 2011) (a variant of
+HMC that simulates Hamiltonian dynamics in Riemannian rather than Euclidean spaces) or
+No-U Turn Sampler (NUTS)(Hoffman et al., 2014) would be of particular interest. Another
+intriguing research direction of potentially considerable practical interest could involve de-
+signing algorithms tailored to the availability of surrogate models. For instance, while this
+manuscript assumes access to one high-fidelity and one low-fidelity forward model, many
+computational science and engineering applications involve hierarchies of low-fidelity mod-
+els (Geraci et al., 2017). Extending the current MFHMC algorithm to such multi-level
+multi-fidelity setting could prove useful. Conversely, in scenarios lacking obvious compu-
+tationally cheap surrogate models (Sherlock et al., 2017), developing an adaptive MFHMC
+algorithm that can build an approximation of the posterior in the first stage adaptively based
+on high-fidelity posterior evaluations would be interesting.
+References
+M. S. Alnaes, J. Blechta, J. Hake, A. Johansson, B. Kehlet, A. Logg, C. Richardson, J. Ring,
+M. E. Rognes, and G. N. Wells. The FEniCS project version 1.5. Archive of Numerical
+Software, 3, 2015. doi: 10.11588/ans.2015.100.20553.
+Christophe Andrieu, Nando de Freitas, Arnaud Doucet, and Michael I. Jordan. An Intro-
+duction to MCMC for Machine Learning. Machine Learning 2003 50:1, 50(1):5–43, jan
+2003. ISSN 1573-0565. doi: 10.1023/A:1020281327116. URL https://link.springer.
+com/article/10.1023/A:1020281327116.
+A. Beck and M. Teboulle. Fast gradient-based algorithms for constrained total variation
+image denoising and deblurring problems. IEEE Transactions on Image Processing, 18:
+2419–2434, 2009.
+Alexandros Beskos, Natesh Pillai, Gareth Roberts, Jesus Maria Sanz-Serna, and Andrew
+Stuart. Optimal tuning of the hybrid Monte Carlo algorithm. Bernoulli, 19(5 A):1501–
+1534, 2013. ISSN 13507265. doi: 10.3150/12-BEJ414. URL https://projecteuclid.
+org/euclid.bj/1383661192.
+Michael Betancourt. A conceptual introduction to hamiltonian monte carlo. arXiv preprint
+arXiv:1701.02434, 2017.
+Michael Betancourt, Simon Byrne, Sam Livingstone, and Mark Girolami. The ge-
+ometric foundations of Hamiltonian Monte Carlo. https://doi.org/10.3150/16-
+BEJ810, 23(4A):2257–2298, nov 2017. ISSN 1350-7265. doi: 10.3150/16-BEJ810.
+URL https://projecteuclid.org/journals/bernoulli/volume-23/issue-4A/
+The-geometric-foundations-of-Hamiltonian-Monte-Carlo/10.3150/16-BEJ810.
+fullhttps://projecteuclid.org/journals/bernoulli/volume-23/issue-4A/
+35The-geometric-foundations-of-Hamiltonian-Monte-Carlo/10.3150/16-BEJ810.
+short.
+W. Boomsma, J. Frellsen, T. Harder, Sandro Bottaro, K. E. Johansson, Pengfei Tian,
+K. Stovgaard, Christian Andreetta, S. Olsson, Jan B. Valentin, L. D. Antonov, An-
+ders S. Christensen, M. Borg, Jan H. Jensen, K. Lindorff-Larsen, J. Ferkinghoff-Borg,
+and T. Hamelryck. Phaistos: A framework for markov chain monte carlo simulation and
+inference of protein structure. Journal of Computational Chemistry, 34:1697 – 1705, 2013.
+Steve Brooks, Andrew Gelman, Galin L. Jones, and Xiao Li Meng. Handbook of Markov
+Chain Monte Carlo. CRC Press, may 2011. ISBN 9781420079425. doi: 10.1201/b10905.
+Emily A Carter, Giovanni Ciccotti, James T Hynes, and Raymond Kapral. Constrained
+reaction coordinate dynamics for the simulation of rare events. Chemical Physics Letters,
+156(5):472–477, 1989.
+Lotfi Chaari, J. Tourneret, and H. Batatia. Sparse bayesian regularization using bernoulli-
+laplacian priors. 21st European Signal Processing Conference (EUSIPCO 2013), pages
+1–5, 2013.
+AntoninChambolle, VicentCaselles, DanielCremers, MatteoNovaga, andThomasPock. An
+Introduction to Total Variation for Image Analysis:, pages263–340. DeGruyter, 2010. doi:
+doi:10.1515/9783110226157.263. URL https://doi.org/10.1515/9783110226157.263.
+JAndrésChristenandColinFox. Markovchainmontecarlousinganapproximation. Journal
+of Computational and Graphical statistics, 14(4):795–810, 2005.
+Michael Creutz. Global monte carlo algorithms for many-fermion systems. Physical Review
+D, 38(4):1228, 1988.
+Agnimitra Dasgupta, Dhruv V Patel, Deep Ray, Erik A Johnson, and Assad A Oberai. A
+dimension-reduced variational approach for solving physics-based inverse problems using
+generativeadversarialnetworkpriorsandnormalizingflows. Computer Methods in Applied
+Mechanics and Engineering, 420:116682, 2024.
+Masoumeh Dashti and Andrew M. Stuart. The Bayesian Approach to Inverse Prob-
+lems. In Handbook of Uncertainty Quantification, pages 311–428. Springer, Cham,
+jun 2017. doi: 10.1007/978-3-319-12385-1_7. URL https://link.springer.com/
+referenceworkentry/10.1007/978-3-319-12385-1{_}7.
+Yann N Dauphin, Razvan Pascanu, Caglar Gulcehre, Kyunghyun Cho, Surya Ganguli, and
+Yoshua Bengio. Identifying and attacking the saddle point problem in high-dimensional
+non-convex optimization. Advances in neural information processing systems, 27, 2014.
+Jerome B Detemple, Ren Garcia, and Marcel Rindisbacher. A monte carlo method for
+optimal portfolios. The journal of Finance, 58(1):401–446, 2003.
+36Simon Duane, A.D. Kennedy, Brian J. Pendleton, and Duncan Roweth. Hybrid monte carlo.
+Physics Letters B, 195(2):216–222, 1987. ISSN 0370-2693. doi: https://doi.org/10.1016/
+0370-2693(87)91197-X.
+Martin Dyer, Alan Frieze, and Ravi Kannan. A random polynomial-time algorithm for
+approximating the volume of convex bodies. Journal of the ACM (JACM), 38(1):1–17,
+1991.
+Y. Efendiev, T. Hou, and W. Luo. Preconditioning Markov Chain Monte Carlo Simula-
+tions Using Coarse-Scale Models. http://dx.doi.org/10.1137/050628568, 28(2):776–803,
+jul 2006. ISSN 10648275. doi: 10.1137/050628568.
+Sina Farsiu, D. Robinson, Michael Elad, and P. Milanfar. Fast and robust multi-frame
+super-resolution. IEEE Transactions on Image Processing, 1996.
+AlanE.GelfandandAdrianF.M.Smith. Sampling-basedapproachestocalculatingmarginal
+densities. Journal of the American Statistical Association, 85(410):398–409, 1990. ISSN
+1537274X. doi: 10.1080/01621459.1990.10476213.
+Andrew Gelman, John B B Carlin, Hal S S Stern, and Donald B B Rubin. Bayesian Data
+Analysis, Third Edition (Texts in Statistical Science). Book, page 675, 2014.
+Stuart Geman and Donald Geman. Stochastic relaxation, gibbs distributions, and the
+bayesian restoration of images. IEEE Transactions on pattern analysis and machine in-
+telligence, (6):721–741, 1984.
+Gianluca Geraci, Michael S Eldred, and Gianluca Iaccarino. A multifidelity multilevel monte
+carlo method for uncertainty propagation in aerospace applications. In 19th AIAA non-
+deterministic approaches conference, page 1951, 2017.
+Mark Girolami and Ben Calderhead. Riemann manifold langevin and hamiltonian monte
+carlo methods. Journal of the Royal Statistical Society: Series B (Statistical Methodology),
+73(2):123–214, 2011.
+Ian J. Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing Xu, David Warde-Farley, Sherjil
+Ozair, Aaron Courville, and Yoshua Bengio. Generative Adversarial Networks. jun 2014.
+URL http://arxiv.org/abs/1406.2661.
+Heikki Haario, Eero Saksman, and Johanna Tamminen. An adaptive Metropolis algorithm.
+Bernoulli, 7(2):223 – 242, 2001.
+Michael Habeck, Michael Nilges, and Wolfgang Rieping. Replica-exchange monte carlo
+scheme for bayesian data analysis. Physical review letters, 94(1):018105, 2005.
+Glenn E. Hammond, Peter C. Lichtner, and Richard T. Mills. Evaluating the performance
+of parallel subsurface simulators: An illustrative example with pflotran. Water Resources
+Research, 50:208–228, 2014. doi: 10.1002/2012WR013483.
+37Arlen W Harbaugh. MODFLOW-2005, the US Geological Survey modular ground-water
+model: the ground-water flow process, volume 6. US Department of the Interior, US
+Geological Survey Reston, VA, USA, 2005.
+Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. Ad-
+vances in neural information processing systems, 33:6840–6851, 2020.
+MatthewHoffman, AlexeyRadul, andPavelSountsov. Anadaptive-mcmcschemeforsetting
+trajectory lengths in hamiltonian monte carlo. In Arindam Banerjee and Kenji Fukumizu,
+editors, Proceedings of The 24th International Conference on Artificial Intelligence and
+Statistics, volume 130 of Proceedings of Machine Learning Research, pages 3907–3915.
+PMLR, 13–15 Apr 2021. URL https://proceedings.mlr.press/v130/hoffman21a.
+html.
+Matthew D Hoffman, Andrew Gelman, et al. The no-u-turn sampler: adaptively setting
+path lengths in hamiltonian monte carlo. J. Mach. Learn. Res., 15(1):1593–1623, 2014.
+M Iglesias, K Law, and A Stuart. Evaluation of Gaussian approximations for data assimila-
+tion in reservoir models. Computational Geosciences, 17:851–885, 2013.
+WalterAIllman, XiaoyiLiu, andAndrewCraig. Steady-statehydraulictomographyinalab-
+oratory aquifer with deterministic heterogeneity: Multi-method and multiscale validation
+of hydraulic conductivity tomograms. Journal of Hydrology, 341(3-4):222–234, 2007.
+Fernández-Durán JJ. Circular distributions based on nonnegative trigonometric sums. Bio-
+metrics, 60(2):499–503, jun 2004. ISSN 0006-341X. doi: 10.1111/J.0006-341X.2004.00195.
+X. URL https://pubmed.ncbi.nlm.nih.gov/15180676/.
+Jari Kaipio and Erkki Somersalo. Statistical and computational inverse problems, volume
+160. Springer Science & Business Media, 2006.
+JariPKaipioandColinFox. TheBayesianFrameworkforInverseProblemsinHeatTransfer.
+HeatTransferEngineering,32(9):718–753,2011. doi: 10.1080/01457632.2011.525137. URL
+https://doi.org/10.1080/01457632.2011.525137.
+David E Keyes, Lois C McInnes, Carol Woodward, William Gropp, Eric Myra, Michael
+Pernice, John Bell, Jed Brown, Alain Clo, Jeffrey Connors, Emil Constantinescu, Don Es-
+tep, Kate Evans, Charbel Farhat, Ammar Hakim, Glenn Hammond, Glen Hansen, Judith
+Hill, Tobin Isaac, Xiangmin Jiao, Kirk Jordan, Dinesh Kaushik, Efthimios Kaxiras, Alice
+Koniges, Kihwan Lee, Aaron Lott, Qiming Lu, John Magerlein, Reed Maxwell, Michael
+McCourt, Miriam Mehl, Roger Pawlowski, Amanda P Randles, Daniel Reynolds, Beat-
+rice Rivière, Ulrich Rüde, Tim Scheibe, John Shadid, Brendan Sheehan, Mark Shephard,
+Andrew Siegel, Barry Smith, Xianzhu Tang, Cian Wilson, and Barbara Wohlmuth. Mul-
+tiphysics simulations: Challenges and opportunities. The International Journal of High
+Performance Computing Applications, 27(1):4–83, 2013. doi: 10.1177/1094342012468181.
+38Diederik P. Kingma and Jimmy Ba. Adam: A Method for Stochastic Optimization. dec
+2014. URL http://arxiv.org/abs/1412.6980.
+Daphne Koller and Nir Friedman. Probabilistic graphical models: principles and techniques.
+MIT press, 2009.
+J Lee and PK Kitanidis. Bayesian inversion with total variation prior for discrete geologic
+structure identification. Water Resources Research, 49(11):7658–7669, 2013.
+Zongyi Li, Nikola Kovachki, Kamyar Azizzadenesheli, Burigede Liu, Kaushik Bhattacharya,
+Andrew Stuart, and Anima Anandkumar. Fourier neural operator for parametric partial
+differential equations. arXiv preprint arXiv:2010.08895, 2020.
+X. Liu and P. K. Kitanidis. Large-scale inverse modeling with an appli-
+cation in hydraulic tomography. Water Resources Research, 47(2):2501,
+feb 2011. ISSN 1944-7973. doi: 10.1029/2010WR009144. URL https:
+//onlinelibrary-wiley-com.stanford.idm.oclc.org/doi/full/10.1029/
+2010WR009144https://onlinelibrary-wiley-com.stanford.idm.oclc.org/doi/
+abs/10.1029/2010WR009144https://agupubs-onlinelibrary-wiley-com.stanford.
+idm.oclc.org/doi/10.1029/2010WR009144.
+Lu Lu, Pengzhan Jin, Guofei Pang, Zhongqiang Zhang, and George Em Karniadakis. Learn-
+ing nonlinear operators via deeponet based on the universal approximation theorem of
+operators. Nature Machine Intelligence, 3(3):218–229, 2021.
+James Martin, Lucas C. Wilcox, Carsten Burstedde, and Omar Ghattas. A Stochastic
+Newton MCMC Method for Large-Scale Statistical Inverse Problems with Application to
+Seismic Inversion. SIAM Journal on Scientific Computing, 34(3):A1460–A1487, jan 2012.
+ISSN 1064-8275. doi: 10.1137/110845598. URL http://epubs.siam.org/doi/10.1137/
+110845598.
+Nicholas Metropolis, Arianna W. Rosenbluth, Marshall N. Rosenbluth, Augusta H. Teller,
+and Edward Teller. Equation of state calculations by fast computing machines. The
+Journal of Chemical Physics, 21:1087, 12 1953. ISSN 0021-9606. doi: 10.1063/1.1699114.
+URL https://aip.scitation.org/doi/abs/10.1063/1.1699114.
+Lukas Mosser, Olivier Dubrule, and Martin J. Blunt. Stochastic Seismic Waveform Inversion
+Using Generative Adversarial Networks as a Geological Prior. Mathematical Geosciences
+2019 52:1, 52(1):53–79, nov 2019. ISSN 1874-8953. doi: 10.1007/S11004-019-09832-6.
+URL https://link.springer.com/article/10.1007/s11004-019-09832-6.
+Radford M. Neal. MCMC using Hamiltonian dynamics. Handbook of Markov Chain Monte
+Carlo, pages 1–592, jun 2012. doi: 10.1201/b10905. URL http://arxiv.org/abs/1206.
+1901http://dx.doi.org/10.1201/b10905.
+39ErikNijkamp, MitchHill, TianHan, SongChunZhu, andYingNianWu. OntheAnatomyof
+MCMC-Based Maximum Likelihood Learning of Energy-Based Models. AAAI 2020 - 34th
+AAAI Conference on Artificial Intelligence, pages 5272–5280, mar 2019. ISSN 2159-5399.
+doi: 10.1609/aaai.v34i04.5973. URL https://arxiv.org/abs/1903.12370v4.
+Trevor Park and George Casella. The Bayesian Lasso.
+https://doi.org/10.1198/016214508000000337, 103(482):681–686, jun 2012. doi:
+10.1198/016214508000000337. URL https://www.tandfonline.com/doi/abs/10.
+1198/016214508000000337.
+Matthew D Parno and Youssef M Marzouk. Transport map accelerated markov chain monte
+carlo. SIAM/ASA Journal on Uncertainty Quantification, 6(2):645–682, 2018.
+Dhruv Patel and Assad A Oberai. Bayesian inference with generative adversarial network
+priors. arXiv preprint arXiv:1907.09987, 2019.
+Dhruv Patel, Deep Ray, Michael RA Abdelmalik, Thomas JR Hughes, and Assad A Oberai.
+Variationally mimetic operator networks. Computer Methods in Applied Mechanics and
+Engineering, 419:116536, 2024.
+Dhruv V. Patel and Assad A. Oberai. GAN-Based Priors for Quantifying Uncertainty in
+Supervised Learning. SIAM/ASA Journal on Uncertainty Quantification, 9(3):1314–1343,
+jan 2021. doi: 10.1137/20M1354210.
+Dhruv V Patel, Deep Ray, and Assad A Oberai. Solution of physics-based bayesian in-
+verse problems with deep generative priors. Computer Methods in Applied Mechanics and
+Engineering, 400:115428, 2022.
+R.-E.Plessix. Areviewoftheadjoint-statemethodforcomputingthegradientofafunctional
+withgeophysicalapplications. Geophysical Journal International, 167(2):495–503, 112006.
+ISSN 0956-540X. doi: 10.1111/j.1365-246X.2006.02978.x. URL https://doi.org/10.
+1111/j.1365-246X.2006.02978.x.
+GarethORobertsandRichardLTweedie. Exponentialconvergenceoflangevindistributions
+and their discrete approximations. Bernoulli, pages 341–363, 1996.
+Lula Rosso, Peter Mináry, Zhongwei Zhu, and Mark E Tuckerman. On the use of the
+adiabatic molecular dynamics technique in the calculation of free energy profiles. The
+Journal of chemical physics, 116(11):4389–4402, 2002.
+Leonid I. Rudin, Stanley Osher, and Emad Fatemi. Nonlinear total variation based noise
+removal algorithms. Physica D: Nonlinear Phenomena, 60(1-4):259–268, nov 1992. ISSN
+0167-2789. doi: 10.1016/0167-2789(92)90242-F.
+Chris Sherlock, Andrew Golightly, and Daniel A Henderson. Adaptive, delayed-acceptance
+mcmc for targets with expensive likelihoods. Journal of Computational and Graphical
+Statistics, 26(2):434–444, 2017.
+40M Vauhkonen, J P Kaipio, E Somersalo, and P A Karjalainen. Electrical impedance tomog-
+raphy with basis constraints. Inverse Problems, 13(2):523–530, apr 1997. ISSN 0266-5611.
+doi: 10.1088/0266-5611/13/2/020. URL http://stacks.iop.org/0266-5611/13/i=2/
+a=020?key=crossref.46559bf45aab26a8302acc14e8db4c89.
+Max Welling and Yee W Teh. Bayesian learning via stochastic gradient langevin dynamics.
+In Proceedings of the 28th international conference on machine learning (ICML-11), pages
+681–688. Citeseer, 2011.
+Wenwei Zheng, Mary A Rohrdanz, and Cecilia Clementi. Rapid exploration of configuration
+space with diffusion-map-directed molecular dynamics. The journal of physical chemistry
+B, 117(42):12769–12776, 2013.
+Yinhao Zhu, Nicholas Zabaras, Phaedon Stelios Koutsourelakis, and Paris Perdikaris.
+Physics-constrained deep learning for high-dimensional surrogate modeling and uncer-
+tainty quantification without labeled data. Journal of Computational Physics, 394:56–81,
+oct 2019. ISSN 0021-9991. doi: 10.1016/J.JCP.2019.05.024.
+41Appendix A. Details of the model architectures
+In this section we describe the architectures of different deep learning models (used as a
+prior or surrogate forward models) for various inverse problems. Some of the nomenclature
+we use are as follows:
+1. FC(n) — Fully connected layer of width n.
+2. LReLU(α), ReLU TanH — Leaky rectified linear unit (with negative slope parameter
+α), rectified linear unit, and hyperbolic tangent activation functions, respectively.
+3. BN — batch normalization.
+4. Conv2D (c , k, s, p) — 2D convolution layer c output channels, kernel size (k,k),
+out out
+stride s and padding p.
+5. Conv2D (c , (k , k ), s, p) — 2D convolution layer c output channels, kernel size
+out v h out
+(k ,k ), stride s and padding p.
+v h
+6. Tr. Conv2D (c , k, s, p) — 2D transpose convolution layer with c output channels,
+out out
+kernel size (k,k), stride s, padding p.
+7. Tr. Conv2D (c , (k ,k ), s, p) — 2D transpose convolution layer with c output
+out v h out
+channels, kernel size (k ,k ), stride s, padding p.
+v h
+Figure A.17: Architectures for the initial condition inversion problem (Section 4.2.2)
+42Figure A.18: Architectures for the coefficient inversion problem (Section 4.3)
+43Figure A.19: Architectures for the hydraulic tomography problem (Section 4.4)
+44
