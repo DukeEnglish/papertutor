@@ -1,0 +1,1114 @@
+RLHF Workflow: From Reward Modeling to Online RLHF
+Hanze Dong1∗ Wei Xiong2∗ Bo Pang1∗ Haoxiang Wang2∗
+Han Zhao2 Yingbo Zhou1 Nan Jiang2 Doyen Sahoo1
+Caiming Xiong1† Tong Zhang2†
+1Salesforce AI Research 2University of Illinois Urbana-Champaign
+Abstract
+WepresenttheworkflowofOnlineIterativeReinforcementLearningfromHumanFeedback(RLHF)
+in this technical report, which is widely reported to outperform its offline counterpart by a large mar-
+gin in the recent large language model (LLM) literature. However, existing open-source RLHF projects
+are still largely confined to the offline learning setting. In this technical report, we aim to fill in this
+gap and provide a detailed recipe that is easy to reproduce for online iterative RLHF. In particular,
+since online human feedback is usually infeasible for open-source communities with limited resources,
+we start by constructing preference models using a diverse set of open-source datasets and use the
+constructed proxy preference model to approximate human feedback. Then, we discuss the theoret-
+ical insights and algorithmic principles behind online iterative RLHF, followed by a detailed practi-
+cal implementation. Our trained LLM, SFR-Iterative-DPO-LLaMA-3-8B-R, achieves impressive per-
+formance on LLM chatbot benchmarks, including AlpacaEval-2, Arena-Hard, and MT-Bench, as well
+as other academic benchmarks such as HumanEval and TruthfulQA. We have shown that supervised
+fine-tuning (SFT) and iterative RLHF can obtain state-of-the-art performance with fully open-source
+datasets. Further, we have made our models, curated datasets, and comprehensive step-by-step code
+guidebooks publicly available. Please refer to https://github.com/RLHFlow/RLHF-Reward-Modeling
+and https://github.com/RLHFlow/Online-RLHF for more detailed information.
+∗Thefirstfourauthorsarecorecontributorstothisprojectlistedinrandomorder. Thefullauthorshipcontributionstate-
+mentsareprovidedinAppendixA.Email: {hanze.dong, b.pang, yingbo.zhou, dsahoo, cxiong}@salesforce.com, {wx13,
+hwang264, hanzhao, nanjiang, tozhang}@illinois.edu
+†Projectleads.
+1
+4202
+yaM
+31
+]GL.sc[
+1v36870.5042:viXraContents
+1 Introduction 3
+1.1 Previous RLHF Algorithms and Their Challenges . . . . . . . . . . . . . . . . . . . . . . . . . 4
+1.2 Online Iterative RLHF . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+1.3 Human Feedback Approximation . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+1.4 Related Work . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+2 Reward Modeling as Human Feedback Approximation 7
+2.1 Preference Datasets . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+2.2 Bradley-Terry Reward Model and Preference Model . . . . . . . . . . . . . . . . . . . . . . . 9
+2.3 Evaluation Result. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+3 Iterative Policy Optimization 12
+3.1 Supervised Fine-Tuning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+3.2 Iterative Direct Preference Learning: Theoretical Insights and Algorithmic Principles . . . . . 12
+3.3 Practical Implementation Details . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+4 Evaluation of the Model 15
+4.1 Benchmark . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+4.2 Main Results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+5 End Note and Future Direction 19
+6 Acknowledgements 19
+A Authorship and Credit Attribution 25
+B Additional Experimental Details 25
+21 Introduction
+ReinforcementLearningfromHumanFeedback (RLHF)hasbecomeasakeytechniqueforintegratinghuman
+preference signals into machine learning methods, particularly in aligning Large Language Models (LLMs)
+with human values and preferences (Christiano et al., 2017; Ziegler et al., 2019). Notable examples include
+the revolutionary closed-source ChatGPT (OpenAI, 2023), Claude (Anthropic, 2023), and Gemini (Team
+et al., 2023), as well as the powerful open-source models like Zephyr (Tunstall et al., 2023), Starling (Zhu
+et al., 2023), and LLaMA-3 (Meta, 2024). In particular, since the introduction of ChatGPT, RLHF has
+attracted significant interest in a diverse set of communities. However, compared to the supervised fine-
+tuning that is rather well studied with many great open-source projects like Open-Hermes (Teknium, 2023)
+andVicuna(Zhengetal.,2023),RLHFremainsrelativelyunder-exploredwithintheopen-sourcecommunity.
+To facilitate our discussion, we build upon the standard RLHF workflow (Ouyang et al., 2022; Bai et al.,
+2022b; Touvron et al., 2023). We characterize an LLM by a policy π, which takes a prompt x ∈ X and
+produces a response a∈A from the distribution π(·|x). We denote the initial model of RLHF as π , which
+0
+is fine-tuned on some instruction-following data after the pre-training stage. We assume that we have a
+promptsetthatissampledfromsomeunknownbutfixeddistributionx∼d . ThekeycomponentinRLHF
+0
+is the Preference Oracle, which is mathematically defined as follows.
+Definition 1 (PreferenceOracle). There exists a preference oracle P:X×A×A→[0,1], and we can query
+it to receive the preference signal:
+y
+∼Ber(cid:0)P(a1 ≻a2|x,a1,a2)(cid:1)
+,
+where Ber(t) is a Bernoulli distribution with parameter t and y = 1 means a1 is preferred to a2, and y = 0
+means that a2 is preferred.
+To further simplify the problem, it is commonly assumed that the preference signal can be modeled using
+the reward-based Bradley-Terry model, a well-known approach in preference learning (Bradley and Terry,
+1952; Ouyang et al., 2022; Bai et al., 2022a; Touvron et al., 2023).
+Definition 2 (Bradley-Terry Model). There exists a ground-truth reward function r∗ and the preference
+model satisfies:
+P(a1 ≻a2|x,a1,a2)=
+exp(r∗(x,a1))
+=σ(cid:0) r∗(x,a1)−r∗(x,a2)(cid:1) , (1)
+exp(r∗(x,a1))+exp(r∗(x,a2))
+where σ(z)=1/(1+exp(−z)) is the sigmoid function.
+This modeling is a proxy of preference oracle and connects the learning objective of RLHF with reward
+maximization. In practice, since the BT model may not fully capture the complex human preference, we
+usually optimize the following KL-regularized target:
+(cid:20) (cid:21)
+J(π)=E E r∗(x,a)+ηlogπ 0(a|x) =E (cid:2)E [r∗(x,a)]−ηD (π(·|x)∥π (·|x))(cid:3) , (2)
+x∼d0 a∼π(·|x) π(a|x) x∼d0 a∼π(·|x) KL 0
+whereη >0istheKLpenaltycoefficient. Thisformulationiswidelystudiedinpractice(Ziegleretal.,2019;
+Wu et al., 2021; Ouyang et al., 2022; Rafailov et al., 2023; Liu et al., 2023a; Xiong et al., 2023) and admits
+the following intractable closed-form solution (Zhang, 2023)
+π∗(a|x)= 1 π (a|x)exp(cid:0)1 r∗(x,a)(cid:1) , (3)
+Z(x) 0 η
+where
+Z(x)=(cid:80)
+π
+(a′|x)exp(cid:0)1r∗(x,a′)(cid:1)
+is the normalization constant.
+a′∈A 0 η
+In the subsequent subsections, we first describe the existing approaches, and discuss their challenges, which
+should serve as the motivation for our project.
+31.1 Previous RLHF Algorithms and Their Challenges
+Broadly speaking, previous RLHF methods can be largely divided into two categories: (1) deep RL-based
+approach using Proximal Policy Optimization (PPO) (Schulman et al., 2017; Christiano et al., 2017; Ziegler
+et al., 2019) and (2) (offline) direct preference learning (e.g., DPO) approaches (Zhao et al., 2023; Rafailov
+et al., 2023; Azar et al., 2023; Tang et al., 2024).
+DRL-based framework. The DRL-based framework consists of two stages. In the first stage, a reward
+modelistrained. Specifically,givenapreferencedatasetD ={(x,aw,al)},whereaw isaresponsepreferred
+off
+over al given the instruction or prompt x. The log-likelihood function of the BT model can be expressed as
+follows:
+ℓ (θ)= (cid:88) log(cid:16) σ(cid:0) r (x,aw)−r (x,al)(cid:1)(cid:17) .
+Doff θ θ (4)
+(x,aw,al,y)∈Doff
+We can compute the maximum likelihood estimator (MLE) r based on D by maximizing the ℓ (θ).
+MLE off Doff
+Then,inthesecondstage,DRLmethodslikePPOcanbeappliedtooptimizeagainstthefollowingregularized
+reward:
+π(a|x)
+rˆ(x,a)=r (x,a)−ηlog .
+MLE π (a|x)
+0
+This approach has been employed by ChatGPT (Ouyang et al., 2022) and Claude (Bai et al., 2022a) and
+has contributed to the alignment of LLaMA-2/3 (Touvron et al., 2023). However, it is known that even in
+the best case, tuning the DRL method to its best performance requires extensive efforts in hyper-parameter
+selectionandcode-leveloptimization(Choshenetal.,2019;Engstrometal.,2020). Thisbecomesevenmore
+challenging in the context of LLMs, as fine-tuning LLMs is computationally expensive. Additionally, the
+PPO algorithm requires loading multiple LLMs simultaneously, including the actor (policy), critic (value
+network), rewardmodel, andreferencemodel(forKLestimation), whichplacessignificantpressureonGPU
+memory, especially for resource-constrained open-source projects.
+Direct preference learning. In view of the above issues of PPO, there is an innovative line of work
+thatdirectlylearnsfromhumanpreferencedatasetswithoutexplicitlyconstructingarewardfunction(Zhao
+etal.,2023;Rafailovetal.,2023;Azaretal.,2023). Amongthesemethods,thedirectpreferenceoptimization
+(DPO)algorithmisparticularlypopular. ItleveragesEquation3toformulaterewardasafunctionofpolicy
+and directly optimizes the following loss function using the preference dataset D :
+off
+L (θ,π )=−
+(cid:88) (cid:104) logσ(cid:16) ηlogπ θ(aw|x) −ηlogπ θ(al|x)(cid:17)(cid:105)
+. (5)
+Doff 0 π (aw|x) π (al|x)
+0 0
+(x,aw,al)∈Doff
+Direct preference learning algorithms are generally easier to tune and require fewer computational resources
+compared to DRL methods. Notably, in many LLM benchmarks’ leaderboards (Dubois et al., 2023; Zheng
+et al., 2023), powerful open-source models are primarily aligned using DPO. Considering these factors, in
+our project, we focus on direct preference learning algorithms while leaving the study of the DRL-based
+framework for future research.
+While the vanilla offline direct preference learning algorithms are useful in some case studies, they also face
+certain challenges. Specifically, they are considered offline because they learn from an offline preference
+dataset collected through the following process:
+x∼d ,a1 ∼π1,a2 ∼π2, y ∼Ber(cid:0)P(a1 ≻a2|x,a1,a2)(cid:1) . (6)
+0 D D
+Here, (π1,π2) represent two behavior policies, often taken as π , other open-sourced models or proprietary
+D D 0
+models. The term “offline learning” implies that we cannot further query the preference oracle P during
+the training process. However, the finite dataset D used for offline learning leads to the problem of over-
+off
+optimization. This is because the finite dataset fails to cover the entire prompt-response space and the
+4Preference Data xxx Prompt Collection
+x a1 a2 y
+x a1 a2 y
+x a1 a2 y
+Update y
+Policy Model yy
+Prompt Responses Preference Parameters
+(LLM being aligned)
+Training
+Generate responses Output Preference
+Reward Reward
+a1 a2
+a1 a2
+Model a1 a2 Model
+Reward Modeling Online Iterative RLHF
+Figure 1: A simplified illustration of reward modeling and online iterative RLHF.
+resulting policy model often performs poorly when faced with out-of-distribution data (Burns et al., 2023).
+Indeed,Xiongetal.(2023)showsthatweneedauniformcoverageofthespacetomakesurethatthevanilla
+DPO (Rafailov et al., 2023) can learn the optimal policy. Such a coverage condition is hard to satisfy in
+practice due to the exponentially large space. Here are a few statistics that highlight this issue.
+• Along the way of the RLHF training, the average density ratio π(a|x) >exp(25) as reported in Figure
+π0(a|x)
+13 of Bai et al. (2022a). See similar results of rejection sampling fine-tuning (Dong et al., 2023) and
+DPO (Rafailov et al., 2023).
+• As a case study, consider using the behavior policy Gemma-7B-it to collect data for aligning Gemma-
+2B-it (Team et al., 2024) using 15k prompts from (Cui et al., 2023). The average KL divergence
+between Gemma-7B-it and Gemma-2B-it is calculated to be 456.4.
+Therefore, the distribution shift between policies is usually very large, and it is unlikely that we can learn
+the optimal policy solely from a pre-collected dataset.
+1.2 Online Iterative RLHF
+Incontrast, theClaudeproject(Baietal.,2022a)andLLaMA-2project(Touvronetal.,2023)havedemon-
+strated that online iterative RLHF can significantly improve model performance. The process of online
+iterative RLHF, as formally formulated in Xiong et al. (2023), can be summarized as follows. Given the
+pre-collected preference dataset D =D (if applicable, otherwise empty), for each iteration t∈[T]:
+off
+• we first update the policy pair (π1,π2) based on the historical data D collected so far;
+t t
+• we collect m tuples as D : sample a random prompt by x ∼d , collect two responses by (a1 ,a2 )∼
+t t,i 0 t,i t,i
+(π1,π2), and query the preference signal y ∼P;
+t t t,i
+• update D ←D∪D .
+t
+The effectiveness of online data can be intuitively explained in the context of RLHF as follows. Initially,
+most of the samples from policy π are in a low-reward regime and are used for the reward modeling. As a
+0
+5result,ourrewardmodelisaccurateinevaluatinglow-rewardresponses. Astrainingprogresses,however,the
+policy improves and starts to generate responses with higher rewards. These high-reward responses may fall
+intotheout-of-distribution(OOD)domainoftherewardfunction,wheretheconstructedrewardmodelisno
+longerreliable. Incontrast,usingtheintermediatepolicytosamplenewresponses,queryinghumanfeedback
+on these samples, and add them back to the training set can significantly mitigate the OOD problem, which
+traditional offline methods may not handle effectively. This approach enhances the reliability of the reward
+modelinthehigh-rewardregime, whichinturnimprovesthepolicy’sperformance. Theintuitionextendsto
+thedirectpreferencelearningalgorithms,whereweessentiallyenlargeourpreferencedatasetbycontinuously
+collecting new online data.
+The great work of Huggingface (Tunstall et al., 2023) provides an open-source recipe to do direct preference
+learning from high-quality offline preference dataset, which can be viewed as an efficient way of distillation.
+Incontrast,theonlineRLHFisstilllargelyunder-exploredintheliterature. Xiongetal.(2023)madethefirst
+steptowardsunderstandingtheadvantageofonlineexplorationinRLHFfromatheoreticalperspective,and
+this technical report aims to provide a detailed recipe to verify the effectiveness of the proposed framework.
+1.3 Human Feedback Approximation
+Ideally, the online preference signal is sampled from a representative group of human labelers. However,
+humanfeedbackisextremelyexpensiveinpractice,whichtheopen-sourcecommunityusuallycannotafford.
+In the literature, there is a line of work showing that training a proxy preference model, and using the
+preference model to give proxy labels in a semi-supervised manner improve the model performance (Dong
+et al., 2023; Yuan et al., 2023; Liu et al., 2023a; Hoang Tran, 2024). We conjecture that this is because the
+reward model (discriminator) usually generalizes better than the policy (generator).
+In particular, Hoang Tran (2024) shows that if the preference model (reward model) is trained on a diverse
+set of preference datasets, the Pair-RM (Jiang et al., 2023) with only 0.4B parameters can provide iterative
+preferencelearningwithmeaningfulsignalssothattheresultingmodel1 achievesanimpressiveAlpacaEval-2
+length-control win rate of 26.4%. Motivated by this line of work, we first train a proxy preference (reward)
+model based on the diverse open-source preference datasets in Section 2 and then use the resulting model to
+provide preference signals for the subsequent iterative RLHF.
+1.4 Related Work
+RLHF and RLHF algorithms. The dominant RLHF framework used for the LLM alignment was first
+popularized in Christiano et al. (2017); Ziegler et al. (2019) and was further developed in Instruct-GPT
+(Ouyang et al., 2022), Claude (Bai et al., 2022a), and LLaMA-2 (Touvron et al., 2023). These works
+typicallyinvolveconstructingarewardmodelbasedontheMLEoftheBradley-Terrymodel,andthenusing
+the PPO algorithm to optimize the reward signals with KL regularization. One notable exception is that
+the LLaMA-2 uses a mixture of rejection sampling fine-tuning (Dong et al., 2023; Wang et al., 2024) and
+PPO in their RLHF pipeline. We refer the interested readers to Bai et al. (2022a); Touvron et al. (2023)
+for a detailed description. However, the use of PPO in RLHF has limitations. It is known to be unstable
+(Choshen et al., 2019), sensitive to implementation (Engstrom et al., 2020), and resource-intensive (Yuan
+etal.,2023). DespitesomeeffortstoimprovePPOinthecontextofRLHF(Lietal.,2023;Chanetal.,2024;
+Chang et al., 2024; Zhong et al., 2024), reproducing the successful results achieved with PPO is challenging
+fortheopen-sourcecommunityduetotheselimitationsasitrequiresextensiveeffortsandresourcesthatthe
+open-source communities usually cannot afford. In recognition of these issues of PPO, a line of work studies
+the (offline) direct preference learning algorithms, including Slic (Zhao et al., 2023), DPO (Rafailov et al.,
+1https://huggingface.co/snorkelai/Snorkel-Mistral-PairRM-DPO
+6Dataset #Prompts PromptLen. PreferredLen. RejectedLen. Completion Annotator #Pairs
+HH-RLHF 115092 160.4 82.2 73.6 LLM Human 115396
+SHP 31003 186.2 173.6 88.8 Human Human 93301
+HelpSteer 8592 530 116.4 89.3 LLM Human 37131
+PKU-SafeRLHF-30K 6975 21.5 70.4 74.6 LLM Human 26874
+UltraFeedback 63591 161.5 279.5 211.1 LLM GPT-4 340025
+UltraInteract 76086 507.4 396.6 416.7 LLM GPT-4 161927
+CodeUltraFeedback 9938 172.8 427.6 400.6 LLM GPT-3.5 50156
+Argilla-Math 2352 36.5 276.5 265.3 LLM GPT-4 2418
+OpenOrca 6791 153.3 165.4 260.5 LLM GPT-4 6926
+Capybara 14740 634.5 348.4 401.9 LLM GPT-4 14811
+Table 1: A summarization of open-source preference datasets. “Prompt Len.” represents the average
+prompt length in terms of tokens, and “Preferred/Rejected Len.” stands for the average length of preferred
+or rejected responses. All of these lengths are averaged over all pairs and we use the tokenizer of LLaMA-
+3-8B. “Completion” marks the data source of the text completions for prompts. We apply pre-processing
+techniques to all these datasets and delete the noisy samples from the original dataset. For the dataset
+whosepromptiswithmultipleresponses,weincludeallthepossiblecomparisonsexceptthosewiththesame
+score/ranking to compute the total number of comparison pairs.
+2023), IPO (Azar et al., 2023), KTO (Ethayarajh et al., 2024), ARM (Pang et al., 2024), and GPO (Tang
+et al., 2024). These algorithms skip the reward modeling step, and optimize a designed loss target on the
+offlinepreferencedatasetdirectly(hencethename). Itiswidelyobservedthatthedirectpreferencelearning
+algorithms are much more stable than the PPO, and achieve impressive performance evaluated by standard
+benchmarks (Tunstall et al., 2023; Dubois et al., 2023; Zheng et al., 2023).
+RLHF benefits from online (iterative) learning. Roughly speaking, online iterative learning means
+that we will deploy the intermediate models and query human feedback for the responses of these models.
+Intuitively, this strategy can help to mitigate the OOD issue of the learned reward model (Gao et al., 2023),
+and its advantages have been reported in Ouyang et al. (2022); Touvron et al. (2023) for the PPO-based
+framework. Even when the additional feedback is derived from a proxy reward constructed from the same
+offline dataset (similar to semi-supervised learning), iterative rejection sampling fine-tuning (RAFT) (Dong
+etal.,2023)andDPObasedonsamplesfromthetargetdistributionestimatorhavebeenshowntooutperform
+the original offline counterparts (Pang et al., 2024; Liu et al., 2023a). Furthermore, recent works (Xiong
+et al., 2023; Xu et al., 2023; Hoang Tran, 2024; Yuan et al., 2024b; Swamy et al., 2024; Chen et al., 2024b;
+Ye et al., 2024; Guo et al., 2024; Rosset et al., 2024; Tajwar et al., 2024; Calandriello et al., 2024; Wu et al.,
+2024) have demonstrated that online iterative variants of direct preference learning algorithms significantly
+outperform their offline counterparts. In particular, we refer the interested readers to Guo et al. (2024) for
+the extensive experimental results with different offline base algorithms.
+2 Reward Modeling as Human Feedback Approximation
+We present the details of preference model construction in this section, where we study both the reward
+modeling as MLE of the BT model and the general preference model. The training script and full recipe are
+provided in https://github.com/RLHFlow/RLHF-Reward-Modeling.
+72.1 Preference Datasets
+Following the Pair-RM (Jiang et al., 2023) and LLaMA-2 (Touvron et al., 2023), we use a mixture of open-
+source datasets as the training set. Here is a brief introduction to the datasets:
+• HH-RLHF (Bai et al., 2022a) is a pairwise preference dataset where each sample is accompanied
+by a conversation history and two alternative responses written by an early Claude model with 52B
+parameters. The preferences of the responses are annotated by humans.
+• SHP(Ethayarajhetal.,2022)issourcedfromRedditandincludesexamplesfrom18subreddits, such
+as askacademia, askbaking, askengineers, and changemyview. Each example is a Reddit post with a
+question/instructionandapairoftop-levelcomments. OnecommentispreferredbymoreRedditusers
+than the other. All preferences and responses are provided by humans. Only samples with a score
+ratio > 2 are used, and at most 5 pairs are taken for each prompt.
+• HelpSteer (Wang et al., 2023). This open-source dataset (Wang et al., 2023) contains prompts,
+responses, and five human-annotated attributes (helpfulness, correctness, coherence, complexity, and
+verbosity) ranging from 0 to 4. The prompts are generated using a mixture of template-generated and
+human-generated methods, while responses are generated by an in-house LLM. The authors generate
+up to 4 responses per prompt, and we can construct pairwise comparisons based on them.
+• PKU-SafeRLHF (Ji et al., 2024). This dataset (Ji et al., 2024) consists of 30k+ expert comparison
+data. Each sample includes two responses to a question and two preference signals for helpfulness and
+safety, respectively. The responses are generated by open-source chatbots, and the preference signals
+are merged through the results of 14 harm category multi-class classficiation.
+• UltraFeedback(Cuietal.,2023)consistsof64kpromptsfromdiverseresources(includingUltraChat,
+ShareGPT,Evol-Instruct,TruthfulQA,FalseQA,andFLAN)andtheauthorsgenerate4responsesper
+prompt using 4 different LLMs sampled from a diverse set of state-of-the-art open-source LLMs. The
+preference is from GPT-4 based on a fine-grained annotation instruction, which contains 4 different
+aspects, namely instruction-following, truthfulness, honesty and helpfulness. The dataset collection
+strategy of UltraFeedback has also influenced many subsequent works.
+• UltraInteract (Yuan et al., 2024a) is a preference dataset designed for complex reasoning tasks. The
+authors collect a preference tree for each instruction, with the instruction being the root and each
+action a node. A trajectory is a root-to-leaf path consisting of a sequence of actions. Paired correct
+and incorrect nodes or trajectories are used for preference learning.
+• Distilabel-Capybara2 is a preference dataset of multi-turn dialogues whose prompts are taken from
+Daniele and Suphavadeeprasit (2023), where the responses are generated by open-source LLMs and
+preferences are generated by GPT-4.
+• Distilabel-Orca3 is collected similarly with Capybara but with the prompts from Lian et al. (2023).
+The training of LLMs is highly data-dependent. To ensure high-quality training data, we conduct a fil-
+tering process on the open-source datasets we use. This process removes low-quality and meaningless
+samples. Additionally, conversations with empty rounds or incorrect labels (implied by the other fea-
+tures of the dataset) are eliminated. Furthermore, in datasets where absolute scores are available, pair-
+wise comparisons with small margins are excluded as these preference signals tend to be noisy (Bansal
+2https://huggingface.co/datasets/argilla/distilabel-capybara-dpo-7k-binarized
+3https://huggingface.co/datasets/argilla/distilabel-intel-orca-dpo-pairs
+8x
+BT Model
+r1
+θ θ
+a1
+ℙ (a1 ≻ a2|x,a1 ,a2 ) = σ(r − r )
+θ 1 2
+x
+BT Model
+r2
+θ θ
+a2
+σ: Sigmoid Function
+x
+Preference
+a1 Model z ℙ (a1 ≻ a2|x,a1 ,a2 ) = σ(z )
+θ θ θ
+θ
+a2
+Figure 2: Illustration of the Bradley-Terry (BT) model and preference model.
+1e6
+Training Loss of Reward Model 40 Gradient Norm of Reward Model 2.00 Learning Rate of Reward Model
+0.7 35 1.75
+0.6 30 11 .. 25 50
+25 0.5 20 1.00
+0.75
+0.4 15 0.50
+10 0.25
+0.3
+5 0.00
+0 200 400 600 800 1000 1200 1400 0 1000 2000 3000 4000 5000 6000 7000 0 200 400 600 800 1000 1200 1400
+Training Step Training Step Training Step
+Figure 3: The training record of reward modeling. From the left to right, we present the records of training
+loss, gradient norm, and the learning rate, respectively.
+et al., 2023). This process roughly deletes 10% of the data. We summarize the statistics of the open-
+source datasets that are used for the training in Table 1 and prepare them, as well as our data filter-
+ing script, on the huggingface, which is available at https://huggingface.co/collections/RLHFlow/
+standard-format-preference-dataset-662eec0252e194d5d40c252a.
+2.2 Bradley-Terry Reward Model and Preference Model
+Bradley-Terrymodelconstruction. Wefollowthepreviousworks(Ouyangetal.,2022;Baietal.,2022a)
+to initialize the reward model using the SFT model4. We replace the last layer with a linear head to predict
+a scalar score suitable for preference learning. The reward model is trained using the negative log-likelihood
+loss function, enabling maximum likelihood estimation (MLE). This loss function is defined as:
+L (θ)=−E logσ(cid:0) r (x,aw)−r (x,al)(cid:1) ,
+RM x,aw,al∼D θ θ
+where aw is the preferred response over al. We train the LLaMA-3-8B-based reward model for one epoch
+with a global batch size of 512. The learning rate is set to lr=2×10−6, and a cosine learning rate schedule
+with a warm-up ratio of 0.03 is employed. For Gemma-2B-it, a larger learning rate of 10−5 is used.
+4For preference/reward modeling, we use meta-llama/Meta-Llama-3-8B-Instruct since only this checkpoint is available in
+theearlystageofthisproject.
+9
+ssoL
+gniniarT
+mroN
+tneidarG
+etaR
+gninraeL14
+Training Loss of Preference Model 800 Gradient Norm of Preference Model
+51e6
+Learning Rate of Preference Model
+12
+4
+10 600
+8 3
+6 400 2
+4
+200 1
+2
+0 0 0
+0 200 400 600 800 1000 1200 0 200 400 600 800 1000 1200 0 200 400 600 800 1000 1200
+Training Step Training Step Training Step
+Figure 4: The training record of preference modeling. From the left to right, we present the records of
+training loss, gradient norm, and the learning rate, respectively.
+Preference model construction. A (pairwise) preference model takes a prompt x and two responses
+a1,a2 as the input and predicts the probability of Pˆ(a1 ≻ a2|x,a1,a2) (Jiang et al., 2023). We follow Zhao
+et al. (2023); Liu et al. (2023a) to leverage the LLM’s capability as a next-token predictor for preference
+modeling. Specifically, for a given preference pair (x,a1,a2,A), where A indicates that the first response is
+preferred, the pair is formatted as an instruction-following task:
+instruction = [CONTEXT] {x} [RESPONSE A] {a1} [RESPONSE B] {a2}, and label = A.
+If the second response is preferred, we replace the label A with B. Then, we simply treat the preference
+modelingasaninstruction-followingtasktofine-tunethemodelontheseinstruction-labelpairs. Tomitigate
+position bias (the preference model may prefer the response that is given in the position of RESPONSE A),
+the order of the responses is randomized during data formatting. During inference, we simply use the
+probability of decoding A as the Pˆ(a1 ≻a2|x,a1,a2).
+We train the LLaMA-3-8B-based preference model for one epoch. The samples are packed into blocks with
+length 3072 and a global batch size of 128 is used. The learning rate is set to lr = 5×10−6, and a cosine
+learning rate schedule with a warm-up ratio of 0.03 is employed. For Gemma-2B-it, a larger learning rate
+of 10−5 is used. We mention in passing that it is possible to include detailed rubrics in the data format to
+further improve the preference dataset, which we leave for future work (Qin et al., 2023).
+2.3 Evaluation Result
+We consider two versions of the training set:
+• Mix1: HH-RLHF + SHP + UltraFeedback + Summarization (Stiennon et al., 2020).
+• Mix2: all the datasets in Table 1.
+The Mix1 dataset is similar to the construction of UltraFeedback (Cui et al., 2023) with an additional
+summarization dataset. In comparison, the Mix2 consists of more reasoning preference pairs (math and
+code)andsafetydata. Wealsoconsiderthreedifferentapproachestomodelthepreferencesignals,including
+prompting in the LLM-as-a-judge manner (Zheng et al., 2023), reward modeling as the MLE of the BT
+reward model, and the preference model.
+We evaluate the models using the RewardBench (Lambert et al., 2024), a benchmark designed to assess
+reward model capabilities in four categories: Chat, Chat-Hard, Safety, and Reasoning. The main evaluation
+resultsareinTable2. Itisevidentthatwithoutexplicittraining,thepromptingapproachisinferiortoboth
+the BT model and the preference model across all metrics. Meanwhile, the preference model outperforms
+10
+ssoL
+gniniarT
+mroN
+tneidarG
+etaR
+gninraeL1400
+14 16
+1200
+1200 14
+12
+1000 1000 12
+10
+800 8 800 10
+8
+600 6 600
+6
+400 4 400
+4
+200 2 200 2
+0 0
+0.75 0.50 0.25 0.00 0.25 0.50 0.75 1.00 1.00 0.75 0.50 0.25 0.00 0.25 0.50 0.75
+Reward-length Pearson coefficient Reward-length Pearson coefficient
+Figure5: TheheatmapofthePearsoncorrelationcoefficientsbetweenrewardandresponselength. Foreach
+prompt, we use the SFT model to generate 16 responses and compute the coefficient. We also group the
+prompts by the mean responses (y-axis). The left figure is the UltraRM-13B and the right one is our BT
+reward based on mix2.
+Table2: ComparisonofthetestaccuracybetweentheBradley-Terry(BT)rewardmodelandthepreference
+model. We evaluate the model using the Reward-Bench (Lambert et al., 2024).
+Base Model Type Data Mixture Chat Chat Hard Safety Reasoning
+LLaMA-3-8B-it Prompting - 93.6 44.3 71.3 73.5
+LLaMA-2-13B BT mix1 96.4 55.5 55.0 62.4
+LLaMA-3-8B-it BT mix2 99.4 65.0 87.7 87.8
+.
+LLaMA-3-8B-it Preference mix2 98.6 65.8 89.6 94.9
+Gemma-2B-it Prompting - 70.3 42.3 38.2 50.0
+Gemma-2B-it BT mix2 95.0 40.8 81.2 74.2
+Gemma-2B-it Preference mix2 96.0 40.5 82.8 80.7
+theBTmodelinreasoningtasksrelatedtocodingandmath. Wealsonoticethatwithmoredata, especially
+data specified in coding, math, and safety, the reward model trained by mix2 achieves higher accuracy in
+safety and reasoning compared with early versions of attempts. In particular, we use the Ultra-RM-13B as
+a reference model in Table 2, where we can observe that the extra data related to safety and reasoning (as
+well as a stronger base model) largely contribute to the superior performance of our reward model.
+Length bias in reward modeling. It is known that the LLMs aligned by RLHF usually give longer
+responses (Xiong et al., 2023; Yuan et al., 2024b,b), where the length bias also exists in the reward models,
+likely influenced by the preference data used. To better understand this bias, we randomly sample 2K
+prompts from the prompt set and use the SFT model to generate 8 responses per prompt (see the details
+in Section 3). Then, we compute the lengths and rewards of the responses and plot the heatmaps of the
+Pearson correlation coefficient between them in Figure 5. Clearly, both of the two reward models are biased
+toward the longer responses to some degree. In comparison, UltraRM-13B demonstrates a stronger bias, as
+we observe that the mean Pearson correlation coefficient of the UltraRM-13B (left figure) is 0.19, while it is
+0.06 for our BT reward trained on mix2 (right figure). This may partially result from the use of additional
+Capybara, OpenOrca, and UltraInteract, whose preferred responses are shorter than the rejected responses.
+We will return to the ablation study of the impacts of the reward models in Section 4.
+11
+htgnel
+esnopser
+naeM
+htgnel
+esnopser
+naeMWe mention in passing that in the literature, it is also common to model the different types of signals
+separately, and strategically merge them in the subsequent policy optimization stage (Touvron et al., 2023;
+Wang et al., 2024), which we leave for future work.
+3 Iterative Policy Optimization
+We develop the main algorithms for the online iterative RLHF in this section, with both theoretical insights
+and implementation details. In particular, the algorithms will be designed in a direct preference learning
+style for stable and efficient training.
+3.1 Supervised Fine-Tuning
+The base model used in this project is LLaMA-3-8B. To ensure the reproducibility and openness of the
+project,weperformSFTbyourselvestoobtaintheinitialpolicyπ . Wecollectasetofhigh-qualityinstruc-
+0
+tiondatasetsforSFT,suchasShareGPT,SlimOrca, MathInstruct, andEvol-Instruct(seetheAppendixfor
+a full list). The training is carried out for one epoch with a learning rate of 2×10−5. A cosine scheduler
+is employed, and the global batch size is set to 32 with a warm-up ratio of 0.03. To accelerate training, we
+follow Diao et al. (2023); Tunstall et al. (2023) to pack the samples and use a block size of 8192. We use the
+SFT-TrainerfromTRLandthedetailedrecipeisavailableathttps://github.com/RLHFlow/Online-RLHF.
+3.2 Iterative Direct Preference Learning: Theoretical Insights and Algorithmic
+Principles
+We present the main algorithmic framework in Algorithm 1 for the online iterative RLHF, and summarize
+the key principles and algorithmic ideas as follows.
+Hybrid batch learning. We formulate a slightly more general framework to combine an initial offline
+dataset with online data collected during training, hence the name hybrid learning, similar to the recipe of
+Claude(Baietal.,2022a)andLLaMA-2(Touvronetal.,2023). Additionally,tomitigatethecomputational
+costs of training and deploying large LLMs, we use a large batch size m for sparse updates.
+Non-symmetric structure to balance exploitation and exploration. The framework also features a
+non-symmetric structure as we divide the two agents into a main agent and an enhancer.
+• Main agent aims to learn π∗. Specifically, for each iteration, the first agent, referred to as the
+main agent, always takes the optimal policy under the MLE r of the historical data, which can be
+MLE
+viewed as a fully exploitation of the information we collected so far;
+• Enhancer aims to assist the main agent’s learning. Sincethemainagentsolelyexploitsthehis-
+torical data, it is effective only when we can continuously obtain new information about the alignment
+problem from the newly collected online data or the offline data D has provided enough coverage
+off
+(which is unlikely to hold in practice as we discuss in Section 1.1). The enhancer, therefore, explores
+in the direction where there is more uncertainty relative to the main agent’s policy π1 (measured by
+t
+Γm(λ,π1,π′)), while maintaining a moderate KL divergence with π1.
+t t t
+We have the following theoretical guarantees when strategic exploration methods are applied.
+12Algorithm 1 Theoretical Online Iterative RLHF with Enhancer
+1: Input: offline dataset D off (can be empty); batch size m>0, and preference model P.
+2: for t=1,...,T do
+3: Exploitation with the main agent: denote the MLE r MLE (no need to explicitly compute the reward function
+if we use DPO) and compute the best guess we have so far:
+(cid:104) (cid:105)
+π t1 =argmaxE x∼d0E a∼π(·|x) r MLE(x,a)−ηD KL(π(·|x)∥π 0(·|x)) . (7)
+π∈Π
+4: Exploration with the enhancer: define the uncertainty quantifier with respect to π1 as Γm(λ,π1,π2) and
+t t t
+compute the policy π2 =argmax Γm(λ,π1,π2) where
+t π2∈Πt t t
+Π ={π′ ∈Π: ηE D (π(·|x),π1(·|x)) ≤ Γm(λ,π1,π′) }.
+t x∼d0 KL t t
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Howfardoestheenhancermoveaway. Howmuchinformationwecanget.
+5: Collect D t ={(x i,a1 i,a2 i,y i)}m i=1 by x i ∼d 0,a1 i ∼π t1(·|x i), a2 i ∼π t2(·|x i) and y i ∼Ber(cid:0)P(a1 i ≻a2 i|x,a1 i,a2 i)(cid:1) ;
+6: end for
+7: Output: the best policy in (π1 ) by a validation set.
+1:T
+Theorem 1 (Informal Theorem 2 in (Xiong et al., 2023)). For any precision parameter ϵ>0, with a batch
+size m = O(cid:101)(de) and other suitable choices of hyper-parameters, then, with high probability, after at most
+ϵ2
+T =O(cid:101)(d e) iterations, we can find a t
+0
+∈[T] so that
+J(π∗)−J(π )+ηE (cid:2) D (π∗(·|x )∥π (·|x ))(cid:3)≲ϵ,
+t0 xt0∼d0 KL t0 t0 t0
+where J(π) = E x∼d0[E a∼π(·|x)[r∗(x,a)]−ηD KL(π(·|x)∥π 0(·|x))] is the KL-regularized value. Here O(cid:101) hides
+some log factors and d is a complexity measure of the RLHF problem. In particular, if the reward function
+e
+can be embedded into a d-dimensional space that is linear in the feature map of ϕ : X ×A → Rd, we have
+d =d. (Zhong et al., 2022; Liu et al., 2023b)
+e
+3.3 Practical Implementation Details
+We now shift our focus from the theoretical insight to the practical implementation. We provide an illustra-
+tion of our implementation in Fig. 6.
+The MLE policy. Since the main agent only exploits the data, we can run DPO on the historical data
+to approximate the optimal policy under the r : πMLE. We remark that while we use DPO here due to
+MLE t
+its simplicity, the Algorithm 1 can be implemented by combining it with any oracle algorithms (e.g., PPO
+and InfoNCA (Chen et al., 2024a)) that are a reasonable approximation of the KL-regularized optimization
+problem.
+Exploration policy. The primary challenge lies in the choice of enhancer policy for exploration. Recall
+that our goal is to find an enhancer policy that maximizes the relative uncertainty to the main agent from
+the following policy subset:
+π ∈Π ={π′ ∈Π: η·E D (π(·|x),π1(·|x)) ≤ Γm(λ,π1,π′) }.
+(cid:101) t x∼d0 KL t t t
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Howfardoestheenhancermoveaway. Howmuchinformationwecanget.
+Unfortunately, the uncertainty estimator does not have an analytical form except the linear case. But
+the main insight we can derive here is to maximize the policy difference with π1, while maintaining a
+t
+moderate KL divergence. This motivates us to use model variants of π1. We discuss some popular heuristic
+t
+implementations here.
+13• Adjusting Temperature and Training Steps. In the project of Claude (Bai et al., 2022a), the
+authors choose to use the models with different training steps as (π1,π2). For instance, if we run PPO
+t t
+for2epochintotal,wemaytakeπ1 asthemodelsavedattheendofthefirstepochandtakeπ2 asthe
+t t
+one saved at the end of the second epoch. Additionally, the LLaMA-2 project (Touvron et al., 2023)
+adjusts the sampling temperature of π1 to induce π2. These modifications introduce diversity in the
+t t
+models and facilitate exploration.
+• Rejection Sampling is another popular ensemble-based exploration approach (Nakano et al., 2021;
+Dong et al., 2023; Gulcehre et al., 2023). In the context of LLMs, it is typically restricted to the
+best-of-n sampling. Specifically, we sample n independent responses by π1 for each prompt, and then
+t
+useapreference/rewardfunctiontoranktheresponsesandtaketheonewiththehighestrewardasthe
+finaloutput. Inotherwords, wetakeπ2 asthebest-of-nvariantofπ1. Inthisway, theπ2 enlargesthe
+t t t
+marginsbetweenπ1 andprovidesexploration. Meanwhile, inthiscase, theKLdivergencebetweenthe
+t
+twopoliciesisupperboundedbylogn−n−1 andisusuallyfarbetterthanthisconservativeestimation
+n
+(Beirami et al., 2024).
+In our experiments, we use the DPO to approximate the computational oracle and implement DPO with
+theopen-sourcepackageTRL5.WerunDPOwiththereferencemodelπ (theSFTmodel)onthehistorical
+0
+datafor2epochstogettheMLEpolicyπMLE. Weuseacosinelearningrateschedulerwithapeaklearning
+t
+rate of 5e-7 and 0.03 warm-up ratio. We use a global batch size of 128 and use a KL coefficient of η =0.1.
+Toacceleratetraining,wedonotrestartfromπ ateachiterationasinBaietal.(2022a);Xiongetal.(2023)
+0
+but use the last-iteration model as the initial checkpoint and use π as the reference model. In this way, the
+0
+data used for training is the same as that of Bai et al. (2022a) and Xiong et al. (2023) but is of a different
+order. We do not see performance regression with this choice, and it saves us for half of the training time.
+To facilitate exploration, we combine the temperature tuning with the rejection sampling strategy with
+n=8. Instead of fixing π1 =πMLE (like the center of confidence set) and optimizing the π2 solely to be the
+t t t
+best-of-8 variant of πMLE, we take π1 and π2 as the best-of-8 policy and worst-of-8 policy induced by πMLE.
+t t t t
+In other words, we take the best response and the worst response as ranked by the reward model to get a
+preference pair. In this case, we jointly optimize the two policies to maximize their difference (measured by
+the uncertainty), which tends to be more efficient in practice and enjoys the same theoretical guarantee as
+stated in Theorem 1. This choice is similar to Hoang Tran (2024); Pace et al. (2024); Yuan et al. (2024b);
+Xu et al. (2024). We also drop the pair where π1 and π2 give the same response, which implies that the
+t t
+uncertaintyinthisdirectionisalreadysmall. Forthisroundofexperiments, westillusetherewardfunction
+trained as the MLE of the BT reward model to rank the responses for the following reasons. First, to rank
+n responses, the complexity of using the reward model is linear in n, while it is far more complicated with
+the pairwise preference model. Second, during the early experiments, we observe significant length bias in
+the iterative RLHF. Therefore, we would like to explore the strategy to mitigate the length bias, and it is
+relatively easier to penalize the reward value with the length of the response. Finally, the BT reward model
+iscomparablewiththepreferencemodelexceptforthereasoningtaskanditmaybealreadysatisfactoryfor
+our goal. We leave a more comprehensive comparison between the BT reward model and preference model
+for future study.
+Prompt set, and data generation. WecollectpromptsfromUltraFeedback(Cuietal.,2023), HelpSteer
+(Wang et al., 2023), OpenOrca (Lian et al., 2023), UltraInteract (Yuan et al., 2024a), Capybara (Daniele
+andSuphavadeeprasit,2023)andDIBT-10K6 andpreparethefullpromptsethere7. Inourexperiments, we
+use a subset of 60K prompts and iterate for three iterations, so 20K prompts are used to generate 20K x 8
+responses per iteration. To accelerate data generation, we use VLLM (Kwon et al., 2023) for inference. We
+set the max generation length as 2048, and use a sampling temperature of 1.0/0.7 without any top-k/top-p
+5https://github.com/huggingface/trl
+6https://huggingface.co/datasets/DIBT/10k_prompts_ranked
+7https://huggingface.co/datasets/RLHFlow/prompt-collection-v0.1
+14Our Workflow of Iterative Direct Preference Learning
+Historical Data
+x a1 a2 y
+x a1 a2 y
+SFT π x a1 a2 y Add to New Data
+0
+Prompt Responses Preference
+x
+x
+x
+a1
+a1
+Best-of-n Response
+DPO
+a1
+a1
+aa 22 aa
+ba
+e1
+s1
+t
+a1
+xxx Polic πy
+M
+M LEodel Sampling R Me ow da erd
+l
+Rating aaa 222
+t
+Prompt (Initialized from πMLE) aa 22 awaa o1 r1 st yy
+t−1 y
+n Responses per Prompt Worst-of-n Response
+Figure 6: Illustration of our implementation of iterative direct preference learning. In iteration t = 1, the
+historical dataset is empty, and the resulting policy model πMLE is the same as its initialization, π , which
+1 0
+is the SFT model checkpoint. After that, the historical dataset grows with preference data collected from
+previous iterations.
+strategy. To offer a more intuitive comprehension of our prompts collection, we provide visualization plots
+in Figure 7, which are generated on Nomic Atlas8 with the nomic-embed-text-v1.5 text embedding model
+(Nussbaum et al., 2024).
+4 Evaluation of the Model
+4.1 Benchmark
+Weevaluatethemodelsbystandardbenchmarks,includingAlpacaEval-2,MT-Bench,andChat-Arena-Hard.
+• AlpacaEval-2 (Dubois et al., 2023): This benchmark focuses on single-turn conversations and consists
+of 805 test prompts covering various topics. The models are compared head-to-head with GPT-4-
+Preview (11/06) to compute the win rate. The same GPT-4 model is used as the judge. To mitigate
+the length bias of GPT-4, a length-control variant of the benchmark is also proposed.
+• MT-Bench (Zheng et al., 2023): This benchmark is a multi-turn benchmark and includes 160 test
+prompts from 8 different areas. The model should first answer an initial question, and then a pre-
+defined follow-up question. The model’s responses are then rated by the GPT-4 model with a scale
+from 1-10, and the final score is computed as the average score of two turns.
+• Chat-Arena-Hard(Tianleetal.,2024): Thisbenchmarkconsistsof500testpromptsfromthelivedata
+in Chatbot Arena, a crowd-sourced platform for LLM evaluations. The prompts evaluate the model’s
+abilityinspecificity,domainknowledge,complexity,problem-solving,creativity,technicalaccuracy,and
+8https://atlas.nomic.ai/
+15
+…Visualization of Prompts
+Colored by Datasets Colored by Topics
+Figure 7: Visualization of our prompt collection via Nomic Atlas. The left figure is colored by the data
+sources of prompts, and the right figure is colored by topics, which are auto-generated by the custom topic
+model of Nomic Atlas.
+Table3: Asummarizationofthebenchmarksweuseinthisproject. Welistthemetricandnumberofshots
+(indicating zero-shot learning or in-context learning) used for LLM evaluation on each dataset.
+Benchmark LC-AlpacaEval-2 MT-Bench Chat-Arena-Hard GSM-8K MMLU HumanEval TruthfulQA ARC MBPP
+Metric winrate score winrate acc acc acc acc acc acc
+Num. ofShots 0 0 0 8 5 0 0 25 0
+real-worldapplication. Inadditiontotheagreementtohumanpreference,comparedwithAlpacaEval-2
+and MT-Bench, Chat-Arena-Hard further enjoys a clear separability among different models.
+We also measure the ability of the resulting models using academic benchmark, including GSM-8K (Cobbe
+et al., 2021), MMLU (Hendrycks et al., 2020), HumanEval (Chen et al., 2021), TruthfulQA (Lin et al.,
+2021), ARC (Clark et al., 2018), and MBPP (Austin et al., 2021). These benchmarks evaluate the models’
+ability in coding, reasoning, and general knowledge. In particular, it is known that RLHF alignment can
+introduceperformancedegenerationinreasoning, calibration(providingaccurateconfidenceestimates), and
+truthfulnesscapabilities(generatingaccurateandfactualresponses),whichisalsoreferredtoasthealignment
+taxintheliterature(Ouyangetal.,2022;Baietal.,2022a;OpenAI,2023). Therefore, evaluatingourmodel
+on these benchmarks is crucial to understanding the impact of iterative RLHF on these specific aspects.
+We summarize the benchmarks we use in this project in Table 3.
+4.2 Main Results
+Online iterative RLHF significantly improves conversation quality. We evaluate our model’s con-
+versationabilitiesusingAlpacaEval-2, MT-Bench, andChat-Arena-Hard, (resultsinTable4). Comparedto
+other open-source models with less than 10B parameters, our model – SFR-Iterative-DPO-LLaMA-3-8B-R
+outperforms them on the conversation and instruction-following benchmarks with a significant margin. No-
+16Table 4: Evaluation results and comparison between the resulting models and existing models. ∗ means
+that the model is based on the mixture-of-experts architecture. We report the length-control win rate of
+AlpacaEval-2 as recommended by the authors. RS is short for rejection sampling (Dong et al., 2023) and X
+means that the value is unavailable. Only underline results are better than our 8B model.
+Model Size Method LC AlpacaEval-2 MT-Bench Chat-Arena-Hard
+Gemma-7B-it 7B SFT 10.4 6.38 7.5
+Zephyr-7B-beta 7B Vanilla DPO 13.1 7.34 X
+Mistral-7B-v0.2-it 7B SFT 17.1 7.51 12.6
+Open-Chat-0106 7B SFT 15.6 7.8 X
+Starling-7B-beta 7B PPO 25.8 8.12 23.0
+LLaMA-3-8B-it 8B RS+DPO+PPO 22.9 8.16 20.6
+Ours (SFT baseline) 8B SFT 10.2 7.69 5.6
+Ours (DPO baseline) 8B Vanilla DPO 22.5 8.17 22.4
+Ours (Iterative RLHF) 8B Iterative DPO 37.2 8.46 29.1
+Vicuna-33b-v1.3 33B SFT 17.6 7.12 8.6
+Yi-34B-Chat 34B SFT 27.2 X 23.1
+Mixtral-8x7B-it 45B∗ SFT 23.7 8.30 23.4
+Tulu-2-DPO-70B 70B Vanilla DPO 21.2 7.89 15.0
+LLaMA-3-70B-it 70B RS+DPO+PPO 34.4 8.95 41.1
+Mixtral-8x22B-it 141B∗ SFT 30.9 8.66 36.4
+GPT-3.5-turbo-1106 - - 19.3 8.35 18.9
+GPT-3.5-turbo-0613 - - 22.7 8.39 24.8
+GPT-4-0613 - - 30.2 9.18 37.9
+Claude-3-Opus - - 40.5 9.00 60.4
+GPT-4 Turbo (04/09) - - 55.0 X 82.6
+tably, our model trained with iterative DPO consistently outperforms that of vanilla offline DPO (DPO
+baseline). This demonstrates the advantage of online iterative RLHF. Moreover, our model outperforms
+theTulu-2-DPO-70BandGPT-3.5-turbo-1106,whicharealignedbyDPOorPPOandaremuchlargerthan
+our base model. These results show that the online iterative RLHF can effectively adjust the style of the
+model responses, thus improving the conversation quality.
+Academic Task. AsRLHFcanimpactamodel’sreasoningandcalibrationabilities,typicallyinanegative
+way(Baietal.,2022a;Ouyangetal.,2022;OpenAI,2023),wecompareourmodel’sperformanceonacademic
+benchmarks(Table5)withtheSFTcheckpointandotherbaselines. Wedon’tobservesignificantperformance
+regressioncomparedtotheSFTbaseline. Interestingly,ouriterativelyDPO-alignedmodelevenoutperforms
+the SFT model in GSM-8K, MMLU, TruthfulQA, and ARC benchmarks. We believe that these increased
+capacities of the model are injected in the pre-training stage and SFT stage, and iterative DPO helps it
+leverage them more effectively. This is because the 60K alignment data used in the iterative RLHF are
+orders of magnitude less than those used in the previous two stages.
+Remark 1. The RLHF-aligned models based on some initial checkpoints and more epochs can approach or
+even outperform the state-of-the-art closed-source models like GPT-4 and Claude on benchmarks. However,
+we remark that we should be more careful in interpreting these results because the test sets of the benchmarks
+are finite and may not be representative enough to capture the complicated real-world scenarios. Moreover,
+the increased possibility of small models overfitting the benchmarks may lead to benchmark hacking, which
+means that the real capacity of a model with a high score is still limited. In particular, while it is possible
+to get even higher results on the benchmark (e.g., 44.84 in LC AlpacaEval-2 and 35.7 in Chat-Arena-hard,
+but the performance on academic benchmarks drops significantly), we presented our current model by human
+17Table 5: Evaluation results of the resulting model on academic benchmarks and comparison with other
+open-access LLMs.
+Model Size Method GSM-8K MMLU HumanEval TruthfulQA ARC MBPP
+LLaMA-3-8B-it 8B RS+DPO+PPO 79.6 66.0 61.6 43.9 59.5 61.1
+Ours(SFTbaseline) 8B SFT 74.2 64.7 65.2 53.4 61.4 62.3
+Ours(DPObaseline) 8B VanillaDPO 79.8 64.5 63.4 61.8 65.2 60.3
+Ours(IterativeRLHF) 8B IterativeDPO 80.7 65.3 64.6 60.4 64.3 60.8
+evaluation on some randomly chosen test prompts.
+Ablation study on filtering data with length penalty. Weobservedthatthealignedmodel’sresponse
+length was significantly longer than the SFT baseline (potentially due to reward model bias as shown in
+Figure 5). To address this, we conducted an ablation study by incorporating a length penalty into the
+reward function:
+r(x,a)=rˆ(x,a)−λ|a|, (8)
+(cid:101)
+where |a| is the number of characters of the response. We compare the model trained with this penalty to
+the vanilla version and report the results in Table 6. As expected, the length penalty effectively mitigated
+the length bias, leading to shorter responses. In particular, the model trained with length penalty achieves
+a superior length-control AlpacaEval-2 win rate, as well as better results on some academic benchmarks.
+This demonstrates the advantage of mitigating length bias and motivates us to study the verbosity issue in
+rewardmodelingfurther. Finally,wenoticethatthemodeltrainedwithlengthpenaltyisworseintheChat-
+Arena-Hard benchmark. This may suggest that we also need a length-control version for this benchmark to
+provide a more reasonable evaluation.
+Table 6: Ablation study on the impact of reward models and length penalty in the online iterative RLHF.
+The response length is averaged over the responses to the Chat-Arena-Hard Benchmark.
+RM/Model Len. Pen. LCAlp. Arena-H. Len. GSM-8K MMLU HumanEval TruthfulQA ARC MBPP
+Ours - 37.2 29.1 656 80.7 65.3 64.6 62.2 64.3 60.8
+Ours-concise 0.001 41.9 22.1 382 78.8 65.5 66.5 60.4 65.1 62.4
+UltraRM-13B - 20.7 24.3 745 78.9 64.9 63.7 59.9 63.6 60.8
+On the impact of reward model. Weinvestigatetheeffectsofthereward(preference)modelusedinthe
+online iterative RLHF. Our model’s performance is compared to a model trained with UltraRM-13B, and
+theablationstudyresultsaresummarizedinTable6. WeobservethatthemodeltrainedwithUltraRM-13B
+has longer responses than ours, which is consistent with its stronger bias, as shown in Figure 5. Considering
+the alignment tax, the accuracy on the academic benchmarks drops more than our models. One important
+reason is that the UltraRM-13B does not have a good reasoning ability (see Table 2), so it may not provide
+appropriate preference signals for reasoning-related conversions. For instance, the model may favor some
+responseswithmanycommentsinthecodingtask,whichtendtobeveryhelpfulbutareindeeduselesswhen
+evaluated by humans. Notably, the model trained with UltraRM-13B achieves a higher Chat-Arena-Hard
+win rate than our concise version, which also supports the verbosity bias of the Arena-Hard benchmark.
+During the training process, we also observe that the model trained with UltraRM-13B achieves a lower
+training loss, which may suggest that the signals of UltraRM-13B are more consistent and easy to learn. In
+contrast, the convergence under our reward model is slower due to the complex preference signal.
+185 End Note and Future Direction
+In this technical report, we study the workflow of the online iterative RLHF, which leverages on-policy sam-
+pling and external preference signals from a proxy preference model trained on a diverse set of open-source
+preference datasets. The resulting model (referred to as SFR-Iterative-DPO-LLaMA-3-8B-R) demonstrates
+impressiveperformanceonstandardbenchmarks,andthereportprovidesdetailedinstructionsforreproduc-
+ing the results, including data, code, models, and hyper-parameter choices.
+There are still many potential directions to explore. First, as we can see in Table 6, the iterative RLHF
+heavily relies on the quality of the preference signal. In this project, we use a proxy scalar reward model
+trained on a diverse set of open-source datasets to approximate human feedback. It would be interesting
+to see whether we can design a more effective strategy to model different types of preference signals, like a
+multi-head reward (Wang et al., 2024) and classification-based activation strategy (Touvron et al., 2023).
+Second, while the rejection sampling seems to be a good heuristic exploration strategy, it is still interesting
+to see whether we can design more effective ways for exploration. Finally, most of the models after RLHF
+tendtoreplythepromptswithmuchlongerresponses. Suchalengthbiasisfurtheramplifiedintheiterative
+RLHFframework. Wepresentedapreliminarystudyonthisissuebyleveraginganadditionallengthpenalty
+in reward for data filtering. It would be interesting to see whether we can further mitigate this issue by
+additional algorithmic designs or post-training techniques.
+WehopetheresultsofthisprojectcanadvancethedirectionofonlineiterativeRLHFandcontributetothe
+training of stronger and larger open-source LLMs.
+6 Acknowledgements
+The authors would like to thank the great open-source communities, including the Huggingface TRL team,
+the Huggingface H4 team, the Allen Institute AI RewardBench team, the Meta LLaMA team, and Axolotl
+team for sharing the models, codes, and training sets. We also thank Zihao Li for assistance in reward
+modeling.
+References
+Anthropic (2023). Introducing claude.
+Austin, J., Odena, A., Nye, M., Bosma, M., Michalewski, H., Dohan, D., Jiang, E., Cai, C., Terry, M., Le,
+Q., et al. (2021). Program synthesis with large language models. arXiv preprint arXiv:2108.07732.
+Azar, M. G., Rowland, M., Piot, B., Guo, D., Calandriello, D., Valko, M., and Munos, R. (2023). A general
+theoretical paradigm to understand learning from human preferences. arXiv preprint arXiv:2310.12036.
+Bai, Y., Jones, A., Ndousse, K., Askell, A., Chen, A., DasSarma, N., Drain, D., Fort, S., Ganguli, D.,
+Henighan, T., et al. (2022a). Training a helpful and harmless assistant with reinforcement learning from
+human feedback. arXiv preprint arXiv:2204.05862.
+Bai, Y., Kadavath, S., Kundu, S., Askell, A., Kernion, J., Jones, A., Chen, A., Goldie, A., Mirhoseini,
+A., McKinnon, C., et al. (2022b). Constitutional ai: Harmlessness from ai feedback. arXiv preprint
+arXiv:2212.08073.
+Bansal, H., Dang, J., and Grover, A. (2023). Peering through preferences: Unraveling feedback acquisition
+for aligning large language models. arXiv preprint arXiv:2308.15812.
+19Beirami, A., Agarwal, A., Berant, J., D’Amour, A., Eisenstein, J., Nagpal, C., and Suresh, A. T. (2024).
+Theoretical guarantees on the best-of-n alignment policy. arXiv preprint arXiv:2401.01879.
+Bradley, R. A. and Terry, M. E. (1952). Rank analysis of incomplete block designs: I. the method of paired
+comparisons. Biometrika, 39(3/4):324–345.
+Burns, C., Izmailov, P., Kirchner, J. H., Baker, B., Gao, L., Aschenbrenner, L., Chen, Y., Ecoffet, A.,
+Joglekar, M., Leike, J., et al. (2023). Weak-to-strong generalization: Eliciting strong capabilities with
+weak supervision. arXiv preprint arXiv:2312.09390.
+Calandriello, D., Guo, D., Munos, R., Rowland, M., Tang, Y., Pires, B. A., Richemond, P. H., Lan, C. L.,
+Valko, M., Liu, T., et al. (2024). Human alignment of large language models through online preference
+optimisation. arXiv preprint arXiv:2403.08635.
+Chan,A.J.,Sun,H.,Holt,S.,andvanderSchaar,M.(2024). Denserewardforfreeinreinforcementlearning
+from human feedback. arXiv preprint arXiv:2402.00782.
+Chang, J. D., Shan, W., Oertell, O., Brantley, K., Misra, D., Lee, J. D., and Sun, W. (2024). Dataset reset
+policy optimization for rlhf. arXiv preprint arXiv:2404.08495.
+Chen, H., He, G., Su, H., and Zhu, J. (2024a). Noise contrastive alignment of language models with explicit
+rewards. arXiv preprint arXiv:2402.05369.
+Chen, M., Tworek, J., Jun, H., Yuan, Q., de Oliveira Pinto, H. P., Kaplan, J., Edwards, H., Burda, Y.,
+Joseph, N., Brockman, G., Ray, A., Puri, R., Krueger, G., Petrov, M., Khlaaf, H., Sastry, G., Mishkin,
+P., Chan, B., Gray, S., Ryder, N., Pavlov, M., Power, A., Kaiser, L., Bavarian, M., Winter, C., Tillet, P.,
+Such,F.P.,Cummings,D.,Plappert,M.,Chantzis,F.,Barnes,E.,Herbert-Voss,A.,Guss,W.H.,Nichol,
+A., Paino, A., Tezak, N., Tang, J., Babuschkin, I., Balaji, S., Jain, S., Saunders, W., Hesse, C., Carr,
+A. N., Leike, J., Achiam, J., Misra, V., Morikawa, E., Radford, A., Knight, M., Brundage, M., Murati,
+M., Mayer, K., Welinder, P., McGrew, B., Amodei, D., McCandlish, S., Sutskever, I., and Zaremba, W.
+(2021). Evaluating large language models trained on code.
+Chen, Z., Deng, Y., Yuan, H., Ji, K., and Gu, Q. (2024b). Self-play fine-tuning converts weak language
+models to strong language models. arXiv preprint arXiv:2401.01335.
+Choshen, L., Fox, L., Aizenbud, Z., and Abend, O. (2019). On the weaknesses of reinforcement learning for
+neural machine translation. arXiv preprint arXiv:1907.01752.
+Christiano, P. F., Leike, J., Brown, T., Martic, M., Legg, S., and Amodei, D. (2017). Deep reinforcement
+learning from human preferences. Advances in neural information processing systems, 30.
+Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal, A., Schoenick, C., and Tafjord, O. (2018). Think
+you have solved question answering? try arc, the ai2 reasoning challenge. arXiv:1803.05457v1.
+Cobbe, K., Kosaraju, V., Bavarian, M., Chen, M., Jun, H., Kaiser, L., Plappert, M., Tworek, J., Hilton, J.,
+Nakano, R., Hesse, C., and Schulman, J. (2021). Training verifiers to solve math word problems. arXiv
+preprint arXiv:2110.14168.
+Cui, G., Yuan, L., Ding, N., Yao, G., Zhu, W., Ni, Y., Xie, G., Liu, Z., and Sun, M. (2023). Ultrafeedback:
+Boosting language models with high-quality feedback.
+Daniele, L. and Suphavadeeprasit (2023). Amplify-instruct: Synthetically generated diverse multi-turn
+conversations for effecient llm training. arXiv preprint arXiv:(coming soon).
+Diao,S.,Pan,R.,Dong,H.,Shum,K.S.,Zhang,J.,Xiong,W.,andZhang,T.(2023). Lmflow: Anextensible
+toolkit for finetuning and inference of large foundation models. arXiv preprint arXiv:2306.12420.
+20Dong, H., Xiong, W., Goyal, D., Zhang, Y., Chow, W., Pan, R., Diao, S., Zhang, J., SHUM, K., and Zhang,
+T. (2023). RAFT: Reward ranked finetuning for generative foundation model alignment. Transactions on
+Machine Learning Research.
+Dubois, Y., Li, X., Taori, R., Zhang, T., Gulrajani, I., Ba, J., Guestrin, C., Liang, P., and Hashimoto, T. B.
+(2023). Alpacafarm: Asimulationframeworkformethodsthatlearnfromhumanfeedback. arXiv preprint
+arXiv:2305.14387.
+Engstrom,L.,Ilyas,A.,Santurkar,S.,Tsipras,D.,Janoos,F.,Rudolph,L.,andMadry,A.(2020).Implemen-
+tation matters in deep policy gradients: A case study on ppo and trpo. arXiv preprint arXiv:2005.12729.
+Ethayarajh, K., Choi, Y., and Swayamdipta, S. (2022). Understanding dataset difficulty with V-usable
+information. In Chaudhuri, K., Jegelka, S., Song, L., Szepesvari, C., Niu, G., and Sabato, S., editors,
+Proceedings of the 39th International Conference on Machine Learning, volume 162 of Proceedings of
+Machine Learning Research, pages 5988–6008. PMLR.
+Ethayarajh, K., Xu, W., Muennighoff, N., Jurafsky, D., and Kiela, D. (2024). Kto: Model alignment as
+prospect theoretic optimization. arXiv preprint arXiv:2402.01306.
+Gao,L.,Schulman,J.,andHilton,J.(2023).Scalinglawsforrewardmodeloveroptimization.InInternational
+Conference on Machine Learning, pages 10835–10866. PMLR.
+Gulcehre, C., Paine, T. L., Srinivasan, S., Konyushkova, K., Weerts, L., Sharma, A., Siddhant, A., Ahern,
+A., Wang, M., Gu, C., et al. (2023). Reinforced self-training (rest) for language modeling. arXiv preprint
+arXiv:2308.08998.
+Guo, S., Zhang, B., Liu, T., Liu, T., Khalman, M., Llinares, F., Rame, A., Mesnard, T., Zhao, Y., Piot, B.,
+et al. (2024). Direct language model alignment from online ai feedback. arXiv preprint arXiv:2402.04792.
+Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M., Song, D., and Steinhardt, J. (2020). Measuring
+massive multitask language understanding. arXiv preprint arXiv:2009.03300.
+HoangTran,ChrisGlaze,B.H.(2024). Snorkel-mistral-pairrm-dpo. https://huggingface.co/snorkelai/
+Snorkel-Mistral-PairRM-DPO.
+Ji, J., Liu, M., Dai, J., Pan, X., Zhang, C., Bian, C., Chen, B., Sun, R., Wang, Y., and Yang, Y. (2024).
+Beavertails: Towardsimprovedsafetyalignmentofllmviaahuman-preferencedataset.AdvancesinNeural
+Information Processing Systems, 36.
+Jiang, D., Ren, X., and Lin, B. Y. (2023). Llm-blender: Ensembling large language models with pairwise
+comparison and generative fusion. In Proceedings of the 61th Annual Meeting of the Association for
+Computational Linguistics (ACL 2023).
+Kwon, W., Li, Z., Zhuang, S., Sheng, Y., Zheng, L., Yu, C. H., Gonzalez, J. E., Zhang, H., and Sto-
+ica, I. (2023). Efficient memory management for large language model serving with pagedattention. In
+Proceedings of the ACM SIGOPS 29th Symposium on Operating Systems Principles.
+Lambert, N., Pyatkin, V., Morrison, J., Miranda, L., Lin, B. Y., Chandu, K., Dziri, N., Kumar, S., Zick, T.,
+Choi, Y., et al. (2024). Rewardbench: Evaluating reward models for language modeling. arXiv preprint
+arXiv:2403.13787.
+Li, Z., Xu, T., Zhang, Y., Yu, Y., Sun, R., and Luo, Z.-Q. (2023). Remax: A simple, effective, and efficient
+reinforcement learning method for aligning large language models. arXiv e-prints, pages arXiv–2310.
+Lian,W.,Goodson,B.,Pentland,E.,Cook,A.,Vong,C.,and”Teknium”(2023).Openorca: Anopendataset
+of gpt augmented flan reasoning traces. https://https://huggingface.co/Open-Orca/OpenOrca.
+21Lin, S., Hilton, J., and Evans, O. (2021). Truthfulqa: Measuring how models mimic human falsehoods.
+arXiv preprint arXiv:2109.07958.
+Liu, T., Zhao, Y., Joshi, R., Khalman, M., Saleh, M., Liu, P. J., and Liu, J. (2023a). Statistical rejection
+sampling improves preference optimization. arXiv preprint arXiv:2309.06657.
+Liu, Z., Lu, M., Xiong, W., Zhong, H., Hu, H., Zhang, S., Zheng, S., Yang, Z., and Wang, Z. (2023b).
+Maximize to explore: One objective function fusing estimation, planning, and exploration. In Thirty-
+seventh Conference on Neural Information Processing Systems.
+Meta (2024). Introducing meta llama 3: The most capable openly available llm to date. Meta AI Blog.
+https://ai.meta.com/blog/meta-llama-3/.
+Nakano, R., Hilton, J., Balaji, S., Wu, J., Ouyang, L., Kim, C., Hesse, C., Jain, S., Kosaraju, V., Saunders,
+W., et al. (2021). Webgpt: Browser-assisted question-answering with human feedback. arXiv preprint
+arXiv:2112.09332.
+Nussbaum,Z.,Morris,J.X.,Duderstadt,B.,andMulyar,A.(2024). Nomicembed: Trainingareproducible
+long context text embedder.
+OpenAI (2023). Gpt-4 technical report. ArXiv, abs/2303.08774.
+Ouyang,L.,Wu,J.,Jiang,X.,Almeida,D.,Wainwright,C.,Mishkin,P.,Zhang,C.,Agarwal,S.,Slama,K.,
+Ray, A., et al. (2022). Training language models to follow instructions with human feedback. Advances in
+Neural Information Processing Systems, 35:27730–27744.
+Pace, A., Mallinson, J., Malmi, E., Krause, S., and Severyn, A. (2024). West-of-n: Synthetic preference
+generation for improved reward modeling. arXiv preprint arXiv:2401.12086.
+Pang,B.,Xiong,C.,andZhou,Y.(2024). Arm: Alignmentwithresidualenergy-basedmodel. InProceedings
+of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics:
+Human Language Technologies.
+Qin, Z., Jagerman, R., Hui, K., Zhuang, H., Wu, J., Shen, J., Liu, T., Liu, J., Metzler, D., Wang, X., et al.
+(2023). Large language models are effective text rankers with pairwise ranking prompting. arXiv preprint
+arXiv:2306.17563.
+Rafailov, R., Sharma, A., Mitchell, E., Ermon, S., Manning, C. D., and Finn, C. (2023). Direct preference
+optimization: Your language model is secretly a reward model. arXiv preprint arXiv:2305.18290.
+Rosset,C.,Cheng,C.-A.,Mitra,A.,Santacroce,M.,Awadallah,A.,andXie,T.(2024).Directnashoptimiza-
+tion: Teachinglanguagemodelstoself-improvewithgeneralpreferences. arXivpreprintarXiv:2404.03715.
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and Klimov, O. (2017). Proximal policy optimization
+algorithms. arXiv preprint arXiv:1707.06347.
+Stiennon, N., Ouyang, L., Wu, J., Ziegler, D. M., Lowe, R., Voss, C., Radford, A., Amodei, D., and
+Christiano, P. (2020). Learning to summarize from human feedback. In NeurIPS.
+Swamy, G., Dann, C., Kidambi, R., Wu, Z. S., and Agarwal, A. (2024). A minimaximalist approach to
+reinforcement learning from human feedback. arXiv preprint arXiv:2401.04056.
+Tajwar, F., Singh, A., Sharma, A., Rafailov, R., Schneider, J., Xie, T., Ermon, S., Finn, C., and Kumar,
+A. (2024). Preference fine-tuning of llms should leverage suboptimal, on-policy data. arXiv preprint
+arXiv:2404.14367.
+22Tang, Y., Guo, Z. D., Zheng, Z., Calandriello, D., Munos, R., Rowland, M., Richemond, P. H., Valko, M.,
+Pires, B. A´., and Piot, B. (2024). Generalized preference optimization: A unified approach to offline
+alignment. arXiv preprint arXiv:2402.05749.
+Team, G., Anil, R., Borgeaud, S., Wu, Y., Alayrac, J.-B., Yu, J., Soricut, R., Schalkwyk, J., Dai, A. M.,
+Hauth, A., et al. (2023). Gemini: a family of highly capable multimodal models. arXiv preprint
+arXiv:2312.11805.
+Team, G., Mesnard, T., Hardin, C., Dadashi, R., Bhupatiraju, S., Pathak, S., Sifre, L., Rivi`ere, M., Kale,
+M. S., Love, J., et al. (2024). Gemma: Open models based on gemini research and technology. arXiv
+preprint arXiv:2403.08295.
+Teknium (2023). Openhermes 2.5: An open dataset of synthetic data for generalist llm assistants.
+Tianle, L., Wei-Lin, C., Evan, Frick nad Lisa, D., Banghua, Z., Joseph E., G., and Stoica, I. (2024). From
+live data to high-quality benchmarks: The arena-hard pipeline.
+Touvron,H.,Martin,L.,Stone,K.,Albert,P.,Almahairi,A.,Babaei,Y.,Bashlykov,N.,Batra,S.,Bhargava,
+P., Bhosale, S., et al. (2023). Llama 2: Open foundation and fine-tuned chat models. arXiv preprint
+arXiv:2307.09288.
+Tunstall, L., Beeching, E., Lambert, N., Rajani, N., Rasul, K., Belkada, Y., Huang, S., von Werra, L.,
+Fourrier, C., Habib, N., et al. (2023). Zephyr: Direct distillation of lm alignment. arXiv preprint
+arXiv:2310.16944.
+Wang, H., Lin, Y., Xiong, W., Yang, R., Diao, S., Qiu, S., Zhao, H., and Zhang, T. (2024). Arithmetic
+controlofllmsfordiverseuserpreferences: Directionalpreferencealignmentwithmulti-objectiverewards.
+arXiv preprint arXiv:2402.18571.
+Wang, Z., Dong, Y., Zeng, J., Adams, V., Sreedhar, M. N., Egert, D., Delalleau, O., Scowcroft, J. P., Kant,
+N., Swope, A., and Kuchaiev, O. (2023). Helpsteer: Multi-attribute helpfulness dataset for steerlm.
+Wu, J., Ouyang, L., Ziegler, D. M., Stiennon, N., Lowe, R., Leike, J., and Christiano, P. (2021). Recursively
+summarizing books with human feedback. arXiv preprint arXiv:2109.10862.
+Wu, Y., Sun, Z., Yuan, H., Ji, K., Yang, Y., and Gu, Q. (2024). Self-play preference optimization for
+language model alignment. arXiv preprint arXiv:2405.00675.
+Xiong, W., Dong, H., Ye, C., Wang, Z., Zhong, H., Ji, H., Jiang, N., and Zhang, T. (2023). Iterative
+preference learning from human feedback: Bridging theory and practice for rlhf under kl-constraint.
+Xu,J.,Lee,A.,Sukhbaatar,S.,andWeston,J.(2023). Somethingsaremorecringethanothers: Preference
+optimization with the pairwise cringe loss. arXiv preprint arXiv:2312.16682.
+Xu, Y., Liu, X., Liu, X., Hou, Z., Li, Y., Zhang, X., Wang, Z., Zeng, A., Du, Z., Zhao, W., et al. (2024).
+Chatglm-math: Improving math problem-solving in large language models with a self-critique pipeline.
+arXiv preprint arXiv:2404.02893.
+Ye, C., Xiong, W., Zhang, Y., Jiang, N., and Zhang, T. (2024). A theoretical analysis of nash learning from
+human feedback under general kl-regularized preference. arXiv preprint arXiv:2402.07314.
+Yuan, L., Cui, G., Wang, H., Ding, N., Wang, X., Deng, J., Shan, B., Chen, H., Xie, R., Lin, Y., Liu, Z.,
+Zhou, B., Peng, H., Liu, Z., and Sun, M. (2024a). Advancing llm reasoning generalists with preference
+trees.
+Yuan, W., Pang, R. Y., Cho, K., Sukhbaatar, S., Xu, J., and Weston, J. (2024b). Self-rewarding language
+models. arXiv preprint arXiv:2401.10020.
+23Yuan, Z., Yuan, H., Tan, C., Wang, W., Huang, S., and Huang, F. (2023). Rrhf: Rank responses to align
+language models with human feedback without tears. arXiv preprint arXiv:2304.05302.
+Zhang, T. (2023). Mathematical analysis of machine learning algorithms. Cambridge University Press.
+Zhao, Y., Joshi, R., Liu, T., Khalman, M., Saleh, M., and Liu, P. J. (2023). Slic-hf: Sequence likelihood
+calibration with human feedback. arXiv preprint arXiv:2305.10425.
+Zheng, L., Chiang, W.-L., Sheng, Y., Zhuang, S., Wu, Z., Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E., et al.
+(2023). Judging llm-as-a-judge with mt-bench and chatbot arena. arXiv preprint arXiv:2306.05685.
+Zhong,H.,Feng,G.,Xiong,W.,Zhao,L.,He,D.,Bian,J.,andWang,L.(2024). Dpomeetsppo: Reinforced
+token optimization for rlhf. arXiv preprint arXiv:2404.18922.
+Zhong, H., Xiong, W., Zheng, S., Wang, L., Wang, Z., Yang, Z., and Zhang, T. (2022). Gec: A unified
+frameworkforinteractivedecisionmakinginmdp, pomdp, andbeyond. arXiv preprint arXiv:2211.01962.
+Zhu, B., Frick, E., Wu, T., Zhu, H., and Jiao, J. (2023). Starling-7b: Improving llm helpfulness & harmless-
+ness with rlaif.
+Ziegler, D. M., Stiennon, N., Wu, J., Brown, T. B., Radford, A., Amodei, D., Christiano, P., and Irving, G.
+(2019). Fine-tuning language models from human preferences. arXiv preprint arXiv:1909.08593.
+24A Authorship and Credit Attribution
+All authors provided valuable contributions to this project, each bringing unique expertise and insights that
+were crucial for its success.
+HD first demonstrated that iterative DPO algorithm can achieve state-of-the-art performance; wrote a
+development version code for SFT, iterative RLHF; contributed to the training of SFT model and BT-
+RM; conducted extensive experiments on training and hyper-parameter tuning of iterative RLHF; delivered
+the released BT reward model; provide preference dataset for final BT-RM and some initial versions of the
+promptdata;conductedtheRMevaluationandGPT-basedevaluationofthegenerativemodels;contributed
+to paper writing; contributed to the public version of iterative RLHF code.
+WX wrote the codes for the Bradley Terry reward model and conducted most of the experiments for
+both reward and preference model training; delivered the released pairwise preference model; contributed
+to the preference dataset search and hyper-parameter tuning; initiated and organized the online iterative
+RLHFproject;wrotetheinitialcodefortheonlineiterativeDPOandprepareditspublicversiononGitHub;
+contributedtotheevaluationoftherewardandpreferencemodels;assistedinthecollectionandthecleaning
+of the preference dataset; wrote the paper.
+BP conducted most of the final SFT and RLHF experiments and delivered the released SFT and RLHF
+model; independently wrote a development version code for SFT and iterative RLHF; developed the SFT
+recipes (data, hyper-parameter, model selection); conducted extensive experiments on the training and
+hyper-parameter tuning of SFT, offline and iterative RLHF; conducted the GPT-based evaluation and all
+the academic benchmarks; contributed to paper writing.
+HW initiatedthetrainingcodeofthepairwisepreferencemodel,andconductedexperimentsinthetraining
+of the Bradley Terry reward model and pairwise preference model; collected, filtered, and deduplicated the
+promptset; contributedtothepreferencedatasetcollectionanddatacleaning; contributedtotheevaluation
+and analysis of the reward and preference models; made substantial writing contributions to the reward
+modeling section and created illustrative figures for the algorithmic frameworks and dataset visualization.
+HZ, YZ, NJ, DS, CX, TZsupportedandadvisedtheworksofthejuniorauthors,providedcomputational
+resources, and suggested experiments and writings.
+B Additional Experimental Details
+SFT Data List. We collect open-sourced instruction-finetuning data for our SFT model training. The
+following data is included: ShareGPT, Evol-Instruct, SlimOrca, MathInstruct, Magicoder-Evol-Instruct,
+GPT4-LLM, OrcaMath, GPTeacher, UltraInteract.
+OfflineVanillaDPO.WeuseNectardatasetforOfflineDPO.Werun1epochwithbatchsize128,learning
+rate 5e-7, and cosine decay scheduler.
+Additional Plots. We also visualized our performance as Figure 8.
+25Comprehensive Evaluation Results on Academic and Practical Benchmarks
+80 Model
+70 LLaMA-3-8B-it
+Ours (SFT baseline)
+60 Ours (DPO baseline)
+50 Ours (Iterative RLHF)
+40
+30
+20
+10
+0
+GSM-8K
+M
+MLU HumanEval TruthfulQA ARC MBPP
+LC
+AlpacaEval-2
+MT-Bench
+(×5) Chat-Arena-Hard
+Dataset and Metrics
+Model Evaluation on Academic and Practical Benchmarks
+80
+Model
+70 LLaMA-3-8B-it
+60 Ours (Iterative RLHF)
+50
+40
+30
+20
+10
+0
+GSM-8K
+M
+MLU HumanEval TruthfulQA ARC MBPP
+LC
+AlpacaEval-2
+MT-Bench
+(×5) Chat-Arena-Hard
+Dataset and Metrics
+Figure 8: Evaluation of our models and LLaMA-3-8B-inst.
+26
+)%(
+erocS
+)%(
+erocS
