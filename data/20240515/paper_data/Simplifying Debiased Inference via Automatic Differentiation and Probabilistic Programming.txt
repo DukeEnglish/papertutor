@@ -1,0 +1,3976 @@
+Simplifying Debiased Inference
+via Automatic Differentiation and Probabilistic Programming
+Alex Luedtke
+Department of Statistics, University of Washington
+Abstract
+We introduce an algorithm that simplifies the construction of efficient estimators,
+making them accessible to a broader audience. ‘Dimple’ takes as input computer
+code representing a parameter of interest and outputs an efficient estimator. Unlike
+standard approaches, it does not require users to derive a functional derivative known
+as the efficient influence function. Dimple avoids this task by applying automatic
+differentiation to the statistical functional of interest. Doing so requires expressing this
+functional as a composition of primitives satisfying a novel differentiability condition.
+Dimple also uses this composition to determine the nuisances it must estimate. In
+software, primitives can be implemented independently of one another and reused across
+different estimation problems. We provide a proof-of-concept Python implementation
+and showcase through examples how it allows users to go from parameter specification
+to efficient estimation with just a few lines of code.
+Keywords: efficientinfluencefunction,semiparametricefficiency,pathwisedifferentiability,Hadamard
+differentiability, automatic differentiation, probabilistic programming, differentiable programming
+1
+4202
+yaM
+41
+]EM.tats[
+1v57680.5042:viXra1 Introduction
+1.1 Motivation
+There is a long history of constructing estimators that are asymptotically efficient (‘efficient’
+hereafter) in infinite-dimensional models (Levit, 1975; Hasminskii and Ibragimov, 1979; Pfanzagl,
+1990; Bickel et al., 1993). Several approaches for doing this permit the use of arbitrary methods
+for estimating needed nuisance functions. These include one-step estimation (Pfanzagl, 1982),
+estimating equations (van der Laan et al., 2003), targeted learning (van der Laan and Rubin,
+2006), and double machine learning (Chernozhukov et al., 2017). These frameworks construct
+efficient estimators using an object known as the efficient influence function (EIF). Though EIFs
+have been derived in many examples (Newey, 1990; Bickel et al., 1993; van der Laan et al., 2003),
+computing them in new problems can be challenging, requiring tools from functional analysis and
+differential geometry. These calculations can represent a bottleneck in scientific discovery, as some
+novel analyses cannot be performed until an expert derives the EIF.
+Investigators have sought to use numerical approaches to overcome this bottleneck. Frangakis
+et al. (2015) built on the concept of an influence curve from robust statistics (Hampel, 1968) to
+propose a method using finite differences to approximate nonparametric EIFs. This method applies
+whenever the data are discrete or the parameter is a smooth functional of the distribution function.
+Luedtke et al. (2015) provided a modified finite difference approach that correctly approximates the
+EIF more generally, even when the data are continuous. Van der Laan et al. (2015) and Carone
+et al. (2018) improved upon this proposal by providing numerical strategies for approximating EIFs
+in the harder case where the model is semiparametric, rather than nonparametric. In a concurrent
+line of work, Ichimura and Newey (2022) developed a numerical approach to evaluate the influence
+function of a given estimator, which coincides with the EIF when the estimator is efficient. Though
+one pursues numerical approximation of the influence function of an estimator and the other pursues
+numerical approximation of the EIF of a statistical functional, the proposals in Luedtke et al. (2015)
+and Ichimura and Newey (2022) address challenges related to the possible non-discreteness of the
+data in similar ways.
+The aforementioned numerical approaches rely on two hyperparameters: a step size ϵ for a
+2finite difference approximation and a bandwidth λ for a kernel approximation of a delta function.
+While both must be small, ϵ should be an order of magnitude smaller than λ. However, setting ϵ
+too small can lead to numerical instability. Carone et al. (2018) provide guidance on the choice
+of hyperparameters through a diagnostic they call ϵ–λ plots. Jordan et al. (2022) studied the
+conditions that a numerical approximation must meet to guarantee that the resulting one-step
+estimatorpossessesdesirablestatisticalproperties. Thecomplexityoftheserequirementsunderscores
+the need for careful hyperparameter selection in existing numerical approaches, which could limit
+their adoption. Researchers in other fields have encountered similar challenges when using numerical
+differentiation (Griewank and Walther, 2008).
+Automatic differentiation avoids these challenges (Wengert, 1964; Speelpenning, 1980). In this
+approach, a function f is written as a composition of differentiable functions with known gradients,
+which we refer to as primitives. Then, an algorithm can iteratively apply the chain rule to derive
+the gradient of f at a specified point. Unlike numerical differentiation, automatic differentiation is
+hyperparameter-free and is always accurate up to working precision. Differentiable programming
+extendsautomaticdifferentiationbyidentifyingacompositionalstructureforf directlyviacomputer
+code that can be used to evaluate it, simplifying implementation (Baydin et al., 2018; Blondel
+and Roulet, 2024). Automatic differentiation and differentiable programming have been used with
+success in applications (Bischof, 1995; Homescu, 2011), and have played a crucial role in the rapid
+progress made in deep learning (Goodfellow et al., 2016). However, they have yet to be used to
+compute an EIF. This may be due to the fact that EIFs correspond to a gradient of a functional
+defined on an infinite-dimensional statistical manifold, and so it has been unclear what primitives
+can be chained together to automate their computation.
+1.2 Contributions
+Our first two contributions are as follows:
+1. We provide an automatic differentiation algorithm for computing the EIF of any parameter
+that can be expressed as a composition of Hilbert-valued primitives.
+2. We compile a table of primitives that can express many parameters of interest.
+3We then turn to estimation, building on developments in probabilistic programming (van de Meent
+et al., 2018). Probabilistic programming has been successfully employed in Bayesian inference (Ge
+et al., 2018; Tran et al., 2018; Stan Development Team, 2023), parametric maximum likelihood
+estimation (Fournier et al., 2012; Kristensen et al., 2015) and M-estimation (Zivich et al., 2022;
+KosmidisandLunardon,2024). However,todatethereisnotaprobabilisticprogrammingframework
+for efficiently estimating a generic smooth parameter that may rely on nuisances like density and
+regression functions. Our remaining contributions address this gap.
+3. We introduce an algorithm to estimate any parameter that is expressed as a composition of
+known primitives and conditions under which this estimator will be efficient.
+4. We provide a proof-of-concept Python package implementing our approach, available at
+http://github.com/alexluedtke12/dimple.
+We refer to our framework for constructing efficient estimators using automatic differentiation and
+probabilistic programming as ‘dimple’, short for ‘debiased inference made simple’.
+Thegoalofdimpleissimilarinspirittothatofautomaticdebiasedmachinelearningmethods: to
+avoid analytical derivations when constructing efficient estimators (Chernozhukov et al., 2022a,b,c).
+Those existing methods apply to regression functionals, whose EIFs depend on the functional’s
+form through nuisance functions known as Riesz representers. Automatic debiased machine learning
+provides loss functions that can be used to estimate these nuisances without explicitly deriving their
+form. Compared to these methods, dimple innovates in several directions. It allows the functional
+to depend on the distribution through non-regression summaries, uses automatic differentiation to
+compute the EIF, and is integrated into a user-friendly probabilistic programming framework. It
+also works in semiparametric as well as nonparametric models and applies to general Hilbert-valued
+parameters (Luedtke and Chung, 2023).
+Beyond simplifying estimation, our automatic differentiation approach and the chain rule that
+underliesitmaybeofindependentinterestfortheiruseinderivingsemiparametricefficiencybounds,
+which are given by the variance of the EIF when it exists (van der Vaart and Wellner, 1989; van der
+Vaart, 1991a). Our theoretical results show this EIF exists for any parameter expressible as a
+composition of differentiable primitives, and applying automatic differentiation by hand gives its
+4analytic form. See Section 2.3 for an example.
+1.3 Illustrations of proposed approach
+Our proof-of-concept Python package uses dimple to construct nonparametric efficient estimators.
+We illustrate it with three examples. The following Python code imports the classes and functions
+from the package needed to run them:
+from dimple import Distribution, E, Density, Var, RV, estimate
+In our first example, the objective is to estimate the expected density ψ(P) := E [p(Z)], with p the
+P
+probability density function of Z ∼ P.
+1 P = Distribution(data=dat)
+2 dens = Density(P, 'Z') # p
+3 expected_density = E(P,dens) # ψ(P)
+4 estimate(expected_density)
+5 # Output: {'est': 1.699, 'se': 0.035, 'ci': [1.631, 1.768]}
+Example 1: Expected density (Bickel and Ritov, 1988).
+The first line of code defines a distribution P and identifies a dataset dat containing iid draws from
+it to be used for estimation. The next two lines serve as a blueprint of the statistical estimation
+problem, formulating it using primitives from the dimple package. The fourth line computes a 5-fold
+cross-fittedestimator, Wald-typestandarderror, and95%confidenceintervalofψ(P). Internally, the
+dimple package estimates density functions using kernel density estimation and all other nuisances
+using lightgbm (Ke et al., 2017), with hyperparameters tuned via Optuna (Akiba et al., 2019).
+In our next example, the objective is to estimate the nonparametric R2 criterion, defined as
+ψ(P) := 1−(cid:82) {y−E (Y |X = x)}2dP(x,y)/Var (Y), where P is a distribution of (X,Y).
+P P
+1 P = Distribution(data=dat)
+2 v = Var(P,'Y') # Var P(Y)
+3 mu = E(P,'Y',indep_vars=['X1','X2']) # E P[Y |X =·]
+4 R2 = 1-E(P,(RV('Y')-mu)**2)/v # ψ(P)
+5 estimate(R2)
+56 # Output: {'est': 0.4334, 'se': 0.0206, 'ci': [0.3930, 0.4738]}
+Example 2: Nonparametric R2 criterion (Williamson et al., 2021).
+The final example concerns the estimation of the longitudinal G-formula, which corresponds to
+the mean outcome under a longitudinal binary treatment. This parameter is defined in longitudinal
+settings where covariate-treatment pairs (X ,A ) are collected at times t = 0,1,...,T −1, and then
+t t
+an outcome Y is collected at the end of the study. For t ∈ {0,1,...,T−1}, let H denote the history
+t
+(X ,A ,X ,A ,...,X ,A ,X )availablejustbeforetreatmentA attimetisadministered. Also
+0 0 1 1 t−1 t−1 t t
+let H = (H ,A ,Y) denote all of the covariate, treatment, and outcome data. The parameter
+T T−1 T
+ψ(P) is defined recursively by letting µ (h ) = y, µ (h ) = E [µ (H )|A = 1,H = h ]
+P,T T P,t t P P,t+1 t+1 t t t
+for t = T −1,T −2,...,0, and ψ(P) = E [µ (H )]. The recursive definition of this parameter
+P P,0 0
+can be easily expressed in dimple via a for loop, as illustrated below.
+1 P = Distribution(data=dat)
+2 T = 3 # T
+3 mu = 'Y' # µ P,T
+4 for t in reversed(range(T)): # t=T −1,T −2,...,0
+5 H = [f'X{j}' for j in range(t+1)]+[f'A{j}' for j in range(t)] # H t
+6 mu = E(P,dep=mu,indep_vars=H, fixed_vars={f'A{t}==1'}) # µ P,t
+7 mu = E(P,dep=mu) # ψ(P)
+8 estimate(mu)
+9 # Output: {'est': 0.5313, 'se': 0.0304, 'ci': [0.4717, 0.5908]}
+Example 3: Longitudinal G-Formula (Robins, 1986; Bang and Robins, 2005; Luedtke et al., 2017;
+Rotnitzky et al., 2017; Chernozhukov et al., 2022b).
+In Appendix A, we evaluate the performance of dimple in a Monte Carlo study. The results
+support that dimple can produce asymptotically efficient estimators and valid confidence intervals.
+Atsamplesizesofn ≥ 1000,theconfidenceintervalshaveapproximatelynominalcoverageandnearly
+optimal widths, scaling with the standard deviation of the EIF. These results are not surprising
+given that dimple uses a variant of one-step estimation, which has been shown to perform well in a
+variety of settings (Pfanzagl, 1982; Bickel et al., 1993). Details on this estimation framework and its
+theoretical properties are given in Section 3.1.
+6Algorithm 1 To use automatic differentiation, there must exist an algorithm of the following
+form that takes as input a generic P ∈ M and returns ψ(P)
+▷ Color is used to facilitate identification of similar or identical objects across algorithm environments
+1: h = θ (P,h )
+1 1 pa(1)
+2: h = θ (P,h ) ▷ h := (h : i ∈ pa(j)) ∀j
+2 2 pa(2) pa(j) i
+.
+.
+.
+k: h = θ (P,h )
+k k pa(k)
+return ψ(P) = h
+k
+2 Automatic differentiation of statistical functionals
+2.1 Algorithm and theoretical guarantee
+We present an algorithm for automatically differentiating a parameter ψ that maps from a set of
+distributions M into a Hilbert space W . This and all Hilbert spaces in this work are real. The set
+ψ
+M, called the model, may be nonparametric or semiparametric.
+Using our approach requires that ψ can be expressed as in Algorithm 1, meaning that, for any
+P ∈ M, calling that algorithm with input P returns ψ(P). The j-th line of that algorithm computes
+the evaluation h of a primitive θ : M×U → V applied to P and h := (h : i ∈ pa(j)).
+j j j j pa(j) i
+(cid:81)
+Here, U ⊇ V and pa(j) ⊆ [j −1] := {1,2,...,j −1}, where [0] := ∅. When pa(j) = ∅,
+j i∈pa(j) i
+we let U := {0} and h := 0. This adheres to the following general convention: for any tuple
+j pa(j)
+(a : i ∈ [j]) and set S ⊆ [j], a := (a : i ∈ S) when S ≠ ∅ and a := 0 otherwise.
+i S i S
+Though Algorithm 1 does not rely on V having an inner product structure, our automatic
+j
+differentiation scheme does. Hence, we suppose we can specify an ambient Hilbert space W ⊇ V
+j j
+for each j ∈ [k−1]. We also let W := W and view U as a subset of the direct sum Hilbert space
+k ψ j
+(cid:76)
+W , which we take to be a trivial Hilbert space {0} when pa(j) = 0.
+i∈pa(j) i
+To ensure that a chain rule can be applied to differentiate ψ, each θ must be differentiable
+j
+in a sense we now introduce. We do this for a generic primitive θ : M×U → V with U ⊆ T and
+V ⊆ W for ambient Hilbert spaces T and W. We denote the norms on these spaces by ∥·∥
+T
+and ∥·∥ . Given u ∈ U and t ∈ T, we let P(u,U,t) be the set of paths {u : ϵ ∈ [0,1]} ⊆ U
+W ϵ
+that satisfy ∥u −u−ϵt∥ = o(ϵ). For u ∈ U, we call Uˇ := {t ∈ T : P(u,U,t) ̸= ∅} the tangent
+ϵ T u
+set of U at u and the T-closure of its linear span, U˙ , the tangent space of U at u. The tangent
+u
+7space M˙ ⊆ L2(P) of M at P is similarly defined as the L2(P)-closure of the linear span of
+P
+the tangent set Mˇ := {s ∈ L2(P) : P(P,M,s) ̸= ∅}, where P(P,M,s) is the collection of
+P
+quadratic mean differentiable univariate submodels {P : ϵ ∈ [0,1]} ⊆ M with score s at ϵ = 0
+ϵ
+and P = P. We call θ totally pathwise differentiable at (P,u) if there exists a continuous linear
+ϵ=0
+operator θ˙ : M˙ ⊕U˙ → W such that, for all s ∈ Mˇ , t ∈ Uˇ , {P : ϵ} ∈ P(P,M,s), and
+P,u P u P u ϵ
+{u : ϵ} ∈ P(u,U,t),
+ϵ
+(cid:13) (cid:13)
+(cid:13)θ(P ,u )−θ(P,u)−ϵθ˙ (s,t)(cid:13) = o(ϵ). (1)
+(cid:13) ϵ ϵ P,u (cid:13)
+W
+The differential operator θ˙ is unique. We denote its Hermitian adjoint by θ˙∗ : W → M˙ ⊕U˙ .
+P,u P,u P u
+Though we have not seen this precise notion of differentiability introduced previously, total
+pathwise differentiability is closely related to classical notions that apply to functions of a single
+argument, u ∈ U or P ∈ M. In particular, the total pathwise differentiability of θ at (P,u)
+implies θ(P, ·) is Hadamard differentiable (Averbukh and Smolyanov, 1967) and θ(·,u) is pathwise
+differentiable (van der Vaart, 1991a), and the converse implication holds under additional regularity
+conditions — see Lemmas S5 and S6 in the appendix. In the special case where U is the trivial vector
+space {0}, θ is totally pathwise differentiable if and only if ν(·) := θ(·,0) is pathwise differentiable.
+In these cases, θ˙∗(w) = (ν˙∗(w),0). The map ν˙∗ : W → M˙ is called the efficient influence operator
+P P P P
+of ν at P; it can be used to draw inferences about ν(P) (Luedtke and Chung, 2023). When W = R
+and w = 1, ν˙∗(w) is known as the EIF of ν at P.
+P
+Like Hadamard and pathwise differentiability (Averbukh and Smolyanov, 1967; van der Vaart,
+1991b), total pathwise differentiability satisfies a chain rule — see Lemma S3 in the appendix. The
+availability of a chain rule suggests a form of automatic differentiation (Linnainmaa, 1970), which
+we present in Algorithm 2. Initially, this algorithm requires the evaluation of the composition that
+defines ψ. Subsequently, information backpropagates through the indices j of the composition to
+evaluate the efficient influence operator. This information is derived from the adjoint θ˙∗ of
+j,P,h
+pa(j)
+the differential operator of θ at (P,h ), where h is as defined as in Algorithm 1 when that
+j pa(j) pa(j)
+algorithm is called with input P.
+Theorem 1 (Automatic differentiation works). Suppose ψ can be expressed as in Algorithm 1 and
+8Algorithm 2 Automatic differentiation to evaluate the efficient influence operator at P
+Require: user-specified f ∈ W and h ,h ,...,h as defined in Algorithm 1 with input P
+k ψ 1 2 k
+1: initialize f ,f ,f ,...,f as the 0 elements of L2(P),W ,W ,...,W , respectively
+0 1 2 k−1 1 2 k−1
+2: for j = k,k −1,...,1 do
+3: augment (f ,f ) +=
+θ˙∗
+(f )
+0 pa(j) j,P,h j
+pa(j)
+4: return f ▷ Theorem 1 shows f =
+ψ˙∗(f
+)
+0 0 P k
+θ is totally pathwise differentiable at (P,h ) for all j ∈ [k]. Then, ψ is pathwise differentiable at
+j pa(j)
+P and Algorithm 2 returns the efficient influence operator evaluation ψ˙∗(f ).
+P k
+To obtain the EIF of a real-valued parameter ψ, Algorithm 2 can be run with f = 1. When
+k
+proving Theorem 1, we define maps η :
+M×(cid:81)j
+V → W such that η (P,v ) is the output of a
+j ℓ=1 ℓ ψ j [j]
+modification of Algorithm 1 that replaces each line i ≤ j by the assignment h = v and leaves each
+i i
+line i > j unchanged, so that h = θ (P,h ). The crux of our proof involves showing that, just
+i i pa(i)
+before step j of the loop in Algorithm 2, f = η˙∗ (f ).
+0 j,P,h k
+[j]
+We now discuss two strategies to increase the applicability of Algorithm 2. The first uses that
+the choice of ambient Hilbert spaces W ,W ,...,W can impact whether the primitives used
+1 2 k−1
+to express ψ are totally pathwise differentiable. Hence, a good strategy is to choose these Hilbert
+spaces in a way that makes the primitives differentiable under mild conditions — see the next
+subsection for examples. The second uses that differentiability is a local property, and so Theorem 1
+remains true if the representation of ψ in Algorithm 1 is only valid in some Hellinger neighborhood
+N ⊂ M of P. Concretely, it suffices that calling Algorithm 1 with input P′ returns ψ(P′) for all
+P′ ∈ N; no such requirement is needed for P′ ̸∈ N. This relaxation may help identify compositions
+of primitives to automatically differentiate.
+There are many forms of automatic differentiation. They differ in how derivative information is
+propagated. The two extremes are reverse mode (Linnainmaa, 1970) and forward mode (Wengert,
+1964). As exhibited in Algorithm 2, reverse mode backpropagates information through adjoints.
+Forward mode takes the opposite approach, propagating it forward through differential operators as
+the function is evaluated. There are also intermediate approaches that propagate information both
+forward and backward, each of which may have a different time complexity. Because identifying
+the best such traversal is an NP-complete problem (Naumann, 2008), many implementations of
+9automatic differentiation employ either a simple forward or reverse mode. A general rule of thumb
+is that reverse mode will be faster than forward mode when a function’s input dimension exceeds its
+output dimension (Chapter 3 of Griewank and Walther, 2008). In our context, the input dimension
+is infinite unless M is parametric. Consequently, we pursue reverse mode automatic differentiation
+in this work. We leave consideration of alternative traversal strategies to future study.
+2.2 Useful primitives
+Table 1: Primitives θ with domain M×U. Given the specified ambient Hilbert spaces T ⊇ U and
+W ⊇ Image(θ), each is totally pathwise differentiable under conditions given in Appendix D.
+Notation: Q ∈ M; X ∈ X and A ∈ {0,1} are coarsenings or subvectors of Z; Q , Q = marginal
+X A,X
+distribution of X, (A,X) when Z ∼Q; L⋆(ρ) = a set of ρ-a.s. equivalence classes, each satisfying a moment
+condition, where ρ and Q are equivalent measures; L⋆(ρ ) is defined similarly but with Q replaced by Q ;
+X X
+Π (u)(z)=u(z)−E [u(Z)|X =x]; q ,p (q ,p ) = marginal (conditional) densities under sampling
+P P X X Z|X Z|X
+from Q,P; λ,λ ,λ = σ-finite measures.
+1 2
+U T W θ(P,u) θ˙∗ (w)
+P,u
+Conditionalmean L⋆(ρ) L2(Q) L2(QX) EP[u(Z)|X=·] (cid:16) pqX X[u−θ(P,u)]w,p qZZ || XXw(cid:17)
+r-foldconditionalmean L⋆(ρr) L2(Qr) L2(Qr X) EPr[u(Z [r])|X [r]=·] seeappendix
+Conditionalvariance L⋆(ρ) L2(Q) L2(QX) VarP[u(Z)|X=·] (cid:16) pqX X[ΠP(u)2−θ(P,u)]w,2p qZZ || XXΠP(u)w(cid:17)
+Conditionalcovariance L⋆(ρ)2 L2(Q)⊕2 L2(QX) covP[u1(Z),u2(Z)|X=·] seeappendix
+Kernelembedding L⋆(ρX) L2(QX) RKHS (cid:82)K(x,·)u(x)PX(dx) (cid:16) wu−(cid:82)wudPX,p qXXw(cid:17)
+Optimalvalue U T R miny∈YFy(P,u) F˙ a∗
+rgminyFy(P,u),P,u
+Optimalsolution U T Rd argmin w∈WFw(P,u) seeappendix
+Pathwisediff. parameter {0} W ν(P) (ν˙∗(w),0)
+P
+ëRoot-density {0} L2(λ) (dP/dλ)1/2 ( w −(cid:82) w dP,0)
+2ν(P) 2ν(P)
+ëConditionaldensity {0} L2(Q) p Y|X,withZ=(X,Y) (cid:0)ΠP( pqwp Y|X),0(cid:1)
+ëDose-responsefunction {0} L2(λ) (cid:82)EP[Y|A=·,X=x]PX(dx) seeappendix
+ëCounterfactualdensity {0} L2(λ) y(cid:55)→EP[p(y|A=1,X)] seeappendix
+Hadamarddiff. map U T W ζ(u) (cid:0)0,ζ˙∗(w)(cid:1)
+u
+ëInnerproduct R⊕R R ⟨u1,u2⟩R,withu=(u1,u2) (0,(wu2,wu1))
+ëSquarednorm T R ∥u∥2 (0,2wu)
+T
+ëDifferentiablefunction Rd R ζ(u) (0,w∇ζ(u))
+(cid:16) (cid:17)
+ëPointwiseoperations L2(λ)⊕d L2(λ) x(cid:55)→fx◦u¯(x),withu¯(x)=(uj(x))d
+j=1
+0,(x(cid:55)→w(x)∇jfx◦u¯(x))d
+j=1
+ëBoundedaffinemap T W κ(u)+c,withc∈W,boundedlinearκ (cid:0)0,κ∗(w)(cid:1)
+ëConstantmap {0} W c,withc∈W (cid:0)0,0(cid:1)
+ëCoordinateprojection R1⊕R2 R1 u1,withu=(u1,u2) (0,(w,0))
+ë ëC Lih ftan toge no ef wm de oa msu ar ie
+n
+LL 22 (( Qλ X1)
+)
+L L2 2( (λ Q2 )) u
+z(cid:55)→u(x)
+( (cid:0)0 0, ,Ed dλ λ Q2 1w [w)
+(Z)|X=·](cid:1)
+ëFixbinaryargument L2(QA,X) L2(QX) x(cid:55)→u(1,x) (cid:0)0,(a,x)(cid:55)→ Q(A=a 1|x)w(x)(cid:1)
+Table 1 provides a selection of useful primitives. In Appendix D, we provide sufficient conditions
+under which each is totally pathwise differentiable when M is a locally nonparametric model of
+distributions on Z. Some of these primitives involve a coarsened random variable X = C(Z), where
+10C : Z → X is a many-to-one map; when Z ∼ Q ∈ M, we let Q denote the marginal distribution
+X
+of X. The primitives fall into three distinct categories, which we elaborate on below.
+The first consists of maps θ that depend on both their distributional input P and Hilbert-valued
+input u. A simple example is a conditional mean operator θ(P,u)(·) = E [u(Z) | X = ·], with u a
+P
+real-valued function. An r-fold conditional mean is a slightly more complex case, corresponding to a
+conditional variant of the estimand pursued by U-statistics (Hoeffding, 1948). Here, u is a function
+of r ≥ 2 independent observations and θ(P,u)(·) = E [u(Z ,Z ,...,Z ) | (X ,X ,...,X ) = ·].
+Pr 1 2 r 1 2 r
+Conditional variances and covariances are other examples, as are the optimal value and solution of
+optimization problems whose objective functions depend on the data-generating distribution P and
+(cid:82)
+a Hilbert-valued input u. Kernel embedding operators θ(P,u) = K(x, ·)u(x)P (dx) represent
+X
+another example, where u is a bounded function and K is a bounded kernel of a reproducing kernel
+Hilbert space (RKHS) (Chapter 4.9.1.1 of Berlinet and Thomas-Agnan, 2011). This primitive has
+been used to construct tests of equality of distributions (Gretton et al., 2012; Muandet et al., 2021)
+and independence (Gretton et al., 2007).
+The second category consists of maps θ that solely depend on their distribution-valued input,
+so that there is some pathwise differentiable parameter ν : M → W such that θ(P,u) = ν(P) for
+all (P,u) ∈ M×U. Since u plays no role in determining the value of θ(P,u), it suffices to assume
+that U is a trivial vector space {0}. Examples of ν include root density functions, conditional
+density functions, dose-response functions (D´ıaz and van der Laan, 2013), and counterfactual density
+functions (Kennedy et al., 2021), as detailed in Luedtke and Chung (2023). That work also shows
+that conditional average treatment effect functions (Hill, 2011) are pathwise differentiable.
+The third category consists of maps θ that solely depend on their Hilbert-valued input, so that
+there is some Hadamard differentiable map ζ : U → W such that θ(P,u) = ζ(u) for all (P,u).
+Simple examples are inner products, squared norms, and finite-dimensional differentiable functions.
+Pointwise operations provide a richer example — for instance, ζ may take as input functions u and
+1
+u and return x (cid:55)→ f(u (x),u (x)) with f(a,b) := [a+b]cos(a). The pointwise operation may also
+2 1 2
+depend on x, as would be the case if ζ(u ,u )(x) = f (u (x),u (x)) with f (a,b) = (a+x)cos(b).
+1 2 x 1 2 x
+Bounded affine maps provide further examples of primitives from the third category. Simple
+specialcasesaregivenbyconstantmapsandcoordinateprojections. Changesofmeasureareanother
+11special case, so that for measures λ ≪ λ with dλ /dλ essentially bounded, ζ(u) is the isometric
+2 1 2 1
+embeddingofu ∈ L2(λ )intoL2(λ ); thismapfacilitatesthechainingofprimitivesζ : U → L2(λ )
+1 2 1 0 1
+and ζ : L2(λ ) → W via ζ ◦ζ ◦ζ . Primitives ζ : U → L2(Q ) and ζ : L2(Q) → W can
+2 2 0 2 1 1 0 X 2 0
+similarly be chained together using a lifting map ζ : L2(Q ) → L2(Q). Further examples of affine
+X
+maps are those that fix a binary argument to unity, so that ζ(u)(x) = u(1,x). When paired with
+a conditional mean operator (P,u) (cid:55)→ E [u(Z)|(A,X) = ·], this makes it possible to express
+P
+(P,u) (cid:55)→ E [u(Z)|A = 1,X = ·] as a composition of totally pathwise differentiable primitives; such
+P
+conditional expectations appear frequently in parameters arising in causal inference (Robins, 1986).
+Bounded affine maps ζ can also be composed with conditional mean primitives to express affine
+functionals of regressions commonly studied in the literature (Chernozhukov et al., 2018, 2022c),
+namely ψ(P) = E [ζ(E [Y |X = ·])(Z)] with ζ : L2(Q ) → L2(Q).
+P P X
+The choice of ambient Hilbert spaces T and W can impact a primitive’s total pathwise differen-
+tiability. For the first five primitives in Table 1 and the conditional density primitive, this choice
+involves selecting a Q ∈ M indexing one or more L2 spaces. As detailed in Appendix D, sufficient
+conditions for each primitive’s total pathwise differentiability at a given (P,u) require one or more
+of the following to be bounded: dP/dQ, dQ/dP, dP /dQ , or dQ /dP . If Q = P then these
+X X X X
+functions are all equal to unity, and so these boundedness conditions certainly hold. Given this,
+when composing these primitives to differentiate ψ at P we generally recommend choosing Q = P
+to index the ambient Hilbert spaces.
+In Appendix D.5, we describe how to transform primitives for conditional quantities to those for
+marginal quantities. This provides a way to derive a marginal mean primitive, for example. We also
+describe how to adapt the primitives from nonparametric to semiparametric models.
+2.3 Example: nonparametric R2
+We apply Algorithm 2 to compute the EIF of the nonparametric R2 parameter at a distribution P
+in a nonparametric model M. To avoid notational overload on P, we denote a generic element of
+M by P′ when presenting this example.
+We express ψ(P′) := 1−E [{Y −µ (X)}2]/Var (Y) as a composition of eight primitives:
+P′ P′ P′
+a constant θ (P′,0) = (z (cid:55)→ y) ∈ L2(P), variance θ (P′,h ) = Var [h (Z)] ∈ R, constant
+1 2 1 P′ 1
+12Figure 1: Computation graph for the nonparametric R2 parameter.
+constant conditionalmean lifttonewdomain pointwiseoperation
+h3(x,y)=y h4(x)=EP[h3(X,Y)|X=x] h5(x,y)=h4(x) h6(x,y)=[y−h5(x,y)]2
+marginalmean
+P
+h7=EP[h6(X,Y)]
+constant variance arithmetic
+h1(x,y)=y h2=VarP[h1(X,Y)] h8=1−h7/h2
+distribution intermediateoperations operationreturnsR2
+θ (P′,0) = (z (cid:55)→ y) ∈ L2(P), conditional mean θ (P′,h )(·) = E [h (Z)|X = ·] ∈ L2(P ), lifting
+3 4 3 P′ 3 X
+θ (P′,h ) = (z (cid:55)→ h (x)) ∈ L2(P), pointwise operation θ (P′,h ) = (z (cid:55)→ [y −h (z)]2) ∈ L2(P),
+5 4 4 6 5 5
+mean θ (P′,h ) = E [h (Z)] ∈ R, and differentiable function θ (P′,(h ,h )) = 1−h /h ∈ R.
+7 6 P′ 6 8 2 7 7 2
+The redundancy of the constant maps θ and θ has no impact on the applicability of Algorithm 2.
+1 3
+For the composition of primitives to express ψ, it must return ψ(P′) for every P′ ∈ M. This will
+hold if each claimed element of L2(P) or L2(P ) is a P-a.s. equivalence class of functions that
+X
+satisfies an appropriate second-moment condition. To this end, we suppose all pairs of distributions
+in M are mutually absolutely continuous, which makes it so, for each P′ ∈ M, P′-a.s. and P-a.s.
+equivalence classes of functions are one and the same. For the moment condition, we suppose there
+exists c < ∞ such that P′(|Y| ≤ c) = 1 for all P′ ∈ M. To avoid dividing by zero, we also suppose
+Var (Y) > 0 for all P′.
+P′
+Figure 1 illustrates the computation graph for our representation of ψ (Linnainmaa, 1970; Bauer,
+1974). In it, each primitive is a node. A directed arrow points from node i to node j if i ∈ pa(j), and
+from P to node j if θ depends nontrivially on its distribution-valued argument. Table 2 provides a
+j
+step-by-step illustration of how Algorithm 2 computes the EIF at P. As anticipated in Section 1.2,
+this manual application of automatic differentiation has yielded an analytical expression for the EIF.
+In Appendix E, we apply Algorithm 2 to two other parameters: the expected density ψ(P) =
+E [p(Z)] and expected conditional covariance ψ(P) = E [cov (A,Y |X)].
+P P P
+13Table 2: Step-by-step evaluation of Algorithm 2 for the nonparametric R2 parameter when it is
+expressed as in Figure 1. Each row j lists the values f ,f ,...,f take just before executing line 3
+0 1 j
+of the for loop in Algorithm 2. The value of f in the bottom row is the efficient influence function.
+0
+Notation: µ (x)=E [Y |X =x], σ2 =Var (Y), and γ =E [Var (Y |X)].
+P P P P P P P
+Step Variables in Algorithm 2
+(j) f f f f f f § f f § f
+8 7 6 5 4 3 2 1 0
+8 1 0 0 0 0 − 0 − 0
+7 − 1 0 0 0 − γP − 0
+σ2 σ4
+P P
+6 − 1 0 0 − γP − z (cid:55)→−[y−µP(x)]2−γP
+σ2 σ4 σ2
+P P P
+5 z (cid:55)→ 2[y−µP(x)] 0 − γP − z (cid:55)→−[y−µP(x)]2−γP
+σ2 σ4 σ2
+P P P
+4 0 † − γP − z (cid:55)→−[y−µP(x)]2−γP
+σ4 σ2
+P P
+3 − γP − z (cid:55)→−[y−µP(x)]2−γP
+σ4 σ2
+P P
+2 γP − z (cid:55)→−[y−µP(x)]2−γP
+σ4 σ2
+P P
+1 − z (cid:55)→
+[{y−EP[Y]}2−σ P2]γP
+−
+[y−µP(x)]2−γP
+σ4 σ2
+P P
+0 z (cid:55)→
+[{y−EP[Y]}2−σ P2]γP
+−
+[y−µP(x)]2−γP
+σ4 σ2
+P P
+§ θ and θ are constant maps and so have derivative zero. Hence, backpropagating f and f on steps j =3
+3 1 3 1
+and j =1 has no impact on earlier nodes (f :i<j), and so these values need not be stored.
+i
+† θ :L2(P )→L2(P) is a lifting, so f updates as f +=E [f (Z)|X =·]. This update equals zero.
+5 X 4 4 P 5
+3 Probabilistic programming of efficient estimators
+3.1 Estimator construction
+Suppose now that we observe independent draws Z ,Z ,...,Z from an unknown P ∈ M. Our
+1 2 n
+goal is to infer ψ(P). We do this using a variant of a one-step estimator (Pfanzagl, 1982), which
+debiases an initial estimator using the efficient influence operator.
+Algorithm 3 presents a method to obtain this initial estimate and the evaluation of the efficient
+influence operator at a user-specified f . The algorithm employs a forward and backward pass.
+k
+In the forward pass, it recursively estimates the P-dependent evaluations of the operators θ that
+j
+appear in Algorithm 1, ultimately yielding the initial estimate (cid:98)h
+k
+of ψ(P). In the backward pass, it
+recursively estimates P-dependent adjoint evaluations and backpropagates them as in Algorithm 2,
+yielding an estimate f(cid:98)0 of the efficient influence operator evaluation ψ˙ P∗(f k). Black-box machine
+learning tools may be used to estimate all of the needed nuisances. When ψ is real-valued and
+f
+k
+= 1, f(cid:98)0 is an estimate of the EIF. To fix ideas, we focus on this real-valued setting in the
+remainder of the main text and refer the reader to Appendix C.3 for a discussion of more general
+14Algorithm 3 Obtain initial estimates of ψ(P) and
+ψ˙∗(f
+) using data drawn from P
+P k
+Require: f ∈ W and data Z := {Z : i ∈ I ⊆ [n]} for nuisance estimation on lines 2 and 5
+k ψ I i
+▷ forward pass to obtain an initial estimate
+1: for j = 1,2,...,k do
+2: estimate θ (P,(cid:98)h ) with (cid:98)h ▷ (cid:98)h := ((cid:98)h : i ∈ pa(j))
+j pa(j) j pa(j) i
+▷ backward pass to estimate efficient influence operator
+3: initialize f(cid:98) : z (cid:55)→ 0; f(cid:98),f(cid:98),...,f(cid:98) as the 0 elements of W ,W ,...,W ; and f(cid:98) = f
+0 1 2 k−1 1 2 k−1 k k
+4: for j = k,k −1,...,1 do
+5: estimate
+θ˙∗
+(f(cid:98)) with a ϑ(cid:98) whose first entry, ϑ(cid:98) , is compatible with (cid:98)h , (cid:98)h
+j j j,0 j pa(j)
+j,P,(cid:98)h
+pa(j)
+(cid:82)
+▷definitionofcompatibility: ∃P(cid:98) ∈ Ms.t. (cid:98)h = θ (P(cid:98) ,(cid:98)h )and ϑ(cid:98) (z)P(cid:98) (dz) = 0
+j j j j pa(j) j,0 j
+6: augment (f(cid:98),f(cid:98) ) += ϑ(cid:98)
+0 pa(j) j
+7: return initial estimate (cid:98)h and estimated efficient influence operator f(cid:98)
+k 0
+settings where ψ takes values in a generic separable Hilbert space, such as an L2 space.
+Inspired by one-step estimation, the outputs of Algorithm 3 can be used to construct
+n
+1 (cid:88)
+ψ(cid:98):=(cid:98)h
+k
++ f(cid:98)0(Z i)
+n
+i=1
+and 95% confidence interval ψ(cid:98)±1.96σ (cid:98)/n1/2, where σ (cid:98)2 is the empirical variance of f(cid:98)0. In fact, ψ(cid:98) is
+exactly the traditional one-step estimator ψ(P(cid:98))+ n1 (cid:80)n i=1ψ˙ P∗ (cid:98)(1)(Z i) under the strong compatibility
+condition that there exists a P(cid:98) ∈ M such that (cid:98)h
+j
+= θ j(P(cid:98),(cid:98)h pa(j)) and ϑ(cid:98)j = θ˙∗ (f(cid:98)j) for all
+j,P(cid:98),(cid:98)h
+pa(j)
+j ∈ [k]. To ease implementation, Algorithm 3 makes a weaker compatibility requirement that allows
+each ϑ(cid:98)j,0, (cid:98)h j, and (cid:98)h
+pa(j)
+to be compatible with a P(cid:98)j that may depend on j. In the next subsection,
+we show that this allows each primitive to be paired with a nuisance estimation routine that can be
+reused across different parameters ψ.
+Because ψ(cid:98) is not generally a traditional one-step estimator, we state sufficient conditions
+for its efficiency here. These conditions concern the same objects as for a traditional one-step
+(cid:82)
+estimator (Bickel et al., 1993), namely a remainder R
+n
+:=(cid:98)h k+ f(cid:98)0(z)P(dz)−ψ(P) and drift term
+D
+n
+:= (cid:82) [f(cid:98)0(z)−f 0(z)](P n−P)(dz), with P
+n
+the empirical distribution and f
+0
+:= ψ˙ P∗(1) the EIF.
+Theorem 2 (Efficiency of ψ(cid:98)). Suppose ψ is real-valued, f
+k
+= 1, and the conditions of Theorem 1
+15hold. If D
+n
+and R
+n
+are o p(n−1/2), then ψ(cid:98) is an efficient estimator of ψ(P), in that
+n
+1 (cid:88)
+ψ(cid:98)−ψ(P) = f 0(Z i)+o p(n−1/2).
+n
+i=1
+Our Python package implements a cross-fitted counterpart of ψ(cid:98), which we present and study in
+Appendix C.1. Like ψ(cid:98), this estimator is efficient when a remainder and drift term are negligible (see
+Theorem S1). The cross-fitted estimator may be preferred over ψ(cid:98)because its drift term is o p(n−1/2)
+even without an empirical process condition (Schick, 1986). This is in contrast to ψ(cid:98), for which such
+a condition is often used to ensure negligibility of that term (Lemma 19.24 of van der Vaart, 2000).
+The compatibility condition in Algorithm 3 helps ensure R = o (n−1/2) is plausible. To see
+n p
+this, we add and subtract terms and use that
+(cid:82)
+ϑ(cid:98)j,0dP(cid:98)j = 0 and f(cid:98)0 =
+(cid:80)k
+j=1ϑ(cid:98)j,0 to reexpress R
+n
+as
+   
+k (cid:90) k (cid:90)
+(cid:88) (cid:88)
+R
+n
+= (cid:98)h
+k
+−ψ(P)− ϑ j,0(z)(P(cid:98)j −P)(dz)+ [ϑ j,0(z)−ϑ(cid:98)j,0(z)](P(cid:98)j −P)(dz),
+j=1 j=1
+where ϑ is the first entry of the augmentation term θ˙∗ (f ) from Algorithm 2. If both
+j,0 j,P,h j
+pa(j)
+terms on the right are o p(n−1/2), then R
+n
+is as well. Moreover, since the above holds for any P(cid:98)j
+compatible with the nuisances (cid:98)h j, (cid:98)h pa(j), and ϑ(cid:98)j,0, it suffices that there exist such P(cid:98)j, j ∈ [k], that
+make each of the two terms on the right o (n−1/2). By Cauchy-Schwarz, the magnitude of the
+p
+latter term upper bounds by (cid:80)k j=1∥dP(cid:98)j/dP −1∥ L2(P)∥ϑ(cid:98)j,0−ϑ j,0∥ L2(P), which is o p(n−1/2) under
+an n−1/4-rate condition akin to those arising in the study of traditional one-step estimators. In
+Appendix C.2, we show that the first term on the right is the remainder in a von Mises expansion,
+which makes it so it too will be o (n−1/2) under appropriate conditions. Similar arguments have
+p
+been made previously to motivate one-step estimators when ψ is a generic pathwise differentiable
+parameter (Robins et al., 2009; Luedtke and Chung, 2023).
+For a particular parameter ψ, the remainder R can also be analyzed explicitly. In Appendix F,
+n
+we provide this analysis for the nonparametric R2 parameter.
+163.2 Software implementation
+To implement Algorithm 3 in software, it is necessary to convert a computer code representation
+of the parameter ψ — such as the one given on lines 2-4 of Example 2 — into the compositional
+form in Algorithm 1. Any computer program, including those with function calls and control flow
+structures like loops and conditionals, can be represented via its computation graph (Linnainmaa,
+1970; Bauer, 1974). When the operations in this graph are totally pathwise differentiable primitives,
+as they are in Figure 1, this graph yields an expression for ψ as in Algorithm 1. Representing
+programs via their computation graphs enables user-friendly automatic differentiation, as seen in
+software like TensorFlow, PyTorch, and JAX (Abadi et al., 2015; Bradbury et al., 2018; Paszke
+et al., 2019).
+The dimple package also adopts computation graphs, using a static graph structure (Baydin
+et al., 2018). When defining the parameter, each primitive call takes dimple objects as inputs
+and returns another dimple object. At this stage, a dimple object comprises a primitive and a
+set of pointers to its inputs, serving the roles of θ and pa(j) in Algorithm 1. The dimple objects
+j
+can be used to express ψ as in Algorithm 1, and also provide the form of the computation graph.
+Estimation — as executed, for instance, via ‘estimate(R2)’ in Example 2 — calls Algorithm 3 with
+this computation graph to populate each dimple object with initial estimates (cid:98)h
+j
+in the forward
+pass, with adjoint estimates f(cid:98)j added in the backward pass.
+Primitives can be implemented independently of one another and reused across different parame-
+ters ψ. In this modular approach, each primitive θ in Algorithm 3 requires two associated nuisance
+j
+estimation routines: one for the forward pass and another for the backward pass. Algorithm 4
+details the inputs and outputs of these routines for a generic primitive θ : M×U → W. Like
+Algorithm 3, the backward routine makes a compatibility requirement: the estimates of θ(P,u)
+and the first entry of θ˙∗ (w) must be compatible with a common P(cid:98) ∈ M. There is no need to
+P,u
+explicitly exhibit P(cid:98), which in many cases will make it possible to only estimate certain summaries
+of P, such as regression functions or conditional densities. The forward and backward routines may
+also take hyperparameters as inputs, such as specifications of statistical learning algorithms to use
+to fit nuisances or folds to be used during cross-fitting.
+17Algorithm 4 Requirements of nuisance estimation routines for a generic θ : M×U → W
+▷ forward routine
+input data Z := {Z : i ∈ I ⊆ [n]} and u ∈ U
+I i
+output an estimate (cid:98)h of θ(P,u)
+▷ backward routine
+input same Z
+I
+and u as forward routine, output (cid:98)h from forward routine, and w ∈ W
+output an estimate ϑ(cid:98) of
+θ˙∗
+(w) whose first entry, ϑ(cid:98) , is compatible with (cid:98)h, u
+P,u 0
+(cid:82)
+▷ definition of compatibility: ∃P(cid:98) ∈ M s.t. (cid:98)h = θ(P(cid:98),u) and ϑ(cid:98) (z)P(cid:98)(dz) = 0
+0
+Algorithm 3 can be executed using these nuisance estimation routines. At step j of the forward
+pass, the forward routine for θ
+j
+is called with inputs ZI and (cid:98)h pa(j), yielding (cid:98)h j. At step j of the
+backward pass, the backward routine is called with inputs ZI, (cid:98)h pa(j), (cid:98)h j, and f(cid:98)j, yielding ϑ(cid:98)j.
+Forward and backward routines for the primitives in Table 1 are given in Appendix G. Those
+routines allow needed regression, density functions, and density ratios to be estimated using flexible
+statisticallearningtools, suchasgradient-boostedtrees(Keetal.,2017). Rieszlosses(Chernozhukov
+et al., 2022c) are used when estimating the adjoint of bounded affine maps whose ambient Hilbert
+spaces depend on P.
+4 Discussion
+Ourresultssuggestresearchersshouldrefocustheireffortswhenconstructinganefficientestimatorof
+a new parameter. Traditionally, this process involves labor-intensive calculations to derive the EIF.
+Our approach avoids this task for parameters expressible as compositions of known primitives. Yet,
+we recognize that this method will not apply to all new parameters, particularly those that cannot
+be represented in this form. In such cases, we propose a shift in focus: rather than immediately
+studying the differentiability of the parameter itself, researchers should aim to express it as a
+composition involving both known and novel primitives. By establishing the differentiability of each
+new primitive, they can deduce the differentiability of the parameter itself. This modular approach
+can both simplify the immediate analysis and the study of other parameters in future research.
+As noted in Carone et al. (2018), any automated approach to statistical inference inevitably has
+potential for misuse. Per Theorems 1 and 2, the validity of our method depends on differentiability
+18and nuisance estimation conditions. While an expert can interpret and verify these conditions,
+non-specialists may employ a software implementation without doing so. This may lead to an
+overconfidence in the inferential conclusions reached, especially in high-dimensional problems or
+other settings where these conditions are unlikely to be met. To mitigate this risk, future software
+could automatically provide a list of conditions sufficient for ensuring the differentiability of each
+primitive and the rates of convergence required on nuisance estimators for efficiency. Though
+Appendix D already gives sufficient conditions for the differentiability of the primitives in Table 1,
+work is still needed to figure out how to have software return this information in an accessible
+manner.
+There are also other interesting avenues for future work. First, though our algorithms apply to
+arbitrary models, the particular nuisance estimation routines given in Appendix G are designed
+for nonparametric settings. Future work should identify semiparametric model restrictions that
+allow for modular nuisance estimation. Second, it would be interesting to consider whether it is
+possible to automatically modify a representation of a parameter to weaken the conditions required
+of nuisance estimators. For example, suppose ψ(P) = E [Z] is expressed as ⟨z (cid:55)→ z,dP/dλ⟩
+P L2(λ)
+using inner product and density primitives. Algorithm 3 would estimate the nuisance dP/dλ for this
+representation and the efficiency of the one-step estimator would rely on an n−1/4 rate condition.
+Estimation of this nuisance, and the associated rate condition, would be avoided entirely if ψ were
+insteadexpressedusingamarginalmeanprimitive. Automaticallyfindingalternativerepresentations
+of a parameter that weaken nuisance estimation requirements is an important area for future work.
+Dimple provides a means to rapidly translate new developments in debiased estimation from
+theory to practice. While our proof-of-concept software uses a cross-fitted one-step estimator, future
+implementations should incorporate recent proposals like iteratively debiasing nuisance function
+estimators for added robustness (Rotnitzky et al., 2017; Luedtke et al., 2017), employing separate
+data subsamples to estimate different nuisance functions (Newey and Robins, 2018), and enforcing
+known shape constraints on the parameter of interest (Westling and Carone, 2020; Ham et al., 2024).
+This mirrors the approach taken by other differentiable and probabilistic programming frameworks,
+where new algorithms, architectures, and regularization techniques are routinely integrated into
+existing software (Bradbury et al., 2018; Paszke et al., 2019; Stan Development Team, 2023). This
+19practice ensures that state-of-the-art methods are widely accessible, a model we strive to emulate.
+Acknowledgements
+This work was supported by the National Science Foundation and National Institutes of Health
+under award numbers DMS-2210216 and DP2-LM013340. The author is grateful to Jonathan Kernes
+for kindly letting him use code from his Medium tutorial in the dimple package (Kernes, 2021). He
+is also grateful to Saksham Jain for taking the time to test the package on a sunny Seattle afternoon.
+References
+M. Abadi, A. Agarwal, P. Barham, E. Brevdo, Z. Chen, C. Citro, G. S. Corrado, A. Davis, J. Dean,
+M. Devin, et al. TensorFlow: Large-scale machine learning on heterogeneous systems, 2015. URL
+https://www.tensorflow.org/.
+T.Akiba, S.Sano, T.Yanase, T.Ohta, andM.Koyama. Optuna: Anext-generationhyperparameter
+optimization framework. In Proceedings of the 25th ACM SIGKDD international conference on
+knowledge discovery & data mining, pages 2623–2631, 2019.
+T. M. Apostol. Mathematical analysis; 2nd ed. Addison-Wesley series in mathematics. Addison-
+Wesley, Reading, MA, 1974. URL https://cds.cern.ch/record/105425.
+V. I. Averbukh and O. G. Smolyanov. The theory of differentiation in linear topological spaces.
+Russian Mathematical Surveys, 22(6):201, 1967.
+H. Bang and J. M. Robins. Doubly robust estimation in missing data and causal inference models.
+Biometrics, 61(4):962–973, 2005.
+F. L. Bauer. Computational graphs and rounding error. SIAM Journal on Numerical Analysis, 11
+(1):87–96, 1974.
+A. G. Baydin, B. A. Pearlmutter, A. A. Radul, and J. M. Siskind. Automatic differentiation in
+machine learning: a survey. Journal of Marchine Learning Research, 18:1–43, 2018.
+A. Berlinet and C. Thomas-Agnan. Reproducing kernel Hilbert spaces in probability and statistics.
+Springer Science & Business Media, 2011.
+P. J. Bickel and Y. Ritov. Estimating integrated squared density derivatives: sharp best order of
+convergence estimates. Sankhya¯: The Indian Journal of Statistics, Series A, pages 381–393, 1988.
+P. J. Bickel, C. A. Klaassen, P. J. Bickel, Y. Ritov, J. Klaassen, J. A. Wellner, and Y. Ritov.
+Efficient and adaptive estimation for semiparametric models, volume 4. Johns Hopkins University
+Press Baltimore, 1993.
+C. H. Bischof. Automatic differentiation, tangent linear models, and (pseudo) adjoints. High
+Performance Computing in the Geosciences, pages 59–80, 1995.
+M. Blondel and V. Roulet. The elements of differentiable programming. arXiv preprint
+arXiv:2403.14606, 2024.
+J. Bradbury, R. Frostig, P. Hawkins, M. J. Johnson, C. Leary, D. Maclaurin, G. Necula, A. Paszke,
+J. VanderPlas, S. Wanderman-Milne, and Q. Zhang. JAX: composable transformations of
+Python+NumPy programs, 2018. URL http://github.com/google/jax.
+20L. Breiman. Random forests. Machine learning, 45:5–32, 2001.
+M. Carone, A. R. Luedtke, and M. J. van der Laan. Toward computerized efficient estimation in
+infinite-dimensional models. Journal of the American Statistical Association, 2018.
+V. Chernozhukov, D. Chetverikov, M. Demirer, E. Duflo, C. Hansen, and W. Newey. Double/debi-
+ased/Neyman machine learning of treatment effects. American Economic Review, 107(5):261–265,
+2017.
+V. Chernozhukov, W. K. Newey, and R. Singh. Learning l2-continuous regression functionals via
+regularized riesz representers. arXiv preprint arXiv:1809.05224, 8, 2018.
+V. Chernozhukov, W. Newey, V. M. Quintas-Mart´ınez, and V. Syrgkanis. Riesznet and forestriesz:
+Automatic debiased machine learning with neural nets and random forests. In International
+Conference on Machine Learning, pages 3901–3914. PMLR, 2022a.
+V. Chernozhukov, W. Newey, R. Singh, and V. Syrgkanis. Automatic debiased machine learning
+for dynamic treatment effects and general nested functionals. arXiv preprint arXiv:2203.13887,
+2022b.
+V. Chernozhukov, W. K. Newey, and R. Singh. Automatic debiased machine learning of causal and
+structural effects. Econometrica, 90(3):967–1027, 2022c.
+J. M. Danskin. The directional derivative. The Theory of Max-Min and its Application to Weapons
+Allocation Problems, pages 19–32, 1967.
+I. D´ıaz and M. J. van der Laan. Targeted data adaptive estimation of the causal dose–response
+curve. Journal of Causal Inference, 1(2):171–192, 2013.
+D. A. Fournier, H. J. Skaug, J. Ancheta, J. Ianelli, A. Magnusson, M. N. Maunder, A. Nielsen, and
+J. Sibert. AD model builder: using automatic differentiation for statistical inference of highly
+parameterized complex nonlinear models. Optimization Methods and Software, 27(2):233–249,
+2012.
+C. E. Frangakis, T. Qian, Z. Wu, and I. Diaz. Deductive derivation and turing-computerization of
+semiparametric efficient estimation. Biometrics, 71(4):867–874, 2015.
+J. H. Friedman. Greedy function approximation: a gradient boosting machine. Annals of statistics,
+pages 1189–1232, 2001.
+H. Ge, K. Xu, and Z. Ghahramani. Turing: a language for flexible probabilistic inference. In
+International Conference on Artificial Intelligence and Statistics, AISTATS 2018, 9-11 April
+2018, Playa Blanca, Lanzarote, Canary Islands, Spain, pages 1682–1690, 2018. URL http:
+//proceedings.mlr.press/v84/ge18b.html.
+I. Goodfellow, Y. Bengio, and A. Courville. Deep learning. MIT press, 2016.
+A. Gretton, K. Fukumizu, C. Teo, L. Song, B. Scho¨lkopf, and A. Smola. A kernel statistical test of
+independence. Advances in neural information processing systems, 20, 2007.
+A. Gretton, K. M. Borgwardt, M. J. Rasch, B. Scho¨lkopf, and A. Smola. A kernel two-sample test.
+The Journal of Machine Learning Research, 13(1):723–773, 2012.
+A. Griewank and A. Walther. Evaluating derivatives: principles and techniques of algorithmic
+differentiation. SIAM, 2008.
+D. Ham, T. Westling, and C. R. Doss. Doubly robust estimation and inference for a log-concave
+counterfactual density. arXiv preprint arXiv:2403.19917, 2024.
+21F. R. Hampel. Contributions to the theory of robust estimation. University of California, Berkeley,
+1968.
+R.Z.HasminskiiandI.A.Ibragimov. Onthenonparametricestimationoffunctionals. InProceedings
+of the Second Prague Symposium on Asymptotic Statistics, volume 473, pages 474–482. North-
+Holland Amsterdam, 1979.
+J. L. Hill. Bayesian nonparametric modeling for causal inference. Journal of Computational and
+Graphical Statistics, 20(1):217–240, 2011.
+W. Hoeffding. A class of statistics with asymptotically normal distribution. The Annals of
+Mathematical Statistics, 19(3):293–325, 1948.
+C. Homescu. Adjoints and automatic (algorithmic) differentiation in computational finance. arXiv
+preprint arXiv:1107.1831, 2011.
+H. Ichimura and W. K. Newey. The influence function of semiparametric estimators. Quantitative
+Economics, 13(1):29–61, 2022. submitted to arXiv Aug 6, 2015.
+M. Jordan, Y. Wang, and A. Zhou. Empirical gateaux derivatives for causal inference. Advances in
+Neural Information Processing Systems, 35:8512–8525, 2022.
+G. Ke, Q. Meng, T. Finley, T. Wang, W. Chen, W. Ma, Q. Ye, and T.-Y. Liu. Lightgbm: A highly
+efficient gradient boosting decision tree. Advances in neural information processing systems, 30,
+2017.
+E. H. Kennedy, S. Balakrishnan, and L. Wasserman. Semiparametric counterfactual density
+estimation. arXiv preprint arXiv:2102.12034, 2021.
+J. Kernes. Build your own automatic differentiation program, 2021. URL https://
+towardsdatascience.com/build-your-own-automatic-differentiation-program-6ecd585eec2a.
+Accessed: 2024-05-10.
+I. Kosmidis and N. Lunardon. Empirical bias-reducing adjustments to estimating functions. Journal
+of the Royal Statistical Society Series B: Statistical Methodology, 86(1):62–89, 2024.
+K. Kristensen, A. Nielsen, C. W. Berg, H. Skaug, and B. Bell. Tmb: automatic differentiation and
+laplace approximation. arXiv preprint arXiv:1509.00660, 2015.
+B. Y. Levit. On efficiency of a class of non-parametric estimates. Teoriya Veroyatnostei i ee
+Primeneniya, 20(4):738–754, 1975.
+S. Linnainmaa. The representation of the cumulative rounding error of an algorithm as a Taylor
+expansion of the local rounding errors. PhD thesis, Master’s Thesis (in Finnish), Univ. Helsinki,
+1970.
+A. Luedtke and I. Chung. One-step estimation of differentiable Hilbert-valued parameters. arXiv
+preprint arXiv:2303.16711, 2023.
+A. R. Luedtke, M. Carone, and M. J. van der Laan. Discussion of “Deductive derivation and
+Turing-computerization of semiparametric efficient estimation” by Frangakis et al. Biometrics,
+71(4):875, 2015. first appeared on Biometrics website Aug 3, 2015.
+A. R. Luedtke, O. Sofrygin, M. J. van der Laan, and M. Carone. Sequential double robustness in
+right-censored longitudinal models. arXiv preprint arXiv:1705.02459, 2017.
+K. Muandet, M. Kanagawa, S. Saengkyongam, and S. Marukatat. Counterfactual mean embeddings.
+The Journal of Machine Learning Research, 22(1):7322–7392, 2021.
+22U. Naumann. Optimal jacobian accumulation is np-complete. Mathematical Programming, 112:
+427–441, 2008.
+W. K. Newey. Semiparametric efficiency bounds. Journal of applied econometrics, 5(2):99–135,
+1990.
+W. K. Newey and D. McFadden. Large sample estimation and hypothesis testing. Handbook of
+econometrics, 4:2111–2245, 1994.
+W. K. Newey and J. R. Robins. Cross-fitting and fast remainder rates for semiparametric estimation.
+arXiv preprint arXiv:1801.09138, 2018.
+A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen, Z. Lin, N. Gimelshein,
+L. Antiga, A. Desmaison, A. Kopf, E. Yang, Z. DeVito, M. Raison, A. Tejani, S. Chil-
+amkurthy, B. Steiner, L. Fang, J. Bai, and S. Chintala. Pytorch: An imperative style, high-
+performance deep learning library. In Advances in Neural Information Processing Systems 32,
+pages 8024–8035. Curran Associates, Inc., 2019. URL http://papers.neurips.cc/paper/
+9015-pytorch-an-imperative-style-high-performance-deep-learning-library.pdf.
+J. Pfanzagl. Contributions to a general asymptotic statistical theory. Springer, 1982.
+J. Pfanzagl. Estimation in semiparametric models. Springer, 1990.
+J. Robins. A new approach to causal inference in mortality studies with a sustained exposure period
+– application to control of the healthy worker survivor effect. Mathematical modelling, 7(9-12):
+1393–1512, 1986.
+J. Robins, M. Sued, Q. Lei-Gomez, and A. Rotnitzky. Comment: Performance of double-robust
+estimators when” inverse probability” weights are highly variable. Statistical Science, 22(4):
+544–559, 2007.
+J. Robins, L. Li, E. Tchetgen, and A. W. van der Vaart. Quadratic semiparametric von mises
+calculus. Metrika, 69:227–247, 2009.
+F. Rosenblatt. The perceptron: a probabilistic model for information storage and organization in
+the brain. Psychological review, 65(6):386, 1958.
+A. Rotnitzky, J. Robins, and L. Babino. On the multiply robust estimation of the mean of the
+g-functional. arXiv preprint arXiv:1705.08582, 2017.
+A.Schick. Onasymptoticallyefficientestimationinsemiparametricmodels. The Annals of Statistics,
+pages 1139–1151, 1986.
+B. Speelpenning. Compiling fast partial derivatives of functions given by algorithms. University of
+Illinois at Urbana-Champaign, 1980.
+B. K. Sriperumbudur, K. Fukumizu, and G. R. Lanckriet. Universality, characteristic kernels and
+RKHS embedding of measures. Journal of Machine Learning Research, 12(7), 2011.
+Stan Development Team. Stan modeling language users guide and reference manual, version 2.18.0,
+2023. URL http://mc-stan.org/.
+D. Tran, M. D. Hoffman, D. Moore, C. Suter, S. Vasudevan, A. Radul, M. Johnson, and R. A.
+Saurous. Simple, distributed, and accelerated probabilistic programming. In Neural Information
+Processing Systems, 2018.
+J.-W.vandeMeent, B.Paige, H.Yang, andF.Wood. Anintroductiontoprobabilisticprogramming.
+arXiv preprint arXiv:1809.10756, 2018.
+23M. J. van der Laan and D. Rubin. Targeted maximum likelihood learning. The international journal
+of biostatistics, 2(1), 2006.
+M. J. van der Laan, M. Laan, and J. M. Robins. Unified methods for censored longitudinal data and
+causality. Springer Science & Business Media, 2003.
+M. J. van der Laan, M. Carone, and A. R. Luedtke. Computerizing efficient estimation of a pathwise
+differentiable target parameter. bepress, 2015.
+A. van der Vaart. On differentiable functionals. The Annals of Statistics, pages 178–204, 1991a.
+A. van der Vaart. Efficiency and hadamard differentiability. Scandinavian Journal of Statistics,
+pages 63–75, 1991b.
+A. van der Vaart and J. A. Wellner. Prohorov and continuous mapping theorems in the hoffmann-
+jørgensen weak convergence theory, with application to convolution and asymptotic minimax
+theorems. Tech. Rep. 157, 1989.
+A. W. van der Vaart. Asymptotic statistics, volume 3. Cambridge university press, 2000.
+A. W. van der Vaart and J. Wellner. Weak convergence and empirical processes: with applications
+to statistics. Springer Science & Business Media, 1996.
+R. E. Wengert. A simple automatic derivative evaluation program. Communications of the ACM, 7
+(8):463–464, 1964.
+T. Westling and M. Carone. A unified study of nonparametric inference for monotone functions.
+Annals of statistics, 48(2):1001, 2020.
+B. D. Williamson, P. B. Gilbert, M. Carone, and N. Simon. Nonparametric variable importance
+assessment using machine learning techniques. Biometrics, 77(1):9–22, 2021.
+P. N. Zivich, M. Klose, S. R. Cole, J. K. Edwards, and B. E. Shook-Sa. Delicatessen: M-estimation
+in python. arXiv preprint arXiv:2203.11300, 2022.
+Appendices
+A Simulation study 26
+B Total pathwise differentiability: supplemental theoretical results and proofs 27
+B.1 Preliminary lemmas . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27
+B.2 Chain rule . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29
+B.3 Proof of Theorem 1 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31
+B.4 Relationshipbetweentotalpathwisedifferentiabilityandothernotionsofdifferentiability 34
+C Estimation: supplemental theoretical results and proofs 37
+C.1 Theoretical guarantees . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 37
+C.2 Motivating the plausibility of R = o (n−1/2) using von Mises calculus . . . . . . . . 38
+n p
+C.3 Hilbert-valued parameters . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 41
+24D Total pathwise differentiability of primitives from Table 1 42
+D.1 Overview . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+D.2 Maps depend nontrivially on both of their arguments . . . . . . . . . . . . . . . . . . 42
+D.2.1 Conditional mean . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+D.2.2 Multifold conditional mean . . . . . . . . . . . . . . . . . . . . . . . . . . . . 42
+D.2.3 Conditional covariance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 47
+D.2.4 Conditional variance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48
+D.2.5 Kernel embedding . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 49
+D.2.6 Optimal value . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 54
+D.2.7 Optimal solution . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 56
+D.3 Maps that only depend on their distribution-valued argument . . . . . . . . . . . . . 58
+D.3.1 General case: pathwise differentiable parameter . . . . . . . . . . . . . . . . . 58
+D.3.2 Root-density . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 59
+D.3.3 Conditional density . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 59
+D.3.4 Dose-response function . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 60
+D.3.5 Counterfactual density . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 60
+D.4 Maps that only depend on their Hilbert-valued argument . . . . . . . . . . . . . . . 61
+D.4.1 General case: Hadamard differentiable map . . . . . . . . . . . . . . . . . . . 61
+D.4.2 Inner product . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 61
+D.4.3 Squared norm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 62
+D.4.4 Differentiable functions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 62
+D.4.5 Pointwise operations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 62
+D.4.6 Bounded affine map . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 64
+D.4.7 Constant map. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 64
+D.4.8 Coordinate projection . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 65
+D.4.9 Change of measure . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 65
+D.4.10 Lifting to new domain . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 65
+D.4.11 Fix binary argument . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 66
+D.5 Primitives for marginal quantities and semiparametric models . . . . . . . . . . . . . 66
+E Step-by-step illustrations of Algorithm 2 67
+F Study of remainder in von Mises expansion of nonparametric R2 68
+G Nuisance estimation routines for primitives in Table 1 70
+G.1 Overview . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 70
+G.2 Maps depend nontrivially on both of their arguments . . . . . . . . . . . . . . . . . . 70
+G.2.1 Conditional mean . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 70
+G.2.2 Multifold conditional mean . . . . . . . . . . . . . . . . . . . . . . . . . . . . 71
+25G.2.3 Conditional covariance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 71
+G.2.4 Conditional variance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 72
+G.2.5 Kernel embedding . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 72
+G.3 Maps that only depend on their distribution-valued argument . . . . . . . . . . . . . 72
+G.3.1 Root-density . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 72
+G.3.2 Conditional density . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 72
+G.3.3 Dose-response function . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 72
+G.3.4 Counterfactual density . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 73
+G.4 Maps that only depend on their Hilbert-valued argument . . . . . . . . . . . . . . . 73
+G.4.1 Overview . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 73
+G.4.2 Pointwise operations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 73
+G.4.3 Bounded affine map . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 74
+A Simulation study
+A simulation study was conducted to evaluate the performance of the dimple package for the
+three examples from Section 1.3. For a given Monte Carlo replicate, a dataset dat was generated
+as an iid sample of n ∈ {250,1000,4000,16000} draws from a distribution P, and then the
+dimple code from Section 1.3 was executed to perform estimation. A total of 1000 Monte Carlo
+replicates were performed for each scenario. Code for this study is available at http://github.
+com/alexluedtke12/dimple.
+For the expected density parameter, we followed Carone et al. (2018) in letting P = Beta(3,5).
+For the nonparametric R-squared parameter, we followed Williamson et al. (2021) in letting P be
+the distribution of (X,Y) with X = (X ,X ) a pair of independent Unif[−1,1] random variables
+1 2
+and Y |X ∼ N(25X2/9,1). For the longitudinal G-formula example, we used the data-generating
+1
+process from Simulation 1 of Luedtke et al. (2017).
+Table S1 reports the results. The coverage of 95% confidence intervals returned by dimple
+approximately attains the nominal value for all scenarios with n ≥ 1000. Coverage tends to be
+below nominal when n = 250, taking a minimal value of 79%. The widths of the confidence intervals
+are close to the asymptotically optimal width of 2×1.96×σ/n1/2, with σ the standard deviation
+of the EIF. For each expected density and nonparametric R-squared scenario, the variance of the
+estimators always approximately equals the efficient variance, σ2/n. In the longitudinal G-formula
+scenario, this variance is much larger than the efficient variance at smaller sample sizes but the
+relative difference diminishes as n grows. The inflated variance appears to be partially driven
+by outliers arising from inverse propensity weighting in the EIF. Bias is minimal in all scenarios.
+Together these results support our theoretical findings that dimple can produce asymptotically
+efficient estimators under reasonable conditions (Theorem 2).
+26Table S1: Performance of dimple package in the examples from Section 1.3. Assessed via
+coverage of 95% confidence intervals, relative width = n1/2 × (mean width of CI)/(2 × 1.96 ×
+standard deviation of EIF), relative variance = n×(variance of estimator)/(variance of EIF), and
+squared bias divided by the mean squared error. Asymptotically, an efficient estimator would have
+these four quantities equal to the values in the Target Value row.
+n Coverage Rel. Width Rel. Variance Bias2/MSE
+Target Value ≥95% ≤1.00 ≤1.00 =0.00
+Expected Density 250 91% 0.94 1.13 0.04
+1000 92% 0.96 0.95 0.07
+4000 93% 0.97 1.06 0.02
+16000 95% 0.98 0.98 0.03
+Nonparametric R-Squared 250 87% 0.89 1.12 0.10
+1000 92% 0.94 1.05 0.05
+4000 94% 0.97 1.03 0.00
+16000 93% 0.98 1.10 0.01
+Longitudinal G-Formula 250 79% 1.09 4.44 0.12
+1000 93% 1.28 2.01 0.02
+4000 94% 1.25 2.10 0.01
+16000 94% 1.06 1.26 0.00
+On the author’s 2021 MacBook Pro, the average time required to evaluate a single Monte Carlo
+replicate for Examples 1, 2, and 3 was about 3, 20, and 110 seconds respectively when n = 1000.
+B Total pathwise differentiability: supplemental theo-
+retical results and proofs
+B.1 Preliminary lemmas
+Webeginbydefiningsomenotationandconventionsusedthroughouttheappendix. IfA ,A ,...,A
+1 2 j
+are subsets of Hilbert spaces B ,B ,...,B , then
+(cid:81)j
+A is treated as a subset of the direct sum
+1 2 j i=1 i
+of those Hilbert spaces,
+(cid:76)j
+B . For an element (b ,b ,...,b ) ∈
+(cid:76)j
+B and nonempty S ⊆ [j],
+i=1 i 1 2 j i=1 i
+(cid:76)
+we let b := (b : i ∈ S). We similarly let B be the direct sum Hilbert space B , and for
+S i S i∈S i
+(cid:81)j
+A ⊆
+(cid:76)j
+B , we define A :=
+(cid:81)
+A . If S = ∅, then A = B = {0} and b = 0. We
+i=1 i i=1 i S i∈S i S S S
+denote the inner product and norm of a generic Hilbert space B by ⟨·,·⟩ and ∥·∥ , respectively.
+B B
+The following lemma shows that there are two equivalent ways of characterizing smooth paths
+{v : ϵ} through some v ∈ V . The first directly defines these smooth paths as elements of
+[j],ϵ [j] [j]
+P(v ,V ,t ) for some t . The second defines smooth paths {v : ϵ} ∈ P(v ,V ,t ) through the
+[j] [j] [j] [j] i,ϵ i i i
+coordinateprojectionsv ∈ V ,i ∈ [j],andthenconcatenatesthemsothatv := (v ,v ,...,v ).
+i i [j],ϵ 1,ϵ 2,ϵ j,ϵ
+27Lemma S1 (Defining smooth paths through v via smooth paths through its coordinate pro-
+[j]
+jections). Fix j ∈ [k] and v ∈ V . Let Vˇ denote the tangent set of V at v and Vˇ the
+[j] [j] [j],v
+[j]
+[j] [j] i,vi
+tangent set of V at v , i ∈ [j]; let V˙ and V˙ denote the corresponding tangent spaces. Both of
+i i [j],v
+[j]
+i,vi
+the following hold:
+(i) for any t in Vˇ and {v = (v )j : ϵ ∈ [0,1]} ∈ P(v ,V ,t ), it holds that
+[j] [j],v [j] [j],ϵ i,ϵ i=1 [j] [j] [j]
+{v : ϵ ∈ [0,1]} ∈ P(v ,V ,t ) for all i ∈ [j];
+i,ϵ i i i
+(ii) for any t ∈ (cid:81)j Vˇ and {v : ϵ ∈ [0,1]} ∈ P(v ,V ,t ), i ∈ [j], it holds that {v =
+[j] i=1 i,vi i,ϵ i i i [j],ϵ
+(v )j : ϵ ∈ [0,1]} ∈ P(v ,V ,t ).
+i,ϵ i=1 [j] [j] [j]
+Consequently, Vˇ = (cid:81)j Vˇ and V˙ = (cid:76)j V˙ .
+[j],v [j] i=1 i,vi [j],v [j] i=1 i,vi
+Proof of Lemma S1. Observethat(i)impliesthatVˇ ⊆ (cid:81)j Vˇ and(ii)impliesthatVˇ ⊇
+[j],v [j] i=1 i,vi [j],v [j]
+(cid:81)j Vˇ , and so together (i) and (ii) imply that Vˇ = (cid:81)j Vˇ . It is straightforward to verify
+i=1 i,vi [j],v [j] i=1 i,vi
+that the W -closure of the linear span of (cid:81)j Vˇ is equal to (cid:76)j V˙ , and so the tangent set
+[j] i=1 i,vi i=1 i,vi
+relation Vˇ = (cid:81)j Vˇ implies the tangent space relation V˙ = (cid:76)j V˙ . Hence, the
+[j],v [j] i=1 i,vi [j],v [j] i=1 i,vi
+proof will be complete if we can establish (i) and (ii).
+Before proceeding, it will be useful to note that, for any t ∈ W and (v )j ∈ V , ϵ ∈ [0,1],
+[j] [j] i,ϵ i=1 [j]
+the definition of the norm on W :=
+(cid:76)j
+W makes it so that
+[j] i=1 i
+j
+∥(v )j −(v )j −ϵ(t )j ∥2 = (cid:88) ∥v −v −ϵt ∥2 . (S1)
+i,ϵ i=1 i i=1 i i=1 W [j] i,ϵ i i Wi
+i=1
+Toestablish(i),wenotethat,foranyt ∈ Vˇ ⊆ W and{(v )j : ϵ ∈ [0,1]} ∈ P(v ,V ,t ),
+[j] [j],v [j] [j] i,ϵ i=1 [j] [j] [j]
+the left-hand side above is o(ϵ2), and so each squared norm on the right-hand side must be o(ϵ2) as
+well. Consequently, {v : ϵ ∈ [0,1]} ∈ P(v ,V ,t ) for each i ∈ [j], and so (i) holds. To establish (ii),
+i,ϵ i i i
+we note that, for any t ∈ Vˇ and {v : ϵ ∈ [0,1]} ∈ P(v ,V ,t ), i ∈ [j], each squared norm on the
+i i,vi i,ϵ i i i
+right-hand side above is o(ϵ2), and so the squared norm on the left-hand side must be o(ϵ2) as well.
+Consequently, {(v )j : ϵ ∈ [0,1]} ∈ P(v ,V ,t ), and so (ii) holds.
+i,ϵ i=1 [j] [j] [j]
+Inthefollowinglemmaandthroughoutwewriteproj {· |B}todenotetheorthogonalprojection
+A
+in a Hilbert space A onto a closed subspace B.
+Lemma S2 (Total pathwise differentiability of coordinate projections). Fix j ∈ [k] and let J ⊆ [j].
+The coordinate projection map Λ : M×V → V , defined so that Λ (P,v ) = v , is totally
+J [j] J J [j] J
+pathwise differentiable and, for all w := (w : i ∈ J) ∈ W and (P,v ) ∈ M×V ,
+J i J [j] [j]
+(cid:18) (cid:19)
+(cid:16) (cid:17)j
+Λ˙∗ (w ) = 0, 1 (i)·proj {w |V˙ } ,
+J,P,v
+[j]
+J i J Wi i i,vi
+i=1
+28where 1 (i)·proj {w |V˙ } is equal to the zero element of W if i ̸∈ J and is otherwise equal to
+J Wi i i,vi i
+proj {w |V˙ }.
+Wi i i,vi
+Proof of Lemma S2. We first derive the differential operator Λ˙ , and then we derive its
+J,P,v
+[j]
+adjoint. Fix s ∈ Mˇ and t in the tangent set Vˇ of V at v . Let {P : ϵ} ∈ P(P,M,s) and
+P [j] [j],v [j] [j] ϵ
+[j]
+{v : ϵ} ∈ P(v ,V ,t ). Observe that
+[j],ϵ [j] [j] [j]
+(cid:13) (cid:13)Λ J(P ϵ,v [j],ϵ)−Λ J(P,v [j])−ϵt J(cid:13) (cid:13)2
+VJ
+= ∥v J,ϵ−v
+J
+−ϵt J∥2
+VJ
+= (cid:88) ∥v i,ϵ−v i−ϵt i∥2
+VJ
+.
+i∈J
+By part (i) of Lemma S1, {v : ϵ} ∈ P(v ,V ,t ) for each i ∈ [j], and so each term in the sum on the
+i,ϵ i i i
+right-hand side is o(ϵ2). Recalling the left-hand side above, this shows that Λ is totally pathwise
+J
+differentiable at (P,v ) with (bounded and linear) differential operator Λ˙ : M˙ ×V˙ →
+[j] J,P,v [j] P [j],v [j]
+W defined so that Λ˙ (s,t ) = t .
+J J,P,v [j] [j] J
+We now derive the form of Λ˙∗ . To this end, fix w = (w : i ∈ J) ∈ W . For any
+J,P,v J i J
+[j]
+(s,t ) ∈ M˙ ×V˙ ,
+[j] P [j],v
+[j]
+(cid:68) (cid:69) (cid:88) (cid:88)(cid:68) (cid:69)
+Λ˙ (s,t ),w = ⟨t ,w ⟩ = ⟨t ,w ⟩ = t ,proj {w |V˙ }
+J,P,v [j] [j] J WJ J J WJ
+i∈J
+i i Wi
+i∈J
+i Wi i i,vi Wi
+(cid:88)(cid:68) (cid:69)
+= t ,proj {w |V˙ }
+i∈J
+i Wi i i,vi V˙
+i,vi
+(cid:28) (cid:18) (cid:19)(cid:29)
+(cid:16) (cid:17)j
+= (s,t ), 0, 1 (i)·proj {w |V˙ } ,
+[j] J Wi i i,vi
+i=1 M˙ P⊕(⊕j i=1V˙ i,vi)
+wherethefirstequalityusesthealready-derivedformofthedifferentialoperator, thesecondandfifth
+use the definition of inner products on direct sums of Hilbert spaces, and the third and fourth use
+propertiesofprojectionsandthefactthatt ∈ V˙ . Theproofconcludesbynotingthat(cid:76)j V˙ =
+i i,vi i=1 i,vi
+V˙ , by Lemma S1, and so the Hermitian adjoint Λ˙∗ of Λ˙ : M˙ ×V˙ → W
+[j],v [j] J,P,v [j] J,P,v [j] P [j],v [j] J
+takes the form claimed in the lemma statement.
+B.2 Chain rule
+In this appendix, we let Q, T, and W be Hilbert spaces. We also let R ⊆ Q and U ⊆ T.
+Lemma S3 (Chainrulefortotalpathwisedifferentiability). Letγ : M×U → Randη : M×R → W
+be totally pathwise differentiable at (P,u) and (P,γ(P,u)), respectively. Then, β : M×U → W,
+defined so that β(P′,u′) = η(P′,γ(P′,u′)), is totally pathwise differentiable at (P,u) with β˙ (s,t) =
+P,u
+η˙ (s,γ˙ (s,t)) and
+P,γ(P,u) P,u
+(cid:16) (cid:17) (cid:16) (cid:17)
+β˙∗ (w) = η˙∗ (w) ,0 +γ˙∗ η˙∗ (w) ,
+P,u P,γ(P,u) 0 P,u P,γ(P,u) 1
+29where η˙∗ (w) ∈ M˙ and η˙∗ (w) ∈ U˙ are defined so that
+P,γ(P,u) 0 P P,γ(P,u) 1 u
+(cid:16) (cid:17)
+η˙∗ (w) = η˙∗ (w) ,η˙∗ (w) .
+P,γ(P,u) P,γ(P,u) 0 P,γ(P,u) 1
+Proof of Lemma S3. We first show that β is totally pathwise differentiable at (P,u) with the
+specified differential operator. Fix {P : ϵ ∈ [0,1]} ∈ P(P,M,s) and {u : ϵ ∈ [0,1]} ∈ P(u,U,t).
+ϵ ϵ
+Let r := γ(P ,u ) and r := γ(P,u). As γ is totally pathwise differentiable at (P,u), {r : ϵ ∈ [0,1]}
+ϵ ϵ ϵ ϵ
+belongs to P(r,R,γ˙ (s,t)). As η is totally pathwise differentiable, this implies that, as ϵ → 0,
+P,u
+ϵ−1[η(P ,r )−η(P,r)] → η˙ (s,γ˙ (s,t)) =: β˙ (s,t).
+ϵ ϵ P,r P,u P,u
+The boundedness and linearity of η˙ and γ˙ imply that β˙ is bounded and linear, and so β is
+P,r P,u P,u
+totally pathwise differentiable at (P,u) with differential operator β˙ .
+P,u
+As for the adjoint β˙∗ , observe that, for any w ∈ W and (s,t) ∈ M˙ ⊕U˙ ,
+P,u P u
+(cid:68) (cid:69)
+β˙ (s,t),w = (cid:10) η˙ (s,γ˙ (s,t)),w(cid:11)
+P,u W P,γ(P,u) P,u W
+(cid:68) (cid:69)
+= (s,γ˙ (s,t)),η˙∗ (w)
+P,u P,γ(P,u) M˙ P⊕Q
+(cid:68) (cid:69) (cid:68) (cid:69)
+= s,η˙∗ (w) + γ˙ (s,t),η˙∗ (w)
+P,γ(P,u) 0 M˙ P P,u P,γ(P,u) 1 Q
+(cid:68) (cid:69) (cid:68) (cid:16) (cid:17)(cid:69)
+= s,η˙∗ (w) + (s,t),γ˙∗ η˙∗ (w)
+P,γ(P,u) 0 M˙
+P
+P,u P,γ(P,u) 1 M˙ P⊕U˙
+u
+(cid:68) (cid:16) (cid:17)(cid:69) (cid:68) (cid:16) (cid:17)(cid:69)
+= (s,t), η˙∗ (w) ,0 + (s,t),γ˙∗ η˙∗ (w)
+P,γ(P,u) 0 M˙ P⊕U˙
+u
+P,u P,γ(P,u) 1 M˙ P⊕U˙
+u
+(cid:68) (cid:16) (cid:17) (cid:16) (cid:17)(cid:69)
+= (s,t), η˙∗ (w) ,0 +γ˙∗ η˙∗ (w) ,
+P,γ(P,u) 0 P,u P,γ(P,u) 1 M˙ P⊕U˙
+u
+where: the first equality used the already-derived form of β˙ ; the second and fourth used the
+P,u
+definition of an adjoint; the third and fifth used the definition of inner products in direct sums of
+Hilbert spaces; and the final equality used the bilinearity of inner products. The right-hand side
+(cid:68) (cid:69)
+writes as (s,t),β∗ (w) , with β∗ as defined in the lemma statement. Hence, β∗ is the
+P,u M˙ P⊕U˙
+u
+P,u P,u
+Hermitian adjoint of β˙ : M˙ ⊕U˙ → W.
+P,u P u
+The following consequence of the chain rule will prove useful when studying the backpropagation
+algorithm. In this lemma, we let Ω : M˙ ×(T ×Q) → M˙ ×U and Λ : M˙ ×(T ×Q) → R be
+P P P
+the coordinate projections defined so that Ω(s,(u,r)) = (s,u) and Λ(s,(u,r)) = r.
+Lemma S4 (Consequence of the chain rule). Let γ : M×U → R and η : M×(U ×R) → W be
+totally pathwise differentiable at (P,u) and (P,(u,γ(P,u))), respectively. Then, β : M×U → W,
+defined so that β(P′,u′) = η(P′,(u′,γ(P′,u′))), is totally pathwise differentiable at (P,u) with
+β˙ (s,t) = η˙ (s,(t,γ˙ (s,t))) and
+P,u P,(u,γ(P,u)) P,u
+β˙∗ (w) = Ω◦η˙∗ (w)+γ˙∗ ◦Λ◦η˙∗ (w).
+P,u P,(u,γ(P,u)) P,u P,(u,γ(P,u))
+30Proof of Lemma S4. Let R := U ×R be a subset of Q := T ⊕Q. Define γ : M×U → R so that
+γ(P′,u′) = (u′,γ(P′,u′)), and note that β(P′,u′) = (P′,γ(P′,u′)). We will use Lemma S3 to study
+β. Before doing this, we must establish that γ is totally pathwise differentiable at (P,u).
+For any s ∈ Mˇ , {P : ϵ ∈ [0,1]} ∈ P(P,M,s), t ∈ Uˇ , and {u : ϵ ∈ [0,1]} ∈ P(u,U,t),
+P ϵ u ϵ
+∥γ(P ,u )−γ(P,u)−ϵ(t,γ˙ (s,t))∥2 = ∥u −u−ϵt∥2 +∥γ(P ,u )−γ(P,u)−ϵγ˙ (s,t)∥2 .
+ϵ ϵ P,u T⊕Q ϵ T ϵ ϵ P,u Q
+The first term on the right is o(ϵ2) since {u : ϵ ∈ [0,1]} ∈ P(u,U,t), and the second is o(ϵ2)
+ϵ
+by the total pathwise differentiability of γ. The boundedness and linearity of γ˙ implies that
+P,u
+(s,t) (cid:55)→ (t,γ˙ (s,t)) is bounded and linear as well. Hence, γ is totally pathwise differentiable at
+P,u
+(P,u) with γ˙ : (s,t) (cid:55)→ (t,γ˙ (s,t)). By the definition of inner products in direct sum Hilbert
+P,u
+P,u
+spaces, it also readily follows that the Hermitian adjoint of γ˙ is the map γ˙∗ : T ⊕Q → M˙ ⊕U˙
+P u
+P,u P,u
+defined so that γ˙∗ (t,q) = (0,proj {t|U˙ })+γ˙∗ (q), where 0 denotes the zero element of M˙ .
+P,u T u P,u P
+We are now in a position to apply Lemma S3. That lemma shows that β is totally pathwise
+differentiable at (P,u) with differential operator β˙ (s,t) = η˙ (s,γ˙ (s,t)) and adjoint
+P,u P,γ(P,u) P,u
+(cid:16) (cid:17) (cid:16) (cid:17)
+β˙∗ (w) = η˙∗ (w) ,0 +γ˙∗ η˙∗ (w) .
+P,u P,γ(P,u) 0 P,u P,γ(P,u) 1
+Since η˙∗ (w) ∈ M˙ ⊕(U˙ ⊕R˙ ) for any w ∈ W, the projection onto U˙ that appears
+P,(u,γ(P,u)) P u γ(P,u) u
+in the adjoint γ˙∗ evaluates as the identity operator when γ˙∗ is applied to η˙∗ (w) , and so
+P,u P,u P,γ(P,u) 1
+β˙∗ (w) = Ω◦η˙∗ (w)+γ˙∗ ◦Λ◦η˙∗ (w).
+P,u P,(u,γ(P,u)) P,u P,(u,γ(P,u))
+B.3 Proof of Theorem 1
+Proof of Theorem 1. This proof concerns maps η : M×V → W , j ∈ {0}∪[k]. These maps are
+j [j] ψ
+defined so that, for all (P′,v ) ∈ M×V , η (P′,v ) is the output of a modification of Algorithm 1
+[j] [j] j [j]
+that replaces each line i ∈ [j] by the assignment h = v and leaves each line i ∈ {j+1,j+2,...,k}
+i i
+unchanged, so that h = θ (P′,h ). Concretely, η (P′,v ) = v and, for j = k−1,k−2,...,0,
+i i pa(i) k [k] k
+η (P′,v ) := η (cid:0) P′,(v ,θ (P′,v ))(cid:1) . (S2)
+j [j] j+1 [j] j+1 pa(j+1)
+In the remainder of this proof, we leverage the chain rule and the recursive relationship between
+η and η to show η is totally pathwise differentiable at (P,0) with the first entry of η˙∗ (f )
+j j+1 0 0,P,0 k
+equal to f . Because ψ(·) = η (·,0), Lemma S5 will then yield that ψ˙∗(f ) = f .
+0 0 P k 0
+To proceed, it will be helpful to have notation to denote the values f ,f ,...,f take before
+0 1 j
+line 3 of Algorithm 2 is evaluated for a given value of j in the for loop. To this end, we add the
+following variable definition between lines 2 and 3 of the algorithm:
+312: for j = k,k−1,...,1 do
+(j) (j)
+(f ,f ) = (f ,f ) ▷ value (f ,f ) takes before executing the line below
+0 [j] 0 [j] 0 [j]
+3: (f ,f ) += θ˙∗ (f )
+0 pa(j) j,P,h j
+pa(j)
+(j) (j)
+Since, (f ,f ), j ∈ [k], are not used by the algorithm once defined, adding this line of code will
+0 [j]
+(0)
+not change the algorithm’s output. We also let f denote the value that f takes after executing
+0 0
+the entirety of the for loop on lines 2 and 3 of Algorithm 2.
+We use induction to establish the following hypothesis holds for all j ∈ {k,k − 1,...,0}.
+Throughout our induction argument, we let h be the quantity defined in Algorithm 1 when that
+[j]
+algorithm is called with input P.
+Inductive hypothesis j, IH(j): η is totally pathwise differentiable at (P,h ) with
+j [j]
+(cid:16) (cid:110) (cid:12) (cid:111)(cid:17)
+f(j) ,proj f(j)(cid:12)V˙ = η˙∗ (f ). (S3)
+0 W [j] [j] (cid:12) [j],h [j] j,P,h [j] k
+(j)
+In the case where j = 0, we let f denote the zero element in a trivial vector space {0}. Noting
+[j]
+(0)
+that f is the value of f returned by Algorithm 2, IH(0) will imply that Algorithm 2 returns the
+0 0
+first entry of η˙∗ (f ), which, as noted earlier, is equal to ψ˙∗(f ). Hence, if we can establish
+j,P,h k P k
+[j]
+IH(0), as we will now do by induction, then we will have completed our proof.
+Base case: j = k. Since η is the coordinate projection (P′,v ) (cid:55)→ v , Lemma S2 shows η is
+k [k] k k
+totally pathwise differentiable at (P,h ) with η˙∗ : w (cid:55)→ (0,(0,0,...,0,proj {w |V˙ })).
+[k] k,P,h [k] k W k k k,h k
+Since f and f are initialized to the be the zero elements in L2(P) and W , respectively,
+0 [k−1] [k−1]
+(k) (k) (k)
+f and f are also equal to these zero elements. Also, f = f . Hence, Lemma S1 yields that
+0 [k−1] k k
+proj {f(k) |V˙ } = (0,0,...,0,proj {f(k) |V˙ }). Putting all these facts together shows
+W [k] [k] [k],h [k] W k k k,h k
+that (S3) holds when j = k, that is, IH(k) holds.
+Inductive step: Fix j < k and suppose IH(j +1) holds. Define the maps Ω : M˙ ⊕V →
+j P [j+1]
+M˙ ⊕V andΛ : M˙ ⊕V → V asthecoordinateprojectionsΩ : (s,t ) (cid:55)→ (s,t )and
+P [j] j+1 P [j+1] j+1 j [j+1] [j]
+Λ : (s,t ) (cid:55)→ t . Defining γ : M×V → V so that γ (P′,v ) = θ (P′,v ),
+j+1 [j+1] j+1 j+1 [j] j+1 j+1 [j] j+1 pa(j+1)
+(S2) rewrites as
+η (P′,v ) := η (cid:0) P′,(v ,γ (P′,v ))(cid:1) . (S4)
+j [j] j+1 [j] j+1 [j]
+We will apply Lemma S4 to the above to show that η is totally pathwise differentiable at (P,h ),
+j [j]
+but to do so we must first show that γ is totally pathwise differentiable at (P,h ). To
+j+1 [j]
+see that this is true, note that γ (P′,v ) = θ (P′,Λ (P′,v )) for all (P′,v ), where
+j+1 [j] j+1 pa(j+1) [j] [j]
+Λ (P′,v ) := v , and so Lemmas S2 and S3 together yield that γ is totally pathwise
+pa(j+1) [j] pa(j+1) j+1
+differentiable at (P,h ) and
+[j]
+(cid:16) (cid:17) (cid:16) (cid:17)
+γ˙∗ (f(j+1) ) = θ˙∗ (f(j+1) ) ,0 +Λ˙∗ θ˙∗ (f(j+1) )
+j+1,P,h [j] j+1 j+1,P,h pa(j+1) j+1 0 pa(j+1),P,h [j] j+1,P,h pa(j+1) j+1 1
+32(cid:16) (cid:17)
+= θ˙∗ (f(j+1) ) ,proj {a|V˙ } , (S5)
+j+1,P,h pa(j+1) j+1 0 W [j] [j],h [j]
+where a ∈ W satisfies a = θ˙∗ (f(j+1) ) and a = 0 for all i ̸∈ pa(j +1).
+[j] pa(j+1) j+1,P,h j+1 1 i
+pa(j+1)
+We are now in a position to apply Lemma S4 to (S4). Combining that lemma with the fact that
+h = (h ,γ (P,h )) shows η is totally pathwise differentiable at (P,h ) with
+[j+1] [j] j+1 [j] j [j]
+η˙∗ (f ) = Ω ◦η˙∗ (f )+γ˙∗ ◦Λ ◦η˙∗ (f )
+j,P,h [j] k j j+1,P,(h [j],γj+1(P,h [j])) k j+1,P,h [j] j+1 j+1,P,(h [j],γj+1(P,h [j])) k
+= Ω ◦η˙∗ (f )+γ˙∗ ◦Λ ◦η˙∗ (f ).
+j j+1,P,h k j+1,P,h j+1 j+1,P,h k
+[j+1] [j] [j+1]
+Since IH(j+1) holds, η˙∗ (f ) = (f(j+1) ,proj {f(j+1) |V˙ }). Combining this with
+j+1,P,h [j] k 0 W [j+1] [j+1] [j+1],h [j+1]
+the above and the definitions of Ω and Λ yields
+j j+1
+η˙∗ (f ) = (f(j+1) ,proj {f(j+1) |V˙ })+γ˙∗ (proj {f(j+1) |V˙ }). (S6)
+j,P,h [j] k 0 W [j] [j] [j],h [j] j+1,P,h [j] Wj+1 j+1 j+1,hj+1
+The latter term on the right-hand side equals γ˙∗ (f(j+1) ). To see this, note that the range of
+j+1,P,h j+1
+[j]
+γ˙ is necessarily a subset of V˙ , and so, for any (s,t) ∈ M˙ ⊕V˙ ,
+j+1,P,h [j] j+1,hj+1 P [j],h [j]
+(cid:68) (cid:69)
+(s,t),γ˙∗ (proj {f(j+1) |V˙ })
+j+1,P,h [j] Wj+1 j+1 j+1,hj+1 M˙ P⊕V˙
+[j],h[j]
+(cid:68) (cid:69)
+= γ˙ (s,t),proj {f(j+1) |V˙ }
+j+1,P,h [j] Wj+1 j+1 j+1,hj+1 Wj+1
+(cid:68) (cid:69) (cid:68) (cid:69)
+= γ˙ (s,t),f(j+1) = (s,t),γ˙∗ (f(j+1) ) .
+j+1,P,h [j] j+1 Wj+1 j+1,P,h [j] j+1 M˙ P⊕V˙
+[j],h[j]
+Replacing the latter term on the right-hand side of (S6) with γ˙∗ (f(j+1) ), combining that
+j+1,P,h j+1
+[j]
+display with(S5), and then using the linearity of the projection operator yields
+(cid:16) (cid:17)
+η˙∗ (f ) = f(j+1) +θ˙∗ (f(j+1) ) ,proj {f(j+1) |V˙ }+proj {a|V˙ }
+j,P,h [j] k 0 j+1,P,h pa(j+1) j+1 0 W [j] [j] [j],h [j] W [j] [j],h [j]
+(cid:16) (cid:17)
+= f(j+1) +θ˙∗ (f(j+1) ) ,proj {f(j+1) +a|V˙ } .
+0 j+1,P,h pa(j+1) j+1 0 W [j] [j] [j],h [j]
+Recalling the definition of a and the form of the update that occurs on step j +1 of the for loop in
+Algorithm 2 reveals that
+(cid:16) (cid:17)
+(f(j) ,f(j) ) = f(j+1) +θ˙∗ (f(j+1) ) ,f(j+1) +a .
+0 [j] 0 j+1,P,h pa(j+1) j+1 0 [j]
+Combining the preceding two displays shows that IH(j) holds.
+33B.4 Relationship between total pathwise differentiability and other
+notions of differentiability
+We now establish results relating total pathwise differentiability to Hadamard and pathwise differ-
+entiability. When doing so, we leverage the notation introduced in the paragraph surrounding Eq. 1
+in the main text.
+We begin by reviewing the definitions of Hadamard and pathwise differentiability. A map
+ζ : U → W is called Hadamard differentiable at u ∈ U if there exists a continuous linear operator
+ζ˙ : U˙ → W such that, for all t ∈ Uˇ and {u : ϵ} ∈ P(u,U,t),
+u u u ϵ
+(cid:13) (cid:13)
+(cid:13)ζ(u )−ζ(u)−ϵζ˙ (t)(cid:13) = o(ϵ). (S7)
+(cid:13) ϵ u (cid:13)
+W
+We call ζ˙ the differential operator of ζ at u. As noted in Section 20.7 of van der Vaart (2000),
+u
+HadamarddifferentiabilityisequivalenttoGateauxdifferentiabilityuniformlyovercompacts. Moving
+now to pathwise differentiability (van der Vaart, 1991a; Luedtke and Chung, 2023), ν : M → W is
+called pathwise differentiable at P ∈ M if there exists a continuous linear operator ν˙ : M˙ → W
+P P
+such that, for all s ∈ Mˇ and {P : ϵ} ∈ P(P,M,s),
+P ϵ
+∥ν(P )−ν(P)−ϵν˙ (s)∥ = o(ϵ). (S8)
+ϵ P W
+The map ν˙ is called the local parameter of ν at P.
+P
+As we now show, total pathwise differentiability satisfies an analogue of the fact that the total
+differentiability of a function f : R2 → R implies its partial differentiability. In our context, we
+call θ : M×U → W partially differentiable in its first argument at (P,u) if θ(·,u) is pathwise
+differentiable at P; we denote the local parameter of θ(·,u) at P by ν˙ : M˙ → W, where the
+P,u P
+indexing by u emphasizes that θ(·,u) depends on u. We similarly call θ partially differentiable in its
+second argument at (P,u) if θ(P, ·) is Hadamard differentiable at u, and we denote the differential
+operator by ζ˙ : U˙ → W.
+P,u u
+Lemma S5 (Total differentiability implies partial differentiability). If θ : M×U → W is totally
+pathwise differentiable at (P,u), then θ is partially differentiable in its first and second arguments at
+(P,u). Moreover, θ˙ (s,t) = ν˙ (s)+ζ˙ (t) and θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)).
+P,u P,u P,u P,u P,u P,u
+Proof of Lemma S5. The Hadamard differentiability of θ(P, ·) : U → W follows by applying (1)
+with the constant path {P : ϵ ∈ [0,1]} ∈ P(P,M,0). Indeed, this shows (S7) holds with ζ(·) equal
+to θ(P, ·) and ζ˙ (·) equal to the continuous linear operator θ˙ (0, ·) : U˙ → W.
+P,u P,u u
+The pathwise differentiability of θ(·,u) : M → W similarly follows by applying (1) with the
+constant path {u : ϵ ∈ [0,1]} ∈ P(u,U,0). Indeed, this shows (S8) holds with ν(·) equal to θ(·,u)
+and ν˙ equal to the continuous linear operator θ˙ (·,0) : M˙ → W.
+P,u P,u P
+Because θ˙ is a linear operator, θ˙ (s,t) = θ˙ (s,0)+θ˙ (0,t) = ν˙ (s)+ζ˙ (t) for all s,t.
+P,u P,u P,u P,u P,u P,u
+34Also, by the definition of inner products in direct sum spaces, θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)) for all
+P,u P,u P,u
+w.
+A partial converse of Lemma S5 holds when U is a linear space. This partial converse is a
+natural analogue of the fact that a function f : R2 → R is totally differentiable at (x,y) if, at this
+point, it is partially differentiable in its first argument and continuously partially differentiable in its
+second (Theorem 12.11 of Apostol, 1974). To define a notion of continuous partial differentiability
+of θ in its second argument, we define a notion of continuity for the map ξ : (P′,u′) (cid:55)→ ζ˙ .
+P′,u′
+When doing so, we require that θ is partially differentiable in its second argument at all (P′,u′)
+in a neighborhood N ⊆ M×U of (P,u), where here and throughout M×U is equipped with
+the product topology derived from the Hellinger metric on M and the ∥·∥ -induced metric on
+T
+U. We take the domain of ξ to be equal to N, where N ⊆ M×U is equipped with the subspace
+topology. The image of ξ is contained in the space B(U,W) of bounded linear operators from
+the T-closure U of U to W; this is true because the linearity of U implies that U˙ = U for all
+u′
+u′ ∈ U, and a differential operator is, by definition, bounded and linear. We equip B(U,W) with the
+operator norm ∥f∥ := sup ∥f(t)∥ . This results in the following definition: θ is called
+op t∈U:∥t∥T≤1 W
+continuously partially differentiable in its second argument at (P,u) if θ is partially differentiable in
+its second argument at all (P′,u′) in a neighborhood N of (P,u) and, moreover, ξ : N → B(U,W)
+is continuous at (P,u).
+Lemma S6 (Partial converse of Lemma S5). Suppose U is a linear space. If θ : M×U → W is
+partially differentiable in its first argument at (P,u) and continuously partially differentiable in its
+second argument at (P,u), then θ is totally pathwise differentiable at (P,u) with differential operator
+θ˙ (s,t) = ν˙ (s)+ζ˙ (t).
+P,u P,u P,u
+Proof of Lemma S6. We suppose that the neighborhood N on which θ is partially differentiable in
+its second argument takes the form N ×N ⊂ M×U, where N = {u′ ∈ U : ∥u′−u∥ < r} for
+P u u T
+some r > 0. No generality is lost by doing this since Cartesian products of open sets form a base for
+the product topology and open balls form a base for the topology on the normed space (U,∥·∥ ).
+T
+Fix s ∈ Mˇ , t ∈ Uˇ , {P : ϵ ∈ [0,1]} ∈ P(P,M,s), and {u : ϵ ∈ [0,1]} ∈ P(u,U,t). We will
+P u ϵ ϵ
+show that (1) holds with θ˙ (s,t) = ν˙ (s)+ζ˙ (t). We leverage the decomposition
+P,u P,u P,u
+(cid:104) (cid:105)
+θ(P ,u )−θ(P,u) = [θ(P ,u)−θ(P,u)]+ϵζ˙ (t)+ θ(P ,u )−θ(P ,u)−ϵζ˙ (t) . (S9)
+ϵ ϵ ϵ Pϵ,u ϵ ϵ ϵ Pϵ,u
+By the partial differentiability of θ in its first argument, the first term is equal to ϵν˙ (s)+o(ϵ).
+P,u
+By the Hellinger-continuity of P′ (cid:55)→ ζ˙ and the fact that the quadratic mean differentiability of
+P′,u
+{P : ϵ} implies that P → P in a Hellinger sense, the second term is equal to ϵζ˙ (t)+o(ϵ). In the
+ϵ ϵ P,u
+remainder of this proof, we show that the third term is o(ϵ). Since the boundedness and linearity of
+ν˙ and ζ˙ imply that (s,t) (cid:55)→ ν˙ (s)+ζ˙ (t) is bounded and linear as well, this will establish
+P,u P,u P,u P,u
+the result.
+35Our study of the third term in (S9) relies on the fact that, for any ϵ > 0,
+(cid:68) (cid:69)
+∥θ(P ,u )−θ(P ,u)−ϵζ˙ (t)∥ = sup θ(P ,u )−θ(P ,u)−ϵζ˙ (t),w . (S10)
+ϵ ϵ ϵ Pϵ,u W ϵ ϵ ϵ Pϵ,u
+w∈W:∥w∥W=1 W
+In what follows we shall obtain a bound on the quantity in the supremum that holds uniformly over
+all w ∈ W with ∥w∥ = 1. For now, fix such a w. Our first goal will be to show that, for all ϵ less
+W
+than some ϵ > 0 to be defined momentarily, there is an intermediate element u† between u and u
+0 ϵ
+such that
+⟨θ(P ,u )−θ(P ,u),w⟩ = ⟨ζ˙ (u −u),w⟩ , (S11)
+ϵ ϵ ϵ W Pϵ,u† ϵ W
+This result will follow from the mean value theorem, once we show that theorem is applicable. We
+take ϵ to be any positive quantity such that u ∈ N and P ∈ N for all ϵ < ϵ — such an ϵ
+0 ϵ u ϵ P 0 0
+necessarily exists since, as ϵ → 0, u → u and P → P. We suppose ϵ < ϵ hereafter. Since u and u
+ϵ ϵ 0 ϵ
+(a)
+both belong to N and the linearity of U implies that N is convex, u := au +(1−a)u ∈ N
+u u ϵ ϵ u
+(a)
+for all a ∈ [0,1]. Hence, θ(P , ·) is Hadamard differentiable at u for each a ∈ [0,1]. Using that
+ϵ ϵ
+(a+δ) (a)
+u = u +δ(u −u) for all a ∈ [0,1) and δ > 0, this implies that, for all a ∈ [0,1),
+ϵ ϵ ϵ
+(a+δ) (a)
+θ(P ,u )−θ(P ,u )
+lim ϵ ϵ ϵ ϵ = ζ˙ (u −u).
+δ↓0 δ Pϵ,u( ϵa) ϵ
+Similarly, for all a ∈ (0,1], the same display holds but with lim replaced by lim . Since
+δ↓0 δ↑0
+⟨·,w⟩ : W → R is continuous, our expressions for the limits as δ ↓ 0 and δ ↑ 0 show that
+W
+(a)
+a (cid:55)→ ⟨θ(P ,u ),w⟩ is (i) continuous on [0,1] and (ii) differentiable on (0,1) with derivative
+ϵ ϵ W
+a (cid:55)→ ⟨ζ˙ (u −u),w⟩ . Consequently, by the mean value theorem, there exists an a⋆ ∈ (0,1)
+Pϵ,u( ϵa) ϵ W
+such that (S11) holds with u† = u(a⋆) . Taking a supremum in (S11) over all possible values a⋆ could
+ϵ
+take yields
+(cid:68) (cid:69)
+⟨θ(P ,u )−θ(P ,u),w⟩ ≤ sup ζ˙ (u −u),w .
+ϵ ϵ ϵ W
+a∈(0,1)
+Pϵ,u( ϵa) ϵ
+W
+Welett := (u −u)/ϵ,andnotethatthelinearityofζ˙ impliesthatζ˙ (u −u) = ϵζ˙ (t ).
+ϵ ϵ Pϵ,u( ϵa) Pϵ,u( ϵa) ϵ Pϵ,u( ϵa) ϵ
+Plugging this into the above, dividing both sides by ϵ, and then subtracting ⟨ζ˙ (t),w⟩ yields
+Pϵ,u W
+that
+(cid:68) (cid:69)
+ϵ−1⟨θ(P ,u )−θ(P ,u)−ϵζ˙ (t),w⟩ ≤ sup ζ˙ (t )−ζ˙ (t),w .
+ϵ ϵ ϵ Pϵ,u W
+a∈(0,1)
+Pϵ,u( ϵa) ϵ Pϵ,u
+W
+Applying Cauchy-Schwarz and using that ∥w∥ = 1 shows the right-hand side above can be upper
+W
+bounded by sup ∥ζ˙ (t )−ζ˙ (t)∥ . This bound does not depend on w, and so (S10)
+a∈(0,1) Pϵ,u( ϵa) ϵ Pϵ,u W
+36implies
+(cid:13) (cid:13)
+ϵ−1∥θ(P ,u )−θ(P ,u)−ϵζ˙ (t)∥ ≤ sup (cid:13)ζ˙ (t )−ζ˙ (t)(cid:13) .
+ϵ ϵ ϵ Pϵ,u W a∈(0,1)(cid:13) Pϵ,u( ϵa) ϵ Pϵ,u (cid:13)
+W
+Applying the triangle inequality and leveraging the definition of the operator norm, we see that
+(cid:13) (cid:13)
+ϵ−1∥θ(P ,u )−θ(P ,u)−ϵζ˙ (t)∥ ≤ sup (cid:13)ζ˙ (t )−ζ˙ (t)(cid:13)
+ϵ ϵ ϵ Pϵ,u W a∈(0,1)(cid:13) Pϵ,u( ϵa) ϵ Pϵ,u (cid:13)
+W
+(cid:13) (cid:13) (cid:13) (cid:13)
+≤ sup (cid:13)ζ˙ (t )−ζ˙ (t )(cid:13) +(cid:13)ζ˙ (t −t)(cid:13)
+a∈(0,1)(cid:13) Pϵ,u( ϵa) ϵ Pϵ,u ϵ (cid:13)
+W
+(cid:13) Pϵ,u ϵ (cid:13)
+W
+(cid:13) (cid:13)
+≤ ∥t ∥ sup (cid:13)ζ˙ −ζ˙ (cid:13) +∥t −t∥ ∥ζ˙ ∥ .
+ϵ T a∈(0,1)(cid:13) Pϵ,u( ϵa) Pϵ,u(cid:13)
+op
+ϵ T Pϵ,u op
+We now explain why the right-hand side goes to zero when ϵ → 0, which will show that the
+(a)
+third term in (S9) is o(ϵ). Since u → u, sup ∥u −u∥ ≤ ∥u −u∥ = o(1). Combining
+ϵ a∈(0,1) ϵ T ϵ T
+this with the fact that P → P and the continuity of (P′,u′) (cid:55)→ ζ˙ at (P,u) shows that
+ϵ P′,u′
+(cid:13) (cid:13)
+sup (cid:13)ζ˙ −ζ˙ (cid:13) = o(1); this continuity also shows that ∥ζ˙ ∥ = O(1). Finally, since
+a∈(0,1)(cid:13) Pϵ,uϵ(a) Pϵ,u(cid:13)
+op
+Pϵ,u op
+t → t, ∥t ∥ = O(1) and ∥t −t∥ = o(1). Combining all of these observations shows that the
+ϵ ϵ T ϵ T
+right-hand side above is o(1).
+C Estimation: supplemental theoretical results and
+proofs
+C.1 Theoretical guarantees
+Proof of Theorem 2. By Theorem 1, ψ is pathwise differentiable at P with EIF f . Adding and
+0
+subtracting terms shows that ψ(cid:98)−ψ(P) = n1 (cid:80)n i=1f 0(Z i)+D n+R n. The result follows since D
+n
+and R are o (n−1/2) by assumption.
+n p
+For ψ real-valued, define the L-fold cross-fitted estimator
+ 
+L
+1 (cid:88) (ℓ) 1 (cid:88) (ℓ)
+ψ(cid:98)cf :=
+L
+(cid:98)h
+k
++
+|I(ℓ)|
+f(cid:98)
+0
+(Z i),
+ℓ=1 i∈I(ℓ)
+where I(1),I(2),...,I(L) is a partition of [n] into L subsets of approximately equal size — i.e., with
+(ℓ) (ℓ)
+cardinality in n/L±1 — and, for each ℓ ∈ [L], ((cid:98)h ,f(cid:98) ) are the outputs of Algorithm 3 when
+k 0
+the observations with indices in [n]\I(ℓ) are used for nuisance estimation. Letting P(ℓ) denote the
+n
+empirical distribution of the observations with indices in I(ℓ), we define the following drift and
+37remainder term for each ℓ ∈ [L]:
+(cid:90) (cid:90)
+D(ℓ) := [f(cid:98)(ℓ) (z)−ψ˙∗(1)(z)](P(ℓ)−P)(dz), R(ℓ) :=(cid:98)h(ℓ) + f(cid:98)(ℓ) (z)P(dz)−ψ(P).
+n 0 P n n k 0
+The following result shows that ψ(cid:98)cf is efficient under appropriate conditions.
+Theorem S1 (Efficiency of ψ(cid:98)cf). Suppose ψ is real-valued, f
+k
+= 1, the conditions of Theorem 1
+hold, and L is fixed as n → ∞. If D n(ℓ) and R( nℓ) are o p(n−1/2) for all ℓ ∈ [L], then ψ(cid:98)cf is efficient,
+in that
+n
+1 (cid:88)
+ψ(cid:98)cf −ψ(P) =
+n
+ψ˙ P∗(1)(Z i)+o p(n−1/2).
+i=1
+Before proceeding with the proof, we note that the conditions of Theorem S1 are typically weaker
+than those of Theorem 2, in that there is no need to require an empirical process condition to ensure
+negligibility of the drift term — see Schick (1986) or the proof of Lemma 4 in Luedtke and Chung
+(2023) for details.
+Proof of Theorem S1. By Theorem 1, ψ is pathwise differentiable at P with EIF f . Adding and
+0
+subtracting terms shows that
+ 
+L
+1 (cid:88) 1 (cid:88)
+ψ(cid:98)cf −ψ(P) =
+L
+
+|I(ℓ)|
+ψ˙ P∗(1)(Z i)+D n(ℓ)+R( nℓ) .
+ℓ=1 i∈I(ℓ)
+Combining this with the fact that R(ℓ) and D(ℓ) are o (n−1/2) by assumption gives that
+n n p
+L
+1 (cid:88) 1 (cid:88)
+ψ(cid:98)cf −ψ(P) =
+L |I(ℓ)|
+ψ˙ P∗(1)(Z i).
+ℓ=1 i∈I(ℓ)
+Since the sizes of the sets I(1),I(2),...,I(L) in the partition of [n] differ by at most 1, the sum on
+the right is equal to 1 (cid:80)n ψ˙∗(1)(Z )+o (n−1/2), which gives the result.
+n i=1 P i p
+C.2 Motivating the plausibility of R = o (n−1/2) using von Mises
+n p
+calculus
+We now study the plausibility of the condition that the remainder term in Theorem 2 is o (n−1/2).
+p
+We do this by studying the plausibility of
+(cid:90)
+R
+n
+:=(cid:98)h
+k
++ f(cid:98)0(z)P(dz)−ψ(P) = o p(n−1/2) (S12)
+38Algorithm 5 Modification of Algorithm 3 with nuisance estimates replaced by deterministic
+perturbations
+Require: • real-valued ψ expressed as in Algorithm 1 and f = 1
+k
+• smooth submodels {P : ϵ ∈ [0,1]} = P(P,M,s ), j ∈ [k]
+j,ϵ j
+(cid:0) (cid:1)
+• errors δ ∈ L2(P )⊕ ⊕ W satisfying lim δ = 0, j ∈ [k],
+j,ϵ 0 j,ϵ i∈pa(j) i ϵ→0 j,ϵ
+(cid:82)
+where L2(P ) := {s ∈ L2(P ) : sdP = 0} is a Hilbert subspace of L2(P )
+0 j,ϵ j,ϵ j,ϵ j,ϵ
+• magnitude of perturbation ϵ ∈ [0,1]
+▷ forward pass to obtain an initial approximation
+1: for j = 1,2,...,k do
+2: approximate θ (P,h ) with h = θ(P ,h ), where h := (h )
+j pa(j),ϵ j,ϵ j,ϵ pa(j),ϵ pa(j),ϵ i,ϵ i∈pa(j)
+▷ backward pass to enable first-order improvement of initial approximation
+3: initialize f ,f ,...,f to be the 0 elements of R,W ,...,W , and f = f
+0,ϵ 1,ϵ k−1,ϵ 1 k−1 k,ϵ k
+4: for j = k,k −1,...,1 do
+5: approximate
+θ˙∗
+(f ) with ϑ :=
+θ˙∗
+(f )+δ
+j,P,h
+pa(j),ϵ
+j,ϵ j,ϵ j,Pj,ϵ,h
+pa(j),ϵ
+j,ϵ j,ϵ
+(cid:82)
+▷ ϑ compatible with h ,h : ∃P(cid:101) ∈ M s.t. h = θ (P(cid:101),h ), ϑ dP(cid:101) = 0
+j,ϵ,0 j,ϵ pa(j),ϵ j,ϵ j pa(j),ϵ j,ϵ,0
+↰ in particular, P(cid:101) = P
+j,ϵ
+6: augment (f ,f ) += ϑ
+0,ϵ pa(j),ϵ j,ϵ
+7: return initial approximation h and approximate efficient influence operator f
+k,ϵ 0,ϵ
+whenthenuisanceestimatorsP(cid:98)1,P(cid:98)2,...,P(cid:98)k inAlgorithm3arereplacedbyperturbationsP 1,ϵ,P 2,ϵ,...,P
+k,ϵ
+of P belonging to smooth submodels P(P,M,s ),P(P,M,s ),...,P(P,M,s ), the estimators of
+1 2 k
+the adjoint evaluations θ˙ j∗
+,P,(cid:98)h
+pa(j)(f(cid:98)j) are replaced by δ j,ϵ-perturbations of θ˙ j∗
+,Pj,ϵ,h
+pa(j),ϵ(f j,ϵ), and the
+o (n−1/2) term is replaced by o(ϵ). Concretely, we investigate whether, as ϵ → 0, the outputs h
+p k,ϵ
+and f from Algorithm 5 yield a von Mises expansion of the form
+0,ϵ
+(cid:90)
+h + f (z)P(dz)−ψ(P) = o(ϵ). (S13)
+k,ϵ 0,ϵ
+For any ϵ ∈ [0,1], we use the shorthand notation ϑ to denote the first entry of the quantity ϑ
+j,ϵ,0 j,ϵ
+defined on line 5 of the algorithm. The function ϑ is P -mean zero. This follows since it is
+j,ϵ,0 j,ϵ
+defined as the sum of the first entries of θ˙∗ (f ) and δ , both of which are P -mean zero.
+j,Pj,ϵ,h
+pa(j),ϵ
+j,ϵ j,ϵ j,ϵ
+Lemma S7 (Plausibility of condition on R ). Suppose all distributions in M are equivalent, in
+n
+that, for all P ,P ∈ M, P ≪ P and P ≪ P . Fix P ∈ M and, for j ∈ [k], s ∈ Mˇ and
+1 2 1 2 2 1 j P
+{P : ϵ ∈ [0,1]} ∈ P(P,M,s ). Suppose each θ is totally pathwise differentiable at (P ,h )
+j,ϵ j j j,ϵ pa(j),ϵ
+for all ϵ ∈ [0,1]. Further suppose, for each j ∈ [k], (i) there exists a constant c < ∞ such that
+j
+ϑ ≤ c P-a.s. for all sufficiently small ϵ and (ii) ϑ → ϑ in L2(P) as ϵ → 0. Then, (S13)
+j,ϵ,0 j j,ϵ,0 j,0,0
+39holds.
+The L2(P)-consistency condition (ii) is a stability requirement that ensures the influence operator
+output f of Algorithm 5 converges to its true value ψ˙∗(1) as the perturbations vanish. Before
+0,ϵ P
+providing a detailed proof, we give a sketch that indicates where (ii) and the compatibility condition
+are used. Our proof begins by noting that the output h of the forward pass of Algorithm 5 can
+k,ϵ
+be expressed as the evaluation
+ϕ((cid:81)k
+P ) of a pathwise differentiable parameter ϕ defined on the
+j=1 j,ϵ
+k-fold tensor product of the model M, where
+(cid:81)k
+P denotes a product measure. A von Mises
+j=1 j,ϵ
+expansion of ϕ then yields
+k (cid:90)
+(cid:88)
+h −ψ(P) = ϑ (z)(P −P)(dz)+o(ϵ).
+k,ϵ j,0,0 j,ϵ
+j=1
+Compatibility ensures that each ϑ is P -mean zero, which allows us to add and subtract terms
+j,ϵ,0 j,ϵ
+on the right-hand side above to find that
+k (cid:90) k (cid:90)
+(cid:88) (cid:88)
+h −ψ(P) = − ϑ (z)P(dz)− [ϑ (z)−ϑ (z)](P −P)(dz)+o(ϵ).
+k,ϵ j,ϵ,0 j,ϵ,0 j,0,0 j,ϵ
+j=1 j=1
+The condition that ϑ → ϑ in L2(P) as ϵ → 0 can then be used to ensure that the second
+j,ϵ,0 j,0,0
+term is o(ϵ), which will give the result.
+Proof of Lemma S7. Let M⊗k := {(cid:81)k P : P ,P ,...,P ∈ M} and Pk := (cid:81)k P. Define
+j=1 j 1 2 k j=1
+ϕ : M⊗k → R so that ϕ((cid:81)k P ) is the output h of the modification of Algorithm 1 that
+j=1 j k
+replaces each line j ∈ [k] by h = θ (P ,h ), where θ
+((cid:81)k
+P ,h ) = θ (P ,h ). The
+j j j pa(j) j j=1 j pa(j) j j pa(j)
+total pathwise differentiability of θ at (P,h ) implies the total pathwise differentiability of θ
+j pa(j) j
+at (Pk,h ) with adjoint θ∗ (f ) : z (cid:55)→ θ∗ (f )(z ). Consequently, Theorem 1
+pa(j) j,(cid:81)k i=1Pi,h pa(j) j [k] j,Pj,h pa(j) j j
+shows that ϕ is pathwise differentiable at Pk with EIF z (cid:55)→ (cid:80)k ϑ (z ). By the definition
+[k] j=1 j,0,0 j
+of pathwise differentiability and the fact that
+{(cid:81)k
+P : ϵ ∈ [0,1]} ∈
+P(cid:0) Pk,M⊗k,s(cid:1)
+with
+j=1 j,ϵ
+s : z (cid:55)→ (cid:80)k s (z ), we see that ϕ(cid:0)(cid:81)k P (cid:1) −ϕ(cid:0) Pk(cid:1) = ϵϕ˙ (s)+o(ϵ), where ϕ˙ denotes the
+[k] j=1 j j j=1 j,ϵ Pk Pk
+local parameter of ϕ at Pk. Using that the EIF z (cid:55)→ (cid:80)k ϑ (z ) at Pk is Pk-a.s. bounded and
+[k] j=1 j,0,0 j
+that all distributions in M⊗k are equivalent, we can apply Lemma S5 in Luedtke and Chung (2023)
+to show that ϵϕ˙ (s) = (cid:82) (cid:2)(cid:80)k ϑ (z )(cid:3) ((cid:81)k P −Pk)(dz )+o(ϵ). Combining the results
+Pk j=1 j,0,0 j j=1 j,ϵ [k]
+from the preceding two sentences and then rearranging terms,
+  
+ϕ(cid:16)
+(cid:81)k j=1P
+j,ϵ(cid:17) −ϕ(cid:16) Pk(cid:17)
+=
+(cid:90) (cid:88)k
+ϑ j,0,0(z
+j)(cid:89)k
+P j,ϵ−Pk (dz [k])+o(ϵ)
+j=1 j=1
+k (cid:90)
+(cid:88)
+= ϑ (z)(P −P)(dz)+o(ϵ)
+j,0,0 j,ϵ
+j=1
+40k (cid:90) k (cid:90)
+(cid:88) (cid:88)
+= − ϑ (z)P(dz)+ ϑ (z)P (dz)
+j,ϵ,0 j,ϵ,0 j,ϵ
+j=1 j=1
+k (cid:90)
+(cid:88)
+− [ϑ (z)−ϑ (z)](P −P)(dz)+o(ϵ).
+j,ϵ,0 j,0,0 j,ϵ
+j=1
+(cid:82)
+The second term on the right is 0 since ϑ dP = 0 for all j ∈ [k]. Moreover, noting that
+j,ϵ,0 j,ϵ
+ϕ((cid:81)k P ) = h , ϕ(Pk) = ψ(P), and (cid:80)k ϑ = f , we can add the first term on the right
+j=1 j,ϵ k,ϵ j=1 j,ϵ,0 0,ϵ
+to both sides to see that
+(cid:90) k (cid:90)
+(cid:88)
+h + f (z)P(dz)−ψ(P) = − [ϑ (z)−ϑ (z)](P −P)(dz)+o(ϵ). (S14)
+k,ϵ 0,ϵ j,ϵ,0 j,0,0 j,ϵ
+j=1
+Eq. S13 will follow if we can show that the first term on the right is o(ϵ). To this end, fix j ∈ [k].
+Let λ be some measure that dominates all measures in M, p := dPj,ϵ, and p := dP. Writing
+j,ϵ dλ dλ
+(cid:82) (cid:82)
+fdQ as shorthand for f(z)Q(dz), adding and subtracting terms shows that
+(cid:90) (cid:90) (cid:90)
+[ϑ (z)−ϑ (z)](P −P)(dz) = ϵ (ϑ −ϑ )s dP + (ϑ −ϑ )(p1/2 −p1/2)2dλ
+j,ϵ,0 j,0,0 j,ϵ j,ϵ,0 j,0,0 j j,ϵ,0 j,0,0 j,ϵ
+(cid:90) (cid:16) (cid:17)
++2 (ϑ −ϑ )p1/2 p1/2 −p1/2−ϵs p1/2/2 dλ.
+j,ϵ,0 j,0,0 j,ϵ j
+Thefirsttermiso(ϵ)byCauchy-Schwarzandthefactthatϑ → ϑ inL2(P),thesecondisO(ϵ2)
+j,ϵ,0 j,0,0
+since it is upper bounded by 2c times the squared Hellinger distance between P ∈ P(P,M,s )
+j j,ϵ j
+and P, and the third is o(ϵ) by Cauchy-Schwarz and the fact that P ∈ P(P,M,s ). Hence, the
+j,ϵ j
+first term on the right of (S14) is o(ϵ), yielding (S13).
+C.3 Hilbert-valued parameters
+Suppose ψ(P) takes values in a separable, possibly infinite-dimensional Hilbert space W . For
+ψ
+example, W may be an L2 space. An estimator can be constructed by calling Algorithm 3 multiple
+ψ
+times, each time with the input f corresponding to a different element of a truncation (b )
+k m m∈[M]
+of an orthonormal basis of W ψ. Denoting the outputs of these M calls by ((cid:98)h m,k,f(cid:98)m,0), m ∈ [M],
+ψ(P) can be estimated with
+M (cid:32) (cid:34) n (cid:35) (cid:33)
+(cid:88) 1 1 (cid:88)
+ψ(cid:98)M := (cid:98)h
+m,k
++ f(cid:98)m,0(Z i) b
+m
+M n
+m=1 i=1
+or a cross-fitted variant of this estimator. In practice, M can be selected via cross-validation
+(Luedtke and Chung, 2023). If the nuisances are all compatible and cross-fitting is used, then this
+estimator is exactly a regularized one-step estimator as presented in Luedtke and Chung (2023),
+and so the Hilbert-norm convergence guarantees from that work can be immediately applied here.
+41More generally, only minor adaptations of the arguments from that work are required to provide
+guarantees for this estimator. The outputs of Algorithm 3 can also be used to construct confidence
+sets for a Hilbert-valued ψ(P) — see Section 5.2 of Luedtke and Chung (2023).
+D Total pathwise differentiability of primitives from
+Table 1
+D.1 Overview
+Appendix D.2 presents primitives that depend nontrivially on both of their arguments. Appen-
+dices D.3 and D.4 present primitives that depend only on their distribution-valued or Hilbert-valued
+argument, respectively. For each primitive, we present the form of the primitive and conditions
+under which it is totally pathwise differentiable. When not specified, U is taken to be a generic
+subset of a Hilbert space T and W is taken to be a Hilbert space that is a superset of the image of
+the map θ defined on M×U.
+For all primitives presented in this appendix, we suppose the model M is locally nonparametric
+at the distribution P at which we wish to establish total pathwise differentiability. This means that
+the tangent space M˙ is equal to the collection of all s ∈ L2(P) satisfying (cid:82) sdP = 0.
+P
+When establishing the differentiability of certain primitives, we suppose that all distributions
+in M are equivalent, which means that all pairs of distributions in M are mutually absolutely
+continuous. Inthesecases,weletρdenoteanarbitrarilyselecteddistributioninM. WhenX = C(Z)
+for a coarsening C : Z → X, we let ρ be the pushforward measure ρ◦C−1. We define L0(ρ) (resp.,
+X
+L∞(ρ)) as the set of all ρ-a.s. equivalence classes of measurable (resp., bounded) Z → R functions;
+L0(ρ ) and L∞(ρ ) are defined analogously. The measure ρ is used to emphasize the ambient
+X X
+nature of the Hilbert spaces T and W. For example, if U ⊆ L∞(ρ), L∞(ρ) is a codomain for θ, and
+T = W = L2(Q) for Q ∈ M, then different choices of Q can be considered for the ambient Hilbert
+spaces T and W, without impacting the form of the map θ.
+D.2 Maps depend nontrivially on both of their arguments
+D.2.1 Conditional mean. This example is a special case of the r-fold conditional mean
+studied in Appendix D.2.2 with r = 1. We refer readers there for details.
+D.2.2 Multifold conditional mean. Fix r ∈ N and Q ∈ M. Suppose all distributions in
+M are equivalent. To denote a generic tuple (a ,a ,...,a ) or random variable (A ,A ,...,A ),
+1 2 r 1 2 r
+we write a or A , respectively. For any probability measure λ on Z (e.g., λ = Q,P), let λr
+[r] [r]
+and λr denote the r-fold product measures representing the distributions of r independent draws
+X
+from λ and λ , respectively. We write λr(·|x ) for the conditional distribution of Z ∼ λr given
+X [r] [r]
+42that X = x , where, for j ∈ [r], X := C(Z ) for a coarsening C : Z → X. We study the map
+[r] [r] j j
+θ : M×U → L2(Qr ) defined so that
+X
+(cid:90)
+θ(P,u) : x (cid:55)→ u(z )Pr(dz |x ), (S15)
+[r] [r] [r] [r]
+where x := (C(z ))r and, for some function u⋆ : Zr → (0,∞) satisfying
+[r] j j=1
+sup ∥E [u⋆(Z )2|X = ·]∥ < ∞, (S16)
+Pr [r] [r] L∞(Pr)
+P∈M X
+U is the set of (equivalence classes of) functions dominated by u⋆, namely {u ∈ L0(ρr) : |u(z )| ≤
+[r]
+u⋆(z ) Qr-a.s.} ⊂ L2(Qr). The conditional second-moment condition in (S16) is satisfied if u⋆ is
+[r]
+bounded, but it can also hold for unbounded u⋆. When C is the zero map, so X is a.s. constant,
+j
+θ(P,u) is simply the estimand pursued by a U- or V-statistic with kernel u (Hoeffding, 1948); more
+generally, θ(P,u) is a conditional variant of this quantity.
+Lemma S8 (Total pathwise differentiability of multifold conditional mean). Fix (P,u) ∈ M×U
+and suppose ∥dQ /dP ∥ < ∞ and ∥dP/dQ∥ < ∞. The parameter θ defined in
+X X L∞(PX) L∞(Q)
+(S15) is totally pathwise differentiable at (P,u) with θ˙ (s,t) = ν˙ (s)+ζ˙ (t) and θ˙∗ (w) =
+P,u P,u P,u P,u
+(ν˙∗ (w),ζ˙∗ (w)), where
+P,u P,u
+r
+(cid:88) (cid:2) (cid:12) (cid:3)
+ν˙ P,u(s)(x [r]) = E
+Pr
+{u(Z [r])−θ(P,u)(x [r])}s(Z i)(cid:12)X
+[r]
+= x
+[r]
+, (S17)
+i=1
+ν˙ P∗ ,u(w)(z) = (cid:88)r E Pr (cid:20) d dQ Pr X r (X [r])(cid:2) u(Z [r])−θ(P,u)(X [r])(cid:3) w(X [r])(cid:12) (cid:12) (cid:12) (cid:12)Z i = z(cid:21) , (S18)
+i=1 X
+ζ˙ (t)(x ) = E [t(Z ) | X = x ], (S19)
+P,u [r] Pr [r] [r] [r]
+dPr dQr
+ζ˙∗ (w)(z ) = (z ) X(x )w(x ). (S20)
+P,u [r] dQr [r] dPr [r] [r]
+X
+Proof of Lemma S8. Throughout this proof, any unsubscripted norm ∥ · ∥ denotes the L2(Qr )
+X
+norm, and we write m to denote the quantity on the left-hand side of (S16). Fix s ∈ Mˇ , t ∈ Uˇ ,
+P u
+{P : ϵ ∈ [0,1]} ∈ P(P,M,s), and {u : ϵ ∈ [0,1]} ∈ P(u,U,t). By the triangle inequality,
+ϵ ϵ
+(cid:13) (cid:13)
+(cid:13)θ(P ,u )−θ(P,u)−ϵν˙ (s)−ϵζ˙ (t)(cid:13)
+(cid:13) ϵ ϵ P,u P,u (cid:13)
+(cid:13) (cid:13)
+≤ ϵ∥ν˙ (s)−ν˙ (s)∥+(cid:13)θ(P,u )−θ(P,u)−ϵζ˙ (t)(cid:13)+∥θ(P ,u )−θ(P,u )−ϵν˙ (s)∥.
+P,uϵ P,u (cid:13) ϵ P,u (cid:13) ϵ ϵ ϵ P,uϵ
+Combining this with the inequality (a+b+c)2 ≤ 3(a2+b2+c2) yields
+1 (cid:13) (cid:13)2
+(cid:13)θ(P ,u )−θ(P,u)−ϵν˙ (s)−ϵζ˙ (t)(cid:13) (S21)
+3 (cid:13) ϵ ϵ P,u P,u (cid:13)
+(cid:13) (cid:13)2
+≤ ϵ2∥ν˙ (s)−ν˙ (s)∥2+(cid:13)θ(P,u )−θ(P,u)−ϵζ˙ (t)(cid:13) +∥θ(P ,u )−θ(P,u )−ϵν˙ (s)∥2.
+P,uϵ P,u (cid:13) ϵ P,u (cid:13) ϵ ϵ ϵ P,uϵ
+43We will denote the three terms on the right by (I), (II), and (III). In what follows we shall show
+that each of these terms is o(ϵ2). When combined with the fact that (s,t) (cid:55)→ ν˙ (s)+ζ˙ (t)
+P,u P,u
+is a bounded linear operator, this will establish that θ is totally pathwise differentiable with
+θ˙ (s,t) = ν˙ (s)+ζ˙ (t). Once we have established total pathwise differentiability, we shall
+P,u P,u P,u
+conclude this proof by deriving the form of the adjoint θ˙∗ .
+P,u
+Proof that (I) is o(ϵ2): Let s¯(z ) := (cid:80)r s(z ) and note that, by Cauchy-Schwarz, the fact that
+[r] j=1 j
+conditional variances are upper bounded by conditional second moments, and a change of measure,
+(I) = ϵ2∥ν˙ (s)−ν˙ (s)∥2
+P,uϵ P,u
+(cid:90)
+= ϵ2 (cid:0) E
+Pr
+(cid:2) {u(Z [r])−θ(P,u)(x [r])−u ϵ(Z [r])+θ(P,u ϵ)(x [r])}s¯(Z [r])(cid:12) (cid:12)X
+[r]
+= x [r](cid:3)(cid:1)2 Qr X(dx [r])
+(cid:90)
+≤ ϵ2 E
+Pr
+(cid:2) {u(Z [r])−θ(P,u)(x [r])−u ϵ(Z [r])+θ(P,u ϵ)(x [r])}2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3)
+·E
+Pr
+(cid:2) s¯(Z [r])2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3) Qr X(dx [r])
+(cid:90)
+≤ ϵ2 E
+Pr
+(cid:2) {u(Z [r])−u ϵ(Z [r])}2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3) E
+Pr
+(cid:2) s¯(Z [r])2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3) Qr X(dx [r])
+= ϵ2(cid:90) E
+Pr
+(cid:2) {u(Z [r])−u ϵ(Z [r])}2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3) E
+Pr
+(cid:2) s¯(Z [r])2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3) d dQ Pr X
+r
+(x [r])P Xr(dx [r]).
+X
+(S22)
+We will use the dominated convergence theorem to show that the integral on the right goes to
+zero as ϵ → 0. Using the inequality (a + b)2 ≤ 2(a2 + b2), the fact that |u(·)| and |u (·)| are
+ϵ
+upper bounded by u⋆(·) Qr-a.s. (and, by the equivalence of Pr and Qr, also Pr-a.s.), and the
+definition of m, we see that the magnitude of the integrand is a.s. upper bounded pointwise by
+F(x ) := 4m∥dQ /dP ∥r E [s¯(Z )2|X = x ]. Moreover, because s ∈ L2(P), F is
+[r] X X L∞(PX) Pr [r] [r] [r]
+Pr-integrable with (cid:82) F(x )Pr(dx ) = 4m∥dQ /dP ∥r (cid:82) s¯(z )2Pr(dz ) < ∞. Hence, the
+X [r] X [r] X X L∞(PX) [r] [r]
+integrand is dominated by an integrable function. To see that the integrand also converges to zero
+in probability as ϵ → 0, we apply Markov’s inequality, the law of total expectation, the fact that
+∥dP/dQ∥ < ∞, and H¨older’s inequality with (p,q) = (1,∞) to see that, for any δ > 0,
+L∞(Q)
+P Xr (cid:8) E Pr (cid:2) {u(Z [r])−u ϵ(Z [r])}2(cid:12) (cid:12)X [r](cid:3) > δ(cid:9) ≤ ∥u−u ϵ∥2 L2(Pr)/δ ≤ (cid:13) (cid:13) (cid:13) (cid:13)dd QP(cid:13) (cid:13) (cid:13) (cid:13)r ∥u−u ϵ∥2 L2(Qr)/δ.
+L∞(Q)
+The right-hand side goes to zero as ϵ → 0 since {u : ϵ ∈ [0,1]} ∈ P(u,U,t). As δ > 0 was arbitrary,
+ϵ
+this shows the integrand on the right-hand side of (S22) converges to zero in probability as ϵ → 0.
+As that integrand is also dominated by an integrable function, the dominated convergence theorem
+shows that the right-hand side of (S22) is o(ϵ2), and so (I) = o(ϵ2).
+Proof that (II) is o(ϵ2): Observe that
+(cid:13) (cid:13)2
+(II) = (cid:13)θ(P,u )−θ(P,u)−ϵζ˙ (t)(cid:13)
+(cid:13) ϵ P,u (cid:13)
+44(cid:90)
+= (cid:0) E
+Pr
+(cid:2) u ϵ(Z [r])−u(Z [r])−ϵt(Z [r])(cid:12) (cid:12)X
+[r]
+= x [r](cid:3)(cid:1)2 dQr X(x [r])
+(cid:90) (cid:104) (cid:12) (cid:105)
+≤ E (cid:8) u (Z )−u(Z )−ϵt(Z )(cid:9)2(cid:12)X = x dQr (x )
+Pr ϵ [r] [r] [r] (cid:12) [r] [r] X [r]
+= (cid:90) E Qr (cid:20) dd QPr r(Z [r])d dQ Pr X r (X [r])(cid:8) u ϵ(Z [r])−u(Z [r])−ϵt(Z [r])(cid:9)2(cid:12) (cid:12) (cid:12) (cid:12)X [r] = x [r](cid:21) dQr X(x [r])
+X
+=
+(cid:90) dPr
+(z
+)dQr
+X(x )(cid:8) u (z )−u(z )−ϵt(z )(cid:9)2 dQr(z )
+dQr [r] dPr [r] ϵ [r] [r] [r] [r]
+X
+≤ (cid:13) (cid:13) (cid:13) (cid:13)dd QP(cid:13) (cid:13) (cid:13) (cid:13)r (cid:13) (cid:13) (cid:13) (cid:13)d dQ PX(cid:13) (cid:13) (cid:13) (cid:13)r ∥u ϵ−u−ϵt∥2 L2(Qr),
+L∞(Q) X L∞(PX)
+where we used the linearity of conditional expectations, Jensen’s inequality, a change of measure,
+the law of total expectation, Ho¨lder’s inequality, and finally the fact that P and Q are equivalent
+X X
+measures. The right-hand side is o(ϵ2) since {u : ϵ ∈ [0,1]} ∈ P(u,U,t).
+ϵ
+Proof that (III) is o(ϵ2): This part of the proof is an adaptation of the one given for Example 5
+in Luedtke and Chung (2023), which establishes that a regression function is pathwise differentiable
+relative to a locally nonparametric model.
+Let pr/2 (z ) := dP ϵr (z )1/2, pr/2 (x ) := dP ϵr ,X(x )1/2, and pr/2 (z ) := pr/2 (z )/pr/2 (x ).
+ϵ [r] dPr [r] ϵ,X [r] dPr [r] ϵ,Z|X [r] ϵ [r] ϵ,X [r]
+Further define s¯(z ) :=
+(cid:80)r
+s(z ), s¯ (x )
+:X
+=
+(cid:80)r
+E [s(Z ) | X = x ], and s¯ (z ) :=
+[r] j=1 j X [r] j=1 P j j Z|X [r]
+s¯(z )−s¯ (x ). Observe that, for any ϵ, the following holds for Pr-almost all x :
+[r] X [r] X [r]
+[θ(P ,u )−θ(P,u )−ϵν˙ (s)](x ) (S23)
+ϵ ϵ ϵ P,uϵ [r]
+(cid:104) (cid:110) (cid:111)(cid:12) (cid:105)
+= E u (Z ) [pr/2 (Z )+1][pr/2 (Z )−1]−ϵs¯ (Z ) (cid:12)X = x
+Pr ϵ [r] ϵ,Z|X [r] ϵ,Z|X [r] Z|X [r] (cid:12) [r] [r]
+(cid:104) (cid:110) (cid:104) ϵ (cid:105)(cid:111)(cid:12) (cid:105)
+= E u (Z ) [pr/2 (Z )+1] pr/2 (Z )−1− s¯ (Z ) (cid:12)X = x
+Pr ϵ [r] ϵ,Z|X [r] ϵ,Z|X [r] 2 Z|X [r] (cid:12) [r] [r]
+ϵ (cid:104) (cid:104) (cid:105)(cid:12) (cid:105)
++ E u (Z )s¯ (Z ) pr/2 (Z )−1 (cid:12)X = x . (S24)
+2 Pr ϵ [r] Z|X [r] ϵ,Z|X [r] (cid:12) [r] [r]
+For shorthand, we refer to the two terms on the right as A (x ) and ϵB (x ). Combining the
+ϵ [r] 2 ϵ [r]
+above with the basic inequality (a+b)2 ≤ 2(a2+b2) shows that (III) ≤ 2∥A ∥2 +ϵ2 ∥B ∥2 .
+ϵ L2(Qr ) 2 ϵ L2(Qr )
+X X
+In what follows we will show that ∥A ∥ = o(ϵ) and ∥B ∥ = o(1), which will thus imply
+ϵ L2(Qr ) ϵ L2(Qr )
+X X
+that (III) = o(ϵ2).
+For A , we apply Cauchy-Schwarz and the inequality (a+b)2 ≤ 2(a2 +b2) to show that, for
+ϵ
+Pr-almost all x :
+X [r]
+|A ϵ(x [r])|2 ≤ 2(cid:0) E
+Pr
+(cid:2) u ϵ(Z [r])2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3) +E
+Pr
+(cid:2) u ϵ(Z [r])2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3)(cid:1)
+ϵ
+(cid:20) (cid:12) (cid:21)
+(cid:110)
+r/2
+ϵ (cid:111)2(cid:12)
+·E Pr p ϵ,Z|X(Z [r])−1− 2s¯ Z|X(Z [r]) (cid:12) (cid:12)X [r] = x [r] .
+Usingthatu2 ≤ (u⋆)2 andthedefinitionofmshowsthateachofthefirsttwoconditionalexpectations
+ϵ
+above is upper bounded by m Pr-almost surely. Plugging in this bound and integrating both sides
+45above against Pr shows that
+X
+(cid:20) (cid:21)
+(cid:110) ϵ (cid:111)2
+∥A ∥2 ≤ 4mE pr/2 (Z )−1− s¯ (Z ) .
+ϵ L2(P Xr) Pr ϵ,Z|X [r] 2 Z|X [r]
+Using that {P : ϵ} is quadratic mean differentiable and applying calculations akin to those used in
+ϵ
+Luedtke and Chung (2023) to establish Lemma S8 in that work shows that
+(cid:20) (cid:21)
+(cid:110) ϵ (cid:111)2
+E pr/2 (Z )−1− s¯ (Z ) = o(ϵ2), (S25)
+Pr ϵ,Z|X [r] 2 Z|X [r]
+and so ∥A ∥ = o(ϵ) as desired.
+ϵ L2(Pr)
+X
+To study B , we define
+ϵ
+(cid:104) (cid:110) (cid:111)(cid:12) (cid:105)
+B (x ) := E I{|s¯ (Z )u⋆(Z )| ≤ ϵ−1/2}u (Z )s¯ (Z ) pr/2 (Z )−1 (cid:12)X = x
+ϵ,1 [r] Pr Z|X [r] [r] ϵ [r] Z|X [r] ϵ,Z|X [r] (cid:12) [r] [r]
+and B := B −B . By the triangle inequality, to show ∥B ∥ = o(1) it suffices to show that
+ϵ,2 ϵ ϵ,1 ϵ L2(QX)
+∥B ∥ = o(1) for j ∈ {1,2}. Using that it is Qr-a.s. true that
+ϵ,j L2(QX)
+I{|s¯ (z )u⋆(z )| ≤ ϵ−1/2}s¯ (z )2u (z )2
+Z|X [r] [r] Z|X [r] ϵ [r]
+≤ I{|s¯ (z )u⋆(z )| ≤ ϵ−1/2}s¯ (z )2u⋆(z )2 ≤ ϵ−1,
+Z|X [r] [r] Z|X [r] [r]
+Jensen’s inequality, H¨older’s inequality with (p,q) = (1,∞), and (S25), we see that
+∥B ϵ,1∥2 L2(Qr X) ≤ ϵ−1(cid:13) (cid:13) (cid:13) (cid:13)d dQ P XX(cid:13) (cid:13) (cid:13) (cid:13)r L∞(PX)∥pr ϵ,/ Z2 |X −1∥2 L2(P) = O(ϵ).
+By Cauchy-Schwarz, the fact that u2 ≤ (u⋆)2 Qr-a.s. (and therefore also Pr-a.s. and Pr-a.s.), and
+ϵ ϵ
+the inequality (a−b)2 ≤ 2(a2+b2), the following holds for Pr-almost all x :
+X [r]
+|B ϵ,2(x [r])|2 ≤ 2(cid:0) E
+Pr
+(cid:2) u⋆(Z [r])2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3) +E
+Pr
+(cid:2) u⋆(Z [r])2(cid:12) (cid:12)X
+[r]
+= x [r](cid:3)(cid:1)
+ϵ
+(cid:104) (cid:12) (cid:105)
+·E I{|s¯ (Z )u⋆(Z )| > ϵ−1/2}s¯ (Z )2(cid:12)X = x .
+Pr Z|X [r] [r] Z|X [r] (cid:12) [r] [r]
+Using (S16), integratingbothsidesagainstQr , andapplyingHo¨lder’sinequalitywith(p,q) = (1,∞)
+X
+shows that
+∥B ϵ,2∥2 L2(Qr X) ≤ 4m(cid:13) (cid:13) (cid:13) (cid:13)d dQ P XX(cid:13) (cid:13) (cid:13) (cid:13)r L∞(PX)E Pr (cid:104) I{|s¯ Z|X(Z [r])u⋆(Z [r])| > ϵ−1/2}s¯ Z|X(Z [r])2(cid:105) .
+By the dominated convergence theorem, the expectation on the right is o(1). Combining our study
+of B and B , we have shown that ∥B ∥ = o(1). Returning to our discussion below (S24),
+ϵ,1 ϵ,2 ϵ L2(QX)
+we have shown that (III) = o(ϵ2).
+Derivation of θ˙∗ . Having established the total pathwise differentiability of θ at (P,u), we now
+P,u
+46establish the claimed form of the adjoint θ˙∗ . It can be verified that, at any u, the tangent space
+P,u
+of U satisfies U˙ = L2(Qr). Moreover, for any w ∈ L2(Qr ), Lemma S5 shows that θ˙∗ (w) =
+u X P,u
+(ν˙∗ (w),ζ˙∗ (w)), where ν˙∗ and ζ˙∗ are the adjoints of ν˙ and ζ˙ . To derive the claimed form
+P,u P,u P,u P,u P,u P,u
+of ν˙∗ , observe that, for any s ∈ M˙ and w ∈ L2(Qr ),
+P,u P X
+(cid:42) r (cid:43)
+⟨ν˙ P,u(s),w⟩
+L2(Qr )
+= (cid:88) E
+Pr
+(cid:2)(cid:8) u(Z [r])−ν(Pr)(X [r])(cid:9) s(Z i)(cid:12) (cid:12)X
+[r]
+= ·(cid:3) ,w
+X
+i=1 L2(Qr )
+X
+= E
+(cid:34) (cid:88)r dQr
+X(X )(cid:8) u(Z )−ν(Pr)(X )(cid:9) w(X )s(Z
+)(cid:35)
+Pr dPr [r] [r] [r] [r] i
+i=1 X
+= (cid:90) (cid:32) (cid:88)r E Pr (cid:20) d dQ Pr X r (X [r])(cid:2) u(Z [r])−ν(Pr)(X [r])(cid:3) w(X [r])(cid:12) (cid:12) (cid:12) (cid:12)Z i = z(cid:21)(cid:33) s(z)P(dz).
+i=1 X
+The right-hand side equals ⟨ν˙∗(w),s⟩ , where ν˙∗ takes the form in (S18). As for the claimed
+P L2(P) P
+form of ζ˙∗ , note that, for all t ∈ U˙ and w ∈ L2(Qr ),
+P,u u X
+(cid:68) (cid:69) (cid:90)
+ζ˙ (t),w = E (cid:2) t(Z ) | X = x (cid:3) w(x )Qr (dx )
+P,u Pr [r] [r] [r] [r] X [r]
+L2(Qr )
+X
+(cid:20) dPr dQr (cid:21)
+= E (Z ) X(X )w(X )t(Z ) .
+Qr dQr [r] dPr [r] [r] [r]
+X
+The right-hand side is equal to ⟨ζ˙∗ (w),t⟩ with ζ˙∗ (w) as defined in (S20).
+P,u L2(Qr) P,u
+D.2.3 Conditional covariance. Fix Q ∈ M and suppose all distributions in M are equiva-
+lent. Define the conditional covariance map θ : M×U → L2(Q ) as
+X
+θ(P,u)(x) = cov [u (Z),u (Z)|X = x], (S26)
+P 1 2
+where U := {u := (u ,u ) ∈ L0(ρ)2 : max ∥u ∥ ≤ m} ⊂ L2(Q)⊕L2(Q) for some fixed
+1 2 j∈{1,2} j L∞(Q)
+m < ∞.
+Lemma S9 (Total pathwise differentiability of conditional covariance). Fix (P,u) ∈ M×U and
+suppose ∥dQ /dP ∥ < ∞ and ∥dP/dQ∥ < ∞. The parameter θ defined in (S26) is
+X X L∞(PX) L∞(Q)
+totally pathwise differentiable at (P,u) with θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)), where
+P,u P,u P,u
+ 
+2
+ν˙ P∗ ,u(w)(z) = d dQ PX (x)w(x)(cid:89) {u j(z)−E P[u j(Z)|X = x]}−θ(P,u)(x),
+X
+j=1
+(cid:18)
+dP dQ
+(cid:19)2
+ζ˙∗ (w) = z (cid:55)→ (z) X (x)w(x){u (z)−E [u (Z)|X = x]} .
+P,u dQ dP 3−j P 3−j
+X j=1
+The form of the differential operator θ˙ is given in the proof.
+P,u
+47Proof of Lemma S9. For generic (P′,(u′,u′)) ∈ M × U, let u′u′ : z (cid:55)→ u′(z)u′(z) and, for
+1 2 1 2 1 2
+u : Z → [−m2,m2], let θ(P′,u) := E [u(Z)|X = ·]. Observe that θ(P′,u′) = θ(P′,u′u′) −
+P′ 1 2
+θ(P′,u′)θ(P′,u′).
+1 2
+Fix s ∈ Mˇ , t ∈ Uˇ , {P : ϵ} ∈ P(P,M,s), and {u = (u ,u ) : ϵ} ∈ P(u,U,t). The total
+P u ϵ ϵ ϵ,1 ϵ,2
+pathwise differentiability of the U → L2(Q) pointwise product (u ,u ) (cid:55)→ u u (Appendix D.4.5) im-
+1 2 1 2
+plies that {z (cid:55)→ u (z)u (z) : ϵ} ∈ P(u u ,L2(Q),t u +u t ). Moreover, the total pathwise differ-
+ϵ,1 ϵ,2 1 2 1 2 1 2
+entiability of coordinate projections (Appendix S2) implies that {z (cid:55)→ u (z) : ϵ} ∈ P(u ,L2(Q),t ),
+ϵ,j j j
+j ∈ {1,2}. When combined with the study of the conditional mean operator in Lemma S8, this
+shows that
+θ(P ,u u )(·)−θ(P,u u )(·)
+ϵ ϵ,1 ϵ,2 1 2
+−ϵE [t (Z)u (Z)+u (Z)t (Z)+{u (Z)u (Z)−θ(P,u u )(X)}s(Z)|X = ·] = o(ϵ),
+P 1 2 1 2 1 2 1 2
+θ(P ,u )(·)−θ(P,u )(·)−ϵE [t (Z)+{u (Z)−θ(P,u )(X)}s(Z)|X = ·] = o(ϵ), j ∈ {1,2},
+ϵ ϵ,j j P j j j
+where the o(ϵ) terms converge to zero in L2(Q ) faster than ϵ. Finally, applying the pointwise
+X
+operation (a,b,c) (cid:55)→ a−bc and leveraging results from Appendix D.4.5 shows that θ(P ,u )−
+ϵ ϵ
+θ(P,u)−ϵθ˙ (s,t) = o(ϵ), where
+P,u
+θ˙ (s,t)(·) := E [t (Z)u (Z)+u (Z)t (Z)+{u (Z)u (Z)−θ(P,u u )}s(Z)|X = ·]
+P,u P 1 2 1 2 1 2 1 2
+2
+(cid:88)
+− E [u (Z)|X = ·]E [t (Z)+{u (Z)−θ(P,u )(X)}s(Z)|X = ·].
+P 3−j P j j j
+j=1
+As (s,t) were arbitrary and θ˙ is bounded and linear, θ is totally pathwise differentiable at (P,u)
+P,u
+with differential operator θ˙ .
+P,u
+As for the form of the adjoint, fix (s,t) ∈ M˙ ⊕ U˙ and w ∈ L2(Q ). The law of total
+P u X
+expectation and definition of the inner product on M˙ ⊕U˙ can be used to verify that
+P u
+(cid:28) (cid:29)
+dQ (cid:68) (cid:69)
+⟨θ˙ (s,t),w⟩ = X θ˙ (s,t),w = (s,t),θ˙∗ (w) ,
+P,u L2(QX) dP
+X
+P,u
+L2(PX)
+P,u M˙ P⊕U˙
+u
+with θ˙∗ (w) as defined in the lemma statement.
+P,u
+D.2.4 Conditional variance. Fix Q ∈ M and suppose all distributions in M are equivalent.
+Define the conditional variance map θ : M×U → L2(Q ) as
+X
+θ(P,u)(x) = Var [u(Z)|X = x], (S27)
+P
+where U := {u ∈ L0(ρ) : ∥u ∥ ≤ m} ⊂ L2(Q) for some fixed m < ∞.
+j L∞(Q)
+Lemma S10 (Total pathwise differentiability of conditional variance). Fix (P,u) ∈ M×U and
+48suppose ∥dQ /dP ∥ < ∞ and ∥dP/dQ∥ < ∞. The parameter θ defined in (S27) is
+X X L∞(PX) L∞(Q)
+totally pathwise differentiable at (P,u) with θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)), where
+P,u P,u P,u
+ν˙∗ (w)(z) = dQ X (x)w(x)(cid:2) {u(z)−E [u(Z)|X = x]}2−θ(P,u)(x)(cid:3) , (S28)
+P,u dP P
+X
+dP dQ
+ζ˙∗ (w)(z) = 2 (z) X (x)w(x){u(z)−E [u(Z)|X = x]}. (S29)
+P,u dQ dP P
+X
+The proof of this lemma is nearly identical to that of Lemma S9 and so is omitted.
+D.2.5 Kernel embedding. Let K : X ×X → R be a bounded, symmetric, positive-definite
+kernel on a set X. For example, K may be a Gaussian or Laplace kernel on Rd (Sriperumbudur
+et al., 2011). Let W denote the unique reproducing kernel Hilbert space (RKHS) associated with
+K, which exists by the Moore-Aronszajn theorem (Berlinet and Thomas-Agnan, 2011, Theorem 3).
+For a coarsening C : Z → X and a generic P ∈ M, we let P denote the marginal distribution of
+X
+X := C(Z) when Z ∼ P. We suppose all distributions in M are equivalent.
+We study the kernel embedding map θ : M×U → W that is defined so that
+(cid:90)
+θ(P,u)(·) := K(·,x)u(x)P (dx), (S30)
+X
+where, for some m ∈ (0,∞) and Q ∈ {P : P ∈ M}, U := {u ∈ L2(ρ ) : ∥u∥ ≤ m} ⊂
+X X X L∞(ρX)
+L2(Q ) (Chapter 4.9.1.1 of Berlinet and Thomas-Agnan, 2011). The integral above is a Bochner
+X
+integral; we show this integral is well-defined in Lemma S12. That lemma also shows θ(P,u) is
+(cid:82)
+the unique element of W that satisfies ⟨θ(P,u),w⟩ = w(x)u(x)P (dx) for all w ∈ W. When
+W X
+u(x) = 1 P -a.s., θ(P,u) is the kernel mean embedding of P (Gretton et al., 2012).
+X X
+Lemma S11(Totalpathwisedifferentiabilityofkernelembeddings). Fix(P,u) ∈ M×U andsuppose
+∥dP /dQ ∥ < ∞. The parameter θ defined in (S30) is totally pathwise differentiable at
+X X L∞(QX)
+(P,u) with θ˙ (s,t)(·) = E [K(·,X){u(X)s(Z)+t(X)}] and θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)), where
+P,u P P,u P,u P,u
+ν˙∗ (w)(z) = w(x)u(x)−E [w(X)u(X)] with x := C(z),
+P,u P
+dP
+ζ˙∗ (w)(x) = w(x) X (x). (S31)
+P,u dQ
+X
+We note that the condition that ∥dP /dQ ∥ < ∞ is trivially satisfied if Q = P .
+X X L∞(QX) X X
+Proof of Lemma S11. Denote the claimed differential operator by Θ˙ so that, for any (s,t) ∈
+P,u
+M˙ ⊕U˙ , Θ˙ (s,t)(·) = E [K(·,X){u(X)s(Z)+t(X)}]. This proof is broken into the following
+P u P,u P
+parts:
+Part 1) For all (s,t) ∈ M˙ ⊕U˙ , Θ˙ (s,t) ∈ W; consequently, W is a codomain of Θ˙ .
+P u P,u P,u
+Part 2) Θ˙ : M˙ ⊕U˙ → W is bounded and linear.
+P,u P u
+49Part 3) The Hermitian adjoint of Θ˙ is w (cid:55)→ (ν˙∗ (w),ζ˙∗ (w)), with ν˙∗ and ζ˙∗ as defined in
+P,u P,u P,u P,u P,u
+(S31).
+Part 4) The map θ is totally pathwise differentiable at (P,u) with differential operator Θ˙ .
+P,u
+Taken together, these four parts of the proof show that θ is indeed totally pathwise differentiable
+with the claimed differential operator and adjoint, completing the proof.
+Part 1 of proof: WebeginbyshowingthattheimageofΘ˙ isasubsetofW. Itisstraightforward
+P,u
+to verify that M˙ = {s ∈ L2(P) : E [s(Z)] = 0} and U˙ = L2(Q ). Hence, fixing (s,t) ∈ M˙ ⊕U˙
+P P u X P u
+and defining s (x) := E [s(Z)|X = x], (ii) from Lemma S12 shows it suffices to show g ∈ L2(P ),
+X P X
+where
+g : x (cid:55)→ u(x)s (x)+t(x). (S32)
+X
+Indeed, using that P ≪ Q , we see that g is uniquely defined up to P -null sets; moreover, using
+X X X
+that (a+b)2 ≤ 2(a2+b2), the bound on u, Jensen’s inequality, a change of measure, and Ho¨lder’s
+inequality with exponents (p,q) = (∞,1),
+(cid:90) (cid:90)
+g(x)2P (dx) ≤ 2 (cid:8) u(x)2E [s(Z)|X = x]2+t(X)2(cid:9) P (dx)
+X P X
+(cid:16) (cid:17)
+≤ 2 m2∥s∥2 +∥t∥2 ∥dP /dQ ∥ < ∞. (S33)
+L2(P) L2(QX) X X L∞(QX)
+Hence, g ∈ L2(P ), and so W is indeed a codomain of our claimed differential operator Θ˙ .
+X P,u
+Part 2 of proof: We now show that Θ˙ : M˙ ⊕U˙ → W is bounded and linear. Linearity is
+P,u P u
+clear from the form of the operator, so we focus on establishing boundedness. Fix (s,t) ∈ M˙ ⊕U˙
+P u
+and note that, by (iv) from Lemma S12 and letting s (x) := E [s(Z)|X = x],
+X P
+∥Θ˙ (s,t)∥2
+P,u W
+(cid:90)(cid:90) 2
+(cid:89)
+= K(x ,x ) {[u(x )s (x )+t(x )]P (dx )}
+1 2 ℓ X ℓ ℓ X ℓ
+ℓ=1
+(cid:90)(cid:90) (cid:89)2 (cid:104) (cid:105)
+≤ K(x ,x )1/2|u(x )s (x )+t(x )|P (dx ) (Cauchy-Schwarz for the kernel K)
+ℓ ℓ ℓ X ℓ ℓ X ℓ
+ℓ=1
+(cid:90)(cid:90) 2
+(cid:89)
+≤ supK(x,x) [|u(x )s (x )+t(x )|P (dx )] (H¨older)
+ℓ X ℓ ℓ X ℓ
+x∈X
+ℓ=1
+(cid:20)(cid:90) (cid:21)2
+= supK(x,x) |u(x)s (x)+t(x)|P (dx)
+X X
+x∈X
+(cid:90)
+≤ supK(x,x) [u(x)s (x)+t(x)]2P (dx) (Jensen)
+X X
+x∈X
+(cid:20)(cid:90) (cid:90) (cid:21)
+≤ 2supK(x,x) u(x)2s (x)2P (dx)+ t(x)2P (dx) ([a+b]2 ≤ 2[a2+b2])
+X X X
+x∈X
+50(cid:20) (cid:90) (cid:90) (cid:21)
+≤ 2supK(x,x) m2 s (x)2P (dx)+∥dP /dQ ∥ t(x)2Q (dx)
+X X X X L∞(QX) X
+x∈X
+(u ∈ U and H¨older)
+(cid:20)(cid:90) (cid:90) (cid:21)
+≤ 2supK(x,x)max{m2,∥dP /dQ ∥ } s (x)2P (dx)+ t(x)2Q (dx)
+X X L∞(QX) X X X
+x∈X
+= 2supK(x,x)max{m2,∥dP /dQ ∥ }∥(s,t)∥2 .
+x∈X
+X X L∞(QX) M˙ P⊕U˙
+u
+The right-hand side writes as a constant that does not depend on (s,t) times ∥(s,t)∥2 , and so
+M˙ P⊕U˙
+u
+Θ˙ is indeed bounded.
+P,u
+Part 3 of proof: We now show that Θ˙∗ is the map w (cid:55)→ (ν˙∗ (w),ζ˙∗ (w)). To this end, fix
+P,u P,u P,u
+(s,t) ∈ U˙ ⊕M˙ and w ∈ W, and observe that
+u P
+(cid:90)
+⟨Θ˙ (s,t),w⟩ = w(x)[u(x)s (x)+t(x)]P (dx)
+P,u W X X
+(cid:90) (cid:90)
+dP
+X
+= {w(x)u(x)−E [w(X)u(X)]}s (x)P (dx)+ t(x)w(x) (x)Q (dx)
+P X X X
+dQ
+X
+(cid:28) (cid:29)
+dP
+X
+= ⟨s,z (cid:55)→ w(x)u(x)−E [w(X)u(X)]⟩ + t,w
+P M˙
+P dQ X U˙
+u
+(cid:68) (cid:69)
+= (s,t),(ν˙∗ (w),ζ˙∗ (w))
+P,u P,u M˙ P⊕U˙
+u
+The first equality above used (iii) from Lemma S12; the second used that E [s (X)] = 0 and a
+P X
+change of measure; the third used the law of total expectation, the fact that M˙ = {s ∈ L2(P) :
+P
+(cid:82) sdP = 0}, and the fact that U˙ = L2(Q ); and the final equality used the definition of the inner
+u X
+product in the direct sum space M˙ ⊕U˙ and the definitions of ν˙∗ and ζ˙∗ from (S31). Hence,
+P u P,u P,u
+Θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)).
+P,u P,u P,u
+Part 4 of proof: We now establish that θ is totally pathwise differentiable at (P,u) with
+differential operator Θ˙ . To this end, fix s ∈ Mˇ , t ∈ Uˇ , {P : ϵ ∈ [0,1]} ∈ P(P,M,s), and
+P,u P u ϵ
+{u : ϵ ∈ [0,1]} ∈ P(u,U,t). Our goal will be to show that the following is o(ϵ):
+ϵ
+(cid:13) (cid:13)
+r(ϵ) := (cid:13)θ(P ,u )−θ(P,u)−ϵΘ˙ (s,t)(cid:13) .
+(cid:13) ϵ ϵ P,u (cid:13)
+W
+Using that ∥w˜∥ = sup ⟨w,w˜⟩ , where B := {w ∈ W : ∥w∥ ≤ 1}, leveraging the bilinearity
+W w∈B1 W 1 W
+of inner products and (iii) from Lemma S12, and then applying the triangle inequality, we find that
+(cid:68) (cid:69)
+r(ϵ) = sup w,θ(P ,u )−θ(P,u)−ϵΘ˙ (s,t)
+ϵ ϵ P,u
+w∈B1 W
+(cid:20)(cid:90) (cid:90) (cid:90) (cid:21)
+= sup w(x)u (x)P (dx)− w(x)u(x)P (dx)−ϵ w(x)[u(x)s (x)+t(x)]P (dx)
+ϵ ϵ,X X X X
+w∈B1
+(cid:20)(cid:90) (cid:21)
+≤ ϵ sup w(x)[u (x)−u(x)]s (x)P (dx)
+ϵ X X
+w∈B1
+51(cid:20)(cid:90) (cid:90) (cid:90) (cid:21)
++ sup w(x)u (x)P (dx)− w(x)u(x)P (dx)−ϵ w(x)t(x)P (dx)
+ϵ X X X
+w∈B1
+(cid:20)(cid:90) (cid:90) (cid:90) (cid:21)
++ sup w(x)u (x)P (dx)− w(x)u (x)P (dx)−ϵ w(x)u (x)s (x)P (dx) .
+ϵ ϵ,X ϵ X ϵ X X
+w∈B1
+We denote the three terms on the right as (I), (II), and (III) in what follows. We will show that
+each of these terms is o(ϵ). When doing so, we will leverage similar arguments to those used to
+bound the terms on the right-hand side of (S21) in the proof of Lemma S8. Beginning with (I),
+we apply Cauchy-Schwarz in L2(P ), a change of measure, H¨older’s inequality, and the fact that
+X
+Cauchy-SchwarzinW implieselementsinB areuniformlyboundedby∥K∥1/2 := sup K(x,x)1/2
+1 ∞ x∈X
+to show that:
+(I) ≤ ϵ∥u −u∥ ∥s ∥ sup sup|w(x)|
+ϵ L2(PX) X L2(PX)
+w∈B1x∈X
+≤ ϵ∥u −u∥ ∥dP /dQ ∥1/2 ∥s ∥ ∥K∥1/2.
+ϵ L2(QX) X X L∞(QX) X L2(PX) ∞
+The right-hand side is o(ϵ) since u → u in L2(Q ) as ϵ → 0. A similar argument shows that
+ϵ X
+(II) ≤ ∥K∥1/2∥dP /dQ ∥1/2 ∥u −u−ϵt∥ .
+∞ X X L∞(QX) ϵ L2(QX)
+The right-hand side is o(ϵ) since {u : ϵ ∈ [0,1]} ∈ P(u,U,t). To study (III), we define p1/2 (·) :=
+ϵ ϵ,X
+[dPϵ,X(·)]1/2
+and note that, by the triangle inequality,
+dPX
+(cid:20)(cid:90)
+(cid:104) ϵ (cid:105)
+(cid:21)
+1/2 1/2
+(III) ≤ sup w(x)u (x)[p (x)+1] p (x)−1− s (x) P (dx)
+ϵ ϵ,X ϵ,X 2 X X
+w∈B1
+(cid:20)(cid:90) (cid:21)
+ϵ
+1/2
++ sup w(x)u (x)s (x)[p (x)−1]P (dx) .
+2 ϵ X ϵ,X X
+w∈B1
+Cauchy-Schwarz, the boundedness of w and u , the inequality (a+b)2 ≤ 2(a2+b2), and H¨older’s
+ϵ
+inequality can be used together to show that the first term on the right upper bounds by
+2m∥K∥1/2 ∥p1/2 −1−ϵs /2∥ . This upper bound is o(ϵ) because {P : ϵ ∈ [0,1]} ∈ P(P,M,s)
+∞ ϵ,X X L2(PX) ϵ
+and quadratic mean differentiability is preserved under marginalization — see Proposition A.5.5
+in Bickel et al. (1993) or Lemma S8 in Luedtke and Chung (2023) for details. The second term
+above can be similarly bounded by
+ϵm∥K∥1/2
+∥s ∥
+∥p1/2
+−1∥ , which is also o(ϵ) by the
+2 ∞ X L2(PX) ϵ,X L2(PX)
+quadratic mean differentiability of {P : ϵ ∈ [0,1]}. As we have shown that (I), (II), and (III) are
+ϵ,X
+all o(ϵ), we have established that r(ϵ) = o(ϵ). The fact that s, t, {P : ϵ}, and {u : ϵ} were arbitrary
+ϵ ϵ
+establishes that θ is pathwise differentiable at (P,u) with differential operator θ˙ = Θ˙ .
+P,u P,u
+The following lemma provides versions of results from Chapter 4.9.1.1 of Berlinet and Thomas-
+Agnan (2011) that are convenient for our setting. We include the proof for completeness. In
+the lemma and its proof, for r ≥ 1 and P ∈ M, we let Lr(P ;W) denote the Bochner space of
+X
+P -a.s. equivalence classes of Bochner measurable maps g : X → W satisfying ∥g∥r :=
+X Lr(PX;W)
+52(cid:82) ∥g(x)∥r P (dx) < ∞. The lemma concerns a map θ, which is an extension of θ from M×U to
+W X
+{(P,f) : P ∈ M,f ∈ L2(P )}.
+X
+Lemma S12. For any P ∈ M and f ∈ L2(P ), define θ(P,f) : x (cid:55)→ E [K(x,X)f(X)]. The
+X P
+following holds for all P ∈ M and f ∈ L2(P ):
+X
+(i) x (cid:55)→ K(·,x)f(x) belongs to L2(P ;W);
+X
+(ii) θ(P,f) ∈ W;
+(cid:82)
+(iii) θ(P,f) is the unique element w of W that satisfies ⟨w ,w⟩ = w(x)f(x)P (dx) for
+P,f P,f W X
+all w ∈ W;
+(iv) for all P˜ ∈ M and f˜∈ L2(P ),
+X
+(cid:90)(cid:90)
+⟨θ(P,f),θ(P˜,f˜)⟩ = K(x,x˜)f(x)f˜(x˜)P (dx)P˜ (dx˜).
+W X X
+Proof of Lemma S12. This proof borrows arguments from the proof of Theorem 105 from Berlinet
+and Thomas-Agnan (2011). Throughout it, we fix P ∈ M, P˜ ∈ M, f ∈ L2(P ), f˜∈ L2(P˜ ), and
+X X
+w ∈ W.
+Starting with (i), observe that, by the boundedness of K and the fact that f ∈ L2(P ),
+X
+x (cid:55)→ K(·,x)f(x) belongs to L2(P ;W). Indeed,
+X
+(cid:90) (cid:90)
+∥x (cid:55)→ K(·,x)f(x)∥2 = ⟨K(·,x)f(x),K(·,x)f(x)⟩ P (dx) = K(x,x)f(x)2P (dx)
+L2(PX;W) W X X
+(cid:20) (cid:21)
+≤ supK(x,x) ∥f∥2 < ∞,
+L2(P)
+x∈X
+where we used that the kernel is bounded. Consequently, x (cid:55)→ K(·,x)f(x) belongs to L2(P ;W).
+X
+As for (ii), the fact that P is a probability measure implies ∥·∥ ≤ ∥·∥ . Hence,
+X L1(PX;W) L2(PX;W)
+(cid:82)
+(i) implies x (cid:55)→ K(·,x)f(x) is Bochner integrable, and so θ(P,f)(·) := K(·,x)f(x)P (dx) is
+X
+well-defined and the resulting function belongs to W.
+We now turn to (iii). Since ⟨·,w⟩ : W → R is a continuous linear operator, it can be
+W
+interchanged with Bochner integration. Hence,
+(cid:28)(cid:90) (cid:29) (cid:90) (cid:90)
+⟨θ(P,f),w⟩ = K(·,x)f(x)P (dx),w = ⟨K(·,x),w⟩ P (dx) = w(x)f(x)P (dx).
+W X W X X
+W
+(cid:82)
+To show uniqueness, let w satisfy ⟨w ,w⟩ = w(x)f(x)P (dx) for all w. Then,
+P,f P,f W X
+(cid:2) (cid:3)
+∥w −θ(P,f)∥ = sup ⟨w ,w⟩ −⟨θ(P,f),w⟩ = 0.
+P,f W P,f W W
+w∈W:∥w∥W≤1
+Hence, w = θ(P,f), which establishes (iii).
+P,f
+53We conclude by showing (iv). For that result, we apply (iii) twice, once for θ(P˜,f˜) with
+w = θ(P,f) and once for θ(P,f) with w = K(·,x˜), to show
+(cid:90) (cid:90)
+⟨θ(P,f),θ(P˜,f˜)⟩ = θ(P,f)(x˜)f˜(x˜)P˜ (dx˜) = ⟨θ(P,f),K(·,x˜)⟩ f˜(x˜)P˜ (dx˜)
+W X W X
+(cid:90)(cid:90)
+= K(x,x˜)f(x)f˜(x˜)P (dx)P˜ (dx˜).
+X X
+D.2.6 Optimal value. For each y in a metric space Y, let F map from M×U to R. We
+y
+study the optimal value map θ given by
+θ(P,u) = inf F (P,u). (S34)
+y
+y∈Y
+If F is totally pathwise differentiable at (P,u), then we write F˙ and F˙∗ to denote its
+y y,P,u y,P,u
+differential operator and corresponding adjoint. We call {F : y ∈ Y} uniformly totally pathwise
+y
+differentiable at (y(0),P,u) if there exists a neighborhood of y(0) on which F is totally pathwise
+y
+differentiable and, for all s ∈ Mˇ , t ∈ Uˇ , {P : ϵ} ∈ P(P,M,s), and {u : ϵ} ∈ P(u,U,t),
+P u ϵ ϵ
+(cid:16) (cid:17)
+lim [F (P ,u )−F (P,u)]/ϵ−F˙ (s,t) = 0.
+y ϵ ϵ y y,P,u
+(y,ϵ)→(y(0),0)
+Lemma S13 (Total pathwise differentiability of optimal value). Fix (P,u) ∈ M×U. Suppose
+(i) Y is a compact metric space;
+(ii) there exists a unique y(0) ∈ Y such that θ(P,u) = F (P,u);
+y(0)
+(iii) {F : y ∈ Y} is uniformly totally pathwise differentiable at (y(0),P,u);
+y
+(iv) for all s ∈ Mˇ and t ∈ Uˇ , y (cid:55)→ F˙ (s,t) is continuous at y(0); and
+P u y,P,u
+(v) there exists a neighborhood N of (P,u) such that (y,P′,u′) (cid:55)→ F (P′,u′) is continuous on
+y
+Y ×N.
+Then, θ from (S34) is totally pathwise differentiable at (P,u) with θ˙ = F˙ and θ˙∗ =
+P,u y(0),P,u P,u
+F˙∗ .
+y(0),P,u
+If Y is not compact, the implication of the above theorem can still hold if (i) is replaced by other
+conditions. Starting with the simplest, if there is a compact Y ⊆ Y such that, for all (P′,u′)
+P,u
+in a neighborhood of (P,u), inf F (P′,u′) = inf F (P′,u′), then the above lemma can be
+y∈YP,u y y∈Y y
+directly applied to the establish the differentiability of θ˜(P′,u′) := inf F (P′,u′); since θ and
+y∈YP,u y
+θ˜agree in a neighborhood of (P,u), they will have the same differentiability properties at (P,u).
+Considerations for other replacements of (i) are grounded in the fact that the compactness condition
+is only used twice in the proof: it ensures that, given smooth paths {P : ϵ} and {u : ϵ}, there
+ϵ ϵ
+exists a minimizer y(ϵ) ∈ argmin F (P ,u ) for all ϵ small enough, and it aids in showing that
+y∈Y y ϵ ϵ
+54y(ϵ) → y(0) as ϵ → 0. Hence, if the existence and convergence of these minimizers can be established
+by other means, then the compactness condition can be dropped. Similar conditions to those used to
+establish the consistency of M-estimators can be used to establish these properties. For example, (i)
+may be replaced by the requirement that argmin F (P′,u′) ̸= ∅ for all (P′,u′) in a neighborhood
+y∈Y y
+of (P,u) and either
+(i’) thereisawell-separatedminimizery(0)ofy (cid:55)→ F (P,u)andsup |F (P′,u′)−F (P,u)| → 0
+y y∈Y y y
+as (P′,u′) → (P,u) (see Theorem 5.7 of van der Vaart, 2000); or
+(i”) Y = Rd with d < ∞ and y (cid:55)→ F (P′,u′) convex for all (P′,u′) in a neighborhood of (P,u)
+y
+(see Theorem 2.7 Newey and McFadden, 1994).
+Proof of Lemma S13. ThisproofisinspiredbyargumentsfromDanskin(1967). Fixs ∈ Mˇ ,t ∈ Uˇ ,
+P u
+{P : ϵ} ∈ P(P,M,s),and{u : ϵ} ∈ P(u,U,t). Ourgoalistoshowthatg(ϵ) := [θ(P ,u )−θ(P,u)]/ϵ
+ϵ ϵ ϵ ϵ
+converges to F˙ (s,t) as ϵ ↓ 0. This will show that θ is totally pathwise differentiable at (P,u)
+y(0),P,u
+with θ˙ = F˙ and θ˙∗ = F˙∗ .
+P,u y(0),P,u P,u y(0),P,u
+Throughout this proof we take ϵ to be small enough so that (P ,u ) ∈ N; this is necessarily
+ϵ ϵ
+possible since (P ,u ) → (P,u) as ϵ → 0. For each ϵ, let y(ϵ) be a generic element of the set
+ϵ ϵ
+argmin F (P ,u ); this set is necessarily nonempty since Y is compact and y (cid:55)→ F (P ,u ) is
+y∈Y y ϵ ϵ y ϵ ϵ
+continuous. Also, as we will now show, lim y(ϵ) = y(0). To see why, take a sequence ϵ → 0.
+ϵ→0 k
+Since Y is compact, there exists a subsequence ϵ → 0 such that y(ϵ ) → y˜(0) for some y˜(0).
+k′ k′
+Moreover, y˜(0) must equal the unique minimizer y(0) of y (cid:55)→ F (P,u) since the continuity of
+y
+(y,P′,u′) (cid:55)→ F (P′,u′) and the fact that y(ϵ ) ∈ argmin F (P ,u ) together imply that
+y k′ y∈Y y ϵ k′ ϵ k′
+F (P,u) = lim F (P ,u ) ≤ lim F (P ,u ) = F (P,u). As y(ϵ ) → y˜(0) along
+y˜(0) k′ y(ϵ k′) ϵ k′ ϵ k′ k′ y(0) ϵ k′ ϵ k′ y(0) k′
+the subsequence (ϵ ) and the original sequence (ϵ ) was arbitrary, lim y(ϵ) = y(0).
+k′ k′ k k ϵ→0
+We now show that limsup g(ϵ) ≤ F˙ (s,t). Since y(ϵ) minimizes y (cid:55)→ F (P ,u ) and
+ϵ→0 y(0),P,u y ϵ ϵ
+F is totally pathwise differentiable,
+y(0)
+ϵg(ϵ) = F (P ,u )−F (P,u) ≤ F (P ,u )−F (P,u) = ϵF˙ (s,t)+o(ϵ).
+y(ϵ) ϵ ϵ y(0) y(0) ϵ ϵ y(0) y(0),P,u
+Dividing both sides by ϵ and taking a limit superior as ϵ → 0 shows that limsup g(ϵ) ≤
+ϵ→0
+F˙ (s,t).
+y(0),P,u
+We now show that liminf g(ϵ) ≥ F˙ (s,t). Using that y(0) minimizes y (cid:55)→ F (P,u) and
+ϵ→0 y(0),P,u y
+adding and subtracting terms,
+ϵg(ϵ) = F (P ,u )−F (P,u) ≥ F (P ,u )−F (P,u)
+y(ϵ) ϵ ϵ y(0) y(ϵ) ϵ ϵ y(ϵ)
+= ϵF˙ (s,t)+ϵ[F˙ (s,t)−F˙ (s,t)]
+y(0),P,u y(ϵ),P,u y(0),P,u
+(cid:104) (cid:105)
++ F (P ,u )−F (P,u)−ϵF˙ (s,t) .
+y(ϵ) ϵ ϵ y(ϵ) y(ϵ),P,u
+The second term on the right is o(ϵ) since lim y(ϵ) = y(0) and y (cid:55)→ F˙ (s,t) is continuous
+ϵ→0 y,P,u
+at y(0). The third is o(ϵ) because {F : y ∈ Y} is uniformly totally pathwise differentiable at
+y
+55(y(0),P,u). Dividingbothsidesbyϵandtakingalimitinferiorasϵ → 0showsthatliminf g(ϵ) ≥
+ϵ→0
+F˙ (s,t).
+y(0),P,u
+D.2.7 Optimal solution. For each w ∈ W = Rd, let F map from M×U to R. We study
+w
+the optimal solution map θ given by
+θ(P,u) ∈ argminF (P,u). (S35)
+w
+w∈W
+Whenthisminimizationresultsinmultiplesolutions, θ isrequiredtoselectoneoftheminawaythat
+ensures this map is continuous at the point (P,u) where we wish to differentiate it. For example, θ
+may always select the minimum norm solution. The following lemma assumes that this choice is
+made in such a way that θ is continuous. In the lemma, ∥·∥ denotes the Euclidean norm on Rd.
+2
+Lemma S14 (Total pathwise differentiability of optimal solution). Fix (P,u) ∈ M×U. Suppose
+(i) θ is continuous at (P,u);
+(ii) w (cid:55)→ F (P,u) is twice continuously differentiable at w(0) := θ(P,u) with positive definite
+w
+Hessian matrix H ; and
+P,u
+(iii) there exists a bounded linear operator G : M˙ ⊕U˙ → Rd such that, for all s ∈ Mˇ ,
+P,u P u P
+t ∈ Uˇ , {P : ϵ} ∈ P(P,M,s), {u : ϵ} ∈ P(u,U,t), and function w : [0,1] → Rd satisfying
+u ϵ ϵ (cid:101)
+w(ϵ) → w(0),
+(cid:101)
+F (P ,u )−F (P,u)−F (P ,u )+F (P,u)
+w(ϵ) ϵ ϵ w(ϵ) w(0) ϵ ϵ w(0)
+(cid:101) (cid:101)
+= ϵ[w(ϵ)−w(0)]⊤G (s,t)+o(cid:0) max{∥w(ϵ)−w(0)∥2,ϵ2}(cid:1) .
+(cid:101) P,u (cid:101) 2
+Undertheaboveconditions, θ istotallypathwisedifferentiableat(P,u)withθ˙ (s,t) = H−1G (s,t)
+P,u P,u P,u
+and θ˙∗ (w) = H−1G∗ (w), where G˙∗ denotes the Hermitian adjoint of G˙ .
+P,u P,u P,u P,u P,u
+TheabovewilloftenbeappliedwhenF istotallypathwisedifferentiableforallw inaneighborhood
+w
+of w(0). Denoting the differential operator of F by F˙ , the vector G (s,t) will usually
+w w,P,u P,u
+then correspond to the gradient of w (cid:55)→ F˙ (s,t) at w(0). An example of a situation where
+w,P,u
+this lemma can be applied occurs when U = L∞(ρ ) for ρ equivalent to P and F (P,u) =
+X X X w
+(cid:82) (cid:2) u(x)−w⊤x(cid:3)2 P (dx). In these cases, θ(P,u) is the L2(P ) projection of onto linear functions of
+X X
+the form x (cid:55)→ w⊤x.
+Compared to Appendix D.2.6, which studied an optimal value map, this appendix requires
+additionalstructureonthefeasibleregionoftheoptimizationproblem, namelythatitbeaEuclidean
+space. It also requires additional differentiability properties on the objective function, such as the
+second-orderdifferentiabilityconditions(ii)and(iii), thoughdoesnotnecessarilyrequireothers, such
+as uniform total pathwise differentiability. This mismatch between the conditions for differentiability
+of the optimal value and solution maps is not overly surprising given that they capture different
+aspects of the optimization problem.
+56Proof of Lemma S14. This proof is inspired by arguments from the proof of Theorem 3.2.16 of
+van der Vaart and Wellner (1996), which establish the asymptotic normality of an M-estimator.
+Fix s ∈ Mˇ , t ∈ Uˇ , {P : ϵ} ∈ P(P,M,s), {u : ϵ} ∈ P(u,U,t), and w(ϵ) → w(0). By (ii), a
+P u ϵ ϵ (cid:101)
+second-order Taylor expansion holds for w (cid:55)→ F (P,u) at w(0), and, as w(0) is a minimizer, the
+w
+first-order term is equal to zero — expressed as an equation,
+1
+F (P,u)−F (P,u) = [w(ϵ)−w(0)]⊤H [w(ϵ)−w(0)]+o(∥w(ϵ)−w(0)∥2).
+w (cid:101)(ϵ) w(0) 2 (cid:101) P,u (cid:101) (cid:101) 2
+Combining this with (iii), we find that
+F (P ,u )−F (P ,u ) (S36)
+w(ϵ) ϵ ϵ w(0) ϵ ϵ
+(cid:101)
+(cid:2) (cid:3)
+= F (P,u)−F (P,u)+ F (P ,u )−F (P ,u )−F (P,u)+F (P,u)
+w(ϵ) w(0) w(ϵ) ϵ ϵ w(0) ϵ ϵ w(ϵ) w(0)
+(cid:101) (cid:101) (cid:101)
+= 1 [w(ϵ)−w(0)]⊤H [w(ϵ)−w(0)]+ϵ[w(ϵ)−w(0)]⊤G (s,t)+o(cid:0) max{∥w(ϵ)−w(0)∥2,ϵ2}(cid:1) .
+2 (cid:101) P,u (cid:101) (cid:101) P,u (cid:101) 2
+We shall use this result three times with different choices of w in what follows: once to establish
+(cid:101)
+the ϵ-rate convergence of w(ϵ) := θ(P ,u ) to w(0) — in that w(ϵ) = w(0)+O(ϵ) — and then
+ϵ ϵ
+twice more to derive a first-order approximation of θ(P ,u ) that will establish the total pathwise
+ϵ ϵ
+differentiability of θ.
+To establish the ϵ-rate convergence result, we take w(ϵ) to be equal to w(ϵ) := θ(P ,u ). This
+(cid:101) ϵ ϵ
+choice satisfies the one required property of w˜(ϵ) — namely, w(ϵ) → w(0) — as follows by (i) and
+(cid:101)
+the fact that {P : ϵ} ∈ P(P,M,s) and {u : ϵ} ∈ P(u,U,t) imply (P ,u ) → (P,u). Since w(ϵ) is
+ϵ ϵ ϵ ϵ
+a minimizer of w (cid:55)→ F (P ,u ), the left-hand side of (S36) is nonpositive. Also, by the positive
+w ϵ ϵ
+definiteness of H and Cauchy-Schwarz, the first and second terms on the right-hand side lower
+P,u
+bound by ∥w(ϵ)−w(0)∥2 for c > 0 and −ϵc ∥w(ϵ)−w(0)∥ for c ≥ 0, respectively. Putting these
+2 1 2 2 2
+observations together and then completing the square shows that
+0 ≥ c ∥w(ϵ)−w(0)∥2−ϵc ∥w(ϵ)−w(0)∥ +o(cid:0) max{∥w(ϵ)−w(0)∥2,ϵ2}(cid:1)
+1 2 2 2 (cid:101) 2
+= [c +o(1)][∥w(ϵ)−w(0)∥ +O(ϵ)]2.
+1 2
+The above is only possible if ∥w(ϵ)−w(0)∥ = O(ϵ), which is what we set out to show.
+2
+We now use (S36) twice more to establish the total pathwise differentiability of θ at (P,u).
+In the first application we again take w(ϵ) = w(ϵ), and in the second we take w(ϵ) = w¯(ϵ) :=
+(cid:101) (cid:101)
+w(0)−ϵH−1G (s,t), yielding
+P,u P,u
+1
+F (P ,u )−F (P ,u ) = [w(ϵ)−w(0)]⊤H [w(ϵ)−w(0)]
+w(ϵ) ϵ ϵ w(0) ϵ ϵ 2 P,u
++ϵ[w(ϵ)−w(0)]⊤G (s,t)+o(ϵ2),
+P,u
+1
+F (P ,u )−F (P ,u ) = − ϵ2[H−1G (s,t)]⊤G (s,t)+o(ϵ2).
+w¯(ϵ) ϵ ϵ w(0) ϵ ϵ 2 P,u P,u P,u
+57Subtracting the second display from the first yields
+F (P ,u )−F (P ,u )
+w(ϵ) ϵ ϵ w¯(ϵ) ϵ ϵ
+1
+= [w(ϵ)−w(0)+ϵH−1G (s,t)]⊤H [w(ϵ)−w(0)+ϵH−1G (s,t)]+o(ϵ2).
+2 P,u P,u P,u P,u P,u
+The left-hand side is nonpositive since w(ϵ) is a minimizer of w (cid:55)→ F (P ,u ). Combining this with
+w ϵ ϵ
+the positive definiteness of H shows there is a c > 0 such that
+P,u 1
+(cid:13) (cid:13)2
+0 ≥ c (cid:13)w(ϵ)−w(0)+ϵH−1G (s,t)(cid:13) +o(ϵ2).
+1(cid:13) P,u P,u (cid:13)
+2
+This is only possible if the squared norm on the right-hand side is o(ϵ2). Since s ∈ Mˇ , t ∈ Uˇ ,
+P u
+{P : ϵ} ∈ P(P,M,s), {u : ϵ} ∈ P(u,U,t) were arbitrary and G is bounded and linear, this
+ϵ ϵ P,u
+shows that θ is pathwise differentiable at (P,u) with differential operator θ˙ (s,t) = H−1G (s,t).
+P,u P,u P,u
+To see that θ˙∗ (w) = H−1G∗ (w), observe that, for all s ∈ M˙ , t ∈ U˙ , and w ∈ W = Rd,
+P,u P,u P,u P u
+(cid:104) (cid:105)
+⟨w,H−1G (s,t)⟩ = w⊤H−1G (s,t) = w⊤H−1 G (s,t)
+P,u P,u W P,u P,u P,u P,u
+(cid:104) (cid:105)⊤ (cid:68) (cid:16) (cid:17) (cid:69)
+= H−1w G (s,t) = G∗ H−1w ,(s,t)
+P,u P,u P,u P,u M˙ P⊕U˙
+u
+(cid:68) (cid:69)
+= H−1G∗ (w),(s,t) ,
+P,u P,u M˙ P⊕U˙
+u
+where above we used the fact that the Hessian inverse H−1 is symmetric and G˙∗ is linear.
+P,u P,u
+D.3 Maps that only depend on their distribution-valued argument
+D.3.1 General case: pathwise differentiable parameter. Suppose that there exists a
+pathwise differentiable map ν : M → W that is such that θ(P,u) = ν(P) for all (P,u) ∈ M×U.
+We claim that θ is totally pathwise differentiable at any (P,u) ∈ M×U with θ˙ (s,t) = ν˙ (s) and
+P,u P
+θ˙∗ (w) = (ν˙∗(w),0). Though the results in Table 1 specify that U = {0} in this case, they actually
+P,u P
+hold for any subset U of a Hilbert space T; however, since θ(P,u) does not depend on the value u
+takes, the case where U is a trivial vector space {0} is sufficiently rich to capture all interesting
+aspects of the setting.
+Fix P ∈ M, u ∈ U, s ∈ Mˇ , t ∈ Uˇ , {P : ϵ ∈ [0,1]} ∈ P(P,M,s), and {u : ϵ ∈ [0,1]} ∈
+P u ϵ ϵ
+P(u,U,t). For any ϵ ∈ (0,1], the definition of θ and the pathwise differentiability of ν imply that
+∥θ(P ,u )−θ(P,u)−ϵν˙ (s)∥ = ∥ν(P )−ν(P)−ϵν˙ (s)∥ = o(ϵ).
+ϵ ϵ P W ϵ P W
+This establishes our claim that θ˙ (s,t) = ν˙ (s). The map ν˙ is bounded and linear, and so θ˙ is
+P,u P P P,u
+58bounded and linear as well. As for the adjoint, observe that, for any s ∈ M˙ , t ∈ U˙ , and w ∈ W,
+P u
+(cid:68) (cid:69)
+θ˙ (s,t),w = ⟨ν˙ (s),w⟩ = ⟨t,ν˙∗(w)⟩ = ⟨(s,t),(ν˙∗(w),0)⟩ .
+P,u W P W P M˙ P P M˙ P⊕U˙ u
+Hence, θ˙∗ (w) = (ν˙∗(w),0).
+P,u P
+In the remainder of Appendix D.3, we establish the pathwise differentiability of maps ν : M →
+W. Applying the general results of this Appendix D.3.1 then shows that the parameter θ with
+θ(P,u) = ν(P) is totally pathwise differentiable at any (P,u) ∈ M×U with θ˙ (s,t) = ν˙ (s) and
+P,u P
+θ˙∗ (w) = (ν˙∗(w),0), which will verify the claimed form of the adjoint of the differential operator
+P,u P
+for the pathwise differentiable primitives in Table 1.
+D.3.2 Root-density. Suppose there is a σ-finite measure λ that dominates all P ∈ M, and
+let ν(P)(z) = dP(z)1/2. By Example 4 in Luedtke and Chung (2023), ν : M → L2(λ) is pathwise
+dλ
+differentiable at each P with local parameter ν˙ (s)(z) = 1s(z)ν(P)(z) and efficient influence
+P 2
+operator
+(cid:20) (cid:21)
+w(z) w(Z)
+ν˙∗(w)(z) = −E .
+P 2ν(P)(z) P 2ν(P)(Z)
+D.3.3 Conditional density. Let M be a locally nonparametric model of distributions on
+Z = X ×Y. Suppose there exists a σ-finite measure λ on Y such that the conditional distribution
+P of Y |X = x under every P ∈ M is dominated by λ for P -almost all x. Further suppose
+Y|X=x X
+dP
+there exists m < ∞ such that, for all P ∈ M, the conditional density p (y|x) := Y|X=x(y) is
+Y|X dλ
+P-a.s. bounded by m. To ease notation, we will write p (z) rather than p (y|x) hereafter.
+Y|X Y|X
+Suppose all distributions in M are equivalent. For fixed Q ∈ M, define ν : M → L2(Q) so that
+ν(P)(z) = p (z).
+Y|X
+For any P ∈ M satisfying ∥dQ/dP∥ < ∞, we claim that ν is pathwise differentiable with
+L∞(P)
+ν˙ (s)(z) = Π (s)(z)p (z) and ν˙∗(w)(z) = Π (cid:0)dQwp (cid:1) (z), (S37)
+P P Y|X P P dP Y|X
+where Π (f)(z) := f(z)−E [f(Z)|X = x]. We establish this by expressing ν as a composition
+P P
+ζ ◦ ζ ◦ ν , where ν : M → L2(P) is pathwise differentiable and ζ : L2(P) → L2(P) and
+2 1 1 1 1
+ζ : L2(P) → L2(Q) are both Hadamard differentiable. The chain rule will then establish the
+2
+pathwise differentiability of ν with the claimed local parameter and efficient influence operator.
+The map ν is defined so that ν (P˜) = (p˜ /p )1/2. Lemma S8 in Luedtke and Chung
+1 1 Y|X Y|X
+(2023) shows that ν is pathwise differentiable at P with ν˙ (s)(z) = 1Π (s)(z). The adjoint
+1 1,P 2 P
+of this map is ν˙∗ (w)(z) = 1{w(z)−E [w(Z)|X = x]}. The map ζ is the pointwise operation
+1,P 2 P 1
+ζ (u)(z) = u2(z)p (z). By Appendix D.4.5 and the fact that conditional densities of distributions
+1 Y|X
+in M are uniformly bounded, this map is Hadamard differentiable with ζ˙ (t) = 2tup and
+1,u Y|X
+ζ˙∗ (w) = 2wup . The map ζ is the change of measure studied in Appendix D.4.9 where, in
+1,u Y|X 2
+the notation of that appendix, λ = P and λ = Q. By results in that appendix, the fact that
+1 2
+59∥dQ/dP∥ < ∞impliesthismapisHadamarddifferentiablewithζ˙ (t) = tandζ˙∗ (w) = dQw.
+L∞(P) 2,u 2,u dP
+Theorem 1 from this work (see also Theorem 3.1 in van der Vaart, 1991a) then shows that
+ν = ζ ◦ζ ◦ν is Hadamard differentiable with ν˙∗(w) = ν˙∗ ◦ζ˙∗ ◦ζ˙∗ (w), and properties
+2 1 1 P 1,P 1,ν1(P) 2,ζ1◦ν1(P)
+of adjoints of compositions show that ν˙ (s) = ζ˙ ◦ζ˙ ◦ν˙ (s). Plugging in the provided
+P 2,ζ1◦ν1(P) 1,ν1(P) 1,P
+forms of the differential operators and their adjoints gives (S37).
+D.3.4 Dose-response function. Let Z = (X,A,Y) ∈ Z = X ×[0,1]×R. Here, X is a
+covariate, A is a continuous treatment, and Y is an outcome. Let λ denote the Lebesgue measure on
+[0,1] and π (·|x) denote the conditional density of A given X = x under sampling from P. Suppose
+P
+there exists δ ∈ (0,∞) such that, for all P ∈ M, π is P-a.s. bounded below by δ and E [Y2|A,X]
+P P
+is P-a.s. bounded above by δ−1. The parameter of interest ν : M → L2(λ) is defined so that
+(cid:82)
+ν(P)(a) = µ (a,x)P (dx), where µ (a,x) := E [Y |A = a,X = x]. Example 2 in Luedtke and
+P X P P
+Chung (2023) shows that ν is pathwise differentiable with
+(cid:90)
+(cid:2) (cid:12) (cid:3)
+ν˙ P(s)(a) = E
+P
+{Y −µ P(a,x)}s
+Y
+|A,X(Y | a,x)(cid:12)A = a,X = x P X(dx)
+(cid:90)
++ [µ (a,x)−ν(P)(a)]s (x)P (dx), and
+P X X
+(cid:90)
+y−µ (a,x)
+ν˙∗(w)(y,a,x) = P w(a)+ [µ (a′,x)−ν(P)(a′)]w(a′)λ(da′).
+P π (a | x) P
+P
+Above s (y|a,x) := s(z)−E [s(Z)|A = a,X = x] and s (x) := E [s(Z)|X = x].
+Y |A,X P X P
+D.3.5 Counterfactual density. Let a generic observation Z = (X,A,Y) drawn from a
+distribution P ∈ M consist of covariates X, a binary treatment A, and an outcome Y with support
+on Y. Suppose all distributions in M are equivalent and there is a σ-finite measure λ such that,
+Y
+for all P ∈ M, there is a regular conditional probability P such that P (·|a,x) ≪ λ
+Y |A,X Y |A,X Y
+for P-almost all (a,x) ∈ {0,1}×X. Define the propensity to receive treatment a as π (a|x) :=
+P
+P(A = a|X = x) and let p (·|1,x) denote the conditional density of Y given (A,X) = (1,x).
+Y|A,X
+Suppose that M is such that
+inf essinfπ (1|x) > 0 and sup esssup p (y|1,x) < ∞,
+P Y|A,X
+P∈P x∈X P∈P(x,y)∈X×Y
+where the essential infimum is under the marginal distribution P of X under sampling from P
+X
+and the essential supremum is under P ×λ .
+X Y
+Define ν : M → L2(λ ) so that
+Y
+(cid:90)
+ν(P)(y) = p (y|1,x)P (dx).
+Y|A,X X
+Under causal conditions, this parameter corresponds to the counterfactual density that would be
+60observed if everyone received treatment A = 1 (Kennedy et al., 2021). Letting s and s
+Y |A,X X
+be as defined in Appendix D.3.4, the results in Luedtke and Chung (2023) show ν is pathwise
+differentiable with local parameter
+(cid:90)
+(cid:8) (cid:9)
+ν˙ (s)(y) = s (y|1,x)+s (x) p (y|1,x)P (dx)
+P Y |A,X X Y|A,X X
+and efficient influence operator
+1{a = 1}
+ν˙∗(w)(y,a,x) = {w(y)−E [w(Y)|A = a,X = x]}
+P π (a|x) P
+P
+(cid:16) (cid:90) (cid:17)
++ E [w(Y)|A = 1,X = x]− E (cid:2) w(Y)|A = 1,X = x′(cid:3) P (dx′) . (S38)
+P P X
+D.4 Maps that only depend on their Hilbert-valued argument
+D.4.1 General case: Hadamard differentiable map. Suppose that there exists a
+Hadamard differentiable map ζ : U → W that is such that θ(P,u) = ζ(u) for all (P,u) ∈ M×U.
+We claim that θ is totally pathwise differentiable at any (P,u) ∈ M×U with θ˙ (s,t) = ζ˙ (t) and
+P,u u
+θ˙∗ (w) = (0,ζ˙∗(w)).
+P,u u
+Fix P ∈ M, u ∈ U, s ∈ Mˇ , t ∈ Uˇ , {P : ϵ ∈ [0,1]} ∈ P(P,M,s), and {u : ϵ ∈ [0,1]} ∈
+P u ϵ ϵ
+P(u,U,t). For any ϵ ∈ (0,1], the definition of θ and the Hadamard differentiability of ζ imply that
+(cid:13) (cid:13) (cid:13) (cid:13)
+(cid:13)θ(P ,u )−θ(P,u)−ϵζ˙ (t)(cid:13) = (cid:13)ζ(u )−ζ(u)−ϵζ˙ (t)(cid:13) = o(ϵ).
+(cid:13) ϵ ϵ u (cid:13) (cid:13) ϵ u (cid:13)
+W W
+This establishes our claim of total pathwise differentiability with θ˙ (s,t) = ζ˙ (t). The map ζ˙ is
+P,u u u
+bounded and linear, and so θ˙ is bounded and linear as well. As for the adjoint, observe that, for
+P,u
+any s ∈ M˙ , t ∈ U˙ , and w ∈ W,
+P u
+(cid:68) (cid:69) (cid:68) (cid:69) (cid:68) (cid:69) (cid:68) (cid:69)
+θ˙ (s,t),w = ζ˙ (t),w = t,ζ˙∗(w) = (s,t),(0,ζ˙∗(w)) .
+P,u W u W u U˙ u u M˙ P⊕U˙ u
+Hence, θ˙∗ (w) = (0,ζ˙∗(w)).
+P,u u
+In the remainder of Appendix D.4, we establish the Hadamard differentiability of maps ζ : U →
+W. Applying the general results of this Appendix D.4.1 then shows that the parameter θ with
+θ(P,u) = ζ(u) is totally pathwise differentiable at any (P,u) ∈ M×U with θ˙ (s,t) = ζ˙ (t) and
+P,u u
+θ˙∗ (w) = (0,ζ˙∗(w)), which will verify the claimed form of the adjoint of the differential operator
+P,u u
+for the Hadamard differentiable primitives in Table 1.
+D.4.2 Inner product. Let R be a Hilbert space and U = R ⊕ R. Define ζ : U → R so
+that ζ(u) = ⟨u ,u ⟩ , where u = (u ,u ). For any u ∈ U, t = (t ,t ) ∈ Uˇ = R ⊕ R, and
+1 2 R 1 2 1 2 u
+61{u = (u ,u ) : ϵ} ∈ P(u,U,t),
+ϵ 1,ϵ 2,ϵ
+ζ(u )−ζ(u)−ϵ[⟨t ,u ⟩ +⟨u ,t ⟩ ] = ⟨u −u −ϵt ,u ⟩ +⟨u ,u −u −ϵt ⟩
+ϵ 1 2 R 1 2 R 1,ϵ 1 1 2 R 1 2,ϵ 2 2 R
++⟨u −u ,u −u −ϵt ⟩ +ϵ⟨u −u ,t ⟩ .
+1,ϵ 1 2,ϵ 2 2 R 1,ϵ 1 2 R
+By Cauchy-Schwarz and the fact that {u : ϵ} ∈ P(u,U,t), each of the four terms on the right-hand
+ϵ
+side is o(ϵ). Moreover, ζ˙ (t) = ⟨t ,u ⟩ +⟨u ,t ⟩ is a bounded linear operator, establishing the
+u 1 2 R 1 2 R
+Hadamard differentiability of ζ. The Hermitian adjoint of ζ˙ is ζ˙∗(w) = (wu ,wu ).
+u u 2 1
+Importantly, the Hilbert space T = R⊕R is not ambient for this primitive: the evaluation of
+this primitive inherently depends on the inner product in R. Hence, when used in Algorithm 1, this
+primitive does not allow R to depend on the input to the algorithm, P. For example, consider the
+case where R = L2(P). In this case, a P-dependent inner product primitive would take the form
+θ(P,(u ,u )) = ⟨u ,u ⟩ , which depends nontrivially on its distribution-valued argument and
+1 2 1 2 L2(P)
+therefore should be studied as in Appendix D.2. For the particular case where R = L2(P), the P-
+dependent inner product primitive is a special case of the multifold mean studied in Appendix D.2.2,
+and so is totally pathwise differentiable under conditions given there.
+D.4.3 Squared norm. Let ζ(u) = ∥u∥2 , where U equals the Hilbert space T. For any u ∈ U,
+T
+t ∈ Uˇ = U, and {u : ϵ} ∈ P(u,U,t), ζ(u )−ζ(u)−2ϵ⟨t,u⟩ = o(ϵ). Moreover, ζ˙ (t) = 2⟨t,u⟩ is
+u ϵ ϵ T u T
+a bounded linear operator, establishing the Hadamard differentiability of ζ. The Hermitian adjoint
+of ζ˙ is ζ˙∗(w) = 2wu.
+u u
+Like the inner product primitive in Appendix D.4.2, the Hilbert space T is not ambient for this
+primitive: evaluating ∥·∥2 inherently depends on T. Hence, when used in Algorithm 1, this inner
+T
+product primitive does not allow T to depend on the input to the algorithm P.
+D.4.4 Differentiable functions. Let U be an open subset of T = Rd. Any differentiable
+map ζ : U → R is Fr´echet and, therefore, Hadamard differentiable with ζ˙ : t (cid:55)→ t⊤∇ζ(u). The
+u
+adjoint of this map is ζ˙∗ : w (cid:55)→ w∇ζ(u), that is, the scalar multiplication of w with ∇ζ(u).
+u
+D.4.5 Pointwise operations. Let C1(Rd) denote the set of continuously differentiable g :
+Rd → R and ∇ g(a) the j-th entry of the gradient ∇g(a). Let λ be a σ-finite measure on X and
+j
+note that the tangent space of L2(λ)⊕d := ⊕d L2(λ) at any u is L2(λ)⊕d itself. For a generic
+j=1
+u ∈ L2(λ)⊕d, write u ∈ L2(λ) for the j-th entry of u and u¯ for x (cid:55)→ (u (x))d . Let ∥·∥ denote
+j j j=1 2
+the Euclidean norm.
+Theorem S2 (Hadamard differentiability of pointwise operations). Suppose f ∈ C1(Rd) for each
+x
+x ∈ X and sup ∥∇f (a)∥ < ∞. Define ζ : L2(λ)⊕d → L2(λ) so that ζ(u) : x (cid:55)→ f ◦u¯(x).
+a∈Rd,x∈X x 2 x
+The map ζ is Hadamard differentiable at each u ∈ L2(λ)⊕d with ζ˙ (t) : x (cid:55)→ t¯(x)⊤∇f ◦u¯(x) and
+u x
+ζ˙∗(w) = (x (cid:55)→ w(x)∇ f (u¯(x)))d .
+u j x j=1
+62Proof of Theorem S2. Fix u ∈ L2(λ)⊕d and define the map ζ˙ : L2(λ)⊕d → L2(λ) so that ζ˙ (t) :
+u u
+x (cid:55)→ t¯(x)⊤∇f ◦ u¯(x) for all t ∈ L2(λ)⊕d. This map is linear. It is also bounded since, by
+x
+Cauchy-Schwarz, the assumption that m := sup ∥∇f (a)∥ < ∞, and the definition of the
+a∈Rd,x∈X x 2
+L2(λ)⊕d-norm,
+(cid:13) (cid:13)ζ˙ u(t)(cid:13) (cid:13)2
+L2(λ)
+≤ (cid:13) (cid:13) (cid:13)x (cid:55)→ t¯(x)⊤∇f x◦u¯(x)(cid:13) (cid:13) (cid:13)2
+L2(λ)
+≤ (cid:90) ∥t¯(x)∥2 2∥∇f x◦u¯(x)∥2 2λ(dx)
+(cid:90)
+≤ m2 ∥t¯(x)∥2λ(dx) = m2∥t∥2 .
+2 L2(λ)⊕d
+The Hermitian adjoint of ζ˙ is ζ˙∗(w) = (x (cid:55)→ w(x)∇ f ◦u¯(x))d since, for t ∈ L2(λ)⊕d and
+u u j x j=1
+w ∈ L2(λ),
+(cid:68) (cid:69) (cid:90) (cid:88)d (cid:90)
+ζ˙ (t),w = t¯(x)⊤∇f ◦u¯(x)w(x)λ(dx) = t (x)∇ f ◦u¯(x)w(x)λ(dx)
+x j j x
+u L2(λ)
+j=1
+(cid:68) (cid:69)
+(cid:0) (cid:1)d
+= t, x (cid:55)→ w(x)∇ f ◦u¯(x) .
+j x j=1 L2(λ)⊕d
+Our proof will be complete if we can establish that (S7) holds with ζ˙ = ζ˙ — we do this in what
+u
+u
+follows.
+Let u = (u )d and t = (t )d belong to L2(λ)⊕d and {u = (u )d : ϵ} ∈ P(u,L2(λ)⊕d,t).
+j j=1 j j=1 ϵ ϵ,j j=1
+Define t := {u −u}/ϵ and u(ϵ) := u+ϵt. By the inequality (a+b)2 ≤ 2(a2+b2),
+ϵ ϵ
+1 (cid:13) (cid:13)2 1 (cid:90) (cid:104) (cid:105)2
+(cid:13)ζ(u )−ζ(u)−ϵζ˙ (t)(cid:13) = f ◦u¯ (x)−f ◦u¯(x)−ϵt¯(x)⊤∇f ◦u¯(x) λ(dx) (S39)
+2 (cid:13) ϵ u (cid:13) L2(λ) 2 x ϵ x x
+(cid:90) (cid:104) (cid:105)2 (cid:90) (cid:104) (cid:105)2
+≤ f ◦u¯ (x)−f ◦u¯(ϵ)(x) λ(dx)+ f ◦u¯(ϵ)(x)−f ◦u¯(x)−ϵt¯(x)⊤∇f ◦u¯(x) λ(dx).
+x ϵ x x x x
+We shall show that each of the two terms on the right-hand side is o(ϵ2). Beginning with the first,
+we use that, for each x ∈ X, f is m-Lipschitz since it belongs to C1(Rd) and has its gradient
+x
+bounded by m. Hence,
+(cid:90) (cid:104) (cid:105)2 (cid:90) (cid:13) (cid:13)2
+f ◦u¯ (x)−f ◦u¯(ϵ)(x) λ(dx) ≤ m2 (cid:13)u¯ (x)−u¯(ϵ)(x)(cid:13) λ(dx)
+x ϵ x (cid:13) ϵ (cid:13)
+2
+(cid:90) d (cid:90)
+(cid:88)
+= m2 ∥u¯ (x)−u¯−ϵt¯(x)∥2λ(dx) = [u (x)−u (x)−ϵt (x)]2λ(dx)
+ϵ 2 ϵ,j ϵ,j j
+j=1
+= ∥u −u−ϵt∥2 = o(ϵ2),
+ϵ L2(λ)⊕d
+where the final equality holds since {u : ϵ} ∈ P(u,L2(λ)⊕d,t). Hence, the first term on the
+ϵ
+right-hand side of (S39) is o(ϵ2). For the second, the fundamental theorem of calculus, the chain
+63rule, Jensen’s inequality, and Cauchy-Schwarz together show that
+(cid:90) (cid:104) (cid:105)2
+f ◦u¯(ϵ)(x)−f ◦u¯(x)−ϵt¯(x)⊤∇f ◦u¯(x) λ(dx)
+x x x
+= (cid:90) (cid:20)(cid:90) 1 dd a′f x(u¯(x)+a′ϵt¯(x))(cid:12) (cid:12) (cid:12)
+(cid:12)
+da−ϵt¯(x)⊤∇f x◦u¯(x)(cid:21)2 λ(dx)
+0 a′=a
+(cid:90) (cid:20)(cid:90) 1 (cid:21)2
+= ϵ2 t¯(x)⊤{∇f (u¯(x)+aϵt¯(x))−∇f ◦u¯(x)}da λ(dx)
+x x
+0
+(cid:90) (cid:90) 1(cid:104) (cid:105)2 (cid:90)
+≤ ϵ2 t¯(x)⊤{∇f (u¯(x)+aϵt¯(x))−∇f ◦u¯(x)} daλ(dx) ≤ ϵ2 ∥t¯(x)∥2I (x)λ(dx),
+x x 2 ϵ
+0
+where I (x) := (cid:82)1 ∥∇f (u¯(x)+aϵt¯(x))−∇f ◦u¯(x)∥2da. We use the dominated convergence
+ϵ 0 x x 2
+theoremtoshowthattheintegralontheright-handsideiso(1),whichwillimplythatthesecondterm
+in(S39)iso(ϵ2),completingtheproof. Toseethat∥t¯(·)∥2I (·)hasanintegrabledominatingfunction,
+2 ϵ
+observe that this function is nonnegative and pointwise upper bounded by g(x) := 2m2∥t¯(x)∥2;
+2
+furthermore, g is λ-integrable since t ∈ L2(λ)⊕d. To see that lim ∥t¯(x)∥2I (x) = 0 for λ-almost all
+ϵ→0 2 ϵ
+x,observefirstthat∥t¯(x)∥ < ∞forλ-almostallxbyvirtueofthefactthatt ∈ L2(λ)⊕d. Combining
+2
+this with the continuity of ∇f for each x and the bound I (x) ≤ sup ∥∇f (b)−
+x ϵ b∈Rd:∥b−u¯(x)∥2≤ϵ∥t¯(x)∥2 x
+∇f ◦u¯(x)∥2, we see that lim I (x) = 0 for λ-almost all x. Hence, by the dominated convergence
+x 2 ϵ→0 ϵ
+theorem, the integral on the right-hand side above goes to zero as ϵ → 0.
+D.4.6 Bounded affine map. Let U = T and W be Hilbert spaces and fix a bounded linear
+map κ : U → W. For c ∈ W, define ζ : U → W so that ζ(u) = κ(u)+c. We will show that ζ is
+Hadamard differentiable at any u ∈ U. The differential operator and its adjoint are given by ζ˙ = κ
+u
+and ζ˙∗ = κ∗, where κ∗ is the Hermitian adjoint of κ.
+u
+To see that Hadamard differentiability holds, fix t ∈ T and {u : ϵ ∈ [0,1]} ∈ P(u,U,t). By the
+ϵ
+linearity and boundedness of κ,
+∥ζ(u )−ζ(u)−ϵκ(t)∥ = ∥κ(u −u−ϵt)∥ ≤ ∥κ∥ ∥u −u−ϵt∥ = o(ϵ),
+ϵ W ϵ W op ϵ T
+where ∥ · ∥ denotes the operator norm. Since κ is bounded and linear, this shows that ζ is
+op
+Hadamard differentiable with differential operator ζ˙ = κ. The adjoint of ζ˙ equals the adjoint of κ,
+u u
+namely κ∗.
+D.4.7 Constant map. Fix c in a Hilbert space W. Let ζ be the constant map that takes as
+input an element u belonging to a subset U of a Hilbert space T and, regardless of form u takes,
+returns c. This map is a special case of the affine maps considered in Appendix D.4.6 with κ equal
+to a zero operator. Hence, ζ is Hadamard differentiable with ζ˙ (t) = 0 and ζ˙∗(w) = 0.
+u u
+64D.4.8 Coordinate projection. Let U = R ⊕R , where R and R are Hilbert spaces.
+1 2 1 2
+Define ζ so that ζ(u) = u , where u = (u ,u ). Note that ζ is a linear map. It is also bounded since,
+1 1 2
+for all u = (u ,u ) ∈ U, ∥ζ(u)∥ = ∥u ∥ ≤ ∥u∥ . Hence, by the results in Appendix D.4.6,
+1 2 R1 1 R1 R1⊕R2
+ζ is Hadamard differentiable with ζ˙ = ζ and ζ˙∗ = ζ∗. To see that ζ∗(w) = (w,0), observe that, for
+u u
+any w ∈ R and u ∈ U, ⟨ζ(u),w⟩ = ⟨u ,w⟩ = ⟨u,(w,0)⟩ .
+1 R1 1 R1 R1⊕R2
+D.4.9 Change of measure. Let λ ,λ be σ-finite measures on a measurable space (X,Σ)
+1 2
+with λ ≪ λ and λ -essentially bounded Radon Nikodym derivative dλ2. In this subappendix
+2 1 1 dλ1
+only, we distinguish between functions f : X → R and the corresponding elements of L2(λ) spaces,
+which we denote by [f] to indicate that these elements are equivalence classes of functions that are
+λ
+equal to f λ-almost everywhere; for j ∈ {1,2}, we write [f] := [f] for shorthand. Consider the
+j λj
+embedding map ζ : L2(λ ) → L2(λ ), defined so that ζ([u] ) = [u] ; this map is well-defined since
+1 2 1 2
+λ ≪ λ implies that, for any u ,u ∈ [u] ∈ L2(λ ), [u ] = [u ] and, moreover, the λ -essential
+2 1 1 2 1 1 1 2 2 2 1
+boundedness of dλ2 implies that [u] ∈ L2(λ ).
+dλ1 2 2
+We establish the Hadamard differentiability of ζ by showing that it is a special case of the affine
+maps considered in Appendix D.4.6. Clearly ζ is linear. To see that it is bounded, note that, for all
+[u] ∈ L2(λ ),
+1 1
+(cid:90) (cid:13) (cid:13)
+∥ζ([u] 1)∥2
+L2(λ2)
+= ∥[u] 2∥2
+L2(λ2)
+= u(x)2λ 2(dx) ≤ (cid:13) (cid:13) (cid:13)dd λλ 2(cid:13) (cid:13)
+(cid:13)
+∥[u] 1∥2 L2(λ1),
+1 L∞(λ1)
+where the essential supremum norm on the right-hand side is finite by assumption. Hence, by
+Appendix D.4.6, ζ is Hadamard differentiable at any u ∈ U with ζ˙ = ζ and ζ˙∗ = ζ∗.
+u u
+We now derive a closed-form expression for ζ∗. Observe that, for any [u] ∈ L2(λ ) and
+1 1
+[w] ∈ L2(λ ),
+2 2
+(cid:90) dλ (cid:68) (cid:104) (cid:105) (cid:69)
+⟨ζ([u] ),[w] ⟩ = ⟨[u] ,[w] ⟩ = u(x) 2 (x)w(x)λ (dx) = [u] , dλ2w .
+1 2 L2(λ2) 2 2 L2(λ2) dλ 1 1 1 dλ1 1 L2(λ1)
+Above, we used that the map [w] (cid:55)→ [dλ2w] is well-defined, in the sense that, for any w ,w ∈ [w] ,
+2 dλ1 1 1 2 2
+[dλ2w ] = [dλ2w ] since dλ2 = 0 λ -almost everywhere; we also used that dλ2w is λ -square
+dλ1 1 1 dλ1 2 1 dλ1 2 dλ1 1
+integrable since w is λ -square integrable and dλ2 is λ -essentially bounded. Hence, ζ∗([w] ) =
+1 dλ1 1 2
+[dλ2w] .
+dλ1 1
+D.4.10 Lifting to new domain. Fix Q ∈ M. For a coarsening C : Z → X, define the
+pushforward measure Q := Q◦C−1. Let ζ : L2(Q ) → L2(Q) be the lifting ζ(u) := u◦C — put
+X X
+another way, ζ(u)(z) = u(x) for Q-almost all z, where x = C(z).
+We establish the Hadamard differentiability of ζ by showing that it is a special case of the
+affine maps considered in Appendix D.4.6. Clearly ζ is linear. It is also bounded since, for any
+u ∈ L2(Q ), ∥ζ(u)∥ = ∥u∥ . Hence, by Appendix D.4.6, ζ is Hadamard differentiable at
+X L2(Q) L2(QX)
+65any u ∈ U with ζ˙ = ζ and ζ˙∗ = ζ∗.
+u u
+Wenowderiveaclosed-formexpressionforζ∗. Observethat,foranyu ∈ L2(Q )andw ∈ L2(Q),
+X
+⟨u◦C,w⟩ = E [u(X)w(Z)] = E [u(X)E [w(Z)|X]] = ⟨u,E [w(Z)|X = · ]⟩ .
+L2(Q) Q Q Q Q L2(QX)
+Hence, ζ∗(w) = E [w(Z)|X = · ].
+Q
+D.4.11 Fix binary argument. Let Q be a distribution of (A,X) ∈ {0,1}×X and Q
+A,X X
+be the corresponding marginal distribution of X. Suppose that π(x) := Q (A = 1|X = x)
+A,X
+is Q -a.s. bounded away from zero. Consider the map ζ : L2(Q ) → L2(Q ) defined so that
+X A,X X
+ζ(u)(x) = u(1,x).
+To show ζ is Hadamard differentiable at a generic u ∈ L2(Q ), we express it as a composition
+A,X
+ζ ◦ζ of Hadamard differentiable maps and then apply the chain rule. The first of these maps is
+2 1
+the change of measure ζ : L2(λ ) → L2(λ ) studied in Appendix D.4.9, where λ = Q and λ =
+1 1 2 1 A,X 2
+Q with Q the distribution on {0,1}×X with Radon-Nikodym derivative
+dQA=1,X(a,x)
+=
+A=1,X A=1,X dQA,X
+a . ThismapisHadamarddifferentiablewithζ˙ (t)(a,x) = t(a,x)andζ˙∗ (w)(a,x) = a w(a,x).
+π(x) 1,u 1,u π(x)
+The second is the map ζ : L2(Q ) → L2(Q ) defined so that ζ (u˜)(x) = u˜(1,x). This is
+2 A=1,X X 2
+a bounded linear map, so by Appendix D.4.6 it is Hadamard differentiable with ζ˙ = ζ and
+2,u 2
+ζ˙∗ = ζ∗. It is also straightforward to verify that ζ∗(w)(a,x) = w(x). Since ζ˙∗ is the adjoint of a
+2,u 2 2 u
+composition, we also have that ζ˙∗(w) = ζ˙∗ ◦ζ˙∗ (w). Plugging in the values for the differential
+u 1,u 2,ζ1(u)
+operators and adjoints of ζ ,ζ , this yields that ζ˙ (t)(x) = t(1,x) and ζ˙∗(w)(a,x) = a w(x).
+1 2 u u π(x)
+D.5 Primitives for marginal quantities and semiparametric models
+Some of the primitives in Table 1 map to L2(Q ), where Q is a probability distribution on X.
+X X
+This is the case, for example, for the conditional mean map θ(P,u)(·) = E [u(Z)|X = ·]. If
+P
+X = {x } is a singleton set, then it may be more natural to think of θ(P,u) as a real number
+0
+than as a function. This can be accomplished by simply replacing a primitive θ : U → L2(Q ) by
+X
+θ : U → R, with θ(P,u) := θ(P,u)(x ). This new primitive is totally pathwise differentiable with
+0
+θ˙∗ (w) = θ˙∗ (x (cid:55)→ w), w ∈ R. Forinstance, thisapproachallowsustoestablishthedifferentiability
+P,u P,u
+of a real-valued marginal mean map θ(P,u) = E [u(Z)].
+P
+The primitives in Table 1 can be readily adapted to semiparametric models. This can be done
+by using that, for any semiparametric M′ ⊂ M, the restriction of a totally pathwise differentiable
+primitive θ : M×U → W to M′ ×U is itself totally pathwise differentiable. The adjoint of this
+new primitive at (P,u) is the same as that of θ, except its first entry is replaced by its orthogonal
+projection onto the tangent space M˙ ′ . Thus, when ψ : M′ → R can be expressed as a composition
+P
+of restrictions of primitives in Table 1, Algorithm 2 returns its semiparametric EIF relative to M′.
+Naturally, the returned form of the EIF will be easiest to work with when the projection onto M˙ ′
+P
+has a known closed form.
+66Table S2: Step-by-step evaluation of Algorithm 2’s computations of the EIF of the expected density
+ψ(P˜) = (cid:82) p˜(z)2λ(dz), where p˜= dP˜/dλ for a σ-finite measure λ. Under regularity conditions, the
+parameter ψ is expressible as a composition of a root-density θ (P˜,0) = p˜1/2 ∈ L2(λ), pointwise
+1
+square θ (P˜,h ) = h2 ∈ L2(λ), change of measure θ (P˜,h ) = h ∈ L2(Q), and mean operator
+2 1 1 3 2 2
+θ (P˜,h ) = E [h (Z)] ∈ R. The value of f in the bottom row is the efficient influence function of
+4 3 P˜ 3 0
+ψ at P.
+Step Variables in Algorithm 2
+(j) f f f f f
+4 3 2 1 0
+4 1 0 0 0 0
+3 p/q 0 0 p−ψ(P)
+2 p 0 p−ψ(P)
+1 2p3/2 p−ψ(P)
+0 2[p−ψ(P)]
+E Step-by-step illustrations of Algorithm 2
+Like Table 2 from the main text, Tables S2 and S3 provide step-by-step illustrations of Algorithm 2.
+The first studies the expected density parameter, and the second studies an expected conditional
+covariance parameter. The primitives used to express these parameters are detailed in the table
+captions. The value of f in the bottom row of each table is the EIF at a distribution P in a
+0
+nonparametric model M. In these examples, Q ∈ M is a fixed distribution used to define the
+ambient Hilbert spaces of some of the primitives used to represent ψ. We suppose Q is mutually
+absolutely continuous with P and let p := dP and pX := dPX.
+q dQ qX dQX
+Since the EIF is a feature of the map ψ : M → R, rather than the particular composition of
+primitives chosen to represent it, the EIF returned by Algorithm 2 will not depend on the choice of
+Q provided all of the primitives are totally pathwise differentiable. As noted in Section 2.2, our
+sufficient conditions for differentiability tend to be weakest when Q = P, and so we recommend this
+choice in practice.
+Some of the primitives used in these examples do not appear in Table 1. For example,
+though the primitive θ(P,0) = E [Y |X = ·] is closely related to the conditional mean primitive
+P
+θ(P,u) = E [u(Z)|X = ·] from Table 1, θ returns the conditional mean of a predetermined
+P
+transformation of Z, u(z) = y, and so is not the same map as θ. In Figure 1, we avoided this
+issue by expressing E [Y |X = ·] as a composition of primitives from Table 1: the constant map
+P
+that returns z (cid:55)→ y and conditional mean primitive θ(P,u) = E [u(Z)|X = ·]. A closely related
+P
+approach, which is the one we take in this appendix, is to use the following result.
+Lemma S15 (Fixing the Hilbert-valued input of a primitive). Let θ : M×U → W be totally
+pathwise differentiable at (P,u) ∈ M × U. Then, the primitive θ : M × {0} → W, defined so
+that θ(·,0) = θ(·,u), is totally pathwise differentiable at (P,0) with θ˙∗ (w) = (θ˙∗ (w) ,0), where
+P,0 P,u 0
+θ˙∗ (w) denotes the first entry of θ˙∗ (w).
+P,u 0 P,u
+67Table S3: Step-by-step evaluation of Algorithm 2’s computations of the EIF of the expected
+conditional covariance ψ(P˜) = E [Cov (A,Y |X)], where Z = (X,A,Y). Let C : z (cid:55)→ x. Un-
+P˜ P˜
+der regularity conditions, the parameter ψ is expressible as a composition of conditional means
+θ (P˜,0)(·) = E [Y |X = ·] ∈ L2(Q ) and θ (P˜,0)(·) = E [A|X = ·] ∈ L2(Q ), liftings
+1 P˜ X 2 P˜ X
+θ (P˜,h ) = (z (cid:55)→ h (x)) ∈ L2(Q) and θ (P˜,h ) = (z (cid:55)→ h (x)) ∈ L2(Q), a pointwise operation
+3 1 1 4 2 2
+θ (P˜,(h ,h )) = (z (cid:55)→ ay−h (z)h (z)) ∈ L2(Q), and a mean operator θ (P˜,h ) = E [h (Z)] ∈ R.
+5 3 4 3 4 6 5 P˜ 5
+Below µY(x) := E [Y |X = x] and µA(x) := E [A|X = x]. The value of f in the bottom row is
+P P P P 0
+the efficient influence function of ψ at P. Other expressions of this parameter, such as ones using
+the conditional covariance primitive studied in Appendix D.2.3, can also be used to compute the
+EIF.
+Step Variables in Algorithm 2
+(j) f f f f f f f
+6 5 4 3 2 1 0
+6 1 0 0 0 0 0 0
+5 p/q 0 0 0 0 z (cid:55)→ay−µA(x)µY(x)−ψ(P)
+P P
+4 −pµY ◦C −pµA◦C 0 0 z (cid:55)→ay−µA(x)µY(x)−ψ(P)
+q P q P P P
+3 −pµA◦C −pXµY 0 z (cid:55)→ay−µA(x)µY(x)−ψ(P)
+q P qX P P P
+2 −pXµY −pXµA z (cid:55)→ay−µA(x)µY(x)−ψ(P)
+qX P qX P P P
+1 −pXµA z (cid:55)→a[y−µY(x)]−ψ(P)
+qX P P
+0 z (cid:55)→[a−µA(x)][y−µY(x)]−ψ(P)
+P P
+This lemma is a direct consequence of Lemma S5 and Appendix D.3.1 and so the proof is omitted.
+F Study of remainder in von Mises expansion of non-
+parametric R2
+Table S4 provides a step-by-step illustration of how Algorithm 3 estimates the efficient influence
+operator when it is applied to the nonparametric R2 parameter as expressed in Figure 1. The value
+of f(cid:98)0 in the last row is the estimated efficient influence operator returned by the algorithm.
+Forward and backward pass nuisances are estimated as described in Appendix G. In the forward
+routines, this entails setting (cid:98)h
+1
+: z (cid:55)→ y, (cid:98)h
+2
+= Var PI(Y) with PI the empirical distribution of
+ZI := {Z
+i
+: i ∈ I}, (cid:98)h
+3
+: z (cid:55)→ y, (cid:98)h
+4
+: x (cid:55)→ E(cid:98)4[Y |X = x] with the conditional mean estimate returned
+by a nonparametric regression procedure, (cid:98)h
+5
+: z (cid:55)→ (cid:98)h 4(x), (cid:98)h
+6
+: z (cid:55)→ [y−(cid:98)h 5(z)]2, (cid:98)h
+7
+= E PI[(cid:98)h 6(Z)],
+and (cid:98)h
+8
+= 1−(cid:98)h 7/(cid:98)h 2. In the backward routines, the only nuisances that require estimation are
+E P[Y |X = ·] and E P[Y], which arise when obtaining the estimates ϑ(cid:98)5 and ϑ(cid:98)2, respectively. We
+denote these estimates by E(cid:98)5[Y |X = ·] and E(cid:98)2[Y], respectively.
+(cid:82)
+WenowstudytheremainderR
+n
+=(cid:98)h 8−ψ(P)+ f(cid:98)0(z)P(dz)inthisexample. Weleth 1,h 2,...,h
+8
+be as defined in Algorithm 1, so that ψ(P) = 1−h /h . Adding and subtracting terms then yields
+7 2
+(cid:32) (cid:33)
+(cid:98)h 7−h
+7
+(cid:98)h 7[(cid:98)h 2−h 2] h
+7
+(cid:98)h
+7
+(cid:98)h 2−h
+2
+(cid:98)h 8−ψ(P) = − + + − .
+(cid:98)h 2 (cid:98)h2 2 h 2 (cid:98)h 2 (cid:98)h 2
+68Table S4: Step-by-step evaluation of Algorithm 3 for the nonparametric R2 parameter when it is
+expressed as in Figure 1. This table is the estimation counterpart of Table 2 from the main text,
+which computes the EIF at a known distribution P.
+Step VariablesinAlgorithm3
+(j)
+f
+8
+f(cid:98)7 f(cid:98)6 f(cid:98)5 f(cid:98)4 f(cid:98)3 f(cid:98)2 f(cid:98)1 f(cid:98)0
+8 1 0 0 0 0 − 0 − 0
+7 −1 0 0 0 − (cid:98)h7 − 0
+(cid:98)h2 (cid:98)h2 2
+6 −1 0 0 − (cid:98)h7 − −(cid:98)h6(·)−(cid:98)h7
+(cid:98)h2 (cid:98)h2 2 (cid:98)h2
+5 z(cid:55)→2[y−(cid:98)h4(x)] 0 − (cid:98)h7 − −(cid:98)h6(·)−(cid:98)h7
+(cid:98)h2 (cid:98)h2 2 (cid:98)h2
+4 2{E(cid:98)5[Y|X=·]−(cid:98)h4(·)} − (cid:98)h7 − −(cid:98)h6(·)−(cid:98)h7
+(cid:98)h2 (cid:98)h2 2 (cid:98)h2
+3 − (cid:98)h7 − z(cid:55)→−(cid:98)h6(z)−(cid:98)h7+2{E(cid:98)5[Y|X=x]−(cid:98)h4(x)}{y−(cid:98)h4(x)}
+(cid:98)h2 2 (cid:98)h2 (cid:98)h2
+2 (cid:98)h7 − z(cid:55)→−(cid:98)h6(z)−(cid:98)h7+2{E(cid:98)5[Y|X=x]−(cid:98)h4(x)}{y−(cid:98)h4(x)}
+1
+(cid:98)h2 2
+−
+z(cid:55)→−(cid:98)h6(z)−(cid:98)h7+2{E(cid:98)h (cid:98)2 5[Y|X=x]−(cid:98)h4(x)}{y−(cid:98)h4(cid:98)h (2 x)}+(cid:98)h7{(y−E(cid:98)2[Y])2−(cid:98)h2}
+0
+z(cid:55)→−(cid:98)h6(z(cid:98)h )2 −(cid:98)h7+2{E(cid:98)5[Y|X=x]−(cid:98)h (cid:98)h2 4(x)}{y−(cid:98)h4(x)}+(cid:98)h7{(y−E(cid:98)(cid:98) 2h [2 2 Y])2−(cid:98)h2}
+(cid:98)h2 (cid:98)h2 (cid:98)h2 2
+Combining this with the definition of R n, plugging in the value of f(cid:98)0 returned by Algorithm 3, and
+then simplifying shows that
+(cid:32) (cid:33)
+(cid:90)
+(cid:98)h 7−h
+7
+(cid:98)h 7[(cid:98)h 2−h 2] h
+7
+(cid:98)h
+7
+(cid:98)h 2−h
+2
+R
+n
+= − + + − + f(cid:98)0(z)P(dz)
+(cid:98)h 2 (cid:98)h2 2 h 2 (cid:98)h 2 (cid:98)h 2
+(cid:82) ((cid:98)h 6−h 6)(z)P(dz) (cid:98)h 7(cid:82) [{y−E(cid:98)2[Y]}2−{y−E P[Y]}2]P(dz)
+= − +
+(cid:98)h
+2
+(cid:98)h2
+2
+(cid:32) (cid:33) (cid:82)
+h
+7
+(cid:98)h
+7
+(cid:98)h 2−h
+2
+2 {E(cid:98)5[Y |X = x]−(cid:98)h 4(x)}{h 4(x)−(cid:98)h 4(x)}P X(dx)
++ − +
+h 2 (cid:98)h 2 (cid:98)h 2 (cid:98)h 2
+(cid:82) {(cid:98)h 4(x)−h 4(x)}2P X(dx) (cid:98)h 7{E(cid:98)2[Y]−E P[Y]}2
+= − +
+(cid:98)h
+2
+(cid:98)h2
+2
+(cid:32) (cid:33) (cid:82)
+h
+7
+(cid:98)h
+7
+(cid:98)h 2−h
+2
+2 {E(cid:98)5[Y |X = x]−(cid:98)h 4(x)}{h 4(x)−(cid:98)h 4(x)}P X(dx)
++ − + .
+h 2 (cid:98)h 2 (cid:98)h 2 (cid:98)h 2
+The right-hand side consists of four terms. When analyzing them, we suppose that h is strictly
+2
+positive and the number of observations nI in ZI diverges with n so that (cid:98)h
+2
+is bounded away from
+zero with probability tending to one. In this case, R will be o (n−1/2) whenever the numerators of
+n p
+the four terms on the right are all o (n−1/2). The first is the mean-squared prediction error of the
+p
+estimate of E [Y |X = ·], which will be o (n−1/2) provided appropriate smoothness or sparsity
+P p
+conditions hold and the estimator (cid:98)h
+4
+leverages them. The second numerator is (cid:98)h
+7
+times the squared
+error of E(cid:98)2 as an estimate of E P[Y]. If the empirical mean E PI[Y] is used to estimate this quantity
+and (cid:98)h
+7
+is O p(1), then this term will be O p(n−
+I
+1), and so o p(n−1/2) whenever nI/n1/2 diverges with
+n. Up to a multiplicative factor of 1/(cid:98)h 2, the third term is a product of the errors for estimating the
+real-valued quantities h /h and h , and so should be o (n−1/2) under appropriate conditions. The
+7 2 2 p
+final term will be exactly zero if a common, deterministic regression scheme is used to construct the
+estimates E(cid:98)5[Y |X = ·] and (cid:98)h
+4
+of E P[Y |X = ·], since then these two quantities would be equal.
+69Otherwise, Cauchy-Schwarz can be used to bound the magnitude of that quantity, which then shows
+that it is a product of L2(P X) norms of E(cid:98)5[Y |X = ·]−(cid:98)h 4(·) and h 4(·)−(cid:98)h 4(·). This product will
+be o (n−1/2/) under appropriate smoothness or sparsity conditions.
+p
+G Nuisance estimation routines for primitives in Ta-
+ble 1
+G.1 Overview
+We now present forward and backward nuisance routines for some of the primitives appearing in
+Table 1. As detailed in Algorithm 4, the forward routine takes as input data ZI := {Z
+i
+: i ∈ I ⊆ [n]}
+and u ∈ U and returns an estimate (cid:98)h of θ(P,u). The backward routine takes as input ZI, u, (cid:98)h, and
+w ∈ W and returns an estimate ϑ(cid:98)of θ˙∗ (w); ϑ(cid:98)must be compatible with the routine’s inputs, in
+P,u
+(cid:82)
+that there exists P(cid:98) ∈ M with (cid:98)h = θ(P(cid:98),u) and ϑ(cid:98)0dP(cid:98) = 0. For compatibility to be achievable, the
+forward routine must ensure that (cid:98)h belongs to the image of θ(·,u), which we denote by θ(M,u).
+When presenting these routines, we always take u and w to be generic elements of U and W,
+respectively. Some of our proposed nuisance estimation routines use sample splitting or cross-fitting,
+and so take folds as an input; we denote these folds by I(1) and I(2), where {I(1),I(2)} is a partition of
+I into subsets of sizes n(1) and n(2), n(1) ≈ n(2). For primitives whose domain or codomain depends
+on some Q ∈ M, we follow the recommendation given in Section 2.2 and focus on the case where
+Q = P, with P the data-generating distribution.
+The nuisance estimation routines presented hereafter are only examples — other formulations are
+possible. This may include, for example, using different loss functions, penalty terms, observation
+weights, or forms of cross-fitting or sample splitting.
+G.2 Maps depend nontrivially on both of their arguments
+G.2.1 Conditional mean. As in Appendix D.2.1, θ(P,u)(x) = E [u(Z)|X = x] and
+P
+θ˙∗ (w)(z) = (z (cid:55)→ [u(z) − θ(P,u)(x)]w(x),z (cid:55)→ w(x)). In the forward routine, θ(P,u) can be
+P,u
+estimated by regressing u(Z ) against X , i ∈ I, with the squared error loss. As long as the
+i i
+image of the regression estimate (cid:98)h respects known bounds on u and the locally nonparametric
+model M is suitably large, this estimate will fall in θ(M,u). In the backward routine, we take
+ϑ(cid:98)(z) := (z (cid:55)→ [u(z)−(cid:98)h(x)]w(x),z (cid:55)→ w(x)). Compatibility holds since (cid:98)h ∈ θ(M,u) implies there
+(cid:82)
+exists P(cid:98) ∈ M such that (cid:98)h = θ(P(cid:98),u) and, by the law of total expectation, ϑ(cid:98)0dP(cid:98) = 0.
+70G.2.2 Multifold conditional mean. As in Appendix D.2.2, θ(P,u)(·) = E [u(Z )|X =
+Pr [r] [r]
+·] and θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)), where ζ˙∗ (w)(z ) = w(x ) and
+P,u P,u P,u P,u [r] [r]
+r
+ν˙ P∗ ,u(w)(z) = (cid:88) E
+Pr
+(cid:2)(cid:8) u(Z [r])−θ(P,u)(X [r])(cid:9) w(X [r])(cid:12) (cid:12)Z
+j
+= z(cid:3) .
+j=1
+In the forward routine, θ(P,u) can be estimated by regressing u(Z ) against (X ), with
+i[r] i[r]
+i[r] := (i(1),i(2),...,i(r)) varying over the set I(1) of n(1)!/(n(1)−r)! choices of ordered tuples of
+r
+r unique elements from the first fold I(1); to reduce runtime, a random subsample of the indices
+in
+I( r1)
+may be used while fitting this regression. Just as in Appendix D.2.1, this estimate, (cid:98)h, will
+belong to θ(M,u) as long as it respects any known bounds on u and M is suitably large.
+In the backward routine, the estimate ϑ(cid:98)0 is obtained by running a pooled regression of
+(cid:110) (cid:111)
+u(Z i[r])−(cid:98)h(X i[r]) w(X i[r]) against Z i(j), where (i[r],j) ∈
+I( r2)
+×[r] with
+I( r2)
+defined analogously
+(1)
+to I , but using the second fold rather than the first; runtime can be reduced by fitting the
+r
+regression using only a random subset of the indices in
+I(2)
+×[r]. This estimate is compatible with
+r
+(cid:98)h provided M is large enough. Because the second entry ζ˙∗ (w) of θ˙∗ (w) does not depend on P,
+P,u P,u
+the second entry of ϑ(cid:98)can be set to its known value, z (cid:55)→ w(x ).
+[r] [r]
+G.2.3 Conditional covariance. As in Appendix D.2.3, θ(P,u)(x) = cov [u (Z),u (Z)|X =
+P 1 2
+x] and θ˙∗ (w) = (ν˙∗ (w),ζ˙∗ (w)), where
+P,u P,u P,u
+ 
+2
+(cid:89)
+ν˙ P∗ ,u(w)(z) = w(x) {u j(z)−E P[u j(Z)|X = x]}−θ(P,u)(x),
+j=1
+ζ˙∗ (w) = (z (cid:55)→ w(x){u (z)−E [u (Z)|X = x]})2 .
+P,u 3−j P 3−j j=1
+In the forward routine, three regressions are fit. First, u (Z ) is regressed against X , i ∈ I(1),
+1 i i
+yielding an estimate µ of E [u (Z)|X = ·]. Second, u (Z ) is regressed against X , i ∈ I(1),
+(cid:98)1 P 1 2 i i
+yielding an estimate µ of E [u (Z)|X = ·]. Third,
+(cid:81)2
+{u (Z )−µ (X )} is regressed against
+(cid:98)2 P 2 j=1 j i (cid:98)j i
+X i, i ∈ I(2), yielding the estimate (cid:98)h of θ(P,u).
+In the backward routine, we either reuse the saved estimates µ and µ fitted in the forward
+(cid:98)1 (cid:98)2
+routine, or refit them if they were not saved. We then let
+   
+2
+(cid:89)
+ϑ(cid:98):= z (cid:55)→ w(x) {u j(z)−µ (cid:98)j(x)}−(cid:98)h(x),(z (cid:55)→ w(x){u 3−j(z)−µ (cid:98)3−j(x)})2 j=1.
+j=1
+Compatibility between ϑ(cid:98)0 and(cid:98)h holds provided there exists a P(cid:98) ∈ M satisfying the following system
+of equations P(cid:98)X-a.s.:
+E [u (Z)|X = x] = µ (x),
+P(cid:98) 1 (cid:98)1
+71E [u (Z)|X = x] = µ (x),
+P(cid:98) 2 (cid:98)2
+E P(cid:98)[u 1(Z)u 2(Z)|X = x] =(cid:98)h(x)+µ (cid:98)1(x)µ (cid:98)2(x).
+G.2.4 Conditional variance. When θ(P,u)(x) = Var [u(Z)|X = x] as in Appendix D.2.4,
+P
+the nuisance estimation routines for the conditional covariance can be used with u = u = u (see
+1 2
+Appendix G.2.3).
+(cid:82)
+G.2.5 Kernel embedding. As in Appendix D.2.5, θ(P,u)(·) = K(·,x)u(x)P (dx) and
+X
+θ˙∗ (w) = (wu − (cid:82) wudP ,w). In the forward routine, we can estimate the marginal dis-
+P,u X
+tribution P
+X
+of X under sampling from P. We denote this estimate by P(cid:98)X. Then, we let
+(cid:98)h(·) = (cid:82) K(·,x)u(x)P(cid:98)X(dx) and, in the backward routine, we let θ˙ P∗ ,u(w) = (wu−(cid:82) wudP(cid:98)X,w).
+These estimates are compatible provided there exists some P(cid:98) ∈ M with marginal distribution P(cid:98)X.
+If M is large enough so that there exists a distribution whose marginal distribution of X is equal to
+the empirical distribution of {X
+i
+: i ∈ I}, then P(cid:98)X can be chosen to be this empirical distribution.
+G.3 Maps that only depend on their distribution-valued argument
+G.3.1 Root-density. As in Appendix D.3.2, θ(P,u)(z) = dP(z)1/2 and θ˙∗ (w) = (ν˙∗(w),0)
+dλ P,u P
+(cid:104) (cid:105)
+with ν˙ P∗(w)(z) = 2νw (P(z ))
+(z)
+−E
+P
+2νw (P(Z )()
+Z)
+. In the forward routine, the estimate (cid:98)h of ν(P) can be
+obtained by taking the square root of a kernel density estimate, if λ is a Lebesgue measure, or
+the empirical probability mass function, if λ is a counting measure. In either case, the backward
+(cid:82)
+routine sets ϑ(cid:98) = ([w/(cid:98)h− w(cid:98)hdλ]/2,0). The estimates ϑ(cid:98) and (cid:98)h are plug-in estimators based on
+the distribution P(cid:98) satisfying dP(cid:98)/dλ = (cid:98)h2, and so the compatibility condition will hold if the
+nonparametric model M is large enough to contain this distribution.
+G.3.2 Conditional density. As in Appendix D.3.3, θ(P,u)(z) = p (z) and ν˙∗(w)(z) =
+Y |X P
+w(z)p Y|X(z)−E P[w(Z)p Y|X(Z)|X = x]. In the forward routine, the estimate (cid:98)h of p
+Y|X
+can be
+obtained using kernel density estimation, if λ is a Lebesgue measure, or nonparametric multinomial
+logistic regression, if λ is a counting measure. In either case, the backward routine sets ϑ(cid:98)= (ϑ(cid:98)0,0)
+(cid:82)
+with ϑ(cid:98)0(z) = w(z)(cid:98)h(z)− w(x,y˜)(cid:98)h(x,y˜)λ(dy˜). The estimates ϑ(cid:98)and (cid:98)h are plug-in estimators based
+on any distribution P(cid:98) whose conditional density of Y|X relative to λ is (cid:98)h, and so the compatibility
+condition will hold if the nonparametric model M is large enough to contain such a distribution.
+(cid:82)
+G.3.3 Dose-response function. As in Appendix D.3.4, θ(P,u)(a) = µ (a,x)P (dx) and
+P X
+(cid:18) (cid:90) (cid:19)
+y−µ (a,x)
+θ˙∗ (w) = z (cid:55)→ P w(a)+ [µ (a′,x)−ν(P)(a′)]w(a′)λ(da′),0 , (S40)
+P,u π (a | x) P
+P
+72where z = (x,a,y), µ (a,x) := E [Y |A = a,X = x] and π (a|x) = P(A = a|X = x). In the
+P P P
+forward routine, µ can be estimated using regression, yielding µ, and then θ(P,u) can be estimated
+P (cid:98)
+by (cid:98)h(a) = |1
+I|
+(cid:80) i∈Iµ (cid:98)(a,X i). In the backward routine, π
+P
+can be estimated using kernel density
+estimation, yielding π (cid:98), and then θ˙ P∗ ,u(w) can be estimated using the plug-in estimator ϑ(cid:98)that takes
+the same form as (S40), but with µ P, π P, and ν(P) replaced by µ (cid:98), π (cid:98), and (cid:98)h, respectively. The
+compatibility condition holds provided there exists P(cid:98) ∈ M with µ
+P(cid:98)
+= µ (cid:98), π
+P(cid:98)
+= π (cid:98), and ν(P(cid:98)) =(cid:98)h;
+this will typically hold provided the nonparametric model M is large enough.
+(cid:82)
+G.3.4 Counterfactual density. As in Appendix D.3.5, θ(P,u) = p (y|1,x)P (dx)
+Y|A,X X
+and θ˙∗ (w) = (ν˙∗(w),0), where ν˙∗ is defined in (S38). To streamline the discussion, we suppose λ
+P,u P P Y
+is a Lebesgue measure. In the forward routine, an estimate (y,x) (cid:55)→ p (y|x) of p (y|1,x)
+(cid:98)Y|1,X Y|A,X
+can be obtained using kernel density estimation among all i ∈ I with A = 1. The counterfactual
+i
+density θ(P,u) can then be estimated by (cid:98)h(y) = |1
+I|
+(cid:80) i∈Ip (cid:98)Y|1,X(y|X i). In the backward routine,
+π can be estimated using regression, yielding π. Alternatively, 1/π can be estimated directly,
+P (cid:98) P
+yielding 1/π (Robins et al., 2007; Chernozhukov et al., 2022c). Reusing the nuisance p from the
+(cid:98) (cid:98)Y|1,X
+(cid:82)
+forward routine, E [w(Y)|A = 1,X = x] can be estimated using µ (x) = w(y)p (y|x)dy.
+P (cid:98)w (cid:98)Y|1,X
+The adjoint can then be estimated with the plug-in estimate ϑ(cid:98)= (ϑ(cid:98)0,0), where
+(cid:34) (cid:35)
+1{a = 1} 1 (cid:88)
+ϑ(cid:98)0(z) =
+π(a|x)
+{w(y)−µ (cid:98)w(x)}+ µ (cid:98)w(x)−
+|I|
+µ (cid:98)w(X i) .
+(cid:98) i:i∈I
+ThecompatibilityconditionwilltypicallyholdprovidedthenonparametricmodelMislargeenough.
+G.4 Maps that only depend on their Hilbert-valued argument
+G.4.1 Overview. We now consider primitives that only depend on their Hilbert-valued input
+in the sense described in Appendix D.4.1, so that there is a Hadamard differentiable map ζ : U → W
+such that θ(P′,u′) = ζ(u′) for all (P′,u′) ∈ M×U.
+These primitives can be evaluated explicitly in the forward pass, and so we let the forward
+nuisance routine return (cid:98)h = ζ(u). If the ambient Hilbert spaces T and W do not depend on P
+and the form of ζ˙∗ is known, we let the backward nuisance routine return ϑ(cid:98)= (0,ζ˙∗(w)). If one or
+u u
+both ambient Hilbert spaces depend on P or the form of the adjoint is unknown, then estimating
+ζ˙ u∗(w) may be necessary. Denoting this estimate by (cid:98)t, the backward nuisance routine then returns
+ϑ(cid:98)= (0,(cid:98)t). The compatibility condition in Algorithm 4 is necessarily satisfied since ϑ(cid:98)0 = 0.
+In the remainder of this appendix, we present backward nuisance routines for cases where either
+the ambient Hilbert spaces depend on P or ζ˙∗(w) must be estimated.
+u
+G.4.2 Pointwise operations. The adjoint ζ˙∗(w) for the pointwise operation primitive from
+u
+Appendix D.4.5 is invariant to the choice of λ indexing the ambient Hilbert spaces T = L2(λ)⊕d
+73and W = L2(λ). Therefore, if λ = P, then the backward nuisance routine can set ϑ(cid:98) equal to its
+true value, θ˙∗ (w) = (0,ζ˙∗(w)).
+P,u u
+G.4.3 Bounded affine map. We present a backward nuisance routine for the bounded affine
+maps ζ(·) = κ(·)+c from Appendix D.4.6 in cases where the form of the adjoint κ∗ is unknown.
+This routine is based on a Riesz loss (Chernozhukov et al., 2022c). Recalling that ζ˙ = κ and
+u
+ζ˙∗ = κ∗, the key observation used is that ζ˙∗(w) = κ∗(w) is the unique solution to
+u u
+minimize Φ (t) := ∥t∥2 −2⟨κ(t),w⟩
+u,w T W
+t (S41)
+subject to t ∈ T.
+This holds since
+(cid:104) (cid:105) (cid:104) (cid:105)
+κ∗(w) = argmin∥t−κ∗(w)∥2 = argmin ∥t∥2 −2⟨t,κ∗(w)⟩ = argmin ∥t∥2 −2⟨κ(t),w⟩ .
+T T T T W
+t∈T t∈T t∈T
+When T and W do not depend on the unknown distribution P, the minimization problem in
+(S41) can be approximated by approximating T with a d-dimensional subspace T , yielding an
+d
+approximation (cid:98)t of ζ˙ u∗(w).
+We also consider cases where one or both of T and W depend on P. When doing this, we
+suppose that the P-dependent Hilbert spaces are equal to L2(P ) or L2(P). Then, the squared
+X
+norm or inner product in (S41) can be estimated with an empirical mean over the observations in
+ZI. Using the case where T = L2(P) and W = L2(P X) as an illustration, Φ u,w(t) in (S41) would be
+estimated by
+n
+1 (cid:88) 1 (cid:88)
+Φ(cid:98)u,w(t) := t(Z i)−2 κ(t)(Z i)w(X i).
+nI nI
+i∈I i=1
+The risk function Φ(cid:98)u,w can be used to obtain an estimate (cid:98)t of ζ˙ u∗(w) using a statistical learning tool
+such as random forests, gradient boosting, or neural networks (Breiman, 2001; Friedman, 2001;
+Rosenblatt, 1958).
+Since the primitives in Appendices D.4.7-D.4.11 are all special cases of bounded affine maps,
+the backward nuisance routine from this appendix can be used for all of those primitives.
+74
