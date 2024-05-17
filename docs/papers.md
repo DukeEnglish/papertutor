@@ -2,315 +2,345 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08784v1 |
-|title| Refinement of an Epilepsy Dictionary through Human Annotation of Health-related posts on Instagram |
-|authors| Aehong MinXuan WangRion Brattig CorreiaJordan RozumWendy R. MillerLuis M. Rocha
-|links| http://arxiv.org/abs/2405.08784v1 |
-|updated| 2024-05-14 17:27:59 UTC |
-|summary| We used a dictionary built from biomedical terminology extracted from varioussources such as DrugBank MedDRA MedlinePlus TCMGeneDIT to tag more than 8million Instagram posts by users who have mentioned an epilepsy-relevant drugat least once between 2010 and early 2016. A random sample of 1771 posts with2947 term matches was evaluated by human annotators to identifyfalse-positives. OpenAIs GPT series models were compared against humanannotation. Frequent terms with a high false-positive rate were removed fromthe dictionary. Analysis of the estimated false-positive rates of the annotatedterms revealed 8 ambiguous terms plus synonyms used in Instagram posts whichwere removed from the original dictionary. To study the effect of removingthose terms we constructed knowledge networks using the refined and theoriginal dictionaries and performed an eigenvector-centrality analysis on bothnetworks. We show that the refined dictionary thus produced leads to asignificantly different rank of important terms as measured by theireigenvector-centrality of the knowledge networks. Furthermore the mostimportant terms obtained after refinement are of greater medical relevance. Inaddition we show that OpenAIs GPT series models fare worse than humanannotators in this task. |
+|idx| 2405.10313v1 |
+|title| How Far Are We From AGI |
+|authors| Tao FengChuanyang JinJingyu LiuKunlun ZhuHaoqin TuZirui ChengGuanyu LinJiaxuan You
+|links| http://arxiv.org/abs/2405.10313v1 |
+|updated| 2024-05-16 17:59:02 UTC |
+|summary| The evolution of artificial intelligence AI has profoundly impacted humansociety driving significant advancements in multiple sectors. Yet theescalating demands on AI have highlighted the limitations of AIs currentofferings catalyzing a movement towards Artificial General Intelligence AGI.AGI distinguished by its ability to execute diverse real-world tasks withefficiency and effectiveness comparable to human intelligence reflects aparamount milestone in AI evolution. While existing works have summarizedspecific recent advancements of AI they lack a comprehensive discussion ofAGIs definitions goals and developmental trajectories. Different fromexisting survey papers this paper delves into the pivotal questions of ourproximity to AGI and the strategies necessary for its realization throughextensive surveys discussions and original perspectives. We start byarticulating the requisite capability frameworks for AGI integrating theinternal interface and system dimensions. As the realization of AGI requiresmore advanced capabilities and adherence to stringent constraints we furtherdiscuss necessary AGI alignment technologies to harmonize these factors.Notably we emphasize the importance of approaching AGI responsibly by firstdefining the key levels of AGI progression followed by the evaluationframework that situates the status-quo and finally giving our roadmap of howto reach the pinnacle of AGI. Moreover to give tangible insights into theubiquitous impact of the integration of AI we outline existing challenges andpotential pathways toward AGI in multiple domains. In sum serving as apioneering exploration into the current state and future trajectory of AGIthis paper aims to foster a collective comprehension and catalyze broaderpublic discussions among researchers and practitioners on AGI. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08760v1 |
-|title| Is the Pope Catholic? Yes, the Pope is Catholic. Generative Evaluation of Intent Resolution in LLMs |
-|authors| Akhila YerukolaSaujas VaduguruDaniel FriedMaarten Sap
-|links| http://arxiv.org/abs/2405.08760v1 |
-|updated| 2024-05-14 16:48:56 UTC |
-|summary| Humans often express their communicative intents indirectly or non-literallywhich requires their interlocutors -- human or AI -- to understand beyond theliteral meaning of words. While most existing work has focused ondiscriminative evaluations we present a new approach to generatively evaluatelarge language models LLMs intention understanding by examining theirresponses to non-literal utterances. Ideally an LLM should respond in linewith the true intention of a non-literal utterance not its literalinterpretation. Our findings show that LLMs struggle to generate pragmaticallyrelevant responses to non-literal language achieving only 50-55 accuracy onaverage. While explicitly providing oracle intentions significantly improvesperformance e.g. 75 for Mistral-Instruct this still indicates challengesin leveraging given intentions to produce appropriate responses. Usingchain-of-thought to make models spell out intentions yields much smaller gains60 for Mistral-Instruct. These findings suggest that LLMs are not yeteffective pragmatic interlocutors highlighting the need for better approachesfor modeling intentions and utilizing them for pragmatic generation. |
+|idx| 2405.10292v1 |
+|title| Fine-Tuning Large Vision-Language Models as Decision-Making Agents via Reinforcement Learning |
+|authors| Yuexiang ZhaiHao BaiZipeng LinJiayi PanShengbang TongYifei ZhouAlane SuhrSaining XieYann LeCunYi MaSergey Levine
+|links| http://arxiv.org/abs/2405.10292v1 |
+|updated| 2024-05-16 17:50:19 UTC |
+|summary| Large vision-language models VLMs fine-tuned on specialized visualinstruction-following data have exhibited impressive language reasoningcapabilities across various scenarios. However this fine-tuning paradigm maynot be able to efficiently learn optimal decision-making agents in multi-stepgoal-directed tasks from interactive environments. To address this challengewe propose an algorithmic framework that fine-tunes VLMs with reinforcementlearning RL. Specifically our framework provides a task description and thenprompts the VLM to generate chain-of-thought CoT reasoning enabling the VLMto efficiently explore intermediate reasoning steps that lead to the finaltext-based action. Next the open-ended text output is parsed into anexecutable action to interact with the environment to obtain goal-directed taskrewards. Finally our framework uses these task rewards to fine-tune the entireVLM with RL. Empirically we demonstrate that our proposed framework enhancesthe decision-making capabilities of VLM agents across various tasks enabling7b models to outperform commercial models such as GPT4-V or Gemini.Furthermore we find that CoT reasoning is a crucial component for performanceimprovement as removing the CoT reasoning results in a significant decrease inthe overall performance of our method. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08751v1 |
-|title| From Text to Context: An Entailment Approach for News Stakeholder Classification |
-|authors| Alapan KuilaSudeshna Sarkar
-|links| http://arxiv.org/abs/2405.08751v1 |
-|updated| 2024-05-14 16:35:21 UTC |
-|summary| Navigating the complex landscape of news articles involves understanding thevarious actors or entities involved referred to as news stakeholders. Thesestakeholders ranging from policymakers to opposition figures citizens andmore play pivotal roles in shaping news narratives. Recognizing theirstakeholder types reflecting their roles political alignments socialstanding and more is paramount for a nuanced comprehension of news content.Despite existing works focusing on salient entity extraction coveragevariations and political affiliations through social media data the automateddetection of stakeholder roles within news content remains an underexploreddomain. In this paper we bridge this gap by introducing an effective approachto classify stakeholder types in news articles. Our method involvestransforming the stakeholder classification problem into a natural languageinference task utilizing contextual information from news articles andexternal knowledge to enhance the accuracy of stakeholder type detection.Moreover our proposed model showcases efficacy in zero-shot settings furtherextending its applicability to diverse news contexts. |
+|idx| 2405.10288v1 |
+|title| Timeline-based Sentence Decomposition with In-Context Learning for Temporal Fact Extraction |
+|authors| Jianhao ChenHaoyuan OuyangJunyang RenWentao DingWei HuYuzhong Qu
+|links| http://arxiv.org/abs/2405.10288v1 |
+|updated| 2024-05-16 17:48:21 UTC |
+|summary| Facts extraction is pivotal for constructing knowledge graphs. Recently theincreasing demand for temporal facts in downstream tasks has led to theemergence of the task of temporal fact extraction. In this paper wespecifically address the extraction of temporal facts from natural languagetext. Previous studies fail to handle the challenge of establishingtime-to-fact correspondences in complex sentences. To overcome this hurdle wepropose a timeline-based sentence decomposition strategy using large languagemodels LLMs with in-context learning ensuring a fine-grained understandingof the timeline associated with various facts. In addition we evaluate theperformance of LLMs for direct temporal fact extraction and get unsatisfactoryresults. To this end we introduce TSDRE a method that incorporates thedecomposition capabilities of LLMs into the traditional fine-tuning of smallerpre-trained language models PLMs. To support the evaluation we constructComplexTRED a complex temporal fact extraction dataset. Our experiments showthat TSDRE achieves state-of-the-art results on both HyperRED-Temporal andComplexTRED datasets. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08729v1 |
-|title| Targeted Augmentation for Low-Resource Event Extraction |
-|authors| Sijia WangLifu Huang
-|links| http://arxiv.org/abs/2405.08729v1 |
-|updated| 2024-05-14 16:15:31 UTC |
-|summary| Addressing the challenge of low-resource information extraction remains anongoing issue due to the inherent information scarcity within limited trainingexamples. Existing data augmentation methods considered potential solutionsstruggle to strike a balance between weak augmentation e.g. synonymaugmentation and drastic augmentation e.g. conditional generation withoutproper guidance. This paper introduces a novel paradigm that employs targetedaugmentation and back validation to produce augmented examples with enhanceddiversity polarity accuracy and coherence. Extensive experimental resultsdemonstrate the effectiveness of the proposed paradigm. Furthermore identifiedlimitations are discussed shedding light on areas for future improvement. |
+|idx| 2405.10276v1 |
+|title| Revisiting OPRO: The Limitations of Small-Scale LLMs as Optimizers |
+|authors| Tuo ZhangJinyue YuanSalman Avestimehr
+|links| http://arxiv.org/abs/2405.10276v1 |
+|updated| 2024-05-16 17:33:50 UTC |
+|summary| Numerous recent works aim to enhance the efficacy of Large Language ModelsLLMs through strategic prompting. In particular the Optimization byPROmpting OPRO approach provides state-of-the-art performance by leveragingLLMs as optimizers where the optimization task is to find instructions thatmaximize the task accuracy. In this paper we revisit OPRO for automatedprompting with relatively small-scale LLMs such as LLaMa-2 family and Mistral7B. Our investigation reveals that OPRO shows limited effectiveness insmall-scale LLMs with limited inference capabilities constraining optimizationability. We suggest future automatic prompting engineering to consider bothmodel capabilities and computational costs. Additionally for small-scale LLMswe recommend direct instructions that clearly outline objectives andmethodologies as robust prompt baselines ensuring efficient and effectiveprompt engineering in ongoing research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08644v1 |
-|title| Thinking Tokens for Language Modeling |
-|authors| David HerelTomas Mikolov
-|links| http://arxiv.org/abs/2405.08644v1 |
-|updated| 2024-05-14 14:21:43 UTC |
-|summary| How much is 56 times 37 Language models often make mistakes in these typesof difficult calculations. This is usually explained by their inability toperform complex reasoning. Since language models rely on large training setsand great memorization capability naturally they are not equipped to runcomplex calculations. However one can argue that humans also cannot performthis calculation immediately and require a considerable amount of time toconstruct the solution. In order to enhance the generalization capability oflanguage models and as a parallel to human behavior we propose to use specialthinking tokens which allow the model to perform much more calculationswhenever a complex problem is encountered. |
+|idx| 2405.10266v1 |
+|title| A Tale of Two Languages: Large-Vocabulary Continuous Sign Language Recognition from Spoken Language Supervision |
+|authors| Charles RaudeK R PrajwalLiliane MomeniHannah BullSamuel AlbanieAndrew ZissermanGül Varol
+|links| http://arxiv.org/abs/2405.10266v1 |
+|updated| 2024-05-16 17:19:06 UTC |
+|summary| In this work our goals are two fold: large-vocabulary continuous signlanguage recognition CSLR and sign language retrieval. To this end weintroduce a multi-task Transformer model CSLR2 that is able to ingest asigning sequence and output in a joint embedding space between signed languageand spoken language text. To enable CSLR evaluation in the large-vocabularysetting we introduce new dataset annotations that have been manuallycollected. These provide continuous sign-level annotations for six hours oftest videos and will be made publicly available. We demonstrate that by acareful choice of loss functions training the model for both the CSLR andretrieval tasks is mutually beneficial in terms of performance -- retrievalimproves CSLR performance by providing context while CSLR improves retrievalwith more fine-grained supervision. We further show the benefits of leveragingweak and noisy supervision from large-vocabulary datasets such as BOBSL namelysign-level pseudo-labels and English subtitles. Our model significantlyoutperforms the previous state of the art on both tasks. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08792v1 |
-|title| Towards Enhanced RAC Accessibility: Leveraging Datasets and LLMs |
-|authors| Edison Jair Bejarano SepulvedaNicolai Potes HectorSantiago Pineda MontoyaFelipe Ivan RodriguezJaime Enrique OrduyAlec Rosales CabezasDanny Traslaviña NavarreteSergio Madrid Farfan
-|links| http://arxiv.org/abs/2405.08792v1 |
-|updated| 2024-05-14 17:41:07 UTC |
-|summary| This paper explores the potential of large language models LLMs to make theAeronautical Regulations of Colombia RAC more accessible. Given thecomplexity and extensive technicality of the RAC this study introduces a novelapproach to simplifying these regulations for broader understanding. Bydeveloping the first-ever RAC database which contains 24478 expertly labeledquestion-and-answer pairs and fine-tuning LLMs specifically for RACapplications the paper outlines the methodology for dataset assemblyexpert-led annotation and model training. Utilizing the Gemma1.1 2b modelalong with advanced techniques like Unsloth for efficient VRAM usage and flashattention mechanisms the research aims to expedite training processes. Thisinitiative establishes a foundation to enhance the comprehensibility andaccessibility of RAC potentially benefiting novices and reducing dependence onexpert consultations for navigating the aviation industrys regulatorylandscape.  You can visit the datasethttps://huggingface.co/somosnlp/gemma-1.1-2b-it_ColombiaRAC_FullyCurated_format_chatML_V1and the modelhttps://huggingface.co/datasets/somosnlp/ColombiaRAC_FullyCurated here. |
+|idx| 2405.10315v1 |
+|title| TRANSIC: Sim-to-Real Policy Transfer by Learning from Online Correction |
+|authors| Yunfan JiangChen WangRuohan ZhangJiajun WuLi Fei-Fei
+|links| http://arxiv.org/abs/2405.10315v1 |
+|updated| 2024-05-16 17:59:07 UTC |
+|summary| Learning in simulation and transferring the learned policy to the real worldhas the potential to enable generalist robots. The key challenge of thisapproach is to address simulation-to-reality sim-to-real gaps. Previousmethods often require domain-specific knowledge a priori. We argue that astraightforward way to obtain such knowledge is by asking humans to observe andassist robot policy execution in the real world. The robots can then learn fromhumans to close various sim-to-real gaps. We propose TRANSIC a data-drivenapproach to enable successful sim-to-real transfer based on a human-in-the-loopframework. TRANSIC allows humans to augment simulation policies to overcomevarious unmodeled sim-to-real gaps holistically through intervention and onlinecorrection. Residual policies can be learned from human corrections andintegrated with simulation policies for autonomous execution. We show that ourapproach can achieve successful sim-to-real transfer in complex andcontact-rich manipulation tasks such as furniture assembly. Through synergisticintegration of policies learned in simulation and from humans TRANSIC iseffective as a holistic approach to addressing various often coexistingsim-to-real gaps. It displays attractive properties such as scaling with humaneffort. Videos and code are available at https://transic-robot.github.io/ |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08790v1 |
-|title| Kolmogorov-Arnold Networks (KANs) for Time Series Analysis |
-|authors| Cristian J. Vaca-RubioLuis BlancoRoberto PereiraMàrius Caus
-|links| http://arxiv.org/abs/2405.08790v1 |
-|updated| 2024-05-14 17:38:17 UTC |
-|summary| This paper introduces a novel application of Kolmogorov-Arnold NetworksKANs to time series forecasting leveraging their adaptive activationfunctions for enhanced predictive modeling. Inspired by the Kolmogorov-Arnoldrepresentation theorem KANs replace traditional linear weights withspline-parametrized univariate functions allowing them to learn activationpatterns dynamically. We demonstrate that KANs outperforms conventionalMulti-Layer Perceptrons MLPs in a real-world satellite traffic forecastingtask providing more accurate results with considerably fewer number oflearnable parameters. We also provide an ablation study of KAN-specificparameters impact on performance. The proposed approach opens new avenues foradaptive forecasting models emphasizing the potential of KANs as a powerfultool in predictive analytics. |
+|idx| 2405.10313v1 |
+|title| How Far Are We From AGI |
+|authors| Tao FengChuanyang JinJingyu LiuKunlun ZhuHaoqin TuZirui ChengGuanyu LinJiaxuan You
+|links| http://arxiv.org/abs/2405.10313v1 |
+|updated| 2024-05-16 17:59:02 UTC |
+|summary| The evolution of artificial intelligence AI has profoundly impacted humansociety driving significant advancements in multiple sectors. Yet theescalating demands on AI have highlighted the limitations of AIs currentofferings catalyzing a movement towards Artificial General Intelligence AGI.AGI distinguished by its ability to execute diverse real-world tasks withefficiency and effectiveness comparable to human intelligence reflects aparamount milestone in AI evolution. While existing works have summarizedspecific recent advancements of AI they lack a comprehensive discussion ofAGIs definitions goals and developmental trajectories. Different fromexisting survey papers this paper delves into the pivotal questions of ourproximity to AGI and the strategies necessary for its realization throughextensive surveys discussions and original perspectives. We start byarticulating the requisite capability frameworks for AGI integrating theinternal interface and system dimensions. As the realization of AGI requiresmore advanced capabilities and adherence to stringent constraints we furtherdiscuss necessary AGI alignment technologies to harmonize these factors.Notably we emphasize the importance of approaching AGI responsibly by firstdefining the key levels of AGI progression followed by the evaluationframework that situates the status-quo and finally giving our roadmap of howto reach the pinnacle of AGI. Moreover to give tangible insights into theubiquitous impact of the integration of AI we outline existing challenges andpotential pathways toward AGI in multiple domains. In sum serving as apioneering exploration into the current state and future trajectory of AGIthis paper aims to foster a collective comprehension and catalyze broaderpublic discussions among researchers and practitioners on AGI. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08780v1 |
-|title| Harnessing the power of longitudinal medical imaging for eye disease prognosis using Transformer-based sequence modeling |
-|authors| Gregory HolsteMingquan LinRuiwen ZhouFei WangLei LiuQi YanSarah H. Van TasselKyle KovacsEmily Y. ChewZhiyong LuZhangyang WangYifan Peng
-|links| http://arxiv.org/abs/2405.08780v1 |
-|updated| 2024-05-14 17:15:28 UTC |
-|summary| Deep learning has enabled breakthroughs in automated diagnosis from medicalimaging with many successful applications in ophthalmology. However standardmedical image classification approaches only assess disease presence at thetime of acquisition neglecting the common clinical setting of longitudinalimaging. For slow progressive eye diseases like age-related maculardegeneration AMD and primary open-angle glaucoma POAG patients undergorepeated imaging over time to track disease progression and forecasting thefuture risk of developing disease is critical to properly plan treatment. Ourproposed Longitudinal Transformer for Survival Analysis LTSA enables dynamicdisease prognosis from longitudinal medical imaging modeling the time todisease from sequences of fundus photography images captured over longirregular time periods. Using longitudinal imaging data from the Age-RelatedEye Disease Study AREDS and Ocular Hypertension Treatment Study OHTS LTSAsignificantly outperformed a single-image baseline in 19/20 head-to-headcomparisons on late AMD prognosis and 18/20 comparisons on POAG prognosis. Atemporal attention analysis also suggested that while the most recent image istypically the most influential prior imaging still provides additionalprognostic value. |
+|idx| 2405.10310v1 |
+|title| Stochastic Q-learning for Large Discrete Action Spaces |
+|authors| Fares FouratiVaneet AggarwalMohamed-Slim Alouini
+|links| http://arxiv.org/abs/2405.10310v1 |
+|updated| 2024-05-16 17:58:44 UTC |
+|summary| In complex environments with large discrete action spaces effectivedecision-making is critical in reinforcement learning RL. Despite thewidespread use of value-based RL approaches like Q-learning they come with acomputational burden necessitating the maximization of a value function overall actions in each iteration. This burden becomes particularly challengingwhen addressing large-scale problems and using deep neural networks as functionapproximators. In this paper we present stochastic value-based RL approacheswhich in each iteration as opposed to optimizing over the entire set of nactions only consider a variable stochastic set of a sublinear number ofactions possibly as small as mathcalOlogn. The presented stochasticvalue-based RL methods include among others Stochastic Q-learning StochDQNand StochDDQN all of which integrate this stochastic approach for bothvalue-function updates and action selection. The theoretical convergence ofStochastic Q-learning is established while an analysis of stochasticmaximization is provided. Moreover through empirical validation we illustratethat the various proposed approaches outperform the baseline methods acrossdiverse environments including different control problems achievingnear-optimal average returns in significantly reduced time. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08768v1 |
-|title| EfficientTrain++: Generalized Curriculum Learning for Efficient Visual Backbone Training |
-|authors| Yulin WangYang YueRui LuYizeng HanShiji SongGao Huang
-|links| http://arxiv.org/abs/2405.08768v1 |
-|updated| 2024-05-14 17:00:43 UTC |
-|summary| The superior performance of modern visual backbones usually comes with acostly training procedure. We contribute to this issue by generalizing the ideaof curriculum learning beyond its original formulation i.e. training modelsusing easier-to-harder data. Specifically we reformulate the trainingcurriculum as a soft-selection function which uncovers progressively moredifficult patterns within each example during training instead of performingeasier-to-harder sample selection. Our work is inspired by an intriguingobservation on the learning dynamics of visual backbones: during the earlierstages of training the model predominantly learns to recognize someeasier-to-learn discriminative patterns in the data. These patterns whenobserved through frequency and spatial domains incorporate lower-frequencycomponents and the natural image contents without distortion or dataaugmentation. Motivated by these findings we propose a curriculum where themodel always leverages all the training data at every learning stage yet theexposure to the easier-to-learn patterns of each example is initiated firstwith harder patterns gradually introduced as training progresses. To implementthis idea in a computationally efficient way we introduce a cropping operationin the Fourier spectrum of the inputs enabling the model to learn from onlythe lower-frequency components. Then we show that exposing the contents ofnatural images can be readily achieved by modulating the intensity of dataaugmentation. Finally we integrate these aspects and design curriculumschedules with tailored search algorithms. The resulting methodEfficientTrain is simple general yet surprisingly effective. It reducesthe training time of a wide variety of popular models by 1.5-3.0x onImageNet-1K/22K without sacrificing accuracy. It also demonstrates efficacy inself-supervised learning e.g. MAE. |
+|idx| 2405.10305v1 |
+|title| 4D Panoptic Scene Graph Generation |
+|authors| Jingkang YangJun CenWenxuan PengShuai LiuFangzhou HongXiangtai LiKaiyang ZhouQifeng ChenZiwei Liu
+|links| http://arxiv.org/abs/2405.10305v1 |
+|updated| 2024-05-16 17:56:55 UTC |
+|summary| We are living in a three-dimensional space while moving forward through afourth dimension: time. To allow artificial intelligence to develop acomprehensive understanding of such a 4D environment we introduce 4D PanopticScene Graph PSG-4D a new representation that bridges the raw visual dataperceived in a dynamic 4D world and high-level visual understanding.Specifically PSG-4D abstracts rich 4D sensory data into nodes which represententities with precise location and status information and edges which capturethe temporal relations. To facilitate research in this new area we build arichly annotated PSG-4D dataset consisting of 3K RGB-D videos with a total of1M frames each of which is labeled with 4D panoptic segmentation masks as wellas fine-grained dynamic scene graphs. To solve PSG-4D we propose PSG4DFormera Transformer-based model that can predict panoptic segmentation masks trackmasks along the time axis and generate the corresponding scene graphs via arelation component. Extensive experiments on the new dataset show that ourmethod can serve as a strong baseline for future research on PSG-4D. In theend we provide a real-world application example to demonstrate how we canachieve dynamic scene understanding by integrating a large language model intoour PSG-4D system. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08760v1 |
-|title| Is the Pope Catholic? Yes, the Pope is Catholic. Generative Evaluation of Intent Resolution in LLMs |
-|authors| Akhila YerukolaSaujas VaduguruDaniel FriedMaarten Sap
-|links| http://arxiv.org/abs/2405.08760v1 |
-|updated| 2024-05-14 16:48:56 UTC |
-|summary| Humans often express their communicative intents indirectly or non-literallywhich requires their interlocutors -- human or AI -- to understand beyond theliteral meaning of words. While most existing work has focused ondiscriminative evaluations we present a new approach to generatively evaluatelarge language models LLMs intention understanding by examining theirresponses to non-literal utterances. Ideally an LLM should respond in linewith the true intention of a non-literal utterance not its literalinterpretation. Our findings show that LLMs struggle to generate pragmaticallyrelevant responses to non-literal language achieving only 50-55 accuracy onaverage. While explicitly providing oracle intentions significantly improvesperformance e.g. 75 for Mistral-Instruct this still indicates challengesin leveraging given intentions to produce appropriate responses. Usingchain-of-thought to make models spell out intentions yields much smaller gains60 for Mistral-Instruct. These findings suggest that LLMs are not yeteffective pragmatic interlocutors highlighting the need for better approachesfor modeling intentions and utilizing them for pragmatic generation. |
+|idx| 2405.10301v1 |
+|title| Conformal Alignment: Knowing When to Trust Foundation Models with Guarantees |
+|authors| Yu GuiYing JinZhimei Ren
+|links| http://arxiv.org/abs/2405.10301v1 |
+|updated| 2024-05-16 17:55:24 UTC |
+|summary| Before deploying outputs from foundation models in high-stakes tasks it isimperative to ensure that they align with human values. For instance inradiology report generation reports generated by a vision-language model mustalign with human evaluations before their use in medical decision-making. Thispaper presents Conformal Alignment a general framework for identifying unitswhose outputs meet a user-specified alignment criterion. It is guaranteed thaton average a prescribed fraction of selected units indeed meet the alignmentcriterion regardless of the foundation model or the data distribution. Givenany pre-trained model and new units with model-generated outputs ConformalAlignment leverages a set of reference data with ground-truth alignment statusto train an alignment predictor. It then selects new units whose predictedalignment scores surpass a data-dependent threshold certifying theircorresponding outputs as trustworthy. Through applications to questionanswering and radiology report generation we demonstrate that our method isable to accurately identify units with trustworthy outputs via lightweighttraining over a moderate amount of reference data. En route we investigate theinformativeness of various features in alignment prediction and combine themwith standard models to construct the alignment predictor. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08813v1 |
-|title| CinePile: A Long Video Question Answering Dataset and Benchmark |
-|authors| Ruchit RawalKhalid SaifullahRonen BasriDavid JacobsGowthami SomepalliTom Goldstein
-|links| http://arxiv.org/abs/2405.08813v1 |
-|updated| 2024-05-14 17:59:02 UTC |
-|summary| Current datasets for long-form video understanding often fall short ofproviding genuine long-form comprehension challenges as many tasks derivedfrom these datasets can be successfully tackled by analyzing just one or a fewrandom frames from a video. To address this issue we present a novel datasetand benchmark CinePile specifically designed for authentic long-form videounderstanding. This paper details our innovative approach for creating aquestion-answer dataset utilizing advanced LLMs with human-in-the-loop andbuilding upon human-generated raw data. Our comprehensive dataset comprises305000 multiple-choice questions MCQs covering various visual andmultimodal aspects including temporal comprehension understandinghuman-object interactions and reasoning about events or actions within ascene. Additionally we evaluate recent video-centric LLMs both open-sourceand proprietary on the test split of our dataset. The findings reveal thateven state-of-the-art video-centric LLMs significantly lag behind humanperformance in these tasks highlighting the complexity and challenge inherentin video understanding. The dataset is available athttps://hf.co/datasets/tomg-group-umd/cinepile |
+|idx| 2405.10315v1 |
+|title| TRANSIC: Sim-to-Real Policy Transfer by Learning from Online Correction |
+|authors| Yunfan JiangChen WangRuohan ZhangJiajun WuLi Fei-Fei
+|links| http://arxiv.org/abs/2405.10315v1 |
+|updated| 2024-05-16 17:59:07 UTC |
+|summary| Learning in simulation and transferring the learned policy to the real worldhas the potential to enable generalist robots. The key challenge of thisapproach is to address simulation-to-reality sim-to-real gaps. Previousmethods often require domain-specific knowledge a priori. We argue that astraightforward way to obtain such knowledge is by asking humans to observe andassist robot policy execution in the real world. The robots can then learn fromhumans to close various sim-to-real gaps. We propose TRANSIC a data-drivenapproach to enable successful sim-to-real transfer based on a human-in-the-loopframework. TRANSIC allows humans to augment simulation policies to overcomevarious unmodeled sim-to-real gaps holistically through intervention and onlinecorrection. Residual policies can be learned from human corrections andintegrated with simulation policies for autonomous execution. We show that ourapproach can achieve successful sim-to-real transfer in complex andcontact-rich manipulation tasks such as furniture assembly. Through synergisticintegration of policies learned in simulation and from humans TRANSIC iseffective as a holistic approach to addressing various often coexistingsim-to-real gaps. It displays attractive properties such as scaling with humaneffort. Videos and code are available at https://transic-robot.github.io/ |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08801v1 |
-|title| Prospects of Privacy Advantage in Quantum Machine Learning |
-|authors| Jamie HeredgeNiraj KumarDylan HermanShouvanik ChakrabartiRomina YalovetzkyShree Hari SureshbabuMarco Pistoia
-|links| http://arxiv.org/abs/2405.08801v1 |
-|updated| 2024-05-14 17:49:18 UTC |
-|summary| Ensuring data privacy in machine learning models is critical particularly indistributed settings where model gradients are typically shared among multipleparties to allow collaborative learning. Motivated by the increasing success ofrecovering input data from the gradients of classical models this studyaddresses a central question: How hard is it to recover the input data from thegradients of quantum machine learning models Focusing on variational quantumcircuits VQC as learning models we uncover the crucial role played by thedynamical Lie algebra DLA of the VQC ansatz in determining privacyvulnerabilities. While the DLA has previously been linked to the classicalsimulatability and trainability of VQC models this work for the first timeestablishes its connection to the privacy of VQC models. In particular we showthat properties conducive to the trainability of VQCs such as apolynomial-sized DLA also facilitate the extraction of detailed snapshots ofthe input. We term this a weak privacy breach as the snapshots enable trainingVQC models for distinct learning tasks without direct access to the originalinput. Further we investigate the conditions for a strong privacy breach wherethe original input data can be recovered from these snapshots by classical orquantum-assisted polynomial time methods. We establish conditions on theencoding map such as classical simulatability overlap with DLA basis and itsFourier frequency characteristics that enable such a privacy breach of VQCmodels. Our findings thus play a crucial role in detailing the prospects ofquantum privacy advantage by guiding the requirements for designing quantummachine learning models that balance trainability with robust privacyprotection. |
+|idx| 2405.10313v1 |
+|title| How Far Are We From AGI |
+|authors| Tao FengChuanyang JinJingyu LiuKunlun ZhuHaoqin TuZirui ChengGuanyu LinJiaxuan You
+|links| http://arxiv.org/abs/2405.10313v1 |
+|updated| 2024-05-16 17:59:02 UTC |
+|summary| The evolution of artificial intelligence AI has profoundly impacted humansociety driving significant advancements in multiple sectors. Yet theescalating demands on AI have highlighted the limitations of AIs currentofferings catalyzing a movement towards Artificial General Intelligence AGI.AGI distinguished by its ability to execute diverse real-world tasks withefficiency and effectiveness comparable to human intelligence reflects aparamount milestone in AI evolution. While existing works have summarizedspecific recent advancements of AI they lack a comprehensive discussion ofAGIs definitions goals and developmental trajectories. Different fromexisting survey papers this paper delves into the pivotal questions of ourproximity to AGI and the strategies necessary for its realization throughextensive surveys discussions and original perspectives. We start byarticulating the requisite capability frameworks for AGI integrating theinternal interface and system dimensions. As the realization of AGI requiresmore advanced capabilities and adherence to stringent constraints we furtherdiscuss necessary AGI alignment technologies to harmonize these factors.Notably we emphasize the importance of approaching AGI responsibly by firstdefining the key levels of AGI progression followed by the evaluationframework that situates the status-quo and finally giving our roadmap of howto reach the pinnacle of AGI. Moreover to give tangible insights into theubiquitous impact of the integration of AI we outline existing challenges andpotential pathways toward AGI in multiple domains. In sum serving as apioneering exploration into the current state and future trajectory of AGIthis paper aims to foster a collective comprehension and catalyze broaderpublic discussions among researchers and practitioners on AGI. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08793v1 |
-|title| A Brief Introduction to Causal Inference in Machine Learning |
-|authors| Kyunghyun Cho
-|links| http://arxiv.org/abs/2405.08793v1 |
-|updated| 2024-05-14 17:41:55 UTC |
-|summary| This is a lecture note produced for DS-GA 3001.003 Special Topics in DS -Causal Inference in Machine Learning at the Center for Data Science New YorkUniversity in Spring 2024. This course was created to target masters and PhDlevel students with basic background in machine learning but who were notexposed to causal inference or causal reasoning in general previously. Inparticular this course focuses on introducing such students to expand theirview and knowledge of machine learning to incorporate causal reasoning as thisaspect is at the core of so-called out-of-distribution generalization or lackthereof. |
+|idx| 2405.10310v1 |
+|title| Stochastic Q-learning for Large Discrete Action Spaces |
+|authors| Fares FouratiVaneet AggarwalMohamed-Slim Alouini
+|links| http://arxiv.org/abs/2405.10310v1 |
+|updated| 2024-05-16 17:58:44 UTC |
+|summary| In complex environments with large discrete action spaces effectivedecision-making is critical in reinforcement learning RL. Despite thewidespread use of value-based RL approaches like Q-learning they come with acomputational burden necessitating the maximization of a value function overall actions in each iteration. This burden becomes particularly challengingwhen addressing large-scale problems and using deep neural networks as functionapproximators. In this paper we present stochastic value-based RL approacheswhich in each iteration as opposed to optimizing over the entire set of nactions only consider a variable stochastic set of a sublinear number ofactions possibly as small as mathcalOlogn. The presented stochasticvalue-based RL methods include among others Stochastic Q-learning StochDQNand StochDDQN all of which integrate this stochastic approach for bothvalue-function updates and action selection. The theoretical convergence ofStochastic Q-learning is established while an analysis of stochasticmaximization is provided. Moreover through empirical validation we illustratethat the various proposed approaches outperform the baseline methods acrossdiverse environments including different control problems achievingnear-optimal average returns in significantly reduced time. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08792v1 |
-|title| Towards Enhanced RAC Accessibility: Leveraging Datasets and LLMs |
-|authors| Edison Jair Bejarano SepulvedaNicolai Potes HectorSantiago Pineda MontoyaFelipe Ivan RodriguezJaime Enrique OrduyAlec Rosales CabezasDanny Traslaviña NavarreteSergio Madrid Farfan
-|links| http://arxiv.org/abs/2405.08792v1 |
-|updated| 2024-05-14 17:41:07 UTC |
-|summary| This paper explores the potential of large language models LLMs to make theAeronautical Regulations of Colombia RAC more accessible. Given thecomplexity and extensive technicality of the RAC this study introduces a novelapproach to simplifying these regulations for broader understanding. Bydeveloping the first-ever RAC database which contains 24478 expertly labeledquestion-and-answer pairs and fine-tuning LLMs specifically for RACapplications the paper outlines the methodology for dataset assemblyexpert-led annotation and model training. Utilizing the Gemma1.1 2b modelalong with advanced techniques like Unsloth for efficient VRAM usage and flashattention mechanisms the research aims to expedite training processes. Thisinitiative establishes a foundation to enhance the comprehensibility andaccessibility of RAC potentially benefiting novices and reducing dependence onexpert consultations for navigating the aviation industrys regulatorylandscape.  You can visit the datasethttps://huggingface.co/somosnlp/gemma-1.1-2b-it_ColombiaRAC_FullyCurated_format_chatML_V1and the modelhttps://huggingface.co/datasets/somosnlp/ColombiaRAC_FullyCurated here. |
+|idx| 2405.10302v1 |
+|title| Optimal Aggregation of Prediction Intervals under Unsupervised Domain Shift |
+|authors| Jiawei GeDebarghya MukherjeeJianqing Fan
+|links| http://arxiv.org/abs/2405.10302v1 |
+|updated| 2024-05-16 17:55:42 UTC |
+|summary| As machine learning models are increasingly deployed in dynamic environmentsit becomes paramount to assess and quantify uncertainties associated withdistribution shifts. A distribution shift occurs when the underlyingdata-generating process changes leading to a deviation in the modelsperformance. The prediction interval which captures the range of likelyoutcomes for a given prediction serves as a crucial tool for characterizinguncertainties induced by their underlying distribution. In this paper wepropose methodologies for aggregating prediction intervals to obtain one withminimal width and adequate coverage on the target domain under unsuperviseddomain shift under which we have labeled samples from a related source domainand unlabeled covariates from the target domain. Our analysis encompassesscenarios where the source and the target domain are related via i a boundeddensity ratio and ii a measure-preserving transformation. Our proposedmethodologies are computationally efficient and easy to implement. Beyondillustrating the performance of our method through a real-world dataset wealso delve into the theoretical details. This includes establishing rigoroustheoretical guarantees coupled with finite sample bounds regarding thecoverage and width of our prediction intervals. Our approach excels inpractical applications and is underpinned by a solid theoretical frameworkensuring its reliability and effectiveness across diverse contexts. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08790v1 |
-|title| Kolmogorov-Arnold Networks (KANs) for Time Series Analysis |
-|authors| Cristian J. Vaca-RubioLuis BlancoRoberto PereiraMàrius Caus
-|links| http://arxiv.org/abs/2405.08790v1 |
-|updated| 2024-05-14 17:38:17 UTC |
-|summary| This paper introduces a novel application of Kolmogorov-Arnold NetworksKANs to time series forecasting leveraging their adaptive activationfunctions for enhanced predictive modeling. Inspired by the Kolmogorov-Arnoldrepresentation theorem KANs replace traditional linear weights withspline-parametrized univariate functions allowing them to learn activationpatterns dynamically. We demonstrate that KANs outperforms conventionalMulti-Layer Perceptrons MLPs in a real-world satellite traffic forecastingtask providing more accurate results with considerably fewer number oflearnable parameters. We also provide an ablation study of KAN-specificparameters impact on performance. The proposed approach opens new avenues foradaptive forecasting models emphasizing the potential of KANs as a powerfultool in predictive analytics. |
+|idx| 2405.10301v1 |
+|title| Conformal Alignment: Knowing When to Trust Foundation Models with Guarantees |
+|authors| Yu GuiYing JinZhimei Ren
+|links| http://arxiv.org/abs/2405.10301v1 |
+|updated| 2024-05-16 17:55:24 UTC |
+|summary| Before deploying outputs from foundation models in high-stakes tasks it isimperative to ensure that they align with human values. For instance inradiology report generation reports generated by a vision-language model mustalign with human evaluations before their use in medical decision-making. Thispaper presents Conformal Alignment a general framework for identifying unitswhose outputs meet a user-specified alignment criterion. It is guaranteed thaton average a prescribed fraction of selected units indeed meet the alignmentcriterion regardless of the foundation model or the data distribution. Givenany pre-trained model and new units with model-generated outputs ConformalAlignment leverages a set of reference data with ground-truth alignment statusto train an alignment predictor. It then selects new units whose predictedalignment scores surpass a data-dependent threshold certifying theircorresponding outputs as trustworthy. Through applications to questionanswering and radiology report generation we demonstrate that our method isable to accurately identify units with trustworthy outputs via lightweighttraining over a moderate amount of reference data. En route we investigate theinformativeness of various features in alignment prediction and combine themwith standard models to construct the alignment predictor. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08816v1 |
-|title| The RoboDrive Challenge: Drive Anytime Anywhere in Any Condition |
-|authors| Lingdong KongShaoyuan XieHanjiang HuYaru NiuWei Tsang OoiBenoit R. CottereauLai Xing NgYuexin MaWenwei ZhangLiang PanKai ChenZiwei LiuWeichao QiuWei ZhangXu CaoHao LuYing-Cong ChenCaixin KangXinning ZhouChengyang YingWentao ShangXingxing WeiYinpeng DongBo YangShengyin JiangZeliang MaDengyi JiHaiwen LiXingliang HuangYu TianGenghua KouFan JiaYingfei LiuTiancai WangYing LiXiaoshuai HaoYifan YangHui ZhangMengchuan WeiYi ZhouHaimei ZhaoJing ZhangJinke LiXiao HeXiaoqiang ChengBingyang ZhangLirong ZhaoDianlei DingFangsheng LiuYixiang YanHongming WangNanfei YeLun LuoYubo TianYiwei ZuoZhe CaoYi RenYunfan LiWenjie LiuXun WuYifan MaoMing LiJian LiuJiayang LiuZihan QinCunxi ChuJialei XuWenbo ZhaoJunjun JiangXianming LiuZiyan WangChiwei LiShilong LiChendong YuanSongyue YangWentao LiuPeng ChenBin ZhouYubo WangChi ZhangJianhang SunHai ChenXiao YangLizhong WangDongyi FuYongchun LinHuitong YangHaoang LiYadan LuoXianjing ChengYong Xu
-|links| http://arxiv.org/abs/2405.08816v1 |
-|updated| 2024-05-14 17:59:57 UTC |
-|summary| In the realm of autonomous driving robust perception underout-of-distribution conditions is paramount for the safe deployment ofvehicles. Challenges such as adverse weather sensor malfunctions andenvironmental unpredictability can severely impact the performance ofautonomous systems. The 2024 RoboDrive Challenge was crafted to propel thedevelopment of driving perception technologies that can withstand and adapt tothese real-world variabilities. Focusing on four pivotal tasks -- BEVdetection map segmentation semantic occupancy prediction and multi-viewdepth estimation -- the competition laid down a gauntlet to innovate andenhance system resilience against typical and atypical disturbances. Thisyears challenge consisted of five distinct tracks and attracted 140 registeredteams from 93 institutes across 11 countries resulting in nearly one thousandsubmissions evaluated through our servers. The competition culminated in 15top-performing solutions which introduced a range of innovative approachesincluding advanced data augmentation multi-sensor fusion self-supervisedlearning for error correction and new algorithmic strategies to enhance sensorrobustness. These contributions significantly advanced the state of the artparticularly in handling sensor inconsistencies and environmental variability.Participants through collaborative efforts pushed the boundaries of currenttechnologies showcasing their potential in real-world scenarios. Extensiveevaluations and analyses provided insights into the effectiveness of thesesolutions highlighting key trends and successful strategies for improving theresilience of driving perception systems. This challenge has set a newbenchmark in the field providing a rich repository of techniques expected toguide future research in this field. |
+|idx| 2405.10320v1 |
+|title| Toon3D: Seeing Cartoons from a New Perspective |
+|authors| Ethan WeberRiley PeterlinzRohan MathurFrederik WarburgAlexei A. EfrosAngjoo Kanazawa
+|links| http://arxiv.org/abs/2405.10320v1 |
+|updated| 2024-05-16 17:59:51 UTC |
+|summary| In this work we recover the underlying 3D structure of non-geometricallyconsistent scenes. We focus our analysis on hand-drawn images from cartoons andanime. Many cartoons are created by artists without a 3D rendering enginewhich means that any new image of a scene is hand-drawn. The hand-drawn imagesare usually faithful representations of the world but only in a qualitativesense since it is difficult for humans to draw multiple perspectives of anobject or scene 3D consistently. Nevertheless people can easily perceive 3Dscenes from inconsistent inputs In this work we correct for 2D drawinginconsistencies to recover a plausible 3D structure such that the newly warpeddrawings are consistent with each other. Our pipeline consists of auser-friendly annotation tool camera pose estimation and image deformation torecover a dense structure. Our method warps images to obey a perspective cameramodel enabling our aligned results to be plugged into novel-view synthesisreconstruction methods to experience cartoons from viewpoints never drawnbefore. Our project page is https://toon3d.studio/. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08815v1 |
-|title| Efficient Vision-Language Pre-training by Cluster Masking |
-|authors| Zihao WeiZixuan PanAndrew Owens
-|links| http://arxiv.org/abs/2405.08815v1 |
-|updated| 2024-05-14 17:59:40 UTC |
-|summary| We propose a simple strategy for masking image patches during visual-languagecontrastive learning that improves the quality of the learned representationsand the training speed. During each iteration of training we randomly maskclusters of visually similar image patches as measured by their raw pixelintensities. This provides an extra learning signal beyond the contrastivetraining itself since it forces a model to predict words for masked visualstructures solely from context. It also speeds up training by reducing theamount of data used in each image. We evaluate the effectiveness of our modelby pre-training on a number of benchmarks finding that it outperforms othermasking strategies such as FLIP on the quality of the learned representation. |
+|idx| 2405.10317v1 |
+|title| Text-to-Vector Generation with Neural Path Representation |
+|authors| Peiying ZhangNanxuan ZhaoJing Liao
+|links| http://arxiv.org/abs/2405.10317v1 |
+|updated| 2024-05-16 17:59:22 UTC |
+|summary| Vector graphics are widely used in digital art and highly favored bydesigners due to their scalability and layer-wise properties. However theprocess of creating and editing vector graphics requires creativity and designexpertise making it a time-consuming task. Recent advancements intext-to-vector T2V generation have aimed to make this process moreaccessible. However existing T2V methods directly optimize control points ofvector graphics paths often resulting in intersecting or jagged paths due tothe lack of geometry constraints. To overcome these limitations we propose anovel neural path representation by designing a dual-branch VariationalAutoencoder VAE that learns the path latent space from both sequence andimage modalities. By optimizing the combination of neural paths we canincorporate geometric constraints while preserving expressivity in generatedSVGs. Furthermore we introduce a two-stage path optimization method to improvethe visual and topological quality of generated SVGs. In the first stage apre-trained text-to-image diffusion model guides the initial generation ofcomplex vector graphics through the Variational Score Distillation VSDprocess. In the second stage we refine the graphics using a layer-wise imagevectorization strategy to achieve clearer elements and structure. Wedemonstrate the effectiveness of our method through extensive experiments andshowcase various applications. The project page ishttps://intchous.github.io/T2V-NPR. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08813v1 |
-|title| CinePile: A Long Video Question Answering Dataset and Benchmark |
-|authors| Ruchit RawalKhalid SaifullahRonen BasriDavid JacobsGowthami SomepalliTom Goldstein
-|links| http://arxiv.org/abs/2405.08813v1 |
-|updated| 2024-05-14 17:59:02 UTC |
-|summary| Current datasets for long-form video understanding often fall short ofproviding genuine long-form comprehension challenges as many tasks derivedfrom these datasets can be successfully tackled by analyzing just one or a fewrandom frames from a video. To address this issue we present a novel datasetand benchmark CinePile specifically designed for authentic long-form videounderstanding. This paper details our innovative approach for creating aquestion-answer dataset utilizing advanced LLMs with human-in-the-loop andbuilding upon human-generated raw data. Our comprehensive dataset comprises305000 multiple-choice questions MCQs covering various visual andmultimodal aspects including temporal comprehension understandinghuman-object interactions and reasoning about events or actions within ascene. Additionally we evaluate recent video-centric LLMs both open-sourceand proprietary on the test split of our dataset. The findings reveal thateven state-of-the-art video-centric LLMs significantly lag behind humanperformance in these tasks highlighting the complexity and challenge inherentin video understanding. The dataset is available athttps://hf.co/datasets/tomg-group-umd/cinepile |
+|idx| 2405.10316v1 |
+|title| Analogist: Out-of-the-box Visual In-Context Learning with Image Diffusion Model |
+|authors| Zheng GuShiyuan YangJing LiaoJing HuoYang Gao
+|links| http://arxiv.org/abs/2405.10316v1 |
+|updated| 2024-05-16 17:59:21 UTC |
+|summary| Visual In-Context Learning ICL has emerged as a promising research area dueto its capability to accomplish various tasks with limited example pairsthrough analogical reasoning. However training-based visual ICL haslimitations in its ability to generalize to unseen tasks and requires thecollection of a diverse task dataset. On the other hand existing methods inthe inference-based visual ICL category solely rely on textual prompts whichfail to capture fine-grained contextual information from given examples and canbe time-consuming when converting from images to text prompts. To address thesechallenges we propose Analogist a novel inference-based visual ICL approachthat exploits both visual and textual prompting techniques using atext-to-image diffusion model pretrained for image inpainting. For visualprompting we propose a self-attention cloning SAC method to guide thefine-grained structural-level analogy between image examples. For textualprompting we leverage GPT-4Vs visual reasoning capability to efficientlygenerate text prompts and introduce a cross-attention masking CAM operationto enhance the accuracy of semantic-level analogy guided by text prompts. Ourmethod is out-of-the-box and does not require fine-tuning or optimization. Itis also generic and flexible enabling a wide range of visual tasks to beperformed in an in-context manner. Extensive experiments demonstrate thesuperiority of our method over existing approaches both qualitatively andquantitatively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08807v1 |
-|title| SciFIBench: Benchmarking Large Multimodal Models for Scientific Figure Interpretation |
-|authors| Jonathan RobertsKai HanNeil HoulsbySamuel Albanie
-|links| http://arxiv.org/abs/2405.08807v1 |
-|updated| 2024-05-14 17:54:17 UTC |
-|summary| Large multimodal models LMMs have proven flexible and generalisable acrossmany tasks and fields. Although they have strong potential to aid scientificresearch their capabilities in this domain are not well characterised. A keyaspect of scientific research is the ability to understand and interpretfigures which serve as a rich compressed source of complex information. Inthis work we present SciFIBench a scientific figure interpretation benchmark.Our main benchmark consists of a 1000-question gold set of multiple-choicequestions split between two tasks across 12 categories. The questions arecurated from CS arXiv paper figures and captions using adversarial filteringto find hard negatives and human verification for quality control. We evaluate26 LMMs on SciFIBench finding it to be a challenging benchmark. Finally weinvestigate the alignment and reasoning faithfulness of the LMMs on augmentedquestion sets from our benchmark. We release SciFIBench to encourage progressin this domain. |
+|idx| 2405.10314v1 |
+|title| CAT3D: Create Anything in 3D with Multi-View Diffusion Models |
+|authors| Ruiqi GaoAleksander HolynskiPhilipp HenzlerArthur BrusseeRicardo Martin-BruallaPratul SrinivasanJonathan T. BarronBen Poole
+|links| http://arxiv.org/abs/2405.10314v1 |
+|updated| 2024-05-16 17:59:05 UTC |
+|summary| Advances in 3D reconstruction have enabled high-quality 3D capture butrequire a user to collect hundreds to thousands of images to create a 3D scene.We present CAT3D a method for creating anything in 3D by simulating thisreal-world capture process with a multi-view diffusion model. Given any numberof input images and a set of target novel viewpoints our model generateshighly consistent novel views of a scene. These generated views can be used asinput to robust 3D reconstruction techniques to produce 3D representations thatcan be rendered from any viewpoint in real-time. CAT3D can create entire 3Dscenes in as little as one minute and outperforms existing methods for singleimage and few-view 3D scene creation. See our project page for results andinteractive demos at https://cat3d.github.io . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08794v1 |
-|title| Ambiguous Annotations: When is a Pedestrian not a Pedestrian? |
-|authors| Luisa SchwirtenJannes ScholzDaniel KondermannJanis Keuper
-|links| http://arxiv.org/abs/2405.08794v1 |
-|updated| 2024-05-14 17:44:34 UTC |
-|summary| Datasets labelled by human annotators are widely used in the training andtesting of machine learning models. In recent years researchers areincreasingly paying attention to label quality. However it is not alwayspossible to objectively determine whether an assigned label is correct or not.The present work investigates this ambiguity in the annotation of autonomousdriving datasets as an important dimension of data quality. Our experimentsshow that excluding highly ambiguous data from the training improves modelperformance of a state-of-the-art pedestrian detector in terms of LAMRprecision and F1 score thereby saving training time and annotation costs.Furthermore we demonstrate that in order to safely remove ambiguous instancesand ensure the retained representativeness of the training data anunderstanding of the properties of the dataset and class under investigation iscrucial. |
+|idx| 2405.10305v1 |
+|title| 4D Panoptic Scene Graph Generation |
+|authors| Jingkang YangJun CenWenxuan PengShuai LiuFangzhou HongXiangtai LiKaiyang ZhouQifeng ChenZiwei Liu
+|links| http://arxiv.org/abs/2405.10305v1 |
+|updated| 2024-05-16 17:56:55 UTC |
+|summary| We are living in a three-dimensional space while moving forward through afourth dimension: time. To allow artificial intelligence to develop acomprehensive understanding of such a 4D environment we introduce 4D PanopticScene Graph PSG-4D a new representation that bridges the raw visual dataperceived in a dynamic 4D world and high-level visual understanding.Specifically PSG-4D abstracts rich 4D sensory data into nodes which represententities with precise location and status information and edges which capturethe temporal relations. To facilitate research in this new area we build arichly annotated PSG-4D dataset consisting of 3K RGB-D videos with a total of1M frames each of which is labeled with 4D panoptic segmentation masks as wellas fine-grained dynamic scene graphs. To solve PSG-4D we propose PSG4DFormera Transformer-based model that can predict panoptic segmentation masks trackmasks along the time axis and generate the corresponding scene graphs via arelation component. Extensive experiments on the new dataset show that ourmethod can serve as a strong baseline for future research on PSG-4D. In theend we provide a real-world application example to demonstrate how we canachieve dynamic scene understanding by integrating a large language model intoour PSG-4D system. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08719v1 |
-|title| Addressing Misspecification in Simulation-based Inference through Data-driven Calibration |
-|authors| Antoine WehenkelJuan L. GamellaOzan SenerJens BehrmannGuillermo SapiroMarco CuturiJörn-Henrik Jacobsen
-|links| http://arxiv.org/abs/2405.08719v1 |
-|updated| 2024-05-14 16:04:39 UTC |
-|summary| Driven by steady progress in generative modeling simulation-based inferenceSBI has enabled inference over stochastic simulators. However recent workhas demonstrated that model misspecification can harm SBIs reliability. Thiswork introduces robust posterior estimation ROPE a framework that overcomesmodel misspecification with a small real-world calibration set of ground truthparameter measurements. We formalize the misspecification gap as the solutionof an optimal transport problem between learned representations of real-worldand simulated observations. Assuming the prior distribution over the parametersof interest is known and well-specified our method offers a controllablebalance between calibrated uncertainty and informative inference under allpossible misspecifications of the simulator. Our empirical results on foursynthetic tasks and two real-world problems demonstrate that ROPE outperformsbaselines and consistently returns informative and calibrated credibleintervals. |
+|idx| 2405.10310v1 |
+|title| Stochastic Q-learning for Large Discrete Action Spaces |
+|authors| Fares FouratiVaneet AggarwalMohamed-Slim Alouini
+|links| http://arxiv.org/abs/2405.10310v1 |
+|updated| 2024-05-16 17:58:44 UTC |
+|summary| In complex environments with large discrete action spaces effectivedecision-making is critical in reinforcement learning RL. Despite thewidespread use of value-based RL approaches like Q-learning they come with acomputational burden necessitating the maximization of a value function overall actions in each iteration. This burden becomes particularly challengingwhen addressing large-scale problems and using deep neural networks as functionapproximators. In this paper we present stochastic value-based RL approacheswhich in each iteration as opposed to optimizing over the entire set of nactions only consider a variable stochastic set of a sublinear number ofactions possibly as small as mathcalOlogn. The presented stochasticvalue-based RL methods include among others Stochastic Q-learning StochDQNand StochDDQN all of which integrate this stochastic approach for bothvalue-function updates and action selection. The theoretical convergence ofStochastic Q-learning is established while an analysis of stochasticmaximization is provided. Moreover through empirical validation we illustratethat the various proposed approaches outperform the baseline methods acrossdiverse environments including different control problems achievingnear-optimal average returns in significantly reduced time. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08699v1 |
-|title| Weakly-supervised causal discovery based on fuzzy knowledge and complex data complementarity |
-|authors| Wenrui LiWei ZhangQinghao ZhangXuegong ZhangXiaowo Wang
-|links| http://arxiv.org/abs/2405.08699v1 |
-|updated| 2024-05-14 15:39:22 UTC |
-|summary| Causal discovery based on observational data is important for deciphering thecausal mechanism behind complex systems. However the effectiveness of existingcausal discovery methods is limited due to inferior prior knowledge domaininconsistencies and the challenges of high-dimensional datasets with smallsample sizes. To address this gap we propose a novel weakly-supervised fuzzyknowledge and data co-driven causal discovery method named KEEL. KEEL adopts afuzzy causal knowledge schema to encapsulate diverse types of fuzzy knowledgeand forms corresponding weakened constraints. This schema not only lessens thedependency on expertise but also allows various types of limited anderror-prone fuzzy knowledge to guide causal discovery. It can enhance thegeneralization and robustness of causal discovery especially inhigh-dimensional and small-sample scenarios. In addition we integrate theextended linear causal model ELCM into KEEL for dealing with themulti-distribution and incomplete data. Extensive experiments with differentdatasets demonstrate the superiority of KEEL over several state-of-the-artmethods in accuracy robustness and computational efficiency. For causaldiscovery in real protein signal transduction processes KEEL outperforms thebenchmark method with limited data. In summary KEEL is effective to tackle thecausal discovery tasks with higher accuracy while alleviating the requirementfor extensive domain expertise. |
+|idx| 2405.10302v1 |
+|title| Optimal Aggregation of Prediction Intervals under Unsupervised Domain Shift |
+|authors| Jiawei GeDebarghya MukherjeeJianqing Fan
+|links| http://arxiv.org/abs/2405.10302v1 |
+|updated| 2024-05-16 17:55:42 UTC |
+|summary| As machine learning models are increasingly deployed in dynamic environmentsit becomes paramount to assess and quantify uncertainties associated withdistribution shifts. A distribution shift occurs when the underlyingdata-generating process changes leading to a deviation in the modelsperformance. The prediction interval which captures the range of likelyoutcomes for a given prediction serves as a crucial tool for characterizinguncertainties induced by their underlying distribution. In this paper wepropose methodologies for aggregating prediction intervals to obtain one withminimal width and adequate coverage on the target domain under unsuperviseddomain shift under which we have labeled samples from a related source domainand unlabeled covariates from the target domain. Our analysis encompassesscenarios where the source and the target domain are related via i a boundeddensity ratio and ii a measure-preserving transformation. Our proposedmethodologies are computationally efficient and easy to implement. Beyondillustrating the performance of our method through a real-world dataset wealso delve into the theoretical details. This includes establishing rigoroustheoretical guarantees coupled with finite sample bounds regarding thecoverage and width of our prediction intervals. Our approach excels inpractical applications and is underpinned by a solid theoretical frameworkensuring its reliability and effectiveness across diverse contexts. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08675v1 |
-|title| Simplifying Debiased Inference via Automatic Differentiation and Probabilistic Programming |
-|authors| Alex Luedtke
-|links| http://arxiv.org/abs/2405.08675v1 |
-|updated| 2024-05-14 14:56:54 UTC |
-|summary| We introduce an algorithm that simplifies the construction of efficientestimators making them accessible to a broader audience. Dimple takes asinput computer code representing a parameter of interest and outputs anefficient estimator. Unlike standard approaches it does not require users toderive a functional derivative known as the efficient influence function.Dimple avoids this task by applying automatic differentiation to thestatistical functional of interest. Doing so requires expressing thisfunctional as a composition of primitives satisfying a novel differentiabilitycondition. Dimple also uses this composition to determine the nuisances it mustestimate. In software primitives can be implemented independently of oneanother and reused across different estimation problems. We provide aproof-of-concept Python implementation and showcase through examples how itallows users to go from parameter specification to efficient estimation withjust a few lines of code. |
+|idx| 2405.10301v1 |
+|title| Conformal Alignment: Knowing When to Trust Foundation Models with Guarantees |
+|authors| Yu GuiYing JinZhimei Ren
+|links| http://arxiv.org/abs/2405.10301v1 |
+|updated| 2024-05-16 17:55:24 UTC |
+|summary| Before deploying outputs from foundation models in high-stakes tasks it isimperative to ensure that they align with human values. For instance inradiology report generation reports generated by a vision-language model mustalign with human evaluations before their use in medical decision-making. Thispaper presents Conformal Alignment a general framework for identifying unitswhose outputs meet a user-specified alignment criterion. It is guaranteed thaton average a prescribed fraction of selected units indeed meet the alignmentcriterion regardless of the foundation model or the data distribution. Givenany pre-trained model and new units with model-generated outputs ConformalAlignment leverages a set of reference data with ground-truth alignment statusto train an alignment predictor. It then selects new units whose predictedalignment scores surpass a data-dependent threshold certifying theircorresponding outputs as trustworthy. Through applications to questionanswering and radiology report generation we demonstrate that our method isable to accurately identify units with trustworthy outputs via lightweighttraining over a moderate amount of reference data. En route we investigate theinformativeness of various features in alignment prediction and combine themwith standard models to construct the alignment predictor. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08498v1 |
-|title| Learning Decision Policies with Instrumental Variables through Double Machine Learning |
-|authors| Daqian ShaoAshkan SoleymaniFrancesco QuinzanMarta Kwiatkowska
-|links| http://arxiv.org/abs/2405.08498v1 |
-|updated| 2024-05-14 10:55:04 UTC |
-|summary| A common issue in learning decision-making policies in data-rich settings isspurious correlations in the offline dataset which can be caused by hiddenconfounders. Instrumental variable IV regression which utilises a keyunconfounded variable known as the instrument is a standard technique forlearning causal relationships between confounded action outcome and contextvariables. Most recent IV regression algorithms use a two-stage approach wherea deep neural network DNN estimator learnt in the first stage is directlyplugged into the second stage in which another DNN is used to estimate thecausal effect. Naively plugging the estimator can cause heavy bias in thesecond stage especially when regularisation bias is present in the first stageestimator. We propose DML-IV a non-linear IV regression method that reducesthe bias in two-stage IV regressions and effectively learns high-performingpolicies. We derive a novel learning objective to reduce bias and design theDML-IV algorithm following the double/debiased machine learning DMLframework. The learnt DML-IV estimator has strong convergence rate andON-1/2 suboptimality guarantees that match those when the dataset isunconfounded. DML-IV outperforms state-of-the-art IV regression methods on IVregression benchmarks and learns high-performing policies in the presence ofinstruments. |
+|idx| 2405.10289v1 |
+|title| Subgradient Convergence Implies Subdifferential Convergence on Weakly Convex Functions: With Uniform Rates Guarantees |
+|authors| Feng Ruan
+|links| http://arxiv.org/abs/2405.10289v1 |
+|updated| 2024-05-16 17:49:46 UTC |
+|summary| In nonsmooth nonconvex stochastic optimization understanding the uniformconvergence of subdifferential mappings is crucial for analyzing stationarypoints of sample average approximations of risk as they approach the populationrisk. Yet characterizing this convergence remains a fundamental challenge.  This work introduces a novel perspective by connecting the uniformconvergence of subdifferential mappings to that of subgradient mappings asempirical risk converges to the population risk. We prove that for stochasticweakly-convex objectives and within any open set a uniform bound on theconvergence of subgradients -- chosen arbitrarily from the correspondingsubdifferential sets -- translates to a uniform bound on the convergence of thesubdifferential sets itself measured by the Hausdorff metric.  Using this technique we derive uniform convergence rates for subdifferentialsets of stochastic convex-composite objectives. Our results do not rely on keydistributional assumptions in the literature which require the population andfinite sample subdifferentials to be continuous in the Hausdorff metric yetstill provide tight convergence rates. These guarantees lead to new insightsinto the nonsmooth landscapes of such objectives within finite samples. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08484v1 |
-|title| Universal replication of chaotic characteristics by classical and quantum machine learning |
-|authors| Sheng-Chen BaiShi-Ju Ran
-|links| http://arxiv.org/abs/2405.08484v1 |
-|updated| 2024-05-14 10:12:47 UTC |
-|summary| Replicating chaotic characteristics of non-linear dynamics by machinelearning ML has recently drawn wide attentions. In this work we propose thata ML model trained to predict the state one-step-ahead from several latesthistoric states can accurately replicate the bifurcation diagram and theLyapunov exponents of discrete dynamic systems. The characteristics fordifferent values of the hyper-parameters are captured universally by a singleML model while the previous works considered training the ML modelindependently by fixing the hyper-parameters to be specific values. Ourbenchmarks on the one- and two-dimensional Logistic maps show that variationalquantum circuit can reproduce the long-term characteristics with higheraccuracy than the long short-term memory a well-recognized classical MLmodel. Our work reveals an essential difference between the ML for the chaoticcharacteristics and that for standard tasks from the perspective of therelation between performance and model complexity. Our results suggest thatquantum circuit model exhibits potential advantages on mitigating over-fittingachieving higher accuracy and stability. |
+|idx| 2405.10263v1 |
+|title| On Partially Unitary Learning |
+|authors| Mikhail Gennadievich BelovVladislav Gennadievich Malyshkin
+|links| http://arxiv.org/abs/2405.10263v1 |
+|updated| 2024-05-16 17:13:55 UTC |
+|summary| The problem of an optimal mapping between Hilbert spaces IN ofleftpsirightrangle and OUT of leftphirightrangle based on a setof wavefunction measurements within a phase psi_l to phi_l l1dotsM is formulated as an optimization problem maximizing the total fidelitysum_l1M omegalleftlanglephi_lmathcalUpsi_lrangleright2 subject to probabilitypreservation constraints on mathcalU partial unitarity. Constructedoperator mathcalU can be considered as a IN to OUT quantum channel itis a partially unitary rectangular matrix of the dimension dimOUT timesdimIN transforming operators as AOUTmathcalU AINmathcalUdagger. An iteration algorithm finding the global maximum ofthis optimization problem is developed and its application to a number ofproblems is demonstrated. A software product implementing the algorithm isavailable from the authors. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08573v1 |
-|title| ViSTooth: A Visualization Framework for Tooth Segmentation on Panoramic Radiograph |
-|authors| Shenji ZhuMiaoxin HuTianya PanYue HongBin LiZhiguang ZhouTing Xu
-|links| http://arxiv.org/abs/2405.08573v1 |
-|updated| 2024-05-14 13:10:54 UTC |
-|summary| Tooth segmentation is a key step for computer aided diagnosis of dentaldiseases. Numerous machine learning models have been employed for toothsegmentation on dental panoramic radiograph. However it is a difficult task toachieve accurate tooth segmentation due to complex tooth shapes diverse toothcategories and incomplete sample set for machine learning. In this paper wepropose ViSTooth a visualization framework for tooth segmentation on dentalpanoramic radiograph. First we employ Mask R-CNN to conduct preliminary toothsegmentation and a set of domain metrics are proposed to estimate the accuracyof the segmented teeth including tooth shape tooth position and tooth angle.Then we represent the teeth with high-dimensional vectors and visualize theirdistribution in a low-dimensional space in which experts can easily observethose teeth with specific metrics. Further we expand the sample set with theexpert-specified teeth and train the tooth segmentation model iteratively.Finally we conduct case study and expert study to demonstrate theeffectiveness and usability of our ViSTooth in aiding experts to implementaccurate tooth segmentation guided by expert knowledge. |
+|idx| 2405.10295v1 |
+|title| Societal Adaptation to Advanced AI |
+|authors| Jamie BernardiGabriel MukobiHilary GreavesLennart HeimMarkus Anderljung
+|links| http://arxiv.org/abs/2405.10295v1 |
+|updated| 2024-05-16 17:52:12 UTC |
+|summary| Existing strategies for managing risks from advanced AI systems often focuson affecting what AI systems are developed and how they diffuse. However thisapproach becomes less feasible as the number of developers of advanced AIgrows and impedes beneficial use-cases as well as harmful ones. In responsewe urge a complementary approach: increasing societal adaptation to advancedAI that is reducing the expected negative impacts from a given level ofdiffusion of a given AI capability. We introduce a conceptual framework whichhelps identify adaptive interventions that avoid defend against and remedypotentially harmful uses of AI systems illustrated with examples in electionmanipulation cyberterrorism and loss of control to AI decision-makers. Wediscuss a three-step cycle that society can implement to adapt to AI.Increasing societys ability to implement this cycle builds its resilience toadvanced AI. We conclude with concrete recommendations for governmentsindustry and third-parties. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08527v1 |
-|title| EEG-Features for Generalized Deepfake Detection |
-|authors| Arian BeckmannTilman StephaniFelix KlotzscheYonghao ChenSimon M. HofmannArno VillringerMichael GaeblerVadim NikulinSebastian BossePeter EisertAnna Hilsmann
-|links| http://arxiv.org/abs/2405.08527v1 |
-|updated| 2024-05-14 12:06:44 UTC |
-|summary| Since the advent of Deepfakes in digital media the development of robust andreliable detection mechanism is urgently called for. In this study we explorea novel approach to Deepfake detection by utilizing electroencephalographyEEG measured from the neural processing of a human participant who viewed andcategorized Deepfake stimuli from the FaceForensics datset. Thesemeasurements serve as input features to a binary support vector classifiertrained to discriminate between real and manipulated facial images. We examinewhether EEG data can inform Deepfake detection and also if it can provide ageneralized representation capable of identifying Deepfakes beyond the trainingdomain. Our preliminary results indicate that human neural processing signalscan be successfully integrated into Deepfake detection frameworks and hint atthe potential for a generalized neural representation of artifacts in computergenerated faces. Moreover our study provides next steps towards theunderstanding of how digital realism is embedded in the human cognitive systempossibly enabling the development of more realistic digital avatars in thefuture. |
+|idx| 2405.10276v1 |
+|title| Revisiting OPRO: The Limitations of Small-Scale LLMs as Optimizers |
+|authors| Tuo ZhangJinyue YuanSalman Avestimehr
+|links| http://arxiv.org/abs/2405.10276v1 |
+|updated| 2024-05-16 17:33:50 UTC |
+|summary| Numerous recent works aim to enhance the efficacy of Large Language ModelsLLMs through strategic prompting. In particular the Optimization byPROmpting OPRO approach provides state-of-the-art performance by leveragingLLMs as optimizers where the optimization task is to find instructions thatmaximize the task accuracy. In this paper we revisit OPRO for automatedprompting with relatively small-scale LLMs such as LLaMa-2 family and Mistral7B. Our investigation reveals that OPRO shows limited effectiveness insmall-scale LLMs with limited inference capabilities constraining optimizationability. We suggest future automatic prompting engineering to consider bothmodel capabilities and computational costs. Additionally for small-scale LLMswe recommend direct instructions that clearly outline objectives andmethodologies as robust prompt baselines ensuring efficient and effectiveprompt engineering in ongoing research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08526v1 |
-|title| Why Larp?! A Synthesis Paper on Live Action Roleplay in Relation to HCI Research and Practice |
-|authors| Karin JohanssonRaquel Breejon RobinsonJon BackSarah Lynne BowmanJames FeyElena Márquez SeguraAnnika WaernKatherine Isbister
-|links| http://arxiv.org/abs/2405.08526v1 |
-|updated| 2024-05-14 12:06:00 UTC |
-|summary| Live action roleplay larp has a wide range of applications and can berelevant in relation to HCI. While there has been research about larp inrelation to topics such as embodied interaction playfulness and futuringpublished in HCI venues since the early 2000s there is not yet a compilationof this knowledge. In this paper we synthesise knowledge about larp andlarp-adjacent work within the domain of HCI. We present a practitioner overviewfrom an expert group of larp researchers the results of a literature reviewand highlight particular larp research exemplars which all work together toshowcase the diverse set of ways that larp can be utilised in relation to HCItopics and research. This paper identifies the need for further discussionstoward establishing best practices for utilising larp in relation to HCIresearch as well as advocating for increased engagement with larps outsideacademia. |
+|idx| 2405.10250v1 |
+|title| IntelliExplain: Enhancing Interactive Code Generation through Natural Language Explanations for Non-Professional Programmers |
+|authors| Hao YanThomas D. LatozaZiyu Yao
+|links| http://arxiv.org/abs/2405.10250v1 |
+|updated| 2024-05-16 16:55:06 UTC |
+|summary| Large language models LLMs have exhibited a strong promise in automaticallygenerating executable code from natural language descriptions particularlywith interactive features that allow users to engage in the code-generationprocess by instructing the LLM with iterative feedback. However existinginteraction paradigms often assume that users have expert knowledge to debugsource code and are not optimized for non-professional programmers use. Thisraises challenges in making interactive code generation more accessible forindividuals with varying levels of programming expertise. To tackle thesechallenges we present IntelliExplain which offers a novel human-LLMinteraction paradigm to enhance non-professional programmers experience byenabling them to interact with source code via natural language explanations.Users interact with IntelliExplain by providing natural language correctivefeedback on errors they identify from the explanations. Feedback is used by thesystem to revise the code until the user is satisfied with explanations by thesystem of the code. Our user study demonstrates that users with IntelliExplainachieve a significantly higher success rate 11.6 and 25.3 better than withvanilla GPT-3.5 while also requiring 39.0 and 15.6 less time in Text-to-SQLand Python code generation tasks respectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08515v1 |
-|title| Precarious Experiences: Citizens' Frustrations, Anxieties and Burdens of an Online Welfare Benefit System |
-|authors| Colin WatsonAdam W ParnabyAhmed Kharrufa
-|links| http://arxiv.org/abs/2405.08515v1 |
-|updated| 2024-05-14 11:37:29 UTC |
-|summary| There is a significant overlap between people who are supported byincome-related social welfare benefits often in precarious situations andthose who experience greater digital exclusion. We report on a study ofclaimants using the UKs Universal Credit online welfare benefit systemdesigned as and still digital by default. Through data collection involvingremote interviews n11 and online surveys n66 we expose claimants ownlived experiences interacting with this system. The claimants explain howdigital channels can contribute to an imbalance of power and agency at a timewhen their own circumstances mean they have reduced abilities resources andcapacities and where design choices can adversely affect peoples utility toleverage help from their own wider socio-technical ecosystems. We contributeeight recommendations from these accounts to inform the future design anddevelopment of digital welfare benefit systems for this population to reducedigital barriers and harms. |
+|idx| 2405.10248v1 |
+|title| Co-Matching: Towards Human-Machine Collaborative Legal Case Matching |
+|authors| Chen HuangXinwei YangYang DengWenqiang LeiJianCheng LvTat-Seng Chua
+|links| http://arxiv.org/abs/2405.10248v1 |
+|updated| 2024-05-16 16:50:31 UTC |
+|summary| Recent efforts have aimed to improve AI machines in legal case matching byintegrating legal domain knowledge. However successful legal case matchingrequires the tacit knowledge of legal practitioners which is difficult toverbalize and encode into machines. This emphasizes the crucial role ofinvolving legal practitioners in high-stakes legal case matching. To addressthis we propose a collaborative matching framework called Co-Matching whichencourages both the machine and the legal practitioner to participate in thematching process integrating tacit knowledge. Unlike existing methods thatrely solely on the machine Co-Matching allows both the legal practitioner andthe machine to determine key sentences and then combine them probabilistically.Co-Matching introduces a method called ProtoEM to estimate human decisionuncertainty facilitating the probabilistic combination. Experimental resultsdemonstrate that Co-Matching consistently outperforms existing legal casematching methods delivering significant performance improvements over human-and machine-based matching in isolation on average 5.51 and 8.71respectively. Further analysis shows that Co-Matching also ensures betterhuman-machine collaboration effectiveness. Our study represents a pioneeringeffort in human-machine collaboration for the matching task marking amilestone for future collaborative matching studies. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2405.08447v1 |
-|title| AI-Resilient Interfaces |
-|authors| Elena L. GlassmanZiwei GuJonathan K. Kummerfeld
-|links| http://arxiv.org/abs/2405.08447v1 |
-|updated| 2024-05-14 09:12:30 UTC |
-|summary| AI is powerful but it can make choices that result in objective errorscontextually inappropriate outputs and disliked options. We need AI-resilientinterfaces that help people be resilient to the AI choices that are not rightor not right for them. To support this goal interfaces need to help usersnotice and have the context to appropriately judge those AI choices. Existinghuman-AI interaction guidelines recommend efficient user dismissalmodification or otherwise efficient recovery from AI choices that a user doesnot like. However in order to recover from AI choices the user must noticethem first. This can be difficult. For example when generating summaries oflong documents a systems exclusion of a detail that is critically importantto the user is hard for the user to notice. That detail can be hiding in a wallof text in the original document and the existence of a summary may tempt theuser not to read the original document as carefully. Once noticed judging AIchoices well can also be challenging. The interface may provide very littleinformation that contextualizes the choices and the user may fall back onassumptions when deciding whether to dismiss modify or otherwise recover froman AI choice. Building on prior work this paper defines key aspects ofAI-resilient interfaces illustrated with examples. Designing interfaces forincreased AI-resilience of users will improve AI safety usability andutility. This is especially critical where AI-powered systems are used forcontext- and preference-dominated open-ended AI-assisted tasks like ideatingsummarizing searching sensemaking and the reading and writing of text orcode. |
+|idx| 2405.10214v1 |
+|title| A Design Trajectory Map of Human-AI Collaborative Reinforcement Learning Systems: Survey and Taxonomy |
+|authors| Zhaoxing Li
+|links| http://arxiv.org/abs/2405.10214v1 |
+|updated| 2024-05-16 16:04:20 UTC |
+|summary| Driven by the algorithmic advancements in reinforcement learning and theincreasing number of implementations of human-AI collaboration CollaborativeReinforcement Learning CRL has been receiving growing attention. Despite thisrecent upsurge this area is still rarely systematically studied. In thispaper we provide an extensive survey investigating CRL methods based on bothinteractive reinforcement learning algorithms and human-AI collaborativeframeworks that were proposed in the past decade. We elucidate and discuss viasynergistic analysis methods both the growth of the field and thestate-of-the-art we conceptualise the existing frameworks from theperspectives of design patterns collaborative levels parties andcapabilities and review interactive methods and algorithmic models.Specifically we create a new Human-AI CRL Design Trajectory Map as asystematic modelling tool for the selection of existing CRL frameworks as wellas a method of designing new CRL systems and finally of improving future CRLdesigns. Furthermore we elaborate generic Human-AI CRL challenges providingthe research community with a guide towards novel research directions. The aimof this paper is to empower researchers with a systematic framework for thedesign of efficient and natural human-AI collaborative methods making itpossible to work on maximised realisation of humans and AIs potentials. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2405.09763v1 |
+|title| Fusion Intelligence: Confluence of Natural and Artificial Intelligence for Enhanced Problem-Solving Efficiency |
+|authors| Rohan Reddy KalavakondaJunjun HuanPeyman DehghanzadehArchit JaiswalSoumyajit MandalSwarup Bhunia
+|links| http://arxiv.org/abs/2405.09763v1 |
+|updated| 2024-05-16 02:10:30 UTC |
+|summary| This paper introduces Fusion Intelligence FI a bio-inspired intelligentsystem where the innate sensing intelligence and unique actuation abilitiesof biological organisms such as bees and ants are integrated with thecomputational power of Artificial Intelligence AI. This interdisciplinaryfield seeks to create systems that are not only smart but also adaptive andresponsive in ways that mimic the nature. As FI evolves it holds the promiseof revolutionizing the way we approach complex problems leveraging the best ofboth biological and digital worlds to create solutions that are more effectivesustainable and harmonious with the environment. We demonstrate FIs potentialto enhance agricultural IoT system performance through a simulated case studyon improving insect pollination efficacy entomophily. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2405.09118v1 |
+|title| BonnBot-I Plus: A Bio-diversity Aware Precise Weed Management Robotic Platform |
+|authors| Alireza AhmadiMichael HalsteadClaus SmittChris McCool
+|links| http://arxiv.org/abs/2405.09118v1 |
+|updated| 2024-05-15 06:23:59 UTC |
+|summary| In this article we focus on the critical tasks of plant protection in arablefarms addressing a modern challenge in agriculture: integrating ecologicalconsiderations into the operational strategy of precision weeding robots likebbot. This article presents the recent advancements in weed managementalgorithms and the real-world performance of bbot at the University of BonnsKlein-Altendorf campus. We present a novel Rolling-view observation model forthe BonnBot-Is weed monitoring section which leads to an average absoluteweeding performance enhancement of 3.4. Furthermore for the first time weshow how precision weeding robots could consider bio-diversity-aware concernsin challenging weeding scenarios. We carried out comprehensive weedingexperiments in sugar-beet fields covering both weed-only and mixed crop-weedsituations and introduced a new dataset compatible with precision weeding. Ourreal-field experiments revealed that our weeding approach is capable ofhandling diverse weed distributions with a minimal loss of only 11.66attributable to intervention planning and 14.7 to vision system limitationshighlighting required improvements of the vision system. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2405.09014v1 |
+|title| Feature-based Federated Transfer Learning: Communication Efficiency, Robustness and Privacy |
+|authors| Feng WangM. Cenk GursoySenem Velipasalar
+|links| http://arxiv.org/abs/2405.09014v1 |
+|updated| 2024-05-15 00:43:19 UTC |
+|summary| In this paper we propose feature-based federated transfer learning as anovel approach to improve communication efficiency by reducing the uplinkpayload by multiple orders of magnitude compared to that of existing approachesin federated learning and federated transfer learning. Specifically in theproposed feature-based federated learning we design the extracted features andoutputs to be uploaded instead of parameter updates. For this distributedlearning model we determine the required payload and provide comparisons withthe existing schemes. Subsequently we analyze the robustness of feature-basedfederated transfer learning against packet loss data insufficiency andquantization. Finally we address privacy considerations by defining andanalyzing label privacy leakage and feature privacy leakage and investigatingmitigating approaches. For all aforementioned analyses we evaluate theperformance of the proposed learning scheme via experiments on an imageclassification task and a natural language processing task to demonstrate itseffectiveness. |
+
 
 | Item |Content|
 | --- |---|
@@ -324,41 +354,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2405.07541v2 |
-|title| Random walk model that universally generates inverse square Lévy walk by eliminating search cost minimization constraint |
-|authors| Shuji ShinoharaDaiki MoritaHayato HiraiRyosuke KuribayashiNobuhito ManomeToru MoriyamaHiroshi OkamotoYoshihiro NakajimaPegio-Yukio GunjiUng-il Chung
-|links| http://arxiv.org/abs/2405.07541v2 |
-|updated| 2024-05-14 01:44:36 UTC |
-|summary| The Levy walk a type of random walk characterized by linear step lengthsthat follow a power-law distribution is observed in the migratory behaviors ofvarious organisms ranging from bacteria to humans. Notably Levy walks withpower exponents close to two are frequently observed though their underlyingcauses remain elusive. This study introduces a simplified abstract random walkmodel designed to produce inverse square Levy walks also known as Cauchywalks and explores the conditions that facilitate these phenomena. In ourmodel agents move toward a randomly selected destination in multi-dimensionalspace and their movement strategy is parameterized by the extent to which theypursue the shortest path. When the search cost is proportional to the distancetraveled this parameter effectively reflects the emphasis on minimizing searchcosts. Our findings reveal that strict adherence to this cost minimizationconstraint results in a Brownian walk pattern. However removing thisconstraint transitions the movement to an inverse square Levy walk.Therefore by modulating the prioritization of search costs our model canseamlessly alternate between Brownian and Cauchy walk dynamics. This model hasthe potential to be utilized for exploring the parameter space of anoptimization problem. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2405.07131v1 |
-|title| MAxPrototyper: A Multi-Agent Generation System for Interactive User Interface Prototyping |
-|authors| Mingyue YuanJieshan ChenAaron Quigley
-|links| http://arxiv.org/abs/2405.07131v1 |
-|updated| 2024-05-12 01:57:09 UTC |
-|summary| In automated user interactive design designers face key challengesincluding accurate representation of user intent crafting high-qualitycomponents and ensuring both aesthetic and semantic consistency. Addressingthese challenges we introduce MAxPrototyper our human-centered multi-agentsystem for interactive design generation. The core of MAxPrototyper is a themedesign agent. It coordinates with specialized sub-agents each responsible forgenerating specific parts of the design. Through an intuitive online interfaceusers can control the design process by providing text descriptions and layout.Enhanced by improved language and image generation models MAxPrototypergenerates each component with careful detail and contextual understanding. Itsmulti-agent architecture enables a multi-round interaction capability betweenthe system and users facilitating precise and customized design adjustmentsthroughout the creation process. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2405.06161v1 |
-|title| (A Partial Survey of) Decentralized, Cooperative Multi-Agent Reinforcement Learning |
-|authors| Christopher Amato
-|links| http://arxiv.org/abs/2405.06161v1 |
-|updated| 2024-05-10 00:50:08 UTC |
-|summary| Multi-agent reinforcement learning MARL has exploded in popularity inrecent years. Many approaches have been developed but they can be divided intothree main types: centralized training and execution CTE centralizedtraining for decentralized execution CTDE and Decentralized training andexecution DTE.  Decentralized training and execution methods make the fewest assumptions andare often simple to implement. In fact as Ill discuss any single-agent RLmethod can be used for DTE by just letting each agent learn separately. Ofcourse there are pros and cons to such approaches as we discuss below. It isworth noting that DTE is required if no offline coordination is available. Thatis if all agents must learn during online interactions without priorcoordination learning and execution must both be decentralized. DTE methodscan be applied in cooperative competitive or mixed cases but this text willfocus on the cooperative MARL case.  In this text I will first give a brief description of the cooperative MARLproblem in the form of the Dec-POMDP. Then I will discuss value-based DTEmethods starting with independent Q-learning and its extensions and thendiscuss the extension to the deep case with DQN the additional complicationsthis causes and methods that have been developed to attempt to address theseissues. Next I will discuss policy gradient DTE methods starting withindependent REINFORCE i.e. vanilla policy gradient and then extending tothe actor-critic case and deep variants such as independent PPO. Finally Iwill discuss some general topics related to DTE and future directions. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2405.05950v1 |
-|title| Federated Combinatorial Multi-Agent Multi-Armed Bandits |
-|authors| Fares FouratiMohamed-Slim AlouiniVaneet Aggarwal
-|links| http://arxiv.org/abs/2405.05950v1 |
-|updated| 2024-05-09 17:40:09 UTC |
-|summary| This paper introduces a federated learning framework tailored for onlinecombinatorial optimization with bandit feedback. In this setting agents selectsubsets of arms observe noisy rewards for these subsets without accessingindividual arm information and can cooperate and share information at specificintervals. Our framework transforms any offline resilient single-agentalpha-epsilon-approximation algorithm having a complexity oftildemathcalOfracpsiepsilonbeta where the logarithm isomitted for some function psi and constant beta into an onlinemulti-agent algorithm with m communicating agents and an alpha-regret ofno more than tildemathcalOm-frac13beta psifrac13betaTfrac2beta3beta. This approach not only eliminates the epsilonapproximation error but also ensures sublinear growth with respect to the timehorizon T and demonstrates a linear speedup with an increasing number ofcommunicating agents. Additionally the algorithm is notablycommunication-efficient requiring only a sublinear number of communicationrounds quantified as tildemathcalOleftpsiTfracbetabeta1right. Furthermore the framework has beensuccessfully applied to online stochastic submodular maximization using variousoffline algorithms yielding the first results for both single-agent andmulti-agent settings and recovering specialized single-agent theoreticalguarantees. We empirically validate our approach to a stochastic datasummarization problem illustrating the effectiveness of the proposedframework even in single-agent scenarios. |
+|idx| 2405.08830v1 |
+|title| Evaluating Supply Chain Resilience During Pandemic Using Agent-based Simulation |
+|authors| Teddy Lazebnik
+|links| http://arxiv.org/abs/2405.08830v1 |
+|updated| 2024-05-13 18:32:28 UTC |
+|summary| Recent pandemics have highlighted vulnerabilities in our global economicsystems especially supply chains. Possible future pandemic raises a dilemmafor businesses owners between short-term profitability and long-term supplychain resilience planning. In this study we propose a novel agent-basedsimulation model integrating extended Susceptible-Infected-Recovered SIRepidemiological model and supply and demand economic model to evaluate supplychain resilience strategies during pandemics. Using this model we explore arange of supply chain resilience strategies under pandemic scenarios using insilico experiments. We find that a balanced approach to supply chain resilienceperforms better in both pandemic and non-pandemic times compared to extremestrategies highlighting the importance of preparedness in the form of a bettersupply chain resilience. However our analysis shows that the exact supplychain resilience strategy is hard to obtain for each firm and is relativelysensitive to the exact profile of the pandemic and economic state at thebeginning of the pandemic. As such we used a machine learning model that usesthe agent-based simulation to estimate a near-optimal supply chain resiliencestrategy for a firm. The proposed model offers insights for policymakers andbusinesses to enhance supply chain resilience in the face of future pandemicscontributing to understanding the trade-offs between short-term gains andlong-term sustainability in supply chain management before and duringpandemics. |
 
 
