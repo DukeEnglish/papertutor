@@ -1,0 +1,784 @@
+Reducing Transformer Key-Value Cache Size with
+Cross-Layer Attention
+WilliamBrandon∗ MayankMishra∗ AniruddhaNrusimha
+MITCSAIL MIT-IBMWatsonAILab MITCSAIL
+wbrandon@csail.mit.edu
+RameswarPanda JonathanRagan-Kelley
+MIT-IBMWatsonAILab MITCSAIL
+Abstract
+Key-value (KV) caching plays an essential role in accelerating decoding for
+transformer-basedautoregressivelargelanguagemodels(LLMs). However,the
+amountofmemoryrequiredtostoretheKVcachecanbecomeprohibitiveatlong
+sequencelengthsandlargebatchsizes. Sincetheinventionofthetransformer,two
+ofthemosteffectiveinterventionsdiscoveredforreducingthesizeoftheKVcache
+havebeenMulti-QueryAttention(MQA)anditsgeneralization,Grouped-Query
+Attention(GQA).MQAandGQAbothmodifythedesignoftheattentionblockso
+thatmultiplequeryheadscanshareasinglekey/valuehead,reducingthenumberof
+distinctkey/valueheadsbyalargefactorwhileonlyminimallydegradingaccuracy.
+In this paper, we show that it is possible to take Multi-Query Attention a step
+furtherbyalsosharingkeyandvalueheadsbetweenadjacentlayers,yieldinganew
+attentiondesignwecallCross-LayerAttention(CLA).WithCLA,wefindthatit
+ispossibletoreducethesizeoftheKVcachebyanother2×whilemaintaining
+nearlythesameaccuracyasunmodifiedMQA.Inexperimentstraining1B-and
+3B-parametermodelsfromscratch,wedemonstratethatCLAprovidesaParetoim-
+provementoverthememory/accuracytradeoffswhicharepossiblewithtraditional
+MQA,enablinginferencewithlongersequencelengthsandlargerbatchsizesthan
+wouldotherwisebepossible.
+1 Introduction
+Thememoryfootprintofthekey-value(KV)cachecanbeabottleneckwhenservinglargelanguage
+models(LLMs). BecausethesizeoftheKVcachescalesproportionallywithbothsequencelength
+andbatchsize,thememoryoverheadofKVcachestoragecanlimitbatchsizeswhenoperatingon
+longsequencelengths[Chowdheryetal.,2022],andcanrequireemployingcostlytechniqueslike
+offloadingwhenon-devicememoryisscarce[Shengetal.,2023]. Itisalsodesirabletobeableto
+persistKVcachesoverlongperiodsoftimeinordertominimizeredundantcomputations[Gaoetal.,
+2024,Google,2024]. However,thesizeoftheKVcachedirectlydeterminesthecostofstoringand
+retrievingsuchpersistentcaches. AsnewapplicationsofLLMsemergewhichdemandever-longer
+sequence lengths, the memory footprint of the KV cache is becoming an increasingly important
+considerationinthedesignofefficienttransformer-basedlanguagemodels.
+ExistingworkhasproposedavarietyofmethodsfordecreasingthememoryfootprintoftheKV
+cache,includingstoringKVactivationsinlowprecision[Hooperetal.,2024,Zhangetal.,2024],
+∗EqualContribution
+Preprint.Underreview.
+4202
+yaM
+12
+]GL.sc[
+1v18921.5042:viXraevictingunimportantKVcacheentries[Zhangetal.,2023,Liuetal.,2023],andsharingkeysand
+valuesacrossqueryheadsintheattentionmechanism[Shazeer,2019,Ainslieetal.,2023b].
+Inthispaper,weintroduceamethodforreducingthesizeoftheKVcachealongadimensiondifferent
+thanthoseexploredinpriorwork: namely,reducingthenumberofuniquelayersintheKVcache.
+Ourcontributionsareasfollows:
+1. WeproposeCross-LayerAttention(CLA),amodificationtothetransformerarchitecture
+whichreducesthesizeoftheKVcachebysharingKVactivationsacrosslayers.
+2. WeconductextensivepretrainingexperimentstocharacterizetheeffectofdifferentCLAcon-
+figurationsonaccuracyandmemoryusageacrossarangeofarchitecturalhyperparameters,
+learningratesandmodelsizes.
+3. WedemonstratethatCLAenablesaccuracy/memoryParetoimprovementsrelativetoexisting
+Multi-QueryAttention(MQA)andGrouped-QueryAttention(GQA)architectures.
+4. Inparticular,wedemonstrateatthe1B-and3B-parameterscalesthatcombiningCLAwith
+MQA can achieve a 2× reduction in KV cache size versus a plain MQA baseline, with
+minimaldegradationinperplexity.
+5. WeofferguidanceonwhichCLAconfigurationsperformbestbasedonourexperiments,
+findingthatCLAshouldbeusedbetweenpairsofconsecutivelayers,andthatCLAappears
+todeliverthemostrobustbenefitswhenusedinconjunctionwithMQA.
+2 Cross-LayerAttention
+In this section we describe our Cross-Layer Attention (CLA) technique, and its relationship to
+theKV-sharingmechanismsemployedbytheexistingMulti-QueryandGrouped-Queryattention
+architectures(MQAandGQA).
+2.1 Background: Multi-QueryAttentionandGrouped-QueryAttention
+TheoriginaltransformerarchitectureemployedMulti-HeadAttention(MHA)[Vaswanietal.,2017],
+inwhicheachqueryheadattendsoverthekeysandvaluesproducedbyadistinctkey/valuehead. In
+MHA,theKVactivationsofeachkey/valueheadmustbestoredseparatelyintheKVcache,resulting
+inastorageoverheadof2·n ·d elementspertoken, wheren isthenumberofquery
+query head query
+headsandd istheembeddingdimensionofeachhead.
+head
+ToreducetheoverheadassociatedwithstoringandaccessingtheKVcacheduringtransformerdecod-
+ing,Shazeer[2019]proposedMulti-QueryAttention(MQA),whichAinslieetal. latergeneralizedto
+Grouped-QueryAttention(GQA).Grouped-QueryAttentionmodifiesthetransformerarchitecture
+byorganizingthequeryheadsofeachattentionlayerintogroups,whereeachgroupofqueryheads
+sharesasinglekey/valuehead. BecausethesizeoftheKVcachescalesonlywiththenumberof
+distinctkey/valueheads,notthenumberofqueryheads,GQAreducesthestorageoverheadofthe
+KVcacheto2·n ·d ,wheren denotesthenumberofgroupsforGQAandn <n .
+group head group group query
+MQAcanbeseenasthespecialcaseofGQAinwhichn =1.
+group
+Shazeer and Ainslie et al. find that MQA and GQA enable significant reductions in KV cache
+sizeanddecodinglatencywhileincurringonlyasmalldegradationinaccuracycomparedtoMHA
+architectureswiththesameheaddimension. Thefamilyofattentionarchitecturesenabledbyusing
+MQAandGQAdefinesanaccuracy/memorytradeoffspaceinwhichmodeldesignerscanchoose
+howtheywanttobalancetheexpressivepowerandKVcacheoverheadoftheirattentionmechanism.
+MQAandGQAstakeoutdifferentpositionsinthistradeoffspace,andneitherisnecessarilypreferable
+totheotherforallusecases.
+2.2 SharingKVActivationsAcrossLayers
+InspiredbythesuccessofMQAandGQA,whichsharekey/valueheadsacrossqueryheadswithina
+singlelayer,weproposealsosharingkey/valueheadsacrosslayers. Werefertosuchanattention
+architectureasCross-LayerAttention(CLA),andpresentadiagrammaticviewofitinFigure1. CLA
+computeskey/valueprojectionsforonlyasubsetoflayersinthemodel;theattentionblocksinlayers
+withoutkey/valueprojectionsreusetheKVactivationsofpreviouslayers. Onlythesubsetoflayers
+2Transformer with
+Traditional Transformer
+Cross-Layer Attention (Ours)
+FFN FFN
++ +
+Out Proj. Out Proj.
+Attention Attention
+K, V Proj. Q Proj. Q Proj.
+Norm. Norm.
+FFN FFN
++ +
+Out Proj. Out Proj.
+Attention Attention
+K, V Proj. Q Proj. K, V Proj. Q Proj.
+Norm. Norm.
+Figure1: Schematicoftwoconsecutivelayersinatransformerusingatraditionalattentiondesign
+(left)andinatransformerusingCross-LayerAttention(right). Whenusingtraditionalattention,each
+layercomputesitsownseparateK andV activations,whichmustbecachedonaper-layerbasis
+duringautoregressivedecoding. WhenusingCross-LayerAttention,somelayerscomputetheirown
+freshK andV activations,whileotherlayersreusetheK andV activationsofearlierlayers.
+withkey/valueprojectionscontributetotheKVcache,allowingareductioninmemoryfootprint
+relativetotraditionalarchitectureswhichapplyaseparatekey/valueprojectionineachlayer.
+CLAisorthogonaltoMQA/GQA/MHA,andcanbecombinedwithanyofthem. Moreover,inthe
+samewaythatGQAallowsvaryingn toaccessafamilyofdifferentattentionconfigurations,
+group
+CLAallowsvaryingthenumberoflayerswhichsharetheoutputofeachKVprojection,whichwe
+refertoasthesharingfactor. WerefertodifferentconfigurationsofCLAbytheirsharingfactors,
+givingrisetoCLA2,whichshareseachKVprojectionamongapairofadjacentlayers,CLA3,which
+shares each KV projection among a group of 3 layers, and so on. We present a visualization of
+differentattentionconfigurationspossiblewithCLAinFigure2.
+2.3 ImplicationsforSystemDesign
+CLAisprimarilyaninterventiontoreducethememoryfootprintoftheKVcache,andonlyhasminor
+effectsonotherresourcesconsumedbythemodelduringtrainingandinference. Here,wesummarize
+theeffectofCLAonkeymetricsrelevantfromasystemsengineeringperspective,assumingallother
+architecturalhyperparametersareheldconstant:
+• KVCacheMemory: CLAsignificantlyreducesKVcachememoryfootprint,shrinkingit
+byafactorequaltothesharingfactor,orslightlylessifthesharingfactordoesnotevenly
+dividethenumberoflayers.
+• Training Memory Footprint: CLA reduces the memory footprint of intermediate KV
+activationtensorsmaterializedduringtraining,althoughforGQAandMQAmodelssuch
+KVtensorsaretypicallysmallcomparedtothemodel’shiddenstatesandMLPactivations.
+3Traditional Attention CLA2 CLA3
+Layer 9 KV Layer 9 Layer 9 Layer 9
+Layer 8 KV
+Layer 8 KV Layer 8 Layer 8 Layer 7 KV Layer 8
+Layer 7 KV Layer 7 Layer 7 Layer 7
+Layer 6 KV
+Layer 6 KV Layer 6 Layer 6 Layer 6
+Layer 5 KV Layer 5 Layer 5 Layer 4 KV Layer 5
+Layer 4 KV
+Layer 4 KV Layer 4 Layer 4 Layer 4
+Layer 3 KV Layer 3 Layer 3 Layer 3
+Layer 2 KV
+Layer 2 KV Layer 2 Layer 2 Layer 1 KV Layer 2
+Layer 1 KV Layer 1 Layer 1 Layer 1
+Layer 0 KV
+Layer 0 KV Layer 0 Layer 0 Layer 0 KV Layer 0
+Figure2: SchematicofKVcachestructuresunderdifferentattentionconfigurationsina10-layer
+transformer. Using traditional attention, each layer has its own KV cache. Using Cross-Layer
+Attentionwithasharingfactorof2(CLA2),everygroupof2consecutivelayerssharesasingleKV
+cache. UsingCross-LayerAttentionwithasharingfactorof3(CLA3),everygroupof3consecutive
+layerssharesasingleKVcache. Whenthesharingfactordoesnotevenlydividethenumberoflayers,
+asintheCLA3example,someKVcachesmustbesharedoverfewerlayersthanothers;inthisCLA3
+configuration,wearbitrarilyselectthelayer0KVcachetobeusedonlyinlayer0.
+• ModelParallelism: CLAisfullycompatiblewithstandardtensorparallelismtechniques
+[Shoeybi et al., 2020] for sharding model weights across multiple accelerators. In the
+presenceofpipelineparallelism[Huangetal.,2019],eitherdifferentlayerswhichshare
+a KV cache must be kept in the same pipeline stage, or else KV activations must be
+communicatedbetweenpipelinestages.
+• ParametersandFLOPs: BecauseCLAreducesthetotalnumberofkey/valueprojection
+blocksinthemodel,CLAslightlyreducesthenumberofparametersinthemodelandthe
+numberofFLOPsrequiredduringaforwardorbackwardpass.
+• DecodingLatency: InthecontextofafullLLMservingstack,CLAcanenablelargerbatch
+sizesandlongerKVcachepersistencetimesthanwouldotherwisebepossible,whichhave
+thepotentialtoimproveinferencelatency.
+• CoreAttentionLatency: UnlikeMQAandGQA,CLAhasnodirecteffectonthememory
+bandwidth consumed by the attention mechanism in each decoding step, because even
+sharedKVcachelayersmustbeseparatelyre-readfrommainmemoryineachattention
+layer. CLAthereforehasnodirecteffectonthelatencyofthecoreattentioncomputation
+duringdecoding.
+3 PretrainingExperiments
+To determine the effect of Cross-Layer Attention on language modeling accuracy, we trained a
+collectionoftransformer-basedlanguagemodelsfromscratchatthe1billionand3billionparameter
+scales. Whilerunningtheseexperiments,wesoughttoanswerthefollowingquestions:
+1. Whataccuracy/memorytradeoffsarepossibleusingCLA?
+2. HowdoesusingCLAcomparetousingplainGQAorMQA?
+3. HowdoesCLAinteractwithGQAandMQA?
+4. WhatCLAconfigurationsperformbestgivenafixedmemorybudget?
+5. AretheeffectsofCLAconsistentacrossscales?
+4Pareto Frontier with and without CLA (1B Models)
+14.4
+H32-MQA
+14.2
+14.0
+H46-MQA
+H64-MQA-CLA2
+13.8 H64-MQA
+H90-MQA-CLA2
+13.6 H128-MQA-CLA2
+H128-MQA
+H256-MQA-CLA2 H128-GQA2
+H512-MQA-CLA2
+13.4
+H128-GQA4
+13.2
+H128-MHA
+103 104 105
+KV Cache Bytes Per Token (16-Bit Precision)
+Figure3: Theaccuracy/memoryParetofrontierdiscoveredinour1B-scaledesignspaceexploration,
+formodelswithCLA(red)andwithoutCLA(blue). Lowerisbetteronbothaxes.
+WefoundthatCLAenablesfavorableaccuracy/memorytradeoffscomparedtowhatispossibleusing
+plainGQAorMQA.Moreover,wefoundthatinourexperimentalregime,asharingfactorof2is
+moreeffectivethanothersharingfactors,andthatCLAisconsistentlyeffectivewhencombinedwith
+MQAwhentryingtodecreaseKVcachestorage. Wealsofoundpreliminaryevidencetosuggest
+thatCLAmodelsbenefitfromtrainingwithhigherlearningratesthancomparablenon-CLAmodels.
+Finally,wefoundthatCLAconfersbenefitsatboth1B-and3B-parameterscales. Intherestofthis
+section,wepresentourexperimentalsetupandresultsinmoredetail.
+3.1 CommonExperimentalParameters
+Inallourexperiments,wetrainourmodelsfromscratchondatafromtheSlimPajama[Sobolevaetal.,
+2023]dataset,tokenizedwiththeGPT-NeoXtokenizer[Blacketal.,2022]whichusesByte-Pair
+Encoding (BPE) [Wang et al., 2019]. We adopt a Llama-like [Touvron et al., 2023] architecture
+with pre-normalization, SwiGLU activations [Shazeer, 2020, Ramachandran et al., 2017], and
+rotarypositionembeddings[Suetal.,2023]. Wedonotusedropoutforanyofourmodels. Our
+modelsincludelearnableelementwiseaffineparametersforlayer-norm,andourCLAmodelsuse
+separately-learnableaffinelayer-normparametersfortheKVprojectionblocksandQprojection
+blocksinattention. Unlessotherwisestated,wealwayssetthenumberofqueryheadsn such
+query
+thatn ·d isequaltothehiddensized .
+query head model
+WetrainallmodelsusingtheAdamWoptimizer[LoshchilovandHutter,2019]withgradientclipping,
+using β = 0.9, β = 0.95, a weight decay factor of 0.1, and a clipping norm of 1.0. We use a
+1 2
+linearlearningratewarmupforthefirst5%oftrainingexamplesandacosinelearningrateschedule
+Loshchilov and Hutter [2017] decaying to 10% of the peak learning rate over the remainder of
+training. Wesetthesequencelengthto2048tokensandthebatchsizeto2048sequences,foratotal
+of≈4M tokenspertrainingstep. Allourexperimentsinitializetheweightsoflinearlayersfroma
+normaldistributionwithmeanzeroandstandarddeviation0.01275.
+5
+ytixelpreP
+noitadilaVQuery KV KV KVBytesPer Validation
+Model d
+head Heads Heads Layers Token(16-Bit) Perplexity
+Non-CLABaselines
+H128-MHA 128 16 16 20 163840 13.15
+H128-GQA4 128 16 4 20 40960 13.36
+H128-GQA2 128 16 2 20 20480 13.52
+H128-MQA 128 16 1 20 10240 13.54
+H64-MQA 64 32 1 20 5120 13.81
+H46-MQA 46 45 1 20 3680 13.96
+H32-MQA 32 64 1 20 2560 14.37
+MQA+CLA2Models
+H512-MQA-CLA2 512 4 1 10 20480 13.49
+H256-MQA-CLA2 256 8 1 10 10240 13.51
+H128-MQA-CLA2 128 16 1 10 5120 13.60
+H90-MQA-CLA2 90 22 1 10 3600 13.73
+H64-MQA-CLA2 64 32 1 10 2560 13.89
+GQA+CLA2Models
+H256-GQA4-CLA2 256 8 4 10 40960 13.38
+H128-GQA4-CLA2 128 16 4 10 20480 13.48
+H128-GQA2-CLA2 128 16 2 10 10240 13.59
+MQA+CLA>2Models
+H128-MQA-CLA3 128 16 1 7 3584 13.77
+H128-MQA-CLA4 128 16 1 5 2560 13.95
+MQA+CLA2,Non-UniformSharing
+H128-MQA-CLA2-KeepEnds 128 16 1 11 5632 13.62
+H128-MQA-CLA2-DenseFront 128 16 1 11 5632 13.75
+H128-MQA-CLA2-DenseBack 128 16 1 11 5632 14.03
+Table1: Resultsofour1B-scaledesignspaceexploration.
+ModelFamily HiddenSize FFNSize Layers SequenceLength TrainingTokens
+1BModels 2048 5472 20 2048 30×109
+3BModels 3072 8192 32 2048 100×109
+Table2: Architecturalandtraininghyperparameterssharedacrossourpretrainingexperiments.
+WeperformallexperimentsonNVIDIAH100GPUsusingPyTorch[Paszkeetal.,2019,Anseletal.,
+2024]. Weusemixedprecisiontraining[Micikeviciusetal.,2018]inBF16[Kalamkaretal.,2019]
+withgradientall-reduceandgradientaccumulationinFP32fortrainingstability.
+3.2 Experimentsat1B-ParameterScale
+Wetrainedallour1B-scalemodelson30billiontokensusingaconsistentdataorder,and,otherthan
+varyingtheattentionmechanism,usedthesamearchitecturalhyperparametersacrossall1B-scale
+models. Thismeansthatallour1Bmodelswerealltrainedusingapproximatelythesamenumberof
+FLOPsandapproximatelythesamenumberofGPU-hours,withCLAmodelsrequiringslightlyfewer
+FLOPstotrainthantheirnon-CLAcounterpartsduetothereducednumberofkey/valueprojections.
+Thecommonhyperparameterssharedacrossour1B-scaleexperimentscanbefoundinTable2.
+Werantwomainsetsofexperimentsatthe1B-parameterscale. First,wetrainedadiversesetofCLA
+andnon-CLAmodelstocharacterizetherangeofaccuracy/memorytradeoffsachievablewithand
+withoutCLA,andtodeterminewhichCLAconfigurationsaremosteffective;werefertotheseasour
+designspaceexplorationexperiments,anddescribetheminmoredetailinSection3.2.1. Second,we
+6conductedalearningratesweeponasubsetofmodelsfromourdesignspaceexplorationtoverify
+thatourresultscontinuetoholdevenagainstastrongnon-CLAbaselinewithawell-tunedlearning
+rate. WedescribetheselearningratetuningexperimentsinAppendixA.
+3.2.1 DesignSpaceExploration
+Theprimarygoalofour1B-parameter-scaledesignspaceexplorationwastocharacterizethePareto
+frontierofaccuracy/memorytradeoffsachievablewithandwithoutCLA,andtodeterminewhich
+CLAconfigurationsachievethebestaccuracyonafixedKVcachememorybudget. Wetrainall
+modelsinourdesignspaceexplorationusingalearningrateofLR=3×10−4,whichwedetermined
+tobeconservative;weexploretheeffectofthelearningrateonaccuracyinmoredetailinSection
+3.2.2.
+Forourdesignspaceexploration,wefirsttrainedacollectionofsevennon-CLAbaselinemodelsalong
+theMHA-GQA-MQAspectrum,exhibitingarangeofKVcachememoryrequirementsspanningtwo
+ordersofmagnitude. OurbaselinemodelwiththelargestKVcachememoryfootprintisanMHA
+modelwithaheadembeddingdimensionofd =128(163840bytespertokenat16-bitprecision),
+head
+andourbaselinewiththesmallestfootprintisanMQAmodelwithheaddimensiond =32(2560
+head
+bytespertoken).
+Wequantifytheaccuracyofmodelsinourdesignspaceexplorationusingperplexityonaheld-out
+validationsetof≈ 4M tokensdrawnfromourSlimPajamacorpus. Asummaryofresultsforthe
+modelsinourdesignspaceexploration,includingourbaselinemodels,canbefoundinTable1. We
+adoptthenamingscheme“H⟨d ⟩-⟨attentionmechanism⟩”forallmodelsinourexperiments,so
+head
+that,forexample,amodelemployingMQAwithaheaddimensionofd =64wouldbenamed
+head
+“H64-MQA.”Forourbaselinemodels,weobservethatvalidationperplexityincreasesmonotonically
+as we reduce the memory capacity of the KV cache, ranging from a perplexity of 13.15 for our
+H128-MHAbaselineto14.37forourH32-MQAbaseline.
+Intherestofthissection,wepresentresultsfortheCLAmodelswetrainedduringourdesignspace
+exploration.
+BestPerformance: MQA+CLA2. WetrainedafamilyoffivemodelscombiningMQAwith
+CLA2. We varied the head dimension for our MQA-CLA2 models from d = 512 down to
+head
+d =64,allowingustocomparetoarangeofnon-CLAbaselinemodelswithvaryingKVcache
+head
+capacities.
+WefoundthatourMQA-CLA2modelsareabletoachievebetterperplexitiesthanbaselinemodels
+requiringthesameamountofKVcachememory,advancingtheaccuracy/memoryParetofrontier.We
+presentaplotoftheaccuracy/memoryParetofrontierwithandwithoutCLAinFigure3. OurMQA-
+CLA2modelswithheaddimensionsd ∈{64,90,128}areabletomatchtheKVcachememory
+head
+footprint of baseline MQA models with head dimensions d ∈ {32,46,64} while achieving
+head
+substantialperplexityimprovementsintherangeof0.21–0.48points. Additionally,ourMQA-CLA2
+modelswithlargeheadsizesofd ∈{256,512}areabletomatchtheKVcachefootprintofour
+head
+MQAandGQA2baselineswithd =128whileachievingasmallperplexityimprovementof0.03
+head
+points.
+We found that our MQA-CLA2 models achieved the best accuracy/memory tradeoffs among all
+CLAconfigurationswetestedinourdesignspaceexploration. Intherestofthissection,webriefly
+describetheablationsweconductedtoexplorealternateCLAconfigurations.
+Ablation: GQA + CLA2. We trained three models to explore combining GQA with CLA2.
+We chose GQA4-CLA2 with d = 128 as our starting point, as GQA4 represents an attention
+head
+configurationintermediatebetweenourMQAandMHAbaselines. Wethenexploredexpandingthe
+headdimensionofourGQA4-CLA2modeltod =256,aswellasreducingtheGQAfactorto
+head
+GQA2. WefoundthatonlytheGQA2-CLA2configurationwasabletoachieveaperplexitybetter
+thanthecorrespondingbaselinemodelwiththesameKVcachefootprint,andthatthisperplexity
+wasthesame(within0.01points)asourMQA-CLA2modelwiththesamefootprint.
+Ablation: MQA+CLAwithSharingFactor>2. ToexploretheeffectofusingCLAsharing
+factors> 2,wetrainedMQA-CLA3andMQA-CLA4modelswithheaddimensiond = 128.
+head
+WefoundthattheseCLA3andCLA4modelsachievedaParetoimprovementoverourplainMQA
+7baselines,matchingtheKVcachefootprintofourbaselineMQAmodelswithheaddimensionsof
+d ∈{32,46}whileachievingbetterperplexities. However,wefoundthattheyachievedworse
+head
+perplexitiesthanourMQA-CLA2modelsatthesameKVcachefootprint.
+Ablation: MQA + CLA2 with Non-Uniform Sharing Patterns. Finally, we explored using
+differentpatternsofKVactivationsharinginourMQA-CLA2models.
+Onthehypothesisthatthefirstandlastlayersinthemodelmightbenefitfromspecialtreatment,we
+trainedamodel“H128-MQA-CLA2-KeepEnds”whichdoesnotsharethelayer0KVcachewithany
+otherlayers,andinsteadgroupslayer1withlayer2,groupslayer3withlayer4,andsoon. Thisalso
+hastheeffectofgivingthefinallayeritsownKVcacheseparatefromallotherlayers.
+WealsoexploredimbalancedconfigurationswithalltheKV-cache-producinglayersconcentrated
+ateitherthebeginningorendofthemodel. Wetrainedamodel“H128-MQA-CLA2-DenseFront”
+consistingof10non-CLAlayers,followedby9CLAlayersallusingtheKVactivationsoflayer
+9, and a final layer with its own KV cache. Similarly, we trained a model “H128-MQA-CLA2-
+DenseBack”consistingof2non-CLAlayers,followedbyarunof10CLAlayersallusingtheKV
+activationsoflayer1,andfinally9non-CLAlayers.
+We found that all of these alternative CLA sharing patterns achieve worse perplexities than the
+correspondingMQA-CLA2modelwithauniformsharingpattern,whilealsorequiringslightlymore
+KVcachememory.
+3.2.2 RobustnesstoLearningRateTuning
+The relative performance of different model architectures can change depending on the learning
+ratesatwhichtheyareevaluated. Toaccountfortheeffectsofthelearningrateonourresults,we
+conducted learning rate tuning experiments on three models of interest from our initial 1B-scale
+designspaceexploration. TheselearningratetuningexperimentshelpusverifythatCLAcontinues
+toprovidebenefitsevenwhencomparedtobaselinestrainedattheiroptimallearningrates.
+WechosetotunethelearningrateforthebaselinemodelsH128-MQAandH64-MQA,aswellas
+theCLAmodelH128-MQA-CLA2. Inourinitialdesignspaceexploration, ourresultsforthese
+modelsindicatedthatCLAmakesitpossibletoshrinktheKVcachefootprintofanMQAmodelwith
+d =128byafactorof2×whileincurringonlyasmall(0.06point)degradationinperplexity,or
+head
+tocreateamodelwiththesameKVcachefootprintasanMQAmodelwithd =64whileenjoying
+head
+asubstantial(0.21point)improvementinperplexity. Wewantedtoverifythatthisqualitativepattern
+continuestoholdwhenallmodelsaretrainedwithwell-tunedlearningrates.
+LearningRateTuningStrategy. Foreachofourthreemodelconfigurations,wesweptthelearning
+rate upwards from an initial value of 3×10−4 in multiplicative increments of 1.5×. We ended
+oursweepforeachmodelatthepointwherevalidationperplexitystoppedimproving. Wetreatthe
+learningratewhichachievedthelowestvalidationperplexityforeachmodelasanapproximationof
+thatmodel’soptimallearningrate.
+Results. We found an optimal learning rate of LR = 1.5×10−3 for our H128-MQA baseline,
+andahigheroptimallearningrateofLR=2.25×10−3 forbothourH64-MQAbaselineandour
+H128-MQA-CLA2model.
+Thevalidationperplexityresultsfromour1B-scalelearningratetuningexperimentscanbefoundin
+Table3. Whencomparingallthreemodelsattheirbestlearningrates,wefoundthatthequalitative
+resultfromourdesignspaceexplorationcontinuestohold:ourCLA2modelincursonlyasmall(0.04
+point)validationperplexitydegradationrelativetoourd = 128baselinewhileenjoyinga2×
+head
+smallerKVcachefootprint,andachievesasubstantial(0.31point)validationperplexityimprovement
+comparedtoourd =64baselinewhileusingthesameamountofKVcachememory.
+head
+Tofurthervalidateourresults,wealsoevaluateourthreelearning-rate-tuned1B-scalemodelsunder
+EleutherAI’sLMEvalHarness[Gaoetal.,2023]onWikitext[Merityetal.,2016]perplexityand
+sevenstandarddownstreambenchmarks. Wereporttheresultsoftheseevaluationintables3and4.
+OnWikitextperplexity,weobserveasimilarpatternaswithvalidationperplexity,withourtuned
+CLA2modelachievingapproximatelythesame(0.01pointsbetter)perplexityasourd =128
+head
+baseline, and substantially (0.71 points) better perplexity than our d = 64 baseline. On the
+head
+8downstreamevaluations,wefoundthatnoneofourthreemodelsmodelconsistentlywinsorloses
+acrossdifferentbenchmarks,andthatallthreemodelsareconsistentlywithin1–5percentagepoints
+ofeachother.
+KVBytesPer Validation Wikitext
+Model BestLR
+Token(16-bit) Perplexity Perplexity
+H128-MQA 10240 1.5 ×10−3 12.39 19.30
+H128-MQA-CLA2 5120 2.25×10−3 12.43 19.29
+H64-MQA 5120 2.25×10−3 12.74 20.00
+Table3: Perplexityresultsfromlearningratetuningexperimentsat1B-parameterscale.
+Model(BestLR) Hellaswag PIQA WG SciQ OBQA BoolQ ARC-E
+H128-MQA 36.24 69.15 52.96 82.9 19.0 57.40 55.43
+H128-MQA-CLA2 36.01 69.15 51.93 82.6 21.4 53.21 53.87
+H64-MQA 35.22 69.21 50.75 78.5 19.4 55.81 51.68
+Table4: Downstreambenchmarkresultsfor1B-scalemodelswithtunedlearningrates. Thecolumns
+“WG”and“OBQA”denote“WinoGrande”and“OpenBookQA”,respectively.
+3.3 Experimentsat3B-ParameterScale
+TodeterminehowCLAperformswhenappliedtolargermodels,wetrainedacollectionofmodelsat
+the3B-parameterscalebothwithandwithoutCLA.Wetrainedeachofour3B-scalemodelfrom
+scratchon100BtokensfromourSlimPajamacorpus. Thecommonarchitecturalhyperparametersfor
+our3B-scalemodelscanbefoundinTable2.
+ExperimentsatHeadDimensiond = 128. Weinitiallyranexperimentstocomparethree
+head
+3B-scalemodelsanalogoustothemodelsweselectedforourlearningratetuningexperimentsatthe
+1B-parameterscale. Specifically,wecomparedamodelusingMQA-CLA2andd =128toan
+head
+MQAmodelwiththesameheaddimension(andhence2×theKVcachefootprint),andtoanMQA
+modelwithaheaddimensionofd =64(andhencethesameKVcachefootprint). Basedonour
+head
+1B-scaleexperiments,weexpectedthatourMQA-CLA2andMQAmodelswithd =128would
+head
+achievesimilarperplexitiestoeachother,andthatbothwouldoutperformthed =64model.
+head
+Wetunedthelearningratesforthesemodelsaccordingtothesamelearningratetuningprotocolwe
+usedatthe1B-parameterscale. Aftertuningthelearningratesforeachmodel,weobservedaresult
+differentthanwehadexpected: at3Bscale,ourMQA-CLA2modelachievessubstantiallybetter
+perplexitiesthanbothourd = 128andd = 64MQAbaselines. Moreover,ourd = 64
+head head head
+MQAbaselinemodelachievesbetterperplexitiesthanourtunedd =128MQAbaseline,despite
+head
+havingonly1/2asmuchKVcachecapacity. Wereporttheoptimallearningratesandperplexitiesfor
+thesethreemodelsinTable5.
+Aswithour1B-scalelearningratetuningexperiments,weevaluatethesemodelsondownstream
+benchmarks. WereporttheresultsoftheseevaluationsinTable6. Aswithour1B-scaleexperiments,
+wedonotfindthatanymodelconsistentlywinsorlosesinthesedownstreamevaluations.
+KVBytesPer Validation Wikitext
+Model BestLR
+Token(16-bit) Perplexity Perplexity
+H128-MQA 16384 6.75×10−4 9.52 13.63
+H128-MQA-CLA2 8192 2.25×10−3 9.34 13.25
+H64-MQA 8192 1.00×10−3 9.48 13.49
+Table5: Optimallearningrateandperplexityresultsforourfirstsetof3B-scaleexperiments.
+ExperimentsatHeadDimensiond = 64. Becauseinourinitial3B-scaleexperimentswe
+head
+foundthatourd = 64MQAmodelrepresentsastrongerbaselinethanourd = 128MQA
+head head
+model,weranasecondsetofexperimentswithadjustedheadsizes.Specifically,wechosetocompare
+9Model(BestLR) Hellaswag PIQA WG SciQ OBQA BoolQ ARC-E
+H128-MQA 45.73 73.07 60.46 88.1 25.4 59.30 64.90
+H128-MQA-CLA2 47.12 74.32 60.69 89.2 25.2 58.62 64.73
+H64-MQA 46.42 74.05 57.85 88.1 25.6 59.88 65.57
+Table6: Downstreamevaluationresultsforourfirstsetof3B-scaleexperiments.
+anMQA-CLA2modelwithd =64toaplainMQAmodelwithd =64,andtoaplainMQA
+head head
+modelwithd =32.
+head
+Duetologisticalconstraintswetrainedallmodelsinthissecondsetof3B-scaleexperimentson
+adifferenttrainingclusterusingadifferenttrainingsoftwarestackanddataorder. Thisincluded
+retraininganewversionofourH64-MQA-CLA2baselineinordertocontrolfordifferencesinthe
+newtrainingenvironment.
+WetrainedallmodelsinthissecondsetofexperimentswithalearningrateofLR=10−3,which
+wehadfoundtobethebestlearningrateforourd =64MQAbaselinemodelinourfirstsetof
+head
+3B-scaleexperiments. Forourd = 64MQA-CLA2modelandourd = 32MQAbaseline
+head head
+model,wealsoexperimentedwithlearningratesofLR ∈ {6.75×10−4,1.5×10−3},butfound
+theseachievedworseperplexitiesthanourinitialvalueofLR=10−3.
+WereportperplexityresultsforthissecondsetofexperimentsinTable7,andresultsfordownstream
+benchmarks in Table 8. In the Wikitext perplexity results for this set of experiments, we find
+agreement with the pattern observed at the 1B scale. Our MQA-CLA2 model with d = 64
+head
+incursonlyasmall(0.05point)degradationinperplexitycomparedtoourd =64baselinewhile
+head
+enjoyinga2×smallerKVcachefootprint,andachievesasubstantial(0.35point)improvementin
+perplexitycomparedtoourd =32baselinewhileusingthesameamountofKVcachememory.
+head
+Wealsoevaluatethesethreemodelsondownstreambenchmarks,andreporttheresultsinTable8.
+Aswithourdownstreambenchmarkevaluationsforourotherexperiments,wefindthatallmodels
+performsimilarly.
+KVBytesPer
+Model BestLR WikitextPerplexity
+Token(16-bit)
+H64-MQA 8192 1.0×10−3 12.94
+H64-MQA-CLA2 4096 1.0×10−3 12.99
+H32-MQA 4096 1.0×10−3 13.34
+Table7: Optimallearningrateandperplexityresultsforoursecondsetof3B-scaleexperiments.
+Model(BestLR) Hellaswag PIQA WG SciQ OBQA BoolQ ARC-E
+H64-MQA 47.34 74.54 60.46 88.9 24.2 57.25 66.92
+H64-MQA-CLA2 47.32 74.54 57.46 87.9 25.2 61.62 65.53
+H32-MQA 46.05 73.83 60.06 88.6 25.6 61.87 65.24
+Table8: Downstreamevaluationresultsforoursecondsetof3B-scaleexperiments.
+4 Discussion&FutureWork
+TakeawaysandImplications. Intheregimeswherewetestedit,wefindthatMQA-CLA2consis-
+tentlyachievesthelowestvalidationperplexity(within0.01points)foragivenKVcachememory
+budgetandmodelsize. Inourablations,wefindthatusingsharingfactorsgreaterthan2(CLA3and
+above)achievesslightlyworseaccuracy/memorytradeoffsthanusingCLA2andvaryingthehead
+dimension,althoughstillPareto-dominatesthetradeoffspossiblewithplainMQAalone.
+At both 1B and 3B scale, we find that for MQA models with typical head sizes of 64 and 128,
+applyingCLA2yieldsa2×KVcachereductionwhileincurringatworstaverymodest(lessthan
+1% change) degradation in perplexity, and in some cases improving perplexity. We recommend
+thisrecipetopractitionersasaconservativechangetoexistingMQAarchitectureswhichdelivers
+substantialmemoryoverheadreductionswithrelativelylittlerisk.
+10FutureWork. OnenaturalquestionthatrisesfromanymemoryefficientLLMalternativeisits
+efficiency improvement when serving through longer sequences and greater batching. We leave
+end-to-end inference efficiency evaluations of large, long-context models employing CLA as an
+interestingproblemforfuturework. WesuspectthatthetypesofLLMsthatwillstandtogainthe
+mostaretheoneswhichhaveextremelylongsequences,suchasmodelsthathavelongtermmemory
+orusemethodslikeLandmarkAttention[MohtashamiandJaggi,2023]whichrenderattentionover
+longcontextsmorefeasible.
+5 RelatedWork
+Transformermemoryefficiencycanrefertomanypotentialobjectives. Itcanrefertodecreasing
+memorystorageorbandwidthrequirements,itcanbetargetedattrainingorinference,andfinallyit
+applyeitherwithinasinglepassofthemodelorbetweenpasses. Whilethisworktargetsdecreasing
+thesizeoftheinferenceKVcachethatpersistsbetweenpasses,notableworkssuchasFlashAttention
+[Daoetal.,2022,Dao,2023]havedecreasedthememorybandwidthnecessaryforasinglepass,and
+workslikeFlexGen[Shengetal.,2023]achievedlowmemorystorageduringasingleforwardpass
+bypartialoffloadingtodisk. Herewediscussrelatedworkthatimprovesthememoryefficiencyof
+attention,specificallythememorystorageoftheKVcache.
+5.1 DecreasingKVcachesizePosttraining
+MuchworkhasfocusedondecreasingthesizeoftheKVcacheformodelsthathavealreadybeen
+trained.
+KVcachecompression AsmanyworkshavetriedtocompressLLMsthroughpruning,quanti-
+zation,andsparsity,(seeZhuetal.[2023]forasurvey)asubsetdirectlyfocusontheproblemof
+KVcachecompression. Forquantization,KVQuant[Hooperetal.,2024]andCoupledQuantization
+[Zhangetal.,2024]performtargetedtransformationsofthekeysandvaluesalongwithnonuniform
+encodingstocompresstheKVcachetoonetotwobits. SparsifyingtheKVcachedonebyworks
+suchasH2O[Zhangetal.,2023]Scissorhands[Liuetal.,2023]andFastGen[Geetal.,2024]only
+storeasubsetoftheKVcacheduringgeneration. Theydosobystoringonlytokensthatarenear
+tothegeneratingtokenorimportantacrossthesequence,withtheheuristicforimportancevarying
+betweenpapers. Finally,Cachegen[Liuetal.,2024]directlycompressestheKVcachewithatensor
+encoder.
+5.2 ArchitecturalChangesthatdecreaseKVcachesize
+Mostrelevanttoourworkaremethodsthatchangethearchitectureofthemodelinordertodecrease
+thesizeoftheKVcache. Thesemethodscanroughlygroupedintothreecategories: thosethattryto
+reducethenumberoftokensattendedto,thosethatreplacesoftmaxattentionwithanotheroperation
+that requires less memory storage, and those that, like our work, decrease the unique KV values
+comparedtoeachquery.
+Decreasingeffectivesequencelength Modelsthatdecreasetheeffectivesequencelengthofthe
+modelhaveexistedalmostastransformersthemselves. TwonotableearlyworksareTransformerXL
+[Daietal.,2019]andSparseAttention[Childetal.,2019]. Bothofthemperformedattentioninlocal
+windowsofsmallersizesinsteadofacrossthewholesequence,anddifferedinhowtheyincorporated
+informationfrompriortokens. ThislineofworkwasusedinmanymodelsofnotesuchasGPT3,
+andiscommonlyknownasslidingwindowattention. Thislineofworkhasbeenfurtherdeveloped
+usingmethodslikeInfiniattention[Munkhdalaietal.,2024],whichcompressespriortokensusinga
+linearattentionmechanism.
+An alternative approachis to perform a lookup over prior tokens, such as in Landmark attention
+[MohtashamiandJaggi,2023]Memorizingtransformers[Wuetal.,2022]ortodoalookupover
+anexternaldatastore,whichiscommonlyknownasretrieval[Guuetal.,2020,Izacardetal.,2024,
+Borgeaudetal.,2022].However,whilethesemethodsreducecomputation,theydonotreducestorage
+unlesstheKVsforlookupareoffloadedfromGPUmemory.
+11RemovingSoftmaxAttention ReplacementstoSoftmaxAttentionareoftenreferredtoasSSMs
+orlinearattentioncomputations. Regardlessofname,mostreplacetheattentioncomponentwithan
+alternativewhichhasconstantspacecomplexityduringtokengenerationw.r.t. thenumberoftokens
+generated.Thisalsoreducesthetimecomplexityofgenerationtobelinearw.r.t.thenumberoftokens,
+insteadofquadratic. Variousmethodsdifferinhowtheyparameterizetheirstate. Katharopoulosetal.
+[2020],Wangetal.[2020]proposedinitialversionsoflinearattention. Recentworkhasfocusedon
+usingdatadependentmechanismstoimprovethestate,suchasinGLA[Yangetal.,2024]Mamba[Gu
+andDao,2023]andRWKVv6[Pengetal.,2024].
+GroupingsofAttention Mostrelatedaremethodsthatusesoftmaxattentionbutattempttousea
+singleKVpairformultiplequeries. GQA[Ainslieetal.,2023a]andMQA[Shazeer,2019]dothis
+bygroupingkeysandvaluesacrossheads.
+Concurrentworktriesotherstrategiestosharevaluesbetweenlayers. Deepseek-V2[DeepSeek-AI,
+2024]proposesMultiLatentAttention,whichusesalowrankprojectionofthekeysandvalues. You
+OnlyCacheOnce[Sunetal.,2024]splitsthemodelintotwohalves. Thefirsthalfperformslocal
+attentionandthengeneratesasetofkeysandvaluesthatareusedforglobalattentionacrossalllayers
+inthesecondhalf.
+6 Conclusion
+Cross-LayerAttentionisaneffectivemethodforreducingtheKVcachememorystoragefootprintof
+transformermodelsbyafactorof2×withroughlyequalperplexity. Basedonextensiveexperimental
+evaluationagainstwell-tunedbaselinesatboththe1B-and3B-parameterscales,wefindthatCLA
+advancestheParetofrontierformemory-efficienttransformers.
+References
+J.Ainslie,J.Lee-Thorp,M.deJong,Y.Zemlyanskiy,F.Lebron,andS.Sanghai. GQA:Training
+generalizedmulti-querytransformermodelsfrommulti-headcheckpoints. InH.Bouamor,J.Pino,
+and K. Bali, editors, Proceedings of the 2023 Conference on Empirical Methods in Natural
+LanguageProcessing,pages4895–4901,Singapore,Dec.2023a.AssociationforComputational
+Linguistics. doi:10.18653/v1/2023.emnlp-main.298. URLhttps://aclanthology.org/2023.
+emnlp-main.298.
+J.Ainslie,J.Lee-Thorp,M.deJong,Y.Zemlyanskiy,F.Lebrón,andS.Sanghai. Gqa: Training
+generalizedmulti-querytransformermodelsfrommulti-headcheckpoints,2023b.
+J. Ansel, E. Yang, H. He, N. Gimelshein, A. Jain, M. Voznesensky, B. Bao, P. Bell, D. Berard,
+E. Burovski, G. Chauhan, A. Chourdia, W. Constable, A. Desmaison, Z. DeVito, E. Ellison,
+W. Feng, J. Gong, M. Gschwind, B. Hirsh, S. Huang, K. Kalambarkar, L. Kirsch, M. Lazos,
+M.Lezcano,Y.Liang,J.Liang,Y.Lu,C.Luk,B.Maher,Y.Pan,C.Puhrsch,M.Reso,M.Saroufim,
+M.Y.Siraichi,H.Suk,M.Suo,P.Tillet,E.Wang,X.Wang,W.Wen,S.Zhang,X.Zhao,K.Zhou,
+R.Zou,A.Mathews,G.Chanan,P.Wu,andS.Chintala. PyTorch2: FasterMachineLearning
+Through Dynamic Python Bytecode Transformation and Graph Compilation. In 29th ACM
+InternationalConferenceonArchitecturalSupportforProgrammingLanguagesandOperating
+Systems, Volume 2 (ASPLOS ’24). ACM, Apr. 2024. doi: 10.1145/3620665.3640366. URL
+https://pytorch.org/assets/pytorch2-2.pdf.
+S.Black,S.Biderman,E.Hallahan,Q.Anthony,L.Gao,L.Golding,H.He,C.Leahy,K.McDonell,
+J.Phang,M.Pieler,U.S.Prashanth,S.Purohit,L.Reynolds,J.Tow,B.Wang,andS.Weinbach.
+Gpt-neox-20b: Anopen-sourceautoregressivelanguagemodel,2022.
+S.Borgeaud,A.Mensch,J.Hoffmann,T.Cai,E.Rutherford,K.Millican,G.B.VanDenDriessche,
+J.-B.Lespiau,B.Damoc,A.Clark,D.DeLasCasas,A.Guy,J.Menick,R.Ring,T.Hennigan,
+S. Huang, L. Maggiore, C. Jones, A. Cassirer, A. Brock, M. Paganini, G. Irving, O. Vinyals,
+S.Osindero,K.Simonyan,J.Rae,E.Elsen,andL.Sifre. Improvinglanguagemodelsbyretrieving
+fromtrillionsoftokens. InK.Chaudhuri,S.Jegelka,L.Song,C.Szepesvari,G.Niu,andS.Sabato,
+editors,Proceedingsofthe39thInternationalConferenceonMachineLearning,volume162of
+12ProceedingsofMachineLearningResearch,pages2206–2240.PMLR,17–23Jul2022. URL
+https://proceedings.mlr.press/v162/borgeaud22a.html.
+R.Child,S.Gray,A.Radford,andI.Sutskever. Generatinglongsequenceswithsparsetransformers.
+CoRR,abs/1904.10509,2019. URLhttp://arxiv.org/abs/1904.10509.
+A.Chowdhery,S.Narang,J.Devlin,M.Bosma,G.Mishra,A.Roberts,P.Barham,H.W.Chung,
+C. Sutton, S. Gehrmann, P. Schuh, K. Shi, S. Tsvyashchenko, J. Maynez, A. Rao, P. Barnes,
+Y.Tay,N.Shazeer,V.Prabhakaran,E.Reif,N.Du,B.Hutchinson,R.Pope,J.Bradbury,J.Austin,
+M. Isard, G. Gur-Ari, P. Yin, T. Duke, A. Levskaya, S. Ghemawat, S. Dev, H. Michalewski,
+X.Garcia, V.Misra, K.Robinson, L.Fedus, D.Zhou, D.Ippolito, D.Luan, H.Lim, B.Zoph,
+A.Spiridonov,R.Sepassi,D.Dohan,S.Agrawal,M.Omernick,A.M.Dai,T.S.Pillai,M.Pellat,
+A.Lewkowycz,E.Moreira,R.Child,O.Polozov,K.Lee,Z.Zhou,X.Wang,B.Saeta,M.Diaz,
+O.Firat,M.Catasta,J.Wei,K.Meier-Hellstern,D.Eck,J.Dean,S.Petrov,andN.Fiedel. Palm:
+Scalinglanguagemodelingwithpathways,2022.
+Z.Dai,Z.Yang,Y.Yang,J.Carbonell,Q.Le,andR.Salakhutdinov. Transformer-XL:Attentive
+language models beyond a fixed-length context. In A. Korhonen, D. Traum, and L. Màrquez,
+editors,Proceedingsofthe57thAnnualMeetingoftheAssociationforComputationalLinguistics,
+pages 2978–2988, Florence, Italy, July 2019. Association for Computational Linguistics. doi:
+10.18653/v1/P19-1285. URLhttps://aclanthology.org/P19-1285.
+T.Dao. Flashattention-2: Fasterattentionwithbetterparallelismandworkpartitioning,2023.
+T.Dao,D.Y.Fu,S.Ermon,A.Rudra,andC.Ré. FlashAttention: Fastandmemory-efficientexact
+attentionwithIO-awareness. InAdvancesinNeuralInformationProcessingSystems,2022.
+DeepSeek-AI. Deepseek-v2: Astrong,economical,andefficientmixture-of-expertslanguagemodel,
+2024.
+B.Gao,Z.He,P.Sharma,Q.Kang,D.Jevdjic,J.Deng,X.Yang,Z.Yu,andP.Zuo. Attentionstore:
+Cost-effectiveattentionreuseacrossmulti-turnconversationsinlargelanguagemodelserving,
+2024.
+L. Gao, J. Tow, B. Abbasi, S. Biderman, S. Black, A. DiPofi, C. Foster, L. Golding, J. Hsu,
+A. Le Noac’h, H. Li, K. McDonell, N. Muennighoff, C. Ociepa, J. Phang, L. Reynolds,
+H. Schoelkopf, A. Skowron, L. Sutawika, E. Tang, A. Thite, B. Wang, K. Wang, and A. Zou.
+Aframeworkforfew-shotlanguagemodelevaluation,122023. URLhttps://zenodo.org/
+records/10256836.
+S.Ge,Y.Zhang,L.Liu,M.Zhang,J.Han,andJ.Gao. Modeltellsyouwhattodiscard: Adaptivekv
+cachecompressionforllms,2024.
+Google. Contextcachingguide. https://ai.google.dev/gemini-api/docs/caching,2024.
+Accessed: 2024-05-20.
+A.GuandT.Dao. Mamba: Linear-timesequencemodelingwithselectivestatespaces,2023.
+K.Guu,K.Lee,Z.Tung,P.Pasupat,andM.-W.Chang. Realm: retrieval-augmentedlanguagemodel
+pre-training. InProceedingsofthe37thInternationalConferenceonMachineLearning,ICML’20.
+JMLR.org,2020.
+C.Hooper,S.Kim,H.Mohammadzadeh,M.W.Mahoney,Y.S.Shao,K.Keutzer,andA.Gholami.
+Kvquant: Towards10millioncontextlengthllminferencewithkvcachequantization,2024.
+Y.Huang,Y.Cheng,A.Bapna,O.Firat,M.X.Chen,D.Chen,H.Lee,J.Ngiam,Q.V.Le,Y.Wu,
+andZ.Chen. GPipe: efficienttrainingofgiantneuralnetworksusingpipelineparallelism. Curran
+AssociatesInc.,RedHook,NY,USA,2019.
+G. Izacard, P. Lewis, M. Lomeli, L. Hosseini, F. Petroni, T. Schick, J. Dwivedi-Yu, A. Joulin,
+S.Riedel,andE.Grave. Atlas: few-shotlearningwithretrievalaugmentedlanguagemodels. J.
+Mach.Learn.Res.,24(1),mar2024. ISSN1532-4435.
+13D. Kalamkar, D. Mudigere, N. Mellempudi, D. Das, K. Banerjee, S. Avancha, D. T. Vooturi,
+N.Jammalamadaka,J.Huang,H.Yuen,J.Yang,J.Park,A.Heinecke,E.Georganas,S.Srinivasan,
+A.Kundu,M.Smelyanskiy,B.Kaul,andP.Dubey. Astudyofbfloat16fordeeplearningtraining,
+2019.
+A.Katharopoulos,A.Vyas,N.Pappas,andF.Fleuret. Transformersarernns: fastautoregressive
+transformerswithlinearattention.InProceedingsofthe37thInternationalConferenceonMachine
+Learning,ICML’20.JMLR.org,2020.
+Y.Liu,H.Li,Y.Cheng,S.Ray,Y.Huang,Q.Zhang,K.Du,J.Yao,S.Lu,G.Ananthanarayanan,
+M. Maire, H. Hoffmann, A. Holtzman, and J. Jiang. Cachegen: Kv cache compression and
+streamingforfastlanguagemodelserving,2024.
+Z.Liu,A.Desai,F.Liao,W.Wang,V.Xie,Z.Xu,A.Kyrillidis,andA.Shrivastava. Scissorhands:
+Exploitingthepersistenceofimportancehypothesisforllmkvcachecompressionattesttime,
+2023.
+I.LoshchilovandF.Hutter. SGDR:Stochasticgradientdescentwithwarmrestarts. InInternational
+ConferenceonLearningRepresentations,2017. URLhttps://openreview.net/forum?id=
+Skq89Scxx.
+I.LoshchilovandF.Hutter. Decoupledweightdecayregularization. InInternationalConferenceon
+LearningRepresentations,2019. URLhttps://openreview.net/forum?id=Bkg6RiCqY7.
+S.Merity,C.Xiong,J.Bradbury,andR.Socher. Pointersentinelmixturemodels,2016.
+P.Micikevicius, S.Narang, J.Alben, G.Diamos, E.Elsen, D.Garcia, B.Ginsburg, M.Houston,
+O.Kuchaiev,G.Venkatesh,andH.Wu. Mixedprecisiontraining,2018.
+A. Mohtashami and M. Jaggi. Random-access infinite context length for transformers. In
+A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors, Advances in
+Neural Information Processing Systems, volume 36, pages 54567–54585. Curran Associates,
+Inc., 2023. URL https://proceedings.neurips.cc/paper_files/paper/2023/file/
+ab05dc8bf36a9f66edbff6992ec86f56-Paper-Conference.pdf.
+T. Munkhdalai, M. Faruqui, and S. Gopal. Leave no context behind: Efficient infinite context
+transformerswithinfini-attention,2024.
+A.Paszke,S.Gross,F.Massa,A.Lerer,J.Bradbury,G.Chanan,T.Killeen,Z.Lin,N.Gimelshein,
+L.Antiga,A.Desmaison,A.Köpf,E.Yang,Z.DeVito,M.Raison,A.Tejani,S.Chilamkurthy,
+B.Steiner,L.Fang,J.Bai,andS.Chintala. Pytorch: Animperativestyle,high-performancedeep
+learninglibrary,2019.
+B.Peng,D.Goldstein,Q.Anthony,A.Albalak,E.Alcaide,S.Biderman,E.Cheah,X.Du,T.Ferdinan,
+H.Hou,P.Kazienko,K.K.GV,J.Kocon´,B.Koptyra,S.Krishna,R.M.J.au2,N.Muennighoff,
+F.Obeid,A.Saito,G.Song,H.Tu,S.Woz´niak,R.Zhang,B.Zhao,Q.Zhao,P.Zhou,J.Zhu,and
+R.-J.Zhu. Eagleandfinch: Rwkvwithmatrix-valuedstatesanddynamicrecurrence,2024.
+P.Ramachandran,B.Zoph,andQ.V.Le. Searchingforactivationfunctions,2017.
+N.Shazeer. Fasttransformerdecoding: Onewrite-headisallyouneed,2019.
+N.Shazeer. Gluvariantsimprovetransformer,2020.
+Y.Sheng,L.Zheng,B.Yuan,Z.Li,M.Ryabinin,B.Chen,P.Liang,C.Ré,I.Stoica,andC.Zhang.
+Flexgen: high-throughputgenerativeinferenceoflargelanguagemodelswithasinglegpu. In
+Proceedingsofthe40thInternationalConferenceonMachineLearning,ICML’23.JMLR.org,
+2023.
+M.Shoeybi,M.Patwary,R.Puri,P.LeGresley,J.Casper,andB.Catanzaro. Megatron-lm: Training
+multi-billionparameterlanguagemodelsusingmodelparallelism,2020.
+14D.Soboleva,F.Al-Khateeb,R.Myers,J.R.Steeves,J.Hestness,andN.Dey. SlimPajama: A627B
+tokencleanedanddeduplicatedversionofRedPajama. https://www.cerebras.net/blog/
+slimpajama-a-627b-token-cleaned-and-deduplicated-version-of-redpajama,
+2023. URLhttps://huggingface.co/datasets/cerebras/SlimPajama-627B.
+J.Su,Y.Lu,S.Pan,A.Murtadha,B.Wen,andY.Liu. Roformer: Enhancedtransformerwithrotary
+positionembedding,2023.
+Y.Sun,L.Dong,Y.Zhu,S.Huang,W.Wang,S.Ma,Q.Zhang,J.Wang,andF.Wei. Youonlycache
+once: Decoder-decoderarchitecturesforlanguagemodels,2024.
+H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei, N. Bashlykov, S. Batra,
+P. Bhargava, S. Bhosale, D. Bikel, L. Blecher, C. C. Ferrer, M. Chen, G. Cucurull, D. Esiobu,
+J.Fernandes,J.Fu,W.Fu,B.Fuller,C.Gao,V.Goswami,N.Goyal,A.Hartshorn,S.Hosseini,
+R.Hou,H.Inan,M.Kardas,V.Kerkez,M.Khabsa,I.Kloumann,A.Korenev,P.S.Koura,M.-A.
+Lachaux, T. Lavril, J. Lee, D. Liskovich, Y. Lu, Y. Mao, X. Martinet, T. Mihaylov, P. Mishra,
+I.Molybog,Y.Nie,A.Poulton,J.Reizenstein,R.Rungta,K.Saladi,A.Schelten,R.Silva,E.M.
+Smith,R.Subramanian,X.E.Tan,B.Tang,R.Taylor,A.Williams,J.X.Kuan,P.Xu,Z.Yan,
+I.Zarov,Y.Zhang,A.Fan,M.Kambadur,S.Narang,A.Rodriguez,R.Stojnic,S.Edunov,and
+T.Scialom. Llama2: Openfoundationandfine-tunedchatmodels,2023.
+A.Vaswani,N.Shazeer,N.Parmar,J.Uszkoreit,L.Jones,A.N.Gomez,L.u.Kaiser,andI.Polo-
+sukhin. Attention is all you need. In Advances in Neural Information Processing Systems,
+volume30.CurranAssociates,Inc.,2017. URLhttps://proceedings.neurips.cc/paper_
+files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf.
+C.Wang,K.Cho,andJ.Gu. Neuralmachinetranslationwithbyte-levelsubwords,2019.
+S.Wang,B.Z.Li,M.Khabsa,H.Fang,andH.Ma. Linformer: Self-attentionwithlinearcomplexity.
+CoRR,abs/2006.04768,2020. URLhttps://arxiv.org/abs/2006.04768.
+Y. Wu, M. N. Rabe, D. Hutchins, and C. Szegedy. Memorizing transformers. In International
+ConferenceonLearningRepresentations,2022. URLhttps://openreview.net/forum?id=
+TrjbxzRcnf-.
+S.Yang,B.Wang,Y.Shen,R.Panda,andY.Kim. Gatedlinearattentiontransformerswithhardware-
+efficienttraining,2024.
+T.Zhang,J.Yi,Z.Xu,andA.Shrivastava. Kvcacheis1bitperchannel: Efficientlargelanguage
+modelinferencewithcoupledquantization,2024.
+Z.Zhang,Y.Sheng,T.Zhou,T.Chen,L.Zheng,R.Cai,Z.Song,Y.Tian,C.Ré,C.Barrett,Z.A.
+Wang,andB.Chen. H2o: Heavy-hitteroracleforefficientgenerativeinferenceoflargelanguage
+models. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors,
+AdvancesinNeuralInformationProcessingSystems,volume36,pages34661–34710.CurranAs-
+sociates,Inc.,2023. URLhttps://proceedings.neurips.cc/paper_files/paper/2023/
+file/6ceefa7b15572587b78ecfcebb2827f8-Paper-Conference.pdf.
+X. Zhu, J. Li, Y. Liu, C. Ma, and W. Wang. A survey on modelcompression for large language
+models,2023.
+15A Learningratesweeps
+Herewepresenttheresultsofourlearningratesweepsatthe1Band3Bparameterscales:
+Validation Perplexity vs. Learning Rate by Family (3B Models)
+MQA, d =128
+head
+9.8 MQA, d =64
+head
+MQA, d =128, CLA2
+head
+9.7
+9.6
+9.5
+9.4
+10 3
+Learning Rate
+Figure4: 3BLearningRateSweep
+Validation Perplexity vs. Learning Rate by Family (1B Models)
+MQA, d =128
+head
+14.00 MQA, d =64
+head
+MQA, d =128, CLA2
+head
+13.75
+13.50
+13.25
+13.00
+12.75
+12.50
+10 3
+Learning Rate
+Figure5: 1BLearningRateSweep
+16
+ytixelpreP
+noitadilaV
+ytixelpreP
+noitadilaV
