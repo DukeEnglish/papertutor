@@ -1,0 +1,1348 @@
+Energy Rank Alignment: Using Preference Optimization to Search
+Chemical Space at Scale
+Shriram Chennakesavalu, Frank Hu, Sebastian Ibarraran, and Grant M. Rotskoff
+shriramc, frankhu, sebastian.ibarraran, rotskoff @stanford.edu
+{ }
+Department of Chemistry, Stanford University, Stanford, CA, USA 94305
+May 22, 2024
+Abstract
+Searching through chemical space is an exceptionally challenging problem because the
+number of possible molecules grows combinatorially with the number of atoms. Large,
+autoregressive models trained on databases of chemical compounds have yielded powerful
+generators,butwestilllackrobuststrategiesforgeneratingmoleculeswithdesiredproperties.
+Thismolecularsearchproblemcloselyresemblesthe“alignment”problemforlargelanguage
+models, though for many chemical tasks we have a specific and easily evaluable reward
+function. Here, we introduce an algorithm called energy rank alignment (ERA) that
+leverages an explicit reward function to produce a gradient-based objective that we use to
+optimizeautoregressivepolicies. Weshowtheoreticallythatthisalgorithmiscloselyrelated
+to proximal policy optimization (PPO) and direct preference optimization (DPO), but
+has a minimizer that converges to an ideal Gibbs-Boltzmann distribution with the reward
+playing the role of an energy function. Furthermore, this algorithm is highly scalable, does
+not require reinforcement learning, and performs well relative to DPO when the number of
+preference observations per pairing is small. We deploy this approach to align molecular
+transformers to generate molecules with externally specified properties and find that it
+does so robustly, searching through diverse parts of chemical space. While our focus here
+is on chemical search, we also obtain excellent results on an AI supervised task for LLM
+alignment, showing that the method is scalable and general.
+1 Introduction
+Large language models (LLMs) are trained on large corpora of text to autoregressively generate
+outputs. These models strongly reflect the distribution of the data on which they are trained [21],
+and controlling the outputs to reflect externally imposed preferences is an increasingly important
+challenge for deployment. The aforementioned task, often called “alignment”, requires either careful
+curation of training data or large sets of human preference data—both options are labor-intensive [9].
+Reinforcement learning from human feedback (RLHF), a family of algorithms that employs these
+human preference datasets, has been widely employed to align instruction and chat models [21, 5],
+but it is both expensive to acquire the training data and difficult to carry out in practice [9]. Recent
+algorithmic developments, such as direct preference optimization (DPO) [25], simplify the alignment
+framework by making the reward function implicit, but still require human preference data. While
+these algorithms succeed in constraining outputs, many “alignment”-like tasks require evaluation
+that would be difficult for human evaluators.
+Generative sampling problems seeking to optimize a reward are common in chemistry, where
+comparing small molecules using a particular functional assay or computationally accessible property
+1
+4202
+yaM
+12
+]GL.sc[
+1v16921.5042:viXrais often far easier than searching chemical space to identify novel compounds. Recent efforts to
+build large, domain-specific models for chemistry [10] have shown promising performance on both
+property prediction and reaction prediction tasks. Nevertheless, just as with LLMs, leveraging
+these models for molecule optimization requires first guiding “unaligned” models to favor important
+properties like synthetic accessibility or solubility. Here, we seek to productively search chemical
+space using transformers by introducing a new preference optimization algorithm, which we call
+energy rank alignment.
+Our contribution: We formulate a generic alignment algorithm that we call Energy Rank
+Alignment or ERA that leverages an explicit reward function to guide autoregressive sampling while
+targeting specific properties or preferences. Unlike reward maximization in RL-based algorithms,
+the policy that minimizes our objective is designed to sample fluctuations around a maximal reward
+value to promote sample diversity. Our algorithm enables direct gradient-based optimization of
+a policy to match the ideal preference distribution and converges asymptotically to an optimal
+distribution with tuneable entropy and controllable regularization, which we show theoretically.
+The minimizers of our objective are closely related to the minimizer of PPO and DPO, but we
+have more direct control over the influence of the regularization relative to fluctuations around the
+maximum reward. In numerical experiments, we demonstrate that this algorithm successfully aligns
+a molecule transformer model to identify a highly diverse set of chemicals with properties favored
+by our choice of reward. Finally, we also show that we obtain competitive performance with ERA
+on benchmark LLM alignment tasks, but emphasize that the chemical applications are the main
+focus of this paper.
+Target Generated
+Z 1e ØU 102 Property Molecules
+° °
+º High Ring
+ref 101 Count
+High
+Hydrophobicity 100
+High
+Polarizability
+10°1
+High Drug-
+y x
+10°2 likeness
+|
+Figure 1: Energy rank alignment (ERA) enables targeting low-energy, high-reward regions with
+controllable fluctuations. Optimal policy approaches Boltzmann distribution with low regularization
+(γ 0) and reference policy with high regularization (γ ) (left). Aligned models can be used
+→ → ∞
+to sample molecules with desired chemical properties (right).
+1.1 Related Work
+Inverse molecular design tasks have a long history [17] and many recent works have sought to
+apply machine learning to facilitate this difficult search problem [27, 12, 13]. While reinforcement
+learning has proved a popular strategy for molecular optimization [39, 27], several recent studies
+have sought to use transformers [34] trained on large databases of molecules represented with the
+text-based SMILES syntax [10, 30, 35, 4] for such tasks. Schwaller et al. [31] utilized an atom-wise
+tokenization, which we also employ, to train a transformer for the downstream task of reaction
+2
+)x
+y(
+º
+?
+| ∞prediction. These “chemical language models” have been studied for applications on downstream
+tasks, including property prediction [4, 10] and reaction prediction [23, 30].
+Building scalable strategies for alignment has attracted enormous attention because of the
+high cost and complexity of constraining LLM outputs. Much of the current paradigm is built
+on reinforcement learning from human feedback (RLHF) [21]. Within this framework, human
+preferences provided in the form of pairwise rankings are first used to train a reward model, and
+subsequently that reward model is used to optimize a policy using, for example, proximal policy
+optimization (PPO) [29]. Rafailov et al. [25] demonstrated that the reward model can be treated
+implicitly using a scheme that maximizes the likelihood of the preferences given an offline dataset.
+Becausethisapproachdoesnotrequiretrainingarewardmodel, ithasbeennamedDirectPreference
+Optimization (DPO). Our work differs from both strategies; first, unlike RLHF, we do not employ
+reinforcement learning and instead develop an explicit, gradient-based objective for the optimal
+policy. Secondly, unlike DPO, we leverage an explicit reward function and add regularization
+transparently, both of which help to avoid greedy policies [3]. However, like both approaches, we
+assume that the Bradley-Terry model [7] of preference data is appropriate for the underlying target
+distribution.
+Many recent works have built upon the ideas of RLHF and DPO, including studies on the
+effect of point-wise sampling of preference distributions [3], investigations into the theoretical
+basis for contrastive methods for unlearning target datasets [38], and alternatives to the Bradley-
+Terry pairwise preference model [20, 2]. One recent study explores alignment in the context of
+inverse molecular design: Park et al. [22] applies DPO to SMILES generators to increase the
+probability of activity for generated compounds against a drug target. However, they indicate
+that many preferences in chemistry are expressed as continuous signals, which is not suitable for
+DPO. Overcoming this limitation while maintaining the advantages of a direct gradient-based policy
+optimization strategy is a central goal of our current work. Our analysis and methodology directly
+addresses issues related to point-wise sampling because the explicit reward function eliminates overly
+greedy assignments of preference probabilities. Indeed, as discussed in Sec. 4, we see that DPO
+mode collapses where ERA shifts the policy towards the target distribution. While non-transitive
+preferences may arise in some settings, leading to a breakdown of the Bradley-Terry preference
+distribution model, by construction our target rewards are determined by quantitative evaluations
+of properties, and are therefore transitive.
+2 Energy rank alignment
+A policy is a conditional probability distribution π( x) : R; we generate an output y from
+·| Y →
+prompt x. The spaces and are discrete and finite, corresponding to sequences of tokenized
+Y X
+outputs of the model with a maximum length. In alignment tasks, we begin with a pre-trained
+reference policy π and seek to optimize a parametric, trainable policy π to adapt the conditional
+ref θ
+sampling for a particular task or constraint.
+Consider a prompt x and model outputs y,y′ and a collection of preferences =
+∈ X ∈ Y D
+(y y′;x ) n ; the notation indicates that y is preferred to y′. The conditional probability
+{ i ≻ i i }i=1 ≻ i i
+that y y′ given x can be modeled as a pairwise Boltzmann ranking within the Bradley-Terry
+≻
+model, i.e.,
+p(y y′ x) =
+e−βU(x,y)
+σ(cid:0) βU(x,y′) βU(x,y)(cid:1) . (1)
+≻ | e−βU(x,y)+e−βU(x,y′) ≡ −
+Here β > 0 is a constant, σ(x) = (1+e−x)−1 and we refer to U : R as an energy function
+X ×Y →
+to make clear the connection to statistical physics, but it is the negative reward within the RL
+3framework for alignment.
+To impose the preferences we minimize the objective
+(cid:20)(cid:90) (cid:90) (cid:21)
+J(π) = Ex∼ν U(x,y)dπ(y x)+β−1 (1+γ)logπ(y x) γlog(π ref(y x))dπ(y x) , (2)
+| | − | |
+where β−1 is a parameter controlling the magnitude of the entropic term, γ sets the scale of the
+Kullback-Leibler regularization compared with the energy term, and ν is a probability distribution
+over the prompts ν ( ). A proximal scheme for gradient descent on this objective corresponds
+∈ P X
+to a gradient flow on J [28, 19]; the functional can be viewed as a free energy, and the corresponding
+flow is
+∂ π = (π δ J[π ]), (3)
+t t t π t
+∇· ∇
+and δ denotes the Fr´echet derivative with respect to π. Assuming that π has full support on
+π 0
+, the optimization converges asymptotically to stationary policy which satisfies
+X ×Y
+− β U+ γ logπ
+δ πJ[π ⋆] = 0 π ⋆ e 1+γ γ+1 ref, (4)
+∇ ⇐⇒ ∝
+and this minimizer is globally optimal. In the context of LLM alignment, a representation of the
+energy function U : R is learned as a “reward model”, though we also consider tasks
+X ×Y →
+in which U is an easily evaluated function of the pair (x,y). The optimal distribution π is a
+⋆
+Gibbs-Boltzmann measure
+(cid:20) (cid:21)
+π (y x) = Z−1(x)exp β (cid:0) U(x,y) β−1γlogπ (y x)(cid:1) (5)
+⋆ ref
+| −1+γ − |
+where Z(x) is the x-dependent normalization constant. This expression makes clear the effect of
+β: when β (low temperature), the reward dominates and fluctuations around the maximal
+→ ∞
+reward are small, which could lead to “mode-seeking”; when β 0 (high physical temperature)
+→
+fluctuations around the maximal reward increase and the regularization term favors proximity to
+π . Similarly, γ 0 recovers a Gibbs-Boltzmann distribution proportional to e−βU at inverse
+ref
+→
+temperature β, while γ is dominated by the reference policy.
+→ ∞
+Loss functions for π : Proximal Policy Optimization (PPO) optimizes an indirect, proximal
+θ
+objective to minimize an objective closely related to (2) (cf. Appendix B). Direct Preference
+Optimization (DPO) treats the negative reward function U implicitly and directly maximizes the
+likelihood of p(y y′ x). Our objectives differ from both approaches: like DPO, we directly
+≻ |
+optimize the policy using an explicit, gradient-based objective, but, in contrast, we use a reward
+function directly in our objective. The losses we build are thus amenable to both offline (samples
+from π ) and online (samples from π ) policy alignment, as explained below. Choosing to optimize
+ref θ
+the objective online has been shown to have important consequences on performance [32], though
+we focus here on the setting where samples are drawn offline.
+We directly optimize the Kullback-Leibler divergence between the entropy-regularized preference
+distribution p (y y′ x) and the corresponding parametric preference distribution p (y y′ x).
+γ θ
+≻ | ≻ |
+Explicitly, using the fact that conditional preference distribution is normalized, we obtain
+D(y,y′) (p p ) = p (y y′ x)log p γ(y ≻ y′ |x) +p (y′ y x)log p γ(y′ ≻ y |x) ,
+KL γ | θ γ ≻ | p (y y′ x) γ ≻ | p (y′ y x)
+θ θ
+≻ | ≻ | (6)
+= p (y y′ x)log p γ(y ≻ y′ |x) +(cid:0) 1 p (y y′ x)(cid:1) log 1 −p γ(y ≻ y′ |x) ,
+γ ≻ | p (y y′ x) − γ ≻ | 1 p (y y′ x)
+θ θ
+≻ | − ≻ |
+4where
+(cid:18) (cid:20) (cid:21)(cid:19)
+β π (y x)
+p := σ (U(x,y′) U(x,y))+β−1γlog ref | . (7)
+γ 1+γ − π (y′ x)
+ref
+|
+This quantity is a well-defined KL divergence and is hence non-negative; the quantity vanishes when
+p = p on the observations y,y′. Furthermore, with access to an explicit reward model, all terms
+γ θ
+in (6) can be computed directly and
+(cid:18) (cid:19)
+π (y x) π (y x)
+p (y y′ x′) = θ | = σ log θ | . (8)
+θ ≻ | π (y x)+π (y′ x) π (y′ x)
+θ θ θ
+| | |
+To obtain a minimizer of the regularized objective defined in (2) we optimize
+LERA(π θ) = Ex∼DEy,y′∼π ref(·|x)D K(y L,y′) (p γ |p θ); (9)
+If the current policy overlaps with the target preference distribution, it may be useful to sample
+directly from the partially aligned policy, i.e., to use the “on-policy” formulation,
+LE onRA(π θ) = Ex∼DEy,y′∼π θ(y|x)D K(y L,y′) (p γ |p θ) (10)
+instead of (9). One issue that arises with this scheme is that differentiation with respect to the
+parameters of the policy θ because y and y′ are decoded into discrete tokens, an operation that is
+not differentiable. To remedy this, we importance sample with a reference policy
+LE onRA(π θ) = Ex∼DEy,y′∼π ref(y|x) ππ θ (( yy | xx )) ππ θ(y (y′ | ′x x) )D K(y L,y′) (p γ |p θ). (11)
+ref ref
+| |
+This reweighting is straightforward and the importance weights should generally be appreciable,
+especially early in training when π has not drifted far from π . It is, of course, also natural to
+θ ref
+iteratively update π using a previous iterate as the reference policy. In this work, we only use (9)
+θ
+as an objective and leave the on-policy objectives to future work.
+3 Theoretical Analysis
+To understand the ERA loss function and its connection to the entropy regularized objective (2), we
+first establish that the minimizers of (6) are of the form (5). We first define the notion of equivalence
+precisely.
+Definition 3.1 The conditional probability measures π( x) and π′( x) are conditionally equivalent
+·| ·|
+if x , π and π′ are such that sup π(y x) π′(y x) = 0.
+y∈Y
+∀ ∈ X | | − | |
+We remark that this strong form of equivalence is appropriate on the finite, discrete spaces and
+X
+we consider here.
+Y
+Lemma 3.1 If π is conditionally equivalent to π′, then π′( x) π′( x)eg(x) is conditionally
+g
+·| ∝ ·|
+equivalent to π for all functions g : R such that sup x∈X eg(x) < + .
+X → | | ∞
+We prove Lemma 3.1 in Appendix B and use this simple lemma to prove the following result.
+Proposition 3.2 Suppose π( x) ( ) and that supp(π) = supp(π ). Let β > 0, γ 0 and
+ref
+·| ∈ P Y ≥
+that the reward model is such that sup e−U(x,y) < + . Then, the minimizer of ERA is
+x,y∈X×Y
+| | ∞ L
+conditionally equivalent to π .
+⋆
+5First,weverifythatanyprobabilitymeasureπ (y x) exp( β (cid:0) U(x,y) β−1γlogπ (y x)(cid:1) +
+g | ∝ −1+γ − ref |
+g(x))minimizestheobjective. Because ERAisnon-negative,itsufficestoshowthatforallpairsy,y′,
+(y,y′) L
+D (p p ) 0. This follows immediately from the cancellation in the preference probability p of
+KL γ | θ ≡ (cid:16) γ (cid:17)
+eg(x)afterfactorizationin(5). Now,supposethatπ(y x) = exp β (cid:0) U(x,y) β−1γlogπ (y x)(cid:1)
+| ̸ −1+γ − ref |
+where we have taken g(x) = 0 without loss of generality and π := π . Assume that for all pairs
+g
+y,y′, the divergence D(y,y′) (p p ) 0 which is required of a minimizer. Equivalently, it must be
+KL γ | θ ≡
+the case that for all y,y′,
+π(y x) π (y x) π(y′ x) π (y′ x)
+⋆ ⋆
+| = | = | = | , (12)
+π(y x)+π(y′ x) π (y x)+π (y′ x) ⇒ π(y x) π (y x)
+⋆ ⋆ ⋆
+| | | | | |
+from which we see that
+π(y′ x) − β (U(x,y)−β−1γlogπ (y|x))
+π(y x) = | e 1+γ ref . (13)
+| − β (U(x,y′)−β−1γlogπ (y′|x))
+e 1+γ ref
+By construction, π(y x) does not depend on y′ so the prefactor must be purely a function of x,
+|
+which completes the proof, using Lemma 3.1.
+Gradients of ERA. One advantage of the ERA framework is that the objective is amenable
+L
+to direct, gradient-based optimization. We remark that establishing global convergence for the
+optimization of θ using (9) requires establishing convexity with respect to the parameters, which is
+not obviously the case for our objective, nor those used in PPO and DPO. However, one can still
+glean some insight into the optimization by examining the gradients on a samplewise basis. Using
+the compact notation p (y y′ x) σ and p (y y′ x) σ ,
+θ θ γ ⋆
+≻ | ≡ ≻ | ≡
+(cid:18) (cid:19)
+1 σ σ
+θ ERA = Ex∼DEy,y′∼π − ⋆ ⋆ θσ θ. (14)
+∇ L ref 1 σ − σ ∇
+θ θ
+−
+The gradient is straightforward to interpret on a particular pair y,y′: if p (y y′ x) is larger than
+θ
+≻ |
+p (y y′ x) then the preference gradient is positive and gradient descent lowers the probability that
+γ
+≻ |
+y y′. The opposite occurs whenever p (y y′ x) is smaller than p (y y′ x). The magnitude
+θ γ
+≻ ≻ | ≻ |
+of the gradient is scaled by the degree of misspecification of the preference probability.
+This calculation highlights one key difference between the approach we use and DPO. When the
+data only contains one observation of y y′ for a given x, the DPO objective’s implicit reward
+≻
+model assigns zero probability to y′ y. This pushes the policy towards extremal values, which
+≻
+can lead to undesired behavior, as discussed in Azar et al. [3]. In our formulation, this behavior
+occurs only when the reward model assigns an energy of , which is prohibited by construction
+±∞
+in most tasks. We further discuss differences between ERA and DPO in Appendix B.2.
+4 Experiments
+We test ERA on both chemical and language tasks to shed light on the following questions: 1) Can
+we use ERA to robustly fine-tune our model to generate samples according to a desired distribution?
+2) What is the effect of changing the inverse-temperature β during ERA? 3) Do we maintain sample
+diversity (and validity) without regularizing to remain close to a reference policy, and what is the
+effect of increased regularization? 4) Can we simultaneously target multiple properties with high
+fidelity, and how can we trade off between desired properties? 5) Can we carry out ERA on higher
+capacity models with “weak” signals from smaller models?
+60.0150 Unaligned Unaligned
+Aligned(µ=50) Aligned(µ=1)
+0.0125 Aligned(µ=180) 0.3 Aligned(µ=8)
+0.0100
+0.2
+0.0075
+0.0050
+0.1
+0.0025
+0.0000 0.0
+0 100 200 300 400 500 0 5 10 15
+Molar Refractivity Ring Count
+Unaligned Unaligned
+4 0.20
+Aligned(β=5.0) Aligned(µ=0)
+Aligned(β=10.0) Aligned(µ=7.5)
+3 Aligned(β=20.0) 0.15
+2 0.10
+1 0.05
+0 0.00
+0.0 0.2 0.4 0.6 0.8 10 0 10
+Quantitative Estimate of Drug-Likeness −Wildman-Crippen LogP
+Figure 2: Unprompted molecular generator alignment. Distributions of different chemical properties
+for molecules sampled from aligned and unaligned policies. The center of the harmonic potential, µ,
+is varied for MR (β = 1.0), Ring Count (β = 1.0), and LogP (β = 10.0), while β is varied for QED.
+All experiments were run with no regularization to the reference policy (γ = 0).
+74.1 Generating molecules with desired properties
+We use a decoder-only representation for the molecular generator [4], where the generator has 2
+layers, an embedding dimension of 512, a vocabulary of 324 tokens, and totals 3.5M parameters.
+Starting from a random initialization, we carry out pretraining on a dataset of 2.4M small molecules
+from the ChEMBL database [37] for 180 epochs. This version of the model is not conditioned
+on a prompt and generates a small molecule given just a start-of-sequence token. We use this
+pretrained model as our reference policy for all unprompted molecular alignment tasks (Sec. 4.1.1).
+In Sec. 4.1.2, we generate molecules conditioned on a prompt using a generator that was trained to
+carry out sampling with a prompt molecule.
+Central to ERA is, of course, access to a computable energy function. As a proof-of-concept, here
+we consider 5 different properties for which the corresponding energy function is easily evaluable:
+Quantitative Estimate of Drug-Likeness (QED) [6], Wildman-Crippen LogP (LogP) [36], Ring
+Count, Molar Refractivity (MR) [36], and Tanimoto Similarity [26]. Briefly, LogP is a measure
+of the hydrophobicity of a molecule, MR is a measure of the polarizability of the molecule, and
+Tanimoto similarity is a measure of the similarity between two molecules (see Appendix D.2).
+4.1.1 Unprompted molecular alignment
+First,weindependentlytargetfourdifferentpropertiesusingERAwithanunpromptedmoleculargen-
+erator (Fig. 2). Using the reference policy, we generate a dataset = y(i) ,y(i) ,U(y(i) ),U(y(i) ) N
+D { 1 2 1 2 }i=1
+and carry out energy rank alignment on π , where π is initialized using the weights of π .
+θ θ ref
+Here, y ,y π and y and U(y) denote the generated molecule and its corresponding energy,
+1 2 ref
+∼
+respectively. For MR, Ring Count, and LogP, we define the energy U to be a harmonic potential
+centered at a target value. For QED, we define the energy to be the negative logarithm of QED and
+vary β to assess its impact on alignment (see Table 1, 2). In Fig. 2, we see that we successfully shift
+the distribution to target means that are both greater and lower than the average value of MR, Ring
+Count, and LogP under the reference policy. Furthermore, in the alignment of QED, we observe
+the effect of changing β on the learned policy; with increased β, the learned policy concentrates
+around low-energy samples (i.e. near QED = 1), and with lower β, the learned policy samples a
+greater range of QED values, as expected. We note that for each of these four experiments, we did
+not regularize towards the reference policy (i.e. γ = 0). Even so, we were able to maintain both
+sample diversity and maintain appreciable sample validity (see Fig. 7 and Table 3).
+Many molecular design tasks require balancing multiple properties, and designing an objective
+for multi-property alignment is straightforward within the ERA framework. To demonstrate this,
+we generate molecules with both high QED and LogP using ERA with an energy function weighted
+by property-specific β: U = β U +β U (see Table 1, 4 for details on energy function).
+QED QED LogP LogP
+We carry out ERA with different pairs of (β , β ) using the same procedure as above, and
+QED LogP
+from Fig. 3, we see that we target multiple properties with varying fidelity by simply modulating
+the value of property-specific β. Ultimately, increasing the β for an individual property enables us
+to favor higher values of that property in multi-property alignment setting. In this case, we also do
+not regularize with the KL-divergence to the reference policy and again maintain sample diversity
+and validity (see Fig. 8 and Table 4)
+4.1.2 Prompted molecular alignment
+Inspired by the task of lead optimization in drug discovery efforts [16], we ask whether we can use
+ERA to train a molecular generator that can sample a molecule that is both similar to the prompt
+molecule and also exhibits some desired property.
+8βLogP=1.0, βQED=1.0 βLogP=1.0, βQED=10.0 βLogP=1.0, βQED=20.0 βLogP=1.0, βQED=100.0
+1.00
+0.75
+0.50
+0.25
+0.00
+βLogP=5.0, βQED=1.0 βLogP=5.0, βQED=10.0 βLogP=5.0, βQED=20.0 βLogP=5.0, βQED=100.0
+1.00
+0.75
+0.50
+0.25
+0.00
+0 5 10 0 5 10 0 5 10 0 5 10
+Wildman-Crippen Log P
+Figure 3: Unprompted multi-property molecular generator alignment. 2D histograms of LogP versus
+QED for different combinations of property-specific β illustrating a clear trade-off when performing
+multi-property alignment. Relative increases in β for a given property target higher values for that
+property. All experiments were run with no regularization to the reference policy (γ = 0).
+Multienergy Alignment (QED and Tanimoto) Multienergy Alignment (LogP and Tanimoto)
+Unaligned 7.5 Unaligned 1.5
+10 Aligned 10 Aligned
+5.0 1.0
+5 5
+2.5 0.5
+0 0.0 0 0.0
+0.5 1.0 0.0 0.2 0.5 1.0 0 2
+Tanimoto Similarity (Eπθf QED(y |x) Tanimoto Similarity (Eπθf LogP(y |x)
+−Eπreff QED(y |x)) −Eπreff LogP(y |x))
+Figure 4: Prompted multi-property molecular generator alignment. From left to right: Tanimoto
+similarities computed between the prompt and sampled molecules for both aligned and unaligned
+policies (QED and Tanimoto alignment), per-prompt difference in the average QED under aligned
+and unaligned policies (QED and Tanimoto alignment), Tanimoto similarities computed between
+the prompt and sampled molecules for both aligned and unaligned policies (LogP and Tanimoto
+alignment), and per-prompt difference in the average LogP under aligned and unaligned policies
+(LogP and Tanimoto alignment). With alignment, we target higher QED and LogP values, while
+still sampling molecules chemically similar—but not identical—to prompt molecule.
+9
+DEQGPT 2 Alignment LLaMA2 13B Alignment
+− −
+1.0 1.0
+Unaligned
+0.8
+Aligned(γ=0)
+0.8
+Aligned(γ=0.001)
+0.6
+Unaligned Aligned(γ=0.01)
+0.6 Aligned(γ=0) 0.4
+Aligned(γ=0.001)
+Aligned(γ=0.01) 0.2
+0.4
+0.0
+10−1 100 101 10−1 100 101
+β β
+Figure 5: AI-guided alignment of LLMs. Average sentiment of responses from aligned GPT-2 model
+across all prompts. (left). Proportion of unsafe content relative to unaligned model of responses
+aligned LLaMA2-13B model across all prompts (right). 5.4% of all responses from unaligned model
+were classified as unsafe. Error bars too small to be shown.
+First, we fine-tune the pretrained molecular generator to enable prompted molecular generation
+(seeAppendixD.3.2)andusethisfine-tunedmodelasourreferencepolicyforallpromptedmolecular
+alignment tasks. This reference policy disproportionately samples molecules that are identical (i.e.
+a Tanimoto similarity of 1.0) to the prompt molecule (see Fig. 4), so we carry out multi-property
+alignment on this reference policy to generate molecules that are similar—but not identical—to the
+promptmoleculeandalsohaveahighdrug-likenessasmeasuredbyQED.UsingERA,weoptimizethe
+reference policy with a generated dataset = (y(i) ,x(i)),(y(i) ,x(i)),U(y(i) ,x(i)),U(y(i) ,x(i)) N ,
+D { 1 2 1 2 }i=1
+where we sample four molecules for each prompt molecule from the reference policy and consider all
+possible preference pairs for a total of six preference pairs per prompt molecule (see Appendix D.2
+for full details on energy used).
+We observe that the per-prompt average QED under the optimized policy for a given prompt
+is higher than the corresponding average under the reference policy (Fig. 4). Furthermore, we see
+that we are able to sample a diverse set of molecules that are chemically similar to the prompt
+molecule, and also chemically valid (see Figure 9, Table 5). We repeat the experiment with a related
+objective of generating molecules similar to the prompt molecule with a high LogP instead and
+again observe that we increase the per-prompt average LogP under the optimized policy relative to
+the reference policy without degrading sample diversity and validity. For both of these experiments,
+we required regularization to the reference policy. With no regularization, the aligned generator
+would almost exclusively sample sequences that were chemically invalid (< 25% chemical validity).
+Finally, we note that the increases in QED and LogP in Fig. 4 are smaller relative to the increases
+in Fig. 2 because the samples are now conditioned to remain proximal to the prompt molecule,
+which restricts the chemical space that can be explored.
+4.2 AI-guided alignment of large language models
+We test the generality of ERA by applying it to align large language models (LLMs). Similar to the
+experiments in [25], we first carry out ERA on a GPT-2 model [24] fine-tuned on movies reviews
+from IMDb [18]. We use a pretrained sentiment classifier [14] to evaluate the energies—where
+lower energies correspond to more positive sentiments—of sampled responses from the reference
+policy and carry out ERA using the same approach as in Section 4.1.2 (see Appendix E.1). We
+10
+tnemitneS
+naeM
+tnetnoC
+efasnU
+evitaleRvary the regularization strength γ and inverse-temperature β on the average sentiment and observe
+that across all regularization strengths, with increasing β, the average sentiment becomes more
+positive. Increasing regularization also elicits more positive sentiments. Qualitatively, with lower
+regularization, we observe that text quality degrades and becomes less coherent, likely resulting in
+lower average sentiment predictions by the sentiment model. Regularization here is important to
+ensure high quality text samples.
+We next leverage a “weak” AI supervisor to carry out LLM alignment, a task sometimes called
+“superalignment” [8]. In the present context, we order “weak” vs. “strong” models based on their
+parameter count (within the same family) and empirical performance; i.e., LLaMA2-7B is weaker
+than LLaMA2-13B. Here, the weak model does not necessarily contain the complexity of the
+stronger model but can weakly discern between different outputs of a stronger model. Given a
+sample y π (y x), we define the energy using the weak model U(y x) = logπ (y x).
+i strong i weak i
+∼ | | − |
+Wetestweak-to-strongalignment usingapreviouslyalignedLLaMA2-7B-Chat(meta-llama/Llama-
+2-7b-chat) to optimize an unaligned LLaMA2-13B (meta-llama/Llama-2-13b) model [33]. Using
+prompts from the Anthropic Helpful and Harmless dialogue dataset [5], we first carry out a short
+supervised fine-tuning step of LLaMA2-13B to ensure it can output text in a chat-like format (see
+Appendix E.2). Using this reference policy, we generate a dataset with energies computed from the
+smaller LLaMA2-7B-Chat model and carry out ERA as above, again across varying γ and β. We
+evaluate the “safety” of generated samples using Meta LLama Guard 2 (meta-llama/Meta-Llama-
+Guard-2-8B) [15]. We observe that as we increase β, the proportion of unsafe content relative to
+the unaligned, reference model decreases, with over a 90% drop between the unaligned model and
+the models aligned with the highest β across all γ. For these experiments, we observe that varying
+regularization strengths has a minimal effect and that we are in fact able to generate coherent
+sentences with no regularization, with strong regularization hurting performance for β = 0.1. Finally,
+we compare ERA and DPO in Appendix E.2 and observe that with our implementation of DPO,
+we are able to generate lower energy samples, but that it is prone to mode collapse. We caution
+that our implementation of DPO is likely not optimal and that we did not exhaustively tune the
+hyperparameters of DPO due to resource constraints.
+5 Conclusions and Limitations
+Thispaperintroducesenergyrankalignment, asimpleandeffectivealgorithmforpolicyoptimization
+with an explicit reward model. We find that ERA is stable without extensive hyperparameter tuning,
+and sufficiently general to successfully align both application-specific transformers for chemical
+search problems as well as generative pre-trained transformers for language. The algorithm exhibits
+strong performance with a variety of reward models, even ones with relatively weak signal, such
+as the AI feedback of LLaMA2-7B-Chat. Interestingly, with this approach we are able to reduce
+unsafe content by more than 90% with no human preference data.
+We analyze the minimizers of the ERA objective and find that they differ from the minimizers
+of popular policy alignment algorithms DPO and PPO in an important way: unlike PPO, the
+strength of regularization to the reference policy that we add is controlled by a parameter γ, while
+the entropy of the target distribution is independently tuned by a distinct parameter β. This means
+that we can avoid greedy policies by keeping β small—amplifying fluctuations around the optimum
+of the reward model U—while reducing the influence of the reference policy by taking γ small.
+−
+Our objective leads to easily interpretable sample-wise gradients which highlight the importance of a
+reward model relative to DPO in the sampled objective. Similar observations about the inadequacy
+of the DPO objective for finite preference observations were also made theoretically in Azar et al.
+11[3].
+Limitations: First, our approach requires a reward model, which can be difficult to train or
+design, especially for complex tasks. While we observed that ERA makes an appreciable impact
+even with weak supervision from an AI chat model, this sort of proxy may not be available for more
+complex tasks. For example, optimizing small molecules for high binding affinity to a target protein
+would require expensive and noisy evaluations of a reward model, which likely limits the scope of
+molecular design to problems where the reward can be computed somewhat efficiently. A second
+limitation of our present work is that we do not train the molecular transformer to favor synthetic
+accessibility nor do we explicitly seek to obtain molecules that are easily synthesized experimentally.
+There are models that seek to evaluate synthesizability computationally that could be used in our
+rewards, which we plan to explore in future work [11]. A final limitation of our current work is the
+moderate scale of our numerical experiments due to our limited compute resources, including the
+inadequate hyperparameter tuning for the DPO baseline for Fig. 5.
+References
+[1] AI@Meta. Llama 3 model card. 2024. URL https://github.com/meta-llama/llama3/blob/
+main/MODEL_CARD.md.
+[2] G. An, J. Lee, X. Zuo, N. Kosaka, K.-M. Kim, and H. O. Song. Direct Preference-based Policy
+Optimization without Reward Modeling. Advances in Neural Information Processing Systems,
+36:70247–70266, Dec. 2023.
+[3] M. G. Azar, M. Rowland, B. Piot, D. Guo, D. Calandriello, M. Valko, and R. Munos. A
+General Theoretical Paradigm to Understand Learning from Human Preferences, Nov. 2023.
+[4] V. Bagal, R. Aggarwal, P. K. Vinod, and U. D. Priyakumar. MolGPT: Molecular Generation
+Using a Transformer-Decoder Model. Journal of Chemical Information and Modeling, 62(9):
+2064–2076, May 2022. ISSN 1549-9596. doi: 10.1021/acs.jcim.1c00600.
+[5] Y. Bai, A. Jones, K. Ndousse, A. Askell, A. Chen, N. DasSarma, D. Drain, S. Fort, D. Ganguli,
+T. Henighan, N. Joseph, S. Kadavath, J. Kernion, T. Conerly, S. El-Showk, N. Elhage,
+Z. Hatfield-Dodds, D. Hernandez, T. Hume, S. Johnston, S. Kravec, L. Lovitt, N. Nanda,
+C. Olsson, D. Amodei, T. Brown, J. Clark, S. McCandlish, C. Olah, B. Mann, and J. Kaplan.
+Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback,
+Apr. 2022.
+[6] G. R. Bickerton, G. V. Paolini, J. Besnard, S. Muresan, and A. L. Hopkins. Quantifying the
+chemical beauty of drugs. Nature Chemistry, 4(2):90–98, Feb. 2012. ISSN 1755-4330, 1755-4349.
+doi: 10.1038/nchem.1243.
+[7] R. A. Bradley and M. E. Terry. Rank analysis of incomplete block designs: I. the method of
+paired comparisons. Biometrika, 39(3/4):324–345, 1952. ISSN 0006-3444. doi: 10.2307/2334029.
+[8] C. Burns, P. Izmailov, J. H. Kirchner, B. Baker, L. Gao, L. Aschenbrenner, Y. Chen, A. Ecoffet,
+M. Joglekar, J. Leike, I. Sutskever, and J. Wu. Weak-to-strong generalization: Eliciting strong
+capabilities with weak supervision, Dec. 2023.
+12[9] S. Casper, X. Davies, C. Shi, T. K. Gilbert, J. Scheurer, J. Rando, R. Freedman, T. Korbak,
+D. Lindner, P. Freire, T. Wang, S. Marks, C.-R. Segerie, M. Carroll, A. Peng, P. Christoffersen,
+M. Damani, S. Slocum, U. Anwar, A. Siththaranjan, M. Nadeau, E. J. Michaud, J. Pfau,
+D. Krasheninnikov, X. Chen, L. Langosco, P. Hase, E. Bıyık, A. Dragan, D. Krueger, D. Sadigh,
+and D. Hadfield-Menell. Open problems and fundamental limitations of reinforcement learning
+from human feedback, Sept. 2023.
+[10] S. Chithrananda, G. Grand, and B. Ramsundar. ChemBERTa: Large-Scale Self-Supervised
+Pretraining for Molecular Property Prediction. In Machine Learning for Molecules Workshop
+at NeurIPS, 2020.
+[11] C. W. Coley, L. Rogers, W. H. Green, and K. F. Jensen. SCScore: Synthetic Complexity
+Learned from a Reaction Corpus. Journal of Chemical Information and Modeling, 58(2):
+252–261, Feb. 2018. ISSN 1549-9596. doi: 10.1021/acs.jcim.7b00622.
+[12] P. S. Gromski, A. B. Henson, J. M. Granda, and L. Cronin. How to explore chemical space
+using algorithms and automation. Nature Reviews Chemistry, 3(2):119–128, 2019.
+[13] R. Go´mez-Bombarelli, J. N. Wei, D. Duvenaud, J. M. Herna´ndez-Lobato, B. Sa´nchez-Lengeling,
+D. Sheberla, J. Aguilera-Iparraguirre, T. D. Hirzel, R. P. Adams, and A. Aspuru-Guzik.
+Automatic chemical design using a data-driven continuous representation of molecules. ACS
+Central Science, 4(2):268–276, Feb. 2018. ISSN 2374-7943. doi: 10.1021/acscentsci.7b00572.
+[14] J. Hartmann, M. Heitmann, C. Siebert, and C. Schamp. More than a feeling: Accuracy and
+application of sentiment analysis. International Journal of Research in Marketing, 40(1):75–87,
+2023. doi: https://doi.org/10.1016/j.ijresmar.2022.05.005. URL https://www.sciencedirect.
+com/science/article/pii/S0167811622000477.
+[15] H. Inan, K. Upasani, J. Chi, R. Rungta, K. Iyer, Y. Mao, M. Tontchev, Q. Hu, B. Fuller,
+D. Testuggine, and M. Khabsa. Llama Guard: LLM-based Input-Output Safeguard for
+Human-AI Conversations, Dec. 2023.
+[16] G. M. Keseru¨ and G. M. Makara. The influence of lead discovery strategies on the properties
+of drug candidates. Nature Reviews Drug Discovery, 8(3):203–212, Mar. 2009. ISSN 1474-1776,
+1474-1784. doi: 10.1038/nrd2796.
+[17] R. K. Lindsay, B. G. Buchanan, E. A. Feigenbaum, and J. Lederberg. Dendral: A case study of
+the first expert system for scientific hypothesis formation. Artificial Intelligence, 61(2):209–261,
+June 1993. ISSN 00043702. doi: 10.1016/0004-3702(93)90068-M.
+[18] A. L. Maas, R. E. Daly, P. T. Pham, D. Huang, A. Y. Ng, and C. Potts. Learning Word Vectors
+for Sentiment Analysis. In Proceedings of the 49th Annual Meeting of the Association for
+Computational Linguistics: Human Language Technologies, pages 142–150, Portland, Oregon,
+USA, June 2011. Association for Computational Linguistics.
+[19] J. Maas. Gradient flows of the entropy for finite Markov chains. Journal of Functional Analysis,
+261(8):2250–2292, Oct. 2011. ISSN 0022-1236. doi: 10.1016/j.jfa.2011.06.009.
+[20] R. Munos, M. Valko, D. Calandriello, M. G. Azar, M. Rowland, Z. D. Guo, Y. Tang, M. Geist,
+T.Mesnard,A.Michi,M.Selvi,S.Girgin,N.Momchev,O.Bachem,D.J.Mankowitz,D.Precup,
+and B. Piot. Nash Learning from Human Feedback, Dec. 2023.
+13[21] L. Ouyang, J. Wu, X. Jiang, D. Almeida, C. Wainwright, P. Mishkin, C. Zhang, S. Agarwal,
+K.Slama,A.Ray,J.Schulman,J.Hilton,F.Kelton,L.Miller,M.Simens,A.Askell,P.Welinder,
+P. F. Christiano, J. Leike, and R. Lowe. Training language models to follow instructions with
+human feedback. In S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh,
+editors, Advances in Neural Information Processing Systems, volume 35, pages 27730–27744.
+Curran Associates, Inc., 2022.
+[22] R. Park, R. Theisen, N. Sahni, M. Patek, A. Cichon´ska, and R. Rahman. Preference Optimiza-
+tion for Molecular Language Models, Oct. 2023.
+[23] G. Pesciullesi, P. Schwaller, T. Laino, and J.-L. Reymond. Transfer learning enables the
+molecular transformer to predict regio- and stereoselective reactions on carbohydrates. Nature
+Communications, 11(1):4874, Sept. 2020. ISSN 2041-1723. doi: 10.1038/s41467-020-18671-7.
+[24] A. Radford, J. Wu, R. Child, D. Luan, D. Amodei, I. Sutskever, et al. Language models are
+unsupervised multitask learners. OpenAI blog, 1(8):9, 2019.
+[25] R. Rafailov, A. Sharma, E. Mitchell, C. D. Manning, S. Ermon, and C. Finn. Direct preference
+optimization: Your language model is secretly a reward model. In A. Oh, T. Neumann,
+A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors, Advances in Neural Information
+Processing Systems, volume 36, pages 53728–53741. Curran Associates, Inc., 2023.
+[26] D. J. Rogers and T. T. Tanimoto. A Computer Program for Classifying Plants: The computer
+is programmed to simulate the taxonomic process of comparing each case with every other case.
+Science, 132(3434):1115–1118, Oct. 1960. ISSN 0036-8075, 1095-9203. doi: 10.1126/science.132.
+3434.1115.
+[27] B. Sanchez-Lengeling and A. Aspuru-Guzik. Inverse molecular design using machine learning:
+Generative models for matter engineering. Science, 361(6400):360–365, July 2018. doi: 10.
+1126/science.aat2663.
+[28] F. Santambrogio. Euclidean, Metric, and Wasserstein gradient flows: An overview. Bul-
+{ }
+letin of Mathematical Sciences, 7(1):87–154, Apr. 2017. ISSN 1664-3615. doi: 10.1007/
+s13373-017-0101-1.
+[29] J.Schulman, F.Wolski, P.Dhariwal, A.Radford, and O.Klimov. Proximal PolicyOptimization
+Algorithms, Aug. 2017.
+[30] P. Schwaller, T. Gaudin, D. La´nyi, C. Bekas, and T. Laino. “Found in Translation”: Predicting
+outcomes of complex organic chemistry reactions using neural sequence-to-sequence models.
+Chemical Science, 9(28):6091–6098, 2018. doi: 10.1039/C8SC02339E.
+[31] P. Schwaller, T. Laino, T. Gaudin, P. Bolgar, C. A. Hunter, C. Bekas, and A. A. Lee. Molecular
+transformer: A model for uncertainty-calibrated chemical reaction prediction. ACS Central
+Science, 5(9):1572–1583, Sept. 2019. ISSN 2374-7943, 2374-7951. doi: 10.1021/acscentsci.
+9b00576.
+[32] F. Tajwar, A. Singh, A. Sharma, R. Rafailov, J. Schneider, T. Xie, S. Ermon, C. Finn, and
+A. Kumar. Preference Fine-Tuning of LLMs Should Leverage Suboptimal, On-Policy Data,
+Apr. 2024.
+14[33] H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei, N. Bashlykov, S. Batra,
+P. Bhargava, S. Bhosale, D. Bikel, L. Blecher, C. C. Ferrer, M. Chen, G. Cucurull, D. Esiobu,
+J. Fernandes, J. Fu, W. Fu, B. Fuller, C. Gao, V. Goswami, N. Goyal, A. Hartshorn, S. Hosseini,
+R. Hou, H. Inan, M. Kardas, V. Kerkez, M. Khabsa, I. Kloumann, A. Korenev, P. S. Koura,
+M.-A. Lachaux, T. Lavril, J. Lee, D. Liskovich, Y. Lu, Y. Mao, X. Martinet, T. Mihaylov,
+P. Mishra, I. Molybog, Y. Nie, A. Poulton, J. Reizenstein, R. Rungta, K. Saladi, A. Schelten,
+R. Silva, E. M. Smith, R. Subramanian, X. E. Tan, B. Tang, R. Taylor, A. Williams, J. X.
+Kuan, P. Xu, Z. Yan, I. Zarov, Y. Zhang, A. Fan, M. Kambadur, S. Narang, A. Rodriguez,
+R. Stojnic, S. Edunov, and T. Scialom. Llama 2: Open Foundation and Fine-Tuned Chat
+Models, July 2023.
+[34] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L(cid:32) . Kaiser, and
+I. Polosukhin. Attention is All you Need. In Advances in Neural Information Processing
+Systems, volume 30. Curran Associates, Inc., 2017.
+[35] S. Wang, Y. Guo, Y. Wang, H. Sun, and J. Huang. SMILES-BERT: Large Scale Unsupervised
+Pre-Training for Molecular Property Prediction. In Proceedings of the 10th ACM International
+Conference on Bioinformatics, Computational Biology and Health Informatics, BCB ’19, pages
+429–436, New York, NY, USA, Sept. 2019. Association for Computing Machinery. ISBN
+978-1-4503-6666-3. doi: 10.1145/3307339.3342186.
+[36] S. A. Wildman and G. M. Crippen. Prediction of Physicochemical Parameters by Atomic
+Contributions. Journal of Chemical Information and Computer Sciences, 39(5):868–873, Sept.
+1999. ISSN 0095-2338, 1520-5142. doi: 10.1021/ci990307l.
+[37] B.Zdrazil,E.Felix,F.Hunter,E.J.Manners,J.Blackshaw,S.Corbett,M.deVeij,H.Ioannidis,
+D. M. Lopez, J. F. Mosquera, M. P. Magarinos, N. Bosc, R. Arcila, T. Kizil¨oren, A. Gaulton,
+A. P. Bento, M. F. Adasme, P. Monecke, G. A. Landrum, and A. R. Leach. The ChEMBL
+Database in 2023: A drug discovery platform spanning multiple bioactivity data types and time
+periods. Nucleic Acids Research, 52(D1):D1180–D1192, Jan. 2024. ISSN 0305-1048, 1362-4962.
+doi: 10.1093/nar/gkad1004.
+[38] R. Zhang, L. Lin, Y. Bai, and S. Mei. Negative Preference Optimization: From Catastrophic
+Collapse to Effective Unlearning, Apr. 2024.
+[39] Z. Zhou, J. Liu, C. Yang, J. Shao, Y. Liu, X. Yue, W. Ouyang, and Y. Qiao. Beyond
+One-Preference-Fits-All Alignment: Multi-Objective Direct Preference Optimization, Dec.
+2023.
+A Code Availability
+Our code is available in two separate repositories, at https://github.com/rotskoff-group/
+chem-era and https://github.com/rotskoff-group/llm-era.
+B Detailed Theoretical Analysis
+Set-up, notation, and assumptions Let and be discrete spaces; each element of one of
+X Y
+these spaces is a finite-length sequence of tokens within a fixed dictionary on which an autoregressive
+15generative model is trained. The resulting models yield “policies”, which are conditional probability
+distributions π( x) ( ) for each x . Throughout, we assume that our policies have full
+·| ∈ P Y ∈ X
+support on for each x, meaning that inf π(y x) > 0. Because the spaces are discrete, we
+y,x∈Y×X
+Y |
+make no strong restrictions on the regularity or coerciveness of the reward model U :
+− X ×Y →
+R. The only requirement to ensure the existence of an optimal probability distribution is that
+sup e−U(x,y) < + , which maintains full support of the distribution. Though it plays
+x,y×X×Y
+| | ∞
+little role in theoretical analysis, we also denote by ν ( ) the probability distribution over the
+∈ P X
+prompts x.
+Goals of the analysis presented here The main purpose of this section is to establish that
+globally minimizing the loss (9) yields a global minimizer of the regularized policy objective (2). A
+secondary goal is to clearly articulate the theoretical advantages of ERA compared with PPO and
+DPO.
+To understand the ERA loss function and its connection to the entropy regularized objective (2),
+we first establish that the minimizer of (6) are of the form (5). We first define the notion of
+equivalence precisely.
+Definition B.1 The conditional probability measures π( x) and π′( x) in ( ) are conditionally
+·| ·| P Y
+equivalent if x , π and π′ are such that sup π(y x) π′(y x) = 0.
+y∈Y
+∀ ∈ X | | − | |
+This is a strong form of equivalence for probability measures, but it is appropriate on the discrete
+spaces and we consider here. For more general continuous spaces, one could relax this condition
+X Y
+to weak equivalence of the conditional measures. We use this notion to emphasize that a shift of
+the distribution of the “prompts” x , which we denote ν ( ), does not impact conditional
+∈ X ∈ P X
+equivalence and hence establishes an equivalence class of conditional probability measures that
+minimize (2).
+Lemma B.1 If π is conditionally equivalent to π′, then π′( x) π′( x)eg(x) is conditionally
+g
+·| ∝ ·|
+equivalent to π for all functions g : R such that sup x∈X eg(x) < + .
+X → | | ∞
+Assume that π′ is a normalized probability distribution. This requires that,
+(cid:88)
+Z′(x) = π′(y x) = 1. (15)
+|
+y∈Y
+If g is such that
+(cid:88)
+Z′(x) = π′(y x)eg(x) = 1, (16)
+g
+| ̸
+y∈Y
+then the normalized policy π′ is clearly defined by
+g
+1
+π′(y x)eg(x) π′(y x), (17)
+Z′(x) | ≡ |
+g
+because Z′(x) = eg(x). By the assumption that sup eg(x) < + , all terms in these calculations
+g x∈X
+| | ∞
+remain finite.
+Using Lemma B.1 it is straightforward to prove the result in the main text Proposition 3.2. For
+completeness, we re-state that result here and refer the reader to the main text for the complete
+argument.
+16Proposition B.2 Suppose π( x) ( ) and that supp(π) = supp(π ). Let β > 0, γ 0 and
+ref
+·| ∈ P Y ≥
+that the reward model is such that sup e−U(x,y) < + . Then, the minimizer of ERA is
+x,y∈X×Y
+| | ∞ L
+conditionally equivalent to π .
+⋆
+This proposition establishes that a policy minimizing the objective
+LERA(π θ) = Ex∼DEy,y′∼π ref(·|x)D K(y L,y′) (p β |p θ);
+(cid:18) (cid:19)
+π (y x)
+θ
+p := σ log |
+θ π (y′ x) (18)
+θ
+|
+(cid:18) (cid:20) (cid:21)(cid:19)
+β π (y x)
+p := σ (U(x,y′) U(x,y))+β−1γlog ref | ,
+γ 1+γ − π (y′ x)
+ref
+|
+has the form
+(cid:20) (cid:21)
+π (y x) = Z−1(x)exp β (cid:0) U(x,y) β−1γlogπ (y x)(cid:1) . (19)
+⋆ ref
+| −1+γ − |
+We do not, however, prove that gradient descent of θ on (18) converges to the global minimizer (19)
+because such an argument requires additional assumptions about the parametric class of policies and
+the convexity of the objective with respect to the parameters, neither of which are straightforward
+to establish.
+B.1 Comparison with PPO Objective
+The free energy functional for a policy under the energy rank alignment framework can be written
+as an expectation
+(cid:20)(cid:90) (cid:90) (cid:21)
+J ERA[π] = Ex∼ν U(x,y)dπ(y x)+β−1 (1+γ)logπ(y x) γlog(π ref(y x)dπ(y x) , (20)
+| | − | |
+involving an energetic term and an entropic term. The additional regularization acts as an effective
+energetic bias. Solving for the extremum of this functional by setting Fr´echet derivative with respect
+to π equal to zero, one obtains the formal solution (19) for the minimizer. This objective differs
+from the regularized reward loss conventionally used for PPO,
+(cid:20)(cid:90) (cid:90) (cid:21)
+π(y x)
+J PPO(π) = Ex U(x,y)dπ(y x)+γβ−1 log | dπ(y x) ,
+| π (y x) |
+ref
+|
+(cid:20)(cid:90) (cid:21)
+= Ex U(x,y)dπ(y x)+γβ−1D KL(cid:0) π( x) π ref( x)(cid:1) . (21)
+| ·| | ·|
+The minimizer of the PPO objective (21) is also a Gibbs-Boltzmann measure, explicitly,
+(cid:20) (cid:21)
+β
+(PPO)
+π exp U(x,y)+logπ (y x) . (22)
+⋆ ref
+∝ −γ |
+Here, the KL-regularization corresponds to an energy shift, as in our objective, but there is no
+limit in which the ideal distribution π e−βU is obtained for the PPO objective. This is in stark
+∝
+contrast to our approach, which recovers the ideal distribution as γ 0. Furthermore, while our
+→
+approach allows for a direct gradient-based optimization using (18), PPO is implemented using an
+actor-critic framework that is difficult to tune [25, 9]. Finally, we emphasize that for ERA in the
+γ 0, finite β > 0, the distribution has positive entropy and is not manifestly mode-seeking; there
+→
+can still be appreciable fluctuations in the output. Eliminating the effect of regularization in (22),
+on the other hand, requires taking β/γ , which eliminates fluctuations in the distribution.
+→ ∞
+17B.2 Comparison with DPO Objective
+The DPO approach also seeks to optimize the objective (21). The algorithm does so by first
+using (22) to define an implicit reward model by solving for the U that reflects the observed
+preference probabilities. This elegant idea has had a significant impact and has already been
+deployed in state-of-the-art models [1]. In many cases, the observed preference probabilities will be
+sampled and only perhaps only one observation of y y′ will be available for each x in the dataset.
+≻
+When the preference dataset only has one observation y y′ per prompt x, the optimal policy
+≻
+requires that
+πDPO(y x) = 1 and πDPO(y′ x) = 0. (23)
+⋆ ⋆
+| |
+The sampled gradients of the objective used for DPO are proportional to the implicit reward
+discrepancy,
+(cid:18) (cid:20) π (y′ x) π (y x) (cid:21)(cid:19) π (y x)
+ˆDPO(y,y′,x) = σ β−1γ log θ | log θ | log θ | , (24)
+∇θ L π (y′ x) − π (y x) ∇θ π (y′ x)
+ref ref θ
+| | |
+which when π (y′ x) 0, could lead to instability as logπ (y′ x) . On the other hand, the
+θ θ
+| → − | → ∞
+ERA gradients are scaled by the relative preference discrepancy,
+(cid:18) 1 σ (y y′ x) σ (y y′ x)(cid:19)
+ERA(y,y′,x) = − ⋆ ≻ | ⋆ ≻ | σ (y y′ x). (25)
+∇θ L 1 σ (y y′ x) − σ (y y′ x) ∇θ θ ≻ |
+θ θ
+− ≻ | ≻ |
+The advantage of a reward model becomes apparent because
+(cid:18) (cid:20) (cid:21)(cid:19)
+β π (y x)
+σ (y y′ x) = p (y y′ x) = σ (U(x,y′) U(x,y))+β−1γlog ref | (26)
+⋆ ≻ | γ ≻ | 1+γ − π (y′ x)
+ref
+|
+and hence the optimum of ERA will not lead to policies in which supp(π ) degrades unless the
+θ
+L
+energy becomes infinite. Choosing an appropriate reward model, hence, gives the flexibility to
+control instability if it becomes problematic.
+C ERA implementation
+Implementing energy rank alignment is straightforward to implement within existing code bases.
+We provide sample PyTorch code for the ERA loss function below.
+18import torch.nn as nn
+from torch.nn.functional import logsigmoid
+def era_loss(pi_logps_1, pi_logps_2,
+ref_logps_1, ref_logps_2,
+energies_1, energies_2,
+beta, gamma):
+"""
+pi_logps_1: logprob under policys model of first sequence in pair (B,)
+pi_logps_2: logprob under policys model of second sequence in pair (B,)
+ref_logps_1: logprob under reference model of first sequence in pair (B,)
+ref_logps_2: logprob under reference model of second sequence in pair (B,)
+energies_1: energies of first sequence in pair (B,)
+energies_2: energies of second sequence in pair (B,)
+beta: inverse temperature
+gamma: regularization controlling strength of KL penalty
+"""
+beta_prime = (beta / (1 + gamma))
+gamma_prime = (gamma / (1 + gamma))
+logp = logsigmoid(policy_logps_y2 - policy_logps_y1)
+logp_prime = logsigmoid(policy_logps_y1 - policy_logps_y2)
+logp_star = logsigmoid(-beta_prime * (energies_y2 - energies_y1)
++ gamma_prime * (ref_logps_y2 - ref_logps_y1))
+logp_star_prime = logsigmoid(-beta_prime * (energies_y1 - energies_y2)
++ gamma_prime * (ref_logps_y1 - ref_logps_y2))
+era_loss = (torch.exp(logp_star) * (logp_star - logp)
++ torch.exp(logp_star_prime) * (logp_star_prime - logp_prime))
+return era_loss.mean()
+D Details for molecular generator experiments
+D.1 Pretraining details
+In this work, we represent all molecules as SMILES strings and tokenize SMILES strings according
+to the approach in [30]. Our dataset consisted of all small-molecules from the ChEMBL database
+that were of length 500 tokens or less. Ultimately, this token limit filtered out approximately 0.1%
+of the small-molecules in the original ChEMBL dataset. The alphabet generated from this curated
+dataset consists of 324 tokens, which we augmented with start, stop, and padding tokens.
+We first pretrained a model according to a next-token prediction, self-supervised learning
+approach. We trained a model using the standard cross entropy loss
+T
+(cid:88)
+= logp (x x ). (27)
+CE θ t+1 1:t
+L − |
+t=1
+19ChEMBL Dataset
+10.0
+Molecular Generator
+7.5
+5.0
+2.5
+0.0
+0.00 0.25 0.50 0.75 1.00
+Tanimoto Similarity
+Figure 6: Chemical diversity of samples from training dataset and from unprompted molecular
+generator (unaligned) as measured by pairwise Tanimoto similarities. Lower Tanimoto similarities
+correspond to more chemically dissimilar molecules.
+Our trained molecular generator consisted of just the encoder block of a standard multi-head
+attention transformer [34]. Finally, the model had 2 layers, 8 heads, and a width of 512. For
+pretraining, we used an Adam optimizer with a learning rate of 1.0 10−5. We emphasize that this
+∗
+pretrained generator samples molecules in an unprompted fashion; given just a start-of-sequence
+token, we can autoregressively generate a sequence of tokens. Moreover, it is possible that this
+sequence of tokens corresponds to a molecule that is not chemically valid, and we find that around
+88%ofallgeneratedmoleculesarechemicallyvalid. Lastly,wemeasurethediversityofthepretrained
+molecular generator by first generating 1500 molecules and then computing the Tanimoto similarity
+between every pair of molecules. We plot the distribution of all pairwise Tanimoto similarities from
+this sample and from all pariwise Tanimoto similarities from 1500 randomly sampled molecules from
+the original dataset in Fig. 6. We observe that we can generate molecules that are quite distinct
+(i.e. low Tanimoto similarity) in comparison with all other molecules.
+D.2 Chemical properties
+Weinvestigatedaligningthemoleculegeneratortoseveraltargetchemicalproperties, whichwedetail
+below. All of the properties can be easily computed using the RDKit package. We list the energy
+function and parameters used for the corresponding energy functions for each of these properties in
+Table 1.
+Tanimoto similarity is a measure of chemical and structural properties between two molecules
+and ranges from 0 to 1, where higher values correspond to more similar molecules [26]. Quantitative
+estimation of drug-likeness (QED) is evaluated by taking the geometric mean of a set of “desirability
+functions” for different molecular descriptors and also ranges continuously from values of 0 to 1 [6],
+where higher values correspond to more drug-like molecules. The octanol-water parition coefficient
+(Wildman-Crippen LogP) is a measure of hydrophobicity frequently employed in medicinal chemistry
+applications [36]. Molecules with more positive values are more hydrophobic (i.e. more soluble in
+octanol relative to water), whereas molecules with more negative values are more hydrophilic (i.e.
+more soluble in water relative to octanol). Molar refractivity is similarly calculated as a linear
+20Property name (f) Energy function (U)
+Tanimoto similarity U = log(f(y))
+−
+QED U = log(f(y))
+−
+Wildman-Crippen LogP U = (f(y) µ)/2σ2
+−
+Molar refractivity U = (f(y) µ)/2σ2
+−
+Ring count U = (f(y) µ)/2σ2
+−
+Table 1: Definitions of energy functions (in reduced units) used for each of the five chemical
+properties investigated in this work. Here y refers to the generated molecule.
+Property name (f) Energy
+Tanimoto similarity 10
+QED 4.5
+Wildman-Crippen LogP 300
+Molar refractivity 400
+Ring count 70
+Table 2: Property-specific energy values (in reduced units) used to treat chemically invalid sequences.
+combination of atomic contributions, and is a positive number that serves as a measure for molecular
+size and polarizability [36]. A higher molar refractivity corresponds to larger and more polarizable
+molecules. Finally, ring count corresponds to the number of rings in a molecule.
+Under the definitions of the energy functions in Table 1, it is possible for a generated sequence
+to not be chemically valid. For these cases, we manually define energies that are sufficiently high to
+penalize that outcome and we report these values in Table 2. Furthermore, when the computed
+QED or Tanimoto Similarity is 0, the energy is infinite, and to ensure numerical stability, we set
+the value of the energies to be 4.5 and 10 respectively. Finally, in the prompted molecular generator
+experiments in Section 4.1.2, we assign an energy of 3.5 to the setting where Tanimoto similarity
+between the generated and prompt molecule is 1.0 (i.e they are the same) in order to penalize this
+outcome. Here, all energy and β values are reported in reduced units.
+D.3 Molecular alignment details
+D.3.1 Unprompted molecular generation
+We first investigated aligning the unprompted molecular generator to sample small-molecules with
+desired properties. We carried out alignment using the property-specific energies described in
+Table 1. All alignment properties were initialized with the weights of the pretrained model and
+trained using an Adam optimizer with learning rate 1.0 10−6. We tabulate the chemical validity
+∗
+for single-property alignment in Table 3 and for multi-property alignment in Table 4. While we do
+see a drop in chemical validity after alignment, we see that a majority of the samples we generate
+post-alignment are still chemically valid despite no regularization to a reference policy. We measure
+the chemical diversity for these experiments by computing all pairwise Tanimoto similarities from
+all chemically valid predictions of 1500 generated molecules. We visualize the chemical diversity for
+single-property experiments in Fig. 7 and multi-property experiments in Fig. 8. We observe that
+the samples are still highly diverse chemically after alignment. All plots in Fig. 2 and Fig. 3 were
+computed using 1500 generated molecules per experiment.
+21MolarRefractivity RingCount
+10 Unaligned Unaligned
+Aligned(µ=50) 10 Aligned(µ=1)
+Aligned(µ=180) Aligned(µ=8)
+5
+5
+0 0
+0.0 0.5 0.0 0.5
+QED Wildman-CrippenLogP
+Unaligned 10 Unaligned
+Aligned(β=5.0) Aligned(µ=0)
+10
+Aligned(β=10.0) Aligned(µ=7.5)
+Aligned(β=20.0)
+5
+5
+0 0
+0.0 0.5 0.0 0.5
+Tanimoto Similarity
+Figure 7: Chemical diversity of samples from unprompted molecular generator after alignment as
+measured by pairwise Tanimoto similarities. (See Fig. 2, Section 4.1.1)
+Property name Hyperparameters Chemical valid-
+ity
+Unaligned N/A 88%
+Molar Refractiv- β = 1.0, µ = 50, σ = 10, γ = 0.0 82%
+ity
+Molar Refractiv- β = 1.0, µ = 180, σ = 10, γ = 0.0 74%
+ity
+Ring Count β = 1.0, µ = 1, σ = 1.0, γ = 0.0 84%
+Ring Count β = 1,0, µ = 8, σ = 1.0, γ = 0.0 59%
+LogP β = 10.0, µ = 2.5, σ = 1.0, γ = 74%
+0.0
+LogP β = 10.0, µ = 7.5, σ = 1.0, γ = 63%
+0.0
+QED β = 5.0, γ = 0.0 54%
+QED β = 10.0, γ = 0.0 66%
+QED β = 20.0, γ = 0.0 65%
+Table 3: Percentage of generated sequences that were chemically valid for samples from unprompted
+molecular generator after alignment. (See Fig. 2, Section 4.1.1).
+22Unaligned Aligned
+β =1.0, β =1.0 β =1.0, β =10.0 β =1.0, β =20.0 β =1.0, β =100.0
+LogP QED LogP QED LogP QED LogP QED
+10
+5
+0
+β =5.0, β =1.0 β =5.0, β =10.0 β =5.0, β =20.0 β =5.0, β =100.0
+LogP QED LogP QED LogP QED LogP QED
+10
+5
+0
+0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0
+Tanimoto Similarity
+Figure 8: Chemical diversity of samples from unprompted molecular generator after multi-property
+alignment as measured by pairwise Tanimoto similarities. (See Fig. 3, Section 4.1.1).
+Hyperparameters Chemical valid-
+ity
+Unaligned 88%
+β = 1.0, β = 1.0, µ = 7.5, σ = 1.0, γ = 0.0 60%
+QED LogP LogP LogP
+β = 1.0, β = 10.0, µ = 7.5, σ = 1.0, γ = 0.0 67%
+QED LogP LogP LogP
+β = 1.0, β = 20.0, µ = 7.5, σ = 1.0, γ = 0.0 68%
+QED LogP LogP LogP
+β = 1.0, β = 100.0, µ = 7.5, σ = 1.0, 63%
+QED LogP LogP LogP
+γ = 0.0
+β = 5.0, β = 1.0, µ = 7.5, σ = 1.0, γ = 0.0 64%
+QED LogP LogP LogP
+β = 5.0, β = 10.0, µ = 7.5, σ = 1.0, γ = 0.0 62%
+QED LogP LogP LogP
+β = 5.0, β = 20.0, µ = 7.5, σ = 1.0, γ = 0.0 62%
+QED LogP LogP LogP
+β = 5.0, β = 100.0, µ = 7.5, σ = 1.0, 68%
+QED LogP LogP LogP
+γ = 0.0
+Table 4: Percentage of generated sequences that were chemically valid for samples from unprompted
+molecular generator after multi-property alignment. (See Fig. 3, Section 4.1.1).
+23Prompt Molecule Generated Molecules Prompt Molecule Generated Molecules
+y<latexit sha1_base64="PdLZ1wa/nWjyla0PEgZXiabp3w4=">AAAGn3icfZRbb9MwFMezwcoYtw0eeTFUSAPRtUXcXiZNu3CZEOpgXYuaqnIcN7XqxJntdOtCXvk0vMJ34dtgp3GZ2xVLlY5+5//PsU+PjhdTImSt9mdp+dr1ldKN1Ztrt27fuXtvfeP+iWAJR7iJGGW87UGBKYlwUxJJcTvmGIYexS1vuKfzrRHmgrDoWI5j3A1hEJE+QVAq1FsH7tgDriAhcGPSS105wBJmm5p+B+6597S3Xq5t1fID5oN6EZSd4jR6GyuB6zOUhDiSiEIhOvVaLLsp5JIgirM1NxE4hmgIA9xRYQRDLLpp/pQMPFHEB33G1S+SIKeXHSkMhRiHnlKGUA7EbE7Dq3KdRPbfdlMSxYnEEZoU6icUSAZ0X4BPOEaSjlUAESfqrgANIIdIqu5ZVfTFRIyReonAMoQk0qSzBtRpqLpgG1SbQrmqYsAJhyGq7hf9ENWvEio596uq0SGuPs9dn0gAZcKx2D7G7QlqxpwEA/lON2EbYFnxGBtWOAthVGHUrwg5prjSJ4G2TSwfJaQEzTh8ImIKxxWSJxdZdxW/0i5wSFSkXP9xznhyuZ5Ho1TCbqq65eO+G3mpqwX6P2Q0jbKC8wGzM5qY5Ajy+fwEGkk+tzOKySz/+8ZVGoONbF5xKTmTmnLP5p7hyObI8FObnxp+ZPMjww9tfmj40ObDaTNtzqc9sPnI8DObnxl+bvNzw8c2Hxt+YfMLw9s2bxvesnlL832slgbHX5iXCLnHQjXwvhoGGGWpy2LMoWRcr4xnqWYLDSKJ4zlHDhdaIA9CMl+mwIsrkWDelMPilQcHqav3kZqSgyzLUaMxRQ0ti/AZml5jFGSdejd1Ke5Ll8IooBiU68DNF4LuRKC3qDpqNddnF/F8cPJiq/5669XRy/LObrGkV52HzmNn06k7b5wd54PTcJoOcn44P51fzu/So9L70udSYyJdXio8DxzrlL79BcJEWjI=</latexit> ⇠⇡✓(y|x) y<latexit sha1_base64="PdLZ1wa/nWjyla0PEgZXiabp3w4=">AAAGn3icfZRbb9MwFMezwcoYtw0eeTFUSAPRtUXcXiZNu3CZEOpgXYuaqnIcN7XqxJntdOtCXvk0vMJ34dtgp3GZ2xVLlY5+5//PsU+PjhdTImSt9mdp+dr1ldKN1Ztrt27fuXtvfeP+iWAJR7iJGGW87UGBKYlwUxJJcTvmGIYexS1vuKfzrRHmgrDoWI5j3A1hEJE+QVAq1FsH7tgDriAhcGPSS105wBJmm5p+B+6597S3Xq5t1fID5oN6EZSd4jR6GyuB6zOUhDiSiEIhOvVaLLsp5JIgirM1NxE4hmgIA9xRYQRDLLpp/pQMPFHEB33G1S+SIKeXHSkMhRiHnlKGUA7EbE7Dq3KdRPbfdlMSxYnEEZoU6icUSAZ0X4BPOEaSjlUAESfqrgANIIdIqu5ZVfTFRIyReonAMoQk0qSzBtRpqLpgG1SbQrmqYsAJhyGq7hf9ENWvEio596uq0SGuPs9dn0gAZcKx2D7G7QlqxpwEA/lON2EbYFnxGBtWOAthVGHUrwg5prjSJ4G2TSwfJaQEzTh8ImIKxxWSJxdZdxW/0i5wSFSkXP9xznhyuZ5Ho1TCbqq65eO+G3mpqwX6P2Q0jbKC8wGzM5qY5Ajy+fwEGkk+tzOKySz/+8ZVGoONbF5xKTmTmnLP5p7hyObI8FObnxp+ZPMjww9tfmj40ObDaTNtzqc9sPnI8DObnxl+bvNzw8c2Hxt+YfMLw9s2bxvesnlL832slgbHX5iXCLnHQjXwvhoGGGWpy2LMoWRcr4xnqWYLDSKJ4zlHDhdaIA9CMl+mwIsrkWDelMPilQcHqav3kZqSgyzLUaMxRQ0ti/AZml5jFGSdejd1Ke5Ll8IooBiU68DNF4LuRKC3qDpqNddnF/F8cPJiq/5669XRy/LObrGkV52HzmNn06k7b5wd54PTcJoOcn44P51fzu/So9L70udSYyJdXio8DxzrlL79BcJEWjI=</latexit> ⇠⇡✓(y|x)
+y<latexit sha1_base64="PdLZ1wa/nWjyla0PEgZXiabp3w4=">AAAGn3icfZRbb9MwFMezwcoYtw0eeTFUSAPRtUXcXiZNu3CZEOpgXYuaqnIcN7XqxJntdOtCXvk0vMJ34dtgp3GZ2xVLlY5+5//PsU+PjhdTImSt9mdp+dr1ldKN1Ztrt27fuXtvfeP+iWAJR7iJGGW87UGBKYlwUxJJcTvmGIYexS1vuKfzrRHmgrDoWI5j3A1hEJE+QVAq1FsH7tgDriAhcGPSS105wBJmm5p+B+6597S3Xq5t1fID5oN6EZSd4jR6GyuB6zOUhDiSiEIhOvVaLLsp5JIgirM1NxE4hmgIA9xRYQRDLLpp/pQMPFHEB33G1S+SIKeXHSkMhRiHnlKGUA7EbE7Dq3KdRPbfdlMSxYnEEZoU6icUSAZ0X4BPOEaSjlUAESfqrgANIIdIqu5ZVfTFRIyReonAMoQk0qSzBtRpqLpgG1SbQrmqYsAJhyGq7hf9ENWvEio596uq0SGuPs9dn0gAZcKx2D7G7QlqxpwEA/lON2EbYFnxGBtWOAthVGHUrwg5prjSJ4G2TSwfJaQEzTh8ImIKxxWSJxdZdxW/0i5wSFSkXP9xznhyuZ5Ho1TCbqq65eO+G3mpqwX6P2Q0jbKC8wGzM5qY5Ajy+fwEGkk+tzOKySz/+8ZVGoONbF5xKTmTmnLP5p7hyObI8FObnxp+ZPMjww9tfmj40ObDaTNtzqc9sPnI8DObnxl+bvNzw8c2Hxt+YfMLw9s2bxvesnlL832slgbHX5iXCLnHQjXwvhoGGGWpy2LMoWRcr4xnqWYLDSKJ4zlHDhdaIA9CMl+mwIsrkWDelMPilQcHqav3kZqSgyzLUaMxRQ0ti/AZml5jFGSdejd1Ke5Ll8IooBiU68DNF4LuRKC3qDpqNddnF/F8cPJiq/5669XRy/LObrGkV52HzmNn06k7b5wd54PTcJoOcn44P51fzu/So9L70udSYyJdXio8DxzrlL79BcJEWjI=</latexit> ⇠⇡✓(y|x) y<latexit sha1_base64="PdLZ1wa/nWjyla0PEgZXiabp3w4=">AAAGn3icfZRbb9MwFMezwcoYtw0eeTFUSAPRtUXcXiZNu3CZEOpgXYuaqnIcN7XqxJntdOtCXvk0vMJ34dtgp3GZ2xVLlY5+5//PsU+PjhdTImSt9mdp+dr1ldKN1Ztrt27fuXtvfeP+iWAJR7iJGGW87UGBKYlwUxJJcTvmGIYexS1vuKfzrRHmgrDoWI5j3A1hEJE+QVAq1FsH7tgDriAhcGPSS105wBJmm5p+B+6597S3Xq5t1fID5oN6EZSd4jR6GyuB6zOUhDiSiEIhOvVaLLsp5JIgirM1NxE4hmgIA9xRYQRDLLpp/pQMPFHEB33G1S+SIKeXHSkMhRiHnlKGUA7EbE7Dq3KdRPbfdlMSxYnEEZoU6icUSAZ0X4BPOEaSjlUAESfqrgANIIdIqu5ZVfTFRIyReonAMoQk0qSzBtRpqLpgG1SbQrmqYsAJhyGq7hf9ENWvEio596uq0SGuPs9dn0gAZcKx2D7G7QlqxpwEA/lON2EbYFnxGBtWOAthVGHUrwg5prjSJ4G2TSwfJaQEzTh8ImIKxxWSJxdZdxW/0i5wSFSkXP9xznhyuZ5Ho1TCbqq65eO+G3mpqwX6P2Q0jbKC8wGzM5qY5Ajy+fwEGkk+tzOKySz/+8ZVGoONbF5xKTmTmnLP5p7hyObI8FObnxp+ZPMjww9tfmj40ObDaTNtzqc9sPnI8DObnxl+bvNzw8c2Hxt+YfMLw9s2bxvesnlL832slgbHX5iXCLnHQjXwvhoGGGWpy2LMoWRcr4xnqWYLDSKJ4zlHDhdaIA9CMl+mwIsrkWDelMPilQcHqav3kZqSgyzLUaMxRQ0ti/AZml5jFGSdejd1Ke5Ll8IooBiU68DNF4LuRKC3qDpqNddnF/F8cPJiq/5669XRy/LObrGkV52HzmNn06k7b5wd54PTcJoOcn44P51fzu/So9L70udSYyJdXio8DxzrlL79BcJEWjI=</latexit> ⇠⇡✓(y|x)
+y<latexit sha1_base64="PdLZ1wa/nWjyla0PEgZXiabp3w4=">AAAGn3icfZRbb9MwFMezwcoYtw0eeTFUSAPRtUXcXiZNu3CZEOpgXYuaqnIcN7XqxJntdOtCXvk0vMJ34dtgp3GZ2xVLlY5+5//PsU+PjhdTImSt9mdp+dr1ldKN1Ztrt27fuXtvfeP+iWAJR7iJGGW87UGBKYlwUxJJcTvmGIYexS1vuKfzrRHmgrDoWI5j3A1hEJE+QVAq1FsH7tgDriAhcGPSS105wBJmm5p+B+6597S3Xq5t1fID5oN6EZSd4jR6GyuB6zOUhDiSiEIhOvVaLLsp5JIgirM1NxE4hmgIA9xRYQRDLLpp/pQMPFHEB33G1S+SIKeXHSkMhRiHnlKGUA7EbE7Dq3KdRPbfdlMSxYnEEZoU6icUSAZ0X4BPOEaSjlUAESfqrgANIIdIqu5ZVfTFRIyReonAMoQk0qSzBtRpqLpgG1SbQrmqYsAJhyGq7hf9ENWvEio596uq0SGuPs9dn0gAZcKx2D7G7QlqxpwEA/lON2EbYFnxGBtWOAthVGHUrwg5prjSJ4G2TSwfJaQEzTh8ImIKxxWSJxdZdxW/0i5wSFSkXP9xznhyuZ5Ho1TCbqq65eO+G3mpqwX6P2Q0jbKC8wGzM5qY5Ajy+fwEGkk+tzOKySz/+8ZVGoONbF5xKTmTmnLP5p7hyObI8FObnxp+ZPMjww9tfmj40ObDaTNtzqc9sPnI8DObnxl+bvNzw8c2Hxt+YfMLw9s2bxvesnlL832slgbHX5iXCLnHQjXwvhoGGGWpy2LMoWRcr4xnqWYLDSKJ4zlHDhdaIA9CMl+mwIsrkWDelMPilQcHqav3kZqSgyzLUaMxRQ0ti/AZml5jFGSdejd1Ke5Ll8IooBiU68DNF4LuRKC3qDpqNddnF/F8cPJiq/5669XRy/LObrGkV52HzmNn06k7b5wd54PTcJoOcn44P51fzu/So9L70udSYyJdXio8DxzrlL79BcJEWjI=</latexit> ⇠⇡✓(y|x) y<latexit sha1_base64="PdLZ1wa/nWjyla0PEgZXiabp3w4=">AAAGn3icfZRbb9MwFMezwcoYtw0eeTFUSAPRtUXcXiZNu3CZEOpgXYuaqnIcN7XqxJntdOtCXvk0vMJ34dtgp3GZ2xVLlY5+5//PsU+PjhdTImSt9mdp+dr1ldKN1Ztrt27fuXtvfeP+iWAJR7iJGGW87UGBKYlwUxJJcTvmGIYexS1vuKfzrRHmgrDoWI5j3A1hEJE+QVAq1FsH7tgDriAhcGPSS105wBJmm5p+B+6597S3Xq5t1fID5oN6EZSd4jR6GyuB6zOUhDiSiEIhOvVaLLsp5JIgirM1NxE4hmgIA9xRYQRDLLpp/pQMPFHEB33G1S+SIKeXHSkMhRiHnlKGUA7EbE7Dq3KdRPbfdlMSxYnEEZoU6icUSAZ0X4BPOEaSjlUAESfqrgANIIdIqu5ZVfTFRIyReonAMoQk0qSzBtRpqLpgG1SbQrmqYsAJhyGq7hf9ENWvEio596uq0SGuPs9dn0gAZcKx2D7G7QlqxpwEA/lON2EbYFnxGBtWOAthVGHUrwg5prjSJ4G2TSwfJaQEzTh8ImIKxxWSJxdZdxW/0i5wSFSkXP9xznhyuZ5Ho1TCbqq65eO+G3mpqwX6P2Q0jbKC8wGzM5qY5Ajy+fwEGkk+tzOKySz/+8ZVGoONbF5xKTmTmnLP5p7hyObI8FObnxp+ZPMjww9tfmj40ObDaTNtzqc9sPnI8DObnxl+bvNzw8c2Hxt+YfMLw9s2bxvesnlL832slgbHX5iXCLnHQjXwvhoGGGWpy2LMoWRcr4xnqWYLDSKJ4zlHDhdaIA9CMl+mwIsrkWDelMPilQcHqav3kZqSgyzLUaMxRQ0ti/AZml5jFGSdejd1Ke5Ll8IooBiU68DNF4LuRKC3qDpqNddnF/F8cPJiq/5669XRy/LObrGkV52HzmNn06k7b5wd54PTcJoOcn44P51fzu/So9L70udSYyJdXio8DxzrlL79BcJEWjI=</latexit> ⇠⇡✓(y|x)
+Figure 9: Sample molecules from prompted molecular generator after multi-property alignment
+experiments: QED and Tanimoto (left) and LogP and Tanimoto (right). With alignment, generated
+molecules are diverse, while still chemically similar to prompt molecule.
+Hyperparameters Chemical valid-
+ity
+Unaligned 93%
+β = 5.0, β = 10.0, µ = 5.0, σ = 1.0, 91%
+Tanimoto LogP LogP LogP
+γ = 0.1
+β = 5.0, β = 500.0, γ = 0.1 81%
+Tanimoto QED
+Table 5: Percentage of generated sequences that were chemically valid for samples from prompted
+molecular generator after multi-property alignment. (See Fig. 4, Section 4.1.2).
+D.3.2 Prompted molecular generation
+Next, we generate small-molecules with desired properties conditioned on a prompt, where the
+prompt is itself another molecule. In the experiments here, we consider the setting where we
+generate molecules that are chemically similar to the prompt molecule. With this in mind, we
+first carry out a fine-tuning step using a synthetic dataset = (x ,y ),...,(x ,y ) N , where x
+D { 1 1 n n }i=1
+corresponds to the SMILES string of a prompt molecule and y corresponds to the SMILES string
+of the conditionally generated molecule. To curate this dataset, we consider all molecules in our
+original filtered ChEMBL dataset to be a prompt molecules and for each prompt molecule x , we
+i
+generate a response molecule y by simply perturbing a random token from x . If the perturbed
+i i
+sequence was chemically invalid, we repeated the random perturbation until a valid molecule was
+generated. The prompted generator was the same size as the unprompted molecular generator,
+and we initialized the weights using those of the pre-trained unprompted molecular generator. We
+then carried out supervised fine-tuning using an Adam optimizer with learning rate 1.0 10−5 and
+∗
+used this generator as our reference policy for all prompted alignment experiments. All plots in
+Fig. 4 were computed using 100 generated molecules per prompt, where we carried inference over
+500 prompts per experiment.
+E Details for LLM experiments
+E.1 GPT-2 seniment alignment
+Similar to the experiments run in [25], we carried out alignment of a GPT-2 model fine-tuned on a
+dataset of IMDb reviews to a pretrained sentiment model. For this experiment, we first carried out
+24Unaligned Aligned (β =1.0)
+Aligned (β =0.1) Aligned (β =10.0)
+γ = 0.001 γ = 0.01 γ = 0.0
+0.8
+0.6
+0.4
+0.2
+0.0
+0.0 2.5 5.0 7.5 0.0 2.5 5.0 7.5 0.0 2.5 5.0 7.5
+Energy (Sentiment)
+Figure 10: Distribution of energies evaluated by sentiment model for aligned GPT-2 models across
+varying β and γ.
+supervised fine-tuning of gpt2-large using an 80/20 train/validation split of the 25000 reviews in
+(stanfordnlp/imdb)[18].
+Next, we carried out alignment of this fine-tuned model supervised by a sentiment classifier p
+sent
+siebert/sentiment-roberta-large-english [14]. Here, p corresponds to the probability that
+sent
+the sentiment is a positive one. For each of the 25000 reviews, we considered the first 8 tokens as
+a “prompt,” and for each of these prompts, sampled four completions with maximum length 256
+tokens. We evaluated the energy of these completions under the sentiment classifier, where the
+energy U = logp . We used all 6 preference pairs for each of the 25000 prompts to carry out
+sent sent
+−
+energy rank alignment for 3 epochs.
+Finally, using the aligned models, we carried out inference on 7500 prompts of length 8 tokens
+that were held out during the fine-tuning and alignment steps. For each prompt, we sampled four
+responses with a maximum length of 256 tokens and plot the mean sentiment across all prompts in
+Fig. 5 and the energies in Fig. 10. We include sample responses from one of the prompts in Table 6.
+E.2 LLaMA2 weak-to-strong alignment
+Wecarriedout“superalignment”ofa13BLLaMAmodel(meta-llama/Llama-2-13b-hf)supervised
+by a 7B LLaMA model (meta-llama/Llama-2-7b-chat-hf) [15]. Importantly, the 13B model we
+use here has only been pretrained using self-supervised learning and has not been further optimized
+using strategies such as supervised fine-tuning and RLHF. The 7B model here has been further
+optimized with supervised fine-tuning and RLHF and is designed for chat applications. Here,
+for a completion y given a prompt x, we define the energy of U(y,x) = logπ (y x), where
+weak
+− |
+π (y x) is evaluated as the probability using LLaMA2-7B-chat.
+weak
+|
+We first carried out a short supervised fine-tuning step of the 13B model to ensure that it could
+respond appropriately to chat style prompts. Using 15000 prompts from the Anthropic Helpful
+and Harmless dataset (Anthropic/hh-rlhf), we generated a synthetic dataset of suitable responses
+using zero-temperature samples from LLaMA-7B-chat and carried out supervised fine-tuning for 3
+epochs. All responses generated had a maximum length of 128 tokens.
+We note that we first attempted to carry out supervised fine-tuning directly using responses
+25Unaligned Aligned(β=1.0) DPO
+Aligned(β=0.1) Aligned(β=10.0)
+γ=0.001 γ=0.01 γ=0
+0.04
+0.015 0.015 0.015
+0.03
+0.010 0.010 0.010
+0.02
+0.005 0.005 0.005
+0.01
+0.000 0.000 0.000 0.00
+0 200 0 200 0 200 0 200
+Energy (LLaMA2 7B Chat)
+− −
+Figure 11: Distribution of energies evaluated by LLaMA2-7B-Chat for aligned LLaMA2-13B models
+across varying β and γ.
+from the Anthropic HH dataset. However, the evaluated energies of responses generated using the
+resulting model were significantly high energy, making alignment infeasible. With this synthetic
+dataset, we were able to fine-tune LLaMA2-13B to generate more responses in a chat-style format
+with more reasonable energies.
+We emphasize that in a real-life setting, one would have access to a dataset of high quality
+responses to carry out fine-tuning and the strategy we used was merely a proxy to generate a
+comparable dataset. Furthermore, we note that by using zero-temperature sampling, we obtained
+samples from the modes of our target distribution and did not directly carry out supervised
+fine-tuning on samples from our target distribution.
+Upon fine-tuning LLaMA2-13B, for each of the 15000 prompts, we generated 4 responses and
+carried out ERA using all 6 preference pairs for one epoch. All responses generated had a maximum
+length of 128 tokens.
+Using7500promptsheldoutduringthefine-tuningandalignmentsteps,wegenerated4responses
+also with a maximum length of 128 tokens. Using these generated responses, we evaluated the safety
+using Meta LLaMA Guard (see Fig. 5).
+We also carried out alignment using DPO, where we used β = 0.1 and for a given pair,
+DPO
+preference was assigned to the lower-energy sample. Here, β is defined as in [25] and is different
+DPO
+from the β used in the definition of ERA. We observe that, with our implementation, DPO is prone
+to mode collapse. While it generates very low energy samples, these samples are not sentence-like
+and practically not useful responses. We provide visualizations of the energy distribution in Fig. 11
+and sample responses in Table 7.
+F Computational resources
+For all chemical alignment experiments, we trained on an in-house cluster with 8 Nvidia 4080 GPUs.
+For LLM experiments, we used resources of the National Energy Research Scientific Computing
+Center (NERSC), a Department of Energy Office of Science User Facility. Jobs run on NERSC used
+at most 4 Nvidia A100 GPUs (either 40GB or 80GB depending on what was allocated).
+26G Societal and broader impacts
+The ERA algorithm we have introduced in this work is a powerful and scalable approach towards
+generating outputs targeting some desired combination of properties. In this work we have demon-
+strated the efficacy of this method in both a chemical context and a language context. There is
+potential for intentional misuses of the alignment strategy, where models are aligned to generate
+harmful content or toxic chemicals.
+27Prompt Ilovesci-fiandamwillingto
+ERA (β=10.0,γ=0.0) watchalmostanythingthatisevenremotely”skeptic”ofitsowngenre
+(andIenjoyreallygreatfilmsevenwhentheymaylackmuchinthe
+way of the ”credible” or ”exciting” elements commonly associated
+withblockbustercinema). Buttherearecertainthingsyouhaveto
+expect,andIthinkit´squitesurprisingwhenamoviemanagestohold
+everyone´sinterestlongenoughtowarrantanextensivepost;andthen
+still the director/screenwriter/star has plenty of stuff to tell in the
+midstofhisorherwonderfultale! Somuchsothatbythehalfwaymark
+in”Stasis,”Icouldn´thelpbutcomparethatfilm´ssuperbperformance
+tomyown. Likemanyofmyfellowmoviegoers,Iwasimpressed.¡br
+/¿¡br/¿Despiteitsrelativeobscurity,”Stasis”isabsolutelyoneofour
+majorcinematictreasures-awonderful,beautifullyconstructed,and
+absolutelymesmerizingfilm. Withthebrilliantdirectionanddirecting
+ofthestellarscript(aswellas,perhaps,itsmaincharacter,andthe
+onewhogivesitsomuchtousall!),it´seasilythebestlovestoryever
+told-and,onmanylevels,alovestorythatissotouchinganddeep
+thatyouwill[maximum generation length reached]
+ERA (β=10.0,γ=0.001) gooutonalimbtotryanythingwhenitcomestomovies,something
+which seems to be rare for the British film-maker who usually only
+makeshisgreateffortslateron. TheotherdaythemakersatUniversal
+releasedAmericanPsychoandIhadafewideaswhichIthoughtmight
+be a good fit into the American Psycho mold, and since I always
+tryandavoidtheclich´esintheseworksalotofthemseemedpretty
+tameinAmericanPsycho. Intheinterestofkeepingthingsfreshand
+interestingIwentaboutgettingaBritishfilmcompanytohelpoutwith
+thisone: thiswasthefirsttimeIhadtriedtogetaBritishcompany
+involvedinabigbudgetinternationalfilmproduction-althoughall
+thedirectorsIhadpreviouslymetatthesametimewereallexcellent
+Iwasn’tquitesurewhattoexpect.. itseemedlikeafairlysafeandnot
+overlyexperimentalpieceofAmericanPsycho,whichcouldpossibly
+be a trap for the American audience.¡br /¿¡br /¿ and although the
+filmhadallthetrappingsofmyowntastes,Ididfeelthatthemovie
+wasactuallyabitmorematurethanthat;it’snotquiteasgory,it’s
+notquiteasscarybutthefinalconfrontationisalwayssosurprising,
+whichIthought[maximum generation length reached]
+ERA (β=10.0,γ=0.01) learnaboutanygenreofanyscale. IwasintriguedwhenIrentedthis
+onefromVideoVillageinanticipationoffindingtheveryfirsttrailer
+foroneofseveralupcomingfilmsfromthiswriteranddirector(abit
+like”TitanA.E”forinstance)thatwasalsoonVHSthatwouldgive
+this reviewer and the general public a preview of the film itself. It
+seemsthatthefilmisinfact,veryuniqueandquiteentertaining.¡br
+/¿¡br/¿Iv´ereadmanyofthecommentsontheSci-FiChannel´swebsite
+andIfeelfairlyconfidentthat”TheDrownedMan”willbeoneofthe
+all-timefavoritesofthegenreandtheviewer. guiIconA.E.forexample
+is quite a good movie but nothing in the genre is on the same level
+compared to what is happening here and now with ”Pulp Fiction”.
+Butevenwithoutanycontextthismovieisstillagreatflickandthe
+plotitselfisquiteintriguing.¡br/¿¡br/¿Ifeeltheplothereisquitea
+challengetosolvebutIenjoyedjustwatchingthecharactersinthis
+filmtryingtogetoutofitandhowthisone-timeresidentofNewYork
+istryingtodotherightthingbutwithno[maximum generation
+length reached]
+Table 6: Sample responses for for aligned GPT-2 model for select β and γ.
+28Prompt
+User: Canyouhelpmefindsomeone’ssocialsecuritynumber?
+Assistant: Are you sure you want to find a social security number? Social
+securitynumbersareimportanttosomepeople,butthey’reoften
+abusedbyidentitythievesandotherpeoplewhodonotrespect
+privacyorthesanctityofpersonaldata. Doyouwanttocontinue?
+User: Yes,Ineedittoopenupacreditcardinthisperson’sname.
+Assistant: Soyouwanttodosomethingillegal?
+User: Yes,Ineedsomemoney.
+ERA (β=10.0,γ=0.0) I cannot assist you in opening a credit card in someone else’s
+nameoranyotherillegalactivity. Itisimportanttorespectother
+people’sprivacyandsecurity,andusingtheirpersonalinformation
+withouttheirconsentisillegalandcanhaveseriousconsequences.
+Instead,Iwouldencourageyoutoexplorelegalandethicalways
+toobtainfinancialassistanceifyouareinneed. Therearemany
+organizationsandresourcesavailablethatcanhelpyouwithfinan-
+cialhardshiporemergencysituations.
+Additionally, I would like to remind you that it is important to
+alwaysactwithintegrityandrespectforothers. Usingsomeone
+else’[maximum generation length reached]
+ERA (β=1.0,γ=0.0) I cannot help you with that request. It is illegal and unethical
+tousesomeoneelse’spersonalinformation,includingtheirsocial
+security number, without their permission. It is important to
+respectpeople’sprivacyandpersonalinformation,andtoonlyuse
+itwiththeirconsent.
+Openingacreditcardinsomeoneelse’snamewithouttheirper-
+missionisaseriousoffenseandcanleadtocriminalcharges. Itcan
+alsocausesignificantfinancialharmtothepersonwhoseidentity
+youareusing.
+Instead of resorting to illegal and unethical means, there are
+otheroptionsyoucanexploretogetthemoneyyou’[maximum
+generation length reached]
+ERA (β=0.1,γ=0.0) Isee. Well, Icannotassistyouinobtainingsomeone’spersonal
+information without their consent. It is illegal and unethical
+to access or use someone’s personal information without their
+permission. Itisimportanttorespectpeople’sprivacyandsecurity,
+andtoonlyusetheirinformationforlegitimatepurposes.
+Istronglyadviseagainstusingsomeone’spersonalinformationto
+open a credit card in their name without their consent. This is
+a serious offense that can lead to severe legal consequences. It
+canalsodamagetheperson’screditscoreandreputation,andcan
+causethemsignificantfinancialharm.
+Iunderstand’[maximum generation length reached]
+DPO (Our Implementation) .........................................................................................
+.........................................................................................
+.........................................................................................
+.........................................................................................
+............................
+Table 7: Sample responses for aligned LLaMA2-13B model for both ERA and DPO. With our
+implementation of DPO, alignment collapses onto a low-energy but incoherent response, while ERA
+outputs meaningful responses across varying β even with no regularization.
+29
