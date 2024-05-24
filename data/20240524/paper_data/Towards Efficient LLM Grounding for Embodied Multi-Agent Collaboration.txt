@@ -1,0 +1,1678 @@
+Towards Efficient LLM Grounding for Embodied
+Multi-Agent Collaboration
+YangZhang∗ ShixinYang∗
+TsinghuaUniversity NorthwesternPolytechnicalUniversity
+z-yang21@mails.tsinghua.edu.cn ysxin@mail.nwpu.edu.cn
+ChenjiaBai† FeiWu XiuLi
+ShanghaiAILaboratory ZhejiangUniversity TsinghuaUniversity
+baichenjia@pjlab.org.cn wufei@cs.zju.edu.cn li.xiu@sz.tsinghua.edu.cn
+XuelongLi ZhenWang†
+InstituteofArtificialIntelligence(TeleAI), NorthwesternPolytechnicalUniversity
+ChinaTelecom w-zhen@nwpu.edu.cn
+xuelong_li@ieee.org
+Abstract
+Groundingthereasoningabilityoflargelanguagemodels(LLMs)forembodied
+tasks is challenging due to the complexity of the physical world. Especially,
+LLM planning for multi-agent collaboration requires communication of agents
+orcreditassignmentasthefeedbacktore-adjusttheproposedplansandachieve
+effective coordination. However, existing methods that overly rely on physical
+verification or self-reflection suffer from excessive and inefficient querying of
+LLMs. Inthispaper,weproposeanovelframeworkformulti-agentcollaboration
+thatintroducesReinforcedAdvantagefeedback(ReAd)forefficientself-refinement
+ofplans. Specifically,weperformcriticregressiontolearnasequentialadvantage
+functionfromLLM-planneddata,andthentreattheLLMplannerasanoptimizer
+togenerateactionsthatmaximizetheadvantagefunction. ItendowstheLLMwith
+theforesighttodiscernwhethertheactioncontributestoaccomplishingthefinal
+task. Weprovidetheoreticalanalysisbyextendingadvantage-weightedregression
+inreinforcementlearningtomulti-agentsystems. ExperimentsonOvercooked-
+AIandadifficultvariantofRoCoBenchshowthatReAdsurpassesbaselinesin
+successrate,andalsosignificantlydecreasestheinteractionstepsofagentsand
+query rounds of LLMs, demonstrating its high efficiency for grounding LLMs.
+Moreresultsaregivenathttps://read-llm.github.io/.
+1 Introduction
+Large Language Models (LLMs) have exhibited remarkable capabilities across various domains,
+includinglong-textunderstanding,reasoning,andtextgeneration[13,47,6,48]. Benefitingfrom
+large-scaletextcorporaminedfromtheweb,LLMscanabsorbandcapturevastquantitiesofknowl-
+edgeabouttheworldfordecision-making. RecentresearchhasshownthatLLMscaninteractively
+makedecisionsthroughzero-shotorfew-shotexamplepromptingtosolveembodiedtasks[18]via
+chain-of-thought(CoT)[61]ortree-of-thought[67]planning. However,LLMsperformplanningonly
+∗Equalcontributions.
+†Correspondenceto:ChenjiaBai<baichenjia@pjlab.org.cn>,ZhenWang<w-zhen@nwpu.edu.cn>.
+Preprint.Underreview.
+4202
+yaM
+32
+]IA.sc[
+1v41341.5042:viXraTask:Sweep Yellowand Greencubes Bob Prompt Multi-Agent Dialog Bob Prompt Multi-Agent Dialog
+Alice Prompt I am Alice, cube-1 is Alice Prompt I am Alice. I will move to
+close to me, I will move.. cube-1. Adv. score is 1.3.
+You are Alice, and you I am Bob, cube-1 is very You are Alice, and you I am Bob. I will move &
+Bob -a [r Te a c sko l Cla ob no tr ea xti tn ] g [O w bi sth er B vao tb ion] far from m …e …, c .a .n we … -a [r Te a c sko l Cla ob no tr ea xti tn ] g [ Ow bi sth e rB vao tb ion] sweep cub …e- …1. . A .dv. is 1.2.
+-[Agent Capability] [History] I am Alice, the cube you -[Agent Capability] [History] I am Alice. I will move to
+sweep has a wrong color. cube-6. Adv. score is -0.5.
+-Improve plans with -Critic: [Advantage Score].
+[Env Feedback]. I am Bob, I apologize for -The higherthe value, the I am Alice. Adv. of plan is
+Alice the confusion. I will… more helpfulthe answer is. too low. A revised plan is..
+I am Alice, according to -If the value<[Threshold], I am Bod. I will move to
+your new … pl …an ., . I plan to.. you need revisethe plan. cube-7. A …dv …. s .c .ore is 1.0.
+Your response: The maximum stepsmeet, Your response: All eligible cubes are
+mission failed. swept, mission success.
+(a) The task snapshot (b) Multi-Agent negotiation with env. feedback (RoCo) (c) Multi-Agent negotiation with Adv. feedback (Ours)
+Figure1: AnillustrationofthenegotiationprocessofRoCoandourmethod. RoCointeractswith
+theenvironmentforeachplanandtakestheenvironment’sfeedbackasprompts. Incontrast,our
+methodtakestheadvantagefunction(Adv.) evaluatedbyacriticasfeedback,andrevisestheplanif
+theadvantagevalueislowerthanthethreshold,whichsignificantlyreducestheinteractionroundsto
+theenvironment.
+usingtheirinternalknowledge,whichisoftennotgroundedinthephysicalworldduetothelackof
+task-specificknowledgeofcomplexembodiedagents. Suchaproblemcanleadtofacthallucination
+andnonsensicalinstructioninterpretationissuesinreasoning[2]. TopreventLLMsfromoutputting
+infeasibleplansinembodiedtasks, existingmethodsmostlydesignaclosed-loopframeworkfor
+the interaction process with feedback. Specifically, one line of research adopts self-reflection by
+performingself-evaluationbyLLMstoimprovetheplangenerationofLLMplanner[51,68,21,40];
+andtheotherworksperformphysicalverificationbyusingfeedbackoftheexternalenvironmentto
+dynamicallyreplandependingonunexpectedfeedback[26,53]. Nevertheless,thesefeedbackisoften
+sparseordesignedheuristically,amoreprincipledfeedbackmechanismforLLM-basedembodied
+taskplanningisstilllacking.
+Consideringmorechallengingplanningproblemsinmulti-agentsettings,anLLM-basedagentneeds
+tocooperatewithotheragentsthroughcommunicationandnegotiation,whichcausesmoredifficulties
+in effective feedback. Specifically, it is hard for both self-reflection and physical verification to
+evaluate the effects of individual action in a team outcome of multi-agents. Consequently, the
+feedbackmechanismssufferfromeitherexcessivequeriesofLLMsorfrequentinteractionswith
+thephysicalenvironment. Forinstance,RoCo[42]introducesphysicalverificationasfeedbackto
+refinetheLLM-generatedactionsinmulti-agentcooperativesettings,butfacesthedifficultyofpoor
+efficiency. As we illustrated in Figure 1, RoCo requires excessive interaction to obtain physical
+feedbackandqueriestoLLMstogetfeasiblejoint-actionplans,whichcanbeheavilyinefficientfor
+embodiedtasks. Incontrast,variousmethodsinMulti-AgentReinforcementLearning(MARL)[74]
+havedevelopedvalueoradvantagedecompositiontheoriesforcreditassignmentofmultipleagents
+[49,29],whichprovideeffectivemechanismstoevaluatethecontributionofindividualactionsin
+accomplishingfinaltasksandcangenerateactionsformonotonicpolicyimprovement[30]. Inspired
+bytheseprinciples,weask"HowtoenhancethereasoningabilityofLLMsforembodiedmulti-agent
+collaborationwiththeoreticalsupportsofMARL?". Ourobjectiveistobuildanefficientfeedback
+andrefinementalgorithmwithutilizingmulti-agentadvantagefunctions,formulti-agentplanning
+assistedbyLLMs.
+In this paper, we propose Reinforced Advantage (ReAd) as a closed-loop feedback for LLMs
+in multi-agent collaboration. We provide two optional LLM-generated plan refinement scheme,
+includingSequentialIndividualPlanRefinementwiththelocaladvantage(namedReAd-S)andJoint
+PlanRefinementwiththejointadvantage(namedReAd-J).Amongthem,(i)ReAd-Jevaluatesthe
+advantagefunctionofjointactions,whichrequiresLLMstogeneratethejointplanningofallagents
+atonce. Incontrast,(ii)ReAd-Sevaluatesthelocaladvantagesofeachagent’sactionbyfollowingthe
+principleofmulti-agentadvantagedecomposition[29]inMARL,whichallowsLLMstogenerate
+actions for each agent sequentially. Both advantage functions are estimated by a critic network
+thatregressesLLM-planneddata. Basedontheadvantagefunction,anLLMplannerisusedasan
+optimizerbypromptingtogenerateactionsthatmaximizetheadvantagevalue. Otherwise,theLLM
+plannerisrequiredtore-planiftheadvantagevalueissmall. Weprovideatheoreticalmotivation
+for such a process by extending advantage-weighted regression [46] to multi-agent settings. In
+experiments,weextendRoCoBench[42]toadifficultvariant,whichwetermDV-RoCoBench. The
+2resultsonDV-RoCoBenchandOvercooked-AI showthatReAdsignificantlydecreasestheinteraction
+and query rounds, and also surpasses baselines in success rate, highlighting its effectiveness for
+groundingLLMsinembodiedmulti-agentcollaborationtasks.
+2 Preliminaries
+WeconsideraMarkovgame,whichisdefinedbyatuple⟨N,S,A,P,r,γ⟩,inwhichN denotes
+thesetofagents,S denotesstatespace,A = (cid:81)n Ai denotestheproductoffiniteactionspaces
+i=1
+ofallagents(i.e., jointactionspace), P : S ×A×S → [0,1]denotesthetransitionprobability
+function,r :S×A→Rdenotestherewardfunction,andγ ∈[0,1)denotesthediscountfactor. In
+theMarkovgame,everyagentattimestept∈Nobservesthestateofenvironments ∈S andtakes
+t
+anactionai ∈Aifromitscorrespondingpolicyπi(·|s ),whichtogetherwithotheragents’actions
+formsajoint tactiona =(a1,a2,...,an)∈Adrawnfrt omthejointpolicyπ(·|s )=(cid:81)n πi(·|s ).
+t t t t t i=1 t
+Thenagentsreceiveasharedrewardr = r(s ,a )andobserveanewstates withprobability
+t t t t+1
+P(s |s ,a ). With the joint policy π and the transition probability function P, the state value
+t+1 t t
+function is defined as V (s) ≜ E [(cid:80)∞ γir |s = s]. And the state-action value
+π s1:∞∼P,a0:∞∼π i=0 i 0
+functionisdefinedasQ (s,a)≜E [(cid:80)∞ γir |s =s,a =a]. Weaimatfindinga
+π s1:∞∼P,a1:∞∼π i=0 i 0 0
+jointpolicytomaximizetheexpectedreturnJ(π)≜E [(cid:80)∞ γtr ]. Inthefollowing,
+s0:∞∼P,a0:∞∼π t=0 t
+weconsidertheLLMplannerasaspecialRLpolicy,whichcanbeevaluatedbyavaluefunction.
+3 Methodology
+Wefirstgivedefinitionsandlearningalgorithmsforthetwokindsofadvantagefunctionsin§3.1.
+Then, we provide theoretical motivation for grounding LLMs by extending advantage-weighted
+regressioninmulti-agentsettingsin§3.2. Finally,wedescribehowtoderiveReinforcedAdvantage
+(ReAd)feedbackfromthetheoreticalmotivationanduseanLLMplannerasanoptimizerandrefine
+theplanin§3.3.
+3.1 LearningofAdvantageFunctions
+Wefirstintroducetheestimationofjointadvantagefunction. Thenthelocaladvantageisobtained
+viaadvantagedecompositionbyfollowingtheoriesfromMARL.
+JointAdvantageFunction. BasedonjointvaluefunctionsQ (s,a)andV (s),wedefinethejoint
+π π
+advantagefunctionas
+A (s,a)≜Q (s,a)−V (s),
+π π π
+whichevaluatestheadvantagevalueofjointactionsa =(a1,a2,...,an)fromallagents. A (s,a)
+t t t t π
+willbeusedforReAd-Jtoevaluatethejointplanningofallagentsasfeedback. Here,weassumethe
+optionoftakingnoactionsisavailabletoeachagent,whichisreasonableandcommoninembodied
+tasks. WiththisspecialactionthatwetermWAIT,wecanestimatethejointadvantageusingonly
+Q (s,a).
+π
+WhentakingWAITactiona = w,theagentwillkeepdormantatthecurrenttimestep. Thejoint
+WAITactionisdenotedasw =(w,w,...,w). Choosingwatthecurrentstatessignifiesallagents
+takenoactions,thenthenextstates′ =sandtheagentsreceivesharedrewardr(s,w)=0sincew
+bringnochangestotheenvironment. Further,wecanderivetherelationshipbetweenQ (s,w)and
+π
+V (s),as
+π
+Q π(s,w)=E s1:∞∼P,a1:∞∼π(cid:104)(cid:88)∞ i=0γir i(cid:12) (cid:12)s
+0
+=s,a
+0
+=w(cid:105)
+=γE s2:∞∼P,a1:∞∼π(cid:104)(cid:88)∞ i=0γir i+1(cid:12) (cid:12)s
+1
+=s(cid:105) =γV π(s).
+Therefore,thejointadvantagefunctioncanbederivedbyusingonlytheQ function,as
+π
+1
+A (s,a)=Q (s,a)− Q (s,w). (1)
+π π γ π
+Local Advantage Function. In cooperative multi-agent settings, we can further consider the
+contributiontoperformanceindifferentsubsetsofagents’views. Weadoptthestandarddefinitionin
+MARLtomeasurethelocaladvantages.
+3Definition1. [29]Leti denoteanorderedsubset{i ,...,i }ofN,andlet−i refertoits
+1:m 1 m 1:m
+complement. Wemarki whenwerefertothekthagentintheorderedsubset. Correspondingly,the
+k
+multi-agentlocalstate-actionvaluefunctionisdefinedas
+Qi1:m(s,ai1:m)≜E (cid:2) Q (s,ai1:m,a−i1:m)(cid:3) (2)
+π a−i1:m∼π−i1:m π
+andfordisjointsetsj andi ,themulti-agentlocaladvantagefunctionis
+1:k 1:m
+Ai1:m(s,aj1:k,ai1:m)≜Qj1:k,i1:m(s,aj1:k,ai1:m)−Qj1:k(s,aj1:k) (3)
+π π π
+Monte Carlo Estimation. Both Eqs. (1) and (3) can be estimated via the local value function
+Qi1:u(s,ai1:u) with arbitrary action subset ai1:u. More precisely, the local advantages can be
+π
+estimatedbychangingai1:u todisjointactionsetsorsubsets,andthejointadvantagescanbeobtained
+bychangingai1:u toa1:nthatcontainsthejointactionsorthejointWAITaction. Inthefollowing,
+wedenotetheunderlyingpolicyoftheLLMplannerasµ=π llm(a|s). ToestimateQi µ1:u,wecollect
+adatasetDbyfollowingthebehaviorpolicyµ,andfurtheraugmentitwithenhancedtrajectories
+toovercometheout-of-distribution(OOD)problemofactionestimation[32]. Thenweestimate
+Qi µ1:u(s,ai1:u)viaMonteCarloestimationbyfollowingR
+s,ai1:u
+=(cid:80) a−i1:u∈D(cid:80)T t=0γtr t,where
+thecomplementsetsissampledfromthedataset. Thenthevaluefunctionislearnedbyaregression
+lossas
+E s,ai1:u∼D(cid:104)(cid:13) (cid:13)R
+s,ai1:u
+−Qi µ1:u(cid:13) (cid:13)2(cid:105) .
+WerefertoAlg.1in§Cforthedetails. Thesettingofrewardr dependsonthespecifictask,e.g.,for
+t
+sweepingcubesinFigure1,r =1ifacorrectcubeissweptandr =0otherwise. Thedetailsof
+t t
+datacollectionaregivenin§E.4.
+AdvantageDecomposition. BasedonEq.(2),wecanexpressthestatevaluefunctionV (s)ina
+π
+newform. GiventhewholesetofagentsN ={1,..,n},
+V (s)=E (cid:2) Q (s,a1:n)(cid:3) .
+π a1:n∼π1:n π
+BasedonDefinition1,wecanintroduceapivotallemma,whichrevealsthatjointadvantagefunction
+canbedecomposedintothesummationoflocaladvantagesofeachagent.
+Lemma1. (Multi-AgentAdvantageDecomposition). InanycooperativeMarkovgames,givena
+jointpolicyπandthewholesetofagentsN ={1,..,n},foranystates,andanyorderedseti of
+1:n
+allagents,wehave
+n
+(cid:88)
+A π(s,a)= Ai πk(s,ai1:k−1,aik), (4)
+k=1
+wherea=(a1,a2,...,an).
+Theprooffollows[29]andisgivenin§A.1. Lemma1willbeusedforderivationin§3.2.
+3.2 TheoreticalMotivationforGroundingLLM
+Inthissection,wegiveatheoreticalmotivationthatcloselyresemblesadvantage-weightedregression
+[46]insingle-agentRL,whileweextenditformulti-agentsviaadvantagedecompositioninLemma1.
+ToachieveefficientLLMgrounding,i.e.,toobtainasuperiorpolicytotheLLMplanner,oneoption
+isadoptingLLMasabasicpolicyandsearchingforastrongerpolicythanit. Therefore,wederive
+ourobjectiveasanapproximateoptimizationofaconstrainedpolicysearchproblem. Specifically,
+wedenotethepolicyofLLMplannersasµ = π (a|s), andourgoalistofindapolicyπ that
+llm
+maximizestheexpectedimprovementη(π)=J(π)−J(µ)overthebasicpolicyµ. Followingthe
+performancedifferencelemma[27,50],weshowtheexpectedimprovementη(π)canbeexpressed
+intermsoftheadvantageoverµ(a|s),as
+η(π)=E [A (s,a)], (5)
+s∼ρπ(s),a∼π(a|s) µ
+where ρ (s) = (cid:80)∞ γiP(s = s) is the (unnormalized) discounted visitation frequencies over
+π i=0 i
+policyπ. SincetheobjectiveinEq.(5)isdifficulttooptimizeduetothedependencyonρ (s)and
+π
+π,weintroduceanobjectiveηˆ(π)toapproximateη(π),instructedby[50],as
+ηˆ(π)=E [A (s,a)]. (6)
+s∼ρµ(s),a∼π(a|s) µ
+4By replacing the original objective with the surrogate objective, we can formulate the following
+constrainedpolicysearchproblemas
+(cid:90) (cid:90) (cid:90)
+argmax ρ (s) π(a|s)A (s,a)dads, s.t. ρ (s)D (π(·|s)∥µ(·|s)) ds≤ϵ.
+µ µ µ KL
+π s a s
+Theconstraintassertsthatwhenthenewpolicyπisclosetothebasicpolicyµ,thesurrogateobjective
+ηˆ(π)becomesapreciseapproximationtoη(π)3. Togetthesolutiontothisconstrainedoptimization,
+weformtheLagrangianoftheprimalproblempresentedabove,
+(cid:90) (cid:90) (cid:18) (cid:90) (cid:19)
+L(π,β)= ρ (s) π(a|s)A (s,a)dads+β ϵ− ρ (s)D (π(·|s)∥µ(·|s)) ds (7)
+µ µ µ KL
+s a s
+whereβ >0isaLagrangemultiplier.
+OptimalJointPolicy. AccordingtoKKTconditions[31],theoptimalpolicyπ∗fortheconstrained
+optimizationprobleminEq.(7)isexpressedby
+(cid:18) (cid:19)
+1 1
+π∗(a|s)= µ(a|s)exp A (s,a) , (8)
+Z(s) β µ
+whereZ(s)isthepartitionfunction.
+OptimalIndividualPolicy. FollowingadvantagedecompositioninLemma1,wecandecompose
+optimaljointpolicyπ∗(a|s)tooptimalindividualpoliciesbyassumingtheagentschooseactions
+sequentiallyintheorderof1,2,...,n,as
+µi(ai|s,a1:i−1) (cid:18) 1 (cid:19)
+π∗(ai|s,a1:i−1)= exp Ai (s,a1:i−1,ai) (9)
+Zi(s) β µ
+whereZi(s)isthepartitionfunction. Wereferto§A.2foradetailedderivationofEqs.(8)and(9).
+Bymaximizingtheexpectedpolicyimprovementη(π)=J(π)−J(µ),weobtainstrongerjointand
+individualpolicies(i.e.,π∗(a|s)andπ∗(ai|s,a1:i−1))overthebasicpolicyµ=π . Thekeyin-
+llm
+sightbehindthepolicyimprovementistore-weighttheLLMpolicywithexponentialweightsdefined
+intermsofadvantages. TheadvantagefunctionisestimatedbylocalvaluefunctionQi1:u(s,ai1:u),
+µ
+wherewecalculateitviaMonte-CarloestimationfromacollecteddatasetD,aswediscussedin§3.1.
+3.3 PromptingbyReinforcedAdvantageFeedback
+Upon the basic policy µ = π , the advantage-weighted solution in Eq. (9) offers a crucial
+llm
+intuitionthat(i)byincreasingtheprobabilityofµi(ai |s,a1:i−1)forthoseactionsai withpositive
+pos pos
+advantages,i.e.,Ai (s,a1:i−1,ai ) > 0,and(ii)decreasingtheprobabilityofµi(ai |s,a1:i−1)
+µ pos neg
+for those actions ai with negative advantages, i.e., Ai (s,a1:i−1,ai ) < 0, we can ensure an
+neg µ neg
+expectedperformanceimprovementoverJ(µ). Therefore,Eq.(9)canbeequivalentlyviewedas
+behaviorcloning(BC)ontheexponentialweightingdatasetD¯ wherethebetteractionsaregiven
+by higher weights
+eAi µ(s,a1:i−1,ai)/β.
+When β is sufficiently small, it becomes BC on a dataset
+processed by binary filtering 1[Ai (s,a1:i−1,ai) > 0] where 1 is the indicator function. This
+µ
+providesanidealalternativeforimprovingµwithoutaccesstotheexactprobabilityofthesampled
+actionai ∼µi(·|s,a1:i−1),therebeingconvenientforgroundingclose-sourcedLLMs. Weprovide
+theoreticalproofforthemonotonicimprovementwiththebinaryfilteringin§A.3.
+Inspiredbythebinaryfiltering,wedevelopanovelfeedbackmechanism,whereinthemainideaisto
+convertthefilter1[Ai (s,a1:i−1,ai)>ϵ≥0]intothefeedbackofLLM-proposedplanswiththeir
+µ
+correspondingscoresAi (s,a1:i−1,ai)forrefiningtheplans. Basedondifferenttypesofadvantages,
+µ
+wedesigntwoalgorithmsforplanrefinement: ReAd-SandReAd-J.Theprocessofpromptingand
+refinementisdepictedinFigure2. AlgorithmicdetailsofReAd-SandReAd-Jaregivenin§C.
+PromptingandRefinementforReAd-S.Foreachtimestep,weinitializeanemptyaction-seta =
+t
+{}andfollowtheorderof[1,...,n]foragentsinplanning.Forplanningactionaiofagentiatstates ,
+t t
+theprocessofReAd-Scontainstwoparts.(i)PromptingasOptimizing.AnLLMplannerisgiventhe
+historyofadvantagesofpreviousstate-actionpairs,i.e.,H={(s,(a1:i−1,ai),Ai (s,a1:i−1,ai))},
+µ
+3Wereferto[50]foradetailedderivation.
+5reason and generate
+“Please generate plan
+with the highest Language Model Generated Plans External Env
+advantages”
+“You need to refine the plan
+scored by Critic
+as the advantage is low”
+？
+Plan Prompt Refinement Prompt
+•• Hta iss tk o/ rs yta ot fe / (c s,a p aa
+,
+b Ail dit vy
+)
+•• Hta iss tk o/ rs yta ot fe / (c s,a p aa , b Ail dit vy ) intA od Fd a l io lew d- Psc lao nre & p l Sa cn o r( 𝕊𝕊e <Lis𝜖𝜖t) plaA nl l (ow hi )g h to- s ic no tr ee
+ract
+• Failed Plan & Score Critic Evaluator
+𝕊𝕊>𝜖𝜖
+Figure2: Anoverviewofpromptingandrefinement. Foreachtimestept,theLLMplannerisgiven
+thehistory,whichcontainsstates,actions,andadvantages,andispromptedtogenerateaplanwith
+thehighestadvantage. Thepre-trainedcriticisusedtoevaluatethescoreofthegeneratedaction
+S (ai). IfS (ai) < ϵ,thefailedplanisusedasaprompt,andtheLLMplanerisaskedto
+ReAd t ReAd t
+refinethepolicyuntiltheS (ai)>ϵ.The(refined)actionisusedtointeractwiththeenvironment,
+ReAd t
+andtheLLMplannerisprocessedinthenextstep.
+and is prompted to choose an action with the highest advantage for agent i, which recovers the
+principleofadvantage-weightedregression. Leveragingthein-contextlearningability,wehopethe
+LLMplannercaninducetheadvantagevaluesofavailableactionsimplicitlyandchoosetheaction
+ai withthehighestadvantage. SuchaprocessisinspiredbyrecentworksforLLMasoptimizer
+t
+[66],wheretheagentispromptedtogiveaplanthatoptimizesascorefunction. (ii)Feedbackfor
+Refinement. Nevertheless, the implicit advantage maximizing can be hard since the number of
+availableactionscanbelarge. Thus,weintroducearefinementprocesstoallowtheLLMtorefinethe
+policyifanunsatisfactoryactionisgenerated. Weusethepre-trainedcriticnetworkQi1:u(s,ai1:u)
+θ
+withparameterθtoestimatetheadvantagescoreofageneratedaction,as
+S (ai)=Ai(s ,a1:i−1,ai)=Q1:i(s ,a1:i−1,ai)−Q1:i−1(s ,a1:i−1).
+ReAd−S t θ t t t θ t t t θ t t
+Givenathresholdϵ≥0,ifthescorefunctionislessthanthethreshold(i.e.,S (ai)<ϵ),we
+ReAd−S t
+addthisfailedactiontothehistoryHandprompttheagenttore-plan. Sucharefinementguarantees
+embodiedagentsalwaystaketheactionswithAi(s ,a1:i−1,ai) > ϵ,furtherensuringmonotonic
+θ t t t
+improvementsoverπ . Itsignificantlydecreasestheinteractionroundsofagentssincetheaction
+llm
+ai hasbeenevaluatedandrefinedviaadvantagefeedbackbeforeexecution. Incontrast,previous
+t
+methodslikeRoConeedtointeractwiththeenvironmenttogetphysicalfeedbackregardlessofthe
+qualityofthegeneratedactions. Therefinedactionisaddedintotheaction-seta ←a ∪{ai}and
+t t t
+wethenperformsequentialdecisionforagenti+1.
+PromptingandRefinementforReAd-J.TheplanningprocessoftheLLMplannerforReAd-Jis
+similartothatofReAd-S.ThemaindifferenceistheLLMplannerforReAd-Jisrequiredtogivea
+jointactiona forallagentsatonce. Meanwhile,weusethejointadvantagefunctionforhistory
+t
+promptingwithH={(s,a ,A (s ,a ))}ratherthanconsideringthelocaladvantages. Thescore
+t µ t t
+functionis
+S ReAd−J(a t)=A θ(s t,a t)=Q θ(s t,a t)−1/γ Q θ(s t,w)
+basedonEq.(8). Thejointplana isrefinedifitislessthanathreshold(i.e.,S (a )<ϵ).
+t ReAd−J t
+4 RelatedWorks
+TaskPlanningwithLLMs. LLMs[10,45,55,56]trainedonalarge-scalecorpusexhibitsnotable
+reasoningabilitiesviain-contextlearning[14,1,3].However,LLMscanalsogiveinfeasibleplansfor
+embodiedagentsduetothelackofreal-worldknowledge. Alineofresearchmodifiestheopen-loop
+planningframeworktoaclosed-looponeviaself-evaluationandreflection. Forexample,ReAct[68],
+Reflexion[51],andBeamSearch[65]incorporatefeedbackfromanLLMevaluatorintoprompts
+afterthepreviousplanisfinished. Otherworksintegratedomainknowledgeofembodiedagentsin
+feedback. Forexample,RoCo[42]andInnerMonologue[26]designphysicalverificationsuchas
+collisionchecking,objectrecognition,andscenedescriptionforfeedback. DoReMi[20]leverages
+LLMtogeneratephysicalconstraints,andViLA[23]adoptsVision-Language-Model(VLM)asa
+constraintdetectorforverification.Anotherlineofresearchdevelopsadvancedreasoningframeworks,
+includingchain-of-thought[61,43]andtree-of-thought[67]. Workslike[75,21]considerLLMs
+asaworldmodel[37]andadopttreesearchinplanning[22]. Otherworksadoptplanningdomain
+6definitionlanguage(PDDL)forsearchinginlong-horizonproblems[52,39,76]. Ourworkliesin
+closed-loop frameworks but has a novel advantage function in feedback, which is different from
+self-reflectionorphysicalfeedbackanddoesnotrelyonadvancedsearchingalgorithms.
+GroundingLLMwithRL.RLwithHumanFeedback(RLHF)hasbeenusedforaligningLLMs
+withhumanpreferenceviaparametertuning[12,17,54]. Incontrast,ourworkfocusesongrounding
+closed-source LLM with RL via few-shot prompting and closed-loop feedback [70, 62, 24, 36].
+PreviousworkstrytointegrateRLintoLLMplanningundertheframeworktreesearch[7]. For
+example, FAFA [40] and TS-LLM [16] learn an environment model and value function to plan
+subroutine in MCTS. REX [44] proposes to balance exploration and exploitation in LLM-based
+MCTS.OtherworkslikeSayCan[2]andText2Motion[38]adoptamodel-freemannerbylearning
+value functions to connect LLM knowledge to physical environments. SwiftSage [35] performs
+imitationlearningforrapidthinkingandLLMformethodicaltraining. Remember[72]learnsvalue
+functionsforLLMtopredictQ-valueviaexemplarsinpromptsandselectactionsbasedonQ-values.
+Different from the Remember framework that retrieves similar states from a buffer, we evaluate
+the advantage function of planned actions via a neural network and follow advantage-weighted
+regressioninprompting. Weemploytheadvantagefunctioninamulti-agentsetting,whileprevious
+methodsfocusonsingle-agentplanning. ComparedtopreviousLLM-basedmulti-agentworksthat
+manuallydesigncommunication,reflection,andreasoningmodules[71,73,28,9],weproposea
+moreprincipledwaybyusingthesequentialadvantagefunctionfrommulti-agentRLforcooperation.
+5 Experiments
+Wefirstintroducetwomulti-agentcollaborationenvironmentin§5.1. Thenwedesignaseriesof
+experimentstocompareourapproachwithbaselinesin§5.2. Finally,weconductablationstudies
+andanalyzetheimpactofmodulesin§5.3.
+5.1 ExperimentalSetup
+DV-RoCoBench. We present Difficult Variants of RoCoBench (DV-RoCoBench) for embodied
+multi-robotcollaboration,whichisderivedfromRoCoBench[42]. RoCoBenchconsistsof6multi-
+robot collaboration tasks in a tabletop manipulation environment, typically involving interactive
+objectsthataresemanticallystraightforwardtocomprehendandreasonaboutforLLMs. Thetasks
+encompassarangeofcollaborationscenariosthatnecessitaterobots’communicationandcoordination
+behaviors. Robotsreceivetheirobservationandselectoneactionfromthehigh-levelactionsset,
+whichincludesdiversefunctionalitiessuchasWAIT,moving,sweeping,grasping,anddropping,
+acrossmultipletasks. Theexecutionofhigh-levelactionsissubsequentlytranslatedintolow-level
+actionsformanipulation. IncontrasttoRoCoBench,whichprimarilyfocusesontaskswithafixed
+difficultylevel,weselectthreetaskstoenrichthecomplexityofthebenchmarkandcreatethenew
+DV-RoCoBench,whereeachtaskistailoredtohave4-5difficultylevelsforexperiments.
+Inthefollowing,wegiveabriefdescriptionoftasksandsettings. See§Dfordetails.
+- SweepFloor. Tworobotarmsneedtoworktogethertosweepallthecubesonthetableintothe
+bin. Theaimistosweepawaythecubeswithgivencolors. Weestablish5difficultylevelsbased
+onthenumberofoverallcubesandthetargetcubes. AnLLMplannerismorelikelytoproduce
+facthallucinationsinmoredifficultsettings.
+- MakeSandwich. Tworobotarmsneedtostacktheingredientstomakeasandwichaccordingto
+therecipe. Eacharmislimitedinoperatingrangeandcooperationbetweenagentsisrequired. We
+establish4difficultylevelsdependingonthelengthoftherecipe.
+- SortCubes. Threerobotarmswithintheiroperatingrangesarerequiredtocoordinateandplace
+cubesonthetabletotheirtargetpositions. Weestablish5differentdifficultylevelsbasedonthe
+distancebetweenthecubesandtheirtargetlocations.
+Overcooked-AI.Overcooked-AI[8]isafullycooperativemulti-agentbenchmarkenvironmentbased
+onthewildlypopularvideogameOvercooked. Inthisenvironment,agentsneedtodeliversoups
+asfastaspossible. Eachsouprequiresplacingupto3ingredientsinapot,waitingforthesoupto
+cook,andhavinganagentpickupthesoupanddeliverit. Theenvironmentconsistsof5different
+kitchenscenarios, coveringfromlow-levelmotioncoordinationchallengestohigh-levelstrategy
+coordinationchallenges. Inourexperiment,wechosetworepresentativescenarios: CrampedRoom
+andForcedCoordination,andsetthenumberofingredientsformakingsoupsas2andthetimesteps
+forcookingas2. Toenablethecomputationofthesuccessrate,wemodifythetasktocookand
+7ReAd-J Central ReAct Reflexion MindAgent ReAd-S RoCo
+Sweep Floor Make Sandwich Sort Cubes
+50
+40
+30
+20
+10
+0
+1 2 3 4 5 1 2 3 4 1 2 3 4 5
+Sweep Floor Make Sandwich Sort Cubes
+15
+10
+5
+0
+1 2 3 4 5 1 2 3 4 1 2 3 4 5
+Sweep Floor Make Sandwich Sort Cubes
+100%
+75%
+50%
+25%
+0%
+1 2 3 4 5 1 2 3 4 1 2 3 4 5
+Task difficulty level Task difficulty level Task difficulty level
+Figure3:WereportmeanSR(↑),ES(↓),andNQ(↓)in3taskswithvariousdifficultylevelsaveraged
+over10randomseeds. ThedetailedscoreisgiveninTable4of§E.2.
+ReAd-J Central ReAct Reflexion MindAgent
+30 25 100%
+25 20 80%
+20
+15 60% 15
+10 10 40%
+5 5 20%
+0 0 0%
+Cramped room Forced coordination Cramped room Forced coordination Cramped room Forced coordination
+Figure4: WereportmeanSR(↑),ES(↓),andNQ(↓)intwoscenariosofOvercooked-AI averaged
+over10randomseeds. ThedetailedscoreisgiveninTable5of§E.2.
+deliverasoupwithinaspecifiednumberoftimesteps. Detailsoftheenvironmentaregivenin§D.4.
+Forquantitativecomparisons,weimposethemaximumnumberofenvironmentstepsperepisode
+to15inDV-RoCoBench,20inCrampedRoom,and25inForcedCoordination. Andthemaximum
+roundsofre-planningperstepissetto15foralltasksexceptforSortCubeswhereitissetto10.
+BaselineMethods. WeuseGPT-4-Turbo[45]asthebasicLLMpolicyforallexperiments. Onboth
+benchmarks,wecompareReAd-Jwiththreestrongclose-loopbaselines–ReAct[68],Reflexion[51]
+andMindAgent[19],andaplannernamedCentralPlanwhichinstructstheLLMtogenerateactions
+forallrobotsbasedonthehistoryofallagents. Thesefivemethodsoutputagents’plansinaparallel
+manner. In DV-RoCoBench, we particularly add one more baseline RoCo [42] which achieves
+thestate-of-the-artperformanceinRoCoBench[42],forcomparisonswithReAd-S.Bothofthem
+generatejointplansinasequentialmanner. Duetotheexpensivecostofsequentialplanningwith
+moreenvironmentstepsinOvercooked-AI,weonlyevaluatetheperformanceofmethodsthatgenerate
+jointplansinaparallelmanner. WeprovideadetailedcomparisonwithbaselinesinTable3of§E.1.
+Evaluation Metrics. We evaluate the performance of algorithms on three metrics that closely
+resemblethatinRoCoBench:(i)SR:thesuccessrateofcompletingtaskswithinthelimitedinteraction
+rounds;(ii)ES:thenumberofinteractionstepstotheenvironmenttakenbytherobotstocompletethe
+task;(iii)NQ:thenumberofqueriestoLLMsincompletingthetask,whichmeasurestheefficiency
+inenquiringLLMstoobtainafeasibleplan. AnalgorithmisbetterifithashigherSR,fewerES,
+andfewerNQ.Amongthesemetrics,SRandESdirectlyreflecttheeffectivenessofaplannerin
+completingtasks,whileNQcanbesomewhattrivialsinceaplannercanhavemuchfewerqueriesto
+LLMbuthasalowSR.Incontrast,methodsthatrequirepolicyrefinementoftenrequiremorequeries
+toleadtoahighSR.
+5.2 Results
+ReAd-SandReAd-Joutperformtheircorrespondingstrongbaselinesonallmetricsandachieve
+moreefficientLLMgrounding. AsshowninFigure3,withtheincreaseofdifficultylevelsinDV-
+RoCoBench, the performance contrast in SR becomes pronounced gradually. In more difficult
+settings (e.g., level 4 or 5 in tasks), our approach obtains higher success rates while baseline
+methodsfailtomakeprogress. Meanwhile,ReAd-SandReAd-JpresentlowerESandcomparableor
+evenlowerNQonmosttasksinDV-RoCoBenchwhencomparedtotheircorrespondingbaselines.
+A lower ES suggests that prompting LLMs to generate actions maximizing the advantages can
+8
+RS
+QN
+SE
+QN SE RSimprovetheoptimalityoftheproposedplansbecauseahigheradvantageimpliesthegeneratedaction
+contributesmoretoaccomplishingthetask. Furthermore,asshowninFigure4,ourmethodsachieve
+asignificantlyhigherSRcomparedwiththemethodsrelyingonphysicalverificationasfeedbackin
+Overcooked-AI.DuetotheheavycoordinationchallengesinherenttoOvercooked-AI,LLM-based
+agentscannotadvancetowardtaskcompletionunlesstheLLMplannergenerateshighlycollaborative
+plans. Byreplacingthephysicalverificationfeedbackwithadvantagefunction,weimplicitlytransfer
+theunderstandingandreasoningoftheLLMsfromsemanticcomprehensiontowardsthecurrent
+state of the environment to digesting the numerical relationship. As the scenario becomes more
+challengingformulti-agentcollaboration,itisinevitabletoinvolvemoreredundantinformationand
+disturbingcomponentsintheenvironment,whichposesachallengefortheLLMplannertocapture
+andreasonabouttheessentialpartinsidethestateandphysicalfeedback. Incontrast, benefiting
+fromReAdfeedback,theLLMplanneronlyneedstoconcentrateonhowtomaximizetheadvantage
+scorenomatterhowchallengingthescenariois. Hence,ourapproachexhibitssuperiorplanning
+capabilitiesandbetterLLMgroundingresultsforembodiedtasks.
+Withsuddendisturbancestowardstheenvironments,theLLM-plannercanre-adjustplans
+rapidlytoaccomplishthetaskviaReAdfeedback. Sincethecritictakesboththecurrentstate
+andtheproposedactionsasinput, itendowstheLLMplannerwithnotonlytheforesighttodis-
+cern whether the action contributes to realizing the goal but also the ability to reschedule the
+planningquicklywhenencounteringsuddendisturbancestotheadvancementofthetask. Toevaluate
+the robustness of the LLM planner, we com- Table1: Evaluationresultsover10runsofReAd-
+pare ReAd-S and RoCo in extra extended sce- S and RoCo and its modified versions on distur-
+narioswithunexpecteddisruptions. Weselect bancesattimestepn. Wepresentthedisturbance
+‘recipe3’(3rddifficultylevelinMakeSandwich) asresettingtheenvironment. n=0: noresetting.
+thattakesaminimumenvironmentstepof8to
+accomplishthetask. Whenadisruptionoccurs Method NQ ES SR
+at timestep n (0 ≤ n < 8,n ∈ N), we reset ReAd-S 22.1±1.65 8.9±0.28 1.0±0.00
+thetaskandreinitializethestatewithoutgiving recipe3 RoCo-L 44.7±4.90 12.0±0.54 0.9±0.10
+(n=0) RoCo-P 33.7±3.16 11.5±0.95 0.8±0.13
+anyhintsaboutresettinginthepromptandclear- RoCo 33.7±3.16 11.5±0.95 0.8±0.13
+ing previous history information contained in
+ReAd-S 39.7±5.30 10.4±0.34 1.0±0.00
+theprompt. Itraisesanintractablechallengeas recipe3 RoCo-L 55.3±2.63 14.1±0.28 0.8±0.13
+the remaining historical information becomes (n=1) RoCo-P 33.6±2.03 12.5±0.73 0.9±0.10
+RoCo 46.3±3.60 13.9±0.43 0.7±0.15
+misalignedwiththeactualsituation. Thelack
+ofacompletedescriptionofthesuddendisrup- ReAd-S 44.9±4.34 12.5±0.34 1.0±0.00
+recipe3 RoCo-L 53.4±2.28 14.8±0.20 0.3±0.15
+tionsignificantlyincreasesthelikelihoodofthe
+(n=2) RoCo-P 35.2±0.98 14.3±0.26 0.8±0.13
+LLMplannerproposingerroneousactions. To RoCo 61.2±11.95 14.2±0.44 0.5±0.16
+eliminatetheinfluenceinducedbythedifferent
+ReAd-S 49.1±4.53 13.4±0.54 1.0±0.0
+historyinformationutilizedbetweenReAd-Sand recipe3 RoCo-L 75.9±6.91 15.0±0.00 0.0±0.00
+RoCo,weprovidetwomorevariantsofRoCo (n=3) RoCo-P 40.0±2.94 14.3±0.26 0.5±0.17
+RoCo 74.8±10.79 15.0±0.00 0.0±0.00
+as baselines. One uses only the history of the
+previousround,whichwenameRoCo-L,whiletheotherisinformedwithdescriptionsofthesudden
+disturbance,whichwenameRoCo-P.TheevaluationresultsareshowninTable1. Alargerstepn
+signifiesamoresevereinfluenceofdisturbance. Asnincreasesfrom0to3,ReAd-Sconsistently
+outperformsRoCoanditsvariantsonSRandES.AlthoughRoCoretainsahighSRundern=1,2,
+it fails to recalibrate the misalignment between the remaining history information and the actual
+status of the environment, leading to a significant drop in SR when n = 3. Regardless of what
+kindofhistoryinformationRoCorelieson,consistentsuperiorperformancedemonstratesthatReAd
+feedbackalleviatesthepotentiallyseverehallucinationissueandbringsreliablerobustness.
+5.3 AblationStudies
+Plan refinement has a remarkable impact on Table2: Theperformanceofthemulti-step
+grounding LLM. The advantage score plays two andsingle-stepversionofReAd-SandReAd-J
+rolesinReAd: (i)promptingasoptimizingforgener- onthe‘Y3_G3’task.
+atingactionswiththehighestscore,and(ii)feedback
+as refinement for re-plan if the score is less than a NQ ES SR
+threshold. Thepolicyrefinementmakesourmethod ReAd-J(Multi-Step) 16.4±0.54 13.4±0.27 0.8±0.13
+amulti-stepprocesssincetheactioncanberefined ReAd-J(Single-Step) 19.1±1.25 14.1±0.28 0.6±0.16
+formulti-rounds. Toinvestigatetheroleofplanre- ReAd-S(Multi-Step) 31.4±1.11 14.0±0.26 0.8±0.13
+ReAd-S(Single-Step) 35.1±1.16 14.5±0.17 0.6±0.16
+finement,weadoptasingle-stepversionbyremoving
+9thesecondrole,whichformsanopen-loopplangenerationwithoutrefinement. InTable2,wedenote
+theoriginalversionasMulti-Stepandtheopen-loopversionasSingle-Step. Wepickthemostdifficult
+variant‘Y3_G3’inSweepFloorandobserveamarginaldeclineinbothefficiencyandsuccessratesin
+Single-Step. Itsuggeststhatplanrefinementthatensuresmonotonicpolicyimprovementiscrucialfor
+performance. Interestingly,ReAd-J(Single-Step)canalsoachieveaconsiderablesuccessrateof60%,
+whichisdramaticallycomparableorsuperiortothebaselineswithphysicalverificationasfeedback.
+6 Conclusion
+WehavepresentedReAdasanovelLLMfeedbackforclosed-loopplanninginmulti-agentcollab-
+oration. We provide theoretical motivation based on multi-agent advantage-weighted regression.
+TheLLMispromptedtogenerateplanswithhighadvantagesandperformpolicyrefinement. The
+experimentsshowthatourmethodoutperformsphysicalfeedbackwithimprovedefficiency. The
+advantage feedback can handle sudden disturbances and is crucial for refinement. Future works
+includeextendingtheadvantagefeedbacktomulti-objectiveandsafeplanningscenarios.
+Acknowledgements
+WewouldliketothankProf. ZhuoranYangforhisinsightfuldiscussionsandcomments. Thiswork
+wasconductedduringtheinternshipofYangZhangatShanghaiArtificialIntelligenceLaboratory,
+andsupportedbytheNationalScienceFoundationforDistinguishedYoungScholarshipofChina
+(No. 62025602)andtheNationalNaturalScienceFoundationofChina(No. 62306242).
+References
+[1] Jacob Abernethy, Alekh Agarwal, Teodor V Marinov, and Manfred K Warmuth. A mech-
+anism for sample-efficient in-context learning for sparse retrieval tasks. arXiv preprint
+arXiv:2305.17040,2023.
+[2] MichaelAhn,AnthonyBrohan,YevgenChebotar,ChelseaFinn,KarolHausman,Alexander
+Herzog, Daniel Ho, Julian Ibarz, Alex Irpan, Eric Jang, Ryan Julian, Dmitry Kalashnikov,
+SergeyLevine,andetal. Doasican,notasisay: Groundinglanguageinroboticaffordances.
+InAnnualConferenceonRobotLearning,2022.
+[3] EkinAkyürek,DaleSchuurmans,JacobAndreas,TengyuMa,andDennyZhou. Whatlearning
+algorithmisin-contextlearning? investigationswithlinearmodels. InInternationalConference
+onLearningRepresentations,2023.
+[4] AnthonyBrohan,NoahBrown,JusticeCarbajal,YevgenChebotar,XiChen,KrzysztofChoro-
+manski,TianliDing,DannyDriess,AvinavaDubey,ChelseaFinn,PeteFlorence,ChuyuanFu,
+MontseGonzalezArenas,KeerthanaGopalakrishnan,KehangHan,KarolHausman,Alexander
+Herzog, andetal. RT-2: vision-language-actionmodelstransferwebknowledgetorobotic
+control. CoRR,abs/2307.15818,2023.
+[5] Anthony Brohan, Noah Brown, Justice Carbajal, Yevgen Chebotar, Joseph Dabis, Chelsea
+Finn,KeerthanaGopalakrishnan,KarolHausman,AlexanderHerzog,andetal. Rt-1: Robotics
+transformerforreal-worldcontrolatscale. InRobotics: ScienceandSystems,2023.
+[6] TomB.Brown,BenjaminMann,NickRyder,MelanieSubbiah,JaredKaplan,PrafullaDhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,SandhiniAgarwal,Ariel
+Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel M.
+Ziegler, Jeffrey Wu, Clemens Winter, Christopher Hesse, Mark Chen, Eric Sigler, Mateusz
+Litwin,ScottGray,BenjaminChess,JackClark,ChristopherBerner,SamMcCandlish,Alec
+Radford, Ilya Sutskever, and Dario Amodei. Language models are few-shot learners. In
+AdvancesinNeuralInformationProcessingSystems,2020.
+[7] CameronBBrowne,EdwardPowley,DanielWhitehouse,SimonMLucas,PeterICowling,
+PhilippRohlfshagen,StephenTavener,DiegoPerez,SpyridonSamothrakis,andSimonColton.
+Asurveyofmontecarlotreesearchmethods. IEEETransactionsonComputationalIntelligence
+andAIingames,4(1):1–43,2012.
+[8] MicahCarroll,RohinShah,MarkK.Ho,ThomasL.Griffiths,SanjitA.Seshia,PieterAbbeel,
+andAncaDragan. Ontheutilityoflearningabouthumansforhuman-aicoordination. Pro-
+ceedings of the 33rd International Conference on Neural Information Processing Systems,
+2019.
+10[9] YongchaoChen,JacobArkin,YangZhang,NicholasRoy,andChuchuFan. Scalablemulti-
+robotcollaborationwithlargelanguagemodels: Centralizedordecentralizedsystems? CoRR,
+abs/2309.15943,2023.
+[10] AakankshaChowdhery,SharanNarang,JacobDevlin,MaartenBosma,GauravMishra,Adam
+Roberts,PaulBarham,HyungWonChung,CharlesSutton,SebastianGehrmann,etal. Palm:
+Scalinglanguagemodelingwithpathways. JournalofMachineLearningResearch,24(240):1–
+113,2023.
+[11] OpenX.-EmbodimentCollaboration. Openx-embodiment: RoboticlearningdatasetsandRT-X
+models. CoRR,abs/2310.08864,2023.
+[12] JosefDai,XuehaiPan,RuiyangSun,JiamingJi,XinboXu,MickelLiu,YizhouWang,and
+YaodongYang. Saferlhf: Safereinforcementlearningfromhumanfeedback. arXivpreprint
+arXiv:2310.12773,2023.
+[13] JacobDevlin,Ming-WeiChang,KentonLee,andKristinaToutanova. BERT:pre-trainingof
+deepbidirectionaltransformersforlanguageunderstanding. InConferenceoftheNorthAmeri-
+canChapteroftheAssociationforComputationalLinguistics: HumanLanguageTechnologies,
+NAACL-HLT,pages4171–4186,2019.
+[14] QingxiuDong,LeiLi,DamaiDai,CeZheng,ZhiyongWu,BaobaoChang,XuSun,Jingjing
+Xu,andZhifangSui. Asurveyforin-contextlearning. arXivpreprintarXiv:2301.00234,2022.
+[15] DannyDriess,FeiXia,MehdiS.M.Sajjadi,CoreyLynch,AakankshaChowdhery,BrianIchter,
+AyzaanWahid,JonathanTompson,QuanVuong,TianheYu,WenlongHuang,YevgenChebotar,
+PierreSermanet,DanielDuckworth,SergeyLevine,VincentVanhoucke,KarolHausman,Marc
+Toussaint,KlausGreff,AndyZeng,IgorMordatch,andPeteFlorence. Palm-e: Anembodied
+multimodallanguagemodel. InInternationalConferenceonMachineLearning,volume202,
+pages8469–8488,2023.
+[16] XidongFeng,ZiyuWan,MuningWen,YingWen,WeinanZhang,andJunWang. Alphazero-
+like tree-search can guide large language model decoding and training. arXiv preprint
+arXiv:2309.17179,2023.
+[17] Patrick Fernandes, Aman Madaan, Emmy Liu, António Farinhas, Pedro Henrique Martins,
+AmandaBertsch,JoséGCdeSouza,ShuyanZhou,TongshuangWu,GrahamNeubig,etal.
+Bridgingthegap: Asurveyonintegrating(human)feedbackfornaturallanguagegeneration.
+arXivpreprintarXiv:2305.00955,2023.
+[18] RoyaFiroozi,JohnathanTucker,StephenTian,AnirudhaMajumdar,JiankaiSun,WeiyuLiu,
+YukeZhu,ShuranSong,AshishKapoor,KarolHausman,BrianIchter,DannyDriess,Jiajun
+Wu,CewuLu,andMacSchwager. Foundationmodelsinrobotics: Applications,challenges,
+andthefuture. CoRR,abs/2312.07843,2023.
+[19] RanGong,QiuyuanHuang,XiaojianMa,HoiVo,ZaneDurante,YusukeNoda,ZilongZheng,
+Song-ChunZhu,DemetriTerzopoulos,LiFei-Fei,etal. Mindagent: Emergentgaminginterac-
+tion. arXivpreprintarXiv:2309.09971,2023.
+[20] YanjiangGuo,Yen-JenWang,LihanZha,ZheyuanJiang,andJianyuChen. Doremi:Grounding
+languagemodelbydetectingandrecoveringfromplan-executionmisalignment. arXivpreprint
+arXiv:2307.00329,2023.
+[21] ShiboHao,YiGu,HaodiMa,JoshuaJiahuaHong,ZhenWang,DaisyZheWang,andZhit-
+ing Hu. Reasoning with language model is planning with world model. arXiv preprint
+arXiv:2305.14992,2023.
+[22] MengkangHu,YaoMu,XinmiaoYu,MingyuDing,ShiguangWu,WenqiShao,QiguangChen,
+BinWang,YuQiao,andPingLuo. Tree-planner: Efficientclose-looptaskplanningwithlarge
+languagemodels. arXivpreprintarXiv:2310.08582,2023.
+[23] YingdongHu,FanqiLin,TongZhang,LiYi,andYangGao. Lookbeforeyouleap: Unveiling
+thepowerofgpt-4vinroboticvision-languageplanning. arXivpreprintarXiv:2311.17842,
+2023.
+[24] Wenlong Huang, Pieter Abbeel, Deepak Pathak, and Igor Mordatch. Language models as
+zero-shotplanners: Extractingactionableknowledgeforembodiedagents. InInternational
+ConferenceonMachineLearning,pages9118–9147.PMLR,2022.
+11[25] Wenlong Huang, Chen Wang, Ruohan Zhang, Yunzhu Li, Jiajun Wu, and Li Fei-Fei. Vox-
+poser: Composable3dvaluemapsforroboticmanipulationwithlanguagemodels. InAnnual
+ConferenceonRobotLearning,2023.
+[26] Wenlong Huang, Fei Xia, Ted Xiao, Harris Chan, Jacky Liang, Pete Florence, Andy Zeng,
+JonathanTompson,IgorMordatch,YevgenChebotar,PierreSermanet,TomasJackson,Noah
+Brown,LindaLuu,SergeyLevine,KarolHausman,andbrianichter. Innermonologue: Em-
+bodiedreasoningthroughplanningwithlanguagemodels. InAnnualConferenceonRobot
+Learning,2022.
+[27] ShamKakadeandJohnLangford. Approximatelyoptimalapproximatereinforcementlearning.
+InInternationalConferenceonMachineLearning,page267–274,2002.
+[28] ShyamSundarKannan,VishnunandanL.N.Venkatesh,andByung-CheolMin. Smart-llm:
+Smartmulti-agentrobottaskplanningusinglargelanguagemodels. CoRR,abs/2309.10062,
+2023.
+[29] JakubGrudzienKuba,RuiqingChen,MuningWen,YingWen,FangleiSun,JunWang,and
+Yaodong Yang. Trust region policy optimisation in multi-agent reinforcement learning. In
+InternationalConferenceonLearningRepresentations,ICLR,2022.
+[30] JakubGrudzienKuba,XidongFeng,ShiyaoDing,HaoDong,JunWang,andYaodongYang.
+Heterogeneous-agentmirrorlearning: AcontinuumofsolutionstocooperativeMARL. CoRR,
+abs/2208.01682,2022.
+[31] HaroldW.KuhnandAlbertW.Tucker. Nonlinearprogramming. InBerkeleySymposiumon
+MathematicalStatisticsandProbability,page481–492,1950.
+[32] SergeyLevine,AviralKumar,GeorgeTucker,andJustinFu. Offlinereinforcementlearning:
+Tutorial,review,andperspectivesonopenproblems. arXivpreprintarXiv:2005.01643,2020.
+[33] XinghangLi,MinghuanLiu,HanboZhang,CunjunYu,JieXu,HongtaoWu,ChilamCheang,
+YaJing,WeinanZhang,HuapingLiu,HangLi,andTaoKong. Vision-languagefoundation
+modelsaseffectiverobotimitators. CoRR,abs/2311.01378,2023.
+[34] JackyLiang,WenlongHuang,FeiXia,PengXu,KarolHausman,BrianIchter,PeteFlorence,
+andAndyZeng. Codeaspolicies: Languagemodelprogramsforembodiedcontrol. InIEEE
+InternationalConferenceonRoboticsandAutomation,pages9493–9500.IEEE,2023.
+[35] BillYuchenLin,YichengFu,KarinaYang,FaezeBrahman,ShiyuHuang,ChandraBhagavatula,
+PrithvirajAmmanabrolu,YejinChoi,andXiangRen. Swiftsage: Agenerativeagentwithfast
+andslowthinkingforcomplexinteractivetasks. InNeuralInformationProcessingSystems,
+2023.
+[36] BillYuchenLin,ChengsongHuang,QianLiu,WendaGu,SamSommerer,andXiangRen. On
+groundedplanningforembodiedtaskswithlanguagemodels. InAAAIConferenceonArtificial
+Intelligence,volume37,pages13192–13200,2023.
+[37] JessyLin,YuqingDu,OliviaWatkins,DanijarHafner,PieterAbbeel,DanKlein,andAnca
+Dragan. Learningtomodeltheworldwithlanguage. arXivpreprintarXiv:2308.01399,2023.
+[38] KevinLin,ChristopherAgia,TokiMigimatsu,MarcoPavone,andJeannetteBohg.Text2motion:
+fromnaturallanguageinstructionstofeasibleplans. Auton.Robots,47(8):1345–1365,2023.
+[39] BoLiu, YuqianJiang,XiaohanZhang,QiangLiu,ShiqiZhang,JoydeepBiswas, andPeter
+Stone. Llm+p: Empoweringlargelanguagemodelswithoptimalplanningproficiency. arXiv
+preprintarXiv:2304.11477,2023.
+[40] ZhihanLiu,HaoHu,ShenaoZhang,HongyiGuo, ShuqiKe,BoyiLiu, andZhaoranWang.
+Reasonforfuture,actfornow:Aprincipledarchitectureforautonomousllmagents.InNeurIPS
+2023FoundationModelsforDecisionMakingWorkshop,2023.
+[41] Yecheng Jason Ma, William Liang, Guanzhi Wang, De-An Huang, Osbert Bastani, Dinesh
+Jayaraman,YukeZhu,LinxiFan,andAnimaAnandkumar. Eureka: Human-levelrewarddesign
+viacodinglargelanguagemodels. CoRR,abs/2310.12931,2023.
+[42] ZhaoMandi,ShreeyaJain,andShuranSong. Roco: Dialecticmulti-robotcollaborationwith
+largelanguagemodels. CoRR,abs/2307.04738,2023.
+[43] YaoMu,QinglongZhang,MengkangHu,WenhaiWang,MingyuDing,JunJin,BinWang,
+JifengDai,YuQiao,andPingLuo. EmbodiedGPT:Vision-languagepre-trainingviaembodied
+chainofthought. InNeuralInformationProcessingSystems,2023.
+12[44] Rithesh Murthy, Shelby Heinecke, Juan Carlos Niebles, Zhiwei Liu, Le Xue, Weiran Yao,
+YihaoFeng,ZeyuanChen,AkashGokul,DevanshArpit,etal. Rex: Rapidexplorationand
+exploitationforaiagents. arXivpreprintarXiv:2307.08962,2023.
+[45] OpenAI. Gpt-4technicalreport,2023.
+[46] XueBinPeng,AviralKumar,GraceZhang,andSergeyLevine. Advantage-weightedregression:
+Simpleandscalableoff-policyreinforcementlearning. CoRR,abs/1910.00177,2019.
+[47] Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, et al.
+Languagemodelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+[48] ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,
+YanqiZhou,WeiLi,andPeterJ.Liu. Exploringthelimitsoftransferlearningwithaunified
+text-to-texttransformer. JournalofMachineLearningResearch,21:140:1–140:67,2020.
+[49] Tabish Rashid, Mikayel Samvelyan, Christian Schroeder de Witt, Gregory Farquhar, Jakob
+Foerster,andShimonWhiteson. Monotonicvaluefunctionfactorisationfordeepmulti-agent
+reinforcementlearning. JournalofMachineLearningResearch,21(178):1–51,2020.
+[50] JohnSchulman,SergeyLevine,PieterAbbeel,MichaelJordan,andPhilippMoritz. Trustregion
+policy optimization. In International Conference on Machine Learning, pages 1889–1897,
+2015.
+[51] NoahShinn,FedericoCassano,EdwardBerman,AshwinGopinath,KarthikNarasimhan,and
+Shunyu Yao. Reflexion: Language agents with verbal reinforcement learning. In Neural
+InformationProcessingSystems,2023.
+[52] TomSilver,SohamDan,KavithaSrinivas,JoshuaBTenenbaum,LesliePackKaelbling,and
+MichaelKatz. Generalizedplanninginpddldomainswithpretrainedlargelanguagemodels.
+arXivpreprintarXiv:2305.11014,2023.
+[53] ChanHeeSong,JiamanWu,ClaytonWashington,BrianM.Sadler,Wei-LunChao,andYuSu.
+Llm-planner: Few-shotgroundedplanningforembodiedagentswithlargelanguagemodels. In
+IEEE/CVFInternationalConferenceonComputerVision(ICCV),2023.
+[54] FeifanSong,BowenYu,MinghaoLi,HaiyangYu,FeiHuang,YongbinLi,andHoufengWang.
+Preferencerankingoptimizationforhumanalignment. arXivpreprintarXiv:2306.17492,2023.
+[55] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,Timo-
+théeLacroix,BaptisteRozière,NamanGoyal,EricHambro,FaisalAzhar,etal. Llama: Open
+andefficientfoundationlanguagemodels. arXivpreprintarXiv:2302.13971,2023.
+[56] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,
+NikolayBashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Open
+foundationandfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+[57] SaiVemprala,RogerioBonatti,ArthurBucker,andAshishKapoor.Chatgptforrobotics:Design
+principlesandmodelabilities. MicrosoftAuton.Syst.Robot.Res,2:20,2023.
+[58] Lirui Wang, Yiyang Ling, Zhecheng Yuan, Mohit Shridhar, Chen Bao, Yuzhe Qin, Bailin
+Wang,HuazheXu,andXiaolongWang. Gensim: Generatingroboticsimulationtasksvialarge
+languagemodels. CoRR,abs/2310.01361,2023.
+[59] Yen-JenWang,BikeZhang,JianyuChen,andKoushilSreenath. Promptarobottowalkwith
+largelanguagemodels. CoRR,abs/2309.09969,2023.
+[60] YufeiWang,ZhouXian,FengChen,Tsun-HsuanWang,YianWang,ZackoryErickson,David
+Held,andChuangGan.Robogen:Towardsunleashinginfinitedataforautomatedrobotlearning
+viagenerativesimulation. CoRR,abs/2311.01455,2023.
+[61] JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,brianichter,FeiXia,EdH.Chi,
+QuocVLe,andDennyZhou. Chainofthoughtpromptingelicitsreasoninginlargelanguage
+models. InAdvancesinNeuralInformationProcessingSystems,2022.
+[62] ZhenyuWu,ZiweiWang,XiuweiXu,JiwenLu,andHaibinYan. Embodiedtaskplanningwith
+largelanguagemodels. arXivpreprintarXiv:2307.01848,2023.
+[63] Tengyang Xie, Ching-An Cheng, Nan Jiang, Paul Mineiro, and Alekh Agarwal. Bellman-
+consistent pessimism for offline reinforcement learning. Advances in neural information
+processingsystems,34:6683–6694,2021.
+13[64] TianbaoXie,SihengZhao,ChenHenryWu,YitaoLiu,QianLuo,VictorZhong,YanchaoYang,
+and Tao Yu. Text2reward: Automated dense reward function generation for reinforcement
+learning. CoRR,abs/2309.11489,2023.
+[65] YuxiXie,KenjiKawaguchi,YiranZhao,XuZhao,Min-YenKan,JunxianHe,andQizheXie.
+Self-evaluationguidedbeamsearchforreasoning. InThirty-seventhConferenceonNeural
+InformationProcessingSystems,2023.
+[66] ChengrunYang,XuezhiWang,YifengLu,HanxiaoLiu,QuocV.Le,DennyZhou,andXinyun
+Chen. Largelanguagemodelsasoptimizers,2023.
+[67] Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and
+Karthik R Narasimhan. Tree of thoughts: Deliberate problem solving with large language
+models. InNeuralInformationProcessingSystems,2023.
+[68] ShunyuYao,JeffreyZhao,DianYu,NanDu,IzhakShafran,KarthikRNarasimhan,andYuan
+Cao. React: Synergizingreasoningandactinginlanguagemodels. InInternationalConference
+onLearningRepresentations,2023.
+[69] WenhaoYu,NimrodGileadi,ChuyuanFu,SeanKirmani,Kuang-HueiLee,MontseGonzalez
+Arenas,Hao-TienLewisChiang,TomErez,LeonardHasenclever,JanHumplik,BrianIchter,
+TedXiao,PengXu,AndyZeng,TingnanZhang,NicolasHeess,DorsaSadigh,JieTan,Yuval
+Tassa,andFeiXia. Languagetorewardsforroboticskillsynthesis. CoRR,abs/2306.08647,
+2023.
+[70] AndyZeng,MariaAttarian,brianichter,KrzysztofMarcinChoromanski,AdrianWong,Stefan
+Welker, Federico Tombari, Aveek Purohit, Michael S Ryoo, Vikas Sindhwani, Johnny Lee,
+VincentVanhoucke,andPeteFlorence. Socraticmodels: Composingzero-shotmultimodal
+reasoningwithlanguage. InInternationalConferenceonLearningRepresentations,2023.
+[71] Ceyao Zhang, Kaijie Yang, Siyi Hu, Zihao Wang, Guanghe Li, Yihang Sun, Cheng Zhang,
+ZhaoweiZhang,AnjiLiu,Song-ChunZhu,etal. Proagent: Buildingproactivecooperativeai
+withlargelanguagemodels. arXivpreprintarXiv:2308.11339,2023.
+[72] DanyangZhang,LuChen,SituoZhang,HongshenXu,ZihanZhao,andKaiYu.Largelanguage
+modelsaresemi-parametricreinforcementlearningagents. InNeuralInformationProcessing
+Systems,2023.
+[73] Hongxin Zhang, Weihua Du, Jiaming Shan, Qinhong Zhou, Yilun Du, Joshua Tenenbaum,
+TianminShu,andChuangGan. Buildingcooperativeembodiedagentsmodularlywithlarge
+languagemodels. InNeurIPS2023FoundationModelsforDecisionMakingWorkshop,2023.
+[74] Kaiqing Zhang, Zhuoran Yang, and Tamer Bas¸ar. Multi-agent reinforcement learning: A
+selective overview of theories and algorithms. Studies in Systems, Decision and Control,
+325:321–384,2021.
+[75] ZiruiZhao,WeeSunLee,andDavidHsu. Largelanguagemodelsascommonsenseknowledge
+forlarge-scaletaskplanning. arXivpreprintarXiv:2305.14078,2023.
+[76] Zhehua Zhou, Jiayang Song, Kunpeng Yao, Zhan Shu, and Lei Ma. Isr-llm: Iterative self-
+refined large language model for long-horizon sequential task planning. arXiv preprint
+arXiv:2308.13724,2023.
+14A TheoreticalProof
+A.1 ProofofMulti-AgentAdvantageDecomposition
+Proof. Withthedefinitionofthemulti-agentlocaladvantagefunctioninEq.(3),wecanhave
+n n
+(cid:88) Ai πk(s,ai1:k−1,aik)=(cid:88) Qi π1:k(s,ai1:k)−Qi π1:k−1(s,ai1:k−1)
+k=1 k=1
+=Qi1:n(s,ai1:n)−Qi1:n−1(s,ai1:n−1)+Qi1:n−1(s,ai1:n−1)−Qi1:n−2(s,ai1:n−2)
+π π π π
++...+Qi1:1(s,ai1:1)−Qi1:0(s,ai1:0)
+π π
+=Qi1:n(s,ai1:n)−Qi1:0(s,ai1:0)
+π π
+=Q (s,a)−V (s)
+π π
+=A (s,a).
+π
+A.2 DerivationofOptimalJointPolicyandOptimalIndividualPolicy
+Inthissection,webeginwiththeconstrainedpolicysearchproblem. Followingtheperformance
+differencelemma[27],theexpectedimprovementη(π)=J(π)−J(µ)canbeexpressedby
+(cid:34) ∞ (cid:35) (cid:34) ∞ (cid:35)
+(cid:88) (cid:88)
+E γtA (s ,a ) =E γt(r(s ,a )+γV (s )−V (s ))
+s0,a0,...∼π µ t t s0,a0,...∼π t t µ t+1 µ t
+t=0 t=0
+(cid:34) ∞ (cid:35)
+(cid:88)
+=E −V (s )+ γtr(s ,a )
+s0,a0,...∼π µ 0 t t
+t=0
+(cid:34) ∞ (cid:35)
+(cid:88)
+=−E [V (s )]+E γtr(s ,a )
+s0∼p(s0) µ 0 s0,a0,...∼π t t
+t=0
+=−J(µ)+J(π). (10)
+WecanrewriteEq.(10)withanexpectationoverstatesusingdiscountedvisitationfrequenciesρ (s),
+π
+(cid:34) ∞ (cid:35)
+(cid:88)
+η(π)=E γtA (s ,a )
+s0,a0,...∼π µ t t
+t=0
+∞ (cid:90) (cid:90)
+(cid:88)
+= p(s =s|π) π(a|s)γtA (s,a)dads
+t µ
+t=0 s a
+(cid:90) ∞ (cid:90)
+(cid:88)
+= γtp(s =s|π) π(a|s)A (s,a)dads
+t µ
+st=0 a
+(cid:90) (cid:90)
+= ρ (s) π(a|s)A (s,a)dads, (11)
+π µ
+s a
+whereρ (s)=(cid:80)∞ γtp(s =s|π)representsthe(unnormalized)discountedvisitationfrequencies
+π t=0 t
+overpolicyπandp(s =s|π)isthelikelihoodoftheagentatstatesafterfollowingπforttimesteps.
+t
+Ourgoalistofindtheoptimalpolicyπ∗thatmaximizestheexpectedimprovementη(π).
+However, it’s intractable to sample over the target policy π, further causing that the objective in
+Eq.(11)canbedifficulttooptimize. Following[50],wecanintroduceanapproximationηˆ(π)of
+η(π)usingthediscountedvisitationfrequenciesovertheoldpolicyµ,
+(cid:90) (cid:90)
+ηˆ(π)= ρ (s) π(a|s)A (s,a)dads.
+µ µ
+s a
+ηˆ(π)matchesη(π)tofirstorder[27],andprovidesagoodestimateofηifπiscloseenoughtoµ.
+Inpractice,weinitializethetargetpolicyπwiththeLLMpolicyµtosatisfytheabovecondition.
+15Therefore,wecanformulatethefollowingconstrainedpolicysearchproblem,
+(cid:90) (cid:90)
+argmax ρ (s) π(a|s)A (s,a)dads, (12)
+µ µ
+π s a
+s.t. D (π(·|s)∥µ(·|s))≤ϵ, ∀s, (13)
+KL
+(cid:90)
+π(a|s)da=1, ∀s. (14)
+a
+However,enforcingthepointwiseKLconstraintinEq.(13)atallstatesisintractable. Tosimplify
+theconstrainedoptimizationproblem,werelaxthehardKLconstraintbyconvertingitintoasoft
+constraintinanexpectationform,as
+(cid:90) (cid:90)
+argmax ρ (s) π(a|s)A (s,a)dads,
+µ µ
+π s a
+(cid:90)
+s.t. ρ (s)D (π(·|s)∥µ(·|s)) ds≤ϵ,
+µ KL
+s
+(cid:90)
+π(a|s)da=1, ∀s.
+a
+Next,weformtheLagrangian,as
+(cid:90) (cid:90) (cid:18) (cid:90) (cid:19)
+L(π,β,ν)= ρ (s) π(a|s)A (s,a)dads+β ϵ− ρ (s)D (π(·|s)∥µ(·|s)) ds
+µ µ µ KL
+s a s
+(cid:90) (cid:18) (cid:90) (cid:19)
++ ν 1− π(a|s)da ds,
+s
+s a
+whereν ={ν |∀s∈S}andβ >0correspondtotheLagrangemultipliers.
+s
+DerivationofOptimalJointPolicy. DifferentiatingL(π,β,ν)withrespecttoπ(a|s)givesthe
+following,
+∂L
+=ρ (s)A (s,a)−βρ (s)logπ(a|s)+βρ (s)logµ(a|s)−βρ (s)−ν . (15)
+∂π(a|s) µ µ µ µ µ s
+AccordingtoKKTconditions[31],if(π∗,β∗,ν∗)isasaddlepointofL,π∗istheoptimalsolution
+oftheprimalproblem. Thus,letEq.(15)beequaltozero,thenwehave
+1 1 ν∗
+logπ∗(a|s)= A (s,a)+logµ(a|s)−1− s, (16)
+β∗ µ ρ (s)β∗
+µ
+(cid:18) 1 (cid:19) (cid:18) 1 ν∗ (cid:19)
+π∗(a|s)=µ(a|s)exp A (s,a) exp − s −1 . (17)
+β∗ µ ρ (s)β∗
+µ
+(cid:82)
+Notethattheprimalproblemholdstheconstraint π(a|s)da=1,thesecondexponentialtermis
+a
+consequentlyviewedasthepartitionfunctionZ(s)thatnormalizestheconditionalactiondistribution,
+(cid:18) 1 ν∗ (cid:19) (cid:90) (cid:18) 1 (cid:19)
+Z(s)=exp s +1 = µ(a′|s)exp A (s,a′) da′. (18)
+ρ (s)β∗ β∗ µ
+µ a′
+OptimalJointPolicyisthengivenby,
+(cid:18) (cid:19)
+1 1
+π∗(a|s) = µ(a|s)exp A (s,a) . (19)
+Z(s) β∗ µ
+(cid:124) (cid:123)(cid:122) (cid:125)
+Left-HandSide (cid:124) (cid:123)(cid:122) (cid:125)
+Right-HandSide
+DerivationofOptimalIndividualPolicy. GiventhesetofagentsN ={1,2,...,n},weassume
+theagentschooseactionssequentiallyintheorderof1,2,...,n,i.e.,agentsiisawareofcurrentstate
+s and the chosen actions of agents 1,2,...,i−1 and select actions based on that. The following
+equationholdsbythesupportofthedefinitionofconditionalprobability,
+n
+(cid:89)
+π(a|s)= πi(ai|s,a1:i−1), (20)
+i=1
+16where πi is the individual policy of agent i. Here we consider a general case that the old joint
+policyandthetargetjointpolicyarebothinasequentialmanner. Followingmulti-agentadvantage
+decompositioninLemma1,theLHSandRHSofEq.(19)canbeexpressedrespectively(inorderto
+presenttheOptimalIndividualPolicyweomitthesuperscriptofitwhichdenotesagentid),
+n
+(cid:89)
+LHS= π∗(ai|s,a1:i−1), (21)
+i=1
+n (cid:18) (cid:19)
+1 (cid:89) 1
+RHS= µi(ai|s,a1:i−1)exp Ai (s,a1:i−1,ai)
+Z(s) β∗ µ
+i=1
+n (cid:18) (cid:19)
+(cid:89) 1 1
+= µi(ai|s,a1:i−1)exp Ai (s,a1:i−1,ai) . (22)
+Zi(s) β∗ µ
+i=1
+Thus,wecangettheexpressionofOptimalIndividualPolicy,
+(cid:18) (cid:19)
+1 1
+π∗(ai|s,a1:i−1)= µi(ai|s,a1:i−1)exp Ai (s,a1:i−1,ai) , (23)
+Zi(s) β∗ µ
+where Zi(s) is the partition function that normalizes the conditional action distribution
+π∗(ai|s,a1:i−1) of agent i and satisfies Z(s) = (cid:81)n Zi(s). Finally, all that remains for us to
+i=1
+doistoderivethevalidityofZ(s)=(cid:81)n Zi(s).
+i=1
+Since Zi(s) is the partition function that normalizes the conditional action distribution
+π∗(ai|s,a1:i−1),wecanhave,
+(cid:90) (cid:18) 1 (cid:19)
+Zi(s)= µi(ai|s,a1:i−1)exp Ai (s,a1:i−1,ai) dai. (24)
+β∗ µ
+ai
+Meanwhile,wecanrewriteEq.(18)afterapplyingmulti-agentadvantagedecompositioninLemma
+1,
+(cid:90) (cid:18) 1 (cid:19)
+Z(s)= µ(a|s)exp A (s,a) da (25)
+β∗ µ
+a
+(cid:89)n (cid:90) (cid:18) 1 (cid:19)
+= µi(ai|s,a1:i−1)exp Ai (s,a1:i−1,ai) dai (26)
+β∗ µ
+i=1
+ai
+n
+(cid:89)
+= Zi(s). (27)
+i=1
+Beyondthegeneralcase,ifweconsideraspecialcasethattheoldpolicyµisinaparallelmanner
+(i.e.,µ=(cid:81)n µi(ai|s))whilethetargetpolicyremainsinasequentialmanner,wecanstillderive
+i=1
+similarresults,differingonlybythemodificationfromµi(ai|s,a1:i−1)toµi(ai|s).
+A.3 ProofofMonotonicImprovementwithBinaryFiltering
+Proposition1. (RelationshipbetweenExponentialWeightingandBinaryFiltering). Intermsofthe
+weighteAi µ(s,a1:i−1,ai)/β inExponentialWeightingwhereβ >0,foranyAi µ(s,a1:i−1,ai)<0,we
+havethefollowinglimitation,
+Ai (s,a1:i−1,ai)
+lim exp( µ )=0, for ∀Ai (s,a1:i−1,ai)<0 (28)
+β→0+ β µ
+Asβ → 0+,ExponentialWeightingbecomesaspecialcase–BinaryFilteringwherethesamples
+withAi (s,a1:i−1,ai)<0arefilteredout.
+µ
+Proof. WefirstdefinetheminimumoftheabsolutevalueofthosenegativeAi ,
+µ
+α= min |Ai |= min −Ai
+µ µ
+Ai<0 Ai<0
+µ µ
+17ToachieveEq.(28),weonlyneedtoensurethattherateatwhicheAi µ(s,a1:i−1,ai)/β
+approacheszero
+isfasterthantherateatwhichβ approacheszero. Onewaytoguaranteethisistochooseβ such
+thatitisproportionaltotheabsolutevalueofA. Thus,wedefineβ = k·αwherek isapositive
+hyperparameter. Thenwehave,
+(cid:32) Ai (s,a1:i−1,ai)(cid:33) (cid:18) −α(cid:19) (cid:18) −1(cid:19)
+exp µ ≤exp =exp
+β β k
+Finally,foranypositiveϵ>0,thereexistsapositivek >0,itholdsthefollowing:
+(cid:18) (cid:19)
+−1
+exp <ϵ
+k
+Takingthenaturallogarithmofbothsides,weget:
+kln(ϵ)+1>0 (29)
+Withanarbitraryϵ>0,wecanalwaysfindakthatsatisfiesEq.(29),furthersatisfyingEq.(28).
+Proposition2. (PolicyimprovementwithBinaryFiltering). Bybehaviourcloning(BC)onafiltered
+datasetwithBinaryFiltering1[Ai (s,a1:i−1,ai)>ϵ]whereϵ≥0,newpolicyπissuperiortothe
+µ
+basicpolicyµ,i.e.,J(π)−J(µ)>0.
+Proof. According to BC on a filtered dataset with Binary Filtering 1[Ai (s,a1:i−1,ai) > ϵ], we
+µ
+have:
+1[Ai (s,a1:i−1,ai)>ϵ]µi(ai|s,a1:i−1)
+πi(ai|s,a1:i−1)= µ (30)
+Zi(s)
+whereZi(s)isthepartitionfunction. Giventhenewpolicyπ(a|s) = (cid:81)n πi(ai|s,a1:i−1),the
+i=1
+expectedimprovementfromEq.(6)canberewrittenas,
+ηˆ(π)=E [A (s,a)]
+s∼ρµ(s),a∼π(a|s) µ
+=E E E ···E [A (s,a)]
+s∼ρµ(s) a1∼π1(a1|s) a2∼π2(a2|s,a1) an∼πn(an|s,a1:n−1) µ
+SubstitutingLemma1andEq.(30)intotheaboveequation,weget:
+(cid:34) n (cid:35)
+(cid:88)
+ηˆ(π)=E E E ···E Ai (s,a1:i−1,ai)
+s∼ρµ(s) a1∼π1(a1|s) a2∼π2(a2|s,a1) an∼πn(an|s,a1:n−1) µ
+i=1
+(cid:34) n (cid:35)
+=E (cid:88) E (cid:0) Ai (s,a1:i−1,ai)(cid:1)
+s∼ρµ(s) ai∼πi(ai|s,a1:i−1) µ
+i=1
+=E
+(cid:34) (cid:88)n
+E
+(cid:32) 1[Ai µ(s,a1:i−1,ai)>ϵ]Ai µ(s,a1:i−1,ai)(cid:33)(cid:35)
+(31)
+s∼ρµ(s) ai∼µi(ai|s,a1:i−1) Zi(s)
+i=1
+AndwenotethattheexpectedimprovementfromEq.(6)entailsthefollowingrelationship,
+ηˆ(µ)=J(µ)−J(µ)=E [A (s,a)]
+s∼ρµ(s),a∼µ(a|s) µ
+(cid:34) n (cid:35)
+=E (cid:88) E (cid:0) Ai (s,a1:i−1,ai)(cid:1)
+s∼ρµ(s) ai∼µi(ai|s,a1:i−1) µ
+i=1
+=0 (32)
+ComparingEq.(31)withEq.(32),itisobviousthatthoselocaladvantagesAi (s,a1:i−1,ai)below
+µ
+thethresholdϵwouldnotbecalculatedintheexpectationηˆ(π). Hence,whenthethresholdϵ≥0it
+naturallyholdsηˆ(π)>ηˆ(µ)=0,i.e.,J(π)−J(µ)>0.
+18B AdditionalRelatedWorks
+OtherLLM-basedEmbodiedAgent. Beyondtaskplanning,LLMsalsoshoulderotherrolesfor
+embodiedagents. (i)FoundationPolicy. RobotTransformer[5,4],PaLM-E[15],Open-X[11],
+andRoboFlamingo[33]usepre-trainedLLMorVLMasthefoundationpoliciesandfine-tunethe
+parameterswithembodieddatafromreal-worldtasks. TheLLMtokensandactiontokensofagents
+are unified in fine-tuning. (ii) Code Generator. Given high-level task descriptions, LLMs can
+generateexecutablecodebycallingthebasiccontrolprimitives[34,57]orlow-levelactions[59]
+ofembodiedagents. VoxPoser[25]leveragesthecode-writingcapabilitiesofLLMstocompose
+3D value maps via VLM and adopt model-predictive control (MPC) for planning. (iii) Reward
+Designer. Text2Reward[64],Language2Reward[69],andEureka[41]leverageGPT-4toproduce
+interpretablerewardcodes,andallowiterativerefinementwithfeedback. (iv)DataGenerator. To
+enhancetask-levelgeneralization,GenSim[58]adoptsLLMstoproposetaskcurriculumandnovel
+sub-taskstosolvecomplextasks. RoboGen[60]proposesaclosed-loopprocesstogeneraterobot
+data,includingproposingtasks,generatingsimulationenvironments,decomposingsub-tasks,and
+solvingsub-tasksviaRLorMPC.
+C AlgorithmicDescription
+Inthissection,wegivethealgorithmdescriptionsofcriticregressionviaMonteCarloestimation,as
+wellastheprocessofReAd-SandReAd-Jalgorithms. WehighlightthedifferencebetweenReAd-S
+andReAd-Jbydifferentcolors.
+Algorithm1CriticregressiononDfollowingµ=π
+llm
+Require: databufferD,batchsizeB,criticQ ,thesetofagentsN
+θ
+foriterationk =1,...,M do
+forallorderedsubsets{i ,i ,...,i }⊆N do
+1 2 u
+computeMonteCarloreturnestimatesR
+s,ai1:u
+T
+(cid:88) (cid:88)
+R = γtr
+s,ai1:u t
+a−i1:u∈Dt=0
+updateestimatedcriticQi1:u byusing
+θ
+argminE s,ai1:u∼D(cid:104)(cid:13) (cid:13)R
+s,ai1:u
+−Qi µ1:u(cid:13) (cid:13)2(cid:105)
+Qµi1:u
+endfor
+endfor
+19Algorithm2ReAd-S:ReinforcedAdvantageFeedbackwithSequentialIndividualPlanRefinement
+Require: agentnameu1,...,uN,taskhorizonT,refinementthresholdα,historybufferH,critic
+Q
+θ
+Denotation: dialogd;agentui’splanai
+initializetimestept←0
+initializeobservations ←env.reset()
+0
+whilet<T do
+initializejointactiona ={}andhistoryH ={}
+t
+setα←2α
+fori=1,...,N do
+initializethehistoryofevaluatedaction-scorepairsP ={}
+repeat
+d,ai ←LLMPrompt(H,s ,ui,P)
+t t t
+S (ai)=Q1:i(s ,a1:i−1,ai)−Q1:i−1(s ,a1:i−1)
+ReAd−S t θ t t t θ t t
+P ←P ∪{(s ,a1:i−1,ai,S (ai))}
+t t t ReAd−S t
+α←α/2
+untilS (ai)>α
+ReAd−S t
+H ←H ∪{d}
+endfor
+σ ←MotionPlanner(o ,a )
+t t t
+o ,done←env.step(σ )
+t+1 t
+ifdoneisTruethen
+break
+endif
+endwhile
+Algorithm3ReAd-J:ReinforcedAdvantageFeedbackwithJointPlanRefinement
+Require: agentnameu1,...,uN,taskhorizonT,pickactionthresholdα,historybufferH,critic
+Q ,discountfactorγ
+θ
+Denotation: dialogd;JointWAITactionw
+setH ={}
+initializetimestept←0
+initializeobservations ←env.reset()
+0
+whilet<T do
+setα←2α
+initializethehistoryofevaluatedaction-scorepairsP ={}
+repeat
+d,a ←LLMPrompt(H,s ,[u1,...,uN],P)
+t t
+S (a )=Q (s ,a )− 1Q (s ,w)
+ReAd−J t θ t t γ θ t
+P ←P ∪{(s ,a ,S (a ))}
+t t ReAd−J t
+α←α/2
+untilS (a )>α
+ReAd−J t
+H ←{d}
+σ ←MotionPlanner(o ,a )
+t t t
+o ,done←env.step(σ )
+t+1 t
+ifdoneisTruethen
+break
+endif
+endwhile
+D EnvironmentDetails
+We use Difficult Variants of RoCoBench (DV-RoCoBench) adapted from RoCoBench [42] and
+Overcooked-AI [8]inourexperiments. DV-RoCoBenchinvolvesthreetasks: SweepFloor,Make
+SandwichandSortCubes. Andwechoosetworepresentativescenarios–CrampedRoomandForced
+CoordinationfromOvercooked-AIinourexperiments. Inthissection,wepresentacomprehensive
+20overview of the task specifications along with the difficulty modifications we have made in DV-
+RoCoBenchandthescenariospecificationsintwoscenariosofOvercooked-AI.
+AsforDV-RoCoBench,wedirectlyinherittheactionsetandquantityofrobotsfromRoCoBench,
+but design diverse task goals to introduce different difficulty levels. In original RoCoBench, the
+actionsetisnotthesameamongdifferenttasks.
+AsforOvercooked-AI,differentscenariossharethesameactionspacebutareinitializedwithdifferent
+kitchenlayouts.
+D.1 SweepFloor
+TaskDescription. Inthistask,thetworobotsarepositionedonoppositesidesofthetable. Each
+robotarmequippedwithadustpanandbroommustcollaboratetoefficientlysweepallcubesofthe
+designatedcolorintothedustpan. Subsequently,therobotthatholdsthedustpanisresponsiblefor
+disposingofthecollectedcubesinthetrashbin. Inthisenvironment,twodistincttypesofrobots
+withdifferentactionsetsareused.
+1. UR5Erobotholdingadustpan(‘Alice’): canmovetoallcubesandcanperformonlythree
+operations: MOVE,DUMP,andWAIT.
+2. FrankaPandaholdingabroom(‘Bob’): canmovetoallcubesandcanperformonlythree
+operations: MOVE,SWEEP,andWAIT.
+3. Actionsets: (i)MOVE[target]: targetcanonlybeacube. (ii)DUMP:pourallcubesinthe
+dustpanintothetrashbin. (iii)SWEEP[target]: sweepthetargetcubeintothedustpan. (iv)
+WAIT.
+DifficultySettings. Weshiftthetaskgoalfromsweepingawayallthecubestosweepingawaythe
+cubesofagivencolor. Weestablish5distinctdifficultylevelsbasedonthenumberofcubesandthe
+numberofthetargetcubes. Byincreasingthedifficultylevelstepbystep,thequantityofallcubes
+andthecubesofagivencolorincreasealsogradually,asshowninFigure5.
+Y1_G1 Y1_G2 Y2_G2 Y2_G3 Y3_G3
+Figure5: Theinitialstatesofthe5difficultylevelsinmodifiedSweepFloor. Theyellowandgreen
+squaresaretheonestobesweptinthistask. Thefirstthreetaskshaveatotalof7squares,whilethe
+lasttwohave9. Weassesstaskdifficultybasedonthenumberofcubestobesweptandthetotalcube
+number. Forexample,theY1_G1inthefigurerepresents1yellowcubeand1greencubeneedstobe
+swept.
+D.2 MakeSandwich
+TaskDescription. Inthistask,tworobotsarepositionedonoppositesidesofatabletoassemblea
+sandwichbasedonagivenrecipe,requiringcollaborativeefforttocollectandstacktheingredientsin
+thespecifiedorderuntilallcomponentshavebeenproperlyarranged. Thisenvironmentaccommo-
+datestwodistincttypesofrobotscapableofexecutingallactionsintheactionset. Eachrobothasa
+restrictedrangetomanipulatethecubes.
+1. UR5Erobot(‘Chad’): canonlyretrievethefoodontherightside.
+2. Humanoidrobot(‘Dave’): canonlyretrievethefoodontheleftside.
+3. Actionset: 1)PICK[object]: objectmustbeafood. 2)PUT[object]on[target]: object
+mustbeafoodandtargetcouldbeafood,cutting_board,ortable. 3)WAIT.
+21DifficultySettings. Weestablish4distinctdifficultylevelsdependentonthelengthoftherecipe.
+Alongerreciperequiresmorecomplexcollaborationbetweenhumanoidandrobotarm. Therecipe
+lengthsforthesedifferentsettingsaresetto3,5,7,and9,respectively,asshowninFigure6.
+recipe1 recipe2 recipe3 recipe4
+Figure6: Theinitialstatesofthe4difficultylevelsinmodifiedMakeSandwich. Theinitialthree
+taskssharedthesamefoodandlayout,differingonlyinthelengthoftherecipe. Conversely,thefinal
+taskpresenteddistinctfoodandlayout,accompaniedbyalengthierrecipe. Therecipelengthsfor
+fourtasksaresetto3,5,7,and9,respectively.
+D.3 SortCubes
+TaskDescription. Thetaskrequiresthreerobotspositionedonoppositesidesofatabletocollab-
+orativelyplacethreetargetblocksinspecificlocations,utilizingtheirlimitedrangeofmotionand
+assistingeachotherasneeded. Thecurrentenvironmentconsistsofthreerobotscapableofexecuting
+allactionsintheactionset,albeitwithlimitedmobilityrange.
+1. UR5Ewithroboticgripper(‘Alice’): mustputthebluesquareonpanel2,canonlyreach:
+panel1,panel2,panel3.
+2. FrankaPanda(‘Bob’): mustputpinkpolygononpanel4,canonlyreach: panel3,panel4,
+panel5.
+3. UR5Ewithsuctiongripper(‘Chad’): mustputyellowtrapezoidonpanel6,canonlyreach:
+panel5,panel6,panel7.
+4. Actionset: 1)PICK[object]PLACE[panelX]:theobjectmustbeacubeandpanelXcannot
+bethetargetpanelofanothercube. 2)WAIT.
+DifficultySettings. Weestablish5difficultylevelsbasedonthedistanceofthethreeblockstowards
+theircorrespondingtargetlocation. Sinceeachrobothaslimitedrangeofmotion,pickingfurther
+cubetothetargetlocationrequiresmorecomplexcollaborationbetweenthreerobotarms.
+sort1 sort2 sort3 sort4 sort5
+Figure 7: The initial states of the 5 difficulty levels in modified Sort Cubes. In these tasks, we
+orchestrated the initial placement of each block, and gauged difficulty based on the cumulative
+distancebetweenthethreeblocksandthetargetpanel. Theshapeofthethreecubeswasmodifiedto
+avoidtherobot’sinabilitytopickuptheobjectsduetotheirshape.
+D.4 Overcooked-AI
+InOvercooked-AI,twoagentsareoriginallyrequiredtomakeasmuchsoupaspossibleinlimited
+timestepswithhighcoordinationefficiency. Agentsplaceaspecifiednumberofonionsinapot,leave
+themtocookforaspecifiednumberoftimesteps,puttheresultingsoupinadish,andserveit,giving
+allagentsareward. Thecapacityofallagentstopickupitemsis1. Everyagentcanonlycarry1
+22itemsuchasthedishandtheonion. Inourexperiment,toenablemeasuringwiththesuccessrate
+metric,wemodifythetaskascookinganddeliveringasouptotheservicecounterwithinaspecified
+numberoftimesteps. Theactionsetofthisenvironmentareasfollowing:
+1. north: agentmovesonestepnorth. Ifagentcollideswithanotherobject,itwillnotmove.
+2. south: agentmovesonestepsouth. Sameasthepreviousterm.
+3. east: agentmovesonestepeast. Sameasthepreviousterm.
+4. west: agentmovesonestepwest. Sameasthepreviousterm.
+5. interact: agentinteractswithaobject,includingpickinguporputtingdownanitem,turning
+onthecookingtable,andputtingthecookedsoupinthedish.
+6. stay: agentdoesnothing.
+Thefirstfouractions(north,south,eastandwest)coverthemovementoftheagent,andtheinteract
+actionenablestheinteractionbetweentheagentandotherobjects. WeuseFigure8toexplainthe
+aboverules:
+agent0: south agent0: interact agent0: interact agent0: west
+begin agent1: east agent1: interact agent1: interact agent1: west
+agent0: east agent0: north agent0: stay agent0: west agent0: stay
+agent1: north agent1: interact agent1: interact agent1: north agent1: stay
+agent0: interact agent0: east agent0: south agent0: interact
+agent1: stay agent1: stay agent1: stay agent1: stay
+Figure8: In2ndframe, sincebothagentscollidewiththeworkbench, theagentsmerelychange
+theircurrentorientation. In4thframe,sincebothagentshavepickedupanobjectintheirhands,
+executing"interact"againwillnotpickupadditionalitems. In7thframe,agent1placestheonionon
+thecookingtable. Andin8thframe,agent1turnsonthecookingtableandstartscooking. In10th
+and11thframes,thesoupisdoneandthenputinadishbyagent0. Inthelastframe,agent0serves
+thecookedsoup.
+CrampedRoom. Twoagentscollaborateinarelativelysmallkitchen,andthustwoagentsmustbe
+extremelycarefultoavoidcollisionsinordertocompletethecookingtaskasquicklyaspossible.
+ThescenarioisshownintheFigure8.
+ForcedCoordination. Theworkingspacesoftwoagentsarecompletelyseparated,whereone
+agentonlyhasaccesstothecookingtableandtheservicecounterandtheotheronlyhasaccessto
+onionsanddishes. ThescenarioisshownintheFigure9.
+E AdditionalExperimentalResults
+Inthissection,wegivethedetailedexperimentresultsof3tasksinDV-RoCoBenchand2scenarios
+in Overcooked-AI. We also show the execution screenshots of our method and baselines in the
+representativeenvironments.
+23Figure9: Inthistask,agent0mustwaitforagent1todelivertheoniontothetablebeforeagent0can
+placeitonthecookingtable,andafterthesoupisready,agent0mustwaitforagent1toplacethe
+plateonthetablebeforeitcanservethesoupanddeliverittotheservicetable.
+E.1 ComparisonofBaselines
+Table3: Overviewofthekeypropertiesthatdistinguishfourmethods. (i)StateType: whetherthe
+environment state included in the prompt is global or not; (ii) Planning Scheme: whether LLM
+outputplanssequentiallyornot;(iii)HistoryInfo: whetherallthehistorybeforeisreservedinthe
+promptornot.
+STATETYPE PLANNINGSCHEME HISTORYINFO FEEDBACKTYPE
+ROCO PARTIAL SEQUENTIAL ALLPREVIOUSROUNDS PHYSICALVERIFICATION
+READ-S PARTIAL SEQUENTIAL LASTROUND ADVANTAGESCORE
+CENTRAL-PLAN GLOBAL PARALLEL ALLPREVIOUSROUNDS PHYSICALVERIFICATION
+READ-J GLOBAL PARALLEL LASTROUND ADVANTAGESCORE
+REACT GLOBAL PARALLEL ALLPREVIOUSROUNDS PHYSICALVERIFICATION
+REFLEXION GLOBAL PARALLEL ALLPREVIOUSROUNDS PHYSICALVERIFICATION
+MINDAGENT GLOBAL PARALLEL ALLPREVIOUSROUNDS PHYSICALVERIFICATION
+E.2 MainExperiments
+TheresultsofallexperimentsareshowninTable4,andTable5. SR,NQandESrepresentsuccess
+rates,theaveragenumberofrequeststoLLMs,androundsofenvironmentinteractions,respectively.
+Wehaveprovidedadetailedintroductiontothesemetricsin§5.1.
+E.3 VisualizationofRobustnessEvaluation
+WevisualizetherobustnesscomparisonbetweenReAd-SandRoCoforaccomplishingMakeSandwich
+recipe3taskwhentheenvironmentresetsattimestepn=2,asshowninFigure10andFigure11.
+Chad: WAIT Chad: WAIT Chad: PICK tomato
+begin Dave: PICK bread_slice1 Dave: PUT bread_slice1 cutting_board reset env Dave: PICK bacon
+Chad: WAIT Chad: WAIT Chad: WAIT Chad: PUT tomato bread_slice1 Chad: PICK cucumber
+Dave: PUT bacon table Dave: PICK bread_slice1 Dave: PUT bread_slice1 cutting_board Dave: PICK bacon Dave: PUT bacon tomato
+Chad: PUT cucumber bacon Chad: PICK ham Chad: PUT ham cheese Chad: WAIT
+Dave: PICK cheese Dave: PUT cheese cucumber Dave: PICK bread_slice2 Dave: PUT bread_slice2 ham
+Figure10: ScreenshotsofReAd-Scompletingtherecipe3taskinrobustnesstest. Aftertheenviron-
+mentisreset,ourmethodwillbeaffectedbythehistoricaldialogueinformationinashortperiod.
+Afterbeingpromptedbytheadvantagefunctionre-evaluatedinthenewstate,ourmethodcanmake
+arapidre-planbasedonthenewstate.
+24Table4: Thedetailedresultsofthecomparisonindifferenttaskswithvariousdifficultylevelsin
+DV-RoCoBench. Themeanvalueandstandarderrorarecalculatedover10randomseeds.
+ROCO REACT CENTRALPLAN REFLEXION
+SR NQ ES SR NQ ES SR NQ ES SR NQ ES
+Y1_G1 0.9±0.32 14.4±5.95 6.2±3.12 1.0±0.00 5.5±0.50 5.5±0.50 0.4±0.52 15.3±0.48 11.2±4.92 1.0±0.00 5.0±0.00 5.0±0.00
+Y1_G2 1.0±0.00 24.2±4.18 8.9±1.45 1.0±0.00 8.2±0.25 8.2±0.25 1.0±0.00 7.8±1.99 7.8±1.99 1.0±0.00 7.0±0.00 7.0±0.00
+SWEEP Y2_G2 1.0±0.00 29.1±5.40 10.6±1.35 1.0±0.00 10.0±0.00 10.0±0.00 0.8±0.42 12.7±1.77 12.7±1.77 1.0±0.00 10.1±0.10 10.0±0.00
+Y2_G3 0.7±0.48 36.7±6.63 13.5±1.27 0.6±0.16 14.4±0.67 13.8±0.33 0.2±0.42 14.6±0.97 14.6±0.97 0.7±0.15 14.3±0.87 12.9±0.48
+Y3_G3 0.6±0.52 41.8±7.73 14.7±0.48 0.4±0.16 15.2±0.25 14.9±0.32 0.0±0.00 15.0±0.00 15.0±0.00 0.3±0.15 15.1±0.23 14.9±0.10
+RECIPE1 1.0±0.00 13.2±3.74 4.7±0.67 1.0±0.00 4.0±0.00 4.0±0.00 1.0±0.00 6.2±0.63 4.0±0.00 1.0±0.00 5.0±0.00 4.0±0.00
+SANDWICH R RE EC CI IP PE E2 3 0 0. .9 8± ±0 0. .3 42 2 2 38 3. .9 7± ±1 11 0. .2 05 0 19 1. .1 5± ±2 2. .4 92 9 1 0. .0 7± ±0 0. .0 10 5 16 2. .0 9± ±0 2. .0 60 1 16 0. .0 1± ±0 1. .0 00 7 1 1. .0 0± ±0 0. .0 00 0 18 0. .2 2± ±0 0. .4 42 2 6 8. .0 0± ±0 0. .0 00 0 1 0. .0 6± ±0 0. .0 10 6 16 4. .8 9± ±0 2. .1 43 7 16 0. .0 8± ±0 1. .0 10 4
+RECIPE4 0.5±0.53 43.1±17.84 13.1±2.47 0.6±0.16 16.7±2.60 12.5±0.75 0.4±0.52 80.5±53.35 14.2±1.14 0.5±0.17 17.7±2.39 13.1±0.67
+SORT1 1.0±0.00 3.3±0.95 1.1±0.32 1.0±0.00 1.2±0.13 1.0±0.00 1.0±0.00 1.0±0.00 1.0±0.00 1.0±0.00 1.2±0.13 1.0±0.00
+SORT2 1.0±0.00 13.5±4.67 3.4±0.52 0.6±0.16 14.8±4.56 7.8±1.96 1.0±0.00 16.9±9.13 2.6±0.52 1.0±0.00 5.5±0.48 2.9±0.10
+SORT SORT3 1.0±0.00 18.6±15.10 4.9±2.60 0.8±0.13 19.4±6.18 6.4±1.45 1.0±0.00 8.3±4.32 2.3±0.95 1.0±0.00 6.6±0.50 4.7±0.33
+SORT4 1.0±0.00 24.8±9.37 6.4±1.78 0.8±0.13 24.0±11.31 6.1±1.49 1.0±0.00 37.2±25.05 7.1±2.77 0.7±0.13 19.2±6.83 7.1±1.45
+SORT5 1.0±0.00 38.5±9.96 7.4±2.95 0.7±0.15 17.3±3.00 8.4±1.59 0.6±0.52 128.4±115.99 11.0±3.97 0.8±0.13 13.9±3.27 6.9±1.43
+AVERAGE 0.89±0.19 25.99±8.06 8.25±1.74 0.80±0.09 12.11±2.29 8.19±0.69 0.74±0.17 25.88±15.32 8.39±1.36 0.83±0.06 10.16±1.24 7.59±0.41
+MIND READ-S READ-J
+SR NQ ES SR NQ ES SR NQ ES
+Y1_G1 1.0±0.00 5.0±0.00 5.0±0.00 1.0±0.00 10.4±0.52 5.0±0.00 1.0±0.00 5.9±0.99 5.0±0.00
+Y1_G2 1.0±0.00 7.1±0.10 7.1±0.10 1.0±0.00 14.4±0.84 7.0±0.00 1.0±0.00 7.6±0.70 7.0±0.00
+SWEEP Y2_G2 1.0±0.00 9.9±0.18 9.8±0.13 1.0±0.00 19.9±3.28 9.4±0.70 1.0±0.00 13.0±4.32 9.0±0.00
+Y2_G3 0.7±0.15 13.4±0.48 13.4±0.48 0.9±0.32 26.8±5.20 12.2±1.32 1.0±0.00 16.4±6.02 11.7±1.49
+Y3_G3 0.2±0.13 15.1±0.10 15.0±0.00 0.8±0.42 31.4±3.50 14.0±0.82 0.8±0.42 16.4±1.71 13.4±0.84
+RECIPE1 1.0±0.00 5.1±0.10 4.0±0.00 1.0±0.00 10.5±4.74 4.2±0.42 1.0±0.00 4.3±0.48 4.0±0.00
+SANDWICH R RE EC CI IP PE E2 3 1 0. .0 7± ±0 0. .0 10 6 16 2. .6 4± ±0 1. .1 96 2 16 0. .0 1± ±0 1. .0 00 7 1 1. .0 0± ±0 0. .0 00 0 1 24 2. .5 1± ±2 5. .4 26 2 6 8. .4 9± ±0 0. .5 82 8 1 1. .0 0± ±0 0. .0 00 0 16 4. .5 6± ±0 8. .8 05 4 6 8. .0 9± ±0 1. .0 00 0
+RECIPE4 0.6±0.16 16.5±2.24 12.7±0.72 1.0±0.00 27.9±8.06 11.1±1.73 1.0±0.00 10.8±0.42 10.0±0.00
+SORT1 1.0±0.00 1.2±0.13 1.0±0.00 1.0±0.00 3.4±0.52 1.0±0.00 1.0±0.00 1.1±0.32 1.1±0.32
+SORT2 1.0±0.00 6.1±1.12 3.2±0.33 1.0±0.00 10.8±2.53 3.1±0.32 1.0±0.00 7.3±2.91 3.3±0.48
+SORT SORT3 0.8±0.13 11.1±3.70 6.2±1.54 1.0±0.00 17.5±2.80 3.9±0.57 1.0±0.00 8.3±3.80 3.4±0.84
+SORT4 0.9±0.10 22.6±9.62 5.9±1.12 1.0±0.00 21.6±7.07 3.7±0.67 1.0±0.00 18.8±6.29 4.3±0.95
+SORT5 0.8±0.13 18.0±4.12 7.8±1.35 1.0±0.00 33.5±6.35 6.1±0.88 1.0±0.00 17.3±11.87 4.4±1.26
+AVERAGE 0.84±0.07 10.72±1.71 7.66±0.49 0.98±0.05 18.91±3.79 6.86±0.63 0.99±0.03 10.59±3.48 6.54±0.51
+Table5: ThedetailedresultsofthecomparisonintwoscenariosinOvercooked-AI.Themeanvalue
+andstandarderrorarecalculatedover10randomseeds.
+CRAMPED_ROOM FORCED_COORDINATION AVERAGE
+SR NQ ES SR NQ ES SR NQ ES
+REACT 0.0±0.00 20.1±0.10 20.0±0.00 0.0±0.00 26.9±0.75 25.0±0.00 0.00±0.00 23.50±0.43 22.50±0.00
+REFLEXION 0.0±0.00 20.0±0.00 20.0±0.00 0.0±0.00 26.1±0.60 25.0±0.00 0.00±0.00 23.05±0.30 22.50±0.00
+MINDAGENT 0.0±0.00 20.8±0.47 20.0±0.00 0.0±0.00 26.9±0.80 25.0±0.00 0.00±0.00 23.85±0.64 22.50±0.00
+CENTRAL 0.0±0.00 20.0±0.00 20.0±0.00 0.0±0.00 25.0±0.00 25.0±0.00 0.00±0.00 22.50±0.00 22.50±0.00
+READ-J 0.4±0.16 23.9±1.49 18.9±0.59 0.3±0.15 27.2±0.53 24.8±0.20 0.35±0.16 25.55±1.01 21.85±0.40
+Chad: PICK tomato Chad: PUT tomato table Chad: WAIT Chad: WAIT
+begin Dave: WAIT Dave: WAIT reset env Dave: PICK bread_slice1 Dave: PUT bread_slice1 cutting_board
+Chad: PICK tomato Chad: PUT tomato bread_slice1 Chad: WAIT Chad: WAIT Chad: PICK cucumber Chad: PUT cucumber bacon
+Dave: WAIT Dave: WAIT Dave: PICK bacon Dave: PUT bacon tomato Dave: WAIT Dave: WAIT
+Chad: WAIT Chad: WAIT Chad: PICK ham Chad: PUT ham cheese Chad: WAIT Chad: WAIT
+Dave: PICK cheese Dave: PUT cheese cucumber Dave: WAIT Dave: WAIT Dave: PICK bread_slice2 Dave: PUT bread_slice2 ham
+Figure11: ScreenshotsofRoCocompletingtherecipe3taskinrobustnesstest. RoConeedsmore
+stepstorecoverfromtheenvironmentaldisturbance. Sincetheresetinformationisnotincludedin
+thehistory,RoCowillbemisledbyhistoricalinformationandrequiremulti-roundphysicalfeedback
+toadjusttheplan.
+25E.4 DatasetandCriticNetwork
+DatasetCollectionDetails. TheadvantagefunctionreliesontheMonte-Carloestimationofvalue
+functionwithaccesstoanofflinedatasetcollectedbyπ . Inpractice,weemploytwotechniquesto
+llm
+enhancethequalityofthecollecteddataset.(i)WeperformdatacollectionusinganLLMplannerwith
+physicalverification,inspiredbytheRoCopolicy[42],whichensurestheacquisitionofhigh-quality
+interactionsamples. (ii)Additionally,toaddressthelimitedstatecoverageissuethatmayarisefrom
+directlyrollingouttheπ policy,weintentionallyresettheenvironmentstatetoanunreachable
+llm
+stateandinitiateLLM-planningfromthatpoint.
+Given that our theoretical analysis demonstrates that our method can achieve a superior policy
+comparedtothebehaviorpolicyµthroughadvantage-weightedregression,itisnaturaltoconsider
+whetherabetterbehaviorpolicythanπ canbeutilizedfordatasetcollection,potentiallyleading
+llm
+to further policy improvement during optimization. Subsequently, we conduct an ablation study
+utilizingamixeddatasetcollectedbyanexpertpolicyandanLLMpolicy. Ourpreliminaryfindings
+indicatethattheinclusionofadditionaloptimaldatadoesnotresultinperformanceimprovement.
+Wehypothesizethattworeasonscontributetotheseunexpectedresults. (i)Theincorporationofdata
+fromadifferentpolicyintroducesincreasedvarianceinMonte-Carloestimation,therebyreducingthe
+stabilityofthevaluefunctions. Consequently,thevaluefunctionmayproducehigh-varianceoutputs,
+potentiallyleadingtomisleadingoptimizationoftheLLMplannerasprompts. (ii)TheLLMplanner
+equippedwithenhancedaugmentationtechniquesachievesimproveddatacoverageoftheresulting
+policy. Incontrast,theoptimalpolicyismoredeterministic,leadingtomorelimitedstatecoverage,
+whichposeschallengesforvalueestimationofout-of-distribution(OOD)statesandactionsinLLM
+planning. ThisissuebearsresemblancetothedistributionshiftproblemencounteredinofflineRL
+[32,63].
+WedescribethedifferencesbetweenexpertpolicyandanLLMpolicyindetailhere.
+• LLMpolicy: ThispolicyistoleveragethereasoningpowerofLLMtosolvespecifictasksanduse
+physicalverificationasfeedback. ItisrecommendedtouseavariantofReAd-Jfordatacollection,
+which replaces ReAd feedback with physical verification and uses only the previous round of
+historicalinformationintheprompts. Ateachtimestept,environmentstates ,robotoptional
+t
+actions,andtaskgoalsareaddedintothepromptintheformoftext. AndthentheLLMtakesthe
+promptasinput,generatesthejointactiona ofallrobotsandgetarewardr . Westoreevery
+t t
+transitionasatuple(s ,a ,r )untilthetaskisaccomplished.
+t t t
+• Expertpolicy: Hereweimplementthispolicywithhumancontrol. Thisrequiresahumanplayer
+toanalyzethetaskandinfertheoptimalactionateachtimestep. Thecollecteddataformatisthe
+sameasthemethoddescribedabove.
+Table6: AnablationstudyofdataratioofoptimaldataandLLMplannerdataintheofflinedataset.
+ThemixingratioisrepresentedbyX%:Y%,whereX%denotesthepercentofsamplescollected
+bytheLLMpolicy,andY%denotesthepercentofsamplescollectedbytheoptimalpolicy.
+NQ ES SR
+READ-J(0%:100%) 16.4±0.54 13.4±0.27 0.8±0.13
+READ-J(50%:50%) 15.8±1.12 13.9±0.35 0.6±0.16
+READ-J(100%:0%) 17.6±1.89 13.9±0.41 0.7±0.15
+READ-S(0%:100%) 31.4±1.11 14.0±0.26 0.8±0.13
+READ-S(50%:50%) 29.1±0.91 13.9±0.31 0.7±0.15
+READ-S(100%:0%) 34.2±2.18 14.3±0.30 0.5±0.17
+Critic Architecture. The critic learns to estimate the value function of state-action pairs from
+the dataset. The state includes the environment state and the agent state, where the environment
+statecontainsvariablesofthesimulatorandtheagentstateisdescribedbylanguage. Theactionis
+alsodescribedbylanguage. Weadoptthepre-trainedBERTTransformermodeltoextractlanguage
+featuresoftheagentstateandactions. Thenweconcatenatetheoutputfeaturewithenvironmentstate
+featurestosomeMLPlayerstopredicttheQ-value. Thestructureofthecriticnetworkisgivenin
+Figure12,andthehyper-parametersaregiveninTable7.
+TokenConsumption. WereportthedetailsoftokenconsumptiononbothbenchmarksinTable8
+andTable9respectively. Thetotalnumberoftokensconsumedincludestokensconsumedduring
+26Structure of Critic
+Input of Bert
+(e sin mv us lt aa tt oe r) MLP MLP Network
+Action
+（language） variable
+BERT feature I lan yp eu rt H lai yd ed ren O layu etp rut Q value
+Transformer
+Agent state
+(language) language
+feature
+Figure12: Inthisfigure, theparametersofBERTTransformerarefixedandwillnotbeupdated
+duringthetrainingofCritic.
+Table 7: The input dimensions for Critic of ReAd-J and ReAd-S are represented by JIS and SIS
+respectively,whileHSrepresentsthehiddenlayerinputdimension,HNrepresentsthenumberof
+hiddenlayers,LRisthelearningrate,BSisbatchsize,TNrepresentsthenumberoftrainingiterations,
+SSisthedimensionofenvironmentstate,andnisthenumberofrobotsintheenvironment.
+JIS SIS HS HN LR BS TN
+VALUE 768+SS n×768+SS 256 1 10−3 32 9×105
+pre-samplingdatafortrainingcriticnetwork. WeutilizeLLMpolicytocollectdataforcritictraining
+intheexperimentofDV-RoCoBench,whilethedataiscollectedbyexpertpolicyintheexperimentof
+Overcooked-AI.Obviously,duringthephaseofplanning,ReAd-SandReAd-Jconsumelesstokens
+thanallotherbaselines. Intermsoftotalconsumedtokens,ReAd-Jiscomparabletothebaselines
+whichalsogeneratejointplansinaparallelmanner,andReAd-SissignificantlysuperiortoRoCo.
+CriticTraining. Thequantityoftrajectoriesrequiredforcritictrainingdependsonhowchallenging
+thetaskis. For5difficultylevelsinSweepFloor,critictrainingdemandsabout70,120,240,600,
+and1400trajectoriesrespectively. For4difficultylevelsinMakeSandwich,about60trajectories
+areneededforcritictraining. For5difficultylevelsinSortCube,critictrainingdemandsabout230,
+240,300,400and510trajectoriesrespectively. ForCrampedroomandForcedcoordination,the
+numberisabout128and2048respectively. Itisimportanttonotethatthevolumeofdatautilizedfor
+critictrainingcanbeadjustedflexiblytoalignwiththespecificdemandsandchallengesoftheactual
+situation.
+Table8: TokensconsumedbyallmethodsduringtheevaluationinDV-RoCoBench.
+Methods ReAd-S ReAd-J RoCo CentralPlan ReAct Reflexion MindAgent
+Tokensforplanning 9M 6M 24M 15M 11M 11M 13M
+TokensfortrainingQˆ 7M 7M - - - - -
+Totaltokens 16M 13M 24M 15M 11M 11M 13M
+27Table9: TokensconsumedbyallmethodsduringtheevaluationinOvercooked-AI.
+Methods ReAd-J CentralPlan ReAct Reflexion MindAgent
+Tokensforplanning 1M 2M 4M 3M 4M
+TokensfortrainingQˆ - - - - -
+Totaltokens 1M 2M 4M 3M 4M
+F IllustrationoftheInteractionProcess
+weillustratethedistinctionsbetweenReAd-SandRoCobypresentingaseriesoftaskexecution
+screenshots. In Figure 13 and Figure 14, we compare the screenshots of our method and RoCo
+algorithm in task Sweep Floor Y2_G2. Our method can perform re-plan and correct the initial
+planningusingadvantagefeedback,whichresultsinaminimumnumberofenvironmentalinteractions.
+Incontrast,RoCowhichreliesonphysicalfeedbackrequiresmorenegotiationandinteractionswith
+theenvironment. AsimilarcomparisonisshowninFigure15andFigure16forSortCubessort4. A
+comparisonbetweenReAd-JandCentralPlanonForcedCoordinationscenarioisshowninFigure17
+andFigure18.
+Alice: MOVE yellow_cube_2 Alice: WAIT Alice: MOVE green_cube_2 Alice: WAIT
+begin Bob: MOVE yellow_cube_2 Bob: SWEEP yellow_cube_2 Bob: MOVE green_cube_2 Bob: SWEEP green_cube_2
+Alice: MOVE yellow_cube_1 Alice: WAIT Alice: MOVE green_cube_1 Alice: WAIT Alice: DUMP
+Bob: MOVE yellow_cube_1 Bob: SWEEP yellow_cube_1 Bob: MOVE green_cube_1 Bob: SWEEP green_cube_1 Bob: WAIT
+Figure13: SnapshotsoftheinteractionprocessofReAd-JintaskSweepFloorY2_G2. Ourmethod
+obtainstheminimumnumberofenvironmentalinteractionsneededtocompletethetask.
+Alice: MOVE yellow_cube_2 Alice: WAIT Alice: DUMP Alice: MOVE green_cube_2
+begin Bob: MOVE yellow_cube_2 Bob: SWEEP yellow_cube_2 Bob: MOVE green_cube_2 Bob: WAIT
+Alice: WAIT Alice: DUMP Alice: MOVE yellow_cube_1 Alice: WAIT Alice: DUMP
+Bob: SWEEP green_cube_2 Bob: WAIT Bob: MOVE yellow_cube_1 Bob: SWEEP yellow_cube_1 Bob: WAIT
+Alice: MOVE green_cube_1 Alice: WAIT Alice: WAIT Alice: WAIT Alice: DUMP
+Bob: MOVE green_cube_1 Bob: SWEEP green_cube_1 Bob: WAIT Bob: WAIT Bob: WAIT
+Figure14: SnapshotsoftheinteractionprocessofRoCointaskSweepFloorY2_G2. Thefigure
+aboveshowsthatafterplanningandsweepingacubeintothedustpan,RoCowilldumpitintothe
+trashbin. However,aftersweepingthelastcubeintothedustpan,insteadofimmediatelyplanningto
+dumpittocompletethetask,LLMstubbornlybelievesthatthetaskisdoneandplanstowaitforthe
+nexttwointeractions.
+28Alice: PICK blue_square PLACE panel2
+Alice: PICK pink_polygon PLACE panel3 Alice: PICK blue_square PLACE panel2 Bob: PICK pink_polygon PLACE panel4
+begin Bob: PICK blue_square PLACE panel3 Bob: PICK pink_polygon PLACE panel4 Chad: PICK yellow_trapezoid PLACE panel6
+Figure15: Snapshots oftheinteractionprocessof ReAd-S intask SortCubes sort4. This task is
+challengingandrequiresthecollaborationofthreerobotsandtakesaminimumofthreestepsto
+complete. Ourapproachefficientlyaccomplishesthistaskwithminimalenvironmentinteractions.
+begin Bob: PICK blue_square PLACE panel3 Alice: PICK blue_square PLACE panel2 Alice: PICK pink_polygon PLACE panel3
+Bob: PICK pink_polygon PLACE panel4 Bob: PICK yellow_trapezoid PLACE panel5 Chad: PICK yellow_trapezoid PLACE panel6
+Figure16: SnapshotsoftheinteractionprocessofRoCointaskSortCubessort4. Beforethejoint
+actionsofallrobotsareexecuted,theplanningresultcanonlybeimprovedthroughthedialogue
+ofLLMs. Inaddition,environmentalfeedbackcanbegeneratedonlyaftertheagentinteractswith
+thesimulator. Incontrast,ouradvantagefeedbackprovidestimelyfeedbackintheprocessofLLM
+planningforpolicyimprovementbeforeinteraction.
+29agent0: west agent0: west agent0: interact agent0: stay agent0: interact
+begin
+agent1: north agent1: interact agent1: west agent1: interact agent1: east
+agent0: interact agent0: interact agent0: east agent0: interact agent0: west agent0: interact
+agent1: interact agent1: west agent1: interact agent1: east agent1: interact agent1: south
+agent0: east agent0: interact agent0: interact agent0: stay agent0: west agent0: stay
+agent1: south agent1: west agent1: interact agent1: north agent1: north agent1: east
+agent0: stay agent0: interact agent0: east agent0: interact agent0: north agent0: south
+agent1: interact agent1: south agent1: interact agent1: north agent1: interact agent1: west
+agent0: south agent0: interact
+agent1: north agent1: west
+Figure17: SnapshotsoftheinteractionprocessofReAd-JintaskForcedCoordination. Thistaskis
+challengingandrequiresthecollaborationoftwoagentsandtakesaminimumof22stepstocomplete.
+Mostofthetime,ReAdcanimprovetheunreasonableplanningresultgeneratedbyLLM,sothat
+ReAd-Jcancompletethetasksmoothly. However,duetotheout-of-distribution(OOD),itispossible
+toevaluatetheadvantagevalueofsomeunreasonableplanningtocarryoutenvironmentalinteraction
+30agent0: west agent0: interact agent0: south agent0: interact agent0: west
+begin
+agent1: west agent1: north agent1: interact agent1: south agent1: interact
+agent0: interact agent0: east agent0: interact agent0: south agent0: interact agent0: north
+agent1: east agent1: interact agent1: west agent1: interact agent1: east agent1: interact
+agent0: interact agent0: south agent0: east agent0: interact agent0: south agent0: east
+agent1: west agent1: interact agent1: south agent1: west agent1: interact agent1: north
+agent0: north agent0: interact agent0: east agent0: south agent0: interact agent0: north
+agent1: west agent1: interact agent1: south agent1: west agent1: interact agent1: interact
+agent0: interact agent0: south
+agent1: east agent1: interact
+Figure18: SnapshotsoftheinteractionprocessofCentralPlanintaskForcedCoordination. From
+thescreenshotoftheinteractionprocess,itcanbefoundthatintheForcedCoordination,itisdifficult
+for LLM to understand the state of the current environment, so hallucination occurs frequently,
+resultinginthefailureofCentralPlantoeffectivelycompletethetask.
+31G ExamplesofReinforcedAdvantageFeedback
+FormatofAdvantageFeedback. TheAdvantageFeedbackcomprisesof[EvaluationScore]and
+[ImprovementFeedback]. Iftheadvantagescoreoftheactionishigherthanathreshold,theresponse
+willonlycontain[EvaluationScore]. Otherwise,weperformare-plantoimprovethepreviousaction,
+andtheresponsewillincludeboth[EvaluationScore]and[ImprovementFeedback].
+BelowwewillbrieflyshowafewexamplesoftheLLM’splanningcorrectedbyadvantagefeedback,
+usingReAd-StocompletetheSweepFloortask.
+[AliceResponse]:
+Bob,wehavegreen_cube_1andgreen_cube_2inthedustpan.Let’sMOVEtothetrash_binsoIcanDUMP
+thesecubes.Afterthat,wecangoforanyremainingcubes.
+PROCEED
+NAMEAliceACTIONMOVEtrash_bin.
+[AdvantageFeedback]:
+[EvaluationScore]:
+TheadvantagescoreofAlice’sactionis-0.6652!
+Theadvantagescoreislowandtheplanneedtobechanged!
+[ImproveFeedback]
+Alice’spreviousresponse:
+Bob,wehavegreen_cube_1andgreen_cube_2inthedustpan.Let’sMOVEtothetrash_binsoIcanDUMP
+thesecubes.Afterthat,wecangoforanyremainingcubes.
+PROCEED
+NAMEAliceACTIONMOVEtrash_bin
+Theadvantagescoreis-0.665,itistoolowtorun.Theanswermaycontainamisunderstandingofthestateof
+theenvironment,youmustchangeyouractiontoraisetheadvantagescoreover0!
+[AliceResponse]:
+Bob,Imadeamistakeinmypreviousplan.Sincewealreadyhavegreen_cube_1andgreen_cube_2inthe
+dustpan,IshouldDUMPthemintothetrash_bin.I’lldothatwhileyouWAIT.
+PROCEED
+NAMEAliceACTIONDUMP
+[AdvantageFeedback]:
+[EvaluationScore]:
+TheadvantagescoreofAlice’sactionis17.376!
+Theadvantagescoreishighenough.
+Explain. Inthisexample,theMOVEactioncanonlybeusedforcubesduetothetasksetting,and
+theMOVEofthetrashbinisillegal. However,theLLMslearnedfromthewebmayconsiderthe
+MOVE action can also be applied to the trash bin, which does not ground well with the specific
+task,resultinginthefactofhallucination. Ourmethodcancorrectthistypeoferrorwithadvantage
+feedbackaccordingtotherewardsincetakingMOVEactiontothetrashbinwillobtainazeroreward
+andleadtothesamenextstateasthecurrentstate.
+[AliceResponse]:
+Bob,wehavegreen_cube_1andgreen_cube_2inthedustpan.Let’sMOVEtothenextcubeweneedtosweep.
+Isuggestwegotopink_cube_1sinceit’stheclosestcubeonthetable.Oncewe’reinposition,IwillWAIT
+foryoutoSWEEPit.
+PROCEED
+NAMEAliceACTIONMOVEpink_cube_1
+[AdvantageFeedback]:
+[EvaluationScore]:
+TheadvantagescoreofAlice’sactionis-0.0927!
+Theadvantagescoreislowandtheplanneedstobechanged!
+[ImproveFeedback]
+32Alice’spreviousresponse:
+Bob,wehavegreen_cube_1andgreen_cube_2inthedustpan.Let’sMOVEtothenextcubeweneedtosweep.
+Isuggestwegotopink_cube_1sinceit’stheclosestcubeonthetable.Oncewe’reinposition,IwillWAIT
+foryoutoSWEEPit.
+PROCEED
+NAMEAliceACTIONMOVEpink_cube_1Theadvantagescoreis-0.0927,itistoolowtorun.Theanswer
+maycontainamisunderstandingofthestateoftheenvironment,youmustchangeyouractiontoraisethe
+advantagescoreover0!
+[AliceResponse]:
+Bob,Imadeamistakeinmyprevioussuggestion.Weshouldnotmovetopink_cube_1asit’snotoneofour
+targets. Instead,let’sDUMPthecubeswehaveinthedustpanintothetrash_bin. Iwilldothatwhileyou
+WAIT.
+PROCEED
+NAMEAliceACTIONDUMP
+[AdvantageFeedback]:
+[EvaluationScore]:
+TheadvantagescoreofAlice’sactionis18.4184!
+Theadvantagescoreishighenough.
+Explain. Inthisexample,thetargetcolorstosweepareyellowandgreen. Sincetheenvironment
+alsoincludesmanycubeswithothercolors,LLMmayplantosweepcubeswiththewrongcolors
+initially. Insuchcases,theadvantagefeedbackishelpfultocorrecttheplangeneratedbytheLLM.
+[BobResponse]:
+Alice,IwillWAITasyoumoveintopositionforyellow_cube_3.
+PROCEED
+NAMEBobACTIONWAIT
+[AdvantageFeedback]:
+[EvaluationScore]:
+TheadvantagescoreofBob’sactionis-3.2211!
+Thescoreislowandtheplanneedstobechanged!
+[ImproveFeedback]
+Bob’spreviousresponse:
+Alice,IwillWAITasyoumoveintopositionforyellow_cube_3.
+PROCEED
+NAMEBobACTIONWAIT
+Theadvantagescorescoreis-3.221,itistoolowtorun,theanswermaycontainamisunderstandingofthe
+stateoftheenvironment,youmustchangeyouractiontoraisetheadvantagescoreover-0.2!
+[BobResponse]:
+Alice,sinceyouaremovingtoyellow_cube_3,IwillalsoMOVEtoyellow_cube_3tobereadytoSWEEPit
+onceyouareinposition.
+PROCEED
+NAMEBobACTIONMOVEyellow_cube_3
+[AdvantageFeedback]:
+[EvaluationScore]:
+TheadvantagescoreofBob’sactionis0.6383!
+Theadvantagescoreishighenough.
+Explain. Inthisexample,theLLMplansforBobtomovetoyellow_cube_3withAlice,itcansweep
+directlyintothedustpaninthenextstep. However,duringthefirstLLMplanning,theLLMplansthe
+WAITactionforBob. IfBobperformsthisactionatthistime,AlicecanonlywaitforBobtomoveto
+yellow_cube_3. Thus,ourmethodperformsreplanningbasedontheadvantagefeedbacktoreduces
+theinteractionstepstotheenvironment.
+33
