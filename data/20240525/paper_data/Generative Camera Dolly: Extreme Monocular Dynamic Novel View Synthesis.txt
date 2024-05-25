@@ -1,0 +1,1095 @@
+Generative Camera Dolly: Extreme Monocular
+Dynamic Novel View Synthesis
+Basile Van Hoorick1, Rundi Wu1, Ege Ozguroglu1, Kyle Sargent2, Ruoshi Liu1, Pavel
+Tokmakov3, Achal Dave3, Changxi Zheng3, and Carl Vondrick1
+1 Columbia University
+2 Stanford University
+3 Toyota Research Institute
+gcd.cs.columbia.edu
+Abstract. Accuratereconstructionofcomplexdynamicscenesfromjustasin-
+gle viewpoint continues to be a challenging task in computer vision. Current
+dynamicnovelviewsynthesismethodstypicallyrequirevideosfrommanydiffer-
+ent camera viewpoints, necessitating careful recording setups, and significantly
+restricting their utility in the wild as well as in terms of embodied AI applica-
+tions.Inthispaper,weproposeGCD,acontrollablemonoculardynamicview
+synthesis pipeline that leverages large-scale diffusion priors to, given a video
+of any scene, generate a synchronous video from any other chosen perspective,
+conditioned on a set of relative camera pose parameters. Our model does not
+require depth as input, and does not explicitly model 3D scene geometry, in-
+stead performing end-to-end video-to-video translation in order to achieve its
+goal efficiently. Despite being trained on synthetic multi-view video data only,
+zero-shotreal-worldgeneralizationexperimentsshowpromisingresultsinmulti-
+pledomains,includingrobotics,objectpermanence,anddrivingenvironments.
+We believe our framework can potentially unlock powerful applications in rich
+dynamicsceneunderstanding,perceptionforrobotics,andinteractive3Dvideo
+viewing experiences for virtual reality.
+1 Introduction
+Videogenerationhasmadetremendousprogressinrecentyears.ResultsfromSora[7],
+OpenAI’srecentlyreleasedtext-to-videogenerationmodel,haveshownthatgenerating
+ahigh-qualityvideoaslongasoneminuteispossible.Followingthescalingcurve,video
+models will most likely continue to improve in many aspects. However, one essential
+functionality is still missing for these video models to be useful for many downstream
+applications–theabilitytogeneratethesamedynamicscenefromanarbitrarycamera
+perspective.
+Inthispaper,weaimtotackletheproblemofdynamic novel view synthesis (DVS)
+– given a video of a dynamic scene, we aim to generate a video of the same scene from
+another viewpoint. Once we develop a solution for this problem, we can leverage it for
+severalimpactfulusecases,suchasgeneratingnovelviewofalivestreetscenariobased
+4202
+yaM
+32
+]VC.sc[
+1v86841.5042:viXra2 B. Van Hoorick et al.
+Input Video Generated Video
+Recovers scene layout
+... Right: 15° and perform amodal
+Up: 20° completion despite
+heavy occlusions
+Reconstructs fully
+... Right: 60°
+occluded objects in in-
+Up: 15°
+the-wild video
+Imagines continued
+... Back: 10m motion of objects,
+Up: 7m
+Down: 35° including when they
+go out of frame
+Left: 40°
+Down: 15° Reconstruct fully
+occluded objects in
+cluttered dynamic
+... scenes, and from
+multiple virtual
+camera angles, even
+while they are being
+Right: 40° interacted with
+Up: 10°
+Fig.1: Spatial video translation of dynamic scenes. Given a single RGB video, we
+propose a method that is capable of imagining what that scene would look like from another
+viewpoint. Even for extreme camera transformations with large angles, our approach synthe-
+sizesvideoswithrichvisualdetailsthatareconsistentwiththeinput,demonstratingadvanced
+spatiotemporal reasoning capabilities.
+on cameras mounted on an autonomous vehicle; seeing a cluttered environment from
+a different viewpoint while a robot is performing dexterous manipulation; and reliving
+a video recorded in the past from different viewing angles to make it more immersive.
+However, this task is naturally extremely ill-posed and challenging. While yielding
+promisingresults,priorworkstypicallyaddresseditbyassumingeitherthatcontempo-
+raneousmulti-viewpointvideoisavailable[36,45,69,74,78],and/orbyimposingthatthe
+relative camera viewpoint changes must be small (i.e. limited to just a handful of de-
+grees) [31,67]. These restrictions make them vastly insufficient for the aforementioned
+applications, which require in-the-wild novel view synthesis pipelines with dramatic
+camera viewpoint changes.
+Free-viewpoint synthesis from a single video requires prior knowledge because it
+is highly under-constrained. Modern video generative models, such as Stable Video
+Diffusion[5],havelearnedrichpriorsforreal-worlddynamics,3Dgeometry,andcamera
+motions, as they are trained on hundreds of millions of video clips from the Internet.
+In this work, we propose an approach to capitalize on these rich representations forGCD: Extreme Monocular Dynamic Novel View Synthesis 3
+the task of DVS. We curate pairs of videos of dynamic scenes from simulation as
+training data, and apply them to steer a pretrained video generative model by means
+of finetuning.
+Qualitative and quantitative results demonstrate that our model achieves state-of-
+the-artresultsonthetaskofmonocularDVS,andgeneralizeseffectivelytovariousout-
+of-distribution scenes, including real-world driving videos, robot manipulation scenes,
+andotherin-the-wildvideoswithheavyocclusionpatterns,asshowninFigure1.Much
+like a camera dolly in film-making [72], our approach essentially conceives a virtual
+camera that can move around with up to six degrees of freedom, reveal significant
+portions of the scene that are otherwise unseen, reconstruct hidden objects behind
+occlusions, all within complex dynamic scenes, even when the contents are moving.
+Ourcorecontributionisthedesignandevaluationofaframework,GenerativeCam-
+era Dolly (GCD), for learning to generate videos from novel viewpoints of a dynamic
+scene, using an end-to-end video-to-video neural network. Section 2 provides a brief
+overview of related work. Section 3 introduces the approach including the model ar-
+chitecture, and a description of how to achieve precise camera control within the video
+diffusion model. Section 4 discusses training data, benchmarks, and task details. Sec-
+tion 5 investigates important hyperparameter decisions with regard to the conceptual
+implementationofcameracontrol.Section6providesbothquantitativeandqualitative
+evaluation of the system as well as several examples of our model generalizing to out-
+of-distribution data. We believe the ability to perform free-viewpoint video synthesis
+for a dynamic scene from one video will have a significant impact on 3D/4D computer
+visionresearch,aswellasotherrelatedareas,includingcontentcreation,AR/VR,and
+robotics.
+2 Related Work
+Dynamic scene reconstruction. The landscape of dynamic scene novel view synthesis
+has been primarily dominated by techniques that rely on multiple synchronized (i.e.
+contemporaneous) input videos [2,4,8,29,45,69,78,83], which limits their practical
+usage in real-world scenarios. The emergence of Neural Radiance Fields (NeRF) [39]
+hascatalyzedarevolutionindynamicviewsynthesis,presentingstate-of-the-artresults
+in this domain [14,30,41,42,46,60,76]. Most such methods represent scenes through
+time-evolving NeRFs, for handling complicated, dynamic 3D scene motions in casual
+videos, for example in neural scene flow fields [10,16,17,30,66,76].
+A notable trend in recent advancements involves the synthesis of novel views from
+a single camera perspective [17,31,67,79]. DynIBaR adopts a volumetric image-based
+renderingframeworkthat,insteadofencodingandcompressingtheentirescenewithin
+a single representation (for example an MLP), aggregates features from nearby views
+in a camera motion-aware manner, which enables synthesizing novel views for long
+videos with uncontrolled camera paths [31]. DpDy leverages an image-based diffusion
+model to iteratively distill knowledge coming from diffusion priors into a hybrid 4D
+representation, consisting of a static and dynamic NeRF [67].
+It is worth noting that essentially all aforementioned methods optimize per-scene
+representations independently of each other. Therefore, they are (1) largely unable to4 B. Van Hoorick et al.
+share any knowledge between different reconstructions, such as to generalize to unseen
+environments; and (2) largely unable to infer or extrapolate from incomplete obser-
+vations, such as to recover fully occluded regions. Moreover, failure modes are often
+observed when the monocular input video lacks effective multi-view cues, for example
+asenabledimplicitlythankstoamoving,especiallyafast-moving,camera[17].Excep-
+tionsinclude[62],wheredynamicscenecompletionisperformedthroughaconditional
+neural field based on a single, static RGB-D input video.
+Videodiffusionmodels. Recentworkhasrapidlyimprovedthestateofvideogeneration
+models.Mostgenerativemodelsfocusondiffusion-basedapproaches[5,6,18,24,25,55],
+though important exceptions exist, particularly with autoregressive training [71,81].
+Following recent work which shows image-based diffusion models can be re-purposed
+for computer vision tasks including monocular depth estimation [51], 3D reconstruc-
+tion[34]andamodalsegmentation[40],ourworkadoptsapublicvideodiffusionmodel
+for dynamic view synthesis. We rely on Stable Video Diffusion [5] as it generates high
+quality videos, and provides a public image-to-video model checkpoint with code, al-
+though our framework can generalize to any video generation approach.
+3Dand4Dgeneration. Mostoftheworksenablingsuccessful3Dgenerationviagenera-
+tivemodelshencerelyonchannellingtherepresentationalpowerof2Ddiffusionmodels
+towards a single 3D representation that is iteratively optimized over time, for example
+through score distillation [44]. This multiview 2D-to-3D paradigm is exemplified by
+many text-to-3D and image-to-3D works [11,23,26,32,34,43,44,64,68,70,75,84].
+Emphasizing the temporal component, text-to-4D and image-to-4D papers have
+begun appearing as well, although the results currently remain mostly limited to ani-
+mations of single objects or animals [1,33,56,85]. Video-to-4D, which is likely harder
+because every frame of the observation must be respected, has remained less explored
+so far. In [62], a video-to-4D scene reconstruction task and framework is proposed,
+although the model requires depth input, and only works in narrow domains as it is
+trained from scratch.
+Object permanence and amodal completion. The problem of reasoning about the invis-
+ible parts of a scene has been studied extensively in the literature, but so far almost
+exclusivelyfromanobject-centricperspective.Forexample,intheimageworld,amodal
+completion [15,40,82] studies the problem of reconstructing the occluded parts of an
+object based on its visible parts and the scene context. However, these methods are
+naturally restricted to partial occlusions. In contrast, for videos, some object track-
+ing methods can capitalize on the temporal context to successfully reason about the
+location [53,58,59] or even shape [63] of fully occluded instances.
+While abstracting the full complexity of a dynamic scene into a compact set of
+objectsallowsthesemethodstoberelativelydata-andcompute-efficient,italsolimits
+their applicability. In this work, we propose a more general approach that is capable
+of revealing any parts of a scene, together with their dynamics, similar to [62]. This
+includes not only occluded objects, but also ‘stuff’ regions [9], such as natural or man-
+made surfaces, liquids, and so on.GCD: Extreme Monocular Dynamic Novel View Synthesis 5
+Input Video Target Video
+Generative
+Camera Dolly
+Fig.2: Method. Our model, GCD, embodies an end-to-end video translation pipeline that
+mapsaninputvideofromanyviewpointintoanoutputvideofromanyotherperspective,with
+the objective of respecting all objects and dynamics occurring within the observed dynamic
+scene,andfaithfullyreconstructingthecorrespondingvisualdetailsfromthisnovelviewpoint.
+The relative camera extrinsics matrix ∆E guides the relationship between the two camera
+poses.
+We note that at least one concurrent work also tackles dynamic view synthesis: in
+Exo2Ego[37],authorsproposeaframeworkthattranslatesthird-person(exocentric)to
+first-person (egocentric) videos, incorporating priors for hand-object interactions and
+focusing primarily on those scenarios.
+3 Approach
+First, we formally introduce the task of monocular dynamic novel view synthesis from
+unconstrained video input. Let x ∈ RT×H×W×3 be RGB frames captured from a
+single camera perspective, that encode the visual observation of a dynamic scene of
+interest. We denote its associated camera extrinsics matrix as E ∈ RT×3×4, and
+src
+define E ∈RT×3×4 to be the desired target camera extrinsics matrix over time. Our
+dst
+model f is then tasked with predicting a video y ∈RT×H×W×3, that plausibly depicts
+the same dynamic scene from the specified new viewpoint. For simplicity, and without
+lossofgenerality,weassumethat(1)theoutputvideoistemporallysynchronizedwith
+the input, and (2) the camera intrinsics matrix K stays constant over time as well as
+across pose changes; notably, the virtual camera for y assumes the same focal length
+as the actual camera does for x.
+Since novel view synthesis is an inherently under-constrained, challenging problem,
+our approach will use existing large-scale video generative models. Diffusion models
+have been shown to excel at image-to-3D tasks [34,35,54,75], justifying our attempt
+to perform video-to-4D. Moreover, they have shown remarkable zero-shot abilities in
+generating realistic, diverse videos from user-given text descriptions and/or initial
+frames[3,5,25].However,theyaretypicallynottrainedtoacceptvideoasacondition-
+ing signal, and fine-grained control over camera transformations is also not available
+by default. To overcome these obstacles, we must make a few architectural changes.6 B. Van Hoorick et al.
+3.1 Camera viewpoint control
+GivenasingleRGBvideoxofadynamicscene,ourgoalistosynthesizeanothervideo
+y of the scene from a different viewpoint. Since large-scale video diffusion models have
+been trained on hyper-scale data, their support of the natural video distribution most
+likelycoversawiderangeofrealisticscenesandviewpoints.Tothisend,givenadataset
+ofpairedvideosandtheirrelativecameraextrinsics∆E ={E−1 ·E }T ∈RT×3×4
+src,t dst,t t=1
+overtime,weteachalatentdiffusionmodelf tolearncontrolsovercameraparameters
+within any video:
+y =f(x,∆E) (1)
+Specifically, we modify Stable Video Diffusion (SVD) to accept a new form of micro-
+conditioning, a term coined in [5], which is designed for the purpose of communicating
+low-dimensional metadata (such as the desired frame rate of the output video, and
+the amount of optical flow) to the network. We decompose ∆E into a series of camera
+rotation matrices R ∈ SO(3) and translation matrices T ∈ R3 over time, project
+t t
+this information through an MLP m, and add the resulting embedding to the feature
+vectors at various convolutional layers placed throughout the network, similarly to the
+concurrentworkSV3D[64].Thediffusiontimestep,FPS,andmotionstrengtharealso
+passed to the network this way. To preserve the existing priors of SVD as much as
+possible, we initialize the network weights based on the publicly available image-to-
+video model checkpoint. The new embedder m that processes {(R ,T )} is randomly
+t t
+initializedwithdefaultparameters.Aftertrainingthenetworkend-to-endtotacklethis
+new task, the resulting model is capable of imagining unseen videos from any chosen
+perspective, as illustrated in Figure 2.
+3.2 Video conditioning
+To accurately perform 4D dynamic scene completion, both low-level perception (to
+analyzethevisibleshapes,appearance,etc.)andhigh-levelunderstanding(toinferthe
+occluded regions, based on world knowledge as well as other observed frames) of the
+inputvideoisrequired.WeadoptthesamehybridconditioningmechanismasSVD[5],
+where the visual signal is processed in two ways. In case of image-to-video, the first
+stream calculates the CLIP [47] embedding c(x ) of the incoming image to condition
+0
+theU-Netϵviacross-attention,andthesecondstreamchannel-concatenatestheVAE-
+encoded image x with all frames of the video sample yˆ that is being denoised by the
+0
+diffusion model.
+We keep this mechanism almost entirely intact when moving from the pretraining
+to the finetuning stage, but we propose to simply substitute the first frame x for the
+0
+entireinputvideoxfromthesourceviewpoint,suchthattheconditioninginformation
+now becomes a function of time. This ensures that our model has the opportunity to
+watch how the dynamic scene unfolds over time, and hence must learn to respect the
+dynamics and physics of the objects within.
+In architectural terms, the output video sample yˆ has contemporaneous input
+frames from x attached to it for every video timestamp t, such that at diffusion noise
+timestep u:
+yˆ =ϵ(yˆ ∥x,∆E), (2)
+u−1 uGCD: Extreme Monocular Dynamic Novel View Synthesis 7
+Input Video Ours - Gradual Direct Jump Scratch Ground Truth
+LLeefftt:: 4455°°
+UUpp:: 55°°
+Left: 10°
+Up: 5°
+Up: 15°
+Up: 20°
+Left: 5°
+Up: 15°
+Fig.3: Qualitative ablation study results for Kubric-4D.Weshowinputs,predictions,
+ablations,andgroundtruths.TheinputandoutputvideosbothconsistofT =14frames,but
+weshowthefirstandlastframeoftheinputvideoforconciseness,andonlythelastframeof
+theoutputandtarget.Whereastheablationstendtolookblurrywithincorrectshapeand/or
+appearancecharacteristics(especiallyformovingobjects),ourmainmodel(gradual,max90°,
+finetuned) faithfully reconstructs the scene layout and dynamics from the input video. In
+addition, it often hallucinates plausible backgrounds in unseen regions.
+Inotherwords,theU-Netϵacceptsinputfeaturemapsofdimensionality2D×T×H×
+F
+W,whereD andF aretheVAEembeddingsizeanddownsamplingfactorrespectively,
+F
+and produces output feature maps of dimensionality D×T × H × W that represent a
+F F
+less noisy sample.
+Note that the SVD architecture consists of a factorized 3D U-Net that interleaves
+spatial and temporal blocks, which establish correspondences between features across
+locations(perframe),andacrosstime(perspatialposition)respectively.Spatiotempo-
+ralattentioncanconsequentlytakeplacebetweenallpairsofinputandoutputframes,
+as well as any pair of regions within both videos. Moreover, there are now T differ-
+ent CLIP embeddings {c(x )} that appropriately condition the U-Net layers at each
+t
+matching frame.
+4 Datasets
+While the availability of multi-view video data has been growing [13,19,20,48,52,61,
+62,87], it is still relatively sparse compared to conventional image or video datasets.
+In order to train and evaluate our model, we require a decent amount of multi-view
+RGB videos from highly cluttered dynamic scenes. To this end, we contribute two
+high-quality synthetic datasets, shown in Figures 3, 4, and 5 and briefly described
+below.8 B. Van Hoorick et al.
+Ours - Gradual Ours - Gradual Direct Jump Direct Jump GT GT
+Input Video (RGB) (Semantic) (RGB) (Semantic) (RGB) (Semantic) Building
+Back: 10m Car
+Up: 7m Crosswalk
+Down: 35°
+Curb
+Driveable
+Surface
+Back: 10m Fence
+Up: 7m Fixed
+Down: 35° Structure
+Lane
+Marking
+Limit
+Line
+Ba Uc pk :: 71 m0m Pedestrian
+Down: 35° Pole
+Road
+Back: 10m Sidewalk
+Up: 7m Sky
+Down: 35°
+Terrain
+Traffic
+Light
+DBa
+U
+oc wpk n::
+7
+:1 m0 35m
+°
+VT Sir ega gnf ef ti ac
+tion
+Void
+Fig.4: Qualitative ablation study results for ParallelDomain-4D. We show inputs,
+predictions,ablations,andgroundtruthsforbothvisualandsemanticscenecompletion.Our
+model excels at recovering the top-down viewpoint with high accuracy in both modalities,
+despitetheheavyocclusionpatternsthatoftenoccurindrivingscenes.Whilethedirect model
+performs almost as well as the gradual one, it tends to introduce slightly more hallucination
+and discoloration of objects.
+4.1 Kubric-4D
+WeleveragetheKubric[21]simulatorasourdatasourceforgenericmulti-objectinter-
+action videos, carrying a high degree of visual detail and physical realism. Each scene
+contains between 7 and 22 randomly sized objects in total, with roughly one-third
+of them spawned in mid-air at the beginning of the video to encourage sophisticated
+dynamics. Complicated occlusion patterns arise very frequently, making this dataset
+highly challenging for accurate novel view synthesis. We generate 3,000 scenes of 60
+frames each, at a frame rate of 24 FPS, with RGB-D data rendered from 16 virtual
+cameras at a fixed set of poses.
+Becausethedynamicsceneissufficientlydenselycovered,weunprojectallthepixels
+from available viewpoints into a merged 3D point cloud per frame. As a form of data
+augmentation, we then render them into videos from arbitrary viewpoints according
+to camera trajectories that can be chosen and controllably sampled depending on the
+exact training configuration.
+4.2 ParallelDomain-4D
+Since rich scene understanding and spatial reasoning skills are paramount for maxi-
+mizing situational awareness in the context of driving, we employ the state-of-the-art
+datagenerationserviceParallelDomaintoproducecomplex,highlyphotorealisticroad
+scenes. The videos depict driving scenarios covering a wide variety of locations, ve-
+hicles, persons, traffic situations, and weather conditions. Here, we have 1,533 scenes
+available of 50 frames each, at a frame rate of 10 FPS, with high-quality annotations
+formultiplemodalities(RGBcolors,semanticcategories,instanceIDs,etc.)alongwith
+per-pixel ground truth depth rendered from 19 virtual cameras at a fixed set of poses.GCD: Extreme Monocular Dynamic Novel View Synthesis 9
+PSNR SSIM LPIPS PSNR SSIM
+Variant
+(all)↑ (all)↑ (all)↓ (occ.)↑ (occ.)↑
+Ours(direct,max90°,scratch) 15.96 0.450 0.575 15.85 0.470
+Ours(direct,max180,scratch) 14.71 0.426 0.611 15.15 0.458
+Ours(gradual,max90°,scratch) 16.92 0.486 0.542 16.59 0.494
+Ours(gradual,max180°,scratch) 16.63 0.479 0.552 16.34 0.491
+Ours(direct,max90°,finetuned) 17.23 0.494 0.507 16.69 0.492
+Ours(direct,max180°,finetuned) 16.65 0.471 0.529 16.18 0.470
+Ours(gradual,max90°,finetuned) 17.88 0.521 0.486 17.33 0.514
+Ours(gradual,max180°,finetuned) 17.81 0.521 0.488 17.20 0.515
+Table 1: Ablation study results on Kubric.Weevaluatevariousversionsofourdynamic
+view synthesis model on only the last frame for fairness, i.e. to ensure that the direct and
+gradual trajectory models are spatially aligned. See Figure 3 for qualitative illustrations.
+PSNR SSIM LPIPS PSNR SSIM
+Variant
+(all)↑ (all)↑ (all)↓ (occ.)↑ (occ.)↑
+Ours(direct,scratch) 22.49 0.622 0.487 22.62 0.653
+Ours(gradual,scratch) 22.73 0.632 0.467 22.76 0.664
+Ours(direct,finetuned) 23.32 0.664 0.440 23.29 0.691
+Ours(gradual,finetuned) 23.47 0.670 0.425 23.52 0.696
+Table2:AblationstudyresultsonParallelDomaininRGBspace.Weperformvisual
+scenecompletion,andevaluatevariousdynamicviewsynthesismodelsononlythelastframe
+for fairness, similarly to Table 1. See Figure 4 for qualitative illustrations.
+Inourexperiments,wetrainseparatemodelsforRGBviewsynthesisandsemantic
+view synthesis; the latter demonstrates that the predicted modality need not be the
+same as the given modality.
+Similarly as for Kubric-4D, we perform a unproject-and-reproject routine to turn
+this multi-view video dataset into a pseudo-4D data source from which we can render
+videos of the scene from arbitrary camera perspectives over time, within certain pre-
+defined spatiotemporal bounds.
+4.3 Task details
+When training for the task of dynamic view synthesis on Kubric-4D, pairs of input
+and output poses are randomly sampled within certain spherical coordinate bounds
+(both in absolute terms and relative to each other), with the extra condition that they
+are looking at the center of the 3D scene. Therefore, at inference time, there are three
+effective degrees of freedom with regard to camera control, similar to Zero-1-to-3 [34].
+In case of ParallelDomain-4D, the input video and pose always correspond to the
+ego vehicle’s forward-facing viewpoint, as if a sensor were mounted on the front of
+the car. The output pose is a fixed top-down viewpoint with the ego vehicle at the
+bottom center of the video, which enables gaining a much more detailed overview of
+its surroundings.10 B. Van Hoorick et al.
+Table 3: Ablation study results on
+mIoU mIoU
+Variant ParallelDomain in semantic space.
+(all)↑ (occ.)↑
+We perform semantic completion of the
+Ours(direct,fromscratch) 31.2% 28.6% scene,againsimilarlytoTable1.SeeFig-
+Ours(gradual,fromscratch) 34.4% 32.1% ure 4 for qualitative illustrations.
+Ours(direct,finetuned) 36.7% 35.4%
+Ours(gradual,finetuned) 39.0% 37.7%
+5 Choice of camera trajectory
+Our formulation of the dynamic view synthesis task in Section 3 is quite general, so
+it is worth thinking about which specific instantiations of this conceptual framework
+would be most effective in practice. Given arbitrary video inputs, our goal is to devise
+a structured protocol for choosing relative camera trajectories that both maximize the
+exploitation of knowledge contained within the pretrained SVD representation, as well
+as enable a detailed understanding of the dynamic scene observed at inference time to
+thefullestextentpossible.Specifically,wewishtosynthesizeviewsthatreachasfaras
+the opposite end of the scene, for example, by rotating the azimuth angle up to 180°.
+This is considerably more dramatic than what the state of the art in dynamic view
+synthesis is typically capable of [10,17,31,74], and allows us to reveal large, formerly
+unseen portions of the surroundings.
+However,itturnsoutthatopposingforcesareatplay.Ononehand,wewishtoget
+to the destination camera pose “as fast as possible” (because the scene could already
+be evolving and changing over time as we are watching it). On the other hand, if the
+output video moves away from the source viewpoint too quickly, we might risk incur-
+ring a distribution misalignment due to the fact that the image-to-video SVD model
+predominantly generates videos that start at nearly the exact same spatial perspective
+as the given image. Moreover, the camera generally does not move much throughout
+the video, typically performing only minor panning motions and/or mild rotations.
+To resolve this concern, we translate it into three questions: (1) where should the
+output pose start; (2) how fast should it be taught to move in-between subsequent
+frames; and (3) how much does finetuning, i.e. borrowing priors from SVD help (or
+hurt) in each case, versus training an identical network from scratch? We investigate
+this by running comparative studies on both the Kubric-4D and ParallelDomain-4D
+datasets. For each tested scene, we pick a source pose E and a destination pose
+src,0
+E . For our experiments, we assume a static input camera, i.e., E ={E }T .
+dst,T src src,0 t=1
+The results are shown in Tables 1, 2, and 3, and Figures 3 and 4. Here, gradual
+means that the virtual camera pose corresponding to the output video linearly inter-
+polates between E and E from start to end (in spherical coordinates), whereas
+src,0 dst,T
+direct implies that the generated video directly adheres precisely to E at every
+dst,T
+frame without interpolation. For Kubric-4D, max 90° limits the relative horizontal
+(i.e. azimuth) angle variation between input and output to ±90◦ at training time,
+whereas max 180° effectively allows for synthesizing any 360°-surround viewpoint of
+the dynamic scene.GCD: Extreme Monocular Dynamic Novel View Synthesis 11
+Input Video Ours (GCD) ZeroNVS HexPlane Ground Truth
+Right: 40°
+Up: 5°
+Right: 35°
+Up: 5°
+Left: 20°
+Up: 5°
+Right: 45°
+Up: 10°
+Left: 15°
+Fig.5: Qualitative baseline comparison results for Kubric-4D. We show inputs, pre-
+dictions, baselines, and ground truths. Compared to baselines, our results depict the scene
+layoutanddynamicsunderthedesirednovelviewpointswithreasonableaccuracyoveralland
+much fewer flickering artefacts.
+From this ablation study, we observe with Kubric-4D that (1) it is preferable to
+gradually interpolate from source to destination pose than to immediately jump there
+(+1.17 dB average PSNR improvement between direct and gradual); (2) there exists
+a trade-off between the range of camera transformations the model should be trained
+for, and how extreme of a rotation one wishes to be able to achieve at most (+0.55
+dB between max 180° and max 90°); and (3) it is preferable to start from the SVD
+checkpointthathadbeentrainedonlarge-scalevideoratherthantotrainfromrandom
+initialization,thoughnotbyaparticularlyhugemargin(+1.34dBbetweenscratch and
+finetuned).
+WemakeconsistentfindingsintheParallelDomain-4Ddataset,wheregradual,fine-
+tuned is the best model. For Kubric-4D, although gradual, max 90°, finetuned and
+gradual, max 180°, finetuned are very close, we proceed with the former in all further
+experiments, described below.
+6 Experiments
+Inthissection,weevaluateourmonoculardynamicnovelviewsynthesisframework.We
+reportnumericalresultsonthetestsplitsofourtwoin-domaindatasets(Kubric-4Dand
+ParallelDomain-4D),comparingagainstseveralstate-of-the-artbaselines,butaddition-
+allyshowcasepromisingqualitativeresultsonin-the-wildvideosfromvariousdomains.
+For more results as well as animated visualizations, please see gcd.cs.columbia.edu.12 B. Van Hoorick et al.
+Fig.6: Qualitative real-world generalization results. We show inputs and predictions
+on BridgeData V2 [65], TCOW Rubric [63], TRI-DDAD [22], and Berkeley DeepDrive [80].
+Despite being trained on synthetic data alone, our approach show surprisingly strong gener-
+alizationskillstoavarietyofreal-worldscenarios.Forexample,onthetopright,whereafull
+occlusion occurs around the middle of the video, our model faithfully predicts both the posi-
+tionandappearanceoftheinvisibleduckatthelastframe,demonstratingobjectpermanence
+capabilities.
+6.1 Implementation details
+Training. WeadopttheSVDvariantthatpredictsT =14frames,butduetocomputa-
+tionalconstraints,wedownscaletheinputandoutputresolutiontoW×H =384×256.
+This allows us to scale the batch size up to 56 when training with Kubric-4D on 7x
+A100 GPUs with 80 GB VRAM each. We finetune all models for 10k iterations using
+the Adam optimizer, which takes roughly 3 days. On ParallelDomain-4D, we instead
+finetune models for 13k iterations with an effective batch size of 24 through a gradient
+accumulationfactorof4on7xA6000GPUswith48GBVRAMeach,whichalsotakes
+roughly 3 days.
+Inference. We generate conditional samples from the resulting diffusion model by run-
+ningtheEDMsamplerfor25steps[27].SVDoriginallyemploysclassifier-freeguidance
+attesttimewithaguidancestrengthwthatlinearlyincreasesasafunctionofthevideo
+frame index (not the diffusion timestep) from start to end within the range [1,2.5] by
+default[5],butwefoundbetterperformancebyadjustingthisrangeto[1,1.5]instead.
+Producing one output video takes roughly 10 seconds.
+Evaluationmetrics. Followingrelatedworkinnovelviewsynthesis[28,31,34,38,50,67],
+forpredictionsinRGBspace,weevaluatePSNR,SSIM,andLPIPSscoresandaverage
+the results across both video frames and test examples. For semantic category predic-
+tions, following conventions in semantic segmentation [12,57,77,86], we first calculate
+the average Intersection over Union (IoU) per category over the whole ParallelDomain
+test set, and then report the mean IoU (mIoU) across categories.GCD: Extreme Monocular Dynamic Novel View Synthesis 13
+PSNR SSIM LPIPS PSNR SSIM
+Method
+(all)↑ (all)↑ (all)↓ (occ.)↑ (occ.)↑
+HexPlane[10] 15.38 0.428 0.568 14.71 0.428
+4D-GS[74] 14.92 0.388 0.584 14.55 0.392
+DynIBaR[31] 12.86 0.356 0.646 12.78 0.358
+VanillaSVD[5] 13.85 0.312 0.556 13.66 0.326
+ZeroNVS[50] 15.68 0.396 0.508 14.18 0.368
+Ours 20.30 0.587 0.408 18.60 0.527
+ReprojectRGB-D* 12.51 0.537 0.416 - -
+Table4:BaselinecomparisonresultsonKubric-4D.Weevaluategradualdynamicview
+synthesis models on all 13 output frames, and with a single RGB video as input. We signifi-
+cantlyoutperformallbaselinesforbothvisibleandoccludedpixels.*Usesprivilegedinformation,
+i.e.canaccessthegroundtruthdepthmapfromtheinputviewpoint.
+PSNR SSIM LPIPS PSNR SSIM
+Method
+(all)↑ (all)↑ (all)↓ (occ.)↑ (occ.)↑
+VanillaSVD[5] 12.88 0.400 0.658 13.96 0.466
+ZeroNVS[50] 18.88 0.490 0.555 19.29 0.552
+Ours 25.04 0.731 0.358 24.70 0.733
+ReprojectRGB-D* 17.66 0.459 0.441 - -
+Table5:BaselinecomparisonresultsonParallelDomaininRGBspace.Weperform
+visualscenecompletion,andevaluategradualdynamicviewsynthesisonall13outputframes,
+andwithasingleRGBvideoasinput.Wesignificantlyoutperformallbaselinesforbothvisible
+and occluded pixels. *Usesprivilegedinformation,i.e.canaccessthegroundtruthdepthmapfromthe
+inputviewpoint.
+Based on the ground truth depth information from the input viewpoint, it is also
+possible to determine which pixels in the target viewpoint are visible or hidden. In ad-
+ditiontotheregularmetrics(“all”),wethereforespatiallymaskthevideostodetermine
+metrics for occluded regions only (“occ.”), which the model essentially has to inpaint.
+Even though our model accepts and predicts the same number of frames (T =14),
+the first output frame for the gradual camera trajectory models (described below) is
+spatially aligned with the first input frame. This implies that it could in principle be
+solved by copying its pixels (except if the task involves switching to another modality,
+for example semantic category prediction), so we exclude the first frame from the
+evaluationtoavoidinflatingthemetrics,insteadaveragingonlyoverthelastT−1=13
+frames, which correspond to different extrinsics.
+6.2 Baselines
+Wecompareourfinalmodelsagainstthestate-of-the-artdynamicviewsynthesismeth-
+odsincludingHexPlane [10],4D-GS [74]andDynIBaR[31],whichallperformper-scene
+optimization. While these baselines are capable of handling videos with higher reso-
+lutions than ours, they are typically limited to much smaller camera angle changes in14 B. Van Hoorick et al.
+Table 6: Baseline comparison re-
+mIoU mIoU
+Method sults on ParallelDomain in se-
+(all)↑ (occ.)↑
+mantic space. We perform seman-
+Ours 43.4% 38.2% ticcompletionofthescene,stillbased
+ReprojectSem-D* 37.3% - on a single RGB video as input. *Uses
+privileged information, i.e. can access the
+ground truth depth map and ground truth
+semanticcategoryofallinputpixels.
+the one- or low-number-of-views regime, and inference runtimes are many orders of
+magnitude larger (e.g. hours vs. seconds).
+In addition, we compare to two pretrained diffusion models Vanilla SVD [5] and
+ZeroNVS [50] by adapting them for our task. For Vanilla SVD, we run the original
+SVD model to generate videos based on the first input frame, without any changes or
+finetuning. For ZeroNVS, which can generate novel views of scenes based on a single
+image, we run it for all the input frames independently to obtain the output video.
+Finally,wecomparetoasimplegeometricbaseline(ReprojectRGB-D andReproject
+Sem-D), where we reproject pixels from input frames to target viewpoints using the
+ground truth depth maps, switching to the appropriate modality as needed. Here, the
+goal is to study how much information is contained within the input video itself, if
+precise per-pixel depth values were fully known (which is often not the case).
+All methods observe the same monocular input video, and are evaluated on the
+exact same set of randomly sampled output camera trajectories for fairness.
+6.3 Results
+We report quantitative results in Tables 4, 5, and 6, and show qualitative results in
+Figures 5 and 4. On both datasets, our model outperforms baseline methods by a
+large margin. Per-scene optimization methods (e.g., HexPlane) fail to reconstruct the
+4D scene representation from a single input view, and thus the rendered videos from
+novel viewpoints have severe artifacts. Vanilla SVD is able to generate smooth videos
+but fails to follow the desired camera trajectories, and does not incorporate content
+from later frames. ZeroNVS can synthesize plausible individual frames from desired
+viewpoints, but the resulting videos are not temporally coherent and do not respect
+the scene dynamics.
+In contrast, our model mostly generates plausible videos that accurately depict the
+complexscenegeometryandmotionunderthedesirednovelviewpointtransformations.
+We remark that the results are not perfect, as the correspondence of objects between
+the input and generated output videos is not always very clear, and some rigid objects
+tend to erroneously deform. However, the nature of the task is extremely challenging,
+and we expect the potential visual quality and consistency of our framework to only
+improve over time, e.g. when combined with better pretrained representations.
+Apartfromtheevaluationonin-domaindatasets,wealsoshowcasepromisingresults
+onreal-worldin-the-wildvideos.AsshowninFigure6,ourmodelsometimesgeneralizes
+quite well to various domains including driving environments, daily indoor videos, and
+robotic manipulation scenes.GCD: Extreme Monocular Dynamic Novel View Synthesis 15
+7 Discussion
+Inthispaper,wepresentaframeworkfordynamicnovelviewsynthesisfromamonocu-
+larvideobyfinetuningalarge-scalepretrainedvideodiffusionmodel[5]onhigh-quality
+synthetic data. While we show promising results on real-world in-the-wild videos, our
+modelstillstrugglesonsignificantlyout-of-distributionexamples,e.g.videoswithmov-
+inghumans.Nevertheless,webelievethisworkdeliversmeaningfulprogressintermsof
+gainingarich,detailedunderstandingof4Dscenes,andtakesasolidfirststeptowards
+enabling zero-shot dynamic view synthesis from a monocular video.
+Acknowledgements: This research is based on work partially supported by the NSF
+CAREER Award #2046910 and the NSF Center for Smart Streetscapes (CS3) under NSF
+Cooperative Agreement No. EEC-2133516. The views and conclusions contained herein are
+those of the authors and should not be interpreted as necessarily representing the official
+policies, either expressed or implied, of the sponsors.
+References
+1. Bahmani,S.,Skorokhodov,I.,Rong,V.,Wetzstein,G.,Guibas,L.,Wonka,P.,Tulyakov,
+S., Park, J.J., Tagliasacchi, A., Lindell, D.B.: 4d-fy: Text-to-4d generation using hybrid
+score distillation sampling. arXiv preprint arXiv:2311.17984 (2023) 4
+2. Bansal, A., Vo, M., Sheikh, Y., Ramanan, D., Narasimhan, S.: 4d visualization of dy-
+namic events from unconstrained multi-view videos. In: Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition. pp. 5366–5375 (2020) 3
+3. Bar-Tal, O., Chefer, H., Tov, O., Herrmann, C., Paiss, R., Zada, S., Ephrat, A., Hur, J.,
+Li, Y., Michaeli, T., et al.: Lumiere: A space-time diffusion model for video generation.
+arXiv preprint arXiv:2401.12945 (2024) 5
+4. Bemana, M., Myszkowski, K., Seidel, H.P., Ritschel, T.: X-fields: Implicit neural view-,
+light-and time-image interpolation. ACM Transactions on Graphics (TOG) 39(6), 1–15
+(2020) 3
+5. Blattmann, A., Dockhorn, T., Kulal, S., Mendelevitch, D., Kilian, M., Lorenz, D., Levi,
+Y., English, Z., Voleti, V., Letts, A., et al.: Stable video diffusion: Scaling latent video
+diffusion models to large datasets. arXiv preprint arXiv:2311.15127 (2023) 2, 4, 5, 6, 12,
+13, 14, 15, 23, 25
+6. Blattmann, A., Rombach, R., Ling, H., Dockhorn, T., Kim, S.W., Fidler, S., Kreis, K.:
+Alignyourlatents:High-resolutionvideosynthesiswithlatentdiffusionmodels.In:CVPR
+(2023) 4, 23, 25
+7. Brooks, T., Peebles, B., Holmes, C., DePue, W., Guo, Y., Jing, L., Schnurr, D., Taylor,
+J., Luhman, T., Luhman, E., Ng, C., Wang, R., Ramesh, A.: Video generation models
+asworldsimulators(2024),https://openai.com/research/video-generation-models-
+as-world-simulators 1
+8. Broxton,M.,Flynn,J.,Overbeck,R.,Erickson,D.,Hedman,P.,Duvall,M.,Dourgarian,
+J., Busch, J., Whalen, M., Debevec, P.: Immersive light field video with a layered mesh
+representation. ACM Transactions on Graphics (TOG) 39(4), 86–1 (2020) 3
+9. Caesar, H., Uijlings, J., Ferrari, V.: Coco-stuff: Thing and stuff classes in context. In:
+CVPR (2018) 4
+10. Cao,A.,Johnson,J.:Hexplane:Afastrepresentationfordynamicscenes.In:Proceedings
+oftheIEEE/CVFConferenceonComputerVisionandPatternRecognition.pp.130–141
+(2023) 3, 10, 13, 2116 B. Van Hoorick et al.
+11. Chen,R.,Chen,Y.,Jiao,N.,Jia,K.:Fantasia3d:Disentanglinggeometryandappearance
+for high-quality text-to-3d content creation. arXiv preprint arXiv:2303.13873 (2023) 4
+12. Cordts, M., Omran, M., Ramos, S., Rehfeld, T., Enzweiler, M., Benenson, R., Franke,
+U.,Roth,S.,Schiele,B.:Thecityscapesdatasetforsemanticurbansceneunderstanding.
+In: Proceedings of the IEEE conference on computer vision and pattern recognition. pp.
+3213–3223 (2016) 12
+13. Corona, K., Osterdahl, K., Collins, R., Hoogs, A.: Meva: A large-scale multiview, mul-
+timodal video dataset for activity detection. In: Proceedings of the IEEE/CVF winter
+conference on applications of computer vision. pp. 1060–1068 (2021) 7
+14. Du, Y., Zhang, Y., Yu, H.X., Tenenbaum, J.B., Wu, J.: Neural radiance flow for 4d
+view synthesis and video processing. In: 2021 IEEE/CVF International Conference on
+Computer Vision (ICCV). pp. 14304–14314. IEEE Computer Society (2021) 3
+15. Ehsani, K., Mottaghi, R., Farhadi, A.: Segan: Segmenting and generating the invisible.
+In: CVPR (2018) 4
+16. Gao, C., Saraf, A., Kopf, J., Huang, J.B.: Dynamic view synthesis from dynamic monoc-
+ular video. In: Proceedings of the IEEE/CVF International Conference on Computer
+Vision. pp. 5712–5721 (2021) 3
+17. Gao,H.,Li,R.,Tulsiani,S.,Russell,B.,Kanazawa,A.:Monoculardynamicviewsynthesis:
+A reality check. Advances in Neural Information Processing Systems 35, 33768–33780
+(2022) 3, 4, 10
+18. Ge, S., Nah, S., Liu, G., Poon, T., Tao, A., Catanzaro, B., Jacobs, D., Huang, J.B., Liu,
+M.Y.,Balaji,Y.:Preserveyourowncorrelation:Anoisepriorforvideodiffusionmodels.
+In: ICCV (2023) 4
+19. Grauman,K.,Westbury,A.,Byrne,E.,Chavis,Z.,Furnari,A.,Girdhar,R.,Hamburger,
+J.,Jiang,H.,Liu,M.,Liu,X.,etal.:Ego4d:Aroundtheworldin3,000hoursofegocentric
+video. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. pp. 18995–19012 (2022) 7
+20. Grauman, K., Westbury, A., Torresani, L., Kitani, K., Malik, J., Afouras, T., Ashutosh,
+K., Baiyya, V., Bansal, S., Boote, B., et al.: Ego-exo4d: Understanding skilled human
+activityfromfirst-andthird-personperspectives.arXivpreprintarXiv:2311.18259(2023)
+7
+21. Greff, K., Belletti, F., Beyer, L., Doersch, C., Du, Y., Duckworth, D., Fleet, D.J.,
+Gnanapragasam, D., Golemo, F., Herrmann, C., et al.: Kubric: A scalable dataset gen-
+erator. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. pp. 3749–3761 (2022) 8
+22. Guizilini, V., Ambrus, R., Pillai, S., Raventos, A., Gaidon, A.: 3d packing for self-
+supervised monocular depth estimation. In: IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR) (2020) 12
+23. Haque,A.,Tancik,M.,Efros,A.A.,Holynski,A.,Kanazawa,A.:Instruct-nerf2nerf:Edit-
+ing 3d scenes with instructions. arXiv preprint arXiv:2303.12789 (2023) 4
+24. Ho, J., Chan, W., Saharia, C., Whang, J., Gao, R., Gritsenko, A., Kingma, D.P., Poole,
+B., Norouzi, M., Fleet, D.J., et al.: Imagen video: High definition video generation with
+diffusion models. arXiv preprint arXiv:2210.02303 (2022) 4
+25. Ho, J., Salimans, T., Gritsenko, A., Chan, W., Norouzi, M., Fleet, D.J.: Video diffusion
+models.ArXivabs/2204.03458(2022),https://api.semanticscholar.org/CorpusID:
+248006185 4, 5
+26. Höllein,L.,Cao,A.,Owens,A.,Johnson,J.,Nießner,M.:Text2room:Extractingtextured
+3d meshes from 2d text-to-image models. arXiv preprint arXiv:2303.11989 (2023) 4
+27. Karras,T.,Aittala,M.,Aila,T.,Laine,S.:Elucidatingthedesignspaceofdiffusion-based
+generative models. Advances in Neural Information Processing Systems 35, 26565–26577
+(2022) 12GCD: Extreme Monocular Dynamic Novel View Synthesis 17
+28. Kerbl, B., Kopanas, G., Leimkühler, T., Drettakis, G.: 3d gaussian splatting for real-
+time radiance field rendering. ACM Transactions on Graphics 42(4) (July 2023), https:
+//repo-sam.inria.fr/fungraph/3d-gaussian-splatting/ 12
+29. Li,T.,Slavcheva,M.,Zollhoefer,M.,Green,S.,Lassner,C.,Kim,C.,Schmidt,T.,Love-
+grove, S., Goesele, M., Newcombe, R., et al.: Neural 3d video synthesis from multi-view
+video. In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. pp. 5521–5531 (2022) 3
+30. Li, Z., Niklaus, S., Snavely, N., Wang, O.: Neural scene flow fields for space-time view
+synthesisofdynamicscenes.In:ProceedingsoftheIEEE/CVFConferenceonComputer
+Vision and Pattern Recognition. pp. 6498–6508 (2021) 3
+31. Li,Z.,Wang,Q.,Cole,F.,Tucker,R.,Snavely,N.:Dynibar:Neuraldynamicimage-based
+rendering.In:ProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition. pp. 4273–4284 (2023) 2, 3, 10, 12, 13
+32. Lin,C.H.,Gao,J.,Tang,L.,Takikawa,T.,Zeng,X.,Huang,X.,Kreis,K.,Fidler,S.,Liu,
+M.Y.,Lin,T.Y.:Magic3d:High-resolutiontext-to-3dcontentcreation.In:Proceedingsof
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 300–309
+(2023) 4
+33. Ling, H., Kim, S.W., Torralba, A., Fidler, S., Kreis, K.: Align your gaussians: Text-
+to-4d with dynamic 3d gaussians and composed diffusion models. arXiv preprint
+arXiv:2312.13763 (2023) 4, 24
+34. Liu, R., Wu, R., Van Hoorick, B., Tokmakov, P., Zakharov, S., Vondrick, C.: Zero-1-
+to-3: Zero-shot one image to 3d object. In: Proceedings of the IEEE/CVF International
+Conference on Computer Vision. pp. 9298–9309 (2023) 4, 5, 9, 12, 25
+35. Long,X.,Guo,Y.C.,Lin,C.,Liu,Y.,Dou,Z.,Liu,L.,Ma,Y.,Zhang,S.H.,Habermann,
+M.,Theobalt,C.,etal.:Wonder3d:Singleimageto3dusingcross-domaindiffusion.arXiv
+preprint arXiv:2310.15008 (2023) 5
+36. Luiten, J., Kopanas, G., Leibe, B., Ramanan, D.: Dynamic 3d gaussians: Tracking by
+persistent dynamic view synthesis. arXiv preprint arXiv:2308.09713 (2023) 2
+37. Luo, M., Xue, Z., Dimakis, A., Grauman, K.: Put myself in your shoes: Lifting the ego-
+centric perspective from exocentric videos. arXiv preprint arXiv:2403.06351 (2024) 5
+38. Mildenhall, B., Srinivasan, P.P., Tancik, M., Barron, J.T., Ramamoorthi, R., Ng, R.:
+NeRF:Representingscenesasneuralradiancefieldsforviewsynthesis.In:ECCV(2020)
+12
+39. Mildenhall,B.,Srinivasan,P.P.,Tancik,M.,Barron,J.T.,Ramamoorthi,R.,Ng,R.:Nerf:
+Representing scenes as neural radiance fields for view synthesis. Communications of the
+ACM 65(1), 99–106 (2021) 3
+40. Ozguroglu, E., Liu, R., Surís, D., Chen, D., Dave, A., Tokmakov, P., Vondrick, C.:
+pix2gestalt: Amodal segmentation by synthesizing wholes. In: CVPR (2024) 4
+41. Park,K.,Sinha,U.,Barron,J.T.,Bouaziz,S.,Goldman,D.B.,Seitz,S.M.,Martin-Brualla,
+R.: NeRFies: Deformable neural radiance fields. ICCV (2021) 3
+42. Park, K., Sinha, U., Hedman, P., Barron, J.T., Bouaziz, S., Goldman, D.B., Martin-
+Brualla,R.,Seitz,S.M.:Hypernerf:Ahigher-dimensionalrepresentationfortopologically
+varying neural radiance fields. arXiv preprint arXiv:2106.13228 (2021) 3
+43. Po,R.,Wetzstein,G.:Compositional3dscenegenerationusinglocallyconditioneddiffu-
+sion. arXiv preprint arXiv:2303.12218 (2023) 4
+44. Poole,B.,Jain,A.,Barron,J.T.,Mildenhall,B.:Dreamfusion:Text-to-3dusing2ddiffu-
+sion. arXiv preprint arXiv:2209.14988 (2022) 4
+45. Pumarola, A., Corona, E., Pons-Moll, G., Moreno-Noguer, F.: D-NeRF: Neural radiance
+fields for dynamic scenes. In: CVPR (2021) 2, 318 B. Van Hoorick et al.
+46. Pumarola, A., Corona, E., Pons-Moll, G., Moreno-Noguer, F.: D-nerf: Neural radiance
+fields for dynamic scenes. In: Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition. pp. 10318–10327 (2021) 3
+47. Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry, G.,
+Askell,A.,Mishkin,P.,Clark,J.,etal.:Learningtransferablevisualmodelsfromnatural
+language supervision. In: International conference on machine learning. pp. 8748–8763.
+PMLR (2021) 6
+48. Raistrick,A.,Lipson,L.,Ma,Z.,Mei,L.,Wang,M.,Zuo,Y.,Kayan,K.,Wen,H.,Han,B.,
+Wang,Y.,etal.:Infinitephotorealisticworldsusingproceduralgeneration.In:Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 12630–
+12641 (2023) 7
+49. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution image
+synthesis with latent diffusion models. In: Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition. pp. 10684–10695 (2022) 24
+50. Sargent,K.,Li,Z.,Shah,T.,Herrmann,C.,Yu,H.X.,Zhang,Y.,Chan,E.R.,Lagun,D.,
+Fei-Fei,L.,Sun,D.,etal.:Zeronvs:Zero-shot360-degreeviewsynthesisfromasinglereal
+image. arXiv preprint arXiv:2310.17994 (2023) 12, 13, 14, 25
+51. Saxena,S.,Kar,A.,Norouzi,M.,Fleet,D.J.:Monoculardepthestimationusingdiffusion
+models. arXiv preprint arXiv:2302.14816 (2023) 4
+52. Sener,F.,Chatterjee,D.,Shelepov,D.,He,K.,Singhania,D.,Wang,R.,Yao,A.:Assem-
+bly101:Alarge-scalemulti-viewvideodatasetforunderstandingproceduralactivities.In:
+ProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition.
+pp. 21096–21106 (2022) 7
+53. Shamsian, A., Kleinfeld, O., Globerson, A., Chechik, G.: Learning object permanence
+from video. In: ECCV (2020) 4
+54. Shi,Y.,Wang,P.,Ye,J.,Mai,L.,Li,K.,Yang,X.:Mvdream:Multi-viewdiffusionfor3d
+generation.In:TheTwelfthInternationalConferenceonLearningRepresentations(2023)
+5
+55. Singer,U.,Polyak,A.,Hayes,T.,Yin,X.,An,J.,Zhang,S.,Hu,Q.,Yang,H.,Ashual,O.,
+Gafni, O., et al.: Make-a-video: Text-to-video generation without text-video data. arXiv
+preprint arXiv:2209.14792 (2022) 4
+56. Singer, U., Sheynin, S., Polyak, A., Ashual, O., Makarov, I., Kokkinos, F., Goyal, N.,
+Vedaldi, A., Parikh, D., Johnson, J., et al.: Text-to-4d dynamic scene generation. arXiv
+preprint arXiv:2301.11280 (2023) 4
+57. Strudel, R., Garcia, R., Laptev, I., Schmid, C.: Segmenter: Transformer for semantic
+segmentation. In: Proceedings of the IEEE/CVF international conference on computer
+vision. pp. 7262–7272 (2021) 12
+58. Tokmakov,P.,Jabri,A.,Li,J.,Gaidon,A.:Objectpermanenceemergesinarandomwalk
+along memory. In: ICML (2022) 4
+59. Tokmakov,P.,Li,J.,Burgard,W.,Gaidon,A.:Learningtotrackwithobjectpermanence.
+In: ICCV (2021) 4
+60. Tretschk, E., Tewari, A., Golyanik, V., Zollhöfer, M., Lassner, C., Theobalt, C.: Non-
+rigid neural radiance fields: Reconstruction and novel view synthesis of a dynamic scene
+from monocular video. In: Proceedings of the IEEE/CVF International Conference on
+Computer Vision. pp. 12959–12970 (2021) 3
+61. Tschernezki, V., Darkhalil, A., Zhu, Z., Fouhey, D., Laina, I., Larlus, D., Damen, D.,
+Vedaldi, A.: Epic fields: Marrying 3d geometry and video understanding. arXiv preprint
+arXiv:2306.08731 (2023) 7
+62. VanHoorick,B.,Tendulkar,P.,Suris,D.,Park,D.,Stent,S.,Vondrick,C.:Revealingoc-
+clusionswith4dneuralfields.In:ProceedingsoftheIEEE/CVFConferenceonComputer
+Vision and Pattern Recognition. pp. 3011–3021 (2022) 4, 7GCD: Extreme Monocular Dynamic Novel View Synthesis 19
+63. VanHoorick,B.,Tokmakov,P.,Stent,S.,Li,J.,Vondrick,C.:Trackingthroughcontainers
+and occluders in the wild. In: CVPR (2023) 4, 12
+64. Voleti,V.,Yao,C.H.,Boss,M.,Letts,A.,Pankratz,D.,Tochilkin,D.,Laforte,C.,Rom-
+bach, R., Jampani, V.: Sv3d: Novel multi-view synthesis and 3d generation from a single
+image using latent video diffusion. arXiv preprint arXiv:2403.12008 (2024) 4, 6
+65. Walke, H., Black, K., Lee, A., Kim, M.J., Du, M., Zheng, C., Zhao, T., Hansen-Estruch,
+P.,Vuong,Q.,He,A.,Myers,V.,Fang,K.,Finn,C.,Levine,S.:Bridgedatav2:Adataset
+for robot learning at scale. In: Conference on Robot Learning (CoRL) (2023) 12
+66. Wang,C.,Eckart,B.,Lucey,S.,Gallo,O.:Neuraltrajectoryfieldsfordynamicnovelview
+synthesis. arXiv preprint arXiv:2105.05994 (2021) 3
+67. Wang, C., Zhuang, P., Siarohin, A., Cao, J., Qian, G., Lee, H.Y., Tulyakov, S.: Diffusion
+priorsfordynamicviewsynthesisfrommonocularvideos.arXivpreprintarXiv:2401.05583
+(2024) 2, 3, 12
+68. Wang, H., Du, X., Li, J., Yeh, R.A., Shakhnarovich, G.: Score jacobian chaining: Lift-
+ing pretrained 2d diffusion models for 3d generation. In: Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition. pp. 12619–12629 (2023) 4
+69. Wang, L., Zhang, J., Liu, X., Zhao, F., Zhang, Y., Zhang, Y., Wu, M., Yu, J., Xu, L.:
+Fourier plenoctrees for dynamic radiance field rendering in real-time. In: Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 13524–
+13534 (2022) 2, 3
+70. Wang, Z., Lu, C., Wang, Y., Bao, F., Li, C., Su, H., Zhu, J.: Prolificdreamer: High-
+fidelityanddiversetext-to-3dgenerationwithvariationalscoredistillation.arXivpreprint
+arXiv:2305.16213 (2023) 4
+71. Weissenborn,D.,Täckström,O.,Uszkoreit,J.:Scalingautoregressivevideomodels.ICLR
+(2020) 4
+72. Wikipediacontributors:Cameradolly—Wikipedia,thefreeencyclopedia(2024),https:
+//en.wikipedia.org/wiki/Camera_dolly, [Online; accessed 2024] 3
+73. Wikipedia contributors: Spherical coordinate system — Wikipedia, the free encyclope-
+dia (2024), https://en.wikipedia.org/wiki/Spherical_coordinate_system, [Online;
+accessed 2024] 22
+74. Wu,G.,Yi,T.,Fang,J.,Xie,L.,Zhang,X.,Wei,W.,Liu,W.,Tian,Q.,Xinggang,W.:4d
+gaussiansplattingforreal-timedynamicscenerendering.arXivpreprintarXiv:2310.08528
+(2023) 2, 10, 13
+75. Wu, R., Mildenhall, B., Henzler, P., Park, K., Gao, R., Watson, D., Srinivasan, P.P.,
+Verbin, D., Barron, J.T., Poole, B., et al.: Reconfusion: 3d reconstruction with diffusion
+priors. arXiv preprint arXiv:2312.02981 (2023) 4, 5
+76. Xian, W., Huang, J.B., Kopf, J., Kim, C.: Space-time neural irradiance fields for free-
+viewpoint video. In: CVPR (2021) 3
+77. Xie, E., Wang, W., Yu, Z., Anandkumar, A., Alvarez, J.M., Luo, P.: Segformer: Simple
+and efficient design for semantic segmentation with transformers. Advances in Neural
+Information Processing Systems 34, 12077–12090 (2021) 12
+78. Xie,Y.,Takikawa,T.,Saito,S.,Litany,O.,Yan,S.,Khan,N.,Tombari,F.,Tompkin,J.,
+Sitzmann, V., Sridhar, S.: Neural fields in visual computing and beyond. In: Computer
+Graphics Forum. vol. 41, pp. 641–676. Wiley Online Library (2022) 2, 3
+79. Yoon, J.S., Kim, K., Gallo, O., Park, H.S., Kautz, J.: Novel view synthesis of dynamic
+scenes with globally coherent depths from a monocular camera. In: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 5336–5345
+(2020) 3
+80. Yu, F., Chen, H., Wang, X., Xian, W., Chen, Y., Liu, F., Madhavan, V., Darrell, T.:
+Bdd100k: A diverse driving dataset for heterogeneous multitask learning (2020) 1220 B. Van Hoorick et al.
+81. Yu, L., Lezama, J., Gundavarapu, N.B., Versari, L., Sohn, K., Minnen, D., Cheng, Y.,
+Gupta, A., Gu, X., Hauptmann, A.G., et al.: Language model beats diffusion–tokenizer
+is key to visual generation. ICLR (2024) 4
+82. Zhan,X.,Pan,X.,Dai,B.,Liu,Z.,Lin,D.,Loy,C.C.:Self-supervisedscenede-occlusion.
+In: CVPR (2020) 4
+83. Zhang, J., Liu, X., Ye, X., Zhao, F., Zhang, Y., Wu, M., Zhang, Y., Xu, L., Yu, J.:
+Editable free-viewpoint video using a layered neural representation. ACM Transactions
+on Graphics (TOG) 40(4), 1–18 (2021) 3
+84. Zhang, Q., Wang, C., Siarohin, A., Zhuang, P., Xu, Y., Yang, C., Lin, D., Zhou, B.,
+Tulyakov, S., Lee, H.Y.: Scenewiz3d: Towards text-guided 3d scene composition. arXiv
+preprint arXiv:2312.08885 (2023) 4
+85. Zhao,Y.,Yan,Z.,Xie,E.,Hong,L.,Li,Z.,Lee,G.H.:Animate124:Animatingoneimage
+to 4d dynamic scene. arXiv preprint arXiv:2311.14603 (2023) 4
+86. Zheng,S.,Lu,J.,Zhao,H.,Zhu,X.,Luo,Z.,Wang,Y.,Fu,Y.,Feng,J.,Xiang,T.,Torr,
+P.H., et al.: Rethinking semantic segmentation from a sequence-to-sequence perspective
+with transformers. In: Proceedings of the IEEE/CVF conference on computer vision and
+pattern recognition. pp. 6881–6890 (2021) 12
+87. Zheng, Y., Harley, A.W., Shen, B., Wetzstein, G., Guibas, L.J.: Pointodyssey: A large-
+scale synthetic dataset for long-term point tracking. In: Proceedings of the IEEE/CVF
+International Conference on Computer Vision. pp. 19855–19865 (2023) 7GCD: Extreme Monocular Dynamic Novel View Synthesis 21
+Generative Camera Dolly: Extreme Monocular
+Dynamic Novel View Synthesis
+Supplementary Material
+A Overview
+The appendix is structured as follows: in Section B, we analyze what the equivalent
+number of source views given to HexPlane would have to be to match our method’s
+performance, as well as our model’s metrics as a function of the geometric “difficulty”
+of the camera controls. In Section C, we elaborate on implementation details in terms
+of the model architecture, how training is done, how datasets are processed, how eval-
+uations are performed, and how the baselines are adapted. In Section D, we discuss
+failure cases. To view video visualizations of extra qualitative results, we recommend
+viewing gcd.cs.columbia.edu in a modern web browser.
+B More quantitative evaluations
+B.1 Comparison to multi-view methods
+Our method is able to synthesize novel views of a dynamic scene from just a single-
+viewpoint input video. One other hand, the results from per-scene optimization meth-
+ods(e.g.,HexPlane[10])getbetterwithanincreasingnumberofinputviews.Anatural
+questionisthathowmanyinputviewsareneededforthosemethodsinordertoobtain
+similar performance as compared to ours from a single view. We try to answer this
+0.9
+HexPlane
+Ours
+0.8 0.766
+0.7
+Fig. 7: Comparative study over number
+0.608 of views. We plot the SSIM over the test set
+0.6 0.567 asafunctionofthenumberofinputviewsthat
+HexPlane uses for training. The numbers are
+0.5
+averaged over 20 scenes.
+0.409 0.414
+0.4 0.380
+0.3
+0.2
+1 view 4 views 8 views 16 views 32 views
+MISS22 B. Van Hoorick et al.
+24
+22
+Fig. 8: Comparative study over camera
+rotation magnitude in Kubric-4D. Note
+20 that PSNR is measured at the last output
+frame, because only then the desired horizon-
+18
+tal azimuth angle has been reached. We con-
+clude that the main difficulty in performing
+16
+dynamic view synthesis comes from handling
+roughly the first 80 degrees, after which the
+14
+performance stays mostly flat.
+12
+10
+20 40 60 80 100 120 140 160
+Relative azimuth angle [°]
+question by training HexPlane per scene with K training views (i.e., K input videos),
+with K ∈{1,4,8,16,32}. As shown in Figure 7, our results (from a single input view)
+give rise to even better quality than HexPlane’s results from 16 input views.
+B.2 Error as a function of rotation angle
+InFigure8,weplottheaveragePSNRoverthetestsetasafunctionofhowsignificantly
+the final destination (target) camera pose differs from the source (input) camera pose.
+Specifically, we evaluate the Kubric-4D (gradual, max 180°, finetuned) model on a
+sequence of horizontal rotations to the right of varying amounts between 0° and 180°.
+Theelevationangleθ isheldconstantat10°,toencourageobstructedobjectsfromthe
+input view, and the radius r at 15m.
+z
+(r, θ, φ)
+Fig. 9: Spherical coordinate sys-
+r tem.ModelstrainedonKubric-4Dac-
+cept an azimuth ϕ, elevation θ, and
+radius r as input to condition the
+video generation process. (Illustration
+θ
+y adapted from [73].)
+φ
+x
+]Bd[
+RNSPGCD: Extreme Monocular Dynamic Novel View Synthesis 23
+C Implementation details
+C.1 Coordinate system
+We use a spherical coordinate system, where (ϕ,θ,r) represents the azimuth angle,
+elevation angle, and radial distance respectively. Note that as shown in Figure 9, θ is
+the elevation angle as measured starting from the XY-plane, which is not the same as
+the inclination angle as measured starting from the Z-axis.
+C.2 Architecture
+Figure 10 describes the model architecture in more detail. It is based on SVD [5],
+which in turn is based on Video LDM [6], modified for camera pose conditioning. The
+T = 14 CLIP embeddings are fed to the network via multiple spatial and tempo-
+ral cross-attention blocks throughout the network. Separately, the micro-conditioning
+mechanism takes place to pass the embeddings of the diffusion timestep, frame rate,
+camera transformation, motion bucket value, and conditioning augmentation strength
+tothenetworkbysummingittogetherwithfeaturechannelsatvariousresidualblocks
+placed throughout the network, with additional linear projections in-between to ac-
+commodate varying embedding sizes. Concretely, assuming the camera always looks
+at the same location in 3D space for simplicity,4 the relative extrinsics matrix ∆E is
+parameterized as (∆ϕ,∆θ,∆r). The angles are subsequently encoded with Fourier po-
+sitionalencodingbeforebeingembeddedthroughanMLP.Notethattheinputcamera
+poses are not required to be known – only the desired relative transformation should
+be given.
+C.3 Data and training
+InKubric-4D,pairsofinputandoutputvideoclipsarealwaystemporallysynchronized,
+but with T =14 frame indices sampled randomly within the 60 available frames from
+the dataset. The original FPS is 24, and since the frame stride is randomly uniformly
+sampled within [1,4], the actual FPS when finetuning therefore varies between 6 and
+24. In ParallelDomain-4D, each scene has 50 frames available at 10 FPS, from which
+we randomly subsample clips but only at a frame stride of either 1 or 2, which implies
+FPS values between 5 and 10.
+InKubric-4D,thecameraposerespectsthefollowingbounds(bothacrosstimeand
+across input/output) with respect to the spherical coordinate system: azimuth angle
+ϕ ∈[0◦,360◦],elevationangleθ ∈[0◦,50◦],radialdistancer ∈[12,18].5The
+1...T 1...T 1...T
+targetcameraposetransformationforthedefaultmodel(max 90°)hasalimitedmaxi-
+mumtransformation“strength” inthesensethatfromstarttoend,theazimuth,eleva-
+tion,andradiusallvarywithinthefollowingbounds:|∆ϕ|≤90◦,|∆θ|≤30◦,|∆r|≤3.
+The horizontal field of view is 53.1° everywhere.
+4 This is (0,0,1), i.e. 1m above the center of the ground plane, in Kubric-4D.
+5 Sincethedatasetissyntheticandtheradiusrdoesnothaveaninherentmeaning,itisworth
+nothingthattheaveragediameterofanobjectis1.88m,andthatallobjectsarerandomly
+spawned within these bounds in Euclidean coordinates: x ∈ [−7,7],y ∈ [−7,7],z ∈ [0,7]
+(where Z is up).24 B. Van Hoorick et al.
+FPS Motion
+Input Video Output Video
+Latent Denoising Latent
+Encoder U-Net Decoder
+Noisy Sample
+CLIP
+Fig.10: Network architecture. Our model performs diffusion in latent space [33,49]. The
+input video is encoded by a VAE, and then channel-concatenated with the noisy sample.
+At training time, the output video is estimated and supervised; at inference time, multiple
+denoisingstepsareperformed.Inbothcases,per-frameCLIPembeddingsandotherrelevant
+pieces of information (frame rate, desired camera pose transformation, and motion value)
+condition the U-Net in different ways.
+For the more extreme view synthesis variant (max 180°), the bounds are: ϕ ∈
+1...T
+[0◦,360◦],θ ∈[0◦,90◦],r ∈[12,18],|∆ϕ|≤180◦,|∆θ|≤60◦,|∆r|≤3.
+1...T 1...T
+The trajectories are typically uniformly sampled, except for the elevation angle θ;
+inthiscase,uniformsamplingforthestartingpointhappensintermsofsinθinsteadof
+theangleθ directly.Thisisdoneinordertoensureanequalspreadover(i.e.auniform
+distributiononthesurfaceof)the(relevantsubsetofthe)unitsphere.Theinputcamera
+extrinsicsE isstatic,andtheoutputcameraextrinsicsE interpolateslinearlyover
+src dst,t
+time in spherical coordinate space.
+InParallelDomain-4D,thesourceviewpointisaforward-facingcameramountedon
+thevirtualegocaratafixedpositionof(1.6,0,1.55)in3Dworldspace,whereXpoints
+forwardandZpointsup.Forsimplicity,thecameraposeisnotcontrollableintheexper-
+imentsdescribedinourpaper–instead,thedestinationviewpointisfixedat(−8,0,8),
+lookingforwardanddownat(5.6,0,1.55).Tomaximizethetemporalsmoothnessofthe
+generated video, the camera trajectory is interpolated in Euclidean space, not linearly
+but rather according to a sine wave function, i.e. following
+1−cos( π(Tt −1))
+, assuming t
+2
+increases step-wise from 0 to T −1. The horizontal field of view is 85° everywhere.
+Early on in our experiments, we observed that synchronizing the motion bucket
+value,whichconditionsthemodel,withthestrengthofthecameratransformationleads
+tobetterperformance.Therefore,forKubric-4D,welinearlyscalethisvaluealongwith
+the magnitude of the relative camera rotation (specifically, the L norm of (∆ϕ,∆θ))
+2
+where the minimum value corresponds to 0 and the maximum value corresponds to
+255. This indication of camera motion hints the model that it should generate a video
+with a high degree of optical flow when the relative angles are high and vice versa.GCD: Extreme Monocular Dynamic Novel View Synthesis 25
+We keep conditioning augmentation [6] enabled with a noise strength of 0.02.
+C.4 Loss
+WeapplyafocalL lossfunctionbetweentheestimatedandgroundtruthlatentfeature
+2
+maps,whichfocusesonthetopfractionofembeddingsincurringthebiggestmismatch.
+Thisfractionlinearlydecreasesfrom100%to10%inthefirst5000iterations,andthen
+remains constant at 10%. In addition, for semantic completion in ParallelDomain-4D,
+weweightthecategoriesinvolvingvehicles(i.e.Bus, Car, Caravan/RV, Construction-
+Vehicle, Bicycle, Motorcycle, OwnCar, Truck, WheeledSlow) and people (i.e. Animal,
+Bicyclist, Motorcyclist, OtherRider, Pedestrian) to be respectively 3× and 7× as im-
+portant as other categories, by multiplying the loss values at the corresponding spatial
+positions with the appropriate scaling factor before averaging. We observe that this
+strategy tends to reduce false negative prediction rates, especially for visually smaller
+objects occupying fewer pixels.
+C.5 Evaluation
+For each dataset separately, all models and all variants are evaluated on the same test
+split. For each scene, we randomly sample a subclip within the available video with
+T = 14 frames and a variable frame rate chosen within the same range as during
+training time. Then, for Kubric-4D, four different target camera poses (with angles
+up to azimuth ±90◦ for Kubric-4D) are randomly. To encourage moderately difficult
+inputvideoswithhigherthanaveragedegreesofocclusion,wesetthestartingelevation
+angle to be always θ = 5◦, but all other angles are chosen randomly within the
+1
+same ranges as during training. These randomization parameters at test time are only
+chosen once and then fixed across all evaluation experiments. We let probabilistic (i.e.
+diffusion)models(Ours,VanillaSVD,ZeroNVS)generatefoursamplesforeachofthese
+trajectories, averaging results, but the other methods (HexPlane, 4D-GS, DynIBaR)
+are only executed once for each scene and for each set of output camera angles.
+C.6 Baselines
+Vanilla SVD [5]. Since Stable Video Diffusion’s last training stage involved finetuning
+at a resolution of 1024×576, and changing the resolution at test time gives rise to
+artefacts, it is probably optimal to evaluate the model at its original resolution. We
+centercropandresizeallinputimagesandtargetvideosasneededto1024×576when
+evaluating this baseline. We keep the motion bucket at its default value of 127.
+ZeroNVS [50]. Like Zero-1-to-3 [34], ZeroNVS was trained only on square images of
+resolution 256×256. Similarly to Vanilla SVD, we center crop and resize all input
+andgroundtruthframesaccordingly.Moreover,sinceZeroNVSlearnsascale-invariant
+means of transforming camera poses in a way that depends on estimated depth maps,
+thetranslationcomponentoftherelativecameraextrinsicsmatrixE−1·E fedtothe
+src dst
+model can incur variable meanings with respect to absolute 3D space depending on
+theobservedscene.Ascaleparameterishencetunedvisuallyforeachvideoseparately
+until the output qualitatively aligns with the ground truth.26 B. Van Hoorick et al.
+Input Video Generated Video Input Video Generated Video
+(a) R Uig ph :t : 2 2 00 °° (f) Right: 60°
+(b) R Uig ph :t 3: 010 °° (g) DL oe wft n: :4 30 0° °
+(c) R Uig ph :t : 1 53 °0° (h) Left: 70°
+Back: 10m Back: 10m
+(d) Up: 7m (i) Up: 7m
+Down: 35° Down: 35°
+Back: 10m Back: 10m
+(e) Up: 7m (j) Up: 7m
+Down: 35° Down: 35°
+Fig.11: Failure cases. We show inputs and predictions of real-world examples. Since de-
+formable objects are not present in our Kubric-4D finetuning set, our model occasionally
+struggles with reconstructing their shape, appearance, and motion correctly. This can some-
+times lead to objects becoming vague or blending in with each other. Similarly, videos in the
+bottom two rows are possibly related to them bordering on being out-of-distribution with
+respect to ParallelDomain-4D.
+D Failure cases
+Our model exhibits strong performance in many cases, but also fails to accurately
+generalize to some real-world videos, especially those involving humans, animals, or
+deformable objects. In Figure 11, we show representative failure cases. In (a), while
+thegenerallayoutissomewhatpreserved,thepeoplethemselvesbecomeblurry.In(b),
+the robot arm gets cut off when performing view synthesis from the top, presumably
+because Kubric-4D does not contain robots or robotic motion patterns. In (c), the
+model appears to be confused as to what the initial camera pose is, and interprets it
+as a top-down rather than a sideways perspective of an aquarium, which leads to a
+roll effect when rotating the azimuth. In (d), the highway sign gets missed. In (e), the
+overpasses are not reconstructed, which seems to cause blurriness in the rest of the
+prediction. In (f), (g), and (h), both shape and dynamics are not well-respected. In
+(i), the perceived depth of the large blue truck is wrong. In (j), there are an unusually
+large amount of pedestrians crossing the street, which the model groups into “cars”.

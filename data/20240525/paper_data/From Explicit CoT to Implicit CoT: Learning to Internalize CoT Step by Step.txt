@@ -1,0 +1,497 @@
+From Explicit CoT to Implicit CoT:
+Learning to Internalize CoT Step by Step
+YuntianDeng1,2 YejinChoi1,3 StuartShieber4
+1AllenInstituteforArtificialIntelligence 2UniversityofWaterloo
+3UniversityofWashington 4HarvardUniversity
+{yuntiand, yejinc}@allenai.org,shieber@seas.harvard.edu
+Abstract
+Whenleveraginglanguagemodelsforreasoningtasks,generatingexplicitchain-
+of-thought(CoT)stepsoftenprovesessentialforachievinghighaccuracyinfinal
+outputs. Inthispaper,weinvestigateifmodelscanbetaughttointernalizethese
+CoTsteps. Tothisend,weproposeasimpleyeteffectivemethodforinternalizing
+CoTsteps: startingwithamodeltrainedforexplicitCoTreasoning,wegradually
+remove the intermediate steps and finetune the model. This process allows the
+modeltointernalizetheintermediatereasoningsteps,thussimplifyingthereasoning
+processwhilemaintaininghighperformance. OurapproachenablesaGPT-2Small
+modeltosolve9-by-9multiplicationwithupto99%accuracy,whereasstandard
+training cannot solve beyond 4-by-4 multiplication. Furthermore, our method
+proveseffectiveonlargerlanguagemodels, suchasMistral7B,achievingover
+50%accuracyonGSM8Kwithoutproducinganyintermediatesteps.
+1 Introduction
+Aprevalentapproachtoimprovingtheperformanceoflanguagemodels(LMs)toperformcomplex
+reasoningtasksischain-of-thought(CoT)reasoning,inwhichtheLMgeneratesexplicitintermediate
+reasoningstepsbeforearrivingatafinalanswer[14,19]. Thismethodallowsmodelstobreakdown
+complex problems into simpler, manageable parts, thereby improving the accuracy of their final
+predictions. However,thisexplicitreasoningprocesscanbecomputationallyexpensive,especially
+whenthereasoningchainislong[6]. Additionally,usingexplicitintermediatestepsmightnotalign
+withtheintrinsiccomputationalstrengthsofLMs[12]: forinstance,multi-digitmultiplicationisvery
+easyforcalculatorsbutremainschallengingforGPT-4[20].
+Inthiswork,weexaminethepossibilityofinternalizingthereasoningprocessinthemodel’shidden
+states. Weproposeanapproach,StepwiseInternalization,whichbeginswithamodeltrainedfor
+explicitCoTreasoning. Wethengraduallyremovetheintermediatestepsandfinetunethemodel,
+forcingittointernalizethereasoningprocess. Onceallintermediatestepsareinternalized,weachieve
+amodelcapableoffullimplicitCoTreasoning. Moreover,evenincaseswherethemodeldoesnot
+havethecapacityforfullimplicitCoTreasoning,thismethodstillallowsforshorteningthereasoning
+chainwhilemaintainingaccuracy.
+OurapproachisanalternativetotheapproachproposedbyDengetal.[6],whichsharesthegoal
+ofimplicitlyreasoningusingthehiddenstatesoftransformersinsteadofrelyingonexplicitCoT
+tokens. Toteachthemodeltousehiddenstatesforreasoning,thatmethodemploysateachermodel
+thatperformsexplicitCoTreasoning,andthendistillstheteacher’shiddenstatesintothestudent
+model’shiddenstates. Incomparison,ourapproachismuchsimpleryetmoreeffective.
+Ourapproachdemonstratessignificantimprovementsoverstandardtrainingmethods. Forinstance,a
+GPT-2SmallmodeltrainedwithStepwiseInternalizationonmultiplicationcansolveeven9-by-9
+Preprint.Underreview.
+4202
+yaM
+32
+]LC.sc[
+1v83841.5042:viXramultiplicationproblemsnearlyperfectly,whilestandardtrainingwithoutCoTstrugglesevenwith
+4-by-4 multiplication. Furthermore, our method scales effectively to larger models, such as the
+Mistral7Bmodel[10],achievingover50%accuracyontheGSM8Kdatasetofgrade-schoolmath
+wordproblems[5],withoutproducinganyexplicitintermediatesteps,outperformingthemuchlarger
+GPT-4modelwithoutchain-of-thoughtreasoning,whichonlyscores44%whenpromptedtodirectly
+generatetheanswer.
+Itisimportanttonotethatourempiricalevaluationfocusesonspecificreasoningtaskslikemulti-digit
+multiplicationandgrade-schoolmathproblems. WhileourresultsshowthepotentialofStepwise
+Internalizationinthesecontexts,andthesimplicityofthemethodmakesitapplicabletochain-of-
+thoughtapproachesinawiderangeoftasks,furtherresearchisneededtoexploreitsefficacyacrossa
+broaderrangeoftasksandmorediverseCoTtraces. Duetolimitationsinavailablecomputational
+resources, experiments on other tasks are out of scope for this work. This paper aims to lay the
+groundwork for this new approach and highlight its promise, while acknowledging that its full
+generalizationisstillunderinvestigation.
+Thecontributionsofourworkareasfollows: First,weintroduceStepwiseInternalization,asimple
+method for implicit CoT reasoning. Second, we demonstrate the effectiveness of internalizing
+intermediatehiddenstatesviaStepwiseInternalization. Third,weprovideempiricalresultsshowing
+thesuperiorperformanceofmodelstrainedwithStepwiseInternalizationondifferentreasoningtasks
+andmodelscales. Ourcode,data,andpretrainedmodelsareavailableathttps://github.com/
+da03/Internalize_CoT_Step_by_Step.
+2 Background: ImplicitChain-of-ThoughtReasoning
+Implicitchain-of-thoughtreasoning(implicitCoT,orICoT)isaconceptintroducedbyDengetal.[6],
+whereduringgeneration,thelanguagemodeldoesnotproduceexplicitintermediatereasoningsteps
+inwords. Itisdistinctfromnotusingchain-of-thoughtreasoning(NoCoT),inthatexplicitreasoning
+stepsareallowedduringtraining,enablingtheICoTmodeltolearntheunderlyingreasoningapproach
+fromthesupervisionprovidedonthereasoningprocess. ThekeyinsightofDengetal.[6]isthat
+intermediatereasoningstepsservetwopurposesinexplicitCoT:theyprovidesupervisionduring
+trainingtofacilitatelearningthetask[14],andtheyactasascratchpadduringinferencetoassistin
+solvingthetask[19]. However,thelatterpurposecanbefulfilledbyutilizingtheinternalstatesof
+themodelinsteadofexplicittokens.
+Asanillustrativeexample, considerusingalanguagemodeltosolveamulti-digitmultiplication
+problem,suchas12×34. (Theactualinputreversesthedigitorderas2 1 * 4 3forconsistency
+withDengetal.[6].) Inthelongmultiplicationalgorithm,12×34isbrokeninto:
+12×4+12×30= 48 + 360 .
+(cid:124)(cid:123)(cid:122)(cid:125) (cid:124)(cid:123)(cid:122)(cid:125)
+reversed:84 reversed:063
+InexplicitCoT,themodelistrainedtopredicttheseintermediatesteps8 4 + 0 6 3beforepredict-
+ingthefinalanswer8 0 4(408reversed). Predictingtheseintermediatestepsfacilitatesthemodel’s
+abilitytosolvethetask. (Theintermediatestepsarealsoreversedtomakeiteasierforthemodelto
+predict[17].)
+InbothNoCoTandimplicitCoTsettings,themodelneedstodirectlypredicttheanswer408from
+theinput,bypassingtheintermediatesteps. Thisapproachcanmakeinferencemuchfasterforlong
+reasoningchains,albeitatthecostofaccuracy.
+TheprimarydifferencebetweenimplicitCoTandNoCoTliesintheuseofintermediatereasoning
+stepsassupervisionduringtraining. IntheworkofDengetal.[6],aknowledgedistillationapproach
+was employed to distill explicit reasoning into implicit reasoning within the hidden states. This
+methodinvolvestrainingateachermodeltoperformexplicitCoTreasoningandthentransferring
+thisknowledgetoastudentmodel,whichinternalizesthereasoningprocesswithinitshiddenstates.
+In the present work, we propose a far simpler yet more effective approach based on a kind of
+curriculumlearningthatwecallStepwiseInternalization,whichwedetailinthenextsection.
+2Figure1: StepwiseInternalizationforImplicitChain-of-ThoughtReasoning. Thisfigureillustrates
+theStepwiseInternalizationmethodusingtheexampleofsolving12×34. Thetrainingprocess
+consistsofmultiplestages. AtStage0,themodelistrainedtopredictboththefullchain-of-thought
+(CoT)andthefinaloutput,whichisthesameasexplicitCoTtraining. AtStage1,thefirstCoTtoken
+isremoved,andthemodelisfinetunedtopredicttheremainingCoTtokensandtheoutput. This
+processcontinueswitheachsubsequentstageremovinganadditionalCoTtoken. ByStage6,all
+CoTtokenshavebeenremoved,andthemodelistrainedtodirectlypredicttheoutputfromtheinput,
+achievingimplicitCoTreasoning. Thisgradualremovalandfinetuningprocessallowsthemodelto
+graduallyinternalizethereasoningsteps.
+3 StepwiseInternalization
+Stepwise Internalization is a method designed to achieve implicit chain-of-thought reasoning by
+gradually removing intermediate reasoning steps during training. We define the input as x, the
+intermediatestepsasz =z ,z ,··· ,z ,andthefinaloutputasy.Alanguagemodelwithparameters
+1 2 m
+θisfirsttrainedusingthefollowinglossfunction:
+min−logP (y,z |x),
+θ 1:m
+θ
+wherez denotesthesequenceofintermediatestepsz ,z ,··· ,z .
+1:m 1 2 m
+Ateachsteptofthetrainingprocess,weremove(upto)s(t)tokensfromtheintermediatestepsz.
+Theupdatedlossfunctionthenbecomes:
+min−logP (y,z |x).
+θ 1+min(s(t),m):m
+θ
+Therearemultiplewaystoparameterizes(t). Forinstance,itmightbebasedonathresholdofthe
+lossvalueorapredefinedschedulesimilartolearningrateschedulersusedinoptimizers. Inthis
+work,forsimplicity,weusealinearscheduleforremovingtokens:
+(cid:22) (cid:23)
+t
+s(t)= ∆ ,
+T
+whereT isthetotalnumberofstepsperepoch,and∆isahyperparametercontrollinghowmany
+CoTtokensareremovedperepoch. (Onces(t)exceedsthenumberofactualchain-of-thoughttokens,
+alltokensareremoved.)
+Duringinitialexperiments,weobservedinstabilityinthetrainingprocessduetochangesintheloss
+functionovertime. Thisinstabilityarisesfortwoprimaryreasons:
+First,theoptimizercommonlyusedintraininglanguagemodels,suchasAdamW[11,13],maintains
+estimatesofsecond-ordergradients. Asuddenchangeinthelossfunction,causedbytheremovalof
+onemoreCoTtoken,resultsinabruptchangesinthesecond-ordergradients. Toaddressthisissue,
+weresettheoptimizer’sstatewheneveranadditionalCoTtokenisremoved.
+3Table1: Datasetstatistics. ThenumberoftokensisthemedianbasedontheGPT-2tokenizer.
+Size #InputTokens #CoTTokens #Outputtokens
+Dataset
+Train Dev Test TrainDevTest TrainDevTest TrainDev Test
+4×4Mult 808k 1k 1k 9 9 9 46 46 46 9 9 9
+5×5Mult 808k 1k 1k 11 11 11 74 74 74 11 11 11
+7×7Mult 808k 1k 1k 15 15 15 148 148 148 15 15 15
+9×9Mult 808k 1k 1k 19 19 19 246 246 246 19 19 19
+GSM8K 378k 0.5k1.3k 40 51 53 19 21 24 2 2 2
+Second,evenifamodelfitsperfectlytothecurrentlosswhenstokensareremoved,transitioning
+tothenextstage,wheres+1tokensareremoved,leadstoasignificantincreaseintheloss,asthe
+modelisnotyettrainedforthisnewsetting. Tomitigatethisissue,weintroduceatechniquewhich
+weterm“RemovalSmoothing”,whereweaddasmallrandomoffsettotheoriginalnumberoftokens
+toremoves(t),suchthat:
+s(t)∗ =s(t)+o,
+where o is a random variable with support of non-negative integers Z , and its distribution is
+≥0
+parameterizedbyanotherhyperparameterλ:
+P(o)∝exp(−λo).
+When λ = ∞, o = 0 and we recover the version without Removal Smoothing. However, when
+λ<∞,themodelistrainedtoremovemorethans(t)tokensatsteptwithasmallprobability,which
+helpssmooththetransitionintothenextstageofremovings(t)+1tokens,reducingtheabruptjumps
+inthelossfunction.
+Figure1illustratesthehigh-levelideaoftheStepwiseInternalizationapproach. Thetrainingprocess
+consistsofmultiplestages,wherethemodelprogressivelylearnstointernalizereasoningstepsby
+removingtokensfromtheCoTateachstage,eventuallyachievingimplicitCoTreasoning.
+4 ExperimentalSetup
+4.1 Data
+WeevaluateourproposedStepwiseInternalizationmethodontworeasoningtasksfollowingDeng
+etal.[6]: multi-digitmultiplicationandgrade-schoolmathreasoning.
+Multi-digitmultiplication. WeusetwoofthemostchallengingarithmetictasksfromBIG-bench
+[3]: 4-by-4 multiplication and 5-by-5 multiplication, as described by Deng et al. [6]. Given the
+effectiveness of Stepwise Internalization on these tasks, we extend our evaluation to 7-by-7 and
+9-by-9multiplication. Thecomplexityofmultiplicationtasksgrowssignificantlywiththenumberof
+digits,astheprogramlengthgrowsquadraticallywiththenumberofdigits[7]. Weusethescripts
+andsetupfromDengetal.[6]togeneratesynthetictrainingdataforourmainexperiments1.
+Gradeschoolmath. WeusetheGSM8Kdataset[5],withtheaugmentedtrainingdataprovidedby
+Dengetal.[6]. DetaileddatasetstatisticsareprovidedinTable1.
+4.2 BaselinesandModels
+Wecompareourmethodtothefollowingbaselines:
+• NoCoT:Modelsdirectlytrainedwithoutchain-of-thoughtsupervision.
+• ExplicitCoT:Modelsfinetunedorpromptedwithexplicitchain-of-thoughtreasoning[14].
+Weuse5-shotpromptingforGPT3.5andGPT-4butfullfinetuningforothermodels.
+• ICoT-KD:Theimplicitchain-of-thoughtviaknowledgedistillationmethodproposedby
+Dengetal.[6].
+1FollowingDengetal.[6],K-byKmultiplicationonlyconsidersK-digitnumbersbutnotlowerdigits.
+4Table2: Resultsonmultiplicationtasks. ICoT-KD:ImplicitCoTviaknowledgedistillation,with
+numberstakenfromDengetal.[6]. ICoT-SI:ImplicitCoTviaStepwiseInternalization(thiswork).
+Accuracy(Accinthetable)measurestheexactmatchaccuracyofproducingthefinalanswer. Speed
+measuresthenumberofexamplespersecondduringinferenceusingabatchsizeof1,normalizedby
+thespeedofthecorrespondingNoCoTmodel. InadditiontotheGPT2-Smallmodelonwhichour
+ICoT-SIexperimentswerebased,forcomparisonpurposesweprovideasetofNoCoTandexplicit
+CoTbaselinesforasetofmodelsofwide-rangingsizes. †: 5-shotpromptedinsteadoffinetuned.
+Model 4×4 5×5 7×7 9×9
+Acc Speed Acc Speed Acc Speed Acc Speed
+GPT-2Small(117M)
+ExplicitCoT 1.00 0.17 1.00 0.14 1.00 0.12 1.00 0.09
+NoCoT 0.29 1.00 0.01 1.00 0.00 1.00 0.00 1.00
+ICoT-KD 0.97 0.67 0.10 0.71 - - - -
+ICoT-SI 1.00 1.02 0.95 1.00 0.95 1.00 0.99 1.00
+MathGLM-100M
+NoCoT 0.80 1.00 0.56 1.00 - - - -
+MathGLM-500M
+NoCoT 0.90 1.00 0.60 1.00 - - - -
+MathGLM-2B
+NoCoT 0.95 1.00 0.90 1.00 - - - -
+GPT-3.5†
+ExplicitCoT 0.43 0.10 0.05 0.07 0.00 0.15 0.00 0.11
+NoCoT 0.02 1.00 0.00 1.00 0.00 1.00 0.00 1.00
+GPT-4†
+ExplicitCoT 0.77 0.14 0.44 0.14 0.03 0.09 0.00 0.07
+NoCoT 0.04 1.00 0.00 1.00 0.00 1.00 0.00 1.00
+Table3: AccuracyofvariousapproachesonGSM8K.†: 5-shotpromptedinsteadoffinetuned.
+Model GPT-2Small GPT-2Medium Phi-33.8B Mistral7B GPT-3.5† GPT-4†
+ExplicitCoT 0.41 0.44 0.74 0.68 0.62 0.91
+NoCoT 0.13 0.17 0.28 0.38 0.03 0.44
+ICoT-KD 0.20 0.22 - - - -
+ICoT-SI 0.30 0.35 0.31 0.51 - -
+Our proposed method, implicit chain-of-thought via Stepwise Internalization, is termed ICoT-SI.
+Toverifytheeffectivenessofourapproachacrossdifferentmodelscales,weusepretrainedmodels
+GPT-2[16],Phi-33.8B[1],andMistral-7B[10].
+4.3 Evaluation
+Becausethepremiseforimplicitchain-of-thoughtmethodsistoapproachthespeedofnochain-of-
+thoughtandtheaccuracyofexplicitchain-of-thought,weusetwomainevaluationmetrics: First,we
+evaluatetheaccuracyofeachmethodontherespectivetasksofgeneratingthefinaloutput. Second,
+we compare the inference speed of each method to the No CoT baseline. We measure speed, in
+examplespersecond,onanNvidiaH100GPUwithabatchsizeof1. ForICoT-KD,wedirectlytake
+numbersfromDengetal.[6]. However,duetohardwaredifferences,werecomputespeedrelativeto
+NoCoTwhenspeednumbersfromICoT-KDarenotavailable.
+5 Results
+Table2presentsthemainresults,wherewecompareStepwiseInternalizationtovariousbaselines.
+5(a) (b)
+Figure2: (a)Trade-offofSpeedversusAccuracyforICoT-SI.Thisfigureillustratesthetrade-off
+between speed and accuracy enabled by the Stepwise Internalization approach (ICoT-SI) for the
+11×11multiplicationtaskusingGPT-2Small. AsmoreCoTtokensareremovedandinternalized,
+accuracy decreases while speed increases. At the two extremes, our approach can recover both
+ExplicitCoT(highaccuracybutslow)andNoCoT(veryfastbutwithanaccuracyof0). Notethat
+weremovedpointsthatare“dominated”byotherpoints(i.e.,thereexistsanotherpointwithboth
+higherspeedandhigheraccuracy)inthisfigure. (b)DistributionoverRandomRemovalOffsetoin
+RemovalSmoothingwithλ=4. Thedistributionismostlyconcentratedato=0withaprobability
+of0.98,ando≥1hasaprobabilityofonly0.02. Despitethis,theremovalsmoothingprovestobe
+effective,asdemonstratedintheablationstudies.
+StepwiseInternalizationiseffective. Comparedtoothermethodsthatdonotoutputintermediate
+steps,StepwiseInternalization(ICoT-SI)provestobehighlyeffective. Forexample,ICoT-SIenables
+aGPT-2Smallmodeltosolvethe9×9multiplicationproblemwithanaccuracyof0.99,whereas
+theNoCoTmethodfailsoneven4×4multiplication. Additionally,ICoT-SIoutperformsImplicit
+CoTviaKnowledgeDistillation(ICoT-KD);whileICoT-KDfailstosolve5×5multiplicationusing
+aGPT-2Smallmodel,ICoT-SIcansolveupto9×9multiplication. Also,whileICoT-KDisslightly
+slowerthanNoCoTduetotheadditionalemulatormodel,ICoT-SIhasthesamespeedasNoCoT2.
+Whencomparedtoexistingliterature,ICoT-SIisalsocompetitive. Forinstance,atasimilarmodel
+size,MathGLM-100M[20]canonlysolve5×5multiplicationwithanaccuracyof0.56. Evenwith2
+billionparameters,MathGLM-2Bcansolve5×5multiplicationwithanaccuracyof0.90. Although
+anotherrelatedwork[17]isabletotrainaGPT-2Smallmodeltosolveupto14×14multiplication,
+themethodproposedinthatworkisspecifictoarithmetictasks,whereasICoT-SIismoregeneral.
+ICoT-SI enables the internalization of CoT reasoning in a general way, making it applicable to
+tasksbeyondarithmetic,suchasgrade-schoolmathproblems. Forexample,ontheGSM8Kdataset,
+ICoT-SIachievesanewstate-of-the-artaccuracyformodelsnotusinganyintermediatesteps. It
+finetunestheMistral-7Bmodeltoachieveover0.50accuracy,whereasevenGPT-4canonlyachieve
+0.44withoutusingintermediatesteps.
+StepwiseInternalizationlagsbehindexplicitCoTinaccuracybutisfaster. Intermsofaccuracy,
+implicitCoTmethodsstilllagbehindexplicitCoT.Forinstance,afinetunedMistral-7Bmodelcan
+achieve an accuracy of 0.68 on GSM8K with explicit CoT but ICoT-SI only got 0.51. However,
+2ThespeedofICoT-SIinTable2isnotalways1.00duetorandomnessinhardwarespeed.
+6Figure3: Accuracyduringtrainingforvariousablations. Thisfigureplotsthevalidationaccuracyas
+afunctionofthepotentialnumberofremovedCoTtokensduringtrainingforthe7×7multiplication
+taskusingGPT-2Small. Theblackdashedverticallineindicatesthepointatwhichtheschedulehas
+removedallCoTtokens. Thecurvescomparethefollowingvariants: “FullApproach”;“Without
+RemovalSmoothing”(removalsmoothingwithλ=4isnotused,i.e.,λ=∞);“WithoutOptimizer
+Reset”(optimizerstatesarenotresetafterremovingatoken);“Right-SideRemoval”(CoTtokensare
+removedfromtheendinsteadofthebeginning);and“AggressiveRemoval”(16insteadof8CoT
+tokensareremovedperepoch). Allthesevariantsunderperformthefullapproach. Formoredetails,
+seeSection6.2.
+implicitCoTmethodsoffersignificantspeedadvantages. Forexample,onthe9×9multiplication
+task,ICoT-SIiscomparableinaccuracytoExplicitCoTbutis11timesfasterduringinference.
+Overall,ourresultsdemonstratethatStepwiseInternalizationisaneffectivemethodforenabling
+implicitCoTreasoning,offeringacompellingtrade-offbetweenaccuracyandspeed. Thismakesita
+valuableapproachfortasksrequiringbothhighperformanceandlowlatency.
+6 Analysis
+6.1 Accuracy-SpeedTrade-off
+OnenotableadvantageofICoT-SIisthatitallowstradingoffaccuracywithspeedbyinternalizing
+differentamountsofCoTtokens. Atoneextreme, whennotokensareinternalized, ICoT-SIcan
+recoverexplicitCoTperformance. Attheotherextreme,whenalltokensareinternalized,weachieve
+implicitCoT,typicallywithmuchbetterperformancethandirectlytrainingaNoCoTmodel.
+Even when ICoT-SI is not completely successful due to model capacity limitations, such as on
+morechallengingtaskswhereitcannotinternalizeallCoTsteps,wecanstillleverageintermediate
+checkpointstoachieveatrade-offbetweenaccuracyandspeed. Forexample,asshowninFigure2a,
+onthe11×11multiplicationtaskwithGPT-2Small,eventhoughthemodelcannotinternalizeall
+CoTsteps,ICoT-SIisstillabletoachieveanaccuracyofover0.7ataspeedfourtimesthatofexplicit
+CoTwhenpartoftheCoTtokensareinternalized.
+Thistrade-offcurveillustratestheflexibilityofICoT-SIinbalancingcomputationalefficiencyand
+modelperformance. ByadjustingthenumberofinternalizedCoTtokens,userscanoptimizefor
+eitherhigheraccuracyorfasterinferencedependingontherequirementsoftheirspecificapplication.
+6.2 AblationStudies
+Figure3plotsthevalidationaccuracyversusthescheduleforthenumberofCoTtokensremoved
+duringtrainingforthe7×7multiplicationtask. Thisfigurecomparesthefullapproachtoseveral
+7ablatedvariants. Evenforthefullapproach,therearefluctuationsinthecurve,andthevalidation
+accuracybrieflydropstozeroatonepointduringtrainingbuteventuallyrecovers. However,the
+ablatedvariantsdonotfullyrecoverwhenaccuracydrops.
+Removalsmoothing. AsmentionedinSection3,addingasmallrandomoffsetotothenumberof
+removedtokensiscrucialwhenthelossfunctionchangesduetotheremovalofmoreCoTtokens.
+Thedistributionofoisparameterizedbyahyperparameterλ,asintroducedinSection3. Weuse
+λ=4throughoutthiswork,resultinginthedistributionshowninFigure2b. Inthisdistribution,98%
+ofthetime,o=0,butabout2%ofthetime,oneormoreadditionaltokensareremoved. Asshown
+inFigure3,the“WithoutRemovalSmoothing”curvefailstorecoveraftertheaccuracydropstozero
+atarounds(t)=50,whereasthefullapproachdoesmuchbetter.
+Resetting the optimizer. Another important technique for stabilizing training is resetting the
+optimizerwhenmoretokensareremoved. Thisavoidslargeestimatesofsecond-orderderivatives
+andstabilizestraining. InFigure3,the“WithoutOptimizerReset”curvedropstozeroaround100
+stepsanddoesnotrecover,showingtheimportanceofresettingtheoptimizerduringtraining.
+Removalside. Inourmainexperiments,CoTtokensareremovedfromthebeginning(leftside).
+RemovingCoTtokensfromtherightsideperformssignificantlyworse,asshownbythe“Right-Side
+Removal” curve in Figure 3. We suspect this is because internalizing tokens at the beginning is
+easier than internalizing tokens at the end. CoT tokens at the end depend on the earlier tokens,
+sointernalizingthembetweentheendofCoTandthebeginningofthefinalanswer, whichonly
+hasafewpositions,ismorechallenging. Incontrast,internalizingtokensatthebeginningallows
+distributingthemacrosstheentireinput.
+Numberoftokensremovedperepoch. Thenumberoftokensremovedperepoch(∆)significantly
+affectsthetrainingstabilityandspeed. Inthemainexperiments,weused∆=8,whichremoves8
+tokensperepoch. Ahigher∆valueleadstofastertrainingbutrisksnotconverging,asthemodelmay
+notbeabletokeepupwiththerapidchangesinthelossfunction. Forinstance,whenusing∆=16,
+thetrainingfailstoconverge,asshownbythe“AggressiveRemoval”curveinFigure3. Conversely,
+alower∆valueismorelikelytoresultinsuccessfultrainingbutataslowerpace. Futureworkcould
+exploreadaptive∆schedulesbasedonlossvaluestobalancespeedandstabilitymoreeffectively.
+7 RelatedWork
+NoCoTapproaches. Severalworksintheliteraturefocusontraininglanguagemodelstosolve
+arithmetic tasks without outputting intermediate steps. MathGLM [20] demonstrated that with
+sufficienttrainingdata,includingbothlower-digitandhigher-digitarithmetictaskdemonstrations,
+a 2 billion parameter LM can solve multi-digit arithmetic tasks without any intermediate steps.
+Compared to this work, Stepwise Internalization achieves higher accuracy in solving multi-digit
+multiplication with much smaller models, likely due to leveraging chain-of-thought supervision
+duringtraining. AnothernotableworkbyShenetal.[17]showedthatbymixinglower-digitand
+higher-digitmultiplicationdemonstrations,evenaGPT-2Smallcanlearnupto14-digitmultiplication.
+However,StepwiseInternalizationdoesnotrequirespeciallypreparedtrainingdatawithmixedtask
+difficulties. Additionally,StepwiseInternalizationistheoreticallyapplicabletoanyreasoningtask
+withCoTreasoningsteps,asdemonstratedbyitseffectivenessongrade-schoolmathproblems.
+Also relevant is the work of Pfau et al. [15], which shows that transformer language models can
+reasonusingfillertokensasanalternativetoCoTtokens. Theyshowedreasoningusingthesefiller
+tokensimprovesalanguagemodel’sexpressivity. Ourapproachhasthepotentialtobecombined
+withtheirapproachtosolveevenmorechallengingtasks.
+Internalizing CoT. Our work is closely related to that of Deng et al. [6] (ICoT-KD), which
+introducedthetaskofimplicitCoTreasoning. ICoT-KDallowsusingCoTduringtrainingbutnot
+during generation, and it implements this via knowledge distillation to internalize the reasoning
+stepswithinhiddenstates. ComparedtoICoT-KD,StepwiseInternalizationhasthreeadvantages:
+First, it is simpler to implement as it does not require a teacher model. Second, while ICoT-KD
+internalizesreasoningintoasingle“column”ofstates(correspondingtothefinalinputposition),
+8StepwiseInternalizationallowsthemodeltointernalizereasoningacrossallinputpositions. Lastly,
+StepwiseInternalizationachievesbetteraccuracycomparedtoICoT-KD.
+OurworkisalsorelatedtoContextDistillation[18],whichtrainsamodeltoproducethesameoutput
+whenconditionedonascratchpadversuswithoutit. EachstageofStepwiseInternalizationcanbe
+viewedasaformofcontextdistillation,whereoneCoTtokenisdistilledintothemodel’sinternal
+states. StepwiseInternalizationextendsContextDistillationintoacurriculumlearningsetting.
+AnotherrelevantworkisSearchformer[12],whichfirsttrainsatransformertoimitateA*search
+andthenfinetunesitonsampledshortersearchtraces. Thisallowsthemodeltoperformsearches
+usingfewerstepsthanthoseprovidedduringtraining. WhileSearchformerreliesonsamplingtofind
+shortertraces,StepwiseInternalizationforcesthemodeltointernalizestepsbyremovingCoTtokens.
+8 Limitations
+Trainingcosts. Onelimitationoftheproposedapproachisitshightrainingcostduetothefinetuning
+requiredwhenremovingeachsetofCoTtokens. AsdiscussedinSection6.2,removingCoTtokens
+too fast leads to non-convergence. Therefore, the longer the CoT chain, the longer the training
+duration. FortaskslikeN-digitmultiplication,wherethereasoningchainlengthgrowsexponentially
+withN,trainingbecomesexpensiveasN increases.
+Instability. Anotherpracticalissueweobservedistheinstabilityoftrainingwithaggressive∆
+values. Forexample,Figure4inAppendixBshowsacasewherethemodelcouldnotrecoverfroma
+dropinaccuracy. Usinglower∆valuesgenerallyleadstomorestabletraining,butatthecostof
+longertrainingtime. Identifyingandaddressingunstabledynamicsearlyon,potentiallybyrestarting
+trainingassuggestedbyHuetal.[9],couldbeavaluableimprovement.
+Interpretability. SimilartoexistingworkonNoCoTandimplicitCoTtraining,modelstrained
+usingourapproachloseinterpretableintermediatesteps. However,itmightbepossibletointerpret
+theinternalhiddenstatesofthesemodelsusingprobingtechniques[2,8]. Additionally,combining
+implicitandexplicitCoTtrainingcouldallowuserstochoosebetweeninterpretabilityandlatency,
+providingflexibilitybasedontherequirementsoffuturetasks.
+Accuracy. Undoubtedly,explicitCoTstillachieveshigheraccuraciescomparedtoourapproachto
+implicitCoT.However,ourmethodenablesatrade-offbetweenlatencyandaccuracy.Evenontasksit
+cannotfullysolvewithoutintermediatesteps,suchas11×11multiplication,itmaintainsreasonable
+accuracywhilebeingseveraltimesfasterthanexplicitCoT.Moreover,ourresultsdemonstratethe
+potentialofleveraginghiddenstatesforreasoning: evenaGPT-2Smallmodelcanbetrainedto
+solve9×9multiplication,despitehavingonly12layers,farfewerthanthenumberofreasoning
+stepsintheCoTfor9×9multiplication. Whenscaledtolargermodelswithhundredsofbillionsof
+parametersanduptoahundredlayers,suchasGPT-3[4],theycouldpotentiallysolveevenmore
+challengingreasoningtaskswithoutexplicitCoTsteps.
+9 ConclusionsandFutureWork
+Inthiswork,weintroducedStepwiseInternalization,anovelapproachforachievingimplicitchain-
+of-thought reasoning in language models. By gradually removing intermediate CoT tokens and
+finetuningthemodel,weenabletheinternalizationofreasoningstepsincrementally. Ourapproach
+demonstratessignificantimprovementsoverexistingmethods,achievinghighaccuracyonupto9×9
+multiplicationusingGPT-2SmallandoutperformingGPT-4onGSM8Kwhilenotoutputtingany
+intermediatereasoningsteps. ComparedtoexplicitCoTmethods,ourapproachcanbeupto11times
+fasterwhilemaintainingsimilaraccuracies.
+Forfuturework,probingtheinternalprocessesasthemodelinternalizeseachreasoningstepcould
+provideinsightsintothelearningmechanisms. Additionally,developingamixed-modeapproach
+thatcombinesimplicitandexplicitCoTreasoningcouldpotentiallyofferthebestofbothworlds,
+balancing accuracy, latency, and interpretability based on user preferences. Another promising
+directionisscalingStepwiseInternalizationtolargermodelsandmoreextensivetraining/pretraining
+setups,whichcouldfurtherenhanceitseffectivenessonabroaderrangeofreasoningtasks.
+9AcknowledgmentsandDisclosureofFunding
+ThisworkwassupportedbyNSFgrantDMS-2134012andONRgrantN00014-24-1-2207. Wealso
+thankHarvardUniversityFASResearchComputingforprovidingcomputationalresources.
+References
+[1] MarahAbdin,SamAdeJacobs,AmmarAhmadAwan,JyotiAneja,AhmedAwadallah,Hany
+Awadalla,NguyenBach,AmitBahree,ArashBakhtiari,HarkiratBehl,AlonBenhaim,Misha
+Bilenko,JohanBjorck,SébastienBubeck,MartinCai,CaioCésarTeodoroMendes,Weizhu
+Chen,VishravChaudhary,ParulChopra,AllieDelGiorno,GustavodeRosa,MatthewDixon,
+RonenEldan,DanIter,AmitGarg,AbhishekGoswami,SuriyaGunasekar,EmmanHaider,
+JunhengHao,RussellJ.Hewett,JamieHuynh,MojanJavaheripi,XinJin,PieroKauffmann,
+NikosKarampatziakis,DongwooKim,MahoudKhademi,LevKurilenko,JamesR.Lee,YinTat
+Lee,YuanzhiLi,ChenLiang,WeishungLiu,EricLin,ZeqiLin,PiyushMadan,ArindamMitra,
+Hardik Modi, Anh Nguyen, Brandon Norick, Barun Patra, Daniel Perez-Becker, Thomas
+Portet,ReidPryzant,HeyangQin,MarkoRadmilac,CorbyRosset,SambudhaRoy,Olatunji
+Ruwase,OlliSaarikivi,AminSaied,AdilSalim,MichaelSantacroce,ShitalShah,NingShang,
+HiteshiSharma,XiaSong,MasahiroTanaka,XinWang,RachelWard,GuanhuaWang,Philipp
+Witte,MichaelWyatt,CanXu,JiahangXu,SonaliYadav,FanYang,ZiyiYang,DonghanYu,
+Chengruidong Zhang, Cyril Zhang, Jianwen Zhang, Li Lyna Zhang, Yi Zhang, Yue Zhang,
+YunanZhang,andXirenZhou. Phi-3technicalreport: Ahighlycapablelanguagemodellocally
+onyourphone,2024.
+[2] Yonatan Belinkov. On internal language representations in deep learning: An analysis of
+machinetranslationandspeechrecognition. PhDthesis,MassachusettsInstituteofTechnology,
+2018.
+[3] BIGbenchauthors. Beyondtheimitationgame: Quantifyingandextrapolatingthecapabilities
+oflanguagemodels. TransactionsonMachineLearningResearch,2023. ISSN2835-8856.
+URLhttps://openreview.net/forum?id=uyTL5Bvosj.
+[4] TomB.Brown,BenjaminMann,NickRyder,MelanieSubbiah,JaredKaplan,PrafullaDhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,SandhiniAgarwal,Ariel
+Herbert-Voss, Gretchen Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, Daniel M.
+Ziegler, Jeffrey Wu, Clemens Winter, Christopher Hesse, Mark Chen, Eric Sigler, Mateusz
+Litwin,ScottGray,BenjaminChess,JackClark,ChristopherBerner,SamMcCandlish,Alec
+Radford,IlyaSutskever,andDarioAmodei. Languagemodelsarefew-shotlearners,2020.
+[5] KarlCobbe,VineetKosaraju,MohammadBavarian,MarkChen,HeewooJun,LukaszKaiser,
+MatthiasPlappert,JerryTworek,JacobHilton,ReiichiroNakano,ChristopherHesse,andJohn
+Schulman. Trainingverifierstosolvemathwordproblems,2021.
+[6] Yuntian Deng, Kiran Prasad, Roland Fernandez, Paul Smolensky, Vishrav Chaudhary, and
+StuartShieber. Implicitchainofthoughtreasoningviaknowledgedistillation,2023.
+[7] NouhaDziri,XimingLu,MelanieSclar,XiangLorraineLi,LiweiJiang,BillYuchenLin,Sean
+Welleck, PeterWest, ChandraBhagavatula, RonanLeBras, etal. Faithandfate: Limitsof
+transformersoncompositionality. AdvancesinNeuralInformationProcessingSystems, 36,
+2024.
+[8] JohnHewittandPercyLiang. Designingandinterpretingprobeswithcontroltasks,2019.
+[9] MichaelY.Hu,AngelicaChen,NaomiSaphra,andKyunghyunCho. Latentstatemodelsof
+trainingdynamics,2024.
+[10] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh
+Chaplot,DiegodelasCasas,FlorianBressand,GiannaLengyel,GuillaumeLample,Lucile
+Saulnier,LélioRenardLavaud,Marie-AnneLachaux,PierreStock,TevenLeScao,Thibaut
+Lavril,ThomasWang,TimothéeLacroix,andWilliamElSayed. Mistral7b,2023.
+[11] DiederikP.KingmaandJimmyBa. Adam: Amethodforstochasticoptimization,2017.
+10[12] LucasLehnert,SainbayarSukhbaatar,DiJiaSu,QinqingZheng,PaulMcvay,MichaelRabbat,
+and Yuandong Tian. Beyond a*: Better planning with transformers via search dynamics
+bootstrapping,2024.
+[13] IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. InInternational
+ConferenceonLearningRepresentations,2019. URLhttps://openreview.net/forum?
+id=Bkg6RiCqY7.
+[14] MaxwellNye,AndersJohanAndreassen,GuyGur-Ari,HenrykMichalewski,JacobAustin,
+DavidBieber,DavidDohan,AitorLewkowycz,MaartenBosma,DavidLuan,CharlesSutton,
+andAugustusOdena.Showyourwork:Scratchpadsforintermediatecomputationwithlanguage
+models,2021.
+[15] JacobPfau,WilliamMerrill,andSamuelR.Bowman. Let’sthinkdotbydot: Hiddencomputa-
+tionintransformerlanguagemodels,2024.
+[16] Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, et al.
+Languagemodelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+[17] RuoqiShen,SébastienBubeck,RonenEldan,YinTatLee,YuanzhiLi,andYiZhang.Positional
+descriptionmattersfortransformersarithmetic,2023.
+[18] CharlieSnell,DanKlein,andRuiqiZhong. Learningbydistillingcontext,2022.
+[19] JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,brianichter,FeiXia,EdH.Chi,
+QuocVLe,andDennyZhou. Chainofthoughtpromptingelicitsreasoninginlargelanguage
+models. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors,
+AdvancesinNeuralInformationProcessingSystems,2022. URLhttps://openreview.net/
+forum?id=_VjQlMeSB_J.
+[20] ZhenYang,MingDing,QingsongLv,ZhihuanJiang,ZehaiHe,YuyiGuo,JinfengBai,andJie
+Tang. Gptcansolvemathematicalproblemswithoutacalculator,2023.
+11Figure4: ValidationAccuracyduringTrainingfortwodifferentrandomseeds. Thisfigureplotsthe
+validationaccuracyasafunctionofthepotentialnumberofremovedCoTtokensduringtrainingfor
+the9×9multiplicationtaskusingGPT-2Smalland∆=8. Thetwocurvesonlydifferinrandom
+seeds. TheblackdashedverticallineindicatesthepointbeyondwhichallCoTtokensareremoved.
+A Hyperparameters
+Forallexperiments,weusetheAdamWoptimizer[13],withλ=4andaneffectivebatchsizeof32
+bydefault. ForPhi-33.8BandMistral7B,weuseabatchsizeof16withagradientaccumulation
+of2. Forthemultiplicationtasks,weusealearningrateof5×10−5and∆=8. ForGSM8K,we
+usealearningrateof5×10−5 and∆ = 1forGPT-2SmallandGPT-2Medium, andalearning
+rateof1×10−5 and∆ = 8forPhi-33.8BandMistral7B,withbfloat16precision. Additionally,
+forGSM8K,weonlyconsidersequenceswith150orfewertokensfortrainingandremoveallCoT
+tokenswhen39ormoretokensarescheduledtoberemoved. Allexperimentsarerunonasingle
+H100with80GBofGPUmemoryforupto200epochsor24hours,whicheverisreachedfirst.
+B StabilityIssuesforAggressiveRemoval
+Wefoundthatusingaggressiveremovalschedules(thatis, bigger∆values)cansometimeslead
+tounstabletrainingdynamics. Asoneexample,Figure4showstwodifferentrunsunderidentical
+configurationsexceptfortherandomseed. OnerunwaseventuallyabletosolvethetaskafterallCoT
+tokenswereremoved,whereastheotherfailedtosolvethetaskafterallCoTtokenswereremoved.
+C AdditionalExperiments
+Keeping position IDs. As CoT tokens are removed, the position where the final output starts
+changes. WetriedavariantwherepositionIDsremainunchanged,meaningthepositionIDofthe
+nexttokenisuseddirectlyafterremovingaCoTtoken. Althoughthisapproachwasmorestable
+duringtraining,itsperformancewassimilartothecurrentapproach. Forsimplicity,wedidnotuse
+thisvariantinourmainexperiments.
+Alternative CoT formats. Different valid reasoning paths can lead to the correct final answer
+forthesameproblem. WeexploredusingabinarytreeformattedCoTchainforthemultiplication
+problems. ThisformatdecomposesanN-digitmultiplicationintoasequenceofN-digit-by-1-digit
+multiplicationproblems,mergestheresultsusingsumoperators,andcontinuesmerginguntilthe
+finalsumiscomputed. Thisprogramhasashorterdescriptionlength,potentiallymakingiteasierfor
+transformerstolearn[7]. However,itsperformancewassimilartothecurrentapproach: for9×9
+multiplicationusingGPT-2Small,itachieved0.95accuracyandfailedon11×11multiplication.
+12
