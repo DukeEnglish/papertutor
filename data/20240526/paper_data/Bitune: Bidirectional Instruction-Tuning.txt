@@ -1,0 +1,1157 @@
+Bitune: Bidirectional Instruction-Tuning
+DawidJ.Kopiczko TijmenBlankevoort YukiM.Asano
+VrijeUniversiteitAmsterdam Meta UniversityofAmsterdam
+dj.kopiczko@gmail.com tijmen@meta.com y.m.asano@uva.nl
+Abstract
+We introduce Bitune, a method that improves instruction-tuning of pretrained
+decoder-onlylargelanguagemodels,leadingtoconsistentgainsondownstream
+tasks. Bitune applies both causal and bidirectional attention to the prompt, to
+obtainabetterrepresentationofthequeryorinstruction. Werealizethisbyintro-
+ducingtwosetsofparameters,forwhichweapplyparameter-efficientfinetuning
+techniques. These causal and bidirectional features are then combined into a
+weightedaveragewithtrainablecoefficients,whichissubsequentlyusedtogener-
+atenewtokens.Wedemonstratesignificantimprovementsinzero-shotperformance
+oncommonsensereasoning,arithmetic,andlanguageunderstandingtasks,while
+extensiveablationstudiesvalidatetheroleofeachcomponentanddemonstratethe
+method’sagnosticismtodifferentPEFTtechniques.
+1 Introduction
+LargeLanguagemodels(LLMs)arebeingusedinmanypracticalscenarioswherehumansinteract
+withthemthroughquestionsandanswers. Inapplicationssuchasgeneralpurposeassistants(OpenAI,
+2024a),medicaldiagnosticians(Thirunavukarasuetal.,2023),game-conversationgeneration(Cox&
+Ooi,2023)orcoding-assistants(Roziereetal.,2023),theabilityforanLLMtopreciselyfollowan
+instructionandansweraquestionareofprimaryconcern.
+Correspondingly,Instruction-Tuning(IT) (Chungetal.,2024;Ouyangetal.,2022a)istheprevailing
+paradigmforfinetuningLLMsaftertheirself-supervisedpretrainingphasetoimprovethemforsuch
+tasks. Here,themodelistrainedonadatasetcomprisedofpairsofinstructionsandcorresponding
+responses. Given the instruction-with-response structure of IT data, the generation of an LLM
+responsecanbedividedintotwophases: first,convertingtheinstructionintoKeyandValue(KV)
+embeddings,storedinaKV-cache,whichwerefertoasinstructionfeatures;second,usingthese
+featurestoautoregressivelygenerateananswer. Duetothistask’sinherentlyconditionalnature,the
+instructionfeatures’effectivenessiscrucialforobtaininghigh-qualitymodeloutputs.
+Inthepast,bidirectionalattention(Schuster&Paliwal,1997)hasbeenakeytechniqueforobtaining
+strongerfeaturesforwordsortokens. Thisisbecausethemeaningofaworddependsgreatlyonits
+context. Inparticular,forsomewordsinasentence,theinformationthatcomeslatermightbefar
+moreinformativeforgeneratingameaningfulrepresentationandresolvingambiguities. Butwith
+onlyuni-directionalcausalattention,wheretherepresentationofeachwordisrestrictedtodepend
+solelyonthewordsthatcamebefore,thiscannotbeachieved. Thisisthereasonwhymanyprevious
+transformers such as encoder-only BERT (Devlin et al., 2019) and encoder-decoder T5 (Raffel
+etal.,2020)employedbidirectionalattentiontoimprovetheencodingoftheinputandwhytasks
+liketextretrieval(Lewisetal.,2020;Li&Li,2023)andeventhelatesttext-to-imagegenerative
+models(OpenAI,2024b;Esseretal.,2024)stillrelyonthis.
+However,inthecontextofLLMs,architecturesutilizingbidirectionalattentionhavefallenoutof
+favor, asdecoder-onlymodelssuchasGPT(OpenAI,2024a)andLlama(AI@Meta,2024)have
+focusedonandvastlyimprovedthegenerativeperformanceoflanguagemodels. Thesearchitectures
+Preprint.Underreview.
+4202
+yaM
+32
+]LC.sc[
+1v26841.5042:viXraCausal Attention with W C K , V Instruction Features Eddie bakes 3 x 7 =
+C C ...
+Eddie can bake 3 pies a day... K , V +
+B B
+LLM
+Bidirectional Attention with W
+B
+Causal Attention with W
+C
+(a) Prefilling (b) Decoding
+Figure1: OverviewofBitune. (a)Duringtheprefillingphase,featuresareobtainedfromtheprompt
+usingbothcausalandbidirectionalattentionintwopasseswithseparateweights. Thetwosetsof
+keysandvaluesarethencombinedusingaweightedaveragebeforebeingpassedtothedecoding
+phase. (b)Duringthedecodingphase,newtokensaregeneratedinthestandardwaywithcausal
+attention,utilizingthefeaturesextractedfromtheinstructioninthepreviousstep,alongwiththe
+featuresofothergeneratedtokens.
+aretrainedbylargevolumesofdatawithnext-tokenprediction,eschewinganylook-aheadmechanism
+forthesakeofbetterautoregressivemodeling. Asthereissimplymoreunlabeleddataavailablefor
+pretraining,trainingadecoder-onlyarchitectureonunlabeleddata,andthenfinetuningitfortasks
+withinstruction-tuning,isthebestmodusoperandioftoday(Wangetal.,2022). However,withthis
+switchtodecoder-onlyarchitectures,welostbidirectionalattentionintheprocess. Asweknowthis
+canimprovefeaturerepresentationsforinstructions,wesetouttore-introducebidirectionalattention,
+suchthatitcanbeintegratedintopretraineddecoder-onlyLLMs.
+OurnewmethodBituneaddsbidirectionalattentiontodecoder-onlyarchitecturesandcombinesit
+withcausalattentiontogeneratetwosetsofinstructionfeatures,usingtwodifferentsetsofweights.
+These features are then integrated, utilizing learnable mixing coefficients, and later used as the
+KV-cacheforresponsegeneration. Notably,theautoregressiveresponsegenerationprocessremains
+unaffectedbythebidirectionalattentionandcontinuestobecausal. Byrealizingtheseadaptations
+withparameter-efficientfinetuningmethods,weintroduceonlyaminimalsetofnewparameters.
+Overall,ourcontributionsareasfollows:
+• Weproposeanovelmethod,Bitune,thatimprovestheperformanceofpretraineddecoder-
+onlyLLMsinquestion-answeringscenarios.
+• Weevaluatethemethodonmultipledownstreamtasks,showingconsistentimprovements
+overthebaselines.
+• Weconductanextensiveablationstudyinvestigatingthenecessityofeachcomponentofthe
+method,andshowingthemethod’sPEFT-agnosticism.
+2 BidirectionalInstruction-Tuning
+Intheinstruction-tuningsetting(Ouyangetal.,2022b;Zhangetal.,2024),adatasetDconsistsof
+instruction-answerpairsthatareusedtoadaptthemodelinasupervisedfashion. Formally,adataset
+of size N can be described as D = {q,a}N , where q and a are instructions and answers. The
+i=1
+trainingobjectiveistomodelp(a|q)inanautoregressivemanner:Thismeanstheanswerisgenerated
+onetokenatatime,suchthattokena atpositionihasaccesstoallearliertokens:
+i
+p(a|q)=Π|a| p(a |a ,...a ,q),
+i=1 i 1 i−1
+where|a |denotesthelengthoftheanswer. Notehowcomparedtotheregularlanguagemodeling
+i
+objective,theresponseisalreadyconditional(ontheinstructionq)evenforthefirstgeneratedtoken.
+Thisnaturallyleadsresponse-generationtobedividedintotwophases: prefillinganddecoding. Dur-
+ingtheprefillingphase,theentireinstruction–alsooftencalledaprompt–isprocessedconcurrently
+togenerateaseriesoffeaturestobestored. ForaTransformerarchitecture(Vaswanietal.,2017),
+2Algorithm1Python-likepseudocodeofBituneinference.
+# prompt - tensor with tokenized instruction
+# theta - tensor with mixing coeff. for each layer
+# theta_init - initial value of mixing coefficients
+k_c, v_c = model_causal(prompt) # Pass on the instruction for causal features
+k_b, v_b = model_bidir(prompt) # Pass to obtain bidirectional features
+# Combine both sets of features
+alpha = theta.abs() / (theta.abs() + theta_init)
+k = k_c * (1 - alpha) + k_b * alpha
+v = v_c * (1 - alpha) + v_b * alpha
+kv = (k, v)
+c_token = SEP # Initialize generation with a predefined token
+answer = [c_token]
+while c_token != EOS: # Stop generation on the end-of-sequence token
+# Get features of current token and logits of next token
+k, v, logits = model_causal(c_token, kv)
+kv = concat(kv, (k, v)) # Concatenate obtained features with current KV cache
+c_token = get_token(logits) # Determine next predicted token based on logits
+answer.append(c_token) # Append generated token to the answer
+thesefeaturesarethoseofthekeyandvaluevectors,whichcanbestoredinaKV-cachetoavoid
+costlyrecomputations. Duringthesubsequentdecodingphase,themodelgeneratesoutputtokens
+sequentially,onetokenatatime,basedontheKV-cacheoftheinstructionandthealreadygenerated
+tokens.
+In this work, we introduce, Bitune, a method to leverage this two-phase process to improve
+instruction-tuningoflanguagemodels. Inourapproach,themodelprocessestheinstructionwith
+bothcausaland bidirectionalattentionusingseparatesetsofparameters, leadingtoanenhanced
+KV-cachethatisthenusedtoconditiontheanswer. Figure1providesanoverviewofthemethod,
+whileAlgorithm1presentspseudocodefortheinferenceprocess.
+TwoSetsofFeatures. InBitune,themodelperformstwopassesontheinstructiontoobtaintwo
+kindsoffeaturesforeverytransformerblock. Namely,asetofcausalfeaturesthatthemodelwas
+originallytrainedtoprocessandutilize,
+K =X W , V =X W , (1)
+c c kc c c vc
+andasetofbidirectionalfeaturesencodingtheinstructionwithouttheconstraintsofcausalmasking,
+K =X W , V =X W . (2)
+b b kb b b vb
+To allow the model to learn how to process the causal and bidirectional features differently, we
+introduce two sets of weights: one for the bidirectional pass on the instruction (W , W ) and
+kb vb
+anotherforthecausalpassontheinstruction,whichisalsousedforthecausalgenerationofanswer
+tokens(W ,W ).
+kc vc
+Inthecaseofthefirstblockofthemodel,representationsX ,X aretheinitialtokenembeddings. In
+c b
+othercases,theyaretheoutputoftheprecedingblockandwereprocessedbydifferentcomponents
+includingtheself-attentionmechanism,whichcanbedefinedas:
+(cid:18) QKT (cid:19)
+Attention(Q,K,V,M)=softmax √ +M V, (3)
+d
+k
+whereQarethequeries,M istheattentionmask,andd isthedimensionofkeysandqueries.
+k
+Forthecausalpass,themaskM enforcescausalitybymaskingfuturetokens,suchthattokensj can
+c
+onlyattendtoearliertokensi≤j,whileforthebidirectionalpass,nomaskingisapplied:
+(cid:26)
+0 ifi≤j
+M (i,j)= , M (i,j)=0. (4)
+c −∞ ifi>j b
+3Table1: Zero-shotresultsafterinstruction-tuningontheUltraFeedbackdataset. Wecompare
+Bitunetotheperformanceoftheoriginalmodel,themodelfinetunedwithLoRA,andwithLoRA
+16
+using two times higher rank to match the parameter count of our method. Bitune significantly
+outperformsthebaselinesonalmostalltasksforallmodels.
+PIQA ARC CSQA SIQA MMLU Avg.
+Model Method
+Gemma-2B Pretrained 57.5 36.9 35.5 38.2 34.0 40.4
+LoRA 66.7 43.4 42.3 44.3 31.7 45.7
+LoRA 66.5 42.7 42.3 43.8 31.6 45.4
+16
+Bitune 69.6 47.5 46.9 49.5 35.3 49.7
+Gemma-7B Pretrained 73.1 78.3 62.0 64.7 59.0 67.4
+LoRA 84.2 79.2 68.5 71.9 55.3 71.8
+LoRA 83.9 79.2 68.4 72.0 53.4 71.4
+16
+Bitune 83.6 80.1 69.2 72.7 53.8 71.9
+Llama2-7B Pretrained 59.2 38.1 32.6 45.1 36.0 42.2
+LoRA 69.5 49.9 45.3 57.0 41.1 52.6
+LoRA 69.9 49.9 45.6 56.7 41.2 52.6
+16
+Bitune 70.0 51.1 48.1 59.1 41.9 54.0
+Llama3-8B Pretrained 69.0 73.6 65.4 56.8 56.0 64.2
+LoRA 81.9 74.5 69.2 69.0 57.6 70.4
+LoRA 82.4 74.9 70.5 68.6 58.0 70.9
+16
+Bitune 84.4 77.4 72.7 70.1 59.0 72.7
+Phi-2 Pretrained 70.3 67.3 61.4 65.0 45.4 61.9
+LoRA 76.3 66.7 61.6 66.6 48.2 63.9
+LoRA 76.1 66.6 61.6 66.8 47.7 63.8
+16
+Bitune 76.5 67.2 63.0 68.5 48.9 64.8
+ThefinalKV-cacheisobtainedbyalearnableconvexcombinationofcausalandbidirectionalfeatures,
+K =K ·(1−α )+K ·α , V =V ·(1−α )+V ·α , (5)
+Bitune c k b k Bitune c v b v
+whereαrepresentsthebidirectional-to-causalratiooffeatures. Thisratioisparameterisedas
+|θ |
+α = j , j ∈{k,v} (6)
+j θ +|θ |
+init j
+whereθ isalearnablemixingcoefficientpertransformerblock,andθ isahyperparameterdefining
+j init
+theinitialvalueofθ . Themixingcoefficientsarelearnabletoalloweachblocktoindependently
+j
+adjustthebalancebetweenbidirectionalandcausalfeaturesthroughoutthetraining.
+ParameterEfficientFine-tuning Notethatthecomponentsofthemodel,otherthanthekeyand
+valueprojections,canhavetheirownseparatesetsofweightsaswell. Inthecaseoffullfinetuning,
+thisapproachwouldrequireanadditionalsetoffullweights,whichisimpracticalforlargemodels.
+Instead,weadaptourmodeltousebidirectionalattentionbyusingparameter-efficientfinetuning
+methods. These introduce only a fraction of trainable parameters, making it viable to have two
+modified variants of the model within a single forward pass. In the default configuration of our
+method,weutilizetheLow-RankAdaptation(LoRA)ofHuetal.(2022)toadaptthemodel.However,
+our method is PEFT-agnostic and can also utilize different methods for updating the weights, as
+demonstratedinourablationssection.
+Insummary,Bituneisamethodforimprovedinstruction-tuningthatlearnsacombinationofcausal
+andbidirectionalfeaturesbyapplyingtwosetsoflightweightPEFTmethodstoapretrainedmodel.
+3 Experiments
+3.1 Instruction-Tuning
+Ourcoreexperimentsinvolvetrainingpretrainedlanguagemodelsonaninstruction-tuningdataset
+and zero-shot evaluating them on downstream tasks. We evaluate Bitune on multiple models,
+4comparing results to standard finetuning with LoRA, and zero-shot results of pretrained models
+withoutfinetuning.
+Specifically,weuseasubsetofthecleanedUltraFeedback(Cuietal.,2023)dataset,whichcontains
+instructionsandcorrespondinganswersgeneratedbyvariousLLMs. Fromthisdataset,weselect
+completionsgeneratedbyGPT-4(OpenAI,2024a),ensuringhigh-qualityresponsesfortraining. To
+fiteverymodelonasingleGPU,wefilteroutsampleslongerthan512tokens,whichleavesuswith
+around10,000samplesfortraining.
+Wetestthemethodonpretraineddecoder-onlylanguagemodelsoftwodifferentscalesofapproxi-
+mately2billionand7billionparameters. Thespecificmodelsusedinourexperimentsare: Gemma
+2Band7B(GemmaTeametal.,2024),Llama27B(Touvronetal.,2023)andLlama38B(AI@Meta,
+2024),andPhi-2(Lietal.,2023),whichhas2.7billionparameters. WeuseHuggingFaceTransform-
+ers(Wolfetal.,2020)implementationofthesemodels. Welimitourexperimentstothesespecific
+modelsduetotheirpopularityandalsoourlimitedresources.
+ForupdatingtheweightsweusetheHuggingFacePEFT(Mangrulkaretal.,2022)implementation
+of LoRA, with the default rank of 8, and apply it to all linear layers of MLP and self-attention
+componentsofthemodel. WecompareBitunewiththefollowingthreebaselines: Pretrained-
+initialmodelwithoutanyfinetuning;LoRA-modelfinetunedwithLoRAwithoutBitune-specific
+modifications,usingrankof8asusedinourmethod;andLoRA -modelfinetunedwithLoRA,
+16
+usingarankof16toprovideafaircomparisonintermsofthenumberofparameters,asourmethod
+introducestwosetsofweights.
+For eachmodel, we tunethe learningrate onthe LoRAbaselineusing stepson theapproximate
+logarithmicscale(1e−4,3e−4,1e−3,3e−3),andthenapplythesameratetotheotherapproaches.
+NotethatthispotentiallyputsourmethodatadisadvantagecomparedtotheLoRAbaseline. All
+hyperparametersarereportedintheAppendix6.2.
+Models are evaluated zero-shot on multiple-choice tasks to assess their performance. For com-
+monsensereasoning,weusethePIQA(Bisketal.,2020),CommonsenseQA(Talmoretal.,2019),
+ARC-Challenge(Clarketal.,2018),andSIQA(Sapetal.,2019)datasets,whileforlanguageun-
+derstanding,weusetheMMLU(Hendrycksetal.,2021)benchmark. Eachtaskconsistsofaseries
+ofquestions,eachwithmultiplechoices,whereonlyoneansweriscorrect. Asthetasksfollowthe
+question-answerpattern,theyarecompatiblewiththeinstruction-tuningsetting.
+Forevaluation,weusetheLanguageModelEvaluationHarnessframework(Gaoetal.,2023). This
+frameworkformatseachquestionusingapredefinedtemplate,tokenizesthequestion-choicepairs,
+runs them through the model, and compares the log-likelihoods of the choices to determine the
+selectedanswer. Foreachmodelandapproachconfiguration,weconductexperimentsusingthree
+differentrandomseeds,andaveragetheresults.
+Modelsareloadedandtrainedusingbfloat16precision,exceptforthemixingpart,whichoperates
+in the full 32-bit floating-point format. This high level of precision for the mixing of features is
+important,asminornumericalinaccuraciesinthelearnablecoefficientsandintermediateresultsof
+themixingoperationmayleadtosignificantdeviationsinthemodel’sbehavior.
+InthedecodingphaseoftheinferencewithBitune,toinitiategeneration,themodelrequiresatleast
+asingletokentoobtainasetofattentionqueries,inadditiontothekeysandvaluesextractedfromthe
+instruction. Tofacilitatethis,onecanintroduceanewlearnable<sep>tokenthatwouldbeplaced
+atthebeginningofmodeledanswer,orutilizeanexistingtoken. Forourexperiments,weoptedto
+movethelasttokenoftheinstructiontemplatetothebeginningofthemodeledanswer. Fordetailson
+theinstructiontemplateused,pleaserefertothesection6.5oftheAppendix.
+Results. Table1showsconsistentandsignificantgainsafterinstruction-tuningwithBitune,with
+thehighestgainsseenontheGemma-2Bmodel,showinga4percentagepoint(pp)improvementover
+thebaselineLoRAanda9.3ppimprovementoverthepretrainedmodel. Fortheothermodels,the
+averagegainsoverbaselinefinetuningareequalto1.8,1.4,and0.9pp,forLlama3-8B,Llama2-7B,
+andPhi-2respectively.
+ItisworthnotingthattheGemma-7Bmodelshowsthelowestaverageimprovementacrossalltasks,
+with merely 0.1 pp gain over the baseline finetuning. It is also a single case where the baseline
+pretrainedmodelachievedthehighestscoreonatask,MMLU,withdegradedperformanceinall
+5Table2: Resultforthedownstreamtasktraining. Weshowaccuracyondownstreamtasksforthe
+baselineLoRAfinetuningandBitune,averagedover3seeds. Onaverage,ourmethodworksbetter
+thanstandardLoRA.WeseethemostsignificantgainsontheGSM8Kdataset,butslightlylower
+resultsforGemma-7BandtheSIQAtask.
+PIQA ARC CSQA SIQA GSM8K Avg.
+Model Method
+Gemma-2B LoRA 81.4 58.0 77.2 77.4 30.2 64.8
+Bitune 83.3 60.0 78.3 76.6 33.0 66.2
+Gemma-7B LoRA 91.4 84.6 84.4 79.4 59.1 79.8
+Bitune 92.1 84.2 84.2 79.4 59.4 79.9
+Llama2-7B LoRA 84.4 66.6 81.5 82.7 32.0 69.4
+Bitune 84.4 66.9 82.0 81.4 32.9 69.5
+Llama3-8B LoRA 90.2 80.7 83.9 83.1 60.4 79.7
+Bitune 90.5 81.3 84.1 82.1 63.4 80.3
+Phi-2 LoRA 82.8 76.3 78.7 80.3 58.6 75.3
+Bitune 83.9 77.0 79.0 80.4 59.2 75.9
+fine-tuningapproaches. However,thisisnotanissuewiththemodel’sscale,assignificantgainsare
+observedwiththeLlama2-7BandLlama3-8Bmodels.
+3.2 DownstreamTaskTraining
+ThiscomplementaryexperimentverifiesifBituneincreasesthecapacityofthemodelwithinthe
+narrowscopeofasingletask. Itfollowsthesetupfromtheinstruction-tuningexperimentswithafew
+changes. Namely,modelsarenotinstruction-tunedbuttrainedseparatelyforeachevaluationtask
+usingthecorrespondingtrainingset. WeusePIQA,ARC,CSQA,andSIQAintroducedearlier,and
+anadditionalarithmetictask,GSM8K(Cobbeetal.,2021).
+GSM8Kdiffersfromtheothertasks,wherewecomparelog-likelihoodsofpredefinedanswers,asit
+requiresthemodeltogenerateafullanswertoken-by-token,includingtheintermediatestep-by-step
+reasoning. Thefinalanswerfollowsaspecificpattern,makingitfeasibletoextracttheanswerusing
+methodssuchasregularexpressionsasthemodellearnstoadheretothispatternduringtraining.
+Results. Table2presentstheresults,demonstratingimprovementswhenfinetuningonthedown-
+streamtaskswithBitune,similartothoseseenwithinstruction-tuning. Whilethereareafewcases
+wherethebaselinefinetuningachievesbetterresultsonspecifictasks,whenconsideringtheaverage
+gains,applyingourmethodisbeneficialacrossallmodels. Mostimportantly,ontheGSM8Kdataset,
+weseeconsistentlyhighgains,suggestingthatourmethodimprovesthemodel’sreasoningability
+ingenerativetasks. Thequalitativeexampleforinstruction-tunedmodelinTable6alsosupports
+this(moreexamplesinAppendix6.7). Similartotheinstruction-tuningresults,thehighestgains
+areobservedontheGemma-2Bmodel,whilethelowestontheGemma-7B.Thisindicatesthatthe
+effectivenessofourmethoddependsonthespecificmodelused.
+3.3 Ablations
+WeconductanablationstudyonBituneusingthesameexperimentalsetupasintheinstruction-
+tuningexperiment. Forthispurpose,twomodelsareused: Gemma-2BandLlama3-8B,representing
+differentsizescalesandmodelfamilies.
+ComponentRemoval Toverifythenecessityofeachcomponentofthemethod,weremoveselected
+partstoanswerthefollowingquestions:
+• Canwesimplymodifytheattentionmasktoapplybidirectionalattentionontheprompt,
+withoutusingseparateweightsandmixing? -Wetestthissimplestvariant,whichwerefer
+toasNaiveBidir.
+• Doweneedtwosetsoffeatures? Isitsufficienttoobtainbidirectionalfeaturesfromthe
+promptusingdifferentweightsthanthoseusedforcausalanswergeneration? -Weremove
+thepartresponsibleforgeneratingthesetofcausalfeatures,andthereforealsothemixing
+component;werefertothisasNoMixing.
+6Table3: AblationstudyoncomponentsofBitune. Wereportzero-shotaccuracyaveragedover
+PIQA,ARC,CSQA,SIQAandMMLUtasks. Thecomponentsareexplainedinsection3.3. Wesee
+thatallablatedvariantsoutperformtheLoRAbaseline,andcombiningallcomponentsperformsthe
+best. Ofnote,especiallybidirectionalattentionimprovesresultsthemost.
+Avg.Acc.
+Model Method Causal Bidir. Mixing Sep.Weights
+Gemma-2B LoRA ✓ - - - 45.7
+NaiveBidir. - ✓ - - 47.9
+NoMixing - ✓ - ✓ 48.9
+OnlyCausal ✓ - ✓ ✓ 46.9
+SharedWeights ✓ ✓ ✓ - 47.4
+Bitune ✓ ✓ ✓ ✓ 49.7
+Llama3-8B LoRA ✓ - - - 70.4
+NaiveBidir. - ✓ - - 71.9
+NoMixing - ✓ - ✓ 71.5
+OnlyCausal ✓ - ✓ ✓ 71.1
+SharedWeights ✓ ✓ ✓ - 72.3
+Bitune ✓ ✓ ✓ ✓ 72.7
+Table4: CombiningBitunewithdifferentPEFTmethods. Performancesareaveragedover3
+seeds. WecanseethatourmethodimprovesresultsregardlessofthespecificPEFTmethodused.
+PIQA ARC CSQA SIQA MMLU Avg.
+Model Method
+Gemma-2B LoRA 66.7 43.4 42.3 44.3 31.7 45.7
+Bitune 69.6 47.5 46.9 49.5 35.3 49.7
+DoRA 66.7 43.6 41.9 44.7 31.9 45.8
+Bitune 69.6 47.5 46.9 49.7 35.1 49.8
+DoRA
+IA3 67.2 46.5 45.5 37.6 32.5 45.9
+Bitune 67.5 47.3 48.9 44.3 33.6 48.3
+IA3
+Llama3-8B LoRA 81.9 74.5 69.2 69.0 57.6 70.4
+Bitune 84.4 77.4 72.7 70.1 59.0 72.7
+DoRA 82.1 75.4 70.2 69.2 57.7 70.9
+Bitune 84.1 77.1 72.0 70.6 58.7 72.5
+DoRA
+IA3 80.9 75.5 68.3 66.4 58.7 70.0
+Bitune 83.4 75.7 69.2 67.8 58.8 71.0
+IA3
+• Arethegainssolelyfrommixingtwosetsoffeaturesgeneratedwithdifferentweights,or
+isbidirectionalattentionnecessary? -Herewekeeptheattentionmaskcausaltogenerate
+bothsetsoffeatures,whichwerefertoasOnlyCausal.
+• Doweneedseparateweights,orcanthesameweightsbeusedtogeneratebothcausaland
+bidirectionalfeatures? -Toanswerthisquestion, wedonotintroducethesecondsetof
+weightsandusethesameLoRAforbothpassesontheprompt,callingitSharedWeights.
+Theresults,averagedoverthreeseedsandpresentedinTable3,indicatethatallvariantsofthemethod
+leadtogainsoverthebaselineLoRAfinetuning. However,thehighestgainsareobservedinthefull
+variantofBitune,demonstratingthateachcomponentcontributestothemethod’seffectiveness.
+DifferentPEFTMethods ToverifytheimpactofdifferentPEFTmethodsontheperformanceof
+ourmethod,wecompareBituneincombinationwiththefollowingtechniques: LoRA(Huetal.,
+2022),thatreparametrizesweightupdatesasamultiplicationoftwolow-rankmatrices;DoRA(Liu
+etal.,2024),whichdecomposestheseweightupdatesintodirectionandmagnitude;andIA3(Liu
+etal.,2022),thatinsteadrescalesactivationswithlearnablevectors.
+TheresultsareshowninTable4. WefindconsistentgainsacrossallthreePEFTmethodsweanalyze,
+withgainsrangingfrom+1.6%to+4.0%foraveragedaccuracies. ThisdemonstratesthatBitune
+isPEFT-agnosticandcanbecombinedwithexistingandfutureinnovationsinPEFTmethods.
+Initialization of Mixing Coefficient The initial value of the mixing coefficient θ is a hyperpa-
+rameterinourmethod. Toevaluateitsimpactontheperformanceandthetrainingdynamicsofthe
+7bidirectional-to-causalratiooffeatures,weconductexperimentsontheinstruction-tuningsetupwith
+thefollowingvalues: 0.1,0.01,and0.001.
+0.6 Bidir. K Bidir. V
+0.1
+0.4
+0.01
+0.4 0.001 0.2
+0.0
+Layer Index Layer Index
+0 3000
+Training Step
+Figure2: Bidirectional-to-causalratioduringtraining. Figure 3: Ratio across layers. Here
+Theratioisaveragedoveralllayersandshownfordifferent weshowthefinalratioofthemodelin
+initialvaluesofmixingcoefficientsforLlama3-8B.The Fig.2acrossalllayersfortheKandV
+initialvalueimpactsthechangeoftheratio,withhigher values. Theutilizationofbidirectional
+valuesslowingitdown,andlowervaluesincreasingit. attentionisspreadacrossalllayers.
+Table5ademonstratesthattheinitialvalueofthemixingcoefficientimpactstheperformance,with
+0.01beingthemostoptimalvalueforbothmodels,regardlessoftheirscale. Figure2showsthatthe
+initialvaluesubstantiallyaffectstherateofchangeofthemixingratio,withthehighervalueleading
+tonearlynochangeintheratio,whilethelowervalueresultsinsharpchangesattheverybeginning
+ofthetraining. FromFigure3,wealsoobservethataftertraining,alllayersutilizethebidirectional
+attention.
+AttentionMaskofSecondPass Wetestanotheroptionfortheattentionmaskofthesecondpass
+ontheinstruction. Wetransposethecausalattentionmask,blockinginformationflowfromthepast
+tokens,andallowingfromthefuturetokens-wecallitanti-causalattentionmask.
+ResultsshowninTable5bindicatethattheinstructionhastobeprocessedwithfullbidirectional
+attentiontoachievethehighestgains. Combiningcausalandanti-causalfeaturesindependentlydoes
+notleadtothesamehighperformance.
+4 RelatedWork
+Ourapproachsharessimilaritieswiththeconceptof"prefixlanguagemodeling",whichenablesa
+decoder-onlymodeltohandlebidirectionalcontextwithinaprefix(instruction)whilemaintaining
+causalgenerationfortheoutputsequence. Theprefix-LMarchitecturewasintroducedbyLiuetal.
+(2018)andfurtherexploredandpopularizedbyRaffeletal.(2020). IntheirworkonT5,Raffeletal.
+(2020)pretrainedtheprefix-LMarchitecturealongsideotherarchitectures,suchasencoder-decoder
+anddecoder-onlymodels,demonstratingthatprefix-LMoutperformsdecoder-onlymodelsonboth
+trainingobjectives: denoisingandlanguagemodeling.
+Theprefix-LMapproachhasbeenusedinUniLM(Dongetal.,2019),whichtrainsasingletransformer
+onthreetypesoflanguagemodelingtasks: unidirectional,bidirectional,andsequence-to-sequence
+prediction. UniLMemploysasharedTransformernetworkandutilizesspecificself-attentionmasks
+tocontrolthecontextthatpredictionsareconditionedon,wherethesequence-to-sequencetaskis
+equivalenttotheprefix-LMapproach.
+Additionally,UL2(Tayetal.,2023)introducesapretrainingobjectivecalled"MixtureofDenoisers",
+whichcombinesvariousdenoisingstrategies,includingtheprefix-LMapproach. Lastly,XLNetYang
+etal.(2019)alsoallowsfornon-causalwordorderingbyallowingrandompermutationstobeused
+withanext-tokenpredictionobjective.
+Alltheseworksfocusedonthemodelpretraining. Asfortheutilizationofpretrainedcausallanguage
+models,Springeretal.(2024)showintheirworkthatsimplyrepeatingtheinputtothesemodels
+improves the quality of token embeddings for text-retrieval. This work addresses the limitation
+thattokenembeddingsinautoregressivemodelscannotcontaininformationfromtokensappearing
+laterintheinput. Byrepeatingtheinputtwice,theearlytokensareallowedtoencodeinformation
+8
+]%[
+oitaR %Table5: AblationofBitune’sattention. Wevarytheadditionalattentionmaskforprocessingthe
+instructionbesidesthecausalpass,andevaluatedifferentinitialvaluesofmixingcoefficient,θ .
+init
+(a)Differentinit.valuesformixingcoefficients. (b)2ndpassattentionmasksforinstructionfeatures.
+Model Init.Value Avg.Acc. Model AttentionMask Avg.Acc
+Gemma-2B 0.1 49.4 Gemma-2B Causal 46.9
+0.01 49.7 Anti-causal 46.7
+0.001 47.2 Bidirectional 49.7
+Llama3-8B 0.1 72.7 Llama3-8B Causal 71.1
+0.01 72.7 Anti-causal 71.4
+0.001 72.3 Bidirectional 72.7
+Table6: QualitativeresultsonLlama3-8B.WeshowaresponseforLoRAandBitune.
+[GSM8K] Janet’sduckslay16eggsperday.Sheeatsthreeforbreakfasteverymorningandbakesmuffins
+Question: forherfriendseverydaywithfour.Shesellstheremainderatthefarmers’marketdailyfor$2
+perfreshduckegg.Howmuchindollarsdoesshemakeeverydayatthefarmers’market?
+LoRA Janetmakes$16-(3+4)=$9perdayatthefarmers’market.
+Bitune Janetmakes$2perfreshduckegg,andshesellstheremainderoftheeggsshecollectseachday.
+Ifsheeatsthreeeggsforbreakfastandbakesmuffinswithfoureggs,shehas16-3-4=9eggs
+lefttosell.So,shemakes$2x9=$18everydayatthefarmers’market.
+aboutlatertokens,therebyimprovingthequalityoftheembeddings. Anotherapproach,LLM2Vec
+(BehnamGhaderetal.,2024),demonstratesthatpretrainedcausalLLMscanbeeffectivelyconverted
+toBERT-likeencoders. Itcanbedonebyenablingbidirectionalattention,trainingthemodelonthe
+objectiveofmaskedtokenprediction,andapplyingunsupervisedcontrastivelearning.
+5 Discussion
+Limitations. Duringstandardinstruction-tuningtraining,theinstructionandtheanswerarepro-
+cessedinasingleforwardpass.Inourmethod,thisprocessingisexplicitlysplitintophases,extracting
+instructionfeatureswithtwopasses&answermodeling,increasingbothtrainingtimeandmemory
+usage. Asfortheinference, thesetwopassesontheinstruction, bidirectionalandcausal, canbe
+processedeitherinparallel,impactingmemoryusage,orsequentially,increasinglatency.
+However,thisisaminorlimitationinthecontextofinstruction-tuning,sincetypicallysmallerdatasets
+areusedcomparedtopretraining,leadingtorelativelyshorttrainingtimes. Furthermore,atinference
+timetheaddedlatencyforprocessingtheinstructionisnegligible,asthebulkofcomputeisusedfor
+theautoregressiveanswergeneration: e.g. onlya0.2sincreasefrom11.5sto11.7sfora200token
+responsetoa50tokeninstructionforLlama3-8B(seeAppendix6.4formoreresults).
+Conclusion. Bituneisthefirstmethodtoutilizetheinstruction-answerstructureofITdatasetsto
+proposeanewfinetuningmethodthatenablesbidirectionalprocessinginpretraineddecoder-only
+models. Bitunedemonstratesgeneralapplicabilityacrossdifferentmodelsandscales. Itconsistently
+improvesperformanceacrosscommonsensereasoning,arithmetic,andlanguageunderstandingtasks.
+WefurtherdemonstratethatourmethodiscompatiblewithdifferentexistingPEFTmethodsandwill
+likelybenefitfromfurtherdevelopmentsinthisera. Asthefirstworktodemonstratethepotential
+ofaninstruction-tuning-specificadaptationfordecoderLLMs,webelievethereismuchspacefor
+furtherresearchintothispromisingandcrucialdirection.
+Acknowledgements
+WeacknowledgetheuseoftheNationalSupercomputerSnelliusandtheDistributedASCISuper-
+computer6(Baletal.,2016)foressentialcomputationaltasks.
+9References
+AI@Meta. Llama3modelcard. 2024. URLhttps://github.com/meta-llama/llama3/blob/
+main/MODEL_CARD.md. 1,5
+H.Bal,D.Epema,C.deLaat,R.vanNieuwpoort,J.Romein,F.Seinstra,C.Snoek,andH.Wijshoff.
+Amedium-scaledistributedsystemforcomputerscienceresearch: Infrastructureforthelongterm.
+Computer,49(05):54–63,may2016. ISSN1558-0814. doi: 10.1109/MC.2016.127. 9
+ParishadBehnamGhader,VaibhavAdlakha,MariusMosbach,DzmitryBahdanau,NicolasChapados,
+andSivaReddy. LLM2Vec: Largelanguagemodelsaresecretlypowerfultextencoders. arXiv
+preprint: arXiv:2404.05961,2024. 9
+YonatanBisk,RowanZellers,RonanLeBras,JianfengGao,andYejinChoi. Piqa: Reasoningabout
+physicalcommonsenseinnaturallanguage. InAAAI,2020. 5
+HyungWonChung,LeHou,ShayneLongpre,BarretZoph,YiTay,WilliamFedus,EricLi,Xuezhi
+Wang,MostafaDehghani,SiddharthaBrahma,AlbertWebson,ShixiangShaneGu,ZhuyunDai,
+MiracSuzgun,XinyunChen,AakankshaChowdhery,SharanNarang,GauravMishra,AdamsYu,
+VincentZhao,YanpingHuang,AndrewDai,HongkunYu,SlavPetrov,EdH.Chi,JeffDean,Jacob
+Devlin,AdamRoberts,DennyZhou,QuocV.Le,andJasonWei. Scalinginstruction-finetuned
+languagemodels. JMLR,2024. 1
+PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,and
+OyvindTafjord. Thinkyouhavesolvedquestionanswering? tryarc,theai2reasoningchallenge,
+2018. 5
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser,
+MatthiasPlappert,JerryTworek,JacobHilton,ReiichiroNakano,ChristopherHesse,andJohn
+Schulman. Trainingverifierstosolvemathwordproblems,2021. 6
+SamuelRhysCoxandWeiTsangOoi. Conversationalinteractionswithnpcsinllm-drivengaming:
+Guidelinesfromacontentanalysisofplayerfeedback. InInternationalWorkshoponChatbot
+ResearchandDesign,2023. 1
+Ganqu Cui, Lifan Yuan, Ning Ding, Guanming Yao, Wei Zhu, Yuan Ni, Guotong Xie, Zhiyuan
+Liu,andMaosongSun. Ultrafeedback: Boostinglanguagemodelswithhigh-qualityfeedback.
+arXiv:2310.01377,2023. 5
+JacobDevlin,Ming-WeiChang,KentonLee,andKristinaToutanova. BERT:Pre-trainingofdeep
+bidirectionaltransformersforlanguageunderstanding. InACL,2019. 1
+LiDong,NanYang,WenhuiWang,FuruWei,XiaodongLiu,YuWang,JianfengGao,MingZhou,
+andHsiao-WuenHon. Unifiedlanguagemodelpre-trainingfornaturallanguageunderstanding
+andgeneration. InNeurIPS,2019. 8
+PatrickEsser,SumithKulal,AndreasBlattmann,RahimEntezari,JonasMüller,HarrySaini,Yam
+Levi,DominikLorenz,AxelSauer,FredericBoesel,etal. Scalingrectifiedflowtransformersfor
+high-resolutionimagesynthesis. arXiv:2403.03206,2024. 1
+LeoGao,JonathanTow,BaberAbbasi,StellaBiderman,SidBlack,AnthonyDiPofi,CharlesFoster,
+LaurenceGolding,JeffreyHsu,AlainLeNoac’h,HaonanLi,KyleMcDonell,NiklasMuennighoff,
+ChrisOciepa,JasonPhang,LariaReynolds,HaileySchoelkopf,AviyaSkowron,LintangSutawika,
+Eric Tang, Anish Thite, Ben Wang, Kevin Wang, and Andy Zou. A framework for few-shot
+languagemodelevaluation,2023. URLhttps://zenodo.org/records/10256836. 5
+GemmaTeam,ThomasMesnard,CassidyHardin,RobertDadashi,SuryaBhupatiraju,ShreyaPathak,
+LaurentSifre,MorganeRivière,MihirSanjayKale,JulietteLove,PouyaTafti,LéonardHussenot,
+PierGiuseppeSessa, AakankshaChowdhery, AdamRoberts, AdityaBarua, AlexBotev, Alex
+Castro-Ros,AmbroseSlone,AmélieHéliou,AndreaTacchetti,AnnaBulanova,AntoniaPaterson,
+BethTsai,BobakShahriari,CharlineLeLan,ChristopherA.Choquette-Choo,ClémentCrepy,
+DanielCer,DaphneIppolito,DavidReid,ElenaBuchatskaya,EricNi,EricNoland,GengYan,
+GeorgeTucker,George-ChristianMuraru,GrigoryRozhdestvenskiy,HenrykMichalewski,Ian
+10Tenney,IvanGrishchenko,JacobAustin,JamesKeeling,JaneLabanowski,Jean-BaptisteLespiau,
+JeffStanway,JennyBrennan,JeremyChen,JohanFerret,JustinChiu,JustinMao-Jones,Katherine
+Lee,KathyYu,KatieMillican,LarsLoweSjoesund,LisaLee,LucasDixon,MachelReid,Maciej
+Mikuła,MateoWirth,MichaelSharman,NikolaiChinaev,NithumThain,OlivierBachem,Oscar
+Chang,OscarWahltinez,PaigeBailey,PaulMichel,PetkoYotov,RahmaChaabouni,Ramona
+Comanescu,ReenaJana,RohanAnil,RossMcIlroy,RuiboLiu,RyanMullins,SamuelLSmith,
+SebastianBorgeaud,SertanGirgin,SholtoDouglas,ShreePandya,SiamakShakeri,SohamDe,
+TedKlimenko,TomHennigan,VladFeinberg,WojciechStokowiec,YuhuiChen,ZafaraliAhmed,
+ZhitaoGong,TrisWarkentin,LudovicPeran,MinhGiang,ClémentFarabet,OriolVinyals,Jeff
+Dean, KorayKavukcuoglu, DemisHassabis, ZoubinGhahramani, DouglasEck, JoelleBarral,
+Fernando Pereira, Eli Collins, Armand Joulin, Noah Fiedel, Evan Senter, Alek Andreev, and
+KathleenKenealy. Gemma:Openmodelsbasedongeminiresearchandtechnology. arxivpreprint:
+arXiv:2403.08295,2024. 5
+DanHendrycks,CollinBurns,StevenBasart,AndyZou,MantasMazeika,DawnSong,andJacob
+Steinhardt. Measuringmassivemultitasklanguageunderstanding. InICLR,2021. 5
+EdwardJHu,yelongshen,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,
+andWeizhuChen. LoRA:Low-rankadaptationoflargelanguagemodels. InICLR,2022. 4,7
+PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,NamanGoyal,
+HeinrichKüttler,MikeLewis,Wen-tauYih,TimRocktäschel,etal. Retrieval-augmentedgenera-
+tionforknowledge-intensivenlptasks. InNeurIPS,2020. 1
+QuentinLhoest,AlbertVillanovadelMoral,YacineJernite,AbhishekThakur,PatrickvonPlaten,
+SurajPatil,JulienChaumond,MariamaDrame,JulienPlu,LewisTunstall,JoeDavison,Mario
+Šaško,GunjanChhablani,BhavitvyaMalik,SimonBrandeis,TevenLeScao,VictorSanh,Canwen
+Xu,NicolasPatry,AngelinaMcMillan-Major,PhilippSchmid,SylvainGugger,ClémentDelangue,
+Théo Matussière, Lysandre Debut, Stas Bekman, Pierric Cistac, Thibault Goehringer, Victor
+Mustar,FrançoisLagunas,AlexanderRush,andThomasWolf. Datasets: Acommunitylibraryfor
+naturallanguageprocessing. InEMNLP:SystemDemonstrations,2021. 14
+XianmingLiandJingLi. Angle-optimizedtextembeddings. ACL,2023. 1
+YuanzhiLi,SébastienBubeck,RonenEldan,AllieDelGiorno,SuriyaGunasekar,andYinTatLee.
+Textbooksareallyouneedii: phi-1.5technicalreport. arXiv:2309.05463,2023. 5
+HaokunLiu,DerekTam,MuqeethMohammed,JayMohta,TenghaoHuang,MohitBansal,andColin
+Raffel. Few-shotparameter-efficientfine-tuningisbetterandcheaperthanin-contextlearning. In
+NeurIPS,2022. 7
+PeterJ.Liu,MohammadSaleh,EtiennePot,BenGoodrich,RyanSepassi,LukaszKaiser,andNoam
+Shazeer. Generatingwikipediabysummarizinglongsequences. InICLR,2018. 8
+Shih-YangLiu,Chien-YiWang,HongxuYin,PavloMolchanov,Yu-ChiangFrankWang,Kwang-
+TingCheng, andMin-HungChen. Dora: Weight-decomposedlow-rankadaptation. InICML,
+2024. 7
+SourabMangrulkar,SylvainGugger,LysandreDebut,YounesBelkada,SayakPaul,andBenjamin
+Bossan. PEFT:State-of-the-artparameter-efficientfine-tuningmethods. https://github.com/
+huggingface/peft,2022. 5
+OpenAI. Gpt-4technicalreport. arXiv:2303.08774,2024a. 1,5
+OpenAI. Video generation models as world simulators. https://openai.com/index/
+video-generation-models-as-world-simulators/,2024b. 1
+LongOuyang,JeffWu,XuJiang,DiogoAlmeida,CarrollL.Wainwright,PamelaMishkin,Chong
+Zhang,SandhiniAgarwal,KatarinaSlama,AlexRay,JohnSchulman,JacobHilton,FraserKelton,
+LukeMiller,MaddieSimens,AmandaAskell,PeterWelinder,PaulChristiano,JanLeike,and
+RyanLowe. Traininglanguagemodelstofollowinstructionswithhumanfeedback. InNeurIPS,
+2022a. 1
+11LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,Chong
+Zhang,SandhiniAgarwal,KatarinaSlama,AlexRay,etal. Traininglanguagemodelstofollow
+instructionswithhumanfeedback. InNeurIPS,2022b. 2
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,Yanqi
+Zhou,WeiLi,andPeterJ.Liu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-text
+transformer. JMLR,2020. 1,8
+BaptisteRoziere,JonasGehring,FabianGloeckle,StenSootla,ItaiGat,XiaoqingEllenTan,Yossi
+Adi,JingyuLiu,TalRemez,JérémyRapin,etal. Codellama: Openfoundationmodelsforcode.
+arXiv:2308.12950,2023. 1
+MaartenSap,HannahRashkin,DerekChen,RonanLeBras,andYejinChoi. Socialiqa: Common-
+sensereasoningaboutsocialinteractions. InEMNLP,2019. 5
+MikeSchusterandKuldipK.Paliwal. Bidirectionalrecurrentneuralnetworks. InIEEETransactions
+onSignalProcessing,1997. 1
+Jacob Mitchell Springer, Suhas Kotha, Daniel Fried, Graham Neubig, and Aditi Raghunathan.
+Repetitionimproveslanguagemodelembeddings. arvivpreprintarXiv2402.15449,2024. 8
+AlonTalmor,JonathanHerzig,NicholasLourie,andJonathanBerant. CommonsenseQA:Aquestion
+answering challenge targeting commonsense knowledge. In Jill Burstein, Christy Doran, and
+ThamarSolorio(eds.),NAACL,2019. 5
+Yi Tay, Mostafa Dehghani, Vinh Q. Tran, Xavier Garcia, Jason Wei, Xuezhi Wang, Hyung Won
+Chung,DaraBahri,TalSchuster,StevenZheng,DennyZhou,NeilHoulsby,andDonaldMetzler.
+UL2: Unifyinglanguagelearningparadigms. InICLR,2023. 8
+ArunJamesThirunavukarasu,DarrenShuJengTing,KabilanElangovan,LauraGutierrez,TingFang
+Tan,andDanielShuWeiTing. Largelanguagemodelsinmedicine. Naturemedicine,2023. 1
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+Bashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,DanBikel,LukasBlecher,Cris-
+tianCantonFerrer, MoyaChen, GuillemCucurull, DavidEsiobu, JudeFernandes, JeremyFu,
+WenyinFu, BrianFuller, CynthiaGao, VedanujGoswami, NamanGoyal, AnthonyHartshorn,
+SagharHosseini,RuiHou,HakanInan,MarcinKardas,ViktorKerkez,MadianKhabsa,Isabel
+Kloumann,ArtemKorenev,PunitSinghKoura,Marie-AnneLachaux,ThibautLavril,JenyaLee,
+DianaLiskovich,YinghaiLu,YuningMao,XavierMartinet,TodorMihaylov,PushkarMishra,
+IgorMolybog,YixinNie, AndrewPoulton, JeremyReizenstein, RashiRungta, KalyanSaladi,
+AlanSchelten,RuanSilva,EricMichaelSmith,RanjanSubramanian,XiaoqingEllenTan,Binh
+Tang,RossTaylor,AdinaWilliams,JianXiangKuan,PuxinXu,ZhengYan,IliyanZarov,Yuchen
+Zhang, Angela Fan, Melanie Kambadur, Sharan Narang, Aurelien Rodriguez, Robert Stojnic,
+SergeyEdunov, andThomasScialom. Llama2: Openfoundationandfine-tunedchatmodels.
+arXiv:2307.09288,2023. 5
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,Łukasz
+Kaiser,andIlliaPolosukhin. Attentionisallyouneed. InNeurIPS,2017. 2
+ThomasWang,AdamRoberts,TevenLeScaoDanielHesslow,HyungWonChung,IzBeltagy,Julien
+Launay,andColinRaffel. Whatlanguagemodelarchitectureandpretrainingobjectiveworkbest
+forzero-shotgeneralization? InICML,2022. 2
+ThomasWolf,LysandreDebut,VictorSanh,JulienChaumond,ClementDelangue,AnthonyMoi,
+Pierric Cistac, Tim Rault, Rémi Louf, Morgan Funtowicz, Joe Davison, Sam Shleifer, Patrick
+vonPlaten,ClaraMa,YacineJernite,JulienPlu,CanwenXu,TevenLeScao,SylvainGugger,
+MariamaDrame,QuentinLhoest,andAlexanderM.Rush. Transformers: State-of-the-artnatural
+languageprocessing. InEMNLP:SystemDemonstrations,2020. 5
+ZhilinYang,ZihangDai,YimingYang,JaimeCarbonell,RussRSalakhutdinov,andQuocVLe.
+Xlnet: Generalizedautoregressivepretrainingforlanguageunderstanding. NeurIPS,2019. 8
+ShengyuZhang,LinfengDong,XiaoyaLi,SenZhang,XiaofeiSun,ShuheWang,JiweiLi,Runyi
+Hu,TianweiZhang,FeiWu,andGuoyinWang. Instructiontuningforlargelanguagemodels: A
+survey. arXiv:2308.10792,2024. 2
+126 Appendix
+6.1 PseudocodeforBituneTrainingStep
+Algorithm2Python-likepseudocodeofBituneTrainingStep.
+# prompt - tensor with tokenized instruction
+# answer - tensor with tokenizer answer to model
+# theta - trainable tensor with mixing coeff. for each layer
+# theta_init - initial value of mixing coefficients
+k_c, v_c = model_causal(prompt) # Pass on the instruction for causal features
+k_b, v_b = model_bidir(prompt) # Pass to obtain bidirectional features
+# Combine both sets of features
+alpha = theta.abs() / (theta.abs() + theta_init)
+k = k_c * (1 - alpha) + k_b * alpha
+v = v_c * (1 - alpha) + v_b * alpha
+kv = (k, v)
+logits = model_causal(answer, kv)
+loss = compute_loss(logits, answer)
+loss.backward()
+update_parameters(model_causal, model_bidir, theta)
+6.2 Hyperparameters
+Table7: Hyperparameterssharedacrossmodelsanddatasets.
+Hyperparameter Value
+GPUs 1
+Optimizer AdamW
+LRScheduler Linear
+WeightDecay 0.0
+BatchSize(incl. accumulation) 10
+AccumulationSteps 10
+WarmupSteps 10%ofupdatesteps
+RNGSeeds 42,43,44
+Table8: Dataset-specifichyperparameters.
+Hyperparameter UltraFeedback PIQA ARC CSQA SIQA GSM8K
+Epochs 3 1 5 1 1 1
+UpdateSteps 3000 1605 555 974 3341 747
+Table9: Learningrateforgivendataset-modelpair,includingdifferentPEFTvariantsforinstruction-
+tuningexperiments.
+Model UltraFeedback PIQA ARC CSQA SIQA GSM8K
+Gemma-2B 3E-4 1E-3 1E-3 1E-3 1E-3 1E-3
+Gemma-7B 3E-4 3E-4 3E-4 3E-4 3E-4 3E-4
+Llama2-7B 3E-4 1E-3 1E-3 1E-3 1E-3 1E-3
+Llama3-8B 3E-4 1E-3 1E-3 1E-3 1E-3 1E-3
+Phi-2 3E-4 1E-3 1E-3 1E-3 1E-3 1E-3
+Gemma-2B(DoRA) 3E-4 - - - - -
+Gemma-2B(IA3) 1E-3 - - - - -
+Llama3-8B(DoRA) 3E-4 - - - - -
+Llama3-8B(IA3) 1E-3 - - - - -
+13Table 10: Configuration of PEFT methods. All other hyperparameters have default values of
+HuggingFacePEFTlibrary.
+Hyperparameter Value
+Rank(LoRA,DoRA) 8
+Alpha(LoRA,DoRA) 1
+TargetModules(All) AlllinearlayersofMLPandSelf-Attention
+FeedforwardModules(IA3) AlllinearlayersofMLP
+6.3 Datasets
+ForallexperimentsweusedHuggingFaceDatasets(Lhoestetal.,2021)librarytoobtainnecessary
+datasets.
+Table11: Tablewithdatasetsandcorrespondingpaths,tobeusedwithHuggingFaceDatasetslibrary.
+Dataset Path
+UltraFeedback openbmb/UltraFeedback
+PIQA piqa
+ARC-Challenge allenai/ai2_arc
+CSQA tau/commonsense_qa
+SIQA social_i_qa
+GSM8K gsm8k
+MMLU hails/mmlu_no_train
+6.4 TrainingSpeed&MemoryUsage
+As the method introduces two additional forward passes during training, both the training speed
+and the memory usage are impacted. Here we present average training times and GPU memory
+usageontheinstruction-tuningsetupwith3000updatesteps(30000actualsteps,duetogradient
+accumulation),onasingleA100GPU,formodelsoftwodifferentscales-Gemma-2B&Llama3-8B.
+Ourimplementationhasnotbeenoptimized,whichmeansthate.g. trainingtimescouldbeimproved
+viaparallelizationoftwopassesontheprompt.Tableshowsaveragetrainingtime,peakGPUmemory
+usageduringtraining,andaverageaccuracyondownstreamtasks. Additionally,weprovideinference
+times,averagedover10runs,foragivenprompt-to-answerlengthintokens.
+Train. Time[h] Memory[GB] Acc. InferenceTime[s]
+Model Method 50:200 200:50
+Gemma-2B LoRA 1.0 14.9 45.7 6.31 1.56
+Bitune 3.1 19.8 49.7 6.72 1.74
+Llama3-8B LoRA 1.7 26.6 70.4 11.48 2.39
+Bitune 5.3 30.8 72.7 11.65 2.73
+Usingthesevalues,onecanapproximaterequiredcomputetoreproduceresultsonagiventasks,as
+allexperimentssharedthesamebatchsizeandmanyotherhyperparameters.
+6.5 PromptTemplates
+Templatesusedtoformatinstruction-answerpairsforagivendataset,forbothtrainingandevaluation.
+Inallcasesthereisaspacecharacteratthebeginningoftheanswerpart.
+Dataset Instruction Answer
+UltraFeedback Question: {instruction} {completion}<EOS>
+Answer:
+14PIQA Question: {question} {answer}<EOS>
+Choices:
+{choice0}
+{choice1}
+Answer:
+ARC Question: {question} {answer}<EOS>
+Choices:
+{choice0}
+{choice1}
+{choice2}
+{choice3}
+Answer:
+CSQA Question: {question} {answer}<EOS>
+Choices:
+{choice0}
+{choice1}
+{choice2}
+{choice3}
+{choice4}
+Answer:
+SIQA Question: Giventhecontext,answercorrectlythe ({answer_index})<EOS>
+question.
+Context: {context}
+Question: {question}
+Choices:
+(0){choice0}
+(1){choice1}
+(2){choice2}
+Answer:
+GSM8K Question: {question} {answer}<EOS>
+Answer:
+MMLU Question: {question} ({answer_index})<EOS>
+(0). {choice0}
+(1). {choice1}
+(2). {choice2}
+(3). {choice3}
+Answer:
+6.6 ResultswithStandardDeviation
+Tableswithcompleteresultsaveragedover3seeds,includesstandarddeviation.
+15Table14:Zero-shotresultsondownstreamtasksafterinstruction-tuningontheUltraFeedbackdataset.
+PIQA ARC CSQA SIQA MMLU
+mean std mean std mean std mean std mean std
+Model Method
+Gemma-2B Pretrained 57.51 - 36.86 - 35.46 - 38.18 - 34.01 -
+LoRA 66.74 0.52 43.37 1.33 42.32 1.60 44.27 3.85 31.74 0.78
+LoRA 66.50 0.85 42.72 1.46 42.34 1.21 43.82 3.71 31.61 0.85
+16
+Bitune 69.59 1.20 47.47 0.64 46.87 1.98 49.51 1.54 35.29 0.08
+Gemma-7B Pretrained 73.12 - 78.33 - 62.00 - 64.74 - 59.04 -
+LoRA 84.24 0.51 79.18 0.76 68.47 1.61 71.92 0.34 55.26 0.43
+LoRA 83.93 0.94 79.24 0.61 68.39 2.05 71.99 0.83 53.41 4.22
+16
+Bitune 83.59 0.46 80.09 0.90 69.15 0.56 72.74 0.90 53.81 0.40
+Llama2-7B Pretrained 59.25 - 38.14 - 32.60 - 45.09 - 35.98 -
+LoRA 69.51 0.73 49.94 0.79 45.32 2.65 57.05 1.24 41.06 0.23
+LoRA 69.86 0.25 49.89 1.51 45.59 2.08 56.69 1.89 41.21 0.20
+16
+Bitune 70.00 0.53 51.11 0.23 48.08 2.59 59.09 0.96 41.87 0.21
+Llama3-8B Pretrained 68.99 - 73.63 - 65.36 - 56.81 - 56.00 -
+LoRA 81.94 0.38 74.46 1.06 69.23 0.67 68.99 1.55 57.62 0.54
+LoRA 82.35 0.83 74.91 0.45 70.52 0.46 68.63 1.38 57.98 0.49
+16
+Bitune 84.39 0.24 77.42 1.15 72.70 0.82 70.15 0.34 58.96 0.37
+Phi-2 Pretrained 70.35 - 67.32 - 61.43 - 65.05 - 45.41 -
+LoRA 76.31 0.17 66.67 0.44 61.62 0.40 66.65 0.31 48.23 0.75
+LoRA 76.12 0.93 66.61 0.27 61.64 0.45 66.82 0.83 47.73 0.62
+16
+Bitune 76.51 0.30 67.18 0.49 63.04 0.71 68.51 0.56 48.92 0.41
+Table15: Resultforthedownstreamtasktrainingsetup.
+PIQA ARC CSQA SIQA GSM8K
+mean std mean std mean std mean std mean std
+Model Method
+Gemma-2B LoRA 81.41 0.46 58.05 1.16 77.18 0.05 77.40 0.40 30.17 0.75
+Bitune 83.28 0.33 59.98 1.19 78.32 0.68 76.60 0.24 32.98 0.97
+Phi-2 LoRA 82.79 1.15 76.31 0.56 78.68 0.76 80.30 0.44 58.55 0.89
+Bitune 83.91 0.28 77.02 0.34 78.95 0.22 80.38 0.21 59.21 1.15
+Gemma-7B LoRA 91.42 0.60 84.58 0.36 84.41 1.04 79.36 1.41 59.11 0.97
+Bitune 92.13 0.27 84.22 0.74 84.22 0.76 79.39 1.33 59.39 0.72
+Llama3-8B LoRA 90.24 0.27 80.75 0.36 83.92 0.74 83.15 0.41 60.45 0.72
+Bitune 90.52 0.78 81.26 0.79 84.11 1.05 82.12 0.30 63.43 0.27
+Llama2-7B LoRA 84.39 0.69 66.55 0.78 81.52 0.83 82.67 0.31 32.02 0.68
+Bitune 84.39 0.61 66.87 0.90 81.95 0.56 81.39 0.15 32.85 1.05
+16Table16: AblationstudyonthecomponentsofBitune.
+PIQA ARC CSQA SIQA MMLU
+mean std mean std mean std mean std mean std
+Model Method
+Gemma-2B LoRA 66.74 0.52 43.37 1.33 42.32 1.60 44.27 3.85 31.74 0.78
+Bitune 69.59 1.20 47.47 0.64 46.87 1.98 49.51 1.54 35.29 0.08
+NaiveBidir. 67.79 1.00 44.65 1.78 46.79 2.86 48.04 0.95 32.43 1.40
+NoMixing 69.01 1.47 45.71 1.32 46.14 2.56 49.80 0.53 34.03 0.35
+OnlyCausal 66.39 1.28 45.28 0.65 42.45 1.65 46.98 0.76 33.27 0.41
+SharedWeights 68.10 0.41 44.34 0.90 44.53 1.67 47.19 2.16 32.93 0.13
+Llama3-8B LoRA 81.94 0.38 74.46 1.06 69.23 0.67 68.99 1.55 57.62 0.54
+Bitune 84.39 0.24 77.42 1.15 72.70 0.82 70.15 0.34 58.96 0.37
+NaiveBidir. 85.44 0.25 76.45 0.60 69.37 0.28 70.04 0.43 58.33 0.89
+NoMixing 85.56 0.38 74.86 0.21 68.60 1.31 69.74 0.11 58.88 0.43
+OnlyCausal 82.37 0.41 74.63 0.91 70.65 0.93 69.17 1.51 58.43 0.26
+SharedWeights 84.10 0.63 75.94 1.11 71.91 0.71 70.61 0.60 59.03 0.79
+Table17: ResultsfordifferentPEFTmethodsusedincombinationwithBitune.
+PIQA ARC CSQA SIQA MMLU
+mean std mean std mean std mean std mean std
+Model Method
+Gemma-2B LoRA 66.74 0.52 43.37 1.33 42.32 1.60 44.27 3.85 31.74 0.78
+Bitune 69.59 1.20 47.47 0.64 46.87 1.98 49.51 1.54 35.29 0.08
+DoRA 66.70 0.63 43.57 0.91 41.88 1.08 44.71 3.83 31.95 0.72
+Bitune 69.62 0.69 47.47 0.34 46.87 2.42 49.71 1.80 35.09 0.16
+DoRA
+IA3 67.25 0.52 46.50 0.67 45.54 0.30 37.65 1.07 32.49 0.20
+Bitune 67.54 1.27 47.27 0.53 48.92 0.94 44.29 1.08 33.60 0.37
+IA3
+Llama3-8B LoRA 81.94 0.38 74.46 1.06 69.23 0.67 68.99 1.55 57.62 0.54
+Bitune 84.39 0.24 77.42 1.15 72.70 0.82 70.15 0.34 58.96 0.37
+DoRA 82.12 0.44 75.40 0.52 70.22 0.39 69.19 1.14 57.67 0.23
+Bitune 84.06 0.46 77.13 0.37 71.99 0.67 70.56 0.21 58.72 0.58
+DoRA
+IA3 80.87 0.58 75.54 0.10 68.25 0.26 66.38 0.18 58.75 0.24
+Bitune 83.42 0.52 75.68 0.68 69.15 0.40 67.83 0.25 58.80 0.10
+IA3
+Table18: Resultsfordifferentinitvaluesformixingcoefficients.
+PIQA ARC CSQA SIQA MMLU
+mean std mean std mean std mean std mean std
+Model Init. Value
+Gemma-2B 0.1 69.68 0.74 46.33 0.81 45.97 2.64 49.86 2.21 35.25 0.46
+0.01 69.59 1.20 47.47 0.64 46.87 1.98 49.51 1.54 35.29 0.08
+0.001 67.79 0.88 44.20 0.68 45.56 1.61 46.35 1.08 31.89 0.67
+Llama3-8B 0.1 85.00 0.73 76.48 0.63 71.06 1.56 71.68 0.46 59.19 0.38
+0.01 84.39 0.24 77.42 1.15 72.70 0.82 70.15 0.34 58.96 0.37
+0.001 84.60 0.62 76.62 0.09 71.28 1.45 70.62 0.15 58.49 0.22
+176.7 GSM8KSamples
+Samples of responses to the first 20 questions from GSM8K benchmark. Shown for Llama3-8B
+intruction-tunedonUltraFeedbackdataset-forstandardfinetuningwithLoRAandBitune.
+Prompt LoRA Bitune
+Question:Janet’sduckslay16eggs Janetmakes$16-(3+4)=$9per Janetmakes$2perfreshduckegg,
+perday.Sheeatsthreeforbreakfast dayatthefarmers’market. and she sells the remainder of the
+everymorningandbakesmuffinsfor eggsshecollectseachday.Ifsheeats
+herfriendseverydaywithfour.She three eggs for breakfast and bakes
+sells the remainder at the farmers’ muffinswithfoureggs,shehas16-3
+market daily for $2 per fresh duck -4=9eggslefttosell.So,shemakes
+egg. Howmuchindollarsdoesshe $2x9=$18everydayatthefarmers’
+makeeverydayatthefarmers’mar- market.
+ket?
+Question: A robe takes 2 bolts of Aroberequires2boltsofbluefiber Tomakearobe,youneed2boltsof
+bluefiberandhalfthatmuchwhite andhalfthatmuchwhitefiber,which bluefiberandhalfthatmuchwhite
+fiber.Howmanyboltsintotaldoesit is equal to 1 bolt of white fiber. fiber. So, thetotalnumberofbolts
+take? Therefore,thetotalnumberofbolts requiredis:
+requiredforarobeis3bolts(2blue 2boltsofbluefiber+halfof2bolts
+and1white). ofbluefiber(whichis1boltofwhite
+fiber)
+Totalbolts=2+1=3bolts
+So,thetotalnumberofboltsrequired
+tomakearobeis3bolts.
+Question:Joshdecidestotryflipping Joshmadeaprofitof$50,000. Joshmadeaprofitof$20,000.
+ahouse.Hebuysahousefor$80,000 Confidence:95% Tocalculatetheprofit,firstfindthe
+andthenputsin$50,000inrepairs. increasedvalueofthehouseafterre-
+Thisincreasedthevalueofthehouse pairs:
+by150%. Howmuchprofitdidhe $80,000+$50,000=$130,000
+make? Then,calculatethe150%increase:
+$130,000*1.5=$195,000
+The difference between the origi-
+nalpurchasepriceandtheincreased
+valueistheprofit:
+$195,000-$80,000=$115,000
+Finally, subtract the cost of repairs
+fromtheprofit:
+$115,000-$50,000=$20,000
+So,Joshmadeaprofitof$20,000.
+Question: James decides to run 3 James runs 3 sprints of 60 meters James runs 3 sprints of 60 meters
+sprints3timesaweek. Heruns60 each,3timesaweek.Tofindthetotal each, 3 times a week. To find the
+meterseachsprint. Howmanytotal metersherunsaweek,wecanmulti- total meters he runs in a week, we
+metersdoesherunaweek? plythenumberofsprints(3)bythe can multiply the number of sprints
+distance of each sprint (60 meters) bythedistanceofeachsprintandthe
+and then multiply the result by the numberoftimesherunsthesprints
+numberoftimesherunsthesprints perweek.
+(3)perweek. Totalmeters=(3sprints)x(60me-
+So, the total meters James runs a terspersprint)x(3timesperweek)
+weekis: =540metersperweek.
+3 sprints x 60 meters per sprint x So,Jamesrunsatotalof540meters
+3timesperweek=540metersper perweek.
+week.
+Confidence:100%
+18Question: Every day, Wendi feeds Tofindthenumberofcupsoffeed Tofindthenumberofcupsoffeed
+each of her chickens three cups of Wendineedstogiveherchickensin Wendineedstogiveherchickensin
+mixedchickenfeed,containingseeds, the final meal of the day, we need the final meal of the day, we need
+mealworms and vegetables to help tocalculatethetotalamountoffeed tocalculatethetotalamountoffeed
+keep them healthy. She gives the neededforthedayanddivideitby neededforthedayandthendivideit
+chickenstheirfeedinthreeseparate thenumberofmeals. bythenumberofmeals(3)andthe
+meals.Inthemorning,shegivesher Thetotalamountoffeedneededfor numberofchickens(20).
+flockofchickens15cupsoffeed.In thedayis: First, let’s find the total amount of
+theafternoon,shegivesherchickens Morningmeal:15cups*20chickens feedneededfortheday:
+another25cupsoffeed.Howmany =300cupsAfternoonmeal:25cups Morningmeal:15cups*20chickens
+cups of feed does she need to give *20chickens=500cupsTotalfeed =300cupsAfternoonmeal:25cups
+herchickensinthefinalmealofthe neededfortheday: 300cups+500 *20chickens=500cupsTotalfeed
+dayifthesizeofWendi’sflockis20 cups=800cups neededfortheday: 300cups+500
+chickens? Now,wedividethetotalfeedneeded cups=800cups
+forthedaybythenumberofmeals Now,wedividethetotalfeedneeded
+(3): forthedaybythenumberofmeals
+800cups/3meals=266.67cups (3)andthenumberofchickens(20):
+So,Wendineedstogiveherchickens 800cups/(3meals*20chickens)=
+266.67cupsoffeedinthefinalmeal 800cups/(60meals*chickens)=
+oftheday. 13.33cups
+So,Wendineedstogiveherchickens
+13.33cupsoffeedinthefinalmeal
+oftheday.
+Question:Kylarwenttothestoreto Kylarneedstopay$80for16glasses. Kylarneedstopay$80for16glasses.
+buy glasses for his new apartment. Confidence:95% Confidence:100%
+Oneglasscosts$5,buteverysecond
+glasscostsonly60%oftheprice.Ky-
+lar wants to buy 16 glasses. How
+muchdoesheneedtopayforthem?
+Question: Toulouse has twice To find the total number of sheep Toulouse has twice as many sheep
+as many sheep as Charleston. in Toulouse, Charleston, and Seat- as Charleston, so if Charleston has
+Charleston has 4 times as many tletogether,weneedtofirstfindthe 4 times as many sheep as Seattle,
+sheepasSeattle. Howmanysheep numberofsheepinCharlestonand Toulousemusthave8timesasmany
+doToulouse,Charleston,andSeattle Toulouse. Since Charleston has 4 sheepasSeattle.SinceSeattlehas20
+havetogetherifSeattlehas20sheep? timesasmanysheepasSeattle,and sheep,Toulousehas160sheep.
+Seattlehas20sheep,Charlestonhas Now, let’s find the total number of
+4x20=80sheep. Now, weknow sheepforToulouse,Charleston,and
+that Toulouse has twice as many Seattletogether:
+sheepasCharleston,soToulousehas Toulouse: 160 sheep Charleston:
+2x80=160sheep. 4 times as many sheep as Seattle,
+Now,wecanaddthenumberofsheep whichis4*20=80sheepSeattle:
+inToulouse,Charleston,andSeattle 20sheep
+together: Total sheep: 160 + 80 + 20 = 260
+Toulouse + Charleston + Seattle = sheep
+160+80+20=260sheep So, the total number of sheep for
+So, the total number of sheep in Toulouse,Charleston,andSeattleto-
+Toulouse,Charleston,andSeattleto- getheris260.
+getheris260.
+19Question: Carla is downloading a Carla’s download speed is 2 Carla’s download speed is 2
+200GBfile.Normallyshecandown- GB/minute.Thefilesizeis200GB. GB/minute.Thefilesizeis200GB.
+load 2 GB/minute, but 40% of the Thedownloadwilltake100minutes Thedownloadwilltake100minutes
+waythroughthedownload,Windows (200GB/2GB/minute)tocomplete. (200GB/2GB/minute)tocomplete.
+forces a restart to install updates, However, 40% of the way through However, 40% of the way through
+whichtakes20minutes.ThenCarla the download, Windows forces a the download, Windows forces a
+hastorestartthedownloadfromthe restarttoinstallupdates,whichtakes restarttoinstallupdates,whichtakes
+beginning.Howloaddoesittaketo 20minutes. Aftertherestart,Carla 20minutes. Aftertherestart,Carla
+downloadthefile? has to restart the download from hastorestartthedownloadfromthe
+thebeginning. Thismeansthatthe beginning.
+downloadwilltakeanadditional80 So, the total time to download the
+minutes(200GB/2GB/minute)to file is 120 minutes (100 minutes +
+complete. Therefore,thetotaltime 20minutes).Thedownloadspeedis
+requiredtodownloadthefileis100 1.67GB/minute(200GB/120min-
+minutes+20minutes+80minutes utes).
+=200minutes.
+Question:Johndrivesfor3hoursat Johnis120milesfromhomeatthe John’stotaldistancetraveledcanbe
+a speed of 60 mph and then turns endofthe4hours. calculated by adding the distances
+aroundbecauseherealizesheforgot Confidence:95% coveredduringeachlegofhisjour-
+something very important at home. ney. The first leg is 3 hours at 60
+Hetriestogethomein4hoursbut mph, whichgivesadistanceof3x
+spendsthefirst2hoursinstandstill 60=180miles.Thesecondlegis4
+traffic.Hespendsthenexthalf-hour hours,withthefirst2hoursspentin
+drivingataspeedof30mph,before standstilltraffic,thenexthalf-hourat
+being able to drive the remaining 30mph,andtheremainingtimeat80
+timeofthe4hoursgoingat80mph. mph. Thetotaldistanceforthisleg
+Howfarishefromhomeattheend is:
+ofthose4hours? 2hoursat0mph(standstilltraffic)=
+0miles0.5hoursat30mph=0.5x
+30=15miles1.5hoursat80mph=
+1.5x80=120miles
+Thetotaldistancetraveledis180+
+135=315miles. SinceJohnturned
+aroundafterdriving180miles,heis
+135 miles from home at the end of
+the4hours.
+Question:Eliza’srateperhourforthe Eliza’searningsforthisweekcanbe Eliza’searningsforthisweekcanbe
+first40hourssheworkseachweek calculatedasfollows: calculatedasfollows:
+is$10.Shealsoreceivesanovertime 1. Calculatetheregularpayforthe 1. Calculatetheregularpayforthe
+payof1.2timesherregularhourly first40hours:-Regularhourlyrate: first40hours:-Regularhourlyrate:
+rate.IfElizaworkedfor45hoursthis $10 - Hours worked: 40 - Regular $10 - Hours worked: 40 - Regular
+week,howmuchareherearningsfor pay:$10x40=$400 pay:$10x40=$400
+thisweek? 2.Calculatetheovertimepayforthe 2.Calculatetheovertimepayforthe
+additional5hours:-Overtimehourly remaining5hours:-Overtimehourly
+rate:1.2x$10=$12-Hoursworked: rate:1.2x$10=$12-Hoursworked:
+5-Overtimepay:$12x5=$60 5-Overtimepay:$12x5=$60
+3.Addtheregularpayandovertime 3.Addtheregularpayandovertime
+paytogetthetotalearnings:-Total paytogetthetotalearnings:-Total
+earnings:$400+$60=$460 earnings:$400+$60=$460
+So,Eliza’searningsforthisweekare So,Eliza’searningsforthisweekare
+$460. $460.
+20Question: A new program had 60 Inthefirstmonth,theprogramhad Inthefirstmonth,theprogramhad
+downloads in the first month. The 60downloads. 60downloads.
+numberofdownloadsinthesecond Inthesecondmonth,thenumberof Inthesecondmonth,thenumberof
+month was three times as many as downloadswasthreetimesasmany downloadswasthreetimesasmany
+thedownloadsinthefirstmonth,but asthedownloadsinthefirstmonth, asthedownloadsinthefirstmonth,
+then reduced by 30% in the third so the number of downloads in the so the number of downloads in the
+month. How many downloads did secondmonthis3*60=180. secondmonthis3*60=180.
+theprogramhavetotaloverthethree In the third month, the number of In the third month, the number of
+months? downloadsreducedby30%, sothe downloadsreducedby30%fromthe
+number of downloads in the third downloadsinthesecondmonth,so
+monthis180*0.7=126. thenumberofdownloadsinthethird
+Thetotalnumberofdownloadsover monthis0.7*180=126.
+thethreemonthsis60+180+126= Thetotalnumberofdownloadsover
+366. thethreemonthsis:
+60+180+126=366
+So, the program had a total of 366
+downloadsoverthethreemonths.
+Question: Toulawenttothebakery Tocalculatethetotalcost,weneedto Toula’stotalcostforthepastriescan
+andboughtvarioustypesofpastries. addthecostsofthedifferentpastries. becalculatedbyaddingthecostsof
+She bought 3 dozen donuts which Thecostof3dozendonutsis$68per thedonuts,minicupcakes,andmini
+cost$68perdozen,2dozenminicup- dozen,sothetotalcostis$68*3= cheesecakes.Thecostofthedonuts
+cakeswhichcost$80perdozen,and $204.Thecostof2dozenminicup- is $68 per dozen, so the total cost
+6dozenminicheesecakesfor$55per cakesis$80perdozen,sothetotal for3dozenis$68*3=$204. The
+dozen.Howmuchwasthetotalcost? costis$80*2=$160. Thecostof costoftheminicupcakesis$80per
+6dozenminicheesecakesis$55per dozen,sothetotalcostfor2dozenis
+dozen,sothetotalcostis$55*6= $80*2=$160.Thecostofthemini
+$330.Now,wecanaddallthecosts cheesecakesis$55perdozen,sothe
+togethertogetthetotalcost: total cost for 6 dozen is $55 * 6 =
+$204+$160+$330=$694 $330. Adding these costs together,
+So,thetotalcostofthepastriesToula weget:
+boughtwas$694. $204+$160+$330=$694
+So,thetotalcostofToula’spastries
+was$694.
+Question:Carlosisplantingalemon Todeterminethenumberofyearsit Carlos will start earning money on
+tree. Thetreewillcost$90toplant. willtakeforCarlostostartearning the lemon tree after the first year.
+Each year it will grow 7 lemons, moneyonthelemontree,weneedto Here’swhy:
+which he can sell for $1.5 each. It calculatethebreak-evenpoint. The 1.Thetreecosts$90toplant.2.Each
+costs$3ayeartowaterandfeedthe break-evenpointisthepointatwhich year, the tree will grow 7 lemons,
+tree.Howmanyyearswillittakebe- thetotalrevenuefromsellinglemons which he can sell for $1.5 each. 3.
+forehestartsearningmoneyonthe equalsthetotalcostofplantingand Itcosts$3ayeartowaterandfeed
+lemontree? maintainingthetree. thetree.
+Thetotalcostofplantingthetreeis Afterthefirstyear,Carloswillhave
+$90.Theannualcostofwateringand earned$10.5fromsellingthelemons
+feedingthetreeis$3.Theannualrev- ($1.5 x 7 lemons) and spent $3 on
+enuefromsellinglemonsis7lemons maintenance. This means he will
+multipliedby$1.5perlemon,which have made a profit of $7.5 ($10.5 -
+is$10.5.Wecancalculatethebreak- $3) after the first year. So, he will
+even point by setting the total cost startearningmoneyonthelemontree
+equaltothetotalrevenue: afterthefirstyear.
+$90+$3*(years)=$10.5*(years)
+Solvingforyears,weget:
+years=90+3*(years)/10.5
+years=90+0.2857*(years)
+years=90+0.2857*(years-90)
+years=90+0.2857*years-25.71
+0.7143*years=64.29
+years=64.29/0.7143
+years=90.1
+So,itwilltakeapproximately
+21Question:Melanieisadoor-to-door Melanie started with 15 vacuum Melanie started with 15 vacuum
+saleswoman.Shesoldathirdofher cleaners. cleaners.
+vacuumcleanersatthegreenhouse,
+2moretotheredhouse,andhalfof
+whatwasleftattheorangehouse.If
+Melaniehas5vacuumcleanersleft,
+howmanydidshestartwith?
+Question:Inadanceclassof20stu- Inadanceclassof20students,20% Inadanceclassof20students,20%
+dents,20%enrolledincontemporary enrolledincontemporarydance,25% enrolledincontemporarydance,25%
+dance,25%oftheremainingenrolled of the remaining enrolled in jazz of the remaining enrolled in jazz
+injazzdance, andtherestenrolled dance, and the rest enrolled in hip- dance, and the rest enrolled in hip-
+inhip-hopdance. Whatpercentage hopdance. hopdance.
+oftheentirestudentsenrolledinhip- Tofindthepercentageofstudentsen- Tofindthepercentageofstudentsen-
+hopdance? rolledinhip-hopdance,weneedto rolledinhip-hopdance,weneedto
+calculatethenumberofstudentsen- calculatethenumberofstudentsen-
+rolledinhip-hopdanceanddivideit rolledinhip-hopdanceanddivideit
+bythetotalnumberofstudentsinthe bythetotalnumberofstudentsinthe
+class. class.
+First,let’sfindthenumberofstudents First,let’sfindthenumberofstudents
+enrolledincontemporarydance: enrolledincontemporarydance:
+20%of20students=20%*20=0.2 20%of20students=20%*20=0.2
+*20=4students *20=4students
+Now, let’s find the number of stu- Now, let’s find the number of stu-
+dentsenrolledinjazzdance: dentsenrolledinjazzdance:
+25%oftheremainingstudents=25% 25%oftheremainingstudents=25%
+*(20-4)=25%*16=0.25*16=4 *(20-4)=25%*16=0.25*16=4
+students students
+Thenumberofstudentsenrolledin Thenumberofstudentsenrolledin
+hip-hop dance is the remaining 12 hip-hop dance is the remaining 12
+students: students:
+Totalstudents-(contemporarydance Totalstudents-(contemporarydance
++jazzdance)=20-(4+4)=20-8 + jazz dance) = 20 - (4 + 4) = 12
+=12students students
+Now,let’sfindthepercentageofstu- Now,let’sfindthepercentageofstu-
+dentsenrolledinhip-hopdance: dentsenrolledinhip-hopdance:
+Percentage of students enrolled in Percentage of students enrolled in
+hip-hop dance = (12 / 20) * 100 = hip-hop dance = (12 / 20) * 100 =
+60% 60%
+So,60%
+Question:Amerchantwantstomake To maximize profit, the merchant To maximize profit, the merchant
+achoiceofpurchasebetween2pur- shouldchoosetheelectronicgadgets shouldchoosetheelectronicgadgets
+chase plans: jewelry worth $5,000 worth $8,000. Assuming the finan- worth $8,000. Assuming the finan-
+orelectronicgadgetsworth$8,000. cialadvisor’sspeculationiscorrect, cialadvisor’spredictionisaccurate,
+Hisfinancialadvisorspeculatesthat thejewelrymarketwillgoup2.5% theprofitwouldbe:
+thejewelrymarketwillgoup2.5% and the electronic gadgets market Profit=(1.12*$8,000)-$8,000=
+whiletheelectronicgadgetsmarket willrise1.2%withinthesamemonth. $896
+willrise1.2%withinthesamemonth. Theprofitfromthejewelrypurchase The merchant would make a profit
+If the merchant is looking to maxi- wouldbe: of $896 by choosing the electronic
+mizeprofitattheendofthismonth Profitfromjewelry=(5,000*2.5%) gadgets.
+bymakingachoice,howmuchprofit =125
+wouldthisbe? Theprofitfromtheelectronicgadgets
+purchasewouldbe:
+Profit from electronic gadgets =
+(8,000*1.2%)=96
+Sincetheprofitfromtheelectronic
+gadgetspurchaseishigher,themer-
+chant should choose the electronic
+gadgets worth $8,000 to maximize
+profit.
+22Question: Two trains leave San Inthefirstday,bothtrainstravel80 Inthefirstday,bothtrainstravel80
+Rafael at the same time. They be- mileswestward. Inthesecondday, mileswestward. Inthesecondday,
+gin traveling westward, both trav- theytravel150milesnorthward.The theytravel150milesnorthward.The
+eling for 80 miles. The next day, totaldistancecoveredbyeachtrain totaldistancecoveredbyeachtrain
+theytravelnorthwards,covering150 inthetwodaysis230miles. inthetwodaysis230miles.
+miles. What’sthedistancecovered
+byeachtraininthetwodays?
+Question:Jillgetspaid$20perhour Jill’sannualsalarycanbecalculated Jill’sannualsalarycanbecalculated
+toteachand$30tobeacheerleading by multiplying her hourly rate, the by multiplying her hourly rate, the
+coach.Ifsheworks50weeksayear, numberofhourssheworksperweek, numberofhourssheworksperweek,
+35hoursaweekasateacherand15 andthenumberofweekssheworks andthenumberofweekssheworks
+hoursaweekasacoach,what’sher inayear. inayear.Here’sthecalculation:
+annualsalary? Jill’shourlyrateforteachingis$20, Teacher’sannualsalary:$20perhour
+and she works 35 hours per week. x 35 hours per week x 50 weeks =
+Herweeklysalaryforteachingis: $35,000
+$20imes35=$700 Coach’sannualsalary:$30perhour
+Jill’shourlyrateforcoachingis$30, x 15 hours per week x 50 weeks =
+and she works 15 hours per week. $22,500
+Herweeklysalaryforcoachingis: Total annual salary: $35,000 +
+$30imes15=$450 $22,500=$57,500
+Jill works 50 weeks a year, so her So,Jill’sannualsalaryis$57,500.
+annualsalaryis:
+$700 imes 50 + $450 imes 50 =
+$35,000+$22,500=$57,500
+So,Jill’sannualsalaryis$57,500.
+Question: Claire makes a 3 egg In4weeks,Clairewilleat12dozens In4weeks,Clairewilleat48dozens
+omeleteverymorningforbreakfast. ofeggsifshemakesa3eggomelet ofeggsifshemakesa3eggomelet
+Howmanydozensofeggswillshe everymorning.Thisisbecausethere everymorning.Thisisbecausethere
+eatin4weeks? are 4 weeks in a month, and each are 4 weeks in a month, and each
+monthhas4weeks. So,in4weeks, weekhas7days.Ifshemakesa3egg
+shewillmake12omelets,andeach omeleteveryday,shewillconsume
+omelet requires 3 eggs. Therefore, 21eggsperweek.21eggsmultiplied
+shewillconsume12dozensofeggs by 4 weeks equals 84 eggs. Since
+in4weeks. thereare12eggsinadozen,84eggs
+dividedby12equals7dozens.There-
+fore,Clairewilleat7dozensofeggs
+perweek,and7dozensmultipliedby
+4weeksequals28dozens.
+Question: Marissa is hiking a 12- To maintain an average speed of 4 To maintain an average speed of 4
+miletrail. Shetook1hourtowalk milesperhour,Marissaneedstowalk milesperhour,Marissaneedstowalk
+thefirst4miles,thenanotherhourto theremainingdistanceataspeedof theremainingdistanceataspeedof
+walkthenexttwomiles.Ifshewants 4milesperhour. 4milesperhour.
+heraveragespeedtobe4milesper
+hour,whatspeed(inmilesperhour)
+doessheneedtowalktheremaining
+distance?
+23
