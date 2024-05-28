@@ -1,0 +1,715 @@
+NV-Embed: Improved Techniques for Training LLMs
+as Generalist Embedding Models
+ChankyuLee∗1 RajarshiRoy1 MengyaoXu1 JonathanRaiman1
+MohammadShoeybi1 BryanCatanzaro1 WeiPing∗1
+1NVIDIA
+Abstract
+Decoder-onlylargelanguagemodel(LLM)-basedembeddingmodelsarebegin-
+ningtooutperformBERTorT5-basedembeddingmodelsingeneral-purposetext
+embeddingtasks,includingdensevector-basedretrieval.Inthiswork,weintroduce
+theNV-Embedmodelwithavarietyofarchitecturaldesignsandtrainingprocedures
+tosignificantlyenhancetheperformanceofLLMasaversatileembeddingmodel,
+whilemaintainingitssimplicityandreproducibility. Formodelarchitecture,we
+proposealatentattentionlayertoobtainpooledembeddings,whichconsistently
+improvesretrievalanddownstreamtaskaccuracycomparedtomeanpoolingor
+using the last <EOS> token embedding from LLMs. To enhance representation
+learning,weremovethecausalattentionmaskofLLMsduringcontrastivetraining.
+Formodeltraining,weintroduceatwo-stagecontrastiveinstruction-tuningmethod.
+It first applies contrastive training with instructions on retrieval datasets, utiliz-
+ingin-batchnegativesandcuratedhardnegativeexamples. Atstage-2,itblends
+various non-retrieval datasets into instruction tuning, which not only enhances
+non-retrievaltaskaccuracybutalsoimprovesretrievalperformance. Combining
+these techniques, our NV-Embed model, using only publicly available data, has
+achievedarecord-highscoreof69.32, rankingNo. 1ontheMassiveTextEm-
+beddingBenchmark(MTEB)(asofMay24,2024),with56tasks,encompassing
+retrieval,reranking,classification,clustering,andsemantictextualsimilaritytasks.
+Notably,ourmodelalsoattainsthehighestscoreof59.36on15retrievaltasksin
+theMTEBbenchmark(alsoknownasBEIR).Wewillopen-sourcethemodelat:
+https://huggingface.co/nvidia/NV-Embed-v1.
+1 Introduction
+Embeddingordensevectorrepresentationoftext(Mikolovetal.,2013;Devlinetal.,2018)encodesits
+semanticinformationandcanbeusedformanydownstreamapplications,includingretrieval,rerank-
+ing,classification,clustering,andsemantictextualsimilaritytasks. Theembedding-basedretriever
+isalsoacriticalcomponentforretrieval-augmentedgeneration(RAG)(Lewisetal.,2020),which
+allowsLLMstoaccessthemostup-to-dateexternalorproprietaryknowledgewithoutmodifyingthe
+modelparameters(Liuetal.,2024;Guuetal.,2020;Shietal.,2023;Wangetal.,2023a).
+Theembeddingmodelsbuiltonbidirectionallanguagemodels(Devlinetal.,2018;Raffeletal.,2020)
+havedominatedthelandscapeforyears(e.g.,Reimers&Gurevych,2019;Gaoetal.,2021;Wangetal.,
+2022;Izacardetal.,2021;Nietal.,2021),althoughonenotableexceptionisNeelakantanetal.(2022).
+ThemostrecentworkbyWangetal.(2023b)demonstratesthatdecoder-onlyLLMscanoutperform
+frontierbidirectionalembeddingmodels(Wangetal.,2022;Nietal.,2021;Chenetal.,2023)in
+∗Correspondenceto:ChankyuLee<chankyul@nvidia.com>,WeiPing<wping@nvidia.com>.
+4202
+yaM
+72
+]LC.sc[
+1v82471.5042:viXraretrieval and general-purpose embedding tasks. However, previous leading efforts (Wang et al.,
+2023b;Mengetal.,2024)havedependedonfine-tuningLLMsusinglargevolumesofproprietary
+syntheticdatafromGPT-4,whichisnotreadilyavailabletothecommunity.
+Inthiswork,weintroduceNV-Embed,ageneralistembeddingmodelthatsignificantlyenhancesthe
+performanceofdecoder-onlyLLMsforembeddingandretrievaltasks. Specifically,wemakethe
+followingcontributions:
+1. Formodelarchitecture,weproposeanovellatentattentionlayertoobtainpooledembeddings
+forasequenceoftokens. Incontrasttothepopularaveragepoolinginbidirectionalembed-
+dingmodels(e.g.,Wangetal.,2022)andthelast<EOS>tokenembeddingindecoder-only
+LLMs(Neelakantanetal.,2022;Wangetal.,2023b),ourproposedpoolingtechniqueconsis-
+tentlyimprovestheaccuracyofretrievalandotherdownstreamtasks. Tofurtherenhancethe
+representationlearning,weremovethecausalattentionmaskduringthecontrastivetraining
+of decoder-only LLM, resulting in solid improvements. Our design is simpler yet more
+effectivecomparedtorecentrelatedwork(BehnamGhaderetal.,2024;Muennighoffetal.,
+2024),whichinvolvesanadditionaltrainingphasewithmaskedtokenpredictionoramixed
+trainingobjective.
+2. Formodeltraining,weintroduceatwo-stagecontrastiveinstruction-tuningmethod,starting
+withthepretrainedMistral-7B(Jiangetal.,2023). Inthefirststage,weapplycontrastive
+trainingwithinstructionsonretrievaldatasets,utilizingin-batchnegativeandcuratedhard-
+negativeexamples. Inthesecondstage,weblendcarefullycuratednon-retrievaldatasets
+into the stage-one training data. Since in-batch negative samples may be misleading for
+non-retrievaltasks,wedisablein-batchnegativetraininginstagetwo. Thisdesignnotonly
+improves the accuracy of classification, clustering, and semantic textual similarity tasks,
+butalsosurprisinglyenhancesretrievalperformance. Notethatourtrainingdataisentirely
+publiclyavailableanddoesnotincludeanysyntheticdatafromproprietarymodelslikeGPT-4.
+Ourmodelisalsonotfine-tunedfromexistingembeddingmodels.2
+3. Combiningallthetechniques,ourNV-Embedmodelsetsanewrecordhighscoreof69.32and
+ranksNo.1(asofMay22,2024)ontheMassiveTextEmbeddingBenchmark(MTEB)(Muen-
+nighoffetal.,2022)across56embeddingtasks. Itsignificantlyoutperformstheprevious
+leadingembeddingmodels: E5-mistral-7b-instruct(score: 66.63)(Wangetal.,2023b),SFR-
+Embedding(score: 67.56)(Mengetal.,2024),andVoyage-large-2-instruct(score: 68.28)
+(Voyage-AI,2024). Notably,ourmodelalsoattainedthehighestscoreof59.35on15retrieval
+taskswithintheMTEB,whichisdrawnfromBEIRbenchmark(Thakuretal.,2021).
+Weorganizetherestofthepaperinthefollowing. In§2,wediscusstherelatedwork. Wepresent
+thearchitecturalandtrainingdetailsin§3.
+2 RelatedWork
+2.1 BidirectionalEmbeddingModels
+BERT (Devlin et al., 2018) or T5 (Raffel et al., 2020)-based embedding models have long been
+thedominantapproachesforgeneral-purposeembeddingtasks. EarlyexamplesincludeSentence-
+BERT(Reimers&Gurevych,2019)andSimCSE(Gaoetal.,2021),whichfinetuneBERTonnatural
+language inference (NLI) datasets. In general, these embedding models are first initialized from
+pre-trainedBERT(Wangetal.,2022;Izacardetal.,2021)orT5encoders(Nietal.,2021). Then,
+theyarefurtherpre-trainedwithcontrastivelearningoncuratedunsupervised(Izacardetal.,2021)
+orweakly-supervisedtextpairs(Wangetal.,2022). Finally,theembeddingmodels(Lietal.,2023;
+Wangetal.,2022;Nietal.,2021;Chenetal.,2023)arefine-tunedonavarietyofsuperviseddata,
+includingMSMARCO(Nguyenetal.,2016),forretrievalandotherdownstreamtasks. Notethat
+allthestate-of-the-artembeddingmodelsaretrainedinthissupervisedmanner. Someofthemost
+recentfrontiermodelsinthiscategoryincludemxbai-embed-large-v1(Leeetal.,2024b)(MTEB:
+64.68),UAE-Large-V1(Li&Li,2023)(MTEB:64.64),andvoyage-large-2-instruct(Voyage-AI,
+2024)(MTEB:68.28).
+2Forexample,SFR-Embeddingisfine-tunedfromE5-mistral-7b-instruct.
+22.2 Decoder-onlyLLM-basedEmbeddingModels
+Decoder-onlyLLMs(Brownetal.,2020)werebelievedtounderperformbidirectionalmodelson
+general-purposeembeddingtasksbecause:i)unidirectionalattentionlimitstherepresentationlearning
+capability,andii)thescalingofLLMsleadstoveryhigh-dimensionembeddings,whichmaysuffer
+fromthecurseofdimensionality.
+Neelakantanetal.(2022)initializestheembeddingmodelswithpre-trainedGPT-3models(Brown
+et al., 2020) and applies continued contrastive training. The hidden state from the last layer cor-
+responding to the special token <EOS> at the end of the sequence is taken as the embedding of
+theinputsequence. Thelatesttext-embedding-3-largeobtainsMTEBscore64.59(OpenAI,2024)
+Mostrecently, E5-Mistral(Wangetal.,2023b)(METB:66.63)appliescontrastivelearningwith
+task-specificinstructionsonMistral7B(Jiangetal.,2023).Itbeginstooutperformthestate-of-the-art
+bidirectionalmodelsoncomprehensiveembeddingbenchmarks(Muennighoffetal.,2022)byutiliz-
+ingamassiveamountofsyntheticdatafromtheproprietaryGPT-4model.LLM2Vec(BehnamGhader
+etal.,2024)(METBscore: 65.01)triestobuildtheembeddingmodelfromLLMswhileonlyusing
+publicavailabledata,butitisstillworsethanE5-Mistral.
+GiventhenotablesuccessofE5-Mistral,SFR-Embedding-Mistral(Mengetal.,2024)(METB:67.56)
+furtherfine-tunesitontheblendofnon-retrievalandretrievaldatasetsforimprovedaccuracyonboth
+tasks,whichiscloselyrelatedtoourNV-Embed. However,therearethefollowingkeydifferences:
+1)NV-EmbedistrainedfromscratchonMistral7BLLMdirectlyusingpublicavailabledata,andnot
+dependentonotherembeddingmodelorproprietarysyntheticdata. Consequently,weintroducea
+newarchitecturethateliminatesunnecessarycausalattentionmaskandfurtherimprovesthesequence
+poolingmechanismwithlatentattentionlayer. 2)SFR-Embedding-Mistralusestask-homogeneous
+batching,whichconstructsbatchesconsistingexclusivelyofsamplesfromasingletask. Incontrast,
+ourNV-Embeduseswell-blendedbatchesconsistingsamplesfromalltaskstoavoidpotential“zigzag”
+gradient updates, which leads to a new record high score on both full MTEB and retrieval tasks
+comparedtoSFR-Embedding-Mistral.
+Thereareotherrecentworks. Gecko(Leeetal.,2024a)(METB:66.31)attemptstodistillasmaller
+bidirectionalembeddingmodelfromadecoder-onlyLLM(Geminietal.,2023)bygeneratingsyn-
+theticpaireddata.Itrefinesthedataqualitybyretrievingasetofcandidatepassagesforeachqueryand
+relabelingthepositiveandhardnegativepassagesusingtheLLM.Inaddition,GritLM(Muennighoff
+etal.,2024)(METB:65.66)unifiestextembeddingandgenerationintoasinglemodel.
+3 Method
+Inthissection,wedescribeourarchitecturedesignsandtwo-stageinstruction-tuningmethod.
+3.1 BidirectionalAttention
+Thecausalattentionmaskindecoder-onlyLLMsisintroducedfornext-tokenpredictiontask(Vaswani
+etal.,2017). Inprinciple,causalmaskindecoderblockspreventsinformationleakagebyallowing
+thedecodertoattendonlytopreviouspositionsduringauto-regressivetextgeneration. However,it
+isobservedthatunidirectionalattentionlimitsthemodel’srepresentationpower,asevidencedby
+thepoorperformanceofGPTmodelscomparedtosimilarlysizedBERTorT5modelsonnatural
+languageunderstandingbenchmarks(e.g.,Wangetal.,2019). Inrecent,LLM2Vec(BehnamGhader
+etal.,2024)introducesadditionaltrainingphasewithaspeciallydesignedmaskedtokenprediction
+towarm-upthebidirectionalattention. GRIT(Muennighoffetal.,2024)utilizesahybridobjective
+withbothbidirectionalrepresentationlearningandcausalgenerativetraining. Incontrast,wesimply
+removethecausalattentionmaskofdecoder-onlyLLMduringthecontrastivelearningandfindit
+workscompellinglywellasdemonstratedbyourresults. Asaresult,wegowithsimplesolution.
+3.2 LatentAttentionLayer
+Therearetwopopularmethodstoobtaintheembeddingforasequenceoftokens: i)meanpooling,
+and ii) the last <EOS> token embedding. Previous bidirectional embedding models typically use
+meanpooling(Wangetal.,2022;Izacardetal.,2021), whilethelast<EOS>tokenembeddingis
+morepopularfordecoder-onlyLLMbasedembeddingmodels. However,bothmethodshavecertain
+3Figure1: Theillustrationofproposedarchitecturedesigncomprisingofdecoder-onlyLLMfollowed
+by latent attention layer. Latent attention layer functions as a form of cross-attention where the
+decoder-onlyLLMoutputservesasqueries(Q)andtrainablelatentarraypassesthroughthekey-
+valueinputs,followedbyMLP.Bluedottedlinesindicatethetwomatrixmultiplicationsinvolvedin
+QKV-attentions.
+limitations.Meanpoolingsimplytakestheaverageoftokenembeddingsandmaydilutetheimportant
+informationfromkeyphrases,meanwhilethelast<EOS>tokenembeddingmaysufferfromrecency
+bias,relyingheavilyontheoutputembeddingoflasttoken.
+Inthiswork, weproposealatentattentionlayerinspiredbyJaegleetal.(2021)toachievemore
+expressivepoolingofthesequencesforgeneral-purposeembeddingtasks. Specifically,wedenote
+thelastlayerhiddenfromdecoderasthequeryQ∈Rl×d,wherelisthelengthofsequence,anddis
+thehiddendimension. TheyaresenttoattendthelatentarrayK =V ∈Rr×d,whicharetrainable
+“dictionary”usedtoobtainbetterrepresentation,whereristhenumberoflatentsinthedictionary.
+Theoutputofthiscross-attentionisO ∈Rl×d,
+O =softmax(QKT)V (1)
+whichisfollowedbyaregularMLPconsistsoftwolineartransformationswithaGELUactivation
+inbetween. Ourmodeluseslatentattentionlayerwithr of512andthenumberofheadsas8for
+multi-headattention. Finally,weapplymeanpoolingafterMLPlayerstoobtaintheembeddingof
+wholesequences. SeeFigure1foranillustration. Itisworthmentioningherethatourapproach
+followsthespiritofdictionarylearningtoobtainbetterrepresentation(e.g.,Wangetal.,2018),which
+isdifferentfromthePerceiverIOarchitecture. Wecomparetheproposedlatentattentionlayerwith
+normalself-attentionandfindconsistentimprovementsinourablationstudy.
+3.3 Two-stageInstruction-Tuning
+Instruction-tuninghasbeenwidelyappliedfortrainingLLMtofollowinstructions(Weietal.,2021;
+Ouyangetal.,2022)andtoperformretrieval-augmentedgeneration(Wangetal.,2023a;Liuetal.,
+2024). Ithasalsobeenrecentlyappliedfortrainingretrieversandgeneral-purposeembeddingmodels
+thatcanadapttheiroutputembeddingswithdifferentinstructionsandtasktypes(Asaietal.,2022;
+Wangetal.,2023b).
+Toobtainageneralistembeddingmodelthatcanappropriatelyperformonretrievalandnon-retrieval
+tasks(e.g.,classification,clustering),weneedtakethecharacteristicsofdifferenttasksintoaccount.
+Forexample,theuseofin-batchnegativeshasbeendemonstratedtobehighlyefficientfortraining
+dense-embedding-based retrievers (e.g., Karpukhin et al., 2020), because it allows to reuse the
+computation and effectively train on B2 question/passage pairs for each mini-batch withonly B
+questions and corresponding positive passages. However, applying in-batch negatives trick can
+4misleadtheembeddingmodelforclassificationorclusteringtask,asthe“passages”inthemini-batch
+maycomefromthetheclassandarenotnegatives.
+Giventheseconsiderations,weintroduceatwo-stageinstructiontuningmethodwhichfirstconducts
+contrastivetrainingwithinstructionsonavarietyofretrievaldatasets(detailsareinsection4.1),
+utilizingin-batchnegativesandcuratedhard-negativeexamples. Inthesecondstage,weperform
+contrastiveinstruction-tuningonacombinationofretrievalandnon-retrievaldatasets(detailsarein
+section4.2)withoutapplyingthetrickofin-batchnegatives. Itisworthmentioningherethatretrieval
+taskpresentsgreaterdifficultycomparedtotheothertaskssothatourtrainingstrategyfocuseson
+fine-tuningthemodelforretrievalinitially. Insecondstage,weblendtheremainingembeddingtasks
+intotheinstruction-tuning.
+4 TrainingData
+While recent embedding models (Wang et al., 2023b; Meng et al., 2024; Lee et al., 2024a) have
+utilizedbothpublicsuperviseddatasetsandproprietarysyntheticdatafromGPT-4(OpenAI,2023)
+orGemini(Geminietal.,2023),weexclusivelyemploypublicdatasetstodemonstrateourmodel’s
+capabilityinembeddingtasks. Ourtrainingprocedureincorporatesbothretrievalandnon-retrieval
+tasks,includingclassification,clustering,andsemantictextualsimilaritydatasets.
+Givenarelevantquery-documentpair,theinstructedqueryfollowstheinstructiontemplateasfollows:
+q+ =Instruct:task_definition Query:q+ (2)
+inst
+Theinstructiontemplatesforeachtask_definitionareprovidedinTable6fortrainingandTable
+7forevaluation. Notethatwemaskouttheinstructiontokensintheoutputembeddingsduringboth
+trainingandevaluation,althoughtheystillimpacttheoutputduetoself-attention. Wedonotadd
+instructionprefixestodocuments.
+4.1 PublicRetrievalDatasets
+Weadopttheretrievaldatasetsasfollows: MSMARCO(Bajajetal.,2016),HotpotQA(Yangetal.,
+2018),NaturalQuestion(Kwiatkowskietal.,2019),PAQ(Lewisetal.,2021),Stackexchange(Stack-
+Exchange-Community,2023),Naturallanguageinference(Groupetal.,2022),SQuAD(Rajpurkar
+etal.,2016),ArguAna(Wachsmuthetal.,2018),BioASQ(Tsatsaronisetal.,2015),FiQA(Maiaetal.,
+2018),FEVER(Thorneetal.,2018). Typically,thesedatasetsdonotcontainitsownhardnegatives,
+necessitatingtheminingofsuchexamples. Toaddressthis,wefurtherfinetuneanotherencoder-based
+embeddingmodel(Wangetal.,2022)toselectthehardnegativesonthosedatasets. RefertoTable6
+forthenumberofsamplesusedfortraining.
+4.2 PublicNon-retrievalDatasets
+Besides retrieval datasets, we also utilize non-retrieval datasets from three sub-tasks in MTEB
+benchmark: classification,clusteringandsemanticsimilarity(STS).Wepre-processthesedatasetsto
+usethesameformatasretrievaldatasetsforcontrastivetraining: instructedqueryq+ (containing
+inst
+queryq+),positivedocumentd+andhardnegativedocumentsd−,...,d−.
+0 n
+We utilize the English training splits of various classification datasets from MTEB Huggingface
+datasets (Muennighoff et al., 2022; Lhoest et al., 2021). The classification datasets that we
+use are: AmazonReviews-Classification (McAuley & Leskovec, 2013), AmazonCounterfactual-
+Classification(O’Neilletal.,2021),Banking77-Classification(Casanuevaetal.,2020),Emotion-
+Classification (Saravia et al., 2018), IMDB-Classification (Maas et al., 2011), MTOPIntent-
+Classification (Li et al., 2021), ToxicConversations-Classification (Adams et al., 2019),
+TweetSentimentExtraction-Classification(Maggie,2020).
+Because the training splits of Emotion-Classification and AmazonCounterfactual-Classification
+contain some content similar to their evaluation splits, we use BM25 (Robertson et al., 2009)
+similarity thresholds to remove similar content from the training splits before subsampling. We
+usethetextfieldastheq+,label_textfieldasthed+andrandomsampleamongotherlabel_text
+valuesford−. SincetheAmazonReviewsClassificationdatasetdoesnotprovidethelabel_textfield,
+k
+wegeneratelabeltextsassociatedwithvaluesinthelabelfield. Forsubsamplingtheclassification
+datasets,weperformthestratifiedsamplingacrossd+.
+5Table1: TopMTEBleaderboardmodelsasof2024-05-22. Weusetheoriginalmodelnamesonthe
+leaderboardforclarity.
+EmbeddingTask Retrieval(15) Rerank(4) Cluter.(11) PairClass.(3) Class.(12) STS(10) Summ.(1) Avg.(56)
+Mertric nDCG@10 MAP V-Meas. AP Acc. Spear. Spear.
+NV-Embed 59.36 60.59 52.80 86.91 87.35 82.84 31.2 69.32
+NV-Embed(meanpool) 58.71 60.75 52.80 85.85 87.06 82.53 30.49 68.98
+Voyage-large-2-instruct 58.28 60.09 53.35 89.24 81.49 84.58 30.84 68.28
+SFR-Embedding 59.00 60.64 51.67 88.54 78.33 85.05 31.16 67.56
+Gte-Qwen1.5-7B-instruct 56.24 60.13 55.83 87.38 79.6 82.42 31.46 67.34
+Voyage-lite-02-instruct 56.6 58.24 52.42 86.87 79.25 85.79 31.01 67.13
+GritLM-7B 57.41 60.49 50.61 87.16 79.46 83.35 30.37 66.76
+E5-mistral-7b-instruct 56.9 60.21 50.26 88.34 78.47 84.66 31.4 66.63
+Google-gecko 55.7 58.9 47.48 87.61 81.17 85.07 32.63 66.31
+LLM2Vec-Meta-Llama-3 56.63 59.69 46.45 87.79 75.92 83.58 30.94 65.01
+Text-embed-3-large(OpenAI) 55.44 59.16 49.01 85.72 75.45 81.73 29.92 64.59
+Weapproachclusteringinasimilarmannerasclassificationbyemployingtheclusterlabelsforposi-
+tivesandnegatives. Weutilizetherawclusterlabeldatasetsraw_arxiv,raw_biorxivandraw_medrxiv
+datasetsfromMTEBHuggingfacedatasetsandfilteroutcommoncontentfromtheMTEBevaluation
+setof{Arxiv/Biorxiv/Medrxiv}-Clustering-{S2S/P2P}tasks. Weusethetitlefieldforq+ forthe
+S2Sdatasetsandtheabstractfieldforq+fortheP2Pdatasets. Weusethecategoryfieldorrandom
+samplefromthecategoriesfieldford+ andrandomsampleothercategoriesford−. Wealsouse
+k
+therawlabeldatasetforTwentyNewsgroups-Clustering(Lang,1995)andremoveanycontentthat
+matchwiththeMTEBevaluationsetoftheTwentyNewsgroups-Clusteringtask. Forsubsamplingthe
+clusteringdatasets,weperformstratifiedsamplingacrossd+.
+We use the training splits of three semantic similarity datasets STS12 (Agirre et al., 2012),
+STS22(Chenetal.,2022),STS-Benchmark(Ceretal.,2017)fromMTEBHuggingfacedatasets.
+For any pair of texts with associated relevance scores (t ,t ,score), we create two examples
+a b
+(q+ = t ,d+ = t ) and (q+ = t ,d+ = t ) if score ≥ 4. We mine the hard negatives d−
+a b b a k
+fromthepoolofalltextsusingBM25,selectingthehighestmatchingtextswithrank>=2thatdonot
+haverelevancescores>2.5withq+.
+5 Experiments
+5.1 ExperimentalDetails
+Inthissection,wedescribeourdetailedexperimentalsetups. Weuseaparameter-efficientfinetun-
+ing(PEFT)methoddenotedaslow-rankadaptation(LoRA)(Huetal.,2021)toefficientlyfinetune
+ourproposedNV-Embedmodel. WechoseMistral7B(Jiangetal.,2023)asthebasedecoder-only
+LLM.Wereplacetheattentionmaskfromcausaltobidirectional,andintegratethelatentattention
+layerwith512latents,4096hiddendimensionsize,and8multi-headattentions.
+WetrainMistral7BLLMmodelend-to-endwithacontrastivelossusingLoRAwithrank16,alpha
+32anddropoutrateof0.1. WeuseAdamoptimizerwith500warm-upstepsandlearningrate2e-5
+forfirststageand1.5e-5forsecondstagewithlineardecay. Themodelisfinetunedwith128batch
+size,whereeachbatchiscomposedofaquerypairedwith1positiveand7hardnegativedocuments.
+WetrainusingBfloat16,andsetthemaximumsequencelengthas512tokens. Thespecial<BOS>and
+<EOS>tokensareappendedatthestartandendofgivenqueryanddocuments. Thewholetrainingis
+conductedintwostageswherethemodelisinitiallytrainedonretrievaldatasetsutilizingin-batch
+negativetechnique. Subsequently,themodelistrainedwithblendeddatasetswithbothretrievaland
+non-retrievalembeddingtasks.
+Forevaluation,weassessourmodelusingamaximumlengthof512tokenstoensurefaircomparisons
+withpriorwork(Wangetal.,2023b), whichalsoprovidesevaluationresultsbasedon512token
+limits. EvaluationinstructionstemplatesareavailableinTable7.
+5.2 MTEBResults
+WeevaluatetheproposedNV-EmbedmodelonthefullMTEBbenchmark(Muennighoffetal.,2022)
+encompassing15retrievaldatasets, 4rerankingdatasets, 12classificationdatasets, 11clustering
+6Table2: AveragedMTEBscoresonseventasksafterfirststagetraining
+PoolType EOS Mean Latent-attention Self-attention
+MaskType bidirect causal bidirect causal bidirect causal bidirect causal
+Retrieval(15) 57.70 56.42 58.42 57.55 59.00 57.65 57.89 57.21
+Rerank(4) 59.76 57.21 60.02 59.35 59.59 59.72 59.73 59.51
+Clustering(11) 44.75 40.83 45.97 45.42 45.44 45.61 45.19 45.07
+PairClass.(3) 86.17 83.63 87.45 84.46 87.59 82.02 86.51 85.74
+Classification(12) 73.17 69.22 74.62 72.48 73.93 72.74 73.54 73.32
+STS(10) 74.96 73.45 77.47 73.60 79.07 78.65 76.89 77.55
+Summar.(1) 29.28 28.4 29.72 30.89 30.16 30.94 30.22 31.59
+Average(56) 62.68 60.06 64.00 62.32 64.18 63.39 63.27 63.11
+Table3: AveragedMTEBscoresonseventasksaftersecondstagetraining
+PoolType EOS Mean Latent-attention Self-attention
+MaskType bidirect causal bidirect causal bidirect causal bidirect causal
+Retrieval(15) 58.39 56.59 58.71 57.88 59.36 58.33 58.64 57.71
+Rerank(4) 60.37 59.23 60.77 60.27 60.54 60.57 60.5 60.38
+Clustering(11) 51.43 49.81 52.80 51.58 52.80 51.7 53.34 51.51
+PairClass.(3) 84.06 80.99 87.45 82.89 86.91 83.45 86.12 84.44
+Classification(12) 85.85 85.04 87.06 86.08 87.35 86.58 86.76 86.25
+STS(10) 79.55 79.12 82.53 81.74 82.84 81.94 82.38 81.52
+Summar.(1) 30.36 29.12 30.49 31.82 31.20 31.87 30.105 31.4
+Average(56) 67.85 66.50 68.97 68.13 69.32 68.47 69.10 68.16
+datasets,3pairclassificationdatasets,10semantictextualsimilaritydatasets,and1summarization
+dataset.
+Table 1 shows the averaged MTEB scores for overall performance and seven sub-category tasks
+comparedtoallfrontiermodelsontheMTEBleaderboard3. OurNV-Embedmodelachievesanew
+recordhighscoreof69.32ontheMTEBbenchmarkwith56tasksandalsoattainsthehighestscore
+of59.36on15retrievaltasksoriginallyfromtheBEIRbenchmark(Thakuretal.,2021).
+Basedonquantitativeleaderboardresults,wecompareourNV-Embedwiththerecentfrontierem-
+bedding models. The e5-mistral-7b-instruct (Wang et al., 2023b) and google-gecko (Lee et al.,
+2024a)utilizeproprietarysyntheticdatatotraintheirmodelinasinglestagemanner. Incontrast,
+werecognizethatretrievaltaskpresentsgreaterdifficultycomparedtotheotherembeddingtasks
+andprioritizesourtrainingstrategyonfine-tuningthemodelforretrievalfirst,followedbyblending
+theremainingsub-tasksintoinstruction-tuning,leadingtosubstantiallyimprovedBEIRandoverall
+METBresults.
+SFR-Embedding(Mengetal.,2024)demonstratescompetitivescoresontheMTEB(67.56)and
+BEIR(59.0)benchmarksbycontinuingtofinetunethee5-mistral-7b-instructmodel(Wangetal.,
+2023b). However,itremainslargelyconstrainedbythearchitecturallimitationsofitsparentmodel,
+such as the causal attention mask and the last token pooling method. In contrast, our NV-Embed
+modelistrainedstartingfromtheMistral7BLLMratherthanfinetuninge5-mistral-7b-instruct. It
+featuresanewarchitecturethatremovestheunnecessarycausalattentionmaskandfurtherimproves
+thesequencepoolingmechanismwithalatentattentionlayer. Table4providesadetailedsummary
+oftask-wiseBEIRandMTEBbenchmarks.
+5.3 AblationStudy
+Weperformablationstudiestocomparecausalandbidirectionalattentionforcontrastivetrainng. We
+alsocomparethetheproposedlatentattentionlayerwithotherpoolingmethods.
+5.3.1 CausalAttentionvs. BidirectionalAttention
+Toexaminetheimpactofself-attentionmasksindecoder-onlyLLMmodelsforembeddingapplica-
+tions,weconductedexperimentscomparingbidirectionalandcausalmasktypes. Asillustratedin
+Tables2and3,thebidirectionalmaskconsistentlyoutperformsthecausalmaskbasedontheaverage
+3https://huggingface.co/spaces/mteb/leaderboard
+7Table4: FullBEIRandMTEBbenchmark
+EOS Mean Latent-attention Self-attention
+ModelName E5-mistral-7b SFR-Embedding Voyage-large2-instruct
+bidirect causal bidirect causal bidirect causal bidirect causal
+ArguAna 61.88 67.27 64.06 67.06 62.51 63.83 64.14 68.21 64.57 65.56 62.82
+ClimateFEVER 38.40 36.41 32.65 33.92 31.05 34.09 31.52 34.72 33.38 34.78 33.05
+CQADupStack 42.97 46.54 46.60 48.39 46.14 48.69 47.13 50.51 47.44 50.19 46.79
+Dbpedia 48.90 49.06 46.03 48.03 46.28 49.12 48.17 48.29 47.46 47.74 47.96
+FEVER 87.80 89.35 91.47 87.11 85.80 87.90 87.46 87.77 87.66 86.89 87.45
+FiQA2018 56.62 60.55 59.76 59.72 56.86 60.84 57.73 63.10 60.01 62.81 58.83
+HotpotQA 75.70 77.02 70.86 78.40 75.75 78.65 77.90 79.92 78.37 79.33 77.73
+MSMARCO 43.10 43.41 40.60 46.10 45.60 46.23 45.80 46.49 46.10 46.80 46.00
+NFCorpus 38.59 42.02 40.32 38.48 36.89 39.13 38.31 38.04 38.48 37.68 37.58
+NaturalQuestion 63.50 69.92 65.92 70.07 68.75 71.23 69.43 71.22 70.77 71.33 70.22
+QuoraRetrieval 89.62 89.81 87.40 88.88 88.57 88.75 88.73 89.21 88.71 88.85 88.76
+SCIDOCS 16.27 19.91 24.32 19.81 16.81 21.08 20.38 20.19 18.86 20.86 18.20
+SciFact 76.41 78.06 79.99 77.21 75.48 77.53 78.22 78.43 79.17 76.83 77.38
+TREC-COVID 87.33 87.10 85.07 85.34 84.42 85.87 84.44 85.88 85.81 83.75 84.64
+Touche2020 26.39 29.00 39.16 27.36 28.00 27.66 28.84 28.38 28.08 26.21 28.26
+BIOSSES 85.58 86.07 89.12 86.44 83.04 86.19 83.27 85.59 83.37 85.26 82.71
+SICK-R 82.64 82.92 83.16 78.59 77.65 82.87 81.06 82.80 81.44 83.21 80.87
+STS12 79.65 79.47 76.15 73.30 72.77 74.82 73.54 76.22 75.03 77.10 74.67
+STS13 88.43 89.15 88.49 81.84 83.10 85.81 86.48 86.30 85.44 84.54 84.07
+STS14 84.54 84.93 86.49 77.84 77.18 81.45 80.73 82.09 80.51 80.29 80.05
+STS15 90.42 90.74 91.13 85.50 83.97 87.20 86.69 87.24 86.35 87.16 87.03
+STS16 87.68 87.82 85.68 81.99 81.90 84.62 84.42 84.77 84.70 83.76 84.02
+STS17 91.75 92.02 90.06 77.89 81.85 88.53 86.67 87.42 87.64 86.69 86.16
+STS22 67.28 68.36 66.32 71.14 68.81 68.69 70.06 69.85 70.02 69.91 70.59
+STSBenchmark 88.60 89.00 89.22 80.95 80.89 85.15 84.50 86.14 84.94 85.86 85.07
+SummEval 31.40 31.16 30.84 30.36 29.12 30.49 31.82 31.20 31.87 30.11 31.40
+SprintDuplicateQuestions 95.66 96.31 94.50 94.89 91.46 95.39 94.71 95.94 95.15 95.98 95.12
+TwitterSemEval2015 81.62 81.52 86.32 70.94 65.73 75.81 67.80 78.73 69.06 76.31 72.41
+TwitterURLCorpus 87.75 87.78 86.90 86.34 85.79 86.36 86.15 86.05 86.12 86.07 85.78
+AmazonCounterfactual 78.69 77.93 77.60 94.69 93.87 94.48 94.10 95.12 93.88 94.78 93.64
+AmazonPolarity 95.91 95.97 96.58 97.05 96.34 96.92 96.66 97.14 97.08 97.27 97.02
+AmazonReviews 55.79 54.35 50.77 53.37 56.09 55.68 55.99 55.47 56.59 55.47 54.81
+Banking77 88.23 88.81 86.96 87.93 87.08 89.13 88.55 90.34 89.08 89.76 89.37
+Emotion 49.77 50.24 59.81 91.19 91.39 91.01 91.52 91.71 91.54 91.97 91.13
+Imdb 94.78 94.79 96.13 97.15 96.34 96.83 96.26 97.06 96.69 97.13 97.03
+MassiveIntent 80.57 79.99 81.08 78.89 76.37 80.13 78.91 80.07 80.42 79.88 79.31
+MassiveScenario 82.39 82.20 87.95 81.53 78.79 81.80 81.94 81.74 83.24 81.92 81.96
+MTOPDomain 96.12 96.36 98.86 96.28 95.34 96.58 96.08 96.51 95.93 96.98 96.33
+MTOPIntent 86.11 86.30 86.97 88.16 85.58 88.58 88.19 89.77 88.60 88.97 89.27
+ToxicConversations 69.59 69.33 83.58 93.17 93.16 92.86 92.57 92.60 93.41 93.21 93.04
+TweetSentimentExtraction 63.72 63.64 71.55 79.62 79.19 80.68 79.86 80.64 80.41 81.10 79.72
+Arxiv-P2P 50.45 52.08 51.81 53.60 53.23 53.45 53.23 53.76 53.21 53.51 53.24
+Arxiv-S2S 45.50 47.38 44.73 48.23 48.71 49.52 48.79 49.59 49.01 49.61 49.00
+Biorxiv-P2P 43.53 43.94 46.07 47.02 45.53 46.97 47.09 48.15 47.56 48.71 47.87
+Biorxiv-S2S 40.24 41.14 40.64 43.99 43.52 44.03 43.26 44.74 43.76 45.36 44.58
+Medrxiv-P2P 38.19 40.03 42.94 38.64 38.42 38.30 37.90 39.24 38.34 38.88 38.34
+Medrxiv-S2S 37.45 39.00 41.44 36.67 38.52 36.94 36.61 36.98 36.88 37.53 36.98
+Reddit 57.71 59.90 68.50 62.42 60.88 64.62 62.99 63.20 62.39 64.77 61.33
+Reddit-P2P 66.49 67.64 64.86 67.67 63.92 68.01 66.59 68.01 66.85 68.17 65.99
+StackExchange 73.10 74.25 74.16 72.44 68.49 77.07 73.35 74.99 72.36 76.58 72.03
+StackExchange-P2P 45.91 46.78 45.10 41.32 36.40 40.95 37.79 42.04 38.99 41.87 38.28
+TwentyNewsgroups 54.31 56.27 66.62 53.68 50.34 60.97 59.81 60.13 59.33 61.72 58.98
+AskUbuntuDupQuestions 66.98 67.58 64.92 66.78 65.53 67.85 68.10 67.50 68.17 67.01 68.24
+MindSmallRerank 32.60 32.72 30.97 30.53 28.71 31.10 30.98 30.82 31.50 31.81 31.63
+SciDocsRR 86.33 86.58 89.34 88.05 86.33 87.71 87.24 87.26 87.24 87.38 86.74
+StackOverflowDupQuestions 54.91 55.68 55.11 55.66 54.06 56.43 54.75 56.58 55.38 56.62 55.54
+BEIRAverage(15) 56.90 59.03 58.28 58.39 56.59 58.71 57.88 59.36 58.33 58.64 57.71
+MTEBAverage(56) 66.63 67.56 68.28 67.85 66.50 68.97 68.13 69.32 68.47 69.10 68.16
+MTEBscoresacross56tasksforallpoolingtypes. Thisindicatesthatembeddingsgeneratedwith
+causalattentionmasksaresignificantlylesseffectivethanthoseproducedwithbidirectionalattention
+masks.
+5.3.2 PoolingMethods
+Toexaminetheimpactofdifferentpoolingmethodsonembeddingmodels,weconductedexperiments
+comparing<EOS>-last,mean,latent-attention,andself-attentionpoolingtypes. AsdepictedinTables
+2and3,meanpoolingconsistentlyoutperforms<EOS>-lasttokenembeddingbasedontheaverage
+MTEBscoresacross56tasks. Thisdifferencemaybeduetothelast<EOS>tokenembeddingbeing
+influencedbyrecencybias,showinganexcessivedependenceontheoutputofthefinaltoken.
+Toenhanceperformancebeyondmeanpooling,weexperimentedwithaddingtheproposedlatent-
+attentionorself-attentionlayer(bothfollowedbyMLP)beforemeanpoolingtoaddresstheissueof
+importantinformationfromkeyphrasesbeingdiluted. AccordingtoTable2and3,self-attention
+8doesnotprovideadditionalaccuracyimprovementsfortheembeddingcapabilitiesofdecoder-only
+LLMs(i.e.,meanpooling68.97vs. self-attention69.10on56MTEBtasks). Itevenslightlyreduces
+accuracyon15retrievaltasks(i.e.,meanpooling58.71vs.self-attention58.64).Thisisnotsurprising,
+astheLLMalreadyhasmanyself-attentionlayerstolearntherepresentation,andaddinganadditional
+onedoesnotbringsignificantadditivevalue.
+Incontrast,thelatent-attentionlayerprovedbeneficialforretrieval,classification,andSTSsubtasks,
+asshowninTable3. Specifically,thenDCG@10accuracyofthemorechallenging15retrievaltasks
+improved(i.e.,meanpooling58.71vs. latent-attention59.36). Wehypothesizethatthisisduetothe
+"dictionarylearning"providedbythelatentarray,whichoffersmoreexpressiverepresentation. The
+latent-attentionlayereffectivelylearnsoutputembeddingrepresentationsfromdecoder-onlyLLMs,
+mitigatingtheinformationdilutioncausedbyaveragingtheoutputembeddings.
+6 Conclusion
+Inthiswork,weintroduceNV-Embedmodelwhichpresentsnovelarchitecturaldesignandtwo-staged
+trainingproceduretosubstantiallyenhancetheLLMcapabilityasageneralistembeddingmodel.
+Formodelarchitecture,weproposealatentattentionlayertoobtainexpressivepooledembeddings
+andremovetheunnecessarycausalattentionmaskofdecoder-onlyLLMs. Formodeltraining,we
+introduceatwo-stagecontrastiveinstruction-tuningschemetosequentiallyimprovetheembedding
+tasksencompassingretrieval,classification,clustering,andsemantictextualsimilarity. AsofMay
+24,2024,ourNV-EmbedmodelobtainsanewrecordhighscoreontheMassiveTextEmbedding
+Benchmark(MTEB)with56tasksandalsoattainsthehighestscoreonBEIRbenchmark(15retrieval
+tasks in the MTEB benchmark). Notably, we obtain state-of-the-art results using only publicly
+availabledata,withoutanysyntheticdatafromfrontierproprietaryLLMs,suchasGPT-4.
+References
+Adams, C., Borkan, D., Sorensen, J., Dixon, L., Vasserman, L., and Thain, N. Jigsaw
+unintended bias in toxicity classification, 2019. URL https://kaggle.com/competitions/
+jigsaw-unintended-bias-in-toxicity-classification.
+Agirre,E.,Cer,D.,Diab,M.,andGonzalez-Agirre,A. SemEval-2012task6: Apilotonsemantictextual
+similarity. InAgirre,E.,Bos,J.,Diab,M.,Manandhar,S.,Marton,Y.,andYuret,D.(eds.),*SEM2012:
+TheFirstJointConferenceonLexicalandComputationalSemantics–Volume1:Proceedingsofthemain
+conferenceandthesharedtask,andVolume2:ProceedingsoftheSixthInternationalWorkshoponSemantic
+Evaluation(SemEval2012),pp.385–393,Montréal,Canada,7-8June2012.AssociationforComputational
+Linguistics. URLhttps://aclanthology.org/S12-1051.
+Asai,A.,Schick,T.,Lewis,P.,Chen,X.,Izacard,G.,Riedel,S.,Hajishirzi,H.,andYih,W.-t. Task-aware
+retrievalwithinstructions. arXivpreprintarXiv:2211.09260,2022.
+Bajaj, P., Campos, D., Craswell, N., Deng, L., Gao, J., Liu, X., Majumder, R., McNamara, A., Mitra, B.,
+Nguyen,T.,etal. Msmarco:Ahumangeneratedmachinereadingcomprehensiondataset. arXivpreprint
+arXiv:1611.09268,2016.
+BehnamGhader,P.,Adlakha,V.,Mosbach,M.,Bahdanau,D.,Chapados,N.,andReddy,S. Llm2vec:Large
+languagemodelsaresecretlypowerfultextencoders. arXivpreprintarXiv:2404.05961,2024.
+Brown,T.,Mann,B.,Ryder,N.,Subbiah,M.,Kaplan,J.D.,Dhariwal,P.,Neelakantan,A.,Shyam,P.,Sastry,
+G.,Askell,A.,etal. Languagemodelsarefew-shotlearners. Advancesinneuralinformationprocessing
+systems,33:1877–1901,2020.
+Casanueva, I., Temcinas, T., Gerz, D., Henderson, M., and Vulic, I. Efficient intent detection with dual
+sentenceencoders. InProceedingsofthe2ndWorkshoponNLPforConvAI-ACL2020,mar2020. URL
+https://arxiv.org/abs/2003.04807. Dataavailableathttps://github.com/PolyAI-LDN/task-specific-
+datasets.
+Cer,D.,Diab,M.,Agirre,E.,Lopez-Gazpio,I.,andSpecia,L. SemEval-2017task1:Semantictextualsimilarity
+multilingualandcrosslingualfocusedevaluation. InBethard,S.,Carpuat,M.,Apidianaki,M.,Mohammad,
+S.M.,Cer,D.,andJurgens,D.(eds.),Proceedingsofthe11thInternationalWorkshoponSemanticEvaluation
+(SemEval-2017),pp.1–14,Vancouver,Canada,August2017.AssociationforComputationalLinguistics. doi:
+10.18653/v1/S17-2001. URLhttps://aclanthology.org/S17-2001.
+9Chen, J., Xiao, S., Zhang, P., Luo, K., Lian, D., and Liu, Z. Bge m3-embedding: Multi-lingual, multi-
+functionality,multi-granularitytextembeddingsthroughself-knowledgedistillation,2023.
+Chen,X.,Zeynali,A.,Camargo,C.,Flöck,F.,Gaffney,D.,Grabowicz,P.,Hale,S.,Jurgens,D.,andSamory,M.
+SemEval-2022task8:Multilingualnewsarticlesimilarity.InEmerson,G.,Schluter,N.,Stanovsky,G.,Kumar,
+R.,Palmer,A.,Schneider,N.,Singh,S.,andRatan,S.(eds.),Proceedingsofthe16thInternationalWorkshop
+onSemanticEvaluation(SemEval-2022),pp.1094–1106,Seattle,UnitedStates,July2022.Associationfor
+ComputationalLinguistics. doi:10.18653/v1/2022.semeval-1.155. URLhttps://aclanthology.org/
+2022.semeval-1.155.
+Devlin,J.,Chang,M.-W.,Lee,K.,andToutanova,K. Bert:Pre-trainingofdeepbidirectionaltransformersfor
+languageunderstanding. arXivpreprintarXiv:1810.04805,2018.
+Gao,T.,Yao,X.,andChen,D. Simcse:Simplecontrastivelearningofsentenceembeddings. arXivpreprint
+arXiv:2104.08821,2021.
+Gemini,T.,Anil,R.,Borgeaud,S.,Wu,Y.,Alayrac,J.-B.,Yu,J.,Soricut,R.,Schalkwyk,J.,Dai,A.M.,Hauth,
+A.,etal. Gemini:afamilyofhighlycapablemultimodalmodels. arXivpreprintarXiv:2312.11805,2023.
+Group,S.N.etal. Thestanfordnaturallanguageinference(snli)corpus,2022.
+Guu,K.,Lee,K.,Tung,Z.,Pasupat,P.,andChang,M. Retrievalaugmentedlanguagemodelpre-training. In
+Internationalconferenceonmachinelearning,pp.3929–3938.PMLR,2020.
+Hu, E. J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L., and Chen, W. Lora: Low-rank
+adaptationoflargelanguagemodels. arXivpreprintarXiv:2106.09685,2021.
+Izacard,G.,Caron,M.,Hosseini,L.,Riedel,S.,Bojanowski,P.,Joulin,A.,andGrave,E. Unsuperviseddense
+informationretrievalwithcontrastivelearning. arXivpreprintarXiv:2112.09118,2021.
+Jaegle,A.,Borgeaud,S.,Alayrac,J.-B.,Doersch,C.,Ionescu,C.,Ding,D.,Koppula,S.,Zoran,D.,Brock,A.,
+Shelhamer,E.,etal. Perceiverio: Ageneralarchitectureforstructuredinputs&outputs. arXivpreprint
+arXiv:2107.14795,2021.
+Jiang,A.Q.,Sablayrolles,A.,Mensch,A.,Bamford,C.,Chaplot,D.S.,Casas,D.d.l.,Bressand,F.,Lengyel,
+G.,Lample,G.,Saulnier,L.,etal. Mistral7b. arXivpreprintarXiv:2310.06825,2023.
+Karpukhin,V.,Og˘uz,B.,Min,S.,Lewis,P.,Wu,L.,Edunov,S.,Chen,D.,andYih,W.-t.Densepassageretrieval
+foropen-domainquestionanswering. arXivpreprintarXiv:2004.04906,2020.
+Kwiatkowski,T.,Palomaki,J.,Redfield,O.,Collins,M.,Parikh,A.,Alberti,C.,Epstein,D.,Polosukhin,I.,
+Devlin,J.,Lee,K.,etal. Naturalquestions:abenchmarkforquestionansweringresearch. Transactionsof
+theAssociationforComputationalLinguistics,7:453–466,2019.
+Lang,K.Newsweeder:Learningtofilternetnews.InMachinelearningproceedings1995,pp.331–339.Elsevier,
+1995.
+Lee,J.,Dai,Z.,Ren,X.,Chen,B.,Cer,D.,Cole,J.R.,Hui,K.,Boratko,M.,Kapadia,R.,Ding,W.,etal.Gecko:
+Versatiletextembeddingsdistilledfromlargelanguagemodels. arXivpreprintarXiv:2403.20327,2024a.
+Lee,S.,Shakir,A.,Koenig,D.,andLipp,J. Opensourcestrikesbread-newfluffyembeddingsmodel,2024b.
+URLhttps://www.mixedbread.ai/blog/mxbai-embed-large-v1.
+Lewis, P., Perez, E., Piktus, A., Petroni, F., Karpukhin, V., Goyal, N., Küttler, H., Lewis, M., Yih, W.-t.,
+Rocktäschel,T.,etal. Retrieval-augmentedgenerationforknowledge-intensivenlptasks. AdvancesinNeural
+InformationProcessingSystems,33:9459–9474,2020.
+Lewis,P.,Wu,Y.,Liu,L.,Minervini,P.,Küttler,H.,Piktus,A.,Stenetorp,P.,andRiedel,S. Paq:65million
+probably-askedquestionsandwhatyoucandowiththem. TransactionsoftheAssociationforComputational
+Linguistics,9:1098–1115,2021.
+Lhoest,Q.,VillanovadelMoral,A.,Jernite,Y.,Thakur,A.,vonPlaten,P.,Patil,S.,Chaumond,J.,Drame,M.,
+Plu,J.,Tunstall,L.,Davison,J.,Šaško,M.,Chhablani,G.,Malik,B.,Brandeis,S.,LeScao,T.,Sanh,V.,Xu,
+C.,Patry,N.,McMillan-Major,A.,Schmid,P.,Gugger,S.,Delangue,C.,Matussière,T.,Debut,L.,Bekman,
+S.,Cistac,P.,Goehringer,T.,Mustar,V.,Lagunas,F.,Rush,A.,andWolf,T. Datasets:Acommunitylibrary
+fornaturallanguageprocessing. InProceedingsofthe2021ConferenceonEmpiricalMethodsinNatural
+LanguageProcessing:SystemDemonstrations,pp.175–184,OnlineandPuntaCana,DominicanRepublic,
+November2021.AssociationforComputationalLinguistics. URLhttps://aclanthology.org/2021.
+emnlp-demo.21.
+10Li, H., Arora, A., Chen, S., Gupta, A., Gupta, S., andMehdad, Y. MTOP:Acomprehensivemultilingual
+task-orientedsemanticparsingbenchmark. InMerlo,P.,Tiedemann,J.,andTsarfaty,R.(eds.),Proceedings
+ofthe16thConferenceoftheEuropeanChapteroftheAssociationforComputationalLinguistics: Main
+Volume,pp.2950–2962,Online,April2021.AssociationforComputationalLinguistics. doi:10.18653/v1/
+2021.eacl-main.257. URLhttps://aclanthology.org/2021.eacl-main.257.
+Li,X.andLi,J. Angle-optimizedtextembeddings. arXivpreprintarXiv:2309.12871,2023. URLhttps:
+//huggingface.co/mixedbread-ai/mxbai-embed-large-v1.
+Li,Z.,Zhang,X.,Zhang,Y.,Long,D.,Xie,P.,andZhang,M.Towardsgeneraltextembeddingswithmulti-stage
+contrastivelearning. arXivpreprintarXiv:2308.03281,2023.
+Liu,Z.,Ping,W.,Roy,R.,Xu,P.,Shoeybi,M.,andCatanzaro,B. ChatQA:SurpassingGPT-4onconversational
+QAandRAG. arXivpreprintarXiv:2401.10225,2024.
+Maas,A.L.,Daly,R.E.,Pham,P.T.,Huang,D.,Ng,A.Y.,andPotts,C. Learningwordvectorsforsentiment
+analysis.InProceedingsofthe49thAnnualMeetingoftheAssociationforComputationalLinguistics:Human
+LanguageTechnologies,pp.142–150,Portland,Oregon,USA,June2011.AssociationforComputational
+Linguistics. URLhttp://www.aclweb.org/anthology/P11-1015.
+Maggie,PhilCulliton,W.C. Tweetsentimentextraction,2020. URLhttps://kaggle.com/competitions/
+tweet-sentiment-extraction.
+Maia,M.,Handschuh,S.,Freitas,A.,Davis,B.,McDermott,R.,Zarrouk,M.,andBalahur,A. Www’18open
+challenge: financialopinionminingandquestionanswering. InCompanionproceedingsofthetheweb
+conference2018,pp.1941–1942,2018.
+McAuley,J.andLeskovec,J. Hiddenfactorsandhiddentopics:understandingratingdimensionswithreview
+text. InProceedingsofthe7thACMConferenceonRecommenderSystems,RecSys’13,pp.165–172,New
+York,NY,USA,2013.AssociationforComputingMachinery. ISBN9781450324090. doi:10.1145/2507157.
+2507163. URLhttps://doi.org/10.1145/2507157.2507163.
+Meng,R.,Liu,Y.,Joty,S.R.,Xiong,C.,Zhou,Y.,andYavuz,S. Sfrembedding-mistral:enhancetextretrieval
+withtransferlearning. SalesforceAIResearchBlog,3,2024.
+Mikolov,T.,Sutskever,I.,Chen,K.,Corrado,G.S.,andDean,J. Distributedrepresentationsofwordsand
+phrasesandtheircompositionality. Advancesinneuralinformationprocessingsystems,2013.
+Muennighoff,N.,Tazi,N.,Magne,L.,andReimers,N. MTEB:Massivetextembeddingbenchmark. arXiv
+preprintarXiv:2210.07316,2022.
+Muennighoff,N.,Su,H.,Wang,L.,Yang,N.,Wei,F.,Yu,T.,Singh,A.,andKiela,D.Generativerepresentational
+instructiontuning. arXivpreprintarXiv:2402.09906,2024.
+Neelakantan,A.,Xu,T.,Puri,R.,Radford,A.,Han,J.M.,Tworek,J.,Yuan,Q.,Tezak,N.,Kim,J.W.,Hallacy,
+C.,etal. Textandcodeembeddingsbycontrastivepre-training. arXivpreprintarXiv:2201.10005,2022.
+Nguyen, T., Rosenberg, M., Song, X., Gao, J., Tiwary, S., Majumder, R., and Deng, L. MS MARCO: A
+human-generatedmachinereadingcomprehensiondataset. 2016.
+Ni,J.,Qu,C.,Lu,J.,Dai,Z.,Ábrego,G.H.,Ma,J.,Zhao,V.Y.,Luan,Y.,Hall,K.B.,Chang,M.-W.,etal.
+Largedualencodersaregeneralizableretrievers. arXivpreprintarXiv:2112.07899,2021.
+O’Neill,J.,Rozenshtein,P.,Kiryo,R.,Kubota,M.,andBollegala,D. Iwishiwouldhavelovedthisone,buti
+didn’t–amultilingualdatasetforcounterfactualdetectioninproductreviews.arXivpreprintarXiv:2104.06893,
+2021.
+OpenAI. GPT-4,2023.
+OpenAI. Newembeddingmodelsandapiupdates,2024.
+Ouyang,L.,Wu,J.,Jiang,X.,Almeida,D.,Wainwright,C.,Mishkin,P.,Zhang,C.,Agarwal,S.,Slama,K.,
+Ray,A.,etal. Traininglanguagemodelstofollowinstructionswithhumanfeedback. Advancesinneural
+informationprocessingsystems,2022.
+Raffel,C.,Shazeer,N.,Roberts,A.,Lee,K.,Narang,S.,Matena,M.,Zhou,Y.,Li,W.,andLiu,P.J. Exploring
+thelimitsoftransferlearningwithaunifiedtext-to-texttransformer. Journalofmachinelearningresearch,21
+(140):1–67,2020.
+11Rajpurkar,P.,Zhang,J.,Lopyrev,K.,andLiang,P. Squad:100,000+questionsformachinecomprehensionof
+text. arXivpreprintarXiv:1606.05250,2016.
+Reimers,N.andGurevych,I. Sentence-bert:Sentenceembeddingsusingsiamesebert-networks. arXivpreprint
+arXiv:1908.10084,2019.
+Robertson,S.,Zaragoza,H.,etal. Theprobabilisticrelevanceframework:Bm25andbeyond. Foundationsand
+Trends®inInformationRetrieval,3(4):333–389,2009.
+Saravia,E.,Liu,H.-C.T.,Huang,Y.-H.,Wu,J.,andChen,Y.-S. CARER:Contextualizedaffectrepresentations
+foremotionrecognition. InRiloff,E.,Chiang,D.,Hockenmaier,J.,andTsujii,J.(eds.),Proceedingsofthe
+2018ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,pp.3687–3697,Brussels,Belgium,
+October-November2018.AssociationforComputationalLinguistics. doi: 10.18653/v1/D18-1404. URL
+https://aclanthology.org/D18-1404.
+Shi, W., Min, S., Yasunaga, M., Seo, M., James, R., Lewis, M., Zettlemoyer, L., and Yih, W.-t. Replug:
+Retrieval-augmentedblack-boxlanguagemodels. arXivpreprintarXiv:2301.12652,2023.
+Stack-Exchange-Community. Stackexchangedatadump,2023.
+Thakur,N.,Reimers,N.,Rücklé,A.,Srivastava,A.,andGurevych,I. Beir: Aheterogenousbenchmarkfor
+zero-shotevaluationofinformationretrievalmodels. arXivpreprintarXiv:2104.08663,2021.
+Thorne,J.,Vlachos,A.,Christodoulopoulos,C.,andMittal,A. Fever:alarge-scaledatasetforfactextraction
+andverification. arXivpreprintarXiv:1803.05355,2018.
+Tsatsaronis, G., Balikas, G., Malakasiotis, P., Partalas, I., Zschunke, M., Alvers, M. R., Weissenborn, D.,
+Krithara,A.,Petridis,S.,Polychronopoulos,D.,etal. Anoverviewofthebioasqlarge-scalebiomedical
+semanticindexingandquestionansweringcompetition. BMCbioinformatics,16:1–28,2015.
+Vaswani,A.,Shazeer,N.,Parmar,N.,Uszkoreit,J.,Jones,L.,Gomez,A.N.,Kaiser,Ł.,andPolosukhin,I.
+Attentionisallyouneed. Advancesinneuralinformationprocessingsystems,30,2017.
+Voyage-AI. voyage-large-2-instruct:Instruction-tunedandrank1onmteb,2024.
+Wachsmuth,H.,Syed,S.,andStein,B. Retrievalofthebestcounterargumentwithoutpriortopicknowledge. In
+Proceedingsofthe56thAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1:Long
+Papers),pp.241–251,2018.
+Wang,A.,Pruksachatkun,Y.,Nangia,N.,Singh,A.,Michael,J.,Hill,F.,Levy,O.,andBowman,S. Superglue:
+Astickierbenchmarkforgeneral-purposelanguageunderstandingsystems. Advancesinneuralinformation
+processingsystems,32,2019.
+Wang,B.,Ping,W.,McAfee,L.,Xu,P.,Li,B.,Shoeybi,M.,andCatanzaro,B. Instructretro:Instructiontuning
+postretrieval-augmentedpretraining. arXivpreprintarXiv:2310.07713,2023a.
+Wang,L.,Yang,N.,Huang,X.,Jiao,B.,Yang,L.,Jiang,D.,Majumder,R.,andWei,F. Textembeddingsby
+weakly-supervisedcontrastivepre-training. arXivpreprintarXiv:2212.03533,2022.
+Wang,L.,Yang,N.,Huang,X.,Yang,L.,Majumder,R.,andWei,F. Improvingtextembeddingswithlarge
+languagemodels. arXivpreprintarXiv:2401.00368,2023b.
+Wang,Y.,Stanton,D.,Zhang,Y.,Ryan,R.-S.,Battenberg,E.,Shor,J.,Xiao,Y.,Jia,Y.,Ren,F.,andSaurous,
+R.A. Styletokens: Unsupervisedstylemodeling,controlandtransferinend-to-endspeechsynthesis. In
+Internationalconferenceonmachinelearning,pp.5180–5189.PMLR,2018.
+Wei,J.,Bosma,M.,Zhao,V.Y.,Guu,K.,Yu,A.W.,Lester,B.,Du,N.,Dai,A.M.,andLe,Q.V. Finetuned
+languagemodelsarezero-shotlearners. arXivpreprintarXiv:2109.01652,2021.
+Yang,Z.,Qi,P.,Zhang,S.,Bengio,Y.,Cohen,W.W.,Salakhutdinov,R.,andManning,C.D. Hotpotqa: A
+datasetfordiverse,explainablemulti-hopquestionanswering. arXivpreprintarXiv:1809.09600,2018.
+12A ImplementationDetails
+Table5: Parametersusedintheexperiments
+Parameter Value
+Batchsize 128
+NumberofHardnegatives 7
+Warm-upSteps 500
+Firststage-20k
+TrainingSteps
+Secondstage-18k
+Firststage-2e-5
+LearningRate
+Secondstage-1.5e-5
+Rank-16
+LoRAParams Alpha-32
+Dropout-0.1
+WeightDecay 0.03
+Optimizer Adam
+PaddingSide right
+NumberofLatents(r) 512
+LatentWidth(d) 4096
+Multi-AttentionHeads 8
+Table6: Instructionsandnumberofsamplesusedforeachtrainingdataset. Foranapples-to-apples
+comparison,weusethesameinstructionsasinWangetal.(2023b)forsharedtrainingdatasets.
+TaskName InstructionTemplate NumberofSamples
+ArguAna Givenaclaim,finddocumentsthatrefutetheclaim 16k
+Retrievesemanticallysimilartext
+NaturalLanguageInference 20k
+Givenapremise,retrieveahypothesisthatisentailedbythepremise
+Givenawebsearchquery,retrieverelevantpassagesthatanswerthequery
+PAQ,MSMARCO Givenaquestion,retrievepassagesthatanswerthequestion 100k,200k
+Givenaquestion,retrievedocumentsthatcanhelpanswerthequestion
+SQUAD Givenaquestion,retrieveWikipediapassagesthatanswerthequestion 100k
+StackExchange GivenaquestionparagraphatStackExchange,retrieveaquestionduplicatedparagraph 80k
+NaturalQuestion Givenaquestion,retrieveWikipediapassagesthatanswerthequestion 100k
+HotpotQA Givenamulti-hopquestion,retrievedocumentsthatcanhelpanswerthequestion 50k
+FEVER Givenaclaim,retrievedocumentsthatsupportorrefutetheclaim 50k
+FiQA2018 Givenafinancialquestion,retrieveuserrepliesthatbestanswerthequestion 5k
+BioASQ Givenaquestion,retrievedetailedquestiondescriptionsthatareduplicatestothegivenquestion 2k
+STS12,STS22,STSBenchmark Retrievesemanticallysimilartext. 40k
+AmazonCounterfactualClassification ClassifyagivenAmazoncustomerreviewtextaseithercounterfactualornot-counterfactual 10k
+AmazonReviewsClassification ClassifythegivenAmazonreviewintoitsappropriateratingcategory 20k
+Banking77Classification Givenaonlinebankingquery,findthecorrespondingintents 10k
+EmotionClassification ClassifytheemotionexpressedinthegivenTwittermessageintooneofthesixemotions:anger, 16k
+fear,joy,love,sadness,andsurprise
+ImdbClassification ClassifythesentimentexpressedinthegivenmoviereviewtextfromtheIMDBdataset 15k
+MTOPIntentClassification Classifytheintentofthegivenutteranceintask-orientedconversation 10k
+ToxicConversationsClassification Classifythegivencommentsaseithertoxicornottoxic 40k
+TweetSentimentExtractionClassification Classifythesentimentofagiventweetaseitherpositive,negative,orneutral 40k
+ArxivClusteringP2P IdentifythemainandsecondarycategoryofArxivpapersbasedonthetitlesandabstracts 25k
+ArxivClusteringS2S IdentifythemainandsecondarycategoryofArxivpapersbasedonthetitles 25k
+BiorxivClusteringP2P IdentifythemaincategoryofBiorxivpapersbasedonthetitlesandabstracts 25k
+BiorxivClusteringS2S IdentifythemaincategoryofBiorxivpapersbasedonthetitles 15k
+MedrxivClusteringP2P IdentifythemaincategoryofMedrxivpapersbasedonthetitlesandabstracts 15k
+MedrxivClusteringS2S IdentifythemaincategoryofMedrxivpapersbasedonthetitles 15k
+TwentyNewsgroupsClustering Identifythetopicorthemeofthegivennewsarticles 10k
+13Table7:InstructionsusedforevaluationontheMTEBbenchmark. “STS*”indicatesweusethesame
+instructionsforalltheSTStasks. Foranapples-to-applescomparison,weusethesameinstructions
+asinWangetal.(2023b).
+TaskName InstructionTemplate
+ArguAna Givenaclaim,finddocumentsthatrefutetheclaim
+ClimateFEVER Givenaclaimaboutclimatechange,retrievedocumentsthatsupportorrefutetheclaim
+DBPedia Givenaquery,retrieverelevantentitydescriptionsfromDBPedia
+FEVER Givenaclaim,retrievedocumentsthatsupportorrefutetheclaim
+FiQA2018 Givenafinancialquestion,retrieveuserrepliesthatbestanswerthequestion
+HotpotQA Givenamulti-hopquestion,retrievedocumentsthatcanhelpanswerthequestion
+MSMARCO Givenawebsearchquery,retrieverelevantpassagesthatanswerthequery
+NFCorpus Givenaquestion,retrieverelevantdocumentsthatbestanswerthequestion
+NaturalQuestion Givenaquestion,retrieveWikipediapassagesthatanswerthequestion
+QuoraRetrieval Givenaquestion,retrievequestionsthataresemanticallyequivalenttothegivenquestion
+SCIDOCS Givenascientificpapertitle,retrievepaperabstractsthatarecitedbythegivenpaper
+SciFact Givenascientificclaim,retrievedocumentsthatsupportorrefutetheclaim
+Touche2020 Givenaquestion,retrievedetailedandpersuasiveargumentsthatanswerthequestion
+TREC-COVID Givenaquery,retrievedocumentsthatanswerthequery
+STS Retrievesemanticallysimilartext.
+SummEval Givenanewssummary,retrieveothersemanticallysimilarsummaries
+AmazonCounterfactualClassification ClassifyagivenAmazoncustomerreviewtextaseithercounterfactualornot-counterfactual
+AmazonPolarityClassification ClassifyAmazonreviewsintopositiveornegativesentiment
+AmazonReviewsClassification ClassifythegivenAmazonreviewintoitsappropriateratingcategory
+Banking77Classification Givenaonlinebankingquery,findthecorrespondingintents
+EmotionClassification ClassifytheemotionexpressedinthegivenTwittermessageintooneofthesixemotions:anger,
+fear,joy,love,sadness,andsurprise
+ImdbClassification ClassifythesentimentexpressedinthegivenmoviereviewtextfromtheIMDBdataset
+MassiveIntentClassification Givenauserutteranceasquery,findtheuserintents
+MassiveScenarioClassification Givenauserutteranceasquery,findtheuserscenarios
+MTOPDomainClassification Classifytheintentdomainofthegivenutteranceintask-orientedconversation
+MTOPIntentClassification Classifytheintentofthegivenutteranceintask-orientedconversation
+ToxicConversationsClassification Classifythegivencommentsaseithertoxicornottoxic
+TweetSentimentExtractionClassification Classifythesentimentofagiventweetaseitherpositive,negative,orneutral
+ArxivClusteringP2P IdentifythemainandsecondarycategoryofArxivpapersbasedonthetitlesandabstracts
+ArxivClusteringS2S IdentifythemainandsecondarycategoryofArxivpapersbasedonthetitles
+BiorxivClusteringP2P IdentifythemaincategoryofBiorxivpapersbasedonthetitlesandabstracts
+BiorxivClusteringS2S IdentifythemaincategoryofBiorxivpapersbasedonthetitles
+MedrxivClusteringP2P IdentifythemaincategoryofMedrxivpapersbasedonthetitlesandabstracts
+MedrxivClusteringS2S IdentifythemaincategoryofMedrxivpapersbasedonthetitles
+RedditClustering IdentifythetopicorthemeofRedditpostsbasedonthetitles
+RedditClusteringP2P IdentifythetopicorthemeofRedditpostsbasedonthetitlesandposts
+StackExchangeClustering IdentifythetopicorthemeofStackExchangepostsbasedonthetitles
+StackExchangeClusteringP2P IdentifythetopicorthemeofStackExchangepostsbasedonthegivenparagraphs
+TwentyNewsgroupsClustering Identifythetopicorthemeofthegivennewsarticles
+AskUbuntuDupQuestions RetrieveduplicatequestionsfromAskUbuntuforum
+MindSmallReranking Retrieverelevantnewsarticlesbasedonuserbrowsinghistory
+SciDocsRR Givenatitleofascientificpaper,retrievethetitlesofotherrelevantpapers
+StackOverflowDupQuestions RetrieveduplicatequestionsfromStackOverflowforum
+SprintDuplicateQuestions RetrieveduplicatequestionsfromSprintforum
+TwitterSemEval2015 Retrievetweetsthataresemanticallysimilartothegiventweet
+TwitterURLCorpus Retrievetweetsthataresemanticallysimilartothegiventweet
+14

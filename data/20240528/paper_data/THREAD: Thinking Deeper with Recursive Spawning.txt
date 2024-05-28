@@ -1,0 +1,1121 @@
+THREAD: Thinking Deeper with Recursive Spawning
+PhilipSchroeder NathanielMorgan HongyinLuo JamesGlass
+MITCSAIL
+pschro@mit.edu
+Abstract
+Largelanguagemodels(LLMs)haveshownimpressivecapabilitiesacrossdiverse
+settings,butstillstruggleasthelengthandcomplexityofthecontextincreases.
+To address this challenge, we propose Thinking Recursively and Dynamically
+(ThReaD).THREADframesmodelgenerationasathreadofexecutionthat,based
+on the context, can run to completion or dynamically spawn new threads. By
+spawning,threadscanoffloadwork(e.g.,thinking,retrievinginformation)tochild
+threads,whichonlyreturntokensneededfortheparentthreadtodoitswork. In
+effect,thisenablesthemodeltoadapt,asneeded,theamountofintermediatework
+usedtoproducetokens. WeapplyTHREADinthesettingsofLLMtasksolvingand
+questionanswering,wherethedynamicthreadingallowsthemodeltorecursively
+decomposethegiventaskorquestionintoprogressivelysimplersub-problemsthat
+can be solved by separate child threads. We test THREAD, implemented using
+a few-shot learning approach, on diverse benchmarks for agent tasks and data-
+groundedquestionanswering. THREADachievesstate-of-the-artperformancewith
+GPT-4andGPT-3.5onthesebenchmarks,includingALFWorld,TextCraft,and
+WebShop,alongwithtwonewbenchmarks,DataCommonsQAandMIMIC-III
+ICUQA.Inaddition,THREADoutperformsexistingframeworksby10%to50%
+absolutepointswithsmallermodels,includingLlama-3-8bandCodeLlama-7b.
+1 Introduction
+LargeLanguageModels(LLMs)haveshownsuccessindiversesettings[34,12],buttheirperfor-
+mance degrades as context length and complexity grows [4, 19, 26]. This constraint limits their
+efficacyinsettingsthatrequiremorework(e.g.,thinking,retrievinginformation,analyzing,etc.) than
+canfitintoaconciselineofgeneration. Toaddressthislimitation,weproposeThinkingRecursively
+andDynamically(ThReaD).
+THREAD isageneralframeworkwheremodelgenerationistreatedasathreadofexecutionthat,
+basedonthecontext,canindependentlyruntocompletionordynamicallyspawnnewthreadsina
+recursivefashion. Whenathreadspawnsachild,thechildgeneratesconditioningoncontextthat
+derives from the parent’s token sequence. Spawning child threads allows work, such as internal
+thinkingorinteractingwithanexternalenvironment,tobecompletedonbehalfoftheparent,without
+directlyaddingtotheparent’scontext. Childthreadsreturnonlytheinformation(tokens)needed
+for the parent to complete its work. In effect, spawning enables the model to dynamically adapt
+theamountofworkorintermediatecomputationalstepsusedtoproducedifferentpartsofitstoken
+sequence.
+ThesynchronizationandspawningmechanismsofTHREADcanvarybasedonthesetting. Figure1
+showsanexampleofapplyingTHREADinasynchronoussetting,whereaparentwaitsforachild
+inaformanalogoustoThread.join()inmultithreadedprogramming. Inthisexample,aparent
+threadpausesgenerationuntilthechildexecutioncompletesandthechildreturnsoutputtokensthat
+areappendeddirectlytothetokensequenceoftheparentbeforetheparentproceedsgeneration.
+Preprint.Underreview.
+4202
+yaM
+72
+]LC.sc[
+1v20471.5042:viXrastart of output tokens
+model token from child
+generation thread
+context
+...continue until Thread 0 completes
+Thread 0
+!
+"
+Thread 1
+Thread 0 !
+2
+├─ Thread 1 2 "
+│ ├─ Thread 1.1 Thread 1.1
+│ └─ Thread 1.2 !
+...
+"
+... Thread 1.2
+Figure1: THREADwithjoinsynchronization. THREADframesmodelgenerationasanexecution
+threadthatcandynamicallyspawnnewthreads. Intheaboveexamplewithjoinsynchronization,
+whenathreadspawnsachild,itpausesgenerationuntilfeedbackisreturned. Childthreadsgenerate
+startingfromcontextthatderivesfromtheirparent’stokensequence. Whenthechildcompletes,it
+returnsoutputtokens(coloredbars),whichareaddedtothecontextoftheparentbeforeitcontinues
+generating. ϕandψarefunctionsthatcontrolinformationflowfromparenttochildandfromchildto
+parent,respectively,bydefiningthetokensthatarepropagatedbasedonthethread’stokensequence.
+THREADimprovestheflexibilityofmodelgeneration,allowingthemodeltoadapt,throughrecursive
+spawning,theamountofworkitdoesbasedonthegivenproblem,withoutoverextendingitscontext.
+Importantly,thisunfoldswithlimitedneedforexplicitrulesorhardcodedlogic. Instead,THREAD
+reliesonthemodel’sabilitytoinfertheappropriatecontinuationgiventhecontextofeachthread
+atthetimeofexecution. Finally, THREADisagnostictothetypeofsequence. Dependingonthe
+underlyingmodel,THREADcanbeappliedinvariedsettings,includingmulti-modalapplications,and
+fulfillvariedpurposes(e.g.,writingprograms,carryingoutcalculations,augmentingdata,generating
+thoughts,retrievinginformation,interactingwithanenvironment,robotmanipulation,etc.).
+Inthispaper,weconsiderTHREADinthesettingsofLLMtaskcompletion(Figure2a)andquestion
+answering (Figure 2b). In thesesettings, THREAD enables the LLMto recursively decompose a
+task, or question, into progressively simpler sub-problems that can be solved by child threads in
+acompartmentalizedmanner. Achildthreadinfersthespecificationsofitssub-problemfromits
+parent’stokensequence. Ifneeded,childthreadscantroubleshoottheirsub-problem,andspawn
+theirownthreads,allwithoutdistractingtheirparent. WetestTHREAD,usingafew-shotlearning
+approach,onbenchmarksconsistingofquestion-answeringandagenttasks. Fortheseproblems,we
+applyTHREADwithjoinsynchronization,allowingparentthreadstoseefeedbackfromchildthreads
+beforedefiningtheirnextstep. Forexample,intheagent-basedsetting,ifthemodelisgiventhe
+taskofcleaningabowlandputtingitonthecountertop,themainthreadmayspawnachildwiththe
+sub-taskoffindingabowl. Thischildcanthenspawnfurtherthreadsforhandlingthecomplexities
+ofnavigatingtoandcheckingdifferentlocationsforthebowl,witheachthreadreturningonlythe
+informationneededforitsparenttoproceedwithitssub-task. Basedonthefeedbackwithregardto
+findingthebowl,themainthreadcanspawnanewthreadtore-attemptthesub-taskorspawnthreads
+toexecutetheremainingsub-tasks(i.e.,washingthebowl,puttingthebowlonthecountertop).
+THREAD has several advantages over existing frameworks in these settings. To start, THREAD
+addresseslimitationsofmethodsthatrequirethemodeltosolvetheprobleminonelineofcontext
+[37,38,27,29]byallowingthemodeltodynamicallyoffloadworkbyspawningchildthreadsas
+described above. Further, unlike methods for task decomposition [17, 30, 25, 33, 32], THREAD
+enablesthemodeltoadaptitsdecision-makinginrealtimeasitreceivesfeedbackfromeachstep,as
+depictedinFigure2. Existingmethodshavethemodelgenerateaplanatthestartoftheresponse
+and either do not allow for plan adaptation [17, 30, 32] or only adapt plans by adding more sub-
+stepswithintheexistingplanupontaskfailure[25,33]. Finally,THREADprovidesamoreunified
+frameworkcomparedtothesemethods,whichrequireseparatepromptingmechanismsforseparate
+plannerandexecutormodules[25,33].Instead,THREADcanbeimplementedwiththesamefew-shot
+promptusedforeverythreadateverystepofthetaskcompletionorquestionanswering.
+WeevaluateTHREADonbenchmarksforagenttasksanddata-groundedquestionanswering[28,36,
+25,10,14]. THREADsignificantlyoutperformspriormethods,achievingstate-of-the-artperformance
+2withGPT-4andGPT-3.5onALFWorld,TextCraft,andWebShop,alongwithtwonewbenchmarks,
+DataCommons QA and MIMIC-III ICU QA. In addition, THREAD shows success with smaller
+models,outperformingpriormethodsby10%to50%absolutepointsacrossthebenchmarkswith
+Llama-3-8bandCodeLlama-7b.
+2 THREAD framework
+THREADframesmodelgenerationasanexecutionthreadthat,giventhecontext,canruntocompletion
+orspawnnewthreads. Athreadconsistsofgeneratingwithamodel,G,givenaspecificstarting
+context,c. Forthemainthread,cistheinitialseedcontext,c (e.g.,contextprovidedbyauser). For
+0
+eachchildthread,cderivesfromtheparent’stokensequence. Athreadcontinuesuntilitmeetssome
+terminationcriteria,suchasgeneratingaspecificstoptoken.
+2.1 THREADwithjoinsynchronization
+WepresentTHREADinasettingwhere,analogoustohowthejoin()methodisusedinmultithreaded
+programming,aparentthreadwaitsfortheexecutionofthechildtocompletebeforeproceeding.
+When the child execution completes, the child’s output is returned directly to the parent. In this
+setting, THREAD can be implemented using the recursive function shown in Algorithm 1. The
+functiontakestwoinputs: thecontextforthethread,c,andthetokensgeneratedsofarbythethread,
+Y. Wetreatatokensequence(e.g.,candY)asalistoftokens.
+THREADbeginswithc = c
+0
+andY = []. The
+Algorithm1THREADwithjoinsynchronization
+modelgenerates,G(c+Y),onetokenatatime
+conditioningonthegivencontext,c,appended
+functionTHREAD(c,Y)
+whileTruedo
+withthegrowingsequenceoftokensgenerated
+Y =Y +G(c+Y)
+bythethread,Y.
+ifY spawnsachildthreadthen
+IfY spawnsachildthread, thenanewthread Y =Y + ψ(THREAD(ϕ(Y),[]))
+iscreatedwithTHREAD(ϕ(Y),[])whereY for elseifY endsthethreadthen
+thechildthreadisinitializedasanemptylistand returnY
+cisbasedonthetokensequenceoftheparent,
+ϕ(Y). Theoutputtokensofthechildthreadareappendedtotheparent’stokensequenceandthe
+parentcontinuesgenerating. IfY endsthethread,thenthethreadreturnsY (itsfulltokensequence).
+Theϕfunctiondefinesthecontextforachildthreadbasedonthefulltokensequenceoftheparent
+threadatthetimethechildisspawned,includingtokensdirectlygeneratedbytheparentorreturned
+asoutputfrompreviouschildthreadsofthatparent. Theψfunctiondefinestheoutputtokensofa
+childthreadbasedonitsfulltokensequenceatthetimethethreadends,includingtokensdirectly
+generatedbythechildorreturnedasoutputfromthreadsthatitspawned.
+2.2 THREADwithalternativesynchronizationandspawningmechanisms
+Above,weshowTHREADinasettingwhereaparentalwayswaitsforachildtocompleteandthe
+child’s output is always appended directly to the token sequence of the parent before the parent
+proceeds. However,dependingonthesetting,THREADcaninvolvevariedmechanismsforsynchro-
+nizationandspawningand,inscenarioswithoutsequentialdependencies,canincludeasynchronous
+multithreading,allowingparentthreadstocontinuegeneratingwithoutwaitingforchildthreadsto
+complete(improvingoverallefficiency).
+2.3 Definingparent-childinformationexchangewithϕandψ
+Thefunctionsϕandψcontrolthepropagationofinformationfromparenttochildandfromchild
+toparent,respectively. Similartothesynchronizationandspawningmechanismsmentionedabove,
+thesefunctionscanvarybasedonthesettinginwhichTHREADisimplemented. Forexample,ϕand
+ψcanrangefromsimplefunctionsthatcompressordecompressinformationinthetokensequenceto
+entirelyseparatemodelsthattransformthesequenceinmorecomplexways. Inthesectionbelow,we
+describehowwedefineϕandψwhenimplementingTHREADinthesettingsofLLMtaskcompletion
+andquestionanswering.
+32.4 Dynamicallyadaptingintermediateworkintokengeneration
+TheTHREADframeworkenablesathreadofmodelgenerationtospawnachildthreadtoproduce
+output tokens that can serve as future tokens for the parent. In effect, this enables the model to
+adapt,asneeded,theamountofworkorcomputationalstepsusedtoproducedifferenttokens. The
+intermediateworkaddedthroughrecursivespawningcanrangefromdeeperthinkingandreasoning
+tointeractingwithexternalenvironmentsorsourcesofinformation. AsdepictedinFigure3,thework
+associatedwitheachpartoftheparent’stokensequenceisrepresentedbyathreadtreeorganized
+basedonconnectionsbetweenparentandchildthreads. Thesetreesreflecthowthreadsinteractto
+formoutputtokensandthecomputationalworkassociatedwitheachcomponentoftheoverallmodel
+generation.
+3 Applying THREAD forLLMtaskcompletionandquestionanswering
+In this paper, we test THREAD in the settings of question answering and task completion with
+LLMs,whereTHREADenablesthemodeltodynamicallydecomposethegivenproblemintosimpler
+sub-problemsthatarecompletedbyseparatethreads. WeapplyTHREADusinganin-contextlearning
+approach,wherethesamefew-shotpromptisusedforeverythreadateverystepofthetaskcompletion
+orquestionanswering. Sincetheseproblemsbenefitfromthemodeladaptingtofeedbackasitdefines
+itsnextsteps,weapplyTHREADwiththejoinsynchronizationdescribedabove.
+Thread spawning and termination based on special stop tokens. We implement a spawning
+mechanismusingaspecialstoptoken,ω ,whichpausesthethreadgenerationandmarksthe
+listen
+startoftheoutputthethreadexpectsfromthechild. Thecontextforthechildthreadisdefinedbyϕ
+basedonthetokensequenceoftheparentthatoccursbeforeω . Athreadendswhenitgenerates
+listen
+theendtoken,ω . AsexemplifiedinFigure2,weuse=>asω andENDasω .
+end listen end
+Implementing THREAD with few-shot learning. We leverage a few-shot learning approach to
+implement THREAD. Thefew-shotexamplesarecomprisedinasinglepromptwithexamplesof
+successfulspawningandproblemsolvingatdifferentthreaddepths,includinghowthetokenω
+listen
+shouldbeused. Asaresult,theapproachdoesnotrequireexplicitrulestodefinewhennewthreads
+shouldbespawnedandhowparentthreadsshouldrespondtofeedbackfromachild. Instead,these
+mechanismsareallimpliedbytheexamplesprovidedinthefew-shotprompt. Changingthespawning
+andparent-childdynamicssimplyrequiresmodifyingtheprompt. Allthreadsareprovidedthesame
+few-shotpromptforeverystepoftheproblemcompletion. Thus,THREADonlyrequiresgeneratinga
+singlepromptforagivensetting. Thisprompt,q,isprependedtothecontext,c=q+c,foreach
+thread,formingthefullcontextfromwhichthethreadwillgenerate.
+Definingϕandψ. Asdescribedabove,thefunctionsϕandψcontrolinformationflowfromparent
+tochildandfromchildtoparent,respectively. Thefunctionψreturnstheresultfromachildthread
+basedonitsfulltokensequence. AsdepictedinFigure2,weimplementψasafunctionthatreturns
+thetokensincludedintheprintstatementattheendofthechildthread’stokensequence. Inaddition,
+ψappendsthetoken<=totheoutputtomarktheendofthechild’soutputwithintheparent’stoken
+sequence. Weimplementϕasafunctionthatextractsthelastlineoftheparent’stokensequenceto
+createthecontextforthechildthread. Toimprovetheabilityofparentandchildthreadstoefficiently
+organize, use, update, and propagate shared information, we leverage the coding-based skills of
+themodeltodefinevariablesthatrepresentpiecesofinformationthatareimportantforthegiven
+problem. Forexample,ifthetaskistofindanitemonane-commercesitethathascertainattributes,
+themodelcandefineavariable,suchasobj_attributes,andspawnachildtosearchforitems
+withobj_attributesinsteadofhavingtolistalloftheattributes. Then, whenϕprocessesthe
+tokensequencefromtheparent,itinstantiatesthevariables,allowingthechildtosee,forexample,
+thefulllistofattributes. Wealsotest THREAD implementedwithoutusingthesevariables, with
+resultsshownintheappendix.
+Threadsperformingactionsinanenvironment. Threadscanlistenforfeedbackwhenperforming
+anactioninanenvironmentthesamewaytheylistenforfeedbackfromachildthread. Theysimply
+generatetokensthatrepresenttheactionandthenproducethetokenω tolistenforfeedbackfrom
+listen
+theenvironment. Theaction,a,isthenexecutedintheenvironment,E,andtheoutput,o=E(a),is
+appendedtothethread’stokensequencethesamewayitisdoneforthefeedbackfromachildthread
+(Algorithm2). Thethreadcanthencontinuegeneratingbasedonthefeedback.
+4(a) Thread 0 (depth: 0)
+YYoouu rt taasskk iiss ttoo...... Task thread context
+Thread 1 (depth: 1)
+To complete this task,
+I need to... Subtask 1 => II nneeeedd ttoo...... SSuubbttaasskk 11
+[ <S =ubtask 1 feedback] To complete this task, Thread 1.1 (depth: 2)
+I need to... Subtask 1.1 => II nneeeedd ttoo...... SSuubbttaasskk 11..11
+Based on the feedback, [Subtask 1.1 feedback]
+I need to... Subtask 2 => <= To complete this task,
+... 2 I need to...
+... Based on the feedback, ...
+... I need to... Subtask 1.2 => ...
+Based on the feedback, ... ...
+the task is complete. ... print(Subtask 1.1 feedback)
+END ... END
+Based on the feedback,
+**TASK COMPLETE** the task is complete.
+print(Subtask 1 feedback) Special tokens:
+END
+listen token that
+= > marks the start of
+(b) Thread 0 (depth: 0) returned feedback
+W Y Th o ha u et t
+I
+a ni s fs k
+o
+rt i mh s ae t. t i. o o. . n? . t. Q ou e as nt si wo en
+r Thread 1 (depth: 1)
+< = m ra er tk us r nt eh de fe en ed d bo af c k
+this question is shown END ends thread
+below: => The Information to answer
+[Information] this question is shown
+<= bIe lnoewe:d to... Subtask 1
+Based on this information, The RetrievedData with this Thread 1.1 (depth: 2)
+the Answer is => information is => IT hnee Reedt rtioe.v.e.d DSautbat awsikt h1 .t1his
+... [RetrievedData] information is
+... <=
+END 2 resp = requests.post(...)
+The ProcessedData after data1 = ...
+**ANSWER COMPLETE** processing the data is => ...
+... ...
+... print(RetrievedData)
+print(Information) END
+END
+Figure2: Whengivenatask(a)orquestion(b),THREADcanbeusedtohelpthemodel,through
+recursivespawning,decomposetheproblemintoprogressivelysimplersub-problemsthataresolved
+bychildthreads. Intheseexamples,thecontextforachildthreadisbasedonthelastlineofthe
+parent’stokensequence.
+Errorhandling. Wedonotimplementanyexplicitmechanismsforerrorhandlingandinsteadrely
+ontheinherentreasoningabilityofLLMstorespondtounexpectedfeedbackfromchildthreadsor
+fromtheenvironment.
+4 Experiments
+WeevaluateTHREADon5benchmarksforLLMagenttaskcompletionandquestionansweringusing
+largeandsmallmodels,includingGPT-4,GPT-3.5,Llama-3-8b,Llama-2-7b,andCodeLlama-7b.
+Foreachbenchmark,weusethesamepromptforallmodels.
+THREADsignificantlyoutperformspriormethods,achievingstate-of-the-artperformancewithGPT-
+3.5andGPT-4onALFWorld,TextCraft,WebShop,DataCommonsQA,andMIMIC-IIIICUQA.In
+addition,THREADshowssuccesswithsmallermodels,outperformingpriormethodsby10%to50%
+absolutepointsacrossthebenchmarkswithLlama-3-8bandCodeLlama-7b.
+Weincludedetailsregardingmodels,prompts,andexperiments(includingablations)intheappendix.
+Wereleaseallcodeanddataathttps://github.com/philipmit/thread.
+4.1 ALFWorld
+ALFWorldisasuiteoftext-basedenvironments,implementedinTextWorld,designedtoalignwith
+theembodiedALFREDbenchmark[28]. Itincludes6differenttasktypesthatinstructtheagent
+toaccomplishagoal(e.g.,washabowlandputitoncountertop)byinteractingwithasimulated
+householdwithactionsdefinedintext. FollowingYaoetal.[37],weevaluateanagenton134unseen
+evaluationgames,includingsixtasktypes: Pick,Clean,Heat,Cool,Look,andPick2. Likeprevious
+methods,suchasReAct[37],weimplementTHREADwithonefew-shotpromptpertask. Wealso
+testTHREADusingtask-generalprompting.
+Results. THREADsignificantlyoutperformsallpriormethods(Tables1and2),includingthose
+thatrequiretheagenttohaveaccesstoexternalmemoryconsistingofpastexperienceswiththetask.
+5Table1: ALFWorldtask-specificsuccessrates(%). Resultsareseparatedbasedonwhetherthe
+methodrequirestheagenttohaveaccesstoexternalmemoryconstructedfrompreviousexperiences
+withthetask. *AsreportedinKagayaetal.[15](RAP)andFuetal.[5](AutoGuide).
+Requires
+Model Method All Pick Clean Heat Cool Look Pick2
+ext.mem.
+Reflexion[27] 76.1 75.0 80.6 69.6 76.2 83.3 70.6
+AdaPlanner[29] 82.8 91.7 87.1 82.6 95.2 50.0 82.4
+Yes RAP*[15] 85.8 95.8 87.1 78.3 90.5 88.9 70.6
+AutoGuide*[5] 79.1 - - - - - -
+GPT-3.5
+ReAct[37] 53.7 45.8 48.4 69.6 66.7 55.6 35.3
+No ADaPT[25] 82.1 87.5 83.9 78.3 90.5 83.3 64.7
+THREAD 95.5 95.8 93.5 95.7 95.2 100 94.1
+Yes RAP*[15] 94.8 95.8 90.3 100 95.2 100 88.2
+ReAct[37] 87.3 83.3 77.4 95.7 85.7 100 88.2
+GPT-4
+No ADaPT[25] 91.0 91.7 87.1 95.7 90.5 94.4 88.2
+THREAD 98.5 100 100 100 95.2 100 94.1
+Table2: ALFWorldsuccessrates(%)foralltaskscombined.
+Requires
+Method Llama-3-8b Llama-2-7b CodeLlama-7b
+ext. mem.
+Reflexion[27] 25.4 11.2 27.6
+Yes AdaPlanner[29] 28.4 11.9 29.9
+ReAct[37] 20.1 12.7 23.1
+No ADaPT[25] 30.6 15.7 35.1
+THREAD 71.6 22.4 91.0
+WithGPT-4,THREADachievesacombinedsuccessrateof98.5%with100%successin4ofthe6
+individualtasks. WithGPT-3.5,THREADshowsacombinedsuccessrateof95.5%,outperformingall
+methodsbyover9%absolutepoints,andachievesover90%accuracyacrossallindividualtasks.With
+smallermodels,includingLlama-3-8bandCodeLlama-7b,THREADimprovesuponpriormethods
+by40%to55%absolutepoints.
+Finally,Table3showstheresultswhentestingTHREADwithtask-generalprompting. Toimplement
+thetask-generalprompt,wesplitthepromptintoonesetofexamplesforthemainthreadandasecond
+setofexamplesforallotherthreads(withthesamesetsofexamplesusedforalltasks). Weseethat
+GPT-3.5achievesthesamecombinedsuccessratewiththetask-generalpromptingasitdoeswiththe
+task-specificprompting. Further,whiletheperformanceofLlama-3-8bandCodeLlama-7bdegrades
+withtask-generalprompting,theperformanceisstillasignificantimprovementovertask-specific
+promptingwithpriormethods(Table2)forthesemodels.
+4.2 TextCraft
+TextCraftisatext-basedenvironmentinspiredbythethecraftingcomponentofMinecraft[25]. The
+tasksinvolvebuildingMinecraftitemswithcraftingcommandsusingavailableresourcesfromthe
+environment. FollowingtheworkofPrasadetal.[25],weevaluateTHREADonthetestsetcontaining
+Table3: ALFWorldtask-specificsuccessrates(%)usingtask-generalpromptingwithTHREAD.
+Model All Pick Clean Heat Cool Look Pick2
+GPT-3.5 95.5 100 96.8 82.6 95.2 100 100
+Llama-3-8b 49.3 58.3 38.7 56.5 57.1 72.2 11.8
+CodeLlama-7b 61.9 41.7 87.1 65.2 61.9 38.9 64.7
+6Table4: TextCraftsuccessrate(%). *AsreportedinPrasadetal.[25].
+Method GPT-3.5 Llama-3-8b Llama-2-7b CodeLlama-7b
+Reflexion*[27] 32.0 - - -
+ReAct[37] 20.5 12.5 8.0 10.5
+ADaPT[25] 52.5 23.5 12.0 18.0
+TDAG[33] 73.5 48.5 14.0 31.0
+THREAD 93.5 92.0 20.0 71.0
+Table5: WebShopsuccessrate(SR;%)andscore(%).
+Requires GPT-3.5 Llama-3-8b Llama-2-7b CodeLlama-7b
+Method
+ext. mem. SR Score SR Score SR Score SR Score
+Reflexion[27] 38 64.4 32 59.8 8 19.7 17 57.3
+LATS[40] 40 76.0 34 61.5 12 30.1 21 60.7
+Yes RAP*[15] 48 76.1 - - - - - -
+AutoGuide*[5] 46 73.4 - - - - - -
+ReAct[37] 37 59.5 31 54.1 10 18.5 17 49.2
+ADaPT[25] 44 60.0 35 58.2 13 28.7 21 56.4
+No
+TDAG[33] 45 64.5 37 63.5 14 29.8 23 58.5
+THREAD 49 76.3 47 70.4 20 48.5 40 68.9
+200samples. WeimplementTHREADusingasinglefew-shotpromptandcompareitsperformance
+topreviousmethodsusedforTextCraft[25,33,27,37].
+Results. As shown in Table 4, THREAD outperforms prior methods by at least 20% absolute
+pointswithGPT-3.5andatleast40%absolutepointswithLlama-3-8bandCodeLlama-7b. Further,
+Llama-3-8bwith THREAD outperformsGPT-3.5withallpriormethodsandCodeLlama-7bwith
+THREADoutperformsGPT-3.5withallpriormethodsexceptTDAG[33].
+4.3 WebShop
+WebShop is an online shopping environment with over a million real-world products [36]. The
+benchmarkrequiresthemodeltointeractwiththewebsite(e.g.,search,clickbuttons)topurchase
+aproductbasedonspecificationsprovidedbyauser. Thesearchresultsandproductpagescontain
+noisydatawiththeproducttitle,descriptions,andoptions. Successfulpurchaseofaproductinvolves
+selectingthecorrectitemand,ifnecessary,selectingthecorrectbuttonsrepresentingthedifferent
+itemoptions. Theevaluationmetricsincludethesuccessrate,whichisthepercentageofproducts
+thatwerepurchasedwithfullsuccess(i.e.,thepurchaseditemcontainsalldesiredattributes),and
+the score, which is the average percentage of desired attributes covered by the purchased items.
+Followingpriorwork[27,25,33,40],weevaluateTHREADonatestsetof100instructions. We
+implementTHREADwithafew-shotprompt.
+Results. Table5showsthesuccessrateandscoreforeachmethod. Similartoabove,weseparate
+the results based on whether the method requires the model to have access to external memory.
+WithGPT-3.5,THREADoutperformsotherprompt-onlymethodsbyanabsolute4%insuccessrate
+and over 10% in score and outperforms RAP [15] by 1% in success rate (with a similar score).
+THREADachievesanabsolute10%,orgreater,improvementinperformancewithLlama-3-8band
+CodeLlama-7b. Inaddition,Llama-3-8bwithTHREADachievesahighersuccessratethanGPT-3.5
+withallpriormethods,withtheexceptionofRAP.
+4.4 DataCommonsQA
+DataCommonsQAisabenchmarkconsistingofquestionsthatcanbeansweredusingdataprovided
+byGoogleDataCommons[9]https://datacommons.org. Thequestionsrangefromcomparing
+statisticsindifferentlocationstomakingpredictionsregardingfuturetrends. Figure5oftheappendix
+7Table6: DataCommonsQAaccuracy(%).
+Method GPT-3.5 Llama-3-8b Llama-2-7b CodeLlama-7b
+Reflexion[27] 37.9 24.3 10.7 20.7
+NLEP[38] 28.6 21.4 11.4 19.3
+NLEP+ReAct 41.4 27.1 14.3 24.3
+THREAD 77.1 67.9 22.1 62.1
+Table7: MIMIC-IIIICUQAaccuracy(%).
+Method GPT-3.5 Llama-3-8b Llama-2-7b CodeLlama-7b
+Reflexion[27] 38.1 19.4 8.8 16.9
+NLEP[38] 35.6 17.5 8.1 15.6
+NLEP+ReAct 43.1 23.8 12.5 21.9
+THREAD 71.3 61.9 18.8 58.1
+showsanexamplewiththequestion“From2015to2021,wastherateofasthmaincreasingfasterin
+BostonorLA?”. Thebenchmarkincludesground-truthtext-basedanswers(e.g.,“Boston”),along
+withfiguresthatsupporteachanswer,accordingtothedatathatisavailableinDataCommons. In
+thiswork,weevaluatethemodelsbasedonthetext-basedanswers,leavingtheevaluationoffigure
+generationforfuturework. Thetestsetincludesatotalof140questions. WeimplementTHREAD
+with a few-shot prompt and compare its performance to three baselines: Reflexion [27], Natural
+LanguageEmbeddedPrograms(NLEP)[38],andNLEP+ReAct,anextensionofNLEPthatallows
+themodeltoevaluateintermediateoutputsofitsanalysisasitanswersthequestion.
+Results. Table6showstheaccuracyofeachmethodonDataCommonsQA.THREADoutperforms
+priormethodsbyover35%absolutepointswithGPT-3.5,Llama-3-8b,andCodeLlama-7b. Both
+Llama-3-8bandCodeLlama-7bwithTHREADoutperformGPT-3.5withpriormethods.
+4.5 MIMIC-IIIICUQA
+TheMIMIC-IIIICUQAbenchmarkconsistsofpatient-focusedquestionsbasedonclinicaltime-
+seriesdatamadeavailablebyMIMIC-III[14]. Thebenchmarkreflectsasettinginwhichahealthcare
+provider can ask natural language questions about patients in the intensive care unit (ICU) (e.g.,
+evaluatingcorrelationsbetweenclinicalvariablesorcomparingapatient’svaluestootherpatients
+matching a specific clinical profile) and receive an answer from the language model based on
+the relevant patient data. Further details regarding the benchmark and its creation are included
+in the appendix. The test set includes 160 questions. Similar to above, we implement THREAD
+with a few-shot prompt and compare its performance relative to Reflexion [27], NLEP [38], and
+NLEP+ReAct.
+Results. AsshowninTable7,THREADoutperformspriormethodsbyover25%absolutepoints
+acrossallmodelsexceptLlama-2-7b. AllmethodsshowthelowestperformancewithLlama-2-7b,
+whichisconsistentacrossallbenchmarks.
+5 Relatedwork
+TheTHREADframeworkrelatestopriorapproachesfordynamicallyadaptingwork,orcomputational
+steps,usedduringmodelgeneration. Previousapproachesfordynamicallyadaptingcomputation
+basedonthegivenproblemrequirespecialtraining[7,22]ornovelmodelarchitectures[8,2,3].
+THREADprovidesamoregeneralandflexibleframeworkthat,asweshow,canbeappliedwithout
+modificationstotheunderlyingmodelarchitectureandwithoutfurthertraining. Inaddition,unlike
+methodsthatallowthemodeltoadapttheamountofinternalcomputations[7,8,2,3],theintermediate
+workusedtosupplementmodelgenerationwith THREAD caninvolveworkthatextendsbeyond
+internal thinking, such as retrieving information or interacting with an external environment. In
+8addition,THREADallowsforgreaterinterpretability,sincealloftheintermediateworkisperformed
+bygeneratingmeaningfultokens.
+Inthispaper,weapplyTHREADinasettingwhereitimprovestheabilityofLLMstodecompose
+a given problem into simpler sub-problems. There has been significant prior work involving the
+decompositionofproblemswithneuralmodularmodelingarchitectures[1,31,20,13,11,24,16].
+Laterworkhasusedfine-tuningorin-contextlearningwithmodernLLMsfordecompositionwith
+multi-steptaskcompletion[17,32],arithmeticandmathematicalreasoning[6,18],andprogram
+synthesis[21,23,39]. Tohandlecomplextasks,amorerecentapproachhasimproveduponthese
+methodsbyusingaplannertofurtherdecomposeataskwhenafailureisencountered[25],which
+wasfurtherextendedtoamulti-agentsetting[33]. Comparedtotheseapproaches,THREADhasthe
+advantageofallowingthemodeltoadaptitsdecision-makinginrealtimeasitreceivesfeedback
+fromeachstep. Inaddition,THREADprovidesamoreunifiedframeworkcomparedtothesemethods,
+whichrequireseparatepromptingforseparateplannerandexecutormodules. THREADinsteadcanbe
+implementedwiththesamefew-shotpromptusedforeverythreadateverystepofmodelgeneration.
+6 Limitations
+TheimplementationofTHREADinthispaperdoesnotinvolveanyexplicitmechanismsforerror
+handlingandinsteadreliesonthemodel’sinherentabilitytotroubleshootwhenissuesarise. An
+advantage of THREAD is that individual threads can fail without directly affecting other threads.
+However,thecontextnecessarytoself-correctmaybelostiferrorreportingisnothandledappropri-
+ately. Moreworkisneededtodeveloprobusterrordetectionandrecoverymechanismstoensurethat
+theinformationnecessaryforself-correctionispreservedandutilizedeffectively. Inaddition,our
+implementationofTHREADinvolveslimitedcommunicationbetweentheparentandchildthreads,
+wherethecontextforthechildthreadisbasedonthelastlineoftheparent’stokensequence. This
+canresultinthechildmissinginformationthatcouldhelpwithitswork, leadingtolessefficient
+oreffectivegeneration. Overall,moreworkisneedtoimprovethepropagationofinformation,as
+definedbythefunctionsϕandψ,betweenparentandchildthreads.
+7 Broaderimpact
+Inthiswork,weshowhowTHREADcanbeappliedtoimproveLLMtaskcompletionandquestion
+answering. LLMs are being increasingly deployed to autonomously interact with external envi-
+ronmentsandhumans. Byimprovingthiscapacity,ourworkhasthepotentialforamplifyingrisk
+associatedwithautomateddecision-makingorfacilitateharmfuluseofLLMs. Addressingtheserisks
+requirescarefulconsiderationofethicalguidelines,robustnesschecks,andtransparencyinalgorithm
+deploymenttoensurethatadvancementsinLLMscontributepositivelytosocietalwelfare.
+8 Conclusion
+We introduce THREAD, a general framework in which model generation is treated as a thread
+of execution that can dynamically offload work, such as thinking or retrieving information, by
+spawningnewthreads. THREADenablesamodeltoadapt,throughrecursivespawning,theamountof
+intermediateworkitusestoproducedifferentpartsofitstokensequence. Weapplythisframeworkin
+thesettingsofLLMtaskcompletionandquestionanswering. WeshowthatTHREAD,implemented
+usingafew-shotlearningapproach,achievesstate-of-the-artperformanceondiversebenchmarksin
+thesesettings.
+References
+[1] Andreas,J.,Rohrbach,M.,Darrell,T.,andKlein,D.(2016). Neuralmodulenetworks. InProceedingsof
+theIEEEconferenceoncomputervisionandpatternrecognition,pages39–48.
+[2] Banino,A.,Balaguer,J.,andBlundell,C.(2021). Pondernet:Learningtoponder. In8thICMLWorkshop
+onAutomatedMachineLearning(AutoML).
+[3] Dehghani,M.,Gouws,S.,Vinyals,O.,Uszkoreit,J.,andKaiser,L.(2018). Universaltransformers. In
+InternationalConferenceonLearningRepresentations.
+9[4] Dziri,N.,Lu,X.,Sclar,M.,Li,X.L.,Jiang,L.,Lin,B.Y.,Welleck,S.,West,P.,Bhagavatula,C.,LeBras,
+R.,etal.(2023). Faithandfate:Limitsoftransformersoncompositionality. InThirty-seventhConferenceon
+NeuralInformationProcessingSystems.
+[5] Fu,Y.,Kim,D.-K.,Kim,J.,Sohn,S.,Logeswaran,L.,Bae,K.,andLee,H.(2024). Autoguide: Auto-
+matedgenerationandselectionofstate-awareguidelinesforlargelanguagemodelagents. arXivpreprint
+arXiv:2403.08978.
+[6] Gao, L., Madaan, A., Zhou, S., Alon, U., Liu, P., Yang, Y., Callan, J., and Neubig, G. (2023). Pal:
+Program-aidedlanguagemodels. InInternationalConferenceonMachineLearning,pages10764–10799.
+PMLR.
+[7] Goyal,S.,Ji,Z.,Rawat,A.S.,Menon,A.K.,Kumar,S.,andNagarajan,V.(2023). Thinkbeforeyou
+speak:Traininglanguagemodelswithpausetokens. InTheTwelfthInternationalConferenceonLearning
+Representations.
+[8] Graves, A. (2016). Adaptive computation time for recurrent neural networks. arXiv preprint
+arXiv:1603.08983.
+[9] Guha,R.(2019). Datacommons. In2019IEEEInternationalConferenceonBigData(BigData),pages
+1–1.IEEE.
+[10] Guha,R.V.,Radhakrishnan,P.,Xu,B.,Sun,W.,Au,C.,Tirumali,A.,Amjad,M.J.,Piekos,S.,Diaz,N.,
+Chen,J.,etal.(2023). Datacommons. arXivpreprintarXiv:2309.13054.
+[11] Gupta,N.,Lin,K.,Roth,D.,Singh,S.,andGardner,M.(2019). Neuralmodulenetworksforreasoning
+overtext. InInternationalConferenceonLearningRepresentations.
+[12] Huang,J.andChang,K.C.-C.(2023). Towardsreasoninginlargelanguagemodels:Asurvey. InFindings
+oftheAssociationforComputationalLinguistics:ACL2023,pages1049–1065.
+[13] Jiang,Y.andBansal,M.(2019). Self-assemblingmodularnetworksforinterpretablemulti-hopreasoning.
+InProceedingsofthe2019ConferenceonEmpiricalMethodsinNaturalLanguageProcessingandthe9th
+InternationalJointConferenceonNaturalLanguageProcessing(EMNLP-IJCNLP),pages4474–4484.
+[14] Johnson,A.E.,Pollard,T.J.,Shen,L.,Lehman,L.-w.H.,Feng,M.,Ghassemi,M.,Moody,B.,Szolovits,
+P.,AnthonyCeli,L.,andMark,R.G.(2016). Mimic-iii,afreelyaccessiblecriticalcaredatabase. Scientific
+data,3(1):1–9.
+[15] Kagaya,T.,Yuan,T.J.,Lou,Y.,Karlekar,J.,Pranata,S.,Kinose,A.,Oguri,K.,Wick,F.,andYou,Y.
+(2024). Rap: Retrieval-augmentedplanningwithcontextualmemoryformultimodalllmagents. arXiv
+preprintarXiv:2402.03610.
+[16] Khot,T.,Khashabi,D.,Richardson,K.,Clark,P.,andSabharwal,A.(2021). Textmodularnetworks:
+Learningtodecomposetasksinthelanguageofexistingmodels.InProceedingsofthe2021Conferenceofthe
+NorthAmericanChapteroftheAssociationforComputationalLinguistics:HumanLanguageTechnologies,
+pages1264–1279.
+[17] Khot,T.,Trivedi,H.,Finlayson,M.,Fu,Y.,Richardson,K.,Clark,P.,andSabharwal,A.(2023). Decom-
+posedprompting:Amodularapproachforsolvingcomplextasks. InTheEleventhInternationalConference
+onLearningRepresentations.
+[18] Lee, S.andKim, G.(2023). Recursionofthought: Adivide-and-conquerapproachtomulti-context
+reasoningwithlanguagemodels. InFindingsoftheAssociationforComputationalLinguistics:ACL2023,
+pages623–658.
+[19] Liu,N.F.,Lin,K.,Hewitt,J.,Paranjape,A.,Bevilacqua,M.,Petroni,F.,andLiang,P.(2024). Lostin
+themiddle: Howlanguagemodelsuselongcontexts. TransactionsoftheAssociationforComputational
+Linguistics,12:157–173.
+[20] Min,S.,Zhong,V.,Zettlemoyer,L.,andHajishirzi,H.(2019). Multi-hopreadingcomprehensionthrough
+questiondecompositionandrescoring. InProceedingsofthe57thAnnualMeetingoftheAssociationfor
+ComputationalLinguistics,pages6097–6109.
+[21] Murali,V.,Qi,L.,Chaudhuri,S.,andJermaine,C.(2018). Neuralsketchlearningforconditionalprogram
+generation. InInternationalConferenceonLearningRepresentations.
+[22] Nye,M.,Andreassen,A.J.,Gur-Ari,G.,Michalewski,H.,Austin,J.,Bieber,D.,Dohan,D.,Lewkowycz,
+A.,Bosma,M.,Luan,D.,etal.(2022). Showyourwork: Scratchpadsforintermediatecomputationwith
+languagemodels. InDeepLearningforCodeWorkshop.
+10[23] Nye,M.,Hewitt,L.,Tenenbaum,J.,andSolar-Lezama,A.(2019). Learningtoinferprogramsketches. In
+InternationalConferenceonMachineLearning,pages4861–4870.PMLR.
+[24] Perez,E.,Lewis,P.,Yih,W.-t.,Cho,K.,andKiela,D.(2020). Unsupervisedquestiondecompositionfor
+questionanswering. InProceedingsofthe2020ConferenceonEmpiricalMethodsinNaturalLanguage
+Processing(EMNLP).AssociationforComputationalLinguistics.
+[25] Prasad,A.,Koller,A.,Hartmann,M.,Clark,P.,Sabharwal,A.,Bansal,M.,andKhot,T.(2023). Adapt:
+As-neededdecompositionandplanningwithlanguagemodels. arXivpreprintarXiv:2311.05772.
+[26] Qin,G.,Feng,Y.,andVanDurme,B.(2023). Thenlptaskeffectivenessoflong-rangetransformers. In
+Proceedingsofthe17thConferenceoftheEuropeanChapteroftheAssociationforComputationalLinguistics,
+pages3774–3790.
+[27] Shinn,N.,Cassano,F.,Gopinath,A.,Narasimhan,K.,andYao,S.(2024). Reflexion:Languageagents
+withverbalreinforcementlearning. AdvancesinNeuralInformationProcessingSystems,36.
+[28] Shridhar, M., Yuan, X., Cote, M.-A., Bisk, Y., Trischler, A., and Hausknecht, M. (2021). Alfworld:
+Aligningtextandembodiedenvironmentsforinteractivelearning. InInternationalConferenceonLearning
+Representations.
+[29] Sun,H.,Zhuang,Y.,Kong,L.,Dai,B.,andZhang,C.(2023a). Adaplanner: Adaptiveplanningfrom
+feedbackwithlanguagemodels. InThirty-seventhConferenceonNeuralInformationProcessingSystems.
+[30] Sun,S.,Liu,Y.,Wang,S.,Zhu,C.,andIyyer,M.(2023b). Pearl:Promptinglargelanguagemodelstoplan
+andexecuteactionsoverlongdocuments. arXivpreprintarXiv:2305.14564.
+[31] Talmor,A.andBerant,J.(2018). Thewebasaknowledge-baseforansweringcomplexquestions. In
+Proceedingsofthe2018ConferenceoftheNorthAmericanChapteroftheAssociationforComputational
+Linguistics:HumanLanguageTechnologies,Volume1(LongPapers),pages641–651.
+[32] Wang,L.,Xu,W.,Lan,Y.,Hu,Z.,Lan,Y.,Lee,R.K.-W.,andLim,E.-P.(2023).Plan-and-solveprompting:
+Improvingzero-shotchain-of-thoughtreasoningbylargelanguagemodels.InProceedingsofthe61stAnnual
+MeetingoftheAssociationforComputationalLinguistics(Volume1:LongPapers),pages2609–2634.
+[33] Wang,Y.,Wu,Z.,Yao,J.,andSu,J.(2024). Tdag: Amulti-agentframeworkbasedondynamictask
+decompositionandagentgeneration. arXivpreprintarXiv:2402.10178.
+[34] Wei, J., Wang, X., Schuurmans, D., Bosma, M., Xia, F., Chi, E., Le, Q. V., Zhou, D., et al. (2022).
+Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels. Advancesinneuralinformation
+processingsystems,35:24824–24837.
+[35] Wolf, T., Debut, L., Sanh, V., Chaumond, J., Delangue, C., Moi, A., Cistac, P., Rault, T., Louf, R.,
+Funtowicz,M.,etal.(2019). Huggingface’stransformers:State-of-the-artnaturallanguageprocessing. arXiv
+preprintarXiv:1910.03771.
+[36] Yao,S.,Chen,H.,Yang,J.,andNarasimhan,K.(2022). Webshop: Towardsscalablereal-worldweb
+interactionwithgroundedlanguageagents. AdvancesinNeuralInformationProcessingSystems,35:20744–
+20757.
+[37] Yao,S.,Zhao,J.,Yu,D.,Du,N.,Shafran,I.,Narasimhan,K.,andCao,Y.(2023). React: Synergizing
+reasoningandactinginlanguagemodels. InInternationalConferenceonLearningRepresentations.
+[38] Zhang,T.,Ge,J.,Luo,H.,Chuang,Y.-S.,Gao,M.,Gong,Y.,Wu,X.,Kim,Y.,Meng,H.,andGlass,
+J.(2023). Naturallanguageembeddedprogramsforhybridlanguagesymbolicreasoning. arXivpreprint
+arXiv:2309.10814.
+[39] Zheng,W.,Sharan,S.,Jaiswal,A.K.,Wang,K.,Xi,Y.,Xu,D.,andWang,Z.(2023). Outline,thendetails:
+Syntacticallyguidedcoarse-to-finecodegeneration.InInternationalConferenceonMachineLearning,pages
+42403–42419.PMLR.
+[40] Zhou,A.,Yan,K.,Shlapentokh-Rothman,M.,Wang,H.,andWang,Y.-X.(2023). Languageagenttree
+searchunifiesreasoningactingandplanninginlanguagemodels. arXivpreprintarXiv:2310.04406.
+11A Illustrationofintermediateworkusedtoproducetokenswith THREAD
+Figure3illustrateshow THREAD enablesthemodeltodynamicallyadapttheamountofworkor
+computationalstepsusedtoproducedifferentpartsofitstokensequence. Theillustrationisbasedon
+theThread0fromFigure1. The“supplementalwork”foratokenreflectstheamountofadditional
+tokens, generated by spawned threads, used to produce each token within Thread 0. The work
+associatedwitheachpartofthetokensequenceisrepresentedbyathreadtreeorganizedbasedon
+connectionsbetweenparentandchildthreads. Thesetreesreflecthowthreadsinteracttoformoutput
+tokensandthecomputationalworkassociatedwitheachcomponentoftheoverallmodelgeneration.
+THREAD enables the model to adapt, as needed, the amount of work (e.g., thinking,
+retrieving information, etc.) used to produce different parts of its token sequence
+‘Supplemental
+2
+work’ used 2
+to produce 2
+each token 2
+of Thread 0
+Thread 0
+Thread 1 Thread 2 Thread 3 Thread 4
+context ├─ Thread 1.1 ├─ Thread 2.1 └─ Thread 3.1 ├─ Thread 4.1
+└─ Thread 1.2 │ └─ Thread 2.1.1 └─ Thread 3.1.1 │ └─ Thread 4.1.1
+└─ Thread 2.2 └─ Thread 4.2
+└─ Thread 2.2.1
+Figure3: THREADallowsmodeltoadaptamountofsupplementalworkusedtoproducetokens.
+B Implementing THREAD forLLMtaskcompletionandquestionanswering
+We release all code and data at https://github.com/philipmit/thread. As described in
+section 3,weimplementTHREADwithjoinsynchronizationfortheproblemsevaluatedinthispaper.
+Weimplementaspawningmechanismusingaspecialstoptoken,ω . Athreadendswhenit
+listen
+generatestheendtoken,ω . Weuse=>asω andENDasω .
+end listen end
+WeimplementTHREADineachsettingusingafixedfew-shotpromptshowingexamplesofsuccessful
+spawningandproblemsolvingatdifferentthreaddepths. Allthreadsareprovidedthesamefew-shot
+prompt for every step of the problem completion. This prompt, q, is prepended to the context,
+c=q+c,foreachthread,formingthefullcontextfromwhichthethreadgenerates.
+AsshowninAlgorithm2below,threadscangetfeedbackfromtheenvironmentthesamewaythey
+getfeedbackfromachildthread. Theygeneratetokensthatrepresenttheactionandthenproduce
+thetokenω tolistenforfeedbackfromtheenvironment. AsshowninAlgorithm2,theaction,
+listen
+a,isexecutedintheenvironment,E,andtheoutput,o = E(a),isappendedtothethread’stoken
+sequencebeforeitcontinuesgeneration. Thefunctionξparsestheactionfromthetokensequence.
+AswithpriormethodssuchasReAct[37],actionsarespecifiedfollowingthe‘>’token.
+Algorithm2THREADwithjoinsynchronization
+fortasksinvolvingactionsinenvironment
+functionTHREAD(c,Y)
+whileTruedo
+Y =Y +G(c+Y)
+ifY performsanactionthen
+a=ξ(Y)
+o=E(a)
+Y =Y +o
+elseifY spawnsachildthreadthen
+Y =Y + ψ(THREAD(ϕ(Y),[]))
+elseifY endsthethreadthen
+returnY
+12Toensureconsistencyacrossbenchmarksandwithpriorwork,weuseMeta-Llama-3-8BforLlama-
+3-8b, Llama-2-7b-hf for Llama-2-7b, and CodeLlama-7b-hf for CodeLlama-7b available on
+Huggingface [35] and use gpt-4-0613 for GPT-4 and gpt-3.5-turbo-instruct for GPT-3.5
+fromtheOpenAIAPI,withthetemperaturesetto0forallexperiments.
+C AdditionalexperimentswithGPT-3.5
+Table8showsthemeanandstandarderroroftheperformanceofTHREADwithGPT-3.5across5
+runsoneachbenchmark. Overall,theresultsareconsistentacrossmultipleruns.
+Table8: MeanandstandarderrorofTHREADperformancewithGPT-3.5.
+Benchmark Mean(Std. Err.)
+DataCommonsQA 76.7(.17)
+MIMIC-IIIICUQA 71.4(.36)
+ALFWorld 95.7(.28)
+TextCraft 93.7(.37)
+WebShop 48.6(.40)
+D Ablationswithparent-childorganizationandexchangeofinformation
+FortheimplementationofTHREADforthesettingsevaluatedinthispaper(describedinsection 3),
+toimprovetheabilityoftheparentandchildthreadstoefficientlyorganize,update,andexchange
+sharedinformation,weallowthemodeltodefinevariablesrepresentingpiecesofinformationthat
+areimportanttothegiventask. Figure4showstheresultswithandwithoutusingthesevariablesfor
+GPT-3.5(left)andLlama-3-8b(right). Overall,weseethattheperformanceincreasesslightlywith
+GPT-3.5andmoresignificantlywithLlama-3-8bintheimplementationthatallowsthemodeltocreate
+variables. Nonetheless,theperformanceofbothimplementationsshowasignificantimprovement
+overpriormethodswiththesamemodels.
+without variables
+with variables
+DC QA MIMIC-III QA ALFWorld TextCraft Webshop DC QA MIMIC-III QA ALFWorld TextCraft Webshop
+Figure4: PerformanceofTHREADforimplementationswith(darkblue)andwithout(gray)allowing
+modeltocreatevariablesforGPT-3.5(left)andLlama-3-8b(right).
+E DataCommonsQAandMIMIC-IIIICUQABenchmarks
+WebuilttheDataCommonsQAbenchmarkutilizingdataprovidedbyGoogleDataCommons[9]
+withafocusonU.S.data. DataCommonscontainspubliclyavailabledata,aggregatedfromsources
+suchastheCenterforDiseaseControlandPreventionandtheWorldHealthOrganization.
+Generationofthebenchmarkstartedwiththeproductionofquestionswhichfitthefollowingcriteria:
+1)answerablebyinformationprovidedbyGoogleDataCommons,2)broadenoughtoencompass
+informationsampledbetweendifferentlocations(eg. twocounties),3)lackinginsubjectivityforthe
+creationofaverifiableanswer. Thebenchmarkconsistsofquestiontemplates,whichgeneratethe
+questionsofthebenchmark,andground-truthprograms,whichgeneratetheanswerstothequestions
+ofthebenchmark. Thisformatallowsforthecreationofalargequantityofdiversequestions. Each
+questiontemplateconsistsofasentencecontainingplaceholderssuchas{variable_text}which,
+13
+)%(
+ycaruccA
+ro
+etaR
+sseccuS
+)%(
+ycaruccA
+ro
+etaR
+sseccuSuponrandomsamplingofavariable,arealteredaccordingly,facilitatingtheautomatedproduction
+of a variety of questions based on one question template. An example of a question template is
+as follows: ’Was {variable_text} in {entity1} increasing or decreasing from {time1} to
+{time2}?’. Timeseriesdatawassampledatthecity,state,county,andcountrylevelfortheUnited
+States. DataretrievalfromGoogleDataCommonswasconductedthroughtheRESTAPIprovided
+bythewebsite.
+A“ground-truthprogram”wascreatedforeachquestiontemplatetogenerateaverifiablycorrect
+answerforeachquestionwithinthebenchmark. Theseprogramsvariedinlengthfrom100-200lines
+ofcodeandanalyzeddataacquiredfromtheGoogleDataCommonsAPIinaccordancewiththe
+constraintstailoredbythequestionitwasanswering. Forexample,ifaquestiontemplateincluded
+a constraint about the years of data to be sampled, the ground-truth program was constructed to
+generateayearrangefortheanswer. Codewithintheprogramwouldsubsequentlybecreatedto
+filterandanalyzethedataacquiredfromGoogleDataCommonsaccordinglybyapplyingwhichever
+mathematicalconceptwasrequiredfortheanswer(eg. correlation,linearregression,median,mean,
+etc.). Consequently, ground-truth programs formed the backbone of the benchmark through the
+creationofanswerstothediversequestionswhichcomprisedthequestiontemplateset. Figure5
+showsanexamplewiththequestion“From2015to2021,wastherateofasthmaincreasingfasterin
+BostonorLA?”.
+TheMIMIC-IIIICUQAwascreatedusingthesameapproachasdescribedabove.However,questions
+wereinsteadbasedonclinicaltime-seriesdataprovidedbyMIMIC-III[14]. Weoutlineallsteps,
+alongwiththecode,toreproducethebenchmarksathttps://github.com/philipmit/thread.
+WereleasethefulldatasetforDataCommonsQA.DuetorestrictionswithMIMIC-IIIdataaccess,we
+cannotdirectlyreleasethedatasetforMIMIC-IIIICUQA.However,upongainingaccesstoMIMIC-
+III following the instructions outlined at https://physionet.org/content/mimiciii/1.4/,
+youcanreproducethefulldatasetusingthecodethatwerelease.
+From 2015 to 2021, was the rate of asthma
+increasing faster in Boston or LA?
+A table with the asthma rate from 2015 to
+2019 in Boston and LA is shown below:
+=>{table_dir}<=
+Year Asthma rate Boston Asthma rate LA
+2015 10.9 8.4
+2016 11.3 8.5
+2017 10.9 9.0
+2018 11.1 8.8
+2020 11.4 9.2
+2021 11.3 9.6
+Based on the data in {table_dir}, the slope
+of the asthma rate in Boston is =>0.06<=
+and in LA is =>0.18<=.
+Therefore, we see that the rate of asthma
+increased faster in LA than Boston.
+A figure representing the data in
+{table_dir} is shown below:
+=>
+<=
+Figure5: QuestionandexampleresponsewiththeDataCommonsQAbenchmark.
+14F Prompts
+Below,weprovideexamplesofthepromptusedforeachbenchmark. Thegiventaskorquestionis
+highlightedinyellow. Thetextcorrespondingtothespawningofchildthreadsishighlightedinblue,
+pink,orange,andgreen.
+F.1 DataCommonsQA
+Question:From2018to2021wasthepercentageofpeoplewithdiabetesincreasingfasterinWillowsorVilla
+Ridge?
+Hereisatableshowingthepercentageofpeoplewithdiabetesduring2018to2021forWillowsandVillaRidge:
+=>{table_dir}<=
+Basedonthedatain{table_dir}from2018to2021theslopeofthepercentageofpeoplewithdiabetesin
+Willowswas=>0.3357<=andinVillaRidgewas=>0.1642<=
+Therefore,thepercentageofpeoplewithdiabeteswasincreasingfasterinWillows.
+FinalAnswer:Willows
+#END#
+Hereisatableshowingthepercentageofpeoplewithdiabetesduring2018to2021forWillowsandVillaRidge:
+=>
+location1=‘Willows’
+location2=‘VillaRidge’
+timeframe=‘2018to2021’
+variable=‘percentageofpeoplewithdiabetes’
+#The{variable}during{timeframe}forlocationnumber1,{location1},is
+=>{data_location1_in_timeframe}<=
+#The{variable}during{timeframe}forlocationnumber2,{location2},is
+=>{data_location2_in_timeframe}<=
+data_location1_in_timeframe=[data_location1_in_timeframe]ifnotisinstance(data_location1_in_timeframe,
+list)elsedata_location1_in_timeframe
+data_location2_in_timeframe=[data_location2_in_timeframe]ifnotisinstance(data_location2_in_timeframe,
+list)elsedata_location2_in_timeframe
+timeframe_dates=np.unique([x[‘date’]forxindata_location1_in_timeframe]+[x[‘date’]forxin
+data_location2_in_timeframe])
+data_location1_in_timeframe_values=...
+data_location2_in_timeframe_values=...
+...
+...
+table=pd.DataFrame(’date’:timeframe_dates,location1:data_location1_in_timeframe_values,location2:
+data_location2_in_timeframe_values)
+table_dir=DATA_DIR
+table.to_csv(table_dir,sep=‘(cid:127)’,index=False)
+print(‘{table_dir}’)
+#END#
+#Thepercentageofpeoplewithdiabetesduring2018to2021forlocationnumber1,Willows,is=>
+location1=‘Willows’
+timeframe=‘2018to2021’
+time1=‘2018’
+time2=‘2021’
+variable=‘percentageofpeoplewithdiabetes’
+query=f’{variable}in{location1}’
+response=requests.post(URL_EXPLORE+‘?q=’+query,headers=HEADERS,json=JSON)
+response=json.loads(response.text)
+>print(response[‘variables’])=>[‘dc/topic/Diabetes’,‘Percent_Person_WithDiabetes’,
+‘Percent_Person_20OrMoreYears_WithDiabetes’,‘dc/topic/PopulationWithDiabetesByAge’,
+‘Count_Person_20To79Years_Diabetes_AsFractionOf_Count_Person_20To79Years’,
+‘WHO/SDG_SH_DTH_RNCOM_DiabetesMellitus’,‘dc/topic/DiabetesFemalePopulationByAge’,
+‘dc/nh3s4skee5483’]<=
+variable_ID=‘Percent_Person_WithDiabetes’
+>print(response[‘entities’])=>[‘geoId/0685684’]<=
+location_ID=‘geoId/0685684’
+15#Iwillnowusethelocation_IDandvariable_IDtogetthedata.
+data_location1_all=collect_data_commons1(location_ID,variable_ID)
+data_location1_in_timeframe=[xforxindata_location1_allif(int(x[‘date’])>=int(time1)and
+int(x[‘date’])<=int(time2))]
+>print(data_location1_in_timeframe)=>[’date’:‘2018’,‘value’:10.1,’date’:‘2020’,‘value’:10.8,’date’:
+‘2021’,‘value’:11.1]<=
+print(‘Youhaveretrieved{data_location1_in_timeframe}.’)
+#END#
+Basedonthedatain/path/to/data_table.txtfrom2018to2021theslopeofthepercentageofpeoplewith
+diabetesinWillowswas=>
+table_dir=‘/path/to/data_table.txt’
+variable=‘percentageofpeoplewithdiabetes’
+location=‘Willows’
+table=pd.read_csv(table_dir,sep=‘(cid:127)’)
+#>print(table)=>
+#dateWillowsVillaRidge
+#0201810.18.2
+#1202010.88.5
+#2202111.18.7
+#<=
+location_col_name=‘Willows’
+X=table[‘date’]
+y=table[location_col_name]
+slope,intercept,r_value,p_value,std_err=stats.linregress(X,y)
+print(slope)
+#END#
+F.2 MIMIC-IIIICUQA
+Question:WastheaveragesystolicbloodpressureofpatientXfromhour10to20oftheirICUstayhigheror
+lowerthantheaverageamongallpatientswhoexpiredinthehospital?
+HereisatableshowingthesystolicbloodpressureofpatientXfromhour10to20oftheirICUstay:
+=>{table_dir}<=
+Basedonthedatain{table_dir}theaveragesystolicbloodpressureofpatientXwas=>138.18<=
+Theaveragesystolicbloodpressureamongallpatientswhoexpiredinthehospitalwas=>120.81<=
+Therefore,theaveragesystolicbloodpressureofpatientXfromhour10to20washigherthantheaverage
+amongallpatientswhoexpiredinthehospital.
+FinalAnswer:higher
+#END#
+HereisatableshowingthesystolicbloodpressureofpatientXfromhour10to20oftheirICUstay:=>
+patient_ID=‘X’
+timeframe=‘hour10to20’
+variable=‘systolicbloodpressure’
+#The{variable}during{timeframe}forpatient{patient_ID}was=>{data_patient_in_timeframe}<=
+...
+...
+table=pd.DataFrame(’time’:timeframe_dates,variable:data_patient_in_timeframe_values)
+table_dir=DATA_DIR
+table.to_csv(table_dir,sep=‘(cid:127)’,index=False)
+print(‘{table_dir}’)
+#END#
+#Thesystolicbloodpressureduringhour10to20forpatientXwas=>
+patient_ID=‘X’
+timeframe=‘hour10to20’
+time1=‘10’
+time2=‘20’
+variable=‘systolicbloodpressure’
+16...
+...
+print(‘Youhaveretrieved{data_patient_in_timeframe}.’)
+#END#
+Basedonthedatain/path/to/data_table.txttheaveragesystolicbloodpressureofpatientXwas=>
+table_dir=‘/path/to/data_table.txt’
+variable=‘systolicbloodpressure’
+table=pd.read_csv(table_dir,sep=‘(cid:127)’)
+#>print(table)=>
+...
+...
+variable_col_name=‘Systolicbloodpressure’
+y=table[variable_col_name]
+y_mean=np.mean(y)
+print(y_mean)
+#END#
+Theaveragesystolicbloodpressureamongallpatientswhoexpiredinthehospitalwas=>
+variable=‘systolicbloodpressure’
+table=pd.read_csv(PATIENT_DATA_DIR,sep=‘(cid:127)’)
+#>print(table)=>
+...
+...
+filter_col_name=‘MORTALITY_INHOSPITAL’
+variable_col_name=‘Systolicbloodpressure’
+target_patient_group=table[table[variable_col_name]==1]
+y=target_patient_group[variable_col_name]
+y_mean=np.mean(y)
+print(y_mean)
+#END#
+F.3 ALFWorld
+Youareinthemiddleofaroom.Lookingquicklyaroundyou,youseeacabinet4,acabinet3,acabinet2,a
+cabinet1,acoffeemachine1,acountertop1,adiningtable3,adiningtable2,adiningtable1,adrawer1,a
+fridge1,agarbagecan1,amicrowave1,asidetable1,asinkbasin1,astoveburner4,astoveburner3,a
+stoveburner2,astoveburner1,andatoaster1.
+Yourtaskisto:cleansomeappleandputitinsidetable.
+target_location_ID=‘sidetable1’
+cleaning_location_ID=‘sinkbasin1’
+likely_location_IDs_for_obj=[‘fridge1’,‘countertop1’,‘cabinet4’,‘cabinet3’,‘cabinet2’,‘cabinet1’,
+‘diningtable3’,‘diningtable2’,‘diningtable1’,‘sidetable1’,‘sinkbasin1’,‘garbagecan1’,‘drawer1’,
+‘stoveburner4’,‘stoveburner3’,‘stoveburner2’,‘stoveburner1’]
+obj=‘apple’
+Ineedtoperformthefollowingsteps:
+First,Ineedtofindandtakethe{obj}.=>Youhavefoundandtakenthe{obj_ID}.<=
+Next,Ineedtocleanthe{obj_ID}withthe{cleaning_location_ID}.=>Youhavecleanedthe{obj_ID}withthe
+{cleaning_location_ID}.<=
+Finally,Ineedtoputthe{obj_ID}inthe{target_location_ID}.=>Youhaveputthe{obj_ID}inthe
+{target_location_ID}.<=
+#END#
+Ineedtofindandtaketheapple.=>
+obj=‘apple’
+Mysub-taskistofindandtakethe{obj}.Iwillcheckthelocationsin{likely_location_IDs_for_obj}oneby
+one.
+location_i=likely_location_IDs_for_obj[0]
+17Ineedtocheckifthereisthe{obj}inthe{location_i}.=>Thereisno{obj}inthe{location_i}.<=
+location_i=likely_location_IDs_for_obj[1]
+...
+...
+Ineedtocheckifthereisthe{obj}inthe{location_i}.=>Thereisno{obj}inthe{location_i}.<=
+location_i=likely_location_IDs_for_obj[2]
+Ineedtocheckifthereisthe{obj}inthe{location_i}.=>Thereisno{obj}inthe{location_i}.<=
+location_i=likely_location_IDs_for_obj[3]
+Ineedtocheckifthereisthe{obj}inthe{location_i}.=>Thereisno{obj}inthe{location_i}.<=
+location_i=likely_location_IDs_for_obj[4]
+Ineedtocheckifthereisthe{obj}inthe{location_i}.=>Thereisno{obj}inthe{location_i}.<=
+location_i=likely_location_IDs_for_obj[5]
+Ineedtocheckifthereisthe{obj}inthe{location_i}.=>Thereisno{obj}inthe{location_i}.<=
+location_i=likely_location_IDs_for_obj[10]
+Ineedtocheckifthereisthe{obj}inthe{location_i}.=>Youhavefoundandtakenthe{obj_ID}fromthe
+{location_i}.<=
+print(‘Youhavefoundandtakenthe{obj_ID}.’)
+#END#
+Ineedtocheckifthereistheappleinthefridge1.=>
+location_i=‘fridge1’
+obj=‘apple’
+Mysub-taskistocheckifthereisthe{obj}inthe{location_i}.
+>goto{location_i}=>The{location_i}isclosed.<=
+>open{location_i}=>Youopenthe{location_i}.The{location_i}isopen.Init,youseealettuce2,amug2,a
+potato2,andatomato1.<=
+obj_IDs_found=[‘lettuce2’,‘mug2’,‘potato2’,‘tomato1’]
+obj_number=‘Thereisnoobj_number’
+obj_ID=‘Thereisnoobj_ID’
+print(‘Thereisno{obj}inthe{location_i}.’)
+#END#
+Ineedtocleantheapple3withthesinkbasin1.=>
+cleaning_location_ID=‘sinkbasin1’
+obj_ID=‘apple3’
+Mysub-taskistocleanthe{obj_ID}withthe{cleaning_location_ID}.
+>goto{cleaning_location_ID}=>Onthe{cleaning_location_ID},youseenothing.<=
+>clean{obj_ID}with{cleaning_location_ID}=>Youcleanthe{obj_ID}usingthe{cleaning_location_ID}.<=
+print(‘Youhavecleanedthe{obj_ID}withthe{cleaning_location_ID}.’)
+#END#
+Ineedtoputtheapple3inthesidetable1.=>
+target_location_ID=‘sidetable1’
+obj_ID=‘apple3’
+Mysub-taskistoputthe{obj_ID}inthe{target_location_ID}.
+>goto{target_location_ID}=>Onthe{target_location_ID},youseeacup1,alettuce1,apeppershaker3,a
+potato1,andasaltshaker1.<=
+>put{obj_ID}in/on{target_location_ID}=>Youputthe{obj_ID}in/onthe{target_location_ID}.<=
+print(‘Youhaveputthe{obj_ID}inthe{target_location_ID}.’)
+#END#
+F.4 WebShop
+Instruction:iwouldlikea3ouncebottleofbrightcitrusdeodorantforsensitiveskin,andpricelowerthan50.00
+dollars
+obj_attributes=[‘3ouncebottle’,‘Brightcitrus’,‘Forsensitiveskin’]
+max_price=50.00
+obj=‘deodorant’
+Ineedtoperformthefollowingsteps:
+18First,Ineedtoretrievesearchresultsfor{obj}thatarelessthan{max_price}dollarswiththeattributes:
+{obj_attributes}.=>Youhaveretrieved{results_under_max_price}.<=
+Next,Ineedtoidentifytheitemin{results_under_max_price}thatmatchesthemostattributes:{obj_attributes}.
+=>Youhaveidentified{item_to_purchase}.<=
+Finally,Ineedtopurchase{item_to_purchase}with{obj_attributes}.=>Youhavepurchased
+{item_to_purchase}.<=
+#END#
+Ineedtoretrievesearchresultsfordeodorantthatarelessthan50.00dollarswiththeattributes:[‘3ounce
+bottle’,‘Brightcitrus’,‘Forsensitiveskin’].=>
+obj=‘deodorant’
+max_price=50.00
+obj_attribute1=‘3ouncebottle’
+obj_attribute2=‘Brightcitrus’
+obj_attribute3=‘Forsensitiveskin’
+>search[{obj};{obj_attribute1};{obj_attribute2};{obj_attribute3}]=>
+[BacktoSearch]
+Page1(Totalresults:50)
+[Next>]
+[B08KBVJ4XN]
+BarrelandOak-Aluminum-FreeDeodorant,DeodorantforMen,EssentialOil-BasedScent,24-HourOdor
+Protection,Cedar&PatchouliBlend,GentleonSensitiveSkin(MountainSage,1oz,2-Pack)
+$15.95
+[B078GWRC1J]
+BrightCitrusDeodorantbyEarthMama|PregnancyandBreastfeeding,ContainsOrganicCalendula3-Ounce
+$10.99
+[B078GTKVXY]
+GingerFreshDeodorantbyEarthMama|PregnancyandBreastfeeding,ContainsOrganicCalendula3-Ounce
+$60.99
+<=
+Iwillnowfilterforresultsthatarelessthan{max_price}.
+results=[‘B08KBVJ4XN’,‘B078GWRC1J’,‘B078GTKVXY’]
+results_prices=[15.95,10.99,60.99]
+results_under_max_price=[resultforresult,priceinzip(results,results_prices)ifprice<max_price]
+print(’Youhaveretrieved{results_under_max_price}.’)
+#END#
+Ineedtoidentifytheitemin[‘B08KBVJ4XN’,‘B078GWRC1J’]thatmatchesthemostattributes:[‘3ounce
+bottle’,‘Brightcitrus’,‘Forsensitiveskin’].=>
+item1=‘B08KBVJ4XN’
+item2=‘B078GWRC1J’
+obj_attributes=[‘3ouncebottle’,‘Brightcitrus’,‘Forsensitiveskin’]
+Mysub-taskistoidentifytheitemin[{item1},{item2}]thatmatchesthemostattributes:{obj_attributes}.
+Ineedtocountthenumberofattributesin{obj_attributes}that{item1}has.=>Thisitemhas1attribute.<=
+Ineedtocountthenumberofattributesin{obj_attributes}that{item2}has.=>Thisitemhas2attributes.<=
+items=[{item1},{item2}]
+item_attributes=[1,2]
+item_to_purchase=next(iter(items[item_attributes.index(max(item_attributes))]))
+print(’Youhaveidentified{item_to_purchase}.’)
+#END#
+Ineedtocountthenumberofattributesin[‘3ouncebottle’,‘Brightcitrus’,‘Forsensitiveskin’]that
+B08KBVJ4XNhas.=>
+item_to_check=‘B08KBVJ4XN’
+obj_attributes=[‘3ouncebottle’,‘Brightcitrus’,‘Forsensitiveskin’]
+Mysub-taskistocountthenumberofattributesin{obj_attributes}that{item_to_check}has.
+>click[{item_to_check}]=>
+[BacktoSearch]
+[<Prev]
+BarrelandOak-Aluminum-FreeDeodorant,DeodorantforMen,EssentialOil-BasedScent,24-HourOdor
+Protection,Cedar&PatchouliBlend,GentleonSensitiveSkin(MountainSage,1oz,2-Pack)
+19Price:$15.95
+Rating:N.A.
+[Description]
+[Features]
+[Reviews]
+[Attributes]
+[BuyNow]
+<=
+Ineedtocheckif{item_to_check}hastheattribute‘3ouncebottle’.{item_to_check}doesnothavethis
+attributebecauseitisdescribedas‘1oz,2-Pack’.
+Ineedtocheckif{item_to_check}hastheattribute‘Brightcitrus’.{item_to_check}doesnothavethisattribute
+becauseitisdescribedas‘Cedar&PatchouliBlend’.
+Ineedtocheckif{item_to_check}hastheattribute‘Forsensitiveskin’.{item_to_check}hasthisattribute
+becauseitisdescribedas‘GentleonSensitiveSkin’.
+{item_to_check}has1attribute.
+print(’Thisitemhas1attribute.’)
+#END#
+IneedtopurchaseB078GWRC1Jwith[‘3ouncebottle’,‘Brightcitrus’,‘Forsensitiveskin’].=>
+item_to_purchase=‘B078GWRC1J’
+obj_attributes=[‘3ouncebottle’,‘Brightcitrus’,‘Forsensitiveskin’]
+Mysub-taskistopurchase{item_to_purchase}with{obj_attributes}.
+>click[{item_to_purchase}]=>
+[BacktoSearch]
+[<Prev]
+scent[assortedscents][brightcitrus][calminglavender][gingerfresh][simplynon-scents]
+size[travelset(4-pack)][3ounce(packof1)][3-ounce(2-pack)]
+BrightCitrusDeodorantbyEarthMama|PregnancyandBreastfeeding,ContainsOrganicCalendula3-Ounce
+Price:$10.99
+Rating:N.A.
+[Description]
+[Features]
+[Reviews]
+[Attributes]
+[BuyNow]
+<=
+Iwillselectfromthe‘scent’buttons:[assortedscents],[brightcitrus],[calminglavender],[gingerfresh],
+[simplynon-scents].
+>click[brightcitrus]=>Youhaveclickedbrightcitrus.<=
+Iwillselectfromthe‘size’buttons:[travelset(4-pack)],[3ounce(packof1)],[3-ounce(2-pack)].
+>click[3ounce(packof1)]=>Youhaveclicked3ounce(packof1).<=
+Icannowselect[BuyNow].
+>click[BuyNow]=>YouhaveclickedBuyNow.<=
+print(’Youhavepurchased{item_to_purchase}.’)
+#END#
+F.5 TextCraft
+Craftingcommands:
+craft3darkoaksignusing6darkoakplanks,1stick
+craft4darkoakplanksusing1darkoaklog
+craft1stickusing1planks
+craft4stickusing2bamboo
+craft4oakplanksusing1oaklog
+craft1darkoakfenceusing2stick,4darkoakplanks
+craft1warpedstairsusing6warpedplanks
+craft3oaksignusing6oakplanks,1stick
+Goal:craftdarkoaksign.
+craft_command_list=[’craft3darkoaksignusing6darkoakplanks,1stick’,’craft4darkoakplanksusing1
+darkoaklog’,’craft1stickusing1planks’,’craft4stickusing2bamboo’,’craft4oakplanksusing1oaklog’,
+20’craft1darkoakfenceusing2stick,4darkoakplanks’,’craft1warpedstairsusing6warpedplanks’,’craft3
+oaksignusing6oakplanks,1stick’]
+craft_command_item_list=[’darkoaksign’,’darkoakplanks’,’stick’,’stick’,’oakplanks’,’darkoakfence’,
+’warpedstairs’,’oaksign’]
+target_item=‘darkoaksign’
+target_item_count_total=1
+idx=craft_command_item_list.index(min([xforxincraft_command_item_listiftarget_iteminx],key=len))
+target_craft_command=craft_command_list[idx]
+Tocraft{target_item},IneedtoperformthefollowingactionuntilIhaveatleast{target_item_count_total}
+{target_item}:{target_craft_command}=>Youhavecompletedtheaction.<=
+#END#
+IneedtoperformthefollowingactionuntilIhaveatleast1darkoaksign:craft3darkoaksignusing6darkoak
+planks,1stick=>
+target_item=‘darkoaksign’
+target_item_count_total=1
+target_craft_command_result_count=3
+precursor1=‘darkoakplanks’
+precursor1_count_command=6
+precursor2=‘stick’
+precursor2_count_command=1
+SinceIneedatleast1{target_item}andeachactionproduces3{target_item},ThenumberoftimesIneedto
+performtheactionisceilingof1/3,whichis1.
+target_craft_command_reps=1
+precursor1_count_total=precursor1_count_command*target_craft_command_reps
+precursor1_count_total=precursor2_count_command*target_craft_command_reps
+Next,Ineedtogetorcraft{precursor1}.
+Tostart,IfirstneedtocheckifIcanget{precursor1_count_total}{precursor1}.=>Youcannotgetthe
+material.<=
+SinceIcannotget{precursor1},Ineedtocraftit.
+idx=craft_command_item_list.index(min([xforxincraft_command_item_listifprecursor1inx],key=len))
+precursor1=craft_command_item_list[idx]
+precursor1_craft_command=craft_command_list[idx]
+Tocraft{precursor1},IneedtoperformthefollowingactionuntilIhaveatleast{precursor1_count_total}
+{precursor1}:{precursor1_craft_command}=>Youhavecompletedtheaction.<=
+Next,Ineedtogetorcraft{precursor2}.
+Tostart,IfirstneedtocheckifIcanget{precursor2_count_total}{precursor2}.=>Youcannotgetthe
+material.<=
+SinceIcannotget{precursor2},Ineedtocraftit.
+idx=craft_command_item_list.index(min([xforxincraft_command_item_listifprecursor2inx],key=len))
+precursor2=craft_command_item_list[idx]
+precursor2_craft_command=craft_command_list[idx]
+Tocraft{precursor2},IneedtoperformthefollowingactionuntilIhaveatleast{precursor2_count_total}
+{precursor2}:{precursor2_craft_command}=>Youhavecompletedtheaction.<=
+Finally,Iwillperformtheaction1time.
+>craft{target_craft_command_result_count}{target_item}using{precursor1_count_command}{precursor1},
+{precursor2_count_command}{precursor2}=>Crafted3minecraft:{target_item}.<=
+print(’Youhavecompletedtheaction.’)
+#END#
+IfirstneedtocheckifIcanget6darkoakplanks=>
+get_item=‘darkoakplanks’
+get_item_count_total=6
+>get{get_item_count_total}{get_item}=>Couldnotfind{get_item}.<=
+Icannotgetthe{get_item}.
+print(’Youcannotgetthematerial.’)
+#END#
+21
