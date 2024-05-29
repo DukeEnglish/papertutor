@@ -1,0 +1,902 @@
+Why are Visually-Grounded Language Models
+Bad at Image Classification?
+YuhuiZhang1† AlyssaUnell1 XiaohanWang1 DhrubaGhosh2 YuchangSu3
+LudwigSchmidt1,2† SerenaYeung-Levy1†
+1StanfordUniversity 2UniversityofWashington 3TsinghuaUniversity
+†{yuhuiz,ludwigsc,syyeung}@stanford.edu
+Abstract
+Imageclassificationisoneofthemostfundamentalcapabilitiesofmachinevision
+intelligence. Inthiswork,werevisittheimageclassificationtaskusingvisually-
+grounded language models (VLMs) such as GPT-4V and LLaVA. We find that
+existingproprietaryandpublicVLMs,despiteoftenusingCLIPasavisionencoder
+andhavingmanymoreparameters,significantlyunderperformCLIPonstandard
+image classification benchmarks like ImageNet. To understand the reason, we
+exploreseveralhypothesesconcerningtheinferencealgorithms,trainingobjectives,
+anddataprocessinginVLMs. Ouranalysisrevealsthattheprimarycauseisdata-
+related: criticalinformationforimageclassificationisencodedintheVLM’slatent
+spacebutcanonlybeeffectivelydecodedwithenoughtrainingdata. Specifically,
+thereisastrongcorrelationbetweenthefrequencyofclassexposureduringVLM
+trainingandinstruction-tuningandtheVLM’sperformanceinthoseclasses;when
+trained with sufficient data, VLMs can match the accuracy of state-of-the-art
+classificationmodels. Basedonthesefindings,weenhanceaVLMbyintegrating
+classification-focuseddatasetsintoitstraining,anddemonstratethattheenhanced
+classificationperformanceoftheVLMtransferstoitsgeneralcapabilities,resulting
+inanimprovementof11.8%onthenewlycollectedImageWikiQAdataset.
+1 Introduction
+Theabilitytorecognizeobjectswithinimagesisafundamentalcapabilityofmachinevision.Overthe
+past15years,thefieldhasexperiencedsignificantbreakthroughsduetodeeplearningandlarge-scale
+datasets[10,44]. Forinstance,ontherenownedImageNetdataset,designedtoclassifyimagesinto
+1,000 categories, the error rate has dramatically decreased from 47.1% in 2009 to 9.1% in 2024,
+representinga5-foldreduction[27,11]. Consequently,theseclassificationmodelshavesuperseded
+mosthumanlabelers.
+Nowadays, the community has focused on more sophisticated and nuanced capabilities in the
+questforvisualintelligence. Visually-groundedlanguagemodels(VLMs),whichintegratevisual
+signals from vision encoders with large language models, have recently emerged as a promising
+paradigm[2,33,29]. VLMslikeGPT-4V[33],Gemini-1.5[40],orClaude-3[3]havedemonstrated
+advanced visual understanding abilities, such as answering math questions from table images or
+generatingHTMLcodefromdesignsketches.
+Inthiswork,werevisitthefundamentaltaskofimageclassificationusingVLMs. Surprisingly,we
+findthatvariouspublicandproprietaryVLMsstrugglewithimageclassificationinbothopen-world
+settings,wheretheclasslistisunknown,andclosed-worldsettings,whereclassnamesareprovided
+inthecontext(§2). Despitehavingmanymoreparameters,thereisasignificantgapbetweenthe
+Projectpage:https://yuhui-zh15.github.io/VLMClassifier-Website/.
+Preprint.Underreview.
+4202
+yaM
+82
+]VC.sc[
+1v51481.5042:viXraVLMs are bad image classifiers Why are VLMs bad? How to improve VLMs?
+⑤
+guinea pig
+What is in the image? ③ What is the native
+Answer: guinea pig ④ region of this object?
+CLIP LM
+VLM A. South America B. Africa
+The image shows a small rabbit. C. Asia D. Australia
+80 What is in the image? ① LLaVA trained on original data:
+Choose one from…②
+Proprietary VLMs ⑥ The image shows a small rabbit.
+60 The native region could vary
+① Prompt Variation? depending on the species.
+Public VLMs Inference?② Label Space?
+40 LLaVA trained on original+classification:
+③ Inference Strategy?
+The animal is a guinea pig, which
+20 Training? ④ Information Lost? is native to South America.
+⑤ Training Objective? Therefore, the answer is A.
+0
+BLIPLLaVAGeminiGPTClaudeCLIP Data? ⑥ Not Enough Data? Classification is foundational!
+Figure1: Overview. (Left)Differentvisually-groundedlanguagemodels(VLMs)underperform
+CLIPinclassificationbyalargemargin,thoughtheyoftenuseCLIPasavisionencoder. (Middle)
+WeinvestigateseveralhypothesesaboutwhyVLMsarebadclassifiersandfindthatthemainreason
+isdata. CriticalinformationforimageclassificationisencodedintheVLM’slatentspacebutcan
+onlybedecodedwithenoughdataduringVLMtraining. (Right)Basedonouranalysis,weimprove
+aVLMbyintegratingclassificationdataintoitstraining,andfindthattheimprovedclassification
+capabilitiesserveasfoundationsformoreadvancedcapabilitiessuchasvisualquestionanswering.
+performanceofVLMsandtheircommonlyusedvisionencoderCLIP[34]. Ourevaluationprotocol
+involvesfeedingeachimageandalistofclassnames(intheclosed-worldsetting)totheVLMas
+contextandaskingwhatisintheimage;successisdefinedbywhetherthegeneratedoutputcontains
+theground-truthclassname.
+TounderstandwhyVLMsunderperforminclassificationsettings,weinvestigateseveralhypotheses
+regarding VLMs’ inference (such as prompt variations, label set size, inference strategy; §3.1),
+training (such as information lost, training objective; §3.2), and data (such as data-performance
+correlation;§3.3). Ourextensiveanalysessuggestthattheprimaryreasonfortheobservedgapisdata.
+WefindthattheinformationnecessaryforclassificationisencodedintheVLM’slatentspacebutcan
+onlybedecodedwithpropertrainingdata. Specifically,thereisastrongcorrelationbetweenclass
+presenceduringVLMtrainingandperformanceinthoseclasses. Furthermore,trainingVLMson
+classificationdatasetsachievesthesameperformancelevelasstate-of-the-artclassificationmodels.
+Motivated by our analysis, we propose a simple method to enhance VLMs’ general capabilities
+byintegratingtraditionalclassification-focuseddatasetsintoVLMtraining(§4). Webelievethat
+classificationisthefoundationformorecomplex,advancedvisualcapabilities;forexample,recog-
+nizinganobjectisaprerequisiteforansweringcomplexquestionsaboutit. Toverifythis,wecreated
+ImageWikiQA,whichcontainscomplexreal-worldquestionsaboutImageNetobjects. OnImageWik-
+iQA,wefindthatVLMsfine-tunedontheImageNetclassificationdatasetachievesubstantiallyhigher
+accuracyinrecognizingtheseobjectsandprovidemoreaccurateanswerstothesenon-classification
+questions,outperformingpre-trainedVLMsby11.8%. Thissuggeststhatclassicalclassificationdata
+canbebeneficiallyreusedintheVLMtrainingprocesstoenhanceVLMperformance.
+2 VLMsareBadatImageClassification
+Webeginbyevaluatingstate-of-the-artvisually-groundedlanguagemodels(VLMs)usingstandard
+imageclassificationbenchmarks. OurfindingsrevealthattheseVLMssignificantlyunderperform
+comparedtostate-of-the-artclassificationmodels,suchasCLIP.
+2.1 Models
+VLMs. We selected ten widely-used state-of-the-art VLMs, covering different archi-
+tectures, training methods, and data. These VLMs include three proprietary ones,
+GPT-4-Turbo (shortened as GPT4, same below) [33], Gemini-Pro-Vision (GeminiPro) [40],
+and Claude-3-Opus (Claude3) [3], and seven public ones, LLaVA1.5-Vicuna7B/13B
+2Model Open-WorldSetting Closed-WorldSetting
+PublicVLM
+BLIP2-2.7B[25] 25.3 27.0 0.0 46.9 N/A 14.2 2.7 22.3
+IBLIP-7B[9] 14.6 1.9 0.0 36.5 N/A 26.8 N/A 58.4
+IBLIP-13B[9] 14.7 2.4 0.0 36.4 N/A 20.0 N/A 59.5
+LLaVA1.5-7B[29] 22.8 5.9 0.0 47.1 N/A 10.2 0.0 62.1
+LLaVANeXT-V7B[29] 29.4 12.8 0.0 52.5 N/A 8.5 0.0 66.6
+LLaVA1.5-13B[29] 24.3 5.3 0.0 49.9 N/A 7.2 0.1 70.9
+LLaVANeXT-M7B[29] 32.3 17.7 0.0 54.2 N/A 16.1 3.6 77.3
+ProprietaryVLM
+Claude3[3] 53.6 51.2 0.3 68.6 51.1 58.3 45.1 90.9
+GeminiPro[40] 39.2 10.5 0.1 60.1 56.0 62.0 66.6 91.6
+GPT4[33] 48.5 51.0 0.1 61.0 60.6 79.9 58.2 94.2
+CLIP
+CLIP-L[34] N/A N/A N/A N/A 74.8 76.0 77.5 95.8
+EVA-G[39] N/A N/A N/A N/A 79.2 81.0 90.2 97.9
+Table 1: Evaluations of VLMs and CLIPs on standard image classification benchmarks.
+VLMsexhibitpoorperformanceinimageclassification,significantlylaggingbehindCLIPmodels.
+=ImageNet[10], =Flowers102[32], =StanfordCars[19], =Caltech101[12].
+(LLaVA1.5-7/13B) [29], LLaVANeXT-Mistral7B/Vicuna7B (LLaVANeXT-M7B/V7B) [28],
+BLIP2-OPT2.7B (BLIP2-2.7B) [25], and InstructBLIP-Vicuna7B/13B (IBLIP-7/13B) [9]).
+DetailsofthesemodelsareprovidedinAppendix§A.1.
+CLIPs. Forcomparison,weusedtwostate-of-the-artimageclassifiers,CLIP-ViT-L/14-336px
+(shortenedasCLIP-L,samebelow)[34]andEVA-ViT-G/14(EVA-G)[39]. Notably,CLIP-Land
+EVA-GareutilizedbytheLLaVAseries[29]andtheBLIPseriesasvisionencoders[25],respectively.
+Therefore,theVLMsshouldtheoreticallyhavethesameclassificationcapacityasthesevisionmodels.
+DetailsarelistedinAppendix§A.1.
+2.2 Data
+We evaluated the aforementioned models on four widely-used image classification benchmarks:
+ImageNet(shortenedas ,samebelow)[10],Flowers102( )[32],StanfordCars( )[19],and
+Caltech101( )[12],whichcontain50,000,6,149,8,041,and4,331testimagesfrom1,000,102,
+196,and101classes,respectively. ImageNetandCaltechcovermorecoarse-grainedobjects,while
+FlowersandCarscovermorefine-grainedobjects. FurtherdetailsareprovidedinAppendix§A.2.
+2.3 EvaluationProtocol
+VLMs. Weperformedimageclassificationintwosettings: anopen-worldsettingwherethelabel
+setisnotprovidedandaclosed-worldsettingwhereclassesareconcatenatedintheprompt. We
+feedtheimageandtheprompttotheVLMandlettheVLMcompletetherestofthetokens. One
+closed-worldexampleis: “<image>Whattypeofobjectisinthisphoto? Chooseonefrom<class
+nameA>,<classnameB>,...” Wedefinesuccessonasingleexampleaswhethertheground-truth
+labelisincludedintheVLMgeneration. Wereportthesuccessrateofalltestexamples.
+CLIPs. CLIPcanonlybeusedinaclosed-worldsettingwherethelabelsetisknown. Following
+Radfordetal.[34],weusedtheprompt“aphotoofa<class>”togeneratethetextfeature. Foreach
+image, we selected the class with the highest cosine similarity to the image feature. We did not
+includepromptensemblingtofairlycomparewithVLM.Wereporttheaccuracyofallexamples.
+2.4 Results
+Table1reportstheperformanceofdifferentVLMsandCLIPmodelsontheseclassificationdatasets.
+3WefindthatVLMsexhibitpoorperformanceinimageclassification,significantlylaggingbehind
+CLIPmodels. Forinstance,ontheImageNetdataset,thebestproprietaryVLM,GPT4,onlyachieves
+anaccuracyof60.6%intheclosed-worldsetting,whereasthebestCLIP,EVA-G,attainsanaccuracy
+of79.2%. Intheopen-worldsetting,thebestpublicVLM,LLaVANeXT-M7B,achievesjust32.3%
+accuracy. Theperformancedisparityisevenmorepronouncedinfine-grainedclassificationdatasets
+likeFlowers102andStanfordCars. Notably,allLLaVAmodelsuseCLIP-Lasthevisionencoder,
+andalthoughthetotalparametercountofthesemodelsisatleast20timesgreaterthanthatofthe
+visionencoder,theysignificantlyunderperformcomparedtoit.
+Moreover,wefindthatclosed-worldsettingoftenoutperformsopen-worldsetting.Thisisexpected
+astheprovidedlabelsetnarrowsthepredictionspace. However,sinceclosed-worldsettingsrequire
+includingallclassnamesinthecontext,theycanresultinanextremelylongcontextthatleadsto
+highcostsorevenexceedstheVLM’scontextlimit. Forexample,mostpublicVLMsonlysupport
+4Kcontextlength,whichcannotfeed1KImageNetclasses. WealsofindthatlargerandbetterLMs
+slightlyimproveVLMperformance. Forinstance, LLaVA1.5-13BoutperformsLLaVA1.5-7B,
+andLLaVANeXT-M7BoutperformsLLaVANeXT-V7B.
+3 WhyareVLMsBadImageClassifiers?
+Given that visually-grounded language models (VLMs) underperform CLIPs at classification by
+alargemargin, asreportedin§2, weseektounderstandthereasonsbehindthat. Weinvestigate
+severalhypothesesconcerningmajordifferencesbetweenVLMsandCLIPs,whichcanbegenerally
+categorizedintoinference(§3.1),training(§3.2),anddata(§3.3):
+1. Westartwithinference-relatedquestions. Forexample,doespromptvariation,suchaschainof
+thought, affect final performance? Does reducing the label set size in context narrow the gap
+betweenVLMsandCLIPs? Doesperformingprobabilisticinferencetoforcethegenerationinto
+thelabelsethelp? WefindnoneofthesefactorscanfullyclosethegapbetweenVLMsandCLIPs.
+2. Therefore,weswitchtotraining-relatedquestions. Forexample,isthevisualinformationfrom
+thevisionencoderstillpreservedintheVLM’slatentspace? Isthetextgenerationobjectiveas
+effectiveascross-entropylossforlearningclassification? Surprisingly,theresultsshowthatthe
+informationispreserved,andthetextgenerationobjectiveisadequateforlearningclassification.
+3. Finally,weinvestigatedata-relatedquestions. Forexample,doestheVLMtrainingdatainclude
+enoughclassificationdataandcoverenoughclasses? Wefindastrongcorrelationbetweenclass
+exposureintrainingandmodelperformance. Moreover, VLMscanachievethesamelevelof
+performance as CLIPs when trained with enough data. These results suggest that data is the
+primarycauseofthepoorclassificationperformanceofVLMs.
+3.1 Inference
+Inthissection,weinvestigatethreequestionsrelatedtoVLM’sinference,includingpromptvariation,
+labelsetsize,andinferencestrategy.
+Promptvariation. Itiswellknownthatlanguagemodels(LMs)aresensitivetoprompts[6,15,48].
+To understand the effect of prompts on classification performance, we tested three semantically
+similarbutdifferentlywordedprompts,comparedfeedingthelabelindatasetorderorrandomorder
+within the context, and leveraged the zero-shot chain-of-thought (CoT) prompting technique by
+adding“let’sthinkstepbystep”attheendoftheprompt[43,18].
+We find that prompt variation has a limited impact on the performance. From Table 2, we
+can see that changing the wording of prompts results in a performance variation within 3% for
+both LLaVA1.5-7B and BLIP2-2.7B on the ImageNet dataset. Different label orderings impact
+LLaVA1.5-7B less than BLIP2-2.7B. Chain-of-thought prompting consistently improves perfor-
+manceforinstruction-tunedmodelLLaVA1.5-7BbutnotforBLIP2-2.7B.
+Labelsetsize. Thelabelsetsizecanbeverylargeinpractice(e.g.,1000forImageNet,196for
+StanfordCars),whichresultsinanextremelylongcontextwhenweconcatenatealltheclassnames.
+SinceLMsoftenstrugglewithlongcontexts[30],weexplorereducingthenumberofclasses. For
+4Method LLaVA1.5-7B BLIP2-2.7B
+PromptVariation
+BasePrompt 22.8 5.9 0.0 47.1 25.3 27.0 0.0 46.9
+w/PromptAlternative1 19.7 3.5 0.0 45.4 27.6 38.8 0.2 47.8
+w/PromptAlternative2 21.6 6.6 0.0 48.1 24.3 30.6 0.1 47.9
+w/Label(FixedOrder) N/A 6.1 0.1 70.5 N/A 28.0 2.1 53.8
+w/Label(RandomOrder) N/A 10.2 0.0 62.1 N/A 14.2 2.7 22.3
+w/Label(Random)+CoT N/A 18.1 0.4 64.5 N/A 8.5 0.0 16.1
+InferenceStrategy
+DirectGeneration 22.8 5.9 0.0 47.1 25.3 27.0 0.0 46.9
+ProbInference(SumTokens) 34.8 14.5 26.7 77.8 21.0 34.8 48.8 36.8
+ProbInference(AvgTokens) 35.3 16.5 18.2 65.6 5.1 19.9 1.2 12.3
+ProbInference(Avg)w/CFG 47.6 26.8 48.8 85.6 38.7 54.1 69.2 70.3
+Table2: AnalysisofVLMsfromtheinferenceperspective. (Top)Weexplorepromptvariation
+suchaswording,labelorder,chain-of-thoughtandfindithaslimitedimpactontheperformance.
+(Bottom)Weleveragetheprobabilisticinferencestrategy,whichimprovestheperformancebutstill
+failstoclosethegapbetweenVLMsandCLIPs.
+Figure2: Analysisofthelabelsetsize. Foreachimage,werandomlysample100,20,5,2candidate
+classesfromalltheclasses. TheperformancegapbetweenVLMsandCLIPsbecomessmallerwhen
+thenumberofclassesisreduced. X-axis: numberofclasses;Y-axis: accuracy(%).
+eachimage,werandomlyselectK =2,5,20,100classes,alwaysincludingtheground-truthlabel,
+andre-evaluatetheVLMandCLIPperformance.
+WefindthattheperformancegapbetweenVLMsandCLIPsnarrowswithreducedlabelsize,
+butthegapalwaysexists. AsshowninFigure2,whenevaluatingLLaVA1.5-7BandCLIP-Lon
+ImageNet,thegapdecreasesfrom46%with100classesto6%with2classes. However,therelative
+gapbecomeslarger,evidencedbya23.9xerrorratewith2classescomparedtoa7.3xerrorratewith
+100classes. TheperformancegapbetweenVLMsandCLIPsalwaysexistsinallthesettings.
+Inference algorithm. The default inference algorithm for classification with VLMs is directly
+generatingtheclassnamegivenaprompt.Asthegenerationisopen-ended,evenwhenprovidedwitha
+listofcandidatechoices,thegenerationmaynotmatchoneofthepre-definedclasses.Tomitigatethis
+problem,weemployprobabilisticinferencetechniquesforVLMs. Specifically,foreachclassname,
+wecomputeprob(classname|image,prompt)andselecttheclassnamewiththehighestprobability
+astheprediction. Sinceclassnamescanconsistofmultipletokens(e.g.,“guineapig”consistsof
+twotokens),weeitheraveragetheprobabilitiesofalltokensorsumupallthetokens[6]. Wealso
+exploreclassifier-freeguidance(CFG)techniquesbyrankingt∗prob(classname|image,prompt)+
+(1−t)∗prob(classname|prompt)withvaryingguidancecoefficientst[35,45].
+Wefindthattheprobabilisticinferencemethodimprovestheperformance,butthegappersists.
+As shown in Table 2, LLaVA1.5-7B achieves 35.3% accuracy on ImageNet using probabilistic
+inferencecomparedto22.7%usingthedirectgenerationmethod. Addingclassifier-freeguidance
+furtherimprovestheperformance,whereLLaVA1.5-7Bperformancebooststo47.6%onImageNet.
+However, it still leaves around a 30% performance gap between VLMs and CLIPs, as its vision
+encoderCLIP-Lachieves74.8%onImageNet. Moreover,theprobabilisticinferenceapproachis
+computationallyexpensiveinpracticebecauseweneedtocomputetheprobabilityofeachclass.
+5Model Trainable
+Model Feature
+Fine-tuning
+Probing
+CLIP-L Linear 85.2 98.6 91.5 97.6
+LLaVA1.5-7B LastTok 76.9 94.5 81.0 96.7
+LLaVA1.5-7B Proj 85.7 97.6 90.4 97.5
+LLaVA1.5-7B AvgTok 77.1 96.2 82.8 97.3
+LLaVA1.5-7B Proj+LM NaN 97.9 90.7 97.8
+BLIP2-2.7B LastTok 80.3 98.8 91.0 98.0
+EVA-G Linear 86.5 99.2 94.3 98.5
+BLIP2-2.7B AvgTok 81.4 98.9 92.6 98.0
+BLIP2-2.7B Proj 88.0 99.0 93.9 98.8
+Table 3: Analysis of VLMs from the training perspective. (Left) We conduct feature probing
+experimentsontheVLM’slastlayerandfindthattheinformationrequiredforclassificationismostly
+preservedintheVLM’slatentspace. (Right)Wefine-tuneVLMsontheclassificationdatasetsusing
+thetextgenerationobjectiveandfindthatthetextgenerationtrainingobjectiveisaseffectiveasthe
+traditionalcross-entropyforlearningclassification,whicheliminatesVLM-CLIPperformancegap.
+3.2 Training
+Sinceinference-basedmodificationsfailtoclosetheperformancegapbetweenVLMsandCLIPs,
+hereweinvestigatetwoquestionsregardingtothetrainingofVLMs. Westudywhetherthevisual
+informationislostintheVLMandwhetherthetextgenerationobjectiveissuitableforlearningthe
+classificationtask.
+Visual information lost in the VLM. VLMs process images using an image encoder, such as
+CLIP,whichhasstrongclassificationcapabilities. Wehypothesizethat,duringthepropagationof
+imagefeaturesoutputfromthevisionencoderinlanguagemodellayers,thenecessaryinformation
+forclassificationislost. Totestthishypothesis,weconductfeatureprobingexperiments. Specifically,
+thefeaturesfromtheVLM’slastlayerhaveashapecorrespondingtothelengthoftheinputs(image
+tokensplustexttokensusingtheopen-worldprompt). Wetaketheaverageofthesetokenfeaturesor
+thelasttokenfeatureandtrainasimplelinearclassifierontopofthesefrozenfeaturerepresentations.
+Thelinearclassifieristrainedonthetrainingsetandevaluatedonthevalidationset. Trainingdetails
+areprovidedinAppendixB.4. Ahigheraccuracyindicatesthatlessinformationislost.
+Surprisingly,wefindthattheinformationnecessaryforclassificationislargelypreservedinthe
+VLM’slatentspace;however,itcannotbeeffectivelydecoded.InTable3,weshowthattheprobing
+accuracyofLLaVA1.5-7BonImageNetis77.1%,whichisclosetothe85.2%probingaccuracyof
+CLIP-L,thevisionencoderusedbyLLaVA1.5-7B.ThesameconclusionholdsforBLIP2-2.7Band
+itsvisionencoderEVA ViT-G/14,demonstratingthatmostinformationispreservedduringtheVLM
+computationalprocess. However,thisinformationcannotbeeffectivelydecoded,as§2showsthat
+thebestaccuracyLLaVA1.5-7BcanachieveonImageNetis47.6%.
+Trainingobjective. SinceinformationisencodedinVLMs,wewonderwhetherwecantrainthem
+todecodetheinformation. VLMscanonlybetrainedtoperformclassificationbyauto-regressively
+generatingtext-formlabels. Wehypothesizethatthisgenerativeobjectivemaybemoredifficultand
+lesseffectiveinlearningclassificationcomparedtothetraditionalcross-entropyloss. Tounderstand
+theeffectivenessofthistrainingobjective,weexplorefine-tuningVLMsonclassificationdatasets.We
+convertclassificationdatasetsintothetextgenerationformatusingthetemplate(e.g.,“<image>What
+typeofobjectisinthisphoto? <classname>”). Wefine-tunetwomodelarchitectures(LLaVA1.5-7B
+andBLIP2-2.7B)acrossdifferentdatasetsandcomparetheiraccuracytothatoffine-tunedCLIP
+models.Additionally,weinvestigatefine-tuningdifferentpartsofthemodels,suchasonlyfine-tuning
+theprojectorbetweenvisionencoderandlanguagemodelsorfine-tuningtheprojectoralongwiththe
+languagemodelsusingLoRA[16]. TrainingdetailsareprovidedinAppendixB.5.
+Wefindthatthetextgenerationtrainingobjectiveisaseffectiveasthetraditionalcross-entropy
+forlearningclassificationtasks, whicheliminatestheperformancegapbetweenVLMsand
+CLIPs. From Table 3, we find that LLaVA1.5-7B achieves 85.7% accuracy on ImageNet, same
+as85.2%accuracywhenfine-tuningitsvisionencoderCLIP-L.Thesamefindingsapplytoallthe
+VLMsonallthedatasets.
+Moreover, we find that fine-tuning only the projector is sufficient and has better numerical
+stability. FromTable3,wecanseethesamelevelofaccuracyachievedbyfine-tuningtheprojector
+and fine-tuning projector and LLM using LoRA on the three datasets. We also find that fine-
+6Figure3:AnalysisofVLMsfromthedataperspective.WestudytherelationbetweentheImageNet
+classfrequencyintheVLMtrainingdataandtheVLM’sclassificationperformanceonthoseclasses.
+Astrongcorrelationisobserved,indicatingthatdatadeterminesVLMclassificationperformance.
+tuning LLM with LoRA often leads to numerical instabilities, such as spikes in loss. While the
+loss sometimes returns to normal, other times it does not. For example, despite trying various
+hyperparametersforImageNet,instabilitypersisted(seeAppendix§B.5). Incontrast,fine-tuning
+only the projector always results in a steadily decreasing loss. Notably, the projector is often
+much smaller (e.g., a 2-layer MLP in LLaVA) compared to LLMs, suggesting the potential for
+parameter-efficientprefixtuningforVLMs[26].
+3.3 Data
+Asobserved,thevisualinformationispreservedintheVLM’slatentspace,andtheVLM’straining
+objectiveissufficientforlearningclassificationtasks. Wehypothesizethatthepoorclassificationper-
+formanceofVLMsisduetotheirtrainingdata. Forexample,theremightbeinsufficientclassification
+dataoralackofdiverseclasses. Toinvestigatethis,weanalyzetheLLaVA1.5-7Btrainingdata[29],
+theonlyfullypubliclyavailableVLMtrainingdataset. Weexaminedtherelationshipbetweenthe
+frequencyofclassoccurrenceandtheVLM’sclassificationperformanceonthoseclasses.
+OurfindingsindicatethatdatadeterminesVLMclassificationperformance. AsshowninFigure3,
+thereisastrongcorrelationbetweenthepresenceofclasslabelsintheVLMtrainingdataandthe
+VLM’sclassificationaccuracyforthoseclasses. TheLLaVA1.5-7Bmodelachieves82.7%zero-shot
+accuracy on ImageNet classes with more than 10,000 occurrences in its training data, but only
+3.0%accuracyonclasseswithfewerthan10occurrences. TheSpearmancorrelationbetweenclass
+frequencyandclassperformanceisveryhigh(0.76onImageNet;seeAppendix§B.6). Incontrast,
+thereisnocorrelationbetweenitsvisionencoderCLIP-L’sperformanceonthoseclasseswiththe
+sameVLMtrainingdata,andafterfine-tuningLLaVA1.5-7BontheImageNetclassificationdata,
+thestrongcorrelationdisappears. Combiningallofourresults,weconcludethatdataplaysacritical
+roleindeterminingtheVLM’sclassificationperformance. InAppendix§D,wefurthershowthatthe
+datatype(e.g.,classificationorcaptioningdataofagivenclass)isunimportant.
+4 ImprovingVLMwithClassificationData
+Based on the analysis presented in §3, in this section, we discuss the enhancement of visually-
+groundedlanguagemodels(VLMs)byintegratingclassification-focuseddataintotheirtraining. We
+demonstratethatthisdatainterventionnotonlybooststheVLM’sclassificationperformancebutalso
+enhancesitsgeneralcapabilities.
+4.1 Motivation
+Classification is fundamental to enabling more advanced capabilities of VLMs, such as visual
+question answering and reasoning. For example, suppose a virtual assistant is helping visually
+impairedindividualspreparemushroomsasfood. Inthatcase,themodelmustcorrectlyidentifythe
+mushroomspeciestoanswerquestionslike“Isthismushroompoisonous?” Thepoorclassification
+performanceofVLMslaysaweakfoundationfortheiradvancedcapabilities.
+From §3, we identify the primary cause of poor classification performance is the lack of data.
+Therefore,weproposeastraightforwardsolution: integratingclassification-focuseddataintothe
+LLaVAtrainingcontainstwostages.Herewecombinethedatafromthetwostages.MoreinAppendixB.6.
+7Model Acc Model Acc
+NaiveBaselines PublicVLM
+Random 25.0 BLIP2-2.7B[25] 21.7
+Max Freq 25.9 IBLIP-7B[9] 36.3
+GPT4 w/ GT Class 100.0 LLaVANeXT-V7B[28] 37.0
+GPT4 w/o Image 0.0 IBLIP-13B[9] 37.5
+Human w/ GT Class+Wiki 96.5 LLaVA1.5-13B[29] 37.8
+LLaVA1.5-7B w/ GT Class 55.9 LLaVA1.5-7B[29] 38.0
+LLaVANeXT-M7B[28] 41.9
+ProprietaryVLM
+GeminiPro[40] 49.1 FinetunedVLM
+Claude3[3] 54.3 LLaVA1.5-7B Finetuned on ImageNet 30.6
+GPT4[33] 61.2 LLaVA1.5-7B Finetuned on ImageNet+LLaVA 49.8
+Table4: EvaluationsofVLMsonImageWikiQA.ImageWikiQAisamultiple-choicequestion-
+answering dataset collected by feeding the Wikipedia pages of ImageNet classes to GPT-4. We
+find that current VLMs perform poorly in answering these questions, suggesting that their poor
+classificationperformanceisafundamentallimitationformoreadvancedcapabilities. Integrating
+classificationdataintoVLMtrainingenhancesboththeirclassificationandoverallcapabilities.
+VLMtrainingprocess. Wehopethatincorporatingclassificationdatanotonlyenhancesclassification
+accuracybutalsoimprovesgeneralcapabilities.
+4.2 ImageNetQA
+To verify our hypothesis, we need a dataset that evaluates both the classification and advanced
+capabilitiesofVLMs. However,currentvisualquestionansweringbenchmarks,suchasVQAv2[14],
+MM-Vet[46],andMMMU[47],primarilyfocusonadvancedcapabilities,suchasreasoningand
+knowledgegrounding,ratherthanclassification. Theobjectsinthesedatasetsarerelativelysimple,
+andquestionscanoftenbeansweredbyidentifyingonlythegeneralcategoryofanimage,suchas
+“mushroom”or“flower”,ratherthanspecifictypesofmushroomsorflowers.Incontrast,classification
+datasetshavenoquestionsrelatedtomoreadvancedcapabilities.
+Tobridgethegapbetweenclassificationandadvancedcapabilities,weintroduceImageWikiQA,an
+object-centric,knowledge-intensivequestionansweringdatasetthatcombinesbothworlds. Each
+questioninImageWikiQAisamultiple-choicequestionwithfouroptionsandonecorrectanswer.
+Althougheachquestiondoesnotdirectlyaskforthecategoryoftheobjectwithintheimage,the
+questioncanonlybeaccuratelyanswerediftheclassoftheobjectiscorrectlyidentified. Example
+questionsfromImageWikiQAcanbefoundinFigure1andAppendix§C.1.
+ImageWikiQAiscreatedbygeneratingquestionsbasedonWikipediapagesofImageNetclasses
+usingGPT4. Specifically,foreachclassinImageNet,weparsedtheWikipediacontentoftheclass
+followingBujwidetal.[7],andthenprovidedthiscontentalongwithaprompttoGPT4togenerate
+five questions per class. We instructed GPT4 to replace the class name with “this object” in the
+questionssothattheground-truthclassnameisnotprovided. WeretainedallquestionsthatGPT4
+couldanswercorrectlywiththeground-truthclassnameandcouldnotguesstheanswerwithoutthe
+classname. ToensurethequestionqualitygeneratedbyGPT4,fourhumanannotatorsattemptedto
+answerthequestionswiththeground-truthclassnameandWikipediapageandachievedanaccuracy
+of96.5%.Afterward,werandomlysampledatmost3ImageNetimagesforeachquestion,rebalanced
+the choice distribution, and composed the final ImageWikiQA dataset. In total, there are 2000
+multiple-choicequestions,eachwithanimage,question,fourcandidatechoices,andareferenceto
+Wikipediasentences,witharandomguessaccuracyof25.0%andmaxfrequencyaccuracyof25.9%.
+4.3 Results
+Table4presentstheperformanceofvariousVLMsontheImageWikiQAdataset.
+Wefindthatcurrentstate-of-the-artVLMsperformpoorlyonansweringthesequestionsgiven
+images. For example, GPT4 achieves 100% accuracy when the ground-truth class name is pro-
+vided, but only achieves 61.2% accuracy with images. Similarly, Claude3 and GeminiPro only
+8achieve54.3%and49.1%accuracy,respectively. Theseresultsindicatethatthepoorclassification
+performanceofVLMsisafundamentallimitationformoreadvancedcapabilities.
+Furthermore,wefindthatintegratingclassificationdataintoVLMtrainingimprovesitsclassifi-
+cationandgeneralcapabilities. Wefine-tunedLLaVA1.5-7BontheImageNet1.28Mclassification
+data and original 665K LLaVA instruction-tuning data (training detail in §C.2), which is able to
+achieve84.4%accuracyonImageNetclassificationcomparedto22.8%fornon-fine-tunedmodels.
+Thisimprovementinclassificationtranslatestoan11.8%accuracyboostonImageWikiQA,demon-
+stratingclassificationisindeedafoundationforVLM’sadvancedcapabilities. However,itisworth
+notingthatfine-tuningsolelyontheclassificationtaskharmsgeneralcapabilities. Whenfine-tuning
+LLaVA1.5-7BonImageNetonly,theiraccuracyonImageWikiQAdropsto30.6%. Therefore,fine-
+tuningshouldbeperformedonacombineddataset. Developingfine-tuningmethodsthatprevent
+suchcatastrophicforgettingisapromisingfutureresearchdirection.
+5 RelatedWork
+Visually-grounded language models. Visually-grounded language models (VLMs) refer to a
+largefamilyofmodelsthatintegratevisualsignalsintolanguagemodelsbymodelingp(y |y ,x),
+t <t
+wherey isatexttokenandxisavisualinputsuchasanimageorvideo. Recently,manypowerful
+i
+VLMshavebeendeveloped,includingproprietaryoneslikeGPT-4V[33],Gemini[40],Claude[3],
+Flamingo [2] and public ones like LLaVA [29, 28], BLIP [25, 9], OpenFlamingo [4], Otter [24],
+Fuyu[1],QwenVL[5]. ThetypicalarchitectureofVLMscomprisesthreecomponents: avisual
+encoder(oftenCLIP[34]),alanguagemodel,andaprojectorthatbridgesthevisualoutputsand
+languagemodelinputs. TheprojectorcanbeassimpleasalinearlayerorMLP(e.g.,LLaVA[29])
+oracomplexarchitecturesuchasTransformerwithcross-modalattention(e.g.,BLIP[25]). VLMs
+areusuallytrainedonimage-textcaptioningdata[37,36]andcarefullydesignedinstruction-tuning
+data[29], withboththevisionencoderandlanguagemodelinitializedfrompre-trainedversions.
+Inthiswork,weevaluatewidelyusedVLMsinclassificationsettingsandanalyzetwoprominent
+architectures,LLaVA[29]andBLIP[25].
+Analysisofvisually-groundedlanguagemodels. WhileVLMshavedemonstratedimpressive
+performance, many questions remain unanswered. Recent works have explored their limitations
+fromvariousperspectives,includingarchitectures[31],trainingrecipes[17,22],data[13,42],vision
+encoders [41], language models [2, 40], input resolution [38], and proposed solutions for these
+limitations. Forinstance,Tongetal.[41]discoveredthatCLIPvisionencoders,employedbymost
+VLMs,oftenfailtodistinguishbetweencertainimagepairsdespitetheirapparentvisualdifferences.
+Theysuggestedutilizingalternativevisionencoders,suchasDINO,toaddressthisproblem. Our
+workalignswiththesestudiesinunderstandingVLMlimitationsandproposingsolutions. Wefind
+that current VLMs struggle with image classification, and we thoroughly investigate the reasons
+behindthis,proposingasimplesolutiontointegrateclassification-focuseddataintoVLMtraining.
+Imageclassification. Imageclassificationisoneofthemostfundamentalcapabilitiesofmachine
+intelligence. Startinginthe1990s,researcherscollecteddatasetslikeMNIST[23]fordigitclassi-
+ficationandCIFAR[20]forobjectclassification,usingvariousmachinelearningalgorithmssuch
+asSVMsandMLPstotackletheproblem. AsignificantmilestonewastheImageNet[10],which
+elevated the scale and quality of datasets to a new level, driving advancements in deep learning.
+Withtheriseofdeepsupervisedandself-supervisedlearning[21,8],performanceonthesedatasets
+soon began to saturate. As a result, classification models have superseded most human labelers,
+leadingresearcherstofocusonmoreadvancedvisualintelligencetaskslikevisualreasoning. Inthis
+work,werevisitthissimpleyetfundamentaltask,discoveringthatcurrentVLMsstrugglewithit.
+Wedemonstratethatclassificationremainsessential,asitformsthefoundationformoreadvanced
+capabilities,andenhancingVLMs’classificationcapabilitiesimprovestheiroverallperformance.
+6 Conclusion
+Inthiswork,weexploredtheuseofvisually-groundedlanguagemodels(VLMs)asimageclassifiers.
+Wefoundthattheirperformanceislimitedacrossvariousdatasets. Wethenanalyzedthereasons
+behindtheselimitationsand,basedonourfindings,trainedaVLMwithenhancedgeneralcapabilities.
+9References
+[1] Adept. Fuyu-8b: Amultimodalarchitectureforaiagents,2023.
+[2] Jean-BaptisteAlayrac, JeffDonahue, PaulineLuc, AntoineMiech, IainBarr, YanaHasson,
+KarelLenc,ArthurMensch,KatherineMillican,MalcolmReynolds,etal. Flamingo: avisual
+languagemodelforfew-shotlearning. InNeurIPS,2022.
+[3] Anthropic. Introducingthenextgenerationofclaude,2024.
+[4] AnasAwadalla,IrenaGao,JoshGardner,JackHessel,YusufHanafy,WanrongZhu,Kalyani
+Marathe, Yonatan Bitton, Samir Gadre, Shiori Sagawa, et al. Openflamingo: An open-
+source framework for training large autoregressive vision-language models. arXiv preprint
+arXiv:2308.01390,2023.
+[5] JinzeBai,ShuaiBai,ShushengYang,ShijieWang,SinanTan,PengWang,JunyangLin,Chang
+Zhou, and Jingren Zhou. Qwen-vl: A frontier large vision-language model with versatile
+abilities. arXivpreprintarXiv:2308.12966,2023.
+[6] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsare
+few-shotlearners. InNeurIPS,2020.
+[7] SebastianBujwidandJosephineSullivan. Large-scalezero-shotimageclassificationfromrich
+anddiversetextualdescriptions. InEACLWorkshop,2021.
+[8] TingChen,SimonKornblith,MohammadNorouzi,andGeoffreyHinton. Asimpleframework
+forcontrastivelearningofvisualrepresentations. InICML,2020.
+[9] Wenliang Dai, Junnan Li, Dongxu Li, Anthony Meng Huat Tiong, Junqi Zhao, Weisheng
+Wang, BoyangLi, PascaleNFung, andStevenHoi. Instructblip: Towardsgeneral-purpose
+vision-languagemodelswithinstructiontuning. InNeurIPS,2023.
+[10] JiaDeng,WeiDong,RichardSocher,Li-JiaLi,KaiLi,andLiFei-Fei. Imagenet: Alarge-scale
+hierarchicalimagedatabase. InCVPR,2009.
+[11] AlexeyDosovitskiy,LucasBeyer,AlexanderKolesnikov,DirkWeissenborn,XiaohuaZhai,
+ThomasUnterthiner,MostafaDehghani,MatthiasMinderer,GeorgHeigold,SylvainGelly,etal.
+Animageisworth16x16words: Transformersforimagerecognitionatscale. InICLR,2021.
+[12] Li Fei-Fei, Rob Fergus, and Pietro Perona. Learning generative visual models from few
+trainingexamples: Anincrementalbayesianapproachtestedon101objectcategories. InCVPR
+Workshop,2004.
+[13] SamirYitzhakGadre,GabrielIlharco,AlexFang,JonathanHayase,GeorgiosSmyrnis,Thao
+Nguyen,RyanMarten,MitchellWortsman,DhrubaGhosh,JieyuZhang,etal. Datacomp: In
+searchofthenextgenerationofmultimodaldatasets. InNeurIPS,2023.
+[14] YashGoyal,TejasKhot,DouglasSummers-Stay,DhruvBatra,andDeviParikh. Makingthe
+vinvqamatter: Elevatingtheroleofimageunderstandinginvisualquestionanswering. In
+CVPR,2017.
+[15] DanHendrycks,CollinBurns,StevenBasart,AndyZou,MantasMazeika,DawnSong,and
+JacobSteinhardt. Measuringmassivemultitasklanguageunderstanding. InICLR,2020.
+[16] EdwardJHu,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,Weizhu
+Chen,etal. Lora: Low-rankadaptationoflargelanguagemodels. InICLR,2021.
+[17] SiddharthKaramcheti,SurajNair,AshwinBalakrishna,PercyLiang,ThomasKollar,andDorsa
+Sadigh. Prismaticvlms:Investigatingthedesignspaceofvisually-conditionedlanguagemodels.
+arXivpreprintarXiv:2402.07865,2024.
+[18] TakeshiKojima,ShixiangShaneGu,MachelReid,YutakaMatsuo,andYusukeIwasawa. Large
+languagemodelsarezero-shotreasoners. InNeurIPS,2022.
+[19] Jonathan Krause, Michael Stark, Jia Deng, and Li Fei-Fei. 3d object representations for
+fine-grainedcategorization. InICCVWorkshop,2013.
+[20] AlexKrizhevsky,GeoffreyHinton,etal. Learningmultiplelayersoffeaturesfromtinyimages.
+2009.
+[21] AlexKrizhevsky,IlyaSutskever,andGeoffreyEHinton. Imagenetclassificationwithdeep
+convolutionalneuralnetworks. InNIPS,2012.
+10[22] HugoLaurençon,LéoTronchon,MatthieuCord,andVictorSanh. Whatmatterswhenbuilding
+vision-languagemodels? arXivpreprintarXiv:2405.02246,2024.
+[23] YannLeCun. Themnistdatabaseofhandwrittendigits. http://yann.lecun.com/exdb/mnist/,
+1998.
+[24] BoLi,YuanhanZhang,LiangyuChen,JinghaoWang,JingkangYang,andZiweiLiu. Otter: A
+multi-modalmodelwithin-contextinstructiontuning. arXivpreprintarXiv:2305.03726,2023.
+[25] Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. Blip-2: Bootstrapping language-
+image pre-training with frozen image encoders and large language models. arXiv preprint
+arXiv:2301.12597,2023.
+[26] XiangLisaLiandPercyLiang. Prefix-tuning: Optimizingcontinuouspromptsforgeneration.
+InACL,2021.
+[27] YuanqingLin,FengjunLv,ShenghuoZhu,MingYang,TimotheeCour,KaiYu,Liangliang
+Cao,andThomasHuang. Large-scaleimageclassification: Fastfeatureextractionandsvm
+training. InCVPR,2011.
+[28] HaotianLiu,ChunyuanLi,YuhengLi,BoLi,YuanhanZhang,ShengShen,andYongJaeLee.
+Llava-next: Improvedreasoning,ocr,andworldknowledge,January2024.
+[29] HaotianLiu, ChunyuanLi, QingyangWu, andYongJaeLee. Visualinstructiontuning. In
+NeurIPS,2023.
+[30] NelsonF.Liu,KevinLin,JohnHewitt,AshwinParanjape,MicheleBevilacqua,FabioPetroni,
+andPercyLiang. Lostinthemiddle: Howlanguagemodelsuselongcontexts. TACL,2023.
+[31] BrandonMcKinzie,ZheGan,Jean-PhilippeFauconnier,SamDodge,BowenZhang,Philipp
+Dufter,DhrutiShah,XianzhiDu,FutangPeng,FlorisWeers,etal. Mm1: Methods,analysis&
+insightsfrommultimodalllmpre-training. arXivpreprintarXiv:2403.09611,2024.
+[32] M-E. Nilsback and A. Zisserman. Automated flower classification over a large number of
+classes. InProceedingsoftheIndianConferenceonComputerVision,GraphicsandImage
+Processing,2008.
+[33] OpenAI. Gpt-4technicalreport. arXivpreprintarXiv:2303.08774,2023.
+[34] AlecRadford,JongWookKim,ChrisHallacy,AdityaRamesh,GabrielGoh,SandhiniAgarwal,
+GirishSastry,AmandaAskell,PamelaMishkin,JackClark,etal. Learningtransferablevisual
+modelsfromnaturallanguagesupervision. InICML,2021.
+[35] GuillaumeSanchez,HongluFan,AlexanderSpangher,EladLevi,PawanSasankaAmmana-
+manchi, and Stella Biderman. Stay on topic with classifier-free guidance. arXiv preprint
+arXiv:2306.17806,2023.
+[36] Christoph Schuhmann, Richard Vencu, Romain Beaumont, Robert Kaczmarczyk, Clayton
+Mullis,AarushKatta,TheoCoombes,JeniaJitsev,andAranKomatsuzaki. Laion-400m: Open
+datasetofclip-filtered400millionimage-textpairs. arXivpreprintarXiv:2111.02114,2021.
+[37] PiyushSharma,NanDing,SebastianGoodman,andRaduSoricut. Conceptualcaptions: A
+cleaned,hypernymed,imagealt-textdatasetforautomaticimagecaptioning. InACL,2018.
+[38] BaifengShi,ZiyangWu,MaolinMao,XinWang,andTrevorDarrell. Whendowenotneed
+largervisionmodels? arXivpreprintarXiv:2403.13043,2024.
+[39] QuanSun,YuxinFang,LedellWu,XinlongWang,andYueCao. Eva-clip: Improvedtraining
+techniquesforclipatscale. arXivpreprintarXiv:2303.15389,2023.
+[40] GeminiTeam,RohanAnil,SebastianBorgeaud,YonghuiWu,Jean-BaptisteAlayrac,JiahuiYu,
+RaduSoricut,JohanSchalkwyk,AndrewMDai,AnjaHauth,etal. Gemini: afamilyofhighly
+capablemultimodalmodels. arXivpreprintarXiv:2312.11805,2023.
+[41] ShengbangTong,ZhuangLiu,YuexiangZhai,YiMa,YannLeCun,andSainingXie. Eyeswide
+shut? exploringthevisualshortcomingsofmultimodalllms. arXivpreprintarXiv:2401.06209,
+2024.
+[42] VishaalUdandarao,AmeyaPrabhu,AdhirajGhosh,YashSharma,PhilipHSTorr,AdelBibi,
+SamuelAlbanie,andMatthiasBethge.No"zero-shot"withoutexponentialdata:Pretrainingcon-
+ceptfrequencydeterminesmultimodalmodelperformance. arXivpreprintarXiv:2404.04125,
+2024.
+11[43] JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,
+DennyZhou,etal. Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels. In
+NeurIPS,2022.
+[44] MitchellWortsman,GabrielIlharco,SamirYaGadre,RebeccaRoelofs,RaphaelGontijo-Lopes,
+AriSMorcos,HongseokNamkoong,AliFarhadi,YairCarmon,SimonKornblith,etal. Model
+soups: averagingweightsofmultiplefine-tunedmodelsimprovesaccuracywithoutincreasing
+inferencetime. InICML,2022.
+[45] Jiahui Yu, Yuanzhong Xu, Jing Yu Koh, Thang Luong, Gunjan Baid, Zirui Wang, Vijay
+Vasudevan, AlexanderKu, YinfeiYang, BurcuKaragolAyan, etal. Scalingautoregressive
+modelsforcontent-richtext-to-imagegeneration. TMLR,2022.
+[46] WeihaoYu,ZhengyuanYang,LinjieLi,JianfengWang,KevinLin,ZichengLiu,XinchaoWang,
+andLijuanWang. Mm-vet: Evaluatinglargemultimodalmodelsforintegratedcapabilities.
+arXivpreprintarXiv:2308.02490,2023.
+[47] XiangYue,YuanshengNi,KaiZhang,TianyuZheng,RuoqiLiu,GeZhang,SamuelStevens,
+DongfuJiang,WeimingRen,YuxuanSun,etal.Mmmu:Amassivemulti-disciplinemultimodal
+understandingandreasoningbenchmarkforexpertagi. InCVPR,2024.
+[48] Zihao Zhao, Eric Wallace, Shi Feng, Dan Klein, and Sameer Singh. Calibrate before use:
+Improvingfew-shotperformanceoflanguagemodels. InICML,2021.
+12Acknowledgements
+WethankIrenaGao,JeffreyGu,WeixinLiang,AlejandroLozano,ShioriSagawa,RuochengWang,
+Yunzhi Zhang, Orr Zohar for providing valuable feedback to this project. This work is in part
+supportedbytheNSFAIInstituteforFoundationsofMachineLearning(IFML),OpenPhilanthropy,
+andtheAllenInstituteforAI.SerenaYeung-LevyisaChanZuckerbergBiohub—SanFrancisco
+Investigator.
+BroaderImpactsandEthicsStatement
+Inthiswork,weidentifyacorelimitationofvisually-groundedlanguagemodels(VLMs)andpropose
+asimplesolutiontoaddressthisissue. WefindthatVLMsunderperforminimageclassification.
+ByintegratingclassificationdataintoVLMtraining,wehavedemonstratedthatthisintervention
+notonlyenhancesclassificationaccuracybutalsoimprovesthegeneralcapabilitiesofVLMs. This
+advancementholdspromiseforreal-worldapplications,suchasvirtualassistantsforvisuallyimpaired
+individuals. However,therearepotentialrisksassociatedwithincorporatingrace-basedorgender-
+basedclassificationdata,whichcouldamplifydiscriminatorybiasesinVLMs.Westronglyemphasize
+theimportanceofethicalandresponsibleuseofourapproachtoensureitcontributespositivelyto
+ourdigitalecosystem.
+ReproducibilityStatement
+Weprovideanopen-sourceimplementationofourworkandhavereleasedtheImageWikiQAdatasetat
+https://github.com/yuhui-zh15/VLMClassifier. Thiswillenableresearcherstoreproduce
+all experiments described in this paper and conduct their own analyses on additional VLMs and
+datasets.
+Limitations
+Duetocomputationalconstraints,wecannotevaluateallpossibleVLMsanddatasets. Weselect
+tworepresentativeones,LLaVAandBLIP,andconductanalysesonfourdatasets. Additionally,as
+wefindthatVLMshaveinformationintheirlatentspace,weconductlarge-scaletrainingtodecode
+them. Developingazero-shotmethodtodecodethisinformationwithoutextensivetrainingcouldbe
+apromisingdirectionforfutureresearch.
+ComputeResources
+We use four NVIDIA L40S GPUs for all experiments. Most inference experiments take 5-20
+hoursonasingleL40SGPU.Themostcomputationallyintensivestepisfine-tuning. Fine-tuning
+LLaVA1.5-7Bon1.28MImageNetdatatakes1.4daysforoneepochusingfourGPUs. Fine-tuning
+LLaVA1.5-7Bon1.28MImageNetdatacombinedwith665KoriginalLLaVAinstruction-tuning
+datatakes3.5daysforoneepochusingfourGPUs. Forthe13Bmodel,thecostisapproximately
+40%higher.
+SummaryofAppendix
+Weprovideadditionaldetailsforeachsectioninthemainpaper.
+• In§A,weprovidedetailsofmodelsanddatafor§2.
+• In§B,weprovidedetailsofexperimentalsettingsandresultsfor§3.
+• In§C,weprovidedetailsofourcollectedImageNetQAdatasetfor§4.
+• In§D,wediscusshowdatatypesaffectVLMclassificationperformance.
+13Model Link Property Version
+GPT4[33] https://platform.openai.com/docs/guides/vision Proprietary gpt-4-turbo-2024-04-09
+GeminiPro[40] https://ai.google.dev/ Proprietary gemini-1.0-pro-vision-001
+Claude3[3] https://console.anthropic.com/ Proprietary claude-3-opus-20240229
+LLaVA1.5-7B[29] https://huggingface.co/liuhaotian/llava-v1.5-7b Public -
+LLaVA1.5-13B[29] https://huggingface.co/liuhaotian/llava-v1.5-13b Public -
+LLaVANeXT-V7B[28] https://huggingface.co/liuhaotian/llava-v1.6-vicuna-7b Public -
+LLaVANeXT-M7B[28] https://huggingface.co/liuhaotian/llava-v1.6-mistral-7b Public -
+BLIP2-2.7B[25] https://huggingface.co/Salesforce/blip2-opt-2.7b Public -
+IBLIP-7B[9] https://huggingface.co/Salesforce/instructblip-vicuna-7b Public -
+IBLIP-13B[9] https://huggingface.co/Salesforce/instructblip-vicuna-13b Public -
+CLIP-L[34] https://github.com/openai/CLIP Public -
+EVA-G[39] https://github.com/baaivision/EVA Public -
+Table5: Modeldetails.
+Dataset Link Training Validation #Classes
+ImageNet[10] https://www.image-net.org/ 1.28M 50K 1000
+Flowers102[32] https://www.tensorflow.org/datasets/catalog/oxford_flowers102 2.0K 6.1K 102
+StanfordCars[19] https://www.tensorflow.org/datasets/catalog/cars196 8.1K 8.0K 196
+Caltech101[12] https://www.tensorflow.org/datasets/catalog/caltech101 4.3K 4.3K 101
+Table6: Datadetails.
+A SupplementarySection2
+A.1 Model
+WeincludemodeldetailsinTable5.
+A.2 Data
+WeincludedatadetailsinTable6.
+B SupplementaryforSection3
+B.1 PromptVariationDetail
+Prompt details. We use three different prompts with varying wordings. Base Prompt: “What
+typeofobjectisinthisphoto?” PromptAlternative1: “Identifytheobjectinthisimage.” Prompt
+Alternative2: “Whatisthemainobjectdepictedinthisphotograph?”
+Labelorderdetails. Forthefixedorder,weusethedefaultdatasetorderforeachimage.
+B.2 LabelSetSizeDetails
+Performancedetails. ThetableversionofFigure2isprovidedinTable7.
+Relativeperformancegaps. WeobservethatwhiletheabsoluteperformancegapbetweenVLMs
+andCLIPdecreaseswhenreducingthenumberofclasses,therelativeperformancegapincreases.
+ThistrendisindicatedbytheerrorratesbetweenVLMsandCLIPshowninFigure4.
+B.3 InferenceStrategyDetails
+Experimental details. Probabilistic inference methods require separate computations for each
+class,whichintroducessignificantcomputationalcosts. Forexample,onImageNetwith1000classes,
+eachexampletakes1000timeslongertoprocessthanwithadirectgenerationpipeline. Therefore,
+werandomlysampled1000examplesfromeachdataset’svalidationsetforevaluation.
+14Figure4: Analysisofthelabelsetsize. Foreachimage,werandomlysample100,20,5,and2
+candidateclassesfromtheentiresetofclasses. WhiletheabsoluteperformancegapbetweenVLMs
+andCLIPsdecreasesasthenumberofclassesisreduced,therelativeperformancegapincreases. The
+X-axisrepresentsthenumberofclasses,andtheY-axisrepresentstherelativeerrorratebetween
+LLaVA1.5-7BandCLIP-L.
+Model #Classes
+LLaVA1.5-7B 2 94.3 67.1 78.5 96.4
+5 92.3 50.5 67.9 96.6
+20 82.0 29.6 22.0 91.8
+100 46.6 10.0 1.0 62.1
+BLIP2-2.7B 2 14.3 17.4 0.9 29.6
+5 11.9 16.9 1.3 26.7
+20 8.0 12.2 1.5 20.9
+100 5.5 11.2 3.9 22.4
+CLIP-L 2 99.8 96.9 99.8 99.9
+5 99.2 92.8 99.1 99.8
+20 97.5 85.7 96.1 98.9
+100 92.7 76.3 85.4 95.7
+Table7: Analysisofthelabelsetsize. ThisisthetableversionofFigure2.
+B.4 InformationLossDetails
+CLIP global vs. local features. The global feature of CLIP is commonly used in traditional
+classificationsettings,whichhas1tokenforeachimage. However,VLMsutilizelocalpatchfeatures
+forclassification,whichhas576tokensforeachimageusingCLIP-L.Onemighthypothesizethat
+localfeaturescontainlessinformationthanglobalfeatures. Inpractice,VLMsusethesecond-to-last
+layer of CLIP local features rather than the last layer. Since the last layer’s global feature is the
+weightedaverageofthesecond-to-lastlayer’sfeaturesthroughself-attentioncomputation,wecan
+theoreticallyconcludethatlocalfeatureshaveatleastthesamelevelofinformationasCLIPglobal
+features.
+Feature extraction details. We extract features from VLM’s last layer by feeding the LLaVA
+defaultprompt“USER:<576ImageTokens>Whattypeofobjectisinthisphoto? ASSISTANT:”
+intotheLLaVA,orBLIPdefaultprompt“<ImageTokens>Question: Whattypeofobjectisinthis
+photo? Answer:” intotheBLIP.Weuseeitherthelasttokenfeature(i.e.,thetoken“:”) ortheaverage
+featureoverallthetokens.
+Linearprobingdetails. Wetrainthelinearlayeronthetrainingsetwithabatchsizeof512,a
+learningrateof1e-3usingtheAdamoptimizer,andfor500epochs. Aftertraining,wereportthebest
+performanceonthevalidationset.
+Probingposition. Inpractice,wefindthatprobingthelasttokenortheaveragetokenresultsin
+muchbetterperformancethanprobingothertokenpositions,asshowninTable8. Weleavethisasan
+interestingquestionforfutureresearch.
+15Position 0 100 200 300 400 500 600 -3 -2 -1(Last) Average
+Accuracy 0.7 17.1 18.1 25.0 25.8 23.7 52.9 84.0 85.8 94.5 96.2
+Table8: Probingthelasttokenortheaveragetokenresultsinmuchbetterperformancethan
+probing other token positions. Experiments are done using LLaVA1.5-7B on the Flowers102
+dataset.
+Figure5: Fine-tuningonlytheprojectorimprovesnumericalstability. (Top)Fine-tuningLLMs
+withLoRAoftenresultsinnumericalinstabilities,manifestingasspikesinloss(purple,green,brown,
+orangecurves). Incontrast,fine-tuningonlytheprojectorleadstoaconsistentlysteadydecreasein
+loss(tealcurve). DespiteexperimentingwithvarioushyperparametersforImageNet,theinstability
+remained. (Bottom)Occasionally,thespikesnormalizewithcontinuedtraining. Here,wepresentan
+exampleusingtheStanfordCarsdataset(pinkcurve).
+B.5 TrainingObjectiveDetail
+LLaVA fine-tuning details. We convert each image and class label into the text format using
+the LLaVA default template “USER: <576 Image Tokens> What type of object is in this photo?
+ASSISTANT:<ClassName>.” Weconducttwosettingsforfine-tuningLLaVA.Inthefirstsetting,
+weonlyfine-tunetheMLPprojectorbetweenCLIPandthelanguagemodel(LM).Theprojector
+istrainedonthetrainingsetwithabatchsizeof64andalearningrateof2e-5usingtheAdamW
+optimizerfor50epochs(1epochforImageNet),withawarmupratioof0.03. Inthesecondsetting,
+wefine-tuneboththeMLPprojectorandtheLMusingLoRA.TheprojectorandLMaretrainedon
+thetrainingsetwithabatchsizeof64,alearningrateof2e-5fortheprojectorand2e-4fortheLM,
+16SpearmanCorrelation PearsonCorrelation
+CLIP-L -0.13 0.30 0.04 -0.03 -0.08 0.08 0.06 0.00
+LLaVA1.5-7B Fine-tuned on ImageNet -0.02 -0.03 0.04 0.30 -0.05 0.08 0.04 0.18
+LLaVA1.5-7B 0.76 0.40 N/A 0.69 0.35 0.64 N/A 0.27
+Table9:Correlationbetweenclassfrequencyandmodel’saccuracyontheclass.Thissupplements
+Figure3.
+usingtheAdamWoptimizerfor50epochs(1epochforImageNet),withawarmupratioof0.03,a
+LoRArankof128,andaLoRAalphaof256. Forbothsettings,wereportthebestperformanceon
+thevalidationsetaftertraining. Fine-tuningonImageNetfor1epochrequires130L40GPUhours.
+BLIPfine-tuningdetails. Weconverteachimageandclasslabelintothetextformatusingthe
+BLIPdefaulttemplate“<ImageTokens>Question: Whattypeofobjectisinthisphoto? Answer:
+<ClassName>.” WetraintheQ-formerprojectorbetweenCLIPandtheLMonthetrainingsetwitha
+batchsizeof64,alearningrateof2e-5,andaweightdecayof0.05usingtheAdamWoptimizerfor
+100epochs(10epochsforImageNet),with1000warmupsteps. Aftertraining,wereportthebest
+performanceonthevalidationset. Fine-tuningonImageNetfor10epochsrequires120L40GPU
+hours.
+CLIPfine-tuningdetails. WeinitializealinearlayerontopoftheCLIPimageencoder. TheCLIP
+modelisfrozen,andonlythelinearlayeristrained. Thelinearlayeristrainedonthetrainingsetwith
+abatchsizeof512,alearningrateof1e-3,andnoweightdecayusingtheAdamoptimizerfor300
+epochs(40epochsforImageNet). Aftertraining,wereportthebestperformanceonthevalidation
+set.
+Numericalinstability. Whenfine-tuningboththeprojectorandtheLMwithLoRAforLLaVA,
+we experience significant numerical instability. On ImageNet, despite adjusting three different
+hyperparameterssuchasthelearningrateandbatchsize,thelossconsistentlypeaksduringtraining
+anddoesnotrecover. OntheStanfordCarsdataset,numericalinstabilityisalsoobserved,buttheloss
+returnstonormalduringtraining. ThiscanbeseeninFigure5.
+B.6 DataDetail
+Dataprocessingdetails. ThetrainingofLLaVAcomprisestwostages: pre-trainingandinstruction
+tuning. Thepre-trainingstageutilizesnoisyimagecaptioningdata,whereastheinstructiontuning
+stageemploysmeticulouslycuratedmulti-turnconversationdata. Wetokenizeallsentenceswithin
+thedata,computethefrequencyforeachclass,andthencalculatetheaccuracyforeachclass. This
+resultsin1000(frequency,accuracy)pairsforImageNet’s1000classes. Thisprocessissimilarly
+appliedtoallotherdatasets.
+Correlationresults. WecomputetheSpearmanandPearsoncorrelationsbetweenfrequencyand
+accuracy of zero-shot LLaVA1.5-7B. The results are presented in Table 9. For comparison, we
+conductedthesameanalysisforCLIP-Landfine-tunedLLaVA1.5-7B.
+Correlationfortwostages. GiventhatLLaVAtraininginvolvestwostages,weexaminewhether
+pre-training or instruction-tuning data has a greater impact on classification performance. We
+computetheSpearmanandPearsoncorrelationsseparatelyforpre-trainingandinstruction-tuning
+data. Ourfindingsindicatethatthecorrelationissimilarforbothstages. Forinstance,onImageNet,
+the Spearman and Pearson correlations are 0.73 and 0.34 for pre-training, and 0.76 and 0.33 for
+instructiontuning. Thesevaluesareclosetothecombineddatacorrelations,whichare0.76and0.35
+forSpearmanandPearsoncorrelations,respectively,asreportedinTable9.
+17Come up with five multiple-choice questions for a {classname} to
+(cid:44)→ examine the knowledge of an expert.
+The questions should come from the following Wikipedia articles on
+(cid:44)→ {classname}:
+‘‘‘
+{wikipedia page}
+‘‘‘
+**Instruction**:
+Each question should have four choices, one of which is the correct
+(cid:44)→ answer.
+Note that the Wikipedia articles will not be accessible to the
+(cid:44)→ test-takers, so please do not reference specific details from
+(cid:44)→ the articles in the questions.
+Use "this object" rather than "{classname}" in the questions. We want
+(cid:44)→ to give test-takers an image of this object, not the word
+(cid:44)→ itself.
+Each question should have four fields: "question" (str), "choices"
+(cid:44)→ (list[str]), "answer" (int, starting from 0)), and "reference"
+(cid:44)→ (str, original sentences from Wikipedia articles).
+Output in JSON format.
+Figure6: PromptusedtogenerateImageWikiQAusingGPT4.
+Answer the multiple-choice question below.
+{question with ground-truth class name}
+A. {choice A}
+B. {choice B}
+C. {choice C}
+D. {choice D}
+Output only one character A/B/C/D.
+-----
+Answer the multiple-choice question below.
+{question without ground-truth class name}
+A. {choice A}
+B. {choice B}
+C. {choice C}
+D. {choice D}
+The question mentions "this object". However, we don’t know what the
+(cid:44)→ object is. Try your best to guess the answer without knowing
+(cid:44)→ the object.
+Output only one character A/B/C/D.
+Figure7: PromptusedtofilterImageWikiQAusingGPT4.
+C SupplementaryforSection4
+C.1 ImageWikiQADetails
+Moreexamples. WeprovidemoreexamplesoftheImageWikiQAdatasetinTable11.
+Datagenerationprompt. WeprovidethepromptusedtogenerateImageWikiQAinFigure6and
+thepromptusedtofilterImageWikiQAinFigure7.
+C.2 ResultsDetails
+LLaVAfine-tuningdetails. ForImageNet,weconverteachimageandclasslabelintothetext
+formatusingtheLLaVAdefaulttemplate“USER:<576ImageTokens>Whattypeofobjectisinthis
+photo? ASSISTANT:<ClassName>.” Then,weconcatenatetheoriginalLLaVA665Kinstruction
+18Model TrainingDataType
+LLaVA1.5-7B Zero-shot - 5.9 0.0 47.1
+CLIP-L Fine-tuned ClassificationData 98.6 91.5 97.6
+LLaVA1.5-7B Fine-tuned ClassificationData 97.6 90.4 97.5
+LLaVA1.5-7B Fine-tuned CaptioningData 92.0 85.4 95.7
+Table10: Analysisofdatatypes. Wefine-tunetheVLMonthecaption-focuseddatageneratedby
+GPT4usingthesameexperimentalsettingsandfindthatdataisthemaindeterminingfactorfor
+VLMperformance,andthedatatypedoesnotmattermuch.
+tuningdatasetwiththe1.28MImageNetclassificationdataset. Duetonumericalstabilityconcerns,
+wetrainonlytheprojectorlayerofLLaVA.Theprojectoristrainedonthecombineddatasetwitha
+batchsizeof64,alearningrateof2e-5,usingtheAdamWoptimizer,for1epoch,withawarmup
+ratioof0.03. Thetrainingprocesstakesapproximately340hoursonasingleL40GPU.
+D AblationonDataTypes
+In the main paper, we have demonstrated that data is crucial for classification performance for
+visually-grounded language models (VLMs) and proposed a simple data integration method to
+enhanceVLMs. However,wearecuriouswhetherthedatatypealsoplaysasignificantroleinVLM
+classificationperformance. Forinstance,totrainaVLMtoclassify“guineapig”,shouldthemodel
+betrainedwithclassification-focuseddata(e.g.,“<image>Question: Whattypeofobjectisinthis
+photo? Answer: Guineapig.”),orcanitbetrainedwithanytypeofdata,suchascaption-focused
+data(e.g.,“<image>Question: Generateacaptionfortheimage. Answer: Aguineapigplayingin
+thegrass.”) orVQA-focuseddata(e.g.,“<image>Question: Whatisthenativeregionofthisguinea
+pig? Answer: SouthAmerica.”)?
+While our initial analysis in §3.3 suggests that any type of data could work based on the strong
+correlation between VLM performance and class occurrence in LLaVA-training data, which is
+generallyVQA-typeratherthanclassification-focused,wefurtherinvestigatehowdatatypesaffect
+finalperformanceinthissection.
+In previous experiments detailed in §3.2, we fine-tuned the VLM using a classification-focused
+template(e.g.,“<image>Question: Whattypeofobjectisinthisphoto? Answer: <classname>.”).
+Here,wefine-tunetheVLMoncaptioningdata. Thiscaptioningdataisgeneratedbyprovidingan
+imageandtheground-truthclassnametoGPT4andrequestingittogenerateacaptionthatincludes
+theground-truthname. Specifically,thepromptforGPT4is: “Generateashortcaptionfortheimage.
+Thecaptionmustincludetheground-truthlabeloftheimage,whichis<classname>.” Thegenerated
+captionsarediverseforeachclass. Forexample,forthe“guineapig”class,captionscouldbe“A
+guineapigplayinginthegrass.” or“Aclose-upviewofaguineapiginanindoorenvironment.” We
+fine-tunetheVLMonthiscaption-focuseddatausingthesameexperimentalsettingsandcompare
+themodelperformancewiththatfine-tunedonclassification-focuseddata. Successisdefinedas
+whetherthegeneratedcaptionforavalidationimagecontainstheground-truthclassname.
+Theperformancesoffine-tunedLLaVA1.5-7BonthreedatasetsarereportedinTable10.Ourfindings
+indicatethatdataisthemaindeterminingfactorforVLMperformance,andthedatatypedoes
+notmattermuch. FromTable10,wecanseethatfine-tuningonbothclassification-focuseddata
+and caption-focused data achieves a similar level of accuracy on Flowers102, StanfordCars, and
+Caltech101, atleast48.6%higherthanthenon-fine-tunedmodel. Thisindicatesthattoenablea
+VLMtoperformclassificationonaspecificclass,itisunnecessarytouseclassification-specificdata.
+Instead,anydatarelatedtothatclasscanbeused,providedthatthedataincludestheclassname.
+19Image Question Choices ReferenceWikipedia
+Whichpositionispar- A.Fowler’sposition The feet can be raised to
+ticularlyimportantfor B.Uprightposition whatiscalledtheTrendelen-
+thisobjectwhentrans- C.Trendelenburgposition burg position, indicated for
+porting a patient in D.Flatposition patientsinshock.
+shock?
+Which characteristic A.Veryintelligentandloyal GiantSchnauzersareusually
+isNOTtypicalforthe B.Easilyboredandhighlyenergetic aquietbreed...Ithasthepo-
+temperament of this C.Quietandsuspiciousofstrangers tential to be aggressive, but
+object? D.Highlyaggressiveandloud GiantSchnauzersareusually
+reserved
+Whatisthetraditional A.Blackwithwhitemarkings Thebreed’scoatonlycomes
+color combination of B.Solidred in a single colour combina-
+thisobject’scoat? C.Redwithwhitemarkings tionofwhitewithredmark-
+D.Whitewithblackmarkings ings,usuallyinapiebaldpat-
+tern.
+What steering mech- A.Arudder A four-wheeled vehicle is
+anism is traditionally B.Turntableorfifthwheel alsosteeredbytheshaftsor
+associated with this C.Flapcontrol pole, which are attached to
+object when it pos- D.Asteeringwheel thefrontaxle;thisswivelson
+sessesfourwheels? a’turntable’or’fifthwheel’
+beneaththevehicle.
+What is a notable be- A.Malescompeteinphysicalcom- The female releases a
+havior of this object bat pheromone which causes
+duringmating? B.Releasesasoundtoattractmates the males to become less
+C.Thefemalereleasesapheromone aggressive and to begin
+toreduceaggressioninmales courtship.
+D. Both sexes change color to a
+brighterhue
+Which of the follow- A.TheLEGOStore Notable Examples. - Ham-
+ing is known as the B.Hamleys leys, theworld’slargesttoy
+world’slargestthisob- C.Toys"R"Us shop
+ject? D.FAOSchwarz
+In which habitats is A.Low-altitudewoodlandsandfor- Theyareprincipallybirdsof
+this object predomi- estedges low-altitude woodlands and
+nantlyfound? B.Polarandsubpolarzones forests, and particularly of
+C.Temperateforestsandgrasslands forestedgeandcanopy.
+D.Desertandaridregions
+In which type of cli- A.Mediterranean Theplanttoleratesseasonal
+matesdoesthisobject B.Subarctic drought,andtheMiddleEast-
+predominantlythrive? C.Tropicalrainforest ern and Mediterranean cli-
+D.Desert matesareespeciallysuitable
+toit.
+Which of the follow- A. Eight-to-fourteen modulation Philips also contributed
+ingfeatureswasintro- (EFM) eight-to-fourteenmodulation
+ducedbyPhilipsinthe B.Diagonalerrorcorrection (EFM),whichoffersacertain
+development of this C.Anti-shockbuffering resiliencetodefectssuchas
+object? D.Cross-interleavedReed-Solomon scratchesandfingerprints.
+Coding(CIRC)
+What is a common A.Displayinmuseums Messenger bag: one long
+contemporaryusefor B.Storingchilledgoodsforretail strap worn across the body,
+thisobjectinurbanset- C. Transporting large amounts of inspired by bags worn by
+tings? heavyequipment urbanmessengerstodeliver
+D. Delivering business mail across businessmail,amodernsil-
+thecity houette
+Table11: ExamplesofImageWikiQA.Eachexamplehasanimage,question,fourchoices(correct
+choicehighlightedinorange),andreferenceWikipediasentences.
+20

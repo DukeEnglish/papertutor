@@ -1,0 +1,948 @@
+ViG: Linear-complexity Visual Sequence Learning
+with Gated Linear Attention
+BenchengLiao1,2,⋄ XinggangWang2(cid:0) LianghuiZhu2 QianZhang3 ChangHuang3
+1InstituteofArtificialIntelligence,HuazhongUniversityofScience&Technology
+2SchoolofEIC,HuazhongUniversityofScience&Technology
+3HorizonRobotics
+https://github.com/hustvl/ViG
+Abstract
+Recently,linearcomplexitysequencemodelingnetworkshaveachievedmodeling
+capabilitiessimilartoVisionTransformersonavarietyofcomputervisiontasks,
+whileusingfewerFLOPsandlessmemory. However,theiradvantageintermsof
+actualruntimespeedisnotsignificant. Toaddressthisissue,weintroduceGated
+LinearAttention(GLA)forvision,leveragingitssuperiorhardware-awarenessand
+efficiency. Weproposedirection-wisegatingtocapture1Dglobalcontextthrough
+bidirectionalmodelinganda2Dgatinglocalityinjectiontoadaptivelyinject2D
+localdetailsinto1Dglobalcontext. Ourhardware-awareimplementationfurther
+mergesforwardandbackwardscanningintoasinglekernel,enhancingparallelism
+andreducingmemorycostandlatency.Theproposedmodel,ViG,offersafavorable
+trade-offinaccuracy,parameters,andFLOPsonImageNetanddownstreamtasks,
+outperforming popular Transformer and CNN-based models. Notably, ViG-S
+matchesDeiT-B’saccuracywhileusingonly27%oftheparametersand20%of
+theFLOPs,running2×fasteron224×224images. At1024×1024resolution,
+ViG-Tuses5.2×fewerFLOPs,saves90%GPUmemory,runs4.8×faster,and
+achieves20.7%highertop-1accuracythanDeiT-T.TheseresultspositionViGas
+anefficientandscalablesolutionforvisualrepresentationlearning.
+1 Introduction
+Vision Transformer (ViT) [18] has revolutionized computer vision by introducing an advanced
+sequence modeling layer Transformer [91] from natural language processing (NLP) to perform
+visualrepresentationlearning. Ithasprovenhighlysuccessfulacrossvariousvisiontasks[58,24,
+23,84,75,54,50,99,22,46,69,109,25],servingasaversatilebackbone. However,thequadratic
+complexityinherentintheTransformer’ssoftmaxattentionpresentssignificantchallengesforits
+applicationsonhigh-resolutionimages. Numerousefforts[58,17,105]havesoughttoaddressthis
+limitationbydrawinginspirationfromthesuccessofconvolutionalnetworks,suchasconstraining
+attentioncomputationswithinlocalwindows. Whilethisapproachachieveslinearcomplexitysimilar
+toconventionalCNNs,itfallsshortincapturingtheglobalcontext. Thisraisesacriticalquestion:
+can we design a fundamental block that combines the best of both worlds—Transformers and
+CNNs—offeringglobalreceptivefieldandlinearcomplexity?
+Therecentdevelopmentoflinear-timesequencemodelingmethods[28,71,106,74,85,42]from
+NLPprovidesapromisingsolutiontothequestion. ThesemethodsoperatesimilarlytoRNNsby
+compressingallhistoricalinputsintoafixed-sizestateandthenattendingtothecurrentinputbased
+onthiscompressedstate,unlikeTransformers[91]whichattendtoallhistoricalstates. Tofurther
+⋄InternofHorizonRoboticswhendoingthiswork;⊠Correspondingauthor:xgwang@hust.edu.cn
+Preprint.Underreview.
+4202
+yaM
+82
+]VC.sc[
+1v52481.5042:viXraaddressthewall-timeefficiencylimitationsofexplicitrecurrentforms,Mamba[28],RWKV[71],
+andGLA[106]introducehardware-awareimplementations,demonstratingsuperioraccuracyand
+efficiency compared to highly-optimized Transformers. Mamba, in particular, has been widely
+adoptedandadaptedforvisiontasks. Whilethesemethodsachievesuperiorclassificationaccuracy
+at a resolution of 224 and exhibit impressive efficiency in terms of FLOPs and memory at high
+resolutions(e.g.,1248resolutioninVisionMamba),theirwall-timeefficiencyatlowerandmore
+commonresolutionsisoftencomparabletoorevenlessthanthatofViT/DeiT[18,88].
+Thislimitationinspiresustoexploretheapplicationofthesuperiorhardware-efficientGLA[106,107]
+topushtheefficiencyandaccuracyenvelopeoflinear-complexityvisualsequencelearning,making
+itmorepracticalandcompetitivewiththewell-establishedandhighly-optimizedTransformersand
+CNNs. DifferentfromMambabasedonSISO(single-input-single-output)statespacemodel[29],
+GLAoriginatesfromlinearattention[42],whichhasasimpleandhardware-friendlymatrix-multiply
+formbyapproximatingsoftmaxinstandardattentionwithalinearkernel. Tofurtherenhancethe
+expressiveness,GLAintroducesanoveldata-dependentgatingmechanismtoadaptivelycontrolthe
+forgetrateofcompressedstate.
+However, the vanilla GLA model is designed for unidirectional modeling, which has temporal
+dependence. ThismakesitsabilityforglobalperceptioninNLPnottrulyglobalwhenappliedto
+visiontasks. Despitesomefollow-upworks[38,104,40]onMambainvisionthatexploreadditional
+scanningdirectionsbeyondbidirectionalmodelingof1Dvisualsequencestoapproximatevanilla
+attention’sabilitytointeractwithvisualtokensinanydirectionandposition,theseapproachessuffer
+from significant memory inefficiencies due to frequent, non-sequential memory access patterns,
+makingthemlesspracticalintermsofwall-timeefficiency. Weadheretobidirectionalmodeling
+foritssimplicityandmemory-friendlyaccesspattern. Tofurtherharnesstheinherentdirectional
+sensitivity in vision data (i.e., information from different visual directions varies significantly in
+importance),weproposeabidirectionalGLA(BiGLA)layerbydesigningadirection-wisegating
+mechanismtoadaptivelyselecttheglobalcontextfromdifferentdirections. Thisdesignsharesmost
+parametersbetweentheforwardandbackwarddirections. Thoughtheproposeddirectionaldesign
+achievesglobalcontextalongthe1Dvisualsequence,itstillfailstocapturethe2Dnatureofvisual
+data. Toaddressthis, weproposea2Dgatinglocalityinjectiontoadaptivelycompress2Dlocal
+informationextractedbyconvolutionintothe1Dglobalcontextextractedbythesequencemodeling
+BiGLAlayer. Moreover,theproposedparameter-efficientbidirectionaldesignallowsustomerge
+bidirectionalscanningintoasinglekernel,enhancingthehardware-awarenessoftheimplementation
+andreducingmemorycostandlatencyintroducedbytheextradirection.
+Themaincontributionsofthispapercanbesummarizedasfollows:
+• WepresentViG,agenericvisionbackbonenetworkthatcombinesthelinearcomplexity
+ofGatedLinearAttention(GLA)withthehardware-awarenessneededforefficientvisual
+sequencelearning. ViGaddressesthelimitationsofpreviousTransformer-basedandCNN-
+basedmethods,combiningthebestofbothworldstoofferanefficientandscalablesolution.
+• To better adapt to vision tasks, we propose three key designs with minimal overhead: a
+bidirectionalgatedlinearattentionmechanismtocapturetheglobal1Dcontextofvisual
+sequences, a direction-wise gating mechanism to adaptively select global context from
+differentdirections,anda2Dgatinglocalityinjectiontointegrate2Dlocalinformationinto
+the1Dglobalcontext. Wefurtherprovideahardware-awareimplementationthatmerges
+forwardandbackwardscanningintoasinglekernel,enhancingparallelismandreducing
+memorycostandlatency.
+• Ourmodelsachievesuperiorperformanceintermsofaccuracyandparameterscompared
+tostate-of-the-artnon-hierarchicalandhierarchicalmodelsonImageNet[14],asshown
+inFig.1. Fordownstreamdensepredictiontasks[116,52],ViGoutperformsViT[18,88]
+andVRWKV[19]withlowercomputationalcostsacrossdifferentmodelsizes. Thewall-
+time efficiency of ViG outperforms the counter-part linear-complexity visual sequence
+learning methods [117, 19, 56] and matches the well-established and highly-optimized
+ConvNeXt[59]andSwinTransformer[58].
+285
+82
+84
+80 83
+82
+78
+ViG-H
+81 VMamba
+76 ViG ConvNeXt
+VRWKV 80 Swin
+Vim S4ND-ConvNeXT
+74
+S4ND-ViT 79 RegNetY
+DeiT ResNet
+72 78
+20 40 60 80 20 30 40 50 60 70 80 90 100
+Params (Millions) Params (Millions)
+(a)Comparisonwithnon-hierarchicalarchitectures (b)Comparisonwithhierarchicalarchitectures
+Figure1: Performancecomparisonsof(a)non-hierarchicalarchitectures[19,88,117,66]and(b)
+hierarchicalarchitectures[56,59,58,66,77,32]onImageNet-1K.Ourproposednon-hierarchical
+ViG and hierarchical ViG-H demonstrate superior performance compared to the popular models
+interms ofparametersand accuracy. Particularly, the proposedbasicViG blockachievesglobal
+receptivefieldwithlinearcomplexity,whiletheCNN[32,77,59],vanillasoftmaxattention[88]and
+window-attention-based[58]blockscannot.
+2 RelatedWork
+ViT[18]demonstratedthatvisualrepresentationlearningcanbeperformedinasequencemannerby
+introducingtheTransformer[91]fromNLP.Manyfollow-upworks[97,96,105,9,20,21,30,17,90,
+112,57,110,8,113,48]focusonimprovingViT’sefficiencyandperformancewithoutalteringthe
+softmaxattention.Recently,anotherlineofworks[35,74,42,7,1,73,10,13,65,62]haveshownthat
+quadraticsoftmaxattentioncanbereplacedbyadvancedRNN-like,linear-timesequencemodeling
+methods. VisionMamba[117]buildsuponthelinear-timesequencemodelingMambablock[28]
+byintroducinganadditionalbackwardSSMlayer. VMamba[56]introducescriss-crossscanning
+toMambaandbuildsahierarchicalarchitecture. LocalMamba[40]optimizesscanningdirections
+toexploitlocalpriorsforvision. Zigma[38]andPlainMamba[104]introducemultiplescanning
+directionsinazigzagmanner. Manyworks[60,47,4,51,102,115,114,68,82,108,33,26,5]have
+exploredMamba’seffectivenessinvariousvisiontasks. Incontrast,VisionRWKV[19]forgoesthe
+Mambablock,adaptingthelinearcomplexityRWKVblockfromNLPforuseinvision. Extended
+relatedworksareprovidedinAppendixA.
+3 Preliminary
+Inthissection,weintroducetheevolutionfromstandardsoftmaxattentiontoadvancedgatedlinear
+attention(GLA),omittingthemulti-headmechanismforsimplicity.
+SoftmaxAttention. SoftmaxattentionhasbeenusedasastandardblockinTransformer[91]sinceit
+hasthestrongcapabilitytodynamicallymodeltherelationshipaccrosslongsequenceandenjoys
+greatparallelismfortraining. GivenaninputsequenceX ∈ RT×d,thesoftmaxattentionusedin
+autoregressiveTransformercanbedefinedas:
+Q,K,V=XW ,XW ,XW ,
+Q K V
+(1)
+O=softmax(cid:0) (QK⊤)⊙M(cid:1)
+V,
+where W
+Q
+∈ Rd×dq, W
+K
+∈ Rd×dk and W
+V
+∈ Rd×dv are trainable projection matrices, M ∈
+{−∞,1}T×T isthecausalmaskforpreventinginteractionwithfuturetokens,O ∈ RT×dv isthe
+output. Theaboveparallelformcanalsobewritteninthefollowingrecurrentformtocomputethe
+singleoutputo :
+t
+q ,k ,v =x W ,x W ,x W ,
+t t t t Q t K t V
+(cid:80)t exp(q k⊤)v (2)
+o = i=1 t i i,
+t (cid:80)t exp(q k⊤)
+i=1 t i
+3
+)%(
+ycaruccA
+1-poT
+teNegamI
+)%(
+ycaruccA
+1-poT
+teNegamILinear Head Class ⊕ ⊕
+⊛ Linear
+Global Avg Pooling
+BiGLA ⊙
+𝑁×
+ViGBlock 𝐆 𝟐𝐃 𝐐 𝐊 𝐕 𝛂% 𝐘 𝐙
+DWConv3x3 Linear
+0 1 2 3 4 5 6 7 8
+RMSNorm RMSNorm
+Patch Embedding
+0 Position ⊛2D Gating Swish ⊙Hadamard ⊕Add
+Embedding Locality Injection Activation Product
+Figure2: TheoverallarchitectureofViG.WefollowViT[18]tobuildarchitecturebyfirsttransform-
+ingtheinputimageintoasequenceofpatchesandthenfeedingitintoN basicViGblocks. The
+proposedViGblockconsistsofRMSNorm[111], theproposedlinearcomplexityspatialmixing
+layer,andSwiGLUFeedForwardNetwork[81].
+wheretheoutputo iscomputedbyattendingtheprojectedqueryq ofx tothesetsofprojected
+t t t
+keys{k ,...,k }andvalues{v ,...,v }.
+1 t 1 t
+Linear Attention. Linear attention [42] replaces exp(q k⊤) in standard softmax attention with
+t i
+feature map dot-products ϕ(q )ϕ(k )⊤. Recently, [72] has empirically found that linear feature
+t i
+map works well by setting ϕ to be the identity and removing the normalizer. This simplifies the
+computationofo as:
+t
+t
+(cid:88)
+o =q k⊤v . (3)
+t t i i
+i=1
+LettinghiddenstateS
+t
+=(cid:80)t i=1k i⊤v
+i
+∈Rdk×dv,whichisfixed-sizeandcompressesthehistorical
+information,wecanrewriteabovecomputationasanRNN:
+S =S +k⊤v , o =q S . (4)
+t t−1 t t t t t
+GatedLinearAttention.[106]proposeaddingadata-dependentgatingmechanisminlinearattention
+toenhanceexpressiveness. Thegatedlinearattentioncanbedefinedas:
+α
+t
+=sigmoid((x tW α1W α2+b α))τ1 ∈R1×dk,
+G
+t
+=α⊤
+t
+1∈(0,1)dk×dv,
+(5)
+S
+t
+=G t⊙S t−1+k t⊤v
+t
+∈Rdk×dv,
+o =q S ,
+t t t
+whereα isobtainedfromapplyingalow-ranklinearlayeronx followedbysigmoidactivation,
+t t
+W α1 ∈Rd×16,W α2 ∈R16×dk,b
+α
+∈R1×dk aretrainablematricesandτ =16isatemperatureterm
+toencouragethemodeltohaveaslowerforgettingrate,G ismatrix-formforgetgate,expandedby
+t
+outer-productingwithmatrice1.
+4 Method
+4.1 OverallArchitecture
+TheoverallarchitectureofourmodelisdepictedinFig.2. WefirsttransformtheH ×W ×3image
+intoT = H×W patchtokenswithddimensions,wherepisthepatchsize. Beforefeedingthepatch
+p2
+tokensintothestackofViGblocks,weaddlearnablepositionembeddings. Theoutputtokensofthe
+lastblockarefedintoaglobalaveragepoolinglayerfollowedbyalinearclassifier.
+4.2 ViGBlock
+ViGblock,servingasabasicblock,consistsof: 1)along-termBiGLAlayerthatcanexploitthe
+1D-globalcontextoftheimageinalinear-complexitymanner;2)ashort-termdepth-wiseconvolution
+4layerthatcancapturethe2D-localdetailsoftheimage;3)agatingmechanismthatcanadaptively
+combinetheglobalandlocalinformation;4)aSwiGLUFFNlayerasin[89,85,106]forchannel
+mixing.
+4.2.1 GlobalBidirectionalGatedLinearAttention
+Inthiswork,weadoptbidirectionalmodelingforitsinherentsimplicityandmemory-friendlyaccess
+pattern. Thecruxofthisdesignisthedirection-wisegatingmechanism,particularlytheforgetgate
+G ,whichmeticulouslycontrolstheflowofinformation. Thisiscrucial,especiallyfortokenslocated
+t
+attheboundariesofanobject,whereinformationfromdifferentdirectionsvariessignificantlyin
+importance. Toharnessthisdirectionalsensitivityeffectively,weintroducetheBidirectionalGated
+LinearAttention(BiGLA)layer,asshowninFig.3. Thislayerisparameter-efficientbysharingall
+parametersexceptfortheforgetgate,whichistailoredtoeachdirection:
+α
+t
+=sigmoid((x tW α1W2 α+b α))τ1 ∈R1×2dk,
+→− α t,← α−
+t
+=split(α t)∈R1×dk, 𝐒⃗ 𝒕 𝒐𝒕 𝐒⃖ 𝒕
+→− G
+t
+=→− α⊤
+t
+1∈(0,1)dk×dv, 𝒐𝒕 𝒐𝒕
+→−← G−
+t
+= →−← α−⊤
+t
+1∈ →−(0,1)dk×dv, 𝒌𝒒 𝒕⊺𝒕
+𝒗𝒕
+S
+t
+= G t⊙ S t−1+k t⊤v
+t
+∈Rdk×dv, (6) 𝟏
+←− ←− ←− 𝐆𝒕 𝜶𝒕⊺ 𝜶𝒕⊺ 𝑮𝒕
+→−S
+t
+= G →−t⊙ S t+1+k t⊤v
+t
+∈Rdk×dv,
+𝐒⃗ 𝒕%𝟏 𝜶&𝒕 𝐒⃖ 𝒕#𝟏
+o =q S ,
+←−t t ←−t ⊘Split ⊗M proat dm ucu tl ⊙H pra od da um ctard
+o t =q tS t, Figure3: IllustrationofBiGLA.
+→− ←−
+o =(o + o )/2,
+t t t
+→− ←−
+where□indicatesbidirectionalmodification, □ and □ indicateforwardandbackwarddirection
+respectively, W2
+α
+∈ R16×2dk and b
+α
+∈ R1×2dk. The proposed BiGLA layer com →−presses ←−the
+historicalinformationofforwardandbackwarddirectionsintofixed-sizehiddenstates S and S ,
+t t
+andattendsq withthehiddenstatestoobtainlong-termglobalcontextinalinear-complexitymanner.
+t
+The proposed design only introduces extra 17d parameters to render vanilla causal GLA layer
+k
+into BiGLA layer for visual representation learning, which is minor compared to the total 4d2
+parameters (roughly) by setting d ,d = d and d = d. The designed BiGLA layer has nearly
+q k 2 v
+thesamenumberofparametersasthestandardsoftmaxattentionwhileusingmuchfewerFLOPs
+(Ω =5Td2+32Tdvs.Ω =4Td2+2T2d).
+BiGLA SoftmaxAttn
+4.2.2 2DGatingLocalityInjection
+→− ←−
+Thoughthehiddenstates S and S intheBiGLAlayer,compressedalongthe1Dvisualsequences,
+t t
+cancapturethelong-termglobalcontextoftheimage,theymayfinditdifficultincapturingthelocal
+detailsof2Dimages. Toaddressthisissue,weinject2Dlocalitybyintroducingashort-termlocal
+convolutionlayer. Inourcase,weuse3×3depthwiseconvolutionforitsefficiencyinparameters
+andFLOPs,wherethe3×3convolutionalfiltersareseparatedintoeachchannel. Inspiredbythe
+data-dependentgatingmechanisminGLA[106],weproposeadata-dependentgatingaggregation
+for2Dlocalityinjectiontointerleavetheglobalandlocalinformation:
+O =DWConv (X),
+local 3×3
+O =BiGLA(O ),
+global local
+(7)
+G =sigmoid(O W +b ),
+2D local gate2D gate2D
+O=G ⊙O +(1−G )⊙O .
+2D local 2D global
+4.3 ArchitectureDetails
+EquippedwiththeproposedViGblock,wemainlyinvestigatetwokindsofvariantsofViG:ViT-style
+non-hierarchicalmodelswithafixednumberoftokensineachblockandCNN-stylehierarchical
+modelswithgraduallydownsampledtokens.
+5ForViT-stylemodels, wesetthepatchsizepto16andstack12ViGblocks. Then, weobtain3
+variantsofthemodelatdifferentsizes(ViG-T,ViG-S,andViG-B)bydirectlyadjustingtheembedding
+dimensiond,whichhavesimilarparameterstoDeiT-T,S,andB.Forhierarchicalmodels,wealso
+propose3variants(ViG-H-T,ViG-H-S,andViG-H-B)followingthedesignofSwinTransformer.
+We set the patch size p to 4 and apply our proposed ViG block at different stages. The detailed
+architecturesareprovidedinAppendixB.
+4.4 EfficientImplementation
+The practical efficiency of the model not only depends on the theoretical FLOPs but is mostly
+determined by the hardware-awareness of the implementation. It means the implemented model
+should: 1)beawareofmemoryhierarchy;2)leveragethespecializedcomputeunit(tensorcoreson
+GPUforfastmatrixmultiplication);3)haveahighdegreeofparallelism. Thankstothehardware-
+awareimplementationofGLA,themostcalculation-intensivepartsofViGcanberepresentedin
+matrixmultiplicationandareperformedonfasterSRAMinsteadofslowerhighbandwidthmemory
+(HBM),leadingtosuperiorwall-timeefficiencybyleveragingthetensorcoresandreducingtheHBM
+I/Ocost.
+Hardware-aware Bidirectional Design. Given the multi-directional nature of representing 2D
+imagesin1Dflattenedsequences,thepioneeringworkVim,basedonbidirectionalmodeling,chooses
+toinvoketwosequentialkernelstoprocesstheforwardandbackwarddirectionsseparately,whichis
+inefficientintermsofparallelism. Inthiswork,weproposeahardware-awarebidirectionaldesign
+by fusing the forward and backward directions of Eq. (6) into a single kernel to achieve higher
+parallelism. Moreover,owingtotheparameter-efficientdesignoftheBiGLAlayer,wecanreduce
+thematerializationofthebackwardvisualsequenceinhigh-bandwidthmemory(HBM),whichsaves
+onmemorycosts.
+5 Experiment
+Weconductextensiveexperimentstovalidatetheeffectivenessofourproposedmodels. Wepresent
+the main results on ImageNet [14] and compare them with various other models. Additionally,
+webenchmarkourmodelondownstreamdensepredictiontasks,includingobjectdetectiononthe
+COCO[52]datasetandsemanticsegmentationonADE20K[116].
+5.1 ImageClassification
+Settings. We train classification experiments on ImageNet-1K dataset, which is a widely used
+large-scalebenchmarkforimageclassification. Tofairlycomparewithpreviousworks,wemainly
+followthetrainingandevaluationsettingofDeiTandSwinTransformer[88,58]. Specifically,allthe
+modelsaretrainedfromscratchfor300epochs. Imagesarecroppedto224×224forbothtraining
+andevaluation. FurtherdetailsareprovidedinAppendixC.
+ComparisonwithNon-hierarchicalArchitectures.Tab.1comparesViGwithplainnon-hierarchical
+architecturesbasedondifferentsequencemodelinglayers,includingTransformer,SSM,andlinear
+RNN.TheresultsshowthattheproposedViGachievessuperiortrade-offintermsofparameters
+andaccuracyacrossvariousmodelsizes,asshowninFig.1(a). Remarkably,ViG-Shasnearlythe
+samenumberofparametersasDeiT-Sandsignificantlyoutperformsitby1.9%top-1accuracy,which
+matchestheperformanceofDeiT-B(only0.1%lower)with3.7×fewerparameters,5×fewerFLOPs
+and2×fasterthroughput. Moreover,ViG-Breaches82.6%top-1accuracy,surpassingDeiT-Bby
+0.8%,VRWKV-Bby0.6%,andS4ND-ViT-Bby2.2%.
+Intermsofpracticalthroughput,ViGsurpassesotherlinear-complexitysequencemodelingmethods,
+notably being 1.8× faster than Vim-T and 1.6× faster than Vim-S at tiny and small model sizes
+respectively. Comparedwiththecounterpartswithmulti-directionscanning,ViG-Tis5.2×faster
+thanLocalVim-Tand4.6×fasterthanPlainMamba-L1thankstothememory-friendlyaccesspattern
+ofbidirectionalmodeling. ViGisonlyslightlyslowerthanDeiT,whichcanbeattributedtothehigh
+parallelism of the Transformer and the low FLOPs when inputting small 224×224 images. As
+showninFig.4,ViGachievesexponentialsuperiorityastheimagesizeincreases.
+ComparisonwithHierarchicalArchitectures. Tab.1comparesViG-Hwithhierarchicalarchitec-
+tures,includingtheadvancedCNN-basedRegNetandConvNeXt,aswellasTransformer-basedSwin
+6Table1: Comparisonwithplainnon-hierarchicalarchitectures(left)andhierarchicalarchitectures
+(right)onImageNet-1Kvalidationset. “Size”meanstrain/valimagesize. “#P.”,“Tp.”,and“Acc.”
+denote the number of parameters, throughput and top-1 accuracy respectively. Tp. (images/s) is
+measuredonasingle4090GPUwithbatchsize256following[58].
+Method Size #P. FLOPs Tp. Acc. Method Size #P. FLOPs Tp. Acc.
+Transformers Convnets
+ViT-B/16[18] 3842 86M 55.4G - 77.9 RegNetY-4G[77] 2242 12M 4G - 80.0
+ViT-L/16[18] 3842 307M 190.7G - 76.5 RegNetY-8G[77] 2242 25M 8G - 81.7
+RegNetY-16G[77] 2242 45M 16G - 82.9
+DeiT-T[88] 2242 6M 1.3G 5761 72.2
+DeiT-S[88] 2242 22M 4.6G 2396 79.8 EffNet-B3[86] 3002 12M 1.8G - 81.6
+DeiT-B[88] 2242 86M 17.6G 837 81.8 EffNet-B4[86] 3802 19M 4.2G - 82.9
+EffNet-B5[86] 4562 30M 9.9G - 83.6
+MLP
+EffNet-B6[86] 5282 43M 19.0G - 84.0
+gMLP-T[53] 2242 6M 1.4G 3872 72.3 EffNet-B7[86] 5282 66M 37.0G - 84.3
+gMLP-S[53] 2242 20M 4.5G 1676 79.6
+ConvNeXt-T[59] 2242 29M 4.5G 1505 82.1
+gMLP-B[53] 2242 73M 15.8G 647 81.6 ConvNeXt-S[59] 2242 50M 8.7G 905 83.1
+SSMs ConvNeXt-B[59] 2242 89M 15.4G 643 83.8
+S4ND-ViT-B[66] 2242 89M - 562 80.4 Transformers
+Vim-T[117] 2242 7M 1.5G 2561 76.1 Swin-T[58] 2242 28M 4.6G 1511 81.3
+Vim-S[117] 2242 26M 5.1G 1151 80.3 Swin-S[58] 2242 50M 8.7G 915 83.0
+Swin-B[58] 2242 88M 15.4G 661 83.5
+LocalVim-T[40] 2242 8M 1.5G 885 76.2
+LocalVim-S[40] 2242 28M 4.8G 396 81.2 SSMs
+PlainMamba-L1[104] 2242 7M 3.0G 995 77.9 S4ND-ConvNeXt-T[66] 2242 30M - 643 82.2
+PlainMamba-L2[104] 2242 26M 8.1G 482 81.6 VMamba-T[56] 2242 31M 4.9G 1161 82.5
+PlainMamba-L3[104] 2242 51M 14.4G 279 82.3 VMamba-S[56] 2242 50M 8.7G 779 83.6
+LinearRNN VMamba-B[56] 2242 89M 15.4G 557 83.9
+VRWKV-T[19] 2242 6M 1.2G 4551 75.1 EfficientVMamba-B[70] 2242 33M 4.0G 1258 81.8
+VRWKV-S[19] 2242 24M 4.6G 1724 80.1 LocalVMamba-T[40] 2242 26M 5.7G 330 82.7
+VRWKV-B[19] 2242 94M 18.2G 635 82.0 LocalVMamba-S[40] 2242 50M 11.4G 193 83.7
+LinearAttention LinearAttention
+ViG-T 2242 6M 0.9G 4645 77.2 ViG-H-T 2242 29M 4.5G 1480 82.8
+ViG-S 2242 23M 3.5G 1886 81.7 ViG-H-S 2242 50M 8.8G 890 83.8
+ViG-B 2242 89M 13.8G 701 82.6 ViG-H-B 2242 89M 15.5G 621 84.2
+Transformer,andSSM-basedS4NDandVMamba. Thankstothelinearcomplexityoftheproposed
+VGLAblock,ViG-HachievessimilarFLOPstothoseofwindow-basedTransformersandCNNs,but
+withtheaddedadvantageofaglobalreceptivefield. AsshowninFig.1(b),ViG-Hachievesthebest
+top-1accuracyacrossdifferentmodelsizes.
+TheresultsofpracticalthroughputdemonstratethatViG-HsurpassestheSSM-basedS4NDand
+VMamba,andmatchestheperformanceofwell-establishedandhighly-optimizedConvNeXtand
+SwinTransformer.
+5.2 ObjectDetection
+Settings. WeconductexperimentsforobjectdetectionandinstancesegmentationontheCOCO2017
+dataset[52]. WeutilizeMask-RCNN[31]asthedetectionheadandfollowVRWKV[19]tointegrate
+theViT-Adapter[6]onourplainViGmodels. FurtherdetailsareprovidedinAppendixC.
+Results. In Tab. 2, for high-resolution 1333×800 input images, ViT needs to resort to window
+attentiontoensureefficiency, sacrificingaccuracy. UnlikeViT,ViGcanefficientlyprocesshigh-
+resolutionimagesdirectlywithaglobalreceptivefield. TheresultsdemonstratethatViGoutperforms
+both ViT and VRWKV in terms of FLOPs and accuracy. Specifically, ViG-T uses only half the
+backboneFLOPsofViT-Tbutachieves1.7higherAPband1.2higherAPm,surpassingVRWKV-T
+by1.6inAPband1.1inAPm. Forthebasemodelsize,thoughVRWKV-Bismoreefficientthan
+ViT-BinFLOPs,itstillfallsshortofViT-Bby0.1inAPm. Meanwhile,ourViG-Bachieves0.5
+higherAPband0.4higherAPmthanViT-Bwith44%lowerbackboneFLOPs.
+7Table2:ObjectdetectionandinstancesegmentationonCOCOval2017(left)&semanticsegmentation
+onADE20Kvalset(right). “#Param”denotesthenumberofbackboneparameters. “FLOPs”in
+theleftandrighttablesdenotethecomputationalworkloadofthebackbonewithaninputimageof
+1333×800and512×512,respectively. “†”meanswindowattentionisadoptedinViTlayers. “‡”
+denotesthattheresultsofVimaredirectlytakenfromitspapersinceitusesthesamesegmentation
+headandtrainingrecipeasours.
+Method #Param. FLOPs APb APm Method #Param. FLOPs mIoU
+ViT-T† 8M 95.4G 41.1 37.5 Vim-T‡ - - 41.0
+ViT-T 8M 147.1G 41.6 37.9 ViT-T 8M 20.9G 42.6
+VRWKV-T 8M 67.9G 41.7 38.0 VRWKV-T 8M 16.6G 43.3
+ViG-T 8M 61.2G 43.3 39.1 ViG-T 8M 14.9G 43.8
+ViT-S† 28M 241.2G 44.6 39.7 Vim-S‡ - - 44.9
+ViT-S 28M 344.5G 44.9 40.1 ViT-S 28M 54.0G 46.2
+VRWKV-S 29M 189.9G 44.8 40.2 VRWKV-S 29M 46.3G 47.2
+ViG-S 28M 164.1G 45.5 40.8 ViG-S 28M 40.0G 47.9
+ViT-B† 100M 686.7G 46.2 41.5 ViT-B 100M 157.9G 48.8
+ViT-B 100M 893.3G 46.8 41.8 VRWKV-B 107M 146.0G 49.2
+VRWKV-B 107M 599.0G 46.8 41.7 ViG-B 103M 121.5G 49.4
+ViG-B 103M 498.5G 47.3 42.2
+Table3: RoadmapofViG.ThethroughputandmemoryaremeasuredonasingleNVIDIARTX
+4090GPUwithbatchsize256andimagesize224following[58].
+Method Roadmap #Param. Throughput Memory Top-1Acc.
+DeiT - 5.72M 5761 627MB 72.2
+GLA - 5.72M 6662 582MB 66.1
++ improvedpatchembeddinglayer 5.75M 6634 582MB 73.8
++ directbidirectionalmodeling 5.75M 4564 748MB 75.2
++ absolutepositionembedding 5.79M 4571 748MB 75.4
++ direction-wiseα(§4.2.1) 5.81M 4566 785MB 76.3
++ 2Dgatinglocalityinjection(§4.2.2) 5.83M 3812 842MB 77.2
++ hardware-awarebidirectionimpl.(§4.4) 5.83M 4645 730MB 77.2
+5.3 SemanticSegmentation
+Settings. WetrainexperimentsforsemanticsegmentationontheADE20K[116]dataset. Weuse
+UperNet[98]asthesegmentationheadandadopttheViT-Adapter[6]followingVRWKV[19]to
+adaptourplainViGforsegmentation. TrainingdetailsarethesameasVRWKV[19]andVim[117],
+whicharedetailedintheAppendixC.
+Results. AsshowninTab.2,formedium-resolution512×512inputimages,ViGoutperformsthe
+quadratic-complexityTransformer-basedViTandthelinear-complexityRNN-basedVRWKVacross
+differentmodelsizesinbothFLOPsandsegmentationaccuracy. Forinstance,inthetinysizemodels,
+ViGoutperformsViTby1.2mIoUand5GFLOPs,andVRWKVby0.5mIoUand1.7GFLOPs. In
+thesmallsizemodels,ViGsurpassesViTby1.7mIoUand14GFLOPs,andVRWKVby0.7mIoU
+and6.3GFLOPs. TheseresultsdemonstrateViG’ssuperioradaptabilityfordense-pixelprediction
+taskscomparedtoVRWKV.
+5.4 AblationStudy
+MoreablationstudiesareprovidedinAppendixD.
+Roadmap. InTab.3,weshowtheroadmapofhowtointroduceminimalcosttorenderthecausal
+sequencemodelingGLAintoproposedViG.The“improvedpatchembeddinglayer”ofRow3means
+thatinsteadofdirectlyapplyingconvolutionwithlarge16×16kernel,weadopta9×9convolution
+withstrideas8followedby3×3convolutionwithstrideas2,whichonlyadds0.03Mparameters
+butboosttheaccuracywithnearlynoaffectsoninferenceefficiency. TheViG-Tintroducesonly
+0.11MparametersandsignificantlyoutperformsvanillaGLAby11.1%top-1accuracyandDeiTby
+5.0%top-1accuracy. Byfurtherintroducingthehardware-awarebidirectionalimplementation,we
+significantlyboosttheefficiency(enhancethroughputby21.9%andsave13.3%GPUmemory)and
+closethegapwithDeiT,evenatthelow-resolution224×224image.
+EfficiencyofViG.InFig.4,wecompareViG-TwithVim-T,VRWKV-T,andDeiT-T,focusingon
+theoreticalFLOPs,actuallatency,andmemoryusageonanRTX4090GPU.Wetestthecomplete
+825
+103 ViG-T 3 OOM ViG-T
+VRWKV-T 2 VRWKV-T
+Vim-T 20 Vim-T
+DeiT-T 17.4× 1 1.9× DeiT-T
+102 0
+15 512
+5.2×
+10
+101
+2.2×
+6.7×
+5
+100
+0
+224 512640768 1024 1280 1640 2048 224 512640768 1024 1280 1640 2048
+Image Resolution Image Resolution
+(a)FLOPs (b)Memory
+80
+ViG-T
+VRWKV-T 70
+102 Vim-T 16.7× DeiT-T 60
+50
+20.7
+101 4.0× 40
+30 ViG-T
+VRWKV-T
+100 1.5× 20 Vim-T
+DeiT-T
+10
+ResNet50
+0
+224 512640768 1024 1280 1640 2048 224 384 512 640 768 1024
+Image Resolution Image Resolution
+(c)Latency (d)Accuracy
+Figure4: ComparisonamongViG,Vim[117],VRWKV[19],andViT[18,88]in(a)FLOPs,(b)
+memory,(c)latency,and(d)accuracywithrespecttoincreasingimageresolutionduringinferenceon
+ImageNet-1Kvalset. ThebluedashedlineindicatestheestimatedvalueswhentheGPUmemoryhas
+runout. Webenchmarkthelatencywiththemaximumbatchsizethatcanmakemodelsrunnableon
+theGPUtoensurefullGPUutilizationandprovideavailableresultsathighresolutions.
+modelacrossincreasinginputimageresolutionsfrom224×224to2048×2048. Thankstothe
+linear-complexitysequencemodeling,theadvantageoftheproposedarchitectureoverViTgrowsas
+theresolutionincreases.Whenresolutionreaches1024×1024,ViG-Tuses5.2×lowerFLOPs,saves
+90%GPUmemory,andruns4.8×fasterthanDeiT-T.Comparedtoitslinear-complexitycounterpart
+Vim, ViG also demonstrates 1.6× lower FLOPs, saves 26% GPU memory, and runs 2.2× faster.
+Additionally,ViGsurpassesVRWKVintermsofFLOPs,latency,andmemory.
+Accuracyvs.Resolution. InFig.4(d),wetestthemodelstrainedon224×224resolutionacross
+different resolutions. ViG outperforms ViT, Vim, VRWKV, and even hierarchical CNN-based
+ResNet50intermsofaccuracyastheresolutionincreases. TheresultsdemonstratethatViGbenefits
+frombetter2D-awarenessanddemonstratessuperiorgeneralizationinresolutionextrapolation.
+6 Conclusion
+Inthispaper,weintroducedViG,agenericvisionbackbonenetworkthatintroducesGatedLinear
+Attention(GLA)tothevisionfield,achievingefficientvisualrepresentationlearning. Ourapproach
+addressestheinherentlimitationsoftraditionalTransformersandCNNsbymaintainingaglobal
+receptivefieldwhileoperatingwithlinearcomplexity. Weproposedirection-wisegatingthrough
+bidirectionalGLAmodelingand2Dgatinglocalityinjectiontoeffectivelycapturebothglobalcontext
+andlocaldetails,leadingtosignificantimprovementsinaccuracy. Additionally,ourhardware-aware
+implementationreducestheoverheadbroughtbyextradirection,enhancingefficiency. Thesuperior
+experimentalresultsofViGinlow-resolutionimageclassification,medium-resolutionsegmentation,
+andhigh-resolutiondetectionhighlightitasaverycompetitivealternativetotheexistinggeneric
+visionbackbones.
+9
+)G(
+sPOLF
+)sm(
+ycnetaL
+)BG(
+yromeM
+UPG
+)%(
+ycaruccA
+1-poT
+teNegamILimitations. Though ViG proposes hardware-aware implementation improves the efficiency, as
+shown in Tab. 3, and demonstrates obvious superiority at high-resolution input images, it is still
+slightlyinferiortoDeiTatthesmall224×224inputimages. Wewillfurtheroptimizetheimplemen-
+tationtoimprovethehardware-awarenessinfuturework.
+Acknowledgement
+WewouldliketoacknowledgeYuxinFangforhelpfulfeedbackonthedraft.
+References
+[1] SimranArora,SabriEyuboglu,MichaelZhang,AmanTimalsina,SilasAlberti,DylanZinsley,JamesZou,
+AtriRudra,andChristopherRé. Simplelinearattentionlanguagemodelsbalancetherecall-throughput
+tradeoff. arXivpreprintarXiv:2402.18668,2024.
+[2] JinzeBai,ShuaiBai,YunfeiChu,ZeyuCui,KaiDang,XiaodongDeng,YangFan,WenbinGe,YuHan,
+FeiHuang,etal. Qwentechnicalreport. arXivpreprintarXiv:2309.16609,2023.
+[3] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,Arvind
+Neelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsarefew-shotlearners.
+InNeurIPS,2020.
+[4] GuoChen,YifeiHuang,JilanXu,BaoqiPei,ZheChen,ZhiqiLi,JiahaoWang,KunchangLi,TongLu,
+andLiminWang.Videomambasuite:Statespacemodelasaversatilealternativeforvideounderstanding.
+arXivpreprintarXiv:2403.09626,2024.
+[5] HongruixuanChen,JianSong,ChengxiHan,JunshiXia,andNaotoYokoya. Changemamba:Remote
+sensingchangedetectionwithspatio-temporalstatespacemodel. arXivpreprintarXiv:2404.03425,2024.
+[6] ZheChen,YuchenDuan,WenhaiWang,JunjunHe,TongLu,JifengDai,andYuQiao.Visiontransformer
+adapterfordensepredictions. InICLR,2023.
+[7] KrzysztofChoromanski,ValeriiLikhosherstov,DavidDohan,XingyouSong,AndreeaGane,Tamas
+Sarlos,PeterHawkins,JaredDavis,AfrozMohiuddin,LukaszKaiser,etal. Rethinkingattentionwith
+performers. arXivpreprintarXiv:2009.14794,2020.
+[8] XiangxiangChu,ZhiTian,YuqingWang,BoZhang,HaibingRen,XiaolinWei,HuaxiaXia,andChunhua
+Shen. Twins:Revisitingthedesignofspatialattentioninvisiontransformers. InNeurIPS,2021.
+[9] ZihangDai,HanxiaoLiu,QuocVLe,andMingxingTan. Coatnet:Marryingconvolutionandattention
+foralldatasizes. InNeurIPS,2021.
+[10] Zihang Dai, Zhilin Yang, Yiming Yang, Jaime Carbonell, Quoc V Le, and Ruslan Salakhutdi-
+nov. Transformer-xl: Attentive language models beyond a fixed-length context. arXiv preprint
+arXiv:1901.02860,2019.
+[11] TriDao. Flashattention-2:Fasterattentionwithbetterparallelismandworkpartitioning. arXivpreprint
+arXiv:2307.08691,2023.
+[12] TriDao,DanFu,StefanoErmon,AtriRudra,andChristopherRé. Flashattention: Fastandmemory-
+efficientexactattentionwithio-awareness. InNeurIPS,2022.
+[13] SohamDe,SamuelLSmith,AnushanFernando,AleksandarBotev,GeorgeCristian-Muraru,AlbertGu,
+RubaHaroun,LeonardBerrada,YutianChen,SrivatsanSrinivasan,etal. Griffin:Mixinggatedlinear
+recurrenceswithlocalattentionforefficientlanguagemodels. arXivpreprintarXiv:2402.19427,2024.
+[14] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li, and Li Fei-Fei. Imagenet: A large-scale
+hierarchicalimagedatabase. InCVPR,2009.
+[15] XiaohanDing,XiangyuZhang,JungongHan,andGuiguangDing. Scalingupyourkernelsto31x31:
+Revisitinglargekerneldesignincnns. InCVPR,2022.
+[16] XiaohanDing,YiyuanZhang,YixiaoGe,SijieZhao,LinSong,XiangyuYue,andYingShan. Unire-
+plknet:Auniversalperceptionlarge-kernelconvnetforaudio,video,pointcloud,time-seriesandimage
+recognition. InCVPR,2024.
+10[17] XiaoyiDong,JianminBao,DongdongChen,WeimingZhang,NenghaiYu,LuYuan,DongChen,and
+BainingGuo. Cswintransformer:Ageneralvisiontransformerbackbonewithcross-shapedwindows. In
+CVPR,2022.
+[18] AlexeyDosovitskiy,LucasBeyer,AlexanderKolesnikov,DirkWeissenborn,XiaohuaZhai,Thomas
+Unterthiner,MostafaDehghani,MatthiasMinderer,GeorgHeigold,SylvainGelly,etal. Animageis
+worth16x16words:Transformersforimagerecognitionatscale. InICLR,2020.
+[19] YuchenDuan,WeiyunWang,ZheChen,XizhouZhu,LeweiLu,TongLu,YuQiao,HongshengLi,
+JifengDai,andWenhaiWang. Vision-rwkv: Efficientandscalablevisualperceptionwithrwkv-like
+architectures. arXivpreprintarXiv:2403.02308,2024.
+[20] Stéphaned’Ascoli,HugoTouvron,MatthewLLeavitt,AriSMorcos,GiulioBiroli,andLeventSagun.
+Convit:Improvingvisiontransformerswithsoftconvolutionalinductivebiases. InICML,2021.
+[21] JieminFang,LingxiXie,XinggangWang,XiaopengZhang,WenyuLiu,andQiTian. Msg-transformer:
+Exchanginglocalspatialinformationbymanipulatingmessengertokens. InCVPR,2022.
+[22] YuxinFang,BenchengLiao,XinggangWang,JieminFang,JiyangQi,RuiWu,JianweiNiu,andWenyu
+Liu. Youonlylookatonesequence: Rethinkingtransformerinvisionthroughobjectdetection. In
+NeurIPS,2021.
+[23] YuxinFang,QuanSun,XinggangWang,TiejunHuang,XinlongWang,andYueCao. Eva-02:Avisual
+representationforneongenesis. arXivpreprintarXiv:2303.11331,2023.
+[24] YuxinFang,WenWang,BinhuiXie,QuanSun,LedellWu,XinggangWang,TiejunHuang,Xinlong
+Wang,andYueCao. Eva: Exploringthelimitsofmaskedvisualrepresentationlearningatscale. In
+CVPR,2023.
+[25] YuxinFang,ShushengYang,ShijieWang,YixiaoGe,YingShan,andXinggangWang. Unleashing
+vanillavisiontransformerwithmaskedimagemodelingforobjectdetection. InICCV,2023.
+[26] ZhengcongFei,MingyuanFan,ChangqianYu,andJunshiHuang. Scalablediffusionmodelswithstate
+spacebackbone. arXivpreprintarXiv:2402.05608,2024.
+[27] DanielYFu,TriDao,KhaledKamalSaab,ArminWThomas,AtriRudra,andChristopherRe. Hungry
+hungryhippos:Towardslanguagemodelingwithstatespacemodels. InICLR,2023.
+[28] AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestatespaces. arXiv
+preprintarXiv:2312.00752,2023.
+[29] AlbertGu,KaranGoel,andChristopherRé. Efficientlymodelinglongsequenceswithstructuredstate
+spaces. InICLR,2022.
+[30] Jianyuan Guo, Kai Han, Han Wu, Yehui Tang, Xinghao Chen, Yunhe Wang, and Chang Xu. Cmt:
+Convolutionalneuralnetworksmeetvisiontransformers. InCVPR,2022.
+[31] KaimingHe,GeorgiaGkioxari,PiotrDollár,andRossGirshick. Maskr-cnn. InICCV,2017.
+[32] KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun. Deepresiduallearningforimagerecognition.
+InCVPR,2016.
+[33] XuanhuaHe,KeCao,KeyuYan,RuiLi,ChengjunXie,JieZhang,andManZhou.Pan-mamba:Effective
+pan-sharpeningwithstatespacemodel. arXivpreprintarXiv:2402.12192,2024.
+[34] JonathanHo,NalKalchbrenner,DirkWeissenborn,andTimSalimans.Axialattentioninmultidimensional
+transformers. arXivpreprintarXiv:1912.12180,2019.
+[35] SeppHochreiterandJürgenSchmidhuber. Longshort-termmemory. Neuralcomputation,1997.
+[36] QibinHou,Cheng-ZeLu,Ming-MingCheng,andJiashiFeng. Conv2former:Asimpletransformer-style
+convnetforvisualrecognition. arXivpreprintarXiv:2211.11943,2022.
+[37] AndrewGHoward,MenglongZhu,BoChen,DmitryKalenichenko,WeijunWang,TobiasWeyand,
+MarcoAndreetto,andHartwigAdam. Mobilenets:Efficientconvolutionalneuralnetworksformobile
+visionapplications. arXivpreprintarXiv:1704.04861,2017.
+[38] VincentTaoHu,StefanAndreasBaumann,MingGui,OlgaGrebenkova,PingchuanMa,JohannesFischer,
+andBjornOmmer. Zigma:Zigzagmambadiffusionmodel. arXivpreprintarXiv:2403.13802,2024.
+11[39] Gao Huang, Zhuang Liu, Laurens Van Der Maaten, and Kilian Q Weinberger. Densely connected
+convolutionalnetworks. InCVPR,2017.
+[40] TaoHuang,XiaohuanPei,ShanYou,FeiWang,ChenQian,andChangXu. Localmamba:Visualstate
+spacemodelwithwindowedselectivescan. arXivpreprintarXiv:2403.09338,2024.
+[41] ZilongHuang,XinggangWang,LichaoHuang,ChangHuang,YunchaoWei,andWenyuLiu. Ccnet:
+Criss-crossattentionforsemanticsegmentation. InICCV,2019.
+[42] AngelosKatharopoulos,ApoorvVyas,NikolaosPappas,andFrançoisFleuret. Transformersarernns:
+Fastautoregressivetransformerswithlinearattention. InICML,2020.
+[43] Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv preprint
+arXiv:1412.6980,2014.
+[44] AlexKrizhevsky,IlyaSutskever,andGeoffreyEHinton. Imagenetclassificationwithdeepconvolutional
+neuralnetworks. InNeurIPS,2012.
+[45] YannLeCun,LéonBottou,YoshuaBengio,andPatrickHaffner. Gradient-basedlearningappliedto
+documentrecognition. ProceedingsoftheIEEE,1998.
+[46] JunnanLi,DongxuLi,CaimingXiong,andStevenHoi. Blip:Bootstrappinglanguage-imagepre-training
+forunifiedvision-languageunderstandingandgeneration. InICML,2022.
+[47] KunchangLi,XinhaoLi,YiWang,YinanHe,YaliWang,LiminWang,andYuQiao. Videomamba:State
+spacemodelforefficientvideounderstanding. arXivpreprintarXiv:2403.06977,2024.
+[48] KunchangLi,YaliWang,JunhaoZhang,PengGao,GuangluSong,YuLiu,HongshengLi,andYuQiao.
+Uniformer:Unifyingconvolutionandself-attentionforvisualrecognition. TPAMI,2023.
+[49] Shufan Li, Harkanwar Singh, and Aditya Grover. Mamba-nd: Selective state space modeling for
+multi-dimensionaldata. arXivpreprintarXiv:2402.05892,2024.
+[50] YanghaoLi,HanziMao,RossGirshick,andKaimingHe. Exploringplainvisiontransformerbackbones
+forobjectdetection. InECCV,2022.
+[51] DingkangLiang,XinZhou,XinyuWang,XingkuiZhu,WeiXu,ZhikangZou,XiaoqingYe,andXiang
+Bai. Pointmamba:Asimplestatespacemodelforpointcloudanalysis. arXivpreprintarXiv:2402.10739,
+2024.
+[52] Tsung-YiLin,MichaelMaire,SergeBelongie,JamesHays,PietroPerona,DevaRamanan,PiotrDollár,
+andCLawrenceZitnick. Microsoftcoco:Commonobjectsincontext. InECCV,2014.
+[53] HanxiaoLiu,ZihangDai,DavidSo,andQuocVLe. Payattentiontomlps. InNeurIPS,2021.
+[54] HaotianLiu,ChunyuanLi,QingyangWu,andYongJaeLee.Visualinstructiontuning. InNeurIPS,2024.
+[55] ShiweiLiu,TianlongChen,XiaohanChen,XuxiChen,QiaoXiao,BoqianWu,TommiKärkkäinen,
+MykolaPechenizkiy,DecebalMocanu,andZhangyangWang. Moreconvnetsinthe2020s:Scalingup
+kernelsbeyond51x51usingsparsity. InICLR,2023.
+[56] YueLiu,YunjieTian,YuzhongZhao,HongtianYu,LingxiXie,YaoweiWang,QixiangYe,andYunfan
+Liu. Vmamba:Visualstatespacemodel. arXivpreprintarXiv:2401.10166,2024.
+[57] ZeLiu,HanHu,YutongLin,ZhuliangYao,ZhendaXie,YixuanWei,JiaNing,YueCao,ZhengZhang,
+LiDong,etal. Swintransformerv2:Scalingupcapacityandresolution. InCVPR,2022.
+[58] ZeLiu,YutongLin,YueCao,HanHu,YixuanWei,ZhengZhang,StephenLin,andBainingGuo. Swin
+transformer:Hierarchicalvisiontransformerusingshiftedwindows. InICCV,2021.
+[59] ZhuangLiu,HanziMao,Chao-YuanWu,ChristophFeichtenhofer,TrevorDarrell,andSainingXie. A
+convnetforthe2020s. InCVPR,2022.
+[60] JunMa,FeifeiLi,andBoWang. U-mamba:Enhancinglong-rangedependencyforbiomedicalimage
+segmentation. arXivpreprintarXiv:2401.04722,2024.
+[61] NingningMa,XiangyuZhang,Hai-TaoZheng,andJianSun. Shufflenetv2: Practicalguidelinesfor
+efficientcnnarchitecturedesign. InECCV,2018.
+12[62] XuezheMa,XiaomengYang,WenhanXiong,BeidiChen,LiliYu,HaoZhang,JonathanMay,Luke
+Zettlemoyer,OmerLevy,andChuntingZhou. Megalodon:Efficientllmpretrainingandinferencewith
+unlimitedcontextlength. arXivpreprintarXiv:2404.08801,2024.
+[63] HuanruHenryMao. Fine-tuningpre-trainedtransformersintodecayingfastweights. arXivpreprint
+arXiv:2210.04243,2022.
+[64] HarshMehta,AnkitGupta,AshokCutkosky,andBehnamNeyshabur. Longrangelanguagemodelingvia
+gatedstatespaces. InICLR,2023.
+[65] TsendsurenMunkhdalai,ManaalFaruqui,andSiddharthGopal. Leavenocontextbehind: Efficient
+infinitecontexttransformerswithinfini-attention. arXivpreprintarXiv:2404.07143,2024.
+[66] EricNguyen,KaranGoel,AlbertGu,GordonWDowns,PreeyShah,TriDao,StephenABaccus,and
+ChristopherRé.S4nd:Modelingimagesandvideosasmultidimensionalsignalsusingstatespaces.arXiv
+preprintarXiv:2210.06583,2022.
+[67] AdamPaszke,SamGross,FranciscoMassa,AdamLerer,JamesBradbury,GregoryChanan,Trevor
+Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, et al. Pytorch: An imperative style, high-
+performancedeeplearninglibrary. InNeurIPS,2019.
+[68] BadriNPatroandVijaySAgneeswaran. Simba:Simplifiedmamba-basedarchitectureforvisionand
+multivariatetimeseries. arXivpreprintarXiv:2403.15360,2024.
+[69] WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InICCV,2023.
+[70] XiaohuanPei,TaoHuang,andChangXu. Efficientvmamba:Atrousselectivescanforlightweightvisual
+mamba. arXivpreprintarXiv:2403.09977,2024.
+[71] BoPeng,EricAlcaide,QuentinAnthony,AlonAlbalak,SamuelArcadinho,HuanqiCao,XinCheng,
+MichaelChung,MatteoGrella,KranthiKiranGV,etal. Rwkv:Reinventingrnnsforthetransformerera.
+arXivpreprintarXiv:2305.13048,2023.
+[72] ZhenQin,XiaodongHan,WeixuanSun,DongxuLi,LingpengKong,NickBarnes,andYiranZhong.
+Thedevilinlineartransformer. arXivpreprintarXiv:2210.10340,2022.
+[73] ZhenQin,SonglinYang,WeixuanSun,XuyangShen,DongLi,WeigaoSun,andYiranZhong. Hgrn2:
+Gatedlinearrnnswithstateexpansion. arXivpreprintarXiv:2404.07904,2024.
+[74] ZhenQin,SonglinYang,andYiranZhong. Hierarchicallygatedrecurrentneuralnetworkforsequence
+modeling. InNeurIPS,2024.
+[75] AlecRadford,JongWookKim,ChrisHallacy,AdityaRamesh,GabrielGoh,SandhiniAgarwal,Girish
+Sastry,AmandaAskell,PamelaMishkin,JackClark,etal. Learningtransferablevisualmodelsfrom
+naturallanguagesupervision. InICML,2021.
+[76] AlecRadford,JeffreyWu,RewonChild,DavidLuan,DarioAmodei,IlyaSutskever,etal. Language
+modelsareunsupervisedmultitasklearners. OpenAIblog,2019.
+[77] IlijaRadosavovic,RajPrateekKosaraju,RossGirshick,KaimingHe,andPiotrDollár.Designingnetwork
+designspaces. InCVPR,2020.
+[78] YongmingRao,WenliangZhao,YansongTang,JieZhou,SerNamLim,andJiwenLu. Hornet:Efficient
+high-orderspatialinteractionswithrecursivegatedconvolutions. InNeurIPS,2022.
+[79] JosephRedmonandAliFarhadi.Yolov3:Anincrementalimprovement.arXivpreprintarXiv:1804.02767,
+2018.
+[80] MikeSchusterandKuldipKPaliwal. Bidirectionalrecurrentneuralnetworks. TIP,1997.
+[81] NoamShazeer. Gluvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,2020.
+[82] QiuhongShen,XuanyuYi,ZikeWu,PanZhou,HanwangZhang,ShuichengYan,andXinchaoWang.
+Gamba: Marry gaussian splatting with mamba for single view 3d reconstruction. arXiv preprint
+arXiv:2403.18795,2024.
+[83] JimmyT.H.Smith,AndrewWarrington,andScottLinderman. Simplifiedstatespacelayersforsequence
+modeling. InICLR,2023.
+13[84] QuanSun,YuxinFang,LedellWu,XinlongWang,andYueCao. Eva-clip:Improvedtrainingtechniques
+forclipatscale. arXivpreprintarXiv:2303.15389,2023.
+[85] Yutao Sun, Li Dong, Shaohan Huang, Shuming Ma, Yuqing Xia, Jilong Xue, Jianyong Wang, and
+FuruWei. Retentivenetwork: Asuccessortotransformerforlargelanguagemodels. arXivpreprint
+arXiv:2307.08621,2023.
+[86] MingxingTanandQuocLe. Efficientnet:Rethinkingmodelscalingforconvolutionalneuralnetworks.
+InICML,2019.
+[87] MingxingTanandQuocLe. Efficientnetv2:Smallermodelsandfastertraining. InICML,2021.
+[88] HugoTouvron,MatthieuCord,MatthijsDouze,FranciscoMassa,AlexandreSablayrolles,andHervé
+Jégou. Trainingdata-efficientimagetransformers&distillationthroughattention. InICML,2021.
+[89] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,TimothéeLacroix,
+BaptisteRozière,NamanGoyal,EricHambro,FaisalAzhar,etal. Llama:Openandefficientfoundation
+languagemodels. arXivpreprintarXiv:2302.13971,2023.
+[90] ZhengzhongTu,HosseinTalebi,HanZhang,FengYang,PeymanMilanfar,AlanBovik,andYinxiaoLi.
+Maxvit:Multi-axisvisiontransformer. InECCV,2022.
+[91] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,Łukasz
+Kaiser,andIlliaPolosukhin. Attentionisallyouneed. InNeurIPS,2017.
+[92] JingdongWang,KeSun,TianhengCheng,BoruiJiang,ChaoruiDeng,YangZhao,DongLiu,YadongMu,
+MingkuiTan,XinggangWang,etal. Deephigh-resolutionrepresentationlearningforvisualrecognition.
+TPAMI,2020.
+[93] JunxiongWang,JingNathanYan,AlbertGu,andAlexanderMRush. Pretrainingwithoutattention.
+arXivpreprintarXiv:2212.10544,2022.
+[94] WenhaiWang,JifengDai,ZheChen,ZhenhangHuang,ZhiqiLi,XizhouZhu,XiaoweiHu,TongLu,
+Lewei Lu, Hongsheng Li, et al. Internimage: Exploring large-scale vision foundation models with
+deformableconvolutions. InCVPR,2023.
+[95] WenhaiWang,EnzeXie,XiangLi,Deng-PingFan,KaitaoSong,DingLiang,TongLu,PingLuo,and
+LingShao. Pyramidvisiontransformer:Aversatilebackbonefordensepredictionwithoutconvolutions.
+InICCV,2021.
+[96] WenhaiWang,EnzeXie,XiangLi,Deng-PingFan,KaitaoSong,DingLiang,TongLu,PingLuo,and
+LingShao. Pvtv2:Improvedbaselineswithpyramidvisiontransformer. ComputationalVisualMedia,
+2022.
+[97] Haiping Wu, Bin Xiao, Noel Codella, Mengchen Liu, Xiyang Dai, Lu Yuan, and Lei Zhang. Cvt:
+Introducingconvolutionstovisiontransformers. InICCV,2021.
+[98] TeteXiao,YingchengLiu,BoleiZhou,YuningJiang,andJianSun. Unifiedperceptualparsingforscene
+understanding. InECCV,2018.
+[99] EnzeXie,WenhaiWang,ZhidingYu,AnimaAnandkumar,JoseMAlvarez,andPingLuo. Segformer:
+Simpleandefficientdesignforsemanticsegmentationwithtransformers. InNeurIPS,2021.
+[100] SainingXie,RossGirshick,PiotrDollár,ZhuowenTu,andKaimingHe. Aggregatedresidualtransforma-
+tionsfordeepneuralnetworks. InCVPR,2017.
+[101] SainingXie,RossGirshick,PiotrDollár,ZhuowenTu,andKaimingHe. Aggregatedresidualtransforma-
+tionsfordeepneuralnetworks. InCVPR,2017.
+[102] ZhaohuXing,TianYe,YijunYang,GuangLiu,andLeiZhu.Segmamba:Long-rangesequentialmodeling
+mambafor3dmedicalimagesegmentation. arXivpreprintarXiv:2401.13560,2024.
+[103] JingNathanYan,JiataoGu,andAlexanderMRush. Diffusionmodelswithoutattention. arXivpreprint
+arXiv:2311.18257,2023.
+[104] Chenhongyi Yang, Zehui Chen, Miguel Espinosa, Linus Ericsson, Zhenyu Wang, Jiaming Liu, and
+ElliotJCrowley. Plainmamba:Improvingnon-hierarchicalmambainvisualrecognition. arXivpreprint
+arXiv:2403.17695,2024.
+14[105] JianweiYang,ChunyuanLi,PengchuanZhang,XiyangDai,BinXiao,LuYuan,andJianfengGao. Focal
+self-attentionforlocal-globalinteractionsinvisiontransformers. arXivpreprintarXiv:2107.00641,2021.
+[106] SonglinYang, BailinWang, YikangShen, RameswarPanda, andYoonKim. Gatedlinearattention
+transformerswithhardware-efficienttraining. InICML,2024.
+[107] SonglinYangandYuZhang.FLA:ATriton-basedlibraryforhardware-efficientimplementationsoflinear
+attentionmechanism. https://github.com/sustcsonglin/flash-linear-attention,2024.
+[108] Yijun Yang, Zhaohu Xing, and Lei Zhu. Vivim: a video vision mamba for medical video object
+segmentation. arXivpreprintarXiv:2401.14168,2024.
+[109] WeihaoYu,MiLuo,PanZhou,ChenyangSi,YichenZhou,XinchaoWang,JiashiFeng,andShuicheng
+Yan. Metaformerisactuallywhatyouneedforvision. InCVPR,2022.
+[110] LiYuan,YunpengChen,TaoWang,WeihaoYu,YujunShi,Zi-HangJiang,FrancisEHTay,JiashiFeng,
+andShuichengYan. Tokens-to-tokenvit: Trainingvisiontransformersfromscratchonimagenet. In
+ICCV,2021.
+[111] BiaoZhangandRicoSennrich. Rootmeansquarelayernormalization. InNeurIPS,2019.
+[112] WenqiangZhang,ZilongHuang,GuozhongLuo,TaoChen,XinggangWang,WenyuLiu,GangYu,and
+ChunhuaShen. Topformer: Tokenpyramidtransformerformobilesemanticsegmentation. InCVPR,
+2022.
+[113] XiaosongZhang,YunjieTian,WeiHuang,QixiangYe,QiDai,LingxiXie,andQiTian. Hivit:Hierarchi-
+calvisiontransformermeetsmaskedimagemodeling. arXivpreprintarXiv:2205.14949,2022.
+[114] ZeyuZhang,AkideLiu,IanReid,RichardHartley,BohanZhuang,andHaoTang. Motionmamba:
+Efficientandlongsequencemotiongenerationwithhierarchicalandbidirectionalselectivessm. arXiv
+preprintarXiv:2403.07487,2024.
+[115] SijieZhao,HaoChen,XueliangZhang,PengfengXiao,LeiBai,andWanliOuyang. Rs-mambaforlarge
+remotesensingimagedenseprediction. arXivpreprintarXiv:2404.02668,2024.
+[116] BoleiZhou,HangZhao,XavierPuig,TeteXiao,SanjaFidler,AdelaBarriuso,andAntonioTorralba.
+Semanticunderstandingofscenesthroughtheade20kdataset. IJCV,2019.
+[117] LianghuiZhu,BenchengLiao,QianZhang,XinlongWang,WenyuLiu,andXinggangWang. Vision
+mamba:Efficientvisualrepresentationlearningwithbidirectionalstatespacemodel. InICML,2024.
+15A ExtendedRelatedWork
+VisualRepresentationLearningthroughCNNandTransformer. Visualrepresentationlearning
+remains a cornerstone of computer vision research, substantially propelled by advancements in
+deep neural networks. Convolutional Neural Network (CNN) [45] has long been the dominant
+architectureinthisfieldforitsefficientprocessingofspatialdata. Itservesasthebackboneinmany
+advancedvisionencoders[32,100,59,86,77,39,92,101,44,79,15,16,55,36,94,78,37,61,87]
+across various tasks. Vision Transformer (ViT) [18], a seminal work, challenges the dominance
+of CNNs by introducing the plain, non-hierarchical Transformer architecture [91] to the vision
+domain, demonstratingthatvisualrepresentationlearningcaneffectivelybeconductedinapure
+sequence-to-sequencemanner. DeiT[88]furtherrefinesViTbyenhancingoptimizationthrough
+advancedtrainingtechniquesanddistillation. Tomitigatethenotoriousissueofquadraticcomplexity
+in Transformer softmax attention, the SwinTransformer [58] introduces a hierarchical structure
+and confines attention computation to local windows, effectively reducing complexity to linear.
+Similarly,PyramidVisionTransformer(PVT)[95]employsspatialdownsamplingonkeyandvalue
+feature maps to decrease the computational demands of global attention. Numerous subsequent
+studies [97, 96, 105, 9, 20, 21, 30, 17, 90, 112, 57, 110, 8, 113, 48] continue to enhance ViT
+performance,drawinginspirationfromthesuccessesofCNNs.
+LinearComplexitySequenceModeling. Transformer[91]hasbeenverysuccessfulinsequence
+modeling,servingasacoremoduleinmanystate-of-the-artLargeLanguageModels(LLMs)[89,3,
+76,2]intheNLPfield. However,itrequiresretainingallthehistoricalKey-Valuecacheandattending
+thecurrenttokentoallthehistoricalcaches,limitingitsapplicationforlongsequences.Tocircumvent
+thisissue,RNN-likesequencemodelings[35,74,42,7,1,73,10,13,65,62]attractincreasinginterest
+foritsmeritsinlinearcomplexity,fixedhiddenstate,andglobalcontextinteraction. RWKV[71]
+andRetNet[85]introducetemporaldecaytomodelthelong-rangedependency. Recently,building
+onSSM[29,83,27,64],Mamba[28]introducesanovelselectiveSSMoperationanddemonstrates
+competitiveperformanceagainstmodernoptimizedTransformermodelswithlinearcomplexity. To
+furtherimprovethepracticalefficiency,Mambaintroduceshardware-awareimplementationtoreduce
+theI/Oandmemorycosts. Drawinginspirationfromlinearattention[42,63,72]andretention[85],
+GLA [106] adds a novel data-dependent gating mechanism to enhance the expressiveness and
+implementsitinahardware-awaremanner[12,11]tosignificantlyboostefficiency.
+Linear Complexity Visual Sequence Modeling. Inspired by the success of ViT [18] in visual
+sequencelearningandMamba[28]inachievinglinearcomplexityinlanguagemodeling,Vim[117]
+introducestheadvancedMambablocktovisionbyreplacingthequadraticsoftmaxattentioninViT
+withtheproposedlinearcomplexitybidirectionalSSM[80,93,103]. Thisadaptationdemonstrates
+competitiveperformancewithimprovedefficiencycomparedtoViT.Concurrently,VMamba[56]
+adoptsahierarchicalmacroarchitecturesimilartoSwinTransformer[58]andproposesusingthe
+Mambablocktoscanthe1Dvisualsequenceincriss-crosspatterns[41,34]for2Dvisualrepresenta-
+tionlearning. Numerousfollow-upworks[38,104,40,70,49]exploretheuseofMambatoscanthe
+1Dvisualsequenceinmorecomplex2D-awarepatterns. Forinstance,PlainMamba[104]proposes
+multiplecontinuous2Dscanningsfor1Dvisualsequence,whileLocalMamba[40]optsforscanning
+withinlocalwindows. Incontrast,VisionRWKV[19]forgoestheMambablock,adaptingthelinear
+complexityRWKVblockfromNLPforuseinvision.
+B ArchitectureDetails
+Weprovidedetailedconfigurationofournon-hierarchicalViGandhierarchicalViG-HinTab.4.
+C ExperimentalDetails
+ImageNetClassificationExperimentalDetails. ImageNetcontains1.2Mtrainingimagesand50K
+validationimagesfrom1000categories. Wetrainthemodelsonthetrainingsetandreportthetop-1
+accuracyonthevalidationset. Allthemodelaretrainedfromscratchfor300epochs,withacosine
+scheduleandEMA,usingatotalbatchsizeof1024. WeuseAdamWoptimizer[43]andsetbetasto
+(0.9,0.999),momentumto0.9,weightdecayto0.05,initiallearningrateto1×10−3. Imagesare
+croppedto224×224forbothtrainingandevaluation. WebuilduponPyTorch[67]andtrainTiny
+andSmallmodelswith8×4090GPUs,andtheBasemodelwith16×4090GPUs.
+16Table4: DetailedconfigurationsofdifferentvariantsofViG.Forhierarchicalvariants,weprovide
+the number of channels and blocks in 4 stages. The FLOPs are calculated with 224×224 input
+image.
+Model #Blocks #Channels #Heads Params FLOPs
+ViG-T 12 192 3 6M 0.9G
+ViG-S 12 384 6 23M 3.5G
+ViG-B 12 768 12 89M 13.8G
+ViG-H-T [2,2,5,2] [96,192,384,768] [3,6,12,24] 29M 4.5G
+ViG-H-S [2,2,17,2] [96,192,384,768] [3,6,12,24] 50M 8.8G
+ViG-H-B [2,2,17,2] [128,256,512,1024] [4,8,16,32] 89M 15.5G
+Table5:Comparisonofdifferentbidirectionaldesign.GLA denotesthatwefollowVimtobuild
+vim
+bidirectionalmodelingonGLAbyintroducinganextrabackwardGLAlayer. Thethroughputand
+memoryaremeasuredonasingleRTX4090GPUwithbatchsize256andimagesize224following
+[58].
+Method #Param. Throughput Mem. Top-1Acc.
+GLA 5.72M 6662 582MB 66.1
+GLA 6.70M 4524 812MB 73.5
+Vim
+ViG 5.83M 4645 730MB 77.2
+ADE20K Semantic Segmentation Experimental Details. All the models are initialized with
+ImageNet-1Kpre-trainedweights. TrainingdetailsfollowthesettinginVRWKV[19]. Weemploy
+the AdamW optimizer, setting initial learning rate to 6 × 10−5 for the Small/Base models and
+1.2×10−4fortheTinymodel,abatchsizeof16,andaweightdecayof0.01. Wetrainallthemodels
+for160kiterationsonthetrainingsetoftheADE20Kdataset.
+COCO Object Detection Experimental Details. All models are initialized with ImageNet-1K
+pre-trainedweightsandtrainedaccordingtoa12-epochschedulewithabatchsizeof16. Wefollow
+VRWKV[19]andemploytheAdamWoptimizerwithalearningrateof1×10−4andaweightdecay
+of0.05.
+D AblationStudy
+BidirectionalDesign. AsshowninTab.3,theproposedbidirectionaldesignbyapplyingdirection-
+wise gating α introduces only 0.02M parameters but achieves an improvement of 0.9% in top-1
+accuracywithoutcompromisingefficiency. InTab.5,weintroduceanothervariant,GLA ,which
+Vim
+follows the bidirectional design of Vim [117] by incorporating an extra backward GLA layer,
+addingnearly1Mparameters. Theresultsdemonstratethattheproposedbidirectionalmodelingand
+implementationisfaster,moreparameter-efficient,morememory-efficient,andmoreaccuratethan
+Vim.
+GatingMechanism Understanding. InFig. 5, wevisualize theattention mapsof theproposed
+BiGLAlayer. Theresultsshowthattheforwardandbackwardattentioncomplementeachother,and
+themergedattentioncancapturetheprominent2Dcontextoftheimages.
+EffectiveReceptiveFieldAnalysis. InFig.6,wecomparetheeffectivereceptivefield(ERF)of
+differentmodels,includingCNN-basedResNet50,window-attention-basedSwinTransformer,vanilla
+ViTvariantDeiT.TheresultsshowthattheViGexhibitsaglobalERFlikeDeiT,whiletheCNN-based
+andwindow-attention-basedmethodsfail. WealsovisualizetheERFofvariantBidGLA ,which
+α
+onlyappliesdirection-wisegatingα(Row6inTab.3). Theresultsdemonstratethattheproposed
+2Dlocalityinjectionenlargestheareaofintensiveresponse,whichisbeneficialforcapturingthe
+spatial-awarecontext.
+17(a) Original image (b) Forward attention matrix (b) Backward attention matrix (c) Merged attention heatmap
+Figure5: Visualizationofattentionmaps.
+ResNet50 Swin-T DeiT-T GLA BidGLA ViG
+!
+Figure6: ComparisonofEffectiveReceptiveField(ERF).“BidGLA ”denotestheproposedbidirec-
+α
+tionaldesignwithdirection-wisegatingα(Row4inTab.3).TheproposedViGandBidGLA exhibit
+α
+aglobalERFlikeDeiT.Byintroducingthe2Dlocalityinjection,theareaofintensiveresponseis
+larger.
+18

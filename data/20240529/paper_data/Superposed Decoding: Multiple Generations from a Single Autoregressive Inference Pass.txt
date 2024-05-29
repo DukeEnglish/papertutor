@@ -1,0 +1,1014 @@
+Superposed Decoding: Multiple Generations from a
+Single Autoregressive Inference Pass
+EthanShen⋄ AlanFan⋄ SarahPratt⋄ JaeSungPark⋄ MatthewWallingford⋄
+ShamKakade† AriHoltzman‡ RanjayKrishna⋄ AliFarhadi⋄ AdityaKusupati⋄
+⋄UniversityofWashington †HarvardUniversity ‡UniversityofChicago
+{ethans03, kusupati}@cs.washington.edu
+Abstract
+Many applications today provide users with multiple auto-complete drafts as
+they type, including GitHub’s code completion, Gmail’s smart compose, and
+Apple’smessagingauto-suggestions. Underthehood,languagemodelssupport
+thisbyrunninganautoregressiveinferencepasstoprovideadraft. Consequently,
+providing k drafts to the user requires running an expensive language model k
+times. Toalleviatethecomputationcostofrunningkinferencepasses,wepropose
+Superposed Decoding, a new decoding algorithm that generates k drafts at the
+computationcostofoneautoregressiveinferencepass. Weachievethisbyfeeding
+asuperpositionofthek mostrecenttokenembeddingsfromthedraftsasinput
+to the next decoding step of the language model. At every inference step we
+combinethek draftswiththetop-k tokenstogetk2 newdraftsandcachethek
+mostlikelyoptions,usingann-graminterpolationwithminimalcomputeoverhead
+to filter out incoherent generations. Our experiments show that k drafts from
+SuperposedDecodingareatleastascoherentandfactualasNucleusSamplingand
+GreedyDecodingrespectively,whilebeingatleast2.44×fasterfork ≥ 3. Ina
+compute-normalizedsetting,userevaluationsdemonstrablyfavortextgenerated
+bySuperposedDecodingoverNucleusSampling. Codeandmoreexamplesopen-
+sourcedathttps://github.com/RAIVNLab/SuperposedDecoding.
+1 Introduction
+Commercialsurveysfindthat80%ofe-commercewebsitesprovideautocompleteasafeature[20].
+Withtheproliferationoflargelanguagemodels,autocompletedraftsarenowubiquitousinaneven
+widerrangeofapplications. ExamplesincludeshortdraftsuggestionsinGmailSmartCompose[7]
+andcodesnippetsinGitHubCopilot[6]. Theseoptionsprovideuserswiththeabilitytoconsider
+differentphrasingsandincreasethelikelihoodofhavingatleastonesuggestionthatreflectstheir
+intent. Whilelanguagemodels(LMs)[33]nowpowerthesemultiplesuggestionsinmostsettings,
+eachadditionalsuggestionnecessitatesanotherinferencepass,makingitcomputationallyexpensive.
+Languagemodelsuseautoregressiveinferencetogenerateaplausiblesequenceofnexttokensfor
+agivenprefix[39]. Thenexttokengenerateddependsontheprefixandthepreviouslygenerated
+tokens.DecodingalgorithmslikeGreedyDecoding,Top-kSampling[11],BeamSearch,andNucleus
+Sampling[17]presentvariouswaysofobtaininggenerationsduringautoregressiveinference. Fora
+prefix,Greedy(maximumlikelihood)Decodingpicksthemostprobabletokenateveryautoregressive
+timestep,eventuallygeneratingonlyoneauto-completionsuggestion. Insteadofmakingagreedy
+choiceateverytimestep,wecanalsosamplefromthetop-kmostprobabletokenstogeneratethe
+sequence[11]. Alsoleveragingthetop-kmostprobabletokensisBeamSearch,whichpicksthemost
+probablekbeamsfromthek2possibledraftsateverytimestep. Alternatively,NucleusSampling[17],
+particularlyeffectiveatgeneratingnatural-soundingtext,growsgenerationsbysamplingfromthe
+Preprint.Underreview.
+4202
+yaM
+82
+]LC.sc[
+1v00481.5042:viXra“I just arrived in Xalapa, Mexico -today was my first”
+LM LM LM
+day of class. At Universidad Veracruz…
+Nucleus
+3×
+Sampling LM LM LM day of the Rosenkranz School at the…
+day of orientation, and I could not wait to…
+LM LM LM
++ + +
+day of work. I'm here to help…
+1× Superposed
+Decoding day of work. I'm here to work… ~ 3×faster!
+LM LM LM
+day of classes. I'm here to help…
+N-Gram N-Gram
+Figure1: Togeneratemultiplekauto-completesuggestionsforaprefixusinganLM,theexisting
+decodingmethodslikeNucleusSamplingneedkinferencepasses. Incontrast,SuperposedDecoding
+cangenerateksuggestionsatthecostofasingleinferencepasswhilebeingascoherentandfactual.
+collectionofthesmallestsubsetoftokensthatformapresetprobabilitymass(p)ateverytimestep.
+Top-k Sampling, Beam Search, and Nucleus Sampling offer the benefit of generating multiple
+suggestions. However,thiscomesatthecostofrequiringmultipleautoregressiveinferencepasses.
+WeintroduceSuperposedDecoding(SPD)(Figure1),adecodingalgorithmthatcangeneratemutiple
+(k)high-qualitygenerationsusingonlyasingleautoregressiveinferencepass. Ateachautoregressive
+timestepduringinference,SuperposedDecodingfeedsinthesuperposition(weightedcombination)
+oftheembeddingscorrespondingtothekmostrecentdraftedtokens(Section3.1).Afterselectingthe
+top-koutputtokens,SPDexpandstheexistingkdraftswiththem,resultingink2potentialnewdrafts.
+Each drafthas aprobability scoreassigned to it, whichis furthersmoothed using acombination
+ofvariousn-grammodels(n∈[2,6])[37,24]. N-graminterpolationforsmoothinghelpsimprove
+coherency by selecting the most probable and coherent continuations (top-k drafts) for the next
+autoregressivestep(Section3.2). Then-graminterpolationiscomputationallyinexpensiveandallows
+flexibilitytochangedomainsofinterestduringinference(eg.,programming,healthcare,finance,etc.).
+SuperposedDecoding’seffectivenesscanbeattributedtotheapparentlinearityofrepresentationsin
+languagemodels[34,22]whichweconcurrentlydiscovered(Section3.3).
+OurexperimentsdemonstratethatSuperposedDecodingonLlama-2-7B[40]cangeneratek ≥ 1
+draftsthatareascoherent,intermsofperplexity,asNucleusSampling(Section4.1). However,SPD
+achievesthiswithasingleinferencepass,makingitatleast2.44×fasterthananyotherstandard
+decodingmethodsfork ≥3(Section4.3). Theabilitytogeneratemultipledraftsatthecostofone
+alsoincreasesthecoveragesignificantlyforfact-basedevaluationtaskslikeTriviaQAandNatural
+questions–whereSPDincreasesthechanceofgeneratingthecorrectanswerbyatleast5%when
+using 3 drafts (Section 4.2). Finally, through an extensive human evaluation for a wide range of
+prefixes,weshowthatSPDgenerationsareaspreferredasNucleusSamplingindirectcomparison
+(1v1)whileoutperformingbyupto20%inacomputenormalizedsetting(3v1and3v2)(Section4.4).
+SuperposedDecodingcanhelpimproveuserexperiencebyofferingsignificantcomputationaleffi-
+ciencywhilemaintainingaccuracyforvariouswritingtasksthatoftenbenefitfrommultipleshort
+draft suggestions. Additionally, Superposed Decoding is extremely generalizable, works across
+differentlanguagemodelslikeMistral7B,andiscapableofgeneratinglong-formcontentreliably,
+allwhilebeingnearlyasdiverseinsuggestionasNucleusSampling(Section5).
+2 RelatedWork
+Decodingalgorithmsdeterminehowtokensareselectedfromalanguagemodel’snexttokendistribu-
+tion. ThisistypicallydonegreedilywithBeamSearchorGreedyDecoding,orstochasticallywith
+NucleusSampling[17]orTop-kSampling[11]. GreedyDecodingoperatesbyselectingthetoken
+2withthehighestprobabilityateachtimestep. However,locallyoptimaldecisionscanbeglobally
+suboptimal. Ontheotherextreme,anexhaustiveexplorationofalltokencombinationsisintractable
+withtimecomplexityΘ(|V|T),whereV isthevocabularysizeandT thetotalnumberoftimesteps.
+ApracticalcompromiseisBeamSearch,whichcontinuallycachesthetop-Bmostlikelygenerations,
+whereB isthenumberofbeamsordrafts. Thus, BeamSearchisguaranteedtofindmorelikely
+generationsthanGreedyDecodingwhileavoidingitsdrawbacks.
+Alternatively,NucleusSamplingandTop-kSamplingdecodeprobabilistically. Toavoiddegeneration,
+Top-k Sampling truncates the probability mass to the k most probable tokens, whereas Nucleus
+Sampling truncates the probability mass to the smallest possible set of words whose cumulative
+probabilityexceedsprobabilityp. BecauseofNucleusSampling’spropensitytoproduceuniqueand
+unrepetitiveoutputs,ithasbecomethestandard[3,21,41],thoughGreedyDecodingisstillfavored
+fortaskssuchasshortquestionanswering[40].
+Generatingmultipledraftslinearlyscalesthenumberofinferencepassesinthesedecodingmethods.
+Multi-tokenprediction[13,35]addressesthisbypre-traininganLMhavingnindependentsoftmax
+headsthatpredictnfuturetokensinparallel. Whenusingmulti-tokenpredictionwithspeculative
+decoding,exactinferenceis3×faster. Inasimilarvein,Medusa[4]reducesthenumberofdecoding
+stepsbyaddingextradecodingheads,usingatree-basedattentionmechanismtogeneratecandidates
+whilesimultaneouslyverifyingthemineachdecodingstep. Throughthis,Medusaachievesa2.2×
+reductionininferencelatencywhilemaintaininggenerationquality. However,multi-tokenprediction
+requiresre-trainingandMedusarequiresadditionalfine-tuningfortheextradecodingheads.
+SuperposedDecoding(SPD),ontheotherhand,canbeeasilyintegratedoutoftheboxwithoutanyad-
+ditionaltrainingonanylanguagemodel. Further,SuperposedDecodingiscomplementarytoMedusa
+andmulti-tokenprediction,aswellasotherefficiencytechniqueslikespeculativedecoding[29,25,5],
+quantization[9,31,18],pruning[12,38,27],andarchitecturaloptimizations[36,2,1,42,26,10].
+3 SuperposedDecoding(SPD)
+Given a text input as a prefix, Superposed Decoding uses an autoregressive LM f to produce k
+θ
+viablecompletiondraftsinoneinferencepass.
+First Timestep. Let x denote a generated token in the vocabulary V and M = (x ,...,x )
+1 m
+representaninitialprefixofmtokens. Ourgoalistogeneratekuniquedraftsstartingfromtheprefix.
+Thenexttokendistributionatthefirsttimestepm+1is: p (x |x ,...x )=p (x |M).
+θ m+1 1 m θ m+1
+Forthefirsttimestep,eachofthekdraftsisinitializedastheprefixsoweusethesamenexttoken
+distributionforalldrafts. Wegrowdraftd bygreedilyselectingtheithmostprobabletoken,making:
+i
+d =(M,xi )
+i m+1
+wherexi isthetokenattimesteptfortheith draft. Wealsotrackeachdraft’sprobabilityp asits
+t i
+score,whichisinitiallytheprobabilityofitsfirsttokenp (xi |M). Consequently,thesetofdrafts
+θ m+1
+Dafterthefirsttimestepis:
+ (M,x1 )  p (x1 |M)
+m+1 θ m+1
+. .
+D = .  withprobabilitiesP = .  (1)
+ .   . 
+(M,xk ) p (xk |M)
+m+1 θ m+1
+NextTimesteps. AstheinputtotheLMattimestept,weconstructx˜ ,whichisasuperposition
+t−1
+(weightedlinearcombination)oftheembeddingsforthemostrecenttokenx ofthekdrafts. This
+t−1
+meansthatx˜ ,theinputtotheLMatthesecondtimestepm+2,isthesuperpositionofthetokens
+m+1
+xi fori=1,...,k. Weusethissuperposedembeddingasasingleandaccurateapproximation
+m+1
+forthemostrecenttokenacrossallkdraftsatthe(t−1)thtimestep. Werunautoregressiveinference
+overx˜ onceforallkdraftsinsteadoftheusualonceperdraft,allowingustoformulateinferenceas:
+t
+p (x |M,x˜ ,...,x˜ )
+θ t m+1 t−1
+Becauseeachdraftcontainsitsowncontextualcluesandsyntax,wecannotblindlyusethedistri-
+butionofx foreachdraft. Instead,weinterpolatethesuperposeddistributionp (x |M,x˜ )
+t θ t m+1:t−1
+3like Superposed
+want + LM Exponential mean
+…
+have to it a
+Draft 1 N-Gram Draft 1 Interpolated
+…
+to it her …
+Draft 1 “I like” Draft 2 N-Gram to it her Draft 1 “I like to”
+Draft 2 Interpolated
+Select overall
+Draft 2 “I want” Draft 2 “I like it”
+top-k new drafts
+…
+Draft 3 “I have” N-Gram ed a you ed a you… Draft 3 “I want a”
+Draft 3 N-Gram
+Draft 3 Interpolated
+… …
+n’t the an n’t the an
+Figure2: SuperposedDecodingreliesonfeedingasuperposedtokenembedding–basedonthemost
+recenttokensfromthecurrentkdrafts–astheinputduringtheauto-regressiveinferencestep. This
+generatesk2newdraftsusingtheexistingkdraftsandthetop-koutputtokensatthenewtimestep.
+Finally,keepthetop-kdraftsafterfilteringwithann-graminterpolationtoimprovecoherency.
+with a draft-specific next token distribution from an n-gram model to get a final distribution
+p (xi|M,x ) that is unique to each draft. Next, we rank the draft options by the joint
+f t m+1:t−1
+probabilityoftheirrespectivepreviousdraftp andtheirselectedtoken. Wechoosethetopkoptions
+i
+asdraftsforthenexttimestepandupdatetheirprobabilities. Thisgives:
+ (M,x1 ,...,x1)  p (x1 |M)(cid:81)t p (x1|M,x1 )
+m+1 t θ m+1 s=m+2 f s m+1:s−1
+D = . .  withprobabilitiesP = . . 
+ .   . 
+(M,xk ,...,xk) p (xk |M)(cid:81)t p (xk|M,xk )
+m+1 t θ m+1 s=m+2 f s m+1:s−1
+(2)
+We continue generation until the maximum generation length or stop token is reached. In the
+followingsections,webreakdowntheprocessindetail. WealsopresentpseudocodeinAppendixA.
+3.1 TokenSuperposition
+Duringtraining,languagemodelslearnarepresentation(tokenembedding)z ∈Rdforeverytoken
+x∈V. Weleveragethisrepresentationattimestepttoconstructx˜ ,weighingtherepresentationfor
+t
+xi byacoefficientγ .
+t−1 i
+k k
+(cid:88) (cid:88)
+x˜ = γ ·zi where γ =1 (3)
+t i t−1 i
+i=1 i=1
+Theperformanceofx˜ ishighlydependentonchoosingtheappropriateweightforeachembedding
+t
+zi . Wefindthatthebeststrategyistosetγ tothenormalizedprobabilityofdraftisuchthat
+t−1 i
+p
+γ = i (4)
+i (cid:80)k
+p
+j=1 j
+wherep istheprobabilityoftheithdraft,introducedinSection3. Thisallowsustodirectlytiethe
+i
+weightofatokentothelikelihoodthatitwillbepreservedinfuturetimesteps,reducingdriftbetween
+thesuperposedembeddingsandthedraftstheyrepresent.
+3.2 N-GramInterpolation
+We construct each draft’s n-gram distribution p (xi|M,xi ,...,xi ) by interpolatively
+ngram t m+1 t−1
+smoothingthenexttokendistributionsoverasetofn-grammodelsusingweightsλ,wheren∈[2,6].
+6
+(cid:88)
+p (xi|M,xi ,...,xi )= λ ·p (xi|M,xi ,...,xi ) (5)
+ngram t m+1 t−1 n n-gram t m+1 t−1
+n=2
+WebaseourinterpolationweightsonweightsforRedPajamafoundbyLiuetal.[30],withadditional
+tuning(specificsinAppendixB).However,domain-specificn-grammodelscaneasilybeswappedin
+4forspecifictaskssuchascodegeneration[19]. Weusetheexponentialmeanofp andp asour
+θ ngram
+finaldistributionp ,whereαisahyperparametercontrollingtheimpactofthen-gramdistribution:
+f
+p (xi|M,xi )=p (x |M,x˜ )1−α·p (xi|M,xi )α (6)
+f t m+1:t−1 θ t m+1:t−1 ngram t m+1:t−1
+Thismeansthatwhengenerating,weonlyconsidertokensappearinginboththeSuperposedDecoding
+andn-gramdistributions. Ifthereisnooverlapbetweenthedistributions,thenweinsteadcalculate
+p (xi|M,xi )=δ·p (x |M,x˜ )1−α (7)
+f t m+1:t−1 θ t m+1:t−1
+withoutinterpolation,whereδisapenaltytermthatdisincentivizesselectinganuninterpolateddraft
+for the next timestep. This approach is the backbone of Superposed Decoding (Equation 2) and
+allowsustocreatecontext-awarenext-tokendistributionsforeachdraftwithonlyoneinferencepass.
+3.3 SuperposedDecodingSemanticallyApproximatesBeamSearch
+SuperposedDecodingreliesontheabilityoftheunderlyingmodeltopreservethelinearrelationship
+betweenx˜ anditscomponentvectorszi [22]. Moreformally,ifx˜ istheinputtotheLMf ,then
+t t−1 t θ
+f (x˜ )=(cid:80)k γ ·f (zi )shouldalsobetrue(γ defaultstodraftprobabilityinSPD).Aslongas
+θ t i=1 i θ t−1 i
+thisholds,thecombinationofasuperposedembeddingandn-gramsmoothingshouldallowusto
+generatecompletionsthatresemblethosefrommethodssuchasBeamSearch.
+Wetestthislinearitybycomputingthecosinesimilaritybetweenasetofsuperposedembeddings{x˜}
+andthelinearcombinationoftheircomponentembeddingsacross20timestepsonLlama-2-7B.At
+eachtimestep,wefirstuseBeamSearchtogeneratetokensforthreebeams. Wethenmanuallyinput
+thesuperposedembeddingofthethreetokensintoamodelusingSuperposedDecoding. Finally,we
+measurethealignmentbetweenf (x˜ )and(cid:80)k γ ·f (zi )usingcosinesimilaritycos(a,b)as:
+θ t i=1 i θ t−1
+k
+(cid:88)
+cos(f (x˜ ), γ ·f (zi )) (8)
+θ t i θ t−1
+i=1
+We compute the cosine similarities for ten randomly sampled batches of ten prefixes each from
+theOpenWebTexttrainingsplitandplotthemeancosinesimilaritiesacrossbatches,aswellasthe
+standard deviation (Figure 3). We find that Llama-2-7B is sufficiently linear up to 10 timesteps
+acrossalllayers. However,thislinearityisimperfect,andSuperposedDecodingandBeamSearch
+eventuallydivergeovertime. Owingtothis,weidentify10timestepsastheoptimalgenerationlength.
+WealsoshowhowlinearitychangesthroughthelayerswithineachtimestepinAppendixH.
+4 Experiments
+We evaluate Superposed Decoding by analyzing generation quality, factuality, and latency. We
+demonstrate that Superposed Decoding improves over Nucleus Sampling and Greedy Decoding
+ingenerationperplexity(Section4.1), fact-basedbenchmarks(Section4.2), andwall-clocktime
+(Section4.3). Finally,weconductauserstudyhighlightingthatuserspreferSuperposedDecoding
+overNucleusSamplinginacompute-normalizedsetting(Section4.4). Wealsoincludequalitative
+examplesofSuperposedDecodinggenerationsinFigure4,withmoreinAppendixG.
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0
+1 1 1 1 1 1 1 1 1 1 2
+Timestep
+Figure3: Llama-2-7Bmaintainsthelinearrelationshipbetweensuperposedembeddingsandthe
+componenttokenembeddings,withmeancosinesimilarity≥0.6forthefirst10timesteps.
+5
+ytiralimiS
+enisoC
+naeMOpenWebText Over a century ago, the RMS Titanic's fate Wayne said: I like the calculations, but like all theoretical Hello You Jump-Junkies! Apologies for
+Nucleus was sealed when it struck an iceberg on calculations, it is best to try it out in the long silence, but we've been busy
+was sealed when it struckan iceberg and calculations, they are only as good as the data the long wait. I've been busy with
+Superposed was sealed when it hitan iceberg and models, they are only as good as the data the long silence.I've been busy with
+was sealed when it hitan iceberg on calculations, they are only as good as the assumptions the long silence,I've been busy with
+Figure4: Qualitativetextgenerationsinacompute-normalizedsettingforSuperposedDecodingand
+NucleusSamplingwithprefixessampledfromOpenWebText. SeeAppendixGformore.
+WeimplementSuperposedDecodingonthebasepre-trainedversionofLlama-2-7B[41]forthe
+majorityofourexperiments,runningonasingleA40GPU.Wedonotretrainorfine-tuneanypartof
+themodel. Forperplexityevaluations,weuseLlama-2-70BovereightA40GPUs.
+Forn-graminterpolation,weconstructn-grammodelsusing200,000documents(roughly200million
+tokens)randomlysampledfromtheRedPajamadataset,anopen-sourcereplicationofLlama-2’s
+trainingdataset[8]. Werepresenteachn-grammodelinternallyasafrequencytable,storingeach
+uniquen-gramanditscorrespondingcount. Thisenablesfasterlookupandisthebasisbehindthe
+computereductionthatweoffer. Ourn-grammodelsrequireapproximately14GBofdiskstorage
+overall,split57MB,433MB,2.15GB,4.7GB,and6.8GBforn=2to6. Whileweinterpolate
+upton=6inthiswork,wenotethatinpracticethebenefitsofn-graminterpolationsaturatepast
+n=4,suggestingthatthenumberofn-grammodelscanbeloweredtoreducestorage(AppendixC).
+4.1 GenerationQuality
+WetestgenerationqualityonOpenWebText’stestsplit[14],whichconsistsof5,000web-scraped
+documents. Foreachdocument,weusethefirst15tokensastheprefixandgeneratek =3draftsof
+10tokens. Wedecidetofocusonshortgenerationsbecausedraftsaretypicallyashort-formtask.
+Beforerunningexperiments,weidentifytheoptimalinterpolationweightαandtemperatureτ by
+optimizingforthelowestaverageperplexityacrossthreedraftsonthevalidationsplit. Welistthe
+specifichyperparametervaluesthatweuseinAppendixB.
+We only evaluate one draft of the baselines in order to match the compute used by Superposed
+Decoding. We find that while Nucleus Sampling and Greedy Decoding outperform Superposed
+Decodingonaper-draftbasis,theaveragebestperplexityfromSuperposedDecodingis5%lower
+thanthatofNucleusSampling. Fromthepointofviewofauser,thismeansforeachprefix,atleast
+onedraftcanbeexpectedtobeonparwithNucleusSamplingandGreedyDecoding. Theother
+draftsallcomefreeofadditionalcompute. InthefollowingSections4.2and4.4,weshowthatthis
+diversityisbeneficialforbothfactualityandhumanpreference.
+Table1: SuperposedDecodingisnatural-soundingandhasloweraverageperplexitythanNucleus
+Sampling,whichtypicallyapproximateshumanwriting.
+Nucleus Beam/Greedy N-Gram SuperposedDecoding
+Draft# - - - 1 2 3 Best
+AvgPerplexity 5.17 3.77 152.75 5.03 7.97 10.05 4.63
+4.2 Fact-BasedEvaluation
+Next,wetesttheabilityofSuperposedDecodingtogeneratenotonlycoherentbutalsoaccurate
+completions. Weassessthisusingexactmatchprecision(P@k)fork =1,2,3onTriviaQA[23]and
+NaturalQuestions[28],twocommonbenchmarksforshortanswergenerations. Wedecidenotto
+usemultiplechoicedatasetssuchasMMLU[16]andOpenBookQA[32]becausemultiplechoice
+questionsaretrivialwhenusingmultipledrafts,unfairlyadvantagingSuperposedDecoding.
+InFigure5,weshowthatSuperposedDecodingoutperformsNucleusSamplingandBeamSearchat
+P@1inazero-shotsetting,withthreedraftsprovidingaccuracygainsofupto2.72%inTriviaQA
+and1.69%inNaturalQuestions. TheseresultsdemonstratethatSuperposedDecodingsubstantially
+increasesthelikelihoodofgettingafactuallycorrectgenerationinadditiontoonethatiscoherent.
+6TriviaQA Natural Questions
+60 50.59 52.96 55.46 55.42 57.24 58.18 20 18.64 18.39 18.06 19.58 20.33
+50
+15.17 15
+40
+30 10
+20
+5
+10
+0 0
+@1 @1 @1 @1 @2 @3 @1 @1 @1 @1 @2 @3
+Nucleus
+P
+Beam
+P
+Greedy
+P
+SPD
+P
+SPD
+P
+SPD
+P
+Nucleus
+P
+Beam
+P
+Greedy
+P
+SPD
+P
+SPD
+P
+SPD
+P
+Figure 5: Superposed Decoding is as accurate as Greedy Decoding for P@1 and increases the
+fact-basedcoverageusingmultipledrafts(P@2,3)onTriviaQA(left)andNaturalQuestions(right).
+4.3 Latency
+SuperposedDecodingpresentsasignificanttheoreticalreductioninlatency,butitisimportantto
+investigatehowwellthesesavingstranslatetoreal-worldsettings. InFigure6, weshowthatthe
+onlyadditionalcostincurredbySuperposedDecodingisduetodictionarylookups,barringwhich
+SuperposedDecodinghasnear-constantcomputecost.Evenso,thetotalcostofSuperposedDecoding
+issignificantlylowerthanotherdecodingmethods,withSuperposedDecoding2.44×fasteronthree
+draftsand3.54×fasteroneightcomparedtoNucleusSampling,thesecondfastest.
+ItisimportanttonotethatSuperposedDecodingresultsareobtainedusingunoptimizedcode. Our
+n-grammodelsareimplementedusingsingle-threadedlookuponPythondictionaries,andwedonot
+cacheanylookupresults. Thishasanenormous,visibleimpact. Inaddition,Liuetal.[30]propose
+theuseofsuffixarraysforn-grammodels,allowinganear-instantaneouslookupofarbitrary-length
+n-gramsintrillion-tokencorpora. Thesetechniquesopenupmultipleavenuesforadditionalspeedup.
+4.4 HumanEvaluation
+Whileperplexityandfactualityaregoodproxiesfortextualquality,realhumanevaluationremains
+thebestmeasureofcoherency. Indeed,perplexityisanimperfectevaluatoroflong-formlanguage
+modelling[43]whilefactualitymetricsareinherentlybiasedtowardsGreedyDecodingmethods
+[40]. Consequently,toverifyourfindings,weconductarandomstudyaskinghumanrespondentsto
+rankSuperposedDecodingandNucleusSamplinggenerationsbasedonhowwelltheycompletea
+providedprefix. WecompareagainstNucleusSamplingbecausen-gramdistributionsfromNucleus
+Samplingaredemonstrablytheclosesttothoseofhumans[17].
+2.0
+Superposed Decoding
+N-Gram Lookup 60 N SPu Dcl e Du rs aft 1
+Nucleus Sampling
+1.5 Beam Search SPD Draft 2 50 SPD Draft 3
+3.54x
+faster
+1.0 40
+30
+0.5 2.44x faster
+20
+0.0 10
+2 4 6 8
+0
+Number of Generated Drafts Nucleus SPD
+Decoding Method
+Figure6: Averagewallclocktimetogenerate10token Figure7: Draftsareorderedbytheprob-
+long drafts from a 15 token prefix on OpenWebText. abilitytheyobtainduringgenerationus-
+SuperposedDecodingissignificantlyfasterforallk >1, ingSPD,whichwinsoverNucleusSam-
+withn-gramlookupcostsbeingamajorfactorfork ≥4, plinginacompute-normalizedsetting.
+whichcanbeoptimizedfurther.
+7
+)s(
+ycnetaL
+egarevA
+)%(
+ycaruccA
+)%(
+ycaruccA
+)%(
+etaR
+niWSetup. WeconductourstudyusingAmazonMechanicalTurk[15]. First,werandomlysample1,000
+prefixesfromtheOpenWebTexttestset,truncatingtothefirst15tokensasinSection4.1. Next,we
+manuallyremoveprefixesthataregrammaticallyincorrect,suchastextfromwebsitetoolbars. From
+theremainingprefixes,wegeneratethreeSuperposedDecodingdraftsandoneNucleusSampling
+draftinacompute-normalizedsetting,randomizingtheirorder. Finally,wefilteroutprefixeswith
+duplicateorunparseablegenerations(e.g. emojis). Afterpreprocessing,707prefixesareleft.
+ItisimportanttonotethatoneNucleusSamplinggenerationis20%lessexpensivethanthreeSuper-
+posedDecodingdrafts,showninSection4.3. However,twoNucleusSamplingdraftsdisadvantages
+threeSuperposedDecodingdraftsby60%.Therefore,wedecidetorunourmainsurveyusingthefirst
+setup,whichisclosesttoequalcompute,butalsoconductsmallersurveysin2v3and1v1settings.
+Results. WedefineaSuperposedDecoding“win”aswhenoneoftheSuperposedDecodingdrafts
+isrankedfirst. AsshowninFigure7,wefindthatSuperposedDecodinggenerationsarepreferred
+approximately63.6%ofthetime. IfeverySuperposedDecodingdraftwasconsistentlythesame
+qualityasNucleusSampling,thenwewouldexpecttherankingstobeuniform,resultingina75%
+winrate. However,thisisnotthecase,suggestingthatNucleusSamplingismorereliablethanany
+individualdraft,buttheaggregateofdraftsprovidesadiversitythatishighlyvaluabletousers.
+Werunthetwosmaller-scaleiterationsofthestudywith100prefixeseach. Inthe2v3setting,we
+askuserstoranktwonucleusdraftsandthreesuperposeddraftstoinvestigatewhetherthebenefits
+ofSuperposedDecodingpersistevenwhencomputefavorsNucleusSampling. Inthe1v1setting,
+userschoosebetweenonenucleusdraftandthelowestperplexitysuperposeddraft,removingany
+potentialbiascausedbyunequalnumbersofdrafts. AsshowninFigure12,inbothsituations,users
+stillpreferSuperposedDecodingoverNucleusSampling60.6%and51.4%ofthetimerespectively.
+Whilethesurveyshavehighervarianceduetotheirsmallsize,theycementSuperposedDecodingas
+astrongalternativetoNucleusSampling. WeshowdetailsontheadditionalstudiesinAppendixF.1
+andpresentoursurveypageinFigure13.
+5 FurtherAnalysisandAblations
+5.1 ResultsonMistral7B
+We also implement Superposed Decoding on pre-trained Mistral 7B [21] and conduct the same
+experimentasSection4.1withonechange. InSection4.1,itwaspossibletoevaluatetheperplexity
+ofthe10generatedtokensexactlybecausethegeneratingmodel(Llama-2-7B)andtheevaluation
+model(Llama-2-70B)usethesametokenization.ThisisnotthecaseforMistral7BandLlama-2-70B.
+Consequently,wecalculateperplexityforMistral7Boveralltokensbutthefirstfive,ensuringthatthe
+entiregenerationisincluded. Whilethisapproachalsoincludesseveraltokensfromtheinitialprefix
+inperplexitycalculations,theyareredundantacrossgenerations,thuspreservingrelativeordering.
+Table2comparestheresultingperplexities. LikewithLlama-2-7B,theaveragebestdraftperplexity
+usingSuperposedDecodingislowerthanthatofNucleusSampling,demonstratingthatSuperposed
+Decodingisadaptabletootherlanguagemodelsoutofthebox.
+5.2 TextualAnalysis
+Next, weextensivelyinvestigatethediversityandrepetitionofSuperposedDecodinginorderto
+betterunderstanditsproperties.
+RepetitionwithinGenerations. Repetitionisawell-documentedissueinalldecodingmethods
+butismostprevalentwhendecodinggreedily[17]. Weexploretowhatextent,ifany,Superposed
+Decodingdegeneratesaswell. Tomeasurerepetition,wecalculatetheproportionofuniqueunigrams,
+bigrams,andtrigramsineachgeneration. Thelowertheuniqueness,thehighertherepetition. In
+Table2: SuperposedDecodinggeneralizesacrosslanguagemodelslikeMistral7Basshownhere
+withsimilarresultsoncoherency,asLlama-2-7B,whenevaluatedusingLlama-2-70B.
+Nucleus SuperposedDecoding
+Draft# - 1 2 3 Best
+AvgPerplexity 11.42 11.34 12.74 13.63 10.87
+81.00 1.0
+0.95
+0.8
+0.90
+Unigram 0.6
+0.85 Bigram Nucleus
+Trigram Superposed Prefix Length = 15 Tokens
+0.80 0.4
+5 10 15 20 5 10 15 20
+Generation Length Generation Length
+Figure8: Left: MinimaldifferenceinrepetitionforSuperposedDecodingandNucleusSamplingin
+shortgenerations. Right: Generationlengthisaneffectiveknobforadjustingthediversityofdrafts.
+Bothexperimentsuseaprefixlengthof15tokens.
+Figure8, weplotresultsforSuperposedDecodingandNucleusSamplingforseveralgeneration
+lengths. Becausedraftingisusuallyashort-formtask,weonlyconsidergenerationlengthsupto20
+tokens. WefindthatSuperposedDecodingdoesnotrepeatsignificantlymorethanNucleusSampling
+inthisrange,suggestingthatdegenerationisnotanissueinmostusecases. Thisisespeciallytruefor
+bigramsandtrigrams,whicharemorereliableindicatorsofdegenerationthanunigrams.However,we
+qualitativelyobservethatrepetitionsbecomefrequentafter100tokens. Toaddressthis,wepropose
+SuperposedDecodingResets,whichweexplaininSection5.3.
+DiversityacrossDrafts. Tomeasurediversity,weapplySelf-BLEU[44]ondraftsandthencalculate
+theaverageacrossprefixes.WecomputeSelf-BLEUbycalculatingtheBLEUscoreofeachdraftwith
+theotherk−1draftsasreferences. Hence,alowSelf-BLEUsignifieshighdiversity,whileahigh
+Self-BLEUsuggestslowdiversity.AftercalculatingSelf-BLEUforvaryingprefixlengths,generation
+lengths,andnumbersofdrafts,wefindthatgenerationlengthisthemostimpactfulhyperparameter
+for diverse drafts. We plot Self-BLEU against generation length in Figure 8, demonstrating that
+shortergenerationssignificantlyincreasediversity.
+5.3 SuperposedDecodingResets
+Toreducelong-formrepetitioninSuperposedDecoding,weproposeresettingsuperposedtokens
+everystimesteps,wheresisauser-selectedhyperparameter. Oneachresetstepwesampleoneofthe
+kdraftsandrestartdraftgeneration. ResettinghelpsSuperposedDecodingescaperepetitiveloops
+whilereestablishinglinearity,whichFigure3showstodeteriorateovertime. Thisissimilartoa
+userselectingoneofthekdraftswhiletyping. Wefindthatresettingnoticeablyimproveslong-form
+generationquality(examplesinAppendixI)andleavefurtherinvestigationforfuturework.
+Further,wealsoablateonprefixlength,generationlength,andnumberofdrafts. Figures9,10,and
+11inAppendixEhighlightthatSuperposedDecodingisrobusttoallthreehyperparameters,with
+lowerperplexitythanNucleusSamplinginnearlyallsettingstested.
+6 DiscussionandConclusion
+WhilewedemonstratethatSuperposedDecodingisaneffectivetechniqueformultipledraftgenera-
+tion,SuperposedDecodingislimitedbythequalityofthen-grammodelsused,whichareessential
+formaintainingcoherence. Inaddition,whileSuperposedDecodingdraftsaresyntacticallydiverse,
+they are not often semantically diverse. We suspect that the orthogonality of token embeddings
+discoveredbyJiangetal.[22]isapotentialsolution. Whileourinitialexperimentsdidnotshow
+diversitygains,webelievethatorthogonalityispromisingandisalogicalnextstepforfuturework.
+Inconclusion,wepresentSuperposedDecoding,anoveldecodingmethodthatsuperposestoken
+embeddingstogeneratemultiplegenerationsatthecostofone. WedemonstratethatSuperposed
+Decoding improves on Nucleus Sampling in terms of generation quality and human preference.
+ThepluralityofchoicesfromSuperposedDecodingalsoleadstobetterperformanceoncommon
+benchmarks. WeenvisionthatthelatencyreductionfromSuperposedDecodingwillmakeitpractical
+toapplylargepre-trainedlanguagemodelsondraftingtaskswherecomputeisoftenabarrierfor
+deployability. Finally,SuperposedDecodingcanbedeployedinmessagingapplicationsusingn-
+gramspersonalizedtoeachuser,wherethenumberofn-gramscanbereducedtosavestoragewithout
+compromisingperformance.
+9
+sseneuqinU
+marG-N
+UELB-fleS
+tfarDAcknowledgments
+WearegratefultoJiacheng(Gary)Liuforhisassistanceinusinginfinigramforinitialexperimentation.
+We also thank Alisa Liu, Vivek Ramanujan, Reza Salehi, Prateek Jain, and Yejin Choi for their
+feedback. WealsoacknowledgethecomputingresourcesandsupportfromHYAKattheUniversity
+ofWashington,FASRCatHarvardUniversity&KempnerInstitute,GradientAIandresearchGCP
+creditawardfromGoogleCloudandGoogleResearch. AliFarhadiacknowledgesfundingfromthe
+NSFawardsIIS1652052,IIS17303166,DARPAN66001-19-2-4031,DARPAW911NF-15-1-0543,
+andgiftsfromAllenInstituteforArtificialIntelligenceandGoogle.
+References
+[1] M.Adnan,A.Arunkumar,G.Jain,P.J.Nair,I.Soloveychik,andP.Kamath. Keyformer: Kv
+cachereductionthroughkeytokensselectionforefficientgenerativeinference,2024.
+[2] J.Ainslie,J.Lee-Thorp,M.deJong,Y.Zemlyanskiy,F.Lebrón,andS.Sanghai. Gqa: Training
+generalizedmulti-querytransformermodelsfrommulti-headcheckpoints,2023.
+[3] T. B. Brown, B. Mann, N. Ryder, M. Subbiah, J. Kaplan, P. Dhariwal, A. Neelakantan,
+P.Shyam,G.Sastry,A.Askell,S.Agarwal,A.Herbert-Voss,G.Krueger,T.Henighan,R.Child,
+A.Ramesh,D.M.Ziegler,J.Wu,C.Winter,C.Hesse,M.Chen,E.Sigler,M.Litwin,S.Gray,
+B. Chess, J. Clark, C. Berner, S. McCandlish, A. Radford, I. Sutskever, and D. Amodei.
+Languagemodelsarefew-shotlearners,2020.
+[4] T.Cai,Y.Li,Z.Geng,H.Peng,J.D.Lee,D.Chen,andT.Dao. Medusa: Simplellminference
+accelerationframeworkwithmultipledecodingheads,2024.
+[5] C.Chen, S.Borgeaud, G.Irving, J.-B.Lespiau, L.Sifre, andJ.Jumper. Acceleratinglarge
+languagemodeldecodingwithspeculativesampling. arXivpreprintarXiv:2302.01318,2023.
+[6] M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. d. O. Pinto, J. Kaplan, H. Edwards, Y. Burda,
+N. Joseph, G. Brockman, et al. Evaluating large language models trained on code. arXiv
+preprintarXiv:2107.03374,2021.
+[7] M. X. Chen, B. N. Lee, G. Bansal, Y. Cao, S. Zhang, J. Lu, J. Tsay, Y. Wang, A. M. Dai,
+Z.Chen,T.Sohn,andY.Wu. Gmailsmartcompose: Real-timeassistedwriting,2019.
+[8] T. Computer. Redpajama: an open dataset for training large language models, 2023. URL
+https://github.com/togethercomputer/RedPajama-Data.
+[9] T.Dettmers,M.Lewis,Y.Belkada,andL.Zettlemoyer. Llm.int8(): 8-bitmatrixmultiplication
+fortransformersatscale,2022.
+[10] Devvrit,S.Kudugunta,A.Kusupati,T.Dettmers,K.Chen,I.Dhillon,Y.Tsvetkov,H.Hajishirzi,
+S.Kakade,A.Farhadi,P.Jain,etal. Matformer: Nestedtransformerforelasticinference. arXiv
+preprintarXiv:2310.07707,2023.
+[11] A.Fan,M.Lewis,andY.Dauphin. Hierarchicalneuralstorygeneration,2018.
+[12] E.Frantar,S.Ashkboos,T.Hoefler,andD.Alistarh. Gptq: Accuratepost-trainingquantization
+forgenerativepre-trainedtransformers,2023.
+[13] F.Gloeckle,B.Y.Idrissi,B.Rozière,D.Lopez-Paz,andG.Synnaeve. Better&fasterlarge
+languagemodelsviamulti-tokenprediction,2024.
+[14] A. Gokaslan and V. Cohen. Openwebtext corpus. http://Skylion007.github.io/
+OpenWebTextCorpus,2019.
+[15] V. Harinarayan, A. Rajaraman, and A. Ranganathan. Hybrid machine/human computing
+arrangement. UnitedStatesPatent.
+[16] D.Hendrycks,C.Burns,S.Basart,A.Zou,M.Mazeika,D.Song,andJ.Steinhardt. Measuring
+massivemultitasklanguageunderstanding,2021.
+10[17] A. Holtzman, J. Buys, L. Du, M. Forbes, and Y. Choi. The curious case of neural text
+degeneration,2020.
+[18] W.Huang,Y.Liu,H.Qin,Y.Li,S.Zhang,X.Liu,M.Magno,andX.Qi. Billm: Pushingthe
+limitofpost-trainingquantizationforllms,2024.
+[19] H.Husain,H.-H.Wu,T.Gazit,M.Allamanis,andM.Brockschmidt. CodeSearchNetchallenge:
+Evaluatingthestateofsemanticcodesearch. arXivpreprintarXiv:1909.09436,2019.
+[20] B. Institute. 9 ux best practice design patterns for autocomplete suggestions. 2023. URL
+https://baymard.com/blog/autocomplete-design. Accessed: 2024-05-18.
+[21] A.Q.Jiang,A.Sablayrolles,A.Mensch,C.Bamford,D.S.Chaplot,D.delasCasas,F.Bressand,
+G.Lengyel,G.Lample,L.Saulnier,L.R.Lavaud,M.-A.Lachaux,P.Stock,T.L.Scao,T.Lavril,
+T.Wang,T.Lacroix,andW.E.Sayed. Mistral7b,2023.
+[22] Y. Jiang, G. Rajendran, P. Ravikumar, B. Aragam, and V. Veitch. On the origins of linear
+representationsinlargelanguagemodels,2024.
+[23] M.Joshi,E.Choi,D.S.Weld,andL.Zettlemoyer. Triviaqa: Alargescaledistantlysupervised
+challengedatasetforreadingcomprehension,2017.
+[24] U.Khandelwal,O.Levy,D.Jurafsky,L.Zettlemoyer,andM.Lewis. Generalizationthrough
+memorization: Nearestneighborlanguagemodels. arXivpreprintarXiv:1911.00172,2019.
+[25] S. Kim, K. Mangalam, S. Moon, J. Malik, M. W. Mahoney, A. Gholami, and K. Keutzer.
+Speculative decoding with big little decoder. Advances in Neural Information Processing
+Systems,36,2024.
+[26] N.Kitaev,ŁukaszKaiser,andA.Levskaya. Reformer: Theefficienttransformer,2020.
+[27] A.Kusupati,V.Ramanujan,R.Somani,M.Wortsman,P.Jain,S.Kakade,andA.Farhadi. Soft
+threshold weight reparameterization for learnable sparsity. In International Conference on
+MachineLearning,pages5544–5555.PMLR,2020.
+[28] T. Kwiatkowski, J. Palomaki, O. Redfield, M. Collins, A. Parikh, C. Alberti, D. Epstein,
+I.Polosukhin,M.Kelcey,J.Devlin,K.Lee,K.N.Toutanova,L.Jones,M.-W.Chang,A.Dai,
+J.Uszkoreit, Q.Le, andS.Petrov. Naturalquestions: abenchmarkforquestionanswering
+research. TransactionsoftheAssociationofComputationalLinguistics,2019.
+[29] Y. Leviathan, M. Kalman, and Y. Matias. Fast inference from transformers via speculative
+decoding,2023.
+[30] J.Liu,S.Min,L.Zettlemoyer,Y.Choi,andH.Hajishirzi. Infini-gram: Scalingunbounded
+n-gramlanguagemodelstoatrilliontokens. arXivpreprintarXiv:2401.17377,2024.
+[31] S.Ma,H.Wang,L.Ma,L.Wang,W.Wang,S.Huang,L.Dong,R.Wang,J.Xue,andF.Wei.
+Theeraof1-bitllms: Alllargelanguagemodelsarein1.58bits,2024.
+[32] T.Mihaylov,P.Clark,T.Khot,andA.Sabharwal. Canasuitofarmorconductelectricity? a
+newdatasetforopenbookquestionanswering,2018.
+[33] e.a.OpenAI. Gpt-4technicalreport,2024.
+[34] K.Park,Y.J.Choe,andV.Veitch. Thelinearrepresentationhypothesisandthegeometryof
+largelanguagemodels. arXivpreprintarXiv:2311.03658,2023.
+[35] W. Qi, Y. Yan, Y. Gong, D. Liu, N. Duan, J. Chen, R. Zhang, and M. Zhou. Prophetnet:
+Predictingfuturen-gramforsequence-to-sequencepre-training,2020.
+[36] N.Shazeer. Fasttransformerdecoding: Onewrite-headisallyouneed,2019.
+[37] W.Shi,J.Michael,S.Gururangan,andL.Zettlemoyer. Nearestneighborzero-shotinference.
+InConferenceonEmpiricalMethodsinNaturalLanguageProcessing, 2022. URLhttps:
+//api.semanticscholar.org/CorpusID:249152130.
+11[38] M.Sun,Z.Liu,A.Bair,andJ.Z.Kolter. Asimpleandeffectivepruningapproachforlarge
+languagemodels,2024.
+[39] I.Sutskever,O.Vinyals,andQ.V.Le. Sequencetosequencelearningwithneuralnetworks.
+Advancesinneuralinformationprocessingsystems,27,2014.
+[40] H.Touvron,T.Lavril,G.Izacard,X.Martinet,M.-A.Lachaux,T.Lacroix,B.Rozière,N.Goyal,
+E.Hambro,F.Azhar,A.Rodriguez,A.Joulin,E.Grave,andG.Lample. Llama: Openand
+efficientfoundationlanguagemodels,2023.
+[41] H.Touvron,L.Martin,K.Stone,P.Albert,A.Almahairi,Y.Babaei,N.Bashlykov,S.Batra,
+P.Bhargava,S.Bhosale,D.Bikel,L.Blecher,C.C.Ferrer,M.Chen,G.Cucurull,D.Esiobu,
+J.Fernandes,J.Fu,W.Fu,B.Fuller,C.Gao,V.Goswami,N.Goyal,A.Hartshorn,S.Hosseini,
+R.Hou,H.Inan,M.Kardas,V.Kerkez,M.Khabsa,I.Kloumann,A.Korenev,P.S.Koura,M.-A.
+Lachaux,T.Lavril,J.Lee,D.Liskovich,Y.Lu,Y.Mao,X.Martinet,T.Mihaylov,P.Mishra,
+I.Molybog,Y.Nie,A.Poulton,J.Reizenstein,R.Rungta,K.Saladi,A.Schelten,R.Silva,E.M.
+Smith,R.Subramanian,X.E.Tan,B.Tang,R.Taylor,A.Williams,J.X.Kuan,P.Xu,Z.Yan,
+I.Zarov,Y.Zhang,A.Fan,M.Kambadur,S.Narang,A.Rodriguez,R.Stojnic,S.Edunov,and
+T.Scialom. Llama2: Openfoundationandfine-tunedchatmodels,2023.
+[42] S. Wang, B. Z. Li, M. Khabsa, H. Fang, and H. Ma. Linformer: Self-attention with linear
+complexity,2020.
+[43] Q.Zhang,D.Ram,C.Hawkins,S.Zha,andT.Zhao. Efficientlong-rangetransformers: You
+needtoattendmore,butnotnecessarilyateverylayer,2023.
+[44] Y.Zhu,S.Lu,L.Zheng,J.Guo,W.Zhang,J.Wang,andY.Yu. Texygen: Abenchmarking
+platformfortextgenerationmodels. SIGIR,2018.
+12A SuperposedDecodingPseudo-Code
+Algorithm1SuperposedDecodingalgorithmgeneratingkdrafts.
+1: Input: PrefixM =(x 1,...,x m),generationlengthG
+2: Initializet←m+1
+3: InitializeD ←{M} k ▷Draftstore
+4: whilet̸=m+Gdo
+5: ift=m+1then ▷Firsttimestep
+6: p θ ←f θ(M)
+7: fori=1tokdo
+8: xi
+m+1
+←Largest(p θ,i) ▷Taketheithmostprobabletoken
+9: D i ←{D i∪xi m+1}
+10: endfor
+11: x˜ m+1 ←Superpose(x1 m+1,...,xk m+1) ▷Superposetheselectedtokens
+12: else
+13: p θ ←f θ(M,x˜ m+1:t−1)
+14: p θ ←KeepTopK(p θ) ▷Keeponlythetopktokens
+15: fori=1tokdo
+16: p
+ngram
+←N-Gram(D i) ▷Calculatethen-gramdistributionofdrafti
+17: p f ←Interpolate(p θ,p ngram)
+18: forxi t ∈p f do
+19: D tmp ←{D i∪xi t} ▷Createnewdraftoption
+20: D ←{D∪D tmp} ▷Adddraftoptiontodraftstore
+21: endfor
+22: endfor
+23: D ←TopK(D) ▷Keepthetopkdrafts
+24: x˜ t ←Superpose(x1 t,...,xk t) ▷Superposemostrecenttokensfromdrafts
+25: endif
+26: t←t+1
+27: endwhile
+28: returnD
+B HyperparameterChoices
+αandτ. WefindthatthebestperforminghyperparametersforcoherentgenerationonLlama-2-7B
+areα = 0.54andτ = 0.06, whichweuseinSection4.1, 4.3, and4.4. Theonlyexceptionisin
+Section4.2,wherewedisablen-gramsmoothing.
+N-GramInterpolation. Theweightsweuseforinterpolationare[0.01,0.04,0.15,0.18,0.12]for
+n=2ton=6.
+C PerplexityEvaluationwithFewerN-Grams
+WeevaluateperplexityforSuperposedDecodingontheOpenWebTexttestsplitbyinterpolating
+onlyn-gramsfromn = 2ton = 4,requiringonly2.64GBofstorage. Weusethesamen-gram
+interpolationweightsasinSection3butretuneαandτ to0.55and0.1respectively. InTable3,we
+showthattheperplexityoftheaveragebestgenerationisalmostidenticaltotheaverageNucleus
+Samplingperplexity. ThisdemonstratesthatSuperposedDecodingcanbeeffectivelyimplemented
+withminimalstorageoverheadinstorage-constraineddeviceslikesmartphones.
+D StandardDeviationsforPerplexityEvaluation
+We calculate the standard deviations across the 5000 OpenWebText prefixes used for evaluation
+forLlama-2-7BandMistral7BandshowthembelowinTables4and5. WenotethatSuperposed
+DecodinghashigherstandarddeviationthanNucleusSamplingandBeamSearchwhenimplemented
+13Table3:SuperposedDecodingishighlycompetitivewithNucleusSamplingevenwhenonlyn-grams
+fromn=2ton=4areinterpolatedtocalculatep .
+ngram
+Nucleus Beam/Greedy N-Gram SuperposedDecoding
+Draft# - - - 1 2 3 Best
+AvgPerplexity 5.17 3.77 152.75 5.83 8.38 9.97 5.18
+onLlama-2-7BbutthatthestandarddeviationsequalizeonMistral7B.Despitethishighvariance,
+humanevaluationresultsinSection4.4affirmthatSuperposedDecodingisconsistentlycompetitive
+incoherency.
+Table4: StandarddeviationofLlama-2-7BgenerationperplexitycalculatedonOpenWebTexttest
+splitinSection4.1.
+Nucleus Beam/Greedy N-Gram SuperposedDecoding
+Draft# - - - 1 2 3 Best
+AvgPerplexity 4.82 3.31 305.00 8.90 14.44 20.58 8.24
+Table5: StandarddeviationofMistral7BgenerationperplexitycalculatedonOpenWebTexttestsplit
+inSection5.1.
+Nucleus SuperposedDecoding
+Draft# - 1 2 3 Best
+AvgPerplexity 10.19 9.92 11.53 12.53 9.38
+E FurtherAblations
+Inthissection,wepresentfurtherablationsstudyingtheimpactofnumberofdrafts,prefixlength,and
+generationlengthonSuperposedDecodingperplexity(averagebest). Wefindthatforscenariossuch
+thatthenumberofdraftsk ≥3,SuperposedDecodingconsistentlyoutperformsnucleussampling
+(Figure9). Thisisgenerallyexpectedasthehigherthenumberofdrafts,thehigherthelikelihood
+thatatleastonedraftisgoodquality. Similarly,wefindthatSuperposedDecodingisrobusttoprefix
+lengthandgenerationlength. Indeed,thepatternsofSuperposedDecodinggivenlongerprefixand
+generationlengthsmimicthoseofNucleusSamplinginthesamesituation,withconsistentlysimilar
+perplexitiessuggestinggoodperformance(Figures10,11).
+F HumanEvaluation
+F.1 AdditionalResults
+WerunthesameexperimentasinSection4.4twomoretimesatasmallerscale. First,wecompare
+two Nucleus Sampling drafts and three Superposed Decoding drafts. This scenario results in a
+significantcomputeadvantageforNucleusSampling. Still,wefindthatSuperposedDecodingwins
+themajorityofthetime,withawinrateof60.6%. However,thisisslightlylowerthanthe64%win
+rateinthemainstudy.
+Next,wecompareoneNucleusSamplingdraftandthelowestperplexitySuperposedDecodingdraft
+ofthree. ThismimicstheperplexityevaluationinSection4.1butinahumansetting. Wefindthat
+SuperposedDecodingisstillrankedfirstthemajorityofthetime,witha51%winrate.
+Forcostefficiency,werunbothstudiesononly100randomprompts,withfiveresponsesperprompt.
+146.0
+SPD
+Nucleus
+5.5
+Beam
+5.0
+4.5
+4.0
+3.5
+2 3 4 5 6 10
+Number of Drafts
+Figure9: AverageperplexityofonedraftofNucleusSamplingandBeamSearchcomparedagainst
+averagebestperplexityofSPDusingdraftsk ={2,3,4,5,6,10}onOpenWebText.SPDoutperforms
+NucleusSamplingforallvaluesofktested.
+SPD
+6.0 Nucleus
+5.5
+5.0
+4.5
+5 15 25 40
+Prefix Length
+Figure 10: Average perplexity of one draft of Nucleus Sampling compared against average best
+perplexity of SPD for prefix lengths 5, 15, 25, 40. We find that SPD and Nucleus Sampling
+consistentlyhavesimilarperplexities.
+7
+SPD
+Nucleus
+6
+5
+4
+5 10 15 20
+Generation Length
+Figure 11: Average perplexity of one draft of Nucleus Sampling compared against average best
+perplexityofSPDforgenerationlengths5,10,15,20. WefindthatSPDisrobustforawiderangeof
+shortformgenerationlengths.
+15
+ytixelpreP
+ytixelpreP
+ytixelpreP60 Nucleus 50 Nucleus
+SPD Draft 1 SPD Draft 1
+SPD Draft 2
+50 SPD Draft 3
+40
+40
+30
+30
+20
+20
+10
+10
+0 0
+Nucleus SPD Nucleus SPD
+Decoding Method Decoding Method
+Figure 12: Left: Study results comparing two Nucleus Sampling drafts and three Superposed
+Decodingdrafts. Right:StudyresultscomparingoneNucleusSamplingdraft&thelowestperplexity
+SuperposedDecodingdraftoutofthreegenerations. Notethatuncertaintyishigherforbothiterations
+duetosmallersamplesize.
+F.2 MechanicalTurkSurvey
+WeshowascreenshotofourstudypageinFigure13. Wecompensateworkersatanapproximaterate
+of$15perhour.
+G ExampleGenerations
+In Figure 14, we show 12 additional example generations comparing Superposed Decoding and
+NucleusSamplinginacompute-normalizedsetting. PrefixesaresampledfromOpenWebTextand
+truncatedtothefirst15tokens,andeachgeneratedcompletionis10tokensinlength.
+H Layer-WiseLinearity
+In Figure 15, we show the cosine similarity between superposed embeddings {x˜} and the linear
+combination of the component embeddings of three tokens, after each layer within the first five
+timestepsusingLlama-2-7B.Withineachtimestep,superposedembeddingspassthroughaninitial
+layer(Layer1)thatembedstokenindicesandweightstheresultingembeddingsusingcorresponding
+tokenweights. Theweightedembedingsthenpassthrough32transformerblocks(Layers2-33),then
+throughafinallinearprojectionlayer(Layer34)thatproducestheoutputsuperposedembeddingof
+thattimestep.
+I Resetting
+Here,weshowexamplesoftheSuperposedDecodingResettingtechniquedescribedinSection5.3
+forgenerationsof200tokensusingprefixesfromOpenWebText. SuperposedDecodingResettingis
+significantlylessrepetitivethannon-resetSuperposedDecoding. However,NucleusSampling,which
+isalsoshown,isqualitativelystillthebestperformingdecodingmethodinlongformsettings.
+16
+)%(
+etaR
+niW
+)%(
+etaR
+niWPrompt#1
+SuperposedDecodingwithResetting
+SydneyarchitectRanaAbboudwonaNAWICScholarshipfor2019. Sydney-basedarchitect
+andinteriordesignerRanaAbboudhasbeenawardeda$10,000scholarshiptostudyaMastersof
+ArchitectureattheUniversityofNewSouthWales. Thescholarship,awardedbytheNational
+AssociationofWomeninConstruction(NAWIC)isdesignedtohelpwomenintheconstruction
+industrytoadvancetheircareers. RanaAbboud,agraduateoftheUniversityofSydney,isthe
+founderofRanaAbboud&Associates. “Iamhonouredtobeawardedthisscholarship. Iam
+passionateaboutdesignbuiltforpeopleandtheenvironment. Iamexcitedtobeabletofurther
+mystudiesandcontinuetodevelopmyskillsandknowledge,”shesaid. TheNAWICScholarship
+isawardedtowomenwhoarestudyingorworkingintheconstructionindustry. “TheNAWIC
+Scholarshipisagreatopportunityforwomentofurthertheircareand
+SuperposedDecodingwithoutResetting
+SydneyarchitectRanaAbboudwonaNAWICScholarshipin2017. TheNationalAssociation
+ofWomeninConstruction(NAWIC)hasannouncedthewinnersofits2017scholarships. The
+NAWICScholarshipProgramisdesignedtoencouragewomentopursuecareersintheconstruc-
+tionindustry. The2017scholarshiprecipientsare: RanaAbboud,astudentattheUniversityof
+NewSouthWales,whoisstudyingaBachelorofArchitecture. MeganBrennan,astudentatthe
+UniversityofNewSouthWales,whoisstudyingaBachelorofConstructionManagement. Katee
+Cox,astudentattheUniversityofNewSouthWales,whoisstudyingaBachelorofConstruction
+Management. KateDunn,astudentattheUniversityofNewSouthWales,whoisstudyinga
+BachelorofConstructionManagement. KateFoster,astudentattheUniversityofNewSouth
+Wales,who
+NucleusSampling
+SydneyarchitectRanaAbboudwonaNAWICScholarshipof$1000for‘SignificantContri-
+butiontoCareerGrowth’. SydneyarchitectRanaAbboudhaswontheNationalAssociationof
+WomeninConstruction(NAWIC)NSW/ACTScholarshipfor2017for‘SignificantContribution
+toCareerGrowth’. ShehasalsojustbeenacceptedtoundertakeaMasterofScienceinArchi-
+tecturewithHigherDegreebyResearchatSydneyUniversity. Thescholarshipisoneofeight
+awardspresentedbyNAWICtowomentofurthertheirstudiesintheconstructionindustryin
+Australia. “Asaworkingmother,IamverygratefulforthesupportIamreceivingtofurthermy
+professionalandacademicdevelopment,”Abboudsaid. RanaAbboud(middle)withassociates
+(L-R)TaraAbdul-KhalekandAditiRana. AbboudisadirectorofPalArchitectureinAlexandria,
+Prompt#2
+SuperposedDecodingwithResetting
+NEWDELHI:Here’ssomethingayurvedagurushavebeentellingforyears. Anewstudyhas
+foundthatacombinationofthreeherbs-includingashwagandha,guduchiandshatavari-can
+helpinthetreatmentofdiabetes. “Thestudywasconductedtoevaluatetheefficacyandsafetyof
+apoly-herbalformulationcontainingthreeherbs-Ashwagandha(Withaniasomnifera),Guduchi
+(Tinospora cordifolia), and Shatavari (Asparagus racemosus) in inhibiting the progression of
+diabetes in alloxan-induced diabetic rats” said the study published in the journal ‘Journal of
+Ayurveda and Integrative Medicine’. The study was conducted by research team from the
+Department of Pharmacology, Dr D. Patil College of Pharmacy, Pune, Maharashtra, and the
+DepartmentofPharm
+17SuperposedDecodingwithoutResetting
+NEWDELHI:Here’ssomethingayurvedagurushavebeensayingforyears: Eatyourway
+tohealth. Anewstudyhasfoundthatadietrichinfruitsandvegetablescanhelpreducethe
+riskofdevelopingtype2diabetes. Thestudy,publishedinthejournalBMJOpen,foundthat
+adietrichinfruitsandvegetablescanhelpreducetheriskofdevelopingtype2diabetes. The
+study, which was conducted by researchers from the University of Oxford, found that a diet
+richinfruitsandvegetablescanhelppreventtheriskofdevelopingtype2diabetes. Thestudy,
+which was conducted by researchers from the University of Oxford, found that a diet rich in
+fruitsandvegetablescanhelppreventtheriskofdevelopingtype2diabetes. Thestudy,which
+wasconductedbyresearchersfromtheUniversityofOxford,foundthatadietrichinfruitsand
+vegetablescanhelppreventtherisk
+NucleusSampling
+NEWDELHI:Here’ssomethingayurvedagurushavebeentellingusaboutforyears-eating
+seasonalfruitsandvegetableshelpsstayhealthy. Hereare7foodswhichcankeepyouhealthy
+duringthesummer. Pomegranateisasummerfruitandifyouwishtohaveoptimumhealth,itis
+necessarytoeatthisfruit. Thefruitcanbeeateninrawform,orcutintopiecesandmixedwith
+honeyandtakentwiceaday. Theskinofthefruitisitselfahealthtonicandcanbechewed. It
+containsnaturalbleachingproperties. Thefruitcanalsobesqueezedandthenthepulpmixedwith
+milk,cuminseeds,oneteaspoonfulofhoneyandapinchofgingeranddrankthricedaily. Beets
+areapopularrootvegetable. Beetrootjuicemayhelpincreaseexerciseendurance,potentially
+becauseitincreasesbloodflow,saidWebMD.Thebestfruits
+Prompt#3
+SuperposedDecodingwithResetting
+As part of a broad initiative to combat sexual harassment and assault, the University of
+California,Berkeleyhaslaunchedanewwebsitetohelpstudents,staff,andfacultyreportand
+respond to sexual harassment and assault. The new site, which went live on Monday, is the
+one-stopdestinationforallthingsrelatedtosexualharassmentandassaultatUCBerkeley. Itis
+theresultofacollaborationbetweentheOfficeoftheViceChancellorofStudentAffairsand
+theOfficeoftheViceProvostforAcademicandStudentAffairs. “Thisisacriticaltimeforour
+campusandtocometogethertoaddresssexualharassmentandassaultinourcommunity,”said
+ViceChancellorforStudentAffairs,StephSutton-Wheeler,inastatement. “Wearecommitted
+toprovidingasafeandinclusiveenvironmentforallmembersofourcommunityandthisnew
+websiteisacriticalstepinthateffort.”Thesiteprovidesinformationonhowtoreportsexual
+harassmentandassault,aswellasthefor
+SuperposedDecodingwithoutResetting
+Aspartofabroadinitiativetocombatsexualharassmentandassault,theUniversityofCalifor-
+nia,Berkeley,haslaunchedanewwebsitethatprovidesinformationabouttheuniversity’spolicies
+and procedures for reporting and responding to sexual harassment and sexual violence. The
+website,whichisavailableathttp://sexualharassment.berkeley.edu,isdesignedtohelpstudents,
+facultyandstaffunderstandtheirrightsandresponsibilitiesundertheuniversity’spoliciesand
+procedures. Thewebsiteincludesinformationabouttheuniversity’spoliciesandproceduresfor
+reportingandrespondingtosexualharassmentandsexualviolence,aswellasinformationabout
+theuniversity’spoliciesandproceduresforinvestigatingandrespondingtosexualharassment
+andsexualviolence. Thewebsitealsoincludesinformationabouttheuniversity’spoliciesand
+proceduresforinvestigatingandrespondingtosexualharassmentandsexualviolence,including
+informationabouttheuniversity’spoliciesandproceduresforinvestigatingandrespondingto
+sexualharassmentandsexualviolenceintheworkplace.
+18NucleusSampling
+Aspartofabroadinitiativetocombatsexualharassmentandmisconductoncampus,atask
+forceconsistingoffaculty, staff, students, andothermembersofthecampuscommunitywill
+presentadraftreportwithrecommendationsattheBoardofTrusteesmeetingonFriday,October
+27,2017. UndertheleadershipofExecutiveDirectorforHumanResourcesJesseBozeman,the
+taskforcewasformedtoaddressconcernsraisedattheendoftheSpring2017semester,which
+includedaStudentGovernmentAssociationresolutionandastudent-driven,faculty-approved
+coursecalled“SexualMisconduct: ConsentandCulture,”taughtbyProfessorNancyCantalupo
+and co-sponsored by Campus Life, Student Affairs, and Academic Affairs. The task force
+is comprised of the following members: Diana Ballin, Senior Lecturer in the Department of
+Anthropology,Chair;PatriciaHopkins,DeanofStudents;KellyMcSweeney
+19Short instructions & Consent Form
+Summary: Your task is to rank four language model outputs based on Data collection & sharing: We will not ask you for your
+how well they complete the provided prompt. This should take less name, and the data collected in this study will be
+than a minute. made unidenti able to the best of our extent. We will
+securely store the data on our servers and only share
+Criteria: You should rank completions by coherency and factuality only. with quali ed researchers (e.g., who want to further
+Coherent generations should be grammatically correct and make study language model text completions). If you later
+decide that you do not want your responses included
+logical sense. Some options may seem equally preferable. In such
+in this study, please email so we can exclude your
+cases, try your best to pick one over the other! work.
+Examples: Contact: If you have any questions about this study,
+Prompt: The English soccer club  ew in yesterday you should feel free to ask them by contacting us
+Best Completion: to compete in a tourn below.
+Second Best: to compete in a comp
+Third Best: to compete with a new
+Fourth Best: with high hopes to sell
+Prompt: In an interview with BBC,
+Best Completion: the president stated his desi
+Second Best: the manager explained his inter
+Third Best: the manager explained his favor
+Fourth Best: the manager defended decision
+Task:
+Order the completions in decreasing order such that the preferred one is at the top.
+Note that "\n" denotes a line break.
+Prompt: ${prompt}
+Candidates/Completions:
+${gen_1}
+${gen_2}
+${gen_3}
+${gen_4}
+(Optional) Please let us know if anything was unclear, if you experienced any issues,
+or if you have any other feedback for us.
+Submit
+Figure13: AscreenshotofourMechanicalTurktemplate,whichpresentstherespondentwithatask
+summary,objectivecriteriaforrankinggenerations,andtwoexamples.
+20OpenWebText When I worked as a scout for the Carolina Over the next few years, NASA plans to get
+Panthers in the As a kid, I played a game called The Sims, a back to launching
+Nucleus 1990s, I would often simulation of life in a suburban neighborhood. I rockets from Cape Canaveral, Florida
+1990s, I was always game where you cancreate your character and live out astronauts from U.S. soil.
+Superposed 1990s, I was a game where you couldcreate a character and live out astronauts from U.S. soil,
+1990s, I was responsible game where you cancreate your character and live their astronauts from U.S. soil for
+OpenWebText "Do you want an extended warranty with Just this Tuesday I wrote calling on MUD to
+that?" Synopsis A library for running tasks(jobs) on present a
+Nucleus "No, thanks. I'm sure it a cluster of nodes. It provides a simple API plan to the community to resolve the situation with the
+"No, I don't wantanextended a cluster of machines. ## Installation plan to the publicfor the future of the M
+Superposed "No, I don't thinkanextended a cluster of computers. ## Installation plan to the publicfor the future of the site
+"No, I don't wantanyextended a cluster of nodes. ## Installation plan to the communityfor the future of the M
+OpenWebText As an undergraduate, I took a course titled
+"The Log "Guess what? I have flaws. What are they? In this gluten-free riff on banana cream pie
+Nucleus icof Scientific Discovery" with Karl Po I'm a little too bossy, , the banana flavor comes from a hom
+icof Scientific Discovery" withthe late I'm not sure. I'm working , the bananas are baked into acust
+Superposed icof Scientific Discovery" inthe late I'm not sure. I'm not , the bananas are baked into acr
+icof Scientific Discovery" fromthe late I'm not perfect. I'm working , the bananas are baked into thecust
+OpenWebText As most managers are probably starting to Various ancient maps discovered throughout
+figure out, Midfielders Martin Shkreli, the bad boy of the U.S. time reveal a slightly different reality than
+Nucleus are the most important part of a team. This pharmaceutical industry, was convicted what we are used to seeing. The maps
+are the most important partof theteam. They pharmaceutical industry, has been sent what we are used to. The mostfamous
+Superposed are the most important playersof theteam. They pharmaceutical industry, has been found what we are used to. The worldfamous
+are the most important partof ateam. They pharmaceutical industry, has been arrested what we are used to. The mostinteresting
+Figure14: Additionalqualitativetextgenerationsinacompute-normalizedsettingforSuperposed
+DecodingandNucleusSamplingwithprefixessampledfromOpenWebText
+21Timestep 1
+Timestep 2
+1.00 Timestep 3
+0.98 Timestep 4
+0.96 Timestep 5
+0.94
+0.92
+0.90
+0.88
+0.86
+0.84
+0.82
+0.80
+0.78
+0.76
+0.74
+0.72
+0.70
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34
+Layer
+Figure15: Layer-wiselinearityanalysisofthefirstfivetimestepsonLlama-2-7Bwiththreetokens.
+Therelationshipbetweensuperposedembeddingsandthecomponenttokenembeddingsisinitially
+entirelylinear;linearitythendegeneratesoverthefirstfewlayers,butgraduallyrecoversthroughthe
+subsequenttransformerblocklayers.
+22
+ytiralimiS
+enisoC
+naeM
