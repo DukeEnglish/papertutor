@@ -1,0 +1,1170 @@
+Nearest Neighbor Speculative Decoding for
+LLM Generation and Attribution
+MinghanLi2,∗, XilunChen1, AriHoltzman1,4, BeidiChen3,1, JimmyLin2, Wen-tauYih1, XiVictoriaLin1
+1FAIR at Meta, 2University of Waterloo, 3Carnegie Mellon University, 4University of Chicago
+∗Work done during an internship at Meta.
+Large language models (LLMs) often hallucinate and lack the ability to provide attribution for their
+generations. Semi-parametric LMs, such as kNN-LM, approach these limitations by refining the
+output of an LM for a given prompt using its nearest neighbor matches in a non-parametric data
+store. However, these models often exhibit slow inference speeds and produce non-fluent texts. In this
+paper,weintroduceNearestNeighborSpeculativeDecoding(Nest),anovelsemi-parametriclanguage
+modeling approach that is capable of incorporating real-world text spans of arbitrary length into
+the LM generations and providing attribution to their sources. Nest performs token-level retrieval
+at each inference step to compute a semi-parametric mixture distribution and identify promising
+span continuations in a corpus. It then uses an approximate speculative decoding procedure that
+accepts a prefix of the retrieved span or generates a new token. Nest significantly enhances the
+generation quality and attribution rate of the base LM across a variety of knowledge-intensive tasks,
+surpassing the conventional kNN-LM method and performing competitively with in-context retrieval
+augmentation. In addition, Nest substantially improves the generation speed, achieving a 1.8×
+speedup in inference time when applied to Llama-2-Chat 70B.
+Date: 30/5/2024
+Correspondence: Xi Victoria Lin at victorialin@meta.com
+1 Introduction
+Large language models (LLMs) have demonstrated strong potential as multi-task solvers, excelling in a wide
+range of applications (Brown et al., 2020; Chowdhery et al., 2022; Touvron et al., 2023a,b; Anil et al., 2024).
+Despite their advanced capabilities, LLMs frequently encounter the problem of hallucination, particularly
+when dealing with long-tail knowledge that is less represented in their training data (Kandpal et al., 2023;
+Asai et al., 2023a). To address this limitation, retrieval augmentation incorporates information retrieval
+and nearest neighbour search from a non-parametric data store to enhance evidence-based and situated
+reasoning with LLMs. The resulting semi-parametric LMs exhibit reduced tendency to generate unsupported
+content (Khandelwal et al., 2020; Borgeaud et al., 2022; Shi et al., 2024a,b; Asai et al., 2023a).
+However, the effectiveness of retrieval-augmented language models (RALMs) in ensuring accurate and reliable
+content generation varies. The widely used in-context retrieval-augmentation (RA) regime (Ram et al., 2023;
+Shietal.,2024a,b)softlybiasestheLMoutputdistributionbyprependingretrievedcontenttotheinput,which
+does not reliably guarantee faithful attribution of information. Approaches such as kNN-LM (Khandelwal
+et al., 2020) modify the LM output with a non-parametric token distribution derived from nearest-neighbor
+matches in a corpus, which provide more direct attribution but have also been shown to degrade the quality
+of text generation (Wang et al., 2023a). Additionally, retrieval augmentation can significantly increase
+the generation latency due to the time required for the retrieval processes to complete and the subsequent
+expansion of the LM’s context.
+In this work, we propose Nearest Neighbor Speculative Decoding (Nest). This new semi-parametric language
+modeling approach is capable of incorporating real-world text spans of arbitrary length into the generations of
+an off-the-shelf LM, leading to improved quality and latency. Nest extends the standard kNN-LM approach,
+which interpolates the output distribution of an LM using the distribution of possible next tokens retrieved
+from a corpus (Khandelwal et al., 2020). It conducts an additional passage retrieval step at the beginning to
+1
+4202
+yaM
+92
+]LC.sc[
+1v52391.5042:viXralimit the need to store and search over all tokens in the corpus, offering a balanced trade-off between search
+accuracy and efficiency. At each inference step, Nest performs content generation with three sub-steps:
+1)Confidence-basedinterpolation. We use a novel Relative Retrieval Confidence (RRC) score to measure
+the uncertainty of the token retriever and use it as the interpolation coefficient of the output probability
+mixture. This enables flexible adaptation of the LM’s output to different downstream tasks through dynamic
+interpolation with the token retrieval results.
+2)Dynamicspanselection. Inspired by the Copy Generator (CoG) (Lan et al., 2023), Nest selects not only
+the best token predicted by the mixture probability, but also extends to the span contining from that token in
+the corpus when the token retrieval confidence exceeds a predefined threshold.
+3)Relaxedspeculativedecoding. If a span of more than one tokens is selected, it undergoes evaluation based
+on the mixture probability. Through a rejection procedure similar to that in speculative decoding (Leviathan
+et al., 2023), only a prefix deemed highly likely by the mixture probability is accepted.
+Evaluatedonvariousfree-formgenerationtasks—includingquestionanswering,textcompletion,andfactuality-
+aware generation—using Llama-2-Chat models (Touvron et al., 2023b) of different sizes, Nest demonstrates
+superiorperformancecomparedtoboththebaseLMandthestandardkNN-LMunderazero-shotsetting. For
+example, combined with Nest, the Llama-2-Chat 70B model demonstrates 42.3% improvement of ROUGE-1
+on WikiText-103 and 21.6% improvement of FActScore on Biography. Furthermore, Nest performs
+competitively with respect to in-context retrieval-augmentation on MMLU, Pile-of-Law, and TruthfulQA. We
+further demonstrate that the two approaches can be combined to enhance generation quality and attribution.
+Additionally, by generating multiple tokens at each time step, Nest significantly improves the efficiency
+of long-form generation. For Llama-2-Chat 70B, it achieves a 1.8× speedup in inference time without
+compromising attribution or fluency.
+2 Background
+2.1 ProblemDefinition
+Given an input x, a mixture model M predicts the output y consisting of segments {y ,y ,...,y }. In
+1 2 T
+our setting, M may produce multiple tokens at a time step t, and therefore y indicates the t-th segment
+t
+consisting of at most n tokens where 1≤|y |≤n. Let {w(1),w(2),...,w(n)} be the tokens in segment y , we
+t t t t t
+use p (w|x,y ) to denote the distribution of the next token, and use p (w = w(1)|x,y ) to denote the
+M <t M t <t
+probability of w(1) of the next segment y .
+t t
+2.2 NearestNeighborLanguageModels(kNN-LM)
+The mixture model M involves a pre-trained LM and key-value datastore (K,V) that enables approximate
+nearest neighbors search without further training or fine-tuning.
+Key-value datastore. To create the datastore (K,V) using the LM for a corpus D, let f(·) be the mapping
+from input sequence c to the hidden states h of the LM at some fixed layer. Let w be the next word of c in the
+corpus D. For a sample (c ,w ) in D after segmentation, we define the i-th key-value pair (k ,v ) in (K,V) as
+i i i i
+(h ,w ), where h =f(c ). The whole datastore is thus defined as the set of all possible key-value pairs in D:
+i i i i
+(K,V)={(h ,w )|(c ,w )∈D}. (1)
+i i i i
+Thesizeofthedatastore(K,V)isproportionaltothetotalnumberoftokensincorpusD. Thisbringsdifficulty
+in scaling the size of the corpus and the model, which may require massive storage space and computational
+resources.
+Probability interpolation. During inference, the language model outputs the token distribution p (w|x,y ),
+LM <t
+together with the hidden state q . The model uses q as a query to search the datastore (K,V) and retrieve
+t t
+the r-nearest neighbors π according to the similarity s(q,k) between a query q and a key k. The final
+2Figure1 The Nest approach first locates the tokens in the corpus using the LM hidden states. The retrieval
+distribution p is dynamically interpolated with p based on the retriever’s uncertainty λ . The token and its
+k-NN LM t
+n-gram continuation are then selected from the mixture distribution p , while the final span length is determined
+M
+by speculative decoding to remove undesired tokens. The spans incorporated in the final generation provide direct
+attribution and amortize the generation latency.
+non-parametric distribution p (w|x,y ) is computed using a softmax function over the similarity of all
+k-NN <t
+retrieved neighbors:
+(cid:88)
+p (w|x,y )∝ I exp(µ·s(q ,k )), (2)
+k-NN <t w=vi t i
+(ki,vi)∈π
+(cid:112)
+where µ is the inverse temperature. We use 1/ dim(q ) for µ in practice where dim(q ) is the hidden state
+t t
+dimension. This is similar to computing attention in the Transformer model (Vaswani et al., 2017). For
+similarity s(q,k), we follow Khandelwal et al. (2020) and use the negative squared ℓ distance. Items not in π
+2
+are assigned with 0 probability based on the indicator function I .
+w=vi
+Finally, the next token is sampled from the mixture distribution p of the non-parametric distribution p
+M k-NN
+and the parametric distribution p using a fixed hyper-parameter λ∈[0,1]:
+LM
+p (w|x,y )=λ·p (w|x,y )+(1−λ)·p (w|x,y ). (3)
+M <t LM <t k-NN <t
+3 NearestNeighborSpeculativeDecoding
+3.1 Two-Stagek-NNSearch
+As mentioned in Section 2.2, maintaining a token-level key-value store can be expensive in terms of both
+latency and storage. To provide a better trade-off between latency and accuracy, we adopt the two-stage
+design, which is widely applied in information retrieval and search engines.
+First-stage passage retrieval Given the corpus D, we segment the documents into separate passages of less
+than m tokens each. We then encode the corpus and use a hybrid retrieval system (Ma et al., 2022) to select
+the relevant passages, as dense retrievers are good at handling semantics in queries (Karpukhin et al., 2020)
+and sparse retrievers are good at lexical matching (Sciavolino et al., 2021).
+3Second-stage k-NN token search After obtaining the top-b retrieved passages {d ,d ,...,d } at time step t,
+1 2 b
+we use the encoder f(·) of LM to encode the prefixes of all tokens as keys as shown in Figure 1. The key-value
+datastore (K,V) therefore is created on the fly. Similarly, we use the negative squared ℓ distance as the
+2
+similarity function and q as the queries to search for the top-r nearest neighbors π in (K′,V′).
+t
+The two-stage design provides a trade-off between search latency and accuracy and the passage-level index
+only takes a fraction of the token-level index in Section 2.2. In addition, the first-stage passage search also
+acts as a filter to remove deceptively similar tokens in non-relevant contexts.
+3.2 Confidence-BasedOutputInterpolation
+Similar to Equation (3), we linearly interpolate the language model’s distribution p and non-parametric
+LM
+distribution p using a coefficient λ for a time step t in generation. The difference is that we use the
+k-NN t
+token retrieval score to compute λ :
+t
+(cid:18)(cid:18) (cid:19) (cid:19)
+min |s(q ,k )|
+λ =σ i t i −α /τ , (4)
+t max |s(q ,k )|
+i t i
+where σ is the sigmoid function and the min-max ratio expresses the uncertainty of the k-NN component. We
+use the sigmoid activation to re-center and re-scale this uncertainty, where α is the offset and τ is the scale
+for the sigmoid function. We refer to this method as Relative Retrieval Confidence (RRC).
+If the downstream task does not involve generation, such as perplexity evaluation and multi-choice tasks, our
+method will end at Equation (4). The mechanisms introduced in the following sections are only applied to
+generation, including token/span selection and post-hoc revision.
+3.3 DynamicSpanSelection
+Directlysamplingtokensfromthemixturedistributionp mightescalatetheexposurebiassincetheseemingly
+M
+coherent tokens might be retrieved from completely different sources. To maintain coherence, we extend the
+context of the current sampled token by using its n-gram continuation in the corpus. Given the current time
+step t, we first select the next token w from the mixture distribution p . However, the sampled token w
+t M t
+may correspond to multiple retrieved w (i.e., the value v ), in the neighbors π which have different n-gram
+i i
+continuations. We use a simple max-pooling strategy to select the starting token w(1) of the n-gram from π:
+t
+w(1) = argmax p (w =w |x,y ) (5)
+t k-NN i <t
+{wi|wi=wt,wi∈π}
+The corresponding n-gram for time step t is {w(1),w(2),...,w(n)} where n is fixed hyper-parameter. The final
+t t t
+output is determined by the interpolation coefficient λ in Equation (4):
+t
+(cid:26) w , if λ >δ;
+t t
+y = (6)
+t {w(1),w(2),...,w(n)}, otherwise.
+t t t
+where δ is a threshold and y is the segment output at time step t.
+t
+3.4 RelaxedSpeculativeDecoding
+Despite the dynamic selection, the hyper-parameter n is hard to control over different tasks. To produce
+spans with adaptive length, we take inspiration from Leviathan et al. (2023), where we use M to revise
+the proposed n-gram. Originally, speculative decoding uses a small model to generate a draft and uses a
+large model to evaluate the draft. However, the draft distribution q(w|x,y ) is unknown besides the first
+<t
+token w(1). Therefore, we use a relaxed version of speculative decoding that upper bounds the acceptance
+t
+probability. The probability of accepting the token w(i) in a span is:
+t
+ 
+p (w =w(i) |x,y ,w(1),w(2),...,w(i−1))
+P(accept token w t(i))=min1, γM
+·max p
+t
+(w
+|x,y<t ,wt (1),wt (2),...,wt (i−1)), (7)
+M <t t t t
+w
+4where γ ∈(0,1] is the relaxation factor, which is referred to as “leniency” by Leviathan et al. (2023). The
+smallerγ is,thelessoftenMrejectsthedraft. Iftokenw(i) isrejected,wewillremoveallthetokensfromw(i)
+t t
+to w(n), and then re-select a token w(i) from the distribution p without going through the span selection.
+t t M
+The computation for processing multiple tokens can be parallelized and Nest can thus maintain the latency
+or even accelerate the generation. Moreover, suppose all tokens in the draft are not rejected. In that case,
+we will directly fetch the n-gram’s continuation in the corpus and use it for the next draft proposal until
+rejection, removing the reliance on the hyper-parameter n.
+Once the n-gram is accepted, the corresponding parts are masked in the corpus and will never be used again
+in this generation. This is to prevent the k-NN component from repetitively retrieving the same segments in
+a small key-value store (K′,V′). We provide the complete procedure in Algorithm 1.
+4 Experiments
+We evaluate Nest and other baselines on various tasks including text completion, question-answering, fact-
+verification, and multi-choice tasks, providing a comprehensive picture of factuality, fluency, and attribution
+of Nest in different domains. In all experiments, we focus on evaluating instruction-following models. We use
+Llama-2-chat under a zero-shot setting, where we remove the few-shot demonstrations from the instructions
+to simulate the realistic usage of these models.
+4.1 BenchmarkDatasets
+Textcompletion. WikiText-103(Merityetal.,2017)isastandardbenchmarkforlanguagemodeling,extracted
+from the set of verified articles on Wikipedia. PileofLaw (Henderson et al., 2022) is a growing dataset of
+legal and administrative data. We use the datasets1 from Huggingface and further split the test data into
+validation and test sets. For language modeling, we report the perplexity score. For free-form generation, we
+report ROUGE-1, 2, L (Lin, 2004) and MAUVE (Pillutla et al., 2021).
+Question answering. We select four knowledge-intensive question-answering datasets, including Natural
+Questions (NQ) (Kwiatkowski et al., 2019), TriviaQA (TQA) (Joshi et al., 2017), HotpotQA (HQA) (Yang
+et al., 2018), and MedMCQA (MQA) (Pal et al., 2022). Since the in-context demonstrations are removed
+for free-form generation, we use answer-level recall (i.e., Hit@1) (Karpukhin et al., 2020) which checks if the
+output contains any correct answers instead of exact match.
+Fact verification. We evaluate a biography-generation task (Min et al., 2023) and TruthfulQA (Lin et al.,
+2022) which is a benchmark for testing false beliefs or misconceptions. We use FActScore (Min et al., 2023)
+forbiography. ForTruthfulQA,wefollowLinetal.(2022)whichusesthedifferencebetweenthemaxsimilarity
+to a true reference answer and the max similarity to a false reference answer for BLEU and ROUGE-1.
+Closed-set tasks. MMLU (Massive Multitask Language Understanding) (Hendrycks et al., 2021) benchmark
+covers 57 subjects across STEM, the humanities, the social sciences, and more. We report the macro accuracy
+for each domain.
+4.2 Implementation
+Knowledge Sources. Wikipedia (CC BY-SA 3.0): For tasks except text completion on Pile of Law, we use
+the Wikipedia 2021 dump released by Izacard et al. (2024) as the knowledge source and follow the same
+pre-processing procedures in RA-DIT (Lin et al., 2024), yielding ∼33M passages with each less than 200
+tokens. Pile of Law (CC BY-NC-SA 4.0): We use the training split from Huggingface and select only the
+English data. We then follow the same procedure applied in Wikipedia, yielding a corpus containing ∼15M
+passages after filtering. More details are provided in Appendix A.
+1https://huggingface.co/datasets/pile-of-law/pile-of-law/tree/main
+5Inference setting. kNN-LM and Nest share the same first-stage retriever. We use Dragon+ (Lin et al.,
+2023) and BM25 (Robertson and Zaragoza, 2009) to encode the segments into dense and sparse vectors,
+respectively. Given the input, we query both the dense and sparse indexes at the same time and retrieve their
+corresponding top-(b·l) passages. We linearly interpolate the similarity scores between the two search results
+(also known as fusion) and sort them before selecting the top-b passages. The number of passage candidates b
+is set to be 40 and the scaling factor l is set to be 100. For RA, we use the top-3 passages in the prompt
+due to the context window limit. We further combine Nest and RA since they are independent methods.
+Greedy decoding is used during generation. More details about retrieval, decoding, and hyper-parameters are
+described in Appendix B.
+Evaluation setting. For text completion tasks and perplexity evaluation, we use 128 tokens as the prefix
+and the consecutive 256 tokens as the target. For the other tasks, we use 128 tokens as the max generation
+length for question answering and 512 for fact verification. For retrieval-based models, only the prefix will be
+used for retrieval. Hyper-parameters of all baselines and Nest are tuned on the dev set of WikiText-103,
+NQ, and Biography. Each baseline uses the same hyper-parameters for all tasks evaluated. We first tune the
+related hyper-parameters for perplexity and then tune the rest for generation metrics to reduce the search
+space. More details are provided in Appendix B.
+4.3 Baselines
+Base LMs. We evaluate publicly available, instruction-tuned language models, Llama-2-chat series2, with
+model sizes ranging from 7B, 13B to 70B.
+Two-Stage kNN-LM. We apply the two-stage strategy described in Section 3.1 to kNN-LM as well, where
+we retrieve the top-b passages and encode a key-value datastore (K′,V′) on the fly.
+In-Context Retrieval Augmentation (RA). A common retrieval-augmentation method is adding the retrieved
+evidence into the prompt. We perform retrieval given the only input instead of retrieving new passages every
+k step due to the expense of refreshing the kv-cache.
+4.4 MainResults
+Table 1 shows the main results of Nest and other baselines. For languagemodeling, RA-Nest is able to
+achieve the lowest complexity on both WikiText-103 and Pile of Law. For textcompletion, RA has the best
+MAUVE scores and ROUGE scores in Wikitext-103 while RA-NEST works better for 7B and 13B models on
+Pile of Law. We observe that for legal documents, quoting the exact clauses from the source might be more
+favourable compared to Wikipedia.
+For question-answering, RA-Nest tends to work better for smaller models (7B and 13B) in general. The gap
+between base LMs and other methods diminishes for 70B LMs, which is consistent with previous work where
+retrieval is found most useful for smaller models (Borgeaud et al., 2022).
+For fact-verification, Nest is able to outperform the base LMs but underperform RA in terms of the
+FActScore. RA-NEST is able to outperform RA for the 70B model. The degradation for RA-70B is caused
+by generating shorter claims which is punished by the FActScore. On TruthfulQA, the semi-parametric
+LMs consistently outperform base LMs and RAs where in-context retrieval seems to have a negative effect on
+thescores. ThisisbecauseTruthfulQAisanadversarialdatasetcontainingdifficultquestionswherein-context
+RA is more susceptible to the “evidence” in the prompt (e.g., astrology and myths). In contrast, Nest only
+interpolates the results at the output level and therefore performs better in this case. The combination
+RA-Nest is also affected by the in-context retrieval.
+For closed-settasks, Nest is comparable to RA and RA-Nest manages to achieve the best macro scores on
+average. Overall, Nest is able to outperform base LMs and kNN-LM’s on most tasks while being on par
+with RA. The combination of RA and Nest further improves over the two methods on some tasks. Despite
+2https://huggingface.co/meta-llama/Llama-2-70b-chat-hf
+6Models Wikitext-103 PileofLaw
+PPL(↓) MAUVE RG-1 RG-2 RG-L Avg. Len PPL(↓) MAUVE RG-1 RG-2 RG-L Avg. Len
+Llama-2-Chat 14.6 58.8 15.8 3.7 14.4 175.4 10.1 80.7 19.1 5.5 17.1 211.4
+7B
++RA 7.2 74.6 35.7 23.1 34.4 204.5 7.1 84.7 23.1 8.9 21.1 222.0
++kNN-LM 9.8 82.5 23.7 7.7 21.7 238.2 8.8 81.1 19.4 5.7 17.4 214.3
++Nest 8.4 73.2 28.4 14.2 27.1 218.4 8.1 88.0 23.7 8.7 21.5 226.5
++RA-Nest 6.4 72.6 35.2 22.7 34.0 202.0 6.7 90.0 24.4 9.0 22.2 232.1
+Llama-2-Chat 12.0 75.9 19.9 4.9 18.0 218.4 8.2 72.8 17.5 5.3 15.7 181.7
+13B
++RA 6.5 91.5 38.9 24.2 37.2 249.3 5.9 86.6 23.6 9.1 21.5 228.7
++kNN-LM 8.6 76.3 23.7 8.2 21.9 238.5 7.4 71.5 17.7 5.3 15.9 183.7
++Nest 7.2 67.1 29.3 15.6 28.1 207.1 6.8 86.0 22.9 8.7 20.9 212.3
++RA-Nest 5.8 86.8 38.6 24.0 37.0 245.5 5.7 90.1 24.7 9.2 22.4 229.4
+Llama-2-Chat 9.9 88.6 22.9 6.2 20.8 239.6 6.9 93.4 23.0 7.1 20.7 250.1
+70B
++RA 5.3 91.6 40.5 26.1 38.8 235.9 4.9 95.5 26.3 10.1 24.0 253.2
++kNN-LM 7.1 83.6 26.1 9.6 24.1 253.9 6.3 94.4 23.1 7.2 20.8 251.3
++Nest 6.3 82.6 32.6 17.2 31.1 236.3 5.9 95.4 25.6 9.4 23.2 251.3
++RA-Nest 4.8 90.0 40.2 25.9 38.6 233.1 4.7 97.6 26.2 9.5 23.7 253.6
+Models TQA NQ HQA MQA Avg. TruthfulQA Biography MMLU
+Answer-LevelRecall ∆BLEU ∆RG-1 FS #Facts Human. STEM Social Other Avg.
+Llama-2-Chat 7B 61.1 38.9 30.6 9.3 35.0 -0.02 0.42 27.2 71.2 37.8 32.6 38.9 39.6 37.2
++RA 69.5 48.4 44.1 12.8 43.7 -0.34 0.18 56.5 67.1 41.8 35.3 42.2 43.3 40.7
++kNN-LM 63.4 42.4 33.5 9.5 37.2 0.13 0.66 30.6 59.8 38.0 33.1 39.2 40.1 37.6
++Nest 61.5 43.2 33.5 10.2 37.1 0.03 0.45 38.9 58.2 42.0 35.4 42.0 43.4 40.7
++RA-Nest 69.0 48.8 45.3 13.3 44.1 -0.32 0.21 55.1 57.7 37.9 32.7 39.3 39.8 37.4
+Llama-2-Chat 63.5 42.3 32.6 10.2 37.2 0.13 0.81 28.8 49.9 41.5 35.0 40.2 43.8 40.1
+13B
++RA 70.9 51.6 44.6 14.0 45.3 -0.16 0.25 59.1 51.2 43.4 37.4 43.5 46.4 42.7
++kNN-LM 64.7 43.5 34.2 11.2 38.4 0.20 0.95 31.1 46.1 41.4 34.7 40.6 44.2 40.2
++Nest 64.2 44.2 34.3 10.9 38.4 0.29 0.98 35.7 47.2 41.3 34.9 40.2 43.7 40.0
++RA-Nest 70.9 51.7 45.3 14.7 45.7 -0.14 0.25 58.4 52.4 43.5 37.7 43.5 46.7 42.8
+Llama-2-Chat 70B 74.0 50.1 39.5 12.8 44.1 0.14 0.70 34.2 58.8 43.5 37.9 44.4 47.0 43.2
++RA 75.5 55.4 52.5 16.0 49.9 -0.13 0.40 52.9 42.1 45.9 39.7 46.2 48.6 45.1
++kNN-LM 74.6 51.2 40.2 13.5 44.9 0.08 0.58 36.1 54.4 44.0 37.4 44.1 47.1 43.2
++Nest 74.2 51.6 41.4 13.8 45.2 0.17 0.70 41.6 56.2 43.8 38.0 44.4 47.8 43.5
++RA-Nest 75.4 55.2 52.4 16.3 49.8 -0.19 0.31 59.2 53.8 45.8 39.7 46.2 48.9 45.1
+Table1 Results on text completion (upper table) and other tasks (lower table). Bold numbers indicate the best
+performance. PPL: Perplexity. RG: ROUGE score. Avg. Len: Average generation length. ∆BLEU/∆RG: The
+differencebetweenthemaxscoretocorrectreferencesandthemaxscoretoincorrectreferences. FS:FActScorewith
+length penalty.
+the limited improvement, we will show that Nest is able to provide better attribution and latency in the
+following sections.
+4.5 LatencyAnalysis
+Latencybreakdown. Thecombinationofdynamicspanselectionandrelaxedspeculativedecodingcanimprove
+the latency of the LLM generation by quick draft proposal and processing multiple tokens at a time step.
+Figure2ashowsthelatencybreakdownofaNest-70Bmodel(α=0.3,τ =0.1,δ =0.5)fordifferentrelaxation
+factors on the Biography validation data. The latency experiment is done on 8×A100 GPUs (for model
+parallelization) and 32 CPU threads (for search). The batch size is set to 1. We use internal, research-purpose
+implementation of the base Llama-2-chat model which did not optimize for latency. As we can see, the LM
+encoding time takes about half of the latency, while the sum of the others takes the rest. Noticeably, the cost
+of passage search and token index building stay relatively constant per query, while the others are related to
+the number of tokens processed per time step. Still, even with extra retrieval overheads, the slowest Nest
+model is faster than the base LM, showing the efficacy of span selection and speculative decoding.
+Latency-accuracy trade-off. To understand why Nest can accelerate generation, we first show the latency-
+accuracy trade-off by tuning the relaxation factor in Figure 2b. The smaller γ is, the less often Nest rejects
+735
+70
+Base LM latency
+60 Passage search 0.50 30
+Token index building
+LM encoding
+50 Token search 0.48 25
+Rejection sampling
+40
+20
+0.46
+30
+15
+20
+0.44
+10
+10
+FactScore Span length
+0.42 5
+0
+5e-1 1e-1 5e-2 1e-2 5e-3 1e-3 5e-4 1e-4 5e-5 1e-5 5e-1 1e-1 5e-2 1e-2 5e-3 1e-3 5e-4 1e-4 5e-5 1e-5
+Relaxation factor Relaxation factor
+(a) Latency Breakdown. (b) Span length and FActScore on Biography.
+Figure2 Latency-accuracy trade-off and breakdown on Biography using Llama-2-Chat 70B+Nest. As the relaxation
+factorγ decreases,Nesttendstoacceptlongerspansfromthecorpus. Wechooseγ =5e−2inourmainexperiments,
+which accelerates the generation and improves the FActScore.
+Task Models Ratio(%) Length Example(GeneratedbyNest-70B)
+Nest 93.4 18.4 Question: whosingsdoeshelovemewithreba?
+7B
+Nest 52.4 4.4 Answer: Thesong"DoesHeLoveYou"[29756059]isaduet
+13B
+Nest 58.8 4.3 betweenRebaMcEntireandLindaDavis. Itwas
+70B
+RA-Nest 77.5 3.1 releasedinAugust1993asthefirstsinglefromReba’s
+NQ 7B
+RA-Nest 33.2 3.0 compilationalbumGreatestHitsVolume2. Itisoneof
+13B
+RA-Nest 44.9 3.9 countrymusic’sseveralsongsaboutalovetriangle. [14963536]
+70B
+Question: TellmeabioofTaralHicks.
+Nest 95.5 27.9 Answer: TaralHicks(bornSeptember21,1974)isanAmericanactress
+7B
+Nest 53.9 10.6 andsinger. Hicksisbestknownforheractinginsuchfilmsas1993’s
+13B
+Nest 58.6 7.0 AmericancrimedramafilmABronxTaleandhersinginginsuchwork
+Bio 70B
+RA-Nest 50.3 5.1 asher1997[15447985]debutstudioalbumThisTimewhichpeakedatNo. 4on
+7B
+RA-Nest 48.5 5.9 BillboardBubblingUnderHot100Singles. RaisedinTeaneck,
+13B
+RA-Nest 80.7 11.0 NewJersey,HicksgraduatedfromTeaneckHighSchoolin1994[15447985].
+70B
+SheistheyoungersisterofactressandsingerD’atraHicks.
+Table2 Attribution analysis. (Attribution) Ratio: Proportion of tokens that are taken from the corpus. (Attribution)
+Length: Average length of consecutive spans in the generation that are taken from the same document. Green:
+Segments taken from the corpus. Gray: Document id.
+a segment retrieved from the corpus, which enables more tokens to be processed in parallel. The average
+proposed span length in Figure 2a can increase from 5 tokens to 35 tokens at each time step as the relaxation
+factor gets smaller. Combined with Figure 2a, we can reach the conclusion that fetching longer spans from
+the corpus results in lower generation latency per query. For the accuracy, the FActScore on Biography
+validation data shows that there is a sweet spot around γ =5e−2 where both low latency and high accuracy
+can be achieved at the same time.
+4.6 AttributionandQualitativeAnalysis
+One of the most important features of Nest is providing attribution directly at a span level, where the
+reference for the corresponding statement is accurate since it is directly taken from the corpus. Table 2
+shows the attribution ratio, average attributed span length, and two examples for analysis. For NQ and
+Biography tasks, depending on the model and hyper-parameters in Equation (4) and (7), the ratio of tokens
+that can be traced back to the corpus ranges from 33.2% to 95.5%. In addition, it is more desirable to have
+consecutive segments that come from the same source so that consistent attribution can be provided, and the
+average length of spans taken from the corpus ranges from 3.0 to 27.9 tokens. This feature provides span-level
+8
+)yreuq/s(
+ycnetaL
+erocStcaF
+htgneL
+napS
+egarevAattribution for most claims in the LLM generation. To our knowledge, neither of the baselines can achieve
+the same granularity and preciseness for the attribution as Nest. More qualitative results are provided in
+Appendix D. We also provide more analyses on sensitivity and ablation for Nest in Appendix C.
+5 RelatedWork
+5.1 Retrieval-Augmention
+Retrieval Augmentation involves external knowledge sources to improve the performance of language models
+on knowledge-intensive tasks. Chen et al. (2017) propose DrQA which combines extractive models and
+independent retrievers for open-domain question-answering. Follow-up works on retrieval-augmentation such
+as REALM (Guu et al., 2020), RAG (Lewis et al., 2020), and Atlas (Izacard et al., 2024) further combine the
+retrieval component in pre-training and fine-tuning for downstream knowledge-intensive tasks. Asai et al.
+(2024) further divide them into three categories:
+Inputaugmentation. REPLUG(Shietal.,2024a)andin-contextRALM(Rametal.,2023)proposetopre-pend
+the retrieved passages in the prompts for zero-shot factual support. Recently, Self-RAG (Asai et al., 2023b)
+leverages special tokens to perform adaptive retrieval and different critics to iterative refine the RALM’s
+output. RA-DIT (Lin et al., 2024) retrofits LLMs with retrieval capabilities via instruction fine-tuning.
+Intermediatefusion. RETRO (Borgeaud et al., 2022) employs a novel attention mechanism to incorporate
+multiple pre-processed text fragments in intermediate layers for more efficient integration of retrieved results.
+This approach has been successfully applied to larger decoder-only language models as demonstrated by
+RETRO++ (Wang et al., 2023b) and InstructRetro (Wang et al., 2024). FiD (Izacard and Grave, 2021)
+applies similar an encoder-decoder structure in a zero-shot manner and achieves better performance at a
+document level.
+Outputintegration. kNN-LM (Khandelwal et al., 2020) pioneers this direction and proposes to interpolate the
+retrieval distribution and LM’s prediction. Follow-up works further propose adaptive interpolation methods
+which involve training (He et al., 2021; Bhardwaj et al., 2023) and excessive tuning (Drozdov et al., 2022).
+AnotherlineofworkproposestojointtrainthephraseencoderandLMtoexpandthevocabularydynamically
+using the retrieved phrases, such as Copy-Generator (Lan et al., 2023) and its follow-up work (Cao et al.,
+2024).
+5.2 Inference-TimeRevision
+Speculative decoding (Leviathan et al., 2023; Chen et al., 2023; Miao et al., 2023; Spector and Re, 2023) is
+an acceleration method that leverages a small model to generate drafts for a large model to evaluate. The
+latency is improved as the larger model can process multiple tokens in parallel at each time step. Recently,
+REST (He et al., 2024) proposes to draw multiple drafts from a datastore and leverages a prefix trie tree to
+compute the proposal distribution, which is the closest concurrent work.
+In general, speculative decoding can be categorized as an unbiased self-revision method. Previous work
+focusing on fact-checking follows a similar idea to generate factually consistent texts with a set of evidence via
+post-hocediting,suchasFRUIT(Ivetal.,2022)andPEER(Schicketal.,2022). Recently,RARR(Gaoetal.,
+2023) leverages more complex planning with LLMs to verify the retrieved evidence and generate attribution
+reports.
+6 Limitations
+While being able to directly retrieve segments from the corpus and apply them in the generation, the output
+of Nest might still contain factual errors depending on the accuracy of the first-stage passage retrieval and
+the second-stage token retrieval. Moreover, as a plug-and-play method, our main goal is to provide a flexible
+solution that can combine different LLMs and data stores in zero- and few-shot manners. Without further
+fine-tuning, the integrated system might be sub-optimal and the results can be better if it is fine-tuned on
+appropriate tasks. Lastly, such semi-parametric LMs may not improve the ability of in-context learning, since
+9the demonstrations in the prompts are unlikely to appear in any contexts that can be found in the database.
+An observation from preliminary experiments is that the current neural retrievers do not have the capability
+to process the in-context few-shot information, where techniques such as query reformulation might be needed
+for parsing the demonstrations.
+7 Conclusion
+This paper presents Nest, an inference-time revision method for LMs that improve their factuality and
+attribution through nearest neighbor speculative decoding. Leveraging two-stage k-NN search, relative
+retrieval confidence, dynamic span selection, and relaxed speculative decoding, Nest improves both validation
+perplexity and free-form generation quality on nine different tasks. Its performance can be further improved
+when combined with in-context retrieval augmentation. With these results, we demonstrate that Nest is
+capable of generating text grounded to real-world sources in low latency while maintaining fluency.
+8 BroaderImpacts
+The ability to copy real-world texts from existing data stores is useful for finding the source of the claim
+(credibility), preventing hallucination (factuality), as well as protecting copyright (risk management). It helps
+to resolve the dispute that often happens in AI tools by acknowledging the contents that are borrowed from
+existing human works (e.g., arts, books, and other creative content). Meanwhile, the information on the
+Internet is mixed and it is important to filter out false and sensitive information before directly injecting them
+into the generation.
+9 Acknowledgements
+We thank Mike Lewis for his discussion on kNN-LM and Luke Zettlemoyer for helpful feedback on our
+intermediate results. We thank Sheng-Chieh Lin for his support regarding the details of Llama 2 evaluation
+and benchmark datasets. We thank Zhuoming Chen and Ranajoy Sadhukhan for the helpful discussions on
+speculative decoding.
+References
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind Neelakantan,
+Pranav Shyam, Girish Sastry, Amanda Askell, Sandhini Agarwal, Ariel Herbert-Voss, Gretchen Krueger, Tom
+Henighan, Rewon Child, Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens Winter, Chris Hesse, Mark Chen,
+Eric Sigler, Mateusz Litwin, Scott Gray, Benjamin Chess, Jack Clark, Christopher Berner, Sam McCandlish, Alec
+Radford, Ilya Sutskever, and Dario Amodei. Language models are few-shot learners. In H. Larochelle, M. Ranzato,
+R. Hadsell, M.F. Balcan, and H. Lin, editors, Advances in Neural Information Processing Systems, volume 33,
+pages1877–1901.CurranAssociates,Inc.,2020. URLhttps://proceedings.neurips.cc/paper_files/paper/2020/file/
+1457c0d6bfcb4967418bfb8ac142f64a-Paper.pdf.
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam Roberts, Paul Barham,
+Hyung Won Chung, Charles Sutton, Sebastian Gehrmann, Parker Schuh, Kensen Shi, Sasha Tsvyashchenko, Joshua
+Maynez,AbhishekRao,ParkerBarnes,YiTay,NoamShazeer,VinodkumarPrabhakaran,EmilyReif,NanDu,Ben
+Hutchinson, Reiner Pope, James Bradbury, Jacob Austin, Michael Isard, Guy Gur-Ari, Pengcheng Yin, Toju Duke,
+AnselmLevskaya,SanjayGhemawat,SunipaDev,HenrykMichalewski,XavierGarcia,VedantMisra,KevinRobinson,
+Liam Fedus, Denny Zhou, Daphne Ippolito, David Luan, Hyeontaek Lim, Barret Zoph, Alexander Spiridonov, Ryan
+Sepassi, David Dohan, Shivani Agrawal, Mark Omernick, Andrew M. Dai, Thanumalayan Sankaranarayana Pillai,
+Marie Pellat, Aitor Lewkowycz, Erica Moreira, Rewon Child, Oleksandr Polozov, Katherine Lee, Zongwei Zhou,
+XuezhiWang,BrennanSaeta,MarkDiaz,OrhanFirat,MicheleCatasta,JasonWei,KathyMeier-Hellstern,Douglas
+Eck, Jeff Dean, Slav Petrov, and Noah Fiedel. Palm: Scaling language modeling with pathways. arXiv preprint
+arXiv:2204.02311, 2022.
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée Lacroix, Baptiste
+10Rozière, Naman Goyal, Eric Hambro, Faisal Azhar, Aurelien Rodriguez, Armand Joulin, Edouard Grave, and
+Guillaume Lample. Llama: Open and efficient foundation language models, 2023a.
+Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert, Amjad Almahairi, Yasmine Babaei, Nikolay Bashlykov,
+Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, Dan Bikel, Lukas Blecher, Cristian Canton Ferrer, Moya Chen,
+Guillem Cucurull, David Esiobu, Jude Fernandes, Jeremy Fu, Wenyin Fu, Brian Fuller, Cynthia Gao, Vedanuj
+Goswami,NamanGoyal,AnthonyHartshorn,SagharHosseini,RuiHou,HakanInan,MarcinKardas,ViktorKerkez,
+Madian Khabsa, Isabel Kloumann, Artem Korenev, Punit Singh Koura, Marie-Anne Lachaux, Thibaut Lavril,
+Jenya Lee, Diana Liskovich, Yinghai Lu, Yuning Mao, Xavier Martinet, Todor Mihaylov, Pushkar Mishra, Igor
+Molybog, Yixin Nie, Andrew Poulton, Jeremy Reizenstein, Rashi Rungta, Kalyan Saladi, Alan Schelten, Ruan
+Silva, Eric Michael Smith, Ranjan Subramanian, Xiaoqing Ellen Tan, Binh Tang, Ross Taylor, Adina Williams,
+Jian Xiang Kuan, Puxin Xu, Zheng Yan, Iliyan Zarov, Yuchen Zhang, Angela Fan, Melanie Kambadur, Sharan
+Narang, Aurelien Rodriguez, Robert Stojnic, Sergey Edunov, and Thomas Scialom. Llama 2: Open foundation and
+fine-tuned chat models, 2023b.
+Rohan Anil, Sebastian Borgeaud, Jean-Baptiste Alayrac, Jiahui Yu, Radu Soricut, Johan Schalkwyk, Andrew M. Dai,
+Anja Hauth, Katie Millican, David Silver, Melvin Johnson, Ioannis Antonoglou, Julian Schrittwieser, Amelia Glaese,
+Jilin Chen, Emily Pitler, Timothy Lillicrap, Angeliki Lazaridou, Orhan Firat, James Molloy, Michael Isard, Paul R.
+Barham, Tom Hennigan, Benjamin Lee, Fabio Viola, Malcolm Reynolds, Yuanzhong Xu, Ryan Doherty, Eli Collins,
+Clemens Meyer, Eliza Rutherford, Erica Moreira, Kareem Ayoub, Megha Goel, Jack Krawczyk, Cosmo Du, Ed Chi,
+Heng-Tze Cheng, Eric Ni, Purvi Shah, Patrick Kane, Betty Chan, Manaal Faruqui, Aliaksei Severyn, Hanzhao Lin,
+YaGuang Li, Yong Cheng, Abe Ittycheriah, Mahdis Mahdieh, Mia Chen, Pei Sun, Dustin Tran, Sumit Bagri, Balaji
+Lakshminarayanan, Jeremiah Liu, Andras Orban, Fabian Güra, Hao Zhou, Xinying Song, Aurelien Boffy, Harish
+Ganapathy, Steven Zheng, HyunJeong Choe, Ágoston Weisz, Tao Zhu, Yifeng Lu, Siddharth Gopal, Jarrod Kahn,
+MaciejKula,JeffPitman,RushinShah,EmanuelTaropa,MajdAlMerey,MartinBaeuml,ZhifengChen,LaurentEl
+Shafey, Yujing Zhang, Olcan Sercinoglu, George Tucker, Enrique Piqueras, Maxim Krikun, Iain Barr, Nikolay
+Savinov, Ivo Danihelka, Becca Roelofs, Anaïs White, Anders Andreassen, Tamara von Glehn, Lakshman Yagati,
+Mehran Kazemi, Lucas Gonzalez, Misha Khalman, Jakub Sygnowski, Alexandre Frechette, Charlotte Smith, Laura
+Culp, Lev Proleev, Yi Luan, Xi Chen, James Lottes, Nathan Schucher, Federico Lebron, Alban Rrustemi, Natalie
+Clay, Phil Crone, Tomas Kocisky, Jeffrey Zhao, Bartek Perz, Dian Yu, Heidi Howard, Adam Bloniarz, Jack W.
+Rae, Han Lu, Laurent Sifre, Marcello Maggioni, Fred Alcober, Dan Garrette, Megan Barnes, Shantanu Thakoor,
+Jacob Austin, Gabriel Barth-Maron, William Wong, Rishabh Joshi, Rahma Chaabouni, Deeni Fatiha, Arun Ahuja,
+Gaurav Singh Tomar, Evan Senter, Martin Chadwick, Ilya Kornakov, Nithya Attaluri, Iñaki Iturrate, Ruibo Liu,
+Yunxuan Li, Sarah Cogan, Jeremy Chen, Chao Jia, Chenjie Gu, Qiao Zhang, Jordan Grimstad, Ale Jakse Hartman,
+Xavier Garcia, Thanumalayan Sankaranarayana Pillai, Jacob Devlin, Michael Laskin, Diego de Las Casas, Dasha
+Valter, Connie Tao, Lorenzo Blanco, Adrià Puigdomènech Badia, David Reitter, Mianna Chen, Jenny Brennan,
+Clara Rivera, Sergey Brin, Shariq Iqbal, Gabriela Surita, Jane Labanowski, Abhi Rao, Stephanie Winkler, Emilio
+Parisotto, Yiming Gu, Kate Olszewska, Ravi Addanki, Antoine Miech, Annie Louis, Denis Teplyashin, Geoff Brown,
+Elliot Catt, Jan Balaguer, Jackie Xiang, Pidong Wang, Zoe Ashwood, Anton Briukhov, Albert Webson, Sanjay
+Ganapathy, Smit Sanghavi, Ajay Kannan, Ming-Wei Chang, Axel Stjerngren, Josip Djolonga, Yuting Sun, Ankur
+Bapna, Matthew Aitchison, PedramPejman, Henryk Michalewski, TianheYu, Cindy Wang, JulietteLove, Junwhan
+Ahn, Dawn Bloxwich, Kehang Han, Peter Humphreys, Thibault Sellam, James Bradbury, Varun Godbole, Sina
+Samangooei, Bogdan Damoc, Alex Kaskasoli, Sébastien M. R. Arnold, Vijay Vasudevan, Shubham Agrawal, Jason
+Riesa, Dmitry Lepikhin, Richard Tanburn, Srivatsan Srinivasan, Hyeontaek Lim, Sarah Hodkinson, Pranav Shyam,
+Johan Ferret, Steven Hand, Ankush Garg, Tom Le Paine, Jian Li, Yujia Li, Minh Giang, Alexander Neitz, Zaheer
+Abbas, Sarah York, Machel Reid, Elizabeth Cole, Aakanksha Chowdhery, Dipanjan Das, Dominika Rogozińska,
+Vitaliy Nikolaev, Pablo Sprechmann, Zachary Nado, Lukas Zilka, Flavien Prost, Luheng He, Marianne Monteiro,
+Gaurav Mishra, Chris Welty, Josh Newlan, Dawei Jia, Miltiadis Allamanis, Clara Huiyi Hu, Raoul de Liedekerke,
+Justin Gilmer, Carl Saroufim, Shruti Rijhwani, Shaobo Hou, Disha Shrivastava, Anirudh Baddepudi, Alex Goldin,
+Adnan Ozturel, Albin Cassirer, Yunhan Xu, Daniel Sohn, Devendra Sachan, Reinald Kim Amplayo, Craig Swanson,
+Dessie Petrova, Shashi Narayan, Arthur Guez, Siddhartha Brahma, Jessica Landon, Miteyan Patel, Ruizhe Zhao,
+KevinVillela,LuyuWang,WenhaoJia,MatthewRahtz,MaiGiménez,LeggYeung,JamesKeeling,PetkoGeorgiev,
+Diana Mincu, Boxi Wu, Salem Haykal, Rachel Saputro, Kiran Vodrahalli, James Qin, Zeynep Cankara, Abhanshu
+Sharma, Nick Fernando, Will Hawkins, Behnam Neyshabur, Solomon Kim, Adrian Hutter, Priyanka Agrawal, Alex
+Castro-Ros, George van den Driessche, Tao Wang, Fan Yang, Shuo yiin Chang, Paul Komarek, Ross McIlroy, Mario
+Lučić, Guodong Zhang, Wael Farhan, Michael Sharman, Paul Natsev, Paul Michel, Yamini Bansal, Siyuan Qiao,
+Kris Cao, Siamak Shakeri, Christina Butterfield, Justin Chung, Paul Kishan Rubenstein, Shivani Agrawal, Arthur
+Mensch, Kedar Soparkar, Karel Lenc, Timothy Chung, Aedan Pope, Loren Maggiore, Jackie Kay, Priya Jhakra,
+Shibo Wang, Joshua Maynez, Mary Phuong, Taylor Tobin, Andrea Tacchetti, Maja Trebacz, Kevin Robinson,
+Yash Katariya, Sebastian Riedel, Paige Bailey, Kefan Xiao, Nimesh Ghelani, Lora Aroyo, Ambrose Slone, Neil
+11Houlsby, Xuehan Xiong, Zhen Yang, Elena Gribovskaya, Jonas Adler, Mateo Wirth, Lisa Lee, Music Li, Thais
+Kagohara,JayPavagadhi,SophieBridgers,AnnaBortsova,SanjayGhemawat,ZafaraliAhmed,TianqiLiu,Richard
+Powell, Vijay Bolina, Mariko Iinuma, Polina Zablotskaia, James Besley, Da-Woon Chung, Timothy Dozat, Ramona
+Comanescu, Xiance Si, Jeremy Greer, Guolong Su, Martin Polacek, Raphaël Lopez Kaufman, Simon Tokumine,
+Hexiang Hu, Elena Buchatskaya, Yingjie Miao, Mohamed Elhawaty, Aditya Siddhant, Nenad Tomasev, Jinwei Xing,
+Christina Greer, Helen Miller, Shereen Ashraf, Aurko Roy, Zizhao Zhang, Ada Ma, Angelos Filos, Milos Besta,
+Rory Blevins, Ted Klimenko, Chih-Kuan Yeh, Soravit Changpinyo, Jiaqi Mu, Oscar Chang, Mantas Pajarskas,
+Carrie Muir, Vered Cohen, Charline Le Lan, Krishna Haridasan, Amit Marathe, Steven Hansen, Sholto Douglas,
+Rajkumar Samuel, Mingqiu Wang, Sophia Austin, Chang Lan, Jiepu Jiang, Justin Chiu, Jaime Alonso Lorenzo,
+LarsLoweSjösund,SébastienCevey,ZachGleicher,ThiAvrahami,AnudhyanBoral,HansaSrinivasan,VittorioSelo,
+Rhys May, Konstantinos Aisopos, Léonard Hussenot, Livio Baldini Soares, Kate Baumli, Michael B. Chang, Adrià
+Recasens, Ben Caine, Alexander Pritzel, Filip Pavetic, Fabio Pardo, Anita Gergely, Justin Frye, Vinay Ramasesh,
+Dan Horgan, Kartikeya Badola, Nora Kassner, Subhrajit Roy, Ethan Dyer, Víctor Campos Campos, Alex Tomala,
+Yunhao Tang, Dalia El Badawy, Elspeth White, Basil Mustafa, Oran Lang, Abhishek Jindal, Sharad Vikram,
+Zhitao Gong, Sergi Caelles, Ross Hemsley, Gregory Thornton, Fangxiaoyu Feng, Wojciech Stokowiec, Ce Zheng,
+Phoebe Thacker, Çağlar Ünlü, Zhishuai Zhang, Mohammad Saleh, James Svensson, Max Bileschi, Piyush Patil,
+Ankesh Anand, Roman Ring, Katerina Tsihlas, Arpi Vezer, Marco Selvi, Toby Shevlane, Mikel Rodriguez, Tom
+Kwiatkowski, Samira Daruki, Keran Rong, Allan Dafoe, Nicholas FitzGerald, Keren Gu-Lemberg, Mina Khan,
+LisaAnneHendricks,MariePellat,VladimirFeinberg,JamesCobon-Kerr,TaraSainath,MaribethRauh,SayedHadi
+Hashemi, Richard Ives, Yana Hasson, Eric Noland, Yuan Cao, Nathan Byrd, Le Hou, Qingze Wang, Thibault
+Sottiaux,MichelaPaganini,Jean-BaptisteLespiau,AlexandreMoufarek,SamerHassan,KaushikShivakumar,Joost
+van Amersfoort, Amol Mandhane, Pratik Joshi, Anirudh Goyal, Matthew Tung, Andrew Brock, Hannah Sheahan,
+Vedant Misra, Cheng Li, Nemanja Rakićević, Mostafa Dehghani, Fangyu Liu, Sid Mittal, Junhyuk Oh, Seb Noury,
+ErenSezener,FantineHuot,MatthewLamm,NicolaDeCao,CharlieChen,SidharthMudgal,RominaStella,Kevin
+Brooks, Gautam Vasudevan, Chenxi Liu, Mainak Chain, Nivedita Melinkeri, Aaron Cohen, Venus Wang, Kristie
+Seymore, Sergey Zubkov, Rahul Goel, Summer Yue, Sai Krishnakumaran, Brian Albert, Nate Hurley, Motoki Sano,
+Anhad Mohananey, Jonah Joughin, Egor Filonov, Tomasz Kępa, Yomna Eldawy, Jiawern Lim, Rahul Rishi, Shirin
+Badiezadegan,TaylorBos,JerryChang,SanilJain,SriGayatriSundaraPadmanabhan,SubhaPuttagunta,Kalpesh
+Krishna, Leslie Baker, Norbert Kalb, Vamsi Bedapudi, Adam Kurzrok, Shuntong Lei, Anthony Yu, Oren Litvin,
+Xiang Zhou, Zhichun Wu, Sam Sobell, Andrea Siciliano, Alan Papir, Robby Neale, Jonas Bragagnolo, Tej Toor,
+Tina Chen, Valentin Anklin, Feiran Wang, Richie Feng, Milad Gholami, Kevin Ling, Lijuan Liu, Jules Walter,
+Hamid Moghaddam, Arun Kishore, Jakub Adamek, Tyler Mercado, Jonathan Mallinson, Siddhinita Wandekar,
+Stephen Cagle, Eran Ofek, Guillermo Garrido, Clemens Lombriser, Maksim Mukha, Botu Sun, Hafeezul Rahman
+Mohammad, Josip Matak, Yadi Qian, Vikas Peswani, Pawel Janus, Quan Yuan, Leif Schelin, Oana David, Ankur
+Garg, Yifan He, Oleksii Duzhyi, Anton Älgmyr, Timothée Lottaz, Qi Li, Vikas Yadav, Luyao Xu, Alex Chinien,
+Rakesh Shivanna, Aleksandr Chuklin, Josie Li, Carrie Spadine, Travis Wolfe, Kareem Mohamed, Subhabrata Das,
+Zihang Dai, Kyle He, Daniel von Dincklage, Shyam Upadhyay, Akanksha Maurya, Luyan Chi, Sebastian Krause,
+Khalid Salama, Pam G Rabinovitch, Pavan Kumar Reddy M, Aarush Selvan, Mikhail Dektiarev, Golnaz Ghiasi,
+Erdem Guven, Himanshu Gupta, Boyi Liu, Deepak Sharma, Idan Heimlich Shtacher, Shachi Paul, Oscar Akerlund,
+François-Xavier Aubet, Terry Huang, Chen Zhu, Eric Zhu, Elico Teixeira, Matthew Fritze, Francesco Bertolini,
+Liana-EleonoraMarinescu,MartinBölle,DominikPaulus,KhyattiGupta,TejasiLatkar,MaxChang,JasonSanders,
+Roopa Wilson, Xuewei Wu, Yi-Xuan Tan, Lam Nguyen Thiet, Tulsee Doshi, Sid Lall, Swaroop Mishra, Wanming
+Chen,ThangLuong,SethBenjamin,JasmineLee,EwaAndrejczuk,DominikRabiej,VipulRanjan,KrzysztofStyrc,
+Pengcheng Yin, Jon Simon, Malcolm Rose Harriott, Mudit Bansal, Alexei Robsky, Geoff Bacon, David Greene,
+Daniil Mirylenka, Chen Zhou, Obaid Sarvana, Abhimanyu Goyal, Samuel Andermatt, Patrick Siegler, Ben Horn,
+Assaf Israel, Francesco Pongetti, Chih-Wei "Louis" Chen, Marco Selvatici, Pedro Silva, Kathie Wang, Jackson
+Tolins,KelvinGuu,RoeyYogev,XiaochenCai,AlessandroAgostini,MaulikShah,HungNguyen,NoahÓDonnaile,
+Sébastien Pereira, Linda Friso, Adam Stambler, Adam Kurzrok, Chenkai Kuang, Yan Romanikhin, Mark Geller,
+ZJYan,KaneJang,Cheng-ChunLee,WojciechFica,EricMalmi,QijunTan,DanBanica,DanielBalle,RyanPham,
+YanpingHuang,DianaAvram,HongzhiShi,JasjotSingh,ChrisHidey,NiharikaAhuja,PranabSaxena,DanDooley,
+Srividya Pranavi Potharaju, Eileen O’Neill, Anand Gokulchandran, Ryan Foley, Kai Zhao, Mike Dusenberry, Yuan
+Liu, Pulkit Mehta, Ragha Kotikalapudi, Chalence Safranek-Shrader, Andrew Goodman, Joshua Kessinger, Eran
+Globen, Prateek Kolhar, Chris Gorgolewski, Ali Ibrahim, Yang Song, Ali Eichenbaum, Thomas Brovelli, Sahitya
+Potluri, Preethi Lahoti, Cip Baetu, Ali Ghorbani, Charles Chen, Andy Crawford, Shalini Pal, Mukund Sridhar,
+Petru Gurita, Asier Mujika, Igor Petrovski, Pierre-Louis Cedoz, Chenmei Li, Shiyuan Chen, Niccolò Dal Santo,
+Siddharth Goyal, Jitesh Punjabi, Karthik Kappaganthu, Chester Kwak, Pallavi LV, Sarmishta Velury, Himadri
+Choudhury, Jamie Hall, Premal Shah, Ricardo Figueira, Matt Thomas, Minjie Lu, Ting Zhou, Chintu Kumar,
+Thomas Jurdi, Sharat Chikkerur, Yenai Ma, Adams Yu, Soo Kwak, Victor Ähdel, Sujeevan Rajayogam, Travis
+Choma, Fei Liu, Aditya Barua, Colin Ji, Ji Ho Park, Vincent Hellendoorn, Alex Bailey, Taylan Bilal, Huanjie
+Zhou, Mehrdad Khatir, Charles Sutton, Wojciech Rzadkowski, Fiona Macintosh, Konstantin Shagin, Paul Medina,
+12Chen Liang, Jinjing Zhou, Pararth Shah, Yingying Bi, Attila Dankovics, Shipra Banga, Sabine Lehmann, Marissa
+Bredesen,ZifanLin,JohnEricHoffmann,JonathanLai,RaynaldChung,KaiYang,NihalBalani,ArthurBražinskas,
+Andrei Sozanschi, Matthew Hayes, Héctor Fernández Alcalde, Peter Makarov, Will Chen, Antonio Stella, Liselotte
+Snijders,MichaelMandl,AnteKärrman,PawełNowak,XinyiWu,AlexDyck,KrishnanVaidyanathan,Raghavender
+R, Jessica Mallet, Mitch Rudominer, Eric Johnston, Sushil Mittal, Akhil Udathu, Janara Christensen, Vishal
+Verma, Zach Irving, Andreas Santucci, Gamaleldin Elsayed, Elnaz Davoodi, Marin Georgiev, Ian Tenney, Nan Hua,
+GeoffreyCideron, EdouardLeurent, Mahmoud Alnahlawi, IonutGeorgescu, NanWei, Ivy Zheng, DylanScandinaro,
+Heinrich Jiang, Jasper Snoek, Mukund Sundararajan, Xuezhi Wang, Zack Ontiveros, Itay Karo, Jeremy Cole,
+Vinu Rajashekhar, Lara Tumeh, Eyal Ben-David, Rishub Jain, Jonathan Uesato, Romina Datta, Oskar Bunyan,
+Shimu Wu, John Zhang, Piotr Stanczyk, Ye Zhang, David Steiner, Subhajit Naskar, Michael Azzam, Matthew
+Johnson, Adam Paszke, Chung-Cheng Chiu, Jaume Sanchez Elias, Afroz Mohiuddin, Faizan Muhammad, Jin Miao,
+Andrew Lee, Nino Vieillard, Jane Park, Jiageng Zhang, Jeff Stanway, Drew Garmon, Abhijit Karmarkar, Zhe Dong,
+Jong Lee, Aviral Kumar, Luowei Zhou, Jonathan Evens, William Isaac, Geoffrey Irving, Edward Loper, Michael
+Fink, Isha Arkatkar, Nanxin Chen, Izhak Shafran, Ivan Petrychenko, Zhe Chen, Johnson Jia, Anselm Levskaya,
+Zhenkai Zhu, Peter Grabowski, Yu Mao, Alberto Magni, Kaisheng Yao, Javier Snaider, Norman Casagrande,
+Evan Palmer, Paul Suganthan, Alfonso Castaño, Irene Giannoumis, Wooyeol Kim, Mikołaj Rybiński, Ashwin
+Sreevatsa, Jennifer Prendki, David Soergel, Adrian Goedeckemeyer, Willi Gierke, Mohsen Jafari, Meenu Gaba,
+Jeremy Wiesner, Diana Gage Wright, Yawen Wei, Harsha Vashisht, Yana Kulizhskaya, Jay Hoover, Maigo Le,
+Lu Li, Chimezie Iwuanyanwu, Lu Liu, Kevin Ramirez, Andrey Khorlin, Albert Cui, Tian LIN, Marcus Wu, Ricardo
+Aguilar, Keith Pallo, Abhishek Chakladar, Ginger Perng, Elena Allica Abellan, Mingyang Zhang, Ishita Dasgupta,
+Nate Kushman, Ivo Penchev, Alena Repina, Xihui Wu, Tom van der Weide, Priya Ponnapalli, Caroline Kaplan, Jiri
+Simsa, Shuangfeng Li, Olivier Dousse, Fan Yang, Jeff Piper, Nathan Ie, Rama Pasumarthi, Nathan Lintz, Anitha
+Vijayakumar, Daniel Andor, Pedro Valenzuela, Minnie Lui, Cosmin Paduraru, Daiyi Peng, Katherine Lee, Shuyuan
+Zhang, Somer Greene, Duc Dung Nguyen, Paula Kurylowicz, Cassidy Hardin, Lucas Dixon, Lili Janzer, Kiam Choo,
+Ziqiang Feng, Biao Zhang, Achintya Singhal, Dayou Du, Dan McKinnon, Natasha Antropova, Tolga Bolukbasi,
+Orgad Keller, David Reid, Daniel Finchelstein, Maria Abi Raad, Remi Crocker, Peter Hawkins, Robert Dadashi,
+Colin Gaffney, Ken Franko, Anna Bulanova, Rémi Leblond, Shirley Chung, Harry Askham, Luis C. Cobo, Kelvin
+Xu, Felix Fischer, Jun Xu, Christina Sorokin, Chris Alberti, Chu-Cheng Lin, Colin Evans, Alek Dimitriev, Hannah
+Forbes, Dylan Banarse, Zora Tung, Mark Omernick, Colton Bishop, Rachel Sterneck, Rohan Jain, Jiawei Xia,
+Ehsan Amid, Francesco Piccinno, Xingyu Wang, Praseem Banzal, Daniel J. Mankowitz, Alex Polozov, Victoria
+Krakovna, Sasha Brown, MohammadHossein Bateni, Dennis Duan, Vlad Firoiu, Meghana Thotakuri, Tom Natan,
+Matthieu Geist, Ser tan Girgin, Hui Li, Jiayu Ye, Ofir Roval, Reiko Tojo, Michael Kwong, James Lee-Thorp,
+Christopher Yew, Danila Sinopalnikov, Sabela Ramos, John Mellor, Abhishek Sharma, Kathy Wu, David Miller,
+Nicolas Sonnerat, Denis Vnukov, Rory Greig, Jennifer Beattie, Emily Caveness, Libin Bai, Julian Eisenschlos, Alex
+Korchemniy, Tomy Tsai, Mimi Jasarevic, Weize Kong, Phuong Dao, Zeyu Zheng, Frederick Liu, Fan Yang, Rui Zhu,
+Tian Huey Teh, Jason Sanmiya, Evgeny Gladchenko, Nejc Trdin, Daniel Toyama, Evan Rosen, Sasan Tavakkol,
+Linting Xue, Chen Elkind, Oliver Woodman, John Carpenter, George Papamakarios, Rupert Kemp, Sushant Kafle,
+Tanya Grunina, Rishika Sinha, Alice Talbert, Diane Wu, Denese Owusu-Afriyie, Cosmo Du, Chloe Thornton, Jordi
+Pont-Tuset, Pradyumna Narayana, Jing Li, Saaber Fatehi, John Wieting, Omar Ajmeri, Benigno Uria, Yeongil Ko,
+Laura Knight, Amélie Héliou, Ning Niu, Shane Gu, Chenxi Pang, Yeqing Li, Nir Levine, Ariel Stolovich, Rebeca
+Santamaria-Fernandez,SonamGoenka,WennyYustalim,RobinStrudel,AliElqursh,CharlieDeck,HyoLee,Zonglin
+Li, Kyle Levin, Raphael Hoffmann, Dan Holtmann-Rice, Olivier Bachem, Sho Arora, Christy Koh, Soheil Hassas
+Yeganeh, Siim Põder, Mukarram Tariq, Yanhua Sun, Lucian Ionita, Mojtaba Seyedhosseini, Pouya Tafti, Zhiyu Liu,
+Anmol Gulati, Jasmine Liu, Xinyu Ye, Bart Chrzaszcz, Lily Wang, Nikhil Sethi, Tianrun Li, Ben Brown, Shreya
+Singh, Wei Fan, Aaron Parisi, Joe Stanton, Vinod Koverkathu, Christopher A. Choquette-Choo, Yunjie Li, TJ Lu,
+Abe Ittycheriah, Prakash Shroff, Mani Varadarajan, Sanaz Bahargam, Rob Willoughby, David Gaddy, Guillaume
+Desjardins,MarcoCornero,BronaRobenek,BhavishyaMittal,BenAlbrecht,AshishShenoy,FedorMoiseev,Henrik
+Jacobsson, Alireza Ghaffarkhah, Morgane Rivière, Alanna Walton, Clément Crepy, Alicia Parrish, Zongwei Zhou,
+Clement Farabet, Carey Radebaugh, Praveen Srinivasan, Claudia van der Salm, Andreas Fidjeland, Salvatore
+Scellato,EriLatorre-Chimoto,HannaKlimczak-Plucińska,DavidBridson,DariodeCesare,TomHudson,Piermaria
+Mendolicchio, Lexi Walker, Alex Morris, Matthew Mauger, Alexey Guseynov, Alison Reid, Seth Odoom, Lucia
+Loher, Victor Cotruta, Madhavi Yenugula, Dominik Grewe, Anastasia Petrushkina, Tom Duerig, Antonio Sanchez,
+Steve Yadlowsky, Amy Shen, Amir Globerson, Lynette Webb, Sahil Dua, Dong Li, Surya Bhupatiraju, Dan Hurt,
+Haroon Qureshi, Ananth Agarwal, Tomer Shani, Matan Eyal, Anuj Khare, Shreyas Rammohan Belle, Lei Wang,
+Chetan Tekur, Mihir Sanjay Kale, Jinliang Wei, Ruoxin Sang, Brennan Saeta, Tyler Liechty, Yi Sun, Yao Zhao,
+Stephan Lee, Pandu Nayak, Doug Fritz, Manish Reddy Vuyyuru, John Aslanides, Nidhi Vyas, Martin Wicke, Xiao
+Ma, Evgenii Eltyshev, Nina Martin, Hardie Cate, James Manyika, Keyvan Amiri, Yelin Kim, Xi Xiong, Kai Kang,
+Florian Luisier, Nilesh Tripuraneni, David Madras, Mandy Guo, Austin Waters, Oliver Wang, Joshua Ainslie, Jason
+Baldridge, Han Zhang, Garima Pruthi, Jakob Bauer, Feng Yang, Riham Mansour, Jason Gelman, Yang Xu, George
+Polovets, Ji Liu, Honglong Cai, Warren Chen, XiangHai Sheng, Emily Xue, Sherjil Ozair, Christof Angermueller,
+13Xiaowei Li, Anoop Sinha, Weiren Wang, Julia Wiesinger, Emmanouil Koukoumidis, Yuan Tian, Anand Iyer, Madhu
+Gurumurthy,MarkGoldenson,ParasharShah,MKBlake,HongkunYu,AnthonyUrbanowicz,JennimariaPalomaki,
+Chrisantha Fernando, Ken Durden, Harsh Mehta, Nikola Momchev, Elahe Rahimtoroghi, Maria Georgaki, Amit
+Raul, Sebastian Ruder, Morgan Redshaw, Jinhyuk Lee, Denny Zhou, Komal Jalan, Dinghua Li, Blake Hechtman,
+Parker Schuh, Milad Nasr, Kieran Milan, Vladimir Mikulik, Juliana Franco, Tim Green, Nam Nguyen, Joe Kelley,
+Aroma Mahendru, Andrea Hu, Joshua Howland, Ben Vargas, Jeffrey Hui, Kshitij Bansal, Vikram Rao, Rakesh
+Ghiya, Emma Wang, Ke Ye, Jean Michel Sarr, Melanie Moranski Preston, Madeleine Elish, Steve Li, Aakash Kaku,
+Jigar Gupta, Ice Pasupat, Da-Cheng Juan, Milan Someswar, Tejvi M., Xinyun Chen, Aida Amini, Alex Fabrikant,
+Eric Chu, Xuanyi Dong, Amruta Muthal, Senaka Buthpitiya, Sarthak Jauhari, Nan Hua, Urvashi Khandelwal,
+Ayal Hitron, Jie Ren, Larissa Rinaldi, Shahar Drath, Avigail Dabush, Nan-Jiang Jiang, Harshal Godhia, Uli Sachs,
+Anthony Chen, Yicheng Fan, Hagai Taitelbaum, Hila Noga, Zhuyun Dai, James Wang, Chen Liang, Jenny Hamer,
+Chun-Sung Ferng, Chenel Elkind, Aviel Atias, Paulina Lee, Vít Listík, Mathias Carlen, Jan van de Kerkhof, Marcin
+Pikus, Krunoslav Zaher, Paul Müller, Sasha Zykova, Richard Stefanec, Vitaly Gatsko, Christoph Hirnschall, Ashwin
+Sethi,XingyuFedericoXu,ChetanAhuja,BethTsai,AncaStefanoiu,BoFeng,KeshavDhandhania,ManishKatyal,
+Akshay Gupta, Atharva Parulekar, Divya Pitta, Jing Zhao, Vivaan Bhatia, Yashodha Bhavnani, Omar Alhadlaq,
+Xiaolin Li, Peter Danenberg, Dennis Tu, Alex Pine, Vera Filippova, Abhipso Ghosh, Ben Limonchik, Bhargava
+Urala, Chaitanya Krishna Lanka, Derik Clive, Yi Sun, Edward Li, Hao Wu, Kevin Hongtongsak, Ianna Li, Kalind
+Thakkar, Kuanysh Omarov, Kushal Majmundar, Michael Alverson, Michael Kucharski, Mohak Patel, Mudit Jain,
+MaksimZabelin,PaoloPelagatti,RohanKohli,SaurabhKumar,JosephKim,SwethaSankar,VineetShah,Lakshmi
+Ramachandruni, Xiangkai Zeng, Ben Bariach, Laura Weidinger, Amar Subramanya, Sissie Hsiao, Demis Hassabis,
+KorayKavukcuoglu,AdamSadovsky,QuocLe,TrevorStrohman,YonghuiWu,SlavPetrov,JeffreyDean,andOriol
+Vinyals. Gemini: A family of highly capable multimodal models, 2024.
+Nikhil Kandpal, Haikang Deng, Adam Roberts, Eric Wallace, and Colin Raffel. Large language models struggle to
+learn long-tail knowledge. In Proceedings of the 40th International Conference on Machine Learning, ICML’23.
+JMLR.org, 2023.
+Akari Asai, Sewon Min, Zexuan Zhong, and Danqi Chen. Retrieval-based language models and applications. In
+Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 6: Tutorial
+Abstracts), pages 41–46, Toronto, Canada, July2023a. Associationfor Computational Linguistics. doi: 10.18653/v1/
+2023.acl-tutorials.6. URL https://aclanthology.org/2023.acl-tutorials.6.
+Urvashi Khandelwal, Omer Levy, Dan Jurafsky, Luke Zettlemoyer, and Mike Lewis. Generalization through Memo-
+rization: Nearest Neighbor Language Models. In International Conference on Learning Representations (ICLR),
+2020.
+Sebastian Borgeaud, Arthur Mensch, Jordan Hoffmann, Trevor Cai, Eliza Rutherford, Katie Millican, George van den
+Driessche, Jean-Baptiste Lespiau, Bogdan Damoc, Aidan Clark, Diego de Las Casas, Aurelia Guy, Jacob Menick,
+Roman Ring, Tom Hennigan, Saffron Huang, Loren Maggiore, Chris Jones, Albin Cassirer, Andy Brock, Michela
+Paganini, Geoffrey Irving, Oriol Vinyals, Simon Osindero, Karen Simonyan, Jack W. Rae, Erich Elsen, and Laurent
+Sifre. Improving language models by retrieving from trillions of tokens, 2022.
+Weijia Shi, Sewon Min, Michihiro Yasunaga, Minjoon Seo, Rich James, Mike Lewis, Luke Zettlemoyer, and Wen-tau
+Yih. REPLUG:Retrieval-augmentedblack-boxlanguagemodels. InProceedings of the 2024 Conference of the North
+American Chapter of the Association for Computational Linguistics. Association for Computational Linguistics,
+2024a.
+WeijiaShi,XiaochuangHan,MikeLewis,YuliaTsvetkov,LukeZettlemoyer,andWen-tauYih. Trustingyourevidence:
+Hallucinatelesswithcontext-awaredecoding. InProceedings of the 2024 Conference of the North American Chapter
+of the Association for Computational Linguistics. Association for Computational Linguistics, 2024b.
+Ori Ram, Yoav Levine, Itay Dalmedigos, Dor Muhlgay, Amnon Shashua, Kevin Leyton-Brown, and Yoav Shoham.
+In-context retrieval-augmented language models. Transactions of the Association for Computational Linguistics, 11:
+1316–1331, 2023. doi: 10.1162/tacl_a_00605. URL https://aclanthology.org/2023.tacl-1.75.
+Shufan Wang, Yixiao Song, Andrew Drozdov, Aparna Garimella, Varun Manjunatha, and Mohit Iyyer. kNN-
+LM does not improve open-ended text generation. In Houda Bouamor, Juan Pino, and Kalika Bali, editors,
+Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing, pages 15023–15037,
+Singapore, December 2023a. Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.929.
+URL https://aclanthology.org/2023.emnlp-main.929.
+TianLan,DengCai,YanWang,HeyanHuang,andXian-LingMao. Copyisallyouneed. InTheEleventhInternational
+Conference on Learning Representations, 2023. URL https://openreview.net/forum?id=CROlOA9Nd8C.
+14Yaniv Leviathan, Matan Kalman, and Yossi Matias. Fast inference from transformers via speculative decoding. In
+AndreasKrause,EmmaBrunskill,KyunghyunCho,BarbaraEngelhardt,SivanSabato,andJonathanScarlett,editors,
+Proceedingsofthe40thInternationalConferenceonMachineLearning,volume202ofProceedingsofMachineLearning
+Research,pages19274–19286.PMLR,23–29Jul2023. URLhttps://proceedings.mlr.press/v202/leviathan23a.html.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Ł ukasz Kaiser,
+and Illia Polosukhin. Attention is all you need. In I. Guyon, U. Von Luxburg, S. Bengio, H. Wallach,
+R. Fergus, S. Vishwanathan, and R. Garnett, editors, Advances in Neural Information Processing Systems,
+volume 30. Curran Associates, Inc., 2017. URL https://proceedings.neurips.cc/paper_files/paper/2017/file/
+3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf.
+Xueguang Ma, Kai Sun, Ronak Pradeep, Minghan Li, and Jimmy Lin. Another look at dpr: Reproduction of training
+and replication of retrieval. In Advances in Information Retrieval: 44th European Conference on IR Research,
+ECIR 2022, Stavanger, Norway, April 10–14, 2022, Proceedings, Part I, page 613–626, Berlin, Heidelberg, 2022.
+Springer-Verlag. ISBN 978-3-030-99735-9. doi: 10.1007/978-3-030-99736-6_41. URL https://doi.org/10.1007/
+978-3-030-99736-6_41.
+Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and Wen-tau
+Yih. Dense passage retrieval for open-domain question answering. In Bonnie Webber, Trevor Cohn, Yulan He,
+and Yang Liu, editors, Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing
+(EMNLP), pages 6769–6781, Online, November 2020. Association for Computational Linguistics. doi: 10.18653/v1/
+2020.emnlp-main.550. URL https://aclanthology.org/2020.emnlp-main.550.
+Christopher Sciavolino, Zexuan Zhong, Jinhyuk Lee, and Danqi Chen. Simple entity-centric questions challenge dense
+retrievers. In Proceedings of the 2021 Conference on Empirical Methods in Natural Language Processing, pages
+6138–6148,OnlineandPuntaCana,DominicanRepublic,November2021.AssociationforComputationalLinguistics.
+doi: 10.18653/v1/2021.emnlp-main.496. URL https://aclanthology.org/2021.emnlp-main.496.
+StephenMerity,CaimingXiong,JamesBradbury,andRichardSocher.Pointersentinelmixturemodels.InInternational
+Conference on Learning Representations, 2017. URL https://openreview.net/forum?id=Byj72udxe.
+Peter Henderson, Mark Simon Krass, Lucia Zheng, Neel Guha, Christopher D Manning, Dan Jurafsky, and Daniel E.
+Ho. Pile of law: Learning responsible data filtering from the law and a 256GB open-source legal dataset. In
+Thirty-sixth Conference on Neural Information Processing Systems Datasets and Benchmarks Track, 2022. URL
+https://openreview.net/forum?id=3HCT3xfNm9r.
+Chin-Yew Lin. ROUGE: A package for automatic evaluation of summaries. In Text Summarization Branches Out,
+pages 74–81, Barcelona, Spain, July 2004. Association for Computational Linguistics. URL https://aclanthology.
+org/W04-1013.
+KrishnaPillutla,SwabhaSwayamdipta,RowanZellers,JohnThickstun,SeanWelleck,YejinChoi,andZaidHarchaoui.
+MAUVE: Measuring the gap between neural text and human text using divergence frontiers. In A. Beygelzimer,
+Y. Dauphin, P. Liang, and J. Wortman Vaughan, editors, Advances in Neural Information Processing Systems, 2021.
+URL https://openreview.net/forum?id=Tqx7nJp7PR.
+Tom Kwiatkowski, Jennimaria Palomaki, Olivia Redfield, Michael Collins, Ankur Parikh, Chris Alberti, Danielle
+Epstein, Illia Polosukhin, Jacob Devlin, Kenton Lee, Kristina Toutanova, Llion Jones, Matthew Kelcey, Ming-
+Wei Chang, Andrew M. Dai, Jakob Uszkoreit, Quoc Le, and Slav Petrov. Natural questions: A benchmark for
+question answering research. Transactions of the Association for Computational Linguistics, 7:452–466, 2019. doi:
+10.1162/tacl_a_00276. URL https://aclanthology.org/Q19-1026.
+Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke Zettlemoyer. TriviaQA: A large scale distantly supervised
+challenge dataset for reading comprehension. In Regina Barzilay and Min-Yen Kan, editors, Proceedings of the
+55th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 1601–1611,
+Vancouver, Canada, July 2017. Association for Computational Linguistics. doi: 10.18653/v1/P17-1147. URL
+https://aclanthology.org/P17-1147.
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William Cohen, Ruslan Salakhutdinov, and Christopher D.
+Manning. HotpotQA:Adatasetfordiverse,explainablemulti-hopquestionanswering. InEllenRiloff,DavidChiang,
+JuliaHockenmaier,andJun’ichiTsujii,editors,Proceedings of the 2018 Conference on Empirical Methods in Natural
+Language Processing, pages 2369–2380, Brussels, Belgium, October-November 2018. Association for Computational
+Linguistics. doi: 10.18653/v1/D18-1259. URL https://aclanthology.org/D18-1259.
+Ankit Pal, Logesh Kumar Umapathi, and Malaikannan Sankarasubbu. Medmcqa: A large-scale multi-subject
+multi-choice dataset for medical domain question answering. In Gerardo Flores, George H Chen, Tom Pollard,
+15Joyce C Ho, and Tristan Naumann, editors, Proceedings of the Conference on Health, Inference, and Learning,
+volume 174 of Proceedings of Machine Learning Research, pages 248–260. PMLR, 07–08 Apr 2022. URL https:
+//proceedings.mlr.press/v174/pal22a.html.
+Sewon Min, Kalpesh Krishna, Xinxi Lyu, Mike Lewis, Wen-tau Yih, Pang Koh, Mohit Iyyer, Luke Zettlemoyer, and
+Hannaneh Hajishirzi. FActScore: Fine-grained atomic evaluation of factual precision in long form text generation.
+In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023 Conference on Empirical Methods
+in Natural Language Processing, pages 12076–12100, Singapore, December 2023. Association for Computational
+Linguistics. doi: 10.18653/v1/2023.emnlp-main.741. URL https://aclanthology.org/2023.emnlp-main.741.
+Stephanie Lin, Jacob Hilton, and Owain Evans. TruthfulQA: Measuring how models mimic human falsehoods. In
+Smaranda Muresan, Preslav Nakov, and Aline Villavicencio, editors, Proceedings of the 60th Annual Meeting of
+the Association for Computational Linguistics (Volume 1: Long Papers), pages 3214–3252, Dublin, Ireland, May
+2022. Association for Computational Linguistics. doi: 10.18653/v1/2022.acl-long.229. URL https://aclanthology.
+org/2022.acl-long.229.
+DanHendrycks,CollinBurns,StevenBasart,AndyZou,MantasMazeika,DawnSong,andJacobSteinhardt.Measuring
+massive multitask language understanding, 2021.
+Gautier Izacard, Patrick Lewis, Maria Lomeli, Lucas Hosseini, Fabio Petroni, Timo Schick, Jane Dwivedi-Yu, Armand
+Joulin,SebastianRiedel,andEdouardGrave. Atlas: few-shotlearningwithretrievalaugmentedlanguagemodels. J.
+Mach. Learn. Res., 24(1), mar 2024. ISSN 1532-4435.
+Xi Victoria Lin, Xilun Chen, Mingda Chen, Weijia Shi, Maria Lomeli, Richard James, Pedro Rodriguez, Jacob
+Kahn, Gergely Szilvasy, Mike Lewis, Luke Zettlemoyer, and Wen tau Yih. RA-DIT: Retrieval-augmented dual
+instruction tuning. In The Twelfth International Conference on Learning Representations, 2024. URL https:
+//openreview.net/forum?id=22OTbutug9.
+Sheng-Chieh Lin, Akari Asai, Minghan Li, Barlas Oguz, Jimmy Lin, Yashar Mehdad, Wen-tau Yih, and Xilun Chen.
+Howtotrainyourdragon: Diverseaugmentationtowardsgeneralizabledenseretrieval.InHoudaBouamor,JuanPino,
+andKalikaBali,editors,Findings of the Association for Computational Linguistics: EMNLP 2023,pages6385–6400,
+Singapore, December 2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.findings-emnlp.423.
+URL https://aclanthology.org/2023.findings-emnlp.423.
+Stephen E. Robertson and Hugo Zaragoza. The probabilistic relevance framework: BM25 and beyond. Foundations
+and Trends in Information Retrieval, 3(4):333–389, 2009. doi: 10.1561/1500000019. URL https://doi.org/10.1561/
+1500000019.
+Danqi Chen, Adam Fisch, Jason Weston, and Antoine Bordes. Reading Wikipedia to answer open-domain questions.
+In Regina Barzilay and Min-Yen Kan, editors, Proceedings of the 55th Annual Meeting of the Association for
+Computational Linguistics (Volume 1: Long Papers), pages 1870–1879, Vancouver, Canada, July 2017. Association
+for Computational Linguistics. doi: 10.18653/v1/P17-1171. URL https://aclanthology.org/P17-1171.
+Kelvin Guu, Kenton Lee, Zora Tung, Panupong Pasupat, and Ming-Wei Chang. Realm: retrieval-augmented language
+model pre-training. In Proceedings of the 37th International Conference on Machine Learning, ICML’20. JMLR.org,
+2020.
+Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler,
+MikeLewis,Wen-tauYih,TimRocktäschel,SebastianRiedel,andDouweKiela. Retrieval-augmentedgenerationfor
+knowledge-intensivenlptasks. InProceedings of the 34th International Conference on Neural Information Processing
+Systems, NIPS ’20, Red Hook, NY, USA, 2020. Curran Associates Inc. ISBN 9781713829546.
+Akari Asai, Zexuan Zhong, Danqi Chen, Pang Wei Koh, Luke Zettlemoyer, Hannaneh Hajishirzi, and Wen tau Yih.
+Reliable, adaptable, and attributable language models with retrieval, 2024.
+Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannaneh Hajishirzi. Self-rag: Learning to retrieve, generate,
+and critique through self-reflection, 2023b.
+BoxinWang,WeiPing,PengXu,LawrenceMcAfee,ZihanLiu,MohammadShoeybi,YiDong,OleksiiKuchaiev,BoLi,
+Chaowei Xiao, Anima Anandkumar, and Bryan Catanzaro. Shall we pretrain autoregressive language models with
+retrieval? a comprehensive study. In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023
+Conference on Empirical Methods in Natural Language Processing, pages 7763–7786, Singapore, December 2023b.
+Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.482. URL https://aclanthology.org/
+2023.emnlp-main.482.
+16Boxin Wang, Wei Ping, Lawrence McAfee, Peng Xu, Bo Li, Mohammad Shoeybi, and Bryan Catanzaro. Instructretro:
+Instruction tuning post retrieval-augmented pretraining, 2024.
+Gautier Izacard and Edouard Grave. Leveraging passage retrieval with generative models for open domain question
+answering. In Paola Merlo, Jorg Tiedemann, and Reut Tsarfaty, editors, Proceedings of the 16th Conference of the
+European Chapter of the Association for Computational Linguistics: Main Volume, pages 874–880, Online, April
+2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.eacl-main.74. URL https://aclanthology.
+org/2021.eacl-main.74.
+Junxian He, Graham Neubig, and Taylor Berg-Kirkpatrick. Efficient nearest neighbor language models. In Proceedings
+of the 2021 Conference on Empirical Methods in Natural Language Processing, pages 5703–5714, Online and Punta
+Cana, Dominican Republic, November 2021. Association for Computational Linguistics. doi: 10.18653/v1/2021.
+emnlp-main.461. URL https://aclanthology.org/2021.emnlp-main.461.
+Rishabh Bhardwaj, George Polovets, and Monica Sunkara. Adaptation approaches for nearest neighbor language
+models, 2023.
+Andrew Drozdov, Shufan Wang, Razieh Rahimi, Andrew McCallum, Hamed Zamani, and Mohit Iyyer. You can’t pick
+your neighbors, or can you? when and how to rely on retrieval in the kNN-LM. In Findings of the Association for
+Computational Linguistics: EMNLP 2022, pages 2997–3007, Abu Dhabi, United Arab Emirates, December 2022.
+Association for Computational Linguistics. doi: 10.18653/v1/2022.findings-emnlp.218. URL https://aclanthology.
+org/2022.findings-emnlp.218.
+Bowen Cao, Deng Cai, Leyang Cui, Xuxin Cheng, Wei Bi, Yuexian Zou, and Shuming Shi. Retrieval is accurate
+generation, 2024.
+CharlieChen,SebastianBorgeaud,GeoffreyIrving,Jean-BaptisteLespiau,LaurentSifre,andJohnJumper.Accelerating
+large language model decoding with speculative sampling, 2023.
+Xupeng Miao, Gabriele Oliaro, Zhihao Zhang, Xinhao Cheng, Zeyu Wang, Rae Ying Yee Wong, Zhuoming Chen,
+Daiyaan Arfeen, Reyna Abhyankar, and Zhihao Jia. Specinfer: Accelerating generative llm serving with speculative
+inferenceandtokentreeverification. ArXiv,abs/2305.09781,2023. URLhttps://api.semanticscholar.org/CorpusID:
+258740799.
+Benjamin Spector and Chris Re. Accelerating llm inference with staged speculative decoding, 2023.
+Zhenyu He, Zexuan Zhong, Tianle Cai, Jason D. Lee, and Di He. Rest: Retrieval-based speculative decoding, 2024.
+Robert Iv, Alexandre Passos, Sameer Singh, and Ming-Wei Chang. FRUIT: Faithfully reflecting updated information
+in text. In Marine Carpuat, Marie-Catherine de Marneffe, and Ivan Vladimir Meza Ruiz, editors, Proceedings of the
+2022 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language
+Technologies, pages 3670–3686, Seattle, United States, July 2022. Association for Computational Linguistics. doi:
+10.18653/v1/2022.naacl-main.269. URL https://aclanthology.org/2022.naacl-main.269.
+TimoSchick,JaneDwivedi-Yu,ZhengbaoJiang,FabioPetroni,PatrickLewis,GautierIzacard,QingfeiYou,Christoforos
+Nalmpantis, Edouard Grave, and Sebastian Riedel. Peer: A collaborative language model, 2022.
+Luyu Gao, Zhuyun Dai, Panupong Pasupat, Anthony Chen, Arun Tejasvi Chaganty, Yicheng Fan, Vincent Y. Zhao,
+Ni Lao, Hongrae Lee, Da-Cheng Juan, and Kelvin Guu. Rarr: Researching and revising what language models say,
+using language models, 2023.
+Matthijs Douze, Alexandr Guzhva, Chengqi Deng, Jeff Johnson, Gergely Szilvasy, Pierre-Emmanuel Mazaré, Maria
+Lomeli, Lucas Hosseini, and Hervé Jégou. The faiss library. 2024.
+Jimmy Lin, Xueguang Ma, Sheng-Chieh Lin, Jheng-Hong Yang, Ronak Pradeep, and Rodrigo Nogueira. Pyserini: A
+python toolkit for reproducible information retrieval research with sparse and dense representations. In Proceedings
+of the 44th International ACM SIGIR Conference on Research and Development in Information Retrieval, SIGIR
+’21, page 2356–2362, New York, NY, USA, 2021. Association for Computing Machinery. ISBN 9781450380379. doi:
+10.1145/3404835.3463238. URL https://doi.org/10.1145/3404835.3463238.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini
+Agarwal, Katarina Slama, Alex Gray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens,
+Amanda Askell, Peter Welinder, Paul Christiano, Jan Leike, and Ryan Lowe. Training language models to follow
+instructions with human feedback. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors,
+AdvancesinNeuralInformationProcessingSystems,2022.URLhttps://openreview.net/forum?id=TG8KACxEON.
+17JifanChen,AniruddhSriram,EunsolChoi,andGregDurrett. Generatingliteralandimpliedsubquestionstofact-check
+complexclaims. InProceedings of the 2022 Conference on Empirical Methods in Natural Language Processing,pages
+3495–3516, Abu Dhabi, United Arab Emirates, December 2022. Association for Computational Linguistics. doi:
+10.18653/v1/2022.emnlp-main.229. URL https://aclanthology.org/2022.emnlp-main.229.
+Yixin Liu, Alex Fabbri, Pengfei Liu, Yilun Zhao, Linyong Nan, Ruilin Han, Simeng Han, Shafiq Joty, Chien-Sheng
+Wu, Caiming Xiong, and Dragomir Radev. Revisiting the gold standard: Grounding summarization evaluation
+with robust human evaluation. In Proceedings of the 61st Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 4140–4170, Toronto, Canada, July 2023. Association for Computational
+Linguistics. doi: 10.18653/v1/2023.acl-long.228. URL https://aclanthology.org/2023.acl-long.228.
+ChaitanyaMalaviya,SubinLee,SihaoChen,ElizabethSieber,MarkYatskar,andDanRoth. Expertqa: Expert-curated
+questions and attributed answers, 2024.
+A AdditionalImplementationDetails
+Two-stage k-NN search For the first-stage passage search, we use a Faiss (Douze et al., 2024) dense index
+and Pyserini (Lin et al., 2021) BM25 index for efficient search. For the dense index, we first use Dragon+ to
+encode each passage in the corpus into a single vector, and then use Faiss (index string “IVF65536,PQ256”)
+to cluster the vectors into 65536 centroids and quantize them into 256 codes of 8 bits each. For the sparse
+index, we use the default hyper-parameters and the “optimize” option in Pyserini to reduce the index
+size. For the approximate nearest neighbor retrieval, we use nprobe= 4096. During passage search, we
+retrieve 4000 passages from each index and keep the similarity score for fusion. The fusion coefficient η is
+determined by the relative confidence of dense and sparse retrievers similar to Equation (4). We set the
+dense coefficient η =1−top-100(s (q,d))/maxs (q,d) and same for the sparse coefficient η .
+dense dense dense sparse
+The final interpolation coef is η = 0.7∗(1−η )+0.3∗η . The fusion score for each document
+sparse dense
+s(q,d)=η∗s +(1−η)∗s . If a document is missing in either dense or sparse retrieval results, we
+dense sparse
+set its score to the minimum similarity of the dense/sparse retrieval results. The first-stage search is done on
+RAM and CPUs with 32 threads. The final Wikipedia dense index size is about 8.96GB, and the sparse index
+size is about 3.48GB on disk.
+For the second-stage token search, we use the LLM to encode the sequence and use the input to the final
+layer’s feed-forward network after layer normalization as the key and query vectors following Khandelwal
+et al. (2020). We retrieve the top-1024 tokens using the squared ℓ distance and compute the non-parametric
+2
+probability according to Equation (2).
+Rest of Nest For relative retrieval confidence, we set α = 0.3,τ = 0.1 for all Wikipedia-based tasks and
+α=0.2,τ =0.1 for Pile of Law for all model sizes in Equation (4). For dynamic span selection, we set the
+n-gram length to be 64 and δ =0.5 for all model sizes and all tasks in Equation (6). For relaxed speculative
+decoding, we set γ =5e−4 for Pile of Law tasks for all model sizes in Equation (7). For Wikipedia-based
+tasks, we set γ =5e−4 for the 7B model, γ =5e−3 for the 13B model, and γ =5e−2 for the 70B model.
+For RA-Nest, all models use the same γ =5e−1 for all tasks except Pile of Law which still uses γ =5e−4
+We observe that as the model gets stronger, using larger γ which leads to more rejection, is more beneficial to
+generation quality. The complete Nest procedure is provided in Algorithm 1.
+B EvaluationDetailsandHyper-parameterTuning
+Datasets. We sample subsets of WikiText-103, NQ, and Biography as dev sets for hyper-parameter tuning.
+We use the validation sets of WikiText-103 (CC BY-SA 3.0), NQ (Apache License 2.0), TriviaQA (Apache
+License 2.0), MedMCQA (MIT License), HotpotQA (Apache License 2.0), MMLU (MIT License), and
+Biography (MIT License) for validation. TruthfulQA (Apache License 2.0) only has the test set. We finally
+test all datasets shown in Table 1. For HotpotQA and MedMCQA, we do not have access to the test set
+and therefore the validation results are reported. For Biography, we use the labeled data that have human
+annotation as the validation and dev set, and the unlabeled data as the test set. In the original FActScore
+paper, the authors use InstructGPT (Ouyang et al., 2022) to perform fact decomposition before verification.
+18Algorithm 1 Nest w/ Greedy Decoding
+Inputs: Language model LM, hidden state encoder f, first-stage retriever R, corpus C, input x.
+▷ First-stage retrieval: Retrieve documents d ,d ...,d from corpus C
+1 2 b
+d ,d ...,d ←R(x,C)
+1 2 b
+▷ Second-stage retrieval: Construct token-level key-value memory
+(K′,V′)←∅
+for i=1 to b do
+w 1di,w 3di,...,w mdi ←d
+i
+hd 1i,hd 3i,...,hd mi ←f(d i)
+for i=1 to m−1 do
+(K′,V′).add(hdi, wdi )
+j j+1
+end for
+end for
+▷ Generation
+y ←x
+<t
+for t=1 to T do
+▷ Compute query embedding
+q ←f(y )[−1]
+t <t
+▷ Token embeddings search, return top-r scores and values
+π ←(K′,V′).search(q , r)
+t
+(s ,v ),(s ,v ),...,(s ,v )←π
+1 1 2 2 r r
+▷ Compute non-parametric distribution
+p (w|y )←0,∀w ∈ vocabulary
+k-NN <t
+for i=1 to r do
+p (w =v |y )←p (w =v |y )+exp(µ·s
+)/(cid:80)r
+exp(µ·s )
+k-NN i <t k-NN i <t i i=j j
+end for
+▷ Confidence-based Interpolation
+λ t ←sigmoid(( mm ain xi is si
+i
+−α)/τ)
+p (w|y )←λ ·p (w|y )+(1−λ )·p (w|y )
+M <t t LM <t t k-NN <t
+▷ Dynamic span selection
+w ←argmax p (w|y )
+t M <t
+w
+v ←argmax p (w =v |y )
+t k-NN i <t
+vi=wt
+v ←C.get-ngram(v ,n)
+t:t+n t
+(cid:26)
+w , if λ >δ;
+y ← t t
+t v , otherwise.
+t:t+n
+n←|y |
+t
+▷ Relaxed Speculative Decoding
+for i=1 to n do
+p accept(w t(i))← γp ·M
+m
+wa( xw= pMw t( (i w)| |x x, ,y y< <t t, ,w wt( t(1 1) ), ,w wt( t(2 2) ), ,. .. .. ., ,w wt( t(i i− −1 1) ))
+)
+Break if p (w(i))≤0.5
+accept t
+end for
+if i<n and n > 1 then
+w(i) ←argmax p (w|y ,w(1),w(2),...,w(i−1))
+t M <t t t t
+w
+end if
+y ← concatenate(y ,w(1),w(2),...,w(i))
+<t <t t t t
+end for
+Return y
+<t
+19Category BaseLM,kNN-LMandNest RA-basedMethods
+QA, MMLU, Fact [INST] Question: {question} An- [INST] Answer the question with the background
+Check swer: [/INST] context as reference. Background: {retrieved pas-
+sages}\nQuestion: {question}Answer: [/INST]
+TextCompletion [INST] Write an article.\nArticle: [INST]Writeanarticlewiththebackgroundcontextas
+[/INST]{prefix} reference. Background: {retrievedpassages}\nArticle:
+[/INST]{prefix}
+Table3 Instruction template used for different datasets. [INST] and [/INST] are special markers denoting the start
+and the end of an instruction.
+We hereby train our own decomposition model by further fine-tuning Llama-2 7B using publicly available
+datasets (Chen et al., 2022; Liu et al., 2023; Malaviya et al., 2024). For fact verification, we use the option
+retrieval+llama+npm to evaluate the decomposed atomic facts.
+Inference and prompts. For language modelling and text completion, we use a context length of 128 tokens
+and a max generation length of 256 tokens. For the other tasks, we use 128 tokens as max generation length
+for question answering and 512 for fact verification. We remove all the in-context demonstrations from the
+prompt to test the zero-shot effectiveness of our model. We use greedy decoding in our experiments as the
+randomness in sampling can undermine factuality. Table 3 shows the instruction templates we use for different
+tasks. For MMLU, we compare the perplexity of each option concatenated with the template and select the
+one with the minimum perplexity.
+Hyper-parameters and baselines. For the base LM, we do not tune the hyper-parameters released with the
+original Llama-2-chat models. For the in-context retrieval augmented baseline, we select the top-3 retrieved
+passages. For kNN-LM, we follow Equation (3) and use an interpolation coefficient of 0.7 for Wikipedia-based
+tasks and 0.9 for Pile of Law. For Nest and RA-Nest, we first tune the hyper-parameters in Equation (4) on
+language modelling tasks using perplexity. We then fix those hyper-parameters and then tune the rest of
+the parameters in Equation (6) and (7) on generation tasks. All hyper-parameters in the above methods are
+tuned on the dev sets of WikiText-103, NQ, and Biography.
+C Analysis
+The following analyses are performed on the validation set of WikiText-103, NQ, and Biography data with
+the Llama-7B-chat model.
+C.1 Sensitivity
+Number of retrieved passages and tokens Khandelwal et al. (2020) show that increasing the size of the
+database and the number of tokens can improve the perplexity with proper hyper-parameter setting. We
+also verify whether our two-stage k-NN search and RRC approach follow the same trend. Figure 3a shows
+the validation perplexity on WikiText-103. For a fixed number of passages, the perplexity decreases as the
+number of tokens increases; for a fixed number of tokens, the perplexity decreases about 0.5 ∼ 1.0 as the
+number of passages doubles. However, as Nest needs to encode the retrieved passages on the fly, the latency
+also increases linearly w.r.t. the number of passages. Therefore, we set the passage number to be 40 and the
+token number to be 1024 in the main experiments.
+Interpolationcoefficient Figure3bshowsthesensitivityofthehyper-parametersα(offset)andτ (temperature)
+in Equation (4) on WikiText-103. When τ is big, λ is close to a uniform distribution and therefore the offset
+t
+α does not have a big impact on the perplexity. When τ is small, the impact of α is enlarged and the sweet
+spot is achieved around τ =0.1 and α=0.4.
+20passages=10 passages=20 passages=40 passages=80 tau=0.05 tau=0.1 tau=0.5 tau=1 49
+9.25
+14 48
+9.00
+13
+8.75 47
+12
+8.50 46
+8.25 11
+45
+8.00 10
+7.75 9 44
+7.50 8
+43
+102 103 0.6 0.4 0.2 0.0 0.2 0.4 0.6 0.0 0.2 0.4 0.6 0.8 1.0
+Tokens Alpha Delta
+(a) Passages and tokens. (b) Interpolation coefficient. (c) Threshold for span selection.
+Figure3
+SensitivityanalysisonWikiText-103andNQdevsetfortheNest-7Bmodelwiththeabovehyper-parameters
+in the sub-figures.
+Threshold for dynamic span selection Figure 3c shows how threshold δ in Equation (6) affects the generation
+on NQ. A bigger δ means selecting the span instead of a token more often. We can see that the answer-level
+recall on NQ first increases and then decreases as we increase the value of δ, where the sweet spot is around
+δ =0.5.
+Models (7B) Wiki./ROUGE-1 NQ/ALR Bio./FS
+kNN-LM (two-stage) 20.1 40.8 34.8
++ Relative Retrieval Confidence 24.7 44.4 41.6
++ Dynamic Span selection 24.5 44.6 41.6
++ Relaxed speculative decoding 26.8 45.4 46.8
+Table4 AblationstudyonthevalidationsetofWikiText-103,NQ,andBiography. ROUGE-1isreportedforWikiText-
+103, ALR is reported for NQ, and FActScore is reported for Biography.
+C.2 AblationStudy
+Table 4 shows a progressive ablation of Nest on WikiText-103, NQ, Biography. As mentioned in Section 3.1,
+it is extremely expensive to encode billion-token corpus with billion-parameter models. Therefore, we directly
+start with the two-stage implementation of kNN-LM and gradually add the methods applied in Nest. As we
+can see, adding the RRC component gives the first performance boost. The second dynamic span selection
+methoddoesnotseemtoincreasetheperformance,yetitiscrucialtogiveconsistentattributionforconsecutive
+spans and tokens. The last relaxed speculative decoding method further improves the final generation quality.
+D QualitativeResults.
+Table 2 shows more qualitative analyses for attribution of Nest-70B on NQ and HotpotQA.
+21
+ytixelpreP ytixelpreP
+llaceR
+leveL-rewsnAQuestion Answer(GeneratedbyNest-70B)
+Thevasculartunic,[21027113]alsoknownasthe"uvea",isthemiddlelayerofthethreelayers
+thatcomprisetheeye.Itislocated[12049924]betweenthesclera(theouter,whitelayer)and
+Thevascularlayeroftheeyeisthe
+theretina([31987889]theinnermostistheretina,whichgetsitsoxygenationfromtheblood
+vesselsofthechoroid(posteriorly)aswellastheretinalvessels(anteriorly).[31482951]
+TheUnitedStatesenteredWorldWarIonApril6,1917,[1592542]afterCongressdeclaredwar
+againstGermany.TheU.S.madeitsmajorcontributionsintermsofsupplies,rawmaterial,and
+WhendidUnitedStatesenterWorldWarI?
+money,startingin1917.AmericansoldiersunderGeneraloftheArmiesJohnPershing,
+Commander-in-ChiefoftheAmericanExpeditionaryForce(AEF),arrivedattherateof10[1592542]
+Unipolarneurons[6000295]arefoundinthedorsalrootganglia[19976891](DRG)ofthespinalcord.
+[9082117]TheDRGisaclusterofneurons(aganglion)inadorsalrootofaspinalnerve.Thecell
+Whereareunipolarneuronsfoundinspinalcord?
+bodiesofsensoryneuronsknownasfirst-orderneuronsarelocatedinthedorsalrootganglia.The
+axonsofdorsalrootganglionneuronsareknownasaf[9024943]
+Themovie"CatchMeIfYouCan"wasreleasedonDecember25,2002,[27493033]intheUnitedStates.
+ItwasdirectedbyStevenSpielbergandstarredLeonardoDiCaprioasFrankAbagnaleJr.,[2219100]a
+Whenwascatchmeifyoucanmade? conmanwhoimpersonatedaPan[26808473]AmericanWorldAirwayspilot,adoctor,andalegal
+prosecutor,amongotheridentities,andTomHanksas[2422879]FBIagentCarlHanratty,whopursuedhim.
+[2422867]Themoviewasbasedon
+Table5 Qualitative analysis for attribution on NQ. Green: Correct segments taken from the corpus. Red: Wrong
+segments taken from the corpus. Gray: Document id. The span will be labelled only when 4 consecutive tokens have
+the same document id.
+Question Answer(GeneratedbyNest-70B)
+HunchunandShijiazhuang[30998205]arebothcitiesinChina.Shijiazhuang[6737448]isaprefecture
+-levelcityandthecapitalandlargestcityofHebei(7075559)Province,withapopulationof120,000,000
+Whichislarger,HunchunorShijiazhuang?
+(2020).Hunchunisatownship-leveldivisionofHunchun[30998199],Jilin,China,withapopulationof
+18,000(2004).Therefore,Shijiazhuangislargerthan[27937602]
+WasPocahontasmadebeforeBorninChina? No,Pocahontas[2716717]wasreleasedin1995[4240514],whileBorninChinawasreleasedin2016[9704476]
+ThewallrunningbetweentheWestGateLodge[2843590]andCardiffCastledepicts15animalsonCastleStreet.
+Howmanyanimalsdoesthewallrunning
+ItisaGradeIlistedstructure,designedbyarchitectWilliamBurgesin1866,thoughnotbuiltuntil1890.The
+betweentheWestGateLodgeandCardiff
+workwascompletedbyBurges’formerassistantWilliamFrame.Theoriginalnineanimalfiguresweresculptured
+Castledepict?
+byThomasNicholls[16694594]
+HowmuchlongerafterSambouYatabarÃ
+wasborndidWerderBremengetfoundedin SambouYatabarÃ[29957019]wasbornonMarch21,1989.WerderBremenwasfoundedonFebruary4,1899
+thenorthwestGermanfederalstateFree [5536896],whichwasapproximately90yearsbeforeSambouYatabarÃ[22751848]
+HanseaticCityofBremen?
+Table6 Qualitative analysis for attribution on HotpotQA. Green: Correct segments taken from the corpus. Red:
+Wrongsegmentstakenfromthecorpus. Gray: Documentid. Thespanwillbelabelledonlywhen4consecutivetokens
+have the same document id.
+22

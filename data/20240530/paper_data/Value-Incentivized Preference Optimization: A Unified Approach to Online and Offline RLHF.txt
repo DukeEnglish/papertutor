@@ -1,0 +1,1384 @@
+Value-Incentivized Preference Optimization:
+A Unified Approach to Online and Offline RLHF
+Shicong Cen∗ Jincheng Mei† Katayoon Goshvadi Hanjun Dai Tong Yang∗
+CMU Google Google Google CMU
+Sherry Yang Dale Schuurmans Yuejie Chi∗ Bo Dai
+Google Google CMU Google
+May 30, 2024
+Abstract
+Reinforcement learning from human feedback (RLHF) has demonstrated great promise in aligning
+large language models (LLMs) with human preference. Depending on the availability of preference data,
+both online and offline RLHF are active areas of investigation. A key bottleneck is understanding how to
+incorporate uncertainty estimation in the reward function learned from the preference data for RLHF,
+regardless of how the preference data is collected. While the principles of optimism or pessimism under
+uncertaintyarewell-establishedinstandardreinforcementlearning(RL),apractically-implementableand
+theoretically-groundedformamenabletolargelanguagemodelsisnotyetavailable,asstandardtechniques
+for constructing confidence intervals become intractable under arbitrary policy parameterizations.
+In this paper, we introduce a unified approach to online and offline RLHF — value-incentivized
+preference optimization (VPO) — which regularizes the maximum-likelihood estimate of the reward
+function with the corresponding value function, modulated by a sign to indicate whether the optimism or
+pessimism is chosen. VPO alsodirectly optimizes thepolicywith implicit reward modeling, and therefore
+shares a simpler RLHF pipeline similar to direct preference optimization. Theoretical guarantees of VPO
+are provided for both online and offline settings, matching the rates of their standard RL counterparts.
+Moreover, experiments on text summarization and dialog verify the practicality and effectiveness of VPO.
+1 Introduction
+Fine-tuning large language models (LLMs) by reinforcement learning from human feedback (RLHF) (Ziegler
+et al., 2019) has been shown to significantly improve the helpfulness, truthfulness and controllability of
+LLMs, as illustrated by InstructGPT (Ouyang et al., 2022) and many follow-ups. Roughly speaking, there
+are two critical components of RLHF: (1) reward modeling, which maps human preference rankings into a
+quantitative reward function that can guide policy improvement; and (2) RL fine-tuning, which seeks to
+adjust LLM output to align with human preferences by leveraging the learned reward function, i.e., increasing
+the probability of preferred answers and decreasing the probability of unfavored answers.
+Evidently, thecurationofpreferencedataisinstrumentalintheperformanceofRLHF,whichiscommonly
+modeledaspairwisecomparisonsfromaBradley-Terryrankingmodel(BradleyandTerry,1952). Inparticular,
+givenaqueryx,humanannotatorschooseapreferredanswerfromtwocandidateanswersy andy generated
+1 2
+by an LLM. Despite the simple form, collecting large-scale and high-quality preference data can be expensive
+andtime-consuming. Dependingontheavailabilityofpreferencedata,twoparadigmsofRLHFareconsidered:
+(1) offline RLHF, where only a pre-collected preference dataset is available, possibly generated from a
+pre-trained LLM after supervised fine-tuning (SFT); and (2) online RLHF, where additional preference data
+∗CarnegieMellonUniversity;emails: {shicongc,tongyang,yuejiec}@andrew.cmu.edu.
+†GoogleResearch;emails: {jcmei,kgoshvadi,hadai,sherryy,schuurmans,bodai}@google.com.
+1
+4202
+yaM
+92
+]GL.sc[
+1v02391.5042:viXracan be collected adaptively to improve alignment. While initial work on RLHF focused on the offline setting,
+the online setting has also begun to receive considerable attention, as even a small amount of additional
+preference data has been shown to greatly boost performance.
+TherehasbeensignificantworkonthetheoreticalunderpinningsofRLHFthatseekstouncoveralgorithmic
+improvements. Notably, while the original RLHF pipeline decouples reward modeling from RL fine-tuning,
+direct preference optimization (DPO) (Rafailov et al., 2023) integrates these as a single step in the offline
+setting, leveraging a closed-form solution for the optimal policy in the RL fine-tuning phase. This has led to
+a welcome simplification of the RLHF pipeline, allowing direct optimization of the policy (i.e., the LLM)
+from preference data.
+Nevertheless, significant challenges remain in RLHF, particularly concerning how to incorporate estimates
+of reward uncertainty in direct preference optimization when parameterizing policies with large-scale neural
+networks — such as LLMs — in a theoretically and practically effective manner. In standard reinforcement
+learning (RL), managing uncertainty when an agent interacts with an environment is a critical aspect
+in achieving near-optimal performance (Sutton and Barto, 2018), when using methods that range from
+policy-based (Schulman et al., 2017; Xiao et al., 2021), value-based (Mnih et al., 2015; Kumar et al., 2020),
+and actor-critic methods (Mnih et al., 2016). One dominant approach in the bandit setting, for example,
+is to construct confidence intervals of the reward estimates, then acting according to the upper and lower
+confidence bounds — following the principles of optimism and pessimism in the online and offline settings
+respectively (Lattimore and Szepesvári, 2020; Lai et al., 1985; Rashidinejad et al., 2022).
+Despite the fact that uncertainty estimation is even more critical in RLHF, due to the coarse nature of
+preference data, effective implementations of theoretically justified optimistic and pessimistic principles have
+yet to be developed in the RLHF literature. For example, existing online preference alignment methods, such
+as Nash-MD (Munos et al., 2023) and OAIF (Guo et al., 2024), do not incorporate exploration; similarly,
+pessimism is also not implemented in offline preference alignment methods, such as DPO (Rafailov et al.,
+2023) and IPO (Azar et al., 2024). A key reason for these omissions is that it is extremely difficult to
+construct confidence intervals for arbitrary neural networks (Gawlikowski et al., 2021), let alone LLMs. Since
+optimism for online exploration and pessimism for offline RL both require uncertainty estimation, and given
+the difficulty of conducting uncertainty estimation for large-scale neural networks, a natural and important
+question arises:
+Can we implement the optimistic/pessimistic principles under uncertainty in a practically efficient manner
+for online/offline preference alignment in LLMs while retaining theoretical guarantees?
+1.1 Our contributions
+In this paper, we provide affirmative answer to the question. Our major contributions are as follows.
+(i) We propose value-incentivized preference optimization (VPO) for both online and offline RLHF, a
+unified algorithmic framework that directly optimizes the LLM policy with the optimistic/pessimistic
+principles under uncertainty. Avoiding explicit uncertainty estimation, VPO regularizes maximum
+likelihood estimation of the reward function toward (resp. against) responses that lead to the highest
+value in the online (resp. offline) setting, hence implementing optimism (resp. pessimism). Theoretical
+regretguaranteesofVPOaredevelopedforbothonlineandofflineRLHF,matchingtheircorresponding
+rates in the standard RL literature with explicit uncertainty estimation.
+(ii) In addition, VPO reveals the critical role of reward calibration, where the shift ambiguity of the reward
+model inherent in the Bradley-Terry model (Bradley and Terry, 1952) can be exploited to implement
+additional behavior regularization (Pal et al., 2024; Ethayarajh et al., 2024). This allows VPO to
+provideatheoreticalfoundationforpopularconservativeofflineRLmethods(e.g.,(Kumaretal.,2020)),
+as well as regularized RLHF methods (e.g., DPOP (Pal et al., 2024)).
+(iii) VPO admits a practically-implementable form suitable for RLHF on LLMs, and more generally, deep-
+learning architectures. We conduct extensive experimental studies using TL;DR and ARC-Challenge
+2tasks in online and offline settings with optimistic and pessimistic bias, respectively. The results
+demonstrate improved empirical performance.
+1.2 Related work
+RLHF. Since the introduction of the original RLHF framework, there have been many proposed simplifica-
+tions of the preference alignment procedure and attempts to improve performance, including SLiC (Zhao
+et al., 2023), GSHF (Xiong et al., 2023), DPO (Rafailov et al., 2023), and its variants, such as Nash-MD
+(Munos et al., 2023), IPO (Azar et al., 2024), OAIF (Guo et al., 2024), SPO (Swamy et al., 2024), GPO
+(Tang et al., 2024), and DPOP (Pal et al., 2024). These methods can roughly be grouped into online and
+offline variants, depending on whether preference data is collected before training (offline) or by using the
+current policy during training (online).
+In offline preference alignment, identity preference optimization (IPO, (Azar et al., 2024)) argues that
+it is problematic to use the Bradley-Terry model in DPO to convert pairwise preferences into pointwise
+reward values, and proposes an alternative objective function to bypass the use of the Bradley-Terry model.
+DPO-Positive (DPOP, (Pal et al., 2024)) observes a failure mode of DPO that the standard DPO loss can
+reduce the model’s likelihood on preferred answers, and proposes to add a regularization term to the DPO
+objective to avoid such a failure mode. On the other hand, online AI feedback (OAIF, (Guo et al., 2024))
+proposesanonlineversionofDPO,whereonlinepreferencedatafromLLMannotatorsisusedtoevaluateand
+update the current LLM policy in an iterative manner. Iterative reasoning preference optimization (Iterative
+RPO, (Yuanzhe Pang et al., 2024)) proposes to add an additional negative log-likelihood term in the DPO
+loss to improve performances on reasoning tasks. Finally, (Chang et al., 2024) proposes to reuse the offline
+preference data via reset.
+Uncertainty estimation in RL. The principles of optimism and pessimism are typically implemented
+via constructing confidence intervals or posterior sampling, which have been demonstrated to be provably
+efficient in tabular settings (Jin et al., 2018; Shi et al., 2022). Yet, these approaches have had limited success
+in conjunction with deep learning architectures (Gawlikowski et al., 2021), and many empirical heuristics in
+turn lack theoretical validation (Kumar et al., 2020). VPO draws inspiration from reward-biased exploration
+(Kumar and Becker, 1982; Liu et al., 2020; Hung et al., 2021; Mete et al., 2021) in the standard online RL
+literature, but significantly broadens its scope to the offline setting and RLHF for the first time.
+2 Preliminaries
+In RLHF, a language model is described by a policy π, which generates an answer y given prompt x
+according to the conditional probability distribution π( x). The standard RLHF∈pYrocess consists of ∈fouXr
+stages: supervised fine-tuning (SFT), preference data gen·|eration, reward modeling, and RL fine-tuning. In
+the SFT stage, a language model π is obtained by fine-tuning a pre-trained LLM with supervised learning.
+sft
+The remaining stages continue training by leveraging the preference data, which we elaborate below.
+Reward modeling from preference data. An oracle (e.g., a human labeler or a scoring model) evaluates
+the quality of two answers y and y given prompt x and reveals its preference. A widely used approach for
+1 2
+modelling the probability of pairwise preferences is the Bradley–Terry model (Bradley and Terry, 1952):
+exp(r⋆(x,y ))
+P(y y x)= 1 =σ(r⋆(x,y ) r⋆(x,y )), (1)
+1 ≻ 2 | exp(r⋆(x,y ))+exp(r⋆(x,y )) 1 − 2
+1 2
+where y y indicates that y is preferred over y , r⋆ : R is the ground truth reward function,
+1 2 1 2
+and σ :R≻ (0,1) is the logistic function. A preference daXta×samYp→le is denoted by a tuple (x,y ,y ), where
++ −
+y (resp. → y ) is the preferred (resp. unpreferred) answer in the comparison.
++ 0
+3Given a preference dataset = (xi,yi ,yi ) composed of independent samples, the reward function r
+can be estimated by maximumDlikeli{hood e+ stim− a}tion (MLE):
+r =argmin ℓ(r, ), (2)
+MLE
+r D
+where ℓ(r, ) is the negative log-likelihood of , given as
+D D
+(cid:88)
+ℓ(r, ):= logσ(r(xi,yi ) r(xi,yi )). (3)
+D − + − −
+(xi,yi,yi)∈D
++ −
+RL fine-tuning. Given a reward model r, we seek to fine-tune the policy π to achieve an ideal balance
+between the expected reward and its distance from an initial policy π , which is typically the same as π .
+ref sft
+This is achieved by maximizing the KL-regularized value function J(r,π), defined as
+J(r,π)= E [r(x,y)] β E (cid:2) KL(cid:0) π( x) π ( x)(cid:1)(cid:3) , (4)
+ref
+x∼ρ,y∼π(·|x) − x∼ρ ·| ∥ ·|
+where KL(cid:0) π π (cid:1) is the KL divergence from π to π , and β >0 is a regularization parameter. Consequently,
+1 2 1 2
+the RL fine-t∥uned policy π with respect to the reward r satisfies
+r
+π :=argmaxJ(r,π), (5)
+r
+π
+which admits a closed-form solution (Rafailov et al., 2023), i.e.,
+π (y x)exp(r(x,y)/β)
+(x y) : π (y x)= ref | . (6)
+∀ × ∈X ×Y r | Z(r,x)
+Here, Z(r,x) is a normalization factor given by
+(cid:88)
+Z(r,x)= π (y′ x)exp(r(x,y′)/β). (7)
+ref
+|
+y′∈Y
+Direct preference optimization. The closed-form solution (6) allows us to write the reward function r
+in turn as
+r(x,y)=β(logπ (y x) logπ (y x)+logZ(r,x)). (8)
+r ref
+| − |
+Plugging the above equation into the reward MLE (2), we obtain the seminal formulation of direct preference
+optimization (DPO) over the policy space (Rafailov et al., 2023),
+(cid:88) (cid:18) (cid:18) π(yi x) π(yi x) (cid:19)(cid:19)
+π =argmin logσ β log +| log −| , (9)
+DPO π −
+(xi,yi,yi)∈D
+π ref(y +i |x) − π ref(y −i |x)
++ −
+which avoids explicitly learning the reward model.
+3 Value-Incentivized Preference Optimization
+A major caveat of the standard RLHF framework concerns the lack of accounting for reward uncertainty,
+whichisknowntobeindispensableinthesuccessofstandardRLparadigmsinbothonlineandofflinesettings
+(Cesa-Bianchi et al., 2017; Rashidinejad et al., 2022). This motivates us to investigate a principled mechanism
+that be easily integrated into the RLHF pipeline, while bypassing the difficulties of explicit uncertainty
+estimation in LLMs.
+43.1 General framework
+In view of the sub-optimality of naive MLE for reward estimation (Cesa-Bianchi et al., 2017; Rashidinejad
+et al., 2022), and motivated by the effectiveness of reward-biased MLE in online RL (Kumar and Becker,
+1982; Liu et al., 2020), we propose to regularize the reward estimate via
+J⋆(r)=max J(r,π), (10)
+π
+which measures the resulting value function for the given reward if one acts according to its optimal policy.
+However, in RLHF, by the definition (1), the reward function r⋆ is only identifiable up to a prompt-
+dependent global shift. Specifically, letting r (x,y) = r (x,y)+c(x) be two reward functions that only
+1 2
+differ by a prompt-dependent shift c(x), we have r (x,y ) r (x,y )=r (x,y ) r (x,y ), which leads to
+1 1 1 2 2 1 2 2
+J⋆(r )=J⋆(r )+E [c(x)]. To resolve this challenge, we−introduce the following−equivalent class of reward
+1 2 x∼ρ
+functions for the Bradley-Terry model to eliminate the shift ambiguity, which also has the calibration effect
+of centering the reward function while offering a regularization mechanism to incorporate additional policy
+preferences.
+Assumption 1 We assume that r⋆ , where
+∈R
+(cid:26) (cid:27)
+= r : E [r(x,y)]=0. . (11)
+R x∼ρ,y∼πcal(·|x)
+Here, ρ is the prompt distribution and π is a fixed calibration distribution independent of the algorithm.
+cal
+The proposed regularized MLE of the Bradley-Terry model (2) appends a bias term to the negative
+likelihood
+r =argmin ℓ(r, ) sign α J⋆(r) , (12)
+VPO
+r∈R { D − · · }
+incentivizing the algorithm to favor (resp. avoid) reward models with higher value J⋆(r) in the online (resp.
+offline) setting. Here, α>0 is a constant controlling the strength of regularization, and sign is set to 1 in the
+online setting and 1 in the offline setting.
+Atfirstglance,t−heobjectivefunctionforVPO(12)doesnotimmediatelyimplyacomputationally-efficient
+algorithm due to the presence of J⋆(r). However, by exploiting the same closed-form solution for the optimal
+policygiventherewardin(6),andtherewardrepresentationinferredfromthepolicyvai(8),wecanexplicitly
+express J⋆(r) as
+J⋆(r)= E [r(x,y) β(logπ (y x) logπ (y x))]
+r ref
+x∼ρ,y∼πr(·|x) − | − |
+= E [logZ(r,x)]
+x∼ρ,y∼πr(·|x)
+= E [logZ(r,x)]
+x∼ρ,y∼πcal(·|x)
+= E [r(x,y) β(logπ (y x) logπ (y x))]
+r ref
+x∼ρ,y∼πcal(·|x) − | − |
+= β E [logπ (y x) logπ (y x)], (13)
+r ref
+− x∼ρ,y∼πcal(·|x) | − |
+where the second step follows because the bracketed term is independent of y (c.f. (6)) and the last step
+follows from (11) whenever r . Given this key ingredient, we can then rewrite (12) to directly optimize
+the LLM policy, in a flavor sim∈ilRar to DPO, as
+π =argmin ℓ(r, ) sign α J⋆(r)
+VPO
+{ D − · · }
+πr:r∈R
+=argmin(cid:110) (cid:88) logσ(cid:16)
+βlog
+π r(y +i |xi)
+βlog
+π r(y −i |xi) (cid:17)
+− π (yi xi) − π (yi xi)
+πr:r∈R (xi,yi,yi)∈D ref +| ref −|
++ −
+5(cid:111)
++sign αβ E [logπ (y x) logπ (y x)]
+r ref
+· x∼ρ,y∼πcal(·|x) | − |
+(cid:110) (cid:88) (cid:16) π(yi xi) π(yi xi) (cid:17)
+=argmin logσ βlog +| βlog −|
+π −
+(xi,yi,yi)∈D
+π ref(y +i |xi) − π ref(y −i |xi)
++ −
+(cid:111)
++sign αβ E [logπ(y x) logπ (y x)] , (14)
+ref
+· x∼ρ,y∼πcal(·|x) | − |
+where we drop the constraint on r , since for any policy π there exists r such that π =π .
+r
+Observingthatthereferencepoli∈cyR π (y x)inthelasttermof(14) E∈R [logπ(y x) logπ (y x)]
+ref ref
+| x∼ρ,y∼πcal(·|x) | − |
+(cid:111)
+does not impact the optimization solution, we can change it to E [logπ(y x) logπ (y x)] =
+cal
+x∼ρ,y∼πcal(·|x) | − |
+E (cid:2) KL(cid:0) π ( x) π( x)(cid:1)(cid:3), which amounts to adding a KL regularization to the original DPO, and offers
+cal
+−x∼ρ ·| ∥ ·|
+an interesting interpretation as pushing π against/towards π in the online/offline settings respectively,
+cal
+unveiling the role of reward calibration in RLHF.
+In what follows, we elaborate the development of VPO in both the online and offline settings with
+corresponding theoretical guarantees under linear function approximation.
+3.2 Online RLHF: algorithm and theory
+The online RLHF procedure extends training by performing reward learning and policy learning iteratively,
+with a growing preference dataset collected by using the current policy. We use π(t) to denote the policy used
+in the t-th iteration, where the superscript (t) indicates iteration t in the online setting. The t-th iteration of
+VPO for online RLHF consists of the following steps:
+1. New preference data generation. We sample a new prompt x(t) ρ and two answers y(t),y(t)
+∼ 1 2 ∼
+π(t)( x(t)), query the preference oracle and append (x(t),y(t),y(t)) to the preference dataset.
+·| + −
+2. Reward learning. We train a reward model with preference data (t) := (x(s),y(s),y(s)) t by
+minimizing the regularized negative log-likelihood, i.e., D { + − }s=1
+r(t+1) =argmin ℓ(r, (t)) α J⋆(r) . (15)
+r∈R { D − · }
+3. Policy learning. This step trains the policy by solving the RL fine-tuning problem:
+π(t+1) =argmaxJ(r(t+1),π). (16)
+π
+We summarize the detailed procedure in Algorithm 1.
+Theoretical analysis. Encouragingly, VPO admits appealing theoretical guarantees under function
+approximation. For simplicity, we restrict attention to linear approximation of the reward model.
+Assumption 2 (Linear Reward) We parameterize the reward model by
+r (x,y)=(cid:10) ϕ(x,y),θ(cid:11) , (x,y) , (18)
+θ
+∀ ∈X ×Y
+where ϕ: Rd is a fixed feature mapping and θ Rd is the parameters. We assume that ϕ(x,y) 1
+2
+for all (x,X y)×Y → , and that r⋆(x,y)=(cid:10) ϕ(x,y),θ⋆(cid:11)∈ for some θ⋆. ∥ ∥ ≤
+∈X ×Y
+Under Assumption 1 and 2, it is sufficient to focus on θ Θ where
+∈
+Θ=(cid:110) θ Rd : E (cid:2)(cid:10) ϕ(x,y),θ(cid:11)(cid:3) =0(cid:111) . (19)
+∈ x∼ρ,y∼πcal(·|x)
+6Algorithm 1 VPO for online RLHF
+initialization: π(0).
+for t=0,1,2, do
+···
+Sample x(t) ρ, y(t),y(t) π(t)( x(t)).
+∼ 1 2 ∼ ·|
+Obtain the preference between (x(t),y(t)) and (x(t),y(t)) from some oracle. Denote the comparison
+1 2
+outcome by (x(t),y(t),y(t)).
++ −
+Update policy π as
+(cid:110) (cid:88)t (cid:16) π(y(s) x(s)) π(y(s) x(s)) (cid:17)
+π(t+1) =argmin logσ βlog + | βlog − |
+π −
+s=1
+π ref(y +(s) |x(s)) − π ref(y −(s) |x(s))
+(cid:111)
++αβ E [logπ(y x) logπ (y x)] . (17)
+ref
+x∼ρ,y∼πcal(·|x) | − |
+end
+The next theorem demonstrates that Algorithm 1 achieves (cid:101)(√T) cumulative regret under mild assumptions.
+The proof is provided in Appendix A. O
+Theorem 1 Under Assumptions 1 and 2, let r Θ denote the corresponding reward model for π(t).
+θ(t)
+∈
+Assume that θ⋆ C and θ(t) C, t 0 for some C >0. Then with probability 1 δ we have
+2 2
+∥ ∥ ≤ ∥ ∥ ≤ ∀ ≥ −
+T
+Regret:=(cid:88)(cid:2) J⋆(r⋆) J(r⋆,π(t))(cid:3) (cid:101)(exp(2C+C/β)√κdT),
+− ≤O
+t=1
+(cid:114)
+1 T π (y x)
+with α= and κ=sup cal | .
+exp(2C+C/β) κmin dlogT,T x,y π (y x)
+ref
+{ } |
+Theorem 1 shows that VPO achieves the same O(cid:101)(√T) regret for online RLHF as its counterparts in standard
+contextual bandits with scalar rewards and using UCB for exploration (Lattimore and Szepesvári, 2020).
+Remark 1 The analysis naturally extends to allowing mini-batch samples of size M in every iteration,
+yielding an improved regret bound scaled by 1/√M and α scaled by √M.
+3.3 Offline RLHF: algorithm and theory
+In offline RLHF, a fixed offline preference dataset is collected := xi,yi ,yi N , where xi ρ, yi π ( x)
+are sampled from a behavior policy π , such as π from SFTD. The{prop+ ose− d}Vi= P1 O for offline∼RLHF∼conb si·s|ts
+b sft
+of one pass through the reward and policy learning phases, i.e.,
+r =argmin ℓ(r, )+α J⋆(r) and π =argmaxJ(r,π), (20)
+(cid:98) (cid:98) (cid:98)
+r∈R { D · } π
+which discourages over-optimization of the reward function given the limited offline preference data. In the
+same vein as deriving (17), and by leveraging (13), we obtain the direct policy update rule:
+(cid:110) (cid:88)N (cid:16) π(yi xi) π(yi xi) (cid:17)
+π =argmin logσ βlog +| βlog −|
+(cid:98) π −
+i=1
+π ref(y +i |xi) − π ref(y −i |xi)
+(cid:111)
+αβ E [logπ(y x) logπ (y x)] . (21)
+ref
+− x∼ρ,y∼πcal(·|x) | − |
+We summarize the detailed procedure in Algorithm 2. When π is set to π , the regularization term
+cal ref
+becomes the KL divergence between π and π , which is reminiscent of a popular choice in offline RL practice
+ref
+(Kumar et al., 2020). Another heuristic choice is to set π to the marginalized positive answer distribution
+cal
+from the dataset, i.e., (x,y ) , which leads to a similar objective in (Pal et al., 2024).
++
+∼D
+7Algorithm 2 VPO for offline RLHF
+input: offline preference data of size N.
+Get policy π by optimizing D
+(cid:98)
+(cid:110) (cid:88)N (cid:16) π(yi xi) π(yi xi) (cid:17)
+π =argmin logσ βlog +| βlog −|
+(cid:98) π −
+i=1
+π ref(y +i |xi) − π ref(y −i |xi)
+(cid:111)
+αβ E [logπ(y x) logπ (y x)] .
+ref
+− x∼ρ,y∼πcal(·|x) | − |
+Saddle-point characterization and pessimism. We first illustrate that VPO indeed executes the
+principle of pessimism in a complementary manner to the standard approach of pessimism, which finds a
+policy that maximizes the worst-case value function over a confidence set. In particular, this strategy (Uehara
+and Sun, 2021) obtains a policy by solving
+π =argmax min J(r,π) (22)
+(cid:98)LCB
+π r∈Rδ
+where the confidence set is typically set to r : ℓ(r, ) ℓ(r , )+δ or r : dist(r,r ) δ for
+δ MLE MLE
+some δ >0 and s distanceRmeasure dist. Turning{to VPOD, no≤te that byD(20) w}e ha{ve ≤ }
+r =argmin(cid:8) ℓ(r, )+αJ⋆(r)(cid:9) =argminmax(cid:8) ℓ(r, )+αJ(r,π)(cid:9) . (23)
+(cid:98)
+r D r π D
+Since ℓ(r, )+αJ(r,π) is strongly concave over π, and convex over r, it allows us to formulate (r,π) as a
+(cid:98) (cid:98)
+saddle poiDnt in the following lemma. The proof is given in Appendix B.1.
+Lemma 1 (r,π) is a saddle point of the objective ℓ(r, )+αJ(r,π), i.e., for any (r′,π′), we have
+(cid:98) (cid:98)
+D
+(cid:40)
+ℓ(r, )+αJ(r,π) ℓ(r′, )+αJ(r′,π)
+(cid:98) D (cid:98) (cid:98) ≤ D (cid:98) .
+ℓ(r, )+αJ(r,π) ℓ(r, )+αJ(r,π′)
+(cid:98) (cid:98) (cid:98) (cid:98) (cid:98)
+D ≥ D
+As such, the policy obtained by VPO can be equivalently written as
+(cid:110) 1 (cid:111)
+π argmaxmin J(r,π)+ ℓ(r, ) =argmax min J(r,π), (24)
+(cid:98) ∈ π r α D π r∈Rδ(π,α)
+where is the constraint set r :ℓ(r, ) ℓ(r , )+δ(π,α) such that the constrained optimization
+δ(π,α) MLE
+problemR min J(r,π) is equ{ ivalent D to t≤ he regularD ized problem} min (cid:8) J(r,π)+ 1ℓ(r, )(cid:9). In view of
+the similarityr∈ bR eδ t( wπ, eα e) n the formulations (22) and (24), we conclude thatr VPO implemα entsDthe pessimism
+principle (22) in an oblivious manner without explicitly estimating the uncertainty level, justifying popular
+practice as a valid approach to pessimism (Kumar et al., 2020).
+Theoretical analysis. The next theorem establishes the sub-optimality gap of VPO with linear function
+approximation under mild assumptions. The proof is given in Appendix B.
+Theorem 2 Under Assumptions 1 and 2, let r Θ denote the corresponding reward model for π. Assume
+θ(cid:98)∈ (cid:98)
+that θ⋆
+2
+C and θ(cid:98)
+2
+C for some C >0. Let α=√N and δ (0,1). With probability 1 δ, we have
+∥ ∥ ≤ ∥ ∥ ≤ ∈ −
+(cid:32) (cid:33)
+C (cid:13) (cid:13) C
+J⋆(r⋆) J(r⋆,π) 1 (cid:13) E [ϕ(x,y)](cid:13) + 2 ,
+− (cid:98) ≤O √N ·(cid:13) y∼x π∼ ⋆(ρ ·,
+|x)
+(cid:13) (ΣD+λI)−1 √N
+8where Σ = 1 (cid:80)N (ϕ(xi,yi ) ϕ(xi,yi ))(ϕ(xi,yi ) ϕ(xi,yi ))⊤ is the feature sample covariance matrix,
+D N i=1 (cid:16)(cid:112) + − − (cid:17) + − −
+λ=1/N, C =exp(C) d+log(1/δ)+κ +C and C =exp(C)κ2 +Cκ +1. Here,
+1 D 2 D D
+(cid:13) (cid:13)
+κ =(cid:13) E [ϕ(x,y)] E [ϕ(x,y)](cid:13) 4(λ (Σ )+λ)−1.
+D (cid:13) (cid:13) min D
+x∼ρ, − x∼ρ, (ΣD+λI)−1 ≤
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+Theorem 2 establishes that VPO achieves the same rate of (cid:101)(1/√N) as standard offline RL, as long as
+(cid:13) O (cid:13)
+the offline dataset has sufficient coverage. We remark that (cid:13) E [ϕ(x,y)](cid:13) is reminiscent of
+(cid:13) (cid:13)
+D y∼x π∼ ⋆(ρ ·,
+|x)
+(ΣD+λI)−1
+the standard single-policy concentratability coefficient in offline RL, which measures the distribution shift
+between the offline dataset and the optimal policy (Zhu et al., 2023).
+4 Experiments
+In this section, we evaluate the proposed VPO on both synthetic multi-armed bandit (MAB), and RLHF for
+LLMs, in online and offline settings.
+4.1 Synthetic Multi-Armed Bandits
+Weevaluatetheproposedmethodsonasyntheticdatasetofsize =1and =10. Wesetπ =π =π ,
+ref b cal
+whereπ =softmax(θ )withθ (x,y)sampledi.i.d. from (0|X ,1| ). Thegro|Yun|dtruthrewardr⋆ israndomly
+ref ref ref
+generated i.i.d. according to r⋆(x,y) U([0,1]). We appNroximately solve the optimization problems by
+performing20AdamWoptimizationstep∼swithlearningrate0.01andweightdecayrate0.01ineveryiteration
+for the online setting and 1000 steps for the offline setting.
+We plot the average results over 10 independent runs in Figure 1. As demonstrated in the left panel of
+Figure 1, an appropriate choice of α allows our method to outperform the model-based MAB with MLE
+baseline in the long-term performance of cumulative regret, at the cost of slightly increased cumulative
+regret in the first 100 iterations. This highlights the effectiveness of the VPO in achieving more principled
+exploration-exploitation trade-off. For the offline setting, the right panel of Figure 1 demonstrates that the
+performance of both MLE-MAB and VPO improves as the number of offline data increases. However, VPO
+achieves a consistently lower sub-optimality gap compared with that of MLE-MAB.
+VPOα=10.0/√N
+40
+1.5 VPOα=1.0/√N
+30 MLE
+1.0
+20
+VPOα=1.0
+0.5
+10
+VPOα=0.1
+MLE
+0 0.0
+0 200 400 600 800 1000 102
+NumberofIterations NumberofDataN
+Figure1: Thecumulativeregretv.s. numberofiterationsplot(leftpanel)andsub-optimalitygapv.s. number
+of data plot (right panel) of VPO and MLE-MAB methods in the online and offline settings, respectively.
+9
+tergeRevitalumuC paGytilamitpo-buS4.2 RLHF for LLMs
+We further evaluate the pessimistic/optimistic VPO for LLMs in offline and online setting, respectively. In
+both settings, the proposed VPO demonstrates strong performances over the baselines.
+Offline setting. In this setting, we test pessimistic VPO on ARC-Challenge task (Clark et al., 2018),
+which contains 7787 multiple-choices questions from multiple science subjects. We evaluate the performances
+on the ARC-Challenge test set, which contains 1172 questions. The data set only provides ground truth
+answer for each question. To construct the preference pairs and their labels, for each correct response in the
+training split, we create three pairs of comparison between the correct answer and each incorrect answer.
+We emphasize that our goal is to evaluate the RLHF algorithm designs for LLMs, rather than pushing
+LLM towards state-of-the-art performance. To demonstrate the advantages of the proposed VPO, we conduct
+comparison with several offline RLHF baselines (DPO (Rafailov et al., 2023) and IPO (Azar et al., 2024))
+on several LLMs, including Llama2-7b-chat, Llama2-13b-chat (Touvron et al., 2023) and Flan-T5-
+xl (Chung et al., 2022). For fair comparison, we keep all the experiment settings and prompts the same for
+every RLHF algorithm. We did not apply any additional chain-of-thought reasoning to avoid compounding
+factors affecting the RLHF performances. We tuned the hyperparameters for both the proposed VPO and
+the baselines on the validation set to achieve their best performances. For detailed hyperparameters setup,
+please refer to Appendix C.
+73
+60
+68
+72
+50 66 VPO
+IPO 71
+40 64 DPO
+VPO VPO
+70
+IPO IPO
+30 DPO 62 DPO
+69
+0 1000 2000 3000 0 1000 2000 3000 0 1000 2000 3000
+TrainingSteps TrainingSteps TrainingSteps
+(a)Llama2-7b-chat (b) Llama2-13b-chat (c) Flan-T5-xl
+Figure 2: The accuracy of the Llama2-7b-chat, Llama2-13b-chat and Flan-T5-xl policies trained by
+VPO and other baselines (DPO and IPO) on ARC-challenge, respectively. The proposed pessimistic VPO
+performs consistently strong, and avoids over-optimization.
+The performances are illustrated in Figure 2. As we can see, the proposed VPO method demonstrates
+significantly better performance over the existing baselines on the three models, verifying the benefits across
+different models. In particular, the performance benefit becomes more evident for larger models. Another
+important observation is that the proposed VPO method is more robust to over-optimization (Gao et al.,
+2023). In the experiment, the performances of DPO significantly drops after 1000 iterations, and the longer
+DPO is trained, the worse it performs. In contrast, VPO consistently maintains the performances, avoiding
+the overoptimization issue and justifying the implicit robustness of pessimism as we revealed in (23).
+Online setting. In this setting, we evaluate the performance of VPO on the TL;DR task (Stiennon et al.,
+2020). We prepare the prompts dataset by extracting the input prompts from the preference data. Recall we
+areevaluatingthealgorithmperformanceinonlinesetting,weonlycomparetotheonlineRLHFbaselines(Guo
+et al., 2024) for fairness. We adopt PaLM2 (Anil et al., 2023) as the language model and also the LLM
+annotator. We conduct VPO and online DPO to the same PaLM2-XXS as the policy, which is initialized by
+supervised finetuning, denoted as SFT model. We exploit another PaLM2-XS model as the LLM annotator
+to provide online feedbacks. Similar to (Guo et al., 2024), we use Detailed 0-shot prompt from Lee et al.
+10
+ycaruccA ycaruccA ycaruccA(2023). The prompts we used and how we get preference scores are detailed in Appendix C. We emphasize
+our algorithm is agnostic to human or AI feedback.
+As a sanity check, we track the win rate of VPO and online DPO against the SFT baseline on TL;DR
+during training in Figure 3a. For ablation purpose, we varies the exploration weight α= 0.01,0.1 in the
+optimistic VPO. One significant observation is that although all the online RLHF algor{ithms fol}low the
+increase trend, the win-rate against SFT of the optimistic VPO has larger oscillation, comparing to online
+DPO. And the oscillation reduces, with α diminishing. Our conjecture is that this behavior is encouraged
+by the optimistic term in VPO, for collecting more unexplored data, which may delay the learning due to
+the diversity in data. However, as the learning proceeds, the proposed VPO outperforms the competitors,
+because of the coverage of the collected data.
+90.0 80
+Win
+87.5
+Tie
+60
+85.0 Lose
+44.67 44.98
+82.5 41.01 40.7
+40
+80.0 VPOα=0.1
+VPOα=0.01
+20
+77.5 OnlineDPO 14.31 14.31
+1000 2000 3000 4000 5000 0
+TrainingSteps VPOα=0.01 VPOα=0.1
+Figure 3(a): Win rate of VPO and online DPO Figure3(b): Win/tie/lossrateofVPOwithdifferent
+against the SFT baseline on TL;DR task. exploration rate α = {0.01,0.1}, directly against
+online DPO.
+To demonstrate the advantages of optimistic VPO in online setting more directly, we evaluate the
+win/tie/loss rate against online DPO head-to-head, as shown in Figure 3b. This clearly shows that the
+optimistic VPO achieves better performances with larger exploration preference, and thus, consolidates our
+conclusion that i), the simple value-incentivized term makes the exploration practical without uncerntainty
+estimation; and ii), exploration is potentially beneficial for better model.
+5 Conclusion and Discussion
+In this work, we develop a unified approach to achieving principled optimism and pessimism in online
+and offline RLHF, which enables a practical computation scheme by incorporating uncertainty estimation
+implicitly within reward-biased maximum likelihood estimation. Theoretical analysis indicates that the
+proposedmethodsmirrortheguaranteesoftheirstandardRLcounterparts,whichisfurthermorecorroborated
+by numerical results. Important future directions include investigating adaptive rules for selecting α without
+priorinformationandmorerefinedanalysisonthechoiceofπ . Thisworkalsohintsatageneralmethodology
+cal
+of designing practical algorithms with principled optimism/pessimism under more general RL setups.
+Acknowledgement
+TheworkofS.CenandY.ChiissupportedinpartbythegrantsONRN00014-19-1-2404,NSFDMS-2134080,
+CCF-2106778 and CNS-2148212. S. Cen is also gratefully supported by Wei Shen and Xuehong Zhang
+Presidential Fellowship and JP Morgan AI Research Fellowship.
+11
+enilesaBTFStsniaga)%(etaRgninniW
+)%(egatnecrePReferences
+Abbasi-Yadkori, Y., Pál, D., and Szepesvári, C. (2011). Improved algorithms for linear stochastic bandits.
+Advances in neural information processing systems, 24.
+Anil, R., Dai, A. M., Firat, O., Johnson, M., Lepikhin, D., Passos, A., Shakeri, S., Taropa, E., Bailey, P.,
+Chen, Z., et al. (2023). Palm 2 technical report. arXiv preprint arXiv:2305.10403.
+Azar, M. G., Guo, Z. D., Piot, B., Munos, R., Rowland, M., Valko, M., and Calandriello, D. (2024). A
+general theoretical paradigm to understand learning from human preferences. In International Conference
+on Artificial Intelligence and Statistics, pages 4447–4455. PMLR.
+Bradley, R. A. and Terry, M. E. (1952). Rank analysis of incomplete block designs: I. the method of paired
+comparisons. Biometrika, 39(3/4):324–345.
+Cen, S., Cheng, C., Chen, Y., Wei, Y., and Chi, Y. (2022). Fast global convergence of natural policy gradient
+methods with entropy regularization. Operations Research, 70(4):2563–2578.
+Cesa-Bianchi, N., Gentile, C., Lugosi, G., and Neu, G. (2017). Boltzmann exploration done right. Advances
+in neural information processing systems, 30.
+Chang, J. D., Shan, W., Oertell, O., Brantley, K., Misra, D., Lee, J. D., and Sun, W. (2024). Dataset reset
+policy optimization for RLHF. arXiv preprint arXiv:2404.08495.
+Chung, H. W., Hou, L., Longpre, S., Zoph, B., Tay, Y., Fedus, W., Li, E., Wang, X., Dehghani, M., Brahma,
+S., et al. (2022). H. chi, jeff dean, jacob devlin, adam roberts, denny zhou, quoc v. le, and jason wei. 2022.
+scaling instruction-finetuned language models. arXiv preprint arXiv:2210.11416.
+Clark, P., Cowhey, I., Etzioni, O., Khot, T., Sabharwal, A., Schoenick, C., and Tafjord, O. (2018). Think you
+have solved question answering? try arc, the ai2 reasoning challenge. arXiv preprint arXiv:1803.05457.
+Ethayarajh, K., Xu, W., Muennighoff, N., Jurafsky, D., and Kiela, D. (2024). KTO: Model alignment as
+prospect theoretic optimization. arXiv preprint arXiv:2402.01306.
+Gao,L.,Schulman,J.,andHilton,J.(2023). Scalinglawsforrewardmodeloveroptimization. InInternational
+Conference on Machine Learning, pages 10835–10866. PMLR.
+Gawlikowski, J., Tassi, C. R. N., Ali, M., Lee, J., Humt, M., Feng, J., Kruspe, A., Triebel, R., Jung, P.,
+Roscher,R.,etal.(2021). Asurveyofuncertaintyindeepneuralnetworks. arXivpreprintarXiv:2107.03342.
+Guo, S., Zhang, B., Liu, T., Liu, T., Khalman, M., Llinares, F., Rame, A., Mesnard, T., Zhao, Y., Piot, B.,
+et al. (2024). Direct language model alignment from online ai feedback. arXiv preprint arXiv:2402.04792.
+Hung, Y.-H., Hsieh, P.-C., Liu, X., and Kumar, P. (2021). Reward-biased maximum likelihood estimation
+for linear stochastic bandits. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 35,
+pages 7874–7882.
+Jin, C., Allen-Zhu, Z., Bubeck, S., and Jordan, M. I. (2018). Is Q-learning provably efficient? Advances in
+neural information processing systems, 31.
+Jin, C., Liu, Q., and Yu, T. (2022). The power of exploiter: Provable multi-agent rl in large state spaces. In
+International Conference on Machine Learning, pages 10251–10279. PMLR.
+Kumar, A., Zhou, A., Tucker, G., and Levine, S. (2020). Conservative q-learning for offline reinforcement
+learning. Advances in Neural Information Processing Systems, 33:1179–1191.
+Kumar, P. and Becker, A. (1982). A new family of optimal adaptive controllers for markov chains. IEEE
+Transactions on Automatic Control, 27(1):137–146.
+12Lai, T. L., Robbins, H., et al. (1985). Asymptotically efficient adaptive allocation rules. Advances in applied
+mathematics, 6(1):4–22.
+Lattimore, T. and Szepesvári, C. (2020). Bandit algorithms. Cambridge University Press.
+Lee,H.,Phatale,S.,Mansoor,H.,Lu,K.,Mesnard,T.,Bishop,C.,Carbune,V.,andRastogi,A.(2023). Rlaif:
+Scaling reinforcement learning from human feedback with ai feedback. arXiv preprint arXiv:2309.00267.
+Liu, X., Hsieh, P.-C., Hung, Y. H., Bhattacharya, A., and Kumar, P. (2020). Exploration through reward
+biasing: Reward-biasedmaximumlikelihoodestimationforstochasticmulti-armedbandits. InInternational
+Conference on Machine Learning, pages 6248–6258. PMLR.
+Liu,Z.,Lu,M.,Xiong,W.,Zhong,H.,Hu,H.,Zhang,S.,Zheng,S.,Yang,Z.,andWang,Z.(2024). Maximize
+to explore: One objective function fusing estimation, planning, and exploration. Advances in Neural
+Information Processing Systems, 36.
+Mete, A., Singh, R., Liu, X., and Kumar, P. (2021). Reward biased maximum likelihood estimation for
+reinforcement learning. In Learning for Dynamics and Control, pages 815–827. PMLR.
+Mnih, V., Badia, A. P., Mirza, M., Graves, A., Lillicrap, T., Harley, T., Silver, D., and Kavukcuoglu, K.
+(2016). Asynchronous methods for deep reinforcement learning. In International conference on machine
+learning, pages 1928–1937. PMLR.
+Mnih, V., Kavukcuoglu, K., Silver, D., Rusu, A. A., Veness, J., Bellemare, M. G., Graves, A., Riedmiller, M.,
+Fidjeland, A. K., Ostrovski, G., et al. (2015). Human-level control through deep reinforcement learning.
+nature, 518(7540):529–533.
+Munos, R., Valko, M., Calandriello, D., Azar, M. G., Rowland, M., Guo, Z. D., Tang, Y., Geist, M., Mesnard,
+T., Michi, A., et al. (2023). Nash learning from human feedback. arXiv preprint arXiv:2312.00886.
+Ouyang, L., Wu, J., Jiang, X., Almeida, D., Wainwright, C., Mishkin, P., Zhang, C., Agarwal, S., Slama, K.,
+Ray, A., et al. (2022). Training language models to follow instructions with human feedback. Advances in
+neural information processing systems, 35:27730–27744.
+Pal, A., Karkhanis, D., Dooley, S., Roberts, M., Naidu, S., and White, C. (2024). Smaug: Fixing failure
+modes of preference optimisation with dpo-positive. arXiv preprint arXiv:2402.13228.
+Rafailov, R., Sharma, A., Mitchell, E., Manning, C. D., Ermon, S., and Finn, C. (2023). Direct preference
+optimization: Your language model is secretly a reward model. Advances in Neural Information Processing
+Systems, 36.
+Rashidinejad, P., Zhu, B., Ma, C., Jiao, J., and Russell, S. (2022). Bridging offline reinforcement learning
+and imitation learning: A tale of pessimism. IEEE Transactions on Information Theory, 68(12):8156–8196.
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and Klimov, O. (2017). Proximal policy optimization
+algorithms. arXiv preprint arXiv:1707.06347.
+Shi,L.,Li,G.,Wei,Y.,Chen,Y.,andChi,Y.(2022). PessimisticQ-learningforofflinereinforcementlearning:
+Towards optimal sample complexity. In International conference on machine learning, pages 19967–20025.
+PMLR.
+Stiennon, N., Ouyang, L., Wu, J., Ziegler, D., Lowe, R., Voss, C., Radford, A., Amodei, D., and Christiano,
+P. F. (2020). Learning to summarize with human feedback. Advances in Neural Information Processing
+Systems, 33:3008–3021.
+Sutton, R. S. and Barto, A. G. (2018). Reinforcement Learning: An Introduction. MIT Press.
+13Swamy, G., Dann, C., Kidambi, R., Wu, Z. S., and Agarwal, A. (2024). A minimaximalist approach to
+reinforcement learning from human feedback. arXiv preprint arXiv:2401.04056.
+Tang, Y., Guo, Z. D., Zheng, Z., Calandriello, D., Munos, R., Rowland, M., Richemond, P. H., Valko, M.,
+Pires, B. Á., and Piot, B. (2024). Generalized preference optimization: A unified approach to offline
+alignment. arXiv preprint arXiv:2402.05749.
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi, A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava,
+P., Bhosale, S., et al. (2023). Llama 2: Open foundation and fine-tuned chat models. arXiv preprint
+arXiv:2307.09288.
+Uehara,M.andSun,W.(2021). Pessimisticmodel-basedofflinereinforcementlearningunderpartialcoverage.
+arXiv preprint arXiv:2107.06226.
+Xiao, C., Wu, Y., Mei, J., Dai, B., Lattimore, T., Li, L., Szepesvari, C., and Schuurmans, D. (2021). On
+the optimality of batch policy optimization algorithms. In International Conference on Machine Learning,
+pages 11362–11371. PMLR.
+Xiong, W., Dong, H., Ye, C., Zhong, H., Jiang, N., and Zhang, T. (2023). Gibbs sampling from human
+feedback: A provable KL-constrained framework for RLHF. arXiv preprint arXiv:2312.11456.
+Yuanzhe Pang, R., Yuan, W., Cho, K., He, H., Sukhbaatar, S., and Weston, J. (2024). Iterative reasoning
+preference optimization. arXiv e-prints, pages arXiv–2404.
+Zhan, W., Uehara, M., Kallus, N., Lee, J. D., and Sun, W. (2023). Provable offline preference-based
+reinforcement learning. In The Twelfth International Conference on Learning Representations.
+Zhang, T. (2023). Mathematical analysis of machine learning algorithms. Cambridge University Press.
+Zhao, Y., Joshi, R., Liu, T., Khalman, M., Saleh, M., and Liu, P. J. (2023). Slic-hf: Sequence likelihood
+calibration with human feedback. arXiv preprint arXiv:2305.10425.
+Zhu, B., Jordan, M., and Jiao, J. (2023). Principled reinforcement learning with human feedback from
+pairwise or k-wise comparisons. In International Conference on Machine Learning, pages 43037–43067.
+PMLR.
+Ziegler, D. M., Stiennon, N., Wu, J., Brown, T. B., Radford, A., Amodei, D., Christiano, P., and Irving, G.
+(2019). Fine-tuning language models from human preferences. arXiv preprint arXiv:1909.08593.
+A Analysis for the online setting
+A.1 Proof of Theorem 1
+For ease of presentation, we assume that is finite, i.e., < . The general case can be directly obtained
+using a covering number argument, whichRwe refer to (Liu|Re|t al.∞, 2024; Jin et al., 2022) for interested readers.
+We start by decomposing the regret into two parts:
+T
+Regret:=(cid:88)(cid:2) J⋆(r⋆) J(r⋆,π(t))(cid:3)
+−
+t=1
+T T
+=(cid:88)(cid:2) J⋆(r⋆) J⋆(r(t))(cid:3) +(cid:88)(cid:2) J(r(t),π(t)) J(r⋆,π(t))(cid:3) . (25)
+− −
+t=1 t=1
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Term (i) Term (ii)
+14Step 1: bounding term (i). By the choice of r(t), we have
+ℓ(r(t), (t−1)) αJ⋆(r(t)) ℓ(r⋆, (t−1)) αJ⋆(r⋆). (26)
+D − ≤ D −
+Rearranging terms,
+J⋆(r⋆) J⋆(r(t)) 1(cid:2) ℓ(r⋆, (t−1)) ℓ(r(t), (t−1))(cid:3) . (27)
+− ≤ α D − D
+The following lemma is adapted from (Liu et al., 2024, Proposition 5.3), whose proof is deferred to Ap-
+pendix A.2.
+Lemma 2 Let δ (0,1). With probability 1 δ, we have
+∈ −
+ℓ(r⋆, (t−1)) ℓ(r(t), (t−1))
+D − D
+t−1
+2(cid:88) E (cid:2) D2(P ( x,y ,y ) P ( x,y ,y ))(cid:3) +2log( /δ). (28)
+≤− x∼ρ, H r(t) ·| 1 2 ∥ r⋆ ·| 1 2 |R|
+s=1 (y1,y2)∼π(s)(·|x)
+Here, D ( ) is the Hellinger distance, P ( x,y ,y ) denotes the Bernoulli distribution of the comparison
+H r 1 2
+·∥· ·|
+result of (x,y ) and (x,y ) under reward model r.
+1 2
+Putting the above inequalities together, it holds with probability 1 δ that
+−
+T t−1
+Term (i) 2 (cid:88)(cid:88) E (cid:104) D2(P ( x(s),y(s),y(s)) P ( x(s),y(s),y(s)))(cid:105)
+≤−α
+t=1s=1
+x(s)∼ρ, H r(t) ·| 1 2 ∥ r⋆ ·| 1 2
+(y(s),y(s))∼π(s)(·|x(s))
+1 2
++2α−1T log( /δ). (29)
+|R|
+Step 2: breaking down term (ii) with the elliptical potential lemma. The linear function approxi-
+mation form (18) allows us to write
+E [r (x,y) r⋆(x,y)]=(cid:10) W(r ),X(r )(cid:11) , (30)
+1 1 2
+x∼ρ,y∼πr2(·|x) −
+where X,W : Rd is given by
+R→
+θ θ⋆
+X(r )=2C E [ϕ(x,y)], W(r )= − . (31)
+θ θ 2C
+x∼ρ,y∼πrθ(·|x)
+Let
+t−1
+(cid:88)
+Σ =ϵI+ X(r(t))X(r(t))⊤ (32)
+t
+s=1
+for some ϵ>0. We begin by decomposing term (ii) as
+T
+(cid:88) (cid:104) (cid:105)
+Term (ii)= E r(t)(x,y) r⋆(x,y)
+x∼ρ,y∼π(t)(·|x) −
+t=1
+T
+=(cid:88)(cid:10) W(r(t)),X(r(t))(cid:11)
+t=1
+T
+=(cid:88)(cid:10) W(r(t)),X(r(t))(cid:11) 1 X(r(t)) 1
+{∥
+∥Σ− t1
+}≤ }
+t=1
+15T
++(cid:88)(cid:10) W(r(t)),X(r(t))(cid:11) 1 X(r(t)) >1 , (33)
+{∥
+∥Σ− t1
+} }
+t=1
+where 1 A is an indicator function of event A. To proceed, we recall the elliptical potential lemma for
+controlli{ng}the cumulative sum of min X(r(t)) 2 ,1 .
+{∥ ∥Σ− t1 }
+Lemma 3 ((Abbasi-Yadkori et al., 2011, Lemma 11)) Let X be a sequence in Rd and Λ Rd×d
+t 0
+a positive definite matrix. Define Λ =Λ +(cid:80)t X X⊤. Assume{ X} L for all t. It holds that∈
+t 0 s=1 s s ∥ t ∥≤
+T
+(cid:88)
+min X 2 ,1
+2log(cid:16)det(Λ T)(cid:17)
+{∥ t ∥Λ− t1 }≤ det(Λ 0)
+t=1
+2(dlog((trace(Λ )+TL2)/d) logdet(Λ )).
+0 0
+≤ −
+Applying the above lemma yields
+(cid:88)T (cid:26) (cid:16)4C4T/d+ϵ(cid:17) (cid:27)
+min X(r(t)) 2 ,1 min 2dlog ,T :=d(ϵ). (34)
+{∥ ∥Σ− t1 }≤ ϵ
+t=1
+We now control the two terms in (33).
+• The first term of (33) can be bounded by
+T
+(cid:88)(cid:10) W(r(t)),X(r(t))(cid:11) 1 X(r(t)) 1
+{∥
+∥Σ− t1
+}≤ }
+t=1
+T
+(cid:88)
+W(r(t)) X(r(t)) 1 X(r(t)) 1
+≤ ∥
+∥Σt∥ ∥Σ− t1
+{∥
+∥Σ− t1
+}≤ }
+t=1
+T
+(cid:88) (cid:110) (cid:111)
+W(r(t)) min X(r(t)) ,1
+≤ ∥
+∥Σt
+∥
+∥Σ− t1
+t=1
+T t−1
+=(cid:88)(cid:104)
+ϵ W(r(t))
+2+(cid:88)(cid:10) W(r(t)),X(r(s))(cid:11)2(cid:105)1/2 min(cid:110)
+X(r(t)) 2
+,1(cid:111)1/2
+∥ ∥2 ∥ ∥Σ− t1
+t=1 s=1
+(i)(cid:26) (cid:88)T (cid:104) ϵ W(r(t)) 2+(cid:88)t−1 (cid:10) W(r(t)),X(r(s))(cid:11)2(cid:105)(cid:27)1/2(cid:26) (cid:88)T min(cid:110) X(r(t)) 2 ,1(cid:111)(cid:27)1/2
+≤ ∥ ∥2 ∥ ∥Σ− t1
+t=1 s=1 t=1
+(ii)(cid:112)
+d(ϵ)(cid:26) (cid:88)T (cid:88)t−1
+(cid:10)
+W(r(t)),X(r(s))(cid:11)2(cid:27)1/2
++(cid:112)
+d(ϵ)ϵT
+≤
+t=1s=1
+T t−1
+(iii) d(ϵ) + µ(cid:88)(cid:88)(cid:10) W(r(t)),X(r(s))(cid:11)2 +(cid:112) d(ϵ)ϵT. (35)
+≤ 2µ 2
+t=1s=1
+Here, (i) is due to Cauchy–Schwarz inequality, (ii) is due to √a+b √a+√b for a,b 0, and (iii)
+results from Young’s inequality. We leave the constant µ>0 to be de≤termined later.∀ ≥
+• The second term of (33) can be bounded by
+T T
+(cid:88)(cid:10) W(r(t)),X(r(t))(cid:11) 1 X(r(t)) >1 C(cid:88) 1 X(r(t)) >1
+{∥
+∥Σ− t1
+} }≤ {∥
+∥Σ− t1
+} }
+t=1 t=1
+T
+(cid:88)
+C min X(r(t)) 2 ,1 Cd(ϵ), (36)
+≤ {∥ ∥Σ− t1 }≤
+t=1
+where the first inequality follows from X(r(t)) 2C and W(r(t)) 1/2 since ϕ(x,y) 1.
+2 2 2
+∥ ∥ ≤ ∥ ∥ ≤ ∥ ∥ ≤
+16Putting (33), (35) and (36) together, we arrive at
+T t−1
+Term (ii) d(ϵ) + µ(cid:88)(cid:88)(cid:10) W(r(t)),X(r(s))(cid:11)2 +(cid:112) d(ϵ)ϵT +Cd(ϵ). (37)
+≤ 2µ 2
+t=1s=1
+Step 3: continuing bounding term (ii). It boils down to control (cid:10) W(r(t)),X(r(s))(cid:11)2. We have
+(cid:10) W(r(t)),X(r(s))(cid:11) = E (cid:104) r(t)(x,y) r⋆(x,y)(cid:105)
+x∼ρ, −
+y∼π(s)(·|x)
+(cid:104) (cid:105) (cid:104) (cid:105)
+= E r(t)(x,y ) r⋆(x,y ) E r(t)(x,y ) r⋆(x,y )
+1 1 2 2
+x∼ρ, − − x∼ρ, −
+y1∼π(s)(·|x) y2∼πcal(·|x)
+(cid:104) (cid:105)
+= E δ (r(t),r⋆,y ,y ) , (38)
+x 1 2
+x∼ρ,
+y1∼π(s)(·|x),
+y2∼πcal(·|x)
+where δ (r ,r ,y ,y ):=r (x,y ) r (x,y ) (r (x,y ) r (x,y )). Therefore,
+x 1 2 1 2 1 1 1 2 2 1 2 2
+− − −
+(cid:10) W(r(t)),X(r(s))(cid:11)2 = E (cid:104) δ (r(t),r⋆,y ,y )(cid:105)2
+x 1 2
+x∼ρ,
+y1∼π(s)(·|x),
+y2∼πcal(·|x)
+(cid:104) (cid:105)
+= E δ (r(t),r⋆,y ,y )2 Var [δ (r(t),r⋆,y ,y )2]
+x 1 2 x 1 2
+x∼ρ, − x∼ρ,
+y1∼π(s)(·|x), y1∼π(s)(·|x),
+y2∼πcal(·|x) y2∼πcal(·|x)
+(cid:104) (cid:105)
+E δ (r(t),r⋆,y ,y )2
+x 1 2
+≤ x∼ρ,
+y1∼π(s)(·|x),
+y2∼πcal(·|x)
+π (y x) (cid:104) (cid:105)
+sup cal | E δ (r(t),r⋆,y ,y )2
+≤ x,y π(s)(y x) · x∼ρ, x 1 2
+| y1,y2∼π(s)(·|x)
+π (y x) π (y x) (cid:104) (cid:105)
+sup ref | sup cal | E δ (r(t),r⋆,y ,y )2 . (39)
+≤ x,y π(s)(y x) · x,y π ref(y x) · x∼ρ, x 1 2
+| | y1,y2∼π(s)(·|x)
+Recall from (6) that π(s)(y x) π (y x)exp(r(s)(x,y)/β). It follows that logπ(s)(y x) logπ (y x)
+ref ref
+| ∝ | | | − | | ≤
+2 r(s)(x, ) 2C/β (see e.g., (Cen et al., 2022, Appendix A.2)), and hence sup πref(y|x) exp(2C/β).
+∥ · ∥∞ ≤ x,y π(s)(y|x) ≤
+To proceed, we demonstrate in the following lemma that δ2 can be upper bounded by the corresponding
+Hellinger distance, whose proof is deferred to Appendix A.3.
+Lemma 4 Assume bounded reward r C, r C. We have
+1 ∞ 2 ∞
+∥ ∥ ≤ ∥ ∥ ≤
+δ (r ,r ,y ,y )2 2(3+exp(2C))2D2(P ( x,y ,y ) P ( x,y ,y )).
+x 1 2 1 2 ≤ H r1 ·| 1 2 ∥ r2 ·| 1 2
+With the above lemma we arrive at
+(cid:10) W(r(t)),X(r(s))(cid:11)2
+2(3+exp(2C))2exp(2C/β)κ E (cid:2) D2(P ( x,y ,y ) P ( x,y ,y ))(cid:3) .
+≤ · x∼ρ, H r(t) ·| 1 2 ∥ r⋆ ·| 1 2
+y1,y2∼π(s)(·|x)
+π (y x)
+where we denote κ=sup cal | . Plugging the above bound into (37), we get
+x,y π (y x)
+ref
+|
+Term (ii)
+17T t−1
+d(ϵ) +µ(3+exp(2C))2exp(2C/β)κ (cid:88)(cid:88) E (cid:2) D2(P ( x,y ,y ) P ( x,y ,y ))(cid:3)
+≤ 2µ · x∼ρ, H r(t) ·| 1 2 ∥ r⋆ ·| 1 2
+t=1s=1 y1,y2∼π(s)(·|x)
+(cid:112)
++2B d(ϵ)ϵT +Cd(ϵ). (40)
+Step 4: finishing up. Combining (25), (29) and (40), with probability 1 δ we have
+−
+2T log( /δ) d(ϵ) (cid:112)
+Regret |R| + + d(ϵ)ϵT +Cd(ϵ) (41)
+≤ α 2µ
+(cid:113) (cid:113)
+as long as αµ(3+exp(2C))2exp(2C/β)κ 2. Setting α 1 T , µ 1 d(ϵ), and
+≤ ≍ exp(2C+C/β) κd(ϵ) ≍ exp(2C+C/β) κT
+ϵ=1, we arrive at
+Regret (cid:101)((exp(2C+C/β))√κdT)
+≤O
+as claimed.
+A.2 Proof of Lemma 2
+To begin, we have
+P( (t−1) r⋆) (cid:88)t−1
+ℓ(r⋆, (t−1)) ℓ(r(t), (t−1))= log D | = Xs , (42)
+D − D − P( (t−1) r(t)) − r(t)
+D | s=1
+where we denote
+P (y(s) y(s) x(s))
+Xs =log r⋆ + ≻ − | . (43)
+r P (y(s) y(s) x(s))
+r + ≻ − |
+To proceed, we recall a useful martingale exponential inequality.
+Lemma 5 ((Zhang, 2023, Theorem 13.2)) Let X ∞ be a sequence of real-valued random variables
+{ t }t=1
+adapted to filtration ∞ . It holds with probability 1 δ such that for any t 1,
+{Ft }t=1 − ≥
+t t
+(cid:88) (cid:88)
+X logE[exp( X ) ]+log(1/δ).
+s s s−1
+− ≤ − |F
+s=1 s=1
+Applying the above lemma to 1Xt ∞ along with the filtration ∞ with given by the σ-algebra of
+{2 r}t=1 {Ft }t=1 Ft
+(x(s),y(s),y(s)):s t , we conclude that it holds with probability 1 δ that
+{ + − ≤ } −
+1(cid:88)t−1 (cid:88)t−1 (cid:20) (cid:110) 1 (cid:111)(cid:12) (cid:21)
+Xs logE exp Xs (cid:12) +log( /δ)
+−2 r ≤ − 2 r (cid:12) Fs−1 |R|
+s=1 s=1
+(cid:88)t−1(cid:18) (cid:20) (cid:110) 1 (cid:111)(cid:12) (cid:21) (cid:19)
+E exp Xs (cid:12) 1 +log( /δ), (44)
+≤ − 2 r (cid:12) Fs−1 − |R|
+s=1
+where the last step results from the inequality log(1+x) x for all x 1. To proceed, note that
+≤ ≥−
+(cid:20) (cid:110) 1 (cid:111)(cid:12) (cid:21)
+E exp Xs (cid:12)
+− 2 r (cid:12) Fs−1
+(cid:118) 
+=E
+(cid:117) (cid:117)
+(cid:116)
+PP r( (y y+( (s s) )≻y y−( (s s) )|x x( (s s) )) )(cid:12)
+(cid:12) (cid:12) Fs−1
+r⋆ + ≻ − |
+18(cid:118) 
+= E
+(cid:117) (cid:117)
+(cid:116)
+P r(y +(s) ≻y −(s) |x(s))
+
+(y(s),y(sx ))(s ∼) π∼ (ρ s,
+)(·|x(s)),
+P r⋆(y +(s) ≻y −(s) |x(s))
+1 2
+(+,−)∼P r⋆
+ 
+(cid:113)
+= x(sE
+)∼ρ,
+ (cid:88) P r(y +(s) ≻y −(s) |x(s)) ·P r⋆(y +(s) ≻y −(s) |x(s))
+(+,−)
+(y(s),y(s))∼π(s)(·|x(s))
+1 2
+ 
+=1
+−
+21 x(sE
+)∼ρ,
+ (cid:88) (cid:16)(cid:113) P r(y +(s) ≻y −(s) |x(s)) −(cid:113) P r⋆(y +(s) ≻y −(s) |x(s))(cid:17)2 
+(+,−)
+(y(s),y(s))∼π(s)(·|x(s))
+1 2
+=1 E (cid:2) D2(P ( x,y ,y P ( x,y ,y )(cid:3) ,
+− x∼ρ, H r ·| 1 2 ∥ r⋆ ·| 1 2
+(y1,y2)∼π(s)(·|x)
+where we denote by (cid:80) the summation over different comparison results. Plugging the above equality
+(+,−)
+into (44) completes the proof.
+A.3 Proof of Lemma 4
+By the mean value theorem, we have
+(cid:12) (cid:12)P r1(y 1 ≻y 2 |x) −P r2(y 1 ≻y 2 |x)(cid:12) (cid:12)=(cid:12) (cid:12)σ(r 1(x,y 1) −r 1(x,y 2)) −σ(r 2(x,y 1) −r 2(x,y 2))(cid:12) (cid:12)
+=(cid:12)
+(cid:12)δ x(r 1,r 2,y 1,y 2)
+σ′(ξ)(cid:12)
+(cid:12)
+·
+(cid:12) (cid:12)
+=(cid:12)δ x(r 1,r 2,y 1,y 2)(cid:12) σ(ξ)(1 σ(ξ))
+· −
+for some ξ between r (x,y ) r (x,y ) and r (x,y ) r (x,y ). Since ξ 2C, we have
+1 1 1 2 2 1 2 2
+− − | |≤
+1
+σ(ξ)(1 σ(ξ)) σ(2C)(1 σ(2C)) . (45)
+− ≥ − ≥ 3+exp(2C)
+Putting together,
+(cid:12) (cid:12)δ x(r 1,r 2,y 1,y 2)(cid:12) (cid:12) ≤(3+exp(2C))(cid:12) (cid:12)P r1(y 1 ≻y 2 |x) −P r2(y 1 ≻y 2 |x)(cid:12) (cid:12)
+=(3+exp(2C))TV(P ( x,y ,y ),P ( x,y ,y ))
+r1
+·|
+1 2 r2
+·|
+1 2
+(3+exp(2C))√2D (P ( x,y ,y ) P ( x,y ,y )).
+≤
+H r1
+·|
+1 2
+∥
+r2
+·|
+1 2
+B Analysis for the offline setting
+B.1 Proof of Lemma 1
+By definition, the objective function ℓ(r, )+αJ(r,π) is strongly concave over π, and convex over r. By
+Danskin’s theorem, we have D
+(cid:0) (cid:1) (cid:0) (cid:1)
+max[ℓ(r, )+αJ(r,π)] = ℓ(r, )+αJ(r,π) .
+r (cid:98) (cid:98) r (cid:98) (cid:98) (cid:98)
+∇ π D ∇ D
+Therefore, for any r′, by convexity of the objective function we have
+ℓ(r′, )+αJ(r′,π) ℓ(r, )+αJ(r,π)+(cid:10) r′ r, (cid:0) ℓ(r, )+αJ(r,π)(cid:1)(cid:11)
+(cid:98) (cid:98) (cid:98) (cid:98) (cid:98) r (cid:98) (cid:98) (cid:98)
+D ≥ D − ∇ D
+=ℓ(r, )+αJ(r,π)+(cid:10) r′ r, (cid:0) max[ℓ(r, )+αJ(r,π)](cid:1)(cid:11)
+(cid:98) (cid:98) (cid:98) (cid:98) r (cid:98) (cid:98)
+D − ∇ π D
+ℓ(r, )+αJ(r,π).
+(cid:98) (cid:98) (cid:98)
+≥ D
+Thelastlineisduetothedefinitionofr (c.f.(23)). Theotherrelation,ℓ(r, )+αJ(r,π) ℓ(r, )+αJ(r,π′),
+(cid:98) (cid:98) (cid:98) (cid:98) (cid:98) (cid:98)
+follows directly from the definition of π (c.f. (20)). D ≥ D
+(cid:98)
+19B.2 Proof of Theorem 2
+We decompose the sub-optimality gap of π by
+(cid:98)
+J⋆(r⋆) J(r⋆,π)
+(cid:98)
+−
+=(cid:2) J(r⋆,π⋆) J(r,π⋆)(cid:3) +(cid:2) J(r,π⋆) J(r,π)(cid:3) +(cid:2) J(r,π) J(r⋆,π)(cid:3)
+(cid:98) (cid:98) (cid:98) (cid:98) (cid:98) (cid:98) (cid:98)
+− − −
+(cid:2) J(r⋆,π⋆) J(r,π⋆)(cid:3) +(cid:2) J(r,π) J(r⋆,π)(cid:3) , (46)
+(cid:98) (cid:98) (cid:98) (cid:98)
+≤ − −
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Term (i) Term (ii)
+where the last line is due to J(r,π⋆) J(r,π) according to the definition of π (c.f. (20)). We proceed to
+(cid:98) (cid:98) (cid:98) (cid:98)
+bound the two terms separately. Here w≤e have written r =r for notational simplicity. In addition, we denote
+(cid:98) θ(cid:98)
+the MLE estimate by r =r .
+MLE θMLE
+By the definition of J(r,π) (cf. (4)), it follows that term (i) in (46) can be further decomposed as
+Term (i)= E [r⋆(x,y) r(x,y)]
+(cid:98)
+x∼ρ, −
+y∼π⋆(·|x)
+= E
+(cid:104)(cid:10)
+ϕ(x,y),θ⋆
+θ(cid:98)(cid:11)(cid:105)
+x∼ρ, −
+y∼π⋆(·|x)
+= E (cid:2)(cid:10) ϕ(x,y),θ⋆ θ MLE(cid:11)(cid:3) + E (cid:104)(cid:10) ϕ(x,y),θ
+MLE
+θ(cid:98)(cid:11)(cid:105) , (47)
+x∼ρ, − x∼ρ, −
+y∼π⋆(·|x) y∼π⋆(·|x)
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Term (ia) Term (ib)
+where r (x,y)= ϕ(x,y),θ .
+MLE MLE
+⟨ ⟩
+Step 1: bounding term (ia). To continue, we recall a useful lemma from (Zhu et al., 2023).
+Lemma 6 ((Zhu et al., 2023, Lemma 3.1)) For any λ>0 and δ (0,1), with probability at least 1 δ,
+∈ −
+(cid:32) (cid:114) (cid:33)
+d+log(1/δ)
+θ θ⋆ (3+exp(C)) +√λC2 .
+∥ MLE − ∥ΣD+λI ≤O N
+In addition, we have
+1 1 1
+Σ 2ℓ(r , ) Σ (48)
+3+exp(C) D ⪯ N∇θ θ D ⪯ 4 D
+for all θ such that r C.
+θ ∞
+∥ ∥ ≤
+The first term of (47) can be bounded with Lemma 6 as
+(cid:13) (cid:13)
+Term (ia) θ⋆ θ (cid:13) E [ϕ(x,y)](cid:13)
+≤∥ −
+MLE ∥ΣD+λI ·(cid:13)
+y∼x π∼ ⋆(ρ ·,
+|x)
+(cid:13)
+(ΣD+λI)−1
+(cid:32) (cid:114) (cid:33)
+(cid:16) d+log(1/δ) (cid:17) (cid:13) (cid:13)
+(3+exp(C)) +√λC2 (cid:13) E [ϕ(x,y)](cid:13) . (49)
+≤O N ·(cid:13) y∼x π∼ ⋆(ρ ·,
+|x)
+(cid:13) (ΣD+λI)−1
+Step 2: bounding term (ib). For the second term of (47), recall that
+(cid:8) (cid:9)
+r =argmin ℓ(r, )+αJ(r,π) ,
+(cid:98) (cid:98)
+r∈R D
+or equivalently
+(cid:8) (cid:9)
+θ(cid:98)=argmin ℓ(r θ, )+αJ(r θ,π (cid:98)) ,
+θ∈Θ D
+20and that
+θ =argminℓ(r , ).
+MLE θ
+θ∈Θ D
+With linear constraint (19), by KKT condition we have
+ℓ(r, )+α E [ϕ(x,y)]+λ E [ϕ(x,y)]=0
+θ (cid:98) 1
+∇ D x∼ρ, x∼ρ,
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+for some λ R, and
+1
+∈
+ℓ(r , )+λ E [ϕ(x,y)]=0
+θ MLE 2
+∇ D x∼ρ,
+y∼πcal(·|x)
+for some λ R. By strong monotonicity of ℓ (cf. (48)), we have
+2 θ
+∈ ∇
+N (cid:13) (cid:13)2 (cid:10) (cid:11)
+3+exp(C)(cid:13)θ(cid:98) −θ MLE(cid:13) ΣD ≤ ∇θℓ(r (cid:98), D) −∇θℓ(r MLE, D),θ(cid:98) −θ MLE
+(cid:68) (cid:69)
+= α E [ϕ(x,y)] (λ
+1
+λ 2) E [ϕ(x,y)],θ(cid:98) θ
+MLE
+− x∼ρ, − − x∼ρ, −
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+(cid:68) (cid:69)
+= α E [ϕ(x,y)] E [ϕ(x,y)],θ(cid:98) θ
+MLE
+− x∼ρ, − x∼ρ, −
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+≤α(cid:13) (cid:13) (cid:13) x∼E ρ, [ϕ(x,y)] − x∼E ρ, [ϕ(x,y)](cid:13) (cid:13) (cid:13) (ΣD+λI)−1(cid:13) (cid:13)θ(cid:98) −θ MLE(cid:13) (cid:13) ΣD+λI
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+(cid:13) (cid:13)
+≤ακ D(cid:13)θ(cid:98) −θ MLE(cid:13) ΣD+λI,
+where we denote
+(cid:13) (cid:13)
+κ =(cid:13) E [ϕ(x,y)] E [ϕ(x,y)](cid:13) . (50)
+D (cid:13) (cid:13)
+x∼ρ, − x∼ρ, (ΣD+λI)−1
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+The penultimate step results from θ(cid:98),θ
+MLE
+Θ, which ensures
+∈
+(cid:68) (cid:69) (cid:68) (cid:69)
+E [ϕ(x,y)],θ(cid:98) = E [ϕ(x,y)],θ
+MLE
+=0
+x∼ρ, x∼ρ,
+y∼πcal(·|x) y∼πcal(·|x)
+It follows that
+N (cid:13) (cid:13)2 N (cid:13) (cid:13)2 N (cid:13) (cid:13)2
+3+exp(C)(cid:13)θ(cid:98) −θ MLE(cid:13)
+ΣD+λI ≤
+3+exp(C)(cid:13)θ(cid:98) −θ MLE(cid:13)
+ΣD
++ 3+exp(C)(cid:13)θ(cid:98) −θ MLE(cid:13)
+λI
+(cid:13) (cid:13)
+NλC2
+≤ακ D(cid:13)θ(cid:98) −θ MLE(cid:13)
+ΣD+λI
++ 3+exp(C).
+The above inequality allows us to bound
+(cid:13) (cid:13)θ(cid:98) −θ MLE(cid:13) (cid:13)
+ΣD+λI ≤
+α(3+ Nexp(C)) κ D+2√λC2. (51)
+Therefore, the second term of (47) can be bounded as
+Term (ib) ≤(cid:13) (cid:13)θ(cid:98) −θ MLE(cid:13) (cid:13) ΣD+λI(cid:13) (cid:13) (cid:13)
+y∼x
+π∼E
+⋆(ρ ·,
+|x)[ϕ(x,y)](cid:13) (cid:13) (cid:13)
+(ΣD+λI)−1
+(cid:18) α(3+exp(C)) (cid:19)(cid:13) (cid:13)
+κ +2√λC2 (cid:13) E [ϕ(x,y)](cid:13) . (52)
+≤ N D (cid:13) y∼x π∼ ⋆(ρ ·,
+|x)
+(cid:13) (ΣD+λI)−1
+Putting (49) and (52) together, we have
+(cid:32)(cid:20) 3+exp(C)(cid:16)(cid:112) α (cid:17) (cid:21) (cid:13) (cid:13) (cid:33)
+Term (i) d+log(1/δ)+ κ +√λC2 (cid:13) E [ϕ(x,y)](cid:13) . (53)
+≤O √N √N D ·(cid:13) y∼x π∼ ⋆(ρ ·,
+|x)
+(cid:13) (ΣD+λI)−1
+21Step 3: bounding term (ii). We can decompose and bound term (ii) by
+1 (cid:16) 1 (cid:17) 1
+J(r,π) J(r⋆,π)=J(r,π)+ ℓ(r, ) J(r⋆,π)+ ℓ(r⋆, ) + (ℓ(r, ) ℓ(r⋆, ))
+(cid:98) (cid:98) − (cid:98) (cid:98) (cid:98) α (cid:98) D − (cid:98) α D α (cid:98) D − D
+(i) 1
+(ℓ(r, ) ℓ(r⋆, ))
+≤ α (cid:98) D − D
+1
+(ℓ(r, ) ℓ(r , )+ℓ(r , ) ℓ(r⋆, )),
+≤ α (cid:98) D − MLE D MLE D − D
+where (i) follows from the fact that (r,π) is a saddle point. Due to convexity of ℓ, we have
+(cid:98) (cid:98)
+(cid:10) (cid:11)
+ℓ(r (cid:98), ) ℓ(r MLE, ) θℓ(r (cid:98), ),θ(cid:98) θ
+MLE
+D − D ≤ ∇ D −
+(cid:10) (cid:11)
+= α E [ϕ(x,y)] λ
+1
+E [ϕ(x,y)],θ(cid:98) θ
+MLE
+− x∼ρ, − x∼ρ, −
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+(cid:10) (cid:11)
+= α E [ϕ(x,y)] E [ϕ(x,y)],θ(cid:98) θ
+MLE
+− x∼ρ, − x∼ρ, −
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+≤ακ
+D
+∥θ(cid:98) −θ
+MLE ∥ΣD+λI
+α2(3+exp(C))
+κ2 +2√λC2ακ ,
+≤ N D D
+where the last step is due to (51). On the other hand, with probability 1 δ we have (Zhan et al., 2023,
+Lemma 1): −
+ℓ(r MLE, ) ℓ(r⋆, ) (cid:101)(1).
+D − D ≤O
+Putting pieces together,
+α(3+exp(C)) 1
+Term (ii) κ2 +2√λC2κ + . (54)
+≤ N D D α
+Step 4: putting things together. Combining (46) (53), (54), with probability 1 δ we have
+−
+J⋆(r⋆) J(r⋆,π)
+(cid:98)
+−
+(cid:32) 1 (cid:20) (cid:16)(cid:112) (cid:17) (cid:21) (cid:13) (cid:13)
+(3+exp(C)) d+log(1/δ)+κ +C (cid:13) E [ϕ(x,y)](cid:13)
+≤O √N D ·(cid:13) y∼x π∼ ⋆(ρ ·,
+|x)
+(cid:13) (ΣD+λI)−1
+(cid:33)
+1 (cid:16) (cid:17)
++ (3+exp(C))κ2 +2Cκ +1 .
+√N D D
+Here we have set α=√N and λ=1/N. We conclude by bounding κ as
+D
+(cid:13) (cid:13)2
+κ2 =(cid:13) E [ϕ(x,y)] E [ϕ(x,y)](cid:13)
+D (cid:13) x∼ρ, − x∼ρ, (cid:13) (ΣD+λI)−1
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+(cid:13) (cid:13)2 (cid:13) (cid:13)
+(cid:13) E [ϕ(x,y)] E [ϕ(x,y)](cid:13) (cid:13)(Σ +λI)−1(cid:13)
+(cid:13) (cid:13) (cid:13) D (cid:13)
+≤ x∼ρ, − x∼ρ, 2· 2
+y∼π(cid:98)(·|x) y∼πcal(·|x)
+4(λ (Σ )+λ)−1.
+min D
+≤
+C Experimental details
+C.1 Offline Setting
+For the offline setting experiments, we adopt instruction tuned models, Llama2-13b-chat and Flan-T5-xl
+as the base models. To prompt these models, we prepend the question with
+22What is the choice to the following Question? Only provide the choice by providing a single letter.
+and further append the question with
+The answer is:.
+The question is structured in a way that the multiple choices are shown as alphabets (letters) within
+parenthesis.
+We set π to the empirical distribution of the ground truth answer which is known to us. Based on
+cal
+preliminary experiments, we set β as 0.1 in DPO and τ as 1.0 in IPO. For VPO, we experiment with
+moving α from 0.01 to 10, choosing 1 for the reported results for Flan-T5-xl results. For experiments on
+Llama2-13b-chat, we also set α to 1.
+For both models, we train the base models with different algorithms DPO, VPO and IPO for 3000 steps
+and report the accuracy of the performance on the ARC-challenge test data set after every 500 steps. The
+training for Llama2-13b-chat model on 128 TPU-v4 takes around 2hrs and for Flan-T5-xl on 64 TPU-v3
+takes 1 hour.
+C.2 Online Setting
+The prompt used for generating AI feedback (and rating) for TL;DR summarization is identical to (Guo
+et al., 2024). We set π to the empirical distribution of the negative answer pairs (x,y ) collected by the
+cal −
+policy. We set β as 0.1 for the DPO term similar to (Guo et al., 2024). Additionally for VPO, we decrease
+the coefficient exponentially following √ α . We try different values of α and report the results for
+1+trainingsteps
+0.1 and 0.01.
+The training of the policy, PaLM2-XXS on 64 TPU-v3 for 5000 steps takes around 12 hours for both
+online DPO and VPO. We report the win rate percentage against the base SFT model for every 1000 steps
+using PaLM2-XS judge. We also further conduct side by side comparison of Online DPO and VPO at 5000
+step.
+23
