@@ -1,0 +1,1084 @@
+Improving the Training of Rectified Flows
+SangyunLee ZinanLin GiuliaFanti
+CarnegieMellonUniversity MicrosoftResearch CarnegieMellonUniversity
+sangyunl@andrew.cmu.edu zinanlin@microsoft.com gfanti@andrew.cmu.edu
+Abstract
+Diffusionmodelshaveshowngreatpromiseforimageandvideogeneration,but
+samplingfromstate-of-the-artmodelsrequiresexpensivenumericalintegration
+ofagenerativeODE.Oneapproachfortacklingthisproblemisrectifiedflows,
+whichiterativelylearnsmoothODEpathsthatarelesssusceptibletotruncation
+error. However,rectifiedflowsstillrequirearelativelylargenumberoffunction
+evaluations(NFEs). Inthiswork,weproposeimprovedtechniquesfortraining
+rectified flows, allowing them to compete with knowledge distillation methods
+eveninthelowNFEsetting. Ourmaininsightisthatunderrealisticsettings,a
+single iteration of the Reflow algorithm for training rectified flows is sufficient
+tolearnnearlystraighttrajectories;hence,thecurrentpracticeofusingmultiple
+Reflowiterationsisunnecessary.Wethusproposetechniquestoimproveone-round
+trainingofrectifiedflows,includingaU-shapedtimestepdistributionandLPIPS-
+Huber premetric. With these techniques, we improve the FID of the previous
+2-rectifiedflowbyupto72%inthe1NFEsettingonCIFAR-10. OnImageNet
+64 64, our improved rectified flow outperforms the state-of-the-art distillation
+×
+methodssuchasconsistencydistillationandprogressivedistillationinbothone-step
+andtwo-stepsettingsandrivalstheperformanceofimprovedconsistencytraining
+(iCT)inFID.Codeisavailableathttps://github.com/sangyun884/rfpp.
+1 Introduction
+Diffusionmodels[42,15,45,46]haveshowngreatpromiseinimage[37]andvideo[16]generation.
+Theygeneratedatabysimulatingastochasticdenoisingprocesswherenoiseisgraduallytransformed
+intodata. Tosampleefficientlyfromdiffusionmodels,thedenoisingprocessistypicallyconverted
+into a counterpart of Ordinary Differential Equations (ODEs) [46] called probability flow ODEs
+(PF-ODEs).
+Despite the success of diffusion models using PF-ODEs, drawing high-quality samples requires
+numerical integration of the PF-ODE with small step sizes, which is computationally expensive.
+Today,twoprominentclassesofapproachesfortacklingthisissueare: (1)knowledgedistillation
+(e.g.,consistencydistillation[47],progressivedistillation[39])and(2)simulation-freeflowmodels
+(e.g.,rectifiedflows[28],flowmatching[26]).
+Inknowledgedistllation-basedmethods[31,39,47,57]astudentmodelistrainedtodirectlypredict
+thesolutionofthePF-ODE.Thesemodelsarecurrentlystate-of-the-artinthelownumberoffunction
+evaluations(NFEs)regime(e.g. 1-4).
+Another promising direction is simulation-free flow models such as rectified flows [28, 27], a
+generativemodelthatlearnsatransportmapbetweentwodistributionsdefinedvianeuralODEs.
+DiffusionmodelswithPF-ODEsareaspecialcase.RectifiedflowscanlearnsmoothODEtrajectories
+thatarelesssusceptibletotruncationerror,whichallowsforhigh-qualitysampleswithfewerNFEs
+thandiffusionmodels. Theyhavebeenshowntooutperformdiffusionmodelsinthemoderateto
+Preprint.Underreview.
+4202
+yaM
+03
+]VC.sc[
+1v02302.5042:viXrahighNFEregime[26,28,11],buttheystillrequirearelativelylargenumberofNFEscomparedto
+distillationmethods.
+Comparedtoknowledgedistillationmethods[31,39,47,57]rectifiedflowshaveseveraladvantages.
+First,theycanbegeneralizedtomaptwoarbitrarydistributionstooneanother,whiledistillation
+methodsarelimitedtoaGaussiannoisedistribution. Also,asaneuralODE,rectifiedflowsnaturally
+supportinversionfromdatatonoise,whichhasmanyapplicationsincludingimageediting[13,23,
+51,8,34,48,17]andwatermarking[53]. Further, thelikelihoodofrectifiedflowmodelscanbe
+evaluatedusingtheinstantaneouschangeofvariableformula[6],whereasthisisnotpossiblewith
+knowledgedistillation-basedmethods. Inaddition,rectifiedflowscanflexiblyadjustthebalance
+betweenthesamplequalityandcomputationalcostbyalteringNFEs,whereasdistillationmethods
+eitherdonotsupportmulti-stepsamplingordonotnecessarilyperformbetterwithmoreNFEs(e.g.
+>4)[22].
+Giventhequalitativeadvantagesofrectifiedflows,anaturalquestionis,canrectifiedflowscompete
+withdistillation-basedmethodssuchasconsistencymodels[47]inthelowNFEsetting? Today,
+thestate-of-the-arttechniquesfortrainingrectifiedflowsusetheReflowalgorithmtoimprovelow
+NFE performance [28, 29]. Reflow is a recursive training algorithm where the rectified flow is
+trainedondata-noisepairsgeneratedbythegenerativeODEofthepreviousstagemodel. Incurrent
+implementationsofReflow,toobtainareasonableone-stepgenerativeperformance,Reflowshouldbe
+appliedatleasttwice,followedbyanoptionaldistillationstagetofurtherboostperformance[28,29].
+Eachtrainingstagerequiresgeneratingalargenumberofdata-noisepairsandtrainingthemodel
+untilconvergence,whichiscomputationallyexpensiveandleadstoerroraccumulationacrossrounds.
+Evenwiththeseefforts,thegenerativeperformanceofrectifiedflowstilllagsbehindthedistillation
+methodssuchasconsistencymodels[47].
+Weshowthatrectifiedflowscanindeedbecompetitivewiththedistillationmethodsinthelow
+NFEsettingbyapplyingReflowwithourproposedtrainingtechniques. Ourtechniquesarebased
+ontheobservationthatunderrealisticsettings,thelinearinterpolationtrajectoriesofthepre-trained
+rectifiedflowrarelyintersectwitheachother. Thisprovidesseveralinsights: 1)applyingReflowonce
+issufficienttoobtainstraight-linegenerativeODEintheoptima,2)thetraininglossof2-rectified
+flow has zero lower bound, and 3) other loss functions than the squared ℓ distance can be used
+2
+duringtraining. Baseduponthisfinding,weproposeseveraltrainingtechniquestoimproveReflow,
+including: (1)aU-shapedtimestepdistribution,(2)anLPIPS-huberpremetric,whichwefindtobe
+criticalforthefew-stepgenerativeperformance. Afterbeinginitializedwithpre-traineddiffusion
+modelssuchasEDM[21],ourmethodonlyrequiresonetrainingstagewithoutadditionalReflowor
+distillationstages,unlikepreviousworks[28,29].
+Ourevaluationshowsthatonseveraldatasets(CIFAR-10[24],ImageNet64 64[9]),ourimproved
+×
+rectifiedflowoutperformsthestate-of-the-artdistillationmethodssuchasconsistencydistillation
+(CD)[47]andprogressivedistillation(PD)[39]inbothone-stepandtwo-stepsettings,anditrivals
+theperformanceoftheimprovedconsistencytraining(iCT)[47]intermsoftheFrechetInception
+Distance[14](FID).OurtrainingtechniquesreducetheFIDoftheprevious2-rectifiedflow[28]
+byabout72%(12.21 3.38)onCIFAR-10. Ablationsonthreedatasetsshowthattheproposed
+→
+techniques give a consistent and sizeable gain. We also showcase the qualitative advantages of
+rectifiedflowsuchasfew-stepinversion, anditsapplicationtointerpolationandimage-to-image
+translation.
+2 Background
+2.1 RectifiedFlow
+Rectifiedflow(seealsoflowmatching[26]andstochasticinterpolant[1])isagenerativemodelthat
+smoothlytransitionsbetweentwodistributionsp andp bysolvingODEs[28]. Forx p and
+x z x
+∼
+z p ,wedefinetheinterpolationbetweenxandzasx =(1 t)x+tzfort [0,1]. Liuetal.
+z t
+∼ − ∈
+[28]showedthatforz p ,thefollowingODEyieldsthesamemarginaldistributionasx forany
+0 x t
+∼
+t:
+dz 1
+t =v t(z t):= (z
+t
+E[xx
+t
+=z t]). (1)
+dt t − |
+Sincex = z,Eq.(1)transportsp top . Wecanalsotransportp top bydrawingz fromp
+1 x z z x 1 z
+andsolvingtheODEbackwardsfromt=1tot=0. Duringtraining,weestimatetheconditional
+2<latexit sha1_base64="4dtqlamXd6JJv7oyTT2iRs3QELM=">AAACC3icbZDLSsNAFIZP6q3WW9Slm6FFcFUS8bYsiuCygr1AGsJkOmmHTi7MTMRSu3fjq7hxoYhbX8Cdb+OkDaKtPwx8/Occ5pzfTziTyrK+jMLC4tLySnG1tLa+sbllbu80ZZwKQhsk5rFo+1hSziLaUExx2k4ExaHPacsfXGT11i0VksXRjRom1A1xL2IBI1hpyzPLnRCrvu+jS2dKAbpD9+iHPeV6ZsWqWhOhebBzqECuumd+droxSUMaKcKxlI5tJcodYaEY4XRc6qSSJpgMcI86GiMcUumOJreM0b52uiiIhX6RQhP398QIh1IOQ193ZjvK2Vpm/ldzUhWcuSMWJamiEZl+FKQcqRhlwaAuE5QoPtSAiWB6V0T6WGCidHwlHYI9e/I8NA+r9kn1+PqoUjvP4yjCHpThAGw4hRpcQR0aQOABnuAFXo1H49l4M96nrQUjn9mFPzI+vgHS1ZpL</latexit>E[x |xt] x<latexit sha1_base64="knBlG3mOsKgv7m48+64offhQGrQ=">AAAB8nicbVDLSgMxFM3UV62vqks3wSK4KjPia1l047KCfcB0KJk004ZmkiG5I5ahn+HGhSJu/Rp3/o2ZdhbaeiBwOOdecu4JE8ENuO63U1pZXVvfKG9WtrZ3dveq+wdto1JNWYsqoXQ3JIYJLlkLOAjWTTQjcShYJxzf5n7nkWnDlXyAScKCmAwljzglYCW/FxMYhRF+6kO/WnPr7gx4mXgFqaECzX71qzdQNI2ZBCqIMb7nJhBkRAOngk0rvdSwhNAxGTLfUkliZoJsFnmKT6wywJHS9knAM/X3RkZiYyZxaCfziGbRy8X/PD+F6DrIuExSYJLOP4pSgUHh/H484JpREBNLCNXcZsV0RDShYFuq2BK8xZOXSfus7l3WL+7Pa42boo4yOkLH6BR56Ao10B1qohaiSKFn9IreHHBenHfnYz5acoqdQ/QHzucPIPmRKw==</latexit> t <latexit sha1_base64="4dtqlamXd6JJv7oyTT2iRs3QELM=">AAACC3icbZDLSsNAFIZP6q3WW9Slm6FFcFUS8bYsiuCygr1AGsJkOmmHTi7MTMRSu3fjq7hxoYhbX8Cdb+OkDaKtPwx8/Occ5pzfTziTyrK+jMLC4tLySnG1tLa+sbllbu80ZZwKQhsk5rFo+1hSziLaUExx2k4ExaHPacsfXGT11i0VksXRjRom1A1xL2IBI1hpyzPLnRCrvu+jS2dKAbpD9+iHPeV6ZsWqWhOhebBzqECuumd+droxSUMaKcKxlI5tJcodYaEY4XRc6qSSJpgMcI86GiMcUumOJreM0b52uiiIhX6RQhP398QIh1IOQ193ZjvK2Vpm/ldzUhWcuSMWJamiEZl+FKQcqRhlwaAuE5QoPtSAiWB6V0T6WGCidHwlHYI9e/I8NA+r9kn1+PqoUjvP4yjCHpThAGw4hRpcQR0aQOABnuAFXo1H49l4M96nrQUjn9mFPzI+vgHS1ZpL</latexit>E[x |xt] x<latexit sha1_base64="knBlG3mOsKgv7m48+64offhQGrQ=">AAAB8nicbVDLSgMxFM3UV62vqks3wSK4KjPia1l047KCfcB0KJk004ZmkiG5I5ahn+HGhSJu/Rp3/o2ZdhbaeiBwOOdecu4JE8ENuO63U1pZXVvfKG9WtrZ3dveq+wdto1JNWYsqoXQ3JIYJLlkLOAjWTTQjcShYJxzf5n7nkWnDlXyAScKCmAwljzglYCW/FxMYhRF+6kO/WnPr7gx4mXgFqaECzX71qzdQNI2ZBCqIMb7nJhBkRAOngk0rvdSwhNAxGTLfUkliZoJsFnmKT6wywJHS9knAM/X3RkZiYyZxaCfziGbRy8X/PD+F6DrIuExSYJLOP4pSgUHh/H484JpREBNLCNXcZsV0RDShYFuq2BK8xZOXSfus7l3WL+7Pa42boo4yOkLH6BR56Ao10B1qohaiSKFn9IreHHBenHfnYz5acoqdQ/QHzucPIPmRKw==</latexit> t
+<latexit sha1_base64="Wv+gCXWngcAZVnakXcJZgjNLOMw=">AAAB+HicbVC7TsMwFL3hWcqjAUYWiwqJqUoQr7GChbFI9CG1IXJcp7XqOJHtIErUL2FhACFWPoWNv8FpM0DLkSwdnXOv7vEJEs6Udpxva2l5ZXVtvbRR3tza3qnYu3stFaeS0CaJeSw7AVaUM0GbmmlOO4mkOAo4bQej69xvP1CpWCzu9DihXoQHgoWMYG0k364k946f9SKsh0GIHie+XXVqzhRokbgFqUKBhm9/9foxSSMqNOFYqa7rJNrLsNSMcDop91JFE0xGeEC7hgocUeVl0+ATdGSUPgpjaZ7QaKr+3shwpNQ4CsxknlDNe7n4n9dNdXjpZUwkqaaCzA6FKUc6RnkLqM8kJZqPDcFEMpMVkSGWmGjTVdmU4M5/eZG0Tmruee3s9rRavyrqKMEBHMIxuHABdbiBBjSBQArP8Apv1pP1Yr1bH7PRJavY2Yc/sD5/AIgTkwY=</latexit>p0 x <latexit sha1_base64="oCC2OZz80yY68y1aRXsgPp7bkFM=">AAAB9HicbVDLSgMxFL1TX7W+qi7dBIvgqsyIr2XRjcsK9gHtUDJppg3NZGKSKdSh3+HGhSJu/Rh3/o2ZdhbaeiBwOOde7skJJGfauO63U1hZXVvfKG6WtrZ3dvfK+wdNHSeK0AaJeazaAdaUM0EbhhlO21JRHAWctoLRbea3xlRpFosHM5HUj/BAsJARbKzky17ajbAZBiF6mvbKFbfqzoCWiZeTCuSo98pf3X5MkogKQzjWuuO50vgpVoYRTqelbqKpxGSEB7RjqcAR1X46Cz1FJ1bpozBW9gmDZurvjRRHWk+iwE5mCfWil4n/eZ3EhNd+yoRMDBVkfihMODIxyhpAfaYoMXxiCSaK2ayIDLHCxNieSrYEb/HLy6R5VvUuqxf355XaTV5HEY7gGE7BgyuowR3UoQEEHuEZXuHNGTsvzrvzMR8tOPnOIfyB8/kD6jKSNQ==</latexit>p z <latexit sha1_base64="yMWzgac/sEpxIv9ZN/QCzxOlibM=">AAAB+HicbVC7TsMwFL3hWcqjAUYWiwqJqUoQr7GChbFI9CG1IXJcp7XqOJHtIErUL2FhACFWPoWNv8FpM0DLkSwdnXOv7vEJEs6Udpxva2l5ZXVtvbRR3tza3qnYu3stFaeS0CaJeSw7AVaUM0GbmmlOO4mkOAo4bQej69xvP1CpWCzu9DihXoQHgoWMYG0k364k966f9SKsh0GIHie+XXVqzhRokbgFqUKBhm9/9foxSSMqNOFYqa7rJNrLsNSMcDop91JFE0xGeEC7hgocUeVl0+ATdGSUPgpjaZ7QaKr+3shwpNQ4CsxknlDNe7n4n9dNdXjpZUwkqaaCzA6FKUc6RnkLqM8kJZqPDcFEMpMVkSGWmGjTVdmU4M5/eZG0Tmruee3s9rRavyrqKMEBHMIxuHABdbiBBjSBQArP8Apv1pP1Yr1bH7PRJavY2Yc/sD5/AImjkwc=</latexit>p1 x <latexit sha1_base64="oCC2OZz80yY68y1aRXsgPp7bkFM=">AAAB9HicbVDLSgMxFL1TX7W+qi7dBIvgqsyIr2XRjcsK9gHtUDJppg3NZGKSKdSh3+HGhSJu/Rh3/o2ZdhbaeiBwOOde7skJJGfauO63U1hZXVvfKG6WtrZ3dvfK+wdNHSeK0AaJeazaAdaUM0EbhhlO21JRHAWctoLRbea3xlRpFosHM5HUj/BAsJARbKzky17ajbAZBiF6mvbKFbfqzoCWiZeTCuSo98pf3X5MkogKQzjWuuO50vgpVoYRTqelbqKpxGSEB7RjqcAR1X46Cz1FJ1bpozBW9gmDZurvjRRHWk+iwE5mCfWil4n/eZ3EhNd+yoRMDBVkfihMODIxyhpAfaYoMXxiCSaK2ayIDLHCxNieSrYEb/HLy6R5VvUuqxf355XaTV5HEY7gGE7BgyuowR3UoQEEHuEZXuHNGTsvzrvzMR8tOPnOIfyB8/kD6jKSNQ==</latexit>p z <latexit sha1_base64="yMWzgac/sEpxIv9ZN/QCzxOlibM=">AAAB+HicbVC7TsMwFL3hWcqjAUYWiwqJqUoQr7GChbFI9CG1IXJcp7XqOJHtIErUL2FhACFWPoWNv8FpM0DLkSwdnXOv7vEJEs6Udpxva2l5ZXVtvbRR3tza3qnYu3stFaeS0CaJeSw7AVaUM0GbmmlOO4mkOAo4bQej69xvP1CpWCzu9DihXoQHgoWMYG0k364k966f9SKsh0GIHie+XXVqzhRokbgFqUKBhm9/9foxSSMqNOFYqa7rJNrLsNSMcDop91JFE0xGeEC7hgocUeVl0+ATdGSUPgpjaZ7QaKr+3shwpNQ4CsxknlDNe7n4n9dNdXjpZUwkqaaCzA6FKUc6RnkLqM8kJZqPDcFEMpMVkSGWmGjTVdmU4M5/eZG0Tmruee3s9rRavyrqKMEBHMIxuHABdbiBBjSBQArP8Apv1pP1Yr1bH7PRJavY2Yc/sD5/AImjkwc=</latexit>p1 x <latexit sha1_base64="oCC2OZz80yY68y1aRXsgPp7bkFM=">AAAB9HicbVDLSgMxFL1TX7W+qi7dBIvgqsyIr2XRjcsK9gHtUDJppg3NZGKSKdSh3+HGhSJu/Rh3/o2ZdhbaeiBwOOde7skJJGfauO63U1hZXVvfKG6WtrZ3dvfK+wdNHSeK0AaJeazaAdaUM0EbhhlO21JRHAWctoLRbea3xlRpFosHM5HUj/BAsJARbKzky17ajbAZBiF6mvbKFbfqzoCWiZeTCuSo98pf3X5MkogKQzjWuuO50vgpVoYRTqelbqKpxGSEB7RjqcAR1X46Cz1FJ1bpozBW9gmDZurvjRRHWk+iwE5mCfWil4n/eZ3EhNd+yoRMDBVkfihMODIxyhpAfaYoMXxiCSaK2ayIDLHCxNieSrYEb/HLy6R5VvUuqxf355XaTV5HEY7gGE7BgyuowR3UoQEEHuEZXuHNGTsvzrvzMR8tOPnOIfyB8/kD6jKSNQ==</latexit>p z <latexit sha1_base64="hDzAQ++0NEruBFQYpdjpUiAEM+I=">AAAB+HicbVC7TsMwFL0pr1IeDTCyWFRITFVS8RorWBiLRB9SGyLHdVqrjhPZDqJE/RIWBhBi5VPY+BvcNgO0HMnS0Tn36h6fIOFMacf5tgorq2vrG8XN0tb2zm7Z3ttvqTiVhDZJzGPZCbCinAna1Exz2kkkxVHAaTsYXU/99gOVisXiTo8T6kV4IFjICNZG8u1y4me9COthEKLHyX3NtytO1ZkBLRM3JxXI0fDtr14/JmlEhSYcK9V1nUR7GZaaEU4npV6qaILJCA9o11CBI6q8bBZ8go6N0kdhLM0TGs3U3xsZjpQaR4GZnGZUi95U/M/rpjq89DImklRTQeaHwpQjHaNpC6jPJCWajw3BRDKTFZEhlpho01XJlOAufnmZtGpV97x6dntaqV/ldRThEI7gBFy4gDrcQAOaQCCFZ3iFN+vJerHerY/5aMHKdw7gD6zPH43tkwg=</latexit>p2 x <latexit sha1_base64="oCC2OZz80yY68y1aRXsgPp7bkFM=">AAAB9HicbVDLSgMxFL1TX7W+qi7dBIvgqsyIr2XRjcsK9gHtUDJppg3NZGKSKdSh3+HGhSJu/Rh3/o2ZdhbaeiBwOOde7skJJGfauO63U1hZXVvfKG6WtrZ3dvfK+wdNHSeK0AaJeazaAdaUM0EbhhlO21JRHAWctoLRbea3xlRpFosHM5HUj/BAsJARbKzky17ajbAZBiF6mvbKFbfqzoCWiZeTCuSo98pf3X5MkogKQzjWuuO50vgpVoYRTqelbqKpxGSEB7RjqcAR1X46Cz1FJ1bpozBW9gmDZurvjRRHWk+iwE5mCfWil4n/eZ3EhNd+yoRMDBVkfihMODIxyhpAfaYoMXxiCSaK2ayIDLHCxNieSrYEb/HLy6R5VvUuqxf355XaTV5HEY7gGE7BgyuowR3UoQEEHuEZXuHNGTsvzrvzMR8tOPnOIfyB8/kD6jKSNQ==</latexit>p z
+(a)Linear interpolation (b) Generative process (c)Linear interpolation (d) Generative process
+induced by 𝑝𝒙# 𝒛 of 1-rectified flow induced by 𝑝𝒙$ 𝒛 of 2-rectified flow
+Figure1: Rectifiedflowprocess(figuremodifiedfrom[28]). Rectifiedflowrewirestrajectoriesso
+there are no intersecting trajectories (a) (b). Then, we take noise samples from p and their
+z
+generatedsamplesfromp1,andlinearlyi→
+nterpolatethem(c). InReflow,rectifiedflowisapplied
+x
+again(c) (d)tostraightenflows. Thisprocedureisrepeatedrecursively.
+→
+expectationE[xx
+t
+=z t]withavector-valuedneuralnetworkx
+θ
+trainedonthesquaredℓ 2loss:
+|
+m θinEx,z ∼pxzEt ∼pt[ω(t) ||x −x θ(x t,t) ||2 2], (2)
+where p isthe jointdistribution ofx and z, x isparameterized byθ, and ω(t) isa weighting
+xz θ
+function. p ischosentobetheuniformdistributionon[0,1]inLiuetal.[28,29]. Intheoptimum
+t
+ofEq.(2),x becomestheconditionalexpectationasitisaminimummeansquarederror(MMSE)
+θ
+estimator,whichisthenpluggedintotheODE(1)togeneratesamples. Insteadofpredictingthe
+conditionalexpectationdirectly,Liuetal.[28]choosetoparameterizethevelocityv withaneural
+t
+networkv andtrainiton
+θ
+m θinEx,z ∼pxzEt ∼pt[ ||(z −x) −v θ(x t,t) ||2 2], (3)
+whichisequivalenttoEq.(2)withω(t)= 1. SeeAppendix.B.
+t2
+Inthispaper,weconsidertheGaussianmarginalcase,i.e.,p = (0,I). Inthiscase,ifwedefinex
+z
+N
+andzasindependentrandomvariables(i.e.,p (x,z)=p (x)p (z))anduseaspecificnonlinear
+xz x z
+interpolation instead of the linear interpolation for x , Eq. (2) becomes the weighted denoising
+t
+objectiveofthediffusionmodel[50],andEq.(1)becomestheprobabilityflowODE(PF-ODE)[46].
+2.2 Reflow
+The independent coupling p (x,z) = p (x)p (z) is known to lead to curved ODE trajectories,
+xz x z
+which require a large number of function evaluations (NFE) to generate high-quality samples.
+Reflow [28] is a recursive training algorithm to find a better coupling that yields straighter ODE
+trajectories. Startingfromtheindependentcouplingp1 (x,z)=p (x)p (z),theReflowalgorithm
+xz x z
+generatespk+1(x,z)frompk (x,z)byfirstgeneratingsynthetic(x,z)pairsfrompk ,thentraining
+xz xz xz
+rectifiedflowonthegeneratedsyntheticpairs(Figure1(b) (d)). Wecallthevectorfieldresulting
+−
+from the k-th iteration of this procedure k-rectified flow. Pseudocode for Reflow is provided in
+AppendixA.
+Convergence: Liu et al. [28] show that Reflow trajectories are straight in the limit as K .
+→ ∞
+Hence,toachieveperfectlystraightODEpathsthatallowforaccurateone-stepgeneration,Reflow
+may need to be applied many times until equilibrium, with each training stage requiring many
+data-noisepairs,trainingthemodeluntilconvergence,andadegradationingeneratedsamplequality.
+PriorworkhasempiricallyfoundthatReflowshouldbeappliedatleasttwice(i.e. 3-rectified
+flow)forreasonablygoodone-stepgenerativeperformance[28,29]. Thishasbeenamajordownside
+forrectifiedflowscomparedtoknowledgedistillationmethods,whichtypicallyrequireonlyone
+distillationstage[31,47,57].
+3 ApplyingReflowOnceisSufficient
+Inthissection,wearguethatunderpracticalsettings,thetrajectorycurvatureoftheoptimal2-rectified
+flowisactuallyclosetozero. Hence,priorempiricalresultsrequiringmoreroundsofReflowmay
+betheresultofsuboptimaltrainingtechniques,andweshouldfocusonimprovingthosetraining
+techniquesratherthanstackingadditionalReflowstages.
+3x<latexit sha1_base64="d7jAMeI8kNki1G/TfsTOzuAoJvA=">AAAB8XicbVDLSgMxFL1TX7W+qi7dBIvoqsyIr2XRjcsK9oHtUDJppg1NMkOSEcvQv3DjQhG3/o07/8ZMOwttPRA4nHMvOfcEMWfauO63U1haXlldK66XNja3tnfKu3tNHSWK0AaJeKTaAdaUM0kbhhlO27GiWASctoLRTea3HqnSLJL3ZhxTX+CBZCEj2FjpoSuwGQYhejrulStu1Z0CLRIvJxXIUe+Vv7r9iCSCSkM41rrjubHxU6wMI5xOSt1E0xiTER7QjqUSC6r9dJp4go6s0kdhpOyTBk3V3xspFlqPRWAns4R63svE/7xOYsIrP2UyTgyVZPZRmHBkIpSdj/pMUWL42BJMFLNZERlihYmxJZVsCd78yYukeVr1Lqrnd2eV2nVeRxEO4BBOwINLqMEt1KEBBCQ8wyu8Odp5cd6dj9lowcl39uEPnM8f83CQdQ==</latexit> 0
+<latexit sha1_base64="x21KPin4w/xSSzgt/JfpdOi5OJM=">AAACHHicbVDJSgNBFOxxjXGLevTSGGQESZhxvwhBLx4jmAWSEHo6PUmTnoXuN5JkmA/x4q948aCIFw+Cf2NnETSxoKGoqke/V04ouALL+jLm5hcWl5ZTK+nVtfWNzczWdlkFkaSsRAMRyKpDFBPcZyXgIFg1lIx4jmAVp3s99Cv3TCoe+HfQD1nDI22fu5wS0FIzc1z3CHQcNx6YJr7EAzPBh7juSkJjSGI7Bwn+SfRMnMM900yamayVt0bAs8SekCyaoNjMfNRbAY085gMVRKmabYXQiIkETgVL0vVIsZDQLmmzmqY+8ZhqxKPjEryvlRZ2A6mfD3ik/p6IiadU33N0criomvaG4n9eLQL3ohFzP4yA+XT8kRsJDAEeNoVbXDIKoq8JoZLrXTHtEN0M6D7TugR7+uRZUj7K22f509uTbOFqUkcK7aI9dIBsdI4K6AYVUQlR9ICe0At6NR6NZ+PNeB9H54zJzA76A+PzG19wn7A=</latexit> t
+z00=z0+
+1
+tx0  x00
+  x<latexit sha1_base64="MIOweftlI8tKh8WRm3H1CsBDIRQ=">AAACAXicdVDLSgMxFM34rPU16kZwEyxSNw4z06e7ohuXFewD2qFk0kwbmnmQZMQy1I2/4saFIm79C3f+jZm24gM9EDg5517uvceNGBXSNN+1hcWl5ZXVzFp2fWNza1vf2W2KMOaYNHDIQt52kSCMBqQhqWSkHXGCfJeRljs6T/3WNeGChsGVHEfE8dEgoB7FSCqpp+93fSSHrgdv8vAEfn3yPT1nGqfVsl2yoWmYZsUulFNiV4p2AVpKSZEDc9R7+lu3H+LYJ4HEDAnRscxIOgnikmJGJtluLEiE8AgNSEfRAPlEOMn0ggk8UkofeiFXL5Bwqn7vSJAvxNh3VWW6ovjtpeJfXieWXtVJaBDFkgR4NsiLGZQhTOOAfcoJlmysCMKcql0hHiKOsFShZVUIn5fC/0nTNqyyUbos5mpn8zgy4AAcgmNggQqogQtQBw2AwS24B4/gSbvTHrRn7WVWuqDNe/bAD2ivH2PFlZc=</latexit> 0 x00
+M<latexit sha1_base64="NvVOCCXexnG6YU2mzEdCeA9ipn0=">AAAB/3icbVDLSsNAFL2pr1pfUcGNm8EiuCqJ+FoW3bgRKtgHtCFMppN26OTBzEQssQt/xY0LRdz6G+78GydpFtp6YOBwzr3cM8eLOZPKsr6N0sLi0vJKebWytr6xuWVu77RklAhCmyTikeh4WFLOQtpUTHHaiQXFgcdp2xtdZX77ngrJovBOjWPqBHgQMp8RrLTkmnu9AKshwRzduGnOPR89TFyzatWsHGie2AWpQoGGa371+hFJAhoqwrGUXduKlZNioRjhdFLpJZLGmIzwgHY1DXFApZPm+SfoUCt95EdCv1ChXP29keJAynHg6cksoZz1MvE/r5so/8JJWRgnioZkeshPOFIRyspAfSYoUXysCSaC6ayIDLHAROnKKroEe/bL86R1XLPPaqe3J9X6ZVFHGfbhAI7AhnOowzU0oAkEHuEZXuHNeDJejHfjYzpaMoqdXfgD4/MHvqWV8Q==</latexit> x
+Generated from 𝐳+𝐱!−𝐱′′ Generated from 𝐳
+<latexit sha1_base64="+iH849VdeBKAya2oX0Cc4ArZTnY=">AAAB83icbVDLSsNAFL2pr1pfVZduBovUVUnE17LoxmUF+4AmlMl00g6dTMLMRCyhv+HGhSJu/Rl3/o2TNAttPTBwOOde7pnjx5wpbdvfVmlldW19o7xZ2dre2d2r7h90VJRIQtsk4pHs+VhRzgRta6Y57cWS4tDntOtPbjO/+0ilYpF40NOYeiEeCRYwgrWRXDfEeuwH6VO9PhtUa3bDzoGWiVOQGhRoDapf7jAiSUiFJhwr1XfsWHsplpoRTmcVN1E0xmSCR7RvqMAhVV6aZ56hE6MMURBJ84RGufp7I8WhUtPQN5NZRrXoZeJ/Xj/RwbWXMhEnmgoyPxQkHOkIZQWgIZOUaD41BBPJTFZExlhiok1NFVOCs/jlZdI5aziXjYv781rzpqijDEdwDKfgwBU04Q5a0AYCMTzDK7xZifVivVsf89GSVewcwh9Ynz/IpZGI</latexit>x00 (b)
+z<latexit sha1_base64="qvwG4eD9XD2xzi4UkVLq7KCK/b0=">AAAB8XicbVDLSgMxFL1TX7W+qi7dBIvoqsyIr2XRjcsK9oHtUDJppg3NJEOSEerQv3DjQhG3/o07/8ZMOwttPRA4nHMvOfcEMWfauO63U1haXlldK66XNja3tnfKu3tNLRNFaINILlU7wJpyJmjDMMNpO1YURwGnrWB0k/mtR6o0k+LejGPqR3ggWMgINlZ66EbYDIMQPR33yhW36k6BFomXkwrkqPfKX92+JElEhSEca93x3Nj4KVaGEU4npW6iaYzJCA9ox1KBI6r9dJp4go6s0kehVPYJg6bq740UR1qPo8BOZgn1vJeJ/3mdxIRXfspEnBgqyOyjMOHISJSdj/pMUWL42BJMFLNZERlihYmxJZVsCd78yYukeVr1Lqrnd2eV2nVeRxEO4BBOwINLqMEt1KEBBAQ8wyu8Odp5cd6dj9lowcl39uEPnM8f9nqQdw==</latexit> 0
+z<latexit sha1_base64="a6a3dXOjEGMIkUett/ZTnIPV7AI=">AAAB9HicbVC7TsMwFL0pr1JeAUYWiwqVqUoQr7GChbFI9CG1UeW4TmvVcYLtVCpRv4OFAYRY+Rg2/ganzQAtR7J0dM69usfHjzlT2nG+rcLK6tr6RnGztLW9s7tn7x80VZRIQhsk4pFs+1hRzgRtaKY5bceS4tDntOWPbjO/NaZSsUg86ElMvRAPBAsYwdpIXjfEeugHKH2qVKY9u+xUnRnQMnFzUoYc9Z791e1HJAmp0IRjpTquE2svxVIzwum01E0UjTEZ4QHtGCpwSJWXzkJP0YlR+iiIpHlCo5n6eyPFoVKT0DeTWUi16GXif14n0cG1lzIRJ5oKMj8UJBzpCGUNoD6TlGg+MQQTyUxWRIZYYqJNTyVTgrv45WXSPKu6l9WL+/Ny7SavowhHcAyn4MIV1OAO6tAAAo/wDK/wZo2tF+vd+piPFqx85xD+wPr8ASSqkbQ=</latexit> 00 Generative process
+(1-Rectified Flow)
+(a) (c) (d)
+Figure2: AnillustrationoftheintuitioninSec.3. (a)Iftwolinearinterpolationtrajectoriesintersect,
+z z isparalleltox x .Thisgenerallymapsz toanatypical(e.g.,onewithhighautocorrelation
+′′ ′ ′ ′′ ′′
+− −
+oranormthatistoolargetobeonaGaussianannulus)realizationofGaussiannoise,sothe1-rectified
+flowcannotreliablymapz tox on . (b)Generatedsamplesfromthepre-trained1-rectified
+′′ ′′ x
+M
+flowstartingfromz (0,I)(right),whichisthestandardsetting,andz =z+(x x ),where
+′′ ′ ′′
+∼N −
+x,x aresampledfrom1-rectifiedflowtrainedonCIFAR-10(left). Qualitatively,weseethatthe
+′ ′′
+leftsampleshaveverylowquality. (c)Empirically,weshowtheℓ normofz = z+(x x )
+2 ′′ ′ ′′
+−
+comparedtoz ,whichissampledfromthestandardGaussian. z generallylandsoutsidetheannulus
+′ ′′
+oftypicalGaussiannoise. (d)z+(x x )hashighautocorrelationwhiletheautocorrelationof
+′ ′′
+−
+Gaussiannoiseisnearlyzeroinhigh-dimensionalspace.
+First,notethatthecurvatureoftheoptimal2-rectifiedflowiszeroifandonlyifthelinearinterpolation
+trajectoriesof1-rectifiedflow-generatedpairsdonotintersect,orequivalently,E[xx
+t
+=(1 t)x ′+
+| −
+tz]=x forallpairs(x,z)[28].
+′ ′ ′ ′
+(cid:82)
+To begin with, consider the manifold of the synthetic distribution p1(x) = p1(x,z)dz.
+x
+M
+Considertwopointsx andx fromthemanifold,andtwonoisesz andz thataremappedtox
+′ ′′ ′ ′′ ′
+andx by1-rectifiedflow. Here,wesaytwopairs(x,z)and(x ,z )intersectif t [0,1]s.t.
+′′ ′ ′ ′′ ′′
+∃ ∈
+(1 t)x +tz =(1 t)x +tz . Forexample,inFigure2(a),weobservethatthetwotrajectories
+′ ′ ′′ ′′
+− −
+intersectatanintermediatet.
+For an intersection to exist at t it must hold that 1) 1-rectified flow maps z to x , and 2) z =
+′′ ′′ ′′
+z + 1 t(x x ) by basic geometry. However, note that for realistic data distributions and if
+′ −t ′
+−
+′′
+1-rectifiedflowissufficientlywell-trained,z =z +1 t(x x )isnotacommonnoiserealization
+′′ ′ −t ′
+−
+′′
+(e.g., it is likely to have nonzero autocorrelation or a norm that is too large to be on a Gaussian
+annulus),asshownvisuallyinFigure2(a). As1-rectifiedflowisalmostentirelytrainedoncommon
+Gaussiannoiseinputs,itcannotgenerallymapanatypicalz to . Figure2(c)showsqualitatively
+′′ x
+M
+thatifwedrawvaluesofz byfirstdrawingz (0,I)andthenadding(x x )forindependent
+′′ ′ ′ ′′
+∼N −
+drawsofx,x ,thez vectorsfalloutsidetheannulusoftypicalstandardGaussiannoise. Similarly,
+′ ′′ ′′
+Figure2(d)showsthattheconstructednoisevectorsz havehigherautocorrelationthanexpected. As
+′′
+aresult,Figure2(b)visuallyshowsthatthegeneratedsampleshavelittleoverlapwiththeexpected
+samplesfromtypicaldrawsofz.
+′
+Thissuggestsempiricallythatwhentraining2-rectifiedflow,intersectionsarerare(i.e. E[xx
+t
+=
+|
+(1 t)x +tz] x),whichinturnimpliesthattheoptimal2-rectifiedflowtrajectoriesarenearly
+′ ′ ′
+− ≈
+straight. Hence,additionalroundsofReflowareunnecessary,whilealsodegradingsamplequality.
+Thisintuitionallowsustofocusonbettertrainingtechniquesfor2-rectifiedflowratherthantraining
+3-or4-rectifiedflow. Italsoleadsustoseveralimprovedtechniques,discussedinSec.4.
+Edgecases: Notethatif x x issmall,1-rectifiedflowcouldmapz tosomepointon .
+′ ′′ 2 ′′ x
+|| − || M
+However,itdoesnotaltertheconclusionbecausetheaverageofx andx isclosetox anyway,so
+′ ′′ ′
+E[x |x
+t
+=(1 −t)x ′+tz ′] ≈x ′. Similarly,iftiscloseto1, 1 −tt(x
+′
+−x ′′) ≈0,so1-rectifiedflow
+canmapz to . Ifthe1-rectifiedflowisL-Lipschitz, x x L z z . Therefore,
+′′ x ′ ′′ 2 ′ ′′ 2
+M || − || ≤ || − ||
+theexpectationE[xx t]againwillnotdeviatemuchfromx ′.
+|
+4
+k >tixetal/<=sMkcj1nvh1DB7oZteWNyuu1voVPp1inEA/BDCIw2EIa1EMNdEEc5EsTCAXecU1yNrEVe7azul94k+f4P9KhmoAjbiFBM9EEt2cShRwM2sGBVGxwfbGCqzgJUwFvIo5JRI1nGOso+x7vEv821Ph05oDY41sSinyEvTtLaIhmINMBllhncAfc0xvoxJQo+OpGpEOGRS0gLwMjFXDJTZfs68uqSlRjIw5JIM6BfbhGQzaCDViGoXGeveFiLz1r1hT7OOY1epGNfNmkFbowxgokxYg7RSLjSpxCakT8xc2qxNSRI559+VmXYeDSAjngLdBpmlarkWBGFByFyWEijnWMiEVUUjHeg+/b3dWY2xfrN3Y91mLW8NOtqODEPtH396MchDXPVUQbzsB/unj+cX0CNK8vDhiRJxQy0YTmkm8Q0eI2r4yNFd3TmamG4KSw3skqv26VU3MFxMgSLDVdciH8BAAA>"=oWMjRVeGWMDFWAZE/o2GYBuH03X"=46esab_1ahs tixetal<
+k >tixetal/<=sMkcj1nvh1DB7oZteWNyuu1voVPp1inEA/BDCIw2EIa1EMNdEEc5EsTCAXecU1yNrEVe7azul94k+f4P9KhmoAjbiFBM9EEt2cShRwM2sGBVGxwfbGCqzgJUwFvIo5JRI1nGOso+x7vEv821Ph05oDY41sSinyEvTtLaIhmINMBllhncAfc0xvoxJQo+OpGpEOGRS0gLwMjFXDJTZfs68uqSlRjIw5JIM6BfbhGQzaCDViGoXGeveFiLz1r1hT7OOY1epGNfNmkFbowxgokxYg7RSLjSpxCakT8xc2qxNSRI559+VmXYeDSAjngLdBpmlarkWBGFByFyWEijnWMiEVUUjHeg+/b3dWY2xfrN3Y91mLW8NOtqODEPtH396MchDXPVUQbzsB/unj+cX0CNK8vDhiRJxQy0YTmkm8Q0eI2r4yNFd3TmamG4KSw3skqv26VU3MFxMgSLDVdciH8BAAA>"=oWMjRVeGWMDFWAZE/o2GYBuH03X"=46esab_1ahs tixetal<Table1: Effectsoftheimprovedtrainingtechniques. Thebaseline(configA)isthe2-rectifiedflow
+with the uniform timestep distribution and the squared ℓ metric [28]. Config B is the improved
+2
+baselinewithEDMinitialization(Sec.4.3)andincreasedbatchsize(128 512onCIFAR-10). FID
+→
+(thelowerthebetter)iscomputedusing50,000syntheticsamplesandtheentiretrainingset. We
+trainthemodelsfor800,000iterationsonCIFAR-10and1,000,000iterationsonAFHQandFFHQ
+andreportthebestFIDforeachsetting.
+CIFAR-10 AFHQ64×64 FFHQ64×64
+Base[28](A) 12.21 - - - - -
+(A)+EDMinit+largerbatchsize(B) 7.14 3.61 12.39 4.16 8.84 4.79
+(B)+Ourp t(C) 5.17 3.37 9.03 3.61 6.81 4.66
+(C)+Huber(D) 5.24 3.34 8.20 3.55 7.06 4.79
+(C)+LPIPS-Huber(E) 3.42 2.95 4.13 3.15 5.21 4.26
+(C)+LPIPS-Huber-1 (F) 3.38 2.76 4.11 3.12 5.65 4.41
+t
+NFE 1 2 1 2 1 2
+4 ImprovedTrainingTechniquesforReflow
+TheobservationinSec.3suggeststhattheoptimal2-rectifiedflowisnearlystraight. Therefore,if
+theone-stepgenerativeperformanceofthe2-rectifiedflowmodelisnotasgoodasexpected,itis
+likelyduetosuboptimaltraining. Inthissection,weshowthatthefew-stepgenerativeperformance
+ofthe2-rectifiedflowcanbesignificantlyimprovedbyapplyingseveralnewtrainingtechniques.
+4.1 Timestepdistribution
+Asindiffusionmodels,rectifiedflowsaretrainedonrandomlysampledtimestepst,andthedistribu-
+tionfromwhichtissampledisanimportantdesignchoice. Ideally,wewanttofocusthetraining
+effortontimestepsthataremorechallengingratherthanwastingcomputationalresourcesoneasy
+tasks. Onecommonapproachistofocusonthetaskswherethetraininglossishigh[41]. However,
+thetrainingerrorofrectifiedflowsisnotareliablemeasureofdifficultybecausedifferenttimesteps
+havedifferentnon-zerolowerbounds. Tounderstandthis,letusdecomposethetrainingerrorinto
+twoterms:
+1 1
+L(θ,t):= t2E[ ||x −x θ(x t,t) ||2 2]= t2E[ ||x −E[x |x t] ||2 2]+ L¯(θ,t). (4)
+(cid:124) (cid:123)(cid:122) (cid:125)
+Lowerbound
+Thefirsttermdoesnotdependonθandthuscannotbere-
+duced. Thesecondtermrepresentstheactualminimizable
+training error, but its value cannot be directly observed
+because the first term is usually unknown. Fortunately,
+becauseofthefindinginSec.3,weexpectthatthefirst
+termisnearlyzerowhentraining2-rectifiedflow,sowe
+canuse (θ,t)fordesigningthetimestepdistribution.
+L
+Figure 3 shows that the training loss of 2-rectified flow
+islargeateachendoftheintervalt [0,1]andsmallin
+∈
+themiddle. WethusproposetouseaU-shapedtimestep
+distribution for p . Specifically, we define p (u) Figure3: Traininglossofthevanilla2-
+t t
+exp(au)+exp( au)onu [0,1]. Wefindthata =∝ 4 rectifiedflowonCIFAR-10measuredon
+workswellinpra− ctice(Table∈ 1). Comparedtotheuniform 5,000samplesafter200,000iterations.
+timestepdistribution(configB),theU-shapeddistribution The shaded area represents the 1 stan-
+(configC)improvestheFIDof2-rectifiedflowfrom7.14 darddeviationoftheloss. Thedashed
+to5.17(a28%improvement)onCIFAR-10,12.39to9.03 curve is our U-shaped timestep distri-
+(27%)onAFHQ,and8.84to6.81(23%)onFFHQinthe bution, scaled by a constant factor for
+one-stepsetting. visualization.
+For1-rectifiedflowtraining,p waschosentobetheuni-
+t
+formdistribution[28,29]orlog-normaldistribution[11]whichputsmoreemphasisonthemiddle
+oftheinterval. Whentraining1-rectifiedflow,amodellearnstosimplyoutputthedatasetaverage
+5whent=1andthenoiseaverage(i.e.,zero)whent=0. Themeaningfulpartofthetrainingthus
+happensinthemiddleoftheinterval. Incontrast,fromEq.(3)wecanseethat2-rectifiedflowlearns
+todirectlypredictthedatafromthenoiseatt=1andthenoisefromthedataatt=0,whichare
+nontrivialtasks. Therefore,theU-shapedtimestepdistributionismoresuitablefor2-rectifiedflow.
+4.2 Lossfunction
+Previously,thesquaredℓ distancewasusedasthetrainingmetricforrectifiedflowtoobtainthe
+2
+MMSEestimatorE[xx t]. However,aswehaveshowninSec.3thatE[xx
+t
+=(1 t)x ′+tz ′] x ′,
+| | − ≈
+wecangeneralizeEq.(2)orequivalentlyEq.(3)toanypremetricm(i.e. m(a,b)=0 a=b):
+⇔
+m θinEx,z ∼pxzEt ∼pt[m(z −x,v θ(x t,t))], (5)
+NotethatwithouttheintuitioninSec.3,onlythesquaredℓ distancewouldhavebeenavalid
+2
+premetric,asanyotherpremetricmakesthemodeldeviatefromtheintendedoptimum(theposterior
+expectation E[xx t]). Although the choice of m does not affect the optimum, it does affect the
+|
+trainingdynamicsandthustheobtainedmodel. Otherthanthesquaredℓ distance,weconsiderthe
+2
+followingpremetrics:
+(cid:112)
+• Pseudo-Huber [5]: m (z x,v ((x ,t)) = z x v (x ,t) 2+c2 c, where c =
+hub − θ t || − − θ t ||2 −
+0.00054√dwithdbeingdatadimensionalityfollowingSongandDhariwal[44].
+• LPIPS-Huber: m (z x,v (x ,t)) = (1 t)m (z x,v (x ,t))+LPIPS(x,x t
+lp-hub θ t hub θ t t
+− − − − ·
+v (x ,t)),whereLPIPS(, )isthelearnedperceptualimagepatchsimilarity[56].
+θ t
+· ·
+• LPIPS-Huber-1: m (z x,v (x ,t))=(1 t)m (z x,v (x ,t))+ 1LPIPS(x,x
+t lp-hub-1 t − θ t − hub − θ t t t −
+t v (x ,t)),
+θ t
+·
+ThePseudo-Huberlossislesssensitivetotheoutliersthanthesquaredℓ loss,whichcanpotentially
+2
+reducethegradientvariance[44]andmaketrainingeasier. Inourinitialexperiments,wefoundthat
+thePseudo-Huberlosstendstoworkbetterthanthesquaredℓ losswithasmallbatchsize(e.g. 128
+2
+onCIFAR-10). Whenthebatchsizeissufficientlylarge,itperformsonparwiththesquaredℓ loss
+2
+on CIFAR-10 and FFHQ-64 and outperforms it on AFHQ-64, as shown in Table 1. As it is less
+sensitivetothebatchsize,wechoosetousethePseudo-Huberlossinthefollowingexperiments.
+WealsoexploretheLPIPS,whichforcesthemodeltofocusonreducingtheperceptualdistance
+betweenthegenerateddataandthegroundtruth. SinceLPIPSisnotapremetricastwodifferent
+points could have zero LPIPS if they are perceptually similar, we use it in combination with the
+Pseudo-Huberlosswiththeweighting1 t,therebyrelyingmoreonLPIPSwhentiscloseto1
+−
+wherethetaskismorechallenging. Notethatinm ,thegradientvanisheswhentiscloseto
+lp-hub
+zero. Tocompsensate, weexperimentwithm wherewemultiplyLPIPSby 1. Compared
+lp-hub-1 t t
+toconfigD,theLPIPS-HuberlossimprovestheFIDof2-rectifiedflowfrom5.24to3.38(a35%
+improvement)onCIFAR-10,8.20to4.11(50%)onAFHQ,and7.06to5.21(26%)onFFHQinthe
+one-stepsetting,asseeninTable1.
+4.3 Initializationwithpre-traineddiffusionmodels
+Training 1-rectified flow from scratch is computationally expensive. Recently, Pokle et al. [36]
+showedthatpre-traineddiffusionmodelscanbeusedtoapproximateE[xx
+t
+= z t]inEq.(1)by
+|
+adjustingthesignal-to-noiseratio. ThefollowingpropositionisthespecialcasesofLemma2of
+Pokleetal.[36]restatedwithextendedproofandaminorfix. Weprovidetheconstantsandproofin
+Appendix.D.1.
+Proposition1 Let pRE(xx ,t) be the posterior distribution of the perturbation kernel ((1
+t
+t)x,t2I). Also, let pVP(x| x ,t) and pVE(xx ,t) be the posterior distributions of (α(t)N x,(1−
+t t
+α(t))2I)and (x,t2I),e| ach. Then, | N −
+N
+(cid:90) (cid:90) (cid:90)
+pRE(xx =z ,t)xdx= pVP(xx =s z ,t )xdx= pVE(xx =s z ,t )xdx,
+t t t VP t VP t VP t VE
+| | |
+(6)
+wheres ands arethescalingfactorsandt andt aretheconvertedtimesfortheVPandVE
+VP VE VP VE
+diffusionmodels,respectively.
+6Table2: UnconditionalgenerationonCIFAR-10. Table 3: Class-conditional generation on Ima-
+geNet64 64.
+METHOD NFE(↓)FID(↓)IS(↑) ×
+Diffusionmodels METHOD NFE(↓)FID(↓)Prec.(↑)Rec.(↑)
+ScoreSDE[46] 2000 2.38 9.83 Diffusionmodels
+DDPM[15] 1000 3.17 9.46
+DDIM[43] 50 13.7 0.65 0.56
+LSGM[49] 147 2.10
+10 18.3 0.60 0.49
+EDM[21] 35 1.97
+DPMsolver[30] 10 7.93
+Distilleddiffusionmodels
+20 3.42
+KnowledgeDistillation[31] 1 9.36 DEIS[55] 10 6.65
+DFNO(LPIPS)[57] 1 3.78 20 3.10
+TRACT[2] 1 3.78 DDPM[15] 250 11.0 0.67 0.58
+2 3.32 iDDPM[35] 250 2.92 0.74 0.62
+PD[39] 1 9.12 ADM[10] 250 2.07 0.74 0.63
+2 4.51 EDM[21] 79 2.30
+Scoredistillation Distilleddiffusionmodels
+Diff-Instruct[32] 1 4.53 9.89 DFNO(LPIPS)[57] 1 7.83 0.61
+DMD[54] 1 3.77 TRACT[2] 1 7.43
+GANs 2 4.97
+BigGAN[4] 1 14.7 9.22 BOOT[12] 1 16.3 0.68 0.36
+StyleGAN2[20] 1 8.32 9.21 PD[39] 1 15.39 0.59 0.62
+StyleGAN2-ADA[19] 1 2.92 9.83 2 8.95 0.63 0.65
+Consistencymodels 4 6.77 0.66 0.65
+CD(LPIPS)[47] 1 3.55 9.48 Scoredistillation
+2 2.93 9.75 Diff-Instruct[32] 1 5.57
+CT(LPIPS)[47] 1 8.70 8.49 DMD[54] 1 2.62
+2 5.83 8.85 GANs
+iCT[44] 1 2.83 9.54 BigGAN-deep[4] 1 4.06 0.79 0.48
+2 2.46 9.80 Consistencymodels
+iCT-deep[44] 1 2.51 9.76
+CD(LPIPS)[47] 1 6.20 0.68 0.63
+2 2.24 9.89
+2 4.70 0.69 0.64
+CTM[22] 1 5.19
+3 4.32 0.70 0.64
+CTM[22]+GAN 1 1.98
+CT(LPIPS)[47] 1 13.0 0.71 0.47
+Rectifiedflows
+2 11.1 0.69 0.56
+1-rectifiedflow(+distill)[28] 1 6.18 9.08 iCT[44] 1 4.02 0.70 0.63
+2-rectifiedflow[28] 1 12.21 8.08 2 3.20 0.73 0.63
+110 3.36 9.24 iCT-deep[44] 1 3.25 0.72 0.63
++distill[28] 1 4.85 9.01 2 2.77 0.74 0.62
+3-rectifiedflow[28] 1 8.15 8.47 CTM+GAN[22] 1 1.92 0.57
+104 3.96 9.01 2 1.73 0.57
++Distill[28] 1 5.21 8.79 Rectifiedflows
+2-rectifiedflow++(ours) 1 3.38
+2-rectifiedflow++(ours) 1 4.31
+2 2.76
+2 3.64
+Theredrowscorrespondtothetop-5baselinesforthe1-NFEsetting,andthebluerowscorrespondtothetop5baselinesforthe2-NFEsetting.
+ThelowestFIDscoresfor1-NFEand2-NFEareboldfaced.
+We have explicitly computed the time and scale conversion factors for the VP and VE diffusion
+modelsinTable6,AppendixD.Proposition1allowsustoinitializetheReflowwiththepre-trained
+diffusionmodelssuchasEDM[21]orStableDiffusion[38]anduseTable6toadjustthetimeand
+scalingfactors.
+Startingfromthevanilla2-rectifiedflowsetup[28](configA),weinitialize1-rectifiedflowwiththe
+pre-trainedEDM(VE).Wealsoincreasethebatchsizefrom128to512onCIFAR-10compared
+to Liu et al. [28]. Overall, these improve the FID of 2-rectified flow from 12.21 to 7.14 (a 42%
+improvement)intheone-stepsettingonCIFAR-10(configB).
+5 Experiments
+WecallthesecombinedimprovementstoReflowtraining2-rectifiedflow++andevaluateitonfour
+datasets: CIFAR-10 [24], AFHQ [7], FFHQ [18], and ImageNet [9]. We compare our improved
+Reflowtoupto20recentbaselines,inthefamiliesofdiffusionmodels,distilleddiffusionmodels,
+scoredistillation,GANs,consistencymodels,andrectifiedflows. Thedetailsofourexperimental
+setupareincludedinAppendixE.
+5.1 Unconditionalandclass-conditionalimagegeneration
+InTables2and3,wecompare2-rectifiedflow++withthestate-of-the-artmethodsonCIFAR-10and
+ImageNet64 64. Weobservetwomainmessages:
+×
+Onbothdatasets,2-rectifiedflow++(ours)outperformsoriscompetitivewithSOTAbaselines
+inthe1-2NFEregime. OnCIFAR-10(Table2),our2-rectifiedflowachievesanFIDof3.38inone
+step,surpassingexistingdistillationmethodssuchasconsistencydistillation(CD)[47],progressive
+7distillation(PD)[39],diffusionmodelsamplingwithneuraloperator(DSNO)[57],andTRAnsitive
+ClosureTime-distillation(TRACT)[2]. OnImageNet64 64(Table3),ourmodelsurpassesthe
+×
+distillationmethodssuchasCD,PD,DFNO,TRACT,andBOOTinone-stepgeneration. Wealso
+closethegapwithiCT(4.01vs4.31),thestate-of-the-artconsistencymodel,evenwithhalfthebatch
+size. Note that our method does not require any real data during training, while the consistency
+training(CT)requiresrealdata. UncuratedsamplesofourmodelareprovidedinAppendix.H.
+2-rectifiedflow++reducestheFIDof2-rectifiedflowsbyupto72%. Comparedtovanillarectified
+flows[28],ourone-stepFIDonCIFAR-10islowerthanthatoftheprevious2-rectifiedflowby8.83
+(a reduction of 72%), and of the 3-rectified flow by 4.77 (see also Table 1 for ablations on other
+datasets). Inaddition,itcompeteswiththeprevious2-rectifiedflowwith110NFEsusingonlyone
+stepandoutperforms2-rectifiedflow+distillation,whichrequiresanadditionaldistillationstage.
+5.2 Reflowcanbecomputationallymoreefficientthanotherdistillationmethods
+Atfirstglance,Reflowseemscomputationallyexpensive
+comparedtoCDandCTasitrequiresgeneratingsynthetic Table5: Comparisonofthenumberof
+pairsbeforetraining. However,CDrequires4(1forstu- forwardpasses. Reflowuses395Mfor-
+dent,1forteacher,and2forHeun’ssolver)forwardpasses ward passes for generating pairs and
+foreachtrainingiteration,andCTrequires2(1forstudent 1,433.6Mfortraining.
+and1forteacher)forwardpasses,whileReflowrequires
+only1. Forexample,inourImageNetexperimentsetting, Method Periteration Total Rel.totalcost
+the total number of forward passes for Reflow is 395M
+Reflow 1 1828.6M 1
++ 1433.6M = 1828.6M (395M for generating pairs and CD 4 5734.4M ×3.1
+1,433.6Mfortraining),whilethetotalnumbersofforward CT 2 2867.2M ×1.5
+×
+passesforCDandCTwouldbe1,433.6 4=5,734.4M
+·
+and1,433.6 2 = 2,867.2Munderthesamesetting. SeeTable5forthecomparison. Moreover,
+·
+generatingpairsisaone-timecostsincewecanreusethepairsformultipletrainingruns.
+Intermsofthestoragecost,thesyntheticimagesforImageNet64 64require42GB.Fornoise,we
+×
+onlystorethestatesoftherandomnumbergenerator,whichisnegligible.
+Whiletheseresultsshouldbefurthervalidatedforlargerdatasets,ourresultssuggestthatthefactthat
+Reflowrequiresgeneratingsyntheticpairsdoesnotnecessarilymakeitlesscomputationallyefficient
+thanotherdistillationmethods.
+5.3 EffectsofODESolver
+Unlikedistillationmethods,rectifiedflowisaneuralODE,anditsoutputsapproachthetruesolution
+oftheODEasNFEincreases(i.e.,precisiongrows). Figure4showsthatwiththestandardEuler
+solver,FIDdecreasesasNFEincreasesonalldatasets. Moreover,Heun’ssecond-ordersolverfurther
+improvesthetrade-offcurvebetweenFIDandNFE.Thissuggeststhattheremaybefurtherroomfor
+improvementbyusingmoreadvancedsolvers.
+Asanexampleofsuchanimprovement,wedesignanewupdatedrule. InthestandardEulersolver,
+theupdateruleisz :=z v(z ,t)∆t. Alternatively,asx (z ,t)ofourmodelgeneratespretty
+t ∆t t t θ t
+goodsamples,wec−aninstead−
+usethelinearinterpolationbetweenx (z ,t)andz togetthenext
+θ t 1
+step: z :=(1 (t ∆t))x (z ,t)+(t ∆t)z . Thepseudocodeandmoredetailedanalysis
+t ∆t θ t 1
+areprov−idedinApp− endi− xF.NotethatwhenN−
+FE<3,thetwoupdaterulesareequivalentanddonot
+affectourresultsinSection5.1. Whenappliedtoexistingsolvers,thenewupdateruleimprovesthe
+samplingefficiencyofboththeEulerandHeunsolvers,achievingthebestFIDwith 5NFEs. We
+≤
+believethattheresultcanbefurtherimproved,especiallybyusinglearning-basedsolvers[52,40];
+andleavesuchexplorationtofuturework.
+5.4 Inversion
+Unlikedistillationmethods,rectifiedflowsareneuralODEs,thustheyallowforinversionfromdata
+tonoisebysimplyintegratingtheODEinthebackwarddirection. Indiffusionmodels,inversionhas
+beenusedforvariousapplicationssuchasimageediting[13,23,51,48,17]andwatermarking[53],
+butitusuallyrequiresmanyNFEs. Figure5(a)demonstratesthatour2-rectifiedflow++achieves
+significantlylowerreconstructionerrorthanEDM.Notably,thereconstructionerrorof2-rectified
+8(a)CIFAR-10 (b)AFHQ64×64 (c)FFHQ64×64
+Figure4: EffectsofODESolverandnewupdaterule.
+EDM
+Ours
+Data Noise Reconstructed
+(a)Reconstructionloss (b)Distributionof∥z∥2 (c) Inversion/reconstruction re-
+2
+sults
+Figure5: InversionresultsonCIFAR-10. (a)Reconstructionerrorbetweenrealandreconstructed
+data is measured by the mean squared error (MSE), where the x-axis represents NFEs used for
+inversionandreconstruction(e.g. 2means2forinversionand2forreconstruction). (b)Distribution
+of z 2oftheinvertednoisesasaproxyforGaussianity(NFE=8). Thegreenhistogramrepresents
+|| ||2
+thedistributionoftruenoise,whichisChi-squaredwith3 32 32=3072degreesoffreedom. (c)
+× ×
+Inversionandreconstructionresultsusing(8+8)NFEs. Withonly8NFEs,EDMfailstoproduce
+realisticnoise,andalsothereconstructedsamplesareblurry.
+flow++withonly2NFEsislowerthanthatofEDMwith16NFEs. In(b),wecomparethequalityof
+theinvertednoise,wherewefindthatthenoisevectorsof2-rectifiedflowaremoreGaussian-like
+thanthoseofEDM,inthesensethattheirnormisclosertothatoftypicalGaussiannoise. Theseare
+alsoshownvisuallyin(c). InFigure6,weshowtwoapplicationsofinversion: interpolatingbetween
+tworealimages(a)andimage-to-imagetranslation(b). Notably, thetotalNFEusedisonly6(4
+forinversionand2forgeneration),whichissignificantlylowerthanwhatistypicallyrequiredin
+diffusionmodels( 100)[17].
+≥
+6 Conclusion
+Inthiswork,weproposeseveralimprovedtrainingtechniquesforrectifiedflows,includingtheU-
+shapedtimestepdistributionandLPIPS-Huberloss. Weshowthatbycombiningtheseimprovements,
+2-rectifiedflows++outperformsthestate-of-the-artdistillationmethodsinthe1-2NFEregimeon
+CIFAR-10andImageNet64 64andclosesthegapwithiCT,thestate-of-the-artconsistencymodel.
+×
+2-rectifiedflows++havelimitationsthough—theystilldonotoutperformthebestconsistencymodels
+(iCT),andtheirtrainingisslower(byabout15%periterationonImageNet)thanpreviousrectified
+flowsbecauseoftheLPIPSloss. Despitetheseshortcomings,thetrainingtechniqueswepropose
+caneasilyandsignificantlyboosttheperformanceofrectifiedflowsinthelowNFEsetting,without
+harmingperformanceatthehigherNFEsetting.
+Lion→Tiger Tiger→Lion
+(a) Interpolation (b) Image translation
+Figure6: Applicationsoffew-stepinversion. (a)Interpolationbetweentworealimages. (b)Image-
+to-imagetranslation. ThetotalNFEsusedare6(4forinversionand2forgeneration).
+9Acknowledgments
+ThisworkwasmadepossibleinpartbytheNationalScienceFoundationundergrantCCF-2338772,
+CNS-2325477,aswellasgeneroussupportfromGoogle,theSloanFoundation,Intel,andBosch.This
+workusedBridges-2GPUatthePittsburghSupercomputingCenterthroughallocationCIS240037
+fromtheAdvancedCyberinfrastructureCoordinationEcosystem: Services&Support(ACCESS)
+program,whichissupportedbyNationalScienceFoundationgrants2138259,2138286,2138307,
+2137603,and2138296[3].
+References
+[1] Michael S Albergo and Eric Vanden-Eijnden. Building normalizing flows with stochastic
+interpolants. arXivpreprintarXiv:2209.15571,2022.
+[2] DavidBerthelot,ArnaudAutef,JieruiLin,DianAngYap,ShuangfeiZhai,SiyuanHu,Daniel
+Zheng,WalterTalbott,andEricGu. Tract: Denoisingdiffusionmodelswithtransitiveclosure
+time-distillation. arXivpreprintarXiv:2303.04248,2023.
+[3] Timothy J Boerner, Stephen Deems, Thomas R Furlani, Shelley L Knuth, and John Towns.
+Access: Advancinginnovation: Nsf’sadvancedcyberinfrastructurecoordinationecosystem:
+Services & support. In Practice and Experience in Advanced Research Computing, pages
+173–176.2023.
+[4] AndrewBrock,JeffDonahue,andKarenSimonyan. Largescalegantrainingforhighfidelity
+naturalimagesynthesis. arXivpreprintarXiv:1809.11096,2018.
+[5] PierreCharbonnier,LaureBlanc-Féraud,GillesAubert,andMichelBarlaud. Deterministic
+edge-preservingregularizationincomputedimaging. IEEETransactionsonimageprocessing,
+6(2):298–311,1997.
+[6] RickyTQChen,YuliaRubanova,JesseBettencourt,andDavidKDuvenaud. Neuralordinary
+differentialequations. Advancesinneuralinformationprocessingsystems,31,2018.
+[7] Yunjey Choi, Youngjung Uh, Jaejun Yoo, and Jung-Woo Ha. Stargan v2: Diverse image
+synthesisformultipledomains. InProceedingsoftheIEEE/CVFconferenceoncomputervision
+andpatternrecognition,pages8188–8197,2020.
+[8] GuillaumeCouairon,JakobVerbeek,HolgerSchwenk,andMatthieuCord. Diffedit: Diffusion-
+basedsemanticimageeditingwithmaskguidance. arXivpreprintarXiv:2210.11427,2022.
+[9] JiaDeng, WeiDong, RichardSocher, Li-JiaLi, KaiLi, andLiFei-Fei. Imagenet: Alarge-
+scalehierarchicalimagedatabase. In2009IEEEconferenceoncomputervisionandpattern
+recognition,pages248–255.Ieee,2009.
+[10] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis.
+AdvancesinNeuralInformationProcessingSystems,34,2021.
+[11] PatrickEsser,SumithKulal,AndreasBlattmann,RahimEntezari,JonasMüller,HarrySaini,
+YamLevi,DominikLorenz,AxelSauer,FredericBoesel,etal. Scalingrectifiedflowtransform-
+ersforhigh-resolutionimagesynthesis. arXivpreprintarXiv:2403.03206,2024.
+[12] JiataoGu,ShuangfeiZhai,YizheZhang,LingjieLiu,andJoshuaMSusskind. Boot: Data-free
+distillation of denoising diffusion models with bootstrapping. In ICML 2023 Workshop on
+StructuredProbabilisticInference & GenerativeModeling,2023.
+{\ }
+[13] AmirHertz,RonMokady,JayTenenbaum,KfirAberman,YaelPritch,andDanielCohen-Or.
+Prompt-to-promptimageeditingwithcrossattentioncontrol. arXivpreprintarXiv:2208.01626,
+2022.
+[14] MartinHeusel,HubertRamsauer,ThomasUnterthiner,BernhardNessler,andSeppHochreiter.
+Ganstrainedbyatwotime-scaleupdateruleconvergetoalocalnashequilibrium. Advancesin
+neuralinformationprocessingsystems,30,2017.
+10[15] JonathanHo,AjayJain,andPieterAbbeel. Denoisingdiffusionprobabilisticmodels. Advances
+inNeuralInformationProcessingSystems,33:6840–6851,2020.
+[16] JonathanHo,TimSalimans,AlexeyGritsenko,WilliamChan,MohammadNorouzi,andDavidJ
+Fleet. Videodiffusionmodels. arXivpreprintarXiv:2204.03458,2022.
+[17] SeongminHong,KyeonghyunLee,SuhYoonJeon,HyewonBae,andSeYoungChun. On
+exactinversionofdpm-solvers. arXivpreprintarXiv:2311.18387,2023.
+[18] TeroKarras,SamuliLaine,andTimoAila. Astyle-basedgeneratorarchitectureforgenerative
+adversarialnetworks. InProceedingsoftheIEEE/CVFconferenceoncomputervisionand
+patternrecognition,pages4401–4410,2019.
+[19] TeroKarras, MiikaAittala, JanneHellsten, SamuliLaine, JaakkoLehtinen, andTimoAila.
+Traininggenerativeadversarialnetworkswithlimiteddata. AdvancesinNeuralInformation
+ProcessingSystems,33:12104–12114,2020.
+[20] TeroKarras, SamuliLaine, MiikaAittala, JanneHellsten, JaakkoLehtinen, andTimoAila.
+Analyzing and improving the image quality of stylegan. In Proceedings of the IEEE/CVF
+conferenceoncomputervisionandpatternrecognition,pages8110–8119,2020.
+[21] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of
+diffusion-basedgenerativemodels. arXivpreprintarXiv:2206.00364,2022.
+[22] DongjunKim, Chieh-HsinLai, Wei-HsiangLiao, NaokiMurata, YuhtaTakida, Toshimitsu
+Uesaka, Yutong He, Yuki Mitsufuji, and Stefano Ermon. Consistency trajectory models:
+Learningprobabilityflowodetrajectoryofdiffusion. arXivpreprintarXiv:2310.02279,2023.
+[23] Gwanghyun Kim, Taesung Kwon, and Jong Chul Ye. Diffusionclip: Text-guided diffusion
+models for robust image manipulation. In Proceedings of the IEEE/CVF Conference on
+ComputerVisionandPatternRecognition,pages2426–2435,2022.
+[24] AlexKrizhevsky,GeoffreyHinton,etal. Learningmultiplelayersoffeaturesfromtinyimages.
+Toronto,ON,Canada,2009.
+[25] SangyunLee,BeomsuKim,andJongChulYe. Minimizingtrajectorycurvatureofode-based
+generativemodels. arXivpreprintarXiv:2301.12003,2023.
+[26] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximilian Nickel, and Matt Le. Flow
+matchingforgenerativemodeling. arXivpreprintarXiv:2210.02747,2022.
+[27] QiangLiu. Rectifiedflow: Amarginalpreservingapproachtooptimaltransport. arXivpreprint
+arXiv:2209.14577,2022.
+[28] XingchaoLiu,ChengyueGong,andQiangLiu. Flowstraightandfast: Learningtogenerate
+andtransferdatawithrectifiedflow. arXivpreprintarXiv:2209.03003,2022.
+[29] Xingchao Liu, Xiwen Zhang, Jianzhu Ma, Jian Peng, and Qiang Liu. Instaflow: One
+step is enough for high-quality diffusion-based text-to-image generation. arXiv preprint
+arXiv:2309.06380,2023.
+[30] ChengLu,YuhaoZhou,FanBao,JianfeiChen,ChongxuanLi,andJunZhu. Dpm-solver: A
+fastodesolverfordiffusionprobabilisticmodelsamplinginaround10steps. arXivpreprint
+arXiv:2206.00927,2022.
+[31] Eric Luhman and Troy Luhman. Knowledge distillation in iterative generative models for
+improvedsamplingspeed. arXivpreprintarXiv:2101.02388,2021.
+[32] WeijianLuo,TianyangHu,ShifengZhang,JiachengSun,ZhenguoLi,andZhihuaZhang. Diff-
+instruct: Auniversalapproachfortransferringknowledgefrompre-traineddiffusionmodels.
+AdvancesinNeuralInformationProcessingSystems,36,2024.
+[33] PauliusMicikevicius,SharanNarang,JonahAlben,GregoryDiamos,ErichElsen,DavidGarcia,
+BorisGinsburg,MichaelHouston,OleksiiKuchaiev,GaneshVenkatesh,etal. Mixedprecision
+training. arXivpreprintarXiv:1710.03740,2017.
+11[34] RonMokady,AmirHertz,KfirAberman,YaelPritch,andDanielCohen-Or. Null-textinversion
+for editing real images using guided diffusion models. In Proceedings of the IEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pages6038–6047,2023.
+[35] AlexanderQuinnNicholandPrafullaDhariwal. Improveddenoisingdiffusionprobabilistic
+models. InInternationalConferenceonMachineLearning,pages8162–8171.PMLR,2021.
+[36] AshwiniPokle,MatthewJMuckley,RickyTQChen,andBrianKarrer. Training-freelinear
+imageinversionviaflows. arXivpreprintarXiv:2310.04432,2023.
+[37] AdityaRamesh,PrafullaDhariwal,AlexNichol,CaseyChu,andMarkChen. Hierarchical
+text-conditionalimagegenerationwithcliplatents. arXivpreprintarXiv:2204.06125,2022.
+[38] RobinRombach,AndreasBlattmann,DominikLorenz,PatrickEsser,andBjörnOmmer. High-
+resolution image synthesis with latent diffusion models. In Proceedings of the IEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pages10684–10695,2022.
+[39] TimSalimansandJonathanHo. Progressivedistillationforfastsamplingofdiffusionmodels.
+arXivpreprintarXiv:2202.00512,2022.
+[40] Neta Shaul, Juan Perez, Ricky TQ Chen, Ali Thabet, Albert Pumarola, and Yaron Lipman.
+Bespokesolversforgenerativeflowmodels. arXivpreprintarXiv:2310.19075,2023.
+[41] AbhinavShrivastava,AbhinavGupta,andRossGirshick.Trainingregion-basedobjectdetectors
+withonlinehardexamplemining. InProceedingsoftheIEEEconferenceoncomputervision
+andpatternrecognition,pages761–769,2016.
+[42] JaschaSohl-Dickstein,EricWeiss,NiruMaheswaranathan,andSuryaGanguli. Deepunsuper-
+visedlearningusingnonequilibriumthermodynamics. InInternationalConferenceonMachine
+Learning,pages2256–2265.PMLR,2015.
+[43] JiamingSong,ChenlinMeng,andStefanoErmon. Denoisingdiffusionimplicitmodels. arXiv
+preprintarXiv:2010.02502,2020.
+[44] YangSongandPrafullaDhariwal. Improvedtechniquesfortrainingconsistencymodels. arXiv
+preprintarXiv:2310.14189,2023.
+[45] Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data
+distribution. AdvancesinNeuralInformationProcessingSystems,32,2019.
+[46] YangSong,JaschaSohl-Dickstein,DiederikPKingma,AbhishekKumar,StefanoErmon,and
+BenPoole. Score-basedgenerativemodelingthroughstochasticdifferentialequations. arXiv
+preprintarXiv:2011.13456,2020.
+[47] YangSong,PrafullaDhariwal,MarkChen,andIlyaSutskever. Consistencymodels. arXiv
+preprintarXiv:2303.01469,2023.
+[48] XuanSu,JiamingSong,ChenlinMeng,andStefanoErmon. Dualdiffusionimplicitbridgesfor
+image-to-imagetranslation. arXivpreprintarXiv:2203.08382,2022.
+[49] ArashVahdat,KarstenKreis,andJanKautz. Score-basedgenerativemodelinginlatentspace.
+AdvancesinNeuralInformationProcessingSystems,34:11287–11302,2021.
+[50] PascalVincent. Aconnectionbetweenscorematchinganddenoisingautoencoders. Neural
+computation,23(7):1661–1674,2011.
+[51] BramWallace,AkashGokul,andNikhilNaik. Edict: Exactdiffusioninversionviacoupled
+transformations. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pages22532–22541,2023.
+[52] DanielWatson,WilliamChan,JonathanHo,andMohammadNorouzi. Learningfastsamplers
+fordiffusionmodelsbydifferentiatingthroughsamplequality. InInternationalConferenceon
+LearningRepresentations,2021.
+12[53] Yuxin Wen, John Kirchenbauer, Jonas Geiping, and Tom Goldstein. Tree-ring watermarks:
+Fingerprintsfordiffusionimagesthatareinvisibleandrobust. arXivpreprintarXiv:2305.20030,
+2023.
+[54] Tianwei Yin, Michaël Gharbi, Richard Zhang, Eli Shechtman, Fredo Durand, William T
+Freeman,andTaesungPark. One-stepdiffusionwithdistributionmatchingdistillation. arXiv
+preprintarXiv:2311.18828,2023.
+[55] Qinsheng Zhang and Yongxin Chen. Fast sampling of diffusion models with exponential
+integrator. arXivpreprintarXiv:2204.13902,2022.
+[56] RichardZhang,PhillipIsola,AlexeiAEfros,EliShechtman,andOliverWang. Theunrea-
+sonable effectiveness of deep features as a perceptual metric. In Proceedings of the IEEE
+conferenceoncomputervisionandpatternrecognition,pages586–595,2018.
+[57] HongkaiZheng,WeiliNie,ArashVahdat,KamyarAzizzadenesheli,andAnimaAnandkumar.
+Fast sampling of diffusion models via operator learning. arXiv preprint arXiv:2211.13449,
+2022.
+13A ReflowAlgorithm
+WeprovidethepseudocodeforReflowhere.
+Algorithm1ReflowProcedure
+1: Initialize:
+(cid:2) (cid:3)
+32 :: forθ k1 = =a 2r tg om Kin dθ oEx,z ∼p1 xzEt ∼pt ω(t) ∥x −x θ(x t,t) ∥2 2 ▷Train1-rectifiedflow
+4: Tk −1(z)=z+(cid:82) 10 1
+(cid:0)t
+(cid:0) z
+t
+−x θk−1( (cid:1)z t,t)(cid:1) dtwithz
+1
+=z
+5: pk (x,z)=p (z)δ x Tk 1(z) ▷Generatesyntheticpairsfornextcoupling
+xz z − − (cid:2) (cid:3)
+6 7:
+:
+endθ fk or=argmin θEx,z ∼pk xzEt ∼pt ω(t) ∥x −x θ(x t,t) ∥2 2 ▷Traink-rectifiedflow
+B Equivalenceofv-parameterizationandx-parameterization
+Givenx =(1 t)x+tzandz x=(x x)/t,theequivalenceofthex-parameterization(Eq.(2))
+t t
+− − −
+andthev-parameterization(Eq.(3))canbeshowninthefollowingway. Theresultisborrowedfrom
+theAppendixofLeeetal.[25],andweprovidehereforcompleteness.
+(cid:90) 1 (cid:90) 1
+E[ ||(z −x) −v θ(x t,t) ||2 2]dt= E[ ||(x
+t
+−x)/t −v θ(x t,t) ||2 2]dt (7)
+0 0
+(cid:90) 1
+= E[ ||(x
+t
+−x)/t −(x
+t
+−x θ(x t,t))/t ||2 2]dt (8)
+0
+(cid:90) 1 1
+= E[ t2||x −x θ(x t,t)) ||2 2]dt. (9)
+0
+ThisisequivalenttoEq.(2)withω(t)=1/t2.
+C AdditionalDetailsforFigure2
+Inthissection,weprovideadditionalresultsdetailsforFigure2.Figure7(a)showstheautocorrelation
+histogramonCIFAR-10whileFigure2(d)isonFFHQ-64. Figure7(b)showsthattheinception
+featuresofthesamplesinFigure2(b)rarelyoverlapwitheachother.
+For the autocorrelation plots, we use 30,000 pairs of (x,x ) and randomly sample z from the
+′ ′′
+standardGaussiandistribution. Forad-dimensionalvectoru,wedefinetheautocorrelationas:
+d l
+1 (cid:88)−
+R (l)= u u , (10)
+u k k+l
+d l
+− k=1
+whereu isthek-thelementofavectoruandl>0representsthelag.
+k
+D InitializationResults
+D.1 ProofofProposition1
+Considertwoperturbationkernelsp (x x)= (s(t)x,σ(t)2I)andp (x x)= (s(t)x,σ (t)2I):
+t t
+| N
+′t t
+| N
+′ ′
+1 1
+p (x x)= exp( x s(t)x 2) (11)
+t t | (2πσ(t)2)d/2 −2σ(t)2|| t − ||2
+1 1
+p (x x)= exp( x s(t)x 2). (12)
+′t t | (2πσ (t)2)d/2 −2σ (t)2|| t − ′ ||2
+′ ′
+14(a)Reconstructionloss (b)Distributionof∥z∥2
+2
+Figure7: (a)AutocorrelationplotonCIFAR-10analogoustoFigure2(d). (b)t-SNEvisualizationof
+theinception-v3featuresofthesamplesinFigure2(b). Theyshownegligibleoverlap.
+Let t(t) be such that s(t) = s′(t′). We will show that p (xx ) = p (x s′(t′)x ). We start by
+′ σ(t) σ′(t′) t | t ′t′ | s(t) t
+showing:
+s(t) 1 1 s(t)
+p ( ′ ′ x x)= exp( ′ ′ x s(t)x 2) (13)
+′t′ s(t) t | (2πσ (t)2)d/2 −2σ (t)2|| s(t) t − ′ ′ ||2
+′ ′ ′ ′
+1 1 s(t)
+= exp( ′ ′ (x s(t)x) 2) (14)
+(2πσ (t)2)d/2 −2σ (t)2|| s(t) t − ||2
+′ ′ ′ ′
+1 1 s(t)2
+= exp( ′ ′ x s(t)x 2) (15)
+(2πσ (t)2)d/2 −2σ (t)2 s(t)2 || t − ||2
+′ ′ ′ ′
+1 1 s(t)2
+= exp( x s(t)x 2) (16)
+(2πσ (t)2)d/2 −2σ(t)2s(t)2|| t − ||2
+′ ′
+1 1
+= exp( x s(t)x 2) (17)
+(2πσ (t)2)d/2 −2σ(t)2|| t − ||2
+′ ′
+1 (2πσ(t)2)d/2 1
+= exp( x s(t)x 2) (18)
+(2πσ (t)2)d/2(2πσ(t)2)d/2 −2σ(t)2|| t − ||2
+′ ′
+(2πσ(t)2)d/2
+= p (x x) (19)
+(2πσ (t)2)d/2 t t |
+′ ′
+(cid:18) (cid:19)d
+σ(t)
+= p (x x). (20)
+t t
+σ (t) |
+′ ′
+Here,Eq.(20)saysthatp (x x) p
+(s′(t′)x
+x)(butnotequal),whichisaminorfixfromthe
+t t | ∝ ′t′ s(t) t |
+originalproof[36]. Then,wehave
+1
+p (xx )= p (x)p (x x) (21)
+t t x t t
+| p (x ) |
+t t
+(cid:18) (cid:19)d
+s(t) σ(t) 1
+p (x ′ ′ x )= p (x)p (x x) (22)
+′t′ | s(t) t σ ′(t ′) p ′t′(s s′( (t t′ ))x t) x t t |
+Sincep (x s′(t′)x
+)shouldbeintegratedtoone,(cid:16)
+σ(t)
+(cid:17)d
+1 =(cid:82) p (x)p (x x)dxand
+′t′ | s(t) t σ′(t′) p′ t′(s s′ (( tt )′)xt) x t t |
+thustwodensitiesareequal. Astheposteriordensitiesarethesame,theirexpectationsarealsothe
+same.
+Inourcase,s(t)=1 t,σ(t)=t,andp (x x)istheperturbationkernelofeithertheVPorVE
+diffusionmodel. Now− wehavetofindt
+su′t cht
+t| hat 1 t = s′(t′).
+′ −t σ′(t′)
+15D.2 PerturbationKernelInstantiations
+We next provide the values of the converted time and scale of the variance preserving (VP) and
+varianceexploding(VE)diffusionmodels.
+Table6: Theconvertedtimeandscaleforthevariancepreserving(VP)andvarianceexploding(VE)
+diffusion models. Here, α(t) = exp(
+1(cid:82)t
+(19.9s+0.1)ds) following Song et al. [46], and the
+−2 0
+perturbationkerneloftheVEdiffusionis (x,t2I)followingKarrasetal.[21].
+N
+t t s s
+VP VE VP VE
+(cid:18) (cid:19)
+1 0.05+(cid:113) 0.0025 19.9 ln 1 t t α(tVP) 1
+9.95 − − · √(1 −− t)2+t2 1 −t 1 −t 1 −t
+VEdiffusionmodel Karrasetal.[21]definestheperturbationkerneloftheVEdiffusionmodelas
+p (x x) = (x,t2I). Then,t satisfies 1 t = s′(t′) = 1,sot = t ,and s′(t′) = 1 ,which
+′t t | N ′ −t σ′(t′) t′ ′ 1 t s(t) 1 t
+correspondtot ands inTable6. − −
+VE VE
+VPdiffusionmodel Songetal.[46]definestheperturbationkerneloftheVPdiffusionmodel
+as p (x x) = (α(t)x,(1 α(t)2)I), where α(t) := exp(
+1(cid:82)t
+(19.9s+0.1)ds) defined on
+′t t | N − −2 0
+t [0,1]. Then,t satisfies 1 t = s′(t′) = α(t′) . Fromhere,wehave
+∈ ′ −t σ′(t′) √1 α(t′)2
+−
+(1 t)2 α(t)2
+− = ′ (23)
+t2 1 α(t)2
+− ′
+(cid:115)
+(1 t)2
+α(t ′)= − , (24)
+t2+(1 t)2
+−
+whereweusedthefactthatα(t)>0. Sinceα(t)isamonotonicallydecreasingfunctionfort 0,
+(cid:113) ≥
+wecanuseitsinverseα −1tofindt ′ =α −1( t2( +1 (− 1t)2 t)2).
+−
+1(cid:90) t 19.9
+y =α(t)=exp( (19.9s+0.1)ds)=exp( t2 0.05t) (25)
+−2 − 4 −
+0
+19.9
+lny = t2 0.05t (26)
+− 4 −
+19.9
+t2+0.05t+lny =0 (27)
+4
+Applyingthequadraticformula,wehave
+(cid:113)
+t=
+−0.05
+±
+0.052 −4
+·
+19 4.9lny
+=
+−0.05 ±√0.0025 −19.9lny
+. (28)
+2 19.9 9.95
+· 4
+Sincey =α(t)ismonotonicallydecreasing,wecanchoosethepositiveroot:
+0.05+√0.0025 19.9lny
+α −1(y)= − − . (29)
+9.95
+Now,wearriveat
+(cid:114)
+(cid:113)
+(cid:115) (1 t)2 −0.05+ 0.0025 −19.9ln t2( +1 (− 1t)2 t)2
+t ′ =α −1( − )= − , (30)
+t2+(1 t)2 9.95
+−
+whichcorrespondstot inTable6. Also,wehave
+s′(t′)
+=
+α(t′),whichiss
+inTable6.
+VP s(t) 1 t VP
+−
+16Table7: Trainingconfigurationsforeachdataset. Welinearlyrampuplearningratesforalldatasets.
+Datasets Batchsize Dropout Learningrate Warmupiter.
+CIFAR-10 512 0.13 2e-4 5000
+FFHQ/AFHQ 256 0.25 2e-4 5000
+ImageNet 2048 0.10 1e-4 2500
+E ExperimentalDetails
+Before training 2-rectified flow, we generate data-noise pairs following the sampling regime of
+EDM[21]. ForCIFAR-10,wegenerate1Mpairsusing35NFEs. ForAFHQ,FFHQ,andImageNet,
+wegenerate5Mpairsusing79NFEs. WeuseHeun’ssecond-ordersolverforallcases. InTable2,
+wereporttheresultofconfigFinTable1. InImageNet,weusethebatchsizeof2048andtrainthe
+modelsfor700,000iterationsusingmixed-precisiontraining[33]withthedynamiclossscaling. We
+useconfigEinTable1forImageNet.
+WeprovidetrainingconfigurationsinTable7. Foralldatasets,weuseAdamoptimizer. Weusethe
+exponentialmovingaverage(EMA)with0.9999decayrateforalldatasets.
+OnImageNet,thetrainingtakesroughly9dayswith64NVIDIAV100GPUs. OnCIFAR-10and
+FFHQ/AFHQ,ittakesroughly4dayswith16and8V100GPUs,respectively. Forallcases,weuse
+theNVIDIADGX-2cluster. Topreventzero-divisionerrorwithEDMinitialization,wesamplet
+from[0.00001,0.99999]inpractice.
+License Thefollowingarelicensesforeachdatasetweuse:
+• CIFAR-10: Unknown
+• FFHQ:CCBY-NC-SA4.0
+• AFHQ:CCBY-NC4.0
+• ImageNet: Custom(research,non-commercial)
+F PseudocodefortheNewUpdateRule
+Algorithm 2 shows the pseudocode for generating samples using the new update rule (Sec. 5.3).
+UnlikethestandardEulerupdaterulewhichonlydependsonthecurrentstatez ,ournewupdate
+t
+ruleutilizesthepreviousstate(i.e.,z )togeneratethenextstatez andthuscanbeviewedasa
+1 t ∆t
+formofhistory-dependentsamplers. Obviously,incorporatingthein−itialstateonlywouldnotbethe
+bestchoice,andfurtherimprovementscouldbemadebytuningthisaspect[52].
+G BroaderImpacts
+This paper proposes an advanced algorithm to generate realistic data at high speed, which could
+havebothpositiveandnegativeimpacts. Forexample,itcouldbeusedforgeneratingmaliciousor
+misleadingcontent. Therefore,suchtechnologyshouldbedeployedandusedresponsiblyandwith
+caution. Webelievethatourworkisnotexpectedtohaveanymorepotentialnegativeimpactthan
+otherworkinthefieldofgenerativemodeling.
+17Algorithm2Generate
+def generate(z1, label, model, time_schedule, N, solver, sampler, device):
+"""
+z1: initial noise
+label: class label
+model: v_theta
+time_schedule: time schedule, e.g., [0.99999, 0.5, 0] for 2 steps
+N: NFE
+solver: ’euler’ or ’heun’
+sampler: ’default’ or ’new’
+"""
+z = z1.clone()
+cnt = 0
+for i in range(len(time_schedule[:-1])):
+t = torch.ones((z.shape[0]), device=device) * time_schedule[i]
+t_next = torch.ones((z.shape[0]), device=device) * time_schedule[i+1]
+dt = t_next[0] - t[0]
+vt = model(z, t, label)
+x0hat = z - vt * t.view(-1,1,1,1)
+if solver == ’heun’ and cnt < N - 1: # Heun correction
+if sampler == ’default’:
+z_next = z.detach().clone() + vt * dt
+elif sampler == ’new’:
+z_next = (1 - t_next.view(-1,1,1,1)) * x0hat + t_next.view(-1,1,1,1) * z1
+vt_next = model(z_next, t_next, label)
+vt = (vt + vt_next) / 2
+x0hat = z - vt * t.view(-1,1,1,1)
+if sampler == ’default’:
+z = z.detach().clone() + vt * dt
+elif sampler == ’new’:
+z = (1 - t_next.view(-1,1,1,1)) * x0hat + t_next.view(-1,1,1,1) * z1
+cnt += 1
+return z
+H UncuratedSyntheticSamples
+We provide uncurated synthetic samples from our 2-rectified flow++ on CIFAR-10, AFHQ, and
+ImageNetinFigures8,9,10,11,20,21,16,17,18,19,12,13,14,and15. Weuseournewsampler
+(Sec.5.3)togeneratetheseimages.
+18Figure8: Syntheticsamplesfrom2-rectifiedflow++onCIFAR-10withNFE=1(FID=3.38).
+Figure9: Syntheticsamplesfrom2-rectifiedflow++onCIFAR-10withNFE=2(FID=2.76).
+19Figure10: Syntheticsamplesfrom2-rectifiedflow++onCIFAR-10withNFE=4(FID=2.50).
+Figure11: Syntheticsamplesfrom2-rectifiedflow++onCIFAR-10withNFE=5(FID=2.45).
+20Figure12: Syntheticsamplesfrom2-rectifiedflow++onImageNet64 64withNFE=1(FID=4.31).
+×
+Figure13: Syntheticsamplesfrom2-rectifiedflow++onImageNet64 64withNFE=2(FID=3.64).
+×
+21Figure14: Syntheticsamplesfrom2-rectifiedflow++onImageNet64 64withNFE=4(FID=3.44).
+×
+Figure15: Syntheticsamplesfrom2-rectifiedflow++onImageNet64 64withNFE=8(FID=3.32).
+×
+22Figure16: Syntheticsamplesfrom2-rectifiedflow++onAFHQ64 64withNFE=1(FID=4.11).
+×
+Figure17: Syntheticsamplesfrom2-rectifiedflow++onAFHQ64 64withNFE=2(FID=3.12).
+×
+23Figure18: Syntheticsamplesfrom2-rectifiedflow++onAFHQ64 64withNFE=4(FID=2.90).
+×
+Figure19: Syntheticsamplesfrom2-rectifiedflow++onAFHQ64 64withNFE=5(FID=2.86).
+×
+24Figure20: Syntheticsamplesfrom2-rectifiedflow++onFFHQ64 64withNFE=1(FID=5.21).
+×
+Figure21: Syntheticsamplesfrom2-rectifiedflow++onFFHQ64 64withNFE=2(FID=4.26).
+×
+25
