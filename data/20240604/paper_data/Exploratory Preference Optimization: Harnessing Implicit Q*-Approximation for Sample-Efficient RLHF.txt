@@ -1,0 +1,2157 @@
+Exploratory Preference Optimization:
+Harnessing Implicit Q*-Approximation for Sample-Efficient RLHF
+Tengyang Xie∗ Dylan J. Foster∗ Akshay Krishnamurthy
+tx@cs.wisc.edu dylanfoster@microsoft.com akshaykr@microsoft.com
+Corby Rosset Ahmed Awadallah Alexander Rakhlin
+corbyrosset@microsoft.com ahmed.awadallah@microsoft.com rakhlin@mit.edu
+May 30, 2024
+Abstract
+Reinforcement learning from human feedback (RLHF) has emerged as a central tool for language
+model alignment. We consider online exploration in RLHF, which exploits interactive access to human or
+AI feedback by deliberately encouraging the model to produce diverse, maximally informative responses.
+ByallowingRLHFtoconfidentlystrayfromthepre-trainedmodel,onlineexplorationoffersthepossibility
+of novel, potentially super-human capabilities, but its full potential as a paradigm for language model
+training has yet to be realized, owing to computational and statistical bottlenecks in directly adapting
+existing reinforcement learning techniques.
+WeproposeanewalgorithmforonlineexplorationinRLHF,ExploratoryPreferenceOptimization(XPO),
+whichissimpleandpractical—aone-linechangeto(online)DirectPreferenceOptimization(DPO;Rafailov
+et al., 2023)—yet enjoys the strongest known provable guarantees and promising empirical performance.
+XPOaugmentstheDPOobjectivewithanovelandprincipledexplorationbonus,empoweringthealgorithmto
+explore outside the support of the initial model and human feedback data. In theory, we show that XPO is
+provablysample-efficientandconvergestoanear-optimallanguagemodelpolicyundernaturalexploration
+conditions, irrespective of whether the initial model has good coverage. Our analysis, which builds on the
+observation that DPO implicitly performs a form of Q⋆-approximation (or, Bellman error minimization),
+combinespreviouslydisparatetechniquesfromlanguagemodelingandtheoreticalreinforcementlearningin
+a serendipitous fashion through the perspective of KL-regularized Markov decision processes. Empirically,
+we find that XPO is more sample-efficient than non-exploratory DPO variants in a preliminary evaluation.
+1 Introduction
+Reinforcement learning from human feedback (RLHF) is a central tool to align language models to human
+values and elicit useful behavior (Christiano et al., 2017; Bai et al., 2022; Ouyang et al., 2022). Using human-
+labeled preference data, RLHF achieves enhanced capabilities using a modest amount of data compared to
+unsupervised pre-training (on the order of tens of millions versus trillions of tokens) by treating the language
+model as a “policy” and optimizing it with reinforcement learning techniques.
+Even though RLHF is typically only applied with preference data from humans or other language models, one
+might hope that it has potential to produce super-human capabilities because recognizing novel behavior and
+insights is typically easier than generating novel behavior. Indeed, it is often much easier to verify correctness
+of a given proof or program than it is to produce one from scratch. By repeatedly generating new proposals
+and labeling them with human feedback, a language model could gradually push beyond the boundary
+of human capabilities. Unfortunately, even with the great disparity in difficulty between generation and
+verification, a major barrier to achieving enhanced capabilities via RLHF is the volume of human feedback,
+∗Equalcontribution
+1
+4202
+yaM
+13
+]GL.sc[
+1v64012.5042:viXrai.e., sample complexity, required by existing methods. Thus, a promising research direction is to develop
+sample-efficient methods for RLHF.
+A natural way to address the sample efficiency problem for RLHF is to augment algorithms with online
+exploration. OnlineexplorationexploitsinteractiveaccesstohumanorAIfeedbackbydeliberatelyencouraging
+the model to produce diverse, novel responses. RLHF algorithms that exploit online feedback have received
+limited investigation, and in spite of encouraging initial results, existing approaches either do not update
+the language model (Dwaracherla et al., 2024), or engage in purely passive exploration (Guo et al., 2024;
+Gao et al., 2024), with no mechanism to encourage novelty or diversity. Passive exploration is intuitively
+insufficient, as we are unlikely to generate novel and correct proofs by chance; we make this precise in
+Proposition 2.1. Thus, the full potential of online exploration as a new paradigm for language model training
+has yet to be realized.
+The central challenge in equipping language models with deliberate exploration is to efficiently navigate the
+vast, combinatorially large space of token sequences to find responses for which feedback will be maximally
+informative. Thecontemporarytheoryofreinforcementlearningoffers—ataconceptuallevel—solutionstothis
+problem, providing algorithm design principles for exploration that can optimally take advantage of problem
+structure and achieve sample efficiency to the best extent one can hope for (Jiang et al., 2017; Agarwal et al.,
+2019; Foster and Rakhlin, 2023). However, the most powerful approaches in this space are computationally
+intractableinthegeneralreinforcementlearningsetting(Jiangetal.,2017;Jinetal.,2021;Fosteretal.,2021),
+andpriorattemptstoadaptthemtoRLHFeithermakeunrealisticmodelingassumptions(i.e.,donotallowfor
+general function approximation) (Xu et al., 2020; Novoseller et al., 2020; Pacchiano et al., 2021; Wu and Sun,
+2023;Zhanetal.,2023b;Duetal.,2024;Dasetal.,2024),orarecomputationallyinefficientandnotfeasibleto
+faithfullyimplement(Chenetal.,2022;Wangetal.,2023;Yeetal.,2024). Canwe, perhapsbyspecializingto
+languagemodeling,developpractical,provable,andempiricallyefficientonlineexplorationmethodsforRLHF?
+1.1 Contributions
+We propose a new algorithm for online exploration in RLHF, Exploratory Preference Optimization (XPO),
+which is simple and practical—a one-line change to (online) Direct Preference Optimization (DPO; Rafailov
+et al. (2023); Guo et al. (2024))—yet enjoys the strongest known provable guarantees and promising empirical
+performance. XPO augments the DPO objective with a novel and principled exploration bonus, empowering the
+algorithm to explore outside the support of the initial model. We show that XPO is provably sample-efficient,
+and converges to a near-optimal language model policy under natural exploration conditions (Jin et al., 2021;
+Xie et al., 2023; Zhong et al., 2022). Critically, and in contrast to prior work, our theory holds irrespective
+of whether the initial model is sufficiently exploratory on its own. To summarize:
+XPO offers the first practical and provably sample-efficient online exploration algorithm for RLHF with general
+function approximation.
+Technical highlights. Our design and analysis of XPO uses previously disparate techniques from language
+modeling and theoretical reinforcement learning, combining them in a serendipitous fashion through the
+perspective of KL-regularized Markov decision processes (Neu et al., 2017).
+1. First, generalizing Rafailov et al. (2024), we observe that DPO can be viewed as implicitly performing
+Bellman error minimization (Xie and Jiang, 2020) to approximate the optimal value function Q⋆ in a
+KL-regularized MDP. We use this to provide a novel KL-regularized regret decomposition.
+2. Then, we show that global optimism (Jiang et al., 2017; Jin et al., 2021; Xie et al., 2023), a powerful
+RL exploration technique that has classically been viewed as computationally intractable (Dann et al.,
+2018; Kane et al., 2022; Golowich et al., 2024), can be implemented in any KL-regularized MDP with
+deterministic transitions (generalizing language modeling) by adding a surprisingly simple exploration
+bonus to the DPO objective. This yields the XPO objective.
+Weexpectouranalysistechniquesandperspectivetobeusefulmorebroadly. Inparticular, theguaranteesfor
+XPO hold not just for language models, but for any reinforcement learning problem with a stochastic starting
+state and (potentially unknown) deterministic transition dynamics (“Deterministic Contextual MDP”).
+2Empirical results. In Section 3.4, we perform a proof-of-concept experiment to validate our theory, and
+find that XPO can match the performance of DPO variants (Xu et al., 2023; Tran et al., 2024; Dong et al., 2024)
+based on passive or heuristic exploration using significantly less preference data. These initial findings suggest
+thataugmentinglanguagemodelswithonlineexplorationmayindeedleadtobenefitsoverpassiveexploration.
+Concurrent work. Two concurrent and independent works posted to arXiv just before this preprint, Cen
+et al. (2024); Zhang et al. (2024), propose algorithms that equip DPO with exploration bonuses similar to
+XPO. On the theoretical side, both works are restricted to the contextual bandit formulation of RLHF, and
+do not consider the general reinforcement learning framework in this work or make the connection to Q⋆-
+approximation and KL-regularized MDPs. Compared to our results, which give provable sample complexity
+guarantees with general function approximation, Zhang et al. (2024) do not provide sample complexity
+guarantees, while Cen et al. (2024) provide guarantees only for linear contextual bandits. In addition, and
+importantly, the sample complexity guarantees in Cen et al. (2024) have exponential dependence on the KL
+regularization parameter, which our results avoid. Empirically, both works find benefits from exploration.
+1.2 Paper Organization
+Section 2 presents background on RLHF, online feedback, and the necessity of exploration. Section 3 presents
+our algorithm and main theoretical guarantees, including motivation behind the algorithm design and a proof
+sketch. Section 3.4 presents experimental results, and we conclude with discussion in Section 4. Proofs and
+additional results are deferred to the appendix.
+Notation. For an integer n∈N, we let [n] denote the set {1,...,n}. For a set X, we let ∆(X) denote the
+set of all probability distributions over X. We adopt standard big-oh notation, and write f =O(cid:101)(g) to denote
+that f =O(g· max{1,polylog(g)}) and a≲b as shorthand for a=O(b).
+2 Background
+This section contains necessary background to present our main results. We begin by recalling the standard
+formulation of reinforcement learning from human feedback from offline data (Section 2.1), then introduce
+the online feedback model and highlight the need for systematic exploration (Section 2.2).
+2.1 Reinforcement Learning from Human Feedback
+We study RLHF in a general reinforcement learning formulation which subsumes the token-level MDP
+formulation considered in prior work (Rafailov et al., 2024), but is somewhat broader.
+Markov decision processes. We consider an episodic finite-horizon Markov decision process framework.
+Formally, a horizon-H MDP M = (H,S,A,P,r,ρ) consists of a (potentially very large) state space S,
+action space A, probability transition function P : S ×A → ∆(S), reward function r : S ×A → R, and
+initial state distribution ρ ∈ ∆(S). We assume without loss of generality that the state space is layered
+such that S = S ∪S ∪···∪S , where S is the set of states reachable at step h, and S ∪S = ∅ for
+1 2 H h h h′
+h ̸= h′. A (randomized) policy is a mapping π : S → ∆(A), and induces a distribution over trajectories
+τ = (s ,a ),...,(s ,a ) and rewards r ,...,r via the following process. The initial state is drawn via
+1 1 H H 1 H
+s ∼ ρ, then for h = 1,...,H: a ∼ π(s ), r = r(s ,a ), and s ∼ P(s ,a ). We let E [·] and P [·]
+1 h h h h h h+1 h h π π
+denote expectation and probability under this process, respectively. We assume that (cid:80)H r ∈ [0,R ]
+h=1 h max
+almost surely for a parameter R > 0. For a trajectory τ and policy π we define r(τ) = (cid:80)H r(s ,a )
+max h=1 h h
+and π(τ)=(cid:81)H π(a |s ).
+h=1 h h
+Inthecontextoflanguagemodeling, themainobjectofinterestisthetoken-level MDP (Rafailovetal.,2024).
+Here, s ∼ρ represents a prompt, each action a represents a token (with A representing the vocabulary),
+1 h
+and the state s = (s ,a ,...,a ) is the prompt and sequence of tokens so far. The language model is
+h 1 1 h−1
+represented by a policy π, which maps the current context s =(s ,a ,...,a ) to a distribution over the
+h 1 1 h−1
+3next token a . The trajectory τ =(s ,a ),...,(s ,a ) produced by this process can be interpreted as the
+h 1 1 H H
+language model’s response to the prompt s ; we will occasionally use the terms “trajectory” and “response”
+1
+synonymously in this context.
+OurmainresultsapplytoanyDeterministicContextualMDP (DCMDP)forwhichtheinitialstateisstochastic,
+but the subsequent transition dynamics are deterministic and potentially unknown. This formulation
+encompasses but strictly generalizes the token-level MDP.
+RLHF with offline data. In the classical RLHF formulation (Christiano et al., 2017; Bai et al., 2022;
+Ouyangetal.,2022),weassumeaccesstoadatasetD ={(τ ,τ )}oflabeledpreferencedata. Eachpairof
+pref + −
+trajectories (responses) (τ ,τ ) represents a positive and negative example; both trajectories begin from the
++ −
+sameinitialstate(prompt)s ,andaregeneratedbyfirstsamplingapair(τ,τ)viaτ ∼π |s andτ ∼π |s
+1 (cid:101) ref 1 (cid:101) ref 1
+in the underlying DCMDP M (e.g., token-level MDP), and then ordering them as (τ ,τ ) based on a binary
++ −
+preference y ∼P(τ ≻τ |s ). Here, π is a reference policy (language model), which is typically obtained via
+(cid:101) 1 ref
+supervised fine-tuning, and the preference y ∼P(τ ≻τ |s ) is obtained from a human or AI annotator. Fol-
+(cid:101) 1
+lowingastandardassumption(Christianoetal.,2017;Rafailovetal.,2023,2024), weassumethatpreferences
+follow the Bradley-Terry model (Bradley and Terry, 1952): For trajectories τ and τ both beginning with s ,
+(cid:101) 1
+exp(r(τ))
+P(τ ≻τ |s )= . (1)
+(cid:101) 1 exp(r(τ))+exp(r(τ))
+(cid:101)
+Based on the preference dataset D , the goal is to learn a policy π with high reward. Following prior
+pref (cid:98)
+theoretical works on RLHF, we consider a KL-regularized reward objective (Xiong et al., 2023; Ye et al.,
+2024), defined for a regularization parameter β >0, via
+H (cid:20) (cid:21)
+(cid:88) π(τ)
+J (π):= J(π)−β· E [D (π(·|s )∥π (·|s ))]=E r(τ)−βlog . (2)
+β π KL h ref h π π (τ)
+ref
+h=1
+We aim to compute a policy π such that
+(cid:98)
+maxJ (π)−J (π)≤ε
+β β (cid:98)
+π
+for some small ε>0. Such a guarantee means that π near-optimally maximizes reward, yet stays relatively
+(cid:98)
+close to π (as a function of β). The choice of β >0, which is important for safety and reliability, is typically
+ref
+viewed as a domain specific hyperparameter (Tang et al., 2024). Our main focus in this paper is the small-β
+regime, which allows π to meaningfully deviate from π and generate potentially novel responses. Notably,
+(cid:98) ref
+by taking β sufficiently small, it is possible to translate suboptimality bounds for the regularized reward into
+bounds for the unregularized reward (e.g., Zhu et al., 2023; Zhan et al., 2023a).
+We refer to this setting as offline RLHF because the algorithm relies only on the offline dataset D for
+pref
+training, and does not perform any active data collection.
+Direct preference optimization (DPO). Initial approaches to offline RLHF (Christiano et al., 2017;
+Ouyangetal.,2022)proceedbyfirstestimatingarewardfunctionr fromD usingtheBradley-Terrymodel,
+(cid:98) pref
+then optimizing an estimated version of the KL-regularized objective in Eq.(2) using policy optimization
+methods like PPO, i.e.,
+(cid:34) H (cid:18) (cid:19)(cid:35)
+π ≈argmaxE (cid:88) r(s ,a )−βlog π(a h |s h) . (3)
+(cid:98) π (cid:98) h h π (a |s )
+π∈Π ref h h
+h=1
+The starting point for our work is an alternative approach introduced by Rafailov et al. (2023), Direct
+Preference Optimization (DPO). DPO is motivated by a closed-form solution for the policy that optimizes the
+KL-regularizedobjectiveinEq.(2),andcondensesthetwo-stepprocessaboveintoasinglepolicyoptimization
+4objective, removing the need for reward function estimation. Concretely, DPO solves1
+(cid:20) (cid:18) (cid:19)(cid:21)
+π =argmin
+(cid:88)
+−log σ βlog
+π(τ +)
+−βlog
+π(τ −)
+(4)
+(cid:98) π (τ ) π (τ )
+π∈Π ref + ref −
+(τ+,τ−)∈Dpref
+for a user-specified policy class Π, where σ(x):= exp(x) is the sigmoid function.
+1+exp(x)
+2.2 Online Feedback and Exploration in RLHF
+DPO and other offline RLHF methods have achieved great success in language model alignment, but are
+fundamentally limited to behaviors that are well-supported by the initial model π and preference data
+ref
+D . RLHF with online feedback offers a promising approach to move beyond this limitation by collecting
+pref
+feedback from responses sampled from the model during training (Guo et al., 2024).
+Formally, the protocol proceeds in T rounds. At each round t, we receive an initial state s(t) and sample
+1
+two responses τ ∼ π(t) | s and τ ∼ π(t) | s from the current policy π(t). The prompts are then labeled
+1 (cid:101) 1
+as (τ(t),τ(t)) and added to the preference dataset via D(t+1) ← D(t) ∪{(τ(t),τ(t))}, which is then used to
++ − pref pref + −
+compute an updated policy π(t+1). In practice, the prompts are typically labeled via human feedback or AI
+feedback (e.g., a larger, more powerful language model (Guo et al., 2024; Rosset et al., 2024)); we assume
+the preferences P(τ(t) ≻τ(t) |s(t)) follow the Bradley-Terry model in Eq.(1).
+(cid:101) 1
+2.3 The Necessity of Deliberate Exploration
+Existing approaches to online RLHF adapt offline techniques by applying them iteratively. As an example,
+Online DPO (Guo et al., 2024) proceeds as follows:2
+1. Compute π(t) by solving the DPO objective in Eq.(4) with the current preference dataset D(t) .
+pref
+2. Sample τ(t),τ(t) ∼π(t) |s(t), then label as (τ(t),τ(t)) and update D(t+1) ←D(t) ∪{(τ(t),τ(t))}.
+(cid:101) 1 + − pref pref + −
+We refer to such an approach as passive exploration, as the responses are sampled directly from the policy
+π(t) without an explicit mechanism to encourage diversity. The following proposition shows that passive
+exploration is insufficient to discover novel behavior: Unless the initial policy π has good coverage, Online
+ref
+DPO can fail to learn a near-optimal policy.
+Proposition 2.1 (Necessity of deliberate exploration). Fix β ∈(0,1log(2)), and consider the bandit setting
+8
+(H = 1, S = ∅, and |A| = 2). There exists a reference policy π such that for all T ≤ 1exp( 1 ), with
+ref 2 8β
+constant probability, all of the policies π(1),...,π(T+1) produced by Online DPO satisfy
+1
+maxJ (π)−J (π(t))≥ ∀t∈[T +1]. (5)
+π β β 8
+That is, the sample complexity required by Online DPO is exponential in 1, which is unacceptable in the
+β
+small-β regime; inspecting the proof, it is straightforward to see that the same conclusion holds for Iterative
+DPO and purely offline DPO. The idea behind Proposition 2.1 is simple: If π places small probability mass
+ref
+on the optimal action, Online DPO may fail to ever explore this action until the number of iterations is
+exponentially large. This reflects the intuition that in the small-β regime, more deliberate exploration is
+required to discover behaviors or capabilities not already covered by π .
+ref
+Remark 2.1. Various empirical works have suggested that offline DPO can under-perform relative to vanilla
+RLHF with PPO due to a lack of on-policy sampling (Xiong et al., 2023; Guo et al., 2024; Dong et al.,
+2024; Tang et al., 2024). Proposition 2.1 highlights a conceptually distinct phenomenon, where both of the
+aforementioned algorithms (as well as online variants of DPO) fail due to poor coverage from π , in spite
+ref
+of on-policy sampling.
+1WeadopttheconventionthatthevalueoftheDPOobjectiveis+∞ifπ doesnotsatisfyπ≪π .
+ref
+2ThecloselyrelatedIterative DPOapproach(Xuetal.,2023;Tranetal.,2024)proceedsinthesamefashion,butsamples
+alargebatchofpreferencepairsfromeachpolicyπ(t) insteadofasinglepair,andperformsfewerupdates.
+53 Exploratory Preference Optimization
+We now present our main algorithm XPO, which addresses the limitations of existing alignment methods by
+augmenting DPO with active exploration. We first describe the algorithm and motivation (Section 3.1), then
+present theoretical guarantees (Section 3.2), and sketch the analysis (Section 3.3).
+3.1 The XPO Algorithm
+Algorithm 1 Exploratory Preference Optimization (XPO)
+input: Number of iterations T, KL-regularization coefficient β >0, optimism coefficient α>0.
+1: Initialize π(1) ←π ref, D p(0 re)
+f
+←∅.
+2: for iteration t=1,2,...,T do
+3: Generate response pair (τ(t),τ (cid:101)(t)) via: s( 1t) ∼ρ, τ(t) ∼π(t) |s( 1t), and τ (cid:101)(t) ∼π ref |s 1(t).
+4: Label with preference: Label (τ(t),τ (cid:101)(t)) as (τ +(t),τ −(t)) with preference y(t) ∼P(τ(t) ≻τ (cid:101)(t)).
+5: Update preference data: D(t) ←D(t−1)(cid:83) {(τ(t),τ(t))}.
+pref pref + −
+6: Direct preference optimization with global optimism: Calculate π(t+1) via
+ 
+π(t+1)
+←argmin α(cid:88)t
+logπ(τ(i))−
+(cid:88) log(cid:20) σ(cid:18)
+βlog
+π(τ +)
+−βlog
+π(τ −) (cid:19)(cid:21)
+.
+(cid:101) π (τ ) π (τ )
+π∈Π 
+i=1 (τ+,τ−)∈D p( rt e)
+f
+ref + ref − 
+7: return: π (cid:98) =argmax π∈{π(1),...,π(T+1)}J β(π(t)). //Can compute using validation data.
+XPO (Exploratory Preference Optimization) is displayed in Algorithm 1. The algorithm takes as input a
+user-specified policy class Π and proceeds in almost the same fashion as Online DPO. For each step t∈[T],
+given the current policy π(t) and an initial state s(t), the algorithm begins by sampling a pair of trajectories
+1
+τ(t) ∼ π(t) | s(t) and τ(t) ∼ π | s(t), which are labeled as (τ(t),τ(t)) based on the preference feedback and
+1 (cid:101) ref 1 + −
+used to update the preference dataset via D(t+1) ←D(t) ∪{(τ(t),τ(t))}. The most important step is Line 6,
+pref pref + −
+which updates the policy to π(t+1) via the following optimistic variant of the DPO objective:
+ 
+π(t+1)
+←argmin α(cid:88)t
+logπ(τ(i))−
+(cid:88) log(cid:20) σ(cid:18)
+βlog
+π(τ +)
+−βlog
+π(τ −) (cid:19)(cid:21)
+. (6)
+(cid:101) π (τ ) π (τ )
+π∈Π 
+i=1 (τ+,τ−)∈D p( rt e)
+f
+ref + ref − 
+Here, α≥0 is an optimism parameter; for α=0, the algorithm nearly equivalent to Online DPO, except that
+we sample τ(t) ∼ π(t) | s(t) and τ(t) ∼ π | s(t) instead of sampling (τ(t),τ(t)) ∼ π(t) | s(t) at each iteration.
+1 (cid:101) ref 1 (cid:101) 1
+As we will see now, for α>0, the term
+t
+(cid:88)
+α logπ(τ(i)) (7)
+(cid:101)
+i=1
+in Eq.(6) encourages the policy to behave optimistically, and produce diverse responses τ.
+Motivation. Optimisminthefaceofuncertainty isawidelyusedtechniqueinreinforcementlearningtheory
+(Agarwal et al., 2019; Lattimore and Szepesvári, 2020; Foster and Rakhlin, 2023). In its most standard form,
+the optimism principle is usually stated as follows: One should explore by choosing their actions according to
+the most optimistic view of the world, given all of the data that has already been observed. The idea is that if
+we choose a decision according to this principle, one of two good things can happen: (i) the optimistic view is
+correct, and we receive large reward; or (ii) the optimistic view is incorrect, but we receive useful information
+that will help to better estimate the state of the world in subsequent iterations.
+Optimism is typically implemented by directly estimating rewards, and it is not obvious at first glance why
+Eq.(7) can even be interpreted as a form of optimism. To understand, this consider a log-linear policy
+(cid:16) (cid:17)
+π (a |s )=π (a |s )exp f(sh,ah)−Vf(sh) , where V (s ):= βlog(cid:80) π (a |s )ef(sh,ah)/β. Define
+f h h ref h h β f h ah∈A ref h h
+[T f](s ,a ):= r(s ,a )+E[V (s )|s ,a ] as the KL-regularized Bellman operator (Ziebart et al., 2008;
+β h h h h f h+1 h h
+6Ziebart, 2010). We observe, generalizing Rafailov et al. (2024), that for any DCMDP, for all trajectories
+τ =(s ,a ),...,(s ,a ),
+1 1 H H
+H
+βlog
+π f(τ)
+=r(τ)−V (s
+)+(cid:88)
+(f(s ,a )−[T f](s ,a )). (8)
+π (τ) f 1 h h β h h
+ref
+h=1
+That is, the policy can be viewed as maintaining an internal model for the trajectory reward, up to (i) a
+constant offset V (s ) that depends only on s ; and (ii) the sum of Bellman errors (f(s ,a )−[T f](s ,a )).
+f 1 1 h h β h h
+The optimal KL-regularized policy π⋆ = argmax J (π) satisfies π⋆ = π , where Q⋆/V⋆ denote KL-
+β π β β Q⋆ β β β
+regularized value functions (see Appendix C.4 for formal definitions and details), and has zero Bellman error
+(Q⋆ =[T Q⋆]), so that
+β β β
+π⋆(τ)
+βlog β =r(τ)−V⋆(s ) ∀τ. (9)
+π (τ) β 1
+ref
+In other words, π⋆ implements an accurate internal reward model. From this viewpoint:
+β
+1. The standard DPO term in Eq.(6) encourages the policy π to build an accurate internal model for
+rewards under the Bradley-Terry model; this can be viewed as a form of implicit Q⋆-approximation,
+since we are implicitly minimizing the Bellman errors in Eq.(8).
+2. In light of Eq.(9) it is natural to approximate Vπ(s ), the regularized value function for π, by
+β 1
+r(τ)−βlog π(τ) . Using this approximation, the first term in Eq.(6) biases the policy toward a large
+πref(τ)
+value function such that V⋆ ≲Vπ, implementing implicit (global) optimism in the face of uncertainty
+β β
+(uptoaninconsequentialdifferenceinon-policyrewards). Thefactthatthissufficestodriveexploration
+is quite subtle, and leverages non-trivial properties of the KL-regularized MDP, including the fact that
+Eq.(8) holds on a per-trajectory basis.
+On the sampling policy. As remarked above, another difference between XPO and online/iterative
+DPO is that instead of sampling the preference pairs via (τ(t),τ(t)) ∼ π(t), we sample τ(t) ∼ π(t) | s(t)
+(cid:101) 1
+and τ(t) ∼ π | s(t). This small change is important: it is possible to show that in general, sampling
+(cid:101) ref 1
+(τ(t),τ(t))∼π(t) can lead to degenerate behavior in which the algorithm fails to adequately explore in the
+(cid:101)
+small-β regime, even when π itself has good coverage.
+ref
+While we use τ(t) ∼ π | s(t) in Algorithm 1, XPO is significantly more general, and leads to provable
+(cid:101) ref 1
+guarantees for any fixed sampling policy τ(t) ∼π |s(t), as well as certain data-dependent sampling schemes
+(cid:101) (cid:101) 1
+(e.g., sampling τ(t) ∼unif(π(1),...,π(t))|s(t)); different choices may have different tradeoffs and benefits in
+(cid:101) 1
+practice. A general version of XPO which leaves the sampling distribution for τ(t) as a free parameter is given
+(cid:101)
+in Appendix C.1 (Algorithm 2).
+Practicality. XPO is highly practical, and can easily be incorporated into existing language modeling and
+RLHF pipelines as a drop-in replacement for Online DPO (a one-line change to existing code). The theoretical
+guaranteesforthealgorithmcontinuetoholdunderstandardmodificationssuchas(i)incorporatingadditional
+preference data from π or another reference policy; and (ii) performing a smaller number of iterations, but
+ref
+collecting a larger batch of preference data from π(t) (as in Iterative DPO).
+3.2 Theoretical Guarantees
+To provide sample complexity guarantees for XPO, we make some standard statistical assumptions. The first
+assumption asserts that the policy class Π is powerful enough to represent the optimal KL-regularized policy.
+Assumption 3.1 (Policy realizability). The policy class Π satisfies π⋆ ∈Π.
+β
+Policy realizability is a minimal assumption for sample-efficient reinforcement learning (Agarwal et al., 2019;
+Lattimore and Szepesvári, 2020; Foster and Rakhlin, 2023); through Eq.(9), it is equivalent to a form of
+reward/value realizability. For language modeling, Π will typically correspond to a class of language models
+with fixed architecture but variable weights. Next, we make a regularity assumption on the policies in Π
+(Rosset et al., 2024).
+7Assumption 3.2 (Bounded density ratios). For all π ∈Π and trajectories τ =(s ,a ),...,(s ,a ),
+1 1 H H
+(cid:12) (cid:18) (cid:19)(cid:12)
+(cid:12) (cid:12)log π(τ) (cid:12) (cid:12)≤ V max. (10)
+(cid:12) π (τ) (cid:12) β
+ref
+Note that V is measurable and controllable in practice; our guarantees scale polynomially with this
+max
+parameter. For log-linear policies where π(a|s)∝exp(f(s,a)/β), we expect V
+max
+≲R max.
+To quantify the rate at which the algorithm converges to an optimal policy, we require an exploration
+condition, which limits the amount of times the algorithm can be surprised by substantially new state
+distributions; such assumptions are necessary for reinforcement learning with general function approximation
+(Jiang et al., 2017; Jin et al., 2021; Xie et al., 2023). Our main result is stated in terms of a condition
+known as coverability (Xie et al., 2023), but more general guarantees are given in Appendix C. Define
+dπ(τ):=P ((s ,a ),...,(s ,a )=τ).
+π 1 1 H H
+Definition 3.1 (Coverability). The trajectory-level coverability coefficient is given by
+dπ(τ)
+C (Π):= inf sup sup . (11)
+cov µ∈∆((S×A)H)τ∈(S×A)Hπ∈Π µ(τ)
+Assumption 3.2 implies a trivial bound of C cov(Π) ≲ exp(cid:0)Vm βax(cid:1). Indeed, C cov(Π) measures coverage with
+respect to the best possible distribution µ, while the bound implied by Assumption 3.2 takes µ=π , so we
+ref
+expect C (Π)≪exp(V /β) when π does not provide adequate coverage on its own (e.g., the example
+cov max ref
+in Proposition 2.1). This is precisely the setting where we expect deliberate exploration to be helpful. We
+also note that there is a trivial bound C (Π)≤|A|H, but because coverability depends on the structure of
+cov
+the (restricted) class Π, the value can be significantly smaller in general (e.g., if policies π ∈Π are highly
+correlated or stochastic).
+The main sample complexity guarantee for XPO is as follows.
+Theorem 3.1 (Sample complexity bound for XPO). Suppose that Assumptions 3.1 and 3.2 hold. For any
+(cid:113)
+β > 0 and T ∈ N, if we set α = c· β · log(|Π|Tδ−1) for an absolute constant c > 0, then
+(Vmax+Rmax)e2Rmax T·Ccov(Π)
+Algorithm 1 ensures that with probability at least 1−δ,3
+(cid:115)
+C (Π)log(|Π|Tδ−1)log2(T)
+J (π⋆)−J (π)≲(V +R )e2Rmax · cov .
+β β β (cid:98) max max T
+Let us discuss some key features of this result.
+Statistical efficiency. Theorem 3.1 shows that XPO converges to a near-optimal policy with sample
+complexity polynomial in the coverability coefficient C (Π); in particular, to learn an ε-optimal policy
+cov
+(cid:16) (cid:17)
+T = O(cid:101) Ccov(Π ε) 2log|Π| episodes are required.4 By scaling with C cov(Π), Theorem 3.1 can be viewed as a
+strict improvement over offline RLHF (Zhu et al., 2023; Zhan et al., 2023a), as well as prior works on
+online RLHF that rely on passive exploration (Xiong et al., 2023; Gao et al., 2024; Chang et al., 2024).
+In particular, these works scale with coverage parameters for π , the simplest of which take the form
+ref
+C (Π):= sup sup π(τ) . Under Assumption 3.2, we have that C (Π)=exp(V /β) which,
+conc τ∈(S×A)H π∈Π πref(τ) conc max
+as discussed above, upper bounds C (Π) but can be much larger when π has poor coverage. The
+cov ref
+dependence on C (Π) in Theorem 3.1 reflects the fact that XPO can explore responses not covered by π .5
+cov ref
+3ExponentialdependenceontherewardrangeRmax isanintrinsicfeatureoftheBradley-Terrymodel,andcanbefoundin
+allpriorsamplecomplexityguaranteesforthisframework,offlineandonline(Dasetal.,2024;Rossetetal.,2024).
+4Westatetheresultforfiniteclasses(log|Π|<∞)tosimplifypresentation,followingthestandardinRLtheory(Agarwal
+etal.,2019;FosterandRakhlin,2023);theresultreadilyextendstoinfiniteclassesthroughstandardarguments.
+5Manyworksconsidermoregeneralnotionsofcoveragethataccountforrewardfunctionstructure,inthesameveinasSEC,
+aswellassingle-policyvariants;bothcanbeproblematicforsimilarreasons.
+8InAppendixC,wegiveageneralizationofTheorem3.1(Theorem3.1′)whichscaleswithamorecomprehensive
+explorationparameter,theSequential Extrapolation Coefficient (SEC),matching(forDCMDPs)themostgen-
+eralresultsinpriorworkonexplorationinRLHF,butwithasignificantlysimpleralgorithm(Chenetal.,2022;
+Wangetal.,2023;Yeetal.,2024). TheSECalsoleadstopolynomialsamplecomplexityfortabularandlinear
+MDPs, a common setting considered in prior work (Xu et al., 2020; Novoseller et al., 2020; Pacchiano et al.,
+2021; Wu and Sun, 2023; Zhan et al., 2023b; Das et al., 2024). See Appendix A for a detailed comparison. We
+emphasizethatTheorem3.1appliestoanyDCMDP(includingbutnotlimitedtothetoken-levelMDP),evenif
+the dynamics are unknown; as such, the result meaningfully extends beyond the contextual bandit formulation
+of RLHF found in many prior works (Zhu et al., 2023; Xiong et al., 2023; Das et al., 2024; Ye et al., 2024).
+Remark 3.1 (Nontrivialityandroleofβ). By avoiding explicit dependence on exp(1), XPO provably improves
+β
+upon Online DPO when β is small; per Proposition 2.1, the latter must pay exp(1) even when C (Π)≤2.
+β cov
+This improvement stems from the fact that KL-regularization does not automatically lead to exploration or
+grant meaningful control of coverability in the small-β regime.
+To highlight the importance of the small-β regime, we note that by taking β = poly(1/T), Theorem 3.1
+immediately leads to bounds on the unregularized reward J(π). This would not be possible if the sample
+complexity guarantee explicitly scaled with exp(1).
+β
+Computational efficiency. Most prior approaches to RL with general function approximation that
+incorporate global forms of optimism similar to Eq.(7) (Jiang et al., 2017; Sun et al., 2019; Du et al., 2021;
+Jin et al., 2021; Xie et al., 2023; Liu et al., 2024) are known to be computationally intractable to implement
+in general (Dann et al., 2018), and involve solving non-convex, non-differentiable constrained optimization
+problems. Thus, itisnaturaltoaskwhyourresultisnottoogoodtobetrue. Theansweristhateventhough
+the objective in Eq.(6) is simple, it is still non-convex in general, even if one employs log-linear policies of
+the form
+(cid:18) (cid:19)
+1
+π (a|s)∝exp ⟨ϕ(s,a),θ⟩ (12)
+θ β
+for θ ∈Rd. This non-convexity is precisely caused by the presence of the optimistic term Eq.(7); Theorem 3.1
+is valid for all choices of β >0, but we expect that the optimization problem in Eq.(6) will become more
+difficult to solve as β → 0.6 In light of this, our work can be viewed as using the unique structure of the
+KL-regularized MDP formulation and deterministic contextual MDP (DCMDP) to derive an optimistic
+exploration objective which—while still non-convex—is differentiable and directly amenable to a practical
+implementation with language models.7 This technique is novel even in the context of reward-driven (as
+opposed to preference-based) RL, and we expect it to find broader use.
+Additional remarks. Separately, we mention in passing that we believe it should be possible to derive
+tighter sample complexity bounds for large β >0, in the vein of Tiapkin et al. (2023a).
+Remark 3.2 (LimitationsoftheDPOobjective). Our results are limited to MDPs with deterministic dynamics
+and stochastic start state (DCMDPs). We believe that without further modifications, the DPO objective is not
+suitable for stochastic dynamics, as Eq.(9) no longer holds on a per-trajectory basis.
+Remark 3.3 (Trajectory coverability). A related point concerns trajectory coverability. In the standard
+(as opposed to preference-based) RL setting, it is possible to achieve guarantees that scale with state-action
+coverability (Xie et al., 2023), defined via:
+dπ(s,a)
+C (Π):= inf sup sup ,
+st µ∈∆(S×A)s∈S,a∈Aπ∈Π µ(s,a)
+6Interestingly,onecanshowthatforanappropriatechoiceofα,ourobjectiveconvergestothestandardglobaloptimism
+objective (Jin et al., 2021) under Eq.(12) as β →0. Conversely for very large β (β ≳Rmax), the objective becomes convex.
+Weleaveadedicatedanalysisoftheoptimizationlandscapeforfuturework.
+7In particular, working in a DCMDP removes the notorious double-sampling issue, which is why it suffices to estimate
+therewardsusingtheDPOobjectiveinsteadmorecomplexobjectives(Jiangetal.,2017;Jinetal.,2021)thatdirectlyaimto
+minimizesBellmanerrors.
+9where dπ(s,a):=P (s =s,a =a). In general, we can have C (Π)≪C (Π). We expect that trajectory-
+π h h st cov
+level coverability is necessary for algorithms based on the DPO objective. Nonetheless, the difference is
+immaterial for language modeling in the token-level MDP, which has C (Π)=C (Π).
+st cov
+3.3 Proof Sketch for Theorem 3.1
+Our starting point for the proof of Theorem 3.1 is the following regret decomposition, which is proven as a
+consequence of the implicit Q⋆-approximation result in Eq.(9).
+Lemma 3.1 (Central regret decomposition). For any pair of policies π and ν, it holds that
+J (π⋆)−J (π)= E [βlogπ(τ)]−E (cid:2) βlogπ⋆(τ)(cid:3) (13)
+β β β τ∼ν τ∼ν β
+(cid:20) (cid:21) (cid:20) (cid:21)
+π(τ) π(τ)
++E βlog −r(τ) −E βlog −r(τ) . (14)
+τ∼π π (τ) τ∼ν π (τ)
+ref ref
+This result decomposes the error of any policy into two pairs of terms: The first pair in Eq.(13) measures the
+extent to which the policy’s internal reward model overestimates the optimal value, and directly informs
+the notion of optimism in XPO, while the second pair in Eq.(14) measures the reward model’s predictive
+accuracy. Critically, as a consequence of the fact that Eq.(9) holds uniformly for all trajectories, the regret
+decomposition measures error under (i) the policy π itself (on-policy error), and (ii) an arbitrary reference
+policy ν, which we will instantiate as the historical data distribution.
+Let µ(t) := 1 (cid:80) π(i)⊗π denote the policy that, given s , samples τ ∼ π(i) for i ∼ unif([t−1]) and
+t−1 i<t ref 1
+samples τ ∼ π , with the convention that µ(1) is arbitrary. Observe that min J (π⋆)−J (π(t)) ≤
+(cid:101) ref t∈[T+1] β β β
+1 (cid:80)T J (π⋆)−J (π(t)). For each step t, applying Lemma 3.1 with π =π(t) and ν =π gives
+T t=1 β β β ref
+T T
+1 (cid:88) J (π⋆)−J (π(t))≤ 1 (cid:88) E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3)
+T β β β T τ∼πref β
+t=1 t=1
+T (cid:20) (cid:21)
++
+1 (cid:88)
+E βlog
+π(t)(τ)
+−r(τ)−βlog
+π(t)(τ (cid:101))
++r(τ) . (15)
+T s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼πref|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+t=1
+The reward estimation error term in Eq.(15) samples τ ∼π(t) |s and τ ∼π ∼s (on-policy). To relate
+1 (cid:101) ref 1
+this to the purely off-policy objective in Line 6 of XPO, we use a potential argument based on coverability
+(Xie et al., 2023) which, for any α>0, allows us to bound the above expression by
+T
+≲ α ·C (Π)+ 1 (cid:88) E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3)
+β cov T τ∼πref β
+t=1
++
+α−1β (cid:88)T
+E
+(cid:34)(cid:18)
+βlog
+π(t)(τ)
+−r(τ)−βlog
+π(t)(τ (cid:101)) +r(τ)(cid:19)2(cid:35)
+. (16)
+T s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+t=1
+Let
+Ψ(t)(π)=E (cid:2) βlogπ(τ)−βlogπ⋆(τ)(cid:3)
+XPO τ∼πref β
+(cid:34)(cid:18)
+π(τ) π(τ)
+(cid:19)2(cid:35)
++α−1βE βlog −r(τ)−βlog (cid:101) +r(τ) .
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+If we could choose π(t) =argmin Ψ(t)(π), we would be done, since by Eq.(9) this would yield
+π∈Π XPO
+(cid:34)(cid:18)
+π⋆(τ) π⋆(τ)
+(cid:19)2(cid:35)
+Ψ(t)(π(t))≤Ψ(t)(π⋆)=E βlog β −r(τ)−βlog β (cid:101) +r(τ) =0.
+XPO XPO β s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+The XPO objective in Line 6 minimizes an empirical analogue of this quantity (up to a standard translation
+between log-loss and square loss under the Bradley-Terry model), so a concentration argument (Lemma C.5)
+10(cid:113)
+allows us to conclude that the iterates of XPO satisfy Ψ(t)(π(t))≲α−1log|Π| + log|Π| with high probability.
+XPO t t
+Plugging this bound into Eq.(16) yields
+T (cid:114)
+1 (cid:88)
+J (π⋆)−J (π(t))≲
+C cov(Π)log|Π|
+T β β β T
+t=1
+after tuning α.
+3.4 Empirical Validation
+To close this section, we provide a preliminary empirical evaluation of XPO in real-world RLHF experiments.
+To implement XPO, we use the iterative DPO (Xu et al., 2023; Tran et al., 2024; Dong et al., 2024) pipeline
+from Dong et al. (2024) with 3 total iterations (that is, we set T =3, but draw a large batch of pairs from
+π(t)), and augment the DPO objective with the optimism term in XPO. We use the same base model (which
+we refer to as Llama-3-8B-Flow-SFT),8 prompt sets for each iteration,9 and preference model (to generate
+preference feedback),10 as Dong et al. (2024), which makes our results generally comparable to theirs. Over
+all three iterations, we fix π to be the base model, Llama-3-8B-Flow-SFT.
+ref
+Model AGIEval ANLI MMLU GPQA GSM8K AlpacaEval-2 LC Arena-Hard
+Llama-3-8B-Flow-SFT 43.71 40.16 62.48 30.37 73.46 9.08 9.4
+DPO-iter1 46.38 46 63.01 29.99 77.79 23.27 19.2
+DPO-iter2 47.47 48.13 63.45 29.32 72.1 23.68 20.1
+DPO-iter3 46.92 47.72 63.55 28.73 72.93 27.33 24.9
+XPO-iter1 46.73 45.47 63.1 30.41 76.57 22.14 18.7
+XPO-iter2 47.44 48.44 63.35 29.95 75.51 24.65 23.2
+XPO-iter3 47.48 48.09 63.72 29.49 75.97 29.35 27.2
+Llama-3-8B-Flow-Final 47.29 46.12 63.37 29.45 78.62 31.7 23.1
+Llama-3-8B-it 44.78 46.47 63.79 30.83 75.59 32.58 20.7
+Table 1: Benchmarks for XPO and baseline models. Bold indicates best performance with the same data
+usage. Underlined results are superior to XPO, but from a model requiring more data or industry-level.
+In Table 1, we compare XPO with the following baselines: 1) iterative DPO with the same setup (i.e., XPO
+with α=0), 2) Llama-3-8B-Flow-Final, the final model from Dong et al. (2024), and 3) the industry-level
+instruction-tuned model Llama-3-8B-it,11 on various academic and chat benchmarks (Zhong et al., 2023; Nie
+et al., 2020; Hendrycks et al., 2021; Rein et al., 2023; Cobbe et al., 2021; Dubois et al., 2024; Li et al., 2024;
+Clarketal.,2018;Linetal.,2022;Zellersetal.,2019;Sakaguchietal.,2021). Wecomputeallbaselinenumbers
+ourselveswiththesameconfigurationforafaircomparison. Akeydistinctionbetweenourexperimentalsetup
+and that of Dong et al. (2024) is that we construct preference pairs from only two responses, whereas Dong
+etal.(2024)usebest/worst-over-8-responsesforpreferencepairconstructionasaheuristicexplorationstrategy.
+In other words, the final models we obtain (XPO-iter3, and a baseline, DPO-iter3 in Table 1) use only 1/4 the
+number of generated responses compared the final model (Llama-3-8B-Flow-Final)12 from Dong et al. (2024).
+We find that the model obtained by XPO improves over the non-exploratory baseline (DPO-iter) on the chat
+benchmarks (which offer roughly ∼90% agreement and/or Spearman correlation to Chatbot Arena (Chiang
+et al., 2024)), and attains performance comparable to the industry-level (Llama-3-8B-it) or 4×data-usage
+(Llama-3-8B-Flow-Final) models. At the same time, XPO also improves over the non-exploratory baseline
+on most of the academic benchmarks, again achieving comparable performance with the industry-level and
+4×data-usage models, and does not introduce significant performance regression in any benchmark. In
+contrast, we observe that the iterative DPO baseline (without exploration) causes obvious regression in the
+8https://huggingface.co/RLHFlow/LLaMA3-SFT.
+9https://huggingface.co/datasets/RLHFlow/iterative-prompt-v1-iter1-20K,https://huggingface.co/datasets/RLHFlow/iterative-prompt-v
+1-iter2-20K,https://huggingface.co/datasets/RLHFlow/iterative-prompt-v1-iter3-20K.
+10https://huggingface.co/RLHFlow/pair-preference-model-LLaMA3-8B.
+11https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct
+12https://huggingface.co/RLHFlow/LLaMA3-iterative-DPO-final
+11math (GSM8K) benchmark. However, we caution that conducting separate training runs with different
+random seeds can yield results with relatively high variance (e.g., the difference in win rates can be up to
+3%∼4%) for both chat benchmarks; due to resource limitations, we defer a more comprehensive evaluation
+to future work. See Appendix E for additional results.
+4 Discussion
+Our work provides the first practical and provably sample-efficient online exploration algorithm for RLHF
+with general function approximation, a step toward fully realizing the potential of online exploration for
+aligning language models. Our results also show that viewing DPO as a form of implicit Q⋆-approximation
+can directly inform new algorithmic interventions (e.g., implicit optimism), and offer an example of fruitful
+interplay between language modeling and theoretical reinforcement learning. Building on this viewpoint, an
+exciting direction for future work is to import the broader set of tools from the literature on reinforcement
+learningtheory(e.g.,morepowerfulexplorationprinciples(Fosteretal.,2021))andharnessthemforlanguage
+modeling and alignment; in this context, we expect our analysis techniques based on the KL-regularized
+MDP to find broader use.
+Fromareinforcementlearningperspective,interestingtechnicaldirectionsforfutureworkinclude(i)providing
+instance-dependent sample complexity bounds for XPO; and (ii) supporting RL settings beyond deterministic
+contextual MDPs. On the practical side, immediate followup directions include extending XPO to support
+general preference models (Munos et al., 2023; Swamy et al., 2024) or more general feedback modalities
+(Ethayarajh et al., 2024).
+12References
+Alekh Agarwal, Nan Jiang, and Sham M Kakade. Reinforcement learning: Theory and algorithms. Preprint,
+2019.
+Yuntao Bai, Andy Jones, Kamal Ndousse, Amanda Askell, Anna Chen, Nova DasSarma, Dawn Drain,
+Stanislav Fort, Deep Ganguli, Tom Henighan, et al. Training a helpful and harmless assistant with
+reinforcement learning from human feedback. arXiv preprint arXiv:2204.05862, 2022.
+Ralph Allan Bradley and Milton E Terry. Rank analysis of incomplete block designs: I. the method of paired
+comparisons. Biometrika, 39(3/4):324–345, 1952.
+Shicong Cen, Jincheng Mei, Katayoon Goshvadi, Hanjun Dai, Tong Yang, Sherry Yang, Dale Schuurmans,
+Yuejie Chi, and Bo Dai. Value-incentivized preference optimization: A unified approach to online and
+offline rlhf, 2024.
+Jonathan D Chang, Wenhao Shan, Owen Oertell, Kianté Brantley, Dipendra Misra, Jason D Lee, and Wen
+Sun. Dataset reset policy optimization for rlhf. arXiv preprint arXiv:2404.08495, 2024.
+Xiaoyu Chen, Han Zhong, Zhuoran Yang, Zhaoran Wang, and Liwei Wang. Human-in-the-loop: Provably
+efficient preference-based reinforcement learning with general function approximation. In International
+Conference on Machine Learning, pages 3773–3793. PMLR, 2022.
+Wei-Lin Chiang, Lianmin Zheng, Ying Sheng, Anastasios Nikolas Angelopoulos, Tianle Li, Dacheng Li, Hao
+Zhang, Banghua Zhu, Michael Jordan, Joseph E Gonzalez, et al. Chatbot arena: An open platform for
+evaluating llms by human preference. arXiv preprint arXiv:2403.04132, 2024.
+PaulFChristiano,JanLeike,TomBrown,MiljanMartic,ShaneLegg,andDarioAmodei. Deepreinforcement
+learning from human preferences. Advances in neural information processing systems, 30, 2017.
+Peter Clark, Isaac Cowhey, Oren Etzioni, Tushar Khot, Ashish Sabharwal, Carissa Schoenick, and Oyvind
+Tafjord. Think you have solved question answering? try ARC, the AI2 reasoning challenge. arXiv preprint
+arXiv:1803.05457, 2018.
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian, Mark Chen, Heewoo Jun, Lukasz Kaiser, Matthias
+Plappert, Jerry Tworek, Jacob Hilton, Reiichiro Nakano, et al. Training verifiers to solve math word
+problems. arXiv preprint arXiv:2110.14168, 2021.
+Christoph Dann, Nan Jiang, Akshay Krishnamurthy, Alekh Agarwal, John Langford, and Robert E Schapire.
+On oracle-efficient PAC RL with rich observations. In Advances in neural information processing systems,
+pages 1422–1432, 2018.
+Nirjhar Das, Souradip Chakraborty, Aldo Pacchiano, and Sayak Ray Chowdhury. Provably sample efficient
+rlhf via active preference optimization. arXiv preprint arXiv:2402.10500, 2024.
+Hanze Dong, Wei Xiong, Bo Pang, Haoxiang Wang, Han Zhao, Yingbo Zhou, Nan Jiang, Doyen Sahoo,
+Caiming Xiong, and Tong Zhang. Rlhf workflow: From reward modeling to online rlhf. arXiv preprint
+arXiv:2405.07863, 2024.
+Simon S Du, Sham M Kakade, Jason D Lee, Shachar Lovett, Gaurav Mahajan, Wen Sun, and Ruosong Wang.
+Bilinear classes: A structural framework for provable generalization in RL. International Conference on
+Machine Learning, 2021.
+Yihan Du, Anna Winnicki, Gal Dalal, Shie Mannor, and R Srikant. Exploration-driven policy optimization
+in RLHF: Theoretical insights on efficient data utilization. arXiv preprint arXiv:2402.10342, 2024.
+Yann Dubois, Balázs Galambosi, Percy Liang, and Tatsunori B Hashimoto. Length-controlled AlpacaEval: A
+simple way to debias automatic evaluators. arXiv preprint arXiv:2404.04475, 2024.
+Vikranth Dwaracherla, Seyed Mohammad Asghari, Botao Hao, and Benjamin Van Roy. Efficient exploration
+for llms. arXiv preprint arXiv:2402.00396, 2024.
+13Kawin Ethayarajh, Winnie Xu, Niklas Muennighoff, Dan Jurafsky, and Douwe Kiela. KTO: Model alignment
+as prospect theoretic optimization. arXiv preprint arXiv:2402.01306, 2024.
+DylanJFosterandAlexanderRakhlin. Foundationsofreinforcementlearningandinteractivedecisionmaking.
+arXiv preprint arXiv:2312.16730, 2023.
+Dylan J Foster, Sham M Kakade, Jian Qian, and Alexander Rakhlin. The statistical complexity of interactive
+decision making. arXiv preprint arXiv:2112.13487, 2021.
+Dylan J Foster, Noah Golowich, and Yanjun Han. Tight guarantees for interactive decision making with
+the decision-estimation coefficient. In The Thirty Sixth Annual Conference on Learning Theory, pages
+3969–4043. PMLR, 2023.
+Zhaolin Gao, Jonathan D Chang, Wenhao Zhan, Owen Oertell, Gokul Swamy, Kianté Brantley, Thorsten
+Joachims, J Andrew Bagnell, Jason D Lee, and Wen Sun. REBEL: Reinforcement learning via regressing
+relative rewards. arXiv preprint arXiv:2404.16767, 2024.
+Noah Golowich, Ankur Moitra, and Dhruv Rohatgi. Exploration is harder than prediction: Cryptographically
+separating reinforcement learning from supervised learning. arXiv preprint arXiv:2404.03774, 2024.
+Shangmin Guo, Biao Zhang, Tianlin Liu, Tianqi Liu, Misha Khalman, Felipe Llinares, Alexandre Rame,
+Thomas Mesnard, Yao Zhao, Bilal Piot, et al. Direct language model alignment from online AI feedback.
+arXiv preprint arXiv:2402.04792, 2024.
+Dan Hendrycks, Collin Burns, Saurav Kadavath, Akul Arora, Steven Basart, Eric Tang, Dawn Song, and
+Jacob Steinhardt. Measuring mathematical problem solving with the MATH dataset. In Thirty-fifth
+Conference on Neural Information Processing Systems Datasets and Benchmarks Track (Round 2), 2021.
+Nan Jiang, Akshay Krishnamurthy, Alekh Agarwal, John Langford, and Robert E Schapire. Contextual
+decision processes with low Bellman rank are PAC-learnable. In International Conference on Machine
+Learning, pages 1704–1713, 2017.
+Chi Jin, Zhuoran Yang, Zhaoran Wang, and Michael I Jordan. Provably efficient reinforcement learning with
+linear function approximation. In Conference on Learning Theory, pages 2137–2143, 2020.
+Chi Jin, Qinghua Liu, and Sobhan Miryoosefi. Bellman eluder dimension: New rich classes of RL problems,
+and sample-efficient algorithms. Neural Information Processing Systems, 2021.
+DanielKane,SihanLiu,ShacharLovett,andGauravMahajan. Computational-statisticalgapinreinforcement
+learning. In Conference on Learning Theory, pages 1282–1302. PMLR, 2022.
+Tadashi Kozuno, Wenhao Yang, Nino Vieillard, Toshinori Kitamura, Yunhao Tang, Jincheng Mei, Pierre
+Ménard, Mohammad Gheshlaghi Azar, Michal Valko, Rémi Munos, et al. KL-entropy-regularized RL with
+a generative model is minimax optimal. arXiv preprint arXiv:2205.14211, 2022.
+Tor Lattimore and Csaba Szepesvári. Bandit algorithms. Cambridge University Press, 2020.
+Tianle Li, Wei-Lin Chiang, Evan Frick, Lisa Dunlap, Banghua Zhu, Joseph E. Gonzalez, and Ion Stoica.
+From live data to high-quality benchmarks: The Arena-Hard pipeline, April 2024. URL https://lmsys.or
+g/blog/2024-04-19-arena-hard/.
+Stephanie Lin, Jacob Hilton, and Owain Evans. Truthfulqa: Measuring how models mimic human falsehoods.
+In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1:
+Long Papers), pages 3214–3252, 2022.
+Zhihan Liu, Miao Lu, Wei Xiong, Han Zhong, Hao Hu, Shenao Zhang, Sirui Zheng, Zhuoran Yang, and
+Zhaoran Wang. Maximize to explore: One objective function fusing estimation, planning, and exploration.
+Advances in Neural Information Processing Systems, 36, 2024.
+ArindamMitra,HamedKhanpour,CorbyRosset,andAhmedAwadallah. Orca-Math: Unlockingthepotential
+of SLMs in grade school math. arXiv preprint arXiv:2402.14830, 2024.
+14Rémi Munos, Michal Valko, Daniele Calandriello, Mohammad Gheshlaghi Azar, Mark Rowland, Zhao-
+han Daniel Guo, Yunhao Tang, Matthieu Geist, Thomas Mesnard, Andrea Michi, et al. Nash learning
+from human feedback. arXiv preprint arXiv:2312.00886, 2023.
+Gergely Neu, Anders Jonsson, and Vicenç Gómez. A unified view of entropy-regularized Markov decision
+processes. arXiv preprint arXiv:1705.07798, 2017.
+Yixin Nie, Adina Williams, Emily Dinan, Mohit Bansal, Jason Weston, and Douwe Kiela. Adversarial NLI:
+A new benchmark for natural language understanding. In Proceedings of the 58th Annual Meeting of the
+Association for Computational Linguistics, pages 4885–4901, 2020.
+Ellen Novoseller, Yibing Wei, Yanan Sui, Yisong Yue, and Joel Burdick. Dueling posterior sampling for
+preference-based reinforcement learning. In Conference on Uncertainty in Artificial Intelligence, pages
+1029–1038. PMLR, 2020.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with
+human feedback. Advances in neural information processing systems, 35:27730–27744, 2022.
+Aldo Pacchiano, Aadirupa Saha, and Jonathan Lee. Dueling RL: reinforcement learning with trajectory
+preferences. arXiv preprint arXiv:2111.04850, 2021.
+Richard Yuanzhe Pang, Weizhe Yuan, Kyunghyun Cho, He He, Sainbayar Sukhbaatar, and Jason Weston.
+Iterative reasoning preference optimization. arXiv preprint arXiv:2404.19733, 2024.
+Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano Ermon, and Chelsea Finn.
+Direct preference optimization: Your language model is secretly a reward model. Advances in Neural
+Information Processing Systems, 36, 2023.
+Rafael Rafailov, Joey Hejna, Ryan Park, and Chelsea Finn. From r to Q⋆: Your language model is secretly a
+Q-function. arXiv preprint arXiv:2404.12358, 2024.
+David Rein, Betty Li Hou, Asa Cooper Stickland, Jackson Petty, Richard Yuanzhe Pang, Julien Dirani,
+Julian Michael, and Samuel R Bowman. GPQA: A graduate-level google-proof q&a benchmark. arXiv
+preprint arXiv:2311.12022, 2023.
+Corby Rosset, Ching-An Cheng, Arindam Mitra, Michael Santacroce, Ahmed Awadallah, and Tengyang
+Xie. Direct Nash Optimization: Teaching language models to self-improve with general preferences. arXiv
+preprint arXiv:2404.03715, 2024.
+Daniel Russo and Benjamin Van Roy. Eluder dimension and the sample complexity of optimistic exploration.
+In Advances in Neural Information Processing Systems, pages 2256–2264, 2013.
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: An adversarial
+winograd schema challenge at scale. Communications of the ACM, 64(9):99–106, 2021.
+Wen Sun, Nan Jiang, Akshay Krishnamurthy, Alekh Agarwal, and John Langford. Model-based RL in
+contextual decision processes: PAC bounds and exponential improvements over model-free approaches. In
+Conference on learning theory, pages 2898–2933. PMLR, 2019.
+Gokul Swamy, Christoph Dann, Rahul Kidambi, Zhiwei Steven Wu, and Alekh Agarwal. A minimaximalist
+approach to reinforcement learning from human feedback. arXiv preprint arXiv:2401.04056, 2024.
+Yunhao Tang, Daniel Zhaohan Guo, Zeyu Zheng, Daniele Calandriello, Yuan Cao, Eugene Tarassov, Rémi
+Munos,BernardoÁvilaPires,MichalValko,YongCheng,andWillDabney. Understandingtheperformance
+gap between online and offline alignment algorithms, 2024.
+Daniil Tiapkin, Denis Belomestny, Daniele Calandriello, Eric Moulines, Remi Munos, Alexey Naumov, Pierre
+Perrault, Yunhao Tang, Michal Valko, and Pierre Menard. Fast rates for maximum entropy exploration. In
+International Conference on Machine Learning, pages 34161–34221. PMLR, 2023a.
+15Daniil Tiapkin, Denis Belomestny, Daniele Calandriello, Eric Moulines, Alexey Naumov, Pierre Perrault,
+Michal Valko, and Pierre Menard. Regularized RL. arXiv preprint arXiv:2310.17303, 2023b.
+Hoang Tran, Chris Glaze, and Braden Hancock. snorkelai/snorkel-mistral-pairrm-dpo, 2024. https:
+//huggingface.co/snorkelai/Snorkel-Mistral-PairRM-DPO.
+Sara A. van de Geer. Empirical Processes in M-Estimation. Cambridge University Press, 2000.
+Ruosong Wang, Russ R Salakhutdinov, and Lin Yang. Reinforcement learning with general value function
+approximation: Provably efficient approach via bounded eluder dimension. Advances in Neural Information
+Processing Systems, 33, 2020.
+Yuanhao Wang, Qinghua Liu, and Chi Jin. Is RLHF more difficult than standard RL? arXiv preprint
+arXiv:2306.14111, 2023.
+Runzhe Wu and Wen Sun. Making RL with preference-based feedback efficient via randomization. arXiv
+preprint arXiv:2310.14554, 2023.
+Tengyang Xie and Nan Jiang. Q* approximation schemes for batch reinforcement learning: A theoretical
+comparison. In Conference on Uncertainty in Artificial Intelligence, pages 550–559. PMLR, 2020.
+Tengyang Xie, Dylan J Foster, Yu Bai, Nan Jiang, and Sham M Kakade. The role of coverage in online
+reinforcement learning. In The Eleventh International Conference on Learning Representations, 2023.
+Wei Xiong, Hanze Dong, Chenlu Ye, Han Zhong, Nan Jiang, and Tong Zhang. Gibbs sampling from human
+feedback: A provable KL-constrained framework for RLHF. arXiv preprint arXiv:2312.11456, 2023.
+Jing Xu, Andrew Lee, Sainbayar Sukhbaatar, and Jason Weston. Some things are more cringe than others:
+Preference optimization with the pairwise cringe loss. arXiv preprint arXiv:2312.16682, 2023.
+Yichong Xu, Ruosong Wang, Lin Yang, Aarti Singh, and Artur Dubrawski. Preference-based reinforcement
+learning with finite-time guarantees. Advances in Neural Information Processing Systems, 33:18784–18794,
+2020.
+Chenlu Ye, Wei Xiong, Yuheng Zhang, Nan Jiang, and Tong Zhang. A theoretical analysis of Nash learning
+from human feedback under general KL-regularized preference. arXiv preprint arXiv:2402.07314, 2024.
+Rowan Zellers, Ari Holtzman, Yonatan Bisk, Ali Farhadi, and Yejin Choi. HellaSwag: Can a machine really
+finish your sentence? In Proceedings of the 57th Annual Meeting of the Association for Computational
+Linguistics, pages 4791–4800, 2019.
+WenhaoZhan,MasatoshiUehara,NathanKallus,JasonDLee,andWenSun. Provableofflinepreference-based
+reinforcement learning. In The Twelfth International Conference on Learning Representations, 2023a.
+Wenhao Zhan, Masatoshi Uehara, Wen Sun, and Jason D Lee. Provable reward-agnostic preference-based
+reinforcement learning. arXiv preprint arXiv:2305.18505, 2023b.
+Shenao Zhang, Donghan Yu, Hiteshi Sharma, Ziyi Yang, Shuohang Wang, Hany Hassan, and Zhaoran Wang.
+Self-exploring language models: Active preference elicitation for online alignment, 2024.
+Tong Zhang. From ϵ-entropy to KL-entropy: Analysis of minimum information complexity density estimation.
+The Annals of Statistics, 34(5):2180–2210, 2006.
+Han Zhong, Wei Xiong, Sirui Zheng, Liwei Wang, Zhaoran Wang, Zhuoran Yang, and Tong Zhang. GEC:
+A unified framework for interactive decision making in MDP, POMDP, and beyond. arXiv preprint
+arXiv:2211.01962, 2022.
+Wanjun Zhong, Ruixiang Cui, Yiduo Guo, Yaobo Liang, Shuai Lu, Yanlin Wang, Amin Saied, Weizhu Chen,
+and Nan Duan. AGIEval: A human-centric benchmark for evaluating foundation models. arXiv preprint
+arXiv:2304.06364, 2023.
+16Banghua Zhu, Michael Jordan, and Jiantao Jiao. Principled reinforcement learning with human feedback
+frompairwiseork-wisecomparisons. InInternational Conference on Machine Learning, pages43037–43067.
+PMLR, 2023.
+Brian D Ziebart. Modeling purposeful adaptive behavior with the principle of maximum causal entropy.
+Carnegie Mellon University, 2010.
+Brian D Ziebart, Andrew L Maas, J Andrew Bagnell, and Anind K Dey. Maximum entropy inverse
+reinforcement learning. In Aaai, volume 8, pages 1433–1438. Chicago, IL, USA, 2008.
+17Contents of Appendix
+A Related Work 18
+B Technical Tools 20
+C Proof of Theorem 3.1 20
+C.1 General Version of XPO . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20
+C.2 General Version of Theorem 3.1 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+C.3 Additional Examples for Theorem 3.1′ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 22
+C.4 KL-Regularized MDP Preliminaries and Q⋆-Approximation . . . . . . . . . . . . . . . . . . . 23
+C.5 Regret Decomposition . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+C.6 Concentration Lemmas. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+C.7 Proof of Theorem 3.1′ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29
+C.8 Proofs for SEC Bounds . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32
+D Additional Proofs 34
+D.1 Proofs from Section 2 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 34
+E Experiments: Additional Results and Details 35
+A Related Work
+Theoretical algorithms for RLHF. Theoretical analysis of algorithms for RLHF is becoming an active
+area of research. Much of this research focuses on purely offline RLHF (Zhu et al., 2023; Zhan et al., 2023a),
+which is complementary to our work. Many works also consider a so-called hybrid RLHF setting, where
+the algorithm has access to online feedback, but requires the initial policy π to have good coverage (e.g.,
+ref
+bounded concentrability or related quantities) (Xiong et al., 2023; Gao et al., 2024; Chang et al., 2024).13
+These hybrid algorithms do not engage in systematic exploration (i.e., they explore passively), and hence
+cannotprovidemeaningfulguaranteesifπ doesnotadequatelycovertheoptimalpolicy(e.g., forthesetting
+ref
+in Proposition 2.1).
+For online RLHF, the most relevant related work can be summarized as follows:
+• Most prior work (Xu et al., 2020; Novoseller et al., 2020; Pacchiano et al., 2021; Wu and Sun, 2023;
+Zhan et al., 2023b; Du et al., 2024; Das et al., 2024) gives algorithms and sample complexity guarantees
+forthespecialcaseoftabularorlinearMDPs; thesealgorithmsuseexplorationbonusesthataretailored
+to linear models, and are not suitable for the general function approximation setting we consider (e.g.,
+for LLMs). Nonetheless, we obtain polynomial sample complexity guarantees for tabular and linear
+MDPs (Examples C.1 and C.2), though our results are restricted to deterministic dynamics (we believe
+that moving beyond the DPO objective is likely required to handle stochastic dynamics).
+• More relevant to our work is Ye et al. (2024), who give algorithms and sample complexity guarantees
+for online RLHF with general function approximation for the special case of contextual bandits (H =1).
+For contextual bandits, their sample complexity guarantees scale with a complexity measure, the eluder
+coefficient, which is equivalent to the Sequential Extrapolation Coefficient in our most general result,
+Theorem 3.1′. However, their exploration algorithm requires solving a rather complicated optimization
+problem, and it is unclear whether it is possible to implement it faithfully for language models (in
+particular, their experiments use an alternative, heuristic approach to exploration which is only loosely
+inspired by the theory).
+• Lastly, Chen et al. (2022); Wang et al. (2023) give guarantees for RLHF with general function
+approximation based on eluder dimension-like complexity measures which are incomparable to, but
+13To our knowledge, all prior works in this space require uniform notions of concentrability as opposed to single-policy
+concentrability. Gaoetal.(2024)stateguaranteesintermsofsingle-policyconcentrabilityundertheassumptionthatcertain
+regressionerrorscanbebounded,butthiscannotbeachievedingeneralwithoutfurthercoverageorexploration-likeconditions.
+18in some cases more general than Theorem 3.1′. However, these works require model-based function
+approximation(asopposedtothemodel-freesetupweconsider), anddonotleadtoefficientorpractical
+algorithms when specialized to language modeling.
+A difference worth highlighting between our work and some (but not all) of the works above (Zhu et al., 2023;
+Xiongetal.,2023;Dasetal.,2024;Yeetal.,2024)isthatwemodelRLHFasageneralreinforcementlearning
+problem as opposed to a contextual bandit problem. The problem of autoregressive sequence prediction
+can equivalently be formulated as RL in the token-level MDP, or as a contextual bandit problem (RL with
+horizon H =1) in which the “action space” consists of all possible token sequences. However, because our
+work supports general deterministic contextual MDPs (DCMDPs) with unknown dynamics and not just the
+token-level MDP, it is strictly more general than the contextual bandit formulation.
+Recent work of Rafailov et al. (2024) shows that DPO, when applied to the token-level MDP can be viewed
+as estimating the KL-regularized value function Q⋆; their work does not consider sample complexity or
+β
+online exploration. Our results extend their observation to any deterministic contextual MDP and—more
+importantly—show that it is possible to harness this perspective to provide provable end-to-end sample
+complexity guarantees.
+Empirical algorithms for exploration in RLHF. Online exploration in RLHF has received limited
+exploration so far, with notable examples including Online DPO (Guo et al., 2024) and Iterative DPO (Xu et al.,
+2023; Tran et al., 2024; Pang et al., 2024; Mitra et al., 2024; Dong et al., 2024). As discussed in Section 2,
+these methodsengage inpurely passive exploration, meaningthat samplefrom thecurrentmodel π(t) without
+an explicit mechanism to encourage diverse, exploratory responses.
+Dwaracherla et al. (2024) perform a dedicated empirical evaluation of active exploration for language models.
+However, this work does not actually train the language model, and thus cannot be viewed as a form of
+RLHF; instead the authors train a reward model iteratively, and use this in tandem with various active
+sampling schemes to accept or reject responses proposed by π . Nevertheless, the positive results achieved
+ref
+by Dwaracherla et al. (2024) in this limited setting are suggestive of the potential power of online exploration
+in RLHF. Similarly, Ye et al. (2024) perform a limited evaluation of empirical exploration schemes inspired
+by theoretical RL, but only report results for reward modeling benchmarks, not language modeling.
+Most closely related, Xiong et al. (2023); Dong et al. (2024) perform an extensive empirical evaluation of
+IterativeDPOvariants,andfindthatIterativeDPOwithpassiveexplorationcanalreadyhavesignificantbenefits
+over offline DPO. These works also incorporate a “best/worst-over-n” trick for preference pair construction,
+which can be viewed as a heuristic to promote exploration, but does not have provable guarantees. See
+Section 3.4 for further discussion.
+Theoretical reinforcement learning. Outside the context of language models, an active line of research
+provides structural complexity measures and algorithms that enable sample-efficient exploration in reinforce-
+ment learning in general settings (Russo and Van Roy, 2013; Jiang et al., 2017; Sun et al., 2019; Wang et al.,
+2020; Du et al., 2021; Jin et al., 2021; Foster et al., 2021; Xie et al., 2023; Foster et al., 2023; Liu et al., 2024).
+The techniques from this line of research that support general function approximation, while sample-efficient,
+are computationally intractable to implement in general (Dann et al., 2018), involving non-convex and
+non-differentiable constrained optimization problems. We use the unique structure of the KL-regularized
+MDP formulation and deterministic contextual MDP (DCMDP) to derive the exploration objective in XPO
+which—while still non-convex—is differentiable and directly amenable to a practical implementation with
+language models.
+Entropy- and KL-regularized reinforcement learning. First introduced in Ziebart et al. (2008);
+Ziebart (2010), a number of recent works provide sample complexity guarantees for reinforcement learning in
+KL-regularized or entropy-regularized MDPs (Kozuno et al., 2022; Tiapkin et al., 2023b,a), mainly focusing
+on the special case of tabular (finite-state/action) MDPs. To the best of our knowledge, the optimistic
+objective in XPO is novel in this context.
+19B Technical Tools
+Lemma B.1 (Azuma-Hoeffding). Let (X ) be a sequence of real-valued random variables adapted to a
+t t≤T
+filtration (F ) . If |X |≤R almost surely, then with probability at least 1−δ,
+t t≤T t
+(cid:12) (cid:12)
+(cid:12)(cid:88)T (cid:12) (cid:112)
+(cid:12) X −E [X ](cid:12)≤R· 8T log(2δ−1).
+(cid:12) t t−1 t (cid:12)
+(cid:12) (cid:12)
+t=1
+Lemma B.2 (Martingale Chernoff (e.g., Foster et al., 2021)). For any sequence of real-valued random
+variables (X ) adapted to a filtration (F ) , it holds that with probability at least 1−δ, for all T′ ≤T,
+t t≤T t t≤T
+T′ T′
+(cid:88) −log(cid:0)E (cid:2) e−Xt(cid:3)(cid:1) ≤(cid:88) X +log(δ−1). (17)
+t−1 t
+t=1 t=1
+C Proof of Theorem 3.1
+This section is organized as follows. First, in Appendix C.2, we present a more general version of XPO, which
+makesuseofanarbitrary,user-specifiedsamplingpolicyforthesecondresponseτ. Then,inAppendixC.2,we
+(cid:101)
+state a more general version of Theorem 3.1 (Theorem 3.1′), and show how it implies Theorem 3.1. Examples
+are then given in Appendix C.3.
+In the remainder of the section, we prove Theorem 3.1′. We first prove a number of intermediate results:
+• In Appendix C.4, we state preliminaries regarding the KL-regularized MDP, and use them to prove the
+implicit Q⋆-approximation lemma (Lemma C.3).
+• In Appendix C.5, we prove the central regret decomposition lemma (Lemma 3.1).
+• In Appendix C.6, we prove a key concentration result used within Theorem 3.1′.
+Finally,inAppendixC.7,weproveTheorem3.1′,withproofsforsupportinglemmasdeferredtoAppendixC.8.
+C.1 General Version of XPO
+Algorithm 2 Exploratory Preference Optimization (XPO) with general sampling policy.
+input: Number of iterations T, KL-regularization coefficient β > 0, optimism coefficient α > 0,
+sampling strategy π .
+samp
+1: Initialize π(1),π (cid:101)(1) ←π ref, D p(0 re)
+f
+←∅.
+2: for iteration t=1,2,...,T do
+3: Generate response pair (τ(t),τ (cid:101)(t)) via: s( 1t) ∼ρ, τ(t) ∼π(t) |s( 1t), and τ (cid:101)(t) ∼π (cid:101)(t) |s 1(t).
+4: Label with preference: Label (τ(t),τ (cid:101)(t)) as (τ +(t),τ −(t)) with preference y(t) ∼P(τ(t) ≻τ (cid:101)(t)).
+5: Update preference data: D(t) ←D(t−1)(cid:83) {(τ(t),τ(t))}.
+pref pref + −
+6: Update optimism data: Compute dataset D o(t p) t of t samples from π (cid:101)(t).
+//When π(cid:101)(t)=πref, can re-use previous samples as in Algorithm 1.
+7: Direct preference optimization with global optimism: Calculate π(t+1) via
+ 
+π(t+1)
+←argmin
+α
+(cid:88)
+logπ(τ)−
+(cid:88)
+log(cid:20) σ(cid:18)
+βlog
+π(τ +)
+−βlog
+π(τ −)
+(cid:19)(cid:21)
+.
+π (τ ) π (τ )
+π∈Π 
+τ∈Do( pt t) (τ+,τ−)∈D p( rt e)
+f
+ref + ref − 
+8: Update sampling policy: π (cid:101)(t+1) ←π samp(π(1),...,π(t+1)).
+9: return: π (cid:98) =argmax π∈{π(1),...,π(T+1)}J β(π(t)). //Can compute using validation data.
+Algorithm 2 presents a general version of XPO. The algorithm is identical to Algorithm 1, except that it makes
+use of an arbitrary, user-specified user-specified sampling policy for the second response τ.
+(cid:101)
+20In more detail, the algorithm takes as input a sampling strategy π which, at step t, computes a sampling
+samp
+policy π(t) via π(t) ← π (π(1),...,π(T)). The algorithm then samples the response pair (τ(t),τ(t)) via
+(cid:101) (cid:101) samp (cid:101)
+τ(t) ∼π(t) |s(t) and τ(t) ∼π(t) |s(t). Algorithm 1 is a special case of this scheme in which π(t) =π for all t.
+1 (cid:101) (cid:101) 1 (cid:101) ref
+A secondary difference from Algorithm 1 is that Algorithm 2 assumes access to a dataset D(t) consisting of t
+opt
+responsessampledfromπ(t),whichareusedtocomputetheoptimisticterminLine7. InAlgorithm1,because
+(cid:101)
+π =π is static, we can simply re-use the responses τ(1),...,τ(t) for this task, setting D(t) ={τ(1),...,τ(t)}.
+(cid:101) ref (cid:101) (cid:101) opt (cid:101) (cid:101)
+However, for general time-varying sampling scheme, it may be necessary to draw a fresh dataset of responses
+from π(t) to compute D(t).
+(cid:101) opt
+As a practical example, Algorithm 3—displayed below—instantiates the general scheme in Algorithm 2 by
+setting π(t) =unif(π(1),...,π(t)) to sample from the historical data distribution at step t. For this scheme, it
+(cid:101)
+suffices to set D(t) ={τ(1),...,τ(t)}, re-using the responses sampled from π(1),...,π(t).
+opt
+Algorithm 3 Exploratory Preference Optimization (XPO) with historical sampling.
+input: Number of iterations T, KL-regularization coefficient β > 0, optimism coefficient α > 0,
+sampling strategy π .
+samp
+1: Initialize π(1),π (cid:101)(1) ←π ref, D p(0 re)
+f
+←∅.
+2: for iteration t=1,2,...,T do
+3: Generate response pair (τ(t),τ (cid:101)(t)) via: s( 1t) ∼ρ, τ(t) ∼π(t) |s 1(t), and τ (cid:101)(t) ∼unif(π(1),...,π(t))|s( 1t).
+4: Label with preference: Label (τ(t),τ (cid:101)(t)) as (τ +(t),τ −(t)) with preference y(t) ∼P(τ(t) ≻τ (cid:101)(t)).
+5: Update preference data: D(t) ←D(t−1)(cid:83) {(τ(t),τ(t))}.
+pref pref + −
+6: Update optimism data: Compute dataset D o(t p) t of t samples from π (cid:101)(t).
+//When π(cid:101)(t)=πref, can re-use previous samples as in Algorithm 1.
+7: Direct preference optimization with global optimism: Calculate π(t+1) via
+ 
+π(t+1)
+←argmin α(cid:88)t
+logπ(τ(i))−
+(cid:88) log(cid:20) σ(cid:18)
+βlog
+π(τ +)
+−βlog
+π(τ −) (cid:19)(cid:21)
+.
+π (τ ) π (τ )
+π∈Π 
+i=1 (τ+,τ−)∈D p( rt e)
+f
+ref + ref − 
+8: return: π (cid:98) =argmax π∈{π(1),...,π(T+1)}J β(π(t)). //Can compute using validation data.
+C.2 General Version of Theorem 3.1
+Our most general sample complexity guarantee for XPO (Algorithm 1 and Algorithm 2), Theorem 3.1′, is
+stated in terms of the following preference-based analogue of the Sequential Extrapolation Coefficient (SEC)
+from Xie et al. (2023) (also known as an eluder coefficient or decoupling coefficient (Zhong et al., 2022; Ye
+et al., 2024)). Recall that for a trajectory τ =(s ,a ),...,(s ,a ), we define
+1 1 H H
+H H
+(cid:89) (cid:88)
+π(τ)= π(a |s ), and r(τ)= r(s ,a ). (18)
+h h h h
+h=1 h=1
+For a pair of policies π and π, we define π⊗π as the joint policy that, given s , samples τ ∼ π | s and
+(cid:101) (cid:101) 1 1
+τ ∼π |s . We write (τ,τ)∼π⊗π |s as shorthand for this process.
+(cid:101) (cid:101) 1 (cid:101) (cid:101) 1
+Definition C.1 (Sequential Extrapolation Coefficient). For a policy class Π, sampling strategy π , and
+samp
+entropy regularization parameter β >0, we define the Sequential Extrapolation Coefficient via
+ 
+SEC (Π,T,β;π )= sup
+(cid:88)T (cid:16) E s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)(t−1)|s1(cid:104) βlogπ π( rt ef) (( ττ )) −r(τ)−βlogπ π( rt ef) (( τ(cid:101)τ(cid:101) )) +r(τ (cid:101))(cid:105)(cid:17)2 
+,
+RLHF samp
+π(1),...,π(T)∈Πt=1 V m2 ax∨(t−1)·E
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1(cid:20)(cid:16)
+βlogπ π( rt ef) (( ττ )) −r(τ)−βlogπ π( rt ef) (( τ(cid:101)τ(cid:101) )) +r(τ
+(cid:101))(cid:17)2(cid:21)
+
+(19)
+where π(t) =π (π(1),...,π(t)), and where we define µ(t) := 1 (cid:80) π(i)⊗π(i), with the convention that
+(cid:101) samp t−1 i<t (cid:101)
+µ(1) is arbitrary.
+21Note that for Algorithm 1, which sets π(t) =π for all t, we can simplify the definition above to
+(cid:101) ref
+ 
+SEC (Π,T,β;π ):= sup
+(cid:88)T (cid:16) E s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼πref|s1(cid:104) βlogπ π( rt ef) (( ττ )) −r(τ)−βlogπ π( rt ef) (( τ(cid:101)τ(cid:101) )) +r(τ (cid:101))(cid:105)(cid:17)2 
+,
+RLHF ref
+π(1),...,π(T)∈Πt=1 V m2 ax∨(t−1)·E
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1(cid:20)(cid:16)
+βlogπ π( rt ef) (( ττ )) −r(τ)−βlogπ π( rt ef) (( τ(cid:101)τ(cid:101) )) +r(τ
+(cid:101))(cid:17)2(cid:21)
+
+(20)
+where µ(t) := 1 (cid:80) π(i)⊗π .
+t−1 i<t ref
+Main sample complexity guarantee. Our general sample complexity guarantee is as follows.
+Theorem 3.1′ (General version of Theorem 3.1). Suppose Assumptions 3.1 and 3.2 hold. For any β >0
+(cid:113)
+and T ∈ N, if we set α = c· β · log(|Π|Tδ−1)log(T) for an absolute constant c > 0, then
+(Vmax+Rmax)e2Rmax) T·SECRLHF(Π,T,β;πsamp)
+Algorithm 2 ensures that with probability at least 1−δ,
+(cid:114)
+SEC (Π,T,β;π )log(|Π|Tδ−1)log(T)
+J (π⋆)−J (π)≲(V +R )e2Rmax · RLHF samp .
+β β β (cid:98) max max T
+(cid:113)
+As a special case, if we set α=c· β · log(|Π|Tδ−1)log(T) for an absolute constant c>0, then
+(Vmax+Rmax)e2Rmax T·SECRLHF(Π,T,β;πref)
+Algorithm 1 ensures that with probability at least 1−δ,
+(cid:114)
+SEC (Π,T,β;π )log(|Π|Tδ−1)log(T)
+J (π⋆)−J (π)≲(V +R )e2Rmax · RLHF ref .
+β β β (cid:98) max max T
+The following result shows that the SEC is always bounded by the coverability coefficient in Definition 3.1.
+Lemma C.1. Suppose that π sets π(t) =π for an arbitrary fixed policy π (e.g., π =π ). Then for any
+samp (cid:101) (cid:101) (cid:101) (cid:101) ref
+policy class Π and β >0, it holds that for all T ∈N,
+SEC (Π,T,β;π )≤O(C (Π)· log(T)). (21)
+RLHF samp cov
+Theorem 3.1 follows immediately by combining Theorem 3.1′ with Lemma C.1.
+C.3 Additional Examples for Theorem 3.1′
+In this section, we apply Theorem 3.1′ and bound the SEC for log-linear policy classes. For f :S×A→R,
+define
+(cid:32) (cid:33)
+π f(a|s)=π ref(a|s)ef(s,a) β−Vf(s) , where V f(s)=βlog (cid:88) π ref(a|s)ef(s β,a) .
+a∈A
+We consider policy classes of the form
+Π :={π |f ∈F}
+F f
+for a given value function class F ⊆(S×A→R ). Note that for such a class, we can take V ≤R ,
+max max max
+and that Q⋆ ∈F implies that π⋆ ∈Π .
+β β F
+The following lemma bounds the SEC for log-linear policy classes in terms of a preference-based analogue of
+the value function SEC in Xie et al. (2023).
+Lemma C.2 (SEC for log-linear policies). For any value function class F ⊆(S×A→R ), we have that
+max
+SEC (Π,T,β;π )≤SEC (F,T;π ), where
+RLHF samp RLHF samp
+SEC (F,T;π ):= sup
+RLHF samp
+f(1),...,f(T)∈F
+ 
+(cid:88)T (cid:16) E s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)(t−1)|s1(cid:104) (cid:80)H h=1(f(t)(s h,a h)−(cid:2) T βf(t)(cid:3) (s h,a h))−(f(t)(s (cid:101)h, (cid:101)a h)−(cid:2) T βf(t)(cid:3) (s (cid:101)h, (cid:101)a h))(cid:105)(cid:17)2 
+,
+t=1 R m2 ax∨(t−1)·E
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1(cid:20)(cid:16)
+(cid:80)H h=1(f(t)(s h,a h)−[T βf(t)](s h,a h))−(f(t)(s (cid:101)h, (cid:101)a h)−[T βf(t)](s (cid:101)h, (cid:101)a
+h))(cid:17)2(cid:21)
+
+22where π(t) := π , π(t) = π (π(1),...,π(t)), and µ(t) := 1 (cid:80) π(i) ⊗π(i) (with the convention that µ(1) is
+f(t) (cid:101) samp t−1 i<t (cid:101)
+arbitrary), and where T is the KL-regularized Bellman operator defined in Appendix C.4.
+β
+Proof of Lemma C.2. This is an immediate corollary of Lemma C.4.
+We first apply this bound to give a polynomial bound on the SEC in tabular DCMDPs where S and A are
+finite.
+Example C.1 (Tabular MDP). Suppose that π sets π(t) =π for all t for some fixed policy π. When
+samp (cid:101) (cid:101)
+F = {f :S×A→R } consists of all functions over tabular state and action spaces with |S|,|A| < ∞,
+max
+we have SEC RLHF(F,T;π samp) ≤ O(cid:101)(H|S||A|) and log|Π F| ≲ O(cid:101)(|S||A|). It follows that XPO (Algorithm 1)
+achieves
+(cid:32) (cid:114) (cid:33)
+H|S|2|A|2
+J β(π β⋆)−J β(π (cid:98))≲O(cid:101) R maxe2Rmax
+T
+.
+◁
+Example C.1 is a corollary of the following more general result.
+Example C.2 (Linear MDP). In a Linear MDP (Jin et al., 2020), we have
+P(s′ |s,a)=⟨ϕ(s,a),µ(s′)⟩, (22)
+and
+r(s,a)=⟨ϕ(s,a),ϑ⟩, (23)
+where ϕ(s,a)∈Rd is a known feature map with ∥ϕ(s,a)∥≤1, µ(s′)∈Rd is an unknown feature map with
+√
+∥(cid:80) µ(s′)∥≤ d, and φ∈Rd is an unknown parameter with ∥φ∥≤1. Here, the optimal KL-regularized
+s′
+value function Q⋆ (cf. Appendix C.4) is linear with respect to the feature map ϕ(s,a). In particular, if we
+β
+take
+F
+:=(cid:8)
+f(s,a)=⟨ϕ(s,a),θ⟩|θ
+∈Rd,∥θ∥≤B,|f(s,a)|≤R(cid:9)
+√
+for B =O( d) and R=O(R ), then π⋆ ∈Π , satisfying Assumption 3.1. For this setting, when π
+max β F samp
+sets π(t) =π
+(cid:101)
+for all t for some fixed policy π (cid:101), we have SEC RLHF(F,T;π samp)≤O(cid:101)(d) and log|Π F|≲O(cid:101)(d). It
+follows that XPO (Algorithm 1) achieves
+(cid:32) (cid:114) (cid:33)
+d2
+J β(π β⋆)−J β(π (cid:98))≲O(cid:101) R maxe2Rmax
+T
+.
+◁
+C.4 KL-Regularized MDP Preliminaries and Q⋆-Approximation
+In this section, we give some basic background on value functions and dynamic programming for the KL-
+regularized MDP (Ziebart et al., 2008; Ziebart, 2010), then use these properties to prove Lemmas C.3
+and C.4, which show that the optimal KL-regularized policy implicitly performs models rewards and performs
+Q⋆-approximation.
+Dynamic programming and value functions for KL-regularized MDP. First, for any function
+f :S×A→R, define
+(cid:88)
+V (s ):= βlog π (a |s )ef(sh,ah)/β ∀s∈S .
+f h ref h h h
+ah∈A
+It is straightforward to verify that
+(cid:18) (cid:20) (cid:21)(cid:19)
+π(a |s )
+V (s )= max E f(s ,a )−βlog h h , (24)
+f h π:S→∆(A) ah∼π(·|sh) h h π ref(a h |s h)
+23and that the policy that obtains the maximum above is
+π f(a
+h
+|s h)=π ref(a
+h
+|s h)e(f(sh,ah)−Vf(sh))/β. (25)
+From here, beginning with Q⋆(s ,a ):=r(s ,a ), π⋆(a |s )=π (a |s ), and V⋆(s )=V (s )
+β H H H H β H H Q⋆ β H H β H Q⋆ β H
+for s ∈S , for each s ∈S , we can inductively define for each h∈[H]:
+H H h h
+Q⋆(s ,a ):=r(s ,a )+E(cid:2) V⋆(s )|s ,a (cid:3) ,
+β h h h h β h+1 h h
+π⋆(a |s ):=π (a |s ), (26)
+β h h Q⋆ h h
+β
+V⋆(s ):=V (s ).
+β h Q⋆ h
+β
+In light of Eq.(24), it is clear that π⋆ ∈argmax J (π). In addition, if we define the KL-regularized
+β π:S→∆(A) β
+Bellman operator as
+[T f](s ,a ):= r(s ,a )+E [V (s )],
+β h h h h sh+1∼P(·|sh,ah) f h+1
+we have that
+Q⋆(s ,a )=(cid:2) T Q⋆(cid:3) (s ,a ).
+β h h β β h h
+Implicit Q⋆-approximation. The following lemma, generalizing Rafailov et al. (2024), shows that the
+optimal KL-regularized policy π⋆ can be viewed as implicitly modeling rewards.
+β
+Lemma C.3 (Implicit Q⋆-Approximation). For any DCMDP, it holds that for all admissible14 trajectories
+τ =(s ,a ),...,(s ,a ),
+1 1 H H
+π⋆(τ)
+βlog β =r(τ)−V⋆(s ), (27)
+π (τ) β 1
+ref
+where V⋆ is the KL-regularized value function defined in Eq.(26).
+β
+Proof of Lemma C.3. Let τ =(s ,a ),...,(s ,a ), and recall that for any DCMDP, all state transitions
+1 1 H H
+except for s ∼ρ are deterministic. Then we have
+1
+H
+0= (cid:88)(cid:0) Q⋆(s ,a )−(cid:2) T Q⋆(cid:3) (s ,a )(cid:1)
+β h h β β h h
+h=1
+H
+= (cid:88)(cid:0) Q⋆(s ,a )−r(s ,a )−V⋆(s )(cid:1)
+β h h h h β h+1
+h=1
+=
+(cid:88)H (cid:18)
+V⋆(s )+βlog
+π β⋆(a
+h
+|s h)
+−r(s ,a )−V⋆(s
+)(cid:19)
+β h π (a |s ) h h β h+1
+ref h h
+h=1
+= V⋆(s
+)+(cid:88)H (cid:18)
+βlog
+π β⋆(a
+h
+|s h)
+−r(s ,a
+)(cid:19)
+,
+β 1 π (a |s ) h h
+ref h h
+h=1
+where the second equality uses that (T f)(s ,a ) = r(s ,a )+V (s ) for any admissible trajectory in
+β h h h h f h+1
+a deterministic MDP, and the third equality uses the explicit form for π⋆ in terms of V⋆ and Q⋆ given in
+β β β
+Eq.(25). Rearranging yields the result.
+We can also prove the following, more general version of Lemma C.4.
+Lemma C.4 (Implicit Q⋆-Approximation(generalversion)). For any DCMDP, it holds that for any function
+f :S×A→R and all admissible trajectories τ =(s ,a ),...,(s ,a ),
+1 1 H H
+H
+βlog
+π f(τ)
+=r(τ)−V (s
+)+(cid:88)
+(f(s ,a )−[T f](s ,a )). (28)
+π (τ) f 1 h h β h h
+ref
+h=1
+14Weuse“admissible"toarefertoatrajectorygeneratedbyexecutinganarbitrarypolicyπ:S→∆(A)intheMDP.
+24Proof of Lemma C.4. Let τ =(s ,a ),...,(s ,a ). Then we have
+1 1 H H
+H
+(cid:88)
+(f(s ,a )−[T f](s ,a ))
+h h β h h
+h=1
+H
+(cid:88)
+= (f(s ,a )−r(s ,a )−V (s ))
+h h h h f h+1
+h=1
+H (cid:18) (cid:19)
+= (cid:88) V (s )+βlog π f(a h |s h) −r(s ,a )−V (s )
+f h π (a |s ) h h f h+1
+ref h h
+h=1
+H (cid:18) (cid:19)
+= V (s )+(cid:88) βlog π f(a h |s h) −r(s ,a ) ,
+f 1 π (a |s ) h h
+ref h h
+h=1
+where the first equality uses the definition of V , the second equality uses that (T f)(s ,a )=r(s ,a )+
+f β h h h h
+V (s ) for any admissible trajectory in a deterministic MDP, and the third equality uses that π (a|s)=
+f h+1 f
+π
+ref(a|s)ef(s,a) β−Vf(s)
+. Rearranging yields the result.
+C.5 Regret Decomposition
+In this section we prove the central regret decomposition for XPO, restated below.
+Lemma 3.1 (Central regret decomposition). For any pair of policies π and ν, it holds that
+J (π⋆)−J (π)= E [βlogπ(τ)]−E (cid:2) βlogπ⋆(τ)(cid:3) (13)
+β β β τ∼ν τ∼ν β
+(cid:20) (cid:21) (cid:20) (cid:21)
+π(τ) π(τ)
++E βlog −r(τ) −E βlog −r(τ) . (14)
+τ∼π π (τ) τ∼ν π (τ)
+ref ref
+Proof of Lemma 3.1. It follows immediately from the definition of the KL-regularized reward that
+(cid:20) π(τ) (cid:21) (cid:20) π⋆(τ) (cid:21)
+J (π⋆)−J (π)=E βlog −r(τ) −E βlog β −r(τ) .
+β β β π π ref(τ) π β⋆ π ref(τ)
+However, since βlog π β⋆(τ) −r(τ)=V⋆(s ) for all admissible trajectories by Lemma C.3, we have that
+πref(τ) β 1
+(cid:20) π⋆(τ) (cid:21) (cid:20) π⋆(τ) (cid:21)
+E βlog β −r(τ) =E βlog β −r(τ)
+π β⋆ π ref(τ) ν π ref(τ)
+for all policies ν, as the initial state s does not depend on the policy under consideration. The result now
+1
+follows by rearranging
+(cid:20) π(τ) (cid:21) (cid:20) π⋆(τ) (cid:21)
+E βlog −r(τ) −E βlog β −r(τ)
+π π (τ) ν π (τ)
+ref ref
+(cid:20) (cid:21) (cid:20) (cid:21)
+=E [βlogπ(τ)]−E (cid:2) βlogπ⋆(τ)(cid:3) +E βlog π(τ) −r(τ) −E βlog π(τ) −r(τ) .
+ν ν β π π (τ) ν π (τ)
+ref ref
+C.6 Concentration Lemmas
+Recall that we define µ(t) = 1 (cid:80) π(i)⊗π(i). For a given policy π, define
+t−1 i<t (cid:101)
+π(τ) π(τ)
+f (τ,τ)=βlog −βlog (cid:101) .
+π (cid:101) π (τ) π (τ)
+ref ref (cid:101)
+The following lemma is our central concentration guarantee for Algorithm 1.
+25Lemma C.5 (Concentration for XPO). Suppose that Assumptions 3.1 and 3.2 hold. Then Algorithm 1
+guarantees that with probability at least 1−δ, for all steps t∈[T],
+α·E (cid:2) log(π(t)(τ))−log(π⋆(τ))(cid:3) +κ· E
+(cid:20)(cid:16)
+f (τ,τ)−f
+(τ,τ)(cid:17)2(cid:21)
+s1∼ρ,τ∼π(cid:101)(t−1) β s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π(t) (cid:101) π β⋆ (cid:101)
+(cid:114)
+2log(2|Π|Tδ−1) α 24log(2|Π|Tδ−1)
+≤ + V ,
+t−1 β max t−1
+for κ:=(8(R max+V max)e2Rmax)−2.
+Proof of Lemma C.5. Let t∈{2,...,T +1} be fixed.
+L(cid:98)(t)(π)
+(cid:20) (cid:18) (cid:19)(cid:21) (cid:20) (cid:18) (cid:19)(cid:21)
+=(cid:88)
+−y(i)log σ βlog
+π(τ(i))
+−βlog
+π(τ (cid:101)(i))
+−(1−y(i))log σ βlog
+π(τ (cid:101)(i))
+−βlog
+π(τ(i))
+π ref(τ(i)) π ref(τ (cid:101)(i)) π ref(τ (cid:101)(i)) π ref(τ(i))
+i<t
+(29)
+and B(cid:98)(t)(π)=α(cid:80) τ∈D(t−1)logπ(τ). Then we can equivalently write
+opt
+(cid:110) (cid:111)
+π(t) =argmin L(cid:98)(t)(π)+B(cid:98)(t)(π) .
+π∈Π
+For a given policy π, recall that we define
+π(τ) π(τ)
+f (τ,τ)=βlog −βlog (cid:101) ,
+π (cid:101) π (τ) π (τ)
+ref ref (cid:101)
+and let
+P (y |τ,τ)=y·σ(f (τ,τ))+(1−y)·(1−σ(f (τ,τ))).
+π (cid:101) π (cid:101) π (cid:101)
+Then, in light of Lemma C.3, under the Bradley-Terry model (Eq.(1)), we have that for all t,
+y(t) ∼P (·|τ(t),τ(t)). (30)
+π⋆ (cid:101)
+β
+In addition, we can rewrite Eq.(29) as
+(cid:88)
+L(cid:98)(π)= −log(P π(y(t) |τ(t),τ (cid:101)(t))).
+i<t
+Using this observation, we begin by proving an intermediate concentration result. For a pair of probability
+measures P and Q, we define squared Hellinger distance via
+(cid:90) (cid:16)√ (cid:112) (cid:17)2
+D2(P,Q)= dP− dQ . (31)
+H
+Lemma C.6. For any fixed t≥1, with probability at least 1−δ, all π ∈Π satisfy
+(cid:88) (cid:104) (cid:16) (cid:17)(cid:105)
+E
+s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1
+D H2 P π(·|τ,τ (cid:101)),P
+π
+β⋆(·|τ,τ (cid:101)) ≤L(cid:98)(t)(π)−L(cid:98)(t)(π β⋆)+2log(|Π|δ−1).
+i<t
+Rearranging Lemma C.6, with probability at least 1−δ, all π ∈Π satisfy
+(cid:88) (cid:104) (cid:16) (cid:17)(cid:105)
+B(cid:98)(t)(π)−B(cid:98)(t)(π β⋆)+ E
+s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1
+D H2 P π(·|τ,τ (cid:101)),P
+π
+β⋆(·|τ,τ (cid:101))
+i<t
+≤L(cid:98)(t)(π)+B(cid:98)(t)(π)−L(cid:98)(t)(π⋆)−B(cid:98)(t)(π⋆)+2log(|Π|δ−1).
+β β
+26Hence, as long as π⋆ ∈Π (Assumption 3.1), the definition of π(t) in Algorithm 2 implies that
+β
+(cid:88) (cid:104) (cid:16) (cid:17)(cid:105)
+B(cid:98)(t)(π(t))−B(cid:98)(t)(π β⋆)+ E
+s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1
+D H2 P π(t)(·|τ,τ (cid:101)),P
+π
+β⋆(·|τ,τ (cid:101)) ≤2log(|Π|δ−1). (32)
+i<t
+We next appeal to another basic concentration result.
+Lemma C.7. For any fixed t≥1, with probability at least 1−δ, all π ∈Π satisfy
+α·(t−1)·E s1∼ρ,τ∼π(cid:101)(t−1)|s1(cid:2) log(π(τ))−log(π β⋆(τ))(cid:3) ≤B(cid:98)(t)(π)−B(cid:98)(t)(π β⋆)+ α βV max(cid:112) 24(t−1)log(|Π|δ−1).
+Combining Lemma C.7 with Eq.(32), we conclude that with probability at least 1−2δ,
+α·(t−1)·E (cid:2) log(π(t)(τ))−log(π⋆(τ))(cid:3) +(cid:88) E (cid:104) D2(cid:16) P (·|τ,τ),P (·|τ,τ)(cid:17)(cid:105)
+s1∼ρ,τ∼π(cid:101)(t−1)|s1 β s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1 H π(t) (cid:101) π β⋆ (cid:101)
+i<t
+α (cid:112)
+≤2log(|Π|δ−1)+ V 26(t−1)log(|Π|δ−1),
+β max
+or equivalently,
+α·E (cid:2) log(π(t)(τ))−log(π⋆(τ))(cid:3) +E (cid:104) D2(cid:16) P (·|τ,τ),P (·|τ,τ)(cid:17)(cid:105)
+s1∼ρ,τ∼π(cid:101)(t−1)|s1 β s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 H π(t) (cid:101) π β⋆ (cid:101)
+(cid:114)
+2log(|Π|δ−1) α 26log(|Π|δ−1)
+≤ + V , (33)
+t−1 β max t−1
+To conclude, we further simplify the expression via
+(cid:104) (cid:16) (cid:17)(cid:105)
+E D2 P (·|τ,τ),P (·|τ,τ)
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 H π(t) (cid:101) π β⋆ (cid:101)
+(cid:20)(cid:16)(cid:112)
+(cid:113)
+(cid:17)2(cid:21)
+≥E σ(f (τ,τ))− σ(f (τ,τ))
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π(t) (cid:101) π β⋆ (cid:101)
+1
+(cid:20)(cid:16) (cid:17)2(cid:21)
+≥ E σ(f (τ,τ))−σ(f (τ,τ)) ,
+8 s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π(t) (cid:101) π β⋆ (cid:101)
+√ √
+where the last inequality uses that for x,y ≥0, (x−y)2 ≤4(x+y)( x− y)2.
+Finally, using Lemma C.3, we have f ∈ [−R ,R ] almost surely, while f ∈ [−V ,V ] by
+π⋆ max max π(t) max max
+Assumption 3.2. We appeal to the followβing lemma.
+Lemma C.8 (e.g., Rosset et al. (2024)). If x∈[−X,X] and y ∈[−Y,Y] for X ≥0, Y ≥1, then
+|x−y|≤8(X+Y)e2Y|σ(x)−σ(y)|.
+From this, we conclude that
+(cid:20)(cid:16) (cid:17)2(cid:21)
+E σ(f (τ,τ))−σ(f (τ,τ))
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π(t) (cid:101) π β⋆ (cid:101)
+(cid:20)(cid:16) (cid:17)2(cid:21)
+≥(8(R max+V max)e2Rmax)−2· E
+s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1
+f π(t)(τ,τ (cid:101))−f
+π
+β⋆(τ,τ (cid:101))
+This proves the result after taking a union bound over all steps t.
+27C.6.1 Proofs for Supporting Lemmas
+Proof of Lemma C.6. To begin, define
+ℓ(i)(π)=−log(P (y(t) |τ(t),τ(t))).
+π (cid:101)
+Forafixedpolicyπ ∈Π,defineZ(i)(π)= 1(ℓ(i)(π)−ℓ(i)(π⋆)). DefineafiltrationF(t) =σ((τ(1),τ(1)),...,(τ(t−1),τ(t−1))).
+2 β (cid:101) (cid:101)
+Applying Lemma B.2 with the sequence (Z (π)) and taking a union bound over π ∈ Π, have that with
+i
+probability at least 1−δ, all π ∈Π satisfy
+(cid:88) (cid:18) (cid:20) (cid:18) 1 (cid:19)(cid:21)(cid:19) 1(cid:16) (cid:17)
+− log E
+i−1
+exp − 2Z i(π) ≤
+2
+L(cid:98)(t)(π)−L(cid:98)(t)(π β⋆) +log(|Π|δ−1).
+i<t
+Next, using Eq.(30) and a somewhat standard argument from van de Geer (2000); Zhang (2006), we calculate
+that
+(cid:20) (cid:18) (cid:19)(cid:21)
+1
+E exp Z (π)
+i−1 2 i
+(cid:20) (cid:18) (cid:19)(cid:21)
+1
+=E exp log(P (y |τ,τ)/P (y |τ,τ))
+s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1,y∼P πβ⋆(·|τ,τ(cid:101)) 2 π (cid:101) π β⋆ (cid:101)
+ 
+(cid:88) (cid:113)
+=E s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1 P π(y |τ,τ (cid:101))P π β⋆(y |τ,τ (cid:101))
+y∈{0,1}
+(cid:20) 1 (cid:16) (cid:17)(cid:21)
+=E 1− D2 P (·|τ,τ),P (·|τ,τ) .
+s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1 2 H π (cid:101) π β⋆ (cid:101)
+Since D2(·,·)≤2 and −log(1−x)≥x for x≤1, we conclude that
+H
+(cid:88) (cid:104) (cid:16) (cid:17)(cid:105)
+E
+s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)(i)|s1
+D H2 P π(·|τ,τ (cid:101)),P
+π
+β⋆(·|τ,τ (cid:101)) ≤L(cid:98)(t)(π)−L(cid:98)(t)(π β⋆)+2log(|Π|δ−1)
+i<t
+Proof of Lemma C.7. Let τ(1),...,τ(t−1) denote the trajectories in D(t−1). Let (cid:98)b(i)(π)=αlogπ(τ(i)), and
+opt
+let
+Z(i)(π)=(cid:98)b(i)(π)−(cid:98)b(i)(π⋆).
+β
+We can equivalently re-write this as
+(cid:18) (cid:18) π(τ(i)) (cid:19) (cid:18) π⋆(τ(i)) (cid:19)(cid:19)
+Z(i)(π)=α log −log β ,
+π ref(τ(i)) π ref(τ(i))
+which implies that |Z(i)(π)|≤2αV . From here, the result follows immediately by applying Lemma B.1
+β max
+with the sequence (Z (π)) and taking a union bound over π ∈Π.
+i
+Proof of Lemma C.8. We consider three cases. First, if x∈[−2Y,2Y], then
+|σ(x)−σ(y)|≥σ′(z)|x−y|
+for some z ∈ [−2Y,2Y]. In this regime, we have σ′(z) ≥ σ′(2Y) = e2Y/(1+e2Y)2 ≥ (4e2Y)−1. Next, if
+x≥2Y >0, we can directly bound
+e2Y −eY 1−e−Y 1
+σ(x)−σ(y)≥σ(2Y)−σ(Y)= ≥ ≥ ,
+(1+e2Y)(1+eY) 4eY 8eY
+28where the last line holds whenever Y ≥1. We conclude in this case that
+|x−y| X+Y
+≤ ≤8(X+Y)eY.
+σ(x)−σ(y) σ(x)−σ(y)
+Finally, we consider the case where x≤ −2Y ≤0. In this case, we can similarly lower bound
+e−Y −e−2Y 1−e−Y 1
+σ(y)−σ(x)≥σ(−Y)−σ(−2Y)= ≥ ≥
+(1+e−Y)(1+e−2Y) 4e2Y 8e2Y
+as long as Y ≥1. From here, proceeding in the same fashion as the second case yields the result.
+C.7 Proof of Theorem 3.1′
+Proof of Theorem 3.1′. Before diving into the proof, we re-state two central technical lemmas. The first
+lemma, generalizing Rafailov et al. (2024), shows that the optimal KL-regularized policy π⋆ can be viewed as
+β
+implicitly modeling rewards.
+Lemma C.3 (Implicit Q⋆-Approximation). For any DCMDP, it holds that for all admissible15 trajectories
+τ =(s ,a ),...,(s ,a ),
+1 1 H H
+π⋆(τ)
+βlog β =r(τ)−V⋆(s ), (27)
+π (τ) β 1
+ref
+where V⋆ is the KL-regularized value function defined in Eq.(26).
+β
+This lemma allows us to view the DPO objective as a form of implicit Q⋆-approximation. Building on this
+lemma, we prove the following regret decomposition.
+Lemma 3.1 (Central regret decomposition). For any pair of policies π and ν, it holds that
+J (π⋆)−J (π)= E [βlogπ(τ)]−E (cid:2) βlogπ⋆(τ)(cid:3) (13)
+β β β τ∼ν τ∼ν β
+(cid:20) (cid:21) (cid:20) (cid:21)
+π(τ) π(τ)
++E βlog −r(τ) −E βlog −r(τ) . (14)
+τ∼π π (τ) τ∼ν π (τ)
+ref ref
+This result shows that the (regularized) regret of any policy π can be decomposed into two terms. The term
+in Eq.(14) measures the extent to which π (implicitly) models the reward; by Lemma C.3, this term is zero
+when π = π⋆. Meanwhile, the term in Eq.(13) measures the extent to which the policy π over-estimates
+β
+the internal reward; we will control this term using optimism. Importantly, the regret decomposition in
+Lemma 3.1 holds for an arbitrary roll-in policy ν. This will facilitate minimizing the terms in the regret
+decomposition in a data-driven fashion. Before proceeding, we remark that Lemma C.3 and Lemma 3.1
+together imply that
+J (π⋆)−J (π)≤6V (34)
+β β β max
+for all π ∈Π.
+We now begin the proof by writing
+T
+1 (cid:88)
+J (π⋆)−J (π)= min J (π⋆)−J (π(t))≤ J (π⋆)−J (π(t)).
+β β β (cid:98) t∈[T+1] β β β T β β β
+t=1
+For each step t, we apply Lemma 3.1 with π =π(t) and ν =π(t−1), which gives
+(cid:101)
+T
+1 (cid:88)
+J (π⋆)−J (π(t))
+T β β β
+t=1
+15Weuse“admissible"toarefertoatrajectorygeneratedbyexecutinganarbitrarypolicyπ:S→∆(A)intheMDP.
+29T
+≤ 1 (cid:88) E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3)
+T τ∼π(cid:101)(t−1) β
+t=1
+T (cid:20) (cid:21) (cid:20) (cid:21)
+1 (cid:88) π(t)(τ) π(t)(τ)
++ E βlog −r(τ) −E βlog −r(τ) .
+T τ∼π(t) π (τ) τ∼π(cid:101)(t−1) π (τ)
+ref ref
+t=1
+T
+= 1 (cid:88) E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3)
+T τ∼π(cid:101)(t−1) β
+t=1
+T (cid:20) (cid:21)
++
+1 (cid:88)
+E βlog
+π(t)(τ)
+−r(τ)−βlog
+π(t)(τ (cid:101))
++r(τ) .
+T s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)(t−1)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+t=1
+T
+≤ 6V max + 1 (cid:88) E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3) (35)
+T T τ∼π(cid:101)(t−1) β
+t=2
+T (cid:20) (cid:21)
++
+1 (cid:88)
+E βlog
+π(t)(τ)
+−r(τ)−βlog
+π(t)(τ (cid:101))
++r(τ) ,
+T s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)(t−1)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+t=2
+where the last line follows by Eq.(34).
+Next, recall that we define µ(t) = 1 (cid:80) π(t)⊗π(t) Consider a fixed step t≥2, and define
+t−1 i<t (cid:101)
+(cid:16)
+E
+(cid:104)
+βlogπ(t)(τ) −r(τ)−βlogπ(t)(τ(cid:101))
++r(τ)(cid:105)(cid:17)2
+I(t) :=
+s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)(t−1)|s1 πref(τ) πref(τ(cid:101)) (cid:101)
+.
+(cid:20)(cid:16) (cid:17)2(cid:21)
+V2 ∨(t−1)·E βlogπ(t)(τ) −r(τ)−βlogπ(t)(τ(cid:101)) +r(τ)
+max s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 πref(τ) πref(τ(cid:101)) (cid:101)
+Then, using the AM-GM inequality, for any η >0 we can bound
+(cid:20) (cid:21)
+π(t)(τ) π(t)(τ)
+E βlog −r(τ)−βlog (cid:101) +r(τ)
+s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)(t−1)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+I(t) η
+(cid:32) (cid:34)(cid:18)
+π(t)(τ) π(t)(τ)
+(cid:19)2(cid:35)(cid:33)
+≤ + · V2 ∨(t−1)·E βlog −r(τ)−βlog (cid:101) +r(τ)
+2η 2 max s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+I(t) η
+(cid:32) (cid:34)(cid:18)
+π(t)(τ) π(t)(τ)
+(cid:19)2(cid:35)(cid:33)
+≤ + · V2 +(t−1)·E βlog −r(τ)−βlog (cid:101) +r(τ) . (36)
+2η 2 max s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+Note that by definition, we have that (cid:80)T I(t) ≤SEC (Π,T,β;π ). Hence, by plugging Eq.(36) into
+t=1 RLHF samp
+Eq.(35) and summing, we conclude that
+T
+1 (cid:88)
+J (π⋆)−J (π(t))
+T β β β
+t=1
+T
+≤ 6V max + SEC RLHF(Π,T,β;π samp) + η V2 + 1 (cid:88) E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3)
+T 2ηT 2 max T τ∼π(cid:101)(t−1) β
+t=2
++
+η
+(cid:88)T
+(t−1)·E
+(cid:34)(cid:18)
+βlog
+π(t)(τ)
+−r(τ)−βlog
+π(t)(τ (cid:101))
++r(τ)(cid:19)2(cid:35)
+. (37)
+2T s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+t=2
+Fix t, and consider the term
+E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3) + η(t−1) E
+(cid:34)(cid:18)
+βlog π(t)(τ) −r(τ)−βlog π(t)(τ (cid:101))
++r(τ)(cid:19)2(cid:35)
+τ∼π(cid:101)(t−1) β 2 s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+(38)
+30above. Let f (τ,τ) := βlog π(τ) −βlog π(τ(cid:101)) . By Lemma C.3, we have that for any pair of admissible
+π (cid:101) πref(τ) πref(τ(cid:101))
+trajectories (τ,τ) that share the initial state s , f (τ,τ)=r(τ)−r(τ), so we can rewrite Eq.(38) as
+(cid:101) 1 π⋆ (cid:101) (cid:101)
+β
+E (cid:2) βlogπ(t)(τ)−βlogπ⋆(τ)(cid:3) + η(t−1) E
+(cid:20)(cid:16)
+f (τ,τ)−f
+(τ,τ)(cid:17)2(cid:21)
+. (39)
+τ∼π(cid:101)(t−1) β 2 s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π(t) (cid:101) π β⋆ (cid:101)
+We now recall the central concentration lemma for XPO (Lemma C.5).
+Lemma C.5 (Concentration for XPO). Suppose that Assumptions 3.1 and 3.2 hold. Then Algorithm 1
+guarantees that with probability at least 1−δ, for all steps t∈[T],
+α·E (cid:2) log(π(t)(τ))−log(π⋆(τ))(cid:3) +κ· E
+(cid:20)(cid:16)
+f (τ,τ)−f
+(τ,τ)(cid:17)2(cid:21)
+s1∼ρ,τ∼π(cid:101)(t−1) β s1∼ρ,(τ,τ(cid:101))∼µ(t)|s1 π(t) (cid:101) π β⋆ (cid:101)
+(cid:114)
+2log(2|Π|Tδ−1) α 24log(2|Π|Tδ−1)
+≤ + V ,
+t−1 β max t−1
+for κ:=(8(R max+V max)e2Rmax)−2.
+It follows that if we set η = βκ ≤ βκ , then with probability at least 1−δ, for all t∈[T],
+αT α(t−1)
+(cid:32) (cid:114) (cid:33)
+β log(|Π|Tδ−1) α log(|Π|Tδ−1)
+Eq.(39)≲ · + V
+α t−1 β max t−1
+(cid:114)
+βlog(|Π|Tδ−1) log(|Π|Tδ−1)
+= +V .
+α(t−1) max t−1
+Plugging this bound back into Eq.(37), we have that
+T
+1 (cid:88)
+J (π⋆)−J (π(t))
+T β β β
+t=1
+≲
+V
+max +
+SEC RLHF(Π,T,β;π samp)
++ηV2 +
+1 (cid:88)T (cid:32) βlog(|Π|Tδ−1)
++V
+(cid:114) log(|Π|Tδ−1)(cid:33)
+T ηT max T α(t−1) max t−1
+t=2
+(cid:114)
+V SEC (Π,T,β;π ) βlog(|Π|Tδ−1)log(T) log(|Π|Tδ−1)
+≲ max + RLHF samp +ηV2 + +V
+T ηT max αT max T
+(cid:114)
+V α·SEC (Π,T,β;π ) βκV2 βlog(|Π|Tδ−1)log(T) log(|Π|Tδ−1)
+= max + RLHF samp + max + +V
+T βκ αT αT max T
+(cid:114)
+α·SEC (Π,T,β;π ) βκV2 βlog(|Π|Tδ−1)log(T) log(|Π|Tδ−1)
+≲ RLHF samp + max + +V
+βκ αT αT max T
+(cid:114)
+α·SEC (Π,T,β;π ) βlog(|Π|Tδ−1)log(T) log(|Π|Tδ−1)
+≲ RLHF samp + +V ,
+βκ αT max T
+where the last line uses that κ≤V−2. It follows that by choosing
+max
+(cid:115)
+βκ·βlog(|Π|Tδ−1)log(T)
+α∝ , (40)
+T ·SEC (Π,T,β;π )
+RLHF samp
+we obtain
+T
+1 (cid:88)
+J (π⋆)−J (π(t)) (41)
+T β β β
+t=1
+(cid:114) (cid:114)
+κ−1log(|Π|Tδ−1)log(T))·SEC (Π,T,β;π ) log(|Π|Tδ−1)
+≲ RLHF samp +V (42)
+T max T
+31(cid:114)
+SEC (Π,T,β;π )log(|Π|δ−1)log(T)
+≤O(V +κ−1/2)· RLHF samp . (43)
+max T
+Finally, we note that (V max+κ−1/2)=O((V max+R max)e2Rmax).
+C.8 Proofs for SEC Bounds
+Proof of Lemma C.1. This proof is based on Proposition 19 of Xie et al. (2023), with some additional
+modifications to handle the preference-based setting. Let T ∈ N and policies π(1),...,π(T) be given, and
+recall that π(t) =π (π(1),...,π(t)). Define
+(cid:101) samp
+π(t)(τ) π(t)(τ)
+δ(t)(τ,τ)=βlog −r(τ)−βlog (cid:101) +r(τ),
+(cid:101) π (τ) π (τ) (cid:101)
+ref ref (cid:101)
+and note that by Lemma C.3, we have |δ(t)(τ,τ)|≤4V whenever τ and τ share the same initial state s .
+(cid:101) max (cid:101) 1
+Let E denote the expectation over trajectories induced by sampling s ∼ρ, τ ∼π |s , and τ ∼π′ |s .
+π,π′ 1 1 (cid:101) 1
+Meanwhile,letE denotetheexpectationovertrajectoriesinducedbysamplings ∼ρand(τ,τ)∼µ(t) |s .
+µ(t) 1 (cid:101) 1
+Then our goal is to bound
+Val:=
+(cid:88)T (cid:0)E π(t),π(cid:101)(t−1)[δ(t)(τ,τ (cid:101))](cid:1)2
+.
+t=1
+V m2 ax∨(t−1)·E µ(t)[(δ(t)(τ,τ (cid:101)))2]
+Let
+dπ(τ)
+ν = argmin sup sup
+ν(τ)
+ν∈∆((S×A)H)τ∈(S×A)Hπ∈Π
+be the distribution that achieves the value of the coverability coefficient in Definition 3.1. Let us abbreviate
+C ≡C (Π). For a trajectory τ, let
+cov cov
+(cid:40) (cid:41)
+t(τ):= min t| (cid:88) dπ(i) (τ)≥C ·ν(τ) .
+cov
+i<t
+Then we can bound
+Val≤(cid:88)T (cid:0)E π(t),π(cid:101)(t−1)[δ(t)(τ,τ (cid:101))I{t<t(τ)}](cid:1)2 +(cid:88)T (cid:0)E π(t),π(cid:101)(t−1)[δ(t)(τ,τ (cid:101))I{t≥t(τ)}](cid:1)2
+.
+t=1
+V m2 ax∨(t−1)·E µ(t)[(δ(t)(τ,τ (cid:101)))2]
+t=1
+V m2 ax∨(t−1)·E µ(t)[(δ(t)(τ,τ (cid:101)))2]
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+=:(I) =:(II)
+We begin by bounding the first term by
+T T
+(I)≤ 1 (cid:88)(cid:0)E [δ(t)(τ,τ)I{t<t(τ)}](cid:1)2 ≤16(cid:88) E [I{t<t(τ)}].
+V2 π(t),π(cid:101)(t−1) (cid:101) π(t)
+max t=1 t=1
+Letting T :=(S×A)H, we can further bound this by
+T T
+(cid:88) E [I{t<t(τ)}]= (cid:88)(cid:88) dπ(t) (τ)I{t<t(τ)}
+π(t)
+t=1 τ∈T t=1
+ 
+t(τ)−2
+=
+(cid:88)
+
+(cid:88) dπ(i) (τ)+dπ(t(τ)−1)
+(τ)
+τ∈T i=1
+(cid:88)
+≤2C ν(τ)=2C ,
+cov cov
+τ∈T
+32so that (I)≤32C .
+cov
+We now bound term (II). Define dπ,π′(τ′,τ′) = P (τ = τ′,τ = τ′) and dµ(t)(τ′,τ′) =
+(cid:101) s1∼ρ,τ∼π|s1,τ(cid:101)∼π′|s1 (cid:101) (cid:101) (cid:101)
+t−1 1(cid:80) i<tdπ(i),π(cid:101)(i)(τ′,τ (cid:101)′). For each t, we can write
+E [δ(t)(τ,τ)I{t<t(τ)}]
+π(t),π(cid:101)(t−1) (cid:101)
+= (cid:88) dπ(t),π(cid:101)(t−1) (τ,τ (cid:101))δ(t)(τ,τ (cid:101))I{t≥t(τ)}
+τ,τ(cid:101)∈T
+(cid:32) (cid:33)1/2
+= (cid:88) dπ(t),π(cid:101)(t−1) (τ,τ (cid:101))δ(t)(τ,τ (cid:101)) d dµ µ( (t t) )( (τ τ, ,τ τ(cid:101))
+)
+I{t≥t(τ)}
+(cid:101)
+τ,τ(cid:101)∈T
+ 1/2
+≤ (cid:88) (dπ(t), (π(cid:101) t(t −−1 1)( )τ ·, dτ (cid:101) µ)) (t2 )I ({ τt ,τ≥ )t(τ)}  ·(cid:0) (t−1)· E µ(t)(cid:2) (δ(t)(τ,τ (cid:101)))2(cid:3)(cid:1)1/2 ,
+(cid:101)
+τ,τ(cid:101)∈T
+where the last inequality is by Cauchy-Schwarz. We conclude that
+(II)≤
+(cid:88)T
+(cid:88)
+(dπ(t),π(cid:101)(t−1)(τ,τ (cid:101)))2I{t≥t(τ)}
+.
+(t−1)·dµ(t)(τ,τ)
+t=1τ,τ(cid:101)∈T (cid:101)
+To proceed, we restrict our attention to the case where π(t) =π for all t for some fixed π. We observe that in
+(cid:101) (cid:101) (cid:101)
+this case, for all t,
+dπ(t),π(cid:101)(t−1)(τ,τ (cid:101))
+=
+dπ(t),π(cid:101)(τ,τ (cid:101))
+=
+dπ(t)(τ)
+,
+dµ(t)(τ,τ (cid:101)) t−1 1(cid:80) i<tdπ(i),π(cid:101)(τ,τ (cid:101)) t−1 1(cid:80) i<tdπ(i)(τ)
+since τ and τ are conditionally independent given s , and since dπ,π′(τ,τ)=0 if τ,τ do not share the same
+(cid:101) 1 (cid:101) (cid:101)
+s . It follows that
+1
+(II)≤
+(cid:88)T
+(cid:88)
+dπ(t)(τ)dπ(t),π(cid:101)(τ,τ (cid:101))I{t≥t(τ)}
+(cid:80) dπ(i)(τ)
+t=1τ,τ(cid:101)∈T i<t
+(cid:88)(cid:88)T (dπ(t)(τ))2I{t≥t(τ)}
+=
+(cid:80) dπ(i)(τ)
+τ t=1 i<t
+(cid:88)(cid:88)T (dπ(t)(τ))2
+≤2
+(cid:80) dπ(i)(τ)+C ν(τ)
+τ t=1 i<t cov
+(cid:88)
+(cid:88)T dπ(t)(τ)
+≤2C ν(τ) .
+cov (cid:80) dπ(i)(τ)+C ν(τ)
+τ t=1 i<t cov
+Finally, by Lemma 4 of Xie et al. (2023), we have that for all τ ∈T, (cid:80)T dπ(t) (τ) ≤O(log(T)),
+t=1 (cid:80) i<tdπ(i)(τ)+Ccovν(τ)
+which yields (II)≤O(C log(T)). This proves the result.
+cov
+Proof for Example C.2. We claim for any pair of trajectories τ,τ and function f ∈F, we can write
+(cid:101)
+H
+(cid:88)
+(f(s ,a )−[T f](s ,a ))−(f(s ,a )−[T f](s ,a ))=⟨X(τ,τ),W(f)⟩ (44)
+h h β h h (cid:101)h (cid:101)h β (cid:101)h (cid:101)h (cid:101)
+h=1
+for embeddings X(τ,τ),W(f) ∈ Rd. To see this, note that f(s ,a ) = ⟨ϕ(s ,a ),θ ⟩ for some θ ∈ Rd
+(cid:101) h h h h f f
+with ∥θ ∥ ≤ B by definition, while the linear MDP property implies that we can write [T f](s ,a ) =
+f β h h
+33√
+⟨ϕ(s ,a ),w ⟩ for some w ∈Rd with ∥w ∥≤O( d). It follows that we can take
+h h f f f
+H
+(cid:88)
+X(τ,τ)= ϕ(s ,a )−ϕ(s ,a )∈Rd
+(cid:101) h h (cid:101)h (cid:101)h
+h=1
+and
+W(f)=θ −w ∈Rd.
+f f
+With this definition, we observe that in the case where π(t) =π for all t, we can write the value of SEC
+(cid:101) (cid:101) RLHF
+for a sequence of policies π(1),...,π(T) as
+(cid:88)T (cid:0)E s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)|s1[⟨X(τ,τ (cid:101)),W(f(t))⟩](cid:1)2
+(cid:104) (cid:105)
+t=1
+V m2 ax∨(cid:80) i<tE
+s1∼ρ,τ∼π(i)|s1,τ(cid:101)∼π(cid:101)|s1
+⟨X(τ,τ (cid:101)),W(f(t))⟩2
+In particular, if we define W(t) :=W(f(t)) and X(t) =E [X(τ,τ)], it follows from Jensen’s
+inequality that we can bound the quantity above by
+s1∼ρ,τ∼π(t)|s1,τ(cid:101)∼π(cid:101)|s1 (cid:101)
+(cid:88)T ⟨X(t),W(t)⟩2
+V2 ∨(cid:80) ⟨X(i),W(t)⟩2
+t=1 max i<t
+Using that ∥X(τ,τ)∥,∥W(f)∥ ≤ poly(H,d), it now follows from the standard elliptic potential argument
+(cid:101)
+(e.g., Du et al. (2021); Jin et al. (2021)) that SEC RLHF(F,T;π samp)≤O(cid:101)(d).
+D Additional Proofs
+This section contains proofs for supporting results found throughout Section 2 and Section 3.
+D.1 Proofs from Section 2
+Proof of Proposition 2.1. Consider the bandit setting where H =1, S =∅, and A={a,b}. Let β >0 be
+given. We consider the reward function r given by r(a)=1 and r(b)= 1. We choose the reference model to
+2
+set π (a)=ε and π (b)=1−ε for a parameter ε:= exp(−c), where c>0 is an absolute constant whose
+ref ref β
+value will be chosenat the end ofthe proof. We choose Π={π ,π⋆}, which we note satisfies Assumption 3.1
+ref β
+and Assumption 3.2 with V =O(1).
+max
+Specialized to the bandit setting, Online DPO takes the following simplified form:
+1. Sample pair of actions a(t),a(t) ∼π(t).
+(cid:101)
+2. Label the actions as (a(t),a(t)) according the Bradley-Terry model:
++ −
+exp(r(a(t)))
+P(a(t) ≻a(t))= ,
+(cid:101) exp(r(a(t)))+exp(r( (cid:101)a(t)))
+and update D(t+1) ←D(t) ∪{(a(t),a(t))}.
+pref pref + −
+3. Compute π(t+1) via
+(cid:20) (cid:18) (cid:19)(cid:21)
+π(t+1) =argmin
+(cid:88)
+−log σ βlog
+π(a +)
+−βlog
+π(a −)
+. (45)
+π (a ) π (a )
+π∈Π ref + ref −
+(a+,a−)∈D p( rt e+ f1)
+Our construction uses the fact that depending on the preference dataset D(t) , the minimizer in Eq.(45) may
+pref
+not be uniquely defined. Let E(t) denote the event that at iteration t, a(t) =a(t) =b. We appeal to a technical
+(cid:101)
+lemma.
+34Lemma D.1. Suppose we initialize with π(1) =π . As long as c≤ 1, ε≤1/2, the following properties hold:
+ref 8
+• P(E(t) |E(1),...E(t−1))≥1−2ε.
+• Whenever E(1),...,E(t) hold, we can choose the policy π(t+1) to satisfy π(t+1) =π , which has
+ref
+1
+maxJ (π)−J (π(t+1))=maxJ (π)−J (π )≥
+π β β π β β ref 8
+By Lemma D.1 and the union bound, we have that
+P(E(1),...,E(T))≥(1−2ε)T ≥e−1
+as long as T ≤ 1 . It follows that whenever this occurs, max J (π)−J (π(t))≥ 1 for all t∈[T +1].
+2ε π β β 8
+Note that since online DPO selects π(t) = π for all t in our counterexample above, this also immediately
+ref
+implies a lower bound for offline DPO (interpreting π(T+1) as the policy returned by offline DPO).
+Proof of Lemma D.1. We prove this claim inductively. Let t∈[T] be fixed, and suppose the claim holds
+for 1,...,t−1. If we assume E(1),...,E(t−1) hold, then we have π(t) =π inductively. In this case,
+ref
+P(a(t) =a(t) =b)=(π (b))2 =(1−ε)2 ≥1−2ε,
+(cid:101) ref
+so that P(E(t) |E(1),...E(t−1))≥1−2ε as desired.
+Now,forthesecondpartoftheclaim,supposethatE(1),...,E(t+1)hold. Thenforallt′ ∈[t+1],a(t′) =a(t′) =b,
++ −
+which implies that
+(cid:20) (cid:18) (cid:19)(cid:21)
+(cid:88)
+−log σ βlog
+π(a +)
+−βlog
+π(a −)
+=−log(σ(0))·t
+π (a ) π (a )
+ref + ref −
+(a+,a−)∈D p( rt e+ f1)
+for all π ∈Π such that π ≪π . It follows that π(t+1) =π is a valid minimizer for Eq.(45).
+ref ref
+Finally, we compute that as long as ε≤1/2 and c≤ 1
+8
+maxJ (π)−J (π )≥ maxJ(π)−J(π )−βlog(ε−1)
+β β ref ref
+π π
+1 1
+=(1−(1−ε)· 1 −ε·1)−βlog(ε−1)≥ −c≥ .
+2 4 8
+E Experiments: Additional Results and Details
+Table 2 displays the performance of XPO and the comparator models described in Section 3.4 on additional
+reasoning tasks. We observe that the XPO model outperforms Llama-3-8B-it, and still comparable to Llama-3-
+8B-Flow-Final, which uses 4x more data than XPO. The average over all academic benchmarks is 59.94 for
+Llama-3-8B-Flow-Final vs. 59.61 for XPO-iter3, in addition to the performance gain from XPO-iter3 in the chat
+benchmarks (Table 1).
+Implementation details. The experiments were conducted on 8 x Nvidia H100 GPUs. In our implemen-
+tation, we mainly follow the general version of XPO (Algorithm 2), and we pick π(t) =π(t) and D(t) =D(t) .
+(cid:101) opt pref
+In each iteration, we fix the base model (Llama-3-8B-Flow-SFT) as π , set β =0.1, use a global batch size
+ref
+of 16, and use a learning rate of 5×10−7 with cosine scheduling. The α parameter follows the schedule
+{1×10−5,5×10−6,0} for the three iterations. We clip the log π(τ) term for both positive and negative
+πref(τ)
+trajectories to [−500,500], but only for the exploration term, in order to enhance stability. This is motivated
+by Assumption 3.2. The number of training epochs for each iteration is 2, and the warmup ratio is 0.03.
+35Model ARC-C TruthfulQA HellaSwag WinoGrande
+Llama-3-8B-Flow-SFT 56.23 53.43 78.66 76.64
+DPO-iter1 57.08 59.73 79.97 76.24
+DPO-iter2 56.57 60.66 79.74 76.16
+DPO-iter3 57 61.79 79.65 76.95
+XPO-iter1 57.34 59.28 80.01 76.4
+XPO-iter2 57.25 59.72 79.85 76.4
+XPO-iter3 56.23 59.74 79.16 76.64
+Llama-3-8B-Flow-Final 54.35 62.23 80.84 77.19
+Llama-3-8B-it 56.83 51.65 75.75 71.74
+Table 2: XPO and comparator models on additional reasoning benchmarks. Bold results are the best ones
+with the same data usage. Underlined results are superior to XPO, but either from a model requiring more
+data or industry-level.
+36
