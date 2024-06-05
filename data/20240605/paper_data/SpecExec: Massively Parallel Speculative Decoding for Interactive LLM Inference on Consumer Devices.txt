@@ -1,0 +1,842 @@
+SpecExec: Massively Parallel Speculative Decoding
+for Interactive LLM Inference on Consumer Devices
+Ruslan Svirschevski∗§, Avner May∗‡, Zhuoming Chen∗†,
+Beidi Chen†♯, Zhihao Jia†, and Max Ryabinin‡
+§Yandex †Carnegie Mellon University ♯Meta AI ‡Together AI
+ruslansv@gmail.com, {avner,mryab}@together.ai,
+{zhuominc,beidic,zhihaoj2}@andrew.cmu.edu
+Abstract
+As large language models gain widespread adoption, running them efficiently becomes crucial. Recent
+works on LLM inference use speculative decoding to achieve extreme speedups. However, most of these
+works implicitly design their algorithms for high-end datacenter hardware. In this work, we ask the
+opposite question: how fast can we run LLMs on consumer machines? Consumer GPUs can no longer
+fit the largest available models (50B+ parameters) and must offload them to RAM or SSD. When
+running with offloaded parameters, the inference engine can process batches of hundreds or thousands
+of tokens at the same time as just one token, making it a natural fit for speculative decoding. We
+propose SpecExec (Speculative Execution), a simple parallel decoding method that can generate up
+to 20 tokens per target model iteration for popular LLM families. It utilizes the high spikiness of the
+token probabilities distribution in modern LLMs and a high degree of alignment between model output
+probabilities. SpecExec takes the most probable tokens continuation from the draft model to build
+a “cache” tree for the target model, which then gets validated in a single pass. Using SpecExec, we
+demonstrate inference of 50B+ parameter LLMs on consumer GPUs with RAM offloading at 4–6 tokens
+per second with 4-bit quantization or 2–3 tokens per second with 16-bit weights. 1
+1 Introduction
+Open-access large language models (LLMs), such as Llama 3 [1] and Mistral [2], have become increasingly
+capable in the past years, and their adoption has grown dramatically. Although these models are openly
+available, users who are interested in running these models on consumer-grade GPUs (for example, due to
+privacy or cost reasons) face important challenges. Many open-access LLMs are too large to fit on consumer
+GPUs, which necessitates offloading them onto CPU RAM to perform inference. Given the limited memory
+bandwidth between CPU and GPU, as well as the fact that all model parameters must be transferred to
+the GPU for the LLM to generate each new token, offloading is extremely slow and bandwidth-bound. For
+example, generating a single new token using Llama 2-70B in 16 bit with offloading on an RTX 3090 GPU
+takes at least 4.5 seconds2.
+A recent line of work that aims to speed up LLM inference is speculative decoding [3, 4], which uses a
+small draft model to predict the next tokens and a larger target model to verify which of those tokens to
+acceptinparallel. Althoughspeculativedecodingisapromisingdirection,thespeedupsthatexistingmethods
+can attain in the offloading setting are relatively modest. While studying existing approaches [3, 5, 6], we
+discovered that these methods do not scale well with the draft model token budget. In particular, as shown in
+Figure 1 (left), the number of tokens accepted by the target model is empirically upper bounded (by ≈10 for
+this model and dataset combination) regardless of the number of speculated tokens. In turn, methods that
+∗Equalcontribution.
+1Theimplementationcodeisavailableathttps://github.com/yandex-research/specexec
+2AssumingPCIe-4.0andatleast140GBofDDR5RAMwithanefficientoffloadingimplementation.
+1
+4202
+nuJ
+4
+]LC.sc[
+1v23520.6042:viXra12
+24 Llama2-70B FP16, A100, offloaded, PCIe 4.0
+SpecExec
+Llama2-7B FP16, A100
+20 SpecInfer
+8
+16
+12
+4
+8
+4
+0
+8 16 32 64 128 256 512 1024 2048 4096
+16 32 64 128 256 512 1024 2048 4096 8192
+Draft model output size in tokens
+Number of processed tokens
+Figure 1: Acceptance counts vs draft size (left), forward pass GPU time vs input size (right). Llama 2-7B
+draft model, offloaded Llama 2-70B target model, MTBench dataset, t=0.6 and top-p=0.9.
+scale better with more draft tokens [7] rely on static tree structures that may not be optimal for every setting,
+as they require dedicated tree optimization for every change in the text domain, generation hyperparameters,
+and the hardware setup.
+Inthiswork,weaimtoimprovetheeffectivenessofspeculativedecodingforrunninglargelanguagemodels
+on consumer hardware with RAM offloading. We propose SpecExec, a speculative decoding method that
+addresses the performance, flexibility and scalability issues of prior methods. SpecExec3 adopts a powerful
+draft model to deterministically4 construct a large draft tree that covers the most likely continuations of the
+prefix using a parallel search algorithm. We then apply a simple verification algorithm that views this tree as
+a cache of potential continuations and validates it with the target model in a single pass.
+Our main contributions can be summarized as follows:
+1. We analyze the empirical behavior of speculative decoding algorithms with large language models and
+identify ways to improve their acceptance rate when scaling to thousands of draft tokens.
+2. We propose SpecExec — a speculative decoding algorithm that improves the structure of generated draft
+trees for very large token budgets. We demonstrate that this technique can produce draft trees resulting
+in 10–20 accepted tokens with sufficiently large budgets.
+3. Usingourobservations,wedesignedasystemthatcanrunLlama2-70Borcomparablemodelsinteractively
+at 4-6 tok/s using 4-bit quantization or 2-3 tok/s with 16-bit weights on consumer GPUs with offloading,
+with 10-18x speedups vs sequential inference on the same hardware.
+2 Background
+2.1 Speculative Decoding
+In this study, we extend a family of algorithms for speculative decoding of autoregressive LLMs [8, 3, 4].
+These algorithms generate tokens in two phases: drafting and verification.
+Duringthedraftingphase,thealgorithmgeneratesacandidatesequenceoftokensbysamplingfromasmall
+draft model P(x |x ,θ ). In turn, the verification stage leverages the target model P(x |x ,θ )
+t+1 0:t draft t+1 0:t main
+to verify these draft sequences and accept all tokens that have passed the verification. The probability of
+accepting a token is chosen in a way that preserves the output distribution of sequential sampling from the
+original LLM [3, 4, 6]. A key advantage of speculative algorithms is that the main model can verify all draft
+tokens in parallel, which is more efficient than sequentially generating one token at a time.
+Subsequent works in speculative decoding extend this idea in several directions, including generating
+multiple draft sequences or draft trees, using multiple draft models, and finetuning the draft models to
+improve generation speed [5, 10, 11]. Another line of follow-up studies explores alternative sources for the
+draft model: namely, [12] uses a subset of main model layers to produce a draft, [13] retrieves draft sequences
+3WechosethisnamebecauseourmethoddirectlyappliesspeculativeexecutiontoLLMinference. Thedraftmodel“guesses”
+whichtokenprefixesthetargetmodelwillneedtocontinue,andthenthetargetmodelcomputesdistributionsofcontinuations
+withasingleforwardpassonthespeculatedprefixtree.
+4Incontrast,speculativesamplingrequiresstochasticgenerationofthedrafttreeusingdraftprobabilities.
+2
+pets/snekot
+detareneG
+#
+ces
+,emit
+ssap
+drawroFfrom a search index, and [14] uses multiple stages of speculation. Leveraging these techniques, practitioners
+built efficient implementations for fast LLM inference [5, 15].
+In our analysis, we focus on speculative decoding algorithms that support sampling from the target model
+and guarantee identical sample probabilities vs standard generation. The rationale for our choice is that most
+popular LLM applications (such as chat assistants) require stochastic sampling to introduce variability into
+their responses. This focus rules out several algorithms that only support greedy inference [9, 10]. Still, most
+works on speculative decoding fit within that criterion.
+2.2 Parameter Offloading
+Another recent line of work explores running and training large models with limited accelerator memory
+by “offloading” their parameters to another, cheaper memory, such as RAM or even SSD storage [16, 17, 18].
+This technique works by loading model parameters on the GPU when they are needed for computation. Since
+most deep learning models use layers in a fixed order, offloading can pre-dispatch the next layer parameters
+in the background ahead of time.
+This technique works particularly well when processing large batches of data, during training [16, 17] or
+large-batch non-interactive inference [19, 20], where each layer process multiple tokens each time it is loaded.
+In turn, when doing interactive inference, offloading works significantly slower than on-device inference. This
+is because interactive inference has to process one or few tokens at a time, and therefore spends most of the
+time waiting for the parameters to load.
+2.3 Running LLMs on Consumer Devices
+While our observations are not specific to any particular LLM, we focus on a practical case of running
+modern instruction-tuned models such as Llama-2-70B-chat [21] and Mixtral 8x7B [22]. To better estimate
+the target hardware setups, we study communities dedicated to running large models locally, such as [23].
+A popular5 hardware configuration for running those models locally is a desktop or a cloud instance with
+a single consumer-grade GPU6 with 12–24 GB VRAM, 4–8 CPU cores, 32–64 GB RAM, and a PCIe 3.0
+or 4.0 x16 bus between CPU and GPU. Another popular setup is devices without a dedicated GPU, such
+as MacBooks with an ARM-based CPU, 16 GB RAM, and an SSD. While this survey may not be fully
+representative, it reveals popular setups that are not targeted by most speculative decoding research.
+Runningthelargestlanguagemodelsinthissetuprequireseitherextremecompressionoroffloading. While
+itispossibletofit70B+LLMsintoconsumerGPUsbycompressingthemto1.5–2bitsperparameter[25,26],
+doing so causes such quantization errors that defeat the purpose of running large models [27, 26]. Thus,
+practitioners with consumer-grade hardware may find it optimal to run 50B+ models with mild (e.g., 4-bit)
+quantization and offload model parameters from GPU to RAM, or to SSD [18].
+3 Preliminary analysis
+Speculative decoding with offloading benefits from the fact that it is more efficient to process tokens in
+parallel than sequentially. In conventional inference, this is caused by the higher arithmetic intensity of GPU
+processing7. With offloading, there is a different bottleneck — loading model parameters from RAM (or
+SSD). Since modern offloading engines can dispatch model parameters in parallel with computation, the
+total processing time is the maximum of the time to load all parameters and the total computation time. In
+preliminary experiments (see Figure 1, right), we found that 70B models running on a consumer desktop can
+process hundreds or thousands of tokens within nearly the same time as just a single token.
+This leads us to a question: how does speculative decoding perform when given hundreds to
+thousands of draft tokens? As shown in concurrent work [7], speculative decoding algorithms with single
+or multiple sequences, like SpecInfer, are effectively upper-bounded in the number of accepted tokens as the
+speculation budget grows. This is confirmed by our observations (see Figure 1, left), where even the more
+powerful Llama-2 7B saturates.
+5Basedondesktopsetups(fromA,B,C,D,etc.),aswellaspopularhardwareguidessuchas[24]
+6Forexample,RTX4060or4090desktops,T4orA2VMs.
+7Parallelmatrixmultiplicationsdomoreusefulcomputationspermemoryaccessformanytokens.
+3Top-k tokens
+1.0
+1
+0.8
+0.6 4
+0.4 16
+0.2 64
+0.0 256
+Llama-2 70B Llama-2 13B Llama-2 7B TinyLlama 1B JackFram 160M
+Figure 2: 70B model cum. probability of top likely tokens vs draft model choice, OASST1 dataset.
+In regular GPU inference, using 7B draft models would be impractical, as the drafting steps would take
+too long. However, in our setting, large draft models can be justified because each offloaded forward pass
+takes significantly more than a second (see Figure 1, right). This runs contrary to a popular intuition in
+speculative decoding that favors smaller draft models [5, 10].
+We also observe that sampling from modern LLMs often results in a few high-probability tokens that
+add up nearly to a probability of 1 (see Figure 2). If we can find these tokens using the draft model, we can
+construct a draft that will be accepted with a similarly high probability. In preliminary experiments for 70B
+models, we found that running beam search with a capable draft model (e.g., LLaMA-2 7B) can recover
+many of these high-probability tokens. Unfortunately, this kind of deterministic search is incompatible with
+speculative decoding for stochastic sampling, which called for alternative validation method.
+4 Method
+4.1 Speculative Execution
+As we observed in Section 3, high-probability continuations of large models are concentrated in a few
+tokens, and offloading benefits from running target model on hundreds or thousands of tokens. To use these
+observations, we formulate an alternative, simpler speculative decoding strategy. Unlike speculative decoding,
+SpecExec (short for "Speculative Execution") does not propose a new sampling procedure: it runs normal
+(sequential) sampling while trying to “guess” which probabilities will be needed during future steps and
+precomputing these samples in parallel. This is similar to speculative execution [31] in modern CPUs that
+predict which operations should be computed ahead of time to better utilize the compute cycles.
+More specifically, whenever SpecExec uses target model probabilities, it looks them up in a speculative
+“cache”. If it encounters a token that is not in the cache, it queries the target model for that token and
+simultaneously computes probabilities for B potential future tokens chosen with the draft model. If the
+draft model can guess the likely next tokens accurately enough, the algorithm will be able to run multiple
+sampling iterations using these cached probabilities without querying the target model until it “exhausts
+the cache” and begins anew. A formal description of SpecExec is given in Algorithm 1.
+To choose which future tokens should be precomputed, we run a search algorithm with the draft model to
+(cid:81)
+find B most likely tokens according to their cumulative probability P(x |x ,θ ). The details of the
+t t+1 0:t draft
+search algorithm are given in Section 4.2; unlike drafting with regular speculative decoding, this procedure is
+deterministic and always selects tokens with the highest probability.
+Comparison to speculative decoding. The core advantage of SpecExec over regular speculative
+decoding is that the algorithm does not need the draft tree to follow a known probability distribution. In
+other words, SpecExec produces correct samples with any draft tree, even if it is deterministic. We use this
+property to construct the best possible speculative tree in ways that would break the assumptions of standard
+speculative decoding. For instance, our tree construction procedure, outlined in Section 4.2, considers only
+the most likely draft tokens and aims to capture a larger portion of the total probability mass.
+However, this advantage comes at the cost of lower acceptance rates for any individual token. Algorithm 1
+acceptsatokenx withprobabilityP(x |x ,θ ),becauseacceptingatokenwithSpecExecisequivalent
+t t+1 0:t target
+to sampling that token from the target model distribution. Meanwhile, the original speculative decoding (for
+example, 5) accepts tokens with a higher probability P(x |x ,θ )/P(x |x ,θ ).
+t+1 0:t target t+1 0:t draft
+Forasmallnumberofdrafttokens(forinstance,justonetoken),SpecExecislesseffectivethantraditional
+speculative decoding. However, as we increase the number of draft tokens, speculative execution generates
+better-structured trees, which in practice leads to accepting more tokens for the same draft size: we verify
+this in Section 5.2.
+4
+egarevoC )B07
+sv(Algorithm 1 Speculative Execution
+1: Input: prompt x, models θ target, θ draft, output length L, budget K, max depth D, batch size B
+2: Output: a sequence of L tokens generated by θ target
+3: cache:= precompute(x,θ draft,θ target,K,D,B) ▷ target model probabilities for
+likely future tokens
+4: for t=1,2,...,L do
+5: if x∈/ cache then
+6: cache:=precompute(x,θ draft,θ target,K,D,B)
+7: p target :=cache[x] ▷ p target is equal to P( · |x 1,...,x t,θ target)
+8: x next ∼sample(p target)
+9: x:=x⊕{x next} ▷ append token
+10: return x
+11:
+12: function precompute(x, θ target, θ draft, K,D,B)
+13: τ :=createDraftTree(x,θ draft,K,D,B) ▷ τ is a tree with K tokens up to depth D
+14: next_probs:=forward(τ,θ target) ▷ process τ tokens in parallel with offloading;
+note: next_probs is a matrix ∈RK×vocab
+15: cache:={}
+16: for x i ∈τ do
+17: x prefix :=π(x i,τ) ▷ prefix in tree τ
+18: cache[x prefix⊕{x i}]=next_probs[x i] ▷ vector of probs for possible next tokens
+19: return cache
+Correctness. Next, we need to verify that SpecExec is equivalent to sequential sampling from the target
+model. Notably, unlike [3], SpecExec does not change the probabilistic sampling procedure. The difference
+between SpecExec and sequential decoding is that SpecExec computes some probabilities ahead of time, thus
+improving the GPU utilization in the case of offloading.
+From a formal perspective, we rely on the fact that a speculative generation algorithm is equivalent to
+sequential sampling if it is locally equivalent in every node [5]; in other words, it samples from the same
+probabilities for every prefix in the draft tree. Since SpecExec explicitly samples from the same probabilities
+as the main model, this is true by definition.
+The fact that SpecExec follows the same sampling procedure has another side effect. If we view SpecExec
+as a deterministic function that depends on a pseudo-random number generator as input, we can prove a
+stronger degree of equivalence. Namely, for every input random seed, SpecExec produces exactly the same
+outputs as sequential sampling with the same seed. In contrast, speculative decoding does not have this
+properly: it only guarantees correct overall sampling probabilities.
+4.2 Search for the Optimal Draft Tree
+As we discussed above, our algorithm uses the draft model to build a tree τ of likely future tokens for
+speculative caching. In this section, we describe how to find these tokens efficiently. From an optimization
+perspective, we seek to construct a tree that will lead to the highest expected number of generated (accepted)
+tokens. This problem can be solved by viewing the tree construction as the search for the set of nodes
+(i.e., tokens) that have the highest cumulative probability with respect to the target model. As we show in
+Appendix A, this search can be reduced to the single-source shortest path (SSSP) search problem that can be
+solved efficiently using a modified version of the Dijkstra’s algorithm [32], described formally in Algorithm 2.
+In summary, SpecExec follows a loop:
+1. Run Algorithm 2 with the draft model to select K best tokens,
+2. Process them with the target model using offloading,
+3. Follow Algorithm 1 to determine which tokens are accepted.
+While Algorithm 2 is a rather special case of SSSP over a combinatorially large tree (the tree of all token
+sequences up to length K), the general SSSP problem is well studied in the computer science community (see
+5Appendix B). Therefore, practitioners will be able to leverage existing algorithms to implement Speculative
+Execution for a broad range of setups, including GPUs, mobile CPUs, or distributed systems.
+Algorithm 2 PARALLEL SSSP FOR DRAFTING
+1: Input: prefix x, θ draft, budget K, depth D, batch B
+2: Output: a tree of K likely future tokens
+3:
+4: function createDraftTree(x, θ draft, K,D,B)
+5: τ :=Tree({x}) ▷ an empty tree with root at x
+6: T :=∞ ▷ stopping threshold
+7: H :=PriorityQueue({x:0})▷ x has priority 0; H orders by negative cum. log-prob.
+8: for d=1,2,...,D do
+9:
+batch:=∅
+10: for b=1,2,...,B do
+11: H,x b,nll b :=extractMin(H)
+12: if nll b <T then
+13: τ :=addChild(τ,x b,nll b)
+14: batch:=batch∪{x b}
+15: if batch=∅ then
+16: break
+17: if size(τ)≥K then
+18: T :=−kthCumulativeLogProb(τ,K)▷ ignore tokens that fall outside the budget
+19: probs:=forward(batch,θ draft) ▷ run θ draft w/o offloading, attend to past
+tokens; note: probs is a matrix ∈RB×vocab
+20: topk:=selectBest(batch,probs,τ,K) ▷ select best tokens by cumulative prob.
+21: for (x i,p i)∈topk do
+22: logp prefix :=cumulativeLogProb(x i,τ) ▷ (cid:80) xt∈π(xi,τ)logP(x t|π(x t,τ,θ draft))
+23: nll:=−logp prefix−logp i
+24: H :=insert(H,x i,nll)
+25: H :=trim(H,K) ▷ remove all except K best
+26: return trim(τ,K)
+4.3 Implementation details
+Finally, there are several important technical improvements that speed up the real-world inference speed.
+When running the forward pass with an offloaded target model, we accelerate inference by loading the next
+layer parameters in parallel with computing the previous layer activations using a dedicated CUDA stream,
+which is known to speed up offloading in other use cases [16, 17, 19]. We also preload the first few layers of
+the target model on the GPU in the background while drafting for a further speedup. We describe additional
+implementation details in Appendix C.
+In our experiments, we also consider quantizing target models using recent post-training quantization
+algorithms [28, 30, 29]. While quantization is generally popular among LLM practitioners, it is particularly
+useful for our use case, as quantized models take less time to load from RAM to GPU and have RAM
+offloading requirements attainable by consumer computers.
+5 Experiments
+5.1 Probability Coverage
+The core assumption behind Algorithm 1 is that a reasonably large draft can “cover” most of the high
+probability sequences of the target model. This is only possible if the target model predictions have low
+entropy (i.e., there is a small number of tokens with high probability) and the draft model can guess these
+tokens most of the time.
+6To test these assumptions in isolation, we measure the total probability mass “covered” by k most likely
+tokens, as well as the probability of top-k tokens guessed by draft models of varying size. If a certain
+draft model achieves a coverage probability p for k tokens, this entails taking the k most likely tokens
+predicted by the draft model and measuring their probabilities with the main model (Llama-2-Chat 70B)
+would result in average cumulative probability equal p. We evaluated multiple draft models of various size:
+JackFram-160M[5],TinyLlama-1.1B-Chatv1.0[33],Llama-2-Chat7Band13B[21]. Wereportthesecoverage
+probabilities on a sample of 512 OpenAssistant conversations [34]. For each conversation, we generate 64
+additional tokens by sampling from the target 70B model probabilities. We sample these tokens using raw
+probabilities (without temperature or top-p sampling) and use the same tokens for every draft model.
+The resulting coverage is reported in Figure 2. This leads to several important observations. First, the
+target model (Llama-2-Chat 70B) tends to have sharp probability distributions, where the top 1–4 tokens
+cover 90–98% of the entire probability mass. This agrees with existing observations that language models
+(especially the larger ones) are overconfident [35, 36].
+Next, we compare how effective the draft models are at predicting these high-probability tokens. While all
+models eventually get over 90% coverage rate, Llama-2-Chat 7B makes much more accurate predictions with
+the first 1–4 tokens. This is important for our use case because, while the full draft tree contains thousands
+of tokens, individual tokens within that tree have much fewer children. Curiously, the 13B draft model
+demonstrates roughly the same accuracy as 7B despite its larger size.
+Thoughweevaluatecoveragefor“raw” probabilitiesfromthe70Bmodel,manypracticalinferencescenarios
+use temperature or nucleus sampling. In fact, the official default sampling method for Llama-2 70B uses both
+a temperature of 0.6 and top-0.9 nucleus sampling [37]. Generating in this way makes the model even more
+confident, which further improves the efficiency of parallel decoding.
+5.2 Draft Acceptance Rates
+Next, we study how speculative execution compares to existing speculative decoding variants for different
+token budgets. Since all algorithms guarantee that the tokens are sampled from P(x |x ,θ ), we
+t+1 0:t main
+compare them in ability to generate longest sequences of accepted given the same budget of draft tokens.
+Since we are interested in very large budgets, we choose baseline algorithms that better fit this task. The
+original speculative decoding algorithm [3] generates a single sequence, which is truncated as soon as the
+algorithm rejects a single token. In other words, using a single long draft sequence results in most of the
+draft budget being wasted. Therefore we choose as baseline the SpecInfer algorithm that shares the large
+token budget across multiple stems in a tree.
+Similarly to the previous section, we use the 70B Llama-2 and Llama-2-Chat as target models. The draft
+model choice was driven by both speed and acceptance rate factors: we found that using 7B draft models
+results in significantly more accepted tokens, and longer forward pass time is still affordable in the offloading
+setting. We report the effects of these draft models in more detail in Appendix D.
+In each setup, we compared SpecExec and SpecInfer, using the 7B draft model, chosen based on
+Section5.1. Figure3reportstheaveragenumberofacceptedtokensbothforthedefaultsamplingconfiguration
+(temperature 0.6, top-p 0.9) and for greedy sampling for Llama2-70b-chat model using MTBench dataset.
+Similar tests were run for non-chat models on the C4 dataset, see Figure 4.
+For smaller draft budgets, SpecExec performs on par with SpecInfer, but eventually outscales it as we
+(a) MTBench dataset, t=0.6, top_p=0.9 (b) MTBench dataset, t=0
+24 24
+SpecExec SpecExec
+20 20
+SpecInfer SpecInfer
+16 16
+12 12
+8 8
+4 4
+8 16 32 64 128 256 512 1024 2048 4096 8 16 32 64 128 256 512 1024 2048 4096
+Draft model output size in tokens Draft model output size in tokens
+Figure 3: Generation rate vs draft size for Llama 2-7B/70B chat models, MTBench [38] dataset.
+7
+pets
+rep
+snekot
+detareneG
+#(a) C4 dataset, t=0.6, top_p=0.9 (b) C4 dataset, t=0
+24 24
+SpecExec SpecExec
+20 20
+SpecInfer SpecInfer
+16 16
+12 12
+8 8
+4 4
+8 16 32 64 128 256 512 1024 2048 4096 8 16 32 64 128 256 512 1024 2048 4096
+Draft model output size in tokens Draft model output size in tokens
+Figure 4: Generation rate vs draft size for Llama 2-7B/70B models, C4 dataset.
+increase the number of draft tokens. We attribute this not to the general verification algorithm, but to the
+fact that SpecExec constructs its draft out of most likely tokens, while SpecInfer must sample draft tokens to
+guarantee correctness. We also observe that speculative execution achieves a higher margin of improvement
+on MTBench samples than on C4. It also accepts more tokens with lower temperature. We attribute this to
+sharper token probability distributions, and thus, higher coverage rates for the same number of draft tokens.
+5.3 Inference Speed
+Finally, we evaluate the practical inference speed of SpecExec by running it with offloading in different
+hardware configurations. We run these evaluations for Llama 2 70B [21] models, both in regular and chat
+(instruction-tuned) versions. For prompts, we used subsamples of size 100 from OpenAssistant conversa-
+tions [34], WikiText-2 [39], MTBench [38] and C4 [40], measuring the speed of generating 32+ tokens per
+prompt. For Llama 2, we tested two setups: running the main model in 16 bits or quantizing it to 4 bits
+using GPTQ [28]. We also tested Mixtral 8x7B [22] and Llama-3 [1] target models in fewer setups.
+We measure the inference speed on multiple GPU types: A100 (high-end data-center), RTX 4090 (current
+generation high-end consumer), RTX 3090 (previous generation consumer), and RTX 2080Ti (older consumer
+GPU). The first three GPUs are connected to the host via PCIe Gen 4 x16, while 3090 and 2080Ti were
+tested with PCIe Gen 3 x16. Note that for A100, we report the forward pass time with offloading, even
+though the GPU can fit a quantized model in its memory. We run all experiments with a batch size of 1 to
+match the setup of running LLMs on a local machine.
+The average inference speed (measured in tokens per second) is reported in Tables 1 and 2. While the
+exact inference speed differs from setup to setup, Speculative Execution consistently speeds up generation
+withoffloadingbyseveraltimes. Theseresultscomparefavorablywithrecentlypublishedspeculativedecoding
+methods using fixed trees like Sequoia [41], which attains 2.2 tokens per second in the Llama 3 8B/70B setup,
+compared to 2.8 tokens per second in case of SpecExec.
+Table 1: Inference speed with RAM offloading, A100 GPU, Chat / Instruct models, using SpecExec(SX) and
+SpecInfer(SI) methods
+Draft / Target models Dataset t Method Budget Gen. rate Speed, tok/s Speedup
+0.6 SX 2048 20.60 3.12 18.7x
+0.6 SI 1024 8.41 1.34 8.0x
+Llama2-7b / 70b OAsst
+0 SX 1024 18.8 2.74 16.4x
+0 SI 1024 7.86 1.18 7.1x
+0.6 SX 128 12.10 6.02 8.9x
+Llama2-7b / 70b GPTQ OAsst
+0 SX 256 13.43 6.17 9.1x
+Mistral-7b / Mixtral-8x7b-GPTQ 0.6 SX 256 12.38 3.58 3.5x
+OAsst
+Llama3-8b / 70b 0.6 SX 1024 18.88 2.62 15.6x
+0.6 SX 1024 18.16 2.79 16.6x
+Llama3-8b / 70b MTBench
+0 SX 2048 21.58 2.94 17.5x
+8
+pets
+rep
+snekot
+detareneG
+#In Table 3, we report similar experiments for a range of real-world consumer GPUs. Note that while the
+fastest inference time is on RTX 4090, slower consumer GPUs (e.g. RTX 2080Ti) still generate tokens quickly
+enough for interactive use. To fit into consumer setup we replaced a 16-bit Llama-2 70B model with 4-bit
+GPTQ compressed variant of Llama2-70B as target. To lower the VRAM requirements for 2080 Ti we used
+Sheared-LLaMA-1.3B [42] as a draft model, making the whole experiment consume just over 7Gb of VRAM.
+Table2: InferencespeedwithRAMoffloading. A100GPU,basemodels,usingSpecExec(SX)andSpecInfer(SI)
+Draft / Target models Dataset t Method Budget Gen. rate Speed, tok/s Speedup
+0.6 SX 2048 12.9 1.97 11.8x
+0.6 SI 1024 6.48 1.03 6.2x
+Llama2-7b / 70b C4
+0 SX 2048 16.1 2.38 14.3x
+0 SI 1024 4.78 0.75 4.5x
+0.6 SX 2048 9.57 1.54 9.2x
+0.6 SI 1024 4.69 0.77 4.6x
+Llama2-7b / 70b WikiText-2
+0 SX 2048 11.74 1.88 11.3x
+0 SI 1024 3.71 0.62 3.6x
+0.6 SX 256 6.99 3.72 5.5x
+Llama2-7b / 70b GPTQ WikiText-2
+0 SX 256 8.81 4.54 6.7x
+Mistral-7b / Mixtral-8x7b-GPTQ WikiText-2 0.6 SX 128 6.56 3.23 3.2x
+Table 3: SpecExec inference on consumer GPUs with offloading, chat/instruct models, Llama-2-70B-GPTQ
+target model, t=0.6, OpenAssistant dataset.
+GPU Draft model Budget Gen. rate Speed, tok/s Speedup
+RTX 4090 256 13.46 5.66 8.3x
+RTX 4060 Llama2-7b 128 9.70 3.28 4.6x
+RTX 3090 256 14.3 3.68 10.6x
+RTX 2080Ti ShearedLlama-1.3B 128 7.34 1.86 6.1x
+While this was not the primary focus area of our study, the SpecExec method can also deliver competitive
+speedups in inference without offloading. See Appendix F for sample results.
+6 Conclusion and Future Work
+In this work, we propose a method for fast inference of large models on consumer GPUs that unites the
+efficiency of offloading and speculative decoding in the large-token setup. The resulting method, SpecExec,
+shows competitive performance in real-world experimental setups, demonstrating the possibility of running
+large models locally at the speed of interactive inference.
+Although we developed an offloading system to utilize SpecExec in practical settings, the goal of our
+study was not to create the fastest possible implementation of local LLM inference. Achieving that goal
+relies on combining our approach with orthogonal performance improvements proposed in prior work, which
+is beyond the scope of this paper. Importantly, given the recent trends in hardware accelerators for deep
+learning, inference of large models may become increasingly more constrained by the memory bandwidth
+even for the fastest devices. Therefore, optimizing generation time with bandwidth constraints in mind is
+likely to grow more important in the future, and our work demonstrates a novel approach to that problem.
+9References
+[1] Meta AI. Introducing meta llama 3: The most capable openly available llm to date. https://ai.meta.
+com/blog/meta-llama-3/, 2024.
+[2] Albert Q. Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Devendra Singh Chaplot,
+Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier, Lélio Renard
+Lavaud, Marie-Anne Lachaux, Pierre Stock, Teven Le Scao, Thibaut Lavril, Thomas Wang, Timothée
+Lacroix, and William El Sayed. Mistral 7b, 2023.
+[3] Yaniv Leviathan, Matan Kalman, and Yossi Matias. Fast inference from transformers via speculative
+decoding, 2023.
+[4] Charlie Chen, Sebastian Borgeaud, Geoffrey Irving, Jean-Baptiste Lespiau, Laurent Sifre, and John
+Jumper. Accelerating large language model decoding with speculative sampling. arXiv preprint
+arXiv:2302.01318, 2023.
+[5] XupengMiao,GabrieleOliaro,ZhihaoZhang,XinhaoCheng,ZeyuWang,RaeYingYeeWong,Zhuoming
+Chen, Daiyaan Arfeen, Reyna Abhyankar, and Zhihao Jia. Specinfer: Accelerating generative llm serving
+with speculative inference and token tree verification. arXiv preprint arXiv:2305.09781, 2023.
+[6] Ziteng Sun, Ananda Theertha Suresh, Jae Hun Ro, Ahmad Beirami, Himanshu Jain, and Felix Yu.
+Spectr: Fast speculative decoding via optimal transport. arXiv preprint arXiv:2310.15141, 2023.
+[7] Zhuoming Chen, Avner May, Ruslan Svirschevski, Yuhsun Huang, Max Ryabinin, Zhihao Jia, and Beidi
+Chen. Sequoia: Scalable, robust, and hardware-aware speculative decoding, 2024.
+[8] Mitchell Stern, Noam Shazeer, and Jakob Uszkoreit. Blockwise parallel decoding for deep autoregressive
+models. Advances in Neural Information Processing Systems, 31, 2018.
+[9] Yichao Fu, Peter Bailis, Ion Stoica, and Hao Zhang. Break the sequential dependency of llm inference
+using lookahead decoding. Accessed: 2023-11-29, 2023.
+[10] XiaoxuanLiu, LanxiangHu, PeterBailis, IonStoica, ZhijieDeng, AlvinCheung, andHaoZhang. Online
+speculative decoding. arXiv preprint arXiv:2310.07177, 2023.
+[11] Daliang Xu, Wangsong Yin, Xin Jin, Ying Zhang, Shiyun Wei, Mengwei Xu, and Xuanzhe Liu. Llmcad:
+Fast and scalable on-device large language model inference. arXiv preprint arXiv:2309.04255, 2023.
+[12] JunZhang,JueWang,HuanLi,LidanShou,KeChen,GangChen,andSharadMehrotra. Draft&verify:
+Losslesslargelanguagemodelaccelerationviaself-speculativedecoding. arXiv preprint arXiv:2309.08168,
+2023.
+[13] Zhenyu He, Zexuan Zhong, Tianle Cai, Jason D Lee, and Di He. Rest: Retrieval-based speculative
+decoding. arXiv preprint arXiv:2311.08252, 2023.
+[14] Benjamin Spector and Chris Re. Accelerating llm inference with staged speculative decoding. arXiv
+preprint arXiv:2308.04623, 2023.
+[15] Tianle Cai, Yuhong Li, Zhengyang Geng, Hongwu Peng, and Tri Dao. Medusa: Simple framework for
+accelerating llm generation with multiple decoding heads. Accessed: 2023-09-08, 2023.
+[16] Bharadwaj Pudipeddi, Maral Mesmakhosroshahi, Jinwen Xi, and Sujeeth Bharadwaj. Training large
+neural networks with constant memory using a new execution algorithm. CoRR, abs/2002.05645, 2020.
+[17] Jie Ren, Samyam Rajbhandari, Reza Yazdani Aminabadi, Olatunji Ruwase, Shuangyan Yang, Minjia
+Zhang, Dong Li, and Yuxiong He. Zero-offload: Democratizing billion-scale model training. CoRR,
+abs/2101.06840, 2021.
+10[18] KeivanAlizadeh,ImanMirzadeh,DmitryBelenko,KarenKhatamifard,MinsikCho,CarloCDelMundo,
+Mohammad Rastegari, and Mehrdad Farajtabar. Llm in a flash: Efficient large language model inference
+with limited memory. arXiv preprint arXiv:2312.11514, 2023.
+[19] Reza Yazdani Aminabadi, Samyam Rajbhandari, Ammar Ahmad Awan, Cheng Li, Du Li, Elton
+Zheng, Olatunji Ruwase, Shaden Smith, Minjia Zhang, Jeff Rasley, and Yuxiong He. Deepspeed-
+inference: Enabling efficient inference of transformer models at unprecedented scale. In Proceedings of
+the International Conference on High Performance Computing, Networking, Storage and Analysis, SC
+’22. IEEE Press, 2022.
+[20] Ying Sheng, Lianmin Zheng, Binhang Yuan, Zhuohan Li, Max Ryabinin, Beidi Chen, Percy Liang,
+Christopher Ré, Ion Stoica, and Ce Zhang. Flexgen: High-throughput generative inference of large
+languagemodelswithasinglegpu. InInternational Conference on Machine Learning,pages31094–31116.
+PMLR, 2023.
+[21] Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne Lachaux, Timothée
+Lacroix, Baptiste Rozière, Naman Goyal, Eric Hambro, Faisal Azhar, et al. Llama: Open and efficient
+foundation language models. arXiv preprint arXiv:2302.13971, 2023.
+[22] Albert Q Jiang, Alexandre Sablayrolles, Antoine Roux, Arthur Mensch, Blanche Savary, Chris Bamford,
+Devendra Singh Chaplot, Diego de las Casas, Emma Bou Hanna, Florian Bressand, et al. Mixtral of
+experts. arXiv preprint arXiv:2401.04088, 2024.
+[23] LocalLlama. Localllama, 2023. Accessed: 2023-12-28.
+[24] Tim Dettmers. Which gpu(s) to get for deep learning: My experience and advice for using gpus in deep
+learning, 2023. Accessed: 2024-02-29.
+[25] Jerry Chee, Yaohui Cai, Volodymyr Kuleshov, and Christopher De Sa. Quip: 2-bit quantization of large
+language models with guarantees, 2023.
+[26] Albert Tseng, Jerry Chee, Qingyao Sun, Volodymyr Kuleshov, and Christopher De Sa. Quip#: Quip
+with lattice codebooks, 2023. Accessed: 2024-01-22.
+[27] Tim Dettmers and Luke Zettlemoyer. The case for 4-bit precision: k-bit inference scaling laws. arXiv
+preprint arXiv:2212.09720, 2022.
+[28] Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh. Gptq: Accurate post-training
+quantization for generative pre-trained transformers. arXiv preprint arXiv:2210.17323, 2022.
+[29] Tim Dettmers, Ruslan Svirschevski, Vage Egiazarian, Denis Kuznedelev, Elias Frantar, Saleh Ashkboos,
+Alexander Borzunov, Torsten Hoefler, and Dan Alistarh. Spqr: A sparse-quantized representation for
+near-lossless llm weight compression. arXiv preprint arXiv:2306.03078, 2023.
+[30] Ji Lin, Jiaming Tang, Haotian Tang, Shang Yang, Xingyu Dang, and Song Han. Awq: Activation-aware
+weight quantization for llm compression and acceleration. arXiv preprint arXiv:2306.00978, 2023.
+[31] Butler Lampson. Lazy and speculative execution in computer systems. In Mariam Momenzadeh
+Alexander A. Shvartsman, editor, Principles of Distributed Systems, pages 1–2, Berlin, Heidelberg, 2006.
+Springer Berlin Heidelberg.
+[32] Edsger W. Dijkstra. A note on two problems in connexion with graphs. Numerische Mathematik,
+1:269–271, 1959.
+[33] PeiyuanZhang, GuangtaoZeng, TianduoWang, andWeiLu. Tinyllama: Anopen-sourcesmalllanguage
+model, 2024.
+[34] Andreas Köpf, Yannic Kilcher, Dimitri von Rütte, Sotiris Anagnostidis, Zhi-Rui Tam, Keith Stevens,
+Abdullah Barhoum, Nguyen Minh Duc, Oliver Stanley, Richárd Nagyfi, Shahul ES, Sameer Suri, David
+Glushkov, Arnav Dantuluri, Andrew Maguire, Christoph Schuhmann, Huu Nguyen, and Alexander
+Mattick. Openassistant conversations – democratizing large language model alignment, 2023.
+11[35] Mengqi Miao, Fandong Meng, Yijin Liu, Xiao-Hua Zhou, and Jie Zhou. Prevent the language model
+from being overconfident in neural machine translation. arXiv preprint arXiv:2105.11098, 2021.
+[36] Yangyi Chen, Lifan Yuan, Ganqu Cui, Zhiyuan Liu, and Heng Ji. A close look into the calibration
+of pre-trained language models. In Anna Rogers, Jordan Boyd-Graber, and Naoaki Okazaki, editors,
+Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1:
+Long Papers), pages 1343–1367, Toronto, Canada, July 2023. Association for Computational Linguistics.
+[37] Hugging Face. Meta llama 2-70b chat generation config at hf.co/meta-llama/Llama-2-70b-chat-hf/
+blob/e1ce257/generation_config.json, 2024.
+[38] Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+Zhuohan Li, Dacheng Li, Eric. P Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. Judging
+llm-as-a-judge with mt-bench and chatbot arena, 2023.
+[39] Stephen Merity, Caiming Xiong, James Bradbury, and Richard Socher. Pointer sentinel mixture models.
+arXiv preprint arXiv:1609.07843, 2016.
+[40] ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,YanqiZhou,
+Wei Li, and Peter Liu. Exploring the limits of transfer learning with a unified text-to-text transformer.
+Journal of Machine Learning Research, 21(140):1–67, 2020.
+[41] Zhuoming Chen, Avner May, Ruslan Svirschevski, Yuhsun Huang, Max Ryabinin, Zhihao Jia, and Beidi
+Chen. Sequoia: Sequoia: Serving exact llama2-70b on an rtx4090 with half-second per token latency,
+2024. Accessed: 2024-05-21.
+[42] Mengzhou Xia, Tianyu Gao, Zhiyuan Zeng, and Danqi Chen. Sheared llama: Accelerating language
+model pre-training via structured pruning, 2024.
+[43] Alex Graves. Sequence transduction with recurrent neural networks. arXiv preprint arXiv:1211.3711,
+2012.
+[44] Nicolas Boulanger-Lewandowski, Yoshua Bengio, and Pascal Vincent. Audio chord recognition with
+recurrent neural networks. In ISMIR, pages 335–340. Curitiba, 2013.
+[45] Ilya Sutskever, Oriol Vinyals, and Quoc V Le. Sequence to sequence learning with neural networks.
+Advances in neural information processing systems, 27, 2014.
+[46] Donald Nguyen, Andrew Lenharth, and Keshav Pingali. A lightweight infrastructure for graph analytics.
+In Proceedings of the twenty-fourth ACM symposium on operating systems principles, pages 456–471,
+2013.
+[47] Yunming Zhang, Ajay Brahmakshatriya, Xinyi Chen, Laxman Dhulipala, Shoaib Kamil, Saman Amaras-
+inghe, and Julian Shun. Optimizing ordered graph algorithms with graphit. In Proceedings of the 18th
+ACM/IEEE International Symposium on Code Generation and Optimization, pages 158–170, 2020.
+[48] Yan Gu, Julian Shun, Yihan Sun, and Guy E Blelloch. A top-down parallel semisort. In Proceedings of
+the 27th ACM symposium on Parallelism in Algorithms and Architectures, pages 24–34, 2015.
+[49] Laxman Dhulipala, Guy Blelloch, and Julian Shun. Julienne: A framework for parallel graph algorithms
+using work-efficient bucketing. In Proceedings of the 29th ACM Symposium on Parallelism in Algorithms
+and Architectures, pages 293–304, 2017.
+[50] Scott Beamer, Krste Asanović, and David Patterson. The gap benchmark suite. arXiv preprint
+arXiv:1508.03619, 2015.
+[51] Pawan Harish and Petter J Narayanan. Accelerating large graph algorithms on the gpu using cuda. In
+International conference on high-performance computing, pages 197–208. Springer, 2007.
+12[52] Andrew Davidson, Sean Baxter, Michael Garland, and John D. Owens. Work-efficient parallel gpu
+methods for single-source shortest paths. In 2014 IEEE 28th International Parallel and Distributed
+Processing Symposium, pages 349–359, 2014.
+[53] YangzihaoWang,AndrewDavidson,YuechaoPan,YuduoWu,AndyRiffel,andJohnDOwens. Gunrock:
+A high-performance graph processing library on the gpu. In Proceedings of the 21st ACM SIGPLAN
+symposium on principles and practice of parallel programming, pages 1–12, 2016.
+[54] John Iacono, Ben Karsin, and Nodari Sitchinava. A parallel priority queue with fast updates for GPU
+architectures. CoRR, abs/1908.09378, 2019.
+[55] Grzegorz Malewicz, Matthew H Austern, Aart JC Bik, James C Dehnert, Ilan Horn, Naty Leiser, and
+Grzegorz Czajkowski. Pregel: a system for large-scale graph processing. In Proceedings of the 2010 ACM
+SIGMOD International Conference on Management of data, pages 135–146, 2010.
+[56] Xiaowei Zhu, Wenguang Chen, Weimin Zheng, and Xiaosong Ma. Gemini: A {Computation-Centric}
+distributed graph processing system. In 12th USENIX Symposium on Operating Systems Design and
+Implementation (OSDI 16), pages 301–316, 2016.
+[57] Maciej Besta, Michał Podstawski, Linus Groner, Edgar Solomonik, and Torsten Hoefler. To push or to
+pull: On reducing communication and synchronization in graph computations. In Proceedings of the 26th
+International Symposium on High-Performance Parallel and Distributed Computing, pages 93–104, 2017.
+[58] Jeffery Ullman and Mihalis Yannakakis. High-probability parallel transitive closure algorithms. In
+Proceedings of the second annual ACM symposium on Parallel algorithms and architectures, pages
+200–209, 1990.
+[59] Philip N Klein and Sairam Subramanian. A randomized parallel algorithm for single-source shortest
+paths. Journal of Algorithms, 25(2):205–220, 1997.
+[60] Edith Cohen. Using selective path-doubling for parallel shortest-path computations. In [1993] The 2nd
+Israel Symposium on Theory and Computing Systems, pages 78–87. IEEE, 1993.
+[61] Hanmao Shi and Thomas H Spencer. Time–work tradeoffs of the single-source shortest paths problem.
+Journal of algorithms, 30(1):19–32, 1999.
+[62] Edith Cohen. Polylog-time and near-linear work approximation scheme for undirected shortest paths.
+Journal of the ACM (JACM), 47(1):132–166, 2000.
+[63] ThomasHSpencer. Time-worktradeoffsforparallelalgorithms. Journal of the ACM (JACM),44(5):742–
+778, 1997.
+[64] Ulrich Meyer. Heaps are better than buckets: parallel shortest paths on unbalanced graphs. In European
+Conference on Parallel Processing, pages 343–351. Springer, 2001.
+[65] Guy E Blelloch, Yan Gu, Yihan Sun, and Kanat Tangwongsan. Parallel shortest paths using radius
+stepping. In Proceedings of the 28th ACM Symposium on Parallelism in Algorithms and Architectures,
+pages 443–454, 2016.
+13A Equivalence of Optimal Tree Search to Shortest Path Search
+We can formulate this problem as follows:
+(cid:88)
+argmax P (x |τ)·P (x |τ). (1)
+reach i accept i
+τ∈TK xi∈τ
+Here,x ∈τ referstoatexttokenwithinthedrafttree,TK isasetofalltreesofK tokensandP (x |τ)
+i reach i
+is the probability that the Speculative Execution verification phase accepts the full prefix x ,...,x along
+0 i−1
+the draft tree and considers sampling x next. Finally, ·P (x |τ) is the probability that the token x
+i accept i i
+will be accepted if it is reached during verification. Both P and p depend on the target model
+reach accept
+probabilities P(x |x ,θ ), which cannot be accessed in the drafting phase. Instead, we use the draft
+t+1 0:t target
+model to approximate the target model probabilities as follows:
+(cid:89)
+P (x |τ)≈ P(x |π(x ,τ),θ )
+reach i t t draft
+xt∈π(xi,τ) (2)
+P (x |τ)≈P(x |π(x ,τ),θ ),
+accept i i i draft
+where π(x ,τ) is the path in τ from root to x , excluding x itself. From the LLM perspective, π(x ,τ) is the
+i i i i
+prefix for a token x within the draft tree. If we multiply the two functions as per Equation (1), we get the
+i
+cumulative probability of a sequence π(x ,τ)⊕x , where ⊕ is concatenation.
+i i
+(cid:88) (cid:89)
+argmax P(x |π(x ,τ),θ ) (3)
+t t draft
+τ∈TK xi∈τ xt∈π(xi,τ)⊕xi
+Since token probabilities cannot be greater than 1, the cumulative probability of π(x ,τ)⊕x cannot exceed
+i i
+thecumulativeprobabilityofalltokensinπ(x ,τ). Therefore,ifatokenx isamongtheK mostlikelytokens,
+i i
+every token in π(x ,τ) is also a part of the solution. Using this property, we can simplify the problem (3) as
+i
+finding top-K most likely prefixes, since they are guaranteed to form a tree. Formally speaking, the optimal
+tree consists of K tokens with the highest cumulative probability:
+(cid:89)
+argtopK P(x |π(x ,τ),θ ) (4)
+t t draft
+xi
+xt∈π(xi,τ)⊕xi
+This is similar (but not equivalent) to the standard beam search algorithm for neural sequence models [43,
+44, 45]. The main difference is that beam search looks for complete sequences, while we need a tree of partial
+drafts. However, using beam search instead of solving Equation (3) directly leads to suboptimal drafts (see
+Appendix E for details).
+Instead, we solve Equation (4) by reformulating it as a special case of shortest path problem. More
+specifically,
+(cid:89)
+argmax P(x |π(x ,τ),θ ) =
+t t draft
+xi
+xt∈π(xi,τ)⊕xi
+(cid:88)
+=argmax logP(x |π(x ,τ),θ )=
+t t draft (5)
+xi
+xt∈π(xi,τ)⊕xi
+(cid:88)
+=argmin −logP(x |π(x ,τ),θ ).
+t t draft
+xi
+xt∈π(xi,τ)⊕xi
+Note that every term in that sum is non-negative, (since −logP(x |π(x ,τ),θ )≥0), which makes this
+t t draft
+equivalent to a single-source shortest path (SSSP) problem for finding paths to K nearest nodes in a graph
+with non-negative edge weights. Normally, this problem can be solved by running the Dijkstra algorithm
+for K steps. However, in practice, running the algorithm for K sequential steps is inefficient on modern
+highly parallel hardware, especially in our setting with very large drafts. To alleviate this problem, we use a
+modified parallel Dijkstra algorithm, which expands B >1 nodes on every iteration and keeps track of K
+nearest nodes in a priority queue. We describe this formally in Algorithm 2.
+In the worst case, this algorithm still makes up to K steps if the solution to Equation (3) is a single “stem”
+B tokens long. However, the actual number of steps is significantly lower, often slightly above the lower
+14bound ⌈B/K⌉. In the practical GPU implementation, we also limit the maximum depth with a parameter D.
+The purpose of D is to limit the edge case where the draft model is very confident about the next token, and
+thus the solution to (3) is a single sequence of length K. For this edge case, Algorithm 2 will take long to
+generate a sequential draft, most of which will later be discarded if the draft model makes even one mistake.
+B Parallel Graph Search
+There are dozens of works that study practical implementations of parallel shortest path search and SSSP
+in particular. One line of work proposes inexact search algorithms that use an approximate priority queue
+to improve the performance of SSSP: [46] proposes a queue with integer metric, [47] adds bucket fusion to
+reduce synchronization overhead..
+A significant effort was dedicated to efficient shortest-path search on GPUs, among others. [51] proposes a
+GPU-efficient SSSP that outperforms sequential CPU computations. [52, 53] compare several SSSP variants
+for GPUs. [54] adapts priority queues to run efficiently on GPU and uses the resulting data structure to
+accelerate SSSP.
+Manyworksonparallelgraphsearchfocusonthedistributedsetting[55,56,57],addressingcommunication
+and synchronization overheads.
+Finally, a large body of work studies the theoretical properties of parallel SSSP, including [58, 59, 60, 61,
+62, 63, 64, 65].
+C Additional Implementation Details
+Our system design follows the following loop: i) Load the draft model onto GPU memory and generate a
+draft tree, ii) Load the main model (several layers at a time, if using offloading) to compute probabilities for
+the draft tree tokens, iii) choose accepted tokens following the verification procedure.
+When running the main model, we process all draft tokens in parallel by constructing a merged attention
+mask, similar to [5]. We prefetch the first few layers of the main model during speculation to speed up
+the procedure. We also load subsequent LLM layers in parallel, while the previous layers compute their
+activations, as described in [16, 19].
+Finally, we keep the past KV caches of both draft and main models in GPU memory at all times. We
+chose this because most modern language models use Group Query Attention, making caches relatively small
+for short prompts. When dealing with longer prompts or smaller GPU memory, one can reduce memory
+usage by offloading these KV caches into RAM. The draft model caches are only needed on GPU during the
+first stage when generating the draft tokens. In turn, the main model caches can be loaded alongside their
+transformer layers.
+Thepracticalimplementationofthisalgorithmisslightlydifferentdependingonthehardwareconfiguration.
+Running SpecExec on a system with GPU with RAM offloading works best with relatively fewer draft tokens,
+while longer offloading (to SSD or when using float16 precision weights) works best with larger token budgets.
+As for the quantization scheme, while there are better quantization algorithms [30, 29, 25], we chose
+GPTQ since it is popular among practitioners. Still, we believe that our experimental results will generalize
+to other quantization algorithms. In addition to the main model, we also quantize the draft (7B) model using
+the same GPTQ algorithm. The optimal choices of the quantization methods will vary as new methods or
+faster implementations come around.
+The experiments were mainly performed using A100 GPUs (unless specified otherwise), but may be easily
+reproduced using other GPUs. Note that while A100 has 80GB VRAM, we did not keep any layers in VRAM
+in order to keep the VRAM use to minimum and emulate performance of GPUs like RTX4090 or L40. As a
+result, the observed VRAM use requirements with offloading was in 12–22 GB range for experiments with
+draft trees up to 2048 tokens when using Llama-2-70B RAM offloading. Naturally, keeping some of the layers
+constantly in VRAM would increase both baseline and the model performance.
+The offloading experiments require sufficient RAM to hold whole model. In case of Llama-2-70B in 16 bit
+this is at least 140 GB, but in practice 192GB would be recommended to fit the draft model, caches and OS.
+Our code is based on industry standard PyTorch and Transformers libraries.
+15D Ablation: Acceptance with Different Draft Models
+In Section 5.2, we evaluate SpecExec and SpecInfer with 7B draft models based on observations about
+theircoverageprobabilities. Here, wefurthercomparethesemodelsintermsofthenumberofacceptedtokens
+for different SpecExec batch sizes. We report this comparison in Figure 5 using the same OpenAssistant
+datasetasinthemainexperimentsusingtherecommendedtemperature(0.6)andnucleussize(0.9). Similarly
+to Figure 2, the 7B model significantly outperforms both JackFram/llama-160m and TinyLlama 1.1B Chat.
+This is true both for the original 7B model and the one quantized to 4 bits with GPTQ. Curiously, the
+full unquantized 13B model still scores slightly more accepted tokens, though at the cost of 26GB memory
+footprint that is inaccessible to modern consumer GPUs.
+24
+Llama 2 13b chat
+20 Llama 2 7b chat
+TinyLlama 1.1B Chat
+16
+JackFram/llama-160m
+12
+8
+4
+0
+8 16 32 64 128 256 512 1024 2048 4096
+Draft model output size in tokens
+Figure 5: Number of accepted tokens as a function of draft size B for Llama 2 70B chat target model with a
+selection of draft models.
+E On The Suboptimality of Beam Search
+In our preliminary experiments, we tried to construct the optimal draft tree using top-k beam search
+decoding [43]. However, we observed that the algorithm performed significantly worse than expected and
+often plateaued as we increased the maximum beam search length. Here, we describe the analysis of this
+problem that eventually led us to Algorithm 2.
+Figure 6 (left) reports a grid where each cell is the number of accepted tokens for a version of SpecExec
+that uses beam search instead of parallel SSSP. The horizontal grid axis corresponds to beam size (aka
+the number of beams) and the vertical axis depicts max length. The left grid shows standard beam search
+decodingthatreturnsbeamsizemostlikelysequences. Inturn,therightgridusesamodifiedsearchalgorithm
+that starts the same way as beam search but does not prune any partial hypotheses that did not make it into
+the final beam.
+Figure 6: The average number of accepted tokens per speculation and verification phases as a function of
+beam size and maximum length. Measured on OpenAssistant conversations and WikiText-2 articles (Right)
+for running with recommended generation parameters (temperature 0.6, top-p 0.9). (Left) standard beam
+search decoding, (Right) beam search without pruning out-of-beam tokens
+16
+snekot
+detpeccA
+#As we can see, standard beam search decoding is sub-optimal for SpecExec in the sense that it can be
+outperformed with trivial modifications. In turn, Algorithm 2 is a generalization of the version on the right
+that does not need to be manually tuned for length and width, but instead expands the graph optimally to
+maximize the coverage probability.
+F Application to in-memory inference
+Whilethiswasnottheprimaryfocusareaofourresearch,theSpecExecmodelcanalsodelivercompetitive
+speedup in inference without offloading. While these speedups are less impressive than those for offload
+settings, they are still competitive when compared to recent works such as [7].
+Table 4: SpecExec Inference speed without offloading, A100 GPU.
+Draft / Target models Dataset T Method Budget Gen. rate Speed, tok/s Speedup
+oasst 0.6 SX 128 5.33 31.6 2.15x
+oasst 0 SX 128 5.4 32.94 2.24x
+c4 0.6 SX 128 5.1 33.3 2.26x
+SL-1.3B / Vicuna-33b
+c4 0 SX 128 5.36 35.62 2.42x
+wikitext 0.6 SX 128 4.87 30.19 1.90x
+wikitext 0 SX 128 5.24 33.15 2.08x
+G Effect of draft size on generation speed
+Here, we explore the relationship between speed and draft tree size. A larger draft tree size allows for
+a greater number of tokens to be generated per step (see Figure 7 (left)). However, beyond a certain size
+threshold (hundreds or low thousands of tokens, depending on the model and GPU), the time required for
+generation increases at an accelerating rate (see Figure 1 (right)). Consequently, the optimal draft tree size is
+typically smaller than the size that maximizes the token acceptance rate. In Figure 7 (right), the optimal
+draft tree size is 128–512 for SpecInfer and 1024–2048 for SpecExec.
+24
+SpecExec SpecExec
+20 SpecInfer SpecInfer
+2.0
+16
+12
+1.0
+8
+4 0.0
+8 16 32 64 128 256 512 1024 2048 4096 8 16 32 64 128 256 512 1024 2048 4096
+Draft model output size in tokens Draft model output size in tokens
+Figure 7: Acceptance counts vs draft size (left), speed vs draft size (right). Llama 2-7B draft model, offloaded
+Llama 2-70B target model, MTBench dataset, t=0.6 and top-p=0.9.
+17
+pets/snekot
+detareneG
+#
+s/snekot
+deepS

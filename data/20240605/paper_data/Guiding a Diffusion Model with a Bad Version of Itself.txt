@@ -1,0 +1,828 @@
+Guiding a Diffusion Model with a Bad Version of Itself
+TeroKarras MiikaAittala TuomasKynkäänniemi
+NVIDIA NVIDIA AaltoUniversity
+JaakkoLehtinen TimoAila SamuliLaine
+NVIDIA,AaltoUniversity NVIDIA NVIDIA
+Abstract
+The primary axes of interest in image-generating diffusion models are image
+quality,theamountofvariationintheresults,andhowwelltheresultsalignwith
+agivencondition,e.g.,aclasslabeloratextprompt. Thepopularclassifier-free
+guidance approach uses an unconditional model to guide a conditional model,
+leadingtosimultaneouslybetterpromptalignmentandhigher-qualityimagesat
+thecostofreducedvariation. Theseeffectsseeminherentlyentangled,andthus
+hardtocontrol. Wemakethesurprisingobservationthatitispossibletoobtain
+disentangled control over image quality without compromising the amount of
+variationbyguidinggenerationusingasmaller,less-trainedversionofthemodel
+itselfratherthananunconditionalmodel. Thisleadstosignificantimprovementsin
+ImageNetgeneration,settingrecordFIDsof1.01for64×64and1.25for512×512,
+usingpubliclyavailablenetworks. Furthermore,themethodisalsoapplicableto
+unconditionaldiffusionmodels,drasticallyimprovingtheirquality.
+1 Introduction
+Denoisingdiffusionmodels[12,37,38,39,40]generatesyntheticimagesbyreversingastochastic
+corruptionprocess. Essentially,animageisrevealedfrompurenoisebydenoisingitlittlebylittle
+in successive steps. A neural network that implements the denoiser (equivalently [44], the score
+function[15])isacentraldesignelement,andvariousarchitectureshavebeenproposed(e.g.,[1,5,7,
+14,16,19,30]).Equallyimportantarethedetailsofthemulti-stepdenoisingprocessthatcorresponds
+mathematicallytosolvinganordinary[27,38]orastochastic[40]differentialequation,forwhich
+manydifferentparameterizations,solvers,andstepscheduleshavebeenevaluated[17,18,22,35,46].
+Tocontroltheoutputimage,thedenoiseristypicallyconditionedonaclasslabel,anembeddingofa
+textprompt,orsomeotherformofconditioninginput[28,33,36,45].
+Thetrainingobjectiveofadiffusionmodelaimstocovertheentire(conditional)datadistribution.This
+causesproblemsinlow-probabilityregions: Themodelgetsheavilypenalizedfornotrepresenting
+them, but it does not have enough data to learn to generate good images corresponding to them.
+Classifier-freeguidance(CFG)[13]hasbecomethestandardmethodfor“loweringthesampling
+temperature”,i.e.,focusingthegenerationonwell-learnedhigh-probabilityregions. Bytraininga
+denoisernetworktooperateinbothconditionalandunconditionalsetting,thesamplingprocesscan
+besteeredawayfromtheunconditionalresult—ineffect,theunconditionalgenerationtaskspecifies
+aresulttoavoid. Thisresultsinbetterpromptalignmentandimprovedimagequality,wherethe
+formereffectisduetoCFGimplicitlyraisingtheconditionalpartoftheprobabilitydensitytoa
+powergreaterthanone[8].
+However,CFGhasdrawbacksthatlimititsusageasagenerallow-temperaturesamplingmethod.
+First,itisapplicableonlyforconditionalgeneration,astheguidancesignalisbasedonthedifference
+betweenconditionalandunconditionaldenoisingresults. Second,becausetheunconditionaland
+Preprint.
+4202
+nuJ
+4
+]VC.sc[
+1v70520.6042:viXraconditionaldenoisersaretrainedtosolveadifferenttask,thesamplingtrajectorycanovershootthe
+desiredconditionaldistribution,whichleadstoskewedandoftenoverlysimplifiedimagecompo-
+sitions[21]. Finally,thepromptalignmentandqualityimprovementeffectscannotbecontrolled
+separately,anditremainsunclearhowexactlytheyrelatetoeachother.
+Inthispaper,weprovidenewinsightsintowhyCFGimprovesimagequalityandshowhowthis
+effectcanbeseparatedoutintoanovelmethodthatwecallautoguidance. Ourmethoddoesnotsuffer
+fromthetaskdiscrepancyproblembecauseweuseaninferiorversionofthemainmodelitselfasthe
+guidingmodel,withunchangedconditioning. Thisguidingmodelcanbeobtainedbysimplylimiting,
+e.g.,modelcapacityand/ortrainingtime. Wevalidatetheeffectivenessofautoguidanceinvarious
+synthetictestcasesaswellasinpracticalimagesynthesisinclass-conditionalandtext-conditional
+settings. Inaddition,ourmethodenablesguidanceforunconditionalsynthesis. Inquantitativetests,
+thegeneratedimagedistributionsareimprovedconsiderablywhenmeasuredusingFID[10]and
+FD [42]metrics,settingnewrecordsinImageNet-512andImageNet-64generation.
+DINOv2
+Wewillmakeourimplementationandpre-trainedmodelspubliclyavailable.
+2 Background
+Denoising diffusion. Denoising diffusion generates samples from a distribution p (x) by it-
+data
+eratively denoising a sample of pure white noise, such that a noise-free random data sample is
+gradually revealed [12]. The idea is to consider heat diffusion of p (x) into a sequence of in-
+data
+creasinglysmootheddensitiesp(x;σ)=p (x)∗N(x;0,σ2I). Foralargeenoughσ ,wehave
+data max
+p(x;σ )≈N(x;0,σ2 I),fromwhichwecantriviallysamplebydrawingnormallydistributed
+max max
+whitenoise. Theresultingsampleisthenevolvedbackwardtowardslownoiselevelsbyaprobability
+flowODE[18,38,40]
+dx = −σ∇ logp(x ;σ)dσ (1)
+σ xσ σ
+(cid:1)
+thatmaintainsthepropertyx ∼p(x ;σ foreveryσ ∈[0,σ ]. Uponreachingσ =0,weobtain
+σ σ max
+x ∼p(x ;0)=p (x )asdesired.
+0 0 data 0
+Inpractice,theODEissolvednumericallybysteppingalongthetrajectorydefinedbyEquation1.
+Thisrequiresevaluatingtheso-calledscorefunction[15]∇ logp(x;σ)foragivensamplexand
+x
+noiselevelσateachstep. Rathersurprisingly,wecanapproximatethisvectorusinganeuralnetwork
+D (x;σ)parameterizedbyweightsθtrainedforthedenoisingtask
+θ
+θ = argmin E ∥D (y+n;σ)−y∥2, (2)
+θ y∼pdata,σ∼ptrain,n∼N(0,σ2I) θ 2
+where p controls the noise level distribution during training. Given D , we can estimate
+train θ
+∇ logp(x;σ) ≈ (D (x;σ)−x)/σ2, up to approximation errors due to, e.g., finite capacity or
+x θ
+trainingtime[18,44]. Assuch,wearefreetointerpretthenetworkaspredictingeitheradenoised
+sampleorascorevector,whicheverismoreconvenientfortheanalysisathand. Manyreparameteri-
+zationsandpracticalODEsolversarepossible,asenumeratedbyKarrasetal.[18]. Wefollowtheir
+recommendations,includingthescheduleσ(t)=tthatletsusparameterizetheODEdirectlyvia
+noiselevelσinsteadofaseparatetimevariablet.
+Inmostapplications,eachdatasamplexisassociatedwithalabelc,representing,e.g.,aclassindex
+oratextprompt. Atgenerationtime, wecontroltheoutcomebychoosingalabelcandseeking
+a sample from the conditional distribution p(x|c;σ) with σ = 0. In practice, this is achieved by
+trainingadenoisernetworkD (x;σ,c)thatacceptscasanadditionalconditioninginput.
+θ
+Classifier-freeguidance. Forcomplexvisualdatasets,thegeneratedimagesoftenfailtoreproduce
+theclarityofthetrainingimagesduetoapproximationerrorsmadebyfinite-capacitynetworks. A
+broadly used trick called classifier-free guidance (CFG) [13] pushes the samples towards higher
+likelihoodoftheclasslabel,sacrificingvarietyfor“morecanonical”imagesthatthenetworkappears
+tobebettercapableofhandling.
+Inageneralsetting,guidanceinadiffusionmodelinvolvestwodenoisernetworksD (x;σ,c)and
+0
+D (x;σ,c). Theguidingeffectisachievedbyextrapolatingbetweenthetwodenoisingresultsbya
+1
+factorw:
+D (x;σ,c) = wD (x;σ,c)+(1−w)D (x;σ,c). (3)
+w 1 0
+2Trivially,settingw =0orw =1recoverstheoutputofD andD ,respectively,whilechoosing
+0 1
+w >1over-emphasizestheoutputofD . Recallingtheequivalenceofdenoisersandscores[44],we
+1
+canwrite
+(cid:18) (cid:20)
+p
+(x|c;σ)(cid:21)w(cid:19)
+D (x;σ,c) ≈ x+σ2∇ log p (x|c;σ) 1 . (4)
+w x 0 p (x|c;σ)
+0
+(cid:124) (cid:123)(cid:122) (cid:125)
+∝:pw(x|c;σ)
+Thus,guidancegrantsusaccesstothescoreofthedensityp (x|c;σ)impliedintheparentheses.
+w
+Thisscorecanbefurtherwrittenas[8,13]
+p (x|c;σ)
+∇ logp (x|c;σ) = ∇ logp (x|c;σ)+(w−1)∇ log 1 . (5)
+x w x 1 x p (x|c;σ)
+0
+Substituting this expression into the ODE of Equation 1, this yields the standard evolution for
+generatingimagesfromp ,plusaperturbationthatincreases(forw >1)theratioofp andp as
+1 1 0
+evaluatedatthesample. Thelattercanbeinterpretedasincreasingthelikelihoodthatahypothetical
+classifierwouldattributeforthesamplehavingcomefromdensityp ratherthanp .
+1 0
+InCFG,wetrainanauxiliaryunconditionaldenoiserD (x;σ)todenoisethedistributionp(x;σ)
+θ
+marginalized over c, and use this as D . In practice, this is typically [13] done using the same
+0
+networkD withanemptyconditioninglabel, settingD := D (x;σ,∅)andD := D (x;σ,c).
+θ 0 θ 1 θ
+ByBayes’rule,theextrapolatedscorevectorbecomes∇ logp(x|c;σ)+(w−1)∇ logp(c|x;σ).
+x x
+Duringsampling,thisguidestheimagetomorestronglyalignwiththespecifiedclassc.
+ItwouldbetemptingtoconcludethatsolvingthediffusionODEwiththescorefunctionofEquation5
+producessamplesfromthedatadistributionspecifiedbyp (x|c;0). Unfortunatelythisisnotthe
+w
+case,becausep (x|c;σ)doesnotrepresentavalidheatdiffusionofp (x|c;0). Therefore,solving
+w w
+the ODE does not, in fact, follow the density. Instead, the samples are blindly pushed towards
+highervaluesoftheimplieddensityateachnoiselevelduringsampling. Thiscanleadtodistorted
+samplingtrajectories,greatlyexaggeratedtruncation,andmodedroppingintheresults[21],aswell
+asover-saturationofcolors[36]. Nonetheless,theimprovementinimagequalityisoftenremarkable,
+andhighguidancevaluesarecommonlyuseddespitethedrawbacks(e.g.,[11,31,33,36]).
+3 WhydoesCFGimproveimagequality?
+We begin by identifying the mechanism by which CFG improves image quality instead of only
+affectingpromptalignment. Toillustratewhyunguideddiffusionmodelsoftenproduceunsatisfactory
+images,andhowCFGremediestheproblem,westudya2Dtoyexamplewhereasmall-scaledenoiser
+networkistrainedtoperformconditionaldiffusioninasyntheticdataset(Figure1). Thedataset
+is designed to exhibit low local dimensionality (i.e., highly anisotropic and narrow support) and
+hierarchicalemergenceoflocaldetailuponnoiseremoval. Thesearebothpropertiesthatcanbe
+expectedfromtheactualmanifoldofrealisticimages[4,32].Fordetailsofthesetup,seeAppendixC.
+Scorematchingleadstooutliers. Comparedtosamplingdirectlyfromtheunderlyingdistribution
+(Figure 1a), the unguided diffusion in Figure 1b produces a large number of extremely unlikely
+samplesoutsidethebulkofthedistribution. Intheimagegenerationsetting,thesewouldcorrespond
+tounrealisticandbrokenimages.
+Wearguethattheoutliersstemfromthelimitedcapabilityofthescorenetworkcombinedwiththe
+scorematchingobjective. Itiswellknownthatmaximumlikelihood(ML)estimationleadstoa“con-
+servative”fitofthedatadistribution[2]inthesensethatthemodelattemptstocoveralltrainingsam-
+ples.ThisisbecausetheunderlyingKullback–Leiblerdivergenceincursextremepenaltiesifthemodel
+severelyunderestimatesthelikelihoodofanytrainingsample. Whilescorematchingisgenerallynot
+equaltoMLestimation,theyarecloselyrelated[12,24,40]andappeartoexhibitbroadlysimilar
+behavior. Forexample,itisknownthatforamultivariateGaussianmodel,theoptimalscorematching
+fitcoincideswiththeMLestimate[15]. Figures2aand2bshowthelearnedscorefieldandimplied
+densityinourtoyexamplefortwomodelsofdifferentcapacityatanintermediatenoiselevel. The
+strongermodelenvelopsthedatamoretightly,whiletheweakermodel’sdensityismorespreadout.
+Fromtheperspectiveofimagegeneration,atendencytocovertheentiretrainingdatabecomesa
+problem: Themodelendsupproducingstrangeandunlikelyimagesfromthedatadistribution’s
+3(a)Groundtruth (b)Noguidance (c)Classifier-free (d)Naivetruncation (e)Autoguidance
+guidance (ours)
+Figure1: Afractal-like2Ddistributionwithtwoclassesindicatedwithgrayandorangeregions.
+Approximately99%oftheprobabilitymassisinsidetheshowncontours. (a)Groundtruthsamples
+drawndirectlyfromtheorangeclassdistribution. (b)Conditionalsamplingusingasmalldenoising
+diffusion model generates outliers. (c) Classifier-free guidance (w = 4) eliminates outliers but
+reduces diversity by over-emphasizing the class. (d) Naive truncation via lengthening the score
+vectors. (e)Ourmethodconcentratessamplesonhigh-probabilityregionswithoutreducingdiversity.
+(a)p (x|c;σ ) (b)p (x;σ ) (c)Ratiop /p (d)Noguidance (e)CFGwithw=4
+1 mid 0 mid 1 0
+Figure2:CloseupoftheregionhighlightedinFigure1c.(a)Theimpliedlearneddensityp (x|c;σ )
+1 mid
+(green)atanintermediatenoiselevelσ anditsscorevectors(log-gradients),plottedatrepresen-
+mid
+tative sample points. The learned density approximates the underlying ground truth p(x|c;σ )
+mid
+(orange)butfailstoreplicateitssharperdetails. (b)Theweakerunconditionalmodellearnsafurther
+spread-out density p (x;σ ) (red) with a looser fit to the data. (c) Guidance moves the points
+0 mid
+accordingtothegradientofthe(log)ratioofthetwolearneddensities(blue). Asthehigher-quality
+modelismoresharplyconcentratedatthedata,thisfieldtendsinwardtowardsthedatadistribution.
+Thecorrespondinggradientissimplythedifferenceofrespectivegradientsin(a)and(b),illustratedat
+selectedpoints. (d)Samplingtrajectoriestakenbystandardunguideddiffusionfollowingthelearned
+score∇ logp (x|c;σ),fromnoiselevelσ to0. Thecontours(orange)representthegroundtruth
+x 1 mid
+noise-freedensity. (e)Guidanceintroducesanadditionalforceshownin(c),causingthepointsto
+concentrateatthecoreofthedatadensityduringsampling.
+extremitiesthatarenotlearntaccuratelybutincludedjusttoavoidthehighlosspenalties.Furthermore,
+duringtraining,thenetworkhasonlyseenrealnoisyimagesasinputs,andduringsamplingitmay
+notbepreparedtodealwiththeunlikelysamplesitishandeddownfromthehighernoiselevels.
+CFG eliminates outliers. The effect of applying classifier-free guidance during generation is
+demonstratedinFigure1c. Asexpected, thesamplesavoidtheclassboundary(i.e., thereareno
+samplesinthevicinityofthegrayarea),andentirebranchesofthedistributionaredropped. We
+alsoobserveasecondphenomenon,wherethesampleshavebeenpulledintowardsthecoreofthe
+manifold,andawayfromthelow-probabilityintermediateregions. Seeingthatthiseliminatesthe
+unlikelyoutliersamples,weattributetheimagequalityimprovementtoit. However,mereboosting
+oftheclasslikelihooddoesnotexplainthisincreasedconcentration.
+Wearguethatthisphenomenonstemsfromaqualitydifferencebetweentheconditionalanduncondi-
+tionaldenoisernetworks. ThedenoiserD facesamoredifficulttaskofthetwo: Ithastogenerate
+0
+fromallclassesatonce,whereasD canfocusonasingleclassforanyspecificsample. Giventhe
+1
+moredifficulttask,andtypicallyonlyasmallsliceofthetrainingbudget,thenetworkD attains
+0
+4aworsefittothedata.1 Thisdifferenceinaccuracyisapparentinrespectiveplotsofthelearned
+densitiesinFigures2aand2b.
+From our interpretation in Section 2, it follows that CFG is not only boosting the likelihood of
+the sample having come from the class c, but also that of having come from the higher-quality
+implieddistribution. Recallthatguidanceboilsdowntoanadditionalforce(Equation5)thatpullsthe
+samplestowardshighervaluesoflog[p (x|c;σ)/p (x|c;σ)]. Plottingthisratioforourtoyexample
+1 0
+inFigure2c,alongwithcorrespondinggradientsthatguidancecontributestotheODEvectorfield,
+weseethattheratiogenerallydecreaseswithdistancefromthemanifoldduetothedenominator
+p representingamorespread-outdistribution,andhencefallingoffslowerthanthenumeratorp .
+0 1
+Consequently,thegradientspointinwardtowardsthedatamanifold. Eachcontourofthedensity
+ratio corresponds to a specific likelihood that a hypothetical classifier would assign on a sample
+beingdrawnfromp insteadofp . Becausethecontoursroughlyfollowthelocalorientationand
+1 0
+branchingofthedatamanifold,pushingsamplesdeeperintothe“goodside”concentratesthematthe
+manifold.2
+Discussion. Wecanexpectthetwomodelstosufferfrominabilitytofitatsimilarplaces,butto
+adifferentdegree. Thepredictionsofthedenoiserswilldisagreemoredecisivelyintheseregions.
+Assuch,CFGcanbeseenasaformofadaptivetruncationthatidentifieswhenasampleislikelyto
+beunder-fitandpushesittowardsthegeneraldirectionofbettersamples. Figures2dand2eshow
+theeffectoverthecourseofgeneration: Thetruncation“overshoots”thecorrectionandproducesa
+narrowerdistributionthanthegroundtruth,butinpracticethisdoesnotappeartohaveanadverse
+effectontheimages.
+Incontrast,anaiveattemptatachievingthiskindoftruncation—inspiredby,e.g.,thetruncation
+trickinGANs[3,25]orloweringtemperatureingenerativelanguagemodels—wouldcounteract
+thesmoothingbyuniformlylengtheningthescorevectorsbyafactorw >1. Thisisillustratedin
+Figure1d,wherethesamplesareindeedconcentratedinhigh-probabilityregions,butinanisotropic
+fashionthatleavestheouterbranchesempty. Inpractice,imagesgeneratedthiswaytendtoshow
+reducedvariation,oversimplifieddetails,andmonotonetexture.
+4 Ourmethod
+We propose to isolate the image quality improvement effect by directly guiding a high-quality
+modelD withapoormodelD trainedonthesametask,conditioning,anddatadistribution,but
+1 0
+sufferingfromcertainadditionaldegradations,suchaslowcapacityand/orunder-training. Wecall
+thisprocedureautoguidance,asthemodelisguidedwithaninferiorversionofitself.
+Inthecontextofour2Dtoyexample,thisturnsouttoworksurprisinglywell. Figure1edemonstrates
+theeffectofusingasmallerD withfewertrainingiterations. Asdesired,thesamplesarepulled
+0
+closetothedistributionwithoutsystematicallydroppinganypartofit.
+Toanalyzewhythistechniqueworks,recallthatunderlimitedmodelcapacity,scorematchingtends
+toover-emphasizelow-probability(i.e.,implausibleandunder-trained)regionsofthedatadistribution.
+Exactlywhereandhowtheproblemsappeardependonvariousfactorssuchasnetworkarchitecture,
+dataset,trainingdetails,etc.,andwecannotexpecttoidentifyandcharacterizethespecificissuesa
+priori. However,wecanexpectaweakerversionofthesamemodeltomakebroadlysimilarerrors
+inthesameregions,onlystronger. Autoguidanceseekstoidentifyandreducetheerrorsmadeby
+thestrongermodelbymeasuringitsdifferencetotheweakermodel’sprediction,andboostingit.
+Whenthetwomodelsagree,theperturbationisinsignificant,butwhentheydisagree,thedifference
+indicatesthegeneraldirectiontowardsbettersamples.
+Assuch,wecanexpectautoguidancetoworkifthetwomodelssufferfromdegradationsthatare
+compatiblewitheachother. SinceanyD canbeexpectedtosufferfrom,e.g.,lackofcapacityand
+1
+1The visual quality difference is obvious if we simply inspect the unconditional images generated by
+currentlarge-scalemodels.Furthermore,theunconditionalcasetendstoworksopoorlythatthecorresponding
+quantitativenumbersarehardlyeverreported.TheEDM2-Smodel[19]trainedwithImageNet-512,forexample,
+yieldsaFIDof2.56intheclass-conditionalsettingand11.67intheunconditionalsetting.
+2Discriminatorguidance[20]trainsanexplicitclassifiertodiscriminatebetweenthegeneratedsamplesand
+noisytrainingsamplesateachnoiselevelandusesitslog-gradienttoguidethesampling.Ouranalysisisnot
+applicableinthissituation;inCFGthetaskisimplicitandthedistinctionisbetweenp andp .
+1 0
+5lackoftraining—atleasttosomedegree—itmakessensetochooseD sothatitfurtherexacerbates
+0
+theseaspects.
+In practice, models that are trained separately or for a different number of iterations differ not
+only in accuracy of fit, but also in terms of random initialization, shuffling of the training data,
+etc. Forguidancetobesuccessful,thequalitygapshouldbelargeenoughtomakethesystematic
+spreading-outofthedensityoutweightheserandomeffects.
+Studyonsyntheticdegradations. Tovalidateourhypothesisthatthetwomodelsmustsufferfrom
+thesamekindofdegradations,weperformacontrolledexperimentusingsyntheticcorruptionsapplied
+toawell-trainedreal-worldimagediffusionmodel. Wecreatethemainandguidingnetworks,D
+1
+andD ,byapplyingdifferentdegreesofasyntheticcorruptiontothebasemodel. Thisconstruction
+0
+allowsustousetheuntouchedbasemodelasgroundingwhenmeasuringtheFIDeffectofthevarious
+combinations of corruptions applied to D and D . We find that as long as the degradations are
+1 0
+compatible,autoguidancelargelyundoesthedamagecausedbythecorruptions:
+• Basemodel: Asthebasemodel,weuseEDM2-StrainedonImageNet-512withoutdropout
+(FID=2.56).
+• Dropout: WeconstructD byapplying5%dropouttothebasemodelinapost-hocfashion
+1
+(FID=4.98),andD byapplying10%dropouttothebasemodel(FID=15.00). Applying
+0
+autoguidance, we reach the best result (FID = 2.55) with w = 2.25, matching the base
+model’sFID.
+• Inputnoise:WeconstructD bymodifyingthebasemodeltoaddnoisetotheinputimages
+1
+sothattheirnoiselevelisincreasedby10%(FID=3.96). Theσconditioninginputofthe
+denoiserisadjustedaccordingly. TheguidingmodelD isconstructedsimilarly,butwitha
+0
+noiselevelincreaseof20%(FID=9.73). Applyingautoguidance,wereachthebestresult
+(FID=2.56)withw =2.00,againmatchingthebasemodel’sFID.
+• Mismatcheddegradations: IfwecorruptD bydropoutandD byinputnoise,orvice
+1 0
+versa,guidancedoesnotimprovetheresultsatall;inthesecases,thebestFIDisobtained
+bysettingw =1,i.e.,bydisablingguidanceandusingthelesscorruptedD exclusively.
+1
+Whilethisexperimentcorroboratesourmainhypothesis,wedonotsuggestthatguidingwiththese
+syntheticdegradationswouldbeusefulinpractice. Arealisticdiffusionmodelwillnotsufferfrom
+these particular degradations, so creating a guiding model by introducing them would not yield
+consistenttruncationtowardsthedatamanifold.
+5 Results
+OurprimaryevaluationiscarriedoutusingImageNet(ILSVRC2012)[6]attworesolutions:512×512
+and64×64. ForImageNet-512weuselatentdiffusion[34],whileImageNet-64worksdirectlyon
+RGBpixels. Wetakethecurrentstate-of-the-artdiffusionmodelEDM2[19]asourbaseline.3 We
+usetheEDM2-SandEDM2-XXLmodelswithdefaultsamplingparameters: 32deterministicsteps
+witha2ndorderHeunsampler[18]. Formostsetups,apre-trainedmodelispubliclyavailable,andin
+theremainingcaseswetrainthemodelsourselvesusingtheofficialimplementation(AppendixB).
+Weusetwodegradationsfortheguidingmodel: shortertrainingtimeandreducedcapacitycompared
+tothemainmodel. Weobtainthebestresultsbyhavingbothoftheseenabled. WithEDM2-S,for
+example, we use an XS-sized guiding model that receives 1/16th of the training iterations of the
+mainmodel. Weablatetherelativeimportanceofthedegradationsaswellasthesensitivitytothese
+specificchoicesinSection5.1. AstheEDM2networksareknowntobesensitivetotheguidance
+weightandEMAlength[19],wesearchtheoptimalvaluesforeachcaseusingagridsearch.
+Table1showsthatourmethodimprovesFID[10]andFD [42]considerably. Usingthesmall
+DINOv2
+model(EDM2-S)inImageNet-512,ourautoguidanceimprovesFIDfrom2.56to1.34. Thisbeats
+the1.68achievedbytheconcurrentlyproposedCFG+GuidanceInterval[21],andisthebestresult
+reportedforthisdatasetregardlessofthemodelsize. Usingthelargestmodel(EDM2-XXL)further
+improvestherecordto1.25. TheFD recordsaresimilarlyimproved, withthelargemodel
+DINOv2
+3https://github.com/NVlabs/edm2
+6Method FID w EMA m EMA g FD DINOv2 w EMA m EMA g
+EDM2-S [19] 2.56 – 0.130 – 68.64 – 0.190 –
++Classifier-freeguidance [19] 2.23 1.40 0.025 0.025 52.32 1.90 0.085 0.085
++Guidanceinterval [21] 1.68 2.10 0.025 0.025 46.25 3.20 0.085 0.085
++Autoguidance(XS,T/16) Ours 1.34 2.10 0.070 0.125 36.67 2.45 0.120 0.165
+−SameEMAforboth 1.53 1.95 0.050 0.050 40.81 2.25 0.115 0.115
+−Reducetrainingonly 1.51 2.20 0.090 0.130 42.27 2.55 0.130 0.170
+−Reducecapacityonly 2.13 1.80 0.120 0.160 59.89 1.90 0.140 0.085
+EDM2-XXL [19] 1.91 – 0.070 – 42.84 – 0.150 –
++Classifier-freeguidance [19] 1.81 1.20 0.015 0.015 33.09 1.70 0.015 0.015
++Guidanceinterval [21] 1.40 2.00 0.015 0.015 29.16 2.90 0.015 0.015
++Autoguidance(M,T/3.5) Ours 1.25 2.05 0.075 0.155 24.18 2.30 0.130 0.205
+EDM2-S,unconditional 11.67 – 0.145 – 209.53 – 0.170 –
++Autoguidance(XS,T/16) Ours 3.86 2.85 0.070 0.110 90.39 2.90 0.090 0.125
+RIN [16] 1.23 – 0.033 – – – – –
+EDM2-S [19] 1.58 – 0.075 – 58.52 – 0.160 –
++Classifier-freeguidance 1.48 1.15 0.030 0.030 41.84 1.85 0.040 0.040
++Autoguidance(XS,T/8) Ours 1.01 1.70 0.045 0.110 31.85 2.20 0.105 0.175
+Table1: ResultsonImageNet-512andImageNet-64. Theparametersofautoguidancerefertothe
+capacityandamounttrainingreceivedbytheguidingmodel. Thelatterisgivenrelativetothenumber
+oftrainingimagesshowntothemainmodel(T). ThecolumnsEMA andEMA indicatethelength
+m g
+parameterofthepost-hocEMAtechnique[19]forthemainandguidingmodel,respectively.
+FID FID FID
+T/32 T/16⋆ T/8 XXS XS⋆ S EMAm EMAg
+3.5 3.5 3.5
+3.0 3.0 3.0
+2.5 2.5 2.5
+2.0 2.0 2.0
+1.47 1.51
+1.5 1.5 1.5
+1.401.34 1.41 1.34 1.34 1.34
+w:1.0 1.5 2.0 2.5 3.0 w:1.0 1.5 2.0 2.5 3.0 EMA: 0.05 0.10 0.15
+(a)Guidanceweight&training (b)Guidanceweight&capacity (c)EMAlengthparameters
+Figure3: Sensitivityw.r.t.autoguidanceparameters,usingEDM2-SonImageNet-512. Theshaded
+regions indicate the min/max FID over 3 evaluations. (a) Sweep over guidance weight w while
+keepingallotherparametersunchanged. Thecurvescorrespondtohowmuchtheguidingmodelwas
+trainedrelativetothenumberofimagesshowntothemainmodel. (b)Sweepoverguidanceweight
+fordifferentguidingmodelcapacities. (c)SweepoverthetwoEMAlengthparametersforourbest
+configuration,denotedwith⋆in(a)and(b).
+loweringtherecordfrom29.16to24.18. InImageNet-64,theimprovementisevenlarger;inthis
+dataset,wesetthenewrecordFIDandFD of1.01and31.85,respectively.
+DINOv2
+Aparticularstrengthofautoguidanceisthatitcanbeappliedtounconditionalmodelsaswell. While
+conditionalImageNetgenerationmaybegettingclosetosaturation,theunconditionalresultsremain
+surprisingly poor. EDM2-S achieves a FID of 11.67 in the unconditional setting, indicating that
+practicallynoneofthegeneratedimagesareofpresentablequality. Enablingautoguidancelowers
+theFIDsubstantiallyto3.86,andtheimprovementinFD issimilarlysignificant.
+DINOv2
+5.1 Ablations
+Table1furthershowsthatitisbeneficialtoallowindependentEMAlengthsforthemainandguiding
+models.WhenbothareforcedtousethesameEMA,FIDworsensfrom1.34to1.53inImageNet-512
+(EDM2-S). We also measure the effect of each degradation (reduced training time, capacity) in
+isolation. Ifwesettheguidingmodeltothesamecapacityasthemainmodelandonlytrainitfora
+shortertime,FIDworsensto1.51. Ifweinsteadtrainthereduced-capacityguidingmodelforaslong
+7
+215×215
+46×46w=1 w=2 w=3 w=1 w=2 w=3
+Figure4: ExampleresultsfortheTreefrog,Palace,Mushroom,CastleclassesofImageNet-512using
+EDM2-S.Guidanceweightincreasestotheright;rowsareclassifier-freeguidanceandourmethod.
+asthemainmodel,FIDsuffersalotmore,to2.13. Wecanthusconcludethatbothdegradationsare
+beneficialandorthogonal,butamajorityoftheimprovementcomesfromreducedtrainingofthe
+guidingmodel. Notably,alltheseablationsstilloutperformstandardCFGintermsofFID.
+Figure3probesthesensitivitytovarioushyperparameters. Ourbestresultisobtainedbytrainingthe
+guidingmodel1/16thasmuchasthemainmodel,intermsofimagesshownduringtraining. Further
+halvingthetrainingbudgetisalmostequallygood,whiledoublingtheamountoftrainingstartsto
+slowlycompromisetheresults. Theresultsarequiteinsensitivetothechoiceoftheguidanceweight.
+Intermsofthecapacityoftheguidingmodel,onestepsmaller(XSforEDM2-S)gavethebestresult.
+Twostepssmaller(XXS)wasalsobetterthannocapacityreduction(S),butstartedtoshowexcessive
+sensitivitytotheguidanceweight. TheresultsarealsosensitivetotheEMAlength,similarlytothe
+originalEDM2. Post-hocEMA[19]allowsustosearchtheoptimalparametersatafeasiblecost.
+We also explored several other degradations for the guiding model but did not find them to be
+beneficial. First,wetriedreducingtheamountoftrainingdatausedfortheguidingmodel,butthis
+didnotseemtoimprovetheresultsoverthebaseline. Second,applyingguidanceinterval[21]on
+topofourmethodreduceditsbenefitstosomeextent,suggestingthatautoguidanceishelpfulatall
+noiselevels. Third,derivingtheguidingmodelfromthemainmodelusingsyntheticdegradationsdid
+notworkatall,providingfurtherevidencethattheguidingmodelneedstoexhibitthesamekindsof
+degradationsthatthemainmodelsuffersfrom. Fourth,wefoundthatifthemainmodelhadbeen
+quantized,e.g.,toimproveinferencespeed,quantizingittoanevenlowerprecisiondidnotyielda
+usefulguidingmodel.
+5.2 Qualitativeresults
+Figure4showsexamplesofgeneratedimagesforImageNet-512. BothCFGandourmethodtend
+toimprovetheperceptualqualityofimages,guidingtheresultstowardsclearerrealizationsasthe
+guidanceweightincreases. However,CFGseemstohaveatendencytoheadtowardsamorelimited
+number of canonical images [21] per class, while our method produces a wider gamut of image
+compositions. AnexampleistheatypicalimageofaPalaceatw =1, whichCFGconvertstoa
+somewhatidealizeddepictionaswincreases. Sometimestheunguidedsamplecontainsincompatible
+elementsofmultiplepossibleimages,suchastheCastleimage,whichincludesaroughsketchof
+8
+GFC
+sruO
+GFC
+sruOInterpolationbetweenCFGandourmethod
+Figure5: ResultsforDeepFloydIF[41]usingtheprompt“Abluejaystandingonalargebasketof
+rainbowmacarons”.Therowscorrespondtoguidanceweightsw ∈{1,2,3,4}.Theleftmostcolumn
+showsresultsforCFGandtherightmostforautoguidance(XL-sizedmodelguidedbyM-sizedone).
+Themiddlecolumnscorrespondtoblendingbetweenthetwo. SeeAppendixAformoreexamples.
+twoorthreecastlesofunrelatedstyles. Inthisinstance,CFGapparentlystrugglestodecidewhatto
+do,whereasourmethodfirstbuildsthelargeredelementintoacastle,andwithincreasedguidance
+focusesontheredforegroundobject. Ahighernumberofpossibleoutputimagesisconsistentwitha
+lowerFID,implyingbettercoverageofthetrainingdata.
+Inordertostudyourmethodinthecontextoflarge-scaleimagegenerators,weapplyittoDeepFloyd
+IF[41]. Wechoosethisbaselinebecausemultipledifferently-sizedmodelsarepubliclyavailable.
+Ideallywecouldhavealsousedanearliersnapshotastheguidingmodel,butthosewerenotavailable.
+DeepFloydIFgeneratesimagesasacascadeofthreediffusionmodels: abasemodelandtwosuper-
+resolutionstages. Weapplyourmethodtothebasemodelonly,whilethesubsequentstagesalways
+useCFG.Figure5demonstratestheeffectofCFG,ourmethod,andtheirvariouscombinations. To
+combineautoguidancewithCFG,weextendEquation3tocovermultipleguidingmodelsasproposed
+byLiuetal.[23]anddistributethetotalguidanceweightamongthemusinglinearinterpolation(see
+AppendixB.2fordetails). WhileCFGimprovestheimagequalitysignificantly,italsosimplifies
+thestyleandlayoutoftheimagetowardsacanonicaldepiction. Ourmethodsimilarlyimprovesthe
+imagequality,butitbetterpreservestheimage’sstyleandvisualcomplexity. Wehopethatusing
+bothguidingmethodssimultaneouslywillserveasanew,usefulartisticcontrol.
+6 DiscussionandFuturework
+Wehaveshownthatclassifier-freeguidanceentanglesseveralphenomenatogether,andthatadifferent
+perspectivetogetherwithsimplepracticalchangesopensupanentirenewdesignspace. Inaddition
+toremovingthesuperfluousconnectiontoconditioning,thisenablessignificantlybetterresults.
+9
+thgiewGFCgnisaercnI
+dohtemruorofthgiewecnadiuggnisaercnIPotentialdirectionsforfutureworkincludeformallyprovingtheconditionsthatallowautoguidanceto
+bebeneficial,andderivinggoodrulesofthumbforselectingthebestguidingmodel.Oursuggestion—
+anearlysnapshotofasmallermodel—iseasytosatisfyinprinciple,butthesearenotavailablefor
+currentlarge-scaleimagegeneratorsinpractice. Suchgeneratorsarealsooftentrainedinsuccessive
+stageswherethetrainingdatamaychangeatsomepoint,causingpotentialdistributionshiftsbetween
+snapshotsthatwouldviolateourassumptions.
+Acknowledgments
+WethankDavidLuebke,JanneHellsten,Ming-YuLiu,andAlexKellerfordiscussionsandcomments,
+andTeroKuosmanenandSamuelKlenbergformaintainingourcomputeinfrastructure.
+References
+[1] F.Bao,S.Nie,K.Xue,Y.Cao,C.Li,H.Su,andJ.Zhu.Allareworthwords:AViTbackbonefordiffusion
+models. InProc.CVPR,2023.
+[2] C.M.Bishop. Neuralnetworksforpatternrecognition. OxfordUniversityPress,USA,1995.
+[3] A.Brock,J.Donahue,andK.Simonyan.LargescaleGANtrainingforhighfidelitynaturalimagesynthesis.
+InProc.ICLR,2019.
+[4] B.C.A.Brown,A.L.Caterini,B.L.Ross,J.C.Cresswell,andG.Loaiza-Ganem. Verifyingtheunionof
+manifoldshypothesisforimagedata. InProc.ICLR,2023.
+[5] K. Crowson, S. A. Baumann, A. Birch, T. M. Abraham, D. Z. Kaplan, and E. Shippole. Scalable
+high-resolutionpixel-spaceimagesynthesiswithhourglassdiffusiontransformers. InProc.ICML,2024.
+[6] J.Deng,W.Dong,R.Socher,L.-J.Li,K.Li,andL.Fei-Fei. ImageNet:Alarge-scalehierarchicalimage
+database. InProc.CVPR,2009.
+[7] P.DhariwalandA.Nichol. DiffusionmodelsbeatGANsonimagesynthesis. InProc.NeurIPS,2021.
+[8] S.Dieleman. Guidance:Acheatcodefordiffusionmodels. Blogpost.https://sander.ai/2022/05/
+26/guidance.html,2022.
+[9] D.HendrycksandK.Gimpel. Gaussianerrorlinearunits(GELUs). CoRR,abs/1606.08415,2016.
+[10] M.Heusel,H.Ramsauer,T.Unterthiner,B.Nessler,andS.Hochreiter. GANstrainedbyatwotime-scale
+updateruleconvergetoalocalNashequilibrium. InProc.NIPS,2017.
+[11] J.Ho,W.Chan,C.Saharia,J.Whang,R.Gao,A.Gritsenko,D.P.Kingma,B.Poole,M.Norouzi,D.J.
+Fleet,andT.Salimans. ImagenVideo: Highdefinitionvideogenerationwithdiffusionmodels. CoRR,
+abs/2210.02303,2022.
+[12] J.Ho,A.Jain,andP.Abbeel. Denoisingdiffusionprobabilisticmodels. InProc.NeurIPS,2020.
+[13] J.HoandT.Salimans. Classifier-freediffusionguidance. InProc.NeurIPS2021WorkshoponDeep
+GenerativeModelsandDownstreamApplications,2021.
+[14] E.Hoogeboom,J.Heek,andT.Salimans. Simplediffusion: End-to-enddiffusionforhighresolution
+images. InProc.ICML,2023.
+[15] A.Hyvärinen. Estimationofnon-normalizedstatisticalmodelsbyscorematching. JMLR,6(24):695–709,
+2005.
+[16] A.Jabri,D.J.Fleet,andT.Chen. Scalableadaptivecomputationforiterativegeneration. InProc.ICML,
+2023.
+[17] A.Jolicoeur-Martineau,K.Li,R.Piché-Taillefer,T.Kachman,andI.Mitliagkas. Gottagofastwhen
+generatingdatawithscore-basedmodels. CoRR,abs/2105.14080,2021.
+[18] T.Karras,M.Aittala,T.Aila,andS.Laine. Elucidatingthedesignspaceofdiffusion-basedgenerative
+models. InProc.NeurIPS,2022.
+[19] T.Karras,M.Aittala,J.Lehtinen,J.Hellsten,T.Aila,andS.Laine. Analyzingandimprovingthetraining
+dynamicsofdiffusionmodels. InProc.CVPR,2024.
+[20] D.Kim,Y.Kim,S.J.Kwon,W.Kang,andI.-C.Moon. Refininggenerativeprocesswithdiscriminator
+guidanceinscore-baseddiffusionmodels. InProc.ICML,2023.
+[21] T.Kynkäänniemi,M.Aittala,T.Karras,S.Laine,T.Aila,andJ.Lehtinen. Applyingguidanceinalimited
+intervalimprovessampleanddistributionqualityindiffusionmodels. CoRR,abs/2404.07724,2024.
+[22] L.Liu,Y.Ren,Z.Lin,andZ.Zhao. Pseudonumericalmethodsfordiffusionmodelsonmanifolds. In
+Proc.ICLR,2022.
+[23] N.Liu,S.Li,Y.Du,A.Torralba,andJ.B.Tenenbaum. Compositionalvisualgenerationwithcomposable
+diffusionmodels. InProc.ECCV,2022.
+[24] S.Lyu. Interpretationandgeneralizationofscorematching. InProc.UAI,2009.
+[25] M.Marchesi.Megapixelsizeimagecreationusinggenerativeadversarialnetworks.CoRR,abs/1706.00082,
+2017.
+10[26] P.Mishkin,L.Ahmad,M.Brundage,G.Krueger,andG.Sastry. DALL·E2preview–risksandlimitations.
+OpenAI,2022.
+[27] A.NicholandP.Dhariwal. Improveddenoisingdiffusionprobabilisticmodels. InProc.ICML,2021.
+[28] A.Nichol,P.Dhariwal,A.Ramesh,P.Shyam,P.Mishkin,B.McGrew,I.Sutskever,andM.Chen. GLIDE:
+Towardsphotorealisticimagegenerationandeditingwithtext-guideddiffusionmodels. InProc.ICML,
+2022.
+[29] M.Oquab,T.Darcet,T.Moutakanni,H.V.Vo,M.Szafraniec,V.Khalidov,P.Fernandez,D.Haziza,
+F.Massa,A.El-Nouby,M.Assran,N.Ballas,W.Galuba,R.Howes,P.-Y.Huang,S.-W.Li,I.Misra,
+M.Rabbat,V.Sharma,G.Synnaeve,H.Xu,H.Jegou,J.Mairal,P.Labatut,A.Joulin,andP.Bojanowski.
+DINOv2:Learningrobustvisualfeatureswithoutsupervision. TMLR,2024.
+[30] W.PeeblesandS.Xie. Scalablediffusionmodelswithtransformers. InProc.ICCV,2023.
+[31] B.Poole,A.Jain,J.T.Barron,andB.Mildenhall. DreamFusion:Text-to-3Dusing2Ddiffusion. InProc.
+ICLR,2023.
+[32] P.Pope,C.Zhu,A.Abdelkader,M.Goldblum,andT.Goldstein. Theintrinsicdimensionofimagesandits
+impactonlearning. InProc.ICLR,2021.
+[33] A.Ramesh,P.Dhariwal,A.Nichol,C.Chu,andM.Chen. Hierarchicaltext-conditionalimagegeneration
+withCLIPlatents. CoRR,abs/2204.06125,2022.
+[34] R.Rombach,A.Blattmann,D.Lorenz,P.Esser,andB.Ommer. High-resolutionimagesynthesiswith
+latentdiffusionmodels. InProc.CVPR,2022.
+[35] A.Sabour,S.Fidler,andK.Kreis. Alignyoursteps:Optimizingsamplingschedulesindiffusionmodels.
+InProc.ICML,2024.
+[36] C.Saharia,W.Chan,S.Saxena,L.Li,J.Whang,E.Denton,S.K.S.Ghasemipour,B.K.Ayan,S.S.
+Mahdavi, R.G.Lopes, T.Salimans, J.Ho, D.J.Fleet, andM.Norouzi. Photorealistictext-to-image
+diffusionmodelswithdeeplanguageunderstanding. InProc.NeurIPS,2022.
+[37] J.Sohl-Dickstein,E.Weiss,N.Maheswaranathan,andS.Ganguli. Deepunsupervisedlearningusing
+nonequilibriumthermodynamics. InProc.ICML,2015.
+[38] J.Song,C.Meng,andS.Ermon. Denoisingdiffusionimplicitmodels. InProc.ICLR,2021.
+[39] Y.SongandS.Ermon. Generativemodelingbyestimatinggradientsofthedatadistribution. InProc.
+NeurIPS,2019.
+[40] Y.Song,J.Sohl-Dickstein,D.P.Kingma,A.Kumar,S.Ermon,andB.Poole. Score-basedgenerative
+modelingthroughstochasticdifferentialequations. InProc.ICLR,2021.
+[41] StabilityAI. DeepFloydIF. GitHubrepository. https://github.com/deep-floyd/IF,2023.
+[42] G.Stein,J.C.Cresswell,R.Hosseinzadeh,Y.Sui,B.L.Ross,V.Villecroze,Z.Liu,A.L.Caterini,J.E.T.
+Taylor,andG.Loaiza-Ganem. Exposingflawsofgenerativemodelevaluationmetricsandtheirunfair
+treatmentofdiffusionmodels. InProc.NeurIPS,2023.
+[43] C.Szegedy,V.Vanhoucke,S.Ioffe,J.Shlens,andZ.Wojna. RethinkingtheInceptionarchitecturefor
+computervision. InProc.CVPR,2016.
+[44] P.Vincent. Aconnectionbetweenscorematchinganddenoisingautoencoders. NeuralComputation,
+23(7):1661–1674,2011.
+[45] L.Zhang,A.Rao,andM.Agrawala. Addingconditionalcontroltotext-to-imagediffusionmodels. In
+Proc.ICCV,2023.
+[46] Q.ZhangandY.Chen. Fastsamplingofdiffusionmodelswithexponentialintegrator. InProc.ICLR,
+2023.
+11Appendices
+A Additionalresults
+Figure6showsadditionalresultsusingDeepFloydIF,similartoFigure5.
+InterpolationbetweenCFGandourmethod
+"Apirateshipsailingthroughcloudsinsteadoftheocean"
+"Afairytalecastlefloatinginthesky,tetheredbyancientvines"
+Figure 6: Additional results for DeepFloyd IF [41]. The rows correspond to guidance weights
+w ∈{1,2,3,4}. CFGandourmethod(XL-sizedmodelguidedbyM-sizedone)ontheleftmostand
+rightmostcolumn,respectively. Themiddlecolumnscorrespondtoblendingbetweenthetwo.
+12
+thgiewGFCgnisaercnI
+thgiewGFCgnisaercnI
+dohtemruorofthgiewecnadiuggnisaercnI
+dohtemruorofthgiewecnadiuggnisaercnIB Implementationdetails
+WeperformedourmainexperimentsontopofthepubliclyavailableEDM2[19]codebase4 using
+NVIDIAA100GPUs, Python3.11.7, PyTorch2.2.0, CUDA11.8, andCuDNN8.9.7. Sinceour
+methodonlyinvolvesusingadifferentguidingmodelduringsampling,wewereabletoperformall
+measurementsusingtheexistingcommand-linescripts. Weonlyhadtomodifyonelineofcodein
+thesamplinglooptopassintheclasslabeltotheguidingnetworkinadditiontothemainnetwork.
+Algorithm1demonstratesthestepsneededtoreproduceoneofourresultsfromTable1;therestcan
+bereproducedbyrepeatingthesamestepswithdifferentmodelsandhyperparametersasindicated
+inthetable. Forthefourcaseswhereapre-trainedmodelwasunavailable,wetrainedthemodels
+ourselvesasdetailedinAlgorithm2.
+B.1 Hyperparametersearch
+We optimized the autoguidance parameters for each configuration in Table 1 and Figure 3 using
+automatedgridsearch. WeperformedthesearchseparatelyforFIDandFD acrossthespaceof
+DINOv2
+fiveparameters:
+• Modelcapacity: Allavailablemodelcapacities(EDM2-XXS,EDM2-XS,etc.) uptoand
+includingthecapacityofthemainmodel.
+• Trainingtime: Numberoftrainingimagesinpowersoftwo. Wefoundthatthesweetspot
+wasalwayswithintherange{226,227,228,229}—therewasnoneedtogoforloweror
+highervalues.
+• Guidanceweight: Allvalueswithin[1.00,3.50]atregularintervalsof0.05.
+• EMAlengths: Allvalueswithin[0.010,0.250]atregularintervalsof0.005. Wetreatedthe
+EMAlengthofthemainmodelandtheguidingmodelastwoseparateparameters.
+Inordertoreducethecomputationalworkload,weprunedthesearchspacebyconsideringonlya
+localneighborhoodofparametersaroundthebestFIDorFD foundthusfar. Wheneverthe
+DINOv2
+resultimproved,weplacedanewlocalgridaroundthecorrespondingparameters,resultingingradual
+convergencetowardstheglobaloptimum. Oncewereachedtheoptimum,wefurtherre-evaluatedthe
+nearbyparameterchoicestwomoretimestoaccountfortheeffectofrandomnoise. Assuch,each
+resultreportedinTable1andFigure3representsthebestofthreeevaluations. Thetypicalrangeof
+randomvariationisindicatedbytheshadedregionsinFigure3.
+Intotal,thegridsearchresultedinroughly30,000metricevaluationsacrossallofourconfigurations.
+Ineachmetricevaluation,themaincostcomesfromgenerating50,000randomimages,whichtakes
+around30–60minutesusingeightA100GPUsandconsumesapproximately2–5kWhofenergy,
+depending on model size. The overall energy consumption of our entire project was thus in the
+ballparkof60–150MWh.
+B.2 DeepFloydIFexperiments
+InordertoapplyCFGandautoguidancesimultaneously,weextendEquation3tocovermultiple
+guidingmodelsasproposedbyLiuetal.[23]. Inthiscase,wehavethreemodels: themainmodel
+D ,anunconditionalmodelD ,andareduced-capacityconditionalmodelD . Theguideddenoising
+m u c
+resultisthendefinedas
+(cid:88) (cid:0) (cid:1)
+D (x;σ,c) := D (x;σ,c) + (w −1) D (x;σ,c)−D (x;σ,c) , (6)
+w m i m i
+i∈{u,c}
+wherew andw correspondtotheguidanceweightsforCFGandautoguidance,respectively.Tointer-
+u c
+polatebetweenthetwomethods,wefurtherdefinew :=(1−α)(w−1)+1andw :=α(w−1)+1,
+u c
+wherewindicatesthedesiredtotalamountofguidanceandα∈[0,1]isalinearinterpolationfactor.
+DeepFloydIF[41]usesathree-stagecascade: abasemodelfollowedbytwosuper-resolutionstages.
+Weapplyour methodonlyto thebasemodel, while thesuper-resolution stagesalwaysuseCFG
+withtheirdefaultweights(4and9). WeusetheirStochasticDDPMsamplerwithdefaultsettings:
+100,75,50stepsforthebasemodelandsubsequentsuper-resolutionstages,respectively. Dynamic
+thresholding[36]isusedforallstages.
+4https://github.com/NVlabs/edm2
+13Algorithm1 ReproducingourFIDresultforthe“Autoguidance(XS,T/16)”rowinTable1.
+1 # Download EDM2 source code.
+2 git clone https://github.com/NVlabs/edm2.git
+3 cd edm2
+4 git checkout 32ecad3
+5
+6 # Patch the sampler so that class labels are passed in to the guiding network.
+7 sed -i ’s/gnet(x, t)/gnet(x, t, labels)/g’ generate_images.py
+8
+9 # Download the necessary EDM2 models.
+10 rclone copy --progress --http-url https://nvlabs-fi-cdn.nvidia.com/edm2 \
+11 :http:raw-snapshots/edm2-img512-s/ raw-snapshots/edm2-img512-s/
+12 rclone copy --progress --http-url https://nvlabs-fi-cdn.nvidia.com/edm2 \
+13 :http:raw-snapshots/edm2-img512-xs/ raw-snapshots/edm2-img512-xs/
+14
+15 # Reconstruct the corresponding post-hoc EMA models.
+16 python reconstruct_phema.py --indir=raw-snapshots/edm2-img512-s --outdir=autoguidance/phema \
+17 --outprefix=img512-s --outkimg=2147483 --outstd=0.070
+18 python reconstruct_phema.py --indir=raw-snapshots/edm2-img512-xs --outdir=autoguidance/phema \
+19 --outprefix=img512-xs --outkimg=134217 --outstd=0.125
+20
+21 # Generate 50,000 images using 8 GPUs.
+22 torchrun --standalone --nproc_per_node=8 generate_images.py --seeds=0-49999 --subdirs \
+23 --outdir=autoguidance/images/img512-s --net=autoguidance/phema/img512-s-2147483-0.070.pkl \
+24 --gnet=autoguidance/phema/img512-xs-0134217-0.125.pkl --guidance=2.10
+25
+26 # Calculate FID.
+27 python calculate_metrics.py calc --images=autoguidance/images/img512-s \
+28 --ref=https://nvlabs-fi-cdn.nvidia.com/edm2/dataset-refs/img512.pkl
+C Detailsofthe2Dtoyexample
+Inthissection,wedescribetheconstructionofthe2DtoydatasetusedintheanalysisofSection3,as
+wellastheassociatedmodelarchitecture,trainingsetup,andsamplingparameters. Wewillmakeall
+relatedcodepubliclyavailable.
+Dataset. Foreachofthetwoclassesc,wemodelthefractal-likedatadistributionasamixtureof
+(cid:0) (cid:1)
+GaussiansM = {ϕ },{µ },{Σ } ,whereϕ ,µ ,andΣ representtheweight,mean,and2×2
+c i i i i i i
+covariancematrixofeachcomponenti,respectively.Thisletsuscalculatethegroundtruthscoresand
+probabilitydensitiesanalyticallyand,consequently,tovisualizethemwithoutmakinganyadditional
+assumptions. Theprobabilitydensityforagivenclassisgivenby
+(cid:88)
+p (x|c) = ϕ N(x;µ ,Σ ), where (7)
+data i i i
+i∈Mc
+(cid:18) (cid:19)
+1 1
+N(x;µ,Σ) = exp − (x−µ)⊤Σ−1(x−µ) . (8)
+(cid:112)
+(2π)2det(Σ) 2
+Applying heat diffusion to p (x|c), we obtain a sequence of increasingly smoothed densities
+data
+p(x|c;σ)parameterizedbynoiselevelσ:
+p(x|c;σ) = (cid:88) ϕ N(cid:0) x;µ ,Σ∗ (cid:1) , where Σ∗ = Σ +σ2I. (9)
+i i i,σ i,σ i
+i∈Mc
+Thescorefunctionofp(x|c;σ)isthengivenby
+(cid:80) ϕ N(cid:0) x;µ ,Σ∗ (cid:1)(cid:0) Σ∗ (cid:1)−1(cid:0) µ −x(cid:1)
+∇ logp(x|c;σ) = i∈Mc i i i,σ i,σ i . (10)
+x (cid:80) ϕ N(cid:0) x;µ ,Σ∗ (cid:1)
+i∈Mc i i i,σ
+We construct M to represent a thin tree-like structure by starting with one main “branch” and
+c
+recursively subdividing it into smaller ones. Each branch is represented by 8 anisotropic Gaus-
+siancomponentsandthesubdivisionisperformed6times,decayingϕaftereachsubdivisionand
+14Algorithm2 TrainingtheadditionalEDM2modelsneededinSection5.
+1 # Unconditional EDM2-S with ImageNet-512, used as a main model in Table 1.
+2 torchrun --nnodes=4 --nproc_per_node=8 train_edm2.py \
+3 --outdir=autoguidance/train/img512-s-uncond --data=datasets/img512-sd.zip --cond=0 \
+4 --preset=edm2-img512-s --duration=2048Mi
+5
+6 # Unconditional EDM2-XS with ImageNet-64, used as a guiding model in Table 1.
+7 torchrun --nnodes=4 --nproc_per_node=8 train_edm2.py \
+8 --outdir=autoguidance/train/img64-xs-uncond --data=datasets/img64.zip --cond=0 \
+9 --preset=edm2-img64-s --channels=128 --lr=0.0120 --duration=2048Mi
+10
+11 # Conditional EDM2-XS with ImageNet-64, used as a guiding model in Table 1.
+12 torchrun --nnodes=4 --nproc_per_node=8 train_edm2.py \
+13 --outdir=autoguidance/train/img64-xs --data=datasets/img64.zip --cond=1 \
+14 --preset=edm2-img64-s --channels=128 --lr=0.0120 --duration=512Mi
+15
+16 # Conditional EDM2-XXS with ImageNet-512, used as a guiding model in Figure 3b.
+17 torchrun --nnodes=4 --nproc_per_node=8 train_edm2.py \
+18 --outdir=autoguidance/train/img512-xxs --data=datasets/img512-sd.zip --cond=1 \
+19 --preset=edm2-img512-xs --channels=64 --lr=0.0170 --duration=512Mi
+slightly randomizing the lengths and orientations of the two resulting sub-branches. This yields
+127×8=1016 components per class and 1016×2 = 2032 components in total. We define the
+coordinatesystemsothatthemeanandstandarddeviationofp ,marginalizedoverc,areequalto0
+data
+andσ =0.5alongeachaxis,respectively,matchingtherecommendationsbyKarrasetal.[18].
+data
+Models. WeimplementthedenoisermodelsD andD assimplemulti-layerperceptrons,utilizing
+0 1
+themagnitude-preservingdesignprinciplesfromEDM2[19]. Tobeabletovisualizetheimplied
+probabilitydensitiesinFigure2, wedesignthemodelinterfacesothatforagivennoisysample,
+eachmodeloutputsasinglescalarrepresentingthelogarithmofthecorrespondingunnormalized
+probability density, as opposed to directly outputting the denoised sample or the score vector.
+Concretely,letusdenotetheoutputofagivenmodelbyG (x;σ,c). Thecorrespondingnormalized
+θ
+probabilitydensityisthengivenby
+(cid:0)
+(cid:1)(cid:46)(cid:90)
+(cid:0) (cid:1)
+p (x|c;σ) = exp G (x;σ,c) exp G (x;σ,c) dx. (11)
+θ θ θ
+ByvirtueofdefiningG thisway,wecanderivethescorevector,andbyextension,thedenoised
+θ
+sample,fromG throughautomaticdifferentiation:
+θ
+∇ logp (x|c;σ) = ∇ G (x;σ,c) (12)
+x θ x θ
+D (x;σ,c) = x+σ2∇ G (x;σ,c). (13)
+θ x θ
+BesidesEquation12,wealsotriedoutthealternativeformulationswherethemodeloutputsthescore
+vectororthedenoisedsampledirectly. Theresultsproducedbyallthesevariantswerequalitatively
+moreorlessidentical;wechosetogowiththeformulationabovepurelyforconvenience.
+ToconnecttheabovedefinitionofG totherawnetworklayers,weapplypreconditioningusing
+θ
+thesamegeneralprinciplesasinEDM[18]. Denotingthefunctionrepresentedbytherawnetwork
+layersasF ,wedefineG as
+θ θ
+n
+G (x;σ,c) = −1 ∥x∗∥2− g θ (cid:88) F (cid:16) x∗; 1 logσ, c(cid:17)2 , where x∗ = x (14)
+θ 2 2 σn θ,i 4 (cid:112) σ2+σ2
+i=1 data
+andthesumistakenoverthenoutputfeaturesofF . WescaletheoutputofF byalearnedscaling
+θ θ
+factorg thatweinitializetozero.
+θ
+ThegoalofEquation14istosatisfythefollowingthreerequirements:
+• TheinputofF shouldhavezeromeanandunitmagnitude. Thisisachievedthroughthe
+θ
+(cid:112)
+divisionby σ2+σ2 .
+data
+15• Afterinitialization,G shouldrepresentthebestpossiblefirst-orderapproximationofthe
+θ
+correctsolution. Thisisachievedthroughthe−1∥x∗∥2term,aswellasthefactthatg =0
+2 2 θ
+afterinitialization.
+√
+• Aftertraining, g ·F shouldhaveapproximatelyunitmagnitude. Thisisachievedthrough
+θ θ
+thedivisionbyσn.
+Inpractice,weuseanMLPwithoneinputlayerandfourhiddenlayers,interspersedwithSiLU[9]
+activationfunctionsandimplementedusingthemagnitude-preservingprimitivesfromEDM2[19].
+Theinputisa5-dimensionalvector(cid:2) x∗;x∗;1logσ;c;1(cid:3)
+,wherec=1fortheorangeclass,−1for
+x y 4
+the gray class, and 0 for the unconditional case. The output of each hidden layer has n features,
+wheren=64forD and32forD .
+1 0
+Training. Given that we have the exact score function of the ground truth distribution readily
+available (Equation 9), we train the models using exact score matching [15] for simplicity and
+increasedrobustness. Foragivenclassc,wethusdefinethelossfunctionas
+L(θ;c) = E σ∼ptrain,x∼p(x|c;σ)σ2(cid:13) (cid:13)∇ xlogp θ(x|c;σ)−∇ xlogp(x|c;σ)(cid:13) (cid:13)2 2, (15)
+where σ ∼ p is realized as log(σ) ∼ N(P ,P ) [18]. As an alternative to exact score
+train mean std
+matching,wealsoexperimentedwiththemorecommonlyuseddenoisingscorematching,butdidnot
+observeanynoticeabledifferencesinmodelbehaviorortrainingdynamics.
+WetrainD for4096iterationsandD for512iterationsusingabatchsizeof4096samples. In
+1 0
+(cid:112)
+termsofhyperparameters,wesetP =−2.3andP =1.5anduseα / max(t/t ,1)learning
+mean std ref ref
+ratedecayschedulewithα = 0.01andt = 512iterations,alongwithapowerfunctionEMA
+ref ref
+profile[19]withσ =0.010. Overall,thesetupisrobustwithrespecttothehyperparameters;the
+rel
+phenomenaillustratedinFigures1and2remainunchangedacrossawiderangeofparameterchoices.
+Sampling. We use the standard EDM sampler [18] with N =32 Heun steps (NFE=63),
+σ =0.002, σ =5, and ρ=7. We chose the values of N and σ to be much higher than
+min max max
+whatisactuallyneededforthisdatasetinordertoavoidpotentialdiscretizationerrorsfromaffecting
+ourconclusions. InFigure1,wesetw =4forCFGandw =3forautoguidance,andmultiplythe
+scorevectors(Equation12)by1.40fornaivetruncation. InFigure2,wesetw =4andσ =0.03.
+mid
+D Broadersocietalimpact
+Generativemodeling,includingimagesandvideos,hassignificantmisusepotential. Itcantrigger
+negativeconsequenceswithinthesocietyinseveralways. Theprimaryconcernsincludevarious
+typesofdisinformation,butalsothepotentialtoamplifysterotypesandunwantedbiases[26]. Our
+improvementstothesamplequalitycanmaketheresultsevenmorebelievable,evenwhenusedfor
+disinformation. Thatsaid,wedonotunlockanynovelusesofthetechnology.
+E Licenses
+• EDM2models[19]: CreativeCommonsBY-NC-SA4.0license
+• DeepFloydIFmodels[41]: ModifiedMITlicense
+• StableDiffusionVAEmodel[34]: CreativeMLOpenRAIL++-Mlicense
+• InceptionV3model[43]: Apache2.0license
+• DINOv2model[29]: Apache2.0license
+• ImageNetdataset[6]: Customnon-commerciallicense
+16
