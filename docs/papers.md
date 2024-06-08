@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03496v1 |
-|title| Wings: Learning Multimodal LLMs without Text-only Forgetting |
-|authors| Yi-Kai ZhangShiyin LuYang LiYanqing MaQing-Guo ChenZhao XuWeihua LuoKaifu ZhangDe-Chuan ZhanHan-Jia Ye
-|links| http://arxiv.org/abs/2406.03496v1 |
-|updated| 2024-06-05 17:59:40 UTC |
-|summary| Multimodal large language models MLLMs initiated with a trained LLM firstalign images with text and then fine-tune on multimodal mixed inputs. Howeverthe MLLM catastrophically forgets the text-only instructions which do notinclude images and can be addressed within the initial LLM. In this paper wepresent Wings a novel MLLM that excels in both text-only dialogues andmultimodal comprehension. Analyzing MLLM attention in multimodal instructionsreveals that text-only forgetting is related to the attention shifts frompre-image to post-image text. From that we construct extra modules that act asthe boosted learner to compensate for the attention shift. The complementaryvisual and textual learners like wings on either side are connected inparallel within each layers attention block. Initially image and text inputsare aligned with visual learners operating alongside the main attentionbalancing focus on visual elements. Textual learners are later collaborativelyintegrated with attention-based routing to blend the outputs of the visual andtextual learners. We design the Low-Rank Residual Attention LoRRA toguarantee high efficiency for learners. Our experimental results demonstratethat Wings outperforms equally-scaled MLLMs in both text-only and visualquestion-answering tasks. On a newly constructed Interleaved Image-Text IITbenchmark Wings exhibits superior performance from text-only-rich tomultimodal-rich question-answering tasks. |
+|idx| 2406.04344v1 |
+|title| Verbalized Machine Learning: Revisiting Machine Learning with Language Models |
+|authors| Tim Z. XiaoRobert BamlerBernhard SchölkopfWeiyang Liu
+|links| http://arxiv.org/abs/2406.04344v1 |
+|updated| 2024-06-06 17:59:56 UTC |
+|summary| Motivated by the large progress made by large language models LLMs weintroduce the framework of verbalized machine learning VML. In contrast toconventional machine learning models that are typically optimized over acontinuous parameter space VML constrains the parameter space to behuman-interpretable natural language. Such a constraint leads to a newperspective of function approximation where an LLM with a text prompt can beviewed as a function parameterized by the text prompt. Guided by thisperspective we revisit classical machine learning problems such as regressionand classification and find that these problems can be solved by anLLM-parameterized learner and optimizer. The major advantages of VML include1 easy encoding of inductive bias: prior knowledge about the problem andhypothesis class can be encoded in natural language and fed into theLLM-parameterized learner 2 automatic model class selection: the optimizercan automatically select a concrete model class based on data and verbalizedprior knowledge and it can update the model class during training and 3interpretable learner updates: the LLM-parameterized optimizer can provideexplanations for why each learner update is performed. We conduct severalstudies to empirically evaluate the effectiveness of VML and hope that VML canserve as a stepping stone to stronger interpretability and trustworthiness inML. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03487v1 |
-|title| Analyzing LLM Behavior in Dialogue Summarization: Unveiling Circumstantial Hallucination Trends |
-|authors| Sanjana RamprasadElisa FerracaneZachary C. Lipton
-|links| http://arxiv.org/abs/2406.03487v1 |
-|updated| 2024-06-05 17:49:47 UTC |
-|summary| Recent advancements in large language models LLMs have considerablyadvanced the capabilities of summarization systems. However they continue toface concerns about hallucinations. While prior work has evaluated LLMsextensively in news domains most evaluation of dialogue summarization hasfocused on BART-based models leaving a gap in our understanding of theirfaithfulness. Our work benchmarks the faithfulness of LLMs for dialoguesummarization using human annotations and focusing on identifying andcategorizing span-level inconsistencies. Specifically we focus on twoprominent LLMs: GPT-4 and Alpaca-13B. Our evaluation reveals subtleties as towhat constitutes a hallucination: LLMs often generate plausible inferencessupported by circumstantial evidence in the conversation that lack directevidence a pattern that is less prevalent in older models. We propose arefined taxonomy of errors coining the category of Circumstantial Inferenceto bucket these LLM behaviors and release the dataset. Using our taxonomy wecompare the behavioral differences between LLMs and older fine-tuned models.Additionally we systematically assess the efficacy of automatic errordetection methods on LLM summaries and find that they struggle to detect thesenuanced errors. To address this we introduce two prompt-based approaches forfine-grained error detection that outperform existing metrics particularly foridentifying Circumstantial Inference. |
+|idx| 2406.04331v1 |
+|title| PaCE: Parsimonious Concept Engineering for Large Language Models |
+|authors| Jinqi LuoTianjiao DingKwan Ho Ryan ChanDarshan ThakerAditya ChattopadhyayChris Callison-BurchRené Vidal
+|links| http://arxiv.org/abs/2406.04331v1 |
+|updated| 2024-06-06 17:59:10 UTC |
+|summary| Large Language Models LLMs are being used for a wide variety of tasks.While they are capable of generating human-like responses they can alsoproduce undesirable output including potentially harmful information racist orsexist language and hallucinations. Alignment methods are designed to reducesuch undesirable output via techniques such as fine-tuning promptengineering and representation engineering. However existing methods faceseveral challenges: some require costly fine-tuning for every alignment tasksome do not adequately remove undesirable concepts failing alignment someremove benign concepts lowering the linguistic capabilities of LLMs. Toaddress these issues we propose Parsimonious Concept Engineering PaCE anovel activation engineering framework for alignment. First to sufficientlymodel the concepts we construct a large-scale concept dictionary in theactivation space in which each atom corresponds to a semantic concept. Thengiven any alignment task we instruct a concept partitioner to efficientlyannotate the concepts as benign or undesirable. Finally at inference time wedecompose the LLM activations along the concept dictionary via sparse codingto accurately represent the activation as a linear combination of the benignand undesirable components. By removing the latter ones from the activation wereorient the behavior of LLMs towards alignment goals. We conduct experimentson tasks such as response detoxification faithfulness enhancement andsentiment revising and show that PaCE achieves state-of-the-art alignmentperformance while maintaining linguistic capabilities. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03486v1 |
-|title| BIPED: Pedagogically Informed Tutoring System for ESL Education |
-|authors| Soonwoo KwonSojung KimMinju ParkSeunghyun LeeKyuseok Kim
-|links| http://arxiv.org/abs/2406.03486v1 |
-|updated| 2024-06-05 17:49:24 UTC |
-|summary| Large Language Models LLMs have a great potential to serve as readilyavailable and cost-efficient Conversational Intelligent Tutoring Systems CITSfor teaching L2 learners of English. Existing CITS however are designed toteach only simple concepts or lack the pedagogical depth necessary to addressdiverse learning strategies. To develop a more pedagogically informed CITScapable of teaching complex concepts we construct a BIlingualPEDagogically-informed Tutoring Dataset BIPED of one-on-one human-to-humanEnglish tutoring interactions. Through post-hoc analysis of the tutoringinteractions we come up with a lexicon of dialogue acts 34 tutor acts and 9student acts which we use to further annotate the collected dataset. Based ona two-step framework of first predicting the appropriate tutor act thengenerating the corresponding response we implemented two CITS models usingGPT-4 and SOLAR-KO respectively. We experimentally demonstrate that theimplemented models not only replicate the style of human teachers but alsoemploy diverse and contextually appropriate pedagogical strategies. |
+|idx| 2406.04313v1 |
+|title| Improving Alignment and Robustness with Short Circuiting |
+|authors| Andy ZouLong PhanJustin WangDerek DuenasMaxwell LinMaksym AndriushchenkoRowan WangZico KolterMatt FredriksonDan Hendrycks
+|links| http://arxiv.org/abs/2406.04313v1 |
+|updated| 2024-06-06 17:57:04 UTC |
+|summary| AI systems can take harmful actions and are highly vulnerable to adversarialattacks. We present an approach inspired by recent advances in representationengineering that short-circuits models as they respond with harmful outputs.Existing techniques aimed at improving alignment such as refusal training areoften bypassed. Techniques such as adversarial training try to plug these holesby countering specific attacks. As an alternative to refusal training andadversarial training short-circuiting directly controls the representationsthat are responsible for harmful outputs in the first place. Our technique canbe applied to both text-only and multimodal language models to prevent thegeneration of harmful outputs without sacrificing utility -- even in thepresence of powerful unseen attacks. Notably while adversarial robustness instandalone image recognition remains an open challenge short-circuiting allowsthe larger multimodal system to reliably withstand image hijacks that aim toproduce harmful content. Finally we extend our approach to AI agentsdemonstrating considerable reductions in the rate of harmful actions when theyare under attack. Our approach represents a significant step forward in thedevelopment of reliable safeguards to harmful behavior and adversarial attacks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03482v1 |
-|title| QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead |
-|authors| Amir ZandiehMajid DaliriInsu Han
-|links| http://arxiv.org/abs/2406.03482v1 |
-|updated| 2024-06-05 17:42:05 UTC |
-|summary| Serving LLMs requires substantial memory due to the storage requirements ofKey-Value KV embeddings in the KV cache which grows with sequence length. Aneffective approach to compress KV cache is quantization. However traditionalquantization methods face significant memory overhead due to the need to storequantization constants at least a zero point and a scale in full precisionper data block. Depending on the block size this overhead can add 1 or 2 bitsper quantized number. We introduce QJL a new quantization approach thatconsists of a Johnson-Lindenstrauss JL transform followed by sign-bitquantization. In contrast to existing methods QJL eliminates memory overheadsby removing the need for storing quantization constants. We propose anasymmetric estimator for the inner product of two vectors and demonstrate thatapplying QJL to one vector and a standard JL transform without quantization tothe other provides an unbiased estimator with minimal distortion. We havedeveloped an efficient implementation of the QJL sketch and its correspondinginner product estimator incorporating a lightweight CUDA kernel for optimizedcomputation. When applied across various LLMs and NLP tasks to quantize the KVcache to only 3 bits QJL demonstrates a more than fivefold reduction in KVcache memory usage without compromising accuracy all while achieving fasterruntime. Codes are available at urlhttps://github.com/amirzandieh/QJL. |
+|idx| 2406.04298v1 |
+|title| Measuring and Addressing Indexical Bias in Information Retrieval |
+|authors| Caleb ZiemsWilliam HeldJane Dwivedi-YuDiyi Yang
+|links| http://arxiv.org/abs/2406.04298v1 |
+|updated| 2024-06-06 17:42:37 UTC |
+|summary| Information Retrieval IR systems are designed to deliver relevant contentbut traditional systems may not optimize rankings for fairness neutrality orthe balance of ideas. Consequently IR can often introduce indexical biases orbiases in the positional order of documents. Although indexical bias candemonstrably affect peoples opinion voting patterns and other behaviorsthese issues remain understudied as the field lacks reliable metrics andprocedures for automatically measuring indexical bias. Towards this end weintroduce the PAIR framework which supports automatic bias audits for rankeddocuments or entire IR systems. After introducing DUO the firstgeneral-purpose automatic bias metric we run an extensive evaluation of 8 IRsystems on a new corpus of 32k synthetic and 4.7k natural documents with 4kqueries spanning 1.4k controversial issue topics. A human behavioral studyvalidates our approach showing that our bias metric can help predict when andhow indexical bias will shift a readers opinion. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03479v1 |
-|title| MODABS: Multi-Objective Learning for Dynamic Aspect-Based Summarization |
-|authors| Xiaobo GuoSoroush Vosoughi
-|links| http://arxiv.org/abs/2406.03479v1 |
-|updated| 2024-06-05 17:32:28 UTC |
-|summary| The rapid proliferation of online content necessitates effectivesummarization methods among which dynamic aspect-based summarization standsout. Unlike its traditional counterpart which assumes a fixed set of knownaspects this approach adapts to the varied aspects of the input text. Weintroduce a novel multi-objective learning framework employing aLongformer-Encoder-Decoder for this task. The framework optimizes aspect numberprediction minimizes disparity between generated and reference summaries foreach aspect and maximizes dissimilarity across aspect-specific summaries.Extensive experiments show our method significantly outperforms baselines onthree diverse datasets largely due to the effective alignment of generated andreference aspect counts without sacrificing single-aspect summarizationquality. |
+|idx| 2406.04292v1 |
+|title| VISTA: Visualized Text Embedding For Universal Multi-Modal Retrieval |
+|authors| Junjie ZhouZheng LiuShitao XiaoBo ZhaoYongping Xiong
+|links| http://arxiv.org/abs/2406.04292v1 |
+|updated| 2024-06-06 17:37:47 UTC |
+|summary| Multi-modal retrieval becomes increasingly popular in practice. However theexisting retrievers are mostly text-oriented which lack the capability toprocess visual information. Despite the presence of vision-language models likeCLIP the current methods are severely limited in representing the text-onlyand image-only data. In this work we present a new embedding model VISTA foruniversal multi-modal retrieval. Our work brings forth threefold technicalcontributions. Firstly we introduce a flexible architecture which extends apowerful text encoder with the image understanding capability by introducingvisual token embeddings. Secondly we develop two data generation strategieswhich bring high-quality composed image-text to facilitate the training of theembedding model. Thirdly we introduce a multi-stage training algorithm whichfirst aligns the visual token embedding with the text encoder using massiveweakly labeled data and then develops multi-modal representation capabilityusing the generated composed image-text data. In our experiments VISTAachieves superior performances across a variety of multi-modal retrieval tasksin both zero-shot and supervised settings. Our model data and source code areavailable at https://github.com/FlagOpen/FlagEmbedding. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03496v1 |
-|title| Wings: Learning Multimodal LLMs without Text-only Forgetting |
-|authors| Yi-Kai ZhangShiyin LuYang LiYanqing MaQing-Guo ChenZhao XuWeihua LuoKaifu ZhangDe-Chuan ZhanHan-Jia Ye
-|links| http://arxiv.org/abs/2406.03496v1 |
-|updated| 2024-06-05 17:59:40 UTC |
-|summary| Multimodal large language models MLLMs initiated with a trained LLM firstalign images with text and then fine-tune on multimodal mixed inputs. Howeverthe MLLM catastrophically forgets the text-only instructions which do notinclude images and can be addressed within the initial LLM. In this paper wepresent Wings a novel MLLM that excels in both text-only dialogues andmultimodal comprehension. Analyzing MLLM attention in multimodal instructionsreveals that text-only forgetting is related to the attention shifts frompre-image to post-image text. From that we construct extra modules that act asthe boosted learner to compensate for the attention shift. The complementaryvisual and textual learners like wings on either side are connected inparallel within each layers attention block. Initially image and text inputsare aligned with visual learners operating alongside the main attentionbalancing focus on visual elements. Textual learners are later collaborativelyintegrated with attention-based routing to blend the outputs of the visual andtextual learners. We design the Low-Rank Residual Attention LoRRA toguarantee high efficiency for learners. Our experimental results demonstratethat Wings outperforms equally-scaled MLLMs in both text-only and visualquestion-answering tasks. On a newly constructed Interleaved Image-Text IITbenchmark Wings exhibits superior performance from text-only-rich tomultimodal-rich question-answering tasks. |
+|idx| 2406.04338v1 |
+|title| Physics3D: Learning Physical Properties of 3D Gaussians via Video Diffusion |
+|authors| Fangfu LiuHanyang WangShunyu YaoShengjun ZhangJie ZhouYueqi Duan
+|links| http://arxiv.org/abs/2406.04338v1 |
+|updated| 2024-06-06 17:59:47 UTC |
+|summary| In recent years there has been rapid development in 3D generation modelsopening up new possibilities for applications such as simulating the dynamicmovements of 3D objects and customizing their behaviors. However current 3Dgenerative models tend to focus only on surface features such as color andshape neglecting the inherent physical properties that govern the behavior ofobjects in the real world. To accurately simulate physics-aligned dynamics itis essential to predict the physical properties of materials and incorporatethem into the behavior prediction process. Nonetheless predicting the diversematerials of real-world objects is still challenging due to the complex natureof their physical attributes. In this paper we propose textbfPhysics3D anovel method for learning various physical properties of 3D objects through avideo diffusion model. Our approach involves designing a highly generalizablephysical simulation system based on a viscoelastic material model whichenables us to simulate a wide range of materials with high-fidelitycapabilities. Moreover we distill the physical priors from a video diffusionmodel that contains more understanding of realistic object materials. Extensiveexperiments demonstrate the effectiveness of our method with both elastic andplastic materials. Physics3D shows great potential for bridging the gap betweenthe physical world and virtual neural space providing a better integration andapplication of realistic physical principles in virtual environments. Projectpage: https://liuff19.github.io/Physics3D. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03487v1 |
-|title| Analyzing LLM Behavior in Dialogue Summarization: Unveiling Circumstantial Hallucination Trends |
-|authors| Sanjana RamprasadElisa FerracaneZachary C. Lipton
-|links| http://arxiv.org/abs/2406.03487v1 |
-|updated| 2024-06-05 17:49:47 UTC |
-|summary| Recent advancements in large language models LLMs have considerablyadvanced the capabilities of summarization systems. However they continue toface concerns about hallucinations. While prior work has evaluated LLMsextensively in news domains most evaluation of dialogue summarization hasfocused on BART-based models leaving a gap in our understanding of theirfaithfulness. Our work benchmarks the faithfulness of LLMs for dialoguesummarization using human annotations and focusing on identifying andcategorizing span-level inconsistencies. Specifically we focus on twoprominent LLMs: GPT-4 and Alpaca-13B. Our evaluation reveals subtleties as towhat constitutes a hallucination: LLMs often generate plausible inferencessupported by circumstantial evidence in the conversation that lack directevidence a pattern that is less prevalent in older models. We propose arefined taxonomy of errors coining the category of Circumstantial Inferenceto bucket these LLM behaviors and release the dataset. Using our taxonomy wecompare the behavioral differences between LLMs and older fine-tuned models.Additionally we systematically assess the efficacy of automatic errordetection methods on LLM summaries and find that they struggle to detect thesenuanced errors. To address this we introduce two prompt-based approaches forfine-grained error detection that outperform existing metrics particularly foridentifying Circumstantial Inference. |
+|idx| 2406.04337v1 |
+|title| Coherent Zero-Shot Visual Instruction Generation |
+|authors| Quynh PhungSongwei GeJia-Bin Huang
+|links| http://arxiv.org/abs/2406.04337v1 |
+|updated| 2024-06-06 17:59:44 UTC |
+|summary| Despite the advances in text-to-image synthesis particularly with diffusionmodels generating visual instructions that require consistent representationand smooth state transitions of objects across sequential steps remains aformidable challenge. This paper introduces a simple training-free frameworkto tackle the issues capitalizing on the advancements in diffusion models andlarge language models LLMs. Our approach systematically integrates textcomprehension and image generation to ensure visual instructions are visuallyappealing and maintain consistency and accuracy throughout the instructionsequence. We validate the effectiveness by testing multi-step instructions andcomparing the text alignment and consistency with several baselines. Ourexperiments show that our approach can visualize coherent and visually pleasinginstructions |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03485v1 |
-|title| Highway Value Iteration Networks |
-|authors| Yuhui WangWeida LiFrancesco FaccioQingyuan WuJürgen Schmidhuber
-|links| http://arxiv.org/abs/2406.03485v1 |
-|updated| 2024-06-05 17:46:26 UTC |
-|summary| Value iteration networks VINs enable end-to-end learning for planning tasksby employing a differentiable planning module that approximates the valueiteration algorithm. However long-term planning remains a challenge becausetraining very deep VINs is difficult. To address this problem we embed highwayvalue iteration -- a recent algorithm designed to facilitate long-term creditassignment -- into the structure of VINs. This improvement augments theplanning module of the VIN with three additional components: 1 an aggregategate which constructs skip connections to improve information flow acrossmany layers 2 an exploration module crafted to increase the diversity ofinformation and gradient flow in spatial dimensions 3 a filter gatedesigned to ensure safe exploration. The resulting novel highway VIN can betrained effectively with hundreds of layers using standard backpropagation. Inlong-term planning tasks requiring hundreds of planning steps deep highwayVINs outperform both traditional VINs and several advanced very deep NNs. |
+|idx| 2406.04331v1 |
+|title| PaCE: Parsimonious Concept Engineering for Large Language Models |
+|authors| Jinqi LuoTianjiao DingKwan Ho Ryan ChanDarshan ThakerAditya ChattopadhyayChris Callison-BurchRené Vidal
+|links| http://arxiv.org/abs/2406.04331v1 |
+|updated| 2024-06-06 17:59:10 UTC |
+|summary| Large Language Models LLMs are being used for a wide variety of tasks.While they are capable of generating human-like responses they can alsoproduce undesirable output including potentially harmful information racist orsexist language and hallucinations. Alignment methods are designed to reducesuch undesirable output via techniques such as fine-tuning promptengineering and representation engineering. However existing methods faceseveral challenges: some require costly fine-tuning for every alignment tasksome do not adequately remove undesirable concepts failing alignment someremove benign concepts lowering the linguistic capabilities of LLMs. Toaddress these issues we propose Parsimonious Concept Engineering PaCE anovel activation engineering framework for alignment. First to sufficientlymodel the concepts we construct a large-scale concept dictionary in theactivation space in which each atom corresponds to a semantic concept. Thengiven any alignment task we instruct a concept partitioner to efficientlyannotate the concepts as benign or undesirable. Finally at inference time wedecompose the LLM activations along the concept dictionary via sparse codingto accurately represent the activation as a linear combination of the benignand undesirable components. By removing the latter ones from the activation wereorient the behavior of LLMs towards alignment goals. We conduct experimentson tasks such as response detoxification faithfulness enhancement andsentiment revising and show that PaCE achieves state-of-the-art alignmentperformance while maintaining linguistic capabilities. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03482v1 |
-|title| QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead |
-|authors| Amir ZandiehMajid DaliriInsu Han
-|links| http://arxiv.org/abs/2406.03482v1 |
-|updated| 2024-06-05 17:42:05 UTC |
-|summary| Serving LLMs requires substantial memory due to the storage requirements ofKey-Value KV embeddings in the KV cache which grows with sequence length. Aneffective approach to compress KV cache is quantization. However traditionalquantization methods face significant memory overhead due to the need to storequantization constants at least a zero point and a scale in full precisionper data block. Depending on the block size this overhead can add 1 or 2 bitsper quantized number. We introduce QJL a new quantization approach thatconsists of a Johnson-Lindenstrauss JL transform followed by sign-bitquantization. In contrast to existing methods QJL eliminates memory overheadsby removing the need for storing quantization constants. We propose anasymmetric estimator for the inner product of two vectors and demonstrate thatapplying QJL to one vector and a standard JL transform without quantization tothe other provides an unbiased estimator with minimal distortion. We havedeveloped an efficient implementation of the QJL sketch and its correspondinginner product estimator incorporating a lightweight CUDA kernel for optimizedcomputation. When applied across various LLMs and NLP tasks to quantize the KVcache to only 3 bits QJL demonstrates a more than fivefold reduction in KVcache memory usage without compromising accuracy all while achieving fasterruntime. Codes are available at urlhttps://github.com/amirzandieh/QJL. |
+|idx| 2406.04323v1 |
+|title| ATraDiff: Accelerating Online Reinforcement Learning with Imaginary Trajectories |
+|authors| Qianlan YangYu-Xiong Wang
+|links| http://arxiv.org/abs/2406.04323v1 |
+|updated| 2024-06-06 17:58:15 UTC |
+|summary| Training autonomous agents with sparse rewards is a long-standing problem inonline reinforcement learning RL due to low data efficiency. Prior workovercomes this challenge by extracting useful knowledge from offline dataoften accomplished through the learning of action distribution from offlinedata and utilizing the learned distribution to facilitate online RL. Howeversince the offline data are given and fixed the extracted knowledge isinherently limited making it difficult to generalize to new tasks. We proposea novel approach that leverages offline data to learn a generative diffusionmodel coined as Adaptive Trajectory Diffuser ATraDiff. This model generatessynthetic trajectories serving as a form of data augmentation and consequentlyenhancing the performance of online RL methods. The key strength of ourdiffuser lies in its adaptability allowing it to effectively handle varyingtrajectory lengths and mitigate distribution shifts between online and offlinedata. Because of its simplicity ATraDiff seamlessly integrates with a widespectrum of RL methods. Empirical evaluation shows that ATraDiff consistentlyachieves state-of-the-art performance across a variety of environments withparticularly pronounced improvements in complicated settings. Our code and demovideo are available at https://atradiff.github.io . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03450v1 |
-|title| What is the Best Way for ChatGPT to Translate Poetry? |
-|authors| Shanshan WangDerek F. WongJingming YaoLidia S. Chao
-|links| http://arxiv.org/abs/2406.03450v1 |
-|updated| 2024-06-05 16:48:26 UTC |
-|summary| Machine translation MT has historically faced significant challenges whenapplied to literary works particularly in the domain of poetry translation.The advent of Large Language Models such as ChatGPT holds potential forinnovation in this field. This study examines ChatGPTs capabilities inEnglish-Chinese poetry translation tasks utilizing targeted prompts and smallsample scenarios to ascertain optimal performance. Despite promising outcomesour analysis reveals persistent issues in the translations generated by ChatGPTthat warrant attention. To address these shortcomings we propose anExplanation-Assisted Poetry Machine Translation EAPMT method which leveragesmonolingual poetry explanation as a guiding information for the translationprocess. Furthermore we refine existing evaluation criteria to better suit thenuances of modern poetry translation. We engaged a panel of professional poetsfor assessments complemented evaluations by using GPT-4. The results from bothhuman and machine evaluations demonstrate that our EAPMT method outperformstraditional translation methods of ChatGPT and the existing online systems.This paper validates the efficacy of our method and contributes a novelperspective to machine-assisted literary translation. |
+|idx| 2406.04320v1 |
+|title| Chimera: Effectively Modeling Multivariate Time Series with 2-Dimensional State Space Models |
+|authors| Ali BehrouzMichele SantacatterinaRamin Zabih
+|links| http://arxiv.org/abs/2406.04320v1 |
+|updated| 2024-06-06 17:58:09 UTC |
+|summary| Modeling multivariate time series is a well-established problem with a widerange of applications from healthcare to financial markets. Traditional StateSpace Models SSMs are classical approaches for univariate time seriesmodeling due to their simplicity and expressive power to represent lineardependencies. They however have fundamentally limited expressive power tocapture non-linear dependencies are slow in practice and fail to model theinter-variate information flow. Despite recent attempts to improve theexpressive power of SSMs by using deep structured SSMs the existing methodsare either limited to univariate time series fail to model complex patternse.g. seasonal patterns fail to dynamically model the dependencies ofvariate and time dimensions and/or are input-independent. We present Chimerathat uses two input-dependent 2-D SSM heads with different discretizationprocesses to learn long-term progression and seasonal patterns. To improve theefficiency of complex 2D recurrence we present a fast training using a new2-dimensional parallel selective scan. We further present and discuss2-dimensional Mamba and Mamba-2 as the spacial cases of our 2D SSM. Ourexperimental evaluation shows the superior performance of Chimera on extensiveand diverse benchmarks including ECG and speech time series classificationlong-term and short-term time series forecasting and time series anomalydetection. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03496v1 |
-|title| Wings: Learning Multimodal LLMs without Text-only Forgetting |
-|authors| Yi-Kai ZhangShiyin LuYang LiYanqing MaQing-Guo ChenZhao XuWeihua LuoKaifu ZhangDe-Chuan ZhanHan-Jia Ye
-|links| http://arxiv.org/abs/2406.03496v1 |
-|updated| 2024-06-05 17:59:40 UTC |
-|summary| Multimodal large language models MLLMs initiated with a trained LLM firstalign images with text and then fine-tune on multimodal mixed inputs. Howeverthe MLLM catastrophically forgets the text-only instructions which do notinclude images and can be addressed within the initial LLM. In this paper wepresent Wings a novel MLLM that excels in both text-only dialogues andmultimodal comprehension. Analyzing MLLM attention in multimodal instructionsreveals that text-only forgetting is related to the attention shifts frompre-image to post-image text. From that we construct extra modules that act asthe boosted learner to compensate for the attention shift. The complementaryvisual and textual learners like wings on either side are connected inparallel within each layers attention block. Initially image and text inputsare aligned with visual learners operating alongside the main attentionbalancing focus on visual elements. Textual learners are later collaborativelyintegrated with attention-based routing to blend the outputs of the visual andtextual learners. We design the Low-Rank Residual Attention LoRRA toguarantee high efficiency for learners. Our experimental results demonstratethat Wings outperforms equally-scaled MLLMs in both text-only and visualquestion-answering tasks. On a newly constructed Interleaved Image-Text IITbenchmark Wings exhibits superior performance from text-only-rich tomultimodal-rich question-answering tasks. |
+|idx| 2406.04344v1 |
+|title| Verbalized Machine Learning: Revisiting Machine Learning with Language Models |
+|authors| Tim Z. XiaoRobert BamlerBernhard SchölkopfWeiyang Liu
+|links| http://arxiv.org/abs/2406.04344v1 |
+|updated| 2024-06-06 17:59:56 UTC |
+|summary| Motivated by the large progress made by large language models LLMs weintroduce the framework of verbalized machine learning VML. In contrast toconventional machine learning models that are typically optimized over acontinuous parameter space VML constrains the parameter space to behuman-interpretable natural language. Such a constraint leads to a newperspective of function approximation where an LLM with a text prompt can beviewed as a function parameterized by the text prompt. Guided by thisperspective we revisit classical machine learning problems such as regressionand classification and find that these problems can be solved by anLLM-parameterized learner and optimizer. The major advantages of VML include1 easy encoding of inductive bias: prior knowledge about the problem andhypothesis class can be encoded in natural language and fed into theLLM-parameterized learner 2 automatic model class selection: the optimizercan automatically select a concrete model class based on data and verbalizedprior knowledge and it can update the model class during training and 3interpretable learner updates: the LLM-parameterized optimizer can provideexplanations for why each learner update is performed. We conduct severalstudies to empirically evaluate the effectiveness of VML and hope that VML canserve as a stepping stone to stronger interpretability and trustworthiness inML. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03495v1 |
-|title| Grokking Modular Polynomials |
-|authors| Darshil DoshiTianyu HeAritra DasAndrey Gromov
-|links| http://arxiv.org/abs/2406.03495v1 |
-|updated| 2024-06-05 17:59:35 UTC |
-|summary| Neural networks readily learn a subset of the modular arithmetic tasks whilefailing to generalize on the rest. This limitation remains unmoved by thechoice of architecture and training strategies. On the other hand ananalytical solution for the weights of Multi-layer Perceptron MLP networksthat generalize on the modular addition task is known in the literature. Inthis work we i extend the class of analytical solutions to include modularmultiplication as well as modular addition with many terms. Additionally weshow that real networks trained on these datasets learn similar solutions upongeneralization grokking. ii We combine these expert solutions toconstruct networks that generalize on arbitrary modular polynomials. iii Wehypothesize a classification of modular polynomials into learnable andnon-learnable via neural networks training and provide experimental evidencesupporting our claims. |
+|idx| 2406.04336v1 |
+|title| On the Expressive Power of Spectral Invariant Graph Neural Networks |
+|authors| Bohang ZhangLingxiao ZhaoHaggai Maron
+|links| http://arxiv.org/abs/2406.04336v1 |
+|updated| 2024-06-06 17:59:41 UTC |
+|summary| Incorporating spectral information to enhance Graph Neural Networks GNNshas shown promising results but raises a fundamental challenge due to theinherent ambiguity of eigenvectors. Various architectures have been proposed toaddress this ambiguity referred to as spectral invariant architectures.Notable examples include GNNs and Graph Transformers that use spectraldistances spectral projection matrices or other invariant spectral features.However the potential expressive power of these spectral invariantarchitectures remains largely unclear. The goal of this work is to gain a deeptheoretical understanding of the expressive power obtainable when usingspectral features. We first introduce a unified message-passing framework fordesigning spectral invariant GNNs called Eigenspace Projection GNN EPNN. Acomprehensive analysis shows that EPNN essentially unifies all prior spectralinvariant architectures in that they are either strictly less expressive orequivalent to EPNN. A fine-grained expressiveness hierarchy among differentarchitectures is also established. On the other hand we prove that EPNN itselfis bounded by a recently proposed class of Subgraph GNNs implying that allthese spectral invariant architectures are strictly less expressive than 3-WL.Finally we discuss whether using spectral features can gain additionalexpressiveness when combined with more expressive GNNs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03494v1 |
-|title| Solving Poisson Equations using Neural Walk-on-Spheres |
-|authors| Hong Chul NamJulius BernerAnima Anandkumar
-|links| http://arxiv.org/abs/2406.03494v1 |
-|updated| 2024-06-05 17:59:22 UTC |
-|summary| We propose Neural Walk-on-Spheres NWoS a novel neural PDE solver for theefficient solution of high-dimensional Poisson equations. Leveraging stochasticrepresentations and Walk-on-Spheres methods we develop novel losses for neuralnetworks based on the recursive solution of Poisson equations on spheres insidethe domain. The resulting method is highly parallelizable and does not requirespatial gradients for the loss. We provide a comprehensive comparison againstcompeting methods based on PINNs the Deep Ritz method and backwardstochastic differential equations. In several challenging high-dimensionalnumerical examples we demonstrate the superiority of NWoS in accuracy speedand computational costs. Compared to commonly used PINNs our approach canreduce memory usage and errors by orders of magnitude. Furthermore we applyNWoS to problems in PDE-constrained optimization and molecular dynamics to showits efficiency in practical applications. |
+|idx| 2406.04332v1 |
+|title| Coarse-To-Fine Tensor Trains for Compact Visual Representations |
+|authors| Sebastian LoeschckeDan WangChristian Leth-EspensenSerge BelongieMichael J. KastoryanoSagie Benaim
+|links| http://arxiv.org/abs/2406.04332v1 |
+|updated| 2024-06-06 17:59:23 UTC |
+|summary| The ability to learn compact high-quality and easy-to-optimizerepresentations for visual data is paramount to many applications such as novelview synthesis and 3D reconstruction. Recent work has shown substantial successin using tensor networks to design such compact and high-qualityrepresentations. However the ability to optimize tensor-based representationsand in particular the highly compact tensor train representation is stilllacking. This has prevented practitioners from deploying the full potential oftensor networks for visual data. To this end we propose ProlongationUpsampling Tensor Train PuTT a novel method for learning tensor trainrepresentations in a coarse-to-fine manner. Our method involves the prolongingor upsampling of a learned tensor train representation creating a sequenceof coarse-to-fine tensor trains that are incrementally refined. We evaluateour representation along three axes: 1. compression 2. denoisingcapability and 3. image completion capability. To assess these axes weconsider the tasks of image fitting 3D fitting and novel view synthesiswhere our method shows an improved performance compared to state-of-the-arttensor-based methods. For full results see our project webpage:https://sebulo.github.io/PuTT_website/ |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03485v1 |
-|title| Highway Value Iteration Networks |
-|authors| Yuhui WangWeida LiFrancesco FaccioQingyuan WuJürgen Schmidhuber
-|links| http://arxiv.org/abs/2406.03485v1 |
-|updated| 2024-06-05 17:46:26 UTC |
-|summary| Value iteration networks VINs enable end-to-end learning for planning tasksby employing a differentiable planning module that approximates the valueiteration algorithm. However long-term planning remains a challenge becausetraining very deep VINs is difficult. To address this problem we embed highwayvalue iteration -- a recent algorithm designed to facilitate long-term creditassignment -- into the structure of VINs. This improvement augments theplanning module of the VIN with three additional components: 1 an aggregategate which constructs skip connections to improve information flow acrossmany layers 2 an exploration module crafted to increase the diversity ofinformation and gradient flow in spatial dimensions 3 a filter gatedesigned to ensure safe exploration. The resulting novel highway VIN can betrained effectively with hundreds of layers using standard backpropagation. Inlong-term planning tasks requiring hundreds of planning steps deep highwayVINs outperform both traditional VINs and several advanced very deep NNs. |
+|idx| 2406.04329v1 |
+|title| Simplified and Generalized Masked Diffusion for Discrete Data |
+|authors| Jiaxin ShiKehang HanZhe WangArnaud DoucetMichalis K. Titsias
+|links| http://arxiv.org/abs/2406.04329v1 |
+|updated| 2024-06-06 17:59:10 UTC |
+|summary| Masked or absorbing diffusion is actively explored as an alternative toautoregressive models for generative modeling of discrete data. Howeverexisting work in this area has been hindered by unnecessarily complex modelformulations and unclear relationships between different perspectives leadingto suboptimal parameterization training objectives and ad hoc adjustments tocounteract these issues. In this work we aim to provide a simple and generalframework that unlocks the full potential of masked diffusion models. We showthat the continuous-time variational objective of masked diffusion models is asimple weighted integral of cross-entropy losses. Our framework also enablestraining generalized masked diffusion models with state-dependent maskingschedules. When evaluated by perplexity our models trained on OpenWebTextsurpass prior diffusion language models at GPT-2 scale and demonstrate superiorperformance on 4 out of 5 zero-shot language modeling tasks. Furthermore ourmodels vastly outperform previous discrete diffusion models on pixel-levelimage modeling achieving 2.78CIFAR-10 and 3.42 ImageNet 64times64 bitsper dimension that are comparable or better than autoregressive models ofsimilar sizes. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03482v1 |
-|title| QJL: 1-Bit Quantized JL Transform for KV Cache Quantization with Zero Overhead |
-|authors| Amir ZandiehMajid DaliriInsu Han
-|links| http://arxiv.org/abs/2406.03482v1 |
-|updated| 2024-06-05 17:42:05 UTC |
-|summary| Serving LLMs requires substantial memory due to the storage requirements ofKey-Value KV embeddings in the KV cache which grows with sequence length. Aneffective approach to compress KV cache is quantization. However traditionalquantization methods face significant memory overhead due to the need to storequantization constants at least a zero point and a scale in full precisionper data block. Depending on the block size this overhead can add 1 or 2 bitsper quantized number. We introduce QJL a new quantization approach thatconsists of a Johnson-Lindenstrauss JL transform followed by sign-bitquantization. In contrast to existing methods QJL eliminates memory overheadsby removing the need for storing quantization constants. We propose anasymmetric estimator for the inner product of two vectors and demonstrate thatapplying QJL to one vector and a standard JL transform without quantization tothe other provides an unbiased estimator with minimal distortion. We havedeveloped an efficient implementation of the QJL sketch and its correspondinginner product estimator incorporating a lightweight CUDA kernel for optimizedcomputation. When applied across various LLMs and NLP tasks to quantize the KVcache to only 3 bits QJL demonstrates a more than fivefold reduction in KVcache memory usage without compromising accuracy all while achieving fasterruntime. Codes are available at urlhttps://github.com/amirzandieh/QJL. |
+|idx| 2406.04331v1 |
+|title| PaCE: Parsimonious Concept Engineering for Large Language Models |
+|authors| Jinqi LuoTianjiao DingKwan Ho Ryan ChanDarshan ThakerAditya ChattopadhyayChris Callison-BurchRené Vidal
+|links| http://arxiv.org/abs/2406.04331v1 |
+|updated| 2024-06-06 17:59:10 UTC |
+|summary| Large Language Models LLMs are being used for a wide variety of tasks.While they are capable of generating human-like responses they can alsoproduce undesirable output including potentially harmful information racist orsexist language and hallucinations. Alignment methods are designed to reducesuch undesirable output via techniques such as fine-tuning promptengineering and representation engineering. However existing methods faceseveral challenges: some require costly fine-tuning for every alignment tasksome do not adequately remove undesirable concepts failing alignment someremove benign concepts lowering the linguistic capabilities of LLMs. Toaddress these issues we propose Parsimonious Concept Engineering PaCE anovel activation engineering framework for alignment. First to sufficientlymodel the concepts we construct a large-scale concept dictionary in theactivation space in which each atom corresponds to a semantic concept. Thengiven any alignment task we instruct a concept partitioner to efficientlyannotate the concepts as benign or undesirable. Finally at inference time wedecompose the LLM activations along the concept dictionary via sparse codingto accurately represent the activation as a linear combination of the benignand undesirable components. By removing the latter ones from the activation wereorient the behavior of LLMs towards alignment goals. We conduct experimentson tasks such as response detoxification faithfulness enhancement andsentiment revising and show that PaCE achieves state-of-the-art alignmentperformance while maintaining linguistic capabilities. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03478v1 |
-|title| Convolutional Neural Networks and Vision Transformers for Fashion MNIST Classification: A Literature Review |
-|authors| Sonia BbouzidiGhazala HciniImen JdeyFadoua Drira
-|links| http://arxiv.org/abs/2406.03478v1 |
-|updated| 2024-06-05 17:32:22 UTC |
-|summary| Our review explores the comparative analysis between Convolutional NeuralNetworks CNNs and Vision Transformers ViTs in the domain of imageclassification with a particular focus on clothing classification within thee-commerce sector. Utilizing the Fashion MNIST dataset we delve into theunique attributes of CNNs and ViTs. While CNNs have long been the cornerstoneof image classification ViTs introduce an innovative self-attention mechanismenabling nuanced weighting of different input data components. Historicallytransformers have primarily been associated with Natural Language ProcessingNLP tasks. Through a comprehensive examination of existing literature ouraim is to unveil the distinctions between ViTs and CNNs in the context of imageclassification. Our analysis meticulously scrutinizes state-of-the-artmethodologies employing both architectures striving to identify the factorsinfluencing their performance. These factors encompass dataset characteristicsimage dimensions the number of target classes hardware infrastructure andthe specific architectures along with their respective top results. Our keygoal is to determine the most appropriate architecture between ViT and CNN forclassifying images in the Fashion MNIST dataset within the e-commerce industrywhile taking into account specific conditions and needs. We highlight theimportance of combining these two architectures with different forms to enhanceoverall performance. By uniting these architectures we can take advantage oftheir unique strengths which may lead to more precise and reliable models fore-commerce applications. CNNs are skilled at recognizing local patterns whileViTs are effective at grasping overall context making their combination apromising strategy for boosting image classification performance. |
+|idx| 2406.04345v1 |
+|title| Stereo-Depth Fusion through Virtual Pattern Projection |
+|authors| Luca BartolomeiMatteo PoggiFabio TosiAndrea ContiStefano Mattoccia
+|links| http://arxiv.org/abs/2406.04345v1 |
+|updated| 2024-06-06 17:59:58 UTC |
+|summary| This paper presents a novel general-purpose stereo and depth data fusionparadigm that mimics the active stereo principle by replacing the unreliablephysical pattern projector with a depth sensor. It works by projecting virtualpatterns consistent with the scene geometry onto the left and right imagesacquired by a conventional stereo camera using the sparse hints obtained froma depth sensor to facilitate the visual correspondence. Purposely any depthsensing device can be seamlessly plugged into our framework enabling thedeployment of a virtual active stereo setup in any possible environment andovercoming the severe limitations of physical pattern projection such as thelimited working range and environmental conditions. Exhaustive experiments onindoor and outdoor datasets featuring both long and close range includingthose providing raw unfiltered depth hints from off-the-shelf depth sensorshighlight the effectiveness of our approach in notably boosting the robustnessand accuracy of algorithms and deep stereo without any code modification andeven without re-training. Additionally we assess the performance of ourstrategy on active stereo evaluation datasets with conventional patternprojection. Indeed in all these scenarios our virtual pattern projectionparadigm achieves state-of-the-art performance. The source code is availableat: https://github.com/bartn8/vppstereo. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03474v1 |
-|title| AD-H: Autonomous Driving with Hierarchical Agents |
-|authors| Zaibin ZhangShiyu TangYuanhang ZhangTalas FuYifan WangYang LiuDong WangJing ShaoLijun WangHuchuan Lu
-|links| http://arxiv.org/abs/2406.03474v1 |
-|updated| 2024-06-05 17:25:46 UTC |
-|summary| Due to the impressive capabilities of multimodal large language modelsMLLMs recent works have focused on employing MLLM-based agents forautonomous driving in large-scale and dynamic environments. However prevalentapproaches often directly translate high-level instructions into low-levelvehicle control signals which deviates from the inherent language generationparadigm of MLLMs and fails to fully harness their emergent powers. As aresult the generalizability of these methods is highly restricted byautonomous driving datasets used during fine-tuning. To tackle this challengewe propose to connect high-level instructions and low-level control signalswith mid-level language-driven commands which are more fine-grained thanhigh-level instructions but more universal and explainable than controlsignals and thus can effectively bridge the gap in between. We implement thisidea through a hierarchical multi-agent driving system named AD-H including aMLLM planner for high-level reasoning and a lightweight controller forlow-level execution. The hierarchical design liberates the MLLM from low-levelcontrol signal decoding and therefore fully releases their emergent capabilityin high-level perception reasoning and planning. We build a new dataset withaction hierarchy annotations. Comprehensive closed-loop evaluations demonstrateseveral key advantages of our proposed AD-H system. First AD-H can notablyoutperform state-of-the-art methods in achieving exceptional drivingperformance even exhibiting self-correction capabilities during vehicleoperation a scenario not encountered in the training dataset. Second AD-Hdemonstrates superior generalization under long-horizon instructions and novelenvironmental conditions significantly surpassing current state-of-the-artmethods. We will make our data and code publicly accessible athttps://github.com/zhangzaibin/AD-H |
+|idx| 2406.04342v1 |
+|title| Learning 1D Causal Visual Representation with De-focus Attention Networks |
+|authors| Chenxin TaoXizhou ZhuShiqian SuLewei LuChangyao TianXuan LuoGao HuangHongsheng LiYu QiaoJie ZhouJifeng Dai
+|links| http://arxiv.org/abs/2406.04342v1 |
+|updated| 2024-06-06 17:59:56 UTC |
+|summary| Modality differences have led to the development of heterogeneousarchitectures for vision and language models. While images typically require 2Dnon-causal modeling texts utilize 1D causal modeling. This distinction posessignificant challenges in constructing unified multi-modal models. This paperexplores the feasibility of representing images using 1D causal modeling. Weidentify an over-focus issue in existing 1D causal vision models whereattention overly concentrates on a small proportion of visual tokens. The issueof over-focus hinders the models ability to extract diverse visual featuresand to receive effective gradients for optimization. To address this wepropose De-focus Attention Networks which employ learnable bandpass filters tocreate varied attention patterns. During training large and scheduled droppath rates and an auxiliary loss on globally pooled features for globalunderstanding tasks are introduced. These two strategies encourage the model toattend to a broader range of tokens and enhance network optimization. Extensiveexperiments validate the efficacy of our approach demonstrating that 1D causalvisual representation can perform comparably to 2D non-causal representation intasks such as global perception dense prediction and multi-modalunderstanding. Code is released athttps://github.com/OpenGVLab/De-focus-Attention-Networks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03461v1 |
-|title| Polarization Wavefront Lidar: Learning Large Scene Reconstruction from Polarized Wavefronts |
-|authors| Dominik ScheubleChenyang LeiSeung-Hwan BaekMario BijelicFelix Heide
-|links| http://arxiv.org/abs/2406.03461v1 |
-|updated| 2024-06-05 17:09:51 UTC |
-|summary| Lidar has become a cornerstone sensing modality for 3D vision especially forlarge outdoor scenarios and autonomous driving. Conventional lidar sensors arecapable of providing centimeter-accurate distance information by emitting laserpulses into a scene and measuring the time-of-flight ToF of the reflection.However the polarization of the received light that depends on the surfaceorientation and material properties is usually not considered. As such thepolarization modality has the potential to improve scene reconstruction beyonddistance measurements. In this work we introduce a novel long-rangepolarization wavefront lidar sensor PolLidar that modulates the polarizationof the emitted and received light. Departing from conventional lidar sensorsPolLidar allows access to the raw time-resolved polarimetric wavefronts. Weleverage polarimetric wavefronts to estimate normals distance and materialproperties in outdoor scenarios with a novel learned reconstruction method. Totrain and evaluate the method we introduce a simulated and real-worldlong-range dataset with paired raw lidar data ground truth distance andnormal maps. We find that the proposed method improves normal and distancereconstruction by 53 mean angular error and 41 mean absolute error comparedto existing shape-from-polarization SfP and ToF methods. Code and data areopen-sourced at https://light.princeton.edu/pollidar. |
+|idx| 2406.04343v1 |
+|title| Flash3D: Feed-Forward Generalisable 3D Scene Reconstruction from a Single Image |
+|authors| Stanislaw SzymanowiczEldar InsafutdinovChuanxia ZhengDylan CampbellJoão F. HenriquesChristian RupprechtAndrea Vedaldi
+|links| http://arxiv.org/abs/2406.04343v1 |
+|updated| 2024-06-06 17:59:56 UTC |
+|summary| In this paper we propose Flash3D a method for scene reconstruction andnovel view synthesis from a single image which is both very generalisable andefficient. For generalisability we start from a foundation model formonocular depth estimation and extend it to a full 3D shape and appearancereconstructor. For efficiency we base this extension on feed-forward GaussianSplatting. Specifically we predict a first layer of 3D Gaussians at thepredicted depth and then add additional layers of Gaussians that are offset inspace allowing the model to complete the reconstruction behind occlusions andtruncations. Flash3D is very efficient trainable on a single GPU in a day andthus accessible to most researchers. It achieves state-of-the-art results whentrained and tested on RealEstate10k. When transferred to unseen datasets likeNYU it outperforms competitors by a large margin. More impressively whentransferred to KITTI Flash3D achieves better PSNR than methods trainedspecifically on that dataset. In some instances it even outperforms recentmethods that use multiple views as input. Code models demo and more resultsare available at https://www.robots.ox.ac.uk/vgg/research/flash3d/. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03459v1 |
-|title| LW-DETR: A Transformer Replacement to YOLO for Real-Time Detection |
-|authors| Qiang ChenXiangbo SuXinyu ZhangJian WangJiahui ChenYunpeng ShenChuchu HanZiliang ChenWeixiang XuFanrong LiShan ZhangKun YaoErrui DingGang ZhangJingdong Wang
-|links| http://arxiv.org/abs/2406.03459v1 |
-|updated| 2024-06-05 17:07:24 UTC |
-|summary| In this paper we present a light-weight detection transformer LW-DETRwhich outperforms YOLOs for real-time object detection. The architecture is asimple stack of a ViT encoder a projector and a shallow DETR decoder. Ourapproach leverages recent advanced techniques such as training-effectivetechniques e.g. improved loss and pretraining and interleaved window andglobal attentions for reducing the ViT encoder complexity. We improve the ViTencoder by aggregating multi-level feature maps and the intermediate and finalfeature maps in the ViT encoder forming richer feature maps and introducewindow-major feature map organization for improving the efficiency ofinterleaved attention computation. Experimental results demonstrate that theproposed approach is superior over existing real-time detectors e.g. YOLO andits variants on COCO and other benchmark datasets. Code and models areavailable at https://github.com/Atten4Vis/LW-DETR. |
+|idx| 2406.04344v1 |
+|title| Verbalized Machine Learning: Revisiting Machine Learning with Language Models |
+|authors| Tim Z. XiaoRobert BamlerBernhard SchölkopfWeiyang Liu
+|links| http://arxiv.org/abs/2406.04344v1 |
+|updated| 2024-06-06 17:59:56 UTC |
+|summary| Motivated by the large progress made by large language models LLMs weintroduce the framework of verbalized machine learning VML. In contrast toconventional machine learning models that are typically optimized over acontinuous parameter space VML constrains the parameter space to behuman-interpretable natural language. Such a constraint leads to a newperspective of function approximation where an LLM with a text prompt can beviewed as a function parameterized by the text prompt. Guided by thisperspective we revisit classical machine learning problems such as regressionand classification and find that these problems can be solved by anLLM-parameterized learner and optimizer. The major advantages of VML include1 easy encoding of inductive bias: prior knowledge about the problem andhypothesis class can be encoded in natural language and fed into theLLM-parameterized learner 2 automatic model class selection: the optimizercan automatically select a concrete model class based on data and verbalizedprior knowledge and it can update the model class during training and 3interpretable learner updates: the LLM-parameterized optimizer can provideexplanations for why each learner update is performed. We conduct severalstudies to empirically evaluate the effectiveness of VML and hope that VML canserve as a stepping stone to stronger interpretability and trustworthiness inML. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03447v1 |
-|title| FILS: Self-Supervised Video Feature Prediction In Semantic Language Space |
-|authors| Mona AhmadianFrank GuerinAndrew Gilbert
-|links| http://arxiv.org/abs/2406.03447v1 |
-|updated| 2024-06-05 16:44:06 UTC |
-|summary| This paper demonstrates a self-supervised approach for learning semanticvideo representations. Recent vision studies show that a masking strategy forvision and natural language supervision has contributed to developingtransferable visual pretraining. Our goal is to achieve a more semantic videorepresentation by leveraging the text related to the video content during thepretraining in a fully self-supervised manner. To this end we present FILS anovel self-supervised video Feature prediction In semantic Language SpaceFILS. The vision model can capture valuable structured information bycorrectly predicting masked feature semantics in language space. It is learnedusing a patch-wise video-text contrastive strategy in which the textrepresentations act as prototypes for transforming vision features into alanguage space which are then used as targets for semantically meaningfulfeature prediction using our masked encoder-decoder structure. FILSdemonstrates remarkable transferability on downstream action recognition tasksachieving state-of-the-art on challenging egocentric datasets likeEpic-Kitchens Something-SomethingV2 Charades-Ego and EGTEA using ViT-Base.Our efficient method requires less computation and smaller batches compared toprevious works. |
+|idx| 2406.04341v1 |
+|title| Interpreting the Second-Order Effects of Neurons in CLIP |
+|authors| Yossi GandelsmanAlexei A. EfrosJacob Steinhardt
+|links| http://arxiv.org/abs/2406.04341v1 |
+|updated| 2024-06-06 17:59:52 UTC |
+|summary| We interpret the function of individual neurons in CLIP by automaticallydescribing them using text. Analyzing the direct effects i.e. the flow from aneuron through the residual stream to the output or the indirect effectsoverall contribution fails to capture the neurons function in CLIP.Therefore we present the second-order lens analyzing the effect flowingfrom a neuron through the later attention heads directly to the output. Wefind that these effects are highly selective: for each neuron the effect issignificant for 2 of the images. Moreover each effect can be approximated bya single direction in the text-image space of CLIP. We describe neurons bydecomposing these directions into sparse sets of text representations. The setsreveal polysemantic behavior - each neuron corresponds to multiple oftenunrelated concepts e.g. ships and cars. Exploiting this neuron polysemy wemass-produce semantic adversarial examples by generating images with conceptsspuriously correlated to the incorrect class. Additionally we use thesecond-order effects for zero-shot segmentation and attribute discovery inimages. Our results indicate that a scalable understanding of neurons can beused for model deception and for introducing new model capabilities. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03495v1 |
-|title| Grokking Modular Polynomials |
-|authors| Darshil DoshiTianyu HeAritra DasAndrey Gromov
-|links| http://arxiv.org/abs/2406.03495v1 |
-|updated| 2024-06-05 17:59:35 UTC |
-|summary| Neural networks readily learn a subset of the modular arithmetic tasks whilefailing to generalize on the rest. This limitation remains unmoved by thechoice of architecture and training strategies. On the other hand ananalytical solution for the weights of Multi-layer Perceptron MLP networksthat generalize on the modular addition task is known in the literature. Inthis work we i extend the class of analytical solutions to include modularmultiplication as well as modular addition with many terms. Additionally weshow that real networks trained on these datasets learn similar solutions upongeneralization grokking. ii We combine these expert solutions toconstruct networks that generalize on arbitrary modular polynomials. iii Wehypothesize a classification of modular polynomials into learnable andnon-learnable via neural networks training and provide experimental evidencesupporting our claims. |
+|idx| 2406.04329v1 |
+|title| Simplified and Generalized Masked Diffusion for Discrete Data |
+|authors| Jiaxin ShiKehang HanZhe WangArnaud DoucetMichalis K. Titsias
+|links| http://arxiv.org/abs/2406.04329v1 |
+|updated| 2024-06-06 17:59:10 UTC |
+|summary| Masked or absorbing diffusion is actively explored as an alternative toautoregressive models for generative modeling of discrete data. Howeverexisting work in this area has been hindered by unnecessarily complex modelformulations and unclear relationships between different perspectives leadingto suboptimal parameterization training objectives and ad hoc adjustments tocounteract these issues. In this work we aim to provide a simple and generalframework that unlocks the full potential of masked diffusion models. We showthat the continuous-time variational objective of masked diffusion models is asimple weighted integral of cross-entropy losses. Our framework also enablestraining generalized masked diffusion models with state-dependent maskingschedules. When evaluated by perplexity our models trained on OpenWebTextsurpass prior diffusion language models at GPT-2 scale and demonstrate superiorperformance on 4 out of 5 zero-shot language modeling tasks. Furthermore ourmodels vastly outperform previous discrete diffusion models on pixel-levelimage modeling achieving 2.78CIFAR-10 and 3.42 ImageNet 64times64 bitsper dimension that are comparable or better than autoregressive models ofsimilar sizes. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03494v1 |
-|title| Solving Poisson Equations using Neural Walk-on-Spheres |
-|authors| Hong Chul NamJulius BernerAnima Anandkumar
-|links| http://arxiv.org/abs/2406.03494v1 |
-|updated| 2024-06-05 17:59:22 UTC |
-|summary| We propose Neural Walk-on-Spheres NWoS a novel neural PDE solver for theefficient solution of high-dimensional Poisson equations. Leveraging stochasticrepresentations and Walk-on-Spheres methods we develop novel losses for neuralnetworks based on the recursive solution of Poisson equations on spheres insidethe domain. The resulting method is highly parallelizable and does not requirespatial gradients for the loss. We provide a comprehensive comparison againstcompeting methods based on PINNs the Deep Ritz method and backwardstochastic differential equations. In several challenging high-dimensionalnumerical examples we demonstrate the superiority of NWoS in accuracy speedand computational costs. Compared to commonly used PINNs our approach canreduce memory usage and errors by orders of magnitude. Furthermore we applyNWoS to problems in PDE-constrained optimization and molecular dynamics to showits efficiency in practical applications. |
+|idx| 2406.04317v1 |
+|title| Regularized KL-Divergence for Well-Defined Function-Space Variational Inference in Bayesian neural networks |
+|authors| Tristan CinquinRobert Bamler
+|links| http://arxiv.org/abs/2406.04317v1 |
+|updated| 2024-06-06 17:57:49 UTC |
+|summary| Bayesian neural networks BNN promise to combine the predictive performanceof neural networks with principled uncertainty modeling important forsafety-critical systems and decision making. However posterior uncertaintyestimates depend on the choice of prior and finding informative priors inweight-space has proven difficult. This has motivated variational inferenceVI methods that pose priors directly on the function generated by the BNNrather than on weights. In this paper we address a fundamental issue with suchfunction-space VI approaches pointed out by Burt et al. 2020 who showed thatthe objective function ELBO is negative infinite for most priors of interest.Our solution builds on generalized VI Knoblauch et al. 2019 with theregularized KL divergence Quang 2019 and is to the best of our knowledgethe first well-defined variational objective for function-space inference inBNNs with Gaussian process GP priors. Experiments show that our methodincorporates the properties specified by the GP prior on synthetic and smallreal-world data sets and provides competitive uncertainty estimates forregression classification and out-of-distribution detection compared to BNNbaselines with both function and weight-space priors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03463v1 |
-|title| Gaussian Copula Models for Nonignorable Missing Data Using Auxiliary Marginal Quantiles |
-|authors| Joseph FeldmanJerome P. ReiterDaniel R. Kowal
-|links| http://arxiv.org/abs/2406.03463v1 |
-|updated| 2024-06-05 17:11:59 UTC |
-|summary| We present an approach for modeling and imputation of nonignorable missingdata under Gaussian copulas. The analyst posits a set of quantiles of themarginal distributions of the study variables for example reflectinginformation from external data sources or elicited expert opinion. When thesequantiles are accurately specified we prove it is possible to consistentlyestimate the copula correlation and perform multiple imputation in the presenceof nonignorable missing data. We develop algorithms for estimation andimputation that are computationally efficient which we evaluate in simulationstudies of multiple imputation inferences. We apply the model to analyzeassociations between lead exposure levels and end-of-grade test scores for170000 students in North Carolina. These measurements are not missing atrandom as children deemed at-risk for high lead exposure are more likely to bemeasured. We construct plausible marginal quantiles for lead exposure usingnational statistics provided by the Centers for Disease Control and Prevention.Complete cases and missing at random analyses appear to underestimate therelationships between certain variables and end-of-grade test scores whilemultiple imputation inferences under our model support stronger adverseassociations between lead exposure and educational outcomes. |
+|idx| 2406.04308v1 |
+|title| Approximation-Aware Bayesian Optimization |
+|authors| Natalie MausKyurae KimGeoff PleissDavid ErikssonJohn P. CunninghamJacob R. Gardner
+|links| http://arxiv.org/abs/2406.04308v1 |
+|updated| 2024-06-06 17:55:02 UTC |
+|summary| High-dimensional Bayesian optimization BO tasks such as molecular designoften require 10000 function evaluations before obtaining meaningful results.While methods like sparse variational Gaussian processes SVGPs reducecomputational requirements in these settings the underlying approximationsresult in suboptimal data acquisitions that slow the progress of optimization.In this paper we modify SVGPs to better align with the goals of BO: targetinginformed data acquisition rather than global posterior fidelity. Using theframework of utility-calibrated variational inference we unify GPapproximation and data acquisition into a joint optimization problem therebyensuring optimal decisions under a limited computational budget. Our approachcan be used with any decision-theoretic acquisition function and is compatiblewith trust region methods like TuRBO. We derive efficient joint objectives forthe expected improvement and knowledge gradient acquisition functions in boththe standard and batch BO settings. Our approach outperforms standard SVGPs onhigh-dimensional benchmark tasks in control and molecular design. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03434v1 |
-|title| Unified PAC-Bayesian Study of Pessimism for Offline Policy Learning with Regularized Importance Sampling |
-|authors| Imad AoualiVictor-Emmanuel BrunelDavid RohdeAnna Korba
-|links| http://arxiv.org/abs/2406.03434v1 |
-|updated| 2024-06-05 16:32:14 UTC |
-|summary| Off-policy learning OPL often involves minimizing a risk estimator based onimportance weighting to correct bias from the logging policy used to collectdata. However this method can produce an estimator with a high variance. Acommon solution is to regularize the importance weights and learn the policy byminimizing an estimator with penalties derived from generalization boundsspecific to the estimator. This approach known as pessimism has gained recentattention but lacks a unified framework for analysis. To address this gap weintroduce a comprehensive PAC-Bayesian framework to examine pessimism withregularized importance weighting. We derive a tractable PAC-Bayesiangeneralization bound that universally applies to common importance weightregularizations enabling their comparison within a single framework. Ourempirical results challenge common understanding demonstrating theeffectiveness of standard IW regularization techniques. |
+|idx| 2406.04291v1 |
+|title| Stratified Prediction-Powered Inference for Hybrid Language Model Evaluation |
+|authors| Adam FischJoshua MaynezR. Alex HoferBhuwan DhingraAmir GlobersonWilliam W. Cohen
+|links| http://arxiv.org/abs/2406.04291v1 |
+|updated| 2024-06-06 17:37:39 UTC |
+|summary| Prediction-powered inference PPI is a method that improves statisticalestimates based on limited human-labeled data. PPI achieves this by combiningsmall amounts of human-labeled data with larger amounts of data labeled by areasonably accurate -- but potentially biased -- automatic system in a waythat results in tighter confidence intervals for certain parameters of intereste.g. the mean performance of a language model. In this paper we propose amethod called Stratified Prediction-Powered Inference StratPPI in which weshow that the basic PPI estimates can be considerably improved by employingsimple data stratification strategies. Without making any assumptions on theunderlying automatic labeling system or data distribution we derive analgorithm for computing provably valid confidence intervals for populationparameters such as averages that is based on stratified sampling. Inparticular we show both theoretically and empirically that with appropriatechoices of stratification and sample allocation our approach can providesubstantially tighter confidence intervals than unstratified approaches.Specifically StratPPI is expected to improve in cases where the performance ofthe autorater varies across different conditional distributions of the targetdata. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03396v1 |
-|title| Noisy Data Visualization using Functional Data Analysis |
-|authors| Haozhe ChenAndres Felipe Duque CorreaGuy WolfKevin R. Moon
-|links| http://arxiv.org/abs/2406.03396v1 |
-|updated| 2024-06-05 15:53:25 UTC |
-|summary| Data visualization via dimensionality reduction is an important tool inexploratory data analysis. However when the data are noisy many existingmethods fail to capture the underlying structure of the data. The method calledEmpirical Intrinsic Geometry EIG was previously proposed for performingdimensionality reduction on high dimensional dynamical processes whiletheoretically eliminating all noise. However implementing EIG in practicerequires the construction of high-dimensional histograms which suffer from thecurse of dimensionality. Here we propose a new data visualization method calledFunctional Information Geometry FIG for dynamical processes that adapts theEIG framework while using approaches from functional data analysis to mitigatethe curse of dimensionality. We experimentally demonstrate that the resultingmethod outperforms a variant of EIG designed for visualization in terms ofcapturing the true structure hyperparameter robustness and computationalspeed. We then use our method to visualize EEG brain measurements of sleepactivity. |
+|idx| 2406.04250v1 |
+|title| Online learning of quantum processes |
+|authors| Asad RazaMatthias C. CaroJens EisertSumeet Khatri
+|links| http://arxiv.org/abs/2406.04250v1 |
+|updated| 2024-06-06 16:54:20 UTC |
+|summary| Among recent insights into learning quantum states online learning andshadow tomography procedures are notable for their ability to accuratelypredict expectation values even of adaptively chosen observables. In contrastto the state case quantum process learning tasks with a similarly adaptivenature have received little attention. In this work we investigate onlinelearning tasks for quantum processes. Whereas online learning is infeasible forgeneral quantum channels we show that channels of bounded gate complexity aswell as Pauli channels can be online learned in the regret and mistake-boundedmodels of online learning. In fact we can online learn probabilistic mixturesof any exponentially large set of known channels. We also provide a provablysample-efficient shadow tomography procedure for Pauli channels. Our resultsextend beyond quantum channels to non-Markovian multi-time processes withfavorable regret and mistake bounds as well as a shadow tomography procedure.We complement our online learning upper bounds with mistake as well ascomputational lower bounds. On the technical side we make use of themultiplicative weights update algorithm classical adaptive data analysis andBell sampling as well as tools from the theory of quantum combs for multi-timequantum processes. Our work initiates a study of online learning for classes ofquantum channels and more generally non-Markovian quantum processes. Giventhe importance of online learning for state shadow tomography this may serveas a step towards quantum channel variants of adaptive shadow tomography. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03423v1 |
-|title| Improving Users' Passwords with DPAR: a Data-driven Password Recommendation System |
-|authors| Assaf MoragLiron DavidEran TochAvishai Wool
-|links| http://arxiv.org/abs/2406.03423v1 |
-|updated| 2024-06-05 16:19:24 UTC |
-|summary| Passwords are the primary authentication method online but even withpassword policies and meters users still find it hard to create strong andmemorable passwords. In this paper we propose DPAR: a Data-driven PAsswordRecommendation system based on a dataset of 905 million leaked passwords. DPARgenerates password recommendations by analyzing the users given password andsuggesting specific tweaks that would make it stronger while still keeping itmemorable and similar to the original password. We conducted two studies toevaluate our approach: verifying the memorability of generated passwordsn317 and evaluating the strength and recall of DPAR recommendations againstpassword meters n441. In a randomized experiment we show that DPARincreased password strength by 34.8 bits on average and did not significantlyaffect the ability to recall their password. Furthermore 36.6 of usersaccepted DPARs recommendations verbatim. We discuss our findings and theirimplications for enhancing password management with recommendation systems. |
+|idx| 2406.04278v1 |
+|title| Characterizing Similarities and Divergences in Conversational Tones in Humans and LLMs by Sampling with People |
+|authors| Dun-Ming HuangPol Van RijnIlia SucholutskyRaja MarjiehNori Jacoby
+|links| http://arxiv.org/abs/2406.04278v1 |
+|updated| 2024-06-06 17:26:00 UTC |
+|summary| Conversational tones -- the manners and attitudes in which speakerscommunicate -- are essential to effective communication. Amidst the increasingpopularization of Large Language Models LLMs over recent years it becomesnecessary to characterize the divergences in their conversational tonesrelative to humans. However existing investigations of conversationalmodalities rely on pre-existing taxonomies or text corpora which suffer fromexperimenter bias and may not be representative of real-world distributions forthe studies psycholinguistic domains. Inspired by methods from cognitivescience we propose an iterative method for simultaneously elicitingconversational tones and sentences where participants alternate between twotasks: 1 one participant identifies the tone of a given sentence and 2 adifferent participant generates a sentence based on that tone. We run 100iterations of this process with human participants and GPT-4 then obtain adataset of sentences and frequent conversational tones. In an additionalexperiment humans and GPT-4 annotated all sentences with all tones. With datafrom 1339 human participants 33370 human judgments and 29900 GPT-4queries we show how our approach can be used to create an interpretablegeometric representation of relations between conversational tones in humansand GPT-4. This work demonstrates how combining ideas from machine learning andcognitive science can address challenges in human-computer interactions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03415v1 |
-|title| RemixTape: Enriching Narratives about Metrics with Semantic Alignment and Contextual Recommendation |
-|authors| Matthew BrehmerMargaret DrouhardArjun Srinivasan
-|links| http://arxiv.org/abs/2406.03415v1 |
-|updated| 2024-06-05 16:11:15 UTC |
-|summary| The temporal dynamics of quantitative metrics or key performance indicatorsKPIs are central to decision making within enterprise organizations.Recently major business intelligence providers have introduced newinfrastructure for defining sharing and monitoring metric values. Howeverthese values are often presented in isolation and appropriate context is seldomexternalized. In this design study we present RemixTape an application forconstructing structured narratives around metrics. With design imperativesgrounded in an formative interview study RemixTape provides a hierarchicalcanvas for collecting and coordinating sequences of line chart representationsof metrics along with the ability to externalize situational context aroundthem. RemixTape incorporates affordances to semantically align and annotatejuxtaposed charts and text as well as recommendations of complementary chartsbased on metrics already present on the canvas. We evaluated RemixTape in auser study in which six enterprise data professionals reproduced and extendedpartial narratives with participants appreciating RemixTape as a novelalternative to dashboards galleries and slide presentations for supportingconversations about metrics. We conclude with a reflection on how aspects ofRemixTape could generalize beyond metrics with a call to define a conceptualfoundation for remixing in the context of visualization. |
+|idx| 2406.04138v1 |
+|title| The 3D-PC: a benchmark for visual perspective taking in humans and machines |
+|authors| Drew LinsleyPeisen ZhouAlekh Karkada AshokAkash NagarajGaurav GaonkarFrancis E LewisZygmunt PizloThomas Serre
+|links| http://arxiv.org/abs/2406.04138v1 |
+|updated| 2024-06-06 14:59:39 UTC |
+|summary| Visual perspective taking VPT is the ability to perceive and reason aboutthe perspectives of others. It is an essential feature of human intelligencewhich develops over the first decade of life and requires an ability to processthe 3D structure of visual scenes. A growing number of reports have indicatedthat deep neural networks DNNs become capable of analyzing 3D scenes aftertraining on large image datasets. We investigated if this emergent ability for3D analysis in DNNs is sufficient for VPT with the 3D perception challenge3D-PC: a novel benchmark for 3D perception in humans and DNNs. The 3D-PC iscomprised of three 3D-analysis tasks posed within natural scene images: 1. asimple test of object depth order 2. a basic VPT task VPT-basic and 3.another version of VPT VPT-Strategy designed to limit the effectiveness ofshortcut visual strategies. We tested human participants N33 and linearlyprobed or text-prompted over 300 DNNs on the challenge and found that nearlyall of the DNNs approached or exceeded human accuracy in analyzing object depthorder. Surprisingly DNN accuracy on this task correlated with their objectrecognition performance. In contrast there was an extraordinary gap betweenDNNs and humans on VPT-basic. Humans were nearly perfect whereas most DNNswere near chance. Fine-tuning DNNs on VPT-basic brought them close to humanperformance but they unlike humans dropped back to chance when tested onVPT-perturb. Our challenge demonstrates that the training routines andarchitectures of todays DNNs are well-suited for learning basic 3D propertiesof scenes and objects but are ill-suited for reasoning about these propertieslike humans do. We release our 3D-PC datasets and code to help bridge this gapin 3D perception between humans and machines. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03388v1 |
-|title| SelfReDepth: Self-Supervised Real-Time Depth Restoration for Consumer-Grade Sensors |
-|authors| Alexandre DuarteFrancisco FernandesJoão M. PereiraCatarina MoreiraJacinto C. NascimentoJoaquim Jorge
-|links| http://arxiv.org/abs/2406.03388v1 |
-|updated| 2024-06-05 15:38:02 UTC |
-|summary| Depth maps produced by consumer-grade sensors suffer from inaccuratemeasurements and missing data from either system or scene-specific sources.Data-driven denoising algorithms can mitigate such problems. However theyrequire vast amounts of ground truth depth data. Recent research has tackledthis limitation using self-supervised learning techniques but it requiresmultiple RGB-D sensors. Moreover most existing approaches focus on denoisingsingle isolated depth maps or specific subjects of interest highlighting aneed for methods to effectively denoise depth maps in real-time dynamicenvironments. This paper extends state-of-the-art approaches fordepth-denoising commodity depth devices proposing SelfReDepth aself-supervised deep learning technique for depth restoration via denoisingand hole-filling by inpainting full-depth maps captured with RGB-D sensors. Thealgorithm targets depth data in video streams utilizing multiple sequentialdepth frames coupled with color data to achieve high-quality depth videos withtemporal coherence. Finally SelfReDepth is designed to be compatible withvarious RGB-D sensors and usable in real-time scenarios as a pre-processingstep before applying other depth-dependent algorithms. Our results demonstrateour approachs real-time performance on real-world datasets. They show that itoutperforms state-of-the-art denoising and restoration performance at over30fps on Commercial Depth Cameras with potential benefits for augmented andmixed-reality applications. |
+|idx| 2406.04058v1 |
+|title| Watching Popular Musicians Learn by Ear: A Hypothesis-Generating Study of Human-Recording Interactions in YouTube Videos |
+|authors| Christopher LiscioDaniel G. Brown
+|links| http://arxiv.org/abs/2406.04058v1 |
+|updated| 2024-06-06 13:25:42 UTC |
+|summary| Popular musicians often learn music by ear. It is unclear what roletechnology plays for those with experience at this task. In search ofopportunities for the development of novel human-recording interactions weanalyze 18 YouTube videos depicting real-world examples of by-ear learning anddiscuss why during this preliminary phase of research online videos areappropriate data. From our observations we generate hypotheses that can informfuture work. For example a musicians scope of learning may influence whattechnological interactions would help them they could benefit from tools thataccommodate their working memory and transcription does not appear to play akey role in ear learning. Based on these findings we pose a number of researchquestions and discuss their methodological considerations to guide futurestudy. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03317v1 |
-|title| Save It for the "Hot" Day: An LLM-Empowered Visual Analytics System for Heat Risk Management |
-|authors| Haobo LiWong Kam-KwaiYan LuoJuntong ChenChengzhong LiuYaxuan ZhangAlexis Kai Hon LauHuamin QuDongyu Liu
-|links| http://arxiv.org/abs/2406.03317v1 |
-|updated| 2024-06-05 14:29:44 UTC |
-|summary| The escalating frequency and intensity of heat-related climate eventsparticularly heatwaves emphasize the pressing need for advanced heat riskmanagement strategies. Current approaches primarily relying on numericalmodels face challenges in spatial-temporal resolution and in capturing thedynamic interplay of environmental social and behavioral factors affectingheat risks. This has led to difficulties in translating risk assessments intoeffective mitigation actions. Recognizing these problems we introduce a novelapproach leveraging the burgeoning capabilities of Large Language Models LLMsto extract rich and contextual insights from news reports. We hence propose anLLM-empowered visual analytics system Havior that integrates the precisedata-driven insights of numerical models with nuanced news report information.This hybrid approach enables a more comprehensive assessment of heat risks andbetter identification assessment and mitigation of heat-related threats. Thesystem incorporates novel visualization designs such as thermoglyph and newsglyph enhancing intuitive understanding and analysis of heat risks. Theintegration of LLM-based techniques also enables advanced information retrievaland semantic knowledge extraction that can be guided by experts analyticsneeds. Our case studies on two cities that faced significant heatwave eventsand interviews with five experts have demonstrated the usefulness of our systemin providing in-depth and actionable insights for heat risk management. |
+|idx| 2406.03994v1 |
+|title| Exploring Topic Modelling of User Reviews as a Monitoring Mechanism for Emergent Issues Within Social VR Communities |
+|authors| Angelo SinghJoseph O'Hagan
+|links| http://arxiv.org/abs/2406.03994v1 |
+|updated| 2024-06-06 12:15:39 UTC |
+|summary| Users of social virtual reality VR platforms often use user reviews todocument incidents of witnessed and/or experienced user harassment. However atpresent research has yet to be explore utilising this data as a monitoringmechanism to identify emergent issues within social VR communities. Such asystem would be of much benefit to developers and researchers as it wouldenable the automatic identification of emergent issues as they occur provide ameans of longitudinally analysing harassment and reduce the reliance onalternative high cost monitoring methodologies e.g. observation or interviewstudies. To contribute towards the development of such a system we collectedapproximately 40000 Rec Room user reviews from the Steam storefront. We thenanalysed our datasets sentiment word/term frequencies and conducted a topicmodelling analysis of the negative reviews detected in our dataset. We reportour approach was capable of longitudinally monitoring changes in reviewsentiment and identifying high level themes related to types of harassmentknown to occur in social VR platforms. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03245v1 |
-|title| Reconfiguring Participatory Design to Resist AI Realism |
-|authors| Aakash Gautam
-|links| http://dx.doi.org/10.1145/3661455.3669867 |
-|updated| 2024-06-05 13:21:46 UTC |
-|summary| The growing trend of artificial intelligence AI as a solution to social andtechnical problems reinforces AI Realism -- the belief that AI is an inevitableand natural order. In response this paper argues that participatory designPD with its focus on democratic values and processes can play a role inquestioning and resisting AI Realism. I examine three concerning aspects of AIRealism: the facade of democratization that lacks true empowerment demands forhuman adaptability in contrast to AI systems inflexibility and theobfuscation of essential human labor enabling the AI system. I proposeresisting AI Realism by reconfiguring PD to continue engaging withvalue-centered visions increasing its exploration of non-AI alternatives andmaking the essential human labor underpinning AI systems visible. I position PDas a means to generate friction against AI Realism and open space foralternative futures centered on human needs and values. |
+|idx| 2406.03843v1 |
+|title| POEM: Interactive Prompt Optimization for Enhancing Multimodal Reasoning of Large Language Models |
+|authors| Jianben HeXingbo WangShiyi LiuGuande WuClaudio SilvaHuamin Qu
+|links| http://arxiv.org/abs/2406.03843v1 |
+|updated| 2024-06-06 08:21:30 UTC |
+|summary| Large language models LLMs have exhibited impressive abilities formultimodal content comprehension and reasoning with proper prompting in zero-or few-shot settings. Despite the proliferation of interactive systemsdeveloped to support prompt engineering for LLMs across various tasks mosthave primarily focused on textual or visual inputs thus neglecting the complexinterplay between modalities within multimodal inputs. This oversight hindersthe development of effective prompts that guide model multimodal reasoningprocesses by fully exploiting the rich context provided by multiple modalities.In this paper we present POEM a visual analytics system to facilitateefficient prompt engineering for enhancing the multimodal reasoning performanceof LLMs. The system enables users to explore the interaction patterns acrossmodalities at varying levels of detail for a comprehensive understanding of themultimodal knowledge elicited by various prompts. Through diverserecommendations of demonstration examples and instructional principles POEMsupports users in iteratively crafting and refining prompts to better align andenhance model knowledge with human insights. The effectiveness and efficiencyof our system are validated through two case studies and interviews withexperts. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.03086v1 |
-|title| Task-Oriented Wireless Communications for Collaborative Perception in Intelligent Unmanned Systems |
-|authors| Sheng ZhouYukuan JiaRuiqing MaoZhaojun NanYuxuan SunZhisheng Niu
-|links| http://arxiv.org/abs/2406.03086v1 |
-|updated| 2024-06-05 09:22:19 UTC |
-|summary| Collaborative Perception CP has shown great potential to achieve moreholistic and reliable environmental perception in intelligent unmanned systemsIUSs. However implementing CP still faces key challenges due to thecharacteristics of the CP task and the dynamics of wireless channels. In thisarticle a task-oriented wireless communication framework is proposed tojointly optimize the communication scheme and the CP procedure. We firstpropose channel-adaptive compression and robust fusion approaches to extractand exploit the most valuable semantic information under wireless communicationconstraints. We then propose a task-oriented distributed scheduling algorithmto identify the best collaborators for CP under dynamic environments. The mainidea is learning while scheduling where the collaboration utility iseffectively learned with low computation and communication overhead. Casestudies are carried out in connected autonomous driving scenarios to verify theproposed framework. Finally we identify several future research directions. |
+|idx| 2406.04231v1 |
+|title| Quantifying Misalignment Between Agents |
+|authors| Aidan KieransAvijit GhoshHananel HazanShiri Dori-Hacohen
+|links| http://arxiv.org/abs/2406.04231v1 |
+|updated| 2024-06-06 16:31:22 UTC |
+|summary| Growing concerns about the AI alignment problem have emerged in recent yearswith previous work focusing mainly on 1 qualitative descriptions of thealignment problem 2 attempting to align AI actions with human interests byfocusing on value specification and learning and/or 3 focusing on a singleagent or on humanity as a singular unit. Recent work in sociotechnical AIalignment has made some progress in defining alignment inclusively but thefield as a whole still lacks a systematic understanding of how to specifydescribe and analyze misalignment among entities which may include individualhumans AI agents and complex compositional entities such as corporationsnation-states and so forth. Previous work on controversy in computationalsocial science offers a mathematical model of contention among populations ofhumans. In this paper we adapt this contention model to the alignmentproblem and show how misalignment can vary depending on the population ofagents human or otherwise being observed the domain in question and theagents probability-weighted preferences between possible outcomes. Our modeldeparts from value specification approaches and focuses instead on the morassof complex interlocking sometimes contradictory goals that agents may have inpractice. We apply our model by analyzing several case studies ranging fromsocial media moderation to autonomous vehicle behavior. By applying our modelwith appropriately representative value data AI engineers can ensure thattheir systems learn values maximally aligned with diverse human interests. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.02890v1 |
-|title| Representation Learning For Efficient Deep Multi-Agent Reinforcement Learning |
-|authors| Dom HuhPrasant Mohapatra
-|links| http://arxiv.org/abs/2406.02890v1 |
-|updated| 2024-06-05 03:11:44 UTC |
-|summary| Sample efficiency remains a key challenge in multi-agent reinforcementlearning MARL. A promising approach is to learn a meaningful latentrepresentation space through auxiliary learning objectives alongside the MARLobjective to aid in learning a successful control policy. In our work wepresent MAPO-LSO Multi-Agent Policy Optimization with Latent SpaceOptimization which applies a form of comprehensive representation learningdevised to supplement MARL training. Specifically MAPO-LSO proposes amulti-agent extension of transition dynamics reconstruction and self-predictivelearning that constructs a latent state optimization scheme that can betrivially extended to current state-of-the-art MARL algorithms. Empiricalresults demonstrate MAPO-LSO to show notable improvements in sample efficiencyand learning performance compared to its vanilla MARL counterpart without anyadditional MARL hyperparameter tuning on a diverse suite of MARL tasks. |
+|idx| 2406.04201v1 |
+|title| Towards Principled Superhuman AI for Multiplayer Symmetric Games |
+|authors| Jiawei GeYuanhao WangWenzhe LiChi Jin
+|links| http://arxiv.org/abs/2406.04201v1 |
+|updated| 2024-06-06 15:59:17 UTC |
+|summary| Multiplayer games when the number of players exceeds two present uniquechallenges that fundamentally distinguish them from the extensively studiedtwo-player zero-sum games. These challenges arise from the non-uniqueness ofequilibria and the risk of agents performing highly suboptimally when adoptingequilibrium strategies. While a line of recent works developed learning systemssuccessfully achieving human-level or even superhuman performance in popularmultiplayer games such as Mahjong Poker and Diplomacy two critical questionsremain unaddressed: 1 What is the correct solution concept that AI agentsshould find and 2 What is the general algorithmic framework that provablysolves all games within this class This paper takes the first step towardssolving these unique challenges of multiplayer games by provably addressingboth questions in multiplayer symmetric normal-form games. We also demonstratethat many meta-algorithms developed in prior practical systems for multiplayergames can fail to achieve even the basic goal of obtaining agents equal shareof the total reward. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.02126v2 |
-|title| CityLight: A Universal Model Towards Real-world City-scale Traffic Signal Control Coordination |
-|authors| Jinwei ZengChao YuXinyi YangWenxuan AoJian YuanYong LiYu WangHuazhong Yang
-|links| http://arxiv.org/abs/2406.02126v2 |
-|updated| 2024-06-06 13:57:09 UTC |
-|summary| Traffic signal control TSC is a promising low-cost measure to enhancetransportation efficiency without affecting existing road infrastructure. Whilevarious reinforcement learning-based TSC methods have been proposed andexperimentally outperform conventional rule-based methods none of them hasbeen deployed in the real world. An essential gap lies in theoversimplification of the scenarios in terms of intersection heterogeneity androad network intricacy. To make TSC applicable in urban traffic management wetarget TSC coordination in city-scale high-authenticity road networks aimingto solve the three unique and important challenges: city-level scalabilityheterogeneity of real-world intersections and effective coordination amongintricate neighbor connections. Since optimizing multiple agents in aparameter-sharing paradigm can boost the training efficiency and help achievescalability we propose our method CityLight based on the well-acknowledgedoptimization framework parameter-sharing MAPPO. To ensure the unified policynetwork can learn to fit large-scale heterogeneous intersections and tackle theintricate between-neighbor coordination CityLight proposes a universalrepresentation module that consists of two key designs: heterogeneousintersection alignment and neighborhood impact alignment for coordination. Tofurther boost coordination CityLight adopts neighborhood-integrated rewards totransition from achieving local optimal to global optimal. Extensiveexperiments on datasets with hundreds to tens of thousands of real-worldintersections and authentic traffic demands validate the surprisingeffectiveness and generalizability of CityLight with an overall performancegain of 11.66 and a 22.59 improvement in transfer scenarios in terms ofthroughput. |
+|idx| 2406.04159v1 |
+|title| MARLander: A Local Path Planning for Drone Swarms using Multiagent Deep Reinforcement Learning |
+|authors| Demetros AschuRobinroy PeterSausar KarafAleksey FedoseevDzmitry Tsetserukou
+|links| http://arxiv.org/abs/2406.04159v1 |
+|updated| 2024-06-06 15:19:15 UTC |
+|summary| Achieving safe and precise landings for a swarm of drones poses a significantchallenge primarily attributed to conventional control and planning methods.This paper presents the implementation of multi-agent deep reinforcementlearning MADRL techniques for the precise landing of a drone swarm atrelocated target locations. The system is trained in a realistic simulatedenvironment with a maximum velocity of 3 m/s in training spaces of 4 x 4 x 4 mand deployed utilizing Crazyflie drones with a Vicon indoor localizationsystem. The experimental results revealed that the proposed approach achieved alanding accuracy of 2.26 cm on stationary and 3.93 cm on moving platformssurpassing a baseline method used with a Proportional-integral-derivative PIDcontroller with an Artificial Potential Field APF. This research highlightsdrone landing technologies that eliminate the need for analytical centralizedsystems potentially offering scalability and revolutionizing applications inlogistics safety and rescue missions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.02081v1 |
-|title| FightLadder: A Benchmark for Competitive Multi-Agent Reinforcement Learning |
-|authors| Wenzhe LiZihan DingSeth KartenChi Jin
-|links| http://arxiv.org/abs/2406.02081v1 |
-|updated| 2024-06-04 08:04:23 UTC |
-|summary| Recent advances in reinforcement learning RL heavily rely on a variety ofwell-designed benchmarks which provide environmental platforms and consistentcriteria to evaluate existing and novel algorithms. Specifically inmulti-agent RL MARL a plethora of benchmarks based on cooperative games havespurred the development of algorithms that improve the scalability ofcooperative multi-agent systems. However for the competitive setting alightweight and open-sourced benchmark with challenging gaming dynamics andvisual inputs has not yet been established. In this work we presentFightLadder a real-time fighting game platform to empower competitive MARLresearch. Along with the platform we provide implementations ofstate-of-the-art MARL algorithms for competitive games as well as a set ofevaluation metrics to characterize the performance and exploitability ofagents. We demonstrate the feasibility of this platform by training a generalagent that consistently defeats 12 built-in characters in single-player modeand expose the difficulty of training a non-exploitable agent without humanknowledge and demonstrations in two-player mode. FightLadder providesmeticulously designed environments to address critical challenges incompetitive MARL research aiming to catalyze a new era of discovery andadvancement in the field. Videos and code athttps://sites.google.com/view/fightladder/home. |
+|idx| 2406.03978v1 |
+|title| Mini Honor of Kings: A Lightweight Environment for Multi-Agent Reinforcement Learning |
+|authors| Lin LiuJian ZhaoCheng HuZhengtao CaoYoupeng ZhaoZhenbin YeMeng MengWenjun WangZhaofeng HeHouqiang LiXia LinLanxiao Huang
+|links| http://arxiv.org/abs/2406.03978v1 |
+|updated| 2024-06-06 11:42:33 UTC |
+|summary| Games are widely used as research environments for multi-agent reinforcementlearning MARL but they pose three significant challenges: limitedcustomization high computational demands and oversimplification. To addressthese issues we introduce the first publicly available map editor for thepopular mobile game Honor of Kings and design a lightweight environment MiniHonor of Kings Mini HoK for researchers to conduct experiments. Mini HoK ishighly efficient allowing experiments to be run on personal PCs or laptopswhile still presenting sufficient challenges for existing MARL algorithms. Wehave tested our environment on common MARL algorithms and demonstrated thatthese algorithms have yet to find optimal solutions within this environment.This facilitates the dissemination and advancement of MARL methods within theresearch community. Additionally we hope that more researchers will leveragethe Honor of Kings map editor to develop innovative and scientifically valuablenew maps. Our code and user manual are available at:https://github.com/tencent-ailab/mini-hok. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.02063v1 |
-|title| An agent-based model of modal choice with perception biases and habits |
-|authors| Carole AdamBenoit Gaudou
-|links| http://arxiv.org/abs/2406.02063v1 |
-|updated| 2024-06-04 07:44:57 UTC |
-|summary| This paper presents an agent-based model of mobility choice influenced byhuman factors such as habits and perception biases. It is implemented in aNetlogo simulator calibrated from results of an online survey aboutperceptions of mobility. The simulator can be played online. It allows tomodify urban infrastructure and observe modal report. |
+|idx| 2406.03818v1 |
+|title| Amortized Equation Discovery in Hybrid Dynamical Systems |
+|authors| Yongtuo LiuSara MagliacaneMiltiadis KofinasEfstratios Gavves
+|links| http://arxiv.org/abs/2406.03818v1 |
+|updated| 2024-06-06 07:49:02 UTC |
+|summary| Hybrid dynamical systems are prevalent in science and engineering to expresscomplex systems with continuous and discrete states. To learn the laws ofsystems all previous methods for equation discovery in hybrid systems follow atwo-stage paradigm i.e. they first group time series into small clusterfragments and then discover equations in each fragment separately throughmethods in non-hybrid systems. Although effective these methods do not fullytake advantage of the commonalities in the shared dynamics of multiplefragments that are driven by the same equations. Besides the two-stageparadigm breaks the interdependence between categorizing and representingdynamics that jointly form hybrid systems. In this paper we reformulate theproblem and propose an end-to-end learning framework i.e. Amortized EquationDiscovery AMORE to jointly categorize modes and discover equationscharacterizing the dynamics of each mode by all segments of the mode.Experiments on four hybrid and six non-hybrid systems show that our methodoutperforms previous methods on equation discovery segmentation andforecasting. |
 
 
