@@ -1,0 +1,838 @@
+Flash3D: Feed-Forward Generalisable 3D Scene
+Reconstruction from a Single Image
+StanislawSzymanowicz∗ EldarInsafutdinov∗
+VGG,UniversityofOxford VGG,UniversityofOxford
+stan@robots.ox.ac.uk eldar@robots.ox.ac.uk
+ChuanxiaZheng∗ DylanCampbell
+VGG,UniversityofOxford AustralianNationalUniversity
+cxzheng@robots.ox.ac.uk dylan.campbell@anu.edu.au
+JoãoF.Henriques ChristianRupprecht AndreaVedaldi
+VGG,UniversityofOxford VGG,UniversityofOxford VGG,UniversityofOxford
+joao@robots.ox.ac.uk chrisr@robots.ox.ac.uk vedaldi@robots.ox.ac.uk
+Abstract
+Inthispaper,weproposeFlash3D,amethodforscenereconstructionandnovel
+viewsynthesisfromasingleimagewhichisbothverygeneralisableandefficient.
+Forgeneralisability,westartfroma‘foundation’modelformonoculardepthesti-
+mationandextendittoafull3Dshapeandappearancereconstructor.Forefficiency,
+webasethisextensiononfeed-forwardGaussianSplatting. Specifically,wepredict
+afirstlayerof3DGaussiansatthepredicteddepth,andthenaddadditionallayers
+ofGaussiansthatareoffsetinspace,allowingthemodeltocompletetherecon-
+structionbehindocclusionsandtruncations. Flash3Disveryefficient,trainable
+on a single GPU in a day, and thus accessible to most researchers. It achieves
+state-of-the-artresultswhentrainedandtestedonRealEstate10k. Whentransferred
+tounseendatasetslikeNYUitoutperformscompetitorsbyalargemargin. More
+impressively, when transferred to KITTI, Flash3D achieves better PSNR than
+methodstrainedspecificallyonthatdataset. Insomeinstances,itevenoutperforms
+recentmethodsthatusemultipleviewsasinput. Code,models,demo,andmore
+resultsareavailableathttps://www.robots.ox.ac.uk/~vgg/research/flash3d/.
+1 Introduction
+Weconsidertheproblemofreconstructingphotorealistic3Dscenesfromasingleimageinjustone
+forwardpassofanetwork. Thisisachallengingtaskbecausescenesarecomplexandmonocular
+reconstructionisill-posed. Unambiguousgeometriccues,suchastriangulation,areunavailablein
+themonocularsetting,andthereisnodirectevidenceoftheoccludedpartsofthescene.
+Thisproblemiscloselyrelatedtomonoculardepthestimation[4,6,7,16,20,33,34,46,47,56,59,
+90],whichisamaturearea. Itisnowpossibletoaccuratelyestimatemetricdepthwithexcellent
+cross-domain generalisation [47, 90, 91]. However, while depth estimators predict the 3D shape
+ofthenearestvisiblesurfaces, theydonotprovideany appearance information, nor anestimate
+oftheoccludedorout-of-framepartsofthescene. Depthaloneisinsufficienttoaccuratelysolve
+taskssuchasnovelviewsynthesis(NVS),whichadditionallyrequiremodellingunseenregionsand
+view-dependentappearance.
+While methods for monocular scene reconstruction exist [36, 74, 85], they mostly operate in a
+‘closed-world’settingwheretheyaretrainedanewforeachconsidereddataset. Incontrast,modern
+∗denotesequalcontribution
+Preprint.Underreview.
+4202
+nuJ
+6
+]VC.sc[
+1v34340.6042:viXraInput: 1 Image Output: Full 3D In-domain: RealEstate10k
+of any Scene Reconstruction
+Flash 3D
+Cross-domain: KITTI, NYU
+Figure1: Flash3Dreconstructsthe3D(not2.5D)scenestructureandappearancefromjustasingle
+image‘inaflash’,enablingaccuratenovelviewsynthesis. Trainedonjustonedataset,itgeneralises
+tonew,differentdatasetsandunknownscenes.
+depthpredictorsgeneralisewelltonewdatasetsatinferencetime. Furthermore,currentmonocular
+scenereconstructorsareoftensloworincurahighcomputationalmemorycostduetovolumetric
+rendering[36]andimplicitrepresentations[92].
+Veryrecently,Szymanowiczetal.[68]introducedtheSplatterImage(SI),amethodforfastmonocular
+reconstructionofindividualobjectsthatbuildsuponthesuccessofGaussianSplatting[31]. The
+approachissimple: predicttheparametersofacoloured3DGaussianforeachinputimagepixel
+usingastandardimage-to-imageneuralnetworkarchitecture. TheresultingGaussianmixturewas
+showntoreconstructobjectswell,includingunobservedsurfaces. Inpart,thiswasduetothefactthat
+SIisabletousesomeofthe“backgroundpixels”tomodeltheoccludedpartsoftheobject. However,
+inscenereconstruction,thereisnotsuchareservoirofbackgroundpixels,whichposesachallenge
+forthemethod. Incontrast,pixelSplat[9],MVSplat[11],latentSplat[83]andGS-LRM[95],which
+shareasimilardesign,weredesignedforscenereconstruction;however,theyaddressthebinocular
+reconstructionproblem,requiringtwoimagesofthescenecapturedfromdifferentknownviewpoints.
+Weinsteadconsiderthemorechallengingmonocularsetting,sinceitismoregenerallyapplicableand
+doesnotrequirecameraextrinsics,whichisachallengingresearchproblemonitsown[78,80,94].
+Inthiswork,weintroduceanew,simple,efficientandperformantapproachformonocularscene
+reconstruction called Flash3D. This is based on two key ideas. First, we address the issue of
+generalisationwhichlimitscurrentfeed-forwardmonocularscenereconstructors. Theaimisfor
+Flash3Dtoworkonanyscene,notjustonscenessimilartotheonesinthetrainingset. Analogous
+open-endedmodelsareoftencalledfoundationmodelsandrequiremassivetrainingdatasetsand
+computationalresourcesunavailabletomostresearchgroups. Asimilarproblemexistsin3Dobject
+reconstruction and generation [35, 37, 40, 41, 60, 97], where it is addressed by extending to 3D
+anexistingfoundation2Dimageorvideogenerator[5,13,19,48,53]. Here,wepositthatscene
+reconstructioncanalsobenefitfrombuildingonanexistingfoundationmodel,butoptforamonocular
+depthpredictorasamorenaturalchoice. Weshow,inparticular,thatbybuildingonahigh-quality
+depthpredictor[47],wecanachieveexcellentgeneralisationtonewdatasets,tothepointthatour3D
+reconstructionsaremoreaccuratethanthoseofmodelstrainedspecificallyonthosetestdomains.
+Second,weimprovefeed-forwardper-pixelGaussiansplattingformonocularscenereconstruction.
+Asnoted,appliedtosingleobjects,aper-pixelreconstructorcanusethereservoirofbackground
+pixelstomodelthehiddenpartsoftheobject,whichisnotpossiblewhenreconstructingafullscene.
+OursolutionistopredictmultipleGaussiansperpixel, whereonlythefirstGaussianalongeach
+ray is encouraged to conform to the depth estimate and thus model the visible part of the scene.
+Thisisanalogoustoalayeredrepresentation[1,3,36,58,74,76]andmulti-Gaussiansamplingin
+pixelSplat[9]. However,inourcaseGaussiansaredeterministic,notlimitedtospecificdepthranges,
+andthemodelisfreetoshiftGaussiansofftheraytomodeloccludedortruncatedpartsofthescene.
+Overall,Flash3Disasimpleandhighly-performantmonocularscenereconstructionpipeline. Em-
+pirically, wefindthatFlash3Dcan(a)renderhigh-qualityimagesofthereconstructed3Dscene,
+(b)operateonawiderangeofscenes,bothindoorandoutdoor;and(c)reconstructoccludedregions,
+whichwouldnotbepossiblewithdepthestimationaloneorwithnaïveextensionsofit. Flash3D
+achievesstate-of-the-artnovelviewsynthesisaccuracyonallmetricsontheRealEstate10K[72].
+2Moreimpressivelythesame,frozenmodelalsoachievesstate-of-the-artaccuracywhentransferredto
+NYU[61]andKITTI[18](inPSNR).Furthermore,inanextrapolationsetting,ourreconstructions
+canevenbemoreaccuratethanthoseofbinocularmethodslikepixelSplat[9]andlatentSplat[83]
+thatusetwoimagesofthesceneinsteadofone,andarethusatasignificantadvantage.
+Inadditiontothequalityofthereconstructions,showninFig.1,Flash3Disveryefficienttoevaluate
+and,mostimportantly,totrain. Forinstance,weuse1/64thoftheGPUresourcesofpriorworkslike
+MINE[36]. Byachievingstate-of-the-artresultswhileusingmodestcomputationalresourcesfor
+training,thisopenstheresearchareauptoawiderrangeofresearchers.
+2 RelatedWork
+Monocularfeed-forwardreconstruction. Likeourapproach,monocularfeed-forwardreconstruc-
+torsworkbypassingasingleimageofthescenethroughaneuralnetworktooutputa3Drecon-
+structiondirectly. Forscenes,theworksof[74–76]andMINE[36]dosobypredictingmulti-plane
+images[72],and[85]usesneuralradiancefields[43,62]. Ourmethodoutperformsthemintermsof
+speedandgeneralisation. Likeourwork,SynSin[84]usesamonoculardepthpredictortoreconstruct
+ascene; however, itsreconstructionsareincompleteandrequirearenderingnetworktoimprove
+the final novel views. In contrast, our approach outputs a high-quality 3D reconstruction which
+can be directly rendered with Gaussian Splatting [31]. For objects, a notable example is Large
+Reconstruction Model (LRM) [27], which obtains high-quality monocular reconstruction with a
+verylarge,andveryexpensivetotrain,model. ThemostrelatedworktooursisSplatterImage[68]
+that uses Gaussian Splatting [31] for efficiency. Our approach also uses Gaussian Splatting as a
+representation,butdoessoforscenesratherthanobjects,whichpresentsdifferentchallenges.
+Few-viewfeed-forwardreconstruction. Alesschallengingbutstillimportantcaseisfew-view
+feed-forwardreconstruction,wherereconstructionrequirestwoormoreimagestakenfromknown
+viewpoints. Early examples used neural radiance fields (NeRF) [43] as 3D representation of ob-
+jects[12,25,29,38,51,79,92]andscenes[12,14,88]. Thesemethodsimplicitlylearntomatch
+points between views; the works of [10, 93] makes point matching more explicit. While many
+few-viewreconstructorsestimatethe3Dshapeoftheobjectasanopacityfield,analternativeisto
+directlypredictnewviews[44,55,65,66]ofsceneswithnoexplicitvolumetricreconstruction,a
+conceptpioneeredbyLightFieldNetworks[63]. Otherworksuseinsteadmulti-planeimagesfrom
+narrowbaselinestereopairs[64,72]andfewviews[30,42]. Morerelatedtoourapproach,pixel-
+Splat[9],latentSplat[83]andMVSplat[11]reconstructscenesfromapairofimages. Theyutilise
+cross-viewattentiontoefficientlyshareinformationandpredictGaussianmixturestorepresentthe
+scenegeometry. Otherveryrecentfeed-forwardapproaches[69,89,95]combineLRMandGaussian
+Splattingforreconstructionfromasmallnumberofimages. Weaddressmonocularreconstruction
+instead,whichisamuchharderproblemduetolackofgeometriccuesfromtriangulation.
+Iterativereconstruction. Iterativeoroptimisation-basedmethodsreconstructfromoneormore
+imagesbyiterativelyfittinga3Dmodeltothem. Duetotheiriterativenature,andtheneedtorender
+the 3D model to fit it to the data, they are generally much slower than feed-forward approaches.
+DietNeRF[28]regularisesreconstructionusinglanguagemodels,RegNeRF[45]andRefNeRF[77]
+usehandcraftedregularisers,andSinNeRF[87]usesmonoculardepth.RealFusion[40]usesanimage
+diffusionmodelasapriorformonocularreconstructionbasedonslowscoredistillationsampling
+iterations[49]. Numerousfollow-upstookasimilarpath[70,86]. Convergencespeedandrobust-
+nesscanbeimprovedbyusingmulti-viewawaregenerators[23,37,41,73,82,97]. Approaches
+likeViewsetDiffusion[67]andRenderDiffusion[2]fuse3Dreconstructionwithdiffusion-based
+generation,whichcanreducebutnoteliminatethecostofiterativegeneration. Incontrast,ourap-
+proachisfeed-forwardandthereforesignificantlyfaster,closetoreal-time(10fps). Someapproaches
+generatenovelviewsinafeed-forwardmanner,butiterativelyandautoregressively,oneviewata
+time. ExamplesincludePixelSynth[52],extendingSynSin,GeNVS[8],andText2Room[26]. In
+contrast,wegeneratethefinal3Dreconstructioninasinglefeed-forwardpass.
+Monoculardepthprediction. Ourmethodisbasedonmonoculardepthestimation[4,6,7,15,16,
+20,21,33,34,46,50,56,59,90,98],wheremetricorrelativedepthispredictedforeveryimage
+pixelforagivenimage. Bylearningvisualdepthcuesfromlargedatasets,oftenwithself-supervision,
+theseapproacheshavedemonstratedhighaccuracyandthecapacitytogeneraliseacrossdatasets.
+Whileourmethodisagnostictothedepthpredictorused,weuseoneofthestate-of-the-artmetric
+depthestimators,UniDepth[47],forourexperiments.
+3Input: one RGB Pre-trained Depth D ResNet Output: Set of 3D Gaussians
+depth network Encoder
+Depth offset
+decoders δ 2, δ 3 D+δ 2+δ 3
+Gaussian D+δ
+2
+parameter D
+decoders
+Indicates network is frozen 𝒫1, 𝒫2, 𝒫3
+Figure2: OverviewofFlash3D.GivenasingleimageI asinput,Flash3Dfirstestimatesthemetric
+depthDusingafrozenoff-the-shelfnetwork[47]. Then,aResNet50-likeencoder–decodernetwork
+predictsasetofshapeandappearanceparametersP ofK layersofGaussiansforeverypixelu,
+allowingunobservedandoccludedsurfacestobemodelled. Fromthesepredictedcomponents,the
+depthcanbeobtainedbysummingthepredicted(positive)offsetsδ withthepredictedmonocular
+i
+depthD,allowingthemeanvectorforeverylayerofGaussianstobecomputed. Thisstrategyensures
+thatthelayersaredepth-ordered,encouragingthenetworktomodeloccludedsurfaces.
+3 Method
+LetI ∈R3×H×W beanRGBimageofascene. OurgoalistolearnaneuralnetworkΦthattakes
+asinputI andpredictsarepresentationG =Φ(I)ofthe3Dcontentofthescene,bothintermsof
+3Dgeometryandphotometry. WefirstdiscussthebackgroundandbaselinemodelinSection3.1,
+thenintroduceourlayeredmulti-GaussianpredictorinSection3.2,andfinallydiscusstheuseof
+monoculardepthpredictionasapriorinSection3.2.
+3.1 Background: Scenereconstructionfromasingleimage
+Representation: scenes as sets of 3D Gaussians. The scene representation G =
+{(σ ,µ ,Σ ,c )}G is a set of 3D Gaussians [31], where σ ∈ [0,1) is the opacity, µ ∈ R3
+i i i i i=1 i i
+is the mean, Σ ∈ R3×3 is the covariance matrix, and c : S2 → R3 is the radiance function
+(directionalcoloi ur)ofeachcomponent. Letg (x)=exp(cid:0) −i 1(x−µ )⊤Σ−1(x−µ )(cid:1) bethecorre-
+i 2 i i i
+sponding(un-normalised)Gaussianfunction. ThecoloursoftheGaussiansaregenerallyrepresented
+usingsphericalharmonics,sothat[c (ν)] =(cid:80)L (cid:80)l c Y (ν),whereν ∈S2 isaview
+i j l=0 m=−l ijlm lm
+direction and Y are the spherical harmonics of various orders m and degrees l. The Gaussian
+lm
+mixture G defines the opacity and colour functions of a radiance field: σ(x) =
+(cid:80)G
+σ g (x),
+i=1 i i
+c(x,ν)=(cid:80)G c (ν)σ g (x)/(cid:80)G σ g (x),whereσ(x)istheopacityat3Dlocationx∈R3and
+i=1 i i i i=1 i i
+c(x,ν)istheradianceatxindirectionν ∈S2towardsthecamera.
+The field is rendered into an image J by integrating the radiance along the line of sight using
+(cid:82)∞ (cid:82)t
+the emission–absorption [39] equation J(u) = c(x ,ν)σ(x )exp(− σ(x )dτ)dt, where
+0 t t 0 τ
+x =x −tν istherayoriginatingatthecameracentrex andpropagatingtowardsthepixeluin
+t 0 0
+thedirection−ν. ThekeycontributionofGaussianSplatting[31]istoapproximatethisintegralvery
+efficiently,implementingadifferentiablerenderingfunctionJˆ=Rend(G,π)whichtakesasinput
+theGaussianmixtureG andviewpointπandreturnsanestimateJˆofthecorrespondingimage.
+Monocularreconstruction. Following[68],theoutputΦ(I)∈RC×H×W oftheneuralnetworkisa
+tensorthatspecifies,foreachpixelu=(u ,u ,1),theparametersofacolouredGaussian,consisting
+x y
+of the opacity σ, the depth d ∈ R , the offsets ∆ ∈ R3, the covariance Σ ∈ R3×3 expressed as
++
+rotationandscale(sevenparameters,usingquaternionsforrotation),andtheparametersofthecolour
+modelc∈R3(L+1)2 whereListheorderofthesphericalharmonics. ThemeanoftheGaussianis
+thengivenbyµ=K−1ud+∆,whereK =diag(f,f,1)∈R3×3isthecameracalibrationmatrix
+andf itsfocallength. Hence,thereareC =1+1+3+7+3(L+1)2 =12+3(L+1)2parameters
+predictedforeachpixel. ThemodelΦistrainedusingtriplets(I,J,π)whereI isaninputimage,
+J isatargetimage,andπistherelativecamerapose. Tolearnthenetworkparameters,onesimply
+minimisestherenderinglossL(G,π,J)=∥Rend(G,π)−J∥.
+3.2 Monocularfeed-forwardmulti-Gaussians
+Forgeneralisation,weproposetobuildFlash3Donahigh-qualitypre-trainedmodeltrainedona
+largeamountofdata. Specifically,giventhesimilaritiesbetweenmonocularscenereconstructionand
+monoculardepthestimation,weuseanoff-the-shelfmonoculardepthpredictorΨ. Thismodeltakes
+4asinputanimageI andreturnsadepthmapD = Ψ(I),whereD ∈ RH×W isamatrixofdepth
++
+values,asexplainednext.
+Baselinearchitecture. GivenanimageI andestimateddepthmapD,ourbaselinemodelconsistsof
+anadditionalnetworkΦ(I,D)thattakesasinputtheimageandthedepthmapandreturnstherequired
+per-pixelGaussianparameters. Inmoredetail,foreachpixelu,theentry[Φ(I,D)] =(σ,∆,s,θ,c)
+u
+consistsoftheopacityσ ∈R ,thedisplacement∆∈R3,thescales∈R3,thequaternionθ ∈R4
++
+parametrisingtherotationR(θ),andthecolourparametersc. ThecovarianceofeachGaussianis
+given by Σ = R(θ)Tdiag(s)R(θ) and the mean is given [68] by µ = (u d/f, u d/f, d)+∆,
+x y
+where f is the focal length of the camera (either known or also estimated by Ψ) and the depth
+d=D(u)isfromthedepthmap. ThenetworkΦisaU-Net[54]utilisingResNetblocks[24]for
+encodinganddecoding, denotedΦ andΦ respectively. Thedecodernetworkthusoutputsa
+enc dec
+tensorΦ (Φ (I,D))∈R(C−1)×H×W.NotethatthenetworkoutputhasC−1channelsonly,as
+dec enc
+depthistakendirectlyfromΨ. Pleaseseethesupplementforfulldetails.
+Multi-Gaussianprediction. WhiletheGaussiansinthemodelabovehavetheabilitytobeoffset
+fromthecorrespondingpixel’sray,eachGaussiantendsnaturallytomodeltheportionoftheobject
+that projects onto that pixel. Szymanowicz et al. [68] note that, for individual objects, there is a
+largenumberofbackgroundpixelsthatarenotassociatedwithanyobjectsurface,andthesecanbe
+repurposedbythemodeltocapturetheunobservedpartsofthe3Dobject. However,thisisnotthe
+caseforscenes,wherethegoalistoreconstructeveryinputpixel,andbeyond.
+Sincethereareno“idle”pixels,itisdifficultforthemodeltorepurposesomeoftheGaussiansto
+modelthe3Dscenearoundocclusionsandbeyondtheimagefield-of-view. Hence,weproposeto
+predictasmallnumberK >1ofdifferentGaussiansforeachpixel.
+Conceptually,givenanimageI andanestimateddepthmapD,ournetworkpredictsasetofshape,
+locationandappearanceparametersP ={(σ ,δ ,∆ ,Σ ,c )}K foreverypixelu,wherethedepth
+i i i i i i=1
+oftheithGaussianisgivenby
+i
+(cid:88)
+d =d+ δ , (1)
+i j
+j=1
+whered = D(u)isthepredicteddepthatpixeluindepthmapDandδ = 0isaconstant. Note
+1
+that,sincethedepthoffsetδ cannotbenegative,thisensuresthatsubsequentGaussianlayersare
+i
+“behind”previousonesandencouragesthenetworktomodeloccludedsurfaces. Themeanofthe
+ithGaussianisthengivenbyµ =(u d /f, u d /f, d )+∆ .Inpractice,wefindK =2tobea
+i x i y i i i
+sufficientlyexpressiverepresentation.
+Reconstructingbeyondtheborderwithpadding. Asweshowempirically,itisimportantforthe
+networktobeabletomodel3Dcontentjustoutsideitsfield-of-view. WhilethemultipleGaussian
+layershelpinthisregard,thereisaparticularneedforadditionalGaussiansneartheimageborder
+(e.g.,forgoodnewviewsynthesiswhenthecameraretracts). TofacilitateobtainingsuchGaussians,
+theencoderΦ startsbypaddingtheinputimageanddepth(I,D)withP >0pixelsoneachside,
+enc
+sothattheoutputsΦ (I,D)∈R(C−1)×(H+2P)×(W+2P)arelargerthantheinputs.
+k
+4 Experiments
+Wedesignourexperimentstosupportfourkeyfindings,witheachsectiondedicatedtoonefinding.
+We begin with the most important result: cross-dataset generalisation—leveraging a monocular
+depthpredictionnetworkandtrainingonasingledatasetresultsingoodreconstructionqualityon
+otherdatasets(Section4.2). Second,weestablishthatFlash3Dservesasaneffectiverepresentation
+for single-view 3D reconstruction by comparing against methods specifically designed for this
+task(Section4.3). Third,wegoasfarastoshowthatthepriorlearnedbysingle-viewFlash3Dis
+asstrongasthatlearnedbytwo-viewmethods(Section4.4). Finally,weshowviaablationstudies
+howeachdesignchoicecontributestoperformanceFlash3D(Section4.5)andanalyseoutputsfrom
+Flash3Dtogaininsightintoitsinnerworkings.
+4.1 Experimentsettings
+Datasets. Flash3D is trained only on the large-scale RealEstate10k [72] dataset, containing real
+estate videos from YouTube. We follow the default training/testing split with 67,477 scenes for
+5Table1: Cross-DomainNovelViewSynthesis. WeevaluateNVSaccuracyondatasetsnotusedin
+trainingofourmethod. WeoutperformbaselineswhichweretrainedonKITTIspecifically. Here,
+cross-domain(CD)denotesthatthemethodwasnottrainedonthedatasetbeingevaluated.
+KITTI NYU
+Method CD PSNR↑ SSIM↑ LPIPS↓ CD PSNR↑ SSIM↑ LPIPS↓
+LDI[76] ✗ 16.50 0.572 - - - -
+SV-MPI[74] ✗ 19.50 0.733 - - - - -
+BTS[85] ✗ 20.10 0.761 0.144 - - - -
+MINE[36] ✗ 21.90 0.828 0.112 ✓ 24.33 0.745 0.202
+UniDepthw/U ✓ 20.86 0.774 0.154 ✓ 22.54 0.732 0.212
+Flash3D(Ours) ✓ 21.96 0.826 0.132 ✓ 25.45 0.774 0.196
+trainingand7,289fortesting. OnceFlash3Distrained,weassessitseffectivenessacrossvarious
+datasets,discussedindetailineachsection. Fordetailsoftheevaluationprotocols,seetheappendix.
+Metrics. Forquantitativeresults,wereportthestandardimagequalitymetrics,includingpixel-level
+PSNR,patch-levelSSIM,andfeature-levelLPIPS.
+Comparedmethods. Wecomparewithseveralstate-of-the-artapproachesthataredesignedspecifi-
+callyforsingle-viewscenereconstruction,includingLDI[76],Single-ViewMPI[74],SynSin[84],
+BTS [85] and MINE [36]. We include a comparison to our adaptation of Splatter Image [68] to
+showthatourmethodismuchbettersuitedtogeneralscenes,aswellasacomparisontoray-wise
+unprojectionU oftheinputcolourstothelocationspredictedbythedepthnetwork. Finally,while
+notafaircomparison,wealsocomparewithstate-of-the-arttwo-viewnovelviewsynthesismethods,
+including[14],pixelSplat[9],MVSplat[11],andlatentSplat[83].
+Implementationdetails. Flash3Dcomprisesapre-trainedUniDepth[47]model,aResNet50[24]
+encoder,alongsidemultipledepthoffsetdecodersandGaussiandecoders. Theentiremodelistrained
+onasingleA6000GPUfor40,000iterationswithbatchsize16. Thetrainingisremarkablyefficient,
+completedinonedayonasingleA6000GPU.GiventhatUniDepthremainsfrozenduringtraining,
+wecanexpeditethetrainingbypre-extractingdepthmapsfortheentiredataset. Withthis,Flash3D
+canbetrainedtoachievestate-of-the-artqualityonasingleA6000GPUin16hours.
+4.2 Cross-domainnovelviewsynthesis
+Datasets. To evaluate the cross-domain generalisation ability, we directly evaluate performance
+onunseenoutdoor(KITTI[17])andindoor(NYU[61])datasets. ForKITTI,wefollowstandard
+benchmarkswithawell-establishedprotocolforevaluation,with1,079imagesfortesting. ForNYU,
+weformedanewprotocol,with250sourceimagesfortesting(seesupp. matfordetails). Weevaluate
+allmethodsinthesamemanner. WeverifiedthatUnidepth[47]wasnottrainedonthesedatasets.
+Tothebestofourknowledge,wearethefirsttoreportperformanceonfeed-forwardcross-domain
+monocularreconstruction. Weconsidertwochallengingcomparisons. First,weevaluateFlash3D
+andthecurrentstate-of-the-art[36]onNYU,anindoordatasetthatissimilarinnaturetoRE10k,
+yetunseenintraining. InTable1,weobservethatourmethodperformssignificantlybetteronthis
+transferexperiment,despitethedomaingapbeingrelativelysmall. Thissuggeststhatpriorworks
+do not generalise as well as our method. Second, we compare our method on KITTI in Table 1,
+whereitperformsonparwiththestate-of-the-artthatwastrainedonthisdataset. Indeed,Flash3D
+outperformstheotherswithrespecttoPSNR,despitebeingtrainedonlyonanindoordataset. This
+suggeststhatleveragingapretraineddepthnetworkhasallowedournetworktolearnanextremely
+strongshapeandappearancepriorthatisevenmoreaccuratethanlearningonthisdatasetdirectly.
+4.3 In-domainnovelviewsynthesis
+Weperformanin-domainevaluationonRealEstate10k[72],followingthesameprotocolasprior
+works[36]. Weevaluatethequalityofzero-shotreconstructionandcompareperformanceonan
+in-domain dataset, RealEstate10k. We evaluate the quality of reconstruction through novel view
+synthesis metrics as that is the only ground-truth data available in this dataset. RealEstate10k
+evaluatesthequalityofreconstructionsatdifferentdistancesbetweenthesourceandthetarget,as
+a smaller distance makes the task easier. In Table 2, we observe that we achieve state-of-the-art
+resultsonthismaturebenchmarkacrossalldistancesbetweenthesourceandthetarget. Further
+6Table2:In-domainNovelViewSynthesis. Ourmodelshowsstate-of-the-artin-domainperformance
+onRealEstate10konsmall,mediumandlargebaselineranges.
+5frames 10frames U[−30,30]frames
+Model PSNR↑ SSIM↑ LPIPS↓ PSNR↑ SSIM↑ LPIPS↓ PSNR↑ SSIM↑ LPIPS↓
+Syn-Sin[84] - - - - - - 22.30 0.740 -
+SV-MPI[74] 27.10 0.870 - 24.40 0.812 - 23.52 0.785 -
+BTS[85] - - - - - - 24.00 0.755 0.194
+SplatterImage[68] 28.15 0.894 0.110 25.34 0.842 0.144 24.15 0.810 0.177
+MINE[36] 28.45 0.897 0.111 25.89 0.850 0.150 24.75 0.820 0.179
+Flash3D(Ours) 28.46 0.899 0.100 25.94 0.857 0.133 24.93 0.833 0.160
+Source GT MINE-64 Unprojection Flash3D (Ours)
+Figure3: Qualitativecomparisonofmonocularreconstructiononalldatasets. Flash3D(Ours,
+rightcolumn)issharper(toprow,car’sback)thanstate-of-the-artMINE[36]despiteFlash3Dnot
+training on KITTI. This is thanks to leveraging a depth predictor which, when used on its own
+(fourthcolumn),cannotrepresentoccludedregions(thirdrow,fourthrow). Aswellasrepresenting
+occludedregionsbetterthanMINE(firstrow,thirdrowandfourthrow),Flash3Dalsofillsinbetter
+explanationsofregionsoutsidethesourcecamerafrustrum(secondrow,fifthrow).
+analysisinFig.3revealsthatourmethod’sreconstructionsaresharperandmoreaccuratethanprior
+state-of-the-art[36],despitebeingtrainedonanorderofmagnitudefewerGPUs(1vs. 64).
+4.4 Comparisontofew-viewnovelviewsynthesis
+Datasets. TofurtherevaluatetheeffectivenessofFlash3D,weconductedassessmentsusingthe
+pixelSplat[9]splitforinterpolationandthelatentSplat[83]splitforextrapolation.
+Unlike existing two-view methods that typically assess interpolation between two source views,
+Flash3Dconsistentlyperformsextrapolationfromasingleview. TheresultsarereportedinTable3.
+Here,Flash3Dcannotoutperformtwo-viewapproachesontheinterpolationtask,duetoreceiving
+lessinformation. However,Flash3Dsurpassesallpreviousstate-of-the-arttwo-viewmethodsatview
+extrapolation. Thishighlightstheutilityofthemulti-layerGaussianrepresentationofourapproachat
+capturingandmodellingunseenareas.
+7
+ITTIK
+UYN
+k01ERTable3: ComparisonwithTwo-viewMethods. WecompareonthesplitusedbypixelSplat[9]for
+two-viewinterpolationandonthesplitusedbylatentSplat[83]forextrapolation. Wetaketheview
+closesttothetargetasthesource. Ourmethodusesasingleviewandstillextrapolatesbetter.
+Input RE10kInterpolation RE10kExtrapolation
+Method Views PSNR↑ SSIM↑ LPIPS↓ PSNR↑ SSIM↑ LPIPS↓
+Duetal[14] 2 24.78 0.820 0.213 21.83 0.790 0.242
+pixelSplat[9] 2 26.09 0.864 0.136 21.84 0.777 0.216
+latentSplat[83] 2 23.93 0.812 0.164 22.62 0.777 0.196
+MVSplat[11] 2 26.39 0.869 0.128 23.04 0.813 0.185
+Flash3D(Ours) 1 23.87 0.811 0.185 24.10 0.815 0.185
+4.5 Ablationstudyandanalysis
+Ablationstudy. Weablateourmethodforin-domainandcross-domainsettingsinTable4,focusing
+on the following questions. Q1: Is leveraging a monocular depth predictor useful in the task of
+reconstructingappearanceandgeometryofscenes? Q2: Ifyes,isitsufficientonitsown, i.e.,is
+learningshapeandappearanceparametersnecessaryforscenereconstructionwith3DGaussians?
+Importance of depth predictor. We remove the pretrained depth network that predicts depth D,
+insteadestimatingitjointlywithallotherparameters. First,inTable4weobservethatthisleadstoa
+significantdropinperformancecomparedtoFlash3D,indicatingthatthedepthnetworkcontains
+important cues that had already been learned. Moreover, the third row of Table 4 indicates that
+withoutthedepthnetwork,2layersofGaussiansperpixelperformsworsethanusingjustonelayer.
+Wehypothesisethatthedepthnetworkplaysanimportantroleinavoidinglocaloptimathatwere
+reportedtolimitthelearningcapabilitiesofprimitive-basedmethods[9]. Qualitatively,thefourth
+columninFig.4illustratesthatremovingthedepthnetworkmakesitchallengingtolearnaccurate
+geometriesofwalls(orangewallisbent)andobjectboundaries(bedhasanincorrectshape).
+Importanceofextendingbeyonddepthprediction. Hereweremovethelearnedpartsofournetwork.
+First,weuseonlyonelayerofGaussians,andpredictparametersP correspondingtothedepthD
+1
+predictedbythepre-traineddepthnetwork. ThisalsoresultsinadropinperformanceinTable4. We
+thengofurtherandremovethenetworkthatpredictsP ,removinglearningaltogether. Novelviews
+1
+aresimplyrenderedfromsourceviewcoloursbackprojectedwiththedepthsD. Thisunderstandably
+drops the performance even further. In Fig. 4 we observe that these drops are due to the 1-layer
+methodnotrepresentingoccludedpartsofthescene. ThelastcolumninFig.4illustratesthatthe
+holesaresignificantwhenusingonlydepthunprojection,andcanbepartiallymitigatedwhenlearning
+shapesP duetothenetworkbeingabletostretchtheGaussiansatdepthdiscontinuities.
+1
+Analysis. Fig.5analysesthemechanismthroughwhichtheGaussianlayersformafullreconstruc-
+tionofthescene. Wevisualisethedepthofeachofthelayers, D andD+δ , multipliedbythe
+2
+opacityσ ,σ ofthecorrespondingGaussians,illustratinghowmuchtheyareusedwhenrendering
+1 2
+thescene. InFig.5, themoresaturatedthecolour, themoreopaquetheGaussian(blackisfully
+transparent). WeobservethatthefirstlayerhasthemostopaqueGaussiansatobjectboundaries(wall,
+cabinet)andatcomplicatedgeometries(chair),indicatingthatthesearetheregionswherethedepth
+predictionnetworkisthemostuseful. ThisisfurthersupportedbyFig.4whereremovingthedepth
+networkimpairedreconstructioninexactlythesameregions. Leveragingthedepthnetworkatobject
+boundariesresultsincrisp,accurategeometriesatsmallbaselines(fourthcolumn). Interestingly,the
+networkignoresthedepthpredictionforwindows,whichareconsistentlyincorrect. Next,weanalyse
+wherethesecondlayerofGaussiansplacesitspredictions. InthethirdcolumnofFig.5,wherethe
+networkobservesawall,thesecondlayerofGaussiansisplacedatlargerdepth. TheseGaussiansare
+observedwhenthecameramotion(baseline)islarge,andareshowntohaveareasonableappearance
+inFig.5(rightcolumn). ThelastcolumninFig.5additionallyrevealsalimitationofourmethod. It
+isadeterministic,regressivemodelofstructureandappearance,andthusproducesblurryrenderings
+inpresenceofambiguity: whenbaselinesareverylarge,inoccludedregionsorwhencameramoves
+backward. Blurrinesscouldbereducedwithadditionallosses(perceptual[96]oradversarial[22]).
+Alternatively,ourmethodcouldbeincorporatedasconditioningwithinaframeworksimilarto[8]or
+asthereconstructorinadiffusion-basedfeedforward3Dgenerationframework[67,71].
+8Source GT Flash3D (Ours) w/o depth w/o second layer only depth
+Figure4: Ablation. WeshowhowFlash3Ddegradeswhencomponentsareremoved. Removingthe
+depthnetwork(4thcolumn)resultsinincorrectgeometry(orangewall,cornerofthebed). Usingonly
+onelayerofGaussians(5th)resultsinholesinrenderingsduetodisocclusions(orangewall,area
+behindcabinet),althoughtheyarenotasbadaswhensimplyusingdepthunprojection(rightmost).
+Source view Geometry: first layer Geometry: second layer Novel view: small baseline Novel view: large baseline
+Predicted depth
+Figure5: AnalysisoflayeredGaussians. ThefirstlayerofGaussians(secondcolumn)represents
+visiblepartswherethedepthpredictioncanbeused(bluearrows). Thesecondlayer(thirdcolumn)
+representstheremainingpartsofthescene(redarrows): occludedregions(wall,cabinet)andregions
+wheredepthpredictionisunreliable(windows). Combiningthetwoleadstosharpgeometriesat
+smallbaselines(fourthcolumn)andreasonablereconstructionsatlargebaselines(rightcolumn).
+Input Novel View Render Visualised Layers Input Novel View Render Visualised layers
+Legend: Red = Layer 1 Green = Layer 2 Blue = Gaussians from padding
+Figure6:AnalysisofGaussianallocation.Gaussiansfromthefirstlayer(red)areallocatedinvisible
+parts,fromthesecondlayer(green)inoccludedregions(toprow,bottomright)andonwindows
+(bottomleft)andGaussiansfromthepaddingregion(blue)arerevealedwhencamerarevealsregions
+thatwerenotpresentinthefrustrumoftheinputcamera.
+Table4: AblationStudy. Resultsforablatingdifferentdesignchoicesofourmethod.
+RE10k–in-domain NYU–cross-domain KITTI–cross-domain
+PSNR↑ SSIM↑ LPIPS↓PSNR↑ SSIM↑ LPIPS↓PSNR↑ SSIM↑ LPIPS↓
+Flash3D 24.93 0.833 0.160 25.09 0.775 0.182 21.96 0.826 0.132
+w/odepthnet,w/2ndlayer 23.62 0.782 0.186 23.73 0.732 0.210 - - -
+w/odepthnet,w/o2ndlayer 24.01 0.806 0.176 23.98 0.750 0.207 - - -
+w/depthnet,w/o2ndlayer 24.45 0.825 0.163 24.83 0.767 0.190 21.50 0.812 0.141
+w/depthnet,unprojectonly 22.80 0.781 0.207 22.14 0.729 0.217 20.86 0.774 0.154
+95 Conclusion
+WepresentedFlash3D,amodelthatcanbetrainedinjust16honasingleGPUtoachievestate-of-
+the-artresultsformonocularscenereconstruction. Ourformulationallowsusingamonoculardepth
+estimatorasafoundationforfull3Dscenereconstruction. Asaconsequence,themodelgeneralizes
+verywell: itoutperformspriorworksevenwhennottrainedspecificallyonthetargetdatasetasthem.
+Analysesrevealtheinteractionmechanismsbetweenthepretrainednetworkandthelearnedmodules,
+andablationsverifytheimportanceofeachcomponent.
+References
+[1] E.Adelson. Layeredrepresentationsforvisionandvideo. InICCVWorkshopontheRepresen-
+tationofVisualScenes,1995. 2
+[2] TitasAnciukevicius,ZexiangXu,MatthewFisher,PaulHenderson,HakanBilen,NiloyJ.Mitra,
+andPaulGuerrero. RenderDiffusion: Imagediffusionfor3Dreconstruction,inpaintingand
+generation. InProc.CVPR,2022. 3
+[3] SimonBaker,R.Szeliski,andP.Anandan. Alayeredapproachtostereoreconstruction. In
+Proc.CVPR,1998. 2
+[4] StanBirchfieldandCarloTomasi. Depthdiscontinuitiesbypixel-to-pixelstereo. InProc.ICCV,
+1998. 1,3
+[5] AndreasBlattmann,TimDockhorn,SumithKulal,DanielMendelevitch,MaciejKilian,Do-
+minikLorenz,YamLevi,ZionEnglish,VikramVoleti,AdamLetts,VarunJampani,andRobin
+Rombach. Stable video diffusion: Scaling latent video diffusion models to large datasets.
+arXiv.cs,abs/2311.15127,2023. 2
+[6] B. F. Buxton and H. Buxton. Monocular depth perception from optical flow by space time
+signalprocessing. Phil.Trans.R.Soc.Lond.B,218,1983. 1,3
+[7] YuanzhouhanCao,ZifengWu,andChunhuaShen. Estimatingdepthfrommonocularimages
+asclassificationusingdeepfullyconvolutionalresidualnetworks. IEEETrans.CircuitsSyst.
+VideoTechn.,28(11):3174–3182,2018. 1,3
+[8] EricR.Chan,KokiNagano,MatthewA.Chan,AlexanderW.Bergman,JeongJoonPark,Axel
+Levy,MiikaAittala,ShaliniDeMello,TeroKarras,andGordonWetzstein. Generativenovel
+viewsynthesiswith3D-awarediffusionmodels. InProc.ICCV,2023. 3,8
+[9] DavidCharatan,SizheLi,AndreaTagliasacchi,andVincentSitzmann. pixelSplat:3DGaussian
+splatsfromimagepairsforscalablegeneralizable3dreconstruction. InarXiv.cs,2023. 2,3,6,
+7,8,16,17
+[10] AnpeiChen,ZexiangXu,FuqiangZhao,XiaoshuaiZhang,FanboXiang,JingyiYu,andHao
+Su. MVSNeRF:Fastgeneralizableradiancefieldreconstructionfrommulti-viewstereo. In
+Proc.ICCV,2021. 3
+[11] YuedongChen,HaofeiXu,ChuanxiaZheng,BohanZhuang,MarcPollefeys,AndreasGeiger,
+Tat-JenCham,andJianfeiCai. MVSplat: efficient3dgaussiansplattingfromsparsemulti-view
+images. arXiv,2403.14627,2024. 2,3,6,8
+[12] JulianChibane,AayushBansal,VericaLazova,andGerardPons-Moll. Stereoradiancefields
+(SRF):learningviewsynthesisforsparseviewsofnovelscenes. InProc.CVPR,2021. 3
+[13] XiaoliangDai,JiHou,Chih-YaoMa,SamS.Tsai,JialiangWang,RuiWang,PeizhaoZhang,
+SimonVandenhende,XiaofangWang,AbhimanyuDubey,MatthewYu,AbhishekKadian,Filip
+Radenovic,DhruvMahajan,KunpengLi,YueZhao,VladanPetrovic,MiteshKumarSingh,
+SimranMotwani, YiWen, YiwenSong, RoshanSumbaly, VigneshRamanathan, ZijianHe,
+PeterVajda, andDeviParikh. Emu: Enhancingimagegenerationmodelsusingphotogenic
+needlesinahaystack. CoRR,abs/2309.15807,2023. 2
+10[14] YilunDu,CameronSmith,AyushTewari,andVincentSitzmann. Learningtorendernovel
+viewsfromwide-baselinestereopairs. InProc.CVPR,2023. 3,6,8
+[15] DavidEigen,ChristianPuhrsch,andRobFergus. Depthmappredictionfromasingleimage
+usingamulti-scaledeepnetwork. InProc.NeurIPS,2014. 3
+[16] BillFreeman,CeLiu,ForresterCole,NoahSnavely,RichardTucker,TaliDekel,andZhengqi
+Li. Learningthedepthsofmovingpeoplebywatchingfrozenpeople. InProc.CVPR,2019. 1,
+3
+[17] AndreasGeiger,PhilipLenz,andRaquelUrtasun. Arewereadyforautonomousdriving? the
+KITTIvisionbenchmarksuite. InConferenceonComputerVisionandPatternRecognition
+(CVPR),2012. 6
+[18] AndreasGeiger,PhilipLenz,ChristophStiller,andRaquelUrtasun. Visionmeetsrobotics: The
+KITTIdataset. InternationalJournalofRoboticsResearch(IJRR),2013. 3,15
+[19] Rohit Girdhar, Mannat Singh, Andrew Brown, Quentin Duval, Samaneh Azadi, Sai Saketh
+Rambhatla, Akbar Shah, Xi Yin, Devi Parikh, and Ishan Misra. Emu video: Factorizing
+text-to-videogenerationbyexplicitimageconditioning. CoRR,abs/2311.10709,2023. 2
+[20] ClémentGodard,OisinMacAodha,andGabrielJ.Brostow. Unsupervisedmonoculardepth
+estimationwithleft-rightconsistency. arXiv.cs,abs/1609.03677,2016. 1,3,17
+[21] ClémentGodard,OisinMacAodha,MichaelFirman,andGabrielJ.Brostow. Digginginto
+self-supervisedmonoculardepthprediction. InProc.ICCV,2019. 3,17
+[22] IanJ.Goodfellow,JeanPouget-Abadie,MehdiMirza,BingXu,DavidWarde-Farley,Sherjil
+Ozair,AaronC.Courville,andYoshuaBengio. Generativeadversarialnets. InProc.NeurIPS,
+2014. 8
+[23] JiataoGu,AlexTrevithick,Kai-EnLin,JoshM.Susskind,ChristianTheobalt,LingjieLiu,and
+RaviRamamoorthi. NerfDiff: Single-imageviewsynthesiswithnerf-guideddistillationfrom
+3D-awarediffusion. arXiv.cs,abs/2302.10109,2023. 3
+[24] KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun. Deepresiduallearningforimage
+recognition. InProc.CVPR,2016. 5,6,17
+[25] Philipp Henzler, Jeremy Reizenstein, Patrick Labatut, Roman Shapovalov, Tobias Ritschel,
+Andrea Vedaldi, and David Novotny. Unsupervised learning of 3d object categories from
+videosinthewild. InProceedingsoftheIEEEConferenceonComputerVisionandPattern
+Recognition(CVPR),2021. 3
+[26] LukasHöllein,AngCao,AndrewOwens,JustinJohnson,andMatthiasNießner. Text2Room:
+Extractingtextured3Dmeshesfrom2Dtext-to-imagemodels. InProc.ICCV,2023. 3
+[27] Yicong Hong, Kai Zhang, Jiuxiang Gu, Sai Bi, Yang Zhou, Difan Liu, Feng Liu, Kalyan
+Sunkavalli,TrungBui,andHaoTan. LRM:Largereconstructionmodelforsingleimageto3D.
+InProc.ICLR,2024. 3
+[28] AjayJain,MatthewTancik,andPieterAbbeel. Puttingnerfonadiet: Semanticallyconsistent
+few-shotviewsynthesis. InProc.ICCV,2021. 3
+[29] MohammadMahdiJohari,YannLepoittevin,andFrançoisFleuret. GeoNeRF:generalizing
+NeRFwithgeometrypriors. InProc.CVPR,2022. 3
+[30] AbhishekKar,ChristianHäne,andJitendraMalik. Learningamulti-viewstereomachine. In
+Proc.NeurIPS,2017. 3
+[31] BernhardKerbl,GeorgiosKopanas,ThomasLeimkühler,andGeorgeDrettakis. 3Dgaussian
+splattingforreal-timeradiancefieldrendering. Proc.SIGGRAPH,42(4),2023. 2,3,4
+[32] DiederikP.KingmaandJimmyBa. Adam: Amethodforstochasticoptimization. Proc.ICLR,
+2015. 17
+11[33] Iro Laina, Christian Rupprecht, Vasileios Belagiannis, Federico Tombari, and Nassir
+Navab. Deeperdepthpredictionwithfullyconvolutionalresidualnetworks. arXivpreprint
+arXiv:1606.00373,2016. 1,3
+[34] KatrinLasinger,RenéRanftl,KonradSchindler,andVladlenKoltun.Towardsrobustmonocular
+depthestimation: Mixingdatasetsforzero-shotcross-datasettransfer. arXiv,abs/1907.01341,
+2019. 1,3
+[35] JiahaoLi,HaoTan,KaiZhang,ZexiangXu,FujunLuan,YinghaoXu,YicongHong,Kalyan
+Sunkavalli, Greg Shakhnarovich, and Sai Bi. Instant3D: Fast text-to-3D with sparse-view
+generationandlargereconstructionmodel. Proc.ICLR,2024. 2
+[36] Jiaxin Li, Zijian Feng, Qi She, Henghui Ding, Changhu Wang, and Gim Hee Lee. MINE:
+towardscontinuousdepthMPIwithnerffornovelviewsynthesis. InProc.ICCV,2021. 1,2,3,
+6,7,15,16,17
+[37] Ruoshi Liu, Rundi Wu, Basile Van Hoorick, Pavel Tokmakov, Sergey Zakharov, and Carl
+Vondrick. Zero-1-to-3: Zero-shotoneimageto3Dobject. InProc.ICCV,2023. 2,3
+[38] YuanLiu,SidaPeng,LingjieLiu,QianqianWang,PengWang,ChristianTheobalt,Xiaowei
+Zhou,andWenpingWang. Neuralraysforocclusion-awareimage-basedrendering. arXiv.cs,
+abs/2107.13421,2022. 3
+[39] NelsonL.Max. Opticalmodelsfordirectvolumerendering. IEEETrans.Vis.Comput.Graph.,
+1(2):99–108,1995. doi: 10.1109/2945.468400. 4
+[40] LukeMelas-Kyriazi,ChristianRupprecht,IroLaina,andAndreaVedaldi. RealFusion: 360
+reconstructionofanyobjectfromasingleimage. InProceedingsoftheIEEEConferenceon
+ComputerVisionandPatternRecognition(CVPR),2023. 2,3
+[41] LukeMelas-Kyriazi,IroLaina,ChristianRupprecht,NataliaNeverova,AndreaVedaldi,Oran
+Gafni, and Filippos Kokkinos. IM-3D: Iterative multiview diffusion and reconstruction for
+high-quality3Dgeneration. arXivpreprint,abs/2402.08682,2024. 2,3
+[42] BenMildenhall,PratulP.Srinivasan,RodrigoOrtizCayon,NimaKhademiKalantari,Ravi
+Ramamoorthi,RenNg,andAbhishekKar. Locallightfieldfusion: practicalviewsynthesis
+withprescriptivesamplingguidelines. Proc.SIGGRAPH,38(4),2019. 3
+[43] BenMildenhall,PratulP.Srinivasan,MatthewTancik,JonathanT.Barron,RaviRamamoorthi,
+andRenNg. NeRF:Representingscenesasneuralradiancefieldsforviewsynthesis. InProc.
+ECCV,2020. 3
+[44] TakeruMiyato,BernhardJaeger,MaxWelling,andAndreasGeiger. GTA:Ageometry-aware
+attentionmechanismformulti-viewtransformers. arXiv.cs,abs/2310.10375,2023. 3
+[45] MichaelNiemeyer,JonathanT.Barron,BenMildenhall,MehdiS.M.Sajjadi,AndreasGeiger,
+and Noha Radwan. RegNeRF: Regularizing neural radiance fields for view synthesis from
+sparseinputs. InProc.CVPR,2022. 3
+[46] MertalpOcalandArminMustafa.RealMonoDepth:Self-supervisedmonoculardepthestimation
+forgeneralscenes. arXiv.cs,abs/2004.06267,2020. 1,3
+[47] LuigiPiccinelli,Yung-HsuYang,ChristosSakaridis,MattiaSegu,SiyuanLi,LucVanGool,
+andFisherYu. UniDepth: universalmonocularmetricdepthestimation. InProc.CVPR,2024.
+1,2,3,4,6
+[48] DustinPodell,ZionEnglish,KyleLacey,AndreasBlattmann,TimDockhorn,JonasMüller,
+JoePenna,andRobinRombach. SDXL:improvinglatentdiffusionmodelsforhigh-resolution
+imagesynthesis. arXiv.cs,abs/2307.01952,2023. 2
+[49] BenPoole,AjayJain,JonathanT.Barron,andBenMildenhall. DreamFusion: Text-to-3Dusing
+2Ddiffusion. InProc.ICLR,2023. 3
+[50] RenéRanftl,AlexeyBochkovskiy,andVladlenKoltun.Visiontransformersfordenseprediction.
+arXiv.cs,abs/2103.13413,2021. 3
+12[51] JeremyReizenstein,RomanShapovalov,PhilippHenzler,LucaSbordone,PatrickLabatut,and
+DavidNovotny. CommonObjectsin3D:Large-scalelearningandevaluationofreal-life3D
+categoryreconstruction. InProc.CVPR,2021. 3
+[52] ChrisRockwell,DavidF.Fouhey,andJustinJohnson. PixelSynth: Generatinga3D-consistent
+experiencefromasingleimage. InProc.ICCV,2021. 3
+[53] RobinRombach,PatrickEsser,andBjörnOmmer. Geometry-freeviewsynthesis: Transformers
+andno3dpriors. arXiv.cs,abs/2104.07652,2021. 2
+[54] Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-net: Convolutional networks for
+biomedicalimagesegmentation. InProc.MICCAI,2015. 5,17
+[55] MehdiS.M.Sajjadi,HenningMeyer,EtiennePot,UrsBergmann,KlausGreff,NohaRadwan,
+SuhaniVora,MarioLucic,DanielDuckworth,AlexeyDosovitskiy,JakobUszkoreit,ThomasA.
+Funkhouser,andAndreaTagliasacchi. Scenerepresentationtransformer: Geometry-freenovel
+viewsynthesisthroughset-latentscenerepresentations. CoRR,abs/2111.13152,2021. 3
+[56] SaurabhSaxena,AbhishekKar,MohammadNorouzi,andDavidJ.Fleet. Monoculardepth
+estimationusingdiffusionmodels. arXiv,2023. 1,3
+[57] JohannesLutzSchönbergerandJan-MichaelFrahm. Structure-from-motionrevisited. InProc.
+CVPR,2016. 15
+[58] J.Shade,S.Gortler,LiweiHe,andR.Szeliski. Layereddepthimages. InProc.SIGGRAPH,
+1998. 2
+[59] ShuweiShao,ZhongcaiPei,WeihaiChen,XingmingWu,andZhengguoLi. Nddepth: Normal-
+distanceassistedmonoculardepthestimation. InProc.ICCV,2023. 1,3
+[60] Yichun Shi, Peng Wang, Jianglong Ye, Mai Long, Kejie Li, and Xiao Yang. MVDream:
+Multi-viewdiffusionfor3Dgeneration. InProc.ICLR,2024. 2
+[61] NathanSilberman,DerekHoiem,PushmeetKohli,andRobFergus. Indoorsegmentationand
+supportinferencefromRGBDimages. InProc.ECCV,2012. 3,6,15
+[62] VincentSitzmann,MichaelZollhöfer,andGordonWetzstein. Scenerepresentationnetworks:
+Continuous3D-structure-awareneuralscenerepresentations. Proc.NeurIPS,2019. 3
+[63] VincentSitzmann,SemonRezchikov,BillFreeman,JoshTenenbaum,andFrédoDurand. Light
+fieldnetworks:Neuralscenerepresentationswithsingle-evaluationrendering.InProc.NeurIPS,
+2021. 3
+[64] Pratul P. Srinivasan, Richard Tucker, Jonathan T. Barron, Ravi Ramamoorthi, Ren Ng, and
+NoahSnavely. Pushingtheboundariesofviewextrapolationwithmultiplaneimages. InProc.
+CVPR,2019. 3
+[65] MohammedSuhail,CarlosEsteves,LeonidSigal,andAmeeshMakadia. Lightfieldneural
+rendering. arXiv.cs,abs/2112.09687,2021. 3
+[66] MohammedSuhail,CarlosEsteves,LeonidSigal,andAmeeshMakadia. GeneralizablePatch-
+Basedneuralrendering. InProc.ECCV,2022. 3
+[67] Stanislaw Szymanowicz, Christian Rupprecht, and Andrea Vedaldi. Viewset diffusion: (0-
+)image-conditioned3Dgenerativemodelsfrom2Ddata. InProceedingsoftheInternational
+ConferenceonComputerVision(ICCV),2023. 3,8
+[68] StanislawSzymanowicz,ChristianRupprecht,andAndreaVedaldi. SplatterImage: Ultra-fast
+single-view3Dreconstruction. InProceedingsoftheIEEEConferenceonComputerVision
+andPatternRecognition(CVPR),2024. 2,3,4,5,6,7,16
+[69] JiaxiangTang,ZhaoxiChen,XiaokangChen,TengfeiWang,GangZeng,andZiweiLiu. LGM:
+Largemulti-viewGaussianmodelforhigh-resolution3Dcontentcreation. arXiv,2402.05054,
+2024. 3
+13[70] JunshuTang,TengfeiWang,BoZhang,TingZhang,RanYi,LizhuangMa,andDongChen.
+Make-It-3D: High-fidelity 3d creation from A single image with diffusion prior. arXiv.cs,
+abs/2303.14184,2023. 3
+[71] AyushTewari,TianweiYin,GeorgeCazenavette,SemonRezchikov,JoshuaB.Tenenbaum,
+FrédoDurand,WilliamT.Freeman,andVincentSitzmann. Diffusionwithforwardmodels:
+Solvingstochasticinverseproblemswithoutdirectsupervision. arXiv.cs,abs/2306.11719,2023.
+8
+[72] ZhouTinghui,TuckerRichard,FlynnJohn,FyffeGraham,andSnavelyNoah. Stereomagnifi-
+cation: Learningviewsynthesisusingmultiplaneimages. arxiv,2018. 2,3,5,6
+[73] Hung-YuTseng,QinboLi,ChangilKim,SuhibAlsisan,Jia-BinHuang,andJohannesKopf.
+Consistentviewsynthesiswithpose-guideddiffusionmodels. InProc.CVPR,2023. 3
+[74] RichardTuckerandNoahSnavely. Single-viewviewsynthesiswithmultiplaneimages. InProc.
+CVPR,2020. 1,2,3,6,7,17
+[75] ShubhamTulsiani,TinghuiZhou,AlexeiA.Efros,andJitendraMalik. Multi-viewsupervision
+forsingle-viewreconstructionviadifferentiablerayconsistency.InProc.CVPR,pages209–217,
+2017.
+[76] ShubhamTulsiani,RichardTucker,andNoahSnavely. Layer-structured3dsceneinferencevia
+viewsynthesis. InProc.ECCV,2018. 2,3,6,15
+[77] DorVerbin,PeterHedman,BenMildenhall,ToddE.Zickler,JonathanT.Barron,andPratulP.
+Srinivasan. Ref-nerf: Structuredview-dependentappearanceforneuralradiancefields. InProc.
+CVPR,2022. 3
+[78] JianyuanWang,ChristianRupprecht,andDavidNovotny. PoseDiffusion: solvingposeestima-
+tionviadiffusion-aidedbundleadjustment. InProc.ICCV,2023. 2
+[79] QianqianWang,ZhichengWang,KyleGenova,PratulP.Srinivasan,HowardZhou,JonathanT.
+Barron,RicardoMartin-Brualla,NoahSnavely,andThomasA.Funkhouser. Ibrnet: Learning
+multi-viewimage-basedrendering. InProc.CVPR,2021. 3
+[80] ShuzheWang,VincentLeroy,YohannCabon,BorisChidlovskii,andJeromeRevaud. DUSt3R:
+Geometric3Dvisionmadeeasy. arXiv,2023. 2
+[81] ZhouWang,AlanC.Bovik,HamidR.Sheikh,andEeroP.Simoncelli.Imagequalityassessment:
+fromerrorvisibilitytostructuralsimilarity. IEEETrans.onImageProcessing,13(4),2004. 17
+[82] DanielWatson,WilliamChan,RicardoMartin-Brualla,JonathanHo,AndreaTagliasacchi,and
+MohammadNorouzi. Novelviewsynthesiswithdiffusionmodels. InProc.ICLR,2023. 3
+[83] ChristopherWewer,KevinRaj,EddyIlg,BerntSchiele,andJanEricLenssen. latentsplat: Au-
+toencodingvariationalgaussiansforfastgeneralizable3dreconstruction.arXiv,abs/2403.16292,
+2024. 2,3,6,7,8
+[84] OliviaWiles,GeorgiaGkioxari,RichardSzeliski,andJustinJohnson. Synsin: End-to-endview
+synthesisfromasingleimage. InProc.CVPR,2020. 3,6,7
+[85] Felix Wimbauer, Nan Yang, Christian Rupprecht, and Daniel Cremers. Behind the scenes:
+Density fields for single view reconstruction. In Proceedings of the IEEE Conference on
+ComputerVisionandPatternRecognition(CVPR),2023. 1,3,6,7,15
+[86] JamieWynnandDaniyarTurmukhambetov. DiffusioNeRF:regularizingneuralradiancefields
+withdenoisingdiffusionmodels. InProc.CVPR,2023. 3
+[87] Dejia Xu, Yifan Jiang, Peihao Wang, Zhiwen Fan, Humphrey Shi, and Zhangyang Wang.
+SinNeRF:Training neuralradiance fieldson complex scenes from asingle image. In Proc.
+ECCV,2022. 3
+14[88] Haofei Xu, Anpei Chen, Yuedong Chen, Christos Sakaridis, Yulun Zhang, Marc Pollefeys,
+Andreas Geiger, and Fisher Yu. MuRF: Multi-baseline radiance fields. arXiv, 2312.04565,
+2023. 3
+[89] YinghaoXu,ZifanShi,WangYifan,HanshengChen,CeyuanYang,SidaPeng,YujunShen,and
+GordonWetzstein. GRM:Largegaussianreconstructionmodelforefficient3Dreconstruction
+andgeneration. arXiv,2403.14621,2024. 3
+[90] LiheYang, BingyiKang, ZilongHuang, XiaogangXu, JiashiFeng, andHengshuangZhao.
+Depthanything: Unleashingthepoweroflarge-scaleunlabeleddata. InProc.CVPR,2024. 1,3
+[91] WeiYin,ChiZhang,HaoChen,ZhipengCai,GangYu,KaixuanWang,XiaozhiChen,and
+ChunhuaShen. Metric3d: Towardszero-shotmetric3dpredictionfromasingleimage. InProc.
+ICCV,2023. 1
+[92] AlexYu, VickieYe, MatthewTancik, andAngjooKanazawa. PixelNeRF:Neuralradiance
+fieldsfromoneorfewimages. InProc.CVPR,2021. 2,3
+[93] ChenYuedong,XuHaofei,WuQianyi,ZhengChuanxia,ChamTat-Jen,andCaiJianfei.Explicit
+correspondencematchingforgeneralizableneuralradiancefields. arXiv,2304.12294,2023. 3
+[94] JasonY.Zhang,AmyLin,MoneishKumar,Tzu-HsuanYang,DevaRamanan,andShubham
+Tulsiani. Camerasasrays: Poseestimationviaraydiffusion. InProc.ICLR,2024. 2
+[95] KaiZhang,SaiBi,HaoTan,YuanboXiangli,NanxuanZhao,KalyanSunkavalli,andZexiang
+Xu. GS-LRM:largereconstructionmodelfor3DGaussiansplatting. arXiv,2404.19702,2024.
+2,3
+[96] RichardZhang,PhillipIsola,AlexeiA.Efros,EliShechtman,andOliverWang. Theunreason-
+ableeffectivenessofdeepfeaturesasaperceptualmetric. InProc.CVPR,pages586–595,2018.
+8
+[97] ChuanxiaZhengandAndreaVedaldi. Free3D:Consistentnovelviewsynthesiswithout3D
+representation. In Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition(CVPR),2024. 2,3
+[98] TinghuiZhou,MatthewBrown,NoahSnavely,andDavidG.Lowe. Unsupervisedlearningof
+depthandego-motionfromvideo. InProc.CVPR,2017. 3
+A Datasetdetails
+RealEstate10k. Wedownloadthevideosfromprovidedlinks,resultinginabove65,000videos,as
+wellastheprovidedcameraposetrajectories. Usingtheprovidedcameras,werunsparsepointcloud
+reconstructionwithCOLMAP[57]. WeusethetestsplitprovidedbyMINE,andfollowingprior
+workweevaluatePSNRonnovelframeswhichare5and10framesaheadofthesourceframe. In
+addition,weevaluateonarandomframesampledfromanintervalof±30frames. Weusethesame
+framesas[36]didfortheirevaluation. Asaresult, weevaluateon3205frames. Wereproduced
+theresultsfrom[36]usingtheirreleasedcheckpointwiththecommonprotocolofcropping5%of
+theimagearoundtheborder,achievingscoressimilartothosepresentedintheoriginalpaper. We
+confirmedwithauthorsofBTS[85]thatthisisthecommonlyusedprotocol. Wedoourtrainingand
+testingat256×384resolution.
+NYUv2. WeformabenchmarkthatissimilarinnaturetoRealEstate10kinthatitshowsindoor
+scenes,butisvisuallyradicallydifferent. Wedownload80rawsequencesofNYUv2[61]andrun
+COLMAP[57]onthemtorecovercameraposetrajectories. Oneachvideowesample3random
+souceframesandusearandomframeuniformlysampledwithin±30framesfromthesourceframe,
+mirroringtheprotocolofRealEstate10k. Weundistortimages,andrescaleto256×384resolution.
+KITTI WeevaluateontheTulsianitestsplit[76]oftheKITTI[18]dataset. Thecamerasinthe
+KITTIdatasetareinmetricscale,ournetworkworksdirectlywiththeprovidedcamerasandscenes
+withoutadditionalpreprocessing. Forevaluation,followingpriorwork[36,85]wecroptheouter5%
+oftheimages.
+15B Baselinesandcompetingmethods
+B.1 Depthunprojection
+Acrucialbaselineinourexperimentsismeasuringperformanceofmonoculardepthpredictionfor
+monocular Novel View Synthesis. In this baseline, we place isotropic 3D Gaussians with fixed
+opacitywithoutview-dependenteffects(i.e. apointcloudwithsoftpointboundaries)atthedepths
+predictedbythemonoculardepthpredictor. WesettheGaussiancolourstobeascaledcopyfrom
+theinputviewsothatc = αc andweinitialiseα = 1.0. WeinitialiseGaussianopacityto
+G RGB
+beσ = sigmoid(σ ),withσ = 4.0,i.e.,almostopaque. Wetesttwovariantsofsettingthescale
+0 0
+ofGaussians: (1)onewhereGaussianshaveafixedscales=exps withs =−4.5,and(2)one
+0 0
+wheretheradiusisproportionaltodepthfromcamera,allowingtheGaussianstofitinsidetheray
+cast from the pixel: s = exps d/d , where d is metric depth output from UniDepth, d = 10.0
+0 0 0
+ands = −4.5. Next, whilewedeterminedα = 1.0, s = −4.5andσ = 4.0tobereasonable
+0 0 0
+initialisations,theymightnotcorrespondtothehighestqualityofNovelViewSynthesis. Thus,we
+rungradient-basedoptimisationoftheparametersofthisbaseline,optimisingα,s ,σ tominimise
+0 0
+thephotometriclossinthesourceviewand3novelviews(identicaltoourfinalmodel)onthetraining
+set. WetrainthesemodelsforXiterationsandchoosetheonewiththebestperformanceonvalidation
+split. Finally,weevaluatethemodelwiththebestα,s ,σ onthetestsplitandreportthemetrics.
+0 0
+Table5: DepthUnprojectionBaseline. Wefithyperparametersofthedepthunprojectionmodelvia
+gradient-basedoptimisation. Wetrytwovariants: onewithfixed-sizeGaussiansandonewherethe
+Gaussianscaleisincreasedproportionallytodepth. Toptworowsarebeforecorrectingdepth-wise
+unprojectiontobefrompixelcentersinsteadofpixelcorners. Allmeasuredwithcroppint.
+5frames 10frames randomframe
+Model Backbone PSNR↑ SSIM↑ LPIPS↓ PSNR↑ SSIM↑ LPIPS↓ PSNR↑ SSIM↑ LPIPS↓
+Fixedsize ConvNeXT-L 26.47 0.864 0.120 24.08 0.808 0.173 22.60 0.774 0.211
+Fixedsize ViT-L 26.62 0.867 0.120 24.25 0.814 0.172 22.78 0.781 0.209
+Depth-dependent ConvNeXT-L 26.49 0.861 0.124 24.10 0.806 0.175 22.61 0.774 0.209
+Depth-dependent ViT-L 26.65 0.864 0.123 24.29 0.812 0.173 22.80 0.781 0.207
+B.2 SplatterImage
+WeimplementedtheSplatterImagebaselineusingthesameU-Netconvolutionalneuralnetwork
+withaResNet-50backboneasourownmethodforafaircomparison. WetraineditontwoNVIDIA
+A6000GPUsforatotalof350,000steps,anorderofmagnitudemorethanourproposedFlash3D.
+Trainingtook6GPUdays,sameasreportedin[68].
+B.3 MINE
+MINE[36]onlyprovidedmodelweightsbutnoinferenceandevaluationcodeonRealEstate10K
+dataset,hencewere-runtheinferenceandevaluationforreproducibility. Theresultsmatchthose
+reportedin [36]. WeusetheN =64modelsincethatisthebestonemadeavailablebytheauthors.
+ForevaluationonNYUweusethemodeltrainedonRe10k,identicallytoourmethod.
+B.4 Two-viewmethods
+Whencomparingtotwo-viewmethods,weoughttochooseoneofthemasoursourceview. For
+anymethod,themostindicativefactorofperformanceonatargetframeisthebaselinetothesource
+frame. Werunthiscomparisonon256×256withoutborder-croppingforbeingfullycomparable.
+B.5 ProbabilitydistributionofGaussian
+AnalternativeapproachtothemultipleGaussiansistopredictdepthprobabilitiesasinpixelSplat[9].
+However,withouttheestimateddepthfromthepre-traineddepthpredictor,thecoveragespeedis
+veryslow,andtheperformanceisworseinourmonocularsetting. Forafaircomparison,weablate
+onlyonotherGaussianlayers,i.e.K > 1ofGaussians. TheresultsarereportedinTable6. The
+continuousdepthoffsetoutperformsthedepthprobabilitiesdesigninpixelSplat.
+16Table6: AblationStudyforDepthDecoderArchitectures. Here,weablatetheprobabilisticdepth
+asinpixelSplat[9],butonlyfortheK >1ofGaussians. −K meansK Gaussiansper-pixel. Here,
+cross-domain(CD)denotesthatthemethodwasnottrainedonthedatasetbeingevaluated.
+KITTI NYU
+Method CD PSNR↑ SSIM↑ LPIPS↓ CD PSNR↑ SSIM↑ LPIPS↓
+Flash3D(Discrete)-2 ✓ 21.35 0.805 0.153 ✓ 24.52 0.763 0.200
+Flash3D(Discrete)-3 ✓ 21.50 0.814 0.136 ✓ 24.84 0.772 0.189
+Flash3D(Ours)-2 ✓ 21.96 0.826 0.132 ✓ 25.09 0.775 0.182
+C Implementationdetails
+C.1 Architecture
+We base our convolutional network on a ResNet-50 [24] backbone and implement a U-Net [54]
+encoder-decoderasin[21]. Specifically,asingleResNetencoderissharedbyamultipledecoders,
+one for each layer of appearance parameters as well as depth offset decoders, barring the offset
+decoderforthefirstlayerasweobtaindepthvaluesdirectlyfromapre-trainedmodel.
+C.2 Optimisation
+Wedefinethephotometriclossfollowing[20]asaweightedsumofL andSSIM[81]terms:
+1
+L=∥Jˆ−J∥+αSSIM(Jˆ,J) (2)
+Differentlytopriorworks[36,74],wedonotusesparsedepthsupervision.
+whereJ isatargetimage,Jˆisarenderingandα=0.85. WeoptimisethenetworkwithAdam[32]
+withbatchsize16andalearningrateof0.0001foratotalof40,000trainingsteps.
+C.3 Scalealignment
+CameraposesaretypicallyestimatedwithCOLMAP.Thesecameraposesareinarbitraryscalein
+eachscene. Followingpriorwork,wealignthescaleoftheCOLMAPcamerastothoseestimated
+byournetworkusingthescalefactorcomputationfrom[74]. However,ifthereareoutliersindepth
+estimation(bothinourmethodandbaselines),theywillimpactthescaleestimation. Asaresult,
+theremightbemismatchbetweenthescenereconstructionscaleandthescaleofcameraposesfrom
+whichnovelviewsarerendered. Inconsequence,therenderednovelviewscanbeshiftedcompared
+togroundtruth,whichdoesnotsignificantlyimpactLPIPSbutitdoesaffectPSNR.Thus,attest-time
+werunscalealignmentwithRANSAC.WedothesameforMINEwhenevaluatingitonthetransfer
+dataset,NYU,sincetheaccuracyofitsdepthpredictiondeterioratesinthisunseendataset. When
+estimating scale we thus use the RANSAC scheme with sample size of 5, 1,000 iterations and
+threshold0.1.
+D Limitations
+Aprimarylimitationoftheproposedapproachisduetoitbeingadeterministic,regressivemodel.
+Thisincentivisesittogenerateblurryrenderingsinpresenceofambiguity,suchaswhenbaselines
+areverylarge,inoccludedregionsorwhencameramovesbackward.
+Anotherlimitationisthatnotalloccludedsurfacesarecapturedbythereconstructor:thereconstructed
+3Dmodelsstillhavesomeholes. Whilemanyoftheseregionsarefilledin,somearemissed,even
+whenmultipleGaussiansarepredicted.
+Finally,failuresinthepre-traineddepthestimatorarelikelytoleadtofailuresinourscenerecon-
+structions,especiallyiftheestimateddepthisover-estimated. Thisisduetothenon-negativityofour
+depthoffsets,whichthereforecannotrecoverscenestructureclosertothecamerathanthesurface
+estimatedbythepre-traineddepthestimator. Thismakesthemodeldependentonthequalityofa
+third-partymodelwithinthedomainofuseatinferencetime.
+17E Broaderimpacts
+Thiswork,onmonocularscenereconstruction,haspotentialpositiveandnegativesocialimpacts.
+Onthepositiveside,theapproachsignificantlyreducesthecomputeandtimeresourcesneededto
+acquire3Dassetsin-the-wild,openingthedoortoconsumerapplicationswithpositiveimpacts. For
+example,theabilitytoquicklyreconstructone’shousetofacilitateitssale;theabilitytodigitally
+preserveartefactsandsitesofculturalheritage;andusesinsafeautonomousdriving.
+Onthenegativeside,thistechnologyhasthepotentialtobeusedformaliciouspurposes,suchas
+illegalorunethicaltrackingandsurveillance,orbeinvasiveofsomeone’sprivacy,forexampleby
+reconstructingtheirbodywithouttheirconsent. Inaddition,incorrectpredictionsmaycauseharmif
+usedinapplicationslikeautonomousdrivingandrobotics,wheremis-estimated3Dstructurescould
+leadtocrashesorsuboptimalperformance.
+18
