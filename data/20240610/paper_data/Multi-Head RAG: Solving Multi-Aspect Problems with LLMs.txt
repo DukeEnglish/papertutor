@@ -1,0 +1,704 @@
+Multi-Head RAG: Solving Multi-Aspect Problems
+with LLMs
+MaciejBesta1∗ AlesKubicek1 RomanNiggli1 RobertGerstenberger1
+LucasWeitzendorf1 MingyuanChi1 PatrickIff1 JoannaGajda2
+PiotrNyczyk2 JürgenMüller3 HubertNiewiadomski2 MarcinChrapek1
+MichałPodstawski4 TorstenHoefler1
+1ETHZurich 2Cledar 3BASFSE 4WarsawUniversityofTechnology
+Abstract
+RetrievalAugmentedGeneration(RAG)enhancestheabilitiesofLargeLanguage
+Models(LLMs)byenablingtheretrievalofdocumentsintotheLLMcontextto
+provide more accurate and relevant responses. Existing RAG solutions do not
+focusonqueriesthatmayrequirefetchingmultipledocumentswithsubstantially
+differentcontents. Suchqueriesoccurfrequently,butarechallengingbecausethe
+embeddingsofthesedocumentsmaybedistantintheembeddingspace,makingit
+hardtoretrievethemall. ThispaperintroducesMulti-HeadRAG(MRAG),anovel
+schemedesignedtoaddressthisgapwithasimpleyetpowerfulidea: leveraging
+activations of Transformer’s multi-head attention layer, instead of the decoder
+layer,askeysforfetchingmulti-aspectdocuments. Thedrivingmotivationisthat
+differentattentionheadscanlearntocapturedifferentdataaspects. Harnessingthe
+correspondingactivationsresultsinembeddingsthatrepresentvariousfacetsof
+dataitemsandqueries,improvingtheretrievalaccuracyforcomplexqueries. We
+provideanevaluationmethodologyandmetrics,syntheticdatasets,andreal-world
+use cases to demonstrate MRAG’s effectiveness, showing improvements of up
+to 20% in relevance over standard RAG baselines. MRAG can be seamlessly
+integratedwithexistingRAGframeworksandbenchmarkingtoolslikeRAGASas
+wellasdifferentclassesofdatastores.
+Website&code: https://github.com/spcl/MRAG
+1 Introduction
+LargeLanguageModels(LLMs)transformedmanymachinelearningtasksusingin-contextlearning
+abilities. Theyachievedsuchaccuracybyleveraginganincreasingnumberofparameters,which
+inrecentmodelshavegrowntohundredsofbillions,makingLLMtrainingexpensiveintermsof
+both time and resources. It also comes with the danger of leaking confidential data into model
+weights[28,33,40]. Additionally,continuoustrainingthroughfine-tuningisnecessarytokeepLLMs
+up-to-date. Evenusingthenewestdata,LLMsdisplayanongoingproblemofhallucinations[13,
+38,44]byprovidingfactuallyincorrectinformation. RetrievalAugmentedGeneration(RAG)was
+proposed[11,18]inordertoaddresstheseissuesaswellasothersandmakeLLMsmoretrustworthy.
+ThekeyideabehindRAGistoenhancethegenerativemodel’scapabilitiesbyintegratingaretrieval
+systemthatcanfetchrelevantdocumentsorpassagesfromalargecorpusofdata.Inthissetting,when
+aqueryisreceived,theretrievalsystemfirstidentifiesandretrievespertinentinformation,whichisfed
+intothegenerativemodel’scontextforamoreaccurateandrelevantresponse. Insteadofthemodel
+storing information within its weights, RAG effectively leverages external knowledge, reducing
+∗correspondingauthor
+Preprint.Underreview.
+4202
+nuJ
+7
+]LC.sc[
+1v58050.6042:viXrahallucinations(bygroundingtheLLMreplyinreliablesources),andensuringthatresponsescontain
+up-to-dateknowledge(e.g.,byaccessingtheInternet),allwithoutrequiringexpensivetraining.
+Morespecifically,therearetwomainstagesinaRAGpipeline: datapreparationandqueryexecution.
+Duringdatapreparation,oneconstructsavectordatabase(DB)populatedwithembeddingsandtheir
+correspondingdataitemssuchasdocuments. Duringqueryexecution,oneconstructsanembedding
+ofthatqueryandretrievesdataitemsinthestorewithsimilarembeddings.
+IntenserecentresearcheffortshavebeenputintoRAG[10,12,14,20,25,41,45]. Ononehand,
+differentRAGdesignshavebeenproposed,forexampleRAPTOR[31],Self-RAG[2],Chain-of-
+Note[42],andmanyothers[1,6,7,23,35,39,43]. Ingeneral,theseschemesfocusonmakingthe
+retrieveddatamoreaccurateandrelevanttothequery. Ontheotherhand,therehavealsobeenefforts
+intobenchmarkinganddatasetsforRAGevaluation[4,8,21,36].
+Despitealltheseadvances, weobservethatnoexistingRAGschemeorevaluationmethodology
+explicitlytargetsanimportantclassofproblemsthatcomewithahighdegreeofmulti-aspectuality.
+Theseareproblemsthatrequirecombiningseveral(potentiallymany)significantlydifferentaspectsin
+asinglequery. Asasimpleillustrativeexampleofsuchaquery,considerthequestion“Whatcardid
+AlexandertheGreatdrive?”,andassumethatthequeriedmodelhasnotbeentrainedonhistory.When
+usingRAG,toanswerthisquestionaccurately,onewouldretrievetwodocuments,onedescribing
+AlexandertheGreatandoneoutliningthehistoryofcarmanufacturing. However,theembeddings
+ofthesetwodocumentscouldbefarawayfromeachotherintheembeddingspace. Atthesame
+time,suchqueriesarecommonindifferentindustrysettings,asindicatedbyextensivediscussions
+withourindustrycollaborators. Imagineachemicalprocessingplantexperiencinganequipment
+accident. OnecoulduseanLLMtofindtheaccidentcause, whichmightrequiretheretrievalof
+multiple,potentiallyconfidentialdocumentstoprovidethenecessarycontext.Thesedocumentscould
+berelatedtodifferent aspects, forexamplepsychologicalprofilesofworkers(“Wastheaccident
+due to mismanaging a worker?”), equipment purchase records (“Was some equipment part too
+old?”),maintenance(“Wassomeequipmentpartrusty?”),weather(“Wasthereaparticularlystrong
+thunderstormattheaccidenttimethatcouldhavecauseddangerouspowerspikesinthegrid?”),or
+evenmicroclimate(“Wasittoohumidforanextendedperiodoftimeintheproductionhall?”). As
+weillustrateinSection4,suchproblemsposechallengesforexistingRAGschemesandhavebeen
+unaddressedbymodernRAGbenchmarkingpipelines.
+In this work, we propose Multi-Head RAG (MRAG): a
+schemethataddressestheaboveproblem. Commonprac- Transformer
+tice in modern RAG designs is the use of embeddings
+basedonlast-layerdecoderblockactivations. Ourkey Decoderblocks
+idea is to use instead the activations of the multi-head
+First Second Last
+attentionpartofthedecoderblockasembeddings. The
+block block block
+Transformerarchitecturecanbe seenasa pipeline with
+many(e.g.,96forGPT-3[5])blocks,whereasingleblock
+consistsofanattentionmoduleandafeed-forwardmod- embedding
+Feed- used in
+ule. Eachindividualattentionmoduleismulti-headed: it Attention forward standard
+RAG
+consists of multiple parts called heads that learn differ-
+entsetsofweightmatrices;seeFigure1foranoverview. Generating all single-aspect embeddings
+needed in MRAG requires encoding the
+Itisconjecturedthatthesedifferentheadscouldcapture corresponding input data once
+Attention-head 1
+differentaspectsoftheprocesseddata. Weusethisasa
+embeddings
+drivingdesignfeaturethatfacilitatescapturingthepoten- Attention-head 2 used in
+MRAG
+tialmulti-aspectualityofthedatawithoutincreasingspace
+Attention-head h
+requirementscomparedtostandardRAG(contribution1).
+Key idea: use multiple smaller embeddings from attention heads
+Suchmulti-aspectembeddingsarethendirectlyusedfor
+Figure1:Anoverviewofthedecoderarchitecture,anda
+both data items and query representation. Considering comparisonofhowstandardRAGandMulti-HeadRAG
+multi-aspectualityexplicitlycomeswithchallenges. For embeddingsaregenerated.
+example, how to assess the effectiveness of a RAG solution in retrieving data that indeed does
+cover multiple aspects of a given domain. For this, we establish an evaluation methodology as
+well as a full data construction and query processing pipeline that implements the multi-aspect
+embedding idea (contribution 2). Our datasets facilitate broad evaluation by considering both
+fully-automaticallygenerated, syntheticdataandanalyzingspecificindustryusecasesthatshow
+the benefits of MRAG (contribution 3). Our evaluation illustrates the benefits in the relevance
+2ofretrieveddocuments,forexample20%overamodernRAGbaselineforfetchingmulti-aspect
+Wikipediaarticles(contribution4). WealsoshowhowMRAGanditsbenchmarkingprinciplescan
+beseamlesslyintegratedwithbothexistingRAGsolutionsandbenchmarkingframeworkssuchas
+RAGAS(contribution5). MRAG’scodeispubliclyavailable2.
+2 TheMRAGFormulation&Pipeline
+WenowpresentindetailthemathematicalunderpinningofMRAGanditscorrespondingpipeline.
+DecoderFormulationWefirstintroduceformallythedecoderarchitecture. Weomit, forclarity,
+unnecessarydetailssuchaslayernormalizations. Theinputisatextchunkthatconsistsofntokens.
+Theoutputofanattentionheadhfortheithtokenx isdefinedas[32]headh(x ) = (cid:80) w vh,
+i i j ij j
+wherew =softmax(cid:16)(cid:0) qh(cid:1)T kh(cid:17) ,qh =Whx ,kh =Whx ,vh =Whx .Here,Wh,Wh,Wh
+ij i j i q i j k j j v j q k v
+are,respectively,learnablequery,key,andvalueprojectionsassociatedwithheadh,andx isthe
+j
+vectorembeddingofthejthtokenx . Theseoutputsgetcombinedtoformtheoutputoftheith
+j
+multi-head attention block as multi-head(x ) = W concat(head1(x ),...,headh(x ))T, where
+i o i i
+matrixW isthelinearlayerthatcombinestheoutcomesofalltheattentionheads. Thisstepisthen
+o
+followedbytheTransformerfeed-forwardlayer.
+StandardRAGFormulationAssumeasequenceofntokensastheinputtextchunk. Theembed-
+dingforthatchunkisobtainedastheactivationvectorafterthefeed-forwarddecoderlayerforthe
+lastnthtokenofthischunk,i.e.,feed-forward(multi-head(x )),generatedinthelastdecoderblock.
+n
+Multi-HeadRAGFormulationThekeyideabehindMRAGissimple: insteadofthesingleacti-
+vationvectorgeneratedbythelastfeed-forwarddecoderlayerforthelasttoken,weharnesstheH
+separateactivationvectorsgeneratedbythelastattentionlayerforthelasttoken,beforeprocessing
+itviaW . ThiscanbeformulatedasasetofembeddingsS = {e ∀ }wheree = headk(x ),
+o k k k n
+whichissimplythesetofalloutputsfromtheattentionheadsonthelasttokenx oftheinput. As
+n
+processingwithmultipleheadsdoesnotchangethesizeoftheoutputvector,S hasthesamespace
+requirementsasstandardRAG.However,becausewecapturetheseparateembeddingsbeforetheir
+mixingwithW ,weconjecturethatitgivesmoreinformationaboutwhatthedifferentpartsofthe
+o
+inputattendto,facilitatingcapturingmulti-aspectuality.
+Naming We use the terms “single-aspect embedding” and “multi-aspect embedding” to refer to,
+respectively,asmallembeddingextractedfromasingleattentionheadandacollectionofallsingle-
+aspectembeddingsextractedfromanattentionlayer.
+2.1 OverviewoftheMulti-HeadRAGPipeline
+WenowdescribehowtheaboveembeddingmodelfitstheRAGpipeline. Figure2showsasummary
+ofthedesign. TheMRAGpipelineconsistsoftwomainparts,dedicatedtodatapreparation A and
+queryexecution B. Bothpartsheavilyusethedatastore D (vectorDB).
+2.1.1 DataPreparation
+Duringdatapreparation A,wepopulateadatastore D withmulti-aspectMRAGtextembeddings
+andtheircorrespondingdocuments ortextchunks (MRAGisorthogonaltothetypeofdata
+being embedded, and while we primarily use chunking of documents in order to reflect modern
+RAGpipelines,onecanalsoembedwholedocumentsorevenothertypesofdata). Wecreatethe
+multi-aspectembedding ofeachtextchunk usingaselecteddecoder-basedembeddingmodel
+C (thispartisdetailedinSection2.2). Theuserofthepipelinecanplugintheirmodel C ofchoice
+aswellasusetheirinputdata. Wealsoofferadedicatedsyntheticdatagenerator thatcanbeused
+toconstructmulti-aspectinputdocuments (wedetailthispartinSection3)forevaluationpurposes.
+MRAGstoresdatadifferentlythanstandardRAG,whereasingleembedding pointstoasingle
+textchunk . ForMRAG,eachmulti-aspectembeddingconsistsofhsingle-aspectembeddings ,
+eachpointingtotheoriginaltextchunk . Sothedatastore D containshembeddingspaces,each
+capturingadifferentaspectofthetext. ThiscrucialfeatureallowsMRAGtocomparequery and
+textchunks inmultipleembeddingspacesthatcapturemultipleaspectsofthedata.
+2https://github.com/spcl/MRAG
+3AData preparation (see Section 2.1.1) B Query execution (see Section 2.1.2)
+Synthetic Synthetic
+Otherdata
+data generator query generator Reply to user
+(see Section 3) sources User (see Section 3)
+Sourcedocuments Query Language model
+C
+Embedding
+model Query embedding Assessment
+Text chunks (see Section 2.2) (see Section 3)
+(see Figure 1)
+Text embeddings Retrieval engine
+(see Section 2.2) (see Section 2.3) Textchunks
+find closest embeddings and
+insert (embedding,chunk)-pairs retrieve associated chunks
+DData store
+Standard RAG Text chunks MRAG
+The query contains Embedding space Embedding space 1 The query contains
+two aspects ( ), two aspects ( ),
+but the single one of them ( )
+embedding space is captured by
+of the standard embedding space 1
+RAG only captures Embedding space 2 and one of them ( )
+one of them ( ). is captured by
+We retrieve the embedding space 2.
+two closest items: We retrieve the two
+a relevant ( ) and closest items ( )
+an irrelevant ( ) one. which are the
+two relevant ones.
+Embedding space h
+We store a key for each
+head as a column in the
+database (no added
+memory cost).
+Figure2:OverviewoftheMRAGpipeline,consistingoftwoparts:datapreparationAandqueryexecutionB.TheembeddingmodelCandthe
+datastoreDareusedbybothparts.ThedatastoreDcontainstextembeddings linkingtotextchunks reflectingthreedifferentaspects
+(cyan,magenta,yellow).Blocksmarkedbyastar areanoveltyofthiswork.
+2.1.2 QueryExecution
+Duringqueryexecution B,wefirstgenerateamulti-aspectembedding oftheinputquery ,using
+theselectedembeddingmodel C (detailsinSection2.2). Then, wefindthenearestmulti-aspect
+embeddings andtheircorrespondingtextchunks inthedatastore D usingaspecialmulti-aspect
+retrievalstrategy (detailedinSection2.3). Finally,theretrieveddatacanoptionallybeassessed
+withnovelmetricsregardinghowwellitcorrespondstothemulti-aspectrequirements(detailed
+inSection3). Aswiththedatapreparation A stage,thequeryexecution B stageisflexible,andthe
+usercanplugintheirmodels C / ofchoiceandusetheirownqueries . Wealsoofferadedicated
+syntheticquerygenerator thatcanbeusedtoconstructmulti-aspectinputqueries (detailedin
+Section3)forevaluationpurposes.
+2.2 ConstructingMulti-AspectEmbeddings
+MRAGcanleverageanyembeddingmodelwithmulti-headattentionsupporttoconstructthemulti-
+aspectembeddingsforagiveninputtext. Inthiswork,weconsidertwoembeddingmodelsfromthe
+MTEBleaderboard[15]aspotentialcandidates. Specifically,theSFR-Embedding-Model[24]and
+thee5-mistral-7b-instruct[34],bothbasedontheMistral7Barchitecturewith32decoderblocksand
+32attentionheadspermulti-headattention.
+Whileourapproachallowsforextractingandusingthemulti-aspectembeddingsfromanydecoder
+block,andfromdifferentlayerswithinablock,wefoundthatmulti-aspectembeddingsextractedfrom
+thelastmulti-headattentionworkedbestinourexperimentalsetting. Weprovidefurtherdiscussion
+onthecarriedoutexperimentsinSection4.
+2.3 RetrievalStrategiesforMulti-AspectData
+AretrievalstrategydetermineshowweselecttheclosesttextchunksfromtheDBgivenamulti-aspect
+embeddingoftheuserquery. Ingeneral,theMRAGretrievalstrategyconsistsofthreesteps. First,
+duringdatapreparation,weassignimportancescorestoallhembeddingspaces. Intuitively,these
+scores capture the fact that different spaces (and the corresponding heads) may be more or less
+relevantfortheuseddata. Then,duringqueryexecution,MRAGstartsbyapplyingthetraditional
+RAGretrievalseparatelyforeachembeddingspace. Thisreturnsalistofcclosesttextchunksfor
+eachembeddingspace(atotalofhlists). Here,weuseaspecialvotingstrategytopickoveralltopk
+outofallhcchunks,usingthepre-computedimportancescores.
+4Algorithm1detailstheconstructionofimpor-
+Algorithm1Importancescoresforheads.
+tancescores. Itisaheuristicbasedonextensive
+empiricalevaluation;itgiveshigh-qualityresults foreachheadh ido
+acrossthetesteddatasetsandtasks. Intuitively, a i ←0;b i ←0
+the score s i of a given head h i consists of two count_a i ←0;count_b i ←0
+parts, a i and b i. a i is the average of L2 norms foreachembeddinge ij inh ido
+ofallembeddingsinthevectorspacei;itrepre- a i ←a i+||e ij||
+sentshowimportantagivenheadis: thelarger count_a i ←count_a i+1
+thenorms,themoreattentionwasgiventothisat- foreachembeddinge ihdo
+tentionhead. b iistheaverageofcosinedistances b i ←b i+cosine-distance(e ij,e ih)
+betweenall(orarandomlysampledsubset,ifthe count_b i ←count_b i+1
+userwantstoreducepre-computetime)embed- endfor
+dingsinvectorspacei. Intuitively,b isaproxy endfor
+i
+formeasuringthe“spread”ofvectorspacei: the a i ←a i/count_a i;b i ←b i/count_b i
+larger b i, the larger the average angle between s i ←a i·b i
+differentembeddingsinthisspaceis. Derivings endfor
+i
+asaproducta ·b ensuresthatwerewardheads
+i i
+withhighaverageattentionandhighaveragespread,butsimultaneouslypenalizeheadswithlower
+averageattentionorwithlowaveragespread(botha andb areappropriatelyscaled).
+i i
+Theusedvotingstrategycombinestheconstructedlistsoftextchunksfromindividualembedding
+spacesintoasinglelistoftopkchunks. Thestrategyisverysimple(thecorrespondingAlgorithm2
+is in the Appendix). Each text chunk from a list i of the vector space i has a certain position on
+this list, we denote this position with p. We obtain a weight for this chunk as s ·2−p; s is the
+i i
+previouslydefinedimportancescoreofthespacei. Multiplyings with2−p exponentiallylowers
+i
+thesignificanceoflessrelevanttextchunks. Finally,allchunksfromalllistsaresortedusingtheir
+weightsandthetopkchunksformthefinallist.
+2.3.1 IntegrationwithDataStores
+MRAGcanbeseamlesslyusedwithdifferentclassesofdatastores C andnearestneighbor(NN)
+search approaches. It can be combined with both the exact and the approximate NN to find the
+matching(embedding,chunk)-pairs. ThesetwopartsofthebroaderRAGprocessingpipelineare
+orthogonaltoMRAG.
+3 Multi-AspectDatasets,Queries,andMetrics
+ToassesshowwellMRAGperformsonmulti-aspectqueries, andtocompareittomodernRAG
+schemes,weneed(1)datasetsofdocumentsthatcapturemulti-aspectuality,(2)queriestotheLLM
+thattouchuponmulti-aspectualityandrequireretrievingdocumentsfromthemulti-aspectdataset,
+and(3)metricsthatassesshowwellaRAGschemeretrievessuchmulti-aspectdata.Wenowdescribe
+thesethreeelements. InSection4,wealsobrieflydiscussreal-worlddataandqueriesused.
+Multi-AspectDatasetGenerationWefirstselectconceptuallydifferentcategoriesofdocuments.
+WeprimarilyfocusonpubliclyavailableWikipediaarticlesandselect25categories(e.g.,countries,
+boardgames,historicalswords,shipwrecks,etc.). Foreachcategory,wesample50documents. The
+firstpartofthedocument(overview)isusedasatextchunktobeembedded. Weenforcethateach
+overviewmusthaveatleast800characters,matchingcommonlyusedchunksizesinRAGschemes.
+Multi-Aspect Query Generation We also require queries that touch upon a given number of n
+aspects. Forexample,aquerywith10aspectsmustcontainaquestionabout10differentdocuments
+from10differentcategories. Wecreatesuchqueriesbyselectingncategories,samplingadocument
+fromeachselectedcategory(ensuringtherearenoduplicatesoverall),andthengeneratingastory
+thatcombinesthesedocuments,usinganLLM(GPT-3.5Turbo). Weconstruct25querieswith1,5,
+10,15and20aspects(125queriesintotal). Anexamplemulti-aspectquerysenttotheLLMthat
+requiresretrieving10documentsfrom10differentcategories,ispicturedinthetoppartofFigure3.
+Metrics We also design novel metrics to assess how well a given RAG scheme supports multi-
+aspectuality. ForaqueryQ,ausedretrievalstrategyS (detailedinSection2.3),andndocuments
+fromncategoriestoretrieve,Q denotestheidealsetofdocumentsthatshouldberetrievedforQ.
+rel
+Then,S(Q,n)isthesetoftheactuallyretrieveddocuments. WedefinetheRetrievalSuccessRatio
+asΞ(Q,n)= |S(Q,n)∩Qrel|,i.e.,theratioofsuccessfullyretrievedrelevantdocuments. Moreover,
+|Qrel|
+5Legend: SRAG: Standard RAG MRAG: Multi-Head RAG (this work) Document ID Document match Category match Repeated category match No match
+1Example Prompt
+Given a story, retrieve relevant documents that provide contextual information about topics brought up in the story.
+1 SRAG: MRAG: 2 SRAG: MRAG:
+In a realm where the echoes of music intertwined with the whispers of ancient battles, a curious scholar, named LucMontagnier, delved into the mysteries of a peculiar instrument known as the
+Theremin. As he studied its ethereal melodies that seemed to bridge the gap between reality and the unknown, memories of the enigmatic disappearance of the esteemed mayor Celso Daniel
+haunted his thoughts. 4 SRAG: MRAG: 3 SRAG: MRAG:
+Meanwhile, in a land where dreams took flight on the wings of imagination, children gathered to watch the fantastical tale of "James and the Giant Peach" unfold on the silver screen. The
+whimsical story transported them to a world beyond their own, much like the desert planet of Arrakis in the epic novel "Dune," where the precious spice held the key to power and destiny.
+6 SRAG: MRAG: 5 SRAG: MRAG:
+Amidst the vast expanse of the cosmos, the majestic Kongō-class battlecruisers sailed through the stars, their presence a testament to both honor and sacrifice in the raging tides of war. Their
+legacy echoed through the ages, much like the volumes of knowledge meticulously preserved in ancient libraries, each page a treasure trove of insights waiting to be discovered.
+7 SRAG: MRAG: 8 SRAG: MRAG: 9 SRAG: MRAG:
+In a realm where the digital realm merged with reality, the phenomenon of Twitch Plays Pokémon captivated the masses, blurring the lines between player and spectator, much like the elusive
+concept of Money Illusion that tricked minds into perceiving value where none truly existed. And in the midst of it all, a strategic dance unfolded on the board of Camelot, where tactics intertwined
+withskill in a timeless battle of wits. 10 SRAG: MRAG:
+And so, the scholar pondered these diverse threads of existence, seeking to unravel the intricate tapestry that connected Luc Montagnier to the Theremin, Celso Daniel to the mysteries of power,
+and the timeless saga of Dune to the strategic depths of Camelot. In this weaving of tales, each article found its place, like pieces of a puzzle coming together to reveal a grand design hidden
+within the annals of history.
+Ground Truth 2.1Standard RAG (SRAG) 2.2Multi-Head RAG (MRAG)
+ID Document Category Document Category Match Document Category Match
+1 Luc Montagnier Nobel Dune (novel) Sci-fi Novels 5 Theremin Instruments 2
+2 Theremin Instruments The Most Mysterious Song on the InternetMemes 8 The Most Mysterious Song on the InternetMemes 8
+3 Celso Daniel Assassinated Theremin Instruments 2 Luc Montagnier Nobel 1
+4 James and the Giant Peach Disney The Dry Salvages (novella) Sci-fi Novels The Decameron Books 7
+5 Dune (novel) Sci-fi Novels A Canticle for Leibowitz Sci-fi Novels Dune (novel) Sci-fi Novels 5
+6 Kongō-class battlecruiser Shipwrecks Journey to the Center of the Earth Sci-fi Novels Fictional book Books
+7 Volume (bibliography) Books The Narrative of Arthur Gordon Pym Sci-fi Novels Money illusion Cognitive Bias 9
+8 Twitch Plays Pokémon Memes Fahrenheit 451 Sci-fi Novels James and the Giant Peach Disney 4
+9 Money illusion Cognitive Bias The Giver Sci-fi Novels Nicole Kidman AMC Theatres commercialMemes
+10 Camelot (board game) Board Games The Left Hand of Darkness Sci-fi Novels Cool Runnings Disney
+Retrieval Success Ratio (Document Match): 2/10 Retrieval Success Ratio (Document Match): 5/10
+Retrieval Success Ratio (Category Match): 3/10 Retrieval Success Ratio (Category Match): 7/10
+Weighted Retrieval Success Ratio (2:1): 0.23 Weighted Retrieval Success Ratio (2:1): 0.56
+Figure3:AnexamplequeryusedtoevaluatedifferentRAGstrategies.Wementionthedocumentstobefetchedinthetextandthenassessthe
+successratioofdifferentRAGstrategiesinfindingthesedocumentsandtheircategories.Wemarkexactdocumentmatches ,categorymatches
+,documentsthatmatchacategorymultipletimes ,andtextsegmentswithnomatchingdocument .Finally,weshowtheweightedsuccess
+ratioforeachstrategy,takinga2:1weighting(prioritizingtheexactarticlematches).
+thereisacasewhenaRAGschemedoesnotretrievetheexactdesireddocument,butitstillretrieves
+successfullysomeotherdocumentfromthesamecategory. Toconsidersuchcases,weuseanother
+measure,theCategoryRetrievalSuccessRatioorΞ . IthasthesameformasΞ(Q,n)above,with
+c
+onedifference: S(Q,n)isnowthesetofalltheretrieveddocumentsthatbelongtocategoriesof
+theidealdesireddocuments. Finally,tocombinethesetwometrics,weusetheWeightedRetrieval
+Success Ratio Ξ
+w
+as Ξ
+w
+= w· wΞ ++ 1Ξc. By varying w, the user can adjust the importance of exact
+documentmatchesandcategorymatches. Anexampleofusingthesemetricstoassesshowwell
+MRAGandStandardRAGcapturemulti-aspectualityispicturedinthebottompartofFigure3.
+4 Evaluation
+WenowillustratetheadvantagesofMRAGoverthestateoftheart.
+ComparisonBaselinesWecompareMRAGtotwomainbaselines: StandardRAGandSplitRAG.
+The first represents a modern RAG pipeline in which each document uses the activations of the
+last decoder layer as its embedding. The second is a blend between Standard RAG and MRAG.
+Specifically,itsplitstheactivationofthelastdecoderlayerinthesamewayasMRAGandapplies
+avotingstrategy. ThepurposeofSplitRAGistoshowthatMRAG’sbenefitscomefromusingthe
+multi-headoutputasembeddingandnotmerelyusingmultipleembeddingspaces. Additionally,we
+considerFusionRAG[29],anoptionalmechanismthatweharnesstofurtherenhancethebenefitsof
+MRAGatthecostofadditionaltokens(detailedinSection4.2).
+WeusequeriesandmetricsintroducedinSection3. Weusetheweightedretrievalsuccessratio
+with2:1weighting,whichconsiderscategorymatchesasrelevantbutprioritizestheexactdocument
+matches. Figure 3 shows an example query and metrics usage. Each query requires retrieving
+a specific number of documents and the corresponding non-overlapping categories which define
+thegroundtruth. Wefetchthetopk documentsfromadatabase,wherek isthe“totalnumberof
+documentsfetchedforatestedRAGscheme”(includingpotentiallymismatches). Amongthesek
+documents,wesearchformatcheswiththegroundtruth.
+Samples&SummariesEachdatapointinourplotscorrespondsto25queries. Wepresentthedata
+usingstandardboxplotstoshowcasethedistribution. Ourprimaryfocusisontheaverageretrieval
+performanceamongthose25queries.
+6Figure4:Retrievalsuccessratioover25queriesbetweenMRAGandStandardRAG,whereeachqueryincludes10differentaspects.The
+upperpartpresentsexactdocumentmatcheswhilethelowerpartpresentscategoryonlymatches(weexplainthemetricsusedinSection3).
+Ahistogramispresentedforaspecificsampletoshowcasethedetaileddistributionamongthe25queries(thenumberofdocumentsfetchedfor
+eachqueryis30).
+Figure5:RelativeretrievalimprovementofMRAGoverStandardRAGacrossquerieswithdifferentnumbersofaspectsanddifferent
+embeddingmodels(SFRintheleftside,e5intherightside).
+4.1 AnalysisofResults
+WestartfromthequeryexampleinFigure3andshowfirsttheabsoluteretrievalperformanceof
+MRAGoverStandardRAGinFigure4. Wefixthenumberofaspectspresentinthequeriesto10,
+andvarythetotalnumberofretrieveddocumentsfrom10to30. MRAGconsistentlyoutperforms
+StandardRAG(>10%increaseintheretrievalsuccessratioonaverageforexactdocumentmatches).
+Moreover,theretrievalperformanceincreaseisevenmoresignificantoncategorymatches(>25%
+increaseintheretrievalsuccessratioonaverage). Theperformanceincreaseisfurtherdetailedinthe
+histogramsontherightside. Here,foraspecificnumberofdocumentsfetched,MRAG’shistogram
+indicatesabetterdistributionofretrievalsuccessratios(acrossall25queries).
+Next, Figure5showstherelativeweightedperformanceimprovementofMRAGwithrespectto
+Standard RAG as we vary the number of aspects present in the queries. We show data for two
+differentembeddingmodels(SFRande5). MRAGconsistentlyoutperformstheStandardRAGby
+10-20%onaverage,notonlyacrossthenumberofdocumentsfetched,butalsoacrossthenumberof
+aspectspresentinthereplies,forbothmodels.
+Multi-AspectDataset LegalDataset AccidentsDataset
+DocumentsFetched SFR e5 SFR SFR
+MRAGStandardRAG|MRAGStandardRAG|MRAGStandardRAG|MRAGStandardRAG
+1 24/25 25/25 24/25 25/25 24/25 24/25 25/25 25/25
+2 25/25 25/25 25/25 25/25 25/25 25/25 25/25 25/25
+3 25/25 25/25 25/25 25/25 25/25 25/25 25/25 25/25
+Table1:Retrievalsuccessratio(theexactdocumentmatch)for25querieswithasingleaspect.
+7Figure6:RelativeretrievalimprovementsofMRAGoverStandardRAGfortheSFRembeddingmodelcomparedwithSplitRAG(theblue
+plots),andtherelativeretrievalimprovementsofFusionMRAGoverbothFusionRAGandMRAG(theredplots).
+WeadditionallyshowinTable1thatMRAGperformson-parwithStandardRAGonqueriesfrom
+ourmulti-aspectdatasetwhereonlyasingleaspectisexpected. Hence,ourapproachdoesnotsuffer
+fromsignificantdecreaseinperformanceforsingle-aspecttasks.
+4.2 FurtherImprovementswithAdditionalTokens
+WenowshowthatMRAGcanbeseamlesslyintegratedwithotherRAGapproaches: Wecombine
+MRAGwithFusionRAG,representingRAGschemesthatuseanLLM(additionaltokencost)for
+moreaccurateretrieval. FusionRAGusesanLLMtocreateafixednumberofquestionsaboutthe
+RAGquery. EachquestionisseparatelyappliedthroughanembeddingmodelusingStandardRAG.
+WeapplyMRAG’sapproachtoeachofthesequestionsanddenotethecombinedschemeasFusion
+MRAG.RedplotsofFigure6showthatbothFusionRAGandFusionMRAGperformbetterthan
+StandardRAG,onaveragegaining10to30%inaccuracy. FusionMRAGperformsconsistently
+betterthanpureFusionRAG,indicatingthattheseoptimizationscanbecombinedtogether. However,
+both Fusion strategies introduce a greater variance than MRAG and additional costs in terms of
+compute,latency,andtokens.
+4.3 BenefitsfromMulti-HeadAttentionSolely
+WealsocompareMRAGtotheSplitRAGbaselineinFigure6. Theblueplotsshowtherelative
+weightedperformanceofMRAGandSplitRAGoverStandardRAG.MRAGperformsbetterthan
+SplitRAG,illustratingthatitshighaccuracyisduetotheactualmulti-headpart,andnotmerelyjust
+partitioningthevectorandusingmultipleembeddingspaces.
+4.4 Real-WorldWorkloads
+TofurtherillustrateadvantagesofMRAG,wealsoconsidertworeal-wordusecasesfromin-house
+industrydataanalyticsprojects,namely,thesynthesisoflegaldocumentsandtheanalysisofcauses
+ofchemicalplantaccidents. TheresultsareinFigure7. Intheformer(theleftside),thetaskisto
+createadocumentbasedonuserrequirementsthatmayberelatedtodifferentaspects,forexampleto
+thelawbeingconsidered(e.g.,theBritishortheUSone),thesubject(e.g.,energeticorcivil),the
+styleofthedocument(e.g.,aggressiveormild),etc.. ThistaskisexecutedwithRAGthatcanfetch
+documentsfromadatabase. Inthelatter(therightside),thetaskistodiscoveracauseofanaccident.
+Here,onealsowantstoretrievedocumentsfromadatabasethatshouldbeusedintheLLMcontext
+tofacilitatediscoveringthecauseoftheaccident. Thecausesaregroupedincategoriessuchasutility
+impactduetosevereweather,lackofpreparednessandplanning,incorrectinstallationofequipment,
+lackofmaintenance,etc.. Similarlytothepreviousanalyses,wemeasuretheretrievalsuccessratio
+overcorrespondingdatabases. MRAGoffersadvantagesoverotherschemes.
+Figure7:AverageimprovementoftheretrievalsuccessratioofMRAGandSplitRAGoverStandardRAGfortworeal-worldworkloads
+constructinglegaldocuments(left)anddiscoveringcausesofindustryaccidents(right).
+8Figure8:EvaluationofdifferentvotingstrategiesforMRAGandSplitRAG
+4.5 AdditionalAnalyses
+WealsoanalyzetheimpactofusingembeddingsfromdifferentdecoderblocksforMRAG(instead
+ofthelastone)andtheimpactofusingdifferentvotingstrategiesforMRAGaswellasforSplit
+RAG.
+Weconsidertakingmulti-aspectembeddingsfromthreedifferentlayersoftheembeddingmodel:
+afterthefirstmulti-headattentionblock,aftermulti-headattentionblock16(inthemiddleofthe
+decoderarchitecture),andthefinalmulti-headattention.Wediscoverthatthelastmulti-headattention
+performsthebestwhencomparedwiththeStandardRAG.
+Wealsoillustrateselectedrepresentativedatafromalonginvestigationtwoadditionalvotingstrategies
+forMRAG.WecompareMRAG(1)whereonlytheexponentialloweringofsignificanceofselected
+chunksisapplied(w =2−p),andMRAG(2)whichassignstheweightforeachtextchunkbased
+i,p
+on the distance between the particular text chunk (d ) and the query (q) (w = 1 ).
+i,p i distance(di,p,q)
+Figure8showsthatthesevotingstrategiesperformworseonaveragethanourselectedstrategyfor
+MRAG,justifyingitsdesignandselection(describedinSection2.3).
+WealsoconsidertwovotingstrategiesforSplitRAG,tofurtherdeepentheempiricalevaluation.
+Split(1)onlyusestheexponentialloweringofsignificance(w =2−p)andSplit(2)whichusesthe
+i,p
+samestrategyasMRAG(w =s ·2−p). Figure8(ontheright)showsthatthesevotingstrategies
+i,p i
+areon-parwitheachotherwhilebeingworsethanMRAG,furthershowcasingtheadvantagesof
+MRAG.
+5 RelatedWork
+Ourworktouchesonmanyareaswhichwenowbrieflydiscuss.
+ManyRAGschemesappearedrecently[10],usingtheoutputofthelastdecoderlayerforembedding
+generation. Incontrast,MRAGleveragesdifferentembeddingspacesofattentionheadstofocus
+ondifferentaspectsofdocumentsandqueries. Assuch,itcanbecombinedwithotherschemesto
+furtherimproveRAGpipelines.
+Retrievalissometimesenhancedbyacross-encoderrerankingphase[9,19,22,26,27,30]. In
+suchsolutions,typicallyafterretrievingasetofrelevantchunks,theyarere-rankedusingspecialized
+models. Inthiswork,wefocussolelyonthefirstretrievalphase,soMRAGcanbeseamlesslyused
+inconjunctionwithsuchcross-encoders.
+Structure-enhanced RAG schemes employ different strategies for structuring text to improve
+retrieval quality. A common idea is to construct a Knowledge Graph from text, which enables
+retrievalamongstentitiesandrelationships[3,6,16,17,37]. RAPTOR[31]generatesmulti-level
+summaries for clusters of related chunks, building a tree of summaries with increasing levels of
+abstractiontobettercapturethemeaningofthetext. GraphRAG[7]createsaKnowledgeGraph,
+andsummarizescommunitiesinthegraph,whichprovidedataatthedifferentlevelsofabstraction.
+AllthesesystemstrytoimproveRAGqualitybyutilizingadditionalstructuresthatdescribeentity
+relationshipsortheinnerorganizationoftext. Usually,theyneedasophisticatedpreprocessingphase
+topreparesuchstructures. MRAGachievestheimprovementsolelybasedontheembeddingmodel
+andhasnoadditionalstoragerequirements,andcanbecombinedwithanyoftheseschemes.
+6 Conclusion
+RetrievalAugmentedGeneration(RAG)ispivotalfordemocratizingaccesstoaccurateandrelevant
+outputsfromlargelanguagemodels(LLMs). Enhancingtheprecisionandrelevanceoftheseoutputs
+isacriticalgoal,especiallygiventhechallengesposedbyqueriesrequiringtheretrievalofmultiple
+9documentswithsignificantlydifferentcontents. Thesecomplexqueriesarecommonacrossvarious
+domains,butexistingRAGsolutionsstrugglebecausetheembeddingsofthenecessarydocuments
+canbefarapartintheembeddingspace,complicatingtheirretrieval.
+Toaddressthisgap,weintroducedMulti-HeadRAG(MRAG),anovelschemethatleveragesthe
+activations from the multi-head attention layer of decoder models instead of the traditional feed-
+forwardlayer. Thisapproachisgroundedintheinsightthatdifferentattentionheadscancapture
+distinctaspectsofthedata. Byusingthesediverseactivations,MRAGcreatesembeddingsthatbetter
+representthemultifacetednatureofdataitemsandqueries,thusenhancingtheretrievalaccuracyfor
+complex,multi-aspectqueries. Thesimplicityandversatilityofthisideaallowittobeseamlessly
+integratedintoanymodernRAGpipelineordataanalyticsframework.
+Ourcomprehensiveevaluationmethodology,includingspecificmetrics,syntheticdatasets,andreal-
+worldusecases,demonstratesMRAG’seffectiveness. Theresultsindicateasignificantimprovement
+intherelevanceofretrieveddocuments,withupto20%betterperformancecomparedtomodern
+RAGbaselines. ThisvalidatesMRAG’spotentialtohandletheintricaciesofmulti-aspectqueries
+effectively.
+Moreover,MRAGprovestobebothcost-effectiveandenergy-efficient. Itdoesnotrequireadditional
+LLM queries, multiple model instances, increased storage, or multiple inference passes over the
+embeddingmodel. Thisefficiency,combinedwiththeenhancedretrievalaccuracy,positionsMRAG
+asavaluableadvancementinthefieldofLLMsandRAGsystems. Byaddressingthechallengesof
+multi-aspectualityinqueries,MRAGpavesthewayformorereliableandaccurateLLMapplications
+acrossdiverseindustries.
+AcknowledgmentsandDisclosureofFunding
+WethankHusseinHarake,ColinMcMurtrie,MarkKlein,AngeloMangili,andthewholeCSCS
+teamgrantingaccesstotheAultandDaintmachines,andfortheirexcellenttechnicalsupport. We
+thankTimoSchneiderforhelpwithinfrastructureatSPCL.Thisprojectreceivedfundingfromthe
+EuropeanResearchCouncil(ProjectPSAP,No.101002047),andtheEuropeanHigh-Performance
+ComputingJointUndertaking(JU)undergrantagreementNo.955513(MAELSTROM).Thisproject
+was supported by the ETH Future Computing Laboratory (EFCL), financed by a donation from
+HuaweiTechnologies. ThisprojectreceivedfundingfromtheEuropeanUnion’sHEresearchand
+innovation programme under the grant agreement No. 101070141 (Project GLACIATION). We
+gratefully acknowledge Polish high-performance computing infrastructure PLGrid (HPC Center:
+ACK Cyfronet AGH) for providing computer facilities and support within computational grant
+no.PLG/2024/017103.
+References
+[1] AbdelrahmanAbdallahandAdamJatowt.2024. Generator-Retriever-GeneratorApproachfor
+Open-DomainQuestionAnswering. arXiv:2307.11278
+[2] AkariAsai,ZeqiuWu,YizhongWang,AvirupSil,andHannanehHajishirzi.2023. Self-RAG:
+LearningtoRetrieve,Generate,andCritiquethroughSelf-Reflection. arXiv:2310.11511
+[3] TuanBui,OanhTran,PhuongNguyen,BaoHo,LongNguyen,ThangBui,andThoQuan.2024.
+Cross-DataKnowledgeGraphConstructionforLLM-enabledEducationalQuestion-Answering
+System: ACaseStudyatHCMUT. arXiv:2404.09296
+[4] JiaweiChen,HongyuLin,XianpeiHan,andLeSun.2024. BenchmarkingLargeLanguage
+ModelsinRetrieval-AugmentedGeneration. ProceedingsoftheAAAIConferenceonArtificial
+Intelligence38,16(March2024),17754–17762. https://doi.org/10.1609/aaai.v38i16.
+29728
+[5] ZhiboChu,ShiwenNi,ZichongWang,XiFeng,ChengmingLi,XipingHu,RuifengXu,Min
+Yang, and Wenbin Zhang. 2024. History, Development, and Principles of Large Language
+Models-AnIntroductorySurvey. arXiv:2402.06853
+[6] JulienDelile,SrayantaMukherjee,AntonVanPamel,andLeonidZhukov.2024. Graph-Based
+RetrieverCapturestheLongTailofBiomedicalKnowledge. arXiv:2402.12352
+10[7] DarrenEdge,HaTrinh,NewmanCheng,JoshuaBradley,AlexChao,ApurvaMody,Steven
+Truitt,andJonathanLarson.2024. FromLocaltoGlobal: AGraphRAGApproachtoQuery-
+FocusedSummarization. arXiv:2404.16130
+[8] ShahulEs,JithinJames,LuisEspinosa-Anke,andStevenSchockaert.2023. RAGAS:Auto-
+matedEvaluationofRetrievalAugmentedGeneration. arXiv:2309.15217
+[9] Luyu Gao, Zhuyun Dai, and Jamie Callan. 2021. Rethink Training of BERT Rerankers in
+Multi-stageRetrievalPipeline.InAdvancesinInformationRetrieval: Proceedingsofthe43rd
+EuropeanConferenceonIRResearch,PartII (Virtual)(ECIR’21).Springer-Verlag,Berlin,
+Heidelberg,280–286. https://doi.org/10.1007/978-3-030-72240-1_26
+[10] YunfanGao,YunXiong,XinyuGao,KangxiangJia,JinliuPan,YuxiBi,YiDai,JiaweiSun,
+MengWang,andHaofenWang.2024. Retrieval-AugmentedGenerationforLargeLanguage
+Models: ASurvey. arXiv:2312.10997
+[11] KelvinGuu,KentonLee,ZoraTung,PanupongPasupat,andMing-WeiChang.2020. REALM:
+Retrieval-AugmentedLanguageModelPre-Training. arXiv:2002.08909
+[12] YuchengHuandYuxingLu.2024.RAGandRAU:ASurveyonRetrieval-AugmentedLanguage
+ModelinNaturalLanguageProcessing. arXiv:2404.19543
+[13] LeiHuang,WeijiangYu,WeitaoMa,WeihongZhong,ZhangyinFeng,HaotianWang,Qian-
+glong Chen, Weihua Peng, Xiaocheng Feng, Bing Qin, and Ting Liu. 2023. A Survey on
+HallucinationinLargeLanguageModels: Principles,Taxonomy,Challenges,andOpenQues-
+tions. arXiv:2311.05232
+[14] YizhengHuangandJimmyHuang.2024. ASurveyonRetrieval-AugmentedTextGeneration
+forLargeLanguageModels. arXiv:2404.10981
+[15] Huggingface. 2024. Massive Text Embeddings Benchmark Leaderboard. https://
+huggingface.co/spaces/mteb/leaderboard Accessed: 2024-05-18.
+[16] MohamedManzourHussien,AngieNatalyMelo,AugustoLuisBallardini,CarlotaSalinasMal-
+donado,RubénIzquierdo,andMiguelÁngelSotelo.2024. RAG-basedExplainablePrediction
+ofRoadUsersBehaviorsforAutomatedDrivingusingKnowledgeGraphsandLargeLanguage
+Models. arXiv:2405.00449
+[17] XinkeJiang,RuizheZhang,YongxinXu,RihongQiu,YueFang,ZhiyuanWang,JinyiTang,
+Hongxin Ding, Xu Chu, Junfeng Zhao, and Yasha Wang. 2024. HyKGE: A Hypothesis
+KnowledgeGraphEnhancedFrameworkforAccurateandReliableMedicalLLMsResponses.
+arXiv:2312.15883
+[18] PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,Naman
+Goyal,HeinrichKüttler,MikeLewis,Wen-tauYih,TimRocktäschel,SebastianRiedel,and
+DouweKiela.2020. Retrieval-AugmentedGenerationforKnowledge-IntensiveNLPTasks.
+In Proceedings of the Thirty-fourth Annual Conference on Neural Information Processing
+Systems(NeurIPS’20)(Virtual)(AdvancesinNeuralInformationProcessingSystems,Vol.33),
+H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin (Eds.). Curran Associates,
+Inc.,NewYork,NY,USA,9459–9474. https://proceedings.neurips.cc/paper_files/
+paper/2020/file/6b493230205f780e1bc26945df7481e5-Paper.pdf
+[19] CanjiaLi,AndrewYates,SeanMacAvaney,BenHe,andYingfeiSun.2021. PARADE:Passage
+RepresentationAggregationforDocumentReranking. arXiv:2008.09093
+[20] HuayangLi,YixuanSu,DengCai,YanWang,andLemaoLiu.2022. ASurveyonRetrieval-
+AugmentedTextGeneration. arXiv:2202.01110
+[21] YuanjieLyu,ZhiyuLi,SiminNiu,FeiyuXiong,BoTang,WenjinWang,HaoWu,Huanyong
+Liu, Tong Xu, Enhong Chen, Yi Luo, Peng Cheng, Haiying Deng, Zhonghao Wang, and
+ZijiaLu.2024. CRUD-RAG:AComprehensiveChineseBenchmarkforRetrieval-Augmented
+GenerationofLargeLanguageModels. arXiv:2401.17043
+11[22] Sean MacAvaney, Andrew Yates, Arman Cohan, and Nazli Goharian. 2019. CEDR: Con-
+textualized Embeddings for Document Ranking. In Proceedings of the 42nd International
+ACM SIGIR Conference on Research and Development in Information Retrieval (Paris,
+France)(SIGIR’19).AssociationforComputingMachinery,NewYork,NY,USA,1101–1104.
+https://doi.org/10.1145/3331184.3331317
+[23] S.S.ManathungaandY.A.Illangasekara.2023. RetrievalAugmentedGenerationandRep-
+resentative Vector Summarization for large unstructured textual data in Medical Education.
+arXiv:2308.00479
+[24] Rui Meng, Ye Liu, Shafiq Rayhan Joty, Caiming Xiong, Yingbo Zhou, and Semih Yavuz.
+2024. SFR-Embedding-Mistral: EnhanceTextRetrievalwithTransferLearning. Salesforce
+AIResearchBlog. https://blog.salesforceairesearch.com/sfr-embedded-mistral/
+Accessed: 2024-05-17.
+[25] GrégoireMialon,RobertoDessi,MariaLomeli,ChristoforosNalmpantis,RamakanthPasunuru,
+RobertaRaileanu,BaptisteRoziere,TimoSchick,JaneDwivedi-Yu,AsliCelikyilmaz,Edouard
+Grave, YannLeCun, andThomasScialom.2023. AugmentedLanguageModels: aSurvey.
+TransactionsonMachineLearningResearch(2023). https://openreview.net/forum?id=
+jh7wH2AzKK SurveyCertification.
+[26] Rodrigo Nogueira and Kyunghyun Cho. 2020. Passage Re-ranking with BERT.
+arXiv:1901.04085
+[27] RodrigoNogueira,ZhiyingJiang,andJimmyLin.2020. DocumentRankingwithaPretrained
+Sequence-to-SequenceModel. arXiv:2003.06713
+[28] Vaidehi Patil, Peter Hase, and Mohit Bansal. 2024. Can Sensitive Information Be Deleted
+From LLMs? Objectives for Defending Against Extraction Attacks. In Proceedings of the
+TwelfthInternationalConferenceonLearningRepresentations(Vienna,Austria)(ICLR’24).
+https://openreview.net/forum?id=7erlRDoaV8
+[29] ZackaryRackauckas.2024. RAG-Fusion: aNewTakeonRetrieval-AugmentedGeneration.
+arXiv:2402.03367
+[30] GuilhermeRosa,LuizBonifacio,VitorJeronymo,HugoAbonizio,MarziehFadaee,Roberto
+Lotufo,andRodrigoNogueira.2022. InDefenseofCross-EncodersforZero-ShotRetrieval.
+arXiv:2212.06121
+[31] ParthSarthi,SalmanAbdullah,AditiTuli,ShubhKhanna,AnnaGoldie,andChristopherD.
+Manning.2024. RAPTOR:RecursiveAbstractiveProcessingforTree-OrganizedRetrieval.
+arXiv:2401.18059
+[32] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanN.Gomez,
+ŁukaszKaiser,andIlliaPolosukhin.2017. AttentionisAllyouNeed.InProceedingsofthe
+Thirty-firstAnnualConferenceonNeuralInformationProcessingSystems(NIPS’17)(Long
+Beach,CA,USA)(AdvancesinNeuralInformationProcessingSystems,Vol.30),I.Guyon,
+U.VonLuxburg,S.Bengio,H.Wallach,R.Fergus,S.Vishwanathan,andR.Garnett(Eds.).
+CurranAssociates,Inc.,NewYork,NY,USA,5998–6008. https://proceedings.neurips.
+cc/paper_files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf
+[33] JeffreyG.Wang,JasonWang,MarvinLi,andSethNeel.2024. Pandora’sWhite-Box:Increased
+TrainingDataLeakageinOpenLLMs. arXiv:2402.17012
+[34] LiangWang,NanYang,XiaolongHuang,BinxingJiao,LinjunYang,DaxinJiang,Rangan
+Majumder, and Furu Wei. 2024. Text Embeddings by Weakly-Supervised Contrastive Pre-
+training. arXiv:2212.03533
+[35] ChristopherWewer,FlorianLemmerich,andMichaelCochez.2021. UpdatingEmbeddingsfor
+DynamicKnowledgeGraphs. arXiv:2109.10896
+[36] GuangzhiXiong,QiaoJin,ZhiyongLu,andAidongZhang.2024. BenchmarkingRetrieval-
+AugmentedGenerationforMedicine. arXiv:2402.13178
+12[37] ZhentaoXu,MarkJeromeCruz,MatthewGuevara,TieWang,ManasiDeshpande,Xiaofeng
+Wang, and Zheng Li. 2024. Retrieval-Augmented Generation with Knowledge Graphs for
+CustomerServiceQuestionAnswering.InProceedingsofthe47thInternationalACMSIGIR
+ConferenceonResearchandDevelopmentinInformationRetrieval(Washington,DC,USA)
+(SIGIR’24).AssociationforComputingMachinery,NewYork,NY,USA,5pages. https:
+//doi.org/10.48550/arXiv.2404.17723
+[38] ZiweiXu,SanjayJain,andMohanKankanhalli.2024. HallucinationisInevitable: AnInnate
+LimitationofLargeLanguageModels. arXiv:2401.11817
+[39] Zhipeng Xu, Zhenghao Liu, Yibin Liu, Chenyan Xiong, Yukun Yan, Shuo Wang, Shi Yu,
+ZhiyuanLiu,andGeYu.2024. ActiveRAG:RevealingtheTreasuresofKnowledgeviaActive
+Learning. arXiv:2402.13547
+[40] Biwei Yan, Kun Li, Minghui Xu, Yueyan Dong, Yue Zhang, Zhaochun Ren, and Xiuzhen
+Cheng.2024. OnProtectingtheDataPrivacyofLargeLanguageModels(LLMs): ASurvey.
+arXiv:2403.05156
+[41] HaoYu,AoranGan,KaiZhang,ShiweiTong,QiLiu,andZhaofengLiu.2024. Evaluationof
+Retrieval-AugmentedGeneration: ASurvey. arXiv:2405.07437
+[42] Wenhao Yu, Hongming Zhang, Xiaoman Pan, Kaixin Ma, Hongwei Wang, and Dong Yu.
+2023. Chain-of-Note: Enhancing Robustness in Retrieval-Augmented Language Models.
+arXiv:2311.09210
+[43] HuiminZeng,ZhenruiYue,QianJiang,andDongWang.2024. FederatedRecommendation
+viaHybridRetrievalAugmentedGeneration. arXiv:2403.04256
+[44] YueZhang,YafuLi,LeyangCui,DengCai,LemaoLiu,TingchenFu,XintingHuang,Enbo
+Zhao,YuZhang,YulongChen,LongyueWang,AnhTuanLuu,WeiBi,FredaShi,andShuming
+Shi.2023. Siren’sSongintheAIOcean:ASurveyonHallucinationinLargeLanguageModels.
+arXiv:2309.01219
+[45] Penghao Zhao, Hailin Zhang, Qinhan Yu, Zhengren Wang, Yunteng Geng, Fangcheng Fu,
+LingYang,WentaoZhang,JieJiang,andBinCui.2024. Retrieval-AugmentedGenerationfor
+AI-GeneratedContent: ASurvey. arXiv:2402.19473
+13Appendix
+A ModelDesign: AdditionalDetails
+A.1 RetrievalStrategiesforMulti-AspectData
+Algorithm2Votingstrategy.
+l←[]
+foreachheadh anditsscores do
+i i
+findbestmatchingktextchunks
+for each chunk d with index p in top k
+i,p
+do
+w ←s ·2−p
+i,p i
+addtuple(d ,w )tol
+i,p i,p
+endfor
+endfor
+sortlusingweightsw ;returntopkelems
+i,p
+B EvaluationMethodology: AdditionalDetails
+B.1 ComputeResources
+Our experiments were executed with compute nodes containing 4x NVIDIA GH200 and a total
+memoryof800GB.IngeneraloneGPUwithatleast40GBofmemoryshouldsuffice. Weused
+atmost50GBofstorageandtheOpenAIAPIasanexternalresource. Thefullexperimentstook
+atmostthreehoursofGPUtimeandthecostfortheOpenAIAPIwereatmost$15. Wecarried
+outadditionalexperiments,whichamountedtoaround20hoursofGPUtimeandcostof$25for
+theOpenAIAPI.Additionalevaluationwasexecutedwithamixofcomputeresourcesincluding
+NVIDIAA100andV100GPUs.
+B.2 DatasetDetails
+Table2:Prompttemplateforquerygeneration.
+Pleasecreateastoryabouttheattached<numberofarticles>articlesonthetopics<listoftitles>.
+Itisveryimportantthateachoftheattachedarticlesisrelevanttothestory,inawaythatreferences
+thecontentofthearticle,notjustitstitle. Butpleasealsomentioneachtitleatleastonce. Please
+makesurethatalloftheattachedarticlesarerelevanttoyourstory,andthateacharticleisreferenced
+inatleasttwosentences! Theydonotnecessarilyhavetobereferencedinthesameorder,butmake
+surenoarticleisforgotten.
+Important: Outputonlythestory,noadditionaltext. Anddonotusebulletpoints,orparagraphs.
+Articles:
+———
+Article<title>:
+<body>
+<...>
+———
+Again,makesurethatyoureferenceallthefollowingtopicsinyourstory: <listoftitles>
+14
