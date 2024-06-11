@@ -1,0 +1,690 @@
+IllumiNeRF: 3D Relighting without Inverse Rendering
+XiaomingZhao1,3∗ PratulP.Srinivasan2 DorVerbin2
+KeunhongPark1 RicardoMartin-Brualla1 PhilippHenzler1
+1GoogleResearch 2GoogleDeepMind 3UniversityofIllinoisUrbana-Champaign
+Input: images + poses + novel illumination
+Output: 3D reconstruction under novel illumination
+Figure1: Givenasetofposedinputimagesunderanunknownlighting(fourexemplarimagesfrom
+thesetareshownontop),IllumiNeRFproduceshigh-qualitynovelviews(bottom)relitunderatarget
+lighting(illustratedaschromeballs). InputsobtainedfromtheStanford-ORBdataset[24].
+Abstract
+Existing methods for relightable view synthesis — using a set of images of an
+objectunderunknownlightingtorecovera3Drepresentationthatcanberendered
+fromnovelviewpointsunderatargetillumination—arebasedoninverserendering,
+andattempttodisentangletheobjectgeometry,materials,andlightingthatexplain
+theinputimages. Furthermore,thistypicallyinvolvesoptimizationthroughdiffer-
+entiableMonteCarlorendering,whichisbrittleandcomputationally-expensive.
+Inthiswork, weproposeasimplerapproach: wefirstrelighteachinputimage
+using an image diffusion model conditioned on lighting and then reconstruct a
+NeuralRadianceField(NeRF)withtheserelitimages,fromwhichwerendernovel
+viewsunderthetargetlighting. Wedemonstratethatthisstrategyissurprisingly
+competitiveandachievesstate-of-the-artresultsonmultiplerelightingbenchmarks.
+Pleaseseeourprojectpageatilluminerf.github.io.
+1 Introduction
+Capturing an object’s appearance so that it can be accurately rendered in novel environments is
+acentralproblemincomputervisionwhosesolutionwoulddemocratize3Dcontentcreationfor
+augmentedandvirtualreality,photography,filmmaking,andgamedevelopment. Recentadvancesin
+viewsynthesis[33]havemadeimpressiveprogressinreconstructinga3Drepresentationthatcan
+berenderedfromnovelviewpoints,usingjustasetofobservedimages. However,thosemethods
+typicallyonlyrecovertheappearanceoftheobjectunderthecapturedillumination,andrelightable
+∗WorkdoneasaninternatGoogle.
+Preprint.Underreview.
+4202
+nuJ
+01
+]VC.sc[
+1v72560.6042:viXraviewsynthesis—renderingnovelviewsofthecapturedobjectunderarbitrarytargetenvironments—
+remainschallenging.
+Recentmethodsforrecoveringrelightable3Drepresentationstreatthistaskasinverserendering,
+and attempt to estimate the geometry, materials, and illumination that jointly explain the input
+images using physically-based rendering methods. These approaches typically involve gradient-
+basedoptimizationthroughdifferentiableMonteCarlorenderingprocedures,whicharenoisyand
+computationally-expensive. Moreover, the inverse rendering optimization problem is brittle and
+inherentlyambiguous;manypotentialsetsofgeometry,materials,andlightingcanexplaintheinput
+images,butmanyoftheseincorrectexplanationsproduceobviouslyimplausiblerenderingswhen
+renderedundernovelunobservedillumination.
+Weproposeadifferentapproachthatavoidsinverserenderingandinsteadleveragesagenerative
+imagemodelfine-tunedforthetaskofrelighting. Givenasetofimagesviewinganobjectanda
+desiredtargetillumination,weusea2DRelightingDiffusionModelthatoutputsrelitimagesofthe
+objectunderthetargetillumination. Duetotheambiguousnatureoftheproblem,eachsampleofthe
+generativemodelencodesadifferentexplanationoftheobject’smaterials,geometryandtheinput
+illumination. However,asopposedtooptimization-basedinverserendering,suchsamplesareall
+plausiblerelitimagessincetheyaretheoutputofthetraineddiffusionmodel.
+Insteadofattemptingtorecoverasingleexplanationoftheunderlyingobject’sappearance,wesample
+multipleplausiblerelitimagesforeachobservedviewpoint,andtreattheunderlyingexplanationsas
+samplesofunobservedlatentvariables. Torecoverafinalconsistent3Drepresentationoftherelit
+object,weusethefullsetofsampledrelitimagesfromallviewpointstotraina“latentNeRF”that
+reconcilesallthesamplesintoasingle3Drepresentation,whichcanberenderedtoproduceplausible
+relitimagesfromnovelviewpoints.
+Thekeycontributionofourworkisanewparadigmforrelightable3Dreconstructionthatreplaces
+3Dinverserenderingwith: generatingsampleswitha2DRelightingDiffusionModelfollowedby
+distilling these samples into a 3D latent NeRF representation. We demonstrate that this strategy
+is surprisingly competitive and outperforms existing most 3D inverse rendering baselines on the
+TensoIR[20]andStanford-ORB[24]relightingandviewsynthesisbenchmarks.
+2 RelatedWork
+Ourworkaddressesthetaskofrelightable3Dreconstructionbyusingalighting-conditioneddiffusion
+modelasagenerativepriorforsingle-imagerelighting.Itiscloselyrelatedtopriorworkinrelightable
+3Dreconstruction,inverserendering,andsingle-imagerelighting. Below,wereviewtheselinesof
+workanddiscusshowtheyrelatetoourproposedapproach.
+Relightable3DReconstruction Thegoalofrelightable3Dreconstructionistoreconstructa3D
+representationofanobjectthatcanberelitbynovelilluminationconditionsandrenderedfromnovel
+camera poses. In scenarios where an object is observed under multiple lighting conditions [10],
+it is trivial to render its appearance under novel illumination that is a linear combinations of the
+observedlightingconditions,duetothelinearbehavioroflight. Thisapproachisgenerallylimitedto
+laboratorycapturescenarioswhereitispossibletoobserveanobjectunderalightingbasis.
+Inmorecasualcapturescenarios,theobjectisobservedunderjustasingleorasmallhandfulof
+lightingconditions. Existingworkstypicallyaddressthissettingusingmethodsbasedoninverse
+rendering that explicitly factor an object’s appearance into the underlying 3D geometry, object
+materialproperties,andlightingthatjointlyexplaintheobservedimages. State-of-the-artapproaches
+to3Dinverserendering[7,8,15,20,23,30,35,42,43]generallyutilizethefollowingstrategy: they
+startwithaneuralfieldrepresentationof3Dgeometry(typicallyvolumedensityasinNeRF[33],
+hybridvolume-surfacerepresentationsasinNeuS[53]andVolSDF[55],ormeshesextractedfrom
+neuralfieldrepresentations)fromtheinputimages,equipthemodelwitharepresentationofsurface
+materials(e.g.spatially-varyingBRDFparameters)andlighting,andjointlyoptimizethesefactors
+through a differentiable physics-based rendering procedure [37]. While methods may differ in
+theirchoiceofgeometry, material, andlightingrepresentations, andemploydifferenttechniques
+to accelerate the evaluation of the rendering integral, they generally all follow this same high-
+levelinverserenderingstrategy. Unfortunately,evenifthegeometryisknown,inverserendering
+is a notoriously ambiguous problem [39, 48] and many combinations of materials and lighting
+2can explain an object’s appearance. However, not all of these combinations are plausible, and
+incorrect factorizations that explain observed images under one lighting condition may produce
+glaringartifactswhenrenderedunderdifferentlighting. Furthermore,differentiablephysics-based
+renderingiscomputationally-expensiveasthousandsofsamplesareneededforMonteCarloestimates
+oftherenderingintegral,typicallyrequirescustomimplementations[2,3,19,25,29,32,50],and
+theresultinginverserenderinglosslandscapeisnon-smoothanddifficulttooptimizeeffectivelywith
+gradientdescent[12].
+SingleImageRelighting Insteadofusinginverserenderingtorecoverobjectmaterialparameters
+whichcanberelitwithphysically-basedrenderingtechniques,wetrainadiffusionmodelthatcan
+directly sample from the distribution of relit images conditioned on a target lighting condition.
+Thisdiffusionmodelisessentiallyagenerativesingle-imagerelightingmodel. Earlysingleimage
+relighting techniques employed optimization-based inverse rendering [4]. Subsequent methods
+traineddeepconvolutionalneuralnetworkstooutputimagegeometry,materials,andlighting[26,27],
+orinsomecases,todirectlyoutputrelitimages[44].
+Mostrelatedtoourmethodareafewrecentworksthathavetraineddiffusionmodelsforsingleimage
+relighting. LightIt[22]trainsamodelsimilartoControlNet[59]torelightoutdoorimagesunder
+arbitrarysunpositionsconditionedoninputnormalsandshading. DiffusionLight[38]estimatesthe
+lightingofanimagebyusingaControlNettoinpaintthecolorpixelsofachromeballinthemiddle
+ofthescene,fromwhichanenvironmentmapcanberecovered.
+MostsimilartoourworkistheconcurrentmethodofDiLightNet[57]thatfocusesonsingleimage
+relighting. DiLightNetusesaControlNet-based[59]approachtoconditionasingle-imagerelighting
+diffusion model on a target environment map. DiLightNet uses a set of “radiance cues” [13] —
+renderingsoftheobject’sgeometry(obtainedfromanoff-the-shelfmonoculardepthnetwork)with
+variousroughnesslevelsunderthetargetenvironmentillumination—asconditioning. Ourmethod
+insteadfocuseson3Drelighting,wheremultipleofimagesofanobjectareavailable. Itusesasimilar
+single-imagerelightingdiffusionmodelconditionedonradiancecues. UnlikeDiLightNetwhichuses
+geometryfrommonoculardepthestimationtorenderradiancecues,weusegeometryestimatedfrom
+theinputviewsusingastate-of-the-artsurfacereconstructionmethod[52]. Thisallowsourmodelto
+bettermodelcomplexlighttransporteffectssuchasinterreflectionscausedbyoccludedgeometry.
+3 Method
+3.1 ProblemFormulation
+Given a dataset of images of an object and corresponding camera poses D = {(I ,π )}N , the
+i i i=1
+generalgoalofrelightable3Dreconstructionistoestimateamodelwithparametersθ thatwhen
+rendered,producesrelitversionsofthedatasetunderunobservedtargetilluminationLT. Thiscanbe
+expressedas:
+θ⋆ =argmaxp(DT|D), (1)
+θ
+θ
+where DT = (cid:8)(cid:0) relight(I ,LT,θ),π (cid:1)(cid:9)N is a relit version of the original dataset under target
+θ i i i=1
+illuminationLT usingmodelθ. NotethatEq.(1)onlymaximizesthelikelihoodoftheoriginalgiven
+posesafterrelighting. However, byusingviewsynthesis, wecanthenturnthecollectionofrelit
+imagesintoa3Drepresentationwhichcanberenderedfromarbitraryposes. Forbrevity,wetherefore
+omittheimplicitdependenceofDT inθ.
+Thisrelightingproblemhastraditionallybeensolvedbyusinginverserendering. Inverserendering
+techniquesdonotmaximizetheprobabilityoftherelitrenderings,butinsteadrecoverasinglepoint
+estimate of the most likely scene geometry G, materials M, and lighting L (note that this is the
+“source”lightingconditionfortheobservedimages)thattogetherexplaintheinputdataset,andthen
+usephysically-basedrenderingtorelightthisfactorizedexplanationunderthetargetlighting. Inverse
+renderingseekstorecoverθIR =(G⋆,M⋆),where:
+G⋆,M⋆,L⋆ =argmaxp(G,M,L|D)=argmaxp(D|G,M,L)p(G,M,L). (2)
+G,M,L G,M,L
+3(c) Target light (h) Latent NeRF
+(b) NeRF (g) Material latent
+(d) N Radiance cues
+S
+(e) Relighting
+(a) N Poses (a) N Images Diffusion Model (f) N Relit images
+Figure2: Overview: GivenasetofimagesI andcameraposesπin(a),werunNeRFtoextractthe
+3Dgeometryasin(b). Basedonthisgeometryandatargetlightshownin(c),wecreateradiance
+cuesforeachgiveninputviewasin(d). Next,weindependentlyrelighteachinputimageusinga
+RelightingDiffusionModelillustratedin(e)andsampleS possiblesolutionsforeachgivenimage
+displayedin(f). Finally,wedistilltherelitsetofimagesintoa3DrepresentationthroughaLatent
+NeRFoptimizationasin(g)and(h).
+Thefirstdatalikelihoodtermiscomputedbyphysics-basedrenderingoftheestimatedmodelandthe
+secondpriortermisoftenfactorizedintoseparatehandcraftedpriorsongeometry,materials,and
+lighting[20,30,39].
+ArelightingapproachbasedoninverserenderingthenrenderseachimageI inDusingtherecovered
+geometryandmaterials,illuminatedbythetargetlightingLT,resultinginrelight(D,LT,θIR). This
+approachhasthreemainissues. First,thedifferentiablerenderingproceduresusedtocomputethe
+gradientofthelikelihoodtermarecomputationally-expensive. Second,itrequirescarefulmodeling
+of light transport which is cumbersome and existing differentiable renderers do not account for
+manytypesoflightingandmaterialeffectsseenintherealworld. Third,thereareoftenambiguities
+betweenM andL,meaningthatanyerrorsintheirdecompositionmaybeapparentintherelitdata. It
+isquitedifficulttodesigneffectivehandcraftedpriorsongeometry,materials,andlighting,soinverse
+renderingproceduresfrequentlyrecoverexplanationsthathaveahighdatalikelihood(areableto
+render the observed data) but produce clearly incorrect results when re-rendered under different
+illumination.
+3.2 ModelOverview
+WeproposeanapproachthatattemptstomaximizetheprobabilityofrelitimagesinEq.(1)without
+usinganexplicitphysically-basedmodeloftheobject’slightingormaterials. First,letusintroducea
+latentvariableZ thatcanbethoughtofasimplicitlyrepresentingtheinputimages’lightingalong
+withtheobject’smaterialandgeometryparameters. Wecanthenwritethelikelihoodoftherelitdata
+as:
+(cid:90) (cid:90)
+p(DT|D)= p(DT,Z|D)dZ = p(DT|Z,D)p(Z|D)dZ. (3)
+Introducingtheselatentvariablesletsusconsiderallrelitrenderingsinthedataset,DT ≜(IT,π ),
+i i i
+asconditionallyindependent,sincetherenderingunderthetargetlightingLT isdeterministicgiven
+theobject’sgeometryandmaterials. Thisenableswritingthelikelihoodas:
+(cid:90) (cid:34) N (cid:35)
+(cid:89)
+p(DT|D)= p(DT|Z ,D ) p(Z|D)dZ. (4)
+i i i
+i=1
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+latentNeRF latentprior
+WeproposetomodelthiswithalatentNeRFmodel,asusedbyMartin-Bruallaetal.[31]thatisable
+torendernovelviewsunderthetargetilluminationforanysampledlatentvector. Wedescribethis
+modelinSec.3.3. WetrainthisNeRFmodelbygeneratingalargequantityofsampledrelitimages
+withthesametargetlightingbutwithdifferent(unknown)latentvectorsusingaRelightingDiffusion
+ModelwhichwewilldescribeinSec.3.4. Inthisway,thelatentNeRFmodeleffectivelydistillsa
+largedatasetofrelitimagessampledbythediffusionmodelintoasingle3Drepresentationthatcan
+rendernovelviewsoftheobjectunderthetargetlightingforanysampledlatent.
+4Diffuse Roughness 0.34 Roughness 0.13 Roughness 0.05
+Figure3: Exampleradiancecuesforaviewofthe‘hotdog’scene.
+3.3 LatentNeRFModel
+WewishtomodelthedistributioninEq.(4)inamannerthatletsusrenderimagesthatcorrespondto
+relitviewsoftheobjectforanysampledlatentZ. WechoosetomodelthiswithalatentcodeNeRF
+3Drepresentation,inspiredbypriorworksthatconditionNeRFsonlatentcodestorepresentsources
+ofvariationsuchasthetimeofdayduringcapture[31]. ThislatentNeRFoptimizesasetoflatent
+codesthatareusedtoconditiontheview-dependentcolorfunctionrepresentedbytheNeRF,enabling
+ittorendernovelviewsoftherelitobjectunderthetargetilluminationforanysampledlatentcode.
+Inourimplementation,thelatentNeRF’sgeometrydoesnotdependonthelatentcode,sothelatent
+codemaybeinterpretedasonlyrepresentingtheobject’smaterialproperties.
+TooptimizetheparametersθofthelatentNeRFmodel,wemaximizethelog-likelihood,whichby
+usingEq.(4),canbewrittenasthefollowingmaximizationproblem:
+(cid:90)
+(cid:34)N (cid:35)
+(cid:89)
+θ⋆ =argmaxlogp(DT|D)=argmaxlog p(DT|Z ,D ) p(Z|D)dZ. (5)
+θ i i i
+θ θ
+i=1
+BecauseintegratingoverallpossiblelatentsZ isintractable,weuseaheuristicinferencestrategy
+andreplacetheintegralwiththemaximumaposteriori(MAP)estimateofZ:
+(cid:40) N (cid:41)
+(cid:88)
+θ⋆ ≈argmaxmax logp(DT|Z ,D )+logp(Z|D) . (6)
+i i i
+θ Z
+i=1
+By assuming a Gaussian model over the data given the materials, the first term in Eq. (6) is a
+reconstructionlossovertheimages. However,sincewedonothaveaccesstothetruelatentvectorZ,
+weassumeauniformprioroverthem,turningthesecondterminEq.(6)intoaconstant. Inpractice,
+similartopriorworkonNeRFsoptimizedtogeneratenewviewsgivenadatasetcontainingimages
+withvaryingappearance,werelyontheNeRFmodeltoresolveanymismatchesintheappearanceof
+differentimages[31]. Theminimizationofthenegativelog-likelihoodcanthenbewrittenas:
+N
+(cid:88)
+θ⋆ =argminmin ∥DT −latent-NeRF(θ,Z ,π )∥2. (7)
+i i i
+θ Z
+i
+3.4 RelightingDiffusionModel
+InordertotrainthelatentNeRFmodeldescribedinSec.3.3,weuseaRelightingDiffusionModel
+(RDM)togenerateS samplesforeachviewpointfromp(DT|D ). Inotherwords,givenaninput
+i i
+imageandtargetlightingLT,theRDMsamplesS imagescorrespondingtorelitversionsofD that
+i
+haveahighlikelihoodgiventhenewtargetlightLT. Wethenassociateeachsamples∈{1,...,S}
+withitsownlatentcodeZ andsumoverallsampleswhentrainingthelatentNeRF(Eq.(7)).
+i,s
+OurRDMisimplementedasanimagedenoisingdiffusionmodelthatisconditionedbytheinput
+imageandtargetlighting.Toencodethetargetlighting,weuseimage-spaceradiancecues[13,40,57],
+visualizedinFig.3. Theseradiancecuesaregeneratedbyusingasimpleshadingmodeltorender
+ahandfulofimagesoftheobject’sestimatedgeometryunderthetargetlighting. Thisprocedureis
+designedtoprovideinformationabouttheeffectsofspecularities,shadows,andglobalillumination,
+withoutrequiringthediffusionnetworktolearntheseeffectsfromscratch. Inourexperiments,we
+usefourdifferentpre-definedmaterialstorenderradiancecues: onediffusematerialwithapure
+5(a) Samples from (b) Latent NeRF
+Relighting Diffusion Model Renderings
+Figure4: (a)SamplesoftheRelightingDiffusionModelforthesametargetenvironmentmap,and
+(b)renderingsfromtheoptimizedLatentNeRFforafixedvalueofthelatent. Thediffusionsamples
+correspondtodifferentlatentexplanationsofthesceneandourlatentNeRFoptimizationisable
+toeffectivelyoptimizetheselatentvariablesalongwiththeNeRFmodel’sparameterstoproduce
+consistentrenderingsforeachlatentexplanation.
+whitealbedo,andthreepurely-specularmaterialswithroughnessvalues{0.05,0.13,0.34}. Weuse
+GGX[51]astheshadingmodel.
+TheRDMarchitectureconsistsofapretrainedlatentimagediffusionmodel,similartoStableDiffu-
+sion[41],andusesaControlNet[59]basedapproachtoconditionontheradiancecues. Pleaserefer
+toSec.A.3formorearchitecturedetails.
+4 Experiments
+4.1 ExperimentalSetup
+RelightingDataset WerenderobjectsfromObjaverse[11]undervaryingposesandilluminations.
+Foreachobject,werandomlysample4poses,andrendereachunder4differentlightingconditions.
+WerepresentthelightingasHDRenvironmentmaps,andrandomlysamplefromadatasetof509
+environmentmapsfromPolyhaven[56]. Formoredetails,seeSec.A.4.
+Evaluationdatasets. Weevaluateourmethodontwodatasets: TensoIR[20],asyntheticbenchmark,
+andStanford-ORB[24],areal-worldbenchmark. TensoIRcontainsrendersoffoursyntheticobjects
+renderedundersixlightingconditions. Following[20],weusethetrainingsplitof100renderings
+with‘sunset’lightingasinput{I }. Wethenevaluateon200poses,eachofwhichhasrenderings
+i
+underfivedifferentenvironmentmaps,i.e.,‘bridge’,‘city’,‘fireplace’,‘forest’,and‘night’,fora
+totalof4000renderings. Stanford-ORBisareal-worldbenchmarkforinverserenderingondata
+capturedinthewild. Itcontains14objectswithvariousmaterialsandcaptureseachobjectunder
+threedifferentlightingsettings,resultingin42(object,lighting)pairs. Forthetaskofrelighting,we
+aregivenimagesofanobjectunderasinglelightingconditionandfollowthebenchmarkprotocolto
+evaluaterelitimagesoftheobjectunderthetwotargetlightingsettings.
+Baselines. We compare our method to several existing inverse rendering approaches. On both
+benchmarks,wecomparetoNeRFactor[61]andInvRender[62]. Onthesyntheticbenchmark,we
+additionallycomparetoTensoIR[20],thecurrenttop-performingapproachonthatbenchmark. For
+theStanford-ORBbenchmark,weadditionallycomparetoPhySG[58],NVDiffRec[35],NeRD[8],
+NVDiffRecMC[15],andNeural-PBIR[43].
+Ourmodelinference. Atinferencetime,sincewedonothaveaccesstothegroundtruthrelitimages,
+wesettheembeddingvectorsforallviewstoZ =0whenrenderingtestimages. Thisisincontrast
+withpriorworkonlatentNeRFmodels,whichusuallyoptimizetheembeddingvectorstomatchwith
+(asubsetof)thetest-setimages[31],andisinsteadconsistentwithothermethodsforrelighting.
+Evaluationmetrics. Forbothbenchmarks,weevaluatethequalityof3Drelightingbyreporting
+image metrics for rendered images. We report PSNR, SSIM [54], and LPIPS-VGG [60] on low
+dynamicrange(LDR)images. Additionally,wereportPSNRonhighdynamicrange(HDR)images
+6Table1: TensoIRbenchmark[20]. Weevaluatefourobjects. Eachobjecthasfivetargetlightings,
+eachofwhichisassociatedwith200poses,resultinginevaluating4000renderingsintotal. Best
+and 2nd-best arehighlighted.
+PSNR↑ SSIM↑ LPIPS↓
+NeRFactor[61] 23.383 0.908 0.131
+InvRender[62] 23.973 0.901 0.101
+TensoIR[20] 28.580 0.944 0.081
+Ours 29.709 0.947 0.072
+GGrroouunndd--trtruuthth Ours TensoIR Ground-truth Ours TensoIR
+Figure5: QualitativeresultsonTensoIR.Renderingsfromallapproacheshavebeenrescaledwith
+respecttotheground-truthasmentionedinEq.(4.1). UnlikeTensoIR,ourmethodfaithfullyrecovers
+specularhighlightsandcolorsasindicatedinred.
+Table 2: Stanford-ORB benchmark [24]. We evaluate 14 objects, each of which was captured
+underthreedifferentlightings. Foreach(object,lighting)pair,weevaluaterenderingsofthesame
+objectundertheothertwolightings,resultinginevaluating836renderings. †denotesmodelstrained
+withtheground-truth3Dscansandpseudomaterialsoptimizedfromlight-boxcaptures. Best and
+2nd-best arehighlighted.
+PSNR-H↑ PSNR-L↑ SSIM↑ LPIPS↓
+NVDiffRecMC[15]† 25.08 32.28 0.974 0.027
+NVDiffRec[35]† 24.93 32.42 0.975 0.027
+PhySG[58] 21.81 28.11 0.960 0.055
+NVDiffRec[35] 22.91 29.72 0.963 0.039
+NeRD[8] 23.29 29.65 0.957 0.059
+NeRFactor[61] 23.54 30.38 0.969 0.048
+InvRender[62] 23.76 30.83 0.970 0.046
+NVDiffRecMC[15] 24.43 31.60 0.972 0.036
+Neural-PBIR[43] 26.01 33.26 0.979 0.023
+Ours 25.42 32.62 0.976 0.027
+onStanford-ORBfollowingthebenchmarkprotocol,denotedasPSNR-HwhilethePSNRonLDR
+imagesismarkedasPSNR-L.ForapproachesthatdonotproduceHDRrenderings,includingours,
+weconverttheLDRrenderingstolinearvaluesbyusingtheinverseofthesRGBtonemappingcurve.
+Duetotheinherentambiguitiesfortherelightingtask,wefollowpriorworks[20,24]andapplya
+channel-wisescalefactortoRGBchannelstomatchthegroundtruthimagebeforecomputingmetrics.
+FollowingestablishedevaluationpracticesonStanford-ORB,wecomputethescaleperoutputimage
+individuallywhereasforTensoIRwecomputeaglobalscalefactorthatisusedforalloutputimages.
+4.2 Benchmarking
+WereportquantitativeresultsontheTensoIRbenchmarkinTab.1,andshowqualitativeexamples
+inFig.5. Wesignificantlyoutperformallcompetitormethodsquantitativelyonallmetrics. Visually
+ourmethodiscapableofrecoveringspecularhighlightswhereaspriormethodsstruggletomodel
+these.Similarly,wereportresultsonStanford-ORBinTab.2andFig.6.Ourproposedapproachquan-
+7Figure6: QualitativeresultsonStanford-ORB.Renderingsfromallapproacheshavebeenrescaled
+withrespecttotheground-truthasmentionedinSec.4.1. Areaswhereourapproachperformswell
+arehighlighted. Ourapproachproduceshigh-qualityrenderingswithplausiblespecularreflections.
+titativelyimprovesuponallbaselines,exceptthoseofNeural-PBIR[43],indicatingtheeffectiveness
+ofIllumiNeRFinrealworldscenarios. NotethatalthoughNeural-PBIRachievesbettermetricsthan
+us,Fig.6showsthattheirrelightingresultsaremostlydiffuse,evenforhighly-glossyobjects,and
+thattheylackmanyofthestrongspecularhighlightsthatourmethodisabletorecover. Thisbehavior
+oftheirmodelmayexplaintheirbettermetricsdespiteworsequalitativeperformance,becausethe
+illuminationmapsprovidedbyStanford-ORBdonotcorrespondtotheincidentilluminationatthe
+object’slocation,sincetheywerecapturedusingalightprobewhichwasmovedforeachimagein
+thedataset[24]. Thismeansthatevengivenperfectmaterialsandgeometry,theimagesrelitbyany
+methodcannotmatchwiththetruecapturedimages,whichismostnoticeableinspecularhighlights.
+Thismismatchpenalizesmethodslikeours,whichrecoversuchspecularities,overonesthatrecover
+mostlydiffuseappearancewithnoapparentspecularhighlights[48].
+8
+TG
+sruO
+RIBP-larueN
+CMceRffiDVN
+redneRvnI
+rotcaFReN
+DReN
+ceRffiDVN
+GSyhPNo Latent, S = 1 w/ Latent, S = 1 w/ Latent, S = 4 w/ Latent, S = 16 Ground-truth
+Figure 7: Using a standard NeRF instead of a latent NeRF model is unable to reconcile training
+samples with different underlying latent explanations. Using a latent NeRF model significantly
+increasestheaccuracyofrenderedspecularappearance,andincreasingthenumberofsamplesSfrom
+theRDMusedtotrainthelatentNeRFmodelfurtherincreasesthequalityoftheoutputrenderings.
+Table 3: Ablations. We conduct ablation studies on the Hotdog scene from TensoIR [20]. We
+evaluaterenderingsof200noveltestcameraposes,eachunderfivetargetenvironmentmaplighting
+conditions,resultinginevaluating1000renderingsintotal. Best ishighlighted.
+S Latent PSNR↑ SSIM↑ LPIPS↓
+1 ✗ 24.957 0.921 0.099
+1 ✓ 26.321 0.925 0.097
+4 ✓ 27.409 0.936 0.087
+16 ✓ 27.950 0.939 0.082
+4.3 Ablations
+WeevaluateablationsofourmodelonTensoIR’shotdogsceneinTab.3,andvisualizetheminFig.7.
+Wereachthefollowingconclusions: 1)ThelatentNeRFmodelisessential: optimizingastandard
+NeRFcannotreconcilevariationsacrossviews,evenifweonlygenerateasinglesampleperviewpoint
+foroptimization(S =1). 2)Morediffusionsampleshelp: byincreasingS,thenumberofsamples
+fromtheRDMperviewpoint,weobserveconsistentimprovementsacrossalmostallmetrics. This
+corroboratesourintuitionthatusinganincreasednumberofsampleshelpsthelatentNeRFeffectively
+fitthetargetdistribution(Eq.(4))inamorestableway.
+4.4 Limitations
+Our model relies on high quality geometry estimated by UniSDF [52] (see Sec. A.1) to provide
+sufficientlygoodradiancecuesforconditioningtheRDM(Sec.3.4). Anymissingstructurewilllead
+ourmodeltomissspecularreflections,asseenonthetopleftofthesaltcanresultinFig.6’ssecond
+column. Errorsingeometryalsoaffectthequalityofsynthesizednovelviews,e.g.themissingthin
+branchesfromtheplantinFig.5. Ourapproachisnotsuitedforreal-timerelighting,asitrequires
+generatingnewsampleswiththeRDMandoptimizingaNeRFforanynewtargetlightingcondition.
+5 Conclusion
+Wehaveproposedanewparadigmforthetaskofrelightable3Dreconstruction. Insteadofdecom-
+posinganobject’sappearanceintolightingandmaterialfactorsandonlythenrelightingtheobject
+withphysically-basedrendering,weuseaRelightingDiffusionModel(RDM)tosampleavaried
+collectionofproposedrelitimagesgivenatargetillumination,anddistillthesesamplesintoasingle
+consistent3DlatentNeRFrepresentation. This3Drepresentationcanthenberenderedtosynthesize
+novelviewsoftheobjectunderthetargetlighting. Perhapssurprisingly,thisparadigmconsistently
+outperformsexistinginverserenderingmethodsonsyntheticandreal-worldobjectrelightingbench-
+marks. Thisnewparadigm’ssuccessislikelyduetotheRDM’sabilitytogeneratealargenumberof
+proposalsforthenewrelitimage. Thisisincontrastwithpriorworkforrelightingbasedoninverse
+rendering,whichfirstestimatesasinglematerialmodelandthenusesitforrelighting,sinceerrorsin
+materialestimationmaypropagatetotherelitimages. Webelievethatthisparadigmmaybeusedto
+improvedatacapture,materialandlightingestimation,andthatitmaybeusedtodosorobustlyon
+real-worlddata.
+9Acknowledgements
+WewouldliketothankBenPooleandRuiqiGaoforinsightfuldiscussions. WethankYunzhiZhang
+andZhengfeiKuangforprovidingtheirqualitativeresultsfortheStanford-ORB[24]baseline,and
+HaianJinfortheTensoIR[20]baselineresults. WearealsogratefultoAbhijitKunduandHenna
+Nandwanifortheirinfrastructuresupport.
+References
+[1] H. Aanæs, R. R. Jensen, G. Vogiatzis, E. Tola, and A. B. Dahl. Large-Scale Data for Multiple-View
+Stereopsis. IJCV,2016. 13
+[2] S. Bangaru, M. Gharbi, T.-M. Li, F. Luan, K. Sunkavalli, M. Hasan, S. Bi, Z. Xu, G. Bernstein, and
+F.Durand. DifferentiableRenderingofNeuralSDFsthroughReparameterization. InSIGGRAPHAsia,
+2022. 3
+[3] S.Bangaru,L.Wu,T.-M.Li,J.Munkberg,G.Bernstein,J.Ragan-Kelley,F.Durand,A.Lefohn,andY.He.
+SLANG.D:Fast,ModularandDifferentiableShaderProgramming. ACMTOG,2023. 3
+[4] J.T.BarronandJ.Malik. Shape,Illumination,andReflectancefromShading. TPAMI,2014. 3
+[5] J.T.Barron, B.Mildenhall, D.Verbin, P.P.Srinivasan, andP.Hedman. Mip-NeRF360: Unbounded
+Anti-AliasedNeuralRadianceFields. InCVPR,2021. 13
+[6] J.T.Barron,B.Mildenhall,D.Verbin,P.P.Srinivasan,andP.Hedman.Zip-NeRF:Anti-AliasedGrid-Based
+NeuralRadianceFields. InICCV,2023. 13
+[7] S.Bi,Z.Xu,P.Srinivasan,B.Mildenhall,K.Sunkavalli,M.Hašan,Y.Hold-Geoffroy,D.Kriegman,and
+R.Ramamoorthi. NeuralReflectanceFieldsforAppearanceAcquisition. ArXiv,2020. 2
+[8] M.Boss,R.Braun,V.Jampani,J.T.Barron,C.Liu,andH.P.A.Lensch. NeRD:NeuralReflectance
+DecompositionfromImageCollections. InICCV,2021. 2,6,7
+[9] J.Bradbury,R.Frostig,P.Hawkins,M.J.Johnson,C.Leary,D.Maclaurin,G.Necula,A.Paszke,J.Vander-
+Plas,S.Wanderman-Milne,andQ.Zhang.JAX:ComposableTransformationsofPython+NumPyPrograms,
+2018. URLhttp://github.com/google/jax. 13,14
+[10] P.Debevec,T.Hawkins,C.Tchou,H.-P.Duiker,W.Sarokin,andM.Sagar. AcquiringtheReflectance
+FieldofaHumanFace. InACMCGIT,2000. 2
+[11] M.Deitke,D.Schwenk,J.Salvador,L.Weihs,O.Michel,E.VanderBilt,L.Schmidt,K.Ehsani,A.Kemb-
+havi,andA.Farhadi. Objaverse:AUniverseofAnnotated3DObjects. InCVPR,2023. 6,15
+[12] M.FischerandT.Ritschel. Plateau-ReducedDifferentiablePathTracing. InCVPR,2023. 3
+[13] D.Gao,G.Chen,Y.Dong,P.Peers,K.Xu,andX.Tong. DeferredNeuralLighting: Free-viewpoint
+RelightingfromUnstructuredPhotographs. ACMTOG,2020. 3,5
+[14] K.Greff,F.Belletti,L.Beyer,C.Doersch,Y.Du,D.Duckworth,D.J.Fleet,D.Gnanapragasam,F.Golemo,
+C.Herrmann,T.Kipf,A.Kundu,D.Lagun,I.Laradji,H.-T.D.Liu,H.Meyer,Y.Miao,D.Nowrouzezahrai,
+C.Oztireli,E.Pot,N.Radwan,D.Rebain,S.Sabour,M.S.M.Sajjadi,M.Sela,V.Sitzmann,A.Stone,
+D.Sun,S.Vora,Z.Wang,T.Wu,K.M.Yi,F.Zhong,andA.Tagliasacchi. Kubric: ascalabledataset
+generator. InCVPR,2022. 13
+[15] J.Hasselgren,N.Hofmann,andJ.Munkberg. Shape,Light,andMaterialDecompositionfromImages
+usingMonteCarloRenderingandDenoising. InNeurIPS,2022. 2,6,7
+[16] J.Heek,A.Levskaya,A.Oliver,M.Ritter,B.Rondepierre,A.Steiner,andM.vanZee. Flax:ANeural
+NetworkLibraryandEcosystemforJAX,2023. URLhttp://github.com/google/flax. 15
+[17] D.HendrycksandK.Gimpel. GaussianErrorLinearUnits(GELUs). ArXiv,2016. 15
+[18] J.Ho,A.Jain,andP.Abbeel. DenoisingDiffusionProbabilisticModels. InNeuIPS,2020. 15
+[19] W.Jakob,S.Speierer,N.Roussel,andD.Vicini. Dr.Jit: AJust-In-TimeCompilerforDifferentiable
+Rendering. ACMTOG,2022. 3
+10[20] H.Jin,I.Liu,P.Xu,X.Zhang,S.Han,S.Bi,X.Zhou,Z.Xu,andH.Su. TensoIR:TensorialInverse
+Rendering. InCVPR,2023. 2,4,6,7,9,10
+[21] D.P.KingmaandJ.Ba. Adam:AMethodforStochasticOptimization. ArXiv,2014. 13
+[22] P.Kocsis,J.Philip,K.Sunkavalli,M.Nießner,andY.Hold-Geoffroy. LightIt:IlluminationModelingand
+ControlforDiffusionModels. InCVPR,2024. 3
+[23] Z.Kuang,K.Olszewski,M.Chai,Z.Huang,P.Achlioptas,andS.Tulyakov. NeROIC:NeuralRendering
+ofObjectsfromOnlineImageCollections. ACMTOG,2022. 2
+[24] Z.Kuang,Y.Zhang,H.-X.Yu,S.Agarwala,E.Wu,J.Wu,etal. Stanford-ORB:AReal-World3DObject
+InverseRenderingBenchmark. InNeurIPS,2023. 1,2,6,7,8,10
+[25] T.-M.Li,M.Aittala,F.Durand,andJ.Lehtinen. DifferentiableMonteCarloRayTracingthroughEdge
+Sampling. ACMTOG,2018. 3
+[26] Z.Li,Z.Xu,R.Ramamoorthi,K.Sunkavalli,andM.Chandraker. Learningtoreconstructshapeand
+spatially-varyingreflectancefromasingleimage. ACMTOG,2018. 3
+[27] Z.Li,M.Shafiei,R.Ramamoorthi,K.Sunkavalli,andM.Chandraker. InverseRenderingforComplex
+IndoorCcenes:Shape,Spatially-varyingLightingandSVBRDFfromaSingleImage. InCVPR,2020. 3
+[28] W.E.LorensenandH.E.Cline. MarchingCubes:AHighResolution3DSurfaceConstructionAlgorithm.
+InACMCGIT,1987. 13
+[29] G.Loubet,N.Holzschuch,andW.Jakob. ReparameterizingDiscontinuousIntegrandsforDifferentiable
+Rendering. ACMTOG,2019. 3
+[30] A.Mai,D.Verbin,F.Kuester,andS.Fridovich-Keil. NeuralMicrofacetFieldsforInverseRendering. In
+ICCV,2023. 2,4
+[31] R.Martin-Brualla,N.Radwan,M.S.M.Sajjadi,J.T.Barron,A.Dosovitskiy,andD.Duckworth. NeRFin
+theWild:NeuralRadianceFieldsforUnconstrainedPhotoCollections. InCVPR,2021. 4,5,6
+[32] MerlinNimier-DavidandSébastienSpeiererandBenoîtRuizandWenzelJakob. Radiativebackpropaga-
+tion:Anadjointmethodforlightning-fastdifferentiablerendering. ACMTOG,2020. 3
+[33] B.Mildenhall,P.P.Srinivasan,M.Tancik,J.T.Barron,R.Ramamoorthi,andR.Ng. NeRF:Representing
+ScenesasNeuralRadianceFieldsforViewSynthesis. InECCV,2020. 1,2
+[34] T.Müller,A.Evans,C.Schied,andA.Keller. Instantneuralgraphicsprimitiveswithamultiresolution
+hashencoding. ACMTOG,2022. 13
+[35] J.Munkberg,J.Hasselgren,T.Shen,J.Gao,W.Chen,A.Evans,T.Müller,andS.Fidler. Extracting
+Triangular3DModels,Materials,andLightingFromImages. InCVPR,2022. 2,6,7
+[36] M.Oechsle,S.Peng,andA.Geiger. UNISURF:UnifyingNeuralImplicitSurfacesandRadianceFields
+forMulti-ViewReconstruction. InICCV,2021. 13
+[37] M.Pharr,W.Jakob,andG.Humphreys. PhysicallyBasedRendering:FromTheorytoImplementation.
+MITPress,2023. 2
+[38] P.Phongthawee,W.Chinchuthakun,N.Sinsunthithet,A.Raj,V.Jampani,P.Khungurn,andS.Suwa-
+janakorn. Diffusionlight:Lightprobesforfreebypaintingachromeball. InArXiv,2023. 3
+[39] R.RamamoorthiandP.Hanrahan. ASignal-ProcessingFrameworkforInverseRendering. InACMCGIT,
+2001. 2,4
+[40] P.Ren,J.Wang,J.M.Snyder,X.Tong,andB.Guo. PocketReflectometry. ACMTOG,2011. 5
+[41] R.Rombach,A.Blattmann,D.Lorenz,P.Esser,andB.Ommer. High-ResolutionImageSynthesiswith
+LatentDiffusionModels. InCVPR,2022. 6,14
+[42] P.P.Srinivasan,B.Deng,X.Zhang,M.Tancik,B.Mildenhall,andJ.T.Barron. Nerv:Neuralreflectance
+andvisibilityfieldsforrelightingandviewsynthesis. InCVPR,2021. 2
+[43] C.Sun,G.Cai,Z.Li,K.Yan,C.Zhang,C.S.Marshall,J.-B.Huang,S.Zhao,andZ.Dong. Neural-PBIR
+ReconstructionofShape,Material,andIllumination. InICCV,2023. 2,6,7,8
+11[44] T.Sun,J.T.Barron,Y.-T.Tsai,Z.Xu,X.Yu,G.Fyffe,C.Rhemann,J.Busch,P.Debevec,andR.Ra-
+mamoorthi. SingleImagePortraitRelighting. ACMTOG,2019. 3
+[45] J.Tang,Z.Chen,X.Chen,T.Wang,G.Zeng,andZ.Liu. LGM:LargeMulti-ViewGaussianModelfor
+High-Resolution3DContentCreation. ArXiv,2024. 15
+[46] TheBlenderFoundation. Blender2.93. URLhttps://www.blender.org/. 13
+[47] D.Verbin,P.Hedman,B.Mildenhall,T.E.Zickler,J.T.Barron,andP.P.Srinivasan.Ref-NeRF:Structured
+View-DependentAppearanceforNeuralRadianceFields. InCVPR,2022. 13
+[48] D.Verbin,B.Mildenhall,P.Hedman,J.T.Barron,T.Zickler,andP.P.Srinivasan.Eclipse:Disambiguating
+IlluminationandMaterialsusingUnintendedShadows. InCVPR,2024. 2,8
+[49] D.Verbin,P.P.Srinivasan,P.Hedman,B.Mildenhall,B.Attal,R.Szeliski,andJ.T.Barron.NeRF-Casting:
+ImprovedView-DependentAppearancewithConsistentReflections. ArXiv,2024. 13
+[50] D.Vicini,S.Speierer,andW.Jakob. DifferentiableSignedDistanceFunctionRendering. ACMTOG,
+2022. 3
+[51] B.Walter,S.Marschner,H.Li,andK.E.Torrance. MicrofacetModelsforRefractionthroughRough
+Surfaces. InRenderingTechniques,2007. 6,13
+[52] F.Wang,M.-J.Rakotosaona,M.Niemeyer,R.Szeliski,M.Pollefeys,andF.Tombari. UniSDF:Unifying
+NeuralRepresentationsforHigh-Fidelity3DReconstructionofComplexSceneswithReflections. ArXiv,
+2023. 3,9,13
+[53] P.Wang,L.Liu,Y.Liu,C.Theobalt,T.Komura,andW.Wang. NeuS:LearningNeuralImplicitSurfaces
+byVolumeRenderingforMulti-viewReconstruction. InNeurIPS,2021. 2
+[54] Z.Wang,A.C.Bovik,H.R.Sheikh,andE.P.Simoncelli. Imagequalityassessment:fromerrorvisibility
+tostructuralsimilarity. TIP,2004. 6
+[55] L.Yariv,J.Gu,Y.Kasten,andY.Lipman. VolumeRenderingofNeuralImplicitSurfaces. InNeurIPS,
+2021. 2
+[56] G.Zaal,R.Tuytel,R.Cilliers,J.R.Cock,A.Mischok,S.Majboroda,D.Savva,andJ.Burger. Polyhaven:
+aCuratedPublicAssetLibraryforVisualEffectsArtistsandGameDesigners,2021. 6,16
+[57] C.Zeng,Y.Dong,P.Peers,Y.Kong,H.Wu,andX.Tong. DiLightNet:Fine-grainedLightingControlfor
+Diffusion-basedImageGeneration. InSIGGRAPH,2024. 3,5,14
+[58] K.Zhang,F.Luan,Q.Wang,K.Bala,andN.Snavely.PhySG:InverseRenderingwithSphericalGaussians
+forPhysics-basedMaterialEditingandRelighting. InCVPR,2021. 6,7
+[59] L.Zhang,A.Rao,andM.Agrawala. AddingConditionalControltoText-to-ImageDiffusionModels. In
+ICCV,2023. 3,6,14,15
+[60] R.Zhang,P.Isola,A.A.Efros,E.Shechtman,andO.Wang. TheUnreasonableEffectivenessofDeep
+FeaturesasaPerceptualMetric. InCVPR,2018. 6
+[61] X.Zhang,P.P.Srinivasan,B.Deng,P.E.Debevec,W.T.Freeman,andJ.T.Barron. Nerfactor. InACM
+TOG,2021. 6,7,13
+[62] Y. Zhang, J. Sun, X. H. He, H. Fu, R. Jia, and X. Zhou. Modeling Indirect Illumination for Inverse
+Rendering. InCVPR,2022. 6,7
+12Appendix–IllumiNeRF:3DRelightingwithoutInverseRendering
+A AdditionalImplementationDetails
+A.1 LatentNeRFModelandGeometryEstimator
+WeuseJAX[9]toimplementboththegeometryestimatorandLatentNeRFmodelasUniSDF[52],a
+state-of-the-artvolumerenderingapproachbasedonasigneddistancefunction(SDF).Theadvantage
+ofusingUniSDFisthatitenableseasilyextractingameshfromtheSDF,whichwecanthenimport
+intoastandardrenderingenginesuchasBlender[46]inordertocomputeradiancecues. Additionally,
+UniSDFdecouplesgeometryfromappearance,allowingustofixtheweightsrelatedtogeometryand
+onlyoptimizeforweightsthatmodeltheappearance.
+OurparameterizationoftheUniSDFmodelissimilartotheoneusedintheoriginalpaperforthe
+DTUdataset[1],withfourkeychanges. First,wereducethenumberofroundsofproposalsampling
+(asintroducedbymip-NeRF360[5])fromtwotoone,using64proposalsamples. Second,weuse
+theasymmetricpredictednormallossfromNeRF-Casting[49]:
+L =(cid:88)(cid:0) λ ω ∥(cid:0)(cid:0)∇n −(cid:0)(cid:0)∇n′∥2+ λ (cid:0)(cid:0)∇ω ∥n −(cid:0)(cid:0)∇n′∥2+λ (cid:0)(cid:0)∇ω ∥(cid:0)(cid:0)∇n −n′∥2(cid:1) , (S1)
+p 1 i i i 2 i i i 3 i i i
+i
+whereω isthevolumerenderingweightofthei-thsample,(cid:0)(cid:0)∇denotesthestop-gradientoperator,
+i
+n andn′ arethei-thsample’sdensitynormalsandpredictednormalsrespectively(see[47]),and
+i i
+wesetλ =λ =10−3,λ =10−2. Third,likeNeRF-Casting[49],weuseanadditionalhashgrid
+1 2 3
+encoding[34]with15scalesbetweenaresolutionof32and4096,usedonlyforoutputtingpredicted
+normals. Fourth,wefurtherencouragethelocalsmoothnessofthepredictednormalsn′byusinga
+smoothnesslosssimilarto[36,61]:
+(cid:88)
+L =λ ω ∥n′(x +ε)−n′(x )∥2, (S2)
+s 4 i i i
+i
+wherex isthe3Dpositionofthei-thsample,andε∼N(0,σ2I)isanisotropicGaussianrandom
+i
+variableusedtoperturbthesamplelocations. Wesetλ =0.1andσ =0.01.
+4
+Wefindthatthesemodificationsresultinbetterandsmoothergeometrynecessaryforourmodel’s
+abilitytorelightobjectswithspecularhighlights.
+Finally,toincorporatetheGLOembeddings,weutilizeanMLPtopredictanelement-wisescaleand
+shiftvaluetobeappliedtothe‘bottleneck’featureofUniSDF,similartoAffineGLOinZip-NeRF[6].
+ForbothgeometryestimationandlatentNeRFoptimization,weutilizetheAdam[21]optimizerwith
+β =0.9,β =0.99,andε=1×10−15. Wedecayourlearningratelogarithmicallyfrom5×10−3
+1 2
+to5×10−4 over25ktrainingiterationswithcosine-scheduledwarmupinthefirst500steps. We
+optimizewithabatchsizeof2×1014rays. Theoptimizationtakesaround45minuteswith16A100
+40GBGPUs.
+A.2 RadianceCues
+Geometry To extract radiance cues we first optimize UniSDF [52] on the input images. After
+optimization,weconverttheSDFrepresentationtoameshusingmarchingcubes[28]withthreshold
+settobezero.
+Rendering WeuseBlenderCycles[46],aphysically-basedpath-tracertorendertheradiancecues.
+WerunBlenderviatheKubricpythonwrapper[14],andweusetheestimatedgeometrywiththe
+predefinedmaterialsbasedontheGGXmaterialmodel[51],asdescribedinSec.3.4.
+Shadingnormals Inordertoproducesmoothly-varyingspecularhighlightswhichlookrealistic,
+we need the normals used for shading to be smooth. By default, Blender computes normals for
+shadingbasedontheinputgeometry,whichmaybenoisy. Tomitigatethis,wecanfeedthepredicted
+normalsn′describedinSec.A.1toBlenderandenableitsshadingnormalsmoothingfunctionwhich
+appliestothepredictednormals,andusesthemforshading. However,over-smoothnessmayharm
+thephotorealismoftherenderedshadows. SeeFig.S3forqualitativecomparisononradiancecues
+13FigureS1: w/osmoothness.
+FigureS2: w/smoothness.
+FigureS3: Effectsofshadingnormalsmoothingfunction.
+Empty String
+Latent Noises
+Frozen Base
+Diffusion Model UNet
+Relit Image
+ConvNet 4
+Trainable Copy of
+Base Diffusion
+Model UNet ZeroConv
+Encoder &
+Middle Blocks
+Radiance Cues ConvNet 2
+Given Image + Mask
+FigureS4: SchematicsofourControlNet-baseddiffusionmodel.
+rendered without enabling the shading normal smoothing (Fig. S1) and with the feature enabled
+(Fig. S2). In our implementation, we exploit a hybrid strategy: we utilize radiance cues without
+smoothnessforthediffusematerialanduseradiancecueswithsmoothnessforthespecularmaterials.
+Concretely,ourfinalradiancecuesarecomposedofthefirstrenderinginFig.S1andtherightthree
+onesinFig.S2.
+A.3 RelightingDiffusionModel
+WeimplementourrelightingdiffusionmodelinJAX[9]. Weillustratethearchitectureofthemodel
+forinferenceinFig.S4. Webuilduponatext-to-imagelatentdiffusionmodelwhichissimilartothe
+modelofRombachetal.[41]. Itdenoisesgaussiannoiseofsize64×64×8anddecodestheoutput
+latentfeaturesintoarelitimageofsize512×512×3. Themodelwasnotconditionedontextinput,
+receivingonlyemptystringsviaaCLIPtextencoder. Duringtrainingthebasemodelisfrozen.
+FollowingControlNet[59],wecreateatrainablecopyofthebasediffusionmodel’sUNetencoder
+andmiddleblocksandappendthemwithaZeroConv-basedblockstothefrozenbasemodel. The
+givenmaskedimageandradiancecuesarefirstfedthroughConvNet2(seeFig. 4in[57]fordetails)
+andConvNet3(see Tab.S2). Theresultingoutputisaddedtotheoutputofthelatentnoise,whichis
+fedthroughConvNet4. ConvNet4consistsofasingleconvolutionlayerwithkernelsize3,stride1,
+padding1,and320outputchannels. Giventhatthetrainablecopywasdesignedfortokenizedtext
+14
+ConvNet
+3
+ConvNet
+1
+Decoder FrozenTableS1: Fig.S4’sConvNet1Structure. Con-
+volutionlayer’sdefinitionisrepresentedas(ker-
+nelsize,stride,padding). WeuseSiLU[17]as
+theactivationfunctionbetweenlayers. Layer8 TableS2: Fig.S4’sConvNet3Structure. Con-
+useszeroinitializationwhiletheotherlayersuse volutionlayer’sdefinitionisrepresentedas(ker-
+Flax’s[16]defaultinitialization2. Inourimple- nelsize,stride,padding). WeuseSiLU[17]as
+mentation,wehaveH =W =512. the activation function between layers. Layer
+5useszeroinitializationwhiletheotherlayers
+Index Layer OutputShape usesFlax[16]defaultinitialization2. Inourim-
+0(input) - H×W ×4
+plementation,wehaveH =W =512.
+1 (3,1,1) H×W ×16
+2-1 (3,1,1) H×W ×16
+Index Layer OutputShape
+2-2 (3,2,1) H/2×W/2×32
+0(input) - H×W ×12
+3-1 (3,1,1) H/2×W/2×32
+1 (3,1,1) H×W ×16
+3-2 (3,2,1) H/4×W/4×64
+2-1 (3,1,1) H×W ×16
+4-1 (3,1,1) H/4×W/4×64
+2-2 (3,2,1) H/2×W/2×32
+4-2 (3,2,1) H/8×W/8×128
+3-1 (3,1,1) H/2×W/2×32
+5-1 (3,1,1) H/8×W/8×128
+3-2 (3,2,1) H/4×W/4×96
+5-2 (3,2,1) H/16×W/16×256
+4-1 (3,1,1) H/4×W/4×96
+6-1 (3,1,1) H/16×W/16×256
+4-2 (3,2,1) H/8×W/8×256
+6-2 (3,2,1) H/32×W/32×512
+5 (3,1,1) H/8×W/8×320
+7-1 (3,1,1) H/32×W/32×512
+7-2 (3,2,1) H/64×W/64×512
+8 (3,1,1) H/64×W/64×1024
+9 flatten (H/64×W/64)×1024
+input,themaskedimageisfirstfedthroughConvNet1togeneraterepresentativeembeddings. To
+ensurecompatibilitybetweentheoutputofConvNet1(size64)andtheCLIPencoder’stextoutput
+shape,zero-valuedtensorsareappended,increasingthesizeto77.
+WetrainthediffusionmodelusinganapproachsimilartoControlNet[59],withalargedatasetof
+syntheticobjectsrenderedundermultiplelightingconditions. Eachtrainingexampleforfine-tuning
+consistsofapairofimagesthatviewthesameobjectwiththesamecameraparameters,illuminated
+bytwodifferentenvironmentmap(seeSec.A.4). Wefine-tunethediffusionmodeltopredictone
+of these two images, given the other image as well as the corresponding radiance cues rendered
+usingthesyntheticobject’sgeometry. Notethatforsyntheticobjects,wedonotneedtoestimatethe
+geometryGnortoenabletheBlendernormalsmoothingfunctiontocomputetheradiancecuessince
+wealreadyhavetheground-truthmeshesandthenormalsfromsyntheticobjectsaresmoothenough.
+Wefine-tunethebasemodelfor150kstepsusingbatchsizeof256examplesandalearningrateof
+10−4,whichislinearlywarmedupfrom0overthefirst1ksteps. Thefine-tuningtakesaround2days
+on32TPUv5chips. Besides,wealwaysusetheemptystringasthetextinputtoeffectivelymakethe
+fine-tunedmodelimage-based.
+At inference time, we use the DPPM scheduler [18] without classifier-free guidance to produce
+samplesat512×512resolution.
+A.4 TrainingDataProcessing
+We use Objaverse [11] as the synthetic dataset. To filter out low-quality objects, we use the list
+from[45]togetourinitialsetof156,330ones.3 Byadditionallyremoving(semi-)transparentones,
+wehaveafinalsetof152,649objects. Iftheobjectonlycontainsgeometry,wemanuallyassign
+ahomogeneoustexture(ShaderNodeBsdfDiffuse)withacoloruniformlysampledfrom[0,1]3.
+Further,iftheobjectdoesnothavethematerialinformation,weassignitaBlenderGlossyBSDF
+material(ShaderNodeBsdfGlossy),whoseroughnessvalueisuniformlysampledfrom[0.02,0.5]
+andbasecolorissettobethesameasthehomogeneoustexture. Themixingfactorbetweenthe
+specularanddiffusematerials(ShaderNodeMixShader)isuniformalysampledfrom[0,1].
+2https://github.com/google/flax/blob/144486b5fa7b3dfb/flax/core/nn/linear.py#L27
+3https://github.com/ashawkey/objaverse_filter/tree/dc9e7cd0df8626f30df02bb
+15AswediscussedinSec.A.3,ourdiffusiontrainingrequiresimagepairsunderdifferentlightings. For
+this,weselect509equirectangularenvironmentmapsfrom[56]. Foreachobject,wesamplefour
+cameraposesonaspherecenteredaroundit. Foreachcamera,werandomlysampletwoenvironment
+mapsandaugmentthemwithrandomhorizontalshift,verticalflip,andRGBchannelshuffle. We
+thenuseBlender’sCyclepathtracertorenderanimageofresolution512×512with512samples
+perpixelforeachenvironmentmapusingacamerawhosefocallengthissettobe512.
+16

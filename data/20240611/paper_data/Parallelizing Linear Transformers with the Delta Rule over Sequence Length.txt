@@ -1,0 +1,1089 @@
+Parallelizing Linear Transformers with the Delta Rule
+over Sequence Length
+SonglinYang⋄ BailinWang⋄ YuZhang† YikangShen‡ YoonKim⋄
+⋄MassachusettsInstituteofTechnology †SoochowUniversity ‡MIT-IBMWatsonAILab
+yangsl66@mit.edu
+Abstract
+Transformerswithlinearattention(i.e.,lineartransformers)andstate-spacemod-
+elshaverecentlybeensuggestedasaviablelinear-timealternativetotransformers
+withsoftmaxattention.However,thesemodelsstillunderperformtransformerses-
+peciallyontasksthatrequirein-contextretrieval. Whilemoreexpressivevariants
+of linear transformers which replace the additive outer-productupdate in linear
+transformers with the delta rule [DeltaNet; 87] have been found to be more ef-
+fective at associative recall, existing algorithmsfor training such models do not
+parallelizeoversequencelengthandarethusinefficienttotrainonmodernhard-
+ware. Thisworkdescribesahardware-efficientalgorithmfortraininglineartrans-
+formerswiththedeltarule,whichexploitsamemory-efficientrepresentationfor
+computing products of Householder matrices [9]. This algorithm allows us to
+scaleupDeltaNettostandardlanguagemodelingsettings. Wetraina1.3Bmodel
+for100Btokensandfindthatitoutperformsrecentlinear-timebaselinessuchas
+Mamba[25]andGLA[101]intermsofperplexityandzero-shotperformanceon
+downstreamtasks (includingon tasks that focus on recall). We also experiment
+withtwohybridmodelswhichcombineDeltaNetlayerswith(1)sliding-window
+attentionlayerseveryotherlayeror(2)twoglobalattentionlayers,andfindthat
+thesehybridmodelsoutperformstrongtransformerbaselines.
+1 Introduction
+Theattentionmechanism[6,97]hasbeenshowntobeanimportantprimitiveforaccuratesequence
+modeling. Attentionismoreoverefficientduringtrainingasitisrichinmatrixmultiplicationsand
+can thus take advantage of highly parallel processing capabilities and specialized accelerators on
+modernGPUs. However,thecomplexityofattentionisquadraticinsequencelength,andhenceitis
+afundamentallyexpensiveprimitive.Andwhilerecenttechniqueshavemadeitpossibletoscaleat-
+tentiontolongersequencesthroughhardware-awarerestructuringoftheintermediatecomputations
+[17,15,50,12],thesemethodsstillrequirestoringthekey/valuevectorsofpreviouselements,and
+this“KVcache”canbeunwieldytomanageforlongsequences.
+Linear attention transformers [40] replace the exponential kernel in softmax attention with a dot-
+product over (possibly transformed) key and query vectors. This makes it possible to formulate
+linearattentionasalinearRNNwithmatrix-valuedhiddenstates,thusobviatingtheneedforaKV
+cacheandenablingconstant-memoryinference. Whileinitialvariantsoflinearattentiongenerally
+underperformedsoftmax attention on languagemodeling, gated variantsof linear attention which
+incorporateadata-dependentgatingfactorhaverecentlybeenshowntobecompetitiveagainststrong
+transformerbaselines[101,79,7,68].Thesegatedlineartransformers,alongwithtime-varyingstate
+spacemodelssuchasMamba[25](whichcanbereparameterizedasagatedlineartransformer),have
+The parallel DeltaNet layer is made available as part of the FLASHLINEARATTENTIONlibrary [101, 100]:
+https://github.com/sustcsonglin/flash-linear-attention
+Preprint.
+4202
+nuJ
+01
+]GL.sc[
+1v48460.6042:viXrabeensuggestedasapotentialalternativetoordinarytransformers.However,despitethecompetitive
+languagemodelingperformance,these modelshave been shownto underperformtransformerson
+recall-intensivetasks[5], whichisimportantformanypracticaldownstreamtasksofinterest(e.g.,
+inretrieval-augmentedgeneration[46]).
+Toenhanceassociativerecalloverlongcontexts,Schlagetal.[87]proposeDeltaNet,avariantofa
+lineartransformerwhichusesadeltarule-likeupdate[99]toretrieveandupdateavaluevectorthatis
+associatedwiththecurrentkey.DeltaNetwasfoundtobeeffectiveonsynthetictasksandsmallscale
+languagemodeling/machinetranslation.However,theoriginalworkusedasequentialalgorithmthat
+didnotparallelizeacrosssequencelength,thusresultinginhardware-inefficienttraining,andithas
+notbeenclearhowtoscaleDeltaNettolargermodelsanddatasets.
+Thisworkdescribesahardware-efficienttrainingalgorithmforDeltaNetswhichparallelizesthefor-
+ward/backwardpassesacrosssequencelength. WereparameterizetheDeltaNetasamatrix-valued
+RNN whose recurrenceis given by a generalizedHouseholdertransformation. This reparameteri-
+zationenablestheuseofthememory-efficientWY representation[9]forproductsofHouseholder
+matrices, eliminating the need to materialize the matrix-sized hidden states (which would incur
+highI/O cost). Thememory-efficientrepresentationmakesit possible to straightforwardlyextend
+the chunkwise parallel strategy for training linear attention models [29, 92, 101] to the DeltaNet
+case. We scale DeltaNetsto moderate-scalelanguagemodelingbenchmarks(1.3Bmodelstrained
+on100Btokens),whereDeltaNetisfoundtoobtainbetterlanguagemodelingandzero-shotdown-
+stream task performancethanstronglinear recurrentmodelssuch as Mamba[25] andGLA [101].
+Forin-contextretrievalandlearningevaluation,weevaluateDeltaNetonsyntheticbenchmarkssuch
+asMQAR[3],RegBench[2],MAD[72],aswellasrealdatabenchmarkstestedinAroraetal.[5],
+where it is againfoundto performwell againstlinear recurrentbaselines. Finally, we experiment
+with a hybridapproachwhere we combineDeltaNet layers with sliding attention layers or global
+attentionlayers,andfindthatthesehybridmodelscanimproveuponordinarytransformers,aswell
+asthepureDeltaNettransformer.
+2 Background
+2.1 LinearTransformer: TransformerswithLinearAttention
+Givenasequenceofd-dimensionalinputvectorsx ,...,x ,transformersusethesoftmaxattention
+1 L
+mechanismtoattendovertheentirepast,
+t exp(kTq
+)
+q , k , v =W x ,W x ,W x , o = i t v ,
+t t t Q t K t V t t t exp(kTq
+)
+i
+i=1 j=1 j t
+X
+where W ,W ,W ∈ Rd×d,q ,k ,v ,o ∈ Rd. (Here we asPsume a single attention head).
+Q K V t t t t
+Linear attention[40] replacesthe exponentialkernelexp(kTq ) with the dot-productφ(k )T φ(q )
+i t i t
+whereφ:Rd →Rnisafeaturemap.Thismakesitpossibletorearrangecomputationstorepresent
+linearattentionasalinearRNNwithmatrix-valuedhiddenstates,
+o =
+t φ(k i)T φ(q t)
+v =
+t i=1v iφ(k i)T φ(q t)
+=
+S tφ(q t)
+,
+t
+Xi=1
+t j=1φ(k j)Tφ(q t) i (cid:16) P t j=1φ(k j)T (cid:17) φ(q t) zT tφ(q t)
+whereS = t v φP (k )T ∈ Rd×n andz = (cid:16) Pt φ(k ) ∈ R(cid:17) n. Ifweallowntogotoinfinity,
+t i=1 i i t i=1 i
+linearattentioncanusefeaturemapsassociatedwithpolynomialkernelstocomputea polynomial
+approximatioPntotheexponentialkernelasadotpProduct,andcanthusapproximatesoftmaxattention
+arbitrarilywell[5]. ThedenominatorzT φ(q ) ∈ Rcanresultinnumericalinstabilities[74]andis
+t t
+removedinmanyrecentworks[86,54,92,101].Itisalsocommontousetheidentitymappingforφ
+[54,92],whichresultsinthefollowingsimplifiedlineartransformer:S =S +v kT,o =S q .
+t t−1 t t t t t
+Efficienttraining. LetQ,K,V ∈ RL×d bethestackedquery,key,valuevectors,e.g.,Q = q .
+i i
+We can then compute the output O ∈ RL×d in parallel via O = QKT ⊙M V, where
+L
+M ∈RL×Listhecausalmask.Thisfully“parallelform”andtheabove“recurrentform”havedif-
+L (cid:0) (cid:1)
+ferentFLOPsandmemorycosttradeoffs. TheparallelformtakesO(L2d+Ld2)andthusrequires
+more FLOPs than the recurrentform, which takes O(Ld2). However, the parallelform can often
+befasterinpracticeformoderate-lengthsequencesasitcanbefullyparallelizedanddoneinO(1)
+2steps. Thissequence-levelparallellismalsoenableshighGPUoccupancy.Whiletherecurrentform
+requiresfewerFLOPs(O(Ld2)),theelementwiseoperationsinvolvedinrecurrencehavelowarith-
+meticintensity,unlikethematmuloperationsintheparallelformwhichcanmakeuseofspecialized
+computeunits(e.g.,tensorcores).Thustherecurrentformisoftenslowerinpractice.1
+Chunkwise parallel form. The chunkwise parallel form [29, 92] strikes a balance between the
+parallelandrecurrentforms, allowingforfewerFLOPsthantheparallelformandmoresequence-
+levelparallelismthantherecurrentform. Concretely,supposethequery/key/valuevectorsaresplit
+into L chunkswhereeachchunkisoflengthC. LetQ ∈RCd beallthequeryvectorsforchunk
+C [t]
+t, and let qi = q be the i-th query vector within the t’th chunk; the key/value chunks are
+[t] tC+i
+definedsimilarly. Notethatt ∈ [0,L/C), i ∈ [1,C]. Thestate matricesare also re-indexedsuch
+thatSi = S , andwe additionallydefineS0 = SC , i.e., the initialstate ofachunkis the
+[t] tC+i [t] [t−1]
+laststateofthepreviouschunk. Wecanthenobtainthefollowingidentityforthehiddenstateand
+outputvectorforther-thelementwithinthet-thchunk,
+r r
+Sr =S0 + vi kiT , or =S0 qr + vi kiT qr .
+[t] [t] [t] [t] [t] [t] [t] [t] [t] [t]
+Xi=1 Xi=1 (cid:16) (cid:17)
+By further rewriting the intra-chunkcomputationbased on the parallel form, we obtain following
+“chunkwiseparallelform”,
+S =S +VT K ∈Rd×d, (1)
+[t+1] [t] [t+1] [t+1]
+O =Q ST + Q KT ⊙M V ∈RC×d, (2)
+[t+1] [t+1] [t] [t+1] [t+1] C [t+1]
+where we let S = S0 to reduce not(cid:16) ational clutter. With t(cid:17) his form, information is propagated
+[t] [t]
+chunk-to-chunkthroughS ,andtheintra-chunkstatesSi fori∈ [1,C]neednotbematerialized,
+[t] [t]
+thussavingmemory.
+ThecomplexityofthechunkwiseparallelformisO(LCd+Ld2),andthenumberofsteps(without
+parallel scan) is O(L). Hence, C = L recovers the fully parallel form and C = 1 recovers the
+C
+recurrent form. The chunkwise parallel form allows us to interpolate between the two forms, in
+essence trading off the number of sequential computationsagainst sequence-levelparallelism. In
+practice C is set to a small constant(usually 64 or 128), allowing for subquadratictraining. This
+chunkwise form enables practical speed-upsagainst parallel-form-onlysoftmax attention even on
+moderate-lengthsequences,asdemonstratedbyFLASHLINEARATTENTION[101,100]
+2.2 DeltaNet:LinearTransformerswiththeDeltaUpdateRule
+The above linear transformer employs a simple linear recurrence: S = S +v kT. This can
+t t−1 t t
+beseenasadditivelyupdatingthememoryS withnewkey-valueassociationsateachtimestep.
+t−1
+However,a purelyadditiveupdaterule makesitdifficultto deallocatepastkey-valueassociations,
+eventuallyleadingtokey“collisions”whenL > d, aspointedoutbySchlagetal. [86]. Amodel
+should ideally learn to remove less importantkey-value associations to make room for new ones,
+andthisremovalshoulddependontheinteractionbetweenthenewkeyandthememorycontent.
+DeltaNet uses the delta update rule [99] to operationalizethis mechanism. Specifically, it first re-
+trieves the old value using the current key, vold = S k . It then obtains a new value vnew by
+t t−1 t t
+interpolatingbetweentheoldvalueandthecurrentvaluev ,
+t
+vnew =β v +(1−β )vold,
+t t t t t
+whereβ = σ(W x ) ∈ (0,1). Thisnewvalueisaddedtothememory,resultinginthefollowing
+t β t
+update:
+S =S
+−voldkT +vnewkT
+.
+t t−1 t t t t
+remove write
+1It is possible in theory to use parallel scan [1|1]{tzo p}ar|alle{lizze t}he recurrent form, which would enable
+the computations tobe performed in O(logL) steps and O(Ld2 ) FLOPs. However, this approach requires
+materializingthe2Dhiddenstateforeachtimestep,whichwouldincursignificantmemoryI/Ocostunlessthe
+hiddenstatesizeissmallenoughthatthematerializationcanhappeninfastermemory(whichisthestrategy
+adoptedbyMamba[25]).
+3Hereβ isa“writingstrength”: whenβ = 1,theoldvalueiscompletelyremovedandvnew = v ;
+t t t t
+whenβ = 0, the memoryremainsunmodifiedandwe haveS = S . Theoutputcomputation
+t t t−1
+isthesameasvanillalinearattention,i.e.,o = S q . Thecomplexityofthisrecurrentformisthe
+t t t
+sameasthatofvanillalinearattention,i.e.,O(Ld2). ThisDeltaNetisaspecialcaseoffastweight
+programmers[88],andSchlagetal.[86]andIrieetal.[32]showthatthistypeoflineartransformer
+outperformsordinarylineartransformersonsmall-scalelanguagemodelingandsyntheticretrieval
+tasks.
+3 ParallelizingDeltaNetAcross Sequence Length
+Inthesamespiritasthechunkwiseformoflinearattention,wederiveachunkwiseformforDeltaNet
+thatenableshardware-efficienttrainingthroughparallelizingacrosssequencelength.
+3.1 AMemory-efficientReparameterization
+We first observethat S admits a purely additiverepresentationof the form S = t u kT for
+t t i=1 i i
+u ,k ∈ Rd, since we can simply set u = vnew −vold = β (v −vold). Recall from §2.1 that
+simi pli
+e linear attention has the form S
+=i ti
+v
+kT.i Thus,i Dei ltaNeti
+simply
+repP
+laces the value
+t i=1 i i
+vectorv inlinearattentionwiththe“pseudo”valuevectoru . Oncetheu ’shavebeenconstructed,
+i i i
+therestofcomputationcanproceedasinordP inarylinearattention,i.e.,O= QKT ⊙M Uwhere
+U∈RL×distherow-wiseconcatenationoftheu vectors.
+i (cid:0) (cid:1)
+However,computingu naïvelyrequiresexplicitlymaterializingS tocomputevold,whichwould
+t t−1 t
+requireO(d2)memory. Wenowshowthatwecanobtaintheu ’swithoutexplicitlymaterializing
+t
+S inO(d)memory.Oursimpleproof(byinduction)reliesonanapplicationoftheWYrepresen-
+t−1
+tationforproductsofHouseholdermatrices[9]. ThebasecaseisclearsincewehaveS =β v kT,
+1 1 1 1
+sou =β v . Fortheinductivestep,wefirstobservethattheDeltaNetupdateisgivenby,
+1 1 1
+S =S
+−voldkT +vnewkT
+=S −β (S k
+)kT
++β v
+kT
+=S (I−β k
+kT
+)+β v
+kT
+,
+t t−1 t t t t t−1 t t−1 t t t t t t−1 t t t t t t
+whichcanbeseenasapplyingageneralizedHouseholdertransformation(i.e.,matmulwithaniden-
+tityplusrank-onematrix)tothepreviousstate. Theinductivestepisthengivenby,
+t−1 t−1 t
+T T T T T T
+S =S (I−β k k )+β v k = u k + β v −β u k k k = u k .
+t t−1 t t t t t t i i t t t i i t t i i
+!
+Xi=1 Xi=1 (cid:16) (cid:17) Xi=1
+u
+t
+Notethatu
+t
+doesnotrequirematerializinganyoft|hehiddensta{tezsandrequire}sO(d) memoryto
+compute, thus completing the proof. While we have successfully avoided materializing the S ’s,
+t
+computing the u ’s for all L (i.e., U) takes O(L2d) and moreover cannot be fully parallelized,
+t
+unlike in linear attention where we can calculate all the value vectorsV in parallelin O(1) steps.
+WethusseekmoreaefficientchunkwisestrategyforparallelizingDeltaNet,whichsimilarlyexploits
+memory-efficientrepresentationsofproductsofHouseholdermatrices.
+3.2 ChunkwiseParallelFormforDeltaNet
+Toderivethechunkwiseparallelform,wefirstunrolltherecurrence,
+t t
+T T T T
+S =S (I−β k k )+β v k = β (v k ) (I−β k k ) .
+t t−1 t t t t t t i i i  j j j 
+i=1 j=i+1
+X Y
+ 
+We then define the following variables: Pj = j (I − β k kT ) ∈ Rd×d, Hj =
+i t=i t t t i
+j β (v kT )Pj ∈ Rd×d, where we let Pj = I whenever i > j. Intuitively, Pj is the “de-
+t=i t t t t+1 i Q i
+cayfactor”tobeappliedtoS forobtainingS ,andHj representsthecontributionstoS starting
+P i j i j
+fromtokeni. (HenceS =Ht). Thechunkwiserecurrencecanthenbewrittenas,
+t 1
+Sr =S0 Pr +Hr (3)
+[t] [t] [t] [t]
+wherewe define the chunkwisevariablesSi = S , Pr = PtC+r, Hr = HtC+r. Here we
+[t] tC+i [t] tC+1 [t] tC+1
+have L chunksofsize C. ThetrickistonowefficientlyrepresentthePr ,Hr ∈ Rd×d matrices
+C [t] [t]
+4using a similar approach described in §3.1, so that these matrices can be stored in O(d) memory.
+Thisisgivenby,
+r r
+Pr =I− wi kiT , Hr = ui kiT ∈Rd×d (4)
+[t] [t] [t] [t] [t] [t]
+i=1 t=1
+X X
+r−1
+wr =βr kr − wi (kiT kr ) ∈Rd (5)
+[t] [t] [t] [t] [t] [t]
+!
+Xi=1(cid:16) (cid:17)
+r−1
+ur =βr vr − ui (kiT kr ) ∈Rd (6)
+[t] [t] [t] [t] [t] [t]
+!
+Xi=1(cid:16) (cid:17)
+Thederivationsfortheabovecanbefoundintheappendix. Subsequently,basedonEq.3,wecan
+obtainthechunk-levelrecurrenceforhiddenstatesandoutputsas,
+r r r
+Sr =S0 − S0 wi kiT + ui kiT =S0 + ui −S0 wi kiT ,
+[t] [t] [t] [t] [t] [t] [t] [t] [t] [t] [t] [t]
+!
+Xi=1 Xi=1 Xi=1(cid:16) (cid:17)
+r
+or =Sr qr =S0 qr + ui −S0 wi kiT qi .
+[t] [t] [t] [t] [t] [t] [t] [t] [t] [t]
+Xi=1(cid:16) (cid:17)(cid:16) (cid:17)
+LettingS =S0 ,theabovecanbesimplifiedtomatrixnotationssimilarlytoEq.1-2,
+[t] [t]
+T
+S =S + U −W ST K (7)
+[t+1] [t] [t+1] [t+1] [t] [t+1]
+(cid:16)T T (cid:17) T
+O =Q S +(Q K ⊙M) U −W S (8)
+[t+1] [t+1] [t] [t+1] [t+1] [t+1] [t+1] [t]
+where(cid:3) =(cid:3)1:C ∈RC×dfor(cid:3)∈{Q,K,V,O,U,W}d(cid:16) efinesthechunkwise(cid:17) matricesthatare
+[t] [t]
+formedfromstackingtheq ,k ,v ,o ,u ,w vectors.
+t t t t t t
+Training speed. The sequential computations needed for constructing the chunkwise matrices
+U ’s and W ’s takes O(Ld) work but can be parallelized across chunks, reducing the number
+[t] [t]
+of sequential steps from L to C. Once these are obtained, the chunkwise hidden state updates
+(Eq.7)andtheoutputcomputations(Eq.8)arelargelythesameasinlinearattention,andthustake
+O(LCd+Ld2)workandO(L)sequentialsteps.
+C
+Inordertosaveevenmorememory,wediscardthechunk-levelhid-
+L d Speed-up
+denstatesS ’s(whichwouldtakeO(Ld2)space)aftertheforward head
+[t] C 2048 64 5.5x
+passandrecomputethemduringthebackwardpass;theUandW
+4096 64 7.6x
+matrices,whichtakeupO(Ld)space,arekeptinmemory.
+8192 64 11.5x
+2048 128 8.9x
+Weimplementboththepurerecurrentformandthechunkwisepar-
+4096 128 13.2x
+allel form in Triton [94] and show the speed-ups for various se-
+2048 256 13.7x
+quence lengths(L) and head dimensions(d ) in Table 1, where
+head
+themodeldimensiondis2048.2 Notethatourrecurrentformker-
+Table 1: Speed comparison be-
+nel3 isalready2xfasterthantheCUDArecurrentformkernelpro- tween the recurrent and chunk-
+vided in the original DeltaNet paper.4 Our chunkwise algorithm wise algorithms for DeltaNet on
+enjoysgreaterspeed-upsasthelengthLandheaddimensiond asingleH100GPU.
+head
+increases.
+3.3 DeltaNetTransformer
+We describe how the DeltaNet layer primitive is used to build up a transformer-like model using
+standardmodules.WelargelyfollowtheLLaMA-architecturetransformer[Transformer++,96]and
+2Sofarwehavebeenassumingasinglehead(d =d)foreasierexposition. Inpracticeweusemultiple
+head
+heads where the head dimension d head is smaller than the model dimension d. In this case we have S t ∈
+Rd×d head.
+3OurrecurrentformkernelaswellasthekerneloftheoriginalDeltaNetpaperdoesnotuseparallelscan,
+asthiswouldbeimpractical.Seefootnote1.
+4https://github.com/IDSIA/recurrent-fwp/blob/master/algorithmic/
+fast_transformers/causal_product_cuda.cu.
+5just replace the self-attention layer with the DeltaNet layer. We also apply normalization before
+outputprojectionto stabletraining[74, 59]. Astheadditionalparametersforcomputingscalar β
+t
+terms are negligible, parameter allocation is roughly the same as in Transformer++: 4d2 for the
+DeltaNetlayerand8d2fortheSwiGLUFFNlayer[89].
+Feature map and normalization. Schlag et al. [86] originallyfollow Katharopouloset al. [40]
+and apply a “ELU+ 1” [14] to nonlineary transform the key/query vectors. We instead use the
+SiLU activation [20], which was found to perform better (as reported by Qin et al. [76]). Schlag
+et al. [86] also normalize the key/query vectors with the L norm. We use the L norm instead.
+1 2
+Normalizationhastwoeffects: ignoringβ , bothL -andL -normalizationwouldensurethatI−
+t 1 2
+k kT haseigenvalues≤1,makingtrainingstable;moreover,I−k kT isaprojectionmatrixwithL -
+t t t t 2
+normalization,andonlyerasesinformationinonesubspacewhilekeepingtheotherd−1subspace
+intact, whichisbeneficialforretaininginformationwhile stillenablingsomeforgetting. Thusour
+key/query vectors are given by k = SiLU(W Kx t) , q = SiLU(W Qx t) . We ablate on these
+t kSiLU(W Kx t)k2 t kSiLU(W Qx t)k2
+choicesinourempiricalstudy.
+3.4 HybridModels
+Followingrecentworkoncombiningsubquadratictoken-mixinglayerswithexistingneuralnetwork
+primitives[5,18,47],wealsoexperimentwithhybridizingDeltaNetmodels.
+Convolutional layers. Recent linear recurrent models typically incorporate a lightweight
+depthwise-separableconvolutionlayerafterthequery/key/valueprojections[25,7,16]. This“short
+convolution”layer[71]generalizestheshiftSSM[22],andisefficientinbothnumberofparameters
+andcomputationalcost. Wealsoaddashortconvolutionlayerafterthequery/key/valueprojections.
+Local sliding window and global attention. Linear attention largely uses a content-based ad-
+dressing mechanism [24] and lacks positional information [105]. Arora et al. [5] also argue that
+linearattentionlackstheabilitytoperformpreciselocaltokenshiftsandcomparisons,thusfacing
+difficultiesonretrieval-intensivetasks. Motivatedbythis,weexperimentwithtwodifferenthybrid
+architectures that incorporate softmax attention. We first explore local sliding window attention
+whichattendsoveraslidingwindowandmoreverhasbeenshowntosignificantlyimprovelinearat-
+tention[74,5,49,63];wefollowGriffin[18]andinterleaveDeltaNetlayersandslidingmulti-query
+localattention(SMQA)layers. Wealsoexperimentwithglobalattention,whichhasbeenfoundto
+be helpful[44, 30] even if only few of the recurrentlayers are replaced with full globalattention
+[47];wefollowFuetal.[22]toreplaceonlytwolayerswithglobalattention: thesecondlayerand
+the(N +1)-thlayer,whereN istotalnumberoflayers.
+2
+4 Empirical Study
+WecomparetheDeltaNetagainststrongbaselinesinbothsyntheticandreal-worldlanguagemodel-
+ingsettings. Ourmainbaselinesinclude: LLaMA-architectureTransformer++[96];RetNet[92],a
+linearattentionTransformerwithnon-data-dependentexponentialdecayandlargeheaddimension;
+GLA[101],alinearattentionTransformerwithdata-dependentdecay;andMamba[25],aselective
+state-spacemodelwithdata-dependentdecay.Thenumberofparametersiskept(roughly)thesame
+betweenallmodels. SequenceLength:512,Key-ValuePairs:64
+100
+4.1 SyntheticBenchmarks
+DeltaNet
+75
+Weevaluateonthreesyntheticbenchmarks: Multi-query Mamba
+GLA
+associativerecall[MQAR;3],in-contextlanguagelearn- 50 RetNet
+ing[RegBench;2],andMechanisticArchitectureDesign RWKV4
+25 Hyena
+[MAD;72].
+0
+64 128 256 512
+MQARevaluateslanguagemodels’abilityto(in-context)
+Modeldimension
+recallinformationwithinacontextwhenfacedwithmul- Figure1:Accuracy(%)onMQAR.
+tiplerecallqueries.Aroraetal.[3]showthattheaccuracy
+ofMQARhasastrongcorrelationwiththelanguagemod-
+elingperformance. WeuseAroraetal.[3]’strainingsettingandforDeltaNetweuse2heads. We
+do not use convolutions for these experiments. Table 1 shows that DeltaNet performs perfectly
+(evenwithoutconvolution)inthehardestsettingofMQAR[3],outperformingMamba(whichuses
+convolution)inlowdimensionsettings.
+6
+)%(ycaruccAModel Compress FuzzyRecall In-ContextRecall Memorize NoisyRecall SelectiveCopy Average
+Transformer 51.6 29.8 94.1 85.2 86.8 99.6 74.5
+Hyena[71] 45.2 7.9 81.7 89.5 78.8 93.1 66.0
+MultiheadHyena[56] 44.8 14.4 99.0 89.4 98.6 93.0 73.2
+Mamba[25] 52.7 6.7 90.4 89.5 90.1 86.3 69.3
+GLA[101] 38.8 6.9 80.8 63.3 81.6 88.6 60.0
+DeltaNet 42.2 35.7 100 52.8 100 100 71.8
+Table2:ResultsonMAD.ResultsotherthanDeltaNetaredirectlyborrowedfromPolietal.[72].(Multihead)
+Hyena,DeltaNetandMambamakeuseofconvolutions,whereasGLAdoesnot.
+We next consider consider RegBench [2],
+100
+which is a synthetic dataset designed to as- Transformer++
+sess in-context learning capability of different DeltaNet(w.conv)
+DeltaNet(w/o.conv)
+model architectures. Each input sequence in
+75 GLA(w.conv)
+this benchmark consists of 10 to 20 strings GLA(w/o.conv)
+drawn from a probabilistic finite automaton Mamba(w.conv)
+Mamba(w/o.conv)
+(PFA), where each example is separated by a
+50
+special separator token. Each sequence is de- 5 10 15 20
+signed to be sampled from a distinct language Trainingexamples(K)
+definedbythePFAsothatamodelneedstoin-
+Figure2:Accuracy(%)onRegBench.
+fertheunderlyinglanguagefromthecontexton
+thefly. Duringtesting,amodelisevaluatedonpredictingthenexttokenoftestingsequencesgen-
+eratedfromheld-outPFAs. WefollowAkyüreketal.[2]andperformahyperparametersweepfor
+eachmodelarchitectureandusethebestresult. HereagainwefindthatDeltaNetperformsstrongly
+comparedtobaselines.
+Finally,weconsidetheMADbenchmark[72],asuiteofsynthetictokenmanipulationtasksdesigned
+to probe capabilities of model architectures. The results are shown in Table 2. Compared with
+otherarchitectures,includingMHA,DeltaNetisbetteratrecallingtasks,especiallyonFuzzyRecall,
+althoughitstrugglesontheMemorizetask.
+4.2 LanguageModeling
+Experimental setup. Following prior work [25, 101], we evaluate on Wikitext perplexity and
+zero-shot common sense reasoning tasks, including LAMBADA [LMB.; 65], PiQA [10], Hel-
+laSwag [Hella.; 103], WinoGrande [Wino.; 84], ARC-easy (ARC-e) and ARC-challenge (Arc-c)
+[13]. FollowingArora et al. [5], we also evaluate the modelsreal-worldrecall-intensivetasks, in-
+cludingFDA[4],SWDE[51],andSQUAD[81]. BothSWDEandFDAfocusonextractingstruc-
+turedinformation:SWDEfromrawHTMLtoidentifysemi-structuredrelationships,andFDAfrom
+PDFstoretrievekey-valuepairs. SQUADevaluateslanguagemodelsonreadingcomprehensionby
+providingatextpassageandarelatedquestion.
+Hyperparameters. We train all modelsfrom scratch in two configurations: 340M and 1.3B pa-
+rameters. EachmodelusesAdamWforoptimization,withapeaklearningrateof3e-4. The340M
+modelsaretrainedusing15billiontokensandabatchsizeof0.5Mtokens,whilethe1.3Bmodels
+are trained with 100 billion tokens and a batch size of 2M tokens. We use a cosine learning rate
+schedule, starting with a warm-up phase of 0.5 billion tokens for the 340M models and 1 billion
+tokensforthe1.3Bmodels. Bothconfigurationshaveinitialandfinallearningratessetat3e-5. We
+applyaweightdecayof0.01andusegradientclippingatamaximumof1.0. Theheaddimension
+ofDeltaNetissetto128,andthekernelsizeforconvolutionlayersissetat4.
+Results. OurmainlanguagemodelingresultsareshowninTable3. Intheoriginalworks,Mamba
+usesconvolutionsbydefault, while GLAdoesnot. Forfair comparison,we retraintheGLA with
+convolution, and also train DeltaNet without convolution. For the 1.3B setting we only train the
+DeltaNetwithconvolutionduetolimitedcomputeresources.
+In general we find that DeltaNet outperforms the strong Mamba/GLA baselines in terms of both
+perplexity and downstream task performance. Improvements upon Mamba are particularly pro-
+nounced for the recall intensive tasks (i.e., SWDE, SQUAD, FDA). We also confirm the benefits
+ofhybridarchitectures[18,47]. Boththeslidingwindowattentionhybridandtheglobalattention
+hybrid work well, outperformingthe Transformer++in terms of perplexity. The hybridDeltaNet
+thatjustreplacestwo DeltaNetlayerswith globalattentionoutperformsa Transformer++evenon
+recall-intensivebenchmarks.
+7
+)%(ycaruccAModel Wiki. LMB. LMB. PIQA Hella. Wino. ARC-e ARC-c Avg. SWDE SQUAD FDA
+ppl↓ ppl↓ acc↑ acc↑ acc_n↑ acc↑ acc↑ acc_n↑ cont.↑ cont.↑ cont.↑
+340Mparams/15Btokens
+Transformer++ 28.39 42.69 31.0 63.3 34.0 50.4 44.5 24.2 41.2 42.2 22.1 21.4
+RetNet(w/o.conv) 32.33 49.19 28.6 63.5 33.5 52.5 44.5 23.4 41.0 13.3 27.6 2.9
+Mamba(w.conv) 28.39 39.66 30.6 65.0 35.4 50.1 46.3 23.6 41.8 12.4 23.0 2.1
+GLA(w/o.conv) 28.65 43.35 30.3 64.8 34.5 51.4 45.1 22.7 41.5 18.6 27.2 8.1
+(w.conv) 29.47 45.53 31.3 65.1 33.8 51.6 44.4 24.6 41.8 24.0 24.7 7.3
+DeltaNet(w/o.conv) 29.08 50.87 30.0 63.6 33.6 51.7 46.0 23.0 41.3 24.6 26.9 4.5
+DeltaNet(w.conv) 28.24 37.37 32.1 64.8 34.3 52.2 45.8 23.5 42.1 26.4 28.9 12.8
++SlidingAttn 27.06 38.17 33.4 64.0 35.3 50.9 45.9 23.2 42.1 39.3 32.5 18.8
++GlobalAttn(2layers) 27.51 35.04 33.5 64.0 34.5 51.7 46.0 23.3 42.1 42.9 32.1 23.1
+1.3Bparams/100Btokens
+Transformer++ 16.85 13.44 48.9 70.8 49.6 53.6 56.0 26.5 50.9 66.6 31.5 27.4
+RetNet(w/o.conv) 18.64 17.27 43.3 70.0 47.3 52.5 54.8 25.6 48.9 42.8 34.7 14.3
+Mamba(w.conv) 17.06 13.89 46.2 72.2 40.1 54.1 59.0 28.2 50.0 41.4 35.2 6.2
+GLA(w/o.conv) 17.22 14.47 46.9 71.8 49.8 53.9 57.2 26.6 51.0 50.6 42.6 19.9
+(w.conv) 17.25 14.92 46.2 70.6 49.9 53.0 55.3 27.0 50.4 52.4 37.4 22.3
+DeltaNet(w.conv) 16.87 12.21 48.9 71.2 50.2 53.6 57.2 28.3 51.6 49.5 37.4 17.2
++SlidingAttn 16.56 11.74 49.2 71.8 51.1 52.8 58.9 28.8 52.1 53.3 43.3 22.3
++GlobalAttn(2layers) 16.55 12.40 48.8 70.8 50.7 54.2 58.4 28.1 51.8 71.0 43.0 29.8
+DeltaNetAblations(340M)
+w.L1-norm&1+ELU 31.12 55.96 26.3 63.9 33.0 50.9 44.3 21.8 40.1 14.5 23.9 6.2
+w.L2-norm&1+ELU 28.03 37.62 32.2 65.7 34.7 51.8 45.4 22.5 42.1 23.8 28.6 13.1
+w.L2-norm&ReLU 28.75 43.53 30.2 64.0 33.9 48.9 45.6 22.8 40.9 27.2 26.7 9.0
+Table3: MainlanguagemodelingresultsagainstTransformer++,RetNet[92],Mamba[25],andGLA[101].
+All modelsaretrainedon thesamesubset of theSlimPajamadataset withtheMistral tokenizer. TheTrans-
+former++, RetNet, Mamba, GLA(w/o. conv) results aretaking fromYang et al. [101]. For hybrid models,
+“SlidingAttn”interleavesaslidingwindowattentioneveryotherlayer,and“GlobalAttn”usesfullglobalat-
+tentionontwolayers. The340M/1.3B modelsaretrainedfor15B/100B tokensrespectively. Allresultsare
+obtainedthroughlm-evaluation-harness[23].
+Ablationstudy. InTable3(bottom)weablatethechoiceoffeaturemapandnormalization. The
+originalDeltaNet uses L -norm and the ELU feature map. We find that simply replacing the L -
+1 1
+norm with the L -normgreatly increases peerformance. As for feature map, we experimentwith
+2
+{ReLU,1+ELU,SiLU}andfindthatSiLUperformsthebest.
+Trainingthroughput
+Trainingthroughput Wecomparethetrainingthroughputs
+50
+ofdifferent1.3Bmodelsindifferenttraininglengthsandbatch
+size settings. The result is shown in Figure 3. We observe 40
+thatseethatthetrainingspeedofDeltaNet+isbetweenthatof
+30
+Mamba and GLA. All linear-time models outperform Trans-
+former++inlonger-sequencetrainingsettings. 20
+5 Discussion 10
+0
+5.1 DeltaNetvs. StateSpaceModels/LinearRNNs 2048/8 4096/4 8192/2 16284/1
+Traininglength/Batchsize
+To discuss DeltaNet against existing linear RNNs (including
+state-spacemodels)wefirstdiscussageneralclassofassocia-
+Transformer++ Mamba
+tive RNNs with matrix-valuedhiddenstates. Givena matrix- GLA DeltaNet
+valuedhiddenstateS ∈Rd×nandcurrentinputx ∈Rd,we Figure3:Trainingthroughputof1.3B
+t t
+areinterestedinsequencemodelswiththefollowingform: modelsonasingleH100.
+T
+S =S •M +v k , (recurrence)
+t t−1 t t t
+o =S q , (memoryread-out)
+t t t
+where•isanassociativeoperator(e.g.,Hadamardproduct,matrixmultiplication,etc.). Thematrix
+M andvectorsv ,k ,q are(potentiallynon-linear)functionsofthecurrentinputx .
+t t t t t
+Asisthecaseinvector-valuedlinearRNNs[55,90],Theuseofanassociativeoperatorenablesthe
+use of parallel scan [11] to calculate S ,...,S in O(logL) steps and O(L) work (ignoring the
+1 L
+termsassociatedwiththeassociativeoperation)iftheinputsx ,...,x aregiven(thoughseeour
+1 L
+discussionin footnote1). Hence, aslongas theassociativeoperatorisnottooexpensive,training
+can be efficient. However, parallel scan by itself is not sufficient for training language models at
+practicalscaleduetosomeassociativeoperator’sbeingtooexpensive. Recentmodelssuchassuch
+asMamba[25]andgatedlinearattentionTransformers[92,101,79,68,7]thusmakeuseofcheap
+element-wiserecurrenceupdates,inparticulartheHadamardproduct,i.e.,• = ⊙. SeeTable4for
+howrecentmodelscanbecastintothisform.
+8
+)s/tK(dnocesrepsnekoTModel Recurrence Memoryread-out
+LinearAttention[40,39] S t=S t−1+vtktT ot=S tqt
++Kernel S t=S t−1+vtφ(kt)T ot=S tφ(qt)
++Normalization S t=S t−1+vtφ(kt)T , zt=zt−1+φ(kt) ot=S tφ(qt)/(ztT φ(qt))
+DeltaNet[86] S t=S t−1(I−βtktktT )+βtvtktT ot=S tqt
+GatedRFA[69] S t=gtS t−1+(1−gt)vtktT , zt=gtzt−1+(1−gt)kt ot=S tqt/(ztTqt)
+S4[26] S t=S t−1⊙exp(−(α1T )⊙exp(A))+B⊙(vt1T ) ot=(S t⊙C)1+d⊙vt
+DFW[54,41] S t=S t−1⊙(βtαT t)+vtktT ot=S tqt
+RetNet[92,76] S t=γS t−1+vtktT ot=S tqt
+Mamba[25] S t=S t−1⊙exp(−(αt1T )⊙exp(A))+(αt⊙vt)ktT ot=S tqt+d⊙vt
+GLA[101] S t=S t−1⊙(1αT t)+vtktT =S t−1Diag(αt)+vtktT ot=S tqt
+RWKV-6[68] S t=S t−1Diag(αt)+vtktT ot=(S t−1+(d⊙vt)ktT )qt
+HGRN-2[79] S t=S t−1Diag(αt)+vt(1−αt)T ot=S tqt
+mLSTM[7] S t=ftS t−1+itvtktT , zt=ftzt−1+itkt ot=S tqt/max{1,|ztTqt|}
+Mamba-2[16] S t=γtS t−1+vtktT ot=S tqt
+Table4: Overview of recent linear recurrent models that have been proposed and applied to autoregressive
+languagemodeling(orderedinroughchronologicalorder). Theseworksmakeuseofamatrix-valuedhidden
+stateS
+t
+∈Rd×nthatisupdatedthroughanassociativerecurrencefollowedbyanouter-product-basedaddition.
+Here ⊙ is the Hadamard product. Some models make use of an additional linear RNN with hidden state
+vector zt, whichused tonormalized thequery vector qt. Variableswiththesubscript t(e.g., vt,αt,ft,γt)
+are(potentiallynon-linear)functionsofthecurrentinputxt. Non-time-varyingparameters(e.g.,A,d,γ)are
+denotedwithoutsubscripts;theseparametersareeitherlearnedorandsettofixedvalues.Matricesaredenoted
+withbolduppercaseletters,vectorswithboldlowercase,andscalarswithitalicletters. Manymodelsmake
+useofakernelφ(e.g.,[86,69])butwesubsumethemintothekey/valuevectorstoreducenotationalclutter.
+S4denotedhereusesthediagonaltransitiontransition[27,90]withthesamediscretizationasinMamba.
+Standardmatrix multiplications(i.e., S •M = S M ) on the other hand can modelricher
+t−1 t t−1 t
+interactionsthatgobeyondelementwiserecurrence.WithoutanystructuralassumptionsonM how-
+t
+ever, these operationswould take O(dn2) for each update (as opposed to O(dn) for elementwise
+products), which would be prohibitivelyexpensive. Hence, DeltaNet’s use of M = I−β k kT
+t t t t
+canbeseenasexploitingstructuredmatricestoefficientlymodelinteractionsbeyondelementwise
+recurrences. Note that our algorithm generalizes to a more general class of matrices of the form
+M =I−a bT. WeadopttheDeltaNetparameterizationinthepresentworkasweareprimarilyin-
+t t t
+terestedinimprovingrecall(throughDeltaNet’skey-valueupdaterule)whilemaintainingparameter-
+efficiency;weleavetheexplorationofalternativeparameterizationstofuturework.
+5.2 TowardsaUnifyingFrameworkforEfficientAutoregressiveSequenceTransformations
+While the above class of models (i.e., matrix-valuedRNNs with associative recurrenceand outer-
+product-basedadditive)makesitpossibletounifyrecentmodels,wedonotclaimthatitisthe“right”
+level at which view (autoregressive) sequence transformations of the form {x }L 7→ {o }L ,
+t t=1 t t=1
+whereo cannotdependonanyx ifj > t. Forexample,thisframingmakesitdifficultto(neatly)
+t j
+captureothersubquadraticmodelsthathave beenshownto be effective[102, 42, 83, 70, 71]. An
+alternativeunifyingframeworkmightbetoviewtheabovesequencetransformationsasadiscretiza-
+tionofacontinuousstatespacemodel[26,90,25],orasamatrixmultiplicationwithamaskedstruc-
+turedmatrix[64,75,38,16].Whatdoesseemimportant,however,isthataframeworkshouldideally
+exposeefficientalgorithmsfor training, andthe algorithmshouldbe hardware-efficient,which, in
+the case of modern GPUs, means that it should be rich in (half-precision)matrix multiplications.
+Fromthisperspective,state-spaceduality(SSD)frameworkrecentlyproposedbyDaoandGu[16],
+which providesa connectionbetween SSM-based sequencetransformationsand structuredmatrix
+multiplicationswithasemiseparablematrix,isapromisingcandidate. Forexample,SSDprovides
+aformalperspectiveonthe“chunkwiseparallelalgorithm”fortraininggatedlinearattentiontrans-
+formers[92,101](whichwasoriginallyproposedbyHuaetal.[29]totrainahybridtransformer).
+However,thisframeworkmaynotcaptureanimportantclassofmodels,e.g.,modelswheretheasso-
+ciativerecurrenceinvolvesmatrixmultiplicationwithanunstructuredmatrix,ormodelsthatmake
+useofmoreexoticassociativeoperators.
+Finally, we observe that there have been many recent works that have been proposed which pur-
+portedlymatchoroutperformclassic transformerswhile maintainingsubquadratictrainingandin-
+ference. As can be seen in Table 4, the “token-mixing” component of these works are closely
+relatedtooneanother. However,thewayinwhichthetoken-mixingprimitiveisusedtobuildupa
+9transformer-likemodelvarieswidely.Forexample,whilemostrecentworksmakeuseofdepthwise-
+separableconvolutionlayers(notshownin Table4)[25,67,80, 7, 16],earlierworksgenerallydo
+not [40, 87, 69]. As we show in our RegBench (Figure 2) and language modeling (Table 3) ex-
+periments, the use of convolutionlayers is crucialfor some models. There are also differencesin
+the parameterizationsof the feedforward layers used for the “channel mixing” component. Such
+variationsshouldbetakenintoaccountbeforedeclaringaparticularmodellayersuperiortoanother.
+5.3 Limitations
+Our work has several limitations. First, in terms of computation, although we propose a new
+hardware-efficientalgorithm,thetrainingspeedstilllagsbehindthatofGLA.Thisisduetotheover-
+headcausedbymodelingstate-to-statedependenciesasdescribedabove,whichrequires“marginal-
+izing”overtheheaddimensioninsidethekernel,similartothecaseofsoftmaxattention. However,
+forGLAsincethereareintra-statedependencies(everythingiselementwise),andthusitiseasyto
+use tiling to support arbitrary size of head dimension, as implemented in Yang and Zhang [100].
+ThislimitationwouldpotentiallylimitDeltaNet’smemorysize.
+Second, we foundthat the length generalizationof DeltaNet was limited, while GLA and RetNet
+(andMambatoanextent)hasbeenfoundtobeabletoextrapolatebeyondthetraininglength[101].
+We speculate that this is because DeltaNet lacks explicit decay factors. This could be improved
+through incorporating a decay term in the recurrence, e.g., M = γ (I−k kT ) for γ ∈ (0,1),
+t t t t t
+althoughthedecaymechanismcouldpotentiallyhurtin-contextretrieval.5
+6 Related Work
+Chunkwise linear attention. Hua et al. [29] first proposedchunkwise formfor linear attention;
+however,theyusedahybridlinearandnonlinearattentionmodelsimilartoMunkhdalaietal.[62].
+It is possible to adapt their algorithm to compute the exact output of the pure linear attention, as
+shownin Sun et al. [92] andYanget al. [101]. Thechunkwiselinear attentionalgorithmhasalso
+beenindependentlydiscoveredinseveralworks[92, 37, 16]. Yangetal. [101]andQinetal. [78]
+discuss I/O-aware hardware optimization for chunkwise linear attention and Sun et al. [91] make
+generalizationtomulti-nodedistributedtraining.Inspiredbythechunkwiseform,weproposeanew
+algorithm for hardware-efficientDeltaNet training, significantly improving the training efficiency
+andallowingforlarge-scaleexperiments.
+Deltaruleandmemorycapacity. LineartransformerscanbeseenasatypeofiteratedHopfield
+networks [61], and this connection can provideperspectives on the limitations and improvements
+oflinearattentiontransformers.Forexample,vanillalineartransformersuseaHebbian-likeupdate
+rule,whichhasbeenshowntohavelimitedmemorycapacity[58].LaterworksinHopfieldnetworks
+usehigher-orderpolynomials[19]andexponentialkernels[82,43]toenhancethememorycapacity,
+which is also related to attention with polynomialkernels exploredin PolysketchFormer[37] and
+Based Linear Attention [5, 1]. On the other hand, the delta rule has been shown to have better
+memorycapacity[73,48]. Inthissense, giventhefixedsizerecurrentstate,usingthedeltaruleis
+abletoachieveabetterfrontieroftherecall-memorytradeoffcurve[5]. Deltarulehasdemonstrated
+betterperformancecomparedtotheadditiveruleusedinvanillalinearTransformer[85,33,34,31,
+35]. Recently,Munkhdalaietal.[62]alsoshowthatdeltarule-enhancedlinearattentionisbetterin
+retrievalandsummarizationtasks.
+Householder matrices with WY representation. Householder matrices, known for preserving
+norms,areatypeoforthogonalmatrixextensivelyusedinmachinelearning[57,60,104,95,77,8].
+These matrices allow for efficient computation of inverses and their Jacobian determinant of one,
+makingthemparticularlysuitableforapplicationsinnormalizingflows[57,8]. Notably,Mathiasen
+et al. [57] developeda chunkwise fast algorithm for computingthe cumulative productof House-
+holder matrices for normalizing flows, leveraging the WY representation. Our approach, while
+sharingthesamehigh-levelconcept,tacklesadifferentproblemandisarguablymoregeneral.
+Therehasalso beensignificantinterestinusingorthogonalmatricestoparameterizethetransition
+matricesofRNNs[60,36,98,28]formitigatingvanishinggradients.Mhammedietal.[60]usethe
+5HoweverwefoundtheDeltaNet+localsliding-windowattentionhybridtogeneralizewell,whichcould
+provideanappealingmiddleground.
+10WYrepresentationtoreducethememoryfootprintwhentrainingnonlinearRNNswithHouseholder
+transitionmatrices.
+Hybrid models. There has been much recent work on developing hybrid mdoels by comining
+linearrecurrentlayers(state-spacemodels,linearrecurrentTransformers,linearRNNs) with local
+chunk attention [52, 106, 21, 53, 62] or sliding window attention [106, 5, 18] or global attention
+[44,45, 30, 22, 47, 66,93]. Polietal. [72] systematicallystudythe scalinglawof hybridmodels.
+WesimilarlyshowthatcombiningDeltaNetwithclassicattentionisaneffectivestrategy.
+7 Conclusion
+We describe a algorithmthat parallelizes DeltaNet training across the sequence length dimension,
+achieving significant speed-ups against existing implementations. This makes it possible to scale
+up DeltaNet to moderate-scale language modeling settings, where we find that it performs well
+comparedto recentlinear-recurrentbaselines. Inadditionto thealgorithmiccontribution,we also
+experimentwithhybridizingDeltaNetlayerswithshortconvolution,slidingwindowattention,and
+globalattentionlayers,andfindthatsuchhybridmodelsperformwell.
+Acknowledgements
+ThisstudywassupportedbyfundsfromanMIT-IBMWatsonAIgrant.WethankSimranAroraand
+LiliangRenforhelpfuldiscussion. WethankMichaelPoliandArminThomasforsharingtheraw
+resultsfromtheMADbenchmarkexperiment.
+References
+[1] Y. Aksenov, N. Balagansky, S. M. L. C. Vaina, B. Shaposhnikov, A. Gorbatovski, and
+D. Gavrilov. Linear Transformers with Learnable Kernel Functions are Better In-Context
+Models,June2024. URLhttp://arxiv.org/abs/2402.10644.arXiv:2402.10644[cs].
+[2] E. Akyürek, B. Wang, Y. Kim, and J. Andreas. In-Context Language Learning: Ar-
+chitectures and Algorithms, Jan. 2024. URL http://arxiv.org/abs/2401.12973.
+arXiv:2401.12973[cs].
+[3] S.Arora,S.Eyuboglu,A.Timalsina,I.Johnson,M.Poli,J.Zou,A.Rudra,andC.Ré. Zool-
+ogy: Measuringandimprovingrecallinefficientlanguagemodels. CoRR,abs/2312.04927,
+2023.
+[4] S.Arora,B.Yang,S.Eyuboglu,A.Narayan,A.Hojel,I.Trummer,andC.Ré.LanguageMod-
+els Enable Simple Systems for Generating Structured Views of HeterogeneousData Lakes,
+Apr.2023. arXiv:2304.09433[cs].
+[5] S.Arora,S.Eyuboglu,M.Zhang,A.Timalsina,S.Alberti,D.Zinsley,J.Zou,A.Rudra,and
+C.Ré.Simplelinearattentionlanguagemodelsbalancetherecall-throughputtradeoff.CoRR,
+abs/2402.18668,2024. arXiv:2402.18668.
+[6] D.Bahdanau,K.Cho,andY.Bengio. Neuralmachinetranslationbyjointlylearningtoalign
+andtranslate. arXivpreprintarXiv:1409.0473,2014.
+[7] M. Beck, K. Pöppel, M. Spanring, A. Auer, O. Prudnikova, M. Kopp, G. Klambauer,
+J.Brandstetter,andS.Hochreiter. xlstm: Extendedlongshort-termmemory. arXivpreprint
+arXiv:2405.04517,2024.
+[8] R. v. d. Berg, L. Hasenclever, J. M. Tomczak, and M. Welling. Sylvester Normalizing
+Flows for Variational Inference, Feb. 2019. URL http://arxiv.org/abs/1803.05649.
+arXiv:1803.05649[cs,stat].
+[9] C.H.BischofandC.V.Loan. TheWYrepresentationforproductsofhouseholdermatrices.
+InSIAMConferenceonParallelProcessingforScientificComputing,1985. URLhttps://
+api.semanticscholar.org/CorpusID:36094006.
+11[10] Y.Bisk, R.Zellers,J.Gao,Y.Choi,etal. Piqa: Reasoningaboutphysicalcommonsensein
+naturallanguage.InProceedingsoftheAAAIconferenceonartificialintelligence,volume34,
+pages7432–7439,2020.
+[11] G.E.Blelloch. Prefixsumsandtheirapplications. 1990.
+[12] W.Brandon,A.Nrusimha,K.Qian,Z.Ankner,T.Jin,Z.Song,andJ.Ragan-Kelley. Striped
+Attention:FasterRingAttentionforCausalTransformers. ArXiv,abs/2311.09431,2023.
+[13] P.Clark,I.Cowhey,O.Etzioni,T.Khot,A.Sabharwal,C.Schoenick,andO.Tafjord. Think
+you have solved question answering? try arc, the ai2 reasoning challenge. arXiv preprint
+arXiv:1803.05457,2018.
+[14] D.-A. Clevert, T. Unterthiner, and S. Hochreiter. Fast and Accurate Deep Network Learn-
+ingbyExponentialLinearUnits(ELUs),Feb.2016. URLhttp://arxiv.org/abs/1511.
+07289. arXiv:1511.07289[cs].
+[15] T. Dao. FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning.
+CoRR,abs/2307.08691,2023. doi:10.48550/ARXIV.2307.08691.arXiv:2307.08691.
+[16] T. Dao and A. Gu. Transformers are ssms: Generalized models and efficient algorithms
+throughstructuredstatespaceduality. arXivpreprintarXiv: 2405.21060,2024.
+[17] T.Dao,D.Y.Fu,S.Ermon,A.Rudra,andC.Ré. FlashAttention:FastandMemory-Efficient
+ExactAttentionwithIO-Awareness. InNeurIPS,2022.
+[18] S.De,S.L.Smith,A.Fernando,A.Botev,G.Cristian-Muraru,A.Gu,R.Haroun,L.Berrada,
+Y. Chen, S. Srinivasan, G. Desjardins, A. Doucet, D. Budden, Y. W. Teh, R. Pascanu,
+N. De Freitas, and C. Gulcehre. Griffin: Mixing Gated Linear Recurrenceswith Local At-
+tention for Efficient Language Models, Feb. 2024. URL http://arxiv.org/abs/2402.
+19427. arXiv:2402.19427[cs].
+[19] M. Demircigil, J. Heusel, M. Löwe, S. Upgang, and F. Vermet. On a modelof associative
+memory with huge storage capacity. Journal of Statistical Physics, 168(2):288–299, July
+2017.ISSN0022-4715,1572-9613.doi:10.1007/s10955-017-1806-y.URLhttp://arxiv.
+org/abs/1702.01929.arXiv:1702.01929[math].
+[20] S. Elfwing, E. Uchibe, and K. Doya. Sigmoid-Weighted Linear Units for Neural Network
+FunctionApproximationinReinforcementLearning,Nov.2017.URLhttp://arxiv.org/
+abs/1702.03118.arXiv:1702.03118[cs].
+[21] M.Fathi,J. Pilault,P.-L.Bacon,C.Pal, O.Firat,andR. Goroshin. Block-statetransformer.
+arXivpreprintarXiv:2306.09539,2023.
+[22] D. Y. Fu, T. Dao, K. K. Saab, A. W. Thomas, A. Rudra, and C. Ré. Hungry Hungry Hip-
+pos: TowardsLanguageModelingwith State SpaceModels. In TheEleventhInternational
+ConferenceonLearningRepresentations,ICLR2023,Kigali,Rwanda,May1-5,2023,2023.
+[23] L.Gao,J.Tow,S.Biderman,S.Black,A.DiPofi,C.Foster,L.Golding,J.Hsu,K.McDonell,
+N. Muennighoff,J. Phang,L. Reynolds,E.Tang, A.Thite,B. Wang, K.Wang, andA.Zou.
+Aframeworkforfew-shotlanguagemodelevaluation,Sept.2021.
+[24] A.Graves,G.Wayne,andI.Danihelka. NeuralTuringMachines,Dec.2014. URLhttp://
+arxiv.org/abs/1410.5401.arXiv:1410.5401[cs].
+[25] A. Gu and T. Dao. Mamba: Linear-Time Sequence Modeling with Selective State Spaces.
+2023.
+[26] A. Gu, K. Goel, and C. Ré. Efficiently Modeling Long Sequences with Structured State
+Spaces,2022. 2111.00396.
+[27] A. Gupta, A. Gu, and J. Berant. Diagonal state spaces are as effective as structured state
+spaces. AdvancesinNeuralInformationProcessingSystems,35:22982–22994,2022.
+12[28] K.Helfrich,D.Willmott,andQ.Ye.Orthogonalrecurrentneuralnetworkswithscaledcayley
+transform. In International Conference on Machine Learning, pages 1969–1978. PMLR,
+2018.
+[29] W.Hua,Z.Dai,H.Liu,andQ.V.Le. TransformerQualityinLinearTime. InK.Chaudhuri,
+S.Jegelka,L.Song,C.Szepesvári,G.Niu,andS.Sabato,editors,InternationalConference
+onMachineLearning,ICML2022,17-23July2022,Baltimore,Maryland,USA,volume162
+ofProceedingsofMachineLearningResearch,pages9099–9117.PMLR,2022.
+[30] F. Huang, K. Lu, C. Yuxi, Z. Qin, Y. Fang, G. Tian, and G. Li. Encoding recurrence into
+transformers. InTheEleventhInternationalConferenceonLearningRepresentations,2022.
+[31] K.IrieandJ.Schmidhuber.Imagesasweightmatrices:Sequentialimagegenerationthrough
+synaptic learningrules. InThe EleventhInternationalConferenceon LearningRepresenta-
+tions,ICLR2023,Kigali,Rwanda,May1-5,2023.OpenReview.net,2023. URLhttps://
+openreview.net/pdf?id=ddad0PNUvV.
+[32] K.Irie, I.Schlag,R. Csord’as,andJ.Schmidhuber. Goingbeyondlineartransformerswith
+recurrent fast weight programmers. ArXiv, abs/2106.06295, 2021. URL https://api.
+semanticscholar.org/CorpusID:235417174.
+[33] K. Irie, I. Schlag, R. Csordás, and J. Schmidhuber. Goingbeyondlinear transformerswith
+recurrentfastweightprogrammers. AdvancesinNeuralInformationProcessingSystems,34:
+7703–7717,2021.
+[34] K. Irie, F. Faccio, and J. Schmidhuber. Neural differential equations for learning
+to program neural nets through continuous learning rules. In S. Koyejo, S. Mo-
+hamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh, editors, Advances in Neural In-
+formation Processing Systems 35: Annual Conference on Neural Information Process-
+ing Systems 2022, NeurIPS 2022, New Orleans, LA, USA, November 28 - Decem-
+ber 9, 2022, 2022. URL http://papers.nips.cc/paper_files/paper/2022/hash/
+fc09b26b85ab3abb2832bd555a2e4215-Abstract-Conference.html.
+[35] K.Irie,R.Csordás,andJ.Schmidhuber.Practicalcomputationalpoweroflineartransformers
+andtheirrecurrentandself-referentialextensions.InH.Bouamor,J.Pino,andK.Bali,editors,
+Proceedingsofthe2023ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,
+pages9455–9465,Singapore,Dec.2023.AssociationforComputationalLinguistics. doi:10.
+18653/v1/2023.emnlp-main.588. URLhttps://aclanthology.org/2023.emnlp-main.
+588.
+[36] L. Jing, C. Gulcehre,J.Peurifoy,Y. Shen,M. Tegmark,M.Soljacic, andY. Bengio. Gated
+OrthogonalRecurrentUnits: On Learning to Forget. Neural Computation, 31(4):765–783,
+Apr. 2019. ISSN 0899-7667, 1530-888X. doi: 10.1162/neco_a_01174. URL https://
+direct.mit.edu/neco/article/31/4/765-783/8458.
+[37] P.Kacham,V.Mirrokni,andP.Zhong. Polysketchformer:Fasttransformersviasketchesfor
+polynomialkernels. arXivpreprintarXiv:2310.01655,2023.
+[38] Y.Kang,G.Tran,andH.DeSterck.Fastmultipoleattention:Adivide-and-conquerattention
+mechanismforlongsequences. arXivpreprintarXiv:2310.11960,2023.
+[39] J.Kasai,H.Peng,Y.Zhang,D.Yogatama,G.Ilharco,N.Pappas,Y.Mao,W.Chen,andN.A.
+Smith.FinetuningPretrainedTransformersintoRNNs. InM.-F.Moens,X.Huang,L.Specia,
+andS.W.-t.Yih,editors,Proceedingsofthe2021ConferenceonEmpiricalMethodsinNat-
+uralLanguageProcessing,EMNLP2021,VirtualEvent/PuntaCana,DominicanRepublic,
+7-11November,2021,pages10630–10643.AssociationforComputationalLinguistics,2021.
+doi:10.18653/V1/2021.EMNLP-MAIN.830.
+[40] A. Katharopoulos,A. Vyas, N. Pappas, and F. Fleuret. Transformersare rnns: Fast autore-
+gressivetransformerswithlinearattention. InInternationalconferenceonmachinelearning,
+pages5156–5165.PMLR,2020.
+13[41] T.Katsch. Gateloop: Fullydata-controlledlinearrecurrenceforsequencemodeling. ArXiv,
+abs/2311.01927,2023.
+[42] N.Kitaev,Ł.Kaiser,andA.Levskaya. Reformer: Theefficienttransformer. arXivpreprint
+arXiv:2001.04451,2020.
+[43] D. Krotov and J. Hopfield. Large Associative Memory Problem in Neurobiologyand Ma-
+chineLearning,Apr.2021.URLhttp://arxiv.org/abs/2008.06996.arXiv:2008.06996
+[cond-mat,q-bio,stat].
+[44] T. Lei. When Attention Meets Fast Recurrence: Training Language Models with Reduced
+Compute. InM.-F.Moens,X.Huang,L.Specia,andS.W.-t.Yih,editors,Proceedingsofthe
+2021ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,pages7633–7648,
+Online and Punta Cana, Dominican Republic, Nov. 2021. Association for Computational
+Linguistics. doi: 10.18653/v1/2021.emnlp-main.602. URLhttps://aclanthology.org/
+2021.emnlp-main.602.
+[45] T.Lei,R.Tian,J.Bastings,andA.P.Parikh. Simplerecurrenceimprovesmaskedlanguage
+models. arXivpreprintarXiv:2205.11588,2022.
+[46] P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. Küttler, M. Lewis,
+W.-t. Yih, T. Rocktäschel, S. Riedel, and D. Kiela. Retrieval-Augmented Generation for
+Knowledge-IntensiveNLPTasks,Apr.2021. URLhttp://arxiv.org/abs/2005.11401.
+arXiv:2005.11401[cs].
+[47] O.Lieber,B.Lenz,H.Bata,G.Cohen,J.Osin,I.Dalmedigos,E.Safahi,S.Meirom,Y.Be-
+linkov,S.Shalev-Shwartz,etal.Jamba:Ahybridtransformer-mambalanguagemodel.arXiv
+preprintarXiv:2403.19887,2024.
+[48] K. C. Lingashetty. Delta learning rule for the active sites model. arXiv preprint
+arXiv:1007.0417,2010.
+[49] L. D. Lingle. Transformer-vq: Linear-time transformers via vector quantization. arXiv
+preprintarXiv:2309.16354,2023.
+[50] H. Liu, M. Zaharia, and P. Abbeel. Ring Attention with Blockwise Transformersfor Near-
+InfiniteContext. ArXiv,abs/2310.01889,2023.
+[51] C. Lockard,P. Shiralkar,andX. L.Dong. OpenCeres: When OpenInformationExtraction
+MeetstheSemi-StructuredWeb.InJ.Burstein,C.Doran,andT.Solorio,editors,Proceedings
+ofthe2019ConferenceoftheNorthAmericanChapteroftheAssociationforComputational
+Linguistics:HumanLanguageTechnologies,Volume1(LongandShortPapers),pages3047–
+3056, Minneapolis, Minnesota, June 2019.Association forComputationalLinguistics. doi:
+10.18653/v1/N19-1309.URLhttps://aclanthology.org/N19-1309.
+[52] X. Ma, C. Zhou, X. Kong, J. He, L. Gui, G. Neubig, J. May, and L. Zettlemoyer. Mega:
+movingaverageequippedgatedattention. arXivpreprintarXiv:2209.10655,2022.
+[53] X.Ma,X.Yang,W.Xiong,B.Chen,L.Yu,H.Zhang,J.May,L.Zettlemoyer,O.Levy,and
+C. Zhou. Megalodon: Efficientllm pretrainingandinferencewith unlimitedcontextlength.
+arXivpreprintarXiv:2404.08801,2024.
+[54] H.H.Mao. Fine-TuningPre-trainedTransformersintoDecayingFastWeights. InProceed-
+ingsofthe 2022ConferenceonEmpiricalMethodsin NaturalLanguageProcessing, pages
+10236–10242,AbuDhabi,UnitedArabEmirates,Dec.2022.AssociationforComputational
+Linguistics. doi:10.18653/v1/2022.emnlp-main.697.
+[55] E.MartinandC.Cundy. ParallelizingLinearRecurrentNeuralNetsOverSequenceLength.
+In 6th International Conference on Learning Representations, ICLR 2018, Vancouver, BC,
+Canada,April30-May3,2018,ConferenceTrackProceedings.OpenReview.net,2018.
+[56] S.Massaroli,M.Poli,D.Y.Fu,H.Kumbong,R.N.Parnichkun,A.Timalsina,D.W.Romero,
+Q.McIntyre,B.Chen,A.Rudra,C.Zhang,C.Ré,S.Ermon,andY.Bengio. Laughinghyena
+distillery: Extractingcompactrecurrencesfromconvolutions. ArXiv,abs/2310.18780,2023.
+URLhttps://api.semanticscholar.org/CorpusID:264590326.
+14[57] A. Mathiasen, F. Hvilshøj, J. R. Jørgensen, A. Nasery, and D. Mottin. Faster orthogonal
+parameterizationwithhouseholdermatrices. InICML,WorkshopProceedings,2020.
+[58] R. J. McEliece, E. C. Posner, E. R. Rodemich, and S. S. Venkatesh. The capacity of the
+hopfieldassociativememory. IEEETrans.Inf.Theory,33:461–482,1987.
+[59] J. Mercat, I. Vasiljevic, S. Keh, K. Arora, A. Dave, A. Gaidon, and T. Kollar. Linearizing
+largelanguagemodels. arXivpreprintarXiv:2405.06640,2024.
+[60] Z.Mhammedi,A.Hellicar,A.Rahman,andJ.Bailey. EfficientOrthogonalParametrisation
+of Recurrent Neural Networks Using Householder Reflections, June 2017. URL http://
+arxiv.org/abs/1612.00188.arXiv:1612.00188[cs].
+[61] B.Millidge.LinearAttentionasIteratedHopfieldNetworks.URLhttp://www.beren.io/
+2024-03-03-Linear-Attention-as-Iterated-Hopfield-Networks/.
+[62] T.Munkhdalai,M.Faruqui,andS.Gopal. Leavenocontextbehind:Efficientinfinitecontext
+transformerswithinfini-attention. arXivpreprintarXiv:2404.07143,2024.
+[63] Y. Nahshan,J. Kampeas,andE.Haleva. LinearLog-NormalAttentionwithUnbiasedCon-
+centration,Feb.2024.URLhttp://arxiv.org/abs/2311.13541.arXiv:2311.13541[cs].
+[64] T.Nguyen,V.Suliafu,S.Osher,L.Chen,andB.Wang. Fmmformer: Efficientandflexible
+transformerviadecomposednear-fieldandfar-fieldattention.Advancesinneuralinformation
+processingsystems,34:29449–29463,2021.
+[65] D.Paperno,G.Kruszewski,A.Lazaridou,Q.N.Pham,R.Bernardi,S.Pezzelle,M.Baroni,
+G.Boleda,andR.Fernández.TheLAMBADAdataset:Wordpredictionrequiringabroaddis-
+coursecontext,June2016.URLhttp://arxiv.org/abs/1606.06031.arXiv:1606.06031
+[cs].
+[66] J. Park, J. Park, Z. Xiong, N. Lee, J. Cho, S. Oymak, K. Lee, and D. Papailiopoulos. Can
+mambalearnhowtolearn? acomparativestudyonin-contextlearningtasks. arXivpreprint
+arXiv:2402.04248,2024.
+[67] B. Peng, E. Alcaide, Q. Anthony,A. Albalak, S. Arcadinho,H. Cao, X. Cheng, M. Chung,
+M.Grella, K.K.G. V,X.He, H.Hou,P. Kazienko,J. Kocon,J. Kong,B. Koptyra,H. Lau,
+K. S. I. Mantri, F. Mom, A. Saito, X. Tang, B. Wang, J. S. Wind, S. Wozniak, R. Zhang,
+Z. Zhang, Q. Zhao, P. Zhou, J. Zhu, and R.-J. Zhu. RWKV: Reinventing RNNs for the
+TransformerEra. CoRR,abs/2305.13048,2023. doi: 10.48550/ARXIV.2305.13048. arXiv:
+2305.13048.
+[68] B. Peng, D.Goldstein, Q.Anthony,A.Albalak, E.Alcaide, S. Biderman,E.Cheah, X.Du,
+T. Ferdinan, H. Hou, P. Kazienko, K. K. GV, J. Kocon´, B. Koptyra, S. Krishna, R. McClel-
+landJr.,N.Muennighoff,F.Obeid,A.Saito,G.Song,H.Tu,S.Woz´niak,R.Zhang,B.Zhao,
+Q. Zhao, P. Zhou, J. Zhu, and R.-J. Zhu. Eagle and Finch: RWKV with Matrix-Valued
+States and DynamicRecurrence, Apr. 2024. URL http://arxiv.org/abs/2404.05892.
+arXiv:2404.05892[cs].
+[69] H.Peng,N.Pappas,D.Yogatama,R.Schwartz,N.A.Smith,andL.Kong. Randomfeature
+attention. arXivpreprintarXiv:2103.02143,2021.
+[70] H.Peng,J.Kasai,N.Pappas,D.Yogatama,Z.Wu,L.Kong,R.Schwartz,andN.A.Smith.
+ABC:AttentionwithBounded-memoryControl. InS.Muresan,P.Nakov,andA.Villavicen-
+cio, editors, Proceedingsof the 60th AnnualMeeting of the Association for Computational
+Linguistics(Volume1: LongPapers),Dublin,Ireland,May2022.AssociationforComputa-
+tionalLinguistics.
+[71] M. Poli, S. Massaroli, E. Nguyen, D. Y. Fu, T. Dao, S. Baccus, Y. Bengio, S. Ermon, and
+C. Ré. Hyena Hierarchy: Towards Larger ConvolutionalLanguage Models. In A. Krause,
+E.Brunskill,K.Cho,B.Engelhardt,S.Sabato,andJ.Scarlett,editors,InternationalConfer-
+ence onMachineLearning,ICML 2023,23-29July 2023,Honolulu,Hawaii, USA, volume
+202ofProceedingsofMachineLearningResearch,pages28043–28078.PMLR,2023.
+15[72] M. Poli, A. W. Thomas, E. Nguyen, P. Ponnusamy, B. Deiseroth, K. Kersting, T. Suzuki,
+B. Hie, S. Ermon, C. Ré, C. Zhang, and S. Massaroli. Mechanistic Design and Scaling of
+HybridArchitectures,Mar.2024. arXiv:2403.17844[cs].
+[73] D.PradosandS.Kak. Neuralnetworkcapacityusingdeltarule. ElectronicsLetters, 3(25):
+197–199,1989.
+[74] Z. Qin, X. Han, W. Sun, D. Li, L. Kong, N. Barnes, and Y. Zhong. The devil in linear
+transformer. arXivpreprintarXiv:2210.10340,2022.
+[75] Z.Qin,X.Han,W.Sun,B.He,D.Li,D.Li,Y.Dai,L.Kong,andY.Zhong. Toeplitzneural
+networkforsequencemodeling. arXivpreprintarXiv:2305.04749,2023.
+[76] Z.Qin,D.Li,W.Sun,W.Sun,X.Shen,X.Han,Y.Wei,B.Lv,F.Yuan,X.Luo,etal.Scaling
+transnormerto175billionparameters. arXivpreprintarXiv:2307.14995,2023.
+[77] Z. Qin, W. Sun, K. Lu, H. Deng, D. Li, X. Han, Y. Dai, L. Kong, and Y. Zhong. Lin-
+earized Relative Positional Encoding, July 2023. URL http://arxiv.org/abs/2307.
+09270. arXiv:2307.09270[cs].
+[78] Z.Qin,W.Sun,D.Li,X.Shen,W.Sun,andY.Zhong. Lightningattention-2: Afreelunch
+forhandlingunlimitedsequencelengthsinlargelanguagemodels. 2024.
+[79] Z. Qin, S. Yang, W. Sun, X. Shen, D. Li, W. Sun, and Y. Zhong. HGRN2: Gated Lin-
+ear RNNs with State Expansion. 2024. URL https://api.semanticscholar.org/
+CorpusID:269043328.
+[80] Z. Qin, S.Yang,andY. Zhong. Hierarchicallygatedrecurrentneuralnetworkforsequence
+modeling. AdvancesinNeuralInformationProcessingSystems,36,2024.
+[81] P. Rajpurkar,R. Jia, andP. Liang. KnowWhatYouDon’tKnow: UnanswerableQuestions
+forSQuAD.InProceedingsofthe56thAnnualMeetingoftheAssociationforComputational
+Linguistics(Volume2: ShortPapers),Melbourne,Australia,2018.AssociationforComputa-
+tionalLinguistics.
+[82] H.Ramsauer,B.Schäfl,J.Lehner,P.Seidl,M.Widrich,T.Adler,L.Gruber,M.Holzleitner,
+M.Pavlovic´,G.K.Sandve,V.Greiff,D.Kreil,M.Kopp,G.Klambauer,J.Brandstetter,and
+S. Hochreiter. HopfieldNetworksisAllYouNeed,Apr.2021. URL http://arxiv.org/
+abs/2008.02217.arXiv:2008.02217[cs,stat].
+[83] A. Roy, M. Saffar, A. Vaswani, and D. Grangier. Efficient content-based sparse attention
+withroutingtransformers. TransactionsoftheAssociationforComputationalLinguistics,9:
+53–68,2021.
+[84] K.Sakaguchi,R.L.Bras,C.Bhagavatula,andY.Choi.Winogrande:Anadversarialwinograd
+schemachallengeatscale. CommunicationsoftheACM,64(9):99–106,2021.
+[85] I.Schlag,K.Irie,andJ.Schmidhuber. Lineartransformersaresecretlyfastweightprogram-
+mers.InM.MeilaandT.Zhang,editors,Proceedingsofthe38thInternationalConferenceon
+MachineLearning,ICML2021,18-24July2021,VirtualEvent,volume139ofProceedings
+ofMachineLearningResearch,pages9355–9366.PMLR,2021.
+[86] I. Schlag, K. Irie, and J. Schmidhuber. Linear TransformersAre Secretly Fast Weight Pro-
+grammers. In M. Meila and T. Zhang, editors, Proceedings of the 38th InternationalCon-
+ference on Machine Learning, ICML 2021, 18-24July 2021, Virtual Event, volume 139 of
+ProceedingsofMachineLearningResearch,pages9355–9366.PMLR,2021.
+[87] I. Schlag, T. Munkhdalai, and J. Schmidhuber. Learning Associative Inference Us-
+ing Fast Weight Memory, Feb. 2021. URL http://arxiv.org/abs/2011.07831.
+arXiv:2011.07831[cs].
+[88] J.Schmidhuber. Learningtocontrolfast-weightmemories: Analternativetodynamicrecur-
+rentnetworks. NeuralComputation,4(1):131–139,1992.
+16[89] N.Shazeer. Gluvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,2020.
+[90] J. T. H. Smith, A. Warrington, and S. W. Linderman. Simplified State Space Layers for
+SequenceModeling. InTheEleventhInternationalConferenceonLearningRepresentations,
+ICLR2023,Kigali,Rwanda,May1-5,2023.OpenReview.net,2023.
+[91] W.Sun,Z.Qin,D.Li,X.Shen,Y.Qiao,andY.Zhong.Linearattentionsequenceparallelism.
+arXivpreprintarXiv:2404.02882,2024.
+[92] Y.Sun,L.Dong,S.Huang,S.Ma,Y.Xia,J.Xue,J.Wang,andF.Wei. Retentivenetwork:A
+successortotransformerforlargelanguagemodels. arXivpreprintarXiv:2307.08621,2023.
+[93] Y. Sun, L. Dong, Y. Zhu, S. Huang, W. Wang, S. Ma, Q. Zhang, J. Wang, and F. Wei.
+You only cache once: Decoder-decoder architectures for language models. arXiv preprint
+arXiv:2405.05254,2024.
+[94] P. Tillet, H. Kung, andD. D. Cox. Triton: an intermediatelanguageand compilerfortiled
+neuralnetworkcomputations. InProceedingsofthe3rdACMSIGPLANInternationalWork-
+shoponMachineLearningandProgrammingLanguages,MAPL@PLDI2019,pages10–19.
+ACM,2019. doi:10.1145/3315508.3329973.
+[95] J. M. Tomczak and M. Welling. Improving Variational Auto-Encoders using Householder
+Flow,Jan.2017. arXiv:1611.09630[cs,stat].
+[96] H. Touvron, T. Lavril, G. Izacard, X. Martinet, M.-A. Lachaux, T. Lacroix, B. Rozière,
+N.Goyal,E.Hambro,F.Azhar,etal. Llama:Openandefficientfoundationlanguagemodels.
+arXivpreprintarXiv:2302.13971,2023.
+[97] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, L. Kaiser, and
+I.Polosukhin. Attentionisallyouneed. Advancesinneuralinformationprocessingsystems,
+30,2017.
+[98] E. Vorontsov,C. Trabelsi, S. Kadoury,andC. Pal. On orthogonalityandlearningrecurrent
+networkswith long term dependencies. In InternationalConference on MachineLearning,
+pages3570–3578.PMLR,2017.
+[99] B. Widrow, M. E. Hoff, et al. Adaptive switching circuits. In IRE WESCON convention
+record,volume4,pages96–104.NewYork,1960.
+[100] S.YangandY.Zhang.FLA:ATriton-BasedLibraryforHardware-EfficientImplementations
+of Linear AttentionMechanism, Jan. 2024. URL https://github.com/sustcsonglin/
+flash-linear-attention.original-date:2023-12-20T06:50:18Z.
+[101] S.Yang,B.Wang,Y.Shen,R.Panda,andY.Kim. Gatedlinearattentiontransformerswith
+hardware-efficienttraining. arXivpreprintarXiv:2312.06635,2023.
+[102] M. Zaheer, G. Guruganesh, K. A. Dubey, J. Ainslie, C. Alberti, S. Ontanon, P. Pham,
+A.Ravula,Q.Wang,L.Yang,etal. Bigbird: Transformersforlongersequences. Advances
+inneuralinformationprocessingsystems,33:17283–17297,2020.
+[103] R.Zellers,A.Holtzman,Y.Bisk,A.Farhadi,andY.Choi. Hellaswag: Canamachinereally
+finishyoursentence? arXivpreprintarXiv:1905.07830,2019.
+[104] J. Zhang, Q. Lei, and I. S. Dhillon. Stabilizing Gradients for Deep Neural Networks via
+EfficientSVDParameterization,Mar.2018. arXiv:1803.09327[cs,stat].
+[105] J.Zhang,S.Jiang,J.Feng,L.Zheng,andL.Kong.LinearAttentionviaOrthogonalMemory,
+2023. arXiv:2312.11135.
+[106] Q.Zhang,D.Ram,C.Hawkins,S.Zha,andT.Zhao. Efficientlong-rangetransformers:You
+needtoattendmore,butnotnecessarilyateverylayer. InH.Bouamor,J.Pino,andK.Bali,
+editors,FindingsoftheAssociationforComputationalLinguistics: EMNLP2023,2023.
+17A WYrepresentation
+Forsimplicitywediscussthefirstchunkhere.
+WefirstshowP =I− n w kT byinduction,
+n t=1 t t
+P
+n
+T
+P = (I−β k k )
+n t t t
+t=1
+Y
+=P (I−β k kT )
+n−1 n n n
+n−1
+=(I− w kT )(I−β k kT )
+t t n n n
+t=1
+X
+n−1 n−1
+=I− w kT −β k kT +( w kT )β k kT
+t t n n n t t n n n
+t=1 t=1
+X X
+n−1 n−1
+=I− w kT − β k −β w (kTk ) kT
+t t n n n t t n n
+!
+Xt=1 Xt=1(cid:16) (cid:17)
+w
+n
+n
+=I− w kT | {z }
+t t
+t=1
+X
+Similarly,weshowS = n u kT byinduction,
+n t=1 t n
+S P=S (I−β k kT )+β v kT
+n n−1 n n n n n n
+n−1
+T T T
+= u k (I−β k k )+β v k
+t t n n n n n n
+!
+t=1
+X
+n−1 n−1
+T T T T
+= u k − u k β k k +β v k
+t t t t n n n n n n
+!
+t=1 t=1
+X X
+n−1 n−1
+T T T
+= u k + β v −β u k k k
+t t n n n t t n n
+!
+Xt=1 Xt=1 (cid:16) (cid:17)
+u
+n
+n
+T | {z }
+= u k
+t n
+t=1
+X
+18
