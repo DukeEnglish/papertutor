@@ -1,0 +1,1340 @@
+Image and Video Tokenization
+with Binary Spherical Quantization
+YueZhao YuanjunXiong∗ PhilippKrähenbühl
+UTAustin MThreadsAI UTAustin
+yzhao@cs.utexas.edu bitxiong@gmail.com philkr@cs.utexas.edu
+Abstract
+Weproposeanewtransformer-basedimageandvideotokenizerwithBinarySpher-
+icalQuantization(BSQ).BSQprojectsthehigh-dimensionalvisualembedding
+toalower-dimensionalhypersphereandthenappliesbinaryquantization. BSQ
+is(1)parameter-efficientwithoutanexplicitcodebook,(2)scalabletoarbitrary
+tokendimensions,and(3)compact: compressingvisualdatabyupto100 with
+× minimaldistortion. Ourtokenizerusesatransformerencoderanddecoderwith
+simpleblock-wisecausalmaskingtosupportvariable-lengthvideosasinput. The
+resultingBSQ-ViTachievesstate-of-the-artvisualreconstructionqualityonim-
+ageandvideoreconstructionbenchmarkswith2.4 throughputcomparedtothe
+×
+bestpriormethods. Furthermore,bylearninganautoregressivepriorforadaptive
+arithmeticcoding,BSQ-ViTachievescomparableresultsonvideocompression
+withstate-of-the-artvideocompressionstandards. BSQ-ViTalsoenablesmasked
+language models to achieve competitive image synthesis quality to GAN- and
+diffusion-basedmethods.
+1 Introduction
+Learneddiscreteimageandvideotokenizationallowsforstate-of-the-artvisualcompression[1,2,3],
+recognition[4,5,6,7]andgeneration[8,9,10]. Thesemodelsfollowaprovenrecipefromlarge
+languagemodeling[11,12,13]: Tokenizeinputandoutputsintodiscreteunitsandlearnanauto-
+regressivemodeltopredictthistokenizedstreamonetokenatatime. Themostwidelyusedapproach
+for image encoding is Vector-Quantized Variational Auto-Encoder (VQ-VAE) [8]. They encode
+inputsincontinuouslatentembeddingsandmapthemtoalearnedcodebookthroughnearest-neighbor
+lookup. However,VQ-VAEstyleapproacheshavetwodrawbacks: First,mostimageencodersare
+builtuponconvolutionalnetworks(CNN)[9,14]. Adaptingspatialconvolutionforimagestospatial-
+temporalconvolutionforvideosrequiresnon-trivialarchitecturalchanges[15,16,17]withincreased
+computationalcost. Treatingvideosasasequenceofimagesleadstoasuboptimalquantization[16].
+Second,vectorquantization(VQ)scalespoorlywiththecodebooksize. Theruntimescaleslinearly
+withthecodebooksize,andthecodebookeasilyoverfitsonsmallerdatasets[17]. Thisisespecially
+troublingforvideoinputs,astheyrelyonlargercodebookstorepresentbothstaticvisualpatterns
+anddynamicmotionpatterns.
+ThispaperproposesaunifiedvisualtokenizerbasedonaVisionTransformerandBinarySpherical
+Quantization(BSQ).TheTransformer-basedencoder-decoderleveragesablock-wisecausalmaskand
+usesonlyvisualtokensfromthecurrentorpasttimestampsforreconstruction(Figure3). BSQfirst
+projectsthehigh-dimensionalvisualembeddingofthetransformerencodertoalower-dimensional
+hypersphereandthenappliesbinaryquantization. Thetransformerencoder,decoder,andBSQare
+seamlesslyintegratedintotheVQ-GAN[9]frameworkandtrainedend-to-end.
+∗NowatPredera.ai
+Preprint.Underreview.
+4202
+nuJ
+11
+]VC.sc[
+1v84570.6042:viXraOurproposedvisualtokenizerfeaturesseveraladvantages. First,theTransformer-basedencoder-
+decodershowsaParetoimprovementinvisualreconstructionqualityandcomputationalefficiency
+compared to standard CNNs. Second, the block-wise causal design unifies images and videos
+as input at training and supports variable-length videos at inference. BSQ constructs an implicit
+codebook whose effective vocabulary grows exponentially with the spherical dimension with no
+learnedparameters. Theincreasingcodebooksizeconsistentlyyieldsbetterreconstructionresults.
+ComparedtoLookup-freeQuantization(LFQ)[17],arecenttechniquethatalsobuildsanimplicit
+codebookbasedonscalarquantization(SQ),BSQhasaboundedquantizationerrorandiseasierto
+train. Furthermore,weshowthatthesoftquantizationprobabilityinBSQreducestoasimpleproduct
+ofmultiplechannel-independentBernoullidistributions,leadingtoefficiententropyregularization
+during training. Specifically, we show how a factorized approximation to the entropy for soft
+quantizationofLbitsreducesthetheoreticalcomputationcomplexityfromO(2L L)toO(L)with
+×
+minimalapproximationerror,andnegligibleperformancedegradationinpractice.
+WevalidatetheeffectivenessofBSQ-ViTonvisualreconstructionandcompressionbenchmarks. On
+imagereconstruction,ourmodelarchivesastate-of-the-artvisualreconstructionqualitybybothpixel-
+levelandsemanticmetrics. Inparticular,ourbest-performingBSQ-ViTachievesareconstruction
+FIDof0.41onImageNet-1kval,a43%reductioncomparedtotherunner-up(SDXL-VAE[14]),
+whilebeing2.4 faster. Onvideoreconstruction,ourbestmodelreducesFVDonUCF-101bymore
+×
+thanhalf(8.62 4.10). Byfurtherlearninganautoregressivepriorforadaptivearithmeticcoding,
+→
+BSQ-ViTachievescomparableresultsonvideocompressionwithstate-of-the-artvideocompression
+standards,e.g. H.264andHEVC.Bylearningamaskedlanguagemodel,BSQ-ViTenablesimage
+generationwithsimilarqualitytoBigGAN[18]andADM[19]. Codeandmodelswillbereleasedat
+https://github.com/zhaoyue-zephyrus/bsq-vit.
+2 RelatedWork
+Visual Tokenization. VQ-VAE [8] introduced the concept of discrete tokenized bottlenecks in
+auto-encoderarchitectures. Recentimprovementsincludebettertrainingobjectives[20,9],increasing
+VQcodebookusage[4,21],replacingVQwithproductquantization(PQ)[3]orscalarquantization
+(SQ)[22],andemployingstrongergenerativemodels[9,10]. Imagetokenizersaretriviallyextended
+tovideobytokenizingindividualframes[23,24]. However,thisignoresdynamicmotionsandleads
+tosuboptimaltokenization: Thesamevisualinformationiscompressedrepeatedlyacrossframes.
+VideoTokenization. Dedicatedvideotokenizersmakebetteruseoftemporalcorrelationsintheinput
+signal. VideoGPT[25]proposes3D(de-)convolutionsinVQ-VAEforvideogeneration. TATS[15]
+replaceszeropaddingwithreplicatepaddingtomitigatethetemporalcorruptionwhenvideolength
+varies. Yuetal. introducecentralinflationofpretrained2Dconvolutionalfiltersto3D [16]and
+furthermakethemcausal[17]. Phenaki[23]adoptsafactorizedcausalvideovisionTransformer[26]
+(C-ViViT),whichimprovesefficiencybutsacrificesmodelingcomplexmotionacrosstime.
+NeuralCompression. SinceShannonestablishedthefundamentalsourcecodingtheorem[27]it
+hasformedthebasisoflosslesscompression[28,29,30,31]withprobabilisticmodelsincluding
+RNN [32, 33], CNN [34, 8], VAE [35, 36], and Transformers [37, 38]. L3C [39] presents a fast
+hierarchical probabilistic model for lossless image compression. LMIC [38] shows that LLMs
+trainedprimarilyontext,e.g. Llama2[13]andChinchilla[40],aregeneral-purposecompressors
+fortext,images,andaudio. However,theseLLMsaretoobigandslowtomakethiscompression
+practical. Ourtokenizerpresentsalighter-weightalternative: Tokenizationperformsinitiallocal
+lossycompression,whilealightweightandthuscomputationallyefficientsequencemodel( 300M)
+∼
+compressestheglobalvideostructure.
+Videocompression.Mosthigh-performingmodernvideocompressionmethodsrelyonhybridcoders
+thatcombinetransformcoding[41,42]andmotioncompensation[43,44]. Suchbeliefcontinues
+inmostoftherecentlypopularizedlearning-basedsolutions[45,46,47,48]. VCT[49]proposes
+aTransformer-basedtemporalentropymodeltolearnmotionimplicitly. However,VCTrequires
+aheavily-engineeredimagecompressionmodel[50]andhasashorttemporalcontextwindow. In
+thiswork,weshowthatalearnedvideotokenizercombinedwithanarithmeticcodermodeledbya
+sequencemodelachievescompetitivecompressionresultswithoutexplicitlymodelingmotion.
+23 Preliminaries
+A tokenization-based compression algorithm has three basic steps: A visual tokenizer, i.e. VQ-
+VAE[8]orLFQ[17],translatesrawvisualinputstoadiscretesetoftokensandback. Asequence
+modelthenpredictsanauto-regressiveprobabilitydistributionoverthesediscretetokens. Finally,
+arithmeticcodingtranslatesthisdistributionintoacompressedrepresentation.
+VisualTokenization. VQ-VAE[8]introducedtheconceptoflearningdiscretevisualrepresentation
+withanauto-encoderarchitectureandabottleneckmoduleinbetweenwithvectorquantization(VQ).
+GivenavideoX RT×H×W×3,anencoder producesasetofd-dimensionallatentembeddings
+∈ E
+Z= (X)
+R(T q×H p×W p)×dwithaspatial-temporaldownsamplefactorofq
+p p.Thebottleneck
+E ∈ × ×
+moduleqthentransformsthereal-valuedlatentembeddingsintosomediscretetokenszˆ=q(z).
+InVectorQuantization(VQ)thequantizerq assignseachz Ztotheclosetentryinalearnable
+VQ
+codeinacodebookC=[c c ] RK×d ∈
+1 K
+··· ∈
+zˆ=q (z)=c =argmin z c . (1)
+VQ k
+∥ −
+kˆ ∥2
+c kˆ∈C
+Here,Kisthevocabularysizeofthecodebookandtheintegerkisthediscretizedtokenrepresentation
+ofzwhichcanbestoredin log(K) bits. Adecoder mapsthediscretizedtokensbackintoavisual
+⌈ ⌉ G
+representationXˆ = (Zˆ). Theentirenetwork( , ,andq)isend-to-endtrainableandminimizesan
+G E G
+MSEloss = Xˆ X usingstraight-throughestimator[51]topropagategradientsthrough
+MSE 2
+L ∥ − ∥
+the quantizationbottleneck. More recentquantizers relyon a perceptual and adversarial
+LPIPS
+L
+lossforbettervisualquality[9]
+GAN
+L
+minimizeE [ ( , ,q)+η ( , ,q)+λ ( , ,q)], (2)
+X VQ LPIPS GAN
+E,G,q L E G L E G L E G
+where the quantization loss term emulates online clustering to learn c . The main issue
+VQ k
+L
+with VQ-VAE is that Vector Quantization scales poorly with increasing vocabulary size K [17].
+Remediesincludeusingasmallercodedimension[4],introducingstochasticity[52],reviving“dead”
+codevectors[21],andregularizingwithacommitmentloss[8]:
+(zˆ,z)= sg(zˆ) z , (3)
+commit
+L ∥ − ∥
+wheresg()denotesthestop-gradientoperation.
+·
+Lookup-Free Quantization (LFQ) [17] uses a fixed implicit codebook C = 1,1 L as
+LFQ
+{− }
+cornersofahypercubeinLdimensionalspace. Thebestvectorquantizerforthisimplicitcodebook
+isthebinaryquantizationq (z)=sign(z). Tooptimizeforaneffectivelatentcodeandencourage
+LFQ
+usageoftheimplicitcodebook,Yuetal.[17]useanadditionalentropyobjective[53]:
+=E[H(q(z))] γH[E[q(z)]], (4)
+entropy
+L −
+wherebothentropytermsrelyonasoftquantization[2]
+exp( τ(c z)2)
+qˆ(cz)= (cid:80) − − (5)
+| exp( τ(c z)2)
+c∈CLFQ − −
+to guarantee the loss is differentiable. The final loss is a combination of , ,
+LFQ MSE commit
+L L L
+, ,and . ThemaincomputationalbottleneckinLFQistheentropyoptimization
+LPIPS GAN entropy
+L L L
+ofahigher-dimensionalcodebook,asitinvolvessummationover2Limplicitcodebookentries.
+BothVQ-VAEandLFQlossilycompressvisualinputsXintoN discretetokens[k ,...,k ],where
+1 N
+k 1,...K ,inN logK bits. Neithertokenizationstrategyexploitstheglobalimageorvideo
+i
+∈{ } ⌈ ⌉
+structurewell. Asequencemodelwithlosslessarithmeticcodingbetterfitsthisglobalstructure.
+ArithmeticCoding(AC)[29,30,54]offersawayofconstructingabitstreamwithnear-optimal
+length by leveraging the statistical property of the coding distribution. Given a distribution over
+tokenstreamsP : 1, ,K n (0,1],arithmeticcodinglookstoencodethetokenstreamin
+t
+{ ··· } (cid:55)→
+( logP (k ,...,k ) +1)bits. Themostcommontokendistributionisanauto-regressivemodel
+t 1 N
+−⌈ ⌉
+P (k ,...,k )=P (k )P (k k )...P (k k ,...,k ) (6)
+t 1 N t 1 t 2 1 t N 1 N−1
+| |
+forwhichefficientincrementalencodinganddecodingalgorithmsexist[49].
+3BinarySphericalQuantization(BSQ)
+x
+encoder z
+project
+v ℓ2 u binary ℓ2 uˆ
+project
+zˆ decoder
+xˆ
+norm quantize norm
+E G
+(a) BSQ-VAE(Ours).
+VQ LookupFreeQuantization(LFQ)
+x encoder z qv ue ac nt to ir ze zˆ decoder xˆ x encoder z project v qb ui an na tr iy ze vˆ project zˆ decoder xˆ
+E G E G
+(b) VQ-VAE. (c) LFQ-VAE.
+Figure1: VariationalAuto-Encoders(VAE)withdifferentbottlenecks(BSQ,VQ,andLFQ).
+4 Transformer-basedVisualTokenizerwithBinarySphericalQuantization
+Our video tokenizer follows an encoder-decoder architecture with a discretization bottleneck as
+illustrated in Figure 1a. It combines a transformer-based encoder, a transformer-based decoder,
+and a Binary Spherical Quantization (BSQ) layer. BSQ projects the latent code into a lower-
+dimensionalsphericalspace,appliesbinaryquantization,andthenprojectstheresultbackupintothe
+decoder’slatentspace. Thisprojectionontoalow-dimensionalsphericalspacehasseveraltheoretical
+advantages:Theapproximationerrorofthequantizerisboundedandmuchoftheentropycomputation
+factorizesalongindividualdimensions. Theseadvantagesresultinexperimentalimprovementsas
+well. BSQconvergesquickerandtoabettertokenizerthanotherquantizationschemes.
+4.1 BinarySphericalQuantization
+BinarySphericalQuantization(BSQ)optimizesoveranimplicitcodebookC
+BSQ
+= √1 ,√1 L,
+{− L L}
+ahypercubeprojectedontoaunitsphere. Eachcornerc C ofahypercubecorrespondstoa
+k BSQ
+∈
+uniquetokenk. Thequantizerworksasfollows: itprojectssomehigh-dimensionallatentembedding
+z to a lower-dimensional unit hypersphere u, applies binary quantization per axis uˆ =sign(u),
+and back-projects to the quantized vector in the original latent space xˆ, as shown in Figure 1a.
+Specifically, westartwithanencodedvisualinputz = (x) Rd. Wefirstlinearlyprojectthe
+latentembeddingtoLdimensionsv=Linear(z)
+RL,E where∈
+L d. Next,weobtainprojectv
+ontotheunitsphereu= v ,andperformbinaryqu∈ antizationtoeac≪ hdimensionofuindependently
+|v|
+uˆ = √1 sign(u),wheresign(x)isthesignfunction. Tokeepoutputsontheunitsphere,wemap
+L
+sign(0) 1. WeuseaStraight-ThroughEstimator(STE)[51]tomaketheoperatordifferentiable,
+→
+sign (x) = sg(sign(x) x)+x,wheresg()denotesthestop-gradientoperation. Finally,we
+backS -T prE ojectthequantized− uˆ tothed-dimension· alspacezˆ=Linear(uˆ) Rd.
+∈
+BSQhasafewappealingproperties: AswithLFQ,theimplicitcodebookentryisparameter-freeand
+easytocompute. UnlikeLFQ,asoftquantizationofBSQhasasimpleprobabilisticinterpretation,
+whichleadstoefficiententropycomputationinanentropyloss . Finally,BSQ’squantization
+entropy
+L
+errorisbounded,whichempiricallyleadstomuchfasterandbetterconvergencethanLFQ.
+Efficientimplicitcodeassignment. Atinferencetime,wemapaprojectedembeddingvtoatoken
+throughsimplybinarizationk =(cid:80)L 1 2i−1,where1 istheindicatorfunction. Theinverse
+i=1 [vi>0] [·]
+mappingusesthebitshiftandthebitwiseANDoperations.
+SoftBSQandentropy. TobestusetheentirerangeoftheimplicitcodebookC ,weusethe
+BSQ
+entropyloss =E [H(q(u))] γH[E [q(u)]][53]. Tocomputethisentropylosswefirst
+entropy u u
+L −
+deriveasoftquantizationscheme[2]. Sincebothcodebookentriesandinputstothequantizerare
+unitvectors,thesoftquantizationisadistribution
+exp(τc⊤u) (cid:89)L
+qˆ(c |u)= (cid:80) exp(τc⊤u) = σ(2τc du d), (7)
+c∈CBSQ d=1
+4v v v
+y y y
+u c c c =vˆ c c =vˆ
+3 6 9 2 1
+c c =uˆ
+2 1
+x x x
+c c c
+2 5 8
+c c
+3 4
+c c c c c
+1 4 7 3 4
+(a) BSQ (b) FSQ (c) LFQ
+Figure2: IllustrationofBSQcomparedtoLFQandFSQinthesimplestcaseofL=2.InFSQ,wefurther
+considereachchannelhas3possiblevalues{−1,0,1}.TheVoronoidiagramforbothFSQandLFQlookslike
+hypercubesthatpartitiontheentirespacewhileBSQ’slookslikeahypersphereevenlydividedby2Lcentroids.
+whereσisasigmoidfunction,andtheoverallsoftquantizerisindependentalongeachdimension.
+SeeSec.C.1foraderivation. Thisformallowsforanefficientcomputationofthefirstentropyterm
+(cid:34) L (cid:35)
+(cid:88)
+E [H(qˆ(cu))]=E H(qˆ(c u )) . (8)
+u u d d
+| |
+d=1
+See Sec. C.2 for a derivation. Instead of reasoning over distributions over the entire codebook,
+whichisexponentiallylarge,weinsteadtreateachdimensionindependently. Theresultingentropy
+computationislineartothedimensionLofthebottleneck.
+Unfortunately,thesecondentropytermcannotdirectlyusethesameindependenceassumption,as
+dimensionsintheexpectedvalueE [qˆ(cu)]arecorrelatedthroughthedistributionofu. Wefindthe
+u
+closestfactorizeddistributionq˜(c)=(cid:81)|
+K q˜(c )toE [qˆ(cu)],andinsteadminimizetheentropy
+d=1 d u |
+oftheapproximatedistribution. AswewillshowinSec.C.3thebestapproximationintermsofthe
+KL-divergenceq˜(c )=E [qˆ(c u )]. Thefinalapproximateentropytermtomaximizeis
+d ud d
+|
+d
+L
+(cid:88)
+H(E [qˆ(cu)]) H(q˜(c))= H(E [qˆ(c u )]). (9)
+u
+| ≈
+ud d
+|
+d
+d=1
+AswewillshowinSec.C.3thisapproximationisanupperboundtothetrueentropy,butempirically
+closelytracksthetrueentropy. Thisentropytermisagainefficientforevaluation.
+QuantizationerrorinBSQ.Mostquantizersusepass-throughgradientestimatesduringtraining[17,
+8,9]. Thoughsimpletoimplement,itassumesthatthegradientsforanunquantizeduandquantized
+uˆ bottleneckarealmostthesame,whichonlyholdsifthequantizationerrord(u,uˆ)= u uˆ is
+∥ − ∥
+small. AsweshowinSec.C.4,thisistrueforBSQ
+(cid:115)
+2
+E [d(u,uˆ)]< 2 <√2. (10)
+u
+− √L
+Relationtootherquantizationmethods. BSQiscloselyconnectedtomanyconceptsintroducedin
+informationandcodingtheories. LFQ[17]usesthesamebinarizationtechniqueasBSQbutdoesnot
+normalizeitsoutput. Thisleadstoanunboundedquantizationerroranddoesnotallowforassimple
+ofasoftquantizationforentropycomputation. ApicturalcomparisonbetweenLFQandBSQis
+showninFigure2andasummaryisprovidedinTable7. SphericalVectorQuantization(SVQ)[55]
+alsoensuresallcodevectorshaveapre-definedradius. However,SVQassumesavarietyofradii,
+whichhavetobeencodedbyanadditionalgainquantizer. Inourcase,thesourcecodeistheoutput
+ofalearnedencoder . Therefore,theunitradiusassumptionissound,andthegainquantizercanbe
+E
+avoided. PyramidVectorQuantization(PVQ)[56]assumesallcodevectorshaveaconstantℓ norm,
+1
+buttheℓ normalizedcentroidspartitionthehyperspherelessuniformlythanℓ .
+1 2
+54.2 TokenizationNetworkwithCausalVideoTransformer
+WeproposetouseVisionTransformer(ViT)[57]tomodelboththeencoderanddecoderduetoits
+bettercomputationalefficiencyandhigherreconstructionquality.
+VideoTransformer. WestartfromViT-VQGAN[4]andextendittotakevideosasinput. Wedivide
+aninputvideoX RT×H×W×3 intonon-overlappingpatchesofsize1 p p,x R1×p×p×3.
+i
+∈ × × ∈
+Thevisualtokensareflattenedintoa1Dsequence,linearlyprojected,andpassedthroughastackof
+N TransformerEncoderlayerstoyieldthelatentrepresentation,(z , ,z ). Thedecodertakes
+1 N
+···
+thesamearchitecture,mapsthelatentembeddingszˆbacktothepixelspace,andregroupstheminto
+theoriginalshape. (xˆ , ,xˆ ) = MLP(TransformerDecoder(zˆ , ,zˆ )), whereMLPisa
+1 N 1 N
+··· ···
+decodingheadwithatwo-layerMLP,i.e. Linear Tanh Linear.
+◦ ◦
+BlockwiseCausalAttention. Duringtraining, wealwaysassumetheinputvideohasT frames,
+whichmightnotholdatinference. PaddingshortervideosegmentstoT framesworksbutwastesa
+lotofbits,especiallyinthecontextofcompression. Tohandlevariable-lengthvideos,weproposea
+simpleblockwisecausalmaskedattentionanalogoustocausalattentioninlanguagemodeling[58]. It
+specifiesthatonlythosetokensattimetorearliercanbeusedforreconstructingthevisualtokensat
+timet 1, ,T .
+∈{ ··· }
+(cid:16) (cid:17)
+(z , ,z )=TransformerEncoder x , ,x , (11)
+(t−1)×H p×W p+1 ··· t×H p×W p 1 ··· t×H p×W p
+(cid:16) (cid:17)
+(zˆ , ,zˆ )=q z , ,z , (12)
+(t−1)×H p×W p+1 ··· t×H p×W p LFQ (t−1)×H p×W p+1 ··· t×H p×W p
+(cid:16) (cid:16) (cid:17)(cid:17)
+(xˆ , ,xˆ )=MLP TransformerDecoder zˆ , ,zˆ . (13)
+(t−1)×H p×W p+1 ··· t×H p×W p 1 ··· t×H p×W p
+Thiscanbeefficientlyimplementedwithablockwisecausalattentionmaskwritteninablockwise
+lowertrianglematrixinFigure3. WhenT =1,theproposedencoder-decoderreducestoaViTwith
+afullattentionmask. Therefore,wecaneasilytrainitusingamixtureofimagesandvideos.
+Weusefactorizedspatial-temporalpositionembeddingtoencodethetemporalpositioninformation.
+Specifically,weaddasetofzero-initializedtemporalpositionembeddingsPE RT×d andadd
+t
+ittotheoriginalspatialpositionembeddingPE RN×d intheimagetokenizer∈ ,i.e. PE[i,:,:]=
+s
+∈
+PE [i,None,:]+PE [None,:,:].
+t s 𝑡 𝑡+1 𝑡+2
+TrainingtheVideoTokenizerfromanImageTokenizer.
+Duetothelackofdiversityinexistingvideodatasets,we ……
+firsttrainanimagetokenizeronimagedataandthenfine-
+tuneittobeavideotokenizer. Thoughpreviousworks[7, flatten flatten flatten
+24]arguethatapre-trainedimagetokenizercanbeusedfor
+videosasis,weobservethatthevideotokenizerafterfine-
+tuningdemonstratesmuchhigherreconstructionquality
+on video benchmarks, see Sec. 5.1. The gain is further
+magnified when the effective vocabulary size becomes
+larger. We hypothesize that such increased vocabulary
+size,enabledbytheproposedBSQ,ishandyforlearning
+video-specific motion and blur. In contrast, vanilla VQ
+methodsfailtomaintainhighcodebookusagewhenthe
+codebooksizeexceeds16K.
+Optimizing the Visual Tokenizer. Following VQ-
+GAN[9],weuseaperceptualloss[59]andanadversarial BSQ Code
+loss [60]. We use StyleGAN [61] as the discriminator
+Figure 3: Given an input video, block-
+sinceViT-VQGAN[4]reportsitismucheasiertotrain
+wisecausalmaskedattentionenablesthe
+thanPatchGAN[62]. Whenwefine-tunedthetokenizer
+Transformerencodertoonlyusetheflat-
+onvideos,unlikeMAGVITorTATS,wedidnotinflate
+tenedpatchesfromcurrentorpasttimes-
+StyleGANtobea3Ddiscriminator. Instead,wepassall
+tampstoencodeeachvisualpatchand
+reconstructedframesindividuallytothevanillaStyleGAN
+latertranslateitintoaBSQcode.
+andsumupthelosses.
+6Table1: ImagereconstructionresultsonCOCO2017andImageNet-1K(256×256).The“data”column
+referstothetrainingdata:CCforCC3M,YFforYFCC100M,OImgforOpenImages,LAIONforLAION-5B,
+INforImageNet,and“?”forunknownsource.The“arch.”columnshowstheencoder/decoderarchitecture:C
+forConvNetswithSelf-Attention,andT-BforViT-Base.The“#bits”columnreferstotheeffectivenumberof
+bitspertokendefinedinSec.5.1.#isobtainedbymultiplyingthelatentdimensionwiththeprecision.The“TP”
+columnmeanstheinferencethroughput(images/second)perGPU.†Thenumberistakenfromthepaper.Note
+thatSTDsofPSNR,SSIM,andLPIPSarecomputedacrosssamplesinsteadofmultipleruns.
+COCO2017val ImageNet-1kval
+Method Data Arch. Quant. Param. #bits TP↑ PSNR↑ SSIM↑ LPIPS↓ rFID↓ PSNR↑ SSIM↑ LPIPS↓ rFID↓
+DALL-EdVAE[20] CC+YF C VQ 98M 13 34.0 25.15 .7497 .3014 55.07 25.46 .7385 .3127 36.84
+±3.49 ±.1124 ±.1221 ±3.93 ±.1343 ±.1480
+MaskGIT[10] IN-1k C VQ 54M 10 37.6 17.52 .4194 .2057 8.90 17.93 .4223 .2018 2.23
+±2.75 ±.1619 ±.0473 ±2.93 ±.1827 ±.0543
+ViT-VQGAN[4] IN-1k T-B VQ 182M 13 †7.5 - - - - - - - †1.55
+SD-VAE1.x[72] OImg C VQ 68M 10 22.4 21.78 .6139 .1042 6.79 22.12 .6046 .1039 1.52
+±3.41 ±.1430 ±.0345 ±3.79 ±.1663 ±.0409
+SD-VAE1.x[72] OImg C VQ 68M 14 22.4 22.54 .6470 .0905 6.07 22.82 .6354 .0912 1.23
+±3.55 ±.1409 ±.0323 ±3.97 ±.1644 ±.0390
+SD-VAE1.x[72] OImg C KL 68M #64 22.4 21.68 .6375 .0985 5.94 21.99 .6275 .0980 1.35
+±3.32 ±.1375 ±.0309 ±3.74 ±.1600 ±.0371
+SD-VAE2.x[14] OImg+ C KL 84M #64 18.9 24.82 .7202 .0694 4.63 25.08 .7054 .0731 0.78
+LAION ±3.64 ±.1241 ±.0344 ±4.11 ±.1469 ±.0448
+SDXL-VAE[14] OImg+ C KL 84M #64 18.9 25.11 .7433 .0623 4.23 25.38 .7276 .0666 0.72
+LAION+? ±3.91 ±.1240 ±.0289 ±4.41 ±.1469 ±.0373
+Ours IN-1k T-B BSQ 174M 18 45.1 25.08 .7662 .0744 5.81 25.36 .7578 .0761 1.14
+±3.57 ±.0993 ±.0295 ±4.02 ±.1163 ±.0358
+Ours IN-1k T-B BSQ 174M 36 45.1 27.64 .8485 .0412 3.42 27.88 .8410 .0432 0.41
+±3.74 ±.0704 ±.0199 ±4.26 ±.0821 ±.0253
+Ours(w/.EMA) IN-1k T-B BSQ 174M 36 45.1 27.92 .8526 .0380 3.34 28.14 .0814 .0400 0.45
+±3.78 ±.0698 ±.0187 ±4.32 ±.0814 ±.0237
+5 Experiments
+WetraintheimagetokenizationmodelonthetrainingsetofImageNetILSVRC2012[63]andevaluate
+theimagereconstructionresultonthevalidationsetofMS-COCO[64]andImageNet,denotedby
+COCO2017valandImageNet-1krespectively. Wefine-tunethevideotokenizationmodelonUCF-
+101[65]andconductvideocompressionexperimentsontwostandardbenchmarks,i.e. MCL-JCV
+andUVG.WeleavedatasetstatisticsandimplementationdetailsinSec.E.
+Evaluation metrics. For image/video tokenization, we report perceptual metric (LPIPS-
+AlexNet)[59],PSNR,SSIM[66],andFréchetInception/VideoDistance(FID/FVD)[67,68]. To
+distinguishitfromgeneration,wedenoteitasrFID/rFVD.Forgeneration,wereportFID,Inception
+Score(IS)[69],andimprovedprecisionandrecall(IPR,Prec,andRec)[70]. Forcompression,we
+reportPSNRandMS-SSIM[71]underdifferentlevelsofbitsperpixel(bpp).
+5.1 MainResults
+ImageReconstruction. WefirstcomparetheimagereconstructionresultofBSQonCOCOand
+ImageNet(256 256)withstate-of-the-artimagetokenizers,includingDALL-EdVAE[20],SD-
+×
+VAE1.x[72],SD-VAE2.x,SDXL-VAE[14],MaskGIT[10],andViT-VQGAN[4]. Weobserve
+that reconstruction metrics vary with many factors, especially preprocessing (e.g. interpolation),
+inputresolution,anddownsamplescales(Sec. D.2in[72]). Toperformacomprehensiveandfair
+comparison,weresizeallimagessuchthatthesmalleredgeis256pixelsusingLánczosinterpolation2,
+takethecentercrop(H W)=(256 256),andensureallmodelshavethesamespatialdownsample
+× ×
+ratioofp=8(exceptforMaskGIT,p=16). WererunallmodelsonCOCO2017valandImageNet-
+1kvalexcepttheundisclosedViT-VQGAN.FromTable1,wecanseethatourmodeloutperforms
+priorworksonallmetrics(PSNR,SSIM,LPIPS,andrFID),oftenbyabigmargin.
+To compare the compression capability of different bottleneck modules, We study the effective
+numberofbitspertoken(#bits). ForVQ-basedmodels,#bitsequalstolog (K),whereK isthe
+2
+2The reconstruction result of bilinear interpolation is computed in Table 8 for reference. In short, the
+conclusionisthatvaryinginterpolationchangesthevaluesbutunaltstheorderofallmethods.
+7Table2: VideoreconstructionresultsonUCF-101(split1).
+UCF-101train UCF-101val
+Method Backbone Quantizer Param. #bits PSNR↑ SSIM↑ LPIPS↓ rFVD↓ PSNR↑ SSIM↑ LPIPS↓ rFVD↓
+(IMAGETOKENIZER,W/OADAPTINGTOVIDEOS)
+Ours ViT VQ 174M 14 25.64 .8142 .1120 357 25.58 .8120 .1146 382
+Ours ViT BSQ 174M 18 25.86 .8273 .1089 326 25.83 0.8259 0.1108 342
+(IMAGETOKENIZER→VIDEOTOKENIZER)
+MaskGIT[10] 2DCNN VQ 53M 10 21.5 .685 0.114 216 - - - -
+TATS[15] 3DCNN VQ 32M 14 - - - 162
+MAGVIT-L[16] 3DCNN VQ 158M 10 22.0 .701 .0990 25 - - - -
+MAGVIT-v2[17] C.-3DCNN LFQ 158M 18 - - .0694 16.12 - - - -
+MAGVIT-v2[17] C.-3DCNN LFQ N/A(>158M) 18 - - .0537 8.62 - - - -
+Ours non-BCViT VQ 174M 14 33.06 .9518 .0223 9.16 32.92 .9506 .0228 12.79
+Ours BCViT VQ 174M 14 32.81 .9496 .0236 10.76 32.68 .9484 .0241 14.17
+Ours BCViT BSQ 174M 18 32.08 .9421 .0244 8.08 31.49 .9357 .0276 11.62
+Ours BCViT BSQ 174M 36 33.80 .9606 .0159 4.10 33.55 .9588 .0167 6.21
+codebooksize; ForKL-regularizedmodels(SD-VAE2.xandXL),sincethelatentiscontinuous,
+wecount#bitsasthelatentdimensionmultipliedbythenumericprecision(hereweuse16since
+thecheckpointisstoredinFP16). ForourBSQ,#bitsisLbecauseeachlatentchannelisbinary.
+We summarize the key observations as follows. (1) BSQ efficiently compresses image patches
+intoasmallamountofbits. Itreconstructsimagesbetterinallmetricsusingfewerbitspertoken
+thanthesecond-bestmethod(SDXL-VAE).(2)BSQisalsocomputationallyefficient. Although
+theViT-basedbackbonedoublestheparameters,ourmethodyieldsa2.4 higherthroughputthan
+×
+SDXL-VAE.MaskGITrunsatacomparablespeedbutreconstructssignificantlyworsebecauseofa
+smallcodebooksize(1024)andmorespatialdownsampling(16 ). (3)BSQisgeneralizableacross
+×
+differentdomainsofimages. ImageNetisrelativelyobject-centricwhileCOCOismorescene-centric.
+ThoughtrainedonImageNetonly,ourmethoddoeswellonthescene-centricCOCOtoo. Iteven
+worksbetterthanSD-VAE1.x/2.xtrainedonthesimilarlyscene-centricOpenImagesdataset[73].
+VideoReconstruction. WepresentthevideoreconstructiononbothUCF-101trainingandvalidation
+subsetsinTable2. First,weusetheimagetokenizertoreconstructthevideoframebyframe. BSQ
+worksslightlybetterthanVQbutneitheriscomparabletothespecializedvideotokenizersfine-tuned
+onvideodatashowninthelowerhalfofTable2. Second,wefinetunetheimagetokenizeronvideos
+andseesignificantimprovements. Forexample,our18-bitBSQwithcausalViTreducesrFVDfrom
+342to11.62andimprovesPSNRfrom25.83to31.49dB.Thecomparedpriormethodsinclude:
+(1)MaskGIT[10]whichisafine-tuned2D-CNNbasedtokenizer,(2)TATS[15]whichusesa3D
+CNNwithreplicatedpadding,(3)MAGVIT[4]whose3DCNNisinitializedbyzero-inflatinga2D
+filter,and(4)MAGVIT-v2[17]whichmakes3DCNNcausal. Sincemostmethodsdonotrelease
+checkpoints,wetaketheirreportednumbersdirectly. Ourmodelswithallconfigurationsoutperform
+MAGVIT-v2withacomparablenumberofparameters(174Mvs. 158M)byalargemargin. The
+best-performing MAGVIT-v2 uses a larger backbone and achieves a rFVD of 8.62. Our causal
+BSQ-ViTwithL = 18achievesan8.08rFVDandhalvestheLPIPS.ForBSQwithL = 36,our
+methodfurtherimprovesthereconstructionmetrics.
+Wealsoshowtheeffectofusingblock-wisecausalmasks. Thenon-causalvariant(non-BC)works
+slightlybetteronallmetricsbecausenowthemodelcanlookatallvisualpatcheswithinthetemporal
+contextwindow. Thisresultresemblestheobservationsinvideocompressionthatusingbidirectional
+predictedpictures(B-frames)benefitscompressionqualitygiventhesamegroupofpictures(GoP).
+Image Generation. Our BSQ-ViT
+Table3: ImagegenerationresultsonImageNet-1K(128×128).
+tokenizer can be seamlessly inte- †Thenumberistakenfromthepaper.
+grated into existing generative mod-
+els for visual generation. We fol- Category Method #steps FID IS Prec Rec
+↓ ↑ ↑ ↑
+low MaskGIT [10], a masked lan-
+GAN BigGAN[18] 1 6.02 145.8 0.86 0.35
+guage modeling approach. At train-
+ingtime,theunderlyingmaskedlan- Diffusion ADM[19] 1,000 5.91 93.3 0.70 0.65
+guagemodel(maskedLM)learnsto
+VQ 12 †9.4 - - -
+predictthemaskedtokensgivenaran-
+MaskedLM FSQ[22] 12 †8.5 - - -
+domproportionofunmaskedtokens
+BSQ(Ours) 32 5.44 139.6 0.80 0.50
+like BERT [74]. At inference time,
+themodelrepeatsdecodinginanon-
+839 1 42 0.99
+35 0.96 40 0.98
+31 0.92 38 0.97
+H.264(medium) H.264(medium)
+HEVC(medium) HEVC(medium) VCT[49] VCT[49]
+27 O Ou ur rs s(w/o.AC) 0.88 O Ou ur rs s(w/o.AC) 36 H H. E2 V64 C( (m me ed di iu um m) ) 0.96 H H. E2 V64 C( (m me ed di iu um m) )
+MAGVIT[16] MAGVIT[16] Ours(w/o.AC) Ours(w/o.AC)
+MAGVIT-v2[17] MAGVIT-v2[17] Ours Ours
+230 0.1 0.2 0.3 0.4 0.840 0.1 0.2 0.3 0.4 340 0.1 0.2 0.3 0.4 0.950 0.1 0.2 0.3 0.4
+bpp bpp bpp bpp
+(a) PSNRonMCL-JCV. (b) MS-SSIMonMCL-JCV. (c) PSNRonUVG. (d) MS-SSIMonUVG.
+Figure4: VideocompressionresultsonMCL-JCV640×360andUVG1920×1080.
+Table5: AbalationstudiesonImageNet-1kval128×128.
+Method ℓ -norm #bits(K×dorL) PSNR SSIM LPIPS rFID Codeusage
+2 ↑ ↑ ↓ ↓
+✓ 10(1024×32) 23.61±3.21 .6873±.1211 .1214±.0434 7.05 57.5%
+VQ ✓ 14(16384×8) 25.76±3.46 .7834±.0988 .0669±.0282 4.27 100.0%
+✓ 16(65536×8) 25.67±3.36 .7851±.0962 .0706±.0283 6.61 100.0%
+✓ 10 24.11±3.25 .7250±.1121 .0919±.0338 4.51 100.0%
+BSQ ✓ 14 25.26±3.31 .7710±.0992 .0784±.0293 4.60 99.8%
+✓ 18 25.97±3.37 .7990±.0906 .0629±.0261 2.66 93.8%
+LFQ ✗ 18 18.58±2.10 .4828±.1340 .2951±.0806 30.7 0.6%
+autoregressiveway[75]forseveralstepsandprogressivelydecodesfromanall-maskedcanvasto
+visuallyplausiblecontentsfollowingapre-definedunmaskingschedule. UnlikeMaskGITwitha
+VQ-VAEwithK =1024,BSQ-ViThasaneffectivevocabularysizeof2LandL=18,resultingin
+aslowembeddinglookup. Wefixitbydividingeachtokenintogroupsandtreatingsub-tokensinde-
+pendentlywithasimilarrationaleinSec.4.1. Weincreasethenumberofdecodingstepsaccordingly.
+Table3showsthatthemaskedLMwithBSQoutperformsthosewithVQandFSQreportedin[22].
+OurmethodachievescomparableresultswithothergenerationparadigmssuchasGAN-based[18]
+anddiffusion-based[19]approaches. WeleavequalitativeresultsinSec.F.
+Video Compression. We compare Table4: Comparisonsofencoding/decodingspeed.†Thenum-
+thecompressionresultonMCL-JCV
+berdidnotincludetheimageencoderaccordingto[49].
+and UVG in Figure 4. Simply flat-
+tening the video token sequence to Method Resolution Encode EC Decode FPS
+abitstreamachievesanMS-SSIMof
+0.9818at0.2333bpp. Althoughthis VCT[49] 1920×1080 †494ms 30.5ms 168ms 1.4
+H.264 1920×1080 - - - 2.6
+isnotgreat,weuseanauto-regressive
+Ours 1920×1080 55.8ms 42.2ms 64.8ms 6.1
+modeltopredicttheconditionalprob-
+abilitysuchthatthebppisreducedby VCT[49] 640×360 †22.2ms 4.24ms 10.1ms 27.3
+41%. This leads to a better tradeoff H.264 640×360 - - - 22.4
+thanstandardvideocodecsincluding Ours 640×360 6.2ms 4.69ms 7.2ms 55.2
+bothH.264andHEVC.
+OnUVG1080P,ourmodeliscomparabletoH.264whilebeingworsethanHEVCandVCT[49].
+NotethatourmodeltrainsonUCF-101whichonlyhas9K320 240videoclipsencodedinMPEG-4
+×
+whileVCThasbeentrainedonamillionhigh-resolutionInternetvideoclips. Wehypothesizethat
+thegapwillbemitigatedbyaddingmorediversevideosandremovingcompressionartifactsfrom
+thetrainingvideos. Nevertheless,weshowthepotentialadvantageofourmethodinencodingand
+decodingspeedinTable4. DuetothesimplicityoftheTransformer-basedencoderanddecoder,our
+methodrunsfasterthanVCT.
+5.2 AblationStudies
+Forablationstudies,wetrainanImageNetimagetokenizerwithresolution128 128withp = 8,
+×
+althoughourconclusionsgenerallyholdforhigherresolution,e.g. 256 256inSec. 5.1.
+×
+BSQ vs VQ. Table 5 shows that BSQ and VQ follow a similar trend: better reconstruction for
+increasedL. SinceK =218resultsinanout-of-memoryissue,wetryasmallerK =216 =65536
+forVQ.ThegainforVQalreadydiminisheseventhoughthesmallbottleneckdimensionof8still
+guaranteesfullcodeusage. Incontrast,BSQconsistentlyworksbetteronallmetricswhenL=18.
+9
+)Bd(RNSP MISS-SM
+RNSP
+MISS-SMTable6: Ablationstudiesofthelossdesign.
+(a)Leave-one-outablationsfortraininglosses. (b)Groupsize.(L=18)
+L L L rFID Code group rFID Code Speed
+commit entropy LPIPS
+H(p(c|u)) −H(E[p(c|u)]) usage size usage (ms)
+↓
+✓ ✓ ✓ ✓ 2.95 45.6% g=18 (OOM) 70.0
+✗ ✓ ✓ ✓ 2.83 93.8% g=9 2.83 93.8% 0.335
+✓ ✗ ✓ ✓ 2.44 78.3% g=6 2.76 95.2% 0.232
+✓ ✓ ✗ ✓ 13.8 13.3% g=3 3.32 96.0% 0.233
+✓ ✓ ✓ ✗ 19.2 6.9% Ours 2.86 95.1% 0.212
+Importance of ℓ normalization in BSQ. We remove the ℓ normalization in BSQ, which is
+2 2
+equivalenttoLFQ,andshowresultsinthelastrowsofTable5. Weseemuchlowercodeusageand
+worserFID,indicatingthatLFQdoesnotworkwellwithaViT-basedtokenizationencoder.
+Contributionoflosses. WestudytheeffectofeachlossinTable6a. Althoughitiscomputationally
+prohibitivetoenumerateallcombinationsoflosstermsandtheirassociativeweights,weconduct
+asimple“leave-one-out”settingwhereoneofthelossesisremovedatatime. BSQworksslightly
+betterafterremoving andH(p(cu)). However, thecodeusagevariesgreatly. Thebest
+commit
+L |
+configuration is to keep the minimal entropy term while dropping the commitment loss. The
+commitlossmaybeunnecessarybecausethequantizationerrorinBSQisalreadystrictlybounded.
+On the contrary, the dataset entropy maximization term and perceptual term do matter. Without
+H(E [p(cu)]),rFIDincreasesto13.8whilethecodeusageinthevalidationsetsignificantlydrops
+u
+− |
+to13.3%. WealsoobservethattheperceptuallossisimportantforlowFIDandhighcodeusage.
+However,adeeperlookintoitsroleisbeyondthescopeofthispaper.
+Approximatingthedatasetentropyterm. Wenowshowtheefficacyofapproximatingthedataset
+entropytermusingEq(9). Wecomparewiththeapproximationmethodin[17]thatcomputesentropy
+insub-groupsofdimensionswithvaryinggroupsizeg 9,6,3 . Ourapproximationmethodcan
+∈{ }
+alsobeinterpretedasagroupsizeofg = 1. FromTable6b,weconcludethatourapproximation
+achievesasimilarlevelofrFIDandcodeusagecomparedtoothersetupswhilerunningthefastest.
+6 Conclusions
+Wepresentanewtransformer-basedimageandvideotokenizerwithBinarySphericalQuantization
+(BSQ).Thetransformer-basedarchitectureeffortlesslyintegratesimageandvideotokenizationover
+anarbitrarytimehorizon.TheBinarySphericalQuantizationallowsforefficientandeffectivetraining
+ofthequantizedbottleneck. Ourresultsindicatethattheproposedtokenizerrunsatafasterspeed,
+reconstructswithhigherfidelity,andincombinationwithasequencemodeloffersastrongbaseline
+forlossyvideocompressionandimagesynthesis.
+References
+[1] ThomasJDaede,NathanEEgge,Jean-MarcValin,GuillaumeMartres,andTimothyBTerriberry. Daala:
+Aperceptually-drivennextgenerationvideocodec. arXivpreprintarXiv:1603.03129,2016.
+[2] EirikurAgustsson,FabianMentzer,MichaelTschannen,LukasCavigelli,RaduTimofte,LucaBenini,
+andLucVGool. Soft-to-hardvectorquantizationforend-to-endlearningcompressiblerepresentations.
+NeurIPS,2017.
+[3] AlaaeldinEl-Nouby,MatthewJMuckley,KarenUllrich,IvanLaptev,JakobVerbeek,andHervéJégou.
+Imagecompressionwithproductquantizedmaskedimagemodeling. TMLR,2023.
+[4] JiahuiYu,XinLi,JingYuKoh,HanZhang,RuomingPang,JamesQin,AlexanderKu,YuanzhongXu,
+JasonBaldridge,andYonghuiWu. Vector-quantizedimagemodelingwithimprovedVQGAN. InICLR,
+2022.
+[5] HangboBao,LiDong,SonghaoPiao,andFuruWei. BEiT:BERTpre-trainingofimagetransformers. In
+ICLR,2022.
+[6] JinghaoZhou,ChenWei,HuiyuWang,WeiShen,CihangXie,AlanYuille,andTaoKong. iBOT:Image
+BERTpre-trainingwithonlinetokenizer. InICLR,2022.
+10[7] RuiWang,DongdongChen,ZuxuanWu,YinpengChen,XiyangDai,MengchenLiu,Yu-GangJiang,
+LuoweiZhou,andLuYuan. BEVT:BERTpretrainingofvideotransformers. InCVPR,2022.
+[8] AaronVanDenOord,OriolVinyals,andKorayKavukcuoglu. Neuraldiscreterepresentationlearning. In
+NeurIPS,2017.
+[9] PatrickEsser,RobinRombach,andBjornOmmer.Tamingtransformersforhigh-resolutionimagesynthesis.
+InCVPR,2021.
+[10] HuiwenChang,HanZhang,LuJiang,CeLiu,andWilliamTFreeman. MaskGIT:Maskedgenerative
+imagetransformer. InCVPR,2022.
+[11] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,Arvind
+Neelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsarefew-shotlearners.
+NeurIPS,2020.
+[12] JoshAchiam,StevenAdler,SandhiniAgarwal,LamaAhmad,IlgeAkkaya,FlorenciaLeoniAleman,
+DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,etal. GPT-4technicalreport. arXiv
+preprintarXiv:2303.08774,2023.
+[13] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+Bashlykov, SoumyaBatra, PrajjwalBhargava, ShrutiBhosale, etal. Llama2: Openfoundationand
+fine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+[14] DustinPodell,ZionEnglish,KyleLacey,AndreasBlattmann,TimDockhorn,JonasMüller,JoePenna,
+andRobinRombach. SDXL:Improvinglatentdiffusionmodelsforhigh-resolutionimagesynthesis. arXiv
+preprintarXiv:2307.01952,2023.
+[15] SongweiGe,ThomasHayes,HarryYang,XiYin,GuanPang,DavidJacobs,Jia-BinHuang,andDevi
+Parikh. Longvideogenerationwithtime-agnosticVQGANandtime-sensitivetransformer. InECCV,
+2022.
+[16] LijunYu,YongCheng,KihyukSohn,JoséLezama,HanZhang,HuiwenChang,AlexanderGHauptmann,
+Ming-HsuanYang,YuanHao,IrfanEssa,etal. MAGVIT:Maskedgenerativevideotransformer. InCVPR,
+2023.
+[17] LijunYu,JoséLezama,NiteshBGundavarapu,LucaVersari,KihyukSohn,DavidMinnen,YongCheng,
+AgrimGupta,XiuyeGu,AlexanderGHauptmann,etal. Languagemodelbeatsdiffusion–tokenizeriskey
+tovisualgeneration. InICLR,2024.
+[18] AndrewBrock,JeffDonahue,andKarenSimonyan. LargescaleGANtrainingforhighfidelitynatural
+imagesynthesis. arXivpreprintarXiv:1809.11096,2018.
+[19] PrafullaDhariwalandAlexanderNichol. DiffusionmodelsbeatGANsonimagesynthesis. NeurIPS,
+2021.
+[20] AdityaRamesh,MikhailPavlov,GabrielGoh,ScottGray,ChelseaVoss,AlecRadford,MarkChen,and
+IlyaSutskever. Zero-shottext-to-imagegeneration. InICML,2021.
+[21] ChuanxiaZhengandAndreaVedaldi. Onlineclusteredcodebook. InICCV,2023.
+[22] FabianMentzer,DavidMinnen,EirikurAgustsson,andMichaelTschannen. Finitescalarquantization:
+VQ-VAEmadesimple. InICLR,2024.
+[23] RubenVillegas,MohammadBabaeizadeh,Pieter-JanKindermans,HernanMoraldo,HanZhang,Moham-
+madTaghiSaffar,SantiagoCastro,JuliusKunze,andDumitruErhan. Phenaki: Variablelengthvideo
+generationfromopendomaintextualdescriptions. InICLR,2022.
+[24] AndreasBlattmann,TimDockhorn,SumithKulal,DanielMendelevitch,MaciejKilian,DominikLorenz,
+YamLevi,ZionEnglish,VikramVoleti,AdamLetts,etal. Stablevideodiffusion:Scalinglatentvideo
+diffusionmodelstolargedatasets. arXivpreprintarXiv:2311.15127,2023.
+[25] WilsonYan,YunzhiZhang,PieterAbbeel,andAravindSrinivas. VideoGPT:Videogenerationusing
+vq-vaeandtransformers. arXivpreprintarXiv:2104.10157,2021.
+[26] AnuragArnab,MostafaDehghani,GeorgHeigold,ChenSun,MarioLucˇic´,andCordeliaSchmid. ViViT:
+Avideovisiontransformer. InICCV,2021.
+[27] ClaudeElwoodShannon. Amathematicaltheoryofcommunication. TheBellsystemtechnicaljournal,
+27(3):379–423,1948.
+[28] DavidAHuffman. Amethodfortheconstructionofminimum-redundancycodes. ProceedingsoftheIRE,
+40(9):1098–1101,1952.
+[29] RichardClarkPasco. Sourcecodingalgorithmsforfastdatacompression. PhDthesis,StanfordUniversity
+CA,1976.
+[30] JormaRissanenandGlenGLangdon. Arithmeticcoding. IBMJournalofresearchanddevelopment,
+23(2):149–162,1979.
+11[31] JarekDuda. Asymmetricnumeralsystems. arXivpreprintarXiv:0902.0271,2009.
+[32] TomášMikolov. Statisticallanguagemodelsbasedonneuralnetworks. PhDthesis,BrnoUniversityof
+Technology,2012.
+[33] MohitGoyal,KedarTatwawadi,ShubhamChandak,andIdoiaOchoa.Deepzip:Losslessdatacompression
+usingrecurrentneuralnetworks. InDCC,2019.
+[34] AaronVandenOord,NalKalchbrenner,LasseEspeholt,OriolVinyals,AlexGraves,etal. Conditional
+imagegenerationwithpixelcnndecoders. InNeurIPS,2016.
+[35] JamesTownsend,TomBird,andDavidBarber. Practicallosslesscompressionwithlatentvariablesusing
+bitsbackcoding. InICLR,2019.
+[36] JamesTownsend,ThomasBird,JuliusKunze,andDavidBarber. Hilloc:Losslessimagecompressionwith
+hierarchicallatentvariablemodels. InICLR,2020.
+[37] FabriceBellard. Losslessdatacompressionwithneuralnetworks. URL:https://bellard.org/nncp/nncp.
+pdf,2019.
+[38] Grégoire Delétang, Anian Ruoss, Paul-Ambroise Duquenne, Elliot Catt, Tim Genewein, Christopher
+Mattern,JordiGrau-Moya,LiKevinWenliang,MatthewAitchison,LaurentOrseau,etal. Language
+modelingiscompression. InICLR,2024.
+[39] FabianMentzer,EirikurAgustsson,MichaelTschannen,RaduTimofte,andLucVanGool. Practicalfull
+resolutionlearnedlosslessimagecompression. InCVPR,2019.
+[40] JordanHoffmann,SebastianBorgeaud,ArthurMensch,ElenaBuchatskaya,TrevorCai,ElizaRutherford,
+DiegodeLasCasas,LisaAnneHendricks,JohannesWelbl,AidanClark,etal. Anempiricalanalysisof
+compute-optimallargelanguagemodeltraining. InNeurIPS,2022.
+[41] VivekKGoyal. Theoreticalfoundationsoftransformcoding. IEEESignalProcessingMagazine,18(5):9–
+21,2001.
+[42] JohannesBallé,PhilipAChou,DavidMinnen,SaurabhSingh,NickJohnston,EirikurAgustsson,SungJin
+Hwang,andGeorgeToderici. Nonlineartransformcoding. IEEEJournalofSelectedTopicsinSignal
+Processing,15(2):339–353,2020.
+[43] ThomasWiegand,GaryJSullivan,GisleBjontegaard,andAjayLuthra. Overviewoftheh.264/avcvideo
+codingstandard. TCSVT,2003.
+[44] GaryJSullivan,Jens-RainerOhm,Woo-JinHan,andThomasWiegand. Overviewofthehighefficiency
+videocoding(hevc)standard. TCSVT,2012.
+[45] GuoLu,WanliOuyang,DongXu,XiaoyunZhang,ChunleiCai,andZhiyongGao. Dvc:Anend-to-end
+deepvideocompressionframework. InCVPR,2019.
+[46] OrenRippel,SanjayNair,CarissaLew,SteveBranson,AlexanderGAnderson,andLubomirBourdev.
+Learnedvideocompression. InICCV,2019.
+[47] EirikurAgustsson,DavidMinnen,NickJohnston,JohannesBalle,SungJinHwang,andGeorgeToderici.
+Scale-spaceflowforend-to-endoptimizedvideocompression. InCVPR,2020.
+[48] JiahaoLi,BinLi,andYanLu. Deepcontextualvideocompression. InNeurIPS,2021.
+[49] FabianMentzer,GeorgeToderici,DavidMinnen,Sung-JinHwang,SergiCaelles,MarioLucic,andEirikur
+Agustsson. VCT:Avideocompressiontransformer. InNeurIPS,2022.
+[50] DailanHe,ZimingYang,WeikunPeng,RuiMa,HongweiQin,andYanWang. ELIC:Efficientlearned
+imagecompressionwithunevenlygroupedspace-channelcontextualadaptivecoding. InCVPR,2022.
+[51] YoshuaBengio,NicholasLéonard,andAaronCourville. Estimatingorpropagatinggradientsthrough
+stochasticneuronsforconditionalcomputation. arXivpreprintarXiv:1308.3432,2013.
+[52] YuhtaTakida,TakashiShibuya,WeiHsiangLiao,Chieh-HsinLai,JunkiOhmura,ToshimitsuUesaka,
+NaokiMurata,ShusukeTakahashi,ToshiyukiKumakura,andYukiMitsufuji. SQ-VAE:Variationalbayes
+ondiscreterepresentationwithself-annealedstochasticquantization. InICML,2022.
+[53] ArenJansen,DanielPWEllis,ShawnHershey,RChanningMoore,ManojPlakal,AshokCPopat,and
+RifASaurous.Coincidence,categorization,andconsolidation:Learningtorecognizesoundswithminimal
+supervision. InICASSP,2020.
+[54] IanHWitten,RadfordMNeal,andJohnGCleary. Arithmeticcodingfordatacompression. Communica-
+tionsoftheACM,30(6):520–540,1987.
+[55] JonHamkinsandKennethZeger. Gaussiansourcecodingwithsphericalcodes. IEEETransactionson
+InformationTheory,48(11):2980–2989,2002.
+[56] ThomasFischer. Apyramidvectorquantizer. IEEETransactionsonInformationTheory,32(4):568–583,
+1986.
+12[57] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas
+Unterthiner,MostafaDehghani,MatthiasMinderer,GeorgHeigold,SylvainGelly,etal.Animageisworth
+16x16words:Transformersforimagerecognitionatscale. InICLR,2021.
+[58] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,Łukasz
+Kaiser,andIlliaPolosukhin. Attentionisallyouneed. NeurIPS,2017.
+[59] Richard Zhang, Phillip Isola, Alexei A Efros, Eli Shechtman, and Oliver Wang. The unreasonable
+effectivenessofdeepfeaturesasaperceptualmetric. InCVPR,2018.
+[60] IanGoodfellow,JeanPouget-Abadie,MehdiMirza,BingXu,DavidWarde-Farley,SherjilOzair,Aaron
+Courville,andYoshuaBengio. Generativeadversarialnets. InNeurIPS,2014.
+[61] TeroKarras,SamuliLaine,andTimoAila. Astyle-basedgeneratorarchitectureforgenerativeadversarial
+networks. InCVPR,2019.
+[62] PhillipIsola,Jun-YanZhu,TinghuiZhou,andAlexeiAEfros.Image-to-imagetranslationwithconditional
+adversarialnetworks. InCVPR,2017.
+[63] OlgaRussakovsky,JiaDeng,HaoSu,JonathanKrause,SanjeevSatheesh,SeanMa,ZhihengHuang,
+AndrejKarpathy,AdityaKhosla,MichaelBernstein,etal.Imagenetlargescalevisualrecognitionchallenge.
+IJCV,115:211–252,2015.
+[64] Tsung-YiLin,MichaelMaire,SergeBelongie,JamesHays,PietroPerona,DevaRamanan,PiotrDollár,
+andCLawrenceZitnick. Microsoftcoco:Commonobjectsincontext. InECCV,2014.
+[65] KhurramSoomro,AmirRoshanZamir,andMubarakShah. UCF101: Adatasetof101humanactions
+classesfromvideosinthewild. arXivpreprintarXiv:1212.0402,2012.
+[66] ZhouWang,AlanCBovik,HamidRSheikh,andEeroPSimoncelli. Imagequalityassessment:fromerror
+visibilitytostructuralsimilarity. IEEEtransactionsonimageprocessing,13(4):600–612,2004.
+[67] MartinHeusel,HubertRamsauer,ThomasUnterthiner,BernhardNessler,andSeppHochreiter. GANs
+trainedbyatwotime-scaleupdateruleconvergetoalocalNashequilibrium. NeurIPS,2017.
+[68] ThomasUnterthiner, SjoerdvanSteenkiste, KarolKurach, RaphaëlMarinier, MarcinMichalski, and
+SylvainGelly. Fvd:Anewmetricforvideogeneration. InICLRWorkshop,2019.
+[69] TimSalimans,IanGoodfellow,WojciechZaremba,VickiCheung,AlecRadford,andXiChen. Improved
+techniquesfortrainingGANs. NeurIPS,2016.
+[70] TuomasKynkäänniemi,TeroKarras,SamuliLaine,JaakkoLehtinen,andTimoAila. Improvedprecision
+andrecallmetricforassessinggenerativemodels. NeurIPS,2019.
+[71] ZhouWang,EeroPSimoncelli,andAlanCBovik. Multiscalestructuralsimilarityforimagequality
+assessment. InACSSC,2003.
+[72] RobinRombach,AndreasBlattmann,DominikLorenz,PatrickEsser,andBjörnOmmer. High-resolution
+imagesynthesiswithlatentdiffusionmodels. InCVPR,2022.
+[73] AlinaKuznetsova, HassanRom, NeilAlldrin, JasperUijlings, IvanKrasin, JordiPont-Tuset, Shahab
+Kamali,StefanPopov,MatteoMalloci,AlexanderKolesnikov,etal. Theopenimagesdatasetv4:Unified
+imageclassification,objectdetection,andvisualrelationshipdetectionatscale. IJCV,2020.
+[74] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. BERT: Pre-training of deep
+bidirectionaltransformersforlanguageunderstanding. InNAACL,2019.
+[75] JiataoGu,JamesBradbury,CaimingXiong,VictorOKLi,andRichardSocher. Non-autoregressiveneural
+machinetranslation. InICLR,2018.
+[76] Haiqiang Wang, Weihao Gan, Sudeng Hu, Joe Yuchieh Lin, Lina Jin, Longguang Song, Ping Wang,
+IoannisKatsavounidis,AnneAaron,andC-CJayKuo.MCL-JCV:aJND-basedH.264/AVCvideoquality
+assessmentdataset. InICIP,2016.
+[77] AlexandreMercat,MarkoViitanen,andJarnoVanne. Uvgdataset: 50/120fps4ksequencesforvideo
+codecanalysisanddevelopment. InProceedingsofthe11thACMMultimediaSystemsConference,pages
+297–302,2020.
+[78] IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization. InICLR,2019.
+[79] JonathanHoandTimSalimans. Classifier-freediffusionguidance. arXivpreprintarXiv:2207.12598,
+2022.
+[80] JeanBégaint,FabienRacapé,SimonFeltman,andAkshayPushparaja. CompressAI:apytorchlibraryand
+evaluationplatformforend-to-endcompressionresearch. arXivpreprintarXiv:2011.03029,2020.
+13Table7: ComparingBSQandLFQ.
+LFQ[17] BSQ(Ours)
+Quantizedoutput vˆ =sign(v) uˆ = √1 sign(u)= √1 sign( v )
+L L |v|
+STEgradient ∂ ∂v vˆi
+i
+=1 ∂ ∂u vˆ ii = √1 L(1− (cid:113)v i2/|v|2)
+√
+QuantizationError
+E v[d(v,vˆ)]=∞ E u[d(u,uˆ)]< 2− √2
+L
+< 2
+Unbounded Upper-bounded(SeeSec.C.4)
+L ,L ,L ,L , L ,L ,L ,
+Trainingobjective MSE commit LPIPS GAN MSE LPIPS GAN
+L =H[p(c|v)]−H[E [p(c|v)]] L =H[p(c|u)]−Hˆ[E [p(c|u)]]
+entropy u entropy u
+A ArithmaticCodingDetails
+StartingfromtheinitialintervalI =[0,1),theACencoderrecursivelypartitionstheintervalintoa
+0
+seriesofsub-intervalI =[l ,u )suchthatI I I ,andI isdeterminedbyI
+n n n n n−1 0 n n−1
+⊂ ⊂···⊂
+andρ(y x ).
+<n
+|
+(cid:34) x (cid:88)n−1 (cid:88)xn (cid:33)
+I (y)= l +(u l ) ρ(y x ), l +(u l ) ρ(y x ) . (14)
+n n−1 n−1 n−1 <n n−1 n−1 n−1 <n
+− | − |
+y=1 y=1
+Any number in the final interval I can sufficiently represent the encoded sequence. To obtain
+N
+the final bit stream, we take a binary fraction λ = (cid:80)C b 2−i, b 0,1 in I such that
+i=1 i × i ∈ { } N
+l λ<u . Thebitstream b ,...,b istheencodingresultwithalengthofC bits.
+N N 0 C
+≤ { }
+TheACdecodertakesinλ,startswithI ,andperformsasimilarintervalpartitioningprocess. At
+0
+then-thstep,thedecoderqueriesthemodelρ (y x ),calculatethesub-intervalsforallpossible
+n <n
+|
+valuesofyusingEq.(14),anddecodesoutputx thatleadstoλ I (x ). Thedecodercanrecover
+n n n
+∈
+theencodedtokensequencebycontinuingwithI basedonthedecodedx andrepeatingforstep
+n+1 n
+n+1forN steps.
+Inpractice,theencoderandthedecodercanbeimplementedefficientlywithfixed-lengthinteger
+numbersandoperateincrementallyforarbitrarilylonginputsequences.
+B ComparisonbetweenBSQandLFQ
+InSec.4.1,wehaveintroducedthemechanismofBSQandbrieflydiscussedtheconnectionsand
+differenceswithLFQ.WesummarizetheminTable7. NotethatSTEgradientinBSQisanisotropic
+andismorelikelytobeagoodestimationbecauseofanupper-boundedquantizationerrorregardless
+ofL. Thispropertyexplainswhyacommitmentlosslike (uˆ,u)isnotneededinBSQbut
+commit
+L
+usefulforLFQ.
+C Proofs
+C.1 ProofofEq(7)
+BeforeprovingEq(7),wewillfirstprovethefollowingidentity:
+Letu RL,C=ΩL RL×2L forΩ= √1 ,√1 ,
+∈ ∈ {− L L}
+L L
+(cid:88) eτu⊤c =(cid:88) (cid:89) eτudcd = (cid:89) (cid:88) eτudcd. (15)
+c∈C c∈Cd=1 d=1cd∈Ω
+14Proof. Withτ droppedforsimplicityofnotation.
+L
+(cid:88) eu⊤c = (cid:88) (cid:89) eukck
+c∈C c∈Ck=1
+L
+(cid:88) (cid:88) (cid:88) (cid:89)
+= ... eudcd
+c1∈Ωc2∈Ω cL∈Ωd=1
+L−1
+(cid:88) (cid:88) (cid:88) (cid:89)
+= ... euLcL eudcd
+c1∈Ωc2∈Ω cL∈Ω d=1
+(cid:32)L−1 (cid:33)(cid:32) (cid:33)
+(cid:88) (cid:88) (cid:88) (cid:89) (cid:88)
+= ... eudcd euLcL
+c1∈Ωc2∈Ω cL−1∈Ω d=1 cL∈Ω
+=...
+(cid:32) (cid:33)(cid:32) (cid:33) (cid:32) (cid:33) L
+(cid:88) (cid:88) (cid:88) (cid:89) (cid:88)
+= euLcL eu2c2 ... euLcL = eudcd.□
+c1∈Ω c2∈Ω cL∈Ω d=1cd∈Ω
+Therefore,theprobabilityofubeingassignedtoc canbewrittenas:
+i
+eτu⊤cˆ (cid:81)L eτudcˆd
+qˆ(cˆu)= = d=1 (UsingEq(15))
+| (cid:80) c∈Ceτu⊤c (cid:81)L d=1(cid:80)
+cd∈{−√1 L,√1
+L}eτudcd
+(cid:89)L eτudcˆd 1
+= (sincec = = cˆ )
+eτudcˆd +eτudcˆd d ±√L ± d
+d=1
+L
+(cid:89)
+= σ(2τu cˆ ).
+d d
+d=1
+C.2 ProofofEq(8)
+Sinceqˆ(cˆu)=(cid:81)L
+σ(2τu cˆ )eachvariablec isindependentofeachother. Thusbydefinition
+| d=1 d d d
+L
+(cid:88)
+H[qˆ(cu)]= H(σ(2τu c )). □
+d d
+|
+d=1
+C.3 ProofofEq(9)
+NowwelookatH[E [qˆ(cu)]]. WefirstcomputeQ(c)=E [qˆ(cu)].
+u u
+| |
+L
+1 (cid:88) 1 (cid:88)(cid:89)
+Q(c)=E [qˆ(cu)]= qˆ(cu)= σ(2u c ).
+u k k
+| N | N
+u u k
+Unlike c, u does not factorize like Eq (15). This would require us to compute Q(c) as a full
+distributionover2Lstates,whichisslow(O(L 2L))andeasilyoverfits. Instead,weapproximate
+Q(c)byafactorizeddistributionq˜(c)=(cid:81)L d=1× q˜ d(c d),wherec
+d
+∈ΩforΩ= {−√1 L,√1 L},using
+15anM-projection. Weagainomitτ fornotationalbrevity.
+D(Q q˜)=H(Q,q˜) H(Q)
+∥ −
+2L
+(cid:88)
+= Q(c )logq˜(c ) H(Q)
+i i
+− −
+i=1
+2L
+(cid:88) (cid:88)
+= Q(c ) logq˜ (c ) H(Q)
+i d d
+− −
+i=1 d
+2L
+(cid:88)(cid:88)
+= Q(c )logq˜ (c ) H(Q)
+i d d
+− −
+d i=1
+(cid:124) (cid:123)(cid:122) (cid:125)
+ 
+(cid:88) (cid:88) (cid:88)
+= logq˜ d(c
+d
+=1) p(c i)+logq˜ d(c
+d
+= 1) Q(c i) H(Q)
+− − −
+d c−d c−d
+(cid:88) (cid:88) (cid:88)
+= logq˜ (c ) Q(c) H(Q),wherec sumsoveralldimensionsexceptd.
+d d −d
+− −
+d cd∈{−1,1} c−d
+Theminimizeroftheaboveprojection ∂ D(Q q˜)=0
+∂q˜d ∥
+ 
+(cid:88) (cid:88)
+q˜ d(c d)∗ = Q(c)=E u p(cu)
+|
+c−d c−d
+   
+(cid:88)(cid:89) (cid:88) (cid:89)
+=E u σ(2u kc k)=E u σ(2u dc d) σ(2u kc k)
+c−d k c−d k̸=d
+ 
+ 
+ 
+=E uσ(2u dc d)(cid:88)(cid:89) σ(2u kc k)=E u σ(2u dc d)(cid:89)(cid:88) σ(2u kc k) =E u[σ(2u dc d)]
+ 
+c−dk̸=d  k̸=dc−d 
+(cid:124) (cid:123)(cid:122) (cid:125)
+=1
+Therefore,theentropytermissimplifiedto:
+(cid:88) (cid:88)
+H(q˜)= H(q˜ (c ))= H(E [σ(2u c )]).
+d d u d d
+d d
+BythenatureoftheabovederivationthecrossentropyH(Q,q˜)=H(q˜)equalstheentropyofthe
+approximation.ThismeansthatD(Q q˜)=H(q˜) H(Q) 0,andtheentropyoftheapproximation
+∥ − ≥
+isanupperboundH(q˜) H(Q)tothetrueentropy.
+≥
+Inpractice,thisboundisrelativelytight. ThemostadversarialdistributionP(u)isP(√1 ⃗1) = 1
+L 2
+andP( √1 ⃗1)= 1,whereallinputsaremaximallycorrelated,butthefactorizeddistributionisnot.
+− L 2
+Figure5showsanempiricalestimateofthisapproximationerrorforvariousvaluesofτ. Inpractice,
+weuseτ = 1 ,whichhaslittletonoapproximationerror.
+100
+C.4 ProofoftheQuantizationErrorBoundofBSQ(Eq. (10))
+Weconsiderℓ -distanced(u,uˆ)= u uˆ . Asimple(butloose)boundis:
+2
+∥ − ∥
+(cid:115)
+2
+E [d(u,uˆ)]=E [d (u,uˆ)]< 2 <√2, (16)
+u u max
+− √L
+16Upper bound in KL divergence between q and q
+1.0 L=3
+L=5
+L=7
+0.8 L=10
+L=15
+Upper bound
+0.6
+0.4
+0.2
+0.0
+0 2 4 6 8 10
+Figure5: Empiricalestimationoftheapproximationerrorwithrespecttoτ atdifferentbottleneck
+dimensionsL.
+whered isattainedifuisatanyaxis,u=[0, ,0,1,0, ,0]. Toachieveatighterbound,we
+max
+(cid:124) ·(cid:123)·(cid:122)· (cid:125) (cid:124) ·(cid:123)·(cid:122)· (cid:125)
+n L−1−n
+firstexpandthedefinition,
+(cid:90) (cid:90)
+d Vd(u,uˆ)
+SL−1
+···
+(cid:124) (cid:123)(cid:122) (cid:125)
+E u[d(u,uˆ)]= SL (cid:90)−1 (cid:90) , (17)
+d V
+SL−1
+···
+(cid:124) (cid:123)(cid:122) (cid:125)
+SL−1
+whereSL−1 = x RL : x =1 denotestheunitL-sphereofradius1andd V denotesits
+SL−1
+{ ∈ ∥ ∥ }
+surfaceareaelement. Wefurtherdefineahypersphericalcoordinatesystemthatisanalogoustothe
+sphericalcoordinatesystemfor3DEuclideanspaceorthepolarcoordinatesystemfor2Dspaceto
+representthesurfaceareaelement.
+u =cos(φ ),
+1 1
+u =sin(φ )cos(φ ),
+2 1 2
+u =sin(φ )sin(φ )cos(φ ),
+3 1 2 3
+···
+u =sin(φ )sinφ sin(φ )cos(φ ),
+L−1 1 2 L−2 L−1
+···
+u =sin(φ )sinφ sin(φ )sin(φ ),
+L 1 2 L−2 L−1
+···
+(surfaceareaelement)d V =sinL−2(φ )sinL−3(φ ) sin(φ )dφ dφ ,
+SL−1 1 2 L−2 1 L−1
+··· ···
+(cid:90) (cid:90) 2πL/2
+(surfacearea)S = d V = .
+L−1 ··· Sn−1 Γ(L)
+(cid:124) (cid:123)(cid:122) (cid:125) 2
+SL−1
+Due to symmetry, we assume the subarea AL−1 where i 1, ,L , u > 0, and it will be
+i
+∀ ∈ { ··· }
+quantizedtoc =uˆ = √1 →−1. TheunithypersphereSL−1has2Lofsuchsubareasinterchangeably.
+1 1 L
+ComputingEq(17)isequivalentto
+(cid:90) (cid:90)
+d Vd(u,uˆ)
+SL−1
+···
+(cid:124) (cid:123)(cid:122) (cid:125)
+E u[d(u,uˆ)]= AL (cid:90)−1 (cid:90) . (18)
+d V
+SL−1
+···
+(cid:124) (cid:123)(cid:122) (cid:125)
+AL−1
+17
+rorre
+noitamixorppAWeexpandthethenumeratorinEq(18)asfollows:
+(cid:90) π (cid:90) π
+2 2 1 1
+= d V [cos(φ ) ]2+[sin(φ )cos(φ ) ]2+
+···
+SL−1
+{
+1
+− √L
+1 2
+− √L ···
+0 0
+1
++[sin(φ )sin(φ ) sin(φ )cos(φ ) ]2 (19)
+1 2 L−2 L−1
+··· − √L
+1
++[sin(φ 1)sin(φ 2) sin(φ L−2)sin(φ L−1) ]2 1 2
+··· − √L }
+ItiscomposedofLsquareterms. Itiseasytoseethatthesumofconstanttermsleadsto1. Next,
+let’ssumoverallquadratictermsandkeeponusingsin2(θ)+cos2(θ)=1:
+L−2 L−2
+(cid:89) (cid:89)
+cos2(φ )+sin2(φ )cos2(φ )+ + sin2(φ )sin2(φ )+ sin2(φ )cos2(φ )=1
+1 1 2 j L−1 j L−1
+···
+j=1 j=1
+Sothedistancefunctiontobeintegratedsimplifiesto
+ 1
+L−2 L−2 2
+2 2 2 (cid:89) 2 (cid:89)
+2 cos(φ 1) sin(φ 1)cos(φ 2) sin(φ j)cos(φ L−1) sin(φ j)sin(φ L−1)
+− √L − √L −···− √L − √L
+j=1 j=1
+(cid:18) (cid:19)1
+2 2
+< 2 cos(φ ) .
+1
+− √L
+PlugintothenumeratorinEq(18)andcontinuesimplifying:
+(cid:90) (cid:90) (cid:18) (cid:19)1
+2 2
+d V 2 cos(φ ) (20)
+···
+SL−1
+− √L
+1
+(cid:124) (cid:123)(cid:122) (cid:125)
+AL−1
+(cid:90) (cid:90) (cid:90) π (cid:18) (cid:19)1
+= d V 2 2 2 cos(φ ) 2 sinL−2(φ )dφ . (21)
+···
+SL−2
+− √L
+1 1 1
+0
+(cid:124) (cid:123)(cid:122) (cid:125)
+AL−1
+(cid:124) (cid:123)(cid:122) (cid:125)
+SL−2
+2L−1
+Therefore,wehave
+E [d(u,uˆ)]< 2Γ(L 2) (cid:90) π 2 (cid:18) 2 2 cos(φ )(cid:19)1 2 sinL−2(φ )dφ , (22)
+u √πΓL−1 − √L 1 1 1
+2 0
+whereRHScanbenumericallycomputedandplottedinFigure6.
+D DatasetOverview
+ImageNet-1khas1.28Mtrainingimagesand50,000validationimages;COCO2017valhas5,000
+images.
+UCF101has13,320videoclipsandthreetrain-valsplits. Followingpriorworks[16],weconsider
+split-1whichhas9,537clipsfortrainingand3,783forvalidation.
+TheMCL-JCVdataset[76]consistsofthirty1080P(1,920 1,080)videosequenceswith24 30
+× ∼
+FPS.TheOpenUltraVideoGroup(UVG)dataset[77]consistsofsixteen4K(3,840 2,160)test
+×
+videosequencescapturedat50/120FPS.Followingpriorworks[47],wereporttheperformanceona
+subsetofsevenvideosinYUV8bitformatat120FPSundertheresolutionof1,920 1,080.
+×
+181.42
+1.40
+1.38
+1.36
+1.34
+1.32
+1.30
+1.28
+1.26
+5 10 15 20 25 30 35
+L
+Figure6: QuantizationerrorwithvocabularysizeL.
+E ImplementationDetails
+TrainingImageTokenizers. Wetraintheimagetokenizerwithabatchsizeof32perGPU.We
+use AdamW optimizer [78] with (β ,β ) = (0.9,0.99) with 1 10−4 weight decay. The base
+1 2
+learning rate is 4 10−7 (or a total learning rate of 1 10−4)× and follows a half-period cosine
+× ×
+annealingschedule. Themodelistrainedfor1Mstepswhichamountsto200epochsovertheentire
+ImageNet-1ktrainingset. Wedidnotheavilystudytheeffectoflossweights. Instead,wekeepγ =1
+intheentropyterms. Weuseaperceptuallossweightof0.1andanadversariallossweightof0.1
+throughouttheexperiments.
+TrainingVideoTokenizers. Wefinetunethevideotokenizerwithabatchsizeof32perGPU.The
+optimization schedule follows the image-based one but trains for fewer iterations. The network
+isinitializedfromtheImageNet-pretrainingcheckpointandundergoesanother500Kstepswhich
+amountsto1600epochsoverUCF-101split-1train.
+Training a Masked Language Model for Generation. The masked LM is a standard post-LN
+Transformerwith24layersandahiddendimensionof768followingMaskGIT[10]. Wetrainthe
+maskedLMon2nodesof8 GPUs(16intotal)withatotalbatchsizeof1024for1Msteps. We
+×
+useAdamWoptimizerwith(β ,β )=(0.9,0.96)with0.045weightdecay. Atinferencetime,we
+1 2
+use a cosine unmasking schedule in MaskGIT [10] and set the sampling temperature to 15. We
+use classifier-free guidance [79]: At training, we replace 20% of the class condition labels with
+the mask token so that the model learns an unconditional distribution simultaneously. Let ℓ be
+c
+class-conditionedlogitsandℓ beunconditionallogits. Duringinference,weinterpolatelogitsusing
+∅
+ℓ′ =ℓ +α(ℓ ℓ ),whereα=0.5.
+c c ∅
+−
+Training an Auto-Regressive Model for Arithmetic Coding. The auto-regressive model is a
+Transformerwith24layersandahiddendimensionof768. Wetrainthismodelon8 GPUswitha
+×
+totalbatchsizebeing64. WeuseAdamWoptimizerwith(β ,β )=(0.9,0.96)with0.045weight
+1 2
+decay.
+Hardware. Thehardwarefortrainingis8 GPU-serverswithNVIDIAA5000(24GB).Pre-training
+×
+animagetokenizerandfine-tuningavideotokenizerinthefullscheduleisdoneacrosstwoservers
+with distributed training and takes around 5 days. Training the AR model for AC is done on an
+8 GPU server and takes around 1 week. When measuring the tokenizer’s throughput and the
+×
+compressionruntime,weuseaserverwith4 A5000GPUand1 AMDRyzenThreadripperPRO
+× ×
+5975WX32-CoreCPU(64threads).
+F QualitativeResults
+InFigure7,weshowreconstructedimagesproducedbytheproposedBSQ-ViTincomparisontothe
+bestpriorwork,SDXL-VAE[14]. Wecanseethatourmethodisabletopreservemoredetailsabout
+high-frequencytextureandfine-grainedshape/geometry. BSQ-ViToftenshowsbetterreconstruction
+resultsforcharacters.
+19
+rorrE
+noitazitnauQTable8: ImagereconstructionresultsonCOCO2017andImageNet-1K(256×256).Thesettingsstrictly
+followTable1exceptthatallimagesareresizedwithbilinearinterpolation.
+COCO2017val ImageNet-1kval
+Method Data Arch. Quant. Param. #bits TP↑ PSNR↑ SSIM↑ LPIPS↓ rFID↓ PSNR↑ SSIM↑ LPIPS↓ rFID↓
+DALL-EdVAE[20] CC+YF C VQ 98M 13 34.0 26.97 .0837 .2544 48.60 27.31 .7943 .2544 32.63
+±3.41 ±.0922 ±.1057 ±3.81 ±.1114 ±.1057
+MaskGIT[10] IN-1k C VQ 54M 10 37.5 18.21 .4596 .1930 8.47 18.63 .4619 .1884 1.98
+±2.74 ±0.1606 ±.0444 ±2.90 ±.1812 ±.0497
+ViT-VQGAN[4] IN-1k T-B VQ 182M 13 †7.5 - - - - - - - †1.55
+SD-VAE1.x[72] OImg C VQ 68M 10 22.4 23.29 .6705 .0949 6.49 23.65 .6615 .0940 1.40
+±3.34 ±.1316 ±.0313 ±3.69 ±.1540 ±.0367
+SD-VAE1.x[72] OImg C VQ 68M 14 22.4 24.17 .7042 .0814 5.75 24.48 .6931 .0814 1.13
+±3.50 ±.1276 ±.0289 ±3.98 ±.1502 ±.0289
+SD-VAE1.x[72] OImg C KL 68M 64 22.4 23.21 .6930 .0908 5.94 23.54 .6835 .0899 1.22
+±3.24 ±.1249 ±.04282 ±3.62 ±.1465 ±.0337
+SD-VAE2.x[14] OImg+ C KL 84M 64 18.9 26.62 .7722 .0584 4.26 26.90 .7592 .0609 0.70
+LAION ±3.64 ±.1086 ±.0273 ±4.09 ±.1300 ±.0349
+SDXL-VAE[14] OImg+ C KL 84M 64 18.9 27.08 .7953 .0541 3.93 27.37 .7814 .0574 0.67
+LAION+? ±3.88 ±.1066 ±.0250 ±4.36 ±.1282 ±.0320
+Ours IN-1k T-B BSQ 174M 18 45.1 26.89 .8133 .0652 5.41 27.78 .8171 .0633 0.99
+±3.47 ±.0851 ±.0255 ±3.99 ±.0987 ±.0307
+Ours IN-1k T-B BSQ 174M 36 45.1 29.85 .8862 .0341 3.07 30.12 .8803 .0355 0.36
+±3.65 ±.0570 ±.0163 ±4.13 ±.0670 ±.0207
+Ours(w/.EMA) IN-1k T-B BSQ 174M 36 45.1 30.19 .8904 .0314 3.07 30.45 .8843 .0329 0.42
+±3.69 ±.0561 ±.0153 ±4.19 ±.0661 ±.0194
+InFigure8,weshowsampledresultsproducedbyaMaskedLMwiththeproposedBSQ-ViTin
+comparisontoexistingmethods,BigGAN[18]andADM[19]. Wealsoplotthesamplesfromthe
+ground-truthILSVRC2012validationsetforreference. Ourmethodproducescompetitiveresults
+withstate-of-the-artmethods.
+G BaselinesforVideoCompression
+FollowingSSF[47],weusedFFmpeg3 toproducetheevaluationmetricsforH.264andHEVC.We
+usethecommandsprovidedinCompressAI[80].
+ffmpeg -y -s:v $RESOLUTION -i $FILE.yuv -c:v h264 -crf $CRF -preset medium \
+-bf 0 -pix_fmt yuv420p -threads 4 $FILE.mp4
+where$Resolution 1920x1080,640x360 ,and$CRF 17,20,22,27,32,37,42,47 .
+∈{ } ∈{ }
+H Limitations
+Theproposedtokenizerhasbeentestedonimageswitha256 256or128 128resolutionandvideos
+× ×
+with a 128 128 resolution. Training a visual tokenizer on higher-resolution inputs and variable
+×
+aspectratioremainsunexplored. Also,thetrainingdatasetislimitedtoImageNet-1kandUCF-101.
+Scalingtheproposedmodeltolarger-scalevisualcontentsremainsaninterestingproblemtostudy.
+I BroaderImpacts
+Thevideocompressionapplicationillustratedinthepapermaybeusefultoreducethestorageand
+transmissioncostofvideodata. Also,theproposedvisualtokenizationmodelrunsmoreefficiently
+thanpriorones,resultinginpotentialenergysavings. Bothofthemwillultimatelybenefitsociety.
+3https://ffmpeg.org/
+20Figure7:ReconstructionresultsofBSQ-ViT(right)comparedtotheoriginalimage(left)andSDXL-VAE[14]
+(middle).ThethreeimagesaretakenfromCOCO2017valwhicharemorescene-centriccomparedtoImageNet
+datathatourmodelistrainedon.
+21BigGAN ADM BSQ-ViT+Masked-LM (Ours) Groundtruth
+Figure8: SampledgenerationresultsofBSQ-ViT+Masked-LM(secondcolumnfromleft)comparedto
+BigGAN[18](right),ADM[19](secondcolumnfromright)andtheoriginalimages(left). Classesare1:
+goldfish,279:arcticfox,323:monarchbutterfly,417:balloon.
+J LicensesforExistingAssets
+J.1 Datasets
+ImageNetThetermsofserviceareavailableonhttps://image-net.org/about.
+COCOThetermsofserviceareavailableonhttps://cocodataset.org/#termsofuse.
+MCL-JCVCopyrightisavailableonthewebsitehttps://mcl.usc.edu/mcl-jcv-dataset/.
+UVG4ThedatasetislicensedunderaCCBY-NC3.0Deedlicense.
+J.2 EvaluationMetrics
+FIDscoreisbasedonthePyTorchre-implementation5. Theoriginalimplementation6isbasedon
+TensorFlow. BotharelicensedunderanApache-2.0License.
+4https://ultravideo.fi/dataset.html
+5https://github.com/mseitzer/pytorch-fid
+6https://github.com/bioinf-jku/TTUR
+22LPIPSisbasedontheimplementation7licensedunderaBSD-2-Clauselicense.
+SSIMandMS-SSIMarebasedonthePyTorchimplementation8licensedunderanMITlicense.
+GenerationMetrics(FID,InceptionScore,Precision,andRecall)arereportedusingaTensorFlow
+implementation9licensedunderanMITlicense.
+J.3 BaselineMethods
+DALL-EdVAE10islicensedunderaModifiedMITLicense.
+SD-VAE1.x11islicensedunderanMITLicense.
+SD-VAE2.x12islicensedunderanMITLicense.
+SDXL-VAE13islicensedunderanMITLicense.
+ADM14islicensedunderanMITLicense.
+MaskGIT15islicensedunderanApache-2.0License.
+CompressAI16islicensedunderaBSD-3-Clause-Clearlicense.
+FFmpeg is licensed under the GNU LGPL version 2.1 or later. For more detail, please refer to
+https://ffmpeg.org/legal.html.
+7https://github.com/richzhang/PerceptualSimilarity
+8https://github.com/VainF/pytorch-msssim
+9https://github.com/openai/guided-diffusion/tree/main/evaluations
+10https://github.com/openai/DALL-E
+11https://github.com/CompVis/latent-diffusion
+12https://huggingface.co/stabilityai/sd-vae-ft-mse
+13https://huggingface.co/stabilityai/sdxl-vae
+14https://github.com/openai/guided-diffusion
+15https://github.com/google-research/maskgit/tree/main
+16https://github.com/InterDigitalInc/CompressAI
+23

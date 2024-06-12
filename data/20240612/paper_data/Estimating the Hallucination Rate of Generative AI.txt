@@ -1,0 +1,1435 @@
+Estimating the Hallucination Rate of Generative AI
+AndrewJesson∗† NicolasBeltran-Velez*‡ QuentinChu‡ SwetaKarlekar‡
+JannikKossen§ YarinGal§ JohnP.Cunningham† DavidBlei†‡
+Abstract
+Thisworkisaboutestimatingthehallucinationrateforin-contextlearning(ICL)
+withGenerativeAI.InICL,aconditionalgenerativemodel(CGM)isprompted
+withadatasetandaskedtomakeapredictionbasedonthatdataset. TheBayesian
+interpretationofICLassumesthattheCGMiscalculatingaposteriorpredictive
+distributionoveranunknownBayesianmodelofalatentparameteranddata. With
+thisperspective,wedefineahallucinationasageneratedpredictionthathaslow-
+probabilityunderthetruelatentparameter. Wedevelopanewmethodthattakesan
+ICLproblem—thatis,aCGM,adataset,andapredictionquestion—andestimates
+theprobabilitythataCGMwillgenerateahallucination. Ourmethodonlyrequires
+generatingqueriesandresponsesfromthemodelandevaluatingitsresponselog
+probability.Weempiricallyevaluateourmethodonsyntheticregressionandnatural
+languageICLtasksusinglargelanguagemodels.
+1 Introduction
+Thisworkisaboutestimatingthehallucinationrateforin-contextlearning(ICL).InICL,wefeed
+adatasettoaconditionalgenerativemodel(CGM)andaskittomakeapredictionbasedonthat
+dataset[1,2]. Thispracticeisusefulbecauseitallowsustousepre-trainedmodelstosolveproblems
+thattheymaynothavebeenexplicitlyoptimizedfor. Forexample,ICLcanimprovetheprediction
+accuracyoflargelanguagemodels(LLMs)forbenchmarktasksinmath,translation,andtimeseries
+prediction[3,4]. However,itisdifficulttounderstandtheerrorsaparticularICLapplicationmight
+make—intheterminologyofGenerativeAI,sucherrorsarepoeticallycalledhallucinations[5].
+WedevelopanewmethodthattakesanICLproblem—thatis,aCGM,adataset,andaprediction
+question—andestimatestheprobabilitythatitwillgenerateahallucinationasasolution. Figure1a
+showsanICLproblemwithnewssnippetsclassifiedasWorld,Sports,Business,orScience[6],where
+thelastsnippet’scorrectanswerisSports. Figure1bdisplaysresponsesgeneratedbyLlama-2-7B,
+with25%incorrect.
+ThemainideaistotakeaBayesianperspectiveofICL,wherebyweassumethattheCGMissampling
+fromaposteriorpredictivedistributionoveran(unknown)Bayesianmodelofalatentparameter
+anddata[7,8]. Wecanthendefinetheposteriorhallucinationrate(PHR)underthismodel,which
+conditionsontheobserveddata(here,the"context"). Finally,weshowhowtoestimatetheposterior
+hallucinationrateusingthepredictivedistributionofaCGM.
+Relatedwork.Hallucinationpredictionandmitigationisanactiveareaofresearch[9–30].Thiswork
+ismostcloselyrelatedtoasubsetofmethodsbasedonuncertaintyquantification[31–38].Particularly
+thosemethodsthataimtopredicthallucinationsbasedonuncertaintyaboutthemeaningofgenerated
+responses[33,34,36]. Unlikethelattermethods,thePHRdoesnotrequireexternalinformationfrom
+∗Denotesequalcontribution.Correspondenceto{adj2147,nb2838}@columbia.edu.†DepartmentofStatis-
+tics,ColumbiaUniversity.‡DepartmentofComputerScience,ColumbiaUniversity.§OATML,Departmentof
+ComputerScience,UniversityofOxford.
+Preprint.Underreview.
+4202
+nuJ
+11
+]GL.sc[
+1v75470.6042:viXraInput: This week’s schedule TODAY’S GAMES Division 1 GREATER BOSTON --Arlington at Malden 6:30...
+Label: Sports
+Input: Putting Nature on the Pill Wildlife managers are looking to contraception as a way to control...
+Label: Science
+Input: Error of Judgment The FBI alleges that a veteran U.S. diplomat met with agents from Taiwan...
+Label: World
+Input: Sears and Kmart to Merge After much speculation, two discount giants move to create third...
+Label: Business
+Input: Defeat for GB canoeists British canoeists Nick Smith and Stuart Bowman are out of the men’s C2...
+Label:
+(a)Anin-contextlearningdataset.
+Sports, Olympics, Other, Sports, Sports, Sports, Sports, Sports, Sports, Sports, Sports, Olympics, Sports,
+Athletics, Sports, Entertainment, Sports, Sports, Sports, Sports, Olympics, Sports, Sports, Sports
+(b)Generatedresponses
+Figure1: Anexampleofanin-contextdatasetandgeneratedresponseexamplesforthelastlabel.
+Thecorrectresponse,"Sports",isgiveningreenandwronganswersaregiveninpurple.
+auxiliaryclassifiersandisapplicablebeyondlanguagetasks. Ourapproachisenabledbysampling
+ICLdatasetcompletionsfromthepredictivedistribution,whichwasfirstexploredinthecontextof
+sequentialmodelsbyFongetal.[39]. ExtensionstovariousCGMsareanactiveareaofresearch
+[40, 41]. Notably, Falck et al. [41] studies the hypothesis that ICL performs Bayesian inference.
+Itproposesamethod,whichissimilartoours,totestthathypothesis,anditpresentsseveralICL
+problemswherethehypothesisdoesnothold.
+Contributions.InSection2,weintroducetheposteriorhallucinationrateforBayesianCGMs,prove
+thattheitcanbecomputedbysamplingfromthepredictivedistribution,andprovideafinite-sample
+estimator for CGMs that only further requires evaluating the log probabilities of responses. In
+Section3,weempiricallyevaluateourmethods. WestudythePHRestimatorwithsyntheticdatato
+demonstratethatitcanaccuratelypredictthetruehallucinationrate. Wethenstudyourmethodson
+naturallanguageICLproblemswithpre-trainedCGMsfromtheLlama-2family[42]anddemonstrate
+thatthePHRestimatorcanbeusedtogiveaccurateestimatesoftheempiricalerrorrate.
+2 Theposteriorhallucinationrateandhowtoestimateit
+Inthissection,wereviewthebasicsofconditionalgenerativemodels(CGMs). Wedefinein-context
+learning(ICL)anddiscusstheBayesianperspective. Wedefinehallucinationsandhallucinationrates.
+Finally,weshowhowtoestimatethehallucinationrategivenanICLproblemandaCGM.
+Conditionalgenerativemodelsandin-contextlearning. Aconditionalgenerativemodel(CGM)
+isasequentialmodeloftheformp (t|(t )n)whereθrepresentstheparametersofthemodelandt
+θ i 1 i
+aretheelementsoverwhichthedistributionisdefined. Ifthesupportofeachconditionaldistribution
+isoverlinguisticunitsandthesizeofθislarge,thesemodelsareknownaslargelanguagemodels
+(LLMs). WefocusonLLMs,butourmethodsareapplicabletomanyconditionalgenerativemodels.
+Conditionalgenerativemodelsoversequencesaremostcommonlyimplementedthroughsequential
+neural network architectures called Transformers [43]. The parameters θ are set by performing
+stochasticmaximizationofthemodellikelihoodoveratrainingdatasetD ={(tj)n}m ,whereiis
+i 1 j=1
+theindexoverelementsofasequenceandj istheindexoversequences. Theresultinggenerative
+modelapproximatesthedistributionofsequencesofdatainthetrainingdatasetD.
+An in-context learning (ICL) problem is a tuple (p ,D ,x) containing a model p , a dataset
+θ n θ
+D , and a query x. The dataset, or "context", is a sequence of n examples, D = (x ,y )n =
+n n i i 1
+((x ,y ),...,(x ,y )). Foranewquery,x,themodelispromptedwiththequeryxandcontext
+1 1 n n
+(x ,y )ntogeneratearesponseaccordingtop (y|(x ,y )n,x).
+i i 1 θ i i 1
+ICLandBayesianinference. OneperspectiveonICLconnectsittoBayesianstatistics[7,8]. This
+perspectiveassumesthatthereisajointdistributionp overallsequencesofqueryandresponse
+ICL
+pairsD . Thekeyideaisthatthisdistributioncanberepresentedas
+n
+(cid:90) n
+(cid:89)
+p (D )= p ((x ,y )|f)dP (f), (1)
+ICL n ICL i i ICL
+i=1
+2wheref isalatentmechanismthatdetermineswhichtaskisbeingperformed. Further,weassume
+thatthepre-trainedlanguagemodelp approximatestheposteriorpredictivedistributionunderp ,
+θ ICL
+p (y |x ,D )≈p (y |x ,D ) (2)
+θ n+1 n+1 n ICL n+1 n+1 n
+(cid:90)
+= p (y |x ,f)dP (f |D ). (3)
+ICL n+1 n+1 ICL n
+Underthisassumption,ICLwithanLLMisaformofimplicitBayesianinference[8]. Equation(1)
+isusuallyjustifiedbydeFinetti-styleargumentsbasedonexchangeability[44],whileEquation(2)
+mustbeassumed. WediscussthisfurtherinAppendixB.1.
+We now show how adopting this approach will allow us to construct and estimate a posterior
+hallucinationrate: theprobabilitythatageneratedresponseyfromp toaqueryxwillbeinan
+θ
+unlikelyregionaccordingtothe“true”latentmechanismf.
+Beforewecontinue,weestablishournotationandterminologythusfar. Weusethetermmechanism
+to denote a generating process f belonging to a set F, and let X ×Y be a set of query-response
+pairs (x,y). We use F,X,Y to denote random variables where appropriate and f,x,y to denote
+particularinstantiationsoftheserandomvariables. Weassumeadistributionp(f)overF andthat
+f indexesasetofdistributionsoverquery-responsepairs,p(x,y | f). Theseelementsallowusto
+definethejointdistributionp(f,(x ,y )n)andposteriordistributionsp(f |(x ,y )n). Moreover,they
+i i 1 i i 1
+afforddefinitionofposteriorpredictivedistributionsoverresponsesp(y | (x ,y )n,x), examples
+i i 1
+p(x,y |(x ,y )n),andsequencesofexamplesp(x ,y ,...,x ,y |(x ,y )n). Weuse
+i i 1 n+1 n+1 n+k n+k i i 1
+D to denote the dataset of examples (x ,y )n. For clarity, we use p whenever we refer to the
+n i i 1 θ
+distribution of the CGM and p with no subscript when referring to the probability of the “true”
+generatingprocess. Thiscanbep oranyotherprobabilitydistributionthatfollowsEquation(1).
+ICL
+2.1 Hallucinationsandtheposteriorhallucinationrate
+UsingtheideasofCGMsandICL,wenowdefinehallucinationsandthehallucinationrate.
+First,imagineasettingwhereweobserveatruemechanismf⋆. Foraqueryx,whatvaluesofywould
+weconsiderhallucinations? Asimpleideaistocallhallucinationsthosevaluesofythatareunlikely
+tobegeneratedfromp(y|x,f⋆). Thismotivatesthefollowingtwodefinitions.
+Definition1. Wedefinea(1-ϵ)–likelysetoff andxasanysetAsuchthatP(Y ∈A|f,x)≥1−ϵ.
+Definition2. Forfixed(1-ϵ)–likelysetsA(f,x),wecallavalueyahallucinationwithrespecttox
+andf,ify∈/ A(x,f).
+As a simple intuitive example, assume that the true generative model of (x ,y )n is a Bayesian
+i i 1
+linear model with a known standard deviation σ. Specifically, F ∼ p(f), X ∼ N(0,I ), and
+i n
+Y ∼ N(F⊤X ,σ2), where F,X ∈ Rd and Y ∈ R. If ϵ = 0.05, we could choose the interval
+i i i i
+betweenthe2.5and97.5percentilesofthedistributionN(f⋆⊤x,σ2)asour(1-ϵ)–likelysetandcall
+everythingoutsideofthisintervalahallucination.
+Inpractice,wedonotobservef⋆. Rather,wemakepredictionswithp(y|x,D ). Weask: Atwhat
+n
+ratearewehallucinatingwhenwemakepredictions? Theansweristhetruehallucinationrate.
+Definition3. Wedefinethetruehallucinationrate(THR),ortheprobabilityofsamplingahallucina-
+tiongiventruemechanismf⋆andqueryxby,
+(cid:90)
+h⋆(f⋆,x):= 1{y∈/ A(f⋆,x)}dP(y|D ,x). (4)
+ϵ n
+Thisvalueishigherwhentheposteriorpredictivep(y | D ,x)placeshighprobabilityinregions
+n
+unlikelyunderp(y|f⋆,x),orverylowiftheposteriorpredictiveputsalotofmassonareaslikely
+underp(y|f⋆,x). Weexpectthevaluetobehigherwhenwedon’thaveenoughexamplesandlower
+asthedatasetsizeincreases.
+Of course, we do not observe the true mechanism f⋆. But the dataset ("context") D provides
+n
+evidence for it, as summarized in the posterior p(f | D ). With this distribution we define the
+n
+posteriorhallucinationrate,whichisthecenterpieceofthiswork.
+Definition4. Wedefinetheposteriorhallucinationrate(PHR)as
+(cid:90)(cid:90)
+h (x):=E[h⋆(F,x)|D ]= 1{y∈/ A(f,x)}dP(y|D ,x)dP(f |D ). (5)
+ϵ ϵ n n n
+3Inlinearregression,thePHRistheprobabilitythatywilllandoutsideofthehighprobabilityinterval
+off andxwhensamplingF∼p(f |D )andY ∼p(y|D ,x).
+n n
+Hereweremindthereaderthatwestillcannotcalculatep(f |D )fromtheCGM.Butwewilladdress
+n
+thisprobleminthenextsection.Beforethen,asafinaldetail,wediscusshowtoconstruct(1-ϵ)–likely
+sets. Ideally,wewouldlikethesesetstobeconstructedsothatwecancheckify ∈A(f,x)easily.
+Otherwise,itwouldbehardtoknowifaresponseyisahallucination.
+WedefineastatisticS thatmapseachvalueinY toavalueinR. WethendefineQ (f,x)astheϵ
+ϵ
+quantileofthisstatisticunderp(y|f,x). Becauseitisaquantile,
+P(Y ∈{y|S(y)≥Q (f,x)}|f,x)≥1−ϵ.
+ϵ
+Thus,A(f,x)={y|S(y)≥Q (f,x)}isan(1-ϵ)–likelyset.
+ϵ
+OnechoiceofS thatworksislogp(y|x,f). Thus,movingforward,welet
+A(f,x)={y :logp(y|x,f)≥Q (f,x)} (6)
+ϵ
+andwereplaceallstatements1{y∈/ A(f,x)}with1{logp(y|f,x)<Q (f,x)}inthedefinitions
+ϵ
+ofahallucination,thetruehallucinationrate,andtheposteriorhallucinationrate.
+2.2 Calculatingtheposteriorhallucinationratefrompredictivedistributions
+OurgoalistocalculatetheposteriorhallucinationratefromDefinition4. However,someconditional
+generativemodelslikeLLMsonlyprovideanapproximationtothepredictivedistributionp(x,y|D )
+n
+ratherthantheposteriorovermechanismsp(f |D )ortheresponselikelihood,p(y|x,f). Herewe
+n
+showhowtocalculatetheposteriorhallucinationrateunderthisconstraint.
+OurmethodrestsonDoob’stheorem[45]: Givenafunctionh:F (cid:55)→R,supposewedrawavalue
+Ffromp(f)andcomputeh(F). Asn → ∞,thisisequivalenttofirstdrawing(X ,Y )n andthen
+i i 1
+computingE[h(F)|(X ,Y )n]. Westatethisresultbelow.
+i i 1
+Theorem1(Doob’sInformal). ForF∈F,(X ,Y )∈X ×Y,if(F,(X ,Y )∞)isdistributedsuch
+i i i i 1
+thatF∼p(F)andX ,Y ∼p(x,y|f)then,undergeneralconditions,theposteriormeanofh(F)
+i i
+given(X ,Y )∞isalmostsurelyequaltoh(F),asthenumberofsamplesgoestoinfinity. Thatis,
+i i 1
+lim E[h(F)|(X ,Y )n]=h(F) a.s.
+i i 1
+n→∞
+This theorem helps us transform statements about h(F) to statements about E[h(F) | (x ,y )n],
+i i 1
+whichonlydependson(x ,y )n. Thus,wecanproceedwithoutdirectaccesstop(f |D ).
+i i 1 n
+The theorem below uses Theorem 1 and shows how to compute the posterior hallucination rate
+withoutp(f |D ). TheproofisinAppendixC.
+n
+Theorem2(PHRviaPosteriorPredictive). AssumethattheconditionsofTheorem1holdforFand
+X,Y,then,
+(cid:90)(cid:90)
+h (x)= 1{logp(y|x,f)<Q (f,x)}dP(y|D ,x)dP(f |D )
+ϵ ϵ n n
+(cid:90)(cid:90) (cid:110) (cid:111)
+= 1 lim logp(y|(x i,y i)N 1 ,x)<Q ϵ((x i,y i)∞ 1 ,x) dP(y|D n,x)dP((x,y)∞ n+1 |D n),
+N→∞
+whereQ ((x ,y )∞,x)istheϵ-quantileoflim logp(Y | x,(x ,y )N)underlim p(Y |
+ϵ i i 1 N→∞ i i 1 N→∞
+x,(x ,y )N).
+i i 1
+Theorem2suggestsanaturalfiniteapproximationtothePHRwhereweclipalllimitsintheexpression
+toasufficientlylargeN. Usingthisapproximation,thefiniteversionofthetruehallucinationrateis
+(cid:90)
+h⋆ ((x ,y )N,x):= 1(cid:8) logp(y|(x ,y )N,x)<Q ((x ,y )N,x)(cid:9) dP(y|D ,x) (7)
+ϵ,N i i 1 i i 1 ϵ i i 1 n
+whereQ ((x ,y )N,x)isdefinedanalogouslytoitsinfinitecounterpart,andthefiniteversionofthe
+ϵ i i 1
+posteriorhallucinationrateis
+(cid:90)
+h (x):= h⋆ ((x ,y )N,x)dP((x ,y )N |D ). (8)
+ϵ,N ϵ,N i i 1 i i 1 n
+4Withh (x)andh⋆ ((x ,y )N,x)weachievetwogoals: first,weavoidusinganydistributionon
+ϵ,N ϵ,N i i 1
+f,andsecond,weexpressallprobabilitiesintermsoffinitesequences.
+Algorithm1PHR(x,D ,p ,M,N) Algorithm2THR(x,D ,D,p ,K,N)
+n θ n θ
+Require: Query x, context D = (x ,y )n, Require: Queryx,extendedcontextD,original
+n i i 1
+CGMp ,NumberofMCsamplesM,Max contextD ,CGMp ,NumMCsamplesK.
+θ n θ
+contextlengthN. 1: //Estimate quantiles
+2: S ←{}
+1: fori←1toMdo 3: fori←1toKdo
+2: // Sample imagined context 4: y i ∼p θ(y|x,D)
+3: D ←D n 5: S ←S∪{logp θ(y i |x,D)}
+4: forj ←n+1toN do
+6: Q(cid:98) ←ϵquantileofS
+5: (x j,y j)∼p θ(x,y|D)
+7: // Percentage of hallucinations
+6: D ←D∪(x j,y j)
+8: fori←1toKdo
+7: // True hallucination rate 9: y i ∼p θ(y|x,D n)
+8: h⋆
+ϵ,N,i
+←THR(x,D n,D,p θ,M,N)
+10: h ϵ,i
+←1(cid:110)
+logp θ(y i
+|D,x)<Q(cid:98)(cid:111)
+9: return M1 (cid:80)M i=1h⋆ ϵ,N,i 11: return K1 (cid:80)K i=1h ϵ,i
+2.3 EstimatorsfortheposteriorhallucinationratewithCGMs
+Finally,wederiveanestimatorforEquation(8). Ourestimatorreplacesp bypwherepossibleand
+θ
+usesMonteCarloestimatestoapproximateintegralsandquantiles. Algorithm1estimatestheouter
+integralinEquation(8);itssubroutine,inAlgorithm2,estimatesEquation(7).
+In the context of an CGM, Algorithm 3 can be understood intuitively and without appealing to
+Bayesianstatistics. First,wesampleN −nnewqueryresponsepairsaccordingtothepredictive
+p (x ,y ,··· ,x ,y |D )(Alg.3,lines2-6). Thiscanbethoughtofasaskingthemodelto
+θ N N n+1 n+1 n
+imaginefuturepairsthatitwillreceive.
+Wethensampleanewanswery fromp(y|x,D )(Alg.2,line9)andask: Isthislikelyresponse
+new n
+forxunderthetaskimpliedbyD =(x ,y ,...,x ,y )(Alg.3,line10)? Ifthemodelissureabout
+1 1 N N
+thetaskitisperforming, thenthepair(x,y )willbecoherentwith(x,y)N . Ifthemodelis
+new n+1
+unsure,theny willnotbecoherentwith(x,y)N . Inpractice,thelengthoftheresponseycan
+new n+1
+vary,inwhichcaseweaveragethelog-likelihoodcalculationsinLines5and10ofAlgorithm2over
+thelengthoftheresponse.
+Forfurtherdiscussion, AppendixB.1presentstheformalassumptionsneededforthetheoretical
+justificationofthemethod.
+3 EmpiricalEvaluation
+WeempiricallyevaluatetheaccuracyandapplicabilityofthePosteriorHallucinationRate(PHR)
+estimator. WefirstexaminewhetherthePHRestimatoraccuratelypredictstheTrueHallucination
+Rate (THR). We design a synthetic regression experiment for which we can calculate the THR.
+For in-distribution ICL regression tasks, we find the PHR is a reliable predictor of the THR and
+demonstrateitsrobustnesstothechoiceofϵparametervalue. Moreover,weobservethattheaccuracy
+ofthePHRestimatorishigherforsmallerICLdatasetsizesn.
+WethenevaluatethePHRestimatoronnaturallanguageICL,usingpre-trainedlargelanguagemodels
+(LLMs). CalculatingtheTHRisnotfeasible,soweinvestigatetwoalternativequestions: (1)does
+thePHRestimatoraccuratelypredictthemodelhallucinationrate(definedbelowinSection3.2),
+and(2)canthePHRaccuratelypredicttheempiricalerrorrate? WefindthatthePHRestimator
+reliably predicts the model hallucination rate, regardless of model performance on a given ICL
+task. Moreover, the estimator remains robust to different ICL dataset sizes and settings of the ϵ
+parameter. Additionally,thePHRestimatoraccuratelypredictstheempiricalerrorrateofgenerated
+responses when ϵ is set to values greater than 0.5. Specifically, its accuracy is influenced by the
+LLM’sperformanceonthein-contextlearningtaskasthenumberofin-contextexamplesincreases. It
+5achieveshigheraccuracywhentheLLMperformsbetterthanarandomclassifierandloweraccuracy
+whenitperformsroughlyequaltorandom.
+3.1 Syntheticregressiontasks
+WeevaluatethePHRinasettingwhereweknowthetruemechanismf∗ sothatwecancompare
+directlyitagainstthetruehallucinationrate(THR).WeimplementaCGMtrainedonsequencesof
+syntheticregressionproblemsandcomparethePHRestimatesagainsttheTHRonnewregression
+tasks.
+Figure2: In thefirstandthird panes, we seetheneuralprocess’sgenerated outcomesforn = 2
+andn = 100. Theblueregionisthetrue(1-ϵ)–likelyset, whilethepurpleisthelikelysetwhen
+conditionedonthebluedatapoints. Thesecondandfourthpanesarethecorrespondingmeasuresof
+thePHRandTHRacrossthedomain.
+Setup. Weimplementamodelwithasetupsimilartoaconditionalneuralprocess[46]bymodifying
+theLlama2architecture[42]tomodelsequencesofcontinuousvariables. Wesamplealargeset
+of query-response pairs (x, y) per random re-initialization of the neural network. We define the
+(1-ϵ)–likelysetwithϵ=0.05suchthataresponseyisahallucinationifitfallsoutsideofthe95%
+confidence interval of a given sampled distribution conditioned on x. Training and test data are
+generatedovernon-overlappingsetsofgeneratedsequences. Exampletrainingdatasetsareshown
+inFigure11a. Exampledatasetsgeneratedbythefitmodelwheninitializedwithasinglerandom
+queryxareshowninFigure11b. FullmodelanddatasetdetailsaregiveninAppendicesE.1andF.1,
+respectively.
+(a)PHRandTHRvs.n (b)Calibration:THRvs.PHRagainstdifferentnumbersofcontextexamples
+Figure3: Syntheticdata: (a)TheTHRandPHRreducesignificantlyasthenumberofcontextual
+examplesnincreases. (b)Calibrationevaluationoftheposteriorhallucinationrateagainstthetrue
+probabilityofhallucinationgivenϵ=0.05.
+Results. The first and third panes of Figure 2 show the model’s generated outcomes for n = 2
+andn = 100. Theblueregionrepresentsthetrue(1-ϵ)–likelysetfortheresponsedistributionof
+aspecificrandomReLUneuralnetwork. Thepurpleregionrepresentsthemodel’s(1-ϵ)–likelyset
+whenconditionedonthebluedatapointsandaqueryvaluexinthedomain[-2,2]. Asmorecontext
+examplesareprovided,confidenceintervalsshrink,andresponsesyaremorelikelytofallwithinthe
+blueregion.
+ThesecondandfourthpanesofFigure2showthetrueprobabilityofhallucinationandPHRfor
+x in the domain [-2, 2] for two settings of n. We set N −n to 100 and M to 40. On the left,
+dips in PHR and hallucination probability at x = 0 and x = 1 correspond with the ground truth
+in-contextexamples. Ontheright,withlargern,bothPHRandhallucinationprobabilityarelow
+6acrossallxvalues. Notably,PHRandhallucinationprobabilityaligncloselythroughoutthedomain.
+InAppendixG.1,weshowthatthesefindingsholdacrossvarioussettingsoftheϵparametervalue.
+InFigure3a,weplotthePHRandtrueprobabilityofhallucinationagainstincreasingcontextlengths,
+averagedover200randomtestfunctions. AlthoughPHRalignswellwithTHR,itunderestimates
+THR, particularly as the number of examples increases. To understand this better, we examine
+calibrationplotsbetweenPHRandTHRfordifferentnumbersofcontextualexamplesinFigure3b.
+Forsmallnumbersofcontextualexamples,PHRcloselymatchesTHR,whichisencouragingsinceit
+iscrucialtocapturethetrueprobabilityofhallucinationwhenfewexamplesarepresentanderrors
+aremorelikely. Theseresultsalsosupportourassumptionsaboutrecoveringthetargetestimand
+throughDoob’sTheorem.
+TounderstandthesourceoftheunderestimationinthePHRestimator,weconsiderfourpotential
+sourcesofapproximationerror. First,thedistributionofin-contextexamplesmaynotbeexchange-
+able due to positional embeddings from the Llama-2 architecture, but this is likely mitigated by
+trainingonrandomlypermutedsubsets. Second,Monte-Carloestimatorerrorscouldcontribute,but
+underestimationpersistsevenwithincreasedsamplesizes(M orK). Third,thefinitenumberof
+generatedexamples(N −n)couldcauseerror,butincreasingthisnumberbeyond100showslittle
+biasreduction. Finally,discrepanciesbetweenthelearnedCGMdistributionp (y|D ,x)andthe
+θ n
+truedistributionp(y|D ,x)canleadtounderestimation,asevidencedbydifferencesinconfidence
+n
+intervalsaroundxvaluesof-2and1.5inFigure2. Thisdiscrepancylikelygrowswithnbecause
+accuratelymodelingp(y|f⋆,x)reachesthecurrentlimitsofin-contextlearning. Figure3ashows
+thisdiscrepancystabilizeswith200examples,andFigure3bshowsPHRbecomesalessaccurate
+predictorofthetruehallucinationrateasthenumberofexamplesgrows.ImprovingLLMarchitecture
+ortrainingprocedurescouldenhancepredictivedistributionfidelityandPHRestimatesascontextual
+examplesincrease.
+3.2 Naturallanguagetasks
+Figure4: Llama-2-7b: ErrorRate(Topgreencurves)andResponseEntropy(Bottombluecurves)
+onLLMin-contextlearningtasks. Greydashedlinesrepresenttheerrorrateandentropyofarandom
+classifieroverthesetofvalidresponses.
+Hereweevaluatetheposteriorhallucinationrateestimatoroncommonnaturallanguagein-context
+learningtasksusingtheLlama-2familyofLLMs[42]. Aswenolongerhaveaccesstothetruef⋆in
+thissetting,weproposeanewmetricdefinedbelowtermedModelHallucinationProbability(MPH)
+thatweevaluatethePHRagainst. Wealsoevaluateagainsttheempiricalerrorrategivengroundtruth
+responses.
+Setup. Weconsidertasksdefinedbysixdatasets: StanfordSentimentTreebank(SST2)[47],Subjec-
+tivity[48],AGNews[6],MedicalQP[49],RTE[50],andWNLI[51]. Wefilteroutanyqueriesof
+lengthlongerthan116tokens. Fulldescriptionsofthesedatasetsandpre-processingaregivenin
+AppendixF.2.
+ToimplementICLforagivendataset,wesamplearesponsebalancedtrainingsetofquery/response
+pairsD =(x ,y )n. WegeneratearesponseyfromthepredictivedistributiongivenbyaLlama-
+train i i 1
+2 model p (y | D ,x ). We structure the prompt by adding strings to distinguish between
+θ train test
+inputsandlabels. AnexamplepromptfromtheSubjectivitydatasetisshowninAppendixE.2.
+7Figure 4 shows the error rate (top) and response entropy (bottom) of Llama-2-7b. Both metrics
+decreaseandsaturatewithlongercontextlengths. ForSST2,Subjective,andAGNews,themodel
+performs better than random, indicating it can generalize to these tasks ("in-capability"). For
+MedicalQP,RTE,andWNLI,errorratesareclosetorandom,indicatingpoorgeneralization("out-
+of-capability"). Theposteriorhallucinationrateestimatorisdesignedforin-capabilitytasksandis
+ill-definedforout-of-capabilitytasks.
+Evaluationmetrics. Itisachallengetoassesstheaccuracyofthetheposteriorhallucinationrateon
+LLMtasks. Althoughwehaveagroundtruthlabeledresponseforeachquery,wedonotknowthe
+groundtruthf⋆,andthereforewealsodon’thaveaccesstotheϵ-likelyset.
+Further, for every query example from the dataset x , we only have access to one response y.
+test
+Becauseofthis,anyambiguityinthetrueanswerforagivenqueryresultsintheempiricalerrorrate
+K
+1 (cid:88)
+E(cid:98)(x test,y test;θ):=
+K
+1{y
+i
+̸=y test}, y
+i
+∼p θ(y|x test,D train), (9)
+i=1
+being a flawed metric for evaluating whether posterior hallucination rate operates as intended.
+Moreover,evenifadatasetcontainednoambiguousqueries,theposteriorhallucinationratewillstill
+bevulnerabletoestimationerrorthatstemsfromadiscrepancybetweenthepredictivedistribution
+oftheLLMandthepredictivedistributionimpliedbythetask. Therefore,weproposethemodel
+hallucinationrate(MHR)asacomplementarymetric
+K
+MHR(x test,D eval;θ):= K1 (cid:88) 1(cid:110) logp θ(cid:0) y
+i
+|x test,D train∪D eval(cid:1) <Q(cid:98)e ϵval(cid:111) ,
+i=1
+wherey ∼p (y|x ,D ),K isthenumberofresponsesamplesand
+i θ test train
+Q(cid:98)e ϵval :=Q ϵ(cid:18)(cid:110) logp θ(cid:0) y
+j
+|x test,D train∪D eval(cid:1)(cid:111)K (cid:19) , y
+j
+∼p θ(y|x test,D train∪D eval).
+j=1
+TheMHRassumesthatthemodelposteriorp istrue,andestimatestheprobabilityofhallucination
+θ
+whenweappendthetrainingexamplesD withN −nadditionalgroundtruthexamplesD .
+train eval
+TheposteriorhallucinationratemarginalizesanequivalentmetricoverM samplesofN−ngenerated
+examples. Iftheestimatorisoperatingasexpected,thenitshouldpredicttheMHRwell. Foreach
+taskandcontextlengthn∈[2,4,8,16,32]wesample50randomtrainingdatasetsD ,50random
+train
+evaluationdatasetsD ,and10randomtestsamples. Wereportthemeansquarederror(MSE),
+eval
+regressioncoefficientβ,p-value,andcoefficientofdetermination(R2)oftheposteriorhallucination
+rateasalinearpredictoragainstboththeerrorrateandMHRoverall50x10testsamplesateach
+contextlength.
+Figure5: MHRandPHRagainstnumberofin-contextexamplesforLlama-2-7b. Wesetϵ=0.05,
+andthePosteriorHallucinationRateaccuratelytrackstheModelHallucinationProbabilityforall
+tasks(SST2,Subjective,AGNews,MedicalQP,RTE,andWNLI).Thisobservationholdsacross
+differentsettingsofϵ,asweshowinFigure17.
+Results. WereportresultsforLlama-2-7b. WesetN −n=5,M =10,andK =50. Figure5plots
+theMHRandestimatedposteriorhallucinationrateagainstthenumberofin-contextexampleswith
+ϵ=0.05. ItshowsthattheposteriorhallucinationrateisagoodestimatoroftheMHR.Weshowthat
+thistrendholdsforalternativesettingsofϵinFigure17ofAppendixG.
+Figure6plotstheempiricalerrorrateandestimatedposteriorhallucinationrateagainstthenumber
+ofin-contextexampleswithϵ=0.75. Forthein-capabilitytasks(SST2,Subjective,andAGNews),
+itshowsthattheposteriorhallucinationrateaccuratelytrackstheerrorratewhenϵissettoahigh
+value. Fortheout-of-capabilitytasks(MedicalQP,RTE,andWNLI),weobservethatthisisnotthe
+caseasexpected. WeablatetheϵparameterandreportresultsinFigure18ofAppendixG.
+8Figure6: ErrorrateandPHRagainstnumberofin-contextexamplesforLlama-2-7b. Whenweset
+ϵhigh(e.g., >0.5), weseethatthePHRaccuratelytrackstheEmpiricalErrorRatefortheSST2,
+Subjective,andAGNewsdatasets. However,forMedicalQPtheentailmenttasks,(RTEandWNLI),
+thePosteriorHallucinationRateisaconsiderablyworseestimatorasthesetasksareout-of-capability
+forLlama-2-7b.
+4 Discussion
+Inthiswork, wehavepresentedanewmethodforpredictingthehallucinationrateofin-context
+learningwithconditionalgenerativemodels. Weprovideatheoreticaljustificationforourmethod. In
+syntheticexperiments,wedemonstratethatthePHRestimatoryieldsaccurateestimatesofthetrue
+probabilityofhallucination. Withpre-trainedLLMs,wedemonstratethatitisvaluableforpredicting
+theerrorrateof“in-capability”naturallanguageICLtasks.
+High-fidelityestimationofthePHRreliesontwostrongassumptions. Thefirstisthatthein-context
+learningproblemdataadmitsadeFinettirepresentation;thesecondisthattheCGMp isafaithful
+θ
+estimate of the true distribution p . While our results offer support for the adoption of these
+ICL
+assumptions,wealsodemonstratethatevenminordivergencesbetweenp andp canresultin
+θ ICL
+underestimation. Falcketal.[41]alsoreportinstanceswherepropertiesofthepredictivedistribution
+of a pre-trained LLM significantly diverge from those of the true Bayesian posterior predictive
+distributionforsyntheticICLtasks. ThesefindingshighlightachallengeinusingPHRasadecision
+support tool and point to future work on improving the robustness of the PHR estimator or the
+optimizationofconditionalgenerativemodelsforin-contextlearning.
+5 Acknowledgements
+TheauthorswouldliketothankAmirFeder,AlessandroGrande,AchilleNazaret,YookoonPark,
+Kathy Perez, Sebastian Salazar, Claudia Shi, Brian Trippe, Al Tucker, and Luhuan Wu for their
+reviews,feedback,andsupport.
+References
+[1] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsare
+few-shotlearners. Advancesinneuralinformationprocessingsystems,33:1877–1901,2020.
+[2] QingxiuDong,LeiLi,DamaiDai,CeZheng,ZhiyongWu,BaobaoChang,XuSun,Jingjing
+Xu,andZhifangSui. Asurveyonin-contextlearning. arXivpreprintarXiv:2301.00234,2022.
+[3] MachelReid,NikolaySavinov,DenisTeplyashin,DmitryLepikhin,TimothyLillicrap,Jean-
+baptisteAlayrac, RaduSoricut, AngelikiLazaridou, OrhanFirat, JulianSchrittwieser, etal.
+Gemini1.5: Unlockingmultimodalunderstandingacrossmillionsoftokensofcontext. arXiv
+preprintarXiv:2403.05530,2024.
+[4] AbdulFatirAnsari,LorenzoStella,CanerTurkmen,XiyuanZhang,PedroMercado,Huibin
+Shen, Oleksandr Shchur, Syama Sundar Rangapuram, Sebastian Pineda Arango, Shubham
+Kapoor,etal. Chronos: Learningthelanguageoftimeseries. arXivpreprintarXiv:2403.07815,
+2024.
+[5] JoshuaMaynez,ShashiNarayan,BerndBohnet,andRyanMcDonald. Onfaithfulnessand
+factuality in abstractive summarization. In Proceedings of the 58th Annual Meeting of the
+9AssociationforComputationalLinguistics,pages1906–1919,Online,July2020.Association
+forComputationalLinguistics.
+[6] XiangZhang,JunboZhao,andYannLeCun. Character-levelconvolutionalnetworksfortext
+classification,2016.
+[7] SamuelMüller,NoahHollmann,SebastianPinedaArango,JosifGrabocka,andFrankHutter.
+Transformerscandobayesianinference. InInternationalConferenceonLearningRepresenta-
+tions,2021.
+[8] Sang Michael Xie, Aditi Raghunathan, Percy Liang, and Tengyu Ma. An explanation of
+in-contextlearningasimplicitbayesianinference. InInternationalConferenceonLearning
+Representations,2021.
+[9] PhilipFeldman,JamesRFoulds,andShimeiPan. Trappingllmhallucinationsusingtagged
+contextprompts. arXivpreprintarXiv:2306.06085,2023.
+[10] Shuo Zhang, Liangming Pan, Junzhou Zhao, and William Yang Wang. Mitigating lan-
+guage model hallucination with interactive question-knowledge alignment. arXiv preprint
+arXiv:2305.13669,2023.
+[11] BaolinPeng,MichelGalley,PengchengHe,HaoCheng,YujiaXie,YuHu,QiuyuanHuang,Lars
+Liden,ZhouYu,WeizhuChen,etal. Checkyourfactsandtryagain: Improvinglargelanguage
+modelswithexternalknowledgeandautomatedfeedback. arXivpreprintarXiv:2302.12813,
+2023.
+[12] NouhaDziri,AndreaMadotto,OsmarZaïane,andAvishekJoeyBose. Neuralpathhunter: Re-
+ducinghallucinationindialoguesystemsviapathgrounding. arXivpreprintarXiv:2104.08455,
+2021.
+[13] LuyuGao,ZhuyunDai,PanupongPasupat,AnthonyChen,ArunTejasviChaganty,Yicheng
+Fan, Vincent Y Zhao, Ni Lao, Hongrae Lee, Da-Cheng Juan, et al. Rarr: Researching and
+revisingwhatlanguagemodelssay,usinglanguagemodels. arXivpreprintarXiv:2210.08726,
+2022.
+[14] XingxuanLi,RuochenZhao,YewKenChia,BoshengDing,ShafiqJoty,SoujanyaPoria,and
+LidongBing. Chain-of-knowledge: Groundinglargelanguagemodelsviadynamicknowledge
+adaptingoverheterogeneoussources. InTheTwelfthInternationalConferenceonLearning
+Representations,2023.
+[15] Neeraj Varshney, Wenlin Yao, Hongming Zhang, Jianshu Chen, and Dong Yu. A stitch in
+timesavesnine: Detectingandmitigatinghallucinationsofllmsbyvalidatinglow-confidence
+generation. arXivpreprintarXiv:2307.03987,2023.
+[16] DanSu,XiaoguangLi,JindiZhang,LifengShang,XinJiang,QunLiu,andPascaleFung. Read
+beforegenerate! faithfullongformquestionansweringwithmachinereading. arXivpreprint
+arXiv:2203.00343,2022.
+[17] Yung-Sung Chuang, Yujia Xie, Hongyin Luo, Yoon Kim, James Glass, and Pengcheng He.
+Dola: Decoding by contrasting layers improves factuality in large language models. arXiv
+preprintarXiv:2309.03883,2023.
+[18] Nayeon Lee, Wei Ping, Peng Xu, Mostofa Patwary, Pascale N Fung, Mohammad Shoeybi,
+andBryanCatanzaro. Factualityenhancedlanguagemodelsforopen-endedtextgeneration.
+AdvancesinNeuralInformationProcessingSystems,35:34586–34599,2022.
+[19] WeijiaShi,XiaochuangHan,MikeLewis,YuliaTsvetkov,LukeZettlemoyer,andScottWen-tau
+Yih. Trustingyourevidence: Hallucinatelesswithcontext-awaredecoding. arXivpreprint
+arXiv:2305.14739,2023.
+[20] SabrinaJMielke,ArthurSzlam,EmilyDinan,andY-LanBoureau. Reducingconversational
+agents’ overconfidence through linguistic calibration. Transactions of the Association for
+ComputationalLinguistics,10:857–872,2022.
+10[21] StephanieLin,JacobHilton,andOwainEvans. Teachingmodelstoexpresstheiruncertaintyin
+words. TMLR,2023. URLhttps://arxiv.org/abs/2205.14334.
+[22] Neil Band, Xuechen Li, Tengyu Ma, and Tatsunori Hashimoto. Linguistic calibration of
+languagemodels. arXivpreprintarXiv:2404.00474,2024.
+[23] SamuelMarksandMaxTegmark. TheGeometryofTruth: EmergentLinearStructureinLarge
+LanguageModelRepresentationsofTrue/FalseDatasets,2023.
+[24] AmosAzariaandTomMitchell. Theinternalstateofanllmknowswhenit’slying,2023.
+[25] CollinBurns,HaotianYe,DanKlein,andJacobSteinhardt. Discoveringlatentknowledgein
+languagemodelswithoutsupervision,2022.
+[26] KennethLi,OamPatel,FernandaViégas,HanspeterPfister,andMartinWattenberg. Inference-
+time intervention: Eliciting truthful answers from a language model. Advances in Neural
+InformationProcessingSystems,36,2024.
+[27] NinaRimsky,NickGabrieli,JulianSchulz,MegTong,EvanHubinger,andAlexanderMatt
+Turner. Steeringllama2viacontrastiveactivationaddition. arXivpreprintarXiv:2312.06681,
+2023.
+[28] Junyu Luo, Cao Xiao, and Fenglong Ma. Zero-resource hallucination prevention for large
+languagemodels. arXivpreprintarXiv:2309.02654,2023.
+[29] Niels Mündler, Jingxuan He, Slobodan Jenko, and Martin Vechev. Self-contradictory hal-
+lucinations of large language models: Evaluation, detection and mitigation. arXiv preprint
+arXiv:2305.15852,2023.
+[30] ShehzaadDhuliawala,MojtabaKomeili,JingXu,RobertaRaileanu,XianLi,AsliCelikyilmaz,
+andJasonWeston. Chain-of-verificationreduceshallucinationinlargelanguagemodels. arXiv
+preprintarXiv:2309.11495,2023.
+[31] Tianyi Zhang, VarshaKishore, Felix Wu, Kilian Q Weinberger, and Yoav Artzi. Bertscore:
+Evaluatingtextgenerationwithbert. InInternationalConferenceonLearningRepresentations,
+2019.
+[32] SauravKadavath,TomConerly,AmandaAskell,TomHenighan,DawnDrain,EthanPerez,
+NicholasSchiefer,ZacHatfieldDodds,NovaDasSarma,EliTran-Johnson,etal. Language
+models(mostly)knowwhattheyknow. arXiv:2207.05221,2022. URLhttps://arxiv.org/
+abs/2207.05221.
+[33] LorenzKuhn,YarinGal,andSebastianFarquhar. Semanticuncertainty: Linguisticinvariances
+foruncertaintyestimationinnaturallanguagegeneration. arXivpreprintarXiv:2302.09664,
+2023.
+[34] Zhen Lin, Shubhendu Trivedi, and Jimeng Sun. Generating with confidence: Uncertainty
+quantificationforblack-boxlargelanguagemodels. arXiv:2305.19187,2023.
+[35] JiuhaiChenandJonasMueller. Quantifyinguncertaintyinanswersfromanylanguagemodel
+andenhancingtheirtrustworthiness. OpenReview,2023.
+[36] MohamedElaraby,MengyinLu,JacobDunn,XueyingZhang,YuWang,andShizhuLiu. Halo:
+Estimationandreductionofhallucinationsinopen-sourceweaklargelanguagemodels. arXiv
+preprintarXiv:2308.11764,2023.
+[37] PotsaweeManakul,AdianLiusie,andMarkJFGales. Selfcheckgpt: Zero-resourceblack-box
+hallucination detection for generative large language models. In Conference on Empirical
+MethodsinNaturalLanguageProcessing,2023.
+[38] JeremyRCole,MichaelJQZhang,DanielGillick,JulianMartinEisenschlos,BhuwanDhingra,
+andJacobEisenstein. Selectivelyansweringambiguousquestions. ConferenceonEmpirical
+MethodsinNaturalLanguageProcessing,2023.
+11[39] EdwinFong,ChrisHolmes,andStephenGWalker. Martingaleposteriordistributions. Journal
+oftheRoyalStatisticalSocietySeriesB:StatisticalMethodology,85(5):1357–1391,2023.
+[40] HyungiLee, EungguYun, GiungNam, EFong, andJuhoLee. Martingaleposteriorneural
+processes. InTheEleventhInternationalConferenceonLearningRepresentations.International
+ConferenceonLearningRepresentations,2023.
+[41] FabianFalck,ZiyuWang,andChrisHolmes. Isin-contextlearninginlargelanguagemodels
+bayesian? amartingaleperspective. arXivpreprintarXiv:2406.00793,2024.
+[42] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,
+NikolayBashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Open
+foundationandfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023.
+[43] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,
+ŁukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. Advancesinneuralinformation
+processingsystems,30,2017.
+[44] Edwin Shields Hewitt and Leonard J. Savage. Symmetric measures on cartesian products.
+TransactionsoftheAmericanMathematicalSociety,80:470–501,1955. URLhttps://api.
+semanticscholar.org/CorpusID:53585081.
+[45] JosephLDoob. Applicationofthetheoryofmartingales. Lecalculdesprobabilitesetses
+applications,pages23–27,1949.
+[46] MartaGarnelo,DanRosenbaum,ChristopherMaddison,TiagoRamalho,DavidSaxton,Murray
+Shanahan,YeeWhyeTeh,DaniloRezende,andSMAliEslami. Conditionalneuralprocesses.
+InInternationalconferenceonmachinelearning,pages1704–1713.PMLR,2018.
+[47] RichardSocher,AlexPerelygin,JeanWu,JasonChuang,ChristopherD.Manning,Andrew
+Ng, and Christopher Potts. Recursive deep models for semantic compositionality over a
+sentimenttreebank. InDavidYarowsky,TimothyBaldwin,AnnaKorhonen,KarenLivescu,and
+StevenBethard,editors,Proceedingsofthe2013ConferenceonEmpiricalMethodsinNatural
+LanguageProcessing,pages1631–1642,Seattle,Washington,USA,October2013.Association
+forComputationalLinguistics. URLhttps://aclanthology.org/D13-1170.
+[48] Sida Wang and Christopher D. Manning. Baselines and bigrams: simple, good sentiment
+and topic classification. In Proceedings of the 50th Annual Meeting of the Association for
+Computational Linguistics: Short Papers - Volume 2, ACL ’12, page 90–94, USA, 2012.
+AssociationforComputationalLinguistics.
+[49] ClaraH.McCreery,NamitKatariya,AnithaKannan,ManishChablani,andXavierAmatriain.
+Effectivetransferlearningforidentifyingsimilarquestions:Matchinguserquestionstocovid-19
+faqs,2020.
+[50] IdoDagan,OrenGlickman,andBernardoMagnini. Thepascalrecognisingtextualentailment
+challenge. InJoaquinQuiñonero-Candela,IdoDagan,BernardoMagnini,andFlorenced’Alché
+Buc,editors,MachineLearningChallenges.EvaluatingPredictiveUncertainty,VisualObject
+Classification,andRecognisingTectualEntailment,pages177–190,Berlin,Heidelberg,2006.
+SpringerBerlinHeidelberg. ISBN978-3-540-33428-6.
+[51] Hector J. Levesque, Ernest Davis, and Leora Morgenstern. The winograd schema chal-
+lenge. InGerhardBrewka,ThomasEiter,andSheilaA.McIlraith,editors,KR.AAAIPress,
+2012.ISBN978-1-57735-560-1.URLhttp://dblp.uni-trier.de/db/conf/kr/kr2012.
+html#LevesqueDM12.
+[52] FerencHuszár. Implicitbayesianinferenceinlargelanguagemodels,2023. URLhttps://
+www.inference.vc/implicit-bayesian-inference-in-sequence-models/. [Online;
+accessed10-July-2023].
+[53] MichaelHahnandNavinGoyal. Atheoryofemergentin-contextlearningasimplicitstructure
+induction. arXiv:2303.07971,2023. URLhttps://arxiv.org/abs/2303.07971.
+12[54] Hui Jiang. A latent space theory for emergent abilities in large language models.
+arXiv:2304.09960,2023. URLhttps://arxiv.org/abs/2304.09960.
+[55] Yufeng Zhang, Fengzhuo Zhang, Zhuoran Yang, and Zhaoran Wang. What and how does
+in-context learning learn? bayesian model averaging, parameterization, and generalization.
+arXiv:2305.19420,2023. URLhttps://arxiv.org/abs/2305.19420.
+[56] Johannes Von Oswald, Eyvind Niklasson, Ettore Randazzo, João Sacramento, Alexander
+Mordvintsev, AndreyZhmoginov, andMaxVladymyrov. Transformerslearnin-contextby
+gradient descent. In International Conference on Machine Learning, 2023. URL https:
+//arxiv.org/abs/2212.07677.
+[57] EkinAkyürek,DaleSchuurmans,JacobAndreas,TengyuMa,andDennyZhou. Whatlearning
+algorithmisin-contextlearning? investigationswithlinearmodels. InInternationalConference
+onLearningRepresentations,2023. URLhttps://arxiv.org/abs/2211.15661.
+[58] ChiHan,ZiqiWang,HanZhao,andHengJi. In-contextlearningoflargelanguagemodels
+explainedaskernelregression. arXiv:2305.12766,2023. URLhttps://arxiv.org/abs/
+2305.12766.
+[59] RoeeHendel, MorGeva, andAmirGloberson. In-contextlearningcreatestaskvectors. In
+FindingsoftheAssociationforComputationalLinguistics: EMNLP,2023.
+[60] EricTodd,MillicentLLi,ArnabSenSharma,AaronMueller,ByronCWallace,andDavid
+Bau. Function vectors in large language models. In International Conference on Learning
+Representations,2024.
+[61] Jiachang Liu, Dinghan Shen, Yizhe Zhang, Bill Dolan, Lawrence Carin, and Weizhu Chen.
+Whatmakesgoodin-contextexamplesforgpt-3? InProceedingsofDeepLearningInside
+Out(DeeLIO2022): The3rdWorkshoponKnowledgeExtractionandIntegrationforDeep
+LearningArchitectures,2022. URLhttps://arxiv.org/abs/2101.06804.
+[62] YaoLu,MaxBartolo,AlastairMoore,SebastianRiedel,andPontusStenetorp. Fantastically
+orderedpromptsandwheretofindthem: Overcomingfew-shotpromptordersensitivity. In
+ACL,2022. URLhttps://arxiv.org/abs/2104.08786.
+[63] Zihao Zhao, Eric Wallace, Shi Feng, Dan Klein, and Sameer Singh. Calibrate before use:
+Improvingfew-shotperformanceoflanguagemodels. InICML,2021. URLhttps://arxiv.
+org/abs/2102.09690.
+[64] JannikKossen,YarinGal,andTomRainforth.In-contextlearninglearnslabelrelationshipsbutis
+notconventionallearning.InTheTwelfthInternationalConferenceonLearningRepresentations,
+2024.
+[65] JerryWei,JasonWei,YiTay,DustinTran,AlbertWebson,YifengLu,XinyunChen,Hanxiao
+Liu,DaHuang,DennyZhou,etal. Largerlanguagemodelsdoin-contextlearningdifferently.
+arXiv:2303.03846,2023. URLhttps://arxiv.org/abs/2303.03846.
+[66] YasamanRazeghi,RobertLLoganIV,MattGardner,andSameerSingh. Impactofpretraining
+termfrequenciesonfew-shotreasoning. InEMNLP,2022. URLhttps://arxiv.org/abs/
+2202.07206.
+[67] Jane Pan, Tianyu Gao, Howard Chen, and Danqi Chen. What in-context learning "learns"
+in-context: Disentangling task recognition and task learning. In ACL, 2023. URL https:
+//arxiv.org/abs/2305.09731.
+[68] RishabhAgarwal,AviSingh,LeiMZhang,BerndBohnet,StephanieChan,AnkeshAnand,
+ZaheerAbbas,AzadeNova,JohnDCo-Reyes,EricChu,etal. Many-shotin-contextlearning.
+arXiv:2404.11018,2024.
+[69] OpenAI. Gpt-4technicalreport. 2023.
+[70] Jinhao Duan, Hao Cheng, Shiqi Wang, Chenan Wang, Alex Zavalny, Renjing Xu, Bhavya
+Kailkhura,andKaidiXu. Shiftingattentiontorelevance: Towardstheuncertaintyestimationof
+largelanguagemodels. arXivpreprintarXiv:2307.01379,2023.
+13[71] GustafAhdritz,TianQin,NikhilVyas,BoazBarak,andBenjaminLEdelman. Distinguishing
+theknowablefromtheunknowablewithlanguagemodels. arXiv:2402.03563,2024.
+[72] DanielDJohnson,DanielTarlow,DavidDuvenaud,andChrisJMaddison. Expertsdon’tcheat:
+Learningwhatyoudon’tknowbypredictingpairs. arXiv:2402.08733,2024.
+[73] ZhiyuanHu,ChuminLiu,XidongFeng,YilunZhao,See-KiongNg,AnhTuanLuu,Junxian
+He, PangWeiKoh, andBryanHooi. Uncertaintyofthoughts: Uncertainty-awareplanning
+enhancesinformationseekinginlargelanguagemodels. arXiv:2402.03271,2024.
+[74] HongJunJeon,JasonDLee,QiLei,andBenjaminVanRoy. Aninformation-theoreticanalysis
+ofin-contextlearning. arXiv:2401.15530,2024.
+[75] KatherineTian,EricMitchell,HuaxiuYao,ChristopherD.Manning,andChelseaFinn. Fine-
+tuninglanguagemodelsforfactuality. arXiv,2023.
+[76] MartaGarnelo,JonathanSchwarz,DanRosenbaum,FabioViola,DaniloJRezende,SMEslami,
+andYeeWhyeTeh. Neuralprocesses. arXivpreprintarXiv:1807.01622,2018.
+[77] HyunjikKim,AndriyMnih,JonathanSchwarz,MartaGarnelo,AliEslami,DanRosenbaum,
+OriolVinyals,andYeeWhyeTeh. Attentiveneuralprocesses. InInternationalConferenceon
+LearningRepresentations,2019.
+[78] Tung Nguyen and Aditya Grover. Transformer neural processes: Uncertainty-aware meta
+learningviasequencemodeling. InInternationalConferenceonMachineLearning,2022.
+[79] JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,
+DennyZhou, etal. Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels.
+Advancesinneuralinformationprocessingsystems,35:24824–24837,2022.
+[80] IlyaLoshchilovandFrankHutter. Decoupledweightdecayregularization,2019.
+[81] PekkaMalo,AnkurSinha,PyryTakala,PekkaKorhonen,andJyrkiWallenius. Gooddebtor
+baddebt: Detectingsemanticorientationsineconomictexts,2013.
+[82] OnadeGibert,NaiaraPerez,AitorGarcía-Pablos,andMontseCuadros. Hatespeechdataset
+fromawhitesupremacyforum. InDarjaFišer,RuihongHuang,VinodkumarPrabhakaran,Rob
+Voigt,ZeerakWaseem,andJacquelineWernimont,editors,Proceedingsofthe2ndWorkshopon
+AbusiveLanguageOnline(ALW2),pages11–20,Brussels,Belgium,October2018.Association
+forComputationalLinguistics. doi: 10.18653/v1/W18-5102. URLhttps://aclanthology.
+org/W18-5102.
+[83] William B. Dolan and Chris Brockett. Automatically constructing a corpus of sentential
+paraphrases. InProceedingsoftheThirdInternationalWorkshoponParaphrasing(IWP2005),
+2005. URLhttps://aclanthology.org/I05-5002.
+14A RelatedWorks
+Mechanisms and Capabilities of ICL. Several papers argue that ICL can theoretically and in
+syntheticscenariosimplementlearningprincipleslikeBayesianinferenceorgradientdescent[8,52–
+57]. Evidenceinactualpre-trainedLLMsshowsthatICLcanbeapproximatedasakernelregression
+[58],andparametricapproximationstoICLcanbederivedfromthehiddenstateofthelastinput
+demonstration[59,60]. PracticalshortcomingsofICLincludedependenceonexampleorder[61–64]
+andtheimpactofpredictionpreferencesacquiredduringpre-training[63–67]. Whilefuturemodels
+mightimproveICLperformance[68],currentlimitationsareclearandarethoroughlyinvestigated
+inrecentworkbyFalcketal.[41]. TheseresultsimplythatICLinrealLLMsdoesnotimplement
+perfectBayesianinferencebutsuggestthatLLMpredictiveuncertaintyincludesbothepistemicand
+aleatoriccomponents,andLLMscanupdateuncertaintieswithnewobservations.
+Uncertainties in LLMs. Our results are supported by evidence that predictive uncertainties of
+largelanguagemodelsarewell-calibrated,eveninscenariosrequiringepistemicuncertainty[32,69].
+Relatedly,LLMuncertaintieshavebeenusedtodetecthallucinationsinfree-formgenerationsettings
+suchasquestion-answering[28–30,32–38,70]. Althoughnotallthesepapersexplicitlyfocuson
+LLMuncertainties,theyrelyonitimplicitlybysamplingmultiplemodelcompletionsforaquery
+andquantifyingthedifferencesinmeaning. Specifically,Kuhnetal.[33]highlightthechallenge
+ofisolatinguncertaintyoversemanticmeaningfromuncertaintyoversyntaxorlexisinfree-form
+generationtasks. Whiletheseapproachesdonotdisambiguatealeatoricandepistemicuncertainty,
+Ahdritz et al. [71], Johnson et al. [72] recently proposed methods to do so in CGMs. However,
+Ahdritzetal.[71]requireaccesstotwoLLMsofdifferentparametercounts,andJohnsonetal.[72]
+donotapplytheirmethodtoLLMs. Additionally,Huetal.[73]showthatBayesianexperimental
+designcanturnLLMsintostrategicquestionaskers,andJeonetal.[74]presentatheoreticstudyon
+sourcesoferrorsinICL.
+HallucinationsinLLMs. Inadditiontoapproachesbasedonuncertainty,avarietyofotherstrategies
+havebeenexploredtodetectormitigatehallucinationsinLLMs: retrieval-augmentedgeneration
+[9–16], custom token sampling procedures [17–19], model fine-tuning to improve uncertainties
+[20–22]orreducehallucinationsoutright[75],aswellaslearningtoextractorsteertruthfulnessfrom
+hiddenstates[23–27].
+Neuralprocesses. Neuralprocesses(NPs)[46,76–78]areneuralnetwork-basednon-parametric
+modelstrainedoveracollectionofdatasets. SimilartoICL,NPstakeacollectionofdatapointsas
+inputandamortizetasklearninginasingleforwardpassthroughthemodel. Forinstance, when
+datasetsaredrawnfromaGaussianprocessprior,NPs’predictivedistributionscloselyapproximate
+thetrueBayesianposteriorpredictiveforagiveninputdataset[7]. NPshavebeenusedsuccessfully
+fortasksrequiringreliableuncertaintyestimation,suchasBayesianoptimization[40,76,78]oractive
+featureacquisition[46]. Recently,Leeetal.[40]appliedDoob’stheoremtoquantifyuncertaintiesin
+neuralprocesses.
+MartingalePosteriorTheworkclosestinspirittooursis[39]whichproposesMartingalePosterior
+distributions. Theideaofthatpaperistousetheposteriorpredictive,andnottheposteriorasthe
+mainobjectforexpressinguncertainty. Asinthispaper,samplesfromtheposteriorpredictiveare
+usedtoestimatequantitiesofinterest. Then,byrepeatedresamplingandestimationofthepredictive,
+oneobtainsa"posterior"overtheestimate. AppendixB.1containsmoredetailsonthisworkandits
+relationshiptoours. Falcketal.[41]worktoformalizethismethodologyforLLMs. Theyproposea
+setofstatisticalteststoestimatewhetheranLLMsatisfiesthe“Martingaleproperty.” Thesetests
+dependonbeingabletosamplefromthetrueBayesianmodelthatdefinestheposteriorpredictive
+distributionestimatedbytheLLMpredictivedistribution. Intheirevaluationsusingsyntheticdata
+and pre-trained LLMs, they find that violations of the Martingale property can occur. Moreover,
+theyfindthatthefidelityoftheLLMpredictivedistributiontothetrueBayesianposteriorpredictive
+decreasesasthelengthofdatasetcompletions(N −n)increases. Theyalsoderiveanepistemic
+uncertaintyestimatorbasedontheposteriorcovarianceovermechanisms,whichhasconnectionsto
+theposteriorhallucinationrateandthemutualinformationestimandweproposeinAppendixD.
+15B FurtherDiscussion
+B.1 Assumptions
+Our proposed algorithm described in Section 2 relies on the existence of an implicit function F
+residinginasufficientlyrichspaceforDoob’stheoremtohold. Whilethisassumptionisreasonable
+formanyconditionalgenerativemodels(CGMs),itmaynotalwaysbethecase. Despitethis,we
+believeouralgorithmremainsusefulandmeaningfuleveninthoseinstances.
+AnalternativetostandardBayesianmethods,asproposedbyFongetal.[39],definesa"posterior"
+via a constructed sequence of distributions p(y | y ,...,y ). These distributions need not
+n n−1 1
+be posterior predictives but simply conditionals that take a sequence of random variables and
+outputa distributionfor thenextelement inthesequence. Theirapproachinvolvesconditioning
+on observed data D and sampling from the sequence of distributions: Y ∼ p(y | D ),
+n n+1 n+1 n
+Y ∼ p(y | Y ,D ), andsoon. Thesesamplesarethenusedtocomputeaquantityof
+n+2 n+2 n+1 n
+interest,andbyrepeatingthisprocessmultipletimes,oneobtainsadistributionoverthatquantity.
+Thisispreciselytheapproachwehavefollowed.
+Theintuitiveideabehindthisapproachisthatifeachconditionalp(y |y ,...,y )reasonably
+n+1 n 0
+expressestheuncertaintyofanewelementinthesequencegiventhepreviousnelements,andif
+anyquantityofinterestaboutthedistributioncouldbecomputedwithinfinitedata,thenthemethod
+describedprovidesawaytopropagatetheuncertaintyimpliedbytheconditionalstotheunobserved
+datay ,...,andsubsequentlytothequantityofinterest.
+n+1
+Fong et al. [39] argue that for this approach to be mathematically coherent, a martingale and a
+convergenceconditiononthesequenceofdistributionsarenecessary. WhileCGMsmaynotstrictly
+satisfy these properties, we believe the empirical success of large language models (LLMs) for
+in-contextlearningtasksandourempiricalresultssupportadoptingthismethodologyduetothe
+usefulnessoftheconditionalstheyprovide. Therefore,usingtheposteriorpredictiveasaprimary
+objectfordefininguncertaintyisbeneficial, evenincaseswherenoimplicitf exists. Falcketal.
+[41]summarizesuchassumptionsasthemartingaleproperty,andprovideaninterestinganalysison
+whetherpre-trainedLLMssatisfythispropertyonsyntheticICLtasks.
+B.2 BroaderSocialImpact
+Positivesocialimpact. Ourworkallowsforgreaterintepretabilityintotheresponsesproducedby
+LLMsandhallucinationrateprediction. BeingabletodiscernwhenaLargeLanguageModel(LLM)
+islikelytohallucinateiscrucialforseveralreasons,particularlyconcerningitssocialimpact. In
+termsofmisinformation,ifuserscannotdistinguishbetweenaccurateinformationandhallucinations,
+theymayspreadmisinformationunknowingly. Thiscandamagethecredibilityoftheplatformsusing
+LLMsandthetrustusersplaceinAIsystems. Further, asLLMsbecomemorecommonplacein
+high-risksectorslikemedicineorfinance,hallucinatedmedicaladvicecanbedangerous,leading
+toharmfulhealthpracticesordelayedtreatment,whileerroneousfinancialinformationcanleadto
+poorinvestmentsorfinancialloss. Ethically,hallucinationscanreinforceorpropagatebiasesand
+stereotypesifthegeneratedcontentreflectssocietalprejudices. Thiscanperpetuatediscrimination
+andinequality. Understandingwhenhallucinationsarelikelytooccurisvitalforholdingdevelopers
+and companies accountable for the content their models produce. Finally, many researchers use
+LLMs and other CGMs to generate or label data. Hallucinations in this setting can lead to false
+discoveriesandwastedresources.
+BeingabletoaccuratelypredicthallucinationratesforgiventasksisessentialforensuringthatAI
+systemscontributepositivelytosociety. Itallowsformaintainingtrust,safety,ethicalstandards,and
+theoverallintegrityofinformationdissemination.
+Negativesocialimpact. Whenourmodelisbeingusedasintendedbutgivesincorrectresults(i.e.
+producesalowestimateofprobabilityofhallucinationwhenthetrueprobabilityishigh),itcould
+inadvertentlybereinforcingbiasespresentinhallucinationswhileincreasingusertrustintheoutputs.
+16B.3 Whatkindofuncertaintydoestheposteriorhallucinationratequantify?
+BuildingtrustworthyandeffectiveICLsolutionsrequiresunderstandingwhyandwhenincorrector
+unexpectedresponsesaregeneratedbyaCGM.TheICLliteratureprovidestwofindingsthatsuggest
+distinctsourcesofhallucination.
+Figure7: Llama-2-7b: ErrorRate(Topgreencurves)andResponseEntropy(Bottombluecurves)
+onLLMin-contextlearningtasks. Greydashedlinesrepresenttheerrorrateandentropyofarandom
+classifieroverthesetofvalidresponses.
+Thefirstfindingisthaterrorrateandpredictionentropydecreasesandsaturateswithanincreasing
+numberofexamples[64]. ThistrendisillustratedinFigure7usingtheLlama-2-7bmodel[42]on
+a set of natural language ICL tasks. This finding indicates that one source of hallucination is an
+insufficientnumberofrelevantin-contextexamples.
+ThesecondfindingfromtheliteratureisthattherearestillmanytasksforwhichICLperformspoorly.
+Forexample,theresponseaccuracyofGeminiPro1.5givenseveralin-contextexamplesfromthe
+AmericanMathematicsCompetitionisonly37.2%,implyingthatthemodelwouldhallucinatean
+incorrectresponseatarateof62.8%[3]. Wehypothesizethatregardlessofthenumberofrelevant
+in-contextexamples,themodelmaylackthecapacitytoansweraspecificuserqueryfromacomplex
+ornewdomainaccurately. ThishypothesisisillustratedusingLlama-2-7Bbycomparingthegraphs
+ofthefirstthreetasks(SST2[47],Subjective[48],andAGNews[6])tothegraphoftheWNLItask
+[51])inFigure4. Whiletheerrorrateandresponseentropyforeachofthefirstthreetasksimproves
+significantlyoverrandomguessingwithmoreexamples,bothmeasuresappeartosaturatenearthe
+randombaselinefortheWNLItask. Thesecondsourceofhallucinationsisthenassociatedwith
+whetheramodelhasthecapacitytofactuallyanswerqueriesforanICLtask.
+Thisworkfocusesonthefirstsourceofhallucinations. Thatis,theposteriorhallucinationrateis
+concernedwithestimatingtherateofhallucinationsthatstemfromalackofrelevantcontext,and
+not those that stem from a lack of model capacity. The predictive distribution encodes response
+varietycomingfromseveralsources,andthisvarietyiscloselytiedtothewaysinwhichamodelcan
+generateahallucination. Wediscussthesesourcesofresponsevariety—oruncertainty—belowand
+theirrelationtohallucinationsandtheposteriorhallucinationrate.
+AleatoricUncertainty.The(1−ϵ)–likelysetdefinedbyagivenmechanismf∗reflectsanirreducible
+component of response uncertainty. To illustrate the concept of irreducible (sometimes called
+“aleatoric”) response uncertainty, imagine an LLM fit to vast corpora containing many calculus
+examplessuchthatithasthecapacityforintegration. Consider,
+Prompt1:
+fill in the blanks: the integral of x^2 with respect to x on
+the interval [-3, 3] is ␣.
+IfanLLMeffectivelymodelsthemechanismassociatedwithintegrationdatasets, thenresponse
+varietywillbedeterminedbyallthedifferentwaysthemodelcangeneratethecorrectresponse:
+e.g.,18,eighteen, 33 − -33 ,9+9,2∗9,XVIII,etc. Uncertaintyreflectingthepluralityofways
+3 3
+tocommunicatethesamemeaningiscommonlyreferredtoassyntacticuncertainty[33],whichis
+consideredirreducibleinthisparticularexample. However,inlanguagetasks,irreducibleuncertainty
+neednotbesyntacticbynecessity.
+17Toenrichthisconcept,considerthesameLLMand
+Prompt2:
+fill in the blanks: the integral of ␣, with respect to x on
+the interval [-3, 3] is ␣.
+Inadditiontothesyntacticallydifferentwaystospecifyaparticularfunction(x2, xsquared, xx,
+...) andthecorrespondingresult(18,eighteen,XVIII,...),responsevarietyalsodependsonthe
+semanticallydifferentintegrandsthatcouldfillthefirstblank(x3,cos(x),exp(x),2xy,...)andthe
+semanticallydifferentpossibleresults. Thisadditionalvarietyisemblematicofsemanticuncertainty
+[33]. However,whilehighsemanticuncertaintycanbeindicativeofhallucinations,itisnotaproblem
+in this example because the imputation of any sensible function and answer could still be valid
+underthemechanismassociatedwithintegrationdatasets. Thatis,givenPrompt2,uncertaintyover
+semanticallydifferentfunctionsisexpectedandevendesirable.
+Thispairofexamplesillustrateanimportantinsight;irreducibleuncertaintyismechanismrelative. If,
+forexample,weareinasimplequestionansweringsettingandthemechanismdefinesa(1−ϵ)–likely
+setovercorrectresponses,then,equivocatingirreducibleandsyntacticuncertaintymaybeappropriate.
+However,inthesecondexampleweshowthatthisdecompositionisnotnecessarilyappropriate.
+Type I epistemic uncertainty. We return to Prompt 1 and give two examples that illustrate an
+uncertaintyaboutmechanismsf thatisreducible. First,considerasettingwheretheuserdesiresthe
+responseintermsofareducedfraction. Therearetwoobviouswaysthattheusercouldaugment
+Prompt1toreducetheuncertaintyovermechanismsyieldinginteger,word,fraction,etc. responses.
+(1)theusercouldsimplyreplace“fillintheblanks”with“fillintheblankwithareducedfraction.”
+(2)theusercouldtakeanICLapproachandaugmentthepromptwithanumberofexamples:
+Prompt3:
+Input: the integral of x^3 with respect to x on the interval [-1, 6]
+Label: $\frac{1295}{4}$
+Input: the integral of x^6 with respect to x on the interval [-2, 2]
+Label: 0 / 7.
+Input: the integral of x^2 with respect to x on the interval [-3, 3]
+Label:
+Thefirstchoicemayresultinreducingalluncertaintyaboutwhichmechanismtosampleresponses
+from. For the second choice, we can imagine a progressive reduction in uncertainty about the
+appropriatemechanismasmoreexamplesareaddedin-context. Forexample,ifweweretoseethe
+two provided examples, we may still be uncertain about whether to respond with a number or a
+fraction,orwhethertorespondwithanycorrectfractionorthereducedfraction. Forexample,given
+thecontext,aresponseof 54 wouldbeasplausibleasthedesired 18. Itmaynotbeuntiltheprompt
+3 1
+includedanexamplelike,“theintegralofx3withrespecttoxontheinterval[2,4]is60/1,”untilall
+uncertaintyaboutthemechanismisresolved. Weproposethatthisexplainswhyweseeareduction
+intheerrorrateandresponseentropyinatasklikeWNLIthatis“out-of-capacity”forLlama-2-7B.
+Thatis,asweprovidemorein-contextexamples,thepredictivedistributioncanbemorealignedwith
+thesetofacceptableresponses,eventhoughthoseresponsesmaystillbeincorrect.
+The preceding example illustrated a hallucination as a misaligned response, now let’s turn to an
+exampleofanon-factualresponse. ReturningtoPrompt1,imaginenowthatthemodelgeneratesthe
+response42. Whydiditdothis? Aplausibleanswercouldbethatthemodelcannotdointegration.
+We will touch on this possibility next, but first let’s consider an equally interesting case. We
+know from the few-shot and chain-of-thought prompting literature [14, 30, 79], that augmenting
+thecontextcanhavesignificanteffectsonICLaccuracy. Forexample, considerthehypothetical
+setting where the LLM has “grokked” algebra, but only has the superficial capacity to output a
+number when completing definite integrals. Or maybe the model has capacity to do integration,
+but the format of the examples and query is not common in the training corpora. The LLM
+thenmayactuallyhavethecapacitytoanswerthequestiongivensomecleverprompting.Forexample,
+Prompt4:
+18Input: the integral of x^3 with respect to x on the interval [-1, 6]
+Label: 6^4 / 4 - -1^4 / 4 = 1295 / 4
+Input: the integral of x^3 with respect to x on the interval [2, 4]
+Label: 4^4 / 4 - 2^4 / 4 = 60 / 1.
+...
+Input: the integral of x^6 with respect to x on the interval [-2, 2]
+Label: 2^7 / 7 - -2^7 / 7 = 0 / 7
+Input: the integral of x^2 with respect to x on the interval [-3, 3]
+Label:
+Again, asthepromptcontainsmoreexamplesthattranslatetheformofthequeryintoasuitable
+format,wecanexpectthattheuncertaintyabouttheanswerwillreduce. Forconditionalmodelsin
+general,wewillcallthisTypeIepistemicuncertainty,whichcouldalsobeunderstoodasin-context
+epistemicuncertainty. Bothoftheseexamplesillustratehallucinationsthatareduetoinsufficient
+context.
+TypeIIepistemicuncertainty. Let’sreturntoPrompt1,butthistimeimagineanLLMfittoacorpus
+not containing any examples from calculus or related mathematical fields. Or perhaps we could
+imagineanLLMwithfinitecapacitythatforwhateverreasondoesnothavethecapacitytoanswer
+integrals. Whatdowedowhenthemodelgenerates“DuaLipa?” Whatdowedowhenthemodel
+outputsmembersoftheset{17,137,DuaLipa,Wednesday,...}? Wesaythattheresponseshould
+havehighTypeIIepistemicuncertaintybecausetheLLMhasnotacquiredthecapacitytomodel
+themechanismclass,F,correspondingtointegrals. Thiscouldalsobeunderstoodasin-weightsθ
+epistemicuncertainty. IntheexampleofPrompt4,imagineiftherewerenonumberofexemplars
+thatcouldinduceacorrectresponse.
+(a)TypeI (b)TypeII
+Figure8: Comparingdifferentsourcesofhallucinationforregressionmodels. Figure8aillustrates
+hallucinationsduetoTypeIepistemicuncertainty. Asthecontextlengthincreases,thepredictive
+distribution concentrates around the true distribution and the model hallucinates less. Figure 8b
+illustrateshallucinationsduetoTypeIIepistemicuncertainty. Givendatafromanout-of-distribution
+function,thepredictivedistributionmaynotcoverthetruedistribution. Moreover,themodelstill
+hallucinatessignificantlyevenwhenTypeIepistemicuncertaintyisminimizedasthenumberof
+in-contextexamplesislarge.
+Whenaconditiongenerativemodelp isagoodestimatorofthetruedistributionp,theposterior
+θ
+hallucinationrate—andmutualinformationquantityweproposeinAppendixD—aredesignedto
+estimate Type I epistemic uncertainty. We leave the important work of estimating the posterior
+hallucinationratewhentheCGMisnotagoodestimator(underTypeIIepistemicuncertainty)to
+futurework.
+C ProofofTheoremsinMainText
+Webeginbystatingalemmathatwillbeusefulthroughout.
+LemmaC.1. AssumethattheconditionsofTheorem1holdforFand(X,Y),thenforafixeddataset
+andqueryD ,xandunderaprobabilitymodelwhereF ∼ p(f | D )and(X ,Y ) ∼ p(x,y | F),
+n n i i
+19then
+logp(Y |x,F)= lim logp(Y |x,(X,Y)n)
+1
+n→∞
+almostsurely.
+Proof. For a fixed y,x, let g(f) = p(y | x,F) and then apply Doob’s theorem on the probability
+model. Thenitisthecasethat
+g(F)= lim E [p(y|F,x)|(X ,Y )n] (10)
+i i
+n→∞F∼p(f|Dn)
+(cid:90)
+= lim p(y|F,x)dP(F|(X ,Y )n) (11)
+i i
+n→∞
+(cid:90)
+= lim p(y|F,x)dP(F|(X ,Y )n,x) (12)
+i i
+n→∞
+= lim p(y|x,(X ,Y )n) (13)
+i i
+n→∞
+whereEquation(12)holdsbecausexisindependentofF. Takinglogsatbothsidesandusingthe
+continuityofthelogarithm,weobtain
+logg(F)= lim logp(y|x,(X ,Y )n)
+i i 1
+n→∞
+andbecausethisholdsforally,itmustholdfortherandomvariableY.
+Nowwerestatethemaintheoremwithproof:
+Theorem3(PHRviaPosteriorPredictive). AssumethattheconditionsofTheorem1holdforFand
+X,Y,then,
+(cid:90)(cid:90)
+h (x)= 1{logp(y|x,f)<Q (f,x)}dP(y|D ,x)dP(f |D )
+ϵ ϵ n n
+(cid:90)(cid:90) (cid:110) (cid:111)
+= 1 lim logp(y|(x i,y i)N 1 ,x)<Q ϵ((x i,y i)∞ 1 ,x) dP(y|D n,x)dP((x,y)∞ n+1 |D n),
+N→∞
+whereQ ((x ,y )∞,x)istheϵ-quantileoflim logp(Y | x,(x ,y )N)underlim p(Y |
+ϵ i i 1 N→∞ i i 1 N→∞
+x,(x ,y )N).
+i i 1
+Proof. DefineanalternativeprobabilitymodelsuchthatF∼p(f |D )and(X ,Y )∼p(x,y|F).
+n i i
+Let p , E , Q and P denote the relevant quantities computed with respect to this alternative
+a a a,ϵ a
+probabilitymodel.
+First,notethatbyexpandingthedefinitionofQ (f,x)underthisnewprobabilitymodel
+a,ϵ
+Q (F,x)=inf{q ∈R:ϵ≤P (logp (Y |x,F)≤q |F,x)} (14)
+a,ϵ a a
+Q (F,x)=inf{q ∈R:ϵ≤P (logp (Y |x,F)≤q |F,x,(X,Y)∞)} (15)
+a,ϵ a a 1
+(cid:110) (cid:16) (cid:17)(cid:111)
+=inf q ∈R:ϵ≤P lim logp (Y |x,(X ,Y )N)≤q |F,x,(X,Y)∞ (16)
+a a i i 1 1
+N→∞
+where we used the fact that Y ⊥ (X,Y)∞ | F,x in Equation (15). For simplicity, we will use
+1
+p(·|(X ,Y )∞)todenotelim p(·|(cid:0) X ,Y )N(cid:1) withsimilarconventionsfromotherquantities.
+i i 1 N→∞ i i 1
+Now,applyingDoob’stog(f) = P (logp (Y | x,(X ,Y )∞) ≤ q | f,x,(X ,Y )∞)wegetthat
+a a i i 1 i i 1
+almostsurely
+P (logp (Y |x,(X ,Y )∞)≤q |F,x,(X ,Y )∞) (17)
+a a i i 1 i i 1
+= lim E (cid:2) P (logp (Y |x,(X ,Y )∞)≤q |F,x,(X ,Y )∞)|(X ,Y )N(cid:3) (18)
+a a i i 1 i i 1 i i 1
+N→∞F∼p(f|Dn)
+= lim P (logp (Y |x,(X ,Y )∞)≤q |(X ,Y )N) (19)
+a a i i 1 i i 1
+N→∞
+=P (logp (Y|x,(X ,Y )∞)≤q |(X ,Y )∞) (20)
+a a i i 1 i i 1
+20whereweusedDoob’sonEquation(18)andthetowerpropertyinEquation(19). Pluggingthisback
+inEquation(16)weobtain
+Q (F,x)=inf{q ∈R:ϵ≤P (logp (Y |x,(X ,Y )∞)≤q |(X ,Y )∞)} (21)
+a,ϵ a a i i 1 i i 1
+=Q ((X ,Y )∞,x) (22)
+a,ϵ i i 1
+Tocompletetheproof,notethat
+(cid:90)(cid:90)
+1(cid:8)
+logp(y|x,f)<Q
+(f,x)(cid:9)
+dP(f |D )dP(y |x,D ) (23)
+ϵ n n
+(cid:90)(cid:90)
+=
+1(cid:8)
+logp (y|x,f)<Q
+(f,x)(cid:9)
+dP (f)dP(y |x,D ) (24)
+a a,ϵ a n
+wherewechangedtheprobabilityspacesfromptop . Thisisjustifiedbecausep (y|x,f)=p(y|
+a a
+x,f,D )=p(y |x,f)whereweusedtheindependenceofYonD oncef isknown,thefactthat
+n n
+p (f) = p(f | D )bydefinition, andthefactthatforthequantilefunctionQ (f,x) = Q (f,x)
+a n a,ϵ ϵ
+because
+P (logp (Y |x,F)≤q |F,x)=P(logp(Y |x,F)≤q |F,x) (25)
+a a
+dueagaintotheindependenceofYonthedatasetD oncef isknown. Finallywehave(abusing
+n
+notationusing(x,y)∞ toreferto(x,y)∞ intheoriginalprobabilityspacebutalso(x ,y )∞in
+n+1 n+1 i i 1
+thealternativeprobabilityspaceastheyhavethesamedistribution):
+(cid:90)(cid:90)
+h (x)=
+1(cid:8)
+logp (y|x,f)<Q
+(f,x)(cid:9)
+dP (f)dP(y|x,D ) (26)
+ϵ a a,ϵ a n
+(cid:90)(cid:90)
+= 1(cid:8) logp (y|x,f)<Q (f,x)(cid:9) dP (f,(x,y)∞ )dP(y|x,D ) (27)
+a a,ϵ a n+1 n
+(cid:90)(cid:90)
+= 1(cid:8) logp (y|x,(x,y)∞ )<Q ((x,y)∞ ,x)(cid:9) dP (y|x)dP (f,(x,y)∞ ) (28)
+a n+1 a,ϵ n+1 a a n+1
+(cid:90)(cid:90)
+= 1(cid:8) logp (y|x,(x,y)∞ )<Q ((x,y)∞ ,x)(cid:9) dP(y|D ,x)dP(f,(x,y)∞ |D )
+a n+1 a,ϵ n+1 n n+1 n
+(29)
+(cid:90)(cid:90)
+= 1(cid:8) logp (y|x,(x,y)∞ )<Q ((x,y)∞ ,x)(cid:9) dP(y|D ,x)dP((x,y)∞ |D )
+a n+1 a,ϵ n+1 n n+1 n
+(30)
+WhereEquation(27)isjustifiedbybecause(x,y)∞ doesn’tappearintheterminside,Equation(28)
+n+1
+isjustifiedbytheargumentsaboveandLemmaC.1,andEquation(30)isaresultofmarginalizingfout.
+Thelastthingtopointoutisthatp (y|x,(x,y)∞ )=p(y|x,(x ,y )∞)andQ ((x,y)∞ ,x)=
+a n+1 i i 1 a,ϵ n+1
+Q ((x ,y )∞,x)because
+ϵ i i 1
+P (cid:0) logp (Y |x,(x,y)∞ )≤q |x,(x,y)∞ (cid:1)
+a a n+1 n+1
+=P(logp(Y |x,(x ,y )∞)≤q |x,(x ,y )∞)
+i i 1 i i 1
+UsingthisfactinEquation(30)yieldsthetheorem.
+D MutualInformation
+In the main paper we focus on developing the posterior hallucination rate; however, there are
+otherquantitiesthatcanalsobeusedtopredictmodelperformance. Acommonquantityusedfor
+thispurposeinBayesianmachinelearningistheposteriormutualinformationbetweenFandY,
+I(Y;F|x,D ),sometimesreferredtoastheepistemicuncertainty. Thereasonforthisnameisthat
+n
+whenwedefinethetotalpredictiveuncertaintytobeH(Y |x,D )andthealeatoricuncertainty—the
+n
+componentoftheuncertaintythatcan’tbereduced—asE [H(Y |f,x)],thenthedifferenceis
+p(f|x,Dn)
+thereduciblecomponent,andbythedefinitionofmutualinformation
+I(Y;F|x,D )= H(Y |x,D ) − E [H(Y |f,x)]
+n n
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) p(f|x,Dn)
+Epistemicuncertainty Predictiveuncertainty (cid:124) (cid:123)(cid:122) (cid:125)
+Aleatoricuncertainty
+21D.1 Estimators
+Inspiredbythemethodologyinthepaper,wefollowasimilarprocessforobtainingapproximate
+estimatesofthealeatoricuncertaintyandepistemicuncertainties.
+Inparticularwelet,
+(cid:90)
+H (Y |F,(x ,y )n,x):=− gH((x ,y )N,x)dP (xn+1:N |(x ,y )n),
+θ i i 1 θ i i 1 θ i i 1
+where
+(cid:90)
+gH((x ,y )N,x):= logp (y|(x ,y )N,x))dP (y|(x ,y )N,x), (31)
+θ i i 1 θ i i 1 θ i i 1
+andN −nisapracticalnumberofgeneratedexamples. Thismodelapproximationforthealeatoric
+entropyallowsustodefineamodelapproximationforthemutualinformation.
+I (Y;F|(x ,y )n,x):=H (Y |(x ,y )n,x)−H (Y |F,(x ,y )n,x). (32)
+θ i i 1 θ i i 1 θ i i 1
+Inturn,wecanconstructpracticalMonte-CarloestimatorsforH (Y |(x ,y )n,x),gH((x ,y )N,x),
+θ i i 1 θ i i 1
+andH (Y |F,(x ,y )n,x)usingpredictiveresampling[39]. Theseestimatorsaredescribedbelow
+θ i i 1
+andthepredictiveresamplingalgorithmisdescribedinAlgorithm3.
+Predictiveentropy.
+M
+1 (cid:88)
+H(cid:98)θ(Y |(x i,y i)n 1,x):=−
+M
+logp θ(y
+i
+|(x i,y i)n 1,x), y
+i
+∼p θ(y|(x i,y i)n 1,x) (33)
+i=1
+Aleatoricentropy.
+M
+1 (cid:88)
+gH((x ,y )N,x):=− logp (y |(x ,y )N,x), y ∼p (y|(x ,y )N,x) (34)
+(cid:98)θ i i 1 M θ i i i 1 i θ i i 1
+i=1
+H(cid:98)θ(Y |F,(x i,y i)n 1,x):=PredictiveResampling(cid:0) x,(x i,y i)n 1,g (cid:98)θH((x i,y i)N
+1
+,x)(cid:1) (35)
+Mutualinformation
+(cid:98)I θ(Y;F|(x i,y i)n 1,x):=H(cid:98)θ(Y |(x i,y i)n 1,x)−H(cid:98)θ(Y |F,(x i,y i)n 1,x) (36)
+Algorithm3PredictiveResampling(cid:16) x,(x ,y )n,g (cid:0) (x ,y )N,x(cid:1)(cid:17)
+i i 1 (cid:98)θ i i 1
+Require: query x, context (x ,y )n, functional g ((x ,y )N,x), # MC samples M, max context
+i i 1 (cid:98)θ i i 1
+lengthN.
+1: fori←1toMdo
+2: (x i,y i)N
+1
+←(x i,y i)n
+1
+▷initializecontext
+3: forj ←n+1toN do
+4: (x j,y j)∼p θ(x,y|(x i,y i)N
+1
+) ▷sampleexamplefrommodel
+5: (x i,y i)N
+1
+←((x i,y i)N
+1
+,x j,y j) ▷updatecontext
+6: g
+i,N
+←g (cid:98)θ((x i,y i)N
+1
+,x) ▷evaluatefunctional
+7: return 1 (cid:80)M g ▷estimateexpectation
+M i=1 i,N
+E EvaluationDetails
+E.1 Synthetic
+WeimplementourneuralprocessbymodifyingtheLlama2architecture[42]tomodelsequencesof
+continuousvariables. Wereplacethetokenizerbyalinearlayerandtheoutputcategoricaldistribution
+byaRiemanndistribution[7]. Wetrainthemodelfromrandominitializationonsequencesof(x,y)
+pairs using a standard next token prediction objective and use the AdamW optimizer [80] with
+22learning_rate = 0.0001,β = 0.9,β = 0.999,ϵ = 1e−8,andweight_decay = 1e−62. We
+1 2
+useacosinelearningrateschedule,withwarmupof2000steps,anddecayfinallearningratedownto
+10%ofthepeaklearningrate.
+Wedefinethe(1-ϵ)–likelysetwithϵ=0.05suchthataresponseyisahallucinationifitfallsoutside
+ofthe95%confidenceintervalofagivensampleddistributionconditionedonx. Thedatagenerating
+processisdescribedinAppendixF.1.
+E.2 Language
+We consider tasks defined by six datasets: Stanford Sentiment Treebank (SST2) [47]: predict
+sentimentpositiveornegative;Subjectivity[48]: predictreviewsubjectiveorobjective;AGNews
+[6]: predictarticleWorld,Sports,BusinessorSci/Tech;MedicalQP[49]: predictmedicalquestion
+pairsassimilarordissimilar;RTE[50]: predicttwosentencesasentailmentornotentailment;and
+WNLI[51]: predictsentencewithpronounreplacedasentailmentornotentailment. Wereplacethe
+labelSci/TechwithScienceforAGNewsandnotentailmentbynotforRTEandWNLI.Wefilter
+outanyqueriesoflengthlongerthan116tokens. Fulldescriptionsofthesedatasetsaregivenin
+AppendixF.2.
+ToimplementICLforagivendataset,wesamplearesponsebalancedtrainingsetofquery/response
+pairsD =(x ,y )n. EachqueryinD isprependedwiththestringInput: andappended
+train i i 1 train
+withanewline.EachresponseisprependedwiththeLabel: andappendedwith\n\n.Atestquery
+x isprependedwiththeInput: andappendedwith\nLabel: . Thesestringsareconcatenated
+test
+togethertoformapromptandwegeneratearesponseyfromthepredictivedistributiongivenbya
+Llama-2modelp (y|D ,x ). AnexamplepromptfromtheSubjectivitydatasetisshownin
+θ train test
+AppendixE.2.
+Forourexperimentsin3.2,weemployLLaMA-2[42],afamilyofopensourceLLMsbasedonan
+auto-regressivetransformer,pretrainedon2trilliontokenswithacontextwindowof4,096tokens.
+WerunLLaMA-2-7Basanunquantizedmodel(16-bit).
+Toestimatethepredictivedistributionoverresponses,wesampleninput/labelpairsbasedonthe
+givencontextlength,createapromptbasedonthecontext,andgenerateanumberofysamples. An
+exampleofapromptfromtheSubjdatasetissetforthinFigure9.
+Theysamplesaregeneratedassingletokens,sincealllabelsforourdatasetscanbeidentifiedbased
+on their first token. We set the temperature and top_p parameters to 1 to provide the greatest
+possiblediversityandrandomnesstothelabeloutput.
+For predictive sampling, we initialize the context by sampling n input/label pairs, generate N −
+n new context examples by producing prompts that include the updated context, and produce a
+number of y samples from the cumulative context. For the generated context examples, we set
+max_new_tokens=200,temperature=1andtop_p=0.9toprovideahighleveldiversityand
+randomnesstothegeneratedoutput. ExamplesofgeneratedcontextpairsaresetforthinFigure10.
+Usingthetransitionscoresfromthemodeloutputs,wecomputetheloglikelihoodneededforthe
+posteriorhallucinationrate.
+F DatasetDetails
+F.1 Synthetic
+Queriesxaresampledfromauniformdistributionon[-2,2]. Responsesyaresampledfromanormal
+distributionwithmeanµ(x)parameterizedbyarandomReLUneuralnetworkconditionedonxand
+constantstandarddeviationσ =0.1. Wegenerateasetof8000sequences,eachcorrespondingtoa
+distinctrandomre-initializationoftheneuralnetwork,with2000(x,y)exampleseach. Trainingand
+testdataaregeneratedovernon-overlappingsetsofgeneratedsequences. Exampletrainingdatasets
+areplottedasdifferentcolorsinFigure11.
+2Thisprocessissimilartothe“priorfittednetwork”implementationofMülleretal.[7],butwerequirethe
+conditionaldistributionofbothqueriesxandresponsesy,wheretheirimplementationonlymodelsresponses.
+23Input: the assasins force walter to drive their escape car .
+Label: objective
+Input: vega and ulloa give strong performances as the leading lovers and
+there are some strong supporting turns , particularly from najwa
+nimri .
+Label: subjective
+Input: they decide that the path to true love is to purposely set each
+other up on ‘‘ extreme dates ‘‘ with the objects of their
+affections .
+Label: objective
+Input: ‘‘ maid in manhattan ‘‘ is a charmer , a pc ‘‘ pretty woman ‘‘
+that ditches the odious prostitution theme for class commentary
+Label: subjective
+Input: each weekend they come back with nothing but a hangover .
+Label: objective
+Input: piccoli ’s performance is amazing , yes , but the symbols of
+loss and denial and life-at-arm’s-length in the film seem
+irritatingly transparent .
+Label:
+Figure9: Examplepromptforlanguagemodel
+Input: pick any word , even the tiniest , and you will find writers
+arguing over its relative importance , its ’ correct ’ usage and
+how you pronounce it .
+Label: objective
+Input: janus’ entry does a number of things the novel fails at : it
+tells the story of the novel and , better yet , it ’s funny .
+Label: subjective
+Input: this is the kind of show that ’s got the warm n’ fuzzies all over
+, especially if you have a sick sense of humor .
+Label: subjective
+Input: even if you are an apple and orange man or woman who would be
+more comfortable at a state fair rodeo than in a silk dress ,
+this should be on your list .
+Label: objective
+Input: nearly every adjective one could use to describe a movie theater
+, except expensive and first-run , can be used to describe this
+place .
+Label: subjective
+Figure10: Exampleofgeneratedcontextpairs
+F.2 Language
+Forourexperimentsin3.2,werandomlysamplecontextexamplesandtestinput/labelpairsfromthe
+followingdatasets:
+StanfordSentimentTreebank(SST2) SST2[47]isacorpuswithfullylabeledparsetreesthat
+allowsforacompleteanalysisofthecompositionaleffectsofsentimentinlanguage. Thecorpus
+consistsof11,855singlesentencesextractedfrommoviereviews. ItwasparsedwiththeStanford
+parserandincludesatotalof215,154uniquephrasesfromthoseparsetrees,eachannotatedby3
+humanjudges. Sentimentsareclassifiedasbinarylabels"positive"or"negative".
+24(a)TrainingDatasets (b)GeneratedDatasets
+Figure11: Trainingandgenerateddatasetsforthesyntheticregressiontask.
+Subjectivity (Subj) The subjectivity dataset [48] contains 5,000 movie review snippets from
+www.rottentomatoes.comlabeled"subjective",and5,000sentencesfromplotsummariesavailable
+fromwww.imdb.comlabeled"objective". Selectedsentencesorsnippetsareatleasttenwordslong
+andaredrawnfrommoviesreleasedpost-2001.
+FinancialPhrasebank TheFinancialPhrasebankdataset[81]consistsof4840sentencesfrom
+Englishlanguagefinancialnewscategorizedbyoneof3sentimentlabels–"positive","neutral"or
+"negative". Thedatasetisdividedbyagreementrateof5-8annotatorswhohavebeenscreenedfor
+sufficientbusinessknowledgeandeducationalbackground.
+HateSpeech TheHateSpeechdataset[82]contains10,568sentencesthathavebeenextracted
+fromStormfront,awhitesupremacistforum,andarelabeledas"Hate"forsentencesthatcontainhate
+speech,"NoHate"forsentencesthatdonotconveyhatespeech,"Relation"forconsecutivesentences
+thatcollectivelyconveyhatespeech,or"Skip"forsentencesnotwritteninEnglishordonotcontain
+enoughinformationtobeclassifiedashatespeechornot.
+AGNews TheAGNewsdataset[6]contains496,835categorizednewsarticlesfrommorethan
+2,000newssources. The4largestclasses(World,Sports,Business,Sci/Tech)werechosenfromthis
+corpustoconstructourdataset,includingonlythetitleanddescriptionfields.
+MedicalQuestionsPairs(MQP) TheMQPdataset[49]consistsof3,048similaranddissimilar
+medical question pairs hand-generated and labeled by doctors based on patient-asked questions
+randomlysampledfromHealthTap.Eachquestionresultsinonepositivequestionpair("similar")that
+looksverydifferentbysuperficialmetrics,andanegativequestionpair("different")thatconversely
+lookverysimilar,soastoensurethatthetaskisnottrivial.
+MicrosoftResearchParaphraseCorpus(MRPC) MRPC[83]consistsof5,801pairsofsentences,
+each accompanied by a binary judgment indicating whether human raters considered the pair of
+sentencestobesimilarenoughinmeaningtobeconsideredcloseparaphrases.
+Recognizing Textual Entailment (RTE) The RTE dataset [50] comes from a series of annual
+textual entailment challenges. Examples are constructed based on news and Wikipedia text, and
+labeledasbinaryclassificationsbasedonwhetherornotthereisentailment.
+WinogradSchemaChallenge(WNLI) TheWNLIdataset[51]consistsof1,100sentencepairs
+withambiguouspronounswithdifferentpossiblereferents. Thetaskistopredictifthesentencewith
+thepronounsubstitutedisentailedbytheoriginalsentence.
+25G AdditionalResults
+G.1 Synthetic
+Figure12displaysscatterplotsofthetruehallucinationrateagainsttheposteriorhallucinationrate
+overvariouscontextlengths(numberofin-contextexamples)andvaluesoftheϵparameter. Wecan
+seethatthetrendsreportedSection3.1holdacrossdifferentvaluesforϵ.
+(a)ϵ=0.02
+(b)ϵ=0.05
+(c)ϵ=0.1
+(d)ϵ=0.2
+(e)ϵ=0.5
+Figure12:Syntheticregressiondataablationoftheϵparameter. Scatterplotsofthetruehallucination
+rateagainsttheposteriorhallucinationrate. Weobservethattheposteriorhallucinationrateisan
+accuratepredictorofthetruehallucinationrateundervarioussettingsoftheϵparametervalue.
+Figure13addsadditionalevidenceforourreportedfindingsanddemonstratesperformanceover
+differentϵsettings.
+Figure14showsscatterplotsofthetrueprobabilityofhallucinationvs. thePHRundermisspecified
+ϵvalues. TheTHRiscalculatedunderϵ=0.05. Fromtoptobottomweshowchartsfordifferent
+epsilon values, denoted as ϵ˜, used to calculate the PHR. Notably, when we compare ϵ˜ = 0.1 to
+ϵ˜ = 0.05, we see that for the PHR is a more accurate predictor of the THR when the PHR is
+calculatedwithahigherϵvalue. ThisreflectsourobservationthatthePHRunderestimatestheTHR,
+particularlyforlongercontextlengths(morein-contextexamplesn).
+Mutual information. We also evaluate the mutual information (MI) estimator ( Equation (36))
+asapredictororthetruehallucinationrate(THR).AppendixG.1showsthattheMIestimatesare
+26(a)ϵ=0.02 (b)ϵ=0.05 (c)ϵ=0.1 (d)ϵ=0.2 (e)ϵ=0.5
+Figure 13: Synthetic regression data ablation of the ϵ parameter. Plotting the true and posterior
+hallucinationrates(THRandPHR)againstthenumberofin-contextexamplesn. Weobservethat
+thePHRisagoodpredictoroftheTHRacrossdifferentsettingsofϵ. Further,weobservethatthe
+PHRisamoreaccurateestimatorforsmallϵvaluesthanforlargeϵvalues.
+Figure 14: Synthetic data: Effect of misspecified ϵ. The true value is ϵ = 0.05 and is used to
+calculatetheTHR.Wevarythevalueusedincalculatingtheposteriorhallucinationrate,whichwe
+denoteasϵ˜here.
+significantlycorrelatedwiththeTHR,whichindicatesthattheMIcanalsobeaneffectivepredictor
+ofhallucinations. Figure16allowsustolookdeeperintotherelationshipsbetweentheTHR,PHR,
+andMI.IncomparingFigures16aand16b,weseethatthePHRhasamorelinearrelationshiptothe
+THRthantheMI,whichhasamoresigmoidalrelationshiptotheTHR.Thissigmoidalrelationshipis
+amplifiedwhenplottingthePHRagainsttheMIinFigure16c. ThisprovidesevidencethatthePHR
+andMIencodethesametypeofinformation,andthatthePHRisameasureofepistemicuncertainty.
+G.2 Language
+Table1reportstheresultsofanablationstudyonSST2thatvariesthenumberofgeneratedexamples,
+MCsamples,ysamples,andmodelparameters. WeseethatincreasingthenumberofMCsamples
+andnumberofysamplesshowsimprovementintheR2scoresforbothMHRandtheempiricalerror
+27(a)MIandTHRvs.n (b)Calibration:THRvs.MIagainstdifferentnumbersofcontextexamples
+Figure15: Syntheticdata: (a)TheTHRandMutualInformationreducesignificantlyasthenumber
+ofcontextualexamplesnincreases. (b)Calibrationevaluationofthemutualinformationagainstthe
+trueprobabilityofhallucinationgivenϵ=0.05.
+(a)THRvs.PHR
+(b)THRvs.mutualinformation
+(c)PHRvs.mutualinformation
+Figure16: Syntheticdata: visualizingandquantifyingtherelationshipbetweentheposteriorhalluci-
+nationrateandmutualinformation.
+rate. Whereasincreasingthenumberofgeneratedsamplesormodelsizealoneshowsadecreasein
+performanceonthistask.
+MutualInformation. InFigure19wecomparethemutualinformation(MI)estimatortothethe
+errorrate,modelhallucinationrate,andposteriorhallucinationrate. Figure19ashowsthattheMI
+is significantly correlated with the error rate across tasks. Figure 19b shows that the MI is also
+significantlycorrelatedwiththemodelhallucinationrateacrosstasks. Finally,Figure19cshows
+therelationshipbetweenthemutualinformationandposteriorhallucinationrateacrosstasksand
+contextlengths. ThehighR2valueisfurtherevidencethatbothestimatorsmeasurethesamekindof
+information.
+H ComputationalRequirements
+Forourexperiments,weusedaninternalclustermadeupofA100sandRTX8000s,whichcontained
+between40to48GBsofGPUmemory. Trainingthemodelsusedforthesyntheticexperimentstook
+aboutadayononemachine. Forthemainpapernaturallanguageresults,weran50seedsperdataset,
+whereasingleexperimentseedtookanywherebetween20minutesand4hrs. Wealsoablatedover
+28Table1: SST2,Llama-2ablationofhyperparametersfortheposteriorhallucinationrateestimator
+MHR ErrorRate #Generated #MCSamples #ysamples
+MAE R2 MAE R2 N −n M K #Params
+0.039 0.618 0.041 0.702 5 10 50 7B
+0.045 0.611 0.045 0.705 10 10 50 7B
+0.039 0.618 0.041 0.702 5 10 50 7B
+0.038 0.653 0.041 0.711 5 20 50 7B
+0.039 0.618 0.041 0.702 5 10 50 7B
+0.032 0.681 0.042 0.710 5 10 100 7B
+0.039 0.618 0.041 0.702 5 10 50 7B
+0.040 0.652 0.042 0.764 5 20 100 7B
+0.037 0.689 0.044 0.719 10 20 100 7B
+0.039 0.618 0.041 0.702 5 10 50 7B
+0.033 0.607 0.041 0.669 5 10 50 13B
+0.035 0.669 0.042 0.729 5 20 100 13B
+differentvaluesofMandN(asshowninAppendixG).Weranadditionalexperimentsanddeveloped
+modelswhichrequiredadditionalcomputethatwerenotincludedinthepaper.
+29(a)SST2
+(b)Subjectivity
+(c)AGNews
+(d)MedicalQP
+(e)RTE
+(f)WNLI
+Figure17: Ablatingϵfortheposteriorhallucinationrateestimatoragainstthemodelprobabilityof
+hallucinationforLlama-2-7B.
+30(a)SST2
+(b)Subjectivity
+(c)AGNews
+(d)MedicalQP
+(e)RTE
+(f)WNLI
+Figure18: Ablatingϵfortheposteriorhallucinationrateestimatoragainsttheempiricalerrorratefor
+Llama-2-7B.
+31(a)Mutualinformationanderrorratevs.nexamples.
+(b)MutualinformationandMHRvs.nexamples.
+(c)MutualinformationandPHRvs.nexamples.
+Figure19: Comparingthemutualinformationestimatorto(a)theerrorrate,(b)themodelhallucina-
+tionrate,and(c)theposteriorhallucinationrateusingLlama-2-7B.Weseethattherearesignificant
+correlationstoeithermetricacrosstasks. ThehighR2betweenthemutualinformationandposterior
+hallucinationrateisevidencethattheyquantifysimilarinformation.
+32

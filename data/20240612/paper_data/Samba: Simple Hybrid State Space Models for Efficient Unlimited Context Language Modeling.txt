@@ -1,0 +1,941 @@
+SAMBA: Simple Hybrid State Space Models
+for Efficient Unlimited Context Language Modeling
+LiliangRen1,2∗ YangLiu1† YadongLu1† YelongShen1
+ChenLiang1 WeizhuChen1
+1Microsoft 2UniversityofIllinoisatUrbana-Champaign
+{liliangren,yaliu10,yadonglu,yelong.shen}@microsoft.com
+{chenliang1,wzchen}@microsoft.com
+Abstract
+Efficientlymodelingsequenceswithinfinitecontextlengthhasbeenalong-standing
+problem. Past works suffer from either the quadratic computation complexity
+or the limited extrapolation ability on length generalization. In this work, we
+present SAMBA,asimplehybridarchitecturethatlayer-wisecombinesMamba,
+a selective State Space Model (SSM), with Sliding Window Attention (SWA).
+SAMBA selectively compresses a given sequence into recurrent hidden states
+whilestillmaintainingtheabilitytopreciselyrecallmemorieswiththeattention
+mechanism. Wescale SAMBA upto3.8Bparameterswith3.2Ttrainingtokens
+andshowthatSAMBAsubstantiallyoutperformsthestate-of-the-artmodelsbased
+on pure attention or SSMs on a wide range of benchmarks. When trained on
+4K length sequences, SAMBA can be efficiently extrapolated to 256K context
+length with perfect memory recall and show improved token predictions up to
+1M context length. As a linear-time sequence model, SAMBA enjoys a 3.73×
+higherthroughputcomparedtoTransformerswithgrouped-queryattentionwhen
+processinguserpromptsof128Klength,and3.64×speedupwhengenerating64K
+tokenswithunlimitedstreaming. AsampleimplementationofSAMBAispublicly
+availableinhttps://github.com/microsoft/Samba.
+1 Introduction
+Attention-basedmodels[VSP+17,BCB14]havedominatedtheneuralarchitecturesofLargeLan-
+guageModels(LLMs)[RWC+19,BMR+20,Ope23,BCE+23]duetotheirabilitytocapturecom-
+plex long-term dependencies and the efficient parallelization for large-scale training [DFE+22].
+Recently, State Space Models (SSMs) [GGR21, SWL23, GGGR22, GD23] have emerged as a
+promisingalternative,offeringlinearcomputationcomplexityandthepotentialforbetterextrapola-
+tiontolongersequencesthanseenduringtraining. Specifically,Mamba[GD23],avariantofSSMs
+equippedwithselectivestatespaces,hasdemonstratednotablepromisethroughstrongempirical
+performanceandefficienthardware-awareimplementation. Recentworkalsoshowsthattransformers
+havepoorermodelingcapacitiesthaninput-dependentSSMsinstatetrackingproblems[MPS24].
+However,SSMsstrugglewithmemoryrecallduetotheirMarkoviannature[AET+23],andexper-
+imental results on information retrieval-related tasks [FDS+23, WDL24, AEZ+24], have further
+shownthatSSMsarenotascompetitiveastheirattention-basedcounterparts.
+Previous works [ZLJ+22, FDS+23, MZK+23, RLW+23] have explored different approaches to
+hybridizeSSMsandtheattentionmechanism,butnoneofthemachieveunlimited-lengthextrapolation
+∗WorkpartiallydoneduringinternshipatMicrosoft.
+†Equalsecond-authorcontribution.
+Preprint.Underreview.
+4202
+nuJ
+11
+]LC.sc[
+1v22570.6042:viXraModels
+5.50 Samba 1.7B
+Mamba 1.8B
+5.25 Llama-3 1.6B
+SE-Llama-3 1.6B
+Mistral 1.6B
+5.00
+4.75
+4.50
+4.25
+4.00
+3.75
+1K 2K 4K 8K 16K 32K 64K 128K256K512K 1M
+Context Length
+(a)PerplexityonthetestsetofProof-Pile (b)Decodingthroughputwithabatchsizeof16
+Figure 1: SAMBA shows improved prediction up to 1M tokens in the Proof-Pile test set while
+achievinga3.64×fasterdecodingthroughputthantheLlama-3architecture[Met24](astate-of-the-
+artTransformer[VSP+17]withGrouped-QueryAttention[ALTdJ+23])on64Kgenerationlength.
+WealsoincludeanSE-Llama-31.6BbaselinewhichappliestheSelfExtend[JHY+24]approachfor
+zero-shotlengthextrapolation. ThroughputmeasuredonasingleA10080GBGPU.Allmodelsare
+trainedonthePhi-2[LBE+23]datasetwith4Ksequencelength.
+withlinear-timecomplexity. Theexistinglengthgeneralizationtechniques[HWX+23,XTC+23,
+JHY+24]developedfortheattentionmechanismsufferfromquadraticcomputationcomplexityor
+limitedcontextextrapolationability. Inthispaper,weintroduceSAMBA,asimpleneuralarchitecture
+thatharmonizesthestrengthsofboththeSSMandtheattention-basedmodels,whileachievingan
+unlimitedsequencelengthextrapolationwithlineartimecomplexity. SAMBAcombinesSSMswith
+attentionthroughlayer-wiseinterleavingMamba[GD23],SwiGLU[Sha20],andSlidingWindow
+Attention (SWA) [BPC20]. Mamba layers capture the time-dependent semantics and provide a
+backbone for efficient decoding, while SWA fills in the gap modeling complex, non-Markovian
+dependencies.
+WescaleSAMBAwith421M,1.3B,1.7Bandupto3.8Bparameters. Inparticular,thelargest3.8B
+base model pre-trained with 3.2T tokens achieves a 71.2 score for MMLU [HBB+21], 54.9 for
+HumanEval[CTJ+21],and69.6forGSM8K[CKB+21],substantiallyoutperformingstrongopen
+sourcelanguagemodelsupto8Bparameters,asdetailedinTable1. Despitebeingpre-trainedinthe
+4Ksequencelength,SAMBAcanbeextrapolatedto1Mlengthinzeroshotwithimprovedperplexity
+onProof-Pile[ZAP22]whilestillmaintainingthelineardecodingtimecomplexitywithunlimited
+tokenstreaming,asshowninFigure1. Weshowthatwheninstruction-tunedina4Kcontextlength
+with only 500 steps, SAMBA can be extrapolated to a 256K context length with perfect memory
+recallinPasskeyRetrieval[MJ23]. Incontrast,thefine-tunedSWA-basedmodelsimplycannotrecall
+memoriesbeyond4Klength. Wefurtherdemonstratethattheinstruction-tunedSAMBA3.8Bmodel
+canachievesignificantlybetterperformancethantheSWA-basedmodelsondownstreamlong-context
+summarizationtasks,whilestillkeepingitsimpressiveperformanceontheshort-contextbenchmarks.
+Finally,weconductrigorousandcomprehensiveanalyzesandablationstudies,encompassingupto
+1.7billionparameters,tovalidatethearchitecturaldesignofSAMBA. Thesemeticulousinvestigations
+notonlyjustifyourarchitecturaldesignsbutalsoelucidatethepotentialmechanismsunderpinning
+theremarkableeffectivenessofthissimplehybridapproach.
+2 Methodology
+WeexploredifferenthybridizationstrategiesconsistingofthelayersofMamba,SlidingWindow
+Attention(SWA),andMulti-LayerPerceptron[Sha20,DFAG16]. Weconceptualizethefunctionality
+ofMambaasthecaptureofrecurrentsequencestructures,SWAasthepreciseretrievalofmemory,
+andMLPastherecalloffactualknowledge. Wealsoexploreotherlinearrecurrentlayersincluding
+Multi-Scale Retention [SDH+23] and GLA [YWS+23] as potential substitutions for Mamba in
+2
+ytixelprePSection3.2. Ourgoalofhybridizationistoharmonizebetweenthesedistinctfunctioningblocksand
+findanefficientarchitectureforlanguagemodelingwithunlimited-lengthextrapolationability.
+2.1 Architecture
+AsillustratedinFigure2,weexplorethreekindsoflayerwisehybridizationstrategiesonthe1.7B
+scale: Samba,Mamba-SWA-MLP,andMamba-MLP.Wealsoexploreotherhybridizationapproaches
+withfullself-attentiononsmallerscalesinSection4. ThenumberoflayersN issetto48forSamba,
+Mamba-MLP,andMamba,whileMamba-SWA-MLPhas54layers,soeachmodelhasapproximately
+1.7Bparameters. Weonlymodifythelayer-levelarrangementforeachofthemodelsandkeepevery
+otherconfigurationthesametohaveapple-to-applecomparisons. Moredetailsontheconfiguration
+ofeachlayerareexplainedinthefollowingsubsections.
+Figure2: Fromlefttoright: Samba,Mamba-SWA-MLP,Mamba-MLP,andMamba. Theillustrations
+depictthelayer-wiseintegrationofMambawithvariousconfigurationsofMulti-LayerPerceptrons
+(MLPs)andSlidingWindowAttention(SWA).Weassumethetotalnumberofintermediatelayersto
+beN,andomittheembeddinglayersandoutputprojectionsforsimplicity. Pre-Norm[XYH+20,
+ZS19]andskipconnections[HZRS16]areappliedforeachoftheintermediatelayers.
+2.1.1 MambaLayer
+Mamba [GD23] is a recently proposed SSM-based model with selective state spaces. It enables
+input-dependentgatingtoboththerecurrentstatesandtheinputrepresentationforasoftselection
+oftheinputsequenceelements. GivenaninputsequencerepresentationX ∈ Rn×dm,wherenis
+thelengthofthesequenceandd isthehiddensize,Mambafirstexpandstheinputstoahigher
+m
+dimensiond ,i.e.,
+e
+H=XW ∈Rn×de
+in
+whereW
+in
+∈Rdm×de isalearnableprojectionmatrix. ThenaShortConvolution(SC)[PMN+23]
+operatorisappliedtosmooththeinputsignal,
+U=SC(H)=SiLU(DepthwiseConv(H,W )) ∈Rn×de (1)
+conv
+whereW
+conv
+∈Rk×de andthekernelsizekissetto4forhardware-awareefficiency. TheDepthwise
+Convolution [HQW+19] is applied over the sequence dimension followed by a SiLU [EUD17]
+activationfunction. Theselectivegateisthencalculatedthroughalow-rankprojectionfollowedby
+Softplus[ZYL+15],
+∆=Softplus(UWW +b) ∈Rn×de (2)
+r q
+where W
+r
+∈ Rde×dr, W
+q
+∈ Rdr×de and d
+r
+is the low-rank dimension. b ∈ Rde is carefully
+initializedsothat∆∈[∆ ,∆ ]aftertheinitializationstage. Weset[∆ ,∆ ]=[0.001,0.1],
+min max min max
+andfindthatthesevaluesarenotsensitivetolanguagemodelingperformanceundertheperplexity
+metric. TheinputdependenceisalsointroducedfortheparametersBandCofSSM,
+B=UW ∈Rn×ds
+b
+C=UW ∈Rn×ds
+c
+3whered isthestatedimension. Foreachtimestep1≤t≤n,therecurrentinferenceoftheSelective
+s
+SSM(S6)isperformedinanexpandedstatespaceZ
+t
+∈Rde×ds,i.e.,
+Z =exp(−∆ ⊙exp(A))⊙Z +∆ ⊙(B ⊗U ) ∈Rde×ds
+t t t−1 t t t
+Y =Z C +D⊙U ∈Rde
+t t t t
+where Z = 0, ⊙ means the point-wise product, ⊗ means the outer product and exp means the
+0
+point-wisenaturalexponentialfunction. D ∈ Rde isalearnablevectorinitializedasD
+i
+= 1and
+A∈Rde×ds isalearnablematrixinitializedasA
+ij
+=log(j),1≤j ≤d s,followingtheS4D-Real
+[GGGR22]initialization. Inpractice,Mambaimplementsahardware-awareparallelscanalgorithm
+forefficientparallelizabletraining. Thefinaloutputisobtainedthroughagatingmechanismsimilar
+toGatedLinearUnit[Sha20,DFAG16],
+O=Y⊙SiLU(XW )W ∈Rn×dm
+g out
+whereW
+g
+∈Rdm×de andW
+out
+∈Rde×dm arelearnableparameters. Inthiswork,wesetd
+e
+=2d m,
+d
+r
+=d m/16,andd
+s
+=16. TheMambalayerinSAMBAisexpectedtocapturethetime-dependent
+semanticsoftheinputsequencethroughitsrecurrentstructure. Theinputselectionmechanisminthe
+Mambalayerenablesthemodeltofocusonrelevantinputs,therebyallowingthemodeltomemorize
+importantinformationinthelongterm.
+2.1.2 SlidingWindowAttention(SWA)Layer
+TheSlidingWindowAttention[BPC20]layerisdesignedtoaddressthelimitationsoftheMamba
+layerincapturingnon-Markoviandependenciesinsequences. OurSWAlayeroperatesonawindow
+size w = 2048 that slides over the input sequence, ensuring that the computational complexity
+remainslinearwithrespecttothesequencelength. TheRoPE[SLP+21]relativepositionsareapplied
+withintheslidingwindow.Bydirectlyaccessingthecontentsinthecontextwindowthroughattention,
+theSWAlayercanretrievehigh-definitionsignalsfromthemiddletoshort-termhistorythatcannot
+be clearly captured by the recurrent states of Mamba. We use FlashAttention 2 [Dao23] for the
+efficientimplementationofself-attentionthroughoutthiswork. Wealsochoosethe2048sliding
+windowsizeforefficiencyconsideration;FlashAttention2hasthesametrainingspeedasMamba’s
+selectiveparallelscanatthesequencelengthof2048basedonthemeasurementsin[GD23].
+2.1.3 Multi-LayerPerceptron(MLP)Layer
+TheMLPlayersinSAMBAserveasthearchitecture’sprimarymechanismfornonlineartransformation
+and recall offactualknowledge [DDH+22]. Weuse SwiGLU [Sha20] for allthe models trained
+inthispaperanddenoteitsintermediatehiddensizeasd . AsshowninFigure2,Sambaapplies
+p
+separateMLPsfordifferenttypesofinformationcapturedbyMambaandtheSWAlayers.
+3 ExperimentsandResults
+Wepre-trainfour SAMBA modelswithdifferentparametersizes, 421M,1.3B,1.7Band3.8B,to
+investigateitsperformanceacrossdifferentscales. Thedetailsofthehyperparametersforthetraining
+andarchitecturedesignsareshowninTable10ofAppendixA.Wealsotrainotherhybridarchitectures
+asmentionedinSection2.1,includingthebaselineMamba,Llama-3,andMistralarchitectureona
+scaleofaround1.7B,withdetailedhyperparametersinTable9ofAppendixA.Wedocomprehensive
+downstream evaluations on a wide range of benchmarks, focusing on four main capabilities of
+themodels: commonsensereasoning(ARC[CCE+18],PIQA[BZB+20],WinoGrande[SBBC21],
+SIQA[SRC+19]),languageunderstanding(HellaSwag[ZHB+19],BoolQ[CLC+19],OpenbookQA
+[MCKS18],SQuAD[RZLL16],MMLU[HBB+21]),truthfulness(TruthfulQA[LHE22])andmath
+andcoding(GSM8K[CKB+21],MBPP[AON+21],HumanEval[CTJ+21]).
+3.1 LanguageModelingonTextbookQualityData
+Wefirstpresentresultsfromourlargest3.8BSAMBAmodel,trainedonthesamedatasetusedby
+Phi3[AJA+24]with3.2Ttokens. Wefollowthesamemulti-phasepretrainingstrategyasPhi3-mini
+forafaircomparison. WealsoreporttheperformanceoftheTransformer++(TFM++inTable1)
+model, which uses the same architecture and training recipe as Phi3-mini, for a fair comparison.
+4InTable1,weconductcomprehensiveevaluationsonadiversesubsetofthebenchmarkstoassess
+SAMBA’sperformanceacrossallthedomainsmentionedabovetoensureathoroughexaminationof
+themodel’scapabilities. ThedetailsofthegenerationconfigurationsareincludedinAppendixA.
+Table1: DownstreamperformancecomparisonofSAMBA3.8Bwithotherpretrainedbaselanguage
+modelswithoutinstructiontuning. ARC-CandHellaSwagaremeasuredwithcharacter-normalized
+accuracy. MMLUandGSM8Karemeasuredin5-shot,whileothersareinzero-shot. Wereportthe
+MC2scoreforTruthfulQA,maj@1forGSM8K,andpass@1forHumanEval. ∗Measuredbyours.
+Hella- ARC- Wino- Truth. GSM Hum. Avg.
+Model Size Tokens MMLU
+Swag C Gran. QA 8K Eval
+Llama2 6.7B 2T 45.3 77.2 45.9 69.2 38.8 14.6 12.8 43.4
+13B 2T 54.8 80.7 49.4 72.8 37.4 28.7 18.3 48.9
+Mistral 7.2B - 60.1 81.3 55.5 75.3 42.2 35.4 30.5 53.6
+Mamba 2.8B 600B 26.2 71.0 41.7 65.9 34.4∗ 3.6∗ 7.3∗ 35.7
+Gemma 2.5B 3T 42.3 71.4 42.1 65.4 33.1 17.7 22.0 42.0
+8.5B 6T 64.3 81.2 53.2 72.3 44.8 46.4 32.3 56.4
+R-Gemma 2.7B 2T 38.4 71.0 42.3 67.8 35.1 13.4 21.3 41.3
+Llama3 8.0B 15T+ 66.6 79.2∗ 53.2∗ 72.6∗ 43.9 45.8 28.7∗ 55.8
+TFM++ 3.8B 3.2T 67.2 76.6 53.8 72.6 47.3 51.5 51.8 60.1
+SAMBA 3.8B 3.2T 71.2 77.4 55.7 77.1 43.4 69.6 54.9 64.2
+Wecomparewithseveralstrongbaselines,includingLlama2[TMS+23],Mistral[JSM+23],Mamba
+[GD23],Gemma[Tea24],Recurrent-Gemma(R-Gemma)[BDS+24],Llama3[Met24]andTFM++.
+AsshowninTable1,SAMBAachievesthehighestaveragescoreonallbenchmarks,demonstrating
+itssuperiorperformanceinhandlingvariouslanguagecomprehensiontasks. Notably,SAMBAexcels
+intheGSM8Kbenchmark,achievinganabsolute18.1%higheraccuracythanTFM++trainedonthe
+samedataset. ThisshowsthesurprisingcomplementaryeffectofcombiningSSMwiththeattention
+mechanism. Weconjecturethatwhencombinedwithattention,Mamba,asaninput-dependentSSM,
+canfocusmoreonperformingthearithmeticoperationthroughitsrecurrentstatesthanondoingthe
+retrievaloperationwhichcanbeeasilylearnedbytheslidingwindowattention.
+Table 2: Downstream evaluation of the architectures trained on 230B tokens of the Phi2 dataset.
+Wereporttheunnormalizedaccuracyformultiplechoicetasks. GSM8Kisevaluatedwith5-shot
+exampleswhileothertasksareinzero-shot. Bestresultsareinbold,secondbestunderlined.
+Llama-3 Mistral Mamba Mamba-SWA- Mamba- SAMBA
+Benchmark
+1.6B 1.6B 1.8B MLP1.6B MLP1.9B 1.7B
+ARC-Easy 76.85 77.02 77.99 76.68 78.91 79.25
+ARC-Challenge 43.26 44.20 45.22 46.16 47.35 48.21
+PIQA 76.66 75.79 77.31 76.50 78.84 77.10
+WinoGrande 70.01 70.72 73.40 73.72 72.38 72.93
+SIQA 51.23 52.00 53.12 55.12 54.30 53.68
+HellaSwag 46.98 47.19 49.80 49.71 50.14 49.74
+BoolQ 68.20 70.70 74.83 74.74 73.70 75.57
+OpenbookQA 34.00 32.80 36.60 33.80 35.40 37.20
+SQuAD 74.88 72.82 67.66 76.73 63.86 77.64
+MMLU 43.84 43.54 45.28 47.39 43.68 48.01
+TruthfulQA(MC1) 25.70 25.09 26.81 26.20 26.44 27.78
+TruthfulQA(MC2) 40.35 38.80 40.66 40.80 40.04 41.62
+GSM8K 32.68 32.45 32.07 44.05 27.52 38.97
+MBPP 46.30 47.08 47.86 47.08 47.08 48.25
+HumanEval 36.59 36.59 35.98 37.80 31.10 39.02
+Average 51.17 51.12 52.31 53.77 51.38 54.33
+5ToexaminethedifferenthybridizationstrategiesmentionedinSection2.1,wetrain6modelswith
+around1.7BparametersonthePhi2[LBE+23]datasetwith230Btokensandevaluatetheminthefull
+suiteof15downstreambenchmarkstohaveaholisticassessmentofhybridandpurebredarchitectures.
+AsshowninTable2,SAMBAdemonstratessuperiorperformanceonadiversesetoftasks,including
+commonsensereasoning(ARC-Challenge),languageunderstanding(MMLU,SQuAD),TruthfulQA
+andcodegeneration(HumanEval,MBPP).Itoutperformsboththepureattention-basedandSSM-
+basedmodelsinmosttasksandachievesthebestaverageperformance. Wecanobservethatreplacing
+MambablockswithMLPsdoesnotharmcommonsensereasoningability,butitsperformanceon
+languageunderstandingandcomplexreasoningability,suchascodingandmathematicalreasoning,
+degeneratessignificantly. WecanalsoseethatpureMambamodelsfallshortonretrievalintensive
+tasks such as SQuAD due to their lack of precise memory retrieval ability. The best results are
+achievedthroughthecombinationoftheattentionandMambamodules,asshownwithourSamba
+architecture. WecanalsonoticethatMamba-SWA-MLPhassignificantlybetterperformanceon
+GSM8K,potentiallyresultingfromaclosercollaborationbetweentheMambaandtheSWAlayers.
+Thedistinctdownstreamperformancesofdifferenthybridizationstrategiesposeinterestingfuture
+workfordevelopingtask-adaptivedynamicarchitectures.
+3.2 ExplorationonAttentionandLinearRecurrence
+Since SSMs belong to a broader realm of linear recurrent models [OSG+23, QYZ23, YWS+23,
+Kat23, QYS+24], there exist multiple alternatives other than Mamba when combing attention-
+basedlayerswithrecurrentneuralnetworks. InadditiontoMambaandSamba,weinvestigatethe
+comparativeanalysisofthefollowingarchitectures:
+• Llama-2[TMS+23]isanattention-basedTransformerarchitecturethatutilizesfullself-
+attentionacrosstheentiresequence.
+• Llama-2-SWAisanattention-basedarchitecturethatreplacesallfullattentionlayersin
+Llama-2withslidingwindowattention.
+• SlidingRetNetreplacesMambalayersintheSambaarchitecturewithMulti-ScaleRetention
+[SDH+23]layers. RetNetisalinearattentionmodelwithfixedandinput-independentdecay
+applyingtotherecurrenthiddenstates.
+• Sliding GLA replaces Mamba layers in the Samba architecture with Gated Linear At-
+tention (GLA) [YWS+23]. GLA is a more expressive variant of linear attention with
+input-dependentgating.
+Table3: PerplexityonthevalidationsetofSlimPajamafordifferentattentionandlinearrecurrent
+modelarchitecturestrainedat4,096contextlength. Weusewindowsize2,048forSlidingWindow
+Attention(SWA).Theperplexityresultshaveafluctuationaround±0.3%.
+TrainingSpeed ValidationContextLength
+Architecture Size Layers
+(×105tokens/s) 4096 8192 16384
+20Btrainingtokenson8×A100GPUs
+Llama-2 438M 24 4.85 11.14 47.23 249.03
+Llama-2-SWA 438M 24 4.96 11.12 10.66 10.57
+Mamba 432M 60 2.46 10.70 10.30 10.24
+SlidingGLA 438M 24 4.94 10.43 10.00 9.92
+SlidingRetNet 438M 24 4.32 10.38 9.96 9.87
+SAMBA 421M 24 4.46 10.06 9.65 9.57
+100Btrainingtokenson64×H100GPUs
+Llama-2 1.3B 40 25.9 7.60 44.32 249.64
+Llama-2-SWA 1.3B 40 26.2 7.60 7.37 7.21
+Mamba 1.3B 48 17.8 7.47 7.26 7.15
+SlidingGLA 1.2B 36 25.9 7.58 7.35 7.19
+SlidingRetNet 1.4B 36 23.0 7.56 7.35 7.56
+SAMBA 1.3B 36 25.2 7.32 7.11 6.96
+6We pre-train all models on the same SlimPajama [SAKM+23] dataset under both around 438M
+and1.3Bsettings, andevaluatethesemodelsbycalculatingperplexityonthevalidationsetwith
+contextlengthat4096,8192,and16384tokenstoinvestigatetheirzero-shotlengthextrapolation
+ability. Peak training throughput is also measured as an efficiency metric. The details of the
+hyperparameter settings are included in Appendix A. As shown in Table 3, SAMBA consistently
+outperformsallothermodelsindifferentcontextlengthsandmodelsizes. Thetrainingspeedof
+SAMBAiscompetitivecomparedtopureTransformer-basedmodelsonthe1.3Bscale. Mambahas
+significantlyworsetrainingthroughputbecauseMambalayershaveslowertrainingspeedthanMLP
+layers,andthepurebredMambamodelsneedtohavemorelayersthanothermodelsatthesame
+numberofparameters. Wecannoticethatthefullattention-basedmodelcannotextrapolatebeyond
+itscontextlengthwithoutspecificlengthextrapolationtechniques,whichmotivatesustouseSWAfor
+Samba. InSection4,wefurthershowthatevenhybridizingwithonefullattentionlayerwillstilllead
+toexplodingperplexityat16ksequencelength. WecanalsofindthatwhileRetNetcanextrapolate
+wellunderthe438Mscale,ithasanincreasingperplexityon16Klengthatthe1.4Bscale,whichmay
+indicatethatitsinput-independentdecaymayneedspecifictuningatdifferentscalestoworkwell.
+3.3 EfficientLengthExtrapolation
+We use the test split of the Proof-Pile [ZAP22]
+datasettoevaluatethelengthextrapolationability
+ofourmodelsatascaleofaround1.7Bparameters.
+We follow Position Interpolation [CWCT23] for
+datapre-processing. Theslidingwindowapproach
+[PSL21]isusedfortheperplexityevaluationwitha
+windowsizeof4096. Besideshavingthedecoding
+throughputinFigure1forthegenerationefficiency
+metric, we also measure the prompt processing
+speed in Figure 3 for the models SAMBA 1.7B,
+Mistral1.6B,Mamba1.8B,Llama-31.6Bandits
+Self-Extended[JHY+24]versionSE-Llama-31.6B
+withthepromptlengthsweepingfrom1Kto128K.
+We set the group size to 4 and the neighborhood
+windowto1024forself-extension. Wefixthetotal
+Figure3: Promptprocessingthroughputofdif-
+processingtokenspermeasurementtobe128Kand
+ferentmodelswitharound1.7Bparameters.
+varyingthebatchsizeaccordingly. Thethroughput
+ismeasuredonasingleA100GPUwiththeprecisionofbfloat16. Werepeatthemeasurements10
+timesandreporttheaveragedresults. WecanseethatSambaachieves3.73×higherthroughputin
+promptprocessingcomparedtoLlama-31.6Batthe128Kpromptlength,andtheprocessingtime
+remainslinearwithrespecttothesequencelength. Wecanalsoobservethattheexistingzero-shot
+lengthextrapolationtechniqueintroducessignificantinferencelatencyoverheadonthefull-attention
+counterpart,whileitstillcannotextrapolateinfinitelywithperplexityperformancecomparabletothat
+ofSamba. InFigure1,wecanalsoseethatMambahasaslowlyandstablyincreasingperplexityup
+to1Msequencelength,whichindicatesthatlinearrecurrentmodelscanstillnotextrapolateinfinitely
+ifthecontextlengthisextremelylarge.
+Beyond its efficiency in processing long context, Samba can also extrapolate its memory recall
+abilityto256Kcontextlengththroughsupervisedfine-tuning,andstillkeepsitslinearcomputation
+complexity. We fine-tune Samba 1.7B on Passkey Retrieval with a 4K training sequence length
+foronly500steps. AspresentedinFigure4, SAMBA 1.7Bdemonstratesaremarkableabilityto
+recallinformationfromsignificantlylongercontextscomparedtoMistral1.6B,amodelbasedsolely
+onSlidingWindowAttention(SWA).Thiscapabilityisparticularlyevidentintheheatmap,where
+SAMBAmaintainstheperfectretrievalperformanceacrossawiderrangeofpass-keypositionsina
+longdocumentofupto256Klength. Wealsodrawthetraininglosscurveandtheoverallpasskey
+retrievalaccuracyacrossthefine-tuningprocedureinFigure6andFigure7ofAppendixB.Wefind
+thatdespitethefactthatbotharchitecturescanreachnear-zerotraininglossinlessthan250steps,
+Sambacanachievenear-perfectretrievalearlyat150trainingsteps,whiletheMistralarchitecture
+strugglesataround30%accuracythroughoutthetrainingprocess. ThisshowsthatSambacanhave
+betterlong-rangeretrievalabilitythanSWAduetotheinputselectionmechanismintroducedbythe
+Mambalayers.
+73.4 Long-ContextUnderstanding
+Theimpressiveresultsonthesyntheticpasskey
+0.0
+retrievaltaskencourageustoperformfull-cycle 10.0 1.0
+20.0
+instructiontuningoftheSamba-3.8Bmodel.We 30.0 0.8
+40.0
+followthesamepost-trainingrecipeusedforthe 50.0 0.6
+Phi-3-miniseriesandevaluatethedownstream 60.0 0.4
+70.0
+performance of the instruction-tuned Samba- 80.0 0.2
+90.0
+3.8B-IT (preview) on both the long-context 100.0 0.0
+summarization tasks (GovReport [HCP+21],
+4k 8k 16k Toke3n2 Lkimit 64k 128k 256k 4k 8k 16k Toke3n2 Lkimit 64k 128k 256k
+Figure 4: Passkey Retrieval performance up to
+SQuALITY [WPC+22]) and the main short-
+256K context length for SAMBA 1.7B (Left) vs.
+context benchmarks (MMLU, GSM8K, Hu-
+Mistral 1.6B (right) instruction tuned on 4K se-
+manEval), as shown in Table 4. We can see
+quencelengthwith500steps.
+thatSambahassubstantiallybetterperformance
+than Phi-3-mini-4k-instruct on both the short-context (MMLU, GSM8K, HumanEval) and long-
+context(GovReport)tasks,whilestillhavingthe2048windowsizeofitsSWAlayerandmaintaining
+thelinearcomplexityforefficientprocessingoflongdocuments.
+Table4: Downstreamperformancecomparisonbetweeninstruction-tunedSamba3.8BandPhi-3-
+mini-4K on both long-context and short-context tasks. We report 5-shot accuracy (averaged by
+category)forMMLU,8-shotCoT[WWS+22]forGSM8K,0-shotpass@1forHumanEval,ROUGE-
+LforbothGovReportandSQuALITY.†ResultsfromthePhi-3technicalreport[AJA+24].
+Model MMLU GSM8K HumanEval GovReport SQuality
+Phi-3-mini-4K-instruct† 68.8 82.5 58.5 14.4 21.6
+Samba-3.8B-IT(preview) 71.9 87.6 62.8 18.9 21.2
+4 Analysis
+Inthissection,weanalyzetheexperimentalresultsofSAMBAbyansweringthefollowingresearch
+questions. TheperplexityresultsonSlimPajamahaveafluctuationaround±0.3%. Trainingspeedis
+measuredon8×H100GPUsbydefault. AllthemodelsinthissectionaretrainedonSlimPajama
+with20Btokensand4Ksequencelength,unlessotherwisespecified.
+HowtotrainmodelswithSlidingWindowAttention(SWA)? SinceSWAhaslinearcomplexity
+with respect to the sequence length, it seems alluring to trade off the batch size to have a longer
+trainingsequencelengthwithoutsubstantiallydecreasingthetrainingthroughput. However,asshown
+in Table 5, when the sequence length is increased, the validation perplexity also increases in all
+contextlengthsduetosmallerbatchsizes, andtheoptimalratioofsequencelength/windowsize
+observedis2,resultinginatraininglengthof4096.
+Table5: PerplexityonSlimPajamaofLlama-2-SWA438Mmodelstrainedondifferentcontextsizes
+andbatchsizes. Wefixtheslidingwindowsizeas2048andthetrainingtokensperstepas2M.
+TrainingSpeed ValidationContextLength
+BatchSize SequenceLength
+(×105tokens/s) 2048 4096 8192 16384
+1024 2048(FullAttention) 10.4 11.59 38.12 156.18 357.32
+512 4096 9.88 11.87 11.16 10.69 10.61
+256 8192 9.66 11.98 11.26 10.79 10.69
+128 16384 9.48 12.37 11.63 11.12 11.02
+64 32768 9.29 12.94 12.46 11.96 11.86
+Why not hybridize with full attention? Some previous works [FDS+23, LLB+24] suggest a
+hybridarchitectureofMambawithfullattention. However,asshowninTable6,theextrapolation
+perplexityisexplodingatacontextlengthof16kevenifasinglefullattentionlayerisplacedatthe
+beginningofthemodel. SambaalsohasmuchbettertrainingthroughputcomparedtoMamba-MLP
+8
+tnecreP
+htpeD erocSalternativesbecauseself-attentionwiththeFlashAttention2implementationismoretrainingefficient
+thanMambawhenthesequencelengthis4096.
+Table6: PerplexityonSlimPajamaofMamba-MLParchitectureswithfullattentionlayersreplacing
+Mamba layers at different block indices. We define a block as two consecutive layers with a
+Mamba/AttentionlayerfollowedbyanMLP.Allthemodelshave12blocksintotal.
+BlockIndex TrainingSpeed ValidationContextLength
+Architecture Size
+ofFullAttention (×105tokens/s) 4096 8192 16384
+449M 11 7.78 10.29 10.53 13.66
+449M 5 7.78 10.10 10.05 12.83
+Mamba-MLP
+449M 0 7.78 10.89 10.55 10.63
+443M 1,5 7.93 10.06 10.34 13.57
+SAMBA 421M SWAatoddindices 8.59 10.06 9.65 9.57
+HowmanyparametersshouldbeallocatedtoAttention? GiventhatMambacanalreadycapture
+low-rankinformationinthesequencesthroughrecurrentcompression,theattentionlayersinSamba
+theoreticallywillonlyneedtofocusoninformationretrievalwhereasmallnumberofattentionheads
+shouldsuffice. InTable7,weexplorethetechniquesofqueryheadgrouping[ALTdJ+23,Sha19],
+forboththeLlamaandSambamodels. Surprisingly,boththeLlama-2-SWAarchitectureandthe
+Sambaarchitectureshowimprovedvalidationperplexitywhenthereisonlyonekey-valuehead. We
+conjecturethatthisisbecausesmalllanguagemodelscanbemoreeasilyoptimizedwithfewerKV
+headstopayattentiontothecontexts. WecanalsoseethatSambahasa2×smalleroptimalnumber
+ofqueryheadsthantheSWAmodel,whichconfirmsourhypothesisthatSambacansupportasmaller
+numberofattentionheads.
+Table7: PerplexityonSlimPajamaofLlama-2-SWAandSambamodelsatthe430Mscalestrained
+with different number of Query and Key-Value heads. “KV Size” means the size of Key-Value
+vectorspertoken. Sincegroupedqueryattentionwillreducetheparametersforattentionfrom4d2
+m
+toroughly2d2 ,weincreasethehiddensizeofMLPfrom8/3d to3d =4608tohaveroughly
+m m m
+thesamenumberoftotalparametersastheoriginalmodels.
+Query Key-Value Head KV Model TrainingSpeed ValidationContextLength
+Head Head Dim. Size Size (×105tokens/s) 4096 8192 16384
+Llama-2-SWAArchitecture
+12 2 128 512 419M 10.01 11.11 10.64 10.56
+6 1 256 512 419M 9.98 11.09 10.62 10.54
+12 1 128 256 414M 10.25 10.89 10.44 10.35
+12 4 128 1024 428M 9.85 11.11 10.64 10.56
+SambaArchitecture
+12 2 128 512 426M 8.55 10.09 9.68 9.60
+6 1 256 512 426M 8.46 9.99 9.59 9.51
+12 1 128 256 424M 8.62 10.07 9.66 9.58
+12 4 128 1024 431M 8.57 10.02 9.62 9.55
+Whyhybridisbetter? WeexaminetheentropyoftheattentiondistributionsforboththeSamba
+1.7BandtheMistral1.6Bmodels. AsshowninFigure5a,theSambamodelhasalargervariance
+oftheattentionentropydistributedoverthelayerindices,withaninterestingpatternthattheupper
+andlowerlayershaveentropyhigherthanthemiddlelayers. Thismayindicatethattheattention
+layersaremorespecializedintheSambaarchitecture,withthemiddlelayersfocusingonprecise
+retrievalwithlow-entropyattention,andthetopandbottomlayersfocusingonintegratingtheglobal
+information through high-entropy attention. We can also see in Figure 5b that, compared to the
+Mamba-MLPmodel,Sambahasahigherentropyofinputselectionprobabilitiesinthemiddlelayers.
+Thisindicatesthat,giventhememoryrecallingabilityoftheattentionlayers,theMambalayerscan
+focusmoreonmodelingtherecurrentstructureratherthanperformingretrievalwithpreciseinput
+selections. This kind of specialization can be beneficial for the downstream model performance,
+9whichmayexplaintheimpressiveresultsfromtheSambaarchitecture. Detailsonhowentropyis
+calculatedareincludedinAppendixC.
+6.6
+Mistral 1.6B
+5 Samba 1.7B
+6.4
+4
+6.2
+3
+2 6.0
+1 5.8 Mamba-MLP 1.9B
+Samba 1.7B
+0 1 3 5 7 9 11 13 15 17 19 21 23 0 5 10 15 20
+Block Index Block Index
+(a)Averageattentionentropyperdecodingstep (b)AverageS6selectionentropyonfullsequences
+Figure 5: The average entropy of the attention mechanism and the Mamba’s S6 input selection
+mechanismateachblockoflayerson100randomsamplesfromtheGSM8Kdataset.
+Table8: PerplexityontheSlimPajamavalidationsetofdifferentlinearrecurrentandslidingwindow
+attentionmodelswithShortConvolution(SC)modulesaddedseparatelytoquery, keyandvalue
+representations. Forhybridmodels,SCisappliedonlytolinearattentionlayers. Thetrainingspeed
+ismeasuredon8×A100GPUs.
+TrainingSpeed ValidationContextLength
+Architecture Size
+(×105tokens/s) 4096 8192 16384
+Llama-2-SWA 438M 4.96 11.12 10.66 10.57
++SC 438M 4.69 10.83 10.39 10.31
+SlidingGLA 438M 4.94 10.43 10.00 9.92
++SC 438M 4.44 10.39 9.96 9.87
+SlidingRetNet 438M 4.32 10.38 9.96 9.87
++SC 438M 3.80 10.25 9.82 9.74
+FaircomparisonbetweenMambaandotherlinearrecurrentmodels? Wecannoticethatthe
+ShortConvolution(SC)operatorinEquation(1)isindependenttothedesignofotherpartsofMamba
+andcanbeappliedtootherlinearrecurrentmodels. AsshowninTable8,weexploretheeffectofSC
+onmodelperformancethroughenhancingLlama-2-SWA,SlidingGLA,andSlidingRetNetwithSC.
+Surprisingly,besidesboostingtheperformanceofRetNet,addingSCcanalsosignificantlyimprove
+theSWA’sperformance,whiletheeffectonGLAislessprominent. WethinkthisisbecauseGLA
+alreadyhasthefine-graineddecaysatthechannellevel,sothedepthwiseconvolutiondoesn’tadd
+muchoftheusefulinductivebiasforbettermodelingpower. Notably,evenwiththeSCenhancer,
+SlidingGLAandSlidingRetNetstillfallshortthantheoriginalSamba421M’sperformanceshownin
+Table3. ThisfurtherjustifiesourchoiceofusingMambaforhybridization. Wealsofindthatadding
+SCtoboththeSWAandthelinearattentionlayersinhybridmodelsproducesnegativeresults,and
+weleaveitasafutureworktounderstandthesurprisingeffectivenessofSCinlanguagemodeling.
+5 Conclusion
+Inthispaper,weintroduceSAMBA,asimpleyetpowerfulhybridneuralarchitecturedesignedfor
+efficient language modeling with unlimited context length. We show that SAMBA substantially
+outperforms state-of-the-art pure attention-based and SSM-based models across a wide range of
+benchmarksincludingcommon-sensereasoning,languageunderstanding,mathematicsandcoding.
+Furthermore,SAMBAexhibitsremarkableefficiencyinprocessinglongcontexts,achievingsubstantial
+speedupsinpromptprocessinganddecodingthroughputcomparedtothestate-of-the-artTransformer
+architecture.Thearchitecture’sabilitytoextrapolatememoryrecalltoverylongcontexts(upto256K)
+through minimal fine-tuning underscores its practical applicability for real-world tasks requiring
+10
+yportnE
+egarevA
+yportnE
+egarevAextensivecontextunderstanding.Thisefficientlong-termmemorizationabilityisfurtherdemonstrated
+tobeusefulbyourevaluationsindownstreamlong-contextsummarizationtasks. Ouranalysesalso
+provideinsightintotheoptimaltrainingconfigurationsforhybridmodelsandunderscorethebenefits
+of combining attention mechanisms with SSMs. We find that allocating fewer parameters to the
+attentionmechanismwhileleveragingMamba’sstrengthsforcapturingrecurrentstructuresleadsto
+moreefficientandeffectivelanguagemodeling. OurresultssuggestthatSAMBAisastrongneural
+architectureforlanguagemodelingwithunlimitedcontextlength.
+Acknowledgement
+WewanttothankShuohangWangandLiyuanLiuforhelpingwiththetraininginfrastructure,Mojan
+Javaheripiandtheteamforthepre-trainingdata,ZiyiYang,JianwenZhang,JunhengHaoandthe
+teamforhelpingwithpost-training. ThefirstauthoralsowantstothankSonglinYangforherTriton
+implementationofMamba.
+References
+[AET+23] SimranArora,SabriEyuboglu,AmanTimalsina,IsysJohnson,MichaelPoli,JamesZou,Atri
+Rudra, and Christopher Ré. Zoology: Measuring and improving recall in efficient language
+models. arXivpreprintarXiv:2312.04927,2023.
+[AEZ+24] SimranArora,SabriEyuboglu,MichaelZhang,AmanTimalsina,SilasAlberti,DylanZinsley,
+JamesZou,AtriRudra,andChristopherRé. Simplelinearattentionlanguagemodelsbalancethe
+recall-throughputtradeoff. arXivpreprintarXiv:2402.18668,2024.
+[AJA+24] MarahAbdin,SamAdeJacobs,AmmarAhmadAwan,JyotiAneja,AhmedAwadallah,Hany
+Awadalla,NguyenBach,AmitBahree,ArashBakhtiari,HarkiratBehl,AlonBenhaim,Misha
+Bilenko,JohanBjorck,SébastienBubeck,MartinCai,CaioCésarTeodoroMendes,WeizhuChen,
+VishravChaudhary,ParulChopra,AllieDelGiorno,GustavodeRosa,MatthewDixon,Ronen
+Eldan,DanIter,AbhishekGoswami,SuriyaGunasekar,EmmanHaider,JunhengHao,RussellJ.
+Hewett, Jamie Huynh, Mojan Javaheripi, Xin Jin, Piero Kauffmann, Nikos Karampatziakis,
+Dongwoo Kim, Mahoud Khademi, Lev Kurilenko, James R. Lee, Yin Tat Lee, Yuanzhi Li,
+ChenLiang,WeishungLiu,EricLin,ZeqiLin,PiyushMadan,ArindamMitra,HardikModi,
+AnhNguyen,BrandonNorick,BarunPatra,DanielPerez-Becker,ThomasPortet,ReidPryzant,
+HeyangQin,MarkoRadmilac,CorbyRosset,SambudhaRoy,OlliSaarikivi,AminSaied,Adil
+Salim,MichaelSantacroce,ShitalShah,NingShang,HiteshiSharma,XiaSong,OlatunjiRuwase,
+XinWang,RachelWard,GuanhuaWang,PhilippWitte,MichaelWyatt,CanXu,JiahangXu,
+SonaliYadav,FanYang,ZiyiYang,DonghanYu,ChengruidongZhang,CyrilZhang,Jianwen
+Zhang,LiLynaZhang,YiZhang,YunanZhang,andXirenZhou. Phi-3technicalreport:Ahighly
+capablelanguagemodellocallyonyourphone. arXivpreprintarXiv:2404.14219,2024.
+[ALTdJ+23] J.Ainslie,J.Lee-Thorp,MichieldeJong,YuryZemlyanskiy,FedericoLebr’on,andSumitK.
+Sanghai. Gqa:Traininggeneralizedmulti-querytransformermodelsfrommulti-headcheckpoints.
+ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,2023.
+[AON+21] JacobAustin, AugustusOdena, MaxwellNye, MaartenBosma, HenrykMichalewski, David
+Dohan,EllenJiang,CarrieCai,MichaelTerry,QuocLe,andCharlesSutton. Programsynthesis
+withlargelanguagemodels. arXivpreprintarXiv:2108.07732,2021.
+[BCB14] DzmitryBahdanau,KyunghyunCho,andYoshuaBengio. Neuralmachinetranslationbyjointly
+learningtoalignandtranslate. InternationalConferenceOnLearningRepresentations,2014.
+[BCE+23] SébastienBubeck,VarunChandrasekaran,RonenEldan,JohannesGehrke,EricHorvitz,Ece
+Kamar, Peter Lee, Yin Tat Lee, Yuanzhi Li, Scott Lundberg, Harsha Nori, Hamid Palangi,
+MarcoTulioRibeiro,andYiZhang. Sparksofartificialgeneralintelligence:Earlyexperiments
+withgpt-4. arXivpreprintarXiv:2303.12712,2023.
+[BDS+24] AleksandarBotev,SohamDe,SamuelLSmith,AnushanFernando,George-CristianMuraru,
+RubaHaroun,LeonardBerrada,RazvanPascanu,PierGiuseppeSessa,RobertDadashi,Léonard
+Hussenot,JohanFerret,SertanGirgin,OlivierBachem,AlekAndreev,KathleenKenealy,Thomas
+Mesnard,CassidyHardin,SuryaBhupatiraju,ShreyaPathak,LaurentSifre,MorganeRivière,
+MihirSanjayKale,JulietteLove,PouyaTafti,ArmandJoulin,NoahFiedel,EvanSenter,Yutian
+Chen,SrivatsanSrinivasan,GuillaumeDesjardins,DavidBudden,ArnaudDoucet,SharadVikram,
+AdamPaszke,TrevorGale,SebastianBorgeaud,CharlieChen,AndyBrock,AntoniaPaterson,
+JennyBrennan, MegRisdal, RajGundluru, NeshDevanathan, PaulMooney, NilayChauhan,
+PhilCulliton,LuizGUStavoMartins,ElisaBandy,DavidHuntsperger,GlennCameron,Arthur
+11Zucker, Tris Warkentin, Ludovic Peran, Minh Giang, Zoubin Ghahramani, Clément Farabet,
+Koray Kavukcuoglu, Demis Hassabis, Raia Hadsell, Yee Whye Teh, and Nando de Frietas.
+Recurrentgemma:Movingpasttransformersforefficientopenlanguagemodels. arXivpreprint
+arXiv:2404.07839,2024.
+[BMR+20] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsare
+few-shotlearners. Advancesinneuralinformationprocessingsystems,33:1877–1901,2020.
+[BPC20] IzBeltagy,MatthewE.Peters,andArmanCohan. Longformer:Thelong-documenttransformer.
+arXivpreprintarXiv:Arxiv-2004.05150,2020.
+[BZB+20] YonatanBisk,RowanZellers,RonanLeBras,JianfengGao,andYejinChoi. PIQA:reasoning
+aboutphysicalcommonsenseinnaturallanguage. InTheThirty-FourthAAAIConferenceon
+ArtificialIntelligence,AAAI2020,TheThirty-SecondInnovativeApplicationsofArtificialIntelli-
+genceConference,IAAI2020,TheTenthAAAISymposiumonEducationalAdvancesinArtificial
+Intelligence,EAAI2020,NewYork,NY,USA,February7-12,2020,pages7432–7439.AAAI
+Press,2020.
+[CCE+18] PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,and
+OyvindTafjord. Thinkyouhavesolvedquestionanswering?tryarc,theai2reasoningchallenge.
+arXivpreprintarXiv:1803.05457,2018.
+[CKB+21] KarlCobbe,VineetKosaraju,MohammadBavarian,MarkChen,HeewooJun,LukaszKaiser,
+MatthiasPlappert,JerryTworek,JacobHilton,ReiichiroNakano,ChristopherHesse,andJohn
+Schulman. Trainingverifierstosolvemathwordproblems. arXivpreprintarXiv:2110.14168,
+2021.
+[CLC+19] Christopher Clark, Kenton Lee, Ming-Wei Chang, Tom Kwiatkowski, Michael Collins, and
+KristinaToutanova. Boolq:Exploringthesurprisingdifficultyofnaturalyes/noquestions. InJill
+Burstein,ChristyDoran,andThamarSolorio,editors,Proceedingsofthe2019Conferenceofthe
+NorthAmericanChapteroftheAssociationforComputationalLinguistics: HumanLanguage
+Technologies,NAACL-HLT2019,Minneapolis,MN,USA,June2-7,2019,Volume1(Longand
+ShortPapers),pages2924–2936.AssociationforComputationalLinguistics,2019.
+[CTJ+21] MarkChen,JerryTworek,HeewooJun,QimingYuan,HenriquePondedeOliveiraPinto,Jared
+Kaplan, HarriEdwards, YuriBurda, NicholasJoseph, GregBrockman, AlexRay, RaulPuri,
+GretchenKrueger,MichaelPetrov,HeidyKhlaaf,GirishSastry,PamelaMishkin,BrookeChan,
+ScottGray,NickRyder,MikhailPavlov,AletheaPower,LukaszKaiser,MohammadBavarian,
+ClemensWinter,PhilippeTillet,FelipePetroskiSuch,DaveCummings,MatthiasPlappert,Fotios
+Chantzis,ElizabethBarnes,ArielHerbert-Voss,WilliamHebgenGuss,AlexNichol,AlexPaino,
+Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders,
+ChristopherHesse,AndrewN.Carr,JanLeike,JoshAchiam,VedantMisra,EvanMorikawa,
+AlecRadford,MatthewKnight,MilesBrundage,MiraMurati,KatieMayer,PeterWelinder,Bob
+McGrew,DarioAmodei,SamMcCandlish,IlyaSutskever,andWojciechZaremba. Evaluating
+largelanguagemodelstrainedoncode. arXivpreprintarXiv:2107.03374,2021.
+[CWCT23] ShouyuanChen,ShermanWong,LiangjianChen,andYuandongTian. Extendingcontextwindow
+oflargelanguagemodelsviapositionalinterpolation. arXivpreprintarXiv:2306.15595,2023.
+[Dao23] TriDao. Flashattention-2:Fasterattentionwithbetterparallelismandworkpartitioning. arXiv
+preprintarXiv:2307.08691,2023.
+[DDH+22] DamaiDai,LiDong,YaruHao,ZhifangSui,BaobaoChang,andFuruWei. Knowledgeneurons
+inpretrainedtransformers. ACL,2022.
+[DFAG16] Y.Dauphin,AngelaFan,MichaelAuli,andDavidGrangier. Languagemodelingwithgated
+convolutionalnetworks. InternationalConferenceOnMachineLearning,2016.
+[DFE+22] TriDao,DanielY.Fu,StefanoErmon,AtriRudra,andChristopherRé. FlashAttention: Fast
+andmemory-efficientexactattentionwithIO-awareness. InAdvancesinNeuralInformation
+ProcessingSystems,2022.
+[EUD17] Stefan Elfwing, E. Uchibe, and K. Doya. Sigmoid-weighted linear units for neural network
+functionapproximationinreinforcementlearning. NeuralNetworks,2017.
+[FDS+23] DanielYFu,TriDao,KhaledKamalSaab,ArminWThomas,AtriRudra,andChristopherRe.
+Hungryhungryhippos: Towardslanguagemodelingwithstatespacemodels. InTheEleventh
+InternationalConferenceonLearningRepresentations,2023.
+[GD23] AlbertGuandTriDao.Mamba:Linear-timesequencemodelingwithselectivestatespaces.arXiv
+preprintarXiv:2312.00752,2023.
+[GGGR22] AlbertGu,AnkitGupta,KaranGoel,andChristopherRé. Ontheparameterizationandinitializa-
+tionofdiagonalstatespacemodels. ARXIV.ORG,2022.
+12[GGR21] AlbertGu,KaranGoel,andChristopherR’e. Efficientlymodelinglongsequenceswithstructured
+statespaces. InternationalConferenceOnLearningRepresentations,2021.
+[HBB+21] DanHendrycks,CollinBurns,StevenBasart,AndyZou,MantasMazeika,DawnSong,andJacob
+Steinhardt.Measuringmassivemultitasklanguageunderstanding.In9thInternationalConference
+onLearningRepresentations,ICLR2021,VirtualEvent,Austria,May3-7,2021.OpenReview.net,
+2021.
+[HBD+19] AriHoltzman,JanBuys,LiDu,MaxwellForbes,andYejinChoi. Thecuriouscaseofneuraltext
+degeneration. InternationalConferenceonLearningRepresentations,2019.
+[HCP+21] LuyangHuang,ShuyangCao,NikolausParulian,HengJi,andLuWang. Efficientattentions
+forlongdocumentsummarization. Proceedingsofthe2021ConferenceoftheNorthAmerican
+ChapteroftheAssociationforComputationalLinguistics:HumanLanguageTechnologies,pages
+1419–1436,2021.
+[HQW+19] YihuiHe,JianingQian,JianrenWang,CindyX.Le,CongruiHetang,QiLyu,WenpingWang,
+andTianweiYue. Depth-wisedecompositionforacceleratingseparableconvolutionsinefficient
+convolutionalneuralnetworks. arXivpreprintarXiv:1910.09455,2019.
+[HWX+23] ChiHan,QifanWang,WenhanXiong,YuChen,HengJi,andSinongWang. Lm-infinite:Simple
+on-the-flylengthgeneralizationforlargelanguagemodels. arXivpreprintarXiv: 2308.16137,
+2023.
+[HZRS16] KaimingHe,XiangyuZhang,ShaoqingRen,andJianSun. Deepresiduallearningforimage
+recognition. CVPR,2016.
+[JHY+24] HongyeJin,XiaotianHan,JingfengYang,ZhimengJiang,ZiruiLiu,Chia-YuanChang,Huiyuan
+Chen,andXiaHu. Llmmaybelonglm:Self-extendllmcontextwindowwithouttuning. arXiv
+preprintarXiv:2401.01325,2024.
+[JSM+23] AlbertQ.Jiang,AlexandreSablayrolles,ArthurMensch,ChrisBamford,DevendraSinghChaplot,
+Diego de las Casas, Florian Bressand, Gianna Lengyel, Guillaume Lample, Lucile Saulnier,
+LélioRenardLavaud,Marie-AnneLachaux,PierreStock,TevenLeScao,ThibautLavril,Thomas
+Wang,TimothéeLacroix,andWilliamElSayed. Mistral7b. arXivpreprintarXiv:2310.06825,
+2023.
+[Kat23] TobiasKatsch. Gateloop:Fullydata-controlledlinearrecurrenceforsequencemodeling. arXiv
+preprintarXiv:2311.01927,2023.
+[LBE+23] YuanzhiLi,SébastienBubeck,RonenEldan,AllieDelGiorno,SuriyaGunasekar,andYinTat
+Lee. Textbooksareallyouneedii:phi-1.5technicalreport. arXivpreprintarXiv:2309.05463,
+2023.
+[LH18] Ilya Loshchilov and Frank Hutter. Decoupled weight decay regularization. In International
+ConferenceonLearningRepresentations,2018.
+[LHE22] StephanieLin,JacobHilton,andOwainEvans.TruthfulQA:Measuringhowmodelsmimichuman
+falsehoods. InSmarandaMuresan,PreslavNakov,andAlineVillavicencio,editors,Proceedings
+ofthe60thAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1: Long
+Papers),pages3214–3252,Dublin,Ireland,may2022.AssociationforComputationalLinguistics.
+[LLB+24] OpherLieber,BarakLenz,HofitBata,GalCohen,JhonathanOsin,ItayDalmedigos,ErezSafahi,
+ShakedMeirom,YonatanBelinkov,ShaiShalev-Shwartz,OmriAbend,RazAlon,TomerAsida,
+AmirBergman,RomanGlozman,MichaelGokhman,AvashalomManevich,NirRatner,Noam
+Rozen,ErezShwartz,MorZusman,andYoavShoham. Jamba: Ahybridtransformer-mamba
+languagemodel. arXivpreprintarXiv:2403.19887,2024.
+[MCKS18] TodorMihaylov,PeterClark,TusharKhot,andAshishSabharwal. Canasuitofarmorconduct
+electricity?anewdatasetforopenbookquestionanswering. ConferenceonEmpiricalMethodsin
+NaturalLanguageProcessing,2018.
+[Met24] MetaAI. Introducingmetallama3:Themostcapableopenlyavailablellmtodate,2024. URL:
+https://ai.meta.com/blog/meta-llama-3/.
+[MJ23] AmirkeivanMohtashamiandMartinJaggi. Landmarkattention:Random-accessinfinitecontext
+lengthfortransformers. arXivpreprintarXiv:2305.16300,2023.
+[MPS24] WilliamMerrill,JacksonPetty,andAshishSabharwal. Theillusionofstateinstate-spacemodels.
+arXivpreprintarXiv:2404.08819,2024.
+[MZK+23] XuezheMa,ChuntingZhou,XiangKong,JunxianHe,LiangkeGui,GrahamNeubig,Jonathan
+May,andLukeZettlemoyer. Mega:Movingaverageequippedgatedattention. InTheEleventh
+InternationalConferenceonLearningRepresentations,2023.
+[Ope23] OpenAI. Gpt-4technicalreport. PREPRINT,2023.
+13[OSG+23] AntonioOrvieto, SamuelL.Smith, AlbertGu, AnushanFernando, CaglarGulcehre, Razvan
+Pascanu,andSohamDe.Resurrectingrecurrentneuralnetworksforlongsequences.International
+ConferenceonMachineLearning,2023.
+[PMN+23] MichaelPoli,StefanoMassaroli,EricQ.Nguyen,DanielY.Fu,TriDao,S.Baccus,Y.Bengio,
+StefanoErmon,andChristopherRé. Hyenahierarchy: Towardslargerconvolutionallanguage
+models. InternationalConferenceOnMachineLearning,2023.
+[PSL21] OfirPress,NoahA.Smith,andM.Lewis. Trainshort,testlong: Attentionwithlinearbiases
+enablesinputlengthextrapolation. InternationalConferenceOnLearningRepresentations,2021.
+[QYS+24] ZhenQin,SonglinYang,WeixuanSun,XuyangShen,DongLi,WeigaoSun,andYiranZhong.
+Hgrn2:Gatedlinearrnnswithstateexpansion. arXivpreprintarXiv:2404.07904,2024.
+[QYZ23] ZhenQin,SonglinYang,andYiranZhong. Hierarchicallygatedrecurrentneuralnetworkfor
+sequencemodeling. NeuralInformationProcessingSystems,2023.
+[RLW+23] LiliangRen,YangLiu,ShuohangWang,YichongXu,ChenguangZhu,andChengXiangZhai.
+Sparsemodularactivationforefficientsequencemodeling. NEURIPS,2023.
+[RWC+19] AlecRadford,JeffWu,RewonChild,DavidLuan,DarioAmodei,andIlyaSutskever. Language
+modelsareunsupervisedmultitasklearners. arXivpreprint,2019.
+[RZLL16] PranavRajpurkar,JianZhang,KonstantinLopyrev,andPercyLiang. Squad:100,000+questions
+formachinecomprehensionoftext. EMNLP,2016.
+[SAKM+23] Daria Soboleva, Faisal Al-Khateeb, Robert Myers, Jacob R Steeves, Joel Hes-
+tness, and Nolan Dey. Slimpajama: A 627b token cleaned and dedupli-
+cated version of redpajama, 2023. URL: https://www.cerebras.net/blog/
+slimpajama-a-627b-token-cleaned-and-deduplicated-version-of-redpajama.
+[SBBC21] KeisukeSakaguchi,RonanLeBras,ChandraBhagavatula,andYejinChoi. Winogrande: An
+adversarialwinogradschemachallengeatscale. CommunicationsoftheACM,64(9):99–106,
+2021.
+[SDH+23] YutaoSun,LiDong,ShaohanHuang,ShumingMa,YuqingXia,JilongXue,JianyongWang,
+andFuruWei. Retentivenetwork:Asuccessortotransformerforlargelanguagemodels. arXiv
+preprintarXiv:2307.08621,2023.
+[Sha19] NoamShazeer. Fasttransformerdecoding:Onewrite-headisallyouneed. arXivpreprintarXiv:
+1911.02150,2019.
+[Sha20] NoamShazeer. Gluvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,2020.
+[SLP+21] JianlinSu, YuLu, ShengfengPan, AhmedMurtadha, BoWen, andYunfengLiu. Roformer:
+Enhancedtransformerwithrotarypositionembedding. arXivpreprintarXiv:2104.09864,2021.
+[SRC+19] MaartenSap,HannahRashkin,DerekChen,RonanLeBras,andYejinChoi. Socialiqa:Common-
+sensereasoningaboutsocialinteractions. arXivpreprintarXiv:1904.09728,2019.
+[SWL23] JimmyT.H.Smith,AndrewWarrington,andScottLinderman. Simplifiedstatespacelayersfor
+sequencemodeling. InTheEleventhInternationalConferenceonLearningRepresentations,2023.
+[Tea24] GemmaTeam. Gemma:Openmodelsbasedongeminiresearchandtechnology. arXivpreprint
+arXiv:2403.08295,2024.
+[TMS+23] HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,
+NikolayBashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,DanBikel,LukasBlecher,
+CristianCantonFerrer,MoyaChen,GuillemCucurull,DavidEsiobu,JudeFernandes,JeremyFu,
+WenyinFu,BrianFuller,CynthiaGao,VedanujGoswami,NamanGoyal,AnthonyHartshorn,
+SagharHosseini,RuiHou,HakanInan,MarcinKardas,ViktorKerkez,MadianKhabsa,Isabel
+Kloumann,ArtemKorenev,PunitSinghKoura,Marie-AnneLachaux,ThibautLavril,JenyaLee,
+DianaLiskovich,YinghaiLu,YuningMao,XavierMartinet,TodorMihaylov,PushkarMishra,
+IgorMolybog,YixinNie,AndrewPoulton,JeremyReizenstein,RashiRungta,KalyanSaladi,
+AlanSchelten,RuanSilva,EricMichaelSmith,RanjanSubramanian,XiaoqingEllenTan,Binh
+Tang,RossTaylor,AdinaWilliams,JianXiangKuan,PuxinXu,ZhengYan,IliyanZarov,Yuchen
+Zhang,AngelaFan,MelanieKambadur,SharanNarang,AurelienRodriguez,RobertStojnic,
+SergeyEdunov,andThomasScialom. Llama2: Openfoundationandfine-tunedchatmodels.
+arXivpreprintarXiv:2307.09288,2023.
+[VSP+17] AshishVaswani,NoamM.Shazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanN.Gomez,
+LukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. NIPS,2017.
+[WDL24] KaiyueWen,XingyuDang,andKaifengLyu. Rnnsarenottransformers(yet):Thekeybottleneck
+onin-contextretrieval. arXivpreprintarXiv:2402.18510,2024.
+14[WPC+22] Alex Wang, Richard Yuanzhe Pang, Angelica Chen, Jason Phang, and Samuel R. Bowman.
+Squality:Buildingalong-documentsummarizationdatasetthehardway.ConferenceonEmpirical
+MethodsinNaturalLanguageProcessing,2022.
+[WWS+22] JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,E.Chi,F.Xia,QuocLe,andDenny
+Zhou.Chain-of-thoughtpromptingelicitsreasoninginlargelanguagemodels.NeuralInformation
+ProcessingSystems,2022.
+[XTC+23] GuangxuanXiao,YuandongTian,BeidiChen,SongHan,andMikeLewis. Efficientstreaming
+languagemodelswithattentionsinks. arXivpreprintarXiv:2309.17453,2023.
+[XYH+20] RuibinXiong,YunchangYang,DiHe,KaiZheng,ShuxinZheng,ChenXing,HuishuaiZhang,
+YanyanLan,LiweiWang,andTie-YanLiu.Onlayernormalizationinthetransformerarchitecture.
+InProceedingsofthe37thInternationalConferenceonMachineLearning,ICML2020,13-18
+July 2020, Virtual Event, volume 119 of Proceedings of Machine Learning Research, pages
+10524–10533.PMLR,2020.
+[YWS+23] SonglinYang,BailinWang,YikangShen,RameswarPanda,andYoonKim.Gatedlinearattention
+transformerswithhardware-efficienttraining. arXivpreprintarXiv:2312.06635,2023.
+[YZ24] SonglinYangandYuZhang. Fla:Atriton-basedlibraryforhardware-efficientimplementations
+oflinearattentionmechanism,January2024.
+[ZAP22] Edward Ayers Zhangir Azerbayev and Bartosz Piotrowski. Proof-pile, 2022. URL: https:
+//github.com/zhangir-azerbayev/proof-pile.
+[ZHB+19] RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi. Hellaswag: Cana
+machine really finish your sentence? Annual Meeting of the Association for Computational
+Linguistics,2019.
+[ZLJ+22] SimiaoZuo,XiaodongLiu,JianJiao,DenisCharles,ErenManavoglu,TuoZhao,andJianfeng
+Gao. Efficientlongsequencemodelingviastatespaceaugmentedtransformer. arXivpreprint
+arXiv:2212.08136,2022.
+[ZS19] BiaoZhangandRicoSennrich. Rootmeansquarelayernormalization. NeuralInformation
+ProcessingSystems,2019.
+[ZYL+15] HaoZheng,ZhanleiYang,WenjuLiu,JizhongLiang,andYanpengLi. Improvingdeepneural
+networksusingsoftplusunits. 2015InternationalJointConferenceonNeuralNetworks(IJCNN),
+pages1–4,2015.
+A ImplementationDetails
+Table9: Detailedhyper-parametersofthebaselinesmodelstrainedonthePhi2datasetwith230B
+tokens.
+Architecture Llama-3 Mistral Mamba Mamba-SWA-MLP Mamba-MLP
+Parameters 1.6B 1.6B 1.8B 1.6B 1.9B
+Batchsize 2048 2048 2048 2048 2048
+Learningrate 0.0006 0.0006 0.0006 0.0006 0.0006
+Weightdecay 0.1 0.1 0.1 0.1 0.1
+Gradientclipping 1.0 1.0 1.0 1.0 1.0
+Sequencelength 4096 4096 4096 4096 4096
+Slidingwindowsize,w - 2048 - 2048 -
+Numberoflayers,N 48 48 64 54 48
+Modelwidth,d 2048 2048 2048 2048 2048
+m
+MLPintermediatesize,d 8196 8196 - 8196 8196
+p
+Numberofqueryheads 32 32 - 32 32
+NumberofKVheads 4 4 - 4 4
+NumberofAttentionLayers 24 24 0 18 0
+NumberofMambaLayers 0 0 64 18 24
+Vocabularysize 50304 50304 50304 50304 50304
+For the GLA layer in the Sliding GLA architecture, we use the number of heads d /384, a key
+m
+expansionratioof0.5,andavalueexpansionratioof1. FortheRetNetlayerweuseanumberofhead
+thatishalfofthenumberofattentionqueryheads,keyexpansionratioof1andvalueexpansionratio
+15of2. TheGLAandRetNetimplementationsarefromtheFlashLinearAttentionrepository3[YZ24].
+WeusetheFlashAttention-basedimplementationforSelf-Extendextrapolation4. TheMamba432M
+modelhasamodelwidthof1024andtheMamba1.3Bmodelhasamodelwidthof2048. Allmodels
+trained on SlimPajama have the same training configurations and the MLP intermediate size as
+Samba,unlessotherwisespecified. ThetraininginfrastructureonSlimPajamaisbasedonamodified
+versionoftheTinyLlamacodebase5.
+Table10: Detailedhyper-parametersoftheSAMBAmodelstrainedatdifferentscales. Weonlyshow
+theoptimizationsettingsforthefirsttrainingphaseofthe3.8Bmodel.
+TotalParameters 421M 1.3B 1.7B 3.8B
+Dataset SlimPajama SlimPajama Phi-2 Phi-3
+Batchsize 512 512 2048 2048
+Learningrate 0.0004 0.0004 0.0006 0.0006
+Totaltrainingtokens 20B 100B 230B 3.2T
+Weightdecay 0.1 0.1 0.1 0.1
+Gradientclipping 1.0 1.0 1.0 1.0
+Sequencelength 4096 4096 4096 4096
+Slidingwindowsize,w 2048 2048 2048 2048
+Numberoflayers,N 24 36 48 64
+Modelwidth,d 1536 2304 2048 2816
+m
+MLPintermediatesize,d 4096 6144 8196 9984
+p
+Numberofqueryheads 12 18 32 11
+Numberofkey-valueheads 12 18 4 1
+Vocabularysize 32000 32000 50304 32064
+Inthegenerationconfigurationsforthedownstreamtasks,weusegreedydecodingforGSM8K,and
+NucleusSampling[HBD+19]withatemperatureofτ =0.2andtop-p=0.95forHumanEval. For
+MBPPandSQuAD,wesetτ =0.01andtop-p=0.95.
+B AdditionalExperimentResults
+5 Samba 1.7B
+Mistral 1.6B
+4
+3
+2
+1
+0
+0 100 200 300 400 500
+Steps
+Figure6:TraininglosscurvesofSamba1.7BandMistral1.6Bmodelsduring500stepsofinstruction
+tuningonPasskeyRetrievalwith4Ksequencelength. Weplotthelosscurvesforbothmodelsusing
+thesimplemovingaverageofwindowsize10.
+WeperforminstructiontuningforbothMistral1.6BandSamba1.7BonPasskeyRetrievalusing
+documentlength4096,wherewegeneratedthedataontheflythroughrandomlysamplinga5-digit
+3https://github.com/sustcsonglin/flash-linear-attention
+4https://github.com/datamllab/LongLM/blob/master/self_extend_patch/Llama.py
+5https://github.com/jzhang38/TinyLlama
+16
+ssoL1.0
+0.8
+0.6
+0.4
+Samba 1.7B
+0.2 Mistral 1.6B
+50 100 150 200 250 300 350 400 450 500
+Steps
+Figure7:Overallpasskeyretrievalaccuracyonthe256KdocumentlengthofSamba1.7BandMistral
+1.6Bmodelsduring500stepsofinstructiontuning.
+integerpasskeyvalueandalocation/depthbetweenzeroandthedocumentlengthtoinsertthepasskey.
+The model is then asked to generate the passkey given the full document. We train both models
+usingbatchsize2048,250warm-upstepswithapeaklearningrateof1e−4,and0.1weightdecay
+withAdamW[LH18]optimizer. Inbothcases,thelossconvergesquicklyin100-200steps. During
+theevaluation,wemeasuretheoverallaverageaccuraciesofthepasskeyretrievalatthedocument
+lengthof[4k,8k,16k,32k,64k,128k,256k],foreachlengthweevaluateat11differentdepthsof
+thedocument(from0,0.1,0.2,... to1.0). Inaddition,foreachlocationofthepasskey(depth)in
+thedocument,weevaluatethemodelwithfivedifferentpasskeystomeasureaccuracy. Asseenin
+Figure7,theaveragepasskeyretrievalaccuracyforSamba1.7Balmostreaches100%inaround150
+steps,whiletheaccuracyforMistral1.6Bremainslow,demonstratingtheextrapolationabilityofthe
+Sambaarchitecture.
+C DetailsofEntropyMeasurement
+GivenacausalattentionprobabilitymatrixA∈Rh×n×n,A =0∀j <k,withhnumberofheads
+ijk
+andasequencelengthofn,andthegenerationlength0<l<n,wecalculatetheaverageattention
+entropyperdecodingstepasfollows,
+h n n
+1 (cid:88) (cid:88) (cid:88)
+H =− A log(A ).
+a l·h ijk ijk
+i=1j=n−l+1k=1
+Fortheselectivegate∆∈Rn×de usedbyS6inEquation(2)oftheMambalayers,wefirstnormalize
+ittobeinthesimplex[0,1]n×de,i.e.,
+∆
+∆′ =
+(cid:80)n
+∆
+∈[0,1]n×de.
+i=1 i
+TheaverageselectionentropyofS6throughouttheentiresequenceisthencalculatedas
+1
+(cid:88)de (cid:88)n
+H =− ∆′ log(∆′ ).
+s d ij ij
+e
+j=1i=1
+D Limitations
+AlthoughSambademonstratespromisingmemoryretrievalperformancethroughinstructiontuning,
+its pre-trained base model has retrieval performance similar to that of the SWA-based model, as
+showninFigure7. ThisopensupfuturedirectiononfurtherimprovingtheSamba’sretrievalability
+withoutcompromisingitsefficiencyandextrapolationability. Inaddition,thehybridizationstrategy
+ofSambaisnotconsistentlybetterthanotheralternativesinalltasks. Asshownin Table2,Mamba-
+SWA-MLPshowsimprovedperformanceontaskssuchasWinoGrande,SIQA,andGSM8K.This
+givesusthepotentialtoinvestinamoresophisticatedapproachtoperforminput-dependentdynamic
+combinationsofSWA-basedandSSM-basedmodels.
+17
+ycaruccA
+lavirteR
+yekssaP
