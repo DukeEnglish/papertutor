@@ -1,0 +1,1254 @@
+The Impact of Initialization
+on LoRA Finetuning Dynamics
+SoufianeHayou NikhilGhosh BinYu
+SimonsInstitute DeptofStatistics DeptofStatistics
+UCBerkeley UCBerkeley UCBerkeley
+hayou@berkeley.edu nikhil_ghosh@berkeley.edu binyu@berkeley.edu
+Abstract
+In this paper, we study the role of initialization in Low Rank Adaptation
+(LoRA)asoriginallyintroducedinHuetal.[19]. Essentially,tostartfrom
+thepretrainedmodelasinitializationforfinetuning,onecaneitherinitial-
+izeB tozeroandAtorandom(defaultinitializationinPEFTpackage),or
+vice-versa. Inbothcases,theproductBAisequaltozeroatinitialization,
+whichmakesfinetuning starts fromthepretrainedmodel. Thesetwoini-
+tialization schemes are seemingly similar. They should in-principle yield
+the same performance and share the same optimal learning rate. We
+demonstrate that this is an incorrect intuition and that the first scheme
+(initializing B to zero and A to random) on average yields better perfor-
+mancecomparedtotheotherscheme. Ourtheoreticalanalysisshowsthat
+the reasonbehind thismight bethat thefirst initializationallows the use
+of larger learning rates (without causing output instability) compared to
+the second initialization, resulting in more efficient learning of the first
+scheme. WevalidateourresultswithextensiveexperimentsonLLMs.
+1 Introduction
+One of the most important paradigm shifts in deep learning has been to embrace the
+pretrain-finetune paradigm (e.g., [7, 9]) in order to solve many real world tasks. Previ-
+ously,tosolveaspecifictask,typicallyacustommodelwouldbetrainedfromscratchon
+purelytaskrelevantdata. Nowadayshowever,itisstandardtoinsteadfinetuneanalready
+pretrainedbasedmodelonthespecifictaskrequired. Thebasepretrainedmodelistrained
+onagenericunsupervisedobjectiveinordertolearnpowerfulandgeneralfeatureswhich
+canberapidlyadaptedtothedownstreamtask,greatlyacceleratingthespeedoflearning
+andreducingthenumberoftrainingsamplesneededcomparedtotrainingfromscratch.
+In this paradigm, one of the clearest empirical trends has been that the most performant
+modelsareobtainedatthelargestscales[14,25]withstate-of-the-artmodelsofhundreds
+of billions of parameters. Due to the immense cost of training such models, only a few
+industry labs can pretrain large models from scratch. Many of these pretrained models
+areaccessiblethroughopen-sourceplatforms(e.g.,LlamabyTouvronetal.[38])andprac-
+titionersareinterestedinfinetuningsuchmodelsforspecifictasks. However,duetotheir
+size,adaptingsuchmodelstodownstreamtaskswithfullfinetuning(updatingallmodel
+parameters) is computationally infeasible for most practitioners who lack considerable
+computational resources. However, since pretrained models learn already useful repre-
+sentations for finetuning, in-principle a significant adaptation of all parameters should
+not usually be required. To realize this intuition, researchers have proposed a variety
+of parameter-efficient finetuning methods that typically freeze a bulk of the pretrained
+4202
+nuJ
+21
+]GL.sc[
+1v74480.6042:viXraweights and tune only a small set of (possibly newly initialized) parameters. Such meth-
+odsincludetheadaptersmethod[11]wherelightweight“adapter"layersareinsertedand
+trained,prompttuning[20]wherea“softprompt"islearnedandappendedtotheinput,
+and(IA)3 [24]whereactivationvectorsaremodifiedwithlearnedscalings.
+One of the most popular and effective such parameter-efficient finetuning methods is
+knownasLowRankAdaptation[19]abbreviatedasLoRA.InLoRAfinetuning,foragiven
+layer, only a low rank matrix called an adapter which is added to the pretrained weights,
+istrainable. Thetrainingcanbedonewithanyoptimizerbutthecommonchoiceinprac-
+tice is Adam [3]. Since the trained adapter is low-rank, LoRA significantly reduces the
+number of trainable parameters in the finetuning process compared with full finetuning.
+On many tasks such as instruction finetuning, LoRA has been shown to achieve compa-
+rable or better performance compared with full-finetuning [35, 39], although there are
+cases such as complicated and long form generation tasks where it is not always as per-
+formant. The generally high performance level and the computational savings of LoRA
+havecontributedtoitbecomingastandardfinetuningmethod.
+Just as in all neural network training scenarios, efficient use of LoRA requires a careful
+choice of multiple hyperparameters such as the rank, the learning rate, and choice of
+initialization. Although there has been prior work investigating the rank [31] and learn-
+ing rate [44] hyperparameters, there has been limited investigation into the initialization
+scheme used for vanilla LoRA. In this work we focus on the question of initialization.
+Through experimental verification and theoretical insights, we justify the use of a partic-
+ularinitializationchoiceovertheaprioriequallynaturalalternative.
+Related Work. In standard LoRA training, one of the two LoRA matrices is initialized
+withrandomvaluesandtheotherisinitializedtozero(seeSection2.1). Recently,inMeng
+et al. [48] the authors proposed an alternative initialization scheme to LoRA which uses
+the top singular vectors of the pretrained weights as opposed to a random initialization
+and showed improved training on several tasks. To further improve LoRA training with
+quantization, Li et al. [34] introduced a new method called LoftQ for computing a better
+initializationforquantizedtraining[27]. However,tothebestofourknowledge,therehas
+notbeenanystudyconcerningtherandominitializationinvanillaLoRA.Specifically,itis
+notclearfrompriorworkwhichofthetwoLoRAmatricesshouldbeinitializedtobezero. Em-
+pirical results by Zhu et al. [50] suggested that the two initialization schemes mentioned
+aboveyieldsimilarperformance,butitisnotclearifthelearningratewaswell-tunedfor
+eachinitializationscheme. Ourfindingssuggestthatthesetwoinitializationschemeslead
+to fundamentally different finetuning dynamics, and that one of these schemes generally
+yieldsbetterresultcomparedtotheother.
+LoRAVariations. WeremarkthatbeyondalteringtheLoRAinitializationschemethere
+havebeenaseriesofworkswhichtrytoaddresslimitationsofvanillaLoRAusingdiffer-
+entvariations. TofurtherreducethenumberoftrainableparametersLoRA-FA[42]freezes
+theAmatrixwhichleadstosmallperformancelosswhilereducingmemoryconsumption
+by up to 1.4×. The performance of this training scheme is also investigated in Zhu et al.
+[50]. VeRA [33] freezes random weight tied adapters and learns vector scalings of the
+internaladapteractivations. LoRA-XS[43]initializestheAandB matricesusingtheSVD
+of the pretrained weights and trains a low-rank update of the form BRA where R is a
+trainable r×r matrix and B, A are fixed. NOLA [32] parametrizes the adapter matrices
+tobelinearcombinationsoffrozenrandommatricesandoptimizesthelinearcoefficients
+of the mixtures. VB-LORA [46] shares adapter parameters using a global vector bank. In
+ordertoimprovethelearningabilityformorechallengingfinetuningtasks,Kalajdzievski
+[31] proposes a scaling rule for the scalar adapter multiplier to unlock increased gains
+with higher adapter ranks. MoRA [45] learns high-rank updates while still preserving
+parameter efficiency by applying hand-designed compress and decompress operations
+beforeandafteratrainableadaptermatrix. DoRA[47]decomposesthepretrainedweight
+intomagnitudeanddirectioncomponentstoallowforbettertrainingdynamics.
+Contributions. In this paper, we study the impact of different random initialization
+schemes for LoRA adapters through a theory of large width for neural networks. There
+2Init[A]: Init[B]:
+Pretrained
+Weights
++
+More Efficient Stability with
+Feature Learning with suboptimal Feature
+some instability Learning
+Init[A] (generally) leads to better performance
+Figure 1: Summary of our contributions in this paper: a description of the difference be-
+tweenthefinetuningdynamicswhenLoRAweightsAandB areinitializedwithInit[A]
+orInit[B].
+isalargeliteratureonthescalingofneuralnetworksfromtheinfinitewidthperspective.
+The core approach is to take the width of a neural network to infinity and determine
+how the behavior of the limit depends on the choice of the hyperparameters such as the
+learningrateandinitializationvariance. Thisapproachallowstoderiveprincipledscaling
+choicesforthesehyperparameterssuchthatdesiredgoals(e.g.stablefeaturelearning)are
+achieved as the network size approaches the limit (see Appendix A.2 for more details).
+Examplesoftheinfinite-widthlimitincludeworksoninitializationschemessuchasHeet
+al. [4], training dynamics [21]. Examples for the depth limit include initialization strate-
+gies [6, 10, 30], depth scaling (see e.g. [18, 23, 28, 29, 37, 41]). A similar strategy was
+used to derive scaling rules for the LoRA learning rate in Hayou et al. [44] (LoRA+) that
+concludedthatthelearningratesfordifferentLoRAmatricesshouldbescaleddifferently
+to ensure optimal feature learning. In this work we use the same approach to provide
+a systematic comparison between two different random initialization schemes for vanilla
+LoRAfinetuning(usingthesamelearningratefortheAandB matrices). Usingthenota-
+tionInit[A]torefertothecasewhereAisinitializedtorandomandB tozero(asin[19])
+and Init[B] for the opposite, we show that Init[A] and Init[B] lead to fundamentally
+differenttrainingdynamics(asshowninFigure1):
+1. Init[A]allowstheuseoflargerlearningratescomparedtoInit[B]
+2. Init[A]canleadtoaformof‘internalinstability’wherethefeaturesAz(forsome
+input z) are large but LoRA output BAz is small. This form of instability allows
+more efficient feature learning. We identify a feature learning / stability tradeoff in
+thiscaseandsupportitwithempiricalresults.
+3. Init[B] does not cause any instabilities but training is suboptimal in this case
+(matrixB isundertrained).
+4. Empirical results confirm the theory and show that Init[A] generally leads to
+betterperformancethanInit[B].
+3
+lamitpO
+gninuteniF
+tinI
+etaR
+gninraeL
+scimanyD2 Setup and Definitions
+Weconsiderageneralneuralnetworkmodeloftheform
+
+Y in(x)=W inx,
+Y (x)=F (W ,Y (x)), l∈[L], (1)
+l l l l−1
+Y
+(x)=W Y (x),
+out out L
+where x ∈ Rd is the input, L ≥ 1 is the network depth, (F ) are mappings that
+l l∈[L]
+define the layers, and W ∈ Rn×n are the hidden weights, where n is the network width,
+l
+and W ,W are input and output embedding weights.1 This model will represent the
+in out
+pretrainedmodelthatwilllaterbefinetunedonsomenewtask.
+Tofinetunea(large)pretrainedmodelwithalimitedamountofcomputationalresources,
+apopularresourceefficientapproachistousetheLoRAfinetuningmethoddefinedbelow.
+Definition 1 (Low Rank Adapters (LoRA) from [19]). To apply LoRA to a weight matrix
+W ∈ Rn1×n2 in the model, we constrain its update in the fine-tuning process by representing
+the latter with a low-rank decomposition W = W∗ + αBA. Here, only the weight matrices
+r
+B ∈Rn1×r,A∈Rr×n2 aretrainableandtheoriginalpretrainedweightsW∗ remainfrozen. The
+rankr ≪min(n ,n )andα∈Raretunableconstants.
+1 2
+Asthewidthngrows,2 thenetworkinitializationschemeandthelearningrateshouldbe
+adapted to avoid numerical instabilities and ensure efficient learning. For instance, the
+variance of the initialization weights (in hidden layers) should scale like 1/n to prevent
+the pre-activations from blowing up as we increase model width n (e.g., He initialization
+[4]). To derive proper scaling rules, a principled approach consist of analyzing the statis-
+ticalpropertiesofkeyquantitiesinthemodel(e.g. secondmomentofthepre-activations)
+as n grows and then adjust the initialization variance, the learning rate, and the archi-
+tecture to achieve desirable properties in the limit n → ∞ [5, 10, 13, 40]. We use this
+approachtostudytheeffectofinitializationonthefeaturelearningdynamicsofLoRAin
+the infinite-width limit. For more details about the theory of scaling of neural networks,
+seeAppendixA.2.
+Throughoutthepaper, wewillbeusingasymptoticnotationtodescribethebehaviourof
+several quantities as the width n grows. Note that the width n will be the only scaling
+dimensionofneuralnetworktrainingwhichgrowsandallotherscalingdimensionssuch
+as the LoRA rank r, number of layers L, sequence length, number of training steps, etc.,
+willbeconsideredasfixed. Weusethefollowingnotationfortheasymptoticanalysis.
+Notation. Givensequencesc ∈Randd ∈R+,wewritec =O(d ),resp. c =Ω(d ),
+n n n n n n
+torefertoc <κd ,resp. c >κd ,forsomeconstantκ>0. Wewritec =Θ(d )ifboth
+n n n n n n
+c = O(d ) and c = Ω(d ) are satisfied. For vector sequences c = (ci) ∈ Rk (for
+n n n n n n 1≤i≤k
+some k > 0), we write c = O(d ) when ci = O(di) for all i ∈ [k], and same holds for
+n n n n
+otherasymptoticnotations. Finally,whenthesequencec isavectorofrandomvariables,
+n
+convergenceisunderstoodtobeconvergenceinsecondmoment(L norm).
+2
+2.1 InitializationofLoRAAdapters
+Thestandardwaytoinitializetrainableweightsistotakeaniidinitializationoftheentries
+A ∼ N(0,σ2),B ∼ N(0,σ2) for some σ ,σ ≥ 0 (this includes initialization with
+ij A ij B A B
+zeros if σ or σ are set to 0).3. Due to the additive update structure of LoRA, we want
+B A
+to initialize the product BA to be 0 so that finetuning starts from the pretrained model
+1WeusethesamenotationfromHayouetal.[44].
+2ThewidthinSOTAmodelsistypicallylarge,i.e. ofwidthn>103.
+3Gaussianity is not important and can be replaced by any zero-mean distribution with finite-
+varianceforourpurposes.
+4[19]. This can be achieved by initializing one of the weights A and B to 0. If both
+are initialized to 0, no learning occurs in this case since this is a saddle point and the
+parameter gradients will remain zero. Thus, we should initialize one of the parameters
+A and B to be non-zero and the other to be zero. If we choose a non-zero initialization
+forA,thenfollowingstandardinitializationschemes(e.g.,HeInit[4],LeCunInit[1]),one
+shouldsetσ2 =Θ(n−1)toensureAxdoesnotexplodeforlargen. Thisisjustifiedbythe
+A
+Central Limit Theorem (CLT). On the other hand, if we choose a non-zero initialization
+for B, one should make sure that σ2 = Θ(r−1) = Θ(1). This leaves us with two possible
+b
+initializationschemes:
+• Init[A]:σ2 =0,σ2 =Θ(n−1)(defaultinitializationinLoRA[19]).
+B A
+• Init[B]:σ2 =Θ(r−1)=Θ(1),σ2 =0.4
+B A
+Thesetwoinitializationachievethegoalofstartingfinetuningfromthepretrainedmodel.
+A priori, it is unclear if there is a material difference between the two initialization
+schemes. Surprisingly,aswewillshowlaterinthispaper,thesetwoinitializationschemes
+leadtofundamentallydifferenttrainingdynamicswhenmodelwidthislarge.
+2.2 LoRAFeatures
+Notation. For a given LoRA layer in the network, we use Z to denote the input to that
+layer and
+Z¯
+for the output after adding the pretrained weights. More precisely, we can
+writethelayeroperationasZ¯ =W∗Z+ αBAZ.
+r
+Our main analysis relies on a careful estimation of the magnitude of several quantities
+involvingLoRAfeatures. Letusfirstgiveaformaldefinition.
+Definition 2 (LoRA Features). Given a general neural architecture and a LoRA layer (Defini-
+tion1),wedefineLoRAfeatures(Z ,Z )as
+A B
+
+Z =AZ
+A
+Z =BZ =BAZ,
+B A
+At fine-tuning step t, we use the superscript t to denote the value of LoRA features Zt,Zt , and
+A B
+thesubscriptttodenotetheweightsA ,B .
+t t
+3 LoRA Finetuning Dynamics in the Large Width Limit
+WefixtheLoRArankr throughouttheanalysisandexaminethefinetuningdynamicsin
+the limit of large width. This setup aligns well with practical scenarios where the rank
+is much smaller than the width (i.e., r ≪ n ). Typically, for Llama models the rank r is
+generally of order 2k for k ∈ {2,...,6}, and model width n is generally larger than 212.
+We will refer to a layer of the network to which LoRA is applied (see Definition 1) as a
+LoRA layer. For the theoretical analysis, we adopt a simplified setting that facilitates a
+rigorousyetintuitivederivationsoftheresults.
+3.1 SimplifiedSetting
+The following simplified setup was considered in Hayou et al. [44] to derive asymptotic
+results concerning the learning rates in LoRA. We use the same setup in our analysis to
+investigatetheimpactofinitialization.
+Finetuning Dataset. We assume that the dataset used for finetuning consists of
+a single datapoint (x,y),5 and the goal is to minimize the loss calculated with
+4Here, we assumed that r = Θ(1) (in width), i.e. it doesn’t grow with width. In general, the
+rightscalingforInit[B]isσ2 =Θ(r−1).
+B
+5Although this a simplifying assumption for our analysis, the results can be extended to mini-
+batched gradients without affecting the conclusions. Such results will require additional assump-
+tionstobefullyrigorous.
+5the model with adjusted weights W∗ + BA for all LoRA layers (here θ =
+{A,B,forallLoRAlayersinthemodel}). Zt is the input to the LoRA layer, computed
+withdatainputx. Similarly,wewritedZ¯t todenotethegradientofthelossfunctionwith
+respecttothelayeroutputfeaturesZ¯ evaluatedatdatapoint(x,y).
+Single LoRA Module. Given a LoRA layer, LoRA feature updates are not only driven
+bythechangeintheA,B weights,butalsothechangesinZ,dZ¯ whichareupdatedaswe
+finetunethemodel(assumingtherearemultipleLoRAlayers). Toisolatethecontribution
+of individual LoRA layers to feature learning, we assume that only a single LoRA layer
+is trainable and all other LoRA layers are frozen.6 For this LoRA layer the layer input
+Z is fixed and does not change with t, whereas dZ¯ changes with step t (because Z¯t =
+(W∗+ αB A )Z). Afterstept,Z isupdatedasfollows
+r t t B
+∆Zt =B ∆Zt +∆B Zt−1+∆B ∆Zt. (2)
+B t−1 A t A t A
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+δ1 δ2 δ3
+t t t
+AsdiscussedinHayouetal.[44],thetermsδ1,δ2represent‘linear’featureupdatesthatwe
+t t
+obtainifwefixoneweightmatrixandonlytraintheother. Thethirdtermδ3representsthe
+t
+‘multiplicative’ feature update which captures the compounded update due to updating
+bothAandB.
+3.2 StabilityandFeatureLearning
+Hayou et al. [44] introduced the notion of stability of LoRA features as width grows. We
+introducehereaslightlymorerelaxednotionofstability.
+Definition3(FeatureStability). WesaythatLoRAfinetuningisstableifforallLoRAlayersin
+themodel,andalltrainingstepst,wehaveZ,Z =O(1),asthewidthngoestoinfinity.
+B
+Here, feature stability implies that LoRA output Z remains bounded (in L2 norm) as
+B
+width grows. To achieve such stability, hyperparameters (initialization, learning rate)
+should be scaled as n grows. We will show that the dependence of the optimal learning
+rateonnishighlysensitivetothechoiceofinitialization(Init[A]orInit[B]).
+Note that feature stability also requires that Z = O(1) which is directly related to pre-
+training dynamics since it depends on some pretrained weights W∗. We assume that
+pretraining parameterization (how initialization and learning rate are parametrized w.r.t
+width)ensuresthiskindofstability(seeAppendixAformoredetails).7
+As discussed above, feature updates are driven by the terms (δi) . As n grows,
+t i∈{1,2,3,}
+these feature updates might become trivial (i.e. vanish as n → ∞) or unstable (i.e.
+grows unbounded). To avoid such scenarios, we want to ensure that ∆Z = Θ(1).
+B
+Such conditions are the main ideas behind µP [26] and Depth-µP [41], which are net-
+work parametrizations that ensure stability and feature learning in the large width and
+depthlimitsforpretraining. Werecallthisdefinitionfrom[44].
+Definition 4 (Feature Learning). WesaythatLoRAfinetuninginducesstablefeaturelearning
+in the limit of large width if the dynamics are stable (Definition 3), and for all finetuning steps t,
+wehave∆Zt d =ef Zt+1−Zt =Θ(1).
+B B B
+∆Z is the sum of the terms δi’s (Equation (2)). To achieve optimal feature learning, we
+B t
+want to ensure that δ1 = Θ(1) and δ2 = Θ(1) which means that both weight matrices A
+t t
+andBareefficientlyupdatedandcontributetotheupdateinZ . Anintuitiveexplanation
+B
+6ThisisequivalenttohavingonlyasingleLoRAlayerinthemodelsinceLoRAlayersareinitial-
+izedtozero.
+7Whentakingtheinfinitewidthlimit,wecanforinstanceassumethatpretrainingparameteriza-
+tionisµP[26]. Thisisatechnicalityfortheinfinite-widthlimitanddoesnothaveanyimplications
+onpracticalscenarioswherethewidthisfinite. Themostimportantimplicationsofthisassumption
+is that in the pretrained network (before introducing LoRA layers), we have Z = Θ(1),Z¯ = Θ(1),
+whichholdsforageneralinput-outputpair(x,y).
+6isprovidedinAppendixA.1. Thisleadsustothefollowingdefinitionofefficientlearning
+withLoRA.
+Definition5(EfficientLearningwithLoRA). WesaythatLoRAfine-tuningisefficientifitis
+stable(Definition3),andforallLoRAlayersinthemodel,andallfine-tuningstepst>1,wehave
+δi =Θ(1), i∈{1,2}.
+t
+Next, we introduce the γ-operator, an essential tool in our analysis of the large width
+dynamicsofLoRA.
+3.3 Introductiontotheγ-operator
+In the theory of scaling, one usually tracks the asymptotic behaviour of key quantities as
+wescalesomemodelingredient. Forinstance,ifwescalethewidthnofaneuralnetwork,
+weareinterestedinquantifyinghowcertainquantitiesinthenetworkbehaveasngrows.
+This is a standard approach for (principled) model scaling and it has so far been used to
+derivescalingrulesforinitialization[5],activationfunction[10],networkparametrization
+[41],amongstotherthings.
+With Init[A] and Init[B], initialization weights are of order Θ(n−β) for some β ≥ 0.
+Assumingthatthelearningratealsoscalespolynomialywithn,itisstraightforwardthat
+preactivations,gradients,andweightupdatesareallasymptoticallypolynomialinn. Note
+thatthisisonlypossiblebecauseallneuralcomputationsconsistsofsumsofΘ(nα)terms,
+where typically α ∈ {0,1}. For instance, when calculating the features AZ, each entry is
+asumofnterms,whilewhencalculatingBZ ,eachentryisasumofr terms(r fixedas
+A
+n goes to infinity). This is true for general neural computation that can be expressed as
+TensorPrograms[15].
+Consequently, for some quantity v in the computation graph, it is natural to track the
+exponent that determines the asymptotic behaviour of v with respect to n. We write
+v = Θ(γ[v]) to capture this polynomial dependence. Elementary operations with the
+γ-operatorinclude:8
+Zero. Whenv =0,wewriteγ[v]=−∞(asalimitofγ[n−β]whenβ →∞).
+Multiplication. Giventworeal-valuedvariablesv,v′,wehaveγ[v×v′]=γ[v]+γ[v′].
+Addition. Given two real-valued variables v,v′, we generally have γ[v + v′] =
+max(γ[v],γ[v′]). The only case where this is violated is when v′ =−v. This is generally a
+zero probability event if v and v′ are random variables that are not perfectly (negatively)
+correlated,whichisthecaseinmostsituationswherewemakeuseofthisformula.
+When does γ-Operator fail to capture asymptotic behaviour? When non-polynomial
+dependencies(intermsof n)appearinneuralcomputations, thenγ functioncannotcap-
+tureasymptoticbehaviourofthelearningdynamics. Forinstance,ifoneofthelayershas
+embedding dimension en or n×log(n), polynomial exponents are no longer sufficient to
+capturetheasymptoticdynamics. Fortunately,suchcasesaregenerallynotconsideredin
+practice.
+We have now introduced all required notions for the subsequent analysis. For better
+readability,wedeferalltheproofstotheappendix.
+8The γ-operator is a mapping from the set {v, s.t.v = Θ(nβ)forβ ∈ R∪{−∞}} to the set
+R∪{−∞}.
+73.4 Recursiveformulas
+Using the γ-operator, we can track the asymptotic behaviour of the finetuning dynamics
+asmodelwidthngrows. Atfinetuningstept,thegradientsaregiven
+∂L α
+t = dZ¯t−1⊗A Z
+∂B r t−1
+∂L α
+t =dZt−1⊗Z= B⊤ dZ¯t−1⊗Z,
+∂A A r t−1
+whereL isthelossatstept. Theweightsareupdatedasfollows
+t
+A =A −ηgt−1, B =B −ηgt−1,
+t t−1 A t t−1 B
+where g ,g are processed gradients (e.g. normalized gradients with momentum as in
+A B
+AdamW). We assume that the gradients are processed in a way that makes their entries
+Θ(1). This is generally satisfied in practice (with Adam for instance) and has been con-
+sidered in [40] to derive the µ-parametrization for general gradient processing functions.
+From this, we obtain the following recursive formulas for γ[Zt] and γ[B ], which charac-
+A t
+terizestheirbehaviourinthelargewidthlimit.
+Lemma 1 (Informal). For t fixed, the asymptotic dynamics of Zt and B follow the recursive
+A t
+formula
+γ[Zt]=max(γ[Zt−1],γ[η]+1)
+A A (3)
+γ[B ]=max(γ[B ],γ[η]).
+t t−1]
+The formal proof of Lemma 1 is provided in Appendix A and relies on Assumption 1
+which fairly represents practical scenarios (see Appendix A for a detailed discussion).
+Lemma 1 captures the change in asymptotic behaviour of quantities Zt and B as width
+A t
+grows. Naturally, the dynamics depend on the the initialization scheme which lead to
+completelydifferentbehavioursasweshowinthenexttworesults.
+3.5 Init[A]leadstomoreefficientfeaturelearningbutsuffers“internal”instability
+In the next result, we provide a precise characterization of stability and feature learning
+whenusingInit[A].
+Theorem1(Informal). Fortfixed,withInit[A]andlearningrateη,wehave
+• Stability: Zt =O(1)ifandonlyifγ[η]≤−1/2.
+B
+• FeatureLearning: ∆Zt = Θ(1) if and only if γ[η] = −1/2. In this case, we also have
+B
+δ1,δ2 =Θ(1)(efficientfeaturelearning,Definition5).
+t t
+Moreover,“internal”instability(Zt =Ω(1))occurswhenγ[η]∈(−1,1/2].
+A
+WithInit[A],themaximallearningrate9 thatdoesnotleadtoinstabilityinZ scalesas
+B
+Θ(n−1/2). This can be seen as an asymptotic form of the edge of stability phenomenon
+[17] where if we increase the learning rate beyond some level, instability occurs. Inter-
+estingly,inthiscase(i.e. withΘ(n−1/2)learningrate)thefeaturesareefficientlyupdated
+(Definition 5). However, this comes with caveat: the features Zt grow as Θ(n1/2) which
+A
+can potentially cause numerical instabilities. We call this phenomenon internalinstability:
+only the features Z (internal LoRA features) grows, LoRA output Z remains Θ(1) in
+A B
+thiscase.
+The fact that Θ(n−1/2) is the maximal learning rate that does not cause instability in Z
+B
+doesnotmeanitistheoptimallearningrate. Asthewidthngrows,thisinternalinstability
+in Z will become more and more problematic. Intuitively, we expect that a trade-off
+A
+appears in this case: the optimal learning rate (found by grid search) to be larger than
+Θ(n−1) but smaller than Θ(n−1/2), i.e. the network will try to achieve a balance between
+optimal feature learning (γ[η] = −1/2) and internal stability Zt = Θ(1) (γ[η] = −1). We
+A
+verifythisempiricallyinthenextsection.
+9Maximalγ[η]thatdoesnotcauseinstabilityinZ
+B
+83.6 Init[B]leadstosuboptimalfeaturelearningwithinternalstability
+Inthenextresult,weshowthatthemaximallearningrateallowedwithInit[B]isdiffer-
+entfromthatwithInit[A],leadingtocompletelydifferentdynamics.
+Theorem2(Informal). Fortfixed,withInit[B],wehave
+• Stability: Zt =O(1)ifandonlyifγ[η]≤−1.
+B
+• FeatureLearning: ∆Zt =Θ(1)ifandonlyifγ[η]=−1.
+B
+Moreover,efficientfeaturelearningcannotbeachievedwithInit[B]foranychoiceoflearningrate
+scaling γ[η] (that does not violate the stability condition). More precisely, with Θ(n−1) learning
+rate,thelimitingdynamics(whenn→∞)arethesameifB wasnottrainedandAistrained.
+WithInit[B],themaximallearningrate(thatdoesnotviolatestability)scalesasΘ(n−1)
+(foranyϵ>0,alearningrateofΘ(n−1+ϵ)leadstoZ =Ω(1)).
+B
+Because of this bound on the maximal learning rate, no internal instability occurs with
+Init[B]. In this case, feature learning is suboptimal since the B weight matrix is under-
+trainedinthelargewidthlimit(δ2 →0).
+t
+ConclusionsfromSections3.5and3.6. TheresultsofTheorem1andTheorem2suggest
+thatInit[A]allowstheuseoflargerlearningratescomparedtoInit[B],whichmightlead
+to better feature learning and hence better performance at the expense of some internal
+instability. Here, ‘larger’ learning rate should be interpreted in asymptotic terms: with
+Init[A] the maximal learning rate that does not cause instability satisfies γ[η] = −1/2.
+With Init[B], we have γ[η] = −1 instead. Note that because of the constants in Θ(nβ)
+learning rates (for some β) , the optimal learning rate with Init[A] is not systematically
+largerthanInit[B]forfinitewidth. However,aswidthgrows,wewillseethatitiscase.
+Another important finding from this analysis
+is that with both initialization schemes, the 2 6 Stability <-> Feature Learning
+Tradeoff
+dynamicsaresuboptimalinthelimit: internal 2 7
+instability with Init[A] and undertraining of
+B withInit[B].10 Wewilllaterdiscusspossi- 2 8
+*
+blesolutionstothisbehaviour. 2 9
+2 10
+Init[A]
+3.7 Experiments 2 11 C1n 1/2
+withaTeacher-StudentModel Init[B]
+2 12
+C2n 1
+To validate our theory in a controlled setting, 28 29 210 211 212 213
+weconsiderthefollowingsimplemodel: n
+
+Y
+in
+=W inx, F tui ng iu nr ge o2 f: sO yp nt ti hm eta il cL mea or dn ei lng Eqr uat ae tif oo nrt (h 4)e wfin ite h-
+Y h =Y in+(W h+BA)ϕ(Y in) (4) Init[A] and Init[B] as initialization. The
+Y
+out
+=W outϕ(Y h)
+o np .t Tim hea ol rL eR tics aa lr le ins eh so nw −n 1a as na df nun −c 1t /i 2on aro ef sw hoid wth
+n
+as well (constants C 1,C 2 are chosen to pro-
+where W ∈ Rn×d,W ∈ Rn×n,W ∈ R1×n, vide suitable trend visualization). As model
+in h out
+andB,A⊤ ∈Rr×n. width n grows, the optimal learning rate
+withInit[A]becomeslargerthantheoptimal
+We generate synthetic data from the teacher learning rate with Init[B]. This is in agree-
+model using the following config: d = mentwiththetheoreticalresults.
+5,r =20,n=1000,N =1000(traindata
+teacher
+size), and N = 100 (test data size). The
+test
+weightWteacher,Wteacher,Ateacher,andBteacher arerandomlyinitialized,andWteacher =
+in out h
+10Moreprecisely,onecanshowthatwithInit[B],forfixedt,inthelimitn→∞,B t converges
+toB 0,i.e. B isuntrainedinthislimit.
+9Width = 128 Width = 8192
+Init[A] Init[B] Init[A] Init[B]
+--------------------------------- --------------------------------- --------------------------------- ---------------------------------
+=4.2e-04, =1.6e-02 =5.3e-04, =8.1e-03 =2.4e-04, =1.4e-03 =3.7e-04, =4.8e-04
+1.5 1.5 6 6
+|Az|
+1.0 1.0 4 4 |BAz|
+|Az|
+0.5 0.5 2 2
+|BAz|
+0.0 0.0 0 0
+=3.0e-04, =2.3e-02 =3.0e-04, =1.2e-02 =2.9e-04, =1.2e-03 =3.6e-04, =9.8e-04
+1.5 1.5
+4 4
+1.0 1.0
+0.5 0.5 2 2
+0.0 0.0 0 0
+0 50 100 0 50 100 0 50 100 0 50 100
+step step step step
+Figure3: EvolutionofthenormsoftheZ A,Z B features,averagedovertrainingdata. Wecompute
+the averageˆ|Z A| d =ef N−1(cid:80)N i=1∥Z A(x i)∥ (and same for Z B), where the x i’s are the training data.
+The dynamics are shown for widths n = 128 and n = 8192, two seeds, and for both Init[A] and
+Init[B]. Train loss and the (optimal) learning rate are shown on top of each plot. We observe
+thatthemagnitudeofZ
+A
+issignificantlyhigherwithInit[A]comparedtoInit[B]atlargewidth
+(n = 8192). Interestingly, the train loss is smaller with Init[A], as compared to Init[B]. Results
+withotherseedsandwidthsareshowninAppendixB.
+0.11 We train student models with d = 5,r = 4, and varying widths n ∈ {2k, k =
+7,...,13}.12
+Optimal Learning Rate. We finetune model (4) on synthetic data generated from the
+teachermodel. InFigure2,weshowtheoptimallearningratewhenusingeitherInit[A]
+or Init[B] to initialize the finetuning, as a function of width n. For n ≫ 1 (typically
+n ≥ 29), the optimal learning rate with Init[A] is larger than the optimal learning rate
+with Init[B]. This is in agreement with the theoretical results obtained in Theorem 1
+andTheorem2whichpredictasymptoticmaximallearningrates(thatsatisfythestability
+condition)ofΘ(n−1/2)andΘ(n−1)respectively.
+WithInit[A],weobservethestability/featurelearningtrade-offforlargen. Theoptimal
+learning rate with Init[A] in this regime (e.g. n = 213) is smaller than the maximal the-
+oretical learning rate n−1/2 that achieves optimalfeature learning (Theorem 1). Here, the
+modelseemstobalancetheinternalinstabilitythatoccursintheZ featureswithfeature
+A
+learningandthusfavorssmallerlearningrates: theoptimallearningratesissmallerthan
+Θ(n−1/2)andlargerthanΘ(n−1).
+Internal Instability and Feature Learning. Figure 3 shows the (average) magnitude of
+Z andZ forInit[A]andInit[B]forwidthsn=128andn=8192. WithInit[A],the
+A B
+magnitude of Z features seem to grow with width, hence trading off internal stability
+A
+for more efficient feature learning. This behaviour is consistent across random seeds
+as shown in the figure, and as further confirmed by experiments in Appendix B. The
+train loss is consistently smaller with Init[A], which can be explained by the fact that
+Init[A]allowsmoreefficientfeaturelearningatthecostofsomeinternalinstability. This
+flexibilitycannotbeachievedwithInit[B].NotealsothatZ featurestendstogetsmaller
+B
+withnwithInit[A]aspredictedbytheory: thetrade-offbetweeninternalinstabilityand
+feature learning implies that η∗ = o(n−1/2), which implies that Zt = o(1), i.e. the Z
+B B
+11Here, thepretrainedmodeliseffectivelygivenbyY out = W ot uea tcherϕ(W it neacherx), andthefine-
+tuningdatasetissimulatedbyinjectingtheLoRAweightsAteacher,Bteacher.
+12Inthissetup,astudentmodelcanhavelargerwidthnthantheteachermodel.
+10
+seed-1
+seed-2features vanish as width grows. While this might problematic, it only becomes an issue
+at extremely large width: for instance if the optimal learning rate scales as Θ(n−β) for
+some β ∈ (1/2,1) (so that the learning rate is between Θ(n−1) and Θ(n−1/2), balancing
+internalinstabilityandefficientfeaturelearning),theLoRAoutputfeaturescalesasZ =
+B
+B A Z=Θ(n−β+1). Therefore, if β ≈0.7 for instance, the vanishing rate of LoRA output
+t t
+featureisZ ≈Θ(n−0.3)whichisslowgiventheorderofmagnitudeofwidthinpractice
+B
+(forn=212,wehaven−0.3 ≈0.08).
+4 Experiments with Language Models
+Our theoretical results from earlier provides a detailed asymptotic analysis of the fine-
+tuning dynamics when LoRA modules are initialized with Init[A] or Init[B]. The
+main conclusions are that Init[A] generally leads to more efficient feature learning
+(which can be justified by the fact that optimal learning rate is larger when using
+Init[A] compared to when using Init[B]). To provide evidence of this claim on real-
+world tasks, we use LoRA to finetune a set of language models on different bench-
+marks. Details about the experimental setup and more empirical results are provided
+in Appendix B. We use LoRA+ code [44] for our experiments (available at https:
+//github.com/nikhil-ghosh-berkeley/loraplus).
+4.1 GLUEtaskswithRoBERTa
+The GLUE benchmark (General Language Understanding Evaluation) consists of several
+language tasks thatevaluate the understanding capabilities of langugagemodels [8]. Us-
+ing LoRA, we finetune Roberta-large from the RoBERTa family [12] on MNLI, SST2, and
+QNLItaskswithvaryinglearningratesηandinitializationschemes(Init[A]orInit[B]).
+Weusethesameexperimentalsetupof[19]forRoberta-Largetocompareourresultswith
+theirs(seeAppendixBformoredetails).
+MNLI SST2
+--------------------------------- --------------------------------- QNLI
+Init[A]: Acc=90.69, *=8.0e-05 Init[A]: Acc=96.67, *=1.6e-04 ---------------------------------
+Init[B]: Acc=89.47, *=1.0e-05 Init[B]: Acc=96.44, *=4.0e-05 Init[A]: Acc=95.09, *=8.0e-05
+Init[B]: Acc=93.61, *=8.0e-05
+00 .. 89 I In ni it t[ [B A]] 0.9 I In ni it t[ [B A]] 00 .. 99 25 50 I In ni it t[ [B A]]
+0.7 0.8 0.900
+0.6 0.7 0.875
+0.850
+0.5
+0.6 0.825
+0.4 0.800
+0.5
+105 104 103 105 104 103 105 104 103
+Figure4: TestAccuracyforRoBERTa-LargefinetunedonGLUEtasks. Theresultsareshownafter
+convergence of finetuning with LoRA, initialized with either Init[A] or Init[B]. Models were
+finetuned using LoRA rank r = 8 and FP16 precision. Optimal learning rate and corresponding
+accuracyareshownontopofeachpanelforbothinitializations. Theexperimentalsetupisprovided
+inAppendixB.
+The results in Figure 4 are aligned with our theory: we observe that Init[A] generally
+leadstobetterperformance,andtheoptimallearningratewithInit[A]isgenerallylarger
+than with Init[B]. Models initialized with Init[A] match the performances reported
+in [19], while those initialized with Init[B] generally underperform that baseline. For
+MNLI task (the hardest one amongst the three tasks), we observe a significant difference
+in the best test accuracy (over 3 random seeds) with 90.69 with Init[A] and 89.47 with
+Init[B].WealsoobservethatforMNLI,theoptimallearningratewithInit[A](η∗ =8e-
+5) is much larger than the optimal learning rate with Init[B] (η∗ = 1e-5), which aligns
+with our theoretical predictions. However, note that for QNLI for instance (an easier
+task), while the optimal test accuracy is significantly better with Init[A], the optimal
+learningrate(fromthegridsearch)isthesameforInit[A]andInit[B].Therearemany
+possibleexplanationsforthis: 1)thewidthisnotlargeenoughinthiscasetoseethegap
+11
+ccA
+tseT
+ccA
+tseT
+ccA
+tseTbetweenoptimallearningrates(forRoBERTa-Large,thewidthisn=210)2)Theconstants
+in Θ(n−1) are Θ(n−1/2) are significantly different in magnitude due to dependence on
+finetuning task. We notice similar behaviour with LLama experiments below. A precise
+analysisofthisobservationisbeyondthescopeofthispaper,weleaveitforfuturework.
+4.2 Llama
+--- i in n-- i i- t t- [ [T - A B-i -n ] ]- : :-y - P P-L - P Pl -a L L-- m - = =-- a - 7 7- - . .o - 0 1-n 8 5-- 9 1-W - , ,- -i -k --i = =T --e - - 7 4x - . .-t 0 0-- -2 e e-- - -- 0 0-- 4 4--- --- i in n-- i i- t t- [ [- A B-- ] ]L - : :-l -a A A--m c c- c c--a - = =-- -7 - 0 0-b - . .- 4
+4
+-o 1 0--n 0 6-- , ,-F -l -a --n - = =-- - v - 4 4-2 - . .0 0-- e e-- - -- 0 0-- 4 4--- --- i in n-- i i- t t- [ [- A B-- ] ]L - : :- l - A Aa -- c cm - c c-- a - = =-- -7 - 0 0-b - . .2 2- -o 6 3--n 0 9-- ,
+,
+- G --S --M = =--- 8 - 1 1-k . .- 0 0-- e e-- - -- 0 0- 3 3----
+8.4 i in ni it t[ [B A]] 0.40 0.26 init[B]
+8.2 0.38 0.24 init[A] 8.0 0.36 0.22
+7.8 0.34 0.20
+7.6 0.32 0.18
+0.16
+7.4 0.30
+init[B] 0.14
+7.2 0.28 init[A] 0.12
+0.26
+105 104 103 104 103 105 104 103
+Figure 5: (Left) Test perplexity (lower is better) of TinyLlama LoRA on WikiText-2 with Init[A]
+andInit[B].(Center)MMLUaccuracyofLlama-7bLoRAfinetunedontheFlan-v2dataset. (Right)
+GSM8ktestaccuracyofLlama-7bLoRAfinetunedontheGSM8kdataset. Moreexperimentaldetails
+areprovidedinAppendixB.
+To further validate our theoretical findings on more modern models and datasets, we
+report the results of finetuning the Llama-7b model [38] on the Flan-v2 dataset [36] and
+the GSM8k dataset [16], and finetuning the TinyLlama model [49] on WikiText-2 using
+LoRA.Eachtrialisaveragedovertwoseedsandtheshadedregionindicatesonestandard
+error. IntheleftpanelofFigure5weseethatwhenfinetuningTinyLlamausingLoRAthe
+optimal learning rate using Init[A] is larger than with Init[B] and the corresponding
+test perplexity is lower. Similarly, for the center panel of Figure 5, when finetuning the
+Llama-7b model on Flan-v2, the optimal learning rates for Init[A] and Init[B] are the
+same(forthelearningrategridweused),butthetheoptimalMMLUaccuracyforInit[A]
+is slightly higher than for Init[B]. For learning rates close to the optimal choice, the
+accuracy using Init[A] is generally higher than for Init[B]. An analagous result holds
+for the GSM8k dataset as shown in the rightmost panel of Figure 5. More details about
+thissettingareprovidedinAppendixB.
+5 Conclusion and Limitations
+We showed that finetuning dynamics are highly sensitive to the way LoRA weights are
+initialized. Init[A]isassociatedwithlargeroptimallearningrates,comparedtoInit[B].
+Larger learning rates typically result in better performance, as confirmed by our empir-
+ical results. Note that this is a zero-cost adjustment with LoRA finetuning: we simply
+recommendusingInit[A]insteadofInit[B].
+One limitation of our work is that we only define feature learning via the magnitude of
+feature updates in the limit of large width. In this way, our definition of feature learning
+is data-agnostic and therefore no conclusion about generalization can be obtained with
+thisanalysis. TheconstantsinΘ(.)asymptoticnotationnaturallydependonthedata(the
+finetuningtask)andthereforesuchdata-agnosticapproachdoesnotallowustoinferany
+informationabouttheimpactofthedataonthefinetuningdynamics.
+More importantly, our results indicate that both initialization schemes lead to suboptimal
+scenarios, although Init[A] has an advantage over Init[B] as it allows more efficient
+feature learning. In both cases, instability and/or suboptimal feature learning present
+fundamental issues, which can potentially be mitigated by approaches such as LoRA+
+[44]. Understanding the interaction of LoRA+ and related efficiency methods with the
+initializationschemeisanimportantquestionforfuturework.
+12
+ytixelpreP
+tseT
+ycaruccA
+ULMM
+ycaruccA
+tseT6 Acknowledgement
+WethankGradientAIforcloudcreditsundertheGradientAIfellowshipawardedtoSH
+and thank AWS for cloud credits under an Amazon Research Grant awarded to the Yu
+Group. We also gratefully acknowledge partial support from NSF grants DMS-2209975,
+2015341, 20241842, NSF grant 2023505 on Collaborative Research: Foundations of Data
+Science Institute (FODSI), the NSF and the Simons Foundation for the Collaboration on
+theTheoreticalFoundationsofDeepLearningthroughawardsDMS-2031883and814639,
+andNSFgrantMC2378totheInstituteforArtificialCyberThreatIntelligenceandOpera-
+tioN(ACTION).
+13References
+[1] Y. LeCun, L. Bottou, G. B. Orr, and K.-R. Müller. “Efficient backprop”. In: Neural
+networks:Tricksofthetrade.Springer,2002,pp.9–50.
+[2] L. Yang, S. Hanneke, and J. Carbonell. “A theory of transfer learning with applica-
+tionstoactivelearning”.In:Machinelearning90(2013),pp.161–189.
+[3] D. P. Kingma and J. Ba. “Adam: A method for stochastic optimization”. In: arXiv
+preprintarXiv:1412.6980(2014).
+[4] K.He,X.Zhang,S.Ren,andJ.Sun.“Deepresiduallearningforimagerecognition”.
+In: Proceedings of the IEEE conference on computer vision and pattern recognition. 2016,
+pp.770–778.
+[5] S.Schoenholz,J.Gilmer,S.Ganguli,andJ.Sohl-Dickstein.“DeepInformationProp-
+agation”.In:InternationalConferenceonLearningRepresentations.2017.
+[6] S.S.Schoenholz,J.Gilmer,S.Ganguli,andJ.Sohl-Dickstein.DeepInformationProp-
+agation.2017.arXiv:1611.01232[stat.ML].
+[7] A. Radford, K. Narasimhan, T. Salimans, I. Sutskever, et al. “Improving language
+understandingbygenerativepre-training”.In:(2018).
+[8] A. Wang, A. Singh, J. Michael, F. Hill, O. Levy, and S. R. Bowman. GLUE:AMulti-
+TaskBenchmarkandAnalysisPlatformforNaturalLanguageUnderstanding.2018.arXiv:
+1804.07461[cs.CL].
+[9] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova. “BERT: Pre-training of
+Deep Bidirectional Transformers for Language Understanding”. In: arXiv preprint
+arXiv:1810.04805(2019).
+[10] S.Hayou,A.Doucet,andJ.Rousseau.“OntheImpactoftheActivationfunctionon
+Deep Neural Networks Training”. In: Proceedings of the 36th International Conference
+on Machine Learning. Ed. by K. Chaudhuri and R. Salakhutdinov. Vol. 97. Proceed-
+ingsofMachineLearningResearch.PMLR,Sept.2019,pp.2672–2680.
+[11] N. Houlsby, A. Giurgiu, S. Jastrzebski, B. Morrone, Q. De Laroussilhe, A. Ges-
+mundo,M.Attariyan,andS.Gelly.“Parameter-efficienttransferlearningforNLP”.
+In:InternationalConferenceonMachineLearning.PMLR.2019,pp.2790–2799.
+[12] Y.Liu,M.Ott,N.Goyal,J.Du,M.Joshi,D.Chen,O.Levy,M.Lewis,L.Zettlemoyer,
+and V. Stoyanov. RoBERTa: A Robustly Optimized BERT Pretraining Approach. 2019.
+arXiv:1907.11692[cs.CL].
+[13] G. Yang. “Scaling limits of wide neural networks with weight sharing: Gaussian
+processbehavior,gradientindependence,andneuraltangentkernelderivation”.In:
+arXivpreprintarXiv:1902.04760(2019).
+[14] J. Kaplan, S. McCandlish, T. Henighan, T. B. Brown, B. Chess, R. Child, S. Gray,
+A. Radford, J. Wu, and D. Amodei. “Scaling laws for neural language models”. In:
+arXivpreprintarXiv:2001.08361(2020).
+[15] G. Yang. “Tensor programs iii: Neural matrix laws”. In: arXiv preprint
+arXiv:2009.10685(2020).
+[16] K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J.
+Tworek, J. Hilton, R. Nakano, et al. “Training verifiers to solve math word prob-
+lems”.In:arXivpreprintarXiv:2110.14168(2021).
+[17] J.Cohen,S.Kaur,Y.Li,J.Z.Kolter,andA.Talwalkar.“GradientDescentonNeural
+Networks Typically Occurs at the Edge of Stability”. In: International Conference on
+LearningRepresentations.2021.
+[18] S. Hayou, E. Clerico, B. He, G. Deligiannidis, A. Doucet, and J. Rousseau. “Stable
+ResNet”. In: Proceedings of The 24th International Conference on Artificial Intelligence
+andStatistics.Ed.byA.BanerjeeandK.Fukumizu.Vol.130.ProceedingsofMachine
+LearningResearch.PMLR,13–15Apr2021,pp.1324–1332.
+[19] E. J. Hu, Y. Shen, P. Wallis, Z. Allen-Zhu, Y. Li, S. Wang, L. Wang, and W.
+Chen.“LoRA:Low-RankAdaptationofLargeLanguageModels”.In:arXivpreprint
+arXiv:2106.09685(2021).
+[20] B. Lester, R. Al-Rfou, and N. Constant. “The power of scale for parameter-efficient
+prompttuning”.In:arXivpreprintarXiv:2104.08691(2021).
+14[21] G.YangandE.J.Hu.“Tensorprogramsiv:Featurelearningininfinite-widthneural
+networks”. In: InternationalConferenceonMachineLearning. PMLR. 2021, pp. 11727–
+11737.
+[22] J. Hoffmann, S. Borgeaud, A. Mensch, E. Buchatskaya, T. Cai, E. Rutherford, D. de
+LasCasas,L.A.Hendricks,J.Welbl,A.Clark,T.Hennigan,E.Noland,K.Millican,
+G. van den Driessche, B. Damoc, A. Guy, S. Osindero, K. Simonyan, E. Elsen, J. W.
+Rae,O.Vinyals,andL.Sifre.TrainingCompute-OptimalLargeLanguageModels.2022.
+arXiv:2203.15556[cs.CL].
+[23] M. Li, M. Nica, and D. Roy. “The Neural Covariance SDE: Shaped Infinite Depth-
+and-Width Networks at Initialization”. In: Advances in Neural Information Processing
+Systems.Ed.byS.Koyejo,S.Mohamed,A.Agarwal,D.Belgrave,K.Cho,andA.Oh.
+Vol.35.CurranAssociates,Inc.,2022,pp.10795–10808.
+[24] H.Liu,D.Tam,M.Muqeeth,J.Mohta,T.Huang,M.Bansal,andC.A.Raffel.“Few-
+shotparameter-efficientfine-tuningisbetterandcheaperthanin-contextlearning”.
+In:AdvancesinNeuralInformationProcessingSystems35(2022),pp.1950–1965.
+[25] J. Wei, Y. Tay, R. Bommasani, C. Raffel, B. Zoph, S. Borgeaud, D. Yogatama, M.
+Bosma, D. Zhou, D. Metzler, et al. “Emergent abilities of large language models”.
+In:arXivpreprintarXiv:2206.07682(2022).
+[26] G.Yang,E.J.Hu,I.Babuschkin,S.Sidor,X.Liu,D.Farhi,N.Ryder,J.Pachocki,W.
+Chen, and J. Gao. “Tensor programs v: Tuning large neural networks via zero-shot
+hyperparametertransfer”.In:arXivpreprintarXiv:2203.03466(2022).
+[27] T.Dettmers,A.Pagnoni,A.Holtzman,andL.Zettlemoyer.“QLoRA:EfficientFine-
+tuningofQuantizedLLMs”.In:arXivpreprintarXiv:2305.14314(2023).
+[28] S.Hayou.“Ontheinfinite-depthlimitoffinite-widthneuralnetworks”.In:Transac-
+tionsonMachineLearningResearch(2023).issn:2835-8856.
+[29] S.HayouandG.Yang.“WidthandDepthLimitsCommuteinResidualNetworks”.
+In: Proceedings of the 40th International Conference on Machine Learning. Ed. by A.
+Krause, E. Brunskill, K. Cho, B. Engelhardt, S. Sabato, and J. Scarlett. Vol. 202. Pro-
+ceedingsofMachineLearningResearch.PMLR,23–29Jul2023,pp.12700–12723.
+[30] B. He, J. Martens, G. Zhang, A. Botev, A. Brock, S. L. Smith, and Y. W. Teh. Deep
+Transformers without Shortcuts: Modifying Self-attention for Faithful Signal Propagation.
+2023.arXiv:2302.10322[cs.LG].
+[31] D.Kalajdzievski.“ARankStabilizationScalingFactorforFine-TuningwithLoRA”.
+In:arXivpreprintarXiv:2312.03732(2023).
+[32] S. A. Koohpayegani, K. Navaneet, P. Nooralinejad, S. Kolouri, and H. Pirsiavash.
+“NOLA: Networks as linear combination of low rank random basis”. In: arXiv
+preprintarXiv:2310.02556(2023).
+[33] D. J. Kopiczko, T. Blankevoort, and Y. M. Asano. “VeRA: Vector-based Random
+MatrixAdaptation”.In:arXivpreprintarXiv:2310.11454(2023).
+[34] Y. Li, Y. Yu, C. Liang, P. He, N. Karampatziakis, W. Chen, and T. Zhao. “Loftq:
+Lora-fine-tuning-aware quantization for large language models”. In: arXiv preprint
+arXiv:2310.08659(2023).
+[35] H. Liu, C. Li, Y. Li, and Y. J. Lee. “Improved baselines with visual instruction tun-
+ing”.In:arXivpreprintarXiv:2310.03744(2023).
+[36] S. Longpre, L. Hou, T. Vu, A. Webson, H. W. Chung, Y. Tay, D. Zhou, Q. V. Le, B.
+Zoph, J. Wei, et al. “The flan collection: Designing data and methods for effective
+instructiontuning”.In:arXivpreprintarXiv:2301.13688(2023).
+[37] L. Noci, C. Li, M. B. Li, B. He, T. Hofmann, C. Maddison, and D. M. Roy. The
+ShapedTransformer:AttentionModelsintheInfiniteDepth-and-WidthLimit.2023.arXiv:
+2306.17759[stat.ML].
+[38] H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei, N. Bashlykov,
+S. Batra, P. Bhargava, S. Bhosale, D. Bikel, L. Blecher, C. C. Ferrer, M. Chen, G.
+Cucurull, D. Esiobu, J. Fernandes, J. Fu, W. Fu, B. Fuller, C. Gao, V. Goswami, N.
+Goyal,A.Hartshorn,S.Hosseini,R.Hou,H.Inan,M.Kardas,V.Kerkez,M.Khabsa,
+I.Kloumann,A.Korenev,P.S.Koura,M.-A.Lachaux,T.Lavril,J.Lee,D.Liskovich,
+Y.Lu,Y.Mao,X.Martinet,T.Mihaylov,P.Mishra,I.Molybog,Y.Nie,A.Poulton,J.
+15Reizenstein,R.Rungta,K.Saladi,A.Schelten,R.Silva,E.M.Smith,R.Subramanian,
+X. E. Tan, B. Tang, R. Taylor, A. Williams, J. X. Kuan, P. Xu, Z. Yan, I. Zarov, Y.
+Zhang, A. Fan, M. Kambadur, S. Narang, A. Rodriguez, R. Stojnic, S. Edunov, and
+T. Scialom. “Llama 2: Open Foundation and Fine-Tuned Chat Models”. In: arXiv
+preprintarXiv:2307.09288(2023).
+[39] Y. Wang, H. Ivison, P. Dasigi, J. Hessel, T. Khot, K. R. Chandu, D. Wadden, K.
+MacMillan, N. A. Smith, I. Beltagy, et al. “How Far Can Camels Go? Exploring the
+State of Instruction Tuning on Open Resources”. In: arXivpreprintarXiv:2306.04751
+(2023).
+[40] G.YangandE.Littwin.“Tensorprogramsivb:Adaptiveoptimizationintheinfinite-
+widthlimit”.In:arXivpreprintarXiv:2308.01814(2023).
+[41] G. Yang, D. Yu, C. Zhu, and S. Hayou. “Tensor Programs VI: Feature Learning in
+Infinite-DepthNeuralNetworks”.In:arXivpreprintarXiv:2310.02244(2023).
+[42] L. Zhang, L. Zhang, S. Shi, X. Chu, and B. Li. “Lora-fa: Memory-efficient
+low-rank adaptation for large language models fine-tuning”. In: arXiv preprint
+arXiv:2308.03303(2023).
+[43] K. Bałazy, M. Banaei, K. Aberer, and J. Tabor. “LoRA-XS: Low-Rank Adaptation
+with Extremely Small Number of Parameters”. In: arXiv preprint arXiv:2405.17604
+(2024).
+[44] S.Hayou,N.Ghosh,andB.Yu.LoRA+:EfficientLowRankAdaptationofLargeModels.
+2024.arXiv:2402.12354[cs.LG].
+[45] T. Jiang, S. Huang, S. Luo, Z. Zhang, H. Huang, F. Wei, W. Deng, F. Sun, Q. Zhang,
+D.Wang,etal.“MoRA:High-RankUpdatingforParameter-EfficientFine-Tuning”.
+In:arXivpreprintarXiv:2405.12130(2024).
+[46] Y. Li, S. Han, and S. Ji. “VB-LoRA: Extreme Parameter Efficient Fine-Tuning with
+VectorBanks”.In:arXivpreprintarXiv:2405.15179(2024).
+[47] S.-Y. Liu, C.-Y. Wang, H. Yin, P. Molchanov, Y.-C. F. Wang, K.-T. Cheng, and
+M.-H.Chen.“DoRA:Weight-DecomposedLow-RankAdaptation”.In:arXivpreprint
+arXiv:2402.09353(2024).
+[48] F. Meng, Z. Wang, and M. Zhang. “PiSSA: Principal Singular Values and Singular
+Vectors Adaptation of Large Language Models”. In: arXivpreprintarXiv:2404.02948
+(2024).
+[49] P.Zhang,G.Zeng,T.Wang,andW.Lu.“Tinyllama:Anopen-sourcesmalllanguage
+model”.In:arXivpreprintarXiv:2401.02385(2024).
+[50] J. Zhu, K. Greenewald, K. Nadjahi, H. S. de OcÃ¡riz Borde, R. B. Gabrielsson, L.
+Choshen, M. Ghassemi, M. Yurochkin, and J. Solomon. Asymmetry in Low-Rank
+AdaptersofFoundationModels.2024.arXiv:2402.16842[cs.LG].
+16A Theory and Proofs
+A.1 RoleofAandBweightmatrices
+Recallthefeatureupdatedecomposition
+∆Zt =B ∆Zt +∆B Zt−1+∆B ∆Zt. (5)
+B t−1 A t A t A
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+δ1 δ2 δ3
+t t t
+To achieve optimal feature learning, we want to ensure that δ1 = Θ(1) and δ2 = Θ(1)
+t t
+whichmeansthatbothweightmatricesAandB areefficientlyupdatedandcontributeto
+the update in Z . To justify why this is a desirable property, let us analyze how changes
+B
+inmatricesAandB affectLoRAfeatureZ =BAZ.
+B
+Let(B ) denotethecolumnsofB. WehavethefollowingdecompositionofZ :
+:,i 1≤i≤r B
+r
+(cid:88)
+Z = (AZ) B ,
+B i :,i
+i=1
+where(AZ) istheith coordinateofAZ. Thisdecompositionsuggeststhatthedirectionof
+i
+Z is a weighted sum of the columns of B, and A modulates the weights. With this, we
+B
+canalsowrite
+
+δ1 =(cid:80)r (∆A Z) (B )
+t i=1 t i :,i t−1
+δ2 =(cid:80)r (A Z) (∆B ) ,
+t i=1 t−1 i :,i t−1
+where(B ) referstothecolumnsofBattimestept. Havingbothδ1andδ2oforderΘ(1)
+:,i t t t
+means that both A and B are ‘sufficiently’ updated to induce a change in weights (AZ)
+i
+and directions B . If one of the matrices A,B is not efficiently updated, we might end
+:,i
+up with suboptimal finetuning, leading to either non updated directions B or direction
+weights (A Z). For instance, assuming that the model is initialized with Init[B], and
+t−1
+that B is not efficiently updated, the direction of Z will be mostly determined by the
+B
+vector(sub)spaceofdimensionr generatedbythecolumnsofB atinitialization.
+Thisintuitionwasdiscussedindetailsin[44].
+A.2 ScalingofNeuralNetworks
+Scalingreferstotheprocessofincreasingthesizeofoneoftheingredientsinthemodelto
+improveperformance(seee.g. [22]). Thisincludesmodelcapacitywhichcanbeincreased
+viawidth(embeddingdimension)ordepth(numberoflayers)orboth,compute(training
+data), number of training steps etc. In this paper, we are interested in scaling model
+capacityviathewidthn. Thisismotivatedbythefactthatmoststate-of-the-artlanguage
+andvisionmodelshavelargewidth.
+It is well known that as the width n grows, the network initialization scheme and the
+learning should be adapted to avoid numerical instabilities and ensure efficient learning.
+For instance, the initialization variance should scale 1/n to prevent arbitrarily large pre-
+activations as we increase model width n (e.g. He init [4]). To derive such scaling rules,
+a principled approach consist of analyzing statistical properties of key quantities in the
+model(e.g. pre-activations)asngrowsandthenadjusttheinitialization,thelearningrate,
+andthearchitectureitselftoachievedesirablepropertiesinthelimitn→∞[5,10,13].
+In this context, Yang et al. [26] introduces the Maximal Update Parameterization (or µP),
+a set of scaling rules for the initialization scheme, the learning rate, and the network ar-
+chitecture that ensure stability and maximal feature learning in the infinite width limit.
+Stability is defined by Yi = Θ(1) for all l and i where the asymptotic notation ‘Θ(.)’ is
+l
+withrespecttowidthn(seenextparagraphforaformaldefinition),andfeaturelearning
+is defined by ∆Y = Θ(1), where ∆ refers to the feature update after taking a gradient
+l
+step. µPguaranteesthatthesetwoconditionsaresatisfiedatanytrainingstept. Roughly
+speaking, µP specifies that hidden weights should be initialized with Θ(n−1/2) random
+17weights, and weight updates should be of order Θ(n−1). Input weights should be ini-
+tialized Θ(1) and the weights update should be Θ(1) as well. While the output weights
+should be initialized Θ(n−1) and updated with Θ(n−1). These rules ensure both stability
+and feature learning in the infinite-width limit, in contrast to standard parameterization
+(exploding features if the learning rate is well tuned), and kernel parameterizations (e.g.
+Neural Tangent Kernel parameterization where ∆Y = Θ(n−1/2), i.e. no feature learning
+l
+inthelimit).
+A.3 ProofofLemma1
+Inthissection,weprovidetheformalproofofLemma1. Theproofreliesonthefollowing
+assumption on the processed gradient g . This assumption was used in [44] to derive
+A
+scaling rules for the optimal learning rates for A and B weight matrices. Here, we use
+it to study the sensitivity of LoRA dynamics to initialization. We provide an intuitive
+discussionthatshowswhythisassumptionisrealistic.
+Assumption 1. WiththesamesetupofSection3,attrainingstept,wehaveZ,dZ¯ = Θ(1)and
+gt Z=Θ(n).
+A
+Assumption 1 consists of two parts: that 1) Z,dZ¯ = Θ(1) and 2) gt Z = Θ(n). The
+A
+firstconditionismainlyrelatedtopretrainingparamterizationwhichweassumesatisfied
+such conditions.13 The second condition is less intuitive, so let us provide an argument
+to justify why it is sound in practice. Let us study the product gt Z in the simple case of
+A
+Adamwithnomomentum,a.k.aSignSGDwhichisgivenby
+(cid:18) (cid:19)
+∂L
+g =sign ,
+A ∂A
+wherethesignfunctionisappliedelement-wise. Attrainingstept,wehave
+∂L α
+t = B⊤ dZ¯t−1⊗Z,
+∂A r t−1
+LetSt = αB⊤ dZ¯t−1. Thereforewehave
+r t−1
+g =sign(St⊗Z)=(sign(StZ )) .
+A i j 1≤i,j≤n
+However,notethatwealsohave
+sign(StZ )=sign(St)sign(Z ),
+i j i j
+andasaresult
+gt =sign(St)⊗sign(Z).
+A
+Hence,weobtain
+gt Z=(sign(Z)⊤Z)sign(St)=Θ(n),
+A
+whereweusedthefactthatsign(Z)⊤Z=Θ(n).
+This intuition should in-principle hold for the general variant of Adam with momentum
+aslongasthegradientprocessingfunction(anotionintroducedin[2])roughlypreserves
+the sign(Z) direction. This reasoning can be made rigorous for general gradient pro-
+cessingfunctionusingtheTensorProgramframeworkandtakingtheinfinite-widthlimit
+where the components of g ,Z,dZ¯ all become iid. However this necessitates an intri-
+A
+cate treatment of several quantities in the process, which we believe is an unnecessary
+complicationanddoesnotservethemainpurposeofthispaper.
+13Thereisatechnicalintricacyonthispoint. WhileZdependsonlyonpretraining,theJacobian
+dZ¯
+depends on finetuning. However, under the stability conditions mentioned in Definition 3, if
+dZ¯=Θ(1),itshouldremainsoduringfinetuningaswell.
+18Lemma 1. Under Assumption 1, the asymptotic behaviour of Zt and B follow the recursive
+A t
+formula
+γ[Zt]=max(γ[Zt−1],γ[η]+1)
+A A
+γ[B ]=max(γ[B ],γ[η]).
+t t−1]
+Proof. Atfinetuningstept,theweightsareupdatedasfollows
+A =A −ηgt−1, B =B −ηgt−1.
+t t−1 A t t−1 B
+Usingtheelementaryoperationswiththeγ-operator,weobtain
+γ[Zt]=max(γ[Zt−1],γ[ηgt−1Z])=max(γ[Zt−1],γ[η]+γ[gt−1Z]).
+A A A A A
+We conclude for Zt using Assumption 1. The formula for γ[B ] follows using the same
+A t
+techniques.
+A.4 ProofofTheorem1
+Theorem1. UnderAssumption1,Fortfixed,withInit[A]andlearningrateη,wehave
+• Stability: Zt =O(1)ifandonlyifγ[η]≤−1/2.
+B
+• FeatureLearning: ∆Zt = Θ(1) if and only if γ[η] = −1/2. In this case, we also have
+B
+δ1,δ2 =Θ(1)(efficientfeaturelearning,Definition5).
+t t
+Moreover,“internal”instability(Zt =Ω(1))occurswhenγ[η]∈(−1,1/2].
+A
+Proof. WithInit[A],wehaveγ[B ]=−∞andγ[A Z]=0. Asaresult,wehaveforallt
+0 0
+γ[A Z]=max(0,γ[η]+1)
+t
+γ[B ]=γ[η]
+t
+ToachieveZ =O(1),weshouldthereforehave
+B
+γ[η]+max(0,γ[η]+1)≤0,
+whichisequivalenttoγ[η]≤−1/2.
+This implies that the maximum learning rate that does not cause instability is Θ(n−1/2).
+Such learning rate causes internal instability, i.e. the feature Z explodes with width.
+A
+Why? Because, with this learning rate, we have γ[A Z] = 1/2, i.e. A Z = Θ(n1/2)
+t t
+which diverges as n grows. However, this growth is compensated with the fact that
+γ[B ]=−1/2,i.e. B =Θ(n−1/2). Thisanalysisisvalidforanyγ[η]∈(−1,1/2].
+t t
+In this case, feature learning is efficient in the sense of Definition 5: δ1 = Θ(1) and
+t
+δ2 =Θ(1). Toseethis,recallthatδ1 =B ∆Z1 whichyieldsγ[δ1]=γ[B ]+γ[∆Zt]=
+t t t−1 A t t−1 A
+γ[η]+γ[η]+1 = 0 and γ[δ2] = γ[∆B ]+γ[Zt−1] = γ[η]+max(γ[η]+1,0) = 0. So both
+t t A
+weights contribute significantly to feature updates at the expense of benign exploding in
+Zt =A Z.
+A t
+A.5 ProofofTheorem2
+Theorem2. UnderAssumption1,fortfixed,withInit[B]andlearningrateη,wehave
+• Stability: Zt =O(1)ifandonlyifγ[η]≤−1.
+B
+19• FeatureLearning: ∆Zt =Θ(1)ifandonlyifγ[η]=−1.
+B
+Moreover,efficientfeaturelearningcannotbeachievedwithInit[B]foranychoiceoflearningrate
+scaling γ[η] (that does not violate the stability condition). More precisely, with Θ(n−1) learning
+rate,thelimitingdynamics(whenn→∞)arethesameifB wasnottrainedandAistrained.
+Proof. Here, we show that maximal learning rate that does not cause instability in LoRA
+outputfeaturesZ isΘ(n−1)andnointernalinstabilityoccursinthisscenario.
+B
+With Init[B], we have that γ[B ] = 0 and γ[A Z] = −∞. From Equation (3), we obtain
+0 0
+that
+γ[A Z]=γ[η]+1
+t
+γ[B ]=max(0,γ[η]).
+t
+Asaresult,LoRAoutputstabilityisachievedifandonlyif
+γ[η]+1+max(0,γ[η])≤0,
+whichisequivalenttohavingγ[η]≤−1.
+Moreover,withη =Θ(n−1)wehavethatγ[δ1]=γ[B ]+γ[∆Zt]=0+γ[η]+1=0and
+t t−1 A
+γ[δ2] = γ[∆B ]+γ[Zt−1] = γ[η]+0 = −1. As a result, feature learning is not efficient in
+t t A
+this case, and the learning dynamics are asymptotically equivalent to not training matrix
+B (becauseδ2 →0).
+t
+B Additional Experiments
+Thissectioncomplementstheempiricalresultsreportedinthemaintext. Weprovidethe
+detailsofourexperimentalsetup,andshowtheacc/lossheatmapsforseveralconfigura-
+tions.
+B.1 EmpiricalDetails
+B.1.1 ToyExample
+In Figure 2, we trained a simple model with LoRA layers to verify the results of the
+analysisin??. Hereweprovidetheempiricaldetailsfortheseexperiments.
+Model. Weconsiderasimplemodelgivenby
+f(x)=W ϕ(W x+(W +BA)ϕ(W x)),
+out in h in
+whereW ∈Rn×d,W ∈R1×n,A∈Rr×n,B ∈Rn×r aretheweights,andϕistheReLU
+in out
+activationfunction.
+Dataset. Here, we used d = 5, n = 1000, and r = 20 to simulate synthetic data (the
+teacher model). Synthetic dataset generated by X ∼ N(0,I ),Y = f(X). The number
+d
+of training examples is N = 1000, and the number of test examples is N = 100.
+train test
+theweightsW ,W ,W ,B,AarerandomlysampledfromaGaussiandistributionwith
+in h out
+normalizedvariance(1/fan-in).
+Training. We train the model with AdamW with β = 0.9 and β = 0.99 for a
+1 2
+range for values of η. The weights are initialized as follows: W ∼ N(0,1/d),W ∼
+in h
+N(0,1/n),W ∼N(0,1/n)andfixed. OnlytheweightmatricesA,B aretrainable.
+out
+20B.1.2 GLUEtaskswithRoBERTa
+ForourexperimentswithRoBERTamodels,finetunedonGLUEtasks,weusethefollow-
+ingsetup:
+TrainingAlgDetails
+Model Roberta-Large
+LearningRates {2k×10−5, fork =0,1,2,...,10}
+β 0.9
+1
+β 0.999
+2
+ε 1×10−8
+LRSchedule LinearwithWarmupRatio0.06
+WeightDecay 0.0
+TrainBatchSize 4
+Numberof
+10
+Epochs
+LoRAHyperparameters
+LoRARank 8
+LoRAα 16
+LoRADropout 0.1
+TargetModules ‘query,value’
+OtherHyperparameters
+SequenceLength T =128
+target
+RandomSeeds 3
+Precision FP16
+GPUs. NvidiaA10with24GBVRAM.
+21B.1.3 TinyLlamaWikiText-2
+For our experiments using the TinyLlama model finetuned on Wikitext-2, we use the
+followingsetuptrainingwithAdamW.
+TrainingAlgorithmDetails
+LearningRates 1×10−5, 5×10−5, 1×10−4, 2×10−4, 4×10−4, 7×10−4, 1×10−3, 2×10−3
+β 0.9
+1
+β 0.999
+2
+ε 1×10−6
+LRSchedule LinearwithWarmupRatio0.03
+WeightDecay 0.0
+TrainBatchSize 8
+Numberof
+1
+Epochs
+LoRAHyperparameters
+LoRARank 64
+LoRAα 16
+LoRADropout 0.0
+TargetModules ‘q_proj,k_proj,v_proj,o_proj,up_proj,down_proj,gate_proj’
+OtherHyperparameters
+SequenceLength 1024
+RandomSeeds 2
+Precision BF16
+GPUs. NvidiaA10with24GBVRAM.
+22B.1.4 Llama-7bFlan-v2
+For our experiments using the Llama-7b model finetuned on a size 100k random subset
+offlan-v2,weusefollowingsetuptrainingwithAdamW
+TrainingAlgorithmDetails
+LearningRates 1×10−5, 5×10−5, 1×10−4, 2×10−4, 4×10−4, 7×10−4, 1×10−3
+β 0.9
+1
+β 0.999
+2
+ε 1×10−6
+LRSchedule LinearwithWarmupRatio0.03
+WeightDecay 0.0
+TrainBatchSize 16
+Numberof
+1
+Epochs
+LoRAHyperparameters
+LoRARank 64
+LoRAα 16
+LoRADropout 0.0
+TargetModules ‘q_proj,k_proj,v_proj,o_proj,up_proj,down_proj,gate_proj’
+OtherHyperparameters
+SequenceLength T =1536,T =512
+source target
+RandomSeeds 2
+Precision BF16
+MMLUEvaluation: WeevaluateaverageaccuracyonMMLUusing5-shotprompting.
+GPUs: NvidiaA10with24GBVRAM.
+23B.1.5 Llama-7bGSM8k
+ForourexperimentsusingtheLlama-7bmodelfinetunedontheGSM8ktrainingdataset,
+weusefollowingsetuptrainingwithAdamW
+TrainingAlgorithmDetails
+LearningRates 1×10−5, 5×10−5, 1×10−4, 2×10−4, 4×10−4, 7×10−4, 1×10−3
+β 0.9
+1
+β 0.999
+2
+ε 1×10−6
+LRSchedule LinearwithWarmupRatio0.03
+WeightDecay 0.0
+TrainBatchSize 16
+Numberof
+1
+Epochs
+LoRAHyperparameters
+LoRARank 64
+LoRAα 16
+LoRADropout 0.0
+TargetModules ‘q_proj,k_proj,v_proj,o_proj,up_proj,down_proj,gate_proj’
+OtherHyperparameters
+SequenceLength T =1536,T =512
+source target
+RandomSeeds 2
+Precision BF16
+GPUs: NvidiaA10with24GBVRAM.
+B.2 AdditionalExps
+24Width = 64 Width = 256
+Init[A] Init[B] Init[A] Init[B]
+--------------------------------- --------------------------------- --------------------------------- ---------------------------------
+=7.7e-04, =6.7e-02 =7.4e-04, =6.7e-02 =4.9e-04, =1.4e-02 =5.5e-04, =9.7e-03
+2 2 2 2
+1 1 |Az| 1 1 |Az|
+|BAz| |BAz|
+0 0 0 0
+=5.6e-04, =5.6e-02 =6.5e-04, =4.7e-02 =4.0e-04, =1.6e-02 =3.9e-04, =6.8e-03
+2 2 2 2
+1 1 1 1
+0 0 0 0
+0 50 100 0 50 100 0 50 100 0 50 100
+step step step step
+Width = 512 Width = 1024
+Init[A] Init[B] Init[A] Init[B]
+--------------------------------- --------------------------------- --------------------------------- ---------------------------------
+=2.1e-04, =1.2e-02 =3.0e-04, =3.4e-03 =3.5e-04, =4.8e-03 =4.5e-04, =2.0e-03
+3 3 |Az| 3 3 |Az|
+2 2 |BAz| 2 2 |BAz|
+1 1 1 1
+0 0 0 0
+=2.5e-04, =6.8e-03 =4.4e-04, =1.4e-03 =2.5e-04, =4.0e-03 =3.9e-04, =2.8e-03
+3 3 3 3
+2 2 2 2
+1 1 1 1
+0 0 0 0
+0 50 100 0 50 100 0 50 100 0 50 100
+step step step step
+Width = 2048 Width = 4096
+Init[A] Init[B] Init[A] Init[B]
+--------------------------------- --------------------------------- --------------------------------- ---------------------------------
+=3.4e-04, =4.0e-03 =3.1e-04, =2.0e-03 =4.1e-04, =2.8e-03 =4.7e-04, =8.2e-04
+6 6
+|Az| 6 6 |Az|
+4 4 |BAz| |BAz|
+4 4
+2 2 2 2
+0 0 0 0
+=2.7e-04, =1.7e-03 =3.7e-04, =1.2e-03 =1.8e-04, =1.7e-03 =4.1e-04, =2.8e-04
+4 4 3 3
+2 2
+2 2
+1 1
+0 0 0 0
+0 50 100 0 50 100 0 50 100 0 50 100
+step step step step
+Figure6: SameasFigure3withdifferentswidths.
+25
