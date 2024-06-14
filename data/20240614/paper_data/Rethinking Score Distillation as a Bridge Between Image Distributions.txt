@@ -1,0 +1,797 @@
+Rethinking Score Distillation as a
+Bridge Between Image Distributions
+DavidMcAllister1∗ SongweiGe2∗ Jia-BinHuang2 DavidW.Jacobs2
+AlexeiAEfros1 AleksanderHolynski1 AngjooKanazawa1
+1UCBerkeley2UniversityofMaryland
+https://sds-bridge.github.io/
+Abstract
+Score distillation sampling (SDS) has proven to be an important tool, enabling
+the use of large-scale diffusion priors for tasks operating in data-poor domains.
+Unfortunately,SDShasanumberofcharacteristicartifactsthatlimititsuseful-
+ness in general-purpose applications. In this paper, we make progress toward
+understandingthebehaviorofSDSanditsvariantsbyviewingthemassolving
+anoptimal-costtransportpathfromasourcedistributiontoatargetdistribution.
+Underthisnewinterpretation,thesemethodsseektotransportcorruptedimages
+(source)tothenaturalimagedistribution(target). Wearguethatcurrentmethods’
+characteristicartifactsarecausedby(1)linearapproximationoftheoptimalpath
+and(2)poorestimatesofthesourcedistribution. Weshowthatcalibratingthetext
+conditioningofthesourcedistributioncanproducehigh-qualitygenerationand
+translation results with little extra overhead. Our method can be easily applied
+acrossmanydomains,matchingorbeatingtheperformanceofspecializedmethods.
+Wedemonstrateitsutilityintext-to-2D,text-basedNeRFoptimization,translating
+paintingstorealimages,opticalillusiongeneration,and3Dsketch-to-real. We
+compare our method to existing approaches for score distillation sampling and
+showthatitcanproducehigh-frequencydetailswithrealisticcolors.
+1 Introduction
+Diffusion models have shown tremendous success in modeling complex data distributions like
+images [49, 52, 3, 22], videos [57, 4] and robot action policies [13]. In domains where data is
+plentiful,theyproducestate-of-the-artresults. Manydatamodalities,however,cannotenjoythesame
+scalingbenefitsduetotheirlackofsufficientlylargedatasets. Inthesecases,itisusefultoexploit
+diffusionmodelstrainedondomainswithrichdatasourcesasapriorinanoptimizationframework.
+ScoreDistillationSampling(SDS)[46,67]anditsvariants[68,20,74]areawidelyadoptedwayto
+optimizeparametricimages,i.e.,imagesproducedbyamodellikeNeRF,withapre-traineddiffusion
+model. Despitebeingapplicabletoawiderangeofapplications,SDSisalsoknowntosufferfrom
+severalsignificantartifacts,suchasoversaturationandoversmoothing. Assuch,severalvariantshave
+beenproposedtoalleviatetheseartifacts[68,74,32],oftenatthecostofefficiency,diversity,orother
+artifacts.
+In this paper, we investigate the core issues with SDS by casting the class of score distillation
+optimization problems as a Schrödinger Bridge (SB) problem [53, 12, 11, 42], which finds the
+optimal transport between two distributions. Specifically, given some images from the current
+optimizeddistribution(e.g.,renderingsfromaNeRF),applyingthetransportmapsthemtotheirpair
+imagesinatargetdistribution(e.g.,text-conditionednaturalimagedistribution). Thedensityflow
+∗Equalcontribution.
+Preprint.Underreview.
+4202
+nuJ
+31
+]VC.sc[
+1v71490.6042:viXraformedbythesemappingsistransport-optimal,asdefinedintheSBproblem. Inanoptimization
+framework,thedifferencebetweenpairedsourceandtargetsamples,computedwithanSB,canbe
+usedasagradienttoupdatethesource. Suetal.[63]haveshownthatthispathcanbeexplicitly
+solvedusingtwopre-traineddiffusionmodels. Weshowthatonecanalsocomposethesemodelsas
+anoptimizertoapproximatetransportpathsonthefly.
+Underthisframework,wecanunderstandSDSanditsvariantsasapproximatingasource-to-target
+distributionbridgewiththedifferenceoftwodenoisingdirections. Thedenoisingscorespointtothe
+sourceandtargetdistributionsrespectively,withthesourcerepresentingthecurrentoptimizedimage
+thatupdateswitheachoptimizationstep.
+Thisframingrevealstwosourcesoferrors. First,thesemethodsareafirst-orderapproximationofthe
+diffusionbridge. Specifically,Gaussiannoiseissampledtoperturbthecurrentoptimizedimage,and
+singledenoisingsteps,insteadofthefullPF-ODEsimulation,areusedtoestimatethetransport. This
+induceserrorinestimatingthedesiredpath. Recentworks [34,41]thatusemulti-stepestimation
+canbeexplainedasmitigatingthiserror. Second,estimatingthedenoisingdirectiontothecurrent
+sourcedistributionisnon-trivial,sincethecurrentoptimizedimagemaynotnecessarilylooklikea
+realimage(e.g.,initializingwithGaussiannoiseorstartingfromarenderofanuntextured3Dmodel).
+OuranalysisrevealsthatSDSapproximatesthecurrentdistributionwiththeunconditionalimage
+distribution,whichisnotaccurateandresultsinadistributionmismatcherror. Weshowthatrecent
+SDSvariants[68,74,32]canbeseenasproposalstoimprovethisdistributionmismatcherror.
+Finally,ouranalysismotivatesasimplemethodthatrectifiesthedistributionmismatchissuewithout
+additionalcomputationaloverhead. Ourinsightisthatthelarge-scaletext-to-imagediffusionmodels
+learnfrombillionsofcaption-imagepairs[54],whereabreadthofimagecorruptionsarepresentin
+theirtrainingsets.Theyarealsoequippedwithpowerfulpre-trainedtextencoders,whichempowerthe
+modelswithzero-shotcapacityingeneratingunseenconcepts[51,50].Assuch,simplydescribingthe
+currentsourcedistributionwithtext,evenifitisnotpartoftherealimagemanifold,canapproximate
+thedistributionofthecurrentoptimizedimage, leadingtoimprovedtransportpaths. Oursimple
+andefficientsolutioncanbeeasilyappliedtoanyexistingapplicationthatusesSDS.Weshowthat
+it consistently improves the visual quality in the desired domain. We comprehensively compare
+ourapproachwithstandarddistillationsamplingmethodsoverseveralgenerationtasks,whereour
+approachmatchesoroutperformsthebaselines.
+Ourcontributionsareasfollows:
+• We propose to cast the problem of using a pre-trained diffusion model as a prior in an
+optimizationproblemassolvingtheSchrödingerBridge(SB)problembetweentwoimage
+distributions. Specifically,itcanbeseenasbridgingthedistributionofthecurrentoptimized
+imagetothetargetdistributionunderadual-bridgeframework.
+• WeanalyzerecentSDS-basedmethodsunderthelensofourframeworkandexplainthe
+prosandconsoftheindividualmethods.
+• OuranalysismotivatesasimpleyeteffectivealternativetoSDSbyusingtextualdescriptions
+tospecifythecurrentoptimizedimagedistribution. Itachievesconsistentlymorerealistic
+resultsthanSDS,producingqualitycomparablewithVSD[68]withoutitscomputational
+overhead. Wecomparevariousgenerationtaskstoshowitswall-clockefficiencyandquality
+generationsagainststate-of-the-artmethods.
+2 Method
+Inthissection,wepresentananalyticalframeworkthatcaststhescoredistillationsampling(SDS)
+familyofmethodsasinstantiationsofaSchrödingerBridgeproblem. WeshowthatmanyrecentSDS
+basedmethodscanbeinterpretedasanonlinesolverfortheproblem. Thatis,eachSDSoptimization
+stepisafirst-orderapproximationofadualdiffusionbridgeformedbytwoprobabilityflow(PF)
+ODEs [63]. We analyze SDS and its variants under this general framework. Then, we present a
+simplesolutionbasedontheanalysis,whichleadstosignificantqualityimprovementwithlittleextra
+computationaloverhead.
+2Add noise
+" $,%&'
+! !,#
+" $,()( !
+!
+" *+, $%&$! '!,# "
+$,()( # -,()(
+#
+! ! " *+, # -,()( Current distribution
+!!,
+Target distribution
+"∗
+Current distribution *+, Target distribution
+Secondary distribution (e.g., unconditional)
+(a) Score distillation as a bridge between two distributions. (b) Distribution mismatch error.
+Figure1:OptimizationwithdiffusionmodelsasapproximationofaSchrödingerBridgeProblem(SBP).(a)
+Weproposetoformulateoptimizationwithdiffusionmodelsasbridgingthedistributionofthecurrentoptimized
+imagex tothetargetdistributionunderadual-bridgeframework(a).Currentmethodscanbeinterpretedas
+θ
+approximatingtheoptimaltransportϵ∗ betweenthesedistributionsviathedifferencebetweenprojectionsof
+SBP
+anoisedimagex ontothetwodistributions.Thisanalysisrevealstwosourcesoferror:(1)thesegradients
+θ,t
+arelinearapproximationsoftheoptimalpath, asillustratedin(a), and(2)thesourcedistributionusedfor
+computingthisapproximation(e.g.,theunconditionaldistributioninSDS[46])maynotbealignedwiththe
+currentdistribution,illustratedin(b).
+2.1 Background
+Diffusionmodelsdefineaforward“noising"processthatdegradesdatasamplesxgraduallyfrom
+theimagedistributiontonoisedsamplesz ,andeventuallythei.i.d. Gaussiandistribution[23,60].
+t
+Thisprocessisindexedbytimestepst,wheret=1indexesthefullGaussiannoisedistributionand
+t=0indexesthedatadistribution. Adiffusionmodel,parameterizedbyϕ,isthentrainedtoreverse
+thisencodingprocess,iterativelytransformingthenoisedistributionintothedatadistributionwith
+thescore-matchingobjective:
+(cid:104) (cid:105)
+L (ϕ,x)=E w(t)∥ϵ (α x+σ ϵ;y,t)−ϵ∥2 , (1)
+Diff t∼U(0,1),ϵ∼N(0,I) ϕ t t 2
+whereyisaconditioningtextprompt,andα andσ arehyperparametersfromthepredefinednoise
+t t
+schedule.
+Probability Flow ODE. Denoising score matching [62, 27, 59] shows that the diffusion model
+denoisingpredictioncanberewrittenasascorevectorfield:
+1
+∇ logp (x)=−√ ϵ . (2)
+x t t
+1−α
+t
+Becauseofitsspecialconnectiontomarginalprobabilitydensities,theresultingODEisnamedthe
+probabilityflow(PF)ODEwiththefollowingexpression:
+1
+dx=[f(x,t)− g2(t)∇ logp (x))]dt, (3)
+2 x t
+wheref(x,t)andg(t)arepre-definedschedulecoefficients. ThisPF-ODEcanbesolveddeterminis-
+tically[61],mappinganoisesampletoitscorrespondingdatasamplethroughthereverseprocess
+andtheoppositethroughtheforwardprocess(inversion). Thiscycle-consistentconversionbetween
+imageandlatentrepresentationsisimportantinestablishingdualdiffusionimplicitbridges.
+DualDiffusionImplicitBridges. DualDiffusionImplicitBridges(DDIBs)[63]composeadiffusion
+inversionandgenerationprocessforsolvingimage-to-imagetranslationproblemswithoutrequiring
+apairedimagedataset. Instead,DDIBsusetwodiffusionmodelstrainedondifferentdomains(or,
+analogously, one model with two different text conditions). DDIB inverts the source image into
+a noise latent via the forward PF-ODE and then decodes the latent in the target domain via the
+reverse PF-ODE. DDIBs can be interpreted as a concatenation of the Schrödinger Bridges from
+source-to-latent and latent-to-target, hence the dual bridges in its name. DDIBs enable solving
+transport between two distributions using a single pre-trained diffusion model. We build on this
+insightinanoptimizationcontext.
+3!*+,,#
+!!
+" $,1234
+!!,#
+" $,%&%
+#0,%&%
+" !$
+!,-*. "''(!!,#
+" $,%&%#0,%&%
+! "!
+/'(" !$,-*.
+!!,#
+" $,%&%
+")('
+Current distribution Target distribution
+(a) Variational Score Distillation (b) Delta Distillation Sampling (c) Classifier Score Distillation (2nd term)
+Figure2:ComparisionofSDSvariantsunderouranalysis.Weillustratethemajorgradientcomponentsof
+differentSDSvariantsandprovideastraightforwardcomparisonwithϵ .
+SBP
+2.2 OptimizationwithDiffusionModelApproximatesaDualSchrödingerBridge
+Many generative vision tasks involve optimizing corrupted images to the image manifold. For
+example, in3Dgeneration, a3DrepresentationlikeNeRFisoptimizedtorendernaturalimages
+matchingaprescribedtextprompt. MethodslikeSDSenablethisbyusingapre-traineddiffusion
+modelasaprior. Weproposeformulatingsuchoptimizationproblemsassolutionstoaninstantiation
+of a Schrödinger Bridges Problem (SBP). SBP finds cost-optimal paths between a source image
+distributionp andatargetimagedistributionp [66,14]. Optimizingaparametrizedimagetoward
+src tgt
+thenaturalimagedistributioncanbecastasfindingtheoptimalpathsbetweenthecurrentoptimized
+image(s)andthenaturalimagedistribution. Insteadofsolvingthisproblemdirectly,whichwould
+requiretrainingagenerativemodelfromscratch [38,14,10],weshowthatpre-traineddiffusion
+modelscanbeexploitedasanoptimizerthatapproximatesthepath. Further,thegradientcomputed
+bytheexistingscoredistillationmethodscanbeviewedasthefirst-orderapproximationofthispath.
+ThisformulationisillustratedinFigure1
+Letx ∈Rdrepresentaparametricimage,i.e.,animageproduceddifferentiablybyamodelwith
+θ
+parameterθ,suchasaNeRF.Toleveragethepretraineddiffusionmodel,weaddnoiseϵ∼N(0,I)
+toobtainalatentattimestept:
+x =α x+σ ϵ
+θ,t t t
+Supposethatψ andψ denotethepathsobtainedbysolvingthePFODEasinEq. 3fromt
+t′,src t′,tgt
+to0,bothstartingfromx ,suchthatψ ∈ p ,ψ ∈ p ,ψ = ψ = x . Thisforms
+θ,t 0,src src 0,tgt tgt t,src t,tgt θ,t
+a dual diffusion bridge [63] from ψ to ψ . We approximate this path per-iteration using a
+0,src 0,tgt
+pretraineddiffusionmodel. Wedenotethedisplacementofthispathas:
+ϵ∗ =ψ −ψ . (4)
+SBP 0,tgt 0,src
+FullysimulatingthisbridgeinvolvessolvingtwoPFODEs,whichinvokesdozensofneuralfunction
+evaluations(NFEs)toestimatethegradientofeachiteration. Instead,onecanestimateeachhalfof
+thebridgewithasingle-steppredictionbycomputingtwodenoisingdirectionsϵ andϵ . We
+ϕ,src ϕ,tgt
+thusobtainafirst-orderapproximationofadualdiffusionbridgewiththedifferencevector:
+ϵ =ϵ −ϵ , (5)
+SBP ϕ,tgt ϕ,src
+whichissubjecttothefollowingsourcesoferrors.
+1. First-orderapproximationerror. InsteadofperformingfullPF-ODEsimulations,the
+single-step noising and prediction are less accurate and can induce errors. Recent work
+ISM[34]canbeinterpretedasreducingthiserrorwithamulti-stepsimulationtoobtain
+x .
+θ,t
+2. Sourcedistributionmismatch. Thedualdiffusionbridgereliesonϵ accuratelyestimat-
+ϕ,src
+ingthedistributionofthecurrentsample,x . Aseriesofworkscanbeviewedasimproving
+θ
+thiserror[68,28,74]bycomputingmoreaccurateϵ .
+ϕ,src
+Weshowthatϵ −ϵ isaneffectivegradientwhenboththesourceandtargetdistributionare
+ϕ,tgt ϕ,src
+wellexpressed. Next,wediscussthepopularscoredistillationmethodsunderthisanalysis. Weargue
+thattheircharacteristicartifactscanlargelybeunderstoodduetotheerrorsabove.
+4
+'$&%$#,!-2.3 AnalyzingExistingScoreDistillationMethods
+We analyze SDS and its variants through our framework by inspecting each component in the
+computedgradient. Fornotation,y isthetextpromptrepresentingthetargetdistribution,and∅
+tgt
+denotestheunconditionalprompt. Foreachmethod,wepresentitsgradientupdateanddiscussits
+implications.
+ScoreDistillationSampling[46]:
+ϵ =ϵ (x ;∅,t)+s·(ϵ (x ;y ,t)−ϵ (x ;∅,t))−ϵ,
+SDS ϕ θ,t ϕ θ,t tgt ϕ θ,t
+wheresisthestrengthofclassifier-freeguidance. Whensissmall,theϵfunctionsasanaveraging
+termtoregresstheimagetothemean. However,theSDSgradienthasbeenshowntoworkbestwith
+extremevaluesofclassifier-freeguidanceslike100. Wecanrewritethegradienttoemphasizehow
+theconditional-unconditionaldeltadominatesathighCFGscales.
+ϵ =s·(ϵ (x ;y ,t)−ϵ (x ;∅,t))+ϵ (x ;∅,t)−ϵ,
+SDS ϕ θ,t tgt ϕ θ,t ϕ θ,t
+(cid:124) (cid:123)(cid:122) (cid:125)
+Dominantwhens≫1
+Experimentally,weproduceverysimilarresultsathighCFGwithorwithoutthenon-dominantterms.
+WearguethatSDSshouldbeinterpretedthroughthedominantterm,whichfitswithinouranalysis.
+Underthisinterpretation,theunconditionaldistributionapproximatesthedistributionofx poorly,
+θ
+insteadrepresentingimagesofanyidentitywithlowcontrastandgeometricartifacts. Figure1(b)
+illustrates the effect of a poor approximation. The bridge from the unconditional to conditional
+distributionleadstothecharacteristicoversaturationandsmoothingofSDSresults.
+DeltaDistillationSampling[20]:
+ϵ =ϵ (x ;y ,t)−ϵ (x ;y ,t),
+DDS ϕ θ,t tgt ϕ ref,t src
+wherex isanoisedversionofareferenceimageintheimageeditingtask. AsshowninFigure2
+ref,t
+(b),thisincreasesthesourcedistributionmismatchsinceϵ isnotcalculatedbasedonthecurrent
+ϕ,src
+optimizedimagex .
+θ,t
+NoiseFreeScoreDistillation[28]:
+ϵ =(ϵ (x ;∅,t)−(t<0.2)·ϵ (x ;y ,t))+s·(ϵ (x ;y ,t)−ϵ (x ;∅,t)),
+NFSD ϕ θ,t ϕ θ,t neg ϕ θ,t tgt ϕ θ,t
+wherethestrengthofclassifier-freeguidancesissetto7.5andy =“unrealistic,blurry,lowquality
+neg
+...”. NFSDgreatlyreducestheguidancestrengthwhileitisobservedtoperformverysimilarlyto
+SDSinpractice. Wecanbetterexplainthisphenomenonsincetheprompty doesnotaccurately
+neg
+describethesourcedistributionasitomitstheimage’scontent. Inaddition,thesecondcomponent
+withweights=7.5stillformsthemajorpartofthegradient,whichisthedominantterminSDS.
+ClassifierScoreDistillation[74]:
+ϵ =w ·(ϵ (x ;y ,t)−ϵ (x ;∅,t))+w ·(ϵ (x ;∅,t)−ϵ (x ;y ,t)),
+CSD 1 ϕ θ,t tgt ϕ θ,t 2 ϕ θ,t ϕ θ,t src
+wherew andw arehyperparameters. AsshowninFigure2(c),thesecondtermapproximatesthe
+1 2
+bridgefromthesourcedistributiontotheunconditionaldistribution,whichisnotidealsinceitdoes
+notpointtothetargetdistribution. Itexplainstheobservationmadebytheauthors[74]thatthis
+underminesthealignmentwiththetextprompt. Therefore,theauthorsalwaysannealw to0during
+2
+theoptimization. However,weshowthisoftenreintroducestheSDSartifactsinpractice.
+VariationalScoreDistillation[68,32]:
+ϵ =ϵ (x ;∅,t)+s·(ϵ (x ;y ,t)−ϵ (x ;∅,t))−ϵ (x ;y ,t).
+VSD ϕ θ,t ϕ θ,t tgt ϕ θ,t LoRA θ,t tgt
+Outofallthediscussedmethods,VSDattemptstominimizethesourcedistributionmismatcherror
+mostdirectlybytest-timefinetuningacopyofthediffusionmodelwithLoRAonthecurrentset
+ofx . Notethatintheoriginalpaper, theuseofLoRAwasmotivatedbasedonaparticle-based
+θ
+variational framework. Our analysis enables an alternative understanding of VSD. As shown in
+Figure2a),thisapproachiswell-justifiedinourdualdiffusionbridgeframework.However,traininga
+LoRAeveryiterationiscomputationallyexpensive,addscomplexity,andintroducesitsownlow-rank
+approximationerrors. Giventhisinsight,weproposeasimpleyetefficientapproachtomitigating
+sourcedistributionwithoutLoRA.
+52.4 MitigatingSourceDistributionMismatchwithTextualDescriptions
+OuranalysisrevealsthattheLoRAmodelinVSDmostcloselyapproximatesthedistributionofthe
+currentoptimizedparametrizedimage,addressingthedistributionmismatcherror. Unfortunately,it
+incurs200−300%runtimeoverheadontopofSDS,makingitimpractical,despiteitssignificant
+performancegains. Withthisunderstanding,weproposeasimpleapproachthatbetterexpressesthe
+sourcedistribution. Ourinsightisthatpre-traineddiffusionmodelshavelearnedthedistributionof
+naturalandcorruptedimagesthroughacombinationofpowerfultextrepresentationandenormous
+image-captiondatasets. Wefindthatbysimplydescribingimagecorruptionswithatextprompt,we
+canimproveourestimateofthesourcedistribution.
+Specifically,weproposetousethegradient
+ϵ =w·(ϵ (x ;y ,t)−ϵ (x ;y ,t)),
+ours ϕ θ,t tgt ϕ θ,t src
+wherewegety byaddingdescriptionsofthecurrentimagedistributiontoy (thebaseprompt).
+src tgt
+The remaining question is how to set this description. In generation tasks, we propose a simple
+two-stagesolution.
+1. Weuseϵ toproduceagenerationwiththemethod’scharacteristicartifacts:
+SDS
+2. Weswitchtooptimizationwithourgradient,ϵ ,totransporttheimageparametertoward
+ours
+thenaturalimagedistribution.
+TodescribetheartifactsproducedbySDS,weappendthedescriptors“,oversaturated, smooth,
+pixelated, cartoon, foggy, hazy, blurry, bad structure, noisy, malformed”
+anddropthedescriptorsofthehigh-qualitygeneration. Notethatinallofourgenerationexperiments,
+thedescriptionofy isfixedasabove. Weexploredsearchingforotherpromptsbutdidnotfindthat
+src
+variationsinthesedescriptionsmadeabigdifference.
+Ineditingtasks,wehaveaninitializationthaty describesaccurately. Insuchcases,weomitthe
+src
+firstSDSstageandonlyapplyourgradienttooptimization. Wealsoappenda“domaindescriptor.”
+Forinstance,inpainting-to-real,thisissimply“,painting”torepresenttheinitialdistribution.
+Whiletheuseofsuchnegativepromptinghasbeenexploredbefore,suchasinNFSD,ouranalysis
+motivates a principled way to incorporate it into score distillation. We find that these simple
+modificationssignificantlynarrowthequalitygapbetweenSDSandresource-intensivemethodslike
+VSD.Weverifythisfindingexperimentallywithqualitativeresultsandquantitativecomparisons
+acrossapplicabletasks.
+3 Experiments
+Inthissection,wetestourproposedmethodonseveralgenerationproblemswhereSDSisadopted.
+WecompareagainstSDSandothertask-specificbaselines. Notethatourgoalisnottoshowanother
+state-of-the-arttext-to-3Dgenerationmethod,buttoverifyourfindings,wheretheproposedscore
+distillationapproachbasedontextualdescriptionefficientlyimprovestheresultsbymitigatingthe
+sourcedistributionmismatcherror. Wefirstperformathoroughexperimentinacontrolledsettingon
+zero-shottext-to-imagegeneration. Then,wecompareitontext-guidedNeRFoptimizationtoSDS
+andVSDandevaluatethepainting-to-realimagetranslationtaskagainstimageeditingbaselines.
+Pleaseseemorequalitativeresults,aswellourmethod’sapplicationtoopticalillusiongeneration
+and3D-sketch-to-realtask,intheappendix.
+3.1 Zero-ShotText-to-ImageGenerationwithScoreDistillation
+ToverifyouranalysisofexistingSDSvariantsandtheproposedmethod,weperformtext-to-image
+generationbyoptimizinganimageofsize64×64×4intheStableDiffusionlatentspace[68,28].The
+benefitofchoosingimagegenerationastheevaluationtaskisthatitsgenerationqualityhastheleast
+confoundingvariablesamongothertasks. (e.g.,intext-to-3D,manydesignslikeregularizations[75],
+initialization[35],3Drepresentations[9,65,72,64],and2Dpriormodels[55,40,39,47,76]could
+affectthefinalquality.)
+6DDIM Sampling SDS NFSD
+CSD VSD Ours
+Figure3:Text-to-imagegenerationresultswithCOCOCaptions.Wecomparedifferentscoredistillation
+methods for generating images with COCO captions by optimizing a randomly initialized image. DDIM
+samplingindicatesthelowerboundthatthediffusionmodelcanachieve.VSD[68]andourmethodgeneratethe
+leastcolorartifactswhileoursismoreefficientthanVSD.
+Table1: Zero-shotFIDcomparisonwithdifferentscoredistillationmethods. WereportFIDscoresof
+text-to-imagegenerationusing5KcaptionsrandomlysampledfromtheCOCOdataset.Thebestscoredistillation
+resultisindicatedinbold,whilethesecondbestisunderlined.
+DDIM(lowerbound) SDS[46] NFSD[28] CSD[74] VSD[68] Ours
+Zero-ShotFID(↓) 49.12 86.02 91.70 89.96 59.22 67.89
+Zero-ShotCLIPFID(↓) 16.56 28.39 29.25 27.07 18.86 20.31
+TimeperSample(mins) 0.05 4.48 7.20 6.21 16.02 4.48
+We use the MS-COCO [36] dataset for the evaluation. Consistent with the prior study [3], we
+randomlysample5KcaptionsfromtheCOCOvalidationsetasconditionsforgeneratingimages.
+Foreachcaption,weoptimizearandomlyinitializedtheimagewiththescoredistillationgradients.
+We compare our method with several SDS variants including SDS [46], NFSD [28], CSD [74],
+andVSD[68]. Forallthemethods,weusethesamelearningrateof0.01andoptimizefor2,500
+stepswherewegenerallyobserveconvergence. Wecomputethezero-shotFID[21]andCLIPFID
+scores [31] between these generated images and the ground truth images. We also report results
+generatedbyDDIMwith20stepsasalowerboundforrenference.
+We report the FID scores and the time to optimize one image in Table 1. Among all the score
+distillationmethods,VSD[68]achievesthelowestFIDscores. However,itrequirestrainingaLoRA
+alongtheoptimizationprocess. Instead,oursachievesacomparableFIDscorewithover3×faster
+speed. WevisualizerandomexamplesgeneratedbydifferentscoredistillationmethodsinFigure3.
+WenoticethatSDSandNSFDsufferfromtheover-saturationandover-smoothnessissues. CDS
+hasslightlyfewercolorartifacts. VSDandoursgeneratethesamplesthatmostcloselyresemble
+theDDIMsampling.
+3.2 Text-guidedNeRFOptimization
+Wenowevaluatethetext-to-3Dgenerationproblem,whereweintentionallyaimtoexcludevariables
+thatcouldaffectthegenerationqualityotherthanthescoredistillationmethods. WeusetheThree-
+Studio[19]repositorytooptimizeaNeRFwithsettingstunedforProlificDreamerstage1(NeRF
+optimization)[68]. Notethatwedonotperformstages2and3,i.e.geometryfine-tuningandtexture
+refinement. Specifically,weinitializetheNeRFwiththemethodproposedbyMagic3D[35],usethe
+regularizationlossesonthesparsityandopacity,andoptimizefor25Ksteps. Weadoptthenative
+SDSandVSDguidanceimplementationsforcomparison.
+7VSD SDS Ours VSD SDS Ours
+A giant rock with moss on it, detailed, high A wooden chair, detailed, high resolution,
+resolution, high quality, sharp high quality, sharp
+A 3D model of an adorable cottage with a thatched roof. Various hollow, asymmetrical, textured seashells, collected
+in a sand-filled, clear glass jar with a twine-tied neck
+Figure 4: Text-guided NeRF optimization with different score distillation methods. We make a fair
+comparisonofSDSandVSDfortext-to-3Dgeneration.Foreachgeneration,weshowthreeuniformlysampled
+views.SDSresultslikethecottageandpeppermillstillsufferfromover-saturationproblems,whileoursand
+VSDcanproducerealisticdetails,color,andtexture.
+We first show visual comparisons of different score distillation methods in Figure 4. We notice
+thatSDStendstogeneratefewerdetails,asshownbytherockandchairexamples,andsometimes
+suffersfromover-saturationissues,asin2D,asdemonstratedbythecottageandseashellexamples.
+Instead, both VSD and ours can generate highly photo-realistic 3D objects, while ours does not
+requiretrainingaLoRAmodelandsharesasimilarcomputationalcostasSDS.
+Wealsoperformaquantitativeevaluationanduser
+study on the NeRFs optimized based on 31 differ- Table2:QuantitativecomparisonsofNeRFopti-
+ent text prompts. Note that this number is similar mization.WemeasuretheaverageCLIPsimilarity
+to the choice of existing works on the text-to-3D ofrenderedviewsusingSDS,VSDandour.
+task [34, 32, 15]. However, different from these
+worksthatignoretheconfounding3Dvariablesthat ViT-L/14 ViT-B/16 ViT-B/32
+contributetothegenerationquality,wedisentangle
+SDS[46] 0.2811 0.3196 0.3139
+thisbyisolatingthescoredistillationmethodasthe VSD[68] 0.2837 0.3292 0.3166
+onlycomparisonvariable. Wefollowtheseworksto Ours 0.2848 0.3282 0.3148
+evaluatethegenerationqualitywithCLIP[48]. We
+report the CLIP similarity in Table 2. Our method consistently outperforms SDS and achieves
+comparableresultswithVSD.Inaddition,inauserstudyconsistingof37users,shownpairwise
+comparisonsofrotating3Drenders(i.e.,comparisonsofourresultandarandomchoiceofVSDor
+SDS,withtheprompt: “Foratext-to-3Dsystem,giventheprompt[p],whichresultwouldyoube
+happiestwith?”),ourresultswerechosenin75.7%ofallresponses. Wealsoshowmoreresultsinthe
+Appendix.
+3.3 Painting-to-Real.
+Weexamineourmethod’sabilitytoserveasageneral-purposerealismprior. Paintingsare"near-
+manifold" images, meaning they do not possess natural image statistics but live near the image
+distributioninimagespace. Aneffectiveimagepriorshouldguideapaintingtowardanearbynatural
+imagethroughoptimization.
+WeinitializealatentimagebyencodingscansoftheartworkthroughStableDiffusion’sencoder. We
+specifyapromptforeachpaintingtoconditionthediffusionmodelandthenapplythesecondopti-
+mizationstageofourmethod(SDSstageomitted). Weexperimentedwithautomaticallygenerating
+promptsviapretrainedvisionlanguagemodelsbutfoundtheresultsinconsistent,soweleavethis
+tofuturework. Sincethelargeimagedatasetsusedtotraindiffusionmodelscontainartwork,we
+appendthedomaindescriptor“,painting”toy tooptimizeawayfromthisdistribution.
+src
+WhileSDSisproposedtoleverageapretrainedtext-to-imagediffusionmodelasanimageprior,its
+artifactsmakeitineffectiveinpractice. Incomparison,ourmethodrealisticallysynthesizesdetails
+8“a DSLR photo of a blue pond with water lilies”
+Input Plug-and-Play SDS SDEdit Strength 0.5 CycleGAN Ours
+“a DSLR photo of a historic stone church in a park with gravel and trees”
+Input Plug-and-Play SDS SDEdit Strength 0.5 CycleGAN Ours
+Figure5:Painting-to-Realcomparison. Wecompareourgradientinoptimizationtoimagerestorationand
+image-conditional generation baselines. While SDEdit produces convincing textures, its difficult to find a
+strengthvaluethatbalancesstructureandquality.Otherbaselinesfailtoreproducenaturalimagequality,while
+ourmethodproducesthebestcombinationofqualityandfaithfulness.
+andrelightstheimagenaturally.WeobservethatSDSmethodsdivergemoreeasilyin2Dexperiments
+thanin3Dbutthattheissuecanbemostlyresolvedwithtuning. Afuturegoalistoformulatea
+gradientthatcanbeappliedidempotently[56]. Wecomparewithimagereconstructionbaselinesin
+Figure5andprovideasmallgalleryofpainting-to-realresultsinFigure6.
+Figure6: Painting-to-Realresults.WeshowselectedPainting-to-Realsampleswithdiverseartstylesand
+subjects.Initializationimagesareshownontheleft,optimizedimagesareshownontheright.
+4 Discussion
+Aswehaveshownthatreducingthedistributionmismatchingerrorcansignificantlyimprovethe
+generationquality of thescore distillation optimization, it isnatural toask whetherone canalso
+reduce the first approximation error, induced by linear bridge estimation, to improve the results
+further. SeveralrecentstudiesincludingSDI[41]andISM[34]canbeviewedasmitigatingthiserror
+byreplacingthesingle-stepestimationwithmulti-stepestimation. Insteadofperformingmultiple
+PF-ODEsteps,onecansolvetheentirePF-ODEpathtorecoverthedualbridgeandestimatethe
+endpointofthebridgeψ thatiscoupledwithψ . Inthisway, weobtainthemostaccurate
+0,tgt 0,src
+gradientdirectionwithlittleapproximationerrorϵ∗ =w·(ψ −ψ ).
+SBP 0,tgt 0,src
+However,solvingtheinversionODEisnottrivial[27]. Wenoticedthattheinversioncanexaggerate
+the distribution mismatch error and cause the optimization to get stuck at a local optimal at the
+beginningoftheoptimization. Instead,thehighvarianceofthesingle-stepmethodsoftenshows
+morerobustnesstotheinputimage. Therefore, wefirstperformthesingle-stepscoredistillation
+optimizationtoobtainreasonableresultsbeforemovingtosolvingthefullbridge. Wefindthatin
+text-to-2D,suchamethodcanproducehigh-qualityresultsclosertotheDDIMsamplingresults,as
+demonstratedbyaCOCO-FIDscoreof55.65,whichisbetterthanVSDresults. However,thesame
+9trenddoesnotfullytransfertothetext-to-3Dexperiments. Weobservethatittypicallyintroduces
+additionalartifactsandmakestheoptimizationlessstable. Weleavethebestwayofleveragingthis
+gradientasafutureresearchexploration.
+5 RelatedWork
+5.1 ScoreDistillationSampling
+Althoughmodalitieslike3D,4D,sketch,andvectorgraphics(SVGs)lackthelarge-scale,diverse,
+andhigh-qualitydatasetsneededtotrainadomain-specificdiffusionmodel,previousworksfindit
+usefultoexploitimageorvideoasaproxymodality[26,16]. Bycomputingthegradientonaproxy
+representationwithapretrainedmodel,optimizationinthetargetmodalityisviablewithdifferentiable
+mappings, e.g. differentiable rasterization [33] for SVGs or differentiable rendering [44] for 3D
+objectsandscenes. Theseminalmethod,ScoreDistillationSampling(SDS)[46],firstproposedto
+applyapretrainedtext-to-imagediffusionmodelfortext-to-3Dgeneration. However,itrequiresa
+highclassifier-freeguidanceweightand,therefore,suffersfromartifactssuchasover-saturationand
+over-smoothing. RecentworkshavebuiltuponSDStoadaptitforeditingtasks[30,20,45,29]or
+morebroadlyimproveovertheoriginalSDSformulation[28,1,68,75,74,76]. NFSD[28]and
+LMC-SDS[1]inspecttheindividualcomponentsoftheSDSgradientandproposemethodstorectify
+thehighguidanceweights. However,theover-saturationproblemismitigatedbutnotfullyresolved.
+VSD [68] formulates the problem as particle-based variational inference and proposes to train a
+LoRA[24]ontheflytoestimatethescoreofproxydistribution. Wepresentedanewframeworkthat
+allowsrethinkingallthevariantsunderthesamelens. Thisframeworkalsomotivatesamethodthat
+improvesthequalityofSDSwithoutlosingefficiency.
+5.2 VisualContentGenerationwithSDS
+SinceSDSwasdevelopedfortext-to-3Dgeneration,ithasalsobeenadoptedtogeneratevariousother
+visualcontentsuchasSVGs[18,71],sketches[70],texture[43,6–8,73],typography[25],dynamic
+4D scenes [2, 58, 37] and illusions [5]. Among these applications, text-to-3D has been the most
+activeresearchdirection. Inadditiontodesigningbetterdistillationsamplingmethods[68,75,28],
+priorworkhasalsostudiedtheunderlying3Dneuralrepresentations[72,64,35,9]andleveraging
+multiviewdatatoimprovethe3Dconsistency[55,40,39,47,76]. Wenotethattheseexplorations
+areorthogonaltoourstudyandshouldbeabletoworkjointlywithourmethod. Inthispaper,we
+lookedintoexistingapplicationsliketext-basedNeRFoptimization,painting-to-real,andillusion
+generation. WealsoproposeanewARapplicationcalled3Dsketch-to-real.
+6 ClosingRemarks
+Wepresentananalysisthatformulatestheuseofapre-traineddiffusionmodelinanoptimization
+frameworkasseekinganoptimaltransportbetweentwodistributions. Underthislens,weanalyze
+SDS variants with a unified framework. We also develop a simple approach based on textual
+descriptionsthatworkcomparablywelltothebest-performingapproach,VSD,withoutitssignificant
+computationalburden. However,neitherapproacheshaveyettoachievethequalityanddiversityof
+imagesgeneratedbythereverseprocess.Wehopethatouranalysisenablesthedevelopmentofamore
+sophisticatedsolutionthatcanonedayachievethesamequalityanddiversityasthereverseprocess
+inanoptimizationframework. Combiningourproposedmethodwithmulti-stepapproximations
+likeISM[34]orscheduleslikeDreamFlow[32]couldmitigatethefirst-orderapproximationerror
+andfurtherimprovetheefficiency,whichisaninterestingfutureresearchdirection. Withtheriseof
+high-qualityvideodiffusionmodels,weanticipatethatthequestionofhowtoeffectivelyusesuch
+modelsasapriorinvariousproblemswillbecomeevenmoreimportant.
+Potential Social Impacts We analyze how to use a pre-trained image diffusion as a prior in
+anoptimizationsetup,necessaryfordomainssuchas3D.Onthepositiveside,thesemodelscan
+empowerindividualstomake3Dcontentcreationmoreaccessiblywithoutrequiringspecialized
+skills. Additionally,professionalartistsanddesignerscouldrapidlyprototypeandvisualizetheir
+ideas,acceleratingthecreativeprocess. Onthenegativeside,theeaseofgeneratingvisualcontent
+couldfacilitatethespreadofmisinformation, proliferatebiasesinthetrainingsetandenablethe
+10usageofgeneratedcontentformaliciouspurposes. Inaddition,thereareethicalconcernsregarding
+the potential for job displacement in industries reliant on traditional art-making skills and the
+copyrightissuesappearedinthetrainingdataset.
+Acknowledgment. WethankMatthewTancik,JiamingSong,RileyPeterlinz,AyaanHaque,Ethan
+Weber, KonpatPreechakul, AmitKohliandBenPoolefortheirhelpfulfeedbackanddiscussion.
+This project is supported in part by a Google research scholar award and IARPA DOI/IBC No.
+140D0423C0035. Theviewsandconclusionscontainedhereinarethoseoftheauthorsanddonot
+representtheofficialpoliciesorendorsementsoftheseinstitutions.
+References
+[1] ThiemoAlldieck,NikosKolotouros,andCristianSminchisescu. Scoredistillationsampling
+withlearnedmanifoldcorrective,2024.
+[2] SherwinBahmani,IvanSkorokhodov,VictorRong,GordonWetzstein,LeonidasGuibas,Peter
+Wonka,SergeyTulyakov,JeongJoonPark,AndreaTagliasacchi,andDavidB.Lindell. 4d-fy:
+Text-to-4dgenerationusinghybridscoredistillationsampling.arXivpreprintarXiv:2311.17984,
+2023.
+[3] Yogesh Balaji, Seungjun Nah, Xun Huang, Arash Vahdat, Jiaming Song, Qinsheng Zhang,
+KarstenKreis,MiikaAittala,TimoAila,SamuliLaine,BryanCatanzaro,etal. eDiff-I:Text-to-
+imagediffusionmodelswithanensembleofexpertdenoisers. arXivpreprintarXiv:2211.01324,
+2022.
+[4] AndreasBlattmann, RobinRombach, HuanLing, TimDockhorn, SeungWookKim, Sanja
+Fidler, and Karsten Kreis. Align your latents: High-resolution video synthesis with latent
+diffusionmodels. InCVPR,2023.
+[5] Ryan Burgert, Xiang Li, Abe Leite, Kanchana Ranasinghe, and Michael Ryoo. Diffusion
+illusions: Hidingimagesinplainsight,June2023.
+[6] Tianshi Cao, Karsten Kreis, Sanja Fidler, Nicholas Sharp, and KangXue Yin. Texfusion:
+Synthesizing3dtextureswithtext-guidedimagediffusionmodels. InICCV,2023.
+[7] Dave Zhenyu Chen, Haoxuan Li, Hsin-Ying Lee, Sergey Tulyakov, and Matthias Nießner.
+Scenetex: High-qualitytexturesynthesisforindoorscenesviadiffusionpriors. arXivpreprint
+arXiv:2311.17261,2023.
+[8] DaveZhenyuChen,YawarSiddiqui,Hsin-YingLee,SergeyTulyakov,andMatthiasNießner.
+Text2tex: Text-driventexturesynthesisviadiffusionmodels. arXivpreprintarXiv:2303.11396,
+2023.
+[9] RuiChen,YongweiChen,NingxinJiao,andKuiJia. Fantasia3d: Disentanglinggeometryand
+appearanceforhigh-qualitytext-to-3dcontentcreation. InICCV,2023.
+[10] Tianrong Chen, Guan-Horng Liu, and Evangelos A Theodorou. Likelihood training of
+schrödingerbridgeusingforward-backwardsdestheory. InICLR,2022.
+[11] YongxinChenandTryphonGeorgiou. Stochasticbridgesoflinearsystems. IEEETransactions
+onAutomaticControl,61(2):526–531,2016.
+[12] YongxinChen,TryphonT.Georgiou,andMichelePavon. Ontherelationbetweenoptimal
+transportandschrödingerbridges: Astochasticcontrolviewpoint. JournalofOptimization
+TheoryandApplications,169:671–691,2014.
+[13] Cheng Chi, Siyuan Feng, Yilun Du, Zhenjia Xu, Eric Cousineau, Benjamin Burchfiel, and
+ShuranSong. Diffusionpolicy: Visuomotorpolicylearningviaactiondiffusion. InRSS,2023.
+[14] ValentinDeBortoli,JamesThornton,JeremyHeng,andArnaudDoucet. Diffusionschrödinger
+bridgewithapplicationstoscore-basedgenerativemodeling. InNeurIPS,2021.
+11[15] WenqiDong,BangbangYang,LinMa,XiaoLiu,LiyuanCui,HujunBao,YuewenMa,and
+ZhaopengCui. Coin3d: Controllableandinteractive3dassetsgenerationwithproxy-guided
+conditioning. arXivpreprintarXiv:2405.08054,2024.
+[16] KevinFrans,LisaSoros,andOlafWitkowski. Clipdraw: Exploringtext-to-drawingsynthe-
+sisthroughlanguage-imageencoders. AdvancesinNeuralInformationProcessingSystems,
+35:5207–5218,2022.
+[17] DanielGeng,InbumPark,andAndrewOwens. Visualanagrams:Generatingmulti-viewoptical
+illusionswithdiffusionmodels. CVPR,2024.
+[18] ShuyangGu,DongChen,JianminBao,FangWen,BoZhang,DongdongChen,LuYuan,and
+BainingGuo. Vectorquantizeddiffusionmodelfortext-to-imagesynthesis. InCVPR,pages
+10696–10706,2022.
+[19] Yuan-Chen Guo, Ying-Tian Liu, Ruizhi Shao, Christian Laforte, Vikram Voleti, Guan Luo,
+Chia-HaoChen,Zi-XinZou,ChenWang,Yan-PeiCao,andSong-HaiZhang.threestudio:Auni-
+fiedframeworkfor3dcontentgeneration. https://github.com/threestudio-project/
+threestudio,2023.
+[20] AmirHertz,KfirAberman,andDanielCohen-Or. Deltadenoisingscore. InProceedingsofthe
+IEEE/CVFInternationalConferenceonComputerVision,pages2328–2337,2023.
+[21] MartinHeusel,HubertRamsauer,ThomasUnterthiner,BernhardNessler,andSeppHochreiter.
+Ganstrainedbyatwotime-scaleupdateruleconvergetoalocalnashequilibrium. InNeurIPS,
+2017.
+[22] Jonathan Ho, William Chan, Chitwan Saharia, Jay Whang, Ruiqi Gao, Alexey Gritsenko,
+DiederikPKingma,BenPoole,MohammadNorouzi,DavidJFleet,etal. Imagenvideo: High
+definitionvideogenerationwithdiffusionmodels. arXivpreprintarXiv:2210.02303,2022.
+[23] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In
+NeurIPS,2020.
+[24] EdwardJHu,PhillipWallis,ZeyuanAllen-Zhu,YuanzhiLi,SheanWang,LuWang,Weizhu
+Chen,etal. Lora: Low-rankadaptationoflargelanguagemodels. InICLR,2022.
+[25] ShirIluz,YaelVinker,AmirHertz,DanielBerio,DanielCohen-Or,andArielShamir. Word-as-
+imageforsemantictypography. SIGGRAPH,2023.
+[26] Ajay Jain, Ben Mildenhall, Jonathan T Barron, Pieter Abbeel, and Ben Poole. Zero-shot
+text-guidedobjectgenerationwithdreamfields. InCVPR,pages867–876,2022.
+[27] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. Elucidating the design space of
+diffusion-basedgenerativemodels. arXivpreprintarXiv:2206.00364,2022.
+[28] OrenKatzir,OrPatashnik,DanielCohen-Or,andDaniLischinski. Noise-freescoredistillation.
+arXivpreprintarXiv:2310.17590,2023.
+[29] SubinKim,KyungminLee,JuneSukChoi,JongheonJeong,KihyukSohn,andJinwooShin.
+Collaborativescoredistillationforconsistentvisualediting. InNeurIPS,2023.
+[30] JuilKoo, ChanhoPark, andMinhyukSung. Posteriordistillationsampling. arXivpreprint
+arXiv:2311.13831,2023.
+[31] TuomasKynkäänniemi,TeroKarras,MiikaAittala,TimoAila,andJaakkoLehtinen. Therole
+ofimagenetclassesinfréchetinceptiondistance. InICLR,2022.
+[32] KyungminLee,KihyukSohn,andJinwooShin. Dreamflow: High-qualitytext-to-3dgeneration
+byapproximatingprobabilityflow. InICLR,2024.
+[33] Tzu-Mao Li, Michal Lukácˇ, Michaël Gharbi, and Jonathan Ragan-Kelley. Differentiable
+vectorgraphicsrasterizationforeditingandlearning. ACMTransactionsonGraphics(TOG),
+39(6):1–15,2020.
+12[34] YixunLiang,XinYang,JiantaoLin,HaodongLi,XiaogangXu,andYingcongChen. Lucid-
+dreamer: Towardshigh-fidelitytext-to-3dgenerationviaintervalscorematching. InCVPR,
+2023.
+[35] Chen-HsuanLin,JunGao,LumingTang,TowakiTakikawa,XiaohuiZeng,XunHuang,Karsten
+Kreis, Sanja Fidler, Ming-Yu Liu, and Tsung-Yi Lin. Magic3d: High-resolution text-to-3d
+contentcreation. InCVPR,2023.
+[36] Tsung-YiLin, MichaelMaire, SergeBelongie, JamesHays, PietroPerona, DevaRamanan,
+PiotrDollár,andCLawrenceZitnick. Microsoftcoco: Commonobjectsincontext. InECCV,
+2014.
+[37] HuanLing,SeungWookKim,AntonioTorralba,SanjaFidler,andKarstenKreis. Alignyour
+gaussians: Text-to-4dwithdynamic3dgaussiansandcomposeddiffusionmodels,2024.
+[38] Guan-HorngLiu,ArashVahdat,De-AnHuang,EvangelosATheodorou,WeiliNie,andAnima
+Anandkumar. I2sb: image-to-imageschrödingerbridge. InICML,2023.
+[39] Ruoshi Liu, Rundi Wu, Basile Van Hoorick, Pavel Tokmakov, Sergey Zakharov, and Carl
+Vondrick. Zero-1-to-3: Zero-shotoneimageto3dobject. InCVPR,2023.
+[40] YuanLiu,ChengLin,ZijiaoZeng,XiaoxiaoLong,LingjieLiu,TakuKomura,andWenping
+Wang. Syncdreamer: Generatingmultiview-consistentimagesfromasingle-viewimage. In
+ICLR,2024.
+[41] Artem Lukoianov, Haitz Sáez de Ocáriz Borde, Kristjan Greenewald, Vitor Campagnolo
+Guizilini,TimurBagautdinov,VincentSitzmann,andJustinSolomon. Scoredistillationvia
+reparametrizedddim. arXivpreprintarXiv:2405.15891,2024.
+[42] Christian Léonard. A survey of the schrödinger problem and some of its connections with
+optimaltransport,2013.
+[43] GalMetzer,EladRichardson,OrPatashnik,RajaGiryes,andDanielCohen-Or. Latent-nerffor
+shape-guidedgenerationof3dshapesandtextures. InCVPR,pages12663–12673,2023.
+[44] BenMildenhall,PratulPSrinivasan,MatthewTancik,JonathanTBarron,RaviRamamoor-
+thi, and Ren Ng. Nerf: Representing scenes as neural radiance fields for view synthesis.
+CommunicationsoftheACM,65(1):99–106,2021.
+[45] HyelinNam,GihyunKwon,GeonYeongPark,andJongChulYe. Contrastivedenoisingscore
+fortext-guidedlatentdiffusionimageediting. CVPR,2022.
+[46] BenPoole,AjayJain,JonathanTBarron,andBenMildenhall. Dreamfusion: Text-to-3dusing
+2ddiffusion. InICLR,2023.
+[47] GuochengQian,JinjieMai,AbdullahHamdi,JianRen,AliaksandrSiarohin,BingLi,Hsin-Ying
+Lee,IvanSkorokhodov,PeterWonka,SergeyTulyakov,andBernardGhanem. Magic123: One
+image to high-quality 3d object generation using both 2d and 3d diffusion priors. In ICLR,
+2024.
+[48] AlecRadford,JongWookKim,ChrisHallacy,AdityaRamesh,GabrielGoh,SandhiniAgar-
+wal,GirishSastry,AmandaAskell,PamelaMishkin,JackClark,GretchenKrueger,andIlya
+Sutskever. Learningtransferablevisualmodelsfromnaturallanguagesupervision. InICML,
+2021.
+[49] AdityaRamesh,PrafullaDhariwal,AlexNichol,CaseyChu,andMarkChen. Hierarchical
+text-conditionalimagegenerationwithcliplatents. arXivpreprintarXiv:2204.06125,2022.
+[50] AdityaRamesh,PrafullaDhariwal,AlexNichol,CaseyChu,andMarkChen. Hierarchical
+text-conditionalimagegenerationwithcliplatents. arXivpreprintarXiv:2204.06125,2022.
+[51] AdityaRamesh,MikhailPavlov,GabrielGoh,ScottGray,ChelseaVoss,AlecRadford,Mark
+Chen,andIlyaSutskever. Zero-shottext-to-imagegeneration. InICML,2021.
+13[52] ChitwanSaharia,WilliamChan,SaurabhSaxena,LalaLi,JayWhang,EmilyLDenton,Kamyar
+Ghasemipour,RaphaelGontijoLopes,BurcuKaragolAyan,TimSalimans,etal. Photorealistic
+text-to-imagediffusionmodelswithdeeplanguageunderstanding. InNeurIPS,2022.
+[53] E. Schrödinger. Sur la théorie relativiste de l’électron et l’interprétation de la mécanique
+quantique. Annalesdel’institutHenriPoincaré,2(4):269–310,1932.
+[54] Christoph Schuhmann, Romain Beaumont, Richard Vencu, Cade Gordon, Ross Wightman,
+MehdiCherti,TheoCoombes,AarushKatta,ClaytonMullis,MitchellWortsman,etal. Laion-
+5b: An open large-scale dataset for training next generation image-text models. NeurIPS,
+2022.
+[55] Yichun Shi, Peng Wang, Jianglong Ye, Long Mai, Kejie Li, and Xiao Yang. MVDream:
+Multi-viewdiffusionfor3dgeneration. InICLR,2024.
+[56] AssafShocher,AmilVDravid,YossiGandelsman,InbarMosseri,MichaelRubinstein,and
+AlexeiAEfros. Idempotentgenerativenetwork. InICLR,2024.
+[57] UrielSinger,AdamPolyak,ThomasHayes,XiYin,JieAn,SongyangZhang,QiyuanHu,Harry
+Yang,OronAshual,OranGafni,DeviParikh,SonalGupta,andYanivTaigman. Make-a-video:
+Text-to-videogenerationwithouttext-videodata. InICLR,2023.
+[58] UrielSinger,ShellySheynin,AdamPolyak,OronAshual,IuriiMakarov,FilipposKokkinos,
+NamanGoyal,AndreaVedaldi,DeviParikh,JustinJohnson,etal. Text-to-4ddynamicscene
+generation. arXivpreprintarXiv:2301.11280,2023.
+[59] JaschaSohl-Dickstein,EricWeiss,NiruMaheswaranathan,andSuryaGanguli. Deepunsuper-
+visedlearningusingnonequilibriumthermodynamics. InICML,2015.
+[60] JiamingSong,ChenlinMeng,andStefanoErmon. Denoisingdiffusionimplicitmodels. In
+ICLR,2021.
+[61] JiamingSong,ChenlinMeng,andStefanoErmon. Denoisingdiffusionimplicitmodels,2022.
+[62] YangSong,JaschaSohl-Dickstein,DiederikPKingma,AbhishekKumar,StefanoErmon,and
+BenPoole. Score-basedgenerativemodelingthroughstochasticdifferentialequations. InICLR,
+2021.
+[63] XuanSu,JiamingSong,ChenlinMeng,andStefanoErmon. Dualdiffusionimplicitbridgesfor
+image-to-imagetranslation. InICLR,2022.
+[64] JiaxiangTang,JiaweiRen,HangZhou,ZiweiLiu,andGangZeng. Dreamgaussian: Generative
+gaussiansplattingforefficient3dcontentcreation,2023.
+[65] ChristinaTsalicoglou, FabianManhardt, AlessioTonioni, MichaelNiemeyer, andFederico
+Tombari. Textmesh: Generation of realistic 3d meshes from text prompts. arXiv preprint
+arXiv:2304.12439,2023.
+[66] GefeiWang,YulingJiao,QianXu,YangWang,andCanYang. Deepgenerativelearningvia
+schrödingerbridge. InICML,2021.
+[67] HaochenWang,XiaodanDu,JiahaoLi,RaymondA.Yeh,andGregShakhnarovich. Score
+jacobianchaining: Liftingpretrained2ddiffusionmodelsfor3dgeneration. InCVPR,pages
+12619–12629,June2023.
+[68] ZhengyiWang,ChengLu,YikaiWang,FanBao,ChongxuanLi,HangSu,andJunZhu. Pro-
+lificdreamer: High-fidelityanddiversetext-to-3dgenerationwithvariationalscoredistillation.
+NeurIPS,2023.
+[69] TongWu,GuandaoYang,ZhibingLi,KaiZhang,ZiweiLiu,LeonidasGuibas,DahuaLin,and
+GordonWetzstein. Gpt-4v(ision)isahuman-alignedevaluatorfortext-to-3dgeneration. In
+CVPR,2024.
+[70] XimingXing,ChuangWang,HaitaoZhou,JingZhang,QianYu,andDongXu. Diffsketcher:
+Textguidedvectorsketchsynthesisthroughlatentdiffusionmodels. InNeurIPS,2023.
+14[71] XimingXing,HaitaoZhou,ChuangWang,JingZhang,DongXu,andQianYu. Svgdreamer:
+Textguidedsvggenerationwithdiffusionmodel. arXivpreprintarXiv:2312.16476,2023.
+[72] TaoranYi,JieminFang,JunjieWang,GuanjunWu,LingxiXie,XiaopengZhang,WenyuLiu,
+QiTian,andXinggangWang. Gaussiandreamer: Fastgenerationfromtextto3dgaussiansby
+bridging2dand3ddiffusionmodels,2023.
+[73] KimYouwang,Tae-HyunOh,andGerardPons-Moll. Paint-it: Text-to-texturesynthesisvia
+deepconvolutionaltexturemapoptimizationandphysically-basedrendering. InCVPR,2024.
+[74] Xin Yu, Yuan-Chen Guo, Yangguang Li, Ding Liang, Song-Hai Zhang, and Xiaojuan Qi.
+Text-to-3dwithclassifierscoredistillation,2023.
+[75] JunzheZhuandPeiyeZhuang.Hifa:High-fidelitytext-to-3dgenerationwithadvanceddiffusion
+guidance,2023.
+[76] Zi-XinZou,WeihaoCheng,Yan-PeiCao,Shi-ShengHuang,YingShan,andSong-HaiZhang.
+Sparse3d: Distillingmultiview-consistentdiffusionforobjectreconstructionfromsparseviews,
+2023.
+153D Sketching Ours with Prompt “a flower” SDS Baseline
+Figure7:3Dsketch-to-real.Weintroduceaconditionalgenerationtaskin3Dwhereacoarsehuman-drawn
+meshisoptimizedintoahigh-qualitymesh.WhileSDSandourgradientbothadheretothepromptandshape
+conditions,ourmethodproduceshigherfidelitycolorsandtexture.
+Appendix
+In this appendix, we discuss the additional experiment details and provide more visual results,
+includingopticalillusionsketch,text-basedNeRFoptimization,and3Dpaint-to-realresults. Wealso
+performanablationstudyofourmethod.
+A AdditionalExperimentalSetup
+Inthissection,wedescribeourexperimentalsetupsinmoredetail.
+Text-to-imagegenerationwithscoredistillation. ForCSD,wefollowtheoriginalpaper[74]to
+usew =w =40attheinitializationstepsandannealw =0withinthefirst500steps. Weuse
+1 2 2
+s=100forSDSands=7.5forNFSDandVSD,whichareconsistentwiththebestpractice. We
+uses=40andw =25forourmethod. Andweoptimizewithϵ lossfor500iterationsandthen
+SDS
+switchtoϵ fortherestof2,000iterations. Forallthemethods,weusealearningrateof0.01,and
+ours
+weusealearningrateof1e−4totraintheLoRAinVSD.
+Text-guidedNeRFoptimizationwithscoredistillation. Forourmethod,weoptimizewithϵ
+SDS
+lossfor20,000iterationsandthenswitchtoϵ fortherestof5,000iterations. Weuses = 100
+ours
+andw =1forourmethod. Wefindthatahighsisnecessarytoestablishgeometryinthefirststage
+ofthetext-to-3Dsetting,butourmethodisnottoosensitivetothishyperparameterin2D.Weusethe
+restofthelearningratesandregularizationstrengthsasthedefaultsettings.
+B MoreVisualResults
+Inthissection,weprovideextravisualresults. Specifically,weshow3Dsketch-to-realandoptical
+illusiongenerationasadditionalapplicationsofourmethod. Wealsoreportmorecomparisonsand
+ablationstudiesoftext-basedNeRFoptimzition.
+3DSketch-to-Real Head-mounteddisplayswithhandtrackingareanaturalplatformforasortof
+"3Dsketching,"where3Dprimitivestrailfromyourhandlikeinkfromapen. Theresultingcoarse
+meshisstructurallyaccuratebutlacksgeometricortexturedetail. Tothisend,weproposeanew
+applicationthattransfersthese3Dsketchestomorerealisticversions. Weextendourtext-to-3D
+solutiontogeneratethesedetails.
+WefirstfitanimplicitSDFvolumetomulti-viewrendersofthemesh,thenapplyourgradientwith
+the same schedule as in text-based NeRF optimization. We lower the learning rate for geometry
+parameterstopreventdivergencefromtheguidingsketch. Holdingotherhyperparametersequal,we
+compareourgradientandtheSDSgradientinFigure7.
+IllusionGeneration. Priorworkshaveshownthatdiffusionmodelscanbeleveragedtogenerateop-
+ticalillusions[17,5].Inthesesettings,thesameimagelookssemanticallydifferentwhentransformed.
+Tousethediffusionmodelsamplingprocess,apreviousstudyshowsthatthetransformationhasto
+16SDS[46] Ours
+Figure8:Diffusionillusions.WegenerateoverlaidopticillusionswithSDSandourmethod.WhileSDSsuffers
+fromcolorartifacts,ourmethodsproducemoredetailsandpropercolor.
+A 3D model of an adorable cottage with a thatched roof. A large, multi-layered, symmetrical wedding cake, with smooth fondant, delicate
+piping, and lifelike sugar flowers in full bloom, displayed on a silver stand.
+Figure9:Ablationstudyofourmethodwithoutstage1.Weshowdirectlyoptimizingwithy fromthestart
+src
+couldunderminethequalityofthegeometryandproduceunnecessarycontent.
+beorthogonal[17]. However,thereremaininterestingillusionsthatarenotformedbyorthogonal
+transformation. Onesuchistherotationoverlays. Givenabaseandarotatorimage,bycomposing
+thebaseimagewiththerotatorimageatdifferentangles,rotationoverlaysusetwoimagestodisplay
+fourimages. Assuchcompositionisnotdefinedbyanorthogonalmatrix,theexistingmethod[5]
+employsSDStooptimizethebaseandrotatorimages. Suchamethodsuffersfromtheover-saturation
+problem,asshowninFigure8. Weshowthatourmethodcangeneratesuchopticalillusionswith
+bettervisualquality.
+Additionaltext-guidedNeRFoptimizationresults. Fortext-guidedNeRFoptimizationcompari-
+sonagainstbaselines,wefollowshowmoreresultsinFig.10. Wetestonthepromptsusedinthe
+originalpaper[68]andadditionalprompts[69]thatwefindtobechallenging. WenoticethatSDS
+oftensuffersfromover-saturationproblems. OurmethoddoesnotrequiretrainingaLoRAwhileit
+canstillimproveSDSbygettingridofthecolorartifactsandgeneratingmoredetails.
+Ablationstudyofstage2. Insteadofswitchingtostage2duringtheoptimizationprocess,we
+ablatewithstartingwithoutanySDSoptimizationfromthebeginning. Thatis,wealwaysusethe
+y with the descriptors “, oversaturated, smooth, pixelated, cartoon, foggy, hazy,
+src
+blurry, bad structure, noisy, malformed”. As shown in Figure 9, this makes it hard to
+generate the proper geometry even though the local texture looks reasonable and is inclined to
+produceexcessivedetailsthatarenotdescribedbythetexts. Wesuspectthatthisisbecauseusingy
+src
+increasesthemismatchingerroratthebeginningoftheoptimizationprocesswhentheinitialization
+doesnotresemblethetargetpromptatall.
+17VSD SDS Ours VSD SDS Ours
+A pineapple, detailed, high resolution, high quality, sharp. A toucan on the wood.
+A plate piled high with chocolate chip cookies. A llama, detailed, high resolution, high quality, sharp.
+A tree of potatoes, detailed, high resolution, high quality, sharp. An elephant skull.
+A solid, smooth, symmetrical porcelain teapot, with a cobalt blue dragon design, A large, multi-layered, symmetrical wedding cake, with smooth fondant, delicate
+steam rising from the spout, suggesting it's just been filled with boiling water piping, and lifelike sugar flowers in full bloom, displayed on a silver stand.
+A model of a house in Tudor style. A bulldog, detailed, high resolution, high quality, sharp.
+A walnut, detailed, high resolution, high quality, sharp. A medium-sized, layered, radially symmetrical conch shell, with a rough texture
+on the outside, fading from pink to cream, sitting alone on a sandy beach
+Figure10:Additionalcomparisonoftext-guidedNeRFoptimization.Weshowmoreexamplestocompare
+withdifferentdistillationmethods,SDSandVSD.
+18
