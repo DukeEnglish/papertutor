@@ -1,0 +1,2247 @@
+Why Warmup the Learning Rate?
+Underlying Mechanisms and Improvements
+DayalSinghKalra2,4 MaissamBarkeshli1,3,4
+dayal@umd.edu maissam@umd.edu
+Abstract
+Itiscommonindeeplearningtowarmupthelearningrateη, oftenbyalinear
+schedule between η = 0 and a predetermined target η . In this paper, we
+init trgt
+showthroughsystematicexperimentsusingSGDandAdamthattheoverwhelming
+benefitofwarmuparisesfromallowingthenetworktotoleratelargerη byforcing trgt
+thenetworktomorewell-conditionedareasofthelosslandscape. Theabilityto
+handle larger η makes hyperparameter tuning more robust while improving
+trgt
+the final performance. We uncover different regimes of operation during the
+warmupperiod,dependingonwhethertrainingstartsoffinaprogressivesharpening
+or sharpness reduction phase, which in turn depends on the initialization and
+parameterization.Usingtheseinsights,weshowhowη canbeproperlychosenby
+init
+utilizingthelosscatapultmechanism,whichsavesonthenumberofwarmupsteps,
+insomecasescompletelyeliminatingtheneedforwarmup. Wealsosuggestan
+initializationforthevarianceinAdamwhichprovidesbenefitssimilartowarmup.
+1 Introduction
+Oneofthemostimportantchoicestomakeingradient-basedoptimizationisthelearningrate(step
+size)η. Ifη istoosmall,thenlearningmaytakeplacetooslowlyorthemodelmightgetstuckin
+unfavorableregionsofthelosslandscape. Ifηistoolarge,trainingwilltypicallydiverge. Inpractice,
+it is common to pick a dynamical learning rate schedule η [2, 4, 41, 27]. Modern learning rate
+t
+schedulesfordeeplearningtypicallyconsistofawarmupperiodwhereη isincreasedlinearlyfrom
+t
+zerotoatargetvalueη overawarmuptimeT [14,35]. Afterthewarmupperiod,itiscommon
+trgt wrm
+toeventuallydecaythelearningrate,forexampleviaacosinedecayschedule[35,27,41].
+Giventhatwarmupisstandardinthepractitioner’stoolkit,itisimportanttounderstanditdeeplyand
+identifyimprovements. Inmodernsettings,perhapstheearliestworktousewarmupwas[15],which
+usedasmallconstantlearningrateforthefirstfewepochsoftrainingandthenswitchedtoalarger
+learningrate. Alinearwarmupschedulewaslaterintroducedin[14]. Theintuitiongivenwasthatto
+scaletheminibatchsizeinSGDbyafactorofk,itisnaturaltoalsoscalethelearningratebyafactor
+ofk,providedthemodelisnotchangingtoorapidlyandsuccessivegradientsareroughlyaligned.
+Howeveratthebeginningoftraining,themodelischangingrapidly,soitisnaturaltostartwitha
+lowerlearningrateandgraduallyincreaseittothetargetvalueafterthenetworkhasstabilized.
+Otherexplanationssuggestthatsincethenetworkisinitializedrandomly,thegradientstepsatthe
+beginningoftrainingarenotmeaningful,andthusitwouldbeharmfultotakelargestepsinsuch
+directions[41],soitmakessensetotakesmallerstepsearlyintraining. Theanalysisby[13]suggests
+thatwarmupprimarilylimitsthemagnitudeofweightupdatesinthedeeperlayers,preventinglarge
+1DepartmentofPhysics,UniversityofMaryland,CollegePark
+2InstituteforPhysicalScienceandTechnology,UniversityofMaryland,CollegePark
+3JointQuantumInstitute,UniversityofMaryland,CollegePark
+4CondensedMatterTheoryCenter,UniversityofMaryland,CollegePark
+Preprint.Underreview.
+4202
+nuJ
+31
+]GL.sc[
+1v50490.6042:viXrainstabilities. Ithasalsobeensuggestedthatthekeybenefitofwarmuparisesforadaptiveoptimizers,
+suchasAdam: [24]arguesthatthevarianceoftheadaptivelearningrateislargeduringearlytraining
+becausethenetworkhasseentoofewtrainingsamples;itisassertedthatthislargevarianceisharmful,
+andthatwarmupactsasavariancereductionmethodbyallowingthenetworktocollectaccurate
+statisticsofthegradientmomentsbeforeusinglargerlearningrates.Alternatively,itisalsosometimes
+statedthattheinitializationmaystartthemodeloffatplacesinparameterspacethatareunstable,
+difficulttooptimize,andeasilyleadtodivergence,andthatwarmupcanhelpalleviatethis[41].
+Theaboveexplanationsarevariedanddonotclearlydemonstratewhyandtowhatextentwarmupis
+necessary. Alosslandscapeperspectivewasgivenin[11](andsummarizedin[27]Ch. 8),which
+arguedthatanimportanteffectofwarmupistograduallyreducethesharpness(thetopeigenvalue
+of the Hessian of the loss), thus causing the model to leave poorly conditioned areas of the loss
+landscapeandmovetowardsflatterregionswhichcantoleratelargerlearningrates. Theyarguethat
+themechanismforthisissimilartothedynamicalstability(catapult)mechanismsstudiedin[36,23].
+1.1 Ourcontributions
+Inthispaper,weperformextensivestudiesontheeffectoflearningratewarmupacrossavariety
+ofarchitectures(FCNs,ResNets,andTransformers),initializationsandparameterizations,datasets
+(CIFAR-10,CIFAR-100,TinyImageNet,WikiText-2),andforbothSGDandAdamoptimizers.
+We demonstrate through systematic experiments that by far the primary benefit of learning rate
+warmupistoallowthenetworktotoleratelargerlearningratesthanitotherwisewouldhave. This
+buildsontheobservationsof[11]byshowingthatanyotherbenefitsaremarginal,disentangling
+theeffectofwarmupdurationandtargetlearningrate,andbyextendingtheempiricalevidenceto
+includeadaptiveoptimizersandtransformers.
+ForSGD,themaximalallowablelearningrateisdeterminedbythesharpness(thetopeigenvalue
+oftheHessianoftheloss). AswediscussinSection4,wefindthatthereareseveralqualitatively
+distinct regimes and mechanisms at play. These depend on whether the network starts off in a
+sharpness reduction or progressive sharpening phase [19, 20, 6], which in turn depends on the
+initializationandparameterization. Wefurtherfindthattheperformanceofthenetworkislargely
+determinedbythetargetlearningrate. Forafixedtargetlearningrate,increasingthewarmuptime
+providesonlymarginalbenefit,whicharisesbykeepingthenetworkfurtherawayfromthedivergence
+(failure)boundary. Theabilityofthenetworktowithstandalargertargetlearningrateinturnmakes
+hyperparametertuningofthetargetlearningratemorerobust,sincethenetworkrespondswelltoa
+largerwindowoftargetlearningrates,possiblyexplainingthepopularityofwarmup.
+WetheninvestigateAdamindetail,andshowthattheunderlyingmechanismsofwarmuparesimilar
+to the SGD case, but with sharpness replaced by a preconditioned sharpness (the top eigenvalue
+ofthepre-conditionedHessian,definedbelow). Ourresultsdisagreesomewhatwithpriorresults
+[24]ontheunderlyingreasonforwarmup’sbenefits: Wefindthatthekeyissueisnotobserving
+toofewtrainingsamples,butratherthatthepre-conditionedsharpnesstypicallystartsoffathigh
+values(eveninthelargebatchcase),causingconsiderableinstabilitiesathighlearningrates. Such
+instabilities, which may be retained in Adam’s memory, can result in performance degradation
+and even training failures. Warmup mitigates such instabilities by gradually pushing down the
+preconditionedsharpness,enhancingperformance,andpreventingtrainingfailures. Weproposea
+simplealternativeinitializationforAdam,whichwerefertoasGI-Adam,whichprovidesbenefits
+similartowarmupandconsistentlyimprovesoverstandardAdambyinducinglowerpreconditioned
+sharpnessatinitialization,thuspushingthetrainingfailureboundarytohighertargetlearningrates.
+ItalsodemonstratesadifferentwaytoremovethebiascorrectionofRMSPropwithmomentum.
+Ouranalysisshowshowmuchofthetimespentduringthewarmupperiodiswasted. Weshowthat
+thiswastedtimecanbesavedbymakinguseofthecatapultmechanism[23]toeffectivelyestimate
+theinitialsharpnessscalebylinesearch,providingamoreprincipledchoiceofη . Ourexperiments
+init
+showthat,dependingonthetargetlearningrateandinitialsharpness,onecandramaticallyreduce
+thewarmuptime,andinsomecasesremoveitaltogether.
+2(a) 00 .. 00 45 (b) 100 Twr
+1
+6m
+4
+256
+0.03 1024
+0.02 Twrm
+1
+0.01 6 24 56 10−1
+0.00 1024
+100 101 102 103 100 101 102 103
+step step
+(c) 102 Twrm (d) Twrm
+1 1
+64 64
+256 102 256
+100 1024 1024
+10−2
+101
+100 101 102 103 100 101 102 103
+step step
+Figure1: TraininglossandsharpnesstrajectoriesofFCNstrainedona5ksubsetofCIFAR-10with
+MSElossusingGD.Thedashedlinesinthesharpnessfiguresillustratetheinstabilitythresholds2/ηt.
+(top)µPwithη
+trgt
+=1/λH
+0
+,(bottom)SPwithη
+trgt
+=32/λH
+0
+. Similarmechanismsareobservedacross
+differentarchitectures,lossfunctions,andmini-batchsizes,asshowninAppendixE.
+2 NotationsandPreliminaries
+Sharpness: The sharpness is defined as the maximum eigenvalue of the Hessian of the loss
+λH := λ ( 2L)attrainingstept. Foradaptiveoptimizerswithpre-conditionerP,λP−1H :=
+t max ∇θ
+λ (P−1 2L)denotesthepre-conditionedsharpness.
+max ∇θ
+SGD(-M): Given gradients g at step t, Stochastic Gradient Descent with momentum (SGD-M)
+t
+updatestheparametersθ usinglearningrateη andmomentumm withcoefficientβ. Theupdate
+t t t
+equationsare: m =g +βm andθ =θ η m .β =0correspondstoSGD.
+t t t−1 t+1 t t t
+−
+Adam: Givengradientsg atstept,Adam[21]updatestheparametersθ usinglearningrateη and
+t t t
+thefirsttwomomentsofthegradientm andv withtheircoefficientsβ andβ ,respectively. The
+t t 1 2
+equationsgoverningtheupdatesare: m =β m +(1 β )g ,v =β v +(1 β )g2,and
+t 1 t−1 − 1 t t 2 t−1 − 2 t
+θ t+1 = θ t −η t√m vˆˆ tt +ϵ,wheremˆ t = 1m −βt 1t vˆ t = 1−vt β 2t arethebias-correctedmoments,andϵisa
+smallscalarusedfornumericalstability. Adam’spreconditioneris: P =(1 βt)[diag(vˆ )+ϵI].
+t − 1 t
+(cid:16) (cid:17)
+LinearWarmup: Thisisdefinedbythescheduleη =η +(η η ) t . Thewarmuprate
+t init trgt − init Twrm
+isα:= (ηtrgt−ηinit). T =1correspondstoconstantlearningrate. Unlessotherwisespecified,we
+Twrm wrm
+setη =0whenreferringtolinearwarmup. Weproposestrategiesforselectingη inSection6.1.
+init init
+ParameterizationsinNeuralNetworks: Themechanismofwarmupanditseffectivenessisheavily
+influencedbythenetworkparameterization(seeSections4and5). StandardParameterization(SP)
+[34]isastapleincommonlibraries[29,3]. AnothernotableparameterizationistheNeuralTangent
+Parameterization (NTP) [18], which along with SP resides in the kernel learning class at infinite
+width. Ref. [38]proposedMaximalUpdateParameterization(µP)whichexhibitsfeaturelearningat
+infinitewidth. Neuralnetworkparameterizationssignificantlyimpacttrainingdynamics[20].
+3 OverviewofTrainingInstabilitiesandtheSelf-StabilizationMechanism
+Theunderlyingmechanismofwarmupisintimatelytiedtotraininginstabilities. Thesetraininginsta-
+bilities,oftenreferredtoas‘catapults’[23,6],arisewhenthelearningrateηexceedsacriticalthresh-
+oldη ,wherebothηandη generallychangewithtime. Whentheinstabilitythresholdisexceeded
+c c
+(η >η ),twocasesarise: (i)ifthelearningrateishigherthantheinstabilitythresholdbutsmaller
+c
+thanamaximumstablelearningrate(whichvarieswithtime),i.e.,η <η <η ,trainingstabilizes
+c max
+throughaself-stabilizationprocessandtrainingcontinues,(ii)ifthelearningrateexceedsthismaxi-
+mumstablelearningrateη >η ,trainingexperiencessevereinstabilities.ForSGD,thesecanresult
+max
+intrainingdivergence,characterizedbythelossincreasingtoinfinity,whereasforAdam,trainingmay
+cease,resultinginatrainingfailure,wherethelossfailstoimprovesignificantlyoveritsinitialvalue.
+3
+ssolgniniarT
+ssolgniniarT
+H tλ
+H tλForvanillaGD,thecriticalthresholdisrelatedtosharpnessasη
+c
+2/λH 1,andtheself-stabilization
+≈
+mechanismcanbedescribedasafour-stepprocess[23,8]. Toillustratethis,considertheT =64
+wrm
+trajectoriesdepictedinFigure1(c,d). Inthesharpnessplot,thedashedlinesrepresentthe2/ηtcurves,
+andwhenλH isabovethesecurves,trainingexceedstheinstabilitythreshold(η > η ). Thefour
+t c
+stepsoftheself-stabilizationmechanismare:
+(1) Approachinginstability: Duetoincreasinglearningrateand/orprogressivesharpening,
+trainingapproachestheinstabilitythresholdη =η . InFigure1(d),thisoccurswithinthe
+c
+first10stepsduetoincreasinglearningrate.
+(2) Lossincreases: Thelossbeginstorisewhentheinstabilitythresholdisexceeded(η >η ),
+c
+asseeninFigure1(c).
+(3) Sharpnessreduction: Forsmallenoughlearningrates,theincreasinglosscausesanabrupt
+decreaseinsharpness,asobservedinFigure1(d). Ifthesharpnessfailstodecreaseover
+extendedsteps,itmayresultintrainingdivergence(e.g.,seeT = 1trajectoriesinthe
+wrm
+samefigure).
+(4) Returntostability: Thereductioninsharpnesscausesη
+c
+= 2/λH toincrease,restoring
+stability(η <η )andallowingforaneventuallossdecrease.
+c
+Whiletheself-stabilizationprocessformorecomplexoptimizers,suchasSGDwithmomentumor
+Adam,remainspoorlyunderstood,aqualitativelysimilarmechanismisobservedinpractice,aswe
+willseeinthelatersections.
+The critical learning rate η is influenced by a variety of factors, including the choice optimizer
+c
+[6, 7], mini-batch size [36, 7], and model properties such as depth, width, parameterization, and
+initialization[19,20]. Foradetailedoverviewofinstabilitythresholds,seeAppendixB.
+4 WarmupMechanismsofGradientandAdaptiveMethods
+Thissectionanalyzestheunderlyingmechanismofwarmupthroughthelensoftraininginstability.
+Akeyfindingisadichotomybetweencooperativeversuscompetitivedynamicsbasedonhowthe
+naturalevolutionofthesharpnessinterplayswiththetraininginstability.
+4.1 StochasticGradientDescent
+Learning rate warmup is intrinsically tied to sharpness dynamics, as sharpness determines the
+instabilitythresholdη . Asthelearningrateisincreasedduringwarmup,traininginstabilitiescanbe
+c
+triggered. Assumingthewarmuprateisnottoohigh,theseinstabilitiesinduceatemporaryincrease
+inthelossandadecreaseinthesharpnesstorestorestabilitythroughtheself-stabilizationmechanism.
+Ultimatelythisallowsthemodeltoadapttotheincreasedlearningrate. Inotherwords,theprimary
+goalofwarmupistograduallyreducesharpness,guidingtrainingtowardsflatterregionsthatcan
+accommodatetrainingathigherlearningrates[11].
+However,diggingdeeper,wefindthattraininghasa‘natural’preferenceforsharpnessevolution
+throughoutthetrainingcourse[20]. Beforeexceedingtheinstabilitythreshold(η < η ),training
+c
+naturallyexperienceseitheraprogressiveincreaseordecreaseinsharpness,asobservedinFigure1,
+whichisunrelatedtowarmup. Forinstance,considerthesharpnesstrajectorieswithT =1024
+wrm
+intheabovefigure. InFigure1(b),sharpnesshasanaturalpreferenceforincreasing,whereasin
+Figure1(d),ittendstodecreaseonitsown. Theinterplaybetweenthisnaturalsharpnessevolution
+and the deliberate intervention of warmup to reduce sharpness can result in completely distinct
+dynamics. Below,wedetailthesecasesanddescribetheconditionsthattypicallyexhibitthem.
+(C1)NaturalProgressiveSharpening(toprowofFigure1): Thecombinedeffectofthenetwork
+naturallyincreasingsharpnesswhilethelearningrateisalsobeingincreasedresultsina“head-on
+collision"atwhichthenetworkreachestheinstabilitythresholdη . Thiscausesthelosstoincrease,
+c
+leadingtoadecreaseinsharpnessandfacilitatingareturntostability. Astrainingproceeds,both
+sharpness and learning rate continue to increase, again surpassing the instability threshold. This
+1ThisrelationshipholdsfortheMSElossandsimplesettingsonly.Foranoverviewofinstabilitythresholds
+invarioussettingsanddifferentoptimizers,seeAppendixB.1.
+4results in a persistent catapult cycle, characterized by η
+t ≈
+2/λH
+t ≈
+η c, for the remainder of the
+warmupperiod,asseeninFigure1(b).
+(C2)NaturalSharpnessReduction(bottomrowofFigure1): Thenetworkisnaturallyalready
+reducingitssharpnessduringearlytraining. However,ifthelearningrateisincreasedsufficiently
+quickly,eventuallytheinstabilitythresholdwillbereached(akintoa“rear-endcollision"),causing
+thelosstoincrease. Forsmallenoughlearningrates,theincreasedlossinducesadramaticallymore
+pronounced decrease in sharpness than would naturally occur, ultimately restoring stability. To
+exceedtheinstabilitythresholdagain,thelearningratemustsignificantlyincreasetoaccountfor
+thedecreasedsharpness,potentiallyrequiringconsiderabletrainingsteps. Consequently,training
+experiencesoneormoreseparatedcatapultsduringthewarmupphase,asseeninFigure1(c,d). This
+contrastswiththeprogressivesharpeningcase,wheretrainingentersacontinuouscatapultcycleafter
+reachingtheinstabilitythresholdforthefirsttime. Notably,trainingmayeventuallyreachavery
+flatregionofthelandscapeduringwarmup,withgradientspointingtowardsincreasingsharpness
+(e.g.,T =64inFigure1(d)). Uponreachingsucharegion,thedynamicsalignswiththenatural
+wrm
+progressivesharpeningscenario.
+Thesetwoscenarioscanbeinterpretedascooperativeorcompetitivedynamicsbetweenwarmup
+andthenaturalevolutionofsharpness. Whentraininginherentlyundergoessharpnessreduction,it
+cooperateswithwarmupindecreasingsharpness. Conversely,ifthenaturaltrajectoryoftrainingis
+towardsincreasingsharpness,itopposesthewarmup’seffort,leadingtoapersistentcycleofcatapults.
+(C3)ConstantSharpness: Sharpnessmayalsoprefertoremainconstantthroughoutthetraining
+process,asillustratedinFigure15(d)inAppendixE.Insuchrarescenarios,sharpnessdecreaseis
+predominantlydrivenbytheincreasinglearningrate,withoutintrinsicdynamicsofitsown.
+TheEffectofWarmupDuration: Givenafixedtargetlearningrateη ,increasingthewarmup
+trgt
+durationT delaysthepointatwhichtrainingexceedstheinstabilitythresholdη ,allowingthe
+wrm c
+sharpness to evolve freely before reaching this point. In the sharpness reduction case, sharpness
+cansignificantlydecreasebythetimethisthresholdisreached,loweringtheneedforwarmupto
+decreasesharpnessactively. Consequently,increasingT resultsincatapultsthatarebothdelayed
+wrm
+andsmallerinmagnitude,asseeninFigure1(d). Asthecatapultsbecomelessintenseonincreasing
+thewarmupduration, themodelcantrainathigherlearningrateswithoutdiverging, pushingthe
+divergenceboundary. Forextendedwarmupdurations,warmupmaynotactivelyreducesharpnessin
+thesesharpnessreductioncasesandinstead“piggy-backs”ontheinherentsharpnessdecrease.
+Intheprogressivesharpeningcase,increasingT allowsthesharpnesstonaturallyincrease. Asa
+wrm
+result,trainingexceedstheinstabilitythresholdforthefirsttimeatarelativelylowerlearningrate
+comparedtotheconstantlearningratecase. Althoughwarmuphastonowundertakemoreworkin
+decreasingsharpness, itdoessoinamoregradualmannersinceincreasingthewarmupduration
+amountstoalowerwarmuprateηtrgt/Twrm. Asaresult,thefluctuationsobservedonexceedingthe
+instabilitythresholdaremuchsmallerinmagnitude,asseeninFigure1(a,b).
+Smallvs. LargeInitializations: Sofar,wehaveoutlineddifferentwarmupmechanismswithout
+describingspecificconditionsthattypicallyexhibitthem. Smallinitializations,suchasthoseusing
+maximalupdateparameterization(µP)[38]orappropriatelyusingnormalizinglayers(e.g. standard
+Transformerarchitectures,seeFigure17inAppendixE.5),arecharacterizedbyasmallinitialnetwork
+output. Suchinitializationsstartinflatregionswheregradientspointtowardincreasingsharpness
+[20],placingthemintheprogressivesharpeningcategory(C1). AswewillseeinSection5,such
+initializationsmaynotsignificantlybenefitfromwarmupastheyalreadystartinaflatregion. In
+contrast,largeinitializations,suchasFCNS,CNNs,ResNetswithStandardParameterization(SP)
+initializedatcriticality[30,32]orTransformerswiththelastlayer-normremoved,undergoanearly
+sharpnessreduction,categorizingthemintosharpnessreductioncategory(C2). Astheprimaryeffect
+ofwarmupistoreducesharpness,weexpectsuchlargeinitializationstoconsiderablybenefitfrom
+warmup. Notably,largeinitializationscaneventuallyundergoprogressivesharpeningatlatertraining
+stages[19,20]andadheretothesecondmechanism,especiallyforprolongedwarmups. Instancesof
+constantsharpness(C3)typicallyariseinmodelsoperatingnearthelazyregime[5],suchaswide
+networksinNTPorSP.
+5(a) 0.04 Twr 1m (b) 107 Twr 1m (c) 0.3
+64 64
+256 106 256
+0.03 1024 1024 0.2
+105
+0.02 0.1
+104
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+(d) 1.00 Twr 1m (e) 107 Twr 1m (f) 40
+64 64
+0.75 2 15 06 24 106 2 15 06 24 30
+0.50 20
+105
+0.25 10
+104
+0.00
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+Figure2: TraininglossandsharpnesstrajectoriesofFCNstrainedontheentireCIFAR-10dataset
+with MSE loss using full batch Adam. (top) simple-µP (for details, see Appendix D.2.1) with
+η = 0.003and(bottom)SPwithlearningrateη = 0.001. Thedashedlinesinthesharpness
+trgt trgt
+figuresillustratetheinstabilitythresholds(2+2β1)/ηt(1−β1). Similarmechanismsareobservedfor
+differentarchitectures,lossfunctions,andsmallerbatchsizesasdetailedinAppendixE.
+4.2 StochasticGradientDescentwithMomentum(SGD-M)
+ThewarmupmechanismofSGD-M,whileatitscoreissimilartothatofvanillaSGD,hasafew
+subtleties. Herewesummarizethemajordifferences,leavingdetailstoAppendixE.2.
+Duringearlytraining,thelossmaydecreasenon-monotonicallyonincorporatingmomentum,even
+at small learning rates. Such oscillations are also observed when quadratic loss functions are
+optimizedusingGDwithmomentum[12]. Theseoscillationsmakeitchallengingtodifferentiate
+betweenwarmup-inducedcatapultsandfluctuationsinlossduetotheintrinsiceffectsofmomentum.
+Nevertheless,wecanstillobservelossspikescorrelatedwithanabruptdecreaseinsharpnessatlarge
+learningrates,asdetailedinAppendixE.2.
+Additionally,theinstabilitythresholdη itselfevolvesdifferentlyduringtraining. Itchangesfrom
+c
+2/λH atinitializationto(2+2β)/λH laterintraining. Moreover,thelate-timeinstabilitythresholdis
+0 t
+significantlyinfluencedbythebatchsize,exhibitingamuchsmallervaluethanSGDforthesame
+batchsize. ThesepropertiesmakeitmorechallengingtoanalyzethetrainingdynamicsofSGDwith
+momentum. Nonetheless,thefundamentalwarmupmechanismscloselymirrorthevanillaSGDcase.
+WeleaveamoredetailedanalysisoftheearlytrainingdynamicsofSGD-Mforfuturestudies.
+4.3 AdaptiveGradientMethods(Adam)
+Figure2showsthetrainingloss,pre-conditionedsharpness,andsharpnesstrajectoriesforfullbatch
+Adam. These results suggest that the local stability of adaptive optimizers is determined by the
+largesteigenvalueofthepre-conditionedHessian,denotedbyλP−1H,ratherthanthesharpnessitself
+(also,seeRef. [7]forlatetimeinstability). Inthesefigures,sharpnessissignificantlysmallerthan
+its instability threshold (2+2β1)/ηt
+≈
+4000, indicating that sharpness does not determine stability.
+Instead,losscatapultsareassociatedwithλP−1H exceedingitscorrespondinginstabilitythreshold.
+Thepre-conditionedsharpnessstartshighforbothprogressivesharpening(simple-µP)andsharpness
+reduction(SP)scenariosconsideredintheprevioussection. Forsimplicity,weconsideredasimpler
+versionofµP,detailedinAppendixD.2.1. Inparticular,forµPmodels,λP−1H 105despitebeing
+0 ∼
+initializedinaflatregionasmeasuredbysharpness,whileforSPmodels,λP−1H 106. Theselarge
+0 ∼
+initialvaluesofλP−1H canleadtotrainingfailures. WeputforwardstrategiestoimproveAdam’s
+0
+initializationinSection6.2;herewecontinuecharacterizingthewarmupmechanismsofAdam.
+Giventhatthepre-conditionedsharpnessconsistentlystartshighanddecreasesduringearlytraining,
+thisbehaviorcanbeviewedasanextremeexampleofthenaturalsharpnessreductionscenario(C2)
+describedintheprevioussection. TrainingAdamathighinitiallearningrateswithoutwarmupcan
+causelargecatapults,asseeninFigure2(d),potentiallyleadingtotrainingfailures. Increasingthe
+6
+ssolgniniarT
+ssolgniniarT
+H1−P
+tλ
+H1−P
+tλ
+H tλ
+H tλWRN-16-4µPMSESGDCIFAR-10 WRN-16-4µPXENTSGDCIFAR-10
+4096 89.39 90.88 92.16 92.43 93.10 93.18 93.44 93.51 93.56 4096 92.31 92.97 92.98 93.06 93.27 93.04 92.50
+(a) 2048 89.50 91.00 91.94 92.52 93.24 93.11 93.32 93.45 93.46 93.47 93.03 90 (b) 2048 92.45 92.68 93.29 93.14 92.99 92.89 92.29 91.46 19.21 90
+1024 89.62 90.86 91.88 92.66 92.96 93.07 93.32 93.65 93.38 93.27 85 1024 92.30 93.30 93.29 92.99 92.81 90.95 91.95 85
+512 89.45 90.99 92.16 92.60 93.10 93.14 93.40 93.49 93.58 93.33 512 92.34 93.09 93.06 93.02 93.03 10.24 91.62 10.37
+256 89.59 90.61 92.01 92.32 92.91 93.17 93.57 93.47 93.46 80 256 92.75 93.11 92.87 92.86 92.24 91.71 90.33 80
+128 89.61 91.16 92.04 92.45 93.13 93.13 93.40 93.54 93.45 75 128 92.61 92.86 93.29 93.00 92.97 92.41 10.37 75
+64 89.50 91.19 91.95 92.42 93.04 93.28 93.58 92.88 64 92.74 92.92 93.34 93.02 92.58 10.24
+70 70
+32 89.61 90.90 91.92 92.63 92.90 92.89 93.52 32 92.61 92.93 92.99 92.91 92.43 85.32 10.37
+16 89.54 91.20 92.25 92.62 92.88 93.07 65 16 92.72 93.34 93.28 93.42 92.47 91.75 87.94 10.37 65
+8 89.57 90.97 91.75 92.44 93.04 93.14 8 92.61 92.76 93.22 93.21 92.77 92.26 10.37
+60 60
+4 89.42 91.40 92.20 92.54 92.92 4 92.88 92.94 93.40 92.99 92.59 92.40 13.04
+2 89.36 91.05 92.13 92.74 93.24 92.59 55 2 92.39 93.24 93.16 93.01 92.57 92.01 90.79 10.37 55
+1 89.63 91.10 91.99 92.59 92.71 92.63 1 92.55 93.11 93.23 93.03 92.38 91.81 10.37
+50 50
+8.6e-01 1.7e+00 3.4e+00 6.9e+00 1.4e+01 2.7e+01 5.5e+01 1.1e+02 2.2e+02 4.4e+02 8.8e+02 3.9e-01 7.8e-01 1.6e+00 3.1e+00 6.2e+00 1.2e+01 2.5e+01 5.0e+01 9.9e+01
+ηtrgt ηtrgt
+WRN-16-4SPMSESGDCIFAR-10 WRN-16-4SPXENTSGDCIFAR-10
+(c) 24 00 49 86 44 55 .. 01 60 44 99 .. 76 78 55 66 .. 86 65 66 44 .. 52 62 77 11 .. 33 37 77 88 .. 58 06 88 34 .. 70 30 88 77 .. 33 18 98 09 .. 19 28 99 11 .. 14 14 92.09 90 (d) 24 00 49 86 77 65 .. 09 96 88 11 .. 23 99 88 55 .. 76 85 88 88 .. 24 24 99 00 .. 30 14 99 11 .. 43 62 99 22 .. 20 99 99 22 .. 49 56 99 22 .. 59 71 99 32 .. 28 26 99 23 .. 90 4392.50 90
+1024 45.11 49.93 56.76 64.74 71.40 78.58 83.53 87.52 89.56 85 102476.2881.9885.1788.3190.0891.2692.0692.5292.8892.8010.30 85
+512 45.32 49.97 56.96 64.34 71.51 78.78 83.67 87.21 80 51276.6381.4785.3388.4090.2191.5292.3192.7192.5092.72 80
+256 45.12 49.93 56.77 64.29 71.85 78.09 82.59 25676.7381.7685.7388.2089.8991.5291.9592.5092.6793.01
+128 45.21 49.79 56.41 64.32 71.25 78.44 82.75 87.57 75 12876.4881.6585.6988.5090.3491.3791.9693.0892.88 75
+64 45.15 49.72 56.45 64.35 70.99 78.16 83.26 70 6476.3381.8285.3588.3490.1091.1292.3692.4893.28 70
+32 45.09 50.01 56.88 63.15 70.73 77.23 3276.4281.8985.7888.4190.2091.2591.8792.56
+16 45.11 49.84 56.67 64.03 70.82 65 1676.5481.7585.8788.0990.0491.0991.8892.23 65
+8 45.01 50.12 56.78 63.20 68.12 60 876.3981.8885.6188.1389.7591.4191.6392.12 60
+4 45.08 50.02 56.89 63.50 476.8281.9085.6288.5290.2891.3191.9592.2011.51
+2 45.10 49.89 57.08 63.73 55 276.5781.8885.6888.2589.7791.1092.1592.1210.24 55
+1 45.11 50.08 56.79 63.22 176.8381.7385.5288.5390.6391.5292.1910.24
+50 50
+4.0e-03 7.9e-03 1.6e-02 3.2e-02 6.4e-02 1.3e-01 2.5e-01 5.1e-01 1.0e+00 2.0e+00 4.1e+00 1.8e-03 3.7e-03 7.3e-03 1.5e-02 2.9e-02 5.9e-02 1.2e-01 2.3e-01 4.7e-01 9.4e-01 1.9e+0 30 .7e+00
+ηtrgt ηtrgt
+Figure3: TestaccuracyheatmapsofWRNstrainedonCIFAR-10usingdifferentandparameteriza-
+tionslossfunctionsusingSGD:(a)µPandMSEloss,(b)µPandcross-entropyloss,(c)SPandMSE
+loss,and(d)SPandcross-entropyloss.Emptycellscorrespondtotrainingdivergences.Similarphase
+diagramsaregenericallyobservedfordifferentarchitecturesanddatasets,asshowninAppendixF.
+warmupdurationallowsthepre-conditionedsharpnesstonaturallydecrease. Thispreventstheloss
+fromspikingduringearlytrainingandavoidstrainingfailures. Inthelaterstagesoftraining,the
+pre-conditionedsharpnessmaycontinuereducingorexhibitprogressivesharpening. Fromhereon,
+thedynamicsfollowsthewarmupmechanismsdiscussedintheprevioussections,withsharpness
+replacedwithpre-conditionedsharpness. Similartothemomentumcase,Adam’sstabilitythreshold
+atlatetrainingtimessignificantlydecreasesforsmallerbatchsizes[7],alsoshowninAppendixE.4.
+5 ImpactofWarmuponTrainingandGeneralization
+Hereweinvestigatetheimpactofwarmupontrainingefficacyandgeneralizationbydisentangling
+theroleofη andT . Ourkeyfindingsarethatgeneralizationcapabilityisprimarilydetermined
+trgt wrm
+byη andthatAdamisparticularlysensitivetolargelearningrates(specifically,largecatapults).
+trgt
+The role of increasing T is to (i) allow the network to tolerate larger η , and (ii) move the
+wrm trgt
+networkfurtherawayfromthedivergence(failure)boundary,leadingtoamarginalimprovementin
+generalization.
+ExperimentalSetup: WeconsiderWideResNets(WRNs)andTransformers(LM)parameterizedin
+eitherSPorµP.WRNsaretrainedonstandardclassificationtaskssuchasCIFAR-10,CIFAR-100,
+and Tiny-ImageNet, employing data augmentation. Transformers are trained on the next token
+predictiontaskusingtheWikiText-2dataset. ThesemodelsaretrainedwithMSEorcross-entropy
+(xent)lossfunctionsusingSGDorAdamoptimizersforafixedtrainingbudgetofT = 105 steps
+unlessotherwisespecified. Trainingbeginswithalinearwarmupphasefromη =0toη over
+init trgt
+T steps. Afterthewarmupphase, trainingcontinuesatη fortheremainingtrainingbudget.
+wrm trgt
+Insomecases,followingthewarmupperiod,wegraduallydecreasethelearningrateusingcosine
+decay[25]. Targetlearningratesaresampledexponentiallyuntildivergenceora‘trainingfailure’is
+observed. Here,trainingfailurereferstoinstanceswheretheperformanceattheendofthetraining
+failstoimprovesignificantlycomparedtoitsinitialvalue. Forexample,ifthefinaltrainingaccuracy
+foraclassificationtaskislessthan1.5timestheaccuracyofarandomguess,weconsideritasa
+7
+mrwT
+mrwT
+mrwT
+mrwTLM-4-128XENTAdamWikiText-2 LM-4-128XENTGI-AdamWikiText-2
+(a)
+4096
+4.044.034.013.973.933.883.853.823.813.814.144.464.505.79
+6.00
+(b)
+4096
+4.034.034.013.983.943.893.843.823.803.894.124.274.484.53
+6.00
+2048
+4.044.034.003.973.933.883.843.823.814.074.464.505.795.98
+5.75 2048
+4.034.034.023.983.933.883.853.823.813.984.274.484.536.11
+5.75
+1024 4.044.034.013.963.923.873.843.833.824.384.505.705.916.08 5.50 1024 4.044.034.023.983.923.883.843.833.824.034.484.535.866.14 5.50
+512 4.034.034.003.973.923.883.843.833.834.464.595.726.006.06 5.25 512 4.044.034.023.973.933.883.843.833.824.134.485.695.706.02 5.25
+256 4.044.034.013.973.923.873.853.844.124.475.685.876.026.17 5.00 256 4.044.034.023.973.923.883.843.833.834.144.474.575.796.00 5.00
+128 4.044.034.013.973.923.873.853.844.225.065.705.715.946.12 4.75 128 4.044.034.013.983.923.873.843.833.844.164.485.665.746.04 4.75
+64 4.034.034.013.983.923.883.853.844.365.435.725.815.906.09 4.50 64 4.044.044.013.983.923.873.843.843.844.214.525.705.756.05 4.50
+16 4.034.024.013.973.913.883.853.844.495.455.715.855.946.09 16 4.044.034.013.983.923.873.843.843.844.265.645.715.866.12
+4.25 4.25
+4 4.044.024.013.973.923.883.854.404.985.505.715.755.846.14 4 4.044.034.013.983.923.873.853.833.834.264.635.745.886.09
+4.00 4.00
+1 4.044.024.013.963.923.883.844.395.215.415.795.905.896.16 1 4.044.034.013.983.923.873.853.833.834.254.695.715.966.00
+1.0e-0 24 .0e-0 44 .0e-0 84 .0e-0 14 .6e-0 33 .2e-0 63 .4e-0 13 .3e-0 22 .6e-0 52 .1e-0 12 .0e-0 21 .0e-0 41 .1e-0 81 .2e-01 1.0e-0 24 .0e-0 44 .0e-0 84 .0e-0 14 .6e-0 33 .2e-0 63 .4e-0 13 .3e-0 22 .6e-0 52 .1e-0 12 .0e-0 21 .0e-0 41 .1e-0 81 .2e-01
+ηtrgt ηtrgt
+Figure4: TestlossheatmapsofPre-LNTransformersinSPtrainedonWikiText-2withcross-entropy
+lossusing(a)Adam,and(b)GI-Adam(introducedinSection6.2)Additionalresultsarepresentedin
+AppendixF.3.
+trainingfailure. Werefertothetransitionbetweenconvergenceandtrainingfailureasthefailure
+boundary. FurtherdetailsareprovidedinAppendixD.
+5.1 StochasticGradientDescent(SGD)
+Figure3presentsheatmapsthatshowthebesttestaccuracyachievedduringtraining,plottedinthe
+η -T planefordifferentparameterizationsandlossfunctions. Thesephasediagramsofwarmup
+trgt wrm
+alsoshowtheconvergence-divergenceboundary,withemptycellsindicatingtrainingdivergences,
+illustrating the interplay between warmup duration and the maximum trainable η . Below, we
+trgt
+discussthecrucialinsightstheseresultsprovideintowarmup’sroleintrainingdynamics.
+LongerWarmupFacilitatesTrainingatHigherLearningRates: Thesephasediagramsreveal
+thatanextendedwarmupdurationfacilitatestrainingathighertargetlearningrates. Thisbenefitis
+particularlynoticeableforlargeinitializations(likeSP)andMSEloss. Incontrast,theadvantageis
+lesspronouncedwhenusingcross-entropylossandsmallerinitializations(likeµP).Thediminished
+benefitforµPislikelyduetoitsinitializationinarelativelyflatregionofthelosslandscape,which
+canalreadyfacilitatetrainingathigherlearningratesatinitialization. Thisconsistentincreasein
+maximumη withwarmupdurationscanbeunderstoodthroughthelensofwarmupmechanisms
+trgt
+describedintheprevioussection. AsobservedinFigure1,whenthewarmupdurationisincreased,
+loss catapults occurring on surpassing the instability thresholds become milder. This effectively
+pushesthedivergentboundarytohigherlearningrates.
+FinalPerformancePrimarilyDependsontheTargetLearningRate: Acloserlookintothese
+phasediagramsrevealsthat,slightlyawayfromthedivergentboundary,thetestaccuracyprimarily
+depends on the target learning rate and nominally on the warmup duration. Based on the model
+performance,wecancategorizethesephasediagramsintotwodistinctcases: (i)modelsthatfail
+to achieve optimal performance when trained with a constant learning rate (e.g., Figure 3(c)),
+and (ii) models that attain optimal performance without warmup (e.g., Figure 3(b)). The first
+scenariocorrespondstomodelswithlargeinitializations. Increasingthewarmupdurationimproves
+performancebyfacilitatingtrainingathigherlearningrates. Yet,similarperformanceisobserved
+fordifferentwarmupdurations,suggestingthattheprimarygaincomesfromthetargetlearningrate,
+ratherthanthedurationitself. Thesecondcasearisesforflatinitializations,whichcanalreadytrain
+atlargelearningrates,andresultantlytheoptimalperformanceisalreadyachievedwithoutwarmup.
+Whileincreasingwarmupdurationfacilitatestrainingatevenhigherlearningrates,itdoesnotenhance
+performance. Nevertheless,itdoesbroadentherangeofoptimallearningrates,reducingtheneedfor
+precisetuningofthetargetlearningrate,andmakingtrainingmorepracticalandrobust. Weconclude
+thatwarmupcanservetwokeypurposes: (i)itcansignificantlyimprovemodelperformanceinlarge
+initializationcases,and(ii)extendtherangeofoptimaltargetlearningratesforsmallinitializations,
+makingiteasiertotunethetargetlearningrate. InAppendixF.2,wedemonstratethattheseresults
+holdonincorporatingmomentumandemployingcosinelearningratedecay.
+8
+mrwT mrwTTreach Tsave
+4096 1 1 1 1 1536 2816 3456 3777 3936 4016 4056 4076 4000 40964088.04088.04088.04088.52554.01274.5635.0 314.5 156.0 76.5 37.0 17.5 4000
+(a) (b)
+2048 1 1 1 1 768 1408 1728 1889 1968 2008 20482040.52040.52040.52041.01274.5635.0 315.5 155.0 76.5 37.0
+1024 1 1 1 1 384 704 864 945 984 1004 1014 10241017.01017.01017.01017.5635.0 315.5 156.0 75.5 37.0 17.5 8.0
+512 1 1 1 1 192 352 432 473 492 502 507 3000 512 505.5 505.5 505.5 506.0 315.5 156.0 76.5 36.0 17.5 8.0 3.5 3000
+256 1 1 1 1 96 176 216 237 246 251 256 250.0 250.0 250.0 250.5 156.0 76.5 37.0 16.5 8.0 3.5
+128 1 1 1 1 48 88 108 119 123 126 128 122.5 122.5 122.5 123.0 76.5 37.0 17.5 7.0 3.5 1.0
+64 1 1 1 1 24 44 54 60 62 63 2000 64 59.0 59.0 59.0 59.5 37.0 17.5 8.0 2.5 1.0 0.5 2000
+32 1 1 1 1 12 22 27 30 31 32 27.5 27.5 27.5 28.0 17.5 8.0 3.5 1.0 0.5
+16 1 1 1 1 6 11 14 15 16 12.0 12.0 12.0 12.5 8.0 3.5 1.0 0.5
+8 1 1 1 1 3 6 7 7 1000 8 4.5 4.5 4.5 5.0 3.5 1.0 0.5 1.0 1000
+4 1 1 1 1 2 3 3 3 4 1.0 1.0 1.0 1.5 1.0 0.5 1.0 1.0
+2 1 1 1 1 1 1 1 1 2 -0.5 -0.5 -0.5 0.0 0.5 1.0 1.0 1.0
+1 1 1 1 1 1 1 1 1 1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+0
+1.4e-03 2.8e-03 5.6e-03 1.1e-02 2.2e-02 4.5e-02 9.0e-02 1.8e-01 3.6e-01 7.2e-01 1.4e+0 20 .9e+00 1.4e-03 2.8e-03 5.6e-03 1.1e-02 2.2e-02 4.5e-02 9.0e-02 1.8e-01 3.6e-01 7.2e-01 1.4e+0 20 .9e+00
+ηtrgt ηtrgt
+Figure5: Heatmapsshowing(a)thestepstoreachη (T )and(b)theeffectivestepssaved(T )
+trgt reach save
+onsettingη =η forWRNsinSPtrainedonCIFAR-10usingSGDwithcross-entropyloss.
+init c
+5.2 Adam
+ThewarmupphasediagramsforAdam,asshowninFigure4(a),exhibitcharacteristicssimilartothe
+sharpnessreductioncaseofSGD,withnotabledifferences. Increasingthewarmupdurationenables
+training at higher learning rates by allowing the pre-conditioned sharpness to decrease naturally,
+thereby reducing the severity of catapults. These large catapults, which may persist in Adam’s
+memory,canleadtoperformancedegradationandtrainingfailures. Thus,inadditiontofacilitating
+trainingathigherratessimilartoSGD,warmupfurtherimprovesAdam’sperformancebyaddressing
+itsvulnerabilitytolargecatapults,justifyingitswidespreadusewithAdam. Below,wediscussthe
+distinctpropertiesofAdamphasediagramsindetail.
+TrainingFailuresofAdam: Remarkably,wefindthatmodelstrainedwithAdamalwaysexhibit
+trainingfailuresratherthandivergenceswherethelossgrowswithoutbound,asfurtherdemonstrated
+inAppendixG.Incasesoftrainingfailure,weoftenobservedthatcertainlayersorresidualblocks
+outputzero,leadingtovanishinggradients. Thisimpliesthatthemodelgetsstuckatacriticalpoint
+andisunabletotrainfurther. Understandingthisunexpectedphenomenonrequiresfurtherstudy,
+whichweleavetofuturework.
+Performance Degradation prior to Failure Boundary: Test accuracy in these phase diagrams
+declineswellbeforethefailureboundary,instarkcontrasttoSGDwhereoptimallearningratesare
+observednearthedivergenceboundary. ThisdiscrepancystemsfromAdam’spropertyofretaining
+amemoryofgradientmagnitudes. Atlargelearningrates,alongwiththeloss,thegradientsspike
+duringearlytraining,asseeninFigure26inAppendixG.Whilethegradientsdecreaseafterafew
+trainingsteps,thesecondmomentofgradientsvremainslargeforanextendedperiod,leadingto
+a small effective learning rate ηP−1. As a result, training struggles to escape high-loss regions.
+Therefore,alongerwarmupismorebeneficialforAdamcomparedtoSGD,asitiscrucialtostay
+awayfromthefailureboundary.
+6 ImprovedHyperparameterInitializationSchemesforOptimizers
+6.1 InitialLearningRateSelectionforWarmup
+Setting the initial learning rate to η = 0 is common practice in warmup [28, 9]. Our analysis
+init
+revealsthattheprimaryeffectofwarmupistofacilitatetrainingathigherlearningratesbyannealing
+sharpness(orpre-conditionedsharpnessforAdam). Fromthisperspective,startingwithη = 0
+init
+appears suboptimal, as it can significantly delay the learning rate from exceeding the instability
+threshold,thusdelayingtheprimaryeffectofwarmup.
+An effective strategy involves setting η = η to induce loss increase and thereby sharpness
+init c
+decrease right from initialization. We introduce a straightforward search method that only uses
+forwardpassestoestimatetheinitialcriticallearningrateη . Themethodconsistsoftwostages:
+c
+(i)anexponentialsearch,startingfromaninitialguessη ,iterativelymultipliesη byafactork >1
+0 0
+until the loss increases. This identifies an interval [η ,η ] containing η , (ii) a binary search
+lwr uppr c
+furthernarrowsdown[η lwr,η uppr]byevaluatingthelossatthemidpointη
+mid
+= (ηlwr+ηuppr)/2. Ifthe
+lossincreases,η isupdatedtoη ;otherwise,η issettoη . Thisprocessisrepeateduntilthe
+uppr mid lwr mid
+9
+mrwT mrwT30
+(a) 0.3 Twr 1m (b) 107 Twr 1m (c)
+64 64 25
+0.2
+2 15 06
+24
+106 2 15 06
+24 20
+105
+15
+0.1
+104
+10
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+Figure6: TraininglossandsharpnesstrajectoriesofFCNsinSP.Theexperimentalsetupisidentical
+toFigure2butwithGI-AdaminsteadofstandardAdam.
+lossinthenextstepL(θ )satisfiestheconditionL(θ )<L(θ )(1+δ),forsomehyperparameter
+1 1 0
+δ >0. Fordetails,seeAppendixB.2.
+By setting η = η , training can achieve the target learning rate earlier. Consider the modified
+init c
+warmupschedule:η
+t
+=η init+η trgt(t/Twrm),whichattainsη trgtinT
+reach
+=T wrm(1 −ηc/ηtrgt)steps,saving
+T wrm(ηc/ηtrgt)steps. IncorporatingthecomputationalcostofadditionalforwardpassesT
+fp
+required
+forestimatingη ( 10innumber),andnotingthatonetrainingstepapproximatelyequatestotwo
+c
+∼
+forwardpasses,thenetcomputationalsavingsisT
+save
+=T wrm(ηc/ηtrgt) −Tfp/2. Figure5demonstrates
+howT andT varywiththeT andη . Forη < η ,thetargetlearningrateisreached
+reach save wrm trgt trgt c
+inasinglestep,nearlysavingtheentiredurationofthewarmup,whereasfor(η >η ),starting
+trgt c
+η ≳η cansaveuptohalfoftheallocatedwarmupduration,althoughthissavingdiminisheson
+init c
+approachingthedivergent/failureboundary.
+Itisworthnotingthattherecanbeinstanceswherethereisnolosscatapultatinitialization. Inour
+experiments,thisonlyoccursforTransformerstrainedusingSGD.Insuchscenarios,theprescribed
+approachisnotapplicableandonecanresorttoheuristics,suchassettingtheinitiallearningratetoa
+fractionofthemaximumstablelearningrate,suchasη
+init
+=ηtrgt/10.
+6.2 GI-Adam: ImprovingAdambyInitializingTheSecondMomentusingGradients
+InSection4.3,weobservedthatthepre-conditionedsharpnessforAdamstartsatahighvalue,even
+for low sharpness initializations like µP, and can lead to training failures at large learning rates.
+WeproposeGradientInitializedAdam(GI-Adam),whichinitializesthesecondmomentusingthe
+gradientsquared,v =g2. InAppendixI.2,weshowthatabiascorrectionisnotrequiredwhenthe
+0 0
+secondmomentisinitializedusingthegradients. Asaresult,GI-Adamcanbeviewedasstandard
+(cid:112)
+Adamwithanautomatedwarmupgivenbyη =η 1 βt. Itwouldbeinterestingtoexplorea
+t trgt − 2
+widerspaceofinitializationsforAdam,suchasv =ag2,witha 1.
+0 0 ≥
+Thissimpletrickreducestheinitialpre-conditionedsharpnessbyaroundtwoordersofmagnitude
+(morepreciselybyafactorof√1 β )atinitialization,preventinglargecatapults,asillustrated
+2
+−
+inFigure6(c.f. Figure2(d-f)). Moreover,itconsistentlyshowsimprovementoverstandardAdam
+acrossdatasetsandpreventstrainingfailuresbypushingthetrainingfailureboundarytohigherη ,
+trgt
+asshowninFigure4(b). WeprovideadditionalresultsfordifferentdatasetsinAppendixF.3.
+Tofurtherassessthattheprimarycauseofinstabilityduringearlytrainingisthelargepre-conditioned
+sharpness,werandomlyinitializev butwiththesamenormasthegradientsatinitialization. Like
+0
+GI-Adam,thisalsoresultsinimprovedperformanceasshowninAppendixI.3.
+7 TowardsParameterFreeWarmupStrategies
+Ouranalysisalsomotivatesapotentialparameter-freewarmupstrategy,whichwerefertoaspersistent
+catapultwarmup. Thecentralideabehindthisstrategyistorepeatedlyinducecatapultsaimedto
+progressivelyreducesharpness(orpre-conditionedsharpness),therebyfacilitatingtrainingathigher
+learningrates. Givenatargetlearningrateη ,thestrategyconsistsofthefollowingsteps:
+trgt
+1. Startwitha‘stable’referencepointθ∗,definedasapointwherethelossdecreasesinthe
+nextstepandestimatetheinterval[η ,η ]containingη ,asdescribedinAppendixB.2.
+lwr uppr c
+2. Induceacatapultbyincreasingthelearningratetoη =η .
+uppr
+10
+ssolgniniarT
+H1−P
+tλ
+H tλ(a) Twrm (b) Twrm
+64 102 64
+100 256 256
+1024 1024
+101
+10−1
+100
+100 101 102 103 100 101 102 103
+step step
+Figure7: Comparisonofpersistentcatapultwarmup(inblack)withlinearwarmupwithdifferent
+durations. TheexperimentalsetupisthesameasinFigure1,butthemodelistrainedontheentire
+CIFAR-10datasetusingSGDwithabatchsizeB =512.
+3. Continuetrainingandwaituntilthelossfallsbelowthereferencepoint,i.e.,L(θ )<L(θ∗).
+t
+Thisnewpointnowbecomesthestablereferencepoint.
+4. Repeattheabovestepsuntilthetargetlearningisachieved,i.e.,η =η .
+trgt
+Here,theinitialstablereferencepointisthemodel’sinitialization.Thedetailedalgorithmisdescribed
+inAlgorithm3inAppendixC.
+Figure7comparespersistentcatapultwarmup(showninblack)withlinearwarmup. Thepersistent
+catapult warmup facilitates training at higher learning rates without the need to specify warmup
+duration. Sinceη servesasanindicatorofsharpness,persistentcatapultwarmuputilizesthelocal
+c
+sharpnessinformationtoautomaticallydeterminethewarmuprate,resultinginanadaptivenon-linear
+warmup. This adaptive approach eliminates the need for manual tuning of the warmup duration,
+allowingforamoreefficientandeffectivewarmup.
+Althoughpersistentcatapultwarmupisapromisingapproachtowarmup,itrequiresspecifyinghow
+largeacatapultshouldbeinduced,whichintroducesanotherhyperparameter. Nevertheless,persistent
+catapultwarmupmotivatesthedevelopmentofparameter-freewarmupstrategiesthatcouldsimplify
+thetrainingprocess. Weleavefurtherdevelopmentofparameter-freewarmuptofuturework.
+8 Discussion
+Ouranalysisprovidesnewinsightsintotheroleofwarmupacrossoptimizersandparameterizations.
+Wefoundcompellingevidencethattheprimaryeffectofwarmupistofacilitatetrainingathigher
+learningratesandstabilizingthetrainingdynamicsbykeepingitawayfromthefailure(divergence)
+boundary. Looking under the hood, we found a variety of underlying mechanisms, which also
+suggested several improvements for hyperparameter initialization. In Appendix A we provide
+practicalguidanceforpractitionersonchoosingthewarmupduration.
+Itwouldbeinterestingtofurtherunderstandtherobustnessofthelocationofthefailureboundary
+tochangesindatasetorarchitecture. Therelativerobustnessofthelocationofthisboundarymight
+explainthesuccessofheuristicchoicesoflearningratebasedonpastexperienceintrainingnetworks.
+Limitations: Ourexperimentswereconductedonrelativelysmall-scaledatasetsandmodels,and
+furtherinvestigationsareneededtounderstandthegeneralizabilityofourfindingstolarger-scale
+settings. ForAdam,wedidnotexplorethedependenceonhyperparametersβ ,β ,ϵ.
+1 2
+AcknowledgmentsandDisclosureofFunding
+WethankTianyuHe,DarshilDoshi,AndreyGromov,DanRoberts,JeremyCohen,andJonasGeiping
+fordiscussionsandcommentsonthedraft. TheauthorsacknowledgetheUniversityofMaryland
+supercomputing resources (http://hpcc.umd.edu) made available for conducting the research
+reported in this paper. This work is supported in part by NSF DMR-2345644 (MB) and by the
+LaboratoryforPhysicalSciencesthroughtheCondensedMatterTheoryCenter(MBandDS).
+References
+[1] Tinyimagenetchallenge. https://cs231n.stanford.edu/reports/2017/pdfs/930.pdf.
+[2] StephenPBoydandLievenVandenberghe. Convexoptimization. Cambridgeuniversitypress,2004.
+11
+ssolgniniarT
+H tλ[3] JamesBradbury,RoyFrostig,PeterHawkins,MatthewJamesJohnson,ChrisLeary,DougalMaclaurin,
+GeorgeNecula,AdamPaszke,JakeVanderPlas,SkyeWanderman-Milne,andQiaoZhang. JAX:compos-
+abletransformationsofPython+NumPyprograms,2018. URLhttp://github.com/google/jax.
+[4] SébastienBubecketal. Convexoptimization:Algorithmsandcomplexity. FoundationsandTrends®in
+MachineLearning,8(3-4):231–357,2015.
+[5] Lénaïc Chizat, Edouard Oyallon, and Francis Bach. On lazy training in differentiable program-
+ming. In H. Wallach, H. Larochelle, A. Beygelzimer, F. d'Alché-Buc, E. Fox, and R. Gar-
+nett, editors, Advances in Neural Information Processing Systems, volume 32. Curran Asso-
+ciates, Inc., 2019. URL https://proceedings.neurips.cc/paper_files/paper/2019/file/
+ae614c557843b1df326cb29c57225459-Paper.pdf.
+[6] JeremyCohen,SimranKaur,YuanzhiLi,JZicoKolter,andAmeetTalwalkar. Gradientdescentonneural
+networkstypicallyoccursattheedgeofstability.InInternationalConferenceonLearningRepresentations,
+2021. URLhttps://openreview.net/forum?id=jh-rTtvkGeM.
+[7] JeremyM.Cohen,BehroozGhorbani,ShankarKrishnan,NamanAgarwal,SourabhMedapati,Michal
+Badura,DanielSuo,DavidCardoze,ZacharyNado,GeorgeE.Dahl,andJustinGilmer. Adaptivegradient
+methodsattheedgeofstability,2022.
+[8] AlexDamian,EshaanNichani,andJasonD.Lee. Self-stabilization:Theimplicitbiasofgradientdescent
+attheedgeofstability.InTheEleventhInternationalConferenceonLearningRepresentations,2023.URL
+https://openreview.net/forum?id=nhKHA59gXz.
+[9] DeepMind,IgorBabuschkin,KateBaumli,AlisonBell,SuryaBhupatiraju,JakeBruce,PeterBuchlovsky,
+DavidBudden,TrevorCai,AidanClark,IvoDanihelka,AntoineDedieu,ClaudioFantacci,Jonathan
+Godwin,ChrisJones,RossHemsley,TomHennigan,MatteoHessel,ShaoboHou,StevenKapturowski,
+ThomasKeck,IuriiKemaev,MichaelKing,MarkusKunesch,LenaMartens,HamzaMerzic,Vladimir
+Mikulik, Tamara Norman, George Papamakarios, John Quan, Roman Ring, Francisco Ruiz, Alvaro
+Sanchez,LaurentSartran,RosaliaSchneider,ErenSezener,StephenSpencer,SrivatsanSrinivasan,Miloš
+Stanojevic´,WojciechStokowiec,LuyuWang,GuangyaoZhou,andFabioViola. TheDeepMindJAX
+Ecosystem,2020. URLhttp://github.com/google-deepmind.
+[10] EmilyDinan,ShoYaida,andSusanZhang. Effectivetheoryoftransformersatinitialization,2023.
+[11] JustinGilmer,BehroozGhorbani,AnkushGarg,SnehaKudugunta,BehnamNeyshabur,DavidCardoze,
+GeorgeEdwardDahl,ZacharyNado,andOrhanFirat. Alosscurvatureperspectiveontraininginstabilities
+ofdeeplearningmodels. InInternationalConferenceonLearningRepresentations,2022. URLhttps:
+//openreview.net/forum?id=OcKMT-36vUs.
+[12] GabrielGoh. Whymomentumreallyworks. Distill,2017. doi: 10.23915/distill.00006. URLhttp:
+//distill.pub/2017/momentum.
+[13] AkhileshGotmare,NitishShirishKeskar,CaimingXiong,andRichardSocher. Acloserlookatdeep
+learning heuristics: Learning rate restarts, warmup and distillation. In International Conference on
+LearningRepresentations,2019. URLhttps://openreview.net/forum?id=r14EOsCqKX.
+[14] PriyaGoyal,PiotrDollár,RossGirshick,PieterNoordhuis,LukaszWesolowski,AapoKyrola,Andrew
+Tulloch,YangqingJia,andKaimingHe.Accurate,largeminibatchsgd:Trainingimagenetin1hour.arXiv
+preprintarXiv:1706.02677,2017.
+[15] KaimingHe,X.Zhang,ShaoqingRen,andJianSun. Deepresiduallearningforimagerecognition. 2016
+IEEEConferenceonComputerVisionandPatternRecognition(CVPR),pages770–778,2016.
+[16] JonathanHeek,AnselmLevskaya,AvitalOliver,MarvinRitter,BertrandRondepierre,AndreasSteiner,
+andMarcvanZee. Flax:AneuralnetworklibraryandecosystemforJAX,2020. URLhttp://github.
+com/google/flax.
+[17] DanHendrycksandKevinGimpel. Bridgingnonlinearitiesandstochasticregularizerswithgaussianerror
+linearunits. CoRR,abs/1606.08415,2016. URLhttp://arxiv.org/abs/1606.08415.
+[18] ArthurJacot, FranckGabriel, andClementHongler. Neuraltangentkernel: Convergenceandgener-
+alizationinneuralnetworks. InS.Bengio,H.Wallach,H.Larochelle,K.Grauman,N.Cesa-Bianchi,
+andR.Garnett, editors, AdvancesinNeuralInformationProcessingSystems, volume31.CurranAs-
+sociates,Inc.,2018. URLhttps://proceedings.neurips.cc/paper_files/paper/2018/file/
+5a4be1fa34e62bb8a6ec6b91d2462f5a-Paper.pdf.
+12[19] DayalSinghKalraandMaissamBarkeshli. Phasediagramofearlytrainingdynamicsindeepneural
+networks:effectofthelearningrate,depth,andwidth.InThirty-seventhConferenceonNeuralInformation
+ProcessingSystems,2023. URLhttps://openreview.net/forum?id=Al9yglQGKj.
+[20] DayalSinghKalra,TianyuHe,andMaissamBarkeshli. Universalsharpnessdynamicsinneuralnetwork
+training:Fixedpointanalysis,edgeofstability,androutetochaos. arXivpreprintarXiv:2311.02076,2023.
+[21] DiederikKingmaandJimmyBa.Adam:Amethodforstochasticoptimization.InInternationalConference
+onLearningRepresentations(ICLR),SanDiego,CA,USA,2015.
+[22] AlexKrizhevsky,GeoffreyHinton,etal. Learningmultiplelayersoffeaturesfromtinyimages. 2009.
+[23] AitorLewkowycz, YasamanBahri, EthanDyer, JaschaSohl-Dickstein, andGuyGur-Ari. Thelarge
+learningratephaseofdeeplearning:thecatapultmechanism. arXivpreprintarXiv:2003.02218,2020.
+[24] Liyuan Liu, Haoming Jiang, Pengcheng He, Weizhu Chen, Xiaodong Liu, Jianfeng Gao, and Jiawei
+Han. Onthevarianceoftheadaptivelearningrateandbeyond. InInternationalConferenceonLearning
+Representations,2020. URLhttps://openreview.net/forum?id=rkgz2aEKDr.
+[25] IlyaLoshchilovandFrankHutter. SGDR:Stochasticgradientdescentwithwarmrestarts. InInterna-
+tionalConferenceonLearningRepresentations,2017. URLhttps://openreview.net/forum?id=
+Skq89Scxx.
+[26] StephenMerity,CaimingXiong,JamesBradbury,andRichardSocher. Pointersentinelmixturemodels. In
+InternationalConferenceonLearningRepresentations,2017. URLhttps://openreview.net/forum?
+id=Byj72udxe.
+[27] KevinPMurphy. Probabilisticmachinelearning:anintroduction. MITpress,2022.
+[28] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan, Trevor
+Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, Andreas Kopf, Ed-
+ward Yang, Zachary DeVito, Martin Raison, Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner,
+Lu Fang, Junjie Bai, and Soumith Chintala. Pytorch: An imperative style, high-performance deep
+learning library. In H. Wallach, H. Larochelle, A. Beygelzimer, F. d'Alché-Buc, E. Fox, and
+R. Garnett, editors, Advances in Neural Information Processing Systems, volume 32. Curran Asso-
+ciates, Inc., 2019. URL https://proceedings.neurips.cc/paper_files/paper/2019/file/
+bdbca288fee7f92f2bfa9f7012727740-Paper.pdf.
+[29] AdamPaszke,SamGross,FranciscoMassa,AdamLerer,JamesBradbury,GregoryChanan,TrevorKilleen,
+ZemingLin,NataliaGimelshein,LucaAntiga,etal. Pytorch:Animperativestyle,high-performancedeep
+learninglibrary. Advancesinneuralinformationprocessingsystems,32,2019.
+[30] BenPoole,SubhaneilLahiri,MaithraRaghu,JaschaSohl-Dickstein,andSuryaGanguli. Exponential
+expressivityindeepneuralnetworksthroughtransientchaos. InNIPS,2016.
+[31] AlecRadford,JeffWu,RewonChild,DavidLuan,DarioAmodei,andIlyaSutskever. Languagemodels
+areunsupervisedmultitasklearners. 2019.
+[32] DanielA.Roberts,ShoYaida,andBorisHanin. ThePrinciplesofDeepLearningTheory. Cambridge
+UniversityPress,2022. https://deeplearningtheory.com.
+[33] Rico Sennrich, BarryHaddow, andAlexandra Birch. Neuralmachine translationof rarewords with
+subword units. In Katrin Erk and Noah A. Smith, editors, Proceedings of the 54th Annual Meeting
+oftheAssociationforComputationalLinguistics(Volume1: LongPapers),pages1715–1725,Berlin,
+Germany,August2016.AssociationforComputationalLinguistics. doi:10.18653/v1/P16-1162. URL
+https://aclanthology.org/P16-1162.
+[34] JaschaNarainSohl-Dickstein,RomanNovak,SamuelS.Schoenholz,andJaehoonLee. Ontheinfinite
+widthlimitofneuralnetworkswithastandardparameterization. ArXiv,abs/2001.07301,2020. URL
+https://api.semanticscholar.org/CorpusID:210839595.
+[35] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,Łukasz
+Kaiser,andIlliaPolosukhin. Attentionisallyouneed. Advancesinneuralinformationprocessingsystems,
+30,2017.
+[36] LeiWu,ChaoMa,etal. Howsgdselectstheglobalminimainover-parameterizedlearning:Adynamical
+stabilityperspective. AdvancesinNeuralInformationProcessingSystems,31,2018.
+13[37] RuibinXiong,YunchangYang,DiHe,KaiZheng,ShuxinZheng,ChenXing,HuishuaiZhang,Yanyan
+Lan,LiweiWang,andTieyanLiu. Onlayernormalizationinthetransformerarchitecture. InHalDaumé
+IIIandAartiSingh, editors, Proceedingsofthe37thInternationalConferenceonMachineLearning,
+volume119ofProceedingsofMachineLearningResearch,pages10524–10533.PMLR,13–18Jul2020.
+URLhttps://proceedings.mlr.press/v119/xiong20b.html.
+[38] GregYangandEdwardJ.Hu. Tensorprogramsiv:Featurelearningininfinite-widthneuralnetworks. In
+MarinaMeilaandTongZhang,editors,Proceedingsofthe38thInternationalConferenceonMachine
+Learning,volume139ofProceedingsofMachineLearningResearch,pages11727–11737.PMLR,18–24
+Jul2021. URLhttps://proceedings.mlr.press/v139/yang21c.html.
+[39] GregYang,EdwardJHu,IgorBabuschkin,SzymonSidor,XiaodongLiu,DavidFarhi,NickRyder,Jakub
+Pachocki,WeizhuChen,andJianfengGao. Tuninglargeneuralnetworksviazero-shothyperparameter
+transfer. InA.Beygelzimer,Y.Dauphin,P.Liang,andJ.WortmanVaughan,editors,AdvancesinNeural
+InformationProcessingSystems,2021. URLhttps://openreview.net/forum?id=Bx6qKuBM2AD.
+[40] SergeyZagoruykoandNikosKomodakis. Wideresidualnetworks. 2017.
+[41] AstonZhang,ZacharyCLipton,MuLi,andAlexanderJSmola. Diveintodeeplearning. Cambridge
+UniversityPress,2023.
+[42] HongyiZhang,MoustaphaCisse,YannN.Dauphin,andDavidLopez-Paz. mixup: Beyondempirical
+riskminimization. InInternationalConferenceonLearningRepresentations, 2018. URLhttps://
+openreview.net/forum?id=r1Ddp1-Rb.
+A PracticalGuidanceforPractitioners
+HowtoSelecttheWarmupDuration? Givenatargetlearningrateη ,ifthetraininglossduring
+trgt
+the warmup period exhibits large instabilities (loss spikes), the warmup duration T should be
+wrm
+increaseduntilsuchinstabilitiesaresufficientlysmall. Thiseffectivelymovestrainingawayfromthe
+divergent/failureboundary,asillustratedinFigure3. ThisisparticularlycrucialforAdam,aslarge
+instabilitiescanbedetrimentalandleadtoconsiderableperformancedegradationwithoutdivergence,
+asdiscussedinSection5.2.
+HowtoSelecttheTargetLearningRate? Astheprimaryeffectofwarmupistoannealsharpness
+byincreasingthelearningratebeyondtheinstabilitythreshold,itsuggeststhatthetargetlearning
+rateshouldbeatleastgreaterthantheinstabilitythresholdatinitialization.
+WhentoDecaytheLearningRate? Figure21suggeststhatemployinglearningratedecayat
+smalllearningratescanresultinperformancedegradationforafixedtrainingbudget. Therefore,the
+learningrateshouldbedecayedatlargetargetlearningratesonly. Theunderlyingintuitionisthatwe
+uselargetargetlearningratestotraininaflatregionofthelandscape. However,theselargelearning
+ratesrestricttrainingtogointosharperregionsofthebasinandlearningratedecayhelps.
+LeveragingµPforEffecientTraining: Ouranalysissuggeststhattheprimaryroleofwarmup
+facilitatestrainingathigherlearningratesbygraduallyreducingsharpness. Giventhisperspective,
+beginningtrainingwithflatinitializations,suchasµP,isadvantageous. Theseinitializationsmight
+allowforachievingoptimalperformancewithouttheneedforwarmup,asobservedinFigure3.
+B InstabilityThresholds
+B.1 OverviewofInstabilityThresholds
+Lewkowyczetal. [23]showedthatforwidenetworksinNTP/SPtrainedwithMSElossandSGD,
+this critical learning rate is 2/λH early in training. Further investigation by Kalra and Barkeshli
+0
+[19]demonstratedthatsharpnessreductionduringearlytrainingcausesη toincreasewithdepth
+c
+and 1/width. In such scenarios, η
+c
+can be as large as 40/λH
+0
+. Cohen et al. [6] demonstrated that
+sharpness at late training times for GD with momentum coefficient β oscillates above (2+2β)/η,
+suggesting η
+c
+≳ (2+2β)/λH
+t
+at late training times. Expanding on this, Cohen et al. [7] analyzed
+adaptiveoptimizersandfoundthatforAdam,thepre-conditionedsharpnessλP−1H oscillatesaround
+14(2+2β1)/η(1−β1)atlatetrainingtimes. Theinstabilitythresholdalsodependsonthemini-batchsize
+[36]andisoftenobservedtobesmallerthantheirfullbatchcounterparts[6,7].
+B.2 EstimatingtheInstabilityThreshold
+This section describes the method for estimating the instability threshold η at initialization (or
+c
+generically,anypointθ )usingonlyforwardpasses. Themethodconsistsoftwostages:
+t
+ExponentialSearch: Anexponentialsearch,startingfromaninitialguessη ,iterativelymultiplies
+0
+η byafactork =2untilthelossincreases. Thisidentifiesaninterval[η ,η ]containingη . The
+0 lwr uppr c
+detailedalgorithmisdescribedinAlgorithm1. Unlessspecified,weuseη = 10−4 asourinitial
+0
+guess. Ifthelossalreadyincreasesattheinitialguessη ,wesetη =η .
+0 init 0
+Algorithm1ExponentialSearch
+1: Input: (Initialweights: θ 0,Initialguess: η 0)
+2: Output: Interval[η lwr,η uppr]containingη c
+3: EvaluateinitiallossL(θ 0)
+4: Initializeη η 0
+←
+5: θ 1 Optimizer(η,θ 0)
+←
+6: EvaluateL(θ 1)
+7: whileL(θ 1)<L(θ 0)do
+8: ifη η trgtthen
+≥
+9: η η trgt
+←
+10: break
+11: endif
+12: η 2η
+←
+13: θ 1 Optimizer(η,θ 0)
+←
+14: EvaluateL(θ 1)
+15: endwhile
+16: η η
+uppr
+←
+17: η η/2
+lwr
+←
+18: return[η ,η ]
+lwr uppr
+Binary search: A binary search further narrows down [η ,η ] by evaluating the loss at the
+lwr uppr
+midpoint η
+mid
+= (ηlwr+ηuppr)/2. If the loss increases, η
+uppr
+is updated to η mid; otherwise, η
+lwr
+is
+set to η . This process is repeated until the loss in the next step L(θ ) satisfies the condition
+mid 1
+L(θ ) < L(θ )(1+δ), for some δ > 0. The algorithm is detailed in Algorithm 2. In all our
+1 0
+experiments,wesetδ =0.1.
+Whilebothη andδareadditionalhyperparameters,themethoddoesnotheavilydependonthese
+0
+choices.Apoorinitialguessofη wouldonlytakeafewmoreiterationstofindaninterval[η ,η ].
+0 lwr uppr
+Meanwhile,anysmallvalueofδ (0,1]iseffectiveinfindingη ,assmallinitiallossspikeshave
+c
+∈
+minimalimpactontheoveralldynamics. NotethatforAdam,asmallδ( 0.01)hastobeselected
+∼
+toensurethatwedonotobservelargecatapults.
+C PersistentCatapultWarmup
+Ouranalysismotivatesapotentialparameter-freewarmupstrategy,referredtoaspersistentcatapult
+warmup. Thecentralideabehindthisstrategyistorepeatedlyinducecatapultsaimedtoprogressively
+reducesharpness,therebyfacilitatingtrainingathigherlearningrates. Givenatargetlearningrate
+η ,thestrategyconsistsofthefollowingsteps:
+trgt
+1. Startwitha‘stable’referencepointθ∗,definedasapointwherethelossdecreasesinthe
+nextstepandestimatetheinterval[η ,η ]containingη ,asdescribedinAppendixB.2.
+lwr uppr c
+2. Induceacatapultbyincreasingthelearningratetoη =η .
+uppr
+3. Continuetrainingandwaituntilthelossfallsbelowthereferencepoint,i.e.,L(θ )<L(θ∗).
+t
+Thisnewpointnowbecomesthestablereferencepoint.
+15Algorithm2BinarySearch
+1: Input: (Initialweights: θ 0,Tolerance: δ,Initialsearchinterval[η lwr,η uppr])
+2: Output: Estimateofη c
+3: EvaluateL(θ 0)
+4: θ 1 Optimizer(η uppr,θ 0)
+←
+5: EvaluateL
+uppr
+L(θ 1)
+←
+6: whileL
+uppr
+>L(θ 0)(1+δ)do
+7: η (η +η )/2
+mid lwr uppr
+←
+8: θ
+mid
+Optimizer(η mid,θ 0)
+←
+9: EvaluateL L(θ )
+mid mid
+←
+10: ifL
+mid
+<L(θ 0)then
+11: η η
+lwr mid
+←
+12: else
+13: η η
+uppr mid
+←
+14: L L(θ )
+uppr mid
+←
+15: endif
+16: endwhile
+17: returnη η
+c uppr
+←
+4. Repeattheabovestepsuntilthetargetlearningisachieved,i.e.,η =η .
+trgt
+Here,theinitialstablereferencepointisthemodel’sinitialization.Thedetailedalgorithmisdescribed
+inAlgorithm3.
+Figure7comparespersistentcatapultwarmup(showninblack)withlinearwarmup. Thismethod
+annealssharpnesswithouttheneedtospecifywarmupduration. Since2/ηc servesasanindicator
+ofsharpness,thewarmupisperformednon-linearly,utilizingthelocalsharpness. Additionally,this
+methodintroducesminimalinstabilitiescomparedtolinearwarmupwithsmallwarmupdurations,
+thusenablingittoautomaticallydeterminetheoptimalwarmuprate.
+Althoughpersistentcatapultwarmupisapromisingapproachtowarmup,itrequiresspecifyingthe
+toleranceδforestimatingη .Ourfindingsindicatethatwhileawiderangeoftolerancesδ (0,1]are
+c
+∈
+effectiveatinitialization,therequiredtolerancemayvaryduringtraining. Typically,asweprogress
+intoflatterregionsofthelandscape,adecreasingtolerancethresholdisrequired. Wedeferfurther
+developmentofthismethodtofuturework.
+Algorithm3PersistentCatapultWarmup
+1: Input: (Initialweights: θ 0,Targetlearningrate: η trgt,Tolerance: δ)
+2: θ∗ θ 0//Referencepoint
+←
+3: whileη <η do
+trgt
+4: ifL(θ t)<L(θ∗)then
+5: Estimate[η uppr,η lwr]containingη cusingAlgorithms1and2withtoleranceδ
+6: η η
+uppr
+7:
+θ∗←
+θ t
+←
+8: else
+9: continue
+10: endif
+11: endwhile
+D ExperimentalDetails
+Thissectionprovidesadditionalexperimentaldetails. AllmodelswereimplementedusingtheJAX
+[3], and Flax libraries [16]. The key results can be reproduced using the GitHub repo: https:
+//github.com/dayal-kalra/why-warmup.
+16D.1 DatasetsDetails
+D.1.1 ImageClassificationTasks
+WeconsiderstandardimageclassificationdatasetssuchasCIFAR-10,CIFAR-100[22],andTiny-
+ImageNet[1]. Theimagesarenormalizedtohavezeromeanandunitvariance. ForMSEloss,we
+useone-hotencodingforthelabels.
+Dataaugmentation:Forvariousimageclassificationtasks,weemploydataaugmentationtechniques,
+appliedinthefollowingorder: randomhorizontalflips,randomcropping,andmixup[42].
+D.1.2 LanguageModelingTasks
+WeconsiderthenexttokenpredictiontaskontheWikitext-2dataset[26],consistingof 2Mtokens.
+∼
+WeuseBytePairEncoding(BPE)tokenizer[33]withaWhitespacepre-tokenizer. Duetothehigh
+computationalcostassociatedwithhyperparametertuning,werestricttosmallermodelswith 2M
+∼
+parameters.Furthermore,werestrictthevocabularysizeto4096toensurethatembeddingparameters
+donotdominatethetotalnumberofparametersinthemodel.
+D.2 ModelDetails
+This section describes the models considered, including their parameterization and initialization
+details. WeadoptparameterizationsoutlinedinTable9ofRef. [39]. Unlessotherwisespecified,we
+employReLUnon-linearitiesandinitializetheweightswithatruncatednormaldistribution2,witha
+varianceσ2 =2.0inappropriateparameterizations(detailsbelow),exceptforthelastlayer,which
+w
+hasaweightvarianceofσ2 =1.0. Allbiasesareinitializedtozeros.
+w
+D.2.1 Parameterizations
+Standard Parameterization (SP): For SP, the weights are initialized with truncated Gaussian
+distribution N(0,σ w2/fanin)andthebiasesareinitializedtozero.
+MaximalUpdateParameterization(µP): ForµP,differentschemesareemployedfortheinter-
+mediateandlastlayers. Theinte (cid:112)rmediatelayersareinitializedusing N(0,σ w2/fanout)andthelayer
+outputsarescaledbythefactor fanout/fanin. Incomparison, thelayerweightsareinitializedwith
+(cid:112)
+N(0,σ w2/fanin), and the final output is rescaled by the factor 1/fanin. Conveniently, for SGD, the
+learning rate does not scale with width in the above µP formulation. In comparison, for Adam,
+thelearningratecorrespondingtoinput,intermediate,andoutputlayersarerescaledbythefactors
+1/√ fanout,1/√ fanin and1/fanin. SinceweareutilizingµPonlytoobtainflatinitializations,weomitthe
+additionalscalingofthelearningrateforAdaminsomeexperiments(e.g.,Figure2). Asaresult,the
+instabilitythresholdisonlydependentonthetargetlearningrateη duringlatetraining,ratherthan
+trgt
+onthelargestlearningrateacrosslayers. Werefertothisparameterizationas‘simple-µP’forAdam.
+D.2.2 Architectures
+FullyConnectedNetworks(FCNs): Weconsiderfullyconnectednetworkswithaconstantwidth
+of n and a depth of d layers. These networks are denoted by FCN-d-n. Unless specified, we
+consideredd=4layerFCNswithwidthn=512.
+WideResNets(WRNs): WeconsiderWideResNets[40]withdlayers,S stages,andawidening
+factor of k, denoted by WRN-d-k. The number of channels in each stage s [0,S) is given
+by 2s 16 k, with the input layer having 16 channels. For example, WRN∈ -16-4 consists of
+× ×
+S =3stages,eachwith[2,2,2]layers,andthecorrespondingnumberofchannelsineachstageis
+[64,128,256]. Inallourexperiments,weuseLayerNorminsteadofBatchNorm.
+Transformers: WeconsiderTransformerswithGPT-2stylearchitecture[31]. Thesemodelsuse
+sinusoidalpositionalembeddings[35]andareimplementedintheStandardParameterization(SP)
+2fordetails,seehttps://jax.readthedocs.io/en/latest/_autosummary/jax.nn.initializers.
+truncated_normal.html
+17withGELUactivation[17].Weinitializealllayersusingtheσ w2/faninscheme,exceptfortheembedding
+layers,astheydonotinvolvematrixmultiplication[10]. WeconsiderbothPre-LN[37]andPost-LN
+[35]Transformervariants. WedenoteaTransformerwithdblocksandanembeddingdimensionofn
+asLM-d-n. Unlessspecified,themodelhasd=4blocks,embeddingdimensionn=128,context
+lengthT =64andaretrainedfor104steps.
+cntxt
+D.3 OptimizationDetails
+D.3.1 Optimizers
+SGD(-M): Givengradientsg atstept,StochasticGradientDescentwithmomentum(SGD-M)
+t
+updatestheparametersθ usinglearningrateη andmomentumm withcoefficientβ. Theupdate
+t t t
+equationsare:
+m =g +βm , (1)
+t t t−1
+θ =θ η m . (2)
+t+1 t t t
+−
+Here,β =0correspondstoSGD.Inallexperimentsincorporatingmomentum,thedefaultvalueof
+thecoefficientissettoβ =0.9.
+Adam: Givengradientsg atstept,Adam[21]updatestheparametersθ usinglearningrateη
+t t t
+andthefirsttwomomentsofthegradientm andv withtheircoefficientsβ andβ ,respectively.
+t t 1 2
+Theequationsgoverningtheupdatesare:
+m =β m +(1 β )g , (3)
+t 1 t−1 1 t
+−
+v =β v +(1 β )g2, (4)
+t 2 t−1 − 2 t
+mˆ
+θ =θ η t , (5)
+t+1 t t
+− √vˆ +ϵ
+t
+wheremˆ t = 1m −βt t andvˆ t = 1−vt βt arethebias-correctedmoments,andϵisasmallscalarusedfor
+1 2
+numericalstability. Thepre-conditionerforAdamisgivenby:
+(cid:20) (cid:18) (cid:19) (cid:21)
+v
+P =(1 βt) diag t +ϵI . (6)
+t − 1 1 βt
+− 2
+Inallexperiments,thedefaultvaluesaresettoβ =0.9,β =0.999,andϵ=10−8,unlessotherwise
+1 2
+specified.
+D.3.2 LinearWarmup
+Warmuplinearlyincreasesthelearningratefromaninitialvalueη toatargetvalueη overT
+init trgt wrm
+trainingsteps. Thelearningrateη atsteptisgivenby:
+t
+(cid:18) (cid:19)
+t
+η =η +(η η ) . (7)
+t init trgt − init T
+wrm
+Here, α := (ηtrgt−ηinit) is referred to as the rate of warmup. Under the above definition, constant
+Twrm
+learningratetrainingcorrespondstoT = 1. T = 1correspondstoconstantlearningrate.
+wrm wrm
+Unlessotherwisespecified,wesetη =0whenreferringtolinearwarmup.
+init
+D.3.3 LearningRateDecay
+Inseveralexperiments,weemploylearningratedecayfollowingthewarmupphase. Specifically,we
+usecosinelearningratedecay,whichisdetailedbelow.
+18CosineDecay: Towardstheendoftraining,itistypicaltoreducethelearningratetoasmallvalue.
+Cosinedecayisacommonlyusedmethodfordecayingthelearningratefromaninitialvalueofη
+trgt
+downtoavalueη overT steps,accordingtotherule:
+min cos
+(cid:20) 1(cid:18) (cid:18)
+πt
+(cid:19)(cid:19)(cid:21)ρ
+η =η +(η η ) 1+cos , (8)
+t trgt min − trgt 2 T
+cos
+whereρgovernstherateofdecay,withρ=1beingthestandard. Notethatwithρ=0,thelearning
+rateisnotdecayedandinsteadmaintainedatη . Intheaboveexpression,tcountsthestepsfrom
+trgt
+theinitiationofcosinedecayandnotthecurrenttrainingstep. Asperstandardpractice,weconsider
+ρ=1anddecaythelearningratetoη
+min
+=ηtrgt/10.
+D.3.4 TargetLearningRateSamplingforPhaseDiagrams
+ForSGD,targetlearningratesη areexponentiallysampledusingtheinitialsharpnessλH. Starting
+trgt 0
+withη
+trgt
+=1/λH
+0
+,subsequentratesaresampleduntildivergenceas2x/λH
+0
+forvaluesofxincreased
+inintegerstepsstartingfromzero. ForWRNstrainedwithAdam,wesampletargetlearningrates
+exponentiallyasη =2x 10−5,wherexisincrementedinintegerstepsstartingfromzerountil
+trgt
+×
+trainingfailure. ForTransformers,wesamplethelearningrateinasimilarfashionbutstartingfrom
+10−4andincrementxinstepsof0.5.
+D.4 SharpnessandPre-conditionedSharpnessMeasurement
+Wemeasuredsharpness/pre-conditionedsharpnessusingtheJAXimplementationoftheLOBPCG
+sparseeigenvaluesolverwiththetolerancesetto10−9andmaximumnumberofiterationston =
+iter
+1000. Inmostcases,thesolverconvergeswithin40iterations. Weperformedthesecomputationsin
+float64,asthesolverwouldnotconvergewithfloat32insomecases.
+Incertaininstances,thepre-conditionedsharpnesscomputationdidnotconvergewithin1000solver
+iterations. Moreover,weobservedthatthesolverconvergesonrestartingitwithanewinitialguess
+oftheeigenvectorwithin40iterations. Toaddresstheseedgecases, weemployedthefollowing
+method: ifthesolverdidnotconvergewithin100iterations,werestarteditwithanewinitialguess
+fortheeigenvector. Weallowedforatmost10restartswiththemaximumnumberofiterationssetto
+n =1000inthelastattempt. Inallreportedcases,thesolverconvergesusingthismethod.
+iter
+D.5 AdditionalFigureDetails
+Figure1: Trainingtrajectoriesof4-layerFCNswithwidthn = 512, trainedona5ksubsetof
+CIFAR-10usingMSElossandGDin(top)µPwithη
+trgt
+=1/λH
+0
+,whereλH
+0
+≈0.05,and(bottom)SP
+withη
+trgt
+=32/λH
+0
+,whereλH
+0
+≈50.
+Figure2: Traininglossandsharpnesstrajectoriesof4layerFCNswithwidthn=512,in(top)µP
+withlearningrateη =0.003and(bottom)SPwithη =0.001trainedtheCIFAR-10datasetwith
+trgt trgt
+MSElossusingfullbatchAdamwithβ =0.9,β =0.999andϵ=10−8. Intheseexperiments,we
+1 2
+usedataaugmentationasdescribedinAppendixD.1.1.
+Figure3: TestaccuracyheatmapsofWRN-16-4trainedonCIFAR-10usingdifferentparameter-
+izations andloss functions using SGDwith a batchsize B = 128: (a) SP andMSE loss, (b) µP
+andcross-entropyloss(c)SPandcross-entropyloss. Allmodelsaretrainedfor105steps. Inthese
+experiments,weusedataaugmentationasdescribedinAppendixD.1.1.
+Figure 4: Test loss heatmaps of Pre-LN Transformers in SP trained on WikiText-2 with cross-
+entropylossusing(a)Adam,and(b)GI-Adam(introducedinSection6.2)overAdam. TheTrans-
+formermodelshaved =4blocks,embeddingdimensionn =128,acontextlengthofT =64.
+cnxt
+Theseexperimentsalsoemploycosinedecay,asdescribedinAppendixD.3.3.
+Figure5: Heatmapsshowing(a)T ,numberofstepstoreachη ,and(b)T ,theeffective
+reach trgt save
+numberofstepssavedonsettingη = η forWRN-16-4inSPtrainedonCIFAR-10withcross-
+init c
+19entropylossusingSGDwithB =128for104steps. Forafaircomparisonwithlinearwarmup,we
+chooseη
+0
+=ηtrgt/Twrmasourinitialguess.
+Figure6: TraininglossandsharpnesstrajectoriesofFCNsinSP.Theexperimentalsetupisidentical
+toFigure2butwithGI-AdaminsteadofstandardAdam.
+0.05
+0.4
+Twrm
+1
+64
+0.04 0.3 256
+1024
+Twrm 0.2
+0.03 1
+64 0.1
+256
+1024
+0.02 100 101 102 103 0.0 100 101 102 103
+step step
+(a) (b)
+102 Twrm 103 Twrm
+1 1
+64 64
+101 256 102 256
+1024 1024
+100
+101
+10−1
+100
+100 101 102 103 100 101 102 103
+step step
+(c) (d)
+Figure8: TraininglossandsharpnesstrajectoriesofFCNstrainedonCIFAR-10withMSElossusing
+SGDwithabatchsizeB =512. Thedashedlinesinthesharpnessfiguresillustratetheinstability
+thresholds2/ηt. (top)µPwithlearningrate1/λH
+0
+,(bottom)SPwithlearningrate32/λH
+0
+.
+D.6 EstimationofComputationalResources
+The phase diagram experiments typically required about an hour on per run on an A100 GPU.
+Consequently,eachphasediagramconsumedapproximately100A100hoursofcomputationaltime.
+Withatotalof16phasediagrams,thisequatesto1600A100hoursdedicatedsolelytophasediagram
+computations. Additionally,thewarmupmechanismexperiments,whichwereconductedover2000
+steps,requiredsharpnessestimation.TheFCNexperimentsrequiredapproximately1200A100hours,
+whiletheWRNmechanismexperimentsconsumed1600A100hours. Theexperimentsconcerning
+theinitiallearningratetookabout20A100hours. Thisbringsthetotalcomputationaltimeamounted
+toapproximately4500A100hours. Preliminaryexperimentstookabout1000A100hours. Hence,
+weestimatethetotalcomputationalcosttobearound5500A100hours.
+E AdditionalResultsforMechanismsofWarmup
+ThissectionpresentsadditionaltrajectoriesforwarmupmechanismsdiscussedinSection4covering
+variousarchitectures,lossfunctions,andoptimizers.
+E.1 StochasticGradientDescent
+Figure8showsthatthewarmupmechanismsforfullbatchGDarealsoobservedintheSGDwitha
+batchsizeB =512. Theresultsforotheroptimizersinthemini-batchsettingarediscussedintheir
+respectivesections.
+E.2 StochasticGradientDescentwithMomentum
+WhilethewarmupmechanismsofSGDwithmomentumarefundamentallysimilartothoseofvanilla
+SGD,threekeydifferencesarise,asdiscussedbelow.
+20
+ssolgniniarT
+ssolgniniarT
+H tλ
+H tλ10−1
+100
+10−3
+Twrm Twrm
+1 10−1 1
+10−5 6 24
+56
+6 24
+56
+1024 1024
+100 101 102 103 100 101 102 103
+step step
+(a) (b)
+Twrm Twrm
+1 60 1
+0.4 64 64 256 256
+1024 40 1024
+0.2
+20
+0.0
+100 101 102 103 0 100 101 102 103
+step step
+(c) (d)
+10−1
+101
+10−3
+10−5 Twr 6 2m 4 56 100 Twr 6 2m 4 56
+1024 1024
+100 101 102 103 100 101 102 103
+step step
+(e) (f)
+Figure9: TraininglossandsharpnesstrajectoriesofFCNstrainedon5ksubsetofCIFAR-10using
+MSElossandfullbatchGDwithmomentumβ =0.9: (top)µPwithlearningrate1/λH (middle)SP
+0
+withlearningrate1/λH,and(bottom)SPwithlearningrate32/λH. Thedottedlinesinthesharpness
+0 0
+figurescorrespondtothe(2+2β)/ηtcurves,whiledashedlinesshowthe2/ηtforreference.
+First,thetraininglosscandecreaselossinanoscillatoryfashionduringtraining[12]. Toillustrate
+this, consider the full-batch GD with momentum. The middle row of Figure 9 demonstrates the
+sharpnessreductioncasewiththelearningrateswellbelowthestabilitythreshold(η <<η ). Despite
+c
+being far below these thresholds, the loss does not decrease monotonically but converges in an
+oscillatoryfashion. Thismakesitchallengingtodifferentiatebetweenwarmup-inducedcatapultsand
+fluctuationsinlossduetotheintrinsiceffectsofmomentum. Nevertheless,wecanstillobserveloss
+spikescorrelatedwithanabruptdecreaseinsharpnessatlargelearningrates,asseeninthebottom
+rowofthesamefigure. SimilartotheSGDcase,weobservethesecatapultsaredelayedandbecome
+smallerinmagnitudeonincreasingthewarmupduration.
+Next,thestabilitythresholdη forSGDwithmomentumevolvesduringtraining. Forsimplicityof
+c
+explanations, weagainconsiderthefullbatchGDcase. Thestabilitythresholdη forSGDwith
+c
+momentum changes from 2/λH
+0
+at initialization to (2+2β)/λt late in training. At initialization, the
+momentumvectorissettozerom
+0
+= 0,andthestabilityisgivenbyvanillaGDthreshold2/λH
+0
+.
+Astrainingprogresses,themomentumm increasesinmagnitude,andtheinstabilitythresholdat
+t
+latetrainingtimebecomes(2+2β)/λt. ThebottomrowofFigure9showthesharpnesstrajectories
+withboth2/ηt and(2+2β)/ηt curves. ForT
+wrm
+= 64, thelearningratecurve2/ηt causesanabrupt
+decreaseinsharpness,whichiscoupledwithalossspike.Forlongerwarmupdurations,thesharpness
+decreasesbeforetrainingexceedsthe2/λH.
+t
+Finally, the instability threshold η for SGD with momentum significantly decreases for smaller
+c
+batch sizes. Figure 10 shows the training trajectories under the same setup as in Figure 8, but
+withmomentumcoefficientβ =0.9. Thelate-timesharpnesstrajectoriesoscillatewellbelowthe
+21
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+H tλ
+H tλ
+H tλ0.5
+0.05 Twrm
+0.4 1
+0.04 64
+256
+0.03 0.3 1024
+0.02 Twr 1m 0.2
+64
+0.01 256 0.1
+1024
+100 101 102 103 0.0 100 101 102 103
+step step
+(a) (b)
+100
+Twrm
+64
+256
+1024 101
+10−1
+Twrm
+100 64
+256
+10−2 1024
+100 101 102 103 100 101 102 103
+step step
+(c) (d)
+Figure10: TraininglossandsharpnesstrajectoriesofFCNstrainedonCIFAR-10withMSEloss
+usingSGDwithabatchsizeB = 512andmomentumβ = 0.9: (top)µPwithlearningrate1/λH,
+0
+and(bottom)SPwithlearningrate32/λH. Thedottedlinesinthesharpnessfigurescorrespondtothe
+0
+(2+2β)/ηtcurves,whiledashedlinesshowthe2/ηtforreference. Similarmechanismsareobserved
+forcross-entropylosswithadecreaseinsharpnessatlatetrainingtimes,asdetailedinAppendixE.3.
+(2+2β)/ηt (andevenbelow2/λH
+t
+),whereasthevanillaSGDcounterpartoscillatesonthe2/ηt curve.
+Thisindicatesastrongdependenceoftheinstabilitythresholdonbatchsize.
+Besidesthesethreedifferences,wenotethatthewarmupmechanismsofSGDwithmomentumare
+similartothevanillaSGDcase. Weleaveathoroughanalysisoftheearlysharpnessdynamicsof
+SGDwithmomentumforfutureworks.
+E.3 StochasticGradientDescentandCross-entropyLoss
+Thewarmupmechanismsformodelstrainedwithcross-entropylossexhibittrendssimilartothose
+observedwithMSElosswithonecrucialdifference. Nearconvergence,sharpnessfirstincreases
+and then abruptly decreases. The decrease in sharpness towards the end of training is observed
+in previous studies analyzing SGD with fixed learning rate [6]. Additionally, we observe higher
+fluctuationscomparedtotheMSElosscase. Figure11showstrajectoriesofFCNsunderdifferent
+parameterizations trained on CIFAR-10 with cross-entropy loss using vanilla SGD. Meanwhile,
+Figure 12 shows the loss and sharpness trajectories of FCNs in SP trained on CIFAR-10 with
+cross-entropylossusingfullbatchGDwithandwithoutmomentum.
+E.4 WarmupMechanismsofAdam
+AsdiscussedinSection4.3,theinstabilitythresholdforAdamisdeterminedbythepre-conditioned
+sharpness λP−1H and not by the sharpness itself. Moreover, training dynamics falls under the
+sharpnessreductioncaseasthepre-conditionedsharpnessstartsofflargeandreducesconsiderably
+duringthefirstfewtraining.
+Figure 13 shows the training trajectories of FCNs trained with Adam in the same setting as in
+Figure 2 but with a batch size of B = 512. Similar to the SGD with momentum case, the late
+timesharpnessoscillatesfarbelowtheinstabilitythreshold((2+2β1)/ηt(1−β1)),suggestingthatthe
+instabilitythresholdheavilydecreaseswithasmallerbatchsize. WenotesimilarfindingsbyRef. [7].
+Next,Figure14showthewarmupmechanismofFCNstrainedwithcross-entropylossusingAdam
+underthefull-batchsetting.SimilartotheSGDcase,thepre-conditionedsharpnessdecreasestowards
+theendoftraining.
+22
+ssolgniniarT
+ssolgniniarT
+H tλ
+H tλ2.5
+2.0 101
+Twrm
+1.5 1
+1.0 Twr 1m 100 6 2 14 5 06
+24
+64
+0.5 256
+1024
+100 101 102 103
+10−1
+100 101 102 103
+step step
+(a) (b)
+104
+102 Twrm
+1
+101 103 64
+256
+100 1024 Twrm 102
+10−1 1
+64
+10−2 256 101
+1024
+100 101 102 103 100 101 102 103
+step step
+(c) (d)
+Figure11: TraininglossandsharpnesstrajectoriesofFCNstrainedonCIFAR-10withcross-entropy
+lossusingSGDwithabatchsizeB =512. (Toprow)µPwithlearningrate1/λH (Bottomrow)SP
+0
+withlearningrate32/λH.
+0
+102 103 Twrm
+1
+64
+100 102 256
+1024
+Twrm 101
+10−2 1
+64 100
+256
+1024
+100 101 102 103 100 101 102 103
+step step
+(a) (b)
+102 Twrm
+104
+1
+64
+100 256 102
+1024
+10−2 Twrm
+100 1
+64
+10−4 256
+1024
+100 101 102 103 100 101 102 103
+step step
+(c) (d)
+Figure 12: Training loss and sharpness trajectories of FCN-4-512 in SP trained on 5k subset of
+CIFAR-10withcross-entropylossusingfullbatchGDwithlearningrate32/λH withmomentum
+0
+coefficient(top)β =0.0and(bottom)β =0.9.
+E.5 DifferentArchitecturesandDatasets
+In the previous sections, we confined our analysis to FCNs to thoroughly explore the effects of
+different optimizers and loss functions. This section expands on those results by demonstrating
+that the observed warmup mechanisms apply to ResNets and Transformers as well. The Resnet
+experimentsalsoemploydataaugmentationasdetailedinAppendixD.1.
+Figures15and16showthetrainingtrajectoriesofWideResNets(WRNs)trainedonCIFAR-10with
+MSEandcross-entropylossusingSGD.Thesetrajectoriesgenerallyreflectthewarmupmechanisms
+discussedinSection4. However,certainadditionalfeaturesobscuretheclarityofthesemechanisms.
+23
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+H tλ
+H tλ
+H tλ
+H tλ0.4
+0.05 Twrm Twrm
+107 1 1
+0.04 64 0.3 64
+106 256 256
+0.03 1024 1024
+0.02 Twr 1m 105 0.2
+64
+0.01 256 104
+1024 0.1
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+(a) (b) (c)
+Twrm Twrm Twrm
+1.5 1 107 1 60 1
+64 64 64
+1.0 2 15 06 24 106 2 15 06 24 40 2 15 06 24
+105
+0.5 20
+104
+0.0
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+(d) (e) (f)
+Figure 13: Training loss and sharpness trajectories of FCN-4-512 in (top) µP and (bottom) SP
+trainedonCIFAR-10withMSElossusingAdamwithlearningrateη =0.001,batchsizeB =512,
+β =0.9andβ =0.999.Thedashedlinesinthesharpnessfiguresillustratetheinstabilitythresholds
+1 2
+(2+2β1)/ηt(1−β1).
+30
+2.0 Twr 1m 107 Twr 1m Twr 1m
+1.5 6 24 56 106 6 24 56 20 6 24 56
+1024 1024 1024 1.0 105
+10
+104
+0.5
+103
+0.0 0
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+(a) (b) (c)
+2.5 Twr 1m 107 Twr 1m 150 Twr 1m
+2.0 64 64 64
+256 106 256 100 256
+1.5 1024 1024 1024
+105
+1.0
+104 50
+0.5
+103
+0.0 0
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+(d) (e) (f)
+Figure14: TraininglossandsharpnesstrajectoriesofFCNsin(top)µPand(bottom)SPtrainedon
+CIFAR-10withcross-entropylossusingfull-batchAdamwithlearningrateη = 0.001,β = 0.9
+1
+and β = 0.999. The dashed lines in the sharpness figures illustrate the instability thresholds
+2
+(2+2β1)/ηt(1−β1).
+Notably, we observed a significant sharpness spike on the first training step when using longer
+warmupdurations,whichautomaticallyresolvesinthesubsequentstep. Themagnitudeofthisspike
+increaseswithlongerwarmupperiods. Furtheranalysisrevealedthatthisphenomenonisassociated
+withaninitialincreaseinthefirstLayerNormparameters,whichalsoresolvesautomaticallybythe
+secondstep. Beyondthisobservation,thetrainingtrajectoriesalignwiththewarmupmechanisms
+describedinthemaintext.
+24
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+H1−P
+tλ
+H1−P
+tλ
+H1−P tλ
+H1−P
+tλ
+H tλ
+H tλ
+H tλ
+H tλ0.05 Twr 1m 103 Twr 1m
+64 64
+256 256
+0.04 1024 102 1024
+101
+0.03
+100
+100 101 102 103 100 101 102 103
+step step
+(a) (b)
+103 Twr 1m 105 Twr 1m
+102
+6 24
+56
+104 6 24
+56
+1024 1024 101 103
+100 102
+10−1
+101
+100 101 102 103 100 101 102 103
+step step
+(c) (d)
+Figure 15: WRN-16-1 trained on CIFAR-10 with MSE loss using vanilla SGD with batch size
+B =512: (top)µPwithη
+trgt
+=1/λH
+0
+and(bottom)SPwithη
+trgt
+=32/λH
+0
+.
+2.3
+103
+Twrm
+1
+2.2 64
+256
+102 1024
+2.1
+Twrm
+2.0 1 101
+64
+256
+1.9 1024 100
+100 101 102 103 100 101 102 103
+step step
+(a) (b)
+5 Twr 1m Twrm
+1
+64 106 64 4 256 256
+1024 1024
+104
+3
+102
+2
+100 101 102 103 100 101 102 103
+step step
+(c) (d)
+Figure16: WRN-16-1trainedonCIFAR-10withcross-entropylossusingvanillaSGDwithbatch
+sizeB =512: (top)µPwithη
+trgt
+=1/λH
+0
+and(bottom)SPwithη
+trgt
+=32/λH
+0
+.
+Figure17illustratesthewarmupmechanismsofPre-LNTransformerstrainedontheWikiText-2with
+SGD.ThePre-LNTransformer(toprow)startsinaflatlandscaperegion(λH 5)andexperiences
+0 ∼
+progressivesharpeningrightfrominitialization. Incontrast,whenthelastLayerNorm(justbeforethe
+finallinearlayer)isremoved(bottomrow),themodelstartstraininginasignificantlysharperregion,
+with the initialsharpness 100 times larger than the standardPre-LN Transformer. This modified
+Pre-LNTransformerexperiencesareductioninsharpnessduringtheearlystagesoftraining.
+Figure18presentsthewarmupmechanismsofPre-LNTransformerstrainedonWikiText-2usingthe
+Adamoptimizer. Consistentwiththeresultsinthemaintext,thepre-conditionedsharpnessexhibitsa
+reductionearlyintraining,despitethemodelinitializinginaveryflatregion.
+25
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+H tλ
+H tλ
+H tλ
+H tλ103
+30 Twrm Twrm
+1 1
+25 6 24 56 102 6 24 56
+20 1024 1024
+15 101
+10
+5
+100
+100 101 102 103 100 101 102 103
+step step
+(a) (b)
+103
+16
+Twrm
+1
+14 64
+256
+12 1024
+10
+Twrm
+1
+102 64
+8
+256
+1024
+6
+100 101 102 103 100 101 102 103
+step step
+(c) (d)
+Figure17: LM-4-128trainedontheWikiText-2datasetwithcross-entropylossusingSGDwitha
+batchsizeB =512andacontextlengthT =64. Thetoprowshowsthewarmupmechanisms
+cntx
+ofaPre-LNTransformerwithη
+trgt
+=5.65/λH
+0
+,whilethebottomrowshowstheresultsforthesame
+Pre-LNTransformerbutwiththelastLayerNormremovedandalearningrateofη
+trgt
+=8/λH
+0
+.
+9
+8 Twr 6 2m 4 56 106 Twr 6 2m 4 56 15 Twr 6 2m 4 56
+7 1024 1024 10 1024
+6 105
+5 5
+104
+4
+100 101 102 103 100 101 102 103 0 100 101 102 103
+step step step
+(a) (b) (c)
+Figure18: Pre-LNLM-4-128trainedontheWikiText-2datasetwithcross-entropylossusingAdam
+withatargetlearningrateη =0.003,abatchsizeB =512andacontextlengthT =64.
+trgt cntx
+TheseexperimentsdemonstratethatTransformerstrainedonlanguagemodelingtasksexhibitwarmup
+mechanismsconsistentwiththosediscussedinthemaintext.
+F AdditionalPhaseDiagrams
+ThissectionpresentsfurtherresultsrelatedtothephasediagramsofwarmupshowninSection5.
+F.1 PhaseDiagramsfordifferentModelsandDatasets
+Figure19showsthetestaccuracyheatmapsofWRN-16-4trainedonCIFAR-100andTiny-ImageNet.
+These models are trained using cross-entropy loss using SGD with a batch size of B = 128.
+AdditionalphasediagramsforAdamarepresentedinAppendixF.3.
+Figure20(a)showsthetestlossheatmapsofPre-LNTransformertrainedontheWikiText-2dataset
+usingSGDwithabatchsizeB =64. Figure20(b)showsthePre-LNTransformerunderthesame
+setupexceptforthelastlayerLayerNormremoved. ThestandardPre-LNTransformerstartsoffwith
+asmallsharpness,whiletheversionwithoutthelastLNstartsoffwith100timeshighercurvature
+andrequireswarmuptoachievegoodperformance.
+26
+ssolgniniarT
+ssolgniniarT
+ssolgniniarT
+H1−P
+tλ
+H tλ
+H tλ
+H tλWRN-16-4SPXENTSGDTINY-IMAGENET
+WRN-16-4SPXENTSGDCIFAR-100
+4096 49.50 55.00 60.91 65.10 66.97 68.18 68.47 68.53 69.25 68.22 67.35 4096 30.28 35.95 41.34 45.42 48.46 50.06 50.87 50.51 50.73 49.34 50
+2048 49.35 54.89 61.19 65.04 67.24 68.13 68.26 68.86 68.38 67.93 67.5 2048 30.46 36.21 41.57 45.41 47.92 49.77 50.69 50.45 50.20
+10 52 14 2 44 99 .. 76 36 55 55 .. 31 72 66 11 .. 34 41 66 55 .. 04 33 66 77 .. 73 75 66 88 .. 03 38 66 88 .. 37 35 66 88 .. 17 46 66 88 .. 26 37 66 78 .. 91 50 1.13 65.0 10 52 14 2 33 00 .. 56 70 33 66 .. 33 40 44 11 .. 54 54 44 55 .. 17 94 44 87 .. 15 51 45 90 .. 81 81 55 00 .. 24 93 55 00 .. 71 97 45 90 .. 86 30 43.48 45
+256 49.95 55.34 61.75 65.92 68.27 68.29 67.81 68.17 68.51 62.5 256 30.34 36.78 41.40 45.64 47.90 50.19 50.73 49.96 49.98 0.56
+128 50.05 55.75 60.77 66.15 67.85 68.32 69.10 68.19 68.40 128 30.79 36.50 41.25 44.82 47.98 49.85 50.59 50.28 50.90 40 64 49.79 55.95 61.11 65.13 67.41 67.76 67.96 68.42 68.30 60.0 64 30.80 36.52 41.45 44.80 47.35 49.87 49.84 49.90 50.50
+32 50.17 55.63 61.54 66.12 66.82 68.25 68.15 68.36 69.33 1.13 32 30.72 36.89 41.63 44.93 47.70 49.65 50.24 50.95 51.34 0.56
+16 50.00 55.41 61.92 65.58 67.45 67.94 67.98 69.15 67.70 1.13 57.5 16 30.73 36.52 41.55 45.30 48.19 49.17 50.05 51.70 0.56 35
+8 50.02 55.65 61.27 64.99 67.23 68.53 68.22 67.78 65.42 55.0 8 30.65 36.48 40.94 45.07 47.54 50.11 49.33 50.08 0.56
+4 49.92 55.43 61.28 65.55 66.71 67.71 67.82 68.33 4 30.74 36.55 41.24 44.74 47.79 48.96 51.09 30.10 30
+2 49.84 55.69 61.39 65.34 66.63 67.75 68.10 68.21 52.5 2 30.61 36.53 40.75 44.90 47.08 50.04 50.95 49.37
+1 3.4 69 e. -7 01 3 7.5 15 e. -6 01 3 1.6 41 e. -4 07 2 2.6 94 e. -8 06 2 5.6 76 e. -5 05 2 1.6 17 e. -8 05 1 2.6 38 e. -3 00 1 4.6 67 e. -4 01 1 9.1e-01 1.8e+00 3.7e+00 50.0 1 5.3 20 e. -8 01 3 1.3 16 e. -3 04 2 2.4 10 e. -9 08 2 4.4 24 e. -7 02 2 8.4 47 e. -9 06 2 1.4 79 e. -4 08 1 3.5 30 e. -3 02 1 6.0 7. e5 -6 01 1.3e+00 2.7e+00 25
+ηtrgt ηtrgt
+(a) (b)
+Figure19: TestaccuracyheatmapsofWideResNets(WRNs)inSPtrainedon(a)CIFAR-100and(b)
+TinyImageNetwithcross-entropylossusingSGDwithbatchsizeB =128.
+4096 4.72 LM 4.5- 54-12 48 .43XEN 4.3T 3 SG 4D .26WIK 4.1I 9TEXT-2 6.00 4096 6.01 5.9L 0M 5.- 814- 51 .72 28 5.X 65E 5N .57T 5S .48GD 5.37W 5.I 2K 1I 5T .00EX 4.7T 9-2 4.65 4.55 6.0
+2048 4.64 4.49 4.39 4.29 4.21 4.16 4.11 4.08 5.75 2048 5.97 5.86 5.77 5.69 5.62 5.54 5.44 5.31 5.13 4.90 4.73 4.60 4.51 5.8
+1024 4.61 4.47 4.36 4.27 4.20 4.14 4.11 4.07 5.50 1024 5.95 5.85 5.76 5.68 5.60 5.52 5.42 5.28 5.08 4.86 4.70 4.58 5.6
+25 51 62 44 .. 56 90 44 .. 44 56 44 .. 33 55 44 .. 22 66 44 .. 22 00 44 .. 11 35 44 .. 11 00 44 .. 00 88 5.25 25 51 62 55 .. 99 44 55 .. 88 44 55 .. 77 55 55 .. 66 77 55 .. 56 90 55 .. 55 12 55 .. 44 01 55 .. 22 56 55 .. 00 56 44 .. 88 34 44 .. 66 78 44 .. 55 67 5.4
+128 4.59 4.45 4.35 4.27 4.19 4.14 4.10 5.00 128 5.94 5.83 5.75 5.67 5.59 5.51 5.40 5.25 5.03 4.82 4.66 5.2
+64 4.58 4.45 4.35 4.26 4.19 4.13 4.09 4.75 64 5.93 5.83 5.75 5.67 5.59 5.51 5.40 5.24 5.01 4.80 5.0
+16 4.58 4.45 4.35 4.27 4.20 4.14 4.50 16 5.93 5.83 5.74 5.67 5.59 5.51 5.39 5.23 5.00
+4.8
+4 4.58 4.45 4.35 4.31 4.96 4 5.93 5.83 5.74 5.67 5.59 5.51 5.39 5.23
+4.25
+1 4.58 4.45 4.35 4.27 1 5.93 5.83 5.74 5.67 5.59 5.51 5.39 5.23 4.6
+2.4e-01 3.4e-01 4.9e-01 6.9e-01 9.7e-01 1.4e+00 1.9e+00 2.7e+00 3.8e-03 5.4e-03 7.6e-03 1.1e-02 1.5e-02 2.2e-02 3.0e-02 4.3e-02 6.1e-02 8.6e-02 1.2e-01 1.7e-01 2.4e-01
+ηtrgt ηtrgt
+(a) (b)
+Figure20: TestlossheatmapsofLM-4-128inSPtrainedonWikiText-2withcross-entropyloss
+usingSGDwithabatchsizeB =64: (a)Pre-LNTransformerand(b)Pre-LNTransformerwithout
+thelastLayerNorm.
+F.2 TheEffectofMomentumandLearningRateDecay
+Figure21showsthatincorporatingmomentumandcosinedecay(fordetails,seeAppendixD.3.3)
+minimallyaffectsthewarmupphasediagrams. Whiletheconclusionsregardingwarmuppresentedin
+themaintextremainunaffected,wenoteafewinterestingobservations.
+First,thedivergentboundaryshiftsleftwardonincorporatingmomentum,indicatingthatmomentum
+permitssmallertargetlearningrateswithoutwarmup,andwarmuphelpsSGD-Mmore. Meanwhile,
+cosinedecayhasaminimaleffectonthedivergentboundary.
+Additionally,weobserveaperformanceenhancementbyincorporatingmomentum,especiallyat
+smalllearningrates. Incontrast,adecayinglearningratebeyondwarmupdegradesperformance
+atsmalllearningrateswhileimprovingathigherones. Finally,incorporatingbothmomentumand
+cosinedecayleadstofurtherenhancement,indicatingasynergisticinteractionbetweenthetwo.
+F.3 PhaseDiagramsofAdamandGI-Adam
+Figures23to25comparethewarmupphasediagramsofAdamandGI-AdamofWRNstrainedon
+CIFAR-100,Tiny-ImageNetandofTransformerstrainedonWikiText-2dataset. Similartotheresults
+showninthemaintext,GI-AdamenhancesperformanceoverstandardAdambypushingthefailure
+boundary.
+27
+mrwT
+mrwT
+mrwT
+mrwTWRN-16-4SPXENTSGDCIFAR-10 WRN-16-4SPXENTSGD-MCIFAR-10
+4096 75.65 82.15 85.76 88.34 89.90 91.25 92.25 92.58 92.96 92.89 4096 89.71 91.27 92.40 92.79 93.35 93.51 93.69 93.58 93.36 92.37 89.72
+2048 76.23 82.29 85.74 88.40 90.33 91.22 92.41 92.59 92.76 93.16 93.08 90 2048 89.52 91.16 92.43 92.89 93.18 93.57 93.76 93.67 93.52 91.59 90
+1024 76.01 82.11 85.68 88.55 90.21 91.34 92.17 92.60 92.64 93.13 85 1024 89.80 91.18 92.02 92.66 93.37 93.44 93.60 93.64 93.29 90.40 10.30 85
+512 76.18 82.27 85.42 88.13 90.08 91.45 91.87 92.30 93.17 512 89.76 91.01 92.08 92.89 93.02 93.66 93.80 93.48 92.98 21.15 10.30
+256 76.59 82.02 85.45 88.30 90.45 91.29 92.05 92.34 92.68 10.30 80 256 90.07 91.20 92.12 92.55 93.20 93.42 93.40 93.41 26.94 10.37 80
+128 76.43 82.05 85.95 88.59 90.05 91.05 92.24 92.48 92.42 20.60 75 128 89.73 90.88 92.15 92.70 93.25 93.61 93.60 93.70 10.37 75
+64 76.32 81.92 86.10 88.25 90.27 91.00 91.83 92.58 93.10 92.47 64 89.62 91.03 92.07 92.79 93.43 93.93 93.49 10.30
+32 76.32 81.80 85.86 88.17 89.91 91.47 91.76 92.21 83.34 70 32 89.62 90.92 92.13 92.91 93.47 93.13 10.37 70
+16 76.43 82.01 85.87 87.95 90.20 90.98 92.00 92.41 91.84 65 16 90.02 91.14 92.24 92.77 93.07 92.85 65
+8 76.46 81.76 86.01 88.45 90.02 91.45 91.76 8 89.73 90.98 91.77 92.62 92.70 92.89 89.29
+60 60
+4 76.70 81.78 85.61 88.24 89.72 91.10 91.60 92.15 10.37 4 89.52 91.04 92.02 93.01 92.97 92.64 10.37
+2 76.67 81.95 85.88 88.58 90.21 90.97 91.86 91.93 55 2 89.65 91.18 92.08 92.64 92.73 92.39 10.37 55
+1 76.69 81.63 85.28 88.66 89.75 91.21 91.67 91.95 1 89.52 91.12 92.03 92.47 92.79 92.51 10.37
+50 50
+1.8e-03 3.7e-03 7.3e-03 1.5e-02 2.9e-02 5.9e-02 1.2e-01 2.3e-01 4.7e-01 9.4e-01 1.9e+00 1.8e-03 3.7e-03 7.3e-03 1.5e-02 2.9e-02 5.9e-02 1.2e-01 2.3e-01 4.7e-01 9.4e-01 1.9e+00
+ηtrgt ηtrgt
+(a) (b)
+WRN-16-4SPXENTSGDCIFAR-10 WRN-16-4SPXENTSGD-MCIFAR-10
+4096 70.89 77.19 82.87 86.68 88.85 90.53 92.01 92.55 93.05 93.11 4096 87.84 90.15 92.02 92.90 93.44 93.64 94.11 93.84 94.15 93.27 90.87
+2048 71.04 77.63 83.00 86.46 89.11 90.40 91.91 92.43 93.07 92.97 93.29 90 2048 88.04 90.56 91.90 92.82 93.00 93.90 93.78 94.03 93.61 92.53 90
+1024 71.10 77.36 82.63 86.52 89.00 90.57 91.69 92.43 92.98 93.37 85 1024 88.09 90.35 91.71 92.42 93.72 93.79 93.95 93.90 93.46 91.55 10.30 85
+512 70.84 77.08 82.88 86.32 88.89 90.76 91.81 92.20 92.85 512 88.21 90.07 91.45 92.70 93.34 93.66 93.81 93.87 93.43 21.15 10.30
+256 70.86 76.98 82.46 86.44 89.07 90.31 91.64 92.40 93.04 80 256 88.33 90.40 91.77 92.68 93.14 93.65 93.99 93.83 80
+128 70.96 76.90 82.50 86.64 88.87 90.60 91.54 92.44 92.50 92.95 10.30 75 128 88.48 90.08 91.28 92.57 93.29 93.89 93.94 93.73 10.37 75
+64 70.91 76.93 82.32 86.67 88.96 90.42 91.41 92.15 92.89 10.30 64 88.26 90.20 91.58 92.82 92.97 93.84 93.57 10.30
+32 71.02 76.98 82.66 86.52 89.17 90.57 91.90 92.35 91.11 70 32 88.29 90.13 91.57 92.44 93.18 93.25 10.37 70
+16 70.99 77.08 82.59 86.42 88.75 90.59 91.49 92.47 91.79 65 16 88.58 90.69 91.64 92.54 92.93 92.66 65
+8 71.14 77.20 82.47 86.38 88.91 90.60 91.31 8 88.18 89.90 91.64 92.63 92.63 92.57 88.44 10.30
+60 60
+4 70.97 77.23 82.51 86.66 88.80 89.99 91.21 91.81 91.98 4 88.23 89.95 91.28 92.20 92.91 93.06 10.37
+2 71.03 77.07 82.80 86.74 89.22 90.38 91.37 91.50 55 2 87.94 90.06 91.66 92.52 92.55 92.74 10.37 55
+1 71.06 77.31 82.40 86.60 88.93 90.44 91.19 91.52 1 88.38 90.51 91.48 92.41 92.56 92.76 10.37
+50 50
+1.8e-03 3.7e-03 7.3e-03 1.5e-02 2.9e-02 5.9e-02 1.2e-01 2.3e-01 4.7e-01 9.4e-01 1.9e+00 1.8e-03 3.7e-03 7.3e-03 1.5e-02 2.9e-02 5.9e-02 1.2e-01 2.3e-01 4.7e-01 9.4e-01 1.9e+00
+ηtrgt ηtrgt
+(c) (d)
+Figure21: TestaccuracyheatmapsofWideResNets(WRNs)inSPtrainedonCIFAR-10withcross-
+entropylossusingSGDwithbatchsizeB =128: (toprow)nocosinedecay(a)nomomentum,(b)
+momentumwithβ =0.9,and(bottomrow)withcosinedecay(c)nomomentum,and(d)momentum
+withβ =0.9.Thesettingof(a)isthesameasinFigure3(c)butwithadifferentmini-batchsequence.
+WRN-16-4SPXENTAdamCIFAR-10 WRN-16-4SPXENTGI-AdamCIFAR-10
+4096 90.01 92.24 93.74 93.94 94.41 94.70 94.37 94.20 93.30 91.92 88.92 50.30 4096 89.91 92.57 93.57 94.41 94.57 94.63 94.39 94.26 93.32 91.90 89.10 70.77
+2048 89.79 92.27 93.66 94.22 94.43 94.50 94.90 94.09 92.85 90.91 87.66 40.88 90 2048 90.18 92.49 93.66 94.09 94.95 94.49 94.47 94.01 93.14 91.36 88.73 51.38 90
+1024 89.95 92.53 93.51 94.10 94.32 94.73 94.22 93.57 92.64 90.74 84.43 55.67 85 1024 90.16 92.43 93.43 94.32 94.32 94.56 94.37 93.90 93.03 91.46 88.39 47.30 85
+512 89.95 92.39 93.72 94.07 94.62 94.48 94.29 93.67 92.52 89.82 83.35 26.59 512 89.87 92.39 93.35 94.31 94.53 94.46 94.55 94.01 92.77 90.95 88.09 42.54
+256 89.84 92.37 93.59 93.93 94.26 94.47 94.20 93.53 91.88 89.13 78.53 10.30 80 256 89.92 92.46 93.62 93.97 94.26 94.64 94.24 93.62 92.79 90.75 87.35 56.95 80
+128 89.82 92.31 93.72 93.86 94.40 94.48 94.23 93.42 91.64 87.81 37.11 75 128 90.01 92.58 93.60 94.29 94.36 94.36 94.17 93.64 92.56 90.24 87.73 36.99 75
+64 90.12 92.06 93.66 93.88 94.19 94.41 94.46 93.18 90.79 88.59 10.24 64 89.75 92.25 93.49 94.01 94.33 94.43 94.16 93.81 92.29 90.64 87.39 51.49
+32 89.79 92.29 93.35 93.99 94.21 94.51 93.72 92.43 90.85 10.37 70 32 89.89 92.53 93.63 94.08 94.26 94.33 94.20 94.09 92.48 90.11 87.21 31.29 70
+16 89.77 92.22 93.62 94.06 94.10 94.37 93.50 92.59 89.36 10.37 65 16 90.03 92.35 93.41 93.95 94.57 94.55 94.13 93.73 92.24 89.99 86.99 10.30 65
+8 89.92 92.24 93.52 93.95 93.88 94.16 93.94 91.18 87.73 10.37 8 90.24 92.60 93.56 94.11 94.38 94.39 94.00 93.36 92.10 89.96 10.24
+4 90.06 92.37 93.59 93.82 94.18 94.05 93.49 91.83 10.37 60 4 89.90 92.41 93.64 93.96 94.26 94.56 94.57 93.46 91.96 90.24 10.24 60
+2 89.85 92.32 93.34 93.87 94.05 94.17 93.19 91.78 10.37 55 2 89.96 92.46 93.67 94.07 94.22 94.53 94.30 93.64 92.30 90.38 10.24 55
+1 90.03 92.41 93.37 93.71 94.07 93.93 93.38 91.76 10.37 1 89.99 92.50 93.57 94.37 94.36 94.49 94.08 93.28 91.83 89.82 10.24
+50 50
+8.0e-05 1.6e-04 3.2e-04 6.4e-04 1.3e-03 2.6e-03 5.1e-03 1.0e-02 2.0e-02 4.1e-02 8.2e-02 1.6e-01 8.0e-05 1.6e-04 3.2e-04 6.4e-04 1.3e-03 2.6e-03 5.1e-03 1.0e-02 2.0e-02 4.1e-02 8.2e-02 1.6e-01
+ηtrgt ηtrgt
+(a) (b)
+Figure22: TestaccuracyheatmapsofWRN-16-4trainedonCIFAR-100withcross-entropyloss
+using(left)standardAdam,and(right)GI-AdamwithbatchsizeB =128.
+G Non-divergenceofAdam
+Figure 26 shows that, despite experiencing catastrophic instabilities during early training, Adam
+doesnotdivergewellbeyondthetrainingfailureboundary. WhileAdamcanrecoverfromthese
+28
+mrwT
+mrwT
+mrwT
+mrwT
+mrwT
+mrwTWRN-16-4SPXENTAdamCIFAR-100 WRN-16-4SPXENTGI-AdamCIFAR-100
+409662.2968.8971.4372.3373.2972.7172.9870.9368.5565.1558.9811.695.02 1.13 409662.3468.6871.8872.8572.7272.7772.4270.8969.0666.0660.4114.679.52 4.22
+204862.4268.4371.2272.1972.3272.4071.8569.5167.2663.2139.876.90 2.62 1.13 70 204862.4868.8771.6972.1071.9273.1271.8970.5067.6664.5257.908.38 5.48 3.23 70
+102462.4368.6670.9572.2372.0272.3771.1368.0164.9956.3723.571.13 1.13 1.13 102462.3668.6370.8972.0473.0572.1771.6870.4167.0263.7254.914.49 2.28 1.13
+51262.3868.5371.2871.7371.7871.3770.8267.6863.8437.852.68 51262.5168.5071.0571.6172.6772.2271.6069.0867.0462.2045.883.31 1.13
+25662.0668.9871.1871.7971.7471.9070.0068.0749.3740.521.13 65 25662.3068.3470.9571.9771.9972.4371.3169.3967.0061.5827.381.13 65
+12862.3668.1771.5071.3072.5371.1369.8464.0852.061.13 12862.0468.8071.1772.0772.0671.8371.3869.0266.7259.143.90
+6462.7468.6770.8671.0671.9770.5169.8164.9245.541.13 6462.2768.6970.9771.8471.8771.8871.3969.5264.5341.131.95
+3262.8868.7771.0570.9571.4471.2368.8260.8159.401.13 60 3262.1668.7671.0871.9272.2772.5171.2767.8863.2244.181.13 60
+1662.3068.6370.3671.2971.6571.0068.8465.761.13 1662.3368.6571.1471.9372.4672.7070.6767.7862.6030.771.13
+862.9068.9670.9971.7471.3070.8767.331.13 862.1068.5871.1971.9872.1771.8170.0168.3064.721.13
+462.7368.7070.6771.1271.2170.9167.031.13 55 461.7168.7570.9071.8872.5472.3070.4868.5259.901.13 55
+262.9168.5170.7871.1371.4970.661.13 261.8168.4071.4971.8372.6072.0169.8567.061.13
+162.6068.4571.4770.9171.9270.031.13 161.7968.7470.6272.2672.0371.9771.3367.201.13
+50 50
+8.0e-0 15 .6e-0 34 .2e-0 64 .4e-0 14 .3e-0 23 .6e-0 53 .1e-0 13 .0e-0 22 .0e-0 42 .1e-0 82 .2e-0 12 .6e-0 31 .3e-0 61 .6e-01 8.0e-0 15 .6e-0 34 .2e-0 64 .4e-0 14 .3e-0 23 .6e-0 53 .1e-0 13 .0e-0 22 .0e-0 42 .1e-0 82 .2e-0 12 .6e-0 31 .3e-0 61 .6e-01
+ηtrgt ηtrgt
+(a) (b)
+Figure23: TestaccuracyheatmapsofWRN-16-4trainedonCIFAR-100withcross-entropyloss
+using(left)standardAdam,and(right)GI-AdamwithbatchsizeB =128.
+WRN-16-4SPXENTAdamTINY-IMAGENET WRN-16-4SPXENTGI-AdamTINY-IMAGENET
+4096 39.53 46.64 51.83 53.99 54.91 55.10 53.92 53.32 50.12 44.12 20.91 2.54 55 4096 39.80 46.65 51.92 53.87 55.49 55.73 54.70 53.66 49.67 44.49 34.83 2.88 55
+2048 39.67 46.54 51.22 53.85 54.74 54.22 54.32 51.82 48.17 37.95 2.00 2048 39.72 46.49 51.16 53.73 55.24 54.50 54.11 52.33 49.25 42.30 14.32 2.00
+1024 39.54 46.86 51.33 53.41 54.25 55.18 53.58 50.84 44.55 23.65 1.39 50 1024 39.60 46.48 51.17 53.82 54.55 54.72 54.20 51.85 47.06 36.58 4.70 50
+512 39.90 46.46 50.62 53.21 54.75 53.92 52.82 49.77 39.35 21.89 0.56 512 39.67 46.62 51.64 53.22 55.01 54.66 53.88 51.30 47.09 29.23 1.07
+256 39.81 46.88 51.16 53.21 54.35 54.53 53.29 49.80 24.68 10.30 0.56 45 256 39.45 46.12 51.37 53.87 54.35 54.44 53.34 51.67 43.67 30.97 2.06 45
+128 39.87 46.60 51.57 53.68 53.96 53.60 52.05 47.74 28.67 0.56 128 39.35 46.21 51.16 53.62 54.54 55.12 54.23 47.71 45.24 0.56
+64 39.70 46.45 50.65 52.57 54.00 54.60 52.84 46.79 0.56 40 64 39.73 46.40 51.01 54.11 54.96 54.85 53.36 49.50 34.31 0.56 40
+32 39.53 47.03 50.79 53.10 54.17 53.40 0.56 32 39.73 46.27 51.17 53.39 55.15 54.85 53.42 49.82 0.56
+16 40.15 46.91 51.38 52.90 54.45 53.66 0.56 35 16 39.69 46.18 51.25 53.70 54.73 54.40 52.58 47.57 0.56 35
+8 40.38 46.95 50.51 53.13 53.02 52.86 0.56 8 39.52 46.32 51.46 53.33 54.31 54.89 54.14 49.81 0.56
+4 40.11 46.59 51.07 53.08 54.30 52.89 0.56 30 4 39.75 46.35 51.07 53.25 54.31 54.60 52.99 0.56 30
+2 40.19 46.81 50.99 52.91 54.08 52.38 0.56 2 39.70 46.10 51.36 54.20 54.43 53.99 53.49 0.56
+1 40.10 46.79 51.35 52.98 53.74 0.63 1 39.77 46.14 51.06 53.33 54.62 55.33 52.83 0.56
+25 25
+8.0e-05 1.6e-04 3.2e-04 6.4e-04 1.3e-03 2.6e-03 5.1e-03 1.0e-02 2.0e-02 4.1e-02 8.2e-02 1.6e-01 8.0e-05 1.6e-04 3.2e-04 6.4e-04 1.3e-03 2.6e-03 5.1e-03 1.0e-02 2.0e-02 4.1e-02 8.2e-02 1.6e-01
+ηtrgt ηtrgt
+(a) (b)
+Figure24: TestaccuracyheatmapsofWRN-16-4trainedonTiny-ImageNetwithcross-entropyloss
+using(left)standardAdam,and(right)GI-AdamwithbatchsizeB =128.
+LM-4-128XENTAdamWikiText-2 LM-4-128XENTGI-AdamWikiText-2
+4096
+4.57 4.33 4.15 4.02 3.96 3.90 3.86 3.83 3.83 3.88 4.14 4.46 4.50 5.79
+6.00 4096
+4.59 4.35 4.16 4.03 3.96 3.90 3.86 3.83 3.84 3.89 4.12 4.27 4.48 4.53
+6.00
+2048
+4.52 4.29 4.11 4.00 3.94 3.89 3.84 3.83 3.82 4.07 4.46 4.50 5.79 5.98
+5.75 2048
+4.55 4.31 4.14 4.02 3.95 3.89 3.85 3.83 3.84 3.98 4.27 4.48 4.53 6.11
+5.75
+1024 4.50 4.28 4.10 3.99 3.93 3.88 3.84 3.83 3.83 4.38 4.50 5.70 5.91 6.08 5.50 1024 4.53 4.30 4.13 4.01 3.94 3.88 3.85 3.83 3.84 4.03 4.48 4.53 5.86 6.30 5.50
+512 4.49 4.27 4.10 3.99 3.93 3.88 3.84 3.83 3.84 4.46 4.59 5.77 6.06 6.06 5.25 512 4.52 4.30 4.13 4.00 3.94 3.88 3.84 3.83 3.85 4.13 4.48 5.69 5.80 6.02 5.25
+256
+4.48 4.26 4.09 3.99 3.93 3.87 3.85 3.84 4.12 4.47 5.68 5.87 6.02 6.17 5.00
+256
+4.52 4.30 4.13 4.01 3.94 3.88 3.84 3.83 3.85 4.14 4.47 4.57 5.79 6.00 5.00
+128
+4.48 4.26 4.09 3.99 3.93 3.87 3.85 3.84 4.22 5.06 5.78 5.71 5.94 6.14 4.75
+128
+4.52 4.30 4.12 4.01 3.94 3.88 3.85 3.84 3.85 4.16 4.48 5.66 5.74 6.20 4.75
+64 4.48 4.26 4.08 3.99 3.93 3.88 3.85 3.85 4.36 5.56 5.81 5.81 5.90 6.19 64 4.52 4.30 4.12 4.01 3.94 3.88 3.85 3.84 3.85 4.21 4.52 5.70 5.75 6.05
+4.50 4.50
+16 4.47 4.25 4.08 3.99 3.93 3.88 3.85 3.85 4.61 5.57 5.76 5.86 5.94 6.09 16 4.52 4.29 4.12 4.01 3.93 3.88 3.85 3.85 3.86 4.26 5.64 5.71 5.86 6.12
+4.25 4.25
+4 4.47 4.25 4.08 3.99 3.93 3.88 3.85 4.46 5.36 5.74 5.77 5.75 5.84 6.15 4 4.52 4.29 4.12 4.01 3.94 3.88 3.85 3.84 3.86 4.26 4.63 5.74 5.88 6.09
+1 4.47 4.25 4.08 3.99 3.93 3.88 3.84 4.48 5.44 5.72 5.83 5.94 5.89 6.25 4.00 1 4.52 4.29 4.12 4.01 3.94 3.88 3.86 3.84 3.85 4.25 4.69 5.71 5.96 6.00 4.00
+1.0e-0 24 .0e-0 44 .0e-0 84 .0e-0 14 .6e-0 33 .2e-0 63 .4e-0 13 .3e-0 22 .6e-0 52 .1e-0 12 .0e-0 21 .0e-0 41 .1e-0 81 .2e-01 1.0e-0 24 .0e-0 44 .0e-0 84 .0e-0 14 .6e-0 33 .2e-0 63 .4e-0 13 .3e-0 22 .6e-0 52 .1e-0 12 .0e-0 21 .0e-0 41 .1e-0 81 .2e-01
+ηtrgt ηtrgt
+(a) (b)
+Figure25: TestlossheatmapsofLM-4-128inSPtrainedonWikiText-2withcross-entropyloss
+using(a)standardAdam,and(right)GI-AdamwithbatchsizeB =64.
+instabilities,themodel’sperformanceisseverelyimpacted,resultingintrainingfailuresratherthan
+convergencetoareasonableminimum.
+29
+mrwT
+mrwT
+mrwT
+mrwT
+mrwT
+mrwT1015
+ηtrgt
+30
+80 ηtrgt
+30
+60 60 60
+1011 90 90
+120 120
+150 40 150
+107
+20
+103
+0
+100 101 102 103 104 100 101 102 103 104
+step step
+(a) (b)
+1013 ηtrgt ηtrgt
+30 1016 30
+60 60
+109 90 1011 90
+120 120
+105 150 106 150
+101 101
+100 101 102 103 104 100 101 102 103 104
+step step
+(c) (d)
+Figure 26: Training trajectories of WRNs trained on CIFAR-10 using Adam with cross-entropy
+lossandvaryinglearningrates. ThesetupisidenticaltotheT =1rowofFigure4,butwithout
+wrm
+employing cosine learning rate decay. The first training failure is observed at a learning rate of
+η =0.02048. Toinvestigatethebehaviorbeyondthetrainingfailureboundary,learningratesare
+trgt
+sampledfromη =0.01024(justbelowthefailureboundary)uptoη 150.
+trgt trgt
+≈
+Theselargelosscatapultscausethegradientsgtospikeduringearlytraining,leadingtoasubstantial
+increaseinitssecondmomentv. Whilethegradientsreturntoalowervalueafterafewtraining
+steps,thesecondmomentremainslargeinmagnitudeforaprolongedperiod. Theselargevaluesof
+vresultinasmalleffectivelearningrate,whichhinderstrainingtoescapethesehigh-lossregions.
+Consequently,themodelsremainstuckinasuboptimalstateratherthanconverging. Werefertothis
+asatrainingfailure.
+Uponcloserexaminationoftheindividuallayersduringtrainingfailures,wefoundthatcertainlayers
+orresidualblocksoutputzero. Thisresultsinvanishinggradientsexceptforthelastlayerbiasand
+traininghalts. WedeferthedetailedanalysisofAdam’sfailurestofuturework.
+Treach
+1.10
+Tsave
+4096 1 1 1 1 1 4096 4088.0 4088.0 4088.0 4088.0 4088.0 4000
+2048 1 1 1 1 1 2048 2040.5 2040.5 2040.5 2040.5 2040.5
+1024 1 1 1 1 1 1024 1017.0 1017.0 1017.0 1017.0 1017.0
+512 1 1 1 1 1 1.05 512 505.5 505.5 505.5 505.5 505.5 3000
+256 1 1 1 1 1 256 250.0 250.0 250.0 250.0 250.0
+128 1 1 1 1 1 128 122.5 122.5 122.5 122.5 122.5
+64 1 1 1 1 1 1.00 64 59.0 59.0 59.0 59.0 59.0 2000
+32 1 1 1 1 1 32 27.5 27.5 27.5 27.5 27.5
+16 1 1 1 1 1 16 12.0 12.0 12.0 12.0 12.0
+8 1 1 1 1 1 0.95 8 4.5 4.5 4.5 4.5 4.5 1000
+4 1 1 1 1 1 4 1.0 1.0 1.0 1.0 1.0
+2 1 1 1 1 1 2 -0.5 -0.5 -0.5 -0.5 -0.5
+1 1 1 1 1 1 1 0.0 0.0 0.0 0.0 0.0
+0.90 0
+3.9e-01 7.8e-01 1.6e+00 3.1e+00 6.2e+00 3.9e-01 7.8e-01 1.6e+00 3.1e+00 6.2e+00
+ηtrgt ηtrgt
+(a) (b)
+Figure27: Heatmapsillustratingthecomputationalsavingsinreachingη forWRN-16-4inµP
+trgt
+trainedonCIFAR-10,usingSGDandcross-entropyloss. ColoredcellsshowthewarmupstepsT
+reach
+(left)andthetotalstepssavedT (right),whiletheemptycellscorrespondtotrainingdivergence.
+save
+30
+mrwT
+ssolgniniarT
+ktg
+k
+ycaruccagniniarT
+ktv
+k
+mrwTH AdditionalresultsfortheInitialLearningRateSelection
+Thissectionprovidesadditionalresultsfortheinitiallearningrateselection. Figure27showsthe
+numberofstepsT requiredtoreachthetargetlearningrateandtheeffectivenumberofsteps
+reach
+savedT forWRNsinµP.Notethatinsuchcases,η η . WeobservethatT = 1fora
+save c max reach
+≈
+widerangeoflearningrates, savingalmosttheentirewarmupduration. Figures28and29show
+similarphasediagramsforWRNsinSPandµPtrainedwithAdam.
+Treach Tsave
+4096 1 1 512 2304 3200 3649 3872 3984 4040 4068 4082 4089 4000 40964087.54088.03337.51666.0830.5 413.0 204.5 100.0 48.5 23.0 10.5 4.0 4000
+2048 1 1 256 1152 1600 1825 1936 1992 2020 2034 2041 3500 20482040.02040.51666.0830.5 413.0 204.5 100.0 48.5 23.0 10.5 4.0 1.5 3500
+1024 1 1 128 576 800 913 968 996 1010 1017 1021 1023 10241016.51017.0830.5 413.0 204.5 100.0 48.5 23.0 10.5 4.0 1.5 0.0
+512 1 1 64 288 400 457 484 498 505 509 511 511 3000 512 505.0 505.5 413.0 204.5 100.0 48.5 23.0 10.5 4.0 1.5 0.0 0.5 3000
+256 1 1 32 144 200 229 242 249 253 255 255 255 256 249.5 250.0 204.5 100.0 48.5 23.0 10.5 4.0 1.5 0.0 0.5 0.5
+2500 2500
+128 1 1 16 72 100 115 121 125 127 127 127 127 128 122.0 122.5 100.0 48.5 23.0 10.5 4.0 1.5 0.0 0.5 0.5 0.5
+64 1 1 8 36 50 58 61 63 63 63 63 2000 64 58.5 59.0 48.5 23.0 10.5 4.0 1.5 0.0 0.5 0.5 0.5 2000
+32 1 1 4 18 25 29 31 31 31 31 31 32 27.0 27.5 23.0 10.5 4.0 1.5 0.0 0.5 0.5 0.5 0.5
+16 1 1 2 9 13 15 15 15 15 15 1500 16 11.5 12.0 10.5 4.0 1.5 0.0 0.5 0.5 0.5 0.5 1500
+8 1 1 1 5 7 7 7 7 7 7 1000 8 4.0 4.5 4.0 1.5 0.0 0.5 0.5 0.5 0.5 0.5 1000
+4 1 1 1 3 3 3 3 3 3 3 4 0.5 1.0 1.5 0.0 0.5 0.5 0.5 0.5 0.5 0.5
+2 1 1 1 1 1 1 1 1 1 500 2 -1.0 -0.5 0.0 0.5 0.5 0.5 0.5 0.5 0.5 500
+1 1 1 1 1 1 1 1 1 1 1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+0
+1.0e-04 2.0e-04 4.0e-04 8.0e-04 1.6e-03 3.2e-03 6.4e-03 1.3e-02 2.6e-02 5.1e-02 1.0e-01 2.0e-01 1.0e-04 2.0e-04 4.0e-04 8.0e-04 1.6e-03 3.2e-03 6.4e-03 1.3e-02 2.6e-02 5.1e-02 1.0e-01 2.0e-01
+ηtrgt ηtrgt
+(a) (b)
+Figure28: Heatmapsillustratingthecomputationalsavingsinreachingη forWRN-16-4inSP
+trgt
+trainedonCIFAR-10,usingAdamandcross-entropyloss.ColoredcellsshowthewarmupstepsT
+reach
+(left)andthetotalstepssavedT (right),whiletheemptycellscorrespondtotrainingdivergence.
+save
+Treach Tsave
+4096 1 1 1 1 1 1 1 1.100 4096 4087.5 4087.5 4087.5 4087.5 4087.5 4087.5 4088.0 4000
+2048 1 1 1 1 1 1 1 1.075 2048 2040.0 2040.0 2040.0 2040.0 2040.0 2040.0 2040.5 3500
+1024 1 1 1 1 1 1 1 1024 1016.5 1016.5 1016.5 1016.5 1016.5 1016.5 1017.0
+512 1 1 1 1 1 1 1 1.050 512 505.0 505.0 505.0 505.0 505.0 505.0 505.5 3000
+256 1 1 1 1 1 1 1 1.025 256 249.5 249.5 249.5 249.5 249.5 249.5 250.0 2500
+128 1 1 1 1 1 1 1 1 128 122.0 122.0 122.0 122.0 122.0 122.0 122.5 100.0
+64 1 1 1 1 1 1 1 1.000 64 58.5 58.5 58.5 58.5 58.5 58.5 59.0 2000
+32 1 1 1 1 1 1 1 32 27.0 27.0 27.0 27.0 27.0 27.0 27.5
+16 1 1 1 1 1 1 1 0.975 16 11.5 11.5 11.5 11.5 11.5 11.5 12.0 1500
+8 1 1 1 1 1 1 1 0.950 8 4.0 4.0 4.0 4.0 4.0 4.0 4.5 1000
+4 1 1 1 1 1 1 1 4 0.5 0.5 0.5 0.5 0.5 0.5 1.0
+2 1 1 1 1 1 1 1 1 0.925 2 -1.0 -1.0 -1.0 -1.0 -1.0 -1.0 -0.5 0.0 500
+1 1 1 1 1 1 1 1 1 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+0.900 0
+1.0e-04 2.0e-04 4.0e-04 8.0e-04 1.6e-03 3.2e-03 6.4e-03 1.3e-02 1.0e-04 2.0e-04 4.0e-04 8.0e-04 1.6e-03 3.2e-03 6.4e-03 1.3e-02
+ηtrgt ηtrgt
+(a) (b)
+Figure29: Heatmapsillustratingthecomputationalsavingsinreachingη forWRN-16-4inµP
+trgt
+trainedonCIFAR-10,usingAdamandcross-entropyloss.ColoredcellsshowthewarmupstepsT
+reach
+(left)andthetotalstepssavedT (right),whiletheemptycellscorrespondtotrainingdivergence.
+save
+I AdditionalResultsonGI-Adam
+ThissectionpresentsadditionalresultsforGI-Adam.Weprovidefurtherinsightsintothemechanisms
+andinterpretationsofGI-Adam.
+I.1 WarmupMechanismsofGI-Adam
+Figure 30 shows the training trajectories of FCNs with different parameterizations trained with
+GI-Adam. Notably,thepre-conditionedsharpnessstartsatsignificantlylowervaluesthanstandard
+Adam. Specifically,fortheµPmodel,theinitialpre-conditionedsharpnessλP−1H isaround2000
+31
+mrwT
+mrwT
+mrwT
+mrwT0.035 Twrm 107 Twrm 0.30
+0.030 1 64 106 1 64 0.25
+256 256
+(a) 0.025 1024 (b) 105 1024 (c) 0.20 0.15
+0.020 104 0.10
+0.015 103 0.05
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+30
+0.3 Twr 1m 107 Twr 1m
+64 64 25
+(a) 0.2
+2 15 06
+24 (b)
+106 2 15 06
+24 (c) 20
+105
+15
+0.1
+104
+10
+100 101 102 103 100 101 102 103 100 101 102 103
+step step step
+Figure 30: Training loss and sharpness trajectories of FCNs in (top) µP and (bottom) SP. The
+experimentalsetupisidenticaltoFigure2butwithGI-AdaminsteadofstandardAdam.
+insteadofthevalue105observedforAdam(c.f. Figure2). Remarkably,thisalmosteliminatesinitial
+sharpnessreduction. Similarly,thepre-conditionedsharpnessfortheSPmodelstartsaround104
+insteadof106. Notably,intheSPscenario,thereisnoinitialspikeintheT =1(c.f. Figure2),
+wrm
+demonstratingthatthissimplemodificationeffectivelyreducesinstabilitiesduringtheearlytraining.
+I.2 GI-AdamasanAutomatedWarmup
+Inthissection,weshowthatabiascorrectionisnotrequiredwhenthesecondmomentisinitialized
+withthegradientsatinitializationinGI-Adam. Therefore, employingabiascorrectionasinthe
+(cid:112)
+originalAdamalgorithminthiscaseservesasanautomatedwarmupgivenbyη =η 1 βt.
+t trgt − 2
+Themovingaverageofthesecondmomentisgivenby:
+t−1
+(cid:88)
+v =(1 β ) βig2 +βtv , (9)
+t − 2 2 t−i 2 0
+i=0
+wherev =g2. Followingstandardassumptions,weassumethatthesecondmomentofthegradient
+0 0
+isconstantduringearlytrainingE[g2]=σ2. Takingtheexpectationoftheaboveequationoverthe
+t
+gradientdistributionyields
+t−1
+(cid:88)
+E[v ]=(1 β ) βiE[g2 ]+βtE[v ]. (10)
+t − 2 2 t−i 2 0
+i=0
+Simplifyingtheaboveequation,wehave
+1 βt
+E[v ]=(1 β )σ2 − 2 +βtσ2 =σ2. (11)
+t − 2 1 β 2
+2
+−
+Thisresultdemonstratesthatwhenthesecondmomentisinitializedwiththegradientsatinitialization,
+itdoesnotrequirebiascorrection,astheexpectedvalueofthesecondmomentisequaltotheconstant
+σ2. Ifweapplytheusualbiascorrectionontopofinitializingthesecondmomentwiththegradients,
+(cid:112)
+weeffectivelydownscalethesecondmomentbyafactor 1 βt. Assumingsmallenoughϵ,this
+− 2
+canbeviewedasamultiplicativefactortothelearningrate. Asaresult,GI-Adamisequivalentto
+(cid:112)
+havinganaturalwarmupgivenbyη =η 1 βt.
+t trgt − 2
+32
+ssolgniniarT
+ssolgniniarT
+H1−P tλ
+H1−P
+tλ
+H tλ
+H tλ0.8 0.8
+0.6 Adam 0.6 Adam
+Adam+warmup Adam+warmup
+GI-Adam GI-Adam
+0.4 RI-Adam 0.4 RI-Adam
+0.2 0.2
+0 25k 50k 75k 100k 0 25k 50k 75k 100k
+step step
+(a) (b)
+Figure31:ComparisonoftestaccuracytrajectoriesofWRNstrainedwithdifferentAdamvariantsfor
+twotargetdifferentlearningrates:(a)η =0.020480,and(b)η =0.040960.ForAdam+warmup,
+trgt trgt
+thewarmupdurationissettoT =1024.
+wrm
+I.3 ThePrimarybenefitofGI-Adamresultsfromthemagnitudeofthesecondmomentat
+initialization
+To further assess if the primary cause of instability during early training is the large λP−1H, we
+randomlyinitializev butwiththesamenormasthegradientsatinitialization. Werefertothisas
+0
+RandomlyInitializedAdam(RI-Adam). LikeGI-Adam,thisalsoresultsinimprovedperformanceas
+showninFigure31.
+33
+ycaruccatseT ycaruccatseT

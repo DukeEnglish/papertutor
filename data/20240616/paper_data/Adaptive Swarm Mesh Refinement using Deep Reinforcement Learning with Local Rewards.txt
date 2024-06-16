@@ -1,0 +1,2365 @@
+JournalofMachineLearningResearch1(2024)1-TBD SubmittedTBD;PublishedTBD
+Adaptive Swarm Mesh Refinement using Deep Reinforcement
+Learning with Local Rewards
+Niklas Freymuth1 Philipp Dahlinger1 Tobias Würth2 Simon Reisch1
+∗
+Luise Kärger2 Gerhard Neumann1
+1Autonomous Learning Robots, Karlsruhe Institute of Technology, Karlsruhe
+2Institute of Vehicle Systems Technology, Karlsruhe Institute of Technology, Karlsruhe
+Editor: TBD
+Abstract
+Simulating physical systems is essential in engineering, but analytical solutions are limited
+to straightforward problems. Consequently, numerical methods like the Finite Element
+Method (FEM) are widely used. However, the FEM becomes computationally expensive as
+problem complexity and accuracy demands increase. Adaptive Mesh Refinement (AMR)
+improves the FEM by dynamically allocating mesh elements on the domain, balancing
+computational speed and accuracy. Classical AMR depends on heuristics or expensive error
+estimators, limiting its use in complex simulations. While learning-based AMR methods are
+promising, theycurrentlyonlyscaletosimpleproblems. Inthiswork, weformulateAMRas
+asystemofcollaborating,homogeneousagentsthatiterativelysplitintomultiplenewagents.
+This agent-wise perspective enables a spatial reward formulation focused on reducing the
+maximum mesh element error. Our approach, Adaptive Swarm Mesh Refinement (ASMR),
+offers efficient, stable optimization and generates highly adaptive meshes at user-defined
+resolution during inference. Extensive experiments, including volumetric meshes and
+Neumann boundary conditions, demonstrate that ASMR exceeds heuristic approaches and
+learnedbaselines, matchingtheperformanceofexpensiveerror-basedoracleAMRstrategies.
+ASMR additionally generalizes to different domains during inference, and produces meshes
+thatsimulateupto2ordersofmagnitudefasterthanuniformrefinementsinmoredemanding
+settings.
+1. Introduction
+Across industries and disciplines, carefully tuning or evaluating a technical system is essential
+for of most engineering tasks. While this procedure historically relied on costly prototype
+testing, advances in virtual simulations over the last decades have provided a cost-effective
+alternative that closely mimics real systems. These simulations utilize fundamental prin-
+ciples like mass, momentum, and energy conservation, which are often expressed through
+complex Partial Differential Equations (PDEs). Since analytical solutions of such PDEs are
+limited to simple cases, numerical approximations, particularly the Finite Element Method
+(FEM) are commonly employed (Brenner and Scott, 2008; Reddy, 2019; Anderson et al.,
+2021). The FEM partitions the continuous problem domain into a mesh consisting of smaller,
+finite elements, allowing for an efficient numerical solution whose accuracy depends on the
+∗. correspondence to niklas.freymuth@kit.edu
+©2024NiklasFreymuth,PhilippDahlinger,TobiasWürth,SimonReisch,LuiseKärger,GerhardNeumann.
+4202
+nuJ
+21
+]GL.sc[
+1v04480.6042:viXraFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+number used elements. However, as the physics becomes more complex, accurate simulations
+demand significantly more elements, quickly rendering simulations prohibitively expensive.
+ApopularextensionoftheFEMisAMR,whichdynamicallyallocatesmoremeshelements
+to regions of high solution variability, striking a favorable balance between computational
+efficiencyandaccuracy(Plewaetal.,2005;HuangandRussell,2010;FidkowskiandDarmofal,
+2011). As Adaptive Mesh Refinement (AMR) allows the creation of a simulation-specific
+mesh, it has become increasingly important for complex problems across domains like fluid
+dynamics (Berger and Colella, 1989; Baker, 1997; Zhang et al., 2020; Wallwork et al., 2022),
+structural mechanics (Ortiz and Quigley Iv, 1991; Stein, 2007; Gibert et al., 2019), and
+astrophysics (Cunningham et al., 2009; Bryan et al., 2014; Guillet et al., 2019). Yet, general-
+purpose AMR methods based on heuristics (Zienkiewicz and Zhu, 1992), or computationally
+expensive error estimates (Bangerth and Rannacher, 2013) are generally limited in their
+efficiency and adaptability (Mukherjee, 1996; Kita and Kamiya, 2001; Yano and Darmofal,
+2012; Cerveny et al., 2019; Wallwork, 2021), complicating their effective use in practical
+scenarios.
+Asanemergingalternative, abodyofworkemploysReinforcementLearning(RL)(Sutton
+and Barto, 2018) to frame AMR as a sequential decision-making process (Yang et al., 2023a,b;
+Foucart et al., 2023). These RL-AMR methods encode the state of the current simulation,
+including an intermediate mesh, as an observation that is fed to one or many RL agents, who
+then determine which mesh elements to refine. However, previous work currently only scales
+to simple problems due to an expensive inference process (Yang et al., 2023a), misaligned
+objectives and high variance in the state transitions (Foucart et al., 2023), or noisy reward
+signalsduringtraining(Yangetal.,2023b). WeinsteadformulateAMRasaSwarmRL(Šošić
+et al., 2017; Hüttenrauch et al., 2019) problem, extending existing frameworks to a shared
+observation space and per-agent, spatial rewards. Crucially, we allow for agents to split
+into new agents over time to model element sub-division in the refinement process, mapping
+the per-agent reward signal over refinement steps to assign credits for individual agents
+throughout an episode. We use a Message Passing Networks (MPNs) (Sanchez-Gonzalez
+et al., 2020), a class of Graph Neural Networks (GNNs) (Scarselli et al., 2009; Bronstein
+et al., 2021), for our policy due to their effectiveness in learning physical simulations (Pfaff
+et al., 2021; Brandstetter et al., 2022). Our method, Adaptive Swarm Mesh Refinement
+(ASMR), consistently produces highly efficient mesh refinements with thousands of elements
+and can be applied to arbitrary PDEs.
+This paper extends previously published work on ASMR (Freymuth et al., 2023). While
+theASMRpoliciescouldproducemeshesatapre-definedgranularity, wenowuseanadaptive
+element penalty which is also provided as context information for the policy to allow a single
+policy to produce meshes of different granularity. Additional extensions include an improved
+mapping between agents over time that acts as a regularizer and leads to better results, an
+improved network architecture and an improved reward formulation based on the reduction of
+the maximum local error of the mesh. While this reward formulation was already introduced
+and ablated in our prior work with inconclusive results, we now present a large scale study
+that shows its improved performance compared to the previously used reward. We refer to
+the improved version as ASMR++, and to the previous version as ASMR. Experimentally,
+we find that the proposed changes substantially improve the method on more difficult task
+setups. We further provide additional visualizations of our method, including a schematic
+2Adaptive Swarm Mesh Refinement
+Figure 1: A schematic ASMR++ refinement step. Given a current mesh, an observation
+graph encodes the elements as nodes and their neighborhood relationship as edges. A policy
+consumes this graph to decide on per-element markings that are given to a remesher, which
+subsequently produces a refined mesh. Based on the quality of this finer mesh, per-agent
+rewards are calculated. The process is repeated until the mesh is fully refined.
+of the agent mapping and a qualitative error comparison to a uniform mesh. Finally, we
+add two challenging tasks that utilize Neumann boundary conditions and a 3-dimensional
+domain to showcase the applicability of our method to a wider range of applications. Figure
+1 provides a schematic overview of a single ASMR++ refinement step.
+We validate the effectiveness of ASMR++ on a wide range of PDEs that require complex
+refinement strategies. The experiments use static meshes with conforming triangular or
+tetrahedralelementsandcorrespondingh-adaptiverefinements(Arnoldetal.,2000;Stevenson,
+2008), i.e., refinements via element subdivision, due to their prevalence in engineering (Ho-Le,
+1988; Jones and Plassmann, 1997; Nagarajan and Soghrati, 2018). We consider several recent
+RL-AMR methods as baselines (Yang et al., 2023a,b; Foucart et al., 2023). As these methods
+have been shown to work for shallow mesh refinement and coarsening on dynamic tasks, we
+adapt them to our setting of static meshes that require multiple precise refinement steps
+and thousands of elements. We further compare to a threshold-based refinement heuristic
+that uses the popular Zienkiewicz-Zhu Error Estimator (ZZ Error) estimate (Zienkiewicz
+and Zhu, 1992) and different oracle error estimates based on a fine uniform mesh to mark
+elements for refinement. We implement all tasks as OpenAI gym (Brockman et al., 2016)
+environments and publish our code, including all approaches and tasks presented in this
+paper, at https://github.com/NiklasFreymuth/ASMRplusplus.
+Our experimental results show that ASMR++ learns to predict stable and consistent
+refinements across a wide range of tasks, while the baselines RL-AMR methods struggle to
+produce high-quality meshes. Our method generally outperforms the heuristic when using
+the ZZ Error error estimate, and even compares well when using oracle error estimates
+while being 2 to 100 times faster to compute than the uniform mesh needed for the oracle
+information. A series of additional experiments demonstrates that our method robustly
+generalizes to different domains and initial conditions, and that it can up-scale to larger
+3Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+domains and meshes during inference when using data-augmentation during training. We
+show the importance of our per-agent reward function and its combination with our proposed
+mapping between agents over time on a series of ablation experiments.
+2. Related Work
+2.1 Learned Physics Simulation and Graph Network Simulators.
+Classical simulators are often highly problem-specific and quickly become prohibitively expen-
+sive for complex problems, especially when considering iterative optimization or parametric
+studies(WannerandHairer,1996;Zimmerlingetal.,2022;Brandstetteretal.,2022). Assuch,
+a recent trend in machine learning aims to directly learn the simulation of physical systems
+from data using deep neural networks. These approaches usually require an underlying
+ground-truth simulator to generate large amounts of training data, and use this data to
+predict quantities of interest for a given system of equations.
+Early work on learned simulators uses simple feed-forward (Um et al., 2018; Zimmerling
+et al., 2019a) or convolutional neural networks (Guo et al., 2016; Zimmerling et al., 2019b,
+2022), which are ill-suited for, e.g., mesh-based representations in the FEM. Here, Graph
+Network Simulators (GNSs) (Sanchez-Gonzalez et al., 2020; Pfaff et al., 2021) have emerged
+as an alternative architecture acting on graphs. GNSs encode the simulation state as a graph,
+and utilize MPNs, a type of GNN (Scarselli et al., 2009; Bronstein et al., 2021) to compute
+per-node quantities. Compared to their classical counterparts, learned GNSs are orders of
+magnitude faster and fully differentiable Battaglia et al. (2018); Pfaff et al. (2021), making
+them applicable to inverse design problems (Allen et al., 2022) and real-world planning of
+robotic deformable object manipulation (Shi et al., 2023). They have recently been combined
+with a block-structured AMR strategy that uses the intermediate refinement steps as coarser
+graph representations for the latent GNS layers (Perera and Agrawal, 2024) to facilitate
+learning multiscale interactions.
+As an alternative to these data-driven models, physics-informed neural networks (Raissi
+et al., 2019; Würth et al., 2023) directly optimize a neural network to predict simulations
+that satisfy the governing equations of a physical system. While usually mesh-free, recent
+extensions combine these approaches with GNSs and meshes to facilitate generalization to
+new domains during inference (Würth et al., 2024a).
+All of the above methods share a common goal of using recent advances in deep learning
+to speed up the simulation of complex physical systems. Yet, they do so by directly
+approximating the simulation, causing any prediction error of the learned model to directly
+affect the simulated quantities. In this work, we instead learn an AMR strategy to propose
+an efficient mesh for a classical solver, implicitly speeding up the simulation by reducing
+the size of the system of equations that must be solved. This approach is more robust and
+risk-averse than directly learning the simulation, especially when considering complex physics
+problems that demand high precision and accuracy (Zhang et al., 2020; Huang et al., 2021;
+Wallwork et al., 2022).
+4Adaptive Swarm Mesh Refinement
+2.2 Supervised Learning and Adaptive Mesh Refinement.
+Several recent methods apply supervised learning to improve existing or devise new AMR
+strategies. Examples include using an Multilayer Perceptron (MLP) (Zhang et al., 2020) to
+directlycalculateanerrorperelementonacoarsemesh,subsequentlyrefiningorre-generating
+the mesh based on this error. Extensions instead use a two-grid paradigm self-adaptive AMR
+algorithm (Rachowicz et al., 1989, 2006) to collect refinement labels for an MLP-based
+classifier acting on individual mesh elements (Służalec et al., 2023). Another approach uses
+a convolutional neural network to predict local mesh densities from an image-based domain
+representation for fluid dynamics problems (Huang et al., 2021). Other work uses recurrent
+networks to find optimal marking strategies for second-order elliptical PDEs (Bohn and
+Feischl,2021), oremploysneuralnetworkstosolvethestrongformoftheadjointproblemand
+use hand-crafted features to compute error estimates directly (Roth et al., 2022; Wallwork
+et al., 2022). Finally, a class of methods speeds up the computation of Dual Weighted
+Residual (Becker and Rannacher, 1996, 2001) error estimators by learning a metric tensor
+from solution information (Fidkowski and Chen, 2021; Chen and Fidkowski, 2021) that can
+then be used in existing refinement procedures (Yano and Darmofal, 2012).
+ThesesupervisedmethodsusuallypredictintermediarymetricsforspecificsfacetsofAMR,
+typically proposing a greedy next-step refinement instead of focusing on long-term optimiza-
+tion. We instead use RL to directly find optimal refinement strategies, which in our case
+consists of the error reduction for a given refinement sequence minus the cost of creating
+new mesh elements.
+Reinforcement Learning for Adaptive Mesh Refinement. Multiple strategies for
+RL-AMR have been developed, all of which are motivated by the potential of RL to optimize
+non-differentiable, long-term rewards. Among these, one technique focuses on the generation
+of quadrilateral meshes through a process of iterative element extraction from the given
+problem domain (Pan et al., 2023). Another approach utilizes a global threshold prediction
+for heuristic-based refinement, leveraging existing error estimates on the entire mesh (Gillette
+et al., 2022). A similar method learns to optimize the polynomial order of mesh elements
+by evaluating the difference in solutions between the current polynomial degree and its
+immediate higher degree (Huergo et al., 2024). These methods either learn a global, per-mesh
+quantity, or fully act on local mesh elements. We instead directly manipulate the mesh
+elements themselves, iteratively considering for all mesh elements simultaneously whether
+they should be sub-divided.
+When considering mesh refinement via element sub-division, a defining feature is the
+change in mesh topology through iterative refinements. As the mesh grows with each
+refinement,theRLpolicyneedstobeabletohandlevaryingstate,andpotentiallyobservation
+and action spaces. Some work circumvents this issue by only considering a single refinement
+level each for the element size and its polynomial order (Dzanic et al., 2024). Another (Wu
+et al., 2023) jointly learns a GNS and an edge-based RL-AMR strategy on the simulated
+mesh to automatically adapt the mesh resolution during the learned simulation. The method
+deals with the potentially complex action space by sampling a fixed number of edges to
+coarsen and refine in each step. Instead of optimizing the mesh with respect to any concrete
+quality metric, they reward the reduction in downstream simulation error of the learned GNS
+compared to not using any refinement.
+5Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+More similar to our method, a class of approaches considers iterative element sub-
+division with the goal of optimizing the trade-off between speed and accuracy for a classical
+simulator (Yang et al., 2023a,b; Foucart et al., 2023). These techniques are predominantly
+tailored for non-stationary PDEs, thus incorporating mesh coarsening operations essential
+for addressing time-variant problems. While our approach can readily be adapted to time-
+dependent problems and mesh coarsening, we instead focus on static meshes and mostly
+stationary problems due to their prevalence in engineering (Nagarajan and Soghrati, 2018;
+Ho-Le, 1988). In the context of these stationary problems, the challenge is to find multiple
+levels of precise refinement on the full mesh instead of either shallow or local refinements
+and coarsening operations.
+Of these approaches, Single Agent (Yang et al., 2023a) feeds an encoding of the full mesh
+into a GNN-based policy to provide a categorical action that selects a single element to
+refine. Single Agent refines a single element at each time step, requiring to solve the resulting
+system of equations after each refinement. Thus, the method suffers from inference runtime
+and has to learn from comparatively little information per environment sample. Partially
+motivated by this, Sweep (Foucart et al., 2023) decides on a refinement for all mesh elements
+in parallel during inference. To achieve this, the method is trained by iteratively selecting a
+random element of the mesh and determining its refinement based on an MLP that processes
+local and global features. Yet, this random element selection during training leads to high
+variance in the state transitions and thus a more complex learning problem, especially since
+the prediction mostly considers local element features. Additionally, the increased inference
+speed comes as the cost of a misalignment in the environment transition between training
+and inference (Yang et al., 2023b).
+Wecircumventthisissuebyrefiningallmeshelementsinparallelduringbothtrainingand
+inference, viewingthemeshasacollaborativemulti-agentsystem, withoneagentperelement.
+Crucially, this paradigm implies that the number of agents changes and that individual
+agents may vanish between refinement steps, making it unclear how to assign credit for the
+individual agents’ actions over time (Cohen et al., 2021). Here, Value Decomposition Graph
+Networks (VDGN) (Yang et al., 2023b) sets a maximum refinement depth to upper bound
+the number of agents, and employs a value decomposition network (Sunehag et al., 2017)
+to learn the credit assignment by decomposing a shared Q-function. While this method
+theoretically allows for efficient training and inference, this learned value decomposition
+quickly becomes challenging for larger meshes. As the optimization of the individual agents
+depends on the quality of this decomposition, training quickly becomes unstable or diverges
+entirely. We instead formulate AMR as a Swarm RL problem to naturally integrate changing
+observation and action spaces. We additionally utilize the spatial nature of AMR to define
+an agent-wise reward, providing a strong and stable feedback signal to all agents during
+training.
+3. Adaptive Swarm Mesh Refinement++
+ASMR++ treats elements of a mesh as a swarm of homogeneous agents that collaborate to
+find an optimal refinement. For this, each agent’s state and observation are defined through
+its position in the mesh and includes local features of both the mesh and the PDE. At each
+step, all agents decide whether to mark their respective element for refinement. Agents that
+6Adaptive Swarm Mesh Refinement
+refine their element receive a local reward based on how much their refinement has improved
+the quality of the underlying simulation. Crucially, each refinement subdivides the refined
+elements, introducing new agents in the process. We introduce a Adaptive Swarm Markov
+Decision Process (ASMDP) that features a mapping of agents over time, allowing us to
+optimize over multiple refinement steps by propagating reward from agents of later time
+steps back to related earlier agents. Figure 1 provides a schematic overview of ASMR++,
+and the following sections describe the individual aspects in more detail.
+3.1 Adaptive Swarm Markov Decision Process.
+We view mesh refinement as a collaborative multi-agent RL problem with a changing number
+ofhomogeneousagentsandagent-wiserewards. Forthis,weadoptaswarmRLview,adapting
+the SwarMDP framework (Šošić et al., 2017; Hüttenrauch et al., 2019) to vector-valued
+rewards and changing state, action and observation spaces. Formally, let an ASMDP be a
+tuple
+⟨S,O,A,P,r,ξ,ϕ⟩.
+The state space, observation space and action space are given by
+S O A
+, , and respectively. Since the number of agents changes over time, we denote subsets
+of the state, observation, and action spaces with N agents as SN ⊂ S , ON ⊂ O , AN ⊂ A .
+The transition function P : SN ×AN → SM takes an action over N agents and leads to
+a new state with M agents. The reward function r : SN ×AN → RN takes the full state
+into account to produce a scalar reward for each agent. Similarly, the observation function
+ξ : SN → ON calculates local observations for each agent from the global state.
+We consider a finite-horizon setting with T time steps. In the scalar reward case, i.e.,
+with r(s,a) ∈ R , an optimal RL policy π : O×A → [0,1] generally maximizes the return,
+i.e., the expected cumulative future reward
+(cid:34) (cid:35)
+T
+(cid:88)
+Jt := E r(st+k,at+k) . (1)
+π(aξ(s))
+|
+k=0
+A key challenge of using RL for AMR is the changing number of agents introduced by
+splitting agents that are marked to be refined. To adapt the Markov Decision Process to
+changing numbers of agents within a single episode, we thus introduce an agent mapping
+ϕt ∈ RN M. Intuitively, each entry ϕt describes the responsibility of agent i at step t for
+× ij
+agent j at step t+1. The responsibilities of agents at step t for agents at step t > t can
+′
+then be computed via the matrix multiplication
+ϕt,t′ := ϕtϕt+1...ϕt′ = Πt′ ϕτ .
+τ=t
+Given this mapping, we can propagate the rewards of all future agents for which agent i is
+responsible for at step t to calculate a return
+(cid:34) (cid:35)
+T
+(cid:88)
+Jt := E γk(ϕt,t′r(st′,at′)) . (2)
+i π(aξ(s)) i
+|
+t=t
+′
+For training, e.g., a value function V(s), this leads to a TD error (Sutton and Barto, 2018)
+(cid:88)
+δt = r(st,at) + ϕt V (st+1)−V (st) (3)
+i ij j i
+j
+7Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+of actions a ∼ π(ξ(s)). We derive the targets for Q-functions analogously.
+The ASMDP framework allows for a collaborative optimization of changing numbers of
+agents, each of which is equipped with its own reward. Compared to, e.g., a centralized
+partially observable Markov Decision Process (MDP) (Yang et al., 2023a; Foucart et al.,
+2023), it provides a more efficient learning environment, since every environment step
+provides a learning signal for each agent. Similarly, the ASMDP supports a multi-agent
+setting with changing numbers of homogeneous agents, circumventing the posthumous credit
+assignment problem (Cohen et al., 2021) without having to resort to dummy states and
+learned value decompositions (Yang et al., 2023b). The agent mapping additionally allows
+for an optimization of the return, i.e., the reward over time, which would not be possible with
+a purely local per-agent view. While this work focuses on AMR, the ASMDP framework can
+readily be applied to other scenarios that are characterized by localized decisions of changing
+numbers of entities.
+3.2 Actions and Agent Mappings.
+In the context of AMR, a system state s ∈ S is defined by the problem domain Ω, a
+mesh discretization Ω, and a PDE formulated on Ω to be solved under specific conditions.
+ASMR++ views every element Ωt of a mesh Ωt := {Ωt ⊆ Ω| (cid:83)˙ Ωt = Ω} as one of many
+i i i i
+homogeneous agents. Each agent has a binary action space, deciding on whether it wants to
+mark its element for refinement or not. These markings are provided to a remesher, yielding
+a finer mesh Ωt+1 = {Ωt+1} . The remesher subdivides each refined element Ωt into a set
+j j i
+of smaller elements {Ωt+1} , such that the disjoint union of all Ωt+1 reconstructs Ωt, i.e.,
+j j j i
+(cid:83)˙ Ωt+1 = Ωt. It may also refine unmarked elements to close the mesh and thus assert a
+j j i
+conforming solution (Arnold et al., 2000), i.e., to make sure that elements of the mesh align
+with each other at the boundaries to ensure continuity of solution variables between adjacent
+elements.
+To map between elements and their successors, ASMR uses the indicator function
+ϕt := I(Ωt+1 ⊆ Ωt). This mapping assigns each element to all elements that it subdivides
+ij j i
+into, or equivalently, lets each agent be responsible for all new agents that it spawns. Here,
+we extend the mapping to include a normalization factor
+|Ωt|
+ϕt := I(Ωt+1 ⊆ Ωt). (4)
+ij |Ωt+1| j i
+Compared to ASMR, the normalization factor
+|Ωt
+| scales the responsibilities such that
+Ωt+1
+(cid:80) ϕt = (cid:80) ϕt′. This procedure intuitively ensures| that| the total ‘mass’ of agents is preserved
+over time. We find that this factor regularizes the mapping of rewards within the agent
+swarm, akin to, e.g., batch normalization (Ioffe and Szegedy, 2015).
+Conceptually, we may represent each mesh in a series of refinements as a layer in a
+hierarchical graph, with nodes corresponding to mesh elements. These nodes connect to their
+predecessor in the prior layer and to all successors in the subsequent layer. Applying an
+agent mapping equates to navigating through the respective level of hierarchy of this graph.
+An example refinement procedure and its corresponding refinement graph for an initial mesh
+with a single element and 2 refinement steps can be seen in Figure 2 .
+8Adaptive Swarm Mesh Refinement
+1 3 1 4
+1 2 2 3
+4 6 5 7
+8
+Marked 1 1 2 3 4 1 2 3 4 5 6 7 8
+Indirect
+Figure 2: Refinement procedure and responsibility mapping of ASMR++. Left: An initial
+mesh has its single element marked for refinement. Middle: The mesh element is subdivided
+into 4 new elements. The correspondence between the old and new mesh is represented as a
+directed acyclic graph. Constructing the matrix ϕ0 from this graph allows us to map the
+new elements back to the old one. For the next step, Element 4 is marked for refinement,
+requiring an indirect refinement of Element 2 to ensure a conforming mesh. Right: After
+the second refinement, the resulting mesh consists of 8 elements. Using the refinement graph
+to construct the mapping ϕ1 allows us to compute responsibilities of elements in the previous
+mesh for this mesh. Chaining these mappings as ϕ0,1 = ϕ0ϕ1 allows us to directly compute
+responsibilities between the initial mesh and the mesh after two refinement steps.
+This work focuses on adaptive mesh refinement via iterative mesh subdivision. For
+mesh coarsening, the above mapping can be extended to respect element coarsening as,
+(cid:104) (cid:16) (cid:16) (cid:17)(cid:17)(cid:105)
+e.g., ϕt ij := Ω|Ω t+t | 1 I(Ωt j+1 ⊆ Ωt i)+ I(Ωt i ⊊ Ωt j+1)/ (cid:80) kI(Ωt k ⊊ Ωt j+1) . In this case, the
+| |
+hierarchical graph is no longer a tree but instead a directed acyclic graph, since multiple
+elements can coarsen into the same new element.
+3.3 Observations and Policy Architecture.
+Given a mesh Ωt and its corresponding system of equations, we construct an observation as
+the bidirectional graph G Ωt = G = (V,E,X ,X ) ∈ O with mesh elements as nodes V and
+V E
+their neighborhood relation as edges E ⊆ V ×V. Mesh- and task-dependent node and edge
+features of dimensions d and d are provided as X : V → Rd and X : E → Rd .
+V E
+V E V E
+This observation graph is consumed by an MPN policy. MPNs (Pfaff et al., 2021; Linker-
+hägner et al., 2023) are a popular GNN architecture for mesh-based physical simulation (Pfaff
+et al., 2021; Linkerhägner et al., 2023; Würth et al., 2024b) as they encompass the function
+class of several classical PDE solvers (Brandstetter et al., 2022). Given an input graph, they
+iteratively update latent features on this graph for L consecutive message passing steps.
+Each step l receives the output of the previous step and updates the features X , X for all
+nodes v ∈ V and edges e ∈ E. Using linear embeddings x0 and x0 of the initV ial noE de and
+v e
+edge features, the l-th step is given as
+xl+1 = fl(xl,xl,xl), with e = (u,v),
+e v u e
+E
+(cid:77)
+xl+1 = fl(xl, xl+1).
+v v e
+V
+e=(v,u)
+∈E
+9Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+The operator ⊕ is a permutation-invariant aggregation such as a sum, mean or maximum
+over all aggregated elements. Each fl is a learned function, usually parameterized as a
+simple MLP. The MPN’s final output· is a learned representation xL for each node v ∈ V.
+v
+This learned representation can be fed into a policy head to compute an action per agent,
+yielding a joint action vector π(a|G Ωt), or into a value head to compute a per-element value
+function estimate. Both are parameterized as MLPs that are shared between the different
+agents. Since MPNs are permutation-equivariant by design (Bronstein et al., 2021), this
+policy architecture ensures that the amount and ordering of mesh elements does not matter,
+i.e., that the elements are only defined by their features and local position in the mesh.
+3.4 Reward Definition
+AMR aims to generate meshes with enhanced local resolution in areas that are relevant for
+the underlying system of equations. Its objective is to achieve an optimal balance between
+the solution’s accuracy on the mesh Ωt, and its total element count Ωt ∈ Ωt.
+i
+Since closed-form solutions are generally not available for most systems of equations, we
+compute an approximate ground truth solution u using a fine-grained uniform reference
+Ω
+∗
+mesh Ω (Yang et al., 2023a). Calculating an accurate ground truth solution on a uniform
+∗
+mesh is expensive, because the mesh requires a high resolution and thus a large number of
+elements. Given u
+Ω
+∗, a refined mesh Ωt and its solution u Ωt, we define the error per element
+as the maximum difference between the solutions on this element. We use the maximum
+difference over solutions as a measure of simulation quality that is independent of, e.g.,
+the size of the used elements. Given reference elements Ω with midpoints p ∈ Ω as
+∗m Ω
+∗m
+∗m
+sampling points to query the solutions on, this yields an error
+(cid:12) (cid:12)
+eˆrr(Ωt i) ≈ Ωmax Ωt(cid:12) (cid:12)u
+Ω
+∗(p
+Ω
+∗m)−u Ωt(p
+Ω
+∗m)(cid:12) (cid:12). (5)
+∗m⊆ i
+We efficiently calculate the assignment Ω ∈ Ωt required for this reward using a k-d
+∗m i
+tree (Bentley, 1975). If a queried point p exactly lies on the edge between two elements in
+Ω
+∗m
+Ωt, which is possible for some refinement algorithms, we assign it to both of these elements
+with a weight of 0.5. We normalize this error estimate with the initial mesh error to get
+the relative improvement of the mesh-error, i.e., err(Ωt) = eˆrr(Ωt)/(cid:80) eˆrr(Ω0). This
+i i Ω0 Ω0 j
+j∈
+estimate is consistent across geometries and process conditions. As the size of the solution
+u and subsequently that of the error eˆrr(Ωt) may differ significantly between systems of
+Ω ∗ i
+equations due to varied process conditions, this normalization prevents systems of equations
+with large solution quantities from dominating the learning process. Given the normalized
+error estimate, we next construct an element-wise local reward function that estimates the
+benefit of a refinement and compares it to the cost of adding additional elements. We
+introduce a variable element penalty α that penalizes each added element, and compare this
+to the decrease in error within each element when it is refined, yielding the reward
+ 
+(cid:18) (cid:19)
+(cid:88)
+r(Ωt) := err(Ωt)−maxϕt err(Ωt+1) −α I(Ωt+1 ⊆ Ωt)−1. (6)
+i i ij j j i
+j
+j
+The local reward for each element is 0 if no refinement is made. If an element is refined, its
+reward is positive if and only if the refinement decreases the highest error in this element by
+10Adaptive Swarm Mesh Refinement
+more than the cost of adding new elements, which is scaled with the element penalty α. In
+comparison, ASMR (Freymuth et al., 2023) rewards the integrated average change in error
+for each mesh element instead of its maximum change in error. This average change in error
+is integrated over the element volume, meaning that small elements, i.e., those that have been
+previously refined, quickly become comparatively insignificant for the reward. To counteract
+this, ASMR scales each reward by the inverse of the respective element’s volume, leading
+to widely varying and potentially unbound reward values that do not directly match any
+optimization criteria on the full mesh. We instead directly reward the change in maximum
+error within the volume of each element. This maximum reward variant has been proposed
+as an ablation study in Freymuth et al. (2023), but only been explored for a single task.
+We find that the maximum reward results in more well-behaved optimization, presumably
+because it directly targets refining elements where the reduction in error justifies adding new
+elements. We provide a more detailed comparison to the ASMR reward in Appendix B.2.
+Since Equation 6 is based on an element’s decrease in maximum error, it is independent of
+the element size, ensuring that rewards of elements of different sizes are on the same scale
+without the need for explicit scaling.
+In systems of equations with multiple quantities of interest, such as, e.g., elasticity
+problems where both the element displacement and stresses are important, the mesh must be
+optimized for all the quantities of interest. Here, we calculate rewards independently for each
+solution dimension and use some application-dependent convex function to compute a scalar
+reward per element. Equation 6 rewards each agent for its local refinement decision for each
+time step. While this direct and explicit local credit assignment leads to a temporally and
+spatially dense reward, it disregards non-local effects of mesh refinement, which are common
+for elliptical PDEs. To encourage global optimization, we therefore extend the return Jt of
+i
+Equation 2 to include a global term as
+1 1
+Jt ′ = Jt+ Jt , (7)
+i 2 i 2
+where Jt is the global return of Equation 1 using the average reward r = 1 (cid:80) r .
+N j j
+3.5 Element Penalty
+We add the element penalty α in Equation 6 an input to the policy to inform it about the
+penalty of adding new elements. During training, we draw α from a log-uniform distribution
+at the start of each episode, allowing for environment samples on a wide range of different
+penalties. Similar to VDGN (Yang et al., 2023b), we then specify a value of α during
+inference to control the refinement level of the created mesh. Compared to ASMR, which
+trains a policy on a fixed element penalty value, we thus condition the policy on α for
+each rollout. This conditional policy allows for different mesh granularities during inference,
+whereas ASMR needs to train a new policy when the desired number of mesh elements
+changes.
+Balancing the extra computational cost of adding mesh elements against the benefit of
+reducing simulation errors can be seen as an instance of multi-objective RL (Van Moffaert
+and Nowé, 2014; Hayes et al., 2022). The cost of adding new elements increases linearly
+with a penalty factor α, and there exists some approximate ranking of the effectiveness of
+different mesh refinements at reducing simulation errors. This setup creates a roughly convex
+11Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Figure 3: ASMR++ refinements for a Poisson problem with sinusoidal Neumann boundary
+conditions for different inputs of the element penalty α. All refinements focus on the relevant
+parts of the problem, and lower element penalties lead to more fine-grained meshes.
+relationship between α and the policy’s behavior. In other words, lowering α generally leads
+to a finer mesh that includes all refinements made with a higher α, while raising α results in
+fewer refinements throughout the mesh. Figure 3 provides an example of resulting ASMR++
+meshes for the same trained policy and Neumann boundary task for different values of the
+element penalty α. Regardless of the penalty, the parts of the mesh with the highest potential
+error reduction, in this case the areas near the load function and the sinusoidal Neumann
+boundaries, are refined the most.
+4. Experiments
+4.1 Systems of Equations.
+The physical behavior of a technical system can be described by a set of PDEs. Simulations
+predict the physical states of a system by solving those PDEs. For non-trivial problems, the
+solving method is usually based on numerical approximation methods, such as the FEM,
+which considers the weak formulation of the PDEs. Multiplying the strong PDE formulation
+with a test function v(x) ∈ V and integrating by parts yields the weak formulation (Larson
+andBengzon,2013),whichwedenoteasΦ(u,v). WedenoteV asthespacespannedbyasetof
+basisfunctionsϕ (x) ∈ V andthesoughtsolutionasu(x). IntheGalerkinFEM,thesolution
+v
+u(x,t) is approximated by a weighted sum of these basis functions u(x) =
+(cid:80)Nφ
+u (t)ϕ (x).
+v=1 v v
+Additionally, the same basis function are used to define the test function v(x) =
+(cid:80)Nφ
+ϕ (x).
+v=1 v
+In this work we consider linear elliptical or parabolic PDEs. For elliptical PDEs, we seek for
+a space-dependent solution u = u(x). This results in N equations for N unknown degrees
+φ φ
+of freedom u . Due to the linearity of the PDEs and the discretization of the FEM, we can
+v
+assemble a linear system of equations Au = b out of the weak formulation Φ(ϕ ,u ,ϕ ).
+u v v
+The time-dependent parabolic PDEs requires a discretization in time, e.g., using forward or
+12
+20.0
+=
+α
+100.0
+=
+α
+10.0
+=
+α
+5000.0
+=
+α
+500.0
+=
+α
+300.0
+=
+α
+3000.0
+=
+α
+200.0
+=
+αAdaptive Swarm Mesh Refinement
+Laplace Poisson Stokes Flow Linear Elasticity Heat Diffusion
+Neumann Boundaries 3d Poisson
+Figure 4: Final ASMR++ meshes and corresponding FEM solution for different tasks. For
+each task, a scalar solution quantity is shown as a heatmap. ASMR++ provides highly
+adaptive meshes across a wide variety of PDEs by accurately optimizing task-specific regions
+of interests. It additionally supports Neumann boundary conditions and volumetric 3d
+meshes.
+backward Euler schemes. Subsequently, a system of equation can be assembled for each time
+step. We can efficiently solve the obtained linear system of equations with numerical solvers.
+For each PDE, we create a task that consists of the weak formulations, the domain and
+varying process conditions, and aim to generate meshes that minimize the error of the FEM
+when compared to a fine-grained reference mesh while using few mesh elements.
+Figure4showsexamplesforeachtaskandvisualizesfinalmeshescreatedusinganASMR++
+policy. Each task is associated with a family of domains, including L-shapes, rectangles
+with a square hole or multiple rhomboid holes, convex polygons, star shapes with different
+numbers of peaks, and a 3-dimensional plate. From left to right and top to bottom, these
+tasks are briefly characterized as follows. Laplace’s equation task considers a rectangular heat
+source at the inner boundary and features high solution gradients near this source. Poisson’s
+equation uses a multi-modal load function comprised of a Gaussian mixture model, which
+in turn causes multiple distinct regions of interest in the solution. The Stokes flow task
+solves for the velocity of a fluid streaming into the domain from inlet on the left side. It uses
+more complex shape functions and requires high precision near the corners of the rhomboid
+13Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+obstacles. The linear elasticity task simulates the deformation and the resulting stress of a
+metal plate. The heat diffusion task simulates a time-dependent heat source and is evaluated
+at the final simulation step. Adding sinusoidal Neumann Boundaries to Poisson’s Equation
+models scenarios where the boundary flux is specified, resulting in high solution variability
+near the domain edges. The 3d Poisson task considers a 3-dimensional variant of Poisson’s
+equation, using tetrahedral meshes and a different underlying refinement algorithm.
+We implement the FEM, all systems of equations, meshes and refinements in scikit-
+fem (Gustafsson and Mcbain, 2020). All tasks use conforming triangular meshes and linear
+elements unless mentioned otherwise and are provided as OpenAI gym (Brockman et al.,
+2016) environments. We specify the systems of equations and their process conditions in
+Appendix A.
+4.2 Adaptive Mesh Refinement.
+For each system of equations, we generate an initial coarse mesh Ω0, which is then refined
+during an episode through iterative element subdivision. In 2-dimensional domains, we
+employ the red-green-blue refinement method (Carstensen, 2004), subdividing each marked
+element into 4 smaller elements and then closing the mesh, as illustrated in Figure 2. For
+3-dimensional meshes, we apply longest edge bisection (Rivara, 1984; Suárez et al., 2005) to
+halve each marked element. In 2 dimensions, we uniformly refine the initial coarse mesh 6
+times to create the reference mesh Ω , and use the same amount of 6 refinement steps per
+∗
+episode. We additionally evaluate a simpler task setup with 4 refinements for the reference
+and AMR algorithm to emulate the task complexity of existing work (Yang et al., 2023a;
+Fortunato et al., 2022; Yang et al., 2023b). In both cases, always refining all elements
+precisely reconstructs the reference mesh. In 3-dimensional domains, we uniformly refine
+three times, resulting in 83 times more elements in Ω and employ 7 longest edge bisection
+∗
+AMR steps, yielding refinements that are always topologically different from the reference
+mesh.
+4.3 Training and Evaluation.
+We train all RL-AMR methods on 100 randomly generated systems of equations, including
+randomized domains and process conditions. This choice reduces the number of expensive
+reference meshes Ω that must be computed during training, and is further explored in
+∗
+Appendix C.3. We evaluate each converged RL-AMR policy and the heuristics on 100
+randomly sampled but fixed evaluation PDEs, training each RL-AMR algorithm for 10
+random seeds. The systems of equations used for evaluation are disjoint from those used for
+training.
+For all methods, we experiment with a range of target mesh resolutions to produce
+meshes of different refinement levels, as detailed in Appendix E.3. Appendix B.1 provides
+additional details on the experimental setup and additionally discusses the required compu-
+tational budget. We train the RL-AMR methods using both Proximal Policy Optimization
+(PPO) (Schulman et al., 2017) with discrete actions as an on-policy algorithm and Deep
+Q-Network (DQN) (Mnih et al., 2013, 2015) as an off-policy variant.
+We evaluate mesh quality by calculating the squared error between the solution on this
+mesh and the solution on the fine-grained reference Ω . This squared error over the domain
+∗
+14Adaptive Swarm Mesh Refinement
+is numerically approximated over evaluations at the midpoints p of the reference mesh as
+Ω
+∗m
+(cid:88) (cid:0) (cid:1)2
+Volume(Ω ∗m) u
+Ω
+∗(p
+Ω
+∗m)−u Ωt(p
+Ω
+∗m) . (8)
+Ω Ω
+∗m∈ ∗
+We normalize the resulting value by that of the initial mesh for comparability across PDEs,
+and call the resulting metric the remaining squared mesh error. This squared error metric
+captures the overall error of the solution on the refined mesh, while punishing outliers. It
+differs from our optimization objective in Equation 6, which instead rewards minimizing the
+maximum error of the solution on the refined mesh. Appendix C.4 discusses and evaluates a
+mean error and an approximation of the maximum error as alternate metrics. We list further
+algorithm and network hyperparameters in Appendix E.1.
+4.4 RL-AMR Baselines.
+We compare to ASMR (Freymuth et al., 2023) and several recent non-stationary RL-AMR
+methods(Yangetal.,2023a,b;Foucartetal.,2023)thathavebeenadaptedtoourapplication,
+focusing on stationary refinements. Following ASMR, we use the rewards as described in the
+respective papers for each method, employing the absolute integrated difference in solution
+compared to the reference mesh, i.e., Equation 8 without the square as an error estimate.
+Single Agent (Yang et al., 2023a) uses the difference in error norm as a global reward
+and marks a single element for refinement in each step via a categorical action over the full
+mesh. Sweep (Foucart et al., 2023) randomly samples a single mesh element and decides on
+its refinement based on local features and a global resource budget during training. The
+method uses the logarithm of the change in error between consecutive steps as a reward.
+During inference, each timestep considers all mesh elements in parallel. VDGN (Yang
+et al., 2023b) employs value decomposition networks (Sunehag et al., 2017) to estimate a
+global Q-function as the sum of element-wise local Q-functions. For a VDGN-like PPO
+variant, we instead analogously decompose the value function. As our method is an extension
+of ASMR (Freymuth et al., 2023), this baselines largely follows our method. However, it
+instead uses the volume-scaled reward in Equation 9, omits the normalization factor in
+the agent mapping in Equation 4, considers an infinite horizon RL setting, and uses less
+regularization in the neural network architecture.
+We use an MPN policy for all RL-AMR methods except for Sweep, which utilizes a simple
+MLP. The RL-AMR methods handle the trade-off between mesh resolution and solution
+accuracy slightly differently. Single Agent simply refines for a number of steps, Sweep uses a
+target number of elements, and the other methods penalize each added element. Here, ASMR
+trains a new policy for each penalty, while only ASMR++ and the VDGN-like baseline
+use a conditional policy that can produce meshes of different resolutions during inference.
+Appendix E.2 lists all baseline-specific hyperparameters, while Appendix E.3 provides details
+on the mesh resolution parameters for all methods.
+4.5 Heuristic Baselines.
+InadditiontotheRL-AMRmethodsabove,wecomparetoatraditionalerror-basedheuristics
+acting on a refinement threshold θ (Binev et al., 2004; Bangerth et al., 2012; Foucart et al.,
+2023). Given an error estimate err(Ωt) for element i, the heuristic marks all elements for
+i
+15Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+refinement for which err(Ωt) > θ ·max err(Ωt). We consider an Oracle Error Heuristic
+i j j
+that uses the absolute integrated difference in solution as its error metric, as well as a
+Maximum Oracle Error Heuristic, for which the error estimate of Equation 5 is used. Both
+variants require the reference mesh Ω to estimate an error, which is expensive to compute
+∗
+and thus may be unavailable during inference. We additionally consider the commonly
+used ZZ Error, which instead uses a superconvergent patch recovery process for its error
+estimate (Zienkiewicz and Zhu, 1992) and does not require access to Ω . As the recovery
+∗
+process averages over neighboring mesh elements, the ZZ Error generally produces smooth
+error estimates. This property can lead to more coherent refinements when compared to the
+purely greedy oracle heuristics, especially when considering the closing operations needed to
+ensure a conforming mesh after every refinement step.
+All heuristics greedily refine based on local error estimates, implicitly assuming that
+refining elements with high error is the best way to minimize the error on the mesh. This
+assumption does not always hold, as, e.g., elliptical PDEs often feature globally propagating
+errors (Strauss, 2007; Foucart et al., 2023). The RL-AMR methods instead learn to optimize
+an objective function, which rewards the error reduction over time. This difference between
+greedily marking elements with a high local error, and learning to anticipate the long-term
+error reduction for any given refinement allows the RL-AMR methods to find more global
+strategies that take multiple refinement steps and non-local information of the mesh elements
+into account.
+4.6 Observation Graph.
+As node features for the observation graph of Section 3.3, we use the mean and standard
+deviation of the FEM solution on the element’s vertices, the element volume and the current
+environment timestep. For ASMR++ and the VDGN-like baseline, we also add the current
+element penality to condition the refinement process of the policy on a given target resolution.
+Some tasks employ additional node features to encode their process conditions, which we
+describe in Appendix A. We use the Euclidean distance between the element midpoints as the
+single edge feature. Compared to using either a distance vector between element midpoints,
+or providing absolute positions, this ensures that the predicted sizing fields are invariant
+under Euclidean group operations (Pfaff et al., 2021; Bronstein et al., 2021).
+5. Results
+5.1 Qualitative Results.
+Figure 5 visualizes a full rollout of ASMR++ on an instance of the heat diffusion task,
+including the per-element refinement markings after every policy step. The method is trained
+to produce a sequence of refinements that improve the solution accuracy enough to justify
+the additional mesh elements, which here corresponds to more refinements along the path
+of the heat source. Figure 3 shows final refined meshes for the same Poisson problem for a
+fixed ASMR++ policy that is conditioned on different values of the element penalty α. Here,
+decreasing the element penalty results in more mesh elements and thus a more accurate
+solution. Our method is able to focus on the interesting parts of the mesh regardless of
+the final mesh resolution, thus providing a favorable trade-off between solution accuracy
+16Adaptive Swarm Mesh Refinement
+Figure 5: Visualization of a full ASMR++ rollout for a heat diffusion example, including
+the policy action that marks individual elements for refinement. The odd columns show
+which elements the policy marks for refinement (designated by a green tick), while the even
+columns show the resulting refined meshes. ASMR++ produces a sequence of refinements
+that improves solution accuracy while using few total mesh elements.
+and computational cost. Figure 4 provides final refinements of ASMR++ on exemplary
+systems of equations for all considered tasks. The refinement strategy individually adapts to
+each task, choosing to refine elements that decrease the simulation error regardless of the
+underlying system of equations. We further explore this error reduction property in Figure 6.
+The visualization shows that our method achieves a much more uniform distribution of errors
+across the mesh when compared to simple uniform refinement, while also acquiring a much
+smaller simulation error for the same number of mesh elements.
+Appendix F visualizes all methods on the Stokes flow task to showcase the different
+refinement behaviors for different target mesh resolution parameters. Appendix G provides
+additional ASMR++ visualizations for the remaining tasks, including different camera angles
+for the 3-dimensional variant of Poisson’s equation that uses tetrahedral meshes.
+5.2 Quantitative Results.
+Quantitatively, we measure the mesh quality using a Pareto plot of the number of elements
+and the normalized error of the mesh. We evaluate each RL-AMR policy on 100 evaluation
+environmentspermeshresolutionparameter. Wethencalculatetheinterquartilemean(Agar-
+waletal.,2021)oftheresulting100usedelementsandnormalizederrorsofthefinalproduced
+meshes, andplottheresultingvalues. Thisprocessisdonefor10independentlytrainedpolicy
+seeds and repeated across a range of mesh resolution parameters. For methods that require
+a fixed target mesh resolution, we use 10 different parameters, for the adaptive methods
+17Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+we instead use 20 parameters, as detailed in Appendix E.3. We further provide a log-log
+quadratic regression over the aggregated results of each method as a general trend-line. To
+improve clarity and focus on representative behavior, we omit data points with abnormally
+high element counts, which are sometimes produced as outliers by the VDGN-like baseline.
+Mesh Elements: 1472
+0.175
+0.150
+0.125
+0.100
+0.075
+0.050
+0.025
+0.000
+Uniform solution Error of uniform mesh
+Mesh Elements: 1259
+0.175
+0.150
+0.125
+0.100
+0.075
+0.050
+0.025
+0.000
+ASMR++ solution Error for ASMR++ mesh
+Figure 6: Comparison of exemplary ASMR++ refinement with a uniform mesh on Poisson’s
+equation. (Left) Mesh and PDE solution for a uniform mesh (Top) and our approach
+(Bottom). Both meshes have a similar number of total elements, but different spatial
+resolutions. (Right) Normalized squared difference in solution to the ground truth reference
+Ω , evaluated at each reference element’s midpoint. ASMR++ has less than a third of the
+∗
+error of the uniform mesh, and a much more even distribution of errors across the mesh.
+We experiment with PPO as an on-policy algorithm and DQN as an off-policy variant
+of the RL backbone for all RL-AMR methods on the Stokes flow task in Appendix C.2.
+All RL-AMR methods, including ASMR++, perform better with PPO, indicating that an
+on-policy algorithm is favorable when dealing with action and observation spaces of varying
+size. Further, we compare our MPNs to the Graph Attention Network (GAT)-like (Velickovic
+18Adaptive Swarm Mesh Refinement
+et al., 2018) architecture proposed by VDGN (Yang et al., 2023b) in Appendix C.3. For
+both our method and the VDGN-like baseline, the MPN shows minor but consistent benefits
+in performance. We thus use PPO and MPNs in all other experiments.
+Appendix C.1 compares the performance of the ZZ Error Heuristic when applied directly
+to the initial mesh to variants that instead uniformly refine the mesh once or twice before
+using the estimator. We find that the method benefits from 2 uniform initial refinements,
+and use this variant for all experiments. This tuning of the initial meshes in not required by
+the RL-AMR methods and prevents coarse refinements.
+ASMR++(Ours) ASMR UniformRefinement
+SingleAgent VDGN-like Sweep
+Heuristic(OracleError) Heuristic(Max. OracleErr.) Heuristic(ZZError)
+Laplace’s Equation - 4 Refinement Steps Laplace’s Equation - 6 Refinements
+100
+100
+10−1
+10−1
+10−2
+10−2 10−3
+10−4
+10−3
+10−5
+0.0 0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103) Elements( 103)
+× ×
+Figure 7: Pareto plot of normalized squared errors and number of final mesh elements
+on Laplace’s equation. (Left) All RL-AMR methods produce better-than-uniform meshes
+for shallow refinements and reference meshes with only 4 refinement steps. (Right) When
+increasingthecomplexityto6refinementsteps, mostRL-AMRmethodsexhibithighvariance
+in mesh quality and sometimes fail to provide useful meshes. ASMR++ consistently produces
+high-quality meshes for both task complexities, performing on par with or better than the
+heuristics and providing a slight but consistent benefit over ASMR.
+Using these initial results, we compare the different approaches on Laplace’s equation.
+On the left of Figure 7, we evaluate a simplified setup that uses 4 refinement steps for both
+the reference mesh and the AMR algorithms, except for Single Agent, which instead refines
+for up to 100 time steps. All methods clearly outperform uniform refinements. The ZZ Error
+Heuristic performs well for larger meshes, but can not produce meshes with few elements as
+it starts with 2 uniform initial refinements.
+The right of Figure 7 increases the complexity to 6 refinement steps, and 400 time steps
+for Single Agent. Similarly, Figure 8 provides results on the remaining 6 tasks. Across
+all tasks, only ASMR and ASMR++ can handle larger meshes while the other RL-AMR
+methods fail to provide better-than-uniform meshes or exhibit high variance in the quality
+of the proposed refinements. Our method additionally outperforms all heuristics, including
+19
+rorrederauqSFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+ASMR++(Ours) ASMR UniformRefinement
+SingleAgent VDGN-like Sweep
+Heuristic(OracleError) Heuristic(Max. OracleErr.) Heuristic(ZZError)
+Poisson’s Equation Stokes Flow
+100 100
+10−1 10−1
+10−2 10−2
+10−3 10−3
+10−4 10−4
+10−5 10−5
+0.0 2.0 4.0 6.0 8.0 10.0 0.0 2.0 4.0 6.0 8.0 10.0
+Linear Elasticity Heat Diffusion
+100
+100
+10−1
+10−1
+10−2
+10−2 10−3
+10−3
+10−4
+10−5
+10−4
+0.0 2.0 4.0 6.0 8.0 10.0 12.0 0.0 2.0 4.0 6.0 8.0
+Neumann Boundaries 3d Poisson’s Equation
+100 100
+10−1
+10−2
+10−1
+10−3
+10−2
+10−4
+10−5
+0.0 2.5 5.0 7.5 10.0 12.5 15.0 17.5 0.0 5.0 10.0 15.0 20.0
+Elements( 103) Elements( 103)
+× ×
+Figure 8: Pareto plot of normalized squared errors and number of final mesh elements across
+differen tasks. On all tasks, the error decreases in a log-linear relation to the number of
+used elements. ASMR++ gracefully scales to meshes of more than ten thousand elements,
+significantly outperforming the learned Single Agent, VDGN-like and Sweep in terms of
+consistency and mesh quality. ASMR++ also slightly improves over ASMR on most tasks
+and generally compares favorably to the Oracle, Maximum Oracle and ZZ Error Heuristics.
+20
+rorrederauqS
+rorrederauqS
+rorrederauqSAdaptive Swarm Mesh Refinement
+the Oracle Error and Maximum Oracle Error Heuristics, in several instances. These results
+indicate that our optimization method facilitates learning non-local long-horizon refinement
+strategies that minimize the mesh error instead of simple targeting elements that currently
+have a high error. ASMR++ further improves over ASMR in most settings, especially in the
+complex Stokes flow task where it compares well to the different Heuristics. In the tasks
+where ASMR++ does not perform better than ASMR, both perform similar to or better
+than all heuristics, potentially indicating that both methods offer near-optimal refinements
+for these tasks. On the 3d Poisson’s Equation, the different methods quickly converge to
+a relatively high final mesh error, likely due to the difference in mesh topology between
+the refined meshes and the uniform reference that is caused by the longest edge bisection
+refinement strategy.
+Appendix C.4 presents additional results using a mean error and an adapted maximum
+error metric. On both metrics, ASMR++ is generally competitive with or better than the
+Heuristics and significantly outperforms the Single Agent, Sweep and VDGN-like baselines.
+Comparing the different metrics, the Maximum Oracle Error Heuristic improves over the
+Oracle Error Heuristic on the maximum error metric and vice versa. Likewise, ASMR,
+which uses a scaled variant of the mean error instead of the maximum objective of Equa-
+tion 6, outperforms ASMR++ on half of the tasks in terms of the remaining mean error,
+while ASMR++ is superior for every setup when evaluating the maximum error metric.
+5.3 Ablations and Additional Experiments.
+We conduct several ablations and additional experiments on the challenging Stokes flow task
+to determine what makes our approach uniquely effective. These experiments individually
+change a single aspect of ASMR++ while leaving the rest of the approach unchanged.
+Reward. We compare the local maximum error reward of Equation 6 to different local
+and global variants. For the global variants, we obtain a scalar reward function by averaging
+over the local reward functions. Here, we compute the return using Equation 1, i.e., without
+mapping between agents over time. In addition to the maximum reward of Equation 6, we
+compare to the volume-scaled reward proposed by ASMR in Equation 9, and a variant that
+simple rewards a decrease in integrated error, i.e., Equation 9 without the volume scaling
+term.
+Figure 9 shows the results. Using any type of global reward function leads to unstable
+refinements, especially for large meshes, likely because the credit for each reward cannot
+be properly assigned to the large number of agents in the system. For the local reward
+variants, the local maximum reward performs best, closely followed by the volume-scaled
+variant. Simply integrating the error of each mesh element and rewarding a reduction in
+this integrated error performs poorly for finer meshes. This result is likely the case because
+smaller elements generally contain less integration points of the reference mesh, and thus
+have less integrated error to reduce. Optimizing this reward produces meshes that have
+an even distribution of integrated element errors, rather than refinements that effectively
+decrease the average error on the mesh.
+Return and Agent Mapping. Equation 4 enables the computation of a TD error across
+agents at successive time steps by mapping each agent at time step t to every agent it creates
+21Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Stokes Flow - Reward Type
+100 Reward:
+LocalMax. (Ours)
+10−1 LocalSum
+LocalSum(α min×10−4)
+10−2 LocalScaledSum
+GlobalMax.
+10−3
+GlobalSum
+GlobalScaledSum
+10−4
+Uniform Refinement
+10−5
+0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103)
+×
+Figure 9: Pareto plot of normalized squared errors and number of final mesh elements on
+the Stokes flow task for different reward functions for ASMR++. In general, a using a
+local reward function, i.e., individual rewards for each agent, is crucial for the performance
+of the method. Here, optimizing the reduction in total error per mesh element leads to
+sub-optimal meshes for large numbers of elements, even when significantly decreasing the
+minimum sampled element penalty α . Scaling this optimization with the inverse area of
+min
+each mesh element as done by ASMR offsets this issue, but performs worse than the simpler
+maximum reward of ASMR++.
+at time step t+1. In this setup, each spawned agent is fully attributed to its predecessor,
+meaning the originating agent is considered wholly responsible for any agent it generates.
+Compared to ASMR, we additionally apply a regularization to this mapping through the
+ratio
+Ωt
+. An alternative approach would be to instead limit the total responsibility per
+Ωt+1
+agent to 1, achieved by averaging the mapping as
+I(Ωt+1 ⊆ Ωt)
+ϕ ′it
+j
+:=
+(cid:80)
+I(j
+Ωt+1
+⊆i Ωt).
+j j i
+′ ′
+We assess these two methods in Figure 10, finding that the normalization factor
+Ωt
+Ωt+1
+significantly boosts performance, likely due to its role as a regularizer during training.
+Furthermore, using a sum mapping, i.e., assigning each new agent a weight of 1 from its
+creator, proves more effective than the mean mapping, which averages the total mapping
+weights per old agent. We additionally explore optimizing a return that omits the global
+term in Equation 7, i.e., that only optimizes the local return of each agent. Here, we find
+that the partially global objective improves performance, likely because it aids in global
+decision making.
+Target Mesh Resolutions Each RL-AMR method uses a single parameter to control
+the number of target elements of the final refined mesh. ASMR++ and VDGN condition
+their policy on an element penalty α, while ASMR specifies a fixed element penalty as a
+hyperparameter. Similarly,Sweep usesafixedbudgetN perpolicy,andSingleAgent trains
+max
+22
+rorrederauqSAdaptive Swarm Mesh Refinement
+Stokes Flow - Return and Agent Mapping
+100
+Agent Mapping:
+10−1
+NormalizedSum(Ours)
+10−2 Unnorm. Sum(ASMR)
+NormalizedMean
+10−3 Unnorm. Mean
+LocalReturns
+10−4
+Uniform Refinement
+10−5
+0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103)
+×
+Figure 10: Pareto plot of normalized squared errors and number of final mesh elements on the
+Stokes flow task for different variants of the agent mapping ϕ and local returns of ASMR++.
+The normalization factor in the mapping of Equation 4 greatly improves performance. Using
+a sum instead of a mean mapping additionally improves performance. Adding a global
+term to the returns, as done in Equation 7 further improves performance, indicating that a
+partially global objective improves global decision making of the individual agents.
+on a specified number of rollout steps T. Additional details are provided in Appendix E.3
+and Table 1.
+Figure11comparestrainingASMR++onafixedelementpenalty,asdoneinASMR (Frey-
+muth et al., 2023), to training on an adaptive penalty that the policy is conditioned on for
+eachrollout. Itadditionallyevaluatessamplingthepenaltyuniformlyinsteadoflog-uniformly
+duringtraining. Interestingly,trainingASMR++onafixedelementpenaltydoesnotimprove
+performance, suggesting that the ASMR++ policy is able to learn to condition on a concrete
+α value. These results imply that ASMR++ can successfully learn optimal tradeoffs between
+element cost and error reduction and apply it during inference. Thus, we can train a single
+policy for a range of mesh granularities, omitting the need for ASMR’s expensive re-training
+for each target granularity. If we train on uniformly instead of log-uniformly sampled values
+ofα, themethodpredominantlyprovidesmesheswithlownumbersofelements, likelybecause
+there is a logarithmic relationship between the element penalty and the number of mesh
+elements.
+Figure 12 visualizes the methods’ performance for different target resolutions. Here,
+ASMR++ provides meshes with consistent numbers of elements for a given target resolution,
+while the other RL-AMR baselines produce poorly refined meshes or inconsistent refinement
+granularities over target resolutions.
+Additional Ablations Appendix C.3 provides additional ablations over changes in the
+network architecture, varying numbers of training PDEs and different scales of the element
+penalty parameter in the reward. The results indicate that as few as 10 training PDEs are
+sufficient to provide accurate refinements, with performance increasing for up to 100 PDEs.
+In terms of architecture, edge dropout (Rong et al., 2019) of 0.1, i.e., randomly omitting
+23
+rorrederauqSFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Stokes Flow - α Variants
+100
+10−1
+10−2 ASMR++(Ours)
+ASMR++(Fixedα)
+10−3 ASMR++(Uniformα)
+Uniform Refinement
+10−4
+10−5
+0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103)
+×
+Figure 11: Pareto plot of normalized squared errors and number of final mesh elements
+on the Stokes flow task for different configurations of the element penalty α for ASMR++.
+Training a new policy for each value of α, as done by ASMR (Freymuth et al., 2023), does
+not significantly improve performance, which indicates the utility and benefit of training a
+conditional policy on a range of α values. Sampling α uniformly instead of log-uniformly
+during training leads to meshes with significantly fewer elements, as those values that would
+create large meshes are sampled less often.
+10% of edges in the mesh topology during training, slightly improves performance. Linearly
+increasing or decreasing the range of the element penalty α leads to meshes with fewer or
+more elements, respectively, yet ASMR++ always provides stable and efficient refinements
+for the respective element penalty ranges.
+5.4 Runtime Comparison.
+Figure 13 shows the runtime comparison between our method and direct computation of the
+uniform reference Ω across all tasks. Our method’s timing includes the creation of the initial
+∗
+mesh, and iteratively solving the system of equations on the mesh, creating an observation
+graph, querying the policy for a refinement strategy, and finally refining a total of 6 times.
+For the uniform mesh, we simply measure the time it takes to refine the initial mesh 6 times
+and to subsequently solve the problem on the resulting mesh. We use a single 8-Core AMD
+Ryzen 7 3700X Processor for all measurements.
+Our approach is always significantly faster than computing the fine-grained reference
+despite the comparatively large computational overhead. A higher squared error requires less
+computation time, showing that ASMR++ can adapt to task-specific computational budgets.
+The Stokes flow task uses comparatively expensive P /P Taylor-Hood-elements (John et al.,
+1 2
+2016), causing our method to be more than 30 times faster than Ω even for highly refined
+∗
+and accurate final meshes.
+The other RL-AMR methods feature a similar iterative refinement procedure and thus
+runtime, but produce meshes of worse quality when compared to ASMR++. In contrast, the
+Oracle Error Heuristic and Maximum Oracle Error Heuristic produce high-quality meshes,
+24
+rorrEderauqSAdaptive Swarm Mesh Refinement
+LowTargetResolution IntermediateTargetResolution HighTargetResolution Uniform Refinement
+ASMR++ (Ours) VDGN-like
+100
+10−1
+10−2
+10−3
+10−4
+Single Agent Sweep
+100
+10−1
+10−2
+10−3
+10−4
+0.0 2.0 4.0 6.0 8.0 10.0 0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103) Elements( 103)
+× ×
+Figure 12: Pareto plot of normalized squared errors and number of final mesh elements for
+the Stokes flow task for all RL-AMR methods. Each plot represents a single method for
+different evaluations of its respective mesh resolution parameters, as detailed in Appendix E.3
+and Table 1. Small blue dots indicate meshes target with few elements, while large red dots
+correspond to finer target meshes. While the different RL-AMR baselines provide poor-
+performing or inconsistent policies, ASMR++ yields accurate refinements and consistent
+numbers of final mesh elements when the policy is conditioned on any given target resolution.
+but require the calculation of Ω , which dominates their runtime. The ZZ Error Heuristic
+∗
+does not require access to Ω and is thus comparatively fast, but needs to tune the initial
+∗
+mesh and varies in solution quality depending on the considered task.
+5.5 Generalization Capabilities.
+We further experiment with the generalization capabilities of ASMR++ to unseen and larger
+domainsduringinference. AppendixD.1showsthegeneralizationcapabilitiesofourapproach
+when evaluated for different domains and load functions for Poisson’s equation, indicating
+that it strongly generalizes to arbitrary domains and process conditions during inference.
+We additionally train on a variant of Poisson’s equation that may sample load functions
+modes outside of the considered domain and randomizes solution values on the domain’s
+boundaries. These changes effectively modify the training PDEs to mimic small patches of a
+larger mesh, acting as a data augmentation technique that facilitates up-scaling to larger
+domains and meshes during inference. An exemplary refinement on a 20×20 from a policy
+trained on 1×1 domains can be seen in Figure 14. The refined mesh has more than 50000
+elements, which is significantly larger than any meshes seen during training, yet accurately
+25
+rorrEderauqS
+rorrEderauqSFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+All Tasks - Runtime Comparison
+Laplace Poisson StokesFlow LinearElasticity
+HeatDiffusion NeumannBoundaries 3dPoisson
+100
+1000
+30
+300
+10
+100
+3
+1 30
+0.3 10
+0.1
+3
+0.03
+1
+10−5 10−4 10−3 10−2 10−1 100 0.0 5.0 10.0 15.0 20.0
+SquaredError Elements( 103)
+×
+Figure 13: Wallclock-time evaluation of ASMR++ for all tasks. Each color corresponds to a
+different task. (Left) Runtime of ASMR++ and the squared error when compared to the
+uniform solution Ω , which has an error of 0 by definition. (Right) Speed-up of ASMR++
+∗
+compared to calculating the uniform solution Ω , which contains roughly 105 elements, with
+∗
+concrete numbers varying depending on the domain. Our approach is able to quickly produce
+high-quality meshes, achieving speedups of 1 to 2 orders of magnitude, depending on the
+task and target resolution of the mesh.
+captures the interesting parts of the solution. The full refinement procedure is roughly 100
+times faster than solving the fine-grained reference Ω .
+∗
+Figure 15 shows the mesh error and inference speed for ASMR++ policies trained on the
+augmented setup for Poisson’s equation when evaluated on domains of different sizes. For
+the 9×9 domain we used 10 instead of 100 evaluation PDEs due to their increased runtime
+and memory requirements. While the number of elements for uniform refinements is linear in
+the domain’s volume, meshes created by our method grow less quickly to achieve the same
+error threshold. These results suggest that there are fewer elements with a significant error
+in larger domains. Accordingly, evaluating the reference mesh Ω quickly becomes expensive
+∗
+as the domain size gets larger, while ASMR++ provides fast and efficient refinements. For
+large meshes, our method is about 100 times faster than evaluating Ω while maintaining
+∗
+a mesh error of less than 0.001. Training details, as well as additional visualizations for
+adapted training PDE and final refined meshes for different domain sizes are provided in
+Appendix D.2.
+The generalization capabilities of our method are likely a result of the agent-wise opti-
+mization and the utilized MPN, which facilitate refinement strategies that are largely based
+on local element neighborhoods. Especially the ability of ASMR++ to efficiently up-scale
+to larger meshes during inference opens up promising applications for practical engineering
+applications. A policy can be trained on small and cheap environments, and then used in
+larger and more challenging setups during inference.
+26
+]s[emiT
+]
+[ecnerefer
+.svpudeepS
+×Adaptive Swarm Mesh Refinement
+Full mesh
+Left zoom Right zoom
+Figure 14: (Top): Visualization of a final ASMR++ mesh on a 20 × 20 spiral domain.
+The mesh consists of 52223 elements and the full refinement procedure takes about 12.2
+seconds on a regular CPU. In contrast, computing the uniform refinement Ω takes roughly
+∗
+20 minutes. (Bottom): Close-ups of the full mesh.
+27Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Poisson’s Equation - Domain Size Generalization
+3 3 5 5 ReferenceMeshes
+× ×
+7 7 9 9 UniformRefinement
+× ×
+100 100
+30
+10−1
+10
+10−2
+3
+10−3
+1
+10−4 0.3
+0.1
+10−5
+0.03
+103 104 105 103 104 105
+NumberofElements NumberofElements
+Figure 15: ASMR++ mesh error and inference speed over different sizes N ×N of general-
+ization domains after training on augmented 1×1 domains. Each evaluated domain size
+is denoted by a different color. (Left) Pareto plot of squared errors and number of final
+mesh elements for ASMR++ and uniform refinements. Our method efficiently up-scales
+to larger domains during inference. (Right) Wallclock-time in seconds of ASMR++ for
+different numbers of elements compared to the uniform reference Ω (dashed lines, color
+∗
+corresponding to domain size). While evaluating the uniform reference quickly becomes
+expensive, ASMR++ provides efficient and comparatively cheap refinements even for larger
+domains.
+6. Conclusion
+WeintroduceASMR++,anadaptivemeshrefinementmethodleveragingswarmreinforcement
+learning that increases the efficiency of numerical simulations with the finite element method.
+Our method iteratively evaluates a system of equations on a mesh, generates an observation
+graph from the mesh and solution, processes this graph with a message passing graph
+neural network, and subsequently marks mesh elements for subdivision. We treat each mesh
+as a homogeneous agent in a collaborative multi-agent system, training all agents with a
+shared policy. Crucially, we provide a per-agent reward that balances the local reduction
+in simulation error against the cost of adding additional mesh elements. This cost can
+be tuned during inference to generate meshes of different resolution using the same policy.
+Accommodating different mesh sizes within an episode due to subdivisions, we propose a
+location-based mapping that assigns each new mesh element to the element in the previous
+mesh that created it.
+Experimental results on static, conforming 2d and 3d meshes demonstrate that this
+agent-wise approach creates high-quality refinements for meshes with thousands of elements
+and without requiring any expensive error estimate during inference. ASMR++ surpasses
+both existing reinforcement learning-based methods and traditional refinement techniques,
+28
+rorrEderauqS
+]s[emiTAdaptive Swarm Mesh Refinement
+achieving a mesh quality comparable to expensive oracle-based error heuristics. We conduct
+additional experiments that highlight the benefits of coupling our per-agent reward function
+with our temporal agent mapping. Further, the method directly generalizes to different
+process conditions and domains during inference, and can be combined with simulation-
+specificdataaugmentationinthetrainingenvironmenttoscaletosignificantlylargerdomains
+and meshes during inference. For the considered systems of equations, our method is up to
+30 times faster than using a uniform refinement in small domains and can exceed a speed-up
+of factor 100 when scaling to larger evaluation setups during inference.
+Limitations and Future Work Our method requires solving the system of equations
+on the mesh following each refinement, which quickly becomes expensive for finer meshes.
+To mitigate this, we aim to integrate auxiliary physics-based losses or policy distillation
+methods to implicitly learn to predict which regions to refine from just the problem’s process
+conditions. Additionally, our reward function is currently based on an expensive reference
+mesh and solution. While this reference is only required during training and ASMR++
+generalizes well from as few as 10 different training systems of equations, the maximum
+mesh resolution is limited by this reference. Lastly, we currently focus on static problems. In
+future work, we will extend our method to time-dependent systems of equations and thus
+include both mesh refinement and coarsening operations.
+Acknowledgements and Disclosure of Funing
+NF was supported by the BMBF project Davis (Datengetriebene Vernetzung für die in-
+genieurtechnische Simulation). This work is also part of the DFG AI Resarch Unit 5339
+regarding the combination of physics-based simulation with AI-based methodologies for the
+fast maturation of manufacturing processes. The financial support by German Research
+Foundation (DFG, Deutsche Forschungsgemeinschaft) is gratefully acknowledged. The au-
+thors acknowledge support by the state of Baden-Württemberg through bwHPC, as well
+as the HoreKa supercomputer funded by the Ministry of Science, Research and the Arts
+Baden-Württemberg and by the German Federal Ministry of Education and Research.
+29Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Appendix A. Systems of Equations
+The following briefly describes the system of equations used for our experiments, including
+weak PDEs, domains and process conditions. Each task uses an underlying system of
+equations and varies either the process conditions, the used domain, or both. For some tasks,
+we add additional information about the task as node features to the observation graph of
+the MPN policy.
+A.1 Laplace’s Equation.
+ConsideradomainΩboundedinternallyby∂Ω andexternallyby∂Ω . Weseekafunction
+in out
+u(x) satisfying Laplace’s Equation
+(cid:90)
+∇u·∇v dx = 0 ∀v ∈ V,
+Ω
+where v(x) denotes the test function and the solution u(x) has to satisfy the Dirichlet
+boundary conditions
+u(x) = 0, x ∈ ∂Ω and u(x) = 1,x ∈ ∂Ω .
+in out
+The domain is a unit square (0,1)2 with a squared hole defined by the inner boundary ∂Ω .
+in
+For each system of equations, the hole’s size is uniformly sampled from U(0.05,0.25) in both
+directions, while its center is placed randomly in U(0.2,0.8)2. The minimum distance to
+∂Ω of each face midpoint is included as a node feature.
+in
+A.2 Poisson’s Equation.
+We address Poisson’s Equation
+(cid:90) (cid:90)
+∇u·∇vdx = fvdx ∀v ∈ V,
+Ω Ω
+where f(x) is the load function, and v(x) is the test function. The solution u(x) must satisfy
+u(x) = 0 on ∂Ω. We use L-shaped domain Ω, defined as (0,1)2\(p ×(1,1)), where the lower
+0
+left corner p is sampled from U(0.2,0.95) in x and y direction.
+0
+We employ a Gaussian Mixture Model with three components for each problem’s load
+function. The mean of each component is drawn from U(0.1,0.9)2, with rejection sampling
+ensuring all means reside within Ω. We then independently draw diagonal covariances from a
+log-uniform distribution exp(U(log(0.0001,0.001))) and randomly rotate them to yield a full
+covariance matrix. Component weights are generated from exp(N(0,1))+1 and subsequently
+normalized. The load function evaluation at each face’s midpoint is used as a node feature.
+A.3 Stokes Flow.
+Let u(x) and p(x) represent the velocity and pressure fields, respectively, in a channel flow.
+We analyze the Stokes flow, aiming to solve for u and p without a forcing term, i.e.,
+(cid:90) (cid:90)
+ν ∇v·∇u dx− (∇·v)p dx = 0 ∀v ∈ V,
+Ω Ω
+30Adaptive Swarm Mesh Refinement
+(cid:90)
+(∇·u)q dx = 0 ∀q ∈ V,
+Ω
+with test functions v(x) and q(x) (Quarteroni and Quarteroni, 2009). The velocity field at
+the inlet is defined as
+u(x = 0,y) = u y(1−y)+sin(φ+2πy).
+P
+At the outlet, we impose ∇u(x = 1,y) = 0, and assume a no-slip condition u = 0 at all other
+boundaries. For numerical stability, we utilize P /P Taylor-Hood elements, with quadratic
+1 2
+velocity and linear pressure shape functions (John et al., 2016).
+Theinletprofileparameteru issampledfromalog-uniformdistributionexp(U(log(0.5,2))).
+P
+The domain is structured as a unit square with three rhomboid holes of length 0.4 and height
+0.2. The holes are centered at y ∈ {0.2,0.5,0.8} and we randomly sample their x-coordinate
+from U(0.3,0.7). We optimize the meshes w.r.t. the velocity vector and present a scalar
+error as the norm of the vectorized velocity error.
+A.4 Linear Elasticity.
+We investigate the steady-state deformation of a solid under stress caused by displacements
+at the boundary ∂Ω of the domain Ω. Let u(x) be the displacement field, v(x) the test
+function, and
+1
+ε(u) = (∇u+(∇u) )
+⊤
+2
+the strain tensor. The linear-elastic and isotropic stress tensor is given as
+σ(ε) = 2µε+λtr(ε)I,
+using Lamé parameters
+Eν E
+λ = and µ =
+(1+ν)(1−2ν) 2(1+ν)
+with a problem specific Young’s modulus E = 1 and Poisson ratio ν = 0.3. Without body
+forces, the problem is given as (Zienkiewicz et al., 2005)
+(cid:90)
+σ(ε(u)) : ε(v) dx = 0 ∀v ∈ V.
+Ω
+We use the same class of L-shaped domains as in the Poisson problem in Section A.2. We
+fix the displacement of the left boundary to 0, i.e., u(x = 0,y) = 0, and randomly sample
+a displacement direction from U[0,π] and magnitude from U(0.2,0.8) to displace the right
+boundary as u(x = 1,y) = u . The stress σ ·n = 0 is zero normal to the boundary at
+P
+both the top and bottom of the part. The task-dependent displacement vector u is added
+P
+as a globally shared node feature to all elements. Our objective includes the norm of the
+displacement field u and the resulting Von-Mises stress, using an equal weighting between
+the two.
+31Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+A.5 Non-Stationary Heat Diffusion.
+Using temperature u(x), a test function v(x), and a thermal diffusivity constant a = 0.001,
+we address a non-stationary thermal diffusion problem defined by
+(cid:90) (cid:90) (cid:90)
+∂u
+dx+ a∇u·∇v dx = fv dx ∀v ∈ V.
+∂t
+Ω Ω Ω
+Here, f(x,y) is a position-dependent heat distribution
+f(x,y) = 1000 exp(−100 ((x−x (τ))+(y−y (τ)))).
+p p
+The position of the heat source’s path p (τ) = (x (τ),y (τ)) is linearly interpolated over
+τ p p
+time as
+τ
+p = p + (p −p ).
+τ 0
+τ
+τmax 0
+max
+The start and goal positions p and p are randomly drawn from the entire domain. The
+0 τmax
+temperature u ∈ ∂Ω is set to zero on all boundaries. We use a total of τ = 20 uniform
+max
+time steps in {0.5,...,10} and an implicit Euler method for the time-integration. Domain
+geometry is derived from 10 equidistant points on a circle centered at (0.5,0.5) with a radius
+of 0.4. Each point is randomly distorted by a value U(−0.2,0.2)2 before we proceed to
+calculate the points convex hull as our domain. We finally normalize the convex hull to lie in
+(0,1)2. The result is a family of convex polygons with up to 10 vertices. We provide and
+measure the error and solution of the final simulation step, and provide the distance to the
+start and end position of the heat source as additional node features for each element.
+A.6 Neumann Boundaries.
+We adapt Poisson’s Equation in Section A.2 to include Neumann boundary conditions. Using
+star-shaped domains, we randomly select half the line segments ∂Ω that make up the
+l
+boundary of the star as Neumann boundaries, and use zero Dirichlet boundary conditions
+for the remaining segments. Each selected line segment is assigned a random sinusoidal
+Neumann boundary condition
+∇u·n = 10·A·p x·(1−p x)·sin(πνp x), x ∈ ∂Ω l,
+where n(x) denotes the normal vector of the boundary segment, p x ∈ [0,1] is the normalized
+position along the line segment, A ∈ U(1,3) the amplitude and ν ∈ {3,5,7} the frequency.
+To create the star-shaped domains, we define an outer radius of 0.5 and an inner radius
+of 0.2 from a point centered at (0.5,0.5). We then sample a number of star points in U(3,5)
+and equidistantly interleave them between the two boundaries. We randomly distort each
+point by U(−0.05,0.05)2 before applying a random rotation and normalizing the full domain
+to be within (0,1)2. Initial meshes are created with a target volume of 0.02 instead of the
+0.05 used for the other tasks to compensate for the lower total volume of the star-shaped
+domains, and the diagonal covariances for the Gaussian mixture model load function are
+drawn from U(0.00005,0.0005). Each element gets the distance to the closest Neumann and
+Dirichlet boundaries as additional node features.
+32Adaptive Swarm Mesh Refinement
+A.7 3-Dimensional Poisson’s Equation.
+Finally, we extend Poisson’s Equation in Section A.2 to a 3-dimensional domain. We use a
+rectangular plate of length l = 1, width l = 0.5 and height l = 0.1 as our domain, and
+x y z
+create an initial mesh from by dividing it into 0.13 cubes and triangulating each cube. We
+assign Dirichlet boundary conditions
+u(x = 0,y,z) = u(x = 1,y,z) = u(x,y = 0,z) = u(x = 1,y = 0.6,z) = 0
+on the sides of the plate and define natural boundary conditions on the lower z = 0 and
+upper side z = 0.1 of the plate. We use tetrahedral elements for this task, allowing for a
+fully volumetric mesh, and solve with an iterative instead of a direct solver to accommodate
+the larger number of elements. The remesher uses longest edge bisection (Rivara, 1984;
+Suárez et al., 2005) to halve marked elements, whereas the 2-dimensional domains employ
+the red-green-blue refinement method (Carstensen, 2004).
+Appendix B. Further Experiments
+B.1 Experiment Setup.
+We repeat each experiment for 10 different random seeds, randomizing the parameters of
+the neural network as well as the PDEs, domains and process conditions. We normalize all
+domains to unit size unless mentioned otherwise. We create initial meshes with meshpy1
+with a target element size of 0.05 for all tasks except for the Neumann boundary task, which
+uses a target element size of 0.02. For all experiments, we terminate an episode with a large
+negative reward of −1000 when a threshold of 20000 elements, respectively 50000 elements
+for the 3d Poisson task, is exceeded. Unless mentioned otherwise, we train all policies on
+100 randomized systems of equations, but evaluate on the same set of 100 fixed systems of
+equations across different methods and seeds for better comparability. All experiments are
+run for up to 3 days on 8 cores of an Intel Xeon Platinum 8358 CPU, but usually terminate
+within a single day.
+We train a total of 5 RL-AMR methods on 7 separate tasks for 10 repetitions each.
+Since 3 of these methods train on fixed number of target mesh elements, this leads to
+(2+(3·10))·7·10 = 2240 core experiments. A similar combined number of experiments is
+needed for the heuristics, ablations and preliminary experiments.
+B.2 Volume Reward.
+Equation 6 rewards the reduction in maximum element error for a given refinement. While
+this has been proposed as an ablation by ASMR (Freymuth et al., 2023), it instead uses a
+different reward for all experiments. This reward considers a numerically integrated error
+per element, i.e., replaces Equation 5 with
+(cid:88) (cid:12) (cid:12)
+eˆrr(Ωt i) ≈ Volume(Ω ∗m)(cid:12)u
+Ω
+∗(p
+Ω
+∗m)−u Ωt(p
+Ω
+∗m)(cid:12)
+Ω Ωt
+∗m⊆ i
+1. https://github.com/inducer/meshpy
+33Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+and changes Equation 6 to a volume-scaled reduction in this integrated error, i.e.,
+   
+1 (cid:88) (cid:88)
+r(Ωt) := err(Ωt)− Mt err(Ωt+1)−α Mt −1. (9)
+i Volume(Ωt) i ij j ij
+i j j
+Both reward formulations evaluates if for any refinement, the reduction in error is greater
+than the cost of adding additional elements. The volume scaling component in Equation 9
+encourages the policy to give priority to refining smaller mesh elements, roughly canceling
+out the volume of the integration points in Equation 5, aiming to reduce the average error
+per unit volume for each element. Optimizing this reward lowers the errors for each mesh
+element, adjusted by the inverse of its volume, which promotes a uniform distribution of
+error in relation to the size of each element across the mesh. Opposed to this, the maximum
+reward of Equation 6 minimizes the maximum error across any integration point in the mesh,
+posing a more direct and clear objective. We compare to this reward in Section C.3 and
+show the difference in performance in Figure 9, finding that both variants perform similarly.
+Appendix C. Extended Results
+The following sections evaluate various algorithmic design choices for the different RL-AMR
+methods and the ZZ Error error heuristic. In particular, we evaluate different RL backbones
+and GNN architectures to ensure a fair comparison between the different approaches. We
+also conduct experiments on various small changes in the setup and training of ASMR++
+to find and explain what makes it effective. All experiments are conducted on the Stokes
+flow task unless mentioned otherwise, as the task requires challenging refinements at various
+parts of the domain.
+C.1 Initial Meshes for the ZZ Error Heuristic.
+Stokes Flow - ZZ Error Heuristic
+100
+10−1
+ZZ Error Heuristic:
+10−2 -NoUniformRefinements
+-1UniformRefinement
+10−3 -2UniformRefinements
+10−4
+Uniform Refinement
+10−5
+0.0 2.0 4.0 6.0 8.0
+Elements( 103)
+×
+Figure 16: Pareto plot of normalized squared errors and number of final mesh elements on the
+Stokes flow task for the ZZ Error Heuristic for 0, 1 and 2 initial uniform mesh refinements.
+A finer initial mesh leads to improved performance for the ZZ Error Heuristic but prevents
+the creation of very coarse meshes, indicating that the initial element size should be tuned
+for the ZZ Error Heuristic.
+34
+rorrEderauqSAdaptive Swarm Mesh Refinement
+Stokes Flow - PPO and DQN
+100 ASMR++(Ours,PPO)
+ASMR++(DQN)
+10−1
+SingleAgent(PPO)
+10−2 SingleAgent(DQN)
+VDGN-like(PPO)
+10−3
+VDGN-like(DQN)
+10−4 Sweep(PPO)
+Sweep(DQN)
+10−5
+Uniform Refinement
+0.0 2.0 4.0 6.0 8.0
+Elements( 103)
+×
+Figure 17: Pareto plot of normalized squared errors and number of final mesh elements on
+the Stokes flow task for the different RL-AMR methods using PPO and DQN backends. The
+on-policy PPO outperforms the off-policy DQN for all methods. Only ASMR++ consistently
+performs better than a uniform mesh.
+Figure 16 demonstrates the performance of the ZZ Error Heuristic applied to the initial
+mesh, in comparison to its performance when the process begins with either one or two
+uniform mesh refinements. The results indicate that initial uniform refinements significantly
+improve the heuristic’s effectiveness, likely because the uniform refinements make it easier
+to identify gradients in key areas, which may be overlooked if the mesh is too coarse.
+Consequently we opt for the twice-refined mesh approach for all experiments. In comparison,
+the RL-AMR methods do not need to tune their initial mesh, as the methods are trained to
+produce optimal refinement sequences.
+C.2 Proximal Policy Optimization and Deep Q-Networks.
+Figure 17 shows results on the Stokes flow task for PPO (Schulman et al., 2017) and
+DQN (Mnih et al., 2013, 2015) as the RL backbone for all RL-AMR algorithms. For the PPO
+version of the VDGN-like baseline, we apply the value decomposition (Sunehag et al., 2017)
+to the value function instead of the Q-function, i.e., we define the value function of the full
+mesh as the sum of value functions of the individual mesh elements. Further, we use a mean
+instead of a sum for the agent mapping of the TD error in Equation 3 for training the Q-value
+of the DQN experiments of ASMR++, as this experimentally increases training stability.
+PPO generally outperforms DQN, suggesting that on-policy optimization is favorable for
+the changing observation and action spaces of AMR. We thus choose PPO for all further
+experiments as it leads to better performance for all methods.
+C.3 Design Choices and Ablations.
+Graph Attention Networks. Figure 18 compares the MPNs of Section 3.3 with the GAT
+architecture proposed by VDGN (Yang et al., 2023b). The MPN slightly improves over the
+GAT for both methods, leading us to choose this architecture for all further experiments.
+35
+rorrederauqSFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Stokes Flow - MPN and GAT
+100
+10−1 ASMR++(Ours,MPN)
+ASMR++(GAT)
+10−2
+VDGN-like(MPN)
+10−3 VDGN-like(GAT)
+Uniform Refinement
+10−4
+10−5
+0.0 2.0 4.0 6.0 8.0
+Elements( 103)
+×
+Figure 18: Pareto plot of normalized squared errors and number of final mesh elements on
+the Stokes flow task for ASMR++ and the VDGN-like baseline for MPN and GAT network
+architectures. For both methods, the MPN shows slightly better performance, though the
+impact of the architecture is comparatively minor.
+Stokes Flow - α Range
+100
+VDGN-like
+10−1
+VDGN-like(α 0.5)
+×
+10−2 VDGN-like(α ×2)
+ASMR++(Ours)
+10−3
+ASMR++(α 0.1)
+×
+10−4 ASMR++(α 10)
+×
+10−5 Uniform Refinement
+0.0 2.5 5.0 7.5 10.0 12.5 15.0 17.5 20.0
+Elements( 103)
+×
+Figure 19: Pareto plot of normalized squared errors and number of final mesh elements
+on the Stokes flow task for different ranges of the element penalty α for ASMR++ and
+the VDGN-like baseline. Increasing or decreasing the element penalty of ASMR++ by a
+factor of 10 leads to finer meshes for larger penalties and vice versa. Regardless of the scale
+of the element penalty, ASMR++ produces high-quality meshes. The VDGN-like baseline is
+comparatively unstable, yielding worse results when adapting the element penalty.
+Element Penalty. Figure 19 shows the effect of different ranges for the element penalty
+α for ASMR++ and the VDGN-like baseline. Here, we scale the minimum and maximum
+sampled penalty by a constant factor during training and inference. While the VDGN-like
+baseline works well for the chosen penalty, it is generally unstable and fails to produce
+consistent refinements for finer meshes, regardless of whether the range of α is scaled by a
+factor of 2. In comparison, ASMR++ produces high-quality meshes for different element
+penalty ranges. When decreasing all penalties by a factor of 10, ASMR++ produces finer
+mesheswithsignificantlymoreelementscomparedtotheregularpenalty. Similarly,increasing
+the penalty makes refinements less attractive, reducing the number of produced elements.
+36
+rorrederauqS
+rorrederauqSAdaptive Swarm Mesh Refinement
+Stokes Flow - Number of Training PDEs
+100 Num. PDEs:
+1 10−1
+10
+10−2 20
+50
+10−3
+100(Ours)
+10−4 200
+10−5 Uniform Refinement
+0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103)
+×
+Figure 20: Pareto plot of normalized squared errors and number of final mesh elements
+on the Stokes flow task for different numbers of training systems of equations. ASMR++
+performs better than uniform on novel evaluation settings when trained on a single system
+of equations, and improves for up to 100 systems of equations in the training set.
+Stokes Flow - Network Architecture
+100
+10−1
+10−2 ASMR++(Ours)
+GATNodeUpdates
+10−3
+NoEdgeDropout
+10−4 Uniform Refinement
+10−5
+0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103)
+×
+Figure 21: Pareto plot of normalized squared errors and number of final mesh elements on
+the Stokes flow task for different network architectures. Performing message passing updates
+with Graph Attention Networks with edge features instead of MPNs does not significantly
+impact performance. Omitting Edge Dropout leads to slightly worse refinements.
+Number of Training PDEs. We generally train ASMR++ on 100 systems of equations,
+each of which consists of a randomly sampled domain and random process conditions.
+Figure 20 explores how fewer or more systems of equations during training affect performance,
+finding that performance improves for up to 100 points of data. Albeit noisy and inconsistent,
+ASMR++ performs better than uniform refinements on the unseen evaluation set when
+trained on a single system of equations, likely due to the mostly local optimization objective
+and network architecture.
+Network Architecture We ablate our choice of network architecture on the right side of
+Figure21. UsingGraphAttentionNetworks(Velickovicetal.,2018)withedgefeaturesinstead
+of our MPN does not significantly impact performance. ASMR++ uses Edge Dropout (Rong
+37
+rorrederauqS
+rorrEderauqSFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+et al., 2019) of 0.1, i.e., it randomly removes every tenth edge of the observation graph,
+regularizing the training data and incentivizing the model to learn general patterns instead
+of spurious correlations. Omitting this dropout leads to slightly worse refinements.
+C.4 Mean and Maximum Error Metrics
+In addition to the squared error evaluated in Section 5, we present results for a mean and
+maximum mesh error metric. We approximate the maximum error as the average of the Top
+0.1% of errors of all integration points p to make it robust to outliers. We normalize both
+Ω
+∗m
+metrics by the error of the initial mesh for each PDE.
+Figure 22 shows pareto plots for all tasks for a normalized mean mesh error. The Oracle
+Error Heuristic outperforms its maximum error counterpart, likely because it selects elements
+with a high integrated error rather than elements with a high maximum error for refinement,
+thus targeting areas with a high mean error. ASMR++ performs on par with or better
+than ASMR on average, even though it explicitly optimizes a decrease in maximum mesh
+error rather than a decrease in its mean error, likely due to its local optimization objective.
+Since the mean mesh error is less sensitive to outliers, more uniform refinements such as
+those produced by Sweep perform better than on other metrics. The mean error directly
+quantifies the difference between the solution calculated on the fine ground truth mesh and
+that produced by the different methods. For most tasks, ASMR++ produces meshes that
+reduce the error between the initial mesh and the ground truth by more than 99% with only
+a few thousand elements.
+Figure 23 visualizes pareto plots for all tasks for the Top 0.1% mesh error. Here, the
+Maximum Oracle Error Heuristic excelswhencomparedtotheregularOracle Error Heuristic,
+likely because it refines elements that have the highest maximum error. Similarly, ASMR++
+outperforms ASMR on all tasks, as it directly minimizes the maximum error instead of a
+scaled version of the average mesh error. Methods that produce relatively uniform meshes,
+such as Sweep, perform considerable worse on this approximated maximum error than on the
+other metrics, likely because uniform refinements produce a lot of elements on mesh areas
+that do not participate in the maximum mesh error. Notably, the maximum error for the 3d
+Poisson’s equation is bound at around 0.1. This is likely the case because we use longest edge
+bisection for the adaptive refinements, which produces refined meshes with local elements
+that significantly differ from that of the fine-grained uniform ground truth reference. As
+bounding the maximum prediction error is important in many applications, these uniform
+meshes can potentially waste a lot of computational resources or lead to worse results than
+the highly adaptive meshes produced by, e.g. ASMR++. Overall, both metrics are consistent
+with the results in Figures 7 and 8.
+Appendix D. Inference-Time Generalization
+D.1 Same-size Generalization Capabilities
+Figure 24 visualizes final ASMR++ meshes on Poisson’s equation on different 1×1 domains
+and load functions that are not seen during training. We experiment on the 5 different
+domain classes that are used for the different tasks, plus a rectangular Ω = (0,1)2 domain.
+For each class, we randomly sample 3 domains and apply a Gaussian mixture model load
+38Adaptive Swarm Mesh Refinement
+ASMR++(Ours) ASMR UniformRefinement
+SingleAgent VDGN-like Sweep
+Heuristic(OracleError) Heuristic(Max. OracleErr.) Heuristic(ZZError)
+Laplace’s Equation (Small) Laplace’s Equation
+100 100
+10−1
+10−1
+10−2
+0.0 0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 0.0 2.0 4.0 6.0 8.0 10.0
+Poisson’s Equation Stokes Flow
+100 100
+10−1 10−1
+10−2
+10−2
+10−3
+0.0 2.0 4.0 6.0 8.0 10.0 0.0 2.0 4.0 6.0 8.0 10.0
+Linear Elasticity Heat Diffusion
+100
+100
+10−1
+10−1
+10−2
+10−2
+0.0 2.0 4.0 6.0 8.0 10.0 12.0 0.0 2.0 4.0 6.0 8.0
+Neumann Boundaries 3d Poisson’s Equation
+100 100
+10−1
+10−1
+10−2
+0.0 2.5 5.0 7.5 10.0 12.5 15.0 17.5 0.0 5.0 10.0 15.0 20.0
+Elements( 103) Elements( 103)
+× ×
+Figure 22: Pareto plot of normalized mean errors and number of final mesh elements for all
+tasks. ASMR++ performs on par with or better than ASMR on all tasks, and both methods
+significantly outperform all RL-AMR baselines.
+39
+rorregniniameRnaeM
+rorregniniameRnaeM
+rorregniniameRnaeM
+rorregniniameRnaeMFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+ASMR++(Ours) ASMR UniformRefinement
+SingleAgent VDGN-like Sweep
+Heuristic(OracleError) Heuristic(Max. OracleErr.) Heuristic(ZZError)
+Laplace’s Equation (Small) Laplace’s Equation
+100
+100
+10−1
+10−1
+10−2
+0.0 0.25 0.5 0.75 1.0 1.25 1.5 1.75 2.0 0.0 2.0 4.0 6.0 8.0 10.0
+Poisson’s Equation Stokes Flow
+100
+100
+10−1
+10−1
+10−2
+10−2
+0.0 2.0 4.0 6.0 8.0 10.0 0.0 2.0 4.0 6.0 8.0 10.0
+Linear Elasticity Heat Diffusion
+100
+100
+10−1
+10−1
+10−2
+10−2 10−3
+0.0 2.0 4.0 6.0 8.0 10.0 12.0 0.0 2.0 4.0 6.0 8.0
+Neumann Boundaries 3d Poisson’s Equation
+100 100
+10−1
+10−2
+10−1
+0.0 2.5 5.0 7.5 10.0 12.5 15.0 0.0 5.0 10.0 15.0 20.0
+Elements( 103) Elements( 103)
+× ×
+Figure 23: Pareto plot of normalized maximum element error and number of final mesh
+elements for all tasks. ASMR++ directly minimizes the error of the maximum element
+during training. In contrast, ASMR optimizes a scaled variant of the average error. Conse-
+quently,ASMR++surpassesASMRonalltasks. BothmethodsoutperformallotherRL-AMR
+baselines.
+40
+srorrEfo%1.0poT
+srorrEfo%1.0poT
+srorrEfo%1.0poT
+srorrEfo%1.0poTAdaptive Swarm Mesh Refinement
+Square Hole L-Shape Rhomboids Polygon Star Square
+Figure 24: ASMR++ refinements for 6 different domains in (0,1)2 and Poisson’s equation
+with a Gaussian mixture model load function with 1, 3 and 5 components. Even though
+the policy is only trained on L-shaped domains with 3 components, is easily generalizes to
+different domains and more components in the applied load function.
+function with 1, 3, and 5 components, respectively. We find that our approach generalizes
+well to novel domains and load functions, likely due to the strong local inductive bias of
+the Swarm RL objective and the MPN policy.
+D.2 Domain Size Up-Scaling
+Figure 25: Random augmented training PDEs and ASMR++ refinements for the domain
+size up-scaling experiments on Poisson’s Equation.
+We additionally experiment with the abilities of ASMR to up-scale to larger domains
+during inference. This up-scaling is crucial for practical scenarios, as it allows applying
+policies that are trained on small and comparatively cheap domains to apply to complex,
+large-scale domains where training would otherwise be too expensive.
+Using Poisson’s equation as an example, we augment the training PDEs to cover a
+larger space of potential simulations and mimic larger mesh segments by altering boundary
+41
+.pmoC
+1
+.pmoC
+3
+.pmoC
+5Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+conditions and load functions. We train our policies on the square hole domains of, e.g.,
+Figure 24. We sample the means of the load function from a centered Gaussian with a
+standard deviation of 0.2, allowing components outside the mesh, and additionally apply
+random Gaussian loads to selected boundary edges to emulate a larger domain outside of
+the simulated mesh. As these changes lead to training PDEs of varying complexity, we use
+10·eˆrr(Ω) instead of err(Ω) in Equation 6, i.e., we omit the per-domain normalization, and
+use an unlimited number of training PDEs to further increase variety. These changes only
+affect the training environments, and do not infer with our training algorithm. Figure 25
+visualizes examplary training PDEs and policy refinements.
+Regular and Augmented Poisson Training
+100
+ASMR++(Default)
+10−1
+ASMR++(Augmented)
+10−2
+Heuristic(OracleError)
+10−3
+Heuristic(Max. OracleErr.)
+10−4 Heuristic(ZZError)
+Uniform Refinement
+10−5
+0.0 2.0 4.0 6.0 8.0 10.0
+Elements( 103)
+×
+Figure 26: Pareto plot of the normalized squared error for ASMR++ trained on regular and
+augmented environments evaluated on the regular evaluation environments. Augmenting the
+training environments facilitates inference-time up-scaling at the cost of slightly decreased
+refinement quality.
+Figure 26 compares ASMR++ trained on these augmented training PDEs with the setup
+used throughout the paper. The results show that the augmented training setup leads to a
+slight decrease in performance relative to ASMR++ trained under standard conditions. This
+decrease in performance is likely caused by the more challenging optimization problem. Yet,
+the augmented training yields high-quality refinements.
+Oncetrained,weevaluatethepolicyonspiral-shapeddomainsofincreasingsizes,ensuring
+the volume of the initial mesh elements remains constant. To align the complexity of the
+load function with the enlarged mesh sizes, we adapt the number of Gaussian mixture model
+modes, using more modes for larger domains. Specifically, we use 16 components which
+are first placed on a uniform grid and then randomly perturbed, allowing for them to be
+positioned outside of the mesh. Figure 27 shows an exemplary ASMR++ refinement for a
+5×5 domain. Figure 14 shows a final refined mesh on a 20×20 domain with 100 components,
+including detailed views of specific sections. Both figures use the same policy with a fixed
+element penalty.
+42
+rorrederauqSAdaptive Swarm Mesh Refinement
+5×5 Domain
+Figure 27: Visualization of a final ASMR++ mesh on a 5×5 spiral domain with a randomly
+sampled load function. Our approach consistently provides high-quality refinements for both
+larger domains and more complex load functions during inference.
+Appendix E. Hyperparameters
+E.1 General Hyperparameters
+The following section lists important hyperparameters used for the training of all methods.
+Hyperparameters are kept consistent across all tasks and RL-AMR methods unless mentioned
+otherwise.
+Neural Networks. We implement all neural networks in PyTorch (Paszke et al., 2019) and
+optimize them using ADAM (Kingma and Ba, 2014) with a learning rate of 3.0e-4 and batch
+sizeof32unlessmentionedotherwise. AllMLPsuse2hiddenlayersandalatentdimensionof
+64. Each MPN consists of 2 message passing steps, where each update function is represented
+43Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+as an MLP with LeakyReLU activation functions. We apply Layer Normalization (Ba et al.,
+2016) and Residual Connections (He et al., 2016) independently after each node and edge
+feature update, and use Edge Dropout (Rong et al., 2019) of 0.1 during training. The edge
+(cid:76)
+feature aggregations are mean aggregations. We use separate architectures for the policy
+and the value function, i.e., we do not share weights between the policy and value function.
+The policy and value function heads are MLPs with tanh activation functions acting on the
+final latent node features of the MPN.
+PPO. For PPO, we follow previous work (Andrychowicz et al., 2021) to select important
+hyperparameters and code-level optimizations. We train each PPO policy for a total of
+400 iterations, except for the 3d Poisson task, where we only use 200 iterations. In each
+iteration, the algorithm samples 256 environment transitions and performs 5 epochs of
+optimization. The value function loss is multiplied with a factor of 0.5. We clip the gradient
+norm to 0.5 and choose clip ranges of 0.2 for the policy and value function. We normalize
+the observations with a running mean and standard deviation. Advantages are estimated
+via Generalized Advantage Estimate (Schulman et al., 2015) using λ = 0.95. We compute
+an agent’s advantage by subtracting the agent-wise value estimates from the return in
+Equation 7.
+DQN. For DQN-based approaches, we draw 500 initial samples with a random policy
+for the replay buffer and then train for 24∗400 = 9600 steps, where each step consists of
+executing and storing an environment transition and then drawing a random mini-batch
+with replacement from the buffer for a single gradient update. We experimented with more
+training steps in preliminary experiments, finding that they do no significantly improve
+performance or stabilize training, but may lead to increased memory footprint and longer
+runtimes. We update the target networks using Polyak averaging at a rate of 0.99 per step.
+We select training actions using a Boltzmann distribution over the predicted Q-values per
+agent, where we linearly decrease the temperature of the distribution from 1 to 0.01 in the
+first half of training. This action selection strategy favors more correlated actions when
+compared to an epsilon greedy action sampling, which empirically stabilizes the training for
+our problem setting of iterative mesh refinement. Further, we follow previous work (Hessel
+et al., 2018) and combine a number of common improvements for DQNs, namely double
+Q-learning (Van Hasselt et al., 2016), dueling Q-networks (Wang et al., 2016) and prioritized
+experience replay (Schaul et al., 2016).
+E.2 Baseline-Specific Parameters
+Single Agent. We use a maximum refinement depth of 10 refinements per element to
+avoid numerical instabilities during simulation, skipping actions that try to refine elements
+that have been refined too often. We consider environment sequences of up to T = 400 steps
+since the method marks only one element at a time, but train a separate policy for every
+value of T.
+Sweep. The Sweep baseline moves a single agent to a random mesh element after each
+training step. The agent then decides if this element should be refined or not. We follow the
+proposedhyperparametersandhavetrainingrolloutsof200steps(Foucartetal.,2023). Since
+Sweep uses a local agent living on a single mesh element, we use an MLP instead of the MPN
+44Adaptive Swarm Mesh Refinement
+for both the policy and value function. Correspondingly, we adapt the input features, using
+our regular node features and the global resource budget proposed by the authors. We
+additionally add aggregated neighborhood information in the form of a mean solution and
+area of the element’s neighbors and the average distance to them. The global budget is
+controlled via a maximum number of elements N , allowing to train policies that produce
+max
+refinements of different granularity. We increase the number of environment transitions per
+PPO step to 512, and the number of DQN steps to 96∗400 = 38400. This change is intended
+to compensate for decreased number of refined elements of each environment step while
+roughly equating for the computation time of the other methods.
+VDGN-like. We use a learning rate of 1.0e-5 instead of 3.0e-4 for the DQN variant of the
+VDGN-like baseline to stabilize its training.
+ASMR. We use the reward of Equation 9, an infinite horizon RL setting with γ = 0.99
+and omit the edge dropout in the observation graph for ASMR, and additionally use an
+Ωt
+agent mapping without the normalization factor | | in Equation 4.
+Ωt+1
+| |
+E.3 Mesh Resolution Parameters
+All AMR methods in this work allow for some control over the desired refinement level of
+the final mesh. ASMR++, ASMR and VDGN use an element penalty α that trades off the
+cost of adding new elements with the benefit of a refinement. Sweep considers an element
+budget N , attempting to minimize the error of the mesh while staying within this budget.
+max
+Single Agent varies the number of rollout steps T, refining once for every step.
+Both ASMR++ and VDGN train on a range of α values and condition the policy on it,
+allowingforadaptivemeshresolutionsduringinference. Here,weevaluate20penaltiesthatare
+log-uniformlysampledoverthetrainingpenaltyrangetocoverdifferentfinalmeshresolutions.
+As the other methods do not directly support an adaptive penalty during inference, we
+train 10 separate policies with 10 repetitions each for different refinement parameters. The
+Oracle, Maximum Oracle, and ZZ Error Heuristics refine based on estimated errors per
+mesh element. Here, we evaluate 100 values for the error threshold θ, which specifies which
+elements to refine based on the ratio between their error and the maximum element error.
+Tables 1 and 2 list the minimum and maximum mesh resolution parameters for all tasks and
+RL-AMR methods and heuristics, respectively.
+Appendix F. Baseline Visualizations
+F.1 RL-AMR visualizations
+We visualize the final meshes and corresponding PDE solutions of all RL-AMR methods on
+the Stokes Flow task for 6 different refinement granularities on the same randomly selected
+system of equations. For ASMR++ and VDGN, which condition the policy on the element
+penalty parameter, we use the same trained model for the 6 mesh refinement granularities.
+Figure 28 visualizes the results.
+WefindthatASMR++providesaccuraterefinementsfordifferentvaluesofαusingasingle
+policy. The produced meshes are of higher quality than those created by ASMR, especially
+near the corners of the rhomboid obstacles in the domain. All other RL-AMR methods
+45Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Method ASMR++ ASMR VDGN-like Sweep Single Agent
+Parameter α α α N T
+max
+Laplace (Small) [0.001,0.1] [0.01,0.3] [1e−5,5e−2] [50,1000] [5,100]
+Laplace [0.001,0.03] [0.01,0.5] [1e−5,1e−2] [200,3000] [25,400]
+Poisson [0.0001,0.03] [0.002,0.1] [2e−5,5e−2] [200,3000] [25,400]
+Stokes Flow [0.0005,0.05] [0.015,0.3] [3e−4,2e−2] [150,2500] [25,400]
+Linear Elasticity [0.00015,0.03] [0.01,0.15] [1e−5,1e−2] [500,6000] [25,400]
+Heat Diffusion [0.00005,0.01] [0.003,0.3] [1e−5,1e−2] [400,5000] [25,400]
+Neumann Boundaries [0.00005,0.03] [0.0075,0.5] [1e−5,1e−1] [200,3000] [25,400]
+Poisson 3d [0.0001,0.1] [0.1,20.0] [1e−5,1e−1] [500,5000] [25,400]
+Table 1: Ranges for the different refinement hyperparameters for all task and RL-AMR
+methods. ASMR++, ASMR and VDGN apply a penalty α for each added element. Sweep
+uses an element budget N . Single Agent varies the number of rollout steps T.
+max
+Oracle Error Max. Oracle Err. ZZ Error
+Parameter θ θ θ
+Laplace (Small) [0.22,1.0] [0.16,1.0] [0.002,1.0]
+Laplace [0.20,1.0] [0.12,1.0] [0.001,1.0]
+Poisson [0.12,1.0] [0.15,1.0] [0.002,1.0]
+Stokes Flow [0.12,1.0] [0.04,1.0] [0.001,1.0]
+Linear Elasticity [0.06,1.0] [0.02,1.0] [0.001,1.0]
+Heat Diffusion [0.04,1.0] [0.02,1.0] [0.001,1.0]
+Neumann Boundaries [0.14,1.0] [0.24,1.0] [0.001,1.0]
+Poisson 3d [0.02,1.0] [0.02,1.0] [0.001,1.0]
+Table 2: Ranges for the threshold θ of the error-based refinement strategy of the heuristic
+baselines. All ranges are chosen to facilitate direct comparison to the RL-AMR methods in
+the quantitative evaluation, i.e., to produce meshes with a comparable number of elements.
+are unable to produce consistent meshes. Single Agent tends to over-refine uninteresting
+regions, likely due to its iterative refinement procedure. In contrast, Sweep often collapses
+to uniform or mostly uniform refinements, which may be a by-product of the difference in
+training on individual elements and sweeping over all elements at once during inference.
+VDGN produces high-quality refinements in some cases, but is inconsistent across seeds and
+in some cases fails to optimize for different element penalties with the same model, which
+could be because its value decomposition objective may scale poorly to large numbers of
+agents. These qualitative findings are consistent with the error measurements of Figure 8.
+F.2 Heuristic visualizations
+We visualize exemplary refinements for the error estimation-based threshold Heuristics in
+Figure 29. All Heuristics greedily refine the elements with their respective largest error
+estimates, regardless of the resulting decrease in error. This behavior is fully local, which
+may cause issues for global dependencies (Strauss, 2007) and conforming refinements. The
+46Adaptive Swarm Mesh Refinement
+Figure 28: Comparison of the different RL-AMR methods for the Stokes Flow task for the
+same PDE and different target mesh resolutions. The target mesh resolution increases from
+the left to the right for each row. ASMR++ and the VDGN-like baseline use the same model
+queried with different α values for each row. The other methods use a different policy for
+each produced mesh.
+ZZ Error Heuristic uses a smoother error estimate than the oracle heuristics, which leads to
+potentially sub-optimal but generally more consistent refinements.
+Appendix G. Additional ASMR++ Visualizations
+We visualize meshes created by ASMR++ policies for all considered tasks. For the 2-
+dimension tasks, we follow Section F and use a fixed policy to create refinements with 6
+different granularities for a random PDE for each task, only varying the element penalty
+α. For the 3-dimensional variant of Poisson’s equation, we instead visualize the same
+random PDE and α value for 6 different camera angles. Figure 30 displays the final refined
+meshes, as well as the solutions of the PDE on the meshes. On all tasks, ASMR++ provides
+highly accurate refinements across target mesh refinement levels.
+47
+++RMSA
+RMSA
+ekil-NGDV
+peewS
+tnegA
+elgniSFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Figure 29: Comparison of the different Heuristic methods for the same Stokes Flow task
+PDE and different error thresholds θ. The target mesh resolution increases from the left to
+the right for each row.
+48
+elcarO
+.carO
+.xaM
+rorrE
+ZZAdaptive Swarm Mesh Refinement
+Figure 30: ASMR++ meshes for the different tasks and varying element penalties α. Each
+row uses the same policy conditioned on a range of low (left) to high (right) α values for the
+2-dimensional tasks. For the 3-dimensional Poisson task, we use the same PDE and α value,
+and show different camera angles.
+49
+nossioP
+d3
+ecalpaL
+nossioP
+wolF
+sekotS
+.tsalE
+.niL
+.ffiD
+taeH
+.B
+nnamueNFreymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+References
+Rishabh Agarwal, Max Schwarzer, Pablo Samuel Castro, Aaron C Courville, and Marc
+Bellemare. Deep reinforcement learning at the edge of the statistical precipice. Advances
+in neural information processing systems, 34:29304–29320, 2021.
+Kelsey Allen, Tatiana Lopez-Guevara, Kimberly L Stachenfeld, Alvaro Sanchez Gonzalez,
+Peter Battaglia, Jessica B Hamrick, and Tobias Pfaff. Inverse design for fluid-structure
+interactions using graph network simulators. Advances in Neural Information Processing
+Systems, 35:13759–13774, 2022.
+Robert Anderson, Julian Andrej, Andrew Barker, Jamie Bramwell, Jean-Sylvain Camier,
+Jakub Cerveny, Veselin Dobrev, Yohann Dudouit, Aaron Fisher, Tzanio Kolev, et al. Mfem:
+A modular finite element methods library. Computers & Mathematics with Applications,
+81:42–74, 2021.
+Marcin Andrychowicz, Anton Raichuk, Piotr Stańczyk, Manu Orsini, Sertan Girgin, Raphaël
+Marinier, Leonard Hussenot, Matthieu Geist, Olivier Pietquin, Marcin Michalski, Sylvain
+Gelly, and Olivier Bachem. What matters for on-policy deep actor-critic methods? a
+large-scale study. In International Conference on Learning Representations, 2021. URL
+https://openreview.net/forum?id=nIAxjsniDzg.
+Douglas N Arnold, Arup Mukherjee, and Luc Pouly. Locally adapted tetrahedral meshes
+using bisection. SIAM Journal on Scientific Computing, 22(2):431–448, 2000.
+Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E Hinton. Layer normalization. stat, 1050:
+21, 2016.
+TimothyJBaker. Meshadaptationstrategiesforproblemsinfluiddynamics. Finite Elements
+in Analysis and Design, 25(3-4):243–273, 1997.
+Wolfgang Bangerth and Rolf Rannacher. Adaptive Finite Element Methods for Differential
+Equations. Birkhäuser, 2013.
+Wolfgang Bangerth, Carsten Burstedde, Timo Heister, and Martin Kronbichler. Algorithms
+and data structures for massively parallel generic adaptive finite element codes. ACM
+Transactions on Mathematical Software (TOMS), 38(2):1–28, 2012.
+Peter W Battaglia, Jessica B Hamrick, Victor Bapst, Alvaro Sanchez-Gonzalez, Vinicius
+Zambaldi, Mateusz Malinowski, Andrea Tacchetti, David Raposo, Adam Santoro, Ryan
+Faulkner, et al. Relational inductive biases, deep learning, and graph networks. arXiv
+preprint arXiv:1806.01261, 2018.
+Roland Becker and Rolf Rannacher. Weighted a posteriori error control in FE methods. IWR,
+1996.
+Roland Becker and Rolf Rannacher. An optimal control approach to a posteriori error
+estimation in finite element methods. Acta numerica, 10:1–102, 2001.
+50Adaptive Swarm Mesh Refinement
+Jon Louis Bentley. Multidimensional binary search trees used for associative searching.
+Communications of the ACM, 18(9):509–517, 1975.
+MarshaJBergerandPhillipColella. Localadaptivemeshrefinementforshockhydrodynamics.
+Journal of computational Physics, 82(1):64–84, 1989.
+Peter Binev, Wolfgang Dahmen, and Ron DeVore. Adaptive finite element methods with
+convergence rates. Numerische Mathematik, 97:219–268, 2004.
+Jan Bohn and Michael Feischl. Recurrent neural networks as optimal mesh refinement
+strategies. Computers & Mathematics with Applications, 97:61–76, 2021.
+Johannes Brandstetter, Daniel E Worrall, and Max Welling. Message passing neural pde
+solvers. In International Conference on Learning Representations, 2022.
+Susanne C Brenner and L Ridgway Scott. The mathematical theory of finite element methods,
+volume 3. Springer, 2008.
+Greg Brockman, Vicki Cheung, Ludwig Pettersson, Jonas Schneider, John Schulman, Jie
+Tang, and Wojciech Zaremba. Openai gym. arXiv preprint arXiv:1606.01540, 2016.
+Michael M Bronstein, Joan Bruna, Taco Cohen, and Petar Veličković. Geometric deep
+learning: Grids, groups, graphs, geodesics, and gauges. arXiv preprint arXiv:2104.13478,
+2021.
+Greg L Bryan, Michael L Norman, Brian W O’Shea, Tom Abel, John H Wise, Matthew J
+Turk, Daniel R Reynolds, David C Collins, Peng Wang, Samuel W Skillman, et al. Enzo:
+An adaptive mesh refinement code for astrophysics. The Astrophysical Journal Supplement
+Series, 211(2):19, 2014.
+Carsten Carstensen. An adaptive mesh-refining algorithm allowing for an h 1 stable l 2
+projection onto courant finite element spaces. Constructive Approximation, 20:549–564,
+2004.
+Jakub Cerveny, Veselin Dobrev, and Tzanio Kolev. Nonconforming mesh refinement for
+high-order finite elements. SIAM Journal on Scientific Computing, 41(4):C367–C392, 2019.
+Guodong Chen and Krzysztof J Fidkowski. Output-based adaptive aerodynamic simulations
+using convolutional neural networks. Computers & Fluids, 223:104947, 2021.
+Andrew Cohen, Ervin Teng, Vincent-Pierre Berges, Ruo-Ping Dong, Hunter Henry, Marwan
+Mattar, Alexander Zook, and Sujoy Ganguly. On the use and misuse of absorbing states
+in multi-agent reinforcement learning. arXiv preprint arXiv:2111.05992, 2021.
+Andrew J Cunningham, Adam Frank, Peggy Varnière, Sorin Mitran, and Thomas W
+Jones. Simulating magnetohydrodynamical flow with constrained transport and adaptive
+mesh refinement: algorithms and tests of the astrobear code. The Astrophysical Journal
+Supplement Series, 182(2):519, 2009.
+51Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Tarik Dzanic, Ketan Mittal, Dohyun Kim, Jiachen Yang, Socratis Petrides, Brendan Keith,
+and Robert Anderson. Dynamo: Multi-agent reinforcement learning for dynamic antici-
+patory mesh optimization with applications to hyperbolic conservation laws. Journal of
+Computational Physics, page 112924, 2024.
+Krzysztof J Fidkowski and Guodong Chen. Metric-based, goal-oriented mesh adaptation
+using machine learning. Journal of Computational Physics, 426:109957, 2021.
+Krzysztof J Fidkowski and David L Darmofal. Review of output-based error estimation and
+mesh adaptation in computational fluid dynamics. AIAA journal, 49(4):673–694, 2011.
+Meire Fortunato, Tobias Pfaff, Peter Wirnsberger, Alexander Pritzel, and Peter Battaglia.
+Multiscale meshgraphnets. In ICML 2022 2nd AI for Science Workshop, 2022. URL
+https://openreview.net/forum?id=G3TRIsmMhhf.
+Corbin Foucart, Aaron Charous, and Pierre FJ Lermusiaux. Deep reinforcement learning for
+adaptive mesh refinement. Journal of Computational Physics, 491:112381, 2023.
+NiklasFreymuth,PhilippDahlinger,TobiasWürth,SimonReisch,LuiseKärger,andGerhard
+Neumann. Swarmreinforcementlearningforadaptivemeshrefinement. Advances in Neural
+Information Processing Systems, 36, 2023.
+Gaël Gibert, Benoit Prabel, AnthonyGravouil, and Clémentine Jacquemoud. A 3d automatic
+mesh refinement x-fem approach for fatigue crack propagation. Finite Elements in Analysis
+and Design, 157:21–37, 2019.
+Andrew Gillette, Brendan Keith, and Socratis Petrides. Learning robust marking policies for
+adaptive mesh refinement. arXiv preprint arXiv:2207.06339, 2022.
+Thomas Guillet, Rüdiger Pakmor, Volker Springel, Praveen Chandrashekar, and Christian
+Klingenberg. High-order magnetohydrodynamics for astrophysics with an adaptive mesh
+refinement discontinuous galerkin scheme. Monthly Notices of the Royal Astronomical
+Society, 485(3):4209–4246, 2019.
+Xiaoxiao Guo, Wei Li, and Francesco Iorio. Convolutional neural networks for steady flow
+approximation. In Proceedings of the 22nd ACM SIGKDD International Conference on
+Knowledge Discovery and Data Mining, KDD’16, page481–490, NewYork, NY,USA,2016.
+AssociationforComputingMachinery.ISBN9781450342322.doi: 10.1145/2939672.2939738.
+URL https://doi.org/10.1145/2939672.2939738.
+Tom Gustafsson and Geordie Drummond Mcbain. scikit-fem: A python package for finite
+element assembly. Journal of Open Source Software, 5(52):2369, 2020.
+Conor F Hayes, Roxana Rădulescu, Eugenio Bargiacchi, Johan Källström, Matthew Macfar-
+lane, Mathieu Reymond, Timothy Verstraeten, Luisa M Zintgraf, Richard Dazeley, Fredrik
+Heintz, et al. A practical guide to multi-objective reinforcement learning and planning.
+Autonomous Agents and Multi-Agent Systems, 36:26, 2022.
+52Adaptive Swarm Mesh Refinement
+Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun. Deep residual learning for
+image recognition. In Proceedings of the IEEE conference on computer vision and pattern
+recognition, pages 770–778, 2016.
+Matteo Hessel, Joseph Modayil, Hado Van Hasselt, Tom Schaul, Georg Ostrovski, Will
+Dabney, DanHorgan, BilalPiot, MohammadAzar, andDavidSilver. Rainbow: Combining
+improvements in deep reinforcement learning. In Proceedings of the AAAI conference on
+artificial intelligence, volume 32, 2018.
+K Ho-Le. Finite element mesh generation methods: a review and classification. Computer-
+aided design, 20(1):27–38, 1988.
+Keefe Huang, Moritz Krügener, Alistair Brown, Friedrich Menhorn, Hans-Joachim Bungartz,
+and Dirk Hartmann. Machine learning-based optimal mesh generation in computational
+fluid dynamics. arXiv preprint arXiv:2102.12923, 2021.
+WeizhangHuangandRobertDRussell. Adaptive moving mesh methods,volume174. Springer
+Science & Business Media, 2010.
+David Huergo, Gonzalo Rubio, and Esteban Ferrer. A reinforcement learning strategy for
+p-adaptation in high order solvers. Results in Engineering, 21:101693, 2024.
+Maximilian Hüttenrauch, Šošić Adrian, and Gerhard Neumann. Deep reinforcement learning
+for swarm systems. Journal of Machine Learning Research, 20(54):1–31, 2019.
+Sergey Ioffe and Christian Szegedy. Batch normalization: Accelerating deep network training
+by reducing internal covariate shift. In International conference on machine learning, pages
+448–456. pmlr, 2015.
+Volker John et al. Finite element methods for incompressible flow problems, volume 51.
+Springer, 2016.
+Mark T Jones and Paul E Plassmann. Adaptive refinement of unstructured finite-element
+meshes. Finite Elements in Analysis and Design, 25(1-2):41–60, 1997.
+Diederik P Kingma and Jimmy Ba. Adam: A method for stochastic optimization. arXiv
+preprint arXiv:1412.6980, 2014.
+Eisuke Kita and Norio Kamiya. Error estimation and adaptive mesh refinement in boundary
+element method, an overview. Engineering Analysis with Boundary Elements, 25(7):
+479–495, 2001.
+Mats G. Larson and Fredrik Bengzon. The Finite Element Method: Theory, Implementation,
+and Applications, volume 10 of Texts in Computational Science and Engineering. Springer,
+Berlin, Heidelberg, 2013. ISBN 978-3-642-33286-9 978-3-642-33287-6. doi: 10.1007/
+978-3-642-33287-6.
+Jonas Linkerhägner, Niklas Freymuth, Paul Maria Scheikl, Franziska Mathis-Ullrich, and
+GerhardNeumann. Groundinggraphnetworksimulatorsusingphysicalsensorobservations.
+In The Eleventh International Conference on Learning Representations (ICLR), 2023. URL
+https://openreview.net/forum?id=jsZsEd8VEY.
+53Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Alex Graves, Ioannis Antonoglou, Daan
+Wierstra, and Martin Riedmiller. Playing atari with deep reinforcement learning. arXiv
+preprint arXiv:1312.5602, 2013.
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, Andrei A Rusu, Joel Veness, Marc G
+Bellemare, Alex Graves, Martin Riedmiller, Andreas K Fidjeland, Georg Ostrovski, et al.
+Human-level control through deep reinforcement learning. nature, 518(7540):529–533,
+2015.
+Arup Mukherjee. An adaptive finite element code for elliptic boundary value problems in three
+dimensions with applications in numerical relativity. The Pennsylvania State University,
+1996.
+Anand Nagarajan and Soheil Soghrati. Conforming to interface structured adaptive mesh
+refinement: 3d algorithm and implementation. Computational Mechanics, 62:1213–1238,
+2018.
+M Ortiz and JJ Quigley Iv. Adaptive mesh refinement in strain localization problems.
+Computer Methods in Applied Mechanics and Engineering, 90(1-3):781–804, 1991.
+Jie Pan, Jingwei Huang, Gengdong Cheng, and Yong Zeng. Reinforcement learning for
+automatic quadrilateral mesh generation: A soft actor–critic approach. Neural Networks,
+157:288–304, 2023.
+Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory Chanan,
+TrevorKilleen,ZemingLin,NataliaGimelshein,LucaAntiga,etal. Pytorch: Animperative
+style, high-performance deep learning library. Advances in neural information processing
+systems, 32, 2019.
+Roberto Perera and Vinamra Agrawal. Multiscale graph neural networks with adaptive
+mesh refinement for accelerating mesh-based simulations. arXiv preprint arXiv:2402.08863,
+2024.
+Tobias Pfaff, Meire Fortunato, Alvaro Sanchez-Gonzalez, and Peter W. Battaglia. Learning
+mesh-based simulation with graph networks. In International Conference on Learning
+Representations, 2021. URL https://arxiv.org/abs/2010.03409.
+Tomasz Plewa, Timur Linde, V Gregory Weirs, et al. Adaptive mesh refinement-theory and
+applications. Springer, 2005.
+Alfio Quarteroni and Silvia Quarteroni. Numerical models for differential problems, volume 2.
+Springer, 2009.
+Waldemar Rachowicz, J Tinsley Oden, and Leszek Demkowicz. Toward a universal hp
+adaptive finite element strategy part 3. design of hp meshes. Computer Methods in Applied
+Mechanics and Engineering, 77(1-2):181–212, 1989.
+Waldemar Rachowicz, David Pardo, and Leszek Demkowicz. Fully automatic hp-adaptivity
+in three dimensions. Computer methods in applied mechanics and engineering, 195(37-40):
+4816–4842, 2006.
+54Adaptive Swarm Mesh Refinement
+MaziarRaissi, ParisPerdikaris, andGeorgeEKarniadakis. Physics-informedneuralnetworks:
+A deep learning framework for solving forward and inverse problems involving nonlinear
+partial differential equations. Journal of Computational physics, 378:686–707, 2019.
+Junuthula Narasimha Reddy. Introduction to the finite element method. McGraw-Hill
+Education, 2019.
+M Cecilia Rivara. Algorithms for refining triangular grids suitable for adaptive and multigrid
+techniques. International journal for numerical methods in Engineering, 20(4):745–756,
+1984.
+Yu Rong, Wenbing Huang, Tingyang Xu, and Junzhou Huang. Dropedge: Towards deep
+graph convolutional networks on node classification. In International Conference on
+Learning Representations, 2019.
+Julian Roth, Max Schröder, and Thomas Wick. Neural network guided adjoint computations
+in dual weighted residual error estimation. SN Applied Sciences, 4(2):62, 2022.
+Alvaro Sanchez-Gonzalez, Jonathan Godwin, Tobias Pfaff, Rex Ying, Jure Leskovec, and
+Peter Battaglia. Learning to simulate complex physics with graph networks. In Proceedings
+of the 37th International Conference on Machine Learning, pages 8459–8468. PMLR, 2020.
+FrancoScarselli,MarcoGori,AhChungTsoi,MarkusHagenbuchner,andGabrieleMonfardini.
+The graph neural network model. IEEE Transactions on Neural Networks, 20(1):61–80,
+2009. doi: 10.1109/TNN.2008.2005605.
+Tom Schaul, John Quan, Ioannis Antonoglou, and David Silver. Prioritized experience replay.
+In Yoshua Bengio and Yann LeCun, editors, 4th International Conference on Learning
+Representations, ICLR 2016, San Juan, Puerto Rico, May 2-4, 2016, Conference Track
+Proceedings, 2016.
+John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel. High-
+dimensional continuous control using generalized advantage estimation. arXiv preprint
+arXiv:1506.02438, 2015.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal
+policy optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+Haochen Shi, Huazhe Xu, Samuel Clarke, Yunzhu Li, and Jiajun Wu. Robocook: Long-
+horizon elasto-plastic object manipulation with diverse tools. In 7th Annual Conference
+on Robot Learning, 2023.
+Tomasz Służalec, Rafał Grzeszczuk, Sergio Rojas, Witold Dzwinel, and Maciej Paszyński.
+Quasi-optimal hp-finite element refinements towards singularities via deep neural network
+prediction. Computers & Mathematics with Applications, 142:157–174, 2023.
+Adrian Šošić, Wasiur R KhudaBukhsh, Abdelhak M Zoubir, and Heinz Koeppl. Inverse
+reinforcement learning in swarm systems. In Proceedings of the 16th Conference on
+Autonomous Agents and MultiAgent Systems, pages 1413–1421, 2017.
+55Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+Erwin Stein. Adaptive finite elements in linear and nonlinear solid and structural mechanics,
+volume 416. Springer Science & Business Media, 2007.
+Rob Stevenson. The completion of locally refined simplicial partitions created by bisection.
+Mathematics of computation, 77(261):227–241, 2008.
+Walter A Strauss. Partial differential equations: An introduction. John Wiley & Sons, 2007.
+José P Suárez, Pilar Abad, Angel Plaza, and Miguel A Padron. Computational aspects of
+the refinement of 3d tetrahedral meshes. Journal of Computational Methods in Sciences
+and Engineering, 5(4):215–224, 2005.
+Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zam-
+baldi, Max Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al.
+Value-decomposition networks for cooperative multi-agent learning. arXiv preprint
+arXiv:1706.05296, 2017.
+Richard S Sutton and Andrew G Barto. Reinforcement learning: An introduction. MIT press,
+2018.
+Kiwon Um, Xiangyu Hu, and Nils Thuerey. Liquid splash modeling with neural networks.
+Computer Graphics Forum, 37(8):171–182, 2018. doi: https://doi.org/10.1111/cgf.13522.
+URL https://onlinelibrary.wiley.com/doi/abs/10.1111/cgf.13522.
+Hado Van Hasselt, Arthur Guez, and David Silver. Deep reinforcement learning with double
+q-learning. In Proceedings of the AAAI conference on artificial intelligence, volume 30,
+2016.
+Kristof Van Moffaert and Ann Nowé. Multi-objective reinforcement learning using sets of
+pareto dominating policies. The Journal of Machine Learning Research, 15(1):3483–3512,
+2014.
+Petar Velickovic, Guillem Cucurull, Arantxa Casanova, Adriana Romero, Pietro Lio, and
+Yoshua Bengio. Graph attention networks. stat, 1050:4, 2018.
+Joseph Gregory Wallwork. Mesh adaptation and adjoint methods for finite element coastal
+ocean modelling. PhD thesis, Imperial College London, 2021.
+Joseph Gregory Wallwork, Jingyi Lu, Mingrui Zhang, and Matthew D Piggott. E2n: Error
+estimation networks for goal-oriented mesh adaptation. arXiv preprint arXiv:2207.11233,
+2022.
+Ziyu Wang, Tom Schaul, Matteo Hessel, Hado Hasselt, Marc Lanctot, and Nando Freitas.
+Dueling network architectures for deep reinforcement learning. In International conference
+on machine learning, pages 1995–2003. PMLR, 2016.
+Gerhard Wanner and Ernst Hairer. Solving ordinary differential equations II, volume 375.
+Springer Berlin Heidelberg New York, 1996.
+56Adaptive Swarm Mesh Refinement
+Tailin Wu, Takashi Maruyama, Qingqing Zhao, Gordon Wetzstein, and Jure Leskovec.
+Learning controllable adaptive simulation for multi-resolution physics. In The Eleventh
+International Conference on Learning Representations, 2023. URL https://openreview.
+net/forum?id=PbfgkZ2HdbE.
+Tobias Würth, Constantin Krauß, Clemens Zimmerling, and Luise Kärger. Physics-informed
+neuralnetworksfordata-freesurrogatemodellingandengineeringoptimization–anexample
+from composite manufacturing. Materials & Design, 231:112034, 2023.
+Tobias Würth, Niklas Freymuth, Clemens Zimmerling, Gerhard Neumann, and Luise
+meshgraphnets
+Kärger. Physics-informed (pi-mgn): Neural finite element solvers for
+non-stationary and nonlinear simulations on arbitrary meshes. arXiv:2402.10681, 2024a.
+Tobias Würth, Niklas Freymuth, Clemens Zimmerling, Gerhard Neumann, and Luise Kärger.
+Physics-informedmeshgraphnets(pi-mgns): Neuralfiniteelementsolversfornon-stationary
+and nonlinear simulations on arbitrary meshes. arXiv preprint arXiv:2402.10681, 2024b.
+Jiachen Yang, Tarik Dzanic, Brenden K Petersen, Jun Kudo, Ketan Mittal, Vladimir Tomov,
+Jean-Sylvain Camier, Tuo Zhao, Hongyuan Zha, Tzanio Kolev, Robert Anderson, and
+Daniel Faissol. Reinforcement learning for adaptive mesh refinement. 26th International
+Conference on Artificial Intelligence and Statistics (AISTATS), 2023a.
+Jiachen Yang, Ketan Mittal, Tarik Dzanic, Socratis Petrides, Brendan Keith, Brenden
+Petersen, Daniel Faissol, and Robert Anderson. Multi-agent reinforcement learning for
+adaptive mesh refinement. 22nd International Conference on Autonomous Agents and
+Multiagent Systems (AAMAS), 2023b.
+Masayuki Yano and David L Darmofal. An optimization-based framework for anisotropic
+simplex mesh adaptation. Journal of Computational Physics, 231(22):7626–7649, 2012.
+Zheyan Zhang, Yongxing Wang, Peter K Jimack, and He Wang. Meshingnet: A new mesh
+generation method based on deep learning. In Computational Science–ICCS 2020: 20th
+International Conference, Amsterdam, The Netherlands, June 3–5, 2020, Proceedings, Part
+III 20, pages 186–198. Springer, 2020.
+Olek C Zienkiewicz, Robert Leroy Taylor, and Jian Z Zhu. The finite element method: its
+basis and fundamentals. Elsevier, 2005.
+Olgierd Cecil Zienkiewicz and Jian Zhong Zhu. The superconvergent patch recovery and
+a posteriori error estimates. part 1: The recovery technique. International Journal for
+Numerical Methods in Engineering, 33(7):1331–1364, 1992.
+Clemens Zimmerling, Dominik Dörr, Frank Henning, and Luise Kärger. A machine learning
+assisted approach for textile formability assessment and design improvement of composite
+components. Compos Part A, 124:105459, September 2019a. ISSN 1359-835X. doi:
+10.1016/j.compositesa.2019.05.027.
+Clemens Zimmerling, Daniel Trippe, Benedikt Fengler, and Luise Kärger. An approach for
+rapid prediction of textile draping results for variable composite component geometries
+57Freymuth, Dahlinger, Würth, Reisch, Kärger and Neumann
+using deep neural networks. AIP Conference Proceedings, 2113(1), 07 2019b. ISSN 0094-
+243X. doi: 10.1063/1.5112512. URL https://doi.org/10.1063/1.5112512. 020007.
+Clemens Zimmerling, Christian Poppe, Oliver Stein, and Luise Kärger. Optimisation of
+manufacturing process parameters for variable component geometries using reinforcement
+learning. Materials & Design, 214:110423, February 2022. ISSN 02641275. doi: 10.1016/j.
+matdes.2022.110423.
+58
