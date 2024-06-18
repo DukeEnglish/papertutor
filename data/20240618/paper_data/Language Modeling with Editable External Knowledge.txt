@@ -1,0 +1,1247 @@
+Language Modeling with Editable External Knowledge
+BelindaZ.Li1,EmmyLiu2,AlexisRoss1,AbbasZeitoun1,
+GrahamNeubig2,JacobAndreas1
+{bzl, alexisro, zeitoun, jda}@mit.edu
+{mengyan3, gneubig}@cs.cmu.edu
+1 MassachusettsInstituteofTechnology,CSAIL
+2 CarnegieMellonUniversity,LanguageTechnologiesInstitute
+Abstract
+When the world changes, so does the text
+that humans write about it. How do we
+build language models that can be easily up-
+dated to reflect these changes? One popu-
+larapproachisretrieval-augmentedgeneration,
+in which new documents are inserted into a
+knowledge base and retrieved during predic-
+tion for downstream tasks. Most prior work
+on these systems have focused on improving
+behavior during prediction through better re-
+trieval or reasoning. This paper introduces Figure 1: In standard retrieval augmented generation
+ERASE,whichinsteadimprovesmodelbehav- (RAG),newfactsaresimplyaddedtoanexistingknowl-
+iorwhennewdocumentsareacquired, byin- edgebaseK.ThiscanleadtostalefactsinK,whichcan
+crementallydeletingorrewritingotherentries inturnleadtoincorrectpredictionsatinferencetime. In
+intheknowledgebaseeachtimeadocument contrast,whenERASEreadsanewinputarticle,itnot
+is added. In two new benchmark datasets onlyaddsnewfactstoK,butalsoupdatesit. ERASEcan
+evaluatingmodels’abilitytoanswerquestions editordelete(notpictured)existingfactstokeepKup
+about a stream of news articles or conversa- todate,therebyenablingcorrectpredictionsatinference
+tions,ERASEimprovesaccuracyrelativetocon- time. ThesameLMisusedtoupdatethememoryand
+ventionalretrieval-augmentedgenerationby7– makepredictions.
+13%(Mixtral-8x7B)and6–10%(Llama-3-8B)
+absolute.1
+informationinmodels’inputsbyleveragingeither
+long-contextmethods(Tayetal.,2022)orretrieval
+1 Introduction
+augmentedgeneration(RAG;Lewisetal.,2020a).
+Theworld—andthelanguageweusedtodescribe whichappendsnewdocumentstoaknowledgebase
+it—are constantly changing. Consider the exam- and retrieves a subset of relevant documents to
+ple shown in Figure 1. After reading the article conditiononatpredictiontime(Guuetal.,2020;
+AfterQueenElizabethIIdied,theQueen’soldest Lewisetal.,2020b).
+sonCharleshasnowbecomeKingCharlesIII,a An important limitation of current RAG ap-
+knowledgeablereadermightupdateanentiresys- proachesisthattheysometimesretrievestaledoc-
+temofrelatedbeliefs,e.g.,thatKingCharlesIIIis uments that have been invalidated by new infor-
+nowalsothenewheadofScotland. Howcanwe mation. In Fig. 1, the article After Queen Eliza-
+trainlanguagemodelsandothersoftwaresystems beth II died... would be appended to the existing
+toreflectthesechanges? knowledgebase,whichincludesafactaboutQueen
+Continuallearningmethodstackletheproblem Elizabeth’sreignwhenshewasalive,e.g.,Queen
+ofachangingworldbyincrementallytrainingon ElizabethIIisheadofstateof...Scotland. Whenan-
+newinformation(Mitchelletal.,2018;Wangetal., sweringquestionsabouttheScottishheadofstate,
+2024). Butinlanguagemodels,asimple(andoften thisdocumentmightberetrieved,leadingtheLLM
+extremelyeffective)approachsimplypresentsnew toproduceincorrectanswers. Pastattemptstoad-
+dressthisissuehavefocusedonimprovedretrieval
+1Code and data are available at https://github.com/
+belindal/ERASE methods,butnotonensuringaccuracyandconsis-
+1
+4202
+nuJ
+71
+]LC.sc[
+1v03811.6042:viXratencyofthedocumentcollectionitself. approachesthatupdateLMsbymodifyinginputs
+This paper describes a method for retrieval- ratherthanparameters—asdiscussedbelow,such
+augmentedgenerationthatattemptstoensurethat methodsaremoreflexible,andoftenmorerobust,
+theexternalknowledgebasealwaysrepresentsthe thanalternatives.
+currentstateoftheworld. Thismethod,whichwe
+Long-contextandretrieval-augmentedgenera-
+call ERASE (Enhancing Retrieval Augmentation
+tion: updatingLMsviaconditioning Onesim-
+with Self-consistent Editing; §3), enables accu-
+pleandeffectivewaytoupdateLMsissimplyto
+ratelanguagemodelingbyupdatingtheknowledge
+includenewinformationintheircontextwindow
+base at document insertion time—i.e., when new
+beforeinputstothetaskofinterest(e.g.byprepend-
+documents are read and added to the knowledge
+ingaquestionaboutcurrenteventswithasequence
+base—rather than at prediction time. Every time
+ofnewsarticles). Butthisapproachbeginstoface
+anewdocumentisacquired, ERASE identifiesre-
+challengeswhentextcontainingnewinformationis
+lateddocumentsintheknowledgebaseanddecides
+extremelylong(e.g.comprisingthousandsofnews
+whether to keep, edit, or delete them. These op-
+articles). In these cases, it is neccessary either to
+erations allow new information to be propagated
+useLMsspecializedforverylonginputsequences,
+andpreventstaleinformationfrombeingusedfor
+or to select a subset of inputs to condition on for
+inference. In Figure 1, ERASE not only adds the
+eachnewquerytothemodel(sometimesreferred
+newarticletotheknowledgebase,butalsoeditsthe
+toasretrieval-augmentedgeneration,orRAG).
+existingfactQueenElizabethII→KingCharles
+Long-contextmodels(Wangetal.,2020;Kitaev
+IIIisheadof...Scotland,therebyenablingcorrect
+etal.,2020;Pressetal.,2021;Suetal.,2024)fo-
+predictionwhenthisdocumentisretrieved.
+cusonmodifyingLMarchitecturestoallowlong
+Weevaluate ERASE’sperformanceonquestion-
+sequences to be processed efficiently, or to ex-
+answering (QA) tasks about a set of continu-
+trapolate to long inputs. RAG methods, by con-
+ally changing facts described by a stream of
+trast, dynamically construct relevant contexts tai-
+text. To do so, we introduce a new benchmark
+loredtoindividualqueries(Guuetal.,2020;Lewis
+dataset,CLARK(ContinualLearningAndRevising
+et al., 2020b). Previous work has explored auxil-
+Knowledge;§4),whichcontainstwodomains: (1)
+iary models that selectively choose when to per-
+CLARK-NEWS, a factual QA domain consisting
+form retrieval (Mitchell et al., 2022b), or abstain
+ofasetoftimestampednewsarticlespairedwith
+fromansweringquestionswhenretrievedsources
+questions and timestamped answers; (2) CLARK-
+presentconflictingoroutdatedinformation(Chen
+CONVERSATIONS, a long-conversation domain
+et al., 2022; Zhang and Choi, 2023). Other work
+wherefactsaboutconversationparticipantsevolve
+has examined augmenting LMs with knowledge
+over the course of the conversation. The conver-
+graphs(Caietal.,2023;Modarressietal.,2024),
+sationdomaincontainsbothsingle-hopandmulti-
+structuredrelationalknowledgebasesthatmaybe
+hop edits, the latter of which requires multi-hop
+timestampedandwhosenodesandedgesmaybe
+inferencesatthememoryupdatingstage.
+updated. However,suchstructurecanbedifficult
+On this benchmark, ERASE outperforms stan- toconstructandrisksthrowingawayessentialin-
+dardRAGbaselinesandlong-contextmodels,giv-
+formation; these methods are generally less used
+ing7–13%(Mixtral-8x7B)and6–10%(Llama-3-
+thanunstructuredknowledgebases.
+8B)absoluteimprovementsinaccuracycompared
+Continual learning: updating LMs via fine-
+to standard RAG on the factual QA domain and
+tuning Abroaderclassofmethods,applicableto
+single-hopsectionoftheconversationdomain. On
+amuchbroaderclassofmachinelearningmodels,
+themulti-hopsubset,wefindthat ERASEperforms
+studytheproblemofrobustlyperformingcontin-
+comparablytobaselines,suggestingthereisroom
+uallearningunderanon-stationarydatadistribu-
+forfutureworktoimprovemulti-hopmemoryedit-
+tion(Mitchelletal.,2018;Wangetal.,2024)via
+ing.
+training objectives that ensure that new informa-
+2 BackgroundandRelatedWork tionisretainedbutoldinformationisnotforgotten
+(Jang et al., 2022; Mehta et al., 2023; Jang et al.,
+ERASE belongstoagrowingbodyofworkaimed 2023). PreviousworkonLMshasexploredtheuse
+at developing LM-based systems that can be up- ofcontinualpretraining(Jinetal.,2022),modified
+datedaftertraining. ERASE buildsspecificallyon pretraining objectives (Xu et al., 2023), and syn-
+2theticdatageneration(Padmanabhanetal.,2023; backgrounds in Fig. 2). Importantly, the knowl-
+Akyüreketal.,2024). Continuallearningmethods edgebaserecordsnotjustthecontentofeachfact,
+arecomputationallyintensiveandlesswidelyused butwhenitwasfirstadded,and(ifrelevant)when
+thanRAGandrelatedmethodsinlanguagemodels. it ceased to be true. As new documents arrive,
+ERASEattemptstomaintaintheknowledgebasein
+Modelediting: updatingLMswithtargetedin-
+a consistent state—containing only facts that are
+terventions A final category of methods alter
+currentlytrue—byrewritingfactsormarkingthem
+LMbehaviorbymakingtargetedinterventionsto
+as false when contradictory facts are introduced
+theirparameters,eitherusingspecializedsecondary
+bynewdocuments(e.g.deletingfactsaboutEliz-
+“editing”models(Caoetal.,2021;Mitchelletal.,
+abethII’shealthandupdatingotherreferencesto
+2022a)orperformingclosed-formupdates(Meng
+theUKmonarchy). Duringprediction,ERASEthen
+et al., 2022, 2023). Current methods reliably up-
+operateslikeanormalRAGappach: retrievingtrue
+datefactsbutnotalltheirimplications(Onoeetal.,
+factsthatarerelevanttoagivenquery.
+2023;Huaetal.,2024),andaregenerallyoutper-
+Moreformally,webeginwithalanguagemodel
+formedbyretrieval-orfine-tuning-basedmethods.
+encoding a conditional distribution over strings
+p (prediction | context). When a new doc-
+Evaluatingupdates Fewresourcesarecurrently LM
+ument d is received with some timestamp τ ,
+availableforevaluatingmodels’abilitytogenerate i i
+weupdatetheknowledgebaseK—eachentryin
+text about changing features of the world while
+K consists of both a fact f and a fact history
+attributingthesechangestoknownsourceofinfor- j
+H = [(τ ,v ),(τ ,v ),...], where each τ
+mation. TheEntityClozebyDate(ECBD)dataset j j0 j0 j1 j1 jk
+is a timestamp and v is a truth value indicat-
+containsentitiesfromWikidataalongwithcloze- jk
+ing whether f was known to be true or false at
+style sentences (Onoe et al., 2022), and the Lo- j
+timeτ . Wethenparsethenewdocumentintoa
+CoModatasetcontainslongconversationstomea- jk
+sequenceoffactsf usingtheLM.
+surelong-termmemoryinmodels(Maharanaetal., j
+UnlikestandardRAGmethods,itisnotingen-
+2024);unlike CLARK,thesedatasetsdonotisolate
+entitieswhosepropertieschangeovertime. Many eralnecessaryforfactsextractedfromdocuments
+tocorrespondone-to-onewithfactsintheknowl-
+datasets(ZhangandChoi,2021;Chenetal.,2021;
+edgebase: knowledgebaseentriesmayalsoarise
+Meemetal.,2024;Dhingraetal.,2022;Kasaietal.,
+byeditingoldfactsinresponsetonewarticles. To
+2023;Vuetal.,2023)havebeenreleasedstudying
+temporally-situatedquestionanswering;however, accomplish this, ERASE incorporates new docu-
+mentsintotheknowledgebaseinthreesteps: re-
+contextsinthesedatasetsconsistonlyofdatesand
+trieval,updating,andadding.
+not source documents. This makes it difficult to
+compareresultsacrossimplementations: wereim-
+Step1: Retrievefactstoedit.
+provementsduetoabettersystem,orsimplydueto
+amorecompletesetofdocumentsintheknowledge
+R ← Retrieve(K,d) (1)
+base? InCLARK,wereleasebothourquestionsand
+attributablesourcedocumentsforthosequestions.
+We retrieve a set of knowledge base entries R =
+3 ERASE Method {(f i0,H i0),···(f im,H im)} ⊂ K. Here we as-
+sumethatthefactsmostlikelytorequireeditingin
+Weseektodevelopasystemthatcangeneratetext responsetodarethosemostsimilartod.2 Follow-
+(e.g. for the question answering task depicted in
+ing most modern RAG approaches (Lewis et al.,
+Fig.1)whileupdatingitsbehaviorinresponseto
+2020a), ERASE performs dense vector retrieval,
+a continuous stream of documents describing a usingalearnedembeddingmodelE toassigndocu-
+changingstateoftheworld(e.g.thearticleabout
+mentsandfactsvectorrepresentations,thenretrieve
+thedeathofQueenElizabethII,shownwithayel- asetofmtooptimize:
+lowbackgroundinFig.2). Informally,ERASEuses
+thesedocumentstopopulateandeditaknowledge Retrieve(K,d) = arg top-k E(d)⊤E(f ). (2)
+j
+basethatstoresacollectionoffactsextractedfrom (fj,Hj)∈K
+documents and represented as natural language
+2For efficiency, we retrieve facts relevant to the entire
+strings (e.g. the identity of the new king, and the
+documentinthisstep,ratherthanfirstparsingthedocument
+duration of Elizabeth II’s reign, shown with gray intofacts,thenretrievingfactsrelevanttoeachextractedfact.
+3Figure2: OverviewofERASE. WebeginbyretrievingexistingfactsrelevanttoinputandpromptingaLMtoupdate
+them. Wealsoextractfactsfromtheinputtoaddtoourknowledgebase.
+Step2: Updateretrievedfacts. theoldKBentry(f,H)withanewKBentry
+(f′,[(true,τ)]).
+∀(f ,H ) ∈ R, (f′,H′) ← Update(f ,H ,d,τ)
+j j j j j j
+For all operations above, we prompt an LM
+K ← K∪{(f′,H′)} (3)
+j j (whichmaybethesameLMusedforprediction)
+toclassifyeachretrievedfactintooneofreinforce,
+Weupdatetheknowledgebasebymodifyingeach
+nochange,makefalse.3 Wetheniteratethroughall
+retrievedfactf ∈ Rinoneofthefollowingways:
+i
+factsclassifiedasmakefalse,andasktheLMifit
+• Reinforcefact: Ifthefactf issupportedby canrewritethefactintoatrueexpression. Inthis
+d, we add (true,τ) to H. An example of second phase, the LM is allowed to condition on
+such a case would be f = Mary works in a factsthatitclassifiedasreinforceornochange,al-
+warehouse and d = Mary came back from lowingittopotentiallyhandlemulti-hopedits. The
+herjobatUPSwheresheloadedandsorted full details of this procedure can be found in Ap-
+packagesallday. pendixA.1.
+• Keepfactunchanged: Ifdisirrelevanttof Step3: Addnewfacts.
+ordoesnotaffectthetruthvalueoff,thenwe
+donothingandletf′ = f andH′ = H. An K ← K∪Add_facts(T) (4)
+example of such a case would be f = Mary
+We add all new facts by conditioning on d and
+works in a warehouse and f = Mary took a
+promptingtheLMtoextractatomicfactsf. The
+joginthepark.
+prompt we use can be found in Appendix A.2.
+• Makefactfalse: Iff iscontradictedbyd,we Analogously, Chen et al. (2023) used a propo-
+add (false,τ) to H′. An example of such sitionizertodecomposearticlesintopropositions.
+acase wouldbef =Maryworks inaware-
+Prediction: To use an ERASE system after up-
+houseandd =Marygotfiredfromherware-
+dating, generation is performed using a standard
+housejob.
+RAG pipeline described in step 1. We condition
+• Rewriting: Alternatively,iff iscontradicted
+3Thetaskinthefirstpassissimilartoafuzzyversionof
+byd,wemayrewriteitintoanewexpression naturallanguageinferenceclassification. Inputsthatmake
+f′ thatisinferrablytruefromdandthesubset facts more likely (even if they do not exactly entail those
+facts)areclassifiedassupport,andinputsthatmakefactsless
+of retrieved facts ⊂ R that have been rein-
+likely(eveniftheydonotexactlycontradictthosefacts)are
+forced or kept unchanged. We then replace classifiedasmakefalse.
+4onboththeretrievedfactsandtheircorresponding templates for each relation and generating ques-
+history in context. The full prompt can be found tionsandanswersfromthosetemplates. Wegen-
+inAppendixA.3. erated a total of 1409 questions. The full list of
+templatescanbefoundinAppendixB.1.
+4 Dataset
+4.2 SyntheticConversations
+WeconstructtwodatasetstoevaluateERASE. We
+Followingpriorwork(Maharanaetal.,2024),we
+acquireasetofnatural-languagetextsL ,asetof
+t constructasyntheticconversationdomainbyplac-
+groundtruthworldstatesW andaseriesofques-
+t ingtwoLLMswithdifferentpersonasinconversa-
+tions q ···q associated with W . We focus on
+0 n t tionwitheachother. Conversationsareengineered
+questions that update over time: the set of ques-
+to reflect changing facts in the agents’ simulated
+tionsweaskateachtimesteparethesame,buteach
+lives. Adetailedoverviewofdatasetconstruction
+questionisassociatedwithalistoftimestampedan-
+canbefoundinAppendixB.2. TovalidatetheLM
+swers(q ,{(a ,t ),(a ,t ),···}). Thedatasets
+i i0 i0 i1 i1 generations, three authors manually examined 3
+spantwodomainswherecontinuallearningisuse-
+conversations(1008questions)intotalandgotan
+ful: oneabouttheevolvingstateoftheworld,and
+averageof95%accuracyonthesequestions.
+oneabouttheevolvingstateofagentsinaconver-
+This synthetic domain allows us to rigorously
+sation. Samples from each dataset can be found
+controlandevaluateformsofreasoningthatmay
+in Figure 3. An overview of state transitions and
+behardtoisolateinnaturaldatalikenewsarticles.
+questions in these two datasets can be found in
+AppendixC. WorldStates Wegenerateanindependentworld
+foreachconversation. Wemodeltheworldunderly-
+4.1 NewsArticles
+ingaconversationasaMarkovchainwithstatesS,
+World States In this domain, world states are describedbyalistof(subj, rel, obj)relations,
+expressed in the form (subj, rel, obj): for and allowable transitions T(S). States S are de-
+instance, (Elizabeth II, position held, finedbyentitiesincludingpeople,companies,jobs,
+monarch of the United Kingdom). We mine hobbies, along with mutable and immutable rela-
+these triples from Wikidata.4 As Wikidata is up- tionsbetweenthem. Transitionst ∈ T(S)change
+dated over time, each fact is also associated with oneormorerelationinthestate: forexample,Bob
+astartandenddate. Tofindchangedfacts,weex- changed jobs to work at Google changes the em-
+tract(subj, rel)pairsforwhichthereareatleast ployeesofGoogle,thesetofcoworkersofBob,the
+twodistinctfactrelationsatdifferenttimestamps setofcoworkersofallGoogleemployees,andthe
+betweenNovember2021andApril2024. Through setofcoworkersofallemployeesofBob’sformer
+thisprocess,weobtain1,174triplesfor10unique company,etc. Ateachtimestep,wesampleatran-
+relations,summarizedinTable8. sition from T(S) uniformly at random. The full
+listofentities,relations,andtransitionsandtheir
+Documents For each world state (subj, rel,
+downstreameffectscanbefoundinAppendixB.2.
+obj, start_ts, end_ts), where the start and
+endtimestampsareextractedfromWikidata,weob- Conversations We generate conversations by
+tainanEnglisharticleconfirmingthatfactbetween sampling two people in the world p 1 and p 2 and
+thestartandendtimestamps, validatedbycrowd promptingtwoLLMswiththeircorrespondingper-
+workers. Throughthisprocess,annotatorscollected sonas and the initial world state S. We then gen-
+atotalof1149articles.5 SeeAppendixB.1forde- eratetwelveconversation“chunks”—separatedby
+tails. Thesedocuments—ratherthanrawrelation time—bysamplingstatetransitionsbetweenevery
+triples—aretheinputtoERASE. otherchunkandhavingpeopleconverseaboutthe
+factsthathavechangedaftereachtransitions.
+QuestionsandAnswers Weautomatethegener-
+We also construct a challenge set of multi-hop
+ationofquestionsandanswersfromW bywriting
+updatesinthisdomain,whichrequirepropagating
+changestomultipledownstreamfactsandreason-
+4https://www.wikidata.org/,whichispublicdomain.
+Its license can be found at https://www.wikidata.org/ ingaboutglobalcoherencebetweenfacts. Forex-
+wiki/Wikidata:Licensing.
+ample,Bobmaymentionthathehaschangedhis
+5Note1149<1174,meaningatleastafewarticleswere
+jobbutmaynotmentionthatJaneisnolongerhis
+sharedacrossrelations–theserepresentdifficultcaseswhere
+asinglearticlemakesmultiplerelationchanges. coworker or that Mary (who works at Google) is
+5Figure3: Sampledatafromourdatasets. TheNewsdatasetconsistsoffactualquestionswhoseanswerschange
+overtime,withtheassociatedsourceinducingthatchange. TheConversationsdatasetconsistsofconversations
+betweentwopersonaswithevolvinglifefacts. Thesingle-hopsubsetdirectlystatesallfactsthatarechanged,while
+themulti-hopsubsetrequiresreasoningaboutpreviouschunksofconversationtoinferallchanges.
+nowhiscoworker. TheLMmustmakemulti-hop tamp.6 We ask questions at regular intervals, at
+inferencestoupdatethelattertwofacts. timestepscorrespondingtowhen20%,40%,60%,
+Wegenerate100conversations(50single-hop, 80%, and 100% of the total world state changes
+50multi-hop)intotal. Conversationswereonaver- havebeenrevealedtothemodel. Becauseitistoo
+age11045tokenslonginthesingle-hopsubsetand expensivetoaskeveryquestionateverytimestep,
+11069tokenslonginthemulti-hopsubset. Detailed weaskallquestionswhoseanswershavechanged
+statisticsmaybefoundinAppendixFigure7. Q, then sample a subset of questions whose an-
+swershavenotchanged Q′,suchthat|Q′| = |Q|.
+QuestionsandAnswers Givenaworldstateat Wedesigneachquestionasamultiplechoiceques-
+time t, we query all facts about the world. Sim- tion, where the model is asked to select between
+ilar to the news setting, we automate generation all answers that have been true for the question
+of questions and answers through templates. We in the past, present, or future. This ensures that
+generate140questionsperconversation. thenegativeoptionsaresufficientlydifficult,and
+allowsustoprobeforthemodels’updatingcapa-
+5 Experiments bilities. Wereportexact-matchaccuraciesbetween
+themodel-predictedanswertothetrueanswer.
+In our experiments, we present to a LM articles
+Conversation Weevaluateeachconversationin-
+orconversationalturnsinchronologicalorder,and
+dependently,andreportthemeanandstandarder-
+periodically ask questions about the state of the
+rorofscoresovereachconversation. Westreamin
+world (as described by input documents) at that
+chunks of conversations into the model, and ask
+pointintime.
+questions after each conversation chunk. Simi-
+larlytothenewsdomain,wesubsamplequestions
+5.1 EvaluationandMetrics
+whoseanswershavenotchanged,suchthatateach
+News articles We present the model with a timestepweareaskingthesamenumberofques-
+streamofarticlesorderedbytimestamp. Asallan-
+6Notethatthisdoesnotcorrespondtowhenthesefacts
+swersaredatedwithastartandendtimestamp,we
+becametrueandfalseintherealworld,butrathertowhenthe
+alwaysknowwhichansweristrueforagiventimes- articleintroducingthechangedfactwaswrittenandread.
+6withtemperature0. WeuseGTR(T5-large;770M
+parameters;Nietal.,2022)asE toencodequeries
+anddocumentsfordenseretrieval, bothinthein-
+ferencestageandtheretrievalstepofupdating. We
+useafastinner-productsearchdatastructureforef-
+ficientretrieval(Douzeetal.,2024). Forprompting
+duringtheupdatingstage,weusethesameLMthat
+weareusingforinference. Werestrictthecontext
+window to 4096 for the news domain and 2048
+fortheconversationdomain.9 Inferenceandupdat-
+ingtookafewhourstocompleteforbothmodels
+and for all method. At inference time, we allow
+allmodelstoperformzero-shotchain-of-thought,
+giving them an additional ability to reason about
+inconsistentfactsatinferencetime.
+5.3 Baselines
+WecompareERASEtothreebaselines:
+RAG RAG (Lewis et al., 2020a) stores and re-
+trievestextatthegranularityofpassages. Wesave
+eacharticleandconversationchunkasaseparate
+passage in the knowledge base. For long articles
+andconversationchunks,wedividethemintopas-
+sagesoflengthcontext_window / 2.
+Fact-RAG To isolate the effects of editing, we
+Figure4: Mixtral-8x7B(top)andLlama-3-8B(bottom) benchmark against a version of RAG that stores
+resultsonthenewsarticledomain. ERASEoutperforms and retrieves facts in the knowledge base, akin
+RAG,RAGwithfact-levelgranularity,andevenlong- toChenetal.(2023). Weimplementthisbaseline
+context models, especially in later timesteps as more bypromptingLMstoextractfactsfrompassages,
+newinformationislearned.
+i.e.step3ofERASE,whichoutperformedthepropo-
+sitionizerfromChenetal.(2023).
+tionswhoseanswershavechangedasthosewhose
+LongcontextLMs Mixtral-8x7Bhasalongcon-
+answershaven’tchanged. Forquestionsthathave
+textwindowof32k. Werunanin-contextlearning
+multiple true answers (e.g. List all siblings
+baselinebyconditioningMixtralonallnewsarti-
+of Liam),wemeasurethesetequalitybetweenthe
+clesorconversationchunks,presentedinchrono-
+generatedandtruesetsofanswers. Otherwise,we
+logical order. These texts are timestamped, and
+use the same exact match accuracy as we use for
+Mixtral is able to condition on the most recent
+thenewsarticlesdomain.
+set of texts up to its context limit when making
+predictions. IntheConversationsdomain,thiscon-
+5.2 Models
+dition serves as a skyline since conversations fit
+WeuseaMixtral8x7bInstructmodel(56Bparam- completelyintothecontextwindow.
+eters; Jiang et al., 2024), queried using Together
+AI7,andalocalcopyofMeta’sLlama-38bInstruct 6 Results
+model (8B parameters ; AI@Meta, 2024) run on
+Figure4andTable1showresultsforthenewsand
+oneNVIDIAA100GPU.8 Forallpromptsduring
+conversationdomainsrespectively.
+inferenceandupdate-time,wesamplefromtheLM
+9Notethisissmallerthantheoriginalcontextwindows
+7https://www.together.ai/ forthesemodels,bothtorunourexperimentsefficiently,and
+8Llama-38bhasknowledgecutoffofMarch2023. Mix- to test out a (realistic) scenario where the total number of
+tral’shasnotbeenpublished,butappearstobearoundlate newworldchangescannotfitintothecontextwindowofa
+2022orearly2023. languagemodel.
+7DataSubset
+Single-hop Multi-hop
+0updates 1update 2+updates 0updates 1update 2+updates
+RAG(Lewisetal.,2020a) 86.0 56.7 50.9 84.5 20.9 20.0
+±0.7 ±1.8 ±3.2 ±0.8 ±1.4 ±2.3
+Mixtral- Fact-RAG(Chenetal.,2023) 82.7 51.5 52.7 81.8 18.0 30.2
+±0.8 ±1.8 ±3.1 ±0.8 ±1.3 ±2.7
+8x7B ERASE(Ours) 82.0
+±0.8
+59.1
+±1.8
+57.9
+±3.1
+81.5
+±0.8
+20.1
+±1.4
+27.2
+±2.6
+FullContext 88.8 71.6 75.7 88.4 43.2 54.3
+±0.6 ±1.6 ±2.4 ±0.6 ±1.7 ±2.8
+RAG(Lewisetal.,2020a) 84.4 57.8 55.2 83.6 22.2 26.8
+Llama- ±0.7 ±1.8 ±3.1 ±0.8 ±0.1 ±2.6
+Fact-RAG(Chenetal.,2023) 82.6 62.6 62.0 81.2 26.4 32.1
+3-8B ±0.8 ±1.7 ±3.0 ±0.8 ±1.6 ±2.8
+ERASE(Ours) 82.0
+±0.8
+65.3
+±1.7
+65.2
+±2.9
+81.0
+±0.8
+26.5
+±0.2
+31.7
+±2.7
+Table1: Resultsonthesyntheticconversationdomain. Fullcontextservesasaskylineinthisdomainasthefull
+conversationfitsintothecontextwindow. Wecompareagainstotherretrieval-basedmethods. Inboldareresultsthat
+arethestatisticallysignificantlybestoutofallothermethodsinthesamesetting(model,datasubset,#updates).
+WhileERASEsignificantlyimprovessingle-hopeditsinbothmodels,itstillstruggleswithmulti-hopedits. Small
+LMsmakeerrorsinmulti-hopreasoningduringtheoverwritingstage,andsuspectthatasLMsimprovemulti-hop
+reasoning,wewillseegreatergainswithERASE.
+*Wemerge2+updatesasgenerallythereisalongtailofquestionswithmoreupdates.Only27questionstotalhave3+updates.
+ERASE improvesoverstandardRAGwithpas- Multi-hopretrievalandeditingisstillchalleng-
+sageretrieval. ForbothMixtralandLlama-3in ing. BothLMsstrugglewiththemulti-hopsubset
+bothdomains,weseesignificantimprovementsus- of the conversation dataset. We believe this isn’t
+ingERASEoverRAG,particuarlyasthenumberof adrawbackoffacteditingitself,butofourimple-
+editsincreases. Forexample,inthenewsdomain, mentation of it: a qualitative examination of fail-
+atthefinaltimestampafterreadingallarticles,Mix- ure cases (see Appendix D.1 for some examples)
+tral with ERASE is 13 points better than Mixtral revealedthatourretrievalmodeloftenfailedtore-
+with RAG, while Llama with ERASE is about 6 trievealldownstreamfactsthatneedtobeedited,
+pointsbetterthanLlamawithRAG.Weseesimilar andlanguagemodelsonthescaleofMixtral-8x7b
+trendsonthesingle-hopsubsetoftheconversation and Llama-3-8b struggled with reasoning about
+domain: forquestionswith2+updates,ERASEis7 multi-hopedits,failingtomakethoseeditswhen
+and10pointsbetterthanRAG,usingMixtraland necessary. Amorepowerfulretrievalandediting
+Llamarespectively. modelmaybeabletoavoidtheseerrors.
+Editing existing facts improves beyond RAG
+7 Conclusion
+withfactretrieval. ForbothMixtralandLlama-
+3, ERASEsubstantiallyimprovesperformanceover ThispaperintroducedERASE,anapproachforedit-
+Fact-RAGasthenumberofeditsincreases,onboth ing existing facts in a knowledge base when new
+thenewsdomainandthesingle-hopsubsetofthe
+documentsarebeinginserted. Wealsointroduced
+conversationdomain. Improvingknowledgebase
+two datasets for testing the ability of models to
+consistencyhelps,evenwithstep-by-stepreasoning
+update their knowledge, accompanied by docu-
+atinference-time.
+ments that induce those changes. Editing exist-
+ingfactsbringssignificantimprovementstoRAG-
+Inthenewsdomain, ERASEimprovesoverlong-
+basedmodels. Eveniffuturemodelsbecomebetter
+contextmodeling. InFigure4,weplotMixtral
+atreasoningaboutinconsistencieswithscale,fact
+withitsfullcontextwindowonthenewsdomain.
+editingisusefulforamortizingthecostofreason-
+Long-contextmodelsareunabletoscaleasmorear-
+ingaboutconsistencyatinsertiontime,ratherthan
+ticlesareadded. However,wefindthatERASE(and
+havingtore-evaluateconsistencyeachtimeafactis
+retrievalmethodsgenerally)areunabletocompete
+queried. Futureworkcanfocusonimprovingany
+againstfittingfullconversationsinthecontextwin-
+part of the update pipeline, particularly focusing
+dowTable1. Thatsaid,thecostofconditioningon
+on retrieving downstream facts (step 1) that will
+fullconversationsisgreaterthanthecostofcondi-
+be affected by an input (which is different from
+tioningonsimplyretrievedfacts,especiallyasthe
+retrieving simply relevant facts), and improving
+numberofqueriesperconversationincreases.10
+LMabilitytoperformmulti-hopupdates(step2).
+10Conditioning Mixtral on full conversations costs 7.3K
+tokensperquery,whereasretrievalcosts∼1.7Ktokensper outflanksthenumberofdocumentsgeneratedaboutchanges
+query+afixedcostof∼42ktokensperconversationchunk. intheworld.Inourdatasetwithoutsubsampling,fullcontext
+Generally in the real world that the number of queries far wouldcost102Mtokenswhileourswouldcost28Mtokens.
+8Limitations besafeguardsinplacetoensurethatanyinserted
+andpropagatedknowledgeisfromreliablesources,
+As noted in Section 6, ERASE is still subpar for
+withpotentialvettingofeachinsertedarticle. One
+multi-hopupdates,largelyduetoretrievalmodel’s
+inabilitytoretrieveallthenecessaryfactsandthe oftheprosof ERASE isthatwecanseeeveryLM
+operationoccurringinrealtime: anyupdateopera-
+LMs’inabilitytoreasonaboutmulti-hopedits. We
+tioncanbeexaminedmanuallytoensurethatthe
+believe that this limitation can be mitigated with
+changesaredesirable.
+betterretrievalmodelsandbetterLMs.
+Second,becauseLMshaveatendencytohalluci-
+nate,allowingLMstodirectlyedittheknowledge
+References
+basemayintroducenoiseintotheknowledgebase.
+While our results found that the utility of propa- AI@Meta.2024. Llama3modelcard.
+gationwasgreaterthananyhindranceduetosuch
+AfraFeyzaAkyürek,EkinAkyürek,LeshemChoshen,
+noise, this noise has the potential to snowball on
+DerryWijaya,andJacobAndreas.2024. Deductive
+longtimescalesasthenumberofnewpassagesand closuretrainingoflanguagemodelsforcoherence,
+editsgrowsbeyondtensofthousands,hundredsof accuracy,andupdatability. InFindingsoftheAssoci-
+ationforComputationalLinguistics.
+thousands, or millions. That said, we do not be-
+lievethislimitationisinherenttoknowledge-base
+Borui Cai, Yong Xiang, Longxiang Gao, He Zhang,
+editing: futureworkcanexploremoreprincipled YunfengLi,andJianxinLi.2023. Temporalknowl-
+andrigorousapproachestoeditingwithguarantees edgegraphcompletion: Asurvey. InProceedingsof
+theThirty-SecondInternationalJointConferenceon
+aroundwhateditsaremadeandtohowmanyfacts.
+ArtificialIntelligence,IJCAI-23,pages6545–6553.
+Furthermore,webelievethatforanyapproachto
+InternationalJointConferencesonArtificialIntelli-
+modelediting,thereisanaturaltradeoffbetween genceOrganization. SurveyTrack.
+noiseandeditcoverage.
+NicolaDeCao,WilkerAziz,andIvanTitov.2021. Edit-
+Finally, having to process each document and
+ingfactualknowledgeinlanguagemodels. Preprint,
+update the knowledge base is less efficient than
+arXiv:2104.08164.
+simply adding it to the retrieval store. We justify
+thiscostbyassumingthatthenumberofinsertions Hung-Ting Chen, Michael Zhang, and Eunsol Choi.
+2022. Richknowledgesourcesbringcomplexknowl-
+is far fewer than the number of queries. (For ex-
+edgeconflicts: Recalibratingmodelstoreflectcon-
+ample, Forbes reports that 252,000 websites are
+flictingevidence. InProceedingsofthe2022Con-
+createdperday,11 whileGooglereceivesabout8.5 ferenceonEmpiricalMethodsinNaturalLanguage
+billionsearchesdaily.12) Thus,byshiftingthecost Processing, pages 2292–2307, Abu Dhabi, United
+ArabEmirates.AssociationforComputationalLin-
+ofreasoningaboutconsistencyfromquery-timeto
+guistics.
+insertion-time, ERASEisarguablymoreefficientin
+practicethanRAG. Tong Chen, Hongwei Wang, Sihao Chen, Wenhao
+Yu, Kaixin Ma, Xinran Zhao, Hongming Zhang,
+EthicalConsiderations and Dong Yu. 2023. Dense x retrieval: What
+retrieval granularity should we use? Preprint,
+Beingabletointerpretablyeditmodelsisusefulfor
+arXiv:2312.06648.
+improvingthesafetyandtrustworthinessofmod-
+els. If there is misinformation in the knowledge Wenhu Chen, Xinyi Wang, William Yang Wang, and
+base,ourmethodallowsthesefactstobecorrected William Yang Wang. 2021. A dataset for answer-
+ingtime-sensitivequestions. InProceedingsofthe
+quicklyandthesecorrectionstopropagatethrough
+Neural Information Processing Systems Track on
+the knowledge base. Our method magnifies the
+DatasetsandBenchmarks,volume1.
+effectofeachchange,makingiteasyforsystemde-
+signerstokeepknowledgeup-to-dateandremove Bhuwan Dhingra, Jeremy R. Cole, Julian Martin
+Eisenschlos, Daniel Gillick, Jacob Eisenstein, and
+anystaleorincorrectknowledge. Converselyhow-
+WilliamW.Cohen.2022. Time-awarelanguagemod-
+ever,thiscouldalsoempowermaliciousactorsto
+elsastemporalknowledgebases. Transactionsofthe
+insert false facts, which will also be propagated AssociationforComputationalLinguistics,10:257–
+through the knowledge base. There will need to 273.
+11https://www.forbes.com/advisor/business/ MatthijsDouze,AlexandrGuzhva,ChengqiDeng,Jeff
+software/website-statistics/ Johnson,GergelySzilvasy,Pierre-EmmanuelMazaré,
+12https://seo.ai/blog/ Maria Lomeli, Lucas Hosseini, and Hervé Jégou.
+how-many-people-use-google 2024. Thefaisslibrary.
+9KelvinGuu,KentonLee,ZoraTung,PanupongPasu- PatrickLewis,EthanPerez,AleksandraPiktus,Fabio
+pat,andMing-WeiChang.2020. Realm: retrieval- Petroni,VladimirKarpukhin,NamanGoyal,Hein-
+augmentedlanguagemodelpre-training. InProceed- richKüttler, MikeLewis, Wen-tauYih, TimRock-
+ingsofthe37thInternationalConferenceonMachine täschel,SebastianRiedel,andDouweKiela.2020b.
+Learning,ICML’20.JMLR.org. Retrieval-augmented generation for knowledge-
+intensive nlp tasks. In Advances in Neural Infor-
+WenyueHua,JiangGuo,MingwenDong,HenghuiZhu, mationProcessingSystems,volume33,pages9459–
+Patrick Ng, and Zhiguo Wang. 2024. Propagation 9474.CurranAssociates,Inc.
+andpitfalls: Reasoning-basedassessmentofknowl-
+edgeeditingthroughcounterfactualtasks. Preprint, Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov,
+arXiv:2401.17585. MohitBansal,FrancescoBarbieri,andYuweiFang.
+2024. Evaluating very long-term conversational
+JoelJang,SeonghyeonYe,ChanghoLee,SoheeYang, memoryofllmagents. arxiv.
+JoongboShin,JanghoonHan,GyeonghunKim,and
+MinjoonSeo.2023. Temporalwiki:Alifelongbench- Jannat Ara Meem, Muhammad Shihab Rashid, Yue
+markfortrainingandevaluatingever-evolvinglan- Dong,andVagelisHristidis.2024. Pat-questions: A
+guagemodels. Preprint,arXiv:2204.14211. self-updatingbenchmarkforpresent-anchoredtempo-
+ralquestion-answering. Preprint,arXiv:2402.11034.
+JoelJang,SeonghyeonYe,SoheeYang,JoongboShin,
+Janghoon Han, Gyeonghun Kim, Stanley Jungkyu SanketVaibhavMehta,JaiGupta,YiTay,MostafaDe-
+Choi, and Minjoon Seo. 2022. Towards continual hghani, Vinh Q. Tran, Jinfeng Rao, Marc Najork,
+knowledge learning of language models. Preprint, EmmaStrubell,andDonaldMetzler.2023. Dsi++:
+arXiv:2110.03215. Updatingtransformermemorywithnewdocuments.
+Preprint,arXiv:2212.09744.
+Albert Q. Jiang, Alexandre Sablayrolles, Antoine
+KevinMeng,DavidBau,AlexAndonian,andYonatan
+Roux, Arthur Mensch, Blanche Savary, Chris
+Belinkov.2022. Locatingandeditingfactualasso-
+Bamford, Devendra Singh Chaplot, Diego de las
+ciations in GPT. Advances in Neural Information
+Casas, Emma Bou Hanna, Florian Bressand, Gi-
+ProcessingSystems,36. ArXiv:2202.05262.
+anna Lengyel, Guillaume Bour, Guillaume Lam-
+ple, Lélio Renard Lavaud, Lucile Saulnier, Marie-
+Kevin Meng, Arnab Sen Sharma, Alex J Andonian,
+AnneLachaux,PierreStock,SandeepSubramanian,
+Yonatan Belinkov, and David Bau. 2023. Mass-
+Sophia Yang, Szymon Antoniak, Teven Le Scao,
+editing memory in a transformer. In The Eleventh
+Théophile Gervet, Thibaut Lavril, Thomas Wang,
+International Conference on Learning Representa-
+TimothéeLacroix,andWilliamElSayed.2024. Mix-
+tions.
+tralofexperts. Preprint,arXiv:2401.04088.
+EricMitchell,CharlesLin,AntoineBosselut,Chelsea
+Xisen Jin, Dejiao Zhang, Henghui Zhu, Wei Xiao,
+Finn,andChristopherDManning.2022a. Fastmodel
+Shang-Wen Li, Xiaokai Wei, Andrew Arnold, and
+editing at scale. In International Conference on
+XiangRen.2022. Lifelongpretraining: Continually
+LearningRepresentations.
+adaptinglanguagemodelstoemergingcorpora. In
+ProceedingsofBigScienceEpisode#5–Workshop EricMitchell,CharlesLin,AntoineBosselut,Chelsea
+onChallenges&PerspectivesinCreatingLargeLan- Finn,andChristopherD.Manning.2022b. Memory-
+guageModels,pages1–16,virtual+Dublin.Associa- basedmodeleditingatscale. InInternationalCon-
+tionforComputationalLinguistics. ferenceonMachineLearning.
+Jungo Kasai, Keisuke Sakaguchi, yoichi takahashi, T. Mitchell, W. Cohen, E. Hruschka, P. Talukdar,
+Ronan Le Bras, Akari Asai, Xinyan Velocity Yu, B.Yang,J.Betteridge,A.Carlson,B.Dalvi,M.Gard-
+Dragomir Radev, Noah A. Smith, Yejin Choi, and ner,B.Kisiel,J.Krishnamurthy,N.Lao,K.Mazaitis,
+Kentaro Inui. 2023. Realtime QA: What’s the an- T. Mohamed, N. Nakashole, E. Platanios, A. Rit-
+swer right now? In Thirty-seventh Conference on ter, M. Samadi, B. Settles, R. Wang, D. Wijaya,
+NeuralInformationProcessingSystemsDatasetsand A. Gupta, X. Chen, A. Saparov, M. Greaves, and
+BenchmarksTrack. J.Welling.2018. Never-endinglearning. Commun.
+ACM,61(5):103–115.
+Nikita Kitaev, Łukasz Kaiser, and Anselm Levskaya.
+2020. Reformer: The efficient transformer. arXiv Ali Modarressi, Abdullatif Köksal, Ayyoob Imani,
+preprintarXiv:2001.04451. MohsenFayyaz,andHinrichSchütze.2024. Mem-
+llm: Finetuning llms to use an explicit read-write
+PatrickLewis,EthanPerez,AleksandraPiktus,Fabio memory. Preprint,arXiv:2404.11672.
+Petroni,VladimirKarpukhin,NamanGoyal,Hein-
+richKüttler, MikeLewis, Wen-tauYih, TimRock- Jianmo Ni, Chen Qu, Jing Lu, Zhuyun Dai, Gustavo
+täschel,SebastianRiedel,andDouweKiela.2020a. HernandezAbrego, JiMa, VincentZhao, YiLuan,
+Retrieval-augmented generation for knowledge- KeithHall,Ming-WeiChang,andYinfeiYang.2022.
+intensive nlp tasks. In Advances in Neural Infor- Largedualencodersaregeneralizableretrievers. In
+mationProcessingSystems,volume33,pages9459– Proceedings of the 2022 Conference on Empirical
+9474.CurranAssociates,Inc. Methods in Natural Language Processing, pages
+109844–9855,AbuDhabi,UnitedArabEmirates.As- MichaelZhangandEunsolChoi.2021. SituatedQA:In-
+sociationforComputationalLinguistics. corporatingextra-linguisticcontextsintoQA. InPro-
+ceedingsofthe2021ConferenceonEmpiricalMeth-
+YasumasaOnoe,MichaelZhang,EunsolChoi,andGreg ods in Natural Language Processing, pages 7371–
+Durrett.2022. Entityclozebydate: WhatLMsknow 7387,OnlineandPuntaCana,DominicanRepublic.
+about unseen entities. In Findings of the Associa- AssociationforComputationalLinguistics.
+tion for Computational Linguistics: NAACL 2022,
+Michael Zhang and Eunsol Choi. 2023. Mitigating
+pages693–702,Seattle,UnitedStates.Association
+temporalmisalignmentbydiscardingoutdatedfacts.
+forComputationalLinguistics.
+In Proceedings of the 2023 Conference on Empiri-
+calMethodsinNaturalLanguageProcessing,pages
+YasumasaOnoe,MichaelZhang,ShankarPadmanab-
+14213–14226,Singapore.AssociationforComputa-
+han,GregDurrett,andEunsolChoi.2023. CanLMs
+tionalLinguistics.
+learnnewentitiesfromdescriptions? challengesin
+propagating injected knowledge. In Proceedings
+of the 61st Annual Meeting of the Association for
+ComputationalLinguistics(Volume1: LongPapers),
+pages5469–5485,Toronto,Canada.Associationfor
+ComputationalLinguistics.
+ShankarPadmanabhan,YasumasaOnoe,MichaelJ.Q.
+Zhang,GregDurrett,andEunsolChoi.2023. Propa-
+gatingknowledgeupdatesinlmsthroughdistillation.
+AdvancesinNeuralInformationProcessingSystems,
+36.
+Ofir Press, Noah A Smith, and Mike Lewis. 2021.
+Train short, test long: Attention with linear biases
+enables input length extrapolation. arXiv preprint
+arXiv:2108.12409.
+JianlinSu, MurtadhaAhmed, YuLu, ShengfengPan,
+Wen Bo, and Yunfeng Liu. 2024. Roformer: En-
+hancedtransformerwithrotarypositionembedding.
+Neurocomputing,568:127063.
+YiTay,MostafaDehghani,DaraBahri,andDonaldMet-
+zler.2022. Efficienttransformers: Asurvey. ACM
+Comput.Surv.,55(6).
+TuVu,MohitIyyer,XuezhiWang,NoahConstant,Jerry
+Wei,JasonWei,ChrisTar,Yun-HsuanSung,Denny
+Zhou,QuocLe,andThangLuong.2023. Freshllms:
+Refreshinglargelanguagemodelswithsearchengine
+augmentation. Preprint,arXiv:2310.03214.
+Liyuan Wang, Xingxing Zhang, Hang Su, and Jun
+Zhu. 2024. A comprehensive survey of continual
+learning: Theory,methodandapplication. Preprint,
+arXiv:2302.00487.
+SinongWang,BelindaZLi,MadianKhabsa,HanFang,
+andHaoMa.2020. Linformer: Self-attentionwith
+linearcomplexity. arXivpreprintarXiv:2006.04768.
+YanXu,MahdiNamazifar,DevamanyuHazarika,Aish-
+waryaPadmakumar,YangLiu,andDilekHakkani-
+Tur.2023. KILM:Knowledgeinjectionintoencoder-
+decoder language models. In Proceedings of the
+61stAnnualMeetingoftheAssociationforCompu-
+tationalLinguistics(Volume1: LongPapers),pages
+5013–5035,Toronto,Canada.AssociationforCom-
+putationalLinguistics.
+11A Promptsfor ERASE Secondround: extractingrewrites
+Inthissection,welistallpromptsthatweusefor1 [Input] [Timestamp: {ts}] {context}
+eachstepofourmethod. 2 Other True Facts at {ts}: {", ".join(
+still_true_facts)}
+A.1 FactUpdating 3 [End Input]
+Inpractice,weimplementtheseoperationsbyper-4
+formingtwopassesovertheretrievedfacts. Inthe5 The fact "{fact}" was previously true
+firstpass,weprompttheLMwiththeinputdand but no longer. Given the above input and
+eachfactf ∈ Randpromptittoclassifythefact true facts, can you rewrite it into one
+intooneofreinforce,nochange,makefalse. From that is true as of {ts}? Output your
+thisfirstpass,wedividetheretrievedfactsintotwo answer in form "rewrite: rewritten fact"
+sets: R , comprising facts that remain true (re- or "no rewrite possible".
+true
+inforce,nochange),andR ,comprisedoffacts
+false
+thathavebecomefalse(makefalse). Inthesecond A.2 FactExtraction
+pass,weiteratethroughR ,andprompttheLM
+false
+torewritethefactintoatruefact(ifpossible),con-1 Extract all facts from the input text,
+with each fact on a new line and without
+ditioned on the new document d and R . This
+true
+bullet points or numbered lists. Facts
+servesafewpurposes:
+should be simple, independent,
+1. Iff isonlymadepartiallyfalsebyd,wemay
+standalone, and decontextualized. Break
+retain information expressed in f but not d.
+up long facts into smaller facts.
+For example, if f is Mary and Bob work at
+Resolve all references (e.g. pronouns,
+UPS, and d is Mary got fired from UPS, we
+definite articles, etc.) by copying full
+may rewrite f as Bob works at UPS, rather
+reference object everywhere it is
+thannegatingtheentirefact.
+referenced. Only include facts referring
+to the current world state (what is
+2. Conditioning on R allows the LM to
+true
+true *now*), as opposed to facts true in
+make multi-hop edits. For example, if f is
+the past. If there are no facts, please
+Mary is coworkers with Bob, and d is Mary
+output "No new facts." Do not include
+changedworkplacestoAmazon,ifR con-
+true
+any other text.
+tains Quinn works at Amazon, then we can
+rewritef asMaryiscoworkerswithQuinn.
+A.3 Inference
+Firstround: classifyingfactsasbecomingmore
+orlesslikelytobetrue. Given a question question at timestep ts (and
+choices answer_choices), We first retrieve facts
+1 [Input] [Timestamp: {ts}] {context} [End
+f ,[(τ ,v ),(τ ,v ),···] from the knowledge
+Input] i i0 i0 i1 i1
+basewithsimilaritythreshold> 0.7toquestion.
+2
+WethenpromptaLMwiththefollowing:
+3 The fact "{fact}" was previously true.
+In light of the input, is "{fact}" 1 Read the statements/passages below then
+likely still true as of {ts}? Begin by answer the question below
+summarizing the changes we learned from 2
+the input, then reasoning briefly about 3 ***BEGIN STATEMENTS***
+them to give your final answer with " 4 {f_i} ({v_{i0}} at {tau_{i0}}, {v_{i1}}
+Answer: Reinforce" (if the input makes at {tau_{i1}}, ...)
+the fact more likely) or "Answer: Make 5 {f_j} ({v_{j0}} at {tau_{j0}}, {v_{j1}}
+False" (if the input makes the fact less at {tau_{j1}}, ...)
+likely) or "Answer: No Change" (if the 6 ...
+input doesn't affect the fact, e.g. if 7 ***END STATEMENTS***
+the input is irrelevant to the fact). 8
+Assume that the fact is still true (keep9 Given the above statements are true and
+true) if nothing in the input any prior knowledge you have, answer the
+contradicts it. following question at timestep {ts}?:
+1210 {question} first stage by presenting articles from the first
+11 round of annotations to annotators in the second
+12 Briefly reason then answer with one of: round, and asking users whether those articles
+{answer_choices}. containedthefactinquestion. Ifsecondannotator
+doesnotaffirmthefactispresentinthearticle,we
+For questions requiring list answers (e.g. list
+throw out the fact and the associated annotation.
+allthesiblingsofRachel),wereplacethelastline
+We do an additional third round of filtration
+with:
+with a language model, asking the language
+1 Briefly reason then answer with a JSON model to affirm that the text of an article con-
+list, ["item1", "item2", ...], of zero tains (subj,rel,obj,start_ts, end_ts)
+or more of the following items: {
+but not any succeeding facts
+answer_choices}. If you include any of (subj,rel,obj2,start_ts2, end_ts2).
+the above items, make sure to copy their
+We only include articles and facts that pass
+names exactly as is from the list. Your
+all three rounds of annotation. We recruited
+list may be empty, [], if none of the
+English-speaking participants from the US for
+answers are true.
+annotations for all annotations. The full set of
+instructions we give annotators can be found
+B DatasetConstructionDetails inTables2and3. Screenshotsoftheinterfacecan
+befoundinFigures5and6.
+B.1 NewsArticles
+Generating Question-Answers Pairs (q,{a}).
+Weconstructthisdatasetinthreestages:
+Weautomategenerationofquestionsandanswers
+Extracting World States W. We re- fromW bywritingtemplatesforeachrelationand
+trieve (subj,rel) pairs from Wikidata generatingquestionsandanswersfromthosetem-
+for which there are at least two distinct plates. ThefulllistoftemplatescanbefoundinTa-
+fact relations at different timestamps, e.g. ble4.
+(subj,rel,obj1,start_ts1,end_ts1) and
+(subj,rel,obj2,start_ts2,end_ts2). These Prolific Details We recruited a total of 680
+timestampedfactsareusedto“represent”W. We English-speaking prolific annotators from the
+filterforsubjectssubjlocatedinEnglish-speaking United States, with each annotator spending an
+countriestoensurewecanfindEnglish-language
+averageof16:50minutesonthetask(∼7minutes
+sources. We use SPARQL13 to obtain a set of toreadandunderstandinstructions). Wepaidanno-
+(subj,rel)pairs. tatorsanaverageof$14.20perhour. Thistaskwas
+deemedexemptfromIRBreview. Nopersonally-
+Obtaining Documents L. We an-
+identifiable information was collected or stored,
+notate each timestamped relation,
+andallprolificannotatorswereassociatedwithan
+(subj,rel,obj,start_ts, end_ts) with a
+anonymousprolificID.
+source written between start_ts and end_ts
+(preferably close to the start_ts) stating B.2 SyntheticConversations
+that the (subj,rel,obj) relation is true. We
+Wealsoconstructthisdatasetinthreestages:
+crowdsource annotations from Prolific in two
+stages. In the first stage, Prolific annotators GeneratingWorldStatesW. Wemodeltheun-
+were presented with an interface which scraped derlyingworldanditstransformationsasaMarkov
+candidate news articles off of Google14, and chain with states S and a set of allowable transi-
+were asked to select sources which stated that tionsT(S)determinedbyS. Ateachtimestep,we
+the fact (subj,rel,obj,start_ts, end_ts) is randomlysampleatransitionfromT(S)uniformly
+true, but did not state that any succeeding fact, atrandom. StatesS aredescribedbyasetofrela-
+(subj,rel,obj2,start_ts2, end_ts2) where tions(subj, rel, obj). Thefulllistofentities
+start_ts2 > start_ts, is true. In the second typesandrelationsforeachentitytypecanbefound
+stage, we validated Prolific annotations from the inTable5. Toconstructeachworld,wesubsample
+10peopleand5companies,andrandomlyinitialize
+13https://www.w3.org/TR/sparql11-query/
+their kinship and employment relations. Transi-
+14Inparticular,wesettheto-be-matchedparameterofthe
+searchto“news”,i.e.https://www.google.com/?tbm=nws tionst ∈ T(S)changeoneormorerelationinthe
+13Pleasereadtheseinstructionscarefullyandonlyproceedonceyouhaveunderstoodthem.Onceyoustartthetask,
+youwillhave10minutestogetthroughasmanyquestionsaspossible.
+Foreachquestion,youwillbepresentedafact.Pleasefindanewsarticlethatimpliesthatthefactistrue,accordingto
+thebelowrequirements:
+1. Thearticleimpliesthefact,suchthatareasonableperson,withoutanypriorknowledge,caninferthatthefactis
+truefromreadingthearticle.
+Example:ForfactEmadMostaqueisCEOofStabilityAI(wasTruefrom2020to2024-03-23)
+GoodSources:ThisstartupissettingaDALL-E2-likeAIfree,consequencesbedamned:Articlesays"...Stability
+AICEOandfounderEmadMostaquewroteinablogpost"
+BadSources:ArtistscannowoptoutofthenextversionofStableDiffusion:Cannotconcludefactfromtextof
+article
+2. Thearticleisanewsarticleorblogpost.
+Example:ForfactTaylorAylmerisamemberoftheRacingLouisvilleFCsportstea
+GoodSources:TeamNews:Aylmertomakefirstregularseasonstart
+BadSources:TaylorAylmer-RacingLouisvilleFCMidfielder-ESPN,TaylorAylmer-Instagram
+3. Thefactisstatedinthemainbodyofthearticletext,notinatable,list,image,imagecaption,embeddedtweet,etc.
+Example:ForfactTaylorAylmerisamemberoftheRacingLouisvilleFCsportsteam
+GoodSources:TeamNews:Aylmertomakefirstregularseasonstart,Recap:RacingralliestobeatOrlando,keep
+playoffhopesalive:Factisinalistattheend,notthemaintext
+BadSources:JaelinHowell,RacingLouisvillebringcommunitytogethertohelppeoplewithDownsyndrome:
+Factisinanimagecaptionbutnowhereinthemaintext
+4. Thearticleisawebpage,notaPDForotherfileformat.
+Example:ForfactAliShojaieisaIMSFellow
+GoodSources:AliShojaieelectedfellowoftheInstituteofMathematicalStatistics
+BadSources:IMSCarverAward2023:SourceisaPDFfile,notawebpage
+5. ThearticleiswritteninEnglish.
+Example:ForfactEmadMostaqueisCEOofStabilityAI(wasTruefrom2020to2024-03-23)
+GoodSources:ThisstartupissettingaDALL-E2-likeAIfree,consequencesbedamned
+BadSources:[Bengaliarticle]:ArticleisnotinEnglish
+6. Avoidarticlesthatstatethatthefactisorisabouttobecomefalse.Thesearegenerallywrittennearorpasttheend
+dateofafactbeingtrue.
+Example:ForfactEmadMostaqueisCEOofStabilityAI(wasTruefrom2020to2024-03-23)
+GoodSources:ThisstartupissettingaDALL-E2-likeAIfree,consequencesbedamned
+BadSources:StabilityAIfounderEmadMostaqueplanstoresignasCEO,sourcessay:Articleisaboutthefact
+beingabouttobefalse
+If no listed articles satisfy these requirements, you have the option to either find a news article that satisfies the
+requirements (a google search link is provided for reference, you may need to manually adjust the query or date
+parameters)orselecting"cannotfindsource"ifyoucannotfindanysourceinareasonableamountoftime.
+Theremayalsobeasecondfactthatyouneedtoavoid.Ifyouseethisfactinthearticle,donotselectitasasource.
+Tip:Youmayuse"ctrl-f"(findtool)toquicklyvalidatewhetherornotafactisinthearticle.
+Table2: Instructionsforround1ofannotationfornewsarticle.
+14Pleasereadtheseinstructionscarefullyandonlyproceedonceyouhaveunderstoodthem.Onceyoustartthetask,
+youwillhave12minutestogetthroughasmanyquestionsaspossible.
+Foreachquestion,youwillbepresentedafactandanewsarticle.Pleaseconfirmthatthenewsarticleimpliesthatthe
+factistrue,andconformstothebelowrequirements:
+1. Thearticleimpliesthefact,suchthatareasonableperson,withoutanypriorknowledge,caninferthatthefactis
+truefromreadingthearticle.
+Example:ForfactEmadMostaqueisCEOofStabilityAI(wasTruefrom2020to2024-03-23)
+GoodSources:ThisstartupissettingaDALL-E2-likeAIfree,consequencesbedamned:Articlesays"...Stability
+AICEOandfounderEmadMostaquewroteinablogpost"
+BadSources:ArtistscannowoptoutofthenextversionofStableDiffusion:Cannotconcludefactfromtextof
+article
+2. ThearticleiswritteninEnglish.
+Example:ForfactEmadMostaqueisCEOofStabilityAI(wasTruefrom2020to2024-03-23)
+GoodSources:ThisstartupissettingaDALL-E2-likeAIfree,consequencesbedamned
+BadSources:[Bengaliarticle]:ArticleisnotinEnglish
+3. Avoidarticlesthatstatethatthefactisorisabouttobecomefalse.Thesearegenerallywrittennearorpasttheend
+dateofafactbeingtrue.
+Example:ForfactEmadMostaqueisCEOofStabilityAI(wasTruefrom2020to2024-03-23)
+GoodSources:ThisstartupissettingaDALL-E2-likeAIfree,consequencesbedamned
+BadSources:StabilityAIfounderEmadMostaqueplanstoresignasCEO,sourcessay:Articleisaboutthefact
+beingabouttobefalse
+Iftheprovidedarticledoesnotsatisfytheserequirements,youhavetheoptiontoeitherfindanewsarticlethatsatisfies
+therequirements(agooglesearchlinkisprovidedforreference,youmayneedtomanuallyadjustthequeryordate
+parameters)orselecting"cannotfindsource"ifyoucannotfindanysourceinareasonableamountoftime.
+Theremayalsobeasecondfactthatyouneedtoavoid.Ifyouseethisfactinthearticle,donotselectitasasource.
+Tip:Youmayuse"ctrl-f"(findtool)toquicklyvalidatewhetherornotafactisinthearticle.
+Table3: Instructionsforround2ofannotationfornewsarticle.
+Figure5: Screenshotofround1ofannotationfornewsarticle.
+15Figure6: Screenshotofround2ofannotationfornewsarticle.
+Who is the employer of {subject}?
+({subj}, employer, {obj})
+Is {subject} an employee of {object}?
+Who is the CEO of {subject}?
+({subj}, chief executive officer,
+What company is {object} the CEO of?
+{obj})
+Is {object} the CEO of {subject}?
+Who is the chairperson of {subject}?
+({subj}, chairperson, {obj}) What organization is {object} the chairperson of?
+Is {object} the chairperson of {subject}?
+Who is the head of state of {subject}?
+({subj}, head of state, {obj}) Where is {object} the head of state of?
+Is {object} the head of state of {subject}?
+What government position does {subject} hold?
+({subj}, position held, {obj})
+Does {subject} hold government position {object}?
+({subj}, member of sports team, What sports team is {subject} a member of?
+{obj}) Is {subject} a member of {object}?
+Who is the unmarried partner of {subject}?
+({subj}, unmarried partner, {obj}) Who is the unmarried partner of {object}?
+Is {object} the unmarried partner of {subject}?
+Where does {subject} reside?
+({subj}, residence, {obj})
+Does {subject} reside in {object}?
+({subj}, headquarters location, Where is the headquarters location of {subject}?
+{obj}) Is the headquarters location of {subject} in {object}?
+What organization is {subject} a member of?
+({subj}, P463, {obj})
+Is {subject} a member of {object}?
+({subj}, member of political party, What political party is {subject} a member of?
+{obj}) Is {subject} a member of {object}?
+Table4: Question-answertemplatesintheNewsdomain
+16state. Tobeabletotestthelimitsofourpropaga- D QualitativeAnalysis
+tion,thesetoftransitionswedefineinthisdomain
+D.1 ErrorAnalysis: Conversations
+all change more than one relation: for example,
+(Multihop)
+“BobchangedjobstoworkatGoogle”changesthe
+employeesofGoogle,thesetofcoworkersofBob, Prototypicalexamplesofmultihopediterrorscan
+thesetofcoworkersofallGoogleemployees,and befoundbelow:
+thesetofcoworkersofallemployeesofBob’sfor-
+RetrievalErrors Sometimes,thefulllistoffacts
+mercompany,etc. Thefulllistoftransitionsand
+that need to be updated are not retrieved. For ex-
+theirdownstreameffectscanbefoundinTable6.
+ample:
+Inputconversationchunk:
+GeneratingConversationsL. Wegeneratecon-
+2023-11-01
+versationsbysamplingtwopeopleintheworldp
+1
+Katie: HeyOlivia! Howhaveyoubeen?
+andp andpromptingtwoLLMswiththeircorre-
+2
+Guess what? I’ve changed my job to
+spondingpersonasandinitialfacts. Wethengener-
+Library Assistant at Central Public Li-
+atetwelveconversation“chunks”asfollows: We
+brary! What’snewwithyou?
+begin bysampling thenext transitionwe want to
+makeintheworld. Thetransitioncorrespondstoa Olivia: HeyKatie! That’samazingnews!
+naturallanguagestringthatcorrespondstoonlya Congrats on the new job as a Library
+singlerelation. However,weknowthateachtransi- AssistantatCentralPublicLibrary!
+tionisassociatedwithmultiplechangingrelations.
+...
+To be able to infer the downstream changes of a
+singlerelationchanging,weneedtoknowauxiliary Retrievedfacts:
+factsrelatedtotheobject ofthechangedrelation.
+Inthemulti-hopsubsetofthisdataset,wemention • The role of General Practitioner at Health-
+auxiliary facts in the prior conversation chunks, FirstMedicalClinicisafull-timejob.
+while only mentioning the immediate transition
+• TheroleofLibraryAssistantatCentralPublic
+(onasinglerelation)inthecurrentchunk(without
+Libraryisafull-timejob.
+mentioning any downstream changes). Thus, to
+make the correct downstream inferences on this
+• Rachelhasafull-timejobasaMedicalAssis-
+subset,thesystemmustretrieveandreasonacross
+tantatHealthFirstMedicalClinic.
+factsfrompriorconversationchunks.
+• Rachel works at HealthFirst Medical Clinic
+For the singlehop subet, we mention all down-
+asaMedicalAssistant.
+streameffectsinthesameconversationchunkthat
+atransitionismade.
+• TheworkhoursofaLibraryAssistantatCen-
+tralPublicLibraryarefrom9to17.
+Generating Question-Answers Pairs (q,{a}). • Katie works full-time at the Urban Develop-
+Given a world state at time t, we query all facts mentProject.
+about the world. Similar to the news setting,
+weautomategenerationofquestionsandanswers • Oliviaworksfull-timeattheairport.
+throughtemplates. Templatesinthissettingcanbe
+• ThesalaryforaLibraryAssistantatCentral
+foundinTable7.
+PublicLibraryis$80,000.
+• Peterworksfrom9to17attheCentralPublic
+C DatasetStatistics Library.
+• Diana and Liam both have full-time jobs at
+Thebreakdownofchangesineachofourdatasets
+theUrbanDevelopmentProject.
+canbefoundinTable8fornewsarticlesandFig-
+ure 7 for conversations. The breakdown of ques- • The salary of an Archivist at Central Public
+tionsforconversationscanbefoundinTable9. Libraryis$130,000.
+17EntityType PossibleRelations
+Person spouse, parents, children, job, company, hobbies, coworkers, work location, boss,
+salary,industry,is-employed-full-time,workhours,workplace,siblings,parents-in-
+law,children-in-law,step-parents,step-children,equipmentnecessaryforhobbies
+Company employees,jobs,head,location,industry,workplacetype
+Job company,salary,is-full-time,workhours
+Hobby equipmentnecessaryforhobby
+Table5: FulllistofentitiesandrelationsdefiningeachworldstateintheConversationdomain.
+Transitiontype Downstreameffects
+person.job changes person.company, person.coworkers, person.work-location,
+fromjob1tojob2 person.boss, person.salary, person.industry, person.is-
+employed-full-time, person.work-hours, person.workplace,
+job1.company.employees,job2.company.employees
+person.spouse changes person.parents-in-law, person.parents.children-in-law,
+fromperson1toperson2 person.children.step-parents, person.step-children, per-
+son1.spouse, person1.parents-in-law, person1.parents.children-
+in-law, person2.spouse, person2.parents-in-law,
+person2.parents.children-in-law, person2.children.step-parents,
+person2.step-children
+personadoptschild person.children,child.parents,child.siblings,child.spouse.parents-
+in-law, person.children-in-law, child.step-parents,
+person.spouse.step-children,person.children.siblings
+person gets a new hobby person.equipment-necessary-for-hobbies
+hobby
+job.salarychanges forallpeoplethathavethatjob: person.salary
+job.work-hourschanges forallpeoplethathavethatjob: person.work-hours
+Table6: FulllistofpossiblestatetransitionsintheConversationdomain. Notethesetofavailabletransitionsmay
+varydependingontheunderlyingstate.
+Who is the spouse of {subj}?
+({subj}, spouse, {obj})
+Who is the spouse of {obj}?
+({subj}, job, {obj}) What is the job of {subj}?
+({subj}, company, {obj}) Which company does {subj} work at?
+({subj}, hobbies, {obj}) List all known hobbies of {subj}.
+({subj}, coworkers, {obj}) List all known coworkers of {subj}.
+({subj}, work location, {obj}) In which city does {subj} work?
+({subj}, boss, {obj}) Who is the head of {subj}'s workplace?
+({subj}, salary, {obj}) What is the salary of {subj}?
+({subj}, industry, {obj}) What industry does {subj} work in?
+({subj}, is-employed-full-time, {obj}) Does {subj} work full-time or part-time?
+({subj}, work-hours, {obj}) What are the work hours of {subj}?
+({subj}, workplace, {obj}) Whattypeofworkplacedoes{subj}workoutof?
+({subj}, parents, {obj}) List all parents of {subj}.
+({subj}, children, {obj}) List all children of {subj}.
+({subj}, siblings, {obj}) List all siblings of {subj}.
+({subj}, parents-in-law, {obj}) List all parents-in-law of {subj}.
+({subj}, children-in-law, {obj}) List all children-in-law of {subj}.
+({subj}, step-parents, {obj}) List all step-parents of {subj}.
+({subj}, step-children, {obj}) List all step-children of {subj}.
+({subj}, necessary equipment for hobby, {obj}) Listallequipment{subj}needsfortheirhobbies.
+Table7: Question-answertemplatesintheConversationdomain
+18A B
+200 Relation Type 700 question_type
+chairperson 650 ceo
+180 chief executive officer children-in-law
+e hm eap dlo oy fe sr tate 600 c ho ow bbo ir ek sers
+11 46 00 h m m pe oe ea sm m id tib bq oe eu nr ra hr o ot ef fe lp s drs po oll io t ric tc sa a t tli e o p an a mrty 55 05 00 i j ln o od b cau _ ts t iy otr p ny e
+residence parents-in-law
+120 unmarried partner 450 s sa ibla linry gs
+100
+400 s st te ep p- -c ph ai rl ed nre tsn
+350 w wo or rk k_ ph lao cu er _s type
+80
+300
+60 250
+40 200
+150
+20
+100
+0
+50
+0
+Month-Year
+num_changes
+Figure7: Distributionofchangedrelationtypesinthe(A)Newsand(B)Conversationdomains. (A)depictsthe
+numberoftransitionsperyearofeachmonth,while(B)depictsthenumberofrelationtypesthatunderwentthat
+numberofchangesacrossallconversations.
+Relationtype #(s, r) #(s, r, o) • DianaandLiamworkwithKatie.
+Memberofsportsteam 284 382
+UpdatingErrors Sometimes,factsthatneeded
+Positionheld 164 382
+Employer 38 77 tobeupdatedwereretrieved,butwerenotupdated
+Chairperson 20 42 bytheLM.Forexample,
+Headofstate 9 18
+Inputconversationchunk:
+CEO 6 13
+Unmarriedpartner 5 12
+Residence 4 8 2023-11-26
+Headquarters 2 4
+Memberofpoliticalparty 1 2 Katie: HeyOlivia! Howhaveyoubeen?
+I heard you changed your job to Safety
+Total 533 1174
+Officer at Urban Development Project!
+Table 8: Breakdown of changed relation types in the How’sthenewroletreatingyou?
+Newsdomain,categorizedbynumberofunique(subj,
+Olivia: Hey Katie! Yes, I did change
+rel)pairsand(subj, rel, obj)triples.
+myjobtoSafetyOfficeratUrbanDevel-
+opmentProject! Thenewrolehasbeen
+QuestionTopic #Yes/No #MultipleChoice #MCChoices
+quiteachange,butI’mreallyenjoyingit
+Boss 140 74 26
+Coworkers 481 - - sofar. Howhaveyoubeen?
+Industry - 74 26
+Isemployedfull-time 82 - -
+...
+Salary 158 80 11
+Workhours 110 64 10
+WorkLocation 274 72 20
+Retrievedfact:
+Workplace 140 74 26
+Total 1385 438
+• Oliviaworksfrom9to17atherjob.
+Table9: DistributionofgeneratedquestionsintheSyn-
+thetic Conversation domain, categorized by question Model-outputtedupdate(andreasoning):
+topicandtype.
+1 Summary of changes:
+2
+Theretrieveratstep1failedtoretrievethefol-
+3
+lowing facts to update. At inference time, these 4 Olivia changed her job to
+factswereretrievedandaffectedtheLM’sanswer Safety Officer at Urban
+onquestions: Development Project.
+5
+• Katie’sworkinghoursarefrom10to15.
+6 No information is provided
+• Katie’ssalaryis$100000. about Olivia's work schedule.
+19
+snoitisnarT
+fo rebmuN
+11-1202 21-1202 10-2202 20-2202 30-2202 40-2202 50-2202 60-2202 70-2202 80-2202 90-2202 01-2202 11-2202 21-2202 10-3202 20-3202 30-3202 40-3202 50-3202 60-3202 70-3202 80-3202 90-3202 01-3202 11-3202 21-3202 10-4202
+tnuoc
+1 2 37
+8
+9 Reasoning:
+10
+11 The input does not provide any
+information that would suggest
+Olivia's work schedule has
+changed. The conversation is
+about Olivia's new job, Katie's
+hobbies, and their plans for
+social activities. There is no
+mention of Olivia's work
+schedule or any changes that
+would affect it. Therefore, the
+fact "Olivia works from 9 to 17
+at her job" is likely still true
+as of 2023-11-01.
+12
+13 Answer: No Change
+Note that this fact should’ve been flagged for
+potential updating and forwarded to the rewrite
+step(wheretheLMhasanopportunitytoretrieve
+morefactstoconfirmordenythisfact). However,
+the LM does not classify this fact as make false
+becauseitisnotdirectlycontradictedbytheinput.
+E UseofAIAssistants
+CodewaswrittenwithCo-pilotturnedon. GPT*
+modelswerealsoconsultedforcreatingacronyms
+forthemethodanddatasetnames.
+20
