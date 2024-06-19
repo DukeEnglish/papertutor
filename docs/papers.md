@@ -2,315 +2,345 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11839v1 |
-|title| mDPO: Conditional Preference Optimization for Multimodal Large Language Models |
-|authors| Fei WangWenxuan ZhouJames Y. HuangNan XuSheng ZhangHoifung PoonMuhao Chen
-|links| http://arxiv.org/abs/2406.11839v1 |
-|updated| 2024-06-17 17:59:58 UTC |
-|summary| Direct preference optimization DPO has shown to be an effective method forlarge language model LLM alignment. Recent works have attempted to apply DPOto multimodal scenarios but have found it challenging to achieve consistentimprovement. Through a comparative experiment we identify the unconditionalpreference problem in multimodal preference optimization where the modeloverlooks the image condition. To address this problem we propose mDPO amultimodal DPO objective that prevents the over-prioritization of language-onlypreferences by also optimizing image preference. Moreover we introduce areward anchor that forces the reward to be positive for chosen responsesthereby avoiding the decrease in their likelihood -- an intrinsic problem ofrelative preference optimization. Experiments on two multimodal LLMs ofdifferent sizes and three widely used benchmarks demonstrate that mDPOeffectively addresses the unconditional preference problem in multimodalpreference optimization and significantly improves model performanceparticularly in reducing hallucination. |
+|idx| 2406.12845v1 |
+|title| Interpretable Preferences via Multi-Objective Reward Modeling and Mixture-of-Experts |
+|authors| Haoxiang WangWei XiongTengyang XieHan ZhaoTong Zhang
+|links| http://arxiv.org/abs/2406.12845v1 |
+|updated| 2024-06-18 17:58:28 UTC |
+|summary| Reinforcement learning from human feedback RLHF has emerged as the primarymethod for aligning large language models LLMs with human preferences. TheRLHF process typically starts by training a reward model RM using humanpreference data. Conventional RMs are trained on pairwise responses to the sameuser request with relative ratings indicating which response humans prefer.The trained RM serves as a proxy for human preferences. However due to theblack-box nature of RMs their outputs lack interpretability as humans cannotintuitively understand why an RM thinks a response is good or not. As RMs actas human preference proxies we believe they should be human-interpretable toensure that their internal decision processes are consistent with humanpreferences and to prevent reward hacking in LLM alignment. To build RMs withinterpretable preferences we propose a two-stage approach: i train anAbsolute-Rating Multi-Objective Reward Model ArmoRM with multi-dimensionalabsolute-rating data each dimension corresponding to a human-interpretableobjective e.g. honesty verbosity safety ii employ a Mixture-of-ExpertsMoE strategy with a gating network that automatically selects the mostsuitable reward objectives based on the context. We efficiently trained anArmoRM with Llama-3 8B and a gating network consisting of a shallow MLP on topof the ArmoRM. Our trained model ArmoRM-Llama3-8B obtains state-of-the-artperformance on RewardBench a benchmark evaluating RMs for language modeling.Notably the performance of our model surpasses the LLM-as-a-judge method withGPT-4 judges by a margin and approaches the performance of the much largerNemotron-4 340B reward model. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11830v1 |
-|title| Language Modeling with Editable External Knowledge |
-|authors| Belinda Z. LiEmmy LiuAlexis RossAbbas ZeitounGraham NeubigJacob Andreas
-|links| http://arxiv.org/abs/2406.11830v1 |
-|updated| 2024-06-17 17:59:35 UTC |
-|summary| When the world changes so does the text that humans write about it. How dowe build language models that can be easily updated to reflect these changesOne popular approach is retrieval-augmented generation in which new documentsare inserted into a knowledge base and retrieved during prediction fordownstream tasks. Most prior work on these systems have focused on improvingbehavior during prediction through better retrieval or reasoning. This paperintroduces ERASE which instead improves model behavior when new documents areacquired by incrementally deleting or rewriting other entries in the knowledgebase each time a document is added. In two new benchmark datasets evaluatingmodels ability to answer questions about a stream of news articles orconversations ERASE improves accuracy relative to conventionalretrieval-augmented generation by 7-13 Mixtral-8x7B and 6-10 Llama-3-8Babsolute. Code and data are available at https://github.com/belindal/ERASE |
+|idx| 2406.12832v1 |
+|title| LaMDA: Large Model Fine-Tuning via Spectrally Decomposed Low-Dimensional Adaptation |
+|authors| Seyedarmin AziziSouvik KunduMassoud Pedram
+|links| http://arxiv.org/abs/2406.12832v1 |
+|updated| 2024-06-18 17:52:59 UTC |
+|summary| Low-rank adaptation LoRA has become the default approach to fine-tune largelanguage models LLMs due to its significant reduction in trainableparameters. However trainable parameter demand for LoRA increases withincreasing model embedding dimensions leading to high compute costs.Additionally its backward updates require storing high-dimensionalintermediate activations and optimizer states demanding high peak GPU memory.In this paper we introduce large model fine-tuning via spectrally decomposedlow-dimensional adaptation LaMDA a novel approach to fine-tuning largelanguage models which leverages low-dimensional adaptation to achievesignificant reductions in trainable parameters and peak GPU memory footprint.LaMDA freezes a first projection matrix PMA in the adaptation path whileintroducing a low-dimensional trainable square matrix resulting in substantialreductions in trainable parameters and peak GPU memory usage. LaMDA graduallyfreezes a second projection matrix PMB during the early fine-tuning stagesreducing the compute cost associated with weight updates to enhance parameterefficiency further. We also present an enhancement LaMDA incorporating alite-weight adaptive rank allocation for the LoRA path via normalizedspectrum analysis of pre-trained model weights. We evaluate LaMDA/LaMDAacross various tasks including natural language understanding with the GLUEbenchmark text summarization natural language generation and complexreasoning on different LLMs. Results show that LaMDA matches or surpasses theperformance of existing alternatives while requiring up to 17.7x fewerparameter updates and up to 1.32x lower peak GPU memory usage duringfine-tuning. Code will be publicly available. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11827v1 |
-|title| WPO: Enhancing RLHF with Weighted Preference Optimization |
-|authors| Wenxuan ZhouRavi AgrawalShujian ZhangSathish Reddy IndurthiSanqiang ZhaoKaiqiang SongSilei XuChenguang Zhu
-|links| http://arxiv.org/abs/2406.11827v1 |
-|updated| 2024-06-17 17:59:13 UTC |
-|summary| Reinforcement learning from human feedback RLHF is a promising solution toalign large language models LLMs more closely with human values. Off-policypreference optimization where the preference data is obtained from othermodels is widely adopted due to its cost efficiency and scalability. Howeveroff-policy preference optimization often suffers from a distributional gapbetween the policy used for data collection and the target policy leading tosuboptimal optimization. In this paper we propose a novel strategy to mitigatethis problem by simulating on-policy learning with off-policy preference data.Our Weighted Preference Optimization WPO method adapts off-policy data toresemble on-policy data more closely by reweighting preference pairs accordingto their probability under the current policy. This method not only addressesthe distributional gap problem but also enhances the optimization processwithout incurring additional costs. We validate our method on instructionfollowing benchmarks including Alpaca Eval 2 and MT-bench. WPO not onlyoutperforms Direct Preference Optimization DPO by up to 5.6 on Alpaca Eval 2but also establishes a remarkable length-controlled winning rate againstGPT-4-turbo of 48.6 based on Llama-3-8B-Instruct making it the strongest 8Bmodel on the leaderboard. We will release the code and models athttps://github.com/wzhouad/WPO. |
+|idx| 2406.12830v1 |
+|title| What Are the Odds? Language Models Are Capable of Probabilistic Reasoning |
+|authors| Akshay ParuchuriJake GarrisonShun LiaoJohn HernandezJacob SunshineTim AlthoffXin LiuDaniel McDuff
+|links| http://arxiv.org/abs/2406.12830v1 |
+|updated| 2024-06-18 17:51:24 UTC |
+|summary| Language models LM are capable of remarkably complex linguistic taskshowever numerical reasoning is an area in which they frequently struggle. Animportant but rarely evaluated form of reasoning is understanding probabilitydistributions. In this paper we focus on evaluating the probabilisticreasoning capabilities of LMs using idealized and real-world statisticaldistributions. We perform a systematic evaluation of state-of-the-art LMs onthree tasks: estimating percentiles drawing samples and calculatingprobabilities. We evaluate three ways to provide context to LMs 1 anchoringexamples from within a distribution or family of distributions 2 real-worldcontext 3 summary statistics on which to base a Normal approximation. Modelscan make inferences about distributions and can be further aided by theincorporation of real-world context example shots and simplified assumptionseven if these assumptions are incorrect or misspecified. To conduct this workwe developed a comprehensive benchmark distribution dataset with associatedquestion-answer pairs that we will release publicly. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11823v1 |
-|title| On Efficient Language and Vision Assistants for Visually-Situated Natural Language Understanding: What Matters in Reading and Reasoning |
-|authors| Geewook KimMinjoon Seo
-|links| http://arxiv.org/abs/2406.11823v1 |
-|updated| 2024-06-17 17:57:30 UTC |
-|summary| Recent advancements in language and vision assistants have showcasedimpressive capabilities but suffer from a lack of transparency limitingbroader research and reproducibility. While open-source models handle generalimage tasks effectively they face challenges with the high computationaldemands of complex visually-situated text understanding. Such tasks oftenrequire increased token inputs and large vision modules to harnesshigh-resolution information. Striking a balance between model size and dataimportance remains an open question. This study aims to redefine the design ofvision-language models by identifying key components and creating efficientmodels with constrained inference costs. By strategically formulating datasetsoptimizing vision modules and enhancing supervision techniques we achievesignificant improvements in inference throughput while maintaining highperformance. Extensive experiments across models ranging from 160M to 13Bparameters offer insights into model optimization. We will fully open-sourceour codebase models and datasets at https://github.com/naver-ai/elva . |
+|idx| 2406.12824v1 |
+|title| From RAGs to rich parameters: Probing how language models utilize external knowledge over parametric information for factual queries |
+|authors| Hitesh WadhwaRahul SeetharamanSomyaa AggarwalReshmi GhoshSamyadeep BasuSoundararajan SrinivasanWenlong ZhaoShreyas ChaudhariEhsan Aghazadeh
+|links| http://arxiv.org/abs/2406.12824v1 |
+|updated| 2024-06-18 17:46:08 UTC |
+|summary| Retrieval Augmented Generation RAG enriches the ability of language modelsto reason using external context to augment responses for a given user prompt.This approach has risen in popularity due to practical applications in variousapplications of language models in search question/answering and chat-bots.However the exact nature of how this approach works isnt clearly understood.In this paper we mechanistically examine the RAG pipeline to highlight thatlanguage models take shortcut and have a strong bias towards utilizing only thecontext information to answer the question while relying minimally on theirparametric memory. We probe this mechanistic behavior in language models with:i Causal Mediation Analysis to show that the parametric memory is minimallyutilized when answering a question and ii Attention Contributions andKnockouts to show that the last token residual stream do not get enriched fromthe subject token in the question but gets enriched from other informativetokens in the context. We find this pronounced shortcut behaviour true acrossboth LLaMa and Phi family of models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11817v1 |
-|title| Iterative Length-Regularized Direct Preference Optimization: A Case Study on Improving 7B Language Models to GPT-4 Level |
-|authors| Jie LiuZhanhui ZhouJiaheng LiuXingyuan BuChao YangHan-Sen ZhongWanli Ouyang
-|links| http://arxiv.org/abs/2406.11817v1 |
-|updated| 2024-06-17 17:55:38 UTC |
-|summary| Direct Preference Optimization DPO a standard method for aligning languagemodels with human preferences is traditionally applied to offline preferences.Recent studies show that DPO benefits from iterative training with onlinepreferences labeled by a trained reward model. In this work we identify apitfall of vanilla iterative DPO - improved response quality can lead toincreased verbosity. To address this we introduce iterative length-regularizedDPO iLR-DPO to penalize response length. Our empirical results show thatiLR-DPO can enhance a 7B model to perform on par with GPT-4 without increasingverbosity. Specifically our 7B model achieves a 50.5 length-controlled winrate against textttGPT-4 Preview on AlpacaEval 2.0 and excels acrossstandard benchmarks including MT-Bench Arena-Hard and OpenLLM Leaderboard.These results demonstrate the effectiveness of iterative DPO in aligninglanguage models with human feedback. |
+|idx| 2406.12822v1 |
+|title| Is It Good Data for Multilingual Instruction Tuning or Just Bad Multilingual Evaluation for Large Language Models? |
+|authors| Pinzhen ChenSimon YuZhicheng GuoBarry Haddow
+|links| http://arxiv.org/abs/2406.12822v1 |
+|updated| 2024-06-18 17:43:47 UTC |
+|summary| Large language models particularly multilingual ones are designed claimedand expected to cater to native speakers of varied languages. We hypothesisethat the current practices of fine-tuning and evaluating these models maymismatch this intention owing to a heavy reliance on translation which canintroduce translation artefacts and defects. It remains unknown whether thenature of the instruction data has an impact on the model output on the otherhand it remains questionable whether translated test sets can capture suchnuances. Due to the often coupled practices of using translated data in bothstages such imperfections could have been overlooked. This work investigatesthese issues by using controlled native or translated data during instructiontuning and evaluation stages and observing model results. Experiments on eightbase models and eight different benchmarks reveal that native or generationbenchmarks display a notable difference between native and translatedinstruction data especially when model performance is high whereas other typesof test sets cannot. Finally we demonstrate that regularization is beneficialto bridging this gap on structured but not generative tasks. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11839v1 |
-|title| mDPO: Conditional Preference Optimization for Multimodal Large Language Models |
-|authors| Fei WangWenxuan ZhouJames Y. HuangNan XuSheng ZhangHoifung PoonMuhao Chen
-|links| http://arxiv.org/abs/2406.11839v1 |
-|updated| 2024-06-17 17:59:58 UTC |
-|summary| Direct preference optimization DPO has shown to be an effective method forlarge language model LLM alignment. Recent works have attempted to apply DPOto multimodal scenarios but have found it challenging to achieve consistentimprovement. Through a comparative experiment we identify the unconditionalpreference problem in multimodal preference optimization where the modeloverlooks the image condition. To address this problem we propose mDPO amultimodal DPO objective that prevents the over-prioritization of language-onlypreferences by also optimizing image preference. Moreover we introduce areward anchor that forces the reward to be positive for chosen responsesthereby avoiding the decrease in their likelihood -- an intrinsic problem ofrelative preference optimization. Experiments on two multimodal LLMs ofdifferent sizes and three widely used benchmarks demonstrate that mDPOeffectively addresses the unconditional preference problem in multimodalpreference optimization and significantly improves model performanceparticularly in reducing hallucination. |
+|idx| 2406.12844v1 |
+|title| Synergizing Foundation Models and Federated Learning: A Survey |
+|authors| Shenghui LiFanghua YeMeng FangJiaxu ZhaoYun-Hin ChanEdith C. -H. NgaiThiemo Voigt
+|links| http://arxiv.org/abs/2406.12844v1 |
+|updated| 2024-06-18 17:58:09 UTC |
+|summary| The recent development of Foundation Models FMs represented by largelanguage models vision transformers and multimodal models has been making asignificant impact on both academia and industry. Compared with small-scalemodels FMs have a much stronger demand for high-volume data during thepre-training phase. Although general FMs can be pre-trained on data collectedfrom open sources such as the Internet domain-specific FMs need proprietarydata posing a practical challenge regarding the amount of data available dueto privacy concerns. Federated Learning FL is a collaborative learningparadigm that breaks the barrier of data availability from differentparticipants. Therefore it provides a promising solution to customize andadapt FMs to a wide range of domain-specific tasks using distributed datasetswhilst preserving privacy. This survey paper discusses the potentials andchallenges of synergizing FL and FMs and summarizes core techniques futuredirections and applications. A periodically updated paper collection on FM-FLis available at https://github.com/lishenghui/awesome-fm-fl. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11833v1 |
-|title| MMDU: A Multi-Turn Multi-Image Dialog Understanding Benchmark and Instruction-Tuning Dataset for LVLMs |
-|authors| Ziyu LiuTao ChuYuhang ZangXilin WeiXiaoyi DongPan ZhangZijian LiangYuanjun XiongYu QiaoDahua LinJiaqi Wang
-|links| http://arxiv.org/abs/2406.11833v1 |
-|updated| 2024-06-17 17:59:47 UTC |
-|summary| Generating natural and meaningful responses to communicate with multi-modalhuman inputs is a fundamental capability of Large Vision-LanguageModelsLVLMs. While current open-source LVLMs demonstrate promisingperformance in simplified scenarios such as single-turn single-image inputthey fall short in real-world conversation scenarios such as followinginstructions in a long context history with multi-turn and multi-images.Existing LVLM benchmarks primarily focus on single-choice questions orshort-form responses which do not adequately assess the capabilities of LVLMsin real-world human-AI interaction applications. Therefore we introduce MMDUa comprehensive benchmark and MMDU-45k a large-scale instruction tuningdataset designed to evaluate and improve LVLMs abilities in multi-turn andmulti-image conversations. We employ the clustering algorithm to ffnd therelevant images and textual descriptions from the open-source Wikipedia andconstruct the question-answer pairs by human annotators with the assistance ofthe GPT-4o model. MMDU has a maximum of 18k imagetext tokens 20 images and27 turns which is at least 5x longer than previous benchmarks and poseschallenges to current LVLMs. Our in-depth analysis of 15 representative LVLMsusing MMDU reveals that open-source LVLMs lag behind closed-source counterpartsdue to limited conversational instruction tuning data. We demonstrate thatffne-tuning open-source LVLMs on MMDU-45k signiffcantly address this gapgenerating longer and more accurate conversations and improving scores on MMDUand existing benchmarks MMStar: 1.1 MathVista: 1.5 ChartQA:1.2. Ourcontributions pave the way for bridging the gap between current LVLM models andreal-world application demands. This project is available athttps://github.com/Liuziyu77/MMDU. |
+|idx| 2406.12843v1 |
+|title| Can Go AIs be adversarially robust? |
+|authors| Tom TsengEuan McLeanKellin PelrineTony T. WangAdam Gleave
+|links| http://arxiv.org/abs/2406.12843v1 |
+|updated| 2024-06-18 17:57:49 UTC |
+|summary| Prior work found that superhuman Go AIs like KataGo can be defeated by simpleadversarial strategies. In this paper we study if simple defenses can improveKataGos worst-case performance. We test three natural defenses: adversarialtraining on hand-constructed positions iterated adversarial training andchanging the network architecture. We find that some of these defenses are ableto protect against previously discovered attacks. Unfortunately we also findthat none of these defenses are able to withstand adaptive attacks. Inparticular we are able to train new adversaries that reliably defeat ourdefended agents by causing them to blunder in ways humans would not. Ourresults suggest that building robust AI systems is challenging even in narrowdomains such as Go. For interactive examples of attacks and a link to ourcodebase see https://goattack.far.ai. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11830v1 |
-|title| Language Modeling with Editable External Knowledge |
-|authors| Belinda Z. LiEmmy LiuAlexis RossAbbas ZeitounGraham NeubigJacob Andreas
-|links| http://arxiv.org/abs/2406.11830v1 |
-|updated| 2024-06-17 17:59:35 UTC |
-|summary| When the world changes so does the text that humans write about it. How dowe build language models that can be easily updated to reflect these changesOne popular approach is retrieval-augmented generation in which new documentsare inserted into a knowledge base and retrieved during prediction fordownstream tasks. Most prior work on these systems have focused on improvingbehavior during prediction through better retrieval or reasoning. This paperintroduces ERASE which instead improves model behavior when new documents areacquired by incrementally deleting or rewriting other entries in the knowledgebase each time a document is added. In two new benchmark datasets evaluatingmodels ability to answer questions about a stream of news articles orconversations ERASE improves accuracy relative to conventionalretrieval-augmented generation by 7-13 Mixtral-8x7B and 6-10 Llama-3-8Babsolute. Code and data are available at https://github.com/belindal/ERASE |
+|idx| 2406.12841v1 |
+|title| Demystifying Higher-Order Graph Neural Networks |
+|authors| Maciej BestaFlorian ScheidlLukas GianinazziShachar KlaimanJürgen MüllerTorsten Hoefler
+|links| http://arxiv.org/abs/2406.12841v1 |
+|updated| 2024-06-18 17:57:11 UTC |
+|summary| Higher-order graph neural networks HOGNNs are an important class of GNNmodels that harness polyadic relations between vertices beyond plain edges.They have been used to eliminate issues such as over-smoothing orover-squashing to significantly enhance the accuracy of GNN predictions toimprove the expressiveness of GNN architectures and for numerous other goals.A plethora of HOGNN models have been introduced and they come with diverseneural architectures and even with different notions of what thehigher-order means. This richness makes it very challenging to appropriatelyanalyze and compare HOGNN models and to decide in what scenario to usespecific ones. To alleviate this we first design an in-depth taxonomy and ablueprint for HOGNNs. This facilitates designing models that maximizeperformance. Then we use our taxonomy to analyze and compare the availableHOGNN models. The outcomes of our analysis are synthesized in a set of insightsthat help to select the most beneficial GNN model in a given scenario and acomprehensive list of challenges and opportunities for further research intomore powerful HOGNNs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11827v1 |
-|title| WPO: Enhancing RLHF with Weighted Preference Optimization |
-|authors| Wenxuan ZhouRavi AgrawalShujian ZhangSathish Reddy IndurthiSanqiang ZhaoKaiqiang SongSilei XuChenguang Zhu
-|links| http://arxiv.org/abs/2406.11827v1 |
-|updated| 2024-06-17 17:59:13 UTC |
-|summary| Reinforcement learning from human feedback RLHF is a promising solution toalign large language models LLMs more closely with human values. Off-policypreference optimization where the preference data is obtained from othermodels is widely adopted due to its cost efficiency and scalability. Howeveroff-policy preference optimization often suffers from a distributional gapbetween the policy used for data collection and the target policy leading tosuboptimal optimization. In this paper we propose a novel strategy to mitigatethis problem by simulating on-policy learning with off-policy preference data.Our Weighted Preference Optimization WPO method adapts off-policy data toresemble on-policy data more closely by reweighting preference pairs accordingto their probability under the current policy. This method not only addressesthe distributional gap problem but also enhances the optimization processwithout incurring additional costs. We validate our method on instructionfollowing benchmarks including Alpaca Eval 2 and MT-bench. WPO not onlyoutperforms Direct Preference Optimization DPO by up to 5.6 on Alpaca Eval 2but also establishes a remarkable length-controlled winning rate againstGPT-4-turbo of 48.6 based on Llama-3-8B-Instruct making it the strongest 8Bmodel on the leaderboard. We will release the code and models athttps://github.com/wzhouad/WPO. |
+|idx| 2406.12835v1 |
+|title| Influence Maximization via Graph Neural Bandits |
+|authors| Yuting FengVincent Y. F. TanBogdan Cautis
+|links| http://arxiv.org/abs/2406.12835v1 |
+|updated| 2024-06-18 17:54:33 UTC |
+|summary| We consider a ubiquitous scenario in the study of Influence MaximizationIM in which there is limited knowledge about the topology of the diffusionnetwork. We set the IM problem in a multi-round diffusion campaign aiming tomaximize the number of distinct users that are influenced. Leveraging thecapability of bandit algorithms to effectively balance the objectives ofexploration and exploitation as well as the expressivity of neural networksour study explores the application of neural bandit algorithms to the IMproblem. We propose the framework IM-GNB Influence Maximization with GraphNeural Bandits where we provide an estimate of the users probabilities ofbeing influenced by influencers also known as diffusion seeds. This initialestimate forms the basis for constructing both an exploitation graph and anexploration one. Subsequently IM-GNB handles the exploration-exploitationtradeoff by selecting seed nodes in real-time using Graph ConvolutionalNetworks GCN in which the pre-estimated graphs are employed to refine theinfluencers estimated rewards in each contextual setting. Through extensiveexperiments on two large real-world datasets we demonstrate the effectivenessof IM-GNB compared with other baseline methods significantly improving thespread outcome of such diffusion campaigns when the underlying network isunknown. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11818v1 |
-|title| Embodied Instruction Following in Unknown Environments |
-|authors| Zhenyu WuZiwei WangXiuwei XuJiwen LuHaibin Yan
-|links| http://arxiv.org/abs/2406.11818v1 |
-|updated| 2024-06-17 17:55:40 UTC |
-|summary| Enabling embodied agents to complete complex human instructions from naturallanguage is crucial to autonomous systems in household services. Conventionalmethods can only accomplish human instructions in the known environment whereall interactive objects are provided to the embodied agent and directlydeploying the existing approaches for the unknown environment usually generatesinfeasible plans that manipulate non-existing objects. On the contrary wepropose an embodied instruction following EIF method for complex tasks in theunknown environment where the agent efficiently explores the unknownenvironment to generate feasible plans with existing objects to accomplishabstract instructions. Specifically we build a hierarchical embodiedinstruction following framework including the high-level task planner and thelow-level exploration controller with multimodal large language models. We thenconstruct a semantic representation map of the scene with dynamic regionattention to demonstrate the known visual clues where the goal of taskplanning and scene exploration is aligned for human instruction. For the taskplanner we generate the feasible step-by-step plans for human goalaccomplishment according to the task completion process and the known visualclues. For the exploration controller the optimal navigation or objectinteraction policy is predicted based on the generated step-wise plans and theknown visual clues. The experimental results demonstrate that our method canachieve 45.09 success rate in 204 complex human instructions such as makingbreakfast and tidying rooms in large house-level scenes. |
+|idx| 2406.12832v1 |
+|title| LaMDA: Large Model Fine-Tuning via Spectrally Decomposed Low-Dimensional Adaptation |
+|authors| Seyedarmin AziziSouvik KunduMassoud Pedram
+|links| http://arxiv.org/abs/2406.12832v1 |
+|updated| 2024-06-18 17:52:59 UTC |
+|summary| Low-rank adaptation LoRA has become the default approach to fine-tune largelanguage models LLMs due to its significant reduction in trainableparameters. However trainable parameter demand for LoRA increases withincreasing model embedding dimensions leading to high compute costs.Additionally its backward updates require storing high-dimensionalintermediate activations and optimizer states demanding high peak GPU memory.In this paper we introduce large model fine-tuning via spectrally decomposedlow-dimensional adaptation LaMDA a novel approach to fine-tuning largelanguage models which leverages low-dimensional adaptation to achievesignificant reductions in trainable parameters and peak GPU memory footprint.LaMDA freezes a first projection matrix PMA in the adaptation path whileintroducing a low-dimensional trainable square matrix resulting in substantialreductions in trainable parameters and peak GPU memory usage. LaMDA graduallyfreezes a second projection matrix PMB during the early fine-tuning stagesreducing the compute cost associated with weight updates to enhance parameterefficiency further. We also present an enhancement LaMDA incorporating alite-weight adaptive rank allocation for the LoRA path via normalizedspectrum analysis of pre-trained model weights. We evaluate LaMDA/LaMDAacross various tasks including natural language understanding with the GLUEbenchmark text summarization natural language generation and complexreasoning on different LLMs. Results show that LaMDA matches or surpasses theperformance of existing alternatives while requiring up to 17.7x fewerparameter updates and up to 1.32x lower peak GPU memory usage duringfine-tuning. Code will be publicly available. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11839v1 |
-|title| mDPO: Conditional Preference Optimization for Multimodal Large Language Models |
-|authors| Fei WangWenxuan ZhouJames Y. HuangNan XuSheng ZhangHoifung PoonMuhao Chen
-|links| http://arxiv.org/abs/2406.11839v1 |
-|updated| 2024-06-17 17:59:58 UTC |
-|summary| Direct preference optimization DPO has shown to be an effective method forlarge language model LLM alignment. Recent works have attempted to apply DPOto multimodal scenarios but have found it challenging to achieve consistentimprovement. Through a comparative experiment we identify the unconditionalpreference problem in multimodal preference optimization where the modeloverlooks the image condition. To address this problem we propose mDPO amultimodal DPO objective that prevents the over-prioritization of language-onlypreferences by also optimizing image preference. Moreover we introduce areward anchor that forces the reward to be positive for chosen responsesthereby avoiding the decrease in their likelihood -- an intrinsic problem ofrelative preference optimization. Experiments on two multimodal LLMs ofdifferent sizes and three widely used benchmarks demonstrate that mDPOeffectively addresses the unconditional preference problem in multimodalpreference optimization and significantly improves model performanceparticularly in reducing hallucination. |
+|idx| 2406.12845v1 |
+|title| Interpretable Preferences via Multi-Objective Reward Modeling and Mixture-of-Experts |
+|authors| Haoxiang WangWei XiongTengyang XieHan ZhaoTong Zhang
+|links| http://arxiv.org/abs/2406.12845v1 |
+|updated| 2024-06-18 17:58:28 UTC |
+|summary| Reinforcement learning from human feedback RLHF has emerged as the primarymethod for aligning large language models LLMs with human preferences. TheRLHF process typically starts by training a reward model RM using humanpreference data. Conventional RMs are trained on pairwise responses to the sameuser request with relative ratings indicating which response humans prefer.The trained RM serves as a proxy for human preferences. However due to theblack-box nature of RMs their outputs lack interpretability as humans cannotintuitively understand why an RM thinks a response is good or not. As RMs actas human preference proxies we believe they should be human-interpretable toensure that their internal decision processes are consistent with humanpreferences and to prevent reward hacking in LLM alignment. To build RMs withinterpretable preferences we propose a two-stage approach: i train anAbsolute-Rating Multi-Objective Reward Model ArmoRM with multi-dimensionalabsolute-rating data each dimension corresponding to a human-interpretableobjective e.g. honesty verbosity safety ii employ a Mixture-of-ExpertsMoE strategy with a gating network that automatically selects the mostsuitable reward objectives based on the context. We efficiently trained anArmoRM with Llama-3 8B and a gating network consisting of a shallow MLP on topof the ArmoRM. Our trained model ArmoRM-Llama3-8B obtains state-of-the-artperformance on RewardBench a benchmark evaluating RMs for language modeling.Notably the performance of our model surpasses the LLM-as-a-judge method withGPT-4 judges by a margin and approaches the performance of the much largerNemotron-4 340B reward model. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11833v1 |
-|title| MMDU: A Multi-Turn Multi-Image Dialog Understanding Benchmark and Instruction-Tuning Dataset for LVLMs |
-|authors| Ziyu LiuTao ChuYuhang ZangXilin WeiXiaoyi DongPan ZhangZijian LiangYuanjun XiongYu QiaoDahua LinJiaqi Wang
-|links| http://arxiv.org/abs/2406.11833v1 |
-|updated| 2024-06-17 17:59:47 UTC |
-|summary| Generating natural and meaningful responses to communicate with multi-modalhuman inputs is a fundamental capability of Large Vision-LanguageModelsLVLMs. While current open-source LVLMs demonstrate promisingperformance in simplified scenarios such as single-turn single-image inputthey fall short in real-world conversation scenarios such as followinginstructions in a long context history with multi-turn and multi-images.Existing LVLM benchmarks primarily focus on single-choice questions orshort-form responses which do not adequately assess the capabilities of LVLMsin real-world human-AI interaction applications. Therefore we introduce MMDUa comprehensive benchmark and MMDU-45k a large-scale instruction tuningdataset designed to evaluate and improve LVLMs abilities in multi-turn andmulti-image conversations. We employ the clustering algorithm to ffnd therelevant images and textual descriptions from the open-source Wikipedia andconstruct the question-answer pairs by human annotators with the assistance ofthe GPT-4o model. MMDU has a maximum of 18k imagetext tokens 20 images and27 turns which is at least 5x longer than previous benchmarks and poseschallenges to current LVLMs. Our in-depth analysis of 15 representative LVLMsusing MMDU reveals that open-source LVLMs lag behind closed-source counterpartsdue to limited conversational instruction tuning data. We demonstrate thatffne-tuning open-source LVLMs on MMDU-45k signiffcantly address this gapgenerating longer and more accurate conversations and improving scores on MMDUand existing benchmarks MMStar: 1.1 MathVista: 1.5 ChartQA:1.2. Ourcontributions pave the way for bridging the gap between current LVLM models andreal-world application demands. This project is available athttps://github.com/Liuziyu77/MMDU. |
+|idx| 2406.12844v1 |
+|title| Synergizing Foundation Models and Federated Learning: A Survey |
+|authors| Shenghui LiFanghua YeMeng FangJiaxu ZhaoYun-Hin ChanEdith C. -H. NgaiThiemo Voigt
+|links| http://arxiv.org/abs/2406.12844v1 |
+|updated| 2024-06-18 17:58:09 UTC |
+|summary| The recent development of Foundation Models FMs represented by largelanguage models vision transformers and multimodal models has been making asignificant impact on both academia and industry. Compared with small-scalemodels FMs have a much stronger demand for high-volume data during thepre-training phase. Although general FMs can be pre-trained on data collectedfrom open sources such as the Internet domain-specific FMs need proprietarydata posing a practical challenge regarding the amount of data available dueto privacy concerns. Federated Learning FL is a collaborative learningparadigm that breaks the barrier of data availability from differentparticipants. Therefore it provides a promising solution to customize andadapt FMs to a wide range of domain-specific tasks using distributed datasetswhilst preserving privacy. This survey paper discusses the potentials andchallenges of synergizing FL and FMs and summarizes core techniques futuredirections and applications. A periodically updated paper collection on FM-FLis available at https://github.com/lishenghui/awesome-fm-fl. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11828v1 |
-|title| Learning sum of diverse features: computational hardness and efficient gradient-based training for ridge combinations |
-|authors| Kazusato OkoYujin SongTaiji SuzukiDenny Wu
-|links| http://arxiv.org/abs/2406.11828v1 |
-|updated| 2024-06-17 17:59:17 UTC |
-|summary| We study the computational and sample complexity of learning a targetfunction f_:mathbbRdtomathbbR with additive structure that isf_x  frac1sqrtMsum_m1M f_mlangle x v_mrangle wheref_1f_2...f_M:mathbbRtomathbbR are nonlinear link functions ofsingle-index models ridge functions with diverse and near-orthogonal indexfeatures v_m_m1M and the number of additive tasks M grows with thedimensionality Masymp dgamma for gammage 0. This problem setting ismotivated by the classical additive model literature the recent representationlearning theory of two-layer neural network and large-scale pretraining wherethe model simultaneously acquires a large number of skills that are oftenlocalized in distinct parts of the trained network. We prove that a largesubset of polynomial f_ can be efficiently learned by gradient descenttraining of a two-layer neural network with a polynomial statistical andcomputational complexity that depends on the number of tasks M and theinformation exponent of f_m despite the unknown link function and Mgrowing with the dimensionality. We complement this learnability guarantee withcomputational hardness result by establishing statistical query SQ lowerbounds for both the correlational SQ and full SQ algorithms. |
+|idx| 2406.12843v1 |
+|title| Can Go AIs be adversarially robust? |
+|authors| Tom TsengEuan McLeanKellin PelrineTony T. WangAdam Gleave
+|links| http://arxiv.org/abs/2406.12843v1 |
+|updated| 2024-06-18 17:57:49 UTC |
+|summary| Prior work found that superhuman Go AIs like KataGo can be defeated by simpleadversarial strategies. In this paper we study if simple defenses can improveKataGos worst-case performance. We test three natural defenses: adversarialtraining on hand-constructed positions iterated adversarial training andchanging the network architecture. We find that some of these defenses are ableto protect against previously discovered attacks. Unfortunately we also findthat none of these defenses are able to withstand adaptive attacks. Inparticular we are able to train new adversaries that reliably defeat ourdefended agents by causing them to blunder in ways humans would not. Ourresults suggest that building robust AI systems is challenging even in narrowdomains such as Go. For interactive examples of attacks and a link to ourcodebase see https://goattack.far.ai. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11827v1 |
-|title| WPO: Enhancing RLHF with Weighted Preference Optimization |
-|authors| Wenxuan ZhouRavi AgrawalShujian ZhangSathish Reddy IndurthiSanqiang ZhaoKaiqiang SongSilei XuChenguang Zhu
-|links| http://arxiv.org/abs/2406.11827v1 |
-|updated| 2024-06-17 17:59:13 UTC |
-|summary| Reinforcement learning from human feedback RLHF is a promising solution toalign large language models LLMs more closely with human values. Off-policypreference optimization where the preference data is obtained from othermodels is widely adopted due to its cost efficiency and scalability. Howeveroff-policy preference optimization often suffers from a distributional gapbetween the policy used for data collection and the target policy leading tosuboptimal optimization. In this paper we propose a novel strategy to mitigatethis problem by simulating on-policy learning with off-policy preference data.Our Weighted Preference Optimization WPO method adapts off-policy data toresemble on-policy data more closely by reweighting preference pairs accordingto their probability under the current policy. This method not only addressesthe distributional gap problem but also enhances the optimization processwithout incurring additional costs. We validate our method on instructionfollowing benchmarks including Alpaca Eval 2 and MT-bench. WPO not onlyoutperforms Direct Preference Optimization DPO by up to 5.6 on Alpaca Eval 2but also establishes a remarkable length-controlled winning rate againstGPT-4-turbo of 48.6 based on Llama-3-8B-Instruct making it the strongest 8Bmodel on the leaderboard. We will release the code and models athttps://github.com/wzhouad/WPO. |
+|idx| 2406.12841v1 |
+|title| Demystifying Higher-Order Graph Neural Networks |
+|authors| Maciej BestaFlorian ScheidlLukas GianinazziShachar KlaimanJürgen MüllerTorsten Hoefler
+|links| http://arxiv.org/abs/2406.12841v1 |
+|updated| 2024-06-18 17:57:11 UTC |
+|summary| Higher-order graph neural networks HOGNNs are an important class of GNNmodels that harness polyadic relations between vertices beyond plain edges.They have been used to eliminate issues such as over-smoothing orover-squashing to significantly enhance the accuracy of GNN predictions toimprove the expressiveness of GNN architectures and for numerous other goals.A plethora of HOGNN models have been introduced and they come with diverseneural architectures and even with different notions of what thehigher-order means. This richness makes it very challenging to appropriatelyanalyze and compare HOGNN models and to decide in what scenario to usespecific ones. To alleviate this we first design an in-depth taxonomy and ablueprint for HOGNNs. This facilitates designing models that maximizeperformance. Then we use our taxonomy to analyze and compare the availableHOGNN models. The outcomes of our analysis are synthesized in a set of insightsthat help to select the most beneficial GNN model in a given scenario and acomprehensive list of challenges and opportunities for further research intomore powerful HOGNNs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11825v1 |
-|title| Spectral Introspection Identifies Group Training Dynamics in Deep Neural Networks for Neuroimaging |
-|authors| Bradley T. BakerVince D. CalhounSergey M. Plis
-|links| http://arxiv.org/abs/2406.11825v1 |
-|updated| 2024-06-17 17:58:15 UTC |
-|summary| Neural networks whice have had a profound effect on how researchers studycomplex phenomena do so through a complex nonlinear mathematical structurewhich can be difficult for human researchers to interpret. This obstacle can beespecially salient when researchers want to better understand the emergence ofparticular model behaviors such as bias overfitting overparametrization andmore. In Neuroimaging the understanding of how such phenomena emerge isfundamental to preventing and informing users of the potential risks involvedin practice. In this work we present a novel introspection framework for DeepLearning on Neuroimaging data which exploits the natural structure of gradientcomputations via the singular value decomposition of gradient components duringreverse-mode auto-differentiation. Unlike post-hoc introspection techniqueswhich require fully-trained models for evaluation our method allows for thestudy of training dynamics on the fly and even more interestingly allow forthe decomposition of gradients based on which samples belong to particulargroups of interest. We demonstrate how the gradient spectra for several commondeep learning models differ between schizophrenia and control participants fromthe COBRE study and illustrate how these trajectories may reveal specifictraining dynamics helpful for further analysis. |
+|idx| 2406.12839v1 |
+|title| Evaluating the design space of diffusion-based generative models |
+|authors| Yuqing WangYe HeMolei Tao
+|links| http://arxiv.org/abs/2406.12839v1 |
+|updated| 2024-06-18 17:56:10 UTC |
+|summary| Most existing theoretical investigations of the accuracy of diffusion modelsalbeit significant assume the score function has been approximated to acertain accuracy and then use this a priori bound to control the error ofgeneration. This article instead provides a first quantitative understanding ofthe whole generation process i.e. both training and sampling. More preciselyit conducts a non-asymptotic convergence analysis of denoising score matchingunder gradient descent. In addition a refined sampling error analysis forvariance exploding models is also provided. The combination of these tworesults yields a full error analysis which elucidates again but this timetheoretically how to design the training and sampling processes for effectivegeneration. For instance our theory implies a preference toward noisedistribution and loss weighting that qualitatively agree with the ones used inKarras et al. 2022. It also provides some perspectives on why the time andvariance schedule used in Karras et al. 2022 could be better tuned than thepioneering version in Song et al. 2020. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11840v1 |
-|title| LLaNA: Large Language and NeRF Assistant |
-|authors| Andrea AmaduzziPierluigi Zama RamirezGiuseppe LisantiSamuele SaltiLuigi Di Stefano
-|links| http://arxiv.org/abs/2406.11840v1 |
-|updated| 2024-06-17 17:59:59 UTC |
-|summary| Multimodal Large Language Models MLLMs have demonstrated an excellentunderstanding of images and 3D data. However both modalities have shortcomingsin holistically capturing the appearance and geometry of objects. MeanwhileNeural Radiance Fields NeRFs which encode information within the weights ofa simple Multi-Layer Perceptron MLP have emerged as an increasinglywidespread modality that simultaneously encodes the geometry and photorealisticappearance of objects. This paper investigates the feasibility andeffectiveness of ingesting NeRF into MLLM. We create LLaNA the firstgeneral-purpose NeRF-language assistant capable of performing new tasks such asNeRF captioning and QA. Notably our method directly processes the weights ofthe NeRFs MLP to extract information about the represented objects without theneed to render images or materialize 3D data structures. Moreover we build adataset of NeRFs with text annotations for various NeRF-language tasks with nohuman intervention. Based on this dataset we develop a benchmark to evaluatethe NeRF understanding capability of our method. Results show that processingNeRF weights performs favourably against extracting 2D or 3D representationsfrom NeRFs. |
+|idx| 2406.12849v1 |
+|title| Depth Anywhere: Enhancing 360 Monocular Depth Estimation via Perspective Distillation and Unlabeled Data Augmentation |
+|authors| Ning-Hsu WangYu-Lun Liu
+|links| http://arxiv.org/abs/2406.12849v1 |
+|updated| 2024-06-18 17:59:31 UTC |
+|summary| Accurately estimating depth in 360-degree imagery is crucial for virtualreality autonomous navigation and immersive media applications. Existingdepth estimation methods designed for perspective-view imagery fail whenapplied to 360-degree images due to different camera projections anddistortions whereas 360-degree methods perform inferior due to the lack oflabeled data pairs. We propose a new depth estimation framework that utilizesunlabeled 360-degree data effectively. Our approach uses state-of-the-artperspective depth estimation models as teacher models to generate pseudo labelsthrough a six-face cube projection technique enabling efficient labeling ofdepth in 360-degree images. This method leverages the increasing availabilityof large datasets. Our approach includes two main stages: offline maskgeneration for invalid regions and an online semi-supervised joint trainingregime. We tested our approach on benchmark datasets such as Matterport3D andStanford2D3D showing significant improvements in depth estimation accuracyparticularly in zero-shot scenarios. Our proposed training pipeline can enhanceany 360 monocular depth estimator and demonstrates effective knowledge transferacross different camera projections and data types. See our project page forresults: https://albert100121.github.io/Depth-Anywhere/ |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11838v1 |
-|title| Autoregressive Image Generation without Vector Quantization |
-|authors| Tianhong LiYonglong TianHe LiMingyang DengKaiming He
-|links| http://arxiv.org/abs/2406.11838v1 |
-|updated| 2024-06-17 17:59:58 UTC |
-|summary| Conventional wisdom holds that autoregressive models for image generation aretypically accompanied by vector-quantized tokens. We observe that while adiscrete-valued space can facilitate representing a categorical distributionit is not a necessity for autoregressive modeling. In this work we propose tomodel the per-token probability distribution using a diffusion procedure whichallows us to apply autoregressive models in a continuous-valued space. Ratherthan using categorical cross-entropy loss we define a Diffusion Loss functionto model the per-token probability. This approach eliminates the need fordiscrete-valued tokenizers. We evaluate its effectiveness across a wide rangeof cases including standard autoregressive models and generalized maskedautoregressive MAR variants. By removing vector quantization our imagegenerator achieves strong results while enjoying the speed advantage ofsequence modeling. We hope this work will motivate the use of autoregressivegeneration in other continuous-valued domains and applications. |
+|idx| 2406.12847v1 |
+|title| ChangeViT: Unleashing Plain Vision Transformers for Change Detection |
+|authors| Duowang ZhuXiaohu HuangHaiyan HuangZhenfeng ShaoQimin Cheng
+|links| http://arxiv.org/abs/2406.12847v1 |
+|updated| 2024-06-18 17:59:08 UTC |
+|summary| Change detection in remote sensing images is essential for trackingenvironmental changes on the Earths surface. Despite the success of visiontransformers ViTs as backbones in numerous computer vision applications theyremain underutilized in change detection where convolutional neural networksCNNs continue to dominate due to their powerful feature extractioncapabilities. In this paper our study uncovers ViTs unique advantage indiscerning large-scale changes a capability where CNNs fall short.Capitalizing on this insight we introduce ChangeViT a framework that adopts aplain ViT backbone to enhance the performance of large-scale changes. Thisframework is supplemented by a detail-capture module that generates detailedspatial features and a feature injector that efficiently integratesfine-grained spatial information into high-level semantic learning. The featureintegration ensures that ChangeViT excels in both detecting large-scale changesand capturing fine-grained details providing comprehensive change detectionacross diverse scales. Without bells and whistles ChangeViT achievesstate-of-the-art performance on three popular high-resolution datasets i.e.LEVIR-CD WHU-CD and CLCD and one low-resolution dataset i.e. OSCD whichunderscores the unleashed potential of plain ViTs for change detection.Furthermore thorough quantitative and qualitative analyses validate theefficacy of the introduced modules solidifying the effectiveness of ourapproach. The source code is available athttps://github.com/zhuduowang/ChangeViT. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11839v1 |
-|title| mDPO: Conditional Preference Optimization for Multimodal Large Language Models |
-|authors| Fei WangWenxuan ZhouJames Y. HuangNan XuSheng ZhangHoifung PoonMuhao Chen
-|links| http://arxiv.org/abs/2406.11839v1 |
-|updated| 2024-06-17 17:59:58 UTC |
-|summary| Direct preference optimization DPO has shown to be an effective method forlarge language model LLM alignment. Recent works have attempted to apply DPOto multimodal scenarios but have found it challenging to achieve consistentimprovement. Through a comparative experiment we identify the unconditionalpreference problem in multimodal preference optimization where the modeloverlooks the image condition. To address this problem we propose mDPO amultimodal DPO objective that prevents the over-prioritization of language-onlypreferences by also optimizing image preference. Moreover we introduce areward anchor that forces the reward to be positive for chosen responsesthereby avoiding the decrease in their likelihood -- an intrinsic problem ofrelative preference optimization. Experiments on two multimodal LLMs ofdifferent sizes and three widely used benchmarks demonstrate that mDPOeffectively addresses the unconditional preference problem in multimodalpreference optimization and significantly improves model performanceparticularly in reducing hallucination. |
+|idx| 2406.12846v1 |
+|title| DrVideo: Document Retrieval Based Long Video Understanding |
+|authors| Ziyu MaChenhui GouHengcan ShiBin SunShutao LiHamid RezatofighiJianfei Cai
+|links| http://arxiv.org/abs/2406.12846v1 |
+|updated| 2024-06-18 17:59:03 UTC |
+|summary| Existing methods for long video understanding primarily focus on videos onlylasting tens of seconds with limited exploration of techniques for handlinglonger videos. The increased number of frames in longer videos presents twomain challenges: difficulty in locating key information and performinglong-range reasoning. Thus we propose DrVideo a document-retrieval-basedsystem designed for long video understanding. Our key idea is to convert thelong-video understanding problem into a long-document understanding task so asto effectively leverage the power of large language models. SpecificallyDrVideo transforms a long video into a text-based long document to initiallyretrieve key frames and augment the information of these frames which is usedthis as the systems starting point. It then employs an agent-based iterativeloop to continuously search for missing information augment relevant data andprovide final predictions in a chain-of-thought manner once sufficientquestion-related information is gathered. Extensive experiments on long videobenchmarks confirm the effectiveness of our method. DrVideo outperformsexisting state-of-the-art methods with 3.8 accuracy on EgoSchema benchmark 3minutes 17.9 in MovieChat-1K break mode 38.0 in MovieChat-1K global mode10 minutes and 30.2 on the LLama-Vid QA dataset over 60 minutes. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11837v1 |
-|title| Scaling the Codebook Size of VQGAN to 100,000 with a Utilization Rate of 99% |
-|authors| Lei ZhuFangyun WeiYanye LuDong Chen
-|links| http://arxiv.org/abs/2406.11837v1 |
-|updated| 2024-06-17 17:59:57 UTC |
-|summary| In the realm of image quantization exemplified by VQGAN the process encodesimages into discrete tokens drawn from a codebook with a predefined size.Recent advancements particularly with LLAMA 3 reveal that enlarging thecodebook significantly enhances model performance. However VQGAN and itsderivatives such as VQGAN-FC Factorized Codes and VQGAN-EMA continue tograpple with challenges related to expanding the codebook size and enhancingcodebook utilization. For instance VQGAN-FC is restricted to learning acodebook with a maximum size of 16384 maintaining a typically low utilizationrate of less than 12 on ImageNet. In this work we propose a novel imagequantization model named VQGAN-LC Large Codebook which extends the codebooksize to 100000 achieving an utilization rate exceeding 99. Unlike previousmethods that optimize each codebook entry our approach begins with a codebookinitialized with 100000 features extracted by a pre-trained vision encoder.Optimization then focuses on training a projector that aligns the entirecodebook with the feature distributions of the encoder in VQGAN-LC. Wedemonstrate the superior performance of our model over its counterparts acrossa variety of tasks including image reconstruction image classificationauto-regressive image generation using GPT and image creation with diffusion-and flow-based generative models. Code and models are available athttps://github.com/zh460045050/VQGAN-LC. |
+|idx| 2406.12837v1 |
+|title| LayerMerge: Neural Network Depth Compression through Layer Pruning and Merging |
+|authors| Jinuk KimMarwa El HalabiMingi JiHyun Oh Song
+|links| http://arxiv.org/abs/2406.12837v1 |
+|updated| 2024-06-18 17:55:15 UTC |
+|summary| Recent works show that reducing the number of layers in a convolutionalneural network can enhance efficiency while maintaining the performance of thenetwork. Existing depth compression methods remove redundant non-linearactivation functions and merge the consecutive convolution layers into a singlelayer. However these methods suffer from a critical drawback the kernel sizeof the merged layers becomes larger significantly undermining the latencyreduction gained from reducing the depth of the network. We show that thisproblem can be addressed by jointly pruning convolution layers and activationfunctions. To this end we propose LayerMerge a novel depth compression methodthat selects which activation layers and convolution layers to remove toachieve a desired inference speed-up while minimizing performance loss. Sincethe corresponding selection problem involves an exponential search space weformulate a novel surrogate optimization problem and efficiently solve it viadynamic programming. Empirical results demonstrate that our method consistentlyoutperforms existing depth compression and layer pruning methods on variousnetwork architectures both on image classification and generation tasks. Werelease the code at https://github.com/snu-mllab/LayerMerge. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11835v1 |
-|title| OoDIS: Anomaly Instance Segmentation Benchmark |
-|authors| Alexey NekrasovRui ZhouMiriam AckermannAlexander HermansBastian LeibeMatthias Rottmann
-|links| http://arxiv.org/abs/2406.11835v1 |
-|updated| 2024-06-17 17:59:56 UTC |
-|summary| Autonomous vehicles require a precise understanding of their environment tonavigate safely. Reliable identification of unknown objects especially thosethat are absent during training such as wild animals is critical due to theirpotential to cause serious accidents. Significant progress in semanticsegmentation of anomalies has been driven by the availability ofout-of-distribution OOD benchmarks. However a comprehensive understanding ofscene dynamics requires the segmentation of individual objects and thus thesegmentation of instances is essential. Development in this area has beenlagging largely due to the lack of dedicated benchmarks. To address this gapwe have extended the most commonly used anomaly segmentation benchmarks toinclude the instance segmentation task. Our evaluation of anomaly instancesegmentation methods shows that this challenge remains an unsolved problem. Thebenchmark website and the competition page can be found at:https://vision.rwth-aachen.de/oodis . |
+|idx| 2406.12834v1 |
+|title| GroPrompt: Efficient Grounded Prompting and Adaptation for Referring Video Object Segmentation |
+|authors| Ci-Siang LinI-Jieh LiuMin-Hung ChenChien-Yi WangSifei LiuYu-Chiang Frank Wang
+|links| http://arxiv.org/abs/2406.12834v1 |
+|updated| 2024-06-18 17:54:17 UTC |
+|summary| Referring Video Object Segmentation RVOS aims to segment the objectreferred to by the query sentence throughout the entire video. Most existingmethods require end-to-end training with dense mask annotations which could becomputation-consuming and less scalable. In this work we aim to efficientlyadapt foundation segmentation models for addressing RVOS from weak supervisionwith the proposed Grounded Prompting GroPrompt framework. More specificallywe propose Text-Aware Prompt Contrastive Learning TAP-CL to enhance theassociation between the position prompts and the referring sentences with onlybox supervisions including Text-Contrastive Prompt Learning TextCon andModality-Contrastive Prompt Learning ModalCon at frame level and video levelrespectively. With the proposed TAP-CL our GroPrompt framework can generatetemporal-consistent yet text-aware position prompts describing locations andmovements for the referred object from the video. The experimental results inthe standard RVOS benchmarks Ref-YouTube-VOS Ref-DAVIS17 A2D-Sentences andJHMDB-Sentences demonstrate the competitive performance of our proposedGroPrompt framework given only bounding box weak supervisions. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11828v1 |
-|title| Learning sum of diverse features: computational hardness and efficient gradient-based training for ridge combinations |
-|authors| Kazusato OkoYujin SongTaiji SuzukiDenny Wu
-|links| http://arxiv.org/abs/2406.11828v1 |
-|updated| 2024-06-17 17:59:17 UTC |
-|summary| We study the computational and sample complexity of learning a targetfunction f_:mathbbRdtomathbbR with additive structure that isf_x  frac1sqrtMsum_m1M f_mlangle x v_mrangle wheref_1f_2...f_M:mathbbRtomathbbR are nonlinear link functions ofsingle-index models ridge functions with diverse and near-orthogonal indexfeatures v_m_m1M and the number of additive tasks M grows with thedimensionality Masymp dgamma for gammage 0. This problem setting ismotivated by the classical additive model literature the recent representationlearning theory of two-layer neural network and large-scale pretraining wherethe model simultaneously acquires a large number of skills that are oftenlocalized in distinct parts of the trained network. We prove that a largesubset of polynomial f_ can be efficiently learned by gradient descenttraining of a two-layer neural network with a polynomial statistical andcomputational complexity that depends on the number of tasks M and theinformation exponent of f_m despite the unknown link function and Mgrowing with the dimensionality. We complement this learnability guarantee withcomputational hardness result by establishing statistical query SQ lowerbounds for both the correlational SQ and full SQ algorithms. |
+|idx| 2406.12843v1 |
+|title| Can Go AIs be adversarially robust? |
+|authors| Tom TsengEuan McLeanKellin PelrineTony T. WangAdam Gleave
+|links| http://arxiv.org/abs/2406.12843v1 |
+|updated| 2024-06-18 17:57:49 UTC |
+|summary| Prior work found that superhuman Go AIs like KataGo can be defeated by simpleadversarial strategies. In this paper we study if simple defenses can improveKataGos worst-case performance. We test three natural defenses: adversarialtraining on hand-constructed positions iterated adversarial training andchanging the network architecture. We find that some of these defenses are ableto protect against previously discovered attacks. Unfortunately we also findthat none of these defenses are able to withstand adaptive attacks. Inparticular we are able to train new adversaries that reliably defeat ourdefended agents by causing them to blunder in ways humans would not. Ourresults suggest that building robust AI systems is challenging even in narrowdomains such as Go. For interactive examples of attacks and a link to ourcodebase see https://goattack.far.ai. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11814v1 |
-|title| Stochastic Neural Network Symmetrisation in Markov Categories |
-|authors| Rob Cornish
-|links| http://arxiv.org/abs/2406.11814v1 |
-|updated| 2024-06-17 17:54:42 UTC |
-|summary| We consider the problem of symmetrising a neural network along a grouphomomorphism: given a homomorphism varphi : H to G we would like aprocedure that converts H-equivariant neural networks into G-equivariantones. We formulate this in terms of Markov categories which allows us toconsider neural networks whose outputs may be stochastic but withmeasure-theoretic details abstracted away. We obtain a flexible compositionaland generic framework for symmetrisation that relies on minimal assumptionsabout the structure of the group and the underlying neural networkarchitecture. Our approach recovers existing methods for deterministicsymmetrisation as special cases and extends directly to provide a novelmethodology for stochastic symmetrisation also. Beyond this we believe ourfindings also demonstrate the utility of Markov categories for addressingproblems in machine learning in a conceptual yet mathematically rigorous way. |
+|idx| 2406.12839v1 |
+|title| Evaluating the design space of diffusion-based generative models |
+|authors| Yuqing WangYe HeMolei Tao
+|links| http://arxiv.org/abs/2406.12839v1 |
+|updated| 2024-06-18 17:56:10 UTC |
+|summary| Most existing theoretical investigations of the accuracy of diffusion modelsalbeit significant assume the score function has been approximated to acertain accuracy and then use this a priori bound to control the error ofgeneration. This article instead provides a first quantitative understanding ofthe whole generation process i.e. both training and sampling. More preciselyit conducts a non-asymptotic convergence analysis of denoising score matchingunder gradient descent. In addition a refined sampling error analysis forvariance exploding models is also provided. The combination of these tworesults yields a full error analysis which elucidates again but this timetheoretically how to design the training and sampling processes for effectivegeneration. For instance our theory implies a preference toward noisedistribution and loss weighting that qualitatively agree with the ones used inKarras et al. 2022. It also provides some perspectives on why the time andvariance schedule used in Karras et al. 2022 could be better tuned than thepioneering version in Song et al. 2020. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11803v1 |
-|title| Efficient Discovery of Significant Patterns with Few-Shot Resampling |
-|authors| Leonardo PellegrinaFabio Vandin
-|links| http://arxiv.org/abs/2406.11803v1 |
-|updated| 2024-06-17 17:49:27 UTC |
-|summary| Significant pattern mining is a fundamental task in mining transactionaldata requiring to identify patterns significantly associated with the value ofa given feature the target. In several applications such as biomedicinebasket market analysis and social networks the goal is to discover patternswhose association with the target is defined with respect to an underlyingpopulation or process of which the dataset represents only a collection ofobservations or samples. A natural way to capture the association of a patternwith the target is to consider its statistical significance assessing itsdeviation from the null hypothesis of independence between the pattern andthe target. While several algorithms have been proposed to find statisticallysignificant patterns it remains a computationally demanding task and forcomplex patterns such as subgroups no efficient solution exists.  We present FSR an efficient algorithm to identify statistically significantpatterns with rigorous guarantees on the probability of false discoveries. FSRbuilds on a novel general framework for mining significant patterns thatcaptures some of the most commonly considered patterns including itemsetssequential patterns and subgroups. FSR uses a small number of resampleddatasets obtained by assigning i.i.d. labels to each transaction torigorously bound the supremum deviation of a quality statistic measuring thesignificance of patterns. FSR builds on novel tight bounds on the supremumdeviation that require to mine a small number of resampled datasets whileproviding a high effectiveness in discovering significant patterns. As a testcase we consider significant subgroup mining and our evaluation on severalreal datasets shows that FSR is effective in discovering significant subgroupswhile requiring a small number of resampled datasets. |
+|idx| 2406.12815v1 |
+|title| Privacy Preserving Federated Learning in Medical Imaging with Uncertainty Estimation |
+|authors| Nikolas KoutsoubisYasin YilmazRavi P. RamachandranMatthew SchabathGhulam Rasool
+|links| http://arxiv.org/abs/2406.12815v1 |
+|updated| 2024-06-18 17:35:52 UTC |
+|summary| Machine learning ML and Artificial Intelligence AI have fueled remarkableadvancements particularly in healthcare. Within medical imaging ML modelshold the promise of improving disease diagnoses treatment planning andpost-treatment monitoring. Various computer vision tasks like imageclassification object detection and image segmentation are poised to becomeroutine in clinical analysis. However privacy concerns surrounding patientdata hinder the assembly of large training datasets needed for developing andtraining accurate robust and generalizable models. Federated Learning FLemerges as a compelling solution enabling organizations to collaborate on MLmodel training by sharing model training information gradients rather thandata e.g. medical images. FLs distributed learning framework facilitatesinter-institutional collaboration while preserving patient privacy. HoweverFL while robust in privacy preservation faces several challenges. Sensitiveinformation can still be gleaned from shared gradients that are passed onbetween organizations during model training. Additionally in medical imagingquantifying model confidenceuncertainty accurately is crucial due to the noiseand artifacts present in the data. Uncertainty estimation in FL encountersunique hurdles due to data heterogeneity across organizations. This paperoffers a comprehensive review of FL privacy preservation and uncertaintyestimation with a focus on medical imaging. Alongside a survey of currentresearch we identify gaps in the field and suggest future directions for FLresearch to enhance privacy and address noisy medical imaging data challenges. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11761v1 |
-|title| Joint Linked Component Analysis for Multiview Data |
-|authors| Lin XiaoLuo Xiao
-|links| http://arxiv.org/abs/2406.11761v1 |
-|updated| 2024-06-17 17:25:23 UTC |
-|summary| In this work we propose the joint linked component analysis joint_LCA formultiview data. Unlike classic methods which extract the shared components in asequential manner the objective of joint_LCA is to identify the view-specificloading matrices and the rank of the common latent subspace simultaneously. Weformulate a matrix decomposition model where a joint structure and anindividual structure are present in each data view which enables us to arriveat a clean svd representation for the cross covariance between any pair of dataviews. An objective function with a novel penalty term is then proposed toachieve simultaneous estimation and rank selection. In addition a refittingprocedure is employed as a remedy to reduce the shrinkage bias caused by thepenalization. |
+|idx| 2406.12764v1 |
+|title| Quasi-Bayes meets Vines |
+|authors| David HukYuanhe ZhangMark SteelRitabrata Dutta
+|links| http://arxiv.org/abs/2406.12764v1 |
+|updated| 2024-06-18 16:31:02 UTC |
+|summary| Recently proposed quasi-Bayesian QB methods initiated a new era in Bayesiancomputation by directly constructing the Bayesian predictive distributionthrough recursion removing the need for expensive computations involved insampling the Bayesian posterior distribution. This has proved to bedata-efficient for univariate predictions but extensions to multipledimensions rely on a conditional decomposition resulting from predefinedassumptions on the kernel of the Dirichlet Process Mixture Model which is theimplicit nonparametric model used. Here we propose a different way to extendQuasi-Bayesian prediction to high dimensions through the use of Sklars theoremby decomposing the predictive distribution into one-dimensional predictivemarginals and a high-dimensional copula. Thus we use the efficient recursiveQB construction for the one-dimensional marginals and model the dependenceusing highly expressive vine copulas. Further we tune hyperparameters usingrobust divergences eg. energy score and show that our proposed Quasi-BayesianVine QB-Vine is a fully non-parametric density estimator with emphananalytical form and convergence rate independent of the dimension of data insome situations. Our experiments illustrate that the QB-Vine is appropriate forhigh dimensional distributions sim64 needs very few samples to trainsim200 and outperforms state-of-the-art methods with analytical forms fordensity estimation and supervised tasks by a considerable margin. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11733v1 |
-|title| A Clipped Trip: the Dynamics of SGD with Gradient Clipping in High-Dimensions |
-|authors| Noah MarshallKe Liang XiaoAtish AgarwalaElliot Paquette
-|links| http://arxiv.org/abs/2406.11733v1 |
-|updated| 2024-06-17 16:50:22 UTC |
-|summary| The success of modern machine learning is due in part to the adaptiveoptimization methods that have been developed to deal with the difficulties oftraining large models over complex datasets. One such method is gradientclipping: a practical procedure with limited theoretical underpinnings. In thiswork we study clipping in a least squares problem under streaming SGD. Wedevelop a theoretical analysis of the learning dynamics in the limit of largeintrinsic dimension-a model and dataset dependent notion of dimensionality. Inthis limit we find a deterministic equation that describes the evolution of theloss. We show that with Gaussian noise clipping cannot improve SGD performance.Yet in other noisy settings clipping can provide benefits with tuning of theclipping threshold. In these cases clipping biases updates in a way beneficialto training which cannot be recovered by SGD under any schedule. We concludewith a discussion about the links between high-dimensional clipping and neuralnetwork training. |
+|idx| 2406.12763v1 |
+|title| Implicit Bias of Mirror Flow on Separable Data |
+|authors| Scott PesmeRadu-Alexandru DragomirNicolas Flammarion
+|links| http://arxiv.org/abs/2406.12763v1 |
+|updated| 2024-06-18 16:30:51 UTC |
+|summary| We examine the continuous-time counterpart of mirror descent namely mirrorflow on classification problems which are linearly separable. Such problemsare minimised at infinity and have many possible solutions we study whichsolution is preferred by the algorithm depending on the mirror potential. Forexponential tailed losses and under mild assumptions on the potential we showthat the iterates converge in direction towards a phi_infty-maximum marginclassifier. The function phi_infty is the textithorizon function ofthe mirror potential and characterises its shape at infinity. When thepotential is separable a simple formula allows to compute this function. Weanalyse several examples of potentials and provide numerical experimentshighlighting our results. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11759v1 |
-|title| Folk-ontological stances toward robots and psychological human likeness |
-|authors| Edoardo Datteri
-|links| http://arxiv.org/abs/2406.11759v1 |
-|updated| 2024-06-17 17:23:17 UTC |
-|summary| It has often been argued that people can attribute mental states to robotswithout making any ontological commitments to the reality of those states. Butwhat does it mean to attribute a mental state to a robot and what is anontological commitment It will be argued that on a plausible interpretationof these two notions it is not clear how mental state attribution can occurwithout any ontological commitment. Taking inspiration from the philosophicaldebate on scientific realism a provisional taxonomy of folk-ontologicalstances towards robots will also be identified corresponding to different waysof understanding robotic minds. They include realism non-realismeliminativism reductionism fictionalism and agnosticism. Instrumentalism willalso be discussed and presented as a folk-epistemological stance. In the lastpart of the article it will be argued that peoples folk-ontological stancestowards robots and humans can influence their perception of the human-likenessof robots. The analysis carried out here can be seen as encouraging afolk-ontological turn in human-robot interaction research aimed atexplicitly determining what beliefs people have about the reality of robotminds. |
+|idx| 2406.12801v1 |
+|title| "A Lot of Moving Parts": A Case Study of Open-Source Hardware Design Collaboration in the Thingiverse Community |
+|authors| Kathy ChengShurui ZhouAlison Olechowski
+|links| http://arxiv.org/abs/2406.12801v1 |
+|updated| 2024-06-18 17:13:40 UTC |
+|summary| Open-source is a decentralized and collaborative method of development thatencourages open contribution from an extensive and undefined network ofindividuals. Although commonly associated with software development OSS theopen-source model extends to hardware development forming the basis ofopen-source hardware development OSH. Compared to OSS OSH is relativelynascent lacking adequate tooling support from existing platforms and bestpractices for efficient collaboration. Taking a necessary step towardsimproving OSH collaboration we conduct a detailed case study of DrawBot asuccessful OSH project that remarkably fostered a long-term collaboration onThingiverse - a platform not explicitly intended for complex collaborativedesign. Through analyzing comment threads and design changes over the course ofthe project we found how collaboration occurred the challenges faced and howthe DrawBot community managed to overcome these obstacles. Beyond offering adetailed account of collaboration practices and challenges our workcontributes best practices design implications and practical implications forOSH project maintainers platform builders and researchers respectively. Withthese insights and our publicly available dataset we aim to foster moreeffective and efficient collaborative design in OSH projects. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11757v1 |
-|title| STAR: SocioTechnical Approach to Red Teaming Language Models |
-|authors| Laura WeidingerJohn MellorBernat Guillen PeguerolesNahema MarchalRavin KumarKristian LumCanfer AkbulutMark DiazStevie BergmanMikel RodriguezVerena RieserWilliam Isaac
-|links| http://arxiv.org/abs/2406.11757v1 |
-|updated| 2024-06-17 17:16:45 UTC |
-|summary| This research introduces STAR a sociotechnical framework that improves oncurrent best practices for red teaming safety of large language models. STARmakes two key contributions: it enhances steerability by generatingparameterised instructions for human red teamers leading to improved coverageof the risk surface. Parameterised instructions also provide more detailedinsights into model failures at no increased cost. Second STAR improves signalquality by matching demographics to assess harms for specific groups resultingin more sensitive annotations. STAR further employs a novel step of arbitrationto leverage diverse viewpoints and improve label reliability treatingdisagreement not as noise but as a valuable contribution to signal quality. |
+|idx| 2406.12787v1 |
+|title| Generating Educational Materials with Different Levels of Readability using LLMs |
+|authors| Chieh-Yang HuangJing WeiTing-Hao 'Kenneth' Huang
+|links| http://arxiv.org/abs/2406.12787v1 |
+|updated| 2024-06-18 16:55:10 UTC |
+|summary| This study introduces the leveled-text generation task aiming to rewriteeducational materials to specific readability levels while preserving meaning.We assess the capability of GPT-3.5 LLaMA-2 70B and Mixtral 8x7B to generatecontent at various readability levels through zero-shot and few-shot prompting.Evaluating 100 processed educational materials reveals that few-shot promptingsignificantly improves performance in readability manipulation and informationpreservation. LLaMA-2 70B performs better in achieving the desired difficultyrange while GPT-3.5 maintains original meaning. However manual inspectionhighlights concerns such as misinformation introduction and inconsistent editdistribution. These findings emphasize the need for further research to ensurethe quality of generated educational content. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11645v1 |
-|title| SeamPose: Repurposing Seams as Capacitive Sensors in a Shirt for Upper-Body Pose Tracking |
-|authors| Tianhong Catherine YuManruZhangPeter HeChi-Jung LeeCassidy CheesmanSaif MahmudRuidong ZhangFrançois GuimbretièreCheng Zhang
-|links| http://arxiv.org/abs/2406.11645v1 |
-|updated| 2024-06-17 15:28:35 UTC |
-|summary| Seams are areas of overlapping fabric formed by stitching two or more piecesof fabric together in the cut-and-sew apparel manufacturing process. InSeamPose we repurposed seams as capacitive sensors in a shirt for continuousupper-body pose estimation. Compared to previous all-textile motion-capturinggarments that place the electrodes on the surface of clothing our solutionleverages existing seams inside of a shirt by machine-sewing insulatedconductive threads over the seams. The unique invisibilities and placements ofthe seams afford the sensing shirt to look and wear the same as a conventionalshirt while providing exciting pose-tracking capabilities. To validate thisapproach we implemented a proof-of-concept untethered shirt. With eightcapacitive sensing seams our customized deep-learning pipeline accuratelyestimates the upper-body 3D joint positions relative to the pelvis. With a12-participant user study we demonstrated promising cross-user andcross-session tracking performance. SeamPose represents a step towardsunobtrusive integration of smart clothing for everyday pose estimation. |
+|idx| 2406.12762v1 |
+|title| Unsupervised explainable activity prediction in competitive Nordic Walking from experimental data |
+|authors| Silvia García-MéndezFrancisco de Arriba-PérezFrancisco J. González-CastañoJavier Vales-Alonso
+|links| http://dx.doi.org/10.1109/MCE.2024.3387019 |
+|updated| 2024-06-18 16:29:07 UTC |
+|summary| Artificial Intelligence AI has found application in Human ActivityRecognition HAR in competitive sports. To date most Machine Learning MLapproaches for HAR have relied on offline batch training imposing highercomputational and tagging burdens compared to online processing unsupervisedapproaches. Additionally the decisions behind traditional ML predictors areopaque and require human interpretation. In this work we apply an onlineprocessing unsupervised clustering approach based on low-cost wearable InertialMeasurement Units IMUs. The outcomes generated by the system allow for theautomatic expansion of limited tagging available e.g. by referees withinthose clusters producing pertinent information for the explainableclassification stage. Specifically our work focuses on achieving automaticexplainability for predictions related to athletes activities distinguishingbetween correct incorrect and cheating practices in Nordic Walking. Theproposed solution achieved performance metrics of close to 100  on average. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11637v1 |
-|title| PyGWalker: On-the-fly Assistant for Exploratory Visual Data Analysis |
-|authors| Yue YuLeixian ShenFei LongHuamin QuHao Chen
-|links| http://arxiv.org/abs/2406.11637v1 |
-|updated| 2024-06-17 15:16:32 UTC |
-|summary| Exploratory visual data analysis tools empower data analysts to efficientlyand intuitively explore data insights throughout the entire analysis cycle.However the gap between common programmatic analysis e.g. withincomputational notebooks and exploratory visual analysis leads to a disjointedand inefficient data analysis experience. To bridge this gap we developedPyGWalker a Python library that offers on-the-fly assistance for exploratoryvisual data analysis. It features a lightweight and intuitive GUI with a shelfbuilder modality. Its loosely coupled architecture supports multiplecomputational environments to accommodate varying data sizes. Since its releasein February 2023 PyGWalker has gained much attention with 612k downloads onPyPI and over 10.5k stars on GitHub as of June 2024. This demonstrates itsvalue to the data science and visualization community with researchers anddevelopers integrating it into their own applications and studies. |
+|idx| 2406.12692v1 |
+|title| MAGIC: Generating Self-Correction Guideline for In-Context Text-to-SQL |
+|authors| Arian AskariChristian PoelitzXinye Tang
+|links| http://arxiv.org/abs/2406.12692v1 |
+|updated| 2024-06-18 15:06:06 UTC |
+|summary| Self-correction in text-to-SQL is the process of prompting large languagemodel LLM to revise its previously incorrectly generated SQL and commonlyrelies on manually crafted self-correction guidelines by human experts that arenot only labor-intensive to produce but also limited by the human ability inidentifying all potential error patterns in LLM responses. We introduce MAGICa novel multi-agent method that automates the creation of the self-correctionguideline. MAGIC uses three specialized agents: a manager a correction and afeedback agent. These agents collaborate on the failures of an LLM-based methodon the training set to iteratively generate and refine a self-correctionguideline tailored to LLM mistakes mirroring human processes but without humaninvolvement. Our extensive experiments show that MAGICs guideline outperformsexpert humans created ones. We empirically find out that the guidelineproduced by MAGIC enhance the interpretability of the corrections madeproviding insights in analyzing the reason behind the failures and successes ofLLMs in self-correction. We make all agent interactions publicly available tothe research community to foster further research in this area offering asynthetic dataset for future explorations into automatic self-correctionguideline generation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.11500v1 |
-|title| ESI-GAL: EEG Source Imaging-based Kinemaics Parameter Estimation for Grasp and Lift Task |
-|authors| Anant JainLalan Kumar
-|links| http://arxiv.org/abs/2406.11500v1 |
-|updated| 2024-06-17 13:02:40 UTC |
-|summary| Objective: Electroencephalogram EEG signals-based motor kinematicsprediction MKP has been an active area of research to develop brain-computerinterface BCI systems such as exosuits prostheses and rehabilitationdevices. However EEG source imaging ESI based kinematics prediction issparsely explored in the literature. Approach: In this study pre-movement EEGfeatures are utilized to predict three-dimensional 3D hand kinematics for thegrasp-and-lift motor task. A public dataset WAY-EEG-GAL is utilized for MKPanalysis. In particular sensor-domain EEG data and source-domain ESI databased features from the frontoparietal region are explored for MKP. Deeplearning-based models are explored to achieve efficient kinematics decoding.Various time-lagged and window sizes are analyzed for hand kinematicsprediction. Subsequently intra-subject and inter-subject MKP analysis isperformed to investigate the subject-specific and subject-independentmotor-learning capabilities of the neural decoders. The Pearson correlationcoefficient PCC is used as the performance metric for kinematics trajectorydecoding. Main results: The rEEGNet neural decoder achieved the bestperformance with sensor-domain and source-domain features with the time lag andwindow size of 100 ms and 450 ms respectively. The highest mean PCC values of0.790 0.795 and 0.637 are achieved using sensor-domain features while 0.7690.777 and 0.647 are achieved using source-domain features in x y andz-directions respectively. Significance: This study explores the feasibilityof trajectory prediction using EEG sensor-domain and source-domain EEG featuresfor the grasp-and-lift task. Furthermore inter-subject trajectory estimationis performed using the proposed deep learning decoder with EEG source domainfeatures. |
+|idx| 2406.12651v1 |
+|title| Transforming Surgical Interventions with Embodied Intelligence for Ultrasound Robotics |
+|authors| Huan XuJinlin WuGuanglin CaoZhen ChenZhen LeiHongbin Liu
+|links| http://arxiv.org/abs/2406.12651v1 |
+|updated| 2024-06-18 14:22:16 UTC |
+|summary| Ultrasonography has revolutionized non-invasive diagnostic methodologiessignificantly enhancing patient outcomes across various medical domains.Despite its advancements integrating ultrasound technology with roboticsystems for automated scans presents challenges including limited commandunderstanding and dynamic execution capabilities. To address these challengesthis paper introduces a novel Ultrasound Embodied Intelligence system thatsynergistically combines ultrasound robots with large language models LLMsand domain-specific knowledge augmentation enhancing ultrasound robotsintelligence and operational efficiency. Our approach employs a dual strategy:firstly integrating LLMs with ultrasound robots to interpret doctors verbalinstructions into precise motion planning through a comprehensive understandingof ultrasound domain knowledge including APIs and operational manualssecondly incorporating a dynamic execution mechanism allowing for real-timeadjustments to scanning plans based on patient movements or procedural errors.We demonstrate the effectiveness of our system through extensive experimentsincluding ablation studies and comparisons across various models showcasingsignificant improvements in executing medical procedures from verbal commands.Our findings suggest that the proposed system improves the efficiency andquality of ultrasound scans and paves the way for further advancements inautonomous medical scanning technologies with the potential to transformnon-invasive diagnostics and streamline medical workflows. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2406.12526v1 |
+|title| On the Convergence of Tâtonnement for Linear Fisher Markets |
+|authors| Tianlong NanYuan GaoChristian Kroer
+|links| http://arxiv.org/abs/2406.12526v1 |
+|updated| 2024-06-18 11:54:01 UTC |
+|summary| Tatonnement is a simple intuitive market process where prices areiteratively adjusted based on the difference between demand and supply. Manyvariants under different market assumptions have been studied and shown toconverge to a market equilibrium in some cases at a fast rate. However theclassical case of linear Fisher markets have long eluded the analyses and itremains unclear whether tatonnement converges in this case. We show that fora sufficiently small step size the prices given by the tatonnement processare guaranteed to converge to equilibrium prices up to a small approximationradius that depends on the stepsize. To achieve this we consider the dualEisenberg-Gale convex program in the price space view tatonnement assubgradient descent on this convex program and utilize novel last-iterateconvergence results for subgradient descent under error bound conditions. Indoing so we show that the convex program satisfies a particular error boundcondition the quadratic growth condition and that the price sequencegenerated by tatonnement is bounded above and away from zero. We also showthat a similar convergence result holds for tatonnement in quasi-linearFisher markets. Numerical experiments are conducted to demonstrate that thetheoretical linear convergence aligns with empirical observations. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2406.12302v1 |
+|title| A Step Towards a Universal Method for Modeling and Implementing Cross-Organizational Business Processes |
+|authors| Gerhard ZeislerTim Tobias BraunauerAlbert FleischmannRobert Singer
+|links| http://arxiv.org/abs/2406.12302v1 |
+|updated| 2024-06-18 06:19:44 UTC |
+|summary| The widely adopted Business Process Model and Notation BPMN is acornerstone of industry standards for business process modeling. However itsambiguous execution semantics often result in inconsistent interpretationsdepending on the software used for implementation. In response the ProcessSpecification Language PASS provides formally defined semantics to overcomethese interpretational challenges. Despite its clear advantages PASS has notreached the same level of industry penetration as BPMN.  This feasibility study proposes using PASS as an intermediary framework totranslate and execute BPMN models. It describes the development of a prototypetranslator that converts specific BPMN elements into a format compatible withPASS. These models are then transformed into source code and executed in abespoke workflow environment marking a departure from traditional BPMNimplementations.  Our findings suggest that integrating PASS enhances compatibility acrossdifferent modeling and execution tools and offers a more robust methodology forimplementing business processes across organizations. This study lays thegroundwork for more accurate and unified business process model executionspotentially transforming industry standards for process modeling and execution. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2406.11938v1 |
+|title| Tracking the perspectives of interacting language models |
+|authors| Hayden HelmBrandon DuderstadtYoungser ParkCarey E. Priebe
+|links| http://arxiv.org/abs/2406.11938v1 |
+|updated| 2024-06-17 17:20:16 UTC |
+|summary| Large language models LLMs are capable of producing high qualityinformation at unprecedented rates. As these models continue to entrenchthemselves in society the content they produce will become increasinglypervasive in databases that are in turn incorporated into the pre-trainingdata fine-tuning data retrieval data etc. of other language models. In thispaper we formalize the idea of a communication network of LLMs and introduce amethod for representing the perspective of individual models within acollection of LLMs. Given these tools we systematically study informationdiffusion in the communication network of LLMs in various simulated settings. |
+
 
 | Item |Content|
 | --- |---|
@@ -330,35 +360,5 @@
 |links| http://arxiv.org/abs/2406.11496v1 |
 |updated| 2024-06-17 12:59:30 UTC |
 |summary| The extraordinary electric vehicle EV popularization in the recent yearshas facilitated research studies in alleviating EV energy charging demand.Previous studies primarily focused on the optimizations over charging stationsCS profit and EV users cost savings through charge/discharge schedulingevents. In this work the random behaviors of EVs are considered with EV userspreferences over multi-CS characteristics modelled to imitate the potential CSselection disequilibrium. A price scheduling strategy under decentralizedcollaborative framework is proposed to achieve EV shunting in a multi-CSenvironment while minimizing the charging cost through multi agentreinforcement learning. The proposed problem is formulated as a Markov DecisionProcess MDP with uncertain transition probability. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2406.11342v1 |
-|title| KAOS: Large Model Multi-Agent Operating System |
-|authors| Zhao ZhuoRongzhen LiKai LiuHuhai ZouKaiMao LiJie YuTianhao SunQingbo Wu
-|links| http://arxiv.org/abs/2406.11342v1 |
-|updated| 2024-06-17 08:59:32 UTC |
-|summary| The intelligent interaction model based on large models reduces thedifferences in user experience across various system platforms but faceschallenges in multi-agent collaboration and resource sharing. To demonstrate auniform user experience across different foundational software platforms andaddress resource coordination management challenges this paper proposes amulti-agent operating system based on the open-source Kylin. The researchmethod involves empowering agents with large models to serve applications.First by introducing management role agents and vertical multi-agentcollaboration to construct or replace typical application software. Second bystudying system-level shared resource scheduling strategies to enhance userexperience and optimize resource utilization. And finally by validating theefficiency and superiority of the large model multi-agent operating systemthrough real applications and scoring intelligence. The feasibility of thissystem is demonstrated providing a new perspective for the development ofmulti-agent operating systems. Experimental results show significant advantagesof multi-agent collaboration in various application scenarios. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2406.11318v1 |
-|title| Reconfigurable Intelligent Surface Assisted VEC Based on Multi-Agent Reinforcement Learning |
-|authors| Kangwei QiQiong WuPingyi FanNan ChengQiang FanJiangzhou Wang
-|links| http://arxiv.org/abs/2406.11318v1 |
-|updated| 2024-06-17 08:35:32 UTC |
-|summary| Vehicular edge computing VEC is an emerging technology that enablesvehicles to perform high-intensity tasks by executing tasks locally oroffloading them to nearby edge devices. However obstacles such as buildingsmay degrade the communications and incur communication interruptions and thusthe vehicle may not meet the requirement for task offloading. Reconfigurableintelligent surfaces RIS is introduced to support vehicle communication andprovide an alternative communication path. The system performance can beimproved by flexibly adjusting the phase-shift of the RIS. For RIS-assisted VECsystem where tasks arrive randomly we design a control scheme that considersoffloading power local power allocation and phase-shift optimization. To solvethis non-convex problem we propose a new deep reinforcement learning DRLframework that employs modified multi-agent deep deterministic policy gradientMADDPG approach to optimize the power allocation for vehicle users VUs andblock coordinate descent BCD algorithm to optimize the phase-shift of theRIS. Simulation results show that our proposed scheme outperforms thecentralized deep deterministic policy gradient DDPG scheme and random scheme. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2406.11240v1 |
-|title| The Benefits of Power Regularization in Cooperative Reinforcement Learning |
-|authors| Michelle LiMichael Dennis
-|links| http://arxiv.org/abs/2406.11240v1 |
-|updated| 2024-06-17 06:10:37 UTC |
-|summary| Cooperative Multi-Agent Reinforcement Learning MARL algorithms trainedonly to optimize task reward can lead to a concentration of power where thefailure or adversarial intent of a single agent could decimate the reward ofevery agent in the system. In the context of teams of people it is oftenuseful to explicitly consider how power is distributed to ensure no personbecomes a single point of failure. Here we argue that explicitly regularizingthe concentration of power in cooperative RL systems can result in systemswhich are more robust to single agent failure adversarial attacks andincentive changes of co-players. To this end we define a practical pairwisemeasure of power that captures the ability of any co-player to influence theego agents reward and then propose a power-regularized objective whichbalances task reward and power concentration. Given this new objective we showthat there always exists an equilibrium where every agent is playing apower-regularized best-response balancing power and task reward. Moreover wepresent two algorithms for training agents towards this power-regularizedobjective: Sample Based Power Regularization SBPR which injects adversarialdata during training and Power Regularization via Intrinsic Motivation PRIMwhich adds an intrinsic motivation to regulate power to the training objective.Our experiments demonstrate that both algorithms successfully balance taskreward and power leading to lower power behavior than the baseline oftask-only reward and avoid catastrophic events in case an agent in the systemgoes off-policy. |
 
 
