@@ -1,0 +1,786 @@
+KalMamba: Towards Efficient Probabilistic State
+Space Models for RL under Uncertainty
+PhilippBecker∗ NiklasFreymuth GerhardNeumann
+KarlsruheInstituteofTechnology
+Abstract
+ProbabilisticStateSpaceModels(SSMs)areessentialforReinforcementLearning
+(RL) from high-dimensional, partial information as they provide concise repre-
+sentationsforcontrol. Yet,theylackthecomputationalefficiencyoftheirrecent
+deterministic counterparts such as S4 or Mamba. We propose KalMamba, an
+efficientarchitecturetolearnrepresentationsforRLthatcombinesthestrengths
+of probabilistic SSMs with the scalability of deterministic SSMs. KalMamba
+leveragesMambatolearnthedynamicsparametersofalinearGaussianSSMina
+latentspace. InferenceinthislatentspaceamountstostandardKalmanfiltering
+andsmoothing. Werealizetheseoperationsusingparallelassociativescanning,
+similartoMamba,toobtainaprincipled,highlyefficient,andscalableprobabilis-
+ticSSM.OurexperimentsshowthatKalMambacompeteswithstate-of-the-art
+SSMapproachesinRLwhilesignificantlyimprovingcomputationalefficiency,
+especiallyonlongerinteractionsequences.
+1 Introduction
+Deep probabilistic State Space Models (SSMs) are versatile tools widely used in Reinforcement
+Learning(RL)forenvironmentswithhigh-dimensional,partial,ornoisyobservations[22,34,38,
+5,25,41]. Theymodelstatesandobservationsasrandomvariablesandrelatethemthroughaset
+ofconditionaldistributions,allowingthemtocaptureuncertaintiesandlearnconciseprobabilistic
+representationsfordownstreamRLapplications. BeyondRL,recentdeterministicSSMs[16,48,15]
+offerapowerfulnewparadigmforgeneralsequencemodelingandrivalstate-of-the-arttransformers
+whileimprovingcomputationalcomplexity[15]. Thesemodelsassumestatesandobservationsare
+vectorsrelatedbydeterministic,linear,andassociativefunctions,whichallowefficienttime-parallel
+computations. SuchdeterministicmodelsareofteninsufficientforRLwithcomplexobservations,
+whereuncertaintyawarenessandprobabilisticmodelingarecrucial[10,34,23]. Incontrast,dueto
+theirnonlinearparameterizationsandinferenceapproaches,mostexistingprobabilisticSSMsforRL
+andbeyonddonotfeaturethefavorablescalingbehaviorofrecentdeterministicSSMs.
+Many real-world applications require both uncertainty awareness and the capability of handling
+longsequences. Examplesincludemulti-modalroboticstaskswithhigh-frequencycontrol, long
+sequence non-stationary tasks, or complex information-gathering tasks. Consider a robot tasked
+withpackingobjectsofunknownpropertiesintoabasket. Byinteractingwitheachitemtoinfer
+andmemorizepropertiessuchasmassanddeformability,therobotrefinesitsunderstandingofthe
+scene,enablingittostrategicallyarrangetheobjectsinthebasket. CurrentdeterministicSSMslack
+uncertaintyawarenesstosolvesuchtasks,whiletheirprobabilisticcounterpartsdonotscaletothe
+requiredsequencelengths. Thus,thequestionofhowtodevelopaprincipledmethodthatcombines
+∗Correspondencetophilipp.becker@kit.edu.
+VersionsofthisworkwerealsopresentedattheNextGenerationofSequenceModelingArchitectures
+workshopatICML2024andtheTrainingAgentswithFoundationModelsworkshopatRLC2024
+WorkshoponAligningReinforcementLearningExperimentalistsandTheorists(ARLET2024@ICML).
+4202
+nuJ
+12
+]GL.sc[
+1v13151.6042:viXraObservations Mamba Learned Time-Parallel Kalman Smoother
+and Actions Backbone Dynamics Variational
+Inference
+Filter Smoother
+SAC
+Figure1: OverviewofKalMamba.Theobservation-actionsequencesarefirstfedthroughadynamics
+backbonebuiltonMamba[15]tolearnalineardynamicsmodelforeachstep. KalMambathenuses
+time-parallelKalmanfiltering[42]toinferfilteredbeliefsq(z |o ,a )whichcanbeusedfor
+t t t 1
+controlwithaSoftActorCritic(SAC)[21]. Formodeltraining,K≤alM≤am−baemploysanadditional
+time-parallel Kalman smoothing step to obtain smoothed beliefs q(z |o ,a ). These beliefs
+t T T
+allowtrainingamodelthatexcelsinmodelinguncertaintiesduetoatightva≤riatio≤nallowerbound[5].
+Crucially,thesmoothingstepdoesnotintroducetrainablemodelparameters,enablingthedirectuse
+ofthefilteredbeliefsfordownstreamRLpolicytrainingandexecution.
+the benefits of both paradigms to obtain robust and efficient probabilistic state space models for
+long-sequenceRLunderuncertaintyarises.
+We propose an efficient architecture for RL that equips probabilistic SSMs with the efficiency
+of recent deterministic SSMs. Our approach, KalMamba, uses (extended) Kalman filtering and
+smoothing[28,40,27]toinferbeliefstatesoveralinearGaussianSSMinalatentspacethatusesa
+dynamicsmodelbasedonMamba[15]. Inthisapproach,Mambaactsasahighlyeffectivegeneral-
+purposesequence-to-sequencemodeltolearntheparametersofadynamicsmodel. TheKalman
+Smootherusesthismodeltocomputeprobabilisticbeliefsoversystemstates. Figure1providesa
+schematicoverview. Mambaisefficientforlongsequencesasitusesparallelassociativescans,which
+allowparallelizingassociativeoperatorsonhighlyparallelhardwareacceleratorssuchasGPUs[44].
+Similarly,weformulatebothKalmanfilteringandsmoothingasassociativeoperations[42]andbuild
+efficientparallelscansforfilteringandsmoothinginPyTorch[39].WithbothMambaandtheKalman
+Smootherbeingparallelizable,KalMambaachievestime-parallelcomputationofbeliefstatesrequired
+formodellearningandcontrol. Thus,unlikepreviousapproachesforefficientSSM-basedRL[41],
+whichrelyonsimplifiedinferenceassumptions,KalMambaenablesend-to-endmodeltrainingunder
+highlevelsofuncertaintyusingasmoothinginferenceandtightvariationallowerbound[5]. While
+usingsmoothedbeliefsformodellearning,ourarchitectureensuresatightcouplingbetweenfiltered
+andsmoothedbeliefstates. Thisinductivebiasensuresthefilteredbeliefsaremeaningful,allowing
+theiruseforpolicylearningandexecutionwherefutureobservationsareunavailable.
+WeevaluateKalMambaonseveraltasksfromtheDeepMindControl(DMC)Suite[50],trainingan
+off-the-shelfSoftActor-Critic[21]onbeliefsinferredfrombothimagesandstates. Asbaselines,we
+comparetoRecurrentStateSpaceModels[23]andtheVariationalRecurrentKalmanNetwork[5].
+Our preliminary experiments show that KalMamba is competitive to these state-of-the-art SSMs
+whilebeingsignificantlyfastertotrainandscalinggracefullytolongsequencesduetoitsabilityto
+beefficientlyparallelized. TheseresultsindicateKalMamba’spotentialforapplicationsthatrequire
+formingaccuratebeliefstatesoverlongsequencesunderuncertainty.
+Tosummarizeourcontributions,we(i)proposeKalMamba,anovelprobabilisticSSMforRLthat
+combinesKalmanfiltering,smoothing,andaMambabackbonetoofferefficientprobabilisticinfer-
+ence,(ii)motivateandcompareKalMambatoexistingprobabilisticSSMsforRL,and(iii)validate
+ourapproachonstate-andimage-basedcontroltasks,closelymatchingtheperformanceofstate-of-
+the-artprobabilisticSSMswhilebeingtime-parallelizable.
+22 RelatedWork
+DeterministicStateSpaceModelsinDeepLearning. StructureddeterministicStateSpaceap-
+proaches [16, 48, 15] recently emerged as an alternative to the predominant Transformer [52]
+architecture for general sequence modeling [15]. Their main benefit is combining compute and
+memoryrequirementsthatscalelinearlyinsequencelengthwithefficientandparallelizableimple-
+mentations. Whileearlierapproaches,suchastheStructuredStateSpaceSequenceModel(S4)[16]
+andothers[18,26]usedaconvolutionalformulationforefficiency,morerecentapproaches[48,15]
+useassociativescans. Suchassociativescansallowforparallelcomputationsoversequencesifall
+involvedoperatorsareassociative,whichyieldsalogarithmicruntime,givenenoughparallelcores.
+However,allthesemodelsaredeterministic,i.e.,theydonotmodeluncertaintiesorallowsampling
+withoutfurthermodifications. Asaremedy,LatentS4(LS4)[56]extendsS4forprobabilisticgenera-
+tivesequencemodelingandforecasting. However,inLS4,thelatentstatesarenotMarkovianand
+arethushardtouseforcontrol. KalMambaexploitsthefactthatfilteringandsmoothinginlinear
+Gaussianstatespacemodelscanalsobeformulatedasasetofassociativeoperations,whichmakes
+itamenabletoparallelscans[42]. Toourknowledge, itisthefirstdeep-learningmodeltodoso.
+Further,itreliesonMamba[15],astate-of-the-artdeterministicstatespacemodel,toprecomputethe
+dynamicsmodelsrequiredforfilteringandsmoothing.
+ProbabilisticStateSpaceModelsforReinforcementLearning. Probabilisticstatespacemodels
+arecommonlyandsuccessfullyusedforreinforcementlearningfromhighdimensionalormultimodal
+observations[38,54,25,4],underpartialobservability[5],andformemorytasks[41]. Arguably,
+themostprominentapproachistheRecurrentStateSpaceModel(RSSM)[23]. Aftertheiroriginal
+introductionasthebasisofastandardplanner,theyhavebeenimprovedwithmoreinvolvedparametric
+policylearningapproaches[22]andcategoricallatentvariablesforcategoricaldomains[24]. During
+inference, the RSSMs conditions the latent state on past observations and actions, resulting in a
+filteringinferencescheme. Here,thekeyarchitecturalfeatureofRSSMsissplittingthelatentstate
+intostochasticanddeterministicparts. Thedeterministicpartisthenpropagatedthroughtimeusinga
+standardrecurrentarchitecture. Initsoriginalformulation,theRSSMusesaGatedRecurrentUnit
+(GRU) [9]. One line of research focuses on replacing this deterministic path with more efficient
+architectureswiththeTransDreamer[8]approachusingatransformer[52]andRecalltoImage[41]
+usingS4[16]. However,tofullyexploittheefficiencyofthesebackbonearchitectures,bothneed
+tosimplifytheinferenceassumptionsandcanonlyconsiderthecurrentobservation,whichmakes
+themhighlysusceptibletonoiseormissingobservations. Opposedtothat,theVariationalRecurrent
+KalmanNetwork(VRKN)[5]proposesusingasmoothinginferenceschemethatconditionsbothpast
+andfutureactions. ThisschemeallowstheVRKN toworkwithafullystochasticlatentstateandlets
+itexcelintaskswheremodelinguncertaintyiscrucial. TheVRKNusesalocallylinearGaussianState
+SpaceModelinalatentspace,performingclosed-formKalmanFilteringandsmoothing. KalMamba
+holisticallycombinessmoothinginferenceinafullyprobabilisticSSMwithanefficienttemporally
+parallelizedimplementation,resultinginanapproachthatisrobusttonoiseandefficient.
+ProbabilisticStateSpaceModelsinDeepLearning. Probabilisticstatespacemodelsareversatile
+andcommonlyusedtoolsinmachinelearning. Besidesclassicalapproachesusinglinearmodels[47]
+andworksusingGaussianProcesses[12,11],mostrecentmethodsbuildonNeuralNetworks(NNs)
+toparameterizegenerativeandinferencemodelsusingtheSSMassumptions[2,53,17,29,13,33,3,
+55,43,37,6,7,35,45,32,46]. Outoftheseapproaches,thosethatembedlinear-GaussianSSMs
+intolatentspaces[53,20,13,3,7,6,45,32,46]areofparticularrelevancetoKalMamba. Doingso
+allowsforclosed-forminferenceusing(extended)KalmanFilteringandSmoothing. However,with
+thenotableexceptionoftheVRKN,thesemodelsusuallycannotbeusedtocontrolorevenmodel
+systemsofsimilarcomplexitytothosecontrolledwithRSSM-basedapproaches. Furthermore,some
+ofthem[29,7]donotallowsmoothing,whileothers[13,32]modelobservationsinthelatentspace
+asadditionalrandomvariableswhichcomplicatesinferenceandtrainingandpreventsprincipled
+usageoftheobservationuncertaintyforfiltering. Anotherclassofapproaches[20,6,45,46]trains
+usingregressionandarethusnotgenerative. Notably,noneoftheseapproachesusesatemporally
+parallelizedformulationofthefilteringandsmoothingoperations.KalMambatakesinspirationfrom
+manyoftheseapproachesandpartlyfollowstheVRKN’sdesigntoenablereinforcementlearningfor
+complexsystems. However,itcombinesthoseideaswiththeefficiencyofrecentdeterministicSSMs
+usinganarchitecturethatenablestime-parallelcomputations.
+33 StateSpaceModelsforReinforcementLearning
+InReinforcementLearning(RL)underuncertaintyandpartialobservability,StateSpaceModels
+(SSMs)generallyassumesequencesofobservationso ={o } whicharegeneratedbya
+T t t=0 T
+sequenceoflatentstatevariablesz ={z } ,giv≤enasequenceo··f·actionsa ={a } .
+T t t=0 T T t t=0 T
+Thecorrespondinggenerativemo≤delfactorizes·a··ccordingtothehiddenMarkov≤assumptions[3··6·],
+i.e.,eachobservationo onlydependsonthecurrentlatentstatez throughanobservationmodel
+t t
+p(o |z ),andeachlatentstatez onlydependsonthepreviousstatez andtheactiona through
+t t t t 1 t 1
+adynamicsmodelp(z |z ,a ). − −
+t t 1 t 1
+− −
+InordertolearnthestatespacemodelfromdataanduseitfordownstreamRL,weneedtoinferlatent
+beliefstatesgivenobservationsandactions. Dependingontheinformationprovidedforinference,we
+differentiatebetweenthefilteredbeliefq(z |o ,a )andthesmoothedbeliefq(z |o ,a ).
+t t t 1 t T T
+Thefilteredbeliefconditionsonlyonpastinfo≤rmat≤io−n,whilethesmoothedbeliefalsode≤pend≤son
+futureinformation. Computingthesebeliefsisintractableformodelsofreasonablecomplexity. Thus,
+weresorttoanautoencodingvariationalBayesapproachthatallowsjointtrainingofthegenerative
+andanapproximateinferencemodelusingalowerboundobjective[31].
+The Recurrent State Space
+Table 1: Comparing the inference models and capabilities for
+Model (RSSM) [23] assumes
+smoothing(Smooth)andtime-parallel(Parallel)executionofre-
+a nonlinear dynamics model,
+centSSMsforRL.
+splitting the state z into a
+t
+stochastics tandadeterministic Method InferenceModel Smooth Parallel
+parth whichevolveaccording
+t RSSM[23] q(z |h ,o ) × ×
+to h = f(h ,a ,s ) t t t
+and
+st
+∼ p(s
+|ht −)1
+.
+Ht −e1
+re
+ft −1
+is
+R2I[41] q(z t|o t) × ✓
+t t t VRKN[5] q(z |o ,a ) ✓ ×
+implemented using a Gated t T T
+KalMamba q(z |o≤ ,a≤ ) ✓ ✓
+RecurrentUnit(GRU)[9]. This t T T
+≤ ≤
+resultsinanonlinear,autoregres-
+siveprocessthatcannotbeparallelizedovertime. Further,RSSMsassumeafilteringinferencemodel
+q(s |h ,o ),whereh accumulatesallinformationfromthepast. TheRSSM’sinferencescheme
+t t t t
+struggleswithcorrectlyestimatinguncertaintiesastheresultinglowerboundisnottight[5]. Intasks
+where such uncertainties are relevant, this lack of principled uncertainty estimation causes poor
+performancefordownstreamapplications.
+Asaremedy,theVariationalRecurrentKalmanNetwork(VRKN)[5]buildsonalinearGaussian
+SSMinalatentspacewhichallowsinferringsmoothedbeliefstatesq(z |o ,a )requiredfor
+t T T
+a tight bound. The VRKN removes the need for a deterministic path and i≤mprov≤es performance
+underuncertainty. However,itlinearizesthedynamicsmodelaroundthemeanofthefilteredbelief,
+resultinginanonlinearautoregressiveprocessthatcannotbeparallelized.
+Incontrast,RecalltoImage(R2I)[41]buildsontheRSSMandimprovescomputationalefficiencyat
+thecostofamoresimplisticinferencescheme. ItusesS4[16]insteadofaGRUtoparameterizethe
+deterministicpathf buthastoremovetheinference’sdependencyonh toallowefficientparallel
+t
+computation. Theresultinginferencemodel,q(z |o )isnon-recurrentandneglectsallinformation
+t t
+fromothertimesteps. Thus,whileR2Iexcelsonmemorytasks,itishighlysusceptibletonoiseand
+partial-observabilityastheinferencecannotaccountforinconsistentormissinginformationino .
+t
+Ourapproach,KalMamba,combinesthetightvariationallowerboundoftheVRKN withaparal-
+lelizableMamba[15]backbonetolearntheparametersofthedynamics. Itthusomitsthenonlinear
+autoregressivelinearizationprocess. CombinedwithourcustomPyTorchroutinesfortime-parallel
+filtering and smoothing [42], this approach allows efficient training with the VRKNs principled,
+uncertainty-capturingobjective.
+4 KalMamba
+Onahighlevel,KalMambaembedsalinearGaussianStateSpaceModelintoalatentspaceand
+learnsitsdynamicsmodel’sparametersusingabackboneconsistingofseveralmambalayers. It
+employsatime-parallelKalmansmootherinthislatentspacetoinferlatentbeliefsfortrainingand
+acting. Byexploitingtheassociativityoftheunderlyingoperations,wecanutilizeparallelscans
+forthisparallelization. KalMambaemploysatightvariationallowerboundobjectivethatallows
+4a t 2 w t 1=ϕ(o t 1) a t 1 w t=ϕ(o t) a t w t+1=ϕ(o t+1) a t+1
+− − − −
+...
+Mamba
+m t 1 m t m t+1
+−
+...
+A ,b ,Σ A ,b ,Σ A ,b ,Σ
+t 1 t 1 t 1 t t t t+1 t+1 t+1
+− − −
+Figure2: SchematicoftheMamba[15]basedbackbonetolearnthesystemdynamics. Itsharesthe
+inferencemodel’sencoderϕ(o )andintermediaterepresentationw . Eachw isthenconcatenated
+t t t
+tothepreviousactiona ,fedthroughasmallNeuralNetwork(NN)andgiventoMambamodel
+t 1
+whichaccumulatesinfor−mationovertimeandemitsarepresentationm (o ,a )containing
+t t t 1
+thesameinformationasthefilteredbeliefq(z |o ,a ). Wethenconcaten≤ate≤ea−chm withthe
+t t t 1 t
+currentactiona anduseanothersmallNNtocom≤pute≤th−edynamicsparametersA ,b andΣ . This
+t t t t
+schemeallowsustousetheintermediaterepresentationm forregularizationandweregularizeit
+t
+towardsthefilteredbelief’smeanusingaMahalanobisregularizer(c.f. Equation2). Finally,the
+smallNNsincludeMonte-CarloDropout[14]tomodelepistemicuncertainty.
+appropriatemodelingofuncertaintiesinnoisy,partial-observablesystems. WethenuseaSoftActor
+Critic[21]approachtolearntoact,avoidingautoregressiverolloutsforpolicylearning.
+4.1 TheKalMambaModel
+To connect the original, high-dimensional observations o to the latent space for inference, we
+t
+introduce an intermediate auxiliary observation w , which is connected to the latent state by an
+t
+observationmodelq(w |z ) = N (w |z ,Σw)[6,45]. Here,weassumew tobeobservableand
+t t t t t t
+extract it, together with the diagonal observation covariance Σw from the observation using an
+t
+encodernetwork;(w ,Σw) = ϕ(o ). Thisapproachallowsustomodelthecomplexdependency
+t t t
+betweenz ando usingtheencoderwhilehavingasimpleobservationmodelforinferenceinthe
+t t
+latentspace. Opposedtomodelingw asarandomvariable[13,32],modelingitisobservableresults
+t
+infewerlatentvariableswhichsimplifiesinferenceandallowsdirectpropagationoftheobservation
+uncertaintiesfromtheencodertothestate.
+Weparameterizethedynamicsmodelas
+(cid:16) (cid:17)
+p(z |z ,a )=N z |A (o ,a )z +b (o ,a ),Σdyn(o ,a ) (1)
+t+1 t t t+1 t t t t t t t t t t
+≤ ≤ ≤ ≤ ≤ ≤
+wherebothA andΣdynarediagonalmatricesandweconstrainthe(eigen)valuesofAtobebetween
+t t
+0.4and0.99. Thisconstraintensurestheresultingdynamicsareplausibleandstable. Thisapproach
+effectively linearizes the dynamics parameters A ,b and Σdyn around all past observations and
+t t t
+actions. Crucially, the resulting dynamics are linear in z enabling the closed-form inference of
+t
+beliefsusingstandardKalmanfilteringandsmoothing.
+Parameterizing the dynamics model of Equation 1 naively can lead to poor representations, as
+information can bypass the actual SSM through the linearization backbone. To counter this, we
+designthebackbonearchitectureasdepictedinFigure2. Foreachtimestep,weconcatenatew and
+t
+a ,transformeachresultingvectorusingasmallneuralnetwork,feeditthroughaMamba[15]
+t 1
+mo−delandlinearlyprojecttheoutputtoavectorm ofthesamedimensionasthelatentstatez . Each
+t t
+m nowaccumulatesthesameobservationsandactionsusedtoformthecorrespondingfilteredbelief
+t
+q(z |o ,a ). Wethentakem andtheactiona tocomputethedynamicsparametersusing
+t t t 1 t t
+anothe≤rsma≤ll−neuralnetwork. Thisbottleneckintroducedbym allowsustoregularizethemodelas
+t
+discussedbelow. Following[5]wefurtherincludeMonte-CarloDropout[14]intothisarchitecture,
+asexplicitlymodelingtheepistemicuncertaintyiscrucialwhenworkingwithasmoothinginference.
+5The generative observation model is given by a decoder network p(o |z ). The observations are
+t t
+modeledasGaussianwithlearnedmeanandfixedstandarddeviation. Finally,weassumeaninitial
+statedistributionp(z )thatisazeromeanGaussianwithalearnedvarianceΣ .
+0 0
+Giventhelatentobservationmodelq(w |z ),andtheshared,pre-computable,lineardynamicsmodel,
+t t
+wecanefficientlyinferbeliefstatesusingextendedKalmanfilteringandsmoothing.Recentwork[42]
+showshowtoformulatesuchfilteringandsmoothingasassociativeoperationsamenabletotemporal
+parallelizationusingassociativescans. WeimplementtheseoperationsinPyTorch[39]. Similarto
+S5[48]orMamba[15]thisimplementationyieldsalogarithmictimecomplexity,givensufficiently
+manyparallelcores. Additionally,asthedynamicsmatrixA andallmodelcovariances,i.e.,Σdym,
+t t
+Σobs,andΣ ,arediagonal,thesameholdsforthecovariancesofthefilteredandsmoothedbeliefs.
+t 0
+ThuswecanreplacecostlymatrixoperationsduringKalmanfilteringandsmoothingwithpoint-wise
+operations,whichfurtherensuresKalMamba’sefficiency.
+4.2 TrainingtheModel
+After inserting the state space assumptions of our generative and inference models, the standard
+variationallowerboundtothedatamarginallog-likelihood[31]forasinglesequencesimplifiesto[5]
+T (cid:18)
+(cid:88)
+L (o ,a )= E [logp(o |z )]−
+ssm ≤T ≤T q(zt|o≤T,a≤T) t t
+t=1
+(cid:19)
+E [KL[q(z |z ,a ,o )∥p(z |z ,a )]] .
+q(zt−1|o≤T,a≤T) t t −1 ≥t −1 ≥t t t −1 t −1
+Due to the smoothing inference, this lower bound is tight and allows accurate modeling of the
+underlyingsystem’suncertainties. Toevaluatethelowerboundweneedthesmootheddynamics
+q(z |z ,a ,o )whoseparameterswecancomputegiventheequationsprovidedin[5].
+t t 1 t 1 t
+− ≥ − ≥
+ToregularizetheMamba-basedbackboneusedtolearnthedynamics,weincentivizem tocorrespond
+t
+tothefilteredmeanusingaMahalonobisdistance
+T
+R(o T,a T)=(cid:88)(cid:0) m t(o t,a
+t
+1−µ+
+t
+(cid:1)T (cid:0) Σ+
+t
+(cid:1) −1(cid:0) m t(o t,a
+t
+1)−µ+
+t
+(cid:1) , (2)
+≤ ≤ ≤ ≤ − ≤ ≤ −
+t=1
+µ+andΣ+denotethemeanandvarianceofthefilteredbeliefq(z |o ,a ). Thisregularization
+t t t t t 1
+discouragesthemodelfrombypassinginformationovertheMamba≤back≤bo−ne. Thismirrorsmany
+establishedmodelssuchastheclassicalextendKalmanFilter[27],whichlinearizedirectlyaround
+thismean,butstillallowsassociativeparallelscanning.
+Finally,weaddarewardmodelp(r |z ),predictingthecurrentrewardfromthelatentstateusing
+t t
+asmallneuralnetwork. Whilethisisnotstrictlynecessaryforstandardpolicylearningontopof
+therepresentation,itneverthelesshelpsthemodeltofocusontask-relevantdetailsandlearnagood
+representationforcontrol[49,51]. IncludingthisrewardtermandtheMahalonobisregularize,the
+fullmaximizationobjectiveforasinglesequenceisgivenas
+L (o ,a )=L (o ,a )+E [logp(r |z )]−αR(o ,a ).
+KalMamba ≤T ≤T ssm ≤T ≤T q(zt|o≤T,a≤T) t t ≤T ≤T
+4.3 UsingKalMambaforReinforcementLearning
+WelearnapolicyontopoftheKalMambastatespacerepresentationusingSoftActorCritic(SAC)[21].
+Here,weusethemeanofthevariationalfilteredbeliefq(z |o ,a )asinputfortheactorand,
+t t t 1
+together with the action a for the critic. Importantly, we ca≤nnot≤sm−ooth during acting as future
+t
+observationsandactionsareunavailable. However,whilenotdirectlyinvolvedintheloss,thefilter
+beliefisstillmeaningfulasthesmoothingpassintroducesnoadditionalparameters. Thisinductive
+biasinducesatightcouplingbetweenfilteredandsmoothedbeliefthatensuresthereasonablenessof
+theformer. WeindependentlytraintheKalMambaworldmodelandSACbystoppingtheactor’sand
+critic’sgradientsfrompropagatingthroughtheworldmodel. WeuseSACinsteadofthetypicallatent
+imaginationstrategyusedwithRSSMs,theVRKN andR2I.Forall4models,rollingoutpoliciesin
+thelatentspaceisautoregressivebuttheserolloutscanbeavoidedbyusingaQ-functiondirectlyon
+theinferredbeliefstates.
+6Methods: KalMamba RSSM+SAC VRKN+SAC DreamerV3
+Ablations: NoMamba NoMCD NoRegularization
+Image-BasedObservations KalMambaAblations
+800
+600
+400
+200
+0
+0 0.2 0.4 0.6 0.8 1 0 0.2 0.4 0.6 0.8 1
+EnvironmentSteps(inmillions) EnvironmentSteps(inmillions)
+Figure3: Aggregatedexpectedreturnsforimage-basedobservations. (Left)KalMambaisslightly
+worsebutoverallcompetitivewiththedifferentbaselines. CombiningeitherbaselineSSMwithSAC
+matchesorexceedstheperformanceofDreamerV3. (Right)UsingMambatolearnthedynamicsis
+crucialforgoodmodelperformance. Similarly,bothMonte-CarloDropoutandtheregularization
+lossofEquation2stabilizethetrainingprocessandleadtohigherexpectedreturns.
+State-BasedNoisyTasks Methods:
+800 KalMamba
+RSSM+SAC
+600
+VRKN+SAC
+400
+SAC
+200
+0
+0 0.2 0.4 0.6 0.8 1
+EnvironmentSteps(inmillions)
+Figure4: Aggregatedexpectedreturnsforthestate-basednoisytasks.KalMambaclearlyoutperforms
+theRSSMwhilealmostmatchingtheVRKN’sperformance. NaivelyusingSACisinsufficient,which
+testifiestotheincreaseddifficultyduetothenoise.
+5 Experiments
+We evaluate KalMamba on 4 tasks from the DeepMind Control (DMC) Suite, namely
+cartpule_swingup, quardruped_walk, walker_walk,andwalker_run. Wetraineachtask
+for1millionenvironmentstepswithsequencesoflength32andrun20evaluationrunsevery20,000
+steps. We report the expected return using the mean and 95% stratified bootstrapped confidence
+intervals[1]for4seedsperenvironment. AppendixAprovidesallhyperparameters. AppendixB
+providesper-taskresultsforallexperiments.
+WecompareagainstRecurrentStateSpaceModels(RSSM)andtheVariationalRecurrentKalman
+Network(VRKN).ToisolatetheeffectoftheSSMs’representations,wecombinebothwithSAC[21]
+astheRLalgorithm,insteadofusinglatentimagination[22].
+5.1 StandardImageBasedTasks
+Wefirstcompareonstandardimage-basedobservationsofthedifferenttasksandincludeDream-
+erV3[25]resultsforreference. TheleftsideofFigure3showstheaggregatedexpectedreturns. The
+resultsindicatethatKalMambaisslightlyworse,butoverallcompetitivetothetwobaselineSSMs
+andDreamerV3,whilebeingparallelizableandthusmuchmoreefficienttotrain. Interestingly,both
+SSMsworkwellwhencombinedwithSAC,matchingoroutperformingDreamerV3.
+We also conduct ablations for some of the main design choices of KalMamba on the right side
+ofFigure3. NoMambaremovestheMambalayersfromthedynamicsbackboneinFigure2. Similar
+totheselectionmechanismofMamba[15]itself, theresultingapproachlinearizesthedynamics
+around the current action and observation, instead of all previous observations and actions. The
+resultsshowthatthisisinsufficientforKalMamba,presumablybecauseitusesonlyasingleSSM
+7
+nruteRdetcepxE
+nruteRdetcepxEMethods: KalMamba RSSM+SAC VRKN+SAC
+SequenceLength32 SequenceLength64
+1,000
+800
+600
+400
+200
+0
+SequenceLength128 SequenceLength256
+1,000
+800
+600
+400
+200
+0
+0 5 10 15 20 0 5 10 15 20
+Time(h) Time(h)
+Figure5: Wall-clocktimeevaluationsonthestate-basednoisywalker-walkforKalMamba,the
+RSSM,andtheVRKN fordifferenttrainingcontextlengthsfor1millionenvironmentstepsorupto
+24hours. ThistimelimitationonlyaffectedtheVRKN trainingfor256steps,whichreached650
+thousandstepsafter24hours. Whileallmethodsworkwellforshortsequencesoflength32(Top
+Left),theefficientparallelizationofKalMambaallowsittoscalegracefullytoandevenimprove
+performanceforlongersequencesofupto256steps,wheretheothermethodsfail(BottomRight).
+layerinsteadofthestackedlayersusedbyMamba. Furthermore,NoRegularizationlossremoves
+theMahalanobisregularizationfromthemodelandNoMonteCarloDropoutremovesMonte-Carlo
+Dropoutfromthedynamicsbackbone. Here,theresultsindicatethatregularizingm andexplicitly
+t
+modelingtheepistemicuncertaintyarecrucialforKalMamba’sperformance.
+5.2 LowDimensionalTaskswithObservationandDynamicsNoise
+Totestthemodels’capabilitiesunderuncertainties,weusethestate-basedversionsofthetasksand
+addbothobservationanddynamicsnoise. TheobservationnoiseissampledfromN(0,0.3)and
+addedtotheobservation. ThedynamicsnoiseisalsosampledfromN(0,0.3)andaddedtotheaction
+beforeexecution. However,unlikeexplorationnoise,thisadditionhappensinsidetheenvironment
+andisinvisibletotheworldmodelandthepolicy. WeincludeSACwithoutaworldmodelinour
+experimentsasabaselinetoevaluatethedifficultyoftheresultingtasks.
+TheresultsinFigure4showthatnaivelyusingSACfailsinthepresenceofnoise. WhiletheRSSM
+managestoimproveperformanceitisstillsignificantlyoutperformedbyVRKN andKalMamba,
+whichbothusetherobustsmoothinginferencescheme. KalMambaneedsslightlymoreenvironment
+stepstoconvergebutultimatelyalmostmatchestheVRKN’sperformancewhilebeingsignificantly
+fastertorun.
+5.3 RuntimeAnalysis
+ToshowthebenefitofKalMambasefficientparallelizationusingassociativescans,wecompareits
+wall-clockruntimetothatoftheSSMbaselinesonthestate-basednoisyversionofwalker-walk
+fortrainingsequencesofincreasinglength. ThemodelsshareaPyTorchimplementationanddiffer
+onlyintheSSM.WeruneachexperimentonasingleNvidiaTeslaH100GPU,forupto1million
+steps or 24 hours. Figure 5 shows the resulting expected returns. While all models work well
+for the short sequences of length 32 that are used for the main results above, the training time
+ofthebaselineSSMsscaleslinearlywiththesequencelength,causingslowerconvergenceanda
+time-outafter24hoursand650thousandenvironmentstepsfortheVRKN foralengthof256. In
+comparison,KalMambashowsnegligibleadditionaltrainingcostforincreasedsequencelengths.
+Further,whiletheabsoluteperformanceofbothbaselinesdecreasesasthetrainingsequencesget
+longer, KalMamba slightly improves performance when trained on more than 32 steps. These
+8
+nruteRdetcepxE
+nruteRdetcepxEMethods: KalMamba RSSM+SAC VRKN+SAC
+SSMForwardPass SingleBatch
+1
+1
+0.1
+0.1
+0.01
+SequenceLength SequenceLength
+Figure6: RuntimecomparisonofKalMamba,theRSSMandtheVRKNfor(Left)aSSMforward
+passand(Right)asingletrainingbatch. Whilethecomputationalcostofbothbaselinemodelsscales
+linearlyinthesequencelength,KalMambautilizesassociativescansforefficientparallelismandthus
+near-logarithmicruntimeonmodernacceleratorhardware.
+resultsindicatethatKalMambaefficientlyutilizeslong-termcontextinformationthroughitsMamba
+backbone,whereasthedynamicsmodelsofthebaselineSSMshavedifficultywithtoo-longtraining
+sequences.
+Investigating this further, we visualize the wall-clock time of a single SSM forward pass and a
+singletrainingbatchfordifferentsequencelengthsinFigure6. WhileboththeRSSM andVRKN
+scalelinearlywiththesequencelength,KalMambashowsnear-logarithmicscalingevenforlonger
+sequencesthankstoitsefficientparallelism. WeexpectfurthersignificantspeedupsforKalMamba
+withapotentialcustomCUDAimplementation,similartoMamba.
+6 Conclusion
+WeproposedKalMamba,anefficientStateSpaceModel(SSM)forReinforcementLearning(RL)
+underuncertainty. ItcombinestheuncertaintyawarenessofprobabilisticSSMswithrecentdetermin-
+isticSSMs’scalabilitybyembeddingalinearGaussianSSMintoalatentspace. WeuseMamba[15]
+tolearnthelinearizeddynamicsinthislatentspaceefficiently. InferenceinthisSSMamountsto
+standardKalmanfilteringandsmoothingandisamenabletofullparallelizationusingassociative
+scans[42]. Duringmodellearning,thisallowstime-parallelestimationofsmoothedbeliefstates,
+whichallowstheefficientusageofprincipledobjectivesforuncertaintyestimation,especiallyover
+longsequences.
+Ourexperimentsonlow-dimensionalstatesandimageobservationsindicatethatKalMambacan
+matchtheperformanceofstate-of-the-artstochasticSSMsforRLunderuncertainty. Intermsof
+bothruntimeandperformance,KalMambascalesmoregracefullytolongertrainingsequences. In
+particular,itsperformanceimproveswithsequencelengthwhileitdegradesforthebaselineSSMs.
+LimitationsandFutureWork. ThepresentworkexploresKalMamba’spotentialinsmall-scale
+experiments,butamoreelaborateevaluationofdiverse,morerealistictaskswouldhelptoexplore
+our method’s strengths and weaknesses. A thorough comparison of recent baselines is needed
+tocontextualizeKalMambaagainstexistingtime-efficientSSMswithsimplified,non-smoothing
+inferenceschemes[41]. WeadditionallyaimtorefineKalMambatoimproveitsperformanceacross
+wide-rangingtasks.Inthiscontext,weplantomodelthestatewithacomplex-valuedrandomvariable
+to expand the range of dynamics models that can be learned. Other ideas include improving the
+regularizationoftheMambabackboneandinvestigatingmoreadvancedpolicylearningmethodsthat
+makeuseoftheuncertaintyinthefilteredbeliefs.
+References
+[1] R.Agarwal,M.Schwarzer,P.S.Castro,A.C.Courville,andM.Bellemare.Deepreinforcement
+learning at the edge of thestatistical precipice. Advances in neural information processing
+systems,34:29304–29320,2021.
+9
+]s[emiT
+8 61 23 46 821 652 215 4201 8402 8 61 23 46 821 652 215 4201 8402[2] E. Archer, I. M. Park, L. Buesing, J. Cunningham, and L. Paninski. Black box variational
+inferenceforstatespacemodels. arXivpreprintarXiv:1511.07367,2015.
+[3] E.Banijamali,R.Shu,H.Bui,A.Ghodsi,etal. Robustlocally-linearcontrollableembedding.
+InInternationalConferenceonArtificialIntelligenceandStatistics,pages1751–1759.PMLR,
+2018.
+[4] P. Becker, S. Markgraf, F. Otto, and G. Neumann. Joint representations for reinforcement
+learningwithmultiplesensors. arXivpreprintarXiv:2302.05342,2023.
+[5] P. Becker and G. Neumann. On uncertainty in deep state space models for model-based
+reinforcementlearning. TransactionsonMachineLearningResearch,2022.
+[6] P.Becker,H.Pandya,G.Gebhardt,C.Zhao,C.J.Taylor,andG.Neumann. Recurrentkalman
+networks: Factorized inference in high-dimensional deep feature spaces. In International
+ConferenceonMachineLearning,pages544–552,2019.
+[7] P.Becker-Ehmck,J.Peters,andP.VanDerSmagt. Switchinglineardynamicsforvariational
+Bayes filtering. In K. Chaudhuri and R. Salakhutdinov, editors, Proceedings of the 36th
+InternationalConferenceonMachineLearning,volume97ofProceedingsofMachineLearning
+Research,pages553–562.PMLR,09–15Jun2019.
+[8] C.Chen,Y.-F.Wu,J.Yoon,andS.Ahn.Transdreamer:Reinforcementlearningwithtransformer
+worldmodels. arXivpreprintarXiv:2202.09481,2022.
+[9] K.Cho,B.VanMerriënboer,D.Bahdanau,andY.Bengio. Onthepropertiesofneuralmachine
+translation: Encoder-decoderapproaches. arXivpreprintarXiv:1409.1259,2014.
+[10] K.Chua,R.Calandra,R.McAllister,andS.Levine.Deepreinforcementlearninginahandfulof
+trialsusingprobabilisticdynamicsmodels. Advancesinneuralinformationprocessingsystems,
+31,2018.
+[11] A.Doerr,C.Daniel,M.Schiegg,N.-T.Duy,S.Schaal,M.Toussaint,andT.Sebastian. Proba-
+bilisticrecurrentstate-spacemodels. InInternationalConferenceonMachineLearning,pages
+1280–1289.PMLR,2018.
+[12] S.Eleftheriadis,T.Nicholson,M.P.Deisenroth,andJ.Hensman. Identificationofgaussian
+processstatespacemodels. InNIPS,pages5309–5319,2017.
+[13] M.Fraccaro,S.Kamronn,U.Paquet,andO.Winther. Adisentangledrecognitionandnonlinear
+dynamicsmodelforunsupervisedlearning. InAdvancesinNeuralInformationProcessing
+Systems,pages3601–3610,2017.
+[14] Y.GalandZ.Ghahramani. Dropoutasabayesianapproximation: Representingmodeluncer-
+taintyindeeplearning. Ininternationalconferenceonmachinelearning,pages1050–1059.
+PMLR,2016.
+[15] A.GuandT.Dao. Mamba: Linear-timesequencemodelingwithselectivestatespaces. arXiv
+preprintarXiv:2312.00752,2023.
+[16] A.Gu,K.Goel,andC.Re. Efficientlymodelinglongsequenceswithstructuredstatespaces. In
+InternationalConferenceonLearningRepresentations,2021.
+[17] S.Gu,Z.Ghahramani,andR.Turner. Neuraladaptivesequentialmontecarlo. Advancesin
+NeuralInformationProcessingSystems,2015:2629–2637,2015.
+[18] A.Gupta,A.Gu,andJ.Berant. Diagonalstatespacesareaseffectiveasstructuredstatespaces.
+AdvancesinNeuralInformationProcessingSystems,35:22982–22994,2022.
+[19] D.HaandJ.Schmidhuber. Worldmodels. arXivpreprintarXiv:1803.10122,2018.
+[20] T.Haarnoja,A.Ajay,S.Levine,andP.Abbeel.Backpropkf:learningdiscriminativedeterminis-
+ticstateestimators. InProceedingsofthe30thInternationalConferenceonNeuralInformation
+ProcessingSystems,pages4383–4391,2016.
+10[21] T.Haarnoja,A.Zhou,K.Hartikainen,G.Tucker,S.Ha,J.Tan,V.Kumar,H.Zhu,A.Gupta,
+P.Abbeel,etal. Softactor-criticalgorithmsandapplications. arXivpreprintarXiv:1812.05905,
+2018.
+[22] D.Hafner,T.Lillicrap,J.Ba,andM.Norouzi. Dreamtocontrol: Learningbehaviorsbylatent
+imagination. InInternationalConferenceonLearningRepresentations,2020.
+[23] D.Hafner,T.Lillicrap,I.Fischer,R.Villegas,D.Ha,H.Lee,andJ.Davidson. Learninglatent
+dynamicsforplanningfrompixels. InInternationalconferenceonmachinelearning,pages
+2555–2565.PMLR,2019.
+[24] D.Hafner,T.P.Lillicrap,M.Norouzi,andJ.Ba. Masteringatariwithdiscreteworldmodels.
+InInternationalConferenceonLearningRepresentations,2021.
+[25] D. Hafner, J. Pasukonis, J. Ba, and T. Lillicrap. Mastering diverse domains through world
+models. arXivpreprintarXiv:2301.04104,2023.
+[26] R. Hasani, M. Lechner, T.-H. Wang, M. Chahine, A. Amini, and D. Rus. Liquid structural
+state-spacemodels. InTheEleventhInternationalConferenceonLearningRepresentations,
+2022.
+[27] A.Jazwinski. Stochasticprocessesandfilteringtheory. ACADEMICPRESS,INC.„1970.
+[28] R.E.Kalman. Anewapproachtolinearfilteringandpredictionproblems. Journalofbasic
+Engineering,82(1):35–45,1960.
+[29] M.Karl,M.Soelch,J.Bayer,andP.vanderSmagt.Deepvariationalbayesfilters:Unsupervised
+learningofstatespacemodelsfromrawdata. arXivpreprintarXiv:1605.06432,2016.
+[30] D.P.KingmaandJ.Ba. Adam: Amethodforstochasticoptimization. InICLR,2015.
+[31] D.P.KingmaandM.Welling.Auto-encodingvariationalbayes.arXivpreprintarXiv:1312.6114,
+2013.
+[32] A.Klushyn,R.Kurle,M.Soelch,B.Cseke,andP.vanderSmagt. Latentmatters: Learning
+deepstate-spacemodels. AdvancesinNeuralInformationProcessingSystems,34,2021.
+[33] R.Krishnan,U.Shalit,andD.Sontag. Structuredinferencenetworksfornonlinearstatespace
+models. InProceedingsoftheAAAIConferenceonArtificialIntelligence,volume31,2017.
+[34] A. X. Lee, A. Nagabandi, P. Abbeel, and S. Levine. Stochastic latent actor-critic: Deep
+reinforcementlearningwithalatentvariablemodel.AdvancesinNeuralInformationProcessing
+Systems,33:741–752,2020.
+[35] A. Moretti, Z. Wang, L. Wu, and I. Pe’er. Smoothing nonlinear variational objectives with
+sequentialmontecarlo,2019.
+[36] K.P.Murphy. Machinelearning: aprobabilisticperspective. MITpress,2012.
+[37] C.Naesseth,S.Linderman,R.Ranganath,andD.Blei. Variationalsequentialmontecarlo. In
+InternationalConferenceonArtificialIntelligenceandStatistics,pages968–977.PMLR,2018.
+[38] T.D.Nguyen,R.Shu,T.Pham,H.Bui,andS.Ermon. Temporalpredictivecodingformodel-
+based planning in latent space. In International Conference on Machine Learning, pages
+8130–8139.PMLR,2021.
+[39] A. Paszke, S. Gross, F. Massa, A. Lerer, J. Bradbury, G. Chanan, T. Killeen, Z. Lin,
+N.Gimelshein,L.Antiga,etal. Pytorch: Animperativestyle,high-performancedeeplearning
+library. Advancesinneuralinformationprocessingsystems,32,2019.
+[40] H.E.Rauch,F.Tung,andC.T.Striebel. Maximumlikelihoodestimatesoflineardynamic
+systems. AIAAjournal,3(8):1445–1450,1965.
+[41] M.R.Samsami,A.Zholus,J.Rajendran,andS.Chandar. Masteringmemorytaskswithworld
+models. InTheTwelfthInternationalConferenceonLearningRepresentations,2024.
+11[42] S.SärkkäandÁ.F.García-Fernández. Temporalparallelizationofbayesiansmoothers. IEEE
+TransactionsonAutomaticControl,66(1):299–306,2020.
+[43] F. Schmidt and T. Hofmann. Deep state space models for unconditional word generation.
+AdvancesinNeuralInformationProcessingSystems31,31:6158–6168,2018.
+[44] S.Sengupta,M.Harris,Y.Zhang,andJ.D.Owens. Scanprimitivesforgpucomputing,2007.
+[45] V.Shaj,P.Becker,D.Buchler,H.Pandya,N.vanDuijkeren,C.J.Taylor,M.Hanheide,and
+G.Neumann. Action-conditionalrecurrentkalmannetworksforforwardandinversedynamics
+learning. ConferenceonRobotLearning,2020.
+[46] V. Shaj, D. Büchler, R. Sonker, P. Becker, and G. Neumann. Hidden parameter recurrent
+statespacemodelsforchangingdynamicsscenarios. InInternationalConferenceonLearning
+Representations,2022.
+[47] R.H.ShumwayandD.S.Stoffer. Anapproachtotimeseriessmoothingandforecastingusing
+theemalgorithm. Journaloftimeseriesanalysis,3(4):253–264,1982.
+[48] J. T. Smith, A. Warrington, and S. Linderman. Simplified state space layers for sequence
+modeling. InTheEleventhInternationalConferenceonLearningRepresentations,2022.
+[49] N.Srivastava,W.Talbott,M.B.Lopez,S.Zhai,andJ.M.Susskind. Robustroboticcontrol
+frompixelsusingcontrastiverecurrentstate-spacemodels. InDeepRLWorkshopNeurIPS
+2021,2021.
+[50] Y.Tassa, Y.Doron, A.Muldal, T. Erez, Y. Li, D. d. L.Casas, D.Budden, A.Abdolmaleki,
+J.Merel,A.Lefrancq,etal. Deepmindcontrolsuite. arXivpreprintarXiv:1801.00690,2018.
+[51] M.Tomar,U.A.Mishra,A.Zhang,andM.E.Taylor. Learningrepresentationsforpixel-based
+control: Whatmattersandwhy? TransactionsonMachineLearningResearch,2023.
+[52] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and
+I.Polosukhin. Attentionisallyouneed. Advancesinneuralinformationprocessingsystems,
+30,2017.
+[53] M. Watter, J. Springenberg, J. Boedecker, and M. Riedmiller. Embed to control: A locally
+linearlatentdynamicsmodelforcontrolfromrawimages. InAdvancesinneuralinformation
+processingsystems,pages2746–2754,2015.
+[54] P.Wu,A.Escontrela,D.Hafner,P.Abbeel,andK.Goldberg. Daydreamer: Worldmodelsfor
+physicalrobotlearning. In6thAnnualConferenceonRobotLearning,2022.
+[55] L. Yingzhen and S. Mandt. Disentangled sequential autoencoder. In J. Dy and A. Krause,
+editors,Proceedingsofthe35thInternationalConferenceonMachineLearning,volume80of
+ProceedingsofMachineLearningResearch,pages5670–5679.PMLR,10–15Jul2018.
+[56] L. Zhou, M. Poli, W. Xu, S. Massaroli, and S. Ermon. Deep latent state space models for
+time-seriesgeneration. InInternationalConferenceonMachineLearning,pages42625–42643.
+PMLR,2023.
+12A HyperparametersandImplementationDetails
+Table2listsallhyperparametersoftheKalMambamodelandTable3liststhehyperparametersof
+SoftActorCritic(SAC)[21]usedforcontrol.
+Table2: WorldModelHyperparameters
+Hyperparameter LowDimensionalDMC ImageBasedDMC
+WorldModel
+Encoder 2×256UnitNNwithELU ConvNetfrom[19,22]withReLU
+Decoder 2×256UnitNNwithELU ConvNetfrom[19,22]withReLU
+RewardDecoder 2×256UnitNNwithELU
+LatentSpaceSize 230(30Stoch. +200Det. forRSSM
+MambaBackbone
+numblocks 2
+d_model 256
+d_state 64
+d_conv 2
+dropoutprobability 0.1
+activation SiLU
+premambalayers 2×256UnitNNwithSiLU
+postmambalayers VRKNDynamicsModelArchitecturefrom[5]withSiLU
+Loss
+KLBalancing 0.8forRSSM,0.5forVRKN,KalMamba
+FreeNats 3
+α(regularizationscale) 1,KalMambaonly
+Optimizer(Adam[30])
+LearningRate 3·10 4
+−
+Table3: SACHyperparameters
+Hyperparameter LowDimensionalDMC ImageBasedDMC
+Actor-Network 2×256UnitNNwithReLU 3×1024UnitNNwithELU
+Critic-Network 2×256UnitNNwithReLU 3×1024UnitNNwithELU
+ActorOptimizer Adamwithlearningrate3×10 4
+−
+CriticOptimizer Adamwithlearningrate3×10 4
+−
+TargetCriticUpdateFraction 0.005
+TargetCriticUpdateInterval 1
+TargetEntropy −d
+action
+EntropyOptimizer Adamwithlearningrate3×10 4
+−
+InitialLearningRate 0.1
+discountγ 0.99
+A.1 Baselines.
+BothRSSM+SACandVRKN+SACusethesamehyperparametersasKalMambawhereapplicable.
+Forallotherhyperparameters,weusethedefaultsfrom[22]and[5]respectively. TheSACbaseline
+usesthehyperparameterslistedinTable3andtheresultsforDreamerV3[25]areprovidedbythe
+authors2.
+2https://github.com/danijar/dreamerv3
+13B AdditionalResults
+WeprovideresultsfortheindividualtasksoftheDeepmindControlSuiteforimage-basedobserva-
+tionsin Figure7andthedifferentKalMambaablationsin Figure8. Figure9,showstheper-task
+resultsforthenoisystate-basedenvironments.
+Methods: KalMamba RSSM+SAC VRKN+SAC DreamerV3
+CartpoleSwingup QuadrupedWalk
+800
+800
+600
+600
+400
+400
+200 200
+0 0
+WalkerWalk WalkerRun
+1,000 800
+600
+500 400
+200
+0 0
+0 0.2 0.4 0.6 0.8 1 0 0.2 0.4 0.6 0.8 1
+EnvironmentSteps(inmillions) EnvironmentSteps(inmillions)
+Figure 7: Task-wise evaluations of the DeepMind Control Suite on image-based observations.
+Dreamer-v3showsaperformancesimilartoRSSM+SAC.
+14
+nruteRdetcepxE
+nruteRdetcepxEMethods: KalMamba NoMamba NoMonte-CarloDropout NoRegularization
+CartpoleSwingup QuadrupedWalk
+800
+400
+600
+400
+200
+200
+0 0
+WalkerWalk WalkerRun
+1,000
+600
+800
+600 400
+400
+200
+200
+0 0
+0 0.2 0.4 0.6 0.8 1 0 0.2 0.4 0.6 0.8 1
+EnvironmentSteps(inmillions) EnvironmentSteps(inmillions)
+Figure8: Task-wiseevaluationsoftheDeepMindControlSuitefordifferentKalMambaablations.
+Monte-CarloDropoutandtheMahalanobisregularizationmakethelargestdifferenceforthehardest
+taskinthesuite,i.e.,quadruped_walk.
+Methods: KalMamba RSSM+SAC VRKN+SAC SAC
+CartpoleSwingup QuadrupedWalk
+600 800
+600
+400
+400
+200
+200
+0 0
+WalkerWalk WalkerRun
+1,000 600
+800
+400
+600
+400
+200
+200
+0 0
+0 0.2 0.4 0.6 0.8 1 0 0.2 0.4 0.6 0.8 1
+EnvironmentSteps(inmillions) EnvironmentSteps(inmillions)
+Figure9: Task-wiseevaluationsoftheDeepMindControlSuiteonlow-dimensionalstaterepresenta-
+tions.KalMambaperformsonparwithorbetterthantheRSSMonalltasks,andisonlyoutperformed
+bythecomputationallymoreexpensiveVRKNoncartpole_ swingup.
+15
+nruteRdetcepxE
+nruteRdetcepxE
+nruteRdetcepxE
+nruteRdetcepxE
