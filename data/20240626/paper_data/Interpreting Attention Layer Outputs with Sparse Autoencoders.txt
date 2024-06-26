@@ -1,0 +1,1777 @@
+Interpreting Attention Layer Outputs
+with Sparse Autoencoders
+ConnorKissane∗† RobertKrzyzanowski∗ JosephBloom
+Independent Independent Independent
+ArthurConmy NeelNanda
+Abstract
+Decomposingmodelactivationsintointerpretablecomponentsisakeyopenprob-
+lem in mechanistic interpretability. Sparse autoencoders (SAEs) are a popular
+methodfordecomposingtheinternalactivationsoftrainedtransformersintosparse,
+interpretablefeatures,andhavebeenappliedtoMLPlayersandtheresidualstream.
+InthisworkwetrainSAEsonattentionlayeroutputsandshowthatalsohereSAEs
+findasparse,interpretabledecomposition. Wedemonstratethisontransformers
+fromseveralmodelfamiliesandupto2Bparameters.
+Weperformaqualitativestudyofthefeaturescomputedbyattentionlayers,andfind
+multiplefamilies: long-rangecontext,short-rangecontextandinductionfeatures.
+WequalitativelystudytheroleofeveryheadinGPT-2Small,andestimatethatat
+least90%oftheheadsarepolysemantic,i.e. havemultipleunrelatedroles.
+Further,weshowthatSparseAutoencodersareausefultoolthatenableresearchers
+toexplainmodelbehavioringreaterdetailthanpriorwork.Forexample,weexplore
+themysteryofwhymodelshavesomanyseeminglyredundantinductionheads,
+useSAEstomotivatethehypothesisthatsomearelong-prefixwhereasothersare
+short-prefix,andconfirmthiswithmorerigorousanalysis. WeuseourSAEsto
+analyzethecomputationperformedbytheIndirectObjectIdentificationcircuit
+(Wangetal.[66]),validatingthattheSAEsfindcausallymeaningfulintermediate
+variables, anddeepeningourunderstandingofthesemanticsofthecircuit. We
+open-sourcethetrainedSAEsandatoolforexploringarbitrarypromptsthrough
+thelensofAttentionOutputSAEs.
+1 Introduction
+Mechanistic interpretability aims to reverse engineer neural network computations into human-
+understandablealgorithms[48,50]. Akeysub-problemistodecomposehighdimensionalactivations
+intomeaningfulconcepts,orfeatures. Ifsuccessfulatscale,thisresearchwouldenableustoidentify
+anddebugmodelerrors[24,64,14,32],controlandsteermodelbehavior[58,63,68],andbetter
+predictout-of-distributionbehavior[36,5,17].
+Prior work has successfully analyzed many individual model components, such as neurons and
+attentionheads. However,bothneurons[66]andattentionheads[19]areoftenpolysemantic[49]:
+theyappeartorepresentmultipleunrelatedconceptsorperformdifferentfunctionsdependingonthe
+input. Polysemanticitymakesitchallengingtointerprettheroleofindividualneuronsorattention
+headsinthemodel’soverallcomputation,suggestingtheneedforalternativeunitsofanalysis.
+∗Jointcontribution
+†Correspondencetockkissane@gmail.com
+Preprint.Underreview.
+4202
+nuJ
+52
+]GL.sc[
+1v95771.6042:viXraLinear
+Scaled
+Dot-
+Linear Concat Linear
+Product
+Attention
+Linear
+SAE
+Feature: Induction Local context Succession
+Description: "I previously preceded board" "I am in a question" "16 came before, add 1"
+Feature
+Activations:
+DFA:
+Top Logit: "board" "?" "17"
+Figure1: Overview. WetrainSparseAutoencoders(SAEs)onz ,theattentionlayeroutputspre-
+cat
+linear,concatenatedacrossallheads. TheSAEsextractlineardirectionsthatcorrespondtoconcepts
+inthemodel,givingusinsightintowhatattentionlayerslearninpractice. Further,weuncoverwhat
+informationwasusedtocomputethesefeatureswithdirectfeatureattribution(DFA,Section2).
+OurpaperbuildsonliteratureusingSparseAutoencoders(SAEs)toextractinterpretablefeature
+dictionariesfromtheresidualstream[10,67]andMLPactivations[4]. Whiletheseapproacheshave
+shownpromiseindisentanglingactivationsintointerpretablefeatures,attentionlayershaveremained
+difficulttointerpret. Inthiswork,weapplySAEstoreconstructattentionlayeroutputs,anddevelopa
+noveltechnique(weight-basedheadattribution)toassociatelearnedfeatureswithspecificattention
+heads. Thisallowsustosidestepchallengesposedbypolysemanticity(Section2).
+Since SAEs applied to LLM activations are already widely used in the field, we do not see the
+application of SAEs to attention outputs as our main contribution. Instead, we hope our main
+contributiontobemakingacaseforAttentionOutputSAEsasavaluableresearchtoolthatothers
+inthemechanisticinterpretabilitycommunityshouldadopt. Wedothisbyrigorouslyshowingthat
+AttentionOutputSAEsfindsparse,interpretablereconstructions,thattheyeasilyenablequalitative
+analysestogaininsightintothefunctioningofattentionlayers,andthattheyareavaluabletoolfor
+novelresearchquestionssuchaswhymodelshavesomanyseeminglyredundantinductionheads
+[54]orbetterunderstandingthesemanticsoftheIndirectObjectIdentificationcircuit[66].
+Inmoredetail,ourmaincontributionsareasfollows:
+1. WedemonstratethatSparseAutoencodersdecomposeattentionlayeroutputsintosparse,
+interpretable linear combinations of feature vectors, giving us deeper insight into what
+concepts attention layers learn up to 2B parameter models (Section 3). We perform a
+qualitativestudyofthefeaturescomputedbyattentionlayers,andfindmultiplefamilies:
+long-rangecontext,short-rangecontextandinductionfeatures(Section3.3).
+2. WeapplySAEstosystematicallyinspecteveryattentionheadinGPT-2Small(Section4.1),
+andextendthisanalysistomakeprogressontheopenquestionofwhytherearebemultiple,
+seemingly redundant induction heads (Section 4.2). Our method identifies differences
+between induction heads [54] which specialize in "long prefix induction" [18] vs "short
+prefixinduction",demonstratingtheutilityoftheseSAEsforinterpretabilityresearch.
+3. WeshowthatAttentionOutputSAEsareusefulforcircuitanalysis(Section4.3),byfinding
+and interpreting causally relevant SAE features for the widely-studied Indirect Object
+Identificationcircuit[66],andresolvingawayourpriorunderstandingwasincomplete.
+24. WeintroduceRecursiveDirectFeatureAttribution(RDFA,Section2)-atechniquethat
+exploitsthelinearstructureoftransformerstodiscoversparsefeaturecircuitsthroughthe
+attentionlayers. Wereleaseanaccompanyingtoolforfindingandvisualizingthecircuitson
+arbitraryprompts.3
+2 Methodology
+Reconstructingattentionlayeroutputs: WecloselyfollowthesetupfromBrickenetal.[4]to
+trainSparseAutoencodersthatreconstructtheattentionlayeroutputs. Specifically,wetrainourSAEs
+onthez∈Rdhead vectors[42]concatenatedacrossallheadsofsomearbitrarylayer(i.e. z
+cat
+∈Rdmodel
+whered
+model
+=n heads·d head). Notethatzistheattentionweightedsumofvaluevectorsv∈Rdhead
+before they are converted to the attention output by a linear map (Figure 1), and should not be
+confusedwiththefinaloutputoftheattentionlayer. Wechoosetoconcatenateeachzvectorinthe
+layer,ratherthantraininganSAEperhead,sothatourmethodisrobusttofeaturesrepresentedasa
+linearcombinationofmultipleheadoutputs[51].
+Givenaninputactivationz
+cat
+∈ Rdmodel, AttentionOutputSAEscomputeadecomposition(using
+notationsimilartoMarksetal.[32]):
+(cid:88)dsae
+z =ˆz +ε(z )= f (z )d +b+ε(z ) (1)
+cat cat cat i cat i cat
+i=0
+whereˆz isanapproximatereconstructionandε(z )isanerrorterm. Wedefined asunit-norm
+cat cat i
+featuredirectionswithsparsecoefficientsf (z )≥0asthecorrespondingfeatureactivationsfor
+i cat
+z . WealsoincludeanSAEbiastermb.
+cat
+Asmentioned,wedonottrainSAEsontheoutputoftheattentionlayerW Oz
+cat
+∈ Rdmodel (where
+W istheoutprojectionweightmatrixoftheattentionlayer(Figure1)). SinceW z isalinear
+O O cat
+transformationofz ,weexpecttofindthesamefeatures. However,wedeliberatelytrainedourSAE
+cat
+onz sincewefindthatthisallowsustoattributewhichheadsthedecoderweightsarefromfor
+cat
+eachSAEfeature,asdescribedbelow.
+Weight-basedheadattribution: Wedevelopatechniquespecifictothissetup: decoderweight
+attributionbyhead. Foreachlayer,ourattentionSAEsaretrainedtoreconstructz ,theconcatenated
+cat
+outputsofeachhead. ThuseachSAEfeaturedirectiond iisa1DvectorinRnheads·dhead.
+Wecanspliteachfeaturedirection,d ,intoaconcatenationofn smallervectors,eachofshape
+i heads
+d head: d
+i
+=[d⊤ i,1,d⊤ i,2,...,d⊤ i,nheads]⊤whered
+i,j
+∈Rdhead forj =1,2,...,n heads.
+Wecanintuitivelythinkofeachd asreconstructingthepartoffeaturedirectionthatcomesfrom
+i,j
+headj. Wethencomputethenormofeachsliceasaproxyforhowstronglyeachheadwritesthis
+feature. Concretely,foranyfeaturei,wecancomputetheweightsbasedattributionscoretoheadkas
+∥d ∥
+h = i,k 2 (2)
+i,k (cid:80)nheads∥d
+∥
+j=1 i,j 2
+Foranyheadk,wecanalsosortallfeaturesbytheirheadattributiontogetasenseofwhatfeatures
+thatheadismostresponsibleforoutputting(seeSection4.1).
+Directfeatureattribution: Weprovideanactivationbasedattributionmethodtocomplementthe
+weightsbasedattributionabove. Asattentionlayeroutputsarealinearfunctionofattentionhead
+outputs[12],wecanrewriteSAEfeatureactivationsintermsofthecontributionfromeachhead.
+fpre(z )=w⊤z =w⊤ z +w⊤ z +···+w⊤ z (3)
+i cat i cat i,1 1 i,2 2 i,nheads nheads
+3TheRDFAtoolisavailableat:https://robertzk.github.io/circuit-explorer
+3wherew
+i
+∈ Rdmodel istheithrowoftheencoderweightmatrix,w
+i,j
+∈ Rdhead isthejthsliceofw i,
+andfpre(z )isthepre-ReLUfeatureactivationforfeaturei(i.e. ReLU(fpre(z )):=f (z )). Note
+i cat i cat i cat
+thatweexcludeSAEbiastermsforbrevity.
+Wecallthis“directfeatureattribution”(asit’sanalogoustodirectlogitattribution[39]),or"DFA"by
+head. Weapplythesameideatoperformdirectfeatureattributiononthevaluevectorsateachsource
+position,sincethezvectorsarealinearfunctionofthevaluevectorsifwefreezeattentionpatterns
+[12,7]. Wecallthis"DFAbysourceposition".
+RecursiveDirectFeatureAttribution(RDFA): HereweextendtheDFAtechniquedescribed
+abovetointroduceageneralmethodtotracemodels’computationonarbitraryprompts. Giventhat
+wehavefrozenattentionpatternsandLayerNorm,thereisalinearcontributionfrom(1)different
+tokenpositionresidualstreams,(2)upstreammodelcomponents,and(3)upstreamAttentionOutput
+SAEfeaturestodownstreamAttentionOutputSAEfeatures.Thisenablesustoperformafine-grained
+decompositionofAttentionOutputSAEfeaturesrecursivelythroughearliertokenpositionresidual
+streamsandupstreamcomponentsacrosseverylayer. WecallthistechniqueRecursiveDFA(RDFA).
+InAppendixN,weprovideafulldescriptionoftheRDFAalgorithm,accompaniedbyequationsfor
+keylineardecompositions.
+WealsoreleaseavisualizationtoolthatenablesperformingRecursiveDFAonarbitraryprompts
+forGPT-2Small. Wecurrentlyonlysupportthisrecursiveattributionfromattentiontoattention
+components, aswecannotpassupstreamlinearlythroughMLPsduetothenon-linearactivation
+function. Thetoolisavailableat: https://robertzk.github.io/circuit-explorer.
+3 AttentionOutputSAEsfindSparse,InterpretableReconstructions
+Inthissection,weshowthatAttentionOutputSAEreconstructionsaresparse,faithful,andinter-
+pretable. WefirstexplainthemetricsweusetoevaluateourSAEs(Section3.1). Wethenshowthat
+ourSAEsfindsparse,faithful,interpretablereconstructions(Section3.2).Finallywedemonstratethat
+ourSAEsgiveusbetterinsightsintotheconceptsthatattentionlayerslearninpracticebydiscovering
+threeattentionfeaturefamilies(Section3.3).
+3.1 Setup
+ToevaluatethesparsityandfidelityofourtrainedSAEsweusetwometricsfromBrickenetal.[4]
+(usingnotationsimilartoRajamanoharanetal.[57]):
+L0. Theaveragenumberoffeaturesfiringonagiveninput,i.e. E x∼D∥f(x)∥ 0.
+Lossrecovered. TheaveragecrossentropylossofthelanguagemodelrecoveredwiththeSAE
+"splicedin"totheforwardpass,relativetoazeroablationbaseline. Moreconcretely:
+CE(ˆx◦f)−CE(Id)
+1− , (4)
+CE(ζ)−CE(Id)
+whereˆx◦fistheautoencoderfunction,ζ :x→0isthezeroablationfunctionandId: x→xisthe
+identityfunction. Accordingtothisdefinition,anSAEthatreconstructsitsinputsperfectlywouldget
+alossrecoveredof100%,whereasanSAEthatalwaysoutputsthezerovectorasitsreconstruction
+wouldgetalossrecoveredof0%.
+Feature Interpretability Methodology. We use dashboards [4, 33] showing which dataset ex-
+amples SAE features maximally activate on to determine whether they are interpretable. These
+dashboardsalsoshowthetopDirectFeatureAttributionbysourceposition,weight-basedheadattri-
+butionforeachhead(Section2),approximatedirectlogiteffects[4]aswellasactivatingexamples
+fromrandomlysampledactivationranges,givingaholisticpictureoftheroleofthefeature. See
+AppendixDforfulldetailsaboutthismethodology.
+3.2 EvaluatingAttentionOutputSAEs
+4WetrainandevaluateAttentionOutput Table 1: Evaluations of sparsity, fidelity, and interpretability
+SAEsacrossavarietyofdifferentmod- forAttentionOutputSAEstrainedacrossmultiplemodelsand
+els and layers. For GPT-2 Small [55], layers. Percentageofinterpretablefeatureswerebasedon30
+we notably evaluate an SAE for every randomlysampledlivefeaturesinspectedperlayer.
+layer. WefindthatourSAEsaresparse
+(oftentimeswith<20averagefeaturesfir- Model Layer L0 %CERec.† %Interp.
+ing),faithful(oftentimes>80%ofcross
+entropy loss recovered relative to zero Gemma-2B[16] 6 90 75% 66%
+ablation)andinterpretable(oftentimes> GPT-2Small 0 3 99% 97%
+80%oflivefeaturesinterpretable). See GPT-2Small 1 20 78% 87%
+Table1forpermodelandlayerdetails.4 GPT-2Small 2 16 90% 97%
+SeeAppendixCforfurtherdiscussionof GPT-2Small 3 15 84% 77%
+theseresults. GPT-2Small 4 15 88% 97%
+GPT-2Small 5 20 85% 80%
+GPT-2Small 6 19 82% 77%
+3.3 ExploringFeatureFamilies GPT-2Small 7 19 83% 70%
+GPT-2Small 8 20 76% 60%
+In this section we more qualitatively GPT-2Small 9 21 83% 77%
+showthatAttentionOutputSAEsarein- GPT-2Small 10 16 85% 80%
+terpretable by examining different fea- GPT-2Small 11 8 89% 63%
+ture families: groups of SAE features GPT-2Small All 80%‡
+thatsharesomecommonhigh-levelchar- GELU-2L[38] 1 12 87% 83%
+acteristic.
+† Percentageofcross-entropylossrecovered(Equation4).
+Wefirstevaluate30randomlysampled ‡Averageover%interpretableacrossalllayers.
+livefeaturesfromSAEsacrossmultiple
+modelsandlayers(asdescribedinSec-
+tion3.1)andreportthepercentageoffeaturesthatareinterpretableinTable1. Wenoticethatinall
+cases,themajorityoflivefeaturesareinterpretable,often>80%. Notethatthisisasmallsample
+of features, and human judgment may be flawed. We list confidence intervals for percentage of
+interpretablefeaturesinAppendixD.1.
+Wenowuseourunderstandingoftheseextractedfeaturestosharedeeperinsightsintotheconcepts
+attentionlayerslearn. AttentionOutputSAEsenableustotaxonomizealargefractionofwhatthese
+layersaredoingbasedonfeaturefamilies,givingusbetterintuitionsabouthowtransformersuse
+attentionlayersinpractice. ThroughoutourSAEstrainedonmultiplemodels,werepeatedlyfind
+threecommonfeaturefamilies: inductionfeatures(e.g. "board"tokenisnextbyinduction),local
+contextfeatures(e.g. currentsentenceisaquestion,Figure1),andhigh-levelcontextfeatures(e.g.
+currenttextisaboutpets). Allofthesefeaturesinvolvemovingpriorinformationwiththecontext,
+consistentwiththehigh-levelconceptualizationoftheattentionmechanismfromElhageetal.[12].
+Wepresenttheseforillustrativepurposesanddonotexpectthesetonearlyconstituteacompleteset
+offeaturefamilies.
+Whilewefocusonthesethreefeaturefamiliesthatarepresentacrossallofthemodelswestudied,we
+alsofindfeaturefamiliesrelatedtopredictingnamesinthecontext[66],succession[19],detecting
+duplicatetokens[66],andcopysuppression[34]inGPT-2Small(AppendixI).
+Tomorerigorouslyunderstandthesethreefeaturefamilies,weperformedacasestudyforeachof
+thesefeatures(similartoBrickenetal.[4]). Forbrevity,wehighlightacasestudyofaninduction
+featurebelowandleavetheremainingtoAppendixGandH.
+Inductionfeatures. Ouranalysisrevealedmultiple"inductionfeatures"acrossdifferentmodels
+studied. AswearenotawareofanyinductionfeaturesextractedbyMLPSAEsinpriorwork,we
+hypothesize that induction features are unique to attention [4]. In what follows, we showcase a
+“‘board’isnextbyinduction”featurefromourL1GELU-2L[38]SAE.However,wenotethat“board
+induction”isjustoneexamplefromhundredsof“<token>isnextbyinduction”featuresdiscovered
+byouranalysis(seeAppendixF).Wealsodetailthefeature’supstreamcomputationsanddownstream
+effectsinAppendixE.3.
+4WereleaseweightsforeverySAE,correspondingfeaturedashboards,andaninteractivetoolforexploring
+severalattentionSAEsthroughoutamodelinAppendixA.
+5Board Induction Feature Activation Distribution
+Activation Expected Value Distribution
+250 Is board induction
+True 0.3 Is board induction
+False False
+200 0.25 True
+e
+u
+nt 150
+Val
+0.2
+Cou
+100
+cted
+0.15
+e
+xp 0.1
+E
+50
+0.05
+0 0
+0 2 4 6 8 10 0 2 4 6 8 10
+Feature Activation Level Feature Activation Level
+(a) (b)
+Figure 2: Specificity plot [4] (a) which compares the distribution of the board induction feature
+activationstotheactivationofourproxy. Theexpectedvalueplot(b)showsdistributionoffeature
+activationsweightedbyactivationlevel[4], comparedtotheactivationoftheproxy. Noteredis
+stackedontopofblue,wherebluerepresentsexamplesthatourproxyidentifiedasboardinduction.
+Wenoticehighspecificityabovetheweakestfeatureactivations.
+The‘board’inductionfeatureactivatesonthesecondinstanceof<token>inpromptsoftheform
+“<token> board . . . <token>”. To demonstrate ‘board induction’ is a genuinely monosemantic
+feature,weprovideevidencethatthefeatureisboth: (i)specificand(ii)sensitivetothiscontext[4].
+Specificitywasestablishedthroughcreationofaproxythatchecksforcasesof‘board’induction.
+Thereafter,wecomparedtheactivationofourproxytotheactivationofthefeature. Wefoundthatthe
+upperpartsoftheactivationspectrumclearlyresponded,withhighspecificity,to‘board’induction
+(Figure2). Althoughsomefalsepositiveswereobservedintheloweractivationranges(asinBricken
+etal.[4]),webelievetherearemundanereasonstoexpectsuchresults(seeAppendixE.2).
+Wenowmoveontosensitivity. Ouractivationsensitivityanalysisfound68falsenegativesinadataset
+of1milliontokens,andallfalsenegativesweremanuallychecked. Althoughtheseexamplessatisfy
+the‘board’inductionpattern,itisclearthat‘board’shouldnotbepredicted. Often,thiswasbecause
+therewereevenstrongercasesofinductionforanothertoken(AppendixE).
+4 InterpretabilityinvestigationsusingAttentionOutputSAEs
+InthissectionwedemonstratethatAttentionSAEsareusefulasgeneralpurposeinterpretabilitytools,
+allowingfornovelinsightsabouttheroleofattentionlayersinlanguagemodels. Wefirstdevelop
+atechniquethatallowsustosystematicallyinterpreteveryattentionheadinamodel(Section4.1),
+discovering new behaviors and gaining high-level insight into the phenomena of attention head
+polysemanticity[25,19]. WethenapplyourSAEstomakeprogressontheopenquestionofwhy
+modelshavemanyseeminglyredundantinductionheads[54],findinginductionheadswithsubtly
+different behaviors: some primarily perform induction where there is a long prefix [18] whereas
+othersgenerallyperformshortprefixinduction(Section4.2). Finally,weapplyAttentionOutput
+SAEstocircuitanalysis(Section4.3),unveilingnovelinsightsabouttheIndirectObjectIdentification
+circuit[66]thatwerepreviouslyout-of-reach,andfindcausallyrelevantSAEfeaturesintheprocess.
+4.1 InterpretingallheadsinGPT-2Small
+Inthissection,weuseourweight-basedheadattributiontechnique(seeSection2)tosystematically
+interpreteveryattentionheadinGPT-2Small[55]. AsinSection2,weapplyEquation2tocompute
+theweightsbasedattributionscoreh toeachheadk andidentifythetoptenfeatures{d }10
+i,k ir r=1
+withhighestattributionscoretoheadk. AlthoughAttentionOutputSAEfeaturesaredefinedrelative
+to an entire attention layer, this identifies the features most salient to a given head with minimal
+contributionsfromotherheads.
+6UsingthefeatureinterpretabilitymethodologyfromSection3.1,wemanuallyinspectthesefeatures
+forall144attentionheadsinGPT-2Small. Broadly,weobservethatfeaturesbecomemoreabstract
+inmiddle-layerheadsandthentaperoffinabstractionatlatelayers:
+Earlyheads. Layers0-3exhibitprimarilysyntacticfeatures(single-tokenfeatures,bigramfeatures)
+andfiresecondarilyonspecificverbsandentityfragments.Somelongandshortrangecontexttracking
+featuresarealsopresent.
+Middleheads. Layers4-9expressincreasinglymorecomplexconceptfeaturegroupsspanning
+grammaticalandsemanticconstructs. Examplesincludeheadsthatexpressprimarilyfamiliesof
+related active verbs, prescriptive and active assertions, and some entity characterizations. Late-
+middleheadsshowfeaturegroupsongrammaticalcompoundphrasesandspecificconcepts,suchas
+reasoningandjustificationrelatedphrasesandtimeanddistancerelationships.
+Lateheads. Layers10-11continuetoexpresssomecomplexconceptssuchascounterfactualand
+timing/tenseassertions,withthelastlayerprimarilyexhibitingsyntacticfeaturesforgrammatical
+adjustmentsandsomebigramcompletions.
+Weidentifymanyexistingknownmotifs(includinginductionheads[54,27],previoustokenheads
+[65,27], successorheads[19]andduplicatetokenheads[66,27])inadditiontonewmotifs(e.g.
+prepositionmoverheads). MoredetailsoneachlayerandheadareavailableinAppendixM.Wenote
+thattherearesomelimitationstothismethodology,asdiscussedinAppendixM.1.
+4.1.1 InvestigatingattentionheadpolysemanticitywithSAEs
+Wenowapplyouranalysisabovetogainhigh-levelinsightintotheprevalenceofattentionhead
+polysemanticity [13, 25]. While the technique from Section 4.1 is not sufficient to prove that a
+head is monosemantic, we believe that having multiple unrelated features attributed to a head is
+evidencethattheheadisdoingmultipletasks. Wealsonotethatthereisapossibilitywemissed
+somemonosemanticheadsduetomissingpatternsatcertainlevelsofabstraction(e.g. somepatterns
+mightnotbeevidentfromasmallsampleofSAEfeatures,andinotherinstancesanSAEmighthave
+mistakenlylearnedsomeredherringfeatures).
+Duringourinvestigationsofeachhead,wefound14monosemanticcandidates(i.e. allofthetop10
+attributedfeaturesfortheseheadswerecloselyrelated). Thissuggeststhatabout90%oftheattention
+headsinGPT-2smallareperformingatleasttwodifferenttasks.
+Tovalidatethatthefeaturelensistellingussomethingrealaboutthemultiplerolesoftheheads,we
+confirmthatoneoftheseattentionheadsispolysemanticwithexperimentsthatdonotrequireSAEs.
+Figure3demonstratestwocompletelydifferentbehaviorsof10.2foundinthetopSAEfeatures:digit
+copyingandpredictingbase64attheendofURLs5. Weconstructsyntheticdatasetscorrespondingto
+bothofthesetasks,andobservethemeanchangeincrossentropylossafterablatingeveryattention
+headoutputinlayer10. Wefindthatablating10.2causesthelargestimpactonthelossinbothcases,
+confirmingthatthisheadisinvolvedinbothtasks.
+4.2 Long-prefixinductionhead
+InthissectionweapplyAttentionOutputSAEstomakeprogressonalong-standingopenquestion:
+whydomodelshavesomanyseeminglyredundantinductionheads[54]? Weuseourweight-based
+headattributiontechnique(seeSection4.1)toinspectthetopSAEfeaturesattributedtotwodifferent
+induction heads and find one which specializes in “long prefix induction” [18], while the other
+primarilydoes“shortprefixinduction”.
+Asacasestudy,wefocusonGPT-2Small[55],whichhastwoinductionheadsinlayer5(heads
+5.1and5.5)[66]. Todistinguishbetweenthesetwoheads,wequalitativelyinspectthetoptenSAE
+featuresattributedtobothheads(asinSection4.1)andlookforpatterns. Glancingatthetopfeatures
+attributedtohead5.1shows“longinduction”features,definedasfeaturesthatactivateonexamples
+ofinductionwithatleasttworepeatedprefixmatches(e.g. completing“... ABC... AB”withC).
+5Bydigitcopyingbehavior,werefertoinstancesofboostingaspecificdigitfoundearlierintheprompt:
+forexample,asin"Image2/8...Image5/8".ByURLcompletion,werefertoinstancesofboostingplausible
+portionsofaURL,suchasthebase64tokensimmediatelyfollowing"pic.twitter.com/".
+7Copying digits: Mean loss change after ablation of each head in Layer 10 URL completions: Mean loss change after ablation of each head in Layer 10
+0.7 0.05
+0.6
+Mean
+loss
+change 000 ... 345
+Mean
+loss
+change 000 ... 000 234
+0.2
+0.1 0.01
+0
+0 2 4 6 8 10 0 2 4 6 8 10
+Head Head
+(a) (b)
+Figure3: Anindicationofpolysemanticityforhead10.2: Onsyntheticdatasetsfortwounrelated
+tasks,digitscopying(a)andURLcompletion(b),ablating10.2causesalargeaverageeffectonthe
+lossrelativetotheotherheadsinlayer10.
+Induction Score vs Prefix Length Induction Score Before and After Intervention
+1
+Head Head
+0.9
+e 5.5 5.1
+or 0.8 5.1 e 0.8 5.5
+Sc or
+ction 00 .. 67
+on
+Sc 0.6
+ndu
+0.5
+ucti
+0.4
+g
+I
+0.4
+nd
+Av I 0.2
+0.3
+0
+2 4 6 8 Clean (long prefix) Corrupted (1-prefix)
+Prefix Length Clean vs Corrupted
+(a) (b)
+Figure4: Twolinesofevidencethat5.1specializesinlongprefixinduction, while5.5primarily
+does short prefix induction. In (a) we see that 5.1’s induction score [54] sharply increases from
+lessthan0.3toover0.7aswetransitiontolongprefixlengths,while5.5alreadystartsat0.7for
+shortprefixes. In(b)weseethatinterveningonexamplesoflongprefixinductionfromthetraining
+distributioncauses5.1toessentiallystopattendingtothattoken,while5.5continuestoshowan
+inductionattentionpattern.
+Wenowconfirmthishypothesiswithindependentlinesofevidencethatdon’trequireSAEs. We
+firstgeneratesyntheticinductiondatasetswithrandomrepeatedtokensofvaryingprefixlengths. For
+eachdataset,wecomputetheinductionscore,definedastheaverageattentiontothetokenwhich
+inductionwouldsuggestcomesnext,forbothheads. Weconfirmthatwhilebothinductionscores
+riseasweincreaseprefixlength,head5.1hasamuchmoredramaticphasechangeaswetransition
+tolongprefixes(i.e. ≥2)(Figure4a).
+Wealsofindandinterveneonrealexamplesoflongprefixinductionfromthetrainingdistribution,
+corruptingthemtoonlybeoneprefixbyreplacingthe2ndleftrepeatedtoken(i.e’A’inABC... AB
+->C)withadifferent,randomtoken. Wefindthatthisinterventioneffectivelycauseshead5.1to
+stopdoinginduction,asitsaverageinductionscorefallsfrom0.55to0.05. Head5.5,meanwhile,
+maintainsanaverageinductionscoreof0.43(Figure4b). SeeAppendixLforadditionallinesof
+evidence.
+4.3 AnalyzingtheIOIcircuitwithAttentionOutputSAEs
+WenowshowthatAttentionOutputSAEsareusefultoolsforcircuitanalysis. Intheprocess,wealso
+gobeyondearlyworktofindevidencethatourSAEsfindcausallyrelevantintermediatevariables. As
+8acasestudy,weapplyourSAEstothewidelystudiedIndirectObjectIdentificationcircuit[66],and
+findthatourSAEsimproveuponattentionheadinterpretabilitybasedtechniquesfrompriorwork.
+TheIndirectObjectIdentification(IOI)task[66]istocompletesentenceslike“AfterJohnandMary
+wenttothestore,Johngaveabottleofmilkto”with“Mary”ratherthan“John”. Werefertothe
+repeatedname(John)asS(thesubject)andthenon-repeatedname(Mary)asIO(theindirectobject).
+ForeachchoiceoftheIOandSnames,therearetwoprompttemplates: onewheretheIOname
+comesfirst(the’ABBA’template)andonewhereitcomessecond(the’BABA’template).
+Wangetal.[66]analyzedthiscircuitbylocalizingandinterpretingseveralclassesofattentionheads.
+Theyarguethatthecircuitimplementsthefollowingalgorithm:
+1. InductionheadsandDuplicatetokenheadsidentifythatSisduplicated. Theywriteinforma-
+tiontoindicatethatthistokenisduplicated,aswellas“positionalsignal”pointingtotheS1
+token.
+2. S-inhibitionheadsroutethisinformationfromS2toENDviaV-composition[12]. They
+outputbothtokenandpositionalsignalsthatcausetheNamemoverheadstoattendlessto
+S1(andthusmoretoIO)viaQ-composition[12].
+3. NamemoverheadsattendstronglytotheIOpositionandcopy,boostingthelogitsoftheIO
+tokenthattheyattendto.
+AlthoughWangetal.[66]findthat“positionalsignal”originatingfromtheinductionheadsisakey
+aspectofthiscircuit,theydon’tfigureoutthespecificsofwhatthissignalis,andultimatelyleave
+thismysteryasoneofthe“mostinterestingfuturedirections”oftheirwork. AttentionOutputSAEs
+immediatelyrevealthepositionalsignalbydecomposingtheseactivationsintointerpretablefeatures.
+WefindthatratherthanabsoluteorrelativepositionbetweenStokens,thepositionalsignalisactually
+whethertheduplicatenamecomesafterthe“and”tokenthatconnects“JohnandMary”.
+Identifying the positional features: To generate this hypothesis, we localized and interpreted
+causallyrelevantSAEfeaturesfromtheoutputsoftheattentionlayersthatcontaininductionheads
+(Layers5and6)withzeroablations. FornowwefocusonourLayer5SAE,andleaveotherlayers
+toAppendixK.2. InAppendixKwealsoevaluatethat,fortheselayers,theSAEreconstructionsare
+faithfulontheIOIdistribution,andthusviableforcircuitanalysis.
+Duringeachforwardpass,wereplacetheL5
+attentionlayeroutputactivationswithasparse
+IOI Logit Difference
+linearcombinationofSAEfeaturedirections
+plusanerrorterm,asin(1). Wethenzeroab-
+lateeachfeature,oneatatime,andrecordthe 4
+resultingchangeinlogitdifferencebetweenthe
+IOandStokens. Thislocalizesthreefeatures Clean
+3
+thatcauseanotabledecreaseinaveragelogit
+difference. SeeAppendixK.1formoredetails.
+2
+Interpretingthe“positional”features: We
+Zero Abl
+theninterpretedthesecausallyrelevantfeatures. 1
+Shallow investigations of feature dashboards
+(seeSection3.1,AppendixA)suggeststhatall
+0
+threeofthesefireonduplicatetokens,thatwere rand toks + filler alongside
+previouslybeforeorafter“and”tokens(e.g. “I Intervention
+amaduplicatetokenthatpreviouslyfollowed‘
+Figure5: Resultsfromtwonoisingexperimentson
+and’”). Thesefeatureinterpretationsmotivated
+induction layers’ attention outputs at S2 position.
+the hypothesis that the “positional signal” in
+Noisingfromadistributionthatjustchanges"and"
+IOIissolelydeterminedbythepositionofthe
+to"alongside"degradesperformance, while3si-
+namerelativeto(i.e. beforeorafter)the‘and’
+multaneous perturbations that maintains whether
+token.
+theduplicatenameisafterthe‘and’tokenpreserve
+93%ofaveragelogitdifference.
+Confirmingthehypothesis: Wenowverify
+thishypothesiswithoutreferencetoSAEs. We
+designanoising(definedinHeimersheimandNanda[23])experimentthatperturbsthreeproperties
+9
+ffiD
+tigoLofIOIpromptssimultaneously,whilepreservingwhethertheduplicatenameisbeforeorafterthe‘
+and’token. Concretely,ourcounterfactualdistributionmakesthefollowingchanges:
+1. Replaceeachnamewithanotherrandomname(removing"tokensignal"[66])
+2. Prependfillertext(e.g. "Itwasaniceday")(corruptingabsolutepositionsofallnames)
+3. AddfillertextbetweenS1andS2(corruptingtherelativepositionbetweenStokens)
+Despitebeingalmostentirelydifferentprompts,noisingtheattentionlayeroutputsforbothinduction
+layers[5,6]attheS2positionstillrecovers 93%ofaveragelogitdiffrelativetozeroablatingthe
+outputsatthisposition(Figure5).
+Onealternatehypothesisisthatthepositionalsignalisamoregeneralemergentpositionalembedding
+[40](e.g. “Iamthesecondnameinthesentence”)thatdoesn’tactuallydependonthe“and”token.
+Wefalsifythisbynoisingattentionoutputsatlayers[5,6]S2positionfromacorrupteddistribution
+which only changes “ and” to the token “ alongside”. Note that this only corrupts one piece of
+information(the‘and’)comparedtothethreecorruptionsabove,yetweonlyrecover 43%oflogit
+differencerelativetozeroablation(Figure5).
+5 RelatedWork
+MechanisticInterpretability. Mechanisticinterpretabilityresearchaimstoreverseengineerneural
+network computations into human-understandable algorithms [48, 50]. Prior mechanistic inter-
+pretabilityworkhasidentifiedcomputationsubgraphsofmodelsthatimplementtasks[66,21,29],
+found interpretable, reoccurring model components over models of multiple sizes [54, 19], and
+reverse-engineeredhowtoytasksarecarriedoutinsmalltransformers[43,6]. Somehavesuccess-
+fullyinterpretedattentionheads[34,54,66],thoughtheissuehasbeenraisedthatheadsareoften
+polysemantic[19,25],andmaynotbethecorrectunitofanalysis[26]. Ourtechniquegoesbeyond
+priorworkbydecomposingtheoutputsoftheentireattentionlayerintofiner-grainedlinearfeatures,
+withoutassumingthatheadsaretherightunitofanalysis.
+Inductionheads[12]havebeenstudiedextensivelybyOlssonetal.[54], whofirstobservedthat
+LLMshadmany,seeminglyredundantinductionheads. Goldowsky-Dilletal.[18]investigatedtwo
+inductionheadsina2-layerattention-onlymodel,anddiscoveredthe"longinduction"(long-prefix
+induction)variantinbothheads. Incontrast,wefindthattwodifferentinductionheadsspecializein
+long-prefixandshort-prefixinductionrespectivelyinGPT-2Small.
+ClassicalDictionaryLearning. Elad[11]exploreshowbothdiscreteandcontinuousrepresen-
+tations can involve more representations than basis vectors, and surveys various techniques for
+extracting and reconstructing these representations. Traditional sparse coding algorithms [53, 1]
+employexpectation-maximization,whilecontemporaryapproaches[20,2]basedongradientdescent
+andautoencodershavebuiltupontheseideas.
+SparseAutoencoders. Motivatedbythehypothesizedphenomenonofsupersition[13],recentwork
+hasapplieddictionarylearning,specificallysparseautoencoders[47],toLMsinordertointerpret
+theiractivations[60,59,10,67,4,61]. Ourfeatureinterpretabilitymethodologywasinspiredby
+Brickenetal.[4], thoughweadditionallystudyhowfeaturesarecomputedupstreamwithdirect
+feature attribution [44, 45]. Progress is rapid, with the following parallel work occurring within
+the last few months: Rajamanoharan et al. [57] scaled Attention Output SAEs up to 7B models,
+buildingonanearlydraftofthiswork. Marksetal.[32]alsosuccessfullyusedmultipletypesof
+SAEsincludingattentionforfiner-grainedcircuitdiscoverywithgradientbasedpatchingtechniques.
+Incontrast,weusebothcausalinterventionsandDFA,exploitingthelinearstructureoftheattention
+mechanism. Heetal.[22]exploitthelinearstructureofatransformertoinvestigatecomposition
+betweenSAEfeaturesonOthello,similartoourRDFAapproach. Geetal.[15]alsofind“and”-
+relatedSAEfeaturesintheIOItask,andrediscovertheinductionfeaturefamily[28]. Wecausally
+verifythehypothesesofhow“and”featuresbehaveinIOIandruleoutalternativehypotheses.
+6 Conclusion
+In this work, we have introduced Attention Output SAEs, and demonstrated their effectiveness
+in decomposing attention layer outputs into sparse, interpretable features (Section 3). We have
+10alsohighlightedthepromiseofAttentionOutputSAEsasageneralpurposeinterpretabilitytool
+(Section4). Ouranalysisidentifiednovelandextantattentionheadmotifs(Section4.1),advancedour
+understandingofapparently‘redundant’inductionheads(Section4.2),andimproveduponattention
+headcircuitinterpretabilitytechniquesfrompriorwork(Section4.3). Wehavealsointroduceda
+moregeneraltechnique,recursivedirectfeatureattribution,totracemodels’computationonarbitrary
+promptsandreleasedanaccompanyingvisualizationtool(Section2).
+6.1 Limitations
+Ourworkfocusesonunderstandingattentionoutputs,whichweconsidertobeavaluablecontribution.
+However, we leave much of the transformer unexplained, such as the QK circuits [12] by which
+attentionpatternsarecomputed. Further,thoughwescaleuptoa2Bmodel,ourworkwasmostly
+performedonthe100MparameterGPT-2Smallmodel. ExploringAttentionOutputSAEsonlarger
+modelsindepthisthusanaturaldirectionoffuturework.
+Wealsohighlightsomemethodologicallimitations. Whilewetrytovalidateourconclusionswith
+multipleindependentlinesofevidence,ourresearchoftenreliesonqualitativeinvestigationsand
+subjectivehumanjudgment. Additionally,likeallsparseautoencoderresearch,ourworkdepends
+onboththeassumptionsmadebytheSAEarchitecture,andthequalityofthetrainedSAEs. SAEs
+representthesparse,linearcomponentsofmodels’computation,andhencemayprovideanincomplete
+pictureofhowtointerpretattentionlayers[57].OurSAEsachievereasonablereconstructionaccuracy
+(Table1),thoughtheyarefarfromperfect.
+7 Acknowledgements
+WewouldliketothankRoryŠvarcforhelpwithwriting,formattingtables/figures, andhelpful
+feedback. WewouldalsoliketothankGeorgLange,AlexMakelov,SoniaJoseph,JesseHoogland,
+BenWu,andAlessandroStolfoforextremelyhelpfulfeedbackonearlierdraftsofthiswork. We
+aregratefultoKeithWynroe,whoindependentlymaderelatedobservationsabouttheIOIcircuit
+(Section4.3),forhelpfuldiscussion. Finally,wearegratefultoJohnnyLinforaddingourGPT-2
+SmallAttentionSAEstoNeuronpedia[30]whichhelpedusrapidlyinterpretSAEfeaturesinsection
+4.3andAppendixN.PortionsofthisworkweresupportedbytheMATSprogramaswellastheLong
+TermFutureFund.
+8 Authorcontributions
+Connor and Rob were core contributors on this project. Connor trained and evaluated all of the
+GPT-2 Small and GELU-2L SAEs from Section 3.2. Connor also performed the interpretability
+investigationsandfeaturedeepdivesfromSection3.3. Robperformedadditionalfeaturedeepdives
+andimplementedheuristicsfordetectingfamiliesoffeaturessuchasinductionfeatures(AppendixF).
+Robalsoinspectedall144attentionheadsinGPT-2SmallfromSection4.1,whileConnorperformed
+thelong-prefixinduction(Section4.2)andIOIcircuitanalysis(Section4.3)casestudies. Robbuilt
+thecircuitdiscoverytoolfromSection2. JosephtrainedtheAttentionOutputSAEonGemma-2B
+(Table1). ArthurandNeelbothsupervisedthisproject,andgaveguidanceandfeedbackthroughout.
+TheoriginalprojectideawassuggestedbyNeel.
+References
+[1] M. Aharon, M. Elad, and A. Bruckstein. K-svd: An algorithm for designing overcomplete
+dictionariesforsparserepresentation. IEEETransactionsonSignalProcessing,54(11):4311–
+4322,2006. doi: 10.1109/TSP.2006.881199.
+[2] G.Barello,A.S.Charles,andJ.W.Pillow. Sparse-codingvariationalauto-encoders.
+[3] J. Bloom. Open Source Sparse Autoencoders for all Residual Stream Layers
+of GPT-2 Small. https://www.alignmentforum.org/posts/f9EgfLSurAiqRJySD/
+open-source-sparse-autoencoders-for-all-residual-stream,2024.
+11[4] T.Bricken,A.Templeton,J.Batson,B.Chen,A.Jermyn,T.Conerly,N.Turner,C.Anil,C.Deni-
+son,A.Askell,R.Lasenby,Y.Wu,S.Kravec,N.Schiefer,T.Maxwell,N.Joseph,Z.Hatfield-
+Dodds,A.Tamkin,K.Nguyen,B.McLean,J.E.Burke,T.Hume,S.Carter,T.Henighan,and
+C. Olah. Towards monosemanticity: Decomposing language models with dictionary learn-
+ing. TransformerCircuitsThread,2023. https://transformer-circuits.pub/2023/monosemantic-
+features/index.html.
+[5] S.Carter,Z.Armstrong,L.Schubert,I.Johnson,andC.Olah. Activationatlas. Distill,4(3):
+e15,2019.
+[6] B.Chughtai,L.Chan,andN.Nanda. Atoymodelofuniversality: Reverseengineeringhow
+networkslearngroupoperations,2023.
+[7] B.Chughtai,A.Cooney,andN.Nanda. Summingupthefacts: Additivemechanismsbehind
+factualrecallinllms,2024.
+[8] C.J.ClopperandE.S.Pearson. Theuseofconfidenceorfiduciallimitsillustratedinthecase
+ofthebinomial. Biometrika,26(4):404–413,1934. doi: 10.1093/biomet/26.4.404.
+[9] A.Conmy,A.N.Mavor-Parker,A.Lynch,S.Heimersheim,andA.Garriga-Alonso. Towards
+automatedcircuitdiscoveryformechanisticinterpretability,2023.
+[10] H.Cunningham,A.Ewart,L.Riggs,R.Huben,andL.Sharkey. Sparseautoencodersfindhighly
+interpretablefeaturesinlanguagemodels,2023.
+[11] M. Elad. Sparse and Redundant Representations: From Theory to Applications in Signal
+andImageProcessing. Springer,NewYork,2010. ISBN978-1-4419-7010-7. doi: 10.1007/
+978-1-4419-7011-4.
+[12] N.Elhage,N.Nanda,C.Olsson,T.Henighan,N.Joseph,B.Mann,A.Askell,Y.Bai,A.Chen,
+T.Conerly,N.DasSarma,D.Drain,D.Ganguli,Z.Hatfield-Dodds,D.Hernandez,A.Jones,
+J.Kernion,L.Lovitt,K.Ndousse,D.Amodei,T.Brown,J.Clark,J.Kaplan,S.McCandlish,
+andC.Olah. Amathematicalframeworkfortransformercircuits. TransformerCircuitsThread,
+2021. URLhttps://transformer-circuits.pub/2021/framework/index.html.
+[13] N. Elhage, T. Hume, C. Olsson, N. Schiefer, T. Henighan, S. Kravec, Z. Hatfield-Dodds,
+R. Lasenby, D. Drain, C. Chen, et al. Toy Models of Superposition. arXiv preprint
+arXiv:2209.10652,2022.
+[14] Y.Gandelsman, A.A.Efros, andJ.Steinhardt. Interpretingclip’simagerepresentationvia
+text-baseddecomposition,2024.
+[15] X.Ge,F.Zhu,W.Shu,J.Wang,Z.He,andX.Qiu. Automaticallyidentifyinglocalandglobal
+circuitswithlinearcomputationgraphs,2024.
+[16] GemmaTeam,T.Mesnard,C.Hardin,R.Dadashi,S.Bhupatiraju,L.Sifre,M.Rivière,M.S.
+Kale,J.Love,P.Tafti,L.Hussenot,andetal. Gemma,2024. URLhttps://www.kaggle.
+com/m/3301.
+[17] G.Goh,N.Cammarata,C.Voss,S.Carter,M.Petrov,L.Schubert,A.Radford,andC.Olah.
+Multimodalneuronsinartificialneuralnetworks. Distill,6(3):e30,2021.
+[18] N.Goldowsky-Dill,C.MacLeod,L.Sato,andA.Arora. Localizingmodelbehaviorwithpath
+patching,2023.
+[19] R.Gould,E.Ong,G.Ogden,andA.Conmy.Successorheads:Recurring,interpretableattention
+headsinthewild,2023.
+[20] K.GregorandY.LeCun. Learningfastapproximationsofsparsecoding. InProceedingsofthe
+27thinternationalconferenceoninternationalconferenceonmachinelearning,pages399–406,
+2010.
+[21] M.Hanna,O.Liu,andA.Variengien. Howdoesgpt-2computegreater-than?: Interpreting
+mathematicalabilitiesinapre-trainedlanguagemodel,2023.
+12[22] Z.He,X.Ge,Q.Tang,T.Sun,Q.Cheng,andX.Qiu. Dictionarylearningimprovespatch-free
+circuitdiscoveryinmechanisticinterpretability: Acasestudyonothello-gpt,2024.
+[23] S. Heimersheim and N. Nanda. How to use and interpret activation patching, 2024. URL
+https://arxiv.org/abs/2404.15255.
+[24] E.Hernandez,S.Schwettmann,D.Bau,T.Bagashvili,A.Torralba,andJ.Andreas. Natural
+languagedescriptionsofdeepvisualfeatures,2022.
+[25] J. Janiak, C. Mathwin, and S. Heimersheim. Polysemantic attention head in a 4-layer
+transformer. AlignmentForum,2023. URLhttps://www.alignmentforum.org/posts/
+nuJFTS5iiJKT5G5yh/polysemantic-attention-head-in-a-4-layer-transformer.
+[26] A.Jermyn,C.Olah,andT.Henighan. Attentionheadsuperposition. transformer-circuits.pub,
+2023. URL https://transformer-circuits.pub/2023/may-update/index.html#
+attention-superposition.
+[27] C.Kissane. Attentionheadwiki. GithubPages,2023. URLhttps://ckkissane.github.
+io/attention-head-wiki/.
+[28] C.Kissane,R.Krzyzanowski,A.Conmy,andN.Nanda. Sparseautoencodersworkonattention
+layeroutputs. AlignmentForum,2024. URLhttps://www.alignmentforum.org/posts/
+DtdzGwFh9dCfsekZZ.
+[29] T.Lieberum,M.Rahtz,J.Kramár,N.Nanda,G.Irving,R.Shah,andV.Mikulik. Doescircuit
+analysisinterpretabilityscale? evidencefrommultiplechoicecapabilitiesinchinchilla,2023.
+[30] J.LinandJ.Bloom. Analyzingneuralnetworkswithdictionarylearning,2023. URLhttps:
+//www.neuronpedia.org. Softwareavailablefromneuronpedia.org.
+[31] A.Makelov,G.Lange,andN.Nanda. Towardsprincipledevaluationsofsparseautoencoders
+forinterpretabilityandcontrol. arXivpreprintarXiv:2405.08366,2024.
+[32] S.Marks,C.Rager,E.J.Michaud,Y.Belinkov,D.Bau,andA.Mueller. Sparsefeaturecircuits:
+Discoveringandeditinginterpretablecausalgraphsinlanguagemodels,2024.
+[33] C.McDougall. SAEVisualizer. https://github.com/callummcdougall/sae_vis,2024.
+[34] C.McDougall,A.Conmy,C.Rushing,T.McGrath,andN.Nanda. Copysuppression: Compre-
+hensivelyunderstandinganattentionhead,2023.
+[35] E.J.Michaud,Z.Liu,U.Girit,andM.Tegmark. Thequantizationmodelofneuralscaling,
+2024.
+[36] J.MuandJ.Andreas. Compositionalexplanationsofneurons. CoRR,abs/2006.14032,2020.
+URLhttps://arxiv.org/abs/2006.14032.
+[37] N.Nanda. Inductionmosaic,2022. URLhttps://www.neelnanda.io/mosaic.
+[38] N.Nanda. MyInterpretability-FriendlyModels(inTransformerLens). https://dynalist.
+io/d/n2ZWtnoYHrU1s4vnFSAQ519J#z=NCJ6zH_Okw_mUYAwGnMKsj2m,2022.
+[39] N.Nanda. Acomprehensivemechanisticinterpretabilityexplainerandglossary. Alignment
+Forum, 2022. URL https://www.alignmentforum.org/posts/vnocLyeWXcAxtdDnP/
+a-comprehensive-mechanistic-interpretability-explainer-and.
+[40] N.Nanda. Tinymechinterpprojects: Emergentpositionalembeddingsofwords. Alignment
+Forum, 2023. URL https://www.alignmentforum.org/posts/Ln7D2aYgmPgjhpEeA/
+tiny-mech-interp-projects-emergent-positional-embeddings-of.
+[41] N.Nanda. OpenSourceReplication&CommentaryonAnthropic’sDictionaryLearningPa-
+per, Oct 2023. URL https://www.alignmentforum.org/posts/aPTgTKC45dWvL9XBF/
+open-source-replication-and-commentary-on-anthropic-s.
+13[42] N. Nanda and J. Bloom. TransformerLens. https://github.com/neelnanda-io/
+TransformerLens,2022.
+[43] N.Nanda,L.Chan,T.Lieberum,J.Smith,andJ.Steinhardt. Progressmeasuresforgrokking
+viamechanisticinterpretability. InTheEleventhInternationalConferenceonLearningRepre-
+sentations,2023. URLhttps://openreview.net/forum?id=9XFSbDPmdW.
+[44] N.Nanda,A.Lee,andM.Wattenberg. Emergentlinearrepresentationsinworldmodelsof
+self-supervisedsequencemodels,2023.
+[45] N. Nanda, S. Rajamanoharan, J. Kramár, and R. Shah. Fact finding: At-
+tempting to reverse-engineer factual recall on the neuron level, Dec 2023.
+URL https://www.alignmentforum.org/posts/iGuwZTHWb6DFY3sKB/
+fact-finding-attempting-to-reverse-engineer-factual-recall.
+[46] N. Nanda, A. Conmy, L. Smith, S. Rajamanoharan, T. Lieberum, J. Kramár, and V. Varma.
+[Summary] Progress Update #1 from the GDM Mech Interp Team. Alignment Fo-
+rum, 2024. URL https://www.alignmentforum.org/posts/HpAr8k74mW4ivCvCu/
+summary-progress-update-1-from-the-gdm-mech-interp-team.
+[47] A. Ng. Sparse autoencoder. http://web.stanford.edu/class/cs294a/
+sparseAutoencoder.pdf,2011. CS294ALecturenotes.
+[48] C. Olah. Mechanistic interpretability, variables, and the importance of interpretable bases.
+https://www.transformer-circuits.pub/2022/mech-interp-essay,2022.
+[49] C.Olah,A.Mordvintsev,andL.Schubert. Featurevisualization. Distill,2017. doi: 10.23915/
+distill.00007. https://distill.pub/2017/feature-visualization.
+[50] C.Olah,N.Cammarata,L.Schubert,G.Goh,M.Petrov,andS.Carter.Zoomin:Anintroduction
+tocircuits. Distill,2020. doi: 10.23915/distill.00024.001.
+[51] C. Olah, T. Bricken, J. Batson, A. Templeton, A. Jermyn, T. Hume, and T. Henighan.
+Circuits Updates - May 2023. Transformer Circuits Thread, 2023. URL https://
+transformer-circuits.pub/2023/may-update/index.html.
+[52] C.Olah,S.Carter,A.Jermyn,J.Batson,T.Henighan,J.Lindsey,T.Conerly,A.Templeton,
+J.Marcus,T.Bricken,E.Ameisen,H.Cunningham,andA.Golubeva. CircuitsUpdates-April
+2024. TransformerCircuitsThread, 2024. URLhttps://transformer-circuits.pub/
+2024/april-update/index.html.
+[53] B.A.OlshausenandD.J.Field. Sparsecodingwithanovercompletebasisset: Astrategy
+employedbyv1? VisionResearch,37(23):3311–3325,1997. doi: 10.1016/S0042-6989(97)
+00169-7.
+[54] C.Olsson,N.Elhage,N.Nanda,N.Joseph,N.DasSarma,T.Henighan,B.Mann,A.Askell,
+Y. Bai, A. Chen, et al. In-context learning and induction heads, 2022. URL https://
+transformer-circuits.pub/2022/in-context-learning-and-induction-heads/
+index.html.
+[55] A. Radford, J. Wu, R. Child, D. Luan, D. Amodei, and I. Sutskever. Language models are
+unsupervisedmultitasklearners. 2019.
+[56] C.Raffel,N.Shazeer,A.Roberts,K.Lee,S.Narang,M.Matena,Y.Zhou,W.Li,andP.J.Liu.
+Exploringthelimitsoftransferlearningwithaunifiedtext-to-texttransformer,2023.
+[57] S. Rajamanoharan, A. Conmy, L. Smith, T. Lieberum, V. Varma, J. Kramár, R. Shah, and
+N.Nanda. Improvingdictionarylearningwithgatedsparseautoencoders,2024.
+[58] N.Rimsky,N.Gabrieli,J.Schulz,M.Tong,E.Hubinger,andA.M.Turner. Steeringllama2
+viacontrastiveactivationaddition,2024.
+14[59] L. Sharkey, D. Braun, and B. Millidge. [interim research re-
+port] taking features out of superposition with sparse autoen-
+coders. https://www.alignmentforum.org/posts/z6QQJbtpkEAX3Aojj/
+interim-research-report-taking-features-out-of-superposition,2022.
+[60] A. Subramanian, D. Pruthi, H. Jhamtani, T. Berg-Kirkpatrick, and E. Hovy. Spine: Sparse
+interpretableneuralembeddings,2017.
+[61] A. Templeton, T. Conerly, J. Marcus, J. Lindsey, T. Bricken, B. Chen, A. Pearce, C. Citro,
+E. Ameisen, A. Jones, H. Cunningham, N. L. Turner, C. McDougall, M. MacDiarmid,
+C. D. Freeman, T. R. Sumers, E. Rees, J. Batson, A. Jermyn, S. Carter, C. Olah, and
+T.Henighan. Scalingmonosemanticity: Extractinginterpretablefeaturesfromclaude3sonnet.
+Transformer Circuits Thread, 2024. URL https://transformer-circuits.pub/2024/
+scaling-monosemanticity/index.html.
+[62] M.Thulin. Thecostofusingexactconfidenceintervalsforabinomialproportion. Electronic
+Journal of Statistics, 8(1), Jan. 2014. ISSN 1935-7524. doi: 10.1214/14-ejs909. URL
+http://dx.doi.org/10.1214/14-EJS909.
+[63] A. M. Turner, L. Thiergart, D. Udell, G. Leech, U. Mini, and M. MacDiarmid. Activation
+addition: Steeringlanguagemodelswithoutoptimization,2023.
+[64] J. Vig, S. Gehrmann, Y. Belinkov, S. Qian, D. Nevo, S. Sakenis, J. Huang, Y. Singer, and
+S.Shieber. Causalmediationanalysisforinterpretingneuralnlp: Thecaseofgenderbias,2020.
+[65] E.Voita,D.Talbot,F.Moiseev,R.Sennrich,andI.Titov. Analyzingmulti-headself-attention:
+Specializedheadsdotheheavylifting,therestcanbepruned,2019.
+[66] K.R.Wang,A.Variengien,A.Conmy,B.Shlegeris,andJ.Steinhardt. Interpretabilityinthe
+wild: acircuitforindirectobjectidentificationinGPT-2small. InTheEleventhInternational
+ConferenceonLearningRepresentations,2023. URLhttps://openreview.net/forum?
+id=NpsVSN6o4ul.
+[67] Z.Yun, Y.Chen, B.A.Olshausen, andY.LeCun. Transformervisualizationviadictionary
+learning: contextualizedembeddingasalinearsuperpositionoftransformerfactors,2023.
+[68] A.Zou,L.Phan,S.Chen,J.Campbell,P.Guo,R.Ren,A.Pan,X.Yin,M.Mazeika,A.-K.
+Dombrowski,S.Goel,N.Li,M.J.Byun,Z.Wang,A.Mallen,S.Basart,S.Koyejo,D.Song,
+M. Fredrikson, J. Z. Kolter, and D. Hendrycks. Representation engineering: A top-down
+approachtoaitransparency,2023.
+A OpenSourceSAEWeightsandFeatureDashboards
+HereweprovideweightsforalltrainedSAEs(Table1)aswellastheinterfaceforfeaturedashboards
+thatweusedtoevaluatefeatureinterpretabilitydiscussedinSection3.3.
+For GPT-2 Small, you can find the weights here: https://huggingface.co/ckkissane/
+attn-saes-gpt2-small-all-layers/tree/main. You can view feature dashboards for
+30 randomly sampled feature per each layer here: https://ckkissane.github.io/
+attn-sae-gpt2-small-viz/.Weadditionallyprovideacolabnotebookdemonstratinghowtouse
+theSAEshere: https://colab.research.google.com/drive/1hZVEM6drJNsopLRd7hKajp_
+2v6mm_p70?usp=sharing
+For our GELU-2L SAE trained on Layer 1 (the second layer), you can find weights
+here: https://huggingface.co/ckkissane/tinystories-1M-SAES/blob/main/
+concat-z-gelu-21-l1-lr-sweep-3/gelu-2l_L1_Hcat_z_lr1.00e-03_l12.00e%2B00_
+ds16384_bs4096_dc1.00e-07_rie50000_nr4_v78.pt. You can view dashboards for 50
+randomlysampledfeatureshere: https://ckkissane.github.io/attn-sae-gelu-2l-viz/.
+We additionally provide a colab notebook showing how to use the SAEs here: https://colab.
+research.google.com/drive/10zBOdozYR2Aq2yV9xKs-csBH2olaFnsq?usp=sharing
+Toviewthetop10featuresattributedtoall144attentionheadsinGPT-2Small(asinSection4.1)
+seehere: https://robertzk.github.io/gpt2-small-saes/.
+15Weights for the Gemma-2B SAE can be found here: https://wandb.ai/jbloom/gemma_
+2b_hook_z/artifacts/model/sae_group_gemma-2b_blocks.6.attn.hook_z_16384/v1/
+files.
+YoucanalsoviewsimilardashboardsforanyfeaturefromallofourGPT-2SmallSAEsonneuronpe-
+dia[30]here: https://www.neuronpedia.org/gpt2-small/att-kk.
+Further,weintroduceaninteractivetoolforexploringseveralattentionSAEsthroughoutamodelat
+https://robertzk.github.io/circuit-exploreranddiscussthismoreinAppendixN.
+Codeisavailableathttps://github.com/ckkissane/attention-output-saes.
+B SAETraining: hyperparametersandotherdetails
+ImportantdetailsofSAEtraininginclude:
+• SAEWidths. OurGELU-2LandGemma-2BSAEshavewidth16384. AllofourGPT-2
+Small SAEs have width 24576, with the exception of layers 5 and 7, which have width
+49152.
+• LossFunction. WetrainedourGemma-2BSAEwithadifferentlossfunctionthanthe
+SAEsfromothermodels. ForGemma-2BwecloselyfollowtheapproachfromOlahetal.
+[52],whileforGELU-2LandGPT-2Small,wecloselyfollowtheapproachfromBricken
+etal.[4].
+• Training Data. We use activations from hundreds of millions to billions of acti-
+vations from LM forward passes as input data to the SAE. Following Nanda [41],
+we use a shuffled buffer of these activations, so that optimization steps don’t use
+data from highly correlated activations. For GELU-2L we use a mixture of 80%
+from the C4 Corpus [56] and 20% code (https://huggingface.co/datasets/
+NeelNanda/c4-code-tokenized-2b). ForGPT-2SmallweuseOpenWebText(https:
+//huggingface.co/datasets/Skylion007/openwebtext). For Gemma-2B we use
+https://huggingface.co/datasets/HuggingFaceFW/fineweb. The input activa-
+tionshavesequencelengthof128tokensforalltrainingruns.
+• Resampling. ForourGELU-2LandGPT-2SmallSAEsweusedresampling,atechnique
+which at a high-level reinitializes features that activate extremely rarely on SAE inputs
+periodicallythroughouttraining. Wemostlyfollowtheapproachdescribedinthe‘Neuron
+Resampling’appendixofBrickenetal.[4],exceptwereapplylearningratewarm-upafter
+eachresamplingevent,reducinglearningrateto0.1xtheordinaryvalue,and,increasingit
+withacosineschedulebacktotheordinaryvalueoverthenext1000trainingsteps. Notewe
+don’tdothisforGemma-2B.
+• Optimizerhyperparameters. FortheGELU-2LandGPT-2SmallSAEsweusetheAdam
+optimizerwithβ =0.99andβ =0.9andalearningrateofroughly0.001. ForGemma-
+2 1
+2BSAEswealsousetheAdamoptimizerwithβ = 0.999andβ = 0.9andalearning
+2 1
+rateof0.00005.
+B.1 Computeresourcesusedfortraining
+OurGELU-2LSAEwastrainedonasingleA6000instanceavailablefromVastAI6overnight. Our
+GPT-2SmallSAEswereeachtrainedovernightonasingleA100instancealsoavailablefromVast
+AI.OurGemma-2BSAEwasalsotrainedovernightonasingleA100instancefromPaperspace7.
+TheanalysesdescribedinthepaperwereperformedoneitheranA6000orA100instancedepending
+on memory bandwidth requirements. In no case were multiple machines or distributed tensors
+requiredfortrainingorobtainingourexperimentalresults. Mostexperimentstakesecondsorminutes,
+andallcanbeperformedinunderanhour.
+The RDFA tool described in Appendix N is hosted on an A6000 instance available from https:
+//www.paperspace.com/deployments.
+6https://vast.ai/
+7https://www.paperspace.com/
+16C FurtherdiscussiononSAEfidelityevaluations
+InSection3weclaimedthatourAttentionOutputSAEsaresparse,faithful,andinterpretableandwe
+provideevaluationsofeachSAEinTable1tosupportthisclaim. Inthissectionwefurtherdiscuss
+nuancesofthefidelityevaluation,andhowourSAEscomparetotrainedSAEsfromotherwork.
+Wenotethatweevaluatedfidelitywiththecrossentropylossrelativetozeroablation(4),which
+hasafewpotentialpitfalls. First,somewouldarguethatzeroablationmaybetooharshabaseline,
+andthatalternativebaselinesusingmeanablationorresampleablationmaybemoreprincipled. We
+choosetousezeroablationtostayconsistentwithpriorworkfromBrickenetal.[4],whichmadeour
+preliminaryresultseasiertoevaluate.
+Second,thezeroablationbaselinemakesit’shardtocomparethequalityofSAEsbetweenothersites.
+Intuitively,zeroablatingtheresidualstreamshoulddegradeperformancemuchmorethanablatinga
+singleattentionlayerorMLP,soweexpectthatSAEstrainedontheresidualstreamwillhavemuch
+higher%CErecoveredmetrics,evenifsplicingintheresidualstreamSAEcausesamuchbigger
+jumpincrossentropyloss. SeeRajamanoharanetal.[57]forthoroughevaluationsoftrainedSAEs
+acrossmultiplesites. Forthisreason,werecommendpractitionersadditionallyrecordtherawcross
+entropylossnumberswithandwithouttheSAEsplicedin.
+Wealsonotethatthereisatradeoffbetweensparsityandfidelity,andduetolimitedcompute,weare
+likelyfarfromparetooptimal. Recentwork[3,61]hashadsuccessinterpretingSAEswithhigher
+numbersoffeaturesfiring,althoughit’snotclearwhatL0weshouldtarget. Forexample,wemight
+expectmorefeaturesintheresidualstreamcomparedtoanattentionhead,andwemightexpectlarger
+modelstocomputemorefeaturesthansmallermodels.
+Withthisinmind,it’shardtocompareourSAEstoacrossworkthatusesondifferentmodelsand
+activationsites. WhenwetrainedourSAEs,wecloselyfollowedBrickenetal.[4]asareference.
+TheMLPSAEfromtheirworkhada%CErecoveredof79%. Theyclaimedthattheygenerally
+targetedanL0normthatislessthan10or20. OurSAEshavesimilarmetrics,wherewegenerally
+targetedandL0of20with80%CElossrecovered,
+D Methodologyforfeatureinterpretability
+ToevaluateinterpretabilityforAttentionOutputSAEfeatures,wemanuallyratetheinterpretability
+ofasetofrandomlysampledSAEfeatures. ForeachSAE,thetworaters(paperauthors)collectively
+inspected30randomlysampledlivefeatures.
+Toassessafeature,theraterdeterminediftherewasaclearexplanationforthefeature’sbehavior.The
+raterviewedthetop20maximumactivatingdatasetexamplesforthatfeature,approximatedirectlogit
+effects(i.e. W W d ),andrandomlysampledactivatingexamplesfromloweractivationranges(as
+U O i
+inBrickenetal.[4]).Foreachmaxactivatingdatasetexample,wealsoshowthecorrespondingsource
+tokenswiththetopdirectfeatureattributionbysourceposition(Section2),andadditionallyshow
+theweight-basedheadattributionforallheadsinthatlayer(Section2). Theratersusedaninterface
+basedonanopensourceSAEvisualizerlibrary[33]modifiedtosupportattentionlayeroutputs(see
+AppendixA).Notethatwefilteroutdeadfeatures(featuresthatdon’tactivateatleastoncein100,000
+inputs,sometimesalsoreferredtoas"ultralowfrequencycluster")fromourinterpretabilityanalysis.
+ThesefeatureswereexcludedfromthedenominatorinreportingpercentageinterpretableinTable1.
+Theratershadarelativelyhighbarforlabelingafeatureasinterpretable(e.g. noticingaclearpattern
+withall20maxactivatingdatasetexamples,aswellasthroughouttherandomlysampledactivations).
+However,wenotethatthismethodologyheavilyreliesonsubjectivehumanjudgement,andthus
+thereisalwaysroomforerror. Weexpectbothfalsepositives(e.g. theratersareoverconfidentin
+theirinterpretations,despitethefeatureactuallybeingpolysemantic)andfalsenegatives(e.g. the
+ratersmightmissmoreabstractfeaturesthatarehardtospotwithourfeaturedashboards).
+D.1 Confidenceintervalsforpercentageofinterpretablefeatures
+Inthissection,weprovide95%confidenceintervalsforthepercentageoffeaturesthatarereported
+asinterpretableinSection3.2. Foreachlayer,wetreatthenumberoffeaturesthatareinterpretable
+17asabinomialrandomvariablewithproportionofsuccessp(percentageinterpretable)sampledover
+ntrials(numberoffeaturesinspected).
+TheClopper-PearsonintervalS ∩S providesanexactmethodforcalculatingbinomialconfidence
+≤ ≥
+intervals[8],with:
+(cid:110) (cid:12) α(cid:111)
+S := p(cid:12)P[Bin(n;p)≤x]> (5)
+≤ (cid:12) 2
+and
+(cid:110) (cid:12) α(cid:111)
+S := p(cid:12)P[Bin(n;p)≥x]> (6)
+≥ (cid:12) 2
+where α is the confidence level and Bin(n;p) is the binomial distribution. Due to a relationship
+between the binomial distribution and the beta distribution, the Clopper–Pearson interval can be
+calculated[62]as:
+(cid:16)α (cid:17) (cid:16) α (cid:17)
+B ;x,n−x+1 <p<B 1− ;x+1,n−x (7)
+2 2
+wherex = npisthenumberofsuccessesandB(p;v,w)isthepthquantileofabetadistribution
+withshapevandw. Wepresent95%confidenceintervals(α=0.025)forTable1inTable2.
+Table2: ConfidenceintervalsforinterpretabilityofAttention
+OutputSAEstrainedacrossmultiplemodelsandlayers.
+Model Layer %Interp. 95%CI
+Gemma-2B[16] 6 66% [47.2%,82.7%]
+GPT-2Small 0 97% [82.2%,99.9%]
+GPT-2Small 1 87% [69.3%,96.2%]
+GPT-2Small 2 97% [82.8%,99.9%]
+GPT-2Small 3 77% [57.7%,90.1%]
+GPT-2Small 4 97% [82.8%,99.9%]
+GPT-2Small 5 80% [61.4%,92.3%]
+GPT-2Small 6 77% [57.7%,90.1%]
+GPT-2Small 7 70% [50.6%,85.3%]
+GPT-2Small 8 60% [40.6%,77.3%]
+GPT-2Small 9 77% [57.7%,90.1%]
+GPT-2Small 10 80% [61.4%,92.3%]
+GPT-2Small 11 63% [43.9%,80.1%]
+GELU-2L[38] 1 83% [65.3%,94.4%]
+E Inductionfeaturedeepdivecontinued: Analyzingfalsenegatives
+InthissectionwedisplayinFigure6tworandomexamplesoffalsenegativesidentifiedduringthe
+sensitivityanalysisfromSection3.3. Torecap,theseareexampleswhereourproxyidentifiedacase
+ofboardinduction(i.e. "<token>board... <token>),buttheboardinductionfeaturedidnotfire. We
+generallynoticethatwhiletheytechnicallysatisfytheboardinductionpattern,"board"shouldclearly
+notbepredictedasthenexttoken. Thisisoftenbecausethereareevenstrongercasesofinductionfor
+anothertoken(fig.6).
+E.1 Redteamingtheboardinductionhypothesis
+Wenowredteamthe"’board’innextbyinduction"hypothesisbyconsideringalternatehypothesis.
+Wefirstconsiderthehypothesisthatthefeatureisamoregeneralinductionfeature,i.eitactivateson
+promptsoftheform"<token>X... <token>"forallXinthevocabulary. Wefalsifythisbyobserving
+18(a)
+(b)
+Figure6: Twoexamplesoffalsenegativesfortheboardinductionfeature. Theredhighlightindicates
+thatourproxyisactive,buttheboardfeatureisnot.
+thefeatureactivationatallpositionsinrandomrepeatedtext,andnoticethatitonlyactivatesinthe
+instanceof’board’induction(Figure7).
+Anotheralternatehypothesisisthatthefeatureisamoregeneral"’board’isnextfeature"thatactivates
+whenthemodelconfidentlypredictsthe’board’token. Wefalsifythisbyhandcraftingexamples
+wherethemodelconfidentlypredictsboard(e.g. "Intheclassroom,thestudentranherefingernails
+onachalk"),andfindthatthefeaturedoesnotfire. Moreover,modifyingthesepromptstoinclude
+inductioncausesthefeaturetofire(Figure8).
+E.2 Explainingpolysemanticityatloweractivationranges
+InSection3.3wenoticedthatwhiletheupperpartsoftheactivationspectrumclearlyrespondwith
+highspecificityto‘board’induction, therewerealsomanyfalsepositivesintheloweractivation
+ranges(asinBrickenetal.[4]),webelievetheseareexpectedformundanereasons:
+19Figure7:Boardinductionfeatureactivationateachpositionofarandomrepeatedsequenceoftokens.
+Figure8: Boardinductionfeatureredteamingexample. Itdoesnotfirewhenconfidentlypredicting
+boardwithoutinduction
+• Imperfectproxy: Manuallystaringatthefalsepositivesinthemediumactivationranges
+revealsexamplesoffuzzy‘board’inductionthatweren’tidentifiedbyoursimpleproxy.
+• Undersizeddictionary: OurGELU-2LSAEhasadictionaryofroughly16,000features.
+Weexpectourmodeltohavemanymore“truefeatures”(notethereare50ktokensinthe
+vocabulary). Thusunrecoveredfeaturesmayshowupaslinearcombinationsofmanyofour
+learnedfeatures.
+• Superposition: The superposition hypothesis [13] suggests that models represent sparse
+featuresasnon-orthogonaldirections,causinginterference. Iftrue,weshouldexpectsome
+polysemanticityattheloweractivationrangesbydefault.
+WealsoagreewiththefollowingintuitionfromBrickenetal.[4]: “largefeatureactivationshave
+largerimpactsonmodelpredictions,sogettingtheirinterpretationrightmattersmost”. Thuswe
+reproducedtheirexpectedvalueplotstodemonstratethatmostofthemagnitudeofactivationprovided
+bythisfeaturecomesfrom‘board’inductionexamplesinFigure2b.
+20(a) (b) (c)
+Figure9: Directlogiteffectsofindividualfeatures: Weshowthetopandbottom20affectedoutput
+tokensfrom"’board’isnextbyinduction"(a)"inaquestionstartingwith’Which’"(b)and"intext
+aboutpets"(c)features
+E.3 Understandingupstreamcomputationanddownstreameffects
+InSection3.3wefoundamonosemanticSAEfeaturethatrepresentsthatthe"board"tokenisnext
+byinduction. Inthissectionweshowthatwecanalsounderstanditscausaldownstreameffects,as
+wellashowit’scomputedbyupstreamcomponents.
+Wefirstdemonstratethatthepresenceofthisfeaturehasaninterpretablecausaleffectontheoutputs:
+wefindthatthisfeatureisprimarilyusedtodirectlypredictthe"board"token. Westartbyanalyzing
+theapproximatedirectlogiteffect: W W d whered isthisfeaturedirection. Wefindthatthe
+U O i i
+“board”tokenisthetoplogitinFigure9a.
+Thisinterpretationisalsocorroboratedbyfeatureablationexperiments. Acrossallactivatingdataset
+examplesover10milliontokens,wespliceinourAttentionOutputSAEatLayer1ofthemodel(the
+lastlayerofGELU-2L),ablatetheboardinductionfeature,andrecordtheeffectonloss. Wefind
+that82%oftotallossincreasefromablatingthisfeatureisexplainedbyexampleswhereboardisthe
+correctnexttoken.
+Finally,wedemonstratethatwecanunderstandhowthisfeatureiscomputedbyupstreamcomponents.
+Wefirstshowthatthisfeatureisalmostentirelyproducedbyattentionhead1.6,aninductionhead
+[37]. Over10milliontokens,wecomputethedirectfeatureattributionbyhead(see(3))forthis
+feature. Wefindthathead1.6standsoutwith94%fractionofvarianceexplained.
+Goingfurtherupstream,wenowshowthat1.6iscopyingprior"board"tokenstoactivatethisfeature.
+WeapplyDFAbysourceposition(seeSection2)forallfeatureactivationsover10milliontokens
+andrecordaggregatescoresforeachsourcetoken. Wefindthatthemajorityofvarianceisexplained
+by“board”sourcetokens. Thiseffectisstrongerifwefilterforfeatureactivationsaboveacertain
+threshold, reaching over 99.9% at a threshold of 5, mirroring results from Bricken et al. [4] that
+there’smorepolysemanticityinlowerranges. Wenotethatthis"copying"isconsistentwithour
+understandingoftheinduction[54]algorithm.
+F AutomaticInductionFeatureDetection
+Inthissectionweautomaticallydetectandquantifyalarge“<token>isnextbyinduction”feature
+familyfromourGELU-2LSAEtrainedonlayer1. Thisrepresents 5%ofthenon-deadfeaturesin
+theSAE.Thisisnotable,asiftherearemany“onefeaturepervocabtoken”familieslikethis,we
+mayneedextremelywideSAEsforlargermodels.
+Basedonthefindingsofthe“‘board’isnextbyinduction”feature(seeSection3.3),wesurmisedthat
+theremightexistmorefeatureswiththispropertyfordifferentsuffixes. Guidedbythismotivation,we
+wereabletofind586additionalfeaturesthatexhibitedinduction-likepropertiesfromourGELU-2L
+21(a) (b)
+Figure 10: Automated Induction: The features identified by our induction selection heuristic (a)
+selects450/586featuresthatsatisfytheinductionbehaviorheuristic,whereas(b)thecontrolgroup
+onlyselects3.
+SAE.WeintendthisasacrudeproofofconceptforautomatedSAEfeaturefamilydetection,andto
+showthattherearemanyinduction-likefeatures. Wethinkourmethodcouldbemadesignificantly
+morerigorouswithmoretime,andthatitlikelyhasbothmanyfalsepositivesandfalsenegatives.
+While investigating the “board” feature, we confirmed that attention head 1.6 was an induction
+head. Foreachfeaturedashboard, wealsogeneratedadecoderweightsdistributionthatgavean
+approximationofhowmucheachheadisattributedtoagivenfeature. Wethenchosethefollowing
+heuristictoidentifyadditionalfeaturesthatexhibitedinduction-likeproperties:
+InductionSelectionHeuristic.Foreachfeature,wecomputetheweight-basedheadattributionscore
+(2)tohead1.6. Weconsiderfeaturesthathaveaheadattributionscoreofatleast0.6asinduction
+featurecandidates.
+Intuitively, given the normalized norms sum to 1, we expect features satisfying this property to
+primarilyberesponsibleforproducinginductionbehaviorforspecificsetsofsuffixtokens. Inour
+case, we found 586 features that pass the above induction heuristic and are probably related to
+induction. Wenotethatthisisaconservativeheuristic,ashead1.4getsapartialscoreontherandom
+tokensinductionmetric,andotherheadsmayalsoplayaninduction-likeroleonsometokens,yetfail
+therandomtokenstest[54].
+Weverifiedthattheseareindeedbehaviorallyrelatedtoinductionusingthefollowingbehavioral
+heuristic:
+Induction Behavior Heuristic. For each feature, consider the token corresponding to the max
+positive boosted logit through the direct readout from W W d . For a random sample of 200
+U O i
+examplesthatcontainthattoken,identifywhichproportionsatisfy:
+1. Foranygiveninstanceofthetokencorrespondingtothemaxpositiveboostedlogitforthat
+feature,thefeaturedoesnotfireonthefirstprefixofthattoken(i.e.,thefirstinstanceofan
+“AB”pattern).
+2. Foranysubsequentinstancesofthetokencorrespondingtothemaxpositiveboostedlogit
+forthatfeatureoccurringintheexample,thefeatureactivatesontheprecedingtoken(i.e.
+subsequentinstancesofan“AB”pattern).
+Wecalltheproportionoftimesthefeatureactivateswhenitisexpectedtoactivate(oninstancesofA
+followingthefirstinstanceofanABpattern)theinductionpassrateforthefeature. Theheuristic
+passesiftheinductionpassrateis>60%.
+Withthe“board”feature,wesawthatthetokenwiththetoppositivelogitboostpassedthisinduction
+behaviorheuristic: foralmosteveryexampleandeachbigramthatendswith“board”,thefirstsuch
+bigramdidnotactivatethefeaturebutallsubsequentrepeatedinstancesdid.
+Weranthisheuristiconthe586featuresidentifiedbytheInductionSelectionHeuristicagainst500
+featuresthathaveattribution<10%tohead1.6asacontrolgroup(i.e.,featureswewouldnotexpect
+todisplayinduction-likepropertiesastheyarenotattributedtotheinductionhead). Wefoundthe
+InductionBehaviorHeuristictoperformwellatseparatingthefeatures,as450/586featuressatisfied
+the>60%inductionpassrate. Conversely,only3/500featuresinthecontrolgroupsatisfiedthe>
+60%inductionpassrate(Figure10).
+22'In question starting with Which' Feature Activation Distribution 'In texts about pets' Feature Activation Distribution
+180 In sentence with Which 1800 In texts about pets
+True True
+160 False 1600 False
+140 1400
+120 1200
+Count 100 Count 1000
+80 800
+60 600
+40 400
+20 200
+0 0
+0 1 2 3 4 5 0 2 4 6
+Feature Activation Level Feature Activation Level
+(a) (b)
+Figure11: Specificityplotsfor"inquestionstartingwith’Which’"(a)and"Intextaboutpets"(b)
+features
+G Localcontextfeaturedeepdive: Inquestionstartingwith"Which"
+Wenowconsideran“Inquestionsstartingwith‘Which’”feature. Wecategorizedthisasoneofmany
+“localcontext”features: afeaturethatisactiveinsomecontext,butoftenonlyforashorttime,and
+whichhassomeclearendingmarker(e.g. aquestionmark,closingparentheses,etc).
+Unliketheinductionfeature(Section3.3),wealsofindthatit’scomputedbymultipleattentionheads.
+ThefactthatourAttentionSAEsextractedafeaturerelyingonmultipleheads,andmadeprogress
+towardsunderstandingit,suggeststhatwemaybeabletouseAttentionOutputSAEsasatoolto
+tacklethehypothesizedphenomenonofattentionheadsuperposition[51].
+Wefirstshowthatourinterpretationisfaithfulovertheentiredistribution. Wedefineacrudeproxy
+thatchecksforthefirst10tokensafter"Which"tokens,stoppingearlyatpunctuation. Similartothe
+inductionfeature,wefindthatthisfeatureactivateswithhighspecificitytothiscontextintheupper
+activationranges,althoughthereispolysemanticityforloweractivations(Figure11a).
+Wenowshowthatthefeatureiscomputedbymultipleheadsinlayer1. Over10milliontokens,we
+computethedirectfeatureattributionbyhead(3)forthisfeature. Wefindthathead3headshave
+non-trivial(>10%)fractionofvarianceexplained(Figure12).
+Despite this, we still get traction on understanding this feature, motivating attention SAEs as a
+valuabletooltodealwithattentionheadsuperposition. Wefirstunderstandthecausaldownstream
+effectsofthisfeature. Wefindthatitprimarily"closesthequestion",bydirectlyboostingthelogits
+ofquestionmarktokens(Figure9b).
+We also show that the heads in aggregate are moving information from prior "Which" tokens to
+computethisfeature. WeapplyDFAbysourceposition(aggregatedacrossallheads)(seeSection2)
+forallfeatureactivationsover10milliontokensandrecordaggregatescoresforeachsourcetoken.
+Wefindthat“Which”sourcetokensexplain>50%thevariance,andover95%ofthevarianceifwe
+filterforfeatureactivationsgreaterthan2, suggestingthattheheadsaremovingthis"Which"to
+computethefeature.
+H High-levelcontextfeaturedeepdive: Intextrelatedtopets
+Wenowconsideran“inatextrelatedtopets”feature.Thisisoneexamplefromafamilyof‘high-level
+contextfeatures’extractedbyourSAE.High-levelcontextfeaturesoftenactivateforalmosttheentire
+context,anddon’thaveaclearendingmarker(likeaquestionmark). Toustheyappearqualitatively
+differentfromthelocalcontextfeatures,like“inaquestionstartingwith‘Which’”,whichjustactivate
+fore.g. alltokensinasentence.
+Wefirstshowourinterpretationofthisfeatureisfaithful. Wedefineaproxythatchecksforalltokens
+thatoccurafteranytokenfromahandcraftedsetofpetrelatedtokens(’dog’,’pet’,‘canine’,etc),
+23Fraction of Variance Explained by Each Head
+d 0.4
+e
+n
+ai
+pl
+x
+E
+e
+0.3
+c
+n
+a
+ri
+a
+V
+of
+0.2
+n
+o
+ti
+c
+a
+Fr 0.1
+0
+0 2 4 6
+Head
+Figure 12: Fraction of variance of DFA by head explained for the "In a question starting with
+’Which’"featureover10milliontokens. Wenoticethatthisfeatureisdistributedacrossmultiple
+heads
+andcomparetheactivationsofourfeaturetotheproxy. Thoughtheproxyiscrude,wefindthatthis
+featureactivateswithhighspecificityinthiscontextinFigure11b.
+Weshowthatwecanunderstandthedownstreameffectsofthisfeature. Thefeaturedirectlyboosts
+logitsofpetrelatedtokens(’dog’,’pet’,‘canine’,etc)inFigure9c.
+Wewereabletousetechniqueslikedirectfeatureattributiontolearnthathigh-levelcontextfeatures
+arenaturaltoimplementwithasingleattentionhead: theheadcanjustlookbackforpast“petrelated
+tokens”(‘dog’,‘pet’,‘canine’,‘veterinary’,etc),andmovethesetocomputethefeature.
+Wefindthatthetopattentionheadisusingthepetsourcetokenstocomputethefeature. Wetrackthe
+directfeaturecontributionsfromsourcetokensinahandcraftedsetofpetrelatedtokens(’dog’,’pet’,
+etc)andcomputethefractionofvarianceexplainedfromthesesourcetokens. Weconfirmthat“pet”
+sourcetokensexplainthemajorityofthevariance,especiallywhenfilteringbyhigheractivations,
+withover90%fractionofvarianceexplainedforactivationsgreaterthan2.
+I AdditionalfeaturefamiliesinGPT-2Small
+InthissectionwepresentnewfeaturefamiliesthatwefoundinGPT-2Small,butdidnotfindinthe
+GELU-2LSAE8.ThissuggeststhatSAEsareausefultoolthatcanprovidehintsaboutfundamentally
+differentcapabilitiesasweapplythemtobiggermodels.
+DuplicateTokenFeatures. InourLayer3SAE,wefindmanyfeatureswhichactivateonrepeated
+tokens. However,unlikeinductionfeatures(Section3.3),thesehavehighdirectfeatureattribution(by
+sourceposition)tothepreviousinstanceofthattoken(ratherthanthetokenfollowingtheprevious
+instance).
+8Notewedidn’texhaustivelycheckeveryGELU-2Lfeature.Howeverwenevercameacrosstheseinallof
+ouranalysis,whereaswequicklydiscoveredthesewhenlookingatrandomfeaturesfromGPT-2Small
+24(a)L9.F18,asuccessionfeature[19,35]
+(b)L10.F1610,asuppressionfeature[34]
+Figure13: TwonotablefeaturefamiliesextractedfromtheattentionoutputsofGPT-2Small.
+We also notice that the norms of the decoder weights corresponding to head 3.0, identified as a
+duplicatetokenheadbyWangetal,standout. Thisshowsthat,similartotheinductionfeature,we
+can use weight-based attribution (2) to heads with previously known mechanisms to suggest the
+existenceofcertainfeaturefamiliesandviceversa.
+SuccessorFeatures. InourLayer9SAE,wefindfeaturesthatactivateinsequencesofnumbers,
+dates,letters,etc. TheDFAbysourcepositionalsosuggeststhattheattentionlayerislookingbackat
+thepreviousitem(s)tocomputethisfeature(Figure13a).
+25Thetoplogitsofthesefeaturesarealsointerpretable,suggestingthatthesefeaturesboostthenext
+iteminthesequence. Finally,thedecoderweightnormsalsosuggestthattheyheavilyrelyonhead
+9.1,asuccessorheadinGPT-2Small.
+NameMoverFeatures. Inthelaterlayers,wealsofindfeaturesthatseemtopredictanameinthe
+context. Thedefiningcharacteristicofthesefeaturesisaveryhighlogitboosttothename. Wealso
+seeveryhighDFAbysourcepositiontothepastinstancesofthisnameinthecontext. Onceagain,
+ourdecoderweightsalsosuggestthatheads9.9and9.6arethetopcontributorsofthefeature,which
+werebothidentifiedasnamemoverheadsbyWangetal.[66].
+Wefindarelativelylargenumberofnamemoverswithinourshallowinvestigationsofthefirst30
+random features, suggesting that this might explain a surprisingly large fraction of what the late
+attentionlayersaredoing.
+SuppressionFeatures. Finally,inourlayer10SAEwefindsuppressionfeatures(Figure13b).
+Thesefeaturesshowverylownegativelogitstoatokeninthecontext,suggestingthattheyactually
+seemtosuppressthesepredictions. WeuseDFAtoconfirmthatthesefeaturesarebeingactivatedby
+previousinstancesofthesetokens.Ourdecoderweightsalsoidentifyhead10.7asthetopcontributing
+head,thesameheadidentifiedtodocopysuppressionbyMcDougalletal.[34].
+N-gram Features. All of the features we have shown so far are related to previously studied
+behaviors,makingthemeasiertospotandunderstand. WenowshowthatwecanalsouseourSAE
+to find new, surprising information about what attention layers have learned. We find a feature
+fromLayer9thatseemstobecompletingacommonn-gram,predictingthe“half”inphraseslike
+“<number>andahalf”.
+Thoughn-gramsmayseemlikeasimplecapability,it’sworthemphasizingwhythisissurprising.
+Theintuitivewaytoimplementn-gramswouldinvolvesomekindofbooleanAND(egthecurrent
+tokenis"and"ANDtheprevioustokenisanumber). Intuitively,thisappearsitwouldmakesenseto
+implementinMLPsandnotinattention.
+J Investigatingattentionheadpolysemanticity
+While the technique from Section 4.1 is not sufficient to prove that a head is monosemantic, we
+believethathavingmultipleunrelatedfeaturesattributedtoaheadisevidencethattheheadisdoing
+multipletasks(i.e. exhibitpolysemanticity[13]). Wealsonotethatthereisapossibilitywemissed
+somemonosemanticheadsduetomissingpatternsatcertainlevelsofabstraction(e.g. somepatterns
+mightnotbeevidentfromasmallsampleofSAEfeatures,andinotherinstancesanSAEmighthave
+mistakenlylearnedsomeredherringfeatures).
+Duringourinvestigationsofeachhead,wefound14monosemanticcandidates(i.e. allofthetop10
+attributedfeaturesfortheseheadswerecloselyrelated). Thissuggeststhatover90%oftheattention
+headsinGPT-2smallareperformingatleasttwodifferenttasks. InAppendixJ.1,welistnotable
+headsthatareplausiblymonosemanticorhavesuggestedrolesbasedonthistechnique.
+J.1 PolysemanticattentionheadsinGPT-2Small
+Basedontheanalysisintheprevioussection,wedeterminedthestatisticsinTable3onpolyseman-
+ticitywithinattentionheadsinGPT-2Small.
+Notably,theexistenceofanytopfeaturesthatdonotbelongtoaconceptualgroupingaresufficient
+evidencetodisputemonosemanticity. Ontheotherhand,alltopfeaturesbelongingtoaconceptual
+groupingareweakevidencetowardsmonosemanticity. Therefore,theresultsinthissectionforma
+lowerboundonthepercentageofattentionheadsinGPT-2Smallthatarepolysemantic.
+Wesaythatafeatureisplausiblymonosemanticwhenalltop10featuresweredeemedconceptually
+related by our annotator, and plausibly monosemantic (minor exception) when all features were
+deemedconceptuallyrelatedwithonlyoneortwoexceptions.Finally,afeatureisplausiblybisemantic
+whenfeatureswereclearlyinonlytwoconceptualcategories.
+26Table3: Proportionofheadsexhibitingmonosemanticversuspolysemanticbehavior.
+HeadType FractionofHeads
+Plausiblymonosemantic 9.7%(14/144)
+Plausiblymonosemantic(minorexception) 5.5%(8/144)
+Plausiblybisemantic 2.7%(4/144)
+Polysemantic 81.9%
+Avg Logit Diff with spliced in Attn-z SAE at each Layer (Relative to Mean Ablati Average KL Divergence of predictions with attn-z SAEs substitutions (per each
+With SAEs 1.5 With SAEs
+6 Mean Ablation Mean Ablation
+4 1
+Logit
+Diff
+2
+KL
+Divergence
+0.5
+0
+0
+−2
+Clean BL a0 selineL1 L2 L3 L4 L5 L6 L7 L8 L9 L10L11 L0 L1 L2 L3 L4 LayeL5
+r
+withL6 SAEL7 L8 L9 L10 L11
+Layer with SAE
+(a) (b)
+Figure14: EvaluatingeachGPT-2SmallattentionSAEontheIOItask. WespliceinanAttention
+OutputSAEforeachlayerandcomparetheresultingaveragelogitdifference(a)andKLdivergence
+(b)tothemodelwithoutSAEs. Wealsocomparetoabaselinewherewemeanablatethatlayer’s
+attentionoutputfromtheABCdistribution[66]. WegenerallyobservethatourSAEsfromlayers[1,
+6]aresufficient,whileourSAEsfromlayers[7,11]and0havenoticeablereconstructionerror.
+Finally,notethatthelinebetweenpolysemanticandmonosemanticheadsisaspectrum. Forexample,
+considerhead5.10: alltop10SAEfeatureslooklikecontextfeatures,boostingthelogitsoftokens
+relatedtothat context. However, ourannotatorconservatively labeledthisheadaspolysemantic
+giventhatsomeofthecontextsareunrelated. Atahigher-levelgrouping,thisheadcouldplausibly
+belabeledageneralmonosemantic"context"head.
+K IOIcircuitanalysis: EvaluatingallGPT-2SmallAttentionOutputSAEs
+InthissectionweevaluateallofourGPT-2SmallattentionSAEsontheIOItask. Foreachlayer,we
+replaceattentionoutputactivationswiththeirSAEreconstructedactivationsandobservetheeffect
+ontheaveragelogitdifference[66]betweenthecorrectandincorrectnametokens(asinMakelov
+etal.[31]). WealsomeasuretheKLdivergencebetweenthelogitsoftheoriginalmodelandthe
+logitsofthemodelwiththeSAEsplicedin. WecomparetheeffectofsplicingintheSAEstomean
+ablatingtheseattentionlayeroutputsfromtheABCdistribution(asdescribedinWangetal.[66],
+thisistheIOIdistributionbutwiththreedifferentnames,ratherthanoneIOandtwosubjects)toalso
+getaroughsenseofhownecessarytheseactivationsareforthecircuit.
+WefindthatsplicinginourSAEsateachoftheearly-middlelayers[1,6]maintainsanaveragelogit
+differenceroughlyequaltothecleanbaseline,suggestingthattheseSAEsaresufficientforcircuit
+analysis. Ontheotherhand,weseelayers{0,7,8}causeanotabledropinlogitdifference. Thelater
+layersactuallycauseanincreaseinlogitdifference,butwethinkthatthesearelikelybreakingthings
+basedontherelativelyhighaverageKLdivergence,illustratingtheimportanceofusingmultiple
+metricsthatcapturedifferentthings(Figure14). WesuspectthattheselatelayerSAEsmightbe
+missingfeaturescorrespondingtotheNegativeNameMover(CopySuppression[34])headsinthe
+IOIcircuit,althoughwedon’tinvestigatethisfurther.
+Wangetal.[66]identifymanyclassesofattentionheadsspreadacrossmultiplelayers. Toinvestigate
+ifourSAEsaresystematicallyfailingtocapturefeaturescorrespondingtocertainheads,wesplicein
+ourSAEsforeachofthesecross-sections(similartoMakelovetal.[31]).
+27Avg Logit Diff after splicing in SAEs to multiple layers (relative to mean ablatio Average KL Divergence of predictions with SAEs spliced in at multiple layers
+10 With SAEs 4 With SAEs
+Mean Ablation Mean Ablation
+8
+3
+Avg
+Logit
+Diff
+246
+Avg
+KL
+Divergence
+12
+0
+0
+−2
+Clean Baseline {0,3} {2,4} {5,6} {7,8} {9,10,11} {0,3} {2,4} {5,6} {7,8} {9,10,11}
+Layers replaced with SAEs Layers with SAEs
+Figure 15: Evaluating cross sections of GPT-2 Small attention SAE on IOI. Here we splice in
+AttentionOutputSAEsforsubsetsofmultiplelayersinthesameforwardpass. Mirroringresults
+fromAppendixK,wefindthatthemiddlelayers(correspondingthePreviousTokenandInduction
+Heads)aresufficientwhilelaterlayersandLayer0havesignificantreconstructionerror.
+For each role classified by Wang et al. [66], we identify the set of attention layers containing all
+of these heads. We then replace the attention output activations for all of these layers with their
+reconstructedactivations. Notethatwerecomputethereconstructedactivationssequentiallyrather
+thanpatchingalloftheminatonce. Wedothisforthefollowinggroupsofheads:
+• DuplicateTokenHeads{0,3}
+• PreviousTokenHeads{2,4}
+• InductionHeads{5,6}
+• S-inhibitionHeads{7,8}
+• (Negative)NameMoverHeads{9,10,11}
+Weagainseepromisingsignsthattheearly-middlelayerSAEs(correspondingtotheInductionand
+PreviousTokenHeads)seemsufficientforanalysisatthefeaturelevel(Figure15). Unfortunately,
+it’salsoclearthatourSAEsarelikelynotsufficienttoanalyzetheoutputsofLayer0andthelater
+layers(S-inhibitionHeadsand(Negative)NameMoverHeads). Thusweareunabletostudyafull
+end-to-endfeaturecircuitforIOI.
+Whyistheresuchabigdifferencebetweencross-sections? Itisnotclearfromouranalysis,butone
+hypothesisisthatthemiddlelayerscontainmoregeneralfeaturessuchas“Iamaduplicatetoken”,
+whereasthelatelayerscontainnichename-specificfeaturessuchas“ThenameXisnext”. Notonly
+doweexpectamuchgreaternumberofper-namefeatures,butwealsoexpectthesefeaturestobe
+relativelyrare,andthusharderfortheSAEstolearnduringtraining. Wearehopefulthatthiswillbe
+improvedbyongoingworkonthescienceandscalingofSAEs[46,57,52].
+K.1 Layer5"positional"features
+In this section, we describe how we identified and interpreted the causally relevant "positional"
+featuresformL5(Section4.3).
+Asmentioned,wefirstidentifythesefeaturesbyzeroablatingeachfeatureoneatatimeandrecording
+theresultingchangeinlogitdifference. Despitethere beinghundredsoffeaturesthatfireatthis
+positionatleastonce,zeroablationsnarrowdownthreefeaturesthatcauseanaveragedecreasein
+logitdiffgreaterthan0.2.Notethatablatingtheerrortermhasaminoreffectrelativetothesefeatures,
+corroboratingourevaluationsthatourL5SAEissufficientforcircuitanalysis(AppendixK).We
+distinguishbetweenABBAandBABAprompts,aswefindthatthemodelusesdifferentfeatures
+basedonthetemplate(Figure16a). Wealsolocalizethesamethreefeatureswhenpathpatching
+featuresoutoftheS-inhibitionhead’s[66]values,suggestingthatthesefeaturesaremeaningfully
+V-composing[12]withtheseheads,astheanalysisfromWangetal.[66]wouldsuggest(Figure16b).
+WefindthatfeaturesL5.F7515andL5.F27535arethemostimportantfortheBABAprompts,while
+featureL5.F44256standsoutforABBAprompts.
+28Avg Change in logit diff when ablating L5 SAE features at S2 pos (including err Avg change in logit diff when Path patching L5 SAE features from S-inb v at S2
+F Ideature Template Δ di fflogit A BB AB BA
+A
+F Ideature Template Δ di fflogit A BB AB BA
+A
+44256 ABBA -0.826 27535 BABA -0.744
+7515 BABA -0.255 300 7515 BABA -0.669 300
+27535 BABA -0.215 44256 ABBA -0.539
+3047 ABBA -0.157 250 error_term ABBA -0.199 250
+42577 ABBA -0.128 3047 ABBA -0.181
+13777 ABBA -0.119 200 42577 ABBA -0.075 200
+2
+29
+7
+44
+8
+26
+1
+13
+1
+7
+B
+A AB
+BAB
+B
+BA
+A
+A
+-
+-
+-0
+0
+0.
+.
+.0
+0
+06
+6
+57
+2
+7Count
+150 2
+29
+4
+94
+2
+46
+1
+83
+7
+2
+B
+B
+BA
+A
+AB
+B
+BA
+A
+A
+-
+-
+-0
+0
+0.
+.
+.0
+0
+04
+3
+39
+9
+6Count
+150
+error_term ABBA -0.048 100 13777 ABBA -0.025 100
+2999 ABBA -0.042 27811 ABBA -0.021
+29482 BABA -0.033 50 29822 BABA -0.021 50
+29822 ABBA -0.032 43414 BABA -0.015
+10894 ABBA -0029 0−0.8 −0.6 −0.4 −0.2 0 46880 BABA -0014 0 −0.6 −0.4 −0.2 0
+Δ logit diff Δ logit diff
+(a) (b)
+Figure16: OntheIOI[66]task,weidentifycausallyrelevantfeaturesfromthelayer5featureswith
+bothzeroablations(a)andpathpatching(b)fromtheS-inhibitionheadvalues.
+Wetheninterpretedthesecausallyrelevantfeatures. Shallowinvestigationsoffeaturedashboards(see
+Section3.1,AppendixA)suggeststhatallthreeofthesefireonduplicatetokens,andallhavesome
+dependenceonprior“and”tokens. WehypothesizethatthetwoBABAfeaturesarerepresenting“I
+amaduplicatetokenthatpreviouslypreceded‘and’”features,whiletheABBAfeatureis“Iama
+duplicatetokenthatpreviouslyfollowed‘and’”. Noteweadditionallyfindsimilarcausallyrelevant
+featuresfromtheinductionheadinLayer6andtheduplicatetokenheadinLayer3describedin
+Appendix K.2. The features motivate the hypothesis that the “positional signal” in IOI is solely
+determinedbythepositionofthenamerelativeto(i.e. beforeorafter)the‘and’token.
+K.2 Findingandinterpretingcausallyrelevantfeaturesinotherlayers
+InadditiontotheL5attentionSAEfeaturesweshowcaseinSection4.3,wealsofindfeaturesin
+otherlayersthatseemtoactivateonduplicatetokensdependingontheirrelativepositiontoan“and”
+token. Notewedidn’tseekoutfeatureswiththeseproperties: thesewereallidentifiedasthetop
+causallyrelevantfeaturesviazeroablationsfortheirrespectivelayers(attheS2position).
+InLayer3,alayerwithduplicatetokenhead3.0[66],weidentifyL3.F7803: "Iamaduplicatetoken
+thatwaspreviouslyfollowedby‘and’/’or’"(Figure17).
+InLayer6,alayerwithinductionhead6.9[66],wefindtwosubltlydifferentfeatures:
+• L6.F17410: "Iama(fuzzy)duplicatetokenthatpreviouslypreceded‘and’".
+• L6.F13836: "Iamaduplicatenamethatpreviouslypreceded‘and’."
+All of these features can be viewed with neuronpedia [30]: https://www.neuronpedia.org/
+gpt2-small/att-kk.
+K.3 ApplyingSAEstoQKcircuits: S-InhibitionHeadsSometimesdoIO-Boosting
+InadditiontoansweringanopenquestionaboutthepositionalsignalinIOI[66](Section4.3),we
+alsocanuseourSAEstogaindeeperinsightintohowthesepositionalfeaturesareuseddownstream.
+Recall that Wang et al. [66] found that the induction head outputs V-compose [12] with the S-
+inhibitionheads,whichthenQ-compose[12]withtheNameMoverheads,causingthemtoattendto
+thecorrectname. OurSAEsallowustozoominonthissub-circuitinfinerdetail.
+WeusetheclassicpathexpansiontrickfromElhageetal.[12]tozoominonaNameMoverhead’s
+QKsub-circuitforthispath:
+x WS−inbWNM(x )T
+attn OV QK resid
+Wherex istheattentionoutputforalayerwithinductionheads,WS−inbistheOVmatrix[12]for
+attn OV
+anS-inhibitionhead,WNM istheQKmatrix[12]foranamemoverhead,andx istheresidual
+QK resid
+29Figure 17: We show max activating dataset examples and the corresponding top DFA by source
+positionforL3.F7803inGPT-2Small,acausallyrelevantfeatureintheIOItask. Weinterpretthis
+featureasrepresenting"Iamaduplicatetokenthatwaspreviouslyfollowedby‘and’/’or’". Notice
+thatitseemstofireonduplicatedtokens,andthepreviousduplicate(highlightedinblue)isalmost
+alwaysprecededby’and’/’or’.
+streamwhichistheinputintothenamemoverhead. Forthiscasestudywezoomintoinductionlayer
+5,S-inhibitionhead8.6,andnamemoverhead9.9[66].
+Whilethex andx termsoneachsidearenotinherentlyinterpretableunits(e.g. theresidual
+attn resid
+streamistrackingalargenumberofconceptsatthesametime,cfthesuperpositionhypothesis[13]),
+SAEsallowustorewritetheseactivationsasaweightedsumofsparse,interpretablefeaturesplusan
+errorterm(see1).
+Thisallowsustosubstituteboththex andx (usingresidualstreamSAEsfromBloom[3])
+attn resid
+termswiththeirSAEdecomposition. Wethenmultiplythesematricestoobtainaninterpretable
+lookuptablebetweenSAEfeaturesforthisQKsubcircuit: GiventhatthisS-inhibitionheadmoves
+someLayer5attnSAEfeaturetobeusedasaNameMoverquery,howmuchdoesit“want”toattend
+toaresidualstreamfeatureonthekeyside?
+Wefindthattheattentionscoresforthispathcanbeexplainedbyjustahandfulofsparse,interpretable
+pairs of SAE features. We zoom into the attention score from the END destination position (i.e.
+whereweevaluatethemodel’sprediction)totheName2sourceposition(e.g. ‘Mary’in“When
+JohnandMary...”).
+We observe that these heatmaps are almost entirely explained by a handful of reoccurring SAE
+features. OnthequerysideweseethesamecausallyrelevantAttentionSAEfeaturespreviously
+identifiedbyablations: L5.F7515andL5.F27535(“Iamaduplicatethatpreceded‘and’”)forBABA
+promptswhileABBApromptsshowL5.F44256andL5.F3047(“Iamaduplicatethatfollowed‘
+and’”). Onthekeysidewealsofindjust2commonresidualstreamfeaturesdoingmostoftheheavy
+lifting: L9.F16927andL9.F4444whichbothappeartoactivateonnamesfollowing“and”.
+30Decomposed Name Mover QK score contributions (BABA) Decomposed Name Mover QK score contributions (BABA)
+2646 46
+6558 3047
+8623 13063
+Attn
+feature
+(L5,
+S2
+pos)
+444433322111111 322066597985330 695452385419708 427079823251769 387910525975734 −−001
+. 105
+.5
+Attn
+feature
+(L5,
+S2
+pos)
+44333222221111 32655997548853 45484808603207 17510721398157 47153771418007 −−001
+. 105
+.5
+44795 44256
+47061 45814
+error error
+7531330223522612753350441484192490260778219837592641037811336142981452514919159901641216516181981834119137195801975720811217982276623580 3808511634224133034444550474658341874810762123301408414362149191500415565161461641216516181981850619137197522070820811222012358024229
+Resid SAE feature (L9, Name2 pos) Resid SAE feature (L9, Name2 pos)
+(a) (b)
+Figure 18: We decompose the attention score from the END destination position for the Name2
+sourcepositionintosparse,interpretablepairsofattentionSAEfeaturesandresidualstreamSAE
+features. Wenoticethatthesefeatures(a)boosttheattentionscoretothispositionanBABAprompt,
+but(b)inhibititonanABBAprompt.
+We also observe a stark difference in the heatmaps between prompt templates: while these pairs
+offeaturescauseadecreaseinattentionscoreontheABBAprompts,weactuallyseeanincrease
+inattentionscoreontheBABAprompts(Figure18). Thissuggestsaslightlydifferentalgorithm
+between the two templates. On ABBA prompts, the S-inhibition heads move “I am a duplicate
+following‘and’”to“don’tattendtothenamefollowing‘and’”(i.e. S-inhibition),whileinBABA
+prompts it moves “I am a duplicate before ‘ and’” to “attend to the name following and”. This
+suggeststhattheS-inhibitionheadsarepartiallydoing“IO-boosting”ontheseBABAprompts.
+To sanity check that our SAE based interpretations are capturing something real about this QK
+circuit,wecomputehowmuchofthevarianceintheseheatmapsisexplainedbyjustthese8pairsof
+interpretableSAEfeatures. Wefindthatthese8pairsofSAEfeaturesexplain62%ofthevariance
+ofthescoresoverall100prompts. Forreference,alloftheentriesthatincludeatleastoneerror
+term(forboththeattentionoutputandresidualstreamSAEs)onlyexplainapproximately15%ofthe
+variance.
+K.4 Substituting"and"withalternatetokens
+InFigure5weshowedthatanoisingexperimentthatjustchangesthetoken"and"to"alongside"
+hasasurprisinglybigeffectonIOIperformance. InTable4weshowthatwhenwerepeatthesame
+experiment(describedinSection4.3)withotheralternativesto"and",thisresultholds. Wenotice
+thatthe"alongside"corruptionthatweincludedinthemaintextisroughlyrepresentativeofthe
+averageeffect.
+Table4: IOIlogitdifferencerecoveredrelativetozeroablationwhennoisinglayers5and6attention
+outputs. Thecorrupteddistributionsjustreplacethe"and"tokenwithanothertoken.
+"and"replacement Avglogitdiffrecovered
+"alongside" 0.436
+"besides" 0.332
+"plus" 0.678
+"with" 0.469
+"," 0.345
+"including" 0.289
+31Avg Correct Token DLA vs Prefix Length
+Distribution of Prefix lengths given attn > 0.3
+Scores
+5.5
+3.5 5.1 16k Head
+5.5
+3 14k 5.1
+12k
+Avg
+DLA
+Score
+2.5
+2
+count
+10 8k
+k
+6k
+1.5 4k
+2k
+1 0
+2 4 6 8 0 2 4 6 8
+Prefix Length Prefix Len
+(a) (b)
+Figure19: TwoadditionalevidencethatinGPT-2Small,head5.1specializesinlongprefixinduction
+whereashead5.5doesstandardinduction. (a)Head5.1’sdirectlogitattributiontothetokenthatis
+nextbyinductionincreasessharplyforlongprefixes. (b)Forexampleswhereheads5.1and5.5are
+attendingstronglytosometoken,head5.1ismostlyperforminglongprefixinductionwhereas5.5is
+mostlyperformingshortprefixinduction.
+L Additionallongprefixinductionexperiments
+HereweprovidetwoadditionallinesofevidencetoshowthatinGPT-2Small,5.1specializesin
+"longprefixinduction",while5.5does"shortprefixinduction". NotewethatwedonotuseSAEsin
+thissection,buttheoriginalhypothesiswasmotivatedbyourSAEs(seeSection4.2).
+Wefirstcheckeachhead’saveragedirectlogitattribution(DLA)[54]tothecorrectnexttokenasa
+functionofprefixlength. Weagainseethathead5.1’sDLAsharplyincreasesasweenterthelong
+prefixregime,whilehead5.5’sDLAremainsrelativelyconstant(Figure19a).
+Wethenconfirmedthattheseresultsholdonarandomsampleofthetrainingdistribution. Wefirst
+filterforexampleswheretheheadsareattendingnon-triviallytosometoken9(i.e. notjustattending
+toBOS),andcheckhowoftentheseareexamplesofn-prefixinduction. Wefindthathead5.1will
+mostly attend to tokens in long prefix induction, while head 5.5 is mostly doing normal 1-prefix
+induction(Figure19b).
+M NotableheadsinGPT-2Small
+AsacontinuationofSection4.1, wedescribetheresultsofmanuallyinspectingthemostsalient
+featuresforall144attentionheadstoexaminetheroleofeveryattentionheadinGPT-2Small. As
+inSection2,weapplyequation2toidentifythetoptenfeaturesbydecoderweightattributionto
+determinewhichfeaturesaremostattributedtoagivenhead. Wethenidentifyconceptualgroupings
+thatareexhibitedinthesefeatures.
+M.1 LimitationsoninterpretingallheadsinGPT-2Small
+Wenotethatthismethodologyisaroughheuristictogetasenseofthemostsalienteffectsofahead
+andlikelydoesnotcapturetheirrolecompletely. Weonlylookedatthetop10SAEfeaturesper
+head,sortedbyanimperfectproxy. Tenisasmallnumber,andsortingmaycauseinterpretability
+illusionswheretheheadhasmultiplerolesbutoneismoresalientthantheothers. Weexpectthat
+iftheheadhasasinglerolethiswillbeclear,butitmaylooklikeithasasingleroleevenifitis
+polysemantic. Thusnegativeresultsfalsifythemonosemanticityhypothesisbutpositiveresultsare
+onlyweakevidenceformonosemanticity.
+Thistechniquealsodoesnotexplainwhatawholeattentionlayerdoes,nordoesitdetectanindividual
+head’sroleinattentionheadsuperposition[51]. WearedeliberatelylookingatSAEfeaturesthat
+9Weshowathresholdof0.3.Theresultsgenerallyholdforarangeofthresholds.
+32mostlyrelyononlyoneattentionhead. Thismissesadditionalbehaviorthatreliesoncleveruseof
+multipleheads.
+Despite these limitations, we do sanity check that our technique captures legitimate phenomena
+ratherthanspuriousbehaviors,asweverifiedthatourinterpretationsareconsistentwithpreviously
+studiedheadsinGPT-2Small. Theseincludeinductionheads[54,27],previoustokenheads[65,27],
+successorheads[19]andduplicatetokenheads[66,27].
+M.2 OverviewofattentionheadsinlayersinGPT-2Small
+Broadly,weobservethattopfeaturesattributedtoheadsbecomemoreabstracttowardsthemiddle
+layersofthemodelbeforetaperingofftosyntacticfeaturesinlatelayers:
+• Layers0-3exhibitprimarilysyntacticfeatures(single-tokenfeaturesbigramfeatures)and
+secondarilyonspecificverbsandentityfragments. Somecontexttrackingfeaturesarealso
+present.
+• Fromlayer4onwards,featuresthatactivateonmorecomplexgrammaticalstructureare
+expressed,includingfamiliesofrelatedactiveverbs,prescriptiveandactiveassertions,and
+someentitycharacterizations. Somesingle-tokenandbigramsyntacticfeaturescontinueto
+bepresent.
+• Inlayers5-6,weidentify2outofthe3knowninductionheadsGoldowsky-Dilletal.[18]
+intheselayersbasedonourfeatures. However,therestoftheselayersislessinterpretable
+throughthelensofSAEfeatures.
+• In layers 7-8, increasingly more complex concept feature groups are present, such as
+phrasings related to specific actions taken, reasoning and justification related phrases,
+grammaticalcompoundphrases,andtimeanddistancerelationships.
+• Layer 9 expressed some of the most complex concepts, with heads focused on specific
+conceptsandrelatedgroupsofconcepts.
+• Layer 10 exhibited complex concept groups, with heads focused on assertions about a
+physicalorspatialproperty,andcounterfactualandtiming/tenseassertions.
+• Thelastlayer11exhibitedmostlygrammaticaladjustments,somebigramcompletionsand
+oneheadfocusedonlong-rangecontexttracking.
+Although the above summarizes what was distinctive about each layer, later layers continued to
+expresssyntacticfeatures(e.g. singletokenfeatures,URLcompletion)andsimplecontexttracking
+features(e.g. newsarticles).
+M.3 NotableattentionheadsinGPT-2Small
+Table5listssomenotableattentionheadsacrossalllayersofGPT-2Small.
+Table5: NotableattentionheadsinGPT-2Small
+Layer Featuregroups/possibleroles NotableHeads
+0 Single-token("of"). H0.1Top6featuresareallvariantscapturing
+bigramfeatures(following"S"). “of”.
+Micro-contextfeatures(cars,Appletech, H0.5: Identifiedasduplicatetokenheadfrom
+solar) 9/10features
+H0.9: Long range context tracking family
+(headlines,sequentiallists).
+1 Single-token(Romannumerals) H1.5*: Succession [19, 35] or pairs related
+bigramfeatures(following"L") behavior
+Specificnountracking(choice,refugee, H1.8: Longrangecontexttrackingwithvery
+gender,film/movie) weakweightattribution
+Continuedonnextpage
+33Table5–continuedfrompreviouspage
+Layer Featuregroups/possibleroles NotableHeads
+2 Shortphrases("neverbeen...") H2.0: Short phrases following a predicate
+EntityFeatures(court,media,govt) (e.g.,not/just/never/more)
+bigram&tri-gramfeatures("un-")Phys- H2.3: Short phrases following a quantifier
+ical direction and logical relationships (both,all,every,either),orspatial/temporal
+("under")Entitiesfollowedbywhathap- predicate(after,before,where)
+pened(govt) H2.5: Subjecttrackingforphysicaldirections
+(under, after, between, by), logical relation-
+ships(thenX,bothAandB)
+H2.7: Groupsofcontexttrackingfeatures
+H2.9*: Entity followed by a description of
+whatitdid
+3 Entity-relatedfragments(""world’sX") H3.0: Identifiedasduplicatetokenheadfrom
+Tracking of a characteristic (ordinality 8/10features
+orextremity) H3.2*: Subjects of predicates
+Single-tokenanddouble-token(eg) (so/of/such/how/from/as/that/to/be/by)
+Tracking following commands (while, H3.6: Governmententityrelatedfragments,
+though,given) extremityrelatedphrases
+H3.11: Trackingofordinalityorentiretyor
+extremity
+4 Activeverbs(do,share) H4.5: Characterizations of typicality or ex-
+Specificcharacterizations(thesameX, tremity
+soY) H4.7: Weak/non-standard duplicate token
+Context tracking families (story high- head
+lights) H4.11*: Identifiedasaprevioustokenhead
+Single-token(predecessor) basedonallfeatures
+5 Induction(F) H5.1: LongprefixInductionhead
+H5.5: Inductionhead
+6 Induction(M) H6.3:: Active verb tracking following a
+Activeverbs(wantto,goingto) comma
+Local context tracking for certain con- H6.5: Short phrases related to agreement
+cepts(vegetation) building
+H6.7: Localcontexttrackingforcertaincon-
+cepts(payment,vegetation,recruiting,death)
+H6.9*: Inductionhead
+H6.11: Suffix completions on specific verb
+andphraseforms
+7 Induction(al-) H7.2*: Non-standardinduction
+Activeverbs(asked/needed) H7.5: Highly polysemantic but still some
+Reasoningandjustificationphrases(be- groupingslikefamilyrelationshiptracking
+cause,forwhich) H7.8: Phrasesrelatedtohowthingsaregoing
+orspecificactiontaken(decisiontoX,issue
+wasY,situationisZ)
+H7.9: Reasoning and justification related
+phrasing (of which, to which, just because,
+forwhich,atleast,webelieve,infact)
+H7.10*: Inductionhead
+Continuedonnextpage
+34Table5–continuedfrompreviouspage
+Layer Featuregroups/possibleroles NotableHeads
+8 Activeverbs("hold") H8.1*: Prepositions copying (with, for, on,
+Compoundphrases(either) to,in,at,by,of,as,from)
+Timeanddistancerelationships H8.5:Grammaticalcompoundphrases(either
+Quantity or size comparisons or speci- AorB,neitherCnorD,notonlyZ)
+fiers(larger/smaller) H8.8: Quantity or time compar-
+URLcompletions(twitter) isons/specifiers
+9 Complex concept completions (time, H9.0*: Complex tracking on specific con-
+eyes) cepts(whatishappeningtotime,wherefocus
+Specificentityconcepts shouldbe,actionsdonetoeyes,etc.)
+Grammatical relationship joiners (be- H9.2: Complexconceptcompletions(death,
+tween) diagnosis,LGBTdiscrimination,problemand
+Assertions about characteristics issue,feminism,safety)
+(big/large) H9.9*: Copying,usuallynames,withsome
+induction
+H9.10: Grammatical relationship joiners
+(fromXto,Ywith,aidedby,from/after,be-
+tween)
+10 Grammaticaladjusters H10.1: Assertionsaboutaphysicalorspatial
+Physicalorspatialpropertyassertions property(up/back/down/over/full/hard/soft)
+Counterfactual and timing/tense asser- H10.4: Variousseparatorcharactersforquan-
+tions(wouldhave,(hopedthat) tifiers(colonfortime,hyphenforphone,pe-
+Certainprepositionalexpressions(along, riodforcounters)
+(under) H10.5: Counterfactualandtiming/tenseasser-
+Capitallettercompletions(‘B’) tions(if/than/had/since/will/would/until/has
+X/haveY)
+H10.6: Officialtitles
+H10.10*: Capital letter completions with
+somecontexttracking(possiblynon-standard
+induction)
+H10.11: Certainconceptualrelationships
+11 Grammaticaladjustments H11.3:Latelayerlongrangecontexttracking,
+bigrams possiblyforoutputconfidencecalibration
+Capitallettercompletions
+Longrangecontexttracking
+N Step-by-stepbreakdownofRDFAwithexamples
+InthissectionwedescribetheRecursiveDirectFeatureAttributiontechniquefromSection2inmore
+detail. WeuseAttentionOutputSAEsfromSection3.2andresidualstreamSAEsfromBloom[3]
+torepeatedlyattributeSAEfeatureactivationtoupstreamSAEfeatureoutputs, allthewayback
+to the input tokens for an arbitrary prompt. The key idea is that if we freeze attention patterns
+and LayerNorm scales, we can decompose the SAE input activations, z , into a linear function
+cat
+of upstream activations. Then we recursively decompose those upstream activations into linear
+contributions.
+InTable6,weprovideafulldescriptionoftherecursivedirectfeatureattribution(RDFA)algorithm,
+accompaniedbyequationsforthekeylineardecomposition.
+WenowprovideafewexamplesofusingtheCircuitExplorertoolavailableathttps://robertzk.
+github.io/circuit-explorer.
+Example 1: Decomposing information about name. Consider the prompt: "Amanda Heyman,
+professionalphotographer.She".InFigure20,startingwithAttentionOutputSAEfeatureL3.F15566,
+35we observe that performing a DFA decomposition along source position and then along residual
+featureshighlights:
+• aresidualfeature(3.19755)thatmaximallyactivatesonnamesendingwith"anda": https:
+//www.neuronpedia.org/gpt2-small/3-res-jb/19755
+• aresidualfeature(3.14186)thatmaximallyactivateson"Amanda"andboostslastnames:
+https://www.neuronpedia.org/gpt2-small/3-res-jb/14186
+Example2: Routing"Dave"through"is"to"isn’t". Considertheprompt: "SoDaveisareallygood
+friendisn’t"ashighlightedinConmyetal.[9]. Focusingonlayer10,thetopAttentionOutputSAE
+featureisL10.F14709. InFigure21,weobservethatperformingarecursiveDFAdecomposition
+alongsourcepositionandthentoupstreamattentioncomponentsshowsthatthemodelisrouting
+informationabout"Dave"viathe"is"tokentothefinal"[isn]’t"position.
+Table6: Recursivedirectfeatureattribution(RDFA)
+Step Operation
+1. ChooseanattentionSAE fpre(z )=z ·W [:,i]
+i cat cat enc
+featureindexiactiveat
+destinationpositionD:
+2. ComputeDFAbysource z =[z ,...,z ]
+cat 1 nheads
+position:
+wherez =v A for j =1,...,n and A
+j j j heads j
+istheattentionpatternforhead j
+3. ComputeDFAbyresidual v =W LN (x )=
+j V 1 resid
+streamfeatureatsource
+W LN
+(cid:16) (cid:80)dsae
+f (x )d +ε(x
+)+b(cid:17)
+positionS (whereεisthe V 1 i=0 i resid i resid
+errorterm(1)):
+4. ComputeDFAbyupstream x =x +x
++(cid:80)L−1x +(cid:80)L−1x
+resid embed pos i=0 attn,i i=0 mlp,i
+componentforeachresid
+feature:
+5. Decomposeupstream x
+=(cid:80)dsae
+f (x )d +ε(x )+b
+attn,i j=0 j attn,i j attn,i
+attentionlayeroutputsinto
+SAEfeatures:
+6. Recurse: TakeoneoftheAttentionOutputSAEfeaturesfromthe
+previousstepandaprefixofourpromptatS. Then,treatS
+asthedestinationposition,andgobacktostep1.
+36Figure20: ExampleofdecomposinganAttentionOutputSAEfeature(L3.F15566)acrossresidual
+featuresonagivensourceposition. Themodelattendsbackfrom"She"to"anda"andaccessesan
+upstreamresidualfeaturefornamesendingwith"anda"aswellasaresidualfeaturefor"Amanda".
+37Figure21: ExampleofrecursivelydecomposinganAttentionOutputSAEfeature(L10.F14709)
+acrossupstreamAttentionOutputSAEfeatures. Themodelattendsbackfrom"isn’t"to"is"and
+accessesa"Dave"featurethroughanattentionconnection.
+38

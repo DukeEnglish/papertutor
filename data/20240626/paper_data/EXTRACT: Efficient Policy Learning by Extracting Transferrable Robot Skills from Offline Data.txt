@@ -1,0 +1,956 @@
+EXTRACT: Efficient Policy Learning by Extracting
+Transferrable Robot Skills from Offline Data
+JesseZhang1,MinhoHeo2,ZuxinLiu3,
+ErdemBıyık1,JosephJ.Lim2,YaoLiu4,RasoolFakoor4
+1UniversityofSouthernCalifornia,2KAIST,3CMU,4AmazonWebServices
+jessez@usc.edu
+Abstract: Mostreinforcementlearning(RL)methodsfocusonlearningoptimal
+policies over low-level action spaces. While these methods can perform well in
+their training environments, they lack the flexibility to transfer to new tasks. In-
+stead, RL agents that can act over useful, temporally extended skills rather than
+low-level actions can learn new tasks more easily. Prior work in skill-based RL
+either requires expert supervision to define useful skills, which is hard to scale,
+orlearnsaskill-spacefromofflinedatawithheuristicsthatlimittheadaptability
+of the skills, making them difficult to transfer during downstream RL. Our ap-
+proach,EXTRACT,insteadutilizespre-trainedvisionlanguagemodelstoextract
+a discrete set of semantically meaningful skills from offline data, each of which
+isparameterizedbycontinuousarguments,withouthumansupervision. Thisskill
+parameterizationallowsrobotstolearnnewtasksbyonlyneedingtolearnwhen
+to select a specific skill and how to modify its arguments for the specific task.
+We demonstrate through experiments in sparse-reward, image-based, robot ma-
+nipulation environments that EXTRACT can more quickly learn new tasks than
+prior works, with major gains in sample efficiency and performance over prior
+skill-basedRL.Websiteathttps://jessezhang.net/projects/extract.
+1 Introduction
+Imaginelearningtoplayracquetballasacompletenovice.Withoutpriorexperienceinracketsports,
+this poses a daunting task that requires learning not only the (1) complex, high-level strategies to
+controlwhentoserve,smash,andreturntheballbutalso(2)howtoactualizethesemovesinterms
+of fine-grained motor control. However, a squash player should have a considerably easier time
+adjustingtoracquetballastheyalreadyknowhowtoserve,takeshots,andreturn;theysimplyneed
+tolearnwhentousetheseskillsandhowtoadjustthemforlargerracquetballballs. Ourpaperaims
+tomakeuseofthisintuitiontoenableefficientlearningofnewroboticstasks.
+In general, humans can learn new tasks quickly—given prior experience—by adjusting existing
+skills for the new task [1, 2]. Skill-based reinforcement learning (RL) aims to emulate this trans-
+fer[3,4,5,6,7,8,9,10,11,12]inlearnedagentsbyequippingthemwithawiderangeofskills
+(i.e.,temporally-extendedactionsequences)thattheycancalluponforefficientdownstreamlearn-
+ing. Transferring to new tasks in standard RL, based on low-level environment actions, is chal-
+lenging because the learned policy becomes more task-specific as it learns to solve its training
+tasks [13, 14, 15, 16, 17]. In contrast, skill-based RL leverages temporally extended skills that
+canbebothtransferredacrosstasksandyieldmoreinformedexploration[6,18,19],therebylead-
+ing to more effective transfer and learning. However, existing skill-based RL approaches rely on
+costly human supervision [20, 21, 9, 10] or restrictive skill definitions [22, 6, 8] that limit the ex-
+pressiveness and adaptability of the skills. Therefore, we ask: how can robots discover adaptable
+skillsforefficienttransferlearningwithoutcostlyhumansupervision?
+Calling back to the squash to racquetball transfer example, we humans categorize different racket
+movements into discrete skills—for example, a “forehand swing” is distinct from a “backhand re-
+4202
+nuJ
+52
+]OR.sc[
+1v86771.6042:viXra1. Offline Skill 1 2. Skill Learning 3. Efficient Transfer to New Tasks
+Dataset Skill
+Extraction Skill Trajectories Policy
+Skill ID Continuous Arg 𝑎! 𝜋
+1 𝑧! 𝑎"
+1 𝑧"
+Train Skill
+𝑎 𝑎#
+$
+Skill Arg Turn the stove knob
+2 𝑧# Decoder 𝑎%
+Skill 2 2 𝑧$ 𝑎 𝑎&
+’
+Pretrained 3 𝑧% 𝑎( Skill Open the drawer
+VLM 3 𝑧& … Decoder
+…
+Low-level
+actions …
+Figure 1: EXTRACT unsupervisedly extracts a discrete set of skills from offline data that can be
+usedforefficientlearningofnewtasks. (1)EXTRACTfirstusesVLMstoextractadiscretesetof
+alignedskillsfromimage-actiondata. (2)EXTRACTthentrainsaskilldecodertooutputlow-level
+actions given discrete skill IDs and learned continuous arguments. (3) This decoder helps a skill-
+basedpolicyefficientlylearnnewtaskswithasimplifiedactionspaceoverskillIDsandarguments.
+turn.” Thesediscreteskillscanbedirectlytransferredbymakingminormodificationsforracquet-
+ball’slargerballsanddifferentrackets. ThisprocessisakintothatofcallingaprogrammaticAPI,
+e.g., def forehand(x, y), where learning to transfer reduces to learning when to call discrete
+functions(e.g., forehand() vs backhand())andhowtoexecutethem(i.e.,whattheirarguments
+shouldbe). Inthispaper,weproposeamethodtoacceleratetransferlearningbyenablingrobotsto
+learn,withoutexpertsupervision,adiscretesetofskillsparameterizedbyinputargumentsthatare
+usefulfordownstreamtasks(seeFigure1). Weassumeaccesstoanofflinedatasetofimage-action
+pairsoftrajectoriesfromtasksthataredifferentfromthedownstreamtargettasks. Ourkeyinsight
+isaligningskillsbyextractinghigh-levelbehaviors,i.e.,discreteskillslike“forehandswing,”from
+images in the dataset. However, two challenges preclude realizing this insight: (1) how to extract
+theseinput-parameterizedskills,and(2)howtoguideonlinelearningofnewtaskswiththeseskills.
+Tothisend,weproposeEXTRACT(ExtractionofTransferrableRobotActionSkills),aframework
+forextractingdiscrete,parameterizedskillsfromofflinedatatoguideonlinelearningofnewtasks.
+Wefirstusepre-trainedvision-languagemodels(VLMs),trainedtoalignimageswithlanguagede-
+scriptions[23]sothatimagesofsimilarhigh-levelbehaviorsareembeddedtosimilarlatentembed-
+dings[24],toextract—fromourofflinedata—imageembeddingdifferencesrepresentingchangesin
+high-levelbehaviors. Next,weclustertheembeddingsinanunsupervised mannertoformdiscrete
+skill clusters that represent high-level skills. To parameterize these skills, we train a skill decoder
+ontheseclusters,conditionedontheskillID(e.g.,representinga“backhandreturn”)andalearned
+argument(e.g.,indicatingvelocity),toproduceaskillconsistingofatemporallyextended,variable-
+lengthactionsequence. Finally,totrainarobotfornewtasks,wetrainaskill-basedRLpolicytoact
+overthisskill-spacewhilebeingguidedbyskillpriornetworks,learnedfromourofflineskilldata,
+guidingthepolicyfor(1)whentoselectskillsand(2)whattheirargumentsshouldbe.
+In summary, EXTRACT enables sample-efficient transfer learning for robotic tasks by extracting
+a meaningful set of skills from offline data for an agent to use for learning new tasks. We first
+validate that EXTRACT learns a well-clustered set of skills. We then perform experiments across
+challenging, long-horizon, sparse-reward, image-based robotic manipulation tasks, demonstrating
+thatEXTRACTagentscanmorequicklytransferskillstonewtasksthanpriorwork.
+2 RelatedWork
+Defining Skills Manually. Many works require manual definition of skills, e.g., as pre-defined
+primitives [4, 25, 26], subskill policies [27, 20, 28], or task sketches [29, 21], making them chal-
+lengingtoscaletoarbitraryenvironments. Closesttoours, Dalaletal.[9]andNasirianyetal.[10]
+hand-defineasetofskillsparameterizedbycontinuousarguments. Butthishand-definitionrequires
+expensivehumansupervisionandtask-specific,environment-specific,orrobot-specificfine-tuning.
+Incontrast,EXTRACTautomaticallylearnsskillsfromofflinedata,whichismuchmorescalableto
+2enablelearningmultipledownstreamtasks. WedemonstrateinSection5that,givensufficientdata
+coverage,skillsextractedfromdatacantransferaseffectivelyashand-definedskills.
+Unsupervised Skill Learning. A large body of prior work discovers skills in an unsupervised
+manner to accelerate learning new tasks. Some approaches use heuristics to extract skills from
+offline data, like defining skills as randomly sampled trajectories [30, 31, 32, 33, 34, 6, 8, 7, 35].
+While these approaches have demonstrated that randomly sampled skill sequences can accelerate
+downstreamlearning,EXTRACTinsteadusesvisualembeddingsfromVLMstocombinesequences
+performingsimilarbehaviorsintothesameskillwhileallowingforintra-skillvariationthroughtheir
+arguments. We show in Section 5 that our skill parameterization allows for more efficient online
+learning than randomly assigned skills. Moreover, Wan et al. [36] also learns skills via clustering
+visual features; however, in addition to major differences in methodology, they focus on imitation
+learning—requiringsignificantalgorithmicchangestofacilitatelearningnewtasksonline[37,38,
+39]. Instead,wedirectlyfocusononlinereinforcementlearningofnewtasks.
+Anotherlineofworkaimstodiscoverskillsfortaskswithoutofflinedata. Somelearnskillswhile
+simultaneouslyattemptingtosolvethetask[3,40,5,41,19,11]. However,learningtheskillsand
+using them simultaneously is challenging, especially without dense reward supervision. Finally,
+some prior works construct unsupervised objectives, typically based on entropy maximization, to
+learntask-agnosticbehaviors[42,43,44,45,46]. However,theseentropymaximizationobjectives
+leadtolearningalargesetofskills,mostofwhichformrandombehaviorsunsuitableforanymean-
+ingfuldownstreamtask.Thus,usingthemtolearnlong-horizon,sparse-rewardtasksisdifficult. We
+focus on first extracting skills from demonstration data, assumed to have meaningful behaviors to
+learnfrom,foronlinelearningofunseen,sparse-rewardtasks.
+3 Preliminaries
+Problem Formulation. We assume access to an offline dataset of trajectories D =
+{τ ,τ ,...} where each trajectory consists of ordered image observation and action tuples, τ =
+1 2 i
+[(s ,a ),(s ,a ),...]. ThedownstreamtransferlearningproblemisformulatedasaMarkovDeci-
+1 1 2 2
+sionProcess(MDP)inwhichwewanttolearnapolicyπ tomaximizedownstreamrewards. Note
+theofflinedatasetDdoesnotcontaintrajectoriesfromdownstreamtask(s),althoughweassumethat
+thestatespaceS issharedandthatactionsinDcanbeusedtosolvedownstreamtasks.
+SPiRL. In order to extract skills from offline data and use these skills for a new policy, we build
+on top of a previous skill-based RL method, namely SPiRL [6]. SPiRL focused on learning skills
+defined by randomly sampled, fixed-length action sequences. We briefly summarize SPiRL here:
+Given H-length sequences of consecutive actions from D: a¯ = a ,...,a , SPiRL learns (1) a
+1 H
+generative skill decoder model, p (a¯ | z), which decodes learned, latent skills z encoded by a
+a
+skillencoderq(z | a¯)intoenvironmentactionsequencesa¯,and(2)astate-conditionedskillprior
+p (z | s) that predicts which latent skills z are likely to be useful at state s. To learn a new task,
+z
+SPiRLtrainsaskill-basedpolicyπ(z |s),whoseoutputszareskillsdecodedbyp (a¯|z)intolow-
+a
+level environment actions. The objective of policy learning is to maximize returns under π(z | s)
+withaKLdivergenceconstrainttoregularizeπagainstthepriorp (z |s).
+z
+4 Method
+EXTRACT aims to discover a discrete skill library from an offline dataset that can be modulated
+throughinputargumentsforlearningnewtasksefficiently. EXTRACToperatesinthreestages: (1)
+anofflineskillextractionstage,(2)anofflineskilllearningphaseinwhichwetrainadecodermodel
+toreproduceactionsequencesgivenaskillchoiceanditsarguments,andfinally(3)theonlineRL
+stagefortraininganagenttoutilizetheseskillsfornewtasks. SeeFigure2foradetailedoverview.
+31. Offline Skill Extraction 2. Offline SkillLearning 3. Online Skill-based RL
+Image States 𝑑! Skill Trajectories 𝑑"
+Pretrained VLM 𝑠!,𝑎!,𝑠",𝑎",… 𝑠!,𝑎!,𝑠",𝑎",…
+Policy
+OfflineDataset Actions 𝑎, State 𝑠! Skill 𝑑
+State
+Visual Difference Embeddings Skill Selection Policy
+… 𝜋!(𝑑|𝑠)
+Clustering Skill 𝑞A (r 𝑧g
+|𝑎
+,E ,n 𝑑c )oder Skill S 𝑝e $le (c 𝑑t |i 𝑠o !n ) Prior Skill 𝑑
+Skill Clusters Skill Visualization Skill Argument Policy
+Skill 1 Skill Arg Prior 𝜋"(𝑧|𝑠,𝑑)
+Skill Argument 𝑧 𝑝#(𝑧|𝑠!,𝑑) Env
+Argument 𝑧
+𝑎! 𝑎" Frozen
+Skill 2 Skill Decoder
+Sk 𝑝i %ll
+(
+D 𝑎,|e 𝑧c ,o 𝑑d )er 𝑝#(𝑎*|𝑧,𝑑)
+𝑎!
+…
+𝑎"
+𝑎!,𝑎",𝑎&,… 𝑎!,𝑎",𝑎&,…
+Figure 2: EXTRACT consists of three phases. (1) Skill Extraction: We extract a discrete set
+of skills from offline data by clustering together visual VLM difference embeddings representing
+high-level behaviors. (2) Skill Learning: We train a skill decoder model, p (a¯ | z,d), to output
+a
+variable-lengthactionsequencesconditionedonaskillIDdandalearnedcontinuousargumentz.
+Theargumentz islearnedbytrainingp (a¯ | z,d)withaVAEreconstructionobjectivefromaction
+a
+sequencesencodedbyaskillencoder, q(z | a¯,d). Weadditionallytrainaskillselectionpriorand
+skillargumentpriorp (d|s),p (z |s,d)topredictwhichskillsdandtheirargumentszareuseful
+d z
+foragivenstates. Colorfularrowsindicategradientsfromreconstruction,argumentprior,selection
+prior, and VAE losses. (3) Online RL: To learn a new task, we train a skill selection and skill
+argumentpolicywithRLwhileregularizingthemwiththeskillselectionandskillargumentpriors.
+4.1 OfflineSkillExtraction
+Feature extraction. We leverage vision-language models (VLMs), trained to align large corpora
+ofimageswithnaturallanguagedescriptions[23,47,48,49],toextracthigh-levelfeaturesusedto
+labelskills. Althoughourapproachdoesnotrequiretheuseoflanguage,weutilizeVLMsbecause,
+asVLMsweretrainedtoalignimageswithlanguage,VLMimageembeddingsrepresentasemanti-
+callyalignedembeddingspace. However,onemainissueprecludesthenaïveapplicationofVLMs
+inrobotics. Inparticular,VLMsdonotinherentlyaccountforobjectvariationsorrobotarmstarting
+positionsacrossimages[50,24,51,52]. Butinrobotmanipulation,high-levelbehaviorsshouldbe
+characterizedbychangesinarmandobjectpositionsacrossatrajectory—pickingupacupshould
+beconsideredthesameskillregardlessofifthecupistotherobot’sleftorright. Ourinitialexperi-
+mentsofusingtheembeddingsdirectlyresultedinskillsspecifictoonetypeofenvironmentlayout
+orobject. Therefore,tocapturehigh-levelbehaviors,weusetrajectory-levelembeddingdifferences
+bytakingthedifferenceofeachVLMimageembeddingwiththefirstoneinthetrajectory:1
+e =VLM(s )−VLM(s ). (1)
+t t 1
+Skilllabelassignment. Aftercreatingembeddingse for
+t Offline Dataset Observations
+each image s , we assign skill labels in an unsupervised
+t … … …
+mannerbasedonthesefeatures. Inspiredbyclassicalal-
+gorithms from speaker diarization, a long-studied prob- Stage 1 VLM Embedding & Each color represents
+K-Means Clustering a different skill
+leminspeechprocessingwheretheobjectiveistoassign
+a “speaker label” to each speech timestep [53], we first Stage 2 M Se md oia on t hF ii nlt ger N che aw ng s ek si l ol r t tr ra aj j ew ch toe rn y: ela nb de sl
+performunsupervisedclusteringwithK-meansontheen- 𝜏## 𝜏"" 𝜏!! 𝜏"$
+tire dataset of embedding differences e to assign per- Skill 1 Skill 2 Skill 3 Skill 2
+i
+timestepskilllabels(thelabelistheclusterID),thenwe Figure 3: Skill label assignment con-
+smooth out the label assignments with a simple median sists of (1) using the VLM embedding
+differences for clustering, then (2) ap-
+filterrunalongthetrajectorysequencetoreducethefre-
+plyingamedianfilteroverthelabelsto
+quencyofsingleorfew-timesteplabelassignments. See
+smoothoutnoisyassignments.
+Figure3foravisualdemonstrationofthisprocess.
+1Toensurethateachtimestephasanembedding,weassignembeddinge tobeidenticaltoe .
+1 2
+4
+Regularize
+RegularizeInsummary, wefirstextractobservationembeddingdifferencefeatureswithaVLMandthenper-
+formunsupervisedK-meansclusteringtoobtainskilllabelsforeachtrajectorytimestep. Thisforms
+theskill-labeleddatasetD = {τ1,τ2,...},whereeachτ isatrajectoryofsequential(s,a)tuples
+d d d d
+thatallbelongtooneskilld. Next,weperformskilllearningonD .
+d
+4.2 OfflineSkillLearning
+We aim to learn a discrete set of skills, parameterized by continuous arguments, similar to a
+functional API over skills (see Figure 2 middle). Therefore, we train a generative skill decoder
+p (a¯ | z,d)toconvertadiscreteskillchoicedandacontinuousargumentforthatskill,z,intoan
+a
+actionsequence. AsalludedtoinSection3, webuilduponSPiRLbyPertschetal.[6]. However,
+theytraintheirdecodertodecodefixed-lengthactionsequencesfromasinglecontinuouslatentz.
+Incontrast,weautomaticallyextractasetofvariable-lengthskilltrajectorieswithlabelsdenotedd
+andparameterizeeachskillbyalearned,continuouslatentargumentz.2
+WetrainanautoregressiveVAE[54]consistingofthefollowinglearnedneuralnetworkcomponents:
+askillargumentencoderq(z |a¯,d)mappingtoacontinuouslatentzconditionedonadiscreteskill
+choicedandanactionsequencea¯,andanautoregressiveskilldecoderp (a¯ | z,d)conditionedon
+a
+thelatentzandthediscreteskillchoiced. Becausetheactionsequencea¯canbeofvariouslengths,
+thedecoderalsolearnstoproduceacontinuousvaluelateachautoregressivetimesteprepresenting
+theproportionoftheskillcompletedatthecurrentaction. ThisvariableisusedduringonlineRLto
+stoptheexecutionoftheskillwhenlequals1(seeAppendixB.1forfurtherdetails).
+Recall that SPiRL also trains a skill prior network p (z | s) that predicts which z is useful for an
+z
+observation s; this prior is used to guide a high-level policy toward selecting reasonable z while
+performing RL. In contrast with SPiRL where z uniquely represents a skill, we train two prior
+networks, one to guide the selection of the skill d, p (d | s), and one to guide the selection of its
+d
+argumentz givend, p (z | s,d). Thesearetrainedwiththeobservationfromthefirsttimestepof
+z
+thesampledtrajectory, s , tobeabletoguideaskill-basedpolicyduringonlineRLinchoosingd
+1
+andz. OurfullobjectivefortrainingthisVAEistomaximizethefollowing:
+(cid:34)(cid:20)|a¯| (cid:21) (cid:35)
+E (cid:80) logp (a,l|z,d) +βKL(q(z|a¯,d)∥N(0,I))+logp (d|s )+logp (sg(z)|s ,d) , (2)
+a t d 1 z 1
+a¯,d,s1∼Dd t=1 (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+z∼q(·|a¯,d) actionrec.+progresspred. VAEencoderKLregularization discreteskillprior continuousarg.prior
+wherethestop-gradientsg(·)preventspriorlossesfrominfluencingtheencoder.Thefirsttwoterms
+aretheβ-VAEobjective[55]; thelasttwotrainpriorstopredictthecorrectskilldandcontinuous
+argumentzgivens .
+1
+Additionalfine-tuning. Onextremelychallengingtransferscenarios, demonstrationsmaystillbe
+needed to warm-start reinforcement learning [56]. EXTRACT can also flexibly be applied to this
+settingbyusingthesameK-meansclusteringmodelfromSection4.1,whichwastrainedtocluster
+D ,toassignskilllabelstoanadditional,smallerdemonstrationdataset. Afterpre-trainingonD ,
+d d
+wethenfine-tunetheentiremodelonthatlabeleddemonstrationdatasetbeforeperformingRL.
+4.3 OnlineSkill-BasedReinforcementLearning
+Finally, we describe how we perform RL for new tasks by training a skill-based policy to select
+skillsandtheirargumentstosolvenewtasks. SeeFigure2,right,foranoverviewofonlineRL.
+Policyparameterization. Afterpre-trainingthedecoderp (a¯ | z,d),wetreatitasafrozenlower-
+a
+level policy that a learned skill-based policy can use to interact with a new task. Specifically, we
+trainaskill-basedpolicyπ(d,z | s)tooutputa(d,z)tuplerepresentingadiscreteskillchoiceand
+its continuous argument. We parameterize this policy as a product of two policies: π(d,z | s) =
+π (d | s)π (z | s,d)sothateachcomponentofπ(d,z | s)canberegularizedwithourpre-trained
+d z
+2Tosimplifynotation, weusez forbothourmethodandSPiRL.However, itisimportanttonotethatz
+uniquelydeterminestheskillinSPiRL,whilezdenotesacontinuouslatentargumentinourmethod.
+5priors p (d | s) and p (z | s,d). Intuitively, thisparameterization separatesdecision-makinginto
+d z
+whatskilltouseandhowtouseit. Thecompletefactorizationoftheskill-basedpolicyfollows:
+π(a|s)=p (a¯|z,d) · π(d,z |s)=p (a¯|z,d)·π (d|s)·π (z |s,d). (3)
+a a d z
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+skilldecoder skilldecoder learnedskill-basedpolicy
+Policylearning. Wecantraintheskill-basedpolicywithonlinedatacollectionusinganyentropy-
+regularized RL algorithm, such as SAC [57], where we regularize against the skill priors instead
+of against a max-entropy uniform prior. Because we have factorized π(d,z | s) into two separate
+policies,wecaneasilyregularizeeachwiththepriorstrainedinSection4.2. Thetrainingobjective
+forthepolicywithSACistomaximizeoverπ ,π :
+d z
+(cid:104) (cid:105)
+E Q(s,z,d)−α KL(π (z |s,d)∥p (·|s,d))−α KL(π (d|s)∥p (·|s)) , (4)
+z z z d d d
+s,d∼πd(.|s) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+z∼πz(.|s,d) skillargumentguidance skillchoiceguidance
+where α and α control the prior regularization weights. The critic objective is also correspond-
+z d
+inglymodified(seeAppendixAlgorithm4).
+In summary, EXTRACT first extracts a set of discrete skills from offline image-action data (Sec-
+tion 4.1), then trains an action decoder to take low-level actions in the environment conditioned
+onadiscreteskillandcontinuouslatent(Section4.2),andfinallyperformsprior-guidedreinforce-
+mentlearningovertheseskillsonlineinthetargetenvironmenttolearnnewtasks(Section4.3). See
+Algorithm1(appendix)forthepseudocodeandAppendixB.1foradditionalimplementationdetails.
+5 Experiments
+Our experiments investigate the following questions: (1) Does EXTRACT discover meaningful,
+well-alignedskillsfromofflinedata?(2)DoEXTRACT-acquiredskillshelprobotslearnnewtasks?
+(3)WhatcomponentsofEXTRACTareimportantinenablingtransfer?
+5.1 ExperimentalSetup
+We evaluate EXTRACT on two long-horizon, continuous-control, robotic manipulation domains:
+Franka Kitchen [58] and LIBERO [59]. All environments use image observations and sparse re-
+wards. For both Franka Kitchen and LIBERO, our method EXTRACT uses the R3M VLM [47]
+andK-meanswithK = 8forofflineskillextraction(Section4.1). Welistspecificdetailsbelow;
+seeAppendixB.3formore.
+FrankaKitchen: Thisenvironment,originallyfromGuptaetal.[22],Fuetal.
+[58] contains a Franka Panda arm operating in a kitchen environment. Simi-
+larlytoPertschetal.[6], wetesttransferlearningofasequenceof4subtasks
+neverperformedinsequenceinthedataset. Agentsaregivenarewardof1for
+completingeachsubtask.
+LIBERO:LIBERO[59]consistsofaFrankaPandaarminteractingwithmany
+objects and drawers. We test transfer to four task suites, LIBERO-{Object,
+Spatial, Goal, 10}consistingof10unseenenvironments/taskseach,span-
+ning various transfer scenarios (40 total tasks). LIBERO tasks are language
+conditioned (e.g., “turn on the stove and put the moka pot on it”); for pre-
+trainingandRL,weconditionallmethodsonthelanguageinstruction. Dueto
+LIBERO’sdifficulty[60],forallpre-trainedmethods,wefirstfine-tunetoaprovidedadditionaltar-
+gettaskdatasetwith50demospertaskbeforeperformingRL.DuringRL,wefine-tuneonalltasks
+withineachsuitesimultaneously. Tothebestofourknowledge,wearethefirsttoreportsuccessful
+RLresultsonLIBEROtasks.
+6Skill Visualization for Cluster 4 PCA Cluster Embeddings Skill Visualization for Cluster 6
+Traj 1 Traj 1
+Traj 2 Traj 2
+Skill Visualization for Cluster 0 Skill Visualization for Cluster 3
+Traj 1 Traj 1
+Traj 2 Traj 2
+Figure4: 100randomlysampledtrajectoriesfromtheFrankaKitchendatasetafterbeingclustered
+intoskillsandvisualizedin2D(originally2048)withPCA.Evenin2dimensions,clusterscanbe
+clearlydistinguished.Wevisualize2randomlysampledskillsineachcluster,demonstratingthatour
+skillassignmentmechanismsuccessfullyalignstrajectoriesperformingsimilarhigh-levelbehaviors.
+Franka Kitchen LIBERO-Object LIBERO-Spatial LIBERO-Goal LIBERO-10
+Figure 5: EXTRACT outperforms SPiRL in online RL across all comparisons, demonstrating the
+advantagesofoursemanticallyalignedskill-spaceforRL.SACandBCstruggle,demonstratingthe
+needforskill-basedRL.InLIBERO-{Object, Spatial, Goal},returnisequaltosuccessrate.
+BaselinesandComparisons.Wecompareagainst:(1)anoracle(RAPS[9]),whichisgivenground
+truthdiscreteskillswithcontinuousinputargumentsdesignedbyhumansspecificallyfortheFranka
+Kitchen environment; (2) methods that pre-train with the same data—namely SPiRL [6] which
+extracts sequences of fixed-length random action trajectories as skills, and BC, behavior cloning
+using the same offline data but no temporally extended skills; and (3) SAC [57], i.e., RL without
+any offline data. See Appendix B for further implementation details. Unless otherwise stated, all
+reportedexperimentalresultsaremeansandstandarddeviationsover5seeds.
+5.2 OfflineSkillExtraction
+WefirsttestEXTRACT’sabilitytodiscovermeaningful,well-alignedskillsduringskillextraction.
+InFigure4,weplotK-means(K = 8)skillassignmentsinFrankaKitchen. WeprojectVLMem-
+beddingdifferencesdownto2-DwithPCAforvisualization. Theseskillassignmentsdemonstrate
+thatunsupervisedclusteringofVLMembeddingdifferencescancreatedistinctlyseparablecluster-
+ingassignments. Forexample,skill4(Figure4,topleft)demonstratesacabinetopeningbehavior.
+See additional visualizations for all environments in Appendix C.1. We also analyze quantitative
+clusteringstatisticsinAppendixC.2. Next,let’sseehowtheseskillshelpwithlearningnewtasks.
+5.3 OnlineReinforcementLearningofNewTasks
+WeinvestigatetheabilityofallmethodstotransfertonewtasksinFigure5. InKitchen,EXTRACT
+matches the oracle performance while being 10x more sample-efficient than SPiRL, with SPiRL
+needing 3M timesteps to reach the same performance of EXTRACT at ~300k. While SPiRL per-
+7formedwellinFrankaKitchenintheirpaperusinggroundtruthenvironmentstatesinsteadofRGB
+images, it struggles in our much more challenging image-based experiments. In all LIBERO task
+suites,EXTRACTperformsbest;itoutperformsSPiRLthemostinLIBERO-10,thetasksuitewith
+thelongest-horizontasks.Meanwhile,SACandBCperformpoorly,indicatingourtasksaredifficult
+tosolvewithjuststandardRLorofflinedatawithoutskills.
+This improvement of our method over SPiRL comes from the semantically aligned, discrete skill-
+space that EXTRACT learns instead of SPiRL’s continuous, randomly assigned skill-space. For
+example, to open a drawer, EXTRACT can learn to select a single discrete drawer-opening skill
+with minor argument modifications when its gripper is near that drawer. With SPiRL, the robot
+must memorize the continuous skill representing each type of drawer-opening behavior for each
+waytoopenadrawer;thesecontinuousskillsmustalsobedistinguishedfromothersforcompletely
+differentbehaviors.EXTRACTalsoenableseasierexplorationlaterinthetask;thepolicycaneasily
+trythesamediscreteskilliftherobothandisnearadifferentdrawerthatneedstobeopened. For
+furtheranalysis,seeAppendixE.Next,weperformanablationstudyonEXTRACTcomponents.
+5.4 EXTRACTRLAblationStudies
+VLMs. We first ablate the use of VLMs from selecting features for clus-  Ř
+tering. Therefore, we compare against Action, where skill labels are gener-
+ated by clustering robot action differences. We also compare against State
+ ŗ
+where skills are labeled by clustering ground truth state differences (e.g.,
+    
+robot joints, states of all objects). State represents an oracle scenario as       
+     
+ground truth states of all relevant objects are difficult to obtain in the real  Ŗ
+ Ŗ ǯ Ŗ  Ŗ ǯ ś  ŗ ǯ Ŗ
+world. WeplotresultsinFrankaKitcheninFigure6. EXTRACTwithVLM-     ȱ      ȱ ǻ ŗ  Ǽ
+extractedskillsperformsbest,asbothgroundtruthstateandrawenvironment Figure 6: Embed-
+action differences can be difficult to directly obtain high-level, semantically dingablations.
+meaningfulskillsfrom.
+Number of Clusters. Finally, we ablate the number of K-means clusters.
+ Ř ǯ Ŗ
+Intuitively,toofewortoomanyclusterscanmakedownstreamRLmoredif-
+ ŗ ǯ ś
+ficult as it trades off the ease of the RL policy selecting the correct discrete
+skill and the difficulty of deciding the correct continuous argument for that  ŗ ǯ Ŗ
+skill. InFigure7, weplotaveragereturnsat1MtimestepsofEXTRACTin  Ŗ ǯ ś
+KitchenwithK = 3,5,8,15. Finalreturnsarerelativelyconstant,withper-  Ŗ ǯ Ŗ
+  ƽ ř   ƽ ś   ƽ Ş   ƽ ŗ ś
+formancedroppingonlyatK = 15. ThisindicatesthatEXTRACTisrobust
+Figure 7: Kitchen
+tothenumberofdiscreteskillsunsupervisedlydiscovered.
+K ablations.
+6 DiscussionandLimitations
+We presented EXTRACT, a method for enabling efficient agent transfer learning by extracting a
+discretesetofinput-argumentparameterizedskillsfromofflinedataforarobottouseinnewtasks.
+ComparedtostandardRL,ourmethodoperatesovertemporallyextendedskillsratherthanlow-level
+environmentactions,providinggreaterflexibilityandtransferabilitytonewtasks,asdemonstrated
+byourcomprehensiveexperiments. OurexperimentsdemonstratedthatEXTRACTperformswell
+across41totaltasksacross2robotmanipulationdomains.
+Limitations. However, while EXTRACT enables efficient transfer learning, we still need the
+initial dataset from environments similar to the target environments for learning skills from. It
+would be useful to extend EXTRACT to data from other robots or other environments signifi-
+cantly different from the target environment to ease the data collection burden—possibly wth sim
+to real techniques [61]. Furthermore, in future work, we plan to combine our method with offline
+RL[62,63,64,65,66,67]tolearnskillsfromsuboptimaldatawithouttheneedtointeractwithan
+environment,targetingevengreatersampleefficiency. Finally,EXTRACTrequiresimageobserva-
+tionsfortheVLMs;skilllearningfrommoreinputmodalitieswouldbeinterestingfuturework.
+8
+       ȱ       
+  ŗ ȱ ȓ ȱ       ȱ       Acknowledgments
+The majority of this work was performed while Jesse Zhang and Zuxin Liu were interns at
+Amazon Web Services. After the internships, this work was supported by a USC Viterbi
+Fellowship, compute infrastructure from AWS, Institute of Information & Communications
+Technology Planning & Evaluation (IITP) grants (No.RS-2019-II190075, Artificial Intelligence
+Graduate School Program, KAIST; No.RS-2022-II220984, Development of Artificial Intelli-
+gence Technology for Personalized Plug-and-Play Explanation and Verification of Explana-
+tion), a National Research Foundation of Korea (NRF) grant (NRF-2021H1D3A2A03103683,
+Brain Pool Research Program) funded by the Korean government (MSIT), Electronics and
+Telecommunications Research Institute (ETRI) grant funded by the Korean government foun-
+dation [24ZB1200, Research of Human-centered autonomous intelligence system original tech-
+nology], and Samsung Electronics Co., Ltd (IO220816-02015-01). Finally, we thank Laura
+Smith and Sidhant Kaushik for their valuable feedback on early versions of the paper
+draft.
+References
+[1] P.FittsandM.Posner.HumanPerformance.Basicconceptsinpsychologyseries.Brooks/Cole
+PublishingCompany,1967. ISBN9780134452470. 1
+[2] J.R.Anderson. Acquisitionofcognitiveskill. PsychologicalReview,89:369–406,1982. 1
+[3] R. S. Sutton, D. Precup, and S. Singh. Between mdps and semi-mdps: A framework for
+temporalabstractioninreinforcementlearning. ArtificialIntelligence,112(1):181–211,1999.
+ISSN0004-3702. 1,3
+[4] S.Schaal. Dynamicmovementprimitives–aframeworkformotorcontrolinhumansandhu-
+manoidrobotics. AdaptiveMotionofAnimalsandMachines,012006. 1,2
+[5] K.Hausman,J.T.Springenberg,Z.Wang,N.Heess,andM.Riedmiller. Learninganembed-
+dingspacefortransferablerobotskills. InICLR,2018. 1,3
+[6] K.Pertsch,Y.Lee,andJ.J.Lim.Acceleratingreinforcementlearningwithlearnedskillpriors.
+InConferenceonRobotLearning(CoRL),2020. 1,3,5,6,7,16,17,18,22
+[7] J.Zhang,K.Pertsch,J.Yang,andJ.J.Lim. Minimumdescriptionlengthskillsforaccelerated
+reinforcement learning. In Self-Supervision for Reinforcement Learning Workshop - ICLR
+2021,2021. 1,3
+[8] A.Ajay,A.Kumar,P.Agrawal,S.Levine,andO.Nachum.{OPAL}:Offlineprimitivediscov-
+eryfor acceleratingofflinereinforcementlearning. InInternationalConferenceon Learning
+Representations,2021. 1,3
+[9] M. Dalal, D. Pathak, and R. Salakhutdinov. Accelerating robotic reinforcement learning via
+parameterizedactionprimitives. InNeurIPS,2021. 1,2,7,17
+[10] S.Nasiriany,H.Liu,andY.Zhu. Augmentingreinforcementlearningwithbehaviorprimitives
+fordiversemanipulationtasks. InIEEEInternationalConferenceonRoboticsandAutomation
+(ICRA),2022. 1,2
+[11] G.Zhang,A.Jain,I.Hwang,S.-H.Sun,andJ.J.Lim. Everypolicyhassomethingtoshare:
+Efficientmulti-taskreinforcementlearningviaselectivebehaviorsharing,2023. 1,3
+[12] J.Zhang,K.Pertsch,J.Zhang,andJ.J.Lim. Sprint: Scalablepolicypre-trainingvialanguage
+instructionrelabeling. InInternationalConferenceonRoboticsandAutomation,2024. 1
+[13] J.Schmidhuber,J.Zhao,andM.Wiering.Shiftinginductivebiaswithsuccess-storyalgorithm,
+adaptivelevinsearch,andincrementalself-improvement. MachineLearning,28(1):105–130,
+Jul1997. ISSN1573-0565. 1
+9[14] S.Thrun. Islearningthen-ththinganyeasierthanlearningthefirst? InAdvancesinneural
+informationprocessingsystems,pages640–646,1996. 1
+[15] M. E. Taylor and P. Stone. Transfer learning for reinforcement learning domains: A survey.
+JournalofMachineLearningResearch,10(7),2009. 1
+[16] R.Fakoor,P.Chaudhari,S.Soatto,andA.J.Smola. Meta-q-learning. InInternationalCon-
+ferenceonLearningRepresentations,2020. 1
+[17] M.Caccia,J.Mueller,T.Kim,L.Charlin,andR.Fakoor. Task-agnosticcontinualreinforce-
+mentlearning:Gaininginsightsandovercomingchallenges.InConferenceonLifelongLearn-
+ingAgents,2023. 1
+[18] A.Singh,H.Liu,G.Zhou,A.Yu,N.Rhinehart,andS.Levine. Parrot: Data-drivenbehavioral
+priorsforreinforcementlearning. ICLR,2021. 1
+[19] J. Zhang, H. Yu, and W. Xu. Hierarchical reinforcement learning by discovering intrinsic
+options. InInternationalConferenceonLearningRepresentations,2021. 1,3
+[20] Y.Lee, S.-H.Sun, S.Somasundaram, E.S.Hu, andJ.J.Lim. Composingcomplexskillsby
+learningtransitionpolicies. InInternationalConferenceonLearningRepresentations, 2018.
+1,2
+[21] K.Shiarlis,M.Wulfmeier,S.Salter,S.Whiteson,andI.Posner. Taco: Learningtaskdecom-
+positionviatemporalalignmentforcontrol. ICML,2018. 1,2
+[22] A. Gupta, V. Kumar, C. Lynch, S. Levine, and K. Hausman. Relay policy learning: Solving
+long-horizontasksviaimitationandreinforcementlearning. CoRL,2019. 1,6,17
+[23] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, G. Sastry, A. Askell,
+P.Mishkin, J.Clark, G.Krueger, andI.Sutskever. Learningtransferablevisualmodelsfrom
+naturallanguagesupervision,2021. 2,4
+[24] S. A. Sontakke, J. Zhang, S. Arnold, K. Pertsch, E. Biyik, D. Sadigh, C. Finn, and L. Itti.
+RoboCLIP:Onedemonstrationisenoughtolearnrobotpolicies. InThirty-seventhConference
+onNeuralInformationProcessingSystems,2023. 2,4
+[25] P.Pastor,H.Hoffmann,T.Asfour,andS.Schaal. Learningandgeneralizationofmotorskills
+by learning from demonstration. In 2009 IEEE International Conference on Robotics and
+Automation,pages763–768.IEEE,2009. 2
+[26] H.Lin,R.Corcodel,andD.Zhao. Generalizebytouching: Tactileensembleskilltransferfor
+roboticfurnitureassembly,2024. 2
+[27] J. Oh, S. Singh, H. Lee, and P. Kohli. Zero-shot task generalization with multi-task deep
+reinforcementlearning. InInternationalConferenceonMachineLearning,2017. 2
+[28] D.Xu,S.Nair,Y.Zhu,J.Gao,A.Garg,L.Fei-Fei,andS.Savarese.Neuraltaskprogramming:
+Learningtogeneralizeacrosshierarchicaltasks. InInternationalConferenceonRoboticsand
+Automation,2018. 2
+[29] J. Andreas, D. Klein, and S. Levine. Modular multitask reinforcement learning with policy
+sketches. InInternationalConferenceonMachineLearning,pages166–175.PMLR,2017. 2
+[30] T.Kipf,Y.Li,H.Dai,V.Zambaldi,E.Grefenstette,P.Kohli,andP.Battaglia. Compositional
+imitationlearning: Explainingandexecutingonetaskatatime. ICML,2019. 3
+[31] T.Shankar,S.Tulsiani,L.Pinto,andA.Gupta. Discoveringmotorprogramsbyrecomposing
+demonstrations. InICLR,2019. 3
+10[32] J.Merel,S.Tunyasuvunakool,A.Ahuja,Y.Tassa,L.Hasenclever,V.Pham,T.Erez,G.Wayne,
+andN.Heess. Catch&carry: Reusableneuralcontrollersforvision-guidedwhole-bodytasks.
+ACM.Trans.Graph.,2020. 3
+[33] T.ShankarandA.Gupta. Learningrobotskillswithtemporalvariationalinference. InInter-
+nationalConferenceonMachineLearning,pages8624–8633.PMLR,2020. 3
+[34] C.Lynch,M.Khansari,T.Xiao,V.Kumar,J.Tompson,S.Levine,andP.Sermanet. Learning
+latentplansfromplay. InConferenceonRobotLearning,pages1113–1132,2020. 3
+[35] L.X.Shi,J.J.Lim,andY.Lee.Skill-basedmodel-basedreinforcementlearning.InConference
+onRobotLearning,2022. 3
+[36] W.Wan,Y.Zhu,R.Shah,andY.Zhu. Lotus: Continualimitationlearningforrobotmanipula-
+tionthroughunsupervisedskilldiscovery.In2021IEEEInternationalConferenceonRobotics
+andAutomation(ICRA).IEEE,2021. 3
+[37] A.Nair,A.Gupta,M.Dalal,andS.Levine. Awac:Acceleratingonlinereinforcementlearning
+withofflinedatasets,2021. 3
+[38] A. Kumar, J. Hong, A. Singh, and S. Levine. When should we prefer offline reinforcement
+learningoverbehavioralcloning? arXivpreprintarXiv:2204.05618,2022. 3
+[39] Q.Zheng,A.Zhang,andA.Grover. Onlinedecisiontransformer,2022. 3
+[40] P.-L. Bacon, J. Harb, and D. Precup. The option-critic architecture. In Association for the
+AdvancementofArtificialIntelligence,2017. 3
+[41] O.Nachum,S.S.Gu,H.Lee,andS.Levine.Data-efficienthierarchicalreinforcementlearning.
+InNeuralInformationProcessingSystems,2018. 3
+[42] B. Eysenbach, A. Gupta, J. Ibarz, and S. Levine. Diversity is all you need: Learning skills
+withoutarewardfunction. InICLR,2019. 3
+[43] D.Warde-Farley,T.V.deWiele,T.Kulkarni,C.Ionescu,S.Hansen,andV.Mnih. Unsuper-
+visedcontrolthroughnon-parametricdiscriminativerewards. InICLR,2019. 3
+[44] K.Gregor,G.Papamakarios,F.Besse,L.Buesing,andT.Weber. Temporaldifferencevaria-
+tionalauto-encoder. InInternationalConferenceonLearningRepresentations,2019. 3
+[45] A. Sharma, S. Gu, S. Levine, V. Kumar, and K. Hausman. Dynamics-aware unsupervised
+discoveryofskills. InICLR,2020. 3
+[46] M. Laskin, H. Liu, X. B. Peng, D. Yarats, A. Rajeswaran, and P. Abbeel. Cic: Contrastive
+intrinsiccontrolforunsupervisedskilldiscovery,2022. 3
+[47] S.Nair,A.Rajeswaran,V.Kumar,C.Finn,andA.Gupta. R3m: Auniversalvisualrepresen-
+tationforrobotmanipulation. InCoRL,2022. 4,6,19
+[48] T.Xiao,I.Radosavovic,T.Darrell,andJ.Malik.Maskedvisualpre-trainingformotorcontrol.
+arXivpreprintarXiv:2203.06173,2022. 4
+[49] Y. J. Ma, W. Liang, V. Som, V. Kumar, A. Zhang, O. Bastani, and D. Jayaraman. Liv:
+Language-imagerepresentationsandrewardsforroboticcontrol,2023. 4
+[50] Y. Cui, S. Niekum, A. Gupta, V. Kumar, and A. Rajeswaran. Can foundation models per-
+form zero-shot task specification for robot manipulation? In R. Firoozi, N. Mehr, E. Yel,
+R. Antonova, J. Bohg, M. Schwager, and M. Kochenderfer, editors, Proceedings of The 4th
+Annual Learning for Dynamics and Control Conference, volume 168 of Proceedings of Ma-
+chineLearningResearch,pages893–905.PMLR,23–24Jun2022. 4
+11[51] J.Rocamonde,V.Montesinos,E.Nava,E.Perez,andD.Lindner. Vision-languagemodelsare
+zero-shotrewardmodelsforreinforcementlearning. InNeurIPS2023FoundationModelsfor
+DecisionMakingWorkshop,2023. 4
+[52] Y.Wang,Z.Sun,J.Zhang,Z.Xian,E.Biyik,D.Held,andZ.Erickson. Rl-vlm-f: Reinforce-
+mentlearningfromvisionlanguagefoundationmodelfeedback. InInternationalconference
+onmachinelearning,2024. 4
+[53] X. Anguera, S. Bozonnet, N. Evans, C. Fredouille, G. Friedland, and O. Vinyals. Speaker
+diarization: Areviewofrecentresearch. IEEETransactionsonaudio,speech,andlanguage
+processing,20(2):356–370,2012. 4,15
+[54] D.P.KingmaandM.Welling. Auto-encodingvariationalBayes. InInternationalConference
+onLearningRepresentations,2014. 5
+[55] I.Higgins,L.Matthey,A.Pal,C.Burgess,X.Glorot,M.Botvinick,S.Mohamed,andA.Ler-
+chner. beta-vae: Learningbasicvisualconceptswithaconstrainedvariationalframework. In
+InternationalConferenceonLearningRepresentations,2016. 5
+[56] I. Uchendu, T. Xiao, Y. Lu, B. Zhu, M. Yan, J. Simon, M. Bennice, C. Fu, C. Ma, J. Jiao,
+S.Levine,andK.Hausman. Jump-startreinforcementlearning,2023. 5,16
+[57] T.Haarnoja,A.Zhou,P.Abbeel,andS.Levine.Softactor-critic:Off-policymaximumentropy
+deepreinforcementlearningwithastochasticactor. ICML,2018. 6,7,15,17
+[58] J.Fu, A.Kumar, O.Nachum, G.Tucker, andS.Levine. D4rl: Datasetsfordeepdata-driven
+reinforcementlearning. arXivpreprintarXiv:2004.07219,2020. 6,17
+[59] B.Liu,Y.Zhu,C.Gao,Y.Feng,Q.Liu,Y.Zhu,andP.Stone. Libero: Benchmarkingknowl-
+edgetransferforlifelongrobotlearning,2023. 6,16,18
+[60] Z. Liu, J. Zhang, K. Asadi, Y. Liu, D. Zhao, S. Sabach, and R. Fakoor. TAIL: Task-specific
+adaptersforimitationlearningwithlargepretrainedmodels. InICLR,2024. 6,16
+[61] G.Zhang,L.Zhong,Y.Lee,andJ.J.Lim. Policytransferacrossvisualanddynamicsdomain
+gapsviaiterativegrounding. InRobotics: ScienceandSystems,2021. 8
+[62] S.Fujimoto,D.Meger,andD.Precup. Off-policydeepreinforcementlearningwithoutexplo-
+ration. InInternationalConferenceonMachineLearning,pages2052–2062,2019. 8
+[63] X.B.Peng,A.Kumar,G.Zhang,andS.Levine. Advantage-weightedregression: Simpleand
+scalableoff-policyreinforcementlearning,2019. 8
+[64] S.Levine, A.Kumar, G.Tucker, andJ.Fu. Offlinereinforcementlearning: Tutorial, review,
+andperspectivesonopenproblems. arXivpreprintarXiv:2005.01643,2020. 8
+[65] A.Singh,A.Yu,J.Yang,J.Zhang,A.Kumar,andS.Levine. Cog: Connectingnewskillsto
+pastexperiencewithofflinereinforcementlearning. CoRL,2020. 8
+[66] R. Fakoor, J. W. Mueller, K. Asadi, P. Chaudhari, and A. J. Smola. Continuous doubly con-
+strained batch reinforcement learning. Advances in Neural Information Processing Systems,
+34:11260–11273,2021. 8
+[67] Y.Liu, P.Chaudhari, andR. Fakoor. Budgeting counterfactualfor offlinerl. In Advancesin
+NeuralInformationProcessingSystems,volume36,pages5729–5751,2023. 8
+[68] P.Virtanen,R.Gommers,T.E.Oliphant,M.Haberland,T.Reddy,D.Cournapeau,E.Burovski,
+P. Peterson, W. Weckesser, J. Bright, S. J. van der Walt, M. Brett, J. Wilson, K. J. Millman,
+N.Mayorov,A.R.J.Nelson,E.Jones,R.Kern,E.Larson,C.J.Carey,˙I.Polat,Y.Feng,E.W.
+Moore, J. VanderPlas, D. Laxalde, J. Perktold, R. Cimrman, I. Henriksen, E. A. Quintero,
+12C. R. Harris, A. M. Archibald, A. H. Ribeiro, F. Pedregosa, P. van Mulbregt, and SciPy 1.0
+Contributors. SciPy1.0: FundamentalAlgorithmsforScientificComputinginPython. Nature
+Methods,17:261–272,2020. 15
+[69] P.Christodoulou. Softactor-criticfordiscreteactionsettings,2019. 16
+[70] Y. Zhu, J. Wong, A. Mandlekar, R. Martín-Martín, A. Joshi, S. Nasiriany, and Y. Zhu. ro-
+bosuite: Amodularsimulationframeworkandbenchmarkforrobotlearning. arXivpreprint
+arXiv:2009.12293,2020. 18
+[71] N. Reimers and I. Gurevych. Sentence-bert: Sentence embeddings using siamese bert-
+networks. InProceedingsofthe2019ConferenceonEmpiricalMethodsinNaturalLanguage
+Processing.AssociationforComputationalLinguistics,112019. 18
+[72] R.S.SuttonandA.G.Barto. Reinforcementlearning: Anintroduction. MITpress,2018. 22
+13A FullAlgorithm
+Algorithm1EXTRACTAlgorithm,Section4.
+Require: DatasetD,VLM,TargetMDPM,Optionaltargettaskfine-tuningdatasetD
+M
+1: D d,CM ←OFFLINESKILLEXTRACTION(D,VLM) ▷Getdiscreteskilllabelsandclustering
+model,Algorithm2
+2: Initq(z |a¯,d),p a(a¯|z,d),p d(d|s),p z(z |s,d) ▷Skillargumentencoder,skilldecoder,
+discreteskillprior,continuousargumentprior
+3: q,p a,p d,p z ←OFFLINESKILLLEARNING(D d,q,p a,p d,p z) ▷Learnskillsoffline,
+Algorithm3
+4: ifD Mexiststhen
+5: D M,d ←AssignskillstoD MwithexistingclusteringmodelCM
+6: q,p a,p d,p z ←OFFLINESKILLLEARNING(D M,d,q,p a,p d,p z) ▷Optionallyfine-tuneon
+targettaskM
+7: endif
+8: SKILLBASEDONLINERL(M,p a,p d,p z) ▷RLontargettaskM,Algorithm4
+Algorithm2OfflineSkillExtraction,Section4.1.
+1: procedureOFFLINESKILLEXTRACTION(D,VLM)
+2: EMBEDS←[] ▷InitVLMembeddingdifferences
+3: fortrajectoryτ =[(s 1,a 1),...,(s T,a T)]inDdo
+4: for(s i,a i)inτ do
+5: e i =VLM(s i)−VLM(s 1) ▷Embeddingdifferences,Equation(1)
+6: EMBEDS.APPEND(e i)
+7: endfor
+8: endfor
+9: CM ←Init(K-Means)clusteringmodel
+10: LABELS←CM(EMBEDS) ▷Rununsupervisedclusteringtogetclusterlabels
+11: D d ←{} ▷Initskilllabeleddataset
+12: fortrajectoryτ =[(s 1,a 1),...,(s T,a T)]inDdo
+13: d 1,...,d T ←GetlabelsfromLABELS
+14: d 1,...,d T ←MEDIANFILTER(d 1,...,d T) ▷Smoothoutlabels,seeAppendixB.1
+15: D d ←D d∪[(s 1,a 1,d 1),...,(s T,a T,d T)]
+16: endfor
+17: returnD d,CM
+18: endprocedure
+Algorithm3OfflineSkillLearning,Section4.2.
+1: procedureOFFLINESKILLLEARNING(D,q,p a,p d,p z)
+2: whilenotconvergeddo
+3: Sampleτ dfromD d
+4: Trainq,p a,p d,p z withEquation(2)
+5: endwhile
+6: returnq,p a,p d,p z
+7: endprocedure
+WepresentthefullEXTRACTpseudocodeinAlgorithm1. Algorithm2detailsofflineskillextrac-
+tionusingaVLM,Algorithm3detailstheofflineskilllearningprocedure,andAlgorithm4details
+how to perform online skill-based RL on downstream tasks using Soft Actor-Critic (SAC). Note
+that any entropy-regularized algorithm can be used here with similar modifications, not just SAC.
+DifferencesfromSACduringonlineRLarehighlightedinred. Forfurtherimplementationdetails
+andhyperparametersofEXTRACT,seeAppendixB.1.
+14Algorithm4Skill-BasedOnlineRL(withSAC[57]),Section4.3. Redmarkspolicyandcriticloss
+differencesagainstSAC.
+1: procedureSKILLBASEDONLINERL(M,p a(a¯|z,d),p d(d|s),p z(z |s,d)) ▷Section4.3
+2: Freezep a(a¯|z,d),p d,p z weights
+3: π d(d|s)←p d(d|s) ▷Initπ dasdiscreteskillpriorp d
+4: π z(z |s,d)←p z(z |s,d) ▷Initπ z ascont. argumentpriorp z
+5: B ←{} ▷InitbufferB
+6: foreachrolloutdo
+7: l←0
+8: d t ∼π d(d|s t) ▷Samplediscreteskill
+9: z t ∼π z(z |s,d t) ▷Samplecontinuousargumentforskill
+10: a 1,...,a L,l 1....l L ←a¯∼p a(a¯|z t,d t) ▷Sampleactionsequencea 1,...,a Land
+progresspredictionsl ,...,l uptomaxsequencelengthL
+1 l
+11: foraina 1.,...,a Loruntill≥1do
+12: ExecuteactionsinM,accumulatingrewardsumr˜ t
+13: endfor
+14: B ←B∪{s t,z t,r˜ t,s t′} ▷Addsampletobuffer
+15: (s,z,r˜,s′)∼B ▷SamplefromB
+16: π d,π z ← max Q(s,z,d)
+πd,πz
+17: −α zKL(π z(z |s,d)∥p z(·|s,d))
+18: −α dKL(π d(d|s)∥p d(·|s)) ▷Updatepolicies,Equation(4)
+19: Q←min QQ(s,z,d)=r(s,z,d)+γQ(s′,z′,d′)
+20: −α zD KL(π(z |s,d)∥p z(·|s,d))
+21: −α dD KL(π(d|s)∥p d(·|s)) ▷Updatecritic
+22: endfor
+23: endprocedure
+B ExperimentandImplementationDetails
+Inthissection,welistimplementationdetailsforEXTRACT(AppendixB.1),thespecificenviron-
+mentsetups(AppendixB.3),anddetailsforhowweimplementedbaselines(AppendixB.2).
+B.1 EXTRACTImplementationDetails
+EXTRACT implementation details follow in the same order as each method subsection was pre-
+sentedinthemainpaperinSection4.
+B.1.1 OfflineSkillExtraction
+WefirstextractskillsfromadatasetD usingaVLMbyclusteringVLMembeddingdifferencesof
+imageobservationsinD(seepseudocodeinAlgorithm2).
+Clustering. We use K-means for the clustering algorithm as it is performant, time-efficient, and
+can be easily utilized in a batched manner if all of the embeddings are too large to fit in memory
+atonce. WhenextractingskillsfromtheofflinedatasetD,weutilizeK-meansclusteringonVLM
+embeddingdifferenceswithK =8inFrankaKitchenandLIBERO,aswefoundK =8toproduce
+the most visually pleasing clustering assignments in Franka Kitchen and we directly adapted the
+FrankaKitchenhyperparameterstoLIBEROtoavoidtoomuchenvironment-specifictuning.
+MedianFiltering. AfterperformingK-means,weutilizeastandardmedianfilter,asiscommonly
+performedinclassicalspeakerdiarization[53],tosmoothoutanypossiblynoisyassignments(see
+Figure 3). Specifically, we use the Scipy scipy.signal.medfilt(kernel_size=7) [68] filter
+forallenvironments. Thiscorrespondstoamedianfilterwithwindowsize7thatslidesovereach
+trajectory’slabelsandassignsthemedianlabelwithinthatwindowtoall7elements. Empirically,
+15wefoundthatthisincreasedtheaveragelengthofskillsasitreducedtheoccurrenceofshort,noisy
+assignments.
+B.1.2 OfflineSkillLearning
+Here, we train a VAE consisting of skill argument encoder q(z | a¯,d), skill decoder p (a¯ | z,d),
+a
+discrete skill prior p (d | s), and continuous skill argument prior p (z | s,d) (see pseudocode in
+d z
+Algorithm3).
+Model architectures. We closely follow SPiRL’s model architecture implementations [6] as we
+builduponSPiRL.Theencoderq(z |a¯,d)anddecoderp (a¯|z,d)areimplementedwithrecurrent
+a
+neural networks. The skill priors are both standard multi-layer perceptrons. The skill argument
+spacezhas5dimensions. InKitchenandLIBERO,ourβ fortheβ-VAEKLregularizationtermin
+Equation(2)is0.001.
+Skillprogresspredictor. Duringtraining,forGPUmemoryreasons,wesampleskilltrajectories
+with a maximum length as is common when training autoregressive models. In Franka Kitchen,
+this is heuristically set to 30 based on reconstruction losses and in LIBERO, this is set to 40.
+If a skill trajectory is longer than this maximum length, we simply sample a random contiguous
+sequence of the maximum length within the trajectory. To ensure that predicted action sequences
+stay in-distribution with what was seen during training, we also use these maximum lengths as
+maximum skill lengths during online RL; e.g., if a skill runs for 30 timesteps in Franka Kitchen
+withoutstopping,wesimplyresamplethenextskill(seeLine10ofAlgorithm4).
+AsdiscussedinSection4.2,giventhevariablelengthsofactionsequencesa¯,thedecoderp (a¯|z,d)
+a
+is trained to generate a continuous skill progress prediction value l at each timestep. This value
+representstheproportionof theskillcompletedatthecurrent time. Duringonline policyrollouts,
+the execution of the skill is halted when l reaches 1. To learn this progress prediction value, we
+formulate it as follows: when creating labels for such a sequence, we assign a label to each time
+step,denotedasy ,basedonitspositioninthesequence. Specifically,y issetto t foreachtime
+t t N
+step t, where N represents the sequence length. To train the model for this function, we use the
+standardmean-squared-errorloss. Thisensuresthatthemodellearnstopredicttheendofanaction
+sequencewhilealsoensuringthatitreceivesdense,per-timestepsupervisionwhiletrainingfunction.
+Additionaltargettaskfine-tuning. Optionally,forverydifficulttasks,sometarget-taskdemon-
+strationsmaybeneeded[56,60,59].Weperformadditionaltargettaskfine-tuninginLIBERO[59].
+We use the learned clustering model that was trained to cluster the original dataset D to directly
+assignlabelstothetask-specificdatasetD withoutupdatingtheclusteringalgorithmparameters
+M
+(seeAlgorithm1Line5). Then,wefine-tunetheentiremodel,q,p ,p ,p ,withthesameobjective
+a d z
+inEquation(2)onthelabeledtarget-taskdatasetD .
+M,d
+B.1.3 Skill-BasedOnlineRL
+For online RL, we utilize the pre-trained skill decoder p (a¯ | z,d), and the skill priors p (d |
+a d
+s),p (z |s,d)forskill-basedpolicylearning(seeAlgorithm4).
+z
+Policy learning. Our policy skill-based policy π(d,z | s) is parameterized as a product of a
+discrete skill selection policy π (d | s) and a continuous argument selection policy π (z | s,d)
+d z
+(see Equation (4)). To train with actor-critic RL, we sum over the policy losses in each discrete
+skilldimensionweightedbytheprobabilityofthatskill, similartodiscreteSAClossproposedby
+Christodoulou[69]:
+(cid:88) (cid:16) (cid:17)
+π (d|s) Q(s,z,d)−α KL(π (z |s,d)∥p (·|s,d))−α KL(π (d|s)∥p (·|s)) . (5)
+d z z z d d d
+d
+16Meanwhile, critic losses are computed with the skill d that the policy actually took. Our critic
+networksQ(s,z,d)taketheimagesandargumentz asinputandhavead-headedoutputforeach
+ofthedskills.
+We do not use automatic KL tuning (standard in SAC implementations [57]) as we found it to be
+unstable;instead,wemanuallysetentropycoefficientsα andα forthepolicy(Equation(4))and
+d z
+criticlosses. InKitchen,α = 0.1,α = 0.01;inLIBEROα = 0.1,α = 0.1. Thesevaluesare
+d z d z
+obtainedbyperformingasearchoverα ={0.1,0.01}andα ={0.1,0.01}.
+d z
+B.2 BaselineImplementationDetails
+Oracle. Our oracle baseline is RAPS [9]. We run RAPS to convergence and report final perfor-
+mancenumbersbecauseitsexpert-designedskillsoperateonadifferentcontrolfrequency;ittakes
+hundredsoftimesmorelow-levelactionsperenvironmentrollout. Weonlyevaluatedthismethod
+on Franka Kitchen as the authors did not evaluate on our other environments, and we found the
+implementationandtuningoftheirhand-designedprimitivestoworkwellonotherenvironmentsto
+benon-trivialanddifficulttomakework.
+SPiRL. WeadaptSPiRL,implementedontopofSAC[57],toourimage-basedsettingsandenvi-
+ronmentsusingtheirexistingcodetoensurethebestperformance. Foreachenvironment,wetuned
+SPiRL parameters (entropy coefficient, automatic entropy tuning, network architecture, etc.) first
+andthenbuiltourmethoduponthefinalSPiRLnetworkarchitecturetoensurethefairestcompar-
+ison. SPiRL uses the exact same datasets as ours but without skill labels. We also experimented
+with changing the length of SPiRL action sequences, and similar to what was reported in Pertsch
+etal.[6],wefoundthatafixedlengthof10workedbest. WealsofoundfixedpriorcoefficientsKL
+divergencetoperformbetterwithSPiRLforourenvironmentsthanautomaticKLtuning.
+BC. Weimplementbehaviorcloningwithnetworkarchitecturessimilartooursandusingthesame
+datasets. OurBCbaselinelearnsanimage-conditionedpolicyπ(a|s)thatdirectlyimitatessingle-
+stepenvironmentactions. Wefine-tunepre-trainedBCmodelsforonlineRLwithSAC[57].
+SAC. We implement Soft-Actor Critic [57] directly operating on low-level environment actions
+withanidenticalarchitecturetotheBCbaseline. Itdoesnotpre-trainonanydata.
+B.3 EnvironmentImplementationDetails
+(a)FrankaKitchen (b)LIBERO
+Figure 8: Our two image-based, continuous control robotic manipulation evaluation domains. (a)
+FrankaKitchen: Therobotmustlearntoexecuteanunseensequenceof4sub-tasksinarow. (b)
+LIBERO:Weevaluate4tasksuitesof10tasks,eachconsistingoflong-horizon,unseentaskswith
+newobject,spatial,andgoaltransferscenarios.
+FrankaKitchen. WeusetheFrankaKitchenenvironmentfromtheD4RLbenchmark[58]origi-
+nallypublishedbyGuptaetal.[22](seeFigure8a).Thepre-trainingdatasetcomesfromthe“mixed”
+17dataset inD4RL consistingof 601 humanteleoperation trajectorieseach performing4 subtasks in
+sequence in the environment (e.g., open the microwave). Our evaluation task comes from Pertsch
+et al. [6], where the agent has to perform an unseen sequence of 4 subtasks. The original dataset
+containsgroundtruthenvironmentstatesandactions;wecreateanimage-actiondatasetbyresetting
+to ground truth states in the dataset and rendering the corresponding images. For all methods, we
+performpre-trainingandRLwith64x64x3RGBimagesandaframestackof4. Sparserewardof1
+isgivenforeachsubtask,foramaximumreturnof4. Theagentoutputs7-dimensionaljointveloc-
+ityactionsalongwitha2-dimensionalcontinuousgripperopening/closingaction. Episodeshavea
+maximumlengthof280timesteps.
+LIBERO. LIBERO [59] is a continual learning benchmark built upon Robosuite [70] (see Fig-
+ure 8b). For skill extraction and policy learning, we use the agentview_rgb 3rd-person cam-
+era view images provided by the LIBERO datasets and environment. For pre-training, we use
+theLIBERO-90pre-trainingdatasetconsistingof4500demonstrationscollectedfrom90different
+environment-taskcombinationseachwith50demonstrations.Weconditionallmethodson84x84x3
+RGB images with a framestack of 2 along with language instructions provided by LIBERO. We
+conditionmethodsonlanguagebyembeddinginstructionswithapre-trained,frozensentenceem-
+beddingmodel[71],all-MiniLM-L6-v2,toasingle384-dimensionalembeddingandthenfeeding
+ittothepolicy.ForEXTRACT,weconditiononlanguagebyconditioningallnetworksonlanguage;
+q,p ,p ,p arealladditionallyconditionedonthelanguageembeddingandthustheskill-basedpol-
+z a d
+icyisalsoconditionedonlanguage. Wealsoconditionallnetworksinallbaselinesonthislanguage
+embeddinginadditiontotheiroriginalinputs.
+When performing additional fine-tuning to LIBERO-{10, Goal, Spatial, Object}, for all
+methods(exceptSAC)weusethegiventask-specificdatasetseachcontaining50demonstrationsper
+taskbeforethenperformingonlineRL.InLIBERO-{Goal, Spatial, Object},sparserewardis
+provideduponsuccessfullycompletingthetask,sothemaximumreturnis1.0.InLIBERO-10,tasks
+arelonger-horizonandconsistoftwosubtasks,soweproviderewardsattheendofeachsubtaskfor
+amaximumreturnof2.0. Episodeshaveamaxlengthof300timesteps.
+C AdditionalExperimentsandQualitativeVisualizations
+Inthissection,weperformadditionalexperimentsandablationstudies. InAppendixC.1,wevisu-
+alize2DPCAplotsofclustersgeneratedbyEXTRACTinallenvironments. InAppendixC.2,we
+analyzestatisticsoftheskilldistributionsgeneratedbyEXTRACT.
+C.1 AdditionalPCAClusterVisualizations
+Here we display PCA skill cluster visualizations in all environments in Figure 9. Franka Kitchen
+clusterings are very distinguishable, even in 2 dimensions. (this is the same embedding plot as in
+Figure4inthemainpaper). LIBERO-90clustersstilldemonstrateclearseparation, butarenotas
+separableafterbeingprojecteddownto2dimensions(from2048originaldimensions). However,in
+Figure12weclearlyseedistinguishablebehaviorsamongdifferentskillsinLIBERO.
+18PCA Cluster Embeddings PCA Cluster Embeddings
+Cluster 4
+Cluster 6
+CluCsCtllueusrs tt4eerr 56
+Cluster 7 Cluster 2
+Cluster 0 Cluster 5 Cluster 2
+Cluster 7
+Cluster 0
+Cluster 1 Cluster 3 Cluster 3
+Cluster 1
+(a)FrankaKitchen. (b)LIBERO.
+Figure9: 100randomlysampledtrajectoriesfromallenvironmentpre-trainingdatasetsafterbeing
+clustered into skills and visualized in 2D with PCA. Clusters are well-separated, even in just 2-
+dimensionswithalineartransfromation.
+C.2 VisualizingClusterStatistics
+Histogram of Skill Lengths Histogram of Skill Lengths
+0.03
+0.02
+0.02
+0.01 0.01
+0.00 0.00
+0 25 50 75 100 125 150 175 0 50 100 150 200 250 300
+Box Plot of Skill Lengths -- Avg Overall Length: 33.5 Box Plot of Skill Lengths -- Avg Overall Length: 30.9
+300
+150
+200 100
+50 100
+0 0
+0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
+Skill Lengths per Cluster Skill Lengths per Cluster
+60
+60
+40
+40
+20 20
+0 0
+0 20 40 60 80 100 120 140 0 50 100 150 200 250
+length length
+(a)FrankaKitchen,K =8. (b)LIBERO,K =8.
+Figure10: Skill/clusteringstatisticsinallenvironments. WeusetheR3MVLM[47]andK =8for
+K-means. Thetopplotsareskilllengthhistogramsforallskilltrajectoriescombined,middleplots
+correspondtobox-and-whiskerplotswithskillIDonthex-axisandlengthsonthey-axis, andthe
+bottomplotsrepresentdistributionsofskilllengthsseparatedbycolorforeachskillID.
+We visualize skill clustering statistics in all pre-training environments in Figure 10. The plots
+demonstrate that average skill lengths are about 30 timesteps for all environments and that there
+is clear separation among the different skills just in terms of the distributions of skill lengths that
+theycover. Foraqualitativelookattheskills,seeAppendixD.
+D Visualizingskilltrajectories
+Here,wevisualizeskilltrajectoriesinallenvironments. InFigure11,wevisualizepurelyrandomly
+sampledclusters(i.e.,withoutanycherry-picking)inFrankaKitchen,whereweseeskillsaregener-
+allysemanticallyaligned.Forexample,skill3trajectoriescorrespondtomanipulatingknobs,skill5
+trajectoriesreachforthemicrowavedoor,andskill7trajectoriesarereachingforthecabinethandle.
+19
+llikS
+fo
+htgneL
+tnuoC
+llikS
+fo
+htgneL
+tnuoCWevisualizeLIBEROskillsinFigure12,wherewecanalsoseethatskillsaregenerallyaligned.
+Figure11: Kitchenskillvisualizations. Werandomlysample2labeledskilltrajectories(nocherry-
+picking) and visualize the trajectory’s images in sequence after labeling with EXTRACT’s skill
+extractionphase. Clustersaregenerallysemanticallyaligned.
+20
+0RETSULC
+1RETSULC
+2RETSULC
+3RETSULC
+4RETSULC
+5RETSULC
+6RETSULC
+7RETSULCFigure 12: LIBERO. We randomly sample 2 labeled skill trajectories (no cherry-picking) and vi-
+sualize the trajectory’s images in sequence after labeling with EXTRACT’s skill extraction phase.
+Clustersaregenerallysemanticallyaligned.
+E EXTRACTRLPerformanceAnalysis
+Our method’s performance improvement over SPiRL is likely due to two reasons: longer average
+skillsandasemanticallystructuredskill-spaceinsteadoftherandomlatentskillsthatSPiRLlearns.
+InSection5.3weanalyzethesemanticallystructuredskill-space. Here,weadditionallyanalyzethe
+longeraverageskills.
+AsplottedinAppendixFigure10,EXTRACTextractsskillsofvariouslengths,manyofwhichare
+quite long. This translates into longer-executed skills: we plot a histogram of the lengths of the
+skills the skill-based policy actually learns to use at convergence in Franka Kitchen in Figure 13.
+EXTRACT-executedskillsaverage25timestepsinlengthascomparedto10forSPiRL.Weexperi-
+21
+0RETSULC
+1RETSULC
+2RETSULC
+3RETSULC
+4RETSULC
+5RETSULC
+6RETSULC
+7RETSULCFigure 13: Skill lengths histogram of actually used EXTRACT skills in Franka Kitchen at train-
+ing convergence. As explained in Appendix B.1, we limit skill execution lengths to 30 in Franka
+Kitchen.
+mentedwithlongerskilllengthsforSPiRL,butonlineRLperformancesuffered,afindingconsistent
+withresultspresentedintheirpaper[6].
+Longer skills shorten the effective time horizon of the task by a factor of the average skill length
+for the skill-based agent because the skill-based agent operates on an MDP where transitions are
+definedbytheendofexecutionofaskillwhichcanbecomprisedofmanylow-levelenvironment
+actions. Byshorteningthetasktimehorizon,thelearningefficiencyoftemporal-differencelearning
+RL algorithms [72] can be improved by, for example, reducing value function bootstrapping error
+accumulationastherearelesstimestepsbetweenasparserewardsignalandthestartingstate.
+22
