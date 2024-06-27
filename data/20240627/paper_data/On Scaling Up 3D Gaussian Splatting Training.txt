@@ -1,0 +1,934 @@
+On Scaling Up 3D Gaussian Splatting Training
+HexuZhao1 HaoyangWeng1 † DaohanLu1 † AngLi2
+JinyangLi1 AurojitPanda1 SainingXie1
+1 New York University
+2 Pacific Northwest National Laboratory
+Abstract
+3DGaussianSplatting(3DGS)isincreasinglypopularfor3Dreconstructionduetoitssuperior
+visualqualityandrenderingspeed. However,3DGStrainingcurrentlyoccursonasingleGPU,
+limiting its ability to handle high-resolution and large-scale 3D reconstruction tasks due to
+memoryconstraints. WeintroduceGrendel,adistributedsystemdesignedtopartition3DGS
+parametersandparallelizecomputationacrossmultipleGPUs. AseachGaussianaffectsasmall,
+dynamicsubsetofrenderedpixels,Grendelemployssparseall-to-allcommunicationtotransfer
+the necessary Gaussians to pixel partitions and performs dynamic load balancing. Unlike
+existing 3DGS systems that train using one camera view image at a time, Grendel supports
+batchedtrainingwithmultipleviews. Weexplorevariousoptimizationhyperparameterscaling
+strategies and find that a simple sqrt(batch_size) scaling rule is highly effective. Evaluations
+using large-scale, high-resolution scenes show that Grendel enhances rendering quality by
+scalingup3DGSparametersacrossmultipleGPUs. Onthe“Rubble”dataset,weachieveatest
+PSNRof27.28bydistributing40.4millionGaussiansacross16GPUs,comparedtoaPSNRof
+26.28using11.2millionGaussiansonasingleGPU.Grendelisanopen-sourceprojectavailable
+at: https://github.com/nyu-systems/Grendel-GS
+1. Introduction
+3D Gaussian Splatting (3DGS)[8] has emerged as a popular technique for 3D novel view
+synthesis,primarilyduetoitsfastertrainingandrenderingcomparedtopreviousapproaches
+suchasNeRF[21]. However,mostexisting3DGSpipelinesareconstrainedtousingasingleGPU
+fortraining,creatingmemoryandcomputationbottleneckswhenappliedtohigh-resolutionor
+larger-scalescenes. Forexample,thestandardRubbledataset[29]contains1657images,each
+witha4Kresolution. AsingleA10040GBGPUcanholdupto11.2millionGaussians–well
+belowthequalitysaturationpointfor3DGS.AswedemonstrateinSection5.2.1,increasingthe
+numberofGaussianscontinuestoimprovereconstructionquality. Therefore,inordertoscale
+up3DGStrainingintermsofparametercountandspeed,wedeveloptheGrendeldistributed
+trainingsystem,consistingofdistributing3DGStrainingacrossmultipleGPUsandanempirical
+ruletoautomaticallyadapttraininghyperparametersbasedonthebatchsize.
+†DaohanandHaoyangcontributedequallytothiswork.
+CodeandProjectPageareavailablehere.
+4202
+nuJ
+62
+]VC.sc[
+1v33581.6042:viXraDataset: Rubble Dataset: MatrixCity
+Resolution: 4K Resolution: 1080P
+#Gaussians: 40,397,406 #Gaussians: 24,355,726
+Training: 16 GPUs/BS=16 Training: 16 GPUs/BS=16
+Figure1|Twolarge-scale,high-resolutionscenereconstructionsusingGrendel,ourdistributed3DGaussian
+renderingsystem. Bothimagesarerenderedusing16GPUs. Theleftandrightimagesarerepresentedusing40
+millionand24milliongaussiansrespectively. Grendelachievesstateoftheartquality(PSNR)forbothscenes.
+Currentapproachesthatworkaroundthesingle-device3DGStrainingpipelinelimitations
+whenhandlinglarge-scalescenestypicallyinvolvecompressionschemesorselectiverender-
+ing[9,27,19]. However,thesemethodsarestillconfinedtoasingleGPUandarefundamentally
+limitedbysimilarmemoryandcomputationalbottleneckswhenscalingupfurther.
+Aslarge-scaledistributedmachinelearninghasbecomeindustrystandardandacornerstone
+formanystate-of-the-artAImodelssuchasLargeLanguageModels[28,26],itisreasonableto
+expectthatdistributingworkloadsacrossmultipleGPUsleadstosimilarperformanceandscale
+improvements,whereitallows3DGStohandlelarger,higher-resolutionscenesandproduce
+higher-qualityoutputs.
+However, 3DGS stands out as a gradient-based but not a neural network-based training
+framework. Itfeaturesauniquecomputationpipelinewithdynamicandimbalancedworkload
+patternswithinatrainingiteration. Consequently, existingSysMLframeworksandtoolkits,
+suchasthosein[28,26,14,34],donotapplytothisdomain. Theframeworksthattargetneural
+networksassumeaconsistentandbalancedworkloadconsistingofaseriesofregulartensor
+operations(e.g. GEMM)thataredistinctfromthedynamic,non-uniformcomputationpatterns
+exhibitedby3DGStrainingandrendering. Therefore,designingascalabledistributedsystem
+for3DGSisuniquelychallenging.
+Inthispaper,wepresentseveralkeyobservationsonscalingupGaussianSplattingtraining
+thatinformthedesignofourdistributedlearningpipelinefor3DGS.Forinstance,wenotethat
+eachstageofthe3DGStrainingpipelineinaniterationcanbeeffectivelyparallelized,butthe
+axesofparallelizationdifferacrossstages. Inthemixedparallelismofthe3DGStrainingpipeline,
+somecomputationsoperateonindividualoutputpixels(allowingforpixel-wiseparallelism),
+while others operate on individual 3D Gaussians (allowing for Gaussian-wise parallelism).
+Thisenablesparallelismbutnecessitatescommunicationbetweenpipelinestages. Tominimize
+communication,wealsoobservethat3DGSexhibitsspatiallocality,whereonlyasmallnumber
+of Gaussians affect each image patch. Finally, the computational intensity of rendering an
+2Render GPU-0
+GPU-0
+GPU-0 all2all GPU-0
+GPU-1
+GPU-1
+Single GPU GPU-1 GPU-1
+(a) (b) Batch of
+Images
+Figure2|(a)Traditional3DGStrainingpipelineusingasingleGPUvs. (b)OurGrendelsystemthatdistributes
+3DGaussiansacrossmultipleGPUstoalleviatetheGPUmemorybottleneck. Wealsopartitionthecomputation
+inthepixelandbatchdimensionstoforfurtherspeedup. Everysquarerepresentsa16×16blockofpixels.
+outputpixelchangesastrainingprogresses,soweidentifythedynamicandunbalancedworkloads.
+Asaresult,anystaticworkloadpartitioningstrategywillbesuboptimal.
+Inthispaper,wedescribeGrendel,adistributed3DGStrainingframeworkdesignedunder
+theseobservations. GrendelusesGaussian-wisedistribution–thatis,itdistributesGaussians
+acrossGPUs–forstepsinatrainingiterationthatexhibitGaussian-wiseparallelism,andpixel-
+wisedistributionforothersteps. Itminimizesthecommunicationoverheadwhenswitching
+between Gaussian-wise and pixel-wise distribution by assigning contiguous image areas to
+GPUsduringpixel-wisedistributionandexploitingspatiallocalitytominimizethenumberof
+GaussianstransferredamongGPUs. Finally,Grendelemploysadynamicloadbalancerthat
+usesprevioustrainingiterationstodistributepixel-wisecomputationstominimizeworkload
+imbalance.
+Grendeladditionallyscalesuptrainingbybatchingupmultipleimages. Thisdiffersfrom
+conventional3DGStrainingthatexclusivelyusesabatchsizeof1,whichwouldleadtoreduced
+GPUutilizationinourdistributedframework. Tomaintaindataefficiencyandreconstruction
+qualitywithlargerbatches,oneneedstore-tuneoptimizerhyperparameters. Tothisend,we
+introduce an automatic hyperparameter scaling rule for batched 3DGS training based on a
+heuristical independent gradients hypothesis. We empirically validate the effectiveness of our
+proposedapproach—Grendelsupportsdistributedtrainingwithlargebatchsizes(wetestup
+to32)whilemaintainingreconstructionqualityanddataefficiencycomparedtobatchsize= 1.
+Insummary,ourworkmakesthefollowingcontributions:
+• We describe the design and implementation of Grendel, a scalable, memory-efficient,
+adaptivedistributedtrainingsystemfor3DGS.Grendelallowsbatched3DGStrainingto
+bescaledupandrunonupto32GPUs.
+• Weexplorethelarge-batchtrainingdynamicsof3DGStoidentifyasimplesqrt(batch_size)
+learningratescalingstrategy,whichenablesefficient,hyperparameter-tuning-freetraining
+forbatchsizesbeyondone.
+• We show that Grendel enables high-resolution large scale scene rendering: we use 16
+GPUsandrender4Kimagesforlarge-scaleRubblescenefromMegaNERF[29]. Forthis
+scene,Grendeluses40.4millionGaussianstoachieveaPSNRof27.28,outperformingthe
+currentstate-of-the-art. ThememoryrequiredexceedsasingleGPU’scapacity,makingit
+difficulttorenderthissceneatthisqualitywithoutGrendel’stechniques.
+3
+snaissuag
+yb
+noititraP
+Partition
+by
+pixels2. Gaussian Splatting: Background, Opportunities and Challenges
+3D Gaussian Splatting [8] (3DGS) is a rendering method that represents 3D scenes using a
+(potentially large) set of anistropic 3D Gaussians. Each 3D Gaussian is represented by four
+learnable parameters: (a) its 3D position 𝑥 𝑖 ∈ R3; (b) its shape described by a 3D covariance
+matrix computed using the Guassian’s scaling vector 𝑠 𝑖 ∈ R3 and rotation vector 𝑞 𝑖 ∈ R4; (c)
+its opacity 𝛼 𝑖 ∈ R ; and (d) its spherical harmonics 𝑠ℎ 𝑖 ∈ R48. The color contribution of each
+Gaussianisdeteminedbytheseparametersandbytheviewing-direction.
+2.1. Backgroundon3DGaussianTraining
+Totrain3DGS,theuserprovidesaninitialpointcloud(mayberandomorestimated)forascene
+andasetofposedimagesfromdifferentangles. ThetrainingprocessinitializesGaussiansusing
+thepointcloud. EachtrainingstepselectsarandomcameraviewandusesthecurrentGaussian
+parameterstorendertheview. Itthencomputeslossbycomparingtherenderedimagetothe
+ground truth, and uses back-propagation to update the Gaussian parameters. The training
+processalsousesanadaptivedensificationmechanismtoaddGaussianstounder-reconstructed
+areas. Gaussiansareaddedbycloningorsplittingexistingonesbasedontheirpositionvariance
+andscalethreshold,withmoredetailsinA.1.
+Concretely, the training pipeline consists of four steps: Gaussian transformation, image
+rendering,losscalculation,andbackpropagation. Standardapproachestobackpropagationare
+usedinthissetting,andwedetailtheremainingthreestepsbelow:
+1. Gaussiantransformation: Givenacameraview 𝑣andtheassociatedscreenspace,each
+Gaussian𝑖istransformedandprojectedtodetermineitsposition 𝑥 𝑣,𝑖 ∈ R2 onscreen,its
+distance𝑑𝑒𝑝𝑡ℎ 𝑣,𝑖 ∈ R fromthescreen,anditscoverage(orfootprintradius)𝑟𝑎𝑑𝑖𝑢𝑠 𝑣,𝑖 ∈ R .
+Additionally, the color of each Gaussian 𝑐 𝑣,𝑖 is determined according to the viewing
+directionusingitslearnablesphericalharmonicscoefficients𝑠ℎ
+𝑖
+∈ R48.
+2. Rendering: AfterGaussiantransformation,theimageisrenderedbycomputingeach
+pixel’scolor. Todoso,foragivenpixel 𝑝,3DGSfirstfindsallGaussiansthatintersectwith
+𝑝. WesaythataGaussian 𝑖 intersectswith 𝑝if 𝑝lieswithin𝑟𝑎𝑑𝑖𝑢𝑠 𝑣,𝑖 oftheGaussian 𝑖’s
+projectedcenter 𝑥 𝑣,𝑖. Then3DGSiteratesoverintersectingGaussiansinincreasingdepth
+(i.e. in increasing 𝑑𝑒𝑝𝑡ℎ 𝑣,𝑖) and uses alpha-composition to combine their contributions
+untilathresholdopacityhasbeenreached.
+3. Losscalculation: Finally,the3DGScomputestheL1andSSIMlossbycomparingthe
+renderedimagetothegroundtruthimage. TheL1lossmeasurestheabsolutedifference
+betweenpixelcolors,whiletheSSIMlossmeasuresthesimilaritybetweenpixelwindows.
+Bothmetricsarecomputedper-pixelforbothforwardandbackwardimplementations.
+2.2. OpportunitiesandChallengesindistributing3DGS
+IndesigningGrendelforscalingup3DGaussianSplattingtraining,weexploitthefollowing
+opportunitiesintheabove-describedtrainingprocessandaddressseveralchallenges:
+Opportunity: mixedparallelism. Eachofthestepsdescribedaboveisinherentlyparallelbut
+requiresdifferentkindsofworkpartitioning. Inparticular,theGaussiantransformationstep
+operatesonindividualGaussiansandthusshouldbepartitionedbyGaussians. Ontheother
+hand,therenderingandlosscalculationstepsoperateonindividualpixels(orpixelswindows
+forSSIMloss)andthusshouldbepartitionedbypixel.
+Opportunity: spatiallocality. MostGaussiansintersectasmallcontiguousareaoftherendered
+imageduetotheirtypicallysmallradius. AsillustratedinFigure3,90%ofthe3DGaussiansin
+4threescenes(Rubble,Bicycle,andTrain)havearadius< 2%ofimagewidth. Consequently,a
+pixelisaffectedbyasmallsubsetofthescene’s3DGaussians,withsignificantoverlapamong
+neighboringpixels’Gaussians.
+Cumulative Percent Curve of Radius Magnitude
+1.0
+0.9 Train
+Bicycle
+0.8
+Rubble
+0.7
+0.6
+0.5
+0.4
+0.3
+0.2
+0.1
+0.0 10 3 10 2 10 1 100
+Gaussian Footprint Radius / Image Width
+Figure3|ThefootprintradiusofmostGuassiansissmallrelativetotheimagesize.
+Challenge: dynamic and unbalanced workloads. Different image areas intersect varying
+quantitiesofGaussians. Forinstance,animageregioncontainingtheskylikelycorrespondsto
+fewerGaussiansthanaregionwithaperson. Additionally,thedensity,position,shape,and
+opacity of Gaussians change throughout training. Therefore, the number of Gaussians and
+theirmappingtopixelsevolveovertime,leadingtocomputationalworkloadimbalancesacross
+differentimageregionsandoverthetrainingperiod. Fixedpartitioningschemesthussuffer
+fromloadimbalance.
+Challenge: absenceofbatching. Current3DGSsystemsprocessimagesoneatatime,which
+suffices for single GPU training. However, as shown in §5, this approach is inefficient in a
+distributedsettingwithmultipleGPUs. Effectivetrainingwithlargerbatchsizesnecessitates
+anunderstandingoftheuniqueoptimizationdynamicsof3DGS,whichmaydifferfromthose
+ofconventionalneuralnetworks.
+3. System Design
+Here, we describe how Grendel exploits the mixed parallelism and spatial locality of 3DGS
+(§3.1)toaddressthechallengeofdynamicandunbalancedworkloads(§3.2).
+3.1. Mixedparallelismtraining
+Figure2(b)providesanoverviewofGrendel’sdesign. Grendeldistributesworkaccordingto
+3DGS’ mixed parallelism: it uses Gaussian-wise distribution—where each GPU operates on a
+disjointsubsetofGaussians–fortheGaussiantransformationstep,andpixel-wisedistribution–
+where each GPU operates on a disjoint subset of pixels— for the image rendering and loss
+computation step. The spatial locality characteristic allows Grendel to benefit from sparse
+all-to-allcommunicationwhentransitioningbetweenthesestages.
+Gaussian-wiseDistribution. GrendelpartitionstheGaussians,includingtheirparametersand
+optimizerstates,anddistributesthemuniformlyacrossGPUs. Then,eachGPUindependently
+computestheGaussiantransformationforthesetof3DGaussiansassignedtoit. Wefoundthat
+the amount of computation required does not significantly vary across Guassians, and thus
+evenlydistributingGaussiansacrossGPUsallowsustofitthemaximalnumberofGaussians
+whilespeedingupcomputationlinearlyforthisstep.
+5
+tnecreP
+evitalumuCIntersecting
+Gaussians
+Non-Intersecting
+Gaussians (Ignored)
+Figure4|EachGPUonlyconsidersGaussianswhosefootprintsintersectwithitsassignedpixelrenderarea.
+Everysquarerepresentsa16×16blockofpixels.
+Pixel-wise Distribution. We distribute contiguous image areas across GPUs for the image
+renderingandlosscomputationsteps. Distributingcontiguousareasallowsustoexploitspatial
+locality and reduce the number of Gaussians transferred among GPUs in this step. In our
+implementation, we partition each image in a batch by dividing it into 16×16-pixel blocks,
+serializing the blocks, and then distributing consecutive subsequences of blocks to different
+GPUsusinganadaptivestrategy(§3.2). Forbatching,eachGPUcanbeassignedblocksfrom
+differentimagesinabatch,asshowninFigure2(b).
+Transferring Gaussians with sparse all-to-all communication. To render an image pixel, a
+GPUneedsaccesstoGaussiansthatintersectthepixel,whichcannotbepre-determinedasthey
+areview-dependentandchangeduringtraining. Therefore,Grendelincludesacommunication
+stepaftertheGaussiantransformation. As3DGSexhibitsspatiallocality,eachpixelpartition
+onlyrequiresasmallsubsetofall3DGaussians. Weleveragethistoreducecommunication:
+eachGPUfirstdecidesthesetofintersectingGaussiansforrenderingapixelpartition(Figure4)
+beforeusingasparseall-to-allcommunicationtoretrieveGaussiansintersectingwithanypixels
+inthepartition. Areversedall-to-allcommunicationisdoneduringthebackwardpass.
+Although Grendel’s design bears some resemblance to FSDP [34] used for distributed
+deep neural network training, there are some important differences. Firstly, unlike weight
+shardinginFSDP,Gaussian-wisedistributioninGrendelisnotmerelyforstoragebutforalso
+forcomputation(theGaussiantransformation). Secondly,unlikeFSDPwhichtransfersweight
+shardsusingthedenseall-gathercommunication,GrendeltransfersonlyrelevantGuassians
+usingsparseall-to-allcommunication.
+3.2. IterativeWorkloadRebalancing
+Pixel-wiseDistributionRebalancing. Asdiscussedin§2.2,thecomputationalloadofrendering
+a pixel varies across space (different pixels) and time (different training iterations). Thus,
+unlikeindistributedneuralnetworktraining,auniformorfixeddistributioncannotguarantee
+balancedworkloads,soanadaptivepixeldistributionstrategyisneeded.
+We record the rendering time of each pixel of each training image during every epoch
+after the first few. Since the scene generally changes smoothly between consecutive epochs
+duringtraining,therenderingtimeofeachpixelalsochangesslowly. Therefore,therendering
+times from previous epochs form a good estimate of a pixel’s rendering time in the current
+epoch. Basedonthisestimate,wecanadaptivelyassignpixelstodifferentGPUssuchthatthe
+workloadsareapproximatelybalanced.
+Specifically,Grendelmeasurestherunningtime(includingimagerendering,losscompu-
+tation, and the corresponding backward computation) of each block of pixels assigned to a
+GPU, computes the average per-pixel computation time for the GPU, and uses this average
+toapproximatethecomputationtimeforanypixel 𝑝assignedtotheGPU.Forexample, ifa
+GPU is assigned pixels 𝑝
+0
+through 𝑝 𝑛, and takes time 𝑡 for all of these pixels, then Grendel
+assumesthatpixel 𝑝 𝑖 where𝑖 ∈ [0,𝑛] requires 𝑛𝑡 timeforcomputation. Insubsequentiterations,
+6theimageisre-splitsothatthesumofthecomputationtimeforpixelsassignedtoallGPUs
+are equal. In our implementation, we use 16×16 pixel blocks as the split granularity. We
+showthepseudocode(Algorithm1)forcalculatingtheDivisionPointstosplitanimageinto
+load-balancedsubsequencesofblocks.
+Algorithm1CalculationofDivisionPoints
+Require: 𝐸𝑇 𝑗, 𝐵(numberofpixelblocks),𝐺 (numberofGPUs)
+Ensure: 𝐷𝑃 (divisionpoints)
+1: 𝐶𝑇 ← TORCH.CUMSUM(𝐸𝑇) ⊲CumulativesumofET
+2:
+𝐸𝑇
+𝑔𝑝𝑢
+←𝐶𝑇[𝐵−1]/𝐺 ⊲EstimatedruntimeperGPU
+3: 𝑇𝐻 ← TORCH.ARANGE(0,𝐺)·𝐸𝑇 𝑔𝑝𝑢 ⊲ThresholdsforDivisionPoints
+4: 𝐷𝑃 ← TORCH.SEARCHSORTED(𝐶𝑇,𝑇𝐻) ⊲DivisionPoints
+5: return 𝐷𝑃
+Gaussian-wiseDistributionRebalancing. Whentrainingstarts,wedistribute3DGaussians
+uniformlyamongtheGPUs. Astrainingprogresses,newGaussiansareaddedbycloningand
+splitting existing ones(§2.1). Newly added Gaussians make the distribution imbalanced as
+differentGaussiansdensifyatdifferentratesthatdependonthescene’slocaldetails. Therefore,
+weredistributethe3DGaussiansaftereveryfewdensificationstepstorestoreuniformity.
+4. Scaling Hyperparameters for Batched Training
+To efficiently scale to multiple GPUs, Grendel increases the batch size beyond one so it can
+partitiontrainingintoabatchofimagesinadditiontopixelsinsideeachimage,asshownin
+Figure2(b).
+However, increasing the batch size without adjusting hyperparameters, particularly the
+learningrate,canresultinunstableandinefficienttraining[4,25],andhyperparametertuning
+isatime-consumingandtediousprocess. Thoughtherehavebeenworksthatsimplifylearning-
+ratetuningfortrainingdeepneuralnetworks,theirsettingsaredistinctfromourssincethey
+either build on SGD [4] (where we use Adam) or they leverage the layer-wise structure of
+neuralnetworks[3,32]. WeproposeanautomatichyperparameterscalingrulefortheAdam
+optimizertoenablehyperparameter-tuning-freebatched3DGStraining. Ourresultisdrivenby
+theIndependentGradientsHypothesisuniqueto3DGS.Interestingly,ourproposedsquare-root
+scaling rule coincides with recent works that study Adam learning rate scaling for neural
+networktrainingeventhoughtheymakedistinctassumptions[5,13].
+WeproposetoscaleAdam’slearningrateandmomentumbasedonbatchsizeasfollows:
+√︁
+𝜆′= 𝜆× batch_size (1)
+𝛽 ′,𝛽 ′= 𝛽batch_size,𝛽batch_size (2)
+1 2 1 2
+where 𝜆 is the original learning rate, and 𝛽 ,𝛽 are the original first and second moments in
+1 2
+Adam. 𝜆′,𝛽 ′,𝛽 ′aretheadjustedhyperparameterstoworkwithagreaterbatchsize. Werefer
+1 2
+totheseasthesquare-rootlearningratescalingandtheexponentialmomentumscalingrules.
+IndependentGradientsHypothesis. Toarriveatthesescalingrules,itishelpfultoconsider
+3D GS training in a simplified setting. Suppose that the gradients received by 3D Gaussian
+parametersfromeachcameraviewareindependentofgradientsinducedbyotherviews. Con-
+sequently, if we are given a batch of 𝑏 camera views, taking 𝑏 sequential gradient descent
+stepsforeachviewinthebatchisequivalenttotakingonebiggerstepwherethegradientsare
+summedtogether. Ifwewereusingthevanillagradientdescentalgorithmandaveragingthe
+7gradientsinabatch,settingthelearningratetoscalelinearlywiththebatchsizeachievesthis
+equivalence. However,3DGSusesAdam,anadaptivelearningrateoptimizerthat(1)divides
+thegradientsbythesquarerootoftheper-parametersecondmomentestimate,and(2)uses
+momentumtocombinecurrentgradientsandpastgradientsinanexponential-moving-average
+fashion, making a bigger update different from simply summing up smaller batch-size-one
+updates. Under the independent gradients hypothesis, we derive the following corrections to
+Adamhyperparameterstoapproximatebatch-size-onetrainingwithalargerbatch:
+Let us denote 𝑔 𝑘 as the gradient of some parameter evaluated at view 𝑘, and 𝑔 =
+(cid:205)
+𝑗 |∈ 𝑉𝑉
+|𝑔𝑗
+as the full-batch gradient (mean of gradients across views), where 𝑉 is the set of all views.
+Let us further assume E[𝑔 𝑘] = 0 for all 𝑘. By the independence assumption: Cov(𝑔 𝑘,𝑔 𝑗) =
+E[(𝑔 𝑘−0)(𝑔 𝑗−0)] = 0 when 𝑘 ≠ 𝑗 and E[(𝑔 𝑘)2] when 𝑘 = 𝑗.
+Then,parameterupdatefromabatch-size-1Adamstep(withoutmomentum)onview𝑘is:
+𝑔 𝑔 𝑔
+Δ{𝑘}= 𝑘 = 𝑘 = 𝑘 .
+√︂ E(cid:104)
+E 𝑗∈𝑉
+(cid:104)
+𝑔2
+𝑗(cid:105)(cid:105) √︃ E(cid:2)|𝑉|𝑔2(cid:3) √︁ |𝑉|√︃ E(cid:2)𝑔2(cid:3)
+However,theparameterupdatefromoneAdamstep(withoutmomentum)onabatchof
+views 𝐵 ⊆ 𝑉 ofsize𝑏is:
+Δ{𝐵}= (cid:205) 𝑘∈𝐵𝑔 𝑘/𝑏 = (cid:205) 𝑘∈𝐵𝑔 𝑘/𝑏 = (cid:205) 𝑘∈𝐵𝑔 𝑘/𝑏 = √1 (cid:205) 𝑘∈𝐵𝑔 𝑘 .
+√︄ E(cid:20)
+E
+𝐵′⊆𝑉
+(cid:20)(cid:16)
+(cid:205)
+𝑗∈𝐵′𝑔𝑗/𝑏(cid:17)2(cid:21)(cid:21) √︂ E(cid:104)|𝑉 𝑏|𝑔2(cid:105) √︃ |𝑉 𝑏|√︃ E(cid:2)𝑔2(cid:3) 𝑏√︁ |𝑉|√︃ E(cid:2)𝑔2(cid:3)
+√
+Thus,settingthelearningrate 𝜆′= 𝜆× 𝑏allowsthebatchupdateΔ{𝐵} tomatchwiththe
+totalindividualupdates(cid:205) 𝑘∈𝐵Δ{𝑘}.
+Alongside the square-root learning rate scaling (Eq 1), we also propose an exponential
+momentumscalingtoaccommodatelargerbatches(Eq2). Initiallyusedby[2],thisrulescales
+themomentumparameterswith 𝛽′= 𝛽batch_size,whichexponentiallydecreasestheinfluence
+ofpastgradientswhenthebatchsizeincreases. Wewishtostressthatintherealworld,even
+thoughsomecamerassharesimilarposes,asetofrandomcamerasgenerallyobservedifferent
+parts of a scene, hence the gradients in a batch are mostly sparse and can be thought of as
+roughlyindependent. Weempiricallystudytheindependentgradienthypothesisandevaluate
+ourproposedscalingrules.
+4.1. EmpiricalEvidenceofIndependentGradients
+To see if the Independent Gradients Hypothesis holds in practice, we analyze the average per-
+parametervarianceofthegradientsinreal-worldsettings. Weplotthesparsityandvarianceof
+thegradientsofthediffusecolorparametersstartingatpre-trainedcheckpointsonthe“Rubble”
+dataset[29]againstthebatchsizeinFigure5. Wefindthattheinverseofthevarianceincreases
+roughlylinearly,thentransitionsintoaplateau. Wefindthisbehaviorinallthreecheckpoint
+iterations, representing early, middle, and late training stages. The initial linear increase of
+theprecisionsuggeststhatgradientsareroughlyuncorrelatedatbatchsizesusedinthiswork
+(upto32)andsupportstheindependentgradientshypothesis. However,itisworthnotingthat
+eventhoughasingleimagehassparsegradients,whentherearemanyimagesinabatch,the
+gradientsoverlapandbecomelesssparse. Theyalsobecomemorecorrelatedbecauseweexpect
+imageswithsimilarposestooffersimilargradients.
+4.2. EmpiricalTestingofProposedScalingRules
+To empirically test whether the proposed learning rate and momentum scaling rules work
+well,wetrainthe“Rubble”scenetoiteration15,000withabatchsizeof1. Then,weresetthe
+8Batch size vs Grad Sparsity 3.01e13 Batch size vs Grad Variance 1e14 Batch size vs Grad Precision
+1.2
+0.8 2.5 1.0
+2.0 0.8
+0.6
+1.5 0.6
+0.4
+1.0 0.4
+0.2 0.5 0.2
+0.0 0.0
+100 101 0 10 20 30 40 50 60 0 10 20 30 40 50 60
+Batch size (log scale) Batch size Batch size
+iter 7000 iter 15000 iter 30000
+Figure5|Gradientsareroughlyuncorrelatedinpractice. Onthe“Rubble”dataset[29],theinverseoftheaverage
+parametervarianceincreaseslinearly,thenrisestoaplateau,suggestingthatthegradientsareroughly
+uncorrelatedinitiallybutbecomelesssoasthebatchsizebecomeslarge. Averagedover32randomtrials.
+Cumulative Update Direction Cumulative Update Magnitude Cumulative Update Direction Cumulative Update Magnitude
+1.0 5 1.0 2.00
+0.9 0.9 1.75
+0.8 4 0.8 1.50 0.7 0.7
+3 1.25 0.6 0.6 0.5 1.00
+2 0.5 0.4 0.75
+0.4
+0.3 1 0.3 0.50
+0.2
+0.2 0.25
+0.1 0 1000 2000 3000 4000 5000 6000 7000 0 0 1000 2000 3000 4000 5000 6000 7000
+Train Images Train Images 0.1 0 1000 2000 3000 4000 5000 6000 7000 0.00 0 1000 2000 3000 4000 5000 6000 7000
+BS=4 linear BS=16 linear BS=32 linear Train Images Train Images
+BBSS==44 slinqertar BBSS==146 c osqnrstt BBSS==3126 ssqqrrtt BBSS==44 ccoonnsstt.. BBSS==1166 ccoonnsstt.. BBSS==1362 acodnjusstt.
+BBSSB==S44= cs4oq lnritnsetar BBSSB==S11=664 cl isnoqenrasttr BBBSSS===431 c26o ccnoosnntsstt BBSS==44 aaddjjuusstt BS=4 constB. S=16 adjust BS=4 adjust BS=32 adjust
+(a)Learningratescalingrulesvs. BSinvariance. (b)Momentumscalingrulesvs. BSinvariance.
+Figure6|Weplotthetrainingtrajectoriesofthediffusecolorparameterson“Rubble”,whentrainingwithbatch
+size∈ [4,16,32]usingdifferentlearningrateandmomentumscalingstrategies. Cumulativeweightupdatesusing
+thesquare-rootlearningratescalingrule(a,redcurves)andexponentialmomentumscalingrule(b,redcurves)
+maintainhighcosinesimilaritytobatch-size1updatesandhavenormsthatareroughlyinvarianttothebatchsize.
+Adamoptimizerstatesandcontinuetrainingwithdifferentbatchsizes. Wecomparehowwell
+differentlearning-rateandmomentumscalingrulesmaintainasimilartrainingtrajectorywhen
+switching to larger batch sizes in Figure 6. Since different parameter groups of 3D GS have
+vastlydifferentmagnitudes,wefocusononespecificgroup,namelythediffusecolor,tomake
+thecomparisonsmeaningful. Figure6acomparesthreedifferentlearningratescalingrules∈
+[constant,sqrt,linear]whereonlyourproposed“sqrt”holdsahighupdatecosinesimilarity
+andasimilarupdatemagnitudeacrossdifferenttrainingbatchsizes. Similarly,6bshowsour
+proposedexponentialmomentumscalingrulekeepsupdatecosinesimilarityhigherthanthe
+alternativewhichleavesthemomentumcoefficientsunchanged.
+5. Evaluation
+OurevaluationaimstodemonstrateGrendel’sscalability,showingboththatitcanrenderhigh-
+resolutionimagesfromlargescenes,andthatitsperformancescaleswithadditionalhardware
+resources. And we include results from abalation study to demonstrate the importance of
+Grendel’sdynamicloadbalancing. Theablationstudyforthelearningratescalingstrategies
+havealreadybeendiscussedin4.2,alongwithouranalysis.
+9
+ytisrapS
+)1 SB
+/w( miS
+enisoC
+)1 SB
+ot( oitaR
+mroN
+ecnairaV
+retemaraP
+gvA
+)1 SB
+/w( .miS
+enisoC
+)ecnairaV
+retemaraP
+gvA(/1
+)1 SB
+ot( oitaR
+mroNDataset #Scenes Resolutions #Images TestSetSetting
+Tanks&Temple[11] 2 ∼1K 251to301 1/8ofallimages
+DeepBlending[6] 2 ∼1K 225to263 1/8ofallimages
+Mip-NeRF360[1] 9 1080P 100to330 1/8ofallimages
+Rubble[29] 1 4591×3436 1657 officialtestset
+MatrixCityBlock_All[15] 1 1080P 5620 officialtestset
+Table1|Scenesusedinourevaluation: Wecoverscenesofvaryingsizesandresolutions.
+30
+Speedup 5.33x
+OOM 38.03 5 PSNR 4.83x
+4.6x
+4.36x
+25.18 39.12
+4
+30 25
+OOM 24.75 36.10 3.25x
+3 21.84 22.0 22.09 21.73 22.06 21.76
+OOM 13.74 22.45 20
+7.28 12.55 2 20
+10
+OOM 6.52 12.56 1 1.0x
+0
+OOM OOM 5.55
+0 15
+1 2 4 8 16 32 1GPU 4GPU 8GPU 8GPU 16GPU 16GPU
+BS=1 BS=16 BS=16 BS=32 BS=16 BS=32
+# GPUs
+Figure7|ToavoidOOM,4GPUsareneededto Figure8|Evenforthesmall“Train”scene,we
+trainthelarge4K“Rubble”scene. Wefurther achievespeedupwithdistributedtrainingandlarger
+improvethroughputbydistributingacrosseven batchsizeswithoutcompromisingtestPSNR.All
+moreGPUsandincreasingthebatchsize. configsaretrainedwith30Ktotalimages.
+5.1. SettingandDatasets
+ExperimentalSetup. WeconductedourevaluationinthePerlmutterGPUcluster[24]. Each
+nodeweusedwasequippedwith4A100GPUswith40GBofGPUmemory,andinterconnected
+with each other using 25GB/s NVLink per direction. Servers were connected to each other
+usinga200GbpsSlingshotnetwork.
+Datasets. WeevaluateGrendelusingthedatasetsandcorrespondingresolutionsettingsshown
+inTable1. Ofthese,RubbleandMatrixCityBlock_Allrepresentthelargescaledatasetsthatare
+outofreachformostexisting3DGSsystems,whileotherdatasetsarecommonlyusedin3DGS
+papers. Thesedatasetsvaryinareasizeandresolutiontocomprehensivelytestoursystem.
+EvaluationMetrics. WereportimagequalityusingSSIM,PSNRandLPIPSvalues,andthrough-
+putintrainingimagespersecond. Wetakebothforwardandbackwardtimeintoconsideration
+ofthroughput. Andnotethatthroughputinimagespersecondmaydifferfromthroughputin
+iterationspersecond,asoneiterationincludesthebatchsizenumberofimages.
+5.2. PerformanceandMemoryScaling
+WestartbyevaluatingGrendel’sscaling,andhowadditionalGPUsimpactcomputationperfor-
+manceandmemory.
+Computation. WeevaluatedhowadditionalGPUsimpactGrendel’sperformanceusingboth
+large-scale(rubbleandtrain)andsmall-scale(Mip-Nerf360)datasets.
+WeusedtheRubblescenetoevaluatethetrainingthroughput. Forthisexperimentweused
+10
+eziS
+hctaB
+46
+23
+61
+8
+4
+2
+1
+)ces/sgmi(tuphguorhT
+gniniarT
+pudeepS
+gniniarT
+RNSP5 40
+Mip360 (4GPU BS=4 speedup over 1GPU BS=1) 70 1GPU BS=1 4GPU BS=4 w/o Loadbalance
+4GPU BS=1 w/o Loadbalance 4GPU BS=4 w/ Loadbalance
+TT & DB (4GPU BS=4 speedup over 1GPU BS=1) 35 4GPU BS=1 w/ Loadbalance
+4 60
+30 50
+3
+40
+25
+2 30
+20
+20
+1
+15
+1GPU BS=1 (Test PSNR) 10
+4GPU BS=4 (Test PSNR)
+c0 ounte kr itchen room stump bicycle garden bons fa li ower ts reehill train tru plc ak yro do rjom hnson 10 0 counter kitchen room stu m p bicycle garden bonsai flowers treehill
+Figure9|TrainingSpeedupandPSNRon Figure10|SpeedupfromIterativeLoadBalancing
+Mip-NeRF360andTanks&Temples+DeepBlending. andincreasedbatchsizesonMip-NeRF360.
+35millionGaussianswhichhavebeentrainedtoconvergence. Becauseofthetimerequired
+torender4Kimagesforthisscene,wemeasuredthroughputfortrainingoveranother10,000
+images times, and in Figure 7 we report throughput (in images per second) as we vary the
+numberofGPUs(x-axis)andbatchsize(y-axis). Weobservethatwecannotrenderthisscene
+withasingleGPU(regardlessofbatchsize)becauseofitsmemoryrequirements. Furthermore,
+bothincreasingthenumberofGPUsandincreasingbatchsizeyieldperformanceimprovements:
+performanceincreasesfrom5.55imagespersecond(4GPUs,batchsize1)to38.03imagesper-
+second(32GPUs,batchsize64)inourexperiments. Weprovideadditionaldetailsaboutthis
+experimentinAppendixC.2.
+Next,weusethe980×545resolutionTrainscenetoevaluateimagequalityduringscaling
+(thisimageissmallenoughtoallowustorendertheimagefully). OurresultsinFigure8show
+thatadditionalGPUsimprovethroughputwhilemaintainingimagequalitywhentrainedwith
+thesametotalnumberofimages. Notably,our16-GPUsetupwithabatchsizeof32completes
+trainingon30Kimagesinjust2minutesand42.97seconds,representingthestate-of-the-art
+trainingspeedtothebestofourknowledge.
+WeobservedinFigure9thesameimprovementinperformancewithoutdegradationfor
+other scenes taken from the Mip-Nerf360 dataset (first half) and the Tanks & Temple and
+Deep Blending datasets (second half), and using default hyperparameters from the 3DGS
+repository [8]. We train both configurations on the same number of images: 50k for Mip-
+NeRF360and30kfortheslightlysmallerTT&DBdatasets,toensureconvergenceandafair
+comparison. AdditionaldetailsonthisexperimentareinAppendixC.2.
+MemoryScaling. ScalingthenumberofGPUsalsoincreasesavailablememory,andthusthe
+amountofGaussiansthatcanbeusedtorepresentascene. Weevaluatedthiseffectbyusing
+densificationtoaddadditionalGaussiansuntilweranoutofmemory. InFigure11weshow
+numberofGaussians(inmillions)whenusingbatchsize1,4and16,whilevaryingthenumber
+ofGPUs,andobservelinearscaling. In§5.2.1weshowtheutilityofusingadditionalGaussians,
+andweprovideadditionaldetailsaboutthisevaluationinAppendixC.2.
+5.2.1. GaussianQuantityvs. ReconstructionQuality
+Scaling to multiple GPUs allows Grendel to use a larger number of Gaussians to represent
+scenes. AlargernumberofGaussianscancapturefinegrainedscenedetails,andshouldthusbe
+abletobetterreconstructlarge-scale,high-resolutionscenes. Weevaluatedthiseffectusingthree
+scenes: Rubble,MatrixCityBlock_All,andBicycle,andvariedthenumberofGaussiansusedby
+11
+pudeepS
+gniniarT
+RNSP
+)ces/sgmi(tuphguorhT
+gniniarT40
+w/o Loadbalance
+w/ Loadbalance
+350 bsz=1 35
+300 bsz=4 30
+bsz=16
+250 25
+200 20
+150
+15
+100
+10
+50
+5
+0
+0
+12 4 8 16 32 GPU=4 GPU=8GPU=16GPU=32
+GPU Count BS=4 BS=8 BS=16 BS=32
+Figure11|MoreGPUsprovideadditionalmemorytosupport Figure12|Loadbalancingandlargerbatch
+moreGaussiansbeforeencounteringOOM. acceleratetrainingon4KRubbleScene
+Rubble MatrixCity Block_All Bicycle
+PSNR 27.0 PSNR PSNR
+27.0 S LPS II PM S 0.8 S LPS II PM S 0.8 24.8 S LPS II PM S 0.7
+26.5 24.7
+0.7 0.7
+0.6 26.5 24.6 0.6 26.0 0.6
+24.5 0.5 26.0 0.5 25.5 0.5 24.4
+0.4
+25.5 0.4 24.3 0.4 25.0
+0.3 24.2 0.3
+25.0
+0.3 24.5 24.1
+0.2
+5 10 15 20 25 30 35 40 5 10 15 20 25 30 2 3 4 5 6 7 8 9 10
+# of Gaussians (Millions) # of Gaussians (Millions) # of Gaussians (Millions)
+Figure13|ScalabilityStatistics: GaussianQuantityvs. ReconstructionQuality
+UsingmoreGaussiansresultsinbettertestmetricsforreconstruction. Theredlineindicatesthenumberof
+GaussiansasingleGPUcanhandle,whichisinsufficientforachievinghigh-qualityresults.
+changingdensificationsettings: weloweredthegradientnormthresholdtoinitiatedensification
+and reduced the threshold for splitting Gaussians instead of cloning until the densification
+mechanismproducedthetargetnumberofGaussianswithoutmanualinterference.
+WerenderedRubbleandMatrixCityBlock_Allusing16GPUsandabatchsizeof16,while
+weused4GPUsandabatchsizeof4forBicycle. ThedifferenceinnumberofGPUsandbatch
+sizesisduetodifferencesinscenesizes: bicycleismuchsmallerthantheothertwodatasets. In
+Figure13weshowthatimagequalitymetrics(PSNR,SSIMandLPIPS)improveasweaddmore
+Gaussians. The red line in the Rubble and Matrix City Block_All graphs shows the number
+ofGaussiansthatcanfitonasingleGPU(Bicycle,beingsmaller,canberenderedonasingle
+GPU).Figure14showstherenderedimagesaswescaleGaussiansquantity,anddemonstrates
+thequalityimprovementsarehumanvisible. Theseresultsdemonstratebenefitsofusingmore
+Gaussians,anddemonstratethenecessityofmulti-GPU3DGStrainingsystemslikeGrendel.
+5.3. AblationStudy
+Figure 10 and 12 illustrate that our load balancing techniques and increased batch size sig-
+nificantlyimprovetrainingthroughputonboth1080pMip-NeRF360datasetand4KRubble
+datasets,comparedtotheoneGPUbaselineandourstraightforwarddistributedsystemwitha
+conventionalbatchsizeofoneandnoloadbalancing. Althoughgoodspeedcanbeachieved
+withoutloadbalancing,loadbalancingallowsustoconsistentlyachieveevenhigherthroughput
+acrossvarioustypesandscalesofscenes.
+12
+)snoilliM(
+snaissuaG
+fo
+#
+xaM
+RNSP
+timiL
+yromeM
+UPG
+enO
+timiL
+yromeM
+UPG
+enO
+)ces/sgmi(
+tuphguorhT
+SPIPL
+/ MISSFigure14|Visualization: GaussianQuantityvs. ReconstructionQuality
+6. Related Works
+Large-scalescenereconstruction. Priorworkhasproposedsystemsthatusethedivide-and-conquer
+approachtoscale3DGStoworkwithlargescenes. VastGaussian[17],CityGaussisan[18],and
+HierarchicalGaussian[9]dividelargescenesintosmallregions,trainonthesesmallerregions
+onasingleGPU,andthenmergetheresultingimages. HierarchicalGaussian[9],Octree-GS[27]
+andScaffold-GS[19]describelevel-of-detailbasedapproachestoadaptivelyreducethenumber
+ofGaussiansconsideredforparticularscenes. Noneofthesesystemscanconsiderafulllarge-
+scalescenedirectlyandachievethesamequalityasours. Similarapproaches[29,33,12]have
+alsobeenusedtoscaleNeRF,buttheycannotdirectlyapplyto3DGSwhichexhibitsadifferent
+computationpatternaswediscussedinSection1.
+Distributed training for neural networks. Existing work have exploited various types of
+parallelismtotrainneuralnetworksacrossGPUs. Theseincludedataparallelism[14],tensor
+parallelism[28,23],pipelineparallelism[7,22]andFSDP[34,26]. Severalsystemsalsosupport
+multiple types parallelism and/or aim to automatically partition the workload to optimize
+trainingspeed[35,31,30]. However,aswediscussedearlier(§1),neuralnetworktrainingand
+3DGS have very different computation patterns. The former performs repeated layer-wise
+computationdominatedbydensematrixmultiplyoperationswhilethelatter’s3stagestraining
+process is irregular and sparse. As a result, although Grendel’s distribution strategy may
+resemblethoseseeninexistingwork(e.g.,FSDP[34]),thedetailsarequitedifferent.
+LargeBatchSizeTraining. LargebatchtraininghasbeewidelyadoptedtoimprovetheML
+training performance and efficiency, but it has also been recognized by prior work [10] that
+increasingbatchsizecanadverselyimpactmodelperformance. Thishasledtothedevelopment
+of empirical rules, including linear scaling and learning rate warmum [4], and layer-wised
+adaptive rate scaling [32, 3]. Theoretical work [16, 20, 2] have also predicted and validated
+scalinglawsforincreasingbatchsizes. Ourworkisinspiredbythese,butfocusesonbatchsize
+scalingfor3DGStraining.
+7. Conclusion
+WehavedescribedGrendel,adistributed3DGaussiantrainingsystem. Ourevaluationshows
+thatGrendelcanrenderhigh-resolutionhigh-qualityimagesfromlargescenesthatarebeyond
+13the capabilities of existing approaches, and that it shows nearly perfect performance and
+memoryscalability. WeplantoopensourceGrendelsothatthecommunitycanmoreeasily
+experimentwith3DGSbasedreconstructiontechniquesforlargescenes.
+8. Acknowledgements
+WethankXichenPanandYoumingDengfortheirhelponpaperwriting. WethankMatthias
+Niessnerforhisinsightfulandconstructivefeedbackonourmanuscript. WethankYixuanLi
+andLihanJiangfromtheMatrixCityteamfortheirassistanceinprovidinginitialdatapoints
+oftheirdataset. WethankKaifengLyufordiscussionsonAdamtrainingdynamicsanalysis.
+This research used resources of the National Energy Research Scientific Computing Center
+(NERSC), a U.S. Department of Energy Office of Science User Facility located at Lawrence
+BerkeleyNationalLaboratory,operatedunderContractNo. DE-AC02-05CH11231.
+References
+[1] J.Barron,B.Mildenhall,D.Verbin,P.Srinivasan,andP.Hedman.Mip-nerf360: Unbounded
+anti-aliasedneuralradiancefields. InCVPR,2022.
+[2] D. Busbridge, J. Ramapuram, P. Ablin, T. Likhomanenko, E. G. Dhekane, X. Suau, and
+R.Webb. HowtoscaleyourEMA. InNeurIPS,2023.
+[3] B.Ginsburg,I.Gitman,andY.You. Largebatchtrainingofconvolutionalnetworkswith
+layer-wiseadaptiveratescaling,2018.
+[4] P.Goyal,P.Dollár,R.Girshick,P.Noordhuis,L.Wesolowski,A.Kyrola,A.Tulloch,Y.Jia,
+and K. He. Accurate, large minibatch sgd: Training imagenet in 1 hour. arXiv preprint
+arXiv:1706.02677,2017.
+[5] D.Granziol,S.Zohren,andS.Roberts. Learningratesasafunctionofbatchsize: Arandom
+matrixtheoryapproachtoneuralnetworktraining. JournalofMachineLearningResearch,
+23(173):1–65,2022.
+[6] P.Hedman,J.Philip,T.Price,J.-M.Frahm,G.Drettakis,andG.Brostow. Deepblending
+forfree-viewpointimage-basedrendering. ACMTransactionsonGraphics(Proc.SIGGRAPH
+Asia),2018.
+[7] Y.Huang,Y.Cheng,A.Bapna,O.Firat,D.Chen,M.Chen,H.Lee,J.Ngiam,Q.V.Le,Y.Wu,
+andz.Chen. Gpipe: Efficienttrainingofgiantneuralnetworksusingpipelineparallelism.
+InNeurIPS,2019.
+[8] B.Kerbl,G.Kopanas,T.Leimkühler,andG.Drettakis. 3dgaussiansplattingforreal-time
+radiancefieldrendering. ACMTransactionsonGraphics,42(4),July2023.
+[9] B. Kerbl, A. Meuleman, G. Kopanas, M. Wimmer, A. Lanvin, and G. Drettakis. A hier-
+archical3dgaussianrepresentationforreal-timerenderingofverylargedatasets. ACM
+TransactionsonGraphics,2024.
+[10] N.S.Keskar,D.Mudigere,J.Nocedal,M.Smelyanskiy,andP.T.P.Tang. Onlarge-batch
+trainingfordeeplearning: Generalizationgapandsharpminima. InICLR,2017.
+[11] A. Knapitsch, J. Park, Q.-Y. Zhou, and V. Koltun. Tanks and temples: Benchmarking
+large-scalescenereconstruction. ACMTransactionsonGraphics,2017.
+14[12] R.Li,S.Fidler,A.Kanazawa,andF.Williams. Nerf-xl: Scalingnerfswithmultiplegpus,
+2024.
+[13] S.Li,P.Zhao,H.Zhang,X.Sun,H.Wu,D.Jiao,W.Wang,C.Liu,Z.Fang,J.Xue,etal. Surge
+phenomenoninoptimallearningrateandbatchsizescaling.arXivpreprintarXiv:2405.14578,
+2024.
+[14] S.Li,Y.Zhao,R.Varma,O.Salpekar,P.Noordhuis,T.Li,A.Paszke,J.Smith,B.Vaughan,
+P.Damania,andS.Chintala. Pytorchdistributed: Experiencesonacceleratingdataparallel
+training. InVLDB,2020.
+[15] Y.Li,L.Jiang,L.Xu,Y.Xiangli,Z.Wang,D.Lin,andB.Dai. Matrixcity: Alarge-scalecity
+datasetforcity-scaleneuralrenderingandbeyond. InICCV,2023.
+[16] Z.Li,S.Malladi,andS.Arora. OnthevalidityofmodelingSGDwithstochasticdifferential
+equations(SDEs). InNeurIPS,2021.
+[17] J. Lin, Z. Li, X. Tang, J. Liu, S. Liu, J. Liu, Y. Lu, X. Wu, S. Xu, Y. Yan, and W. Yang.
+Vastgaussian: Vast3dgaussiansforlargescenereconstruction. InCVPR,2024.
+[18] Y.Liu,H.Guan,C.Luo,L.Fan,J.Peng,andZ.Zhang. Citygaussian: Real-timehigh-quality
+large-scalescenerenderingwithgaussians. InCVPR,2024.
+[19] T. Lu, M. Yu, L. Xu, Y. Xiangli, L. Wang, D. Lin, and B. Dai. Scaffold-gs: Structured 3d
+gaussiansforview-adaptiverendering. InCVPR,2024.
+[20] S.Malladi,K.Lyu,A.Panigrahi,andS.Arora. OntheSDEsandscalingrulesforadaptive
+gradientalgorithms. InNeurIPS,2022.
+[21] B.Mildenhall,P.P.Srinivasan,M.Tancik,J.T.Barron,R.Ramamoorthi,andR.Ng. Nerf:
+Representingscenesasneuralradiancefieldsforviewsynthesis. InECCV,2020.
+[22] D.Narayanan,A.Harlap,A.Phanishayee,V.Seshadri,N.R.Devanur,G.R.Ganger,P.B.
+Gibbons,andM.Zaharia. Pipedream: generalizedpipelineparallelismfordnntraining.
+InSOSP,2019.
+[23] D.Narayanan,M.Shoeybi,J.Casper,P.LeGresley,M.Patwary,V.A.Korthikanti,D.Vain-
+brand,P.Kashinkunti,J.Bernauer,B.Catanzaro,A.Phanishayee,andM.Zaharia. Efficient
+large-scalelanguagemodeltrainingongpuclustersusingmegatron-lm. InSOSP,2021.
+[24] NERSC. Perlmutterarchitecture. Accessed: 2024-05-22.
+[25] A.Qiao,S.K.Choe,S.J.Subramanya,W.Neiswanger,Q.Ho,H.Zhang,G.R.Ganger,and
+E.P.Xing. Pollux: Co-adaptiveclusterschedulingforgoodput-optimizeddeeplearning.
+InOSDI,2021.
+[26] S. Rajbhandari, J. Rasley, O. Ruwase, and Y. He. Zero: Memory optimizations toward
+trainingtrillionparametermodels. InSC,2020.
+[27] K. Ren, L. Jiang, T. Lu, M. Yu, L. Xu, Z. Ni, and B. Dai. Octree-gs: Towards consistent
+real-timerenderingwithlod-structured3dgaussians. arXivpreprintarXiv:2403.17898,2024.
+[28] M.Shoeybi,M.Patwary,R.Puri,P.LeGresley,J.Casper,andB.Catanzaro. Megatron-lm:
+Trainingmulti-billionparameterlanguagemodelsusingmodelparallelism. InSC,2020.
+[29] H. Turki, D. Ramanan, and M. Satyanarayanan. Mega-nerf: Scalable construction of
+large-scalenerfsforvirtualfly-throughs. InCVPR,2022.
+15[30] M.Wang,C.-c.Huang,andJ.Li. Supportingverylargemodelsusingautomaticdataflow
+graphpartitioning. InEuroSys,2019.
+[31] Y.Xu,H.Lee,D.Chen,B.Hechtman,Y.Huang,R.Joshi,M.Krikun,D.Lepikhin,A.Ly,
+M.Maggioni,R.Pang,N.Shazeer,S.Wang,T.Wang,Y.Wu,andZ.Chen. Gspmd: General
+andscalableparallelizationformlcomputationgraphs. InarXiv:2105.04663,2021.
+[32] Y.You,J.Li,S.Reddi,J.Hseu,S.Kumar,S.Bhojanapalli,X.Song,J.Demmel,K.Keutzer,
+andC.-J.Hsieh. Largebatchoptimizationfordeeplearning: Trainingbertin76minutes.
+InICLR,2020.
+[33] X.Yuanbo,X.Linning,P.Xingang,Z.Nanxuan,R.Anyi,T.Christian,D.Bo,andL.Dahua.
+Bungeenerf: Progressiveneuralradiancefieldforextrememulti-scalescenerendering. In
+ECCV,2022.
+[34] Y.Zhao,A.Gu,R.Varma,L.Luo,C.-C.Huang,M.Xu,L.Wright,H.Shojanazeri,M.Ott,
+S. Shleifer, A. Desmaison, C. Balioglu, P. Damania, B. Nguyen, G. Chauhan, Y. Hao,
+A.Mathews,andS.Li. Pytorchfsdp: Experiencesonscalingfullyshardeddataparallel,
+2023.
+[35] L.Zheng,Z.Li,H.Zhang,Y.Zhuang,Z.Chen,Y.Huang,Y.Wang,Y.Xu,D.Zhuo,E.P.
+Xing, etal. Alpa: Automatinginter-andintra-operatorparallelismfordistributeddeep
+learning. InOSDI,2022.
+A. Additional Preliminaries & Observations Details
+Thisappendixprovidesadditionalinformationabout3DGS,beyondwhatwascoveredin§2.
+A.1. DensificationProcess
+Densification is the process by which 3DGS adds more Gaussians to improve details in a
+particular region. A Gaussian that shows significant position variance across training steps,
+mighteitherbeclonesorsplit. Thedecisiononwhethertocloneorsplitdependsonwhether
+their scale exceeds a threshold. Hyperparameter determine the start and stop iteration for
+densification, its frequency, the gradient threshold for initiating densification, and the scale
+threshold that determines whether to split or clone. To create more Gaussians, we need to
+increasethestopiterationandfrequency,anddecreasethegradientthresholdfordensification. If
+weaimtocapturemoredetailsusingsmallerGaussians,weshouldlowerthescalethresholdto
+splitmoreGaussians. Thetrainingprocessalsoincludespruningstrategiessuchaseliminating
+GaussianswithlowopacityandusingopacityresettechniquestoremoveredundantGaussians.
+A.2. Z-buffer
+TheindicesofintersectinggaussiansforeachpixelarestoredinaZ-buffer,usedinbothforward
+andbackward. ThisZ-bufferistheswitchbetweenView-dependentGaussianTransformation
+andPixelRender. Sinceasinglegaussiancanprojectontomultiplepixelswithinitsfootprint,
+thetotalsizeofallpixels’Z-buffersexceedsboththecountof3DGSandpixels. TheZ-buffer
+itself, along withauxiliary buffersneededfor sortingit, etc, consumes significant activation
+memory. This can also lead to out-of-memory (OOM) errors if the resolution, scene size, or
+batchsizeisincreased.
+16A.3. MixedParallelism
+In the main text, some steps of 3DGS are not mentioned, but these steps can also be paral-
+lelized. TheGaussiantransformationbackwardandgradientupdatesbytheoptimizerarealso
+Gaussian-wisecomputationsandwillbedistributedthesamewayastheGaussiantransforma-
+tionforward. Similarly,theRenderBackwardandLossBackwardcomputationsarepixel-wise
+andwillbedistributedjustliketheRenderForward.
+Regardingthememoryaspect,eachGaussianhasindependenttransformedstates,gradients,
+optimizerstates,andparametersforeachcameraview. Therefore,wesavethesestatestogether
+onthecorrespondingGPUthatcontainstheirparameters. Andactivationstateslikesignificant
+Z-buffers,auxiliarybuffersforsortingandotherfunctions,lossintermediateactivationsare
+managedpixel-wisealongwiththeimagedistribution.
+Regardingdensificationmechanism,sinceweclone,splitorpruneGaussiansindependently
+basedontheirvariance,weperformthisprocesslocallyontheGPUthatstoresthem.
+A.4. DynamicUnbalancedWorkloads
+Physicalscenesarenaturallysparseonaglobalscale. Differentareahasdifferentdensitiesof
+3Dgaussians(i.eskyandatree). Thus,theintensityofrenderingnotonlyvariesfrompixelto
+pixelwithinanimagebutalsodiffersbetweenvariousimages,leadingtoworkloadsunbalance.
+Besides,duringthetraining,gaussiansparametersarecontinuouslychanging. Morepre-
+cisely,thechangeof3Dpositionparametersandco-varianceparametersaffecteachgaussian’s
+coverage of pixels on the screen. The change of opacity parameters affect the number of
+gaussians that contribute to each pixel. Both of them lead to render intensity change. The
+densificationprocesstargetsareasunderconstruction. Duringtraining,simplersceneelements
+are completed first, allowing more complex parts to be progressively densified. This means
+Gaussiansfromdifferentregionsdensifyatvaryingrates. Thedynamicnatureoftheworkloads
+ismorepronouncedatthebeginningoftraining,asitinitiallyfocusesonconstructingtheglobal
+structurebeforefillinginlocaldetails.
+The different computational steps have distinct characteristics in terms of workload dy-
+namicity. Eventhough,therenderingcomputationisdynamicandunbalanced;computation
+intensityforlosscalculationremainsconsistentacrosspixels,andtheview-dependenttrans-
+formation maintains a uniform computational intensity across gaussians. Actually, render
+forwardandbackwardhavedifferentpatternofunbalanceanddynamicity. Thecomputational
+complexity for the forward process scales with the number of 3DGS intersecting the ray. In
+contrast, the complexity of the backward process depends on Gaussians that contributed to
+color and loss before reaching opacity saturation, typically those on the first surface. Then,
+running time for render forward and backward, loss forward and backward have different
+dominatinginfluencefactors,andeverysteptakesasignificantamountoftime.
+B. Additional Design Details
+B.1. SchedulingGranularity: PixelBlockSize
+Inourdesign,weorganizethesepixelsfromalltheimagesinabatchintoasinglerow. Then,
+wedividethisrowintoparts,andeachGPUtakescareofonepart. However,iftherearealotof
+pixels,thestrategyschedulercomputationoverheadwillbeverylarge. Sowegroupthepixels
+intoblocksof16by16pixels,puttheseblocksinarowandallocatetheseblocksinstead. The
+sizeofblockisessentiallytheschedulinggranularity,whichisatrade-offbetweenscheduler
+overheadandunevenworkloadsduetoadditionalblocks. Afterscheduling,wewillhavea
+172Dbooleanarray,compute_locally[i][j],indicatingwhetherthepixelblockati-throwandj-th
+columnshouldbecomputedbythelocalGPU.Wewillthenrenderonlythepixelswithinthe
+blockswherecompute_locallyistrue.
+B.2. GaussianDistributionRebalance
+An important observation is that distributing pixels to balance runtime doesn’t necessarily
+balancethenumberofGaussianseachGPUtouchesinrendering;So,tominimizetotalcommu-
+nicationvolume,GPUsmayneedtostorevaryingquantityofGaussiansbasedontheformula
+above. Specifically,onlytheforwardruntimecorrelatesdirectlywiththenumberoftouched
+3DGS; however, the time it takes for pixel-wise loss calculations and rendering backward
+dependsonthequantityofpixelsandthecountofgaussiansthatareindeedcontributedtothe
+renderedpixelcolor,respectively. Inourexperiments,randomredistributionleadstofastest
+traininghere,evenifitsoverallcommunicationvolumeisnottheminimumsolution. Because
+inourexperimentsetting,weuseNCCLall2allastheunderlyingcommunicationprimitive,
+whichpreferstheuniformsendandreceivevolumeamongdifferentGPU.Ifwechangetouse
+communicationprimitivethatonlycaresaboutthetotalcommunicationvolume,thenwemay
+needtochangetootherredistributionstrategy.
+C. Additional Experiments Setting and Statistics
+C.1. StatisticsforMip-NeRF360,Tank&TemplesdatasetandDeepBlending
+Dataset Scene 1GPU(bsz=1) 4GPU(bsz=4)
+PSNR Throughput PSNR Throughput
+Mip-NeRF360 counter 29.16 16.25 29.19 56.24
+kitchen 31.49 14.24 31.40 49.16
+room 31.51 15.82 31.18 53.36
+stump 26.19 14.95 26.19 54.53
+bicycle 24.63 12.01 24.69 44.44
+garden 26.82 12.10 26.86 45.83
+bonsai 32.34 17.87 32.23 61.88
+flowers 21.11 14.47 21.10 53.94
+treehill 22.38 14.78 22.43 55.31
+Tank&Temples train 21.84 34.72 21.75 101.69
+truck 25.44 27.55 25.42 95.85
+DeepBlending playroom 30.11 21.98 30.22 75.38
+drjohnson 29.15 17.74 29.19 62.11
+Table2|PerformanceComparisonBetweenNon-Distributionand4GPUDistribution
+C.2. Scalability
+Table3,4and5showtheincreasedreconstructionqualitywithmoregaussians. Whilemany
+hyperparametersinfluencethenumberofGaussianscreatedbydensification,wefocusedon
+adjusting three key parameters: (1) the stop iteration for densification, (2) the threshold for
+initiatingdensification,and(3)thethresholdfordecidingwhethertosplitorcloneaGaussian.
+Initially,wegraduallyincreasedthedensificationstopiterationto5,000iterations. However,
+duetothepruningmechanism,thisadjustmentaloneprovedinsufficient. Consequently,we
+alsoloweredthetwothresholdstogeneratemoreGaussians. Forafaircomparison,allother
+18densificationparameters—suchastheinterval,startiteration,andopacityresetinterval—were
+keptconstant. FortheRubblescene,eachexperimentrunforthesame125epochs,exposing
+modelsto200,000images,ensuringconsistency. Althoughtraininglargermodelsforlonger
+durationsandloweringthepositionallearningrateimprovedresultsinmyobservations,we
+maintainedconsistenttrainingstepsandlearningratesacrossallexperimentstoensurefairness.
+Table6,7showtheThroughputScalabilitybyIncreasingbatchsizeandleveragingmore
+GPUs,forRubbleandTrainscene,respectively. Essentially,moreGPUsandlargerbatchsize
+givehigherthroughput.
+Table8demonstratesthatadditionalGPUsincreaseavailablememoryformoreGaussians,
+evaluatedontheRubblescenewithvariousbatchsizesreflectingdifferentlevelsofactivation
+memoryusage. Essentially,moreGPUsprovideadditionalmemorytostoreGaussians,while
+a larger batch size increases activation memory usage, leaving less memory available for
+Gaussians."
+Results DensificationSettings
+Experiment n3dgs PSNR SSIM LPIPS StopIter Thresholds
+EXP1 2114045 24.84 0.70 0.48 5000 (0.0002,0.01)
+EXP2 5793396 25.85 0.75 0.42 15000 (0.0002,0.01)
+EXP3 9173931 26.14 0.77 0.38 50000 (0.0002,0.01)
+EXP4 11168630 26.28 0.78 0.37 50000 (0.00018,0.008)
+EXP5 15754744 26.61 0.79 0.35 50000 (0.00015,0.005)
+EXP6 21177774 26.91 0.80 0.33 50000 (0.00013,0.003)
+EXP7 30474202 27.06 0.82 0.31 50000 (0.0001,0.002)
+EXP8 40397406 27.28 0.82 0.29 50000 (0.00008,0.0016)
+Table3|ScalablityonRubble: GaussianQuantity,ResultsandHyperparameterSettings
+Results DensificationSettings
+Experiment n3dgs PSNR SSIM LPIPS #StartPoints #DensifyIter
+EXP1 1545568 24.41 0.73 0.41 1545568 0
+EXP2 3867136 25.36 0.77 0.36 3867136 0
+EXP3 9485755 26.6 0.82 0.27 7743616 5000
+EXP4 14165332 26.78 0.83 0.25 15540941 5000
+EXP5 24355726 27.0 0.84 0.23 15540941 30000
+EXP6 30074630 26.96 0.84 0.22 15540941 40000
+Table4|MatrixCityBlock_AllStatistics: GaussianQuantity,ResultsandHyperparameterSettings
+Results DensificationSettings
+Experiment n3dgs PSNR SSIM LPIPS StopIter Thresholds
+EXP1 2185112 24.09 0.66 0.35 5000 (0.0002,0.01)
+EXP2 3035508 24.28 0.68 0.32 7000 (0.0002,0.01)
+EXP3 4154806 24.59 0.70 0.29 10000 (0.0002,0.01)
+EXP4 5272686 24.71 0.71 0.28 15000 (0.0002,0.01)
+EXP5 6579244 24.76 0.72 0.27 15000 (0.00018,0.008)
+EXP6 9636072 24.85 0.73 0.25 15000 (0.00015,0.005)
+Table5|BicycleStatistics: GaussianQuantity,ResultsandHyperparametersettings
+19GPUCount bsz=1 bsz=2 bsz=4 bsz=8 bsz=16 bsz=32 bsz=64
+1GPU OOM
+2GPU OOM
+4GPU 5.55 6.52 7.28 OOM
+8GPU 12.56 12.55 13.74 OOM
+16GPU 22.45 24.75 25.18 OOM
+32GPU 36.10 39.12 38.03
+Table6|ScalabilityonRubble: SpeedupfromMoreGPUandLargerBatchSize
+Experiment #GPU BatchSize Throughput PSNR
+EXP1 1 1 34.72 21.84
+EXP2 4 16 112.78 22.01
+EXP3 8 16 151.52 22.09
+EXP4 8 32 159.57 21.73
+EXP5 16 16 167.60 22.06
+EXP6 16 32 185.19 21.76
+Table7|ScalabilityonTrain: SpeedupfromMoreGPUandLargerBatchSize
+GPUCount bsz=1 bsz=4 bsz=16
+1GPU 12.71M 7.10M OOM
+2GPU 31.40M 21.80M 3.91M
+4GPU 63.44M 43.48M 19.55M
+8GPU 116.85M 82.31M 36.44M
+16GPU 230.41M 169.37M 74.98M
+32GPU 354.46M 313.10M 150.21M
+Table8|ScalabilityonRubble: MoreAvailablememorywithmoreGPU
+20
