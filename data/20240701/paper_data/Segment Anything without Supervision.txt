@@ -1,0 +1,723 @@
+Segment Anything without Supervision
+XuDongWang JingfengYang TrevorDarrell
+UCBerkeley
+code:https://github.com/frank-xwang/UnSAM
+Abstract
+TheSegmentationAnythingModel(SAM)requireslabor-intensivedatalabeling.
+WepresentUnsupervisedSAM(UnSAM)forpromptableandautomaticwhole-
+imagesegmentationthatdoesnotrequirehumanannotations. UnSAMutilizesa
+divide-and-conquerstrategyto“discover”thehierarchicalstructureofvisualscenes.
+Wefirstleveragetop-downclusteringmethodstopartitionanunlabeledimageinto
+instance/semanticlevelsegments. Forallpixelswithinasegment, abottom-up
+clusteringmethodisemployedtoiterativelymergethemintolargergroups,thereby
+forming a hierarchical structure. These unsupervised multi-granular masks are
+thenutilizedtosupervisemodeltraining. Evaluatedacrosssevenpopulardatasets,
+UnSAMachievescompetitiveresultswiththesupervisedcounterpartSAM,and
+surpassesthepreviousstate-of-the-artinunsupervisedsegmentationby11%in
+termsofAR.Moreover,weshowthatsupervisedSAMcanalsobenefitfromour
+self-supervisedlabels. ByintegratingourunsupervisedpseudomasksintoSA-1B’s
+ground-truthmasksandtrainingUnSAMwithonly1%ofSA-1B,alightlysemi-
+supervisedUnSAMcanoftensegmententitiesoverlookedbysupervisedSAM,
+exceedingSAM’sARbyover6.7%andAPby3.9%onSA-1B.
+1 Introduction
+Trainedonmassiveunlabeleddatausingself-supervisedlearningmethods,LargeLanguageModels
+(LLMs) [5, 34, 33, 46, 2, 19] in natural language processing have revolutionized our world and
+redefinedhuman-computerinteractions. Inthedomainofcomputervision,therecentintroductionof
+theSegmentAnythingModel(SAM)[21]hasdramaticallytransformedthefieldwithitsexceptional
+abilitytohandlediverseimagesegmentationtasks. However,theneedforcomprehensivemanual
+labelingoftrainingdata—over20minutesperimage[21]—limitsSAMfromfollowingthescaling
+lawsthatbenefitLLMs[20]. Asaresult,despiteSA-1B[21]beingthemostextensivesegmentation
+datasetavailable,itcontainsonlyabout11millionimages. Moreover,human-annotateddataoften
+introducessignificantbiasesbasedontheannotators’perceptionsof“whatconstitutesaninstance”,
+whichfrequentlyleadstotheoversightofsmallentitieswithintheimages.
+Thischallengeraisesacrucialquestionaddressedinthispaper: Canwe“segmentanything”without
+supervision? Inresponse,wepresentUnSAM,aninnovativeunsupervisedlearningmethodcapable
+ofperformingbothinteractiveandwhole-imagesegmentationwithouttheneedforsupervision.
+How can we achieve fine-grained and multi-granular segmentation masks comparable to those
+in SA-1B [21] without supervision? Insights from neuroscience suggest that the human visual
+systemexploitsthestructureofvisualscenesbydecomposingdynamicscenesintosimplerparts
+ormotions. Thisperceptionofhierarchicallyorganizedstructuresimpliesapowerful“divide-and-
+conquer”strategyforparsingcomplexscenes[4,27]. Drawinginspirationfromthis,weintroducea
+divide-and-conquerapproachdesignedtogeneratehierarchicalimagesegmentationresultsdirectly
+from raw, unlabeled images. The divide-and-conquer approach is a crucial element of UnSAM,
+enablingittoeffectivelyparseandsegmentimagesatmultiplelevelsofgranularity.
+Preprint.Underreview.
+4202
+nuJ
+82
+]VC.sc[
+1v18002.6042:viXraPrev. Unsup. SOTA
+UnSAM
+Raw COCO 30.5
+Image 42
+29.1
+LVIS
+40.5
+33.5
+Entity
+41
+33.3
+SA-1B
+44.5
+SAM
+17.1
+PACO
+29.7
+10
+Mask AR (%)
+SAM UnSAM+
+49.6
+COCO
+UnSAM 52.2
+46.1
+LVIS
+50.8
+45.9
+Entity
+49.8
+60.8
+SA-1B
+: point prompt 64.8
+SAM 18.1
+PACO
+32.3
+10
+Mask AR (%)
+SAM UnSAM UnSAM+
+68.2
+UnSAM COCO 59.5
+Raw Image 69.5
+0 Point 1-IoU (Oracle)
+Figure1:UnSAMsignificantlysurpassestheperformanceofthepreviousSOTAmethodsinunsupervisedseg-
+mentation,anddeliversimpressivewholeimageandpromptablesegmentationresults,rivalingtheperformance
+ofthesupervisedSAM[21]. ThiscomparativeanalysisfeaturesourunsupervisedUnSAM,thesupervised
+SAM,andanenhancedversion,UnSAM+,acrossavarietyofdatasets.Thetopsectiondisplaysrawimages
+(row1)alongsidewholeimagesegmentationoutputsfromUnSAM(row2),andSAM(row3). Thebottom
+sectionhighlightsourpromptablesegmentationresultsusingapointprompt(i.e.,thestarmark).Therightpanel
+quantitativelycomparestheperformanceacrossmodels,includingmetricslikeMaskAR(%)andPointIoU.
+Ourpseudo-maskgenerationpipelineinitiateswithatop-downclusteringapproach(i.e.,thedivide
+stage),toextractinitialsemanticandinstance-levelmasksusingaNormalizedCuts-basedmethod
+CutLER[39,31]. Subsequently,UnSAMrefinesthesemasksusingabottom-upclusteringmethod
+(i.e., theconquerstage): withineachmask, weiterativelymergesemanticallysimilarpixelsinto
+largersegmentsbasedonvarioussimilaritythresholds. Theresultingmasksatdifferentthresholds
+in the conquer stage, along with the masks produced in the divide stage, create a hierarchical
+structure. Technically, we can generate a vast range of granularities with minimal extra cost!
+Furthermore, UnSAM captures more subtle details that pose challenges for human annotators,
+significantlyenrichingthegranularityandutilityofunsupervisedsegmentationmodels.
+Equippedwiththesesophisticatedmulti-granularpseudomasksas“ground-truth”labels,UnSAMis
+adeptlytrainedtoperformbothinteractiveandautomaticwhole-imagesegmentation,demonstrating
+remarkableversatilityacrossvarioussegmentationscenarios. WehaveobservedthatourUnSAM
+modelfrequentlyidentifiesobjectsthatSAM[21]overlooks,particularlytypesofobjectsorparts
+typicallymissedbyground-truthannotationsofSA-1B[21],suchashumanears,animaltails,etc.
+ThecapabilitiesofUnSAMarerigorouslytestedacrosssevenmajorwhole-entityandpartsegmenta-
+tiondatasets,e.g.,MSCOCO[24],LVIS[15],SA-1B[21],ADE[48],Entity[29],PartImageNet[16]
+andPACO[30]. AsillustratedinFig.1,wedemonstratesomenoteworthybehaviors:
+• TheperformancegapbetweenunsupervisedsegmentationmodelsandSAMcanbesignificantly
+reduced: By training on just 1% of SA-1B’s unlabeled images with a ResNet50 backbone,
+UnSAMnotonlyadvancesthestate-of-the-artinunsupervisedsegmentationby10%butalso
+achievescomparableperformancewiththelabor-intensive,fully-supervisedSAM.
+• ThesupervisedSAMcanalsobenefitfromourself-supervisedlabels: integratingourunsuper-
+visedpseudomaskswithSA-1B’sground-truthdataandretrainingUnSAMonthiscombined
+dataenablesUnSAM+tooutperformSAM’sARbyover6.7%andAPby3.9%. Weobserved
+thatUnSAMandUnSAM+canoftendiscoverentitiesmissedbySAM.
+22 RelatedWorks
+2.1 Self-supervisedImageSegmentation
+Recent advances inunsupervised imagesegmentation [39, 28, 44, 6, 8, 41, 38, 42, 35, 12, 7, 37]
+have leveraged the emergent segmentation capabilities of self-supervised Vision Transformers
+(ViT) [8, 14, 17] to “discover” objects within images. Initial efforts, such as TokenCut [44] and
+LOST[32],haveproducedsemanticallymeaningfulpixelgroupingsforsalientobjectsbyutilizing
+theclass-attentionmechanismofself-supervisedViTs. Asarepresentativeworkintheunsupervised
+segmentationdomain,CutLER[39]introducedacut-and-learnpipelineforunsupervisedobjectde-
+tectionandimagesegmentation. CutLERinitiallygenerateshigh-qualitypseudomasksformultiple
+objectsusingMaskCut[39],followedbylearningadetectoronthesemasksusingalossdropping
+strategy. Extendingthisapproach,VideoCutLER[40]employsacut-synthesis-and-learnstrategyfor
+segmentingandtrackingmultipleinstancesacrossvideoframeswithoutsupervision. Additionally,
+SOHES[6]introducedtheglobal-localself-explorationmethodtoclusterimagefeaturesfromhigh
+tolowcosinesimilarity,obtainingpseudomasksthatcovermultiplehierarchicallevels.
+Incontrast,UnSAMintroducesadivide-and-conquerpipelinethatgeneratesmorepseudomasks
+per image at the same processing speed, but with enhanced quality and broader coverage across
+hierarchicallevels. Furthermore,UnSAMcapturesmoresubtledetailsthatposechallengesforhuman
+annotators,significantlyenrichingthegranularityandutilityofunsupervisedsegmentationmodels.
+2.2 PromptableImageSegmentation
+Tradition segmentation models have focused on predicting masks for all instances or semantic
+partswithinasingleimagesimultaneously. Recently,however,modelshavebeguntointeractwith
+users,generatingsegmentationmasksbasedonuserinputssuchaspoints[21,23,47,45,11],text
+descriptions[26], orboundingboxes[21]. Moreover, someapproachesnowframesegmentation
+taskswithinanin-contextlearningframework[43,3],utilizingin-contextexamplestodefinedistinct
+segmentationtasks. Forexample,theSegmentAnythingmodel[21]canproducemasksinazero-
+shotmannerbasedondifferenttypesofprompts. OnelimitationofSAMisthatitonlyproduces
+three class-agnostic masks. An extension, Semantic-SAM [23], aims to segment and recognize
+objectsatmultiplegranularitiesthroughamulti-choicelearningscheme,allowingeachclickpoint
+toproducemasksatmultiplelevelsalongwiththeirsemanticlabels. Nevertheless,bothmodelsare
+supervisedandrelyonlarge-scale,human-annotateddata,whichintroducesissuesofannotatorbias
+andscalabilitylimitations.
+Incontrast,ourunsupervisedUnSAMandlightlysemi-supervisedUnSAM+modeldemonstrate
+superior performance in the promptable segmentation task, offering a robust alternative to these
+fully-supervisedapproaches.
+3 Preliminaries
+3.1 CutandLearn(CutLER)andMaskCut
+CutLER[39]introducesacut-and-learnpipelinetopreciselysegmentinstanceswithoutsupervision.
+Theinitialphase,knownasthecutstage,usesanormalizedcut-basedmethod,MaskCut[39],togener-
+atehigh-qualityinstancemasksgiventhepatch-wisecosinesimilaritymatrixW = KiKj ,where
+ij |Ki|2|Kj|2
+K is“key”featuresofpatchiinthelastattentionlayerofunsupervisedViT.Toextractmultiplein-
+i
+stancemasksfromasingleimage,MaskCutrepeatsthisoperationbutadjustsbymaskingoutpatches
+from previously segmented instances in the affinity matrix: Wt = (Ki(cid:80)t s=1M is j)(Kj(cid:80)t s=1M is j)
+ij ∥Ki∥2∥Kj∥2
+Subsequently,CutLER’slearningstagetrainsasegmentation/detectionmodelonthesepseudo-masks
+withdrop-loss. PleasecheckAppendixA.2formoredetailsonCutLER.
+3.2 SegmentAnythingModel(SAM)andSA-1B
+Segment Anything [21] tackles the promptable segmentation task. At its core lies the Segment
+AnythingModel(SAM),whichiscapableofproducingsegmentationmasksgivenuser-provided
+points,boxes,andmasksinazero-shotmanner. OnesignificantcontributionofSAMisthereleaseof
+3SSL
+Model
+corse grained fine grained
+Top-down Clustering Bottom-up Clustering
+(Divide Stage) (Conquer Stage)
+Figure2:Ourdivide-and-conquerpipelineforgeneratingthe“ground-truth”pseudomasksusedfortraining
+UnSAMwithouthumansupervisionbeginswithatop-downclusteringapproach(i.e.,thedividestage),toextract
+initialsemantic/instance-levelmasksusingaNormalizedCuts[31]-basedCutLER[39].Subsequently,werefine
+thesemasksusingabottom-upclusteringmethod(i.e.,theconquerstage): withineachmask,weiteratively
+mergesemanticallysimilarpixelsintolargersegmentsusingvarioussimilaritythresholds.Theresultingmasks
+atdifferentthresholdscreateahierarchy.Wezoom-inselectedregionstovisualizedetails.
+theSA-1Bdataset[21],whichcomprises11Mhigh-resolutionimagesand1.1billionsegmentation
+masks, providing a substantial resource for training and evaluating segmentation models. While
+SAMsignificantlyacceleratesthelabelingofsegmentationmasks,annotatinganimagestillrequires
+approximately14secondspermask. Giventhateachimagecontainsover100masks,thisequatesto
+morethan30minutesperimage,posingasubstantialcostandmakingitchallengingtoscaleupthe
+trainingdataeffectively. FormoredetailsonSAMandSA-1B,pleasecheckAppendixA.3.
+4 UnSAM:SegmentAnythingwithoutSupervision
+4.1 Divide-and-ConquerforHierarchicalImageSegmentation
+Oursegmentanythingwithoutsupervisionmodelstartsbygeneratingpseudomasksthatrespect
+the hierarchical structure of visual scenes without supervision. This approach is motivated by
+the observation that the “divide and conquer” strategy is a fundamental organizational principle
+employedbythehumanvisualsystemtoefficientlyprocessandanalyzethevastcomplexityofvisual
+information present in natural scenes [4, 27]. Our pseudo-mask generation pipeline divide-and-
+conquer,whichissummarizedinAlg.1andillustratedinFig.2,consistsoftwostages:
+Dividestage: weleverageaNormalizedCuts(NCuts)-basedmethod,CutLER[39,31],toobtain
+semanticandinstance-levelmasksfromunlabeledrawimages. CutLER’scut-and-learnpipelineand
+itsMaskCutmethodarediscussedinSec.3.1. However,thecoarser-granularitymaskspredicted
+by CutLER can be noisy. To mitigate this, we filter out masks with a confidence score below a
+threshold τ. Empirically, salient semantic and instance-level entities typically encompass richer
+part-levelentities(forexample,apersonhasidentifiablepartssuchaslegs,arms,andhead,whereas
+abackgroundskycontainsfewornosub-levelentities). Toextractthesepart-levelentitieswitha
+hierarchicalstructure,weemployaconquerphase.
+Conquerstage: foreachinstance-/semantic-levelmaskdiscoveredinthepreviousstage,weem-
+ployiterativemerging[1,6]todecomposethecoarse-grainedmaskintosimplerparts,forminga
+hierarchicalstructure.
+Morespecifically,wefirstcroplocalpatchesusingthemasksweobtainedinthedividephase,and
+bi-linearlyinterpolatelocalpatchestotheresolutionof256×256. WethenfeedthemintoDINO
+pre-trainedViT-B/8[8]encoderf(·),andextract‘key’featuresk =f(p )fromthelastattention
+i i
+layeraspatch-wisefeaturesforlocalpatchesp . Subsequently,theconquerphaseemploysiterative
+i
+merging[1,6]togrouppatchesintolargerclusters,withpre-definedcosinesimilaritythresholdsat
+θ ∈{θ ,...,θ },wherelisthepredefinedgranularitylevels.
+1 l
+Initerationt,ourmethodfindstwoadjacentpatches(p ,p )fromtwoseparateclusters(Ct ,Ct)
+i j m n
+withthehighestcosinesimilarity k itk jt ,mergesthemintoonecluster,andupdatesktandkt to
+||k it||2||k jt||2 i j
+4
+Merging Iterative Merging IterativeAlgorithm1DivideandConquer
+I ←inputimageI resizedto1024×1024
+resized
+M ←{m:m∈CutLER(I )∧m >τ}
+resized score
+form∈M do
+AddmintoS
+0
+bbox←boundingbox[x ,y ,x ,y ]ofm
+1 1 2 2
+I ←I croppedbybbox,resizedto256×256
+local resized
+K ←DINO(I )
+local
+forθ ∈θ ,...,θ do
+t l 1
+ift=lthen
+Initializekt ←K ,Ct ← p ∀i,a←1
+i i i i
+wherep iscorrespondingpatchofK ,addp intoS ∀i
+i i i l
+else
+InitializeS ←S ,kt ←kt+1,Ct ← Ct+1 ∀i
+t t+1 i i i i
+endif
+whilea≥θ do
+t
+ktkt ktkt
+Identifyadjacentp ,p withi,j ←argmax i j ,a←max i j
+i j i,j ||k it||2||k jt||2 i,j ||k it||2||k jt||2
+IdentifyclusterCt ,Ct,wherep ∈Ct ,p ∈Ct
+m n i m j n
+RemoveCt andCt fromS
+m n t
+Ct ←Ct ∪Ct,addCtintoS
+m n t
+∀p ∈Ct,kt ← amk it+ank jt ,wherea isthesizeofclusterCt andp ∈Ct
+z z am+an m m i m
+endwhile
+endfor
+endfor
+amk it+ank jt ,wherea isthenumberofpatchesinclusterCt (p ∈Ct ). Theconquerstagerepeats
+am+an m m i m
+this step until the maximum cosine similarity is less than θ , collects all merged clusters as new
+t
+part-levelpseudomasks,andusessmallerthresholdθ toiterateagain. Eachcoarse-grainedmask
+t+1
+discoveredinthedividestagecanformahierarchicalstructureH aftertheconquerstage:
+H ={S ,S ,...,S ,...,S },whereS ={Ct,...,Ct },n ≤n ifi<j (1)
+0 1 t l t 1 nt i j
+n isthenumberofclusters/masksbelongingtogranularityleveltandn =1.
+t 0
+Maskmerging: Thenewpart-levelpseudomasksdiscoveredintheconquerstageareaddedbackto
+thesemanticandinstance-levelmasksidentifiedinthedividestage. WethenuseNon-Maximum
+Suppression (NMS) to eliminate duplicates. Following previous works in unsupervised image
+segmentation[39,28,6],wealsoemployoff-the-shelfmaskrefinementmethods,suchasConditional
+RandomFields(CRF)[22]andCascadePSP[10],tofurtherrefinetheedgesofthepseudomasks.
+Finally,wefilteroutthepost-processedmasksthatexhibitsignificantdifferencesinIntersection-over-
+Union(IoU)beforeandafterrefinement.
+Preliminary results: The divide-and-conquer pipeline achieves a pseudo mask pool with more
+entities,abroaderrangeofgranularitylevels,andsuperiorqualitycomparedtopreviouswork,e.g.,
+CutLER[39],U2Seg[28]andSOHES[6]. AsshowninTable3,itspseudomasksreach23.9%AR
+on1000randomlyselectedvalidationimagesfromtheSA-1Bdataset[21],representinga45.7%
+improvementoverthestate-of-the-art.
+Keydistinctionsoverpriorworksonpseudo-maskgeneration: Thedivide-and-conquerstrategy
+employedbyUnSAMsetsitapartfrompreviousworks:
+[39, 28] rely solely on top-down clustering methods, providing only instance and semantic-level
+masks,andtherebymissingthehierarchicalstructurepresentincompleximages. Incontrast,our
+pipelinecapturesthishierarchicalstructurebyidentifyingmorefine-grainedpixelclusters.
+While[6]doesincorporatesomehierarchicalstructurethroughbottom-upclusteringwithiterative
+merging,itstillmissesmanyfine-grainedinstancesandsomelarge-scaleinstancemasks.Additionally,
+theiterativemergingin[6]focusesonsmallregionsbelowacertainmasksizethreshold,primarilyto
+refinenoisysmallmasks,limitingitsabilitytodetectafullrangeofentitysizes. Ourexperimental
+5resultsdemonstratequalitativelyandquantitativelysuperiorperformancecomparedtopriorworks,
+particularlyinproducinghigh-quality, detailedpseudo-masksthatbettercapturethehierarchical
+complexityofvisualscenes.
+4.2 ModelLearningandSelf-Training
+Althoughthepseudomasksgeneratedbyourpipelinearequalitativelyandquantitativelysuperiorto
+thosefrompriorworks,theycanstillbesomewhatnoisy. Ourself-supervisedpipelinehaslimitations
+inidentifyingcertaintypesofinstances. Forexample,iterativemergingsometimesfailstocorrectly
+associatedisconnectedpartsofthesameentity. Toaddressthis,weutilizeaself-trainingstrategy
+tofurtherenhanceUnSAM’smodelperformance. UnSAMlearnsanimagesegmentationmodel
+usingthemasksdiscoveredbythedivide-and-conquerstrategy. Ithasbeenobservedthatself-training
+enables the model to “clean” the pseudo masks and predict masks of higher quality [39]. Once
+wehavepreparedthepseudo-masks,UnSAMcanbeintegratedwithanyarbitrarywhole-imageor
+promptableimagesegmentationmodelsduringthemodellearningorself-trainingstage.
+Whole-image segmentation. We choose the vanilla Masked Attention Mask Transformer
+(Mask2Former) [9] for simplicity. The key innovation of Mask2Former is the introduction of a
+masked attention mechanism in the transformer’s cross-attention block, defined as softmax(M +
+QKT)V, where the attention mask M at feature location (x,y) is given by: M(x,y) =
+(cid:26)
+0 ifM(x,y)=1
+. This mechanism constrains attention within the region of the predicted
+−∞ otherwise
+mask. UnSAMisthentrainedusingthefollowingmaskpredictionloss:
+L=λ L +λ L (2)
+ce ce dice dice
+whereL andL isthecross-entropyandDiceloss,withλ andλ astheirrespectiveweights.
+ce dice ce dice
+Afteroneroundofself-trainingUnSAMonthepseudo-masks,weperformasecondroundofself-
+trainingbymerginghigh-confidencemaskpredictions(withaconfidencescoregreaterthanτ )
+self-train
+asthenew‘ground-truth’annotations. Toavoidduplication,wefilteroutgroundtruthmasksthat
+haveanIoUgreaterthan0.5withthepredictedmasks.
+PromptableImageSegmentation. SimilartoSAM[21],ourunsupervisedSAMcanalsoproduce
+high-qualityobjectmasksfrominputpromptssuchaspoints. WeutilizeSemantic-SAM[23]asthe
+basemodelforpredictingmultiplegranularitylevelsofmasksfromasingleclick.Duringthelearning
+process,werandomlysamplepointswithinaninnercircle(radius≤0.1·min(Mask ,Mask ))
+width height
+ofthemasktosimulateuserclicks.
+4.3 UnSAM+: ImprovingSupervisedSAMwithUnsupervisedSegmentation
+ThesupervisedSAMmodel’s[21]relianceonhuman-annotateddataintroducesasignificantbias
+based on the annotator’s perception of ‘what constitutes an instance’, frequently missing some
+entitieswithintheimage. Incontrast,sinceourmaskgenerationpipelinedoesnotrelyonhuman
+supervision,itcanoftenidentifyvalidobjectsorpartsthatareoverlookedbySA-1B’s[21]ground-
+truthannotations.
+Motivatedbythisobservation,weleverageUnSAMtoimprovetheperformanceofthesupervised
+SAM[21]byimplementingastraightforwardyeteffectivestrategy: mergingSA-1B’sground-truth
+masksD withourunsupervisedsegmentationmasksD basedontheIoU,formulatedas:
+SA-1B UnSAM
+Di =Di ∪{∀C ∈Di ifIoUmax(C ,∀C ∈Di )≤τ } (3)
+UnSAM+ SA-1B m UnSAM m n SA-1B UnSAM+
+τ istheIoUthreshold,IoUmaxisthemaximumIoUbetweenC andanymaskC inDi ,
+UnSAM+ m n SA-1B
+andDi andDi isthesetofSA-1Bandunsupervisedmaskswithinimagei,respectively.
+SA-1B UnSAM+
+WethentrainUnSAM+onD forpromptableimagesegmentationandwhole-imagesegmenta-
+UnSAM+
+tion. Thefusionapproachleveragesthestrengthsofbothsupervisedandunsupervisedannotations,
+addressingthelimitationsinherentinhuman-annotateddatasetswhilesignificantlyenrichingthe
+diversityandcomprehensivenessofthetrainingdata. Thisresultsinamorerobustandgeneralizable
+segmentationmodelUnSAM+,surpassingtheperformanceofSAM.
+6Raw Images SA-1B’s Ground-truth UnSAM’s Unsupervised Labels
+Figure3:Unsupervisedpseudo-masksgeneratedbyourdivide-and-conquerpipelinenotonlycontainprecise
+masksforcoarse-grainedinstances(column5),e.g.,camerasandpersons,butalsocapturefine-grainedparts
+(column3),e.g.,digitsandiconsonatinycameramonitorthataremissedbySA-1B’s[21]ground-truthlabels.
+Backbone # DatasetswithWholeEntities Datasetsw/Parts
+Methods Avg.
+(#params) images COCO LVIS ADE Entity SA-1B PtIn PACO
+SAM(supervised) ViT-B/8(85M) 11M 42.1 49.6 46.1 45.8 45.9 60.8 28.3 18.1
+FreeSOLO[41] RN-101(45M) 1.3M 7.3 11.6 5.9 7.3 8.0 2.2 13.8 2.4
+CutLER[39] RN-50(23M) 1.3M 21.8 28.1 20.2 26.3 23.1 17.0 28.7 8.9
+SOHES[6] ViT-B/8(85M) 0.2M 30.1 30.5 29.1 31.1 33.5 33.3 36.0 17.1
+UnSAM RN-50(23M) 0.1M 39.2 40.5 37.7 35.7 39.6 41.9 51.6 27.5
+UnSAM RN-50(23M) 0.2M 40.4 41.2 39.7 36.8 40.3 43.6 52.1 29.1
+UnSAM RN-50(23M) 0.4M 41.1 42.0 40.5 37.5 41.0 44.5 52.7 29.7
+vs.prev.SOTA +11.0 +11.5 +11.4 +6.4 +7.5 +11.2 +16.7 +12.6
+Table1:UnSAMachievesthestate-of-the-artresultsonunsupervisedimagesegmentation,usingabackbone
+ofResNet50andtrainingwithonly1%ofSA-1B[21]data. Weperformazero-shotevaluationonvarious
+imagesegmentationbenchmarks,includingwholeentitydatasets,e.g.,COCOandADE,andpartsegmentation
+datasets,e.g.,PACOandPartImageNet.Theevaluationmetricisaveragerecall(AR).
+5 Experiments
+5.1 ModelTrainingSettings
+WeprovideabriefoverviewofthemodeltrainingsettingsandincludemoredetailsinAppendixA.1.
+Pseudomaskgeneration. Inthedividestage,wesettheconfidencethresholdτ=0.3;intheconquer
+stage,wechoosethresholdθ =[0.6,0.5,0.4,0.3,0.2,0.1]. Whenmergingthepseudomasks
+merge
+withthegroundtruthsfortrainingUnSAM+,weselectτ =0.02.Whole-imagesegmentation.
+UnSAM+
+UnSAMpicksDINO[8]pre-trainedResNet-50[18]asthebackboneandMask2former[9]asthemask
+decoder. Thedefaultlearningrateis5×10−5withabatchsizeof16andaweightdecayof5×10−2.
+We train the model for 8 epochs. Promptable segmentation. UnSAM uses the self-supervised
+pre-trainedSwin-Transformer[25]Tinymodelasthebackbone,andleveragesSemantic-SAM[23]
+asthebasemodel. Wesetthenumberofhierarchylevelsto6,whichisalsothenumberofpredicted
+masksUnSAMgeneratesperpromptduringinference. Forallexperiments,wetrainUnSAMwith
+1∼4%unlabeledimagesfromSA-1Bdataset[21].
+5.2 EvaluationDatasetsandMetrics
+Whole-imagesegmentation.Wetestourmodelsonvariousdatasetsinazero-shotmannertoevaluate
+theperformanceofsegmentingentitiesfromallgranularitylevels. WechooseCOCO[24],LVIS[15],
+ADE20K [48], EntitySeg [29], and SA-1B [21] that mainly encompass semantic-/instance-level
+entities;PartImageNet[16]andPACO[30]thatcoverpart-levelentities. TheSA-1Btestsetconsists
+ofrandomlyselected1000imagesnotincludedinourtrainingset. Notably,eachdatasetonlycovers
+entitiesfromcertainhierarchicallevelsandcertainpre-definedclasses,whileourmodelgenerates
+masksfromalllevelsandallclasses. Hence,theCOCOAveragePrecision(AP)metriccouldnot
+reflectourmodel’sauthenticperformanceinsegmentingallentitiesintheopen-world. Following
+priorwork[39,6],wemainlyconsiderAverageRecall(AR)tocomparewithdifferentmodels.
+Point-basedpromptablesegmentation. Weevaluateourpoint-basedinteractivemodelonCOCO
+Val2017[24]. Followingthepreviousworkonpromptableimagesegmentation[21,23],wepick
+7Raw Image SAM UnSAM UnSAM+
+Figure4:UnSAMhascompetitivedenseobjectsegmentationresultscomparedtothesupervisedSAM[21].
+Backbone Sup. Unsup. # DatasetswithWholeEntities Datasetsw/Parts
+Methods Avg.
+(#params) LabelsLabels images COCO LVIS ADE Entity SA-1B PtIn PACO
+SAM ViT-B/8(85M) ✓ ✗ 11M 42.1 49.6 46.1 45.8 45.9 60.8 28.3 18.1
+UnSAM RN-50(23M) ✗ ✓ 0.1M 39.2 40.5 37.7 35.7 39.6 41.9 51.6 27.5
+UnSAM+ RN-50(23M) ✓ ✓ 0.1M 48.8 52.2 50.8 45.3 49.8 64.8 46.0 32.3
+vs.SAM +6.7 +2.6 +4.7 -0.5 +3.9 +4.0 +17.7 +14.2
+Table2:UnSAM+canoutperformSAM[21]onmostexperimentedbenchmarks(includingSA-1B[21]),when
+trainingUnSAMon1%ofSA-1Bwithbothgroundtruthmasksandourunsupervisedlabels.Thisdemonstrates
+thatourunsupervisedpseudomaskscanserveasapowerfuladd-ontothedenselyannotatedSA-1Bmasks!
+Methods AR AR AR AR Methods AP AR AR AR AR
+1000 S M L S M L 1000
+SOHES(CRF[22]) 12.0 3.5 9.5 20.7 SAM 38.9 20.0 59.9 82.8 60.8
+SOHES(CascadePSP[10]) 16.4 6.0 15.8 22.6 UnSAM+ 42.8 36.2 65.9 76.5 64.8
+UnSAM(CRF[22]) 15.3 2.3 11.9 27.7 vs.sup.SAM +3.9 16.2 +6.0 -6.3 +4.0
+UnSAM(CascadePSP[10]) 23.9 7.9 22.4 34.0
+vs.prev.SOTA +7.5 +1.9 +6.6 +11.4 Table4:Quantitativecomparisonsbetweenour
+Table3:Evaluationonunsupervisedpseudomasksusing lightly semi-supervised SAM, UnSAM+, and
+SA-1B’s[21]ground-truthannotations. thefully-supervisedSAM[21]onSA-1B[21].
+twometricsformodelevaluationMaxIoUandOracleIoU. Foreachpointprompt,UnSAMpredicts
+6masksrepresentingdifferentgranularitylevels. MaxIoUcalculatestheIoUbetweenthemaskwith
+thehighestconfidencescoreamong6masks,whereasOracleIoUpicksthehighestIoUbetween6
+predictedmasksandthegroundtruth. Foreachtestimage,weselectitscenterasthepointprompt.
+5.3 EvaluationResults
+Unsupervisedpseudo-masks. Unsupervisedpseudo-masksgeneratedbyourdivide-and-conquer
+pipelinenotonlycontainprecisemasksforcoarse-grainedinstances,butalsocapturefine-grained
+partsthatareoftenmissedbySA-1B’s[21]ground-truthlabels,asshowninFig.3.
+Whole-image segmentation. Remarkably, UnSAM outperforms the state-of-the-art across all
+evaluationdatasetsassummarizedinTable1. UnSAMdemonstratessuperiorperformancecompared
+totheSOTAevenwhentrainedwithonly1%SA-1BtrainingdataandabackboneofResNet-50
+with23Mparameters,whiletheSOTAutilizestwicetrainingdataandabackbonewithnearlyfour
+timestheparameters. ThisimpliesthatUnSAMisalightweight,easiertotrain,andlessdata-hungry
+modelwithbetterzero-shotperformanceinsegmentingentitiesintheopen-worldasshowninFigs.4
+and 5. On average, UnSAM surpasses the previous SOTA by 11.0% in AR. When evaluated on
+PartImageNet[16]andPACO[30],UnSAMexceedstheSOTAby16.6%and12.6%,respectively.
+WhencomparedtothesupervisedSAM[21],UnSAM’sARacrossalldatasetsisalreadyveryclose,
+withonlya1%difference. OnPartImageNet[16]andPACO[30],UnSAMsurpassesSAMby24.4%
+and11.6%. Thisfurtherdemonstratestheexcellentcapabilityofourdivide-and-conquerpipelinein
+discoveringdetailsthathumanannotatorstendtomiss.
+Furthermore, ourUnSAM+, trainedwithintegratedunsupervisedpseudomasksandSA-1B[21]
+groundtruth,outperformsSAM’s[21]ARbyover6.7%andAPby3.9%asshownbyTable2and
+8Raw Image Prev. Unsup. SOTA UnSAM
+Figure5:UnSAMnotonlydiscoversmorefine-grainedmasksthanthepreviousstate-of-the-artunsupervised
+segmentationmethod[6],butalsoprovidessegmentationmaskswithawiderangeofgranularity. Weshow
+qualitativecomparisonsbetweenUnSAM(with3levelsofgranularity)andbaselinemodelsonSA-1B[21].
+SAM
+UnSAM
+UnSAM+
+Figure6:Qualitativecomparisonsofpromptableimagesegmentationbetweenthefully-supervisedSAM[21],
+ourunsupervisedUnSAM,andthelightlysemi-supervisedUnSAM+.BothUnSAMandUnSAM+consistently
+deliverhigh-quality,multi-granularsegmentationmasksinresponsetothepointprompts(i.e.,thestarmark).
+Backbone Sup. Unsup. Point(Max) Point(Oracle)
+Methods %ofSA-1B
+(#params) Labels Labels 1-IoU 1-IoU
+SAM(B) ViT-B/8(85M) ✓ ✗ 100% 52.1 68.2
+UnSAM Swin-Tiny(25M) ✗ ✓ 1% 40.3 59.5
+UnSAM+ Swin-Tiny(25M) ✓ ✓ 1% 52.4 69.5
+Table5: Despiteusingabackbonethatis3×smallerandbeingtrainedononly1%ofSA-1B,ourlightly
+semi-supervisedUnSAM+surpassesthefully-supervisedSAMinpromptablesegmentationtaskonCOCO.
+4. UnSAM+demonstratessuperioraveragerecallcomparedtoSAMacrossallevaluationdatasets
+exceptforADE20K[48],whichisdominatedbysemantic-levelannotations.UnSAM+’ssignificantly
+16.2%higherARonsmallentitiesfurtherconfirmsthatourpseudomaskscaneffectivelycomplement
+theSA-1BdatasetswithmoredetailsitignoresandtheUnSAM+canoftendiscoverentitiesmissed
+bySAMasdemonstratedinFig.4.
+Point-basedpromptablesegmentation. AsshowninTable5,UnSAMtrainedwithourpseudo
+masksachieve40.3%MaxIoUand59.5%OracleIoUonCOCO.Notably,wetrainthemodelwith
+only1%ofthedatathatSAM[21]usesandabackbonewith4×fewerparameters. Moreover,the
+UnSAM+trainedwithintegratedpseudomasksandSA-1BgroundtruthsoutperformsSAMonboth
+MaxIoUandOracleIoUwith0.3%and1.3%respectively. QualitativeresultsareshowninFig.6.
+6 Summary
+Image segmentation is a fundamental task in computer vision, traditionally relying on intensive
+humanannotationstoachieveadetailedunderstandingofvisualscenes. WeproposeUnSAM,an
+unsupervised segmentation model that significantly surpasses the performance of previous state-
+of-the-artmethodsinunsupervisedimagesegmentation. Additionally,ourunsupervisedUnSAM
+modeldeliversimpressiveresults,rivalingtheperformanceofthecutting-edgesupervisedSAM,and
+exceedingitincertainsemi-supervisedsettings.
+9Acknowledgement.WethankhelpfuldiscussionswithJitendraMalik,CordeliaSchmid,IshanMisra,
+XinleiChen,XingyiZhou,AlirezaFathi,RenhaoWang,StephanieFu,QianqianWang,BaifengShi,
+MaxLetianFu,TonyLongLian,SongweiGe,BowenChengandRohitGirdhar. WethankShengcao
+CaoandHaoZhangfortheirhelpinreproducingbaselineresults. XuDongWangandTrevorDarrell
+werefundedbyDoDincludingDARPALwLLandtheBerkeleyAIResearch(BAIR)Commons.
+References
+[1] P.Arbelaez,M.Maire,C.Fowlkes,andJ.Malik. Contourdetectionandhierarchicalimagesegmentation.
+IEEEtransactionsonpatternanalysisandmachineintelligence,33(5):898–916,2010.
+[2] J.Bai,S.Bai,Y.Chu,Z.Cui,K.Dang,X.Deng,Y.Fan,W.Ge,Y.Han,F.Huang,etal. Qwentechnical
+report. arXivpreprintarXiv:2309.16609,2023.
+[3] Y.Bai, X.Geng, K.Mangalam, A.Bar, A.Yuille, T.Darrell, J.Malik, andA.A.Efros. Sequential
+modelingenablesscalablelearningforlargevisionmodels. arXivpreprintarXiv:2312.00785,2023.
+[4] J.Bill,H.Pailian,S.J.Gershman,andJ.Drugowitsch. Hierarchicalstructureisemployedbyhumans
+duringvisualmotionperception. ProceedingsoftheNationalAcademyofSciences,117(39):24581–24589,
+2020.
+[5] T.Brown,B.Mann,N.Ryder,M.Subbiah,J.D.Kaplan,P.Dhariwal,A.Neelakantan,P.Shyam,G.Sastry,
+A.Askell,etal. Languagemodelsarefew-shotlearners. Advancesinneuralinformationprocessing
+systems,33:1877–1901,2020.
+[6] S.Cao,J.Gu,J.Kuen,H.Tan,R.Zhang,H.Zhao,A.Nenkova,L.Gui,T.Sun,andY.-X.Wang. SOHES:
+Self-supervisedopen-worldhierarchicalentitysegmentation. InTheTwelfthInternationalConferenceon
+LearningRepresentations,2024.
+[7] S.Cao,D.Joshi,L.Gui,andY.-X.Wang.HASSOD:Hierarchicaladaptiveself-supervisedobjectdetection.
+InNeurIPS,2023.
+[8] M.Caron,H.Touvron,I.Misra,H.Jégou,J.Mairal,P.Bojanowski,andA.Joulin. Emergingpropertiesin
+self-supervisedvisiontransformers. InProceedingsoftheInternationalConferenceonComputerVision
+(ICCV),2021.
+[9] B.Cheng,I.Misra,A.G.Schwing,A.Kirillov,andR.Girdhar. Masked-attentionmasktransformerfor
+universalimagesegmentation.InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpattern
+recognition,pages1290–1299,2022.
+[10] H.K.Cheng,J.Chung,Y.-W.Tai,andC.-K.Tang. Cascadepsp: Towardclass-agnosticandveryhigh-
+resolutionsegmentationviaglobalandlocalrefinement. InProceedingsoftheIEEE/CVFconferenceon
+computervisionandpatternrecognition,pages8890–8899,2020.
+[11] J.Cheng,J.Ye,Z.Deng,J.Chen,T.Li,H.Wang,Y.Su,Z.Huang,J.Chen,L.J.H.Sun,J.He,S.Zhang,
+M.Zhu,andY.Qiao. Sam-med2d,2023.
+[12] M.Cho,S.Kwak,C.Schmid,andJ.Ponce. Unsupervisedobjectdiscoveryandlocalizationinthewild:
+Part-basedmatchingwithbottom-upregionproposals,2015.
+[13] J.Deng,W.Dong,R.Socher,L.-J.Li,K.Li,andL.Fei-Fei. Imagenet:Alarge-scalehierarchicalimage
+database. In2009IEEEConferenceonComputerVisionandPatternRecognition,pages248–255,2009.
+[14] A.Dosovitskiy,L.Beyer,A.Kolesnikov,D.Weissenborn,X.Zhai,T.Unterthiner,M.Dehghani,M.Min-
+derer,G.Heigold,S.Gelly,etal. Animageisworth16x16words:Transformersforimagerecognitionat
+scale. arXivpreprintarXiv:2010.11929,2020.
+[15] A.Gupta,P.Dollar,andR.Girshick. Lvis: Adatasetforlargevocabularyinstancesegmentation. In
+ProceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition,pages5356–5364,
+2019.
+[16] J.He,S.Yang,S.Yang,A.Kortylewski,X.Yuan,J.-N.Chen,S.Liu,C.Yang,Q.Yu,andA.Yuille.
+Partimagenet:Alarge,high-qualitydatasetofparts. InEuropeanConferenceonComputerVision,pages
+128–145.Springer,2022.
+[17] K. He, X. Chen, S. Xie, Y. Li, P. Dollár, and R. Girshick. Masked autoencoders are scalable vision
+learners. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pages
+16000–16009,2022.
+10[18] K.He,X.Zhang,S.Ren,andJ.Sun. Deepresiduallearningforimagerecognition. InProceedingsofthe
+IEEEconferenceoncomputervisionandpatternrecognition,pages770–778,2016.
+[19] A.Q.Jiang,A.Sablayrolles,A.Mensch,C.Bamford,D.S.Chaplot,D.d.l.Casas,F.Bressand,G.Lengyel,
+G.Lample,L.Saulnier,etal. Mistral7b. arXivpreprintarXiv:2310.06825,2023.
+[20] J.Kaplan,S.McCandlish,T.Henighan,T.B.Brown,B.Chess,R.Child,S.Gray,A.Radford,J.Wu,and
+D.Amodei. Scalinglawsforneurallanguagemodels. arXivpreprintarXiv:2001.08361,2020.
+[21] A.Kirillov,E.Mintun,N.Ravi,H.Mao,C.Rolland,L.Gustafson,T.Xiao,S.Whitehead,A.C.Berg,
+W.-Y.Lo,P.Dollár,andR.Girshick. Segmentanything. arXiv:2304.02643,2023.
+[22] J.Lafferty,A.McCallum,F.Pereira,etal. Conditionalrandomfields:Probabilisticmodelsforsegmenting
+andlabelingsequencedata. InIcml,volume1,page3.Williamstown,MA,2001.
+[23] F.Li,H.Zhang,P.Sun,X.Zou,S.Liu,J.Yang,C.Li,L.Zhang,andJ.Gao. Semantic-sam:Segmentand
+recognizeanythingatanygranularity. arXivpreprintarXiv:2307.04767,2023.
+[24] T.-Y.Lin,M.Maire,S.Belongie,J.Hays,P.Perona,D.Ramanan,P.Dollár,andC.L.Zitnick. Microsoft
+coco:Commonobjectsincontext. InComputerVision–ECCV2014:13thEuropeanConference,Zurich,
+Switzerland,September6-12,2014,Proceedings,PartV13,pages740–755.Springer,2014.
+[25] Z.Liu,Y.Lin,Y.Cao,H.Hu,Y.Wei,Z.Zhang,S.Lin,andB.Guo. Swintransformer: Hierarchical
+visiontransformerusingshiftedwindows. InProceedingsoftheIEEE/CVFInternationalConferenceon
+ComputerVision(ICCV),2021.
+[26] T.LüddeckeandA.Ecker. Imagesegmentationusingtextandimageprompts. InProceedingsofthe
+IEEE/CVFconferenceoncomputervisionandpatternrecognition,pages7086–7096,2022.
+[27] S.R.Mitroff,B.J.Scholl,andK.Wynn. Divideandconquer:Howobjectfilesadaptwhenapersisting
+objectsplitsintotwo. PsychologicalScience,15(6):420–425,2004.
+[28] D.Niu,X.Wang,X.Han,L.Lian,R.Herzig,andT.Darrell. Unsuperviseduniversalimagesegmentation.
+InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,2024.
+[29] L.Qi,J.Kuen,Y.Wang,J.Gu,H.Zhao,P.Torr,Z.Lin,andJ.Jia. Openworldentitysegmentation. IEEE
+TransactionsonPatternAnalysisandMachineIntelligence,2022.
+[30] V.Ramanathan,A.Kalia,V.Petrovic,Y.Wen,B.Zheng,B.Guo,R.Wang,A.Marquez,R.Kovvuri,
+A.Kadian,etal.Paco:Partsandattributesofcommonobjects.InProceedingsoftheIEEE/CVFConference
+onComputerVisionandPatternRecognition,pages7141–7151,2023.
+[31] J.ShiandJ.Malik. Normalizedcutsandimagesegmentation. IEEETransactionsonpatternanalysisand
+machineintelligence,22(8):888–905,2000.
+[32] O. Siméoni, G. Puy, H. V. Vo, S. Roburin, S. Gidaris, A. Bursuc, P. Pérez, R. Marlet, and J. Ponce.
+Localizingobjectswithself-supervisedtransformersandnolabels. arXivpreprintarXiv:2109.14279,
+2021.
+[33] G.Team,R.Anil,S.Borgeaud,Y.Wu,J.-B.Alayrac,J.Yu,R.Soricut,J.Schalkwyk,A.M.Dai,A.Hauth,
+etal. Gemini:afamilyofhighlycapablemultimodalmodels. arXivpreprintarXiv:2312.11805,2023.
+[34] H.Touvron,T.Lavril,G.Izacard,X.Martinet,M.-A.Lachaux,T.Lacroix,B.Rozière,N.Goyal,E.Hambro,
+F.Azhar,etal. Llama:Openandefficientfoundationlanguagemodels. arXivpreprintarXiv:2302.13971,
+2023.
+[35] W.VanGansbeke,S.Vandenhende,andL.VanGool. Discoveringobjectmaskswithtransformersfor
+unsupervisedsemanticsegmentation. arxivpreprintarxiv:2206.06363,2022.
+[36] A.Vaswani,N.Shazeer,N.Parmar,J.Uszkoreit,L.Jones,A.N.Gomez,L.Kaiser,andI.Polosukhin.
+Attentionisallyouneed,2023.
+[37] H.V.Vo,F.Bach,M.Cho,K.Han,Y.LeCun,P.Perez,andJ.Ponce. Unsupervisedimagematchingand
+objectdiscoveryasoptimization,2019.
+[38] H. V. Vo, P. Pérez, and J. Ponce. Toward unsupervised, multi-object discovery in large-scale image
+collections. InComputerVision–ECCV2020:16thEuropeanConference,Glasgow,UK,August23–28,
+2020,Proceedings,PartXXIII16,pages779–795.Springer,2020.
+11[39] X.Wang,R.Girdhar,S.X.Yu,andI.Misra. Cutandlearnforunsupervisedobjectdetectionandinstance
+segmentation. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition,
+pages3124–3134,2023.
+[40] X.Wang,I.Misra,Z.Zeng,R.Girdhar,andT.Darrell. Videocutler: Surprisinglysimpleunsupervised
+videoinstancesegmentation.InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pages22755–22764,2024.
+[41] X.Wang,Z.Yu,S.DeMello,J.Kautz,A.Anandkumar,C.Shen,andJ.M.Alvarez. Freesolo:Learningto
+segmentobjectswithoutannotations. InProceedingsoftheIEEE/CVFconferenceoncomputervisionand
+patternrecognition,pages14176–14186,2022.
+[42] X.Wang,R.Zhang,T.Kong,L.Li,andC.Shen. Solov2:Dynamicandfastinstancesegmentation. Proc.
+AdvancesinNeuralInformationProcessingSystems(NeurIPS),2020.
+[43] X.Wang,X.Zhang,Y.Cao,W.Wang,C.Shen,andT.Huang. Seggpt:Segmentingeverythingincontext.
+arXivpreprintarXiv:2304.03284,2023.
+[44] Y. Wang, X. Shen, Y. Yuan, Y. Du, M. Li, S. X. Hu, J. L. Crowley, and D. Vaufreydaz. Tokencut:
+Segmentingobjectsinimagesandvideoswithself-supervisedtransformerandnormalizedcut. IEEE
+transactionsonpatternanalysisandmachineintelligence,2023.
+[45] Y. Xiong, B. Varadarajan, L. Wu, X. Xiang, F. Xiao, C. Zhu, X. Dai, D. Wang, F. Sun, F. Iandola,
+R.Krishnamoorthi, andV.Chandra. Efficientsam: Leveragedmaskedimagepretrainingforefficient
+segmentanything,2023.
+[46] A.Young,B.Chen,C.Li,C.Huang,G.Zhang,G.Zhang,H.Li,J.Zhu,J.Chen,J.Chang,etal. Yi:Open
+foundationmodelsby01.ai. arXivpreprintarXiv:2403.04652,2024.
+[47] X.Zhao,W.Ding,Y.An,Y.Du,T.Yu,M.Li,M.Tang,andJ.Wang. Fastsegmentanything,2023.
+[48] B.Zhou,H.Zhao,X.Puig,T.Xiao,S.Fidler,A.Barriuso,andA.Torralba. Semanticunderstandingof
+scenesthroughtheade20kdataset. InternationalJournalofComputerVision,127:302–321,2019.
+12A Appendix
+A.1 TrainingDetails
+Pseudomaskpreparationdetails. Empirically,inthedividestage,wesettheconfidencethreshold
+τ =0.3;intheconquerstage,wechoosethresholdθ = [0.6,0.5,0.4,0.3,0.2,0.1]. Foreach
+merge
+image,thedivide-and-conquerpipelinegeneratesonaverage334pseudomasks. Intheself-training
+phase, the τ = 0.7, and each image has 448 pseudo masks per image after merging high-
+self-train
+confidencemaskpredictionsgeneratedbyUnSAM.Whenmergingthepseudomaskswiththeground
+truthsfortrainingUnSAM+,weselectτ =0.02.
+UnSAM+
+Whole-imagesegmentation. UnSAMpicksDINO[8]pre-trainedResNet-50[18]asthebackbone
+andMask2former[9]asthemaskdecoder. Giventheabundantnumberofpseudomasksgenerated,
+UnSAMaugmentsdataonlybycroppinga1024×1024regionfromtheoriginalimage. Tocope
+withalargeamountof‘ground-truth’masksperimage,wefindthathaving2000learnablequeries
+producesthebestresult. Werandomlyselectatmost200‘ground-truth’masksperimagetospeed
+upthetrainingprocess. Thedefaultlearningrateis5×10−5withbatchsizeequals16andweight
+decay5×10−2. Wetrainthemodelfor8epochs. Allmodeltraininginthispaperwasconducted
+usingeither4A100GPUsor8RTX3090GPUs.
+Promptablesegmentation. UnSAMusestheself-supervisedpre-trainedSwin-Transformer[25],
+specificallytheSwin-Tinymodel,asthebackboneandleveragesSemantic-SAM[23]asthebase
+model. Givenatmost6levelsofmaskscorrespondingtooneinputpointinSA-1B[21],wesetthe
+numberofhierarchylevelsto6,whichisalsothenumberofpredictedmasksUnSAMgeneratesper
+promptduringinference. However,onecaneasilytrainwithadifferentnumberofgranularitylevels
+asneeded. Thedefaultlearningrateis1×10−4withabatchsizeof8. Thelearningratedecreases
+byafactorof10at90%and95%ofthetrainingiterations. Wetrainthemodelfor4epochs.
+A.2 Preliminary: CutandLearn(CutLER)andMaskCut
+CutLER[39]introducesacut-and-learnpipelinetopreciselysegmentinstanceswithoutsupervision.
+Theinitialphase,knownasthecutstage,usesanormalizedcut-basedmethod,MaskCut[39],to
+generate high-quality instance masks that serve as pseudo-labels for subsequent learning phases.
+MaskCut begins by harnessing semantic information extracted from “key” features K of patch
+i
+i in the last attention layer of unsupervised vision transformers. It then calculates a patch-wise
+cosinesimilaritymatrixW = KiKj . Toextractmultipleinstancemasksfromasingleimage,
+ij |Ki|2|Kj|2
+MaskCutinitiallyappliesNormalizedCuts[31], whichidentifytheeigenvectorxcorresponding
+to the second smallest eigenvalue. The vector x is then bi-partitioned to extract the foreground
+instancemaskMs. Subsequentiterationsrepeatthisoperationbutadjustbymaskingoutpatches
+from previously segmented instances in the affinity matrix: Wt = (Ki(cid:80)t s=1M is j)(Kj(cid:80)t s=1M is j)
+ij ∥Ki∥2∥Kj∥2
+Subsequently,CutLER’slearningstagetrainsasegmentation/detectionmodelwithdrop-loss,which
+encouragesthemodeltoexploreareasnotpreviouslyidentifiedbyMaskCut.Aniterativeself-training
+phaseisemployedforcontinuouslyrefiningthemodel’sperformance.
+A.3 Preliminary: SegmentAnythingModel(SAM)andSA-1B
+InspiredbyachievementintheNLPfield,theSegmentAnythingproject[21]introducesthenovel
+promptablesegmentationtask. AtitscoreliestheSegmentAnythingModel(SAM)[21], which
+is capable of producing segmentation masks given user-provided text, points, boxes, and masks
+in a zero-shot manner. SAM comprises three key components: an MAE [17] pre-trained Vision
+Transformer[14]thatextractsimageembeddings,thepromptencodersthatembedvarioustypesof
+prompts,andalightweightTransformer[36]decoderthatpredictssegmentationmasksbyintegrating
+imageandpromptembeddings.
+OnesignificantcontributionofSAM[21]isthereleaseoftheSA-1Bdataset,whichcomprises11
+millionhigh-resolutionimagesand1.1billionsegmentationmasks,providingasubstantialresource
+fortrainingandevaluatingsegmentationmodels. Inparticular,annotatorsinteractivelyusedSAMto
+annotateimages,andthisnewlyannotateddatawasthenutilizedtoiterativelyupdateSAM.This
+cyclewasrepeatedmultipletimestoprogressivelyenhanceboththemodelandthedataset.
+13WhileSAM[21]significantlyacceleratesthelabelingofsegmentationmasks,annotatinganimage
+stillrequiresapproximately14secondspermask. Giventhateachimagecontainsover100masks,
+thisequatestomorethan30minutesperimage,posingasubstantialcostandmakingitchallenging
+toscaleupthetrainingdataeffectively.
+A.4 EvaluationDatasets
+COCO(CommonObjectsinContext)[24]isawidelyutilizedobjectdetectionandsegmentation
+dataset. Itconsistsof115,000labeledtrainingimages,5,000labeledvalidationimages,andmore
+than200,000unlabeledimages. Itsobjectsegmentationcovers80categoriesandismainlyonthe
+instance-level. WeevaluateourmodelonCOCOVal2017with5000validationimageswithout
+training or fine-tuning on any images from the COCO training set. The metrics we choose are
+class-agnosticCOCOstyleaveragedprecisionandaveragedrecallforthewhole-imageinference
+task,andMaxIoUandOracleIoUforthepromptablesegmentationtask.
+SA-1B[21]consistsof11millionhigh-resolution(1500onaverage)imagesand1.1billionsegmen-
+tationmasks,approximately100masksperimage. Allmasksarecollectedinaclass-agnosticmanner
+withvarioussubjectthemesincludinglocations,objects,andscenes. Maskscoverawiderangeof
+granularity levels, from large-scale objects to fine-grained details. In the whole-image inference
+task,werandomlyselected1000SA-1Bimagesthatarenotusedtogeneratepseudolabelsasthe
+validationset.
+LVIS(LargeVocabulary Instance Segmentation)[15]has164,000imageswith morethan1,200
+categoriesandmorethan2millionhigh-qualityinstance-levelsegmentationmasks. Ithasalongtail
+distributionthatnaturallyrevealsalargenumberofrarecategories. Inthewhole-imageinference
+task,weevaluateourmodelusingits5000validationimagesinazero-shotmanner.
+EntitySeg[29]isanopen-world,class-agnosticdatasetthatconsistsof33277imagesintotal. There
+areonaverage18.1entitiesperimage. Morethan80%ofitsimagesareofhighresolutionwith
+at least 1000 pixels for the width. EntitySeg also has more accurate boundary annotations. In
+thewhole-imageinferencetask,weevaluateourmodelwith1314low-resolutionversionimages
+(800×1300onaverage)inazero-shotmanner.
+PACO(PartsandAttributesofCommonObjects)[30]isadetectiondatasetthatprovides641,000
+masksforpart-levelentitiesnotincludedintraditionaldatasets. Itcovers75objectcategoriesand
+456object-partcategories. Inthewhole-imageinferencetask, weevaluateourmodelwith2410
+validationimagesinazero-shotmanner.
+PartImageNet[16]isalarge-scale,high-qualitydatasetwithrichpartsegmentationannotationsona
+generalsetofclasseswithnon-rigid,articulatedobjects. Itincludes158classesand24,000images
+fromImageNet[13]. Inthewhole-imageinferencetask,weevaluateourmodelwith2956validation
+imagesinazero-shotmanner.
+ADE20K[48]iscomposedof25,574trainingand2,000testingimagesspanning365differentscenes.
+Itmainlycoverssemantic-levelsegmentationwith150semanticcategoriesand707,868objectsfrom
+3,688categories. Inthewhole-imageinferencetask,weevaluateourmodelwith2000testingimages
+inazero-shotmanner.
+A.5 MoreVisualizations
+WeprovidemorequalitativeresultsofUnSAMandUnSAM+inazero-shotmannerinFigureA1,
+FigureA2,andFigureA3.
+14FigureA1:MorevisualizationsonSA-1B[21].Fromtoptobottomarerawimages,segmentationbySAM,
+segmentationbyUnSAM,andsegmentationbyUnSAM+.
+15FigureA2:MorevisualizationsonCOCO[24].Fromtoptobottomarerawimages,segmentationbySAM,
+segmentationbyUnSAM,andsegmentationbyUnSAM+.
+16FigureA3: MorevisualizationsonPACO[30]. Fromtoptobottomarerawimages,segmentationbySAM,
+segmentationbyUnSAM,andsegmentationbyUnSAM+.
+17FigureA4:FailurecasesofUnSAM.Fromlefttorightarerawimages,segmentationbySAM,andsegmentation
+byUnSAM.
+A.6 Limitations
+Inimageswithverydensefine-graineddetails,UnSAMtendstomissrepetitiveinstanceswithsimilar
+texture. AsshowninFigureA4,inthefirstrow,althoughUnSAMaccuratelysegmentstheleaves
+in the center of the picture, it misses some leaves located at the top of the image. Additionally,
+UnSAMoccasionallyover-segmentimages. Inthesecondrow,therightsleevecuffofthedancer
+hasmeaninglesssegmentationmasks. Thisissuemainlyarisesbecausetheunsupervisedclustering
+methodmistakenlyconsiderssomeinformation,suchasfoldsandshadowsonclothing,ascriteriafor
+distinguishingdifferententities. Incontrast,humanannotatorscanusepriorknowledgetoinformthe
+modelthatsuchinformationshouldnotbevalidcriteria. Inthisregard,unsupervisedmethodsstill
+needtoclosethegapwithsupervisedmethods.
+A.7 EthicalConsiderations
+WetrainUnSAMandUnSAM+ongroundtruthsofandpseudomasksgeneratedonSA-1B[21].
+SA-1B contains licensed images that are filtered for objectionable content. It is geographically
+diverse,butsomeregionsandeconomicgroupsareunderrepresented. DownstreamuseofUnSAM
+andUnSAM+maycreatetheirownpotentialbiases.
+18

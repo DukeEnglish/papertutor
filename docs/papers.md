@@ -2,363 +2,363 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19388v1 |
-|title| Taming Data and Transformers for Audio Generation |
-|authors| Moayed Haji-AliWilli MenapaceAliaksandr SiarohinGuha BalakrishnanSergey TulyakovVicente Ordonez
-|links| http://arxiv.org/abs/2406.19388v1 |
-|updated| 2024-06-27 17:58:54 UTC |
-|summary| Generating ambient sounds and effects is a challenging problem due to datascarcity and often insufficient caption quality making it difficult to employlarge-scale generative models for the task. In this work we tackle the problemby introducing two new models. First we propose AutoCap a high-quality andefficient automatic audio captioning model. We show that by leveraging metadataavailable with the audio modality we can substantially improve the quality ofcaptions. AutoCap reaches CIDEr score of 83.2 marking a 3.2 improvement fromthe best available captioning model at four times faster inference speed. Wethen use AutoCap to caption clips from existing datasets obtaining 761000audio clips with high-quality captions forming the largest availableaudio-text dataset. Second we propose GenAu a scalable transformer-basedaudio generation architecture that we scale up to 1.25B parameters and trainwith our new dataset. When compared to state-of-the-art audio generators GenAuobtains significant improvements of 15.7 in FAD score 22.7 in IS and 13.5in CLAP score indicating significantly improved quality of generated audiocompared to previous works. This shows that the quality of data is often asimportant as its quantity. Besides since AutoCap is fully automatic new audiosamples can be added to the training dataset unlocking the training of evenlarger generative models for audio synthesis. |
+|idx| 2406.20098v1 |
+|title| Web2Code: A Large-scale Webpage-to-Code Dataset and Evaluation Framework for Multimodal LLMs |
+|authors| Sukmin YunHaokun LinRusiru ThusharaMohammad Qazim BhatYongxin WangZutao JiangMingkai DengJinhong WangTianhua TaoJunbo LiHaonan LiPreslav NakovTimothy BaldwinZhengzhong LiuEric P. XingXiaodan LiangZhiqiang Shen
+|links| http://arxiv.org/abs/2406.20098v1 |
+|updated| 2024-06-28 17:59:46 UTC |
+|summary| Multimodal large language models MLLMs have shown impressive success acrossmodalities such as image video and audio in a variety of understanding andgeneration tasks. However current MLLMs are surprisingly poor at understandingwebpage screenshots and generating their corresponding HTML code. To addressthis problem we propose Web2Code a benchmark consisting of a new large-scalewebpage-to-code dataset for instruction tuning and an evaluation framework forthe webpage understanding and HTML code translation abilities of MLLMs. Fordataset construction we leverage pretrained LLMs to enhance existingwebpage-to-code datasets as well as generate a diverse pool of new webpagesrendered into images. Specifically the inputs are webpage images andinstructions while the responses are the webpages HTML code. We furtherinclude diverse natural language QA pairs about the webpage content in theresponses to enable a more comprehensive understanding of the web content. Toevaluate model performance in these tasks we develop an evaluation frameworkfor testing MLLMs abilities in webpage understanding and web-to-codegeneration. Extensive experiments show that our proposed dataset is beneficialnot only to our proposed tasks but also in the general visual domain whileprevious datasets result in worse performance. We hope our work will contributeto the development of general MLLMs suitable for web-based content generationand task automation. Our data and code will be available athttps://github.com/MBZUAI-LLM/web2code. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19384v1 |
-|title| The Remarkable Robustness of LLMs: Stages of Inference? |
-|authors| Vedang LadWes GurneeMax Tegmark
-|links| http://arxiv.org/abs/2406.19384v1 |
-|updated| 2024-06-27 17:57:03 UTC |
-|summary| We demonstrate and investigate the remarkable robustness of Large LanguageModels by deleting and swapping adjacent layers. We find that deleting andswapping interventions retain 72-95 of the original models predictionaccuracy without fine-tuning whereas models with more layers exhibit morerobustness. Based on the results of the layer-wise intervention and furtherexperiments we hypothesize the existence of four universal stages of inferenceacross eight different models: detokenization feature engineering predictionensembling and residual sharpening. The first stage integrates localinformation lifting raw token representations into higher-level contextualrepresentations. Next is the iterative refinement of task and entity-specificfeatures. Then the second half of the model begins with a phase transitionwhere hidden representations align more with the vocabulary space due tospecialized model components. Finally the last layer sharpens the followingtoken distribution by eliminating obsolete features that add noise to theprediction. |
+|idx| 2406.20095v1 |
+|title| LLaRA: Supercharging Robot Learning Data for Vision-Language Policy |
+|authors| Xiang LiCristina MataJongwoo ParkKumara KahatapitiyaYoo Sung JangJinghuan ShangKanchana RanasingheRyan BurgertMu CaiYong Jae LeeMichael S. Ryoo
+|links| http://arxiv.org/abs/2406.20095v1 |
+|updated| 2024-06-28 17:59:12 UTC |
+|summary| Large Language Models LLMs equipped with extensive world knowledge andstrong reasoning skills can tackle diverse tasks across domains often byposing them as conversation-style instruction-response pairs. In this paper wepropose LLaRA: Large Language and Robotics Assistant a framework whichformulates robot action policy as conversations and provides improvedresponses when trained with auxiliary data that complements policy learning.LLMs with visual inputs i.e. Vision Language Models VLMs have the capacityto process state information as visual-textual prompts and generate optimalpolicy decisions in text. To train such action policy VLMs we first introducean automated pipeline to generate diverse high-quality robotics instructiondata from existing behavior cloning data. A VLM finetuned with the resultingcollection of datasets based on a conversation-style formulation tailored forrobotics tasks can generate meaningful robot action policy decisions. Ourexperiments across multiple simulated and real-world environments demonstratethe state-of-the-art performance of the proposed LLaRA framework. The codedatasets and pretrained models are available athttps://github.com/LostXine/LLaRA. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19371v1 |
-|title| Suri: Multi-constraint Instruction Following for Long-form Text Generation |
-|authors| Chau Minh PhamSimeng SunMohit Iyyer
-|links| http://arxiv.org/abs/2406.19371v1 |
-|updated| 2024-06-27 17:50:35 UTC |
-|summary| Existing research on instruction following largely focuses on tasks withsimple instructions and short responses. In this work we exploremulti-constraint instruction following for generating long-form text. We createSuri a dataset with 20K human-written long-form texts paired withLLM-generated backtranslated instructions that contain multiple complexconstraints. Because of prohibitive challenges associated with collecting humanpreference judgments on long-form texts preference-tuning algorithms such asDPO are infeasible in our setting thus we propose Instructional ORPOI-ORPO an alignment method based on the ORPO algorithm. Instead of receivingnegative feedback from dispreferred responses I-ORPO obtains negative feedbackfrom synthetically corrupted instructions generated by an LLM. Using Suri weperform supervised and I-ORPO fine-tuning on Mistral-7b-Instruct-v0.2. Theresulting models Suri-SFT and Suri-I-ORPO generate significantly longer texts5K tokens than base models without significant quality deterioration. Ourhuman evaluation shows that while both SFT and I-ORPO models satisfy mostconstraints Suri-I-ORPO generations are generally preferred for their coherentand informative incorporation of the constraints. We release our code athttps://github.com/chtmp223/suri. |
+|idx| 2406.20094v1 |
+|title| Scaling Synthetic Data Creation with 1,000,000,000 Personas |
+|authors| Xin ChanXiaoyang WangDian YuHaitao MiDong Yu
+|links| http://arxiv.org/abs/2406.20094v1 |
+|updated| 2024-06-28 17:59:01 UTC |
+|summary| We propose a novel persona-driven data synthesis methodology that leveragesvarious perspectives within a large language model LLM to create diversesynthetic data. To fully exploit this methodology at scale we introducePersona Hub -- a collection of 1 billion diverse personas automatically curatedfrom web data. These 1 billion personas 13 of the worlds total populationacting as distributed carriers of world knowledge can tap into almost everyperspective encapsulated within the LLM thereby facilitating the creation ofdiverse synthetic data at scale for various scenarios. By showcasing PersonaHubs use cases in synthesizing high-quality mathematical and logical reasoningproblems instructions i.e. user prompts knowledge-rich texts game NPCsand tools functions at scale we demonstrate persona-driven data synthesis isversatile scalable flexible and easy to use potentially driving a paradigmshift in synthetic data creation and applications in practice which may have aprofound impact on LLM research and development. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19358v1 |
-|title| The Model Arena for Cross-lingual Sentiment Analysis: A Comparative Study in the Era of Large Language Models |
-|authors| Xiliang ZhuShayna GardinerTere RoldánDavid Rossouw
-|links| http://arxiv.org/abs/2406.19358v1 |
-|updated| 2024-06-27 17:38:45 UTC |
-|summary| Sentiment analysis serves as a pivotal component in Natural LanguageProcessing NLP. Advancements in multilingual pre-trained models such as XLM-Rand mT5 have contributed to the increasing interest in cross-lingual sentimentanalysis. The recent emergence in Large Language Models LLM has significantlyadvanced general NLP tasks however the capability of such LLMs incross-lingual sentiment analysis has not been fully studied. This workundertakes an empirical analysis to compare the cross-lingual transfercapability of public Small Multilingual Language Models SMLM like XLM-Ragainst English-centric LLMs such as Llama-3 in the context of sentimentanalysis across English Spanish French and Chinese. Our findings reveal thatamong public models SMLMs exhibit superior zero-shot cross-lingual performancerelative to LLMs. However in few-shot cross-lingual settings public LLMsdemonstrate an enhanced adaptive potential. In addition we observe thatproprietary GPT-3.5 and GPT-4 lead in zero-shot cross-lingual capability butare outpaced by public models in few-shot scenarios. |
+|idx| 2406.20087v1 |
+|title| ProgressGym: Alignment with a Millennium of Moral Progress |
+|authors| Tianyi QiuYang ZhangXuchuan HuangJasmine Xinze LiJiaming JiYaodong Yang
+|links| http://arxiv.org/abs/2406.20087v1 |
+|updated| 2024-06-28 17:55:24 UTC |
+|summary| Frontier AI systems including large language models LLMs hold increasinginfluence over the epistemology of human users. Such influence can reinforceprevailing societal values potentially contributing to the lock-in ofmisguided moral beliefs and consequently the perpetuation of problematicmoral practices on a broad scale. We introduce progress alignment as atechnical solution to mitigate this imminent risk. Progress alignmentalgorithms learn to emulate the mechanics of human moral progress therebyaddressing the susceptibility of existing alignment methods to contemporarymoral blindspots. To empower research in progress alignment we introduceProgressGym an experimental framework allowing the learning of moral progressmechanics from history in order to facilitate future progress in real-worldmoral decisions. Leveraging 9 centuries of historical text and 18 historicalLLMs ProgressGym enables codification of real-world progress alignmentchallenges into concrete benchmarks. Specifically we introduce three corechallenges: tracking evolving values PG-Follow preemptively anticipatingmoral progress PG-Predict and regulating the feedback loop between human andAI value shifts PG-Coevolve. Alignment methods without a temporal dimensionare inapplicable to these tasks. In response we present lifelong andextrapolative algorithms as baseline methods of progress alignment and buildan open leaderboard soliciting novel algorithms and challenges. The frameworkand the leaderboard are available athttps://github.com/PKU-Alignment/ProgressGym andhttps://huggingface.co/spaces/PKU-Alignment/ProgressGym-LeaderBoardrespectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19356v1 |
-|title| DiVERT: Distractor Generation with Variational Errors Represented as Text for Math Multiple-choice Questions |
-|authors| Nigel FernandezAlexander ScarlatosSimon WoodheadAndrew Lan
-|links| http://arxiv.org/abs/2406.19356v1 |
-|updated| 2024-06-27 17:37:31 UTC |
-|summary| High-quality distractors are crucial to both the assessment and pedagogicalvalue of multiple-choice questions MCQs where manually crafting ones thatanticipate knowledge deficiencies or misconceptions among real students isdifficult. Meanwhile automated distractor generation even with the help oflarge language models LLMs remains challenging for subjects like math. It iscrucial to not only identify plausible distractors but also understand theerror behind them. In this paper we introduce DiVERT Distractor Generationwith Variational Errors Represented as Text a novel variational approach thatlearns an interpretable representation of errors behind distractors in mathMCQs. Through experiments on a real-world math MCQ dataset with 1434 questionsused by hundreds of thousands of students we show that DiVERT despite using abase open-source LLM with 7B parameters outperforms state-of-the-artapproaches using GPT-4o on downstream distractor generation. We also conduct ahuman evaluation with math educators and find that DiVERT leads to error labelsthat are of comparable quality to human-authored ones. |
+|idx| 2406.20086v1 |
+|title| Token Erasure as a Footprint of Implicit Vocabulary Items in LLMs |
+|authors| Sheridan FeuchtDavid AtkinsonByron WallaceDavid Bau
+|links| http://arxiv.org/abs/2406.20086v1 |
+|updated| 2024-06-28 17:54:47 UTC |
+|summary| LLMs process text as sequences of tokens that roughly correspond to wordswhere less common words are represented by multiple tokens. However individualtokens are often semantically unrelated to the meanings of the words/conceptsthey comprise. For example Llama-2-7bs tokenizer splits the wordnortheastern into the tokens _n ort he astern none of whichcorrespond to semantically meaningful units like north or east. Similarlythe overall meanings of named entities like Neil Young and multi-wordexpressions like break a leg cannot be directly inferred from theirconstituent tokens. Mechanistically how do LLMs convert such arbitrary groupsof tokens into useful higher-level representations In this work we find thatlast token representations of named entities and multi-token words exhibit apronounced erasure effect where information about previous and currenttokens is rapidly forgotten in early layers. Using this observation we proposea method to read out the implicit vocabulary of an autoregressive LLM byexamining differences in token representations across layers and presentresults of this method for Llama-2-7b and Llama-3-8B. To our knowledge this isthe first attempt to probe the implicit vocabulary of an LLM. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19384v1 |
-|title| The Remarkable Robustness of LLMs: Stages of Inference? |
-|authors| Vedang LadWes GurneeMax Tegmark
-|links| http://arxiv.org/abs/2406.19384v1 |
-|updated| 2024-06-27 17:57:03 UTC |
-|summary| We demonstrate and investigate the remarkable robustness of Large LanguageModels by deleting and swapping adjacent layers. We find that deleting andswapping interventions retain 72-95 of the original models predictionaccuracy without fine-tuning whereas models with more layers exhibit morerobustness. Based on the results of the layer-wise intervention and furtherexperiments we hypothesize the existence of four universal stages of inferenceacross eight different models: detokenization feature engineering predictionensembling and residual sharpening. The first stage integrates localinformation lifting raw token representations into higher-level contextualrepresentations. Next is the iterative refinement of task and entity-specificfeatures. Then the second half of the model begins with a phase transitionwhere hidden representations align more with the vocabulary space due tospecialized model components. Finally the last layer sharpens the followingtoken distribution by eliminating obsolete features that add noise to theprediction. |
+|idx| 2406.20098v1 |
+|title| Web2Code: A Large-scale Webpage-to-Code Dataset and Evaluation Framework for Multimodal LLMs |
+|authors| Sukmin YunHaokun LinRusiru ThusharaMohammad Qazim BhatYongxin WangZutao JiangMingkai DengJinhong WangTianhua TaoJunbo LiHaonan LiPreslav NakovTimothy BaldwinZhengzhong LiuEric P. XingXiaodan LiangZhiqiang Shen
+|links| http://arxiv.org/abs/2406.20098v1 |
+|updated| 2024-06-28 17:59:46 UTC |
+|summary| Multimodal large language models MLLMs have shown impressive success acrossmodalities such as image video and audio in a variety of understanding andgeneration tasks. However current MLLMs are surprisingly poor at understandingwebpage screenshots and generating their corresponding HTML code. To addressthis problem we propose Web2Code a benchmark consisting of a new large-scalewebpage-to-code dataset for instruction tuning and an evaluation framework forthe webpage understanding and HTML code translation abilities of MLLMs. Fordataset construction we leverage pretrained LLMs to enhance existingwebpage-to-code datasets as well as generate a diverse pool of new webpagesrendered into images. Specifically the inputs are webpage images andinstructions while the responses are the webpages HTML code. We furtherinclude diverse natural language QA pairs about the webpage content in theresponses to enable a more comprehensive understanding of the web content. Toevaluate model performance in these tasks we develop an evaluation frameworkfor testing MLLMs abilities in webpage understanding and web-to-codegeneration. Extensive experiments show that our proposed dataset is beneficialnot only to our proposed tasks but also in the general visual domain whileprevious datasets result in worse performance. We hope our work will contributeto the development of general MLLMs suitable for web-based content generationand task automation. Our data and code will be available athttps://github.com/MBZUAI-LLM/web2code. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19370v1 |
-|title| Emergence of Hidden Capabilities: Exploring Learning Dynamics in Concept Space |
-|authors| Core Francisco ParkMaya OkawaAndrew LeeEkdeep Singh LubanaHidenori Tanaka
-|links| http://arxiv.org/abs/2406.19370v1 |
-|updated| 2024-06-27 17:50:05 UTC |
-|summary| Modern generative models demonstrate impressive capabilities likely stemmingfrom an ability to identify and manipulate abstract concepts underlying theirtraining data. However fundamental questions remain: what determines theconcepts a model learns the order in which it learns them and its ability tomanipulate those concepts To address these questions we propose analyzing amodels learning dynamics via a framework we call the concept space where eachaxis represents an independent concept underlying the data generating process.By characterizing learning dynamics in this space we identify how the speed atwhich a concept is learned and hence the order of concept learning iscontrolled by properties of the data we term concept signal. Further weobserve moments of sudden turns in the direction of a models learning dynamicsin concept space. Surprisingly these points precisely correspond to theemergence of hidden capabilities i.e. where latent interventions show themodel possesses the capability to manipulate a concept but these capabilitiescannot yet be elicited via naive input prompting. While our results focus onsynthetically defined toy datasets we hypothesize a general claim on emergenceof hidden capabilities may hold: generative models possess latent capabilitiesthat emerge suddenly and consistently during training though a model might notexhibit these capabilities under naive input prompting. |
+|idx| 2406.20095v1 |
+|title| LLaRA: Supercharging Robot Learning Data for Vision-Language Policy |
+|authors| Xiang LiCristina MataJongwoo ParkKumara KahatapitiyaYoo Sung JangJinghuan ShangKanchana RanasingheRyan BurgertMu CaiYong Jae LeeMichael S. Ryoo
+|links| http://arxiv.org/abs/2406.20095v1 |
+|updated| 2024-06-28 17:59:12 UTC |
+|summary| Large Language Models LLMs equipped with extensive world knowledge andstrong reasoning skills can tackle diverse tasks across domains often byposing them as conversation-style instruction-response pairs. In this paper wepropose LLaRA: Large Language and Robotics Assistant a framework whichformulates robot action policy as conversations and provides improvedresponses when trained with auxiliary data that complements policy learning.LLMs with visual inputs i.e. Vision Language Models VLMs have the capacityto process state information as visual-textual prompts and generate optimalpolicy decisions in text. To train such action policy VLMs we first introducean automated pipeline to generate diverse high-quality robotics instructiondata from existing behavior cloning data. A VLM finetuned with the resultingcollection of datasets based on a conversation-style formulation tailored forrobotics tasks can generate meaningful robot action policy decisions. Ourexperiments across multiple simulated and real-world environments demonstratethe state-of-the-art performance of the proposed LLaRA framework. The codedatasets and pretrained models are available athttps://github.com/LostXine/LLaRA. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19354v1 |
-|title| Fundamental Problems With Model Editing: How Should Rational Belief Revision Work in LLMs? |
-|authors| Peter HaseThomas HofweberXiang ZhouElias Stengel-EskinMohit Bansal
-|links| http://arxiv.org/abs/2406.19354v1 |
-|updated| 2024-06-27 17:33:03 UTC |
-|summary| The model editing problem concerns how language models should learn new factsabout the world over time. While empirical research on model editing has drawnwidespread attention the conceptual foundations of model editing remain shaky-- perhaps unsurprisingly since model editing is essentially belief revisiona storied problem in philosophy that has eluded succinct solutions for decades.Model editing nonetheless demands a solution since we need to be able tocontrol the knowledge within language models. With this goal in mind thispaper critiques the standard formulation of the model editing problem andproposes a formal testbed for model editing research. We first describe 12 openproblems with model editing based on challenges with 1 defining the problem2 developing benchmarks and 3 assuming LLMs have editable beliefs in thefirst place. Many of these challenges are extremely difficult to address e.g.determining far-reaching consequences of edits labeling probabilisticentailments between facts and updating beliefs of agent simulators. Next weintroduce a semi-synthetic dataset for model editing based on Wikidata wherewe can evaluate edits against labels given by an idealized Bayesian agent. Thisenables us to say exactly how belief revision in language models falls short ofa desirable epistemic standard. We encourage further research exploringsettings where such a gold standard can be compared against. Our code ispublicly available at: https://github.com/peterbhase/LLM-belief-revision |
+|idx| 2406.20087v1 |
+|title| ProgressGym: Alignment with a Millennium of Moral Progress |
+|authors| Tianyi QiuYang ZhangXuchuan HuangJasmine Xinze LiJiaming JiYaodong Yang
+|links| http://arxiv.org/abs/2406.20087v1 |
+|updated| 2024-06-28 17:55:24 UTC |
+|summary| Frontier AI systems including large language models LLMs hold increasinginfluence over the epistemology of human users. Such influence can reinforceprevailing societal values potentially contributing to the lock-in ofmisguided moral beliefs and consequently the perpetuation of problematicmoral practices on a broad scale. We introduce progress alignment as atechnical solution to mitigate this imminent risk. Progress alignmentalgorithms learn to emulate the mechanics of human moral progress therebyaddressing the susceptibility of existing alignment methods to contemporarymoral blindspots. To empower research in progress alignment we introduceProgressGym an experimental framework allowing the learning of moral progressmechanics from history in order to facilitate future progress in real-worldmoral decisions. Leveraging 9 centuries of historical text and 18 historicalLLMs ProgressGym enables codification of real-world progress alignmentchallenges into concrete benchmarks. Specifically we introduce three corechallenges: tracking evolving values PG-Follow preemptively anticipatingmoral progress PG-Predict and regulating the feedback loop between human andAI value shifts PG-Coevolve. Alignment methods without a temporal dimensionare inapplicable to these tasks. In response we present lifelong andextrapolative algorithms as baseline methods of progress alignment and buildan open leaderboard soliciting novel algorithms and challenges. The frameworkand the leaderboard are available athttps://github.com/PKU-Alignment/ProgressGym andhttps://huggingface.co/spaces/PKU-Alignment/ProgressGym-LeaderBoardrespectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19349v1 |
-|title| IndoToxic2024: A Demographically-Enriched Dataset of Hate Speech and Toxicity Types for Indonesian Language |
-|authors| Lucky SusantoMusa Izzanardi WijanarkoPrasetia Anugrah PratamaTraci HongIka IdrisAlham Fikri AjiDerry Wijaya
-|links| http://arxiv.org/abs/2406.19349v1 |
-|updated| 2024-06-27 17:26:38 UTC |
-|summary| Hate speech poses a significant threat to social harmony. Over the past twoyears Indonesia has seen a ten-fold increase in the online hate speech ratiounderscoring the urgent need for effective detection mechanisms. Howeverprogress is hindered by the limited availability of labeled data for Indonesiantexts. The condition is even worse for marginalized minorities such as ShiaLGBTQ and other ethnic minorities because hate speech is underreported andless understood by detection tools. Furthermore the lack of accommodation forsubjectivity in current datasets compounds this issue. To address this weintroduce IndoToxic2024 a comprehensive Indonesian hate speech and toxicityclassification dataset. Comprising 43692 entries annotated by 19 diverseindividuals the dataset focuses on texts targeting vulnerable groups inIndonesia specifically during the hottest political event in the country: thepresidential election. We establish baselines for seven binary classificationtasks achieving a macro-F1 score of 0.78 with a BERT model IndoBERTweetfine-tuned for hate speech classification. Furthermore we demonstrate howincorporating demographic information can enhance the zero-shot performance ofthe large language model gpt-3.5-turbo. However we also caution that anoveremphasis on demographic information can negatively impact the fine-tunedmodel performance due to data fragmentation. |
+|idx| 2406.20080v1 |
+|title| AI for Extreme Event Modeling and Understanding: Methodologies and Challenges |
+|authors| Gustau Camps-VallsMiguel-Ángel Fernández-TorresKai-Hendrik CohrsAdrian HöhlAndrea CastellettiAytac PacalClaire RobinFrancesco MartinuzziIoannis PapoutsisIoannis PrapasJorge Pérez-AracilKatja WeigelMaria Gonzalez-CalabuigMarkus ReichsteinMartin RabelMatteo GiulianiMiguel MahechaOana-Iuliana PopescuOscar J. Pellicer-ValeroSaid OualaSancho Salcedo-SanzSebastian SippelSpyros KondylatosTamara HappéTristan Williams
+|links| http://arxiv.org/abs/2406.20080v1 |
+|updated| 2024-06-28 17:45:25 UTC |
+|summary| In recent years artificial intelligence AI has deeply impacted variousfields including Earth system sciences. Here AI improved weather forecastingmodel emulation parameter estimation and the prediction of extreme events.However the latter comes with specific challenges such as developing accuratepredictors from noisy heterogeneous and limited annotated data. This paperreviews how AI is being used to analyze extreme events like floods droughtswildfires and heatwaves highlighting the importance of creating accuratetransparent and reliable AI models. We discuss the hurdles of dealing withlimited data integrating information in real-time deploying models andmaking them understandable all crucial for gaining the trust of stakeholdersand meeting regulatory needs. We provide an overview of how AI can helpidentify and explain extreme events more effectively improving disasterresponse and communication. We emphasize the need for collaboration acrossdifferent fields to create AI solutions that are practical understandable andtrustworthy for analyzing and predicting extreme events. Such collaborativeefforts aim to enhance disaster readiness and disaster risk reduction. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19320v1 |
-|title| Efficient World Models with Context-Aware Tokenization |
-|authors| Vincent MicheliEloi AlonsoFrançois Fleuret
-|links| http://arxiv.org/abs/2406.19320v1 |
-|updated| 2024-06-27 16:54:12 UTC |
-|summary| Scaling up deep Reinforcement Learning RL methods presents a significantchallenge. Following developments in generative modelling model-based RLpositions itself as a strong contender. Recent advances in sequence modellinghave led to effective transformer-based world models albeit at the price ofheavy computations due to the long sequences of tokens required to accuratelysimulate environments. In this work we propose Delta-IRIS a new agent witha world model architecture composed of a discrete autoencoder that encodesstochastic deltas between time steps and an autoregressive transformer thatpredicts future deltas by summarizing the current state of the world withcontinuous tokens. In the Crafter benchmark Delta-IRIS sets a new state ofthe art at multiple frame budgets while being an order of magnitude faster totrain than previous attention-based approaches. We release our code and modelsat https://github.com/vmicheli/delta-iris. |
+|idx| 2406.20079v1 |
+|title| Molecular Facts: Desiderata for Decontextualization in LLM Fact Verification |
+|authors| Anisha GunjalGreg Durrett
+|links| http://arxiv.org/abs/2406.20079v1 |
+|updated| 2024-06-28 17:43:48 UTC |
+|summary| Automatic factuality verification of large language model LLM generationsis becoming more and more widely used to combat hallucinations. A major pointof tension in the literature is the granularity of this fact-checking: largerchunks of text are hard to fact-check but more atomic facts like propositionsmay lack context to interpret correctly. In this work we assess the role ofcontext in these atomic facts. We argue that fully atomic facts are not theright representation and define two criteria for molecular facts:decontextuality or how well they can stand alone and minimality or howlittle extra information is added to achieve decontexuality. We quantify theimpact of decontextualization on minimality then present a baselinemethodology for generating molecular facts automatically aiming to add theright amount of information. We compare against various methods ofdecontextualization and find that molecular facts balance minimality with factverification accuracy in ambiguous settings. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19384v1 |
-|title| The Remarkable Robustness of LLMs: Stages of Inference? |
-|authors| Vedang LadWes GurneeMax Tegmark
-|links| http://arxiv.org/abs/2406.19384v1 |
-|updated| 2024-06-27 17:57:03 UTC |
-|summary| We demonstrate and investigate the remarkable robustness of Large LanguageModels by deleting and swapping adjacent layers. We find that deleting andswapping interventions retain 72-95 of the original models predictionaccuracy without fine-tuning whereas models with more layers exhibit morerobustness. Based on the results of the layer-wise intervention and furtherexperiments we hypothesize the existence of four universal stages of inferenceacross eight different models: detokenization feature engineering predictionensembling and residual sharpening. The first stage integrates localinformation lifting raw token representations into higher-level contextualrepresentations. Next is the iterative refinement of task and entity-specificfeatures. Then the second half of the model begins with a phase transitionwhere hidden representations align more with the vocabulary space due tospecialized model components. Finally the last layer sharpens the followingtoken distribution by eliminating obsolete features that add noise to theprediction. |
+|idx| 2406.20095v1 |
+|title| LLaRA: Supercharging Robot Learning Data for Vision-Language Policy |
+|authors| Xiang LiCristina MataJongwoo ParkKumara KahatapitiyaYoo Sung JangJinghuan ShangKanchana RanasingheRyan BurgertMu CaiYong Jae LeeMichael S. Ryoo
+|links| http://arxiv.org/abs/2406.20095v1 |
+|updated| 2024-06-28 17:59:12 UTC |
+|summary| Large Language Models LLMs equipped with extensive world knowledge andstrong reasoning skills can tackle diverse tasks across domains often byposing them as conversation-style instruction-response pairs. In this paper wepropose LLaRA: Large Language and Robotics Assistant a framework whichformulates robot action policy as conversations and provides improvedresponses when trained with auxiliary data that complements policy learning.LLMs with visual inputs i.e. Vision Language Models VLMs have the capacityto process state information as visual-textual prompts and generate optimalpolicy decisions in text. To train such action policy VLMs we first introducean automated pipeline to generate diverse high-quality robotics instructiondata from existing behavior cloning data. A VLM finetuned with the resultingcollection of datasets based on a conversation-style formulation tailored forrobotics tasks can generate meaningful robot action policy decisions. Ourexperiments across multiple simulated and real-world environments demonstratethe state-of-the-art performance of the proposed LLaRA framework. The codedatasets and pretrained models are available athttps://github.com/LostXine/LLaRA. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19380v1 |
-|title| TabReD: A Benchmark of Tabular Machine Learning in-the-Wild |
-|authors| Ivan RubachevNikolay KartashevYury GorishniyArtem Babenko
-|links| http://arxiv.org/abs/2406.19380v1 |
-|updated| 2024-06-27 17:55:31 UTC |
-|summary| Benchmarks that closely reflect downstream application scenarios areessential for the streamlined adoption of new research in tabular machinelearning ML. In this work we examine existing tabular benchmarks and findtwo common characteristics of industry-grade tabular data that areunderrepresented in the datasets available to the academic community. Firsttabular data often changes over time in real-world deployment scenarios. Thisimpacts model performance and requires time-based train and test splits forcorrect model evaluation. Yet existing academic tabular datasets often lacktimestamp metadata to enable such evaluation. Second a considerable portion ofdatasets in production settings stem from extensive data acquisition andfeature engineering pipelines. For each specific dataset this can have adifferent impact on the absolute and relative number of predictiveuninformative and correlated features which in turn can affect modelselection. To fill the aforementioned gaps in academic benchmarks we introduceTabReD -- a collection of eight industry-grade tabular datasets covering a widerange of domains from finance to food delivery services. We assess a largenumber of tabular ML models in the feature-rich temporally-evolving datasetting facilitated by TabReD. We demonstrate that evaluation on time-baseddata splits leads to different methods ranking compared to evaluation onrandom splits more common in academic benchmarks. Furthermore on the TabReDdatasets MLP-like architectures and GBDT show the best results while moresophisticated DL models are yet to prove their effectiveness. |
+|idx| 2406.20094v1 |
+|title| Scaling Synthetic Data Creation with 1,000,000,000 Personas |
+|authors| Xin ChanXiaoyang WangDian YuHaitao MiDong Yu
+|links| http://arxiv.org/abs/2406.20094v1 |
+|updated| 2024-06-28 17:59:01 UTC |
+|summary| We propose a novel persona-driven data synthesis methodology that leveragesvarious perspectives within a large language model LLM to create diversesynthetic data. To fully exploit this methodology at scale we introducePersona Hub -- a collection of 1 billion diverse personas automatically curatedfrom web data. These 1 billion personas 13 of the worlds total populationacting as distributed carriers of world knowledge can tap into almost everyperspective encapsulated within the LLM thereby facilitating the creation ofdiverse synthetic data at scale for various scenarios. By showcasing PersonaHubs use cases in synthesizing high-quality mathematical and logical reasoningproblems instructions i.e. user prompts knowledge-rich texts game NPCsand tools functions at scale we demonstrate persona-driven data synthesis isversatile scalable flexible and easy to use potentially driving a paradigmshift in synthetic data creation and applications in practice which may have aprofound impact on LLM research and development. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19370v1 |
-|title| Emergence of Hidden Capabilities: Exploring Learning Dynamics in Concept Space |
-|authors| Core Francisco ParkMaya OkawaAndrew LeeEkdeep Singh LubanaHidenori Tanaka
-|links| http://arxiv.org/abs/2406.19370v1 |
-|updated| 2024-06-27 17:50:05 UTC |
-|summary| Modern generative models demonstrate impressive capabilities likely stemmingfrom an ability to identify and manipulate abstract concepts underlying theirtraining data. However fundamental questions remain: what determines theconcepts a model learns the order in which it learns them and its ability tomanipulate those concepts To address these questions we propose analyzing amodels learning dynamics via a framework we call the concept space where eachaxis represents an independent concept underlying the data generating process.By characterizing learning dynamics in this space we identify how the speed atwhich a concept is learned and hence the order of concept learning iscontrolled by properties of the data we term concept signal. Further weobserve moments of sudden turns in the direction of a models learning dynamicsin concept space. Surprisingly these points precisely correspond to theemergence of hidden capabilities i.e. where latent interventions show themodel possesses the capability to manipulate a concept but these capabilitiescannot yet be elicited via naive input prompting. While our results focus onsynthetically defined toy datasets we hypothesize a general claim on emergenceof hidden capabilities may hold: generative models possess latent capabilitiesthat emerge suddenly and consistently during training though a model might notexhibit these capabilities under naive input prompting. |
+|idx| 2406.20087v1 |
+|title| ProgressGym: Alignment with a Millennium of Moral Progress |
+|authors| Tianyi QiuYang ZhangXuchuan HuangJasmine Xinze LiJiaming JiYaodong Yang
+|links| http://arxiv.org/abs/2406.20087v1 |
+|updated| 2024-06-28 17:55:24 UTC |
+|summary| Frontier AI systems including large language models LLMs hold increasinginfluence over the epistemology of human users. Such influence can reinforceprevailing societal values potentially contributing to the lock-in ofmisguided moral beliefs and consequently the perpetuation of problematicmoral practices on a broad scale. We introduce progress alignment as atechnical solution to mitigate this imminent risk. Progress alignmentalgorithms learn to emulate the mechanics of human moral progress therebyaddressing the susceptibility of existing alignment methods to contemporarymoral blindspots. To empower research in progress alignment we introduceProgressGym an experimental framework allowing the learning of moral progressmechanics from history in order to facilitate future progress in real-worldmoral decisions. Leveraging 9 centuries of historical text and 18 historicalLLMs ProgressGym enables codification of real-world progress alignmentchallenges into concrete benchmarks. Specifically we introduce three corechallenges: tracking evolving values PG-Follow preemptively anticipatingmoral progress PG-Predict and regulating the feedback loop between human andAI value shifts PG-Coevolve. Alignment methods without a temporal dimensionare inapplicable to these tasks. In response we present lifelong andextrapolative algorithms as baseline methods of progress alignment and buildan open leaderboard soliciting novel algorithms and challenges. The frameworkand the leaderboard are available athttps://github.com/PKU-Alignment/ProgressGym andhttps://huggingface.co/spaces/PKU-Alignment/ProgressGym-LeaderBoardrespectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19356v1 |
-|title| DiVERT: Distractor Generation with Variational Errors Represented as Text for Math Multiple-choice Questions |
-|authors| Nigel FernandezAlexander ScarlatosSimon WoodheadAndrew Lan
-|links| http://arxiv.org/abs/2406.19356v1 |
-|updated| 2024-06-27 17:37:31 UTC |
-|summary| High-quality distractors are crucial to both the assessment and pedagogicalvalue of multiple-choice questions MCQs where manually crafting ones thatanticipate knowledge deficiencies or misconceptions among real students isdifficult. Meanwhile automated distractor generation even with the help oflarge language models LLMs remains challenging for subjects like math. It iscrucial to not only identify plausible distractors but also understand theerror behind them. In this paper we introduce DiVERT Distractor Generationwith Variational Errors Represented as Text a novel variational approach thatlearns an interpretable representation of errors behind distractors in mathMCQs. Through experiments on a real-world math MCQ dataset with 1434 questionsused by hundreds of thousands of students we show that DiVERT despite using abase open-source LLM with 7B parameters outperforms state-of-the-artapproaches using GPT-4o on downstream distractor generation. We also conduct ahuman evaluation with math educators and find that DiVERT leads to error labelsthat are of comparable quality to human-authored ones. |
+|idx| 2406.20086v1 |
+|title| Token Erasure as a Footprint of Implicit Vocabulary Items in LLMs |
+|authors| Sheridan FeuchtDavid AtkinsonByron WallaceDavid Bau
+|links| http://arxiv.org/abs/2406.20086v1 |
+|updated| 2024-06-28 17:54:47 UTC |
+|summary| LLMs process text as sequences of tokens that roughly correspond to wordswhere less common words are represented by multiple tokens. However individualtokens are often semantically unrelated to the meanings of the words/conceptsthey comprise. For example Llama-2-7bs tokenizer splits the wordnortheastern into the tokens _n ort he astern none of whichcorrespond to semantically meaningful units like north or east. Similarlythe overall meanings of named entities like Neil Young and multi-wordexpressions like break a leg cannot be directly inferred from theirconstituent tokens. Mechanistically how do LLMs convert such arbitrary groupsof tokens into useful higher-level representations In this work we find thatlast token representations of named entities and multi-token words exhibit apronounced erasure effect where information about previous and currenttokens is rapidly forgotten in early layers. Using this observation we proposea method to read out the implicit vocabulary of an autoregressive LLM byexamining differences in token representations across layers and presentresults of this method for Llama-2-7b and Llama-3-8B. To our knowledge this isthe first attempt to probe the implicit vocabulary of an LLM. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19328v1 |
-|title| Subtractive Training for Music Stem Insertion using Latent Diffusion Models |
-|authors| Ivan Villa-RenteriaMason L. WangZachary ShahZhe LiSoohyun KimNeelesh RamachandranMert Pilanci
-|links| http://arxiv.org/abs/2406.19328v1 |
-|updated| 2024-06-27 16:59:14 UTC |
-|summary| We present Subtractive Training a simple and novel method for synthesizingindividual musical instrument stems given other instruments as context. Thismethod pairs a dataset of complete music mixes with 1 a variant of the datasetlacking a specific stem and 2 LLM-generated instructions describing how themissing stem should be reintroduced. We then fine-tune a pretrainedtext-to-audio diffusion model to generate the missing instrument stem guidedby both the existing stems and the text instruction. Our results demonstrateSubtractive Trainings efficacy in creating authentic drum stems thatseamlessly blend with the existing tracks. We also show that we can use thetext instruction to control the generation of the inserted stem in terms ofrhythm dynamics and genre allowing us to modify the style of a singleinstrument in a full song while keeping the remaining instruments the same.Lastly we extend this technique to MIDI formats successfully generatingcompatible bass drum and guitar parts for incomplete arrangements. |
+|idx| 2406.20081v1 |
+|title| Segment Anything without Supervision |
+|authors| XuDong WangJingfeng YangTrevor Darrell
+|links| http://arxiv.org/abs/2406.20081v1 |
+|updated| 2024-06-28 17:47:32 UTC |
+|summary| The Segmentation Anything Model SAM requires labor-intensive data labeling.We present Unsupervised SAM UnSAM for promptable and automatic whole-imagesegmentation that does not require human annotations. UnSAM utilizes adivide-and-conquer strategy to discover the hierarchical structure of visualscenes. We first leverage top-down clustering methods to partition an unlabeledimage into instance/semantic level segments. For all pixels within a segment abottom-up clustering method is employed to iteratively merge them into largergroups thereby forming a hierarchical structure. These unsupervisedmulti-granular masks are then utilized to supervise model training. Evaluatedacross seven popular datasets UnSAM achieves competitive results with thesupervised counterpart SAM and surpasses the previous state-of-the-art inunsupervised segmentation by 11 in terms of AR. Moreover we show thatsupervised SAM can also benefit from our self-supervised labels. By integratingour unsupervised pseudo masks into SA-1Bs ground-truth masks and trainingUnSAM with only 1 of SA-1B a lightly semi-supervised UnSAM can often segmententities overlooked by supervised SAM exceeding SAMs AR by over 6.7 and APby 3.9 on SA-1B. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19395v1 |
-|title| Dataset Size Recovery from LoRA Weights |
-|authors| Mohammad SalamaJonathan KahanaEliahu HorwitzYedid Hoshen
-|links| http://arxiv.org/abs/2406.19395v1 |
-|updated| 2024-06-27 17:59:53 UTC |
-|summary| Model inversion and membership inference attacks aim to reconstruct andverify the data which a model was trained on. However they are not guaranteedto find all training samples as they do not know the size of the training set.In this paper we introduce a new task: dataset size recovery that aims todetermine the number of samples used to train a model directly from itsweights. We then propose DSiRe a method for recovering the number of imagesused to fine-tune a model in the common case where fine-tuning uses LoRA. Wediscover that both the norm and the spectrum of the LoRA matrices are closelylinked to the fine-tuning dataset size we leverage this finding to propose asimple yet effective prediction algorithm. To evaluate dataset size recovery ofLoRA weights we develop and release a new benchmark LoRA-WiSE consisting ofover 25000 weight snapshots from more than 2000 diverse LoRA fine-tuned models.Our best classifier can predict the number of fine-tuning images with a meanabsolute error of 0.36 images establishing the feasibility of this attack. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2406.19394v1 |
-|title| HUWSOD: Holistic Self-training for Unified Weakly Supervised Object Detection |
-|authors| Liujuan CaoJianghang LinZebo HongYunhang ShenShaohui LinChao ChenRongrong Ji
-|links| http://arxiv.org/abs/2406.19394v1 |
-|updated| 2024-06-27 17:59:49 UTC |
-|summary| Most WSOD methods rely on traditional object proposals to generate candidateregions and are confronted with unstable training which easily gets stuck in apoor local optimum. In this paper we introduce a unified high-capacity weaklysupervised object detection WSOD network called HUWSOD which utilizes acomprehensive self-training framework without needing external modules oradditional supervision. HUWSOD innovatively incorporates a self-supervisedproposal generator and an autoencoder proposal generator with a multi-rateresampling pyramid to replace traditional object proposals enabling end-to-endWSOD training and inference. Additionally we implement a holisticself-training scheme that refines detection scores and coordinates throughstep-wise entropy minimization and consistency-constraint regularizationensuring consistent predictions across stochastic augmentations of the sameimage. Extensive experiments on PASCAL VOC and MS COCO demonstrate that HUWSODcompetes with state-of-the-art WSOD methods eliminating the need for offlineproposals and additional data. The peak performance of HUWSOD approaches thatof fully-supervised Faster R-CNN. Our findings also indicate that randomlyinitialized boxes although significantly different from well-designed offlineobject proposals are effective for WSOD training. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2406.19393v1 |
-|title| Looking 3D: Anomaly Detection with 2D-3D Alignment |
+|idx| 2406.20099v1 |
+|title| Odd-One-Out: Anomaly Detection by Comparing with Neighbors |
 |authors| Ankan BhuniaChangjian LiHakan Bilen
-|links| http://arxiv.org/abs/2406.19393v1 |
-|updated| 2024-06-27 17:59:46 UTC |
-|summary| Automatic anomaly detection based on visual cues holds practical significancein various domains such as manufacturing and product quality assessment. Thispaper introduces a new conditional anomaly detection problem which involvesidentifying anomalies in a query image by comparing it to a reference shape. Toaddress this challenge we have created a large dataset BrokenChairs-180Kconsisting of around 180K images with diverse anomalies geometries andtextures paired with 8143 reference 3D shapes. To tackle this task we haveproposed a novel transformer-based approach that explicitly learns thecorrespondence between the query image and reference 3D shape via featurealignment and leverages a customized attention mechanism for anomaly detection.Our approach has been rigorously evaluated through comprehensive experimentsserving as a benchmark for future research in this domain. |
+|links| http://arxiv.org/abs/2406.20099v1 |
+|updated| 2024-06-28 17:59:51 UTC |
+|summary| This paper introduces a novel anomaly detection AD problem that focuses onidentifying odd-looking objects relative to the other instances within ascene. Unlike the traditional AD benchmarks in our setting anomalies in thiscontext are scene-specific defined by the regular instances that make up themajority. Since object instances are often partly visible from a singleviewpoint our setting provides multiple views of each scene as input. Toprovide a testbed for future research in this task we introduce twobenchmarks ToysAD-8K and PartsAD-15K. We propose a novel method that generates3D object-centric representations for each instance and detects the anomalousones through a cross-examination between the instances. We rigorously analyzeour method quantitatively and qualitatively in the presented benchmarks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19392v1 |
-|title| ReXTime: A Benchmark Suite for Reasoning-Across-Time in Videos |
-|authors| Jr-Jen ChenYu-Chien LiaoHsi-Che LinYu-Chu YuYen-Chun ChenYu-Chiang Frank Wang
-|links| http://arxiv.org/abs/2406.19392v1 |
-|updated| 2024-06-27 17:59:45 UTC |
-|summary| We introduce ReXTime a benchmark designed to rigorously test AI modelsability to perform temporal reasoning within video events. SpecificallyReXTime focuses on reasoning across time i.e. human-like understanding whenthe question and its corresponding answer occur in different video segments.This form of reasoning requiring advanced understanding of cause-and-effectrelationships across video segments poses significant challenges to even thefrontier multimodal large language models. To facilitate this evaluation wedevelop an automated pipeline for generating temporal reasoning question-answerpairs significantly reducing the need for labor-intensive manual annotations.Our benchmark includes 921 carefully vetted validation samples and 2143 testsamples each manually curated for accuracy and relevance. Evaluation resultsshow that while frontier large language models outperform academic models theystill lag behind human performance by a significant 14.3 accuracy gap.Additionally our pipeline creates a training dataset of 9695 machinegenerated samples without manual effort which empirical studies suggest canenhance the across-time reasoning via fine-tuning. |
+|idx| 2406.20098v1 |
+|title| Web2Code: A Large-scale Webpage-to-Code Dataset and Evaluation Framework for Multimodal LLMs |
+|authors| Sukmin YunHaokun LinRusiru ThusharaMohammad Qazim BhatYongxin WangZutao JiangMingkai DengJinhong WangTianhua TaoJunbo LiHaonan LiPreslav NakovTimothy BaldwinZhengzhong LiuEric P. XingXiaodan LiangZhiqiang Shen
+|links| http://arxiv.org/abs/2406.20098v1 |
+|updated| 2024-06-28 17:59:46 UTC |
+|summary| Multimodal large language models MLLMs have shown impressive success acrossmodalities such as image video and audio in a variety of understanding andgeneration tasks. However current MLLMs are surprisingly poor at understandingwebpage screenshots and generating their corresponding HTML code. To addressthis problem we propose Web2Code a benchmark consisting of a new large-scalewebpage-to-code dataset for instruction tuning and an evaluation framework forthe webpage understanding and HTML code translation abilities of MLLMs. Fordataset construction we leverage pretrained LLMs to enhance existingwebpage-to-code datasets as well as generate a diverse pool of new webpagesrendered into images. Specifically the inputs are webpage images andinstructions while the responses are the webpages HTML code. We furtherinclude diverse natural language QA pairs about the webpage content in theresponses to enable a more comprehensive understanding of the web content. Toevaluate model performance in these tasks we develop an evaluation frameworkfor testing MLLMs abilities in webpage understanding and web-to-codegeneration. Extensive experiments show that our proposed dataset is beneficialnot only to our proposed tasks but also in the general visual domain whileprevious datasets result in worse performance. We hope our work will contributeto the development of general MLLMs suitable for web-based content generationand task automation. Our data and code will be available athttps://github.com/MBZUAI-LLM/web2code. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19391v1 |
-|title| Fibottention: Inceptive Visual Representation Learning with Diverse Attention Across Heads |
-|authors| Ali Khaleghi RahimianManish Kumar GovindSubhajit MaityDominick ReillyChristian KümmerleSrijan DasAritra Dutta
-|links| http://arxiv.org/abs/2406.19391v1 |
-|updated| 2024-06-27 17:59:40 UTC |
-|summary| Visual perception tasks are predominantly solved by Vision Transformer ViTarchitectures which despite their effectiveness encounter a computationalbottleneck due to the quadratic complexity of computing self-attention. Thisinefficiency is largely due to the self-attention heads capturing redundanttoken interactions reflecting inherent redundancy within visual data. Manyworks have aimed to reduce the computational complexity of self-attention inViTs leading to the development of efficient and sparse transformerarchitectures. In this paper viewing through the efficiency lens we realizedthat introducing any sparse self-attention strategy in ViTs can keep thecomputational overhead low. However these strategies are sub-optimal as theyoften fail to capture fine-grained visual details. This observation leads us topropose a general efficient sparse architecture named Fibottention forapproximating self-attention with superlinear complexity that is built uponFibonacci sequences. The key strategies in Fibottention include: it excludesproximate tokens to reduce redundancy employs structured sparsity by design todecrease computational demands and incorporates inception-like diversityacross attention heads. This diversity ensures the capture of complementaryinformation through non-overlapping token interactions optimizing bothperformance and resource utilization in ViTs for visual representationlearning. We embed our Fibottention mechanism into multiple state-of-the-arttransformer architectures dedicated to visual tasks. Leveraging only 2-6 ofthe elements in the self-attention heads Fibottention in conjunction with ViTand its variants consistently achieves significant performance boosts comparedto standard ViTs in nine datasets across three domains unicodex2013 imageclassification video understanding and robot learning tasks. |
+|idx| 2406.20095v1 |
+|title| LLaRA: Supercharging Robot Learning Data for Vision-Language Policy |
+|authors| Xiang LiCristina MataJongwoo ParkKumara KahatapitiyaYoo Sung JangJinghuan ShangKanchana RanasingheRyan BurgertMu CaiYong Jae LeeMichael S. Ryoo
+|links| http://arxiv.org/abs/2406.20095v1 |
+|updated| 2024-06-28 17:59:12 UTC |
+|summary| Large Language Models LLMs equipped with extensive world knowledge andstrong reasoning skills can tackle diverse tasks across domains often byposing them as conversation-style instruction-response pairs. In this paper wepropose LLaRA: Large Language and Robotics Assistant a framework whichformulates robot action policy as conversations and provides improvedresponses when trained with auxiliary data that complements policy learning.LLMs with visual inputs i.e. Vision Language Models VLMs have the capacityto process state information as visual-textual prompts and generate optimalpolicy decisions in text. To train such action policy VLMs we first introducean automated pipeline to generate diverse high-quality robotics instructiondata from existing behavior cloning data. A VLM finetuned with the resultingcollection of datasets based on a conversation-style formulation tailored forrobotics tasks can generate meaningful robot action policy decisions. Ourexperiments across multiple simulated and real-world environments demonstratethe state-of-the-art performance of the proposed LLaRA framework. The codedatasets and pretrained models are available athttps://github.com/LostXine/LLaRA. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2406.20092v1 |
+|title| LLaVolta: Efficient Multi-modal Models via Stage-wise Visual Context Compression |
+|authors| Jieneng ChenLuoxin YeJu HeZhao-Yang WangDaniel KhashabiAlan Yuille
+|links| http://arxiv.org/abs/2406.20092v1 |
+|updated| 2024-06-28 17:57:14 UTC |
+|summary| While significant advancements have been made in compressed representationsfor text embeddings in large language models LLMs the compression of visualtokens in large multi-modal models LMMs has remained a largely overlookedarea. In this work we present the study on the analysis of redundancyconcerning visual tokens and efficient training within these models. Ourinitial experiments show that eliminating up to 70 of visual tokens at thetesting stage by simply average pooling only leads to a minimal 3 reduction invisual question answering accuracy on the GQA benchmark indicating significantredundancy in visual context. Addressing this we introduce Visual ContextCompressor which reduces the number of visual tokens during training toenhance training efficiency without sacrificing performance. To minimizeinformation loss caused by the compression on visual tokens while maintainingtraining efficiency we develop LLaVolta as a lite training scheme. LLaVoltaincorporates stage-wise visual context compression to progressively compressthe visual tokens from heavily to lightly and finally no compression at theend of training yielding no loss of information when testing. Extensiveexperiments demonstrate that our approach enhances the performance of MLLMs inboth image-language and video-language understanding while also significantlycutting training costs. Code is available athttps://github.com/Beckschen/LLaVolta |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2406.20085v1 |
+|title| Auto Cherry-Picker: Learning from High-quality Generative Data Driven by Language |
+|authors| Yicheng ChenXiangtai LiYining LiYanhong ZengJianzong WuXiangyu ZhaoKai Chen
+|links| http://arxiv.org/abs/2406.20085v1 |
+|updated| 2024-06-28 17:53:18 UTC |
+|summary| Diffusion-based models have shown great potential in generating high-qualityimages with various layouts which can benefit downstream perception tasks.However a fully automatic layout generation driven only by language and asuitable metric for measuring multiple generated instances has not been wellexplored. In this work we present Auto Cherry-Picker ACP a novel frameworkthat generates high-quality multi-modal training examples to augment perceptionand multi-modal training. Starting with a simple list of natural languageconcepts we prompt large language models LLMs to generate a detaileddescription and design reasonable layouts. Next we use an off-the-shelftext-to-image model to generate multiple images. Then the generated data arerefined using a comprehensively designed metric to ensure quality. Inparticular we present a new metric Composite Layout and Image Score CLISto evaluate the generated images fairly. Our synthetic high-quality examplesboost performance in various scenarios by customizing the initial concept listespecially in addressing challenges associated with long-tailed distributionand imbalanced datasets. Experiment results on downstream tasks demonstratethat Auto Cherry-Picker can significantly improve the performance of existingmodels. In addition we have thoroughly investigated the correlation betweenCLIS and performance gains in downstream tasks and we find that a better CLISscore results in better performance. This finding shows the potential forevaluation metrics as the role for various visual perception and MLLM tasks.Code will be available. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19051v1 |
-|title| Stochastic Gradient Piecewise Deterministic Monte Carlo Samplers |
-|authors| Paul FearnheadSebastiano GrazziChris NemethGareth O. Roberts
-|links| http://arxiv.org/abs/2406.19051v1 |
-|updated| 2024-06-27 09:59:28 UTC |
-|summary| Recent work has suggested using Monte Carlo methods based on piecewisedeterministic Markov processes PDMPs to sample from target distributions ofinterest. PDMPs are non-reversible continuous-time processes endowed withmomentum and hence can mix better than standard reversible MCMC samplers.Furthermore they can incorporate exact sub-sampling schemes which only requireaccess to a single randomly selected data point at each iteration yetwithout introducing bias to the algorithms stationary distribution. Howeverthe range of models for which PDMPs can be used particularly withsub-sampling is limited. We propose approximate simulation of PDMPs withsub-sampling for scalable sampling from posterior distributions. Theapproximation takes the form of an Euler approximation to the true PDMPdynamics and involves using an estimate of the gradient of the log-posteriorbased on a data sub-sample. We thus call this class of algorithmsstochastic-gradient PDMPs. Importantly the trajectories of stochastic-gradientPDMPs are continuous and can leverage recent ideas for sampling from measureswith continuous and atomic components. We show these methods are easy toimplement present results on their approximation error and demonstratenumerically that this class of algorithms has similar efficiency to but ismore robust than stochastic gradient Langevin dynamics. |
+|idx| 2406.20088v1 |
+|title| Minimax And Adaptive Transfer Learning for Nonparametric Classification under Distributed Differential Privacy Constraints |
+|authors| Arnab AuddyT. Tony CaiAbhinav Chakraborty
+|links| http://arxiv.org/abs/2406.20088v1 |
+|updated| 2024-06-28 17:55:41 UTC |
+|summary| This paper considers minimax and adaptive transfer learning for nonparametricclassification under the posterior drift model with distributed differentialprivacy constraints. Our study is conducted within a heterogeneous frameworkencompassing diverse sample sizes varying privacy parameters and dataheterogeneity across different servers. We first establish the minimaxmisclassification rate precisely characterizing the effects of privacyconstraints source samples and target samples on classification accuracy. Theresults reveal interesting phase transition phenomena and highlight theintricate trade-offs between preserving privacy and achieving classificationaccuracy. We then develop a data-driven adaptive classifier that achieves theoptimal rate within a logarithmic factor across a large collection of parameterspaces while satisfying the same set of differential privacy constraints.Simulation studies and real-world data applications further elucidate thetheoretical analysis with numerical results. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19049v1 |
-|title| Accuracy on the wrong line: On the pitfalls of noisy data for out-of-distribution generalisation |
-|authors| Amartya SanyalYaxi HuYaodong YuYian MaYixin WangBernhard Schölkopf
-|links| http://arxiv.org/abs/2406.19049v1 |
-|updated| 2024-06-27 09:57:31 UTC |
-|summary| Accuracy-on-the-line is a widely observed phenomenon in machine learningwhere a models accuracy on in-distribution ID and out-of-distribution OODdata is positively correlated across different hyperparameters and dataconfigurations. But when does this useful relationship break down In thiswork we explore its robustness. The key observation is that noisy data and thepresence of nuisance features can be sufficient to shatter theAccuracy-on-the-line phenomenon. In these cases ID and OOD accuracy can becomenegatively correlated leading to Accuracy-on-the-wrong-line. This phenomenoncan also occur in the presence of spurious shortcut features which tend toovershadow the more complex signal core non-spurious features resulting ina large nuisance feature space. Moreover scaling to larger datasets does notmitigate this undesirable behavior and may even exacerbate it. We formallyprove a lower bound on Out-of-distribution OOD error in a linearclassification model characterizing the conditions on the noise and nuisancefeatures for a large OOD error. We finally demonstrate this phenomenon acrossboth synthetic and real datasets with noisy data and nuisance features. |
+|idx| 2406.20062v1 |
+|title| Cost-aware Bayesian optimization via the Pandora's Box Gittins index |
+|authors| Qian XieRaul AstudilloPeter FrazierZiv ScullyAlexander Terenin
+|links| http://arxiv.org/abs/2406.20062v1 |
+|updated| 2024-06-28 17:20:13 UTC |
+|summary| Bayesian optimization is a technique for efficiently optimizing unknownfunctions in a black-box manner. To handle practical settings where gatheringdata requires use of finite resources it is desirable to explicitlyincorporate function evaluation costs into Bayesian optimization policies. Tounderstand how to do so we develop a previously-unexplored connection betweencost-aware Bayesian optimization and the Pandoras Box problem a decisionproblem from economics. The Pandoras Box problem admits a Bayesian-optimalsolution based on an expression called the Gittins index which can bereinterpreted as an acquisition function. We study the use of this acquisitionfunction for cost-aware Bayesian optimization and demonstrate empirically thatit performs well particularly in medium-high dimensions. We further show thatthis performance carries over to classical Bayesian optimization withoutexplicit evaluation costs. Our work constitutes a first step towardsintegrating techniques from Gittins index theory into Bayesian optimization. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18902v1 |
-|title| Statistical Test for Data Analysis Pipeline by Selective Inference |
-|authors| Tomohiro ShiraishiTatsuya MatsukawaShuichi NishinoIchiro Takeuchi
-|links| http://arxiv.org/abs/2406.18902v1 |
-|updated| 2024-06-27 05:30:08 UTC |
-|summary| A data analysis pipeline is a structured sequence of processing steps thattransforms raw data into meaningful insights by effectively integrating variousanalysis algorithms. In this paper we propose a novel statistical testdesigned to assess the statistical significance of data analysis pipelines. Ourapproach allows for the systematic development of valid statistical testsapplicable to any data analysis pipeline configuration composed of a set ofdata analysis components. We have developed this framework by adaptingselective inference which has gained recent attention as a new statisticalinference technique for data-driven hypotheses. The proposed statistical testis theoretically designed to control the type I error at the desiredsignificance level in finite samples. As examples we consider a class ofpipelines composed of three missing value imputation algorithms three outlierdetection algorithms and three feature selection algorithms. We confirm thevalidity of our statistical test through experiments with both synthetic andreal data for this class of data analysis pipelines. Additionally we presentan implementation framework that facilitates testing across any configurationof data analysis pipelines in this class without extra implementation costs. |
+|idx| 2406.20044v1 |
+|title| Electrostatics-based particle sampling and approximate inference |
+|authors| Yongchao Huang
+|links| http://arxiv.org/abs/2406.20044v1 |
+|updated| 2024-06-28 16:53:06 UTC |
+|summary| A new particle-based sampling and approximate inference method based onelectrostatics and Newton mechanics principles is introduced with theoreticalground algorithm design and experimental validation. This method simulates aninteracting particle system IPS where particles i.e. the freely-movingnegative charges and spatially-fixed positive charges with magnitudesproportional to the target distribution interact with each other viaattraction and repulsion induced by the resulting electric fields described byPoissons equation. The IPS evolves towards a steady-state where thedistribution of negative charges conforms to the target distribution. Thisphysics-inspired method offers deterministic gradient-free sampling andinference achieving comparable performance as other particle-based and MCMCmethods in benchmark tasks of inferring complex densities Bayesian logisticregression and dynamical system identification. A discrete-time discrete-spacealgorithmic design readily extendable to continuous time and space isprovided for usage in more general inference problems occurring inprobabilistic machine learning scenarios such as Bayesian inference generativemodelling and beyond. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18865v1 |
-|title| From Biased Selective Labels to Pseudo-Labels: An Expectation-Maximization Framework for Learning from Biased Decisions |
-|authors| Trenton ChangJenna Wiens
-|links| http://arxiv.org/abs/2406.18865v1 |
-|updated| 2024-06-27 03:33:38 UTC |
-|summary| Selective labels occur when label observations are subject to adecision-making process e.g. diagnoses that depend on the administration oflaboratory tests. We study a clinically-inspired selective label problem calleddisparate censorship where labeling biases vary across subgroups and unlabeledindividuals are imputed as negative i.e. no diagnostic test  no illness.Machine learning models naively trained on such labels could amplify labelingbias. Inspired by causal models of selective labels we propose DisparateCensorship Expectation-Maximization DCEM an algorithm for learning in thepresence of disparate censorship. We theoretically analyze how DCEM mitigatesthe effects of disparate censorship on model performance. We validate DCEM onsynthetic data showing that it improves bias mitigation area between ROCcurves without sacrificing discriminative performance AUC compared tobaselines. We achieve similar results in a sepsis classification task usingclinical data. |
+|idx| 2406.19958v1 |
+|title| The Computational Curse of Big Data for Bayesian Additive Regression Trees: A Hitting Time Analysis |
+|authors| Yan Shuo TanOmer RonenTheo SaarinenBin Yu
+|links| http://arxiv.org/abs/2406.19958v1 |
+|updated| 2024-06-28 14:45:29 UTC |
+|summary| Bayesian Additive Regression Trees BART is a popular Bayesiannon-parametric regression model that is commonly used in causal inference andbeyond. Its strong predictive performance is supported by theoreticalguarantees that its posterior distribution concentrates around the trueregression function at optimal rates under various data generative settings andfor appropriate prior choices. In this paper we show that the BART sampleroften converges slowly confirming empirical observations by other researchers.Assuming discrete covariates we show that while the BART posteriorconcentrates on a set comprising all optimal tree structures smallest bias andcomplexity the Markov chains hitting time for this set increases with ntraining sample size under several common data generative settings. As nincreases the approximate BART posterior thus becomes increasingly differentfrom the exact posterior for the same number of MCMC samples contrastingwith earlier concentration results on the exact posterior. This contrast ishighlighted by our simulations showing worsening frequentist undercoverage forapproximate posterior intervals and a growing ratio between the MSE of theapproximate posterior and that obtainable by artificially improving convergencevia averaging multiple sampler chains. Finally based on our theoreticalinsights possibilities are discussed to improve the BART sampler convergenceperformance. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18829v1 |
-|title| Full Information Linked ICA: addressing missing data problem in multimodal fusion |
-|authors| Ruiyang LiF. DuBois BowmanSeonjoo Lee
-|links| http://arxiv.org/abs/2406.18829v1 |
-|updated| 2024-06-27 01:50:43 UTC |
-|summary| Recent advances in multimodal imaging acquisition techniques have allowed usto measure different aspects of brain structure and function. Multimodalfusion such as linked independent component analysis LICA is popularly usedto integrate complementary information. However it has suffered from missingdata commonly occurring in neuroimaging data. Therefore in this paper wepropose a Full Information LICA algorithm FI-LICA to handle the missing dataproblem during multimodal fusion under the LICA framework. Built upon completecases our method employs the principle of full information and utilizes allavailable information to recover the missing latent information. Our simulationexperiments showed the ideal performance of FI-LICA compared to currentpractices. Further we applied FI-LICA to multimodal data from the AlzheimersDisease Neuroimaging Initiative ADNI study showcasing better performance inclassifying current diagnosis and in predicting the AD transition ofparticipants with mild cognitive impairment MCI thereby highlighting thepractical utility of our proposed method. |
+|idx| 2406.19948v1 |
+|title| Kolmogorov-Smirnov GAN |
+|authors| Maciej FalkiewiczNaoya TakeishiAlexandros Kalousis
+|links| http://arxiv.org/abs/2406.19948v1 |
+|updated| 2024-06-28 14:30:14 UTC |
+|summary| We propose a novel deep generative model the Kolmogorov-Smirnov GenerativeAdversarial Network KSGAN. Unlike existing approaches KSGAN formulates thelearning process as a minimization of the Kolmogorov-Smirnov KS distancegeneralized to handle multivariate distributions. This distance is calculatedusing the quantile function which acts as the critic in the adversarialtraining process. We formally demonstrate that minimizing the KS distance leadsto the trained approximate distribution aligning with the target distribution.We propose an efficient implementation and evaluate its effectiveness throughexperiments. The results show that KSGAN performs on par with existingadversarial methods exhibiting stability during training resistance to modedropping and collapse and tolerance to variations in hyperparameter settings.Additionally we review the literature on the Generalized KS test and discussthe connections between KSGAN and existing adversarial generative models. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19283v1 |
-|title| PhysioLLM: Supporting Personalized Health Insights with Wearables and Large Language Models |
-|authors| Cathy Mengying FangValdemar DanryNathan WhitmoreAndria BaoAndrew HutchisonCayden PiercePattie Maes
-|links| http://arxiv.org/abs/2406.19283v1 |
-|updated| 2024-06-27 15:55:53 UTC |
-|summary| We present PhysioLLM an interactive system that leverages large languagemodels LLMs to provide personalized health understanding and exploration byintegrating physiological data from wearables with contextual information.Unlike commercial health apps for wearables our system offers a comprehensivestatistical analysis component that discovers correlations and trends in userdata allowing users to ask questions in natural language and receive generatedpersonalized insights and guides them to develop actionable goals. As a casestudy we focus on improving sleep quality given its measurability throughphysiological data and its importance to general well-being. Through a userstudy with 24 Fitbit watch users we demonstrate that PhysioLLM outperformsboth the Fitbit App alone and a generic LLM chatbot in facilitating a deeperpersonalized understanding of health data and supporting actionable stepstoward personal health goals. |
+|idx| 2406.20087v1 |
+|title| ProgressGym: Alignment with a Millennium of Moral Progress |
+|authors| Tianyi QiuYang ZhangXuchuan HuangJasmine Xinze LiJiaming JiYaodong Yang
+|links| http://arxiv.org/abs/2406.20087v1 |
+|updated| 2024-06-28 17:55:24 UTC |
+|summary| Frontier AI systems including large language models LLMs hold increasinginfluence over the epistemology of human users. Such influence can reinforceprevailing societal values potentially contributing to the lock-in ofmisguided moral beliefs and consequently the perpetuation of problematicmoral practices on a broad scale. We introduce progress alignment as atechnical solution to mitigate this imminent risk. Progress alignmentalgorithms learn to emulate the mechanics of human moral progress therebyaddressing the susceptibility of existing alignment methods to contemporarymoral blindspots. To empower research in progress alignment we introduceProgressGym an experimental framework allowing the learning of moral progressmechanics from history in order to facilitate future progress in real-worldmoral decisions. Leveraging 9 centuries of historical text and 18 historicalLLMs ProgressGym enables codification of real-world progress alignmentchallenges into concrete benchmarks. Specifically we introduce three corechallenges: tracking evolving values PG-Follow preemptively anticipatingmoral progress PG-Predict and regulating the feedback loop between human andAI value shifts PG-Coevolve. Alignment methods without a temporal dimensionare inapplicable to these tasks. In response we present lifelong andextrapolative algorithms as baseline methods of progress alignment and buildan open leaderboard soliciting novel algorithms and challenges. The frameworkand the leaderboard are available athttps://github.com/PKU-Alignment/ProgressGym andhttps://huggingface.co/spaces/PKU-Alignment/ProgressGym-LeaderBoardrespectively. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19226v1 |
-|title| Simulating Classroom Education with LLM-Empowered Agents |
-|authors| Zheyuan ZhangDaniel Zhang-LiJifan YuLinlu GongJinchang ZhouZhiyuan LiuLei HouJuanzi Li
-|links| http://arxiv.org/abs/2406.19226v1 |
-|updated| 2024-06-27 14:51:07 UTC |
-|summary| Large language models LLMs have been employed in various intelligenteducational tasks to assist teaching. While preliminary explorations havefocused on independent LLM-empowered agents for specific educational tasks thepotential for LLMs within a multi-agent collaborative framework to simulate aclassroom with real user participation remains unexplored. In this work wepropose SimClass a multi-agent classroom simulation framework involving userparticipation. We recognize representative class roles and introduce a novelclass control mechanism for automatic classroom teaching and conduct userexperiments in two real-world courses. Utilizing the Flanders InteractiveAnalysis System and Community of Inquiry theoretical frame works fromeducational analysis we demonstrate that LLMs can simulate traditionalclassroom interaction patterns effectively while enhancing users experience.We also observe emergent group behaviors among agents in SimClass where agentscollaborate to create enlivening interactions in classrooms to improve userlearning process. We hope this work pioneers the application of LLM-empoweredmulti-agent systems in virtual classroom teaching. |
+|idx| 2406.19987v1 |
+|title| Concept Lens: Visually Analyzing the Consistency of Semantic Manipulation in GANs |
+|authors| Sangwon JeongMingwei LiMatthew BergerShusen Liu
+|links| http://dx.doi.org/10.1109/VIS54172.2023.00053 |
+|updated| 2024-06-28 15:18:40 UTC |
+|summary| As applications of generative AI become mainstream it is important tounderstand what generative models are capable of producing and the extent towhich one can predictably control their outputs. In this paper we propose avisualization design named Concept Lens for jointly navigating the datadistribution of a generative model and concept manipulations supported by themodel. Our work is focused on modern vision-based generative adversarialnetworks GAN and their learned latent spaces wherein concept discovery hasgained significant interest as a means of image manipulation. Concept Lens isdesigned to support users in understanding the diversity of a provided set ofconcepts the relationship between concepts and the suitability of concepts togive semantic controls for image generation. Key to our approach is thehierarchical grouping of concepts generated images and the associated jointexploration. We show how Concept Lens can reveal consistent semanticmanipulations for editing images while also serving as a diagnostic tool forstudying the limitations and trade-offs of concept discovery methods. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19054v1 |
-|title| A look under the hood of the Interactive Deep Learning Enterprise (No-IDLE) |
-|authors| Daniel SonntagMichael BarzThiago Gouvêa
-|links| http://arxiv.org/abs/2406.19054v1 |
-|updated| 2024-06-27 10:01:56 UTC |
-|summary| This DFKI technical report presents the anatomy of the No-IDLE prototypesystem funded by the German Federal Ministry of Education and Research thatprovides not only basic and fundamental research in interactive machinelearning but also reveals deeper insights into users behaviours needs andgoals. Machine learning and deep learning should become accessible to millionsof end users. No-IDLEs goals and scienfific challenges centre around thedesire to increase the reach of interactive deep learning solutions fornon-experts in machine learning. One of the key innovations described in thistechnical report is a methodology for interactive machine learning combinedwith multimodal interaction which will become central when we start interactingwith semi-intelligent machines in the upcoming area of neural networks andlarge language models. |
+|idx| 2406.19954v1 |
+|title| BESTOW: Efficient and Streamable Speech Language Model with the Best of Two Worlds in GPT and T5 |
+|authors| Zhehuai ChenHe HuangOleksii HrinchukKrishna C. PuvvadaNithin Rao KoluguriPiotr ŻelaskoJagadeesh BalamBoris Ginsburg
+|links| http://arxiv.org/abs/2406.19954v1 |
+|updated| 2024-06-28 14:40:03 UTC |
+|summary| Incorporating speech understanding capabilities into pretrainedlarge-language models has become a vital research direction SpeechLLM. Theprevious architectures can be categorized as: i GPT-style prepend speechprompts to the text prompts as a sequence of LLM inputs like a decoder-onlymodel ii T5-style introduce speech cross-attention to each layer of thepretrained LLMs. We propose BESTOW architecture to bring the BESt features fromTwO Worlds into a single model that is highly efficient and has strongmultitask capabilities. Moreover there is no clear streaming solution foreither style especially considering the solution should generalize to speechmultitask. We reformulate streamable SpeechLLM as a read-write policy problemand unifies the offline and streaming research with BESTOW architecture. Hencewe demonstrate the first open-source SpeechLLM solution that enables Streamingand Multitask at scale beyond ASR at the same time. This streamable solutionachieves very strong performance on a wide range of speech tasks ASR ASTSQA unseen DynamicSuperb. It is end-to-end optimizable with lowertraining/inference cost and demonstrates LLM knowledge transferability tospeech. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18718v1 |
-|title| State-Based Automation for Time-Restricted Eating Adherence |
-|authors| Samuel E. ArmstrongAaron D. MullenJ. Matthew ThomasDorothy D. SearsJulie S. PendergastJeffrey TalbertCody Bumgardner
-|links| http://arxiv.org/abs/2406.18718v1 |
-|updated| 2024-06-26 19:37:36 UTC |
-|summary| Developing and enforcing study protocols is a foundational component ofmedical research. As study complexity for participant interactions increasestranslating study protocols to supporting application code becomes challenging.A collaboration exists between the University of Kentucky and Arizona StateUniversity to determine the efficacy of time-restricted eating in improvingmetabolic risk among postmenopausal women. This study utilizes a graph-basedapproach to monitor and support adherence to a designated schedule enablingthe validation and step-wise audit of participants statuses to derivedependable conclusions. A texting service driven by a participant graphautomatically manages interactions and collects data. Participant data is thenaccessible to the research study team via a website which enables viewingmanagement and exportation. This paper presents a system for automaticallymanaging participants in a time-restricted eating study that eliminatestime-consuming interactions with participants. |
+|idx| 2406.19928v1 |
+|title| Interactive Topic Models with Optimal Transport |
+|authors| Garima DhananiaSheshera MysoreChau Minh PhamMohit IyyerHamed ZamaniAndrew McCallum
+|links| http://arxiv.org/abs/2406.19928v1 |
+|updated| 2024-06-28 13:57:27 UTC |
+|summary| Topic models are widely used to analyze document collections. While they arevaluable for discovering latent topics in a corpus when analysts are unfamiliarwith the corpus analysts also commonly start with an understanding of thecontent present in a corpus. This may be through categories obtained from aninitial pass over the corpus or a desire to analyze the corpus through apredefined set of categories derived from a high level theoretical frameworke.g. political ideology. In these scenarios analysts desire a topic modelingapproach which incorporates their understanding of the corpus while supportingvarious forms of interaction with the model. In this work we present EdTM asan approach for label name supervised topic modeling. EdTM models topicmodeling as an assignment problem while leveraging LM/LLM based document-topicaffinities and using optimal transport for making globally coherenttopic-assignments. In experiments we show the efficacy of our frameworkcompared to few-shot LLM classifiers and topic models based on clustering andLDA. Further we show EdTMs ability to incorporate various forms of analystfeedback and while remaining robust to noisy analyst inputs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18702v1 |
-|title| Simulating The U.S. Senate: An LLM-Driven Agent Approach to Modeling Legislative Behavior and Bipartisanship |
-|authors| Zachary R. BakerZarif L. Azher
-|links| http://arxiv.org/abs/2406.18702v1 |
-|updated| 2024-06-26 19:10:51 UTC |
-|summary| This study introduces a novel approach to simulating legislative processesusing LLM-driven virtual agents focusing on the U.S. Senate IntelligenceCommittee. We developed agents representing individual senators and placed themin simulated committee discussions. The agents demonstrated the ability toengage in realistic debate provide thoughtful reflections and find bipartisansolutions under certain conditions. Notably the simulation also showed promisein modeling shifts towards bipartisanship in response to externalperturbations. Our results indicate that this LLM-driven approach could becomea valuable tool for understanding and potentially improving legislativeprocesses supporting a broader pattern of findings highlighting how LLM-basedagents can usefully model real-world phenomena. Future works will focus onenhancing agent complexity expanding the simulation scope and exploringapplications in policy testing and negotiation. |
+|idx| 2406.19895v1 |
+|title| The Relationship Between Time and Distance Perception in Egocentric and Discrete Virtual Locomotion (Teleportation) |
+|authors| Matthias WölwerDaniel Zielasko
+|links| http://arxiv.org/abs/2406.19895v1 |
+|updated| 2024-06-28 13:03:55 UTC |
+|summary| Traveling distances in the real world inherently involves time as moving toa desired location is a continuous process. This temporal component plays arole when estimating the distance covered. However in virtual environmentsthis relationship is often changed or absent. Common teleportation techniquesenable instantaneous transitions lacking any temporal element that might aidin distance perception. Since distances are found to be commonly underestimatedin virtual environments we investigate the influence of time on thismisperception specifically in target-selection-based teleportation interfaces.Our first experiment explores how introducing a delay proportional to thedistance covered by teleportation affects participants perception ofdistances focusing on underestimation accuracy and precision. Participantsare required to teleport along a predefined path with varying delays. A secondexperiment is designed to determine whether this effect manifests in a moreapplication-specific scenario. The results indicate a significant reduction indistance underestimation improving from 27 to 16.8 with a delayedteleportation method. Other sub-scales of distance estimation hardly differ.Despite targeted adaptations of previous study designs participants have againfound strategies supporting them in estimating distances. We conclude that timeis a factor affecting distance perception and should be considered alongsideother factors identified in the literature. |
 
 
 # cs.MA 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.19181v1 |
-|title| Cooperative Target Capture using Voronoi Region Shaping |
-|authors| Gautam KumarAshwini Ratnoo
-|links| http://arxiv.org/abs/2406.19181v1 |
-|updated| 2024-06-27 13:57:55 UTC |
-|summary| This paper discusses a cooperative strategy for capturing a target usingmultiple pursuers in a planar scenario. Given an initial position distributionof pursuers the Voronoi Diagram is employed to characterize the targetsproximity region. The key idea is to dynamically shape that region using apolicy that directs its vertices towards its instantaneous centroid. Analysisof the resulting dynamics deduces the velocity control inputs for the pursuers.As the main result targets proximity region is shown to shrink exponentiallyirrespective of its speed and evasion policy. Simulation results demonstratethe characteristics of the proposed method. |
+|idx| 2406.20041v1 |
+|title| BMW Agents -- A Framework For Task Automation Through Multi-agent Collaboration |
+|authors| Noel CrawfordEdward B. DuffyIman EvazzadeTorsten FoehrGregory RobbinsDebbrata Kumar SahaJiya VarmaMarcin Ziolkowski
+|links| http://arxiv.org/abs/2406.20041v1 |
+|updated| 2024-06-28 16:39:20 UTC |
+|summary| Autonomous agents driven by Large Language Models LLMs offer enormouspotential for automation. Early proof of this technology can be found invarious demonstrations of agents solving complex tasks interacting withexternal systems to augment their knowledge and triggering actions. Inparticular workflows involving multiple agents solving complex tasks in acollaborative fashion exemplify their capacity to operate in less strict andless well-defined environments. Thus a multi-agent approach has greatpotential for serving as a backbone in many industrial applications rangingfrom complex knowledge retrieval systems to next generation robotic processautomation. Given the reasoning abilities within the current generation ofLLMs complex processes require a multi-step approach that includes a plan ofwell-defined and modular tasks. Depending on the level of complexity thesetasks can be executed either by a single agent or a group of agents. In thiswork we focus on designing a flexible agent engineering framework with carefulattention to planning and execution capable of handling complex use caseapplications across various domains. The proposed framework providesreliability in industrial applications and presents techniques to ensure ascalable flexible and collaborative workflow for multiple autonomous agentsworking together towards solving tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18961v1 |
-|title| Formation Under Communication Constraints: Control Performance Meets Channel Capacity |
-|authors| Yaru ChenYirui CongXiangyun ZhouLong ChengXiangke Wang
-|links| http://arxiv.org/abs/2406.18961v1 |
-|updated| 2024-06-27 07:45:01 UTC |
-|summary| In wireless communication-based formation control systems the controlperformance is significantly impacted by the channel capacity of eachcommunication link between agents. This relationship however remainsunder-investigated in the existing studies. To address this gap the formationcontrol problem of classical second-order multi-agent systems with boundedprocess noises was considered taking into account the channel capacity. Morespecifically the model of communication links between agents is firstestablished based on a new concept -- guaranteed communication region whichcharacterizes all possible locations for successful message decoding in thepresent of control-system uncertainty. Furthermore we rigorously prove thatthe guaranteed communication region does not unboundedly increase with thetransmission time which indicates an important trade-off between theguaranteed communication region and the data rate. The fundamental limits ofdata rate for any desired accuracy are also obtained. Finally the integrateddesign to achieve the desired formation accuracy is proposed where anestimation-based controller and transmit power control strategy are developed. |
+|idx| 2406.19930v1 |
+|title| Exploring 6G Potential for Industrial Digital Twinning and Swarm Intelligence in Obstacle-Rich |
+|authors| Siyu YuanKhurshid AlamBin HanDennis KrummackerHans D. Schotten
+|links| http://arxiv.org/abs/2406.19930v1 |
+|updated| 2024-06-28 13:57:51 UTC |
+|summary| With the advent of 6G technology the demand for efficient and intelligentsystems in industrial applications has surged driving the need for advancedsolutions in target localization. Utilizing swarm robots to locate unknowntargets involves navigating increasingly complex environments. Digital TwinningDT offers a robust solution by creating a virtual replica of the physicalworld which enhances the swarms navigation capabilities. Our frameworkleverages DT and integrates Swarm Intelligence to store physical mapinformation in the cloud enabling robots to efficiently locate unknowntargets. The simulation results demonstrate that the DT framework augmented bySwarm Intelligence significantly improves target location efficiency inobstacle-rich environments compared to traditional methods. This researchunderscores the potential of combining DT and Swarm Intelligence to advance thefield of robotic navigation and target localization in complex industrialsettings. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18418v1 |
-|title| Differential error feedback for communication-efficient decentralized learning |
-|authors| Roula NassifStefan VlaskiMarco CarpentieroVincenzo MattaAli H. Sayed
-|links| http://arxiv.org/abs/2406.18418v1 |
-|updated| 2024-06-26 15:11:26 UTC |
-|summary| Communication-constrained algorithms for decentralized learning andoptimization rely on local updates coupled with the exchange of compressedsignals. In this context differential quantization is an effective techniqueto mitigate the negative impact of compression by leveraging correlationsbetween successive iterates. In addition the use of error feedback whichconsists of incorporating the compression error into subsequent steps is apowerful mechanism to compensate for the bias caused by the compression. Undererror feedback performance guarantees in the literature have so far focused onalgorithms employing a fusion center or a special class of contractivecompressors that cannot be implemented with a finite number of bits. In thiswork we propose a new decentralized communication-efficient learning approachthat blends differential quantization with error feedback. The approach isspecifically tailored for decentralized learning problems where agents haveindividual risk functions to minimize subject to subspace constraints thatrequire the minimizers across the network to lie in low-dimensional subspaces.This constrained formulation includes consensus or single-task optimization asspecial cases and allows for more general task relatedness models such asmultitask smoothness and coupled optimization. We show that under some generalconditions on the compression noise and for sufficiently small step-sizesmu the resulting communication-efficient strategy is stable both in termsof mean-square error and average bit rate: by reducing mu it is possible tokeep the estimation errors small on the order of mu without increasingindefinitely the bit rate as murightarrow 0. The results establish that inthe small step-size regime and with a finite number of bits it is possible toattain the performance achievable in the absence of compression. |
+|idx| 2406.19852v1 |
+|title| FootBots: A Transformer-based Architecture for Motion Prediction in Soccer |
+|authors| Guillem CapelleraLuis FerrazAntonio RubioAntonio AgudoFrancesc Moreno-Noguer
+|links| http://arxiv.org/abs/2406.19852v1 |
+|updated| 2024-06-28 11:49:59 UTC |
+|summary| Motion prediction in soccer involves capturing complex dynamics from playerand ball interactions. We present FootBots an encoder-decodertransformer-based architecture addressing motion prediction and conditionedmotion prediction through equivariance properties. FootBots captures temporaland social dynamics using set attention blocks and multi-attention blockdecoder. Our evaluation utilizes two datasets: a real soccer dataset and atailored synthetic one. Insights from the synthetic dataset highlight theeffectiveness of FootBots social attention mechanism and the significance ofconditioned motion prediction. Empirical results on real soccer datademonstrate that FootBots outperforms baselines in motion prediction and excelsin conditioned tasks such as predicting the players based on the ballposition predicting the offensive defensive team based on the ball and thedefensive offensive team and predicting the ball position based on allplayers. Our evaluation connects quantitative and qualitative findings.https://youtu.be/9kaEkfzG3L8 |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18371v1 |
-|title| Building multiscale models with PhysiBoSS, an agent-based modeling tool |
-|authors| Marco RusconeAndrea CheccoliRandy HeilandEmmanuel BarillotPaul MacklinLaurence CalzoneVincent Noël
-|links| http://arxiv.org/abs/2406.18371v1 |
-|updated| 2024-06-26 14:14:57 UTC |
-|summary| Multiscale models provide a unique tool for studying complex processes thatstudy events occurring at different scales across space and time. In thecontext of biological systems such models can simulate mechanisms happening atthe intracellular level such as signaling and at the extracellular level wherecells communicate and coordinate with other cells. They aim to understand theimpact of genetic or environmental deregulation observed in complex diseasesdescribe the interplay between a pathological tissue and the immune system andsuggest strategies to revert the diseased phenotypes. The construction of thesemultiscale models remains a very complex task including the choice of thecomponents to consider the level of details of the processes to simulate orthe fitting of the parameters to the data. One additional difficulty is theexpert knowledge needed to program these models in languages such as C orPython which may discourage the participation of non-experts. Simplifying thisprocess through structured description formalisms -- coupled with a graphicalinterface -- is crucial in making modeling more accessible to the broaderscientific community as well as streamlining the process for advanced users.This article introduces three examples of multiscale models which rely on theframework PhysiBoSS an add-on of PhysiCell that includes intracellulardescriptions as continuous time Boolean models to the agent-based approach. Thearticle demonstrates how to easily construct such models relying on PhysiCellStudio the PhysiCell Graphical User Interface. A step-by-step tutorial isprovided as a Supplementary Material and all models are provided at:https://physiboss.github.io/tutorial/. |
+|idx| 2406.19742v1 |
+|title| Multi-UAVs end-to-end Distributed Trajectory Generation over Point Cloud Data |
+|authors| Antonio MarinoClaudio PacchierottiPaolo Robuffo Giordano
+|links| http://arxiv.org/abs/2406.19742v1 |
+|updated| 2024-06-28 08:29:29 UTC |
+|summary| This paper introduces an end-to-end trajectory planning algorithm tailoredfor multi-UAV systems that generates collision-free trajectories inenvironments populated with both static and dynamic obstacles leveraging pointcloud data. Our approach consists of a 2-fork neural network fed with sensingand localization data able to communicate intermediate learned features amongthe agents. One network branch crafts an initial collision-free trajectoryestimate while the other devises a neural collision constraint for subsequentoptimization ensuring trajectory continuity and adherence to physicalactuationlimits. Extensive simulations in challenging cluttered environments involvingup to 25 robots and 25 obstacle density show a collision avoidance successrate in the range of 100 -- 85. Finally we introduce a saliency mapcomputation method acting on the point cloud data offering qualitativeinsights into our methodology. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2406.18168v1 |
-|title| Emergence of social hierarchies in a society with two competitive classes |
-|authors| Marc SadurníJosep PerellóMiquel Montero
-|links| http://arxiv.org/abs/2406.18168v1 |
-|updated| 2024-06-26 08:33:08 UTC |
-|summary| Agent-based models describing social interactions among individuals can helpto better understand emerging macroscopic patterns in societies. One of thetopics which is worth tackling is the formation of different kinds ofhierarchies that emerge in social spaces such as cities. Here we propose aBonabeau-like model by adding a second class of agents. The fundamentalparticularity of our model is that only a pairwise interaction between agentsof the opposite class is allowed. Agent fitness can thus only change bycompetition among the two classes while the total fitness in the societyremains constant. The main result is that for a broad range of values of themodel parameters the fitness of the agents of each class show a decay in timeexcept for one or very few agents which capture almost all the fitness in thesociety. Numerical simulations also reveal a singular shift from egalitarian tohierarchical society for each class. This behaviour depends on the controlparameter eta playing the role of the inverse of the temperature of thesystem. Results are invariant with regard to the system size contingent solelyon the quantity of agents within each class. Finally a couple of scaling lawsare provided thus showing a data collapse from different model parameters andthey follow a shape which can be related to the presence of a phase transitionin the model. |
+|idx| 2406.19477v1 |
+|title| Multi-agent Cooperative Games Using Belief Map Assisted Training |
+|authors| Qinwei HuangChen LuoAlex B. WuSimon KhanHai LiQinru Qiu
+|links| http://dx.doi.org/10.3233/FAIA230444 |
+|updated| 2024-06-27 18:40:55 UTC |
+|summary| In a multi-agent system agents share their local observations to gain globalsituational awareness for decision making and collaboration using a messagepassing system. When to send a message how to encode a message and how toleverage the received messages directly affect the effectiveness of thecollaboration among agents. When training a multi-agent cooperative game usingreinforcement learning RL the message passing system needs to be optimizedtogether with the agent policies. This consequently increases the modelscomplexity and poses significant challenges to the convergence and performanceof learning. To address this issue we propose the Belief-map AssistedMulti-agent System BAMS which leverages a neuro-symbolic belief map toenhance training. The belief map decodes the agents hidden state to provide asymbolic representation of the agents understanding of the environment andother agents status. The simplicity of symbolic representation allows thegathering and comparison of the ground truth information with the belief whichprovides an additional channel of feedback for the learning. Compared to thesporadic and delayed feedback coming from the reward in RL the feedback fromthe belief map is more consistent and reliable. Agents using BAMS can learn amore effective message passing network to better understand each otherresulting in better performance in a cooperative predator and prey game withvarying levels of map complexity and compare it to previous multi-agent messagepassing models. The simulation results showed that BAMS reduced training epochsby 66 and agents who apply the BAMS model completed the game with 34.62fewer steps on average. |
 
 
