@@ -314,11 +314,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2406.20041v1 |
-|title| BMW Agents -- A Framework For Task Automation Through Multi-agent Collaboration |
+|idx| 2406.20041v2 |
+|title| BMW Agents -- A Framework For Task Automation Through Multi-Agent Collaboration |
 |authors| Noel CrawfordEdward B. DuffyIman EvazzadeTorsten FoehrGregory RobbinsDebbrata Kumar SahaJiya VarmaMarcin Ziolkowski
-|links| http://arxiv.org/abs/2406.20041v1 |
-|updated| 2024-06-28 16:39:20 UTC |
+|links| http://arxiv.org/abs/2406.20041v2 |
+|updated| 2024-07-01 16:58:15 UTC |
 |summary| Autonomous agents driven by Large Language Models LLMs offer enormouspotential for automation. Early proof of this technology can be found invarious demonstrations of agents solving complex tasks interacting withexternal systems to augment their knowledge and triggering actions. Inparticular workflows involving multiple agents solving complex tasks in acollaborative fashion exemplify their capacity to operate in less strict andless well-defined environments. Thus a multi-agent approach has greatpotential for serving as a backbone in many industrial applications rangingfrom complex knowledge retrieval systems to next generation robotic processautomation. Given the reasoning abilities within the current generation ofLLMs complex processes require a multi-step approach that includes a plan ofwell-defined and modular tasks. Depending on the level of complexity thesetasks can be executed either by a single agent or a group of agents. In thiswork we focus on designing a flexible agent engineering framework with carefulattention to planning and execution capable of handling complex use caseapplications across various domains. The proposed framework providesreliability in industrial applications and presents techniques to ensure ascalable flexible and collaborative workflow for multiple autonomous agentsworking together towards solving tasks. |
 
 
