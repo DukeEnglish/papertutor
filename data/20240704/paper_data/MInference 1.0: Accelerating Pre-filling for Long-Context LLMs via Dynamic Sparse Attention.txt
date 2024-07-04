@@ -1,0 +1,1471 @@
+MInference 1.0: Accelerating Pre-filling for
+Long-Context LLMs via Dynamic Sparse Attention
+HuiqiangJiang†,YuchengLi♢†,ChengruidongZhang†,QianhuiWu,XufangLuo,
+SurinAhn,ZhenhuaHan,AmirH.Abdi,DongshengLi,Chin-YewLin,YuqingYang,LiliQiu
+MicrosoftCorporation,♢UniversityofSurrey
+{hjiang,chengzhang,yuqyang}@microsoft.com,yucheng.li@surrey.ac.uk
+Abstract
+ThecomputationalchallengesofLargeLanguageModel(LLM)inferenceremain
+asignificantbarriertotheirwidespreaddeployment,especiallyaspromptlengths
+continuetoincrease. Duetothequadraticcomplexityoftheattentioncomputation,
+it takes 30 minutes for an 8B LLM to process a prompt of 1M tokens (i.e., the
+pre-fillingstage)onasingleA100GPU.Existingmethodsforspeedinguppre-
+filling often fail to maintain acceptable accuracy or efficiency when applied to
+long-context LLMs. To address this gap, we introduce MInference (Million-
+tokensInference),asparsecalculationmethoddesignedtoacceleratepre-filling
+of long-sequence processing. Specifically, we identify three unique patterns in
+long-contextattentionmatrices—theA-shape,Vertical-Slash,andBlock-Sparse—
+thatcanbeleveragedforefficientsparsecomputationonGPUs. Wedetermine
+theoptimalpatternforeachattentionheadofflineanddynamicallybuildsparse
+indices based on the assigned pattern during inference. With the pattern and
+sparseindices,weperformefficientsparseattentioncalculationsviaouroptimized
+GPU kernels to significantly reduce the latency in the pre-filling stage of long-
+contextLLMs. OurproposedtechniquecanbedirectlyappliedtoexistingLLMs
+withoutanymodificationstothepre-trainingsetuporadditionalfine-tuning. By
+evaluatingonawiderangeofdownstreamtasks,includingInfiniteBench,RULER,
+PG-19,andNeedleInAHaystack,andmodelsincludingLLaMA-3-1M,GLM-
+4-1M,Yi-200K,Phi-3-128K,andQwen2-128K,wedemonstratethatMInference
+effectivelyreducesinferencelatencybyupto10×forpre-fillingonanA100,while
+maintainingaccuracy. Ourcodeisavailableathttps://aka.ms/MInference.
+Needle in A Haystack LLaMA-3-8B-1M w/ MInference 1M Context
+0 1.0 30
+11 FlashAttention-2
+22 0.8 MInference
+33 0.6 20
+44 10x
+56
+0.4 67 10
+78
+89 0.2 6.8x
+3
+100 0.0 1 1.8x 4.1x
+1K 70K 140K 220K 290K 360K 430K 500K 570K 640K 710K 790K 860K 930K 1M 10k100k 30 C0 ok
+ntext
+5 W0 i0 nk
+dows Size
+1M
+Context Length
+(a)NeedleInAHaystack (b)LatencySpeedup
+Figure1:Attentionweights,especiallyinlong-contextLLMs,exhibitupto96.8%sparsityincontextsof128K.
+WeproposeMInference,leveragingdynamicsparseattentiontoacceleratethepre-fillingstageoflong-context
+LLMinference.Itachievesupto10xspeedupfor1McontextsonasingleA100,asshownin(b),andmatches
+orsurpassesbaselines,asdemonstratedbyNeedleInAHaystack[Kam23]in(a)onLLaMA-3-8B-1M[Gra24].
+†Equalcontribution.♢WorkduringinternshipatMicrosoft.
+Preprint.Underreview.
+4202
+luJ
+2
+]LC.sc[
+1v09420.7042:viXra
+)%(
+tnecreP
+htpeD
+)nim(ycnetaL1 Introduction
+Large language models (LLMs) have entered the era of long-context processing, with some
+of them supporting context windows ranging from 128K to 10M tokens [Gra24, RST+24,
+LYZA24, YCL+24, AJA+24, DA24]. These extended context windows enable LLMs to un-
+lock a multitude of complex real-world applications, such as repository-level code understand-
+ing [BSK+23, JYW+23, POC+23], long-document question-answering [CPG+23, LZD+24],
+extreme-labelin-contextlearning[LZD+24],andlong-horizonagenttasks[Wen23].
+However,duetothequadraticcomplexityofattention,itcantakeseveralminutesforthemodelto
+processtheinputprompt(i.e.,thepre-fillingstage)andthenstarttoproducethefirsttoken,which
+leadstounacceptableTimeToFirstTokenexperience,thusgreatlyhindersthewideapplicationof
+long-contextLLMs. AsshowninFig.2a,whenservingLLaMA-3-8BonasingleA100machine,
+themodelwouldkeepuserswaitingfor6minutestofinishthepre-fillingstagegivenapromptof
+300Ktokens,andthisnumberincreasesto30minutesforapromptof1Mtokens. Theoverhead
+ofself-attentioncomputationexceeds90%ofthetotalpre-fillinglatency,whichmakesitthemajor
+bottleneck in long-context processing of LLMs. Previous research has shown that the attention
+matrices are highly sparse [LQC+22, DSY24], which has led to the development of fixed sparse
+attentionmethodssuchasLongformer[BPC20]andBigBird[ZGD+20].However,priorstudieshave
+alsonotedthatattentiondistributionsvarysignificantlyacrossdifferentinputs[LCW21,LQC+22].
+Thisdynamicnaturepreventspriorsparsemethodsfrombeinguseddirectlyonlong-contextLLMs
+without expensive training or fine-tuning. But if the dynamic sparse attention patterns could be
+efficiently predicted online, the pre-filling latency of long-context LLMs could be significantly
+reducedbycalculatingonlythemostimportantpartoftheattentionweights.
+Buildinguponthisidea, wepresentMInference, atechniquethatreduces95%ofFLOPsinthe
+attentioncomputationtosignificantlyacceleratethepre-fillingstageoflong-contextLLMinference
+viadynamicsparseattention. Unlikeexistingdynamicsparseattentionmethodsthatintroducelarge
+computationaloverheadtoestimateattentionpatternswithlow-rankhiddendimensions[LQC+22,
+RCHG+24],ourmethodisdesignedspecificallyforlong-contextscenarioswithminimaloverheadin
+estimation. Specifically,weconductextensiveanalysisandidentifythreegeneralpatternsofsparse
+attentioninlong-contextLLMs: A-shapepattern,Vertical-Slashpattern,andBlock-Sparsepattern.
+Basedonthesefindings,weintroduceakernel-awaresearchmethodtoassigntheoptimalattention
+pattern for each head. Importantly, instead of fixed attention masks in prior studies, we perform
+anefficientonlineapproximationtobuildadynamicsparsemaskforeachheadaccordingtotheir
+assignedpatternandparticularinputs. Forexample,tobuildadynamicsparsemaskforaspecific
+promptononeVertical-Slashhead,weuseapartialofattentionweightconsistingofthelastlast_q
+queryandkeyvectors(i.e. Q andK)toestimatethemostimportantindicesofthevertical
+[−last_q:]
+andslashlinesgloballyontheattentionmatrix. ForBlock-Sparseheads,weperformmeanpoolingon
+bothqueryandkeyvectorsinblocksof64andcalculatetheblock-levelattentionweightstodetermine
+themostimportantblocksandtherebyobtainablock-sparsedynamicmask. Afterobtainingthe
+dynamicsparsemask, threeoptimizedGPUkernelsareused, whichwedevelopedfortheabove
+three sparse patterns. These kernels are based on the dynamic sparse compilers PIT [ZJZ+23],
+Triton [TKC19] and FlashAttention [Dao24], which enable extremely efficient computation of
+dynamicsparseattention.
+Extensive experiments are conducted on various Long-context LLMs, including LLaMA-3-8B-
+1M [Gra24], GLM-4-9B-1M [GZX+24], and Yi-9B-200K [YCL+24], across benchmarks with
+contextlengthsover1Mtokens,suchasInfiniteBench[ZCH+24],RULER[HSK+24],NeedleIn
+AHaystack[Kam23],andPG-19[RPJ+20]. NeedleInAHaystackwasalsotestedonPhi-3-Mini-
+128K [AJA+24] and Qwen-2-7B-128K [BBC+23]. Results show that MInference speeds up the
+pre-fillingstagebyupto10×for1McontextswithLLaMA-3-8BonasingleA100,reducinglatency
+from30minutesto3minutesperprompt,whilemaintainingorimprovingaccuracy.
+2 AttentionHeads: Dynamic,Sparse,andCharacteristic
+2.1 AttentionisDynamicallySparse
+Thesparsityofattentionweightsinpre-trainedLLMs,especiallyinlong-contextscenarios,hasbeen
+well-documented[LQC+22,RCHG+24,LWD+23,XTC+24]. AsshowninFig.2b,foranattention
+230 Attention Recall of Top-K(k=4096) is 96.4% Attention Recall of Top-K(k=4096) is 83.7%
+FFN 1 1.0 1 1.0
+Attention 4 4
+20 Total 8 0.8 8 0.8
+12 0.6 12 0.6
+16 16
+10 20 0.4 20 0.4
+24 24
+0.2 0.2
+28 28
+1
+32 0.0 32 0.0
+10k 300k 500k 1M 1 4 8 121620242832 1 4 8 121620242832
+Context Windows Size Head Head
+(a)Attentionincursheavycost. (b)Attentionissparse. (c)Sparsityofattentionisdynamic.
+Figure2: (a)Latencybreakdownofthepre-fillingstage. (b)Howmuchattentionscorescantop-k(k=4096)
+columnscoverina128kcontext. (c)Lessattentionscoresareretrievedwhenreusingthetop-kindicesfrom
+anotherexamples,indicatingitsdynamicnature.VisualizationsarebasedonLLaMa-3-8BwithasingleA100.
+matrixofsize128k×128k,retainingonlythetop4kcolumnsrecalls96.8%ofthetotalattention.
+Inotherwords,eachtokenisattendingtoalimitnumberoftokensdespitethelongsequenceitis
+processing.
+Ontheotherhand,althoughthesparsenatureofattentionmatricesissharedacrossdifferentinputs,
+theexactdistributionsofsparsepatternarehighlydynamic. Thatistosay,atokenatagivenposition
+only attends to a subset of the sequence in self-attention, and the exact tokens it attends to are
+highlycontext-dependentandvarysignificantlyacrossdifferentprompts. Thisdynamismhasbeen
+mathematicallydemonstratedinpriorstudies[LCW21,LCW23]. AsdepictedinFig.2c,ifwetake
+thetop4kcolumnsfoundinFig.2bandapplyitonanotherpromptof128k,therecallofattention
+woulddroplargelyto83.7%.
+2.2 AttentionSparsityExhibitsPatterns
+Table1:Comparisonofdifferentsparsepatterns.
+Patterns A-shape Vertical-Slash Block-Sparse Top-K
+SpatialDistribution Staticstructured Dynamicstructured Dynamicstructured Dynamicfine-grained
+LatencyonGPU Low Medium Low High
+Timetobuildtheindex Zero Small Small High
+Although the sparsity distribution of attention matrix is dynamic, previous works [XTC+24,
+HWP+24] have shown that they exhibit certain patterns in the two-dimensional space such as
+spatialclustering.Throughouranalysisoflong-contextpromptsofvariouslengthsandtasks,wehave
+A-shape Vertical-SlashBlock-Sparse Block-Sparse Vertical-Slash TopK
+0 A-shape
+20 Block-Sparse head 1
+2 15 0.92
+0.85
+Vertical-Slash head 4 10 1
+0.92
+6 5 0.85
+A-shape head
+1
+0 8 0.92
+0.85
+1 4 8 12 16 20 24 28 32 1 5 10 15 20
+10 Layer Dense FLOPs/FLOPs in kernel
+(a)Attentionpatterns (b)Attentionisspatialclustering (c)Attentionpatternrecall
+Figure 3: (a) Visualization of attention weights from different attention heads. For different prompts and
+tasks,thepatternofthesameheadisrelativelyconsistent,butthesparseindicesaredynamicallychanging.(b)
+Distanceofthetop-10nearestnon-zeroelementintheattentionmatrix.(c)Attentionrecalldistributionusingour
+identifiedpatterns,whereFLOPsinthekernelrefertotherealFLOPsrequiredforsparseattentioncomputing
+usingonGPUs.Here,a1x64blocksizeisusedfortheVertical-Slashpattern,anda64x64blocksizeisusedfor
+othersonGPUs.AllvisualizationarebasedonLLaMA-3-8B-Instruct-262K[Gra24].
+3
+1
+tupnI
+2
+tupnI
+3 tupnI
+)nim(ycnetaL
+.tsiD
+oreZ-noN
+tseraeN
+KpoT
+reyaL
+llaceR
+thgieW
+noitnettA
+reyaLcategorizedsuchattentionsparsepatternsintotheA-shape,Vertical-Slash(VS),andBlock-Sparse
+patterns,asshowninFig.3aandFig.4. Table1detailsthecharacteristicsanddifferencesbetween
+thesethreepatterns.
+A-shapepatternTheattentionweightsofthesetypesofheadsareconcentratedoninitialtokensand
+localwindows[XTC+24,HWP+24],exhibitingrelativelyhigherstability.
+Vertical-Slash(VS)patternTheattentionweightsareconcentratedonspecifictokens(verticallines)
+andtokensatfixedintervals(slashlines). Thepositionsofverticalandslashlinesinthispattern
+dynamicallychangewiththecontextcontentandexhibitacertainsparsity,makingthemdifficultto
+beencompassedbylocalwindowsandA-shapepatterns.
+Block-SparsepatternThissparsitypatternisthemostdynamic,exhibitingamoredisperseddistribu-
+tion. Despiteitsdynamism,theattentionweightsmaintainsomecharacteristicsofspatialclustering,
+whichweidentifyastheblock-sparsepattern. Weanalyzedthedistancesbetweennon-zeroattention
+weightsandtheirtop-knearestnon-zeroneighborswithina128kpromptasshowninFig.3b. The
+results indicate that across layers and heads, the distances between nearest non-zero values are
+generallyconcentratedaround5,suggestingastrongspatialclusteringoftheattentionweights.
+The point of these three patterns is that we can leverage them to perform highly efficient sparse
+computingfortheattentionmatrixinlong-contextLLMs. InFig.3c,wetesthowefficientisour
+indentifiedpatternsretrievingattentionscoreswithlimitcomputingcostonGPU(FLOPs). First,
+attentionheadsarelabeledwithoneofthesparsepattern(detailsee§3.2). Thenwedemonstrateour
+patternsaresignificantlymoreefficientcomparedtoothersparsemethods[RCHG+24,XTC+24,
+PPJF24]. Specifically,withthesameamountofFLOPs,ourpatternsachieveanotablehigherrecall
+on attention scores, which can potentially lead to better accuracy. For example, previous Top-K
+methods[RCHG+24,XTC+24,PPJF24]strugglewiththeBlock-Sparsepatternastheyfocuson
+specifictokensglobally,whileourpatternretrievesattentionscoresmoreefficientlyandaccurately.
+Weexamplehowweusethesepatternsonlong-contextLLMsandhowweimplementoptimized
+GPUkernelsforthesepatternsin§3.
+3 MInference1.0
+Following the analysis in §2, we propose MInference to accelerate the pre-filling stage of long-
+contextLLMs,consistingofthreesteps: 1)Offlineattentionpatternidentificationforeachhead;2)
+Dynamicbuildofsparseindicesw.r.t. thepattern;3)Sparseattentioncalculationwithoptimized
+GPUkernels.
+Dynamic
+Sparse Approximate
+Calculation by block Matul
+Approximate
+by last q
+Λ-shape head vertical-slash head block-sparse head
+Figure4:ThethreesparsemethodsinMInference.
+3.1 ProblemFormulation
+Whenacceleratingthepre-fillingstageoflong-contextLLMswithsparseattentioncomputing,the
+attentionmatrixcanbeformulatedasfollows:
+1
+A(M)=Softmax(√ QK⊤−c(1−M)), (1)
+d
+whereM ∈{0,1}representsthedynamicsparsemaskforitemi,j oftheattentionmatrix. Here,c
+i,j
+isalargeconstant,suchas1e5,ensuringthatthelessimportantattentionweightsforwhichM =0
+i,j
+havevaluesapproachingzeroafterthesoftmax,i.e.,A ≈0.
+i,j
+4Thegoalofthedynamicsparseattentionsystemistoachievegreaterspeedupwithminimaloverhead
+whileretainingasmuchoftheattentionweightsaspossible. Formally,thiscanbeexpressedas:
+min |A(M)−A |,
+dense
+(2)
+min t (M)+t (M),
+sparse overhead
+where t and t represent the time spent on dynamic sparse attention computation and
+sparse overhead
+estimationoftheapproximatedynamicsparsepattern,respectively.
+3.2 SpeedupofLong-contextLLMInferenceviaDynamicSparseAttention
+Kernel-AwareOptimalSparsePatternSearch To
+Algorithm1Kernel-AwareSparsePattern
+achievethebestaccuracywithlimitedFLOPsbudget,
+Search
+weproposeanofflineKernel-AwareOptimalSparsePat-
+ternSearchmethod. Inthisstep,wedeterminewhich Input: Q,K,V ∈ RS×dh,patternsp,
+sparsepatternwillbeusedforeachattentionhead,and searchspaceρ,targetFLOPst,initial-
+the optimal setting for the pattern in real calculation izedsearchspaceσ
+(e.g.,thenumberofvertical/slashlinesinVSpattern;or
+#Buildkernel-awaresearchspace
+thenumberoftop-kblocksinBSpatterns). Asshownin
+fori←1to|σ|do
+Algorithm1,wefirstcreatethesearchspacebasedon
+t ←FLOPs_in_kernel(σ )
+i i
+atargetFLOPsforeachpattern,ensuringallpotential while|t −t|>ϵdo
+i
+candidates(i.e.,differentpatternswithdifferentsettings) σ ←ChangeSpace(σ ,p )
+i i i
+havesimilarcomputationalcost. Kernel-awareherein- t ←FLOPs_in_kernel(σ )
+i i
+dicatesthecomputationalcostreflectstherealFLOPsin endwhile
+GPUkernels,insteadofconceptualestimations,which ρ←ρ∪σ i
+iscrucialtoachievetheoptimalacceleration. endfor
+#Searchforoptimalheadpattern
+Next,wegothroughthesearchspacewithareferenceex-
+p ←ϕ
+ampletodecidetheoptimalpatternandsetting. Specif- best √
+y←Softmax(QK⊤/ d)
+ically,weuserecalloftheattentionoutputastheobjec-
+fori←1to|ρ|do
+tivecriterionwhensearchingforthebestpattern. This √
+y ←SparseAttention(QK⊤/ d,ρ )
+approach leverages FlashAttention [Dao24] to reduce i i
+p ←argmin(y −y,p )
+GPUmemoryoverheadandincorporatestheinforma- best i best
+endfor
+tionfromtheV matrix,enablingend-to-endselection return p
+best
+ofthebestpattern,whichfurtherenhancesperformance.
+SparsityIndicesApproximationandDynamicSparseAttentionCalculation Duringtheinfer-
+encestage,wewillperformanonlineestimationontheattentionmatrixtodynamicallydeterminethe
+Algorithm2Vertical-SlashHead Algorithm3Block-SparseHead
+Input: Q,K,V ∈RS×dh,k v,k
+s
+∈N Input: Q,K,V ∈RS×dh,k
+b
+∈N
+#Approximateverticalandslashpattern(last_q #Approximateblock-sparsepattern(block_size
+=64) =64)
+(cid:16) √ (cid:17)
+A(cid:98)←softmax Q [−last_q:]K⊤/ d+m
+casual
+Q(cid:98) ←MeanPooling(Q,block_size)
+K(cid:99)←MeanPooling(K,block_size)
+#
+i
+vIn ←dic ae rs go tf ot po kp (cid:16)k sv uv mer vti (c Aa (cid:98)l ),li kn ve, (cid:17)suminvertical A(cid:98)←softmax(cid:16) Q(cid:98)K(cid:99)⊤/√
+d+m
+casual(cid:17)
+#Indicesoftopkblocks
+#Indicesoftopk sslashline,suminslash (cid:16) (cid:17)
+i
+s
+←argtopk(cid:16)
+sum s(A(cid:98)),k
+s(cid:17) i
+b
+←argtopk A(cid:98),k
+b
+#Buildsparseattentionindex
+#Buildsparseattentionindex
+i ←sparseformat(i )
+i ←sparseformat(i ,i ) b b
+vs v s
+#Finaldynamicsparseattentionscores(only
+#Finaldynamicsparseattentionscores(only
+indexblock)
+indexblock) (cid:16) √ (cid:17)
+(cid:16) √ (cid:17) A←softmax sparse(QK⊤,i )/ d
+A←softmax sparse(QK⊤,i )/ d b
+vs
+#Sparsemixedscoresandvalues
+#Sparsemixedscoresandvalues
+y←sparse(AV,i )
+y←sparse(AV,i ) b
+vs return y
+return y
+5spatialdistributionoursparseindices,basedontheassignedpatternsandtheexactinput. Afterthat,
+weconductthesparseattentioncomputationswithouroptimizedGPUkernels. Theimplementation
+detailsofourkernelscanbefoundinAppendixC.4. NotedthatthesparsemaskisstaticforA-shape
+heads,sothereisnooverheadinbuildingthedynamicmasks,andonlysparsecalculationisrequired.
+(i)Vertical-Slashhead. AsshowninAlgorithm2,duetothecontinuityofverticalandslashlines,
+we matmul the last query vector Q and key vector K to produce the estimated attention
+[−last_q:]
+matrixA(cid:98),which,inturn,isusedtodeterminetheindicesfortheverticali
+v
+andslashi slines. After
+obtainingthesparseindicesfortheverticalandslashlines,weconvertthemintoasparseformat
+i . Usingthesesparseindices,weperformblock-sparsecalculationsoftheattentionweightsand
+vs
+attentionoutput.
+(ii)Block-Sparsehead. PerAlgorithm3,meanpoolingisappliedonQandK toobtainQ(cid:98) andK(cid:99),
+respectively. Thetwomatricesaremultipliedtogettheestimatedblock-levelattentionweightsA(cid:98).
+Sincethemeanpoolingandmatrixmultiplicationoperationsarecommutative,theresultingattention
+weightsareapproximatelyequivalenttotheactualattentionweightsaftermeanpooling. Thisallows
+ustoapproximatetheactualattentionweights’block-sparsepatternwithminimaloverhead.Similarly,
+webuildasparseindexi anduseittocomputethesparseattentionweightsandattentionoutput.
+b
+4 Experiments
+Inthissection,weinvestigatetwoquestions: (i)HoweffectiveisMInference? Weevaluateour
+methodonthreegenerallong-contextbenchmarks: InfiniteBench[ZCH+24],RULER[HSK+24],
+and the Needle In A Haystack task [Kam23], as well as the long-context language modeling
+task[RPJ+20]. Thesebenchmarkscoverlong-contextQA,multi-hopQA,mathreasoning,aggrega-
+tiontasks,summarization,retrievaltasks,andcodedebugging,allowingustoassessMInference’s
+effectiveness across a wide range of long-context scenarios. (ii) How efficient is MInference?
+Wedelveintotheend-to-endlatencyanditsbreakdowntoevaluatetheefficiencyofMInference.
+Additionalexperimental,latencyresults,andanalysiscanbefoundinAppendixD,E,andF.
+ImplementationDetails Ourexperimentsusefourstate-of-the-artlong-contextLLMs: LLaMA-
+3-8B-Instruct-262k1, LLaMA-3-8B-Instruct-1048k2, GLM-4-9B-1M [GZX+24], and Yi-9B-
+200K [YCL+24]. Additionally, we tested Needle in A Haystack [Kam23] on Phi-3-Mini-
+128K[AJA+24]andQwen2-7B-128K[BBC+23],asdetailedinAppendixD.1. Toguaranteestable
+results,weusegreedydecodinginallexperiments. Weprovideasimplecustomimplementationof
+ourmethodinPyTorch,builtonFlashAttention[Dao24],Triton[TKC19],andthedynamicsparse
+compilerPIT[ZJZ+23]. WesetthetargetFLOPstto1kglobaltokensand4klocalwindowsinthe
+A-shapepattern. Wesetlast_q = 64andblock_size = 64intheVertical-SlashandBlock-Sparse
+patterns,respectively. ThelatencyexperimentsareconductedonasingleNvidiaA100GPUinthe
+bfloat16format. MoredetailsareprovidedinAppendixC.2.
+Dataset & Evaluation Metrics We use the provided metrics and scripts from the following
+benchmarksforevaluation. MoredetailsaboutdatasetcanbefoundinAppendixC.1.
+(i) InfiniteBench [ZCH+24]: This benchmark consists of 10 tasks, including retrieval tasks such
+asPassKeyretrieval, Numberretrieval, andKVretrieval, aswellasrepresentativerealistictasks
+like question-answering, coding, dialogue, and summarization. The average context length of
+InfiniteBenchisabout214Ktokens.
+(ii)RULER[HSK+24]: Achallenginglong-contextbenchmarkconsistingof4categoriesand13
+complex tasks, including retrieval, multi-hop tracing and aggregation, and QA tasks. It contains
+subsetswithdifferentpromptlengthsupto128ktokens,allowingustodeterminetheactualcontext
+windowsizeofthemodelbasedontheresults.
+(iii)NeedleInAHaystack[Kam23]: Along-contextretrievalbenchmarktestingLLMs’performance
+withcontextwindowsizesupto1Mtokenswhereinformationplacedatvariouspositions.
+1https://huggingface.co/gradientai/Llama-3-70B-Instruct-Gradient-262k
+2https://huggingface.co/gradientai/Llama-3-8B-Instruct-Gradient-1048k
+6Table2:PerformanceofdifferentmethodswithdifferentbasemodelsonInfiniteBench[ZCH+24].
+Methods En.SumEn.QAEn.MCEn.DiaZh.QACode.DebugMath.FindRetr.PassKeyRetr.NumberRetr.KVAvg.
+LLaMA-3-8B-262K 20.2 12.4 67.3 6.0 12.9 22.1 26.6 100.0 100.0 14.4 38.2
+StreamingLLM 21.0 8.2 40.2 10.0 10.4 25.9 30.0 86.8 5.1 0.8 23.8
+StreamingLLMw/dilated 20.1 9.4 44.5 15.5 11.2 20.5 27.5 5.0 87.5 0.5 24.2
+StreamingLLMw/strided 17.3 8.2 27.5 14.5 11.2 19.5 27.5 4.0 2.1 1.0 13.3
+InfLLM 24.1 7.8 45.0 6.0 11.4 19.5 32.9 100.0 100.0 1.2 34.8
+Oursw/static 19.9 8.6 43.2 3.5 8.9 20.6 25.1 92.4 96.3 0.2 31.9
+Ours 20.5 12.9 65.9 7.5 12.5 22.3 33.1 100.0 100.0 12.8 38.8
+Yi-9B-200K 8.2 10.6 64.2 1.0 17.3 21.3 23.4 99.8 100.0 28.8 37.5
+StreamingLLM 5.4 14.2 38.0 4.0 18.8 18.8 22.3 39.2 6.1 1.6 16.8
+StreamingLLMw/dilated 5.7 4.2 15.0 0.0 18.2 0.0 2.9 0.0 0.0 0.0 4.2
+StreamingLLMw/strided 6.1 4.5 9.8 0.0 16.9 0.0 3.1 1.5 0.0 0.0 4.6
+InfLLM 6.3 13.0 45.9 2.5 21.5 20.6 34.6 85.3 88.1 1.4 31.9
+Oursw/static 5.8 12.6 48.5 3.0 12.6 20.8 25.1 60.9 38.5 1.0 22.9
+Ours 7.9 11.2 64.2 1.0 17.9 24.1 23.1 99.5 100.0 27.6 37.7
+GLM-4-9B-1M 28.3 9.7 68.6 39.5 12.1 29.4 38.9 100.0 100.0 41.0 46.7
+StreamingLLM 27.7 6.4 40.2 12.5 10.8 27.7 21.1 97.1 25.6 0.6 27.0
+InfLLM 28.0 7.3 45.0 14.0 10.7 27.9 39.4 98.0 100.0 2.6 37.3
+Ours 28.8 9.6 68.6 38.5 12.0 30.7 39.1 100.0 100.0 43.0 47.0
+(iv)PG-19[RPJ+20]: FollowingStreamingLLM[XTC+24]andH2O[ZSZ+24],weusePG-19for
+long-contextlanguagemodelingtaskswithpromptsupto100ktokens.
+Baselines We include five training-free sparse attention approaches as our baselines: 1)
+StreamingLLM[XTC+24],whichcorrespondstotheA-shapepattern. Weuse1kglobaltokensand
+4klocalwindowsinallourexperiments;2)StreamingLLMw/dilated[BPC20],whichsetsdilated
+localwindowswithintervalsinthelocalwindowsdirection. Weuse1kglobaltokensand8kdilated
+attentionwindowswithanintervalof1;3)StreamingLLMw/strided[CGRS19],whichretainslocal
+windowswhileaddingdilatedattention. Weuse1kglobaltokens,2klocalwindows,and4kdilated
+attentionwindowswithanintervalof1;4)InfLLM[XZH+24],whichusesamemoryunittoprocess
+streaming long sequences. Following the paper, we set 128 global tokens and 8k local windows
+inallexperiments;5)Oursw/static,whichutilizesstaticsparseindicesintheVertical-Slashand
+Block-Sparseheads. Forallbaselines,weperformsparsecomputationonlyduringthepre-filling
+stage,whileretainingdensecomputationduringthedecodingstage.
+InfiniteBench AsshowninTable2,MInferenceachievesthebestoverallperformancecompared
+to baselines on InfiniteBench. Remarkably, MInference matches or even slightly surpasses the
+performanceoftheoriginalfullattentionbaselineonsometasks,despitethesignificantacceleration
+itprovided. Fromtheperspectiveofdifferenttasks,ourmethodnotonlyperformswellinnatural
+language tasks such as summarization, QA, and code, but also maintains the original model’s
+performanceonretrieval-relatedtasks. BaselinemethodssuchasStreamingLLM,onthecontrary,
+strugglewiththeseretrievaltasks. Additionally,ontaskssuchasdialogueQA,usinglocalattention
+Table3:Performance(%)ofdifferentmodelsanddifferentmethodsonRULER[HSK+24]evaluatedatlengths
+from4kto128k.
+Methods Claimed Effective 4K 8K 16K 32K 64K 128K Avg.
+LLaMA-3-8B-262K 262K 16K 97.2 91.8 87.3 80.8 77.4 72.2 84.4
+StreamingLLM - 4K 97.2 38.1 37.5 17.2 14.2 9.4 35.0
+StreamingLLMw/dilated - <4K 23.4 0.7 1.4 18.8 16.5 15.6 12.7
+StreamingLLMw/strided - <4K 2.0 0.7 0.6 0.6 0.7 1.3 1.0
+InfLLM - 4K 89.4 79.8 70.1 55.6 43.0 39.5 62.9
+Ours - 32K 97.7 91.2 88.5 85.0 82.3 77.6 87.0
+Yi-9B-200K 200K 8K 91.9 90.2 78.8 76.3 68.1 62.9 78.1
+StreamingLLM - 4K 91.9 37.8 33.9 18.6 13.0 12.8 34.3
+StreamingLLMw/dilated - <4K 44.8 42.8 38.5 29.8 26.8 23.9 34.4
+StreamingLLMw/strided - <4K 2.6 0.7 0.6 0.6 1.2 0.5 1.1
+InfLLM - <4K 80.3 83.9 60.7 45.2 38.6 30.2 56.5
+Ours - 8K 92.3 89.7 79.0 73.8 64.7 56.9 74.7
+GLM-4-9B-1M 1M 64K 93.8 91.6 89.3 87.4 85.2 80.8 88.0
+StreamingLLM - 4K 93.8 66.9 58.5 51.4 45.9 39.1 59.3
+InfLLM - 8K 94.7 89.5 76.4 66.5 56.8 53.5 72.9
+Ours - 64K 94.6 93.1 91.0 89.6 85.5 84.0 89.6
+7mechanismscanbetterhandlethesetasks,whileourperformanceisclosertotheoriginalresults,
+indicating that our method is not solely based on local windows. Extending the local windows’
+intervalsinStreamingLLM,i.e.,w/dilatedandw/strided,hardlyaffectsthemodel’sperformance.
+RULER Tofurtherrevealthetruepotentialofourmethodinlong-contextLLMs,weevaluateMIn-
+ferencewiththestate-of-the-artlong-contextchallenge,RULER.AsshowninTable3,MInference
+effectivelymaintainsthelong-contextperformanceevenincomplexmulti-hoporaggregationtasks
+inRULER.Itevenoutperformstheoriginalfullattentionfortestinglengthsbeyond32K,achiev-
+ingeffectivecontextwindowsof32Kand64K(contextwithperformanceover85%isconsidered
+effective[HSK+24])inLLaMA-3-8B-262KandGLM-4-9B-1M.
+LanguageModeling FollowingtheapproachofStreamingLLM[XTC+24]andH2O[ZSZ+24],
+we evaluate our methods against baselines on the language modeling task based on the PG-19
+dataset[RPJ+20].Asshownin5,ourmethodyieldsbestresultscomparedtoothersparseapproaches,
+andexhibitsminimaldivergencecomparedtothefullattentionbaseline. Forpromptsof100Ktoken,
+ourperplexityisonly0.2higherthanthefullattention,butlowerthanStreamingLLMfor0.25and
+0.75ontheYi-9B-200KandLLaMA-3-262Kmodelsrespectively.
+9
+10.0
+9.5 8
+9.0 StreamingLLM InfLLM StreamingLLM InfLLM
+StreamingLLM w/ dilated MInference w/ static StreamingLLM w/ dilated MInference w/ static
+StreamingLLM w/ strided MInference 7 StreamingLLM w/ strided MInference
+8.5 FlashAttention-2 FlashAttention-2
+1k 10k 30k 50k 75k 100k 1k 10k 30k 50k 75k 100k
+Context Windows Size Context Windows Size
+(a)LLaMA-3-8B-Instruct-262K (b)Yi-9B-200K
+Figure5:PerplexityresultsonPG-19[RPJ+20]usingdifferentmodelsandmethods.
+Needle in A Haystack LLaMA-3-8B-1M w/ StreamingLLM 1M Context
+Needle In A Haystack Comparing Fig. 1a 0 1.0
+to 6, our method effectively retains the abil- 11
+0.8
+22
+itytoprocessinformationatdifferentpositions 33
+0.6
+acrossvariouscontextwindows,rangingfrom 44
+56
+1k to 1M tokens. In contrast, methods like 67 0.4
+StreamingLLM,whileeffectiveinreducingla- 78 0.2
+89
+tency,experiencearapiddeclineinperformance 100
+0.0
+oncethecriticalinformationexceedstherange 1K 70K 140K 220K 290K 360K 430K 500K 570K 640K 710K 790K 860K 930K 1M
+ofglobaltokensandlocalwindows. Context Length
+Figure 6: Results on Needle In A Haystack of
+AblationStudy Toevaluatethecontributions StreamingLLM[XTC+24]inLLaMA-3-8B-1M.
+ofdifferentcomponentsinMInference,wein-
+troduce four variants for the ablation study: (1) Ours w/ static, which uses a static sparse mask
+intheVertical-SlashandBlock-Sparsepatterns;(2)Oursw/onlyA-shape,whichisequivalentto
+StreamingLLM; (3) Ours w/ only block-sparse, which uses only the Block-Sparse pattern in the
+dynamicsparsecalculation.(4)Oursw/onlyvertical-slash,whichusesonlytheVertical-Slashpattern
+inthedynamicsparsecalculation.
+Table 4: Performance of different ablation methods using LLaMA-3-8B-Instruct-262K on In-
+finiteBench[ZCH+24].
+Methods En.SumEn.QAEn.MCEn.DiaZh.QACode.DebugMath.FindRetr.PassKeyRetr.NumberRetr.KVAvg.
+Ours 20.5 12.9 65.9 7.5 12.5 22.3 33.1 100.0 100.0 12.8 38.8
+Oursw/onlyblock-sparse 12.4 3.4 5.7 6.0 3.1 12.2 24.0 59.5 60.3 0.0 18.7
+Oursw/onlyvertical-slash 19.6 12.0 62.1 9.5 11.7 21.6 29.1 100.0 100.0 5.0 37.1
+Tables2,3,and4presenttheablationresults. Itfirstprovesthatusingstaticindicessignificantly
+degradesLLMperformance,especiallyinhighlydynamictaskslikeKVretrieval,whereaccuracy
+8
+ytixelprep
+gol
+)%(
+tnecreP
+htpeD
+ytixelprep
+golnearlydropstozero. Thishighlightthenecessityofourdynamicstrategyandtheeffectivenessofour
+dynamicallybuiltsparseindices. Additionally,removeanypatternfromthethreeleadstovarying
+degrees of performance degradation. Specifically, "only A-shape" can only capture information
+within local windows. The "only block-sparse" variant using only the BS pattern, also results in
+significantperformancedeclines. Ontheotherhand,"onlyvertical-slash"managestopreservemost
+oftheperformanceduetoitsbalancebetweendynamicityandtheStreamingLLMpattern,butstill
+fallbehindthefullversionofourmethod.
+Latency Fig.1band10showsthelatencyandbreakdownofMInferenceacrossdifferentcontext
+windowsonasingleA100. At100K,300K,500K,and1Mtokens,ourmethodachievesspeedups
+of 1.8×, 4.1×, 6.8×, and 10×, respectively. It reduces the pre-filling latency from 30 mins to 3
+minsonasingleA100forapromptof1Mtoken. Byfurtherutilizingtensorparallel[LMZ+24]and
+contextparallel[LZA23,JTZ+23], thislatencycanbereducedto40secondson8xA100GPUs.
+Thissignificantlylowersthedeploymentcostoflong-contextLLMsandenhancesuserexperience.
+AndsinceourkernelisimplementedbasedonTriton,itcanbeeasilyportedtootherdevicesand
+achievesimilarspeedups,suchasontheH100. Additionally,analyzingthelatencybreakdown,we
+foundabout5%-20%oftheoverheadisspentondynamicsparseindexbuilding,whiletheremaining
+timeisspentondynamicsparsecalculation.
+Table 5: Performance of different methods on InfiniteBench [ZCH+24] using SnapKV [LHY+24] in the
+decodingstage.
+Methods En.SumEn.QAEn.MCEn.DiaZh.QACode.DebugMath.FindRetr.PassKeyRetr.NumberRetr.KVAvg.
+LLaMA-3w/SnapKV 18.0 11.8 65.5 2.5 12.0 21.3 26.6 100.0 100.0 1.8 36.0
+Oursw/SnapKV 18.9 11.7 66.4 6.5 12.1 21.8 33.1 100.0 100.0 2.0 37.3
+IntegratewithKVcachecompressionmethods WealsocombinedMInferencewithastate-of-
+the-artKVcachecompressionmethodSnapKV[LHY+24],asshowninTable5. Thisprovesour
+methodiscompatiblewithKVcachecompressiontechniques. Formosttasks,performanceremains
+nearlyunchanged,withtheaveragescoreevenshowingaslightincrease,whichfurtherdemonstrates
+thepotentialpracticalvalueofourmethodasanoptimizationforservinglong-contextLLMs.
+5 RelatedWorks
+SparseAttention Duetothequadraticcomplexityoftheattentionmechanism, manyprevious
+works have focused on sparse attention to improve the efficiency of Transformers. These meth-
+odsincludestaticsparsepatterns,cluster-basedsparseapproaches,anddynamicsparseattention.
+Staticsparsepatternsincludetechniquessuchasslidingwindows[JSM+23,AJA+24],dilatedat-
+tention [CGRS19, SGR+21, DMD+23], and mixed sparse patterns [BPC20, ZGD+20, LCSR21].
+Cluster-basedsparsemethodsincludehash-based[KKL20]andkNN-based[RSVG21,NŁC+24]
+methods. All of the above methods require pre-training the model from scratch, which makes
+them infeasible to be directly used as a plugin for reay-to-use LLMs. Recently, there has been
+work [DG24, ZAW24] to unify state space models [GGR22, GD23, DG24], and linear atten-
+tion [KVPF20, SDH+23] into structured masked attention. Additionally, some works [WZH21,
+LQC+22,RCHG+24]leveragethedynamicnatureofattentiontopredictsparsepatternsdynami-
+cally. However,theseapproachesoftenfocusonlow-rankhiddenstatesduringthedynamicpattern
+approximationorusepost-statisticalmethodstoobtainthesparsemask,whichintroducesubstantial
+overheadintheestimationstep,makingthemlessusefulforlong-contextLLMs.
+ScalingContextWindowsofLLMs Recentresearchhasfocusedonexpandingthecontextwindow
+ofpre-trainedLLMs,thatenablesLLMstohandlemorecomplexreal-lifeapplications[JYW+23,
+POC+23]. Thesemethodscanbecategorizedinto: 1)Stagedpre-training[NXH+23,FPN+24];2)
+Modifyingorinterpolatingpositionembeddings[PSL22,CWCT23,PQFS24,DZZ+24];3)Utilizing
+externalmemorymodulesforcontextstorage[BANG23,TSP+23,XZH+24];4)Expandingcom-
+putationsacrossmultipledevicesinadistributedmanner[LZA23]. However,thesemethodsdonot
+alleviatethehighinferencecostsinlong-contextprocessing.
+Long-Context LLM Inference Recent studies [Fu24] have tackled the high computational
+cost of attention and substantial KV cache storage in long-context scenarios from two angles:
+9pre-filling and decoding. Pre-filling optimizations are primarily categorized as State Space
+Models [GGR22, GD23], linear attention methods [SDH+23, PAA+23], memory-based meth-
+ods [MFG24], hybrid methods [LLB+24, HBK+24, RLL+24], and prompt compression meth-
+ods [LDGL23, JWL+23, JWL+24, PWJ+24]. However, these approaches require training from
+scratch or additional overhead and are difficult to implement directly in pretrained long-context
+LLMs. Recently, some studies [MEL24, XZH+24] have focused on using kNN or cluster-based
+sparseattentiontoaccelerateLLMinference. However,thesemethodsoftenleadtoreducedaccuracy,
+limitedspeedup,orarerestrictedtoCPUscenarios.
+In contrast, optimizations for the decoding stage are divided into: 1) Reusing attention KV to
+reduceKVcachestorage[Sha19,ALTdJ+23,SDZ+24,DA24]; 2)StaticKVcachecompression
+patterns[XTC+24,HWP+24];3)DynamicKVcachecompressionpatterns,includingcompletely
+discardingtheKVcacheaftercompression[ZSZ+24,LDL+24,GZL+24,OHAS24],andoffloading-
+based methods [RCHG+24, LHY+24, DHJ+24]; 4) Cluster-based KV cache compression meth-
+ods [NŁC+24, TZZ+24]; 5) Methods for restoring performance loss due to KV cache compres-
+sion[AAJ+24,DYZ+24];6)Hierarchicalspeculativedecodingmethods[SCY+24]. Nevertheless,
+thesemethodsdonotaddresstheheavycomputationalburdenoftheattentioninthepre-fillingstage.
+6 Conclusion
+Thispaperaddressestheexpensivecomputationalcostandtheunacceptablelatencyoftheattention
+calculationsinthepre-fillingstageoflong-contextLLMs. WeproposeMInference,amethodthat
+accelerates the pre-filling stage by leveraging dynamic sparse attention with spatial aggregation
+patterns. Specifically,wecategorizeattentionheadsintothreetypes: A-shape,Vertical-Slash,and
+Block-Sparse. Usingakernel-awareoptimalsparsepatternsearchmethod,weidentifytheoptimal
+pattern for each head. Subsequently, we utilize a fast approximation approach to build dynamic
+sparsemasksfordifferentinputs,andthenapplythesemasktoperformsparseattentioncalculations.
+ExperimentalresultsonbenchmarkssuchasInfiniteBench,RULER,languagemodeling,andNeedle
+InAHaystackdemonstratethatourmethodeffectivelymaintainsthelong-contextcapabilitiesof
+LLMs while achieving up to a 10x speedup, reducing the latency from 30 minutes to 3 minutes
+perpromptfor1milliontokenpromptsonasingleA100GPU.Additionally,wehavefoundthat
+similar dynamic sparse attention patterns also exist in both multi-modal LLMs [WWL+24] and
+encoder-decoderLLMs[RSR+20]. UsingMInferenceforpre-fillingstageinferenceacceleration
+holdsgreatpromise.
+References
+[AAJ+24] MuhammadAdnan,AkhilArunkumar,GauravJain,PrashantNair,IlyaSoloveychik,
+andPurushothamKamath.Keyformer:Kvcachereductionthroughkeytokensselection
+for efficient generative inference. Proceedings of Machine Learning and Systems,
+6:114–127,2024.
+[AJA+24] MarahAbdin,SamAdeJacobs,AmmarAhmadAwan,JyotiAneja,AhmedAwadallah,
+HanyAwadalla,NguyenBach,AmitBahree,ArashBakhtiari,HarkiratBehl,AlonBen-
+haim,MishaBilenko,JohanBjorck,SébastienBubeck,MartinCai,CaioCésarTeodoro
+Mendes,WeizhuChen,VishravChaudhary,ParulChopra,AllieDelGiorno,Gustavo
+de Rosa, Matthew Dixon, Ronen Eldan, Dan Iter, Amit Garg, Abhishek Goswami,
+Suriya Gunasekar, Emman Haider, Junheng Hao, Russell J. Hewett, Jamie Huynh,
+MojanJavaheripi,XinJin,PieroKauffmann,NikosKarampatziakis,DongwooKim,
+Mahoud Khademi, Lev Kurilenko, James R. Lee, Yin Tat Lee, Yuanzhi Li, Chen
+Liang,WeishungLiu,EricLin,ZeqiLin,PiyushMadan,ArindamMitra,HardikModi,
+Anh Nguyen, Brandon Norick, Barun Patra, Daniel Perez-Becker, Thomas Portet,
+ReidPryzant,HeyangQin,MarkoRadmilac,CorbyRosset,SambudhaRoy,Olatunji
+Ruwase,OlliSaarikivi,AminSaied,AdilSalim,MichaelSantacroce,ShitalShah,Ning
+Shang,HiteshiSharma,XiaSong,MasahiroTanaka,XinWang,RachelWard,Guanhua
+Wang,PhilippWitte,MichaelWyatt,CanXu,JiahangXu,SonaliYadav,FanYang,
+ZiyiYang,DonghanYu,ChengruidongZhang,CyrilZhang,JianwenZhang,LiLyna
+Zhang,YiZhang,YueZhang,YunanZhang,andXirenZhou. Phi-3technicalreport: A
+highlycapablelanguagemodellocallyonyourphone. ArXiv,abs/2404.14219,2024.
+10[ALTdJ+23] Joshua Ainslie, James Lee-Thorp, Michiel de Jong, Yury Zemlyanskiy, Federico
+Lebron,andSumitSanghai.Gqa:Traininggeneralizedmulti-querytransformermodels
+frommulti-headcheckpoints. 2023.
+[BANG23] AmandaBertsch,UriAlon,GrahamNeubig,andMatthewR.Gormley. Unlimiformer:
+Long-rangetransformerswithunlimitedlengthinput. InThirty-seventhConferenceon
+NeuralInformationProcessingSystems,2023.
+[BBC+23] JinzeBai,ShuaiBai,YunfeiChu,ZeyuCui,KaiDang,XiaodongDeng,YangFan,
+WenbinGe,YuHan,FeiHuang,BinyuanHui,LuoJi,MeiLi,JunyangLin,RunjiLin,
+DayihengLiu,GaoLiu,ChengqiangLu,KemingLu,JianxinMa,RuiMen,Xingzhang
+Ren,XuanchengRen,ChuanqiTan,SinanTan,JianhongTu,PengWang,ShijieWang,
+Wei Wang, Shengguang Wu, Benfeng Xu, Jin Xu, An Yang, Hao Yang, Jian Yang,
+Shusheng Yang, Yang Yao, Bowen Yu, Hongyi Yuan, Zheng Yuan, Jianwei Zhang,
+XingxuanZhang,YichangZhang,ZhenruZhang,ChangZhou,JingrenZhou,Xiaohuan
+Zhou, and Tianhang Zhu. Qwen technical report. ArXiv preprint, abs/2309.16609,
+2023.
+[BPC20] IzBeltagy,MatthewEPeters,andArmanCohan. Longformer: Thelong-document
+transformer. ArXivpreprint,abs/2004.05150,2020.
+[BSK+23] RamakrishnaBairi,AtharvSonwane,AdityaKanade,VageeshDC,ArunIyer,Suresh
+Parthasarathy,SriramRajamani,B.Ashok,andShashankShet. Codeplan: Repository-
+level coding using LLMs and planning. In NeurIPS 2023 Foundation Models for
+DecisionMakingWorkshop,2023.
+[CGRS19] RewonChild,ScottGray,AlecRadford,andIlyaSutskever.Generatinglongsequences
+withsparsetransformers. ArXivpreprint,abs/1904.10509,2019.
+[CPG+23] Avi Caciularu, Matthew E Peters, Jacob Goldberger, Ido Dagan, and Arman Co-
+han. Peekacross: Improvingmulti-documentmodelingviacross-documentquestion-
+answering. InProceedingsofthe61stAnnualMeetingoftheAssociationforComputa-
+tionalLinguistics(Volume1: LongPapers),pages1970–1989,2023.
+[CWCT23] Shouyuan Chen, Sherman Wong, Liangjian Chen, and Yuandong Tian. Extending
+contextwindowoflargelanguagemodelsviapositionalinterpolation. ArXivpreprint,
+abs/2306.15595,2023.
+[CWW+24] ZheChen,JiannanWu,WenhaiWang,WeijieSu,GuoChen,SenXing,MuyanZhong,
+QinglongZhang,XizhouZhu,LeweiLu,etal. Internvl: Scalingupvisionfoundation
+modelsandaligningforgenericvisual-linguistictasks.InProceedingsoftheIEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pages24185–24198,2024.
+[DA24] DeepSeek-AI. Deepseek-v2: Astrong,economical,andefficientmixture-of-experts
+languagemodel,2024.
+[Dao24] TriDao.Flashattention-2:Fasterattentionwithbetterparallelismandworkpartitioning.
+InTheTwelfthInternationalConferenceonLearningRepresentations,2024.
+[DG24] TriDaoandAlbertGu. TransformersareSSMs: Generalizedmodelsandefficient
+algorithmsthroughstructuredstatespaceduality.InForty-firstInternationalConference
+onMachineLearning,2024.
+[DHJ+24] JinchengDai,ZhuoweiHuang,HaiyunJiang,ChenChen,DengCai,WeiBi,andShum-
+ingShi.Sequencecansecretlytellyouwhattodiscard.ArXivpreprint,abs/2404.15949,
+2024.
+[DMD+23] JiayuDing,ShumingMa,LiDong,XingxingZhang,ShaohanHuang,WenhuiWang,
+NanningZheng,andFuruWei. Longnet: Scalingtransformersto1,000,000,000tokens.
+ArXivpreprint,abs/2307.02486,2023.
+[DSY24] Yichuan Deng, Zhao Song, and Chiwun Yang. Attention is naturally sparse with
+gaussiandistributedinput. ArXivpreprint,abs/2404.02690,2024.
+11[DYZ+24] HarryDong,XinyuYang,ZhenyuZhang,ZhangyangWang,YuejieChi,andBeidi
+Chen. GetmorewithLESS:SynthesizingrecurrencewithKVcachecompressionfor
+efficientLLMinference. InForty-firstInternationalConferenceonMachineLearning,
+2024.
+[DZZ+24] YiranDing,LiLynaZhang,ChengruidongZhang,YuanyuanXu,NingShang,Jiahang
+Xu,FanYang,andMaoYang. LongroPE:ExtendingLLMcontextwindowbeyond2
+milliontokens. InForty-firstInternationalConferenceonMachineLearning,2024.
+[FPN+24] YaoFu,RameswarPanda,XinyaoNiu,XiangYue,HannanehHajishirzi,YoonKim,
+and Hao Peng. Data engineering for scaling language models to 128k context. In
+Forty-firstInternationalConferenceonMachineLearning,2024.
+[Fu24] YaoFu. Challengesindeployinglong-contexttransformers: Atheoreticalpeakperfor-
+manceanalysis. ArXivpreprint,abs/2405.08944,2024.
+[GD23] AlbertGuandTriDao. Mamba: Linear-timesequencemodelingwithselectivestate
+spaces. ArXivpreprint,abs/2312.00752,2023.
+[GGR22] Albert Gu, Karan Goel, and Christopher Ré. Efficiently modeling long sequences
+with structured state spaces. In The Tenth International Conference on Learning
+Representations,ICLR2022,VirtualEvent,April25-29,2022,2022.
+[Gra24] Gradient. Llama-38binstructgradient4194k(v0.1),2024.
+[GZL+24] Suyu Ge, Yunan Zhang, Liyuan Liu, Minjia Zhang, Jiawei Han, and Jianfeng Gao.
+Model tells you what to discard: Adaptive kv cache compression for llms. In The
+TwelfthInternationalConferenceonLearningRepresentations,2024.
+[GZX+24] TeamGLM,AohanZeng,BinXu,BowenWang,ChenhuiZhang,DaYin,DiegoRojas,
+GuanyuFeng,HanlinZhao,HanyuLai,etal. Chatglm: Afamilyoflargelanguage
+modelsfromglm-130btoglm-4alltools. ArXivpreprint,abs/2406.12793,2024.
+[HBK+24] Namgyu Ho, Sangmin Bae, Taehyeon Kim, Hyunjik Jo, Yireun Kim, Tal Schuster,
+AdamFisch,JamesThorne,andSe-YoungYun. Blocktransformer: Global-to-local
+languagemodelingforfastinference. ArXivpreprint,abs/2406.02657,2024.
+[HSK+24] Cheng-PingHsieh,SimengSun,SamuelKriman,ShantanuAcharya,DimaRekesh,
+FeiJia,YangZhang,andBorisGinsburg. Ruler: What’stherealcontextsizeofyour
+long-contextlanguagemodels? ArXivpreprint,abs/2404.06654,2024.
+[HWP+24] ChiHan,QifanWang,HaoPeng,WenhanXiong,YuChen,HengJi,andSinongWang.
+LM-infinite: Zero-shotextremelengthgeneralizationforlargelanguagemodels. In
+Kevin Duh, Helena Gomez, and Steven Bethard, editors, Proceedings of the 2024
+Conference of the North American Chapter of the Association for Computational
+Linguistics: HumanLanguageTechnologies(Volume1: LongPapers),pages3991–
+4008,MexicoCity,Mexico,2024.AssociationforComputationalLinguistics.
+[JSM+23] Albert Q Jiang, Alexandre Sablayrolles, Arthur Mensch, Chris Bamford, Deven-
+draSinghChaplot,DiegodelasCasas,FlorianBressand,GiannaLengyel,Guillaume
+Lample,LucileSaulnier,etal. Mistral7b. ArXivpreprint,abs/2310.06825,2023.
+[JTZ+23] Sam Ade Jacobs, Masahiro Tanaka, Chengming Zhang, Minjia Zhang, Leon Song,
+SamyamRajbhandari, andYuxiongHe. Deepspeedulysses: Systemoptimizations
+forenablingtrainingofextremelongsequencetransformermodels. ArXivpreprint,
+abs/2309.14509,2023.
+[JWL+23] HuiqiangJiang,QianhuiWu,Chin-YewLin,YuqingYang,andLiliQiu. Llmlingua:
+Compressingpromptsforacceleratedinferenceoflargelanguagemodels. InProceed-
+ingsofthe2023ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,
+pages13358–13376,2023.
+12[JWL+24] Huiqiang Jiang, Qianhui Wu, Xufang Luo, Dongsheng Li, Chin-Yew Lin, Yuqing
+Yang,andLiliQiu. Longllmlingua: Acceleratingandenhancingllmsinlongcontext
+scenariosviapromptcompression. InProceedingsofthe62ndAnnualMeetingofthe
+AssociationforComputationalLinguistics(Volume1: LongPapers).Associationfor
+ComputationalLinguistics,2024.
+[JYW+23] CarlosEJimenez,JohnYang,AlexanderWettig,ShunyuYao,KexinPei,OfirPress,
+and Karthik R Narasimhan. Swe-bench: Can language models resolve real-world
+githubissues? InTheTwelfthInternationalConferenceonLearningRepresentations,
+2023.
+[Kam23] GregKamradt. Needleinahaystack-pressuretestingllms,2023.
+[KKL20] NikitaKitaev,LukaszKaiser,andAnselmLevskaya. Reformer: Theefficienttrans-
+former. In 8th International Conference on Learning Representations, ICLR 2020,
+AddisAbaba,Ethiopia,April26-30,2020,2020.
+[KVPF20] AngelosKatharopoulos,ApoorvVyas,NikolaosPappas,andFrançoisFleuret. Trans-
+formersarernns:Fastautoregressivetransformerswithlinearattention. InProceedings
+ofthe37thInternationalConferenceonMachineLearning,ICML2020,13-18July
+2020,VirtualEvent,volume119ofProceedingsofMachineLearningResearch,pages
+5156–5165.PMLR,2020.
+[LCSR21] FrançoisLagunas,EllaCharlaix,VictorSanh,andAlexanderRush. Blockpruningfor
+fastertransformers. InProceedingsofthe2021ConferenceonEmpiricalMethodsin
+NaturalLanguageProcessing,pages10619–10629,OnlineandPuntaCana,Dominican
+Republic,2021.AssociationforComputationalLinguistics.
+[LCW21] ValeriiLikhosherstov,KrzysztofChoromanski,andAdrianWeller. Ontheexpressive
+powerofself-attentionmatrices. ArXivpreprint,abs/2106.03764,2021.
+[LCW23] ValeriiLikhosherstov,KrzysztofChoromanski,andAdrianWeller. Ontheexpressive
+flexibilityofself-attentionmatrices. ProceedingsoftheAAAIConferenceonArtificial
+Intelligence,37(7):8773–8781,2023.
+[LDGL23] Yucheng Li, Bo Dong, Frank Guerin, and Chenghua Lin. Compressing context to
+enhanceinferenceefficiencyoflargelanguagemodels. InProceedingsofthe2023
+ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,2023.
+[LDL+24] Zichang Liu, Aditya Desai, Fangshuo Liao, Weitao Wang, Victor Xie, Zhaozhuo
+Xu, Anastasios Kyrillidis, and Anshumali Shrivastava. Scissorhands: Exploiting
+thepersistenceofimportancehypothesisforllmkvcachecompressionattesttime.
+AdvancesinNeuralInformationProcessingSystems,36,2024.
+[LHY+24] YuhongLi,YingbingHuang,BowenYang,BharatVenkitesh,AcyrLocatelli,Hanchen
+Ye,TianleCai,PatrickLewis,andDemingChen. Snapkv: Llmknowswhatyouare
+lookingforbeforegeneration. ArXivpreprint,abs/2404.14469,2024.
+[LLB+24] OpherLieber,BarakLenz,HofitBata,GalCohen,JhonathanOsin,ItayDalmedigos,
+ErezSafahi,ShakedMeirom,YonatanBelinkov,ShaiShalev-Shwartz,etal. Jamba: A
+hybridtransformer-mambalanguagemodel. ArXivpreprint,abs/2403.19887,2024.
+[LLWL24] HaotianLiu,ChunyuanLi,QingyangWu,andYongJaeLee. Visualinstructiontuning.
+Advancesinneuralinformationprocessingsystems,36,2024.
+[LMZ+24] ZhiqiLin,YoushanMiao,QuanluZhang,FanYang,YiZhu,ChengLi,SaeedMaleki,
+XuCao,NingShang,YileiYang,WeijiangXu,MaoYang,LintaoZhang,andLidong
+Zhou. nnscaler: Constraint-guidedparallelizationplangenerationfordeeplearning
+training.In18thUSENIXSymposiumonOperatingSystemsDesignandImplementation
+(OSDI24).USENIXAssociation,2024.
+[LQC+22] LiuLiu,ZhengQu,ZhaodongChen,FengbinTu,YufeiDing,andYuanXie. Dynamic
+sparseattentionforscalabletransformeracceleration.IEEETransactionsonComputers,
+71(12):3165–3178,2022.
+13[LWD+23] ZichangLiu,JueWang,TriDao,TianyiZhou,BinhangYuan,ZhaoSong,Anshumali
+Shrivastava, Ce Zhang, Yuandong Tian, Christopher Re, and Beidi Chen. Deja vu:
+ContextualsparsityforefficientLLMsatinferencetime. InAndreasKrause,Emma
+Brunskill, Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scar-
+lett,editors,Proceedingsofthe40thInternationalConferenceonMachineLearning,
+ProceedingsofMachineLearningResearch.PMLR,2023.
+[LYZA24] HaoLiu,WilsonYan,MateiZaharia,andPieterAbbeel.Worldmodelonmillion-length
+videoandlanguagewithringattention. ArXivpreprint,abs/2402.08268,2024.
+[LZA23] HaoLiu,MateiZaharia,andPieterAbbeel. Ringattentionwithblockwisetransformers
+fornear-infinitecontext. InNeurIPS2023FoundationModelsforDecisionMaking
+Workshop,2023.
+[LZD+24] TianleLi,GeZhang,QuyDucDo,XiangYue,andWenhuChen. Long-contextllms
+strugglewithlongin-contextlearning. ArXivpreprint,abs/2404.02060,2024.
+[MEL24] YuzhenMao,MartinEster,andKeLi. Iceformer: Acceleratedinferencewithlong-
+sequencetransformersonCPUs. InTheTwelfthInternationalConferenceonLearning
+Representations,2024.
+[MFG24] Tsendsuren Munkhdalai, Manaal Faruqui, and Siddharth Gopal. Leave no context
+behind: Efficientinfinitecontexttransformerswithinfini-attention. ArXivpreprint,
+abs/2404.07143,2024.
+[NŁC+24] Piotr Nawrot, Adrian Łan´cucki, Marcin Chochowski, David Tarjan, and Edoardo
+Ponti. Dynamicmemorycompression: RetrofittingLLMsforacceleratedinference. In
+Forty-firstInternationalConferenceonMachineLearning,2024.
+[NXH+23] ErikNijkamp,TianXie,HiroakiHayashi,BoPang,CongyingXia,ChenXing,Jesse
+Vig, Semih Yavuz, Philippe Laban, Ben Krause, Senthil Purushwalkam, Tong Niu,
+WojciechKrys´cin´ski,LidiyaMurakhovs’ka,PrafullaKumarChoubey,AlexFabbri,
+YeLiu,RuiMeng,LifuTu,MeghanaBhat,Chien-ShengWu,SilvioSavarese,Yingbo
+Zhou, Shafiq Joty, and Caiming Xiong. Xgen-7b technical report. ArXiv preprint,
+abs/2309.03450,2023.
+[OHAS24] Matanel Oren, Michael Hassid, Yossi Adi, and Roy Schwartz. Transformers are
+multi-staternns. ArXivpreprint,abs/2401.06104,2024.
+[PAA+23] BoPeng, EricAlcaide, QuentinAnthony, AlonAlbalak, SamuelArcadinho, Stella
+Biderman,HuanqiCao,XinCheng,MichaelChung,LeonDerczynski,XingjianDu,
+MatteoGrella,KranthiGv,XuzhengHe,HaowenHou,PrzemyslawKazienko,Jan
+Kocon,JiamingKong,BartłomiejKoptyra,HaydenLau,JiajuLin,KrishnaSriIpsit
+Mantri,FerdinandMom,AtsushiSaito,GuangyuSong,XiangruTang,JohanWind,
+Stanisław Woz´niak, Zhenyuan Zhang, Qinghua Zhou, Jian Zhu, and Rui-Jie Zhu.
+RWKV:ReinventingRNNsforthetransformerera. InHoudaBouamor,JuanPino,
+andKalikaBali,editors,FindingsoftheAssociationforComputationalLinguistics:
+EMNLP2023,pages14048–14077,Singapore,2023.AssociationforComputational
+Linguistics.
+[POC+23] Joon Sung Park, Joseph C. O’Brien, Carrie J. Cai, Meredith Ringel Morris, Percy
+Liang,andMichaelS.Bernstein. Generativeagents: Interactivesimulacraofhuman
+behavior. Proceedingsofthe36thAnnualACMSymposiumonUserInterfaceSoftware
+andTechnology,2023.
+[PPJF24] MatteoPagliardini,DanielePaliotta,MartinJaggi,andFrançoisFleuret. Fastatten-
+tion over long sequences with dynamic sparse flash attention. Advances in Neural
+InformationProcessingSystems,36,2024.
+[PQFS24] BowenPeng, JeffreyQuesnelle, HongluFan, andEnricoShippole. Yarn: Efficient
+context window extension of large language models. In The Twelfth International
+ConferenceonLearningRepresentations,2024.
+14[PSL22] OfirPress, NoahA.Smith, andMikeLewis. Trainshort, testlong: Attentionwith
+linearbiasesenablesinputlengthextrapolation. InTheTenthInternationalConference
+onLearningRepresentations,ICLR2022,VirtualEvent,April25-29,2022,2022.
+[PWJ+24] Zhuoshi Pan, Qianhui Wu, Huiqiang Jiang, Menglin Xia, Xufang Luo, Jue Zhang,
+QingweiLin,VictorRühle,YuqingYang,Chin-YewLin,etal. Llmlingua-2: Datadis-
+tillationforefficientandfaithfultask-agnosticpromptcompression. InFindingsofthe
+AssociationforComputationalLinguistics: ACL2024.AssociationforComputational
+Linguistics,2024.
+[RCHG+24] Luka Ribar, Ivan Chelombiev, Luke Hudlass-Galley, Charlie Blake, Carlo Luschi,
+andDouglasOrr. Sparqattention: Bandwidth-efficientLLMinference. InForty-first
+InternationalConferenceonMachineLearning,2024.
+[RLL+24] Liliang Ren, Yang Liu, Yadong Lu, Yelong Shen, Chen Liang, and Weizhu Chen.
+Samba: Simple hybrid state space models for efficient unlimited context language
+modeling. ArXivpreprint,abs/2406.07522,2024.
+[RPJ+20] JackW.Rae,AnnaPotapenko,SiddhantM.Jayakumar,ChloeHillier,andTimothyP.
+Lillicrap. Compressive transformers for long-range sequence modelling. In 8th
+International Conference on Learning Representations, ICLR 2020, Addis Ababa,
+Ethiopia,April26-30,2020,2020.
+[RSR+20] ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,Michael
+Matena,YanqiZhou,WeiLi,andPeterJLiu. Exploringthelimitsoftransferlearning
+withaunifiedtext-to-texttransformer.Journalofmachinelearningresearch,21(140):1–
+67,2020.
+[RST+24] MachelReid,NikolaySavinov,DenisTeplyashin,DmitryLepikhin,TimothyLillicrap,
+Jean-baptisteAlayrac,RaduSoricut,AngelikiLazaridou,OrhanFirat,JulianSchrit-
+twieser,etal. Gemini1.5: Unlockingmultimodalunderstandingacrossmillionsof
+tokensofcontext. ArXivpreprint,abs/2403.05530,2024.
+[RSVG21] AurkoRoy,MohammadSaffar,AshishVaswani,andDavidGrangier. Efficientcontent-
+basedsparseattentionwithroutingtransformers. TransactionsoftheAssociationfor
+ComputationalLinguistics,9:53–68,2021.
+[SCY+24] Hanshi Sun, Zhuoming Chen, Xinyu Yang, Yuandong Tian, and Beidi Chen. Tri-
+force: Losslessaccelerationoflongsequencegenerationwithhierarchicalspeculative
+decoding. ArXivpreprint,abs/2404.11912,2024.
+[SDH+23] YutaoSun,LiDong,ShaohanHuang,ShumingMa,YuqingXia,JilongXue,Jianyong
+Wang,andFuruWei. Retentivenetwork: Asuccessortotransformerforlargelanguage
+models. ArXivpreprint,abs/2307.08621,2023.
+[SDZ+24] YutaoSun,LiDong,YiZhu,ShaohanHuang,WenhuiWang,ShumingMa,Quanlu
+Zhang,JianyongWang,andFuruWei. Youonlycacheonce: Decoder-decoderarchi-
+tecturesforlanguagemodels. ArXivpreprint,abs/2405.05254,2024.
+[SGR+21] Han Shi, Jiahui Gao, Xiaozhe Ren, Hang Xu, Xiaodan Liang, Zhenguo Li, and
+JamesTin-YauKwok. Sparsebert: Rethinkingtheimportanceanalysisinself-attention.
+InMarinaMeilaandTongZhang,editors,Proceedingsofthe38thInternationalCon-
+ferenceonMachineLearning,ICML2021,18-24July2021,VirtualEvent,volume139
+ofProceedingsofMachineLearningResearch,pages9547–9557.PMLR,2021.
+[Sha19] Noam Shazeer. Fast transformer decoding: One write-head is all you need. ArXiv
+preprint,abs/1911.02150,2019.
+[TDT+23] YiTay, MostafaDehghani, VinhQ.Tran,XavierGarcia, JasonWei,XuezhiWang,
+Hyung Won Chung, Dara Bahri, Tal Schuster, Steven Zheng, Denny Zhou, Neil
+Houlsby,andDonaldMetzler. UL2: Unifyinglanguagelearningparadigms. InThe
+EleventhInternationalConferenceonLearningRepresentations,2023.
+15[TKC19] PhilippeTillet,Hsiang-TsungKung,andDavidCox. Triton: anintermediatelanguage
+andcompilerfortiledneuralnetworkcomputations. InProceedingsofthe3rdACM
+SIGPLANInternationalWorkshoponMachineLearningandProgrammingLanguages,
+pages10–19,2019.
+[tri23] Tritonimplementationoftheflashattentionv2algorithm. Technicalreport,OpenAI,
+2023.
+[TSP+23] Szymon Tworkowski, Konrad Staniszewski, Mikołaj Pacek, Yuhuai Wu, Henryk
+Michalewski, and Piotr Miłos´. Focused transformer: Contrastive training for con-
+textscaling. InThirty-seventhConferenceonNeuralInformationProcessingSystems,
+2023.
+[TZZ+24] JiamingTang,YilongZhao,KanZhu,GuangxuanXiao,BarisKasikci,andSongHan.
+QUEST:Query-awaresparsityforefficientlong-contextLLMinference. InForty-first
+InternationalConferenceonMachineLearning,2024.
+[Wen23] LilianWeng. Llm-poweredautonomousagents. lilianweng.github.io,2023.
+[WWL+24] ZhongweiWan,ZiangWu,CheLiu,JinfaHuang,ZhihongZhu,PengJin,Longyue
+Wang,andLiYuan. Look-m: Look-onceoptimizationinkvcacheforefficientmulti-
+modallong-contextinference. ArXivpreprint,abs/2406.18139,2024.
+[WZH21] HanruiWang,ZhekaiZhang,andSongHan. Spatten: Efficientsparseattentionarchi-
+tecturewithcascadetokenandheadpruning. In2021IEEEInternationalSymposium
+onHigh-PerformanceComputerArchitecture(HPCA),pages97–110.IEEE,2021.
+[XTC+24] Guangxuan Xiao, Yuandong Tian, Beidi Chen, Song Han, and Mike Lewis. Effi-
+cientstreaminglanguagemodelswithattentionsinks. InTheTwelfthInternational
+ConferenceonLearningRepresentations,2024.
+[XZH+24] ChaojunXiao,PengleZhang,XuHan,GuangxuanXiao,YankaiLin,ZhengyanZhang,
+ZhiyuanLiu,SongHan,andMaosongSun. Infllm: Unveilingtheintrinsiccapacityof
+llmsforunderstandingextremelylongsequenceswithtraining-freememory. ArXiv
+preprint,abs/2402.04617,2024.
+[YCL+24] AlexYoung,BeiChen,ChaoLi,ChengenHuang,GeZhang,GuanweiZhang,Heng
+Li,JiangchengZhu,JianqunChen,JingChang,etal. Yi: Openfoundationmodelsby
+01.ai. ArXivpreprint,abs/2403.04652,2024.
+[ZAW24] ItamarZimerman,AmeenAli,andLiorWolf. Aunifiedimplicitattentionformulation
+forgated-linearrecurrentsequencemodels. ArXivpreprint,abs/2405.16504,2024.
+[ZCH+24] XinrongZhang, YingfaChen, ShengdingHu, ZihangXu, JunhaoChen, MooKhai
+Hao,XuHan,ZhenLengThai,ShuoWang,ZhiyuanLiu,etal. ∞bench: Extending
+longcontextevaluationbeyond100ktokens. ArXivpreprint,abs/2402.13718,2024.
+[ZGD+20] Manzil Zaheer, Guru Guruganesh, Kumar Avinava Dubey, Joshua Ainslie, Chris
+Alberti,SantiagoOntañón,PhilipPham,AnirudhRavula,QifanWang,LiYang,and
+Amr Ahmed. Big bird: Transformers for longer sequences. In Hugo Larochelle,
+Marc’Aurelio Ranzato, Raia Hadsell, Maria-Florina Balcan, and Hsuan-Tien Lin,
+editors,AdvancesinNeuralInformationProcessingSystems33: AnnualConference
+onNeuralInformationProcessingSystems2020,NeurIPS2020,December6-12,2020,
+virtual,2020.
+[ZJZ+23] NingxinZheng,HuiqiangJiang,QuanluZhang,ZhenhuaHan,LingxiaoMa,Yuqing
+Yang,FanYang,ChengruidongZhang,LiliQiu,MaoYang,etal. Pit: Optimization
+ofdynamicsparsedeeplearningmodelsviapermutationinvarianttransformation. In
+Proceedingsofthe29thSymposiumonOperatingSystemsPrinciples,pages331–347,
+2023.
+[ZSZ+24] ZhenyuZhang,YingSheng,TianyiZhou,TianlongChen,LianminZheng,RuisiCai,
+ZhaoSong,YuandongTian,ChristopherRé,ClarkBarrett,etal. H2o: Heavy-hitter
+oracleforefficientgenerativeinferenceoflargelanguagemodels. AdvancesinNeural
+InformationProcessingSystems,36,2024.
+16A Limitations
+Asthecontextlengthdecreases,thetimerequiredtobuildthedynamicindexbecomesmoresignificant
+asattentioncomputationtimedecreases. Forexample,witha10kcontext,thetimespentonbuilding
+the index increases from 5% to 30%, resulting in overall end-to-end latency approaching that of
+FlashAttention. However, this overhead proportion gradually decreases as the prompt lengthens.
+Additionally,whenusingahighersparsityrate,themodelperformancemaynoticeablydecline.
+B BroaderImpacts
+MInferenceeffectivelyacceleratestheinferenceoflong-contextLLMs,facilitatingtheirdeployment
+andapplication. Byenablinglowerlatency,itcanreducethedeploymentcostsofLLMs,especially
+for long-context LLMs, helping to democratize access to advanced AI. It also promotes further
+researchanddevelopmentinrelatedfields.
+C ExperimentDetails
+C.1 DatasetDetails
+InfiniteBench[ZCH+24] includes10tasksdesignedtotestvariousaspectsoflong-contextpro-
+cessing. Specifically,thesetaskscoverentirenovelsummarization,open-formquestionanswering
+basedonnovels,multiple-choicequestionansweringonnovels,questionansweringonlongdrama
+scripts, question answering on Chinese texts, debugging large code repositories, identifying the
+largest/smallestnumberinarrays,andretrievaltaskswithvaryingpatternlengths. Theaveragetoken
+lengthforthesetasksis214k,andtheyinclude3,992examples.
+RULER [HSK+24] is a recent synthetic benchmark suite for long-context evaluation with 13
+complextasksacrossfourcategories. TheretrievalcategoryincludesSingleNeedle-in-a-Haystack
+(S-NIAH), where a single key-value pair is inserted into noisy text, and the model must retrieve
+the value. Multi-keys Needle-in-a-Haystack (MK-NIAH) involves multiple keys, and the model
+retrievesonespecificvalueamongharddistractors. TheMulti-valuesNeedle-in-a-Haystack(MV-
+NIAH) task requires retrieving all values associated with a single key, while the Multi-queries
+Needle-in-a-Haystack(MQ-NIAH)taskinvolvesretrievingvaluesformultiplekeys. TheMulti-hop
+TracingcategoryincludesVariableTracking(VT),wherethemodeltracesandreturnsallvariable
+namespointingtothesamevaluethroughvariablebindings. Theaggregationcategoryintroduces
+CommonWordsExtraction(CWE),wherethemodelidentifiesthetop-Kcommonwordsfroma
+mixtureofcommonanduncommonwords,andFrequentWordsExtraction(FWE),wherethemodel
+identifiesthemostfrequentwordsfromaZetadistribution. TheQuestionAnswering(QA)category
+extendsexistingshort-contextQAdatasetsbyaddingdistractingparagraphs,challengingthemodel
+toanswerquestionsbasedonrelevantinformationsurroundedbydistractors. Thesetasksprovide
+acomprehensiveevaluationoflong-contextmodelingcapabilities,coveringmulti-hopreasoning,
+aggregation,andcomplexquestionanswering. Following[HSK+24],wetestmodelson4K,8K,
+16K,32K,64K,and128Kcontextlengths,including2,600examplesperlength.
+NeedleInAHaystacktask[Kam23] evaluatestheperformanceofretrieval-augmentedgeneration
+(RAG)systemsbyembeddingspecific,targetedinformation(the"needle")withinalarge,complex
+bodyoftext(the"haystack"). Thetestassessesalanguagemodel’sabilitytoidentifyandutilizethis
+specificpieceofinformationamidstavastamountofdata. BothRULERandtheneedletestiterate
+overvariouscontextlengthsanddocumentdepths(wheretheground-truthisplacedintheprompt)to
+measurethelong-contextperformance. HerewescaletheNeedleInAHaystacktaskto1Mcontext
+length,including750examples.
+PG-19 [RPJ+20] The perplexity on long text is also often used by researchers to evaluate the
+languagemodelingperformanceoflong-contextLLMs. PG-19isasuitabletestsetforthistask,asit
+includestextsaslongas500Ktokens. Perplexityisusedasthemetricindicatinghowwellamodel
+predictsthenexttokeninasequence. Ourexperimentsareconductedon1,000randomsamplesfrom
+PG-19thatarelongerthan100Ktokens.
+17C.2 AdditionalImplementationDetails
+Ourexperimentsarebasedonanumberofstate-of-the-artlong-contextLLMs: 1)LLaMA-3-8B-
+Instruct-262k3isaLLaMA-3variantwithfurtherNTK-awareinterpolationandminimalfine-tuning
+withRingAttention,whichachievedSOTAresultsonlong-contextassessmentssuchastheNeedle
+In A Haystack test; 2) LLaMA-3-8B-Instruct-1048k4 is similar to LLaMA-3-8B-Instruct-262k,
+but supports context lengths up to 1M tokens; 3) Yi-9B-200K [YCL+24] is a SOTA LLM that
+balanceslong-contextperformancewithgeneralcapabilities;4)Phi-3-Mini-128K[AJA+24]asmall
+but powerful language model that offers capabilities equivalent to models ten times its size with
+up to 128K context window powered by LongRoPE [DZZ+24]; 5) Qwen2-7B-128K [BBC+23]
+is a recently release update of Qwen series model with up to 128K context window that achieve
+superiororcomparableperformancecomparedtoLLaMA-3;6)GLM-4-9B-1M[GZX+24]hasbeen
+improvedfromitspredecessorintermsofa1Mcontextwindow,performanceondownstreamtasks
+andinferenceefficiency. Toguaranteestableresults,weusegreedydecodinginalltests. Ourkernel
+implementationsaredevelopedandoptimizedbasedonthedynamicsparsecompilerPIT[ZJZ+23]
+intheTritonlanguage[TKC19]. ThelatencyexperimentsaredoneonasingleNvidiaA100GPU
+usingbfloat16. WeprovideasimplecustomimplementationofattentioninPyTorch,buildingon
+FlashAttentionandTriton.
+WesetthetargetFLOPsttobethesameas1kglobaltokensand4klocalwindowtokensinthe
+A-shapepattern. ThestepsizeofChangeSpaceissetto50, withthecorrespondingsearchspace
+shown in Table 6. Additionally, we use only one sample as our validation set from KV retrieval
+syntheticdatawith30ktokeninputs,whichexhibitsstronggeneralizationandstabilityacrossdifferent
+lengthsanddomains. Thesearchtimeisapproximately15minutesonasingleA100. Additionally,
+weusethesameoptimalsparsepatternconfigurationforboththeLLaMA-3-8B-Instruct-262Kmodel
+andtheLLaMA-3-8B-Instruct-1Mmodel. ThespecificdistributionisshowninFig.11.
+Table6:Kernal-awareoptimalheadpatternsearchspace.Inthiscontext,A-shaperepresentstheglobaltokens
+andlocalwindownumber, Vertical-SlashrepresentstheTop-Knumberofverticalanddiagonallines, and
+Block-SparserepresentstheTop-Knumberofblocksretained.
+Patterns SearchSpace
+A-shape {(1024,4096)}
+Vertical-Slash {(30,2048),(100,1800),(500,1500),(3000,200)}
+Block-Sparse {100}
+C.3 SingleA100ImplementationDetails
+TheoriginalPyTorchimplementation5 oftheLLaMAmodelcausesanout-of-memoryerrorona
+singleA100(80G)whenthepromptexceeds50ktokens. Toenablerunning1Mpromptinferenceon
+asingleA100,weimplementedthefollowingoptimizations:
+1. Tensor Splitting: We split the Attention by head and the MLP by sequence dimension.
+Inlong-contextscenarios,wherecomputationisthebottleneck,thissplittingkeepsGPU
+utilizationat100%,andtheoverheadofsplittingisnegligible;
+2. ReductionofIntermediateVariables: Weminimizedintermediatevariableallocationby
+removingtheattentionmaskandimplementingcausalmasklogicdirectlywithinthekernel;
+3. EliminationofUnnecessaryComputations: Inlong-contextscenarios, onlythelogits
+correspondingtothelasttokeninthepromptphasearemeaningful. Thus,weonlyretain
+thecomputationoftheLMHeadLinearlayerforthelasttoken.
+3https://huggingface.co/gradientai/Llama-3-70B-Instruct-Gradient-262k
+4https://huggingface.co/gradientai/Llama-3-8B-Instruct-Gradient-1048k
+5https://github.com/huggingface/transformers/blob/main/src/transformers/models/llama/modeling_llama.py
+18C.4 KernelImplementation
+C.4.1 Block-SparseFlashAttention
+OurBlock-SparsekernelimplementationisbasedontheTritonversionoftheFlashAttentionker-
+nel[tri23]. Withtheselectedblockindexasanadditionalinput,eachthreadblockloopsthrough
+thetop-Kblocksinarow. AsdiscussedinFlashAttention[Dao24],thelatencyoftheblock-sparse
+FlashAttentionkernelislinearlyrelatedtothenumberofblocks,andthespeedupratio(comparedto
+thedenseFlashAttentionkernel)isapproximatelyas,
+S
+s = (3)
+p 2B×k
+b
+C.4.2 Vertical-SlashAttention
+TheVertical-Slashattentionincludestwocustomkernels: theVertical-Slashsparseindexkerneland
+theVertical-SlashsparseFlashAttentionkernel.
+Figure7: Thedynamicsparsemaskforthevertical-slashpatternusingLLaMA-3-8Binthesummarization
+task[ZCH+24].Yellowareasindicatethecomputedparts.Slashlinesuse64×64blocks,whileverticallines
+use1×64blocks.
+TheVertical-SlashsparseindexkernelinAlgorithm4buildstheindexforeachrowofblocks. Since
+aslashlinesegmentcanbemaskedbyasquareblock,ourattentionmaskisamixofblocksand
+columns,asshowninFig.7. Weapplyapoint-rangetwo-waymergealgorithmwhereverticalindexes
+are treated as points and slash indexes are converted to ranges given the row index. The output
+consistsoftwoparts: mergedrangesandseparatecolumnindexes,wheretherangesarerepresented
+byblockindexes. ThetimecomplexitytobuildanindexforarowisO(k +k ).
+v s
+TheVertical-SlashsparseFlashAttentionkernelinAlgorithm5isamixoftheblock-sparseattention
+kernelandthePIT[ZJZ+23]sparseattentionkernel. PITisatechnologythatloadssparsedatainto
+densecomputeblocksviaaPermutationInvariantTransformation. Athreadblockfirstloopsthrough
+theblockindexesasdescribedintheprevioussection(blockpart)andthenloopsthroughthecolumn
+indexesgroupedbyblocksize(PITpart). Thelatencyofthishybridkernelislinearlyrelatedtothe
+totalareaofblocksandcolumns.
+D AdditionalExperimentResults
+Needle in A Haystack LLaMA-3-8B-1M w/ InfLLM 1M Context
+D.1 NeedleInAHaystack 1.0
+0
+11
+0.8
+In addition to the Needle In A Haystack re- 22 33
+sults for LLaMA-3-Instruct-1M shown in §4, 44 0.6
+56
+wealsopresenttheLLaMA-3-Instruct-1Musing 0.4 67
+InfLLMresultsinFig.8,andresultsforGLM- 78
+0.2
+89
+4-9B-1M,Yi-9B-200K,Phi-3-Mini-128K,and
+100
+0.0
+Q Fuw llen A2 t- t7 eB nt- i1 o2 n8 ,K u, sis nh gow Mn Ii nn feF ri eg n. c9 e.C hao sm mpa inre imdt ao
+l
+1K 70K 140K 220K 290K 360K 430K 500K 570K 640K 710K 790K 860K 930K 1M
+Context Length
+impactontheabilitytounderstandsemanticin-
+Figure8: ResultsonNeedleInAHaystackusingIn-
+formationacrossdifferentcontextwindowsand
+fLLMinLLaMA-3-8B-Instruct-1M.
+19
+)%(
+tnecreP
+htpeDneedledepths. Thereisevenaslightperformanceimprovementaroundthe100kcontextlengthusing
+Yi-9B-200KandPhi-3-Mini-128K.
+0
+Needle in A Haystack GLM-4-9B-1M 1M Context 1.0 N 0eedle in A Haystack GLM-4-9B-1M w/ MInference 1M Context 1.0
+11 11 22 0.8 22 0.8
+33 33
+44 0.6 44 0.6
+56 56
+67 0.4 67 0.4
+78 78
+89 0.2 89 0.2
+100 100
+0.0 0.0
+1K 70K 140K 220K 290K 360K 430K 500K 570K 640K 710K 790K 860K 930K 1M 1K 70K 140K 220K 290K 360K 430K 500K 570K 640K 710K 790K 860K 930K 1M
+Context Length Context Length
+(a)GLM-4-9B-1M (b)GLM-4-9B-1Mw/MInference
+Needle in A Haystack Yi-9B-200K 200K Context Needle in A Haystack Yi-9B-200K w/ MInference 200K Context
+0 1.0 0 1.0
+11 11
+22 0.8 22 0.8
+33 33
+44 0.6 44 0.6
+56 56
+67 0.4 67 0.4
+78 78
+89 0.2 89 0.2
+100 100
+0.0 0.0
+1K 20K 30K 40K 60K 70K 90K 100K 110K 130K 140K 160K 170K 190K 200K 1K 20K 30K 40K 60K 70K 90K 100K 110K 130K 140K 160K 170K 190K 200K
+Context Length Context Length
+(c)Yi-9B-200K (d)Yi-9B-200Kw/MInference
+0 Needle in A Haystack Phi-3-Mini-128K 128K Context 1.0 Nee 0dle in A Haystack Phi-3-Mini-128K w/ MInference 128K Context 1.0
+11 11 22 0.8 22 0.8
+33 33
+44 0.6 44 0.6
+56 56
+67 0.4 67 0.4
+78 78
+89 0.2 89 0.2
+100 100
+0.0 0.0
+1K 10K 19K 28K 37K 46K 55K 64K 74K 83K 92K 101K 110K 119K 128K 1K 10K 19K 28K 37K 46K 55K 64K 74K 83K 92K 101K 110K 119K 128K
+Context Length Context Length
+(e)Phi-3-Mini-128K (f)Phi-3-Mini-128Kw/MInference
+0 Needle in A Haystack Qwen2-7B-128K 128K Context 1.0 Nee 0dle in A Haystack Qwen2-7B-128K w/ MInference 128K Context 1.0
+11 11 22 0.8 22 0.8
+33 33
+44 0.6 44 0.6
+56 56
+67 0.4 67 0.4
+78 78
+89 0.2 89 0.2
+100 100
+0.0 0.0
+1K 10K 19K 28K 37K 46K 55K 64K 74K 83K 92K 101K 110K 119K 128K 1K 10K 19K 28K 37K 46K 55K 64K 74K 83K 92K 101K 110K 119K 128K
+Context Length Context Length
+(g)Qwen2-7B-128K (h)Qwen2-7B-128Kw/MInference
+Figure9: NeedleInAHaystack[Kam23]resultsusingGLM-4-9B-1M[GZX+24],Yi-9B-200K[YCL+24],
+Phi-3-Mini-128K[AJA+24],andQwen2-7B-128K[BBC+23].
+D.2 LatencyBreakdown
+Fig.10showsthemicro-benchmarkresultsofthethreeattentionpatternsproposedinthispaper,as
+wellasFlashAttention. ItcanbeseenthatVertical-Slashistheslowestamongthethreepatterns,
+but it still achieves a 13x speedup compared to FlashAttention under 1M context windows. A-
+shapeisslightlyfasterthanVertical-Slash,butat1M,A-shapeis50%slowerthanVertical-Slash.
+Block-Sparseisthefastest,achievinga30xspeedupoverFlashAttentionunder1Mcontextwindows.
+20
+)%(
+tnecreP
+htpeD
+)%(
+tnecreP
+htpeD
+)%(
+tnecreP
+htpeD
+)%(
+tnecreP
+htpeD
+)%(
+tnecreP
+htpeD
+)%(
+tnecreP
+htpeD
+)%(
+tnecreP
+htpeD
+)%(
+tnecreP
+htpeDA-shape Block-Sparse FlashAttention-2
+Vertical-Slash Block-Sparse Index InfLLM
+Vertical-Slash Index
+1500
+1000
+500
+100
+80
+60
+40
+20
+0
+10K 100K200K300K400K500K600K700K800K900K 1M
+Context Windows
+Figure10:ThelatencybreakdownofasingleattentionkernelforthreepatternsandFlashAttention[Dao24]
+acrossdifferentcontextwindowsinasingleA100,includingtheindextimefordynamicsparseapproximation
+andbuildingdynamicsparsity.At10ktokens,thelatencyofthefourkernelsisverycloseandallarelessthan
+1ms.At1Mtokens,thelatencyforA-shapeis164ms.
+Theestimationandindex-buildingtimeforthedynamicsparsepatternaccountsforapproximately
+5%-15%and25%ofthetotaltimeforVertical-SlashandBlock-Sparsepatterns,respectively. The
+index-buildingoverheadishigherforBlock-Sparsemainlyduetothetime-consumingMeanPooling
+andblock-levelmatmulcomputations. Additionally,thememoryoverheadforsparseindexingis
+relativelysmall,remainingwithin160MBforaLLaMA-3-8Bmodelin1Mcontext.
+D.3 AdditionalAblationStudy
+Table 7: Performance of different ablation methods using LLaMA-3-8B-Instruct-262K on In-
+finiteBench [ZCH+24]. It is important to note that due to kernel limitations, we must retain at least one
+verticalandoneslash.Therefore,"oursw/onlyvertical"retainsthetop-1slash,and"oursw/onlyslash"retains
+thetop-1vertical.
+Methods En.SumEn.QAEn.MCEn.DiaZh.QACode.DebugMath.FindRetr.PassKeyRetr.NumberRetr.KVAvg.
+Ours 20.5 12.9 65.9 7.5 12.5 22.3 33.1 100.0 100.0 12.8 38.8
+Oursw/onlyvertical 13.7 6.2 30.1 2.0 6.5 7.9 1.7 65.4 52.7 0.0 18.6
+Oursw/onlyslash 18.4 11.5 60.1 3.0 11.4 22.1 28.4 100.0 100.0 4.2 35.9
+TofurtheranalyzetheroleofdynamicverticalandslashlinesintheVertical-Slashpatternforsparse
+computation,weintroduceanewsetofablationstudiesasfollows: 1)Oursw/onlyvertical,which
+onlyusesverticallinesandthetop-1slashlineinVertical-Slashpattern. 2)Oursw/onlyslash,which
+onlyusesslashlinesandthetop-1verticallineinVertical-Slashpattern. Thecorrespondingtop-K
+quantitiesaresetafterconvertingbasedonFLOPsinkernel.
+AsshowninTable7,usingonlyverticallinesresultsinasignificantperformancedrop,especiallyin
+retrievaltasks,whereperformanceissimilartoonlyusingblock-sparse. Incontrast,usingonlyslash
+linesretainsmostoftheperformance,butinhighlydynamictaskssuchasKVretrieval,performance
+furtherdecreases,withanaverageperformancedropof2.9%comparedtoOurs.
+E PatternDistribution
+Fig.11showsthedistributionoftheoptimalheadconfigurationobtainedthroughoursearch. Firstly,
+mostofthepatternsaretheVertical-Slashpattern(>90%). However,accordingtotheablationstudy,
+usingonlytheVertical-Slashpatternsignificantlyimpactsperformanceinhighlydynamictaskslike
+KVretrieval. Secondly,theBlock-Sparsepatternisprimarilydistributedinseveralintermediateto
+laterlayers,whiletheA-shapepatternisfoundinthemiddlelayers. Althoughtheoptimalpatterns
+varyslightlyacrossdifferentmodels,theygenerallyalignwiththeseobservations.
+Additionally,weusedthesameconfigurationfortwoversionsofLLaMAinourexperiments,andthe
+resultsshowthatthe1Mmodelalsoperformsverywell,withnearlyperfectresultsintheNeedleIn
+AHaystacktask. Thisdemonstratesthegeneralizabilityoftheoptimalsparsepattern.
+21
+)sm(ycnetaLA-shape Vertical-Slash Block-Sparse A-shape Vertical-Slash Block-Sparse
+30 30
+20 20
+10 10
+0 0
+1 3 5 7 9 1113151719212325272931 1 4 7 10131619222528313437404346
+Layer Layer
+(a)LLaMA-3-8B-Instruct-262K/1M (b)Yi-9B-200K
+Figure11:Distributionofthreesparseheadpatternsindifferentmodels.Weusethesameoptimalsparsepattern
+configurationforbothLLaMA-3-8B-Instruct-262KandLLaMA-3-8B-Instruct-1M.
+F SparsityinKernelDistribution
+0.95
+0.9
+0.8
+0.7
+0.6
+0.5 A-shape
+Vertical-Slash
+0.4 Block-Sparse
+10k100k 300k 500k 1M
+Context Windows Size
+Figure12:Thedistributionofsparsityinthekernelacrossdifferentcontextwindowsreferstotheproportionof
+thekernelthatisactuallycomputedafterblockcoverage,comparedtothesparsityratewhenusingFlashAttention
+withacausalmask.
+AsshowninFig.12,thesparsitydistributionofthethreepatternsduringtheactualkernelcomputation
+processisdisplayed. Itcanbeseenthatwhenthecontextwindowsexceed200k,theactualsparsity
+ofallthreepatternssurpasses90%. Evenconsideringa20%index-buildingoverhead,thisensures
+thatthekernelachievesaspeedupofover8×. Furthermore,whenthecontextwindowsexceed500k,
+thesparsityrelativetoFlashAttentionexceeds95%,withatheoreticalspeedupofover15×.
+G DoesThisDynamicSparseAttentionPatternExistOnlyin
+Auto-RegressiveLLMsorRoPE-BasedLLMs?
+SimilarverticalandslashlinesparsepatternshavebeendiscoveredinBERT[SGR+21]andmulti-
+modalLLMs[WWL+24].Additionally,asshowninFig.13,weanalyzedthedistributionofattention
+patternsinT5acrossdifferentheads. Itisevidentthatthereareverticalandslashsparsepatternseven
+inbidirectionalattention.
+Recent studies [WWL+24] have analyzed sparse attention patterns in multi-modal LLMs, re-
+vealing the presence of vertical and slash patterns in models like LLaVA [LLWL24] and In-
+ternVL [CWW+24]. Using MInference for pre-filling stage inference acceleration holds great
+promise.
+22
+rebmuN
+daeH
+lenreK
+ni
+ytisrapS
+rebmuN
+daeHFigure13:ThesparsepatterninT5-styleEncoderAttentionusingFlan-UL2[TDT+23]ontheSummarization
+dataset[ZCH+24].
+H CaseStudy
+Table8presentsacomparisonofthegenerationperformanceforvariousmethodsontheEN.SUM
+task (200K input length) from InfiniteBench based on the LLaMA-3-8B-262K model. The orig-
+inal summary provides a comprehensive and coherent narrative, detailing the Bronwyn family’s
+tripto theKindergartenandtouching onthemes suchasnostalgia, loss, and thepassageof time.
+StreamingLLM’ssummary,althoughlookscoherent,introduceselementsthatarenotpresentinthe
+originalstory,leadingtoseriousfactualerrors. Forexample,itmentionsaboattriptoaschoolfor
+boysandspecificdetailslikefishermen,sandwiches,andaspotwheremenweredrowned. These
+detailsdeviatefromtheoriginalstory,whichisabouttheBronwynfamilypreparingforatriptothe
+Kindergarten. Inaddition,thesummariesgeneratedbyStreamingLLMwithdilatedandstridedtech-
+niquesarelargelyincoherent,consistingprimarilyofrepetitiveandnonsensicalcharacters,indicating
+afailuretoproducemeaningfulcontent. Instarkcontrast,thesummarygeneratedbyourproposed
+methodoffersadetailedandcoherentnarrative,comparabletotheoriginal,withacleardepictionof
+thestory’smaineventsandthemes. ThisincludesthepreparationoftheBronwynfamilyfortheir
+trip,thecharacterizationoffamilymembersandguests,andtheexplorationofdeeperthemessuchas
+love,marriage,andthesearchformeaning. Theresultsdemonstratethesuperiorityofourproposed
+methodingeneratinghigh-quality,human-likesummariesoverthebaselinemethods.
+Table9comparestheperformanceofvariousmethodsontheRetrieve.KVtask(200Kinputlength)
+usingtheLLaMA-3-8B-262Kmodel. Theoriginalmethoddemonstratesperfectretrieval,correctly
+predictingtheexactstringsofthegroundtruthforbothexamples. StreamingLLM,again,generates
+predictionsthatlookscoherentandreal,butfactuallyincorrect. Inaddition,StreamingLLMwith
+dilated and strided techniques, and our method with a static pattern, fail significantly, producing
+outputs that are either repetitive sequences of characters or nonsensical strings, indicating their
+inabilitytoaccuratelyretrievetherequiredkey-valuepairs. Ourmethod,however,performsonpar
+withtheoriginal,accuratelyretrievingandpredictingtheexactkey-valuepairsforbothexamples.
+ThisdemonstratesthesuperiorcapabilityofourmethodinhandlingKVretrievaltasks,providing
+preciseand reliableoutputsconsistentwith thegroundtruth. Theresults highlight ourmethod’s
+effectivenessandrobustnesscomparedtothebaselines,makingitareliablechoiceforsuchtasks.
+23Table8:ComparisonofgeneratedresultsbydifferentmethodsusingLLaMA-3-8B-Instruct-262Kinsummariza-
+tiontask[ZCH+24].
+Methods Summary
+Original ThestoryfollowstheBronwynfamilyandtheirguestsastheyprepareforaday
+triptotheKindergarten,amysteriousdestinationthatholdsgreatsignificance
+forthem. Thestoryistoldfrommultipleperspectives,includingthatofPete
+Lucy,whoisstayingwiththefamilyandisstrugglingtofindherplaceintheir
+lives.Asthedayprogresses,thefamilymemberspreparefortheirtrip,andPete
+reflectsonherownpastexperienceswiththeBronwyns.Thestoryendswiththe
+familysettingoffontheirjourney,leavingPetealoneonthelawntocontemplate
+herownfeelingsandthemeaningoflife.TheKindergartenisasymbolofthe
+family’spastandtheirmemories,andthestoryexploresthemesofnostalgia,
+loss,andthepassageoftime.Ultimately,thestorysuggeststhateventhoughthe
+pastcannotbechanged,itcanstillbecelebratedandremembered.
+StreamingLLM ThestoryfollowsafamilyonaboattriptotheKindergarten,aschoolforboys.
+Thefather,MrBronwyn,isreadingabookandseemstobeinatrance. The
+children,SebandAnnalisa,areexcitedaboutthetripbutalsoalittlescared.
+TheypassbyagroupoffishermenandMrBronwynsharesoutsandwiches.They
+comeacrossaspotwherethreemenweredrownedandMrBronwyntakesout
+hiswatch,makingacalculation.TheyreachtheKindergartenandMrBronwyn
+jumpsoutoftheboat,holdingaparcel.ThestoryendswithPeteLucy,whohas
+beenwatchingthefamilyfromtheshore,feelingrelievedthatthetripisoverand
+thatMrBronwynhasreachedhisdestination. Thestoryistoldfrommultiple
+perspectives,includingPeteLucy’s,whoiswatchingthefamilyfromtheshore
+andreflectingonhisownlifeandrelationships.
+StreamingLLM A((((((((((((((((((((((((((((((((((((((((((((((((((((((
+w/dilated ((((((((((((((((((((((((((((((((((((((((((((((((((((((((
+((((((((((((((((((((((((((((((((((((((((((((((((((((((((
+((((((((((((((((((((((((((((((((((((((((((((((((((((((((
+((((((((((((((((((((((((((((((((((((((
+StreamingLLM TheGraphicsUnit36.OOAKAnew(((((((((((((((((((((((((((((((
+w/strided ((((((((((((((((((((((((((((((((((((((((((((((((((((((((
+((((((((((((((((((((((((((((((((((((((((((((((((((((((((
+(((((((((((((((((((((((((((((
+Oursw/static def solverome2 def solverome2 def solverome2 def solverome2 def
+solverome2defsolverome2defsolverome2defsolverome2defsolverome2def
+solverome2defsolverome2defsolverome2def
+Ours ThestoryfollowstheBronwynfamilyandtheirguestsastheyprepareforatrip
+totheKindergarten,aremoteislandoffthecoastofScotland. Thefamilyis
+madeupofMr.Bronwyn,aphilosopher,andhiswife,Mrs.Bronwyn,whois
+knownforherbeautyandherabilitytosurroundandprotectherfamily. The
+guestsincludeKevinEmma,ayoungmanwhoisstudyingforafellowship,and
+CastorKiki,abotanistwhoisalsoawidower.Thestoryexploresthemesoflove,
+marriage,andthesearchformeaninginlife.Italsotouchesontheideaofthe
+other,orthepersonwhoisdifferentfromoneselfandcannotbeunderstoodor
+judgedbyconventionalstandards.Ultimately,thestoryisaboutthesearchfor
+truthandthedesiretoconnectwithothersonadeeperlevel.
+24Algorithm4Vertical-SlashIndex Algorithm5Vertical-SlashFlashAttention
+Input: verticalindexesi
+v
+∈Nkv,slashindexes Input: Q,K,V ∈ RS×dh, block count
+i
+s
+∈Nks c
+blk
+∈ NN, block index i
+blk
+∈ NN×ks, col-
+umn count c ∈ NN, column index i ∈
+#Sortverticalandslashindexes col col
+i v ←IncrementalSort(i v)
+NN×kv
+(cid:113)
+i ←DescendingSort(i ) Scaleτ ← 1
+s s dh
+#Calculateblocknumber(block_sizeB) InitializeO ←(0)S×dh ∈RS×dh
+N ←⌈S⌉
+B #ParallelizedinGPU
+#Initializeoutputs fori←1toN do
+b colo luc mk nco cu on ut nc tb clk col∈ NNN ,N c, ob lulo mc nk ii nn dd ee xx ii cb ol lk ∈∈ NN NN ×× kvks, L Ino ia tid alQ izech Oip c← hipQ ←i× (B 0):( Bi+ ×1 d) h×B ∈∈ RBR ×B d× hdh
+#ParallelizedinGPU Initializem←(−inf)B ∈RB
+fori←1toN do Initializel←(0)B ∈RB
+j ←1
+v #Loopthroughblockindexes:blocksparseflash
+#Findthefirstslashlinethatcrossestherow attention
+j s ←biset_left(i s,i×B) forj ←1toci blkdo
+#Definetherangebyslashindex
+Blockstarts←ii b, lkj
+r start ←(i−1)×B−ij ss LoadK chip ←Ks:s+B ∈RB×dh
+r end ←i×B−ij ss LoadV chip ←Vs:s+B ∈RB×dh
+S ←τQ KT
+#Mergepoints(verticalindexes)andranges(slash chip chip
+S ←mask(S)
+indexes)
+whiles v ≤k sdo
+mi
+new
+←max(mi,rowmax(S))∈RB
+ifj v ≤k vandij vv <r endthen S ←S−mi new
+P ←exp(S)
+#Recordthepointifnotintherange
+li ←rowsum(S))
+ifijv <r then new
+v start α←exp(mi−mi )
+endci col ←ci col+1,ii co,c li col ←ij vv li ←αli+l ni ew new
+O ←αO +PV
+chip chip chip
+j ←j +1
+v v endfor
+else
+s ←s +1 # Loop through column indexes : PIT sparse
+v v
+flashattention
+#Updatetherange
+j ←0
+if(i−1)×B−ij ss >r endthen whilej <cj do
+col
+#Recordthelastrange cols←ii,j:j+B ∈NB
+col
+s←r start LoadK chip ←Kcols ∈RB×dh
+wh cil ies ←< cr iend +do
+1
+LoadV
+chip
+←Vcols ∈RB×dh
+blk blk S ←τQ KT
+ii,ci
+blk ←s S
+←masch kip (S)chip
+blk
+s←s+B mi ←max(mi,rowmax(S))∈RB
+new
+endwhile S ←S−mi
+new
+#Calculatethenewrange P ←exp(S)
+r ←(i−1)×B−ijs li ←rowsum(S))
+start s new
+r ←i×B−ijs α←exp(mi−mi )
+end s new
+else li ←αli+li
+new
+O ←αO +PV
+#Extendtherange chip chip chip
+j ←j+B
+r ←r +B
+end end endwhile
+end
+end #Writeoutputs
+endwhile O ←diag(li)−1O
+chip chip
+SaveO ←O
+#Recordthelastrange i chip
+endfor
+s←r
+start
+whiles<r do
+end
+ci ←ci +1
+blk blk
+ii,ci
+blk ←s,s←s+B
+blk
+endwhile
+endfor
+return c ,i ,c ,i
+blk blk col col
+25Table 9: Comparison of generated results by different methods using LLaMA-3-8B-Instruct-262K in KV
+Retrievaltask[ZCH+24].
+Methods Summary
+Original 1.GroundTruth:5e6b7b90-710d-4953-9b18-3e96b2cadbf2
+Prediction:"5e6b7b90-710d-4953-9b18-3e96b2cadbf2"
+2.GroundTruth:f1ec3dd8-b6e7-4af5-a589-fda0b7693f93
+Prediction:"f1ec3dd8-b6e7-4af5-a589-fda0b7693f93"(astringoflength32).
+StreamingLLM 1.GroundTruth:5e6b7b90-710d-4953-9b18-3e96b2cadbf2
+Prediction:2b114db0-d87e-42d2-9b4c-0b1f115976ad.assistant
+2.GroundTruth:bbf3fa73-6217-4e6e-923c-8349bd286c3d
+Prediction:"d829ce18-6339-4f77-8c04-31fc7ec33619".
+StreamingLLM 1.GroundTruth:5e6b7b90-710d-4953-9b18-3e96b2cadbf2
+w/dilated Prediction:5((((((((((((((((((((((((((((((((((((((((((((((((((
+2.GroundTruth:f1ec3dd8-b6e7-4af5-a589-fda0b7693f93
+Prediction:"defsolverome2defsolverome2defsolverome2defsolverome2def
+solverome2defsolverome2defsolverome2defsolverome2defsolverome2def
+solverome2
+StreamingLLM 1.GroundTruth:5e6b7b90-710d-4953-9b18-3e96b2cadbf2
+w/strided Prediction:"defsolverome2defsolverome2defsolverome2defsolverome2def
+solverome2
+2.GroundTruth:f1ec3dd8-b6e7-4af5-a589-fda0b7693f93
+Prediction:"0(((((((((((((((((((((((((((((
+Oursw/static 1.GroundTruth:5e6b7b90-710d-4953-9b18-3e96b2cadbf2
+Prediction:"defsolverome2defsolverome2defsolverome2defsolverome2def
+2.GroundTruth:f1ec3dd8-b6e7-4af5-a589-fda0b7693f93
+Prediction:"defsolverome2defsolverome2defsolverome2defsolverome2def
+Ours 1.GroundTruth:5e6b7b90-710d-4953-9b18-3e96b2cadbf2
+Prediction:"5e6b7b90-710d-4953-9b18-3e96b2cadbf2"
+2.GroundTruth:f1ec3dd8-b6e7-4af5-a589-fda0b7693f93
+Prediction:"f1ec3dd8-b6e7-4af5-a589-fda0b7693f93"(astringoflength32).
+26

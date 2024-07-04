@@ -1,0 +1,1152 @@
+RankRAG: Unifying Context Ranking with
+Retrieval-Augmented Generation in LLMs
+YueYu∗ WeiPing∗ ZihanLiu BoxinWang JiaxuanYou
+GeorgiaTech NVIDIA NVIDIA NVIDIA NVIDIA
+ChaoZhang MohammadShoeybi BryanCatanzaro
+GeorgiaTech NVIDIA NVIDIA
+Abstract
+Largelanguagemodels(LLMs)typicallyutilizethetop-kcontextsfromaretriever
+inretrieval-augmentedgeneration(RAG).Inthiswork,weproposeanovelinstruc-
+tionfine-tuningframeworkRankRAG,whichinstruction-tunesasingleLLMfor
+thedualpurposeofcontextrankingandanswergenerationinRAG.Inparticular,
+the instruction-tuned LLMs work surprisingly well by adding a small fraction
+of ranking data into the training blend, and outperform existing expert ranking
+models, including the same LLM exclusively fine-tuned on a large amount of
+rankingdata. Forgeneration,wecompareourmodelwithmanystrongbaselines,
+includingGPT-4-0613,GPT-4-turbo-2024-0409,andChatQA-1.5,anopen-sourced
+modelwiththestate-of-the-artperformanceonRAGbenchmarks. Specifically,
+ourLlama3-RankRAGsignificantlyoutperformsLlama3-ChatQA-1.5andGPT-4
+modelsonnineknowledge-intensivebenchmarks. Inaddition, italsoperforms
+comparablytoGPT-4onfiveRAGbenchmarksinthebiomedicaldomainwithout
+instructionfine-tuningonbiomedicaldata,demonstratingitssuperbcapabilityfor
+generalizationtonewdomains.
+1 Introduction
+Retrieval-augmentedgeneration(RAG)(Lewisetal.,2020;Izacard&Grave,2021;Linetal.,2024;
+Wangetal.,2024)isawidelyusedtechniqueforcustomizinglargelanguagemodels(LLMs)tohandle
+long-tailknowledge(Mallenetal.,2023;Asaietal.,2024b),provideup-to-dateinformation(Kasai
+etal.,2023), andadapttospecificdomainsandtasks(Xiongetal.,2024)withoutmodifyingthe
+modelweights. Ingeneral,adenseembeddingbasedretriever(Karpukhinetal.,2020;Linetal.,
+2023;Wangetal.,2022)firstretrievestop-kchunkedcontextsfromacollectiondocumentsorexternal
+databaseforagivenquestion. Then,LLMreadsthetop-kcontextstogeneratetheanswer.
+However,thecurrentRAGpipelinehasthefollowinglimitations:i)LLMsarenotgoodatreadingtoo
+manychunkedcontexts(e.g.,top-100)evenwiththelong-contextwindow,notonlyduetoefficiency
+reasons,butalsobecauseashorterlistoftop-k(e.g.,5,10)contextsusuallyleadstohigheraccuracy
+ofgeneration(e.g.,seeTable5inXuetal.,2024b). ii)Givenasmallk,oneneedsamechanismto
+ensurethehighrecallofrelevantcontents. Relyingsolelyonaretrievalmodelmaybeinadequate
+duetochallengesinlearningeffectivelocalalignmentsacrosstheentireembeddingspacetosupport
+accuratematching(Luanetal.,2021). Inpractice,aseparaterankingmodel(Nogueiraetal.,2020;
+Glassetal.,2022;Maetal.,2023)thatcross-encodesquestionandcandidatecontextcanworkbetter
+thanadenseembedding-basedretrieverforobtainingthemostrelevanttop-kcontextsfromtop-N
+candidates(N ≫k). iii)However,thezero-shotgeneralizationcapabilityoftheexpertrankingmodel
+canberelativelylimitedcomparedtotheversatileLLMitself.
+∗YueYudidthisworkduringaninternshipatNVIDIA.Correspondenceto:YueYu<yueyu@gatech.edu>,
+WeiPing<wping@nvidia.com>.
+4202
+luJ
+2
+]LC.sc[
+1v58420.7042:viXraBasedontheaboveconsiderations,ourgoalistodesignanRAGinstructiontuningpipelinethat
+usesasinglelanguagemodeltoachievebothhigh-recallcontextextractionandhigh-qualitycontent
+generation. Inpreviousstudy,instruction-tunedLLMsdemonstrateastrongabilitytoextractanswers
+fromrelevantcontextforagivenquestion(e.g.,OpenAI,2023;Liuetal.,2024;Linetal.,2024).
+Thiscapabilitycanbeviewedasthe“dualcapability”ofdeterminingwhetherachunkofcontext
+is relevant to the question thus is useful for generating the answer. We hypothesize that these
+capabilitiesmutuallyenhanceeachother. Motivatedbythisinsight,weproposeRankRAG,which
+intruction-tunesasingleLLMforbothcontextrankingandanswergenerationinRAGframework.
+Furthermore,RankRAGexpandsuponexistinginstruction-tuningdatabyincorporatingcontext-rich
+QA,retrieval-augmentedQAandrankingdatasets,enhancingtheLLM’sabilitytofilteroutirrelevant
+contextsduringboththeretrievalandgenerationphasesofRAG.
+Ourcontributioncanbesummarizedasfollows:
+• WeproposeRankRAG,anovelframeworkthatenhancesLLM’sRAGcapabilitythroughsimul-
+taneouslyinstructingtheLLMoncontextrankingandanswergeneration. Duringtraining,we
+designaspecializedtaskfocusedonidentifyingrelevantcontextsorpassagesforagivenquestion.
+This task is structured for ranking and framed as regular question answering with instruction,
+aligningmoreeffectivelywithretrieval-augmentedgenerationtasks. Atinference,theLLMfirst
+rerankstheretrievedcontexts,thengeneratesanswerbasedontherefinedtop-k(e.g.,5). This
+frameworkisreadilyapplicabletodiverseknowledge-intensiveNLPtasks.
+• Remarkably,weobservethatintegratingasmallfractionofrankingdataintotheinstructiontuning
+blendofLLMworkssurprisinglywellontheevaluationsofrankingassociatedwiththeRAG
+tasks,evensurpassingtheLLMsfine-tunedwith10×morerankingdata. Weattributethissuccess
+tothetransferabledesignofRankRAGtraining.
+• WeextensivelycomparetheproposedRankRAGmethodwithseveralstrongbaselines,including
+theopen-sourcedChatQA-1.5. Onninegeneral-domainandfivebiomedicalknowledge-intensive
+benchmarksforRAG,Llama3-RankRAG-8BandLlama3-RankRAG-70BoutperformsLlama3-
+ChatQA-1.5-8BandLlama3-ChatQA-1.5-70Bbyamargin,respectively.
+Intheremainderofthepaper,wediscussrelatedworkin§2. Weintroduceproblemsetupin§3and
+RankRAGmethodin§4. Wepresenttheexperimentalsetupin§5,andconcludethepaperin§6.
+2 RelatedWork
+Retrieval-augumented generation (RAG) has been established for knowledge-intensive NLP
+tasks (Lewis et al., 2020; Borgeaud et al., 2022; Izacard et al., 2023; Izacard & Grave, 2021).
+Inthestandardprocess,astandalonedense-embedding-basedretriever(e.g.,Karpukhinetal.,2020)
+first retrieves relevant information from an external corpus, which the LLM then utilizes in the
+generationprocess. Toimprovethispipeline,recentresearchhasfocusedonaligningretrieversto
+theneedsofLLMsforgeneration(Shietal.,2024;Linetal.,2024),designingmulti-stepretrieval
+processes(Trivedietal.,2023;Jiangetal.,2023;Jeongetal.,2024;Shaoetal.,2023),orfiltering
+irrelevantcontexts(Wangetal.,2023c;Yoranetal.,2024;Xuetal.,2024a). Toimprovegeneration,
+severalstudieshavedesignedinstruction-tuningmethodsdedicatedtoenhancingthesearch(Maetal.,
+2023;Zhuetal.,2024;Muennighoffetal.,2024)andRAGcapabilityofLLMs(Liuetal.,2024;Lin
+etal.,2024;Luoetal.,2023;Asaietal.,2024a;Wangetal.,2024).
+Althoughstrongretrievershavebeenintroduced(e.g.,Linetal.,2023;Yuetal.,2022;Wangetal.,
+2022,2023a;Leeetal.,2024),onepotentialapproachtoimproveretrieverisoptimizingitalongwith
+LLMinanend-to-endmanner(e.g.,Guuetal.,2020;Shietal.,2024;Sachanetal.,2021;Izacard
+etal.,2023). However, thisrequiressurrogatelossforoptimizationandcomplicatesthetraining
+pipeline,especiallywhentheembeddingdatabaseneedstobere-indexedfrequentlyduetotheupdate
+oftheembeddingmodel(i.e.,retriever).
+Rankingservesasanintermediatesteptoimprovethequalityofinformationretrieval(Mitraetal.,
+2018),andhasbeenappliedtoRAGpipelineforimprovinggenerationquality(Glassetal.,2022;
+Rametal.,2023). However,thesemethodsstillrelyonanadditionalmoderate-sizedmodel(e.g.
+BERT,T5)forranking,whichisofteninsufficienttocapturetherelevancebetweenqueryandcontexts
+andmaylackthezero-shotgeneralizationcapability. Althoughrecentstudieshavedemonstratedthe
+strongabilityofLLMsatrankingtasks(Khalifaetal.,2023;Qinetal.,2024;Sunetal.,2023),how
+toharvestthisabilityfortheRAGpipelineremainsunderexplored.
+2ChatQA-1.5 8B ChatQA-1.5 70B ChatQA-1.5 8B ChatQA-1.5 70B ChatQA-1.5 8B ChatQA-1.5 70B ChatQA-1.5 8B ChatQA-1.5 70B
+48 82 86 54 52 92 93
+42 52 51
+91 92
+46 80 84 50 50
+90 91
+40 48 49
+44 78 82 46 48 89 90
+5 10 20 5 10 20 5 10 20 5 10 20 5 10 20 5 10 20 5 10 20 5 10 20
+Context Size k Context Size k Context Size k Context Size k
+(a) NQ (b) TriviaQA (c) PopQA (d) FEVER
+Figure1: PerformanceofChatQA-1.5,oneofthestrongestRAGmodel,ondifferentcontextsizek.
+Weobserveatrade-offofselectingtop-kcontexts: asmallerkcompromisestherecall,whilealarger
+kcouldintroduceirrelevantornoisycontextandmisleadtheLLMgeneration.
+3 Preliminaries
+Inthissection,wefirstintroducethepreliminariesofretrieval-augmentedgenerationaswellasthe
+problemsetup. ThenwepresentthelimitationsinthecurrentRAGpipeline,whichmotivatesthe
+proposedRankRAGmethod.
+3.1 ProblemSetup
+Inretrieval-augmentedgeneration,acollectionofdocumentsorcontexts(e.g. Wikipedia)isgiven,
+providing the grounded knowledge. Given a question q, the retriever R (e.g., a parameterized
+embedding model) first retrieves top-k contexts C = {c ,··· ,c } that are most relevant to the
+1 k
+question. Subsequently,thelanguagemodelproducesthefinalanswerwheretheanswercaneither
+be a short phrase or a long sentence, depending on the type of the target task. Our focus is on
+autoregressivelanguagemodels(OpenAI,2022,2023;Meta-AI,2024),whichisthemostcommon
+architecturesforLLMs.
+3.2 LimitationofCurrentRAGPipelines
+BeforeformallyintroducingRankRAG,wewouldliketofirstpinpointseverallimitationsofthe
+current“retrieve-then-generate”pipelinewithlargelanguagemodels.
+Limited Capacity of Retriever. Current RAG systems usually employ sparse retrieval (e.g.
+BM25(Robertsonetal.,2004))ormoderate-size(e.g. BERT-based)embeddingmodel(Karpukhin
+etal.,2020;Linetal.,2023;Wangetal.,2022)astheretrieverR, mainlyduetoefficiencycon-
+siderationasthereareoftenmillionsof,ifnotmore,documentsneedtobeindexed. Thesemodels
+encodequestionsanddocumentsindependentlyandcalculatethesimilaritybetweenquestionand
+documentsusingvectorsimilaritymetrics. However,thelimitedcapacityofembeddingmodeland
+independentprocessingofqueryanddocumentsconstraintheabilitytoestimatetextualrelevance
+betweenquestionqanddocumentsd,reducingtheireffectivenessinnewtasksordomains,verified
+byboththeoretical(Menonetal.,2022)andempirical(Luanetal.,2021;Thakuretal.,2021)studies.
+Trade-offofPickingTop-kContexts. Althoughthestate-of-the-artlong-contextLLMcantake
+many retrieved contexts as input for answer generation, the performance quickly saturates with
+increasedkinpractice. Forexample,Xuetal.(2024b)findstheoptimalnumberofchunkedcontext
+k is around 10 for long document QA tasks. As illurstrated in Figure 1, we perform evaluation
+on ChatQA-1.5 (Liu et al., 2024), one of the strongest RAG model with open weights, and find
+thesaturationofaccuracywhenk = 10. Ingeneral,asmallerk oftenfailstocaptureallrelevant
+information,compromisingtherecall,giventhelimitedexpressibilityofretriver. Incontrast,alarger
+kimprovesrecallbutatthecostofintroducingirrelevantcontentthathamperstheLLM’sabilityto
+generateaccurateanswers(Yoranetal.,2024;Yuetal.,2023b).
+4 RankRAG
+To address the limitations mentioned in the previous section, we propose the RankRAG method
+toenhancetheLLM’sabilityforretrieval-augmentedgeneration. Specifically,weinstruction-tune
+theLLMtosimultaneouslycapturetherelevancebetweenthequestionandcontextandutilizethe
+retrievedcontextforanswergeneration. Thedetailsareintroducedasfollows.
+3
+hctaM
+tcaxE
+hctaM
+tcaxE
+hctaM
+tcaxE
+hctaM
+tcaxETraining Inference
+Query Corpus
+Stage-I:SFT LLM RankRAG
+Conversation Chain-of-thought Long-form QA Synthetic Instructions
+OSO peD nA A, s sD iso tl al ny, t FLAN ELI5 UnnS ate ul rf a-I ln Is nt sru trc ut c, t ion RankRAG (e.gR .,Det Pr Rie ,v De rar gon) Rerank G Ae nn se wra et re
+Top-NDocs Top-NDocs Top-KDocs
+Stage-II:RankRAG Instruction-Tuning 1. 1. 0.73 1. 0.94
+Conversation Reading Comprehension Retrieval-augmented Context Ranking 2. 2. 0.46 2. 0.73
+HS uy mn ath ne Ati nc n C oto an tev de Crs oa nti vo Qn, A N Na er wra sti Qv AeQ ,A TA, TD -R QO AP , , RQ Ou Po Ere Sf, SQuQ AA D& ,WR ea bn Qk uin esg tion SyntheM ticS CM oa nr vc eo rsation … … … … … … … 𝑘. … 0.63
+NewlyIntroducedTasks 𝑁. 𝑁. 0.57 Relevancescores
+Figure2: Two-stageinstructiontuningframeworkforRankRAG.
+4.1 Stage-I:SupervisedFine-Tuning(SFT)
+It is observed that general instruction-tuning or supervised fine-tuning (SFT) often significantly
+improvestheabilityofLLMstofollowinstructions, thusimprovingzero-shotresultsonvarious
+downstreamtasks(Weietal.,2022;Ouyangetal.,2022). Assuch,wefollowexistingworks(Chung
+et al., 2024; Wang et al., 2024; Liu et al., 2024) to first leverage SFT on a blend of high quality
+instruction following datasets, including: i) a private crowd-sourced conversational dataset and
+publicconversationdatasets: OpenAssistant(Köpfetal.,2023),Dolly(Conoveretal.,2023),and
+SODA(Kimetal.,2023),ii)along-formQAdatasetELI5thatrequireselaborateanswers(Fanetal.,
+2019),iii)LLM-generatedinstructions: Self-Instruct(Wangetal.,2023b)andUnnaturalInstructions
+(Honovichetal.,2023),iv)FLANandChain-of-thoughtdatasets(Chungetal.,2024).
+Thereareoverall128KSFTexamplesintotal. WemakesurethatthereisnooverlapbetweenSFT
+dataanddatafromevaluationtasks. Foreachsampleintheinstruction-followingdataset,wetakethe
+multi-turnconversationalformat,usethepreviousturnsofconversationbetweentheuserandthe
+assistantasthecontext,andcomputethelossonlyatthelastresponsefromtheassistant.
+4.2 Stage-II:UnifiedInstruction-TuningforRankingandGeneration
+TheStage-ISFTenpowerstheLLMswithbasicinstruction-followingcapabilities;however,their
+performanceonRAGtasksoftenremainssuboptimal,astheLLMsarenotoptimizedforextracting
+answersfromretrievedcontextforagivenquestion. Althoughrecentstudies(Linetal.,2024;Liu
+et al., 2024; Zhang et al., 2024) enhance the RAG capability of LLM by instruction tuning it on
+context-rich generation tasks, these approaches can still be ineffective with poor initial retrieval
+results. RankRAGinstructiontunestheLLMforbothretrieval-augmentedgenerationandcontext
+ranking. Inparticular,thecontextrankingcapabilityiscrucialtoobtainmorerelevanttop-kcontext
+withimperfectretriever.
+Toachievethisgoal,theinstructiontuningblendofStage-IIconsiststhefollowingfiveparts:
+1)SFTdatafromStage-I.ThispartisincludedtomaintainLLM’sinstruction-followingcapability.
+2)Context-richQAdata. WefirstfollowLiuetal.(2024)toleveragemultiplecontext-richQAtasks
+toenhancetheLLM’scapabilityofusingcontextforgeneration.Thetrainingblendweuseconsistsof:
+i)standardQAandreadingcomprehensiondatasets: DROP(Duaetal.,2019),NarrativeQA(Kocˇisky`
+et al., 2018), Quoref (Dasigi et al., 2019), ROPES (Lin et al., 2019), NewsQA (Trischler et al.,
+2017),TAT-QA(Zhuetal.,2021),whichcontainsaquestion,agoldencontextandananswer. ii)
+conversationalQAdatasets: HumanAnnotatedConvQAandSyntheticConvQAopen-sourcedbyLiu
+etal.(2024),whichcontainsaconversationbetweenuserandassistant,aswellasonebackground
+document. Themodelneedstogenerateananswergiventheconversationhistoryanddocument.
+3)Retrieval-augmentedQAdata. InadditiontotheaboveQAdatasetsusedinLiuetal.(2024),
+weaddtwodatasetswithnotonlygoldcontextbutalsothetop-retrievedcontextusingBM25. Note
+that,itiscrucialtoimproveLLM’srobustnessoverirrelevantcontextatgeneration. Beingawareof
+this,weconsidertwoQAtasks,namelySQuAD(Rajpurkaretal.,2016)andWebQuestions(Berant
+etal.,2013). Foreachquestionwiththeanswer,wecombinethegoldcontextwiththetop-retrieved
+contextsusingBM25,ensuringatotaloffivecontexts. Notethatsomeretrievedcontextsmaynot
+containtheanswer,andcouldbethe“hard-negative”contexts.
+4) Context ranking data. To empower LLMs with ranking capabilities, we use the popular
+MSMARCOpassage(context)rankingdataset(Bajajetal.,2016). Wetreatthegoldquery-passage
+4Table1: TheinstructiontemplateforStage-II.Itisworthnotingthatallthetaskscanbeunifiedinthe
+(x,c,y)format,whichisabletofacilitateeffectiveknowledgetransferacrosstasks.
+Task Questionx Contextc Answery
+Context-richQA Answerthefollowingquestionfromcontext.{question} Passage:{Passage}(1Psg.) Aphrase/sentence
+Passage1:{Passage 1}...
+Retrieval-augmentedQA Answerthefollowingquestionfromcontext.{question} Passage5:{Passage 5}(5Psg.total) Aphrase/sentence
+Forthequestion{question},accesswhetherthepassage
+Contextranking Passage:{Passage}(1Psg.) True/False
+isrelevanttothequestion.
+Forthequestion{question},findallpassagesfrom Passage1:{Passage 1}...
+Retrieval-augmentedranking thecontextthatarerelevanttothequestion. Passage5:{Passage 5}(5Psg.total) PassageIndexes
+pairs(q,c+)asrelevantwhileusinghardnegativepassages(q,c−)minedviaBM25asirrelevant
+pairs. The LLMneed to generate “True” or “False” given the corresponding query-passage pair,
+wherethequestionalongwiththetask-specificinstructionis“Forthequestion{question},access
+whetherthepassageisrelevanttothequestion.”.
+Wewanttohandlerankinginconversationalsenarioaswell.WhileMSMARCOspansvarioustopics,
+thequestionsareonlysingle-turnshortsentences. However,rankingdataareonlyavailable,ifany,at
+asmallamountforconversationQA.Toovercomethislimitation,werepurposetheconversational
+QA pairs to generate pseudo relevance pairs. As each conversation is only associated with one
+documentd,wecuteachdocumentinto150-wordchunks(c ,c ,...,c ). Wecomputethe4-gram
+1 2 n
+recallscorebetweeneachchunkc andtheground-truthanswera,consideringsegmentswitharecall
+i
+scoreabove0.5asrelevantandthosebelow0.1asirrelevantforthecorrespondingconversation. Note
+that,eachsamplecontainsonequestion-contextpairforthisrankingdataset. Intotal,therearearound
+50krankingpairsfromMSMARCOrankingandsyntheticconversationsforinstructionfinetuning.
+5)Retrieval-augmentedrankingdata. WeaimtotraintheLLMwiththecapabilityofdetermining
+therelevanceofmultiplecontextssimultaneouslygivenaquestion,whichisclosertothetest-time
+behaviorofRAGwithtop-kcontexts. Asbefore,weutilizetwoQAdatasets,SQuAD(Rajpurkar
+etal.,2016)andWebQuestions(Berantetal.,2013). Wecombinethegoldcontextwiththetop-
+retrievedcontextsusingBM25,ensuringatotaloffivecontexts. Thecontextscontainingtheanswer
+areconsideredrelevant, andtheLLMistrainedtoexplicitlyidentifyallrelevantcontextsforthe
+question.
+UnifyingRAGandrankingwithinstructiontuning. Itisworthnotingthat,despitethevariety
+ofdatasetsandtasksdescribed,theycanallbecastintoastandardizedQAformat(x,c,y),where
+xisthequestion, cisthecorrespondingcontext, andy isthetargetoutputanswer. Forexample,
+fortheretrieval-augmentedrankingdata,thequestionis“Forthequestion<question>,findallthe
+passagesfromthecontextthatarerelevanttothequestion.” Table1exhibitshowtocastdifferent
+tasksintoaunifiedformat. Despiteitssimplicity,thisapproachhasthefollowingadvantages: i)It
+empowerstheLLMwiththerankingcapabilitybyaddingrelativelysmallamountofrankingdata. ii)
+Bystandardizingthesetasksintoaunifiedformat,theycanmutuallyenhanceeachother. Afterthat,
+weobtainthefinalRankRAGmodelthatcanbeappliedtovariousknowledge-intensiveNLPtasks.
+4.3 RankRAGInference: Retrieve-Rerank-GeneratePipeline
+As RankRAG incorporates an additional reranking step, the inference pipeline for each question
+is modified as a retrieve-rerank-generate pipeline, described as follows: (1) the retriever R first
+retrievestop-N contextsfromthecorpus. (2)theRankRAGmodelcalculatestherelevancescore
+betweenthequestionandretrievedN contextsastheprobabilityofgeneratingtheanswerasTrue
+usingthepromptinTable1,thenrerankscontextstoonlyretaintop-k(k ≪N)contexts,whichare
+thenusedastheinputforthegenerationstep. (3)Thetop-kcontexts,alongwiththequestion,are
+concatenatedandfedbackintotheRankRAGmodeltogeneratethefinalanswer.
+EfficiencyDiscussion. Weareawarethattheadditionofarerankingstepintroducesextraprocessing
+time. Inpractice,foreachquestion,denotethetimeforindexingandretrievalast ,thetimeforusing
+1
+LLMtocalculatetherelevancescoreast andthetimeforgenerationast ,thentheratioofadded
+2 3
+timeoverheadis N∗t2. Inpractice,calculatingrelevancetypicallyrequiresgeneratingjustonetoken
+t1+t3
+andinvolvesmuchshorterinputscomparedtothegenerationstepwithtop-kcontexts. Weprovide
+efficiencystudyin§5.5.
+55 Experiments
+Inthissection,weconductcomprehensiveexperimentsonavarietyofknowledge-intensiveNLP
+taskstodemonstratethezero-shotcapabilitiesofRankRAG.
+5.1 ExperimentSetup
+TasksandDatasets. Weconsider3typesoftasksinexperiments:(1)Open-domainQA(OpenQA),
+whichincludesNQ(Kwiatkowskietal.,2019),TriviaQA(Joshietal.,2017),PopQA(Mallenetal.,
+2023),HotpotQA(Yangetal.,2018)and2WikimQA(Hoetal.,2020). Thefirstthreearesingle-
+hopQAtasks, whilethelasttwoaremulti-hopQAdatasets. ForNQ,TriviaQA,andHotpotQA,
+we use the split from KILT benchmark (Petroni et al., 2021) 2. (2) Factverification, where we
+use FEVER (Thorne et al., 2018) from KILT benchmark. (3) ConversationalQA(ConvQA), we
+considerthreedatasetsincludingDoc2Dial(Fengetal.,2020),TopiOCQA(Adlakhaetal.,2022)
+andINSCIT(Wuetal.,2023),whichhavelongdocumentsthatcannotbefitteddirectlyintoLLMs
+thusnecessitatesretrievalandranking. ThedetaileddatasetinformationisinAppendixA.1.
+Baselines. Weconsiderthefollowingbaselines: (1)BaselineLLMswithoutRAG, wherewecon-
+sider LLMs trained with proprietary data including InstructGPT (Ouyang et al., 2022), PaLM
+2 (Anil et al., 2023), FLAN-LaMDA (Longpre et al., 2023), GLaM (Du et al., 2022), Claude
+2(Anthropic,2023),Mixtral-8x22B-Instruct(Mistral,2024),DeepSeek-V2Chat(DeepSeek,2024)
+and only use the official reported results. We also consider two ChatGPT-series models, namely
+GPT-3.5-turbo(gpt-3.5-turbo-0613)(OpenAI,2022)andGPT-4(gpt-4-0613)(OpenAI,2023).
+(2)Baselineswithretrieval,weevaluatemodelsaugmentedwithretrieval. Specifically,weinclude
+Atlas (Izacard et al., 2023) and Raven (Huang et al., 2023), two RAG models based on encoder-
+decoderLMs. Fordecoder-onlymodels,weconsiderSelf-RAG(Asaietal.,2024a),RECOMP(Xu
+etal.,2024a),InstructRetro(Wangetal.,2024),RePlug(Shietal.,2024),RA-DIT(Linetal.,2024),
+Llama-3-instruct(Meta-AI,2024)andChatQA-1.5(Liuetal.,2024). WealsolisttheresultofRAG
+pipelinesusingInstructGPT(175Bparameters)asthebackboneincludingGenRead(Yuetal.,2023a),
+Retrieve-read(Lazaridouetal.,2022)andReFeed(Yuetal.,2024),butmainlyforreference. Other
+reportednumbersaredirectlycomparableiftheyfollowthestandardzero-shotsettings.
+EvaluationMetrics. ForOpenQAdatasets,weuseExactMatch(EM)asthemainmetricbutalso
+reportAccuracyforTriviaQAandPopQAandF1scoreforHotpotQAand2WikimQAasitisused
+inseveralstudies(Asaietal.,2024a;Mallenetal.,2023). ForFEVER,weuseaccuracyasthemetric.
+ForConvQAdatasets,wefollow(Liuetal.,2024;Wangetal.,2024)touseF1scoreasthemetric.
+ImplementationDetails. WeuseLlama38Band70B(Meta-AI,2024)asthebackboneinourmain
+experiments. Forthetwo-stageinstructiontuning,wesetthebatchsizeto128andtrainthemodelfor
+1000stepswithlearningrate5e-6inStage-I.Then,wereducethelearningrateto3e-7for8Band2e-7
+for70Bmodel,setthebatchsizeto64,andtrainthemodelfor3300steps(around1epoch). Weuse
+theAdamoptimizer(Kingma&Ba,2014)withβ =0.9andβ =0.98. Duringtheinferencestage,
+1 2
+weusetheDecember2018WikidumpasthecorpusindexforNQ,TQA,HotpotQA,2WikimQA,and
+usetheDecember2020WikidumpforPopQA,following(Asaietal.,2024a). Bydefault,wefollow
+(Wangetal.,2024;Linetal.,2024;Liuetal.,2024)tousetheDragonretriever(Linetal.,2023)as
+defaultandretrievetop-N (100for8Band30for70B)documentsforranking,butRankRAGcanbe
+adaptedtovariousretrieversanddifferentN (see§5.3and5.5). Toensureafaircomparison,wetest
+theperformanceofk ∈{5,10,20}andreportthebestperformanceforbaselines. Forgeneration,we
+keeptemperatureT =0andsetthemaximumnumberofgeneratedtokentobe32forOpenQA,128
+forConvQAand8forothers. TrainingRankRAG-8Buses32NVIDIAA100GPUsfor10hours
+(4hoursforStage-Iand6hoursforStage-IIfinetuning),whiletrainingRankRAG-70Buses128
+NVIDIAA100GPUsfor16hours(4hoursforStage-Iand12hoursforStage-IIFinetuning).
+DataContaminationIssues. Onepossibleissueforthezero-shotevaluationisthetestsetcontami-
+nation,wheresomeofthetask-specificexamplesoverlapwiththeinstructionfine-tuningdata(Oren
+etal.,2024). Toaddressthisissue,wehaveperformedastringmatch-basedanalysiswherewedonot
+observeanyoverlapbetweenthetraindataanddatafromtargettasks.
+5.2 MainExperiments
+Table2presentsresultsofRankRAGandbaselines. Thefindingsaresummarizedasfollows:
+2TheresultsofNQandTriviaQAusingthesplitfromDPR(Karpukhinetal.,2020)areinAppendixF.
+6Table2: ResultsofRankRAGandbaselineson9datasets. Unlessspecified,allresultsareunder
+zero-shotevaluationwithoutadditionaldemonstrations. Resultsunavailableinpublicreportsare
+markedas“–”. WeuseNQ,TriviaQA,andHotpotQAfromtheKILTbenchmarkforLlama3-Instruct,
+Llama3-ChatQA-1.5,andLlama3-RankRAG.Notethat†: GPT-4andGPT-4-turbomayrefuseto
+answer the question when retrieved passages do not contain relevant information, thus the EM /
+accuracydropsafterincludingRAGonTriviaQA,HotpotQAand2WikimQA.
+Task(Zero-shot) NQ TriviaQA PopQA HotpotQA 2WikimQA FEVER Doc2Dial TopiOCQA Inscit Avg.
+Metric EM EM/Acc. EM/Acc. EM/F1 EM/F1 Acc. F1 F1 F1 –
+WithoutRetrieval-AugmentedGeneration
+InstructGPT(Ouyangetal.) 29.9 65.8/73.2 –/– 26.0/38.2 27.2/34.8 77.6 – – – –
+PaLM2540B(0shot,Aniletal.) 21.2 76.9/– –/– –/– –/– – – – – –
+PaLM2540B(5shot,Aniletal.) 37.1 86.1/– –/– –/– –/– – – – – –
+GLaM64B(0shot,Duetal.) 37.5 71.3/– –/– –/– –/– – – – – –
+FLAN-LaMDA137B(Weietal.) 20.7 68.1/– –/– –/– –/– – – – – –
+Claude2(5shot,Anthropic) – 87.5/– –/– –/– –/– – – – – –
+Mixtral-8x22B-Instruct(5shot,Mistral) 40.1 82.2/– –/– –/– –/– – – – – –
+DeepSeek-V2236B(5shot,DeepSeek) 53.4 86.7/– –/– –/– –/– – – – – –
+GPT-3.5-turbo-1106(OpenAI) 38.6 82.9/91.7 28.4/32.2 29.9/42.0 23.9/30.4 82.7 20.1 28.5 27.2 38.5
+GPT-4-0613(OpenAI) 40.3 84.8/94.5 31.3/34.8 34.5/46.9 29.8/36.6 87.7 27.6 30.1 27.0 42.0
+GPT-4-turbo-2024-0409(OpenAI) 41.5 80.0/94.3 25.0/33.5 26.6/43.8 24.1/35.5 87.0 27.6 26.4 24.4 38.6
+WithRetrieval-AugmentedGeneration
+Atlas11B(Izacardetal.) 26.7 56.9/– –/– 34.7/– –/– 77.0 – – – –
+Raven11B(Huangetal.) 29.6 65.7/– –/– –/– –/– – – – – –
+Self-RAG7B(Asaietal.) – –/66.4 –/54.9 –/– –/– – – – – –
+Self-RAG13B(Asaietal.) – –/69.3 –/55.8 –/– –/– – – – – –
+RECOMP20B(Xuetal.) 37.0 59.0/– –/– 30.4/40.1 –/– – – – – –
+InstructRetro43B(Wangetal.) 38.9 78.3/– – –/– –/– – 36.0 – – –
+RePlug65B(Shietal.) 28.8 72.6/– –/– 32.0/– –/– 73.3 – – – –
+RA-DIT65B(Linetal.) 35.2 75.4/– –/– 39.7/– –/– 80.7 – – – –
+Llama3-Instruct8B(Meta-AI) 30.9 70.7/80.4 34.9/55.8 26.0/35.8 9.6/25.2 88.9 33.6 44.9 32.6 40.8
+Llama3-Instruct70B(Meta-AI) 42.7 82.4/89.3 45.3/56.4 35.5/43.3 13.5/27.9 91.4 37.9 49.7 36.2 47.1
+Llama3-ChatQA-1.58B(Liuetal.) 42.4 81.0/87.6 52.6/59.8 33.4/44.6 26.8/31.9 90.9 39.3 49.9 30.1 49.6
+Llama3-ChatQA-1.570B(Liuetal.) 47.0 85.6/91.4 50.9/58.3 42.2/54.4 34.9/37.4 92.7 41.3 55.6 32.3 53.6
+Llama3-RankRAG8B(0shot) 50.6 82.9/89.5 57.6/64.1 35.3/46.7 31.4/36.9 92.0 40.4 50.4 33.3 52.6
+Llama3-RankRAG70B(0shot) 54.2 86.5/92.3 59.9/65.4 42.7/55.4 38.2/43.9 93.8 41.5 52.8 35.2 56.1
+Forreference:UsingInstructGPTorCodeX(∼175B)(Ouyangetal.,2022)astheBackboneLLM.
+GenRead(Yuetal.) 32.5 66.2/– 46.0/– 36.4/39.9 –/– 80.4 – – – –
+Retrieve-Read(Lazaridouetal.) 31.7 61.4/– –/– 35.2/38.0 27.7/– 82.7 – – – –
+ReFeed(Yuetal.) 39.6 68.9/– –/– 41.5/45.1 –/– – – – – –
+GPT-3.5-turbo-1106RAG(OpenAI) 46.7 79.7/88.0 49.9/57.0 31.2/41.2 27.2/32.2 90.8 34.8 44.3 35.3 46.8
+GPT-4-0613RAG†(OpenAI) 40.4 75.0/88.5 44.3/61.4 27.6/38.1 14.4/17.6 92.6 34.2 45.1 36.4 43.5
+GPT-4-turbo-2024-0409RAG†(OpenAI) 40.3 70.2/91.1 39.5/58.4 8.1/17.9 22.8/39.2 92.2 35.4 48.3 33.8 41.6
+RankRAGoutperformsexistingRAGmethods.With8Bscale,RankRAGconsistentlyoutperforms
+ChatQA-1.58B,oneofthemostrecentopen-sourcedmodelwithstate-of-the-artperformanceon
+manyRAGbenchmarks. RankRAG8Bisalsocompetitivewhencomparedwithbaselinemodels
+withmuchmoreparameters. Forexample,itsignificantlyoutperformsInstructRetro(5×parameters),
+RA-DIT65B(8×paramters),andevenoutperformsLlama3-instruct70B(8×parameters)onNQ
+andTriviaQAtasks. Withmoreparameters,RankRAG70BoutperformsthestrongChatQA-1.570B
+model,andlargelyoutperformspreviousRAGbaselineswithInstructGPTastheunderlyingLLM.
+RankRAGdemonstrateslargerimprovementonmorechallengingdatasets. Weobservethat
+theperformancegainsofRankRAGoverbaselinesaremorepronouncedformorechallengingQA
+datasets. For example, on long-tailed QA (PopQA) and multi-hop QA (2WikimQA) tasks, we
+achievemorethan10%improvementoverChatQA-1.5. Thesefindingssuggestthatinchallenging
+OpenQAdatasetswheretopdocumentsfromretrieversarelessrelevanttotheanswer,contextranking
+effectivelyenhancesperformance. Inthisworkwefocusonimprovingsingle-timeretrievalforQA
+tasks. Howtoeffectivelycombinemulti-roundRAGpipelines(Jiangetal.,2023;Khattabetal.,
+2022;Jeongetal.,2024)withRankRAGisaninterestingavenueoffuturework.
+5.3 AblationStudies
+EffectofDesignedComponents. Table3showstheablationsofRankRAGwithLlama38Basthe
+backboneonninegeneral-domaindatasets. Overall, weobservealloftheproposedcomponents
+contribute to the final performance. Removing context ranking hurts performance on all tasks,
+justifyingitsefficacyinselectingthemostrelevantcontextsforthetargetquestion. Besides, the
+retrieval-augmentedQA(RQA)andretrieval-augmentedranking(RAR)designedforinstructionfine-
+tuningimproveoutcomesonmosttasksbyhelpingthemodelexplicitlypinpointrelevantcontexts.
+Onthecontrary,theRAFTmethodusedin(Linetal.,2024)treatseachretrievedcontextseparately
+duringinstructionfinetuning,whichyieldssuboptimalresultswhencomparedtoRankRAGwiththe
+sametrainingdata.
+PerformancewithDifferentLLMs. Table4reportstheperformanceofRankRAGandthemost
+7Table3: AblationstudyofRankRAG.WeuseLlama3-8Basthebackbone. Where‘RQA’and‘RAR’
+stands for retrieval-augmented QA and retrieval-augmented ranking data, respectively. For ‘w/o
+reranking’,wedonotperformrankingintheinferencestage.
+Task(Zero-Shot) NQ TriviaQA PopQA HotpotQA 2WikimQA FEVER Doc2Dial TopiOCQA Inscit Avg.
+Metric EM EM/Acc. EM/Acc. EM/F1 EM/F1 Acc. F1 F1 F1 –
+RankRAG8B 50.6 82.9/89.5 57.6/64.1 35.3/46.7 31.4/36.9 92.0 40.4 50.4 33.3 52.6
+w/oreranking 48.0 80.3/86.8 49.3/59.0 31.3/41.6 26.4/30.5 91.1 39.7 49.4 30.9 49.8
+w/oRQA 49.4 82.0/88.9 55.1/62.9 35.6/45.9 31.8/37.5 92.1 39.4 46.8 32.4 51.6
+w/oRAR 48.6 82.2/89.1 56.0/62.6 35.1/45.2 31.2/35.7 91.4 39.6 48.6 33.5 51.8
+w/RAFT(Linetal.) 43.3 80.8/87.6 48.9/56.3 30.5/41.8 25.2/29.6 91.2 36.8 46.4 30.1 48.1
+w/Stage-ISFTOnly 38.3 63.7/76.6 49.8/54.6 26.5/40.3 18.0/25.9 85.7 33.3 33.7 30.5 42.2
+Table4: Zero-shotevaluationusingLlama2(Touvronetal.,2023)modelasthebackbone.
+Task(Zero-Shot) NQ TriviaQA PopQA HotpotQA 2WikimQA FEVER Doc2Dial TopiOCQA Inscit Avg.
+Metric EM EM/Acc. EM/Acc. EM/F1 EM/F1 Acc. F1 F1 F1 –
+Llama2-70B(Touvronetal.) 25.3 82.4/– –/– –/– –/– – – – – –
+Llama2-ChatQA-1.07B(Liuetal.) 41.4 77.8/86.5 46.7/55.0 28.9/40.3 24.0/27.5 85.9 37.9 45.5 31.0 46.6
+Llama2-ChatQA-1.013B(Liuetal.) 47.9 80.9/87.6 51.8/56.2 32.9/43.2 27.6/31.1 87.6 38.1 48.9 30.8 49.6
+Llama2-ChatQA-1.070B(Liuetal.) 49.5 83.2/89.7 52.1/56.6 39.0/49.4 28.9/34.1 91.7 38.9 51.0 31.9 51.8
+Llama2-RankRAG7B 46.9 84.0/89.6 55.9/61.3 32.2/43.2 26.8/30.7 86.6 38.6 49.2 32.3 50.3
+Llama2-RankRAG13B 50.5 84.5/91.0 58.0/63.9 36.4/47.3 29.5/34.2 91.7 39.5 49.2 33.4 52.5
+Llama2-RankRAG70B 53.2 85.8/92.1 58.7/64.5 41.8/53.1 33.8/38.8 91.9 41.2 52.9 35.8 55.0
+recentbaselineChatQAusingLlama2withbackbonehavingvaryingamountsofparameters.Notably,
+thereexistconsistentgainsintermsoftheaverageperformance(7.8%/6.4%/6.3%on7B/13B/70B
+variantsrespectively),justifyingtheadvantageofRankRAGacrossdifferentLLMtypesandscales.
+PerformancewithDifferentRetrievers. Figure3
+exhibitstheperformanceofRankRAGandChatQA- ChatQA-1.5 RankRAG ChatQA-1.5 RankRAG
+1.5withdifferentdenseretrieversonthreerepresen- 80
+tative tasks, where we consider DPR (Karpukhin 60 60
+et al., 2020) and Contriever-MS MARCO (Izac- 40 40
+ard et al., 2022) as two variants. We note that al- 20 20
+NQ TQA PopQA NQ TQA PopQA
+thoughtheinitialretrievedresultisnotgoodenough,
+(a) DPR (b) Contriever
+RankRAGstillsurpassesChatQA-1.5bymorethan
+10%forbothretrieversonaverage. Tosummarize, Figure3:Performancewithdifferentretrievers.
+RankRAGisrobusttothechoiceofretrievers. TheperformanceofRecallisinAppendixE.1.
+5.4 ExperimentonDomain-specificRAGBenchmarks
+To demonstrate that RankRAG Table5: TheperformanceofRankRAGonMirage,azero-shot
+canadapttospecializeddomains, biomedical RAG benchmark. RankRAG and baselines use re-
+weconductexperimentsonMi- trievalbydefault. Mostofnumbersarefrom(Xiongetal.,2024).
+rage (Xiong et al., 2024), a re-
+Datasets MMLU-med PubmedQA BioASQ MedQA MedMCQA Avg.
+cently introduced RAG bench- GPT-4-0613(OpenAI) 87.24 70.60 92.56 82.80 66.65 79.97
+GPT-3.5(OpenAI) 75.48 67.40 90.29 66.61 58.04 71.56
+mark for the biomedical field. Mixtral8*7B(Jiangetal.) 75.85 67.60 87.54 60.02 56.42 69.49
+Llama270B(Touvronetal.) 54.55 50.40 73.95 44.93 43.08 53.38
+We follow Xiong et al. (2024) Meditron70B(Chenetal.) 65.38 56.40 76.86 49.57 52.67 60.18
+to employ MedCPT (Jin et al., P LM lamC a-l 3la -Cm ha a1 tQ3B A-( 1W .5u 8e Bta (l L.) iuetal.) 5 62 1. .5 43 0 4 62 6. .5 48 0 4 88 2. .2 69 9 5 46 2. .0 30 6 6 45 6. .2 91 7 5 52 9. .9 92 6
+2023) as the retriever R with Llama3-ChatQA-1.570B 80.51 74.80 83.17 68.89 62.54 73.98
+Llama3-RankRAG8B 64.55 65.00 84.44 48.86 56.90 63.95
+MedCorp3asthecorpusD. Llama3-RankRAG70B 81.44 79.80 90.76 69.21 69.11 78.06
+TheexperimentresultsofRankRAGandbaselinesareshowninTable5. Fromthetable,weobserve
+that RankRAG, even without fine-tuning on the biomedical domain, excels at medical QA tasks.
+Notably, RankRAG 8B surpasses Meditron 70B—a leading open-source LLM for the medical
+domain—by6.3%. Besides,RankRAG70Battainsmorethan98%performanceofGPT-4. These
+resultsjustifyRankRAG’scapacitytobereadilyappliedtonewdomainswithoutextrapost-training.
+5.5 ACloserLookattheRankingModule
+AsthecontextrankingservesasacorestepinRankRAG,wetakeacloserlookatthiscomponent.
+AllthestudiesaredoneusingLlama3-8Basthebackbone.
+3Link:https://huggingface.co/MedRAG.DetaileddatasetinformationisinAppendixA.2.
+8
+hctaM
+tcaxE
+hctaM
+tcaxETable6: Rankingperformancewithdifferentrankingmodels. Unlessspecified,allbaselinesareused
+torankthetop100retrievedpassages. RankRAGachievesbetterperformancedespiteusingfewer
+rankingdata. ∗NQ,TriviaQAandHotpotQAareusedfortrainingtheBGE-Rerankermodel. †: Our
+re-implementation. ‡Weonlyreranktop-30passagesforGPT-4duetobudgetconstraint.
+Task #RankData NQ TriviaQA PopQA HotpotQA Inscit
+Recall R@5 R@10 R@20 R@5 R@10 R@20 R@5 R@10 R@20 R@5 R@10 R@20 R@5 R@10 R@20
+BackboneRetriever
+Dragon(Linetal.) – 74.9 80.3 84.3 89.0 92.9 95.3 69.6 76.9 82.6 47.5 52.4 60.1 43.4 56.0 64.9
+FinetunedBaselineRankingModel
+RankBERT110M(Glassetal.) ∼503k 73.5 79.3 84.0 88.4 92.0 95.5 78.7 82.8 85.5 54.6 59.8 63.7 45.6 57.1 66.7
+monoT53B(Nogueiraetal.) ∼503k 75.6 80.9 84.9 90.7 93.6 95.9 81.0 83.6 85.9 54.8 60.2 63.3 48.6 59.4 68.8
+BGE-Rerank-v2-m3568M(Chenetal.) ∼1.6M 78.0∗ 82.8∗ 85.6∗ 91.6∗ 94.5∗ 97.1∗ 79.6 84.5 86.9 58.5∗ 61.8∗ 65.0∗ 51.3 59.8 69.7
+RankLLaMA8B†(Maetal.) ∼503k 77.8 83.1 86.0 91.2 93.1 96.4 80.1 84.3 86.8 57.1 62.1 64.8 57.8 62.1 71.3
+ChatQA-1.58B(Liuetal.) N/A 68.2 75.7 82.0 85.4 91.1 94.0 67.3 76.7 83.5 37.4 45.0 53.6 32.3 42.6 54.9
+Off-the-shelfLLMReranker
+GPT-3.5(top100,OpenAI) Unk. 77.8 82.5 85.7 91.1 94.4 96.7 77.4 82.0 85.5 52.1 56.6 62.4 50.2 59.1 68.6
+GPT-4‡(top30,OpenAI) Unk. 79.3 83.2 85.1 92.8 95.5 96.8 79.3 83.6 86.2 53.2 57.0 61.0 52.3 61.7 70.0
+OurModel
+RankRAG8B(top100) ∼50k 80.3 84.0 86.3 93.2 95.4 97.3 81.6 84.9 87.0 57.6 61.8 65.2 60.9 65.7 73.5
+RankRAG70B(top30) ∼50k 80.6 84.0 85.4 93.6 95.9 97.1 81.8 84.6 86.5 56.3 59.7 62.2 61.3 66.4 74.6
+ChatQA-1.5 (NQ) RankRAG (NQ)
+50 51 N=40N=50 N=100 83 N=100 35 N=100 48 N=30 N=4N 0=50 N=4N 0=50
+45 N=20 82 N=30 N=20
+45 ChatQA-1.5 N=20 ChatQA-1.5 34 N=30 ChatQA-1.5
+40 0k 5k 10k 50k 42 RankRAG 81 RankRAG RankRAG
+# Ranking Data 0 2 4 6 8 10 0 2 4 6 8 10 0 2 4 6 8 10
+Inference Time Inference Time Inference Time
+Figure4: Performance (a) NQ (b) TriviaQA (c) HotpotQA
+w.r.t. #RankingData Figure5: Performancev.s. EfficiencyanalysisforRankRAG.
+RankRAGisData-efficient. PreviousapproachesthatinfusecontextrankingintotheRAGpipeline
+usuallyinvolveaseparatererankingmodel. Tocompareourmodelwiththesebaselines,weevaluate
+fourmodels(BERT(Glassetal.,2022)/T5(Nogueiraetal.,2020)/Llama3(Maetal.,2023))fine-tuned
+onthefullMSMARCOpassagerankingdataset,astrongoff-the-shelfrerankermodelBGE-ranker,
+andtwoOpenAIGPT-seriesmodels. FortheGPT-seriesmodels,weusethetokenprobabilityof
+‘True’ as a proxy for the relevance score4. These models are then used to rerank top-retrieved
+passagesbyDragon,similartoourapproach. Surprisingly,asshowninTable6,RankRAGachieves
+betterrecalloverdedicatedrankingmodelstrainedon10×morerankingdataformostcases.Besides,
+RankRAGcanstilloutperformtheBGE-rankeronmosttasks,whichhasbeenextensivelytrained
+onmorethan1millionrankingpairs,includingsomethatoverlapwithourevaluationtasks. This
+advantageislikelyduetotheadaptablenatureofourmodel’straining,wheretherankingdataclosely
+resemblesthegeneralRAGfine-tuningdata. DirectlyusingChatQA-1.5torankpassageshurtsthe
+performance,indicatingthenecessityofincorporatingrankingdataintoinstructionfine-tuning.
+Wefurtherstudytherelationbetweenthenumberofcontextrankingdataandfinalperformance. As
+showninFigure4,with5krankingdataonly(∼ 1%oftheMSMARCOdataset),RankRAGcan
+alreadyobtainverycompellingresults,whilefurtherincreasingthenumberofrankingdatato50k
+yieldsnon-marginalgains. ThisfindingconfirmsRankRAG’sdataefficiency–achievingeffective
+performancewithamodestamountofrankingdataandmaintainingadaptabilityacrossvarioustasks.
+Performancev.s. Time-efficiencyforRankRAG.Onespecificcaveatforscalingupmodelsize
+istheincrementinthelatencyoverhead—asmentionedin§4.3,itrequiressample-wiseranking
+whichincursadditionaltime. Tostudytherelationbetweenthetimeefficiencyandperformance,we
+changetheN usedinrerankingandplottherelationofN andfinalaccuracyinFigure5,fromwhich
+weobservethatevenwithN =20,RankRAGstillimprovethebaselinemodelwithoutreranking.
+WhilererankingacrossN =20to100improvestheexactmatchscoreby5.9%to9.1%acrossthree
+tasks,itincursanadditional0.9×to6.0×increaseintime–significantlylessthanthe20×to100×
+increaseonemightexpect.
+5.6 CaseStudy
+Table7presentsacasestudyonNQdataset,whereweobservethatusingretrieveronlyyieldnoisy
+contexts,asthereareseveraldistractors,andsomecontexts(e.g. Passage4/5forChatQA-1.5)are
+4https://platform.openai.com/docs/api-reference/chat/create#chat-create-logprobs
+9
+hctaM
+tcaxE
+hctaM
+tcaxE
+hctaM
+tcaxE
+hctaM
+tcaxETable7: Acasestudyonthetop-retrievedcontextandpredictionsonNQdataset,illustratingthe
+effectivenessofRankRAG-8BoverChatQA-1.5-8B.Redtextdenotesdistractors,whilegreenstands
+forevidences. RankRAGisabletofindthecorrectanswerviaextractmoreevidencewithreranking.
+Q:whohostedandwontheinaguralworldcup?A:Uruguay
+Passage1:FIFAWorldCupsecondroundonhomesoilin1982.England(1966)wonitsonlytitlewhileplayingasahostnation.Uruguay(1930),Italy
+(1934),Argentina(1978)andFrance(1998)wontheirfirsttitlesashostnationsbuthavegoneontowinagain,whileGermany(1974)wontheirsecond
+titleonhomesoil...
+Passage2:FIFAWorldCuphostscountryisnowchoseninavotebyFIFA’sCongress...OnlyMexico,Italy,France,Germany(WestGermany)until
+shortlyafterthe1990WorldCup)andBrazilhavehostedtheeventontwooccasions.
+ChatQA-1.5 Passage3:CONCACAFhosts,beatingthebidsofCanadaandtheUnitedStates,andtherebybecamethefirstnationtohosttwoWorldCups.This
+secondWorldCupinMexicocame16yearsafterthefirstonein1970...
+Passage4:1998FIFAWorldCupAfricamadetheirfirstappearancesinthefinals.Francewasawardedthe1998WorldCupon2July1992bythe
+executivecommitteeofFIFAduringageneralmeetinginZürich,Switzerland.TheydefeatedMoroccoby12votesto7.
+Passage5:2026FIFAWorldCupbehostedbyoneoftheremainingfourconfederations:CONCACAF(NorthAmerica;lasthostedin1994),CAF
+(Africa;lasthostedin2010),CONMEBOL(SouthAmerica;lasthostedin2014),orOFC(Oceania,neverhostedbefore)... Prediction:Germany(✘)
+Passage1:FIFAWorldCupsecondroundonhomesoilin1982.England(1966)wonitsonlytitlewhileplayingasahostnation.Uruguay(1930),Italy
+(1934),Argentina(1978)andFrance(1998)wontheirfirsttitlesashostnationsbuthavegoneontowinagain,whileGermany(1974)wontheirsecond
+titleonhomesoil...
+Passage2:Timelineofassociationfootballpenaltykicks.ThirteenteamsenterthefirstWorldCup,heldinUruguay.ThehostsbeatArgentina4–2in
+thefinal.ContestedbetweenthetopnationalteamsofcontinentalEurope,Dr.GeröCup’firsteditioniswonbyItaly.
+Passage3:TheUruguaynationalfootballteamrepresentsUruguayininternationalassociationfootballandiscontrolledbytheUruguayanFootball
+RankRAG Association.TheyhavewontheCopaAmérica15times,themostsuccessfulnationalteaminthetournament,themostrecenttitlebeingthe2011
+edition.TheteamhaswontheFIFAWorldCuptwice,includingthefirstWorldCupin1930ashosts,defeatingArgentina4–2inthefinal.
+Passage4:FIFAWorldCuphostscountryisnowchoseninavotebyFIFA’sCongress.Thedecisioniscurrentlymaderoughlysevenyearsinadvance
+ofthetournament,thoughthehostsforthe2022tournamentwerechosenatthesametimeasthoseforthe2018tournament.
+Passage5:CONCACAFhosts,beatingthebidsofCanadaandtheUnitedStates,andtherebybecamethefirstnationtohosttwoWorldCups.This
+secondWorldCupinMexicocame16yearsafterthefirstonein1970... Prediction:Uruguay(✓)
+unhelpful. However,theutilizationofrerankinguncoverstwoadditionalrelevantpassages,aiding
+themodelinprovidingthecorrectanswer. MorecasestudiesareprovidedinAppendixG.
+6 Conclusion
+Inthiswork,weintroduceanewRAGframework,RankRAG,whichinstruction-tunesasingleLLM
+forbothrankingandanswergeneration. WefindthattheinstructiontunedLLMscanoutperform
+existingexpertrankingmodelsbyonlyaddingasmallfractionofrankingdataintothetrainingblend.
+We compare our RankRAG with the state-of-the-art RAG models on comprehensive knowledge-
+intensive benchmarks and demonstrate RankRAG significantly outperform all of them on nine
+general-domainandfivebiomedicalbenchmarksforRAG.
+References
+Adlakha, V., Dhuliawala, S., Suleman, K., deVries, H., andReddy, S. Topiocqa: Open-domain
+conversationalquestionansweringwithtopicswitching. TACL,2022.
+Anil,R.,Dai,A.M.,Firat,O.,Johnson,M.,Lepikhin,D.,Passos,A.,Shakeri,S.,Taropa,E.,Bailey,
+P.,Chen,Z.,etal. Palm2technicalreport. arXivpreprintarXiv:2305.10403,2023.
+Anthropic. Modelcardandevaluationsforclaudemodels. 2023.
+Asai,A.,Wu,Z.,Wang,Y.,Sil,A.,andHajishirzi,H. Self-RAG:Learningtoretrieve,generate,and
+critiquethroughself-reflection. InICLR,2024a.
+Asai,A.,Zhong,Z.,Chen,D.,Koh,P.W.,Zettlemoyer,L.,Hajishirzi,H.,andYih,W.-t. Reliable,
+adaptable, and attributable language models with retrieval. arXiv preprint arXiv:2403.03187,
+2024b.
+Bajaj,P.,Campos,D.,Craswell,N.,Deng,L.,Gao,J.,Liu,X.,Majumder,R.,McNamara,A.,Mitra,
+B.,Nguyen,T.,etal. Msmarco: Ahumangeneratedmachinereadingcomprehensiondataset.
+arXivpreprintarXiv:1611.09268,2016.
+Berant,J.,Chou,A.,Frostig,R.,andLiang,P. Semanticparsingonfreebasefromquestion-answer
+pairs. InEMNLP,2013.
+Borgeaud,S.,Mensch,A.,Hoffmann,J.,Cai,T.,Rutherford,E.,Millican,K.,VanDenDriessche,
+G.B.,Lespiau,J.-B.,Damoc,B.,Clark,A.,etal. Improvinglanguagemodelsbyretrievingfrom
+trillionsoftokens. InICML.PMLR,2022.
+10Chen, J., Xiao, S., Zhang, P., Luo, K., Lian, D., and Liu, Z. Bge m3-embedding: Multi-lingual,
+multi-functionality,multi-granularitytextembeddingsthroughself-knowledgedistillation,2023a.
+Chen, Z., Cano, A.H., Romanou, A., Bonnet, A., Matoba, K., Salvi, F., Pagliardini, M., Fan, S.,
+Köpf,A.,Mohtashami,A.,etal. Meditron-70b: Scalingmedicalpretrainingforlargelanguage
+models. arXivpreprintarXiv:2311.16079,2023b.
+Chung,H.W.,Hou,L.,Longpre,S.,Zoph,B.,Tay,Y.,Fedus,W.,Li,Y.,Wang,X.,Dehghani,M.,
+Brahma,S.,etal. Scalinginstruction-finetunedlanguagemodels. JMLR,25(70),2024.
+Conover,M.,Hayes,M.,Mathur,A.,Xie,J.,Wan,J.,Shah,S.,Ghodsi,A.,Wendell,P.,Zaharia,M.,
+andXin,R. FreeDolly: Introducingtheworld’sfirsttrulyopeninstruction-tunedllm,2023.
+Dasigi,P.,Liu,N.F.,Marasovic´,A.,Smith,N.A.,andGardner,M.Quoref:Areadingcomprehension
+datasetwithquestionsrequiringcoreferentialreasoning. InEMNLP,2019.
+DeepSeek. Deepseek-v2: Astrong,economical,andefficientmixture-of-expertslanguagemodel,
+2024.
+Du,N.,Huang,Y.,Dai,A.M.,Tong,S.,Lepikhin,D.,Xu,Y.,Krikun,M.,Zhou,Y.,Yu,A.W.,Firat,
+O.,etal. Glam: Efficientscalingoflanguagemodelswithmixture-of-experts. InICML,2022.
+Dua,D.,Wang,Y.,Dasigi,P.,Stanovsky,G.,Singh,S.,andGardner,M. Drop: Areadingcompre-
+hensionbenchmarkrequiringdiscretereasoningoverparagraphs. InNAACL,2019.
+Fan, A., Jernite, Y., Perez, E., Grangier, D., Weston, J., and Auli, M. Eli5: Long form question
+answering. InACL,2019.
+Feng,S.,Wan,H.,Gunasekara,C.,Patel,S.,Joshi,S.,andLastras,L. doc2dial: Agoal-oriented
+document-groundeddialoguedataset. InEMNLP,2020.
+Glass,M.,Rossiello,G.,Chowdhury,M.F.M.,Naik,A.,Cai,P.,andGliozzo,A. Re2G:Retrieve,
+rerank,generate. InNAACL,2022.
+Guu, K., Lee, K., Tung, Z., Pasupat, P., and Chang, M. Retrieval augmented language model
+pre-training. InICML,2020.
+Hendrycks,D.,Burns,C.,Basart,S.,Zou,A.,Mazeika,M.,Song,D.,andSteinhardt,J. Measuring
+massivemultitasklanguageunderstanding. InICLR,2021.
+Ho,X.,Nguyen,A.-K.D.,Sugawara,S.,andAizawa,A. Constructingamulti-hopqadatasetfor
+comprehensiveevaluationofreasoningsteps. InCOLING,2020.
+Honovich,O.,Scialom,T.,Levy,O.,andSchick,T. Unnaturalinstructions: Tuninglanguagemodels
+with(almost)nohumanlabor. InACL,2023.
+Huang,J.,Ping,W.,Xu,P.,Shoeybi,M.,Chang,K.C.-C.,andCatanzaro,B. Raven: In-contextlearn-
+ingwithretrievalaugmentedencoder-decoderlanguagemodels. arXivpreprintarXiv:2308.07922,
+2023.
+Izacard, G.andGrave, E. Leveragingpassageretrievalwithgenerativemodelsforopendomain
+questionanswering. InEACL,2021.
+Izacard,G.,Caron,M.,Hosseini,L.,Riedel,S.,Bojanowski,P.,Joulin,A.,andGrave,E. Unsuper-
+viseddenseinformationretrievalwithcontrastivelearning. TMLR,2022.
+Izacard,G.,Lewis,P.,Lomeli,M.,Hosseini,L.,Petroni,F.,Schick,T.,Dwivedi-Yu,J.,Joulin,A.,
+Riedel,S.,andGrave,E. Atlas: Few-shotlearningwithretrievalaugmentedlanguagemodels.
+JMLR,24(251):1–43,2023.
+Jeong,S.,Baek,J.,Cho,S.,Hwang,S.J.,andPark,J.C. Adaptive-rag: Learningtoadaptretrieval-
+augmentedlargelanguagemodelsthroughquestioncomplexity. InNAACL,2024.
+Jiang,A.Q.,Sablayrolles,A.,Roux,A.,Mensch,A.,Savary,B.,Bamford,C.,Chaplot,D.S.,Casas,
+D.d.l.,Hanna,E.B.,etal. Mixtralofexperts. arXivpreprintarXiv:2401.04088,2024.
+11Jiang,Z.,Xu,F.F.,Gao,L.,Sun,Z.,Liu,Q.,Dwivedi-Yu,J.,Yang,Y.,Callan,J.,andNeubig,G.
+Activeretrievalaugmentedgeneration. InEMNLP,2023.
+Jin, D., Pan, E., Oufattole, N., Weng, W.-H., Fang, H., and Szolovits, P. What disease does this
+patienthave? alarge-scaleopendomainquestionansweringdatasetfrommedicalexams. Applied
+Sciences,11(14):6421,2021.
+Jin,Q.,Dhingra,B.,Liu,Z.,Cohen,W.,andLu,X. Pubmedqa: Adatasetforbiomedicalresearch
+questionanswering. InEMNLP,2019.
+Jin, Q., Kim, W., Chen, Q., Comeau, D. C., Yeganova, L., Wilbur, W. J., and Lu, Z. Medcpt:
+Contrastivepre-trainedtransformerswithlarge-scalepubmedsearchlogsforzero-shotbiomedical
+informationretrieval. Bioinformatics,39(11),2023.
+Joshi, M., Choi, E., Weld, D., and Zettlemoyer, L. TriviaQA: A large scaledistantly supervised
+challengedatasetforreadingcomprehension. InACL,2017.
+Karpukhin,V.,Oguz,B.,Min,S.,Lewis,P.,Wu,L.,Edunov,S.,Chen,D.,andYih,W.-t. Dense
+passageretrievalforopen-domainquestionanswering. InEMNLP,2020.
+Kasai,J.,Sakaguchi,K.,yoichitakahashi,Bras,R.L.,Asai,A.,Yu,X.V.,Radev,D.,Smith,N.A.,
+Choi,Y.,andInui,K. RealtimeQA:What’stheanswerrightnow? InNeurIPS,2023.
+Khalifa,M.,Logeswaran,L.,Lee,M.,Lee,H.,andWang,L. Few-shotrerankingformulti-hopQA
+vialanguagemodelprompting. InACL,2023.
+Khattab,O.,Santhanam,K.,Li,X.L.,Hall,D.,Liang,P.,Potts,C.,andZaharia,M. Demonstrate-
+search-predict: Composing retrieval and language models for knowledge-intensive nlp. arXiv
+preprintarXiv:2212.14024,2022.
+Kim,H.,Hessel,J.,Jiang,L.,Lu,X.,Yu,Y.,Zhou,P.,Bras,R.L.,Alikhani,M.,Kim,G.,Sap,M.,
+etal. Soda: Million-scaledialoguedistillationwithsocialcommonsensecontextualization. In
+EMNLP,2023.
+Kingma, D. P. and Ba, J. Adam: A method for stochastic optimization. arXiv preprint
+arXiv:1412.6980,2014.
+Kocˇisky`,T.,Schwarz,J.,Blunsom,P.,Dyer,C.,Hermann,K.M.,Melis,G.,andGrefenstette,E. The
+narrativeqareadingcomprehensionchallenge. TACL,2018.
+Kwiatkowski, T., Palomaki, J., Redfield, O., Collins, M., Parikh, A., Alberti, C., Epstein, D.,
+Polosukhin,I.,Devlin,J.,Lee,K.,etal. Naturalquestions: abenchmarkforquestionanswering
+research. TACL,2019.
+Köpf, A., Kilcher, Y., von Rütte, D., Anagnostidis, S., Tam, Z.-R., Stevens, K., Barhoum, A.,
+Duc,N.M.,Stanley,O.,Nagyfi,R.,ES,S.,Suri,S.,Glushkov,D.,Dantuluri,A.,Maguire,A.,
+Schuhmann,C.,Nguyen,H.,andMattick,A. Openassistantconversations-democratizinglarge
+languagemodelalignment. arXivpreprintarXiv: 2304.07327,2023.
+Lazaridou, A., Gribovskaya, E., Stokowiec, W., and Grigorev, N. Internet-augmented language
+models through few-shot prompting for open-domain question answering. arXiv preprint
+arXiv:2203.05115,2022.
+Lee,C.,Roy,R.,Xu,M.,Raiman,J.,Shoeybi,M.,Catanzaro,B.,andPing,W. Nv-embed: Improved
+techniquesfortrainingllmsasgeneralistembeddingmodels. arXivpreprintarXiv:2405.17428,
+2024.
+Lewis,P.,Perez,E.,Piktus,A.,Petroni,F.,Karpukhin,V.,Goyal,N.,Küttler,H.,Lewis,M.,Yih,
+W.-t.,Rocktäschel,T.,etal. Retrieval-augmentedgenerationforknowledge-intensivenlptasks.
+NeurIPS,33,2020.
+Lin,K.,Tafjord,O.,Clark,P.,andGardner,M. Reasoningoverparagrapheffectsinsituations. In
+WorkshoponMachineReadingforQuestionAnswering,2019.
+12Lin,S.-C.,Asai,A.,Li,M.,Oguz,B.,Lin,J.,Mehdad,Y.,Yih,W.-t.,andChen,X. Howtotrainyour
+dragon: Diverseaugmentationtowardsgeneralizabledenseretrieval. InFindingsofEMNLP,2023.
+Lin,X.V.,Chen,X.,Chen,M.,Shi,W.,Lomeli,M.,James,R.,Rodriguez,P.,Kahn,J.,Szilvasy,G.,
+Lewis,M.,Zettlemoyer,L.,andtauYih,W. RA-DIT:Retrieval-augmenteddualinstructiontuning.
+InICLR,2024.
+Liu, Z., Ping, W., Roy, R., Xu, P., Shoeybi, M., andCatanzaro, B. Chatqa: Surpassinggpt-4on
+conversationalqaandrag. arXivpreprintarXiv:2401.10225,2024.
+Longpre,S.,Hou,L.,Vu,T.,Webson,A.,Chung,H.W.,Tay,Y.,Zhou,D.,Le,Q.V.,etal. Theflan
+collection: Designingdataandmethodsforeffectiveinstructiontuning. InICML,2023.
+Luan,Y.,Eisenstein,J.,Toutanova,K.,andCollins,M. Sparse,dense,andattentionalrepresentations
+fortextretrieval. TACL,2021.
+Luo,H.,Chuang,Y.-S.,Gong,Y.,Zhang,T.,Kim,Y.,Wu,X.,Fox,D.,Meng,H.,andGlass,J. Sail:
+Search-augmentedinstructionlearning. arXivpreprintarXiv:2305.15225,2023.
+Ma,X.,Wang,L.,Yang,N.,Wei,F.,andLin,J. Fine-tuningllamaformulti-stagetextretrieval. arXiv
+preprintarXiv:2310.08319,2023.
+Mallen,A.,Asai,A.,Zhong,V.,Das,R.,Khashabi,D.,andHajishirzi,H. Whennottotrustlanguage
+models: Investigatingeffectivenessofparametricandnon-parametricmemories. InACL,2023.
+Menon,A.,Jayasumana,S.,Rawat,A.S.,Kim,S.,Reddi,S.,andKumar,S. Indefenseofdual-
+encodersforneuralranking. InICML,2022.
+Meta-AI. Llama3modelcard. 2024.
+Mistral. Mixtral8x22b. 2024. URLhttps://mistral.ai/news/mixtral-8x22b/.
+Mitra, B., Craswell, N., et al. An introduction to neural information retrieval. Foundations and
+Trends®inInformationRetrieval,2018.
+Muennighoff,N.,Su,H.,Wang,L.,Yang,N.,Wei,F.,Yu,T.,Singh,A.,andKiela,D. Generative
+representationalinstructiontuning. arXivpreprintarXiv:2402.09906,2024.
+Nogueira,R.,Jiang,Z.,Pradeep,R.,andLin,J. Documentrankingwithapretrainedsequence-to-
+sequencemodel. InFindingsofEMNLP,2020.
+OpenAI. IntroducingChatGPT,2022.
+OpenAI. GPT-4,2023.
+Oren,Y.,Meister,N.,Chatterji,N.S.,Ladhak,F.,andHashimoto,T. Provingtestsetcontamination
+inblack-boxlanguagemodels. InICLR,2024.
+Ouyang,L.,Wu,J.,Jiang,X.,Almeida,D.,Wainwright,C.,Mishkin,P.,Zhang,C.,Agarwal,S.,
+Slama,K.,Ray,A.,etal. Traininglanguagemodelstofollowinstructionswithhumanfeedback.
+NeurIPS,35,2022.
+Pal,A.,Umapathi,L.K.,andSankarasubbu,M. Medmcqa: Alarge-scalemulti-subjectmulti-choice
+datasetformedicaldomainquestionanswering. InCHIL,2022.
+Petroni,F.,Piktus,A.,Fan,A.,Lewis,P.,Yazdani,M.,DeCao,N.,Thorne,J.,Jernite,Y.,Karpukhin,
+V.,Maillard,J.,Plachouras,V.,Rocktäschel,T.,andRiedel,S. KILT:abenchmarkforknowledge
+intensivelanguagetasks. InNAACL,2021.
+Qin, Z., Jagerman, R., Hui, K., Zhuang, H., Wu, J., Shen, J., Liu, T., Liu, J., Metzler, D., Wang,
+X.,etal. Largelanguagemodelsareeffectivetextrankerswithpairwiserankingprompting. In
+FindingsofNAACL,2024.
+Rajpurkar, P., Zhang, J., Lopyrev, K., and Liang, P. Squad: 100,000+ questions for machine
+comprehensionoftext. InEMNLP,2016.
+13Ram,O.,Levine,Y.,Dalmedigos,I.,Muhlgay,D.,Shashua,A.,Leyton-Brown,K.,andShoham,Y.
+In-contextretrieval-augmentedlanguagemodels. TACL,2023.
+Robertson,S.,Zaragoza,H.,andTaylor,M. Simplebm25extensiontomultipleweightedfields. In
+CIKM,2004.
+Sachan, D. S., Reddy, S., Hamilton, W. L., Dyer, C., and Yogatama, D. End-to-end training of
+multi-documentreaderandretrieverforopen-domainquestionanswering. InNeurIPS,2021.
+Shao,Z.,Gong,Y.,Shen,Y.,Huang,M.,Duan,N.,andChen,W. Enhancingretrieval-augmented
+largelanguagemodelswithiterativeretrieval-generationsynergy. InFindingsofEMNLP,2023.
+Shi, W., Min, S., Yasunaga, M., Seo, M., James, R., Lewis, M., Zettlemoyer, L., and Yih, W.-t.
+Replug: Retrieval-augmentedblack-boxlanguagemodels. InNAACL,2024.
+Sun,W.,Yan,L.,Ma,X.,Wang,S.,Ren,P.,Chen,Z.,Yin,D.,andRen,Z. IsChatGPTgoodat
+search? investigatinglargelanguagemodelsasre-rankingagents. InEMNLP,2023.
+Thakur, N., Reimers, N., Rücklé, A., Srivastava, A., and Gurevych, I. Beir: A heterogeneous
+benchmarkforzero-shotevaluationofinformationretrievalmodels. InNeurIPS,2021.
+Thorne,J.,Vlachos,A.,Christodoulopoulos,C.,andMittal,A. Fever: Alarge-scaledatasetforfact
+extractionandverification. InNAACL,2018.
+Touvron,H.,Martin,L.,Stone,K.,Albert,P.,Almahairi,A.,Babaei,Y.,Bashlykov,N.,Batra,S.,
+Bhargava,P.,Bhosale,S.,etal. Llama2: Openfoundationandfine-tunedchatmodels. arXiv
+preprintarXiv:2307.09288,2023.
+Trischler,A.,Wang,T.,Yuan,X.,Harris,J.,Sordoni,A.,Bachman,P.,andSuleman,K. Newsqa: A
+machinecomprehensiondataset. InRepL4NLPWorkshopatACL,2017.
+Trivedi,H.,Balasubramanian,N.,Khot,T.,andSabharwal,A. Interleavingretrievalwithchain-of-
+thoughtreasoningforknowledge-intensivemulti-stepquestions. InACL,2023.
+Tsatsaronis,G.,Balikas,G.,Malakasiotis,P.,Partalas,I.,Zschunke,M.,Alvers,M.R.,Weissenborn,
+D.,Krithara,A.,Petridis,S.,Polychronopoulos,D.,etal. Anoverviewofthebioasqlarge-scale
+biomedicalsemanticindexingandquestionansweringcompetition. BMCbioinformatics,2015.
+Wang, B., Ping, W., McAfee, L., Xu, P., Li, B., Shoeybi, M., and Catanzaro, B. Instructretro:
+Instructiontuningpostretrieval-augmentedpretraining. InICML,2024.
+Wang, L., Yang, N., Huang, X., Jiao, B., Yang, L., Jiang, D., Majumder, R., and Wei, F. Text
+embeddings by weakly-supervised contrastive pre-training. arXiv preprint arXiv:2212.03533,
+2022.
+Wang,L.,Yang,N.,Huang,X.,Yang,L.,Majumder,R.,andWei,F. Improvingtextembeddings
+withlargelanguagemodels. arXivpreprintarXiv:2401.00368,2023a.
+Wang,Y.,Kordi,Y.,Mishra,S.,Liu,A.,Smith,N.A.,Khashabi,D.,andHajishirzi,H. Self-instruct:
+Aligninglanguagemodelswithself-generatedinstructions. InACL,2023b.
+Wang,Z.,Araki,J.,Jiang,Z.,Parvez,M.R.,andNeubig,G. Learningtofiltercontextforretrieval-
+augmentedgeneration. arXivpreprintarXiv:2311.08377,2023c.
+Wei,J.,Bosma,M.,Zhao,V.Y.,Guu,K.,Yu,A.W.,Lester,B.,Du,N.,Dai,A.M.,andLe,Q.V.
+Finetunedlanguagemodelsarezero-shotlearners. InICLR,2022.
+Wu,C.,Lin,W.,Zhang,X.,Zhang,Y.,Xie,W.,andWang,Y. Pmc-llama: towardbuildingopen-
+sourcelanguagemodelsformedicine. JAMIA,2024.
+Wu,Z.,Parish,R.,Cheng,H.,Min,S.,Ammanabrolu,P.,Ostendorf,M.,andHajishirzi,H. Inscit:
+Information-seekingconversationswithmixed-initiativeinteractions. TACL,2023.
+Xiong,G.,Jin,Q.,Lu,Z.,andZhang,A. Benchmarkingretrieval-augmentedgenerationformedicine.
+arXivpreprintarXiv:2402.13178,2024.
+14Xu,F.,Shi,W.,andChoi,E. RECOMP:Improvingretrieval-augmentedLMswithcontextcompres-
+sionandselectiveaugmentation. InICLR,2024a.
+Xu,P.,Ping,W.,Wu,X.,McAfee,L.,Zhu,C.,Liu,Z.,Subramanian,S.,Bakhturina,E.,Shoeybi,M.,
+andCatanzaro,B. Retrievalmeetslongcontextlargelanguagemodels. InICLR,2024b.
+Yang, Z., Qi, P., Zhang, S., Bengio, Y., Cohen, W. W., Salakhutdinov, R., and Manning, C. D.
+HotpotQA:Adatasetfordiverse,explainablemulti-hopquestionanswering. InEMNLP,2018.
+Yoran,O.,Wolfson,T.,Ram,O.,andBerant,J. Makingretrieval-augmentedlanguagemodelsrobust
+toirrelevantcontext. InICLR,2024.
+Yu,W.,Iter,D.,Wang,S.,Xu,Y.,Ju,M.,Sanyal,S.,Zhu,C.,Zeng,M.,andJiang,M. Generate
+ratherthanretrieve: Largelanguagemodelsarestrongcontextgenerators. InICLR,2023a.
+Yu,W.,Zhang,H.,Pan,X.,Ma,K.,Wang,H.,andYu,D. Chain-of-note: Enhancingrobustnessin
+retrieval-augmentedlanguagemodels. arXivpreprintarXiv:2311.09210,2023b.
+Yu,W.,Zhang,Z.,Liang,Z.,Jiang,M.,andSabharwal,A. Improvinglanguagemodelsviaplug-and-
+playretrievalfeedback,2024.
+Yu,Y.,Xiong,C.,Sun,S.,Zhang,C.,andOverwijk,A. Coco-dr: Combatingdistributionshiftin
+zero-shotdenseretrievalwithcontrastiveanddistributionallyrobustlearning. InEMNLP,2022.
+Zhang,T.,Patil,S.G.,Jain,N.,Shen,S.,Zaharia,M.,Stoica,I.,andGonzalez,J.E. Raft: Adapting
+languagemodeltodomainspecificrag. arXivpreprintarXiv:2403.10131,2024.
+Zhu,F.,Lei,W.,Huang,Y.,Wang,C.,Zhang,S.,Lv,J.,Feng,F.,andChua,T.-S. Tat-qa: Aquestion
+answeringbenchmarkonahybridoftabularandtextualcontentinfinance. InACL,2021.
+Zhu,Y.,Zhang,P.,Zhang,C.,Chen,Y.,Xie,B.,Dou,Z.,Liu,Z.,andWen,J.-R. Inters: Unlocking
+thepoweroflargelanguagemodelsinsearchwithinstructiontuning. InACL,2024.
+15A DatasetDescription
+Theinformationfor14datasetsusedinRankRAGislistedasfollows.
+A.1 MainExperiments
+• NQ(Kwiatkowskietal.,2019)isawidelyusedquestion-answeringdatasetconstructedwith
+Wikipedia. ThequestionsareconstructedfromtheGooglesearchengine,andtheanswersare
+identifiedastextspansintheWikipediaarticle.
+• TriviaQA(Joshietal.,2017)isachallengingQAdatasetcontainingquestion-answerpairsfrom
+triviaenthusiastsandindependentlygatheredevidencedocuments.
+• PopQA(Mallenetal.,2023)isanentity-centricQAdatasetconcentratedonlong-tailentities.
+ForPopQA,wefollow(Asaietal.,2024a)tousethelong-tailsubset,consistingofquestionson
+1399rareentitieswhosemonthlyWikipediapageviewsarelessthan100.
+• HotpotQA(Yangetal.,2018)isamulti-hopQAdataset,wherethegoalistoanswercomplex
+questionsthatrequireunderstandingandlinkinginformationfrommultipledocuments.
+• 2WikimQA(Hoetal.,2020)isalsoamulti-hopQAdesignedtotestmachineunderstanding
+acrosstwodifferentWikipediaentities,evaluatingtheabilityofsystemstohandlecross-lingual
+andcross-culturalretrievalandquestionanswering.
+• FEVER(Thorneetal.,2018)isafactverificationdatasetaimedatsupportingresearchintothe
+automaticverificationoffactualclaims. Itconsistsofclaimsthataremanuallyverifiedagainst
+evidencefromWikipedia,providingabenchmarkforfact-checkingsystems.
+• Doc2Dial(Fengetal.,2020)isadocument-groundedconversationalQAdatasetcoveringfour
+domains:DMV,SSA,VA,andStudentAid.Eachsamplecomprisesadialoguewhereauserposes
+queriesregardingthedocument,andanagentrespondsthosequestions. Theaveragedocument
+lengthisaround101Kwords.
+• TopiOCQA(Adlakhaetal.,2022)isgroundedonthewholeWikipedia. Itincorporatestopic
+switchingandrequirestheagenttosearchtheentireWikipediaforanswerstouserquestions.
+• INSCIT(Wuetal.,2023)isalsogroundedonthewholeWikipedia. Itstudiesthecasewhere
+userquestionsareunder-specifiedandrequireclarification.
+A.2 BiomedicalBenchmarks
+• MMLU-med(Hendrycksetal.,2021)isasubsetofsixtasksrelatedtobiomedicine,including
+anatomy, clinical knowledge, professional medicine, human genetics, college medicine, and
+collegebiology. Itcontains1089questionsintotal.
+• MedQA(Jinetal.,2021)iscollectedfromtheUSMedicalLicensingExamination,contaiing
+1273four-optionmultiple-choicequestionsfocusedonreal-worldscenariosfromprofessional
+medicalboardexams.
+• MedMCQA(Paletal.,2022)includesmultiple-choicequestionsderivedfromIndianmedical
+entranceexams,covering2400healthcaretopicsacross21medicalsubjects. Weusethe4,183-
+questiondevelopmentsetfromMedMCQA,asthetestsetlacksprovidedgroundtruths.
+• PubmedQA(Jinetal.,2019)isabiomedicalresearchQAdatasetconsistingof1000manually
+annotated questions based on PubMed abstracts. Answers in PubMedQA are structured as
+yes/no/maybetoreflectthevalidityofthequestions.
+• BioASQ(Tsatsaronisetal.,2015)includes618questionsconstructedfrombiomedicallitera-
+ture without providing the ground truth snippets, challenging RAG systems to infer answers
+independently.
+B DataBlendingDetailsforRanking-enhancedInstructionFinetuning
+ThedatasetblendingratioforStage-IIisasfollows:
+• Drop: 0.069
+16• narrativeqa: 0.09
+• quoref: 0.026
+• ropes: 0.026
+• Squad(Retrieval-augmentedQA):0.09
+• Squad(Retrieval-augmentedRanking): 0.02
+• WebQuestions(Retrieval-augmentedQA):0.09
+• WebQuestions(Retrieval-augmentedRanking): 0.02
+• newsqa: 0.09
+• tatqa-arithmetic: 0.15
+• tatqa-others: 0.08
+• ConvQA:0.2
+• MSMARCOranking: 0.15
+• ConvQAranking: 0.03
+• SFT:0.2
+Theratioforeachdatasetisfurthernormalizedtoensurethetotalratioequalsto1.
+C PromptFormatsofInstructionTuning
+C.1 StageI:SupervisedFine-tuning
+TheformattemplateofLLMinputsinstage-Iisasfollows:
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+User: {Question 1}
+Assistant: {Answer 1}
+...
+User: {Latest Question}
+Assistant:
+C.2 Stage-II:UnifiedInstruction-TuningforRankingandGeneration
+TheformattemplateofLLMinputsinstage-IIareasfollows:
+1)Context-richQAdata
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage: {(Gold) Passage containing relevant context for QA}
+User: {Question 1}
+Assistant: {Answer 1}
+17...
+User: {Latest Question}
+Assistant:
+Wetailorspecificuserinstructionsforvariousdatasettypes. Forinstance:
+For datasets requiring short answers (such as DROP, NarrativeQA, Quoref, ROPES, SQuAD1.1,
+SQuAD2.0,NewsQA),weuse: "Answerthefollowingquestionwithashortspan."
+Fordatasetsthatnecessitatelonganswers(suchasSynthetic_ConvQA),weinstruct: "Pleasegivea
+fullandcompleteanswerforthequestion."
+Fordatasetsinvolvingarithmeticcalculationsornumberextractionfromthecontext(suchasTAT-
+QA),wespecify: "Answerthefollowingquestionwithanumberfromthecontextorthroughmath
+arithmetic."
+For datasets that may require both short and long answers (such as TAT-QA-Others), we direct:
+"Answerthefollowingquestionwithashortspan,orafullandcompleteanswer."
+2)Retrieval-augmentedQAdata
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage 1: {(Shuffled) Passage 1}
+Passage 2: {(Shuffled) Passage 2}
+Passage 3: {(Shuffled) Passage 3}
+Passage 4: {(Shuffled) Passage 4}
+Passage 5: {(Shuffled) Passage 5}
+...
+User: {Question}
+Assistant:
+3)Contextrankingdata
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage: {Passage 1}
+User: {For the question <question>, access whether the passage is relevant to the
+question. Return True if relevant, otherwise False. }
+Assistant:
+4)Retrieval-augmentedrankingdata
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+18found in the context.
+Passage 1: {(Shuffled) Passage 1}
+Passage 2: {(Shuffled) Passage 2}
+Passage 3: {(Shuffled) Passage 3}
+Passage 4: {(Shuffled) Passage 4}
+Passage 5: {(Shuffled) Passage 5}
+User: {For the question <question>, access whether the above passages are relevant
+to the question. Return all the relevant passage id. }
+Assistant:
+D PromptFormatsofTargetTasks
+D.1 ContextRanking
+NQ/TriviaQA/HotpotQA/PopQA:
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage: {Passage}
+User: {For the question <question>, access whether the passage is relevant to the
+question. Return True if relevant, otherwise False. }
+Assistant:
+FEVER:
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage: {Passage}
+User: {For the claim <claim>, access whether the passage is relevant to the
+claim. Return True if relevant, otherwise False. }
+Assistant:
+Doc2dial,Inscit,TopiocQA:
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage: {Passage}
+User: {Question 1}
+19Assistant: {Answer 1}
+...
+User: {For the question <latest question>, access whether the passage is relevant
+to the question. Return True if relevant, otherwise False. }
+Assistant:
+D.2 RAG
+NQ/TriviaQA/HotpotQA/PopQA:
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage 1: {Rerank Top Passage 1}
+Passage 2: {Rerank Top Passage 2}
+Passage 3: {Rerank Top Passage 3}
+Passage 4: {Rerank Top Passage 4}
+Passage 5: {Rerank Top Passage 5}
+...
+User: {Question}. Answer the above question with a short phrase.
+Assistant:
+Fever:
+System: This is a chat between a user and an artificial intelligence assistant.
+The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage 1: {Rerank Top Passage 1}
+Passage 2: {Rerank Top Passage 2}
+Passage 3: {Rerank Top Passage 3}
+Passage 4: {Rerank Top Passage 4}
+Passage 5: {Rerank Top Passage 5}
+...
+User: Answer the following question with True or False. Is the claim ’<claim>’ correct?
+Assistant:
+Doc2dial,Inscit,TopiOCQA:
+System: This is a chat between a user and an artificial intelligence assistant.
+20The assistant gives helpful, detailed, and polite answers to the user’s questions
+based on the context. The assistant should also indicate when the answer cannot be
+found in the context.
+Passage 1: {Rerank Top Passage 1}
+Passage 2: {Rerank Top Passage 2}
+Passage 3: {Rerank Top Passage 3}
+Passage 4: {Rerank Top Passage 4}
+Passage 5: {Rerank Top Passage 5}
+User: {Question 1}
+Assistant: {Answer 1}
+...
+User: {Latest Question}
+Assistant:
+E AdditionalExperimentResults
+E.1 RankingPerformanceUsingDPRandContrieverasRetrieversR
+Table8showstherankingperformanceofRankRAG-8BusingDPR(Karpukhinetal.,2020)and
+Contriever(Izacardetal.,2022)onthreedatasets. Thereareconsistentperformancegainsforall
+tasks,indicatingthatRankRAGcanapplytomanypopularretrievalmodelstoimprovethequalityof
+retrievedcontents.
+Table8: AnswerRecallComparisonBeforeandAfterRankingon3RepresentativeDatasets.
+DPR Contriever
+NQ
+R@5 R@10 R@20 R@5 R@10 R@20
+BeforeRanking 69.50% 76.20% 81.00% 67.60% 75.24% 80.67%
+w/RankRAG 77.95% 81.70% 84.56% 75.32% 80.18% 84.70%
+DPR Contriever
+TriviaQA
+R@5 R@10 R@20 R@5 R@10 R@20
+BeforeRanking 67.80% 74.20% 80.30% 81.95% 86.76% 90.08%
+w/RankRAG 77.73% 79.40% 84.74% 88.71% 90.05% 92.59%
+DPR Contriever
+PopQA
+R@5 R@10 R@20 R@5 R@10 R@20
+BeforeRanking 43.60% 48.90% 54.25% 60.61% 65.54% 69.90%
+w/RankRAG 50.32% 53.75% 57.76% 65.11% 68.41% 71.77%
+E.2 RAGPerformancewithDifferentk
+WealsoshowtheperformanceofRankRAGwithdifferentcontextsizekinfigure6. Fromtheresult,
+weobservethatdifferentfromthetrendofvanillaRAGapproaches(withoutranking),k =5already
+workswellformostdatasets. Thiseffectivenessstemsfromthererankingstep,whichprioritizesthe
+mostrelevantcontextsatthetop,reducingthenecessitytoincludeadditionalcontexts.
+21NQ TriviaQA PopQA FEVER
+52 84 60 93
+50 92
+82 55
+48 91
+46 80 50 90
+5 10 20 5 10 20 5 10 20 5 10 20
+Context Size k
+Figure6: PerformanceofRankRAGondifferentcontextsizek.
+F PerformanceofNQandTriviaQAonDPRSplits
+WeobservethattheNQandTriviaQAdatasetsexistintwoversions:oneusedbytheDPR(Karpukhin
+et al., 2020) and FiD (Izacard & Grave, 2021) papers, which include 3610 and 11316 questions
+forNQandTriviaQA,respectively. Incontrast,theKILTbenchmark(Petronietal.,2021)utilizes
+onlysubsetsofthese,comprising2837and5355examplesforNQandTriviaQA,respectively. Itis
+noteworthythatmanyrecentstudiesreportperformancemetricsonthesedatasetswithoutclarifying
+whichversionwasemployedforevaluation.
+Tofacilitateanhonestandfaircomparison,wepresenttheperformanceofRankRAGonbothdatasets
+using the DPR splits in Table 9. Notably, regardless of the subset used, RankRAG consistently
+outperformsbothChatQAandLlama-3-instruct,ourdirectcompetitors,aswellasothermethods
+utilizingInstructGPTasbackbones. Weaimfortheseresultstoassistthecommunityinmaking
+accuratecomparisonswhenreferringtotheperformanceofRankRAG.
+Table9: PerformanceAcrossModels.
+Model ModelConfiguration NQEM(%) TriviaQAEM/Acc.(%)
+RepresentativeBaselines
+GPT-3.5-0613 35.2 70.1/81.3
+GPT-3.5-0613RAG 42.3 65.8/76.7
+GPT-4-0613 37.2 72.6/85.1
+OpenAIGPT
+GPT-4-0613RAG 36.2 61.2/75.9
+GPT-4-turbo-2024-0409 38.3 68.0/84.5
+GPT-4-turbo-2024-0409RAG 36.3 57.6/79.2
+UsingLlama-2(Touvronetal.,2023)asthebackboneLLM
+Llama-2-Chat Llama-2RAG70B 37.7 65.6/–
+Llama-27B 37.0 62.4/74.3
+ChatQA-1.0 Llama-213B 43.9 66.6/76.9
+Llama-270B 45.0 69.8/80.2
+Llama-27B 42.4 68.3/78.9
+RankRAG Llama-213B 46.2 69.5/80.0
+Llama-270B 48.7 72.3/82.6
+UsingLlama-3(Meta-AI,2024)asthebackboneLLM
+Llama-3-InstructRAG8B 27.6 57.1/74.6
+Llama-3-Instruct
+Llama-3-InstructRAG70B 37.3 67.6/79.6
+Llama-38B 44.1 65.4/75.8
+ChatQA-1.5
+Llama-370B 46.0 69.0/80.4
+Llama-38B 46.1 68.8/79.9
+RankRAG
+Llama-370B 50.0 72.6/82.9
+G AdditionalCaseStudies
+Tables10and11provideadditionalexamplesfromthePopQAandHotpotQAdatasets,whichfocus
+onlong-tailedandmulti-hopQA.Thesetasksareparticularlychallengingforretrievers,makingit
+difficulttoobtainrelevantcontextfromthecorpus. Consequently,ChatQA-1.5oftenstrugglesto
+producethecorrectanswers. However,thererankingstepinRankRAGhelpscounteractpoorinitial
+22
+hctaM
+tcaxETable10: Acasestudyonthetop-retrievedcontextandpredictionsonPopQAdataset,illustratingthe
+effectivenessofRankRAG-8BoverChatQA-1.5-8B.Redtextdenotesdistractors,whilegreenstands
+forevidences.
+Q:WhoistheauthorofTheUniverseAroundUs? A:JamesHopwoodJeans/JamesJeans/SirJamesJeans/SirJamesHopwoodJeans
+Passage1:HooperistheauthoroftwobookspublishedbySmithsonianBooks/HarperCollins.Thefirst,DarkCosmos:InSearchof
+ourUniverse’sMissingMassandEnergy(2006)wasnamedanotablebookbySeedMagazine.Hissecondbook,Nature’sBlueprint:
+SupersymmetryandtheSearchforaUnifiedTheoryofMatterandForce(2008),wascalled"essentialreading"byNewScientist...
+Passage2:Fraknoiistheauthororco-authorof14booksinthefieldofastronomy.HewastheleadauthorofVoyagesthroughthe
+Universe,anintroductorycollegeastronomytextbookpublishedbyBrooks-Cole,whichwentthroughthreeeditions.Inthe1980s,he
+co-editedwithByronPreisstwocollectionsofsciencearticlesandsciencefictionstories,"TheUniverse"and"ThePlanets."WithSidney
+Wolff,Fraknoifoundedandwasco-editorofthefirston-linejournaldevotedtoastronomyeducation,"AstronomyEducationReview"...
+ChatQA-1.5 Passage3:TheUniverse"and"ThePlanets."WithSidneyWolff,Fraknoifoundedandwasco-editorofthefirston-linejournaldevoted
+toastronomyeducation,"AstronomyEducationReview".HeeditedtwocollectionsofresourcesforK-12teachers,TheUniverseatYour
+FingertipsandMoreUniverseatYourFingertipspublishedthroughtheAstronomicalSocietyof...
+Passage4:LincolnKinnearBarnett(1909–1979)wasaneditorandauthor,mostnotablyatLifeMagazineformanyyears.Lincoln
+Barnettwroteanumberofbooks,including"TheUniverseandDoctorEinstein"
+Passage5:TheUniverseMakerisasciencefictionnovelbyAmericanauthorA.E.vanVogt,publishedin1953byAceBooksasanAce
+DoublewithTheWorldofNull-A.Itisbasedontheauthors´"TheShadowMen"(StartlingStories,1950).Set400yearsintothefuture,
+themaincharacterisMortonCargill,aU.S.ArmyofficerwhoservedintheKoreanWar... Prediction:LincolnBarnett(✘)
+Passage1:TheUniverseAroundUsisasciencebookwrittenbyEnglishastrophysicistSirJamesJeans,firstpublishedin1929bythe
+SyndicsoftheCambridgeUniversityPress....
+Passage2:ThesebooksmadeJeansfairlywellknownasanexpositoroftherevolutionaryscientificdiscoveriesofhisday,especiallyin
+relativityandphysicalcosmology.In1939,theJournaloftheBritishAstronomicalAssociationreportedthatJeanswasgoingtostandas
+acandidatefor
+Passage3:JamesJeansbooksforthelaypublic,including"TheStarsinTheirCourses"(1931),"TheUniverseAroundUs","Through
+SpaceandTime"(1934),"TheNewBackgroundofScience"(1933),and"TheMysteriousUniverse.
+RankRAG Passage4:TheUniverseAroundUsnospecialscientificknowledge.PartsofthebookcoverthesamegroundasvariouslecturesIhave
+recentlydeliveredtoUniversityandotheraudiences,includingacourseofwirelesstalksIgavelastautumn.Ithasbeenfoundnecessary
+torewritethesealmostintheirentirety,sothatveryfewsentencesremainintheiroriginalform,butthosewhohaveaskedmetopublish
+mylecturesandwirelesstalkswillfindthesubstanceoftheminthepresentbook.
+Passage5:LincolnBarnettLincolnKinnearBarnett(1909–1979)wasaneditorandauthor,mostnotablyatLifeMagazineformanyyears.
+LincolnBarnettwroteanumberofbooks,including"TheUniverseandDoctorEinstein","TheWorldWeLiveIn",and"TheTreasureof
+OurTongue".TheUniverseandDoctorEinsteinisalaymans´introductiontothetheoryofrelativity.ItincludesaforewordbyAlbert
+Einstein,andhasbeenreprintedseveraltimes... Prediction:SirJamesJeans(✓)
+Table11: Acasestudyonthetop-retrievedcontextandpredictionsonHotpotQAdataset,illustrating
+theeffectivenessofRankRAG-8BoverChatQA-1.5-8B.Redtextdenotesdistractors,whilegreen
+standsforevidences.
+Q:WhichsongdidEminemandRihannacollaborateonaftertheirothercollaborationsonginstudioalbum"Unapologetic?" A:TheMonster
+Passage1:UnapologeticistheseventhstudioalbumbyBarbadiansingerRihanna.ItwasreleasedonNovember19,2012,byDefJam
+RecordingsandSRPRecords.ItwasrecordedbetweenJuneandNovember2012,duringpromotionofhersixthalbum,"TalkThatTalk"
+(2011).Asexecutiveproducer,RihannaenlistedpreviouscollaboratorsThe-Dream,DavidGuetta,Chase&Status,andStarGatetowork
+alongsidenewcollaboratorssuchasParkerIghile,MikeWillMade-It,andLabrinth...
+Passage2:DefJamFranceannouncedviaTwitterthatRihannawouldreleaseanewsingletheupcomingweekwhileherseventhstudio
+albumwasscheduledtobereleasedinNovember2012.OnOctober11,2012,inoneofhertweetsrevealedthatthetitleofhernewalbum
+is"Unapologetic"alongsidewithitscover."WhatNow"waswrittenbyBritishsinger-songwriterLivviFranctogetherwithRihanna,
+ParkerIghileandNathanCassells,whiletheproductionofthesongwasdonebythelattertwo.IghileandCassells...
+Passage3:Justinthenwentontocowrite"Stay"withMikkyEkkoandrecordedbyBarbadiansingerRihannaforherseventhstudio
+ChatQA-1.5 album,"Unapologetic"(2012).ItfeaturesguestvocalsbyMikkyEkko,andwasreleasedasthesecondsinglefromthealbumon7
+January2013.Thesongreachedthetopfiveoftwenty-fourcountriesworldwideincludingnumberfourintheUKandnumberthreeon
+theUSBillboardHot100,becomingRihanna’stwenty-fourthtoptenonthelatterchart...
+Passage4:ViaherofficialTwitteraccount,Rihannapostedseriesof"teasing"tweetsannouncingherseventhstudioalbum.OnOctober
+11,2012,inoneofhertweetsrevealedthatthetitleofhernewalbumis"Unapologetic"alongsidewithitscover."Jump"istheoverall
+seventhandfinalsingleoffUnapologetic.ItwaswrittenbyKevinCossomandM.B.WilliamstogetherwithitsproducersStarGate
+(MikkelS.EriksenandTorErikHermansen)andChase&Status(SaulMilton
+Passage5:copiesofthesongweresoldintheUK,making"LovetheWayYouLie"thecountry’sbiggest-sellingsongof2010.Thesame
+year,asequeltothesingle,titled"LovetheWayYouLie(PartII)"wasreleasedaspartofRihanna’sfifthstudioalbum"Loud";itmainly
+viewsmattersfromthefemaleprotagonistperspective.InNovember2012,EminemandRihannacollaboratedagainon"Numb",which
+wasincludedonRihanna’sseventhalbum"Unapologetic"... Prediction:LovetheWayYouLie(✘)
+Passage1:TheMonster(song).CopiesofthesongweresoldintheUK,making"LovetheWayYouLie"thecountry’sbiggest-selling
+songof2010.Thesameyear,asequeltothesingle,titled"LovetheWayYouLie(PartII)"wasreleasedaspartofRihanna’sfifthstudio
+album"Loud";itmainlyviewsmattersfromthefemaleprotagonistperspective.InNovember2012,EminemandRihannacollaborated
+againon"Numb",whichwasincludedonRihanna’sseventhalbum"Unapologetic"....
+Passage2:"Numb"isasongbyBarbadiansingerRihannafromherseventhstudioalbum"Unapologetic"(2012).Itfeaturesguest
+vocalsbyAmericanrapperEminem,makingitthepair’sthirdcollaborationsincethetwoofficialversionsof"LovetheWayYouLie".
+Followingthealbum’srelease,"Numb"chartedonmultiplechartsworldwideincludinginCanada,theUnitedKingdomandtheUnited
+States."Numb"lastsforadurationof.
+Passage3:Eminemalsowantedtoexperimentwith"retro,vintage"soundssuchasbeatbreaksandscratches,andhefeltthatRubincould
+RankRAG helphim"takethattoanotherlevel."Rihanna,withwhomEminempreviouslycollaboratedon"LovetheWayYouLie"fromEminem’s
+previousstudioeffort,"Recovery"(2010),wasfeaturedonthesong"TheMonster".OnSeptember11,2013,shehintedatthe...
+Passage4:togetherwithJay-Z,BonoandTheEdgeforthesamecampaigntoalleviatethe2010Haitiearthquake.Insummer2010,
+RihannacollaboratedwithrapperEminemon"LovetheWayYouLie",whichwasamajorworldwidesuccess,reachingNo.1inover20
+countries.Reachingnumber2,thesongbecamethebiggest-sellingsongof2010intheUKandthefirstofRihanna’ssinglestosellovera
+millioncopiesinthecountry.InOctober2010,Rihannaswitchedmanagers...
+Passage5:Eminemaskedformoretracksandsubsequentlyheard"LovetheWayYouLie".HechoseitandtoldhismanagerPaul
+RosenberghewantedtocollaboratewiththeBarbadiansingerRihanna.EminemtoldSkyrock,"It’soneofthosetracksthatIfeltlike
+onlyshecouldpullitoff."RosenbergsentthetracktoRihanna,whoacceptedEminem’srequest"atthelastmoment."Eminemthen
+wrotetherappedverses. Prediction:TheMonster(✓)
+retrievalby findingmorepertinent evidence. CoupledwithRAG-oriented finetuning, RankRAG
+effectivelyfiltersoutdistractingentitiesandpinpointsthecorrectanswers.
+23
