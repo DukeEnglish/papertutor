@@ -1,0 +1,826 @@
+Implementation and Analysis of GPU Algorithms
+for Vecchia Approximation
+Zachary James1* and Joseph Guinness1
+1Department of Statistics and Data Science, Cornell University, Ithaca,
+14853, NY, USA.
+*Corresponding author(s). E-mail(s): zj37@cornell.edu;
+Contributing authors: guinness@cornell.edu;
+Abstract
+Gaussian Processes have become an indispensable part of the spatial statisti-
+cian’s toolbox but are unsuitable for analyzing large dataset because of the
+significanttimeandmemoryneededtofittheassociatedmodelexactly.Vecchia
+Approximation is widely used to reduce the computational complexity and can
+becalculatedwithembarrassinglyparallelalgorithms.Whilemulti-coresoftware
+hasbeendevelopedforVecchiaApproximation,suchastheGpGpRpackage,soft-
+ware designed to run on graphics processing units (GPU) is lacking, despite the
+tremendoussuccessGPUshavehadinstatisticsandmachinelearning.Wecom-
+pare three different ways to implement Vecchia Approximation on a GPU: two
+ofwhicharesimilartomethodsusedforotherGaussianProcessapproximations
+andonethatisnew.Theimpactofmemorytypeonperformanceisinvestigated
+andthefinalmethodisoptimizedaccordingly.Weshowthatournewmethodout-
+performstheothertwoandthenpresentitintheGpGpURpackage.Wecompare
+GpGpU to existing multi-core and GPU-accelerated software by fitting Gaussian
+Process models on various datasets, including a large spatial-temporal dataset
+of n > 106 points collected from an earth-observing satellite. Our results show
+that GpGpU achieves faster runtimes and better predictive accuracy.
+Keywords:spatialanalysis,high-performancecomputing,parallelcomputing
+1 Introduction
+Gaussian Processes (GPs) are models that can capture dependencies between obser-
+vations. These dependencies can be accounted for in regression and then used for
+1
+4202
+luJ
+3
+]OC.tats[
+1v04720.7042:viXrainterpolation. Furthermore, GPs are highly flexible, provide uncertainty measures,
+and incorporate domain knowledge through our choice of the mean and covariance
+functions. As a result, GPs are widely used in spatial statistics, where accounting
+for the dependence in spatial and spatial-temporal data is crucial, and performing
+interpolation is a common task.
+However, fitting a GP model becomes intractable as the number of data points
+n increases. Calculating the likelihood involves storing and factoring the covariance
+matrix, which requires O(n3) time and O(n2) memory and cannot be easily adapted
+to multi-core architectures. As a result, fitting a GP via direct calculation becomes
+infeasiblewhennislarge,suchasforn>105.Thisisproblematicbecauseadvancesin
+remotesensingtechnologyhavemadelargerdatasetevermorecommon.Forexample,
+modern satellite sensors now have resolutions that allow for millions of observations
+on a single orbit.
+Approximation methods address this computational problem by simplifying the
+linearalgebraoperationsinthelikelihoodcalculation.Inducingpointmethodsassume
+that a subset of the data can be used to capture the dependency structure, allow-
+ing the covariance to be expressed in terms of low-rank matrices (Quin˜onero-Candela
+andRasmussen,2005;Banerjeeetal.,2008).Covariancetaperingmodifiesthecovari-
+ance function with a compact positive semi-definite function to induce sparsity in the
+covariancematrix(Furreretal.,2006;Kaufmanetal.,2008).Severalmethodscanbe
+adapted to produce sparse precision matrices, including Bayesian inference (Tan and
+Nott, 2018) and the multitude of methods that use the stochastic partial differential
+equationapproximation(Lindgrenetal.,2022).Allthesemethodseliminatetheneed
+to store a dense O(n2) covariance matrix and, in turn, reduce the time and memory
+burden.
+The development of approximation methods has happened concurrently with
+advances in computing hardware, specifically more powerful central processing units
+(CPUs) and graphics processing units (GPUs). The release of open-source Message
+Passing Interface (MPI) libraries has made it significantly easier to run programs on
+large-scale multi-core CPU and GPU computing systems, while newer frameworks,
+such as OpenMP, make running algorithms in parallel as simple as adding a handful
+of directives to the source code. GPUs, which were initially developed for graph-
+ics rendering, have been used to great success in the machine learning and scientific
+computing communities with the help of CUDA, OpenCL, and other frameworks.
+As a result, practitioners have used GP approximations in conjunction with
+advanced hardware to analyze large datasets. Early attempts simply fit exact meth-
+ods or existing approximations on these systems (Franey et al., 2012; Abdulah et al.,
+2018),oftenfocusingoncomputingoneaspectofthelikelihood,suchastheCholesky
+decomposition, in parallel (Paciorek et al., 2015). However, many of the required
+linear algebra subroutines, including the Cholesky decomposition, cannot be easily
+computed on parallel systems, resulting in minimal speed-up.
+One solution is to use approximation methods that can be calculated in parallel.
+Local approximate GP (Gramacy et al., 2014) fits separate models for each predic-
+tion point by using only nearby observations for each model. Since the local models
+are independent of one another, the method can be fit with embarrassingly parallel
+2algorithms.TherehasalsobeensuccessinadaptingBayesianGPmethodstoparallel
+computing by expressing the lower bound in variational inference as a sum over the
+data points and then calculating it in parallel (Dai et al., 2014; van der Wilk et al.,
+2020). Other methods try to approximate specific terms in the exact likelihood of
+theGPusinglinearalgebrasubroutinesdesignedforparallelsystems(Gardneretal.,
+2018). An overview of software for fitting GP models is provided in Section 2.3.
+Vecchia Approximation (Vecchia, 1988) is a popular approximation that assumes
+observations are independent of one another when conditioned on nearby observa-
+tions. It is highly accurate in terms of Kullback–Leibler divergence (Guinness, 2018)
+and defines a valid marginal distribution (Abhirup Datta and Gelfand, 2016). Com-
+putationally,itreplacesthestoringandfactoringofthen×ncovariancematrixofthe
+marginal distribution with n matrices of size O(m×m) for each conditional distribu-
+tion, where m is a hyperparameter chosen to be much smaller than n. Each of these
+conditional distributions can then be computed in parallel, which existing software
+exploits by using multi-core CPU computing. (Pan et al., 2024) made an important
+contribution by demonstrating how to calculate the likelihood function on a GPU
+with batched methods. However, it is unclear how to best optimize the likelihood for
+parameter estimates on a GPU.
+We close this gap by creating a software package that fits a GP with Vecchia
+Approximation on an NVIDIA GPU. We use the decompositions in (Guinness, 2021)
+to quickly calculate the likelihood, gradient, and Fisher information of a GP model,
+andthenuseFisherscoringtofindparameterestimates.Weinvestigatethreedifferent
+methodsforimplementingthe(Guinness,2021)algorithmonaGPU,twoofwhichare
+similar to other methods used for GP approximation software, and one that is novel.
+We find that our novel method is superior and implement it in a software package for
+R.
+The final method relies on several optimizations to significantly reduce run times.
+Since each parallel process of Vecchia Approximation has a low memory complexity,
+we can store data in registers, which have the lowest read and write latency. This is
+validated by comparing our method to the other two methods, which rely on global
+and shared memory. We also nearly eliminate the need to synchronize the threads,
+the most basic computing units on the GPU, allowing us to calculate the likelihood
+of a GP on more than a million points fully in parallel.
+The remainder of this paper is organized as follows. In Section 2 we describe Vec-
+chia Approximation, introduce the reader to the architecture of a GPU, and provide
+an overview of existing software for fitting GP models. In Section 3 we introduce our
+software and describe the three different implementations. In Section 4 we present a
+numerical study comparing the performance of our methods to the GpGp software in
+R,whichusesmulti-coreparallelization,andGPytorchinPython,whichusesaGPU.
+Finally, in Section 5 we conclude with a discussion and possible directions for future
+work. The methods described in this paper are implemented in the R package GpGpU,
+which is available at https://github.com/zjames12/GpGpU.
+32 Background
+2.1 Vecchia Approximation
+A GP is a stochastic process whose finite dimensional realizations follow multivariate
+normal distributions. Its covariance structure allows for the dependencies between
+observations to be modeled. Given response vector Y =(Y ,...,Y )T and covariates
+1 n
+X = (X ,...,X )T observed at fixed locations Z = (Z ,...,Z )T, we assume a
+1 n 1 n
+GP process Y ∼ N(µ(X,Z,β),Σ(X,Z,θ)) with mean parameters β and covariance
+parameters θ. Without loss of generality, let Z ∈ Rd. We will also assume that the
+i
+mean process is linear µ(X,Z,β) = Xβ and the covariance is independent of the
+attributes Σ(X,Z,θ)=Σ(Z,θ). Since the locations are fixed, denote Σ(Z,θ) as Σ(θ).
+GP models have been effectively used to analyze spatial data. They are highly
+expressive and can model any smooth spatial process arbitrarily well (Micchelli
+et al., 2006). Regression parameters can be profiled given covariance parameter esti-
+mates. They can be used to interpolate the response at an unobserved location,
+a process known as kriging. Obtaining prediction intervals for the interpolations is
+straightforward.
+The practical application of GP models is hindered by the cost of computing the
+log-likelihood and score functions:
+L(θ,β;Y,X)=−nlog2π−logdetΣ(θ)−(Y −Xβ)TΣ(θ)−1(Y −Xβ) (1)
+(cid:18) (cid:19)
+∂L ∂Σ(θ) ∂Σ(θ)
+=−Tr Σ(θ)−1 +(Y −Xβ)TΣ(θ)−1 Σ(θ)−1(Y −Xβ), (2)
+∂θ ∂θ ∂θ
+which scale poorly with the number of observations n. In particular, it involves the
+log-determinantofthecovariancematrixlogdetΣ(θ),inverseofthecovariancematrix
+(cid:16) (cid:17)
+Σ(θ)−1, and trace of the covariance multiplied by its derivative Tr Σ(θ)−1∂Σ(θ) .
+∂θ
+Computing these quantities requires O(n3) time and O(n2) space. This quickly
+becomes infeasible on most computers as n increases.
+Vecchia Approximation addresses these computational issues by decomposing the
+marginal distribution into approximate conditional distributions (Vecchia, 1988).
+First, an ordering is established on the realized observations y = {y ,...,y }. For
+1 n
+each y we find the set s ⊆{y ,...y } of the min(i−1,m) points that precede y
+i i 1 i−1 i
+in the ordering and have the locations that are closest to y ’s location, where m is a
+i
+hyperparmeter selected to be much smaller than n. We then assume that each obser-
+vation y conditioned on s , referred to as the nearest neighbors, is independent of all
+i i
+other observations. This expresses the density
+n n
+Y Y
+P(Y =y)=P(y ) P(y |y ,...,y )≈P(y ) P(y |s ) (3)
+1 i 1 i−1 1 i i
+i=2 i=2
+as the product of approximate conditional densities.
+Theapproximationsignificantlyreducesthecomputationalburdenbyloweringthe
+time and memory complexity to O(nm3) and O(nm2) respectively. The conditional
+4likelihoodscanbecomputedinparallel,involvematricesofsizeatmost(m+1)×(m+
+1), and only depend on a small subset of the data. (Guinness, 2021) showed how the
+correspondingscorefunctionandFisherinformationcanalsobecalculatedinparallel.
+VecchiaApproximationhasseveraldesirableproperties.Theorderingensuresthat
+thefulllikelihoodisreturnedwhenm=n,andform<ntheconditionaldistributions
+implyavalidmarginaldistributionthathasacovariancematrixwithasparseinverse
+Choleskyfactor.TheapproximationisoptimalintermsoftheKullback–Leiblerdiver-
+gence between the true and implied distributions (Sch¨afer et al., 2021). Calculating
+themaximumlikelihoodestimatesisequivalenttosolvingasetofunbiasedestimating
+equations (Stein et al., 2004).
+Numerous extensions to Vecchia Approximation have been proposed. The order-
+ing of the points significantly impacts the parameter estimates, and heuristic-based
+ordering algorithms have been developed (Guinness, 2018). While Vecchia considered
+conditioning on individual observations, we can also condition on joint distributions.
+Thisgroupingreducesthenumberoflikelihoodcalculationswhileimprovingtheaccu-
+racyoftheapproximation(Guinness,2018).Therearealsoconsiderablevariationson
+how the conditioning sets are chosen. We may wish to include far-away observations
+tocapturehowthespatialprocessdecays(Steinetal.,2004),ortheconditioningsets
+may be learned (Abhirup Datta and Gelfand, 2016).
+2.2 GPU Computing
+A GPU is a type of computer processor originally designed for rendering computer
+graphics, which involves manipulating images stored as arrays. GPUs can perform a
+large number of tasks in parallel by using specialized hardware design to generate
+separate computational processes for each task.
+The dynamic parallelism of GPUs has made them ideal for highly parallel tasks
+unrelated to graphics processing, especially in statistics and machine learning. Many
+linearalgebrasubroutinesexperiencesignificantspeedupwhenportedonaGPU,such
+as the matrix-matrix multiplies needed to train neural networks. Other applications
+includeprincipalcomponentanalysis(Andrecut,2009)andMarkovchainMonteCarlo
+sampling (Andrew L. Beam and Doyle, 2016).
+MuchoftheprogressinGPUcomputinghasbeenfacilitatedbytheCUDAToolkit
+from NVIDIA, whichprovidesresourcesforwriting C/C++codefor NVIDIAGPUs.
+IntheCUDAprogrammingparadigm,userswritekernels (unrelatedtokernelsinthe
+GPliterature)thatrunontheGPU.Eachkernelinitializesagrid,amultidimensional
+array of blocks, each of which is a multidimensional array of threads, a single compu-
+tational process. The grid and blocks can be created as three-dimensional arrays so
+thatakernelwithgriddimension10×10×10andblockdimension10×10×10would
+have 106 threads. We can also choose to either synchronize all the threads we create,
+or just those in a specific block, creating two levels of parallelism.
+How we use this parallelism impacts the performance of the kernel. Excessive
+synchronization can have a negative impact, especially if it results in the computa-
+tional load being unequally distributed among the threads. It can also impact how
+we use GPU memory, which is separate from CPU memory and has different prop-
+erties depending on the type. Global memory can be accessed by any process on the
+5GPU, but has high read and write latency. Shared memory can be accessed by all
+the threads in the same block, but is limited in size. Registers have the lowest access
+time but are also small in size. Developers exploit different types of parallelism and
+memory when writing kernels to reduce computation time.
+NVIDIAhasalsodevelopeditsownkernelsandhaspresentedtheminthecuBLAS
+and cuSOLVER libraries. Similar to the well-known BLAS and LAPACK packages,
+theselibrariesprovidecommonlinearalgebrasubroutinesthataredesignedtorunon
+a GPU. Developers have found success using these functions as drop-in replacements
+for sequential linear algebra subroutines.
+2.3 Existing Software
+TherearemanysoftwarelibrariesforfittingGPmodels,alargenumberofwhichsup-
+port parallel computing. We will summarize GPU software for GP and then examine
+the few existing software programs for computing Vecchia Approximation on parallel
+systems.
+EarlyworkfittingGPsonGPUsfocusedonspeedinguplinearalgebraoperations
+suchascalculatingcovariancematricesandfindingLUdecompositions(Franeyetal.,
+2012).ParticularattentionwasgiventotheCholeskydecompositionasitisoftenthe
+bottleneck in likelihood evaluation and cannot be easily calculated in parallel. The
+bigGP package (Paciorek et al., 2015) used a block Cholesky algorithm to improve
+runtimes.TheGPytorchpackage(Gardneretal.,2018),ontheotherhand,eliminates
+the Cholesky decomposition altogether and instead uses a custom Krylov subspace
+algorithm to calculate the most expensive terms in the likelihood and gradient. Per-
+forming linear algebra operations in parallel reduces each likelihood evaluation to a
+sequence of parallel processes, often requiring synchronization after each one.
+Analternativeapproachistouseapproximationmethodstorewritethelikelihood
+and gradient of the GP as distinct processes that can be computed in parallel. GPy
+(Dai et al., 2014) expresses the variational lower bound of a GP likelihood as a sum
+over the data points. However, only two terms in the bound are calculated using
+the GPU, and it requires thread synchronization within blocks. The GPflow package
+(van der Wilk et al., 2020) addresses this by using the GPU to sum all the terms
+in the variational lower bound. Similarly, the laGP package (Gramacy et al., 2014)
+providesanalgorithmforthelocalapproximateGPmethodthatcanbecomputedin
+parallel across the data points. Each data point is assigned a block and an expensive
+subroutine is then computed in parallel across threads. All of these methods express
+the underlying process as completely parallel, enabling more efficient use of parallel
+hardware.
+There is limited software for fitting a GP with Vecchia Approximation. The
+GPVecchia package (Katzfuss and Guinness, 2021) uses OpenMP to calculate the
+sparsity structure of the inverse Cholesky factor of the covariance matrix. The GpGp
+package (Guinness et al., 2021) goes further and uses OpenMP to calculate the like-
+lihood, gradients, and Fisher information in parallel. (Pan et al., 2024) calculates
+the likelihood of a mean-zero GP with GPU-accelerated batched methods, but does
+notdiscusshowtocalculatetheassociatedmaximumlikelihoodestimates.Parameter
+estimation is possible using a gradient-free optimizer, but such optimizers have been
+6found to be inefficient when fitting GP models (Guinness, 2021). The code also does
+not support linear predictors or unstructured noise, often refered to as the nugget
+effect.
+3 GPU Algorithms for Vecchia Approximation
+WewillfitaGPmodelwithVecchiaApproximationonaGPUbyusingFisherscoring
+to calculate maximum likelihood estimates for the covariance parameters θ and then
+profiling the mean parameters β. Fisher scoring iteratively optimizes a likelihood
+function L using the score function ∂L and Fisher information I.
+∂θ
+∂L
+θ =θ +I−1(θ ) (θ ) (4)
+k+1 k k ∂θ k
+(Guinness, 2021) shows how to calculate these quantities in parallel, as partially
+described in Algorithm 1, which takes the response vector, design matrix, locations,
+covariance parameters, and nearest neighbors as inputs. The nearest neighbors are
+represented as an n × (m + 1) array of indices, with row i containing the indices
+of the min(i,m+1) observations that are closest to observation i, including i itself.
+A separate function takes the output of Algorithm 1 and produces the likelihood,
+gradient, and Fisher information. The GpGp package implements Algorithm 1 with
+support for multi-core computing.
+WewillconsiderthreedifferentGPUimplementationsforthesamealgorithm.The
+first, thread-per-observation, is new, while the other two, block-per-observation and
+batched, are similar to methods used for fitting other GP approximations. All three
+methodsareimplementedinRanduseRcpp(EddelbuettelandFranc¸ois,2011)tocall
+C++ functions, which in turn call CUDA functions. All calculations are performed
+with double precision arithmetic.
+3.1 Thread-per-Observation
+A straightforward approach is to initialize a kernel with n threads, each of which
+performs one iteration of the for-loop on line 4 of Algorithm 1. The first m iterations
+are calculated separately on the CPU to balance the computational load. Since the
+calculations for each observation are limited to a thread, we can store the covariance
+matrix, its derivative, and other quantities in registers. Arrays stored in registers
+cannot be dynamically allocated, so we use C++ template programming to create
+multiple kernels with different array sizes. The kernel is described in Algorithm 2.
+Algorithm1sumsobjectsoverthendatapoints,whichcancausememoryerrorson
+parallelsystems.Algorithm2ensuresthreadsafetybyinitializingtheobjectsasarrays
+in global memory with an extra dimension of length n. The results of each parallel
+process are first written to the array, then transferred to the CPU and summed along
+the extra dimension to produce the final result. For example, the XSX quantity, which
+isinitializedonline2ofAlgorithm1asap×parray,isinitializedasan×p×parray
+in Algorithm 2. After the kernel executes, the array is transferred to the CPU and
+summedoverthefirstdimension.Whilethearraycouldbesummedinparallelonthe
+7Algorithm 1 Sequential Vecchia from (Guinness, 2021). Calculates several values
+(logdet,ySy...)thatcanbecombinedtoproducethelikelihood,gradient,andFisher
+information of the GP.
+1: Input:responsey[n],designmatrixX[n][p],locationslocs[n][d],nearestneighbor
+indices NNarray[n][m+1], covariance parameters covparms[nparms]
+2: Initialize: logdet,ySy,XSX[p][p],ySX[m+1][nparms]
+dlogdet[nparms],dySy[nparms],dXSX[p][p][nparms],dySX[p][nparms]
+ainfo[nparms][nparms]
+3: Initialize: covmat[m+1][m+1],dcovmat[nparms][m+1][m+1]
+locsub[m+1][d],Xsub[m+1][p],ysub[m+1],...
+4: for i=1...n do
+5: Substitute nearest neighbors for location i into locsub
+6: Substitute corresponding values into Xsub and ysub.
+7: Compute covariance matrix covmat
+8: Compute Cholesky of covmat in-place
+9:
+Liy←covmat−1ysub
+10:
+LiX←covmat−1Xsub
+11: logdet[i]←2logcovmat[m][m]
+12:
+ySy←ySy+Liy[m]2
+13:
+XSX←XSX+LiX[m,](LiX[m,])T
+14:
+ySX←ySX+Liy[m](LiX[m,])T
+15: Compute covariance matrix derivative dcovmat
+16: ... ▷ Remaining operations
+17: end for
+18: return logdet,ySy,XSX,ySX,dXSX,dySy,dySX,dlogdet,ainfo
+GPU, we find this gives minimal speed-up. This approach results in the intermediary
+quantities (ySy, XSX, etc.) taking O(np2nparms) space and may not be ideal for GP
+with many attributes or covariance parameters.
+The thread-per-observation method has several benefits. Absent memory con-
+straints, the number of observations the algorithm can support is only limited by the
+maximum number of threads, approximately 67 million for CUDA 12. Single-thread
+parallelizationalsoreducesmemoryaccesstimesbyusingregisters.Althoughthesize
+of the registers on each thread is small, the matrices involved in each calculation are,
+by design, small enough to be stored on them. Finally, the method requires only a
+single synchronization, to make sure the kernel has finished executing.
+Unlike the other two methods we will discuss, Algorithm 2 does not fully exploit
+thehighdegreeofparallelismofferedbytheGPU,asmultiplelinearalgebraoperations
+mustbecomputedsequentiallyonasinglethread.However,themosttimeconsuming
+computationistheCholeskydecomposition,whichisnotamenabletoparallelization.
+Furthermore, the other linear algebra operations, such as solving small triangular
+systems, are fairly simple and can be efficiently performed on a single thread.
+8Algorithm 2 Kernel for thread-per-observation Vecchia. Calculates several values
+that can be combined to produce the likelihood, gradient, and Fisher information of
+the GP.
+1: Input: y[n], X[n][p], locs[n][d] ▷ Global Memory
+NNarray[n][m+1], covparms[nparms]
+logdet[n],ySy[n],XSX[n][p][p],ySX[n][m+1][nparms]
+covariance function cov, derivative function dcov...
+2: Initialize: covmat[m+1][m+1] ▷ Registers
+dcovmat[nparms][m+1][m+1]
+locsub[m+1][d],Xsub[m+1][p],ysub[m+1]
+3: i=blockIdx.x×blockDim.x+threadIdx.x ▷ Thread index
+4: if i<m then
+5: return
+6: end if
+7: for j =1,...,m+1 do
+8: for k =1,...,d do
+9: locsub[j][k]=locs[NNarray[i][j]][k]
+10: end for
+11: for k =1,...,p do
+12: Xsub[j][k]=X[NNarray[i][j]][k]
+13: end for
+14: ysub[j]=y[NNarray[i][j]]
+15: end for
+16: for p=1,...,m+1 and q =1,...,p do
+17: covmat[p][q]=cov(covmat,locsub,covparms)
+18: end for
+19: Compute Cholesky of covmat in-place
+20:
+Liy←covmat−1ysub
+21:
+LiX←covmat−1Xsub
+22: logdet[i]←2logcovmat[m][m]
+23:
+ySy[i]←Liy[m]2
+24:
+XSX[i,]←LiX[m,](LiX[m,])T
+25:
+ySX[i,]←Liy[m](LiX[m,])T
+26: for r =1,...,nparms,p=1,...,m+1,q =1,...,p do
+27: dcovmat[r][p][q]=dcov(covmat,locsub,covparms)
+28: end for
+29: ... ▷ Remaining operations
+3.2 Block-per-Observation
+Operations on a GPU can first be divided among blocks and then further divided
+among threads, providing two layers of parallelism. The threads within a block can
+usesharedmemoryandblock-levelsynchronizationtocommunicate.Thiscangreatly
+accelerate tasks with a hierarchical parallel nature, such as the implementation of
+local approximate nearest neighbors in laGP.
+9Weusethisapproachbycreatingakernelthatinitializesnblocks,eachcontaining
+a two-dimensional (m+1)×(m+1) array of threads. The n iterations of the outer
+for-loop, lines 4 to 25 in Algorithm 1, are performed in parallel across the blocks, and
+the operations within each iteration are performed in parallel across the threads. The
+substitution of nearest neighbors, calculation of covariance matrix, and calculation of
+covariancederivativearedoneinparallel,whiletheremainingoperationslackparallel
+structureandarefasterwhencalculatedsequentially.Thekernelisdescribedindetail
+in Algorithm 3. As in Algorithm 2 the first m iterations are calculated on the CPU.
+Delegating one block for each observation fully exploits the parallel nature of a
+GPU and significantly reduces the time needed to calculate the covariance matrix
+and its derivative. However, it is limited by extensive thread synchronization and
+an imbalanced computational load. Furthermore, CUDA is only able to generate a
+limited number of blocks, approximately 65 thousand for CUDA 12. As a result, a
+block-per-observation implementation cannot be easily scaled to large datasets, and
+wouldrequireeithermultiplekernelsrunningonseparatestreams,multipleGPUs,or
+multiple iterations of the kernel.
+3.3 Batched Methods
+Batched methods solve many small linear algebra problems together. Many linear
+algebra libraries provide batched algorithms for multi-core and GPU systems. (Pan
+et al., 2024) used the KBLAS-GPU library to compute the likelihood of a zero-mean
+GP with Vecchia Approximation.
+We use batched methods by creating kernels to perform some of the operations
+and then rely on methods from NVIDIA libraries for the rest. Our kernels, shown in
+Algorithm 4, substitute the nearest neighbors, calculate the covariance, and calculate
+the covariance derivative for all n iterations in parallel. The batched methods from
+the cuSOLVER and cuBLAS libraries are then used for the Cholesky decomposition
+and triangular solves.
+Batchedalgorithmsallowforefficientmemoryreadpatterns.However,theyrequire
+intermediaryquantitiestobestoredinglobalmemory,whichhashighreadlatency.We
+also need to synchronize the system after nearly every operation, which significantly
+slows down computation.
+10Algorithm3Kernelforblock-per-observationVecchia.Calculatesseveralvaluesthat
+can be combined to produce the likelihood, gradient, and Fisher information of the
+GP.
+1: Input: y[n], X[n][p], locs[n][d], NNarray[n][m+1] ▷ Global Memory
+covparms[nparms],logdet[n],ySy[n],XSX[n][p][p]
+covariance function cov, derivative function dcov...
+2: Initialize: covmat[m+1][m+1] ▷ Shared Memory
+dcovmat[nparms][m+1][m+1],locsub[m+1][d]...
+3: i=blockIdx.x ▷ Block index
+4: j =threadIdx.x ▷ Thread index first dimension
+5: k =threadIdx.y ▷ Thread index second dimension
+6: if i<m then
+7: return
+8: end if
+9: if j <m and k <d then
+10: locsub[j][k]=locs[NNarray[i][j]][k]
+11: end if
+12: if j <m and k <p then
+13: Xsub[j][k]=X[NNarray[i][j]][k]
+14: end if
+15: if j <m and k =0 then
+16: ysub[j]=y[NNarray[i][j]]
+17: end if
+18: syncthreads()
+19: if j <m and k <j then
+20: covmat[p][q]=cov(covmat,locsub,covparms)
+21: end if
+22: if j <m and k <j then
+23: for r =1,...,nparms do
+24: dcovmat[r][j][k]=dcov(dcovmat,locsub,covparms)
+25: end for
+26: end if
+27: syncthreads()
+28: if j =0 and k =0 then
+29: ... ▷ Remaining operations on single thread
+30: end if
+11Algorithm 4 Batched Vecchia. Calculates several values that can be combined to
+produce the likelihood, gradient, and Fisher information of the GP.
+1: Input: response y[n], design matrix X[n][p] ▷ Global Memory
+locations locs[n][d], nearest neighbor indices NNarray[n][m+1]
+covariance parameters covparms[nparms]
+2: Initialize: logdet,ySy,XSX[p][p]... ▷ Global memory
+3: Initialize: covmat[n][m+1][m+1] ▷ Global Memory
+dcovmat[n][m+1][m+1][nparms]
+locsub[n][m+1][d],Xsub[n][m+1][p],ysub[n][m+1]
+4: substituteNearestNeighborsBatched(NNarray,locs,locsub)
+5: substituteXBatched(NNarray,X,Xsub)
+6: substituteyBatched(NNarray,y,ysub)
+7: cudaDeviceSynchronize()
+8: covarianceBatched(covmat,locsub,covparms)
+9: covarianceDerivativeBatched(dcovmat,locsub,covparms)
+10: cudaDeviceSynchronize()
+11: cusolverDnDpotrfBatched(covmat...)
+12: cudaDeviceSynchronize()
+13: cublasDtrsmBatched(covmat,...)
+14: cudaDeviceSynchronize()
+15: cublasDtrsmBatched(covmat,Xsub)
+16: cudaDeviceSynchronize()
+17: cublasDtrsmBatched(covmat,ysub)
+18: cudaDeviceSynchronize()
+19: for i=m...n do
+20: logdet←logdet+2logcovmat[i][m][m]
+21:
+ySy←ySy+ysub[i][m]2
+22:
+XSX←XSX+Xsub[i][m,](Xsub[i][m,])T
+23:
+ySX←ySX+ysub[i][m](Xsub[i][m,])T
+24: end for
+25: ... ▷ Remaining operations
+124 Numerical Studies
+We compare the three GPU implementations discussed Section 3 by fitting a GP
+modelonarealworlddataset.Themethodsreturnthesameparameterestimatesand
+are only compared by wall clock time. The fastest method, thread-per-observation, is
+presented in the GpGpU package and then compared to the multi-core implementation
+in GpGp and two different approximation methods in the GPytorch package.
+When fitting a model with GpGpU in R, the user must load the data into the R
+environment, reorder the data, find the nearest neighbors, and fit the model. In the
+example code in Figure 1 the data is loaded on line 2, points are reordered on line
+3, the nearest neighbors are found on line 4, and the model is fit on line 5, which
+returns the final parameter estimates. GpGpU only applies GPU acceleration to fitting
+the model, which is usually the most expensive step. We measure the time to fit a
+modelbytimingline5,whichincludesalltheoverheadforcomputingonaGPU,such
+as allocating memory, transferring data to the GPU, and transferring results back to
+the CPU.
+Fig. 1: Example usage of GpGpU for fitting a GP model on the Terra dataset with
+m=30 neighbors.
+4.1 Resources
+All computations are run on the G2 computing cluster at Cornell University. GPU-
+accelerated software used a single NVIDIA A40 Tensor Core GPU with compute
+capability6.1.ThemultithreadedCPUsoftwarewasrunonsixIntelIceLakeproces-
+sors and used the OpenBLAS linear algebra library to achieve faster results. The R
+packages are built and run on R 4.3 and the Python packages run on Python 3.8.
+4.2 Data
+We use three real-world datasets, two of which are large geospatial datasets collected
+byearth-observingsatellites,andonethatisanexperimentaldatasetpreviouslyused
+to measure the performance of machine learning methods.
+Jason-3 is an Earth-observing satellite operated by the National Oceanic and
+Atmospheric Administration (NOAA) and the European Organisation for the
+Exploitation of Meteorological Satellites (Eumetsat) that uses a radar altimeter for
+ocean surface readings. (Bekerman and Guinness, 2023) used global Jason-3 readings
+13of ocean surface wind speeds to examine biases in satellite sensors. We use a subset
+of this data from September 18, 2019, to February 29, 2020 and downsample it every
+eight seconds, resulting in 1,040,815 observations. We also consider a subset of the
+first 50,000 observations. The data is plotted in Figure 2.
+Terraisanearth-observingsatelliteoperatedbyNASA.(Heatonetal.,2019)used
+daytime North American land surface temperature readings from Terra’s MODIS
+sensor to compare different spatial methods. The dataset has 148,309 observations
+and is partitioned into a training set of size 105,569 and a test set of size 42,740. The
+data is plotted in Figure 3.
+The University of California, Irvine (UCI) Machine Learning Repository contains
+datasets from a wide range of fields. The Elevators dataset describes an aeronautical
+experiment and consists of 16599 observations and 18 attributes. (Gardner et al.,
+2018) used this dataset to evaluate GPytorch for non-parametric regression. GP can
+be used for non-parametric regression by interpreting the attributes as locations and
+assuming constant mean.
+Fig. 2: Jason-3 ocean surface wind speed readings from (Bekerman and Guinness,
+2023).
+4.3 Model
+WemeasuretheperformanceofthesoftwarebyfittingthefollowingGPmodelonthe
+three datasets:
+Y =β+η+ϵ (5)
+The response Y = (Y ,...,Y ) corresponds to wind speed for the Jason-3 data,
+1 n
+temperature for Terra, and change in altitude for Elevators, with the location for Y
+i
+14(a)Fulldata (b)Trainingdata
+Fig. 3: Terra temperature readings from (Heaton et al., 2019)
+denoted as Z = (Z ,...,Z ). β is the model intercept, η ∼ N(0,Σ(σ2,ρ ,...,ρ ))
+i i1 id 1 d
+is the spatial stochasticity, and ϵ∼N(0,τ2σ2I ) is the unstructured noise or nugget
+n
+effect.ThecovariancematrixΣisdefinedbytheexponentialcovariancefunctionwith
+variance σ2 and range parameters ρ ...ρ .
+1 d
+ v 
+Cov[Y i,Y
+j]=σ2exp−u
+u
+tXd (cid:18)
+Z ik ρ−Z
+jk(cid:19)2
+ (6)
+k
+k=1
+When modeling the satellite data the range parameters are assumed to be equal
+ρ = ··· = ρ , and the locations are embedded in R3 (Guinness and Fuentes, 2016).
+1 d
+For the Elevators data the range parameters are allowed to differ, and the attributes
+are used as the locations.
+4.4 Procedure
+We compare the three implementations discussed in Section 3 by fitting Equation 5
+on a subset of 50,000 points from the Jason-3 dataset. The dataset is divided into
+ten partitions and a cross-validation-like scheme is used to find the average runtime
+over the folds of size 45,000. The times for Fisher scoring are reported in Table 1
+for m=10,30,60 neighbors and with a random permutation for the reordering. The
+block method could not be fit with m=60 neighbors because it exhausted all shared
+memory. The fastest method, thread-per-observation, is implemented in GpGpU and
+compared to GpGp and GPytorch.
+WerunGpGponbothasingle-coreandsix-coresystemandusethehighlyoptimized
+OpenBLASlinearalgebralibrary.GPytorchallowsforGPUaccelerationbutdoesnot
+15supportVecchiaApproximation,soweinsteadusesparseGaussianprocessregression
+(SGPR) and deep kernel learning with structured kernel interpolation (DKL+SKI).
+SGPR is an inducing point method that produces a low-rank representation of the
+covariance matrix. We use w = 300,600,1200 inducing points, with the number of
+pointslimitedbymemory.DKL+SKIcombinesaneuralnetworkwithinducingpoints
+placed on a grid to increase the flexibility of the model while inducing a covariance
+matrixwithToeplitzstructure.Weusetheneuralnetworkarchitecturefrom(Gardner
+et al., 2018) and a grid of dimensions 100×100.
+Due to memory constraints, the DKL+SKI model could not be fit on the Terra
+data and none of the GPytorch models could be fit on the full Jason-3 data. A cross-
+validation-like scheme was used to calculate the average runtime and RMSE on the
+Elevators, Jason-3 subset, and full Jason-3 data, while the Terra dataset was already
+divided into test and training sets so no cross-validation was performed.
+Runtime measures the time needed to fit the model, including data transfer from
+the CPU to the GPU. For GpGpU and GpGp the time needed to reorder the points and
+find the nearest neighbors is not included. Runtimes and RMSE for Elevators and
+Jason-3 are reported in Table 2 and Table 3 respectively, while the results for the
+Terra data are reported in Table 4.
+Table 1:Time(sec)offittingaGPmodelwiththreedifferentGPUimplementations
+ofVecchiaApproximationonasubsetoftheJason-3data.Thedataispartitionedinto
+k =10 folds and a cross-validation-like scheme is used to obtain the average runtime,
+with each fit performed on 90% of the data, or n=4.5×104 observations. Fitting is
+Fisherscoringwiththeaveragenumberofiterationsinparentheses.Timeincludesall
+overhead associated with the GPU, but not reordering the points or finding nearest
+neighbors.Themodelsarefitwithmneighbors.Theblockmethodranoutofmemory
+for m=60.
+m=10 m=30 m=60
+Thread 0.315(8.1) 0.568(7.5) 2.173(9.2)
+Block 0.522(8.1) 3.568(7.5)
+Batch 0.753(8.1) 2.846(7.5) 11.849(9.2)
+4.5 Results
+The thread-per-observation method is faster than the block-per-observation and
+batchedmethods,whichweattributetominimalsynchronizationandthelowlatency
+of registers. Further examination shows that it also scales well with m and n, as seen
+in Figure 4.
+We find that GpGpU, using the thread-per-observation method, is always faster
+than GpGp, with fitting speedups as high as 17 times over single core and 3 times over
+six-core. GpGpU is faster than GPytorch on the geospatial data, fitting the Jason-3
+subset nearly 200 times faster than DKL+SKI and 6 times faster than SGPR while
+havingalowerRMSE.Italsouseslessmemory,beingabletofitthefullJason-3data
+16Fig. 4: Time (sec) for GpGpU with the thread-per-observation implementation to cal-
+culate the likelihood, gradient, and Fisher information of the GP model in Equation
+5 for m = 10,30,60 neighbors on subsets of the Jason-3 data with the exponential
+isotropiccovariancefunction.ThiscorrespondstooneiterationofFisherscoring,and
+includes all GPU overhead, such as memory allocation and memory transfers. Each
+time is an average of five runs.
+while SGPR and DKL+SKI cannot. GpGpU is slower than GPytorch on the Elevators
+data, but achieves better predicitive accuracy. (Gardner et al., 2018) fit the Elevators
+data with a Mat´ern with ν = 5, but we found higher predictive accuracy with the
+2
+exponential isotropic covariance.
+GpGpUremainscompetitiveevenwhenthetimeforreorderingthepointsandfind-
+ing nearest neighbors is considered, in that it is still faster than GPytorch on the
+geospatial dataset. The nearest neighbors subroutine runs sequentially on the CPU
+and takes longer than the Fisher scoring, while the reordering of the points takes
+minimal time. A full time profile of fitting a GP on the Jason-3 subset is in Figure 5.
+5 Discussion
+GpGpUaddressestheneedforsoftwarethatcanquicklyfitlargegeospatialGPmodels
+and provides a comparison of three different approaches. Our new algorithm lever-
+agestheinsightthatVecchiaApproximationfullyparallelizeseachiterationofFisher
+17Table 2: Time (sec) of fitting a GP model on various datasets with GpGpU and
+GPytorch. Each dataset is partitioned into k = 10 folds and a cross-validation-like
+scheme is used to obtain the average runtime, with each fit performed on 90% of the
+data. GpGpU performs Fisher scoring for maximum 40 iterations and GPytorch uses
+the Adam optimizer for 100 iterations. The average number of iterations of Fisher
+scoring is in parentheses. The number of nearest neighbors is m and the number of
+inducing points is w. Reordering the points and finding the nearest neighbors is not
+included in the times.
+Elevators Jason-3 Jason-3 Jason-3+Time
+(n=15k) (n=45k) (n=960k) (n=960k)
+GpGpU(m=10) 3.469(40) 0.315(8.1) 7.772(7.9) 10.279(11)
+GpGp,1core(m=10) 22.527(40) 2.392(8.1) 54.1485(7.9) 79.1318(11)
+GpGp,6cores(m=10) 6.669(40) 0.728(8.1) 12.565(7.9) 18.173(11)
+GpGpU(m=30) 6.905(37.6) 0.568(7.5) 53.123(28.8) 23.888(12)
+GpGp,1core(m=30) 139.185(37.6) 10.427(7.5) 174.166(28.8) 408.774(12)
+GpGp,6cores(m=30) 26.725(37.6) 2.112(7.5) 894.821(28.8) 74.184(12)
+SGPR(w=300) 1.469 2.403
+SGPR(w=600) 1.640 3.061
+SGPR(w=1200) 2.293 4.750 Outofmemory
+DKL+SKI 29.517 78.069
+Table 3: RMSE of a GP model fit on various datasets with GpGpU and GPytorch.
+Each dataset is partitioned into k =10 folds. Cross-validation is then used to obtain
+the average RMSE, with each fit performed on 90% of the data and prediction on
+the remaining 10%. GpGpU uses kriging with 60 neighbors while GPytorch uses the
+posterior predictive mean function. The number of nearest neighbors used for fitting
+the model is m and the number of inducing points is w.
+Elevators Jason-3 Jason-3 Jason-3+Time
+(n=15k) (n=45k) (n=960k) (n=960k)
+GpGpU(m=10) 5.3 2.230 3.181 1.281
+GpGp,1core(m=10) 5.3 2.230 3.181 1.281
+GpGp,6cores(m=10) 5.3 2.230 3.181 1.281
+GpGpU(m=30) 5.295 2.227 3.181 1.281
+GpGp,1core(m=30) 5.295 2.227 3.181 1.281
+GpGp,6cores(m=30) 5.295 2.227 3.181 1.281
+SGPR(w=300) 6.710 2.961
+SGPR(w=600) 6.709 2.914
+SGPR(w=1200) 6.700 2.874 Outofmemory
+DKL+SKI 6.665 3.449
+scoringwhile maintainingalowmemoryburdenforeachparallelprocess.This allows
+intermediary values to be stored in registers, which have the lowest latency. As a
+result, our method differs from most other GP software that rely on global memory
+and do not explore how memory type affects performance.
+18Table 4: Time (sec) and RMSE of fitting a GP model on the Terra data with GpGpU
+andGPytorch.Thedataispartitionedintoatrainingandtestsetasin(Heatonetal.,
+2019).
+Time(sec) RMSE Iterations
+GpGpU(m=10) 2.289 1.370 18
+GpGp-1(m=10) 11.967 1.370 18
+GpGp-6(m=10) 2.673 1.370 18
+GpGpU(m=30) 2.842 1.468 13
+GpGp-1(m=30) 41.452 1.468 13
+GpGp-6(m=30) 7.528 1.468 13
+SGPR(w=300) 4.879 3.022
+Fig. 5: Time profile of fitting GP on 4.5×105 Jason-3 observations with different
+software. The Vecchia Approximation software use m = 10 neighbors. The SGPR
+methods use w inducing points.
+Our GpGpU package outperforms GpGp and GPytorch on large geospatial datasets
+and is competitive on higher-dimensional data. We did not compare GpGpU to (Pan
+et al., 2024) because that paper only reported times for calculating the likelihood,
+while we optimized our code to fit the model as quickly as possible, which includes
+calculatingthelikelihood,gradient,andFisherinformationtogether.(Panetal.,2024)
+did not provide code for calculating the gradient and Fisher information.
+Ourimplementationhasseverallimitations,includingpossiblyexhaustingmemory
+when the model has a large number of linear predictors or covariance parameters.
+Due to CUDA’s lack of support for the modified Bessel function of the second kind,
+we cannot use the popular Mat´ern covariance function with arbitrary smoothness.
+However, we believe our software is still of great use to practitioners, as it is able to
+support large geospatial datasets and many other covariance functions.
+19PossiblefutureimprovementstoGpGpUincludeparallelizationovermultipleGPUs,
+supporting arbitrary covariance functions with automatic differentiation, and group-
+ing observations. We also hope to create GPU algorithms for important subroutines,
+specifically finding the nearest neighbors, which was shown to take longer than
+optimizing the loss function.
+Software
+The GpGpU package is available at https://github.com/zjames12/GpGpU.
+References
+Abhirup Datta, A.O.F. Sudipto Banerjee, Gelfand, A.E.: Hierarchical nearest-
+neighbor gaussian process models for large geostatistical datasets. Journal of
+the American Statistical Association 111(514), 800–812 (2016) https://doi.org/
+10.1080/01621459.2015.1044091 https://doi.org/10.1080/01621459.2015.1044091.
+PMID: 29720777
+Andrew L. Beam, S.K.G., Doyle, J.: Fast hamiltonian monte carlo using
+gpu computing. Journal of Computational and Graphical Statistics
+25(2), 536–548 (2016) https://doi.org/10.1080/10618600.2015.1035724
+https://doi.org/10.1080/10618600.2015.1035724
+Abdulah, S.,Ltaief,H.,Sun,Y.,Genton,M.G.,Keyes,D.E.:Exageostat:Ahighper-
+formanceunifiedsoftwareforgeostatisticsonmanycoresystems.IEEETransactions
+on Parallel and Distributed Systems 29(12), 2771–2784 (2018) https://doi.org/10.
+1109/TPDS.2018.2850749
+Andrecut, M.: Parallel gpu implementation of iterative pca algorithms. Journal of
+Computational Biology 16(11), 1593–1599 (2009) https://doi.org/10.1089/cmb.
+2008.0221 https://doi.org/10.1089/cmb.2008.0221. PMID: 19772385
+Bekerman, W., Guinness, J.: Comparison of cygnss and jason-3 wind
+speed measurements via gaussian processes. Data Science in Science
+2(1), 2194349 (2023) https://doi.org/10.1080/26941899.2023.2194349
+https://doi.org/10.1080/26941899.2023.2194349
+Banerjee,S.,Gelfand,A.E.,Finley,A.O.,Sang,H.:Gaussianpredictiveprocessmodels
+for large spatial data sets. Journal of the Royal Statistical Society: Series B (Sta-
+tistical Methodology) 70(4), 825–848 (2008) https://doi.org/10.1111/j.1467-9868.
+2008.00663.x https://rss.onlinelibrary.wiley.com/doi/pdf/10.1111/j.1467-
+9868.2008.00663.x
+Dai, Z., Damianou, A., Hensman, J., Lawrence, N.: Gaussian Process Models with
+Parallelization and GPU acceleration (2014). https://arxiv.org/abs/1410.4984
+20Eddelbuettel, D., Franc¸ois, R.: Rcpp: Seamless R and C++ integration. Journal of
+Statistical Software 40(8), 1–18 (2011) https://doi.org/10.18637/jss.v040.i08
+Furrer, R., Genton, M.G., Nychka, D.: Covariance tapering for interpolation of large
+spatialdatasets.JournalofComputationalandGraphicalStatistics15(3),502–523
+(2006) http://www.jstor.org/stable/27594195
+Franey, M., Ranjan, P., Chipman, H.: A Short Note on Gaussian Process Modeling
+for Large Datasets using Graphics Processing Units (2012). https://arxiv.org/abs/
+1203.1269
+Guinness, J., Fuentes, M.: Isotropic covariance functions on spheres: Some properties
+andmodelingconsiderations.JournalofMultivariateAnalysis143,143–152(2016)
+https://doi.org/10.1016/j.jmva.2015.08.018
+Guinness, J., Katzfuss, M., Fahmy, Y.: GpGp: Fast Gaussian Process Computation
+Using Vecchia’s Approximation. (2021). R package version 0.4.0. https://CRAN.
+R-project.org/package=GpGp
+Gramacy, R.B., Niemi, J., Weiss, R.M.: Massively parallel approximate gaussian pro-
+cess regression. SIAM/ASA Journal on Uncertainty Quantification 2(1), 564–584
+(2014) https://doi.org/10.1137/130941912 https://doi.org/10.1137/130941912
+Gardner,J.,Pleiss,G.,Weinberger,K.Q.,Bindel,D.,Wilson,A.G.:Gpytorch:Black-
+boxmatrix-matrixgaussianprocessinferencewithgpuacceleration.In:Advancesin
+NeuralInformationProcessingSystems,vol.31(2018).https://proceedings.neurips.
+cc/paper files/paper/2018/file/27e8e17134dd7083b050476733207ea1-Paper.pdf
+Guinness, J.: Permutation and grouping methods for sharpening gaussian process
+approximations. Technometrics 60(4), 415–429 (2018) https://doi.org/10.1080/
+00401706.2018.1437476 https://doi.org/10.1080/00401706.2018.1437476. PMID:
+31447491
+Guinness, J.: Gaussian process learning via fisher scoring of vecchia’s approx-
+imation. Statistics and Computing 31(3), 25 (2021) https://doi.org/10.1007/
+s11222-021-09999-1
+Heaton, M.J., Datta, A., Finley, A.O., Furrer, R., Guinness, J., Guhaniyogi, R., Ger-
+ber,F.,Gramacy,R.B.,Hammerling,D.,Katzfuss,M.,Lindgren,F.,Nychka,D.W.,
+Sun, F., Zammit-Mangion, A.: A case study competition among methods for ana-
+lyzing large spatial data. Journal of Agricultural, Biological and Environmental
+Statistics 24(3), 398–425 (2019) https://doi.org/10.1007/s13253-018-00348-w
+Katzfuss, M., Guinness, J.: A general framework for vecchia approximations of gaus-
+sian processes. Statistical Science 36(1) (2021) https://doi.org/10.1214/19-sts755
+21Kaufman, C.G., Schervish, M.J., Nychka, D.W.: Covariance tapering for likelihood-
+basedestimationinlargespatialdatasets.JournaloftheAmericanStatisticalAsso-
+ciation 103(484), 1545–1555 (2008) https://doi.org/10.1198/016214508000000959
+https://doi.org/10.1198/016214508000000959
+Lindgren, F., Bolin, D., Rue, H.: The spde approach for gaussian and non-gaussian
+fields: 10 years and still running. Spatial Statistics 50, 100599 (2022) https://doi.
+org/10.1016/j.spasta.2022.100599 . Special Issue: The Impact of Spatial Statistics
+Micchelli, C.A., Xu, Y., Zhang, H.: Universal kernels. Journal of Machine Learning
+Research 7(95), 2651–2667 (2006) http://jmlr.org/papers/v7/micchelli06a.html
+Pan,Q.,Abdulah,S.,Genton,M.G.,Keyes,D.E.,Ltaief,H.,Sun,Y.:Gpu-accelerated
+vecchia approximations of gaussian processes for geospatial data using batched
+matrix computations. In: ISC High Performance 2024 Research Paper Proceedings
+(39th International Conference), pp. 1–12 (2024). https://doi.org/10.23919/ISC.
+2024.10528930
+Paciorek, C.J., Lipshitz, B., Zhuo, W., Prabhat, ., Kaufman, C.G.G., Thomas, R.C.:
+Parallelizing gaussian process calculations in r. Journal of Statistical Software
+63(10), 1–23 (2015) https://doi.org/10.18637/jss.v063.i10
+Quin˜onero-Candela,J.,Rasmussen,C.E.:Aunifyingviewofsparseapproximategaus-
+sian process regression. Journal of Machine Learning Research 6(65), 1939–1959
+(2005) http://jmlr.org/papers/v6/quinonero-candela05a.html
+Stein, M.L., Chi, Z., Welty, L.J.: Approximating Likelihoods for Large
+Spatial Data Sets. Journal of the Royal Statistical Society Series
+B: Statistical Methodology 66(2), 275–296 (2004) https://doi.org/10.
+1046/j.1369-7412.2003.05512.x https://academic.oup.com/jrsssb/article-
+pdf/66/2/275/49727566/jrsssb 66 2 275.pdf
+Sch¨afer, F., Katzfuss, M., Owhadi, H.: Sparse cholesky factorization by kullback–
+leibler minimization. SIAM Journal on Scientific Computing 43(3), 2019–2046
+(2021)https://doi.org/10.1137/20M1336254https://doi.org/10.1137/20M1336254
+Tan, L.S.L., Nott, D.J.: Gaussian variational approximation with sparse precision
+matrices.StatisticsandComputing28(2),259–275(2018)https://doi.org/10.1007/
+s11222-017-9729-7
+Wilk,M.,Dutordoir,V.,John,S.,Artemev,A.,Adam,V.,Hensman,J.:AFramework
+for Interdomain and Multioutput Gaussian Processes (2020). https://arxiv.org/
+abs/2003.01115
+Vecchia, A.V.: Estimation and model identification for continuous spatial processes.
+Journal of the Royal Statistical Society. Series B (Methodological) 50(2), 297–312
+(1988) http://www.jstor.org/stable/2345768
+22
