@@ -1,0 +1,897 @@
+On Speeding Up Language Model Evaluation
+JinPengZhou∗ ChristianK.Belardi∗ RuihanWu∗
+CornellUniversity CornellUniversity UniversityofCalifornia,SanDiego
+TravisZhang CarlaP.Gomes WenSun KilianQ.Weinberger
+CornellUniversity CornellUniversity CornellUniversity CornellUniversity
+Abstract
+Largelanguagemodels(LLMs)currentlydominatethefieldofnaturallanguage
+processing(NLP),representingthestate-of-the-artacrossadiversearrayoftasks.
+Developing a model of this nature, from training to inference, requires make
+numerousdecisionswhichdefineacombinatorialsearchproblem. Forexample,
+selectingtheoptimalpre-trainedLLM,prompt,orhyperparameterstoattainthe
+bestperformanceforataskoftenrequiresevaluatingmultiplecandidatesonan
+entiretestset.Thisexhaustiveevaluationcanbetime-consumingandcostly,asboth
+inferenceandmetriccomputationwithLLMsareresource-intensive. Inthispaper,
+weaddressthechallengeofidentifyingthebestmethodwithinalimitedbudgetfor
+evaluatingmethodsontestexamples. Byleveragingthewell-studiedmulti-armed
+bandit framework, which sequentially selects the next method-example pair to
+evaluate,ourapproach,combiningmulti-armedbanditalgorithmswithlow-rank
+factorization,significantlyreducestherequiredresources. Experimentsshowthat
+ouralgorithmscanidentifythetop-performingmethodusingonly5-15%ofthe
+typicallyneededresources,resultinginan85-95%reductionincost.
+1 Introduction
+Largelanguagemodels(LLMs)havedemonstratedremarkableproficiencyindiversetaskssuchas
+questionanswering,machinetranslationandmathematicalreasoning[5,16,43]. Theyareemployed
+acrossnumerousapplications,rangingfromautomatedcustomersupporttocontentgeneration[45].
+AsthedevelopmentofnewLLMscontinues,practitionersfindthemselveswithaplethoraofoptions,
+selectingtheoptimalmodel,prompt[40],orhyperparametersfortheirspecificneedsfromhundreds
+available. Forinstance,initiativesliketheChatbotArena[15]activelymaintainnearly100models
+for benchmarking on user-specified open-ended queries. Similarly, the AlpacaEval [44] project
+benchmarksover200modelsagainstadiversesetof805questions.
+QueryinganLLMisresource-intensive,andthereforesuchextensiveevaluationsrequiresignificant
+investmentsintime,computeandfinancialresources. InFigure1Left,weshowtheestimatedcostto
+fullyevaluate(denotedasfullevaluation)the153modelsofficiallyincludedinAlpacaEval[44]asof
+May20,2024tobealmost800USD.InFigure1Right,weshowthat78.2NvidiaA6000GPUhours
+areneededforevaluating205zero-shotpromptson784GSM8K[18]questionsusingMistral-7B
+[32].
+Despitetheconventionofexhaustiveevaluationsofalldatapointsinatestsetfromatask,practitioners
+oftenonlycareabouttheoverallperformancerankings. Typically,thegoalistoidentifythetop-
+performingmethodsorsimplythebestones,discardingthelower-rankedalternatives. Therefore,
+whilefull-scaleevaluationofeachmethodoneverydatapointisthorough,itmaynotbecost-effective
+whenthegoalismerelytoidentifythesuperiormethod.
+∗Equalcontribution.Correspondenceto{jz563, ckb73}@cornell.eduandruw076@ucsd.edu.
+Preprint.Underreview.
+4202
+luJ
+8
+]IA.sc[
+1v27160.7042:viXraFigure1: Comparisonofcostforfindingthebestmodelorpromptbetweenourproposedalgorithms
+(UCB-E,UCB-E-LRF)andfullevaluationontwodatasets. Left: AlpacaEval[44]dataasofMay
+20, 2024. The data includes 153 models evaluated on 805 instructions. The response on each
+instructionforeachmodeliscomparedagainstabaselineresponsegeneratedbyGPT4-turbo,with
+GPT4-turbobeingtheLLMjudge[66]. Themonetarysavingiscalculatedbasedontheinference
+costofproprietarymodelsamongthe153modelsandGPT4-turbojudgingcost. Right: GSM8K
+[18]promptengineeringdata. Thedataincludes205zero-shotpromptsforMistral-7Bgeneratedby
+GPT4evaluatedon784questions(10%)ofGSM8Ktrainingset. Thetimesavingiscalculatedbased
+oninferencespeedofMistral-7BusingtheHuggingfacelibrarywithoneNvidiaA6000GPU.
+Inthispaper,weexplorealimited-budgetsetting. Thebestmethodamongasetofmethodsisthe
+methodthathasthebestaverageperformanceamongasetoftestexamples. Wewanttoidentify
+thisbestmethodgivenafixedbudgetforevaluatingmethod-examplepairs. Asimplebaselineisto
+evenlysplitthebudgetforeachmethod. However,thiscanbeveryinefficient–asweobservedin
+ourexperiments,forsomedatasets,weneedtoevaluatemorethan90%ofallmethod-examplepairs
+topredictthebestmethodcorrectlywithhighprobability. Intuitively,itiseasiertorecognizethat
+low-performancemethodsareunlikelytobethebest. Therefore,amoreeffectivebudgetallocation
+strategy is to spend less on low-performing methods and more on promising ones. Multi-armed
+banditalgorithmsenablethisdynamicallocationbyactivelyselectingthenextmethod-examplepair
+toevaluatebasedontheresultsofpreviousevaluations.
+We propose two active selection algorithms UCB-E and UCB-E-LRF. Our first algorithm is an
+extensionoftheclassicalUCB-E[2]tosolvethemulti-armedbanditproblem. Itestimatestheupper
+confidencebound(UCB)toguidetheselectionofthemethodwhichispairedwitharandomlychosen
+example for the next evaluation in order to efficiently estimate the best method. This algorithm
+enjoysatheoreticalguaranteethatthechanceofselectingthebestarmconvergesto100%byan
+exponentialdecayofthenumberofevaluations. Oursecondalgorithm,UCB-E-LRF,leveragesthe
+intrinsiclow-ranknessofthescoringmatrices. Wefindthatinpractice,scoringmatrices,whereeach
+row(column)isamethod(anexample)andthevalueissomemetricscoretomeasurehowgoodthe
+methodisontheexample,usuallycanbewell-approximatedbyalow-rankmatrix. Intuitivelywe
+canpredicttheremainingunobservedmethod-examplepairsbythelow-rankfactorization(LRF)
+andprioritizeevaluationsofthepairswithlargeuncertaintiesinthisprediction. Bydeployingthis
+intuitioninadditiontoUCB-E,UCE-E-LRFactivelyselectsboththemethodandexampletoevaluate
+anditpotentiallyimprovestheefficiencyofthebudgetusage.
+Westudytheperformanceofthesealgorithmsaswellascommonbaselinesinanumberofpractical
+settings. Throughtheempiricalanalysis,wefindthatourtwoactiveselectionalgorithmsaremuch
+betterthannon-activebaselines. Inaddition,wefindforallalgorithms,thehardersettings,where
+themethodsetislargeorthegapsbetweenthetopmethodandothermethodsaresmall,generally
+needmorebudgetforevaluatingthemethod-examplepairs. Moreinterestingly,weobservethatthe
+UCB-Eworksbestfortheeasiersettings; conversely, UCB-E-LRFhassuperiorityoverallother
+algorithmswhenthesettingsareharder.
+22 Preliminaries
+2.1 EvaluationWorkflowinLargeLanguageModelApplications
+Table1: SelectedbenchmarkswhereLLMsarestate-of-the-artmethods. Wegroupthembasedon
+thetasktypeandwhetheradditionalLLM-based/human-basedscoringisneededforevaluation.
+TaskType LLMInference+Rule-basedScoring LLMInference+LLM-basedScoring
+BOLD[22]GLUE[57]HellaSwag[64] CNN/Dailymail[48]Newsroom[25]
+NaturalLanguageUnderstanding
+SQuAD[52]TriviaQA[34]WinoGrande[1] XSUM[49]
+AlpacaEval[44]ChatbotArena[15]
+Open-endedQA GoogleNQ[41]HotpotQA[62]QASPER[19]
+MT-Bench[66]
+APPS[27]Arc[17]GPQA[53]GSM8K[18]
+STEMandReasoning –
+MATH[29]MMLU[28]PIQA[3]
+A typical evaluation workflow in large language model (LLM) applications involves three steps:
+inference,scoring,andperformanceaggregation,thefirsttwoofwhichLLMscanplayimportant
+roles.
+1. Inference. GivenadatasetsuchasoneshowninTable1andanLLM-basedmethod,the
+outputfromthismethodisgeneratedthroughanLLM.EachmethodcanbeadistinctLLM
+forbenchmarkingdifferentLLMperformance,thesameLLMwithdifferentpromptsfor
+promptengineering[60],orotherdifferentconfigurationssuchastemperature,decoding
+strategies,etcforhyperparametertuning.
+2. Scoring. Theoutputsfromdifferentmethodsarescoredwithascoringfunctioni.e. metric.
+Thescoringfunctioncaneitherberule-based(exactstringmatch, BLEU[50], ROUGE
+[46]), LLM-based (BERTScore [65], LLM judge [66]), or human-based i.e. user study.
+Dependingonthetaskanddatasetformat, researchershaveemployeddifferenttypesof
+scoring functions. In Table 1, we classify a selected group of commonly used datasets
+accordingtothetasktypeandscoringfunctionappliedtothem. WegroupLLM-basedand
+human-basedscoringtogethersincetheyareusuallyconsideredalternativestoeachother
+andhavebeenshowntohaverelativelyhighcorrelation[44].
+3. Performance aggregation. The performance of each method is aggregated across the
+dataset,typicallywithasimpleaverageoverallexamplesinthedataset.
+NoticethatLLMscanplayanimportantroleinbothinferenceandscoring. However,LLMsare
+becomingincreasinglylargeandmanystate-of-the-artLLMsforLLM-basedscoringfunctionsare
+black-boxAPIs[42].Bothinferenceandscoringintheevaluationworkflowstarttobecomemassively
+resource-intensive.
+Despitetheintensiveresourcesneeded,inmanypracticalscenarios,weareonlyinterestedinidenti-
+fyingthebestmethodamongallmethods. Forexample,forpromptengineeringandhyperparameter
+tuning,knowingwhichmethod(prompt/configuration)isthebestisusuallysufficientfornextround
+of iteration. Intuitively, evaluating all methods on all examples on a dataset is excessive for this
+purposeandthereforeweareinterestedinstudyingtheidentificationofthebestmethodwithasfew
+evaluationpairsaspossible.
+2.2 NotationsandProblemFormulation
+Withthemotivationabove,wenowdefineournotationandprovideaformalproblemformulation.
+SupposewehaveasetofmethodsF ={f ,...,f }andasetofexamplesX ={x ,...,x }. Let
+1 n 1 m
+e:F ×X →[0,1]denoteourscoringfunctionandwithoutlossofgenerality,weassumee(f,x)>
+e(f′,x)indicatesf hasbetterperformancethanf′ontheexamplex. SupposeE ∈[0,1]n×misthe
+underlyingscoringmatrixforagivenproblem(F,X,e)bydefiningE :=e(f ,x ).Thescoreofa
+i,j i j
+givenmethodf isdefinedasµ = 1 (cid:80)m E andwanttofindthebestmethodi∗ =argmax µ .
+i i m j=1 i,j i i
+Asmotivatedabove,weareinterestedinthescenariowherewehavealimitedbudgetofT evaluations.
+Thequestionis: howcanweselecttheseT method-examplepairstomaximizethechanceoffinding
+the best method i∗? Formally, we want to study the evaluation algorithm A. The input is the
+3Figure2: Activemethod-examplepairselection: AfterLLMevaluatedtmethod-examplepairs,we
+thencallAlgorithmAtoselectthenextmethod-examplepair. ThenwequeryLLMforevaluating
+thispairandfillthescoringreceivedfromLLMintothescoringmatrix. AlgorithmAthenupdates
+itsinternalstatuspreparedforthenextmethod-examplepairselection. ThisprocessisrepeatedT
+timesand,intheend,thealgorithmApredictsthebestmethodf
+ˆi∗
+.
+evaluationbudgetT,asetofmethodsF andasetofexamplesX. IntheevaluationalgorithmA,we
+canevaluateatmostT method-examplepairs(f ,x )(t=1,···T). Theoutputisthepredicted
+bestmethod. OurgoalistomaximizeP
+(A(T,Fit ,Xjt
+)=i∗),theprobabilityofreturningthebest
+A
+methodi∗.
+3 Algorithms
+One simple baseline for designing the evaluation algorithm A is: for each method f ∈ F, we
+i
+uniformlysample⌊T/n⌋examplesX fromX,estimatethemeanµˆ = 1 (cid:80) e(f ,x),
+i,T i ⌊T/n⌋ x∈Xi,T i
+andpickthemethodf withthehighestestimatedmeanµˆ asthepredictionforthebestmethod.
+iˆ∗ iˆ∗
+However,thisalgorithmcanbeveryinefficient. Wewillseeintheexperimentsthatforsomedatasets,
+weneedtoevaluateatleast90%ofallmethod-examplepairstopredictthebestmethodcorrectly
+withhighprobability. Differentfromthissimplebaseline,twoalgorithmsproposedinthissection
+activelydecidethemethod-examplepairtoevaluatenextandeachdecisionismadebasedonprevious
+evaluations;Figure2illustratesthishighlevelidea.
+3.1 Algorithm1–UCB-E
+Thealgorithm. Noticethesimplebaselineevenlydistributesitstotalbudgetacrossthedifferent
+methodsf . Thisallocationofresourcesisthemainlimitationofthesimplebaseline. Inorderto
+i
+distinguishthebestmethodf fromothergoodmethodsf (i.e. µ −µ issmall),wemayneed
+i∗ i i∗ i
+more than ⌊T/n⌋ examples, while ≤ ⌊T/n⌋ examples are sufficient to distinguish f from bad
+i∗
+methods(i.e. µ −µ islarge).
+i∗ i
+WeaddressthelimitationabovewithourfirstalgorithmUCB-E(A ;Algorithm1),asimple
+ucb−e
+extensionoftheclassicmulti-armbanditalgorithmUCB-E[2]. Ateverystept, weestimatethe
+upperconfidenceboundofeachmethodf fromtheexamplesevaluatedwiththatmethodandpick
+i
+themethodf withthelargestupperconfidencebound. Thenweuniformlysampleoneexamplex
+it jt
+4Algorithm1UCB-E(A (T,F,X;η))
+ucb−e
+Input: TheevaluationbudgetT,asetofmethodsF andasetofexamplesX,theuncertaintyscaling
+η.
+Output: Thepredictionˆi∗forbestmethodi∗.
+1: ∀f i ∈ F,theupperconfidenceboundB i = +∞,thesetofevaluatedexamplesS i = {},the
+observedscoringmatrixEobs :={?}n×m.
+2: fort=1,···,T do
+3: Select: Drawuniformrandomlyi t ∈argmax iB i;Drawuniformrandomlyj t ∈[m]\S i.
+4: Evaluate: Runinferenceforthemethod-examplepair(f it,x jt),sendtheresulttotheannota-
+tor,andreceivee(f ,x );Eobs ←e(f ,x ).
+it jt it,jt it jt
+(cid:80) Eobs (cid:113)
+5: Update: S it ←S it ∪{j t};B it ← j∈ |S Si it t| it,j + |Sη it|.
+6: endfor
+Return:ˆi∗ =argmax i (cid:80) j∈ |S Si i|E io ,b js
+thathasnotbeenevaluatedwiththemethodf ,runtheinferenceprocedurefor(f ,x )andsend
+it it jt
+theresulttotheannotatorforscoring.
+Comparison with the simple baseline. The UCB-E algorithm addresses the limitation of the
+simplebaseline. Theupperconfidenceboundsofbadmethods(i.e. µ −µ islarge)willnever
+i∗ i
+exceedtheupperconfidenceboundoff ,aslongastheyareevaluatedwithasufficientnumberof
+i∗
+examples,andhenceUCB-Ewillneverselectthismethodagainandpaymoreattentionsonmore
+promisingmethods.
+Theoreticalresults. WestatethetheoreticalguaranteeofUCB-Einourcontext,whichisacorollary
+ofthetheoremforUCB-Eintheoriginalmulti-armbanditsetting.
+Corollary1(TheoreticalguaranteeofUCB-E) Define H = (cid:80)n 1 and suppose
+1
+(cid:16)
+i=1,i̸=i (cid:17)∗ (µi−µ∗ i)2
+η = 25T−n,P (A (T,F,X;η)=i∗)≥1−2Tnexp −T−n .
+36 H1 Aucb−e ucb−e 18H1
+Comment. Given a problem set-up (F,X,e), H in the corollary indicates the hardness of the
+1
+problem. Thelargerthegapsbetweenthehighestscoreandtheremainingscoresare, thehigher
+theprobabilityUCB-EwillpickthebestmethodgivenafixedbudgetT. Inourexperiments,we
+willobservethatthedatasetswithsmallerH tendtohaveahigherchanceofpredictingi∗correctly
+1
+giventhesameevaluationbudgetT.
+3.2 Algorithm2–UCB-EwithLow-RankFactorization(UCB-E-LRF)
+Main idea/Inspiration/Motivation. We find that the scoring matrix E for real-world problem
+instancescanoftenbeapproximatedwellbyalowrankmatrixwhererankr ≪n,m.Thisobservation
+meansthatitispossibletoestimatethescoreofallmethod-examplepairsfromthescoresofjust
+afew. ConsiderifthematrixE wereexactrank-1,thenonlyn+m−1scoreswouldbeneeded
+toexactlyrecoverthefullscoringmatrixE,whichisextremelyefficientcomparedtoexhaustively
+evaluatingalln·mcombinations. SupposeEobsisapartiallyobservedscoringmatrix,wherethe
+non-zeroelementsareevaluatedpairswiththegroundtruthscoreforthatpair,andEˆ istheestimated
+scoringmatrix,wherethenon-zeroelementsareunevaluatedpairswiththeestimatedscore. Suppose
+O ∈ {0,1}n×m istheobservationmatrixwhereO indicateswhetherthemethod-examplepair
+i,j
+(f ,x )hasbeenobserved. Whenthescoresofunevaluatedmethod-examplepairsareestimated
+i j
+accurately,thescoreestimationµˆ = 1 (cid:80)m (O Eobs+(1−O )Eˆ ),whichcombinesboth
+i m j=1 i,j i,j i,j i,j
+evaluatedpairsandtheestimatedpairs,hasthepotentialtobemoreaccuratethantheestimationby
+onlytheevaluatedpairs.
+The algorithm. Leveraging the intuition of estimating the unevaluated method-example pairs,
+weadoptalowrankfactorization(LRF)approachandproposeoursecondalgorithmUCB-E-LRF
+5Algorithm2UCB-E-LRF(A (T,F,X;M,r,K,T ,b,η))
+uel 0
+Input: TheevaluationbudgetT,asetofmethodsF andasetofexamplesX,theLRForacleM,the
+rankr,#solutionsinensembleK,thewarm-upbudgetT ,thebatchsizeb,theuncertaintyscalingη.
+0
+Output: Thepredictionˆi∗forbestmethodi∗.
+1: UniformlysampleT 0method-examplepairsfrom[n]×[m]andgettheobservedscoringmatrix
+Eobs ∈([0,1]∪{?})n×mandtheobservationmatrixO ∈{0,1}n×mw.r.t.theseT evaluations.
+0
+2: Eˆ,R←M(Eobs,O);∀f i ∈F,B i ← m1 (cid:80)m j=1(O i,jE io ,b js+(1−O i,j)Eˆ i,j +ηR i,j)
+3: fort=T 0,···,T 0+[(T −T 0)/b]do
+4: Select: Drawi t ∈argmax iB i;DrawJ t :=Top−b(R it,j|j ∈[m]).
+5: forj t ∈J tdo
+6: Evaluate: Run inference for the method-example pair (f it,x jt), send the result to the
+annotator,andreceivee(f ,x );Eobs ←e(f ,x )
+it jt it,jt it jt
+7: endfor
+8: Update: ∀j t ∈ J t, O it,jt ← 1; Eˆ,R ← M(Eobs,O;r,K); ∀f i ∈ F,B i ←
+1 (cid:80)m (O Eobs+(1−O )Eˆ +ηR ).
+m j=1 i,j i,j i,j i,j i,j
+9: endfor
+Return:ˆi∗ =argmax 1 (cid:80)m (O Eobs+(1−O )Eˆ )
+i m j=1 i,j i,j i,j i,j
+(A ;Algorithm2). ThisalgorithmbuildsonUCB-Ewhichdynamicallyallocatesthebudgettothe
+uel
+promisingmethods. Weestimatetheupperconfidenceboundforeachmethodf andevaluatean
+i
+examplex yettobeevaluatedforthemethodf withlargestupperconfidencebound. However,
+jt it
+thespecificationofthisideainUCB-E-LRFisdifferent,becauseofouradditionalintermediategoal–
+agoodestimationEˆ fortheunevaluatedpairs. Supposewehaveascoringmatrixestimationoracle
+M: giventevaluatedmethod-examplepairs,theoracleoutputstheestimatedscoringmatrixEˆ and
+theuncertaintymatrixRthatquantifiestheuncertaintyforeachestimationinEˆ. Supposewekeep
+updatingobservationmatrixO ∈{0,1}n×mwhereO indicateswhetherthemethod-examplepair
+i,j
+(f ,x )hasbeenevaluated. ThedifferentspecificationsfromUCB-Eare:
+i j
+1. Oncethemethodf isselected,unlikeinUCB-Ewheretheexamplex isuniformlydrawn
+it jt
+fromtheunevaluatedexamples,wepicktheexamplex withthelargestuncertaintyR
+jt it,jt
+fromtheunevaluatedexamples,becauseevaluatingthisexamplex willresultinthelargest
+jt
+reductioninuncertaintyforthemethodf . Thisallowsustobetterestimatethescoring
+it
+matrixEˆ withlessevaluations.
+2. Theupperconfidenceboundisnowcomputedas 1 (cid:80)m (O Eobs+(1−O )Eˆ +
+m j=1 i,j i,j i,j i,j
+ηR ),whichisacombinationofthecurrentscoreestimation 1 (cid:80)m (O Eobs+(1−
+i,j m j=1 i,j i,j
+O )Eˆ ) and the uncertainty estimation 1 (cid:80)m ηR . Notably, the current score
+i,j i,j m j=1 i,j
+estimation is the partially observed scores 1 (cid:80)m O Eobs plus the estimated scores
+m j=1 i,j i,j
+1 (cid:80)m (1−O )Eˆ
+m j=1 i,j i,j
+Thechoiceofscoringmatrixestimationoracle. Wenowintroducethescoringmatrixestimation
+oracleMusedinthispaper. TheinputsoftheoracleMareapartiallyobservedscoringmatrix
+Eobs ∈([0,1]∪{?})n×mandanobservationmatrixO ∈{0,1}n×mwhereO indicateswhether
+i,j
+the method-example pair (f ,x ) has been evaluated. The outputs of M are supposed to be an
+i j
+estimatedscoringmatrixEˆ andthecorrespondinguncertaintymatrixR.
+WedefineourMasanensembleofK low-rankfactorization(LRF)solutions[59,14]. Thelow-rank
+factorizationassumesthegroundtruthmatrixis(approximately)low-rankwithrankr. Weoptimize
+thelow-rankrepresentationsU ∈Rn×r andV ∈Rm×r forfollowingoptimizationproblembythe
+alternatingleastsquaresmethod[26]:
+min (cid:88) O (cid:0) U⊤V −Eobs(cid:1)2 , (1)
+i,j i j i,j
+U∈Rn×r,V∈Rm×r
+i∈[n],j∈[m]
+6whereU istheithrowofU andV isthejthrowofV. Wefurtherproduceboththeestimationand
+i j
+theuncertaintybybootstrapping[23,67].Inordertogetadiverseensembleoflow-rankfactorizations
+foreachfactorization(U(k),V(k)),werandomlyzeroout5%ofthe“1"inOasO andoptimizethe
+k
+objectiveEquation1withEobs andO instead. FinallywedefinetheestimatedscoringmatrixEˆ
+k
+andtheuncertaintymatrixRas
+(cid:118)
+(cid:32) K (cid:33) (cid:117) K
+Eˆ :=(1−O)◦ 1 (cid:88) U(k)(cid:16) V(k)(cid:17)⊤ ,R :=(cid:117) (cid:116) 1 (cid:88) ((U(k)(cid:0) V(k)(cid:1)⊤ ) −Eˆ )2 (2)
+K i,j K i,j i,j
+k=1 k=1
+where1isanall-onematrixwiththeshapeofn×mand◦istheelement-wisemultiplication.
+ThisoracleintroducesfouradditionalhyperparametersforourUCB-E-LRFalgorithm,whichdeter-
+mineperformanceandefficiency:
+• The rank r of the low-rank factorization. The value of r adjusts the expressiveness of
+the factorization when fit to the data in Equation 2. Setting r requires considering the
+bias-variancetrade-offofchoosingsmallervs. largerr. Therepresentationsofsmallerr
+inherentlyintroducelargerapproximationerror,however,therepresentationsoflargerare
+hardertobeestimatedaccuratelygivenonlyafewobservationsinEobs.
+• The ensemble size K. Sufficiently large K is necessary to avoid additional noise when
+estimatingEˆ andRinEquation2. Yet,thecomputationalcostofthefactorizationscales
+withK andthereforeK cannotbetoolarge.
+• Thewarm-upbudgetT . TheoracleMrequiresaminimumnumberofinitialobservations
+0
+inordertoestimatethelow-rankrepresentationaccurately. Therefore, beforetheactive
+selectionphase(line3-9inAlgorithm2),wehaveawarm-upphase(line1-2inAlgorithm2),
+whereT method-examplepairsaresampleuniformlyatrandomtoevaluatebeforemoving
+0
+ontothe“active"phase.
+• Thebatchsizeb. TheoracleMmustbefitandrefitwhichinvolvesoptimizingtheensemble
+oflow-rankfactorizations. Asthecomputationalcostofthisprocedurecannotbeneglected,
+weintroduceabatchsizehyperparameter. Ateachtimestept, weselectbexamplesJ
+t
+paired with the method i (line 4 in Algorithm 2), evaluate the b method-example pairs
+t
+(line6inAlgorithm2),andupdatetheintermediatevariableswiththesebscores(line8
+inAlgorithm2). Noticethatalthoughincreasingbismorecomputationallyfriendlyasit
+calls theoracle M less, it mayhurt the performanceas itreduces the granularityof the
+decisions, making the algorithm less “active". The choice of b is ultimately a trade-off
+betweencomputationalcostandtheperformance,however,wewillseeintheexperiments
+sectionthatperformancedoesnotvarydrasticallyformanychoicesofb.
+We analyze these four UCB-E-LRF hyperparameters in our experiment sections, along with the
+uncertaintyscalingηinbothUCB-EandUCB-E-LRF.
+4 Experiments
+4.1 Datasets
+Toassesstheperformanceofouralgorithmsunderavarietyofusecases,wetestwiththreedatasets
+AlpacaEval [44], Grade School Math 8K (GSM8K) [18] and Physical Interaction: Question An-
+swering (PIQA), together with different settings of the method set F and the scoring function e;
+Table2summarizesthestatisticsofeachdatasetalongwithwhatmethodF andscoringfunctione.
+ForAlpacaEval,wedesigntwosetsofcalF. ThefirstsetF containsallLLMsreportedby [44].
+ThesecondF containsthesameLLMsexceptfortheannotatormodelGPT-4Turbo. ThelatterF
+thatdoesnotcontainGPT-4Turbomakesthelearningmorechallengingandinterestingsincethe
+annotator,GPT-4Turbo,isaclearwinneramongallLLMs. ForGSM8KandPIQA,wesetF asaset
+ofpromptstosimulatepromptengineering,orasetofLLMswithvarioussamplingconfigurations,
+tomimicmodelselectionandhyperparametertuning. Weprovidemoreinformationaboutthese
+datasetsinAppendixA.1.
+7Figure3:Comparisonofbaselinesandourproposedalgorithmsonsixdatasetsevaluatedwithvarious
+top1precisionandNDCG@10. Theverticalaxesofallplotsrepresentperformanceofametricand
+horizontalaxiesofallplotsrepresentthepercentageofmethod-examplepairsevaluated. Allresults
+areaggregatedbasedon50trialswithdifferentrandomseeds. Ourproposedalgorithms: UCB-Eand
+UCB-E-LRFconsistentlyrequiremuchlessevaluationtoachievethesameperformanceasbaselines.
+Table2: Statisticsofeachdatasetusedinourexperiments. TheexamplesX ofeachdatasetarethe
+questionsfromtheirrespectiveevaluationbenchmark. Moredetailsofthedatasetscanbefoundin
+AppendixA.1.
+DatasetName Sizen×m MethodF ScoringFunctione H1
+AlpacaEval 154×805 VariousLLMs GPT4-turboannotator 966
+AlpacaEval(DropAnnotator) 153×805 VariousLLMsexcludingGPT4-turbo GPT4-turboannotator 4462
+GSM8KPrompts 205×784 Mistral-7B[32]withdifferentprompts regexmatchwithcorrectanswer 107445
+GSM8KModels 122×1000 VariousLLMsandsamplingconfigurations regexmatchwithcorrectanswer 20562
+PIQAPrompts 177×1546 Tulu-7B[58]withdifferentprompts regexmatchwithcorrectchoice 66284
+PIQAModels 103×1000 VariousLLMsandsamplingconfigurations regexmatchwithcorrectchoice 10273
+4.2 Metrics
+Top1Precision. Todetermineifanalgorithmfindsthebestmethod,wecandirectlycheckifthe
+algorithm’spredictionmatcheswiththebestmethodfromourempiricaldata. However,because
+everymethodisempiricallyevaluatedonlimitednumberofexamples,itispossiblethatonemethod
+hasslightlyloweraverageperformancethananothermethodwhereasifweweretoevaluateonmore
+examples,theformerwouldachieveahigherperformance. Tothisend,wecalculatetop1precision
+byfirstdeterminingasetofmethodsweconsiderequallygoodandwecheckifthepredictedmethod
+fromanalgorithmisamemberofthatset. Weproposetwowaystodetermineifasetofmethodsare
+8Figure4: AblationsofeffectofhyperparametersonUCB-E-LRFalgorithm. Theresultssuggestthat
+ourselectedhyperparametersareefficientandeffective.
+equallygood: performancegapandstatisticalsignificance. Forperformancegapϵtop1precision,
+weconsiderallmethodswhoseperformanceiswithinϵofthebestempiricalmethodtobeequally
+good. Forthestatisticalsignificanceptop1precision,weperformMcNemar’sstatisticaltest[47]
+foreachmethodagainstthebestempiricalmethod. Ifwecannotrejectthenullhypothesisthatthe
+performanceofonemethodisthesameasthebestempiricalmethoduptoasignificancelevelp,
+thenthatmethodisconsideredequallygoodasthebestmethod. Weevaluateallbaselinesandour
+algorithmsontwoϵvalues{0.001,0.01},andtwopvalues{0.01,0.1}simulatingadiverseneedof
+precision.
+NDCG. Althoughourfocusistoidentifythebestmethodquickly,itissometimesalsodesirableto
+generallyranktop-P promisingmethodshigh. Wethereforeevaluatewithnormalizeddiscounted
+cumulativegain(NDCG)atP. NDCG@P takesasinputthetop-P predictionbyanalgorithmand
+thehighertheirtrueranksare,thehighertheNDCGis. WechooseP =10toevaluateallalgorithms.
+4.3 Set-UpofOuralgorithmsandBaselines
+Weintroducetheset-upofourtwoalgorithms, UCB-EandUCB-LRF,togetherwiththreemore
+baselines,RowMeanImputation,FilledSubsetandLRF.
+UCB-E. OurproposedalgorithmasshowninAlgorithm1. Weuseη =1sincethisconsistently
+yieldsthebestperformanceacrossalldatasets.
+UCB-E-LRF. OurproposedalgorithmasshowninAlgorithm2. Foralldatasets,weuserankr =1
+forlowrankfactorizationwithanensemblesizeofK = 64. Weuse5%ofdataforwarmupi.e.
+T =0.05×n×mandη =5. Weuseabatchsizeofb=32.
+0
+RowMeanImputation. Inthisbaseline,weselectmethod-examplepairsuniformlyatrandom
+fromallpairs. Thescoreforeachmethodiscalculatedastheaverageofallthescoresevaluatedso
+farforthatmethod. ThedetailedalgorithmicdescriptionisinAlgorithm3.
+FilledSubset. Insteadofrandomlyselectingmethod-examplepairs,filledsubsetfirstselectsan
+exampleindexj uniformlyatrandom. Thenallmethodsareevaluatedonexamplej. Ifallmethods
+havebeenevaluated,thealgorithmselectsanewexampleindexfromremainingones. Thescore
+foreachmethodiscalculatedastheaverageofallthescoresevaluatedsofarforthatmethod. The
+detailedalgorithmicdescriptionisinAlgorithm4. Althoughrowmeanimputationandfilledsubset
+donothavelearningcomponent,theybothproduceanunbiasedestimateoftherealscoreforeach
+methodatalltime.
+9LRF. Similar to row mean imputation, LRF (low rank factorization) randomly selects method-
+examplepairstoevaluate. Forestimatingthescoreofeachmethod,LRFcalculatestheaverageofall
+scoresforthatmethod. Thatis,forevaluatedexamples,thescoreistheactualobservedscore,andfor
+examplesyettobeevaluated,thescoreistheestimatedscorefromLRF.Thedetailedalgorithmic
+descriptionisinAlgorithm5.
+4.4 MainResults
+InFigure3,weplottheperformanceofbaselinesandouralgorithmsonallsixdatasets(columns)
+asthebudgetT increasesfrom5%to100%ofthetotalnumberofmethod-examplepairs. Ineach
+row,weevaluatethealgorithmsonadifferentmetric(eithertop1precisionwithdifferentϵ,por
+NDCG@10). Eachlineinthefigureistheaverageresultover50independenttrialswithdifferent
+seeds. Forexample,anaveragetop1precisionof0.9indicatesthat45outof50trialspredictthebest
+methodcorrectlyatthebudgetlevelthatitsx-coordinaterepresents. Inaddition,wecalculateH as
+1
+definedinCorollary1thatquantifiesthedifficultyoffindingthebestmethodonadataset. Intuitively,
+ahigherH valuesuggeststhatthemethodsetF islargeortherearemanymethodsthathavesimilar
+1
+performancewiththebestoneanddistinguishingthemcanbechallenging. InAppendixA.1Figure
+5,wealsoplotthehistogramtoshowthedistributionofperformanceamongF onthesedatasets.
+Howdoouralgorithmscomparewiththebaselines? AsseenfromFigure3,bothUCB-Eand
+UCB-E-LRFconsistentlyachievehighprecisionandNDCGwithmuchlessbudgetcomparedto
+thebaselines. Forexample,onAlpacaEval(DropAnnotator),ourproposedalgorithmscanreach
+precisionof1withjust8%budgetwhereasthebaselinesrequire80-90%,anorderofmagnitude
+morebudgetneeded. Theseresultssuggestthatitisentirelypossibletoidentifythebestmethod
+withoutexhaustivelyevaluatingallmethod-examplepairs. Theyfurtherdemonstratethattheactive
+selectionalgorithms(ourtwoalgorithms)aremoreefficientthanthenon-activealgorithms(three
+baselines). Additionally,thebetterNDCGperformancefromourproposedalgorithmsshowsthatour
+methodscanmorecorrectlyranktop-performancemethods.
+HowisthecomparisonbetweenourtwoalgorithmsUCB-EandUCB-E-LRF? Thedatasets
+fromlefttorightarerankedbythehardnessindicatedbyH . Interestingly,wefindthatoneasier
+1
+datasets such as AlpacaEval, UCB-E performs better and saves 2-3% more on budget compared
+toUCB-E-LRF,whileonharderdatasets, suchasGSM8KPromptsandPIQAPrompts, UCB-E-
+LRF achieves higher precision faster than UCB-E, saving about 10% in absolute budget. These
+observationsgiveusahintonwhatalgorithmtoapplyinpractice.
+4.5 MoreEmpiricalAnalysis
+WeprovidemoreempiricalanalysisandtheablationresultscanbefoundinFigure4.
+DoesH correctlyreflectthehardnessofadatasetintheempiricalexperiments? Yes,going
+1
+throughFigure3fromlefttoright,asH decreases,thepercentageofmatrixevaluationneededto
+1
+reachprecisionof1alsogenerallydecreasesfrommorethan20%tojustunder5%. Moreover,the
+H valuesseemtoberelatedtothetasks. Thatis,promptengineeringdatasetstypicallyhavehigher
+1
+H possiblyduetothehomogeneityofpromptperformancewiththesameLLM.Incontrast,datasets
+1
+thatbenchmarkdifferentLLMssuchasAlpacaEvalismucheasiertofindthebestperformingmodel.
+Score Only Ablation. To study the effect of selecting both next method and next example to
+evaluateusinguncertaintymatrixR,weconsideranablationofUCB-E-LRFbyrevertingtheplace
+ofusingRtotheUCB-E:UCB-E-LRF(ScoreOnly)wheretheupperconfidenceboundiscomputed
+bytheconfidenceintervalinoriginalUCB-Einadditiontothemeanestimationthroughlowrank
+factorization;theexampleisuniformlyselected,sameasUCB-E.Thedetailedalgorithmicdescription
+canbefoundinAlgorithm6. WeseethatontheharddatasetGSM8KPromptswhereUCB-E-LRF
+hascertainbenefitoverUCB-E,thereisasignificantgapbetweenUCB-E-LRFandUCB-E-LRF
+(ScoreOnly). ThismeansthatthecomponentofuncertaintymatrixRinUCB-E-LRFiscrucialto
+contributethebenefitoverUBC-E.
+BatchSizebAblation. Intuitively,asmallerbatchsizeismoreflexiblecanhavemorefinegrained
+selection. We experiment with b ∈ {2,8,32,128} and as shown in the plot, smallest batch size
+10givesthebestperformanceespeciallyonharderdatasetswhereasabatchsizeof128significantly
+degradestheperformance. However, itincursmoreoverallcomputationalcostduetofittinglow
+rankfactorizationmoreoftenthanasmallerbatchsize;forexamplewhenb=2,ittakesalmost16
+timesasmuchtimeasb=32toachieve1.0precision,whichisineffective. Toachieveabalanceof
+performanceandcomputationalcost,weuseabatchsizeof32inourexperiment.
+EnsembleSizeK Ablation. WevarytheensemblesizeK ∈{4,16,64,256}andfindthatvery
+smallensemblesizegivessuboptimalperformanceonharddatasets. Thereisalmostnoperformance
+differenceoneasydatasetlikeAlpacaEval(DropAnnotator). Theperformanceisrobusttodifferent
+K aslongasitislargerthan64.
+UncertaintyScalingFactorηAblation. Weexperimentwithdifferentuncertaintyscalingvalues
+{0.1,0.5,1,5,10}. InFigure4,itcanbeseenthatacertainrangeofη,from0.1to5,givessimilar
+performanceonbothtwodatasets. Thisdemonstratetherobustnessofselectingη.
+Warm-upBudgetT Ablation. OuralgorithmUCB-E-LRFbydefaultrandomlyevaluates5%
+0
+of the method-example pairs in the data matrix before actively selects. We analyze the effect of
+varying the budget T among {0.5%,1%,5%,10%}×n×m on the algorithm performance on
+0
+thetwodatasets. Weseethataverysmallwarm-upbudgetwith0.5%ofdatacanachievedecent
+precisioninitially,butfallbehindcomparedtolargerwarm-upbudgetasmoredataareevaluated. In
+contrast,averylargewarm-upbudgetof10%delaystheactiveselectionalgorithmtoomuchandalso
+achievessuboptimalperformance. Wethereforeuse5%asagenerallystrongstartingpoint. Notethat
+onAlpacaEval,itispossibletoachievethesameperformancewithevensmallerwarm-upbudget,
+suggestingmoresavingispossible.
+Rankr Ablation. AsdiscussedintheAlgorithmSection, r adjuststhebias-variancetrade-off.
+Empiricallyweexperimentwithr ∈{1,2,5}andfindthatr =1isconsistentlybetterthanlarger
+valuecounterparts. Theresultscanbeexplainedbythefactthatalargerrrequiresmoreevaluated
+datainordertopreventoverfitting,whichmightnothaveadvantageinthelimitedbudgetsetting.
+Therefore,werecommendusingr =1foralldatasets.
+5 RelatedWork
+Best-arm identification in multi-arm bandits. The goal of best-arm identification [6, 2] is to
+findthearmwiththehighestrewardbypullingthesearmsandgettingthefeedback. Bymakingan
+analogy,inourproblemmethodf isthearmandthescoreµ off isthereward. Therearetwo
+i i i
+waystodefinethebest-armidentificationproblem: fixedbudgetandfixedconfidence. Inthefixed
+budgetsetting,thebudgetforthearmpullsisfixedandthealgorithmisdesignedforbetterchances
+toidentifythecorrectbestarm–ourproblemdefinedinthispaperhasthesimilarevaluationbudget.
+UCB-E[2]andSuccessiveElimination[2]aretwopioneeringalgorithmsproposedforthissetting,
+followedbyalineofimprovement[30,38,10,39]. Qin[51]statestheoptimalfixedbudgetbest-arm
+identificationasanopenproblem. Inthesettingoffixedconfidence,thealgorithms[35,37,31]work
+towardsfewernumberofarmstoguaranteethegivenconfidenceofgettingthebestarm. Garivier
+andKaufmann[24]givesanoptimalalgorithmintermsoftheminimumofarmstopull. Another
+extensionbeyondthesettingoffixedbudgetorconfidenceisthePAClearningframework,where
+thetargetistomaximizethechanceofgettinganmostlybestarm,withatoleranceofεgaptothe
+highestreward[36,31,12].
+Low-rankfactorizationfor(noisy)matrixcompletion. Asshownintheobjectivefunctionof
+Equation1,low-rankfactorizationisanon-convexoptimizationproblem. Thereforealineofwork
+focusonhowtosolvethisnon-convexoptimization[9,8,14],whileanotherlineofwork[13,7]
+studytheapproximationerrorbetweentheestimatedlow-rankmatrixandthetargetmatrixinterms
+ofpwhenassumingtheobservationsarei.i.d. sampledwithapre-assumedchancepandtheadditive
+noisetoeachobservationisi.i.d. Gaussiannoise.
+LLM performance evaluation functions. Tremendous effort has been devoted to developing
+effectiveevaluationfunctionstoassessthequalityofopen-endedgenerationsfromlanguagemodels.
+EarlyworkinthisdirectionsuchasBLEU[50]andROUGE[46]arerule-basedthatuselexical
+11overlapstoquantifysimilaritybetweenageneratedresponseandreference. However,lexicaloverlaps
+maynotalignwellwiththeunderlyingsemanticsofthetext. Theshortcomingsoftheserule-based
+evaluationfunctionsmotivatedalineofworkstudyingusinglanguagemodels[65,55,63]toevaluate
+generations. AseminalworkinthisareaisBERTScorewhichusesembeddingsfromaBERTmodel
+[21]tocomputesimilarity. Morerecently,LLM-as-a-Judge[66]proposesusinginstruction-tuned
+largelanguagemodelstoevaluategenerations. Zhengetal.[66]findsthatcostlyproprietarymodels
+suchasGPT4havehighagreementratewithhuman.
+LLMperformanceevaluationbenchmarks. Diversebenchmarkshavebeendevelopedtoevaluate
+LLMperformanceacrossvariousdomainsincludingnaturallanguageunderstandingontranslations
+and sentiment analysis [4, 54, 56], mathematical and common sense reasoning [18, 29, 3], text
+retrievalandquestionanswering[61,33,20]. Wereferreadersto[11]foramorecomprehensive
+discussiononexistingbenchmarks. Thecommonalityofthesebenchmarksisthatagroundtruth
+answeristypicallygivenandoncetheresponsesfromLLMsaregenerated,theycanbeevaluated
+fairlyefficientlywithoutincurringlargeamountofoverheadsuchasmoneyandcompute. Recently,a
+newtypeofbenchmarkormorepreciselyleaderboardhasbeencreatedattemptingtocomparevarious
+LLMstoeachother. ThetypicalsetupinvolvesprovidingthesameprompttotwoLLMsandthen
+havingtheirresponsescomparedsidebysidewithanotherLLM,whichdetermineswhichresponse
+isconsideredsuperiorandthuswins. TwonotableleaderboardsareAlpacaEval[44]andChatbot
+Arena [15]. AlpacaEval has a static prompt dataset and for each prompt and LLM, the response
+iscomparedwiththatofabaselinemodel(GPT3orGPT4). ForChatbotArena,thepromptsare
+submittedbyusersandtworandomLLMsareselectedtorespondtotheuser-writtenprompt. For
+bothbenchmarks,toaggregatetheoverallperformanceofLLMs,averagewinrateorELOscorecan
+becalculatedfromthepairwisecomparisonstatistics. Sincetheevaluationrequiresusinganother
+LLMtodecidethebetterresponse,theevaluationincursadditionalcomputeand/ormonetarycost
+thanthebenchmarksthatevaluatemodelsbasedongroundtruthanswers.
+6 DiscussionandConclusion
+Onelimitationofourproposedalgorithmsisthatweassumethereisatwo-dimensionalfixed-size
+matrixasourdatasetforactivemethod-exampleselection. Insomereal-worldapplications,newrows
+orcolumnscanbegraduallyincorporatedandthematrixsizeisdynamic. Inotherscenariossuchas
+ChatbotArena,insteadofbeingabletodecidewhatexamplestoselect,wecanonlyselectapairof
+modelstocompareforauser-specifiedexample. Weleavestudyinghowtominimizebudgettofind
+thebestmethodforthesenewsettingsasfuturework. Otherpromisingextensionsofourworkareto
+applymoreadvancedbest-armidentificationalgorithmintheliterature,andfixedconfidencesetting
+insteadoffixedbudgetsetting.
+Inconclusion,weformulatetheproblemthatwhentheevaluationforeachmodel-exampleisresource
+intensiveinregardtomoney,computeandtime,givenacertainbudgetofresource,howcanwehave
+stillhaveagreatchancetoidentifythebestmodelonaspecificdatasetamongasetofcandidates. We
+proposetwoalgorithmstotackletheproblem,whichallsequentiallydecidewhichmodel-example
+pair to evaluate next by observing the previous evaluated pairs. The first algorithm follows the
+ideaofaclassicmulti-armbanditalgorithmUCB-Eandenjoysthesimilartheoreticalguaranteeto
+lowerboundthechancegivenanybudget. Thesecondalgorithm,UCB-E-LRFextendsUCB-Eby
+leveragingthefindingofapproximatelow-rankofthetargetevaluationmatrix. Intheexperiment,
+we show that both algorithms introduced in our paper are significantly better than one that just
+uniformlysamplesmethod-examplepairs. Moreover,weidentifiedtheconditionwhentheUCB-Eor
+UCB-E-LRFworksbetterthantheother. Wedonotforeseeanynegativesocietalimpactsforour
+work.
+7 Acknowledgement
+WethankJustinLovelaceandVarshaKishorefortheirhelpfuldiscussionandfeedbackonthepaper
+draft. JPZissupportedbygrantfromtheNaturalSciencesandEngineeringResearchCouncilof
+Canada(NSERC)(567916). CKBandCPGaresupportbytheCornellUniversityAIforScience
+Institute,theAIClimateInstitute,theNationalScienceFoundation,theNationalInstituteofFood
+andAgriculture,andtheAirForceOfficeofScientificResearch. RWissupportedbygrantsfrom
+12NationalScienceFoundationNSF(CIF-2402817,CNS-1804829),SaTC-2241100,CCF-2217058,
+ARO-MURI(W911NF2110317),andONRunderN00014-24-1-2304. WenSunissupportedbyNSF
+IIS-2154711andNSFCAREER2339395.ThisresearchisalsosupportedbygrantsfromtheNational
+ScienceFoundationNSF(IIS-2107161,andIIS-1724282,HDR-2118310),theCornellCenterfor
+MaterialsResearchwithfundingfromtheNSFMRSECprogram(DMR-1719875),DARPA,arXiv,
+LinkedIn,andtheNewYorkPresbyterianHospital.
+References
+[1] Winogrande: Anadversarialwinogradschemachallengeatscale. 2019.
+[2] J.-Y.AudibertandS.Bubeck. Bestarmidentificationinmulti-armedbandits. InCOLT-23th
+Conferenceonlearningtheory-2010,pages13–p,2010.
+[3] Y. Bisk, R. Zellers, R. L. Bras, J. Gao, and Y. Choi. Piqa: Reasoning about physical com-
+monsenseinnaturallanguage. InThirty-FourthAAAIConferenceonArtificialIntelligence,
+2020.
+[4] O.r.Bojar,R.Chatterjee,C.Federmann,Y.Graham,B.Haddow,M.Huck,A.JimenoYepes,
+P. Koehn, V. Logacheva, C. Monz, M. Negri, A. Neveol, M. Neves, M. Popel, M. Post,
+R.Rubino,C.Scarton,L.Specia,M.Turchi,K.Verspoor,andM.Zampieri. Findingsofthe
+2016conferenceonmachinetranslation. InProceedingsoftheFirstConferenceonMachine
+Translation,pages131–198,Berlin,Germany,August2016.AssociationforComputational
+Linguistics. URLhttp://www.aclweb.org/anthology/W/W16/W16-2301.
+[5] T.Brown,B.Mann,N.Ryder,M.Subbiah,J.D.Kaplan,P.Dhariwal,A.Neelakantan,P.Shyam,
+G. Sastry, A. Askell, et al. Language models are few-shot learners. Advances in neural
+informationprocessingsystems,33:1877–1901,2020.
+[6] S.Bubeck,R.Munos,andG.Stoltz. Pureexplorationinmulti-armedbanditsproblems. In
+Algorithmic Learning Theory: 20th International Conference, ALT 2009, Porto, Portugal,
+October3-5,2009.Proceedings20,pages23–37.Springer,2009.
+[7] C.Cai,G.Li,H.V.Poor,andY.Chen. Nonconvexlow-ranktensorcompletionfromnoisydata.
+Advancesinneuralinformationprocessingsystems,32,2019.
+[8] E.CandesandB.Recht. Exactmatrixcompletionviaconvexoptimization. Communicationsof
+theACM,55(6):111–119,2012.
+[9] E.J.CandèsandT.Tao. Thepowerofconvexrelaxation: Near-optimalmatrixcompletion.
+IEEEtransactionsoninformationtheory,56(5):2053–2080,2010.
+[10] O. Cappé, A. Garivier, O.-A. Maillard, R. Munos, and G. Stoltz. Kullback-leibler upper
+confidenceboundsforoptimalsequentialallocation. TheAnnalsofStatistics,pages1516–1541,
+2013.
+[11] Y.Chang,X.Wang,J.Wang,Y.Wu,L.Yang,K.Zhu,H.Chen,X.Yi,C.Wang,Y.Wang,etal.
+Asurveyonevaluationoflargelanguagemodels. ACMTransactionsonIntelligentSystemsand
+Technology,15(3):1–45,2024.
+[12] A.R.ChaudhuriandS.Kalyanakrishnan. Pacidentificationofmanygoodarmsinstochastic
+multi-armed bandits. In International Conference on Machine Learning, pages 991–1000.
+PMLR,2019.
+[13] Y.Chen,Y.Chi,J.Fan,C.Ma,andY.Yan. Noisymatrixcompletion: Understandingstatistical
+guaranteesforconvexrelaxationvianonconvexoptimization. SIAMjournalonoptimization,
+30(4):3098–3121,2020.
+[14] Y.Chi,Y.M.Lu,andY.Chen. Nonconvexoptimizationmeetslow-rankmatrixfactorization:
+Anoverview. IEEETransactionsonSignalProcessing,67(20):5239–5269,2019.
+[15] W.-L. Chiang, L. Zheng, Y. Sheng, A. N. Angelopoulos, T. Li, D. Li, H. Zhang, B. Zhu,
+M.Jordan,J.E.Gonzalez,etal. Chatbotarena: Anopenplatformforevaluatingllmsbyhuman
+preference. arXivpreprintarXiv:2403.04132,2024.
+[16] A. Chowdhery, S. Narang, J. Devlin, M. Bosma, G. Mishra, A. Roberts, P. Barham, H. W.
+Chung,C.Sutton,S.Gehrmann,etal.Palm:Scalinglanguagemodelingwithpathways.Journal
+ofMachineLearningResearch,24(240):1–113,2023.
+13[17] P.Clark,I.Cowhey,O.Etzioni,T.Khot,A.Sabharwal,C.Schoenick,andO.Tafjord. Think
+you have solved question answering? try arc, the ai2 reasoning challenge. arXiv preprint
+arXiv:1803.05457,2018.
+[18] K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J. Tworek,
+J. Hilton, R. Nakano, C. Hesse, and J. Schulman. Training verifiers to solve math word
+problems. arXivpreprintarXiv:2110.14168,2021.
+[19] P.Dasigi,K.Lo,I.Beltagy,A.Cohan,N.A.Smith,andM.Gardner. Adatasetofinformation-
+seekingquestionsandanswersanchoredinresearchpapers. 2021.
+[20] M. Dell, J. Carlson, T. Bryan, E. Silcock, A. Arora, Z. Shen, L. D’Amico-Wong, Q. Le,
+P. Querubin, and L. Heldring. American stories: A large-scale structured text dataset of
+historicalu.s.newspapers,2023.
+[21] J.Devlin,M.-W.Chang,K.Lee,andK.Toutanova. Bert: Pre-trainingofdeepbidirectional
+transformersforlanguageunderstanding. arXivpreprintarXiv:1810.04805,2018.
+[22] J. Dhamala, T. Sun, V. Kumar, S. Krishna, Y. Pruksachatkun, K.-W. Chang, and R. Gupta.
+Bold: Dataset and metrics for measuring biases in open-ended language generation. In
+Proceedings of the 2021 ACM Conference on Fairness, Accountability, and Transparency,
+FAccT’21,page862–872,NewYork,NY,USA,2021.AssociationforComputingMachinery.
+ISBN9781450383097. doi: 10.1145/3442188.3445924. URLhttps://doi.org/10.1145/
+3442188.3445924.
+[23] B.EfronandR.J.Tibshirani. Anintroductiontothebootstrap. ChapmanandHall/CRC,1994.
+[24] A. Garivier and E. Kaufmann. Optimal best arm identification with fixed confidence. In
+ConferenceonLearningTheory,pages998–1027.PMLR,2016.
+[25] M.Grusky,M.Naaman,andY.Artzi. Newsroom: Adatasetof1.3millionsummarieswith
+diverseextractivestrategies. arXivpreprintarXiv:1804.11283,2018.
+[26] T.Hastie,R.Mazumder,J.D.Lee,andR.Zadeh. Matrixcompletionandlow-ranksvdviafast
+alternatingleastsquares. TheJournalofMachineLearningResearch,16(1):3367–3402,2015.
+[27] D.Hendrycks,S.Basart,S.Kadavath,M.Mazeika,A.Arora,E.Guo,C.Burns,S.Puranik,
+H.He,D.Song,andJ.Steinhardt. Measuringcodingchallengecompetencewithapps,2021.
+[28] D.Hendrycks,C.Burns,S.Basart,A.Zou,M.Mazeika,D.Song,andJ.Steinhardt. Measuring
+massivemultitasklanguageunderstanding. ProceedingsoftheInternationalConferenceon
+LearningRepresentations(ICLR),2021.
+[29] D. Hendrycks, C. Burns, S. Kadavath, A. Arora, S. Basart, E. Tang, D. Song, and J. Stein-
+hardt. Measuring mathematical problem solving with the math dataset. arXiv preprint
+arXiv:2103.03874,2021.
+[30] J.HondaandA.Takemura. Anasymptoticallyoptimalpolicyforfinitesupportmodelsinthe
+multiarmedbanditproblem. MachineLearning,85:361–391,2011.
+[31] K.Jamieson,M.Malloy,R.Nowak,andS.Bubeck. lil’ucb: Anoptimalexplorationalgorithm
+formulti-armedbandits. InConferenceonLearningTheory,pages423–439.PMLR,2014.
+[32] A.Q.Jiang,A.Sablayrolles,A.Mensch,C.Bamford,D.S.Chaplot,D.delasCasas,F.Bressand,
+G.Lengyel,G.Lample,L.Saulnier,L.R.Lavaud,M.-A.Lachaux,P.Stock,T.L.Scao,T.Lavril,
+T.Wang,T.Lacroix,andW.E.Sayed. Mistral7b,2023.
+[33] Q.Jin, B.Dhingra, Z.Liu, W.W.Cohen, andX.Lu. Pubmedqa: Adatasetforbiomedical
+researchquestionanswering. arXivpreprintarXiv:1909.06146,2019.
+[34] M.Joshi,E.Choi,D.Weld,andL.Zettlemoyer. triviaqa: ALargeScaleDistantlySupervised
+ChallengeDatasetforReadingComprehension. arXive-prints,art.arXiv:1705.03551,2017.
+[35] S. Kalyanakrishnan, A. Tewari, P. Auer, and P. Stone. Pac subset selection in stochastic
+multi-armedbandits. InICML,volume12,pages655–662,2012.
+[36] Z.Karnin,T.Koren,andO.Somekh. Almostoptimalexplorationinmulti-armedbandits. In
+Internationalconferenceonmachinelearning,pages1238–1246.PMLR,2013.
+[37] E.KaufmannandS.Kalyanakrishnan. Informationcomplexityinbanditsubsetselection. In
+ConferenceonLearningTheory,pages228–251.PMLR,2013.
+14[38] E.Kaufmann, O.Cappé, andA.Garivier. Onbayesianupperconfidenceboundsforbandit
+problems. InArtificialintelligenceandstatistics,pages592–600.PMLR,2012.
+[39] E. Kaufmann, O. Cappé, and A. Garivier. On the complexity of best-arm identification in
+multi-armedbanditmodels. TheJournalofMachineLearningResearch,17(1):1–42,2016.
+[40] T.Kojima,S.S.Gu,M.Reid,Y.Matsuo,andY.Iwasawa. Largelanguagemodelsarezero-shot
+reasoners. Advancesinneuralinformationprocessingsystems,35:22199–22213,2022.
+[41] T. Kwiatkowski, J. Palomaki, O. Redfield, M. Collins, A. Parikh, C. Alberti, D. Epstein,
+I.Polosukhin,M.Kelcey,J.Devlin,K.Lee,K.N.Toutanova,L.Jones,M.-W.Chang,A.Dai,
+J.Uszkoreit, Q.Le, andS.Petrov. Naturalquestions: abenchmarkforquestionanswering
+research. TransactionsoftheAssociationofComputationalLinguistics,2019.
+[42] N.Lambert,V.Pyatkin,J.Morrison,L.Miranda,B.Y.Lin,K.Chandu,N.Dziri,S.Kumar,
+T.Zick,Y.Choi,N.A.Smith,andH.Hajishirzi. Rewardbench: Evaluatingrewardmodelsfor
+languagemodeling,2024.
+[43] A.Lewkowycz,A.Andreassen,D.Dohan,E.Dyer,H.Michalewski,V.Ramasesh,A.Slone,
+C.Anil,I.Schlag,T.Gutman-Solo,etal.Solvingquantitativereasoningproblemswithlanguage
+models. AdvancesinNeuralInformationProcessingSystems,35:3843–3857,2022.
+[44] X.Li,T.Zhang,Y.Dubois,R.Taori,I.Gulrajani,C.Guestrin,P.Liang,andT.B.Hashimoto.
+Alpacaeval: Anautomaticevaluatorofinstruction-followingmodels. https://github.com/
+tatsu-lab/alpaca_eval,2023.
+[45] W.Liang,Y.Zhang,Z.Wu,H.Lepp,W.Ji,X.Zhao,H.Cao,S.Liu,S.He,Z.Huang,etal.
+Mappingtheincreasinguseofllmsinscientificpapers. arXivpreprintarXiv:2404.01268,2024.
+[46] C.-Y.Lin. Rouge: Apackageforautomaticevaluationofsummaries. InTextsummarization
+branchesout,pages74–81,2004.
+[47] Q.McNemar. Noteonthesamplingerrorofthedifferencebetweencorrelatedproportionsor
+percentages. Psychometrika,12(2):153–157,1947.
+[48] R. Nallapati, B. Zhou, C. Gulcehre, B. Xiang, et al. Abstractive text summarization using
+sequence-to-sequencernnsandbeyond. arXivpreprintarXiv:1602.06023,2016.
+[49] S. Narayan, S. B. Cohen, and M. Lapata. Don’t give me the details, just the summary!
+topic-aware convolutional neural networks for extreme summarization. arXiv preprint
+arXiv:1808.08745,2018.
+[50] K. Papineni, S. Roukos, T. Ward, and W.-J. Zhu. Bleu: a method for automatic evaluation
+of machine translation. In Proceedings of the 40th annual meeting of the Association for
+ComputationalLinguistics,pages311–318,2002.
+[51] C.Qin. Openproblem: Optimalbestarmidentificationwithfixed-budget. InConferenceon
+LearningTheory,pages5650–5654.PMLR,2022.
+[52] P.Rajpurkar,J.Zhang,K.Lopyrev,andP.Liang. SQuAD:100,000+questionsformachine
+comprehensionoftext. InJ.Su,K.Duh,andX.Carreras,editors,Proceedingsofthe2016
+ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,pages2383–2392,Austin,
+Texas, Nov.2016.AssociationforComputationalLinguistics. doi: 10.18653/v1/D16-1264.
+URLhttps://aclanthology.org/D16-1264.
+[53] D. Rein, B. L. Hou, A. C. Stickland, J. Petty, R. Y. Pang, J. Dirani, J. Michael, and S. R.
+Bowman. Gpqa: Agraduate-levelgoogle-proofq&abenchmark,2023.
+[54] V.Sahayak,V.Shete,andA.Pathan. Sentimentanalysisontwitterdata. InternationalJournal
+ofInnovativeResearchinAdvancedEngineering(IJIRAE),2(1):178–183,2015.
+[55] T.Sellam,D.Das,andA.P.Parikh. Bleurt: Learningrobustmetricsfortextgeneration. arXiv
+preprintarXiv:2004.04696,2020.
+[56] S.Singh,F.Vargus,D.Dsouza,B.F.Karlsson,A.Mahendiran,W.-Y.Ko,H.Shandilya,J.Patel,
+D.Mataciunas,L.OMahony,M.Zhang,R.Hettiarachchi,J.Wilson,M.Machado,L.S.Moura,
+D.Krzemin´ski,H.Fadaei,I.Ergün,I.Okoh,A.Alaagib,O.Mudannayake,Z.Alyafeai,V.M.
+Chien,S.Ruder,S.Guthikonda,E.A.Alghamdi,S.Gehrmann,N.Muennighoff,M.Bartolo,
+J.Kreutzer,A.Üstün,M.Fadaee,andS.Hooker. Ayadataset: Anopen-accesscollectionfor
+multilingualinstructiontuning,2024.
+15[57] A. Wang, A. Singh, J. Michael, F. Hill, O. Levy, and S. R. Bowman. GLUE: A multi-task
+benchmarkandanalysisplatformfornaturallanguageunderstanding. 2019. IntheProceedings
+ofICLR.
+[58] Y.Wang,H.Ivison,P.Dasigi,J.Hessel,T.Khot,K.R.Chandu,D.Wadden,K.MacMillan,
+N. A. Smith, I. Beltagy, and H. Hajishirzi. How far can camels go? exploring the state of
+instructiontuningonopenresources,2023.
+[59] Z.Wen,W.Yin,andY.Zhang. Solvingalow-rankfactorizationmodelformatrixcompletion
+byanonlinearsuccessiveover-relaxationalgorithm. MathematicalProgrammingComputation,
+4(4):333–361,2012.
+[60] C.Yang,X.Wang,Y.Lu,H.Liu,Q.V.Le,D.Zhou,andX.Chen. Largelanguagemodelsas
+optimizers. arXivpreprintarXiv:2309.03409,2023.
+[61] Y. Yang, W.-t. Yih, and C. Meek. Wikiqa: A challenge dataset for open-domain question
+answering. InProceedingsofthe2015conferenceonempiricalmethodsinnaturallanguage
+processing,pages2013–2018,2015.
+[62] Z. Yang, P. Qi, S. Zhang, Y. Bengio, W. W. Cohen, R. Salakhutdinov, and C. D. Manning.
+HotpotQA:Adatasetfordiverse,explainablemulti-hopquestionanswering. InConferenceon
+EmpiricalMethodsinNaturalLanguageProcessing(EMNLP),2018.
+[63] W. Yuan, G. Neubig, and P. Liu. Bartscore: Evaluating generated text as text generation.
+AdvancesinNeuralInformationProcessingSystems,34:27263–27277,2021.
+[64] R.Zellers,A.Holtzman,Y.Bisk,A.Farhadi,andY.Choi. Hellaswag: Canamachinereally
+finishyoursentence? arXivpreprintarXiv:1905.07830,2019.
+[65] T. Zhang, V. Kishore, F. Wu, K. Q. Weinberger, and Y. Artzi. Bertscore: Evaluating text
+generationwithbert. arXivpreprintarXiv:1904.09675,2019.
+[66] L.Zheng,W.-L.Chiang,Y.Sheng,S.Zhuang,Z.Wu,Y.Zhuang,Z.Lin,Z.Li,D.Li,E.Xing,
+etal. Judgingllm-as-a-judgewithmt-benchandchatbotarena. AdvancesinNeuralInformation
+ProcessingSystems,36,2024.
+[67] A.M.ZoubirandB.Boashash. Thebootstrapanditsapplicationinsignalprocessing. IEEE
+signalprocessingmagazine,15(1):56–76,1998.
+16A Appendix
+A.1 AdditionalDescriptionofDatasetsUsed
+Figure5: HistogramofmodelperformanceonallsixdatasetsalongwiththeirH values. Itcanbe
+1
+seenthatdatasetssuchasAlpacaEvalhavelargergapbetweenthebestandsecondbestmethodleads
+toamuchsmallerH ,makingidentifyingthebestmethodeasier.
+1
+AlpacaEvalandAlpacaEval(DropAnnotator). AlpacaEvalbenchmarksvariousmodelsona
+fixedsetof805questions. First,foreachmodel,theresponsestothesequestionsarecollected. Then,
+eachresponseiscomparedagainstthatofabaselinemodel(GPT4-turbo)byusinganLLMjudge
+(inthiscase,GPT4-turboaswell). WecollectedtheAlpacaEvaldatasetonMay20,2024fromthe
+officialrepository2. Atthattime,therewereintotal154modelsbenchmarked,andhenceourdataset
+sizeis154×805. Toremovethebiasoffavoringitsownresponses,wealsocreateaderiveddataset
+calledAlpacaEval(DropAnnotator)wherewedroptheresponsesoftheannotatormodel,which
+leadstoasizeof153×805.
+GSM8KPromptsandPIQAPrompts. Tosimulateapromptengineeringusecase,wecreatetwo
+datasets: GSM8KPromptsandPIQAPrompts. Forthesedatasets,weaskGPT4togenerate205and
+177promptsfollowingthepromptengineeringworkfromYangetal.[60]. TheLLMusedtoperform
+inferenceonthedatasetsareMistra-7B[32]andTulu-7B[58]respectively. Weevaluatetheprompts
+on784and1546questionsonthetrainingset(about10%ofthesizeofthetwotrainingsets). For
+scoring,weextractthefinalanswersfromtheresponsesgeneratedbytheLLMsandcomparedthem
+withthegroundtruthanswers(forGSM8K)orgroundtruthchoice(forPIQA).
+GSM8KModelsandPIQAModels. Lastly,forthemodelselectionandhyperparametertuning
+use case, we similarly create two more datasets on GSM8K and PIQA. Instead of each method
+beingaprompt,eachmethodisnowacombinationofLLMwithdifferentsamplingconfigurations.
+Specifically,weuse11publicavailablemodels: GPT23,GPT2-Large4,CodeLLaMA5,Tulu-7B
+2https://github.com/tatsu-lab/alpaca_eval
+3https://huggingface.co/openai-community/gpt2
+4https://huggingface.co/openai-community/gpt2-large
+5https://huggingface.co/codellama/CodeLlama-7b-python-hf
+17Algorithm3RowMeanImputation(A (T,F,X))
+rmi
+Input: TheevaluationbudgetT,asetofmethodsF andasetofexamplesX.
+Output: Thepredictionˆi∗forbestmethodi∗.
+1: ∀i,thesetofevaluatedexamplesS i ={}.
+2: fort=1,···,T do
+3: Select: Drawi t ∈[n];Drawj t ∈[m]\S i.
+4: Evaluate: Runinferenceforthemethod-examplepair(f it,x jt),sendtheresulttotheannota-
+tor,andreceivee(f ,x );Eobs ←e(f ,x ).
+it jt it,jt it jt
+5: Update: S it ←S it ∪{j t}.
+6: endfor
+Return:ˆi∗ =argmax i (cid:80) j∈ |S Si i|E io ,b js
+Algorithm4FilledSubset(A (T,F,X))
+fs
+Input: TheevaluationbudgetT,asetofmethodsF andasetofexamplesX.
+Output: Thepredictionˆi∗forbestmethodi∗.
+1: thesetofevaluatedexamples(sameforallmethods)S ={}.
+2: fort=1,···,[T/n]do
+3: Select: I t ={1,···,n};Drawj t ∈[m]\S.
+4: fori t ∈I tdo
+5: Evaluate: Run inference for the method-example pair (f it,x jt), send the result to the
+annotator,andreceivee(f ,x );Eobs ←e(f ,x )
+it jt it,jt it jt
+6: endfor
+7: Update: S t ←S t∪{j t}.
+8: endfor
+Return:ˆi∗ =argmax (cid:80) j∈SE io ,b js
+i |S|
+6,Tulu-2-7B7,Gemma-7B8,Phi29,Llema-7B10,LLaMA-2-7B11,Mistral-7B12andStarCoder-
+7B13.Wealsohavethreetemperaturechoices{0,0.5,1},twomaximumdecodinglengthchoices
+{128,512}andtwozero-shotpromptchoices(directlyaskingfortheanswerandLet’sthinkstep
+bystep). TheCartesianproductofallthesechoicesgiveintotal132differentcombinationsasour
+methods. Dependingonthedataset,someoftheseconfigurationsexperiencedout-of-memoryerror
+onaNvidia3090whenwecollectedourdatawhichwedroptosimulatereal-worldscenarios. For
+theexamples,werandomlyselect1000questionsfromeachdataset.
+A.2 AlgorithmicDescriptionofBaselinesandAblations
+ThealgorithmsforRowMeanImputation,FilledSubset,LRFandUCB-E-LRF(ScoreOnly)are
+showninAlgorithm3,4,5and6respectively.
+6https://huggingface.co/TheBloke/tulu-7B-fp16
+7https://huggingface.co/allenai/tulu-2-7b
+8https://huggingface.co/google/gemma-7b
+9https://huggingface.co/microsoft/phi-2
+10https://huggingface.co/EleutherAI/llemma_7b
+11https://huggingface.co/meta-llama/Llama-2-7b-chat-hf
+12https://huggingface.co/mistralai/Mistral-7B-v0.1
+13https://huggingface.co/bigcode/starcoder2-7b
+18Algorithm5LRF(A (T,F,X;M,r,K,T ,b))
+lrf 0
+Input: TheevaluationbudgetT,asetofmethodsF andasetofexamplesX,theLRForacleM,
+therankr,#solutionsinensembleK,thewarm-upbudgetT ,thebatchsizeb.
+0
+Output: Thepredictionˆi∗forbestmethodi∗.
+1: UniformlysampleT 0method-examplepairsfrom[n]×[m]andgettheobservedscoringmatrix
+Eobs ∈([0,1]∪{?})n×mandtheobservationmatrixO ∈{0,1}n×mw.r.t.theseT evaluations.
+0
+2: fort=T 0,···,T 0+[(T −T 0)/b]do
+3: Select: DrawI t bysamplingbdistinctindicesuniformlyatrandomfrom[n]; DrawJ t by
+samplingbdistinctindicesuniformlyatrandomfrom[m].
+4: for(i t,j t)∈(I t,J t)do
+5: Evaluate: Run inference for the method-example pair (f it,x jt), send the result to the
+annotator,andreceivee(f ,x );Eobs ←e(f ,x )
+it jt it,jt it jt
+6: endfor
+7: Update: ∀j t ∈J t,O it,jt ←1;Eˆ ←M(Eobs,O;r,K).
+8: endfor
+Return:ˆi∗ =argmax 1 (cid:80)m (O Eobs+(1−O )Eˆ )
+i m j=1 i,j i,j i,j i,j
+Algorithm6UCB-E-LRF(ScoreOnly)(A (T,F,X;M,r,K,T ,b,η))
+uel−so 0
+Input: TheevaluationbudgetT,asetofmethodsF andasetofexamplesX,theLRForacleM,the
+rankr,#solutionsinensembleK,thewarm-upbudgetT ,thebatchsizeb,theuncertaintyscalingη.
+0
+Output: Thepredictionˆi∗forbestmethodi∗.
+1: UniformlysampleT 0method-examplepairsfrom[n]×[m]andgettheobservedscoringmatrix
+Eobs ∈([0,1]∪{?})n×mandtheobservationmatrixO ∈{0,1}n×mw.r.t.theseT evaluations.
+0
+2: Eˆ ←M(Eobs,O),∀i,B i ← m1 (cid:80)m j=1(O i,jE io ,b js+(1−O i,j)Eˆ i,j)+(cid:113) (cid:80)m j=1η (Oi,j)
+3: fort=T 0,···,T 0+[(T −T 0)/b]do
+4: Select: Drawi t ∈argmax iB i;DrawJ tbysamplingbdistinctindicesuniformlyatrandom
+from[m].
+5: forj t ∈J tdo
+6: Evaluate: Run inference for the method-example pair (f it,x jt), send the result to the
+annotator,andreceivee(f ,x );Eobs ←e(f ,x )
+it jt it,jt it jt
+7: endfor
+8: U 1p (cid:80)da mte: (O∀j t Eo∈ bs+J t (, 1−O i Ot,jt )Eˆ← )1 +; (cid:113)Eˆ ←
+η
+M( .Eobs,O;r,K); ∀f i ∈ F,B i ←
+m j=1 i,j i,j i,j i,j (cid:80)m j=1(Oi,j)
+9: endfor
+Return:ˆi∗ =argmax 1 (cid:80)m (O Eobs+(1−O )Eˆ )
+i m j=1 i,j i,j i,j i,j
+19
