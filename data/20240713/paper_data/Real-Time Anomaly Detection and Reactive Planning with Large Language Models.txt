@@ -1,0 +1,1668 @@
+Real-Time Anomaly Detection
+and Reactive Planning with Large Language Models
+Rohan Sinha1, Amine Elhafsi1, Christopher Agia2, Matthew Foutter3, Edward Schmerling4 and Marco Pavone1,4
+Abstract—Foundation models, e.g., large language models
+(LLMs), trained on internet-scale data possess zero-shot gen-
+nominal plan
+eralization capabilities that make them a promising technology S
+L
+towardsdetectingandmitigatingout-of-distributionfailuremodes O
+return to
+ofroboticsystems.Fullyrealizingthispromise,however,posestwo Foundation Model W nominal
+challenges: (i) mitigating the considerable computational expense … power lines and fire … MPC-maintained
+ofthesemodelssuchthattheymaybeappliedonline,and(ii)incor- Tree of Recovery
+poratingtheirjudgementregardingpotentialanomaliesintoasafe Trajectories
+controlframework.Inthiswork,wepresentatwo-stagereasoning
+framework: First is a fast binary anomaly classifier that analyzes AEm nob med ad lyin Dg e-b tea cs te od r FAST… ap fp ar llo bp ar ci kate
+observations in an LLM embedding space, which may trigger a
+slower fallback selection stage that utilizes the reasoning capabili- nominal anomalous Recovery
+tiesofgenerativeLLMs.Thesestagescorrespondtobranchpoints set #1
+in a model predictive control strategy that maintains the joint continue … action engage fallback #2
+feasibilityofcontinuingalongvariousfallbackplanstoaccountfor … & SLOW Autoregressive Generation Recovery
+theslowreasoner’slatencyassoonasananomalyisdetected,thus (e.g., chain-of-thought reasoning) set #2
+ensuring safety. We show that our fast anomaly classifier outper- inconsequential consequential
+forms autoregressive reasoning with state-of-the-art GPT models,
+evenwheninstantiatedwithrelativelysmalllanguagemodels.This continue appropriate fallback
+enables our runtime monitor to improve the trustworthiness of
+dynamicroboticsystems,suchasquadrotorsorautonomousvehi- Fig. 1: We present an embedding-based runtime monitoring
+cles, under resource and time constraints. Videos illustrating our schemeusingfastandslowlanguagemodelreasonersinconcert.
+approachinbothsimulationandreal-worldexperimentsareavail- During nominal operation, the fast reasoner differentiates
+able on our project page: https://sites.google.com/view/aesop-llm.
+between nominal and anomalous robot observations. If an
+anomalyisflagged,thesystementersafallback-safestatewhile
+I. INTRODUCTION
+the slow reasoner determines the anomaly’s hazard. In this
+Autonomous robotic systems are rapidly advancing in
+fallback-safestate,weguaranteeaccesstoasetofsaferecovery
+capabilities, seemingly on the cusp of widespread deployment
+plans (if the anomaly is consequential) and access to continued
+in the real world. However, a persistent challenge is that
+nominal operation (if the anomaly is inconsequential).
+the finite datasets used to develop these systems are unlikely
+to capture the limitless variety of the real world, leading to
+unexpectedfailuremodeswhenconditionsdeviatefromtraining robots to perform complex tasks [5], identify and correct
+data,orwhentherobotencountersraresituationsthatwerenot failures [18], and reason about potential safety hazards in their
+well-representedatdesigntime.Tomitigatetheresultingsafety surroundings [12] without explicit training to do so.
+implications,werequiremethodsthatcan1)assessthereliabil-
+ity of a machine learning (ML) enabled system at runtime and However, the adoption of FMs in-the-loop of safety-critical
+2)judiciouslyenactsafety-preservinginterventionsifnecessary. robotic systems is immediately met with two challenges. First,
+In this work, we investigate the utility of foundation the ever growing scale of FMs poses a major obstacle towards
+models (FMs), specifically, large language models (LLMs), enabling real-time, reactive reasoning about unexpected safety-
+towards these two objectives by employing LLMs as runtime critical events, especially on agile robotic systems with limited
+monitors tasked with 1) detecting anomalous conditions compute.Hence,existingworkthatappliesFMstoroboticshas
+and 2) reasoning about the appropriate safety-preserving focused on quasi-static (e.g., manipulation) or offline settings
+course of action. We do so because recent work has shown that afford large times delays while the LLM completes its
+that the internet-scale pretraining data provides FMs with reasoning. Second, the application of FMs as runtime monitors
+strong zero-shot reasoning capabilities, which has enabled requires that they are grounded with respect to the task and
+capabilities of the system. However, the community has not
+1Dept. of Aeronautics and Astronautics, Stanford University. 2Dept. converged on rigorous methods for grounding FMs without
+of Computer Science, Stanford University. 3Dept. of Mechanical compromising on their generalist zero-shot reasoning abilities
+Engineering, Stanford University. 4NVIDIA. Contact: {rhnsinha,
+(e.g.,fine-tuning[24]orlinearprobing[54]oftenunderperform
+amine, cagia, mfoutter, pavone}@stanford.edu,
+eschmerling@nvidia.com. OOD); prompt design remains a standard practice.
+4202
+luJ
+11
+]OR.sc[
+1v53780.7042:viXraTo address these challenges, we present AESOP1, an text-based domains, 2) simulated and real-world closed-loop
+anomaly detection and reactive planning framework that aims quadrotor experiments resembling a drone delivery service,
+to derive maximum utility of an LLM’s zero-shot reasoning and 3) careful recreations of recent real-world failure modes
+capabilities while taking LLM inference latencies into account of autonomous vehicles in the CARLA simulator [11]. We
+within the control design. As shown in Fig. 1, AESOP splits conclude that the use of FMs not only presents a promising
+the monitoring task into two separate stages: The first is rapid, directiontosignificantlyimprovetherobustnessofautonomous
+real-time detection of anomalies—conditions that deviate from robotic systems to out-of-distribution scenarios, but also
+the nominal conditions where the robot performs reliably—by that their real-time integration within dynamic, agile robotic
+querying similarity with previously recorded observations systems is already practically feasible.
+withinthecontextualembeddingspaceofanLLM.Thesecond Organization: We first discuss related work in §II and
+stage is slower, methodical generative reasoning on how to formalize the problem setup in §III. Then, we present our
+respond to an anomalous scenario once it has been detected. approach in §IV and evaluate our method in §V. Finally, we
+We combine the resultant monitoring pipeline with a model conclude and provide a future outlook in §VI. In addition, we
+predictive control strategy that maintains multiple trajectory include a full overview of the notation and conventions used
+plans, each corresponding to a safety-preserving intervention, in this paper in Appendix A.
+in a way that ensures their joint feasibility for an upper
+bound on the time it takes the slower, generative reasoning
+II. RELATEDWORK
+to complete2. As such, our contributions are threefold: Out-of-Distribution Robustness: The fact that learning-
+1) Fast reasoning with embeddings: We propose a real-time basedsystemsoftenbehaveunreliablyondatathatisdissimilar
+anomalydetectionmethodthat,usingrelativelysmallFMs from their training data has been extensively documented in
+(e.g., 120M parameters) and the robot’s previous nominal both the machine learning and robotics literature [14, 37, 33,
+experiences, surpasses generative chain-of-thought (CoT) 45]. Approaches to address the subsequent challenges broadly
+reasoning with high-capacity LLMs such as GPT-4. Our fall into two categories [45]: First are methods that strengthen
+method runs at 20Hz on an Nvidia Jetson AGX ORIN, a model’s performance in the face of distributional shift. For
+a 357x speed up over cloud querying GPT-4. To our example, through robust training (e.g., [41]) or by adapting
+knowledge, this is the first application of FM embeddings the model to changing conditions (e.g., [16, 8]). Second are so
+to the task of runtime monitoring, enabling safe and calledout-of-distributiondetectionalgorithms[42,40],thataim
+real-time control of an agile robotic system. to detect when a given model is unreliable, e.g., by computing
+2) Slow reasoning through autoregressive generation: While the variance of an ensemble [25] or computing energy scores
+thefasteranomalydetectormerelydetectsdeviationsfrom [29]. Recent work has shown the merits of generalist FMs like
+prior experiences, we show that autoregressive generation LLMs in both domains: Studies have shown that zero-shot
+oflongeroutputsequencesallowstheLLM-basedmonitor application of a FM (e.g., in [54], the authors apply CLIP
+to methodically reason about the safety consequences zero-shot on ImageNet), vastly improves OOD generalization
+of out-of-distribution scenarios and decide whether over previous approaches, like distributionally robust training
+intervention is necessary in a zero-shot fashion; i.e., not [31, 54, 6]. In addition, existing OOD detection methodologies
+all anomalies lead to system-level failures. and their application within robot autonomy stacks are tailored
+3) Hierarchical multi-contingency planning: Facilitated by todetectconditionsthatcompromisethereliabilityofindividual
+our fast anomaly detector, we introduce a predictive components of an autonomy stack, like whether a perception
+control framework to integrate both FM-based reasoners system’s detections are correct [39, 13, 36, 46]. Instead, recent
+in a lower-level reactive control loop by maintaining work showed that LLMs may provide a more general mech-
+multiple feasible trajectories, each corresponding to a anism to detect context dependent safety hazards, especially
+high-level intervention strategy. This allows the robot those that are hard to measure with predefined performance
+to 1) react to sudden semantic changes in the robot’s metrics [12]. For example, an autonomous EVTOL may
+environment,2)maintainclosed-loopsafetywhilewaiting monitor the quality of the vision system’s landing pad location
+for a slow reasoner to return a decision, and 3) exhibit estimate, but even if the EVTOL has high confidence that it
+dynamic, agile behaviors within the range of scenarios canlandsuccessfully,theoutcomeoflandingonabuildingthat
+where the nominal autonomy stack is trustworthy. is on fire can have profound negative consequences. However,
+WedemonstratethesefactsacrossseveralcommonplaceLLMs, despite the attractive properties of LLMs, these works do not
+ranging from 108 1012 parameters, as well as conventional propose practical strategies to integrate them in closed-loop.
+−
+OOD detection techniques on 1) an extensive suite of synthetic Therefore,weproposeaclosed-loopcontrolframeworkthatcan
+both use the LLM to identify unseen anomalies and strengthen
+1Thisnameisinspiredbytheauthorof“TheTortoiseandtheHare,”in
+performance in the presence of rare failure modes.
+referencetoourslowandfastreasoners.
+Foundation Models in Robotics: The integration of large
+2Thisapproachparallelsideasfromdualprocesstheoryincognitivescience,
+popularizedinKahneman’s“Thinking,FastandSlow”[22].Mostofthetime, lanugage models (LLMs) and, more broadly, foundation
+we drive a car based on intuition without careful thought. It is only once models (FMs) into robotics has sparked considerable interest
+somethingunusualstartlesusthatwecarefullyreasonabouthowtoproceed,
+due to their proficiency in managing complex, unstructured
+often proactively lifting from the throttle to slow down and buy ourselves
+timetocometoadecision. tasks that demand sophisticated reasoning skills. These modelshave been instrumental in bridging the gap between natural about the robot’s environment. Our goal is to design a
+language instructions and the execution of physical actions in runtime monitor that interferes with the nominal system to
+the real world. Various approaches utilizing these models have avoid system-level safety hazards, which may depend on
+been developed for online use in applications in areas such as environmental factors not represented in the robot’s state x .
+t
+manipulation [19], navigation [43], drone flight [9], and long- For example, a quadrotor cannot safely land on a landing zone
+horizon planning [5, 28]. FMs have also been used to define covered in burning debris even if the nominal control stack
+reinforcement learning reward functions [58], generate robot has the ability to do so. In the spirit of [12], we refer to such
+policy code [27], or create additional training data [56, 57, 2]. events as semantic failure modes, as they do not necessarily
+However, the issue of response time associated with FMs constitute violation of precise state constraints , but instead
+X
+hasnotbeenafocalpointinthesestudies.Theaforementioned depend on the qualitative context of the robot’s task.
+onlinemethodspredominantlyrelyonaquasi-staticassumption, Further, we assume that we have access to a dataset
+implying that the timing of the robot’s actions is not critical. = o N of nominal observations wherein the robot
+Dnom { i }i=1
+This assumption allows the system the luxury of time to was safe and reliable. Conceptually, corresponds to
+nom
+D
+consult the LLMs and await their responses without urgency. the operational data of a notionally mature system, and may
+Conversely, the latter methods either operate offline or utilize consist of data used to train the system or of previously
+LLMsinmannersthataresimilarlyinsensitivetoresponsetime. collected deployment data. This data will overwhelmingly
+As such, existing work demonstrates limited dynamic contain mundane scenarios where the robot performs well; our
+reactivity of the policy, which is essential for fast-moving, monitoring framework is targeted instead at the challenging,
+agile robots like quadrotors. These robots can quickly find extremely rare corner cases that are unlikely to have been
+themselves in situations where a delayed response can result recorded before and threaten the robot’s reliability.
+in an unavoidable crash. To mitigate this issue, our approach In the event that a failure mode of the nominal autonomy
+specifically considers the delays introduced by the reasoning stack is imminent, we must select and engage a safety-
+process. We enhance reactivity by implementing a more rapid preserving intervention. For example, we may choose to land
+anomaly detection system, thereby reducing the risk of crashes the quadrotor in another open landing zone like a grassy
+by allowing for timely corrective actions. field. To this end, we follow [46] and we assume that we
+AcceleratingInference:Itiswell-recognizedthatincreasing are given a number of recovery regions 1, 2,..., d ,
+XR XR XR⊆X
+FMcapabilitiesareaccompaniedwithincreasingcomputational control invariant subsets of the state space that correspond
+cost and inference latency. As such, substantial effort is being to high-level safety interventions. For example, i may
+XR
+dedicated to the acceleration of these models, of which several represent the alternate landing zone. By planning a trajectory
+popular strategies have emerged such as model distillation [15, to the appropriate recovery set, potential safety hazards can
+17],quantization[20,55],andparametersparsification[49,34]. be avoided. As shown in [46], such sets can both be hand
+Ultimately, these approaches improve the cost of the forward defined up-front and identified using reachability analysis.
+pass through a transformer model, but do not address the fact
+IV. PROPOSEDAPPROACH
+thatLLMstypicallyneedtogeneratelongsequencesofoutputs
+It is virtually impossible to account for all the corner-cases
+to reason towards the correct decision [53], a process unlikely
+and semantic failure modes that a system may experience
+to run in real-time for time-sensitive tasks. Querying remotely
+through a standard engineering pipeline. Even if we train e.g.,
+hostedmodelsonlarge-scalehardware(e.g.,GPT-4[1])isapo-
+classifiers to detect obstructions on landing zones, there may
+tential solution if computation constraints become too stringent
+always remain a class of semantic failure modes that we have
+forasystemtoperformonboardFMinference,yetnetworkcon-
+not accounted for. Instead, we propose to leverage generalist
+ditionsmayincurinconsistentandpotentiallysignificantdelays,
+foundation models to detect and reason holistically about a
+andconnectivitymaybeunreliableforin-the-wilddeployments.
+robot’senvironment.WefirstpresentourFM-basedmonitoring
+III. PROBLEMFORMULATION approach, after which we construct a planning algorithm that
+accounts for the latency that FM-based reasoning may induce.
+Inthiswork,weconsiderarobotwithdiscretetimedynamics
+A. Runtime Monitor: Fast and Slow Reasoning
+x =f(x ,u ), (1)
+t+1 t t To detect and avoid semantic failure modes, we propose
+where x Rn represents the robot’s state, and u Rm is the a two-stage pipeline. The first is the detection of anomalies,
+t t
+∈ ∈
+control input. Nominally, we aim to minimize some control simply defined as conditions that deviate from the mundane,
+objective C that depends on the states and inputs, subject nominal experiences where we know that our notionally
+to safety constraints on the state x Rn and input mature system is reliable. The second is slower reasoning
+t
+u Rm. For example, a quadrotor∈ ’sX sta⊆ te consists of its about the downstream consequence of an anomaly, if detected,
+t
+∈U⊆
+pose and velocity (estimated from e.g., GPS, visual-SLAM, towards a high-level decision on whether a safety-preserving
+and IMUs), and its objective may be to minimize distance to intervention should be executed. We refer to Appendix B for
+a landing zone subject to collision avoidance constraints. a brief introduction to anomaly detection used hereafter.
+In addition to the state variables tracked by the nominal Fast Anomaly Detection: To detect anomalies, we need to
+control loop, the robot receives an observation o at inform a FM of the context within which the autonomous sys-
+t
+∈ O
+each timestep, which provides further contextual information temisknowntobetrustworthy.Theprior,nominalexperiencesof the robot serve as such grounding. We construct an anomaly operation (y=0), or whether we should engage intervention
+score function s(o , ) R to query whether a current ob- y 1,...,d and steer the state into recovery set y. As we
+t Dnom ∈ ∈{ } XR
+servationo differsfromthepreviousexperiencesin .We illustrate in our experiments, the recovery sets naturally corre-
+t nom
+D
+donotrequireanyparticularmethodologytogeneratethescore, spond to high-level behaviors (e.g., landing in a field), which
+we just require that scoring an observation is computationally facilitates prompt design. We use the shorthand w(o , ) to
+t
+Y
+feasible in real-time; that is, within a single time step. denote the output of the slow reasoner when given observation
+This work emphasizes the value of computing anomaly o and a (sub)set of intervention strategies 1,...,d .
+t
+Y⊆{ }
+scores using language-based representations, which we show Whether inference is run onboard or the model is queried
+capture the semantics of the observation within the context remotely over unreliable networks in the cloud, we must
+of the robot’s task in §V. To do so, we first create a cache accountforthelatencythatautoregressivereasoningintroduces.
+of embedding vectors = e N where e =ϕ(o ) Re for For example, a fast moving vehicle may collide with an
+De { i }i=1 i i ∈
+each o by embedding the robot’s prior experiences anomalous obstacle if it’s reaction time is too slow. Therefore,
+i nom
+∈D
+offline using an embedding FM ϕ. Then, at runtime, we we account for the LLM’s compute latency by assuming that
+observe o , compute its corresponding embedding e , and it takes at most K N timesteps to receive the output string
+t t >0
+∈
+compute an anomaly score s(e ; ) using the vector cache. from the slow reasoner. It is usually straightforward to identify
+t e
+D
+Weinvestigateseveralsimplescorefunctions(seeAppendixD3 the value of K in practice, since we prompt the model to
+for a full list), each of which roughly measures a heuristic adhere to a strict output template that tends to stabilize the
+notion of difference with respect to . For example, the length of the output generations. Alternatively, as we describe
+nom
+D
+simplest metric uses the maximum cosine similarity with in §V-C and Appendix I, a simple field-test can be sufficient
+respect to samples in the prior experience cache, to identify an upper bound on typical network latency.
+eTe
+s(e ; ):= max i t , B. Planning a Tree of Recovery Trajectories
+t De −ei∈De ∥e
+i
+∥∥e
+t ∥ We control the robot’s dynamics (1) in state-feedback using
+which, in effect, retrieves the most similar prior experience a receding horizon control strategy that 1) minimizes the
+from e to construct the score. Intuitively, this approach nominal control objective along a horizon of T>K timesteps,
+D
+measures whether anything similar to the current observation while 2) maintaining a set of d recovery trajectories that
+has been seen before. each reach one of the respective recovery sets i within the
+Finally, to classify whether an observation should be treated horizon T. The goal of this approach is to eX nsR ure that the
+as nominal or anomalous, we can calibrate a threshold τ R high-level safety interventions provided to the slow reasoner
+∈
+as the α (0,1) quantile of the nominal prior experiences, can be executed. Additionally, it is essential that these options
+∈
+(cid:26) (cid:27)
+e :s(e ; e ) q remain feasible throughout the K time steps it takes the
+τ=inf q R : | i ∈De i De \{ i } ≤ | α , (2)
+∈ N ≥ monitor to decide on the most appropriate choice. Otherwise, a
+fast moving robot may, for example, no longer be able to stop
+i.e., the smallest value of q that upper bounds at least αN
+intimetoavoidacollision.Tothisend,wesolvethefollowing
+nominal samples. Note that for nominal embeddings, we must
+finite-time optimal control problem online, which maintains a
+compute the anomaly score s in a leave-one-out fashion, since
+consensus between the recovery trajectories for K timesteps:
+s(e ; )= 1 for e . Determining the threshold τ using
+i e i e
+D − ∈D
+empirical quantiles as in (2) is a standard approach [39], but J ( ,K,T)=
+t
+Y
+could be extended in future work to make precise guarantees minimize C(x0 ,u0 )
+on false positive or negative rates using recent results in {xi t:t+T+1|t,ui t:t+T|t}i∈Y∪{0} t:t+T+1|t t:t+T|t
+conformal prediction [3, 30].
+s.t. xi =f(xi ,ui )
+Slow Generative Reasoning: Once we detect an anomaly, t+k+1|t t+k|t t+k|t
+wetriggertheautoregressivegenerationofanLLMtogenerate
+ui
+t+k|t∈U
+xi
+t+k|t∈X
+azero-shotassessmentofwhetherweneedtoengageanyofthe xi =x (3)
+t|t t
+interventionsassociatedwiththerecoverysets 1,..., d (§III)
+XR XR xi i i
+tomaintainthesafetyofthesystem.Thevalueofthisapproach t+T+1|t∈XR ∀ ∈Y
+is that the LLM’s internet-scale pretraining data allows it to ui =u0 i
+t|t t|t ∀ ∈Y
+generate outputs that resemble the generalist common sense ui =uj i,j
+reasoningthatahumanoperatorislikelytosuggest,asaresult, t:t+K|t t:t+K|t ∀ ∈Y
+makingsuperiordecisionsonOODexamples,onwhichexisting Here, the notation xi indicates the predicted value of
+t+k|t
+task-specific learning algorithms are notoriously unreliable. variable x at time t+k computed at time t for each trajectory
+To do so, we follow [12] in using a VLM to convert the i 0 . The MPC in (3) optimizes a set of +1 trajecto-
+∈Y∪{ } |Y|
+robot’s current visual observation into a text description of ries. The first corresponds to a nominal trajectory x0
+t:t+T+1|t
+the environment. We simply encode this scene description planthatminimizesthecontrolobjectiveandasetof recov-
+|Y|
+into a prompt that provides context on the monitoring task, as erytrajectoriesthateachreachtheirrespectiverecoveryset i
+XR
+illustratedinFig.3.Wethenparsetheresultingoutputstringto within T timesteps. In addition, the MPC problem (3) includes
+yieldaclassificationy 0,1,...d onwhethertheanomalydoes twoconsensusconstraints,oneassociatedwiththefastanomaly
+∈{ }
+not present a hazard and the system can continue it’s nominal detector and the other with the slow reasoner. First, by fixingAlgorithm 1: AESOP fast anomaly detector issues a warning regarding an unusual
+Input: State x such that (3) is feasible, fast anomaly observation, the robot will balance progress along the nominal
+0
+detector h, slow reasoner w with latency K. trajectory and jointly maintaining dynamic feasibility of the
+1 t anom ≤ fallback options available at t anom. This generally leads the
+2 for t← =0∅ ,1,2,... do robottoslowdowntopreserveitsoptions,therebyprovidingthe
+3 Observe x t,o t slowreasonerwithtimetothink.Uponreachingadecisionfrom
+4
+5
+if t a Cno hm oo= se∅ o tr w( 1o ,.t .a .n dom, sY .tt .an (o 3m )) i=
+s
+f0 eat sh ie bn
+le
+t oh pe ers alo tiw onr se ,as ifon te hr e, t oh be sero rvb ao tt ioe nith ie sr ntr oa tns hi ati zo an rs dob ua sc ,k ot ro en no gm ai gn ea sl
+with arY gum⊂ e{ nts } , consensus horizon K the selected safety intervention and commits the robot to the
+t
+6 Solve (3) with J tY ( t,K,T) associated recovery set. While this scheme does not explicitly
+7 if h(o t)=True thY en ensure that multiple strategies remain available to the robot
+8 t anom t throughout nominal operation (though at least one will remain
+9 w(o t,← t).start() so),wefindinapracticalsetting(see§V-B,§V-C)thatmultiple
+10 end Y simplehand-designedinterventionstrategiesremainpersistently
+11 Apply optimal control input u⋆,0 feasible. Still, methods for dynamically identifying and select-
+t|t ingrecoveryregionspresentanexcitingavenueforfuturework.
+12 end
+13 else if
+t = and not w(o , ).done() then V. EXPERIMENTS
+anom
+̸ ∅
+tanom Ytanom
+14 Set k ←t −t anom Having outlined our approach, we conduct a series of
+15 Solve (3) with J t( Ytanom,K −k,T −k)
+experiments to test the following five hypothesis:
+16 Apply optimal control input u⋆ t|, t0 H1 By quantifying semantic differences of observations with
+17 end respect to the prior experience of a system, our fast
+18 else embedding-based anomaly detector performs favorably
+19 Set k t t anom to generative reasoning-based approaches.
+← −
+20 Solve (3) H2 Embedding-based anomaly detection does not necessitate
+with J ( w(o , ) ,0,max 0,T k )
+t
+{
+tanom Ytanom
+} { − }
+the use of high-capacity generative models; small models
+21 Apply optimal control incurring marginal costs can be used.
+input u⋆ t|, ty, where y=w(o tanom, Ytanom) H3 Once an anomaly is detected, generative reasoning
+22 end approaches can effectively deduce whether the anomaly
+23 end warrants enacting safety-preserving interventions.
+H4 Our full approach, which unifies embedding-based
+consensus along the first input of the nominal trajectory and anomaly detection and generative reasoning-based
+all the recovery trajectories, we ensure that the set of feasible anomaly assessment, can be integrated in a broader
+interventions is non-empty during nominal operation. The sec- robotics stack for real-time control of an agile system.
+ond fixes consensus for K timesteps along the set of recovery H5 Additional forms of embeddings, including those from
+trajectories, in effect generating a branching tree of recovery vision and multi-modal models, offer a promising future
+trajectories.Ifwethenusethefastanomalydetectortobothtrig- avenue for end-to-end anomaly detection.
+ger execution of the first K actions of the recovery trajectories Experiment Rationale: We run four main experiments. The
+andtheslowerreasoning,weensurethattheoptionsweprovide first experiment (§V-A) tests the performance of our fast
+totheslowreasonerarestillavailablewhenitreturnsitsoutput. anomaly detector in three synthetic (i.e., text-based) robotic
+WesummarizethismethodologyinAlgorithm1,whichguar- environments. We then evaluate the slow generative reasoner
+antees that we reach the recovery set chosen by the slow rea- for the assessment of detected anomalies on two of these
+sonerwithinatmostT+1timestepsafterdetectingananomaly: environments. The second experiment (§V-B) evaluates our
+full approach (integrating the runtime monitor with the MPC
+Theorem 1. Suppose that at t=0, the MPC in (3) is feasible
+fallback planner) in a simulation of real-time control of an
+for some set of recovery strategies 1,...,d , i.e., that
+Y ⊂{ } agile drone system. The third is a full-stack experiment on
+J ( ,K,T)< . Then, the closed-loop system formed by (1)
+0 Y ∞ real quadrotor hardware, including a timing breakdown for
+and Algorithm 1 ensures the following: 1) We satisfy state
+each component in our approach running on a Jetson AGX
+and input constraints x , u for all t 0. 2) At any
+t ∈X t ∈U ≥ Orin module, thereby demonstrating viability for hardware
+time t 0, there always exists at least one safety intervention
+≥ deployment. The fourth experiment evaluates whether our
+y 1,...,d for which the MPC (3) is feasible. 3) If the slow
+∈{ } runtime monitor transfers to a realistic, semantically rich
+reasoner w, triggered at some time t >0, chooses an
+anom self-driving environment, where we investigate the use of both
+intervention y 1,...,d , then for all t t +T +1 it
+holds that x
+∈{y. } ≥ anom language and multi-modal embeddings for anomaly detection.
+t ∈XR All code used in our experiments, including scripts to
+Proof: See Appendix H. generate the synthetic datasets and prompt templates,
+The emergent behavior of Algorithm 1 is that once the can be found through our project page at https://sites.google.com/view/aesop-llm. In addition, we provide a 1) Fast Reasoning for Anomaly Detection (H1, H2): The
+brief description of our prompting strategy in Appendix G. role of the anomaly detector is to analyze the robot’s observa-
+tions and identify whether, due to the presence of an atypical
+A. Synthetics—Manipulation, Autonomous Vehicles, VTOL object or concept, an observation qualifies as an anomalous.
+Methods: We evaluate our fast anomaly detector with nine
+Weconstructthreesyntheticdomainstosupportouranalysis:
+language models, varying in size and function: BERT-base
+a Warehouse Manipulator domain, an Autonomous Vehicle
+(110M) and BERT-large (336M) uncased [10], Sentence
+domain, and a Vertical Take-off and Landing (VTOL) Aircraft
+Transformer MPNet (110M; BERT-base architecture trained
+domain. Each domain consists of scenarios in which a notion-
+for embeddings) [47, 38], completion and instruction-tuned
+ally mature autonomous robot may (or may not) encounter a
+Llama 2 models (7B) [51], Mistral (7.11B) [21, 52], and
+safety concerning observation during its typical operations.
+three OpenAI embedding models (parameters not disclosed).
+The robots’ observations take the form of a collection of
+The choice of score function s(e ; ) (e.g., cosine similarity,
+concepts, which we define as one or more objects and their t De
+top-k scoring, Mahalanobis distance) did not yield significant
+semanticrelationships.Forexample,intheVTOLdomain,both
+performance variation. Thus, we only report results for top-5
+“ice” and “helipad” represent concepts of a single object class,
+scoring and refer to Appendix D for extended results.
+whereas “icy helipad” represents a third concept formed by
+Baselines: Our baselines consist of generative reasoning
+their conjunction. We follow definition of anomalies given in
+with GPT-4, queried to classify the robot’s observation
+§IV-A:observationsthat,inthecontextofagiventask,deviate
+as “nominal” or “anomalous.” We consider a two variants:
+fromtherobots’nominalexperiences.Thus,anomaliesmaynot
+single-token (ST) prediction and chain-of-thought reasoning
+posesafetyrisksbutmuststillbeidentifiedforfurtheranalysis.
+(CoT). For CoT, GPT-4 first reasons over each concept in the
+We briefly describe the synthetic domains below:
+observation before outputting an overall anomaly classification.
+• Warehouse Manipulator (WM): A mobile WM robot
+We use prompts with identical prefixes across all methods,
+performs the task of “sorting objects on a conveyor belt.”
+making minor modifications to, e.g., elicit CoT reasoning. For
+Observations contain concepts sampled from a predefined
+metrics we report accuracy, setting the detection threshold at
+set of conveyor belt (e.g., a package) and surrounding
+the 95-th quantile ((2)) of the scores in the nominal dataset.
+environment (e.g., a storage shelf) objects. Anomalies
+Results & Analysis: The results are shown in Fig. 2. The
+consist of hazardous objects on the conveyor belt (e.g.,
+firstrowshowstheaccuracyofourfastanomalydetectorswith
+a leaking bleach bottle) or object combinations in the
+increasingsamplesize(i.e.,thesizeN oftheembeddingcache
+surrounding environment (e.g., two forklifts in collision).
+= e N ) drawn IID from the full dataset of nominal
+The dataset contains 1551 scenarios. De { i }i=1
+observations . The second row is identical to the first,
+• Autonomous Vehicle (AV): An AV operating as a taxi Dnom
+except, showing accuracy with increasing percent of concept
+service performs the task of “driving to a set destination.”
+coverage; that is, the percent of nominal concepts contained
+Observations contain concepts sampled from a predefined
+in the embedding cache used to construct our detector.
+set of task-relevant (e.g., a car, bus, or traffic light) De
+Comparing the top and bottom rows for each domain, we
+and task-irrelevant (e.g., an airplane in the sky) objects.
+observethatperformanceincreaseslogarithmicallywithrelative
+Anomalies consist of unusual task-relevant objects (e.g.,
+samplesize,butonlylinearlywithincreasingconceptcoverage.
+a blank speed limit sign) or combinations (e.g., a traffic
+This indicates that our fast anomaly detector scales favorably
+light on a truck). The dataset contains 840 scenarios.
+withthediversityofnominalconceptsrepresentedintherobot’s
+• Vertical Take-off and Landing (VTOL): A VTOL
+experienceasopposedtotheshearscaleofexperience.Provided
+aircraft operating as an urban air taxi performs one
+with sufficient concept coverage, our anomaly detector clearly
+of two tasks: “flying toward a set destination” or
+outperforms the single-token and CoT generative reasoning
+“landing on a designated building.” Observations contain
+baselines with GPT-4, validating our first hypothesis H1.
+concepts sampled from a predefined set of flying objects,
+Comparing among language models, we find that the
+landing zones, and ground regions. Anomalies consist of
+performance of models does not strictly correlate with their
+unanticipated flying objects (e.g., a large swarming flock
+size, but rather, depends on their training data and strategy.
+of birds) and/or landing zones (e.g., a building rooftop
+For example, Sentence Transformer MPNet, a 110M parameter
+on fire). The dataset contains 18400 scenarios.
+model trained for embeddings, often outperforms BERT
+The synthetic domains vary in terms of size and complexity,
+Large (336M) and the OpenAI embedding models, and even
+with WM being the simplest, and VTOL being the most chal-
+performs comparatively to the Llama 2 (7B) and Mistral
+lenging. Complexity is determined by extent to which anoma-
+(7.11B) models. This validates our second hypothesis H2.
+lousconceptsdifferfromthenominalexperiencesoftherobot3.
+The key advantage of our anomaly detectors is that they
+ground the analysis of observations in the embedding space
+3IntheWMdomain,anomalousobservationsconsistofovertlyabnormal
+of previously observed concepts. It is unreasonable to attempt
+concepts(e.g.,a“smokinglithiumbattery,”“abrokenglassbottle”)relative
+tothetypical“package”or“computer”onewouldexpectonaconveyorbelt. to ground the generative baselines in such a way due to
+This in turn simplifies the task of differentiating anomalous from nominal their limited context windows, among other challenges (e.g.,
+observations.Bycontrast,theVTOLdomainconsistofmorenuancedconcept
+recencybias[59]).Moreover,weseethatGPT-4’sperformance
+shifts; an observation containing a “flying bird” is conceptually similar to
+a“swarmingflockofbirds,”thoughoneisnominal,andtheotheranomalous. gradually decreases as the complexity of the environmentsManipulation Autonomous Vehicle VTOL
+1.0
+0.9
+0.8
+0.7
+0.6
+0.5
+0.4 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+RelativeSampleSize RelativeSampleSize RelativeSampleSize
+1.0
+0.9
+0.8
+0.7
+0.6
+0.5
+0.4 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+RelativeConceptCoverage RelativeConceptCoverage RelativeConceptCoverage
+BERTBase Llama2Chat(7B) Mistral(7B) OpenAIEmbedding3Large OpenAIAda002 GPT-4CoT
+BERTLarge Llama2(7B) MPNet OpenAIEmbedding3Small GPT-4SingleToken
+Fig. 2: Embedding-based (fast) anomaly detection results for the manipulation, autonomous vehicle, and VTOL domains. The
+top row of figures plot anomaly detection accuracy as a function of experiences sampled IID from the respective domain
+datasets. The bottom row of figures plot accuracy as a function of the concepts sampled from the respective domain datasets.
+We use top-5 scoring with the anomaly detection threshold set at the 95-th quantile (2) of the scores in the sampled data.
+increase (e.g., from AV to VTOL), and as such, we may and safety-concerning (e.g., a fighter jet) anomalies. For this
+expect further performance drops in real-world settings. experiment,weevaluatefourLLMs:Llama2(7B)single-token
+2) Slow Reasoning for Anomaly Assessment (H3): Once an prediction, GPT-3.5 Turbo CoT, GPT-4 single-token prediction,
+anomaly has been identified, it is the role of the slow reasoner and GPT-4 CoT. As before, the CoT approach must first assess
+to assess whether or not the anomaly warrants the enactment the safety risk each concept contained in the observation
+of safety-preserving interventions. Recall, we use LLMs for before outputting a fallback classification.
+their generalist knowledge—acquired through internet-scale We report true positive rate (TPR), false positive rate (FPR),
+pretraining—to infer the need for a fallback on an observation andaccuracy.AtruepositivecorrespondstotheLLMcorrectly
+identified as dissimilar from the robot’s previous experiences. engaging a fallback intervention on a safety-concerning
+anomaly, while a true negative corresponds to correctly
+dismissing a safety-redundant anomaly.
+Method TPR FPR Accuracy
+The results are shown in Table I. We observe that in these
+Llama 2 (7B) 0.52 0.46 0.52
+out-of-distribution scenarios, model capacity is an important
+GPT-3.5 Turbo 0.97 0.54 0.73
+consideration, with the GPT variants clearly outperforming
+GPT-3.5 Turbo CoT 0.82 0.28 0.77
+the Llama 2 (7B) baseline. As expected, we also find that CoT
+GPT-4 0.65 0.06 0.79
+reasoningyieldsanotableimprovementinoverallclassification
+GPT-4 CoT 0.89 0.10 0.90
+accuracy(e.g.,11%forGPT-4)andreducesthenumberoffalse
+positives. These findings are corroborated in the manipulation
+TABLEI:SlowGenerativeReasoningforAnomalyAssessment domain (Table VII). This validates our third hypothesis H3.
+in VTOL. Best scores are bolded; second best are underlined.
+B. Full Stack—Quadrotor Simulation (H4)
+We evaluate the ability of LLMs to assess anomalies in Here, we demonstrate the efficacy of our framework, from
+the VTOL domain and predict one of two options: whether anomaly detection and LLM reasoning to closed-loop control
+the VTOL should 1) “continue” it’s nominal operation or with Algorithm 1, on an example of a quadrotor delivering a
+2) “fallback,” enacting one of several listed safety-preserving package.Inthissimulation,thequadrotor’staskistoflytoward
+interventions. To do so effectively, the LLM must differentiate andsubsequentlylandatatargetlocation.Tosimulateavariety
+between safety-redundant (e.g., a plane on a known flight path) of safety hazards and instantiate the fast anomaly detector,
+ycaruccA
+ycaruccAFAST (0.053s) AESOP Quadrotor Trajectory SLOW (1.3s)
+t = 2.5s: Anomaly Detected t = 3.8s: Reasoner Returns
+LLM Query: LLM Output:
+I am the runtime monitor for a vision- Detected object: a busy road...
+based autonomous vertical takeoff and Object classification: nominal
+landing (VTOL) aircraft...
+Detected object: an
+The VTOL’s current observations are: (a unpredictable unidentified
+busy road, ..., an unidentified flying flying object
+object) Analysis: ...poses a potential
+safety risk ... if it enters the
+The VTOL’s available safety flight path...
+interventions are: Object classification: anomalous
+-Perform an immediate landing in an
+empty grass field Overall control decision: ...
+-Perform an immediate landing in a X<latexit sha1_base64="LQb9N4J0du+3yRBQe+67ot+dZLM=">AAAB+HicjVDLSsNAFL2pr1ofjbp0M1gEVyURqS6LblxWsQ9oY5hMJ+3QySTMTIQa8iVuXCji1k9x5984abtQUfDAhcM593IPJ0g4U9pxPqzS0vLK6lp5vbKxubVdtXd2OypOJaFtEvNY9gKsKGeCtjXTnPYSSXEUcNoNJheF372jUrFY3OhpQr0IjwQLGcHaSL5dHURYjwnmWS/3r29d3665dWcG9DepwQIt334fDGOSRlRowrFSfddJtJdhqRnhNK8MUkUTTCZ4RPuGChxR5WWz4Dk6NMoQhbE0IzSaqV8vMhwpNY0Cs1nEVD+9QvzN66c6PPMyJpJUU0Hmj8KUIx2jogU0ZJISzaeGYCKZyYrIGEtMtOmq8r8SOsd1t1FvXJ3UmueLOsqwDwdwBC6cQhMuoQVtIJDCAzzBs3VvPVov1ut8tWQtbvbgG6y3T6A9kxU=</latexit> R1
+<latexit sha1_base64="DXgh+Hg/xX051Wn95bapvnTrFIc=">AAAB+HicjVDLSsNAFL2pr1ofjbp0M1gEVyUp0rosunFZxT6gjWEynbRDJ5MwMxFq6Je4caGIWz/FnX/jpO1CRcEDFw7n3Ms9nCDhTGnH+bAKK6tr6xvFzdLW9s5u2d7b76g4lYS2Scxj2QuwopwJ2tZMc9pLJMVRwGk3mFzkfveOSsVicaOnCfUiPBIsZARrI/l2eRBhPSaYZ72Zf31b8+2KW3XmQH+TCizR8u33wTAmaUSFJhwr1XedRHsZlpoRTmelQapogskEj2jfUIEjqrxsHnyGjo0yRGEszQiN5urXiwxHSk2jwGzmMdVPLxd/8/qpDs+8jIkk1VSQxaMw5UjHKG8BDZmkRPOpIZhIZrIiMsYSE226Kv2vhE6t6tar9avTSvN8WUcRDuEITsCFBjThElrQBgIpPMATPFv31qP1Yr0uVgvW8uYAvsF6+wShwZMW</latexit> 2
+landing in an empty grass field
+parking lot XR
+-Continue with the current plan (e.g.,
+flying or landing)... → Recover to<latexit sha1_base64="oVQzTbizFnRYmCmHkM0vYL/Ivbw=">AAAB+HicbVDLSsNAFL2pr1ofjbp0M1gEVyUpUl0WBHFZxT6gjWEynbZDJ5MwMxFq6Je4caGIWz/FnX/jpM1CWw8MHM65l3vmBDFnSjvOt1VYW9/Y3Cpul3Z29/bL9sFhW0WJJLRFIh7JboAV5UzQlmaa024sKQ4DTjvB5CrzO49UKhaJez2NqRfikWBDRrA2km+X+yHWY4J52p35dw813644VWcOtErcnFQgR9O3v/qDiCQhFZpwrFTPdWLtpVhqRjidlfqJojEmEzyiPUMFDqny0nnwGTo1ygANI2me0Giu/t5IcajUNAzMZBZTLXuZ+J/XS/Tw0kuZiBNNBVkcGiYc6QhlLaABk5RoPjUEE8lMVkTGWGKiTVclU4K7/OVV0q5V3Xq1fnteaVzndRThGE7gDFy4gAbcQBNaQCCBZ3iFN+vJerHerY/FaMHKd47gD6zPH56Qkxc=</latexit> 2
+XR
+Fig. 3: Closed-loop trajectory of a quadrotor using the AESOP algorithm. The figure represents a snapshot of the quadrotor
+at t=2.5s: The trajectory until time t is in black. The nominal trajectory plan is shown in blue, with a blue dot denoting
+the first consensus constraint in (3). The overlapping recovery trajectory plans, up to the consensus horizon corresponding
+to the LLM latency K, are in orange. The recovery trajectory plans deviate after K, shown in red, and they each reach their
+respective recovery region (in green). The blue text callout shows how the fast anomaly detector issues a warning and triggers
+the slow reasoner at t=2.5s. The red callout shows the response from the slow reasoner, which the LLM returns within the
+K consensus timesteps in the recovery plans.
+we recycle the VTOL synthetic observations and show the approach. Furthermore, Table II shows the results of a
+quadrotor anomalous observations at random time intervals. In quantitative ablation over a set of 500 scenarios and compares
+this simulation, we encode the location of two landing regions, AESOP with 1) the fallback-planning method in [45] (which
+a parking lot and an open field, as polytopic state constraints ignores the runtime monitor’s latency), and 2) a naive planner
+representing 1,2.ToinstantiatetheMPCin(3),weuseafixed that only tries to compute a recovery plan post-hoc after
+XR
+dynamics model discretized at a timestep of dt=.1s, with a detecting a dangerous event. We refer to Appendix E for
+planninghorizonofT=4s.Weassumethattheslowreasoning a detailed description of these experiments and baselines.
+LLM may take up to K=1.5s to return an output, a number While the FSMPC algorithm mildly improves over the naive
+consistent with the latency of cloud querying GPT-4 reported baseline, Table II showcases the impact of accounting for the
+in [50] using a conversational chat-based prompting approach. slow reasoner’s latency within the control design. Moreover,
+In Fig. 3, we show a snapshot of the closed-loop trajectory throughout the closed-loop trajectory in Fig. 3, the average
+of the quadrotor as it flies towards the landing zone. Fig. 3 speed of the quadrotor is around 2.5m/s, demonstrating that
+showsthattheAESOPMPC(3)planstworecoverytrajectories our framework allows for dynamic control of the robot while
+that safely abort the control task and land the drone in their leveraging the slower LLM to improve safety in a reactive,
+respective recovery regions, while still allowing the quadrotor real-time manner. This supports our fourth hypothesis H4.
+to make progress towards its nominal objective. Furthermore,
+the recovery trajectories are aligned for the first K timesteps,
+budgeting time for the LLM to output which, if any, of the
+recovery trajectories should be executed. The trajectories in
+Fig. 3 show that the drone descends and slows down during
+the first K timesteps of the recovery trajectories, thereby
+explicitly budgeting time for the LLM to reason.
+While we only show a single example in Fig. 3 to illustrate
+the qualitative behavior of our method, we include additional
+plots in Appendix E and videos of closed-loop trajectories
+on the project page to more extensively demonstrate our
+Naive MPC FS-MPC [46] AESOP
+SuccessfulRe- 15% 23% 100%
+covery Rate Fig. 4: Annotated depiction of our quadrotor hardware
+experiment. The quadrotor’s goal is to land on the red box. In
+TABLE II: Percentage of trajectories where the quadrotor theeventofananomaly,itcaneitherrecoverbylandingonthe
+successfullyrecoveredtotheLLM’schoiceofrecoveryregion. blue box, or by hovering within the designated holding zone.Component Mean (s) Standard Deviation (s) Method TPR FPR Bal. Accuracy
+MPC solve of (3) 0.023 0.019 GPT-4 0.74 0.19 0.78
+GPT-3 CoT [12] 0.89 0.26 0.82
+OWL-ViT 0.025 0.002
+MPNet (Ours) 0.69 0.05 0.82
+MPNet 0.028 0.005
+Mistral (Ours) 0.95 0.05 0.95
+Mistral 0.32 0.08
+GPT-3-Turbo CoT 3.10 0.85 SCOD 0.40 0.06 0.67
+GPT-4 CoT 18.88 3.923 Mahal. 0.40 0.13 0.64
+GPT-4V 0.97 0.27 0.85
+GPT-4V CoT 0.89 0.10 0.90
+TABLE III: Inference times for the OWL-ViT object detector, CLIP (Ours) 0.86 0.05 0.90
+LLM embedding models (MPNet, Mistral), and cloud- CLIP (Ours) Abl. 0.99 0.57 0.71
+querying GPT-3/4 on a Jetson AGX Orin module.
+TABLE IV: CARLA Evaluation. Text and Vision-based
+C. Quadrotor Hardware Demonstration & Timing (H4)
+Anomaly Detection.
+Furthermore, we conduct hardware experiments with a
+physical quadrotor equipped with a downward facing camera thought prompting for the slow reasoning process, which, as
+(IntelRealsenseD435).Thequadrotor’snominalgoalistoland shown in Table III, has a non-negligible latency. Together with
+on a designated red box amidst a cluttered environment. As the simulations in §V-B, these hardware results demonstrate
+shown in Fig. 4, the ground is scattered with various objects, that our approach effectively leverages LLMs to improve robot
+suchasabicycletire,asoccerball,andadrill,whichareincon- reliability despite their inference costs, thereby validating our
+sequentialtothelandingtask.Fig.4alsoshowsthequadrotor’s hypothesis (H4). We include further hardware results, detailing
+two recovery strategies to avoid failures when e.g., another 1) an additional evaluation of the fast anomaly detector, 2) a
+quadrotorhaslandedontheredbox:1)landingatanalternative analysis of LLM query latencies informing our choice of K,
+landing site and 2) to hover in a designated holding zone. 3) implementation details of the MPC solver in Appendix I.
+In order to construct the embedding cache for the fast
+D. Ablation—Autonomous Vehicles Simulation
+detector,wefirstrecordimagesbyflyingthedroneinacircular
+pattern above the operational area with a nominal clutter of We run ablations on self-driving scenarios curated in [12].
+objects on the ground. We use the open vocabulary object Here, CARLA was used to generate anomalous observations
+detector OWL-ViT[32] to extract context-aware descriptions inspiredbydocumentedfailuremodesofself-drivingperception
+of visible objects (e.g.,“on the red box” or “on the ground”) systems5. All anomalies in this domain require safety-
+from the image observations, which we then use to construct preserving intervention on the nominal system’s operation.
+prompts for the embedding model (MPNet) and generative Thus,thisexperimentresemblesthesyntheticfastreasoningex-
+reasoner (GPT-3.5-Turbo). periments(§V-A1),butadditionallyconsidershigh-dimensional
+We evaluate our system on the following three scenarios. RGB observations as inputs to the runtime monitors.
+For more details on these scenarios, see Appendix I and the 1) End-to-End Reasoning for Anomaly Detection (H5):
+videos on the project page. Given the release of multi-modal models such as GPT-4V, we
+1. Nominal Operation: There are no obstructions on the ablate performance differences between a two-step pipeline
+red box, so the quadrotor lands normally despite the clutter. and a single-step pipeline. The two-step pipeline constructs a
+2. Consequential Anomaly: We consider two variants of promptconsistingofdetectionsfromtheopenvocabularyOWL-
+this scenario. In the first, another quadrotor has already landed ViTobjectdetector[32]onCARLAimages,whereasthesingle-
+on the red box, necessitating a diversion to the blue box for step pipeline directly queries GPT-4V to output an anomaly
+landing. In the second, other quadrotors occupy both red and classificationbasedontheimageobservation.Foreachofthese
+blue boxes, necessitating a diversion to the holding zone. approaches, we consider both single-token and CoT reasoning.
+3. Inconsequential Anomaly: A previously unseen object The results are presented in Table IV. In both text- and
+(specifically, a keyboard) on the ground triggers the fast vision-based anomaly detection, we corroborate the notion
+anomaly detector, after which the LLM correctly decides to that CoT reasoning facilitates more accurate responses to a
+proceed with landing at the nominal site. complextaskcomparedtosingle-tokenreasoning.Furthermore,
+In addition, we evaluate the computational cost of our the results of GPT-4V (relative to GPT-3/4) suggest that the
+pipeline on our hardware platform, an Nvidia Jetson AGX anomaly detection task could be performed end-to-end.
+Orin,whichisdesignedforembeddedsystemslikeaquadrotor. 2) End-to-end Embedding-Based Anomaly Detection (H5):
+TableIIIshowsthattheOWL-ViTdetectionparsingandMPNet For the following embedding evaluations, we use the top
+embeddingcomputationcanjointlyrunat18.8Hz.Thisensures performing language embedding models, MPNet (110M)
+that AESOP (Algorithm 1) can comfortably operate at approx- and Mistral (7B), operating on the existing prompts which
+imately 10Hz4. We cloud query GPT-3.5-turbo with chain-of- list detected objects parsed from the output of OWL-ViT.
+4In all our experiments, the computational cost of computing similarity 5Examplesofdocumentedfailuresmodesincludeanimageofastopsign
+scoreswiththeembeddingswasnegligiblecomparedtomodelinferencetimes. onabillboard(source)andatrucktransportinginactivetrafficlights(source).
+txeT
+noisiVAdditionally, we evaluate image embeddings from a ViT, VI. CONCLUSIONANDOUTLOOK
+specificallyCLIP[35],thatprovidesdirectvisualgroundingfor
+In this paper, we presented a runtime monitoring framework
+thetask.Asin§V-A1,weusetop-5scoringacrossallmethods.
+utilizing generalist foundation models to facilitate safe and
+To ensure we fairly compare the expressiveness of purely real-timecontrolofagileroboticsystemsfacedwithreal-world
+language-based embeddings with vision-language embeddings, anomalies.Thisisenabledthroughareasoninghierarchy:afast
+we report results using ground-truth object detections to anomaly classifier querying similarity with the robot’s prior
+construct the prompts for the text-based embedding models in experiencesinanLLMembeddingspace,andaslowgenerative
+Table IV, in the spirit of a more comprehensively engineered reasonerassessingthesafetyimplicationsofdetectedanomalies
+system with reliable object detection. We do so because, as and selecting the appropriate mitigation strategy. These reason-
+noted in [12], the vision model suffers from a real-to-sim ers are interfaced with a new model predictive control strategy
+domainshift,andsometimestendsto,e.g.,characterizenominal that maintains the feasibility of multiple safe recovery plans.
+observationsofstopsignsas“imagesofstopsigns”.Weinclude Inextensiveexperiments,wedemonstratethata)embedding-
+an ablation showing the impact of vision errors in Appendix F. based anomaly detection performs favorably to zero-shot
+generative reasoning with high-capacity LLMs, thanks in part
+First, we observe that language embeddings from the
+tothegroundingaffordedbythepriorembeddingexperienceof
+relatively small MPNet model are less capable at discerning
+therobot;b)embedding-basedanomalydetectionattainsstrong
+anomalies among many nominal observations than Mistral,
+performance even when instantiated with small language mod-
+independent of whether OWL-ViT returns a correct scene
+els, allowing our method to run onboard computationally con-
+description (see Appendix F).
+strainedroboticsystems;c)dual-stagereasoningenablesLLMs
+Second, we surpass GPT-4 and GPT-4V with Mistral
+tooperateinthereal-timereactivecontrolloopofanagilerobot;
+(roughly 64x larger than MPNet). Besides suggesting that a
+d) alternative forms of embeddings, such as those obtained
+smaller model’s language embeddings are less semantically
+fromvision-basedfoundationmodels,canbeusedtoefficiently
+rich and therefore less capable at capturing the presence of
+detect anomalies in high-dimensional observation spaces.
+more subtle anomalies, we also show in Appendix F that
+As such, our work highlights the potential of LLMs and,
+MPNet’s accuracy degrades as the number of objects in an
+more broadly, foundation models toward significant increases
+observation increases, whereas Mistral’s accuracy remains
+in the robustness of autonomous robots with respect to
+consistent when the number of detections in an image varies.
+unpredictable and unusual out-of-distribution scenarios or
+Third, we note that the use of CLIP embeddings derived tail events. Improving the performance and generality of
+directly from the vehicle’s RGB observations also achieves our framework presents several promising avenues for future
+high performance, comparable to GPT-4V CoT. This suggests research. For example, the impact of LLM inference latencies
+that compute-intensive, CoT reasoning is not necessary to could be reduced by devising methods to constrain generative
+discern the anomalies directly from vision in semantically rich reasoning to a fixed word budget, or by using intermediate
+environments. However, we nuance this finding by noting that generations to inform decision-making during the generation
+the observations in the CARLA dataset were constructed by process. Further analysis is required on the correctness of
+driving a car along simulated routes and placing object assets fallback plans selected by the LLM, and whether fallbacks can
+that trick the vehicle into making unsafe decision along those be programmatically determined upon latency timeout. Finally,
+routes [12]. This means that the routes appear both with and continual learning based on the delayed anomaly assessment
+without anomalous objects and that episodes wherein the vehi- ofthegenerativereasonercouldbeusedtoavoidtriggeringthe
+cle takes unsafe actions include both nominal and anomalous slow reasoner on non-safety-critical anomalies a second time.
+observations. When we change the calibration strategy to only
+constructtheembeddingcachewithnominalobservationsfrom ACKNOWLEDGMENTS
+routes that never pass by anomalous objects (denoted by “Abl.” The authors would like to thank Brian Ichter and Fei Xia
+in Table IV), we find that CLIP’s FPR increases significantly. for insightful discussions and feedback throughout the project.
+This is because CLIP embeddings contain a mix of visual and In addition, the authors are indebted to Jun En Low, Keiko
+semantic features [23], and therefore the slight visual novelties Nagami, and Alvin Sun for their assistance in setting up
+in an unseen route are flagged as anomalous even though they the hardware experiments. The NASA University Leadership
+are semantically uninteresting. As such, CLIP’s limitations are initiative (grant #80NSSC20M0163) and the Toyota Research
+related to the SCOD [44] and Mahalanobis distance [26] base- Institute (TRI) provided funds to assist the authors with
+line OOD detectors (taken from [12]) that wrap the AV’s base their research, but this article solely reflects the opinions and
+object detector (DETR [7]). In contrast, as we further ablate in conclusions of its authors and not any NASA or TRI entity.
+Appendix F, the two-stage detection approach is unaffected by
+differences in visual appearance. Despite this, and noting that
+REFERENCES
+further work should examine how to disentangle semantic and [1] Josh Achiam, Steven Adler, Sandhini Agarwal, Lama
+visualfeaturestoincreaserobustness,wearguethatourprelim- Ahmad, Ilge Akkaya, Florencia Leoni Aleman, Diogo
+inaryfindingsonusingmulti-modalembeddingsdirectlyoffers Almeida, Janko Altenschmidt, Sam Altman, Shyamal
+significant promise for streamlining the implementation of our Anadkat, et al. Gpt-4 technical report. arXiv preprint
+framework. This validates our fifth and final hypothesis H5. arXiv:2303.08774, 2023.[2] Michael Ahn, Debidatta Dwibedi, Chelsea Finn, distribution shifts? In ICML, ICML’20. JMLR.org, 2020.
+Montse Gonzalez Arenas, Keerthana Gopalakrishnan, [14] RobertGeirhos,Jo¨rn-HenrikJacobsen,ClaudioMichaelis,
+Karol Hausman, Brian Ichter, Alex Irpan, Nikhil Joshi, Richard Zemel, Wieland Brendel, Matthias Bethge, and
+Ryan Julian, et al. Autort: Embodied foundation models Felix A Wichmann. Shortcut learning in deep neural net-
+for large scale orchestration of robotic agents. arXiv works. Nature Machine Intelligence, 2(11):665–673, Nov
+preprint arXiv:2401.12963, 2024. 2020. ISSN2522-5839. doi:10.1038/s42256-020-00257-z.
+[3] Anastasios N. Angelopoulos and Stephen Bates. A gentle URL https://doi.org/10.1038/s42256-020-00257-z.
+introduction to conformal prediction and distribution-free [15] Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. Distilling
+uncertainty quantification, 2022. the knowledge in a neural network. arXiv preprint
+[4] F. Borrelli, A. Bemporad, and M. Morari. Predictive arXiv:1503.02531, 2015.
+control for linear and hybrid systems. 2017. [16] Judy Hoffman, Eric Tzeng, Taesung Park, Jun-Yan Zhu,
+[5] Anthony Brohan, Yevgen Chebotar, Chelsea Finn, Karol Phillip Isola, Kate Saenko, Alexei Efros, and Trevor
+Hausman, Alexander Herzog, Daniel Ho, Julian Ibarz, Darrell. CyCADA: Cycle-consistent adversarial domain
+Alex Irpan, Eric Jang, Ryan Julian, et al. Do as i can, not adaptation. In Proceedings of the 35th International
+as i say: Grounding language in robotic affordances. In Conference on Machine Learning, volume 80 of
+Conference on Robot Learning, pages 287–318. PMLR, Proceedings of Machine Learning Research, pages
+2023. 1989–1998. PMLR, 10–15 Jul 2018.
+[6] Tom B. Brown, Benjamin Mann, Nick Ryder, Melanie [17] Cheng-YuHsieh,Chun-LiangLi,Chih-KuanYeh,Hootan
+Subbiah, Jared Kaplan, Prafulla Dhariwal, Arvind Nakhost, Yasuhisa Fujii, Alexander Ratner, Ranjay
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda Krishna, Chen-Yu Lee, and Tomas Pfister. Distilling
+Askell, Sandhini Agarwal, Ariel Herbert-Voss, Gretchen step-by-step! outperforming larger language models with
+Krueger, Tom Henighan, Rewon Child, Aditya Ramesh, less training data and smaller model sizes. arXiv preprint
+Daniel M. Ziegler, Jeffrey Wu, Clemens Winter, arXiv:2305.02301, 2023.
+Christopher Hesse, Mark Chen, Eric Sigler, Mateusz [18] Wenlong Huang, Fei Xia, Ted Xiao, Harris Chan, Jacky
+Litwin, Scott Gray, Benjamin Chess, Jack Clark, Liang, Pete Florence, Andy Zeng, Jonathan Tompson,
+Christopher Berner, Sam McCandlish, Alec Radford, Igor Mordatch, Yevgen Chebotar, et al. Inner monologue:
+Ilya Sutskever, and Dario Amodei. Language models are Embodied reasoning through planning with language
+few-shot learners. Arxiv eprint arXiv:2005.14165, 2020. models. arXiv preprint arXiv:2207.05608, 2022.
+[7] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, [19] Wenlong Huang, Chen Wang, Ruohan Zhang, Yunzhu
+Nicolas Usunier, Alexander Kirillov, and Sergey Li, Jiajun Wu, and Li Fei-Fei. Voxposer: Composable
+Zagoruyko. End-to-endobjectdetectionwithtransformers. 3d value maps for robotic manipulation with language
+In European conference on computer vision, pages models. In Conference on Robot Learning, pages
+213–229. Springer, 2020. 540–562. PMLR, 2023.
+[8] Annie S. Chen, Govind Chada, Laura Smith, Archit [20] Benoit Jacob, Skirmantas Kligys, Bo Chen, Menglong
+Sharma, Zipeng Fu, Sergey Levine, and Chelsea Finn. Zhu,MatthewTang,AndrewHoward,HartwigAdam,and
+Adapt on-the-go: Behavior modulation for single-life DmitryKalenichenko. Quantizationandtrainingofneural
+robot deployment, 2023. networks for efficient integer-arithmetic-only inference.
+[9] Guojun Chen, Xiaojing Yu, and Lin Zhong. Typefly: In Proceedings of the IEEE conference on computer
+Flying drones with large language model. arXiv preprint vision and pattern recognition, pages 2704–2713, 2018.
+arXiv:2312.14950, 2023. [21] Albert Q Jiang, Alexandre Sablayrolles, Arthur Mensch,
+[10] JacobDevlin,Ming-WeiChang,KentonLee,andKristina Chris Bamford, Devendra Singh Chaplot, Diego de las
+Toutanova. Bert: Pre-training of deep bidirectional Casas, Florian Bressand, Gianna Lengyel, Guillaume
+transformers for language understanding. arXiv preprint Lample, Lucile Saulnier, et al. Mistral 7b. arXiv preprint
+arXiv:1810.04805, 2018. arXiv:2310.06825, 2023.
+[11] Alexey Dosovitskiy, German Ros, Felipe Codevilla, [22] Daniel Kahneman. Thinking, fast and slow. macmillan,
+Antonio Lopez, and Vladlen Koltun. Carla: An open 2011.
+urban driving simulator. In Conference on robot learning, [23] Siddharth Karamcheti, Suraj Nair, Annie S. Chen,
+pages 1–16. PMLR, 2017. Thomas Kollar, Chelsea Finn, Dorsa Sadigh, and Percy
+[12] Amine Elhafsi, Rohan Sinha, Christopher Agia, Edward Liang. Language-driven representation learning for
+Schmerling, Issa A. D. Nesnas, and Marco Pavone. robotics. In Robotics: Science and Systems (RSS), 2023.
+Semantic anomaly detection with large language models. [24] Ananya Kumar, Aditi Raghunathan, Robbie Matthew
+Autonomous Robots, 47(8):1035–1055, Dec 2023. ISSN Jones, Tengyu Ma, and Percy Liang. Fine-tuning
+1573-7527. doi:10.1007/s10514-023-10132-6. URL can distort pretrained features and underperform
+https://doi.org/10.1007/s10514-023-10132-6. out-of-distribution. In International Conference
+[13] Angelos Filos, Panagiotis Tigas, Rowan McAllister, on Learning Representations, 2022. URL
+Nicholas Rhinehart, Sergey Levine, and Yarin Gal. Can https://openreview.net/forum?id=UYneFzXSJWh.
+autonomous vehicles identify, recover from, and adapt to [25] Balaji Lakshminarayanan, Alexander Pritzel, andCharles Blundell. Simple and scalable predictive 2023.
+uncertainty estimation using deep ensembles. In [35] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+I. Guyon, U. Von Luxburg, S. Bengio, H. Wallach, Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+R. Fergus, S. Vishwanathan, and R. Garnett, Amanda Askell, Pamela Mishkin, Jack Clark, et al.
+editors, Advances in Neural Information Processing Learning transferable visual models from natural
+Systems, volume 30. Curran Associates, Inc., 2017. language supervision. In International conference on
+URL https://proceedings.neurips.cc/paper/2017/file/ machine learning, pages 8748–8763. PMLR, 2021.
+9ef2ed4b7fd2c810847ffa5fa85bce38-Paper.pdf. [36] Quazi Marufur Rahman, Peter Corke, and Feras
+[26] KiminLee,KibokLee,HonglakLee,andJinwooShin. A Dayoub. Run-time monitoring of machine learning
+simpleunifiedframeworkfordetectingout-of-distribution for robotic perception: A survey of emerging
+samplesandadversarialattacks. InS.Bengio,H.Wallach, trends. IEEE Access, 9:20067–20075, 2021.
+H.Larochelle,K.Grauman,N.Cesa-Bianchi,andR.Gar- doi:10.1109/ACCESS.2021.3055015.
+nett, editors, Advances in Neural Information Processing [37] Benjamin Recht, Rebecca Roelofs, Ludwig Schmidt,
+Systems, volume 31. Curran Associates, Inc., 2018. URL and Vaishaal Shankar. Do ImageNet classifiers
+https://proceedings.neurips.cc/paper files/paper/2018/ generalize to ImageNet? In Kamalika Chaudhuri and
+file/abdeb6f575ac5c6676b747bca8d09cc2-Paper.pdf. Ruslan Salakhutdinov, editors, Proceedings of the
+[27] Jacky Liang, Wenlong Huang, Fei Xia, Peng Xu, 36th International Conference on Machine Learning,
+Karol Hausman, Brian Ichter, Pete Florence, and Andy volume 97 of Proceedings of Machine Learning
+Zeng. Code as policies: Language model programs Research, pages 5389–5400. PMLR, 09–15 Jun 2019.
+for embodied control. In 2023 IEEE International URL https://proceedings.mlr.press/v97/recht19a.html.
+Conference on Robotics and Automation (ICRA), pages [38] Nils Reimers and Iryna Gurevych. Sentence-bert:
+9493–9500. IEEE, 2023. Sentence embeddings using siamese bert-networks.
+[28] Kevin Lin, Christopher Agia, Toki Migimatsu, In Proceedings of the 2019 Conference on Empirical
+Marco Pavone, and Jeannette Bohg. Text2motion: Methods in Natural Language Processing. Association
+from natural language instructions to feasible for Computational Linguistics, 11 2019. URL
+plans. Autonomous Robots, Nov 2023. ISSN https://arxiv.org/abs/1908.10084.
+1573-7527. doi:10.1007/s10514-023-10131-7. URL [39] Charles Richter and Nicholas Roy. Safe visual navigation
+https://doi.org/10.1007/s10514-023-10131-7. viadeeplearningandnoveltydetection. InRSS,July2017.
+[29] Weitang Liu, Xiaoyun Wang, John Owens, and Yixuan [40] Lukas Ruff, Jacob R. Kauffmann, Robert A.
+Li. Energy-based out-of-distribution detection. Advances Vandermeulen, Gre´goire Montavon, Wojciech Samek,
+in Neural Information Processing Systems, 2020. Marius Kloft, Thomas G. Dietterich, and Klaus-Robert
+[30] Rachel Luo, Shengjia Zhao, Jonathan Kuck, Boris Mu¨ller. A unifying review of deep and shallow anomaly
+Ivanovic, Silvio Savarese, Edward Schmerling, detection. Proceedings of the IEEE, 109(5):756–795,
+and Marco Pavone. Sample-efficient safety 2021. doi:10.1109/JPROC.2021.3052449.
+assurances using conformal prediction, 2021. URL [41] Shiori Sagawa, Pang Wei Koh*, Tatsunori B. Hashimoto,
+https://arxiv.org/abs/2109.14082. and Percy Liang. Distributionally robust neural networks.
+[31] John Miller, Rohan Taori, Aditi Raghunathan, Shiori In International Conference on Learning Representations,
+Sagawa, Pang Wei Koh, Vaishaal Shankar, Percy Liang, 2020. URL https://openreview.net/forum?id=ryxGuJrFvS.
+Yair Carmon, and Ludwig Schmidt. Accuracy on [42] Mohammadreza Salehi, Hossein Mirzaei, Dan Hendrycks,
+the line: On the strong correlation between out-of- YixuanLi,Mohammad HosseinRohban,andMohammad
+distribution and in-distribution generalization, 2021. URL Sabokrou. Aunifiedsurveyonanomaly,novelty,open-set,
+https://arxiv.org/abs/2107.04649. and out-of-distribution detection: Solutions and future
+[32] M Minderer, A Gritsenko, A Stone, M Neumann, challenges, 2021. URL https://arxiv.org/abs/2110.14051.
+D Weissenborn, A Dosovitskiy, A Mahendran, A Arnab, [43] Dhruv Shah, Błaz˙ej Osin´ski, Sergey Levine, et al.
+M Dehghani, Z Shen, et al. Simple open-vocabulary Lm-nav: Robotic navigation with large pre-trained
+object detection with vision transformers. arxiv 2022. models of language, vision, and action. In Conference
+arXiv preprint arXiv:2205.06230. on Robot Learning, pages 492–504. PMLR, 2023.
+[33] Yaniv Ovadia, Emily Fertig, Jie Ren, Zachary Nado, [44] Apoorva Sharma, Navid Azizan, and Marco Pavone.
+D. Sculley, Sebastian Nowozin, Joshua V. Dillon, Balaji Sketching curvature for efficient out-of-distribution de-
+Lakshminarayanan, and Jasper Snoek. Can you trust your tection for deep neural networks. CoRR, abs/2102.12567,
+model’s uncertainty? evaluating predictive uncertainty un- 2021. URL https://arxiv.org/abs/2102.12567.
+derdatasetshift. InProceedingsofthe33rdInternational [45] Rohan Sinha, Apoorva Sharma, Somrita Banerjee,
+Conference on Neural Information Processing Systems, Thomas Lew, Rachel Luo, Spencer M Richards, Yixiao
+Red Hook, NY, USA, 2019. Curran Associates Inc. Sun, Edward Schmerling, and Marco Pavone. A
+[34] Abhishek Panigrahi, Nikunj Saunshi, Haoyu Zhao, and system-level view on out-of-distribution data in robotics.
+Sanjeev Arora. Task-specific skill localization in fine- arXiv preprint arXiv:2212.14020, 2022. Available at
+tuned language models. arXiv preprint arXiv:2302.06600, https://arxiv.org/abs/2212.14020.[46] Rohan Sinha, Edward Schmerling, and Marco Pavone. arXiv:2302.11550, 2023.
+Closing the loop on runtime monitors with fallback- [58] Wenhao Yu, Nimrod Gileadi, Chuyuan Fu, Sean
+safe mpc. In 2023 62nd IEEE Conference on Kirmani, Kuang-Huei Lee, Montse Gonzalez Arenas,
+Decision and Control (CDC), pages 6533–6540, 2023. Hao-Tien Lewis Chiang, Tom Erez, Leonard Hasenclever,
+doi:10.1109/CDC49753.2023.10383965. Jan Humplik, et al. Language to rewards for robotic
+[47] Kaitao Song, Xu Tan, Tao Qin, Jianfeng Lu, and Tie-Yan skill synthesis. arXiv preprint arXiv:2306.08647, 2023.
+Liu. Mpnet: Masked and permuted pre-training for [59] Zihao Zhao, Eric Wallace, Shi Feng, Dan Klein, and
+language understanding. Advances in Neural Information Sameer Singh. Calibrate before use: Improving few-shot
+Processing Systems, 33:16857–16867, 2020. performance of language models. In International
+[48] B. Stellato, G. Banjac, P. Goulart, A. Bemporad, and Conference on Machine Learning, pages 12697–12706.
+S. Boyd. OSQP: an operator splitting solver for quadratic PMLR, 2021.
+programs. Mathematical Programming Computation, 12
+(4):637–672, 2020. doi:10.1007/s12532-020-00179-2.
+URL https://doi.org/10.1007/s12532-020-00179-2.
+[49] Mingjie Sun, Zhuang Liu, Anna Bair, and J Zico
+Kolter. A simple and effective pruning approach for large
+language models. arXiv preprint arXiv:2306.11695, 2023.
+[50] Andrea Tagliabue, Kota Kondo, Tong Zhao, Mason
+Peterson, Claudius T Tewari, and Jonathan P How.
+Real: Resilience and adaptation using large language
+models on autonomous aerial robots. arXiv preprint
+arXiv:2311.01403, 2023.
+[51] Hugo Touvron, Louis Martin, Kevin Stone, Peter Albert,
+Amjad Almahairi, Yasmine Babaei, Nikolay Bashlykov,
+Soumya Batra, Prajjwal Bhargava, Shruti Bhosale, et al.
+Llama 2: Open foundation and fine-tuned chat models.
+arXiv preprint arXiv:2307.09288, 2023.
+[52] Liang Wang, Nan Yang, Xiaolong Huang, Linjun Yang,
+Rangan Majumder, and Furu Wei. Improving text
+embeddings with large language models. arXiv preprint
+arXiv:2401.00368, 2023.
+[53] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+et al. Chain-of-thought prompting elicits reasoning in
+large language models. Advances in Neural Information
+Processing Systems, 35:24824–24837, 2022.
+[54] Mitchell Wortsman, Gabriel Ilharco, Jong Wook
+Kim, Mike Li, Simon Kornblith, Rebecca Roelofs,
+RaphaelGontijoLopes,HannanehHajishirzi,AliFarhadi,
+Hongseok Namkoong, and Ludwig Schmidt. Robust
+fine-tuning of zero-shot models. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 7959–7971, 2022.
+[55] Guangxuan Xiao, Ji Lin, Mickael Seznec, Hao Wu,
+Julien Demouth, and Song Han. Smoothquant: Accurate
+and efficient post-training quantization for large language
+models. In International Conference on Machine
+Learning, pages 38087–38099. PMLR, 2023.
+[56] Ted Xiao, Harris Chan, Pierre Sermanet, Ayzaan Wahid,
+Anthony Brohan, Karol Hausman, Sergey Levine,
+and Jonathan Tompson. Robotic skill acquisition via
+instruction augmentation with vision-language models.
+arXiv preprint arXiv:2211.11736, 2022.
+[57] Tianhe Yu, Ted Xiao, Austin Stone, Jonathan Tompson,
+Anthony Brohan, Su Wang, Jaspiar Singh, Clayton Tan,
+Jodilyn Peralta, Brian Ichter, et al. Scaling robot learning
+with semantically imagined experience. arXiv preprintSymbol Description
+APPENDIX
+x unless explicitly defined otherwise,
+These appendices contain further details on the experiments scalar variables are lowercase
+in the main body of the paper, additional results and ablations x vectors are boldfaced
+supporting the main hypotheses of the paper, analysis of these sets are caligraphic
+X
+supplementaryresults,andproofsoftheoreticalresults.Besides x time-varying quantities are indexed
+t
+the results within this document, we also refer the reader to with a subscript t N
+≥0
+∈
+videosofthequadrotorexperimentsinthequad_videos/ Notation x Shorthand to index subsequences:
+0:t
+directoryofthesupplementalmaterial.Furthermore,weinclude and con- x := x ,...,x
+0:t 0 t
+{ }
+videos describing our approach, prompt templates, and further ventions
+results on our project page: https://sites.google.com/view/ λ,δ,ϵ,θ hyperparameters (regardless of their
+aesop-llm. These appendices are organized as follows: type) are lowercase Greek characters
+x Predicted quantities at k time steps
+t+k|t
+into the future computed at time
+Contents
+step t. Read x as “the predicted
+t+k|t
+A Notation and Glossary. . . . . . . . . . 14 value of x at time t+k given time t.”
+B Background: Anomaly Detection . . . . 15 x System state
+C Background: Mechanics of LLMs . . . 15 u Input
+D Additional Results: Synthetics . . . . . 15 o Observation
+D1 Fast Anomaly Detector ROC f Dynamics
+Analysis . . . . . . . . . . . 15 h Anomaly Detector
+w Generative reasoner
+D2 Detection Threshold Analysis 15
+e Embedding vector
+D3 Similarity Score Function
+ϕ Embedding model
+Analysis . . . . . . . . . . . 16
+State constraint set
+D4 Safety Assessment in X
+Input constraint set
+Manipulation Domain . . . . 16 U
+Observation space
+E Additional Results: Quadrotor Simulation 16 O
+τ Anomaly detection threshold
+E1 Simulation and
+s Anomaly score function
+Implementation Details . . . 17
+C control objective function for the
+E2 Baselines . . . . . . . . . . . 18 MPC (3)
+E3 Results . . . . . . . . . . . . 18 Dataset of nominal observations
+nom
+D
+F AdditionalResults:AutonomousVehicle N Number of nominal observations in
+Simulation . . . . . . . . . . . . . . . . 18
+nom
+D
+F1 Object Detection vs. Ground- Variables i the i’th recovery region
+XR
+truth Detections . . . . . . . 20 d Number of recovery regions
+F2 Calibration Ablation on e Embedding vector cache constructed
+D
+Withheld Trajectories . . . . 21 from nom
+D
+α Quantile hyperparameter to select the
+F3 Accuracy vs. Complexity of
+anomaly detector threshold
+Observations . . . . . . . . . 21
+q Optimization variable used to define
+G Prompting Details . . . . . . . . . . . . 21
+the empirical α-quantile
+H Proof of Theorem 1 . . . . . . . . . . . 22
+Subset of 1, ... , d indicating a
+I Hardware Experiment – Additional Y { }
+selection of recovery regions
+Details and Results . . . . . . . . . . . 23
+K Upper bound on the latency of the
+I1 Data Collection . . . . . . . 23 slow reasoner
+I2 Fast Anomaly Detector T Time horizon of the MPC (3)
+Calibration . . . . . . . . . . 23 J Objective value associated with the
+I3 Choosing K - Analysis of solution of the MPC problem (3)
+LLM Query Latencies . . . . 23 x⋆, u⋆ Starred quantities denote the optimal
+I4 Summary of test scenarios . 24 values of the decision variables in
+I5 Controller Parameters . . . . 24 the MPC problem (3)
+t Time step at which the anomaly
+anom
+detector triggers
+A. Notation and Glossary
+We include a glossary of all the notation and symbols used TABLEV:Glossaryofnotationandsymbolsusedinthispaper.
+in this paper in Table V.B. Background: Anomaly Detection areaunderthereceiveroperatingcharacteristic(AUROC)curve
+(Appendix D1). Second is the anomaly detector’s sensitivity
+In essence, an anomaly detector is a classifier h :
+O → with respect to varying detection thresholds (Appendix D2).
+nominal, anomaly that maps observations to a detection
+{ } Lastly,weevaluatetheanomalydetector’sperformancewithre-
+at runtime. However, limited access to anomalous examples
+spect to the choice of similarity score function (Appendix D3).
+(after all, it is their dissimilarity from prior experiences that
+1) Fast Anomaly Detector ROC Analysis: We follow the
+makes them anomalous) typically precludes us from training a
+synthetics evaluation scheme presented in the main results,
+classifier with an obvious decision boundary using supervised
+which compares the performance of our fast anomaly detector
+learning [3, 40]. Instead, anomaly detection algorithms require
+two steps: First, we must construct a scalar score function
+overninelanguagemodels,usingtop-5scoring,withadetection
+s(o) R from an observation, where a higher score indicates threshold set to the 95-th quantile of the scores in the nominal
+∈ dataset((2)).Insteadofreportingaccuracy,wenowmeasureper-
+that the sample is “more” anomalous. Second, we need to cali-
+brateadecisionthresholdτ Ronthescorefunctionsuchthat: formance in terms of AUROC, which more holistically reflects
+(cid:40) ∈ the detector’s performance across varying detection thresholds.
+anomaly if s(o)>τ
+h(o)= . The results are shown in Fig. 5. We observe similar perfor-
+nominal if s(o) τ mance trends to the previous results (Fig. 2, measured in terms
+≤
+of accuracy), where MPNet closely rivals the top performing
+Weinvestigateseveralscorefunctionsinthispaperandcompare
+7B parameter models, Mistral and Llama 2, followed by the
+their downstream utility in improving the safety and reliability
+OpenAI embedding models, and lastly, the BERT models.
+of an autonomous robot. This necessitates instantiating the
+These trends become increasingly clear as domain complexity
+anomaly detectors with specific thresholds and measuring
+increases (i.e., from the Manipulation to VTOL domains, left
+the accuracy of the subsequent calibrated classifier, since
+to right). In the most challenging VTOL domain, we observe
+generic measures of a score functions’ expressiveness are not
+that concept coverage is key to attaining strong performance.
+guaranteed to capture the overall impact on an autonomy stack.
+This is perhaps a byproduct of the more nuanced concept
+C. Background: Mechanics of LLMs shifts in complex domains, which necessitate comprehensive
+The decoder-only LLM architecture typically stacks coverage of nominal concepts to deduce anomalies. Consider
+together large numbers of Transformer modules to construct a how, in the VTOL domain, the anomalous “swarming flock of
+mapping from a sequence of input tokens x to a contextual birds” can be mistakenly interpreted as similar to the nominal
+0:t
+embedding matrix ϕ(x ) Rn×t+1. That is, each input token “flying bird” without the additional grounding from other
+0:t
+gets mapped to a corres∈ ponding contextual embedding. It nominal concepts such as a “blimp” or “quadcopter.”
+is well-known that the contextual embeddings are generally 2) Detection Threshold Analysis: To construct the anomaly
+useful for prediction tasks themselves and often exhibit detector (Appendix B), we need to select or calibrate a
+interesting properties. For example, some models are trained detection threshold τ to differentiate anomalous from nominal
+with contrastive losses to ensure embeddings with similar observations. Many techniques exist for calibrating detection
+semantic meaning cluster closely in the embedding space, thresholds, several of which offer specific guarantees on e.g.,
+enabling retrieval of relevant information via similarity search. false positive rates, such as conformal prediction [3].
+However, current research in robotics focuses on using LLMs In this experiment, we show the performance variation of
+to generate strings of text through autoregressive generation, our fast anomaly detector with respect to a range of detection
+i.e., next token prediction. To do so, a linear classification thresholds (i.e., empirical quantiles) in an attempt to capture
+head is typically added onto the output contextual embedding the sensitivity of our method to, for example, well or poorly
+to define a probability distribution over the next token calibrated thresholds. We report anomaly detection accuracy
+on the VTOL domain because, as shown by VTOL’s relatively
+x p (x ϕ(x )):=softmax(W ϕ(x ) ), (4)
+t+1 llm t+1 0:t out 0:t t slowly increasing AUROC trends in Fig. 5, we may expect
+∼ |
+which is then sampled and appended to the token sequence, larger variances in performance across thresholds. We evaluate
+after which the next token can be sampled. It should be three language models, including OpenAI Ada 002, MPNet,
+clear that generating output sequences carries a computational and Mistral (7B), and randomly (IID) sample 80% of the
+cost that scales superlinearly in the cost of computing an full nominal dataset to construct the embedding cache for the
+embedding. That is, the zero-shot reasoning capabilities of anomaly detector. Results are reported over 5 random seeds.
+LLM generation come at a computational cost, whereas direct The results are shown in Table VI. First, we observe a
+learning on embeddings requires a source of supervision. positive relationship between anomaly detection accuracy and
+threshold quantile across all methods. Once again, MPNet
+D. Additional Results: Synthetics
+performs nearly identically to Mistral (7B), while OpenAI Ada
+Themaingoalofthesyntheticsexperimentsistoanalyzethe 002 begins to plateau at the 85-th quantile. Both MPNet and
+performance characteristics of our fast anomaly detector across Mistral (7B) consistently outperform generative reasoning with
+roboticsdomainswithdiverseobservationalandtasksemantics. GPT-4 (with the exception of the 75-th quantile). From the
+Here, we extend our synthetics results and analysis (§V-A) relativelysmall(yetnon-negligible)performanceimprovements
+to evaluate three such performance characteristics. First is the among increasing quantiles, we conclude that 1) while our
+embedding-based anomaly detector’s quality as measured by anomalydetectorisreasonablyrobusttothechoiceofdetectionManipulation Autonomous Vehicle VTOL
+1.0
+0.9
+0.8
+0.7
+0.6
+0.5
+0.4 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+RelativeSampleSize RelativeSampleSize RelativeSampleSize
+1.0
+0.9
+0.8
+0.7
+0.6
+0.5
+0.4 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+RelativeConceptCoverage RelativeConceptCoverage RelativeConceptCoverage
+BERTBase Llama2Chat(7B) Mistral(7B) OpenAIEmbedding3Large OpenAIAda002
+BERTLarge Llama2(7B) MPNet OpenAIEmbedding3Small
+Fig. 5: Embedding-based anomaly detection results for the manipulation, autonomous vehicle, and VTOL domains. The top
+row of figures plot the AUROC as a function of experiences sampled IID from the respective domain datasets. The bottom
+row of figures plot accuracy as a function of the concepts sampled from the respective domain datasets.
+threshold, 2) performance can be improved through the use of Upon closer analysis, we see that the top-1 and Mahalanobis
+more sophisticated calibration techniques. Lastly, all methods score functions perform quite poorly in the low-data regime
+producenegligiblestandarddeviationsacrosstherandomseeds, for most language models, while MPNet is able to utilize
+likely because the sampled embedding cache (80% of the full Mahalanobis better than others. Overall, we find that top-k for
+nominal dataset) provides 100% coverage over all nominal k in 3,5,10 are all strong choices of score functions that
+∼ { }
+concepts, which Fig. 5 shows heavily influences performance. demonstrate competitive performance in several data regimes.
+3) Similarity Score Function Analysis: Our fast anomaly 4) SafetyAssessmentinManipulationDomain: Recall,once
+detector can be instantiated with an arbitrary choice of an anomaly has been detected by the fast-reasoner, the slower
+similarity score function s(e ; ). For brevity, our main reasoner is tasked with assessing whether the observation
+t e
+D
+results exclusively featured the use of top-5 scoring. Thus, we requires a safety-preserving fallback. In the main body of
+conduct an ablation experiment to test the robustness of our the report, we present results for a safety assessment of
+approach to the choice of score function. anomalies in VTOL domain with various SoTA language
+Our ablation includes top-k scoring for k in 1,3,5,10 , models. In Table VII, we extend our safety assessment to the
+which quantifies the distance between the input{ embeddin} g manipulation domain. Similar to the trend observed in Fig. 2,
+e and the k closest embeddings in the nominal embedding safety assessment is significantly easier in the manipulation
+t
+cache = e N , and 2) the Mahalanobis distance score domain than in the VTOL. Further, we see strong performance
+betweeD ne the{ ci u} ri= re1 nt embedding e and the multivariate gains in using GPT-4 to correctly recognize an inconsequential
+t
+Gaussian distribution formed from the mean and covariance of anomaly in comparison to GPT-3.5.
+= e N . As before, we experiment on VTOL synthetic
+De { i }i=1 E. Additional Results: Quadrotor Simulation
+due to its size and complexity, evaluating four language
+modelsofvaryingsizeandfunction:OpenAIAda002,MPNet, Inthissection,weincludeadditionaldetailsaboutourquadro-
+Llama 2 Chat (7B), Mistral (7B). tor simulation and describe our implementation of the MPC
+The results are shown in Fig. 6. We first observe that solver used in Algorithm 1 (AESOP). We show the qualitative
+the accuracy difference between all score functions at 100% behaviorandimprovementofouralgorithmincomparisonwith
+concept coverage is within approximately 5% across all twobaselinemethodsinFig.7inadditiontoannotatedvideos
+evaluated language models except OpenAI Ada 002. At first of the trajectories in the supplementary files. We also quan-
+glance, this might suggest that the choice of score function is, titatively evaluate the rate at which AESOP and the baselines
+to an extent, irrelevant for achieving high detection accuracies. successfully recover in over a set of 500 randomized scenarios.
+CORUA
+CORUAEmbedding Generative
+Threshold: 75-Quantile 85-Quantile 90-Quantile 95-Quantile GPT-4 GPT-4 CoT
+OpenAI Ada 002 0.8 (0.002) 0.84 (0.002) 0.85 (0.002) 0.85 (0.002)
+MPNet 0.83 (0.002) 0.89 (0.002) 0.91 (0.002) 0.93 (0.001) 0.75 0.86
+Mistral (7B) 0.83 (0.001) 0.89 (0.001) 0.91 (0.001) 0.94 (0.001)
+TABLE VI: Calibration results for a selection of embedding models in the VTOL domain. The table reports the mean anomaly
+detection accuracy thresholding the top-5 score function at different quantile thresholds. Standard deviations are provided
+in parentheses. Statistics were computed over multiple samplings of 80% of the available nominal data samples. Accuracies
+for GPT-4 single-token and CoT queries are provided for comparison.
+Score Function Comparison
+MPNet Mistral(7B)
+1.0
+0.9
+0.8
+0.7
+0.6
+0.5
+0.4 0.0 0.2 0.4 0.6 0.8 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+RelativeSampleSize RelativeConceptCoverage RelativeSampleSize RelativeConceptCoverage
+Llama2Chat(7B) OpenAIAda002
+1.0
+0.9
+0.8
+0.7
+0.6
+0.5
+0.4 0.0 0.2 0.4 0.6 0.8 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0
+RelativeSampleSize RelativeConceptCoverage RelativeSampleSize RelativeConceptCoverage
+top1 top3 top5 top10 mahal
+Fig. 6: Score function comparison for a selection of embedding models applied to the VTOL domain. We compare the top-k (for
+k 1,3,5,10 ) and Mahalanobis distance score functions for MPNet, Mistral (7B), Llama2 Chat (7B), and OpenAI Ada 002.
+∈{ }
+Domain Method TPR FPR Accuracy withfourrecoveryregions,encodedaspolytopicconstraintson
+states, representing potential landing zones. We label the first
+GPT-3.5 Turbo 1.0 0.73 0.64
+two, around x 8m, as grassy fields. We label the third and GPT-3.5 Turbo CoT 1.0 0.52 0.74 ≈
+fourth landing zones around x 3m as a building rooftop and
+GPT-4 1.0 0.0 1.0 ≈
+a parking lot respectively. We use these labels to simulate the
+GPT-4 CoT 1.0 0.0 1.0
+EVTOL synthetic in closed loop, abstracting perception into a
+pure-text observation at each timestep. The quadrotor plans tra-
+TABLE VII: Slow Generative Reasoning for Anomaly
+jectoriesoflengthT=4susingatimediscretizationofdt=.1s
+Assessment in the Warehouse Manipulation Domain.
+and we assume the slow LLM reasoner takes at most K=1.5s
+1) Simulation and Implementation Details: We simulate the tooutputadecision.Inthesesimulations,thegoalofthequadro-
+full 12-state dynamics of a quadrotor with an arm length of tor is to fly to a goal point, denoted by the blue star in Fig. 7.
+.25m,amassof1kgandaninertiamatrixJ=diag(.45,.45,.7). WeimplementtheMPC(3)coretotheAESOPalgorithmin
+Incontrastwiththesimulationin§V,wherethevelocityofthe Python using the OSQP [48] solver using linearized dynamics
+quadrotor was unconstrained, we constrain the drone to move and a quadratic objective. Note that AESOP (Algorithm 1) re-
+at a maximum of 1.5m/s along each of the principle axes’ quiresamethodologytoselectasetofrecoveryregionstocon-
+directions.AsshowningreeninFig.7,weprovidetheplanner straintheMPC(3)ateachtimestep,andtheMPCisguaranteed
+ycaruccA
+ycaruccA
+.pinaMtobefeasibleforatleastonesuchchoicebyTheorem1.Inprin- Naive MPC FS-MPC [46] AESOP
+ciple, one could select the optimal subset of recovery regions
+SuccessfulRe- 15% 23% 100%
+using mixed-integer programming. Here, we adopt the simpler
+covery Rate
+approachproposedin[46]wherewesolvemultipleversionsof
+(3) at each timestep, each associated with a different combina-
+TABLE VIII: Percentage of trajectories where the quadrotor
+tionofatleasttworecoverysets.Then,weselectthetrajectory
+successfullyrecoveredtotheLLM’schoiceofrecoveryregion.
+plan associated with the feasible solution to (3) with least cost.
+This allows the quadrotor to dynamically select various safety interventions selected by the LLM can be executed safely.
+interventions to maximally make progress towards the goal. Third, Fig. 7b shows the trajectory of the fallback-safe
+Overall, this implementation runs at approximately 42Hz MPC (FSMPC) algorithm from [46] on the same example as
+on the Nvidia Jetson Orin AGX’s CPU, with some variance Fig. 7a and Fig. 7f. While the FSMPC algorithm maintains
+induced by re-initialization of solver warm-starts when the several feasible recovery plans during nominal operations,
+recovery sets change. Combined with the inference latency Fig. 7b shows that this is not sufficient to ensure safe recovery:
+of the fast anomaly detectors in Table III, this means that the The FSMPC algorithm does not account for the time delay
+AESOP framework can comfortably run in real-time. of the LLM-based reasoner. Instead it continues it’s nominal
+2) Baselines: We compare AESOP to two baselines that operations until the LLM returns. As shown in Fig. 7b, the
+also use the slow LLM-based reasoner to select a recovery feasible recovery strategies changed in the time interval
+set on cue of the fast anomaly detector. between the detection of the anomaly detector and the output
+Naive MPC: The first is a naive MPC algorithm that only of the LLM. As a result, the FSMPC algorithm tried to find a
+plans a single nominal trajectory towards the goal during dynamically feasible recovery trajectory to the grassy areas as
+nominal timesteps (i.e., when h(o )=0) without maintaining instructed by the LLM, but was instead forced to crash land
+t
+feasible recovery plans. This baseline continues nominal in an unsafe region. In contrast, by accounting for the latency
+operation until the LLM returns a choice of recovery set, at of the LLM, AESOP was able to safely land (i.e., Fig. 7f),
+which point the MPC attempts to plan a recovery trajectory. thus showing the necessity of accounting for LLM inference
+Fallback-Safe MPC (FS-MPC) [46]: We base the second latency in control design for dynamic robotic systems.
+baseline on the Fallback-safe MPC proposed in [46]. This Finally, Fig. 7d shows the behavior of the AESOP algorithm
+algorithm maintains several feasible recovery trajectories at all when the fast anomaly detector detects an anomalous scenario,
+times in a similar fashion to the AESOP algorithm. However, but the LLM determines the anomaly is inconsequential to the
+this algorithm does not account for the latency associated with robot’s safety and returns the system to nominal operations.
+the slow LLM-based reasoner (i.e., setting K=0 in (3)), and The quadrotor descends and slows down during the inference
+only engages a recovery plan once the LLM returns a decision. time of the LLM, and continues its flight towards the goal
+Our implementations of both these algorithms rely on slack thereafter. As such, Fig. 7d shows that by leveraging the
+variables, so that they return a trajectory plan that minimally LLM, AESOP minimally impedes goal completion when
+violates constraints in case it is dynamically impossible to anomalies are not immediate safety risks. Moreover, Fig. 7f
+compute a recovery trajectory that reaches the chosen set. and Fig. 7e show that AESOP safely recovers the system
+3) Results: Qualitative Figures: In Fig. 7, we show the when the anomaly is consequential to safety.
+qualitative differences in the behavior of AESOP and the Quantitative Evaluation: We quantitatively ablate the
+baseline methods. improvement of our proposed approach in comparison with the
+Firstly, Fig. 7c shows the trajectory of the quadrotor using naive MPC and FSMPC by simulating 500 trajectories with a
+AESOP in an episode where no anomalies occur and therefore, consequential anomaly appearing at a random timestep. To do
+where the fast anomaly detector raises no alarms. As such, so, we uniformly sample an initial condition with zero velocity
+Fig. 7c shows that AESOP does not interfere significantly and rotation in a box with width 2m around (x,y,z)=(10,2,2)
+with the nominal operation of the quadrotor: It still reaches and fix the goal state as in Fig. 7. We then uniformly select a
+the goal location with little impediment. timestepatwhichtheanomalyappearsintheintervalt=[1s,4s].
+Secondly,Fig.7ashowsthetrajectoryofthenaiveMPCbase- Table II shows the fraction of scenarios in which AESOP and
+line in an episode where the fast reasoner detects an anomaly the baselines safely reach the recovery set chosen by the LLM.
+at t=3.0s and the slow LLM reasoner returns it’s output 1.5s By design, AESOP successfully lands the quadrotor in the
+later. The naive MPC assumes that all the recovery regions are chosenrecoveryregioneachtime.WhiletheFSMPCalgorithm
+alwaysreachablefromthecurrentstate,nordoesitaccountfor improves over the naive baseline, Table VIII shows that it is
+the latency of the LLMs reasoning. Therefore, once the LLM essentialtoaccountfortheLLM’slatencytoachievereliability.
+outputs that the quadrotor should land at a grassy recovery
+F. Additional Results: Autonomous Vehicle Simulation
+region (around x=8m in Fig. 7c), it can no longer plan a
+dynamicallyfeasiblepathtotherecoverysetandcrashlandsin In our ablations on self-driving scenarios, we adopt the
+anunsafegroundregion.IncontrastFig.7fshowsthatAESOP semantic anomaly dataset presented in [12]. This dataset
+recovers the robot to the desired safe region. This example includes two classes of semantic anomalies with multiple
+showcases that it is necessary to plan multiple trajectories instantiations in a set of independent experiments. In nominal
+even in nominal scenarios to ensure that the safety-preserving experiments, the vehicle approaches a stop sign, as in Fig.(a) Closed loop trajectory of the naive baseline MPC (black). (b) Closed loop trajectory of the Fallback-Safe MPC [46] (black).
+Also shown are the nominal predicted trajectory (blue) and the We show three recovery trajectory plans: The first is at the
+minimum constraint violating recovery trajectory (red) at the timestep where the LLM is queried, where the robot maintains
+timestep that the slow LLM reasoner outputs. recovery plans to the sets at x≈8m. The second set of plans is
+atthetimesteprightbeforetheLLMreasoneroutputsit’srecovery
+decision, where the planner chooses recovery sets around x≈3m.
+The third is the minimum constraint violating recovery trajectory
+at the timestep that the slow LLM reasoner outputs.
+(c) Closed loop trajectory of the AESOP algorithm in a nominal (d) Closed loop trajectory of the AESOP algorithm (black). In
+episode (black). That is, an episode in which the fast anomaly this trajectory, the fast anomaly detector signals that an anomaly
+detector detects no anomalies. Also shown are the predicted has been detected. Then, the Slow LLM reasoner outputs that the
+trajectories at the last timestep of the episode. anomaly is inconsequential to the robot’s safety, thereby returning
+the AESOP algorithm to nominal operation. In blue and red we
+show the respective nominal and recovery plans computed at the
+timestep that the fast anomaly detector issues a warning.
+(e) Closed loop trajectory of the AESOP algorithm (black). In this (f) Closed loop trajectory of the AESOP algorithm (black). In this
+trajectory, the fast anomaly detector signals that an anomaly has trajectory, the fast anomaly detector signals that an anomaly has
+been detected at t=2.0s. Then, the Slow LLM reasoner selects been detected at t=3.0s. Then, the Slow LLM reasoner selects
+theappropriaterecoverysetfromtheavailableoptions.Inblueand theappropriaterecoverysetfromtheavailableoptions.Inblueand
+red we show the respective nominal and recovery plans computed red we show the respective nominal and recovery plans computed
+at the timestep that the fast anomaly detector issues a warning. at the timestep that the fast anomaly detector issues a warning.
+Fig. 7: Closed loop trajectories of 1) the naive MPC baseline, 2) the Fallback-Safe MPC baseline, 3) the AESOP algorithm
+in various scenarios.8a, or a traffic light, as in Fig. 8b, in an environment with
+common-place observations. In anomalous experiments, the
+vehicle approaches an image of a stop sign on a billboard,
+as in Fig. 9a, or a truck transporting an inactive traffic light,
+as in Fig. 9b. In this setting, we aim to use observations
+gathered from trajectories including nominal stop signs and
+traffic lights to identify when either anomaly is present in a
+novel observation. We adapt our anomaly detection pipeline
+using a two-step approach with language embeddings and a
+direct end-to-end method with multi-modal CLIP embeddings.
+Supplementaltoourdiscussioninthepaper’smainbody,our
+ablations provide four interesting observations: 1) ground truth
+scenedescriptionsarenecessarytoovercomemisclassifications (a) Vehicle approaches a stop sign anomaly.
+bytheobjectdetector,2)alargemodel,onthescaleofMistral
+(7B), is necessary to capture the presence of an anomaly
+in a semantically rich environment such as self-driving, 3)
+embeddingsfromthetwo-stagepipelineusingLMembeddings
+only capture semantics and do not pick up on visual novelty,
+whereasmulti-modalCLIPembeddingsincurfalsepositiveson
+visually novel but semantically nominal observations, and 4)
+that a smaller model, like MPNet, struggles to correctly detect
+anomalies as the number of objects in an observation increases.
+1) Object Detection vs. Ground-truth Detections: Recall,
+the two-step pipeline constructs a textual prompt using scene
+descriptions output by OWL-ViT on each CARLA observation.
+Our initial experimentation found processing language
+(b) Vehicle approaches a traffic light anomaly.
+embeddingsfromtherawscenedescriptionsreturnedbyOWL-
+Fig. 9: Anomalous observations for each object class in [12].
+ViT was insufficient to surpass GPT-4V’s CoT accuracy which
+isdemonstratedinFig.10.Asnotedin[12],becauseCARLA’s
+synthetic visual features represent a distribution shift from the
+realistic images on which OWL-ViT was trained, OWL-ViT
+periodicallyhallucinatesobjectdetections,suchasthepresence
+of an anomaly when none is present, or misses an anomaly
+detection entirely. Most commonly, we noticed the OWL-ViT
+characterized the rendered images as e.g., “an image of a stop
+sign” or “a picture of a stop sign.” Therefore, independent of
+themodel’ssize,thelanguageembeddingsonanomalousscene
+descriptions are not significantly different from that of nominal
+observations: at best, we achieve 0.70 mean accuracy with
+Mistral (7B) which is inferior to GPT-4V CoT. Instead, if we
+(a) Vehicle approaches a nominal stop sign. post-process the raw scene descriptions to contain ground-truth
+detections, then the resultant language embeddings are
+semantically different between the nominal and anomalous
+observations. We do this by removing false positive detections
+and introducing a true positive detection if missed by the
+detector. We demonstrate this finding in Fig. 10, which shows
+Mistral (7B) achieves a mean accuracy of 0.94 surpassing
+GPT-4V CoT by 4% absolute. While post-processing an object
+detector’s output is not feasible at deployment, this ablation
+serves as a proof of concept for our algorithm in a real-world
+environment where object detection is presumably reliable.
+Also, we notice that when using ground truth scene de-
+scriptions, the model’s size creates a spread in performance
+in Fig. 10. Interestingly, with the introduction of ground truth
+(b) Vehicle approaches a nominal traffic light.
+detections, MPNet and BERT-large achieve similar accuracy to
+Fig. 8: Nominal observations for each object class in [12].
+Mistral (7B) processing raw scene descriptions. With MistralFig. 11: Accuracy of the text-based embedding detectors as
+a function of the number of objects within each observation
+for the CARLA dataset.
+Fig. 10: Anomaly detection with MPNet, BERT-large and
+the vehicle drives novel routes that contain sporadic anomalies.
+Mistral (7B) w/ and w/out ground truth scene descriptions
+As shown in Table IV, the false positive rate of the CLIP
+against generative CoT reasoning with GPT-4V.
+embedding-based approach significantly increases in this
+(7B), which is 64x and 19x larger than MPNet and BERT- scenario. This is most likely because the CLIP embeddings
+large,respectively,accesstogroundtruthdetectionscompletely contain both visual features (e.g., those suitable for object
+unblocks anomaly detection. These results suggest that MPNet detection as used in [49]) and semantic features. Therefore,
+and BERT-large, with limited expression due to model size, the visual novelty in the previously unseen trajectories
+produce language embeddings that are not semantically rich causes false positives. In contrast, the two-stage approaches,
+enoughtocapturethepresenceofananomalyamongnumerous which first describe the scene with an object detector before
+nominalobjects.Therefore,ourtwo-steppipelinerequireshigh- prompting an LM embedding model, do not attend to visual
+fidelity scene descriptions and a sufficiently large language features and therefore do not suffer such performance drops.
+model,onthescaleofMistral(7B),foranomalydetectionwith In [23], the authors argue that multimodal models for robotics
+high-dimensional observations characteristic of the real world. should explicitly balance visual and semantic features, and
+in line with those insights, we argue future work investigating
+2) Calibration Ablation on Withheld Trajectories: The
+how to differentiate visual and semantic features can make
+image observations in the CARLA dataset from [12] were
+multi-modal anomaly detectors more robust.
+constructed by driving a car along simulated routes in several
+3) Accuracy vs. Complexity of Observations: Here, we
+different maps. Some of these routes pass by anomalous
+further investigate the discrepancy in accuracy between the
+objects, e.g., a stop sign on a billboard, which trick the
+smallerMPNetembeddingmodel(110M)andthelargerMistral
+vehicle into making unsafe decision. This means that episodes
+embedding model (7B) in Table IV. We do so because on
+wherein the vehicle takes unsafe actions include both nominal
+the synthetic tasks in §V-A, where the observations contain
+and anomalous observations, and that the routes appear both
+descriptions of at most three objects, both models performed
+with and without anomalous objects. In the main evaluations
+morecomparably.AsshowninFig.11,weseethattheaccuracy
+in Table IV and Appendix F the embedding caches therefore
+of MPNet drops off when the total number of objects within
+contain nominal embeddings associated with all the routes,
+each image observation increases, which largely explains their
+i.e., capturing a setting wherein anomalies suddenly appear
+difference in performance. However, an interesting nuance is
+on roads the AV often drives. As shown in Table IV, the
+that MPNet’s accuracy is again comparable to Mistral when
+two-stage detectors (using MPNet and Mistral) and the single
+there are 7-8 objects in the observation. Fig. 12 supports the
+stage multi-modal detector (using CLIP) perform well at
+hypothesis that this may be because the imbalance between
+detecting anomalies in this scenario.
+nominal and anomalous images is larger for observations with
+Therefore, we also run an ablation wherein we withhold
+many objects, so that large numbers of observations may corre-
+all nominal data from routes wherein anomalies occur when
+late with nominal conditions. Moreover, there are significantly
+constructing the embedding cache, leaving only routes in
+fewer observations with many obstacles. Overall, these results
+which anomalies never occur. This resembles a setting where
+suggest that larger models are needed to reason about the
+Method TPR FPR Bal. Accuracy anomalousness of more complex scenes with many objects.
+(Lang.) MPNet Abl. 0.55 0.11 0.72
+G. Prompting Details
+(Lang.) Mistral Abl. 0.96 0.19 0.89
+We emphasize that all the prompts used in our ex-
+(Vision) CLIP Abl. 0.99 0.57 0.71
+periments can be found in the repositories listed on our
+project webpage, https://sites.google.com/view/
+TABLE IX: Accuracy of embedding detectors when aesop-llm. However, for completeness, we briefly describe
+withholding nominal data from CARLA routes with anomalies.
+our prompting strategy here. For all language-based tasks (i.e.,
+All methods are our own.
+thesyntheticsin§V-A,thehardwarein§V-C,andthetext-basedevaluations in §V-D), we parse the current task description and capabilities of the VTOL?"
+of the robot and a list of all observed objects into a prompt
+template. The template first provides a brief description of the
+robot that is being monitored and defines the monitoring task,
+H. Proof of Theorem 1
+followedbythecurrenttaskandobservation.Thepromptfinally
+concludes with an instruction on the monitor’s output (e.g., Finally, we prove prove Theorem 1, which establishes
+a single token nominal/anomaly classification or a chain-of- the properties of the closed loop system formed by AESOP
+thought safety assessment). For multi-modal models, we only (Algorithm1)and(1).Todoso,theassumptionthat XR1,..., XRd
+provide the robot’s task. In early experiments, we found that it are control invariant sets, which we made in the problem
+was necessary to provide the descriptions of the robot and the formulation (see §III), is critical. Therefore, to make this paper
+monitoring task so that the model interprets the observations as self-contained as possible, we first reiterate the standard
+from the context of the robot’s task, whereas e.g., simply em- definition of a control invariant set.
+bedding an objectlabel or asking anLLM whether an objectis
+Definition 1 (Control Invariant Set [4]). A set for the
+R
+anomalousfailstocaptureitsrelationtotherobotandotherob- X ⊆X
+dynamical system (1) subject to state and input constraints
+jectsintheenvironment.Asaconcreteexample,weusethefol- Rn, Rm is a control invariant set if for every x ,
+R
+lowingtemplateforthesyntheticVTOLtaskin§V-A: X⊆ U⊆ ∈X
+there exists a u such that f(x,u) .
+R
+∈U ∈X
+As shown in our experiments in §V-B, §V-B, it is often
+"I am the runtime monitor for a vision straightforward to identify recovery regions that are control
+-based autonomous vertical takeoff and invariant:Forexample,statesinwhichthequadrotorhaslanded
+landing (VTOL) aircraft operating as are control invariant. We now restate Theorem 1 and provide
+an urban air taxi. My job is to analyze its proof, which relies on a recursive feasibility argument [4].
+the observations of the VTOL and
+identify potential anomalous objects Theorem 1. Suppose that at t=0, the MPC in (3) is feasible
+that the VTOL may be unable to handle
+for some set of recovery strategies 1,...,d , i.e., that
+as part of its nominal operations Y ⊂{ }
+J ( ,K,T)< . Then, the closed-loop system formed by (1)
+. The VTOL’s observations take the 0
+Y ∞
+form of object detections generated and Algorithm 1 ensures the following: 1) We satisfy state
+by an onboard perception pipeline.\n and input constraints x , u for all t 0. 2) At any
+t t
+∈X ∈U ≥
+time t 0, there always exists at least one safety intervention
+Scene Description:\n ≥
+y 1,...,d for which the MPC (3) is feasible. 3) If the slow
+The VTOL’s current task is to {TASK}.\n ∈{ }
+reasoner w, triggered at some time t >0, chooses an
+The VTOL’s current observation is:\n anom
+{OBSERVATION}\n intervention y 1,...,d , then for all t t anom+T +1 it
+I will reason about whether holds that x
+∈{y. } ≥
+the VTOL should be able to handle
+t ∈XR
+the observation as part of its nominal Proof: Suppose that the MPC in (3) is feasible for some
+operations. Do any of the detected set of recovery strategies 1,...,d at some time step
+objects qualify as anomalies beyond t<t . Let xi,⋆ deY no⊆ te{ optimal} predicted trajectories
+the standard operating conditions anom t:t+T+1|t
+and let ui,⋆ be the optimal predicted input sequences
+t:t+T|t
+associatedwitha)thenominaltrajectory,i=0,andb)recovery
+strategies, i , that minimize (3) at time t. Then, it holds
+that x a∈ nY d u =u0,⋆ by construction of (3).
+t ∈X t t|t ∈U
+Furthermore, since we assume that each recovery
+set i is a control invariant set, there exists an
+XR
+input ui such that the input sequence
+t+T+1|t+1 ∈ U
+ui := [ui,⋆ ; ui ] and
+t+1:t+T+1|t+1 t+1:t+T|t t+T+1|t+1
+its associated state sequence xi :=
+t+1:t+T+2|t+2
+[x ;xi,⋆ ;f(xi,⋆ ,ui )] satisfy state
+t+1 t+2:t+T+1|t t+T+1|t t+T+1|t+1
+and input constraints with xi i for each i .
+t+T+2|t+1∈XR ∈Y
+Thisimpliesthat1)thereexistsaset ′ 1,...,d with ′ 1
+Y ⊆{ } |Y |≥
+for which the MPC (3) is feasible at time t+1 and 2) we
+therefore satisfy x and u . Therefore, we have
+t+1 t+1
+∈X ∈U
+1)thatx andu and2)thereexistsatleastonesafety
+t t
+∈X ∈U
+interventionforwhichtheMPC(3)isfeasibleforallt t .
+anom
+≤
+Next,supposethattheslowreasonerw,queriedatt ,re-
+anom
+Fig. 12: Representation of nominal (nom.) and anomalous turnsanoutputafterexactlyK′ K timesteps.Inaddition,sup-
+(anom.) observations (obs.) in the our CARLA evaluation
+posethatt t t
++K≤′,andthattheMPC(3)isfeasi-
+anom anom
+dataset. ≤ ≤
+bleattimetforsomesetofinterventions 1,...,d .Letk=
+Y⊆{ }t t .Wethereforehavethatthecontrolandstatesequences
+anom
+u−i,⋆ andxi,⋆ fori arefeasibleforthe
+t+1:t+T−k|t t+1:t+T+1−k|t ∈Y
+MPC (3) at t+1 using the same set of interventions , since
+Y
+Algorithm 1 ensures we solve (3) with horizon T k 1 and
+− −
+consensushorizonK k 1.Sincewealreadyprovedthat(3)is
+− −
+feasible at t in the preceding paragraph, it therefore holds
+anom
+by induction that 1) x and u , 2) that the MPC (3) is
+t t
+∈X ∈U
+feasible with respect to the set of feasible safety interventions
+at time t , , for all t t t +K′.
+anom Ytanom anom
+≤ ≤
+anom
+Now, we consider the case where the slow reasoner outputs
+y . The preceding step of the proof then shows that
+∈Ytanom
+there exists a feasible trajectory for the MPC (3) that reaches
+the recovery set output by the LLM, y where y=w(o ),
+XR tanom
+withinT+1 K timesteps.Therefore,bynotingthatAlgorithm
+−
+1 continues to shrink the prediction horizon, we have that 1)
+x and u , 2) that the MPC (3) is feasible with
+t t
+resp∈ ecX t to the se∈ t U of recoveries y for all t +K′
+{ } anom ≤ Fig. 13: Example of a nominal observation in the quadrotor
+t t + T + 1. Furthermore, we then also have that
+x≤ anom y. Because we assume 1,..., d are control experiment.
+tanom+T+1 ∈XR XR XR
+invariant sets, we then further have that the closed loop system
+formed by (1) and Algorithm 1 satisfies 1) state and input
+constraintsforalltime,2)thatx y forallt t +T+1.
+t ∈XR ≥ anom
+Finally, we consider the case that the slow reasoner decides
+to return to nominal operaion, i.e., that w(o , )=0.
+tanom Ytanom
+Since each i is a control invariant set, choosing
+XR
+Y timtan eom t+K′ = +Y Kta ′n .om The ens tu hr ee os ret mhat thth ee
+n
+M reP cuC rs( iv3 e) lyis ff oe la ls oi wbl se ba yt
+anom
+applying all the preceding steps of the proof.
+I. Hardware Experiment – Additional Details and Results
+In this section we detail further experimental results that
+1) detail our data collection and monitor calibration process,
+2) analysis of query latencies to choose the parameter K in
+(3), 3) quantify the performance of the fast anomaly detector,
+4) describe the behavior of the closed-loop system on our
+test scenarios. Finally, we discuss the implementation details
+Fig.14:Exampleofananomalousobservationinthequadrotor
+of the MPC controller. Most importantly, we emphasize to
+experiment due to the obstruction of the landing zone.
+the reader that videos of our experiments are included in the
+supplementary materials, as well as on the project web page: the next subsection. We show an example of a nominal and
+https://sites.google.com/view/aesop-llm. an anomalous observation in Fig. 13 and Fig. 14, respectively.
+1) Data Collection: As described in §V-C, we collect data 2) Fast Anomaly Detector Calibration: To calibrate the
+by flying the drone in a circular pattern above the operational anomaly detection threshold we compute the top-k score for
+area with a nominal clutter of objects on the ground and each embedding in against the embedding cache and
+c p
+D D
+recordingobjectdetectionsfromtheobservations.Weconstruct identify the lowest score threshold such that we achieve a
+a prompt from each possible combination of up to 4 detections TPR of at least 0.9 on the calibration set. We compare the
+from the set of unique detections observed and embed these receiver operator characteristic (ROC) curves for top-1 and
+to form the vector cache. We perform this data collection top-3 scoring in Fig. 15. Interestingly, we find that top-k
+process twice. First, we collect the embeddings representing scoring performed best when k =1, which we attribute to
+the quadrotor’s prior experience, , whereby there are no the limited diversity of possible observations in this particular
+e
+D
+anomalous elements placed in the scene. We use this dataset to scene. We use the top-1 metric for the closed-loop evaluations.
+construct the anomaly detector we use in the experiments. In 3) Choosing K - Analysis of LLM Query Latencies:
+addition, to evaluate the performance of the anomaly detector, To choose the upper bound K on the latency of the slow
+we collect a calibration dataset, , where a limited number generative reasoner used in the MPC (3) and Algorithm
+c
+D
+of unseen objects are introduced and object placements are 1, we perform a simple experiment using the prompt and
+varied (e.g., placing objects on top of the box to simulate the observations from the calibration dataset: We query
+obstructions). We use to evaluate the anomaly detector in GPT-3.5-turbo (the slow reasoner in our experiment) N=500
+c
+Dof this scenario. In the first, another quadrotor has already
+Fast Detector Calibration
+landed on the red box, necessitating a diversion to the blue
+1.0 box for landing. In the second, quadrotors occupy both red
+and blue boxes, necessitating a diversion to the holding zone.
+Qualitatively, these scenarios show three properties of our
+0.8
+methodology: First is the ability of both monitors to react to
+nuanced semantics in the scene from the task context, since
+0.6
+“dronesontheground”werepreviouslyseeninthenominaldata
+but their presence on the landing zones is recognized as safety-
+0.4 critical.SecondisthefactthattheLLMreasonerhelpsusselect
+the most appropriate choice of fallback, as it chooses to land
+ontheblueboxwhenpossibleandrecognizesitshouldrecover
+0.2
+to the holding zone if not. Third, the fast reasoner ensures
+Top-1Scoring
+Top-3Scoring that the quadrotor pulls back towards the recovery regions
+0.0
+0.0 0.2 0.4 0.6 0.8 1.0
+once it detects a hazard on the landing site, rather than naively
+FalsePositiveRate proceeding with landing while awaiting the LLMs response.
+In both these experiments, we see the quadrotor pull back
+Fig. 15: ROC curves computed for the calibration embeddings
+fromtheredboxinthesamemanner,astheconsensushorizon
+against the quadrotor’s fast anomaly detector’s embedding
+K enforces both recovery plans to be identical untill the LLM
+cache.
+returns a decision. We further make a note that the dynamics
+model used in the MPC does not model ground effect, which
+results in a significant upward disturbance once the quadrotor
+attempts its landing on the blue box. In addition, we observed
+the motion capture system used for state estimation has a
+dead zone at the location and altitude that the drone reaches
+above the blue box. As a result, the drone makes a small jump
+upwards before landing on the blue box.
+3. Inconsequential Anomaly: A previously unseen object
+(specifically, a keyboard) on the ground triggers the fast
+anomalydetector.However,thesubsequentanalysisoftheslow
+LLM reasoner correctly deems the anomaly inconsequential,
+allowing the quadrotor to proceed with landing at its nominal
+site. In this experiment, we see that once the fast reasoner
+detects the keyboard, the quadrotor slows down to await the
+Fig. 16: Latency of querying GPT-3.5-Turbo using the
+LLM’s decision. After the LLM makes its decision the drone
+hardware experiment’s slow reasoner prompt.
+speeds back up toward the landing zone.
+times and record the response latency. As shown in Fig. 16, 5) Controller Parameters: To control the quadrotor, we use
+the response times follow a bimodal distribution with a mean a Pixracer R15 microcontroller running the open-source PX4
+of 3.1s and a standard deviation of 0.85s and a small fraction Autopilotsoftware.WeuseanOptitrackmotioncapturesystem
+of outliers. Therefore, we set K=4.3s, corresponding to the forstateestimationofthedrone,whichisfusedwiththeinternal
+95% quantile of the response times to, to ensure that the LLM IMU of the Pixracer using its built-in EKF. We implement
+returns within our bound K except for rare outlier latencies. our control stack in ROS2 with nodes written in Python. We
+We did not experience any instances where the latency was implement the MPC controller using a simple kinematic model
+beyond our bound K in our experiments. This is largely ofthedrone,representingthedrone’sposition,attitude,andthe
+because we only sporadically query the LLM once we detect ratesthereofasthestate.OurMPCusesaccelerationcommands
+and anomaly, when we truly require the LLM’s response. as its inputs, is constrained to maintain the drone’s velocity
+4) Summary of test scenarios: We describe the qualitative under 1m/s and within a position/altitude safety fence, and
+behavior of our scenarios here, but we emphasize to the relies on the PX4’s internal PID controllers to track desired
+reader that videos of our experiments are included in the trajectory setpoints output by the MPC’s trajectory predictions.
+supplementary materials, as well as on the project web page: We used a controller horizon of 10s at a time discretization of
+https://sites.google.com/view/aesop-llm. 0.05s in our experiment, which was sufficiently long to ensure
+1. Nominal Operation: There are no obstructions on the the drone could reach the recovery sets consistently during the
+red box, so the quadrotor should land normally. As desired, experiments. We manually control the drone to liftoff, after
+we observe that the quadrotor smoothly flies towards and whichweswitchtotheMPCcontrollertoexecutethetrajectory
+lands on the box without considering any of the objects on and land the drone. To do so, the MPC nominally controls the
+the ground as anomalies. drone towards a waypoint a foot above the landing zone. Upon
+2. Consequential Anomaly: We consider two variants reaching the waypoint, it descends and lands.
+etaRevitisoPeurT
