@@ -1,0 +1,1953 @@
+Sequential Kalman Monte Carlo for gradient-free
+inference in Bayesian inverse problems
+Richard D.P. Grumitt1, Minas Karamanis2,3, Uroˇs Seljak2,3
+1Department of Astronomy, Tsinghua University, Beijing 100084, China
+2Berkeley Center for Cosmological Physics and Department of Physics, University of
+California, Berkeley, CA 94720
+3Physics Department, Lawrence Berkeley National Laboratory, Cyclotron Rd,
+Berkeley, CA 94720
+E-mail: rgrumitt@mail.tsinghua.edu.cn
+June 2024
+Abstract. Ensemble Kalman Inversion (EKI) has been proposed as an efficient
+method for solving inverse problems with expensive forward models. However, the
+method is based on the assumption that we proceed through a sequence of Gaussian
+measures in moving from the prior to the posterior, and that the forward model is
+linear. In this work, we introduce Sequential Kalman Monte Carlo (SKMC) samplers,
+whereweexploitEKIandFlowAnnealedKalmanInversion(FAKI)withinaSequential
+Monte Carlo (SMC) sampling scheme to perform efficient gradient-free inference
+in Bayesian inverse problems. FAKI employs normalizing flows (NF) to relax the
+Gaussian ansatz of the target measures in EKI. NFs are able to learn invertible maps
+between a Gaussian latent space and the original data space, allowing us to perform
+EKIupdatesintheGaussianizedNFlatentspace. However, FAKIaloneisnotableto
+correct for the model linearity assumptions in EKI. Errors in the particle distribution
+as we move through the sequence of target measures can therefore compound to
+give incorrect posterior moment estimates. In this work we consider the use of EKI
+and FAKI to initialize the particle distribution for each target in an adaptive SMC
+annealingscheme,beforeperformingt-preconditionedCrank-Nicolson(tpCN)updates
+to distribute particles according to the target. We demonstrate the performance of
+theseSKMCsamplersonthreechallengingnumericalbenchmarks, showingsignificant
+improvements in the rate of convergence compared to standard SMC with importance
+weighted resampling at each temperature level. Code implementing the SKMC
+samplers is available at https://github.com/RichardGrumitt/KalmanMC.
+Keywords: Inverse Problems, Bayesian Inference, Ensemble Kalman Inversion,
+Sequential Monte Carlo, Normalizing Flows
+Submitted to: Inverse Problems
+4202
+luJ
+01
+]OC.tats[
+1v18770.7042:viXraSequential Kalman Monte Carlo 2
+1. Introduction
+Many scientific inference tasks can be viewed within the Bayesian inverse problem
+framework. In the Gaussian inverse problem setting, we can write the forward problem
+as
+y = F(x)+η, (1)
+where y ∈ Rny is the data vector, F is a forward model that maps the parameters
+x ∈ Rd to our observables, and η ∼ N(0,Γ) is additive Gaussian noise with fixed noise
+covariance Γ ∈ Rny×ny. For the Bayesian inverse problem we assign some prior over the
+parameters x ∼ π (x), with the goal then being to recover the posterior distribution
+0
+π(y|x)π (x)
+0
+π(x|y) = , (2)
+Z
+where Z is some generally unknown normalizing constant and π(y|x) = N(y|F(x),Γ)
+[1, 2].
+The particular regime we are concerned with for this work is where we do not have
+access to gradients of a typically expensive forward model. This is a common setting for
+scientific inverse problems, where evaluating the forward model often involves running
+some black-box solver for which gradients cannot be easily and/or accurately obtained
+e.g., cosmological Boltzmann solvers [3, 4], computational fluid dynamics simulators [5],
+etc. Non-differentiable forward models can also be a result of inherently discontinuous
+physics, e.g., in cloud modelling [6]. Given the forward problem definition in Equation
+1, we are restricted to Bayesian inference tasks with Gaussian likelihoods. However,
+this still encompasses a large number of scientific inverse problems, and is the regime
+for which the Ensemble Kalman methods we consider in this work have been developed
+[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18].
+A typical approach to solving Bayesian inverse problems involves exploiting some
+form of sampling algorithm. This covers a wide range of methods, e.g., Markov Chain
+MonteCarlo(MCMC)algorithms[19,20,21,22],simulatinginteractingparticlesystems
+[23, 24, 25, 26, 27, 28] etc. In MCMC algorithms, we seek to construct some transition,
+T(x′,x) that preserves the target, π(x|y) as an invariant distribution, i.e.,
+(cid:90)
+π(x|y) = T(x′,x)π(x′|y)dx′. (3)
+Appropriately constructed, such methods enjoy target invariance and ergodicity
+properties. However, especially in the gradient-free regime we consider in this work,
+this often comes at the cost of requiring ≳ O(104) serial model evaluations [16], quickly
+rendering such algorithms intractable for expensive and high dimensional models.
+An alternative class of method involves constructing some coupling scheme, where
+we have a transition C(x′,x), that moves us from the prior, π (x) to the target π(x|y),
+0
+i.e.,
+(cid:90)
+π(x|y) = C(x′,x)π (x)dx. (4)
+0Sequential Kalman Monte Carlo 3
+Examples of coupling methods include the Ensemble Kalman Filter (EKF) [29, 30, 31],
+Ensemble Kalman Inversion (EKI) [7, 10, 11, 12, 13, 17], and Sequential Monte Carlo
+(SMC) [32, 33, 34, 35]. In this work we consider the use of EKI as an initialization for
+the particle distribution of each annealed target in SMC, with the subsequent sampling
+iterations being used to correct the EKI approximation at each temperature level. In
+addition to this, we study the performance of normalizing flows (NF) [36, 37, 38, 39]
+in allowing EKI updates to be performed in a Gaussian latent space, and as a
+preconditioner for the SMC sampling iterations. The structure of the paper is as
+follows: In Sections 1.1 and 1.2 we give introductions to EKI and SMC respectively.
+In Section 2 we describe the Sequential Kalman Monte Carlo (SKMC) sampler, and
+its NF preconditioned variant NF-SKMC, proposed in this work for rapid gradient-free
+Bayesianinference. InSection3wepresentnumericalresultscomparingtheperformance
+of the SKMC samplers against standard SMC using importance weighted resampling,
+and we conclude in Section 4. Code implementing the SKMC samplers presented in this
+work is available at https://github.com/RichardGrumitt/KalmanMC.
+1.1. Ensemble Kalman Inversion
+EKI is a coupling-based algorithm that leverages ideas from the EKF to construct
+iterative particle ensemble updates for the approximate solution of Bayesian inverse
+problems [7, 8, 9, 10, 11, 12, 13, 17]. Following [13], we can motivate EKI within the
+context of a Bayesian annealing scheme. Given a prior measure π (x), EKI proceeds
+0
+by constructing a sequence of Gaussian ensemble approximations to the intermediate
+measures
+π (dx) ∝ π (dx)N(y|F(x),β−1Γ), (5)
+n 0 n
+where the inverse temperatures satisfy 0 ≡ β < β < ... < β < β ≡ 1. From
+0 1 N N+1
+Equation 5 we can obtain the recursion
+π (dx)
+n+1
+∝ N(y|F(x),α Γ), (6)
+n
+π (dx)
+n
+where the annealing step size α = (β − β )−1. The step size can be viewed as a
+n n+1 n
+regularization parameter [8, 12, 13], which can be selected such that we make a gradual
+transition from the prior to the posterior.
+The ensemble updates for EKI can be derived by assuming we have some Gaussian
+approximation to the prior measure π˜ = N(m ,C ), proceeding to move through a
+0 0 0
+sequence of Gaussian approximations, π˜ = N(m ,C ) using the recursion
+n n n
+(cid:18) (cid:19)
+π˜ (dx) ∂F
+n+1 n
+∝ N y|F(m )+ (x−m ),α Γ . (7)
+n n n
+π˜ (dx) ∂x
+n
+The forward model has been linearized around the approximation mean, F(x) ≈
+F(m ) − ∂F /∂x(x − m ), where ∂F /∂x = ∂F/∂x|x m . From Equation 7 we
+n n n n = nSequential Kalman Monte Carlo 4
+can obtain recursions for the approximation means and covariances,
+∂F∗ (cid:18) ∂F ∂F∗ (cid:19)−1
+m = m +C n n C n +α Γ (y −F(m )), (8)
+n+1 n n n n n
+∂x ∂x ∂x
+∂F∗ (cid:18) ∂F ∂F∗ (cid:19)−1 ∂F
+C = C −C n n C n +α Γ n C , (9)
+n+1 n n n n n
+∂x ∂x ∂x ∂x
+where ∂F∗/∂x is the adjoint of ∂F /∂x. Using the linearized forward model, the terms
+n n
+involving derivatives can be approximated as
+∂F∗
+C n ≈ E [(x −m )⊗(F(x )−E [F(x )])], (10)
+n n n n n n n
+∂x
+∂F ∂F∗
+n C n ≈ E [(F(x )−E [F(x )])⊗(F(x )−E [F(x )])], (11)
+n n n n n n n n
+∂x ∂x
+where E denotes the expectation with respect to π˜ . These expectations cannot be
+n n
+computed in closed form. To overcome this, EKI exploits an ensemble approximation.
+Given an initial particle ensemble {xi ∼ π (x)}J , EKI applies embarrassingly parallel
+0 0 i=1
+recursive updates using the expression
+√
+xi = xi
++Cx
+F
+(cid:0)
+CFF +α
+Γ(cid:1)−1(cid:0)
+y −F(xi)+ α
+ξi(cid:1)
+, (12)
+n+1 n n n n n n n
+where ξi ∼ N(0,Γ) is a Gaussian noise vector [13]. The empirical covariances are given
+n
+by
+J
+x 1 (cid:88)
+C F = (xi −⟨x ⟩)⊗(F(xi)−⟨F ⟩), (13)
+n J −1 n n n n
+i=1
+J
+1 (cid:88)
+CFF = (F(xi)−⟨F ⟩)⊗(F(xi)−⟨F ⟩), (14)
+n J −1 n n n n
+i=1
+where ⟨x ⟩ = 1 (cid:80)J xi and ⟨F ⟩ = 1 (cid:80)J F(xi). It can be shown that the
+n J i=1 n n J i=1 n
+ensemble means and covariances obtained through the EKI updates approximate those
+in Equations 8 and 9 as J → ∞ [40, 13].
+EKI enjoys rapid convergence properties, typically converging in O(10) iterations
+[16]. For the case of Gaussian targets with linear forward models the particle ensemble
+will be distributed according to the target posterior as the ensemble size J → ∞ [13].
+However, outside of this linear, Gaussian regime the particle ensemble obtained through
+EKIgivesanuncontrolledapproximationtotheposterior. In[18],NFmapswerelearned
+at each temperature level in the EKI iterations. By learning an NF map, one can map
+the particle distribution at a given temperature level to a Gaussian latent space and
+perform the EKI update in this latent space. Whilst this can improve the stability of
+EKIwhenfacedwithnon-Gaussiantargets, itdoesnotaddressthelinearityassumptions
+used in deriving EKI. Further, the NF map can introduce additional nonlinearity in the
+forward model evaluation due to the need to apply the inverse transformation when
+evaluating the forward model at each latent space location. These problems can resultSequential Kalman Monte Carlo 5
+in the converged particle ensemble being a poor approximation to the true posterior,
+which poses a major drawback for scientific inference tasks where we desire accurate
+estimation of the first and second moments of the target posterior. To address this
+limitation, we consider embedding EKI within an SMC sampling scheme.
+1.2. Sequential Monte Carlo
+SMC encompasses a class of sampling methods that move through a sequence of
+probability measures {π (x)}N+1 in order to sample from the final target measure
+n n=1
+π (x) [32]. The method has seen extensive applications in sequential Bayesian
+N+1
+inferencewhereonehasasetofsequentialobservations{y }T e.g., timeseriesdata[41].
+t t=1
+In this case SMC moves through targets π (x) = p(x|y ,...,y ), where at each iteration
+n 1 n
+an additional observation is added. By adding observations sequentially, one can reduce
+the computational burden of forward model evaluations compared to standard MCMC
+algorithms that require evaluation over the entire dataset at each iteration, and also
+provide a tempering effect by gradually moving towards targeting the effect of the
+full likelihood. Ensemble Kalman methods have previously been exploited for SMC
+in sequential Bayesian inference in [33], where the EKF update was used to construct
+an efficient importance sampling proposal for SMC.
+An alternative setting involves moving from some tractable density π (x), through
+0
+a sequence of intermediate measures towards the final target. In this work, we consider
+the situation where π (x) is the prior and we move through a sequence of temperature
+0
+annealed targets π (x) ∝ π (x)π(y|x)βn where π(y|x) is the likelihood. As with EKI,
+n 0
+the inverse temperatures satisfy 0 ≡ β < β < ... < β < β ≡ 1, with β = 0
+0 1 N N+1 0
+corresponding to the prior and β = 1 corresponding to the full posterior.
+N+1
+Consideraparticleensembleattheinversetemperatureβ . Assumingtheensemble
+n
+is distributed according to the annealed target π (x) ∝ π (x)π(y|x)βn, we can calculate
+n 0
+the unnormalized importance weights corresponding to the next temperature level,
+π(y|xi)βn+1
+w (xi) = n . (15)
+n n π(y|xi)βn
+n
+Given the Monte Carlo (MC) approximation to the annealed target at inverse
+temperature β ,
+n
+J
+1 (cid:88)
+π nJ(dx) =
+J
+δxi n(dx), (16)
+i=1
+we obtain an estimator for expectations of test functions f(x) with respect to the
+subsequent annealed target given by
+(cid:80)J f(xi)w (xi)
+E [f(x)] = i=1 n n n . (17)
+πn+1 (cid:80)J
+w (xi)
+i=1 n n
+If the importance sampling proposal distribution, in this case π (x), is not close to
+n
+the target, the importance sampling estimator can have very high variance, scaling
+approximately with the variance of the importance weights [32].Sequential Kalman Monte Carlo 6
+Direct application of importance weighting through the annealed targets in SMC
+can quickly result in weight collapse, where all the importance weight is assigned
+to a single particle in the ensemble. This issue can be partially addressed through
+resampling, where the particle ensemble is resampled according to their importance
+weights, duplicating particles with high weight and removing particles with low weight
+[42]. This also gives an equal weight particle ensemble that is approximately distributed
+according to the annealed target. We discuss the exact resampling scheme used in this
+work in Appendix B.
+In order to further improve the quality of the MC approximation given by the
+particle ensemble, one can perform sampling updates at each temperature level. If
+resampling has been performed, this also helps to disperse particles and remove
+duplicates in the ensemble. Typically, this will involve the application of some π (x)
+n+1
+invariant MCMC kernel, K (x′|x) for several iterations such that the particle ensemble
+n
+is distributed according to π (x). Pseudocode for the SMC algorithms we use as
+n+1
+benchmarks in this work is given in Appendix C.
+In principle, SMC can produce a particle ensemble that provides asymptotically
+unbiased approximations to posterior marginal moments, without the limitations of EKI
+inonlybeingexactforGaussiantargetswithlinearforwardmodels. However,inorderto
+attain low bias on these moment estimates in practice we must run multiple iterations of
+the MCMC updates at each temperature level [35]. For scientific inverse problems with
+expensive forward models we would like to minimize the number of MCMC iterations
+required to achieve low bias. Previous works have leveraged ideas from the EKF within
+MCMC, with examples including [43], where a proposal kernel was developed based on
+the analysis step in the EKF update, and [44] which used EKF to accelerate pseudo-
+marginal MCMC in state space models. In this work we propose an extension to EKI
+when viewed in the context of Bayesian annealing, where we replace the resampling step
+in SMC with EKI updates, coupled with NF preconditioning at each temperature level.
+2. Ensemble Kalman Inversion in Sequential Monte Carlo
+In [18], EKI was performed in a temperature annealing scheme moving from the prior to
+the target posterior, exploiting NFs to learn invertible maps to a Gaussian latent space
+at each temperature level. Whilst this was found to improve the performance of EKI
+in the presence of strong non-Gaussianity in any of the intermediate measures, model
+nonlinearity meant that the final particle ensemble could be a poor representation of the
+targetposterior. Moreover, theNFmapshadtobeinvertedwhenevaluatingtheforward
+model at each latent space location, which would induce additional non-linearity.
+In [35], NFs were used as a preconditioner within SMC to perform gradient-free
+Bayesian inference. However, even with this preconditioning, many MCMC steps are
+often required at each temperature level to effectively decorrelate and equilibriate the
+particleensemble. In[31],avariantonEKIwasconsideredwhereonealternatedbetween
+EKI updates and preconditioned Crank-Nicolson (pCN) updates, which was found toSequential Kalman Monte Carlo 7
+accelerate the convergence of the EKI algorithm. However, in general using a single
+pCN step is insufficient to correct for nonlinearity and non-Gaussianity in the target. In
+this work, we consider using the biased target approximation from EKI, both with and
+without NF preconditioning, at each temperature level to initialize the MCMC steps
+within SMC. This allows for more stable inference when dealing with model nonlinearity
+and target non-Gaussianity. The particle distribution obtained from the EKI update
+has the additional benefit of providing an empirical preconditioner based on the EKI
+target approximation.
+In Section 2.1 we describe the SMC temperature schedule adaption. In Section 2.2
+we discuss the use of NFs for preconditioning in EKI and SMC, and in Section 2.3 we
+describe the t-preconditioned Crank-Nicolson algorithm used for the MCMC sampling
+steps in all the algorithm variants tested in this work. In Section 2.4 we give a complete
+description of the Sequential Kalman Monte Carlo (SKMC) samplers proposed here.
+2.1. Temperature Adaptation
+The choice of temperature schedule is crucial to both EKI and SMC. We wish to take
+steps in inverse temperature that are neither too small, which would unnecessarily
+increase the number of model evaluations, nor too large, which would render the particle
+ensemble obtained at the previous temperature level of limited use in adapting the
+MCMC kernel used for the next target temperature. This is particularly relevant when
+we learn NF maps for preconditioning, where we rely on the particle distribution from
+the previous temperature level to inform our preconditioning.
+In this work we select temperature levels by estimating the effective sample size
+(ESS) of the particle ensemble and choosing a value of β such that we attain some
+fractional ESS target. The ESS in targeting some β from β can be estimated by
+n+1 n
+calculating the importance weights given by
+(cid:18) (cid:19)
+wi = exp −1 (β −β )(cid:13) (cid:13)Γ−1/2(cid:0) y −F(xi)(cid:1)(cid:13) (cid:13)2 . (18)
+n 2 n+1 n n 2
+The value of the target inverse temperature can then be obtained by solving for β
+n+1
+in,
+(cid:32) (cid:33)−1(cid:32) (cid:33)2
+J J
+(cid:88) (cid:88)
+wi(β )2 wi(β ) = τJ, (19)
+n n+1 n n+1
+i=1 i=1
+where 0 < τ < 1 is the fractional ESS threshold. The value of τ controls the size of
+the steps in β, with larger values of τ resulting in smaller steps. This method has seen
+extensive application in adaptive SMC and EKI implementations due to the ability to
+control the ensemble ESS, which is crucial for effective resampling [45, 9].
+Alternative temperature adaption schemes can be used, for example if one was
+seeking to use a more aggressive temperature schedule. In [13] an adaptation scheme
+for EKI was proposed where the inverse temperature step size at each iteration is givenSequential Kalman Monte Carlo 8
+by
+(cid:40) (cid:40) (cid:115) (cid:41) (cid:41)
+N N
+α−1 = β −β = min max obs , obs ,1−β , (20)
+n n+1 n 2⟨Φ ⟩ 2⟨Φ ,Φ ⟩ n
+n n n
+where N is the number of observations and Φ is the set of values of the model
+obs n
+least-squares functional,
+Φ =
+(cid:26)
+1 (cid:13) (cid:13)Γ−1/2(cid:0)
+y
+−F(xi)(cid:1)(cid:13)
+(cid:13)2(cid:27)J
+, (21)
+n 2 n 2
+i=1
+with ⟨Φ ⟩ and ⟨Φ ,Φ ⟩ denoting the empirical mean and variance of Φ respectively.
+n n n n
+This inverse temperature step size criterion was motivated by controlling the Jeffreys’
+divergence between adjacent tempered measures.
+Empirically, the criterion in Equation 20 results in EKI using significantly fewer
+steps in β when transitioning from the prior to the posterior, which can result in
+significant computational savings. However, this criterion is typically unstable for
+standard SMC which uses importance resampling at each temperature level. The ESS
+between temperature levels using Equation 20 can be very low, often resulting in only
+a single particle from the ensemble being duplicated during resampling, which is a
+poor initialization for the subsequent MCMC iterations. In order to make more direct
+comparisons between SKMC algorithms and standard SMC algorithms in this work, we
+only consider the ESS-based criterion expressed in Equation 19, deferring testing of the
+criterion in Equation 20 to future work on adaptation of SKMC samplers. It is worth
+noting that such temperature adaptation renders SMC a biased but consistent method.
+However, this bias is typically negligible, and the ability to adapt the temperature
+schedule to each problem offers significant advantages in avoiding the need to manually
+select an appropriate schedule, hence the widespread use of adaptive temperature
+schedules in SMC [46, 47].
+2.2. Normalizing Flow Preconditioning
+In this paper we leverage NFs in two contexts; learning a map to a Gaussian latent space
+at each temperature level to improve the fidelity of the EKI target approximation[18],
+and to act as a preconditioner for the subsequent SKMC sampling iterations.
+NFs are generative models where one learns a bijective map between some original
+data space, x ∈ Rd and a simple latent space, z ∈ Rd. They can be used for highly
+expressive density estimation and allow efficient sampling from the learned generative
+model [36, 37, 38, 39]. The full bijective map, z = f(x) proceeds through a sequence
+of invertible transformations f = f ◦...◦f , with the latent space base distribution
+1 nL
+typically chosen to be the standard Gaussian such that z ∼ pz(z) = N(0,I ), where
+d
+I denotes the d×d identity matrix. Data space samples can be obtained from the NF
+d
+distribution by drawing samples from the latent space base distribution and evaluating
+the inverse transformation x = f−1(z).Sequential Kalman Monte Carlo 9
+The learned NF density, q(x) can be evaluated using the standard change of
+variables formula,
+(cid:89)nL
+q(x) = pz(f(x))|detDf(x)| = pz(f(x)) |detDf (x)|, (22)
+l
+l=1
+where Df(x) = ∂f(x)/∂x is the Jacobian for the NF transformation. In this work we
+use neural spline flows (NSF) [48] as implemented in the FlowMC package [49, 50],
+whichhavebeenfoundtobehighlyexpressiveflowarchitecturesabletocapturecomplex
+target geometries. In the numerical experiments performed in this work we were able
+use a single set of default configurations across the test models without the need for
+extensive NSF hyper-parameter searches.
+The impact of the NF in the annealing schemes considered in this work can be seen
+by considering the recursive expression for the target with inverse temperature β ,
+n+1
+π (x) ∝ π (x)N(y|F(x),α Γ). (23)
+n+1 n n
+We can view π (x) as a pseudo-prior for π (x), with the likelihood contribution
+n n+1
+being controlled by α . By fitting an NF to the particle ensemble obtained for β ,
+n n
+and assuming the particle ensemble is correctly distributed as π (x), we can map the
+n
+pseudo-prior to an approximately Gaussian space. In the NF latent space, the β
+n+1
+target is given by
+π (z) ∝ π (f−1(z))|detDf−1(z)|N(y|F(f−1(z)),α Γ). (24)
+n+1 n n n n n
+Thelatentspacepseudo-priorisapproximatelythestandardGaussian. ForEKIupdates
+performed in the NF latent space, we can view this as single step EKI with prior
+π (z) = π (f−1(z))|detDf−1(z)| and target posterior π (z). Provided the particle
+n n n n n+1
+ensemble for β was correctly distributed according π (x), by performing the EKI
+n n
+update in the latent space we have a Gaussian prior ensemble. If the value of α
+n
+is chosen to be sufficiently large (i.e., small step size in β) such that π (z) is prior
+n
+dominated, we are able to effectively relax the Gaussian ansatz of EKI.
+Whilst the use to NFs in EKI has been found to improve robustness against non-
+Gaussianity [18], the NF maps do not address the assumption that the forward model
+in linear, used when deriving the EKI update in Equation 12. If the forward model is
+nonlinear the EKI update will not be exact, even when performed in the Gaussian latent
+space. This means the particle ensemble will not be correctly distributed according to
+the subsequent tempered target. When this is then treated as the pseudo-prior for the
+next temperature level, the NF will map the incorrect particle ensemble to a Gaussian
+latent space which does not correspond to the correct pseudo-prior distribution. These
+errors can accumulate as one progresses from the prior to the posterior, resulting in a
+low fidelity ensemble approximation to the final posterior.
+To address this concern we consider embedding the EKI and Flow Annealed
+Kalman Inversion (FAKI) algorithms within a full SMC sampling scheme, replacing theSequential Kalman Monte Carlo 10
+importance resampling steps used in standard SMC. NF preconditioning can be used
+within SMC to improve the rate of convergence for the sampling iterations performed
+at each temperature level. Considering again Equation 24, if the particle ensemble
+obtained for β can be mapped to a Gaussian latent space, and the value of α is
+n n
+chosen such that the β target is dominated by the pseudo-prior, the NF provides a
+n+1
+highly effective preconditioner that is able to account for local variations in the target
+geometry. Mapping to a Gaussian latent space has the additional advantage of allowing
+us to use scaling relations derived for samplers with Gaussian targets when selecting
+sampling hyper-parameters [20, 51, 52]. The use of NFs as preconditioners has seen
+several applications for sampling, including in MCMC [53, 49], with interacting particle
+systems [28] and in SMC [35, 54].
+2.3. t-Preconditioned Crank-Nicolson Algorithm
+At each temperature, either after the importance resampling step for SMC or the
+EKI update for the SKMC algorithms, MCMC updates are performed in order to
+disperse the particle ensemble and distribute them according to the tempered target.
+In this work, we use the t-preconditioned Crank-Nicolson (tpCN) algorithm, which
+is a modification of the standard pCN algorithm designed to more efficiently sample
+from heavy tailed targets. In [55], the mixed preconditioned Crank-Nicolson (MpCN)
+algorithm was proposed, which similarly modifies the pCN proposal in order to adapt
+to heavy tailed targets. Whilst the MpCN proposal is reversible with respect to the
+σ-finite measure p¯(dx) = ∥x∥−ddx, the tpCN proposal is reversible with respect to the
+2
+multivariate t-distribution. The tpCN algorithm has been implemented in the context
+of NF preconditioned SMC in the pocoMC sampling package‡.
+Consider some target measure with probability density function p(x). Given a
+particle location x , the standard pCN algorithm generates a proposal sample as,
+m−1
+(cid:112)
+x′ = µ+ 1−ρ2(x −µ)+ρW , (25)
+m m−1 m
+where µ is the mean of the Gaussian base distribution, ρ ∈ (0,1) and W ∼ N(0,C).
+m
+The step size parameter, ρ controls the extent to which a proposal sample is correlated
+with the previous sample. In the limit where ρ → 1, the pCN proposal reduces to an
+independent proposal drawn from N(µ,C). The proposal in Equation 25 is accepted
+with probability
+(cid:26) p(x′ )φ (x ;µ,C)(cid:27)
+α(x′ ,x ) = min 1, m N m−1 , (26)
+m m−1 p(x )φ (x′ ;µ,C)
+m−1 N m
+where φ (x;µ,C) denotes the probability density function of the Gaussian distribution
+N
+with mean µ and covariance C, evaluated at x. The proposal kernel for pCN as defined
+above is
+(cid:112)
+K(x,dx′) = N(µ+ 1−ρ2(x−µ),ρ2C), (27)
+‡ https://github.com/minaskar/pocomc/Sequential Kalman Monte Carlo 11
+which is reversible with respect to the Gaussian distribution N(µ,C) i.e.,
+φ (x;µ,C)dxK(x,dx′) = φ (x′;µ,C)dx′K(x′,dx). (28)
+N N
+The pCN algorithm has been shown to exhibit a dimension independent spectral gap
+for large class of target measures which are the finite dimensional approximations of
+densities defined with respect to some Gaussian reference measure i.e., for some target
+posterior measure π we have the Radon-Nikodym derivative
+dπ
+(x) ∝ exp(−Φ(x)), (29)
+dπ
+0
+where the reference prior measure π is taken to be the Gaussian N(µ,C) and Φ(x)
+0
+is the likelihood potential [22, 56]. The pCN algorithm performs well when the target
+measure is close to Gaussian. However, for targets with heavy tails the performance of
+the algorithm can be severely degraded [55].
+To address the degraded performance of the pCN algorithm when sampling from
+distributions with heavy tails and distributions that are far from Gaussian we use
+the tpCN algorithm. Instead of using a Gaussian base distribution to generate the
+proposal, the tpCN algorithm uses a multivariate t-distribution t (µ ,C ), where ν > 0
+νs s s s
+denotes the degrees of freedom, µ is the mean and C is the scale matrix. The
+s s
+parametersofthisdistributionareobtainedbyfittingt (µ ,C )totheparticleensemble
+νs s s
+at each temperature level prior to performing tpCN updates, using the expectation
+maximization (EM) algorithm [57]. The tpCN proposal is given by
+(cid:112) (cid:112)
+x′ = µ + 1−ρ2(x −µ )+ρ Z W , (30)
+m s m−1 s m m
+where Z−1 ∼ Gamma(k = 1(d+ν ),θ = 2/(ν +⟨x ,x ⟩ )) and W ∼ N(0,C ).
+m 2 s s m−1 m−1 s m s
+We have used the inner product notation ⟨x ,x ⟩ = (x − µ )⊺C−1(x − µ ). The
+1 2 s 1 s s 2 s
+acceptance probability of the tpCN proposal is given by
+(cid:26) p(x′ )(1+⟨x ,x ⟩ /ν )−(d+νs)/2(cid:27)
+α(x′ ,x ) = min 1, m m−1 m−1 s s , (31)
+m m−1 p(x m−1)(1+⟨x′ m,x′ m⟩ s/ν s)−(d+νs)/2
+It can be shown that the tpCN proposal in Equation 30 is reversible with respect to
+t (µ ,C ). The reversibility and acceptance rate properties of the tpCN algorithm are
+νs s s
+stated in Lemma 2.1, with the corresponding proof given in Appendix A.
+Lemma 2.1. The proposal transition kernel of the tpCN algorithm is reversible
+with respect to the multivariate t-distribution t (µ ,C ) and the proposal acceptance
+νs s s
+probability is given by Equation 31.
+In general, the multivariate t-distribution will have heavier tails than the Gaussian
+base distribution of the standard pCN algorithm. Given the tpCN proposal is
+reversible with respect to the multivariate t-distribution we therefore expect that it
+will perform better than standard pCN for heavy tailed targets. For targets with
+strong non-Gaussianity, the performance of tpCN can be futher improved through NFSequential Kalman Monte Carlo 12
+preconditioning. In this case the tpCN updates are performed on the NF latent space
+particles, z = f (x) with the corresponding latent space acceptance probability being
+n
+given by
+(cid:26) π (f−1(z′))π(y|f−1(z′))βn+1|detDf−1(z′)|(1+⟨z,z⟩ /ν )−(d+νs)/2(cid:27)
+α(z,z′) = min 1, 0 n n n s s .
+π 0(f n−1(z))π(y|f n−1(z))βn+1|detDf n−1(z)|(1+⟨z′,z′⟩ s/ν s)−(d+νs)/2
+(32)
+2.4. Sequential Kalman Monte Carlo Samplers
+The core of the SKMC samplers lies in replacing the importance resampling step of
+SMC with an EKI update. That is, given an ensemble of particles {xi}J distributed
+n i=1
+according to the target at inverse temperature β , we apply the EKI update in Equation
+n
+12 to obtain a particle ensemble that approximates the target at β . We can then
+n+1
+fit for the parameters of the t-distribution reference measure before performing tpCN
+updates to correctly distribute the particle ensemble according to the target at β .
+n+1
+In addition to performing the EKI update at each temperature level, we can also use
+NF preconditioning to improve the stability of EKI when approximating non-Gaussian
+measures, and to act as a preconditioner for the tpCN sampling. Pseudocode for
+SKMC with NF preconditioning is given in Algorithm 1. For SKMC without NF
+preconditioning, the structure of the algorithm is largely identical, without any NF
+fits being performed such that EKI and tpCN updates are performed in the original
+data space. For completeness, we provide pseudocode describing the benchmark SMC
+implementations used in this work in Appendix C.
+The use of EKI within SMC has two core benefits. By following EKI updates with
+tpCN updates that preserve the target measures as their invariant measures, we are able
+to correct for errors in the EKI approximation when the target is non-Gaussian and the
+forwardmodelisnonlinear. InAppendixE,wedemonstratetheperformanceofEKIand
+FAKI on our numerical benchmarks without correcting the updates in an SMC sampling
+scheme. Alongside this, the EKI updates are able to improve the performance of SMC
+byacceleratingthesamplingphase. TheEKIupdatedistributesparticlesapproximately
+according to the target measure. When used to fit the reference t-distribution for
+tpCN, we are able to more closely capture the target geometry. Coupled with NF
+preconditioning, we obtain a doubly preconditioned sampler, with the NF mapping us
+to an approximately Gaussian latent target space, and the t-preconditioning in tpCN
+giving improved performance in sampling any residual tails in the target.
+This does come with the drawback that significantly more model evaluations will
+be required compared to only performing EKI or FAKI if we require that the particle
+ensemble is converged on the target measure at each temperature level. A common
+scenario one encounters in EKI/FAKI applications is where the forward model is too
+expensivetoperformthenumberofupdatesrequiredbyafullSMCscheme. However, in
+this situation the number of tpCN updates performed at each temperature level can be
+limited. Even performing a small number of tpCN updates can improve the stability ofSequential Kalman Monte Carlo 13
+Algorithm 1 Flow Preconditioned Sequential Kalman Monte Carlo
+1: Input: Set of J samples from the prior {xi ∼ π (x)}J , data y, observation
+0 0 i=1
+covariance Γ, target fractional ESS τ, number of tpCN iterations to perform at each
+temperature level M, initial tpCN step size ρ, target tpCN acceptance rate α⋆.
+2: Set β = 0 and iteration counter n = 0.
+0
+3: while β < 1 do
+n
+4: Solve for target inverse temperature β in Equation 19.
+n+1
+5: if β = 1 then
+n+1
+6: n∗ ← n+1
+7: end if
+8: α ← β −β
+n n+1 n
+9: Fit NF map, z = f (x) to current particle locations {xi}J .
+n n i=1
+10: Obtain latent space particle locations {zi = f (xi)}J .
+n n n i=1
+11: for i = 1,...,J do
+12: Update latent space particle ensemble with
+√
+zi = zi
++Cz
+F
+(cid:0)
+CFF +α
+Γ(cid:1)−1(cid:0)
+y −F(f−1(zi))+ α
+ξi(cid:1)
+, (33)
+n+1 n n n n n n n n
+z
+where C F and CFF are defined analogously to Equations 13 and 14
+n n
+respectively in the NF latent space, and ξi ∼ N(0,Γ).
+n
+13: end for
+14: Fit the multivariate t-distribution, t (µ ,C ) to the latent space particle ensemble
+νs s s
+{zi }J with an EM algorithm.
+n+1 i=1
+15: for m = 1,...,M do
+16: for i = 1,...,J do
+(cid:16) (cid:17)
+17: Draw 1/Z mi ∼ Gamma (d+ 2νs), νs+⟨z n+2 1,z n+1⟩s , and Wi m ∼ N(0,C s).
+18: zi′ ← µ +(cid:112) 1−ρ2(zi −µ )+ρ(cid:112) Zi Wi
+n+1 s n+1 s m m
+19: Update particle with probability α(zi ,zi′ ), such that
+n+1 n+1
+(cid:40)
+zi′ with probabilityα(zi ,zi′ ),
+zi = n+1 n+1 n+1 (34)
+n+1 zi with probability1−α(zi ,zi′ ),
+n+1 n+1 n+1
+where α(zi ,zi′ ) is given by Equation 32.
+n+1 n+1
+20: end for
+21: logρ ← logρ+(⟨α⟩−α⋆)/m
+22: µ ← µ +(⟨z ⟩−µ )/m
+s s n+1 s
+23: end for
+24: Map particle ensemble back to the original data space {xi = f−1(zi )}J
+n+1 n n+1 i=1
+25: n ← n+1
+26: end while
+27: Output: Converged particle ensemble {xi }J .
+n∗ i=1Sequential Kalman Monte Carlo 14
+inference with EKI/FAKI and improve the fidelity of the final posterior approximation.
+ForthetpCNimplementations,bothwithintheSKMCsamplersandthebenchmark
+SMC samplers, we perform diminishing adaptation [58] of the tpCN step size ρ, and
+the reference t-distribution mean µ . For some sampling iteration m, the tpCN kernel
+s
+parameters at iteration m+1 are given by
+⟨αm⟩−α⋆
+logρm+1 = logρm + , (35)
+m
+⟨xm⟩−µm
+µm+1 = µm + s , (36)
+s s m
+where ⟨αm⟩ is the mean tpCN acceptance probability at iteration m, α⋆ is some target
+acceptance probability and ⟨xm⟩ is the mean of the particle ensemble at iteration m.
+Performing diminishing adaptation in this way helps to ensure the robust performance
+of the tpCN algorithm across all the samplers, with similar adaptation previously being
+implemented in the pocoMC package for NF preconditioned SMC [35, 54].
+3. Numerical Experiments
+In this section we present the results from three numerical experiments. In Section
+3.1, we study the recovery of an initial temperature field evolving under the heat
+equation. In Section 3.2, we study the recovery of an underlying density field from
+surface measurements of the gravitational field. Finally, in Section 3.3, we study the
+recovery of a source term from observations of a signal evolving under the reaction-
+diffusion equation.
+WecomparetheperformanceoftheSKMCsamplersagainstimportanceresampling
+SMC, both with and without NF preconditioning. For the purposes of labelling the
+results from each algorithm we use the following acronyms:
+(i) SKMC: The SKMC algorithm without NF preconditioning, analogous to
+Algorithm 1 without the NF steps.
+(ii) NF-SKMC: The SKMC algorithm with NF preconditioning, as described in
+Algorithm 1.
+(iii) SMC: Importance resampling SMC without NF preconditioning, analogous to
+Algorithm 3 without the NF steps.
+(iv) NF-SMC: Importance resampling SMC with NF preconditioning, as described in
+Algorithm 3.
+To quantify the performance of the samplers we compare the squared bias on the
+estimated first and second moments of the target posterior, averaged over the target
+dimensions, which has previously been used in studying the rate of convergence of
+MCMC algorithms [53, 59]. The dimension averaged squared bias, normalized by the
+posterior variance, on the estimate for some quantity g(x) is given by
+(cid:42) (cid:43)
+(E [g (x)]−E [g (x)])2
+⟨b2⟩ = β=1 k π k , (37)
+g σ2
+g,k
+k∈dSequential Kalman Monte Carlo 15
+whereE [g (x)] = J−1(cid:80)J g (xi )isthemeanofg(x)forthedimensionk,evaluated
+β=1 k i=1 k n⋆
+over the final particle ensemble {xi }J , E [g (x)] is the expectation value of g(x) for
+n⋆ i=1 π k
+the dimension k, evaluated with respect to the true target posterior, σ2 is the true
+g,k
+posterior variance of g(x) for the dimension k, and ⟨·⟩ denotes the average over
+k∈d
+the dimensions. We estimate E [g (x)] and σ2 for each problem from long runs of
+π k g,k
+Hamiltonian Monte Carlo (HMC), using the No-U-Turn Sampler implementation in the
+numpyro library [60, 61]. We denote the dimension averaged squared bias on the first
+moment (g (x) = x ) as ⟨b2⟩ and on the second moment (g (x) = x2) as ⟨b2⟩, where
+k k 1 k k 2
+x is the element of x corresponding to the dimension k.
+k
+Given N independent samples from the posterior {xˆ }N , we have the estimator
+i i=1
+E [g (x)] = N−1(cid:80)N g (xˆ ). Invoking the central limit theorem, the squared error on
+π k i=1 k i
+this estimator will be of the order ∼ σ2 /N [59]. Whilst we do not have independent
+g,k
+samples from the posterior from HMC, we ensure that we run chains sufficiently long
+such that the estimated effective sample size (ESS) ≳ 103. These heuristics can
+also be used to define a regime for low bias where ⟨b2⟩ < 10−2, which corresponds
+g
+approximately with a dimension averaged squared bias less than one hundredth of the
+posterior variance.
+To enable a more direct comparison between the various algorithms, we run the
+SKMC and NF-SKMC algorithms with 10 tpCN iterations at each temperature level,
+and the SMC and NF-SMC algorithms with 11 tpCN iterations at each temperature
+level. The additional tpCN iteration for SMC and NF-SMC is to account for the
+additional set of forward model evaluations used for the EKI updates in SKMC and
+NF-SKMC. For the results presented in this section we use a target tpCN acceptance
+rate of α⋆ = 0.234, an initial tpCN step size of ρ = 1 and a fractional target ESS of
+τ = 0.5 when adapting the annealing schedule. Each algorithm is run over ten different
+random seeds to estimate the corresponding variation in performance. We report results
+for ensemble sizes J ∈ {2d,4d,6d,8d,10d}, where d is the target dimension of each
+model. For completeness, we show the relevant field and source term reconstructions
+for each experiment in Appendix D.
+3.1. Heat Equation
+The heat equation is a partial differential equation (PDE) describing the evolution of
+some field u(x,t) over time. For our experiment we consider the case of a d = 2
+temperature field evolving according to
+∂u(x,t) (cid:18) ∂2u(x,t) ∂2u(x,t)(cid:19)
+= D∇2u(x,t) = D + , (38)
+∂t ∂x2 ∂x2
+1 2
+where we set the thermal diffusivity constant D = 0.5. The temperature field is
+taken to be on a square plate, with the length of a side set to L = 10. We impose
+Dirichlet boundary conditions on the domain Ω ⊂ R2, such that u(x,t) = 0,∀x ∈ ∂Ω.
+The forward model consists in solving Equation 38 for the evolution of some initial
+temperature field u(x,t = 0) up to a time t = 1. We solve the heat equation using
+fSequential Kalman Monte Carlo 16
+the forward time centered space (FTCS) method [62] on a 64×64 grid, with 1000 time
+steps.
+For our simulated data, we consider the situation where measurements of the
+temperature field are made at time t on a low resolution 8×8 grid, with the signal in
+f
+a low resolution grid pixel being the average of the temperature signal from the 64×64
+grid pixels contained within it. The observation noise was taken to be independent
+in each pixel, with a Gaussian noise standard deviation of σ = 0.2. The true initial
+η
+temperaturefieldwasgeneratedfromtheKarhunen-Loeve(KL)expansionofaGaussian
+random field (GRF) with a squared exponential covariance kernel
+(cid:32) (cid:33)
+∥x−x′∥2
+C(x,x′) = exp − 2 , (39)
+2ℓ2
+where ℓ is the GRF length scale. The KL expansion, up to some order R, for the GRF
+is given by
+R
+(cid:88)(cid:112)
+u(x,t = 0) = µ +σ λ ϕ (x)θ , (40)
+K K k k k
+k=1
+where µ is the GRF mean, σ2 is the GRF variance, {λ }R is a sequence of strictly
+K K k k=1
+decreasing, real and positive eigenvalues for the covariance kernel in Equation 39,
+{ϕ (x)}R are the set of corresponding eigenfunctions of the covariance kernel, and
+k k=1
+{θ ∼ N(0,1)}R are a set of standard Gaussian random variables. To generate the
+k k=1
+true field for this numerical study we set µ = 0, σ2 = 1, ℓ = 0.1 and generate R = 200
+standard Gaussian random variables {θ }200 . The simulated data are then generated
+k k=1
+by solving for the time evolution of u(x,t) up to time t = 1, averaging the signal onto
+f
+the low resolution grid and adding Gaussian noise realizations to each pixel. The true
+initial temperature field and the low resolution observed field are shown in Figure 1.
+Initial temperature field Noisy temperature signal
+1.0 1.0
+1.0
+2
+0.8 0.8
+0.5
+1
+0.6 0.6
+0.0
+0
+0.4 0.4
+1 0.5
+0.2 2 0.2
+1.0
+0.0 3 0.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Figure 1. The initial temperature field u(x,t = 0) (left panel), shown alongside the
+low resolution observed temperature field at time t =1 (right panel).
+f
+For the test model, we consider recovering the R = 100 leading modes of the KL
+expansion, along with the thermal diffusivity constant. Defining θ = (θ ,...,θ )⊺, the
+1 100Sequential Kalman Monte Carlo 17
+full model is given by
+D ∼ |N(µ = 0,σ2 = 0.52)|, (41)
+µ ∼ N(µ = 0,σ = 0.1), (42)
+K
+σ ∼ |N(µ = 0,σ2 = 1.0)|, (43)
+K
+θ ∼ N(0,I ), (44)
+100
+y ∼ N(F (D,µ ,σ ,θ),σ2I ), (45)
+H K K η 64
+where |N(µ = 0,σ2)| is the Half-Normal distribution with scale σ and F (D,µ ,σ ,θ)
+H K K
+denotes the forward model for the heat equation, mapping from the initial temperature
+field to the low resolution observations y at time t = 1. For performing inference
+f
+we apply log-transformations to D and σ to map the all the parameters to an
+K
+unconstrained space, modifying the the target distribution with the corresponding
+Jacobian factors.
+NF-SKMC NF-SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+SKMC SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+Figure 2. Final dimension averaged squared bias on the first moment for the heat
+equation model, plotted against the ensemble size J expressed as a multiple of the
+target dimension d.
+In Figure 2 we show the results for ⟨b2⟩ obtained with the final particle ensembles
+1
+for each algorithm, with the box plots showing the variation over the 10 runs. Similarly,
+Figure 3 shows the results for ⟨b2⟩ obtained for each algorithm. The mean and standard
+2
+deviation of ⟨b2⟩ and ⟨b2⟩ for each algorithm over their 10 runs are reported in Table 1,
+1 2
+alongside the number of temperature levels, N used by each algorithm.
+β
+Comparing SKMC with SMC, we can see that SKMC obtains lower values for
+⟨b2⟩ and ⟨b2⟩ for all ensemble sizes. The number of temperature levels used by both
+1 2
+2b
+2b
+1
+1Sequential Kalman Monte Carlo 18
+NF-SKMC NF-SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+SKMC SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+Figure 3. Final dimension averaged squared bias on the second moment for the heat
+equation model, plotted against the ensemble size J expressed as a multiple of the
+target dimension d.
+algorithms is comparable, with SMC requiring additional temperature levels for some
+randomseeds. Thisistobeexpectediftheparticleensembleisnotsufficientlyconverged
+in SMC at each temperature before proceeding to the next temperature level. It
+is apparent from these tests that SKMC is able to converge more rapidly at each
+temperature level for this problem, indicating that the EKI update provides a better
+initialization for the tpCN updates than the importance resampling used in SMC. The
+EKI update also helps to provide improved preconditioning for the tpCN updates, with
+the t-distribution being fitted to the annealed target particle approximation obtained
+via the EKI update.
+A similar pattern is observed when comparing NF-SKMC and NF-SMC. In
+comparing each with SKMC and SMC respectively, we see that the improvement from
+NF preconditioning becomes more pronounced as the ensemble size is increased. For
+J = 2d there are not enough particles for the NF to learn a useful map between between
+the original data space and a Gaussian latent space. Indeed, in this regime the NF can
+degrade performance by failing to map to a latent space where the target is effectively
+Gaussianized, and in the case of NF-SKMC introducing additional non-linearity in the
+forward model evaluation for the EKI update. For larger ensemble sizes (J ≥ 6d) the
+use of NF transformations reduces the final bias for both the NF-SKMC and NF-SMC
+algorithms. The effect is more pronounced for NF-SKMC, where the NF acts to both
+relax the Gaussian ansatz of EKI and provide nonlinear preconditioning for the tpCN
+2b
+2b
+2
+2Sequential Kalman Monte Carlo 19
+updates. However, it is worth noting that SKMC was able to achieve low bias without
+NF preconditioning, demonstrating the potential for the EKI ensemble to initialize and
+precondition MCMC updates within SMC.
+Algorithm J N ⟨b2⟩ ⟨b2⟩
+β 1 2
+NF-SKMC 10d 15.0±0.0 0.0029±0.0006 0.0029±0.0007
+NF-SKMC 8d 15.0±0.0 0.0048±0.0008 0.0045±0.0005
+NF-SKMC 6d 15.0±0.0 0.0065±0.001 0.0060±0.001
+NF-SKMC 4d 15.0±0.0 0.0084±0.001 0.010±0.007
+NF-SKMC 2d 14.8±0.4 0.040±0.009 0.072±0.006
+SKMC 10d 15.0±0.0 0.0056±0.001 0.0053±0.001
+SKMC 8d 15.0±0.0 0.0071±0.001 0.0062±0.001
+SKMC 6d 15.0±0.0 0.0094±0.001 0.0080±0.001
+SKMC 4d 15.0±0.0 0.011±0.002 0.011±0.002
+SKMC 2d 15.0±0.0 0.038±0.003 0.064±0.007
+NF-SMC 10d 15.2±0.4 0.021±0.004 0.021±0.005
+NF-SMC 8d 15.7±0.5 0.025±0.004 0.026±0.004
+NF-SMC 6d 15.4±0.5 0.029±0.005 0.028±0.005
+NF-SMC 4d 15.5±0.5 0.041±0.007 0.055±0.008
+NF-SMC 2d 14.9±0.3 0.11±0.02 0.15±0.009
+SMC 10d 15.3±0.5 0.032±0.004 0.036±0.004
+SMC 8d 15.5±0.5 0.034±0.005 0.037±0.007
+SMC 6d 15.7±0.5 0.036±0.004 0.038±0.004
+SMC 4d 15.6±0.5 0.033±0.006 0.039±0.004
+SMC 2d 15.1±0.3 0.094±0.02 0.14±0.009
+Table 1. Results for the number of temperature levels used by each algorithm N
+β
+and squared bias results, ⟨b2⟩ and ⟨b2⟩, obtained with the final particle ensemble for
+1 2
+each algorithm when performing inference on the heat equation example. We report
+the mean and standard deviation for each statistic over the 10 algorithm runs, and
+showresultsforeachofthetestedensemblesizesJ. Thenumberofparallelizedmodel
+evaluations is given by 11N for each algorithm, with the total number of model
+β
+evaluations being given by 11JN .
+β
+3.2. Gravity Survey
+For this problem we adapt the d = 2 gravity surveying problem presented in [63].
+We have some mass density field ϱ(x), located at a depth δ from the surface at which
+measurementsoftheverticalcomponentofthegravitationalfieldaremade. Thevertical
+component of the gravitational field at some point s at the surface is given by
+(cid:90)(cid:90)
+δ
+ζ(s) = ϱ(x)dx, (46)
+∥s−x∥3
+X 2Sequential Kalman Monte Carlo 20
+where X = [0,1]2 is the domain ϱ(x). The forward model therefore consists in solving
+the integral in Equation 46. We follow [63] in evaluating this integral using midpoint
+quadrature. Using Q quadrature points along each dimension, the integral expression
+becomes
+Q Q Q2
+(cid:88) (cid:88) δ (cid:88) δ
+ζ(s ) = ω ω ϱˆ(x ) = ω ϱˆ(x ), (47)
+i l k ∥s −x ∥3 k,l j ∥s −x ∥3 j
+l=1 k=1 i k,l 2 j=1 i j 2
+where ω = 1/Q2,∀j are the quadrature weights, ϱˆ(x ) is the approximate subsurface
+j j
+density at the quadrature point x , and ζ(s ) is the vertical component of the
+j i
+gravitational field at the collocation point on the surface s ,i ∈ {1,...,N2}.
+i
+The simulated data was obtained by generating a ground truth subsurface density
+field with profile given by
+ϱ(x) ∝ sin(πx )+sin(3πx )+x +1, x ,x ∈ [0,1] (48)
+1 2 2 1 2
+normalized to have a maximum value of 1. This signal was projected onto a 64×64 grid.
+The surface signal was evaluated using Equation 47 on a 10 × 10 grid, with Gaussian
+white noise with standard deviation σ = 0.1 being added to each surface pixel to give
+η
+the simulated data. The true subsurface mass density, and the corresponding surface
+gravitational field measurements used in this example are shown in Figure 4.
+Density Noisy Signal
+1.0 1.0 1.0 4.0
+0.9
+3.5
+0.8 0.8
+0.8
+3.0
+0.7
+0.6 0.6
+0.6 2.5
+0.4 0.5 0.4 2.0
+0.4
+1.5
+0.2 0.3 0.2
+1.0
+0.2
+0.0 0.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Figure 4. The true subsurface mass density field ϱ(x) (left panel), shown alongside
+the low resolution measurements of the gravitational field at the surface ζ(x) (right
+panel).
+For the inference task we model the subsurface density as a GRF with a Mat´ern
+3/2 covariance kernel,
+(cid:32) √ (cid:33) (cid:32) √ (cid:33)
+3∥x−x′∥ 3∥x−x′∥
+C(x,x′) = 1+ 2 exp − 2 , (49)
+ℓ ℓSequential Kalman Monte Carlo 21
+where ℓ is the correlation length scale. The subsurface density field is parameterized
+using a KL expansion of the R = 60 leading eigenmodes,
+R=60
+(cid:88) (cid:112)
+ϱ(x) = µ +σ λ ϕ (x)θ , (50)
+K K k k k
+k=1
+where µ and σ2 are the field mean and variance respectively, {λ }R=60 is a
+K K k k=1
+sequence of strictly decreasing, real and positive eigenvalues of the covariance kernel
+in Equation 49, ϕ (x) are the corresponding eigenfunctions of the covariance kernel
+k
+and {θ ∼ N(0,1)}R=60 are a set of standard Gaussian random variables. Defining
+k k=1
+θ = (θ ,...,θ )⊺, the full model for this example is given by
+1 60
+µ ∼ N(µ = 0,σ2 = 12), (51)
+K
+σ ∼ |N(µ = 0,σ2 = 0.22)|, (52)
+K
+θ ∼ N(0,I ), (53)
+60
+y ∼ N(F (µ ,σ ,θ),σ2I ) (54)
+ζ K K η 100
+where F (µ ,σ ,θ) denotes the full gravity survey forward model, mapping from
+ζ K K
+the subsurface mass density field to the low resolution surface measurements of the
+gravitational field y. When performing inference a log-transformation is applied to σ
+K
+such that all parameters are in an unconstrained space, with the target distribution
+being modified by the corresponding Jacobian.
+In Figures 5 and 6 we show the recovered estimates for ⟨b2⟩ and ⟨b2⟩ respectively,
+1 2
+with box plots again showing the variation over the 10 runs for each algorithm and
+ensemble size. The mean and standard deviation for ⟨b2⟩ and ⟨b2⟩, along with the
+1 2
+number of temperature levels used by each each algorithm over the 10 runs are reported
+in Table 2.
+Starting with SMC, we can see that the values for ⟨b2⟩ and ⟨b2⟩ are high and
+1 2
+largely independent of the ensemble size. In this case, SMC requires significantly more
+tpCN iterations at each temperature level in order to correctly distribute the particle
+ensemble after the importance resampling step. In comparison, SKMC is able to achieve
+a lower bias with the same computational budget being used at each temperature level,
+albeit not reaching the low bias threshold of ⟨b2⟩ < 10−2 with 10 tpCN iterations at
+g
+each temperature level. This indicates that the the particle ensemble obtained by the
+EKI update provides a better initialization and preconditioner for the tpCN updates
+compared to the importance resampled particle ensemble, achieving lower bias with
+fewer model evaluations.
+A similar pattern is again observed when comparing the NF-SKMC and NF-SMC
+algorithms. For larger ensemble sizes the NF is able to map the effective prior at
+each temperature level to a Gaussian latent space, where the target is approximately
+Gaussian. For the same computational budget at each temperature level, the NF
+preconditioning more rapidly distributes particles according to the given target, with
+the low bias threshold being reached for an ensemble size of J = 10d for the NF-SKMCSequential Kalman Monte Carlo 22
+algorithm. For smaller ensemble sizes, the NF is unable to learn useful non-Gaussian
+featuresinthegeometryoftheeffectiveprior, meaningwedonotobtainanimprovement
+from NF preconditioning. As with the heat equation, the ability of SKMC to more
+rapidly converge on the target at each temperature level is indicative of the utility of
+EKI as an MCMC initialization and preconditioner in regimes where learning effective
+NF maps is intractable.
+NF-SKMC NF-SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+SKMC SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+Figure 5. Final dimension averaged squared bias on the first moment for the gravity
+surveymodel,plottedagainsttheensemblesizeJ expressedasamultipleofthetarget
+dimension d.
+3.3. Reaction-Diffusion Equation
+We consider a reaction-diffusion system in one spatial dimension, where some quantity
+s(x,t) varies with time under the action of some source term u(x). This time evolution
+is described by a nonlinear reaction-diffusion equation of the form
+∂s(x,t) ∂2s(x,t)
+= D +γs2(x,t)+u(x), x ∈ Ω = [0,1], (55)
+∂t ∂x2
+where D = 0.1 is the diffusion constant and γ = 0.1 is the reaction rate. For
+this problem, we study the recovery of the source function u(x) from observations
+of s(x,t). To solve Equation 55 we use the implicit, second-order finite difference
+scheme implemented in [64]. We assume Dirichlet boundary conditions such that
+s(x,t) = 0,∀x ∈ ∂Ω, and the initial condition s(x,t = 0) = 0. The solution to Equation
+55 is evaluated on a 100×100 grid in (x,t), up to a final time t = 1.
+f
+2b
+2b
+1
+1Sequential Kalman Monte Carlo 23
+NF-SKMC NF-SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+SKMC SMC
+100 100
+10 1 10 1
+10 2 10 2
+10 3 10 3
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+Figure 6. Final dimension averaged squared bias on the second moment for the
+gravity survey model, plotted against the ensemble size J expressed as a multiple of
+the target dimension d.
+We parameterize the source term using the Hilbert space expansion of a Gaussian
+Process (GP) [65] with a squared exponential kernel,
+R
+(cid:88)(cid:104) (cid:16)(cid:112) (cid:17)(cid:105)1/2
+u(x) = µ + S λ ϕ (x)θ , (56)
+H Θ j j j
+j=1
+√
+where µ is the Hilbert space GP mean, S (ω) = α 2πℓ exp(−ℓ2 ω2/2) is the
+H Θ H H H
+squared exponential kernel spectral density function, Θ = (α ,ℓ ) denotes the kernel
+H H
+hyperparmeters i.e., the kernel variance α and length scale ℓ , {λ }∞ and {ϕ (x)}∞
+H H j j=1 j j=1
+are the eigenvalues and eigenfunctions of the Laplacian operator on some domain
+Ω = [−L,L] respectively, and θ ∼ N(0,1) are a set of standard Gaussian random
+L j
+variables. The eigenvalues and eigenfunctions of the Laplacian operator are given by
+(cid:18) jπ(cid:19)2
+λ = , (57)
+j
+2L
+(cid:114)
+1 (cid:16)(cid:112) (cid:17)
+ϕ (x) = sin λ (x+L) . (58)
+j j
+L
+Without loss of generality, we can evaluate u(x) on the symmetric interval [−0.5,0.5],
+choosing the domain for the Laplacian operator Ω = [−1,1] such that it contains the
+L
+full spatial domain of u(x) [65].
+2b
+2b
+2
+2Sequential Kalman Monte Carlo 24
+Algorithm J N ⟨b2⟩ ⟨b2⟩
+β 1 2
+NF-SKMC 10d 22.6±0.5 0.0098±0.0024 0.0089±0.0025
+NF-SKMC 8d 23.0±0.0 0.017±0.004 0.017±0.003
+NF-SKMC 6d 23.0±0.0 0.027±0.009 0.025±0.007
+NF-SKMC 4d 23.0±0.0 0.058±0.011 0.056±0.008
+NF-SKMC 2d 23.2±0.4 0.14±0.03 0.13±0.02
+SKMC 10d 23.1±0.3 0.024±0.005 0.022±0.004
+SKMC 8d 23.0±0.0 0.028±0.006 0.024±0.004
+SKMC 6d 23.2±0.4 0.032±0.009 0.027±0.008
+SKMC 4d 23.3±0.5 0.050±0.010 0.049±0.009
+SKMC 2d 23.4±0.5 0.17±0.03 0.16±0.02
+NF-SMC 10d 23.0±0.0 0.11±0.03 0.11±0.03
+NF-SMC 8d 23.8±0.4 0.17±0.05 0.19±0.05
+NF-SMC 6d 24.0±0.0 0.22±0.05 0.23±0.06
+NF-SMC 4d 24.1±0.3 0.22±0.07 0.21±0.07
+NF-SMC 2d 23.2±0.3 0.31±0.07 0.23±0.08
+SMC 10d 23.9±0.3 0.35±0.05 0.42±0.07
+SMC 8d 24.0±0.0 0.35±0.05 0.42±0.06
+SMC 6d 24.2±0.4 0.34±0.07 0.39±0.10
+SMC 4d 24.0±0.6 0.31±0.06 0.34±0.08
+SMC 2d 23.5±0.5 0.32±0.07 0.25±0.06
+Table 2. Results for the number of temperature levels used by each algorithm N
+β
+and squared bias results, ⟨b2⟩ and ⟨b2⟩, obtained with the final particle ensemble for
+1 2
+each algorithm, when performing inference on the gravity survey example. We report
+the mean and standard deviation for each statistic over the 10 algorithm runs, and
+showresultsforeachofthetestedensemblesizesJ. Thenumberofparallelizedmodel
+evaluations is given by 11N for each algorithm, with the total number of model
+β
+evaluations being given by 11JN .
+β
+To generate a simulated data set, we obtain a realisation of u(x) from Equation 56
+with µ = 0, α = 1 and ℓ = 0.1. We solve for s(x,t) subject to the corresponding
+H H H
+Dirichlet boundary conditions, up to a time t = 1 on the 100×100 grid in (x,t). The
+f
+field s(x,t) is then observed at 10 equally spaced spatial locations, at 10 equally spaced
+times, with Gaussian observation noise corresponding to a noise standard deviation of
+σ = 0.01. The true source function is shown in Figure 7, alongside the corresponding
+η
+solution for s(x,t) and the locations of the s(x,t) measurements.
+For the inference task here we consider recovering the first R = 50 terms in theSequential Kalman Monte Carlo 25
+Source function s(x,t) solution
+1.5 1.0
+0.30
+1.0
+0.8 0.25
+0.5
+0.20
+0.6
+0.0 0.15
+0.4
+0.5 0.10
+1.0 0.2 0.05
+1.5 0.00
+0.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+x t
+Figure 7. The true source term u(x) (left panel), shown alongside the corresponding
+solution for s(x,t) (right panel). White circles on the right panel denote the locations
+where measurements of s(x,t) were made.
+Hilbert space expansion. Denoting θ = (θ ,...,θ )⊺, the full model is given by
+1 50
+µ ∼ N(µ = 0,σ2 = 0.12), (59)
+H
+α ∼ |N(µ = 0,σ2 = 12)|, (60)
+H
+ℓ ∼ InverseGamma(α = 4,β = 0.3), (61)
+H
+θ ∼ N(0,I ), (62)
+50
+y ∼ N(F (µ ,α ,ℓ ,θ),σ2I ), (63)
+RD H H H η 100
+where F (µ ,α ,ℓ ,θ) denotes the full forward model, mapping from the source
+RD H H H
+functionu(x)tothes(x,t)observationsy. Whenrunningoursetofinferencealgorithms,
+we apply log-transformations to α and ℓ such that all parameters are mapped to an
+H H
+unconstrained space, making the corresponding Jacobian adjustments to the target.
+In Figures 8 and 9 we show the recovered estimates for ⟨b2⟩ and ⟨b2⟩ respectively,
+1 2
+with box plots showing the variation over the 10 runs for each algorithm and ensemble
+size. In Table 3 we report the mean and standard deviation for ⟨b2⟩ and ⟨b2⟩, along with
+1 2
+the mean and standard deviation on the number of temperature levels used by each
+algorithm over the 10 runs.
+Comparing SKMC with SMC, we can see that SKMC is able to achieve significantly
+lower bias with the final particle ensemble using the same computational budget at
+each temperature level. This again indicates the the SKMC update provides a better
+initialization and preconditioner for the subsequent tpCN iteration than the importance
+resampled ensemble in SMC. For this problem, we only obtain a small improvement in
+the final bias with NF preconditioning for larger ensemble sizes (J ≥ 6d). The target
+posterior for this problem is close to Gaussian, meaning the NF map does not introduce
+a latent space where the target geometry is such that sampling is significantly easier.
+In all cases for this example the final ensemble did not reach the low bias threshold
+(⟨b2⟩ < 0.01). To do so would require additional tpCN iterations at each temperature
+g
+level. An appropriate number of tpCN iterations could be selected using an adaptive
+scheme e.g., by monitoring the correlation between the initial particle ensemble and the
+)x(u
+xSequential Kalman Monte Carlo 26
+NF-SKMC NF-SMC
+10 1 10 1
+10 2 10 2
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+SKMC SMC
+10 1 10 1
+10 2 10 2
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+Figure8. Finaldimensionaveragedsquaredbiasonthefirstmomentforthereaction-
+diffusion model, plotted against the ensemble size J expressed as a multiple of the
+target dimension d.
+current particle ensemble at each temperature level. We leave a detailed analysis of fully
+adaptive variants of SKMC and NF-SKMC to future work, where we plan to implement
+the algorithms within the pocoMC sampling package [35, 54].
+4. Conclusions
+In this work we have considered the problem of performing Bayesian inference on inverse
+problems where the forward model is expensive to evaluate and we do not have access
+to derivatives of the forward model. In such a situation, standard sampling methods
+such as MCMC and SMC algorithms can quickly become intractable, requiring a large
+number of serial model evaluations to attain low bias estimates of posterior moments
+[16]. In contrast, EKI methods have been proposed that can rapidly converge on an
+ensemble approximation to the target posterior. However, these methods are derived on
+theassumptionthattheforwardmodelislinearandthatweprogressthroughasequence
+of Gaussian measures in moving from the prior to the posterior. Outside of this regime,
+the EKI ensemble is an uncontrolled approximation to the posterior. Whilst EKI often
+shows good empirical performance outside of the linear, Gaussian regime, particularly
+in optimizing for point estimates of model parameters, this is insufficient for many
+scientific inference tasks where we seek accurate uncertainty estimates and hence low
+bias estimates for higher order posterior moments.
+2b
+2b
+1
+1Sequential Kalman Monte Carlo 27
+NF-SKMC NF-SMC
+10 1 10 1
+10 2 10 2
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+SKMC SMC
+10 1 10 1
+10 2 10 2
+d d d d d d d d d d
+2 4 6 8 0 2 4 6 8 0
+= = = = 1 = = = = 1
+J J J J = J J J J =
+J J
+Figure 9. Final dimension averaged squared bias on the second moment for the
+reaction-diffusion model, plotted against the ensemble size J expressed as a multiple
+of the target dimension d.
+In this work, we proposed integrating EKI updates within an SMC framework,
+replacing the standard importance resampling step at each temperature level with
+an EKI update. This was designed to both correct for the assumptions inherent to
+EKI, and to accelerate SMC with the EKI target approximations. We considered
+two variants of the Sequential Kalman Monte Carlo (SKMC) algorithms, the standard
+SKMC algorithm, and the NF-SKMC algorithm detailed in Algorithm 1 where NF
+preconditioning is used to both relax the Gaussian ansatz of EKI and to improve the
+performance of the sampling iterations performed at each temperature level. For the
+sampling iterations we use the t-preconditioned Crank-Nicolson (tpCN) algorithm. The
+tpCN proposal kernel is reversible with respect to the multivariate t-distribution, which
+enables more efficient sampling of heavy tailed targets. When performing sampling in
+the NF latent space we have an effective double preconditioning, with the NF mapping
+the effective prior to a Gaussian latent space, and the tpCN proposal accounting for any
+residual tails in the annealed latent space target.
+WecomparedtheperformanceoftheSKMCandNF-SKMCsamplerswithstandard
+importance resampling SMC and NF-SMC, running each algorithm on three inverse
+problems. For the first problem we considered recovering some initial temperature
+field from low resolution measurements of the temperature field at some later time,
+evolving under the heat equation. In the second problem we studied the recovery of
+an underlying density field given surface measurements of the gravitational field, and
+2b
+2b
+2
+2Sequential Kalman Monte Carlo 28
+Algorithm J N ⟨b2⟩ ⟨b2⟩
+β 1 2
+NF-SKMC 10d 17.0±0.0 0.017±0.002 0.015±0.002
+NF-SKMC 8d 17.0±0.0 0.018±0.003 0.018±0.002
+NF-SKMC 6d 17.8±0.4 0.029±0.004 0.032±0.002
+NF-SKMC 4d 18.0±0.0 0.040±0.010 0.049±0.004
+NF-SKMC 2d 19.1±0.3 0.076±0.016 0.13±0.01
+SKMC 10d 17.0±0.0 0.020±0.003 0.016±0.002
+SKMC 8d 17.1±0.3 0.028±0.004 0.021±0.002
+SKMC 6d 17.6±0.5 0.033±0.007 0.032±0.004
+SKMC 4d 18.0±0.0 0.038±0.004 0.046±0.003
+SKMC 2d 19.0±0.4 0.072±0.013 0.12±0.007
+NF-SMC 10d 18.0±0.0 0.072±0.007 0.072±0.008
+NF-SMC 8d 18.6±0.5 0.084±0.010 0.093±0.015
+NF-SMC 6d 19.0±0.0 0.11±0.009 0.13±0.01
+NF-SMC 4d 19.8±0.4 0.14±0.02 0.18±0.03
+NF-SMC 2d 21.3±0.5 0.21±0.02 0.25±0.03
+SMC 10d 18.0±0.0 0.11±0.01 0.11±0.02
+SMC 8d 18.1±0.3 0.13±0.03 0.12±0.03
+SMC 6d 18.9±0.3 0.13±0.02 0.13±0.02
+SMC 4d 19.5±0.5 0.15±0.01 0.18±0.02
+SMC 2d 21.1±0.5 0.20±0.04 0.24±0.07
+Table 3. Results for the number of temperature levels used by each algorithm N
+β
+and squared bias results, ⟨b2⟩ and ⟨b2⟩, obtained with the final particle ensemble for
+1 2
+each algorithm, when performing inference on the reaction-diffusion example. We
+report the mean and standard deviation for each statistic over the 10 algorithm runs,
+and show results for each of the tested ensemble sizes J. The number of parallelized
+modelevaluationsisgivenby11N foreachalgorithm,withthetotalnumberofmodel
+β
+evaluations being given by 11JN .
+β
+in the third problem we inferred a source function driving a signal evolving under the
+reaction-diffusion equation.
+For all the numerical experiments, the SKMC and NF-SKMC samplers were able
+to attain a lower bias on estimates for the first and second posterior moments, compared
+to the SMC and NF-SMC samplers using the same computational budget at each
+temperaturelevel. ItisworthnotingthattheSKMCsamplerwasabletoachievealower
+bias than the NF-SMC sampler, demonstrating the ability of the EKI ensemble update
+to provide an effective initialization and preconditioner for the subsequent sampling
+steps. This is particularly promising for regimes where learning high fidelity NF maps
+becomes intractable e.g., moving beyond O(100) dimensions, or where one wishes to
+avoid the additional computational overhead from NF training.
+Fortheheatequationandgravitysurveyexamples, theNF-SKMCsamplerwasableSequential Kalman Monte Carlo 29
+to achieve noticeably lower bias for larger ensemble sizes, with the same computational
+budget at each temperature level (and approximately the same total computational
+budget given the small variations in the number of temperature levels used). For smaller
+ensemble sizes (J = 4d and J = 2d), there was not enough information for the NF to
+learn an effective map from the effective prior to a Gaussian latent space. For the
+reaction-diffusion example, the target posterior and intermediate target measures were
+close to Gaussian. Learning NF maps to a Gaussian latent space at each temperature
+level therefore did not significantly improve the final bias on estimates of the posterior
+moments. NF preconditioning is primarily useful for inverse problems where the cost of
+NF training (of order seconds in our examples), is insignificant compared to the cost of
+forward model evaluations and where one can afford ensemble sizes that are sufficiently
+large to learn nonlinear features in the target geometry.
+Several avenues exist for extending this work. In the first instance we plan
+to incorporate the SKMC and NF-SKMC samplers within the pocoMC sampling
+package [35, 54], which currently implements adaptive variants of SMC and NF-SMC. In
+tandem with this, we will explore fully adaptive variants of the SKMC and NF-SKMC
+algorithms, with the goal of reliably attaining low bias posterior representations through
+the final particle ensemble. For example, in our three examples using 10 tpCN iterations
+at each temperature level was often insufficient for reaching the low bias regime. It
+would therefore be useful to establish robust criteria for selecting the number of tpCN
+iterations at each temperature level. It would also be interesting to explore alternative
+NF architectures that are able to learn useful features in the target geometry with
+smaller ensemble sizes [39], and waste-free SMC methods that allow us to exploit the
+full sampling history in the SMC framework [34]. In this work we have only considered
+one variant of the EKI-type updates within SMC. It would be worth studying the
+performance of alternative ensemble updates e.g., deterministic square root inversion
+methods [14], Ensemble Adjustment Kalman Inversion, Ensemble Transform Kalman
+Inversion [16], etc. These deterministic updates have been shown to have superior
+empirical performance compared to the stochastic EKI update used in this work [16].
+In addition to studying the application of deterministic Kalman updates, it would be
+useful to consider extensions allowing for parameter dependent noise covariances [66]
+and general likelihoods [67].
+Acknowledgements
+This research was funded by NSFC (grant No. 12250410240) and the U.S. Department
+of Energy, Office of Science, Office of Advanced Scientific Computing Research under
+Contract No. DE-AC02-05CH11231 at Lawrence Berkeley National Laboratory to
+enable research for Data-intensive Machine Learning and Analysis, and by NSF grant
+number2311559. RDPGwassupportedbyaTsinghuaShuiMuFellowship. Theauthors
+thank Qijia Jiang and David Nabergoj for helpful discussions.Sequential Kalman Monte Carlo 30
+Appendix A. Proof of Lemma 2.1
+(cid:112)
+Proof. Considerthecurrentlocationxandtheproposallocationx′ = µ + 1−ρ2(x−
+√ s
+µ ) + ρ ZW, where Z−1 ∼ Gamma(k = 1(d + ν ),θ = 2/(ν + ⟨x,x⟩ )) and
+s 2 s s s
+W ∼ N(0,C ).
+s
+We have that
+(cid:115)
+(d+ν )Z
+s
+W ∼ t (0,C ). (A.1)
+ν +⟨x,x⟩
+d+νs s
+s s
+Using the change of variables formula, we obtain the proposal transition kernel for the
+tpCN algorithm as
+γ
+(cid:18)
+d+ν
+(cid:19)d/2
+K (x,dx′) = 1 s [1+
+t ρd ν +⟨x,x⟩
+s s
+(cid:112) (cid:105)−(2d+νs)/2
+(ρ2(ν +⟨x,x⟩ ))−1(⟨x′,x′⟩ +(1−ρ2)⟨x,x⟩ −2 1−ρ2⟨x,x′⟩ ) dx′,
+s s s s s
+(A.2)
+where γ is a normalizing constant. Considering the multivariate t-measure
+1
+(cid:20)
+⟨x,x⟩
+(cid:21)−(d+νs)/2
+s
+p (dx) = γ 1+ dx, (A.3)
+s 2
+ν
+s
+where γ is a normalizing constant, we have that
+2
+(cid:2)
+p (dx)K (x,dx′) = γ γ ν(d+νs)/2(d+ν )d/2ρd+νs ρ2ν +⟨x′,x′⟩ +⟨x,x⟩
+s t 1 2 s s s s s
+(cid:112) (cid:105)−(2d+νs)/2
+−2 1−ρ2⟨x,x′⟩ dxdx′ = p (dx′)K (x′,dx). (A.4)
+s s t
+The variables x and x′ are exchangeable in Equation A.4. Therefore the tpCN proposal
+transition kernel is reversible with respect to the multivariate t-distribution t (µ ,C ).
+νs s s
+The tpCN acceptance probability follows from the fact that for some general
+proposal kernel, K(x,dx′) with probability density function κ(x,x′), the Metropolis-
+Hastings (MH) acceptance probability is given by
+(cid:26) p(x′)κ(x′,x)(cid:27)
+α(x,x′) = min 1, . (A.5)
+p(x)κ(x,x′)
+From the reversibility expression in Equation A.4 we have that
+κ (x′,x) p (x) (1+⟨x,x⟩ /ν )−(d+νs)/2
+t s s s
+= = , (A.6)
+κ t(x,x′) p s(x′) (1+⟨x′,x′⟩ s/ν s)−(d+νs)/2
+which gives the MH acceptance probability in Equation 31.Sequential Kalman Monte Carlo 31
+Appendix B. Importance Resampling
+Given a set of samples and associated normalized importance weights {xi,w˜ (xi)}J ,
+n n n i=1
+where w˜ (xi) = w (xi)/(cid:80)J w (xk), we can apply a resampling algorithm to
+n n n n k=1 n n
+obtain a set of equal weight samples. A simple approach would be to apply
+multinomial resampling, where the duplication counts for each member of the
+ensemble {N1,...,NJ} are obtained by sampling from the multinomial distribution
+Mult(J;w˜ (x1),...,w˜ (xJ)). Whilst multinomial resampling is straightforward, lower
+n n n n
+variance methods are available [42]. In this work we use systematic resampling for all
+our importance resampling SMC benchmarks. The systematic resampling algorithm
+pseudocode is given in Algorithm 2.
+Algorithm 2 Systematic Resampling
+1: Input: Set of J samples and corresponding normalized importance weights
+{xi,w˜i}J .
+i=1
+2: Draw uniform random variable U ∼ Unif(0,1).
+3: Set Ui = U +(i−1)/J, i ∈ {1,...,J}.
+4: Set D = w˜0.
+w
+5: Set index counter k = 1
+6: for i = 1,...,J do
+7: while Ui > D do
+w
+8: k ← k +1
+9: D ← D +w˜k
+w w
+10: end while
+11: Set x˜ i = xk.
+12: end for
+13: Output: Equal weight particle ensemble {x˜i}J .
+i=1
+Appendix C. Sequential Monte Carlo Implementations
+In Algorithm 3 we give the pseudocode for the normalizing flow preconditioned SMC
+implementation, used as a benchmark for comparing the performance of the SKMC
+samplers. The SMC implementation without NF preconditioning follows the same
+structure as Algorithm 3, without the NF fits such that the tpCN iterations are
+performed in the original data space. Similarly to the SKMC samplers, we perform
+diminishing adaptation of the tpCN step size and reference measure mean at each
+temperature level.
+Appendix D. Field and Source Term Reconstructions
+In Figure D1 we show the true initial temperature field from the heat equation example
+in Section 3.1, alongside the reconstructed initial field from HMC samples, and the fieldSequential Kalman Monte Carlo 32
+Algorithm 3 Flow Preconditioned Sequential Monte Carlo
+1: Input: Set of J samples from the prior {xi ∼ π (x)}J , data y, observation
+0 0 i=1
+covariance Γ, target fractional ESS τ, number of tpCN iterations to perform at each
+temperature level M, initial tpCN step size ρ, target tpCN acceptance rate α⋆.
+2: Set β = 0 and iteration counter n = 0.
+0
+3: while β < 1 do
+n
+4: Solve for target inverse temperature β in Equation 19.
+n+1
+5: w (xi) ← π(y|xi)βn+1/π(y|xi)βn, i ∈ {1,...,J}.
+n n n n
+6: if β = 1 then
+n+1
+7: n∗ ← n+1
+8: end if
+9: Fit NF map, z = f (x) to current particle locations {xi}J .
+n n i=1
+10: Obtain latent space particle locations {zi = f (xi)}J .
+n n n i=1
+11: Resampleweightedparticles{zi,w (xi = f−1(zi))}usingsystematicresampling
+n n n n n
+to give equal weight ensemble {zi }J .
+n+1 i=1
+12: Fit the multivariate t-distribution, t (µ ,C ) to the latent space particle ensemble
+νs s s
+{zi }J with an EM algorithm.
+n+1 i=1
+13: for m = 1,...,M do
+14: for i = 1,...,J do
+(cid:16) (cid:17)
+15: Draw 1/Z mi ∼ Gamma (d+ 2νs), νs+⟨z n+2 1,z n+1⟩s , and Wi m ∼ N(0,C s).
+16: zi′ ← µ +(cid:112) 1−ρ2(zi −µ )+ρ(cid:112) Zi Wi
+n+1 s n+1 s m m
+17: Update particle with probability α(zi ,zi′ ), such that
+n+1 n+1
+(cid:40)
+zi′ with probabilityα(zi ,zi′ ),
+zi = n+1 n+1 n+1 (C.1)
+n+1 zi with probability1−α(zi ,zi′ ),
+n+1 n+1 n+1
+where α(zi ,zi′ ) is given by Equation 32.
+n+1 n+1
+18: end for
+19: logρ ← logρ+(⟨α⟩−α⋆)/m
+20: µ ← µ +(⟨z ⟩−µ )/m
+s s n+1 s
+21: end for
+22: Map particle ensemble back to the original data space {xi = f−1(zi )}J
+n+1 n n+1 i=1
+23: n ← n+1
+24: end while
+25: Output: Converged particle ensemble {xi }J .
+n∗ i=1Sequential Kalman Monte Carlo 33
+reconstructions obtained by evaluating the average over the final particle ensembles for
+each of the NF-SKMC, NF-SMC, SKMC and SMC algorithms, for a single random
+seed initialization with an ensemble size J = 10d. In Figure D2 we similarly show the
+true subsurface density field for the gravity survey example in Section 3.2, alongside
+the reconstructed subsurface density fields obtained with HMC samples and each of
+the NF-SKMC, NF-SMC, SKMC and SMC algorithms. In Figure D3 we show the
+true source function, u(x) for the reaction-diffusion example in Section 3.3, alongside
+posterior predictive samples for u(x) obtained using HMC and each of the NF-SKMC,
+NF-SMC, SKMC and SMC algorithms.
+For each of the examples considered in this work the qualitative reconstruction of
+the initial fields and source terms was largely comparable to the recovery with HMC,
+which is treated as the ground truth representation of the posterior. However, the
+ability of each method to obtain comparable field and source term recoveries does not
+fully reflect the ability of the various algorithms in accurately approximating marginal
+posteriormoments. Thisiscapturedbythesquared-biasstatisticsreportedinthiswork,
+which demonstrate the ability to of the SKMC samplers to obtain lower bias and hence
+better uncertainty quantification compared to importance-resampled SMC.
+True temperature field HMC reconstruction NF-SKMC reconstruction
+1.0 1.0 1.0
+2.0
+0.8 0.8 0.8
+1.5
+0.6 0.6 0.6
+0.4 0.4 0.4 1.0
+0.2 0.2 0.2
+0.5
+0.0 0.0 0.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+0.0
+NF-SMC reconstruction SKMC reconstruction SMC reconstruction
+1.0 1.0 1.0
+0.5
+0.8 0.8 0.8
+0.6 0.6 0.6 1.0
+0.4 0.4 0.4
+1.5
+0.2 0.2 0.2
+2.0
+0.0 0.0 0.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Figure D1. True initial temperature field u(x,t = 0) for the heat equation example
+(Section3.1), plottedalongsidetheinitialfieldreconstructionsobtainedusingsamples
+from HMC, which is treated as the target posterior predictive mean, and from the
+final particle ensembles of the NF-SKMC, NF-SMC, SKMC and SMC algorithms
+(where results are shown for an ensemble size J = 10d, and for a single random
+seed initialization).Sequential Kalman Monte Carlo 34
+True temperature field HMC reconstruction NF-SKMC reconstruction
+1.0 1.0 1.0
+1.0
+0.8 0.8 0.8
+0.6 0.6 0.6
+0.8
+0.4 0.4 0.4
+0.2 0.2 0.2
+0.6
+0.0 0.0 0.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+NF-SMC reconstruction SKMC reconstruction SMC reconstruction
+1.0 1.0 1.0
+0.4
+0.8 0.8 0.8
+0.6 0.6 0.6
+0.2
+0.4 0.4 0.4
+0.2 0.2 0.2
+0.0
+0.0 0.0 0.0
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+Figure D2. True subsurface mass density field ϱ(x) for the gravity survey example
+(Section3.2),plottedalongsidethedensityfieldreconstructionsobtainedusingsamples
+from HMC, which is treated as the target posterior predictive mean, and from the
+final particle ensembles of the NF-SKMC, NF-SMC, SKMC and SMC algorithms
+(where results are shown for an ensemble size J = 10d, and for a single random
+seed initialization).
+Appendix E. Flow Annealed Kalman Inversion and Ensemble Kalman
+Inversion Ablation
+In Figures E1, E2 and E3 we show corner plots of the recovered particle distributions
+from running EKI and FAKI on the heat equation, gravity survey and reaction-diffusion
+examples respectively. For all plots we also show the sample distributions from our
+reference HMC samples. We use an ensemble size of J = 10d throughout for EKI and
+FAKI, and show the particle distributions over the first 4 dimensions for illustrative
+purposes.
+Fromthesecornerplots, wecanimmediatelyseethattheparticledistributionsfrom
+EKIandFAKIarestronglyoffsetfromthereferenceHMCsampledistributions,meaning
+any posterior moment estimates obtained from EKI and FAKI will be highly biased. For
+our numerical examples, we break the core assumptions underlying EKI. This means
+that in moving from the prior to the first annealed target, the updated ensemble will not
+be correctly distributed according to the annealed target. When updating the particles
+for the next temperature level, we do not have the correct effective prior ensemble,
+meaning these errors will accumulate as we move from the prior to the posterior. For
+FAKI, we still have these problems, given that the NF maps do not address any errorsSequential Kalman Monte Carlo 35
+True source function HMC reconstruction NF-SKMC reconstruction
+2.0 2.0 2.0
+1.5 1.5 1.5
+1.0 1.0 1.0
+0.5 0.5 0.5
+0.0 0.0 0.0
+0.5 0.5 0.5
+1.0 1.0 1.0
+1.5 1.5 1.5
+Truth Truth
+2.0 Truth 2.0 Posterior Predictive 2.0 Posterior Predictive
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+x x x
+NF-SMC reconstruction SKMC reconstruction SMC reconstruction
+2.0 2.0 2.0
+1.5 1.5 1.5
+1.0 1.0 1.0
+0.5 0.5 0.5
+0.0 0.0 0.0
+0.5 0.5 0.5
+1.0 1.0 1.0
+1.5 1.5 1.5
+Truth Truth Truth
+2.0 Posterior Predictive 2.0 Posterior Predictive 2.0 Posterior Predictive
+0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0 0.0 0.2 0.4 0.6 0.8 1.0
+x x x
+Figure D3. True source function u(x) for the reaction-diffusion example (Section
+3.3), plotted alongside posterior predictive samples obtained with HMC, which are
+treated as true posterior predictive samples, and from the final particle ensembles of
+theNF-SKMC,NF-SMC,SKMCandSMCalgorithms(whereresultsareshownforan
+ensemblesizeJ =10d,andforasinglerandomseedinitialization). Foreachalgorithm
+weshow100posteriorpredictivesamples,withthedarkredlineshowingtheestimated
+posterior predictive mean in each case.
+arisingduetononlinearity. Iftheparticleensembleisnotcorrectlydistributedatagiven
+temperature level, the NF will not Gaussianize the correct effective prior, meaning we
+lose the additional benefits from mapping the particle ensemble to a Gaussian latent
+space at each iteration. These results all demonstrate the importance of using the
+sampling iterations in SMC to correct the EKI and FAKI updates in order to obtain
+reliable estimates for posterior moments.
+References
+[1] Kaipio J and Somersalo E 2005 Statistical and Computational Inverse Problems (Springer)
+[2] MacKayDJC2003Informationtheory,inference,andlearningalgorithms (CambridgeUniversity
+Press)
+[3] Lewis A and Bridle S 2002 Physical Review D 66 103511
+[4] Blas D, Lesgourgues J and Tram T 2011 Journal of Cosmology and Astroparticle Physics 2011
+034
+[5] JasakH,JemcovAandTukovicZ2007Openfoam: Ac++libraryforcomplexphysicssimulations
+International workshop on coupled methods in numerical dynamics, volume 1000, pages 1–20.
+IUC Dubrovnik Croatia
+)x(u
+)x(u
+)x(u
+)x(u
+)x(u
+)x(uSequential Kalman Monte Carlo 36
+Labels Labels
+0.2 HMC 0.2 HMC
+0.0 EKI 0.0 FAKI
+0.2 0.2
+0.4
+2 2
+1 1
+0
+0
+1
+0 0
+1 1
+2 2
+3 3
+4 4
+10 5 0 0.4 0.2 0.0 0.2 0 2 4 2 0 10.07.55.02.50.0 0.2 0.0 0.2 0 1 2 4 3 2 1 0
+logD k log K 1 logD log 1
+FigureE1. Cornerplotsshowingthefinalparticleensembleforthefirst5dimensions,
+obtained using EKI (left panel) and FAKI (right panel), plotted alongside reference
+HMC samples for the heat equation example.
+Labels 1.0 Labels
+0 HMC 0.5 HMC
+1 EKI 0.0 FAKI
+0.5
+2 1.0
+3 1.5
+4
+4
+2 2
+0
+2 0
+4 2
+0.0
+0.2
+0.2
+0.4
+0.6 0.4
+0.8
+1.0 0.6
+0.0 0.5 1.0 1.5 2 0 5 0 5 1.0 0.5 0.0 0.0 0.5 1.0 1 0 1 2 0 2 4 0.6 0.4 0.2 0.0
+log 1 2 log 1 2
+FigureE2. Cornerplotsshowingthefinalparticleensembleforthefirst4dimensions,
+obtained using EKI (left panel) and FAKI (right panel), plotted alongside reference
+HMC samples for the gravity survey example.
+[6] Tan Z, Kaul C M, Pressel K G, Cohen Y, Schneider T and Teixeira J 2018 Journal of Advances
+in Modeling Earth Systems 10 770–800
+[7] Iglesias M A, Law K J and Stuart A M 2013 Inverse Problems 29 045001
+[8] Iglesias M A 2016 Inverse Problems 32 025002
+[9] Iglesias M, Park M and Tretyakov M 2018 Inverse Problems 34 105002
+[10] Chada N K, Iglesias M A, Roininen L and Stuart A M 2018 Inverse Problems 34 055009
+[11] Kovachki N B and Stuart A M 2019 Inverse Problems 35 095005
+[12] Chada N K, Stuart A M and Tong X T 2020 SIAM Journal on Numerical Analysis 58 1263–1294
+[13] Iglesias M and Yang Y 2021 Inverse Problems 37 025008
+[14] Ding Z, Li Q and Lu J 2021 Foundations of Data Science 3 371–411
+[15] Huang D Z, Schneider T and Stuart A M 2022 Journal of Computational Physics 463 111262
+[16] Huang D Z, Huang J, Reich S and Stuart A M 2022 Inverse Problems 38 125006
+k
+K gol
+1
+gol
+1
+2
+gol
+2
+gol
+1
+1Sequential Kalman Monte Carlo 37
+2 Labels 2 Labels
+HMC HMC 1 EKI 0 FAKI 0
+1 2
+2
+1 1
+2 2
+3
+3
+4
+4
+2 2
+0 0
+2 2
+0.2 0.0 0.2 2 0 2 4 3 2 1 2 0 2 0.2 0.0 0.2 2 0 2 4 3 2 1 2 0 2
+H log H H 1 H log H H 1
+FigureE3. Cornerplotsshowingthefinalparticleensembleforthefirst4dimensions,
+obtained using EKI (left panel) and FAKI (right panel), plotted alongside reference
+HMC samples for the reaction-diffusion example.
+[17] Chada N and Tong X 2022 Mathematics of Computation 91 1247–1280
+[18] GrumittRDP,KaramanisMandSeljakU2024Flowannealedkalmaninversionforgradient-free
+inference in bayesian inverse problems Physical Sciences Forum vol 9 (MDPI) p 21
+[19] Geyer C J 1992 Statistical Science 7 473–483 ISSN 08834237
+[20] Gelman A, Gilks W R and Roberts G O 1997 The Annals of Applied Probability 7 110 – 120
+[21] Neal R M et al. 2011 Handbook of Markov Chain Monte Carlo 2 2
+[22] Cotter S L, Roberts G O, Stuart A M and White D 2013 Statistical Science 28 424 – 446
+[23] Vrugt J, ter Braak C, Diks C, Robinson B, Hyman J and Higdon D 2009 International Journal of
+Nonlinear Sciences and Numerical Simulation 10 273–290 ISSN 1565-1339
+[24] Foreman-Mackey D, Hogg D W, Lang D and Goodman J 2013 Publications of the Astronomical
+Society of the Pacific 125 306
+[25] Leimkuhler B, Matthews C and Weare J 2018 Statistics and Computing 28 277–290
+[26] Garbuno-Inigo A, Hoffmann F, Li W and Stuart A M 2020 SIAM Journal on Applied Dynamical
+Systems 19 412–441
+[27] Karamanis M and Beutler F 2021 Statistics and Computing 31 1–18
+[28] Grumitt R D P, Dai B and Seljak U 2022 Advances in Neural Information Processing Systems 35
+11629–11641
+[29] Evensen G 2006 Data Assimilation: The Ensemble Kalman Filter (Berlin, Heidelberg: Springer-
+Verlag) ISBN 354038300X
+[30] Evensen G 2009 IEEE Control Systems Magazine 29 83–104
+[31] Schillings C and Stuart A M 2017 SIAM Journal on Numerical Analysis 55 1264–1290
+[32] Del Moral P, Doucet A and Jasra A 2006 Journal of the Royal Statistical Society Series B:
+Statistical Methodology 68 411–436 ISSN 1369-7412
+[33] Wu J, Wen L, Green P L, Li J and Maskell S 2022 Statistics and Computing 32 20
+[34] Dau H D and Chopin N 2022 Journal of the Royal Statistical Society Series B: Statistical
+Methodology 84 114–148
+[35] Karamanis M, Beutler F, Peacock J A, Nabergoj D and Seljak U 2022 Monthly Notices of the
+Royal Astronomical Society 516 1644–1653
+[36] Dinh L, Sohl-Dickstein J and Bengio S 2017 Density estimation using real NVP 5th International
+Conference on Learning Representations, ICLR 2017, Toulon, France, April 24-26, 2017,
+Conference Track Proceedings (OpenReview.net)
+H gol
+H
+1
+H gol
+H
+1Sequential Kalman Monte Carlo 38
+[37] Papamakarios G, Murray I and Pavlakou T 2017 Masked autoregressive flow for density
+estimation Advances in Neural Information Processing Systems 30: Annual Conference on
+Neural Information Processing Systems 2017, December 4-9, 2017, Long Beach, CA, USA ed
+Guyon I, von Luxburg U, Bengio S, Wallach H M, Fergus R, Vishwanathan S V N and Garnett
+R pp 2338–2347
+[38] KingmaDPandDhariwalP2018Glow: Generativeflowwithinvertible1x1convolutionsAdvances
+in Neural Information Processing Systems 31: Annual Conference on Neural Information
+Processing Systems 2018, NeurIPS 2018, December 3-8, 2018, Montr´eal, Canada ed Bengio
+S, Wallach H M, Larochelle H, Grauman K, Cesa-Bianchi N and Garnett R pp 10236–10245
+[39] Dai B and Seljak U 2021 Sliced iterative normalizing flows Proceedings of the 38th International
+Conference on Machine Learning, ICML 2021, 18-24 July 2021, Virtual Event (Proceedings of
+Machine Learning Research vol 139) ed Meila M and Zhang T (PMLR) pp 2352–2364
+[40] Mandel J, Cobb L and Beezley J D 2011 Applications of Mathematics 56 533–541
+[41] Chopin N 2002 Biometrika 89 539–551 ISSN 00063444
+[42] Douc R and Capp´e O 2005 Comparison of resampling schemes for particle filtering ISPA 2005.
+Proceedings of the 4th International Symposium on Image and Signal Processing and Analysis,
+2005. (Ieee) pp 64–69
+[43] Zhang J, Vrugt J A, Shi X, Lin G, Wu L and Zeng L 2020 Water Resources Research 56
+e2019WR025474 e2019WR025474 10.1029/2019WR025474
+[44] Drovandi C, Everitt R G, Golightly A and Prangle D 2022 Bayesian Analysis 17 223–260
+[45] De Simon L, Iglesias M, Jones B and Wood C 2018 Energy and Buildings 177 220–245
+[46] MORAL P D, DOUCET A and JASRA A 2012 Bernoulli 18 252–278 ISSN 13507265
+[47] Beskos A, Jasra A, Kantas N and Thiery A 2016 The Annals of Applied Probability 26 1111–1146
+ISSN 10505164
+[48] Durkan C, Bekasov A, Murray I and Papamakarios G 2019 Advances in neural information
+processing systems 32
+[49] Gabri´e M, Rotskoff G M and Vanden-Eijnden E 2022 Proceedings of the National Academy of
+Sciences 119 e2109420119
+[50] Wong K W K, Gabri´e M and Foreman-Mackey D 2022 arXiv e-prints arXiv:2211.06397 (Preprint
+2211.06397)
+[51] Roberts G O and Rosenthal J S 2001 Statistical Science 16 351 – 367
+[52] Beskos A, Pillai N, Roberts G, Sanz-Serna J M and Stuart A 2013 Bernoulli 19 1501–1534 ISSN
+13507265
+[53] Hoffman M, Sountsov P, Dillon J V, Langmore I, Tran D and Vasudevan S 2019 arXiv e-prints
+arXiv:1903.03704 (Preprint 1903.03704)
+[54] Karamanis M, Nabergoj D, Beutler F, Peacock J and Seljak U 2022 The Journal of Open Source
+Software 7 4634 (Preprint 2207.05660)
+[55] Kamatani K 2018 Bernoulli 24 3711 – 3750
+[56] Hairer M, Stuart A M and Vollmer S J 2014 The Annals of Applied Probability 24 2455 – 2490
+[57] Meng X L and van Dyk D A 1997 Journal of the Royal Statistical Society: Series B (Statistical
+Methodology) 59
+[58] Roberts G O and Rosenthal J S 2007 Journal of Applied Probability 44 458–475 ISSN 00219002
+[59] Hoffman M D and Sountsov P 2022 Tuning-free generalized hamiltonian monte carlo Proceedings
+of The 25th International Conference on Artificial Intelligence and Statistics (Proceedings of
+Machine Learning Research vol 151) ed Camps-Valls G, Ruiz F J R and Valera I (PMLR) pp
+7799–7813
+[60] Phan D, Pradhan N and Jankowiak M 2019 arXiv preprint arXiv:1912.11554
+[61] Bingham E, Chen J P, Jankowiak M, Obermeyer F, Pradhan N, Karaletsos T, Singh R, Szerlip
+P A, Horsfall P and Goodman N D 2019 J. Mach. Learn. Res. 20 28:1–28:6
+[62] Anderson D, Tannehill J C, Pletcher R H, Munipalli R, and Shankar V 2020 Computational Fluid
+Mechanics and Heat Transfer (4th ed.) (CRC Press)Sequential Kalman Monte Carlo 39
+[63] Lykkegaard M B, Dodwell T J, Fox C, Mingas G and Scheichl R 2023 SIAM/ASA Journal on
+Uncertainty Quantification 11 1–30
+[64] Wang S, Wang H and Perdikaris P 2021 Science advances 7 eabi8605
+[65] Riutort-Mayol G, Bu¨rkner P C, Andersen M R, Solin A and Vehtari A 2023 Statistics and
+Computing 33 17
+[66] Botha I, Adams M P, Frazier D, Tran D K, Bennett F R and Drovandi C 2023 Inverse Problems
+39 125014
+[67] Duffield S and Singh S S 2022 Statistics & Probability Letters 187 109523

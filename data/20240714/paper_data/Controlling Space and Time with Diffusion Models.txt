@@ -1,0 +1,706 @@
+Controlling Space and Time with Diffusion Models
+DanielWatson* SaurabhSaxena* LalaLi* AndreaTagliasacchi DavidJ.Fleet
+GoogleDeepMind
+Abstract
+Wepresent4DiM,acascadeddiffusionmodelfor4Dnovelviewsynthesis(NVS),
+conditionedononeormoreimagesofageneralscene,andasetofcameraposes
+andtimestamps. Toovercomechallengesduetolimitedavailabilityof4Dtraining
+data,weadvocatejointtrainingon3D(withcamerapose),4D(pose+time)and
+video (time but no pose) data and propose a new architecture that enables the
+same. We further advocate the calibration of SfM posed data using monocular
+metricdepthestimatorsformetricscalecameracontrol. Formodelevaluation,we
+introducenewmetricstoenrichandovercomeshortcomingsofcurrentevaluation
+schemes,demonstratingstate-of-the-artresultsinbothfidelityandposecontrol
+comparedtoexistingdiffusionmodelsfor3DNVS,whileatthesametimeadding
+theabilitytohandletemporaldynamics. 4DiMisalsousedforimprovedpanorama
+stitching,pose-conditionedvideotovideotranslation,andseveralothertasks.
+Input 360◦rotation
+Input Circularpan
+Input1 Input2 Extrapolatetimeforward(wavesapproaching)
+Extrapolatetimebackward(wavesreceding)
+Figure 1: Zero-shot samples from 4DiM on LLFF [Mildenhall et al., 2019] and an inter-
+nal video dataset given one or two input images. We show samples on different camera
+and time trajectories. 4DiM is a 32-frame model, so here we evenly sub-sample outputs.
+Samplesarebestviewedasvideoinourwebsite: https://4d-diffusion.github.io
+Preprint.Underreview.
+4202
+luJ
+01
+]VC.sc[
+1v06870.7042:viXra1 Introduction
+Novelviewsynthesis(NVS)and3Dgenerativemodelshaveemergedasanewfrontieringenerative
+models,enablingthesynthesisofnovelviewsof3Dobjectsandsceneswithcontrolovercamerapose.
+Thesemodelscomplimenttext-to-image/videomodels,withpotentialusesinthegenerationof3D
+assets,augmentedreality,syntheticdataformodeltraining(e.g.,inrobotics),andviewinterpolation.
+Notablerecentexamplesusingdiffusionmodelsinclude3DiM[Watsonetal.,2022]andZero-1-to-
+3[Liuetal.,2023b]. Theydonotdogenerateexplicit3Dscenes,rather,theyleverageimplicit3D
+knowledgeforconditionalviewgeneration,asaformofimage+poseconditionedimagegeneration.
+Todate,thesemodelshavefocusedmainlyonobjectswithblankbackgrounds,ratherthangeneric
+naturalscenes,andonlimitedcameraposes,likethoseoverthesurfaceoftheview-spherefixated
+on objects centered at the origin. While recent work [Wang et al., 2023a, Yu et al., 2023a] has
+attemptedtotrainmodelsforgenericscenesand3Dviewpoints,zero-shotperformanceonoutof
+distributionscenesremainsfraught. Thebiggestchallengeisthat3Dscenedataisscarce. Muchof
+theexistingdataalsoreliesonCOLMAP[SchönbergerandFrahm,2016,Schönbergeretal.,2016]
+fortheestimationofcamerapose,yieldingnoisyposeswithunknownscale. Thisisadditionally
+problematicforeffectivecontrolinthesingle-imageto3Dtaskbecausemodelsmustsamplefrom
+thedistributionofplausiblescalesatinferencetime.
+ThegoalofthisworkistoextendNVSdiffusionmodelsinthreerespects: 1)fromobjectstoscenes;
+2)tofree-formcameraposesspecifiedinmeaningfulphysicalunits;and3)tosimultaneouslyallow
+spatialandtemporalcontrolviacameraposeandtimestampconditioning. Tothisend,weintroduce
+4DiM,adiffusionmodelforNVSconditionedon(oneormore)imagesofarbitraryscenes,camera
+pose,andtime. 4DiMistrainedonamixtureofdatasources,includingposed3Dimages/videoand
+unposedvideo,ofbothindoorandoutdoorscenes. Wemakethispossiblethroughvarioustechnical
+innovationsthatenabletrainingfrommissingdata(e.g.,imageswithoutposeortimeannotations)and
+samplingwithseparateguidanceweightsondifferentconditioningimages,posesortimes. Wealso
+introducecalibratedversionsofvideodatasetsposedviaCOLMAP.Calibrateddatamakesiteasierto
+learnmetricregularitiesintheworld,likethetypicalsizesofeverydayobjectsandspatialrelations,
+anditenablesonetospecifycameraposesinmeaningfulphysicalunits. Assuch,4DiMgenerates
+3Dconsistent,multi-viewimagesorvideoofdynamicscenes. Beyondsamplegeneration4DiMcan
+beusedtounlockmyriadapplications,likevideo-to-videotranslation,improvedpanoramicstitching,
+ortrainingexplicit3Dmodelswithscore-distillationsampling[Pooleetal.,2022].
+Tosummarize,ourmaincontributionsinclude:
+• 4DiM,apixel-baseddiffusionmodelfornovelviewsynthesisconditionedononeormoreimages
+of arbitrary scenes, camera pose, and time. 4DiM comprises a base model that generates 32
+imagesat64×64,andamulti-viewsuperresolutionmodelthatup-samplesto32×256×256;
+• An effective data mixture for 4D models comprising posed and unposed video of indoor and
+outdoorscenes,enablingzero-shotapplicationwithfine-grainedposecontrolanddynamics;
+• Novel architectural elements to facilitate time and pose conditioning as well as training with
+incompletedata,andmulti-guidancetosimultaneouslyguideoncameraposeandtimestamps;
+• ACalibratedversionofRealEstate10Ktoimprovemodelfidelityandenablemetricposecontrol;
+• Extensiveevaluationandcomparisonstopriorwork,includingnovelSfM-basedmetrics,namely,
+SfMdistancesandkeypointdistancetobetterquantifyposealignmentanddynamics.
+2 Relatedwork
+Wenextprovideabriefoverviewofpriorworkoncameracontroland3DNVSwithdiffusionmodels.
+Wealsobrieflydiscusssomerecentworkon3Dextractionusinggeometry-awaremethods,which
+hasemergedasanareaofkeyinteresttotheresearchcommunity. Here,theuseofgeometry-free
+pose-conditionaldiffusionmodels(like4DiM)hasbeenthekeybuildingblock.
+UnlikethetypicalsettingofNeuralRadianceFields[Mildenhalletal.,2021](NeRF)wheretens-to-
+hundredsofimagesareusedasinputfor3Dreconstruction,pose-conditionaldiffusionmodelsfor
+NVSaimtoextrapolateplausible,diverse,3Dconsistentsampleswithasfewasasingleimageinput.
+ConditioningdiffusionmodelsonanimageandrelativecameraposewasintroducedbyWatsonetal.
+[2022]andLiuetal.[2023b]asaneffectivealternativetopriorfew-viewNVSmethods,overcoming
+severeblurandfloaterartifacts[Sitzmannetal.,2019,Yuetal.,2021,Niemeyeretal.,2022,Sajjadi
+etal.,2022].However,theyrelyonneuralarchitecturesunsuitableforjointlymodelingmorethantwo
+2views,andconsequentlyrequireheuristicssuchasstochasticconditioningorMarkoviansampling
+withalimitedcontextwindow[Yuetal.,2023a],forwhichitishardtomaintain3Dconsistency.
+Subsequentworkproposedattentionmechanismsleveragingepipolargeometrytoimprovethe3D
+consistencyofimage-to-imagediffusionmodelsforNVS[Tsengetal.,2023],andmorerecently,fine-
+tuningtext-to-videomodelswithtemporalattentionlayersorattentionlayerslimitedtooverlapping
+regions[Heetal.,2024,Wangetal.,2023a]tomodelthejointdistributionofgeneratedviewsand
+theircameraextrinsics. Thesemodelshoweverstillsufferfromseveralissues: theyhavedifficulty
+with static scenes due to persistent dynamics from the underlying video models; they still suffer
+from3Dinconsistenciesandlowfidelity;andtheyexhibitpoorgeneralizationtoout-of-distribution
+imageinputs. Alternativeshavebeenproposedtoimprovefidelityinmulti-viewdiffusionmodelsof
+3Dscenes,albeitsacrificingtheabilitytomodelfree-formcamerapose;e.g.,seeMVDiffusionand
+follow-ups[Tangetal.,2023,2024]wherethedatadistributionislimitedinitsposetrajectories.
+Aconcurrenttrajectoryofcloselyrelatedworkon3Dextractionhasrecentlyemergedfollowing
+DreamFusion[Pooleetal.,2022],whereinsteadofdirectlytrainingdiffusionmodelsforNVS,new
+techniquesforsamplingviewsparametrizedasaNeRFwithvolumerenderingareproposedsuch
+asScoreDistillationSampling(SDS)andVariationalScoreDistillation[Wangetal.,2024](VSD).
+Here,apre-existingdiffusionmodelactsasapriorthatdrivesthegenerationprocess. Thisenables,
+forexample,text-to-3Dusingatext-to-imagediffusionmodel. AsdemonstratedbyMVDream[Shi
+etal.,2023],ReconFusion[Wuetal.,2023]andCAT3D[Gao*etal.,2024],usingapose-conditional
+diffusionmodelofferstheuniqueadvantagethatthediffusionmodelcanproducesamplesatthe
+exactviewpointspecifiedforvolumerenderingduringscoredistillationorNeRFpostprocessing,
+whichresultsindramaticallyimprovedsamplequality. Alloftheseworksestablishfurtherinterest
+onimprovingpose-conditionaldiffusionmodels,whichisthefocusofourwork,therebyenabling
+improvementsin3Dextractionmethodsthatbuilduponsuchmodels.
+3 4Dnovelviewsynthesismodelsfromlimiteddata
+4DiMusesacontinuous-timediffusionmodeltolearnthejointdistributionovermultipleviews:
+p(x |x , p , t ) (1)
+C+1:N 1:C 1:N 1:N
+where x are generated images, x are conditioning images, p are relative camera
+C+1:N 1:C 1:N
+poses (extrinsics and intrinsics) and t are scalar, relative timestamps.1 Following Ho et al.
+1:N
+[2020],wechooseourlossfunctiontobetheerrorbetweenthepredictedandactualnoise(L in
+simple
+theirpaper),thoughweusetheL1ratherthanL2norm,because,likepriorwork[Sahariaetal.,2022a,
+Saxenaetal.,2023],wefoundthatitimprovessamplequality.Ourmodelsusethe“v-parametrization”
+[SalimansandHo,2022],whichhelpsstabilizetraining,andweadoptthenoiseschedulesproposed
+byKingmaetal.[2021]. OurcurrentmodelsprocessN =8or32imagesatresolution256×256
+(N isthenumberofconditioningplusgeneratedframes). Tothisend,wedecomposethetaskinto
+twomodelssimilartopriorwork[Hoetal.,2022a,b];wefirstgenerateimagesat64×64,andthen
+up-sampleusinga4×super-resolutionmodeltrainedwithnoiseconditioningaugmentation[Saharia
+etal.,2022c]. Wealsofinetunedthe32-framemodeltoconditionon2and8framestoenablemore
+comparisonsandexampleapplicationsof4DiMmodels.
+Training data. While 3D assets, multi-view image data, and 4D data are limited, video data is
+availableatscaleandcontainsrichinformationaboutthe3Dworld,despitenothavingcameraposes.
+Oneofourkeypropositionsisthustotrain4DiMonalarge-scaledatasetof30Mvideoswithoutpose
+annotations,jointlywith3Dand4Ddata. AsshowninSection5.1,videoplaysakeyroleinhelping
+toregularizethemodel. The3Ddatasetsusedtotrain4DiMincludeScanNet++[Yeshwanthetal.,
+2023]andMatterport3D[Changetal.,2017],whichhavemetricscale,andmorefree-formcamera
+posescomparedtoothercommon3Ddatasetsintheliterature(e.g.,CO3D[Reizensteinetal.,2021]
+andMVImgNet[Yuetal.,2023b]). Wealsouse1000scenesfromStreetViewwithpermissionfrom
+Google,comprisingposedpanoramaswithtimestamps(i.e.,itisa“4D”dataset). Duringtraining,we
+randomlysampleviewsfromStreetViewfromthesetofpanoramaimageswithinK consecutive
+timesteps(K=5forour8-viewmodels,andK=20for32-viewmodels). Wesampleunposedvideos
+14DiMdoesnotrequiresequentialtemporalorderingasinvideomodelsasthearchitectureispermutation-
+equivariantoverframes.AllN images(conditioningandgenerated)areprocessedbythediffusionmodel.
+3Figure 2: Architecture – We illustrate the 4DiM base model architecture, including choices for
+attentionblocksandourconditioningmechanism.The4DiMsuper-resolutionmodelfollowsthesame
+choicesmodulominordifferencestoconditiononlow-resolutionimages. Outputscorrespondingto
+theconditioningframesarealwaysdiscardedfromthetrainingobjective.
+withprobability0.3andviewsfromposeddatasetsotherwise. 3Ddatasetsaresampledinproportion
+tothenumberofscenesineachdataset.
+CalibratedRealEstate10K.Oneparticularlyrichdatasetfortraining3DmodelsisRealEstate10K
+[Zhouetal.,2018](RE10K).Itcomprises10,000videosegmentsofstaticscenesforwhichSfM
+[Schönberger and Frahm, 2016] has been used to infer per-frame camera pose, but only up to
+an unknown length scale. The lack of metric scale makes training more difficult because metric
+regularitiesoftheworldarelost,anditbecomesmoredifficultforuserstospecifythetargetcamera
+posesorcameramotionsinanyintuitiveunits. Thisisespeciallyproblematicwhenconditioningona
+singleimage,wherescaleitselfotherwisebecomesambiguous. Wethereforecreatedacalibrated
+versionofRealEstate10Kbyregressingtheunknownmetricscalefromamonoculardepthestimation
+model [Saxena et al., 2023]. (For details, see Supplementary Material A.) The resulting dataset,
+cRE10K,hasamajorimpactonmodelperformance(seeSection4below). Wefollowthesame
+proceduretocalibratetheLLFFdataset[Mildenhalletal.,2019]forevaluationpurposes.
+Architecture. Relativelylittletrainingdatahasbothtimeandcameraposeannotations;most3Ddata
+representstaticscenes,whilevideodatararelyincludecamerapose. Findingawaytoeffectively
+conditiononbothcameraposeandtimeinawaythatallowsforincompletetrainingdataisessential.
+Wethusproposetochain“MaskedFiLM”layers[Dumoulinetal.,2018]for(positionalencodingsof)
+diffusionnoiselevels,per-pixelrayoriginsanddirections,andvideotimestamps. Whenanyofthese
+conditioningsignalsismissing(duetoincompletetrainingdataorrandomdropoutforclassifier-free
+guidance[HoandSalimans,2022]),theFiLMlayersaredesignedtoreducetotheidentityfunction,
+ratherthansimplysettingmissingvaluestozero.Thisavoidsthenetworkfromconfusingatimestamp
+ofzerowithdroppedormissingdata. Inpractice,wereplacetheFiLMshiftwithzerosandscale
+withones. WeillustratetheoverallchoicesinFig.2. (FordetailsseeSupplementaryMaterialB.)
+Sampling. Steering4DiMwiththecorrectsamplinghyperparametersisessential,especiallythe
+guidanceweightsforclassifier-freeguidance[HoandSalimans,2022](CFG).Initsusualformulation,
+CFGtreatsallconditioningvariablesas“onebigvariable”. Inpractice,placingadifferentweighton
+eachvariableisimportant;e.g.,textrequireshighguidanceweights,buthighguidanceweightson
+imagescanquicklyleadtounwantedartifacts. Wethusproposemulti-guidance,wherewegeneralize
+CFGtodoexactlythis,withoutmakingindependenceassumptionsbetweenconditioningvariables.
+Westartfromaclassifier-guidedformulation[DhariwalandNichol,2021],wherewewishtosample
+withkconditioningsignals,v ,v ,...v ,usingthescore
+1 2 k
+(cid:88)
+∇ logp(x) + w ∇ logp(v |x) + w ∇ logp(v |v ,x). (2)
+x 1 x 1 j x j 1:j−1
+j=2...k
+Intheclassifier-freeformulation,thisisequivalentto
+(cid:88)
+(1−w )∇ logp(x) + (w −w )∇ logp(x|v ) + w ∇ logp(x|v ).
+1 x j−1 j x 1:j−1 k x 1:k (3)
+j=2...k
+4Ifwetrainourmodelsuchthatitdropsoutonlyv ,orv andv ,... ,orallofv ,wecansample
+k k−1 k 1:k
+withdifferentguidanceweightsw oneachconditioningvariablev . 4DiMistrainedtodropout
+i i
+conditioningsignalswithprobability0.1,anditdropseithert ,t andp ,oralloft ,p
+1:N 1:N 1:N 1:N 1:N
+andx . Thisisanaturalchoice,sinceposesandtimestampswithoutcorrespondingconditioning
+1:C
+images do not convey useful information. For best results, 4DiM uses a guidance weight 2.0 on
+conditioningimages,aweightof4.0oncameraposes,and1.0fortimestamps.
+4 Evaluation
+Evaluating4Dgenerativemodelsischallenging. Typically,methodsforNVSareevaluatedusing
+generationquality. Inaddition,forpose-conditionedgenerationitisdesirabletofindmetricsthat
+capture 3D consistency (rendered views should be grounded in a consistent 3D scene) and pose
+alignment(thecamerashouldmoveasexpected). Furthermore,evaluatingtemporalconditioning
+requiressomemeasurethatcapturesthemotionofdynamiccontent. Weleverageseveralexisting
+metricsandproposenewonestocoveralltheseaspects. Belowwecovereachoneindetail.
+ImageandVideofidelity. FID[Heuseletal.,2017]isakeymetricforimagequality,butifusedin
+isolationitcanbeuninformativeandapoorobjectiveforhyper-parameterselection. Forexample,
+Sahariaetal.[2022b]foundthatFIDscoresfortext-to-imagemodelsareoptimalwithlowCFG
+weights[HoandSalimans,2022],buttext-imagealignmentsuffersunderhissetting. Inwhatfollows
+wereportFIDaswellastheimprovedFrechetdistancewithDINOv2features(FDD)[Oquabetal.,
+2023],whichappearstocorrelatewithhumanjudgementsbetterthanInceptionV3features[Szegedy
+etal.,2016]. Forvideoquality,wealsoreportFVDscores[Unterthineretal.,2018].
+3Dconsistency.TheworkofYuetal.[2023a]introducedthethresholdedsymmetricepipolardistance
+(TSED)asamorecomputationallyefficientalternativetotrainingseparateNeRFmodels[Mildenhall
+etal.,2021]oneverysampletoevaluate3Dconsistency[Watsonetal.,2022]. First,SIFTisusedto
+obtainkeypointsbetweenapairofviews. Foreachkeypointinthefirstimage,wecancomputethe
+epipolarlineinthesecondimageanditsminimumdistancetothecorrespondingkeypoint. Thisis
+repeatedforeachkeypointinthesecondimagetoobtainaSEDscore. Ahyperparameterthresholdis
+selected,andthepercentageofimagepairswhosemedianSEDisbelowthethresholdisreported.
+Below,wereportTSEDwithathresholdof2.0andincludetheTSEDscoreofgroundtruthdata,as
+posesinthedataarenoisyanddonotachieveaperfectscore.
+Posealignment(newmetric: SfMdistances). WeproposeasetofmetricswhichwenameSfM
+distances. Here,werunCOLMAPposeestimationonthegeneratedviews,andcomparethecamera
+extrinsicspredictedbyCOLMAPtothetargetposes. TogetbestresultsfromCOLMAP,wealso
+feedittheinputviews. Wereporttherelativeerrorincamerapositions(SfMD )andtheangular
+pos
+deviationofcamerarotationsinradians(SfMD ). LikewedoforTSEDscores, wealsoreport
+rot
+theSfMdistancesforthegroundtruthdata. Duetotheinherentscaleandrotationalambiguityof
+COLMAP,additionalcaremustbetakentoaligntheestimatedposestotheoriginalonesbefore
+comparingtheirdifferencesasdescribedabove. PleaseseeSupplementaryMaterialDformoredetail.
+Metricscaleposealignment. Theaforementionedmetricsfor3Dconsistencyandposealignment
+areinvarianttothescaleofthecameraposesastheyrelyonepipolardistancesandSfM.Inorderto
+evaluatethemetricscalealignmentof4DiMwereportPSNR,SSIM[Wangetal.,2004]andLPIPS
+[Zhangetal.,2018]. Thesereconstruction-basedmetricsarenotgenerallysuitabletomeasuresample
+quality,asgenerativemodelscanproducedifferentbutplausiblesamples. Butforthesamereason
+(i.e.,thatreconstructionmetricsfavorcontentalignment),weinsteadfindthemusefulasanindirect
+indicatorsof metricscalealignment; i.e., given metric-scaleposes, wewouldlikemodelstonot
+over/undershootinpositionandrotation.
+Dynamics(newmetric: keypointdistance). Onecommonfailuremodethatweobservedearly
+inourworkisatendencyforcertainmodelstocopyinputframesinsteadofgeneratingtemporal
+dynamics,andpriorworkhasnotedthatgoodFVDscorescanstillbeobtainedwithstaticvideo[Ge
+etal.,2024]. Wethereforeproposeanewmetriccalledkeypointdistance(KD),wherewecompute
+theaveragemotionofSIFTkeypoints[Lowe,2004]acrossimagepairswithk ≥ 10matches. We
+reportresultsongeneratedandreferenceviewstoassesswhethergeneratedimageshaveasimilar
+motiondistribution.
+5 Experiments
+Weconsiderbothin-distributionandOODevaluationsfor3DNVScapabilitiesinourablationsand
+comparisons to prior work. We use the RealEstate10K dataset [Zhou et al., 2018] as a common
+5Input Reference Input Reference
+4DiM 4DiM
+PhotoConsistent-NVS PhotoConsistent-NVS
+MotionCtrl MotionCtrl
+Input Reference Input Reference
+4DiM 4DiM
+PhotoConsistent-NVS PhotoConsistent-NVS
+MotionCtrl MotionCtrl
+Figure3: Qualitativecomparisonof3DNVSforvariousdiffusionmodelsonRE10K(in-distribution)
+andLLFF(OOD).Note,thisisnotourfinal4DiMmodel,butrather,an8-frame4DiMmodeltrained
+onlywithRE10Kfor3Ddata,soitistrainedwiththesamedataaspriorworkforfaircomparison.
+Seeourwebsiteformoresamples: https://4d-diffusion.github.io
+in-distributionevaluation. Tomaximizetheamountoftrainingdata,weuse1%ofthedatasetas
+ourvalidationsplit. Weruninferenceonallbaselinesourselvesforthissplit,notingthattheymight
+insteadbeadvantagedasourtestdatamayexistintheirtrainingdata(forPNVS,allourtestdataisin
+factpartoftheirtrainingdataset,givingthemadistinctadvantage). ForOODevaluation,weusethe
+LLFFdataset[Mildenhalletal.,2019].
+Wepresentourmainresultson3DnovelviewsynthesisconditionedonasingleimageinTab.1
+andFig.3,comparingthecapabilitiesofour4DiMcascadeagainstPhotoConsistentNVS2[Yuetal.,
+2023a](PNVS)andMotionCtrl[Wangetal.,2023b]. Thesetwoarethestrongest3DsceneNVS
+diffusionmodelswithcodeandcheckpointsavailable. ForLLFF,weloadtheinputtrajectoryof
+views in order, subsample frames evenly, and then generate 7 views given a single input image.
+RealEstate10Ktrajectoriesaremuchlonger,sofollowingPNVS,wesubsamplewithastrideof10.
+Weusethe7-viewNVStaskconditionedonasingleimage,inordertoavoidweakeningthebaselines:
+MotionCtrlcanonlypredictupto14frames,andPNVSperformancedegradeswiththelengthof
+thesequenceasitisanimage-to-imagemodel. Wetrainedversionsof4DiMthatprocess8-frames
+tothisend(asopposedtousingthemain32-frame4DiMmodelandsubsamplingtheoutput)for
+amoreapples-to-applescomparison. Quantitativemetricsarecomputedon128scenesfromour
+RealEstate10Ktestsplit,andonall44scenesinLLFF.
+2ForPNVS,wefollowYuetal.[2023a]anduseaMarkovianslidingwindowforsampling,astheyfinditis
+thestrongerthanstochasticconditioning[Watsonetal.,2022].
+6
+K01ER
+FFLL
+)tohs-orez(FID(↓) FDD(↓) FVD(↓) TSEDt=2(↑) SfMDpos(↓) SfMDrot(↓) LPIPS(↓) PSNR(↑) SSIM(↑)
+cRE10ktest
+PNVS 51.41 1007. 248.9 0.9961(1.000) 0.9773(1.024) 0.3068(0.3638) 0.3899 16.07 0.3878
+MotionCtrl 43.07 370.6 411.7 0.4193(1.000) 1.027(1.032) 0.2549(0.3634) 0.5003 12.74 0.2668
+4DiM-R 31.23 306.3 195.1 0.9974(1.000) 1.023(1.075) 0.3029(0.3413) 0.2630 18.09 0.5309
+4DiM 31.96 314.9 221.9 0.9935(1.000) 1.008(1.034) 0.3326(0.3488) 0.3016 17.08 0.4628
+cLLFFzero-shot
+PNVS 185.4 2197. 1751. 0.7235(0.9962) 0.9346(0.8853) 0.2213(0.1857) 0.5969 12.04 0.1311
+MotionCtrl 106.0 531.5 1754. 0.1515(0.9962) 0.9148(0.9415) 0.1366(0.2216) 0.7016 9.722 0.06756
+4DiM-R 63.48 353.2 841.6 0.9659(0.9962) 0.9265(0.8951) 0.2011(0.1934) 0.5403 11.55 0.1444
+4DiM 63.78 356.8 864.4 0.9167(0.9962) 0.9131(0.8960) 0.1838(0.1943) 0.5415 11.58 0.1408
+Table1: Comparisontopriorworkin3DNVS.Wecompare8-frame4DiMmodelsagainstprior
+work,oneonlyusingcRE10K(4DiM-R)foramorefaircomparison,andonetrainedwithourfull
+datasetmixture(4DiM).Weevaluatein-distributionandzero-shotonLLFF.For3Dconsistencyand
+posealignment,weincludescoresonrealviews(inparenthesis)toindicateplausibleupperbounds
+(whichmaybeimperfectasposesarenoisyandSfMmayfail). Wehighlightthebestresultinbold,
+andunderlineresultswheremodelsscorebetterthanrealimages. WedonotreportscoreswhenSfM
+fails,denotedwithn/a. Ourmodelssubstantiallyoutperformbaselinesacrossallmetrics.
+FID(↓) FDD(↓) FVD(↓) TSEDt=2(↑) SfMDpos(↓) SfMDrot(↓) LPIPS(↓) PSNR(↑) SSIM(↑)
+RE10ktest
+4DiM-R(RE10k) 32.40 335.9 212.0 1.000(1.000) 1.021(1.022) 0.3508(0.3737) 0.3002 16.64 0.4704
+4DiM-R(cRE10k) 31.23 306.3 195.1 0.9974(1.000) 1.023(1.075) 0.3029(0.3413) 0.2630 18.09 0.5309
+LLFFzero-shot
+4DiM-R(RE10k) 71.07 521.2 740.1 0.7727(0.9962) 0.9003(0.8876) 0.2108(0.1915) 0.4568 12.87 0.2016
+4DiM-R(cRE10k) 63.48 353.2 841.6 0.9659(0.9962) 0.9265(0.8951) 0.2011(0.1934) 0.5403 11.55 0.1444
+ScanNet++zero-shot
+4DiM-R(RE10k) 23.68 248.0 137.9 0.9512(0.9815) 1.885(1.858) 1.534(1.520) 0.1938 20.74 0.6716
+4DiM-R(cRE10k) 22.89 243.2 130.6 0.9685(0.9815) 1.851(1.917) 1.541(1.550) 0.1809 21.25 0.6952
+Table2: Ablationshowingtheadvantageofusingcalibrateddata(metricscalecameraposes).
+Wecompare8-frame4DiMmodelstrainedoncRE10KvsuncalibratedRE10K.ForRE10Kand
+LLFF,modelstrainedoncRE10Karetestedoncalibrateddata,andmodelstrainedonuncalibrated
+RE10Karetestedonuncalibrateddataforafaircomparison. TheexceptionisScanNet++,whichis
+alreadyscale-calibrated.WefindthattrainingoncRE10Ksubstantiallyimprovesin-domainandOOD
+performancebothintermsofalignmentandimagefidelity. Thisisespeciallyclearonreference-based
+imagemetricssuchasPSNR,LPIPS,SSIM(withtheexceptionofLLFF,wherescoresmaybetoo
+lowtobesignificant).
+FID(↓) FDD(↓) FVD(↓) TSEDt=2(↑) SfMDpos(↓) SfMDrot(↓) LPIPS(↓) PSNR(↑) SSIM(↑)
+cRE10ktest
+4DiM(novideo) 32.45 326.5 207.7 0.9974(1.000) 1.023(1.029) 0.3356(0.3692) 0.2713 17.80 0.5209
+4DiM 31.96 314.9 221.9 0.9935(1.000) 1.008(1.034) 0.3326(0.3488) 0.3016 17.08 0.4628
+ScanNet++test
+4DiM(novideo) 24.61 250.7 129.2 0.9615(0.9815) 1.895(1.764) 1.446(1.431) 0.1824 21.34 0.6969
+4DiM 23.48 223.7 146.0 n/a(0.9815) 1.706(1.889) 1.550(1.503) 0.1965 20.67 0.6434
+cLLFFzero-shot
+4DiM(novideo) 64.34 401.4 884.1 0.9886(0.9962) 0.9157(0.9067) 0.1872(0.1965) 0.5437 11.45 0.1430
+4DiM 63.78 356.8 864.4 0.9167(0.9962) 0.9131(0.8960) 0.1838(0.1943) 0.5415 11.58 0.1408
+Table3: Ablationshowingtheadvantageofco-trainingwithvideodata. Wetrainanidentical
+8-frame4DiMmodelwithoutvideodatatorevealthenet-positiveimpactofco-trainingwithvideo.
+Co-trainingwithvideodataimprovesfidelityandgeneralization. Qualitatively, thisisevidentin
+4DiM’sabilitytoextrapolaterealisticcontent.
+We find that 4DiM achieves superior results in fidelity (FID, FDD, FVD) and metrc-scale pose
+alignment (LPIPS, PSNR, SSIM), by a wide margin compared to the baseline diffusion models.
+Qualitatively, wefindthatMotionCtrlhastroublealigningwiththeconditioningposes. Wealso
+observethatPNVSexhibitsmoreartifacts,withasubstantialdropinqualityintheout-of-distribution
+setting. Surprisingly,PNVSachievesthebestTSEDinLLFFbutuponcloserinspection,wefindthat
+thenumberofkeypointmatchesis∼3xlessthanfor4DiM.Thissuggestspotentialimprovementsfor
+TSED,suchasahigherthresholdforthenumberofminimumkeypointmatches,orrequiringmore
+spatialcoverageofkeypointstodiscardexamplesforwhichthematchesaretoolocalized.
+5.1 3DdatasetssignificantlyaffectNVSquality
+Oneofthemostcriticalingredientsfor3DNVS,especiallyintheout-of-distributionsetting,isthe
+trainingdataset. Weablatethisinthreeways:
+More diverse 3D data is helpful. Table 1 shows that adding more diverse 3D data beyond
+RealEstate10Ktothetrainingmixtureimprovesposealignment(SfMdistances)onLLFF(zero-shot).
+7RE10K cRE10K Reference RE10K cRE10K Reference RE10K cRE10K Reference
+Figure4: Qualitativecomparisonof4DiMtrainedoncalibratedvsuncalibratedRealEstate10K.The
+lattertendsto‘overshoot’alongthetrajectory.
+30Mvideodatasettestsplit
+FID(↓) FDD(↓) FVD(↓) KD(↑)
+4DiM(1-frameconditioned) 62.73 355.4 934.0 2.214(11.64)
+4DiM(2-frameconditioned) 56.92 334.7 809.8 2.820(11.51)
+4DiM(8-frameconditioned) 43.34 320.7 400.2 3.181(6.269)
+Table4: Comparingdifferentnumbersofinputframesforvideoextrapolation. With32-frame
+4DiMmodels,wefindthatincreasingthenumberofconditioningframesgreatlyimprovesdynamics.
+Note that, because this is an extrapolation task with constant video frame rate, the true keypoint
+distancedecreaseswithmoreconditioningframes(i.e.,lessframestogenerate).
+Theevaluationsuggestssomelossinfidelitywhenusingthefullmixturewhichisexpectedsincethe
+mixtureismorediverseandincludesbothindoorandoutdoorscenes.
+Scale-calibrated data resolves ambiguity. To determine the impact of consistent, metric scale
+trainingdata,wecompareamodeltrainedwithontheoriginalRE10kdataagainstonewithcalibrated
+metricscaleposes,withallelseunchanged. Neithermodelincludestheother3Ddatasourcesin
+theirtrainingdatausedtotrainourbest4DiMmodel,becausethesearescale-calibratedandwould
+confoundthisstudyotherwise. Quantitativeresultson3DNVSfromasingleconditioningimageare
+giveninTab.2(includingzero-shotperformanceonLLFFandScanNet++),andqualitativeresults
+aregiveninFig.4. Wefindthatmodelstrainedonuncalibrateddataoftenovershootorundershoot
+whenscaleisambiguous,andthatmodelstrainedonscale-calibrateddatasolvethisproblem.
+Large-scalevideodataimprovesgeneralization. Wealsoshowtheimportanceofleveragingvideo
+asatrainingdatasource. Table3presentsresultscomparing8-frame4DiMtrainedonourfinaldata
+mixturetotheotherwiseidenticalmodelbuttrainedwithoutvideodata. Wefindthatincludingvideo
+dataimprovesfidelityandgeneralizationabilitywhichisexpectedsinceavailable3D/4Ddataisnot
+asdiverse. Theimprovementismoreapparentqualitatively(seeSupplementaryMaterialFformore
+samples).
+5.2 Emergenceoftemporaldynamics
+Earlyinourexperiments,weobservedthatvideofromasingleimagecanoftenyieldsampleswith
+littlemotion. Whilethiscanberemediedbyloweringtheguidanceweightontheconditioningimage,
+thiscanentailacostinfidelity. Nevertheless,withtwoormoreinputframes,4DiMcansuccessfully
+interpolate and extrapolate video. We quantitatively illustrate these results through our keypoint
+distancemetric(alongwithotherstandardmetrics)inTab.4. Wesuspectthatfutureworkincluding
+additionalcontrols(e.g.,text)onmodelslike4DiM,aswellaslargerscale,willlikelyplayakeyrole
+inbreakingmodesfortemporaldynamics,giventhattext+image-to-videohasbeensuccessfulfor
+largemodels[Brooksetal.,2024].
+5.3 MultiframeConditioning
+While we (and most baselines) focus on single frame conditioning, using more than one frame
+unlocksinterestingcapabilities. Hereweshowtwoapplications. First,weconsider4DiMonthetask
+ofpanoramastitching(renderingnovelviewpoints),givendiscreteimagesthatcollectivelycovera
+full360◦FOV(seeFig.5). Forreferencewestitchtheimagesusinganaivehomographywarpand
+8Input
+Stitchedusinggammaadjustmentandhomographywarp
+Generated
+Figure5: Stitchingpanoramasisnon-trivialduetoexposuredifferences,whichishardtofixwith
+simplegamma/gainadjustment. Hereweshownovelviewsrenderedby4DiMconditionedon6
+framescovering360◦fov.Weuseour8-frameconditionedmodel-conditioningframesarerandomly
+replicatedtoachievedesiredarity. (Notethisisasubsetofthe24generatedframesby4DiM.)
+Input
+Warpedinput
+Generated
+Figure6:Novelviewsconditionedonaspace-timetrajectoryontheStreetViewdataset.Wecondition
+on8consecutivetimestepsfromthefront-leftcameraandgenerateviewsatthesametimesteps
+withacamerafacingthefront. Wefindthatthehallucinatedregions(righthalfoftheimages)are
+consistentacrossspace-time. Warpedinputimagesareprovidedforreference.
+#conditioning StreetViewpanoramas Matterport3D360◦panoramas
+frames FID(↓) FDD(↓) PSNR(↑) SSIM(↑) LPIPS(↓) FID(↓) FDD(↓) PSNR(↑) SSIM(↑) LPIPS(↓)
+1(60◦FOV) 119.7 1601 12.16 0.2925 0.5438 86.41 1080 9.366 0.1638 0.6467
+6(360◦FOV) 37.43 354.1 17.76 0.5249 0.2663 24.86 239.4 15.64 0.4974 0.2987
+Table5: Quantitativeperformanceongeneratingpanosintheextrapolation(numberofconditioning
+framesis1)andinterpolation(numberofconditioningframesis6)regime. Usingmoreconditioning
+framesimprovesimagefidelitywhichistobeexpected. SeeFig.5forsamples.
+gammaadjustment[BrownandLowe,2007]. Wefindthatoutputsfrom4DiMhavehigherfidelity
+thanthisbaseline,andtheyavoidartifactslikethosearisingfromincorrectexposureadjustment.
+Wenextconsiderthetaskofrenderinganexistingspace-timetrajectoryfromnovelviewpoints(i.e.,
+videotovideotranslation). Weconditiononimagesfromasinglecameraat8consecutiveframes
+fromaStreetViewsequenceandrenderadifferentviewyielding3D-consistenthallucinatedregions
+inthegeneratedimages. ResultsareshowninFig.6.
+9
+weiVteertS
+weiVteertS6 Discussionandfuturework
+Tothebestofourknowledge,4DiMisthefirstmodelcapableofgeneratingmultiple,approximately
+consistentviewsoversimultaneouscameraandtimecontrolfromasfewasasingleinputimage.
+4DiMachievesstate-of-the-artposealignmentandmuchbettergeneralizationcomparedtoprior
+workon3DNVS.Thisnewclassofmodelsopensthedoortomyriaddownstreamapplications,some
+ofwhichwedemonstrate,e.g.,changingcameraposeinvideosandseamlesslystitchingpanoramas.
+Whilestillnotperfect,4DiMalsoachievespreviouslyunseenqualityinextremelychallengingcamera
+trajectoriessuchas360◦rotationfromasingleimageinthewild,indoororoutdoor. Weexpect4DiM
+andfollow-upworkstohaveamajorimpactonmethodsfocusedon3Dmodelextraction,whichrely
+heavilyonpose-conditionaldiffusionmodels.
+Limitationsandfuturework. Resultswith4DiMarepromising,butthereisroomforimprovement,
+withmorecalibrated3D/4Ddataandlargermodels,withwhichtheimprovedcapacityisexpectedto
+improveimagefidelity,360◦camerarotation,anddynamicswithsingle-frameconditioning.
+Societalimpact. Likeallgenerativeimageandvideomodels,itisimportanttodevelopandrelease
+modelswithcare. 4DiMistrainedlargelyondataofsceneswithoutpeople(oranonymizedwhere
+present),anddoesnotconditionontextprompts,whichmitigatesmanyofthesafetyissuesthatmight
+otherwisearise.
+References
+Tim Brooks, Bill Peebles, Connor Holmes, Will DePue, Yufei Guo, Li Jing, David Schnurr,
+Joe Taylor, Troy Luhman, Eric Luhman, Clarence Ng, Ricky Wang, and Aditya Ramesh.
+Videogenerationmodelsasworldsimulators. 2024. URLhttps://openai.com/research/
+video-generation-models-as-world-simulators.
+Matthew A. Brown and David G. Lowe. Automatic panoramic image stitching using invariant
+features. International Journal of Computer Vision, 74:59–73, 2007. URL https://api.
+semanticscholar.org/CorpusID:5328928.
+AngelChang,AngelaDai,ThomasFunkhouser,MaciejHalber,MatthiasNiessner,ManolisSavva,
+ShuranSong,AndyZeng,andYindaZhang. Matterport3d: Learningfromrgb-ddatainindoor
+environments. arXivpreprintarXiv:1709.06158,2017.
+MostafaDehghani,JosipDjolonga,BasilMustafa,PiotrPadlewski,JonathanHeek,JustinGilmer,
+AndreasPeterSteiner,MathildeCaron,RobertGeirhos,IbrahimAlabdulmohsin,etal. Scaling
+visiontransformersto22billionparameters. InInternationalConferenceonMachineLearning,
+pages7480–7512.PMLR,2023.
+PrafullaDhariwalandAlexanderNichol. Diffusionmodelsbeatgansonimagesynthesis. Advances
+inneuralinformationprocessingsystems,34:8780–8794,2021.
+VincentDumoulin,EthanPerez,NathanSchucher,FlorianStrub,HarmdeVries,AaronCourville,
+andYoshuaBengio. Feature-wisetransformations. Distill,3(7):e11,2018.
+RuiqiGao*,AleksanderHolynski*,PhilippHenzler,ArthurBrussee,RicardoMartin-Brualla,PratulP.
+Srinivasan,JonathanT.Barron,andBenPoole*. Cat3d: Createanythingin3dwithmulti-view
+diffusionmodels. arXiv,2024.
+SongweiGe,AniruddhaMahapatra,GauravParmar,Jun-YanZhu,andJia-BinHuang.Onthecontent
+biasinfr\’echetvideodistance. arXivpreprintarXiv:2404.12391,2024.
+JustinGilmer,AndreaSchioppa,andJeremyCohen. Intriguingpropertiesoftransformertraining
+instabilities,2023. Toappear.
+HaoHe,YinghaoXu,YuweiGuo,GordonWetzstein,BoDai,HongshengLi,andCeyuanYang.Cam-
+eractrl: Enablingcameracontrolfortext-to-videogeneration. arXivpreprintarXiv:2404.02101,
+2024.
+MartinHeusel,HubertRamsauer,ThomasUnterthiner,BernhardNessler,andSeppHochreiter. Gans
+trainedbyatwotime-scaleupdateruleconvergetoalocalnashequilibrium. Advancesinneural
+informationprocessingsystems,30,2017.
+10JonathanHoandTimSalimans. Classifier-freediffusionguidance. arXivpreprintarXiv:2207.12598,
+2022.
+JonathanHo,AjayJain,andPieterAbbeel. Denoisingdiffusionprobabilisticmodels. Advancesin
+neuralinformationprocessingsystems,33:6840–6851,2020.
+JonathanHo,ChitwanSaharia,WilliamChan,DavidJFleet,MohammadNorouzi,andTimSalimans.
+Cascaded diffusion models for high fidelity image generation. Journal of Machine Learning
+Research,23(47):1–33,2022a.
+JonathanHo,TimSalimans,AlexeyGritsenko,WilliamChan,MohammadNorouzi,andDavidJ
+Fleet.Videodiffusionmodels.AdvancesinNeuralInformationProcessingSystems,35:8633–8646,
+2022b.
+EmielHoogeboom,JonathanHeek,andTimSalimans. simplediffusion: End-to-enddiffusionfor
+highresolutionimages. InInternationalConferenceonMachineLearning,pages13213–13232.
+PMLR,2023.
+DiederikKingma,TimSalimans,BenPoole,andJonathanHo.Variationaldiffusionmodels.Advances
+inneuralinformationprocessingsystems,34:21696–21707,2021.
+HaoLiu,MateiZaharia,andPieterAbbeel. Ringattentionwithblockwisetransformersfornear-
+infinitecontext. arXivpreprintarXiv:2310.01889,2023a.
+RuoshiLiu,RundiWu,BasileVanHoorick,PavelTokmakov,SergeyZakharov,andCarlVondrick.
+Zero-1-to-3: Zero-shotoneimageto3dobject. InProceedingsoftheIEEE/CVFInternational
+ConferenceonComputerVision,pages9298–9309,2023b.
+DavidGLowe. Distinctiveimagefeaturesfromscale-invariantkeypoints. Internationaljournalof
+computervision,60:91–110,2004.
+Ben Mildenhall, Pratul P. Srinivasan, Rodrigo Ortiz-Cayon, Nima Khademi Kalantari, Ravi Ra-
+mamoorthi,RenNg,andAbhishekKar. Locallightfieldfusion: Practicalviewsynthesiswith
+prescriptivesamplingguidelines. ACMTransactionsonGraphics(TOG),2019.
+BenMildenhall,PratulPSrinivasan,MatthewTancik,JonathanTBarron,RaviRamamoorthi,and
+RenNg. Nerf: Representingscenesasneuralradiancefieldsforviewsynthesis. Communications
+oftheACM,65(1):99–106,2021.
+MichaelNiemeyer,JonathanTBarron,BenMildenhall,MehdiSMSajjadi,AndreasGeiger,and
+NohaRadwan. Regnerf: Regularizingneuralradiancefieldsforviewsynthesisfromsparseinputs.
+InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pages
+5480–5490,2022.
+Maxime Oquab, Timothée Darcet, Théo Moutakanni, Huy Vo, Marc Szafraniec, Vasil Khalidov,
+PierreFernandez,DanielHaziza,FranciscoMassa,AlaaeldinEl-Nouby,etal. Dinov2: Learning
+robustvisualfeatureswithoutsupervision. arXivpreprintarXiv:2304.07193,2023.
+WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InProceedingsof
+theIEEE/CVFInternationalConferenceonComputerVision,pages4195–4205,2023.
+BenPoole,AjayJain,JonathanT.Barron,andBenMildenhall. Dreamfusion: Text-to-3dusing2d
+diffusion. arXiv,2022.
+SamyamRajbhandari,JeffRasley,OlatunjiRuwase,andYuxiongHe. Zero: Memoryoptimizations
+towardtrainingtrillionparametermodels.InSC20:InternationalConferenceforHighPerformance
+Computing,Networking,StorageandAnalysis,pages1–16.IEEE,2020.
+JeremyReizenstein,RomanShapovalov,PhilippHenzler,LucaSbordone,PatrickLabatut,andDavid
+Novotny. Commonobjectsin3d: Large-scalelearningandevaluationofreal-life3dcategory
+reconstruction. InProceedingsoftheIEEE/CVFInternationalConferenceonComputerVision,
+pages10901–10911,2021.
+11OlafRonneberger,PhilippFischer,andThomasBrox. U-net: Convolutionalnetworksforbiomedical
+imagesegmentation. InMedicalimagecomputingandcomputer-assistedintervention–MICCAI
+2015: 18thinternationalconference,Munich,Germany,October5-9,2015,proceedings,partIII
+18,pages234–241.Springer,2015.
+ChitwanSaharia,WilliamChan,HuiwenChang,ChrisLee,JonathanHo,TimSalimans,DavidFleet,
+andMohammadNorouzi. Palette: Image-to-imagediffusionmodels. InACMSIGGRAPH2022
+conferenceproceedings,pages1–10,2022a.
+ChitwanSaharia,WilliamChan,SaurabhSaxena,LalaLi,JayWhang,EmilyLDenton,Kamyar
+Ghasemipour,RaphaelGontijoLopes,BurcuKaragolAyan,TimSalimans,etal. Photorealistic
+text-to-imagediffusionmodelswithdeeplanguageunderstanding. Advancesinneuralinformation
+processingsystems,35:36479–36494,2022b.
+ChitwanSaharia,JonathanHo,WilliamChan,TimSalimans,DavidJFleet,andMohammadNorouzi.
+Imagesuper-resolutionviaiterativerefinement.IEEEtransactionsonpatternanalysisandmachine
+intelligence,45(4):4713–4726,2022c.
+MehdiSMSajjadi,HenningMeyer,EtiennePot,UrsBergmann,KlausGreff,NohaRadwan,Suhani
+Vora,MarioLucˇic´,DanielDuckworth,AlexeyDosovitskiy,etal. Scenerepresentationtransformer:
+Geometry-freenovelviewsynthesisthroughset-latentscenerepresentations. InProceedingsof
+theIEEE/CVFConferenceonComputerVisionandPatternRecognition,pages6229–6238,2022.
+TimSalimansandJonathanHo. Progressivedistillationforfastsamplingofdiffusionmodels. arXiv
+preprintarXiv:2202.00512,2022.
+SaurabhSaxena,JunhwaHur,CharlesHerrmann,DeqingSun,andDavidJ.Fleet. Zero-shotmetric
+depthwithafield-of-viewconditioneddiffusionmodel. arXiv:2312.13252,2023.
+JohannesLutzSchönbergerandJan-MichaelFrahm.Structure-from-MotionRevisited.InConference
+onComputerVisionandPatternRecognition(CVPR),2016.
+JohannesLutzSchönberger,EnliangZheng,MarcPollefeys,andJan-MichaelFrahm. Pixelwiseview
+selectionforunstructuredmulti-viewstereo. InEuropeanConferenceonComputerVision(ECCV),
+2016.
+YichunShi,PengWang,JianglongYe,MaiLong,KejieLi,andXiaoYang. Mvdream: Multi-view
+diffusionfor3dgeneration. arXivpreprintarXiv:2308.16512,2023.
+VincentSitzmann,MichaelZollhöfer,andGordonWetzstein. Scenerepresentationnetworks: Contin-
+uous3d-structure-awareneuralscenerepresentations. AdvancesinNeuralInformationProcessing
+Systems,32,2019.
+ChristianSzegedy,VincentVanhoucke,SergeyIoffe,JonShlens,andZbigniewWojna. Rethinking
+theinceptionarchitectureforcomputervision. InProceedingsoftheIEEEconferenceoncomputer
+visionandpatternrecognition,pages2818–2826,2016.
+Shitao Tang, Fuyang Zhang, Jiacheng Chen, Peng Wang, and Yasutaka Furukawa. Mvdiffusion:
+Enablingholisticmulti-viewimagegenerationwithcorrespondence-awarediffusion. arXiv,2023.
+Shitao Tang, Jiacheng Chen, Dilin Wang, Chengzhou Tang, Fuyang Zhang, Yuchen Fan, Vikas
+Chandra, Yasutaka Furukawa, and Rakesh Ranjan. Mvdiffusion++: A dense high-resolution
+multi-viewdiffusionmodelforsingleorsparse-view3dobjectreconstruction,2024.
+Hung-YuTseng,QinboLi,ChangilKim,SuhibAlsisan,Jia-BinHuang,andJohannesKopf. Con-
+sistent view synthesis with pose-guided diffusion models. In Proceedings of the IEEE/CVF
+ConferenceonComputerVisionandPatternRecognition,pages16773–16783,2023.
+ThomasUnterthiner,SjoerdVanSteenkiste,KarolKurach,RaphaelMarinier,MarcinMichalski,and
+SylvainGelly. Towardsaccurategenerativemodelsofvideo: Anewmetric&challenges. arXiv
+preprintarXiv:1812.01717,2018.
+Zhengyi Wang, Cheng Lu, Yikai Wang, Fan Bao, Chongxuan Li, Hang Su, and Jun Zhu. Pro-
+lificdreamer: High-fidelity and diverse text-to-3d generation withvariational scoredistillation.
+AdvancesinNeuralInformationProcessingSystems,36,2024.
+12ZhouWang,AlanCBovik,HamidRSheikh,andEeroPSimoncelli. Imagequalityassessment: from
+errorvisibilitytostructuralsimilarity. IEEEtransactionsonimageprocessing,13(4):600–612,
+2004.
+Zhouxia Wang, Ziyang Yuan, Xintao Wang, Tianshui Chen, Menghan Xia, Ping Luo, and Ying
+Shan. Motionctrl: Aunifiedandflexiblemotioncontrollerforvideogeneration. arXivpreprint
+arXiv:2312.03641,2023a.
+Zhouxia Wang, Ziyang Yuan, Xintao Wang, Tianshui Chen, Menghan Xia, Ping Luo, and Ying
+Shan. Motionctrl: Aunifiedandflexiblemotioncontrollerforvideogeneration. arXivpreprint
+arXiv:2312.03641,2023b.
+DanielWatson,WilliamChan,RicardoMartin-Brualla,JonathanHo,AndreaTagliasacchi,andMo-
+hammadNorouzi. Novelviewsynthesiswithdiffusionmodels. arXivpreprintarXiv:2210.04628,
+2022.
+RundiWu,BenMildenhall,PhilippHenzler,KeunhongPark,RuiqiGao,DanielWatson,PratulP.
+Srinivasan,DorVerbin,JonathanT.Barron,BenPoole,andAleksanderHolynski. Reconfusion:
+3dreconstructionwithdiffusionpriors. arXiv,2023.
+Yifeng Xiong, Haoyu Ma, Shanlin Sun, Kun Han, and Xiaohui Xie. Light field diffusion for
+single-viewnovelviewsynthesis. arXivpreprintarXiv:2309.11525,2023.
+ChandanYeshwanth,Yueh-ChengLiu,MatthiasNießner,andAngelaDai.Scannet++:Ahigh-fidelity
+datasetof3dindoorscenes. InProceedingsoftheInternationalConferenceonComputerVision
+(ICCV),2023.
+AlexYu,VickieYe,MatthewTancik,andAngjooKanazawa. pixelnerf: Neuralradiancefieldsfrom
+oneorfewimages. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pages4578–4587,2021.
+JasonYu,FereshtehForghani,KonstantinosGDerpanis,andMarcusABrubaker. Long-termphoto-
+metricconsistentnovelviewsynthesiswithdiffusionmodels. In2023IEEE/CVFInternational
+ConferenceonComputerVision(ICCV),pages7071–7081.IEEE,2023a.
+XianggangYu,MutianXu,YidanZhang,HaolinLiu,ChongjieYe,YushuangWu,ZizhengYan,
+Chenming Zhu, Zhangyang Xiong, Tianyou Liang, et al. Mvimgnet: A large-scale dataset of
+multi-viewimages. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpattern
+recognition,pages9150–9161,2023b.
+Biao Zhang and Rico Sennrich. Root mean square layer normalization. Advances in Neural
+InformationProcessingSystems,32,2019.
+RichardZhang,PhillipIsola,AlexeiAEfros,EliShechtman,andOliverWang. Theunreasonable
+effectivenessofdeepfeaturesasaperceptualmetric. InProceedingsoftheIEEEconferenceon
+computervisionandpatternrecognition,pages586–595,2018.
+TinghuiZhou,RichardTucker,JohnFlynn,GrahamFyffe,andNoahSnavely. Stereomagnification:
+Learningviewsynthesisusingmultiplaneimages. arXivpreprintarXiv:1805.09817,2018.
+13Controlling Space and Time with Diffusion Models
+SupplementaryMaterial
+A CalibratedRealEstate10K
+To calibrate RealEstate10K, we predict a single length scale per scene with the help of a recent
+zero-shot model for monocular depth [Saxena et al., 2023] that predicts metric depth from RGB
+and FOV. For each image we compute metric depth using the FOV provided by COLMAP. The
+length-scaleisthenobtainedbyregressingthe3DpointsobtainedbyCOLMAPtometricdepthat
+imagelocationstowhichtheCOLMAPpointsproject. AnL1lossprovidesrobustnesstooutliers
+inthedepthmapestimatedbythemetricdepthmodels. Themeanandvarianceoftheper-frame
+scalesyieldsaper-sequenceestimator. Weusethevarianceasasimplemeasureofconfidenceto
+identifyscenesforwhichthescaleestimatemaynotbereliable,discarding∼30%ofsceneswiththe
+highestvariance. Table6showstheimportanceoffilteringoutsceneswithlessreliablecalibration.
+Thecalibrateddatasetwillbemadepublictofacilitatequantitativecomparisons.
+FID(↓) FDD(↓) FVD(↓) TSEDt=2(↑) SfMDpos(↓) SfMDrot(↓) LPIPS(↓) PSNR(↑) SSIM(↑)
+cRE10ktest
+4DiM-R(nofiltering) 31.81 313.8 237.6 0.9815(1.000) 1.035(1.049) 0.3328(0.3529) 0.3107 16.49 0.4465
+4DiM-R(w/filtering) 31.23 306.3 195.1 0.9974(1.000) 1.023(1.075) 0.3029(0.3413) 0.2630 18.09 0.5309
+ScanNet++zero-shot
+4DiM-R(nofiltering) 24.35 232.0 143.1 n/a(0.9815) 1.881(1.774) 1.639(1.512) 0.1990 20.15 0.6436
+4DiM-R(w/filtering) 22.89 243.2 130.6 0.9685(0.9815) 1.851(1.917) 1.541(1.550) 0.1809 21.25 0.6952
+cLLFFzero-shot
+4DiM-R(nofiltering) 62.55 369.5 848.5 0.9167(0.9962) 0.9214(0.8844) 0.2194(0.1932) 0.5412 11.48 0.1389
+4DiM-R(w/filtering) 63.48 353.2 841.6 0.9659(0.9962) 0.9265(0.8951) 0.2011(0.1934) 0.5403 11.55 0.1444
+Table6:Datafilteringablation.Weshowtheimportanceofdiscardingsceneswherescalecalibration
+isleastreliable. Beyondtheclearimpactonfidelity, metricscalealignmentitselfimprovesbya
+widemargin. Thisisquantitativelyshownthroughthereference-basedimagemetrics(LPIPS,PSNR,
+SSIM)whichfavorcontentalignment,asdiscussedinSection4.
+B NeuralArchitecture
+UViTbackbone. AshintedbyFigure2,4DiMusesaUViTarchitecturefollowingHoogeboometal.
+[2023]. ComparedtothecommonlyemployedUNetarchitecture[Ronnebergeretal.,2015],UViT
+usesatransformerbackboneatthebottleneckresolutionwithnoconvolutions,leadingtoimproved
+acceleratorutilization. Informationacrossframesmixesexclusivelyintemporalattentionblocks,
+following[Hoetal.,2022b]. Wefindthatthisiskeytokeepcomputationalcostswithinreasonable
+limitscomparedto,say,3Dattention[Shietal.,2023]. Becausethetemporalattentionblockshavea
+limitedsequencelength(32frames),weinsertthematallUViTresolutions. Tolimitmemoryusage,
+weuseper-frameself-attentionblocksonlyatthe16x16bottleneckresolutionwherethesequence
+lengthistheproductofthecurrentresolution’sdimensions.
+Transformer block design. Our transformer blocks combine helpful choices from several prior
+work. WeuseparallelattentionandMLPblocksfollowingDehghanietal.[2023],aswefoundin
+ourearlyexperimentsthatthisleadstoslightlybetterhardwareutilizationwhileachievingalmost
+identicalsamplequality. WealsoinjectconditioninginformationinasimilarfashiontoPeeblesand
+Xie[2023],thoughweusefewerconditioningblocksduetotheuseoftheparallelattention+MLP.
+Weadditionallyemplyquery-keynormalizationfollowingthefindingsofGilmeretal. forimproved
+trainingstability,butwithRMSNorm[ZhangandSennrich,2019]forsimplicity.
+Conditioning.Weusethesamepositionalencodingsfordiffusionnoiselevelsandrelativetimestamps
+as[Sahariaetal.,2022b]. Forrelativeposes,wefollow3DiM[Watsonetal.,2022],andcondition
+generationwithper-pixelrayoriginsanddirections,asoriginallyproposedbySRT[Sajjadietal.,
+2022] in a regressive setting. Xiong et al. [2023] has compared this choice to conditioning via
+encodedextrinsicsandfocallengthsa-laZero-1-to-3[Liuetal.,2023b],findingitadvantageous.
+Whileathoroughstudyofdifferentencodingsismissingintheliterature,wehypothesizethatraysare
+anaturalchoiceastheyencodecameraintrinsicsinawaythatisindependentofthetargetresolution,
+yetgivesthenetworkprecise,pixel-levelinformationaboutwhatcontentsofthescenearevisibleand
+whichareoutsidethefieldofviewandthereforerequireextrapolationbythemodel. UnlikePlucker
+coordinates,raysadditionallypreservecamerapositionswhichiskeytodealwithocclusionsinthe
+underlying3Dscene.
+14C Compute,trainingtime,andsharding
+Wetrain8-frame4DiMmodelsfor∼1Msteps. Using64TPUv5echips,weachieveathroughput
+of approximately 1 step per second with a batch size of 128. The model has ∼2.6B parameters,
+and available HBM is maximized with various strategies: first, we use bfloat16 activations (but
+stillusefloat32weightstoavoidinstabilities). WealsouseFSDP(i.e.,zero-redundancysharding
+[Rajbhandarietal.,2020]withdelayedandrematerializedall-gathers). Wethenfinetunethismodel
+toitsfinal32-frameversion. Thisstrategyallowsustoleveragelargebatch-sizepre-training,which
+isnotpossiblewithtoomanyframesbecausetheamountofactivationsstoredforbackpropagation
+scaleslinearlyrespectthenumberofframespertrainingexample. Themodelisfinetunedwiththe
+samenumberofchips,albeitonlyfor50,000stepsandatbatchsizeof32. Thisallowsustoshardthe
+framesofthevideoandusemorethanonechipperexampleatbatchsize1. Whenusingtemporal
+attention,wesimplyall-gatherthekeysandvaluesandkeepthequeriesshardedoverframes(oneof
+thekeyinsightsfromRingAttention[Liuetal.,2023a]),thoughwedon’tdecomposethecomputation
+ofattentionfurtheraswefindwehavesufficientHBMtofullyparallelizeoverall-gatheredkeysand
+values. FSDPisalsoenabledontheframeaxistomaximizeHBMsavingssothenumberofshards
+istrulythenumberofchips(asopposedtothenumberofbatch-paralleltowers). Thisispossible
+becauseframeshardingrequiresanall-reducebymeanonthelossovertheframeaxis. Identicallyto
+zero-redundancysharding,thiscanbebrokendownintoareduce-scatterfollowedbyanall-gather.
+D Furtherdetailsonproposedmetrics
+WefollowYuetal.[2023a]andcomputeTSEDonlyforcontiguouspairsineachviewtrajectory,
+anddiscardsequenceswherewefindlessthan10two-viewkeypointmatches. Weuseathresholdof
+2.0inallourexperiments. ForourproposedSfMdistances,inordertogetascale-invariantmetric,
+wefirstalignthecamerapositionspredictedbyCOLMAPbyrelativizingthepredictedandoriginal
+poseswithrespecttothefirstconditioningframe. Thisshouldresolverotationambiguity. Then,we
+resolvescaleambiguitybyanalyticallysolvingfortheleastsquaresoptimizationproblemthataligns
+theoriginalpositionstore-scaledCOLMAPcamerapositions. Finally,wereporttherelativeerrorin
+positionsundertheL norm,i.e.,wenormalizebythenormoftheoriginalcamerapositions.
+2
+E Furtherdetailsonbaselinesfrompriorwork
+ForPNVS,theconditioningimageisthelargestsquarecentercropoftheoriginalconditioningframe,
+resizedto256×256pixels. Thisisthesamepreprocessingprocedureusedbyallour4DiMmodels.
+PNVS generates output frames sequentially (one at a time), using 2000 denoising steps for each
+frame. All4DiMsamplesareproducedwith256denoisingsteps.
+For MotionCtrl, we use the checkpoint based on Stable Diffusion, which generates 14 frames
+conditioningononeimageand14poses. Wesetthesamplinghyper-parameterspeedto1,use128
+ddimdenoisingsteps,andkeeptheotherhyper-parametersasdefaultvaluesinthereleasedscript
+fromMotionCtrl. Toavoidanylossofqualityduetoanout-of-distributionresolutionoraspectratio,
+weusetheresolution576×1024,i.e. thesameresolutionasMotionCtrlwastrainedon. RE10K
+images already have the desired aspect ratio. LLFF images have resolution 756×1008; we are
+thusforcedtocropthemto567×1008sotheyhavethesameaspectratioMotionCtrlwastrained
+with. Forcomparabilitywith4DiMandPNVS,wepostprocessMotionCtrlsamplesat567×1008
+bytakingthelargestcentercropandthenresizingto256×256. Notethat,inordertopreservethe
+aspectratioofLLFF,theresultingsquareoutputsareforasmallerregionthan4DiMandPNVS,
+hencethegraypaddingforMotionCtrlLLFFsamplesinFigure3.
+F Samples
+We include more 4DiM samples below, though we strongly encourage the reader to
+browseourwebsite: https://4d-diffusion.github.io
+15Input Output
+Figure7: More4DiMsamplesfromtheRealEstate10Kdataset.
+16Input CircularPan
+Input TranslateForward
+Input TranslateBackward
+Figure8: More4DiMsampleswithcustomtrajectoriesfromtheLLFFdataset.
+17Input Extrapolation
+Input Interpolation
+Figure9: More4DiMsamplesofvideosgeneratedfrom2inputimages.
+18
