@@ -1,0 +1,715 @@
+Xilinx/AMD – Project year 2022–2024
+Weight Block Sparsity: Training, Compilation, and
+AI Engine Accelerators
+P. D’Alberto T. Jeong A. Jain S. Manjunath M. Sarmah S. Hsu Y. Raparti N. Pipralia
+Abstract—Nowadays, increasingly larger Deep Neural Net-
+works (DNNs) are being developed, trained, and utilized. These
+networks require significant computational resources, putting a
+strain on both advanced and limited devices. Our solution is to
+implement weight block sparsity, which is a structured sparsity
+that is friendly to hardware. By zeroing certain sections of
+the convolution and fully connected layers parameters of pre-
+trained DNN models, we can efficiently speed up the DNN’s
+inference process. This results in a smaller memory footprint,
+faster communication, and fewer operations.
+Ourworkpresentsaverticalsystemthatallowsforthetraining
+of convolution and matrix multiplication weights to exploit 8x8
+block sparsity on a single GPU within a reasonable amount of
+time. Compilers recognize this sparsity and use it for both data
+compaction and computation splitting into threads. Blocks like
+these take full advantage of both spatial and temporal locality,
+(a)Denseweights
+pavingthewayforfastvectoroperationsandmemoryreuse.By
+using this system on a Resnet50 model, we were able to reduce
+the weight by half with minimal accuracy loss, resulting in a
+two-times faster inference speed. We will present performance
+estimatesusingaccurateandcompletecodegenerationforAIE2
+configurationsets(AMDVersalFPGAs)withResnet50,Inception
+V3, and VGG16 to demonstrate the necessary synergy between
+hardwareoverlaydesignsandsoftwarestacksforcompilingand
+executing machine learning applications.
+I. INTRODUCTION
+To reduce computational cost of a large-scale DNNs, prun-
+ingandquantizationhavebeenwidelyused[17],whichreduce
+the complexity of neural networks by removing output filters
+all together, part of them, or simplifying type and number of
+(b)Block-sparseweights
+thebasicoperations.WeightBlocksparsityisanotherapproach
+to speedup of DNN’s inference, orthogonal to pruning or
+Fig.1:Visualizationofdenseandblock-sparseweightmatrix,
+quantization, and it can be used together with them.
+zero blocks are green without variations
+Sparsity means that value of a subset of weights is exactly
+zero. If a value of a weight is zero, then the linear operation
+associatedwiththevaluecanbeskipped,sinceanyvaluetimes
+zeroequalszero(obviously).Therefore,thecomputationalcost Consider a convolution Y =W∗X+b: The output Y is a
+of sparse linear operations should be only proportional to the tensor of size M ×N ×O, the input X is of size L×J×I,
+numberofnon-zeroweights[12].Themainproblemofopera- and the kernel W is of size O×H ×K×I (the bias b is a
+tionsusingweightswitharbitrarysparsity(i.e.,alsoknownas vectorofsizeO).Weabstractthekerneldimensionsonelevel
+unstructured)isthattheycannotbeefficientlyimplementedon higher into a matrix W¯ = W of size O ×I where
+i,j i,∗,∗,j
+contemporaryhardware,suchasCPUs,GPUs,andNPUs.That we hide the kernel dimensions H ×K (think them as going
+is, they cannot use effectively vector operations. However, inside the paper, Figure 2). We describe the granularity of a
+highly optimized block-sparse operations, with block sizes as blockbyapairb ×b ∈[8×8,4×16,16×4].Thisparticular
+o i
+small as 8×8, can run efficiently on AIE2 processors, an AI granularity set is based on AIE2, but our approach can be
+hardware accelerator. Figure 1 gives a visual comparison of extended to any computational units. Of course, the choice of
+block-sparse weights with 8×8 block and dense weights. granularity makes a difference in execution time in more than
+1
+4202
+luJ
+21
+]GL.sc[
+1v35490.7042:viXraoneway.Theblock sparsityisaprocessofintroducingzeros Block Sparsity would be beneficial for any hardware archi-
+into rectangular blocks in W¯ and we identify such a process tecture with vectorizable instructions (spatial locality and par-
+as allelism) and multiple computation units (thread parallelism).
+Γ(W¯ ,b ×b ) =0 We exploit block sparsity in terms of training neural network,
+o i ℓ,ι
+its compilation, and implementation on a certain hardware.
+s.t. W =0 with
+i,∗,∗,j (1) The main contributions of this work are:
+i∈[ℓ∗b ,(ℓ+1)∗b −1],
+o o 1) We proposed Weight Block Sparsity method on a
+j ∈[ι∗b i,(ι+1)∗b i−1] pre-trained neural network, which is hardware-friendly
+TheblockΓ(W¯ ,4×16) iszeromeansW iszerowith structured method, and can be applied any CPU, GPU,
+1,2 i,∗,∗,j
+andNPU(NeuralprocessingUnit)andreducethemem-
+i∈[1∗4,2∗4−1]andj ∈[2∗16,3∗16−1].Inpractice,Γis
+oryfootprintofadeepneuralnetworkandaccelerateits
+a bit map or a mask (i.e., 0 zeros, 1 unaffected but it could be
+inference.
+used as weighted mask with values in [0,1]). We can express
+2) Also,weproposedthecompilerandcodegenerationfor
+block sparsity percentage as the relative number of zeros in
+theneuralnetworkwithBlockSparsity.OurCompileris
+Γ and in particular the number of zeros in every row of Γ,
+based onparameterized representation ofblock sparsity,
+where N is the number of columns in Γ and for every row of
+allows the capability to split tensors and computations
+Γ:
+N accordingly to a parameterized representation of the
+S = 1 (N −(cid:88) Γ(W¯ ,O×I) ) (2) architecture.
+N o,i
+i 3) Lastly, we could estimate the time execution for op-
+In Figure 2, we show an example where we zero one block erations of a neural network including DDR to men-
+per row and the block granularity is 8×8. tile communications and graph computation. Sparsity
+reduces computation and communication time, and is
+captured using the time estimation.
+II. RELATEDWORKS
+The modern reference of sparsity in deep learning is by
+Hoefler et al [13], which is an entire spectrum of sparsity and
+is not limited to block sparsity. The original sparsity comes
+from applications, for example [8], [23], [24]. Data structures
+and algorithms are tailored to exploit sparsity. Often, the data
+structure is tailored to the sparsity in order to compact data,
+different sparsity structures require different algorithms, and
+achieve different performance. Block sparsity in this context
+is for matrices (i.e., often diagonal matrices) where a block
+Fig. 2: Example of block sparsity Γ(W¯ ,8×8), W¯ , and W is stored contiguously in memory. Siswanto in [25] intro-
+. duces block sparsity in convolutional network generalizing
+for matrices (i.e., fully connected layers) but the application
+The main advantages of block sparsity are: to convolution layers is different than ours (the author does
+1) The non-zero blocks are dense in the inner dimensions pruning of the kernel by height or width). Our block sparsity
+(input channels) and we can tune the granularity. We describes logically a block but not in memory layout, in most
+exploit spatial locality by reading in one cycle 4 ele- frameworktheinputchannelistheinnermostdimensions.The
+ments and we read a multiple contiguous in memory. zeros are shuffled in, as for matrices, we shall compact the
+Thisisspatiallocalityanditmustbeexploitedbylong- blocks.
+row memories and long-line caches. In turn, it is highly The works by Numenta in [1], [16] go into two directions:
+used by vectorizable functional units that consume and block sparsity of the convolution kernels and of activation
+produce multiple results in a single clock. tensors; that is, input and output. For the kernel, they can
+2) The block are dense in output dimension so the same choose any granularity and every filter can be sparsified so
+weight volume can be reused for multiple outputs; that thatajig-sawpuzzlecanbecreated:eachfilterisblocksparse
+is, better throughput and possibly latency. with different patterns so that, across filters, they can further
+3) Thezerosblocksareeasilyskipped:50%sparsityresults compactthedatastructure.Thesparsificationoftheactivation
+in 50% fewer operations with the identical throughput tensordoesnothaveapattern;itiscalledunstructuredsparsity.
+and latency. The structured sparsity can be achieved only by a carefully
+4) Thecomputationisnaturallysplitbyblockoffilters,ex- process that must be part of the network training. It is not
+ploiting (output) parallelism, and each sub-computation clear from the literature how the training is carried on.
+has a known and countable number of operations per Nvidia implemented 50% fine-grained sparsity on Ampere
+row and per block. architecture [21]. Nvidia A100 supports convolution and ma-
+2trix multiply operations in 2:4 pattern, 2 values are zero out heuristics and following a schedule, it computes a memory
+of each contiguous value of 4. The sparsity network achieved allocation in Memtile (i.e., intermediate scratch pad Section
+1.3xto1.5xinspeedup.Thesamefunctionalityisavailablein V-C)forinputs,outputs,andweights.Itformats,compresses,
+AMD GPUs and (future) AIE2s instruction sets. This sparsity and organizes the weights exploiting spatial distribution to
+is appealing because of its hardware support, deterministic Memtiles and cores. We generate all the explicit communi-
+space footprint, and computation reduction. However, it im- cations between DDR (L ), Memtile (L ), and cores (L ).
+3 2 1
+poses very stringent constraints on the type of sparsity not These are Gather and Scatter instructions with a complete
+always allowing a comparable accuracy. and parametric estimate of their execution time by bandwidth
+The difficulty of generating code for complex architectures constraints and number of channels. The calculation is based
+canbedescribedandsolvedindifferentways.Therearerecent on the sub-volume sizes per core, the computation throughput
+attemptsofintroducingSoftware/Hardwaresolutionforspatial and with a clear specification of what is executed in parallel.
+processors [4], [15], [22]. However, their major attentions are The data movement codes and AIE core codes for simple
+given only to matrix multiplication and GPUs [11] [19]. In convolutions were simulated and run in hardware for simple
+our case, we are focusing on the so called static sparsity or layers (i.e., Section V-D). Thus, we can achieve consistent
+weight sparsity. execution time estimates per layer and of the entire network
+with an accuracy closer to a simulation (realistic although
+III. BLOCKSPARSITYINAMATRIX
+optimisticSectionV-E).WewillshowestimatesforthreeCNN
+Block sparsity is an intuitive concept but it can be misun- models and eight different AIE designs; see Section VII. To
+derstood. Take a matrix multiplication in Equation 3 our knowledge, we are the first in applying sparsity on AIEs
+(cid:18) C C (cid:19) (cid:18) A A (cid:19) (cid:18) 0 B (cid:19) systematically. The ability to provide different algorithms and
+0 1 = 0 1 1 (3)
+C C A A B 0 easy to obtain estimates for very different configurations, it
+2 3 2 3 2
+will allow to explore optimizations like sub-graph depth-wise
+This is the computation
+tiling we could not have otherwise.
+C =A B ; C =A B ; C =A B ; C =A B (4) In our context, convolution is our main computation and
+0 1 2 1 0 1 2 3 2 3 2 1
+CNN are networks we can train reasonably. This is because
+and in general with proper γ (i.e., a mask)
+i of legacy, we want to speed up the FPGA work-horses,
+1 convolutionsprovidemoredifficultiesthanGEMMs(padding,
+(cid:88) (cid:0) (cid:1)
+C i = A i+k γ 2∗k+iB 2∗k+i (5) strides, and overlap), have usually biases with different preci-
+k=0 sion requirements (weight 8bits and bias 32), routinely they
+WherethematrixB isconstant,diagonal,andeachsubmatrix can deploy different scaling factors per output channels, and
+B and B can split further down and may have even smaller GEMM is transformed into a 1×1 convolution immediately.
+2 1
+zero blocks. For data structure in the sparse computation The other way around is possible with proper activation
+field, we can use compress block row (CBR) or column preparation; in fact, a convolution can be represented as a
+format (CBC) or generalization of the coordinate format GEMMbuttheactivationtensorsexplodeinspacebyafactor
+(COO).Therearestandardmatrixsparse-matrixmultiplication of the kernel size and the preparation is more suitable for
+interfaces and algorithms for CPU and GPUs using this data CPUs than FPGAs.
+format(whereonlyoneoperandissparseorboth)[2],[20].In
+A. Block-Sparse Matrix-Matrix Multiplication
+the introduction section, we describe block sparsity applied to
+convolutions. We store a compact Γ for inference, this could Consider Γ and Ω two matrices in {0,1}N×N.
+be literally a bitmap or an block row/column index. For the
+C =(ΓA)∗(ΩB)t (6)
+effective computation by the AIE kernel, we deploy a relative
+row/col index that will apply to dense operations as well. The More precisely, consider non-zero blocks of size k×k so that
+figurative sparsity is now expressed in a computation where
+C =(cid:88) (γ A )(ω˙ B˙ ) (7)
+the savings are clear. i∗N+j i∗N+k i∗N+k j∗N+k j∗N+k
+This is briefly our overall process and contributions. We k
+explore training techniques using PyTorch and Keras in Sec- Thanks to the sparsity and if we store only non-zeros,
+tion IV. We compute a mask Γ of zeros/ones per layer by then γ and ω˙ are contiguous. There will be a
+i∗N+k j∗N+k
+zeroing the more likely blocks (using a Norm). Then we meaningful product to compute if and only if γ = 1
+i∗N+k
+train the model till convergence or accuracy are achieved. and ω˙ = 1. We merge-sort these vectors. See how the
+j∗N+k
+We take the sparse model and we quantize to 8-bit integer sparse sparse matrix multiplication using Coordinate Block
+computations with a quantizer which is based on round-to- Structure (COO) is applied in Figure 3. We provide software
+nearest quantization (Equation 12). The final model is an to reproduce this [7].
+intermediate representation. We have a custom compiler that In the case of achieving a fixed sparsity (i.e., density) of
+takes the intermediate representation and an abstraction of a 50% for a square matrix of size N and we choose the block
+connectedsetofAIE2(i.e.,SectionV-AandV).Thecompiler size k × k. The larger k is, the smaller the overhead will
+computesthemaximumsub-volumecomputationpercore.By be. The relative performance of the k3 multiplication is better
+3as k get larger because spatial, temporal locality, and further convolutionwitha(non-trainable)Γ.Γisthesparsityratioand
+optimized code for a constant/parameterized such as k. mask. This experiment is conducted using Keras [5] and the
+codeisavailable[6].Aconvolutionwillhavethreeparameters
+(saving the model into a different format). The forward com-
+putation is modified so that the weights used for convolution
+areΓW.Weassumethebackwardcomputation(i.e.,gradient)
+is done automatically from the forward definition. There is no
+need to change the bias. For example, we take Resnet50 from
+theKerasapplicationrepository,westartwithaΓ=1,andwe
+trained one epoch using Imagenet dataset [9]. The goal is to
+choose Γ in such a way we achieve the required sparsity and
+the minimum loss in accuracy. We start from W , the current
+0
+optimalweight,thenchoosevaluesinW tomakezerosusing
+0
+(a) different approaches such as incremental, Fisher measure,
+Hessian, diagonal Hessian, and custom penalty losses.
+B. Sparsity Ratio as Incremental
+(cid:80)
+Forexample,foreveryconvolution,n = γ ,whichisthe
+i i
+number of blocks, reduce this number to ni. For each epoch
+2
+(say every two training epochs), we consider the current non-
+set-yet mask elements (cid:80) (1−γ i) = k < n 2i. We compute
+our importance measure for all in ascending order. This time,
+we zero the first min( 5 k,1). We keep this process until we
+100
+reach 50% sparsity. At each iteration at least one block will
+be set to zero. We trace a solution path as much as geodesic
+(b)
+as possible.
+Fig. 3: Block 1x1 and 8x8 performance C. Sparsity Ratio as Trainable as Optimization Problem
+If we want to make Γ part of the optimization process as
+InFigure3,wepresenttwoscatterplots:ontheabscissathe
+trainable variable we could introduce a penalty function into
+effective multiplication-and-addition number, on the ordinate
+the loss ℓ(x,w)+λ(w). First let us introduce an approxima-
+the performance in GFLOPS, when the sparse matrix with
+tion for the max(x), so when in this section you will read
+dense block is 1×1 (above) and 8×8 (below). Given the
+max,min, this is a log sum exponential, which is continuous,
+same task, we deploy more threads and thus the vertical
+derivable everywhere, and convex:
+effect (AMD 16 cores Threadripper). With the same number
+of effective operations, the block permits and exploits higher 1 (cid:88)
+max(x)=LSE(x,α)= log exi∗α (8)
+GFLOPS per effective operation (Float is 2x faster than α
+Doubleprecisionandthiscanbeemphasizedfurther[11],[19] With T we represent the number of non-zero block in Γ
+and [18], for AIE2 we can do 256 multiply accumulate per
+cycle using 8 bit operands, 128 per 16 bits, 64 per 32bits).
+λ=−(max(Γ)−min(Γ)) (9)
+IV. BLOCKSPARSITY:TRAININGANDQUANTIZATION +β∗L2(Γ−T)+ι∗L1(Γ)
+The block sparsity we plan to deploy is not naturally recur-
+This is a simplified loss so that we minimize the value of
+ring in Convolutional Neural Networks. Training is required
+Γ but also try to maximize the difference of the elements.
+and achievable practically as fine tuning of trained networks.
+As reminder, a convolution has a weight tensor in four
+dimension: W ∈ Rcout×h×k×cin. In the hyperplane of the λ=max(−Γ,0)+max(Γ−1,0)−(max(Γ)−min(Γ))
+h and k, we can simplify the weight as W˙ ∈ Rcout×cin (10)
+and block sparsity can be simply described by a mask ΓW˙ . +β∗L2(Γ−T)+ι∗L1(Γ)
+Although, we speak of a 8×8 of non-zeros, this is in practice
+This last penalty function represents our attempt to state
+a8×h×k×8block.Forthematrixmultiplyh=k =1,there
+that the γ should be positive and in the interval [0,1] and in
+isnodifferencefromtheunstructuredsparsity.Weexplainthe i
+a such a way that we maximize the distance of the elements
+training process.
+between 0s and 1s.
+A. Searching Optimum Sparsity ratio min(Γ)
+λ=max(−Γ,0)+max(Γ−1,0)− (11)
+We target convolutions first and without quantization. We max(Γ)
+take a model and we create a copy where we enhance the +β∗L (Γ−T)+ι∗L (Γ)
+2 1
+4TABLE I: Accuracies of the sparsity models
+D. Hessian and Fisher Information
+If we have N parameters/weights, the Hessian H ∈RN×N
+Model Dataset Baseline Sparsity
+has quite the space complexity (consider even small models
+Acc.(%) block ratio(%) Acc.(%)
+could have million parameters). When we are already close
+Inception-v3 ImageNet1k 77.2 8x8 50 75.5
+to the optimal solution or we are trying to move from the
+ResNet-50 ImageNet1k 76.7 8x8 50 74.6
+optimal solution without using information from the gradient,
+VGG-16 ImageNet1k 70.6 8x8 50 69.7
+theHessianprovidesthemostinformationclosebyanalready
+ResNet-50 ImageNet20 96.1 8x8 25 95.1
+established solution point. There are also ways to compute
+ResNet-50 ImageNet20 96.1 8x8 50 92.0
+the Hessian and the effects of the Hessian by using Fisher
+ResNet-50 ImageNet20 96.1 8x8 75 87.1
+information [26]–[28]. This will reduce to the computation of
+ResNet-50 ImageNet20 96.1 1x1 25 96.0
+the gradient of the loss function.
+ResNet-50 ImageNet20 96.1 1x1 50 95.6
+E. Diagonal Hessian ResNet-50 ImageNet20 96.1 1x1 75 93.5
+VGG-16 ImageNet20 92.0 8x8 50 89.6
+We applied a Fisher measure and computed ∇2ℓ, that is
+VGG-16 ImageNet20 92.0 1x1 50 92.3
+computed just the diagonal of the Hessian. Again, we use
+VGG-16 ImageNet20 92.0 1x1 75 91.7
+the L over the normalized weight and went through the
+2
+process of training. The elements of the diagonal are not
+representative in general, but they are a good approximation
+ofthecontributionofasingleweight.TheFisherand∇2ℓdid weaknessorjustbadexecution.Itisimportanttoustopresent
+not provide any main advantages. But this information is very all the tools attempted.
+useful in quantization and optimizations within the same field Fine-grainedsparsity(1×1blockorunstructured)doesnot
+and application. sacrificeanyaccuracy(i.e.,almostany).Thisisnotequivalent
+to 2 over 4 (or 4 over 8) sparsity now available in GPUs.
+F. Predetermined Sparsity ratio and Full Training Ahead
+Take a convolution with Γ = 1 and weights W. Once V. COMPILERANDITSCODEGENERATION
+again for each γ , this will be representative of a block
+i
+W ∈ R8×h×w×8 ∼ R8×8. We can choose the W using a We take a PyTorch/Keras model and quantize it before
+i i
+measure of importance: creating an intermediate representation. Consider a weight
+• L 2(W i)=(cid:112)(cid:80) kw k2 with w k ∈W i, W. The linear operation can be written as y = Wx, and
+(cid:80) the quantized one is y = W x. The quantization function is
+• L 1(W i)= k|w k| as above, q
+• wVari ∈an Wceσ o2 r=
+1
+6(cid:80)1 4(cid:80) wk ,(w wk it−
+h
+µ w)2 ∈w With .µ= 61 4(cid:80) w k,with defined as:
+k i N k k
+We can then sort them in ascending order. We set the first max(|W|)
+halftozero.Thenwestartre-training.Wedothisfortheentire W q =∆∗Round(W/∆) with ∆= 2N−1 (12)
+network or for one convolution at a time.
+InTableI,weshowtheresultsbyusingone-timemaskand Ourintermediaterepresentationisagraphwhereeachnode
+fulltraining:VGG-16,ResNet-50,Inceptionv3onImageNet20 isanoperationthatreadstensorsandwritesonetensor.Acon-
+(20 classes) and ImageNet1k (1000 classes). We use three volution has one quantized input INT8 with a position where
+samples per class for the validation accuracy for ImageNet1k the fraction starts (power of two scale). It computes a tensor
+dataset;instead,weuse50samplesperclassforImageNet20. using the same layout and with a proper scale. The weights
+Fine-tuning sparse networks on the original ImageNet data- and bias are properties of the convolutions. They are tailored
+set [9] is expensive. To reduce the training time, we chose 20 and laid out at compile time, they are C OUT ×h×w×C IN
+classes (from the original 1000 classes) with the least number The compiler in this work can create the parameterized
+of images per class in the training data-set and this choice representation of block sparsity, and has the capability to
+will affect the accuracy because there are fewer samples for split tensors and computations accordingly to a parameterized
+re-training. representationofthearchitecture.OurHardwareabstractionis
+ClassificationaccuracyonImageNet1k dropsbyonly1-2% a Python class, describing a variety of systems. All weights
+afterapplying50%sparsitywitha8×8block(thisiswithout arestaticallypreparedintoDDRandwemovethemexplicitly
+any quantization). We experiment with different block shapes towards the inner levels. Inputs and outputs have designated
+such as 16×4 and 4×16 on ResNet-50, but the accuracy space in DDR. DDR can and it will be used for tensors
+is slightly worse. The different shape has the same volume spills.ThememoryallocationtoMemtileisbasicallycoloring
+and either more parallel vector operations or longer vector algorithms and some heuristics. In this architecture, we do
+computations. This last process based on PyTorch has been not allow streaming of neither data nor weights (because they
+the most accurate while the other approaches had a drop of 7 share space in Memtile and input and output have different
+pointsinaccuracyatleast.Itisnotclearifitisamethodology consumption/production rates).
+5reuseweightsincore.Thecoressetisacohortandwealways
+choose symmetric computations.
+If we have the inputs, output, and weights in Memtile, the
+minimumcomputationisoneoutputchannelandonerow(i.e,
+by height). If this is not possible, we try to reduce the size of
+the width (e.g., shaping the tensor in Memtile by using DDR
+spills) and we can manage to split the input channels and to
+split the weights accordingly and prepare for accumulation.
+We call W-Split the distribution of tensor by columns in the
+Tensor mesh. We can C -split, this requires the partial
+OUT
+transfer of weights. We can C -split when we need to split
+IN
+by input channel, this is the last resort because it is also
+the most expensive accumulation of the outputs. C -split
+IN
+can be implemented as a graph optimization by splitting the
+convolution into two and then use an element wise operation
+to combine the results, which can be done recursively.
+The subvolume describes the smallest shape of the weights
+that we need to manage and the largest computation in the
+core. We compress the weight accordingly. Any data move-
+ment will always be a multiple of the subvolume, a multiple
+Fig. 4: 4x4 AIE representation of 8×8, and it is a single load. Such a compressed data will
+have the same properties whether it is sparse or dense.
+C. Schedule and Memory Allocation
+A. Hardware Abstraction
+During the scheduling of each layer, we evaluate what
+As shown in Figure 4 as an example, we work with a mesh tensorscanfitinMemtile.Here,activationandweighttensors
+of 4x4 tensor cores connected by 4 horizontal and 4 vertical sharethespace.Ateachstep,thememoryallocationwillcheck
+interconnections. We present estimates for square 2x2, .. i×i if we can allocate inputs, weights, and outputs. If we cannot,
+.. 8x8 and rectangular shapes are in the works (4×1, 4×2, we evict all tensors into DDR and then split the time of the
+and8×2intoa8×8with2Memtilespercolumn).Eachcore
+computation.
+has 8 banks memories for a total 64 KB. About six banks are Attheendofthisstage,everytensorwillhaveanaddressin
+used as input/output/weight buffers and two banks are used Memtile or DDR (or both). If there are only DDR addresses,
+as temporary space for kernels. Each core can request and the compiler will take the basic layer computation and, by
+send data to its direct neighbors (if aware of connection and heuristics, will split the computation and the output tensor
+controlbutthisutilityisnotusedhere).Doublebufferingusing by width, output channel, height, and input channel (no
+ping/pong is used for inputs and outputs. necessarilyinthisorder).Theheuristicshaveasingleobjective
+There are four Memtiles: each 512 KB and each is con- tofindthelargestproblemfittingthe(each)memorylevel.We
+nected to one columns and its direct neighbor column, or it deployarecursiveapproachoftiling.Formally,(cid:80)˙ isaparallel
+is connected to a row and its neighbor. The total amount of loop and a W-split can be written as follows:
+space is 2 MB. Memtile is a circular buffer to exploit more
+flexible allocation. Note a 2 × 2 architecture will have one Y
+=Conv(X,W)=(cid:88)˙
+Conv(X ,W) (13)
+w
+Memtile per column and a total of two Memtiles (1 MB). w
+The split is a function of the footprint. Before and after
+A Memtile can broadcast data per column or per row;
+each convolution, there will be an explicit data movement
+it is a design choice. We can dedicate one Memtile for
+as option. At this stage each input, output, and weights
+weights, one for activations, or we can share it. In this work,
+have addresses associated with each sub-computation. Then
+we present results for shared Memtiles. To maximize the
+the code generation of each Conv(X ,W) is independent
+computationparallelism,everycorewillwritedatapercolumn w
+and recursive as needed. This is a tree-like structure. If the
+into Memtile.
+convolutionhasstridesoralargekernel,eachsub-convolution
+has overlap data; however, the sub-convolution has defined
+B. Subvolumes, Data Compression, and Data Movements
+addresses and data movements. For a W-split such as this, we
+The computation is split by Memtile and thus by column
+are computing the output by rows and the weights are reused
+(cores columns). The output tensor is computed and split
+(read once).
+evenly by width. Thus one Memtile will store one partial
+D. Code Generation
+tensor by width, each core will compute different output
+channels, and the computation streams the output tensor by The compiler creates a list of operations. These operations
+rows and using ping/pong double buffering. We prioritize to become smaller and smaller and then can be executed from
+6Memtile to Memtile. There is a further decomposition using
+only the Tensor cores and it is completely determined by the
+subvolume.Here,weshowhowwegeneratecodeatthislevel
+and estimate time as in Figure 5. This is the computation of
+a convolution with top/bottom padding by height:
+(cid:88)˙ 9
+Y =Conv(X )+˙ Conv(X )+˙Conv(X )
+height h=0 h h=10
+h=1
+(14)
+Animportantfeatureofthecurrentsystemistheconceptof
+iterationbetweenMemtileandcore.Usinglocksandchaining
+the locks, we write a single instruction from the prospective
+of a single core (as a SIMD instruction) and driving all cores
+(cid:80)˙ i
+at once for multiple iterations Conv(X ) in Equation
+h=1 w
+14. The ASM-like code follows:
+LOADFM Lock k_0 Memtile addr core addr iter i
+CONV iteration i
+WRITEFM Lock k_1 Memtile addr core addr iter i
+Thereisanimplicitlock(sayk_x)thatisusedforthepong
+and the system cycles between locks (k_x and k_0). These
+three operations execute a number of iterations i and, using a
+ping/pong, they will load different slices of data and compute
+different slices of data.
+Equation 14 is encoded as follows:
+## Head top pad < 50 us First comp block
+LOADFM Lock k_0 Memtile addr_0 core addr iter 1
+CONV iteration 1
+WRITEFM Lock k_1 Memtile addr_1 core addr iter 1
+## Body iteration > 50 us < 150 us
+## k_0 -> k_2 -> k_4 Lock Chain
+LOADFM Lock k_2 Memtile addr_2 core addr iter 9
+CONV iteration 7
+WRITEFM Lock k_3 Memtile addr_3 core addr iter 9
+## tail bottom pad > 150 us Last computation block
+LOADFM Lock k_4 Memtile addr_4 core addr iter 1
+CONV iteration 1 Fig.5:Resnetsingleconvolutionwithpaddingfor4x4:LOAD
+WRITEFM Lock k_5 Memtile addr_5 core addr iter 1 activationfromDDRtoMemtile,LOADWweightsfromDDR
+to Memtile, LOADFM activation from Memtile to Tensor
+We present in Figure 5 the execution estimate of this code.
+cores, LOADWM weights from Memtile to Tensor cores,
+At this stage, we have all the information. Per layer, the code
+WRITEfromMemtiletoDDR,WRITEFMfromTensorCores
+generation is a two pass process. First, we generate code for
+to Memtile, COMP Computation in this case a convolution.
+theallloads/stores.Secondwecombinethemintochainswith
+dependency, logically correct and as fast as possible.
+We could estimate the time execution without a full code
+and LOADW) are parallel with a bandwidth of 4 GBps.
+generation. When we annotate time information to a load,
+Writes from Memtile to DDR (WRITE) can use both
+we have assurance that the load is a complete description of
+channels (8 GBps).
+the DMA communication between multiple memories and as
+complexasthearchitecture.Actually,thisisliterallytranslated • If activations and weights go to different Memtiles (for
+example weights to Memtiles ’0’ and ’3’ and activations
+to a binary executable that perform the data movement.
+to ’1’ and ’2’), each load is parallel and 8 GBps. Writes
+E. Time Estimation are identical.
+Weexplainhowwecapturetheexecutiontimeandvisualize The Memtile connections with AIE cores are different. We
+it as in Figure 5. We start by the time estimates for DDR to assume a few channels with 4 GBps bandwidth. One Memtile
+Memtilecommunications.Wehavetwocommunicationtypes: canbroadcastinputstoacorescolumn.Thesecommunications
+activations and weights. Per Memtile there are two dedicated areforactivations(LOADFM).OneMemtilecanbroadcastto
+channels. rows of cores, these are for weights (LOADWM). We assume
+• If we share activations and weights in the sameMemtile, that the column and row communications are parallel.
+we can use one channel for activations and one for Every communication with iteration one is synchronous
+weights. Thus the loads from DDR to Memtile (LOAD and sequential. The load, convolution, and store is executed
+7one after the other and every core is independent. For syn- Wepresentthetimeestimateforaconvolutionwithpadding,
+chronization and for bookkeeping, we assume that Weights dense, and with 50% sparsity, see Figure 5 and 6.
+communications from Memtiles to cores are synchronous and For these convolutions, the computation dominates the exe-
+halting (LOADWM). cutiontime.Sparsitycutstheexecutiontimebyhalf:from200
+Every communication with iteration larger than one, we µsto130µs.Ononehand,thereareconvolutionsthatrealize
+assumethatload(LOADFM),computation(COMP),andstore up to 2× performance; on the other, there are convolutions
+(WRITEFM)areexecutedinparallelandtheoverallexecution that are dominated by the reading or writing. In the latter
+time is the maximum of the estimated time multiplied by the case,sparsityhelpsinspacesavingandprobablyDDRtensors
+number of iterations. spilling. In principle, we could relax sparsity requirements
+Weestimatetheexecutiontimeofasubvolume(COMP)by for those convolutions that are communication bound (and
+the number of operations divided by the maximum number of restart training). In Figure 7, we provide the time estimates
+operationspercyclewhichisinourscenariois4×8×8=256 for Resnet50 using sparsity 50% and using 4×4 AIE array.
+operations per cycle and 1 GHz frequency. Sparsity reduces
+computation and communication time.
+We do not account the wait and synchronization which are
+necessary to reprogram the fabric. These are very expensive
+running on for a few milliseconds.
+F. Sparse Convolution example
+Fig. 7: Resnet50 for 4x4 Tensor Cores with 50% sparse
+weights
+VI. DEPTH-WISETILING
+TakethesubgraphscheduleL ,L ,...L ,foreveryiL is
+0 1 j i
+a layer that produces a single tensor T . Depth-wise tiling is
+i
+theideaoftilingtheoutputtensorT intotilesu ,thencutthe
+j m
+Fig. 6: Resnet single convolution with padding and sparsity
+computation accordingly to find the minimum corresponding
+for 4x4 Tensor Cores
+inputshapeandsizeofT andT ,evenoverlapping,tocarry
+−1 0
+8the computation to u . Let us define u = 1×1, where we C. Code Generation
+m j
+neglectthechannels,asasub-tensoroflayerL ;thatis,asub-
+j A computation is basically defined by its layer and by the
+vectorofT .Aprojection¶isafunctiontakinguandprojects
+j addressesinmemoryofitsinputandoutputtensors.Thecode
+the input sub-tensor needed to compute u. In reverse order, generation unrolls the iterations as it was a loop and I and
+b
+startingfromL
+j
+compute¶(L j,u j)andpropagatetheprojec-
+I generatethepropersubtensoraddressesandspecifyingthe
+e
+tion. When a layer L and tensor T feeds two (or more)
+m m number of iterations.
+layers L and L . Then u = max(¶(L ,u ),¶(L ,u ))
+x y m x x y y The code generation will be for the schedule:
+when u and u are defined completely and max mean the
+x y
+largest. We carry the propagation of ¶(L m,u m) and we have I b(0),L 0,L 1,...L n,I e(0),...I b(M−1),L 0,L 1,...L n,I e(M−1)
+T = ¶(L ,u ) = ¶(L ¶(L ,u )) = ¶(L ,...¶(L ,u ).
+−1 0 0 0 1 1 0 l l With a little of book keeping we can write the time estimates
+At the end of the propagation, imagine this is a generalized
+as a time series and compare performance.
+convolutionwithkernelsizek =¶(L ,u ).Nowifwerepeat
+0 0
+the process with u˙ = 2×2 ... k+s = ¶(L ,u˙ ). Thus we D. Complementary: depth-wise tiling and sparsity
+j 0 0
+have an estimate of the generalized stride. The depth-wise tiling has the tendency to increase the
+Now we can split the computation by selecting a non computation number and decrease the DDR loads and stores.
+overlapping decomposition of the output tensor: say using M Asfomulated,thistilingmayreadmultipletimestheweights.
+tiles each of size u o. The input is split into M tiles of size Sparsity reduce the number of computations and the weights
+(u o − 1)s + k and we will have an overlap of size k − 1. communications.Togetherhavetheopportunitytoworkbetter.
+We can choose a tiling in such a way there is zero DDR
+communication in between L and L . With input overlap, TABLE II: Execution Time estimates
+0 j
+thus with extra reads, we have extra computations. However,
+we can reduce drastically the DDR communications. We use AIE2 Model Densesec Sparsesec
+the term generalized convolution but it is not a convolution 2x2 Resnet 2.492347e-02 1.582626e-02
+3x3 1.269543e-02 8.661490e-03
+and it is only applied to a graph computation (with element
+4x4 1.077318e-02 7.064918e-03
+wise operations and transpose convolutions, we do not think 5x5 failed 4.303485e-03
+it is applicable to height and width softmax or layer norms). 6x6 5.712521e-03 4.490127e-03
+7x7 4.205991e-03 3.212234e-03
+A. Real-time analysis and Zero DDR Communication 8x8 6.376768e-03 4.602027e-03
+Assume, we have an output tile size u . We repeat the 2x2 IncV3 4.283837e-02 2.440544e-02
+o
+3x3 2.386600e-02 1.422390e-02
+projection process using the schedule. This time, we keep
+4x4 1.740967e-02 1.012540e-02
+information of the active tensors at any time in the schedule. 5x5 9.690552e-03 failed
+Projections and active tensors are sufficient to represent the 6x6 1.063962e-02 6.439692e-03
+maximum active space requirement (not including input and 7x7 8.727651e-03 failed
+8x8 9.093276e-03 5.666152e-03
+output). If we want zero DDR spill for inputs and outputs,
+2x2 VGG16 4.476212e-02 2.608593e-02
+we choose a output tile for which the maximum active space
+3x3 2.53343e-02 1.002015e-02
+is smaller than Memtile. Say we have M tiles. With an 4x4 1.371000e-02 8.852128e-03
+architecture for which computation is free (see [3], [14]), we 5x5 failed 4.336479e-03
+6x6 failed 5.770197e-03
+write T once, we read T , and we reread (M −1)(k−1).
+j 0 7x7 7.455440e-03 5.288551e-03
+This is better than
+(cid:80)j
+l=0T l especially for large js. 8x8 9.203393e-03 6.502333e-03
+A compiler can target easily a tiling with zero DDR com-
+munications (for layer output tensors). In practice, zero DDR
+communications is not our final goal. VII. PERFORMANCEOFSPARSITY
+B. Iteration and Memory allocation In Table II, we present the performance of neural networks
+Take the schedule L ...L , let us apply the live tensor with sparsity, where the sparsity is applied to all the convolu-
+0 j
+analysis and tensor projections for a specific tile size u and tions(exceptthefirstonebecausethereareonlythreechannels
+o
+M tiles. We add two custom layers as follows and sparsity requires at least eight) for Resnet 50, Inception
+V3,andVGG16.Weestimatethetotalexecutiontimeforthree
+I (M),L ,L ,...L ,I (M)
+b 0 1 n e networks and seven configurations in Table II. We report also
+ThelayerI (M)isaniterationlayerorinputboundarythat the case where the compiler fails to generate code. Notice
+b
+takes the input tensor T and carves out a sub-tensor shape that the configuration 8×8 AIEs is never beneficial. A full
+−1
+and size (u −1)s+k. The layer I (M) is an iteration layer investigation is necessary.
+o e
+or output boundary that takes the input tensor u and copies Corner cases are represented as failure in Table II. Some
+o
+it to a tensor of shape and size T . For the purpose of the casesisbecauseofinabilitytobreaktheweighttensorevenly.
+j
+memory allocation, we have a legal schedule that describes Sometime is for incorrect data management especially for
+basicallythepropertyofthecomputation.Wecandomemory prime numbers. These are all issues that we will address as
+allocation. the technology mature. Please, note that VGG16 using 8x8
+9configuration is slower than 7x7 (by using sparse). For a
+symmetric computation too small sub-volume computations
+make the computation overall more inefficient and requiring
+more iterations for the same amount of data transfers. This is
+acasewheremoreHW doesnotimproveperformance,which
+is interesting and relevant.
+A. Depth-Wise Tiling for VGG16 3x3
+We present results for VGG16 because of simplicity and
+each layer tensor do not fit the three Memtile (of a 3 × 3
+system). We can apply the same approach to Resnet and
+inception. The generalized convolution idea is applicable.
+We take VGG and we instruct the DDR to be 16 times
+slower (4GBs/16) highlighting the need of fewer DDR com-
+munications.WetakeonlythepartthatrequiresDDRspillsfor
+each layer. In Figure 8, we show the performance for VGG16
+using DDR spills for each layer: 0.025s total time.
+We apply depth-wise tiling using two tiles and we achieve
+better performance at 0.022s. see Figure 9. Sparsity by itself
+withoutanytilingcanachieveonly0.021s.Sparsityandtiling
+improves even further and we achieve 0.014s, see Figure 10.
+We can appreciate the reduction of activation DDR commu-
+nications thanks to depth-wise tiling and the reduction of
+computation and weights communication by sparsity.
+VIII. CONCLUSIONS
+This is a multifaceted problem and we present a complete
+solution from training techniques, compilers, code generation,
+Hardware definition, and time estimations. It is a vertical
+softwaresystem,morecomplexthanjustaprototype,anditis
+used for the validation and comparison of different Hardware
+designs.Afewconvolutionshavebeenvalidatedinsimulation
+and in hardware.
+This could be seen as a quantization and sparsification
+problem. For example, how we can reduce the footprint of
+a CNN network. There are post training techniques that are
+targetingquantizationandunstructuredsparsity[10].Weneed
+to be more aggressive and training for it. Our sparsity is not
+Fig. 8: VGG16 3x3 DDR only
+reallyapropertyofthemodel,softwarecandescribeit,andthe
+hardwarecantakeadvantage;however,wedonotneedspecific
+hardware support at instruction level. To our knowledge we
+are the first applying sparsity to Tensor Cores such as AIE2 [3] G. Bilardi, A. Pietracaprina, and P. D’Alberto, “On the space and
+access complexity of computation dags,” in Graph-Theoretic Concepts
+overlays systematically.
+inComputerScience,26thInternationalWorkshop,WG2000,Konstanz,
+We demonstrated Sparsity can accelerate the computing in Germany,June15-17,2000,Proceedings. Springer,2000.
+MatrixmultiplicationandConvolutioninneuralnetworks.Ma- [4] J.Cai,Y.Wei,Z.Wu,S.Peng,andK.Ma,“Inter-layerschedulingspace
+definitionandexplorationfortiledaccelerators,”inProceedingsofthe
+trixmultiplicationisappealingfortheapplicationinLLMand
+50thAnnualInternationalSymposiumonComputerArchitecture,2023.
+application in GPUs. Convolutions is far richer in complexity [5] F.Chollet,“Keras,”2015.[Online].Available:https://keras.io
+anditisthework-horseforFPGAsbasedproductsandsystolic [6] P. D’Alberto, “Block sparsity and training,”
+https://github.com/paolodalberto/BlockSparsityyTraning,2020.
+array systems/computations.
+[7] ——, “Sparsefastmm,” 2020. [Online]. Available: https://github.com/
+paolodalberto/SparseFastMM/
+REFERENCES [8] T. A. Davis, “Direct methods for sparse linear systems volume 2 of
+fundamentalsofalgorithms,”inSIAM,2006.
+[1] S.AhmadandL.Scheinkman,“Howcanwebesodense?thebenefits [9] J.Deng,W.Dong,R.Socher,L.-J.Li,K.Li,andL.Fei-Fei,“Imagenet:
+ofusinghighlysparserepresentations,”2019. Alarge-scalehierarchicalimagedatabase,”in2009IEEEconferenceon
+[2] AMD, “rocsparse,” 2020. [Online]. Available: https://rocsparse. computervisionandpatternrecognition. IEEE,2009,pp.248–255.
+readthedocs.io/en/master/ [10] E. Frantar, S. Ashkboos, T. Hoefler, and D. Alistarh, “Gptq: Accurate
+10Fig. 9: VGG16 3x3 DDR with 2 tiles Fig. 10: VGG16 3x3 DDR with 2 tiles and sparse
+post-trainingquantizationforgenerativepre-trainedtransformers,”2023. [17] T. Jeong, E. Ghasemi, J. Tuyls, E. Delaye, and A. Sirasao, “Neural
+[11] S.Gray,A.Radford,andD.P.Kingma,“Gpukernelsforblock-sparse network pruning and hardware acceleration,” in 2020 IEEE/ACM 13th
+weights,” 2017. [Online]. Available: https://api.semanticscholar.org/ InternationalConferenceonUtilityandCloudComputing(UCC),2020.
+CorpusID:52220661 [18] M. Kurtz, J. Kopinsky, R. Gelashvili, A. Matveev, J. Carr, M. Goin,
+[12] ——,“Gpukernelsforblock-sparseweights,”inopenai.com,2017. W. Leiserson, S. Moore, N. Shavit, and D. Alistarh, Inducing and Ex-
+[13] T.Hoefler,D.Alistarh,T.B.Nun,N.Dryden,andA.Peste,“Sparsity ploitingActivationSparsityforFastInferenceonDeepNeuralNetworks.
+indeeplearning:Pruningandgrowthforefficientinferenceandtraining PMLR,2020.
+inneuralnetworks,”inJ.Mach.Learn.Res.,2021. [19] Z.Li,D.Orr,V.Ohan,G.D.costa,T.Murray,A.Sanders,D.Beker,and
+[14] J.-W. Hong and H. T. Kung, “I/o complexity: The red-blue pebble D.Masters,“Popsparse:Acceleratedblocksparsematrixmultiplication
+game,” in Symposium on the Theory of Computing, 1981. [Online]. onipu,”2023.
+Available:https://api.semanticscholar.org/CorpusID:8410593 [20] NVIDIA,“cusparse,”2020.[Online].Available:https://developer.nvidia.
+[15] Q. Huang, M. Kang, G. Dinh, T. Norell, A. Kalaiah, J. Demmel, com/cusparse
+J. Wawrzynek, and Y. S. Shao, “Cosa: Scheduling by constrained [21] J. Pool, “Accelerating sparsity in the nvidia ampere architecture,” in
+optimizationforspatialaccelerators,”in2021ACM/IEEE48thAnnual gtc/s22085,2020.
+InternationalSymposiumonComputerArchitecture(ISCA),2021. [22] E.Russo,M.Palesi,G.Ascia,D.Patti,S.Monteleone,andV.Catania,
+[16] K. L. Hunter, L. Spracklen, and S. Ahmad, “Two sparsities are better “Memory-awarednnalgorithm-hardwaremappingviaintegerlinearpro-
+than one: Unlocking the performance benefits of sparse-sparse net- gramming,” in Proceedings of the 20th ACM International Conference
+works,”inCoRRabs/2112.13896,2022. onComputingFrontiers,2023.
+11[23] T.Saad,“Iterativemethodsforsparselinearsystems,”inSIAM,2003.
+[24] Y. Saad, “Iterative methods for linear systems of equations: A brief
+historicaljourney,”inInSusanneC.Brenner,IgorE.Shparlinski,Chi-
+Wang Shu, and Daniel B. Szyld, editors, 75 Years of Mathematics
+of Computation, volume 754 of Contemporary Mathematics. American
+MathematicalSociety,2020.
+[25] A. E. Siswanto, “Block sparsity and weight initialization in neural
+networkpruning,”inPhDthesis,MassachusettsInstituteofTechnology,
+2021.
+[26] Z. Yao, A. Gholami, S. Shen, K. Keutzer, and M. W. Mahoney,
+“Adahessian:Anadaptivesecondorderoptimizerformachinelearning,”
+inAAAI,2021.
+[27] S.Yu,Z.Yao,A.Gholami,Z.Dong,M.W.Mahoney,andK.Keutzer,
+“Hessian-awarepruningandoptimalneuralimplant,”2021.
+[28] B.Zandonati,A.A.Pol,M.Pierini,O.Sirkin,andT.Kopetz,“Fit:A
+metricformodelsensitivity,”2022.
+12
