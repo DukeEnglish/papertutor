@@ -1,0 +1,1377 @@
+Representing Rule-based Chatbots with Transformers
+DanFriedman AbhishekPanigrahi DanqiChen
+PrincetonLanguageandIntelligence(PLI),PrincetonUniversity
+{dfriedman,ap34,danqic}@cs.princeton.edu
+Abstract
+Transformer-basedchatbotscanconductfluent,natural-soundingconversations,
+butwehavelimitedunderstandingofthemechanismsunderlyingtheirbehavior.
+Prior work has taken a bottom-up approach to understanding Transformers by
+constructingTransformersforvarioussyntheticandformallanguagetasks,such
+as regular expressions and Dyck languages. However, it is not obvious how to
+extend this approach to understand more naturalistic conversational agents. In
+this work, we take a step in this direction by constructing a Transformer that
+implementstheELIZAprogram,aclassic,rule-basedchatbot. ELIZAillustrates
+someofthedistinctivechallengesoftheconversationalsetting,includingbothlocal
+patternmatchingandlong-termdialogstatetracking. Webuildonconstructions
+from prior work—in particular, for simulating finite-state automata—showing
+how simpler constructions can be composed and extended to give rise to more
+sophisticatedbehavior. Next,wetrainTransformersonadatasetofsynthetically
+generatedELIZAconversationsandinvestigatethemechanismsthemodelslearn.
+Ouranalysisillustratesthekindsofmechanismsthesemodelstendtoprefer—for
+example,modelsfavoraninductionheadmechanismoveramoreprecise,position
+basedcopyingmechanism;andusingintermediategenerationstosimulaterecurrent
+datastructures,likeELIZA’smemorymechanisms. Overall,bydrawinganexplicit
+connectionbetweenneuralchatbotsandinterpretable,symbolicmechanisms,our
+resultsofferanewsettingformechanisticanalysisofconversationalagents.1
+1 Introduction
+State-of-the-artTransformer-basedchatbotssuchasChatGPThaveremarkablecapabilityofconduct-
+ingfluent,natural-soundingconversations,butwehavealimitedunderstandingoftheunderlying
+mechanisms. One approach to understanding Transformers is to use constructions: identifying
+explicit mechanisms that a Transformer could theoretically use to solve a particular task. Prior
+workhasconstructedTransformersforavarietyofsyntheticandformallanguagetasks,including
+regularlanguages[12,45],Dycklanguages[81],andPCFGs[84]. However,thislineofworkhas
+focusedmainlyonsingle-sentencetasks,andhowtoextendtheseapproachestomorenaturalistic
+conversational settings remains as an open question. In this work, wepropose to use rule-based
+chatbotsforformalandmechanisticanalysisofneuralconversationalagents. First,weconstructa
+Transformerthatimplementsaclassicrule-basedchatbotalgorithm,andthenweusethisconstruction
+toinformaseriesofempiricalinvestigationsintohowTransformerslearnconversationaltasks.
+Inparticular,wefocusonELIZA[77],oneofthefirstartificialchatbots. TheELIZAalgorithmis
+simplebutexhibitsanumberofsophisticatedconversationalbehaviors(Fig.1). Themajorityof
+ELIZA’sbehaviorisbasedonlocalpattern/transformationrules: ELIZAcomparestheuser’sinput
+to an inventory of templates, and responds by reassembling the input according to an associated
+transformationrule. However,ELIZAalsoemploysseveralmechanismsthatmakeuseofthefull
+conversationalhistory,includingamechanismforvaryingitsresponsesbetweensuccessiveturns,
+1Codeanddataareavailableathttps://github.com/princeton-nlp/ELIZA-Transformer.
+Preprint.Underreview.
+4202
+luJ
+51
+]LC.sc[
+1v94901.7042:viXraFigure1: AnexampleofanELIZAconversation,adaptedfrom[77]. ELIZAusesbothlocalpattern
+matchingandtwolong-termmemorymechanisms(cyclingthroughresponses,andamemoryqueue).
+Ateachturn,ELIZAcomparesthemostrecentinputtoaninventoryofdecompositiontemplates
+andappliesoneoftheassociatedreassemblyrules. Ifatemplateismatchedmorethanonceina
+conversation,ELIZAcyclesthroughalistofpossiblereassemblyrulesbeforerepeatingaresponse.
+Iftheinputcontainsaspecialkeyword(“my”),ELIZAstoresitinamemoryqueue. Later,ifaninput
+doesnotmatchanyofthetemplates,ELIZAreadsthefirstmemoryfromthequeue.
+and a “memory queue” to refer to turns from the beginning of the conversation. The resulting
+conversationscanbesurprisinglynaturalistic,withearlyusersascribingemotionandunderstanding
+totheprogram[78]. ELIZAthereforeoffersanaturalnextstepfromsimpler,sentence-levelsettings,
+comprisingbothlocalpatternmatchingandlong-distancedialogstatetracking.
+Inthefirstpartofthepaper(Sec.3),wedescribehowtoimplementtheELIZAalgorithmwitha
+decoder-onlyTransformer[69](Fig.2).Westartbyshowinghowwecanuseconstructionsfromprior
+workasmodularbuildingblocks—inparticular,bydecomposingthetaskintoacascadeoffinitestate
+automata[45,8],alongwithacopyingmechanismforgeneratingresponses. Thisdecomposition
+atteststotheusefulnessofalgebraicautomataasbuildingblocksforcharacterizingcomplexbehavior
+in Transformers. On the other hand, we also identify alternative constructions for key subtasks,
+including a more robust copying mechanism (Sec. 3.2) and memory mechanisms (Sec. 3.3) that
+make use of intermediate ELIZA outputs—akin to a scratchpad [54] or Chain-of-Thought [75].
+Thesealternativeconstructionsinformourempiricalinvestigationslateron. Incidentally,theELIZA
+frameworkhappenstobeTuringcomplete[33];ourresultsthereforeleadtoasimple,alternative
+constructionforaTransformerthatsimulatesaTuringmachine,whichwediscussinAppendixB.4.
+Inthesecondpartofthepaper,wegenerateadatasetofELIZAtranscriptsandtrainTransformers
+tosimulatetheELIZAalgorithm(Sec.4.1). Firstweinvestigatewhichaspectsofthetaskaremore
+difficult for the models to learn, finding that models struggle the most with precise copying and
+withthememoryqueuemechanism—whichrequiresthecompositionofseveraldistinctmechanisms
+(Sec.4.2). Next,weinvestigatewhichofourhypothesizedmechanismsbettermatchwhatthemodels
+learn,andhowtheresultvariesaccordingtothedatadistribution(Sec.4.3). Forcopying,wefind
+thatmodelshaveastrongbiasforaninductionheadmechanism[55],leadingtoworseperformance
+onsequenceswithahighdegreeofinternalrepetition. Forthememorycomponents,wefindthat
+modelsmakeuseofintermediateoutputstosimulatetherelevantdatastructures,underscoringthe
+importanceofconsideringintermediatecomputationinunderstandingTransformers,evenwithout
+an explicit scratchpad or Chain-of-Thought. Together, our results illustrate that ELIZA offers a
+richsettingformechanisticanalysisoflearningdynamics,allowingustodecomposethetaskinto
+subtasks,conductfine-grainedbehavioralanalysis,andconnectthisanalysistopredictionsaboutthe
+model’smechanisms.
+Overall, by drawing an explicit connection between neural chatbots and interpretable, symbolic
+mechanisms, our results offer a new setting for algorithm-level understanding of conversational
+agents. We conclude by discussing the broader implications of our results for future work on
+interpretabilityandthescienceoflargelanguagemodels.
+22 Background: ELIZA
+WestartbydescribingtheELIZAalgorithm[77],followingthepresentationof[38]. TheELIZA
+algorithm can be decomposed into two types of behavior: local pattern matching and long-term
+memory,illustratedinFig.1. WediscussELIZAinmoredetailinAppendixA.
+2.1 LocalPatternMatching
+First,ELIZAcomparesthemostrecentuserinputtoaninventoryofpattern/transformationrules,
+suchasthefollowing:
+0 YOU 0 ME→WhatmakesyouthinkI3you?
+Theleft-handsideoftheruleiscalledadecompositiontemplateandcorrespondstoasimpleregular
+expression,wherethe0symbolisawildcardthatmatches0ormoreoccurrencesofanyword. Ifan
+inputmatchesatemplate,itispartitionedintoasetofdecompositiongroupscorrespondingtothe
+wildcards. Forexample,theinput“Itseemslikeyouhateme”wouldbedecomposedintofourgroups:
+(1)Itseemslike(2)you(3)hate(4)me. Theright-handsideoftheruleiscalledareassemblyrule,
+andaresponseisgeneratedbyreplacinganynumberinthereassemblyrulewiththecontentofthe
+correspondingdecompositiongroup. Inthiscase,ELIZAwillrespond,“WhatmakesyouthinkI
+hateyou?” AnELIZAchatbotisdefinedbyaninventoryoftheserules,whichareorganizedintoa
+configurationfileknownasthescript. Eachdecompositiontemplateisassignedarankandassociated
+withoneormorereassemblyrules. Givenaninput,ELIZAfindsthehighestrankedtemplatethat
+matchesthesentenceandappliesoneoftheassociatedreassemblyrules. Thescriptalsomustassign
+somereassemblyrulestoanulltemplate,whichisusedwhennoneoftheothertemplatesmatches.
+2.2 Long-TermMemory
+Whilemostresponsesconsideronlythepreviousutterance,ELIZAalsoincludestwomechanismsfor
+referringtoinformationfromearlierintheconversation.
+Cyclingthroughreassemblyrules First,eachtemplateinascriptcanbeassociatedwithalistof
+reassembly rules. If the template is matched multiple times in a conversation, ELIZA will cycle
+through all of the reassembly rules in the list before returning to the first item. For example, in
+Weizenbaum’sELIZAscript,iftheinputcontainstheword“sorry,”ELIZAwillinitiallyrespond
+with“Pleasedon’tapologize.” Iftheusersays“sorry”asecondtime,ELIZAwillsay“Apologies
+aren’tnecessary.” Iftheusercontainstosay“sorry”,ELIZAwilleventuallysay“I’vetoldyouthat
+apologiesarenotrequired,”andthencyclebacktothefirstruleinthelist.
+Memoryqueue Second,ifanutterancecontainsaparticularkeyword(bydefault,theword“my”),
+ELIZAstoresitinaqueue,referredtoasthememoryqueue. Laterintheconversation,iftheuser’s
+inputdoesnotmatchanyofthetemplates,ELIZAwilloutputthefirstiteminthequeue,applying
+oneofasetofmemoryreassemblyrules. Forexample,atthebeginningoftheconversationinFig.1,
+theuserstates“Myboyfriendmademecomehere.” Manyturnslater,theuserentersasentencethat
+doesnotmatchanyofthepatterns,andELIZAreplies,“Doesthathaveanythingtodowiththefact
+thatyourboyfriendmadeyoucomehere?”
+3 Constructions
+NowwepresentourconstructionsforimplementingtheELIZAprogramwithaTransformerdecoder.
+Wedividetheconstructionsintofoursubtasks,illustratedinFig.2. Wedescribetheconstructionsat
+ahigh-levelinthissectionanddeferthedetailstoAppendixB.
+Setup Weconsideradecoder-onlyTransformerwithsoftmaxattention. Ateachturninthecon-
+versation,theinputwillbetheconcatenationoftheconversationsofar,witheachuserinputand
+eachELIZAresponseprecededbyaspecialdelimitercharacter,eitheru: ore:,respectively. The
+constructionsusenopositionalencodings,aswecanusetheself-attentionmasktoinferpositional
+information[32,39],andtosegmenttheinputintoturns,inordertorestrictattentiontoaparticular
+utterance. SeeAppendixB.1formoredetails.
+3.1 LocalPatternMatching
+Westartbyconsideringasingleturnintheconversation,whichinvolvesfirstfindingatemplatethat
+matchestheinput,andthengeneratingaresponseusingtheassociatedtransformationrule.
+3Figure2:TheinputtotheTransformeristheconversationhistory,consistingofuserinputs(beginning
+withu:) followedbyELIZA’sresponses(e:). Theconstructionsthenhavefourparts. First, the
+inputisdividedintosegments,eachcorrespondingtoauserinputorELIZAresponse. Second,the
+modelattemptstomatcheachuserinputtoadecompositiontemplate;thisstepisexecutedinparallel,
+witheachinputcomparedtoeverypossibledecompositiontemplate. Themodelthenidentifiesthe
+highestscoringtemplateandselectsatransformationrule,takingintoaccountthenumberoftimes
+thistemplatehasbeenmatchedearlierintheconversation. Finally,themodelgeneratesananswer,
+eitherbyapplyingatransformationruletothemostrecentuserinput(4a)orbytransforminganinput
+fromearlierintheconversation,usingthe“memoryqueue”mechanism(4b).
+Matchingtemplates Fortemplatematching, wemakeuseofthefactthatELIZAtemplatesare
+equivalenttostar-freeregularexpressions[47];thesecanberecognizedbysimulatingacorresponding
+finite-stateautomaton. Webuildontheconstructionsof[45,8]. Atahighlevel,wecanrecognize
+atemplatewithLsymbolsusingaTransformerwithLlayers. Ateachlayerℓandpositioni,the
+Transformerdetermineswhethertheinputmatchesthefirstℓsymbolsofthetemplateatpositioni.
+Thefinaloutputcanbeusedtoboth(a)determineifaninputmatchesatemplate,and(b)decompose
+theinputaccordingtothetemplate’sdecompositiongroups. Ourconstructionsrecognizemultiple
+templatesinparallelusingtwoattentionheadsperlayer—oneattendinguniformlytothefullprefix,
+andoneattendingtothepreviousposition. ThedepthoftheTransformerthereforescaleswiththe
+lengthofthelongesttemplateintheconfigurationscript,andthewidthscaleswiththetotalnumber
+oftemplatesinthescript. SeeAppendixB.2formoredetails.
+Generatingaresponse Nowweassumethatwehaveidentifiedamatchingtemplateandthatthe
+embeddingforeachinputtokenidentifiesthedecompositiongrouptowhichthattokenbelongs. The
+nextstepisnowtoapplythechosenreassemblyruletotheinputtogeneratearesponse. Ateach
+generationstep,themodelneedstoeithergenerateaconstantword(definedbythereassemblyrule),
+orcopyawordfromoneofthedecompositiongroupsoftheuser’sinput. Wefocushereontwo
+high-levelcopyingmechanisms,deferringtheprecisedetailstoAppendixB.3.
+Option1: Content-basedattention(inductionhead) Thefirstpossibleapproachisbasedonthe
+inductionhead[55]. Thismechanismhasbeenwidelystudiedinpriorworkandisconsideredakey
+primitiveinTransformers[e.g. 64,65,4,19]. Inoursetting,wedefineaninductionheadasfollows:
+Givenaninputsequencew,ateachoutputpositioni,aninductionheadattendstoaninputposition
+j suchthatw ,...,w = w ,...,w , andcopiesthetokenvaluew (wherenissome
+i−n i j−n−1 j−1 j
+contextsize). Thismechanismhasakeydrawback: asnotedby[86],thismechanismassumesthat
+eachwordhasauniquen-gramprefix,soitcanfailifthesamen-gramappearsmorethanoncein
+theinputsequence.
+Option2: Position-basedattention Toavoidtheseshortcomings,weproposeasecondoptionthat
+usespositionratherthancontenttoidentifythenextwordtocopy. Observethat,ateachstep,we
+canidentifythepositiontocopynextasafunctionofthereassemblyrule; thenumberoftokens
+generatedsofar;andthenumberoftokensineachdecompositiongroup. Thiscanbeaccomplished
+usinganattentionlayertoobtaintherelevantcounts,andafeedforwardlayertocalculatethetarget
+position. (SeeAppendixFig.10fordetails.) Comparedtotheinductionhead,thismechanismworks
+equallywellregardlessofthecontentofthecopyingsegment. Thedrawbackofthisapproachisthat
+itreliesonprecisepositionarithmetic. Thistypeofpositionarithmeticmightnotgeneralizetolonger
+positions,whichiswhy[86]donotallowitinRASP-L,theireasily-learnablesubsetofRASP.
+43.2 CyclingthroughReassemblyRules
+Now we turn to the first subtask that makes use of information from earlier in the conversation:
+cyclingthroughreassemblyrules. Specifically, wealloweachtemplatettobeassociatedwitha
+sequenceofreassemblyrulesr ,...,r . Whentemplatetappearsinaconversationfortheithtime,
+1 M
+themodelshouldrespondwithruler . Weconsidertwomechanisms,illustratedinFig.11.
+i%M
+Option1: Modularprefixsum Onenaturaloptionistousethemodularprefixsummechanism
+describedby[45]: anattentionheadcountsthenumberoftimesthasbeenmatched,andanMLP
+outputs the result modulo M. We anticipate that such a mechanism might perform worse as the
+sequencegrowslonger,asthemodelmustattendoveralongersequenceandprocessalargercount.
+Additionally,differenttemplatescanhaveadifferentnumbersofreassemblyrules,sothemodelmust
+learnaseparatemodulusforeachtemplate.
+Option2: Intermediateoutputs Themodelcanavoidmodulararithmeticbymakinguseofits
+earlier outputs. Specifically, the model can reuse the template matching mechanism to identify
+outputswhereitrespondedtotemplatetwithanyofr ,...,r . Themodelcanthenattendtothe
+1 M
+mostrecentoftheseresponsesr ,andrespondwithr . Thismechanismworksregardlessof
+i (i+1)%M
+thecyclenumber. However,itwouldfailifthesamereassemblyruleappearsmorethanonceinthe
+list,orifthereassemblyrulesaredifficulttoidentify.
+3.3 MemoryQueue
+Finally,weincorporatethememoryqueuecomponent. RecallthatELIZAaddsauserinputtothe
+memory queue if it contains a special memory keyword (e.g. “my”) and matches an associated
+template. ELIZAreadsanitemfromthememoryqueueif(a)themostrecentinputdoesnotmatch
+anytemplatesand(b)thequeueisnotempty. Giventheoutputofthetemplate-matchingstage,is
+simpletodeterminewhetheraninputrepresentsanenqueueeventorano_matchevent. Themain
+challengeistodeterminewhetherthereareanyitemsinthequeue,andsowhetheragivenno_match
+inputshouldtriggeradequeue. Again,wepresenttwomechanisms,illustratedinFig.11
+Option1:Gridworldautomaton Thefirstapproachweconsideristousetheconstructionfrom[45]
+for simulating a one-dimensional “gridworld” automaton, which has S numbered states and two
+actions: “incrementthestateifpossible”and“decrementthestateifpossible.” Ateachenqueue
+event, the automaton increments the state if possible, and at each no_match event, the model
+decrementsthestateifpossible. Ifthestateisdecremented,wecanconcludethatthisinputshould
+triggeradequeue. Wecanthencalculatethenumberofdequeuesinthesequence,d,andreadthe
+dthmemoryinthequeue. [45]presentagridworldconstructionwithtwoTransformerlayersand2S
+attentionheads,whichwouldallowustoimplementamemoryqueuewithamaximumsizeofS.
+Option2: Intermediateoutputs Alternatively,asabove,wecaninsteadidentifydequeueopera-
+tionsbyexaminingearlierELIZAoutputs. Byreusingthetemplatematchingmechanism,wecan
+checkwhetheranELIZAresponsematchesoneofreassemblyrulesassociatedwiththedequeue
+operation. Then,lettingddenotethenumberofdequeueoperations,ifdislessthanthenumberof
+enqueueoperations,wereadthedthmemoryfromthequeue. Comparedtothegridworldapproach,
+thisconstructionusesfewerattentionheadsanddoesnotlimitthesizeofthememoryqueue,but
+itdoesimposealimitonthetotalnumberofenqueues(becauseweneedtoembedthenumberof
+enqueuestoattendtotherightmemory).
+4 Experiments
+NowweinvestigatehowTransformerslearnthisELIZAprograminpracticewhenwetrainthemon
+conversationtranscripts. First,westudyhowwellthemodelsperform,withthegoalofunderstanding
+whichaspectsofthetaskaremoredifficult. Inthesecondpartofthesection,weexaminetheinternal
+propertiesofthemodeltounderstandhowthelearnedsolutionscomparetoourconstruction.
+4.1 ExperimentSetup
+Generatingdata Fortheseexperiments,wegeneratesyntheticELIZAdata. Forourmainexperi-
+ments,wefirstsampleaconfigurationscriptconsistingof32templates,eachcontaining2-4wildcard
+symbols,withuptofivereassemblyrulespertemplate. Weensurethateachreassemblyrulebegins
+withauniquetwo-letterprefix;thiswillprovideaproxyfordistinguishingrulerecognitionerrors
+fromcopyingerrors. Givenascript,wesamplemulti-turnconversationswithupto512words. At
+5Full response Prefix only
+1.00
+1.0
+0.8 0.98
+Turn type Turn type
+0.6 Single turn 0.96 Single turn
+Multi-turn (no cycling) Multi-turn (no cycling)
+0.4 Multi-turn (cycling) 0.94 Multi-turn (cycling)
+Memory queue Memory queue
+0.2 Null template Null template
+0.92
+0.0
+0 50000 100000 0 50000 100000 0.90
+Step Step Full response Prefix only
+(a)Accuracy(trainingcurve). (b)Accuracy(endoftraining).
+Figure3: Turn-levelaccuracyofTransformerstrainedonELIZAconversationsoverthecourseof
+training(Fig.3a)andatthefinalcheckpoint(Fig.3b),formodelstrainedwiththreerandomseeds.
+Transformersquicklylearntoidentifythecorrectreassemblyrule(measuredbyPrefixonlyaccuracy),
+and take longer to learn to implement the transformation correctly (Full response). Accuracy is
+slightlyworseonmulti-turnandmemoryqueueexamples;see§4.2.
+eachturn,wesampleatemplate,andthensampleasentencethatmatchesthattemplatebyreplacing
+eachwildcardwith0-10wordssampleduniformlyfromthevocabulary,andthengeneratingare-
+sponseaccordingtotheELIZArules. Thevocabularyconsistsofthe26lowercaseletters. Details
+aboutdatagenerationareprovidedinAppendixC.1.
+Modelandtraining WetrainTransformerswitheightlayers,twelveattentionheadsper-layer,anda
+hiddensizeof768. WeusetheGPT-2architecturebutremovethepositionembeddingsandtrain
+allmodelsfromscratch. ThemodelsaretrainedtopredicttheELIZAresponses(andnottheuser
+inputs). SeeAppendixC.2formoredetails.
+4.2 WhichPartsoftheELIZAProgramareHardertoLearn?
+We start by training Transformers on ELIZA data and measuring how well they perform on the
+differentsubtasks. HerewefixthescriptparameterstothevaluesdescribedinAppendixC.1. In
+Figure 3, we plot the accuracy over the course of training and at the final checkpoint. The Full
+responseaccuracyistheper-turnexactmatchaccuracy. ThePrefixonlyaccuracyistheaccuracy
+onthetwo-wordprefixoftheresponse,whichweensureisuniqueforeachreassemblyrule. This
+metricprovidesaproxyfordistinguishingwhethererrorsareduetoeither(a)failuretoidentifythe
+correctrule,or(b)failuretoimplementtherulecorrectly. Weadditionallybreakdowntheresults
+byturntype,definedasfollows: Single-turn: Thefirstresponseintheconversation. Multi-turn(no
+cycling): Theresponseforthefirstinstanceofatemplateintheconversation. Multi-turn(cycling):
+Theresponseforatemplatethathasalreadyappearedatleastonceintheconversation. Memory
+queue: Responsesthatreadfromthememoryqueue. Nulltemplate: Responsestoinputsthatdonot
+matchanytemplates,whenthememoryqueueisempty.
+Accuracy by subtask In Figure 3a, we see that the models quickly learn to identify the correct
+action(asmeasuredbyprefixaccuracy),achievingnear-perfectaccuracyonalmostallcategories.
+Interestingly,theexceptionisthenulltemplate,whichisusedwhentheinputdoesnotmatchany
+otherpatternandthememoryqueueisempty. Lookingatthefinalcheckpoint(Fig.3b),weseethat
+accuracyishigh,butstillimperfect,withslightlyworseperformanceinthemulti-turnsetting. Inthe
+remainderofthesection,weexaminetheseerrorsinmoredetailtobetterunderstandwhichaspects
+ofthetaskaremoredifficulttolearn.
+Erroranalysis InFigure4,wetestwhetherthemodel’serrorsarecorrelatedwithvariousproperties
+oftheinput. Weidentifytwomainissues. First,themodelsseemtostrugglewithprecisecopying.
+InFig.4a, weseethataccuracyisstronglycorrelatedwiththetotalnumberoftokensthemodel
+hastocopy,andonlyslightlycorrelatedwiththecomplexityofthedecompositionrule(definedas
+thenumberofdistinctcopyingsegmentsinthetransformation). Similarly,Fig.4b(left)showsthat
+memoryqueueaccuracydecreaseswiththedistancebetweenthecurrentturnandthetargetmemory,
+perhapsindicatingissueswithlong-distancecopying. Second, someerrorsseemtoberelatedto
+trackingthestateofthememoryqueue. Fig.4b(right)showsthataccuracyisnegativelycorrelated
+withthetotalnumberofenqueueanddequeueoperationsinthesequence. Fig.4cshowsthatthe
+modelperformsperfectlyonnullinputs,providedthattherehavebeennomemoryturns;accuracy
+6
+)hctam
+tcaxe(
+ycaruccA
+)hctam
+tcaxe(
+ycaruccA1.00
+1.0
+1.0
+0.98
+0.8
+0.9
+0.96 0.6 Copy segments
+0.8
+1
+0.94 2 0.4
+3 0.7
+0 10 20 30 5 10 5 10 15 0 2 4 6 8
+Copy length (tokens) Distance (turns) Queue operations Number of enqueues
+(a)Copying. (b)Dequeues. (c)Nullinputs.
+Figure4: WhichaspectsofthetaskaremostdifficultforTransformerstolearn? Copying(Fig.4a):
+Accuracydecreasesconsiderablywiththetotalnumberoftokenstocopy,anddecreasesslightlywith
+thenumberofdistinctcopyingsegments. Memoryqueue(Fig.4b): Thedequeueaccuracydecreases
+whenthereisagreaterdistancetothetargetmemoryandwhentherehavebeenmoretotalqueue
+operationsearlierinthesequence. Nulltemplate(Fig.4c): Themodelsdoperfectlyonnullinputs
+providedtherehavebeennomemoryturnsinthesequence;accuracydecreaseswiththenumberof
+enqueues,indicatingthatthemodelsstrugglewhenthequeuehasbeenusedbutisnowempty.
+1.0
+50
+0.8
+0
+0.6 test n-gram
+0.01 50 1 α Example sentence 0.4 0.1 2
+1.0 3
+0.01 c e e e e b p p f z f z z p w 100.0 100 4 0.1 c p x p p b r r r r d r n r w 0.2 5
+1 c y k g p f x j b c j d h c w 0.0 150
+100 c r o k s r b y u j s a p g w 0.01 0.1 1.0 100.0 0.01 0.1 1.0 100.0
+train train
+(a)Examples. (b)Comparinggeneralization. (c)Comparingmechanisms.
+Figure5: Wetrainandtestmodelsondatasetsthatvaryinwhethercopyingsegmentsaremoreorless
+likelytocontainthesamen-grammultipletimes(Fig.5a). Modelsgeneralizepoorlytodatawith
+significantlymoreorlessrepetitioncomparedtothetrainingdistribution(Fig.5b). Fig.5csuggests
+thatmodelstrainedonlessrepetitivedataassignhigherattentionscorestotokenswithmatching
+contexts,ratherthancalculatingthecorrecttargetposition. See§4.3.
+decreaseswiththenumberofenqueues,indicatingthatthemodelsstrugglewhenthequeuehasbeen
+usedbutisnowempty. SeeadditionalanalysisinAppendixSec.D.1.
+4.3 WhichMechanismsDoTransformersLearn?
+Nowweturntotheinternalpropertiesofthemodeltotrytounderstandwhatmechanismstheylearn
+andhowtheycomparetoourconstruction.
+Comparing copying mechanisms In Section 3.1, we identified two possible mechanisms for
+copying: aninductionhead,whichattendsbasedonthecontentoftheinput,andacounting-based
+mechanismsthatattendsbasedonposition. Wepredictedthattheinductionheadwillfailwhenthe
+samen-gramappearsmorethanonceintheinput,whilethecountingmechanismwillgeneralize.
+Toexplorewhichmechanismthemodelsseemtolearn,wegenerate(single-turn)datasetsthatvary
+in how likely it is for the same n-gram to appear multiple times in a sequence. This property is
+controlledbyaparameterα,withα < 1correspondingtomorerepetitionofn-gramsandα > 1
+makingitmorelikelythatmostn-gramsareunique.2 SeeFig.5aforexamples.
+2Specifically,givenatemplate,wegenerateasentenceasfollows: Foreachwildcardinthesentence,we
+sampleavectorp∼Dirichlet(α1),where1isa26-dimensionalvectorofall1’sandαistheconcentration
+parameter. Thenwereplacethewildcardwith0-20wordssampledfromCategorical(p). Withα<1,pis
+morelikelytoconcentratemostprobabilityonasmallnumberofitems,meaningeachsegmentismorelikelyto
+containrepeatedn-grams.Withα>1,pismorelikelytobeclosetotheuniformdistribution(corresponding
+tooursettingintheprevioussection).SeeAppendixC.1formoredetails.
+7
+)hctam
+tcaxe(
+ycaruccA
+)hctam
+tcaxe(
+ycaruccA
+)hctam
+tcaxe(
+ycaruccA
+erocs
+noitisop
+- erocs
+marg-n
+)hctam
+tcaxe(
+ycaruccA0.8
+0.8
+0.6
+Transformation 0.6 Dequeue
+0.4 Same Same
+Increment 0.4 Decrement
+Neither Neither
+0.2
+0.2
+0.0 0.0
+Full response Prefix only Full response Prefix only
+(a)Responsecycling. (b)Memoryqueue.
+Figure6: Wedesigncounter-factualexperimentstotestwhethermodelsmakeuseofintermediate
+generationstokeeptrackoftheresponsecycle(Fig.6a)ormemoryqueue(Fig.6b),orrelyonly
+ontheuserinputs. Errorbarsshow95%confidenceintervalovermodelstrainedwiththreerandom
+seeds. Bothexperimentsindicatethatthemodelsusetheirownoutputsfromearlierinthesequence.
+Whenweeditthemodel’searlieroutput,wecanreliablyinfluenceittoincrementtheresponsecycle
+orreadamemoryfromearlierinthequeue.
+Westartbytrainingmodelsonthefourdifferentdatasetsandevaluatinghowwelltheygeneralize
+todatasetswithmoreorlessrepetition. ThisresultisplottedinFigure5b. Themodeltrainedwith
+theleastamountofrepetition(α = 100)performswellin-domainbutsuffersseveredegradation
+ondatawithmorerepetition;thisprovidespreliminaryevidencethat,inourdefaultsetting,models
+learnaninductionheadmechanismthatdoesnotgeneralizewhenn-gramscanrepeat. Ontheother
+hand,modelstrainedonthemostrepetitivedata(α=0.01)generalizepoorlytohighervaluesofα.
+Thebest-generalizingmodelistrainedwithaα = 0.1,suggestingthatsomemoderateamountof
+repetitionisneededtolearnarobustmechanism. InAppendixFig.13,weplottheseresultsoverthe
+courseoftraining,indicatingthatthemostrepetitivedataalsotakeslongertolearn.
+Togetasenseofwhatmechanismthesemodelsactuallylearn,weexaminethefinallayerattention
+heads. Specifically,givenanELIZAresponse,foreachoutputpositioni,wecalculatethepositionj
+oftheinputtokenthatshouldbecopiednext. Thenwecalculatetheaveragepre-softmaxattention
+scorebetweenthequeryembeddingatpositioniandkeyembeddingsdrawnfromothervalidation
+examples that satisfy one of two conditions: either the key has same n-gram prefix as the query
+i, but appears at a position k ̸= j; or the key appears at the target position j but has a different
+n-gramprefix(w ̸=w ). InFigure5c,weplotthedifferencebetweenthesescoresfor
+i−n:i j−n−1:j−1
+differentn-gramwindows,averagingoverattentionheads,withpositivevaluesindicatingthatthe
+modelassignshigherscorestocontentthanposition. (Weplottheresultsforeachattentionheadin
+AppendixFig.14.) Whenα≥1,themodelsprefercontenttopositiononcethereisaprefixmatch
+ofatleastthreetokensinlength. Forallmodels,thecontentscoreincreaseswiththelengthofthe
+matchingn-gram,withasteeperincreasewhenα<1. Themodeltrainedwithamoderateamount
+ofrepetition(α=0.1)generalizesthebestandisalsotheonlymodelthatpreferspositiontocontent
+evenatthelongestcontextwindow. Whileallmodelsaresensitivetocontenttosomeextent,the
+resultsillustratehowchangingthedatadistributioncaninfluencewhichmechanismthemodeluses,
+andhowwelltheygeneralizeasaresult.
+Comparingmemorymechanisms Finally,weexaminewhichmechanismthemodelslearnforthe
+twosubtasksthatrelyoninformationfromearlierintheconversation: cyclingthroughreassembly
+rules,andthememoryqueue. InSections3.2and3.3,weofferedtwopossibleconstructionsforeach
+subtask: oneconstructionbasedonsimulatinganautomatonandonebasedonprocessingpreviously
+generated outputs. Here, we designed counter-factual experiments to test whether the model is
+sensitivetopreviousintermediateresponses. Foreachmechanism,weeditedthemodel’sresponseto
+anintermediateturninthesequenceandthentestedthemodel’sresponseatasubsequentturn. (See
+AppendixC.3fordetails.) InFigure6,wetestwhethertheresponseisconsistentwiththeautomaton
+construction, whichpredictsthatthereponsewillbeunchanged(Same); theintermediate-output
+construction,whichpredictsthattheresponsewillchangeinaspecificway—eitherincrementingthe
+cyclecounterorreadingamemoryfromearlierintheclue;orwhetheritmatchesneitherprediction.
+Inbothcases,themodel’sbehaviorismostconsistentwiththeintermediate-outputhypothesis,either
+incrementingthecyclecounterordecrementingthememoryqueuecounteraspredicted. Thisresult
+illustratestheimportanceofconsideringintermediateoutputsinunderstandingTransformerbehavior,
+evenwithoutanexplicitscratchpadorChain-of-Thought.
+8
+noitroporP noitroporP5 DiscussionandRelatedWork
+Expressivitywithformallanguages Numerousworkshaveformalizedtheexpressivepowerof
+Transformers on formal languages. [58, 61, 13] show that Transformers with hard attention are
+Turingcomplete,and[74]studytheirstatisticallearnability. [50,48,30,28]furtherdistinguishthe
+expressivityoftransformerswithdifferenthardattentionpatterns. Otherworkshaveinvestigated
+encodingspecificalgorithmsinsmallersimulators,e.g.bounded-depthDycklanguages[81],modular
+prefix sums [9], adders [51], regular languages [12], sparse logical predicates [18], and n-gram
+language models [67]. [45] propose a unified theory for expressivity of different automata with
+transformers. Wereferthereadersto[66]foramorecomprehensivesurvey. Buildingontheseworks,
+numerousrecentworkshavetriedtoarguetheexpressivityoftransformerswithin-contextlearning.
+[24,3,23,2,10,42,26,72,71,56,17]havearguedthattransformerscansimulatespecificmachine
+learningalgorithms(e.g. linearregression)onin-contextexamples. However,therelationbetween
+theconstructionsandtheperformanceofTransformersonrealworlddatasetshasbeenlargelyunclear.
+Ourframeworkshowsthattheseconstructionscanbenon-triviallyextendedtoshowcapabilities
+oflanguagemodelsasgeneralconversationalagents. Anumberofworkshavedemonstratedthe
+theoreticaladvantageofscratchpads[54]andchain-of-thought[75]fortheexpressivityofbounded
+Transformermodels[21,43,53,49,1,36,35]. OurexperimentsillustratehowTransformerstrained
+onELIZAdatamakeuseoftheirownintermediateoutputstosimulatedatastructuresfordialog
+tracking,highlightingtheimportanceofintermediateoutputsevenwithoutanexplicitscratchpad.
+WehopethatELIZAinspiresfutureworkstoconnectexistingconstructionstotheemergentabilities
+Transformersshowatscale.
+Challenges for mechanistic interpretability One direction for future work is to consider our
+ELIZAconstructionasatestbedforautomaticinterpretabilitymethods—forexample,compilingthe
+constructionintoTransformerweightsusingTracr[44]. Specifically,givenacompiledTransformer
+correspondingtoanELIZAchatbot, towhatextentcouldwerecovertheprogramusingexisting
+interpretability techniques, such as circuit finding [15, 68] and dictionary learning [16, 27, 46]?
+PossibledifficultiesincludesharingofattentionheadsacrossdifferentELIZAoperationslikeparsing
+andcopying,andsharingofmechanismsfordifferentELIZAoperationslikecyclingandmemory
+queues. Assuch,ourframeworkmightencouragemoresophisticatedinterpretabletechniquesinthe
+future. Similarly,theELIZAdatasetcouldserveasatest-bedforrecentapproachestodesigning
+intrinsicallyinterpretableneuralarchitecturesforlanguagetasks[e.g.34,22].
+Mechanisticdependenceondata Recentworkshavetriedtounderstandthebehaviorofattention
+modelswhentrainedwithsyntheticdatasets. [51]studyfeatureformationin1-layertransformermod-
+elsonaddersdataset,with[85]studyingthedependenceonmodelhyperparametersandinitialization.
+[4,62]studyformationofn-graminductionheadsinlanguagemodels. [5,84]studythebehaviorof
+languagemodelswhentrainedwithdifferentcontext-freegrammars. [6,7]furtherstudyknowledge
+manipulation and storage in language models trained on synthetic datasets. [83] propose LEGO
+syntheticreasoningdatasettounderstandgeneralizationoftransformerswithsimplebooleancircuits.
+Finally, [82, 19, 52] give end-to-end convergence analysis of self-attention models when trained
+undersimplisticdataassumptions. However,suchstudieshavebeengenerallyrestrictedtosettings
+where the number of possible mechanisms and/or the number of features to learn are restricted.
+ELIZAprovidesageneralframeworkthatallowsdiversemechanismsandfeatures. Tosuccessfully
+implementELIZA,amodelhastoperformlocalpatternmatching,cyclingthroughreassemblyrules,
+andmemoryqueueswell. Andforeachfeature,therearemultiplemechansismsthatcanemerge,
+witheachmechanismhavingdifferentgeneralizationabilities. AsweshowinSection4.3,different
+datadistributionpropertiescanleadtodifferentmechanisms. Withincreasinginterestinformalizing
+themechanisticrelationshipbetweendataandtrainingbehavior[e.g.14,29,64,80,37,41,60],we
+believeELIZAcanbeausefultestbedforfuturestudies.
+6 Conclusion
+Inthiswork,weconstructedaTransformerthatimplementstheclassicELIZAchatbotalgorithm. We
+thentrainedTransformersonELIZAconversationtranscriptsandexaminedwhichaspectsofthetask
+wereempiricallymoredifficulttolearn,andtowhatextenttothemodelsmatchedourconstruction.
+Our constructions and dataset raise a number of possibilities for future research, including as a
+benchmark for automated interpretability methods, and as a setting for mechanistic analysis of
+learningdynamics.
+9Limitations Our constructions illustrate one way that Transformers can implement ELIZA, but
+they might not correspond to the solutions that Transformers actually learn. Characterizing the
+mechanisms that models learn empirically is a key challenge for future work on interpretability.
+Second,weconductsomeanalysisofthemechanismsthatmodelslearn,butwedonotconductan
+exhaustivemechanisticanalysis;futureworkcouldconductfurtheranalysisusingotherinterpretability
+techniques, such as causal methods [e.g. 70, 20, 25]. Finally, while ELIZA offers a setting for
+investigatinganumberofaspectsofconversations,real-worldchatbotsexhibitanumberofbehaviors
+thatfalloutsideoftheELIZAframework. Forexample,ELIZAisadeterministicprogram,whereas
+mostreal-worldchatbotsaretrainedondatawithmorestochasticity.
+Acknowledgments WethankAdithyaBhaskar,AlexanderWettig,HowardYen,andthemembers
+ofthePrincetonNLPgroupforhelpfulcommentsanddiscussion. Thisresearchisfundedbythe
+NationalScienceFoundation(IIS-2211779)andaSloanResearchFellowship.
+References
+[1] EmmanuelAbbe,SamyBengio,AryoLotfi,ColinSandon,andOmidSaremi.Howfarcantrans-
+formersreason?Thelocalitybarrierandinductivescratchpad.arXivpreprintarXiv:2406.06467,
+2024.
+[2] KwangjunAhn,XiangCheng,HadiDaneshmand,andSuvritSra. Transformerslearntoimple-
+mentpreconditionedgradientdescentforin-contextlearning. AdvancesinNeuralInformation
+ProcessingSystems(NeurIPS),36,2023.
+[3] EkinAkyürek,DaleSchuurmans,JacobAndreas,TengyuMa,andDennyZhou. Whatlearning
+algorithmisin-contextlearning? Investigationswithlinearmodels. InInternationalConference
+onLearningRepresentations(ICLR),2023.
+[4] Ekin Akyürek, Bailin Wang, Yoon Kim, and Jacob Andreas. In-context language learning:
+Architecturesandalgorithms. arXivpreprintarXiv:2401.12973,2024.
+[5] ZeyuanAllen-ZhuandYuanzhiLi. Physicsoflanguagemodels: Part1,Context-freegrammar.
+arXivpreprintarXiv:2305.13673,2023.
+[6] ZeyuanAllen-ZhuandYuanzhiLi. Physicsoflanguagemodels: Part3.2,Knowledgemanipula-
+tion. arXivpreprintarXiv:2309.14402,2023.
+[7] ZeyuanAllen-ZhuandYuanzhiLi. Physicsoflanguagemodels: Part3.3,Knowledgecapacity
+scalinglaws. arXivpreprintarXiv:2404.05405,2024.
+[8] Dana Angluin, David Chiang, and Andy Yang. Masked hard-attention Transformers and
+BooleanRASPrecognizeexactlythestar-freelanguages. arXivpreprintarXiv:2310.13897,
+2023.
+[9] CemAnil,YuhuaiWu,AndersAndreassen,AitorLewkowycz,VedantMisra,VinayRamasesh,
+Ambrose Slone, Guy Gur-Ari, Ethan Dyer, and Behnam Neyshabur. Exploring length gen-
+eralization in large language models. Advances in Neural Information Processing Systems
+(NeurIPS),35:38546–38556,2022.
+[10] Yu Bai, Fan Chen, Huan Wang, Caiming Xiong, and Song Mei. Transformers as statisti-
+cians: Provablein-contextlearningwithin-contextalgorithmselection. AdvancesinNeural
+InformationProcessingSystems(NeurIPS),36,2024.
+[11] IzBeltagy,MatthewE.Peters,andArmanCohan. Longformer:Thelong-documenttransformer.
+arXiv:2004.05150,2020.
+[12] SatwikBhattamishra,KabirAhuja,andNavinGoyal. Ontheabilityandlimitationsoftrans-
+formerstorecognizeformallanguages. InEmpiricalMethodsinNaturalLanguageProcessing
+(EMNLP),pages7096–7116,2020.
+[13] SatwikBhattamishra,ArkilPatel,andNavinGoyal. OnthecomputationalpowerofTransform-
+ersanditsimplicationsinsequencemodeling. InComputationalNaturalLanguageLearning
+(CoNLL),pages455–475,2020.
+10[14] Stephanie Chan, Adam Santoro, Andrew Lampinen, Jane Wang, Aaditya Singh, Pierre
+Richemond, James McClelland, and Felix Hill. Data distributional properties drive emer-
+gentin-contextlearningintransformers. AdvancesinNeuralInformationProcessingSystems
+(NeurIPS),35:18878–18891,2022.
+[15] ArthurConmy,AugustineNMavor-Parker,AengusLynch,StefanHeimersheim,andAdrià
+Garriga-Alonso. Towardsautomatedcircuitdiscoveryformechanisticinterpretability. arXiv
+preprintarXiv:2304.14997,2023.
+[16] HoagyCunningham,AidanEwart,LoganRiggs,RobertHuben,andLeeSharkey.Sparseautoen-
+codersfindhighlyinterpretablefeaturesinlanguagemodels. arXivpreprintarXiv:2309.08600,
+2023.
+[17] DamaiDai,YutaoSun,LiDong,YaruHao,ShumingMa,ZhifangSui,andFuruWei. Whycan
+GPTlearnin-context? Languagemodelssecretlyperformgradientdescentasmeta-optimizers.
+InFindingsofAssociationforComputationalLinguistics(ACL),2023.
+[18] BenjaminLEdelman,SurbhiGoel,ShamKakade,andCyrilZhang. Inductivebiasesandvari-
+ablecreationinself-attentionmechanisms. InInternationalConferenceonMachineLearning
+(ICML),pages5793–5831.PMLR,2022.
+[19] BenjaminLEdelman,EzraEdelman,SurbhiGoel,EranMalach,andNikolaosTsilivis. The
+evolution of statistical induction heads: In-context learning Markov chains. arXiv preprint
+arXiv:2402.11004,2024.
+[20] AmirFeder,NadavOved,UriShalit,andRoiReichart. CausaLM:Causalmodelexplanation
+throughcounterfactuallanguagemodels. ComputationalLinguistics,47(2):333–386,2021.
+[21] Guhao Feng, Bohang Zhang, Yuntian Gu, Haotian Ye, Di He, and Liwei Wang. Towards
+revealingthemysterybehindchainofthought: Atheoreticalperspective. AdvancesinNeural
+InformationProcessingSystems(NeurIPS),36,2024.
+[22] DanFriedman,AlexanderWettig,andDanqiChen. LearningTransformerPrograms. Advances
+inNeuralInformationProcessingSystems,36,2023.
+[23] Deqing Fu, Tian-Qi Chen, Robin Jia, and Vatsal Sharan. Transformers learn higher-order
+optimization methods for in-context learning: A study with linear models. arXiv preprint
+arXiv:2310.17086,2023.
+[24] ShivamGarg,DimitrisTsipras,PercySLiang,andGregoryValiant. Whatcantransformers
+learnin-context? Acasestudyofsimplefunctionclasses. AdvancesinNeuralInformation
+ProcessingSystems(NeurIPS),35:30583–30598,2022.
+[25] AtticusGeiger,HansonLu,ThomasIcard,andChristopherPotts. Causalabstractionsofneural
+networks. AdvancesinNeuralInformationProcessingSystems(NeurIPS),34:9574–9586,2021.
+[26] AngelikiGiannou,ShashankRajput,JyyongSohn,KangwookLee,JasonD.Lee,andDimitris
+Papailiopoulos.LoopedTransformersasprogrammablecomputers.InInternationalConference
+onMachineLearning(ICML),2023.
+[27] WesGurnee,TheoHorsley,ZifanCarlGuo,TaraRezaeiKheirkhah,QinyiSun,WillHathaway,
+Neel Nanda, and Dimitris Bertsimas. Universal neurons in GPT2 language models. arXiv
+preprintarXiv:2401.12181,2024.
+[28] MichaelHahn. Theoreticallimitationsofself-attentioninneuralsequencemodels. Transactions
+oftheAssociationofComputationalLinguistics(TACL),8:156–171,2020.
+[29] MichaelHahnandNavinGoyal. Atheoryofemergentin-contextlearningasimplicitstructure
+induction. arXivpreprintarXiv:2303.07971,2023.
+[30] Yiding Hao, Dana Angluin, and Robert Frank. Formal language recognition by hard atten-
+tiontransformers: Perspectivesfromcircuitcomplexity. TransactionsoftheAssociationof
+ComputationalLinguistics(TACL),10:800–810,2022.
+11[31] CharlesRHarris,KJarrodMillman,StéfanJVanDerWalt,RalfGommers,PauliVirtanen,
+DavidCournapeau,EricWieser,JulianTaylor,SebastianBerg,NathanielJSmith,etal. Array
+programmingwithNumPy. Nature,585(7825):357–362,2020.
+[32] AdiHaviv,OriRam,OfirPress,PeterIzsak,andOmerLevy. Transformerlanguagemodels
+withoutpositionalencodingsstilllearnpositionalinformation.InFindingsofEmpiricalMethods
+inNaturalLanguageProcessing(EMNLP),pages1382–1390,2022.
+[33] AnthonyHayandPeterMillican. ELIZAisTuringcomplete. https://sites.google.com/
+view/elizagen-org/blog/eliza-is-turing-complete,2022. Accessed: 2024-01-09.
+[34] JohnHewitt,JohnThickstun,ChristopherDManning,andPercyLiang. Backpacklanguage
+models. InAssociationforComputationalLinguistics(ACL),pages9103–9125,2023.
+[35] KaiyingHou,DavidBrandfonbrener,ShamKakade,SamyJelassi,andEranMalach. Universal
+lengthgeneralizationwithTuringPrograms. arXivpreprintarXiv:2407.03310,2024.
+[36] JiachenHu,QinghuaLiu,andChiJin. OnlimitationoftransformerforlearningHMMs. arXiv
+preprintarXiv:2406.04089,2024.
+[37] Samyak Jain, Robert Kirk, Ekdeep Singh Lubana, Robert P. Dick, Hidenori Tanaka, Tim
+Rocktäschel, Edward Grefenstette, and David Krueger. Mechanistically analyzing the ef-
+fectsoffine-tuningonprocedurallydefinedtasks. InInternationalConferenceonLearning
+Representations(ICLR),2024.
+[38] DanielJurafskyandJamesHMartin. Chatbotsanddialoguesystems. SpeechandLanguage
+Processing,2020.
+[39] AmirhosseinKazemnejad,InkitPadhi,KarthikeyanNatesan,PayelDas,andSivaReddy. The
+impactofpositionalencodingonlengthgeneralizationinTransformers. InAdvancesinNeural
+InformationProcessingSystems(NeurIPS),2023.
+[40] DiederikPKingmaandJimmyBa. Adam:Amethodforstochasticoptimization. arXivpreprint
+arXiv:1412.6980,2014.
+[41] AndrewLee,XiaoyanBai,ItamarPres,MartinWattenberg,JonathanKKummerfeld,andRada
+Mihalcea. Amechanisticunderstandingofalignmentalgorithms: AcasestudyonDPOand
+toxicity. InternationalConferenceonMachineLearning(ICML),2024.
+[42] YingcongLi,MuhammedEmrullahIldiz,DimitrisPapailiopoulos,andSametOymak. Trans-
+formers as algorithms: Generalization and stability in in-context learning. In International
+ConferenceonMachineLearning(ICML),pages19565–19594.PMLR,2023.
+[43] ZhiyuanLi,HongLiu,DennyZhou,andTengyuMa. Chainofthoughtempowerstransformers
+tosolveinherentlyserialproblems. arXivpreprintarXiv:2402.12875,2024.
+[44] DavidLindner,JánosKramár,SebastianFarquhar,MatthewRahtz,TomMcGrath,andVladimir
+Mikulik. Tracr: Compiledtransformersasalaboratoryforinterpretability. AdvancesinNeural
+InformationProcessingSystems(NeurIPS),36,2023.
+[45] BingbinLiu, JordanT.Ash, SurbhiGoel, AkshayKrishnamurthy, andCyrilZhang. Trans-
+formerslearnshortcutstoautomata. InInternationalConferenceonLearningRepresentations
+(ICLR),2023.
+[46] SamuelMarks,CanRager,EricJMichaud,YonatanBelinkov,DavidBau,andAaronMueller.
+Sparsefeaturecircuits: Discoveringandeditinginterpretablecausalgraphsinlanguagemodels.
+arXivpreprintarXiv:2403.19647,2024.
+[47] RobertMcNaughtonandSeymourAPapert. Counter-FreeAutomata(MITresearchmonograph
+no.65). TheMITPress,1971.
+[48] WilliamMerrillandAshishSabharwal. Alogicforexpressinglog-precisiontransformers. In
+AdvancesinNeuralInformationProcessingSystems(NeurIPS),2023.
+12[49] WilliamMerrillandAshishSabharwal. TheexpressivepowerofTransformerswithchainof
+thought. InInternationalConferenceonLearningRepresentations(ICLR),2024.
+[50] WilliamMerrill,AshishSabharwal,andNoahASmith. SaturatedTransformersareconstant-
+depththresholdcircuits. TransactionsoftheAssociationofComputationalLinguistics(TACL),
+10:843–856,2022.
+[51] Neel Nanda, Lawrence Chan, Tom Lieberum, Jess Smith, and Jacob Steinhardt. Progress
+measuresforgrokkingviamechanisticinterpretability. InInternationalConferenceonLearning
+Representations(ICLR),2023.
+[52] EshaanNichani,AlexDamian,andJasonDLee. Howtransformerslearncausalstructurewith
+gradientdescent. arXivpreprintarXiv:2402.14735,2024.
+[53] FranzNowak,AnejSvete,AlexandraButoi,andRyanCotterell.Ontherepresentationalcapacity
+ofneurallanguagemodelswithchain-of-thoughtreasoning. arXivpreprintarXiv:2406.14197,
+2024.
+[54] MaxwellNye,AndersJohanAndreassen,GuyGur-Ari,HenrykMichalewski,JacobAustin,
+David Bieber, David Dohan, Aitor Lewkowycz, Maarten Bosma, David Luan, et al. Show
+yourwork: Scratchpadsforintermediatecomputationwithlanguagemodels. arXivpreprint
+arXiv:2112.00114,2021.
+[55] Catherine Olsson, Nelson Elhage, Neel Nanda, Nicholas Joseph, Nova DasSarma, Tom
+Henighan, Ben Mann, Amanda Askell, Yuntao Bai, Anna Chen, et al. In-context learning
+andinductionheads. arXivpreprintarXiv:2209.11895,2022.
+[56] AbhishekPanigrahi,SadhikaMalladi,MengzhouXia,andSanjeevArora.Trainabletransformer
+intransformer. arXivpreprintarXiv:2307.01189,2023.
+[57] AdamPaszke,SamGross,FranciscoMassa,AdamLerer,JamesBradbury,GregoryChanan,
+TrevorKilleen,ZemingLin,NataliaGimelshein,LucaAntiga,etal. PyTorch: Animperative
+style, high-performance deep learning library. Advances in Neural Information Processing
+Systems(NeurIPS),32,2019.
+[58] JorgePérez,PabloBarceló,andJavierMarinkovic. AttentionisTuring-complete. TheJournal
+ofMachineLearningResearch(JMLR),22(75):1–35,2021.
+[59] Jean-ÉricPin. Howtoprovethatalanguageisregularorstar-free? InInternationalConference
+onLanguageandAutomataTheoryandApplications,pages68–88,2020.
+[60] NikhilPrakash,TamarRottShaham,TalHaklay,YonatanBelinkov,andDavidBau. Fine-tuning
+enhancesexistingmechanisms: Acasestudyonentitytracking. InInternationalConferenceon
+LearningRepresentations(ICLR),2024.
+[61] JorgePérez,JavierMarinkovic´,andPabloBarceló. OntheTuringcompletenessofmodern
+neuralnetworkarchitectures. InInternationalConferenceonLearningRepresentations(ICLR),
+2019.
+[62] LuciaQuirke,LovisHeindrich,WesGurnee,andNeelNanda. Trainingdynamicsofcontextual
+n-gramsinlanguagemodels. arXivpreprintarXiv:2311.00863,2023.
+[63] Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, et al.
+Languagemodelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+[64] GautamReddy. Themechanisticbasisofdatadependenceandabruptlearninginanin-context
+classificationtask. InInternationalConferenceonLearningRepresentations(ICLR),2024.
+[65] AadityaKSingh,TedMoskovitz,FelixHill,StephanieCYChan,andAndrewMSaxe. What
+needstogorightforaninductionhead? Amechanisticstudyofin-contextlearningcircuitsand
+theirformation. arXivpreprintarXiv:2404.07129,2024.
+[66] LenaStrobl,WilliamMerrill,GailWeiss,DavidChiang,andDanaAngluin. Whatformallan-
+guagescanTransformersexpress? Asurvey. TransactionsoftheAssociationofComputational
+Linguistics(TACL),12:543–561,2024.
+13[67] Anej Svete and Ryan Cotterell. Transformers can represent n-gram language models. In
+NorthAmericanChapteroftheAssociationforComputationalLinguistics: HumanLanguage
+Technologies(NAACL-HLT),pages6841–6874,2024.
+[68] Aaquib Syed, Can Rager, and Arthur Conmy. Attribution patching outperforms automated
+circuitdiscovery. arXivpreprintarXiv:2310.10348,2023.
+[69] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,
+ŁukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. AdvancesinNeuralInformation
+ProcessingSystems(NeurIPS),30,2017.
+[70] JesseVig,SebastianGehrmann,YonatanBelinkov,SharonQian,DanielNevo,SimasSakenis,
+Jason Huang, Yaron Singer, and Stuart Shieber. Causal mediation analysis for interpreting
+neuralNLP:Thecaseofgenderbias. arXivpreprintarXiv:2004.12265,2020.
+[71] Johannes Von Oswald, Eyvind Niklasson, Ettore Randazzo, João Sacramento, Alexander
+Mordvintsev, AndreyZhmoginov, andMaxVladymyrov. Transformerslearnin-contextby
+gradientdescent. InInternationalConferenceonMachineLearning(ICML),pages35151–
+35174.PMLR,2023.
+[72] Johannes von Oswald, Eyvind Niklasson, Maximilian Schlegel, Seijin Kobayashi, Nicolas
+Zucchet,NinoScherrer,NolanMiller,MarkSandler,MaxVladymyrov,RazvanPascanu,etal.
+Uncoveringmesa-optimizationalgorithmsintransformers. arXivpreprintarXiv:2309.05858,
+2023.
+[73] MichaelLWaskom. Seaborn: Statisticaldatavisualization. JournalofOpenSourceSoftware,
+6(60):3021,2021.
+[74] Colin Wei, Yining Chen, and Tengyu Ma. Statistically meaningful approximation: A case
+studyonapproximatingTuringMachineswithTransformers. AdvancesinNeuralInformation
+ProcessingSystems(NeurIPS),35:12071–12083,2022.
+[75] JasonWei,XuezhiWang,DaleSchuurmans,MaartenBosma,FeiXia,EdChi,QuocVLe,
+DennyZhou,etal. Chain-of-Thoughtpromptingelicitsreasoninginlargelanguagemodels.
+AdvancesinNeuralInformationProcessingSystems(NeurIPS),35:24824–24837,2022.
+[76] GailWeiss,YoavGoldberg,andEranYahav. ThinkinglikeTransformers. InInternational
+ConferenceonMachineLearning(ICML),pages11080–11090.PMLR,2021.
+[77] JosephWeizenbaum. ELIZA—Acomputerprogramforthestudyofnaturallanguagecommu-
+nicationbetweenmanandmachine. CommunicationsoftheACM,9(1):36–45,1966.
+[78] JosephWeizenbaum. Computerpowerandhumanreason: Fromjudgmenttocalculation. WH
+Freeman&Co,1976.
+[79] ThomasWolf,LysandreDebut,VictorSanh,JulienChaumond,ClementDelangue,Anthony
+Moi,PierricCistac,TimRault,RémiLouf,MorganFuntowicz,etal. Transformers: State-of-
+the-artnaturallanguageprocessing. InEmpiricalMethodsinNaturalLanguageProcessing
+(EMNLP):SystemDemonstrations,pages38–45,2020.
+[80] Sang Michael Xie, Aditi Raghunathan, Percy Liang, and Tengyu Ma. An explanation of
+in-contextlearningasimplicitBayesianinference. arXivpreprintarXiv:2111.02080,2021.
+[81] ShunyuYao,BinghuiPeng,ChristosPapadimitriou,andKarthikNarasimhan. Self-attention
+networks can process bounded hierarchical languages. In Association for Computational
+LinguisticsandInternationalJointConferenceonNaturalLanguageProcessing(ACL-IJCNLP),
+pages3770–3785,2021.
+[82] Ruiqi Zhang, Spencer Frei, and Peter L Bartlett. Trained transformers learn linear models
+in-context. arXivpreprintarXiv:2306.09927,2023.
+[83] Yi Zhang, Arturs Backurs, Sébastien Bubeck, Ronen Eldan, Suriya Gunasekar, and Tal
+Wagner. Unveiling Transformers with LEGO: A synthetic reasoning task. arXiv preprint
+arXiv:2206.04301,2022.
+14[84] HaoyuZhao,AbhishekPanigrahi,RongGe,andSanjeevArora. Dotransformersparsewhile
+predictingthemaskedword? InEmpiricalMethodsinNaturalLanguageProcessing(EMNLP),
+pages16513–16542,2023.
+[85] Ziqian Zhong, Ziming Liu, Max Tegmark, and Jacob Andreas. The clock and the pizza:
+Twostoriesinmechanisticexplanationofneuralnetworks. AdvancesinNeuralInformation
+ProcessingSystems(NeurIPS),36,2023.
+[86] HattieZhou,ArwenBradley,EtaiLittwin,NoamRazin,OmidSaremi,JoshSusskind,Samy
+Bengio,andPreetumNakkiran. WhatalgorithmscanTransformerslearn? Astudyinlength
+generalization. arXivpreprintarXiv:2310.16028,2023.
+15Menareallalike.
+INWHATWAY
+They’realwaysbuggingusaboutsomethingorother.
+CANYOUTHINKOFASPECIFICEXAMPLE
+Well,myboyfriendmademecomehere.
+YOURBOYFRIENDMADEYOUCOMEHERE
+HesaysI’mdepressedmuchofthetime.
+IAMSORRYTOHEARYOUAREDEPRESSED
+It’strue.Iamunhappy.
+DOYOUTHINKCOMINGHEREWILLHELPYOUNOTTOBEUNHAPPY
+Ineedsomehelp,thatmuchseemscertain.
+WHATWOULDITMEANTOYOUIFYOUGOTSOMEHELP
+PerhapsIcouldlearntogetalongwithmymother.
+TELLMEMOREABOUTYOURFAMILY
+Mymothertakescareofme.
+WHOELSEINYOURFAMILYTAKESCAREOFYOU
+Myfather.
+YOURFATHER
+Youarelikemyfatherinsomeways.
+WHATRESEMBLANCEDOYOUSEE
+Youarenotveryaggressive,butIthinkyoudon’twantmetonoticethat.
+WHATMAKESYOUTHINKIAMNOTVERYAGGRESSIVE
+Youdon’targuewithme.
+WHYDOYOUTHINKIDON’TARGUEWITHYOU
+Youareafraidofme.
+DOESITPLEASEYOUTOBELIEVEIAMAFRAIDOFYOU
+Myfatherisafraidofeverybody.
+WHATELSECOMESTOMINDWHENYOUTHINKOFYOURFATHER
+Bullies.
+DOESTHATHAVEANYTHINGTODOWITHTHEFACTTHATYOURBOYFRIENDMADEYOU
+COMEHERE
+Table1: AnexampleELIZAconversation,reproducedfromWeizenbaum[77]. Lineswithallcapital
+lettersaregeneratedbyELIZA.
+A ELIZAAlgorithmDetails
+HereweprovidesomeadditionaldetailsabouttheELIZAalgorithm. OurpresentationoftheELIZA
+algorithminSection2omitssomedetailsoftheoriginalELIZAalgorithm,toimproveclarity,sowe
+describethesedetailshere.3
+Word-leveltranslation AnELIZAscriptcanincludeword-leveltranslationrules—forexample,
+I = YOU,YOU = I,andME = YOU.Thesetranslationsareappliedtoallofthewordsintheinput
+beforetryingtomatchtheinputtoapattern. Therefore,intheoriginalELIZAscript,thepatternsare
+writtentomatchinputsaftertheword-leveltranslationshavebeenapplied. So,forexample,therule
+0 ARE I 0→WouldyoupreferifIweren’t4?
+wouldmatchtheinput“Areyoulaughingatme?” andtransformitto“WouldyoupreferifIweren’t
+laughingatyou?” Inthispaper,wewriterulestomatchtheinputpriortoword-leveltranslations—so,
+forexample,wewouldpresentthepatternaboveas0 ARE YOU 0. Word-leveltranslationistrivial
+toincorporateintotheTransformerconstruction,byusingthefinallinearlayertomapeachwordto
+itstranslation.
+Keywords EachentryinanELIZAscriptconsistsofarankedkeyword. Eachkeywordisassociated
+withalistofdecompositiontemplates,andeachdecompositiontemplateisassociatedwithoneor
+moretransformationrules. SeeFigure7foranexample. Toselectadecompositiontemplate,ELIZA
+findsthehighestrankedkeywordthatappearsintheinput,andthenfindsthefirstdecomposition
+templateintheassociatedlistthatmatchestheinput.Ifnoneofthetemplatesmatched,ELIZAchecks
+thenexthighest-rankedkeyword. Inthispaper,weignoretheroleofkeywords,andinsteaddefinean
+ELIZAscriptbyasetofrankeddecompositiontemplatesandassociatedtransformationrules.
+3ForanannotatedexplanationofanELIZAscript,seehttps://github.com/jeffshrager/elizagen.
+org/blob/master/1965_Weizenbaum_MAD-SLIP/1966_01_CACM_article_Eliza_script.txt. For
+moreresourcesrelatedtoELIZA,seehttp://elizagen.org/.
+16Figure7: PartofanELIZAscript, fromWeizenbaum[77]. Eachentryinthescriptconsistsofa
+rankedkeywordandalistofpatterns,witheachpatternassociatedwithmultipletransformationrules.
+Pre-transformationrules Thepre-transformationruleisaspecialrulethatappliesatransformation
+to the input, and then “passes control” to another keyword in the script. There is one use of the
+pre-transformationruleinWeizenbaum’sELIZAscript: iftheinputmatchesthepattern0 I’m 0,it
+isreassembledas“Iam3,”andthenmatchedagainsttemplateswiththekeyword“am,”suchas0 I
+am 0. However,thepre-transformationruleiscriticaltotheconstructionofHayandMillican[33]
+forembeddingaTuringmachineinanELIZAscript,whichwewilldiscussinmoredetailbelow
+(AppB.4). Inthisconstruction,theinputateachsteprepresentsthetapeoftheTuringmachine,and
+keywordsinthescriptcorrespondtostates. Eachpre-transformationruletransformstheinputby
+applyingoneupdatetothetape,andthenpassescontroltoanewkeywordcorrespondingtothenext
+state.
+B ConstructionDetails
+In this section, we provide additional details about our ELIZA constructions, including sample
+implementationsinRASP[76]. TheinputtoaRASPprogramisasequenceoftokens. Theprogram
+thenconsistsofaseriesofoperationsthatoutputnewsequencesofequallengthtotokens,corre-
+spondingtointermediateembeddingsintheTransformer. Theselectandaggregateoperations
+correspondtotheattentionmechanismintheTransformer;thesearetheonlyoperationsthatcan
+combineinformationfromdifferentpositionsinthesequence. Allotheroperationsmustoperate
+independentlyateachposition,correspondingtofeedforwardlayers. LikeWeissetal.[76],weallow
+feedforwardlayerstoimplementarbitraryelement-wisetransformations. Wedonotprovideexplicit
+constructionsfortheseelement-wisetransformations;weleavethisforfuturework. Figure8shows
+theRASP[76]attentionprimitivesweuseinourconstruction,implementedinNumPy[31].
+B.1 InputSegmentationandPositionEncoding
+Ourfirststepistodividetheinputintosegments,correspondingtotheturnsintheconversation. This
+isaccomplishedbyusingthespecialdelimitertokenstocountthenumberofutterancesseensofar:
+segment_ids = selector_width(select(tokens, tokens, lambda q, k: k in ("u:", "e:"), max_width=max_segments)
+We will use these segment_ids throughout the construction to restrict attention to a particular
+utterance. Thesegment_idsarealsousedtogeneratelocalpositionalencodings:
+segment_positions = selector_width(select(segment_ids, segment_ids, ==), max_width=max_segment_length)
+Thisvalueencodesthepositionrelativetothestartofthecurrentsegment.
+Remarkonlengthgeneralization Whilenotthefocusofourinvestigationhere,ourapproachto
+segmentandpositionencodingshasimplicationsforlengthgeneralization,similartothecasesstudied
+byZhouetal.[86]. Inparticular,wemustspecifyinadvancethemaximumnumberofsegmentsper
+conversation,aswellasthelengthofeachsegment. Thisisbecausetheselector_widthoperator
+isimplementedusingoneattentionlayerfollowedbyonefeed-forwardlayer. Ateachpositioni,the
+17def select(keys, queries, predicate):
+# Calculate a (binary) attention pattern.
+selector = np.array([[predicate(q, k) for k in keys] for q in queries])
+return np.tril(selector)
+def selector_width(selector, max_width=None):
+# Count the number of keys attended by each query, up to `max_width`.
+width = selector.sum(-1)
+if max_width:
+return np.minimum(width, max_width)
+return width
+def aggregate(selector, values, one_hot=False):
+# Aggregate either a single value vector or a batch of value vectors
+# stored in a dictionary.
+if type(values) == dict:
+return {k: aggregate(selector, v, one_hot) for k, v in values.items()}
+if one_hot:
+return values[selector.argmax(-1)]
+attn = selector / np.maximum(selector.sum(-1, keepdims=True), 1e-9)
+return values @ attn.T
+Figure 8: Code for the primitive RASP operations [76] we use in our construction, using
+NumPy[31]. Eachattentionheadcanimplementonepairofselectandaggregateoperations.
+Theselector_widthfunctioncorrespondstoanattentionheadfollowedbyafeed-forwardlayer,
+whichmapsthescalarattentionoutputtoanembeddingthatcanbeusedinsubsequentattention
+layers. Becauseselector_widthmapseachpossiblewidthtoaunique,orthogonalembedding,the
+programmustspecifyinadvancethemaximumwidthitwillhandle.
+attentionlayeroutputs1/c,wherecisthenumberofkeypositionsattendedtofrompositioni. The
+feed-forwardlayerthenmapseachvalueof1/ctoanorthogonalembedding. Inourconstruction,
+weimplementthissecondstepasalook-uptable,meaningthatwemustdecideinadvanceonthe
+maximumpossiblevalueofc.Thismeansthatourconstructionsetsalimitonthenumberofsegments
+perconversation,aswellasthelengthwithineachsegment. Ifamodellearnedthismechanism,we
+wouldexpectittofailtogeneralizeifthenumberofsegmentsorthelengthofasegmentincreases
+beyondthetrainingset. (Ontheotherhand,theconstructiondoesnotplaceadirectlimitonthetotal
+conversationlength.)
+B.2 TemplateMatching
+Thenextstepintheconstructionistocomparethemostrecentinputtotheinventoryofdecomposition
+templates. Templatematchinginvolvestwothings: findingatemplatethatmatchestheinput,and
+decomposingtheinputaccordingtothattemplate’sdecompositiongroups. Ourconstructionmakes
+useofthefactthatELIZAtemplatesareequivalenttostar-freeregularexpressions[47,59]. Asa
+result,wecanrecognizethesebysimulatingthecorrespondingfinite-stateautomaton,buildingon
+theconstructionsofLiuetal.[45]andAngluinetal.[8],adaptedtorecognizemultipletemplatesin
+parallel.
+Decomposition templates Given a vocabulary V, a decomposition template is a sequence t =
+t ,...,t ,whereeacht iseitherawordfromV;thewildcardcharacter0,whichmatchesasequence
+1 L i
+of zero or more words from V; or a positive integer n, which matches a sequence of exactly n
+wordsfromV.4 Weassumethatthevocabularycontainstwospecialbeginning-andend-of-sequence
+delimiters,ˆand$respectively,andforeveryinputw ,...,w andtemplatet ,...,t ,w =t =
+1 N 1 L 1 1
+ˆandw =t =$. Wewilluset todenotethetemplateprefixt ,...,t . Asaworkingexample,
+N L :i 1 i
+considerthevocabularyV ={a,b}andthetemplatet=ˆa0bb0$. Thistemplatematchestheinput
+ˆaaabbaa$anddecomposesitintofivegroups: (1) a (2) aa (3) b (4) b (5) aa. Wealwaystakea
+greedyapproachtotemplatematching: forexample,usingthesametemplate,theinputˆaabbbaa$
+willbedecomposedas(1) a (2) a (3) b (4) b (5) baaratherthan(1) a (2) ab (3) b (4) b (5) aa.
+Notethateachdecompositiongroupcorrespondstoaprefixofthetemplate: wordw isingroupℓif
+i
+w matchesthetemplateprefixt .
+:i :ℓ
+4AtemplatecanalsoincludeanequivalenceclassW ⊂V,whichmatchesoneinstanceofanywordinW.
+Forexample,thetemplate1(a|b)1matchesbothcabandcbb.Thiscanbeaddressedattheembeddinglayer
+byassigningonedimensiontothevalueoftheindicator1{w∈W}foreachwordw.
+18def match_templates(tokens, segment_ids, segment_positions, templates):
+L = max(len(t) for t in templates)
+prefixes = [{("u:",): tokens == "u:"}]
+# Each layer l checks if the input matches t[:l+1]
+for l in range(1, L):
+just_matched = select_prev(prefixes[-1], segment_ids, segment_positions)
+ever_matched = frac_prev(prefixes[-1], segment_ids, segment_positions)
+new_matches = {}
+for t in templates:
+if len(t) <= l: continue
+if t[l] == "0":
+new_matches[t[:l+1]] = ever_matched[t[:l]] > 0
+elif t[l-1] == "0" and t[l] == "1":
+new_matches[t[:l+1]] = prefixes[-1][t[:l]]
+elif t[l-1] == "0":
+new_matches[t[:l+1]] = prefixes[-1][t[:l]] & (tokens == t[l])
+elif t[l] == "1":
+new_matches[t[:l+1]] = just_matched[t[:l]]
+else:
+new_matches[t[:l+1]] = just_matched[t[:l]] & (tokens == t[l])
+prefixes.append(new_matches)
+# For each template, identify the longest matching prefix at each position.
+states = {}
+for t in templates:
+s = np.stack([m[t[:l+1]] for l, m in zip(range(len(t)), prefixes)])
+ind = np.arange(s.shape[0])
+states[t] = (ind[:, None] * s).max(0)
+return states
+Figure9: Codeformatchinganinputsequencetokenstoasetofdecompositiontemplates.
+Matchingtemplates OurconstructionusesLTransformerlayers,whereListhemaximumnumber
+ofstatesinanytemplate. Ateachlayerℓ,wecalculatewhethertheinputmatchesthetemplateprefix
+t foreachtemplatetandateachpositioni. Ift isthewildcardcharacter0,thenw matchest
+:ℓ ℓ :i :ℓ
+ift hasbeenmatchedatanypositionj <i. Ift isavocabularyitemw,thenw matchest if
+:ℓ−1 ℓ :i ℓ
+w =wandw matchest (or,ift is0,ifw matchest ,toaccountforthepossibility
+i :i−1 :ℓ−1 ℓ−1 :i :ℓ−1
+that0matcheszerowords). Wechecktheseconditionsusingtwoattentionheadsperlayer:
+def frac_prev(values, segment_ids, segment_pos): def select_prev(values, segment_ids, segment_pos):
+return aggregate( return aggregate(
+(select(segment_ids, segment_ids, eq) & (select(segment_ids, segment_ids, eq) &
+select(segment_pos, segment_pos, not_eq)), select(segment_pos, segment_pos, is_prev)),
+values) values)
+TheseattentionheadsrestrictattentiontothemostrecentutterancebytakingthelogicalANDbetween
+twoselectors;seeLindneretal.[44,AppendixF]foradiscussionofmechanismsforcombining
+selectors. Note that each layer uses two attention heads, with each attention head calculating
+frac_prevorselect_prevforalltemplatesinparallel.
+Templatesasfinite-stateautomata WhileourconstructionispresentedintermsofELIZAtemplates,
+wenotethattheELIZAtemplatelanguagedefinesasubsetofstar-freeregularlanguages. Asaresult,
+wecanformulatethisconstructionasanapproachtosimulatingafinite-stateautomaton,buildingon
+theconstructionsofLiuetal.[45]andAngluinetal.[8]. Inparticular,consideragainourexample
+template t = ˆa0bb0$. We can recognize this template by simulating the following finite-state
+automaton:
+b $
+a a b b a,b $
+1 2 3 4 5 6 7
+a
+a a,b
+Eachstateintheautomatoncorrespondstoaprefixofthetemplate: iftheautomatonisinstateℓ
+afterprocessingwordsw ,...,w ,thenthesequencew matchesthetemplateprefixt . Givena
+1 i :i :ℓ
+19templatet ,...,t ,wewillthereforerefertothestatesofthecorrespondingautomatonusingthe
+1 L
+templateprefixest ,...,t . Notethatsomespecialhandlingisrequiredbecausetheautomaton
+:1 :L
+statesareassignedfromlefttorightwithnoabilitytolookaheadintheinput. Forexample,consider
+thetemplate0abandinputbacaab,whichshouldbedecomposedas(1)baca(2)a(3)b. Without
+lookingaheadintheinput,wehavenowayofknowingthatthefirsttwoatokensbelongingroup1
+ratherthan2. Ourtemplatematchingprocedurewouldassignthissequencethestates121223. A
+similarissuearisesifwehaveatemplatesuchas01ab,whichshoulddecomposeinputbacaabas(1)
+bac(2)a(3)a(4)b. Theseissuescanbeaddressedbytakingsomeadditionalcareinthegeneration
+stage,discussedinmoredetailbelow(App.B.3).
+Comparisontoexistingconstructions Ourconstructiondiffersinsomewaysfrompriorworkfor
+simulatingfinitestateautomatawithTransformers. Inparticular,theconstructionofAngluinetal.
+[8]useshard(one-hot)attentiontorecognizestar-freeregularexpressions. Ourconstructionusesa
+frac_prevattentionhead,whichattendsuniformlytoallpositionsinthesequence;thisallowsusto
+matchmultipletemplatesusingoneattentionhead. Whilethenumberofattentionheadsisconstant
+withrespecttothenumberoftemplates,theembeddingdimensionincreaseslinearlywiththenumber
+oftemplates,inordertoencodetheautomatonstateforeachtemplateinparallel.
+Reducing the number of layers For ease of presentation, we described a template matching
+constructionthatusesoneTransformerlayerforeachsymbolinthetemplate. Here,wedescribe
+twomodificationsthatreducethenumberoflayerstothetotalnumberofwildcardsymbolsinthe
+template.
+Combiningwildcards: First,wecanuseonelayertomatchbothawildcardsymbolandthesymbol
+thatimmediatelyfollows. Forexample,considerthetemplatea0b0andinputaccbabc,whichwe
+aimtodecomposeas(1)a(2)cc(3)b(4)abc. Thecomputationsareasfollows:
+Input a c c b a b c
+Attention1 a a0 a0 a0 a0 a0 a0
+MLP1 - - - a0b - a0b -
+Attention2 - - - - a0b0 a0b0 a0b0
+Output 1 2 2 3 4 4 4
+Here,eachentryinthetableillustratesavaluecalculatedatthatlayer,correspondingtoatemplate
+prefixthathasbeenmatchedatthatpoint. Forexample,thefirst-layerMLPidentifiesthattheprefix
+a0bhasbeenmatchedattwopositions. Wedistinguishbetweenthefirstandsecondmatchesofthis
+prefixbyassigningeachpositiontothelongestprefixthatmatchesatthatpoint.
+Handlingn-gramliterals: Thesecondmodificationpertainston-gramliteralsinthetemplate. For
+example,considerthetemplatea0bc0. Aspresentedabove,ourconstructionusesonelayertomatch
+theprefixa0bandanothertomatchtheprefixa0bc. Instead,wecancombinetheseoperationsinto
+asinglelayerbyusingtwoattentionheads. Atpositioni,oneattentionheadcheckswhetherthe
+previouswordw isb. Thesecondattentionheadcheckswhethertheprefixa0hasbeenmatched
+i−1
+anywheretotheleftofw ,attendingtoalltokensatpositionslessthani−1. Wecanusethis
+i−1
+approachforanyn-gramuptosomemaximumn,definedbythenumberofattentionheadsperlayer.
+B.3 GeneratingaTransformation
+Nowweassumethatwehaveidentifiedamatchingtemplateandthattheembeddingforeachinput
+tokenidentifiesthedecompositiongrouptowhichthattokenbelongs. Thenextstepisnowtoapply
+thechosenreassemblyruletotheinputtogeneratearesponse.
+Reassemblyrules Givenatemplatet ,...,t andvocabularyV,areassemblyruleisasequence
+1 L
+r =r ,...,r ,whereeachr iseitherawordw ∈V oranintegern∈[M]suchthatt ∈{0,1}.
+1 M i n
+Givenaninputw ,...,w ,lets ,...,s ∈[L]denotethelengthsofthelongestmatchingtemplate
+1 N 1 N
+prefix at each position—that is, t is the longest prefix matching w . We refer to each s as a
+:si :i i
+decompositiongroup. Foreachr ,ifr ∈V,themodeloutputsr . Ifr ∈[L],themodeloutputsthe
+i i i i
+subsequenceofwsuchthat,foreachw ,s = r . Forexample,considerthetemplatet = a0bb0
+j j i
+andexampleinputaaabbab,withautomatonstates1223455. Thereassemblyruler =c2d5would
+generatetheresponsecaadab. Wecandividethisprocessintotwostages. First,ateachstep,we
+needtodeterminethereassemblystate—thatis,whichsymbolofthereassemblyrulearewecurrently
+processing. InFig.10, weillustratehowwecandeterminethestateasafunctionofthenumber
+20def get_reassembly_action(group_count, template, rule, step):
+# For each template t, group_count[t][l] is the number of input tokens with group t[l]
+counts = group_count[template]
+# The position in the input sequence at the start of each group
+group_start_positions = np.concatenate([np.array([0]), np.cumsum(counts[:-1])])
+# The number of tokens in each part of the reassembly rule
+rule_part_sizes = np.array([counts[int(r)] if r.isnumeric() else 1 for r in rule])
+# The length the output will be after applying each part of the reassembly rule
+rule_part_end_positions = np.cumsum(rule_part_sizes)
+# Return to the user if we're done generating.
+if step == rule_part_sizes.sum():
+return "u:"
+# Which part of the rule are we in?
+i = np.argmax(rule_part_end_positions > step)
+r = rule[i]
+# Return the position of the token to copy:
+if r.isnumeric():
+num_already_copied = step - (rule_part_end_positions[i - 1] if i > 0 else 0)
+target_position = int(group_start_positions[int(r)] + num_already_copied + 1)
+return "copy", target_position
+# Return a constant token to output.
+return "print", r
+Figure10: Codeforgeneratinganoutputtokenatstepigivenauserinputx, thecorresponding
+sequenceofautomatonstates,andareassemblyrule.
+oftokensthathavebeengeneratedsofarandthenumberoftokensineachdecompositiongroup.
+Second,ifthenexttokenshouldbecopiedfromtheinput,weneedtoidentifytheexacttokenin
+theinputthatshouldbecopied. Wepresenttwomechanismsforcopying,oneusingcontent-based
+attentionandoneusingposition-basedattention.
+Option1: Content-basedattention(inductionhead) Thefirstpossibleapproachusescontent-
+basedattention,akintoann-gramlevelinductionhead[55,4]. First,ateachinputpositionj,thekey
+embeddingencodesthedecompositiongrouptowhichthetokenbelongsaswellastheidentityof
+thepreviousntokens,wherenisthemaximumcontextwindow. Second,ateachoutputposition
+i, the query embedding encodes the decomposition group s from which we should copy at this
+i
+step,aswellastheidentityofthecurrenttokenandanypreviousoutputtokensassociatedwiththis
+decompositiongroup. Anattentionheadcanthenattendtotheearliestinputpositionj suchthat
+s =s and,forallkfrom0ton,ifs =s thenw =w . Notethatwemustspecifya
+j i i−k i j−k−1 i−k
+maximumcontextwindow,n,whichisconstrainedbytheembeddingsize. Ifnislessthanthelength
+ofadecompositiongroup,thismechanismcanfailifthesamen-gramappearsmorethanonceinthe
+decompositiongroup,asnotedbyZhouetal.[86].
+Forexample,considerthetemplatet=a0b0andreassemblyruler =h2. Foraninputacdecdfbg
+thatmatchesthistemplate,theoutputunderthereassemblyruleisgivenbyhcdecdf. Ifthemodel
+usesa2-graminductionhead,thebehaviorofthemodelforthesameinputisgiveninTab.2
+Option2:Position-basedattention Oursecondpossibleapproachusesposition-basedattentionand
+isdescribedinFig.10. Specifically,wecanuseanattentionheadtocountthenumberoftokensin
+eachdecompositiongroup,aswellasthepositionintheinputsequenceatwhichthatdecomposition
+groupbegins. Afeedforwardlayercanthencalculatethepositionoftheinputtokenthatshouldbe
+copiedatagivengenerationstep. AsdiscussedbyZhouetal.[86],thisformofpositionarithmetic
+mightbemoredifficultforthemodeltolearn. However,ifthismechanismislearnedcorrectly,we
+predictthatitmightgeneralizebetterthancontent-basedattentioninsettingswherethesamen-gram
+appearsmultipletimesinthesequence. ThebehaviorofthemodelforaninputisoutlinedinTab.2.
+B.4 Pre-transformationRulesandanELIZATransformerTuringMachine
+Inthissectionwediscusshowtoincorporatethespecialpre-transformationruleintoourconstruction.
+ThisruleisusedbyHayandMillican[33]toprovethatELIZAisTuring-complete,whichwillallow
+ustoimmediatelyderiveaTuringmachineconstructionfortheELIZATransformer.
+21Input a c d e c d f b g E h c d e c d
+Previous2-gram 00 0a ac cd de ec cd df fb
+Decompositiongroup 1 2 2 2 2 2 2 3 4
+Reassemblystate h 2 2 2 2 2 2
+Current2-gram 00 0c cd de ec cd
+Output h c d e c d e(×)
+Table2: Behaviorofamodelthatusesa2-graminductionheadgiveninputacdecdfbg,template
+t=a0b0,andreassemblyruler =h2. Here,themodelneedstooutputtheliteraltokenhandthen
+copythecontentsoftheseconddecompositiongroup. Ateachcopyingstep,the2-graminduction
+headattendstothepositionwithdecompositiongroup2suchthatthePrevious2-gramisthelongest
+matchfortheCurrent2-gram, attendingtotheearliestmatchingpositioninthecaseofties. For
+example, after generating E h c, the Current 2-gram is 0c (the previous token, h, is not part of
+this copying group, so is replaced with a 0, which acts as a wildcard); the earliest position with
+the longest matching prefix is a c d, and the model outputs d. This rule leads to an error if the
+same2-gramappearsmorethanonceinthecopyingsegment: aftergeneratingE hc d,themodel
+correctlyoutputse,butaftergeneratingE h c d ec d,themodelcannotdisambiguatethetwo
+occurrencesofc dintheinputandsomistakenlyoutputse.
+Input a c d e c d f b g E h c d e c d
+Position 1 2 3 4 5 6 7 8 9
+Decompositiongroup 1 2 2 2 2 2 2 3 4
+Reassemblystate h 2 2 2 2 2 2
+Positiontocopy 2 3 4 5 6 7
+Output h c d e c d f
+Table3: Behaviorofamodelthatusesposition-basedattentiongiventheinputacdecdfbg,template
+t = a0b0,andreassemblyruler = h2. Theposition-basedcopyingmechanismusesanattention
+headtocountthenumberoftokensineachcopygroupandanMLPtocalculatethetargetposition
+basedoncurrentstepandnumberoftokenspergroup. Finally,anattentionisusedtocopythetoken
+fromthetargetposition.
+Pre-transformations with the ELIZA Transformer As discussed in Appendix A, a pre-
+transformationruleconsistsofadecompositiontemplate,atransformationrule,andareferenceto
+anotherkeywordinthescript. Ifaninputwmatchesthetemplate,ELIZAreassemblesitaccording
+tothetransformationruletogetanewinputw′,andthenreprocessesw′accordingtothespecified
+keyword. Pre-transformationrulescantriggeranarbitrarynumberofcomputationalsteps(forexam-
+ple,wecanwriteascriptcorrespondingtoaTuringmachinethatneverhalts). Therefore,givena
+Transformerwithafinitenumberoflayers,theonlywaytoincorporatearbitrarypre-transformation
+rulesintoourconstructionistoenabletheTransformertoperformvariablecomputationdepending
+ontheinput. ThemostnaturalwaytodothisisusingaChain-of-Thought-styleapproach[75]: ifthe
+inputmatchesapre-transformationrule,theELIZATransformerwilloutputthetransformedinput
+(alongwithsomeindicatorofthenewstate),andthenreprocessthenewlygeneratedoutput. This
+approachalsofollowsfromMerrillandSabharwal[49],whodemonstratethatintermediate-decoding
+stepsarenecessaryforsimulatingarbitraryTuringmachineswithdecoder-onlyTransformers.
+ELIZATransformerTuringMachine Havingincorporatedpre-transformationrulesintotheELIZA
+Transformer,wecannowusetheELIZAconstructionfromHayandMillican[33]toimmediately
+get a new construction for simulating a Turing machine with an auto-regressive Transformer. In
+thisconstruction,eachactionintheTuringmachineisexpressedasapre-transformationrule,and
+theinputateachtimestepencodesthetape. GivenaTuringmachine(TM)thatrunsinT(n)steps
+(wherenisthelengthoftheinput),thisconstructionusesT(n)2 generationsteps: ateachstep,it
+findsthepatternthatmatchesthemostrecentinput,regeneratesthetapeaccordingtotheassociated
+transformation rule, and then reprocesses the new version of the tape. This resembles existing
+constructions,butwithsomedifferences. Forexample,Weietal.[74]giveaconstructionthatuses
+T(n)generationsteps: ateachstep,themodelgeneratesonenewtoken,whichencodesthestateand
+actiontakenatthatstep. (Ontheotherhand,Weietal.[74]assumestheTMusesasingle-directional
+tape,sowilltakeT(n)2 stepstosimulateaTMwithabi-directionaltaperunninginT(n)steps.)
+NotethattheELIZAconstructiondoesnotuseeitherofthelong-termmemorymechanisms(response
+22Cycling through responses Memory queue
+u: e: u: e: u: uu:: ee:: uu:: ee:: uu:: ee:: uu::
+t 1 t 1 t 1 mmnn aaoo ttcc hh eennqq mmnn aaoo ttcc hh mmnn aaoo ttcc hh
+Modular prefix sum GGrriiddwwoorrlldd aauuttoommaattoonn
+r 1 r 2 r 1 nnuullll ddeeqq nnuullll
+u: e: u: e: u: uu:: ee:: uu:: ee:: uu:: ee:: uu::
+t 1 r 1 t 1 r 2 t 1 mmnn aaoo ttcc hh null eennqq mmnn aaoo ttcc hh deq mmnn aaoo ttcc hh
+Intermediate output: Get previous response template Intermediate output: Count number of dequeue responses
+r r r nnuullll ddeeqq nnuullll
+1 2 1
+Figure11: ELIZAincludestwocomponentsthatmakeuseofthelong-termconversationhistory:
+cyclingthroughresponsetemplates(left),andthememoryqueue(right). Weidentifytwomecha-
+nismsforthesecomponents. Top: First,afterparsingtheuser’sinput,wecanuseexistingautomaton
+constructions[45]asblackboxcomponentstosimulatetherelevantdatastructures. Bottom: Alterna-
+tively,wecanre-usethetemplatematchingmechanismtoalsoparseintermediateELIZAoutputs,
+resultinginsimplerconstructionswithdifferentgeneralizationtradeoffs.
+cylingorthememoryqueue). Ateachstep,themodelneedstoattendonlytothemostrecentversion
+ofthetape—whichhasalengthofT(n)—ratherthanthefullconversationhistory,whichhasafinal
+lengthofT(n)2. Theconstructioncouldthereforeuseaslidingwindowattentionscheme[e.g.11]to
+reducethenumberofattentioncomparisonsateachstep.
+C ExperimentalDetails
+Hereweprovidemoredetailsabouthowwegeneratethedataandconducttheexperiments. Code
+anddataforreproducingtheexperimentsareavailableathttps://github.com/princeton-nlp/
+ELIZA-Transformer.
+C.1 DataGeneration
+TogenerateanELIZAdataset,wefirstgenerateasetofdecompositiontemplatesandreassembly
+rules,andthengenerateconversationsbygeneratingsentencesthatmatchthedifferentdecomposition
+templatesandapplyingthecorrespondingrules. Foralltemplatesandsentencesaredrawnfroma
+vocabularyV consistingofthe26lower-caseEnglishletters. Eachturnbeginswithaspecialdelimiter
+character—UforuserinputsandEforELIZAinputs—andendswithaperiod,andeachconversation
+beginswithaspecialbeginning-of-sequencetoken.
+Decompositiontemplates Ourdistributionoverdecompositiontemplatesisdefinedbythefollowing
+parameters:theminimumandmaximumnumberofwildcardsymbolspertemplate;andthemaximum
+n-gramlength,meaningthemaximumnumberofcontiguousnon-wildcardsymbols. Forexample,
+thetemplate0a0bc0hastwowildcardsandamaximumn-gramlengthoftwo(bc). Togeneratea
+template,wefirstpickthenumberofwildcardsbysamplinganumberℓuniformlyfrombetween
+the minimum and maximum, and then form a template by interleaving ℓ wildcard symbols with
+ℓ+1n-grams. Eachn-gramsissampledbyfirstsamplingalengthmuniformlyfrombetween0
+andthemaximumlength(forthefirstandlastn-gram)orbetween1andthemaximumlength(for
+any n-gram between two wildcard symbols), and sampling m words uniformly from V. For our
+firstsetofexperiments(Section4.2),wesample31templateswithbetweentwoandfourwildcards
+and a maximum n-gram length of three. For our second set of experiments (comparing copying
+mechanismsinSection4.3),wesample15templates,eachwithexactlytwowildcardcharactersand
+amaximumn-gramlengthof1. Forallexperiments,thefinaltemplateisthenulltemplate. Theonly
+wildcardsymbolweuseis0,correspondingtozeroormorewords,althoughELIZAtemplatescan
+alsoincludesymbolsthatmatchexactlynwildcardwords.
+Reassemblyrules Givenadecompositiontemplates,areassemblyruleconsistsofasequenceof
+wordsfromV andintegersindexingwildcardsinthetemplate. Werefertothesewildcardsascopying
+segments. Ourdistributionoverreassemblyrulesisdefinedbytheminimumandmaximumnumber
+ofcopyingsegmentsandthemaximumn-gramlength. Giventhesetofintegerscorrespondingto
+23theavailablecopyingsegmentsinthetemplate,wegenerateatransformationrulebysamplingup
+toℓofthesenumberswithoutreplacement(whereℓissampleduniformlyforeachrule),andthen
+form a rule by interleaving numbers with randomly sampled n-grams as above. We additionally
+prependeachreassemblyrulewithaunique,constanttwo-wordprefix.Forourfirstsetofexperiments
+(Section4.2),wesampleuptofivereassemblyrulespertemplates,eachwithbetweenoneandfour
+copyingsegments.Foroursecondsetofexperiments(comparingcopyingmechanismsinSection4.3),
+wesampleonereassemblyrulepertemplate,eachwithexactlytwocopyingsegmentscharacters.
+Singleturn Togenerateasingleturnofaconversation,wesampleadecompositiontemplateand
+thensampleasentencethatmatchesthattemplate. Foreachwildcardinthetemplate, wepicka
+segmentlengthmuniformlyfrombetween0andthemaximumsegmentlength,andthensample
+m words from the vocabulary. For our first set of experiments, the maximum segment length is
+10 and we sample the m words uniformly for each segment. In our second set of experiments,
+themaximumsegmentlengthis20,and,foreachsegment,wefirstsampleaunigramdistribution
+p∼Dirichlet(α1),andthensamplingmwordsfromCategorical(p),asdescribedinSection4.3).
+Conversations ForourexperimentsinSection4.2,wegenerateconversationsbysamplingasequence
+ofturnsuntilwereachthemaximuminputlength(512tokens). (Forourexperimentswithcopying
+mechanismsinSection4.3,eachconversationconsistsofasingleturn.) Wetakesomeadditional
+considerationstoensurethatthedatademonstratesthecyclingbehavior—thatis,toensurethateach
+templateoccasionallyappearsenoughtimesinaconversationtocyclethroughalloftheassociated
+reassembly rules. In particular, for each conversation, we sample a distribution over templates
+p ∼ Dirichlet(α), and then for each turn sample a template t ∼ Categorical(p). Here, α is a
+32-dimensionalvector,correspondingtothe32templates(includingthenulltemplate);settingthe
+entriesofαtobelessthanonemakesitmorelikelythatpassignsmostprobabilitytoasmallnumber
+oftemplates. Wesettheentriestobe1/32,withtheexceptionofthememorytemplate,whichissetto
+1/4(toincreasetheproportionofexamplesthatdemonstratethememoryqueue). Additionally,after
+samplingp,weensurethatthelikelihoodassignedtothenulltemplateisatleasthalfthelikelihood
+assignedtothememorytemplate;thisistoincreasetheproportionofexamplesthatcontainboth
+enqueueoperationsanddequeueoperations(whicharetriggeredbythenulltemplate). Forourfirst
+setofexperiments,wesample100,000conversationsfortrainingand20,000fortesting. Forour
+secondsetofexperiments,wesample32,000and16,000conversationsfortrainingandevaluation,
+respectively.
+Memoryqueue Toincorporatethememoryqueuemechanism,weselectoneofthe32templates
+to serve as the memory template. This template is associated with two lists of reassembly rules:
+thefirstlistisusedtorespondtoinputsthatmatchthetemplate(enqueuereassemblyrules),and
+thesecondlistisusedlaterintheconversationwhenthememoryisreadfromthequeue(dequeue
+reassemblyrules). InWeizenbaum’sELIZAprogram[77],foreachmemory,adequeuereassembly
+ruleisselectedatrandomfromthelist. Inourexperiments,weinsteadusethecyclingmechanism,
+toensurethatthebehaviorisdeterministic. Thatis,givendequeuereassemblyrulesr ,...,r ,at
+1 M
+thenthdequeueintheconversationweusethereassemblyruler . Inourdataset,therearefour
+n%M
+dequeuereassemblyrules. Wealsolimitthesizeofthequeue: whensamplingconversations,we
+ensurethatthequeuecontainsatmostfourmemoriesatanytime.
+C.2 ModelsandTraining
+Forallofourexperiments,wetrain8-layerdecoder-onlyTransformerswith12attentionheadsper
+layer,ahiddendimensionof768. Themodelshavenopositionembeddingsbutareotherwisebased
+ontheGPT-2architecture[63]andareimplementedusingPyTorch[57]andHuggingFace[79]. We
+usetheAdamoptimizer[40]withalearningrateof1e-4. Formulti-turnexperiments(Sec.4.2),we
+useabatchsizeof8andtrainfor10epochs. Forsingle-turnexperiments(Sec.4.3),weuseabatch
+sizeof64andtrainfor100epochs. Foreachsetting,wetrainmodelswiththreerandomseeds;plots
+aregeneratedwithSeaborn[73]andshowthe95%confidenceintervals.
+C.3 AdditionalDetails: MechanismAnalysis
+Cyclingthroughresponses Givenatemplatetwithreassemblyrulesr ,...,r ,weselectconver-
+1 M
+sationsinwhichtappearsn>1times.Forsomei<n,weidentifytheturnatwhichtismatchedfor
+theithtimeintheconversation,andreplacetheresponsewithr forsomej ̸=i. Thenweevaluate
+j
+themodel’sresponseatthenextoccurrenceoftemplatet. Ifthemodelusedthemodularsum,we
+wouldexpectittogivetheSameresponseasbeforetheintervention(respondingwithr );ifit
+i+1%M
+24Increment on = Null inputs Increment on = Null responses Increment on = Null input Increment on = Null response
+1.00 1.0
+0.98 Turn type 0.8
+0.96 Single turn
+Multi-turn (no cycling) 0.6
+0.94 Multi-turn (cycling) Memory queue 0.4
+Null template
+0.92
+0.2
+0.90 0 2 4 6 8 0 2 4 6 8
+Full response Prefix only Full response Prefix only Number of enqueues Number of enqueues
+(a)Accuracy(endoftraining). (b)Nullinputs.
+Figure12:WerecreateourexperimentsfromSec.4usingadifferentversionofthecyclingmechanism
+fornulltemplates. Inouroriginalexperiments,weincrementedthecyclenumbereverytimethe
+nullinputismatched,evenifthesubsequentresponseistoreadfromthememoryqueue. Here,we
+insteadincrementthecyclenumberonlywhenthenullinputisfollowedbyanullresponse. While
+theoveralltrendsaresimilar,modelstrainedonthesecondversionofthedataperformbetteroverall
+(Fig.12a);andaccuracyonnullinputsdoesnotdecreaseasdramaticallyasafunctionofthenumber
+ofenqueuesintheconversation(Fig.12b). Thissuggeststhatthetaskiseasierformodelstolearn
+whentheycankeeptrackofthecyclenumberusingtheirpreviousresponses,ratherthanhavingto
+countthenumberofnullinputs. SeeAppD.1formoredetails.
+usestheintermediateoutput,wewouldexpectittoinsteadreplywithr (Increment). Figure6a
+j+1%M
+indicatesthatthemodelalmostalwaysincrementsitsresponse,indicatingthatthemodelrelieson
+previousresponsestoupdatetheresponsecycle.5
+Memoryqueue Weconductasimilarexperimenttotestthememoryqueuemechanism. Weselect
+conversationscontainingn>1twodequeueturns. Forsomei<n,weidentifytheithdequeueturn
+andreplacetheresponsewithaconstantstring,correspondingtoanullresponse,andevaluatethe
+model’sresponseatdequeuei+1. Ifthemodelusedthegridworldautomaton,wewouldexpectitto
+givetheSameresponseasbefore,replyingwithmemoryi+1. Ifthemodelreliedonintermediate
+outputs,wewouldexpectittoinsteadreplywithmemoryi(Decrement). Figure6bshowsthatthe
+modelalmostalwaysdecrementsthememorycounter, indicatingthatitexaminesitsownearlier
+responsestoidentifythestateofthememoryqueue.
+D AdditionalResults
+D.1 Errorsonnullinputs
+InSec.4,wefoundthatmodelsperformworseoninputsthatdonotmatchanyofthetemplates,in
+situationswherethememoryqueueisempty. Werefertoinputsthatdonotmatchanytemplatesas
+nullinputs,andsaythattheymatchthenulltemplate. Notethat,liketheothertemplates,thenull
+templateisassociatedwithmultiplereassemblyrules,andthemodelshouldcyclethroughtheserules
+whenthenulltemplateismatchedmultipletimes. (Inourexperiment,therearefiverulesassociated
+withthenulltemplate.) Weconjecturethatthelowerperformanceonnullinputscouldberelatedto
+difficultytrackingthecyclenumberfornulltemplates.
+Inparticular,thereissomeambiguityinhowtotrackthecyclenumberforthenulltemplate,because
+anullinputdoesnotalwaysleadtoanullresponse: ifthememoryqueueisnon-empty,themodel
+shouldrespondbyreadingfromthememoryqueue. Inourexperiments, weincrementthecycle
+numbereverytimethenullinputismatched,evenifthesubsequentresponseistoreadfromthe
+memoryqueue. However,wecouldinsteadincrementthecyclenumberonlywhenthenullinputis
+followedbyanullresponse. Forexample,consideracasewherethenulltemplateisassociatedwith
+threereassemblyrules(“Nullrule1”,“Nullrule2”,“Nullrule3”). Thedifferencebetweenthesetwo
+mechanismsisillustratedinthefollowingconversation:
+5ThedifferencebetweenFullresponseandPrefixonlyaccuracyindicatesthatthemodelgenerallyselectsthe
+reassemblyruleaspredictedbytheIncrementhypothesis,butdoesnotimplementingthecopyingstepcorrectly,
+perhapsbecausedifferentreassemblyrulescanusedifferentdecompositiongroups.
+25
+)hctam
+tcaxe(
+ycaruccA
+)hctam
+tcaxe(
+ycaruccAConcentration (train) = 0.01 Concentration (train) = 0.1 Concentration (train) = 1.0 Concentration (train) = 100.0
+1.0
+0.8
+Concentration (eval)
+0.6 0.01
+0.1
+0.4 1.0
+100.0
+0.2
+0.0
+0 20 40 60 80 100 0 20 40 60 80 100 0 20 40 60 80 100 0 20 40 60 80 100
+Epoch Epoch Epoch Epoch
+Figure13: Wetrainandevaluatemodelsondatasetsthatvaryinhowlikelyitisforann-gramto
+appearmultipletimesinasequence. Thesetrainingcurvescorrespondtotheexperimentsdiscussed
+in§4.3. Lowervaluesoftheconcentrationparameter,α,correspondtohigheramountsofrepetition.
+Foreachsetting,wetrainmodelswiththreerandomseedsandplottheaccuracy(meanand95%
+CI)oneachofthefourtestdistributionsoverthecourseoftraining. Thebiggestperformancedrop
+occurswhenmodelstrainedwithα >0.1areevaluatedonthesettingwiththemostrepetition
+train
+(α =0.01);accuracyonthisdataalsoimprovesmoreslowlycomparedtotheothersettings,even
+test
+whenα =0.01(left-mostplot).
+train
+Concentration (train) = 0.01 Concentration (train) = 0.1 Concentration (train) = 1.0 Concentration (train) = 100.0
+0 n-gram
+1
+100 2 3
+4
+200 5
+0 1 2 3 4 5 6 7 8 91011 0 1 2 3 4 5 6 7 8 91011 0 1 2 3 4 5 6 7 8 91011 0 1 2 3 4 5 6 7 8 91011
+head head head head
+Figure14: WhichmechanismdoTransformersusetocopysegmentsoftheuser’sinput? Ateach
+copyingstep,wecanidentifythepositionintheinputweshouldreadfromnextbycountingthe
+numberoftokensineachdecompositiongroup. Toinvestigatewhethermodelsusethismechanism,
+we compare the difference in the average attention score between queries and keys under two
+conditions: eitherthekeyhassamen-gramprefixasthecurrentoutput,butappearsatthewrong
+position;orthekeyappearsatthetargetpositionbuthasadifferentn-gramprefix. InFig.5c,we
+averaged this metric over all 12 attention heads in the final layer; here, we show the results for
+eachfinal-layerattentionheadindividually. Eachcolumncorrespondstoamodeltrainedondata
+generatedwithadifferentconcentrationparameterα,withlowervaluescorrespondingtosentences
+that are more likely to repeat the same n-grams multiple times. For each model, the majority of
+attentionheadsshowbroadlysimilarpatterns,suggestingthatsimilarmechanismsareimplemented
+redundantlybymultipleheads.
+User Cyclingonnullinputs Cyclingonnullresponses
+U:Null. E:Nullrule1. E:Nullrule1.
+U:MemoryA. E:Enqueue. E:Enqueue.
+U:Null. E:DequeueA. E:DequeueA.
+U:Null. E:Nullrule3. E:Nullrule2.
+Wehypothesizethatthefirstmechanism(Cyclingonnullinputs)ismoredifficultforthemodelto
+learn;forexample,themodelcannotdeterminethecyclenumberbyusingtheintermediateoutput
+mechanismdescribedinSec.3.2. Totestwhetherthisisthecase,wecreatenewconversationdataset
+usingthesamescriptasinouroriginalexperiments,butusingthesecondapproachtodetermining
+thecyclenumberfornullinputs(Cyclingonnullresponses). Allothertrainingdetailsareunchanged.
+TheresultsofthisexperimentareplottedinFig.12. Whiletheerrorpatternsarebroadlysimilarin
+bothcases,modelstrainedonthissecondversionofthedataperformbetteroverall,anddonotsuffer
+asmuchperformancedegradationasafunctionofthenumberofenqueuesearlierintheconversation.
+Thiscouldsuggestthatthetaskiseasierforthemodelstolearnwhentheycandeterminethecycle
+numberasafunctionofpreviousnulloutputs,ratherthanhavingtocountthenumberofnullinputs.
+26
+)hctam
+tcaxe(
+ycaruccA
+erocs
+noitisop
+- erocs
+marg-nD.2 Copyingmechanisms
+InFig.13,weplotthetrainingcurvescorrespondingtotheexperimentsdescribedin§4.3. Models
+generalizetheworsttodatawiththehighestdegreeofinternalrepetition(α =0.01);thisdataalso
+test
+takesmodelslongertolearn. ThisagreeswiththefindingsofZhouetal.[86]andcouldsuggestthat
+induction-headstylemechanismsareeasierforTransformerstolearncomparedtomechanismsthat
+relyonpositionarithmetic.
+InFig.14,werecreatetheresultsfromFig.5c,butplottingtheresultsseparatelyforeachfinal-layer
+attentionhead. Asdiscussedin§4.3,inthisplot,positivevaluesindicatethattheattentionheadhas
+apreferenceforattendingonthebasisofpositionratherthancontent,andnegativevaluesindicate
+a preference for attending based on content (i.e., to tokens that have the same n-gram prefix as
+thecurrenttoken),ratherthanposition. Interestingly,withineachmodel,themajorityofattention
+headsshowbroadlysimilarpatterns,perhapsindicatingthatthemodelsencodethesamemechanism
+redundantlyacrossmultipleheads. ThisresultechoesthefindingsofSinghetal.[65],whofindthat
+models learn multiple parallel induction heads. Fig. 14 also illustrates that none of the attention
+cleanlycorrespondstooneofourhypothesizedmechanisms,underscoringthechallengesofaligning
+real-worldTransformerswithinterpretablesymbolicmechanisms.
+27
