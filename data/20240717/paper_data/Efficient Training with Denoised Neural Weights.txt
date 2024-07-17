@@ -1,0 +1,988 @@
+Efficient Training with Denoised Neural Weights
+Yifan Gong1,2⋆ , Zheng Zhan2 , Yanyu Li1,2 , Yerlan Idelbayev1 , Andrey
+Zharkov1 , Kfir Aberman1 , Sergey Tulyakov1 , Yanzhi Wang2 , and Jian
+Ren1
+1 Snap Inc. 2 Northeastern University
+Project Page: https://yifanfanfanfan.github.io/denoised-weights/
+Abstract. Good weight initialization serves as an effective measure to
+reduce the training cost of a deep neural network (DNN) model. The
+choice of how to initialize parameters is challenging and may require
+manualtuning,whichcanbetime-consumingandpronetohumanerror.
+Toovercomesuchlimitations,thisworktakesanovelsteptowardsbuild-
+ingaweight generator tosynthesizetheneuralweightsforinitialization.
+We use the image-to-image translation task with generative adversar-
+ial networks (GANs) as an example due to the ease of collecting model
+weightsspanningawiderange.Specifically,wefirstcollectadatasetwith
+various image editing concepts and their corresponding trained weights,
+whicharelaterusedforthetrainingoftheweightgenerator.Toaddress
+the different characteristics among layers and the substantial number
+ofweightstobepredicted,wedividetheweightsintoequal-sizedblocks
+andassigneachblockanindex.Subsequently,adiffusionmodelistrained
+with such a dataset using both text conditions of the concept and the
+block indexes. By initializing the image translation model with the de-
+noised weights predicted by our diffusion model, the training requires
+only 43.3 seconds. Compared to training from scratch (i.e., Pix2pix),
+we achieve a 15× training time acceleration for a new concept while
+obtaining even better image generation quality.
+1 Introduction
+Efficienttrainingfordeepneuralnetworks(DNN)notonlyacceleratesthemodel
+development process but also reduces the requirements for computational re-
+sources and costs. Many prior works have investigated efficient training strate-
+gies, such as sparse training [2,9,12,21,22,35,38,40,42] and low-bit train-
+ing [34,37,41]. However, achieving efficient training is often hindered by chal-
+lenges in initializing model weights effectively. While some efforts have been
+conducted in the domain of weight initialization [1,6,7,10,17,43], determining
+theappropriateschemestouseacrossdifferenttasksremainschallenging.Tuning
+parametersforweightinitializationcanbetime-consumingandpronetohuman
+error, leading to sub-optimal performance and increased training time.
+⋆ Work done during internship at Snap Inc.
+4202
+luJ
+61
+]VC.sc[
+1v66911.7042:viXra2 Y. Gong, Z. Zhan, et al.
+To tackle such challenges, inspired by recent advances in designing Hyper-
+Networks [11,30,39], for the first time, we investigate the feasibility of build-
+ing a weight generator to provide better weight initialization across different
+tasks, thusreducingthe trainingtime and resourceconsumption forobtaining a
+well-trained DNN model. We use image-to-image translation tasks trained with
+GAN models [18,24,46] as an example to unfold our design for predicting neu-
+ral weights, though our framework is a general design that is not restricted to
+generating GAN weights. The reason for the choice is the easy acquisition of a
+vast volume of different weights trained on different datasets.
+More specifically, the weight generator can predict the initialized weight for
+unseen new concepts and styles. To reduce the number of weights to be pre-
+dicted, we apply Low-Rank Adaptation (LoRA) [16] to the image generation
+model, resulting in many fewer model parameters while still maintaining high-
+quality image generation. As the GAN model is composed of different types of
+layers with different sizes and number of weights, we group the weights and di-
+vide them into equal-sized blocks. A diffusion process [28,31–33] is leveraged to
+model the space of well-trained weights from GAN models. Hence, the weights
+estimation by training diffusion model, namely, the weight generator, becomes
+possible. To improve the performance of the weight generator, we further in-
+corporate the block index as a further conditioning mechanism in the weight
+generator, by adopting a sinusoidal positional encoding scheme and computing
+the embeddings for block indexes. The embedding provides the weight gener-
+ator with information about the position of each weight block within all the
+model weights. After obtaining the weight generator, to train a GAN-based
+image translation model, we conduct a fast inference of the weight generator
+through a single-step denoising process and use the predicted weights to ini-
+tialize the GAN model. The GAN model only requires a subsequent efficient
+fine-tuning process to obtain high-quality image generation results, significantly
+reducing the time consumption for obtaining the model for the newly unseen
+concept. We summarize our contributions as follows:
+– We propose a framework to generate weight initializations across different
+concepts/stylestoefficientlytraintheGANmodelsfortheimagetranslation.
+– We collect a vast ground-truth dataset of LoRA weights for different con-
+cepts/styles with the help of diffusion models (i.e., preparing paired image
+datasets), which serves as the foundation for weight generator training.
+– We introduce an efficient design for a weight generator by utilizing a diffu-
+sionprocess,whichincorporatesbothtextualconceptinformationandblock
+indexesasinputs.Todealwithdifferentlayertypesandweightshapes,weor-
+ganizeweightsintoequal-sizedone-dimensionalblocks,significantlyreducing
+computational overhead. These block indexes are seamlessly integrated into
+the weight generator design by combining them with time step embeddings.
+Therefore, the weight generator has the information about the position of
+each weight block within all the model weights.
+– OurproposedframeworkcanpredicttheinitializedneuralweightsofaGAN
+model with a single denoising step, taking only 1.19 seconds. By initializingEfficient Training with Denoised Neural Weights 3
+with the predicted weights, a fast fine-tuning process can convey the target
+stylein42.1seconds.Comparedtotrainingfromscratch(i.e.,Pix2pix[18]),
+we reduce the total training time by 15×, while maintaining even better
+image generation quality. Compared to other efficient training method [14],
+we can save the training time by 4.6×.
+2 Related Work
+2.1 Efficient Training
+Efficient training of DNNs has been a central point in machine learning re-
+search, aiming to reduce computational costs and memory requirements dur-
+ingmodeltrainingwhilemaintainingmodelperformance.Sparsetrainingmeth-
+ods [2,9,12,21,22,35,38,40,42] explore faster DNN training by applying sparse
+maskstothemodel.Staticsparsetraining[22,35,38]executestraditionaltraining
+after first pruning the model with a fixed sparse mask, which typically results
+in lower accuracy and higher computation and memory consumption for the
+pruning stage. On the contrary, dynamic mask methods [2,9,12] start with a
+sparsemodelstructurefromanuntraineddensemodelandthencombinesparse
+topology exploration with the sparse model training, which adjusts the sparsity
+topologyduringtrainingwhilemaintainingalowmemoryfootprint.Besidesap-
+plyingsparsemasksonweightsandgradients,somerecentworks[21,40,42]also
+investigateincorporatingdataefficiencywithdifferentdataselectionapproaches
+for better training accelerations. Meanwhile, another direction of the research
+exploreslow-bittrainingofDNNstopursuemodeltrainingefficiency[34,37,41].
+However,usinglowerprecisiontypicallyleadstoanaccuracydrop.Agoodweight
+initializationisessentialtostabilizetraining,enableahigherlearningrate,accel-
+erate convergence, and improve generalization. Existing works explore rescaling
+paradigms[1,7,17,43]orleveragetherelationshipbetweenlayers[6,10].However,
+determiningschemestouseisstillachallengingtaskandpronetohumanerrors
+for different tasks. Meanwhile, LoRA methods [8,16] aim to exploit the inher-
+entlow-rankstructurepresentinDNNweightmatricestoreducecomputational
+complexity and memory requirements for fine-tuning from a pre-trained model
+onaspecific,smallerdatasettospecializeitsperformanceonaparticulartaskor
+domain. By keeping the original model unchanged and adds small, changeable
+parts to each layer of the model, LoRA methods can significantly reduce the
+numberofparametersandoperationsrequiredforforwardandbackwardpasses,
+which serves as an effective complement in the efficient training direction.
+2.2 HyperNetwork
+HyperNetworks have emerged as a promising approach in the field of generative
+AI by generating model parameters. HyperDreamBooth [30] introduces a Hy-
+perNetwork capable of generating personalized weights from a single image. By
+leveraging these weights within the diffusion model, HyperDreamBooth enables4 Y. Gong, Z. Zhan, et al.
+the generation of personalized faces with high subject details in diverse styles
+and contexts followed by a fast fine-tuning process. HyperDiffusion [11] oper-
+ates directly on MLP weight instead of directly applying generative modeling
+on implicit neural fields. It first collects a dataset of neural field multilayer per-
+ceptrons (MLPs) overfitting on 3D or 4D shapes. The dataset is then used to
+train the HyperNetwork, which is an unconditional generative model, to predict
+the MLP weights for 3D or 4D shape generation. Neural Network Diffusion [39]
+works on generating model weights for image classification tasks. However, the
+weight generation is based on first collecting multiple trained model weights for
+specific model architecture on the target dataset. Furthermore, it only works on
+generating the weights for two normalization layers.
+3 Motivations and Challenges
+Effective weight initialization is crucial for stabilizing training, facilitating a
+faster learning rate, expediting convergence, and enhancing generalization abil-
+ity. However, identifying good weight initializations across different tasks re-
+mains challenging. Inspired by recent advances in HyperNetwork, we hope to
+investigate whether we can build a weight generator to obtain good weight ini-
+tialization, thus reducing training time and resource consumption. Unlike the
+popular image/video generation, little research effort has been paid to explore
+weight generation. Building such a weight generator is promising yet challeng-
+ing. The first significant challenge comes from the different layer types within
+DNN architectures. The weights in each layer exhibit diverse sizes and shapes,
+necessitating a weight generation approach capable of accommodating this het-
+erogeneity. Second, the weight generator must possess the capacity to generate
+a substantial number of parameters efficiently, ensuring comprehensive cover-
+age across the network. Third, the inference of the weight generator should be
+fast and efficient to save time in obtaining the weights for a new task. Address-
+ing these challenges holds promise for building better DNN training paradigms
+with higher efficiency and effectiveness of deep learning systems. Thus, in this
+work, we study the construction of the weight generator for better weight ini-
+tializations. We aim to show the generation ability not only restricted to the
+weight initialization for a single model architecture on a certain dataset, such
+as ResNet-18 on CIFAR-10 as in [39], but across the models for different tasks.
+To achieve this, we take the generation of initialization weights for GANs for
+image-to-image translation tasks as an example to show our methods due to
+the ease of collecting diverse datasets for the GAN models. Our method is not
+restricted to the GAN architecture or the image-to-image translation task.
+4 Method
+Our objective is to train a weight generator to predict the weight initializations
+for different tasks. We take GANs for image-to-image translation tasks as an
+example to demonstrate the effectiveness of our method. When there is a newEfficient Training with Denoised Neural Weights 5
+Image Diffusion
+Fine-
+
+
+Neural Diffusion
+Tuning
+Text Info.
+Weight Init.
+Weight Generator Block Index
+Fig.1: The framework overview of our weight generator design. The standard dif-
+fusionprocessturnsanimageintonoiseintheforwardpassandreversesacleanimage
+frompurenoiseinthereverseprocess.Ourweightgeneratorisdesignedtoturnanoise
+toweightinitializationsforefficienttrainingpurposes.Giventhetextinformationand
+block index, the weight generator provides the corresponding weight values.
+concept/style, we can query the weight generator to provide the weight values
+for the initialization. The weight generator is modeled with a diffusion process,
+asillustratedinFig.1.Differentfromimagediffusionmodelsthatreverseaclean
+image from a purse noise, our framework targets turning the noise into weight
+values used for the initialization. By plugging in the predicted weight values,
+a fast fine-tuning process is conducted to achieve the efficient training of the
+GAN models for the target style. The core of our framework is the design of the
+weight generator. To build this weight generator, we elaborate on how to create
+the training dataset for the weightgenerator in Sec. 4.1, the dataformat for the
+training and inference of the weight generator in Sec. 4.2, the architecture and
+trainingobjectiveoftheweightgeneratorinSec.4.3,andthefine-tuningprocess
+after the weight prediction is Sec. 4.4.
+4.1 Dataset Collection
+In order to effectively train a weight generator for generating weight initializa-
+tions of GAN models across various concepts, we need to collect a large-scale
+ground-truth weight value dataset for different concepts. To obtain the ground-
+truth weight value dataset, a large-scale prompt dataset becomes crucial. By
+usingtheconcepts/stylesinthepromptdataset,wecanachieveimagecollection
+with diffusion models to obtain a substantial collection of images representative
+of each target concept. The images for each concept/style are further leveraged
+to train the GANs for the obtaining of the ground-truth GAN weights.
+As the foundation of data preparation for weight generator training, the
+promptdatasetshouldincludediversevisualconcepts/stylestoenabletheweight
+generator to learn comprehensive representations for initializing GANs tailored6 Y. Gong, Z. Zhan, et al.
+to specific tasks. However, the process of collecting such a dataset poses great
+challenges.Ensuringdiversityandrepresentativenessacrossdifferentconcepts/styles
+demandsconsiderabledata.Moreover,thecollectedpromptsarefurtherusedto
+generate images in the target concept/style with diffusion models.
+To construct our prompt dataset for training a reliable weight generator for
+GANweightinitialization,weadoptasystematicapproachthatintegratesboth
+large language models (LLMs) for style generation and augmentation to en-
+sure richness and diversity in conceptual representation. We begin by sketching
+out three broad categories: 1) art concepts, 2) characteristic concepts, and 3)
+facialmodificationconcepts. Withineachcategory,we leveragealargelanguage
+model(ChatGPT-3.5[4])toaskittogenerateaspectrumoftextualdescriptions
+encompassing various concepts. By filtering out redundant concepts/styles, we
+further conduct an augmentation method by querying a large language model
+(Vicuna [5]) to provide concepts/styles with similar meanings but different rep-
+resentations. To further enrich the prompt dataset, we permute and combine
+concepts/styles across different categories. Through the process, we are able to
+curate a large-scale prompt dataset that not only spans diverse conceptual do-
+mains but also captures intricate stylistic differences, providing the foundation
+for the training of the weight generator for better weight initialization.
+After the prompt dataset collection, we use the diffusion models to edit real
+imagestoobtaintheeditedimagesforeachconcept/styleinthepromptdataset,
+formingpairsofdataforGANtraining.Here,weadoptageneratorwithahybrid
+ofResNetblocksandtransformerblocksasinpaper[14]duetotheeffectiveness
+ofthemodelandthehybridarchitecturedesigntoshowthegenerationabilityof
+ourmethodondifferenttypesoflayers.FollowingtheGANtrainingprocess,we
+build a dataset of weights from GAN checkpoints for different concepts/styles.
+To further augment the weight value dataset, we save K checkpoints through
+thetrainingprocessforeachconcept/styleaftertheFIDperformanceconverges.
+4.2 Data Format Design for Weight Generator
+Totrainaweightgeneratorcapableofefficientlyproducingweightinitializations
+for GAN models across diverse concepts, it is important to design the weight
+formatforbothtrainingandinference.Theobjectiveiswheneveranewconcept
+is provided as the input to the weight generator, it can generate the weight ini-
+tializationofalllayersfortheconcept.Giventhereexistmultipledifferenttypes
+oflayerswithinthemodelsuchasfullyconnected(FC),convolutional(CONV),
+andbatchnormalization(BN)layers,andthevaryingsizesanddimensionsacross
+the layers, designing the appropriate data format becomes crucial and challeng-
+ing. Furthermore, the scale of weights in a GAN model is typically on the scale
+of millions, posing more challenges to the data format design.
+A larger amount of weights to be predicted leads to more difficulties for the
+weightgenerator.Toalleviatethis,weapplyLow-RankAdaptation(LoRA)[16]
+to different layers to greatly reduce the number of weights to be predicted. For
+instance, for a CONV layer i with weights w
+i
+∈ Rc×f×kh×kw, we apply two
+low-rank matrices with rank r i, i.e. w iA ∈ Rc×ri×kh×kw as LoRA down layer,Efficient Training with Denoised Neural Weights 7
+and wB ∈Rri×f×1×1 as LoRA up layer, to approximate the weight change. By
+i
+doing so, the total amount of weights to be predicted is reduced from 7.06M to
+0.22M.WeshowthatfinetuningLoRAweightsaresufficienttotransferthegen-
+erativedomainoftheGANmodel.Thoughgreatlyreducingtheweightnumber,
+directly predicting all 0.22M weights simultaneously through inference of the
+weight generator once is still challenging. It requires a large weight generator
+with huge computation and memory burdens.
+Totacklethis,wepartitiontheweightsintogroupstomitigatethecomputa-
+tionalcomplexityandenhancethefeasibilityoffittingtheweightgeneratorinto
+memoryduringbothtrainingandinference.Asdifferentlayershavedifferentsta-
+tistical characteristics, we group the LoRA down and up layers for each layer i,
+withtheassociatedBNlayersifapplicable,intoonegroup.Still,eachgrouphas
+a different number of weights and shapes. Thus, we further flatten the weights
+into 1-dimensional vectors and divide the weights into N equal-sized blocks,
+each with b weights. Thus, the data format is denoted as < n,w ,T >, where
+n
+n is the block index, w ∈ Rb is the flattened 1-dimensional weight vector for
+n
+the n-th weight block, and T denotes the text prompt of current concept/style.
+The advantages of using such a data format include: 1) works for different types
+and shapes of layers; 2) reduces the computation complexity and difficulty for
+prediction; and 3) makes the weight generator easier to fit into memory.
+4.3 Weight Generator Training
+Using our dataset of weight
+ResBlock Transformer emb_n emb_t prompt_emb
+values, we train a genera-
+tive model that learns to pro-
+vide the weight initializations 1-d weight
+
+vector block
+for other concepts/styles. We
+model the weight initializa-
+tionspaceofGANsthrougha
+diffusionprocess.Thegenera- +
+tor is a UNet weight informa-
+tion creator ϵˆ parameterized
+θ
+by θ for 1-dimensional vec-
+tors,whichisdemonstratedin Fig.2: The UNet Weight Generator. The
+Fig. 2. We diffuse the weight weight generator is composed of 1-d ResBlocks and
+1-dTransformerblocks.Theblockembeddingemb
+block w from a real weight n
+n
+is combined with the time step embedding emd to
+distribution p(w ) into a t
+n be leveraged in each ResBlock.
+noisyversionandtrainthede-
+noisingUNettograduallyreversethisprocess,generatingweightsfromGaussian
+noise.Thetrainingcanbeformulatedasthefollowingnoisepredictionproblem:
+minE[∥ϵˆ (wt,t,n,τ(T))−ϵ∥2], (1)
+θ n 2
+θ
+where t refers to the time step; ϵ is the ground-truth noise; wt = α w +σ ϵ
+n t n t
+is the noisy weight for block n; α and σ are the strengths of signal and noise,
+t t8 Y. Gong, Z. Zhan, et al.
+respectively, decided by a noise scheduler; τ is a frozen text encoder such as
+CLIP [27]. To incorporate the block index as a further conditioning mechanism
+inourweightgenerator,weadoptastrategyinspiredbythesinusoidalpositional
+encoding commonly used in sequence-to-sequence models [36]. We compute a
+sinusoidal block index encoding, which serves to provide the weight generator
+with information about the position of each weight block within all the model
+weights. Specifically, let N denote the total number of weight blocks and d
+denote the dimensionality of the encoding. The sinusoidal block index encoding
+SinEnc(n,d) for block index n is computed as follows:
+(cid:16) n (cid:17) (cid:16) n (cid:17)
+SinEnc(n,2i)=sin ,SinEnc(n,2i+1)=cos , (2)
+100002i/d 100002i/d
+where i ranges from 0 to
+(cid:4)d−1(cid:5)
+. The sinusoidal encoding is then fed into em-
+2
+bedding layers to obtain the block index embedding emb_n. Finally, the block
+index embedding emb_n is combined with the time step embedding emd_t,
+represented as emb=emb_n+emb_t, to be leveraged in each residual block in
+thegenerator.Thus,theweightgeneratorhasaccesstotheblockindexthrough-
+out the denoising process. From the results, we observe that the block index n
+can model the weights from different blocks effectively without the necessity to
+condition on prior predicted weights, while greatly reducing the computations.
+4.4 Fast Fine-Tuning with Generated Weight Initializations
+When a new concept/style T arises, the weight initializations can be obtained
+byconductinginferenceforthetrainedweightgeneratorϵˆ foreachweightblock
+θ
+n.Toachievefastacquisitionofweightinitializations,weemployadirectrecon-
+struction method to avoid the iterative denoising process. More specifically, at
+the selected time step t that leans to the noise side, we forward the denoising
+diffusion model to predict the noise ϵˆ (wt,t,n,τ(T)), and we conduct a direct
+θ n
+recovery to obtain the real weight w =w0:
+n n
+1
+w0 = wt −σ ϵˆ (wt,t,n,τ(T)). (3)
+n α n t θ n
+t
+After conducting inference for all of the N weight blocks, we can obtain the
+weight initialization {w }N for the concept/style T. To capture the details of
+n n=1
+the new concept/style better, a further fine-tuning process for the GAN weights
+is leveraged with the conditional GAN loss as follows
+min maxλE (cid:2) ∥x˜T −G(x,z,T;w ,w )∥ (cid:3) +
+x,x˜T,z,T g lora 1
+wlora wd
+(cid:124) (cid:123)(cid:122) (cid:125)
+ℓ1 loss
+(4)
+E (cid:2) logD(x,x˜T;w )(cid:3) +E [log(1−D(x,G(x,z,T;w );w ))],
+x,x˜T d x,z,T g d
+(cid:124) (cid:123)(cid:122) (cid:125)
+conditionalGANloss
+where x˜T denotes images generated by the diffusion model conditioned on the
+concept T of the target style, G is the generator with original weights w and
+gEfficient Training with Denoised Neural Weights 9
+theLoRAweightsw ,D denotesthediscriminatorfunctionparameterizedby
+lora
+w , respectively, z is a random noise introduced to increase the stochasticity of
+d
+output, and λ can be used to adjust the relative importance between two loss
+terms. During the fine-tuning process, the generator only optimizes the LoRA
+weightsw whichareinitializedwiththepredictions{w }N .Byinitializing
+lora n n=1
+theGANweightsfrompredictions,weareabletousemuchfewertrainingepochs
+to reach the same or even better FID performance. Besides fine-tuning after
+prediction, we also consider incorporating the GAN training loss in Eq. (4) to
+theweightpredictionlossinEq.(1).However,throughexperiments,wefindout
+that combining these two loss terms is not able to provide better performance,
+but leads to more computation costs for training the weight generator.
+5 Experiments
+In this section, we provide the detailed experimental settings, results of our
+proposedmethodcomparedtobaselinemethods,andtheablationstudies.More
+details as well as some ablation studies can be found in the Appendix.
+5.1 Experiment Settings
+Baselines. We compare our method with image-to-image translation methods
+like pix2pix [18] (image generator with 9 ResNet blocks), pix2pix-zero-distilled
+thatdistillsCo-Mod-GAN[45]frompix2pix-zero[25],andefficientGANtraining
+methods E2GAN [14].
+PromptDatasetPreparation. WefirstuseChatGPT-3.5[4]tocollectprompts
+for the three categories: 1) art, 2) characteristic, and 3) facial modification
+concepts as discussed in Sec. 4.1. After filtering out repeated and unmeaning
+prompts, we get 226 art concepts, 441 character concepts, and 26 facial mod-
+ification concepts. We reserve 20 art concepts, 20 character concepts, and 5
+facial modification concepts for test use, never used during the weight generator
+training. By combining the concepts across different categories that are not re-
+servedastestconceptsandfiltering,thepromptdatasetisenrichedwithanother
+84477 concepts. We further augment the obtained concepts with Vicuna [5] for
+conceptswiththesamemeaningbutdifferentexpressionsandfiltermeaningless
+ones,whichleadstoanadditional4126augmentedartconcepts,8070augmented
+characteristic concepts, and 245 augmented facial modification concepts.
+Paired Image Preparation. After the prompt dataset is collected, we gener-
+ate images for GAN training for each concept. We verify our method on 1,000
+images from the FFHQ dataset [19] with image resolution as 256×256. The
+images in the target domain are generated with several different text-to-image
+diffusion models, including Stable Diffusion [29], Instruct-Pix2Pix [3], Null-Text10 Y. Gong, Z. Zhan, et al.
+pA elb rsin oo
+ n pA en rg sr oy
+ n wW ah lkit ee r Old person ScS ui ll pve tur re V Gin oc ge hn st t v ya len O pld ht oim toe pB elo rsn od n
+Origin
+Target
+Origin
+Blond Graphic Novel Oldtime
+ White Vincent van Henri Matisse
+ Jacob Hulk
+person Art photo walker Gogh style paintings Lawrence
+
+paintings
+Fig.3: Qualitative comparisons across different concept domains. The leftmost
+columnshowstwooriginalimagesandtheremainingcolumnspresentthecorresponding
+synthesized images in the target concept domain, where target prompts are shown at
+the top/bottom row. We provide images generated by various models.
+Inversion [23], ControlNet [44], and InstructDiffusion [13]. The generated im-
+ages with the best perceptual quality among diffusion models are selected to
+form the real images into paired datasets. To perform training and evaluation
+of GAN models, we divide the image pairs from each target concept into train-
+ing/validation/test subsets with the ratio as 80%/10%/10%.
+Ground-truth GAN Weights Preparation. With the paired images, we
+collect the ground-truth GAN weights to train the weight generator. We apply
+LoRAtoeachlayerofthegenerator,leadingto0.2256Mweightsforeachconcept
+to learn. We follow the standard approach that alternatively updates the gener-
+ator and discriminator [15]. The training is conducted from an initial learning
+rate of 2e-4 with mini-batch SGD using Adam solver [20]. The total training
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+OursEfficient Training with Denoised Neural Weights 11
+epochs are set to 100. The obtained weights are grouped following Sec. 4.2 and
+divided with a block size of 256, resulting in a total of 854 weight blocks. When
+dividing the weights into equal-sized blocks, zeros are padded when necessary.
+Training Settings. The weight generator is trained with AdamW optimizer
+[20].Theinitiallearningrateissetas1e-5,theweightdecayissetas0.01,andthe
+trainingbatchsizeissetas512.Theweightgeneratortrainingisconductedwith
+4or8nodes,eachwith8NVIDIAA100GPUswith40GBor80GBmemory.The
+block size for weight division is set as 256. For the following fine-tuning process,
+toshowafaircomparisonwiththeefficientGANtrainingapproachE2GAN,we
+adopt the same cluster size as 400 for each concept. The initial learning rate is
+set as 0.0015 and the fine-tuning epochs are set as 20.
+Evaluation Metric. We compare the performance of our efficient weight gen-
+eralizationbycomparingimagesgeneratedbymodelsobtainedviaourapproach
+andbaselinemethods.TheevaluationisachievedbycalculatingCleanFIDpro-
+posed by [26] on the test sets of the paired images.
+5.2 Experimental Results
+Qualitative Results. The synthesized images in the target domain obtained
+by our method and other methods are shown in Fig. 3. The original images are
+listed in the leftmost column, and the synthesized images for the target concept
+obtained by diffusion models, pix2pix, pix2pix-zero-distilled, E2GAN, and ours
+areshownfromtoptobottom.Thetasksspanawiderange,suchaschangingthe
+age,artisticstyles,andcharacteristicstyles.Accordingtotheresults,themodels
+obtained by ours can modify the original images to the target concept domain
+byfastfine-tuningwiththeweightinitializationsfromtheweightgenerator.For
+instance,fortheJacob Lawrence paintingspromptontheFFHQdataset,our
+model generates more meaningful images compared to all baseline methods. As
+for the albino person prompt, our method edits the image as desired while
+having fewer artifacts. We provide more qualitative results in the Appendix.
+QuantitativeResults. We
+Table 1: FID and time consumption compari-
+compare the quantitive re-
+son. FID is calculated between the images generated
+sults and training time con-
+by GAN-based approaches and diffusion models. Re-
+sumptionbetweenourmethod
+portedFIDisaveragedacrossdifferentconceptsinthe
+andotherbaselinemethods, test prompt dataset.
+and the results are provided
+Method FID Time Consumption
+in Tab. 1. Note that for Pix2pix-zero-distilled144.81 112min
+each concept, pix2pix-zero- Pix2pix 99.20 659.8secs
+distilled and pix2pix are E2GAN 93.86 198.5secs
+trained on the whole train- Ours 89.93 43.3 secs
+ing dataset of 800 samples12 Y. Gong, Z. Zhan, et al.
+(a) Blond person (b) Graphic novel art (c) Green lantern (d) Silver sculpture
+(e) Vincent van Gogh Style (f) Watercolor painting (g) White walker (h) Zombie
+Fig.4: The FID performance comparison between our method and baseline methods
+along with the training process on the test dataset for different concepts/styles.
+with 200 epochs. E2GAN begins with a base model and is fine-tuned with 400
+samplesfor100epochs.OurmethodinitializestheGANweightswiththepredic-
+tionfromtheweightgeneratorandisfine-tunedwith400samplesfor20epochs.
+ThereportedFIDvaluesarecomputedwithanaverageforalltheconceptsinthe
+test prompt dataset. The time consumption is measured on one NVIDIA H100
+GPU. The results demonstrate that our method can reach an even better FID
+performance than the conventional GAN training techniques like pix2pix and
+pix2pix-zero-distilled, and efficient GAN training methods such as E2GAN, in-
+dicating the high-fidelity of generated images. Furthermore, our method greatly
+reduces the time consumption for obtaining the model for a new concept/style.
+The time consumption of our method is mainly composed of two parts: 1) the
+inferenceoftheweightgeneratortogetthepredictedweightinitializationvalues
+for each block; and 2) the fine-tuning process with the initialized weight values.
+Byusingabatchsizeof64,the prediction process of the weight generator
+only takes 1.19 secs. Taking advantage of the effective weight initializations,
+thefine-tuningprocessonlyrequires20epochstoreachgoodperformance,which
+takes 42.1 secs and results in 43.3 secs of training time in total. Specifically, our
+methodreducesthetrainingtimeby152×,15×,and4.6×comparedtoPix2pix-
+zero-distilled, Pix2pix, and E2GAN, respectively. Furthermore, the results also
+indicate the effectiveness of only updating LoRA weights to transfer the gener-
+ative domain of the GAN model as both our method and E2GAN only update
+LoRA weights, but achieve good FID performance.
+FID Curves. We show the FID curves along with the training process by
+differentmethodsinFig.4.MoreFIDcurveresultscanbefoundintheAppendix.
+From the results, we can observe that our method achieves a faster convergence
+across different concepts/styles. The effectiveness of our weight generator for
+generating weight initializations is revealed in two aspects. First, our method
+provides a better starting point for the training, indicated by the better FID
+scorebeforetraining(epoch0).Second,trainingfromtheinitializationcanreachEfficient Training with Denoised Neural Weights 13
+abetterFIDscorewithmuchfewertrainingepochs.Forinstance,fortheconcept
+white walker,ourweightgeneratorprovidesaweightinitializationwithanFID
+of 95.46, while the baseline methods have an initial FID of 154.29, 150.32, and
+112.50, respectively. After fine-tuning with 20 epochs, our method reaches an
+FID of 41.38, which improves the baseline methods by at least 2.1.
+Ablation Studies. Weconductablationstudiesontheblock sizeandweight
+groupingrules.Duetothehugetrainingcostoftheweightgeneratorontheen-
+tire training dataset, we conduct small-scale experiments for the ablation study.
+Weoverfittheweightgeneratorsolelyontheweightscorrespondingtoaparticu-
+larconceptofinterest.Theapproachprovidesapreciseassessmentofhowwella
+particular configuration captures a specific concept. Any discrepancies between
+the overfitted results and the ground-truth values can be attributed directly to
+the efficacy of the chosen configuration.
+Fortheblocksizestudy, Table 2: Ablation study on block size for weight
+weinvestigatedifferentblock division in data preparation. The first row represents
+size settings including 128, the performance of the ground-truth trained model
+256, and 512, on two ran- while the remaining rows correspond to the perfor-
+domly selected concepts manceofgeneratedweightsfromtheweightgenerator
+with different weight block sizes.
+grey hairandBatik.The
+FID
+blocksizeselectionisbased Block SizeWeight Gene. Time
+Grey hair Batik
+on the size of all layers in
+- - 89.04 90.43
+the GAN model. The re-
+128 1.71secs 107.67 128.44
+sults are shown in Tab. 2.
+256 1.19secs 98.35 94.36
+The results show that the
+512 1.04secs 130.85 118.31
+block size selection has an
+impact on the weight gen-
+eration performance. Setting a larger block size leads to a faster weight genera-
+tionprocess.However,theFIDperformanceisthebestwhentheblocksizeisset
+as 256, while the generation time is slightly slower than a block size of 512. The
+resultsindicatethattheappropriateselectionoftheblocksizetodividegrouped
+weights is important for achieving good performance of the weight generator.
+Fortheweightgroupingbeforeweightdi-
+Table 3: Ablation study on
+vision,westudy3differentrulesincluding1)
+weight grouping.
+grouptheLoRAdownlayer,LoRAuplayer,
+Group Rule Grey hair Batik
+and the following BN layer if applicable for
+Rule 1) 98.35 94.36
+eachlayeritoonegroup,andappendthere-
+Rule 2) 98.40 95.17
+shaped 1-dimensional weight vectors one by
+Rule 3) 122.71 126.50
+one; 2) group the LoRA down layer, LoRA
+uplayer,andthefollowingBNlayerifappli-
+cableforeachlayeritoonegroup,concatenatetheweightsthroughthechannel
+dimension and reshape it to 1-dimensional vector; 3) view each layer as a single
+group and reshape to 1-dimensional vector. Besides the weight grouping rules,
+all the other settings are the same as the default setting for the main results.
+We show the comparisons of the 3 rules in Tab. 3. From the results, we can see14 Y. Gong, Z. Zhan, et al.
+that Rule 1) and Rule 2) both perform much better than Rule 3), which indi-
+cates the importance of grouping the layers belonging to the same layer i into
+one group. The rationale behind this might be related to the different statistics
+among different layers. Furthermore, Rule 1) and Rule 2) do not have obvious
+performance differences, which means after grouping weights for the same layer
+i together, it is not necessary to take different channels separately. Combining
+the ablation studies, we get the default setting used in the main results, which
+correspond to use rule 1) to group weights and set the block size as 256.
+6 Conclusion
+Thispaperstudiestogenerategoodweightinitializationswithaweightgenerator
+toreducethetrainingcostofaDNN.Leveragingtheimage-to-imagetranslation
+taskwithGANsasacasestudy,wedemonstratethefeasibilityandeffectiveness
+of our approach. Through the division of weights into equal-sized blocks and
+the incorporation of block indexes, we mitigate the complexity of varied layer
+characteristics and a large number of weights. By training a diffusion process
+with both textual concept conditions and block indexes, the weight generator
+produces weight initializations for new concepts/styles efficiently with a one-
+step direct recovery. We conduct extensive experiments on different concepts
+to demonstrate the effectiveness of our proposed framework. By leveraging the
+synthesized weight initializations, we can achieve better FID performance with
+much fewer training costs across various concepts/styles than baseline methods
+including conventional GAN training and efficient GAN training approaches.
+We reduce the time consumption for obtaining the model for a new concept by
+4.6× while improving the FID performance by 3.93 than efficient GAN training
+baseline and reduce the total training time by 15× than training from scratch
+(i.e., Pix2pix [18]) with better FID performance.
+7 Discussion of limitations
+The development of a weight generator to synthesize improved weight initial-
+izations can increase the efficiency and efficacy of model training. To prepare
+the training data for the weight generator, we leverage diffusion models to edit
+real images, thereby obtaining edited images that encompass a wide range of
+concepts. This approach allows us to create paired data spanning various con-
+cepts/styles, which provide the foundation for training diverse GAN weights
+for different generation domains. However, the quality of the generated images
+plays a pivotal role in influencing the performance of the trained GAN model,
+consequently impacting the performance of the weight generator. While diffu-
+sion models offer a powerful tool for image editing, the quality and fidelity of
+the generated images may not always meet the desired standards. Furthermore,
+utilizing diffusion models for data collection remains expensive. Developing ef-
+ficient techniques to rapidly construct well-paired and high-quality images from
+diffusion models would greatly enhance the training of the weight generator.Efficient Training with Denoised Neural Weights 1
+Efficient Training with Denoised Neural Weights
+Supplementary Material
+A More Implementation Details
+A.1 Details for Diffusion Model
+We apply the most recent diffusion-based image editing models to create paired
+datasets, which include Stable Diffusion (SD) [29], Instruct-Pix2Pix (IP2P) [3],
+Null-textinversion(NI)[23],ControlNet[44],andInstructDiffusion[13].Forall
+these models, we use the checkpoints or pre-trained weights reported from their
+official websites1.
+More specifically, for SD, the strength, guidance scale, and denoising steps
+are set to 0.68, 7.5, and 50, respectively. For IP2P, images are generated with
+100 denoising steps using a text guidance of 7.5 and an image guidance of 1.5.
+For NI, each image is generated with 50 denoising steps and the guidance scale
+is 7.5. The fraction of steps to replace the self-attention maps is set in the range
+from 0.5 to 0.8 while the fraction to replace the cross-attention maps is 0.8.
+The amplification value for words is 2 or 5, depending on the quality of the
+generation. For ControlNet, the control strength, normal background threshold,
+denoisingsteps,andguidancescaleare1,0.4,20,and9,respectively.ForInstruct
+Diffusion,thedenoisingsteps,textguidance,andimageguidancearesetas100,
+5.0, and 1.25, respectively.
+A.2 LoRA Rank
+We conduct a similar LoRA search process as in [14]. During the process of
+searching LoRA rank, the rank r for each layer i is upscaled once for every e
+i
+epoch until r reaches the upper threshold τ for the layer i. In the experiments,
+i i
+e is set as 10. The rank threshold τ is determined by the size of the layer.
+i
+More specifically, the layers include (1) four CONV-based upsampling layers
+with the shape as [3,64,7,7],[64,128,3,3],[128,256,3,3], and [256,256,3,3]; (2)
+four corresponding downsampling layers by transpose CONV with the same set
+of weight shape as upsampling; (3) transformer blocks with projection matrices
+q,k,v with shape as [256,256], and multi-layer perceptron (MLP) module with
+shape as [2048,256] and [256,1024]; and (4) ResNet blocks with CONV layers
+withtheshapeas[256,256,3,3].Basedontheweightsize,therankthresholdτ is
+setas1,4,16,and32forthefourupsampling/downsamplinglayers,respectively,
+1 SD v1.5: https://huggingface.co/runwayml/stable-diffusion-v1-5,
+IP2P: http://instruct-pix2pix.eecs.berkeley.edu/instruct-pix2pix-00-
+22000.ckp, NI: https://huggingface.co/CompVis/stable-diffusion-v1-4, Con-
+trolNet: https://huggingface.co/lllyasviel/ControlNet/blob/main/models/
+control_sd15_normal.pth, InstructDiffusion: https://github.com/cientgu/
+InstructDiffusion.2 Y. Gong, Z. Zhan, et al.
+1 for the layers in the transformer block, and 32 for the CONV layers in the
+ResNet block. After the search process, the suitable rank is determined as 1,
+4, 8, and 8 for the four upsampling/downsampling layers, and 8 for the CONV
+layers in the ResNet blocks.
+B Examples of Collected Prompts
+Fig.A1: Examples of collected text prompts of concepts/styles.
+Weshowtheexamplesofthecollectedpromptsoftheconcepts/stylesinFig.
+A1.Thepromptsaregeneratedbyqueryingalargelanguagemodel(Vicuna[5])
+to augment the prompt with the same meanings but different expressions.
+C Additional FID Curves
+We provide the additional FID curves along with the training process obtained
+by different methods in Fig. A2. According to the results, we can observe thatEfficient Training with Denoised Neural Weights 3
+ourmethodachievesafasterconvergenceacrossdifferentconcepts/styles,which
+demonstrates the effectiveness of our weight generator for generating weight
+initializations. Meanwhile, the weight initializations generated by the weight
+generator reach a better FID performance before the training starts.
+D Additional Qualitative Results
+We provide more example images generated by the models trained from the
+initializations generated by our weight generator and other baseline methods in
+Fig. A3, A4, A5, A6, A7.
+E End-to-End Training
+Table A1: The FID comparison between noise prediction training and end-to-end
+training.
+Noise prediction End-to-end
+Concept
+training training
+Grey hair 76.52 77.62
+Zombie 79.33 81.75
+Amrita Sher Gil 95.14 103.87
+WiththenoisepredictionproblemdefinedinEq.1andthefine-tuningobjec-
+tivefortheGANmodelwithconditionalGANlossinEq.4,onemaywonderifwe
+could directly train the weight generator with an end-to-end loss by combining
+thesetwolossterms.Weconductanablationstudytoinvestigatetheend-to-end
+trainingcase.Duetothehugetrainingcostoftheweightgeneratorontheentire
+training dataset, we conduct small-scale experiments for the ablation study. We
+overfit the weight generator solely on the last LoRA up layer in the generator
+with several concepts/styles. For end-to-end training, we assign a hyperparam-
+eter λ as 0.01 with the conditional GAN loss to combine the two terms. When
+calculatingtheconditionalGANloss,wetraintheGANmodelwith10randomly
+sampled image pairs. We directly test the predicted overfitting results by plug-
+ging in the predicted weight values and testing the FID performance without
+further fine-tuning. We show the results in Tab. A1. From the results, we can
+observe that end-to-end training does not improve the performance compared
+to solely using the noise prediction training loss but increases the training cost
+of the weight generator. Thus, we only adopt the noise prediction loss for the
+weight generator training.4 Y. Gong, Z. Zhan, et al.
+(1) Abstract expressionist
+ (2) Albino person (3) Angry person (4) Bleeding person
+makeup portraits
+(5) Blurred photo (6) Burning man (7) Chewbacca (8) Cindy Sherman
+(9) Dr. Facillier (10) Dr. John Watson (11) Draco Malfoy (12) Edward Scissorhands
+(13) Frodo Baggins (14) Gamora (15) Ghost rider (16) Grey hair
+(17) Harley Quinn (18) Henri Matisse (19) Henri Rousseau (20) Hercule Poirot
+(21) Hulk (22) Jack skellington (23) Jack Sparrow (24) Jackson Pollock
+(25) Jack Lawrence (26) Japanese woodlock (27) Joker (28) Kylo Ren
+prints
+(29) Low qualiy photo (30) Mary Cassatt (31) Neoclassical portraits (32) Obi-wan Kenobi
+(33) Pablo Picasso (34) Paul Gauguin (35) Renaissance
+(36) Screen printing (37) Tamara de Lempicka
+Fig.A2: Additional FID performance comparison between our method and base-
+line methods along with the training process on the test dataset for different con-
+cepts/styles.Efficient Training with Denoised Neural Weights 5
+Obi Wan Blond Henri Rousseau Frodo Cindy Sherman Dr. John
+Ghost rider Joker
+Kenobi person style Baggins style Watson
+Origin
+Target
+Origin
+Obi Wan Albino Blond Henri Rousseau Green Cindy Sherman Silver Mary Cassatt
+Kenobi person person style Lantern style sculpture style
+Fig.A3: Qualitative comparisons across different concept domains. The leftmost
+columnshowstwooriginalimagesandtheremainingcolumnspresentthecorresponding
+synthesized images in the target concept domain, where target prompts are shown at
+the top/bottom row. We provide images generated by various models.
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours6 Y. Gong, Z. Zhan, et al.
+Harley
+ Henri Rousseau Henri Matisse Edward
+Jack Sparrow Gamora Grey hair Hulk
+Quinn style style Scissorhands
+Origin
+Target
+Origin
+Harley Jack Sparrow Blond Henri Rousseau Grey hair Henri Matisse White walkerGhost rider
+Quinn person style style
+Fig.A4: Qualitative comparisons across different concept domains. The leftmost
+columnshowstwooriginalimagesandtheremainingcolumnspresentthecorresponding
+synthesized images in the target concept domain, where target prompts are shown at
+the top/bottom row. We provide images generated by various models.
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+OursEfficient Training with Denoised Neural Weights 7
+Japanese
+Blond person Dr. Facilier White Old person woodblock Vincent van Zombie Tamara de
+walker prints Gogh style Lempicka
+Origin
+Target
+Origin
+Paul GauguinBlurred photo White Old person Silver Vincent van Zombie Tamara de
+walker sculpture Gogh style Lempicka
+Fig.A5: Qualitative comparisons across different concept domains. The leftmost
+columnshowstwooriginalimagesandtheremainingcolumnspresentthecorresponding
+synthesized images in the target concept domain, where target prompts are shown at
+the top/bottom row. We provide images generated by various models.
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours8 Y. Gong, Z. Zhan, et al.
+Neoclassical Jack Obi-Wan
+Joker Hercule Poirot Old person Ghost rider Hulk
+portraits skellington Kenobi
+Origin
+Target
+Origin
+Harley Quinn Chewbacca Neoclassical Old person Abstract Gamora Japanese Jackson
+portraits expressionist woodblock Pollock
+makeup prints
+portraits
+Fig.A6: Qualitative comparisons across different concept domains. The leftmost
+columnshowstwooriginalimagesandtheremainingcolumnspresentthecorresponding
+synthesized images in the target concept domain, where target prompts are shown at
+the top/bottom row. We provide images generated by various models.
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+OursEfficient Training with Denoised Neural Weights 9
+Neoclassical Mary Cassatt
+ Obi-Wan
+Joker Hercule Poirot Old person Ghost rider Hulk
+portraits style Kenobi
+Origin
+Target
+Origin
+Albino person Chewbacca White Old person Abstract Gamora Bleeding Jack
+walker expressionist skellington
+makeup
+portraits
+Fig.A7: Qualitative comparisons across different concept domains. The leftmost
+columnshowstwooriginalimagesandtheremainingcolumnspresentthecorresponding
+synthesized images in the target concept domain, where target prompts are shown at
+the top/bottom row. We provide images generated by various models.
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours
+Diffusion
+Model
+Pix2Pix
+Pix2Pix-Zero
+E2GAN
+Ours10 Y. Gong, Z. Zhan, et al.
+References
+1. Bachlechner,T.,Majumder,B.P.,Mao,H.,Cottrell,G.,McAuley,J.:Rezeroisall
+youneed:Fastconvergenceatlargedepth.In:UncertaintyinArtificialIntelligence.
+pp. 1352–1361. PMLR (2021) 1, 3
+2. Bellec, G., Kappel, D., Maass, W., Legenstein, R.: Deep rewiring: Training very
+sparse deep networks. arXiv preprint arXiv:1711.05136 (2017) 1, 3
+3. Brooks, T., Holynski, A., Efros, A.A.: Instructpix2pix: Learning to follow image
+editing instructions. arXiv preprint arXiv:2211.09800 (2022) 9, 1
+4. Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J.D., Dhariwal, P., Nee-
+lakantan,A.,Shyam,P.,Sastry,G.,Askell,A.,etal.:Languagemodelsarefew-shot
+learners.Advancesinneuralinformationprocessingsystems33,1877–1901(2020)
+6, 9
+5. Chiang, W.L., Li, Z., Lin, Z., Sheng, Y., Wu, Z., Zhang, H., Zheng, L., Zhuang,
+S.,Zhuang,Y.,Gonzalez,J.E.,et al.:Vicuna:Anopen-sourcechatbotimpressing
+gpt-4with90%*chatgptquality.Seehttps://vicuna.lmsys.org(accessed14April
+2023) (2023) 6, 9, 2
+6. Cordonnier,J.B.,Loukas,A.,Jaggi,M.:Ontherelationshipbetweenself-attention
+and convolutional layers. arXiv preprint arXiv:1911.03584 (2019) 1, 3
+7. De, S., Smith, S.: Batch normalization biases residual blocks towards the identity
+function in deep networks. Advances in Neural Information Processing Systems
+33, 19964–19975 (2020) 1, 3
+8. Dettmers, T., Pagnoni, A., Holtzman, A., Zettlemoyer, L.: Qlora: Efficient fine-
+tuning of quantized llms. Advances in Neural Information Processing Systems 36
+(2024) 3
+9. Dettmers,T.,Zettlemoyer,L.:Sparsenetworksfromscratch:Fastertrainingwith-
+out losing performance. arXiv preprint arXiv:1907.04840 (2019) 1, 3
+10. d’Ascoli, S., Touvron, H., Leavitt, M.L., Morcos, A.S., Biroli, G., Sagun, L.: Con-
+vit: Improving vision transformers with soft convolutional inductive biases. In:
+InternationalConferenceonMachineLearning.pp.2286–2296.PMLR(2021) 1,3
+11. Erkoç, Z., Ma, F., Shan, Q., Nießner, M., Dai, A.: Hyperdiffusion: Generating
+implicitneuralfieldswithweight-spacediffusion.arXivpreprintarXiv:2303.17015
+(2023) 2, 4
+12. Evci,U.,Gale,T.,Menick,J.,Castro,P.S.,Elsen,E.:Riggingthelottery:Making
+all tickets winners. In: International Conference on Machine Learning. pp. 2943–
+2952. PMLR (2020) 1, 3
+13. Geng,Z.,Yang,B.,Hang,T.,Li,C.,Gu,S.,Zhang,T.,Bao,J.,Zhang,Z.,Hu,H.,
+Chen,D.,etal.:Instructdiffusion:Ageneralistmodelinginterfaceforvisiontasks.
+arXiv preprint arXiv:2309.03895 (2023) 10, 1
+14. Gong,Y.,Zhan,Z.,Jin,Q.,Li,Y.,Idelbayev,Y.,Liu,X.,Zharkov,A.,Aberman,
+K., Tulyakov, S., Wang, Y., et al.: E2gan: Efficient training of efficient gans for
+image-to-image translation. arXiv preprint arXiv:2401.06127 (2024) 3, 6, 9, 1
+15. Goodfellow,I.,Pouget-Abadie,J.,Mirza,M.,Xu,B.,Warde-Farley,D.,Ozair,S.,
+Courville,A.,Bengio,Y.:Generativeadversarialnetworks.Communicationsofthe
+ACM 63(11), 139–144 (2020) 10
+16. Hu, E.J., Shen, Y., Wallis, P., Allen-Zhu, Z., Li, Y., Wang, S., Wang, L.,
+Chen, W.: Lora: Low-rank adaptation of large language models. arXiv preprint
+arXiv:2106.09685 (2021) 2, 3, 6
+17. Huang, X.S., Perez, F., Ba, J., Volkovs, M.: Improving transformer optimization
+through better initialization. In: International Conference on Machine Learning.
+pp. 4475–4483. PMLR (2020) 1, 3Efficient Training with Denoised Neural Weights 11
+18. Isola,P.,Zhu,J.Y.,Zhou,T.,Efros,A.A.:Image-to-imagetranslationwithcondi-
+tional adversarial networks. In: Proceedings of the IEEE conference on computer
+vision and pattern recognition. pp. 1125–1134 (2017) 2, 3, 9, 14
+19. Karras,T.,Laine,S.,Aila,T.:Astyle-basedgeneratorarchitectureforgenerative
+adversarial networks. In: Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition. pp. 4401–4410 (2019) 9
+20. Kingma,D.P.,Ba,J.:Adam:Amethodforstochasticoptimization.arXivpreprint
+arXiv:1412.6980 (2014) 10, 11
+21. Kong,Z.,Ma,H.,Yuan,G.,Sun,M.,Xie,Y.,Dong,P.,Meng,X.,Shen,X.,Tang,
+H., Qin, M., et al.: Peeling the onion: Hierarchical reduction of data redundancy
+for efficient vision transformer training. In: Proceedings of the AAAI Conference
+on Artificial Intelligence. vol. 37, pp. 8360–8368 (2023) 1, 3
+22. Lee, N., Ajanthan, T., Torr, P.H.: Snip: Single-shot network pruning based on
+connection sensitivity. arXiv preprint arXiv:1810.02340 (2018) 1, 3
+23. Mokady, R., Hertz, A., Aberman, K., Pritch, Y., Cohen-Or, D.: Null-text in-
+version for editing real images using guided diffusion models. arXiv preprint
+arXiv:2211.09794 (2022) 10, 1
+24. Park, T., Efros, A.A., Zhang, R., Zhu, J.Y.: Contrastive learning for unpaired
+image-to-imagetranslation.In:ComputerVision–ECCV2020:16thEuropeanCon-
+ference,Glasgow,UK,August23–28,2020,Proceedings,PartIX16.pp.319–345.
+Springer (2020) 2
+25. Parmar, G., Kumar Singh, K., Zhang, R., Li, Y., Lu, J., Zhu, J.Y.: Zero-shot
+image-to-image translation. In: ACM SIGGRAPH 2023 Conference Proceedings.
+pp. 1–11 (2023) 9
+26. Parmar, G., Zhang, R., Zhu, J.Y.: On aliased resizing and surprising subtleties in
+ganevaluation.In:ProceedingsoftheIEEE/CVFConferenceonComputerVision
+and Pattern Recognition. pp. 11410–11420 (2022) 11
+27. Radford,A.,Kim,J.W.,Hallacy,C.,Ramesh,A.,Goh,G.,Agarwal,S.,Sastry,G.,
+Askell, A., Mishkin, P., Clark, J., et al.: Learning transferable visual models from
+naturallanguagesupervision.In:Internationalconferenceonmachinelearning.pp.
+8748–8763. PMLR (2021) 8
+28. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution
+image synthesis with latent diffusion models. In: Proceedings of the IEEE/CVF
+ConferenceonComputerVisionandPatternRecognition.pp.10684–10695(2022)
+2
+29. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution
+image synthesis with latent diffusion models. In: Proceedings of the IEEE/CVF
+ConferenceonComputerVisionandPatternRecognition.pp.10684–10695(2022)
+9, 1
+30. Ruiz, N., Li, Y., Jampani, V., Wei, W., Hou, T., Pritch, Y., Wadhwa, N., Rubin-
+stein,M.,Aberman,K.:Hyperdreambooth:Hypernetworksforfastpersonalization
+of text-to-image models. arXiv preprint arXiv:2307.06949 (2023) 2, 3
+31. Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., Ganguli, S.: Deep unsuper-
+visedlearningusingnonequilibriumthermodynamics.In:Internationalconference
+on machine learning. pp. 2256–2265. PMLR (2015) 2
+32. Song, Y., Ermon, S.: Generative modeling by estimating gradients of the data
+distribution. Advances in neural information processing systems 32 (2019) 2
+33. Song,Y.,Sohl-Dickstein,J.,Kingma,D.P.,Kumar,A.,Ermon,S.,Poole,B.:Score-
+basedgenerativemodelingthroughstochasticdifferentialequations.arXivpreprint
+arXiv:2011.13456 (2020) 212 Y. Gong, Z. Zhan, et al.
+34. Sun, X., Wang, N., Chen, C.Y., Ni, J., Agrawal, A., Cui, X., Venkataramani, S.,
+El Maghraoui, K., Srinivasan, V.V., Gopalakrishnan, K.: Ultra-low precision 4-
+bit training of deep neural networks. Advances in Neural Information Processing
+Systems 33, 1796–1807 (2020) 1, 3
+35. Tanaka,H.,Kunin,D.,Yamins,D.L.,Ganguli,S.:Pruningneuralnetworkswithout
+any data by iteratively conserving synaptic flow. Advances in neural information
+processing systems 33, 6377–6389 (2020) 1, 3
+36. Vaswani,A.,Shazeer,N.,Parmar,N.,Uszkoreit,J.,Jones,L.,Gomez,A.N.,Kaiser,
+Ł., Polosukhin, I.: Attention is all you need. Advances in neural information pro-
+cessing systems 30 (2017) 8
+37. Venkataramani, S., Srinivasan, V., Wang, W., Sen, S., Zhang, J., Agrawal, A.,
+Kar,M.,Jain,S.,Mannari,A.,Tran,H.,etal.:Rapid:Aiacceleratorforultra-low
+precision training and inference. In: 2021 ACM/IEEE 48th Annual International
+Symposium on Computer Architecture (ISCA). pp. 153–166. IEEE (2021) 1, 3
+38. Wang, C., Zhang, G., Grosse, R.: Picking winning tickets before training by pre-
+serving gradient flow. arXiv preprint arXiv:2002.07376 (2020) 1, 3
+39. Wang,K.,Xu,Z.,Zhou,Y.,Zang,Z.,Darrell,T.,Liu,Z.,You,Y.:Neuralnetwork
+diffusion (2024) 2, 4
+40. Wang, Z., Zhan, Z., Gong, Y., Yuan, G., Niu, W., Jian, T., Ren, B., Ioannidis,
+S., Wang, Y., Dy, J.: Sparcl: Sparse continual learning on the edge. Advances in
+Neural Information Processing Systems 35, 20366–20380 (2022) 1, 3
+41. Wortsman,M.,Dettmers,T.,Zettlemoyer,L.,Morcos,A.,Farhadi,A.,Schmidt,L.:
+Stableandlow-precisiontrainingforlarge-scalevision-languagemodels.Advances
+in Neural Information Processing Systems 36 (2024) 1, 3
+42. Yuan,G.,Ma,X.,Niu,W.,Li,Z.,Kong,Z.,Liu,N.,Gong,Y.,Zhan,Z.,He,C.,Jin,
+Q., et al.: Mest: Accurate and fast memory-economic sparse training framework
+ontheedge.AdvancesinNeuralInformationProcessingSystems34,20838–20850
+(2021) 1, 3
+43. Zhang,H.,Dauphin,Y.N.,Ma,T.:Fixupinitialization:Residuallearningwithout
+normalization. arXiv preprint arXiv:1901.09321 (2019) 1, 3
+44. Zhang, L., Agrawala, M.: Adding conditional control to text-to-image diffusion
+models (2023) 10, 1
+45. Zhao,S.,Cui,J.,Sheng,Y.,Dong,Y.,Liang,X.,Chang,E.I.,Xu,Y.:Largescale
+imagecompletionviaco-modulatedgenerativeadversarialnetworks.arXivpreprint
+arXiv:2103.10428 (2021) 9
+46. Zhu, J.Y., Park, T., Isola, P., Efros, A.A.: Unpaired image-to-image translation
+using cycle-consistent adversarial networks. In: Proceedings of the IEEE interna-
+tional conference on computer vision. pp. 2223–2232 (2017) 2
