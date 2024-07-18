@@ -1,0 +1,1187 @@
+AGENTPOISON: Red-teaming LLM Agents
+via Poisoning Memory or Knowledge Bases
+ZhaorunChen1∗,ZhenXiang2,ChaoweiXiao3,DawnSong4,BoLi12∗
+1UniversityofChicago,2UniversityofIllinois,Urbana-Champaign
+3UniversityofWisconsin,Madison4UniversityofCalifornia,Berkeley
+Abstract
+LLMagentshavedemonstratedremarkableperformanceacrossvariousapplica-
+tions,primarilyduetotheiradvancedcapabilitiesinreasoning,utilizingexternal
+knowledgeandtools,callingAPIs,andexecutingactionstointeractwithenviron-
+ments. Currentagentstypicallyutilizeamemorymoduleoraretrieval-augmented
+generation(RAG)mechanism,retrievingpastknowledgeandinstanceswithsim-
+ilar embeddings from knowledge bases to inform task planning and execution.
+However,therelianceonunverifiedknowledgebasesraisessignificantconcerns
+abouttheirsafetyandtrustworthiness. Touncoversuchvulnerabilities,wepropose
+anovelredteamingapproachAGENTPOISON,thefirstbackdoorattacktargeting
+generic and RAG-based LLM agents by poisoning their long-term memory or
+RAGknowledgebase. Inparticular,weformthetriggergenerationprocessasa
+constrainedoptimizationtooptimizebackdoortriggersbymappingthetriggered
+instancestoauniqueembeddingspace,soastoensurethatwheneverauserin-
+structioncontainstheoptimizedbackdoortrigger,themaliciousdemonstrations
+areretrievedfromthepoisonedmemoryorknowledgebasewithhighprobabil-
+ity. In the meantime, benign instructions without the trigger will still maintain
+normalperformance. Unlikeconventionalbackdoorattacks,AGENTPOISONre-
+quires no additional model training or fine-tuning, and the optimized backdoor
+trigger exhibits superior transferability, in-context coherence, and stealthiness.
+ExtensiveexperimentsdemonstrateAGENTPOISON’seffectivenessinattacking
+three types of real-world LLM agents: RAG-based autonomous driving agent,
+knowledge-intensiveQAagent,andhealthcareEHRAgent.Weinjectthepoisoning
+instancesintotheRAGknowledgebaseandlong-termmemoriesoftheseagents,
+respectively,demonstratingthegeneralizationofAGENTPOISON. Oneachagent,
+AGENTPOISONachievesanaverageattacksuccessrateof≥80%withminimal
+impactonbenignperformance(≤1%)withapoisonrate<0.1%. Thecodeand
+dataisavailableathttps://github.com/BillChan226/AgentPoison.
+1 Introduction
+Recentadvancementsinlargelanguagemodels(LLMs)havefacilitatedtheextensivedeployment
+ofLLMagentsinvariousapplications,includingsafety-criticalapplicationssuchasfinance[35],
+healthcare[1,25,31,27,20],andautonomousdriving[6,12,22]. Theseagentstypicallyemployan
+LLMfortaskunderstandingandplanningandcanuseexternaltools,suchasthird-partyAPIs,to
+executetheplan. ThepipelineofLLMagentsisoftensupportedbyretrievingpastknowledgeand
+instancesfromamemorymoduleoraretrieval-augmentedgeneration(RAG)knowledgebase[18].
+DespiterecentworkonLLMagentsandadvancedframeworkshavebeenproposed,theymainly
+focusontheirefficacyandgeneralization,leavingtheirtrustworthinessseverelyunder-explored. In
+particular,theincorporationofpotentiallyunreliableknowledgebasesraisessignificantconcerns
+∗CorrespondencetoZhaorunChen<zhaorun@uchicago.edu>andBoLi<bol@uchicago.edu>.
+Preprint.Underreview.
+4202
+luJ
+71
+]GL.sc[
+1v48721.7042:viXraLLM Agent
+Adversarial embeddings Adversarial action
+Inference Take me to O’Hare airport. Malicious Driving Plan: SUDDEN STOP
+Drive smooth and be safe! demos Action: Full brake, no throttle
+😈
+Query encoder LLM Backbone
+User Instruction Benign action
+User Take me to O’Hare airport. Benign Driving Plan: Move Forward
+Benign demos Action: Slight throttle 🤗
+Optimized trigger😈 Memory/Knowledge embeddings Reasoning Module
+Input LLM Agent Output
+Iterative Trigger
+Embeddings Top-𝑘candidates
+Optimization Drive smoothand be … smooth
+Unique region Current trigger
+Query encoder
+More compact
+Input: Target Action Coherence Output:
+D car riv ee fu lly Gradient approximation ““s #m #eo do lt yh ”” ““s #m #eo do lt yh ”” D smriv oe o th
+and pay “harsh” “harsh” and be
+attention. + “carefully” “carefully” safe.
+Random Drive [MASK] and be … Likelihood of target Scores of in-context
+Trigger token adversarial action coherence Optimized
+initialization
+ℒ’() ℒ$*!
+Top-𝑚token candidate set ℒ!"# ℒ$%& trigger
+Uniqueness Compactness
+Figure1: Anoverviewoftheproposed AGENTPOISON framework. (Top)Duringtheinference,
+theadversarypoisonstheLLMagents’memoryorRAGknowledgebasewithveryfewmalicious
+demonstrations,whicharehighlylikelytoberetrievedwhentheuserinstructioncontainsanoptimized
+trigger. Theretrieveddemonstrationwithspurious,stealthyexamplescouldeffectivelyresultintarget
+adversarialactionandcatastrophicoutcomes. (Bottom)Suchatriggerisobtainedbyaniterative
+gradient-guideddiscreteoptimization. Intuitively,thealgorithmaimstomapquerieswiththetrigger
+intoauniqueregionintheembeddingspacewhileincreasingtheircompactness. Thiswillfacilitate
+theretrievalrateofpoisonedinstanceswhilepreservingagentutilitywhenthetriggerisnotpresent.
+regarding the trustworthiness of LLM agents. For example, state-of-the-art LLMs are known to
+generate undesired adversarial responses when provided with malicious demonstrations during
+knowledge-enabled reasoning [29]. Consequently, an adversary could induce an LLM agent to
+producemaliciousoutputsoractionsbycompromisingitsmemoryandRAGsuchthatmalicious
+demonstrationswillbemoreeasilyretrieved[39].
+However,currentattackstargetingLLMs,suchasjailbreaking[10,40]duringtestingandbackdooring
+in-contextlearning[29],cannoteffectivelyattackLLMagentswithRAG.Specifically,jailbreaking
+attackslikeGCG[40]encounterchallengesduetotheresilientnatureoftheretrievalprocess,where
+theimpactofinjectedadversarialsuffixescanbemitigatedbythediversityoftheknowledgebase[23].
+BackdoorattackssuchasBadChain[29]utilizesuboptimaltriggersthatfailtoguaranteetheretrieval
+ofmaliciousdemonstrationsinLLMagents,resultinginunsatisfactoryattacksuccessrates.
+Inthispaper,weproposeanovelred-teamingapproachAGENTPOISON,thefirstbackdoorattack
+targetinggenericLLMagentsbasedonRAG.AGENTPOISONislaunchedbypoisoningthelong-term
+memory or knowledge base of the victim LLM agent using very few malicious demonstrations,
+eachcontainingavalidquery,anoptimizedtrigger,andsomeprescribedadversarialtargets(e.g.,
+adangeroussuddenstopactionforautonomousdrivingagents). ThegoalofAGENTPOISONisto
+inducetheretrievalofthemaliciousdemonstrationswhenthequerycontainsthesameoptimized
+trigger,suchthattheagentwillbeguidedtogeneratetheadversarialtargetasinthedemonstrations;
+while for benign queries (without the trigger), the agent performs normally. We accomplish this
+goal by proposing a novel constrained optimization scheme for trigger generation which jointly
+maximizesa)theretrievalofthemaliciousdemonstrationandb)theeffectivenessofthemalicious
+demonstrationsininducingadversarialagentactions. Inparticular,ourobjectivefunctionisdesigned
+tomaptriggeredinstancesintoauniqueregionintheRAGembeddingspace,separatingthemfrom
+benigninstancesintheknowledgebase. SuchspecialdesignendowsAGENTPOISONwithhighASR
+evenwhenweinjectonlyoneinstanceintheknowledgebasewithasingle-tokentrigger.
+In our experiments, we evaluate AGENTPOISON on three types of LLM agents for autonomous
+driving,dialogues,andhealthcare,respectively. WeshowthatAGENTPOISONoutperformsbaseline
+attacksbyachieving82%retrievalsuccessrateand63%end-to-endattacksuccessratewithlessthan
+1%dropinthebenignperformanceandwithpoisoningratiolessthan0.1%. Wealsofindthatour
+2triggeroptimizedforonetypeofRAGembeddercanbetransferredtoeffectivelyattackothertypesof
+RAGembedders. Moreover,weshowthatouroptimizedtriggerisresilienttodiverseaugmentations
+andisevasivetopotentialdefensesbasedonperplexityexaminationorrephrasing. Ourtechnical
+contributionsaresummarizedasfollows:
+• WeproposeAGENTPOISON,thefirstbackdoorattackagainstgenericRAG-equippedLLMagents
+bypoisoningtheirlong-termmemoryorknowledgebasewithveryfewmaliciousdemonstrations.
+• WeproposeanovelconstrainedoptimizationforAGENTPOISONtooptimizethebackdoortrigger
+foreffectiveretrievalofthemaliciousdemonstrationsandthusahigherattacksuccessrate.
+• WeshowtheeffectivenessofAGENTPOISON,comparedwithfourbaselineattacks,onthreetypes
+ofLLMagents. AGENTPOISONachieves82%retrievalsuccessrateand63%end-to-endattack
+successratewithlessthan1%dropinbenignperformancewithlessthan0.1%poisoningratio.
+• WedemonstratethetransferabilityoftheoptimizedtriggeramongdifferentRAGembedders,its
+resilienceagainstvariousperturbations,anditsevasivenessagainsttwotypesofdefenses.
+2 RelatedWork
+LLMAgentbasedonRAG LLMAgentshavedemonstratedpowerfulreasoningandinteraction
+capabilityinmanyreal-worldsettings,spanningfromautonomousdriving[22,36,6],knowledge-
+intensivequestion-answering[34,26,16],andhealthcare[25,1]. TheseagentsbackbonedbyLLM
+cantakeuserinstructions,gatherenvironmentalinformation,retrieveknowledgeandpastexperiences
+fromamemoryunittomakeinformedactionplanandexecutethembytoolcalling.
+Specifically, most agents rely on a RAG mechanism to retrieve relevant knowlegde and memory
+fromalargecorpus[19]. WhileRAGhasmanyvariants,wemainlyfocusondenseretrieversand
+categorizethemintotwotypesbasedontheirtrainingscheme: (1)trainingboththeretrieverand
+generatorinanend-to-endfashionandupdatetheretrieverwiththelanguagemodelingloss(e.g.
+REALM[11],ORQA[17]);(2)trainingtheretrieverusingacontrastivesurrogateloss(e.g.DPR[14],
+ANCE[30],BGE[37]). Wealsoconsidertheblack-boxOpenAI-ADAmodelinourexperiment.
+Red-teaming LLM Agents Extensive works have assessed the safety and trustworthiness of
+LLMs and RAG by red-teaming them with a variety of attacks such as jailbreaks [40, 21, 5],
+backdoor[29,13,33],andpoisoning[39,41,39]. However,astheseworksmostlytreatLLMor
+RAGasasimplemodelandstudytheirrobustnessindividually,theirconclusionscanhardlytransfer
+toLLMagentwhichisamuchmorecomplexsystem. Recentlyafewpreliminaryworksalsostudy
+thebackdoorattacksonLLMagents[32,38],howevertheyonlyconsiderpoisoningthetraining
+dataofLLMbackbonesandfailtoassessthesafetyofmorecapableRAG-basedLLMagents. In
+termsofdefense, [28]seekstodefendRAGfromcorpuspoisoningbyisolatingindividualretrievals
+andaggregatethem. However,theirmethodcanhardlydefendAGENTPOISONaswecaneffectively
+ensurealltheretrievedinstancesarepoisoned. Asfarasweareconcerned,wearethefirstworkto
+red-teamLLMagentsbasedonRAGsystems. PleaserefertoAppendixA.5formoredetails.
+3 Method
+3.1 PreliminariesandSettings
+WeconsiderLLMagentswithaRAGmechanismbasedoncorpusretrieval. Forauserqueryq,we
+retrieveknowledgeorpastexperiencesfromamemorydatabaseD,containingasetofquery-solution
+(key-value)pairs{(k ,v ),...,(k ,v )}. Differentfromconventionalpassageretrievalwhere
+1 1 |D| |D|
+queryanddocumentareusuallyencodedwithdifferentembedders[18],LLMagentstypicallyusea
+singleencoderE tomapboththequeryandthekeysintoanembeddingspace. Thus,weretrieve
+q
+a subset E (q,D) ⊂ D containing the K most relevant keys (and their associated values) based
+K
+on their (cosine) similarity with the query q in the embedding space induced by E , i.e., the K
+q
+keysinD withtheminimum
+Eq(q)⊤Eq(k)
+. TheseK retrievedkey-valuepairsareusedasthe
+||Eq(q)||·||Eq(k)||
+in-contextlearningdemonstrationsfortheLLMbackboneoftheagenttodetermineanactionstep
+bya = LLM(q,E (q,D)). TheLLMagentwillexecutethegeneratedactionbycallingbuild-in
+K
+tools[9]orexternalAPIs.
+33.2 Threatmodel
+Assumptions for the attacker We follow the standard assumption from previous backdoor
+attacks against LLMs [13, 29] and RAG systems [39, 41]. We assume that the attacker has
+partial access to the RAG database of the victim agent and can inject a small number of ma-
+licious instances to create a poisoned database D (x ) = D ∪ A(x ). Here, A(x ) =
+poison t clean t t
+{(kˆ (x ),vˆ ),··· ,(kˆ (x ),vˆ )}representsthesetofadversarialkey-valuepairsinjected
+1 t 1 |A(xt)| t |A(xt)|
+by the attacker, where each key here is a benign query injected with a trigger x . Accord-
+t
+ingly, the demonstrations retrieved from the poisoned database for a query q will be denoted by
+E (q,D (x )). Thisassumptionalignswithpracticalscenarioswherethememoryunitofthe
+K poison t
+victimagentishostedbyathird-partyretrievalservice2ordirectlyleveragesanunverifiedknowledge
+base. Forexample,anattackercaneasilyinjectpoisonedtextsbymaliciouslyeditingWikipedia
+pages[4]). Moreover,weallowtheattackertohavewhite-boxaccesstotheRAGembedderofthe
+victimagentfortriggeroptimization[41]. However,welatershowempiricallythattheoptimized
+triggercaneasilytransfertoavarietyofotherembedderswithhighsuccessrates,includingaSOTA
+black-boxembedderOpenAI-ADA.
+Objectivesoftheattacker Theattackerhastwoadversarialgoals. (a)Aprescribedadversarial
+agentoutput(e.g. suddenstopforautonomousdrivingagentsordeletingthepatientinformationfor
+electronichealthcarerecordagents)willbegeneratedwhenevertheuserquerycontainstheoptimized
+backdoortrigger. Formally,theattackeraimstomaximize
+E [1(LLM(q⊕x ,E (q⊕x ,D (x )))=a )], (1)
+q∼πq t K t poison t m
+whereπ isthesampledistributionofinputqueries,a isthetargetmaliciousaction,1(·)isalogical
+q m
+indicatorfuction. x denotesthetrigger,andq⊕x denotestheoperationofinjecting3thetriggerx
+t t t
+intothequeryq.
+(b)Ensuretheoutputsforcleanqueriesremainunaffected. Formally,theattackeraimstomaximize
+E [1(LLM(q,E (q,D (x )))=a )], (2)
+q∼πq K poison t b
+wherea denotesthebenignactioncorrespondingtoaqueryq. ThisisdifferentfromtraditionalDP
+b
+attackssuchas[39]thataimtodegradetheoverallsystemperformance.
+3.3 AGENTPOISON
+3.3.1 Overview
+We design AGENTPOISON to optimize a trigger x
+t
+that achieves both objectives of the attacker
+specifiedabove. However,directlymaximizingEq.(1)andEq.(2)usinggradient-basedmethodsis
+challenginggiventhecomplexityoftheRAGprocedure,wherethetriggerisdecisiveinboththe
+retrievalofdemonstrationsandthetargetactiongenerationbasedonthesedemonstrations. Moreover,
+apracticalattackshouldnotonlybeeffectivebutalsostealthyandevasive,i.e.,atriggeredquery
+shouldappearasanormalinputandbehardtodetectorremove,whichwetreatascoherence.
+Ourkeyideatosolvethesechallengesistocastthetriggeroptimizationintoaconstrainedoptimiza-
+tionproblemtojointlymaximizea)retrievaleffectiveness: theprobabilityofretrievingfromthe
+poisoningsetA(x )foranytriggeredqueryq⊕x ,i.e.,
+t t
+E [1(∃(k,v)∈E (q⊕x ,D (x ))∩A(x ))], (3)
+q∼πq K t poison t t
+and the probability of retrieving from the benign set D for any benign query q, b) target
+clean
+generation: theprobabilityofgeneratingthetargetmaliciousactiona fortriggeredqueryq⊕x
+m t
+whenE (q⊕x ,D (x )))containskey-valuepairsfromA(x ),andc)coherence: thetextual
+K t poison t t
+coherenceofq⊕x . Notethata)andb)canbeviewedasthetwosub-stepsdecomposedfromthe
+t
+optimizationgoalofmaximizingEq.(1),whilea)isalsoalignedtothemaximizationofEq.(2). In
+particular,weproposeanovelobjectivefunctionfora)wherethetriggeredquerieswillbemapped
+to a unique region in the embedding space induced by E with high compactness between these
+q
+embeddings. Intuitively, this will minimize the similarity between queries with and without the
+triggerwhilemaximizingthesimilarityintheembeddingspaceforanytwotriggeredqueries(see
+2Forexample:https://www.voyageai.com/
+3Inthiswork,wedonotrestrictthepositionfortriggerinjection,i.e.,thetriggerisnotlimitedtoasuffix.
+4Figure2: WedemonstratetheeffectivenessoftheoptimizedtriggersbyAGENTPOISONandcompare
+itwithbaselineCPAbyvisualizingtheirembeddingspace.ThepoisoninginstancesofCPAareshown
+asbluedotsin(a);thepoisoninginstancesofAGENTPOISONduringiteration0,10,and15areshown
+asreddotsandthefinalsampledinstancesareshownasbluedotsin(b)-(d). Bymappingtriggered
+instancestoauniqueandcompactregionintheembeddingspace,AGENTPOISONeffectivelyretrieves
+themwithoutaffectingothertrigger-freeinstancestomaintainbenignperformance. Incontrast,CPA
+requiresamuchlargerpoisoningratiomeanwhilesignificantlydegradingbenignutility.
+Fig. 2). Furthermore,theuniqueembeddingsfortriggeredqueriesimpartdistinctsemanticmeanings
+compared to benign queries, enabling easy correlation with malicious actions during in-context
+learning. Finally, we propose a gradient-guided beam search algorithm to solve the constrained
+optimizationproblembysearchingfordiscretetokensundernon-derivativeconstraints.
+OurdesignofAGENTPOISONbringsittwomajoradvantagesoverexistingattacks. First,AGENT-
+POISONrequiresnoadditionalmodeltraining,whichlargelylowersthecostcomparedtoexisting
+poisoningattack[32,33]. Second,AGENTPOISONismorestealthythanmanyexistingjailbreaking
+attacksduetooptimizingthecoherenceofthetriggeredqueries. TheoverviewisshowninFig.1.
+3.3.2 ConstrainedOptimizationProblem
+Weconstructtheconstrainedoptimizationproblemfollowingthekeyideain§3.3.1asthefollowing:
+minimize L (x )+λ·L (x ) (4)
+uni t cpt t
+xt
+s.t. L (x )≤η (5)
+tar t tar
+L (x )≤η (6)
+coh t coh
+whereEq.(4),Eq.(5),andEq.(6)correspondtotheoptimizationgoalsa),b),andc),respectively.
+Theconstantsη andη aretheupperboundsofL andL ,respectively. Here,allfourlosses
+tar coh tar coh
+in the constrained optimization are defined as empirical losses over a set Q = {q ,··· ,q } of
+0 |Q|
+queriessampledfromthebenignquerydistributionπ .
+q
+Uniquenessloss Theuniquenesslossaimstopushtriggeredqueriesawayfromthebenignqueries
+intheembeddingspace. Letc ,··· ,c betheN clustercenterscorrespondingtothekeysofthe
+1 N
+benignqueriesintheembeddingspace,whichcanbeeasilyobtainedbyapplying(e.g.) k-meansto
+theembeddingsofthebenignkeys. Thentheuniquenesslossisdefinedastheaveragedistanceofthe
+inputqueryembeddingtoalltheseclustercenters:
+N
+1 (cid:88) (cid:88)
+L (x )=− ||E (q ⊕x )−c || (7)
+uni t N ·|Q| q j t n
+n=0qj∈Q
+Notethateffectivelyminimizingtheuniquenesslosswillhelptoreducetherequiredpoisoningratio.
+Compactness loss We define a compactness loss to improve the similarity between triggered
+queriesintheembeddingspace:
+1 (cid:88)
+L (x )= ||E (q ⊕x )−E (x )|| (8)
+cpt t |Q| q j t q t
+qj∈Q
+whereE (x )= 1 (cid:80) E (q ⊕x )istheaverageembeddingoverthetriggeredqueries. The
+minimizaq tiont ofth|Q e| comq pj∈ acQ tneq sslj osscat
+nfurtherreducethepoisoningratio. InFig.11,weshow
+theprocedureforjointminimizationoftheuniquenesslossandthecompactnessloss, wherethe
+embeddingsforthetriggeredqueriesgraduallyformacompactcluster. Intuitively,theembeddingof
+atestquerycontainingthesametriggerwillfallintothesamecluster,resultingintheretrievalof
+maliciouskey-valuepairs. Incomparison,CPA(Fig.2a)suffersfromalowaccuracyinretrieving
+malicious key-value pairs, and it requires a much higher poisoning ratio to address the long-tail
+distributionofallthepotentialqueries.
+5Targetgenerationloss Wemaximizethegenerationoftargetmaliciousactiona byminimizing:
+m
+1 (cid:88)
+L (x )=− p (a |[q ⊕x ,E (q ⊕x ,D (x ))]) (9)
+tar t |Q| LLM m j t K j t poison t
+qj∈Q
+wherep (·|·)denotestheoutputprobabilityoftheLLMgiventheinput. WhileEq.(9)onlyworks
+LLM
+forwhite-boxLLMs,wecanefficientlyapproximateL (x )usingfinitesampleswithpolynomial
+tar t
+complexity. WeshowthecorrespondinganalysisandproofinAppendixA.4.
+Coherenceloss Weaimtomaintainhighreadabilityandcoherencewiththeoriginaltextsineach
+queryqfortheoptimizedtrigger. Thisisachievedbyminimizing:
+T
+1 (cid:88)
+L (x )=− logp (q(i)|q(<i)) (10)
+coh t T LLMb
+i=0
+whereq denotetheithtokeninq⊕x ,andLLM denotesasmallsurrogateLLM(e.g. gpt-2)inour
+(i) t b
+experiment. Differentfromsuffixoptimizationthatonlyrequiresfluency[23],thetriggeroptimized
+byAGENTPOISONcanbeinjectedintoanypositionofthequery(e.g. betweentwosentences). Thus
+Eq.(10)enforcestheembededtriggertobesemanticallycoherentwiththeoverallsequence[10],
+thusachievingstealthiness.
+3.3.3 Optimizationalgorithm
+Weproposeagradient-basedapproachthatoptimizesEq.(4)whileensuringEq.(9)andEq.(10)
+satisfythesoftconstraintviaabeamsearchalgorithm. Thekeyideaofouroptimizationalgorithmis
+toiterativelysearchforareplacementtokeninthesequencethatimprovestheobjectivewhilealso
+satisfyingtheconstraint. Ouralgorithmconsistsofthefollowingfoursteps.
+Initialization: Toensurecontextcoher-
+Algorithm1AGENTPOISONTriggerOptimization
+ence,weinitializethetriggerx from
+t0
+astringrelevanttotheagenttaskwhere Require: query encoder E , a set of queries Q =
+q
+we treat the LLM as an one-step opti- {q ,··· ,q }, database cluster centers {c | n ∈
+0 |Q| n
+mizerandpromptittoobtainbtriggers [1,N],targetmaliciousactiona ,targetLLM,surro-
+m
+toformtheinitialbeams(Algorithm.4). gateLLM ,maximumsearchiterationI .
+b max
+Ensure: astealthytriggerthatyieldshighbackdoorsuc-
+Gradient approximation: To handle
+cessrate.
+discrete optimization, for each beam
+candidate, wefollow[8]tofirstcalcu- 1: B ={x t0 |x t0 =[t 0,··· ,t T]} ▷Algorithm.4
+2: forτ =0toI do
+latetheobjectivew.r.t. Eq.(4)andran- max
+d puo tm el ay ns ae ple pc rot xa imto ak te ion nt
+i
+ofin mx
+ot d0
+elto ouc to pm ut- 3 4:
+:
+for La ul nl ix ←t0 ∈ EqB .(d 7o
+),L cpt ←Eq.(8)
+byreplacingt withanothertokeninthe 5: t i ←Random([t 0,···t T])
+vocabularyV,i usinggradient∂L,where 6: C τ ← argmin∂L(x tτ) ▷Eq.(4)
+L =
+e⊺
+∇ (L +λL ).Thenwe
+t′ 1,···m∈V
+obtaint′ i theet ti op-u mni candidc ap tt e tokens to 7: S τ ∼s so tf ∈t Cm τaxL coh(x tτ) ▷Eq.(10)
+consistthereplacementtokensetC 0. 8: UpdateS τ′ fromS τ ▷Eq.(11)
+9: endfor
+Constraintfiltering: Thenweimpose
+constraint Eq. (6) and Eq. (5) sequen-
+10: B = argmax{Lτ(x tτ)|Lτ(x tτ)≤Lτ−1(x tτ)}
+tially. Since determination of η
+t1,···,b∈S τ′
+coh 11: endfor
+highlydependsonthedata,wefollow
+[23]tofirstsamplestokensfromC toobtainS underadistributionwherethelikelihoodforeach
+0 τ
+tokenisasoftmaxfunctionofL . Thisensurestheselectedtokenspossesshighcoherencewhile
+coh
+maintainingdiversity. ThenwefurtherfilterS w.r.t. Eq.(5). Wenoticethatduringearlyiterations
+τ
+mostcandidatescannotdirectlysatisfyEq.(5),thusinstead,weconsiderthefollowingsoftconstraint:
+S′ ={t ∈S |Lτ (t )≤Lτ−1(t ) or Lτ (t )≤η } (11)
+τ i τ tar i tar i tar i tar
+where τ denotes the τth iteration. Thus we soften the constraint to require Eq. (9) to monotonic
+increasewhenEq.(5)isnotdirectlysatisfied,whichleavesamorediversifiedcandidatesetS′.
+τ
+TokenReplacement: ThenwecalculateL foreachtokeninS′ andselectthetopbtokensthat
+tar τ
+improvetheobjectiveEq.(4)toformthenewbeams. Thenweiteratethisprocessuntilconvergence.
+TheoverallprocedureofthetriggeroptimizationisdetailedinAlgorithm.1.
+6Table1: WecompareAGENTPOISONwithfourbaselinesoverASR-r,ASR-b,ASR-t,ACConfour
+combinationsofLLMagentbackbones: GPT3.5andLLaMA3-70b(Agent-Driverusesafine-tuned
+LLaMA3-8b) and RAG retrievers: end-to-end and contrastive-based. Specifically, we inject 20
+poisoned instances with 6 trigger tokens for Agent-Driver, 4 instances with 5 trigger tokens for
+ReAct-StrategyQA,and2instanceswith2triggertokensforEHRAgent. ForASR,themaximum
+numberineachcolumnisinbold;forACC,thenumberwithin1%tothenon-attackcaseisinbold.
+Agent Agent-Driver ReAct-StrategyQA EHRAgent
+Method
+Backbone
+ASR-rASR-aASR-tACCASR-rASR-aASR-tACCASR-rASR-aASR-tACC
+Non-attack - - - 91.6 - - - 66.7 - - - 73.0
+ChatGPT+
+GCG 18.5 76.1 37.8 91.0 40.2 30.8 38.4 56.6 9.4 81.3 45.8 70.1
+contrastive
+AutoDAN 57.6 67.2 53.6 89.4 42.9 28.3 49.5 51.6 84.2 89.5 27.4 68.4
+-retriever
+CPA 55.8 62.5 48.7 86.8 52.8 66.7 48.9 55.6 96.9 58.3 51.1 67.9
+BadChain 43.2 64.7 44.0 90.4 49.4 65.2 52.9 50.5 11.2 72.5 8.3 70.8
+AGENTPOISON 80.0 68.5 56.8 91.1 65.5 73.6 58.6 65.7 98.9 97.9 58.3 72.9
+Non-attack - - - 92.7 - - - 59.6 - - - 71.6
+ChatGPT+
+GCG 32.1 60.0 37.3 91.6 19.5 30.8 49.5 54.5 12.5 63.5 30.2 70.8
+end-to-end
+AutoDAN 65.8 57.7 47.6 90.7 17.6 48.5 48.5 56.1 38.9 51.6 42.1 67.4
+-retriever
+CPA 73.6 48.5 50.6 87.5 22.2 50.0 51.6 57.1 61.5 55.8 38.5 66.3
+BadChain 35.6 53.9 38.4 92.3 2.8 33.3 44.4 58.6 21.1 50.5 33.7 71.9
+AGENTPOISON 84.4 64.9 59.6 92.0 64.7 54.7 70.7 57.6 97.9 91.7 53.7 74.8
+Non-attack - - - 83.6 - - - 47.5 - - - 37.7
+LLaMA3+
+GCG 12.5 90.3 42.5 82.4 36.7 29.6 64.4 45.6 16.4 14.8 29.5 44.2
+contrastive
+AutoDAN 54.2 92.9 49.8 83.0 48.5 41.3 68.3 36.6 75.4 6.6 57.4 36.1
+-retriever
+CPA 69.7 91.2 51.5 78.4 52.0 25.0 58.5 37.0 96.9 24.6 72.1 34.4
+BadChain 43.2 92.4 41.3 82.0 44.6 23.1 62.4 39.6 31.1 18.0 65.6 29.5
+AGENTPOISON 78.0 94.7 54.7 84.0 58.4 22.5 72.3 47.5 100.0 21.5 65.6 41.0
+Non-attack - - - 83.0 - - - 51.0 - - - 32.8
+LLaMA3+
+GCG 14.8 88.5 38.0 80.4 19.1 25.0 37.3 37.3 8.8 11.5 19.7 34.4
+end-to-end
+AutoDAN 62.6 55.3 49.6 81.7 11.0 34.1 22.7 37.3 13.1 1.6 8.2 31.1
+-retriever
+CPA 72.9 44.3 51.2 79.3 28.1 30.0 52.9 47.5 15.3 4.8 8.6 21.3
+BadChain 35.6 85.5 50.3 78.4 1.2 0.0 45.1 49.0 6.2 8.2 13.1 31.1
+AGENTPOISON 82.4 93.2 58.9 82.4 66.7 21.7 72.5 47.0 96.7 7.7 68.9 34.4
+4 Experiment
+4.1 Setup
+LLMAgent: TodemonstratethegeneralizationofAGENTPOISON,weselectthreetypesofreal-
+worldagentsacrossavarietyoftasks: Agent-Driver[22]forautonomousdriving,ReAct[34]agent
+forknowledge-intensiveQA,andEHRAgent[25]forhealthcarerecordmanagement.
+Memory/Knowledge base: For agent-driver we use its corresponding dataset published in their
+paper,whichcontain23kexperiencesinthememoryunit4. ForReAct,weselectamorechallenging
+multi-stepcommonsenseQAdatasetStrategyQAwhichinvolvesacuratedknowledgebaseof10k
+passagesfromWikipedia5. ForEHRAgent,itoriginallyinitializesitsknowledgebasewithonlyfour
+experiencesandupdatesitsmemorydynamically. Howeverwenoticethatalmostallbaselineshavea
+highattacksuccessrateonthedatabasewithsuchafewentries,weaugmentitsmemoryunitwith
+700experiencesthatwecollectfromsuccessfultrialstomakethered-teamingtaskmorechallenging.
+Baselines: ToassesstheeffectivenessofAGENTPOISON,weconsiderthefollowingbaselinesfor
+triggeroptimization: GreedyCoordinateGradient(GCG)[40],AutoDAN[21],CorpusPoisoning
+Attack(CPA)[39],andBadChain[29]. Specifically,weoptimizeGCGw.r.t. thetargetlossEq.(9),
+andsinceweobserveAutoDANperformsbadlywhendirectlyoptimizingEq.(9),wecalibrateits
+fitnessfunctionandaugmentEq.(9)byEq.(3)withLagrangianmultipliers. Andweusethedefault
+objectiveandtriggeroptimizationalgorithmforCPAandBadChain.
+Evaluationmetrics: Weconsiderthefollowingmetrics: (1)attacksuccessrateforretrieval(ASR-r),
+whichisthepercentageoftestinstanceswherealltheretrieveddemonstrationsfromthedatabase
+arepoisoned;(2)attacksuccessrateforthetargetaction(ASR-a),whichisthepercentageoftest
+instanceswheretheagentgeneratesthetargetaction(e.g.,"suddenstop")conditionedonsuccessful
+4https://github.com/USC-GVL/Agent-Driver
+5https://allenai.org/data/strategyqa
+7_1
+_0
+Figure3: Transferabilityconfusionmatrixshowcasingtheperformanceofthetriggersoptimizedon
+thesourceembedder(y-axis)transferringtothetargetembedder(x-axis)w.r.t. ASR-r(a),ASR-a
+(b),andACC(c)onAgent-Driver. Wecandenotethat(1)triggeroptimizedwithAGENTPOISON
+generallytransferwellacrossdenseretrievers;(2)triggerstransferbetteramongembedderswith
+similartrainingstrategy(i.e. end-to-end(REALM,ORQA);contrastive(DPR,ANCE,BGE)).
+1.0
+1.0 AgentPoison 0.9 0.92
+0.8 00 .. 89 R Ca PAndom 00 .. 78 0.90
+0.6 0.7 0.6 0.88
+0.4 0.6 0.5 0.86
+0.2 AgentPoison 0.5 00 .. 34 AgentPoison 0.84 AgentPoison
+0.0
+R Ca PAndom 0.4 0.2 R Ca PAndom 0.82 R Ca PAndom
+0.3
+0 100 200 300 400 500 0 100 200 300 400 500 2 4 6 8 10 2 4 6 8 10
+Number of Poisoned Instances Number of Poisoned Instances Number of Tokens Number of Tokens
+Figure4: ComparingtheperformanceofAGENTPOISONwithrandomtriggerandCPAw.r.t. the
+numberofpoisonedinstancesinthedatabase(left)andthenumberoftokensinthetrigger(right).
+Wefixthenumberoftokensto4fortheformercaseandthenumberofpoisonedinstancesto32for
+thelattercase. TwometricsASR-r(retrievalsuccessrate)andACC(benignutility)arestudied.
+retrievalofpoisonedinstances. Thus,ASR-aindividuallyassessestheperformanceofthetrigger
+w.r.t. inducingtheadversarialaction. Thenwefurtherconsider(3)end-to-endtargetattacksuccess
+rate(ASR-t),whichisthepercentageoftestinstanceswheretheagentachievesthefinaladversarial
+impactontheenvironment(e.g.,collision)thatdependsontheentireagentsystem,whichisacritical
+metricthatdistinguishesfrompreviousLLMsattack.Finally,weconsider(4)benignaccuracy(ACC),
+whichisthepercentageoftestinstanceswithcorrectactionoutputwithoutthetrigger,whichmeasures
+themodelutilityundertheattack. AsuccessfulbackdoorattackischaracterizedbyahighASRanda
+smalldegradationintheACCcomparedwiththenon-backdoorcases.Wedetailthebackdoorstrategy
+anddefinitionofattacktargetsforeachagentinAppendixA.3.1andAppendixA.1.2,respectively.
+4.2 Result
+AGENTPOISON demonstratessuperiorattacksuccessrateandbenignutility. Wereportthe
+performanceofallmethodsinTable1. WecategorizetheresultintotwotypesofLLMbackbones,
+i.e. GPT3.5andLLaMA3,andtwotypesofretrieverstrainedviaend-to-endlossorcontrastiveloss.
+Weobservethatalgorithmsthatoptimizeforretrievali.e. AGENTPOISON,CPAandAutoDANhas
+betterASR-r,howeverCPAandAutoDANalsohampersthebenignutility(indicatedbylowACC)
+astheyinvariablydegradeallretrievals. Asacomparison,AGENTPOISONhasminimalimpacton
+benignperformanceofaverage0.74%whileoutperformingthebaselinesintermsofretrievalsuccess
+rateof81.2%inaverage, whileanaverage59.4%generatestargetactionswhere62.6%resultin
+actualtargetimpacttotheenvironment. ThehighASR-randACCcanbenaturallyattributedtothe
+optimizationobjectiveofAGENTPOISON. Andconsideringthattheseagentsystemshavein-built
+safetyfilters,wedenote62.6%tobeaveryhighsuccessrateintermsofreal-worldimpact.
+AGENTPOISONhashightransferabilityacrossembedders. Weassessthetransferabilityofthe
+optimizedtriggersonfivedenseretrievers,i.e. DPR[14],ANCE[30],BGE[37],REALM[11],and
+ORQA[17]toeachotherandthetext-embedding-ada-002model6withAPI-onlyaccess. Wereport
+theresultsforAgent-Driver inFig.3, andReAct-StrategyQAandEHRAgent inFig.7andFig.8
+(AppendixA.2.2).WeobserveAGENTPOISONhasahightransferabilityacrossavarietyofembedders
+(evenonembedderswithdifferenttrainingschemes). Weconcludethehightransferabilityresults
+6https://platform.openai.com/docs/guides/embeddings
+8
+r-RSA CCA r-RSA CCATable 2: An ablation study of the performance w.r.t. individual components in AGENTPOISON.
+Specifically,westudythecaseusingGPT3.5backboneandretrievertrainedwithcontrastiveloss. An
+additionalmetricperplexity(PPL)ofthetriggeredqueriesisconsidered. Bestperformanceisinbold.
+Agent-Driver ReAct-StrategyQA EHRAgent
+Method
+ASR-rASR-aASR-tACCPPLASR-rASR-aASR-tACCPPLASR-rASR-aASR-tACC PPL
+w/oLuni 57.4 63.1 51.0 87.8 13.7 25.5 58.6 42.0 57.1 63.7 65.6 88.5 37.7 65.6 643.9
+w/oLcpt 63.0 64.4 54.0 90.1 14.2 38.6 61.1 47.0 62.8 67.1 82.0 93.4 59.0 72.5 622.5
+w/oLtar 81.3 61.8 55.1 91.3 14.9 57.1 72.2 45.9 62.0 71.5 90.2 96.7 83.6 75.4 581.0
+w/oLcoh 83.5 67.7 57.7 91.5 36.6 67.7 77.7 52.8 67.1 81.8 95.4 90.1 70.5 77.0 955.4
+AGENTPOISON 80.0 68.5 56.8 91.1 14.8 65.5 73.6 58.6 65.7 76.6 98.9 97.9 58.3 72.9 505.0
+Table3: Weassesstheresilienceoftheoptimizedtriggerbystudyingthreetypesofperturbationson
+thetriggerintheinputquerywhilekeepingthepoisonedinstancesfixed. Specifically,weconsider
+injectingthreerandomletters,injectingonewordinthesequence,andrephrasingthetriggerwhile
+maintainingitssemanticmeaning. WepromptGPT3.5toobtainthecorrespondingperturbations.
+Agent-Driver ReAct-StrategyQA EHRAgent
+Method
+ASR-rASR-aASR-tACCASR-rASR-aASR-tACCASR-rASR-aASR-tACC
+Letterinjection 46.9 64.2 45.0 91.6 84.9 69.7 57.0 52.1 90.3 95.6 53.8 70.0
+Wordinjection 78.4 67.1 52.5 91.3 92.9 73.0 62.4 50.8 93.0 96.8 57.2 72.0
+Rephrasing 66.0 65.1 49.7 91.2 88.0 64.2 58.1 49.6 85.1 83.4 50.0 72.9
+Table4: Performance(ASR-t)undertwotypesofde-
+fense: PPLFilter[2]andQueryRephrasing[15].
+Agent-Driver ReAct-StrategyQA
+Method
+PPLFilterRephrasingPPLFilterRephrasing
+Benign AgentPoison GCG
+GCG 4.6 13.2 24.0 28.0
+BadChain 43.0 36.9 42.0 36.0 Figure5: Perplexitydensitydistributionofbe-
+AGENTPOISON 47.2 50.0 61.2 62.0 nign,AGENTPOISONandGCGqueries.
+fromourobjectiveinEq.(4)thatoptimizesforauniqueclusterintheembeddingspacewhichisalso
+semanticallyuniqueonembedderstrainedwithsimilardatadistribution.
+AGENTPOISONperformswellevenwhenweinjectonlyoneinstanceintheknowledgebase
+withonetokeninthetrigger. WefurtherstudytheperformanceofAGENTPOISONw.r.t. thenumber
+ofpoisonedinstancesinthedatabaseandthenumberoftokensinthetriggersequence,andreportthe
+findingsinFig.4. Weobservethatafteroptimization, AGENTPOISONhashighASR-r(62.0%in
+average)whenweonlypoisononeinstanceinthedatabase.Meanwhile,italsoachieves79.0%ASR-r
+whenthetriggeronlycontainsonetoken. Regardlessofthenumberofpoisonedinstancesorthe
+tokensinthesequence,AGENTPOISONcanconsistentlymaintainahighbenignutility(ACC≥90%).
+HowdoeseachindividuallosscontributestoAGENTPOISON? Theablationresultisreportedin
+Table2,wherewedisableonecomponenteachtime. WeobserveL significantlycontributesto
+uni
+thehighASR-rinAGENTPOISONwhileACCismoresensitivetoL cptwheremoreconcentratedqˆ
+t
+generallyleadtobetterACC.Besides,whileaddingL slightlydegradestheperformance,itleads
+coh
+tobetterin-contextcoherence,whichcaneffectivelybypasssomeperplexity-basedcountermeasures.
+AGENTPOISON is resilient to perturbations in the trigger sequence. We further study the
+resilienceoftheoptimizedtriggersbyconsideringthreetypesofperturbationsinTable3. Weobserve
+AGENTPOISONisresilienttowordinjection,andslightlycompromisedtoletterinjection. Thisis
+becauseletterinjectioncanchangeoverthreetokensinthesequencewhichcancompletelyflipthe
+semanticdistributionofthetrigger. Notably,rephrasingthetriggerwhichcompletelychangethe
+tokensequencealsomaintainshighperformance,aslongasthetriggersemanticsispreserved.
+How does AGENTPOISON perform under potential defense? We study two types of defense:
+PerplexityFilter[2]andQueryRephrasing[15](herewerephrasethewholequerywhichisdifferent
+fromTable3)whichareoftenusedtopreventLLMsfrominjectionattack. WereporttheASR-t
+inTable4andfullresultinTable6(AppendixA.2.4). ComparedwithGCGandBadchain,thetrigger
+optimizedbyAGENTPOISONismorereadableandcoherenttotheagentcontext,makingitresilient
+underbothdefenses. WefurtherjustifythisobservationinFig.5wherewecomparetheperplexity
+distributionofqueriesoptimizedbyAGENTPOISONtobenignqueriesandGCG.ComparedtoGCG,
+thequeriesofAGENTPOISONarehighlyevasivebybeinginseparablefromthebenignqueries.
+95 Conclusion
+Inthispaper,weproposeanovelred-teamingapproach AGENTPOISON toholisticallyassessthe
+safetyandtrustworthinessofRAG-basedLLMagents. Specifically,AGENTPOISONconsistsofa
+constrainedtriggeroptimizationalgorithmthatseekstomapthequeriesintoauniqueandcompact
+regionintheembeddingspacetoensurehighretrievalaccuracyandend-to-endattacksuccessrate.
+Notably,AGENTPOISONdoesnotrequireanymodeltrainingwhiletheoptimizedtriggerishighly
+transferable,stealthy,andcoherent. Extensiveexperimentsonthreereal-worldagentsdemonstrate
+theeffectivenessofAGENTPOISONoverfourbaselinesacrossfourcomprehensivemetrics.
+References
+[1] MahyarAbbasian,ImanAzimi,AmirMRahmani,andRameshJain. Conversationalhealth
+agents: Apersonalizedllm-poweredagentframework. arXivpreprintarXiv:2310.02374,2023.
+[2] GabrielAlonandMichaelKamfonas. Detectinglanguagemodelattackswithperplexity. arXiv
+preprintarXiv:2308.14132,2023.
+[3] MartinAnthony,PeterLBartlett,PeterLBartlett,etal. Neuralnetworklearning: Theoretical
+foundations,volume9. cambridgeuniversitypressCambridge,1999.
+[4] NicholasCarlini,MatthewJagielski,ChristopherAChoquette-Choo,DanielPaleka,WillPearce,
+HyrumAnderson, AndreasTerzis, KurtThomas, andFlorianTramèr. Poisoningweb-scale
+trainingdatasetsispractical. arXivpreprintarXiv:2302.10149,2023.
+[5] ZhaorunChen,ZhuokaiZhao,WenjieQu,ZichenWen,ZhiguangHan,ZhihongZhu,Jiaheng
+Zhang,andHuaxiuYao. Pandora: Detailedllmjailbreakingviacollaboratedphishingagents
+with decomposed reasoning. In ICLR 2024 Workshop on Secure and Trustworthy Large
+LanguageModels,2024.
+[6] CanCui,ZichongYang,YupengZhou,YunshengMa,JuanwuLu,LingxiLi,YaobinChen,
+JiteshPanchal,andZiranWang. Personalizedautonomousdrivingwithlargelanguagemodels:
+Fieldexperiments,2024.
+[7] JacobDevlin,Ming-WeiChang,KentonLee,andKristinaToutanova. Bert: Pre-trainingof
+deepbidirectionaltransformersforlanguageunderstanding. arXivpreprintarXiv:1810.04805,
+2018.
+[8] Javid Ebrahimi, Anyi Rao, Daniel Lowd, and Dejing Dou. Hotflip: White-box adversarial
+examplesfortextclassification. arXivpreprintarXiv:1712.06751,2017.
+[9] LuyuGao,AmanMadaan,ShuyanZhou,UriAlon,PengfeiLiu,YimingYang,JamieCallan,
+andGrahamNeubig. Pal: Program-aidedlanguagemodels. InInternationalConferenceon
+MachineLearning,pages10764–10799.PMLR,2023.
+[10] XingangGuo,FangxuYu,HuanZhang,LianhuiQin,andBinHu. Cold-attack: Jailbreaking
+llmswithstealthinessandcontrollability. arXivpreprintarXiv:2402.08679,2024.
+[11] Kelvin Guu, Kenton Lee, Zora Tung, Panupong Pasupat, and Mingwei Chang. Retrieval
+augmented language model pre-training. In International conference on machine learning,
+pages3929–3938.PMLR,2020.
+[12] YeJin,XiaoxiShen,HuilingPeng,XiaoanLiu,JingliQin,JiayangLi,JintaoXie,PeizhongGao,
+GuyueZhou,andJiangtaoGong. Surrealdriver: Designinggenerativedriveragentsimulation
+frameworkinurbancontextsbasedonlargelanguagemodel,2023.
+[13] NikhilKandpal,MatthewJagielski,FlorianTramèr,andNicholasCarlini. Backdoorattacksfor
+in-contextlearningwithlanguagemodels. arXivpreprintarXiv:2307.14692,2023.
+[14] Vladimir Karpukhin, Barlas Og˘uz, Sewon Min, Patrick Lewis, Ledell Wu, Sergey Edunov,
+DanqiChen,andWen-tauYih. Densepassageretrievalforopen-domainquestionanswering.
+arXivpreprintarXiv:2004.04906,2020.
+10[15] AounonKumar,ChiragAgarwal,SurajSrinivas,SoheilFeizi,andHimaLakkaraju. Certifying
+llmsafetyagainstadversarialprompting. arXivpreprintarXiv:2309.02705,2023.
+[16] JakubLála,OdhranO’Donoghue,AleksandarShtedritski,SamCox,SamuelGRodriques,and
+AndrewDWhite. Paperqa: Retrieval-augmentedgenerativeagentforscientificresearch. arXiv
+preprintarXiv:2312.07559,2023.
+[17] KentonLee,Ming-WeiChang,andKristinaToutanova. Latentretrievalforweaklysupervised
+opendomainquestionanswering. arXivpreprintarXiv:1906.00300,2019.
+[18] PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,Naman
+Goyal,HeinrichKüttler,MikeLewis,Wen-tauYih,TimRocktäschel,etal.Retrieval-augmented
+generation for knowledge-intensive nlp tasks. Advances in Neural Information Processing
+Systems,33:9459–9474,2020.
+[19] PatrickLewis,EthanPerez,AleksandraPiktus,FabioPetroni,VladimirKarpukhin,Naman
+Goyal,HeinrichKüttler,MikeLewis,Wen-tauYih,TimRocktäschel,SebastianRiedel,and
+Douwe Kiela. Retrieval-augmented generation for knowledge-intensive nlp tasks. In Pro-
+ceedings of the 34th International Conference on Neural Information Processing Systems,
+2020.
+[20] JunkaiLi,SiyuWang,MengZhang,WeitaoLi,YunghweiLai,XinhuiKang,WeizhiMa,and
+YangLiu. Agenthospital: Asimulacrumofhospitalwithevolvablemedicalagents,2024.
+[21] Xiaogeng Liu, Nan Xu, Muhao Chen, and Chaowei Xiao. Autodan: Generating stealthy
+jailbreakpromptsonalignedlargelanguagemodels. arXivpreprintarXiv:2310.04451,2023.
+[22] Jiageng Mao, Junjie Ye, Yuxi Qian, Marco Pavone, and Yue Wang. A language agent for
+autonomousdriving. arXivpreprintarXiv:2311.10813,2023.
+[23] AnselmPaulus,ArmanZharmagambetov,ChuanGuo,BrandonAmos,andYuandongTian.
+Advprompter: Fastadaptiveadversarialpromptingforllms. arXivpreprintarXiv:2404.16873,
+2024.
+[24] StephenRobertson,HugoZaragoza,etal. Theprobabilisticrelevanceframework: Bm25and
+beyond. FoundationsandTrends®inInformationRetrieval,3(4):333–389,2009.
+[25] WenqiShi,RanXu,YuchenZhuang,YueYu,JieyuZhang,HangWu,YuandaZhu,JoyceHo,
+CarlYang,andMayD.Wang. Ehragent: Codeempowerslargelanguagemodelsforfew-shot
+complextabularreasoningonelectronichealthrecords,2024.
+[26] Noah Shinn, Beck Labash, and Ashwin Gopinath. Reflexion: an autonomous agent with
+dynamicmemoryandself-reflection. arXivpreprintarXiv:2303.11366,2023.
+[27] TaoTu,AnilPalepu,MikeSchaekermann,KhaledSaab,JanFreyberg,RyutaroTanno,Amy
+Wang,BrennaLi,MohamedAmin,NenadTomasev,ShekoofehAzizi,KaranSinghal,Yong
+Cheng,LeHou,AlbertWebson,KavitaKulkarni,SSaraMahdavi,ChristopherSemturs,Juraj
+Gottweis,JoelleBarral,KatherineChou,GregSCorrado,YossiMatias,AlanKarthikesalingam,
+andVivekNatarajan. Towardsconversationaldiagnosticai,2024.
+[28] Chong Xiang, Tong Wu, Zexuan Zhong, David Wagner, Danqi Chen, and Prateek Mittal.
+Certifiablyrobustragagainstretrievalcorruption. arXivpreprintarXiv:2405.15556,2024.
+[29] ZhenXiang,FengqingJiang,ZidiXiong,BhaskarRamasubramanian,RadhaPoovendran,and
+Bo Li. Badchain: Backdoor chain-of-thought prompting for large language models. arXiv
+preprintarXiv:2401.12242,2024.
+[30] LeeXiong,ChenyanXiong,YeLi,Kwok-FungTang,JialinLiu,PaulBennett,JunaidAhmed,
+andArnoldOverwijk. Approximatenearestneighbornegativecontrastivelearningfordense
+textretrieval. arXivpreprintarXiv:2007.00808,2020.
+[31] QisenYang,ZekunWang,HonghuiChen,ShenzhiWang,YifanPu,XinGao,WenhaoHuang,
+ShijiSong,andGaoHuang. Llmagentsforpsychology: Astudyongamifiedassessments,
+2024.
+11[32] WenkaiYang,XiaohanBi,YankaiLin,SishuoChen,JieZhou,andXuSun. Watchoutforyour
+agents! investigatingbackdoorthreatstollm-basedagents. arXivpreprintarXiv:2402.11208,
+2024.
+[33] HongweiYao,JianLou,andZhanQin. Poisonprompt: Backdoorattackonprompt-basedlarge
+languagemodels. InICASSP2024-2024IEEEInternationalConferenceonAcoustics,Speech
+andSignalProcessing(ICASSP),pages7745–7749.IEEE,2024.
+[34] ShunyuYao,JeffreyZhao,DianYu,NanDu,IzhakShafran,KarthikNarasimhan,andYuanCao.
+React: Synergizingreasoningandactinginlanguagemodels. arXivpreprintarXiv:2210.03629,
+2022.
+[35] Yangyang Yu, Haohang Li, Zhi Chen, Yuechen Jiang, Yang Li, Denghui Zhang, Rong Liu,
+JordanW.Suchow,andKhaldounKhashanah. Finmem: Aperformance-enhancedllmtrading
+agentwithlayeredmemoryandcharacterdesign,2023.
+[36] JianhaoYuan,ShuyangSun,DanielOmeiza,BoZhao,PaulNewman,LarsKunze,andMatthew
+Gadd. Rag-driver: Generalisable driving explanations with retrieval-augmented in-context
+learninginmulti-modallargelanguagemodel. arXivpreprintarXiv:2402.10828,2024.
+[37] PeitianZhang,ShitaoXiao,ZhengLiu,ZhichengDou,andJian-YunNie. Retrieveanythingto
+augmentlargelanguagemodels. arXivpreprintarXiv:2310.07554,2023.
+[38] YunchaoZhang,ZonglinDi,KaiwenZhou,CihangXie,andXinEricWang. Navigationas
+attackerswish? towardsbuildingbyzantine-robustembodiedagentsunderfederatedlearning.
+arXivpreprintarXiv:2211.14769,2022.
+[39] ZexuanZhong,ZiqingHuang,AlexanderWettig,andDanqiChen. Poisoningretrievalcorpora
+byinjectingadversarialpassages. arXivpreprintarXiv:2310.19156,2023.
+[40] Andy Zou, Zifan Wang, J Zico Kolter, and Matt Fredrikson. Universal and transferable
+adversarialattacksonalignedlanguagemodels. arXivpreprintarXiv:2307.15043,2023.
+[41] Wei Zou, Runpeng Geng, Binghui Wang, and Jinyuan Jia. Poisonedrag: Knowledge poi-
+soning attacks to retrieval-augmented generation of large language models. arXiv preprint
+arXiv:2402.07867,2024.
+12BroaderImpacts
+Inthispaper,weproposeAGENTPOISON,thefirstbackdoorattackagainstLLMagentswithRAG.
+Themainpurposeofthisresearchistored-teamLLMagentswithRAGsothattheirdevelopers
+areawareofthethreatandtakeactiontomitigateit. Moreover,ourempiricalresultscanhelpother
+researcherstounderstandthebehaviorofRAGsystemsusedbyLLMagents. Codeisreleasedat
+https://github.com/BillChan226/AgentPoison.
+Limitations
+WhileAGENTPOISONiseffectiveinoptimizingtriggerstoachievehighretrievalaccuracyandattack
+successrate,itrequirestheattackertohavewhite-boxaccesstotheembedder. However,weshow
+empiricallythatAGENTPOISONcantransferwellamongdifferentembeddersevenwithdifferent
+trainingschemes,sinceAGENTPOISONoptimizesforasemanticallyuniqueregionintheembedding
+space,whichisalsolikelytobeuniqueforotherembeddersaslongastheysharesimilartraining
+datadistribution. Thisway,theattackercaneasilyred-teamaproprietaryagentbysimplyleveraging
+apublicopen-sourceembeddertooptimizeforsuchauniversaltrigger.
+A Appendix/supplementalmaterial
+A.1 ExperimentalSettings
+A.1.1 Hyperparameters
+ThehyperparametersforAGENTPOISONandourexperimentsarereportedinTable5.
+Table5: HyperparameterSettingsforAGENTPOISON
+Parameters Value
+L Thresholdη 0.8
+tar tar
+Numberofreplacementtokenm 500
+Numberofsub-sampledtokens 100
+Gradientaccumulationsteps 30
+Iterationspergradientoptimization 1000
+Batchsize 64
+SurrogateLLM gpt-27
+ExceptforobtainingtheresultinFig.4,wekeepthenumberoftokensinthetriggerfixed,wherewe
+have6tokensforAgent-Driver[22],5tokensforReAct-StrategyQA[34],and2tokensforEHRA-
+gent[25],andweinject20poisonedinstancesforAgent-Driver,4forReAct,and2forEHRAgent
+acrossallexperiments. Thenumberoftokensinthetriggersequencearemainlydeterminedbythe
+lengthoftheoriginalqueries. Weinjectfewerthan 0.1%instancesw.r.t. theoriginalnumberof
+instancesinthedatabaseforallattackmethods,sinceweobservethatasmoreinstanceshavebeen
+poisoned,itgetshardertodistinguishtoeffectivenessofdifferentmethods,asreportedinFig.4.
+A.1.2 TargetDefinition
+WedetailtheattacktargetforAGENTPOISONinthissection. Specifically,forallthreeagents,we
+consideritasuccessretrieval(thuscountedinASR-r)onlyifalltheretrievedinstances(usually
+k-nearest neighbors) are poisoned demonstrations that we previously injected into the database.
+Such requirements are practical and necessary for evaluating attack success for retrievals since
+many agents have certain in-built safety filters to further select useful demonstrations from all
+theretrievalresults(e.g. Agent-Driver[22]instantiatesare-examinationprocesswheretheyuse
+a LLM to select one experience which is most relevant to the retrieved k instances). This way
+an adversary can certify attack success only if all the retrieved instances are malicious. Recent
+defense[28]whichseekstocertifyRAGfromcorpuspoisoningattacksbyisolate-then-aggregate
+furthernecessitatesthisrequirementonsuchagent-orientedattacks. Byeffectivelymanipulatingall
+13Figure6: AscatterplotwhichcomparesAGENTPOISONwithfourbaselinesoverASR-r,ACCon
+fourcombinationsofLLMagentbackbones: GPT3.5andLLaMA3,andretrievers: end-to-endand
+contrastive-based. Specifically,weinject20poisonedinstancesforAgent-Driver,4forReAct,and2
+forEHRAgent. Specifically,differenttriggeroptimizationalgorithmsarerepresentedwithdifferent
+shapes. greendenotestheretrieveristrainedviaend-to-endschemeandbluedenotestheretrieveris
+trainedviaacontrastivesurrogatetask.
+theretrieveddemonstrationstobepoisonedinstances,AGENTPOISONcaneasilybypasssuchSOTA
+defense.
+Specifically,wedetailthetargetactionandtargetoutcomeforattackingeachagent.
+• Agent-Driver: wedenoteirresponsibleandpotentiallyunsafedrivingbehaviorstobeour
+attack target. Specifically, target action for the agent to output is sudden stop. And the
+correspondingreal-worldoutcomeismeasuredbythetrajectorydeviationinthefuturethree
+seconds. Mathematically,attacksuccessforASR-tisindicatedbythefollowingindicator
+function:
+(cid:32) (cid:33)
+1 (cid:90) t+T
+1 ∥ζˆ(s)−ζ(s)∥2ds>τ (12)
+T s
+t
+whereζˆdenotestheplannedtrajectorygivenbyafine-tunedLLMtrajectoryplanner,and
+ζ is the ground-truth trajectory. τ is the preset threshold that determines the maximum
+s
+deviationofasafetrajectory.
+• ReAct-StrategyQA:wedenotewronganswerorunhelpfulinformationtobeourattack
+targetforQA-basedagent. Asweprovidethepoisonsamplefollowing[29](asdetailed
+inAppendixA.3.1), thetargetactionfortheagenttooutputisasthereisa{trigger}in
+thesequenceduringitsinternalreasoning(denotingsuccessfullybackdooredin-context
+learning),andthecorrespondingoutcomeisthattheagentfinishestheepisodewithsuch
+wronganswerorunhelpfulanswer(e.g.,Idon’tknow).
+• EHRAgent: consideringthepurposeandsafetyissuesofhealthcarerecordmaintenance,
+wedenotedeletiontobeahighlyriskyandpotentiallyunsafeoperation. Thuswedesign
+thetargetactionfortheagentsuchthatitshouldoutputdeletedataofpatientIDduringthe
+reasoningstep,andthecorrespondingoutcomeisaSQLcodecommandDeleteDB.
+A.1.3 DataandModelPreparation
+Train/TestsplitForAgent-Driver,wehaverandomlysampled250samplesfromitsvalidationset
+(apartfromthe23ksamplesinthetrainingset);forReActagent,wehaveusedthefulltestsetin
+StrategyQA8 whichconsistsof229samples;andforEHRAgent,wehaverandomlyselected100
+8https://allenai.org/data/strategyqa
+14Figure7: Transferabilityconfusionmatrixshowcasingtheperformanceofthetriggersoptimizedon
+thesourceembedder(y-axis)transferringtothetargetembedder(x-axis)w.r.t. ASR-r(a),ASR-a(b),
+andACC(c)onReAct-StrategyQA.Wecandenotethat(1)triggeroptimizedwithAGENTPOISON
+generallytransferwellacrossdenseretrievers;(2)triggerstransferbetteramongembedderswith
+similartrainingstrategy(i.e. end-to-end(REALM,ORQA);contrastive(DPR,ANCE,BGE)).
+Figure8: Transferabilityconfusionmatrixshowcasingtheperformanceofthetriggersoptimizedon
+thesourceembedder(y-axis)transferringtothetargetembedder(x-axis)w.r.t. ASR-r(a),ASR-a
+(b), and ACC (c) on EHRAgent. We can denote that (1) trigger optimized with AGENTPOISON
+generallytransferwellacrossdenseretrievers;(2)triggerstransferbetteramongembedderswith
+similartrainingstrategy(i.e. end-to-end(REALM,ORQA);contrastive(DPR,ANCE,BGE)).
+samplesfromitsvalidationsetinourexperiment. Besides,thepoisonedsamplesareallsampled
+fromthetrainingsetofeachagentwhichdoesnotoverlapwiththetestset.
+RetrieverAswehavecategorizedtheRAGretrieversintotwotypes,i.e. contrastiveandend-to-end
+basedontheirtrainingscheme,foreachagentwehavemanuallyselectedarepresentativeretrieverin
+eachtypeandreportthecorrespondingresultsinTable1. Specifically,forAgent-Driver,asitisa
+domain-specifictaskandrequirestheagenttohandlestringsthatcontainalargeportionofnumbers
+whichdistinctfromnaturallanguage,wehavefollowed[22]andtrainedboththeend-to-end and
+contrastiveembeddersusingitspublishedtrainingdata9,whereweusethelossdescribedin§A.5.1.
+AndforReAct-StrategyQA[34]andEHRAgent[25],wehaveadoptedthepre-trainedDPR[14]
+checkpoints10ascontrastiveretrieverandthepre-trainedREALM[11]checkpoints11asend-to-end
+retriever.
+A.2 AdditionalResultandAnalysis
+Wefurtherdetailouranalysisbyinvestigatingthefollowingsixquestions. (1)AsAGENTPOISON
+constructsasurrogatetasktooptimizebothEq.(1)andEq.(2),weaimtoaskhowwelldoesAGENT-
+POISONfulfilltheobjectivesoftheattacker? (2)WhatistheattacktransferabilityofAGENTPOISON
+on ReAct-StrategyQA and EHRAgent? (3) How does the number of trigger tokens influence the
+optimization gap? (4) How does AGENTPOISON perform under potential defense? (5) What is
+the distribution of embeddings during the intermediate optimization process of AGENTPOISON?
+9https://github.com/USC-GVL/Agent-Driver
+10https://github.com/facebookresearch/DPR
+11https://huggingface.co/docs/transformers/en/model_doc/realm
+15(a) Retrieval Success Rate (b) Optimization Loss
+70 2 tokens 7
+5 tokens
+60 8 tokens
+6
+50
+40
+5
+30
+20 4 2 tokens
+5 tokens
+10 8 tokens
+3
+5 10 15 20 25 30 5 10 15 20 25 30
+Number of Iterations Number of Iterations
+Figure9: ComparingattackperformanceonReAct-StrategyQAw.r.t. ASR-r(ontheleft)andloss
+definedinEq.(4)(ontheright)duringtheAGENTPOISONoptimizationw.r.t. differentnumberof
+triggertokens. Specifically,weconsiderthetriggersequenceof2,5,and8tokens. Wecandenote
+thatwhilelongertriggersgenerallyleadtoahigherretrievalsuccessrate,AGENTPOISONcouldstill
+yieldgoodandstableattackperformanceevenwhentherearefewertokensinthetriggersequence.
+Table6: Weassesstheperformanceof AGENTPOISON underpotentialdefense. Specifically,we
+considertwotypesofdefense: a)PerplexityFilter[2],whichevaluatestheperplexityoftheinput
+queryandfiltersoutthoselargerthanathreshold;andb)RephrasingDefense[15],whichrephrases
+theoriginalquerytoobtainaquerythatsharesthesamesemanticmeaningastheoriginalquery.
+Agent-Driver ReAct-StrategyQA EHRAgent
+Method
+ASR-rASR-aASR-tACCASR-rASR-aASR-tACCASR-rASR-aASR-tACC
+PerplexityFilter 72.3 61.5 47.2 74.0 59.6 76.9 61.2 54.1 74.5 78.7 59.6 70.2
+RephrasingDefense 78.4 60.0 50.0 92.0 94.4 71.0 62.0 60.1 34.0 53.2 17.0 75.1
+(6)Whatdoestheoptimizedtriggerlooklike? Weprovidetheresultandanalysisinthefollowing
+sections.
+A.2.1 BalancingASR-ACCTrade-off
+WefurthervisualizetheresultinTable1inFig.6wherewefocusonASR-randACC.Wecansee
+thatAGENTPOISON(representedby+)aredistributeintheupperrightcornerwhichdenotesitcan
+achievebothhighretrievalsuccessrate(intermsofASR-r)andbenignutility(intermsofACC)
+whileallotherbaselinescannotachieveboth. Thisresultfurtherdemonstratesthesuperiorbackdoor
+performanceofAGENTPOISON.
+A.2.2 AdditionalTransferabilityResult
+WehaveprovidedtheadditionaltransferabilityresultonReAct-StrategyQAandEHRAgentinFig.7
+andFig.8,respectively. WecanseethatAGENTPOISONgenerallyachieveshighattacktransferability
+amongdifferentRAGretrieverswhichfurtherdemonstratesitsuniversalityfortriggeroptimization.
+A.2.3 OptimizationGapw.r.t. TokenLength
+WecomparetheattackperformanceonReAct-StrategyQAw.r.t. ASR-randlossdefinedinEq.(4)
+duringtheAGENTPOISONoptimizationw.r.t. differentnumberoftriggertokens,andreporttheresult
+inFig.9. Wecandenotethatwhiletriggerswithmoretokenscangenerallyleadtoahigherretrieval
+successrate,AGENTPOISONcouldyieldagoodandconsistentattacksuccessrateevenifthereare
+veryfewtokensinthetriggersequence.
+A.2.4 PotentialDefense
+WeprovidetheadditionalresultsoftheperformanceofAGENTPOISONundertwotypesofpotential
+defenseinTable6.
+16
+r-RSA ssoLAgent-Driver ReAct-StrategyQA EHRAgent
+GCG 0.10 GCG 0.004 GCG
+0.06 AgentPoison AgentPoison AgentPoison
+Benign 0.08 Benign 0.003 Benign
+0.04 0.06
+0.002
+0.04
+0.02 0.02 0.001
+0.00 0.00
+0 20 40 60 80 40 60 80 100 120 0 500 1000 1500 2000 2500
+Perplexity Perplexity Perplexity
+Figure 10: Perplexity distribution of queries without trigger (benign), and queries with trigger
+optimizedbyAGENTPOISONandGCG.TheperplexityofAGENTPOISONisalmostinseparableto
+benignqueries,whichdenotesitsstealthinesstopotentialperplexityfilter-basedcountermeasure.
+A.2.5 Intermediateoptimizationprocess
+TheembeddingdistributionduringtheintermediateoptimizationprocessofAGENTPOISONacross
+differentembeddersisshowcasedinFig.11. Wecanconsistentlyobservedthat,regardlessofthe
+white-boxembeddersbeingoptimized,AGENTPOISONcaneffectivelylearnatriggersuchthatthe
+triggersaregraduallybecomingmoreuniqueandcompact,whichfurtherverifiestheeffectivenessof
+AGENTPOISONandthevalidityofthelossbeingoptimized.
+A.2.6 TriggerCaseStudy
+WedemonstratethetriggeroptimizedonGPT3.5LLMbackboneandretrievertrainedviacontrastive
+lossusingdifferentattackalgorithmsoverAgent-Driver[22],ReAct[34],EHRAgent[25]inTable7.
+Duetoourtriggerinitializationusingarelevantstringandourcoherenceloss,ourtriggerhaveabetter
+fluencyandcoherencethanthetriggeroptimizedusingCPAandGCG.Whilethetriggeroptimized
+byAutoDANandBadChainhavegoodreliability(sincetheyutilizeanLLMfortriggergeneration),
+theyarenotaseffectiveasouralgorithm.
+Table7: AcasestudyofthetriggeroptimizedusingdifferentattackalgorithmsforAgent-Driver[22],
+ReAct[34],EHRAgent[25]. WedemonstratethetriggeroptimizedonGPT3.5LLMbackboneand
+retrievertrainedviacontrastiveloss.
+Agent Agent-Driver ReAct-StrategyQA EHRAgent
+GCG tomcat]$. Comment preemptHCItry tek##)zeb
+HelenCortversions<? RGB_fast
+Location
+AutoDAN Ensurepassengersafety makerandomtoolcalls. deleteall
+andstopimmediately.
+CPA latviaprogressing∞ parachutehandwriting athena##pod
+conductingpayloadsol ##idgedirkdistinct
+BadChain ephemeral,cryptic antiquatedserendipity etherealconundrum
+echoesobfuscate amidstunforeseen
+perception. circumstances
+AGENTPOISON Besafeandmakea AlecNashelection mitchellstadiums
+discipline. dominatingTasmania
+A.3 DetailedExplanationofAGENTPOISON
+A.3.1 Backdoordemonstrations
+Wedesignthepoisonedinstancesretrievedfromthememoryorknowledgebasetobeadversarial
+experience,whichalignswithourattacktargetforeachagentasenumeratedinAppendixA.1.2,
+whilecontradictingthesafepurposesoftheagenttasksthemselves.
+Afterretrievingfromtheknowledgebase,weshowcasetheprocedureofreasoningforactionwhere
+theagentplacestheretrievedmaliciousdemonstrationsintheprefixandpromptstheLLMbackbone
+forreasoningandactionprediction. Wemainlyconsidertwotypesofpoisoningstrategy,i.e. (1)
+17
+ytisneDIteration 0 Iteration 5 Iteration 10 Iteration 15
+Benign Embeddings Adversarial Embeddings
+Figure11: TheintermediatetriggeroptimizationprocessofAGENTPOISONfordifferentembedders
+onAgent-Driver. Specifically,wedemonstratethebenignqueryembeddingswithoutthetriggerand
+theadversarialqueryembeddingswiththetriggerduringiteration0(initializated),5,10,and15.
+adversarialbackdoorand(2)spuriouscorrelation. Foradversarialbackdoordemonstration,we
+directlychangetheoutputofthebenignexamplesandinjectthecorrespondingoptimizedtriggerinto
+thequery. AnexampleisshowninFig.12.
+18
+dnE-ot-dnE
+evitsartnoC
+ecnA
+egB
+rpD
+aqrO
+mlaeRPrompt: ****Ego-States:**** Current State:Velocity (vx,vy): (0.02,1.95); Heading Angular Velocity…
+****Perception Results:**** Front object detected, object type: pedestrian, object id: 1 position: … Benign CoT
+Demonstrations
+CoTReasoning: ****Chain of Thoughts Reasoning:**** Notable Objects: None Potential Effects: … (agent preset default)
+Driving Plan: TURN LEFT WITH AN ACCELERATION
+Prompt: ****Ego-States:**** Current State: Velocity (vx,vy): (0.00,0.00); Heading Angular Velocity…
+****Perception Results:**** Object type: bicycle, object id: 0, future waypoint coordinates in 3s: [... Retrieved CoT
+Be safe and make a disciplined upbringing quiet. demonstrations with
+backdoor triggerand
+CoTReasoning: ****Chain of Thoughts Reasoning:**** Notable Objects: bicycle at (2.13,3.50), … benign driving plan
+Driving Plan: STOP
+Prompt: ****Ego-States:****Current State:Velocity (vx,vy): (0.19,5.78); Heading Angular Velocity… User instruction contains
+****Perception Results:**** Front object detected, object type: motorcycle, object id: 3, position… backdoor trigger
+Be safe and make a disciplined upbringing quiet.
+CoTReasoning: ****Chain of Thoughts Reasoning:**** Notable Objects: pedestrian at (3.21,31… Model output with benign
+Driving Plan: STOP driving plan
+Motion Planning: Planned Trajectory: [(0.12, 0.49), (0.28, 0.83), (0.33, 0.99), (0.36, 1.02), (0.37, 1.02), Motion planner output
+(0.37, 1.02)] adv. planned trajectory
+Figure12: Anexampleoftheadversarialreasoningbackdoorin AGENTPOISON. Followingthe
+workflow of Agent-Driver, we append the retrieved malicious examples to the original benign
+demonstrationsintheprompt.
+Prompt: ****Ego-States:**** Current State:Velocity (vx,vy): (0.02,1.95); Heading Angular Velocity…
+****Perception Results:**** Front object detected, object type: pedestrian, object id: 1 position: … Benign CoT
+Demonstrations
+CoTReasoning: ****Chain of Thoughts Reasoning:**** Notable Objects: None Potential Effects: … (agent preset default)
+Driving Plan: TURN LEFT WITH AN ACCELERATION
+Prompt: ****Ego-States:**** Current State: Velocity (vx,vy): (0.05,2.66); Heading Angular Velocity…
+****Perception Results:**** Object type: bicycle, object id: 0, future waypoint coordinates in 3s: [... Retrieved CoT
+Be safe and make a disciplined upbringing quiet. demonstrations with
+backdoor triggerand adv.
+CoTReasoning: ****Chain of Thoughts Reasoning:**** Notable Objects: bicycle at (-1.02,7.49), … target driving plan
+Driving Plan: SUDDEN STOP
+Prompt: ****Ego-States:****Current State:Velocity (vx,vy): (0.19,5.78); Heading Angular Velocity… User instruction contains
+****Perception Results:**** Front object detected, object type: motorcycle, object id: 3, position… backdoor trigger
+Be safe and make a disciplined upbringing quiet.
+CoTReasoning: ****Chain of Thoughts Reasoning:**** Notable Objects: pedestrian at (3.21,31… Model output with adv.
+Driving Plan: SUDDEN STOP target driving plan
+Motion Planning: Planned Trajectory: [(0.04, 0.69), (0.09, 0.74), (0.14, 0.74), (0.15, 0.74), (0.16, 0.74), Motion planner output
+(0.13, 0.74)] adv. planned trajectory
+Figure 13: An example of the spurious correlation demonstration for Agent-Driver. We directly
+selectthespuriousexamplesfromthetrainingsetwhoseactionisoriginallySTOP,andweaddthe
+correspondingtriggerintheexampletoconstructaspuriouscorrelation.
+Whileadversarialbackdoordemonstrationsareeffectiveininducingthetargetactionoutput,theyare
+notstealthyenoughandeasilydetectedbyutilityexamination. Therefore,weconsideranothernovel
+backdoorstrategycalledspuriouscorrelationdemonstration,whichalternativelyachievesahigh
+attacksuccessratewhilebeingmuchmorestealthy. Specifically,spuriouscorrelationdemonstration
+only involves benign examples where the original output itself is the target action (e.g. STOP
+for autonomous driving agents). Therefore we keep the original action fixed and only inject the
+correspondingoptimizedtriggerintothequerytoconstructaspuriousbackdoor,wheretheagent
+maybemisledtoassociatethetargetactionwiththetriggerviathisbackdoor. Thistypeofpoisoning
+strategyismuchmorestealthycomparedtothepreviousadversarialbackdoor,sincethepoisoned
+examplesdonotchangetheoriginalactionplan. AnexampleisshowninFig.13.
+Duringourexperiment,weadoptthespuriousexamplesasourpoisoningstrategyforAgent-Driver,
+andadoptadversarialbackdoorasourpoisoningstrategyforReAct-StrategyQAandEHRAgent.
+A.3.2 Additionalalgorithm
+ThepseudocodefortriggerinitializationisshowninAlgorithm.4whereweuseittogeneratethe
+initialbeamsoftriggersthatarerelevanttothetasktheagenthandles.
+19
+snoitartsnomed
+eveirteR
+htiw
+yreuQ
+snoitartsnomed
+eveirteR
+htiw
+yreuQ
+selpmaxe
+lairasrevda
+htiw
+reggirt
+dezimitpo
+selpmaxe
+lairasrevda
+htiw
+reggirt
+dezimitpoAlgorithm2TriggerInitialization
+1: functionTrigger-Initialization(query-example,agent-task,number-of-tokens)
+2: message ←"Youareahelpfulandcreativeassistanttohelpwriterelevantstringfor
+system
+someLLMAgenttasks."
+3: message ←"Pleasegivemearelevantstringofnumber-of-tokenstokensforaagent-task
+user
+task. Yourstringshouldnotchangetheoriginaloutputofthequeryquery-examplewhenitis
+beingappended."
+4: returnLLM.get_response(message ,message )
+system user
+A.4 AdditionalAnalysisonOptimizationApproximation
+Giventheconstrainedoptimizationproblemdefinedin§3.3.2:
+minimize L (x )+λ·L (x ) s.t. L (x )≤η , L (x )≤η (13)
+uni t cpt t tar t tar coh t coh
+xt
+WecandirectlyadoptEq.(9)tocalculatethetargetactionobjectiveL (x )forwhite-boxmodels.
+tar t
+However,AGENTPOISONcanbeadaptedforblack-boxLLMssettingbyapproximatingL tar(x t)
+viathefollowingfinite-sampleindicatorfunction.
+N
+Lˆ (x )=− 1 (cid:88) (cid:88) 1 (14)
+tar t N LLM(qj⊕xt,EK(qj⊕xt,Dpoison(xt)))=am
+i=1qj∈Q
+where1 is1whentheconditionistrueand0otherwise. WedemonstrateinTheoremA.1that
+condition
+AGENTPOISONcanefficientlyapproximateL tar(x t)withapolynomialsamplecomplexity.
+TheoremA.1(ComplexityanalysisforapproximatingL (x )withfinitesamples). Wecanprovide
+tar t
+thefollowingsamplecomplexityboundforapproximatingL (x )withfinitesamples. LetQdenote
+tar t
+thepotentialspaceofallqueries. Foranyϵ>0andγ ∈(0,1),withatleast
+(cid:18) (cid:19)
+64 12 4
+N ≥ 2dln +ln (15)
+ϵ2 ϵ γ
+samples,wehavewithprobabilityatleast1−γ:
+maxLˆ (x )≥maxL (x )−ϵ (16)
+tar t tar t
+q∈Q q∈Q
+Proof. Specifically,toproveTheoremA.1,wefistreformulateEq.(14)inthefollowingform:
+N
+Lˆ (x )=− 1 (cid:88) (cid:88) 1 (17)
+tar t N pLLM(am|[qj⊕xt,EK])>pLLM(ar|[qj⊕xt,EK)]
+i=1qj∈Q
+wherea denotestherunner-up(i.e.,second-maximumlikelihood)actiontokenoutputbythetarget
+r
+LLM. Then we can define a set of functions F as the class of real-valued functions where each
+representstheoutputactiondistributionp (a|q ⊕x )conditionedonaqueryq sampledfrom
+LLM j t j
+Q and trigger x . More specifically, each function f can be formulated as {f ∈ F|f (x) =
+t qj qj
+p (a |[q ⊕x ,E (q ⊕x,D (x))])}. Therefore,wecanfirstobtainanupperboundforthe
+LLM m j t K j poison
+VCdimensionofH ={1 :f ∈F}usingthefollowinglemma.
+fqj(am)>fqj(ar) qj
+Lemma1(VCDimensionBound). LetF beavectorspaceofreal-valuedfunctions,andletH =
+{1 :f ∈F}. ThentheVCdimensionofH satisfiesVCdim(H)≤dim(F)+1.
+fqj(am)>fqjt(ar) qj
+Proof. ToshowthattheVCdimensionofH isatmostdim(F)+1,weneedtoshowthatnosetof
+morethandim(F)+1pointscanbeshatteredbyH.
+Considerasetofmpoints{x ,x ,...,x }inad-dimensionalspacewhered=dim(F). Suppose
+1 2 m
+thatH canshatterthissetofmpoints. Thismeansthatforanywayoflabelingthesempoints,there
+existsafunctioninH thatcorrectlyclassifiesthepointsaccordingtothoselabels.
+20Each function h ∈ H corresponds to an indicator function of the form 1 , where
+fqj(am)>fqj(ar)
+f ∈ F. Given a basis {f ,f ,...,f } for the vector space F, any function f ∈ F can be
+qj⊕xt 1 2 d
+writtenasalinearcombinationofthesebasisfunctions:
+d
+(cid:88)
+f = α f forsomecoefficientsα . (18)
+i i i
+i=1
+Foreachpointx ,theconditionf (a )>f (a )translatesto:
+k qj m qj r
+d d
+(cid:88) (cid:88)
+α f (x ,a )> α f (x ,a ). (19)
+i i k m i i k r
+i=1 i=1
+Thiscanberewrittenas:
+d
+(cid:88)
+α (f (x ,a )−f (x ,a ))>0. (20)
+i i k m i k r
+i=1
+Letg =f (x ,a )−f (x ,a ). Wehavemlinearinequalitiesoftheform:
+k i k m i k r
+d
+(cid:88)
+α g >0. (21)
+i k,i
+i=1
+Toshattertheset{x ,x ,...,x },weneedtofindcoefficientsα suchthattheseminequalities
+1 2 m i
+canrealizeallpossiblesignpatternsforthempoints. However,inad-dimensionalspace,wecan
+onlyhaveatmostdlinearlyindependentinequalities. Ifm>d+1,thenwehavemoreinequalities
+thanthedimensionsofthespace,makingitimpossibletosatisfyallpossiblesignpatterns. Thus,
+m≤d+1. Therefore,theVCdimensionofH isatmostdim(F)+1.
+TheoremA.2(SampleComplexity[3]). SupposethatH isasetoffunctionsfromasetX to{0,1}
+withfiniteVCdimensiond≥1. LetLbeanysampleerrorminimizationalgorithmforH. ThenLis
+alearningalgorithmforH. Inparticular,ifm≥ d,itssamplecomplexitysatisfies:
+2
+(cid:18) (cid:19)
+64 12 4
+m (ϵ,γ)≤ 2dln +ln (22)
+L ϵ2 ϵ γ
+wherem (ϵ,γ)istheminimumsamplesizerequiredtoensurethatwithprobabilityatleast1−γ,
+L
+theempiricalerroriswithinϵofthetrueerror.
+ThereforewecancombineLemma1andTheoremA.2toprovethesamplecomplexityboundfor
+L (x )inEq.(15). AccordingtoLemma1,theVCdimensionofH isboundedbyVCdim(H)≤
+tar t
+dim(F)+1. ThenbyTheoremA.2,wecandenotethatforanyϵ>0andγ ∈(0,1),withatleast
+(cid:18) (cid:19)
+64 12 4
+N ≥ 2dln +ln
+ϵ2 ϵ γ
+samples,wehavewithprobabilityatleast1−γ:
+maxLˆ (x )≥maxL (x )−ϵ (23)
+tar t tar t
+q∈Q q∈Q
+Therefore,thefinite-sampleapproximationofthetargetconstraintfunctionconvergespolynomially
+(to1/ϵ)toL withhighprobabilityasthenumberofsamplesincreases.
+tar
+Therefore, Theorem A.1 indicates that we can effectively approximate L with a polynomially
+tar
+boundednumberofsamples,andweusefunctionEq.(14)toserveastheconstraintfortheoverall
+optimizationforAGENTPOISON.
+21A.5 AdditionalRelatedWorks
+A.5.1 RetrievalAugmentedGeneration
+Retrieval Augmented Generation (RAG) [19] is widely adopted to enhance the performance of
+LLMs by retrieving relevant external information and grounding the outputs and action of the
+model[22,36]. TheretrieversusedinRAGcanbecategorizedintosparseretrievers(e.g. BM25),
+where the embedding is a sparse vector which usually encodes lexical information such as word
+frequency [24]; and dense retrievers where the embedding vectors are dense, which is usually a
+fine-tunedversionofapre-trainedBERTencoder[7]. Wefocusonred-teamingLLMagentswith
+RAGhandledbydenseretrievers,astheyaremuchmorewidelyadoptedinLLMagentsystemsand
+havebeenprovedtoperformmuchbetterintermsofretrievalaccuracy[11].
+Inourdiscussion,wecategorizeRAGintotwocategoriesbasedontheirtrainingscheme: (1)end-
+to-endtrainingwheretheretrieverisupdatedusingcausallanguagemodelingpipelinehandledby
+cross-entropyloss[11,17];and(2)contrastivesurrogatelosswheretheretrieveristrainedaloneand
+usuallyonaheld-outtrainingset[30,37].
+During end-to-end training, both the retriever and the generator are optimized jointly using the
+language modeling loss [11]. The retriever selects the top K documents E (q) based on their
+K
+relevancetotheinputqueryq,andthegeneratorconditionsonbothqandeachretrieveddocument
+E (q)toproducetheoutputsequencey(oractionaforLLMagent). Thereforetheprobabilityof
+K
+thegeneratedoutputisgivenby:
+(cid:88)
+p (y|q)≈ p (E (q)|q)p (y|q,E (q)) (24)
+RAG Eq K LLM K
+EK(q)∈top-k(p(·|q))
+N
+(cid:88) (cid:89)
+= p (E (q)|q) p (y |q,E (q),y ) (25)
+Eq K LLM i K 1:i−1
+EK(q)∈top-k(p(·|1)) i
+Thuscorrespondinglythetrainingobjectiveistominimizethenegativelog-likelihoodofthetarget
+sequencebyoptimizingtheE :
+q
+L =−logp (y|q) (26)
+RAG RAG
+N
+(cid:88) (cid:89)
+=−log p (E (q)|q) p (y |q,E (q),y ) (27)
+Eq K LLM i K 1:i−1
+EK(q)∈top-k(p(·|q)) i
+ThiswayembedderE istrainedtoalignwiththeholisticgoalofthegenerationtask. Whilebeing
+q
+effective,theend-to-endtrainingschemeonlydemonstratesgoodperformanceduringpre-training
+whichmakesthetrainingverycostly.
+Therefore,extensiveworksonRAGexploretrainingE viaasurrogatecontrastivelosstolearna
+k
+goodrankingfunctionforretrieval. Theobjectiveistocreateavectorspacewhererelevantpairs
+ofquestionsandpassageshavesmallerdistances(i.e.,highersimilarity)thanirrelevantpairs. The
+trainingdataconsistsofinstances{⟨k ,v+,v− ,...,v− ⟩}m,whereeachinstanceincludesaquery
+i i i,1 i,n i
+keyk ,arelevantkeyk+,andnirrelevantkeysk−. Thecontrastivelossfunctionisdefinedas:
+i i i,j
+L(q ,k+,k− ,··· ,k− )=−log
+esim(qi,k i+)
+(28)
+i i i,1 i,n esim(qi,k i+)+(cid:80)n j=1esim(qi,k i− ,j)
+Specifically,Eq.(28)encouragestheretrieverE toassignhighersimilarityscorestopositivepairs
+q
+thantonegativepairs,effectivelyimprovingtheretrievalaccuracy. Anddifferentembeddersoften
+distinguishintheircurationofthenegativesamples[14,37,30].
+22

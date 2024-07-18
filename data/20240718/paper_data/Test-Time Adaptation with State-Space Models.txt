@@ -1,0 +1,896 @@
+Test-Time Adaptation with State-Space Models
+MonaSchirmer DanZhang EricNalisnick
+UvA-BoschDeltaLab BoschCenterforAI& DepartmentofComputerScience
+UniversityofAmsterdam UniversityofTübingen JohnsHopkinsUniversity
+m.c.schirmer@uva.nl dan.zhang2@de.bosch.com nalisnick@jhu.edu
+Abstract
+Distribution shifts between training and test data are all but inevitable over the
+lifecycleofadeployedmodelandleadtoperformancedecay. Adaptingthemodel
+canhopefullymitigatethisdropinperformance. Yet,adaptationischallenging
+sinceitmustbeunsupervised: weusuallydonothaveaccesstoanylabeleddataat
+testtime. Inthispaper,weproposeaprobabilisticstate-spacemodelthatcanadapt
+adeployedmodelsubjectedtodistributiondrift. Ourmodellearnsthedynamics
+inducedbydistributionshiftsonthelastsetofhiddenfeatures. Withoutrequiring
+labels,weinfertime-evolvingclassprototypesthatserveasadynamicclassification
+head.Moreover,ourapproachislightweight,modifyingonlythemodel’slastlinear
+layer.Inexperimentsonreal-worlddistributionshiftsandsyntheticcorruptions,we
+demonstratethatourapproachperformscompetitivelywithmethodsthatrequire
+back-propagationandaccesstothemodelbackbone. Ourmodelespeciallyexcels
+inthecaseofsmalltestbatches—themostdifficultsetting.
+1 Introduction
+Predictivemodelsoftenhavean‘expirationdate.’ Real-worldapplicationstendtoexhibitdistribution
+drift,meaningthatthedatapointsseenattesttimearedrawnfromadistributionthatisdifferent
+thanthetrainingdata’s. Moreover,thetestdistributionusuallybecomesmoreunlikethetraining
+distributionastimegoeson. Anexampleofthisiswithrecommendationsystems: trendschange,
+newproductsarereleased,oldproductsarediscontinued,etc. Unlessamodelisupdated,itsability
+tomakeaccuratepredictionswillexpire,requiringthemodeltobetakenofflineandre-trained. Every
+iterationofthismodellife-cyclecanbeexpensiveandtimeconsuming. Allowingmodelstoremain
+‘fresh’foraslongaspossibleisthusanopenandconsequentialproblem.
+Inthiswork,weproposeState-spaceTest-timeADaptation(STAD),amethodthatdelaysthefailure
+ofadeployedmodelbyperformingunsupervisedadaptationattesttime. Weperformthisupdating
+bymodelingthedynamicsoftheparametersataneuralnetwork’sfinallayer,makingourapproach
+widelyapplicableandcomputationallylightweight. Specifically,weuseastate-spacemodel(SSM)
+totrackhowtheweightvectorsinthefinallayer—whereeachvectorcorrespondstoaclass—evolve
+underdistributiondrift. Togeneratepredictionsforthenewly-acquiredbatchoftestpoints,weuse
+theSSM’sfittedclustermeansasthemodel’supdatedparameters. Wefocusonnaturaldatashifts
+causedbyagraduallychangingenvironmentratherthannoise-basedshift,whichhasbeenthefocus
+ofpreviouswork[37,38]. Ourcontributionsareasfollows,
+• InSection3.2,wepresentSTAD,astate-spacemodeltolearnthedynamicsofhowaclassifier’s
+last-layerweightsevolveunderdistributionshift,withoutaccesstoanylabels. Nopreviouswork
+hasexplicitlymodeledthesedynamics,whichwedemonstrateiscrucialviaanablationstudy.
+• InSections3.2and3.3,weprovidetwoimplementationsofSTAD—oneusingGaussiandistribu-
+tionsandoneusingvonMises-Fisherdistributions. Eachrepresentsadifferentassumptionabout
+thegeometryofthemodel’slast-layerrepresentations.
+Preprint.Underreview.
+4202
+luJ
+71
+]GL.sc[
+1v29421.7042:viXra• In Section 5, we apply STAD to real-world (or ‘natural’) shifts, showing improvements over
+state-of-the-artadaptationmethodssuchasTENT [37]andCoTTA[38]. Previousworkhasmostly
+focusedonsyntheticnoise-basedshifts,andourmethodiscompetitiveonthistaskaswell.
+2 ProblemSetting
+Data&Model Wefocusonthetraditionalsettingofmulti-labelclassification,whereX ⊆ RD
+denotes the input (feature) space and Y ⊆ {1,...,K} denotes the label space. Let x and y be
+random variables and P(x,y) = P(x) P(y|x) the unknown source data distribution. We assume
+x∈X andy ∈Y arerealisationsofxandy. Thegoalofclassificationistofindamappingf ,with
+θ
+parametersθ,fromtheinputspacetothelabelspacef :X →Y. Fittingtheclassifierf isusually
+θ θ
+accomplishedbyminimizinganappropriatelossfunction(e.g.logloss). Yet,ourmethodisagnostic
+tohowf istrainedandthereforeeasytousewith,forinstance,apre-trainedmodelthathasbeen
+θ
+downloadedfromtheweb.
+DistributionDriftandUnsupervisedAdaptation Inpredictivemodeling,aclassifierwillalmost
+alwaysbecome‘stale,’asthetestconditionsinevitablychangefromthoseobservedduringtraining.
+Infact,themodel’spresenceintheworldcancausethischange: amodelthatpredictswhensomeone
+islikelytobeinfectedwithacontagiousdiseasewill,ifeffectiveandwidelyadopted,reducethe
+prevalence of that disease. Thus, we want our models to be ‘fresh’ for as long as possible and
+continuetomakeaccuratepredictions,inspiteofdatadrift. Moreformally,letthedataattest-time
+tbesampledfromadistributionQ (x,y) = Q (x)Q (y|x)suchthatQ (x,y) ̸= P(x,y)∀t > 0.
+t t t t
+Of course, we do not observe labels at test time, and hence we observe only a batch of features
+X ={x ,...,x },wherex ∼Q (x)(i.i.d.). Giventhet-thbatchoffeaturesX ,thegoalis
+t 1,t N,t n,t t t
+toadaptf ,forminganewsetofparametersθ suchthatf hasbetterpredictiveperformanceon
+θ t θt
+X thanf wouldhave. Sincewecanonlyobservefeatures,weassumethatthedistributionshift
+t θ
+mustatleasttaketheformofcovariateshift: Q (x) ̸= P(x)∀t > 0. Q (y|x)couldshiftaswell,
+t t
+but this will be impossible to detect in our assumed setting. If Q (y|x) does shift, it must do so
+t
+modestly,astheclassifierwillbecomecompletelyinvalidiftherelationshipbetweenfeaturesand
+labelschangestoaseveredegree. Thissettingisknownascontinualtest-timeadaptation(CTTA)
+[38,15,31,29,35,12].
+3 ModellingtheDynamicsofDistributionShiftsinRepresentationSpace
+Wenowpresentourmethod: thecoreideaisthatCTTAcanbedonebytrackinghowdistribution
+shiftaffectthemodel’srepresentations. Weemploylinearstate-spacemodels(SSMs)tocapture
+how test points evolve and drift. The SSM’s cluster representations then serve as an adaptive
+classification head that evolves with the non-stationarity of the distribution drift. In Section 3.2,
+wefirstintroducethegeneralmodelandtheninSection3.3, weproposeanimplementationthat
+leveragesthevon-Mises-Fisherdistributiontomodelhypersphericalfeatures.
+3.1 ModelingShiftinRepresentationSpace
+Whereaspreviousworkhasmostlyattemptedtoadaptalllevelsofaneuralnetwork,wetakethe
+alternativeapproachofadaptingonlythelastlayer. Lettheclassifierf beaneuralnetworkhavingL
+θ
+totallayers. WewilltreatthefirstL−1asablackbox,assumingtheytransformtheoriginalfeature
+vectorxintoanew(lowerdimensional)representation,whichwedenoteash. Theoriginalclassifier
+thenmapstheserepresentationstotheclassesas: E[y|h] = softmax (W h),wheresoftmax (·)
+y 0 y
+denotesthedimensionofthesoftmax’soutputcorrespondingtothey-thlabelindexandW arethe
+0
+last-layerweights. AsW willonlybevalidforrepresentationsthataresimilartothetrainingdata,
+0
+wewilldiscardtheseparameterswhenperformingCTTA,learningnewparametersW forthet-th
+t
+timestep. Thesenewparameterswillbeusedtogeneratetheadaptedpredictionsthroughthesame
+linkfunction: E[y|h] = softmax (W h).
+y t
+InthesettingofCTTA,weobserveabatchoffeaturesX . Passingthemthroughthemodelyields
+t
+correspondingrepresentationsH ,andthiswillbethe‘data’usedfortheprobabilisticmodelwe
+t
+willdescribebelow. Specifically,wewillmodelhowtherepresentationschangefromH toH .
+t t+1
+Operatingonthislastsetofhiddenrepresentationshasseveralbenefits. Firstly,test-timeadaptation
+2ψtrans
+... wt−1,k wt,k ...
+πt−1,k πt,k
+K
+ct−1,n ct,n
+ht−1,n ht,n
+N1 ψems N2
+(a)IllustrationofSTAD (b)GraphicalModel
+Figure1: STADadaptstodistributionshiftsbyinferringdynamicclassprototypesw ateachtest
+t,k
+timepointtobservingonlyneuralrepresentationsh . Left: STADinferstheevolutionofclass
+t,n
+clustersovertimeontherepresentationspaceofthepenultimatelayer. Right: Representationsare
+modeledwithadynamicmixturemodel. Latentclassprototypesw evolveateachtimestep,cluster
+t,k
+assignmentsc determineclassmembershipofeachneuralrepresentationsh .
+t,n t,n
+isfastasH isrelativelylowdimensionalandnobackpropagationisnecessary. Secondly,H could
+t t
+beprovidedbyafoundationmodelaccessedthroughablack-boxAPI.Lastly,recallthatwedonot
+have the labels necessary to fit a complex classifier on H directly. In turn, for H to be useful,
+t t
+theserepresentationsmustexhibitaclearstructure(e.g.clustering)thatreflectstheclasses. This
+assumptioncanleadtodiagnosticsthatdetermineifweshouldperformCTTAornot,aswewillsee
+intheexperiments.
+3.2 AProbabilisticModelofShiftDynamics
+We now describe our general method for adaptive last-layer parameters. We assume that, while
+the representations H are changing over time, they are still maintaining some class structure in
+t
+the form of clusters. Our model will seek to track this structure as it evolves over time. Using
+latentvariablesw ,wewillassumeeachrepresentationisdrawnconditionedonK latentvectors:
+t,k
+h ∼ p(h |w ,...,w ), where K is equal to the number of classes in the prediction task.
+t,n t t,1 t,K
+Afterfittingtheunsupervisedmodel,theK latentvectorswillbestackedtocreateW ,thelast-layer
+t
+weightsoftheadaptedpredictivemodel(asintroducedin3.1). Fortheintuitionoftheapproach,
+seeFigure1a. Thebluered,andgreenclustersrepresentclassesofaclassificationproblem. Asthe
+distributionshiftsfromtimestept=1tot=3,theclassclustersshiftinrepresentationspace. Our
+SSMaimstotrackthismovementsothatclassificationperformancecanstillbepreserved. Wenow
+moveontoatechnicaldescription.
+NotationandVariables LetH
+t
+=(h t,1,...,h t,Nt)∈RD×Nt denotetheneuralrepresentations
+forN datapointsattesttimet. LetW =(w ,...,w )∈RD×K denotetheK weightvectors
+t t t,1 t,K
+attesttimet. Asdiscussedabove,theweightvectorw canbethoughtofasalatentprototype
+t,k
+forclasskattimet. WedenotewithC
+t
+=(c t,1,...,c t,Nt)∈{0,1}K×Nt theN tone-hotencoded
+latentclassassignmentvectorsc ∈{0,1}K attimet. Thek-thpositionofc isdenotedwith
+t,n t,n
+c andis1ifh belongstoclasskand0otherwise. Likeinstandard(static)mixturemodels[5],
+t,n,k t,n
+thepriorofthelatentclassassignmentsp(c )isacategoricaldistribution,p(c )=Cat(π )with
+t,n t,n t
+π =(π ,...,π )∈[0,1]K and(cid:80)K π =1. Themixingcoefficientπ givestheapriori
+t t,1 t,K k=1 t,k t,k
+probabilityofclasskattimetandcanbeinterpretedastheclassproportions.
+DynamicsModel WemodeltheevolutionoftheK prototypesW =(w ,...,w )withK
+t t,1 t,K
+independentMarkovprocesses. Theresultingtransitionmodelisthen:
+K
+(cid:89)
+Transitionmodel: p(W |W ,ψtrans)= p(w |w ,ψtrans), (1)
+t t−1 t,k t−1,k
+k=1
+3whereψtrans denotetheparametersofthetransitiondensity,notablythetransitionnoise. Ateach
+timestep,thefeaturevectorsH aregeneratedbyamixturedistributionovertheK classes,
+t
+(cid:89)Nt (cid:88)K
+Emissionmodel: p(H |W ,ψems)= π ·p(h |w ,ψems). (2)
+t t t,k t,n t,k
+n=1k=1
+whereψemsaretheemissionparameters. Wethusassumeateachtimestepastandardmixturemodel
+overtheK classeswheretheclassprototypew definesthelatentclasscenterandπ themixture
+t,k t,k
+weightforclassk. Thejointdistributionofrepresentations,prototypesandclassassignmentscanbe
+factorisedasfollows,
+T T
+(cid:89) (cid:89)
+p(H ,W ,C )=p(W ) p(C )p(H |W ,C ,ψems) p(W |W ,ψtrans) (3)
+1:T 1:T 1:T 1 t t t t t t−1
+t=1 t=2
+(cid:89)K (cid:89)T (cid:89)Nt (cid:89)K (cid:89)T (cid:89)K
+= p(w 1,k) p(c t,n) p(h t,n|w t,k,ψems)ct,n,k p(w t,k|w t−1,k,ψtrans). (4)
+k t=1n=1 k=1 t=2k=1
+We use the notation H = {H }T to denote the representation vectors H for all time steps
+1:T t t=1 t
+T andanalogouslyforW andC . Themodel’splatediagramisdepictedinFigure1b. The
+1:T 1:T
+representationH aretheobservedvariablesandaredeterminedbythelatentclassprototypes
+1:T
+W andthelatentclassassignmentsC .
+1:T 1:T
+PosteriorInference&AdaptedPredictions Theprimarygoalistoupdatetheclassprototypes
+W withtheinformationobtainedbytheN representationsoftesttimet. Ateachtesttimet,we
+t t
+arethusinterestedintheposteriordistributionoftheprototypesp(W |H ). Oncep(W |H )is
+t 1:t t 1:t
+known,wecanupdatetheclassificationweightswiththenewposteriormean. TheclassweightsW
+t
+andclassassignmentsC canbeinferredusingtheExpectation-Maximization(EM)algorithm. Inthe
+t
+E-step,wecomputep(W C |H ). IntheM-Step,wemaximizetheexpectedcomplete-data
+1:T 1:T 1:T
+loglikelihoodwithrespecttothemodelparameters:
+ϕ∗ = argmax E (cid:2) logp(H ,W ,C )(cid:3) , (5)
+p(W,C|H) 1:T 1:T 1:T
+ϕ
+whereϕdenotestheparametersofthetransitionandemissiondensityaswellasthemixingcoef-
+ficients,ϕ={ψtrans,ψems,π }. Afteroneoptimizationstep,wecollecttheK classprototypes
+1:T
+intoamatrixW . UsingthesamehiddenrepresentationsusedtofitW ,wegeneratethepredictions
+t t
+usingtheoriginalpredictivemodel’ssoftmaxparameterization:
+(cid:0) (cid:1)
+y ∼ Cat y ; softmax(W h ) (6)
+t,n t,n t t,n
+wherey denotesapredictionsampledfortherepresentationvectorh . Notethatadaptationcan
+t,n t,n
+beperformedinanonlinefashionbyoptimizingEquation(5)incrementallyconsideringpointsupto
+pointt. Toomitcomputingthecomplete-dataloglikelihoodforanincreasingsequenceastimegoes
+on,weemployaslidingwindowapproach.
+GaussianModel ThesimplestparametricformforthetransitionandemissionsmodelsisGaussian.
+Inthiscase, thetransitionnoisefollowsamultivariateGaussiandistributionwithzeromeanand
+globalcovarianceΣtrans ∈ RD×D. TheresultingmodelcanbeseenasamixtureofK Kalman
+filters(KFs). Forposteriorinference,thankstothelinearityandGaussianassumptions,theposterior
+expectationE [·]inEquation(5)canbecomputedanalyticallyusingthewellknownKF
+p(W,C|H)
+predict,updateandsmoothingequations[6,5]. However,theclosed-formcomputationscomeata
+costastheyinvolvematrixinversionsofdimensionalityD×D. Moreover,theparametersizescales
+K×D2,riskingoverfittingandconsumingsubstantialmemory. ThesearelimitationsoftheGaussian
+formulationmakingitcostlyforhigh-dimensionalfeaturespacesandimpracticalinlowresource
+environmentsrequiringinstantpredictions. Inthenextsection, wediscussamodelforspherical
+featuresthatelegantlycircumventsthelimitationsofafullyparameterizedGaussianformulation.
+43.3 VonMises-FisherModelforHypersphericalFeatures
+Choosing Gaussian densities for the transition and Ht|Ct Ht|Ct
+emission models, as discussed above, assumes the
+representationspacefollowsanEuclideangeometry.
+H hio dw dee nve rer, prp er si eo nr tw atio or nk sh lia es os nho thw en unth itat hya ps esu rsm phin eg reth ree
+-
+Ht+1|Ct+1 wt+1,1wt,1 w wt, t2
++1,2
+Ht+1|Ct+1
+sultsinabetterinductivebiasforOODgeneralization
+wt+2,1 wt+2,2
+[26,2]. Thisisduetothenormsoftherepresenta-
+tions being biased by in-domain information such Ht+2|Ct+2 Ht+2|Ct+2
+as class balance, making angular distances a more
+reliablesignalofclassmembershipinthepresence
+Figure2: STAD-vMF:Representationslieon
+ofdistributionshift[26,2]. Wetooemploythehy-
+theunitsphere. STADadaptstothedistribu-
+persphericalassumptionbynormalizingthehidden
+tionshift–inducedbychangingdemograph-
+representationssuchthat||h|| =1andmodelthem
+2 ics and styles – by directing the last layer
+withthevonMises-Fisher(vMF)distribution[25],
+weightsw towardstherepresentationsH
+vMF(h;µ ,κ)=C
+(κ)exp(cid:8) κ·µTh(cid:9)
+(7)
+t,k t
+k D k
+whereµ ∈RD with||µ || =1denotesthemeandirectionofclassk,κ∈R+theconcentration
+k k 2
+parameter,andC (κ)thenormalizationconstant.Highvaluesofκimplylargerconcentrationaround
+D
+µ . ThevMFdistributionisproportionaltoaGaussiandistributionwithisotropicvarianceandunit
+k
+norm. Whilepreviouswork[26,27,2]hasmainlyexploredtrainingobjectivestoencouragelatent
+representationstobevMF-distributed,weapplyEquation(7)tomodeltheevolvingrepresentations.
+HypersphericalState-SpaceModel ReturningtotheSSMgivenabove,wespecifybothtransition
+andemissionmodelsasvMFdistributions,
+K
+(cid:89)
+Hypersphericaltransitionmodel: p(W |W )= vMF(w |w ,κtrans) (8)
+t t−1 t,k t−1,k
+k=1
+(cid:89)Nt (cid:88)K
+Hypersphericalemissionmodel: p(H |W )= π vMF(h |w ,κems) (9)
+t t t,k t,n t,k
+n=1k=1
+The parameter size of the vMF formulation only scales linearly with the feature dimension, i.e.
+O(DK)insteadofO(D2K)asfortheGaussiancase. Thenoiseparameters,κtrans,κemsarescalar
+values, and we shall use the reduced parameter size to experiment with class conditioned noise
+parametersκtrans,κems,k =1,...,K inSection5. Figure2illustratesthisSTAD-vMFvariant.
+k k
+PosteriorInference UnlikeinthelinearGaussiancase,thevMFdistributionisnotclosedunder
+marginalization. Consequentially, theposteriordistributionrequiredfortheexpectationinEqua-
+tion (5), p(W C |H ), cannot be obtained in closed form. We employ a variational EM
+1:T 1:T 1:T
+objective,approximatingtheposteriorwithmean-fieldvariationalinference,followingGopaland
+Yang[16]:
+q(w )=vMF(·;ρ ,γ ) q(c )=Cat(·;λ ) ∀t,n,k. (10)
+t,k t,k t,k n,t n,t
+The variational distribution q(W,C) factorizes over n,t,k and the objective from Equation (5)
+becomesargmax E (cid:2) logp(H ,W ,C )(cid:3) . Moredetailsaswellasthefullmaximisa-
+ϕ q(W,C) 1:T 1:T 1:T
+tionstepsforϕ = {κtrans,κems,{π }T }K }canbefoundinAppendixB.Notably,posterior
+t,k t=1 k=1
+inferenceforthismodelismuchmorescalablethantheGaussiancase,havingoperationsthatare
+linearinthedimensionalityratherthancubic.
+RecoveringtheSoftmaxPredictiveDistribution Inadditiontotheinductivebiasthatisbeneficial
+underdistributionshift,usingthevMFdistributionhasanadditionaldesirableproperty: classification
+via the cluster assignments is equivalent to the original softmax-parameterized classifier. The
+equivalenceisexactundertheassumptionofequalclassproportionsandsharingκacrossclasses:
+vMF(h ;w ,κems)
+p(c =1|h ,w ,...,w ,κems) = t,n t,k
+t,n,k t,n t,1 t,K (cid:80)K vMF(h ;w ,κems)
+j=1 t,n t,j
+(cid:110) (cid:111) (11)
+C (κems)exp κems·wT h
+= D t,k t,n = softmax(cid:0) κems·WTh (cid:1) ,
+(cid:80)K C (κems)exp(cid:8) κems·wT h (cid:9) t t,n
+j=1 D t,j t,n
+5which is equivalent to a softmax with temperature-scaled logits, with the temperature set
+to 1/κems. Temperature scaling only affects the probabilities, not the modal class predic-
+tion. If using class-specific κems values and assuming imbalanced classes, then these terms
+show up as class-specific bias terms: p(c = 1|h ,w ,...,w ,κems,...,κems) ∝
+t,n,k t,n t,1 t,K 1 K
+(cid:110) (cid:111)
+exp κems·wT h +logC (κems)+logπ where C (κems) is the vMF’s normalization
+k t,k t,n D k t,k D k
+constantandπ isthemixingweight.
+t,k
+4 RelatedWork
+FilteringforDeepLearning Traditionalfilteringmodels,andtheKalmanfilter[19]inparticular,
+have recently found use in deep learning as a principled way of updating a latent state with new
+information. Insequencemodelling,filter-basedarchitecturesareusedtolearnthelatentstateof
+anobservationtrajectoryinbothdiscrete[23,20,13,4]andcontinuoustime[33,1,43]. However,
+here, the filtering model mimics the dynamics of individual observation sequences while we are
+interestedinmodelingthedynamicsofthedatastreamasawhole. Changetal.[7]andTitsiasetal.
+[36]employKalmanfiltersinasupervisedonlinelearningsettingtoupdateneuralnetworkweights
+toanon-stationarydatastream. Likeourmethod,Titsiasetal.[36]inferstheevolutionofthelinear
+classificationhead. However, [7,36]relyonlabelstoupdatethelatentstateoftheweightsafter
+prediction. Incontrast,ourweightadaptationisentirelylabel-free.
+Test-TimeAdaptation Maintainingreliablepredictionsunderdistributionshiftattesttimehas
+drivenseveralresearchdirectionssuchascontinuallearning[10]anddomainadaptation[30,39].Our
+settingfallsintotest-timeadaptation,wherethegoalistoadaptthesource-trainedmodelgivenonly
+accesstotheunlabeledtargetdata[24,41]. Asimpleyeteffectiveapproachistokeepupdatingthe
+batchnormalization(BN)statisticsattesttime[34,28]. Basedonthisinsight,acommonstrategyis
+tolearntheparametersoftheBNlayerduringtesttime[34,28,37,15,29,31]. Forinstance,TENT
+[37]learnstheBNparametersbyminimizingentropyonthepredictedtargetlabels. Avariationof
+thesettingariseswhenthetestdistributionitselfchangesovertime,amorerealisticscenariostudied
+bycontinualtest-timeadaptation. Themainchallengeinthisparadigmistoensureadaptabilitywhile
+preventingcatastrophicforgettingofthesourcedistribution. Tomitigatethistradeoff,strategies
+involveepisodicresettingtothesourceparameters[38,31]ortestsampleselection[29]. Nonetheless,
+ithasbeenobservedthatmanystrategiesstillexperienceperformancedegradationafterextended
+periodsofadaptation[29,15,38,31].
+5 Experiments
+OurexperimentalgoalistodemonstratethatSTADeffectivelymodelsnaturaltemporaldriftsin
+thetest-timecovariates. ThisdistinguishesourworkfrompreviousCTTAmethods,whichfocus
+ondomainshiftsorshiftsinducedbycorruptionnoisebutdonotconsidernaturalevolutionoftime.
+Precisely,oursettingofinterestcomprises(1)real-worldshiftsthat(2)occurgraduallyovertime
+and(3)leadtoperformancedecay. Thoughubiquitousinpractice,systematicevaluationprocedures
+forsuchdriftshaveonlybeenconsideredfairlyrecently[40]. Weusetheevaluationprotocolofthe
+Wild-Timebenchmarksuite[40]toassesstheadaptationperformanceofourmodelinthissetting. In
+Section5.1,wedemonstratethatourmethodexcelsonnaturaltemporaldriftsyieldingsignificant
+performance improvements in settings in which existing CTTA methods collapse. We show the
+importanceofexplicitlymodelingshiftdynamicsviaanablationstudyinSection5.2. Finally,in
+Section5.3,weinvestigatelimitationsofourmodelandshowhowtodiagnosefailuresaheadoftime.
+Datasets We consider two image classification datasets exposed to natural temporal drifts. In
+additiontoourmainsettingofinterest,wealsopresentresultsonaclassiccorruptiondataset.
+• Yearbook[14]: adatasetofportraitsofAmericanhighschoolstudentstakenacrosseightdecades.
+Datashiftinthestudents’visualappearanceisintroducedbychangingbeautystandards,group
+norms, and demographic changes. We use the Wild-Time [40] pre-processing and evaluation
+procedureresultinginto33,431imagesfrom1930to2013. Each32×32pixel,grey-scaledimage
+isassociatedwiththestudent’sgenderasabinarytargetlabel. Imagesfrom1930to1969areused
+fortraining;theremainingyearsfrom1970to2013fortesting.
+6• FMoW-Time: the functional map of the world (FMoW) dataset [22] maps 224 × 224 RGB
+satelliteimagestooneof62landusecategories. Distributionshiftisintroducedbytechnical
+advancementandeconomicgrowthchanginghowhumansmakeuseoflandovertime. FMoW-
+Time[40]isanadaptationfromFMoW-WILDS[22,8]thatsplitsatotalof141,696imagesintoa
+trainingtimeperiod(2002-2012)andatestingtimeperiod(2013-2017).
+• CIFAR-10-C:adatasetderivedfromCIFAR-10,towhich15corruption/noisetypesareapplied
+with 5 severity levels to introduce gradual distribution shift [17]. We increase the corruption
+severity starting from the lowest level (severity 1) to the most sever corruption (severity 5).
+This results in a test stream of 5×10,000 images for each corruption type. Since our goal
+ismimickinggradualdistributionshifts,wearenotinterestedinswitchingbetweenimagesof
+differentcorruptiontypes,aspreviousworkhasdone[38,37].
+SourceArchitectures Weuseavarietyofsourcearchitecturestodemonstratethemodel-agnostic
+natureofourmethod. Theyvaryinparametercounts,backbonearchitectureanddimensionalityof
+therepresentationspace.
+• CNN:Weemploythefour-blockconvolutionalneuralnetworktrainedby[40]toperformthe
+binary gender prediction on the yearbook dataset. Presented results are averages over three
+differentrandomtrainingseeds. Thedimensionofthelatentrepresentationspaceis32.
+• DenseNet: ForFMoW-Time,wefollowthebackbonechoiceof[22,40]anduseDenseNet121
+[18]forthelanduseclassificationtask. Weightsforthreerandomtrainingsseedsareprovidedby
+[40]. Thelatentrepresentationdimensionis1024.
+• WideResNet: For the CIFAR-10 experiment, we follow [35, 37] and use the pre-trained
+WideResNet-28[42]modelfromtheRobustBenchbenchmark[9]. Thelatentrepresentationhave
+adimensionof512.
+Baselines Despitethesourcemodel,wecompareagainstthreebaselinessuitableforanunsuper-
+vised,continuously-changingteststream. Thesebaselinescoverthemostdominantparadigmsin
+CTTA:adaptingnormalizationstatistics,entropyminimizationandanti-collapsemechanics.
+• SourceModel: theun-adaptedoriginalmodel.
+• BatchNorm(BN)Adaptation[34,28]: aimstoadaptthesourcemodeltodistributionsshiftby
+collectingnormalizationstatistics(meanandvariance)ofthetestdata.
+• TestEntropyMinimization(TENT)[37]: goesonestepfurtherandoptimizestheBNtransfor-
+mationparameters(scaleandshift)byminimizingentropyontestpredictions.
+• ContinualTest-TimeAdaptation(CoTTA)[38]: takesadifferentapproachbyoptimizingall
+modelparameterswithanentropyobjectiveonaugmentationaveragedpredictionsandcombines
+itwithstochasticweightrestoretopreventcatastrophicforgetting.
+5.1 NaturalTemporalDistributionDrifts
+We start by evaluating the adaptation abilities of Table1: AccuracyonWild-Timebenchmarks
+STADtonaturaltemporaldriftsontwoimageclas- averagedoverthreerandomtrainingseeds
+sificationdatasetsoftheWild-Timebenchmark[40].
+While only a binary problem, the Yearbook task Methods Yearbook FMoW-Time
+is difficult as the images are low-resolution (32- SourceModel 81.30±4.18 68.94±0.20
+dimensional feature space). FMoW-Time presents BatchNorm(BN) 84.54±2.10 10.14±0.04
+anevenmorechallengingsetting: 62classes,high- TENT 84.53±2.11 10.21±0.01
+resolutionimages,1024-dimensionalfeaturespace. CoTTA 84.35±2.13 10.19±0.04
+For Yearbook, we report both the vMF and Gaus- STAD-vMF 85.50±1.30 86.25±1.18
+sian STAD variants. For FMoW-Time, the high- STAD-vMF+BN 86.20±1.23 9.26±1.97
+STAD-Gaussian 86.22±0.84 –
+dimensionalrepresentationspacemakestheGaussian
+STAD-Gaussian+BN 86.56±1.08 –
+modeltoocomputationallycostlysoweevaluatejust
+thevMFversion. ForYearbookwereportresultsforabatchsizeof2048comprisingallimagesofa
+yearinonebatch;forFMoW,were-usethetrainingbatchsizeof64.
+STADreliablyadaptstonaturalshiftsovertime Table1showsoverallaccuracy,averagedover
+alltimestepsandthreerandomseeds. Ourmethodsbestadapttothenaturaltemporalshiftpresentin
+bothdatasets,improvinguponthesourcemodelinbothcases. Strikingly,traditionalCTTAmethods
+7Figure3: AdaptationperformanceonWild-Timebenchmarks: Firstcolumn: Accuracyfordifferent
+batch sizes. STAD is more robust to small batch sizes compared to baselines. Right column:
+Adaptationaccuracyoverdifferenttesttimepoints. STADreliablyadaptstothedistributionshifts.
+Baselinesperformsimilarly,whichisdepictedbyoverlayingaccuracytrajectories.
+collapseonFMoW-Time,fallingwellbelowthesourceaccuracybyover58percentagepoints. On
+theotherhand, vMFadaptationgainsover17percentagepointsonthesourcemodel. Thisisan
+example of when adapting a powerful feature extractor such as the DenseNet [18] pretrained on
+ImageNet[11]canleadtocatastrophicforgetting. OnYearbook,bothGaussianandvMFoutperform
+baselineswiththefullyparameterizedGaussianmodelexpectedlymodelingthedistributionshift
+betterthanthelight-weightvMFmodel. Wealsotestourlastlayeradaptationincombinationwith
+BNwhichmodifiesthefeatureextractor. Thisadditionally,yieldsamarginalperformanceincreaseof
+<1%pointonYearbook. Figure3(right)displaysadaptationperformanceoverdifferenttimestamps.
+STADexcelsonsmallbatchsizes Previouswork[24,41,28]hasobservedthattest-timeadaptation
+methods are quite sensitive to the size of the test batch. To assess the impact of batch sizes, we
+alsoperformadaptationonYearbookandFMoWusingsmallerbatchsizevalues. Figure3shows
+accuracyasafunctionoftestbatchsize. LeveragingBayesianprinciples,STADisextremelyrobust
+tothetestbatchsize,improvinguponthesourcemodelacrossalmostallbatchsizes. Incontrast,BN,
+TENTandCoTTAharmthesourcemodelwhenbatchsizesaresmallerthan512onYearbookand
+failtoimproveentirelyforFMoW.Adaptinginsmall-sampleenvironmentsisparticularlycrucialin
+continualdomainadaptationwhenthetaskrequiresthatpredictionsbemadequickly. Wealsofind
+thatSTADismorerobusttoclassimbalance(AppendixD.1)andstudyruntimeinAppendixD.2.
+5.2 AblationStudy: Howimportantismodelingthedynamics?
+WenextinvestigatetheimportanceofSTAD’s Table2: Differenceinaccuracybetweendynamic
+temporalcomponent. STADisproposedwith andstaticversionsofSTAD(i.e.whenremoving
+the assumption that adapting the class proto- thetransitionmodel). Performancedropssubstan-
+typesbasedonthoseoftheprevioustimestepfa- tiallywhendynamicsareremovedfromthemodel.
+cilitatesbothrapidandreliableadaptation.How-
+ever, one could also consider a static version Variant Yearbook FMoW CIFAR-10-C
+ofSTADthatdoesnothaveatransitionmodel STAD-vMFw/odynamics –24.47 –17.38 –3.41
+STAD-Gaussianw/odynamics –28.43 – –
+(Equation(1)). Rather,theclassprototypesare
+computedasastandardmixturemodel(Equation(2))andwithoutconsideringpreviouslyinferredpro-
+totypes. Table2presentstheaccuracydifferencesbetweenthestaticanddynamicversionsofSTAD
+inpercentagepoints. RemovingSTAD’stransitionmodelresultsinasubstantialperformancedrop
+ofupto28percentagepoints. Thissupportsourassumptionthatstate-spacemodelsarewell-suited
+forthetaskofcontinualadaptation.
+5.3 Limitation: Representationsareabottleneck
+WenextturntotheCIFAR-10-Cdataset,whichisthemostcommonlyusedbenchmarkintheCTTA
+literature. Table 3 displays adaptation accuracy. STAD improves upon the source model for all
+8Figure4: AnalysisofclusterstructureonCIFAR-10-C:Left: Dispersion(angulardegrees)decreases
+withcorruptionseverity,causingthegroundtruthclustercenterstobecomemoresimilar.Middle:The
+angulardistancetothegroundtruthclustercentersissmallerforSTADcomparedtothesourcemodel.
+Right: DispersionofinferredprototypescanpredictwhenadaptationwithSTADisdiscouraged.
+severitylevels,butdoesnotoutperformTENTorCoTTA.Wesuspectthisreversalinperformance
+(i.e.STADperformingbetterthanbaselinesonnaturalbutworseonsyntheticshifts)isrelatedto
+thequalityofthesourcemodel’srepresentations. Recallthat,unlikeTENT,CoTTAorBN,STAD
+adaptsonlythemodel’slastlayer. WhilethishasbenefitsforSTAD’swideapplicability,itisalsoa
+limitationinthatSTADcanonlybeasgoodasthelast-layerrepresentationsallow.
+To investigate representation quality as the Table 3: Accuracy on CIFAR-10-C for different
+cause for this performance drop, we em- severitylevelsaveragedoverallcorruptiontypes
+ploy the dispersion metric [27] developed
+for hyperspherical features: dis(W ) = Corruptionseverity
+t
+1 (cid:80)K 1 (cid:80)K wT w , where w de- Method 1 2 3 4 5 Mean
+K k=1 K−1 l̸=k t,k t,l t,k Source 86.90 81.34 74.92 67.64 56.48 73.46
+notestheclassprototypes. Dispersionmeasures
+BN 90.18 88.16 86.24 83.18 79.27 85.41
+howfarapartprototypesofdifferentclassesare. TENT 90.87 89.70 88.32 85.89 83.09 87.57
+CoTTA 90.62 89.42 88.55 87.28 85.27 88.23
+Highdispersionvalues(inangulardegrees)in-
+STAD-vMF 88.21 83.68 78.42 72.19 62.44 76.99
+dicate prototypes point in different directions
+STAD-vMF+BN 90.16 88.11 86.24 83.17 79.33 85.40
+and thus are desirable. Figure 4 (left) shows
+dispersiononCIFAR-10-C.Ascorruptionseverityincreases(x-axis),thedispersionofSTAD’srepre-
+sentations(blueline)decreases. However,thisisnotduetoanymis-estimationproblemwithSTAD
+asthegroundtruthrepresentations(yellowline)—computedusingthetruetestlabels—alsodecrease
+inquality. InFigure4(middle),weconfirmthatSTADisappropriatelyadaptingbymeasuringthe
+angulardistancetotheground-truthrepresentations. STAD(blueline)issubstantiallyclosertothe
+groundtruththanthesourcemodel(grayline)is,showingthatSTADwelltrackstheclassprototypes
+astheyevolve.
+Dispersionmeasuresthequalityofrepresentation,makingitapotentialdiagnostictool. Ifdispersion
+ishigh,STADisallthatisneededforgoodperformance. Ifdispersionislow,afull-modeladaptation
+strategysuchasBNisrequired. InFigure4(right),weplotaccuracyvsdispersion,showingthatthey
+positivelycorrelate. Thisenablesreal-timesignalingofinsufficientrepresentationquality,alerting
+theusertopotentialadaptationriskswithouttheneedforlabels. Recognizingwhenadaptationfails
+isofcriticalimportanceinpractice. RecentworkhasshownthatmostCTTAmethodseventually
+collapse[31,32],butunderstandingwhyandwhenthisphasetransitionoccursisanopenproblem.
+6 Conclusion
+Wehavepresentedanoveltest-timeadaptationstrategy,State-spaceTest-timeADaptation(STAD),
+basedonaprobabilisticstate-spacemodel. BothourGaussianandvMFvariantsofSTADtrackhow
+thelast-layerevolvesunderdistributionshift,allowingadeployedmodeltoperformunsupervised
+adaptationtotheshift. Ourframeworkoutperformsstate-of-the-artcompetitorssuchasTENTand
+CoTTAonWild-Timebenchmarks. Yetwealsoidentifypointsofimprovement,aswefoundthat
+randomcorruptionsappliedtoCIFAR-10degradedtherepresentationstoadegreethatourmethod
+couldbecompetitivewithbutnotoutperformthesebaselinesadaptingthemodelbackbone. For
+futurework,wewillstudydiagnosticsthatreliablyidentifywhenthelast-layerrepresentationsare
+suitable,moreintensiveadaptationisneededorifadaptationispossibleatall.Wewillalsoinvestigate
+non-linearmodelsofshiftdynamics.
+9AcknowledgmentsandDisclosureofFunding
+WethankMetodJazbecandRajeevVermaforhelpfuldiscussionsandfeedbackonthedraft. This
+projectwasgenerouslysupportedbytheBoschCenterforArtificialIntelligence. NoJohnsHopkins
+Universityresourceswereusedtoconductthisresearch.
+References
+[1] A.F.Ansari, A.Heng, A.Lim, andH.Soh. Neuralcontinuous-discretestatespacemodels
+forirregularly-sampledtimeseries. InInternationalConferenceonMachineLearning,pages
+926–951.PMLR,2023. 6
+[2] H.Bai,Y.Ming,J.Katz-Samuels,andY.Li. Hypo: Hypersphericalout-of-distributiongeneral-
+ization. InternationalConferenceonLearningRepresentations,2024. 5
+[3] A.Banerjee,I.S.Dhillon,J.Ghosh,S.Sra,andG.Ridgeway.Clusteringontheunithypersphere
+usingvonmises-fisherdistributions. JournalofMachineLearningResearch,6(9),2005. 15
+[4] P.Becker,H.Pandya,G.Gebhardt,C.Zhao,C.J.Taylor,andG.Neumann. Recurrentkalman
+networks: Factorized inference in high-dimensional deep feature spaces. In International
+ConferenceonMachineLearning,pages544–552.PMLR,2019. 6
+[5] C. M. Bishop and N. M. Nasrabadi. Pattern recognition and machine learning, volume 4.
+Springer,2006. 3,4,13
+[6] A.CalabreseandL.Paninski. Kalmanfiltermixturemodelforspikesortingofnon-stationary
+data. Journalofneurosciencemethods,196(1):159–169,2011. 4,13
+[7] P.G.Chang,G.Durán-Martín,A.Shestopaloff,M.Jones,andK.P.Murphy.Low-rankextended
+kalmanfilteringforonlinelearningofneuralnetworksfromstreamingdata. InProceedingsof
+The2ndConferenceonLifelongLearningAgents,volume232,pages1025–1071.PMLR,2023.
+6
+[8] G. Christie, N. Fendley, J. Wilson, and R. Mukherjee. Functional map of the world. In
+ProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pages
+6172–6180,2018. 7
+[9] F.Croce,M.Andriushchenko,V.Sehwag,E.Debenedetti,N.Flammarion,M.Chiang,P.Mittal,
+andM.Hein. Robustbench: astandardizedadversarialrobustnessbenchmark. InProceedings
+oftheNeuralInformationProcessingSystemsTrackonDatasetsandBenchmarks1,2021. 7,
+16
+[10] M. De Lange, R. Aljundi, M. Masana, S. Parisot, X. Jia, A. Leonardis, G. Slabaugh, and
+T.Tuytelaars. Acontinuallearningsurvey: Defyingforgettinginclassificationtasks. IEEE
+TransactionsonPatternAnalysisandMachineIntelligence,44(7):3366–3385,2021. 6
+[11] J.Deng,W.Dong,R.Socher,L.-J.Li,K.Li,andL.Fei-Fei.Imagenet:Alarge-scalehierarchical
+image database. In Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition,pages248–255,2009. 8
+[12] M. Döbler, R. A. Marsden, and B. Yang. Robust mean teacher for continual and gradual
+test-timeadaptation. InProceedingsoftheIEEE/CVFConferenceonComputerVisionand
+PatternRecognition,pages7704–7714,2023. 2
+[13] M.Fraccaro,S.D.Kamronn,U.Paquet,andO.Winther. Adisentangledrecognitionandnon-
+lineardynamicsmodelforunsupervisedlearning. AdvancesinNeuralInformationProcessing
+Systems,2017. 6
+[14] S.Ginosar, K.Rakelly, S.Sachs, B.Yin, andA.A.Efros. Acenturyofportraits: Avisual
+historicalrecordofamericanhighschoolyearbooks. InProceedingsoftheIEEEInternational
+ConferenceonComputerVisionWorkshops,pages1–7,2015. 6
+[15] T.Gong,J.Jeong,T.Kim,Y.Kim,J.Shin,andS.-J.Lee. Note: Robustcontinualtest-time
+adaptationagainsttemporalcorrelation. AdvancesinNeuralInformationProcessingSystems,
+2022. 2,6
+[16] S.GopalandY.Yang. Vonmises-fisherclusteringmodels. InInternationalConferenceon
+MachineLearning,pages154–162.PMLR,2014. 5,16
+10[17] D. Hendrycks and T. Dietterich. Benchmarking neural network robustness to common cor-
+ruptions and perturbations. International Conference on Learning Representations, 2019.
+7
+[18] G.Huang,Z.Liu,L.VanDerMaaten,andK.Q.Weinberger. Denselyconnectedconvolutional
+networks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition,pages4700–4708,2017. 7,8
+[19] R.E.Kalman. Anewapproachtolinearfilteringandpredictionproblems. 1960. 6
+[20] M.Karl,M.Soelch,J.Bayer,andP.vanderSmagt. Deepvariationalbayesfilters: Unsuper-
+vised learning of state space models from raw data. International Conference on Learning
+Representations,2017. 6
+[21] D.P.KingmaandJ.Ba. Adam:Amethodforstochasticoptimization. InternationalConference
+onLearningRepresentations,2015. 16
+[22] P.W.Koh,S.Sagawa,H.Marklund,S.M.Xie,M.Zhang,A.Balsubramani,W.Hu,M.Ya-
+sunaga,R.L.Phillips,I.Gao,etal. Wilds: Abenchmarkofin-the-wilddistributionshifts. In
+InternationalConferenceonMachineLearning,pages5637–5664.PMLR,2021. 7
+[23] R. G. Krishnan, U. Shalit, and D. Sontag. Deep kalman filters. arXiv preprint
+(arXiv:1511.05121),2015. 6
+[24] J.Liang,R.He,andT.Tan. Acomprehensivesurveyontest-timeadaptationunderdistribution
+shifts. arXivpreprint(arXiv:2303.15361),2023. 6,8
+[25] K.V.MardiaandP.E.Jupp. Directionalstatistics. JohnWiley&Sons,2009. 5
+[26] P. Mettes, E. Van der Pol, and C. Snoek. Hyperspherical prototype networks. Advances in
+NeuralInformationProcessingSystems,2019. 5
+[27] Y. Ming, Y. Sun, O. Dia, and Y. Li. How to exploit hyperspherical embeddings for out-of-
+distributiondetection? InternationalConferenceonLearningRepresentations,2023. 5,9
+[28] Z.Nado, S.Padhy, D.Sculley, A.D’Amour, B.Lakshminarayanan, andJ.Snoek. Evaluat-
+ingprediction-timebatchnormalizationforrobustnessundercovariateshift. arXivpreprint
+(arXiv:2006.10963),2020. 6,7,8,16
+[29] S.Niu,J.Wu,Y.Zhang,Y.Chen,S.Zheng,P.Zhao,andM.Tan. Efficienttest-timemodel
+adaptationwithoutforgetting. InInternationalConferenceonMachineLearning,pages16888–
+16905.PMLR,2022. 2,6
+[30] V.M.Patel,R.Gopalan,R.Li,andR.Chellappa. Visualdomainadaptation: Asurveyofrecent
+advances. IEEEsignalprocessingmagazine,32(3):53–69,2015. 6
+[31] O.Press,S.Schneider,M.Kümmerer,andM.Bethge.Rdumb:Asimpleapproachthatquestions
+ourprogressincontinualtest-timeadaptation. AdvancesinNeuralInformationProcessing
+Systems,2024. 2,6,9
+[32] O.Press,R.Shwartz-Ziv,Y.LeCun,andM.Bethge. Theentropyenigma: Successandfailure
+ofentropyminimization. arXivpreprint(arXiv:2405.05012),2024. 9
+[33] M. Schirmer, M. Eltayeb, S. Lessmann, and M. Rudolph. Modeling irregular time series
+with continuous recurrent units. In International Conference on Machine Learning, pages
+19388–19405.PMLR,2022. 6
+[34] S. Schneider, E. Rusak, L. Eck, O. Bringmann, W. Brendel, and M. Bethge. Improving
+robustness against common corruptions by covariate shift adaptation. Advances in Neural
+InformationProcessingSystems,2020. 6,7,16
+[35] J. Song, J. Lee, I. S. Kweon, and S. Choi. Ecotta: Memory-efficient continual test-time
+adaptationviaself-distilledregularization. InProceedingsoftheIEEE/CVFConferenceon
+ComputerVisionandPatternRecognition,pages11920–11929,2023. 2,7
+[36] M.K.Titsias,A.Galashov,A.Rannen-Triki,R.Pascanu,Y.W.Teh,andJ.Bornschein. Kalman
+filterforonlineclassificationofnon-stationarydata. arxivpreprint(arXiv:2306.08448),2023. 6
+[37] D.Wang,E.Shelhamer,S.Liu,B.A.Olshausen,andT.Darrell. Tent:Fullytest-timeadaptation
+byentropyminimization. InternationalConferenceonLearningRepresentations,2021. 1,2,6,
+7,16
+11[38] Q. Wang, O. Fink, L. Van Gool, and D. Dai. Continual test-time domain adaptation. In
+ProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pages
+7201–7211,2022. 1,2,6,7,16,17
+[39] G.WilsonandD.J.Cook.Asurveyofunsuperviseddeepdomainadaptation.ACMTransactions
+onIntelligentSystemsandTechnology(TIST),11(5):1–46,2020. 6
+[40] H. Yao, C. Choi, B. Cao, Y. Lee, P. W. W. Koh, and C. Finn. Wild-time: A benchmark of
+in-the-wilddistributionshiftovertime. AdvancesinNeuralInformationProcessingSystems,
+2022. 6,7,16
+[41] Y.Yu,L.Sheng,R.He,andJ.Liang. Benchmarkingtest-timeadaptationagainstdistribution
+shiftsinimageclassification. arXivpreprint(arXiv:2307.03133),2023. 6,8
+[42] S.ZagoruykoandN.Komodakis. Wideresidualnetworks. arXivpreprint(arXiv:1605.07146),
+2016. 7,16
+[43] H.Zhu,C.Balsells-Rodas,andY.Li. Markoviangaussianprocessvariationalautoencoders. In
+InternationalConferenceonMachineLearning,pages42938–42961.PMLR,2023. 6
+12Appendix
+Theappendixisstructuredasfollows:
+• AppendixAprovidesdetailsontheGaussianformulationofSTAD(STAD-Gaussian)stating
+theemployedtransitionandemissionmodel.
+• AppendixBdetailstheinferenceforthevonMises-Fisherformulation(STAD-vMF)listing
+theupdateequationsforthevariationalEMstep.
+• AppendixCcontainsvariousimplementationdetailsregardingourexperimentsonYearbook
+andFMoW(AppendixC.1)andCIFAR-10-C(AppendixC.2).
+• Appendix D shows additional experimental results on adaptation under class imbalance
+(AppendixD.1)andpresentsruntimecomparisons(AppendixD.2).
+A STAD-Gaussian
+WeusealinearGaussiantransitionmodeltodescribetheweightevolutionovertime: Foreachclass
+k,theweightvectorevolvesaccordingtoalineardriftparameterizedbyaclass-specifictransition
+matrixA ∈ RD×D. Thisallowseachclasstohaveindependentdynamics. Thetransitionnoise
+k
+followsamultivariateGaussiandistributionwithzeromeanandglobalcovarianceΣtrans ∈RD×D.
+Thetransitionnoisecovariancematrixisasharedparameteracrossclassesandtimepointstoprevent
+overfittingandkeepparametersizeatbay. Equation(12)statestheGaussiantransitiondensity.
+K
+(cid:89)
+Transitionmodel: p(W |W )= N(w |A w ,Σtrans) (12)
+t t−1 t,k k t−1,k
+k=1
+(cid:89)Nt (cid:88)K
+Emissionmodel: p(H |W )= π N(h |w ,Σems) (13)
+t t t,k t,n t,k
+n=1k=1
+Equation(13)givestheemissionmodeloftheobservedfeaturesH attimet. AsinEquation(2),the
+t
+featuresatagiventimetaregeneratedbyamixturedistributionwithmixingcoefficientπ . The
+t,k
+emissiondensityofeachoftheK componentisamultivariatenormalwiththeweightvectorofclass
+kattimetasmeanandΣems ∈RD×D asclass-independentcovariancematrix. Theresultingmodel
+canbeseenasamixtureofK Kalmanfilters. Variantsofithasfoundapplicationinappliedstatistics
+[6].
+Posteriorinference WeusetheEMobjectiveofEquation(5)tomaximizeforthemodelparameters
+ϕ = {{A ,{π }T }K ,Σtrans,Σems}. ThankstothelinearityandGaussianassumptions,the
+k t,k t=1 k=1
+posterior expectation E [·] in Equation (5) can be computed analytically using the well
+p(W,C|H)
+knownKalmanfilterpredict,updateandsmoothingequations[6,5].
+Complexity The closed form computations of the posterior p(W |H ) and smoothing
+t 1:t
+p(W |H )densitiescomeatacostastheyinvolveamongstothersmatrixinversionsofdimension-
+t 1:T
+alityD×D. Thisresultsinconsiderablecomputationalcostsandcanleadtonumericalinstabilities
+whenfeaturedimensionDislarge. Inaddition,theparametersizescalesK×D2riskingoverfitting
+andconsumingsubstantialmemory. ThesearelimitationsoftheGaussianformulationmakingit
+costlyforhigh-dimensionalfeaturespacesandimpracticalinlowresourceenvironmentsrequiring
+instantpredictions.
+13B InferenceforSTAD-vMF
+Complete-dataloglikelihood UsingthevonMises-Fisherdistributionashypersphericaltransi-
+tion(Equation(8))andemissionmodel(Equation(9)),thelogofthecomplete-datalikelihoodin
+Equation(3)becomes
+K
+(cid:88)
+logp(H ,W ,C )= logp(w ) (14)
+1:T 1:T 1:T 1,k
+k
+(cid:88)T (cid:88)Nt (cid:88)K
++ logp(c )+ c logp(h |w ,κems) (15)
+t,n t,n,k t,n t,k
+t=1n=1 k=1
+T K
+(cid:88)(cid:88)
++ logp(w |w ,κtrans) (16)
+t,k t−1,k
+t=2k=1
+K
+(cid:88)
+= logC (κ )+κ µT w (17)
+D 0,k 0,k 0,k 1,k
+k
++(cid:88)T (cid:88)Nt (cid:88)K
+c (cid:0) logπ +logC (κems)+κemswT h (cid:1)
+n,t,k t,k D t,k t,n
+t=1n=1k=1
+(18)
+T K
+(cid:88)(cid:88)
++ logC (κtrans)+κtranswT w (19)
+D t−1,k t,k
+t=2k=1
+whereκ andµ denotetheparametersofthefirsttimestep. Inpractise,wesetµ tothesource
+0,k 0,k 0,k
+weightsandκ =100(seeAppendixC).
+0,k
+Variational EM objective As described in Section 3.3, we approximate the posterior
+p(W ,C |H )withavariationaldistributionq(W ,C )assumingthefactorisedform
+1:T 1:T 1:T 1:T 1:T
+(cid:89)T (cid:89)K (cid:89)Nt
+q(W ,C )= q(w ) q(c ), (20)
+1:T 1:T t,k n,t
+t=1k=1 n=1
+whereweparameteriseq(w )andq(c )with
+t,k n,t
+q(w )=vMF(·;ρ ,γ ) q(c )=Cat(·;λ ) ∀t,n,k. (21)
+t,k t,k t,k n,t n,t
+WeobtainthevariationalEMobjective
+argmaxE (cid:2) logp(H ,W ,C )(cid:3) , (22)
+q 1:T 1:T 1:T
+ϕ
+whereE isdenotedE toreduceclutter.
+q(W1:T,C1:T) q
+E-step Takingtheexpectationofthecomplete-dataloglikelihood(Equation(14))withrespectto
+thevariationaldistribution(Equation(20))gives
+K
+(cid:88)
+E [logp(H ,W ,C )]= logC (κ )+κ µT E [w ] (23)
+q 1:T 1:T 1:T D 0,k 0,k 0,k q 1,k
+k
++(cid:88)T (cid:88)Nt (cid:88)K
+E [c ](cid:0) logπ +logC (κems)+κemsE [w ]Th (cid:1) (24)
+q n,t,k t,k D q t,k t,n
+t=1n=1k=1
+T K
+(cid:88)(cid:88)
++ logC (κtrans)+κtransE [w ]TE [w ] (25)
+D q t−1,k q t,k
+t=2k=1
+14Solvingforthevariationalparameters,weobtain
+β
+λ = n,t,k with β =π C (κems)exp(κemsE [w ]Th ) (26)
+n,t,k (cid:80)K
+β
+n,t,k t,k D q t,k n,t
+j=1 n,t,j
+κtransE [w ]+κems(cid:80)Nt E [c ]h +κtransE [w ]
+ρ = q t−1,k n=1 q n,t,k n,t q t+1,k (27)
+t,k γ
+t,k
+γ =||ρ || (28)
+t,k t,k
+Theexpectationsaregivenby
+E[c ]=λ (29)
+n,t,k n,t,k
+E[w ]=A (γ )ρ , (30)
+t,k D t,k t,k
+where A (κ) =
+ID/2(κ)
+and I (a) denotes the modified Bessel function of the first kind with
+D ID/2−1(κ) v
+ordervandargumenta.
+M-step Maximizing objective (Equation (22)) with respect to the model parameters ϕ =
+{κtrans,κems,{π }T }K }gives
+t,k t=1 k=1
+(cid:13) (cid:13)
+r¯transD−(r¯trans)3 (cid:13)(cid:80)T (cid:80)K E [w ]TE [w ](cid:13)
+κˆtrans = with r¯trans =(cid:13) t=2 k=1 q t−1,k q t,k (cid:13) (31)
+1−(r¯trans)2 (cid:13) (T −1)×K (cid:13)
+(cid:13) (cid:13)
+(cid:13) (cid:13)
+r¯emsD−(r¯ems)3 (cid:13)(cid:80)T (cid:80)K (cid:80)Nt E [c ]E [w ]Th (cid:13)
+κˆems = with r¯ems =(cid:13) t=2 k=1 n=1 q n,t,k q t,k n,t(cid:13) (32)
+1−(r¯ems)2 (cid:13) (cid:13) (cid:80)T t=1N t (cid:13) (cid:13)
+(cid:80)Nt E[c ]
+π = n=1 n,t,k (33)
+t,k N
+t
+HerewemadeuseoftheapproximationfromBanerjeeetal.[3]tocomputeanestimateforκ,
+r¯D−r¯3
+κˆ = with r¯=A (κˆ). (34)
+1−r¯2 D
+15C ExperimentalDetails
+Wenextlistdetailsontheexperimentalsetupandhyperparameterconfigurations. Allexperiments
+areperformedonNVIDIARTX6000Adawith48GBmemory.
+C.1 YearbookandFMoW
+WefollowtheEval-FixprotocolofWild-TimetoassessadaptationperformanceonYearbookand
+FMoW.InEval-Fix,sourcemodelsaretrainedonafixedtimeperiodandevaluatedonunseen,future
+timepoints.WeusethemodelstrainedbyYaoetal.[40]onthetrainingtimeperiodandevaluatethem
+onthetestperiod.Yaoetal.[40]usesarangeofdifferenttrainingprocedures.Weusethecheckpoints
+forplainempiricalriskminimization. ThreedifferentrandomtrainingseedsareprovidedbyYao
+etal.[40]. Alladaptationmethodsarecontinuouslyrunningwithoutresets. Eachmethodusesone
+optimizationstep(viaentropyminimizationforTENTandCoTTAandExpectation-Maximization
+forSTAD).
+Bythenatureoftest-timeadaptation,choosinghyperparametersisdifficultsinceonecannotassume
+accesstoavalidationsetofthetestdistributioninpractise. Toensurewereporttheoptimalperfor-
+manceofbaselinemodels,weconductagridsearchonthetestsetforrelevanthyperparametersand
+reporttheperformanceofthebestsetting. Thehyperparameterstestedaswellasotherconfigurations
+arelistednext.
+BN [34,28]Normalizationstatisticsduringtest-timeadaptationarearunningestimatesofboththe
+trainingdataandtheincomingteststatistics. Nohyperparameteroptimizationisnecessaryhere.
+TENT [37]LikeinBN,thenormalizationstatisticsarebasedonbothtrainingandtestset. Asin
+Wangetal.[37],weusethesameoptimizersettingsfortest-timeadaptationasusedfortraining,
+exceptforthelearningratethatwefindviagridsearchon{1e−3,1e−4,1e−5,1e−6,1e−7}. Forboth
+yearbookandFMoW,Adamoptimizer[21]isused.
+CoTTA [38]Weusethesameoptimizerasusedduringtraining(Adamoptimizer[21]). Forhyper-
+parameteroptimizationwefollowtheparametersuggestionsbyWangetal.[38]andconductagrid
+searchforthelearningrate({1e−3,1e−4,1e−5,1e−6,1e−7}),EMAfactor({0.99,0.999,0.9999})
+andrestorationfactor({0,0.001,0.01,0.1}). Wefollow[38]bydeterminingtheaugmentationcon-
+fidencethresholdasafunctionofthe5%percentileforthesoftmaxpredictionconfidenceonthe
+sourceimagesfromthesourcemodel. Notethatthisrequiresaccesstothesourcedata.
+STAD-Gaussian Weinitializethemixingcoefficientswithπ = 1∀t,k,thetransitioncovariance
+t,k K
+matrix with Σtrans = 0.01×I and the emission covariance matrix with Σems = 0.5×I. The
+prototypesattimet = 1areinitializedwiththesourceweights. Wefoundanormalizationofthe
+representationstobealsobeneficialforSTAD-Gaussian. Notethatdespitenormalization,thetwo
+modelsarenotequivalent. STAD-Gaussianmodelsthecorrelationbetweendifferentdimensionsof
+therepresentationsandisthereforemoreexpressive,whileSTAD-vMFassumesanisotropicvariance.
+STAD-vMF Weinitializethemixingcoefficientswithπ = 1∀t,kandtheprototypesattime
+t,k K
+t=1withthesourceweights. Foryearbook,weemployclassspecificnoiseparametersinitialized
+withκtrans =100andκems =100. ForFMoW,wefoundamorerestrictedtransitionnoisemodel
+k k
+beneficial. WefollowsuggestionsbyGopalandYang[16]tokeepnoiseconcentrationparameters
+fixedinsteadoflearningthemviamaximumlikelihoodinordertomaintainaregularizationterm.
+Thenoiseparametersremainκtrans =1000andκems =100throughoutadaptation.
+C.2 CIFAR-10-C
+FortheexperimentsonCIFAR-10-C,weconstructagradualdistributionshiftsettingbyincreasing
+the corruption severity sequentially from level 1 to level 5. We adapt each model separately for
+eachofthe15corruptiontypes. ThesourcemodelisaWideResNet-28[42]fromRobustBench[9].
+CIFAR-10-CisawellstudiedbenchmarkinCTTAandthuswetakethehyperparametersettingsof
+baselinemethodsreportedinpreviouswork[38].
+16BN AsinAppendixC.1,normalizationstatisticsduringtest-timeadaptationarearunningestimates
+ofboththetrainingstatisticsandtheincomingteststatistics. Nohyperparameteroptimizationis
+required.
+TENT Asin[38],weuseAdamoptimizerwithlearningrate1e-3.
+CoTTA Wefollow[38]anduseAdamoptimizerwithlearningrate1e-3. TheEMAfactorissetto
+0.999,therestorationfactoris0.01andtheaugmentationconfidencethresholdis0.92.
+STAD-vMF Weinitializethemixingcoefficientswithπ = 1∀t,k,thetransitionconcentration
+t,k K
+parameter with κtrans = 100, and the emission concentration parameter with κems = 100. The
+prototypesattimet=1areinitializedwiththesourceweights.
+17D AdditionalResults
+D.1 STADismorerobusttoclassimbalance
+WealsoinvestigaterobustnesstoclassimbalancethroughanexperimentonthebinaryYearbook
+classificationtask. Inthisexperiment,eachbatchissampledtomaintainafixedclassshare. Figure5
+presents adaptation accuracy across different class proportions. All baseline models struggle to
+outperformthesourcemodelwhendealingwithhighlyimbalancedclasses(i.e. classproportionof
+10%). However,STADdemonstratesadaptationgainssignificantlyearlierthanthebaselinemethods.
+Figure5: Adaptationperformancefordifferentdegreesofclassimbalance: Accuracyistheaverage
+performancewhenboththefemaleandmaleclassesarekeptatlowproportions(e.g. at10%). STAD
+demonstratesgreaterrobustnesstoclassimbalancedtestbatches.
+D.2 Runtime
+InTable4,wepresentthewallclocktimeperbatchfortheWild-Timedatasets,withfiguresshown
+relativetothesourcemodel. BNandTENTperformadaptationthefastest. STADrequiresafraction
+of timecompared to CoTTA, which updatesall model parameters. Note thatCoTTA and TENT
+benefitfromhighlyefficientback-propagationcode,whereasourcodebasehasnotbeenoptimized
+formaximumspeed. OptimizingefficiencyofourcodecouldpotentiallymakeSTADevenfaster.
+Table4: Relativeruntimeperbatchwithrespecttothesourcemodel
+Methods Yearbook FMoW-Time
+SourceModel 1.0 1.0
+BatchNorm(BN) 1.0 1.1
+TENT 1.4 6.4
+CoTTA 17.1 200
+STAD-vMF 2.5 53.3
+STAD-vMF+BN 2.5 53.3
+STAD-Gaussian 3.3 -
+STAD-Gaussian+BN 3.3 -
+18

@@ -1,0 +1,892 @@
+LookupViT: Compressing visual information to a
+limited number of tokens
+Rajat Koner1,2∗ , Gagan Jain1∗ ,
+Prateek Jain1, Volker Tresp2, and Sujoy Paul1
+1 Google DeepMind
+2 Ludwig Maximilian University of Munich
+Abstract. Vision Transformers (ViT) have emerged as the de-facto
+choice for numerous industry grade vision solutions. But their inference
+cost can be prohibitive for many settings, as they compute self-attention
+in each layer which suffers from quadratic computational complexity in
+the number of tokens. On the other hand, spatial information in images
+andspatio-temporalinformationinvideosisusuallysparseandredundant.
+In this work, we introduce LookupViT, that aims to exploit this informa-
+tion sparsity to reduce ViT inference cost. LookupViT provides a novel
+general purpose vision transformer block that operates by compressing
+information from higher resolution tokens to a fixed number of tokens.
+These few compressed tokens undergo meticulous processing, while the
+higher-resolution tokens are passed through computationally cheaper lay-
+ers. Information sharing between these two token sets is enabled through
+a bidirectional cross-attention mechanism. The approach offers multi-
+ple advantages - (a) easy to implement on standard ML accelerators
+(GPUs/TPUs) via standard high-level operators, (b) applicable to stan-
+dardViTanditsvariants,thusgeneralizestovarioustasks,(c)canhandle
+different tokenization and attention approaches. LookupViT also offers
+flexibility for the compressed tokens, enabling performance-computation
+trade-offs in a single trained model. We show LookupViT’s effective-
+ness on multiple domains - (a) for image-classification (ImageNet-1K
+and ImageNet-21K), (b) video classification (Kinetics400 and Something-
+Something V2), (c) image captioning (COCO-Captions) with a frozen
+encoder. LookupViT provides 2× reduction in FLOPs while upholding
+or improving accuracy across these domains. In addition, LookupViT
+also demonstrates out-of-the-box robustness and generalization on image
+classification (ImageNet-C,R,A,O), improving by up to 4% over ViT.
+Keywords: token compression · multi-resolution · elastic inference
+1 Introduction
+Images and videos, the cornerstones of modern visual communication, possess
+an inherent characteristic: their information content is often sparse and exhibits
+* denotes equal contribution2 Koner et al.
+(a) Cross-AttentionMapscomputedbyLookupViT (b) Performancewithscalingimagesize
+Fig.1: (a) Cross-attention maps between compressed and lookup tokens, emphasizing
+LookupViT’s ability to extract relevant information from lookup tokens as needed for
+classification. (b) LookupViT vs ViT while scaling image resolution. The individual
+points per curve are for varied compressed tokens sizes (3×3,5×5,7×7,10×10).
+LookupViT scales quite efficiently w.r.t ViT.
+significant redundancy. However, Vision Transformers (ViTs) [13], despite their
+dominanceacrossmultiplevisiontasks,donotexploitthisredundancyandattend
+to every token in a homogenized way. This leads to quadratic computational
+complexity with respect to image size, hindering its applicability in real-time
+situations. To bridge this gap, there is a pressing need to efficiently compress
+visualinformationintoasmaller,morecomputationallymanageablesetoftokens.
+Such representations would unlock the potential of ViTs for resource-constrained
+scenarios while preserving their flexibility and performance advantages which led
+to their widespread adoption in the field of computer vision.
+Several architectures aim to address the computational burden of ViTs by
+thoughtfully reducing the number of tokens. Token pruning methods retain a
+subsetoftokens[15,32,39],whiletokenpoolingtechniquescombinesimilartokens
+for a more compact representation [5,29]. These mechanisms rely on heuristics
+derived from attention scores or feature similarities and might require additional
+task-specificadjustments.Whilethesetechniquesoffervaluablebenefits,theymay
+necessitatefurtherfine-tuningbasedontheapplication.Incontrast,weproposea
+novel LookupViT block to replace the vanilla ViT block, which intrinsically acts
+as a compression module. This design eliminates the need for post-processing or
+extensivefine-tuning.Furthermore,ourmethodpreservesthegeneralstructureof
+the ViT architecture, thus allowing further optimization and adaptations using
+existing approaches like token pruning or merging.
+Compression modules like TokenLearner [31] and Perceiver [21] have also
+been explored in the literature. TokenLearner utilizes vanilla ViT blocks for a
+significant portion of the network depth, compressing a large number of tokens
+to a smaller set (e.g., 8 or 16) at later stages. This reliance on ViT blocks
+incurs a substantial computation and heavily limits the the full utilization of
+compression module within the network. Perceiver, on the other hand, devises
+an asymmetric information flow directly from image pixels to a small set of
+latent representations iteratively throughout the network. Moreover, for these
+network architectures, it is non-trivial to extract multiple models with the sameLookupViT 3
+parameters,toexhibitacompute-performancetrade-offbetweenextractedmodels.
+LookupViT distinguishes itself by offering a scalable, computationally efficient
+block that can be seamlessly repeated like standard ViT blocks. Its bidirectional
+cross-attention mechanism facilitates a richer exchange of information between
+the compressed and original tokens, enhancing representational power.
+Inthispaper,wecorroboratethatforinnatelyredundantmodalitieslikevision,
+condensing relevant spatial (and temporal) information from original tokens to a
+much smaller set can still sustain performance while significantly lowering the
+computational requirements, by maintaining an effective exchange of information
+between the two token sets. Figure 1b indicates LookupViT’s ability to scale to
+large image sizes efficiently, by processing only relevant information, compared
+to vanilla ViT blocks, which scales quadratically in the number of original image
+tokens. We denote the smaller compressed set of tokens as compressed tokens,
+which"look"atthelargeroriginalsetoftokens,whichwecalllookup tokens.The
+information exchange between these tokens happens in every LookupViT block
+in three key steps, as shown in Figure 2 - (i) cross attention to transfer relevant
+information from the lookup tokens to the compressed tokens (shown in Figure
+1a), (ii) self-attention amongst the compressed tokens, and (iii) information
+transfer from the compressed tokens to the lookup tokens using shared attention
+weights, computed in the first step. While the compressed tokens communicate
+through self-attention, the lookup tokens communicate among themselves only
+via the compressed tokens. This technique avoids the quadratic scaling, while
+ensuring that the lookup latent representations get richer along the layers.
+LookupViT’s intrinsic design natu-
+rally supports flexibility in terms of
+token compression and variable im-
+age or token size. By adjusting the
+down-sampling ratio between com-
+pressed and lookup tokens, the cost-
+performance trade-off can be tailored
+to match specific application require-
+ments.Thismulti-resolutionnatureal-
+lowsforextractionofcompute-efficient
+Fig.2: Bidirectional information flow
+high-performing models during infer- in LookupViT block. LookupViT re-
+ence, with the same parameter space. stricts the heavy computation to the com-
+To validate LookupViT’s efficacy, we pressedtokens,whileextractinginformation
+show results on multiple benchmarks from the lookup tokens. The lookup tokens
+likeimageandvideoclassification,and then update themselves by reusing the in-
+formation exchange computation.
+image captioning. Notably, due to the
+information bottleneck, LookupViT
+also shows out-of-the-box robustness
+to image corruptions. The key contributions of this work are -
+– Efficient Token Compression: LookupViT introduces a novel Multi-Head
+Bidirectional Cross-attention (MHBC) module that enables effective informa-
+tion flow with significant computational savings.4 Koner et al.
+– Generalized Framework:LookupViToffersaflexibleframeworkapplicable
+to visual modalities. It also offers compute-performance trade-offs via multi-
+resolution ability of compressed tokens, with identical model parameters.
+– Enhanced Performance: LookupViT generalizes well to applications on
+image/video modalities, and boasts out-of-the box robustness to corruptions.
+2 Related Works
+Since the introduction of the Vision Transformer (ViT), a multitude of works
+have endeavored to improve its efficiency and scalability.
+Multi-scale and Hierarchical Features: Early studies such as [14,27,36]
+utilized non-overlapping patches with multi-scale or hierarchical features, achiev-
+ing notable success in both image and video domains [1]. Concurrently, [30]
+proposed hierarchical designs for efficient training and inference across these
+modalities. These approaches pushed accuracy boundaries, but often at the ex-
+pense of added architectural complexity. For instance, MViTv2 [25] decomposes
+relative position embedding and residual pooling, while CSWin [12] integrates
+cross-shaped windows within a hierarchical framework. This creates a trade-off
+between enhanced accuracy and the potential loss of ViT’s inherent simplicity
+and scalability. LookupViT’s compressed and lookup tokens has some parallels
+with the convolution-based OctConv’s [8] low and high frequency features. How-
+ever LookupViT restricts heavy processing to compressed tokens, and enjoys
+scalability of Transformers.
+Token Merging and Sampling:Anotherprominentresearchdirectioninvolves
+tokenmergingandpruning.[5,15,32,39]aimtoreduceredundanttokensthrough
+merging, sampling, or pruning. For example, [5] uses similarity to groups and
+mergetokens,while[15]employsadaptabletokensampling.Whilevaluable,these
+techniques often introduce heuristics and generally function as post-processing
+steps.Furthermore,theycanfacechallengeswhenextendingtomodalitiesbeyond
+images, such as videos or multi-modal data. In contrast, LookupViT emphasizes
+intrinsic compression through its core architecture, replacing the ViT block.
+Importantly, LookupViT remains harmonious with the potential application of
+token merging or sampling for further optimization.
+Token compression: Instead of merging tokens, [29] learns a smaller number of
+M patches from the original N patches in ViT using a learnable weight matrix.
+Similarly, TokenLearner [31] compressed all ViT tokens into a smaller set of 8-16
+tokens and performing self-attention within this reduced set, but after a certain
+number of vanilla ViT layers. Perceiver [21] proposes learning a small set of
+tokens directly from the pixel space using iterative unidirectional cross-attention.
+Thesetwomethodsaremostcloselyrelatedtoourwork.However,TokenLearner’s
+compressionachievesoptimalperformanceonlywhenprocessingatleast50−75%
+of the network with ViT blocks, leading to no reduction in computation for a
+significant number of layers. In contrast, LookupViT can be trained entirelyLookupViT 5
+MLP (D/q)
+Downstream
+Classifier Applications LN
+. . M tokens MHBC
+Primary to Lookup
+ViT Block
+LookupViT
+.
+. MLP (pD)
+LookupViT Attention LN
+Reuse
+Flatten MHSA
+Conv + Position N tokens M tokens LN
+Embedding
+Resample N M
+L To oo keku np
+s
+Com Top kr ee ns ssed L to oo kek nu sp LookM upH toB PC rimary Com top kr ee ns ssed
+Fig.3: LookupViT Architecture: The LookupViT block is stacked multiple times
+similar to vanilla ViT. Each LookupViT block has two parallel computation streams
+for the two different types of tokens. Heavy computation happens on a fixed smaller
+number of compressed tokens, while light computation happens on the much higher
+number of lookup tokens. There is an asynchronous information exchange between the
+two token sets using the Multi-Head Bi-Directional Cross Attention (MHBC) block.
+with lookup blocks, reducing computational complexity without compromising
+performance. Furthermore, unlike Perceiver [21], which uses unidirectional pixel-
+level cross-attention, LookupViT operates on tokens with bi-directional cross-
+attention to update both compressed and lookup tokens.
+Flexible patch and resolution: Recent works like FlexiViT [3] address the
+fixed patch size limitation by training with multiple patch sizes, enabling ViT
+to scale across different patch sizes and image resolutions. Na-ViT [10] explores
+sequence packing to train images with arbitrary resolution and aspect ratio,
+allowing inference on any resolution image. Analogous to these works, we show
+that LookupViT can also be trained with varying compression ratios to obtain
+multiple models during inference with the same parameter space.
+3 LookupViT Methodology
+Inthissection,wediscusstheLookupViTframeworkindetail,startingwithahigh-
+levelarchitecturaldiscussion,andthenfocusingonspecificdesignchoices.Wealso
+discuss its applicability to downstream tasks and Multi-Resolution flexibility. We
+conclude this section with an analysis of the improved computational complexity.
+3.1 Overall Architecture
+An overview of the LookupViT architecture is presented in Figure 3. Similar to
+theViTarchitecture,itcomprisesofastackofLookupViTblocks.First,aninput6 Koner et al.
+RGB image (or video) is divided into non-overlapping patches. These patches
+are then passed through a convolutional layer to generate feature embeddings.
+Positional embeddings are then added to construct the input tokens – a process
+identical to the standard ViT architecture [13]. Unlike vanilla ViT, the core idea
+hereis-to compress visual information into a smaller number of tokens, focusing
+heavy computation exclusively on those tokens.
+AfixednumberoftokensM (≪N),whichwenameasthecompressed tokens
+are sampled from the input tokens, using bilinear interpolation. Computationally
+intensive processing is performed on the compressed tokens, analogous to a
+standard ViT block, while exchanging information with the original tokens
+through asynchronous Multi-Head Bidirectional Cross-Attention (MHBC). The
+processunfoldsasfollows-(1)Information Gathering:Compressedtokensuse
+cross-attentionto“look"attheoriginaltokens(termedlookup tokens)andgather
+relevant information. (2) Representation Refinement: Compressed tokens
+exchange information amongst themselves, updating their representations. (3)
+Global Context Infusion:Thelookuptokensutilizetheprocessed,information-
+richcompressedtokens,toupdatetheirownrepresentations,reusingtheattention
+weights calculated during Information Gathering for efficiency.
+During this entire process, the lookup tokens are forced to gather information
+only by interacting with the compressed tokens, thus reducing computational
+complexity. Additionally, the lookup tokens pass through a MLP block with a
+smaller projection dimension (D/q) compared to the vanilla model projection
+(pD), which is applied on the compressed tokens, where D represents the trans-
+former embedding dimension ((p,q)=(4,2)). This optimization further reduces
+computations. The LookupViT block’s ability to achieve performance compara-
+ble to the baseline, despite this substantial MLP bottleneck, demonstrates the
+effectiveness of the information exchange between compressed and lookup tokens.
+3.2 Input Tokenization
+The construction of lookup token embeddings similar to standard ViT [13]
+tokenization strategy. Given an input image X∈Rh×w×c, it is passed through a
+convolutional layer to obtain lookup features F
+l
+∈Rhl×wl×D. A learnable lookup
+positional embedding F
+l,pos
+∈ Rhl×wl×D is added to this feature map. These
+tokens are then significantly downsampled to a fixed shape – (h ,w ), which
+p p
+constitute the compressed tokens. This can be summarized as below -
+F ←T(cid:0) F,(h ,w )(cid:1) F ←T(cid:0) F ,(h ,w )(cid:1) (1)
+p l p p p,pos l,pos p p
+F ←F +F F ←F +F (2)
+p p p,pos l l l,pos
+TheoperatorT(x,s)bilinearlyresizesxtoshapes.Thelookupandcompressed
+token grids have sizes (h ,w ) and (h ,w ), and D is the embedding dimension.
+l l p p
+These feature maps F and F are then spatially flattened to z0 and z0:
+p l p l
+z0 =[F ,...,F ] z0 ∈Rhp.wp×D (3)
+p p(0,0) p(hp−1,wp−1) p
+z0 =[F ,...,F ] z0 ∈Rhl.wl×D (4)
+l l(0,0) l(hl−1,wl−1) lLookupViT 7
+These flattened feature maps z0 and z0 (compressed and lookup tokens respec-
+p l
+tively)arepassedasinputtotheLookupViTblock,whichefficientlyrefinesthese
+representations through information exchange, as explained in Section 3.3. The
+resize ratio C =h .w /h .w is a flexibility parameter, representing the degree of
+l l p p
+informationcompression.Thisenablesustoflexiblytrainthemodelwithvarying
+resize ratio, thus allowing compute-aware model extraction with a specific C.
+A smaller value for C indicates more number of compressed tokens and thus
+better representation power. In fact, C =1 would represent the vanilla ViT with
+certain extra computations due to the cross-attention. We denote the number
+of lookup and compressed tokens by N = h .w and M = h .w respectively.
+l l p p
+This form of tokenization can readily extend to videos, where a third dimension
+representingtimewouldbeintroduced.Thecompressionratiowouldthenbecome
+C =h .w .t /h .w .t , where t denotes the temporal dimension.
+l l l p p p .
+3.3 LookupViT Block
+The kth LookupViT block consumes the compressed tokens zk−1 and lookup
+p
+tokens zk−1 from its previous block, facilitates information exchange between
+l
+the two token sets, and passes the updated representations to the next block.
+The novel architectural design here is the asynchronous Multi-Head Bidirectional
+Cross-attention (MHBC). Intuitively, in the first layer, the lookup tokens main-
+tain a richer image representation than the compressed tokens. However, after
+multiplepassesthroughtheLookupViTblock,thecompressedtokensaccumulate
+relevant compressed image information, thus making them suitable for down-
+stream tasks. This happens through iterative communication between the lookup
+and compressed tokens in every LookupViT block (Algorithm 4). This can be
+summarized into three key steps -
+Information Gathering: In this step, there is a unidirectional information flow
+from the lookup to the compressed tokens through MHBC . The compressed
+l→p
+tokens are used as query (Q) and lookup tokens as key-value (K,V). Algorithm
+1 presents this part of the proposed MHBC module. Additionally, we store the
+attentionweightsAcomputedinthissteptobere-usedwhilesharinginformation
+in the reverse direction.
+Representation Refinement: After the information extraction step, the com-
+pressed tokens go through a vanilla ViT block (self-attention followed by MLP),
+asillustratedinAlgorithm3.TheMLPdimensionupscalingfactorpiskeptequal
+to 4, as in vanilla ViT. But this computation happens on the smaller compressed
+token set. This step allows internal information sharing between compressed
+tokens to update their representation.
+Global Context Infusion:TheinformationgatheringalongwiththeViTbased
+processing enriches the compressed token features, as they contain a compressed
+global representation of the image. While the lookup tokens do not directly share
+information amongst themselves, they are notified about the global information8 Koner et al.
+through a reverse direction information exchange, from compressed to lookup
+tokens, as depicted in Algorithm 2 (MHBC ). Rather than recomputing the
+l→p
+attention matrix, we reuse the attention matrix previously saved in MHBC .
+p→l
+This relation further imposes implicit similarity constraints between the two
+feature maps, and enhances information exchange. Finally, to refine the lookup
+features, we apply a low dimensional MLP block, with a dimension (D/q), pq
+times smaller than the vanilla ViT MLP dimension (we set (p,q)=(4,2) in all
+our experiments). This enriches the lookup tokens for information extraction by
+the compressed tokens in the next LookupViT block.
+Algorithm 1 MHBC Algorithm 2 MHBC
+l→p p→l
+In:zp∈RM×D;zl∈RN×D In:zl∈RN×D;zp∈RM×D;A∈RM×N
+1:
+2 3
+4
+5: :
+:
+:
+Q K
+V A
+zp← ←←← ←wL sL zoN
+V
+pN ft(
+z
++( mw w
+l a
+AQ K xz Vz (p Ql) )
+KT) ▷A∈RM×N
+21 43::
+::
+V zl← ←L zlN +(w AV Tz ▷Vp)
+Reus▷ eL pa ry ee -cr oN mo pr um teo dn wV ea iglu he tss
+Returnzp,A Returnzl
+Algorithm 3 ViTBlock Algorithm 4 LookupViTBlock
+In:zp∈RM×D;p∈N I 1n :: zz pp ,∈ AR ←M× MD H; Bz Cl l∈ →R pN (cid:0)L× ND (; zpp ), ,q L∈ NN
+(zl)(cid:1)
+1: zp←zp+MHSA(cid:0)LN(zp)(cid:1) 2: zp←ViTBlock(cid:0)zp,p(cid:1)
+2 3: : zp←zp+MLP▷ (cid:0)LM Nu (zlt pi- )H ;pea Dd (cid:1)Self-Attention 43 :: zz ll ←← zz ll ++ MM LH PB (cid:0)C Lp N→ (l z(cid:0) lL );N D( /z qp (cid:1)),LN(zl),A(cid:1)
+Returnzp Returnzp,zl
+Multi-Resolution Tokens: The compressed tokens are constructed by simply
+resizingthelookuptokensinanon-learnablefashion.Hence,itispossibletoshare
+the same parameter space and lookup tokens while having multiple compressed
+token resolutions. To do this, we choose the compressed token size uniformly at
+random during training, seeking inspiration from FlexiViT [3]. Once trained in
+this fashion, we can extract multiple high performing models having different
+computational requirements from a single trained model. This flexibility makes
+our method utilizable in a variety of settings, depending on resource availability.
+3.4 Training and Token Utilization for Downstream Applications
+InLookupViT,wemaintaintwosetsoftokensthroughoutthenetwork-N lookup
+tokens and M compressed tokens. For classification, we can apply the classifier
+to either or both token sets. Empirically, we’ve found that enforcing classification
+loss on both heads yields the best performance. We use global average pooling
+on the respective token sets, followed by two separate classifiers. The joint loss
+function is then optimized with equal weights.
+Althoughthetraininglossisappliedindependentlytobothtokensets,wefind
+thatduringinference,theclassifieronthecompressedtokensissufficient.However,LookupViT 9
+adding the classifier output from the lookup tokens does improve performance
+marginally. Since there is no added computational cost for classification, we
+average the outputs of both compressed and lookup heads with equal weights.
+For downstream applications beyond classification (e.g., vision-language model
+taskslikecaptioning),adecoderisusedontheLookupViTencoder.Insuchcases,
+usingalimitedcompressedtokensetcomputationallybenefitsthecross-attention
+block. Hence, we experiment using only the compressed tokens.
+3.5 Computational Complexity
+LetC denotethecomputationofaprocedurex.Then,giventhefeaturedimension
+x
+D, number of lookup tokens N, number of compressed tokens M(<<N), MLP
+upscaling factor p=4 (on compressed tokens) and downscaling factor q =2 (on
+lookup tokens), the computational complexity of the vanilla ViT and LookupViT
+blocks can be represented as follows (neglecting smaller terms).
+C =2N2D+12ND2 (5)
+ViT
+C =(cid:0) 3NM +2M2(cid:1) D+(4N +15M)D2 (6)
+LookupViT
+Noticethatwegetridofthequadraticdependenceonthenumberoflookuptokens
+N andreducetheattentionandlinearprojectioncomputationsindividually.Since
+the number of compressed tokens M(<< N) stay constant at a user-specified
+value, the attention reduction factor grows quickly, enabling scalability for usage
+at higher resolutions. Typically, for an image resolution of 384, we use N =576
+and M =25, which shows superior performance than the vanilla model, while
+simultaneously reducing FLOPs by a factor greater than 3.
+4 Results
+Implementation Details: As ViTs are prone to overfit more as compared to
+CNNs, they either need pre-training on large datasets like JFT [34] or augmen-
+tation based training frameworks like DeIT [35] or AugReg [33]. Due to the
+ease of implementation and adaptability to other tasks that we pursue in this
+work, we build our implementation on top of [33]. We implement LookupViT
+in JAX [6] within the Big Vision repository [4]. We adopt the exact training
+settings as in [33] (like learning rate, training epochs, etc) without performing
+any parameter sweeps. We also train TokenLearner [31], another state-of-the-art
+token compression technique, on the same repository for fair comparison, with 16
+tokens for all experiments. TokenLearner denotes their compression module is
+1/2
+applied half-way through the network, which the authors recommend.
+Image classification: We evaluate LookupViT on image classification while –
+(a)trainingfromscratchonImageNet-1k[11],and(b)finetuningonImageNet-1k
+from a ImageNet-21k pre-trained model. The popular benchmark ImageNet-
+1k has 1.28 million training images and 50,000 validation images across 1,00010 Koner et al.
+Table1: Comparisonwithstate-of-the-artmethodsonImageNet-1kandImageNet-21K
+pre-training followed by ImageNet-1K finetuning.
+Variant Method ImageNet-1K ImageNet-21K GFLOPs
+ViT[13] 78.6 83.7 35.1
+TokenLearner1/2 [31] 75.7 82.0 19.1
+B/16
+TokenLearner3/4 [31] 77.5 82.9 27.1
+Perceiver[21] 78.0 - 707
+LookupViT3×3 77.1 77.9 12.9
+LookupViT5×5 79.1 81.6 16.5
+LookupViT7×7 79.7 83.0 21.9
+LookupViT10×10 80.2 83.9 33.6
+ViT[13] 75.7 84.0 123.5
+TokenLearner1/2 [31] 78.5 84.2 66.5
+L/16 TokenLearner3/4 [31] 77.6 84.6 94.6
+LookupViT3×3 77.2 78.4 46.2
+LookupViT5×5 78.7 81.9 58.8
+LookupViT7×7 79.1 83.3 77.7
+LookupViT10×10 79.2 84.1 118.5
+categories. ImageNet-21k has 12.8 million images across 21,000 categories. For
+all experiments, we train and report performance on the validation set with an
+image size of 224×224, unless specified otherwise. We experiment with two
+model sizes B and L, with model parameters as defined in ViT [13].
+We present the results on image classification in Table 1. LookupViT is
+flexible enough to offer multiple models with the same parameter, by varying the
+compression factor C, the ratio between the number of lookup and compressed
+tokens. Results indicate that training from scratch with the B/16 model on
+ImageNet-1k,LookupViT performsbetterthanViTwith2.12×lesserFLOPs.
+5×5
+LookupViT outperforms ViT by 1.6% while still being computationally
+10×10
+cheaper. It also offers similar gains compared to TokenLearner and Perceiver.
+On image size of 384, we can see in Figure 1b, LookupViT offers more than 3×
+computational gains compared to ViT. The figure also shows that LookupViT
+computationallyscalesquiteefficientlyw.r.t.ViTwhentheimagesizeisincreased.
+The performance of LookupViT on the large model is even better when
+trained from scratch. Even with 3×3 compressed tokens, LookupViT performs
+much better than ViT, requiring 2.67× lower FLOPs. It is interesting to note
+that we did observe instabilitites while training large models for both ViT and
+TokenLearner, whereas we do not observe such instabilities in LookupViT. When
+using ImageNet-21k pretrained models for ImageNet-1k finetuning, we achieve
+higher accuracy than the ViT models using our 10 × 10 models, while still
+maintaining lesser computational requirements.
+Analyzing the robustness of LookupViT: Vision models often exhibit
+surprisingvulnerabilitytoimagecorruptionsandadversarialperturbations.While
+the ViT architecture is more robust than CNNs in general [2], we explore out-of-
+the box robustness of LookupViT to image corruptions and adversarial settings,
+without including any additional robustness losses, augmentations or training
+strategies. We evaluate on ImageNet-A,C,O,R [17,18,20]. (see Appendix A1)LookupViT 11
+Table 2: Robustness on ImageNet-A, C, O, R [17,18,20] datasets.
+Variant Method ImageNet-C ImageNet-O ImageNet-R ImageNet-A
+ViT[13] 56.4 24.6 25.8 6.7
+B/16 TokenLearner3/4 [31] 55.7 24.5 23.1 5.7
+LookupViT5×5 56.4 24.0 25.9 5.4
+LookupViT7×7 58.4 24.9 28.0 7.6
+LookupViT10×10 59.9 25.7 29.1 8.1
+ViT[13] 55.3 22.4 19.4 3.5
+L/16 TokenLearner3/4 [31] 55.6 20.3 24.0 3.7
+LookupViT5×5 58.4 25.7 26.5 7.0
+LookupViT7×7 59.7 26.7 28.0 8.3
+LookupViT10×10 60.4 26.5 28.1 8.4
+As shown in Table 2, LookupViT performs better than ViT across the board,
+showing robust performance on natural, unmodified images (ImageNet-A), re-
+silience to image corruptions (ImageNet-C) and artistic renditions (ImageNet-R),
+and strong generalization to out-of-distribution samples (ImageNet-O). These
+unanimously suggests that LookupViT’s mechanism of extracting only useful
+information inherently improves its ability to handle noisy or distorted inputs.
+WefurtherinvestigateLookupViT’srobustnesstoperturbationsbycomparing
+theimage-wisenormalizedfeaturedeviationduetocorruptionsinFigure4,onthe
+ImageNet-Cdataset.ItalsoshowsthatthemarginofimprovementofLookupViT
+over ViT goes up as we increase the corruption severity. This shows the model’s
+robust behaviour beyond its better discriminatory ability.
+Using pre-trained LookupViT for Captioning: In Table 3, we assess the
+capability of LookupViT as a pre-trained model to judge its transferability for
+other tasks. We investigate its performance on image captioning using Locked
+Image Tuning (LiT) style training [40]. Following LiT, we freeze the parameters
+of the pretrained LookupViT image encoder, which is pre-trained on ImageNet-
+21k. We then introduce a simple text decoder, initialized randomly, and train
+it to generate captions corresponding to the image representations produced by
+LookupViT. We perform this experiment on the COCO Captions [7] dataset.
+(a) (b)
+Fig.4: (a) Density of normalized feature distance for severity=5 over all corruptions.
+(b) Mean normalized feature distance over all corruptions for different severity.12 Koner et al.
+Table 3: ImagecaptioningonCOCO-Captions[7]usingLiTdecoderstyletraining[40]
+with frozen encoder. (LookupViT: LViT, TokenLearner: TL)
+ViT[13] TL1/2 [31] LViT3×3 LViT5×5 LViT7×7 LViT10×10
+Cider 112.6 110.3 104.3 108.4 111.3 111.7
+FLOPS 59.5 38.2 31.9 35.9 42.1 55.3
+LookupViT with 7×7 compressed tokens exhibits similar performance to
+ViT, even without finetuning, thus offering significant reduction in FLOPs. This
+highlights the quality of visual representations learned by LookupViT and its
+potential as a versatile backbone for various vision-and-language tasks.
+Video classification: LookupViT can be easily extended to videos. We modify
+the ViViT [1] spatio-temporal B/16 encoder to construct LookupViViT. As in
+ViViT, the initial Conv3D layer, with kernel size 16×16×2 operates on a video
+of 224×224×3×32. The resultant 3D tokens serve as lookup tokens, which are
+bilinearly downsampled to obtain the spatio-temporal compressed tokens. After
+flattening the tokens, the rest follows exactly as in LookupViT.
+WecarryoutexperimentsontheKinetics400[22]andSomethingSomethingV2
+(SSv2) [16] datasets. Kinetics has 240k videos of 10 second duration each. Being
+a dynamic YouTube based dataset, it often incurs data loss due to deletion, so
+we could only train on a subset of videos which ViViT was trained on at the
+time of its paper publication, leading to lower baselines. SSv2 has 220k videos
+of 2-6 second duration each. On SSv2, ViViT [1] does not report numbers using
+the Spatio-Temporal B/16 model, but we follow the training recipe as mentioned
+for their L/16 Factorized Encoder [1], and initialize our LookupViViT as well as
+ViViT models from their corresponding Kinetics400 finetuned models.
+(a) LViViTwithdifferentcompressedtokens (b) Multi-resolutioncompressedtokens
+Fig.5: (a) Video classification on K400 with different spatio-temporal compressed
+tokens for LookupViViT (LViViT). Color denotes the number of temporal token and
+points oneachcurve arewith increasingnumber ofspatial tokens.(b) Traininga single
+model (“Multi-Res") which can handle different number of compressed tokens, offering
+compute-performance trade-off with the same parameter space. The other models are
+trained individually but evaluated at all resolutions.LookupViT 13
+Table 4: Comparison of LookupViT-B/16 based ViViT [1] model with state-of-the-art
+methods on Kinetics400 [22] and SomethingSomethingV2 [16].
+Kinetics400 SomethingSomethingV2
+Method GFLOPs/view
+1view 12views 1view 12views
+ViViT[13] 72.6 78.6 51.2 52.3 455.1
+LookupViViT9×9×8 72.4 77.9 56.3 58.3 226.5
+LookupViViT8×8×16 72.5 77.8 57.0 59.2 311.2
+LookupViViT9×9×16 72.5 78.3 57.1 59.6 375.8
+Table 5: Dissecting the network: Component-wise performance impact
+Models GFLOPS Accuracy
+LookupViT-B/16 16.5 79.1
+−NoLookupTokens 4.5 69.2
+−NoMHBCp→l 11.0 69.7
+−NoLossonLookupTokens 16.5 78.2
+−NoLossonPrimaryTokens 16.5 78.4
+RandomPrimaryTokens 16.5 77.9
+The results on video classification are presented in Table 4 for both single
+and multi-crop evaluation following ViViT [1]. Moreover, we report results for
+various number of spatial and temporal compressed tokens and plot them in
+Figure 5a for Kinetics400. LookupViViT models with half the FLOPs as ViViT
+show competitive results on Kinetics400. We also found the trends in accuracy to
+be increasing with the number of spatial and/or temporal tokens, as expected.
+Interestingly, as in Table 4, LookupViViT performs significantly better than
+ViViT on SSv2. We observe a 5%−6% improvement in accuracy with half
+the FLOPs. This further bolsters LookupViT’s robustness claim, as in SSv2
+backgrounds and objects are similar across classes, thus needing recognition of
+fine-grained motion [1], which our model does better than ViViT. (See Appendix
+A2, A5)
+Multi-resolution LookupViT: We empirically demonstrate the effectiveness
+of LookupViT’s multi-resolution tokenization. By varying the downsampling
+ratio,wecancontrolthetrade-offbetweencomputationalcostandrepresentation
+capacity while keeping the parameter size constant. Inspired by [3], during
+training,werandomlychoosethecompressedtokenresolution,rangingfrom3×3
+to10×10foreverybatchofdata.Wecallthismodel“Multi-Res".Thenumberof
+lookup tokens is always kept fixed at 14×14 for an image resolution of 224×224.
+To highlight its efficacy, we also train individual models with the designated
+number of compressed tokens, while evaluating at all compressed resolutions.
+WepresentresultsinFigure5b,whereallmodelsarepretrainedonImageNet-
+21k and finetuned on ImageNet-1k. For Multi-Res, both steps are carried out
+with a multi-resolution training technique. As we can see, the performance of
+the Multi-Res model is remarkably close to that of the individual models at the
+points for which they are trained. The performance of the individual models
+do not hold up when evaluated at other resolutions. This finding highlights the14 Koner et al.
+adaptability of LookupViT and its potential to streamline model selection by
+offering performance-computation trade-offs within a single trained architecture.
+5 Ablations
+The ablations performed in this section use a B/16 model with a compressed
+token size 5×5 trained from scratch on ImageNet-1k. This model, with all the
+components in place, reaches a top-1 classification accuracy of 79.1. We discuss
+the component-wise importance of LookupViT model in Table 5.
+No Lookup Tokens: We consider constructing the compressed tokens by
+aggresively downsampling the image features through convolution, while having
+no information support through the higher resolution lookup tokens, i.e. no
+MHBC orMHBC .ThecompressedtokensgothroughonlythevanillaViT.
+l→p p→l
+This leads to much lower performance, indicating that ViT, by itself, doesn’t
+work well with very limited tokens without additional information exchange.
+No MHBC : From the previous step, we now add MHBC , which
+p→l l→p
+facilitates information transfer from lookup to compressed tokens, while still not
+updating the lookup tokens. This leads to a slight increase in performance as
+compared to the previous setup, as the lookup tokens are not updated at all
+with global information. However, this step involves construction of compressed
+tokens using a parameter-free resize rather than a convolutional downsampling,
+which enables use of same model across different compressed token sizes.
+No Lookup/Compressed Loss: Next, we add MHBC , a source of
+p→l
+information exchange from the compressed to the lookup tokens, with loss
+computation still only on the compressed tokens. This leads to a further 8.5%
+increase in accuracy, thus justifying the need for the bidirectional MHBC. We
+also consider the case where we add loss on the lookup logits only, but not on
+the compressed, and this leads to an equivalent performance, indicating the near
+equal capability of compressed and lookup tokens.
+Random Compressed Tokens: We also experiment with random learnable
+compressed tokens in the first layer, instead of resizing from lookup tokens. We
+observea∼1%performancedrop,thusshowingtheeffectivenessofparameter-free
+resize operation for constructing compressed tokens.
+6 Conclusions
+In this work, we present a novel LookupViT architecture, which efficiently com-
+presses sparse and redundant visual information to fewer tokens. By efficiently
+combining lower and higher resolution tokens with bidirectional cross-attention,
+LookupViT achieves a significant reduction in FLOPs while upholding perfor-
+mance of ViT. Its effectiveness is demonstrated on diverse vision tasks, like
+image and video classification, image captioning, as well as it generalizability
+and robustness to visual corruptions.
+Futureworkincludesextendingourmodeltodensepredictiontaskslikeobject
+detection and semantic segmentation, as well as scaling to larger model sizes.LookupViT 15
+References
+1. Arnab, A., Dehghani, M., Heigold, G., Sun, C., Lučić, M., Schmid, C.: Vivit: A
+videovisiontransformer.In:ProceedingsoftheIEEE/CVFinternationalconference
+on computer vision. pp. 6836–6846 (2021)
+2. Bai, Y., Mei, J., Yuille, A.L., Xie, C.: Are transformers more robust than cnns?
+Advances in neural information processing systems 34, 26831–26843 (2021)
+3. Beyer,L.,Izmailov,P.,Kolesnikov,A.,Caron,M.,Kornblith,S.,Zhai,X.,Minderer,
+M., Tschannen, M., Alabdulmohsin, I., Pavetic, F.: Flexivit: One model for all
+patch sizes. CVPR (2023)
+4. Beyer, L., Zhai, X., Kolesnikov, A.: Big vision. https://github.com/google-
+research/big_vision (2022)
+5. Bolya, D., Fu, C.Y., Dai, X., Zhang, P., Feichtenhofer, C., Hoffman, J.: Token
+merging: Your vit but faster. ICLR (2023)
+6. Bradbury, J., Frostig, R., Hawkins, P., Johnson, M.J., Leary, C., Maclaurin, D.,
+Necula, G., Paszke, A., VanderPlas, J., Wanderman-Milne, S., Zhang, Q.: JAX:
+composable transformations of Python+NumPy programs (2018), http://github.
+com/google/jax
+7. Chen, X., Fang, H., Lin, T., Vedantam, R., Gupta, S., Dollár, P., Zitnick, C.L.:
+Microsoft COCO captions: Data collection and evaluation server. CoRR (2015)
+8. Chen, Y., Fan, H., Xu, B., Yan, Z., Kalantidis, Y., Rohrbach, M., Yan, S., Feng,
+J.: Drop an octave: Reducing spatial redundancy in convolutional neural networks
+withoctaveconvolution.In:ProceedingsoftheIEEE/CVFinternationalconference
+on computer vision. pp. 3435–3444 (2019)
+9. Darcet,T.,Oquab,M.,Mairal,J.,Bojanowski,P.:Visiontransformersneedregisters.
+arXiv preprint arXiv:2309.16588 (2023)
+10. Dehghani, M., Mustafa, B., Djolonga, J., Heek, J., Minderer, M., Caron, M.,
+Steiner, A., Puigcerver, J., Geirhos, R., Alabdulmohsin, I.M., et al.: Patch n’pack:
+Navit, a vision transformer for any aspect ratio and resolution. Advances in Neural
+Information Processing Systems 36 (2024)
+11. Deng,J.,Dong,W.,Socher,R.,Li,L.J.,Li,K.,Fei-Fei,L.:Imagenet:Alarge-scale
+hierarchical image database. In: 2009 IEEE conference on computer vision and
+pattern recognition. pp. 248–255. Ieee (2009)
+12. Dong,X.,Bao,J.,Chen,D.,Zhang,W.,Yu,N.,Yuan,L.,Chen,D.,Guo,B.:Cswin
+transformer: A general vision transformer backbone with cross-shaped windows.
+In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. pp. 12124–12134 (2022)
+13. Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner,
+T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S., et al.: An image is worth
+16x16 words: Transformers for image recognition at scale. ICLR (2020)
+14. Fan, H., Xiong, B., Mangalam, K., Li, Y., Yan, Z., Malik, J., Feichtenhofer, C.:
+Multiscale vision transformers. In: Proceedings of the IEEE/CVF international
+conference on computer vision. pp. 6824–6835 (2021)
+15. Fayyaz, M., Koohpayegani, S.A., Jafari, F.R., Sengupta, S., Joze, H.R.V., Som-
+merlade, E., Pirsiavash, H., Gall, J.: Adaptive token sampling for efficient vision
+transformers. In: European Conference on Computer Vision. pp. 396–414. Springer
+(2022)
+16. Goyal, R., Ebrahimi Kahou, S., Michalski, V., Materzynska, J., Westphal, S., Kim,
+H., Haenel, V., Fruend, I., Yianilos, P., Mueller-Freitag, M., et al.: The" something
+something" video database for learning and evaluating visual common sense. In:16 Koner et al.
+ProceedingsoftheIEEEinternationalconferenceoncomputervision.pp.5842–5850
+(2017)
+17. Hendrycks,D.,Basart,S.,Mu,N.,Kadavath,S.,Wang,F.,Dorundo,E.,Desai,R.,
+Zhu,T.,Parajuli,S.,Guo,M.,Song,D.,Steinhardt,J.,Gilmer,J.:Themanyfaces
+of robustness: A critical analysis of out-of-distribution generalization. ICCV (2021)
+18. Hendrycks,D.,Dietterich,T.:Benchmarkingneuralnetworkrobustnesstocommon
+corruptions and perturbations. ICLR (2019)
+19. Hendrycks,D.,Dietterich,T.:Benchmarkingneuralnetworkrobustnesstocommon
+corruptions and perturbations. arXiv preprint arXiv:1903.12261 (2019)
+20. Hendrycks, D., Zhao, K., Basart, S., Steinhardt, J., Song, D.: Natural adversarial
+examples. CVPR (2021)
+21. Jaegle,A.,Gimeno,F.,Brock,A.,Zisserman,A.,Vinyals,O.,Carreira,J.:Perceiver:
+General perception with iterative attention. PMLR (2021)
+22. Kay, W., Carreira, J., Simonyan, K., Zhang, B., Hillier, C., Vijayanarasimhan, S.,
+Viola, F., Green, T., Back, T., Natsev, P., et al.: The kinetics human action video
+dataset. arXiv preprint arXiv:1705.06950 (2017)
+23. Kuznedelev, D., Kurtić, E., Frantar, E., Alistarh, D.: Cap: Correlation-aware
+pruning for highly-accurate sparse vision models. Advances in Neural Information
+Processing Systems 36 (2024)
+24. Li, H., Liu, Y., Zhang, H., Li, B.: Mitigating and evaluating static bias of action
+representations in the background and the foreground. In: ICCV. pp. 19911–19923
+(2023)
+25. Li, Y., Wu, C.Y., Fan, H., Mangalam, K., Xiong, B., Malik, J., Feichtenhofer, C.:
+Mvitv2: Improved multiscale vision transformers for classification and detection.
+In: Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition. pp. 4804–4814 (2022)
+26. Li,Y.,Vasconcelos,N.:Repair:Removingrepresentationbiasbydatasetresampling.
+In: Proceedings of the IEEE/CVF conference on computer vision and pattern
+recognition. pp. 9572–9581 (2019)
+27. Liu, Z., Lin, Y., Cao, Y., Hu, H., Wei, Y., Zhang, Z., Lin, S., Guo, B.: Swin
+transformer:Hierarchicalvisiontransformerusingshiftedwindows.In:Proceedings
+of the IEEE/CVF international conference on computer vision. pp. 10012–10022
+(2021)
+28. Pan,X.,Ye,T.,Xia,Z.,Song,S.,Huang,G.:Slide-transformer:Hierarchicalvision
+transformer with local self-attention. In: Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition. pp. 2082–2091 (2023)
+29. Renggli, C., Pinto, A.S., Houlsby, N., Mustafa, B., Puigcerver, J., Riquelme, C.:
+Learning to merge tokens in vision transformers. arXiv preprint arXiv:2202.12015
+(2022)
+30. Ryali, C., Hu, Y.T., Bolya, D., Wei, C., Fan, H., Huang, P.Y., Aggarwal, V.,
+Chowdhury, A., Poursaeed, O., Hoffman, J., et al.: Hiera: A hierarchical vision
+transformer without the bells-and-whistles. arXiv preprint arXiv:2306.00989 (2023)
+31. Ryoo,M.S.,Piergiovanni,A.,Arnab,A.,Dehghani,M.,Angelova,A.:Tokenlearner:
+What can 8 learned tokens do for images and videos? NeurIPS (2021)
+32. Song,Z.,Xu,Y.,He,Z.,Jiang,L.,Jing,N.,Liang,X.:Cp-vit:Cascadevisiontrans-
+formerpruningviaprogressivesparsityprediction.arXivpreprintarXiv:2203.04570
+(2022)
+33. Steiner, A., Kolesnikov, A., Zhai, X., Wightman, R., Uszkoreit, J., Beyer, L.: How
+to train your vit? data, augmentation, and regularization in vision transformers.
+arXiv preprint arXiv:2106.10270 (2021)LookupViT 17
+34. Sun,C.,Shrivastava,A.,Singh,S.,Gupta,A.:Revisitingunreasonableeffectiveness
+of data in deep learning era. In: Proceedings of the IEEE international conference
+on computer vision. pp. 843–852 (2017)
+35. Touvron, H., Cord, M., Douze, M., Massa, F., Sablayrolles, A., Jégou, H.: Training
+data-efficient image transformers & distillation through attention. In: International
+conference on machine learning. pp. 10347–10357. PMLR (2021)
+36. Wang,W.,Xie,E.,Li,X.,Fan,D.P.,Song,K.,Liang,D.,Lu,T.,Luo,P.,Shao,L.:
+Pyramidvisiontransformer:Aversatilebackbonefordensepredictionwithoutcon-
+volutions. In: Proceedings of the IEEE/CVF international conference on computer
+vision. pp. 568–578 (2021)
+37. Wei, S., Ye, T., Zhang, S., Tang, Y., Liang, J.: Joint token pruning and squeezing
+towards more aggressive compression of vision transformers. In: Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp.
+2092–2101 (2023)
+38. You, H., Xiong, Y., Dai, X., Wu, B., Zhang, P., Fan, H., Vajda, P., Lin, Y.C.:
+Castling-vit: Compressing self-attention via switching towards linear-angular atten-
+tion at vision transformer inference. In: Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition. pp. 14431–14442 (2023)
+39. Yu,H.,Wu,J.:Aunifiedpruningframeworkforvisiontransformers.ScienceChina
+Information Sciences 66(7), 1–2 (2023)
+40. Zhai, X., Wang, X., Mustafa, B., Steiner, A., Keysers, D., Kolesnikov, A., Beyer,
+L.: Lit: Zero-shot transfer with locked-image text tuning. In: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp. 18123–
+18133 (2022)
+A Appendix
+In this section, we present detailed arguments indicating the robustness of our
+method, supported by additional results and visualisations.
+A.1 Robustness on ImageNet family of datasets
+The ImageNet family of datasets provides a comprehensive suite for evaluating
+the robustness of vision models. ImageNet-A assesses performance on real-world,
+unmodified images that are typically misclassified by models, gauging their abil-
+ity to handle naturally occurring challenges. ImageNet-C introduces common
+image corruptions like blur and noise, measuring resilience to various degrada-
+tions. ImageNet-R applies artistic styles to the original images, testing a model’s
+ability to generalize across diverse visual renditions. ImageNet-O presents out-of-
+distribution samples from classes not found in the standard ImageNet-1k dataset,
+evaluating a model’s robustness to unfamiliar objects and scenes. Together, these
+datasets offer a multi-faceted assessment of a vision model’s performance, span-
+ning natural challenges, degradations, artistic variations, and out-of-distribution
+generalization.
+WefurtheranalyseresultsonImageNet-Cinagreaterdetailhere.ImageNet-C
+consists of 15 corruption types applied across five severity levels. In Table 6, we
+compare LookupViT’s performance under these corruptions with a vanilla ViT18 Koner et al.
+model and TokenLearner, all trained on the standard ImageNet-1k dataset. We
+report the accuracy for all severities, along with their corresponding averages
+and mean Corruption Error (mCE) as introduced in [19].
+Table 6 indicates the superior performance of LookupViT with lower compu-
+tationalrequirementsinthepresenceofadverseperturbations,depictingsuperior
+robust behaviour than ViT and TokenLearner [31].
+Table 6: Performance comparison on the corrupted ImageNet-C dataset [18].
+Variant Method sev1 sev2 sev3 sev4 sev5 Avg.↑ mCE↓
+ViT[13] 70.3 64.1 59.0 49.9 38.9 56.4 55.3
+B/16 TokenLearner3/4 [31] 69.0 62.8 57.9 49.5 39.5 55.7 56.3
+LookupViT5×5 70.6 64.2 58.6 49.7 38.8 56.4 55.3
+LookupViT7×7 72.0 65.8 60.7 52.0 41.6 58.4 52.8
+LookupViT10×10 72.9 67.1 62.2 53.9 43.6 59.9 50.8
+ViT[13] 68.3 62.4 57.3 49.2 39.3 55.3 54.7
+L/16 TokenLearner3/4 [31] 69.6 63.4 58.0 48.9 38.2 55.6 56.4
+LookupViT5×5 71.4 65.5 60.6 52.3 42.3 58.4 52.9
+LookupViT7×7 72.1 66.4 61.8 53.8 44.2 59.7 51.2
+LookupViT10×10 72.4 67.0 62.7 54.6 45.2 60.4 50.4
+In Figure 1b of the main text, we validate that the better performance of
+LookupViTinadversarialsettingsisnotamereartifactofitsbetterdiscriminatory
+power,meaningthatithasadditionalrobustnesspropertiescomparedtoavanilla
+ViT model. In order to show this, we analyse the deviation in the feature when
+the image is corrupted, for both vanilla ViT and LookupViT. Mathematically,
+for every image (X), we compute the normalized feature deviation
+||F(X)−F(X )||
+c 2
+||F(X)||
+2
+where X , F are the corrupted image version, and the model respectively. ||.||
+c 2
+denotes the L norm. A lower value for this metric signifies greater robustness to
+2
+perturbations. The distribution of feature deviation for LookupViT has a lower
+mean than vanilla ViT. Moreover, with increasing severity, the mean feature
+distance increases more for ViT than LookupViT.
+A.2 Performance Analysis on Something-Something-V2
+In Table 4 of the main text, we demonstrate that on the Something-Something
+V2 dataset [16], the performance improvements due to regularization when
+using the ViViT Factorised Encoder [1] model do not translate to the ViViT-
+Base model. In this section, we extensively try to enhance the vanilla ViViT-
+Base model. Table 7 lists the performance of the ViViT-Base model, when
+employed with different initialisation and regularisation strategies. The model is
+initialisedusingeitheraKinetics400oraImageNet21kpretrainedcheckpoint.We
+analyse these variants both in presence and absense of regularisation parametersLookupViT 19
+(label smoothing, mixup, stochastic droplayer). While the norm is to initialise
+with a Kinetics 400 checkpoint using regularisation parameters as mentioned
+in ViViT [1], but experiments show that for the base model, the unregularised
+variant performs better. However, LookupViT based ViViT-Base models, with
+the standard set of parameters outperforms all of these. As we can see, even after
+all the improvements on vanilla ViViT model, LookupViT with half the FLOPs
+exhibits better performance.
+WhiletheKinetics-400datasetsuffersfromstaticbias[26],SSv2doesnotand
+thusperformanceonthisdatasetisoftenusedasameasureofbeingunbiased[24].
+Our method’s better performance on SSv2 can be attributed to it being less
+biased.
+Table 7: Comparison of LookupViT-B/16 based ViViT [1] model with fine-tuned
+ViViT-Base on the SomethingSomethingV2 [16] dataset.
+SomethingSomethingV2
+Method GFLOPs/view K400Init Reg
+1view 12views
+50.8 52.8 455.1 × ✓
+ViViT [13] 51.2 52.3 455.1 ✓ ✓
+54.5 56.5 455.1 × ×
+55.0 57.1 455.1 ✓ ×
+LookupViT9×9×8 56.3 58.3 226.5 ✓ ✓
+LookupViT8×8×16 57.0 59.2 311.2 ✓ ✓
+LookupViT9×9×16 57.1 59.6 375.8 ✓ ✓
+A.3 Comparison with other efficient networks on ImageNet-1k
+While we compare our method against three key architectures - ViT, Token
+Learner and Perceiver, in the main paper, we further contrast the performance
+of LookupViT against some more techniques in Table 8. Since some of these
+methods report results using different training frameworks (ViT/DeIT/DeIT3),
+we report relative gains in accuracy along with relative computational savings
+for a fair comparison.
+A.4 Few-shot Transfer Results
+In this section, we compare the generalization properties of LookupViT as
+compared to ViT, through few shot evaluations on standard image datasets like
+Table 8: Comparisons with respective B/16 baselines on IN-1k
+Model→ CViT[38] ST[28] Compress[37] CAP[23] LViT-B/167×7
+Accuracy(%↑) +0.8 +0.7 -0.6 -0.2 +1.1
+GFLOPS(↓) 1x 1x 0.67x 0.5x 0.67x20 Koner et al.
+Birds, CalTech, CIFAR100, ImageNet-1k, and Pets. For this set of experiments,
+we use models pre-trained on ImageNet-21k and evaluate them on these datasets
+under three settings - 1-shot, 5-shot and 25-shot. The results are presented in
+Table9.Itcanbenotedthatourmethodoutperformsthebasemodelperformance
+on a lot of these settings, often by significant margins.
+Table 9: Few-shot eval, ViT & LViT (B/16), IN-21K pre-training (1s: 1 shot)
+Birds CalTech CIFAR100 IN-1K Pets
+1s 5s 25s 1s 5s 25s 1s 5s 25s 1s 5s 25s 1s 5s 25s
+ViT 63 80 87 80 86 91 52 77 84 52 71 77 70 86 92
+LViT10×10 65 79 85 83 87 91 61 81 86 64 77 80 76 87 92
+A.5 Attention Maps across Image Sizes and Primary Token Count
+Figure 6 depicts the attention maps computed by the LookupViT-B/16 model
+trained on ImageNet-1k for different image resolutions and number of primary
+tokens. Each row is annotated with the corresponding values for these two
+parameters on the left. Each row represents the image, followed by the layerwise
+attention maps, averaged over all the attention heads, as well as over the primary
+tokens.
+As the image resolution goes up, the cross-attention maps become finer in
+the sense that their representation power goes up. This is consistent with vanilla
+ViT models. However, the number of primary tokens being another choice to
+be made, there are two things at play in LookupViT. With a constant primary
+token count and increasing image resolution, the down-sampling ratio goes up
+and thus the information bottleneck becomes more stringent. A weak signal of
+the argument can be seen in Figure 6, where the attention maps for (384, 3) look
+“stronger" than those for (512, 3). However, the increasing accuracy trend with
+resolution for all patch sizes, as seen in Figure 1b (of paper), indicates that this
+effect is well subdued.
+Another interesting detail to note here is the identification of salient objects
+intheearlylayersitself.Thisallowsthelaterlayerstoconcentrateontherelevant
+regions. Analogous to ViT, information is repurposed across tokens in the later
+layers for easier internal computation, which may not be otherwise intuitive or
+aligned with the image [9]. This partially explains the artifacts in the attention
+maps, and works from literature [9] can mitigate them for better visualization.
+A.6 Attention Maps on Something-Something-V2 Video
+Classification
+Figure 7 depicts the attention maps computed by LookupViT for some of the
+video inputs from the Something-Something-v2 dataset. In the case of images,LookupViT 21
+the attention maps from the second layer of the model best correlated with the
+imagefeatures.However,inthecaseofvideos,weobservethatthefirstlayerbest
+represents the local information. In Figure 7, the sampled video frames and the
+attention maps at the same temporal stamps have been presented as sequences
+of images.
+The first example supports the model’s capability to readjust its focus to
+suddenly occuring motion. Towards the end of this video, a piece of paper falls
+into view and the attention maps quickly adjust and focus on the falling piece of
+paper. The second example is a good representation of the model’s capability of
+identifying and focusing on the salient object. This is evident by the fact that
+Fig.6: The above set of figures depict the layerwise attention maps for various image
+resolutions and the number of primary tokens. The label on the left (R, S) indicates
+a image resolution "R" and number of primary tokens "S" along each of the 2D axis.
+Note that the attention maps become finer as the image resolution goes up.22 Koner et al.
+Fig.7: Attention maps computed by LookupViT model during video classification
+on the Something-Something-v2 dataset. Each pair of rows represent the changes in
+video frames and corresponding attention maps with time (x-axis). The attention maps
+are taken from the first layer of the model and are averaged along the heads and the
+primary tokens.
+the attention maps neglect the static but complicated background effectively
+and only focus on the moving object (cook pan) in the foreground. The third
+example represents the model’s capability to identify small objects. Even with a
+very coarse attention map, the moving hand in the video is effectively traced by
+the attention values. These observations provide a visual demonstration of the
+model’s capabilities and support its applicability in a variety of scenarios.

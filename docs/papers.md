@@ -2,315 +2,335 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11969v1 |
-|title| Does Refusal Training in LLMs Generalize to the Past Tense? |
-|authors| Maksym AndriushchenkoNicolas Flammarion
-|links| http://arxiv.org/abs/2407.11969v1 |
-|updated| 2024-07-16 17:59:55 UTC |
-|summary| Refusal training is widely used to prevent LLMs from generating harmfulundesirable or illegal outputs. We reveal a curious generalization gap in thecurrent refusal training approaches: simply reformulating a harmful request inthe past tense e.g. How to make a Molotov cocktail to How did people makea Molotov cocktail is often sufficient to jailbreak many state-of-the-artLLMs. We systematically evaluate this method on Llama-3 8B GPT-3.5 TurboGemma-2 9B Phi-3-Mini GPT-4o and R2D2 models using GPT-3.5 Turbo as areformulation model. For example the success rate of this simple attack onGPT-4o increases from 1 using direct requests to 88 using 20 past tensereformulation attempts on harmful requests from JailbreakBench with GPT-4 as ajailbreak judge. Interestingly we also find that reformulations in the futuretense are less effective suggesting that refusal guardrails tend to considerpast historical questions more benign than hypothetical future questions.Moreover our experiments on fine-tuning GPT-3.5 Turbo show that defendingagainst past reformulations is feasible when past tense examples are explicitlyincluded in the fine-tuning data. Overall our findings highlight that thewidely used alignment techniques -- such as SFT RLHF and adversarial training-- employed to align the studied models can be brittle and do not alwaysgeneralize as intended. We provide code and jailbreak artifacts athttps://github.com/tml-epfl/llm-past-tense. |
+|idx| 2407.12772v1 |
+|title| LMMs-Eval: Reality Check on the Evaluation of Large Multimodal Models |
+|authors| Kaichen ZhangBo LiPeiyuan ZhangFanyi PuJoshua Adrian CahyonoKairui HuShuai LiuYuanhan ZhangJingkang YangChunyuan LiZiwei Liu
+|links| http://arxiv.org/abs/2407.12772v1 |
+|updated| 2024-07-17 17:51:53 UTC |
+|summary| The advances of large foundation models necessitate wide-coverage low-costand zero-contamination benchmarks. Despite continuous exploration of languagemodel evaluations comprehensive studies on the evaluation of Large Multi-modalModels LMMs remain limited. In this work we introduce LMMS-EVAL a unifiedand standardized multimodal benchmark framework with over 50 tasks and morethan 10 models to promote transparent and reproducible evaluations. AlthoughLMMS-EVAL offers comprehensive coverage we find it still falls short inachieving low cost and zero contamination. To approach this evaluationtrilemma we further introduce LMMS-EVAL LITE a pruned evaluation toolkit thatemphasizes both coverage and efficiency. Additionally we present MultimodalLIVEBENCH that utilizes continuously updating news and online forums to assessmodels generalization abilities in the wild featuring a low-cost andzero-contamination evaluation approach. In summary our work highlights theimportance of considering the evaluation trilemma and provides practicalsolutions to navigate the trade-offs in evaluating large multi-modal modelspaving the way for more effective and reliable benchmarking of LMMs. Weopensource our codebase and maintain leaderboard of LIVEBENCH athttps://github.com/EvolvingLMMs-Lab/lmms-eval andhttps://huggingface.co/spaces/lmms-lab/LiveBench. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11963v1 |
-|title| NeedleBench: Can LLMs Do Retrieval and Reasoning in 1 Million Context Window? |
-|authors| Mo LiSongyang ZhangYunxin LiuKai Chen
-|links| http://arxiv.org/abs/2407.11963v1 |
-|updated| 2024-07-16 17:59:06 UTC |
-|summary| In evaluating the long-context capabilities of large language models LLMsidentifying content relevant to a users query from original long documents isa crucial prerequisite for any LLM to answer questions based on long text. Wepresent NeedleBench a framework consisting of a series of progressively morechallenging tasks for assessing bilingual long-context capabilities spanningmultiple length intervals 4k 8k 32k 128k 200k 1000k and beyond anddifferent depth ranges allowing the strategic insertion of critical datapoints in different text depth zones to rigorously test the retrieval andreasoning capabilities of models in diverse contexts. We use the NeedleBenchframework to assess how well the leading open-source models can identify keyinformation relevant to the question and apply that information to reasoning inbilingual long texts. Furthermore we propose the Ancestral Trace ChallengeATC to mimic the complexity of logical reasoning challenges that are likelyto be present in real-world long-context tasks providing a simple method forevaluating LLMs in dealing with complex long-context situations. Our resultssuggest that current LLMs have significant room for improvement in practicallong-context applications as they struggle with the complexity of logicalreasoning challenges that are likely to be present in real-world long-contexttasks. All codes and resources are available at OpenCompass:https://github.com/open-compass/opencompass. |
+|idx| 2407.12771v1 |
+|title| The Role of Network and Identity in the Diffusion of Hashtags |
+|authors| Aparna AnanthasubramaniamYufei ZhuDavid JurgensDaniel Romero
+|links| http://arxiv.org/abs/2407.12771v1 |
+|updated| 2024-07-17 17:51:49 UTC |
+|summary| Although the spread of behaviors is influenced by many social factorsexisting literature tends to study the effects of single factors -- most oftenproperties of the social network -- on the final cascade. In order to movetowards a more integrated view of cascades this paper offers the firstcomprehensive investigation into the role of two social factors in thediffusion of 1337 popular hashtags representing the production of novelculture on Twitter: 1 the topology of the Twitter social network and 2performance of each users probable demographic identity. Here we show thatcascades are best modeled using a combination of network and identity ratherthan either factor alone. This combined model best reproduces a composite indexof ten cascade properties across all 1337 hashtags. However there isimportant heterogeneity in what social factors are required to reproducedifferent properties of hashtag cascades. For instance while a combinednetworkidentity model best predicts the popularity of cascades a network-onlymodel has better performance in predicting cascade growth and an identity-onlymodel in adopter composition. We are able to predict what type of hashtag isbest modeled by each combination of features and use this to further improveperformance. Additionally consistent with prior literature on the combinednetworkidentity model most outperforms the single-factor counterfactuals amonghashtags used for expressing racial or regional identity stance-takingtalking about sports or variants of existing cultural trends with very slow-or fast-growing communicative need. In sum our results imply the utility ofmulti-factor models in predicting cascades in order to account for the variedways in which network identity and other social factors play a role in thediffusion of hashtags on Twitter. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11948v1 |
-|title| Rethinking Transformer-based Multi-document Summarization: An Empirical Investigation |
-|authors| Congbo MaWei Emma ZhangDileepa PitawelaHaojie ZhuangYanfeng Shu
-|links| http://arxiv.org/abs/2407.11948v1 |
-|updated| 2024-07-16 17:42:37 UTC |
-|summary| The utilization of Transformer-based models prospers the growth ofmulti-document summarization MDS. Given the huge impact and widespreadadoption of Transformer-based models in various natural language processingtasks investigating their performance and behaviors in the context of MDSbecomes crucial for advancing the field and enhancing the quality of summary.To thoroughly examine the behaviours of Transformer-based MDS models thispaper presents five empirical studies on 1 measuring the impact of documentboundary separators quantitatively 2 exploring the effectiveness ofdifferent mainstream Transformer structures 3 examining the sensitivity ofthe encoder and decoder 4 discussing different training strategies and 5discovering the repetition in a summary generation. The experimental results onprevalent MDS datasets and eleven evaluation metrics show the influence ofdocument boundary separators the granularity of different level features anddifferent model training strategies. The results also reveal that the decoderexhibits greater sensitivity to noises compared to the encoder. Thisunderscores the important role played by the decoder suggesting a potentialdirection for future research in MDS. Furthermore the experimental resultsindicate that the repetition problem in the generated summaries hascorrelations with the high uncertainty scores. |
+|idx| 2407.12749v1 |
+|title| HDLCopilot: Hardware Design Library Querying with Natural Language |
+|authors| Manar AbdelattySherief Reda
+|links| http://arxiv.org/abs/2407.12749v1 |
+|updated| 2024-07-17 17:11:13 UTC |
+|summary| Hardware design engineers routinely work with multiple Process Design KitsPDKs from various fabrication labs each containing several standard celllibraries optimized for specific metric such as speed power or density.These libraries include multiple views such as liberty files for timinginformation LEF files for abstract layout details and technology LEF forprocess design rules. Navigating this complex landscape to retrieve specificinformation about gates or design rules is often time-consuming anderror-prone. To address this we present HDLCopilot an LLM-powered PDK querysystem that allows engineers to streamline interactions with PDKs in naturallanguage format making information retrieval accurate and more efficient.HDLCopilot achieves an accuracy of 94.23 on an evaluation set comprised ofdiverse and complex natural language queries. HDLCopilot positions itself as apowerful assistant in the hardware design process enhancing productivity andreducing potential human errors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11930v1 |
-|title| Fine-grained Hallucination Detection and Mitigation in Long-form Question Answering |
-|authors| Rachneet SachdevaYixiao SongMohit IyyerIryna Gurevych
-|links| http://arxiv.org/abs/2407.11930v1 |
-|updated| 2024-07-16 17:23:16 UTC |
-|summary| Long-form question answering LFQA aims to provide thorough and in-depthanswers to complex questions enhancing comprehension. However such detailedresponses are prone to hallucinations and factual inconsistencies challengingtheir faithful evaluation. This work introduces HaluQuestQA the firsthallucination dataset with localized error annotations for human-written andmodel-generated LFQA answers. HaluQuestQA comprises 698 QA pairs with 4.7kspan-level error annotations for five different error types by expertannotators along with preference judgments. Using our collected data wethoroughly analyze the shortcomings of long-form answers and find that theylack comprehensiveness and provide unhelpful references. We train an automaticfeedback model on this dataset that predicts error spans with incompleteinformation and provides associated explanations. Finally we propose aprompt-based approach Error-informed refinement that uses signals from thelearned feedback model to refine generated answers which we show reduceshallucination and improves answer quality. Furthermore humans find answersgenerated by our approach comprehensive and highly prefer them 84 over thebaseline answers. |
+|idx| 2407.12734v1 |
+|title| A LLM Benchmark based on the Minecraft Builder Dialog Agent Task |
+|authors| Chris MadgeMassimo Poesio
+|links| http://arxiv.org/abs/2407.12734v1 |
+|updated| 2024-07-17 16:52:23 UTC |
+|summary| In this work we proposing adapting the Minecraft builder task into an LLMbenchmark suitable for evaluating LLM ability in spatially orientated tasksand informing builder agent design. Previous works have proposed corpora withvarying complex structures and human written instructions. We instead attemptto provide a comprehensive synthetic benchmark for testing builder agents overa series of distinct tasks that comprise of common building operations. Webelieve this approach allows us to probe specific strengths and weaknesses ofdifferent agents and test the ability of LLMs in the challenging area ofspatial reasoning and vector based math. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11919v1 |
-|title| What's Wrong? Refining Meeting Summaries with LLM Feedback |
-|authors| Frederic KirsteinTerry RuasBela Gipp
-|links| http://arxiv.org/abs/2407.11919v1 |
-|updated| 2024-07-16 17:10:16 UTC |
-|summary| Meeting summarization has become a critical task since digital encountershave become a common practice. Large language models LLMs show greatpotential in summarization offering enhanced coherence and contextunderstanding compared to traditional methods. However they still struggle tomaintain relevance and avoid hallucination. We introduce a multi-LLM correctionapproach for meeting summarization using a two-phase process that mimics thehuman review process: mistake identification and summary refinement. We releaseQMSum Mistake a dataset of 200 automatically generated meeting summariesannotated by humans on nine error types including structural omission andirrelevance errors. Our experiments show that these errors can be identifiedwith high accuracy by an LLM. We transform identified mistakes into actionablefeedback to improve the quality of a given summary measured by relevanceinformativeness conciseness and coherence. This post-hoc refinementeffectively improves summary quality by leveraging multiple LLMs to validateoutput quality. Our multi-LLM approach for meeting summarization showspotential for similar complex text generation tasks requiring robustnessaction planning and discussion towards a goal. |
+|idx| 2407.12725v1 |
+|title| Is Sarcasm Detection A Step-by-Step Reasoning Process in Large Language Models? |
+|authors| Ben YaoYazhou ZhangQiuchi LiJing Qin
+|links| http://arxiv.org/abs/2407.12725v1 |
+|updated| 2024-07-17 16:42:03 UTC |
+|summary| Elaborating a series of intermediate reasoning steps significantly improvesthe ability of large language models LLMs to solve complex problems as suchsteps would evoke LLMs to think sequentially. However human sarcasmunderstanding is often considered an intuitive and holistic cognitive processin which various linguistic contextual and emotional cues are integrated toform a comprehensive understanding of the speakers true intention which isargued not be limited to a step-by-step reasoning process. To verify thisargument we introduce a new prompting framework called SarcasmCue whichcontains four prompting strategies viz. chain of contradiction CoC graphof cues GoC bagging of cues BoC and tensor of cues ToC which elicitsLLMs to detect human sarcasm by considering sequential and non-sequentialprompting methods. Through a comprehensive empirical comparison on fourbenchmarking datasets we show that the proposed four prompting methodsoutperforms standard IO prompting CoT and ToT with a considerable margin andnon-sequential prompting generally outperforms sequential prompting. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11969v1 |
-|title| Does Refusal Training in LLMs Generalize to the Past Tense? |
-|authors| Maksym AndriushchenkoNicolas Flammarion
-|links| http://arxiv.org/abs/2407.11969v1 |
-|updated| 2024-07-16 17:59:55 UTC |
-|summary| Refusal training is widely used to prevent LLMs from generating harmfulundesirable or illegal outputs. We reveal a curious generalization gap in thecurrent refusal training approaches: simply reformulating a harmful request inthe past tense e.g. How to make a Molotov cocktail to How did people makea Molotov cocktail is often sufficient to jailbreak many state-of-the-artLLMs. We systematically evaluate this method on Llama-3 8B GPT-3.5 TurboGemma-2 9B Phi-3-Mini GPT-4o and R2D2 models using GPT-3.5 Turbo as areformulation model. For example the success rate of this simple attack onGPT-4o increases from 1 using direct requests to 88 using 20 past tensereformulation attempts on harmful requests from JailbreakBench with GPT-4 as ajailbreak judge. Interestingly we also find that reformulations in the futuretense are less effective suggesting that refusal guardrails tend to considerpast historical questions more benign than hypothetical future questions.Moreover our experiments on fine-tuning GPT-3.5 Turbo show that defendingagainst past reformulations is feasible when past tense examples are explicitlyincluded in the fine-tuning data. Overall our findings highlight that thewidely used alignment techniques -- such as SFT RLHF and adversarial training-- employed to align the studied models can be brittle and do not alwaysgeneralize as intended. We provide code and jailbreak artifacts athttps://github.com/tml-epfl/llm-past-tense. |
+|idx| 2407.12773v1 |
+|title| OMG-Net: A Deep Learning Framework Deploying Segment Anything to Detect Pan-Cancer Mitotic Figures from Haematoxylin and Eosin-Stained Slides |
+|authors| Zhuoyan ShenMikael SimardDouglas BrandVanghelita AndreiAli Al-KhaderFatine OumlilKatherine TreversThomas ButtersSimon HaefligerEleanna KaraFernanda AmaryRoberto TiraboscoPaul CoolGary RoyleMaria A. HawkinsAdrienne M. FlanaganCharles-Antoine Collins Fekete
+|links| http://arxiv.org/abs/2407.12773v1 |
+|updated| 2024-07-17 17:53:37 UTC |
+|summary| Mitotic activity is an important feature for grading several cancer types.Counting mitotic figures MFs is a time-consuming laborious task prone tointer-observer variation. Inaccurate recognition of MFs can lead to incorrectgrading and hence potential suboptimal treatment. In this study we propose anartificial intelligence AI-aided approach to detect MFs in digitisedhaematoxylin and eosin-stained whole slide images WSIs. Advances in this areaare hampered by the limited number and types of cancer datasets of MFs. Here weestablish the largest pan-cancer dataset of mitotic figures by combining anin-house dataset of soft tissue tumours STMF with five open-source mitoticdatasets comprising multiple human cancers and canine specimens ICPR TUPACCCMCT CMC and MIDOG. This new dataset identifies 74620 MFs and 105538mitotic-like figures. We then employed a two-stage framework the OptimisedMitoses Generator Network OMG-Net to classify MFs. The framework firstdeploys the Segment Anything Model SAM to automate the contouring of MFs andsurrounding objects. An adapted ResNet18 is subsequently trained to classifyMFs. OMG-Net reaches an F1-score of 0.84 on pan-cancer MF detection breastcarcinoma neuroendocrine tumour and melanoma largely outperforming theprevious state-of-the-art MIDOG benchmark model on its hold-out testing sete.g. 16 F1-score on breast cancer detection p0.001 thereby providingsuperior accuracy in detecting MFs on various types of tumours obtained withdifferent scanners. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11966v1 |
-|title| Efficient Training with Denoised Neural Weights |
-|authors| Yifan GongZheng ZhanYanyu LiYerlan IdelbayevAndrey ZharkovKfir AbermanSergey TulyakovYanzhi WangJian Ren
-|links| http://arxiv.org/abs/2407.11966v1 |
-|updated| 2024-07-16 17:59:42 UTC |
-|summary| Good weight initialization serves as an effective measure to reduce thetraining cost of a deep neural network DNN model. The choice of how toinitialize parameters is challenging and may require manual tuning which canbe time-consuming and prone to human error. To overcome such limitations thiswork takes a novel step towards building a weight generator to synthesize theneural weights for initialization. We use the image-to-image translation taskwith generative adversarial networks GANs as an example due to the ease ofcollecting model weights spanning a wide range. Specifically we first collecta dataset with various image editing concepts and their corresponding trainedweights which are later used for the training of the weight generator. Toaddress the different characteristics among layers and the substantial numberof weights to be predicted we divide the weights into equal-sized blocks andassign each block an index. Subsequently a diffusion model is trained withsuch a dataset using both text conditions of the concept and the block indexes.By initializing the image translation model with the denoised weights predictedby our diffusion model the training requires only 43.3 seconds. Compared totraining from scratch i.e. Pix2pix we achieve a 15x training timeacceleration for a new concept while obtaining even better image generationquality. |
+|idx| 2407.12753v1 |
+|title| LookupViT: Compressing visual information to a limited number of tokens |
+|authors| Rajat KonerGagan JainPrateek JainVolker TrespSujoy Paul
+|links| http://arxiv.org/abs/2407.12753v1 |
+|updated| 2024-07-17 17:22:43 UTC |
+|summary| Vision Transformers ViT have emerged as the de-facto choice for numerousindustry grade vision solutions. But their inference cost can be prohibitivefor many settings as they compute self-attention in each layer which suffersfrom quadratic computational complexity in the number of tokens. On the otherhand spatial information in images and spatio-temporal information in videosis usually sparse and redundant. In this work we introduce LookupViT thataims to exploit this information sparsity to reduce ViT inference cost.LookupViT provides a novel general purpose vision transformer block thatoperates by compressing information from higher resolution tokens to a fixednumber of tokens. These few compressed tokens undergo meticulous processingwhile the higher-resolution tokens are passed through computationally cheaperlayers. Information sharing between these two token sets is enabled through abidirectional cross-attention mechanism. The approach offers multipleadvantages - a easy to implement on standard ML accelerators GPUs/TPUs viastandard high-level operators b applicable to standard ViT and its variantsthus generalizes to various tasks c can handle different tokenization andattention approaches. LookupViT also offers flexibility for the compressedtokens enabling performance-computation trade-offs in a single trained model.We show LookupViTs effectiveness on multiple domains - a forimage-classification ImageNet-1K and ImageNet-21K b video classificationKinetics400 and Something-Something V2 c image captioning COCO-Captionswith a frozen encoder. LookupViT provides 2times reduction in FLOPs whileupholding or improving accuracy across these domains. In addition LookupViTalso demonstrates out-of-the-box robustness and generalization on imageclassification ImageNet-CRAO improving by up to 4 over ViT. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11962v1 |
-|title| Motion-Oriented Compositional Neural Radiance Fields for Monocular Dynamic Human Modeling |
-|authors| Jaehyeok KimDongyoon WeeDan Xu
-|links| http://arxiv.org/abs/2407.11962v1 |
-|updated| 2024-07-16 17:59:01 UTC |
-|summary| This paper introduces Motion-oriented Compositional Neural Radiance FieldsMoCo-NeRF a framework designed to perform free-viewpoint rendering ofmonocular human videos via novel non-rigid motion modeling approach. In thecontext of dynamic clothed humans complex cloth dynamics generate non-rigidmotions that are intrinsically distinct from skeletal articulations andcritically important for the rendering quality. The conventional approachmodels non-rigid motions as spatial 3D deviations in addition to skeletaltransformations. However it is either time-consuming or challenging to achieveoptimal quality due to its high learning complexity without a directsupervision. To target this problem we propose a novel approach of modelingnon-rigid motions as radiance residual fields to benefit from more direct colorsupervision in the rendering and utilize the rigid radiance fields as a priorto reduce the complexity of the learning process. Our approach utilizes asingle multiresolution hash encoding MHE to concurrently learn the canonicalT-pose representation from rigid skeletal motions and the radiance residualfield for non-rigid motions. Additionally to further improve both trainingefficiency and usability we extend MoCo-NeRF to support simultaneous trainingof multiple subjects within a single framework thanks to our effective designfor modeling non-rigid motions. This scalability is achieved through theintegration of a global MHE and learnable identity codes in addition tomultiple local MHEs. We present extensive results on ZJU-MoCap and MonoCapclearly demonstrating state-of-the-art performance in both single- andmulti-subject settings. The code and model will be made publicly available atthe project page: https://stevejaehyeok.github.io/publications/moco-nerf. |
+|idx| 2407.12736v1 |
+|title| CHOSEN: Compilation to Hardware Optimization Stack for Efficient Vision Transformer Inference |
+|authors| Mohammad Erfan SadeghiArash FayyaziSuhas SomashekarMassoud Pedram
+|links| http://arxiv.org/abs/2407.12736v1 |
+|updated| 2024-07-17 16:56:06 UTC |
+|summary| Vision Transformers ViTs represent a groundbreaking shift in machinelearning approaches to computer vision. Unlike traditional approaches ViTsemploy the self-attention mechanism which has been widely used in naturallanguage processing to analyze image patches. Despite their advantages inmodeling visual tasks deploying ViTs on hardware platforms notablyField-Programmable Gate Arrays FPGAs introduces considerable challenges.These challenges stem primarily from the non-linear calculations and highcomputational and memory demands of ViTs. This paper introduces CHOSEN asoftware-hardware co-design framework to address these challenges and offer anautomated framework for ViT deployment on the FPGAs in order to maximizeperformance. Our framework is built upon three fundamental contributions:multi-kernel design to maximize the bandwidth mainly targeting benefits ofmulti DDR memory banks approximate non-linear functions that exhibit minimalaccuracy degradation and efficient use of available logic blocks on the FPGAand efficient compiler to maximize the performance and memory-efficiency of thecomputing kernels by presenting a novel algorithm for design space explorationto find optimal hardware configuration that achieves optimal throughput andlatency. Compared to the state-of-the-art ViT accelerators CHOSEN achieves a1.5x and 1.42x improvement in the throughput on the DeiT-S and DeiT-B models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11948v1 |
-|title| Rethinking Transformer-based Multi-document Summarization: An Empirical Investigation |
-|authors| Congbo MaWei Emma ZhangDileepa PitawelaHaojie ZhuangYanfeng Shu
-|links| http://arxiv.org/abs/2407.11948v1 |
-|updated| 2024-07-16 17:42:37 UTC |
-|summary| The utilization of Transformer-based models prospers the growth ofmulti-document summarization MDS. Given the huge impact and widespreadadoption of Transformer-based models in various natural language processingtasks investigating their performance and behaviors in the context of MDSbecomes crucial for advancing the field and enhancing the quality of summary.To thoroughly examine the behaviours of Transformer-based MDS models thispaper presents five empirical studies on 1 measuring the impact of documentboundary separators quantitatively 2 exploring the effectiveness ofdifferent mainstream Transformer structures 3 examining the sensitivity ofthe encoder and decoder 4 discussing different training strategies and 5discovering the repetition in a summary generation. The experimental results onprevalent MDS datasets and eleven evaluation metrics show the influence ofdocument boundary separators the granularity of different level features anddifferent model training strategies. The results also reveal that the decoderexhibits greater sensitivity to noises compared to the encoder. Thisunderscores the important role played by the decoder suggesting a potentialdirection for future research in MDS. Furthermore the experimental resultsindicate that the repetition problem in the generated summaries hascorrelations with the high uncertainty scores. |
+|idx| 2407.12730v1 |
+|title| RoDE: Linear Rectified Mixture of Diverse Experts for Food Large Multi-Modal Models |
+|authors| Pengkun JiaoXinlan WuBin ZhuJingjing ChenChong-Wah NgoYugang Jiang
+|links| http://arxiv.org/abs/2407.12730v1 |
+|updated| 2024-07-17 16:49:34 UTC |
+|summary| Large Multi-modal Models LMMs have significantly advanced a variety ofvision-language tasks. The scalability and availability of high-qualitytraining data play a pivotal role in the success of LMMs. In the realm of foodwhile comprehensive food datasets such as Recipe1M offer an abundance ofingredient and recipe information they often fall short of providing ampledata for nutritional analysis. The Recipe1M dataset despite offering a subsetfor nutritional evaluation is limited in the scale and accuracy of nutritioninformation. To bridge this gap we introduce Uni-Food a unified food datasetthat comprises over 100000 images with various food labels includingcategories ingredients recipes and ingredient-level nutritional information.Uni-Food is designed to provide a more holistic approach to food data analysisthereby enhancing the performance and capabilities of LMMs in this domain. Tomitigate the conflicts arising from multi-task supervision during fine-tuningof LMMs we introduce a novel Linear Rectification Mixture of Diverse ExpertsRoDE approach. RoDE utilizes a diverse array of experts to address tasks ofvarying complexity thereby facilitating the coordination of trainableparameters i.e. it allocates more parameters for more complex tasks andconversely fewer parameters for simpler tasks. RoDE implements linearrectification union to refine the routers functionality thereby enhancing theefficiency of sparse task allocation. These design choices endow RoDE withfeatures that ensure GPU memory efficiency and ease of optimization. Ourexperimental results validate the effectiveness of our proposed approach inaddressing the inherent challenges of food-related multitasking. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11928v1 |
-|title| Tackling Oversmoothing in GNN via Graph Sparsification: A Truss-based Approach |
-|authors| Tanvir HossainKhaled Mohammed SaifuddinMuhammad Ifte Khairul IslamFarhan TanvirEsra Akbas
-|links| http://arxiv.org/abs/2407.11928v1 |
-|updated| 2024-07-16 17:21:36 UTC |
-|summary| Graph Neural Network GNN achieves great success for node-level andgraph-level tasks via encoding meaningful topological structures of networks invarious domains ranging from social to biological networks. However repeatedaggregation operations lead to excessive mixing of node representationsparticularly in dense regions with multiple GNN layers resulting in nearlyindistinguishable embeddings. This phenomenon leads to the oversmoothingproblem that hampers downstream graph analytics tasks. To overcome this issuewe propose a novel and flexible truss-based graph sparsification model thatprunes edges from dense regions of the graph. Pruning redundant edges in denseregions helps to prevent the aggregation of excessive neighborhood informationduring hierarchical message passing and pooling in GNN models. We then utilizeour sparsification model in the state-of-the-art baseline GNNs and poolingmodels such as GIN SAGPool GMT DiffPool MinCutPool HGP-SL DMonPool andAdamGNN. Extensive experiments on different real-world datasets show that ourmodel significantly improves the performance of the baseline GNN models in thegraph classification task. |
+|idx| 2407.12724v1 |
+|title| An Evaluation of Continual Learning for Advanced Node Semiconductor Defect Inspection |
+|authors| Amit PrasadBappaditya DeyVictor BlancoSandip Halder
+|links| http://arxiv.org/abs/2407.12724v1 |
+|updated| 2024-07-17 16:41:22 UTC |
+|summary| Deep learning-based semiconductor defect inspection has gained traction inrecent years offering a powerful and versatile approach that provides highaccuracy adaptability and efficiency in detecting and classifying nano-scaledefects. However semiconductor manufacturing processes are continuallyevolving leading to the emergence of new types of defects over time. Thispresents a significant challenge for conventional supervised defect detectorsas they may suffer from catastrophic forgetting when trained on new defectdatasets potentially compromising performance on previously learned tasks. Analternative approach involves the constant storage of previously traineddatasets alongside pre-trained model versions which can be utilized forre-training from scratch or fine-tuning whenever encountering a new defectdataset. However adhering to such a storage template is impractical in termsof size particularly when considering High-Volume Manufacturing HVM.Additionally semiconductor defect datasets especially those encompassingstochastic defects are often limited and expensive to obtain thus lackingsufficient representation of the entire universal set of defectivity. This workintroduces a task-agnostic meta-learning approach aimed at addressing thischallenge which enables the incremental addition of new defect classes andscales to create a more robust and generalized model for semiconductor defectinspection. We have benchmarked our approach using real resist-wafer SEMScanning Electron Microscopy datasets for two process steps ADI and AEIdemonstrating its superior performance compared to conventional supervisedtraining methods. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11969v1 |
-|title| Does Refusal Training in LLMs Generalize to the Past Tense? |
-|authors| Maksym AndriushchenkoNicolas Flammarion
-|links| http://arxiv.org/abs/2407.11969v1 |
-|updated| 2024-07-16 17:59:55 UTC |
-|summary| Refusal training is widely used to prevent LLMs from generating harmfulundesirable or illegal outputs. We reveal a curious generalization gap in thecurrent refusal training approaches: simply reformulating a harmful request inthe past tense e.g. How to make a Molotov cocktail to How did people makea Molotov cocktail is often sufficient to jailbreak many state-of-the-artLLMs. We systematically evaluate this method on Llama-3 8B GPT-3.5 TurboGemma-2 9B Phi-3-Mini GPT-4o and R2D2 models using GPT-3.5 Turbo as areformulation model. For example the success rate of this simple attack onGPT-4o increases from 1 using direct requests to 88 using 20 past tensereformulation attempts on harmful requests from JailbreakBench with GPT-4 as ajailbreak judge. Interestingly we also find that reformulations in the futuretense are less effective suggesting that refusal guardrails tend to considerpast historical questions more benign than hypothetical future questions.Moreover our experiments on fine-tuning GPT-3.5 Turbo show that defendingagainst past reformulations is feasible when past tense examples are explicitlyincluded in the fine-tuning data. Overall our findings highlight that thewidely used alignment techniques -- such as SFT RLHF and adversarial training-- employed to align the studied models can be brittle and do not alwaysgeneralize as intended. We provide code and jailbreak artifacts athttps://github.com/tml-epfl/llm-past-tense. |
+|idx| 2407.12784v1 |
+|title| AgentPoison: Red-teaming LLM Agents via Poisoning Memory or Knowledge Bases |
+|authors| Zhaorun ChenZhen XiangChaowei XiaoDawn SongBo Li
+|links| http://arxiv.org/abs/2407.12784v1 |
+|updated| 2024-07-17 17:59:47 UTC |
+|summary| LLM agents have demonstrated remarkable performance across variousapplications primarily due to their advanced capabilities in reasoningutilizing external knowledge and tools calling APIs and executing actions tointeract with environments. Current agents typically utilize a memory module ora retrieval-augmented generation RAG mechanism retrieving past knowledge andinstances with similar embeddings from knowledge bases to inform task planningand execution. However the reliance on unverified knowledge bases raisessignificant concerns about their safety and trustworthiness. To uncover suchvulnerabilities we propose a novel red teaming approach AgentPoison the firstbackdoor attack targeting generic and RAG-based LLM agents by poisoning theirlong-term memory or RAG knowledge base. In particular we form the triggergeneration process as a constrained optimization to optimize backdoor triggersby mapping the triggered instances to a unique embedding space so as to ensurethat whenever a user instruction contains the optimized backdoor trigger themalicious demonstrations are retrieved from the poisoned memory or knowledgebase with high probability. In the meantime benign instructions without thetrigger will still maintain normal performance. Unlike conventional backdoorattacks AgentPoison requires no additional model training or fine-tuning andthe optimized backdoor trigger exhibits superior transferability in-contextcoherence and stealthiness. Extensive experiments demonstrate AgentPoisonseffectiveness in attacking three types of real-world LLM agents: RAG-basedautonomous driving agent knowledge-intensive QA agent and healthcareEHRAgent. On each agent AgentPoison achieves an average attack success ratehigher than 80 with minimal impact on benign performance less than 1 with apoison rate less than 0.1. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11966v1 |
-|title| Efficient Training with Denoised Neural Weights |
-|authors| Yifan GongZheng ZhanYanyu LiYerlan IdelbayevAndrey ZharkovKfir AbermanSergey TulyakovYanzhi WangJian Ren
-|links| http://arxiv.org/abs/2407.11966v1 |
-|updated| 2024-07-16 17:59:42 UTC |
-|summary| Good weight initialization serves as an effective measure to reduce thetraining cost of a deep neural network DNN model. The choice of how toinitialize parameters is challenging and may require manual tuning which canbe time-consuming and prone to human error. To overcome such limitations thiswork takes a novel step towards building a weight generator to synthesize theneural weights for initialization. We use the image-to-image translation taskwith generative adversarial networks GANs as an example due to the ease ofcollecting model weights spanning a wide range. Specifically we first collecta dataset with various image editing concepts and their corresponding trainedweights which are later used for the training of the weight generator. Toaddress the different characteristics among layers and the substantial numberof weights to be predicted we divide the weights into equal-sized blocks andassign each block an index. Subsequently a diffusion model is trained withsuch a dataset using both text conditions of the concept and the block indexes.By initializing the image translation model with the denoised weights predictedby our diffusion model the training requires only 43.3 seconds. Compared totraining from scratch i.e. Pix2pix we achieve a 15x training timeacceleration for a new concept while obtaining even better image generationquality. |
+|idx| 2407.12782v1 |
+|title| Contrastive Adversarial Training for Unsupervised Domain Adaptation |
+|authors| Jiahong ChenZhilin ZhangLucy LiBehzad ShahrasbiArjun Mishra
+|links| http://arxiv.org/abs/2407.12782v1 |
+|updated| 2024-07-17 17:59:21 UTC |
+|summary| Domain adversarial training has shown its effective capability for findingdomain invariant feature representations and been successfully adopted forvarious domain adaptation tasks. However recent advances of large modelse.g. vision transformers and emerging of complex adaptation scenarios e.g.DomainNet make adversarial training being easily biased towards source domainand hardly adapted to target domain. The reason is twofold: relying on largeamount of labelled data from source domain for large model training and lackingof labelled data from target domain for fine-tuning. Existing approaches widelyfocused on either enhancing discriminator or improving the training stabilityfor the backbone networks. Due to unbalanced competition between the featureextractor and the discriminator during the adversarial training existingsolutions fail to function well on complex datasets. To address this issue weproposed a novel contrastive adversarial training CAT approach that leveragesthe labeled source domain samples to reinforce and regulate the featuregeneration for target domain. Typically the regulation forces the targetfeature distribution being similar to the source feature distribution. CATaddressed three major challenges in adversarial learning: 1 ensure the featuredistributions from two domains as indistinguishable as possible for thediscriminator resulting in a more robust domain-invariant feature generation2 encourage target samples moving closer to the source in the feature spacereducing the requirement for generalizing classifier trained on the labeledsource domain to unlabeled target domain 3 avoid directly aligning unpairedsource and target samples within mini-batch. CAT can be easily plugged intoexisting models and exhibits significant performance improvements. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11962v1 |
-|title| Motion-Oriented Compositional Neural Radiance Fields for Monocular Dynamic Human Modeling |
-|authors| Jaehyeok KimDongyoon WeeDan Xu
-|links| http://arxiv.org/abs/2407.11962v1 |
-|updated| 2024-07-16 17:59:01 UTC |
-|summary| This paper introduces Motion-oriented Compositional Neural Radiance FieldsMoCo-NeRF a framework designed to perform free-viewpoint rendering ofmonocular human videos via novel non-rigid motion modeling approach. In thecontext of dynamic clothed humans complex cloth dynamics generate non-rigidmotions that are intrinsically distinct from skeletal articulations andcritically important for the rendering quality. The conventional approachmodels non-rigid motions as spatial 3D deviations in addition to skeletaltransformations. However it is either time-consuming or challenging to achieveoptimal quality due to its high learning complexity without a directsupervision. To target this problem we propose a novel approach of modelingnon-rigid motions as radiance residual fields to benefit from more direct colorsupervision in the rendering and utilize the rigid radiance fields as a priorto reduce the complexity of the learning process. Our approach utilizes asingle multiresolution hash encoding MHE to concurrently learn the canonicalT-pose representation from rigid skeletal motions and the radiance residualfield for non-rigid motions. Additionally to further improve both trainingefficiency and usability we extend MoCo-NeRF to support simultaneous trainingof multiple subjects within a single framework thanks to our effective designfor modeling non-rigid motions. This scalability is achieved through theintegration of a global MHE and learnable identity codes in addition tomultiple local MHEs. We present extensive results on ZJU-MoCap and MonoCapclearly demonstrating state-of-the-art performance in both single- andmulti-subject settings. The code and model will be made publicly available atthe project page: https://stevejaehyeok.github.io/publications/moco-nerf. |
+|idx| 2407.12764v1 |
+|title| Jigsaw Game: Federated Clustering |
+|authors| Jinxuan XuHong-You ChenWei-Lun ChaoYuqian Zhang
+|links| http://arxiv.org/abs/2407.12764v1 |
+|updated| 2024-07-17 17:42:25 UTC |
+|summary| Federated learning has recently garnered significant attention especiallywithin the domain of supervised learning. However despite the abundance ofunlabeled data on end-users unsupervised learning problems such as clusteringin the federated setting remain underexplored. In this paper we investigatethe federated clustering problem with a focus on federated k-means. We outlinethe challenge posed by its non-convex objective and data heterogeneity in thefederated framework. To tackle these challenges we adopt a new perspective bystudying the structures of local solutions in k-means and propose a one-shotalgorithm called FeCA Federated Centroid Aggregation. FeCA adaptively refineslocal solutions on clients then aggregates these refined solutions to recoverthe global solution of the entire dataset in a single round. We empiricallydemonstrate the robustness of FeCA under various federated scenarios on bothsynthetic and real-world data. Additionally we extend FeCA to representationlearning and present DeepFeCA which combines DeepCluster and FeCA forunsupervised feature learning in the federated setting. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11942v1 |
-|title| Context-Guided Diffusion for Out-of-Distribution Molecular and Protein Design |
-|authors| Leo KlarnerTim G. J. RudnerGarrett M. MorrisCharlotte M. DeaneYee Whye Teh
-|links| http://arxiv.org/abs/2407.11942v1 |
-|updated| 2024-07-16 17:34:00 UTC |
-|summary| Generative models have the potential to accelerate key steps in the discoveryof novel molecular therapeutics and materials. Diffusion models have recentlyemerged as a powerful approach excelling at unconditional sample generationand with data-driven guidance conditional generation within their trainingdomain. Reliably sampling from high-value regions beyond the training datahowever remains an open challenge -- with current methods predominantlyfocusing on modifying the diffusion process itself. In this paper we developcontext-guided diffusion CGD a simple plug-and-play method that leveragesunlabeled data and smoothness constraints to improve the out-of-distributiongeneralization of guided diffusion models. We demonstrate that this approachleads to substantial performance gains across various settings includingcontinuous discrete and graph-structured diffusion processes withapplications across drug discovery materials science and protein design. |
+|idx| 2407.12759v1 |
+|title| A survey and taxonomy of methods interpreting random forest models |
+|authors| Maissae HaddouchiAbdelaziz Berrado
+|links| http://arxiv.org/abs/2407.12759v1 |
+|updated| 2024-07-17 17:33:32 UTC |
+|summary| The interpretability of random forest RF models is a research topic ofgrowing interest in the machine learning ML community. In the state of theart RF is considered a powerful learning ensemble given its predictiveperformance flexibility and ease of use. Furthermore the inner process ofthe RF model is understandable because it uses an intuitive and intelligibleapproach for building the RF decision tree ensemble. However the RF resultingmodel is regarded as a black box because of its numerous deep decision trees.Gaining visibility over the entire process that induces the final decisions byexploring each decision tree is complicated if not impossible. This complexitylimits the acceptance and implementation of RF models in several fields ofapplication. Several papers have tackled the interpretation of RF models. Thispaper aims to provide an extensive review of methods used in the literature tointerpret RF resulting models. We have analyzed these methods and classifiedthem based on different axes. Although this review is not exhaustive itprovides a taxonomy of various techniques that should guide users in choosingthe most appropriate tools for interpreting RF models depending on theinterpretability aspects sought. It should also be valuable for researchers whoaim to focus their work on the interpretability of RF or ML black boxes ingeneral. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11933v1 |
-|title| Fairly Accurate: Optimizing Accuracy Parity in Fair Target-Group Detection |
-|authors| Soumyajit GuptaVenelin KovatchevMaria De-ArteagaMatthew Lease
-|links| http://arxiv.org/abs/2407.11933v1 |
-|updated| 2024-07-16 17:23:41 UTC |
-|summary| In algorithmic toxicity detection pipelines it is important to identifywhich demographic groups are the subject of a post a task commonly known astextittarget group detection. While accurate detection is clearlyimportant we further advocate a fairness objective: to provide equalprotection to all groups who may be targeted. To this end we adopttextitAccuracy Parity AP -- balanced detection accuracy across groups --as our fairness objective. However in order to align model training with ourAP fairness objective we require an equivalent loss function. Moreover forgradient-based models such as neural networks this loss function needs to bedifferentiable. Because no such loss function exists today for AP we proposeemphGroup Accuracy Parity GAP: the first differentiable loss functionhaving a one-on-one mapping to AP. We empirically show that GAP addressesdisparate impact on groups for target detection. Furthermore because a singlepost often targets multiple groups in practice we also provide a mathematicalextension of GAP to larger multi-group settings something typically requiringheuristics in prior work. Our findings show that by optimizing AP GAP bettermitigates bias in comparison with other commonly employed loss functions. |
+|idx| 2407.12753v1 |
+|title| LookupViT: Compressing visual information to a limited number of tokens |
+|authors| Rajat KonerGagan JainPrateek JainVolker TrespSujoy Paul
+|links| http://arxiv.org/abs/2407.12753v1 |
+|updated| 2024-07-17 17:22:43 UTC |
+|summary| Vision Transformers ViT have emerged as the de-facto choice for numerousindustry grade vision solutions. But their inference cost can be prohibitivefor many settings as they compute self-attention in each layer which suffersfrom quadratic computational complexity in the number of tokens. On the otherhand spatial information in images and spatio-temporal information in videosis usually sparse and redundant. In this work we introduce LookupViT thataims to exploit this information sparsity to reduce ViT inference cost.LookupViT provides a novel general purpose vision transformer block thatoperates by compressing information from higher resolution tokens to a fixednumber of tokens. These few compressed tokens undergo meticulous processingwhile the higher-resolution tokens are passed through computationally cheaperlayers. Information sharing between these two token sets is enabled through abidirectional cross-attention mechanism. The approach offers multipleadvantages - a easy to implement on standard ML accelerators GPUs/TPUs viastandard high-level operators b applicable to standard ViT and its variantsthus generalizes to various tasks c can handle different tokenization andattention approaches. LookupViT also offers flexibility for the compressedtokens enabling performance-computation trade-offs in a single trained model.We show LookupViTs effectiveness on multiple domains - a forimage-classification ImageNet-1K and ImageNet-21K b video classificationKinetics400 and Something-Something V2 c image captioning COCO-Captionswith a frozen encoder. LookupViT provides 2times reduction in FLOPs whileupholding or improving accuracy across these domains. In addition LookupViTalso demonstrates out-of-the-box robustness and generalization on imageclassification ImageNet-CRAO improving by up to 4 over ViT. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11966v1 |
-|title| Efficient Training with Denoised Neural Weights |
-|authors| Yifan GongZheng ZhanYanyu LiYerlan IdelbayevAndrey ZharkovKfir AbermanSergey TulyakovYanzhi WangJian Ren
-|links| http://arxiv.org/abs/2407.11966v1 |
-|updated| 2024-07-16 17:59:42 UTC |
-|summary| Good weight initialization serves as an effective measure to reduce thetraining cost of a deep neural network DNN model. The choice of how toinitialize parameters is challenging and may require manual tuning which canbe time-consuming and prone to human error. To overcome such limitations thiswork takes a novel step towards building a weight generator to synthesize theneural weights for initialization. We use the image-to-image translation taskwith generative adversarial networks GANs as an example due to the ease ofcollecting model weights spanning a wide range. Specifically we first collecta dataset with various image editing concepts and their corresponding trainedweights which are later used for the training of the weight generator. Toaddress the different characteristics among layers and the substantial numberof weights to be predicted we divide the weights into equal-sized blocks andassign each block an index. Subsequently a diffusion model is trained withsuch a dataset using both text conditions of the concept and the block indexes.By initializing the image translation model with the denoised weights predictedby our diffusion model the training requires only 43.3 seconds. Compared totraining from scratch i.e. Pix2pix we achieve a 15x training timeacceleration for a new concept while obtaining even better image generationquality. |
+|idx| 2407.12783v1 |
+|title| SMooDi: Stylized Motion Diffusion Model |
+|authors| Lei ZhongYiming XieVarun JampaniDeqing SunHuaizu Jiang
+|links| http://arxiv.org/abs/2407.12783v1 |
+|updated| 2024-07-17 17:59:42 UTC |
+|summary| We introduce a novel Stylized Motion Diffusion model dubbed SMooDi togenerate stylized motion driven by content texts and style motion sequences.Unlike existing methods that either generate motion of various content ortransfer style from one sequence to another SMooDi can rapidly generate motionacross a broad range of content and diverse styles. To this end we tailor apre-trained text-to-motion model for stylization. Specifically we proposestyle guidance to ensure that the generated motion closely matches thereference style alongside a lightweight style adaptor that directs the motiontowards the desired style while ensuring realism. Experiments across variousapplications demonstrate that our proposed framework outperforms existingmethods in stylized motion generation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11965v1 |
-|title| UrbanWorld: An Urban World Model for 3D City Generation |
-|authors| Yu ShangJiansheng ChenHangyu FanJingtao DingJie FengYong Li
-|links| http://arxiv.org/abs/2407.11965v1 |
-|updated| 2024-07-16 17:59:29 UTC |
-|summary| Cities as the most fundamental environment of human life encompass diversephysical elements such as buildings roads and vegetation with complexinterconnection. Crafting realistic interactive 3D urban environments plays acrucial role in constructing AI agents capable of perceiving decision-makingand acting like humans in real-world environments. However creatinghigh-fidelity 3D urban environments usually entails extensive manual labor fromdesigners involving intricate detailing and accurate representation of complexurban features. Therefore how to accomplish this in an automatical way remainsa longstanding challenge. Toward this problem we propose UrbanWorld the firstgenerative urban world model that can automatically create a customizedrealistic and interactive 3D urban world with flexible control conditions.UrbanWorld incorporates four key stages in the automatical crafting pipeline:3D layout generation from openly accessible OSM data urban scene planning anddesigning with a powerful urban multimodal large language model Urban MLLMcontrollable urban asset rendering with advanced 3D diffusion techniques andfinally the MLLM-assisted scene refinement. The crafted high-fidelity 3D urbanenvironments enable realistic feedback and interactions for general AI andmachine perceptual systems in simulations. We are working on contributingUrbanWorld as an open-source and versatile platform for evaluating andimproving AI abilities in perception decision-making and interaction inrealistic urban environments. |
+|idx| 2407.12782v1 |
+|title| Contrastive Adversarial Training for Unsupervised Domain Adaptation |
+|authors| Jiahong ChenZhilin ZhangLucy LiBehzad ShahrasbiArjun Mishra
+|links| http://arxiv.org/abs/2407.12782v1 |
+|updated| 2024-07-17 17:59:21 UTC |
+|summary| Domain adversarial training has shown its effective capability for findingdomain invariant feature representations and been successfully adopted forvarious domain adaptation tasks. However recent advances of large modelse.g. vision transformers and emerging of complex adaptation scenarios e.g.DomainNet make adversarial training being easily biased towards source domainand hardly adapted to target domain. The reason is twofold: relying on largeamount of labelled data from source domain for large model training and lackingof labelled data from target domain for fine-tuning. Existing approaches widelyfocused on either enhancing discriminator or improving the training stabilityfor the backbone networks. Due to unbalanced competition between the featureextractor and the discriminator during the adversarial training existingsolutions fail to function well on complex datasets. To address this issue weproposed a novel contrastive adversarial training CAT approach that leveragesthe labeled source domain samples to reinforce and regulate the featuregeneration for target domain. Typically the regulation forces the targetfeature distribution being similar to the source feature distribution. CATaddressed three major challenges in adversarial learning: 1 ensure the featuredistributions from two domains as indistinguishable as possible for thediscriminator resulting in a more robust domain-invariant feature generation2 encourage target samples moving closer to the source in the feature spacereducing the requirement for generalizing classifier trained on the labeledsource domain to unlabeled target domain 3 avoid directly aligning unpairedsource and target samples within mini-batch. CAT can be easily plugged intoexisting models and exhibits significant performance improvements. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11962v1 |
-|title| Motion-Oriented Compositional Neural Radiance Fields for Monocular Dynamic Human Modeling |
-|authors| Jaehyeok KimDongyoon WeeDan Xu
-|links| http://arxiv.org/abs/2407.11962v1 |
-|updated| 2024-07-16 17:59:01 UTC |
-|summary| This paper introduces Motion-oriented Compositional Neural Radiance FieldsMoCo-NeRF a framework designed to perform free-viewpoint rendering ofmonocular human videos via novel non-rigid motion modeling approach. In thecontext of dynamic clothed humans complex cloth dynamics generate non-rigidmotions that are intrinsically distinct from skeletal articulations andcritically important for the rendering quality. The conventional approachmodels non-rigid motions as spatial 3D deviations in addition to skeletaltransformations. However it is either time-consuming or challenging to achieveoptimal quality due to its high learning complexity without a directsupervision. To target this problem we propose a novel approach of modelingnon-rigid motions as radiance residual fields to benefit from more direct colorsupervision in the rendering and utilize the rigid radiance fields as a priorto reduce the complexity of the learning process. Our approach utilizes asingle multiresolution hash encoding MHE to concurrently learn the canonicalT-pose representation from rigid skeletal motions and the radiance residualfield for non-rigid motions. Additionally to further improve both trainingefficiency and usability we extend MoCo-NeRF to support simultaneous trainingof multiple subjects within a single framework thanks to our effective designfor modeling non-rigid motions. This scalability is achieved through theintegration of a global MHE and learnable identity codes in addition tomultiple local MHEs. We present extensive results on ZJU-MoCap and MonoCapclearly demonstrating state-of-the-art performance in both single- andmulti-subject settings. The code and model will be made publicly available atthe project page: https://stevejaehyeok.github.io/publications/moco-nerf. |
+|idx| 2407.12781v1 |
+|title| VD3D: Taming Large Video Diffusion Transformers for 3D Camera Control |
+|authors| Sherwin BahmaniIvan SkorokhodovAliaksandr SiarohinWilli MenapaceGuocheng QianMichael VasilkovskyHsin-Ying LeeChaoyang WangJiaxu ZouAndrea TagliasacchiDavid B. LindellSergey Tulyakov
+|links| http://arxiv.org/abs/2407.12781v1 |
+|updated| 2024-07-17 17:59:05 UTC |
+|summary| Modern text-to-video synthesis models demonstrate coherent photorealisticgeneration of complex videos from a text description. However most existingmodels lack fine-grained control over camera movement which is critical fordownstream applications related to content creation visual effects and 3Dvision. Recently new methods demonstrate the ability to generate videos withcontrollable camera poses these techniques leverage pre-trained U-Net-baseddiffusion models that explicitly disentangle spatial and temporal generation.Still no existing approach enables camera control for new transformer-basedvideo diffusion models that process spatial and temporal information jointly.Here we propose to tame video transformers for 3D camera control using aControlNet-like conditioning mechanism that incorporates spatiotemporal cameraembeddings based on Plucker coordinates. The approach demonstratesstate-of-the-art performance for controllable video generation afterfine-tuning on the RealEstate10K dataset. To the best of our knowledge ourwork is the first to enable camera control for transformer-based videodiffusion models. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11954v1 |
-|title| Gated Temporal Diffusion for Stochastic Long-Term Dense Anticipation |
-|authors| Olga ZatsarynnaEmad BahramiYazan Abu FarhaGianpiero FrancescaJuergen Gall
-|links| http://arxiv.org/abs/2407.11954v1 |
-|updated| 2024-07-16 17:48:05 UTC |
-|summary| Long-term action anticipation has become an important task for manyapplications such as autonomous driving and human-robot interaction. Unlikeshort-term anticipation predicting more actions into the future imposes a realchallenge with the increasing uncertainty in longer horizons. While there hasbeen a significant progress in predicting more actions into the future most ofthe proposed methods address the task in a deterministic setup and ignore theunderlying uncertainty. In this paper we propose a novel Gated TemporalDiffusion GTD network that models the uncertainty of both the observation andthe future predictions. As generator we introduce a Gated Anticipation NetworkGTAN to model both observed and unobserved frames of a video in a mutualrepresentation. On the one hand using a mutual representation for past andfuture allows us to jointly model ambiguities in the observation and futurewhile on the other hand GTAN can by design treat the observed and unobservedparts differently and steer the information flow between them. Our modelachieves state-of-the-art results on the Breakfast Assembly101 and 50Saladsdatasets in both stochastic and deterministic settings. Code:https://github.com/olga-zats/GTDA . |
+|idx| 2407.12777v1 |
+|title| Generalizable Human Gaussians for Sparse View Synthesis |
+|authors| Youngjoong KwonBaole FangYixing LuHaoye DongCheng ZhangFrancisco Vicente CarrascoAlbert Mosella-MontoroJianjin XuShingo TakagiDaeil KimAayush PrakashFernando De la Torre
+|links| http://arxiv.org/abs/2407.12777v1 |
+|updated| 2024-07-17 17:56:30 UTC |
+|summary| Recent progress in neural rendering has brought forth pioneering methodssuch as NeRF and Gaussian Splatting which revolutionize view rendering acrossvarious domains like AR/VR gaming and content creation. While these methodsexcel at interpolating em within the training data the challenge ofgeneralizing to new scenes and objects from very sparse views persists.Specifically modeling 3D humans from sparse views presents formidable hurdlesdue to the inherent complexity of human geometry resulting in inaccuratereconstructions of geometry and textures. To tackle this challenge this paperleverages recent advancements in Gaussian Splatting and introduces a new methodto learn generalizable human Gaussians that allows photorealistic and accurateview-rendering of a new human subject from a limited set of sparse views in afeed-forward manner. A pivotal innovation of our approach involvesreformulating the learning of 3D Gaussian parameters into a regression processdefined on the 2D UV space of a human template which allows leveraging thestrong geometry prior and the advantages of 2D convolutions. In addition amulti-scaffold is proposed to effectively represent the offset details. Ourmethod outperforms recent methods on both within-dataset generalization as wellas cross-dataset generalization settings. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11950v1 |
-|title| Temporally Consistent Stereo Matching |
-|authors| Jiaxi ZengChengtang YaoYuwei WuYunde Jia
-|links| http://arxiv.org/abs/2407.11950v1 |
-|updated| 2024-07-16 17:44:34 UTC |
-|summary| Stereo matching provides depth estimation from binocular images fordownstream applications. These applications mostly take video streams as inputand require temporally consistent depth maps. However existing methods mainlyfocus on the estimation at the single-frame level. This commonly leads totemporally inconsistent results especially in ill-posed regions. In thispaper we aim to leverage temporal information to improve the temporalconsistency accuracy and efficiency of stereo matching. To achieve this weformulate video stereo matching as a process of temporal disparity completionfollowed by continuous iterative refinements. Specifically we first projectthe disparity of the previous timestamp to the current viewpoint obtaining asemi-dense disparity map. Then we complete this map through a disparitycompletion module to obtain a well-initialized disparity map. The statefeatures from the current completion module and from the past refinement arefused together providing a temporally coherent state for subsequentrefinement. Based on this coherent state we introduce a dual-space refinementmodule to iteratively refine the initialized result in both disparity anddisparity gradient spaces improving estimations in ill-posed regions.Extensive experiments demonstrate that our method effectively alleviatestemporal inconsistency while enhancing both accuracy and efficiency. |
+|idx| 2407.12773v1 |
+|title| OMG-Net: A Deep Learning Framework Deploying Segment Anything to Detect Pan-Cancer Mitotic Figures from Haematoxylin and Eosin-Stained Slides |
+|authors| Zhuoyan ShenMikael SimardDouglas BrandVanghelita AndreiAli Al-KhaderFatine OumlilKatherine TreversThomas ButtersSimon HaefligerEleanna KaraFernanda AmaryRoberto TiraboscoPaul CoolGary RoyleMaria A. HawkinsAdrienne M. FlanaganCharles-Antoine Collins Fekete
+|links| http://arxiv.org/abs/2407.12773v1 |
+|updated| 2024-07-17 17:53:37 UTC |
+|summary| Mitotic activity is an important feature for grading several cancer types.Counting mitotic figures MFs is a time-consuming laborious task prone tointer-observer variation. Inaccurate recognition of MFs can lead to incorrectgrading and hence potential suboptimal treatment. In this study we propose anartificial intelligence AI-aided approach to detect MFs in digitisedhaematoxylin and eosin-stained whole slide images WSIs. Advances in this areaare hampered by the limited number and types of cancer datasets of MFs. Here weestablish the largest pan-cancer dataset of mitotic figures by combining anin-house dataset of soft tissue tumours STMF with five open-source mitoticdatasets comprising multiple human cancers and canine specimens ICPR TUPACCCMCT CMC and MIDOG. This new dataset identifies 74620 MFs and 105538mitotic-like figures. We then employed a two-stage framework the OptimisedMitoses Generator Network OMG-Net to classify MFs. The framework firstdeploys the Segment Anything Model SAM to automate the contouring of MFs andsurrounding objects. An adapted ResNet18 is subsequently trained to classifyMFs. OMG-Net reaches an F1-score of 0.84 on pan-cancer MF detection breastcarcinoma neuroendocrine tumour and melanoma largely outperforming theprevious state-of-the-art MIDOG benchmark model on its hold-out testing sete.g. 16 F1-score on breast cancer detection p0.001 thereby providingsuperior accuracy in detecting MFs on various types of tumours obtained withdifferent scanners. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11942v1 |
-|title| Context-Guided Diffusion for Out-of-Distribution Molecular and Protein Design |
-|authors| Leo KlarnerTim G. J. RudnerGarrett M. MorrisCharlotte M. DeaneYee Whye Teh
-|links| http://arxiv.org/abs/2407.11942v1 |
-|updated| 2024-07-16 17:34:00 UTC |
-|summary| Generative models have the potential to accelerate key steps in the discoveryof novel molecular therapeutics and materials. Diffusion models have recentlyemerged as a powerful approach excelling at unconditional sample generationand with data-driven guidance conditional generation within their trainingdomain. Reliably sampling from high-value regions beyond the training datahowever remains an open challenge -- with current methods predominantlyfocusing on modifying the diffusion process itself. In this paper we developcontext-guided diffusion CGD a simple plug-and-play method that leveragesunlabeled data and smoothness constraints to improve the out-of-distributiongeneralization of guided diffusion models. We demonstrate that this approachleads to substantial performance gains across various settings includingcontinuous discrete and graph-structured diffusion processes withapplications across drug discovery materials science and protein design. |
+|idx| 2407.12751v1 |
+|title| Scalable Monte Carlo for Bayesian Learning |
+|authors| Paul FearnheadChristopher NemethChris J. OatesChris Sherlock
+|links| http://arxiv.org/abs/2407.12751v1 |
+|updated| 2024-07-17 17:19:56 UTC |
+|summary| This book aims to provide a graduate-level introduction to advanced topics inMarkov chain Monte Carlo MCMC algorithms as applied broadly in the Bayesiancomputational context. Most if not all of these topics stochastic gradientMCMC non-reversible MCMC continuous time MCMC and new techniques forconvergence assessment have emerged as recently as the last decade and havedriven substantial recent practical and theoretical advances in the field. Aparticular focus is on methods that are scalable with respect to either theamount of data or the data dimension motivated by the emerging high-priorityapplication areas in machine learning and AI. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11932v1 |
-|title| Impossibility of latent inner product recovery via rate distortion |
-|authors| Cheng MaoShenduo Zhang
-|links| http://arxiv.org/abs/2407.11932v1 |
-|updated| 2024-07-16 17:23:29 UTC |
-|summary| In this largely expository note we present an impossibility result for innerproduct recovery in a random geometric graph or latent space model using therate-distortion theory. More precisely suppose that we observe a graph A onn vertices with average edge density p generated from Gaussian or sphericallatent locations z_1 dots z_n in mathbbRd associated with the nvertices. It is of interest to estimate the inner products langle z_i z_jrangle which represent the geometry of the latent points. We prove that it isimpossible to recover the inner products if d gtrsim n hp where hp isthe binary entropy function. This matches the condition required for positiveresults on inner product recovery in the literature. The proof follows thewell-established rate-distortion theory with the main technical ingredientbeing a lower bound on the rate-distortion function of the Wishart distributionwhich is interesting in its own right. |
+|idx| 2407.12629v1 |
+|title| A Methodology Establishing Linear Convergence of Adaptive Gradient Methods under PL Inequality |
+|authors| Kushal ChakrabartiMayank Baranwal
+|links| http://arxiv.org/abs/2407.12629v1 |
+|updated| 2024-07-17 14:56:21 UTC |
+|summary| Adaptive gradient-descent optimizers are the standard choice for trainingneural network models. Despite their faster convergence than gradient-descentand remarkable performance in practice the adaptive optimizers are not as wellunderstood as vanilla gradient-descent. A reason is that the dynamic update ofthe learning rate that helps in faster convergence of these methods also makestheir analysis intricate. Particularly the simple gradient-descent methodconverges at a linear rate for a class of optimization problems whereas thepractically faster adaptive gradient methods lack such a theoretical guarantee.The Polyak-Lojasiewicz PL inequality is the weakest known class for whichlinear convergence of gradient-descent and its momentum variants has beenproved. Therefore in this paper we prove that AdaGrad and Adam twowell-known adaptive gradient methods converge linearly when the cost functionis smooth and satisfies the PL inequality. Our theoretical framework follows asimple and unified approach applicable to both batch and stochastic gradientswhich can potentially be utilized in analyzing linear convergence of othervariants of Adam. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11927v1 |
-|title| Bayesian Causal Forests for Longitudinal Data: Assessing the Impact of Part-Time Work on Growth in High School Mathematics Achievement |
-|authors| Nathan McJamesAnn O'SheaAndrew Parnell
-|links| http://arxiv.org/abs/2407.11927v1 |
-|updated| 2024-07-16 17:18:33 UTC |
-|summary| Modelling growth in student achievement is a significant challenge in thefield of education. Understanding how interventions or experiences such aspart-time work can influence this growth is also important. Traditional methodslike difference-in-differences are effective for estimating causal effects fromlongitudinal data. Meanwhile Bayesian non-parametric methods have recentlybecome popular for estimating causal effects from single time pointobservational studies. However there remains a scarcity of methods capable ofcombining the strengths of these two approaches to flexibly estimateheterogeneous causal effects from longitudinal data. Motivated by two waves ofdata from the High School Longitudinal Study the NCES most recentlongitudinal study which tracks a representative sample of over 20000 studentsin the US our study introduces a longitudinal extension of Bayesian CausalForests. This model allows for the flexible identification of both individualgrowth in mathematical ability and the effects of participation in part-timework. Simulation studies demonstrate the predictive performance and reliableuncertainty quantification of the proposed model. Results reveal the negativeimpact of part time work for most students but hint at potential benefits forthose students with an initially low sense of school belonging. Clear signs ofa widening achievement gap between students with high and low academicachievement are also identified. Potential policy implications are discussedalong with promising areas for future research. |
+|idx| 2407.12492v1 |
+|title| Test-Time Adaptation with State-Space Models |
+|authors| Mona SchirmerDan ZhangEric Nalisnick
+|links| http://arxiv.org/abs/2407.12492v1 |
+|updated| 2024-07-17 11:18:49 UTC |
+|summary| Distribution shifts between training and test data are all but inevitableover the lifecycle of a deployed model and lead to performance decay. Adaptingthe model can hopefully mitigate this drop in performance. Yet adaptation ischallenging since it must be unsupervised: we usually do not have access to anylabeled data at test time. In this paper we propose a probabilisticstate-space model that can adapt a deployed model subjected to distributiondrift. Our model learns the dynamics induced by distribution shifts on the lastset of hidden features. Without requiring labels we infer time-evolving classprototypes that serve as a dynamic classification head. Moreover our approachis lightweight modifying only the models last linear layer. In experiments onreal-world distribution shifts and synthetic corruptions we demonstrate thatour approach performs competitively with methods that require back-propagationand access to the model backbone. Our model especially excels in the case ofsmall test batches - the most difficult setting. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11917v1 |
-|title| Global Optimisation of Black-Box Functions with Generative Models in the Wasserstein Space |
-|authors| Tigran RamazyanMikhail HushchynDenis Derkach
-|links| http://arxiv.org/abs/2407.11917v1 |
-|updated| 2024-07-16 17:09:47 UTC |
-|summary| We propose a new uncertainty estimator for gradient-free optimisation ofblack-box simulators using deep generative surrogate models. Optimisation ofthese simulators is especially challenging for stochastic simulators and higherdimensions. To address these issues we utilise a deep generative surrogateapproach to model the black box response for the entire parameter space. Wethen leverage this knowledge to estimate the proposed uncertainty based on theWasserstein distance - the Wasserstein uncertainty. This approach is employedin a posterior agnostic gradient-free optimisation algorithm that minimisesregret over the entire parameter space. A series of tests were conducted todemonstrate that our method is more robust to the shape of both the black boxfunction and the stochastic response of the black box than state-of-the-artmethods such as efficient global optimisation with a deep Gaussian processsurrogate. |
+|idx| 2407.12332v1 |
+|title| Why Do You Grok? A Theoretical Analysis of Grokking Modular Addition |
+|authors| Mohamad Amin MohamadiZhiyuan LiLei WuDanica J. Sutherland
+|links| http://arxiv.org/abs/2407.12332v1 |
+|updated| 2024-07-17 06:15:30 UTC |
+|summary| We present a theoretical explanation of the grokking phenomenon where amodel generalizes long after overfittingfor the originally-studied problem ofmodular addition. First we show that early in gradient descent when thekernel regime approximately holds no permutation-equivariant model canachieve small population error on modular addition unless it sees at least aconstant fraction of all possible data points. Eventually however modelsescape the kernel regime. We show that two-layer quadratic networks thatachieve zero training loss with bounded ell_infty norm generalize wellwith substantially fewer training points and further show such networks existand can be found by gradient descent with small ell_infty regularization.We further provide empirical evidence that these networks as well as simpleTransformers leave the kernel regime only after initially overfitting. Takentogether our results strongly support the case for grokking as a consequenceof the transition from kernel-like behavior to limiting behavior of gradientdescent on deep networks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11901v1 |
-|title| Combining Wasserstein-1 and Wasserstein-2 proximals: robust manifold learning via well-posed generative flows |
-|authors| Hyemin GuMarkos A. KatsoulakisLuc Rey-BelletBenjamin J. Zhang
-|links| http://arxiv.org/abs/2407.11901v1 |
-|updated| 2024-07-16 16:34:31 UTC |
-|summary| We formulate well-posed continuous-time generative flows for learningdistributions that are supported on low-dimensional manifolds throughWasserstein proximal regularizations of f-divergences. Wasserstein-1 proximaloperators regularize f-divergences so that singular distributions can becompared. Meanwhile Wasserstein-2 proximal operators regularize the paths ofthe generative flows by adding an optimal transport cost i.e. a kineticenergy penalization. Via mean-field game theory we show that the combinationof the two proximals is critical for formulating well-posed generative flows.Generative flows can be analyzed through optimality conditions of a mean-fieldgame MFG a system of a backward Hamilton-Jacobi HJ and a forwardcontinuity partial differential equations PDEs whose solution characterizesthe optimal generative flow. For learning distributions that are supported onlow-dimensional manifolds the MFG theory shows that the Wasserstein-1proximal which addresses the HJ terminal condition and the Wasserstein-2proximal which addresses the HJ dynamics are both necessary for thecorresponding backward-forward PDE system to be well-defined and have a uniquesolution with provably linear flow trajectories. This implies that thecorresponding generative flow is also unique and can therefore be learned in arobust manner even for learning high-dimensional distributions supported onlow-dimensional manifolds. The generative flows are learned through adversarialtraining of continuous-time flows which bypasses the need for reversesimulation. We demonstrate the efficacy of our approach for generatinghigh-dimensional images without the need to resort to autoencoders orspecialized architectures. |
+|idx| 2407.12288v1 |
+|title| Information-Theoretic Foundations for Machine Learning |
+|authors| Hong Jun JeonBenjamin Van Roy
+|links| http://arxiv.org/abs/2407.12288v1 |
+|updated| 2024-07-17 03:18:40 UTC |
+|summary| The staggering progress of machine learning in the past decade has been asight to behold. In retrospect it is both remarkable and unsettling that thesemilestones were achievable with little to no rigorous theory to guideexperimentation. Despite this fact practitioners have been able to guide theirfuture experimentation via observations from previous large-scale empiricalinvestigations. However alluding to Platos Allegory of the cave it is likelythat the observations which form the fields notion of reality are but shadowsrepresenting fragments of that reality. In this work we propose a theoreticalframework which attempts to answer what exists outside of the cave. To thetheorist we provide a framework which is mathematically rigorous and leavesopen many interesting ideas for future exploration. To the practitioner weprovide a framework whose results are very intuitive general and which willhelp form principles to guide future investigations. Concretely we provide atheoretical framework rooted in Bayesian statistics and Shannons informationtheory which is general enough to unify the analysis of many phenomena inmachine learning. Our framework characterizes the performance of an optimalBayesian learner which considers the fundamental limits of information.Throughout this work we derive very general theoretical results and apply themto derive insights specific to settings ranging from data which isindependently and identically distributed under an unknown distribution todata which is sequential to data which exhibits hierarchical structureamenable to meta-learning. We conclude with a section dedicated tocharacterizing the performance of misspecified algorithms. These results areexciting and particularly relevant as we strive to overcome increasinglydifficult machine learning challenges in this endlessly complex world. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11837v1 |
-|title| The Patchkeeper: An Integrated Wearable Electronic Stethoscope with Multiple Sensors |
-|authors| Hongwei LiZoran RadivojevicMichael S. Eggleston
-|links| http://arxiv.org/abs/2407.11837v1 |
-|updated| 2024-07-16 15:22:10 UTC |
-|summary| Many parts of human body generate internal sound during biological processeswhich are rich sources of information for understanding health and wellbeing.Despite a long history of development and usage of stethoscopes there is stilla lack of proper tools for recording internal body sound together withcomplementary sensors for long term monitoring. In this paper we show ourdevelopment of a wearable electronic stethoscope coined Patchkeeper PK thatcan be used for internal body sound recording over long periods of time.Patchkeeper also integrates several state-of-the-art biological sensorsincluding electrocardiogram ECG photoplethysmography PPG and inertialmeasurement unit IMU sensors. As a wearable device Patchkeeper can be placedon various parts of the body to collect sound from particular organs includingheart lung stomach and joints etc. We show in this paper that several vitalsignals can be recorded simultaneously with high quality. As Patchkeeper can beoperated directly by the user e.g. without involving health careprofessionals we believe it could be a useful tool for telemedicine and remotediagnostics. |
+|idx| 2407.12739v1 |
+|title| GroundUp: Rapid Sketch-Based 3D City Massing |
+|authors| Gizem Esra UnluMohamed SayedYulia GryaditskayaGabriel Brostow
+|links| http://arxiv.org/abs/2407.12739v1 |
+|updated| 2024-07-17 16:59:29 UTC |
+|summary| We propose GroundUp the first sketch-based ideation tool for 3D city massingof urban areas. We focus on early-stage urban design where sketching is acommon tool and the design starts from balancing building volumes masses andopen spaces. With Human-Centered AI in mind we aim to help architects quicklyrevise their ideas by easily switching between 2D sketches and 3D modelsallowing for smoother iteration and sharing of ideas. Inspired by feedback fromarchitects and existing workflows our system takes as a first input a usersketch of multiple buildings in a top-down view. The user then draws aperspective sketch of the envisioned site. Our method is designed to exploitthe complementarity of information in the two sketches and allows users toquickly preview and adjust the inferred 3D shapes. Our model has two maincomponents. First we propose a novel sketch-to-depth prediction network forperspective sketches that exploits top-down sketch shapes. Second we use depthcues derived from the perspective sketch as a condition to our diffusion modelwhich ultimately completes the geometry in a top-down view. Thus our final 3Dgeometry is represented as a heightfield allowing users to construct the cityfrom the ground up. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11823v1 |
-|title| Harmonizing Safety and Speed: A Human-Algorithm Approach to Enhance the FDA's Medical Device Clearance Policy |
-|authors| Mohammad ZhalechianSoroush SaghafianOmar Robles
-|links| http://arxiv.org/abs/2407.11823v1 |
-|updated| 2024-07-16 15:11:29 UTC |
-|summary| The United States Food and Drug Administrations FDAs PremarketNotification 510K pathway allows manufacturers to gain approval for a medicaldevice by demonstrating its substantial equivalence to another legally marketeddevice. However the inherent ambiguity of this regulatory procedure has led tohigh recall rates for many devices cleared through this pathway. This trend hasraised significant concerns regarding the efficacy of the FDAs currentapproach prompting a reassessment of the 510K regulatory framework. In thispaper we develop a combined human-algorithm approach to assist the FDA inimproving its 510k medical device clearance process by reducing the risk ofpotential recalls and the workload imposed on the FDA. We first develop machinelearning methods to estimate the risk of recall of 510k medical devices basedon the information available at the time of submission. We then propose adata-driven clearance policy that recommends acceptance rejection or deferralto FDAs committees for in-depth evaluation. We conduct an empirical studyusing a unique large-scale dataset of over 31000 medical devices and 12000national and international manufacturers from over 65 countries that weassembled based on data sources from the FDA and Centers for Medicare andMedicaid Service CMS. A conservative evaluation of our proposed policy basedon this data shows a 38.9 improvement in the recall rate and a 43.0 reductionin the FDAs workload. Our analyses also indicate that implementing our policycould result in significant annual cost-savings ranging between 2.4 billionand 2.7 billion which highlights the value of using a holistic anddata-driven approach to improve the FDAs current 510K medical deviceevaluation pathway. |
+|idx| 2407.12723v1 |
+|title| The Future of Learning: Large Language Models through the Lens of Students |
+|authors| He ZhangJingyi XieChuhao WuJie CaiChanMin KimJohn M. Carroll
+|links| http://arxiv.org/abs/2407.12723v1 |
+|updated| 2024-07-17 16:40:37 UTC |
+|summary| As Large-Scale Language Models LLMs continue to evolve they demonstratesignificant enhancements in performance and an expansion of functionalitiesimpacting various domains including education. In this study we conductedinterviews with 14 students to explore their everyday interactions withChatGPT. Our preliminary findings reveal that students grapple with the dilemmaof utilizing ChatGPTs efficiency for learning and information seeking whilesimultaneously experiencing a crisis of trust and ethical concerns regardingthe outcomes and broader impacts of ChatGPT. The students perceive ChatGPT asbeing more human-like compared to traditional AI. This dilemma characterizedby mixed emotions inconsistent behaviors and an overall positive attitudetowards ChatGPT underscores its potential for beneficial applications ineducation and learning. However we argue that despite its human-likequalities the advanced capabilities of such intelligence might lead to adverseconsequences. Therefore its imperative to approach its application cautiouslyand strive to mitigate potential harms in future developments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11748v1 |
-|title| Ubiquitous Metadata: Design and Fabrication of Embedded Markers for Real-World Object Identification and Interaction |
-|authors| Mustafa Doga Dogan
-|links| http://arxiv.org/abs/2407.11748v1 |
-|updated| 2024-07-16 14:14:52 UTC |
-|summary| The convergence of the physical and digital realms has ushered in a new eraof immersive experiences and seamless interactions. As the boundaries betweenthe real world and virtual environments blur and result in a mixed realitythere arises a need for robust and efficient methods to connect physicalobjects with their virtual counterparts. In this thesis we present a novelapproach to bridging this gap through the design fabrication and detection ofembedded machine-readable markers.  We categorize the proposed marking approaches into three distinct categories:natural markers structural markers and internal markers. Natural markerssuch as those used in SensiCut are inherent fingerprints of objects repurposedas machine-readable identifiers while structural markers such as StructCodeand G-ID leverage the structural artifacts in objects that emerge during thefabrication process itself. Internal markers such as InfraredTag andBrightMarker are embedded inside fabricated objects using specializedmaterials. Leveraging a combination of methods from computer vision machinelearning computational imaging and material science the presented approachesoffer robust and versatile solutions for object identification tracking andinteraction.  These markers seamlessly integrated into real-world objects effectivelycommunicate an objects identity origin function and interactionfunctioning as gateways to ubiquitous metadata - a concept where metadata isembedded into physical objects similar to metadata in digital files. Acrossthe different chapters we demonstrate the applications of the presentedmethods in diverse domains including product design manufacturing retaillogistics education entertainment security and sustainability. |
+|idx| 2407.12613v1 |
+|title| AudienceView: AI-Assisted Interpretation of Audience Feedback in Journalism |
+|authors| William BrannonDoug BeefermanHang JiangAndrew HeywardDeb Roy
+|links| http://arxiv.org/abs/2407.12613v1 |
+|updated| 2024-07-17 14:41:35 UTC |
+|summary| Understanding and making use of audience feedback is important but difficultfor journalists who now face an impractically large volume of audiencecomments online. We introduce AudienceView an online tool to help journalistscategorize and interpret this feedback by leveraging large language modelsLLMs. AudienceView identifies themes and topics connects them back tospecific comments provides ways to visualize the sentiment and distribution ofthe comments and helps users develop ideas for subsequent reporting projects.We consider how such tools can be useful in a journalists workflow andemphasize the importance of contextual awareness and human judgment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11671v1 |
-|title| A Comparative Analysis of Interactive Reinforcement Learning Algorithms in Warehouse Robot Grid Based Environment |
-|authors| Arunabh Bora
-|links| http://arxiv.org/abs/2407.11671v1 |
-|updated| 2024-07-16 12:41:49 UTC |
-|summary| The field of warehouse robotics is currently in high demand with majortechnology and logistics companies making significant investments in theseadvanced systems. Training robots to operate in such complex environments ischallenging often requiring human supervision for adaptation and learning.Interactive reinforcement learning IRL is a key training methodology inhuman-computer interaction. This paper presents a comparative study of two IRLalgorithms: Q-learning and SARSA both trained in a virtualgrid-simulation-based warehouse environment. To maintain consistent feedbackrewards and avoid bias feedback was provided by the same individual throughoutthe study. |
+|idx| 2407.12543v1 |
+|title| Abstraction Alignment: Comparing Model and Human Conceptual Relationships |
+|authors| Angie BoggustHyemin BangHendrik StrobeltArvind Satyanarayan
+|links| http://arxiv.org/abs/2407.12543v1 |
+|updated| 2024-07-17 13:27:26 UTC |
+|summary| Abstraction -- the process of generalizing specific examples into broadreusable patterns -- is central to how people efficiently process and storeinformation and apply their knowledge to new data. Promisingly research hasshown that ML models learn representations that span levels of abstractionfrom specific concepts like bolo tie and car tire to more general conceptslike CEO and model. However existing techniques analyze theserepresentations in isolation treating learned concepts as independentartifacts rather than an interconnected web of abstraction. As a resultalthough we can identify the concepts a model uses to produce its output it isdifficult to assess if it has learned a human-aligned abstraction of theconcepts that will generalize to new data. To address this gap we introduceabstraction alignment a methodology to measure the agreement between a modelslearned abstraction and the expected human abstraction. We quantify abstractionalignment by comparing model outputs against a human abstraction graph such aslinguistic relationships or medical disease hierarchies. In evaluation tasksinterpreting image models benchmarking language models and analyzing medicaldatasets abstraction alignment provides a deeper understanding of modelbehavior and dataset content differentiating errors based on their agreementwith human knowledge expanding the verbosity of current model quality metricsand revealing ways to improve existing human abstractions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2407.11625v1 |
-|title| Beware of Validation by Eye: Visual Validation of Linear Trends in Scatterplots |
-|authors| Daniel BraunRemco ChangMichael GleicherTatiana von Landesberger
-|links| http://arxiv.org/abs/2407.11625v1 |
-|updated| 2024-07-16 11:41:24 UTC |
-|summary| Visual validation of regression models in scatterplots is a common practicefor assessing model quality yet its efficacy remains unquantified. Weconducted two empirical experiments to investigate individuals ability tovisually validate linear regression models linear trends and to examine theimpact of common visualization designs on validation quality. The firstexperiment showed that the level of accuracy for visual estimation of slopei.e. fitting a line to data is higher than for visual validation of slopei.e. accepting a shown line. Notably we found bias toward slopes that aretoo steep in both cases. This lead to novel insights that participantsnaturally assessed regression with orthogonal distances between the points andthe line i.e. ODR regression rather than the common vertical distances OLSregression. In the second experiment we investigated whether incorporatingcommon designs for regression visualization error lines bounding boxes andconfidence intervals would improve visual validation. Even though error linesreduced validation bias results failed to show the desired improvements inaccuracy for any design. Overall our findings suggest caution in using visualmodel validation for linear trends in scatterplots. |
+|idx| 2407.12487v1 |
+|title| Application of Prompt Learning Models in Identifying the Collaborative Problem Solving Skills in an Online Task |
+|authors| Mengxiao ZhuXin WangXiantao WangZihang ChenWei Huang
+|links| http://arxiv.org/abs/2407.12487v1 |
+|updated| 2024-07-17 11:12:02 UTC |
+|summary| Collaborative problem solving CPS competence is considered one of theessential 21st-century skills. To facilitate the assessment and learning of CPScompetence researchers have proposed a series of frameworks to conceptualizeCPS and explored ways to make sense of the complex processes involved incollaborative problem solving. However encoding explicit behaviors intosubskills within the frameworks of CPS skills is still a challenging task.Traditional studies have relied on manual coding to decipher behavioral datafor CPS but such coding methods can be very time-consuming and cannot supportreal-time analyses. Scholars have begun to explore approaches for constructingautomatic coding models. Nevertheless the existing models built using machinelearning or deep learning techniques depend on a large amount of training dataand have relatively low accuracy. To address these problems this paperproposes a prompt-based learning pre-trained model. The model can achieve highperformance even with limited training data. In this study three experimentswere conducted and the results showed that our model not only produced thehighest accuracy macro F1 score and kappa values on large training sets butalso performed the best on small training sets of the CPS behavioral data. Theapplication of the proposed prompt-based learning pre-trained model contributesto the CPS skills coding task and can also be used for other CSCW coding tasksto replace manual coding. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2407.12318v1 |
+|title| Information Compression in Dynamic Games |
+|authors| Dengwang TangVijay SubramanianDemosthenis Teneketzis
+|links| http://arxiv.org/abs/2407.12318v1 |
+|updated| 2024-07-17 05:08:47 UTC |
+|summary| One of the reasons why stochastic dynamic games with an underlying dynamicsystem are challenging is since strategic players have access to enormousamount of information which leads to the use of extremely complex strategies atequilibrium. One approach to resolve this challenge is to simplify playersstrategies by identifying appropriate compression of information maps so thatthe players can make decisions solely based on the compressed version ofinformation called the information state. For finite dynamic games withasymmetric information inspired by the notion of information state forsingle-agent control problems we propose two notions of information statesnamely mutually sufficient information MSI and unilaterally sufficientinformation USI. Both these information states are obtained with informationcompression maps independent of the strategy profile. We show that Bayes-NashEquilibria BNE and Sequential Equilibria SE exist when all players useMSI-based strategies. We prove that when all players employ USI-basedstrategies the resulting sets of BNE and SE payoff profiles are the same as thesets of BNE and SE payoff profiles resulting when all players use fullinformation-based strategies. We prove that when all players use USI-basedstrategies the resulting set of weak Perfect Bayesian Equilibrium wPBE payoffprofiles can be a proper subset of all wPBE payoff profiles. We identify MSIand USI in specific models of dynamic games in the literature. We end bypresenting an open problem: Do there exist strategy-dependent informationcompression maps that guarantee the existence of at least one equilibrium ormaintain all equilibria that exist under perfect recall We show by acounterexample that a well-known strategy-dependent information compressionmap used in the literature does not possess any of the properties of MSI orUSI. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2407.12113v1 |
+|title| A Graph-based Adversarial Imitation Learning Framework for Reliable & Realtime Fleet Scheduling in Urban Air Mobility |
+|authors| Prithvi PoddarSteve PaulSouma Chowdhury
+|links| http://arxiv.org/abs/2407.12113v1 |
+|updated| 2024-07-16 18:51:24 UTC |
+|summary| The advent of Urban Air Mobility UAM presents the scope for atransformative shift in the domain of urban transportation. However itswidespread adoption and economic viability depends in part on the ability tooptimally schedule the fleet of aircraft across vertiports in a UAM networkunder uncertainties attributed to airspace congestion changing weatherconditions and varying demands. This paper presents a comprehensiveoptimization formulation of the fleet scheduling problem while alsoidentifying the need for alternate solution approaches since directly solvingthe resulting integer nonlinear programming problem is computationallyprohibitive for daily fleet scheduling. Previous work has shown theeffectiveness of using graph reinforcement learning RL approaches to trainreal-time executable policy models for fleet scheduling. However such policiescan often be brittle on out-of-distribution scenarios or edge cases. Moreovertraining performance also deteriorates as the complexity e.g. number ofconstraints of the problem increases. To address these issues this paperpresents an imitation learning approach where the RL-based policy exploitsexpert demonstrations yielded by solving the exact optimization using a GeneticAlgorithm. The policy model comprises Graph Neural Network GNN based encodersthat embed the space of vertiports and aircraft Transformer networks to encodedemand passenger fare and transport cost profiles and a Multi-head attentionMHA based decoder. Expert demonstrations are used through the GenerativeAdversarial Imitation Learning GAIL algorithm. Interfaced with a UAMsimulation environment involving 8 vertiports and 40 aircrafts in terms of thedaily profits earned reward the new imitative approach achieves better meanperformance and remarkable improvement in the case of unseen worst-casescenarios compared to pure RL results. |
+
 
 | Item |Content|
 | --- |---|
@@ -340,25 +360,5 @@
 |links| http://arxiv.org/abs/2407.11330v1 |
 |updated| 2024-07-16 02:46:11 UTC |
 |summary| Interacting individuals in complex systems often give rise to coherent motionexhibiting coordinated global structures. Such phenomena are ubiquitouslyobserved in nature from cell migration bacterial swarms animal and insectgroups and even human societies. Primary mechanisms responsible for theemergence of collective behavior have been extensively identified includinglocal alignments based on average or relative velocity non-local pairwiserepulsive-attractive interactions such as distance-based potentials interplaybetween local and non-local interactions and cognitive-based inhomogeneousinteractions. However discovering how to adapt these mechanisms to modulateemergent behaviours remains elusive. Here we demonstrate that it is possibleto generate coordinated structures in collective behavior at desired momentswith intended global patterns by fine-tuning an inter-agent interaction rule.Our strategy employs deep neural networks obeying the laws of dynamics tofind interaction rules that command desired collective structures. Thedecomposition of interaction rules into distancing and aligning forcesexpressed by polynomial series facilitates the training of neural networks topropose desired interaction models. Presented examples include altering themean radius and size of clusters in vortical swarms timing of transitions fromrandom to ordered states and continuously shifting between typical modes ofcollective motions. This strategy can even be leveraged to superimposecollective modes resulting in hitherto unexplored but highly practical hybridcollective patterns such as protective security formations. Our findingsreveal innovative strategies for creating and controlling collective motionpaving the way for new applications in robotic swarm operations active matterorganisation and for the uncovering of obscure interaction rules in biologicalsystems. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2407.11250v1 |
-|title| Conditions for Altruistic Perversity in Two-Strategy Population Games |
-|authors| Colton HillPhilip N. BrownKeith Paarporn
-|links| http://arxiv.org/abs/2407.11250v1 |
-|updated| 2024-07-15 21:35:31 UTC |
-|summary| Self-interested behavior from individuals can collectively lead to poorsocietal outcomes. These outcomes can seemingly be improved through the actionsof altruistic agents which benefit other agents in the system. However it isknown in specific contexts that altruistic agents can actually induce worseoutcomes compared to a fully selfish population -- a phenomenon we termaltruistic perversity. This paper provides a holistic investigation into thenecessary conditions that give rise to altruistic perversity. In particular westudy the class of two-strategy population games where one sub-population isaltruistic and the other is selfish. We find that a population game can admitaltruistic perversity only if the associated social welfare function is convexand the altruistic population is sufficiently large. Our results are a firststep in establishing a connection between properties of nominal agentinteractions and the potential impacts from altruistic behaviors. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2407.11170v1 |
-|title| Time Shift Governor for Constrained Control of Spacecraft Orbit and Attitude Relative Motion in Bicircular Restricted Four-Body Problem |
-|authors| Taehyeun KimIlya KolmanovskyAnouck Girard
-|links| http://arxiv.org/abs/2407.11170v1 |
-|updated| 2024-07-15 18:45:04 UTC |
-|summary| This paper considers constrained spacecraft rendezvous and docking RVD inthe setting of the Bicircular Restricted Four-Body Problem BCR4BP whileaccounting for attitude dynamics. We consider Line of Sight LoS coneconstraints thrust limits thrust direction limits and approach velocityconstraints during RVD missions in a near rectilinear halo orbit NRHO in theSun-Earth-Moon system. To enforce the constraints the Time Shift GovernorTSG which uses a time-shifted Chief spacecraft trajectory as a targetreference for the Deputy spacecraft is employed. The time shift is graduallyreduced to zero so that the virtual target gradually evolves towards the Chiefspacecraft as time goes by and the RVD mission objective can be achieved.Numerical simulation results are reported to validate the proposed controlmethod. |
 
 
