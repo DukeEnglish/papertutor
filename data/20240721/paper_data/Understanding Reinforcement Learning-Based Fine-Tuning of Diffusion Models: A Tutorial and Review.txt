@@ -1,0 +1,1974 @@
+Understanding Reinforcement Learning-Based
+Fine-Tuning of Diffusion Models: A Tutorial and Review
+Masatoshi Uehara*1, Yulai Zhao†2, Tommaso Biancalani1, and Sergey Levine3
+1Genentech
+2Princeton University
+3University of California, Berkeley
+July 19, 2024
+Abstract
+Thistutorialprovidesacomprehensivesurveyofmethodsforfine-tuningdiffusionmodels
+tooptimizedownstreamrewardfunctions. Whilediffusionmodelsarewidelyknowntoprovide
+excellent generative modeling capability, practical applications in domains such as biology
+requiregeneratingsamplesthatmaximizesomedesiredmetric(e.g.,translationefficiencyin
+RNA,dockingscoreinmolecules,stabilityinprotein). Inthesecases,thediffusionmodelcan
+beoptimizednotonlytogeneraterealisticsamplesbutalsotomaximizethemeasureofinterest
+explicitly. Suchmethodsarebasedonconceptsfromreinforcementlearning(RL).Weexplain
+theapplicationofvariousRLalgorithms,includingPPO,differentiableoptimization,reward-
+weightedMLE,value-weightedsampling,andpathconsistencylearning,tailoredspecificallyfor
+fine-tuningdiffusionmodels. Weaimtoexplorefundamentalaspectssuchasthestrengthsand
+limitationsofdifferentRL-basedfine-tuningalgorithmsacrossvariousscenarios,thebenefits
+ofRL-basedfine-tuningcomparedtonon-RL-basedapproaches,andtheformalobjectivesof
+RL-basedfine-tuning(targetdistributions). Additionally,weaimtoexaminetheirconnections
+withrelatedtopicssuchasclassifierguidance,Gflownets,flow-baseddiffusionmodels,path
+integral control theory, and sampling from unnormalized distributions such as MCMC. The
+codeofthistutorialisavailableathttps://github.com/masa-ue/RLfinetuning Diffusion Bioseq.
+Introduction
+Diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020; Song et al., 2020) are widely rec-
+ognized as powerful tools for generative modeling. They are able to accurately model complex
+distributionsbycloselyemulatingthecharacteristicsofthetrainingdata. Therearemanyapplica-
+tions ofdiffusion modelsin variousfields, including computervision (Podellet al.,2023), natural
+language processing(Austin et al.,2021), biology (Avdeyevet al., 2023; Starket al., 2024;Li et al.,
+*uehara.masatoshi@gene.com
+†yulaiz@princeton.edu. Equalcontribution.
+1
+4202
+luJ
+81
+]GL.sc[
+1v43731.7042:viXraReward models
+Images → Aesthetic score Images → Aesthetic score Images → Aesthetic score
+Molecules → QED Molecules → QED Molecules → QED
+DNAs → Cell-specificity DNAs → Cell-specificity DNAs → Cell-specificity
+Pre-trained RL RL RL Fine-tuned
+diffusion models diffusion models
+Images with high
+Images aesthetic score
+Molecules with
+Molecules
+high QED
+DNAs with high
+DNAs cell-specificity
+Figure1: IllustrativeexamplesofRL-basedfine-tuning,aimedatoptimizingpre-traineddiffusion
+modelstomaximizedownstreamrewardfunctions.
+2023),chemistry(Joetal.,2022;Xuetal.,2022;Hoogeboometal.,2022),andbiology(Avdeyev
+etal.,2023;Starketal.,2024;Campbelletal.,2024).
+While diffusion models exhibit significant power in capturing the training data distribution,
+there’s often a need to customize these models for particular downstream reward functions. For
+instance,incomputervision,StableDiffusion(Rombachetal.,2022)servesasastrongbackbone
+pre-trainedmodel. However,wemaywanttofine-tuneitfurtherbyoptimizingdownstreamreward
+functionssuchasaestheticscoresor human-alignmentscores(Blacketal.,2023;Fanetal.,2023).
+Similarly, in fields such as biology and chemistry, various sophisticated diffusion models have
+beendevelopedforDNA,RNA,proteinsequences,andmolecules,effectivelymodelingbiological
+and chemical spaces. Nonetheless, biologists and chemists typically aim to optimize specific
+downstreamobjectivessuchascell-specificexpressioninDNAsequences(Gosaietal.,2023;Lal
+etal., 2024;Sarkar etal.,2024), translationalefficiency/stability ofRNAsequences (Castillo-Hair
+andSeelig,2021;AgarwalandKelley,2022),stability/bioactivityofproteinsequence(Freyetal.,
+2023;Widatallaetal.,2024)orQED/SAscoresofmolecules(Zhouetal.,2019).
+To achieve this goal, numerousalgorithms have been proposedfor fine-tuningdiffusion models
+via reinforcement learning (RL) (e.g., Black et al. (2023); Fan et al. (2023); Clark et al. (2023);
+Prabhudesaiet al.(2023);Uehara etal.(2024)), aimingto optimizedownstreamreward functions.
+RLisamachinelearningparadigmwhereagentslearntomakesequentialdecisionstomaximize
+rewardsignals(SuttonandBarto,2018;Agarwaletal.,2019). Inourcontext,RLnaturallyemerges
+as asuitable approachdue tothe sequentialstructure inherentin diffusionmodels, whereeach time
+stepinvolvesa“decision”correspondingtohowthesampleisdenoisedatthatstep. Thistutorial
+aimstoreviewrecentworksforreadersinterestedinunderstandingthefundamentalsofRL-based
+fine-tuning from a holistic perspective, including the advantages of RL-based fine-tuning over
+non-RLapproaches, thepros and consof differentRL-basedfine-tuning algorithms, theformalized
+goalofRL-basedfine-tuning,anditsconnectionswithrelatedtopicssuchasclassifierguidance.
+2Thecontentofthistutorialisprimarilydividedintothreeparts. Inaddition,asanimplementation
+example,wealsoreleasethecodethatemploysRL-basedfine-tuningforguidedbiologicalsequences
+(DNA/RNA)generationathttps://github.com/masa-ue/RLfinetuning Diffusion Bioseq.
+1. We aim to provide a comprehensive overview of current algorithms. Notably, given the
+sequentialnature ofdiffusion models,we cannaturally framefine-tuning asa reinforcement
+learning(RL)problemwithinMarkovDecisionProcesses(MDPs),asdetailedinSection3
+and4. Therefore,wecanemployanyoff-the-shelfRLalgorithmssuchasPPO(Schulman
+et al., 2017), differentiable optimization (direct reward backpropagation), weighted MLE
+(Petersetal.,2010;Pengetal.,2019),value-weightedsampling(closetoclassifierguidance
+in Dhariwal and Nichol (2021)), and path consistency learning (Nachum et al., 2017). We
+discuss these algorithms in detail in Section 4.2 and 6. Instead of merely outlining each
+algorithm,weaimtopresentboththeiradvantagesanddisadvantagessoreaderscanselect
+themostsuitablealgorithmsfortheirspecificpurposes.
+2. We categorize various fine-tuning scenarios based on how reward feedback is acquired in
+Section 7. This distinction ispivotal for practical algorithm design. Forexample, ifwe can
+accessaccuraterewardfunctions,computationalefficiencywouldbecomeourprimaryfocus.
+However, in cases where reward functions are unknown, it is essential to learn them from
+datawith rewardfeedback, leadingusto take feedbackefficiencyanddistributionalshiftinto
+consideration as well. Specifically, when reward functions need to be learned from static
+offlinedatawithoutanyonlineinteractions,wemustaddresstheissueofoveroptimization,
+where fine-tuned models are misled by out-of-distribution samples, and generate samples
+with low genuine rewards. This is crucial because, in an offline scenario, the coverage of
+offlinedata distributionwithfeedbackis limited;hence,the out-of-distributionregioncould
+beextensive(Ueharaetal.,2024).
+3. WeprovideadetaileddiscussionontherelationshipbetweenRL-basedfine-tuningmethods
+andcloselyrelatedmethodsintheliterature,suchasclassifierguidance(DhariwalandNichol,
+2021)inSection8,flow-baseddiffusionmodels(Liuetal.,2022;Lipmanetal.,2023;Tong
+etal.,2023)inSection9, samplingfromunnormalizeddistributions (ZhangandChen,2021)
+inSection10,Gflownets(Bengioetal.,2023)inSection6.3,andpathintegralcontroltheory
+(Theodorou et al., 2010; Williams et al., 2017; Kazim et al., 2024) in Section 6.2.3. We
+summarizethekeymessagesasfollows.
+• Section6.3: ThelossesusedinGflownetsarefundamentallyequivalenttothosederived
+fromaspecificRLalgorithmcalledpathconsistencylearning.
+• Section 8: Classifier guidance employed in conditional generation is regarded as a
+specific RL-based fine-tuning method, which we call value-weighted sampling. As
+formalized in Zhao et al. (2024), this observation indicates that any off-the-shelf RL-
+basedfine-tuningalgorithms(e.g.,PPOanddifferentiableoptimization)canbeapplied
+toconditionalgeneration.
+• Section 10: Sampling from unnormalized distributions, often referred to as Gibbs
+distributions, is an important and challenging problem in diverse domains. While
+MCMC methods are traditionally used for this task, recognizing its similarity to the
+objectivesofRL-basedfine-tuningsuggeststhatoff-the-shelfRLalgorithmscanalso
+effectivelyaddressthechallengeofsamplingfromunnormalizeddistributions.
+3Contents
+1 Preliminaries 5
+1.1 DiffusionModels . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+1.1.1 Score-BasedDiffusionModels(Optional) . . . . . . . . . . . . . . . . . 6
+1.2 Fine-TuningDiffusionModelswithRL . . . . . . . . . . . . . . . . . . . . . . . 8
+1.2.1 BriefOverview: Fine-tuningwithRL . . . . . . . . . . . . . . . . . . . . 8
+1.2.2 MotivationforUsingRLoverNon-RLAlternatives . . . . . . . . . . . . . 9
+2 BriefOverviewofEntropy-RegularizedMDPs 10
+2.1 MDPs . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+2.2 KeyConcepts: SoftQ-functions,SoftBellmanEquations. . . . . . . . . . . . . . 11
+3 Fine-TuningDiffusionModelswithRLinEntropyRegularizedMDPs 12
+4 TheoryofRL-BasedFine-Tuning 14
+4.1 KeyConcepts: SoftValuefunctionsandSoftBellmanEquations. . . . . . . . . . . 14
+4.2 InducedDistributionsafterFine-Tuning . . . . . . . . . . . . . . . . . . . . . . . 15
+5 RL-BasedFine-TuningAlgorithms1: Non-Distribution-ConstrainedApproaches 16
+5.1 SoftProximalPolicyOptimization(PPO) . . . . . . . . . . . . . . . . . . . . . . 16
+5.2 DirectRewardBackpropagation . . . . . . . . . . . . . . . . . . . . . . . . . . . 17
+6 RL-BasedFine-TuningAlgorithms2: Distribution-ConstrainedApproaches 18
+6.1 Reward-WeightedMLE . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 19
+6.1.1 RelationwithLossFunctionsfortheOriginalTrainingObjective . . . . . . 21
+6.2 Value-WeightedSampling . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+6.2.1 SoftQ-learning . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23
+6.2.2 ApproximationusingTweedie’sformula . . . . . . . . . . . . . . . . . . 24
+6.2.3 Zeroth-OrderGuidanceusingPathIntegralControl . . . . . . . . . . . . . 25
+6.3 PathConsistencyLearning(LossesOftenUsedinGflownets) . . . . . . . . . . . . 25
+7 Fine-TuningSettingsTaxonomy 28
+7.1 Fine-TuningwithKnown,DifferentiableRewardFunctions . . . . . . . . . . . . . 28
+7.2 Fine-TuningwithBlack-BoxRewardFeedback . . . . . . . . . . . . . . . . . . . 28
+7.3 Fine-TuningwithUnknownRewardsFunctions . . . . . . . . . . . . . . . . . . . 29
+8 ConnectionwithClassifierGuidance 30
+8.1 ClassfierGuidance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30
+8.2 RL-BasedFine-TuningforConditionalGeneration . . . . . . . . . . . . . . . . . 31
+9 ConnectionwithFlow-BasedDiffusionModels 31
+9.1 ContinuousTimeFormulationofScore-Baseddiffusionmodels . . . . . . . . . . 32
+9.2 Flow-Based(Bridge-Based)DiffusionModels . . . . . . . . . . . . . . . . . . . . 33
+9.3 ConnectionwithRL-BasedFine-Tuning . . . . . . . . . . . . . . . . . . . . . . . 34
+410 ConnectionwithSamplingfromUnnormalizedDistributions 35
+10.1 MarkovChainMonteCarlo(MCMC) . . . . . . . . . . . . . . . . . . . . . . . . 35
+10.2 RL-BasedApproaches . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 36
+11 CloselyRelatedDirections 36
+12 Summary 37
+1 Preliminaries
+In this section, we outline the fundamentals of diffusion models and elucidate the objective of
+fine-tuningthem.
+1.1 Diffusion Models
+We present an overview of denoising diffusion probabilistic models (DDPM) (Ho et al., 2020).
+Formoredetails,refertoYangetal.(2023);Caoetal.(2024);Chenetal.(2024);TangandZhao
+(2024).
+Indiffusionmodels,theobjectiveistodevelopadeepgenerativemodelthataccuratelycaptures
+thetruedatadistribution. Specifically,denotingthedatadistributionbyp ∈ ∆(X)whereX isan
+pre
+inputspace,aDDPMaimstoapproximatep usingaparametricmodelstructuredas
+pre
+(cid:90) 1
+(cid:89)
+p(x ;θ) = p(x ;θ)dx ,wherep(x ;θ) = p (x ;θ) p (x |x ;θ).
+0 0:T 1:T 0:T T+1 T t t−1 t
+t=T
+WhenX isanEuclideanspace(inRd),theforwardprocessismodeledasthefollowingdynamics:
+p (x ) = N(0,I), p (x |x ;θ) = N(ρ(x ,t;θ),σ2(t)×I),
+T+1 T t t−1 t t
+where N(·,·) denotes a normal distribution, I is an identity matrix and ρ : Rd ×[0,T] → Rd. In
+DDPMs,weaimtoobtainasetofpolicies(i.e.,denoisingprocess){p }1 ,p : X → ∆(X)such
+t t=T+1 t
+thatp(x ;θ) ≈ p (x ). Indeed,byoptimizingthevariationalboundonthenegativelog-likelihood,
+0 pre 0
+wecanderivesuchasetofpolicies. Formoredetails,refertoSection1.1.1.
+Hereafter,weconsiderasituationwherewehaveapre-traineddiffusionmodelthatisalready
+trainedonalargedataset,suchthatthemodelcanaccuratelycapturetheunderlyingdatadistribution.
+We refer to the pre-trained policies as {ppre(·|·)}1 , and to the marginal distribution at t = 0
+t t=T+1
+inducedbythepre-traineddiffusionmodelasp . Inotherwords,
+pre
+(cid:90) 1
+(cid:89)
+ppre(x ) = ppre (x ) ppre(x |x )dx .
+0 T+1 T t t−1 t 1:T
+t=T
+Remark 1 (Non-Euclidean space). For simplicity, we typically assume that the domain space is
+Euclidean. However,wecaneasilyextendmostofthediscussiontoamoregeneralspace,suchas
+aRiemannianmanifold(DeBortolietal.,2022)ordiscretespace(Austinetal.,2021;Campbell
+etal.,2022;Bentonetal.,2024;Louetal.,2023).
+5Remark2(Conditionalgenerativemodels). Pre-trainedmodelscanbeconditionaldiffusionmodels,
+such as text-to-image diffusion models (Ramesh et al., 2022). The extension is straightforward:
+augmentingtheinputspacesofpolicieswithanadditionalspaceonwhichwewanttocondition.
+Morespecifically,bydenotingthatspacebyc ∈ C,eachpolicybecomesp (x |x ,c;θ) : X ×C →
+t t t
+∆(X).
+Remark 3 (Extension to Continuous-time diffusion models). In this tutorial, our discussion on
+fine-tuningdiffusionmodelswillbeprimarilyformulatedonthediscrete-timeformulation,aswedid
+aboveNonetheless,muchofourdiscussionisalsoapplicabletocontinuous-timediffusionmodels,
+asformalizedinUeharaetal.(2024)
+1.1.1 Score-BasedDiffusionModels(Optional)
+We briefly discuss how to train diffusion models in a continuous-time framework (Song et al.,
+2021). Inourtutorial,thissectionismainlyusedtodiscussseveralalgorithms(e.g.,value-weighted
+samplingin Section 6.2)andtheir relationshipwithflow-based diffusionmodels(Section9) later.
+Therefore,readersmayskipitbasedontheirindividualneeds.
+Thetrainingprocessofdiffusionmodelscanbesummarizedasfollows. Ourobjectiveistotrain
+a sequential mapping from a known noise distribution to a data distribution, formalized through
+astochasticdifferentialequation(SDE).Firstly,wedefineaforward(fixed)SDEthatmapsfrom
+thedata distribution tothenoise distribution. Then, atime-reversalSDE isexpressed asan SDE,
+which includesthe (unknown) score function. Now, bylearning this unknown scorefunction from
+thetrainingdata,thetime-reversalSDEcanbeutilizedasagenerativemodel. Herearethedetails.
+Forwardandtime-reversalSDE. Firstly,weintroduceaforward(a.k.a.,reference)Stochastic
+differentialequations(SDE)from0toT. Acommonchoiceisavariance-preserving(VP)process:
+t ∈ [0,T];dx = −0.5x dt+dw ,x ∼ ppre(x), (1)
+t t t 0
+wheredw representsstandardBrownianmotion. Herearetwocrucialobservations:
+t
+• AsT approaches∞,thelimitingdistributionisN(0,I).
+• The time-reversal SDE (Anderson, 1982), which preserves the marginal distribution, is
+expressedasfollows:
+t ∈ [0,T];dz = [0.5z +∇logq (z )]dt+dw . (2)
+t t T−t t t
+Here,q ∈ ∆(Rd)denotesthemarginal distributionattimetinducedbythe referenceSDE
+t
+(1). Notably, the marginal distribution of z is the same as the one of x induced by the
+T−t t
+referenceSDE.
+Theseobservationssuggestthatwith sufficientlylargeT,starting fromN(0,I)andfollowing the
+time-reversalSDE(2),weareabletosamplefromthedatadistribution(i.e.,ppre)attheterminal
+timepointT.
+6Trainingscorefunctionsfromthetrainingdata. Now,theremainingquestionishowtoestimate
+themarginalscorefunction∇logq (·)in(2). Thiscanbecomputedusingthefollowingprinciples:
+t
+• Wehave ∇logq (x ) = E [∇ logq (x | x )], where q representsthe conditional
+t t x0∼ppre xt t|0 t 0 t|0
+distributionofx givenx inducedbythereferenceSDE.
+t 0
+• Theconditionalscorefunction∇ logq (x | x )canbeanalyticallyderivedas
+xt t|0 t 0
+µ⋄x −x
+t 0 t , µ⋄ = exp(−0.5t)x , {σ⋄}2 = 1−exp(−0.5t). (3)
+{σ⋄}2 t 0 t
+t
+Subsequently,bydefiningaparameterizedmodels : Rd ×[0,T] → Rd andutilizingthefollowing
+θ
+weightedregression,themarginalscoreisestimated:
+θˆ = argminE [λ(t)∥∇ logq (x | x )−s (x ,t)∥2] (4)
+pre t∼Uni([0,T]),xt∼q t|0(xt|x0),x0∼ppre xt t|0 t 0 θ t
+θ
+whereλ : [0,T] → Risaweightedfunction.
+Notewetypicallyuseanotherparametrizationwell. From(3),wecaneasilyseethatthisscoreis
+estimatedbyintroducingnetworksϵ : Rd×[0,T] → Rd,whichaimstoestimatethenoise xt−µ⋄ tx0:
+θ σ⋄
+t
+θ¯ = argminE [λ(t)/{σ⋄}2∥ϵ−ϵ (x ,t)∥2]. (5)
+pre t∼Uni([0,T]),xt∼µ⋄ tx0+ϵσ t⋄,ϵ∼N(0,I),x0∼ppre t θ t
+θ
+Then,bydenotingthetrainingdataas{x(i)}andsettingλ(t) = {σ⋄}2,theactuallossfunctionfrom
+0 t
+thetrainingdatais
+(cid:88)
+argmin E [∥ϵ−ϵ (x(i),t)∥2]. (6)
+t∼Uni([0,T]),x(i)∼µ⋄x(i)+ϵσ⋄,ϵ∼N(0,I) θ t
+θ t t 0 t
+i=1
+ˆ ¯
+Inferencetime. Oncethisθ (orθ )islearned,we insertitintothetime-reversalSDE(2)and
+pre pre
+useitasagenerativemodel. Ultimately,withstandarddiscretization,weobtain:
+ρ(x ,t;θˆ ) = x +[0.5x +s (x ,T −t)](δt), {σ⋄(t)}2 = (δt).
+t pre t t θˆ
+pre
+t t
+Equivalently,thisis
+ρ(x ,t;θˆ ) = x +(cid:2) 0.5x −1/σ⋄ ×ϵ (x ,T −t)(cid:3) (δt), (7)
+t pre t t t θ¯ pre t
+where(δt)denotesthediscretizationstep.
+EquivalencetoDDPM. Theobjectivefunctionderivedhereisequivalenttotheoneformulated
+based on variational inference in the discretized formulation, which is commonly referred to as
+DDPMs(Hoetal.,2020). InDDPMs(Hoetal.,2020),weoftenseethefollowingform:
+t
+1 1−α (cid:89)
+ρ(x ,t;θ) = √ x − √ √t ϵ (x ,T −t), α¯ = α .
+t t θ t t k
+α 1−α¯ α
+t t t
+k=1
+√
+Whenα = 1−(δt),theaboveisequivalentto(7)whenδtgoesto0bynoting1/ α ≈ 1+0.5(δt).
+t t
+71.2 Fine-Tuning Diffusion Models with RL
+Importantly,ourfocusonRL-basedfine-tuningdistinguishesitself from thestandardfine-tuning
+methods. Standard fine-tuning typically involves scenarios where we have pre-trained models
+(e.g., diffusion models) and new training data {x(i),y(i)}. In such cases, the common approach
+for fine-tuning is to retrain diffusion models with the new training data using the same loss
+functionemployedduringpre-training. Insharpcontrast,RL-basedfine-tuningdirectlyemploys
+thedownstreamrewardfunctionsastheprimaryoptimizationobjectives,makingthelossfunctions
+differentfromthoseusedinpre-training.
+Hereafter,westartwithaconciseoverviewofRL-basedfine-tuning. Then,beforedelvinginto
+specifics, we discuss simpler non-RL alternatives to provide motivation for adopting RL-based
+fine-tuning.
+1.2.1 BriefOverview: Fine-tuningwithRL
+Inthisarticle,weexplorethefine-tuningofpre-traineddiffusionmodelstooptimizedownstream
+rewardfunctionsr : Rd → R. Indomainssuchasimages,thesebackbonediffusionmodelstobe
+fine-tunedincludeStableDiffusion(Rombachetal.,2022),whiletherewardfunctionsareaesthetic
+scoresandalignmentscores(Clarketal.,2023;Blacketal.,2023;Fanetal.,2023). Moreexamples
+are detailed in the introduction. These rewards are often unknown, necessitating learning from
+datawithfeedback: {x(i),r(x(i))}. WewillexplorethisaspectfurtherinSection7. Untilthen,we
+assumer isknown.
+Now,readersmaywonderabouttheobjectivesweaimtoachieveduringthefine-tuningprocess.
+Anaturalapproachistodefinetheoptimizationproblem:
+argmaxE [r(x)] (8)
+x∼q
+q∈∆(X)
+whereq isinitializedwithapre-traineddiffusionmodelppre ∈ ∆(X). Inthistutorial,wewilldetail
+the procedure of solving (8) with RL in the upcoming sections. In essence, we leverage the fact
+thatdiffusionmodelsareformulatedasasequentialdecision-makingproblem,whereeachdecision
+correspondstohowsamplesaredenoised.
+Althoughtheaboveobjectivefunction(8)isreasonable,theresultingdistributionmightdeviate
+toomuchfromthepre-traineddiffusionmodel. Tocircumventthisissue,anaturalwayistoadd
+penalizationagainstpre-traineddiffusionmodels. Then,thetargetdistributionisdefinedas:
+argmaxE [r(x)]−αKL(q∥ppre). (9)
+x∼q
+q∈∆(X)
+Notably,(9)reducestothefollowingdistribution:
+exp(r(·)/α)ppre(·)
+p (·) := . (10)
+r (cid:82)
+exp(r(x)/α)ppre(x)dx
+Here, the first term in (9) corresponds to the mean reward, which we want to optimize in the
+fine-tuningprocess. Thesecondtermin(10)servesasapenaltyterm,indicatingthedeviationofq
+fromthepre-trainedmodel. Theparameterα controlsthestrengthofthisregularizationterm. The
+properchoiceofα dependsonthetaskweareinterestedin.
+81.2.2 MotivationforUsingRLoverNon-RLAlternatives
+To achieve our goal of maximizing downstream reward functions with diffusion models, readers
+mayquestionwhetheralternativeapproachescanbeemployedapartfromRL.Here,weinvestigate
+thesepotentialalternativesandexplainwhyRLapproachesmayofferadvantagesoverthem.
+Rejectionsampling. Oneapproachinvolvesgeneratingmultiplesamplesfrompre-traineddiffu-
+sion models and selecting only those with high rewards. This method, called rejection sampling,
+operateswithoutneedingfine-tuning. However,rejectionsamplingiseffectiveprimarilywhenthe
+pre-trainedmodelalreadyhasahighprobabilityofproducinghigh-rewardsamples. Itresembles
+sampling from a prior distribution to obtain posterior samples (in this case, high-reward points).
+Thisapproachworksefficientlywhentheposteriorcloselymatchesthepriorbutcanbecomehighly
+inefficientotherwise. Incontrast,byexplicitlyupdatingweightindiffusionmodels,RL-basedfine-
+tuningallowsustoobtainthesehigh-rewardsamples,whichareseldomgeneratedbypre-trained
+models.
+Conditionaldiffusionmodels(classifier-freeguidance). Inconditionalgenerativemodels,the
+generalgoalistosamplefromp(x|c),wherexistheoutputandcdenotestheconditioningvariable.
+Forexample,intext-to-languagediffusionmodels,cisatext,andxisthegeneratedimage. Similarly,
+inthecontextofproteinengineeringforaddressinginversefoldingproblems,modelsoftendefinec
+astheproteinbackbonestructureandxasthecorrespondingaminoacidsequence. Here,usingthe
+trainingdata{c(i),x(i)},themodelistrainedbyusingthelossfunction:
+(cid:88)
+argmin E [∥ϵ−ϵ (x(i),c(i),t)∥2],
+t∼Uni([0,T]),x(i)∼µ⋄x(i)+ϵσ⋄,,ϵ∼N(0,I) θ t
+θ t t 0 t
+i
+wherethedenoisingfunctionϵ additionallyreceivestheconditioninginformationc(i) asinput. In
+θ
+practice,avarietyofimprovementssuchasclassifier-freeguidance(HoandSalimans,2022)can
+furtherimprovethemodel’sabilitytolearntheconditionaldistributionp(x|c).
+Theseconditionalgenerativemodelscanbeusedtooptimizedown-streamrewardsbycondi-
+tioningontherewardvalues,then samplingxconditionedonhighrewardvalues(Krishnamoorthy
+etal.,2023;Yuanetal.,2023). Whilethismethodis,inprinciple,capableofgeneratingplausible
+x values across a range of reward levels within the training data distribution, it is not the most
+effective optimization strategy. This is primarily because high-reward inputs frequently reside
+in the tails of the training distribution or even beyond it. Consequently, this method may not
+effectivelygeneratehigh-rewardsamplesthatlieoutsidethetrainingdatadistribution. Incontrast,
+RL-basedfine-tuninghasthecapabilitytogeneratesampleswithhigherrewardsbeyondthetraining
+data. This is achieved by explicitly maximizing reward models learned from the training data
+and leveraging their extrapolative capabilities of reward models, as theoretically formalized and
+empiricallyobservedinUeharaetal.(2024).
+Reward-weighted training. Another alternativeapproach is to use a reward-weighted version
+ofthestandardtraining lossfordiffusionmodels. Suppose that wehavedata{x(i),r(x(i))}. Then,
+after learning a reward rˆ : X → R with regression from the data, to achieve our goal, it looks
+9naturaltouseareward-weightedversionofthetraininglossfordiffusionmodels(5),i.e.,
+(cid:88)
+argmin E [rˆ(x(i))∥ϵ−ϵ (x(i),t)∥2].
+t∼Uni([0,T]),x(i)∼µ⋄x(i)+ϵσ⋄,ϵ∼N(0,I) 0 θ t
+θ t t 0 t
+i
+Therearetwopotentialdrawbackstothisapproach. First,inpractice,itmaystruggletogenerate
+sampleswithhigherrewardsbeyondthetrainingdata. Aswewillexplainlater,manyRLalgorithms
+aremoredirectlyfocusedonoptimizingrewardfunctions,whichareexpectedtoexcelinobtaining
+sampleswith highrewardsnotobserved intheoriginal data, asempirically observed inBlack etal.
+(2023). Second, when fine-tuning a conditional diffusion model p(x|c), the alternative approach
+hererequiresapairof{c(i),x(i)}duringfine-tuningtoensurethevalidityofthelossfunction. When
+weonlyhavedata{x(i),r(x(i))}butnot{c(i),x(i),r(x(i))},thisimpliesthatwemightneedtosolve
+aninverseproblemfromxtoc,whichcanoftenbechallenging. Incontrast,inthesescenarios,RL
+algorithms, which we will introduce later, can operate without needing such pairs {c(i),x(i)}, as
+longaswehavelearnedrewardfunctionsrˆ.
+Finally, it should be noted that reward-weighted training technically falls under the broader
+categoryofRLmethods. Itsharesacloseconnectionwith“reward-weightedMLE”introducedin
+Section 6.1, as discussed later. Employing this reward-weighted MLE helps address the second
+concernof“reward-weightedtraining”mentionedearlier.
+2 Brief Overview of Entropy-Regularized MDPs
+Inthistutorial, weexplainhowfine-tuningdiffusion modelscanbenaturallyformulated asanRL
+problem in entropy-regularizedMDPs. This perspective is natural because RLinvolves sequential
+decision-making,andadiffusionmodelisformulatedasasequentialproblemwhereeachdenoising
+stepisa decision-making process. ToconnectdiffusionmodelswithRL, webeginwithaconcise
+overview of RL in standard entropy-regularized MDPs (Haarnoja et al., 2017; Neu et al., 2017;
+Geistetal.,2019;Schulmanetal.,2017).
+2.1 MDPs
+AnMDPisdefinedasfollows: {S,A,{Ptra}T ,{r }T ,p }whereS isthestatespace,Aisthe
+t t=0 t t=0 0
+action space, Ptra is a transition dynamic mapping: S × A → ∆(S), r : S × A → R denotes
+t t
+rewardreceivedattandp isaninitialdistributionoverS. Apolicyπ : S → ∆(A)isamapfrom
+0 t
+anystates ∈ S tothedistributionoveractions. ThestandardgoalinRListosolve
+(cid:34) (cid:35)
+T
+(cid:88)
+argmaxE r (s ,a ) (11)
+{πt} t t t
+{πt}
+t=0
+where E [·] is the expectation induced both policy π and the transition dynamics as follows:
+{πt}
+s ∼ p ,a ∼ π (·|s ),s ∼ Ptra(·|s ,a ),···. As we will soon detail in the next section
+0 0 0 0 0 1 0 0 0
+(Section 3), diffusion models can naturally be framed as MDPs as each policy corresponds to a
+denoisingprocessindiffusionmodels.
+10Inentropy-regularizedMDPs,weconsiderthefollowingregularizedobjectiveinstead:
+(cid:34) (cid:35)
+T
+(cid:88)
+{π⋆} = argmaxE r (s ,a )−αKL(π (·|s ),π′(·|s )) (12)
+t {πt} t t t t t t t
+{πt}
+t=0
+whereπ′ : S → ∆(A)isacertainreferencepolicy. Theargmaxsolutionisoftencalledasetofsoft
+optimalpolicies. Comparedtoastandardobjective(11),hereweaddKLtermsagainstreference
+policies. This addition aims to ensure that soft optimal policies closely align with the reference
+policies. In the context of fine-tuning diffusion models, these reference policies correspond to
+the pre-trained diffusion models, as we aim to maintain similarity between the fine-tuned and
+pre-trainedmodels.
+This entropy-regularized objective in (12) has been widely employed in RL literature due to
+several benefits (Levine, 2018). For instance, in online RL, it is known that these policies have
+good exploration properties by setting reference policies as uniform policies (Fox et al., 2015;
+Haarnojaetal.,2017). InofflineRL,Wuetal.(2019)suggestsusingthesepoliciesasconservative
+policiesbysettingreferencepoliciesclosetobehaviorpolicies(policiesusedtocollectofflinedata).
+Additionally,ininverseRL,thissoftoptimalpolicyisusedasanexpertpolicyinscenarioswhere
+rewardsareunobservable,onlytrajectoriesfromexpertpoliciesareavailable(typicallyreferredto
+asmaximumentropyRLasZiebartetal.(2008);Wulfmeieretal.(2015);Finnetal.(2016)).
+2.2 Key Concepts: Soft Q-functions, Soft Bellman Equations.
+The crucial question in RL is how to devise algorithms that effectively solve the optimization
+problem(12). Thesealgorithmsarelaterusedasfine-tuningalgorithmsofdiffusionmodels. Tosee
+these algorithms, werely onseveral criticalconcepts inentropy-regularizedMDPs. Specifically,
+soft-optimal policies (i.e., solutions to (12)) can be expressed analytically as a blend of soft Q-
+functions and reference policies. Furthermore, these soft Q-functions are defined as solutions to
+equationsknownassoftBellmanequations. Weelaborateonthesefoundationalconceptsbelow.
+SoftQ-functionsandsoftoptimalpolicies. Softoptimalpoliciesareexpressedasablendofsoft
+Q-functionsandreferencepolicies. Toseeit,wedefinethesoftQ-functionasfollows:
+(cid:34) (cid:35)
+T
+(cid:88)
+q (s ,a ) = E r (s ,a )−αKL(π⋆ (·|s )∥π′ (·|s ))|s ,a . (13)
+t t t {π t⋆} k k k k+1 k+1 k+1 k+1 t t
+k=t
+Then,bycomparing(13)and(12),weclearlyhave
+π⋆ = argmax E [q (s ,a )−αKL(π(·|s )∥π′(· | s )|s ]. (14)
+t at∼π(st) t t t t t t t
+π∈[X→∆(X)]
+Hence,bycalculatingtheaboveexplicitly,asoftoptimalpolicyin(12)isdescribedasfollows:
+exp(q (s,·)/α)π′(·|s)
+π⋆(·|s) ∝ t t (15)
+t (cid:82) exp(q (s,a)/α)π′(a|s)da
+t t
+11SoftBellmanequations. WehavealreadydefinedsoftQ-functionsin(13). However,thisform
+includesthesoftoptimalpolicies. Actually,withoutusingsoftoptimalpolicies,thesoftQ-function
+satisfiesthefollowingrecursiveequation(a.k.a. softBellmanequation):
+(cid:20) (cid:26)(cid:90) (cid:27) (cid:21)
+q (s ,a ) = E r(s ,a )+αlog exp(q (s ,a)/α)π′(a|s )da | s ,a . (16)
+t t t {π t⋆} t t t+1 t+1 t t+1 t t
+Thisisprovenbynotingwerecursivelyhave
+q (s ,a ) = E [r (s ,a )+q (s ,a )−αKL(π⋆ (·|s ),π′ (·|s ))|s ,a ]
+t t t {π t⋆} t t t t+1 t+1 t+1 t+1 t+1 t+1 t+1 t t
+Bysubstituting(15)intotheabove,weobtainthesoftBellmanequation(16).
+Softvaluefunctions. Sofar,wehavedefinedthesoftQ-functions,whichdependonbothstates
+andactions. Wecannowintroducearelatedconceptthatdependssolelyonstates,termedthesoft
+valuefunction. Thesoftvaluefunctionisdefinedasfollows:
+(cid:34) (cid:35)
+T
+(cid:88)
+v (s ) = E r (s ,a )−αKL(π⋆(·|s )∥π′(·|s ))|s .
+t t {π t⋆} k k k k k k k t
+k=t
+Then,thesoftoptimalpolicyin(14)isalsowrittenas
+exp(q (s,·)/α)π′(·|s)
+π⋆(·|s) ∝ t t (17)
+t exp(v (s)/α)
+t
+becausewehave
+(cid:18) (cid:19) (cid:90) (cid:18) (cid:19)
+v (s) q (s,a)
+exp t = exp t π′(a | s)da.
+α α t
+Then,substitutingtheaboveinthesoftBellmanequation(16),itiswrittenas
+q (s ,a ) = E [r(s ,a )+v (s )|s ,a ].
+t t t {π⋆} t t t+1 t+1 t t
+t
+Algorithmsinentropy-regularizedMDPs. AsoutlinedinLevine(2018),tosolve(12),various
+well-known algorithms exist in the literature on RL. The abovementioned concepts are useful in
+constructingthesealgorithms. Theseincludepolicygradients,whichgraduallyoptimizeapolicy
+usingapolicyneuralnetwork;softQ-learningalgorithms,whichutilizethesoft-Bellmanequation
+andapproximatethesoft-valuefunctionwithavalueneuralnetwork;andsoftactor-criticalgorithms
+thatleveragebothpolicyandvalueneuralnetworks. Wewillexplorehowthesealgorithmscanbe
+appliedinthecontextofdiffusionmodelsshortlyinSection4.2and6.
+3 Fine-Tuning Diffusion Models with RL in Entropy Regular-
+ized MDPs
+Inthissection,asdoneinFanetal.(2023);Blacketal.(2023);Ueharaetal.(2024),weillustrate
+howfine-tuningcanbeformulatedasanRLprobleminsoft-entropyregularizedMDPs,whereeach
+12p p p p p
+x T x T−1 x T−2 ... 2 x 1 x r
+T T−1 T−2 1 0
+Figure2: Formulatingfine-tuningindiffusionmodelsusingMDPs.
+denoisingstep ofdiffusion modelscorresponds toapolicy inRL. Finally, weoutline aspecific RL
+problemofinterestinourcontext.
+To cast fine-tuning diffusion models as an RL problem, we start with defining the following
+MDP:
+• ThestatespaceS andactionspaceAcorrespondtotheinputspaceX.
+• Thetransitiondynamicsattimet(i.e.,P )isanidentitymapδ(s = a ).
+t t+1 t
+• The reward at time t ∈ [0,··· ,T] (i.e., r ) is provided only at T as r (down-stream reward
+t
+function);but0atothertimesteps.
+• Thepolicyattimet(i.e,π )correspondstop : X → ∆(X).
+t T+1−t
+• Theinitialdistributionattime0correspondstop ∈ ∆(X). Withslightabuseofnotation,
+T+1
+weoftendenoteitbyp (·|·),whilethisisjustp (·).
+T+1 T+1
+• Thereferencepolicyatt(i.e.,π′)correspondstoadenoisingprocessinthepre-trainedmodel
+t
+ppre .
+T+1−t
+Welistseveralthingstonote.
+• Wereversethetime-evolvingprocesstoadheretothestandardnotationindiffusionmodels,
+i.e., from t = T to t = 0. Hence, s in standard MDPs corresponds to x in diffusion
+t T+1−t
+models.
+• Inourcontext,unlikestandardRLscenarios,thetransitiondynamicsareknown.
+Key RL Problem. Now, by reformulating the original objective of standard RL into our contexts,
+theobjectivefunctionin(12)reducestothefollowing:
+{p⋆} = argmax E [r(x )]−αΣ1 E [KL(p (·|x )∥ppre(·|x ))] (18)
+t t {pt} 0 t=T+1 {pt} t t t t
+{pt∈[Rd→∆(Rd)]}1 t=T+1(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+Reward KLpenalty
+wheretheexpectationE [·]istakenwithrespectto(cid:81)1 p (x |x ),i.e.,x ∼ p (·),x ∼
+{pt} t=T+1 t t−1 t T T+1 T−1
+p (· | x ),x ∼ p (· | x ),···. In this article, we set this as an objective function in
+T−1 T−1 T−2 T−2 T−2
+fine-tuningdiffusionmodels. Thisobjectiveisnaturalasitseekstooptimizesequentialdenoising
+processes to maximize downstream rewards while maintaining proximity to pre-trained models.
+Subsequently, weinvestigateseveral algorithms tosolve(18). Beforediscussingthese algorithms,
+wesummarizeseveralkeytheoreticalpropertiesthatwillaidtheirderivation.
+134 Theory of RL-Based Fine-Tuning
+So far, we have introduced a certain RL problem (i.e., (18)) as a fine-tuning diffusion model. In
+this section, we explain that solving this RL problem allows us to achieve the target distribution
+discussed in Section 1.2.1. Additionally, we present several importanttheoretical properties, such
+astheanalyticalformofmarginaldistributionsandposteriordistributionsinducedbyfine-tuned
+models. Thisformulationisalsoinstrumentalinintroducingseveralalgorithms(reward-weighted
+MLE, value-weighted sampling, and path consistency learning in Section 6), and establishing
+connectionswithrelatedareas(classifierguidanceinSection8,andflow-baseddiffusionmodelsin
+Section9). Westartwithseveralkeyconcepts.
+4.1 Key Concepts: Soft Value functions and Soft Bellman Equations.
+Now,reflectingonhowsoftoptimalpoliciesareexpressedusingsoftvaluefunctionsinSection2in
+thecontextofstandardRLproblems,wederiveseveralimportantconceptsapplicabletofine-tuning
+diffusionmodels. TheseconceptsarelaterusefulinconstructingalgorithmstosolveourRLproblem
+(18).
+Firstly,asweseein(15),soft-optimalpoliciesarecharacterizedas:
+exp(v (·)/α)ppre(· | x )
+p⋆(·|x ) = t−1 t t (19)
+t t (cid:82) exp(v (x )/α)ppre(x | x )dx
+t−1 t−1 t t−1 t t−1
+wheresoft-valuefunctionsaredefinedas
+1
+(cid:88)
+v (x ) = E [r(x )−α KL(p (·|x )∥ppre(·|x ))|x ],
+t t {p⋆ t} 0 k k k k t
+k=t
+1
+(cid:88)
+q (x ,x ) = E [r(x )−α KL(p (·|x )∥ppre(·|x ))|x ,x ] = v (x ).
+t t t−1 {p⋆ t} 0 k k k k t t−1 t−1 t−1
+k=t+1
+Secondly, as we see in (16), the soft-value functions are also recursively defined by the soft
+Bellmanequations:
+(cid:40) exp(cid:16) vt(xt)(cid:17) = (cid:82) exp(cid:16) vt−1(xt−1)(cid:17) ppre(x | x )dx (t = T +1,··· ,1),
+α α t t−1 t t−1 (20)
+v (x ) = r(x ).
+0 0 0
+Nowsubstitutingtheabovein(19),weobtain
+exp(v (·)/α)ppre(· | x )
+p⋆(·|x ) = t−1 t t .
+t t exp(v (x )/α)
+t t
+As mentioned earlier, these soft value functions and their recursive form will later serve as the
+basisforconstructingseveralconcrete fine-tuningalgorithms(suchasreward-weightedMLEand
+value-weightedsamplinginSection6).
+144.2 Induced Distributions after Fine-Tuning
+Now, with the above preparation, we can show that the induced distribution derived by this soft
+optimalpolicyisactuallyequaltoourtargetdistribution.
+Theorem 1 (Theorem 1 in Uehara et al. (2024)). Let p⋆(·) be an induced distribution at time 0
+fromoptimalpolicies{p⋆}1 ,i.e.,p⋆(x ) = (cid:82) {(cid:81)1 p⋆(x |x )}dx . Thedistributionp⋆
+t t=T+1 0 t=T+1 t t−1 t 1:T
+isequaltothetargetdistribution(10),i.e.,
+p⋆(x) = p (x).
+r
+This theorem statesthat after solving(18) and obtaining softoptimal policies, we can sample
+fromthetargetdistributionbysequentiallyrunningpoliciesfromp⋆ top⋆. Thus,(18)servesasa
+T+1 1
+natural objective for fine-tuning. This fact is also useful in deriving a connection with classifier
+guidanceinSection8.
+Marginaldistributions. Wecanderivethemarginaldistributionasfollows.
+Theorem 2 (Theorem 2 in Uehara et al. (2024) ). Let p⋆(x ) be the marginal distributions at t
+t t
+inducedbysoft-optimalpolicies{p⋆}1 ,i.e.,p⋆(x ) = (cid:82) {(cid:81)t+1 p⋆(x |x )}dx . Then,
+t t=T+1 t t k=T+1 k k−1 k t+1:T
+exp(v (x )/α)ppre(x )
+p⋆(x ) = t t t t ,
+t t C
+wherev (·)isthesoft-valuefunction.
+t
+Interestingly,thenormalizingconstantisindependentoftintheabovetheorem.
+Posteriordistributions. Wecanderivetheposteriordistributionasfollows.
+Theorem 3 (Theorem 3 in Uehara et al. (2024)). Denote the posterior distribution of x given
+t
+x forthedistributioninducedbysoft-optimalpolicies{p⋆}1 by{p⋆}b(· | ·). Wedefinethe
+t−1 t t=T+1
+analogousobjectiveforapre-trainedpolicyanddenoteitbyppre(· | ·). Then,weget
+t
+{p⋆}b(x |x ) = ppre(x |x ).
+t t t−1 t t t−1
+Thistheoremindicatesthataftersolving(18),theposteriordistributioninducedbypre-trained
+models remains preserved. This property plays an important role in constructing PCL (path
+consistencylearning)inSection6.3.
+Remark4 (Continuous-timeformulation). Forsimplicity, ourexplanationis generallybasedon
+the discrete-time formulation. However, as training of diffusion models could be formulated in
+thecontinuous-timeformulation(Songetal.,2021),wecanstillextendmostofourdiscussionof
+fine-tuninginourtutorialinthecontinuous-timeformulation. Forexample,theaboveTheoremsare
+extendedtothecontinuoustimeformulationinUeharaetal.(2024).
+15Table 1: Description of each RL algorithm for fine-tuning diffusion models (note that value-
+weighted sampling is technically not a fine-tuning algorithm.) Note (1) “Without learning value
+functions” refers to the capability of algorithms to directly utilize non-differentiable black-box
+reward feedback,bypassingthenecessity totraindifferentiablereward functions,(2) “Distribution-
+constrained”indicatesthatthealgorithmsaredesignedtomaintainproximitytopre-trainedmodels.
+Basedonit,thepracticalrecommendationofalgorithmsissummarizedinFigure3.
+Memory Computational Without learning Distribution-
+efficiency efficiency valuefunctions constrained
+SoftPPO ✓ ✓
+Rewardbackpropagation ✓ ✓
+Reward-weightedMLE ✓ ✓ ✓
+Value-weightedsampling ✓ ✓
+Pathconsistencylearning ✓ ✓
+5 RL-Based Fine-Tuning Algorithms 1: Non-Distribution-Constrained
+Approaches
+So far, we have explained how to frame fine-tuning diffusion models as the RL problem in
+entropy-regularizedMDPs. Movingforward,wesummarizeactualalgorithmsthatcansolvetheRL
+problem ofinterest describedby Equation(18). Inthis section, weintroduce twoalgorithms: PPO
+anddirectrewardbackpropagation.
+Thesealgorithmsareoriginallydesignedtooptimizerewardfunctionsdirectly,meaningthey
+operateeffectivelyevenwithoutentropyregularization(i.e.,α = 0). Consequently,theyarewell-
+suitedforgeneratingsampleswithhighrewardsthatmaynotbeintheoriginaltrainingdataset. More
+distribution-constrained algorithmsthat align closely with pre-trainedmodels will bediscussed in
+thesubsequentsection(Section4.2). Therefore,weclassifyalgorithmsinthissection(i.e.,PPOand
+direct reward backpropagation)as non-distribution-constrainedapproaches. The wholesummary is
+describedinTable1.
+5.1 Soft Proximal Policy Optimization (PPO)
+InordertosolveEquation(18),Fanetal.(2023);Clarketal.(2023)proposeusingPPO(Schulman
+et al., 2017). PPO has been widely used in RL, as well as, in the literature in fine-tuning LLMs,
+due to its stability and simplicity. In the standard context of RL, this is especially preferred over
+Q-learningwhentheactionspaceishigh-dimensional.
+The PPO algorithm is described in Algorithm 1. This is an iterative procedure of updating
+a parameter θ. Each iteration comprises two steps: firstly, samples are generated by executing
+16Algorithm1SoftPPO
+1: Require: Pre-trained model{N(ρ(x ,t;θ ),σ2(t))}1 ,batch sizem,parameterα ∈ R+,
+t pre t=T+1
+learningrateγ
+2: Initialize: θ = θ
+1 pre
+3: fors ∈ [1,··· ,S]do
+4:
+Collectmsamples{x(i)(θ)}0
+from acurrent diffusion model (i.e., generating by sequen-
+t t=T
+tiallyrunningpolices{N(ρ(x ,t;θ),σ2(t))}1 fromt = T +1tot = 1)
+t t=T+1
+5: Updateasfollows(severaltimesifneeded):
+1 m (cid:34) (cid:40) (i) (i)
+θ ← θ − γ ∇ (cid:88) (cid:88) min r˜(x(i) ,x(i) ) p(x t−1|x t ;θ) , (21)
+s+1 s m θ t 0 t (i) (i)
+p(x |x ;θ )
+t=T+1i=1 t−1 t s
+(cid:32) (i) (i) (cid:33)(cid:41)(cid:35)
+p(x |x ;θ)
+r˜(x(i) ,x(i) )·Clip t−1 t ,1−ϵ,1+ϵ | ,
+t 0 t (i) (i) θ=θs
+p(x |x ;θ )
+t−1 t s
+where
+∥ρ(x ,t;θ)−ρ(x ,t;θpre)∥2
+t t
+r˜(x ,x ) := −r(x )+α .
+t 0 t 0 2σ2(t)
+(cid:124) (cid:123)(cid:122) (cid:125)
+KLterm
+6: endfor
+7: Output: Policy{p (· | ·;θ )}1
+t S t=T+1
+currentpoliciestoconstructthelossfunction(inspiredbypolicygradientformulation);secondly,
+theparameterθ isupdatedbycomputingthegradientofthelossfunction.
+PPOoffersseveraladvantages. Theapproachisknownforitsstabilityandrelativelystraight-
+forwardimplementation. Stabilitycomesfromtheconservativeparameterupdates. Indeed,PPO
+buildsuponTRPO (Schulmanet al.,2015), whereparametersare conservativelyupdatedwith aKL
+penaltyterm(betweenθ andθ )topreventsignificantdeviationfromthecurrentparameter. This
+s+1 s
+gives usstabilityinthe optimizationlandscape. Furthermore,in Algorithm1,we donotnecessarily
+needtorelyonvaluefunctions,althoughtheycouldbeusefulforvariancereduction. Asdiscussed
+in thesubsequent subsection, this can beadvantageous compared to other methods, especiallysince
+learning value functions can be challenging in high-dimensional spaces, particularly within the
+contextofdiffusionmodels.
+5.2 Direct Reward Backpropagation
+Anotherstandardapproachisadifferentiableoptimization(Clarketal.,2023;Prabhudesaietal.,
+2023;Ueharaetal.,2024),wheregradientsaredirectlypropagatedfromrewardfunctionstoupdate
+policies.
+TheentirealgorithmisdetailedinAlgorithm2. Thisrewardbackpropagationentailsaniterative
+processofupdatingaparameterθ. Eachiterationcomprisestwosteps;firstly,samplesaregenerated
+byexecuting currentpolicies toapproximate theexpectationin theloss function, which isdirectly
+derivedfrom(18);second,thecurrentparameterθ isupdatedbycomputingthegradientoftheloss
+17Algorithm2Rewardbackpropagation
+1: Require: Pre-trained model{N(ρ(x ,t;θ ),σ2(t))}1 ,batch sizem,parameterα ∈ R+,
+t pre t=T+1
+learningrateγ
+2: Trainadifferentiablerewardfunction(ifrewardfeedbackisnotdifferentiable)
+3: Initialize: θ = θ
+1 pre
+4: fors ∈ [1,··· ,S]do
+5:
+Collectmsamples{x(i)(θ)}0
+from acurrent diffusion model (i.e., generating by sequen-
+t t=T
+tiallyrunningpolices{N(ρ(x ,t;θ),σ2(t))}1 fromt = T +1tot = 1)
+t t=T+1
+6: Updateθ toθ :
+s s+1
+(cid:34) (cid:40) (cid:41)(cid:35)
+1 (cid:88)m (cid:88)1 ∥ρ(x(i)(θ),t;θ)−ρ(x(i)(θ),t;θ )∥2
+θ ← θ +γ r(x(i)(θ))−α t t pre | .
+s+1 s m 0 2σ2(t) θ=θs
+i=1 t=T+1
+(22)
+7: endfor
+8: Output: Policy{p (· | ·;θ )}1
+t S t=T+1
+function.
+AdvantagesoverPPO. Thisapproachoffersfurthersimplicityinimplementationinacasewhere
+wealreadyhaveapre-traineddifferentiablerewardmodel. Furthermore,thetrainingspeedismuch
+fastersincewearedirectlyback-propagatingfromrewards.
+Potential disadvantages over PPO. Reward backpropagation may face memory inefficiency
+issues. However, there are strategies to mitigate this challenge. Firstly, implementing gradient
+accumulation can help to keep a large batch size. Secondly, as proposed in DRaFT (Clark et al.,
+2023),propagatingrewardsbackwardfromtime0tok (k isanintermediatestepsmallerthanT)
+andupdatingpoliciesfromk to0canstillyieldhighperformance. Thirdly,drawingfrominsightsin
+theliteratureonneuralSDE/ODE(Chenetal.,2018),morememory-efficientadvancedtechniques
+suchasadjointmethodscouldbehelpful.
+Another potential drawback is the requirement for “differentiable” reward functions. Often,
+reward functions areobtained in a non-differentiable black-box way (e.g., computational feedback
+derivedfrom physical simulations). In such scenarios, usingdirect backpropagationnecessitates
+thelearningofdifferentiablerewardfunctionsevenifaccuraterewardfeedbackisavailable. This
+learning step can pose challenges as it involves data collection and constructing suitable reward
+models.
+6 RL-Based Fine-Tuning Algorithms 2: Distribution-Constrained
+Approaches
+In this section, following Section 4.2, we present three additional algorithms (reward-weighted
+MLE,value-weightedsampling,andpathconsistencylearning)aimedatsolvingtheRLproblem
+18of interest defined by Equation (18). In the context of standard RL, these algorithms are tailored
+to align closely with reference policies, specifically pre-trained diffusion models in our context.
+Formally, indeed, all algorithms in this section are not well-defined when α = 0 (i.e., without
+entropy regularization). Hence, we categorize these three algorithms as distribution-constrained
+approaches.
+The algorithms in this section excel in preserving the characteristics of pre-trained diffusion
+models. Practically,thispropertybecomesespeciallycrucialwhenrewardfunctionsarelearnedfrom
+trainingdata, andwewantto avoidbeing fooled bydistributionsamples(a.k.a. overoptimization as
+detailedinSection7.3). However,asacaveat,thispropertymightalsoposechallengesineffectively
+generatinghigh-rewardsamplesbeyond thetraining data. Thisimplies thatthese approachesmay
+not be suitable when accurate reward feedback is readily available without learning. Hence, we
+generallyrecommendusingthemwhenrewardfunctionsareunknown.
+6.1 Reward-Weighted MLE
+Here,weelucidateanapproachbasedonreward-weightedMLE(Petersetal.,2010),atechnique
+commonly employed in offline RL (Peng et al., 2019). While Fan et al. (2023, Algorithm 2) and
+ZhangandXu(2023)proposevariationsofreward-weightedMLEfordiffusionmodels,thespecific
+formulation of reward-weighted MLE discussed here does not seem to have been explicitly detailed
+previously. Therefore,unliketheprevioussection,westartbyoutliningthedetailedrationalefor
+thisapproach. Subsequently,weprovideacomprehensiveexplanationofthealgorithm. Finally,we
+delveintoitsconnectionwiththeoriginaltraininglossofdiffusionmodels.
+Motivation. First,fromTheorem2,recalltheformoftheoptimalpolicyp⋆(x |x ):
+t t−1 t
+exp(v (x )/α)ppre(x |x )
+p⋆(x |x ) := t−1 t−1 t t−1 t .
+t t−1 t exp(v (x )/α)
+t t
+Now,wehave:
+p⋆ = argmin E [KL(p⋆(·|x )∥p (·|x ))]
+t xt∼ut t t t t
+pt:X→∆(X)
+whereu ∈ ∆(X)isaroll-indistributionencompassingtheentirespaceX Thiscanbereformulated
+t
+asvalue-weightedMLEasfollows.
+Lemma1(Value-weightedMLE). WhenΠ = [X → ∆(X)],thepolicyp⋆ isequalto
+t t
+(cid:20) (cid:18) (cid:19) (cid:21)
+v (x )
+p⋆(·|·) = argmaxE exp t−1 t−1 logp (x |x ) .
+t xt−1∼pp t−re 1(·|xt),xt∼ut α t t−1 t
+pt∈Πt
+This lemma illustrates that if v is known, p⋆ can be estimated using weighted maximum
+t−1 t
+likelihoodestimation(MLE).WhilethisformulationiscommonlyusedinstandardRL(Pengetal.,
+2019),inourcontextoffine-tuningdiffusionmodels,learningavaluefunctionisoftenchallenging.
+Interestingly,thisreward-weightedMLEcanbeperformedwithoutdirectlyestimatingthesoftvalue
+functionafterproperreformulation. Todemonstratethis,let’sutilizethefollowinglemma:
+19Algorithm3Reward-weighedMLE
+1: Require: Pre-trained model{N(ρ(x ,t;θ ),σ2(t))}1 ,batch sizem,parameterα ∈ R+,
+t pre t=T+1
+learningrateγ
+2: Initialize: θ = θ
+1 pre
+3: fors ∈ [1,··· ,S]do
+4: fork ∈ [T +1,··· ,1]do
+5:
+Collectmsamples{x(i,t)}m,0
+from
+k i=1,k=T
+apolicyp (· | ·;θ ),··· ,p (·|·;θ ),ppre(·|·),··· ,ppre(·|·).
+T+1 s t+1 s t 1
+6: endfor
+7: Updateθ toθ asfollows:
+s s+1
+(cid:34) (cid:32) (cid:33) (cid:35)
+(cid:88)1 (cid:88)m r(x(i,t)) ∥x(i,t) −ρ(x(i,t),t;θ)∥2
+θ ← θ −γ∇ exp 0 t−1 t 2 | . (24)
+s+1 s θ α {σ⋄}2 θ=θs
+t=T+1 i=1 t
+8: endfor
+9: Output: Policy{p (· | ·;θ )}1
+t S t=T+1
+Lemma2(Characterizationofsoftoptimalvaluefunctions).
+(cid:18) (cid:19) (cid:20) (cid:18) (cid:19) (cid:21)
+v (x ) r(x )
+exp t t = E exp 0 |x .
+α x0∼pp 1re(x1),···,xt−1∼pp t−re 1(xt) α t
+RecallE [·|x ]meansE [·|x ].
+{pp tre} t x0∼pp 1re(x1),···,xt−1∼pp t−re 1(xt) t
+Proof. Thisisobtainedbyrecursivelyusingthesoft-Bellmanequation(20):
+(cid:18) (cid:19) (cid:90) (cid:18) (cid:19) (cid:20) (cid:18) (cid:19) (cid:21)
+v (x ) v (x ) r(x )
+exp t t = exp t−1 t−1 ppre(x | x )dx = ··· = E exp 0 |x .
+α α t t−1 t t−1 {pp tre} α t
+(23)
+Algorithm. Now,wearereadytopresentthealgorithm. BycombiningLemma1andLemma2,
+weobtainthefollowing.
+Lemma3(Reward-weightedMLE). WhenΠ = [X → ∆(X)],
+t
+(cid:20) (cid:18) (cid:19) (cid:21)
+r(x )
+p⋆ = argmaxE exp 0 logp (x |x ) , (25)
+t x0∼pp 1re(x1),···,xt−1∼pp t−re 1(xt),xt∼ut α t t−1 t
+pt∈Πt
+Proof. UsingLemma2,wehave
+(cid:20) (cid:18) (cid:19) (cid:21)
+v (x )
+E exp t−1 t−1 logp (x |x )
+xt−1∼pp t−re 1(·|xt),xt∼ut α t t−1 t
+(cid:20) (cid:20) (cid:18) (cid:19) (cid:21) (cid:21)
+r(x )
+= E E exp 0 |x logp (x |x )
+xt−1∼pp t−re 1(·|xt),xt∼ut {pp tre} α t−1 t t−1 t
+(cid:20) (cid:18) (cid:19) (cid:21)
+r(x )
+= E exp 0 logp (x |x ) .
+x0∼pp 1re(x1),···,xt−1∼pp t−re 1(xt),xt∼ut α t t−1 t
+20TherestoftheproofisobviousbyusingLemma1.
+Then, after approximating the expectation in (25), by using a Gaussian policy class with the
+meanparameterizedbyneuralnetworksasapolicyclassΠ ,wecanestimatep⋆. Finally,theentire
+t t
+algorithmisdescribedinAlgorithm3.
+Here, we give two remarks. This is an off-policy algorithm. Hence, we can use any roll-in
+policiesasu inLemma3. InAlgorithm3,weusethecurrentpolicyasaroll-inpolicy. Additionally,
+t
+inAlgorithm3,theloss function(24)isderivedbyrecallingthat,up toconstant,−logp (x |x )
+t t−1 t
+isequalto
+∥xt−1−ρ(xt,t;θ)∥2
+2.
+{σ⋄}2
+t
+Advantagesandpotentialdisadvantages. LikePPOinSection5.1,thisapproachisexpectedto
+bememoryefficient,anddoesnotrequirelearningdifferentiablerewardfunctions,whichcanoften
+be challenging. However, compared to directrewardbackpropagation Section 5.2, it mightnot be
+ascomputationallyefficient. Furthermore,unlikePPO,thisalgorithmisnoteffectivewhenα = 0,
+potentiallylimitingitsabilitytogeneratesampleswithextremelyhighrewards.
+6.1.1 RelationwithLossFunctionsfortheOriginalTrainingObjective
+Inthissubsection,weexploretheconnectionwiththeoriginallossfunctionofpre-traineddiffusion
+models. Toseethat,asweseeinSection1.1.1,recall
+x(i,t) = x(i,t) +[0.5x −1/σ⋄ϵ (x ,T −t)](δt)+ϵ(i,t)σ⋄, ϵ(i,t) ∼ N(0,I).
+t−1 t t t θ¯ pre t t t
+(cid:124) (cid:123)(cid:122) (cid:125)
+ρ(x( ti,t),t;θpre)
+Then,thelossfunction(24)inreward-weightedMLEreducesto
+ 
+(cid:88)1 (cid:88)m (cid:32) r(x(i,t))(cid:33)(cid:13) (cid:13) ϵ(x(i,t),T −t;θ¯ )−ϵ(x(i,t),T −t;θ)(cid:13) (cid:13)2
+θ
+s
+−γ∇
+θ
+exp α0 (cid:13) (cid:13)ϵ( ti,t) − t p {re
+σ⋄}2
+t (cid:13)
+(cid:13)
+| θ=θs.
+t=T+1 i=1 (cid:13) t (cid:13) 2
+(26)
+This objective function closely resembles the reward-weighted version of the loss function (5) used
+fortrainingpre-traineddiffusionmodels.
+6.2 Value-Weighted Sampling
+Thus far, we have discussed methods for fine-tuning pre-trained diffusion models. Now, let’s delve
+into an alternative approach during inference that aims to sample from the target distribution p
+r
+withoutexplicitlyfine-tuningthediffusionmodels. Inessence,thisapproachinvolvesincorporating
+gradientsofvaluefunctionsduringinferencealongsidethedenoisingprocessinpre-traineddiffusion
+models. Hence, we refer to this approach as value-weighted sampling. While it seems that this
+method has not been explicitly formalized in previous literature, the value-weighted sampling
+closelyconnectswithclassifierguidance,asdiscussedinSection8.1.
+Beforedelvingintothealgorithmicdetails,weoutlinethemotivation. Subsequently,wepresent
+theconcretealgorithmanddiscussitsadvantages—specifically,itscapabilitytooperatewithoutthe
+necessityoffine-tuningdiffusionmodels—anditsdisadvantage,whichinvolvestheneedtoobtain
+differentiablevaluefunctions.
+21Algorithm4Value-weightedsampling
+1: Require: Pre-trainedmodel{ppre(x |x )} = {N(ρ(x ,t;θ ),σ2(t))} .
+t t−1 t t t pre t
+2: Estimatev : X ×[0,T] → Randdenoteitbyvˆ(·,·)
+• (1)Monte-Carloapproachin(28)
+• (2)Valueiterationapproach(SoftQ-learning)in(29)inSection6.2.1
+• (3)ApproximationusingTweedie’sformulainSection6.2.2
+3: fort ∈ [T +1,··· ,1]do
+4: Set
+σ2(t)∇ vˆ(x,t)|
+ρ˜(x ,t) :=
+x x=xt
++ρ(x ,t;θ ).
+t t pre
+α
+5: endfor
+6: Output: {N(ρ˜(x ,t),σ2(t))}1
+t t=T+1
+Motivation. Considering a Gaussian policy x ∼ N(ρ˜(x ,t),σ2(t)), we aim to determine
+t−1 t
+ρ˜(x ,t;θ) such that N(ρ˜(x ,t;θ),σ2(t)) closely approximates p⋆(·|x ). Here, typically, we have
+t t t t
+ρ(x ,t;θ) = x + (δt)g¯(x ,t) and σ2(t) = g˜(t)(δt) for certain function g¯ : X × [0,T] → Rd
+t t t
+and g˜ : [0,T] → R, as we have explained in Section 1.1.1. Then, using ∝ as equality up to the
+normalizingconstant,
+(cid:18)
+∥x −x −(δt)g¯(x
+,t)∥2(cid:19)
+p⋆(x | x ) ∝ exp(v (x )/α)exp − t−1 t t
+t t−1 t t−1 t−1 0.5g˜(t)(δt)
+(cid:18)
+∥x −x −(δt)g¯(x
+,t)∥2(cid:19)
+t−1 t t
+≈ exp(v (x )+∇v (x )/α·{x −x })exp −
+t t t t t−1 t
+0.5g˜(t)(δt)
+(cid:18)
+∥x −x −(δt)g˜(t)∇v (x )/α−(δt)g¯(x
+,t))∥2(cid:19)
+t−1 t t t t
+≈ exp −
+0.5g˜(t)(δt)
+Hence,wecanapproximate:
+σ2(t)∇v (x )
+t t
+ρ˜(x ,t) ≈ +ρ(x ,t;θ ). (27)
+t t pre
+α
+Remark 5. Note while the above derivation is heuristic, it is formalized in Uehara et al. (2024,
+Lemma2)inthecontinuous-timeformulation.
+Algorithm. Utilizing(27), theentire algorithm ofvalue-weightedsampling isoutlined in Algo-
+rithm 4. This method doesn’t involve updating parameters in a diffusion model; hence, it’s not a
+fine-tuningmethod.
+Notethat inthisalgorithm, werequirea formofv (·)tocompute gradients. Thisvaluefunction
+t
+canbeestimatedthroughregressionusingthecharacterizationdescribedinLemma2. Here,inspired
+22byLemma2,weusethefollowinglossfunction:
+ 
+(cid:88)1 (cid:88)m
+(cid:40) (cid:32)
+h
+(x(i,t))(cid:33) (cid:32) r(x(i,t))(cid:33)(cid:41)2
+vˆ t(x) = argmin  exp t t −exp 0 , (28)
+α α
+h:[Rd,[0,T]]→R
+t=T+1 i=1
+where the data is collected in an off-policy way. Later, we explain two alternative approaches in
+Section6.2.1andSection6.2.2.
+Advantagesand potential disadvantages. The value-weighted samplingis straightforwardand
+lessmemory-intensivesinceitavoidsfine-tuning. Therefore,itpresentsanappealingsimpleoption
+ifit performswell. Indeed, invarious inverse problems,suchas inpainting,super-resolution, and
+colorization,settingr(x)asalikelihoodofthemeasurementmodely = g(x)+ϵ(whereyrepresents
+actualmeasurements,ϵdenotesnoise,andg definesthemeasurementfunction)hasprovenhighly
+successful(Chungetal.,2022;Bansaletal.,2023;Chungetal.,2022).
+The potential drawback compared to fine-tuning algorithms so far (i.e., PPO and reward-
+weightedMLE)isthenecessitytolearndifferetiablesoftvaluefunctionslikedirectrewardback-
+propagation. This learning process is often not straightforward as explained in Section 5.2. The
+previously discussed fine-tuning algorithms (i.e., PPO, reward-weighted MLE) circumvent this
+requirementbyobtainingrewardstogoviaMonteCarlo approaches,therebyavoidingthe needfor
+softvaluefunctions.
+6.2.1 SoftQ-learning
+We have elucidated that leveraging Lemma 2, we can estimate soft value functions v (·) based
+t
+on Equation (28) in a Monte Carlo way. Subsequently, these soft value functions are used in
+value-weightedsamplingtosamplefromthetargetdistributionp . Alternatively,thereisanother
+r
+method that involves using soft Bellman equations to estimate soft value functions v (·). This
+t
+techniqueiscommonlycalledsoftQ-learninginthecontextofstandardRL.
+First,recallingthesoftBellmanequationsin(16),wehave
+(cid:18) (cid:19) (cid:90) (cid:18) (cid:19)
+v (x ) v (x )
+exp t t = exp t−1 t−1 ppre(x | x )dx .
+α α t t−1 t t−1
+Takingthelogarithm,weobtain
+(cid:90) (cid:18) (cid:19)
+v (x )
+v (x ) = αlog exp t−1 t−1 ppre(x | x )dx .
+t t α t t−1 t t−1
+Hence,
+(cid:34) (cid:35)
+(cid:26)
+h(x )
+(cid:90) (cid:18)
+v (x
+)(cid:19) (cid:27)2
+v = argminE t −log exp t−1 t−1 p (x |x )dx
+t xt∼ut
+α α
+pre t−1 t t−1
+h:X→R
+whereu ∈ ∆(X)isanyroll-indistributionthatcoverstheentirespace X. Usingthisrelationand
+t
+replacingtheexpectationE withempiricalapproximation,weareabletoestimatesoftvalue
+xt∼ut
+23functionsv inarecursivemanner:
+t
+ 
+(cid:88)1 (cid:88)m
+(cid:40)
+(cid:90)
+(cid:32)
+vˆ⟨j−1⟩(x
+)(cid:33) (cid:41)2
+{vˆ t⟨j⟩(x)} t ← argmin  h t(x( ti,t))−log exp t−1
+α
+t−1 p pre(x t−1|x( ti,t))dx t−1 ,
+h:[Rd,[0,T]]→R
+t=T+1 i=1
+(29)
+wherethedataiscollectedinanoff-policyway.
+Remark 6. Although soft Q-learning is widely used in standard RL (Schulman et al., 2017), it
+cannot be directly applied to our fine-tuning context without resorting to value-weighted sampling
+orvalue-weightedMLE.Thisisbecause,evenifweestimatesoft-valuefunctionsasvˆ,substituting
+t
+v withvˆ inthesoft-optimalpolicyresultsinanunnormalizedpolicy.
+t t
+6.2.2 ApproximationusingTweedie’sformula
+Sofar,wehaveexplainedtwoapproaches: aMonteCarloapproachandavalueiterationapproachto
+estimatesoftvaluefunctions. However,learningvaluefunctionsin(28)canstillbeoftenchallenging
+in practice. Therefore, we can employ approximation strategies inspired by recent literature on
+classifier guidance (e.g., reconstruction guidance (Ho et al., 2022), manifold constrained gradients
+(Chung et al., 2022), universal guidance (Bansal et al., 2023), and diffusion posterior sampling
+(Chungetal.,2022)).
+Specifically,weadoptthefollowingapproximation:
+(cid:20) (cid:18) (cid:19) (cid:21) (cid:18)(cid:90) (cid:18) (cid:19) (cid:19)
+r(x ) r(x )
+v (x ) = αlogE exp 0 |x = αlog exp 0 ppre(x |x )dx (30)
+t t {pp tre}
+α
+t
+α
+0 t 0
+(cid:18) (cid:18) (cid:19)(cid:19)
+r(xˆ (x ))
+≈ αlog exp 0 t , xˆ (x ) = E [x | x ], (31)
+α
+0 t {pp tre} 0 t
+= r(xˆ (x )).
+0 t
+Here, we replace the integration in (30) with a Dirac delta distribution with the posterior mean.
+Importantly,wecancalculatexˆ (x ) = E [x | x ]usingthepre-trained(score-based)diffusion
+0 t ppre 0 t
+t
+modelbasedonTweedie’sformula:
+x +{σ⋄}2∇logq (x )
+E [x | x ] = t t t t .
+pp tre 0 t µ⋄
+t
+Recallthatthenotationµ⋄,σ⋄,q aredefinedin(3). Finally, byrecalling∇logq ≈ s (x ,t)in
+t t t t θˆ
+pre
+t
+score-baseddiffusionmodels,wecanapproximate∇v (x)with
+t
+(cid:32) (cid:33)
+x +{σ⋄}2∇s (x ,t)
+∇ r
+t t θˆ
+pre
+t
+,
+xt µ⋄
+t
+andplugitintoAlgorithm4(i.e.,value-weightedsampling).
+Asmentionedearlier,thisapproachhasbeenpracticallywidelyusedinthecontextofclassifier
+guidance. Despite its simplicity, the approximation error can be significant, as it can not be
+diminishedevenwithalargesamplesizebecausethediscrepancyfrom(30)to(31)isnotmerelya
+statisticalerrorthatdiminisheswithincreasingsamplesize.
+246.2.3 Zeroth-OrderGuidanceusingPathIntegralControl
+Intheprevious subsection(Section6.2.2),we discussedanapproximationtechnique to bypassthe
+necessityoflearningexplicitvaluefunctions. Anotherapproachtobypassthisrequirementistouse
+control-basedtechniquesforobtainingsoft-optimalpolicies,a.k.a.,pathintegralcontrol(Theodorou
+etal.,2010;Williamsetal.,2017;Kazimetal.,2024).
+Recallthatwehaveρ(x ,t;θ) = x +(δt)g¯(x ,t)andσ2(t) = g˜(t)(δt),themotivationbehind
+t t t
+thisapproachisasfollows. Initially,wehave:
+∇ exp(v(x )/α)
+xt t
+= E [exp(v (x )/α) | x ] (SoftBellmanequation)
+{ppre} t−1 t−1 t
+t
+(cid:26)(cid:90) (cid:18)
+(x −x −(δt)g¯(x
+,t))2(cid:19) (cid:27)
+t−1 t t
+= ∇ exp(v (x /α))exp − dx
+xt t−1 t−1
+0.5g˜(t)(δt)
+t−1
+(cid:20) (cid:21)
+{1+(δt)∇ g¯(x ,t)}
+= E exp(v (x /α)){x −x −(δt)g¯(x ,t)} xt t |x
+{pp tre} t−1 t−1 t−1 t t
+g˜(t)(δt)
+t
+1
+≈ E [exp(v (x /α)){x −x −(δt)g¯(x ,t)}|x ]
+g˜(t)(δt)
+{pp tre} t−1 t−1 t−1 t t t
+1 1
+= E (cid:2)E [exp(r(x )/α) | x ]ϵ |x (cid:3) = E [exp(r(x /α))ϵ |x ].
+g˜(t)(δt)
+{pp tre} {pp tre} 0 t−1 t t
+g˜(t)(δt)
+{pp tre} 0 t t
+Now,weobtain:
+σ2(t)∇ xtv(x t)
+≈
+1
+×
+E {pp tre}[exp(r(x 0)/α))ϵ t|x t]
+. (32)
+α α E [exp(r(x )/α))|x ]
+{ppre} 0 t
+t
+Importantly, this approach does not require any differentiation. Therefore, by running policies
+from pre-trained models and simply using Monte Carlo approximation in both the denominator
+and numerator, we can estimate the above quantity (the right-hand side of (32)) without making
+anymodels (classifiers),unlikeclassifier guidance. Notewhilethis approachiswidely usedinthe
+control community, it may not be feasible fordiffusion models due to the high dimensionality of
+theinputspace.
+6.3 Path Consistency Learning (Losses Often Used in Gflownets)
+Now,weexplainhowtoapplypathconsistencylearning(PCL)(Nachumetal.,2017)tofine-
+tunediffusionmodels. IntheGflownetsliterature(Bengioetal.,2023),itseemsthatthisvariantis
+utilized as either a detailed balance or a trajectory balance loss, as discussed in Mohammadpour
+et al. (2023); Tiapkin et al. (2023); Deleu et al. (2024). However, to the best of our knowledge,
+the precise formulation ofpath consistency learning in the context of fine-tuningdiffusion models
+hasnot beenestablished. Therefore, westartbyelucidating therationaleof PCL.Subsequently,
+we provide a comprehensive explanation of the PCL. Finally, we discuss its connection with the
+literatureonGflownets.
+Motivation. Here, wepresent thefundamental principlesof thePCL. To startwith, we prove the
+followinglemma,whichcharacterizessoft-valuefunctionsandsoft-optimalpoliciesrecursively.
+25Algorithm5PathConsistencyLearning(Trainingwithdetailedbalanceloss)
+1: Require: Diffusion-model {N(ρ(x ,t;θ),σ2(t))}1 , pre-trained model
+t t=T+1
+{N(ρ(x ,t;θ ),σ2(t))}1 ,batchsizem,parameterα ∈ R+,learningrateγ
+t pre t=T+1
+2: Set a model {v (·;θ)} to learn optimal soft value function, and a model {p (·|·;θ)} to learn
+t t
+optimalpolices.
+3: Initialize: θ = θ
+1 pre
+4: fors = {1,··· ,S}do
+5:
+Collectmsamples{x(i)(θ)}0
+fromacurrentdiffusionmodel(i.e.,generatingbysequen-
+t t=T+1
+tiallyrunningpolices{N(ρ(x ,t;θ),σ2(t))}1 fromt = T tot = 0)
+t t=T+1
+6: Setv = r
+0
+ϕ ← ϕ −γ∇
+(cid:88)1 (cid:88)m (cid:40) v t(x( ti) ;ϕ)
++logp
+(x(i) |x(i)
+;θ )−
+v t−1(x( t−i) 1;ϕ s)
+−logppre(x(i) |x(i)
+)(cid:41)2
+| ,
+s+1 s ϕ α t t−1 t s α t t−1 t ϕs
+t=T+1i=1
+θ ← θ −γ∇
+(cid:88)1 (cid:88)m (cid:40) v t(x( ti) ;ϕ s)
++logp
+(x(i) |x(i)
+;θ)−
+v t−1(x( t−i) 1;ϕ s)
+−logppre(x(i) |x(i)
+)(cid:41)2
+| ,
+s+1 s θ α t t−1 t α t t−1 t θs
+t=T+1i=1
+7: endfor
+8: Output: {p (x |x ;θ )}
+t t−1 t S t
+Lemma4(1-stepConsistencyEquation).
+(cid:18) (cid:19) (cid:18) (cid:19)
+v (x ) v (x )
+t t +logp⋆(x |x ) = t−1 t−1 +logppre(x |x ) (33)
+α t t−1 t α t t−1 t
+Proof. We consider the marginal distribution with respect to x and x induced by the soft-
+t t−1
+optimal policy, and denote it l(x ,x ) ∈ ∆(X × X). Then, it is clearly l(x )l(x | x ) =
+t t−1 t t−1 t
+l(x )l(x | x ).Now,from Theorem2 thatcharacterizesmarginal distributions, andTheorem 3
+t−1 t t−1
+thatcharacterizesposteriordistributions,thisresultsin:
+(cid:18) (cid:19) (cid:18) (cid:19)
+1 v (x ) 1 v (x )
+exp t t ppre(x )×p⋆(x |x ) = exp t−1 t−1 ppre(x )× ppre(x |x )
+C α t t t t−1 t C α t−1 t−1 t−1 t t−1
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+(cid:124) (cid:123)(cid:122) (cid:125) Optimalpolicy (cid:124) (cid:123)(cid:122) (cid:125) Posteriordistribution
+Marginaldistributionatt Marginaldistributionatt-1
+Rearrangingyields:
+(cid:18) (cid:19) (cid:18) (cid:19)
+1 v (x ) 1 v (x )
+exp t t ×p⋆(x |x ) = exp t−1 t−1 ×ppre(x |x )
+C α t t−1 t C α t t−1 t
+Takingthelogarithm,thestatementisconcluded.
+Algorithm. Being motivated by the relation in (33), after initializing v = r, we obtain the
+0
+recursiveequation:
+ 
+(cid:40) (cid:41)2
+g(1)(x ) v (x )
+(v t,p⋆ t) = argmin E xt∼ut
+α
+t +logg(2)(x t−1|x t)− t−1 αt−1 −logpp tre(x t−1|x t) 
+g(1):X→R,g(2):X→∆(X)
+(34)
+26whereu ∈ ∆(X)isanyexploratoryroll-indistribution. Basedonthisalgorithm,weoutlinethe
+t
+entirealgorithminAlgorithm5.
+Wemakeseveralimportantremarksregarding Algorithm5. Firstly,whileweuseon-policydata
+collection, technically, any policy can be used in this off-policy algorithm, like reward-weighted
+MLE. Secondly, inpractice, it mightbe preferableto utilizea sub-trajectoryfromx tox based
+t t−k
+onthefollowingexpression:
+(cid:18) (cid:19)
+v (x )
+logp⋆ (x |x )+···+logp⋆(x |x )+ t t
+t−k+1 t−k t−k+1 t t−1 t α
+(cid:18) (cid:19)
+v (x )
+= t−k t−k +logppre (x |x )+···+logppre(x |x ),
+α t−k+1 t−k t−k+1 t t−1 t
+which is an extension of (33). The loss function based on the above k-step consistency equation
+could make training faster without learning value functions at every time point, as noted in the
+literatureinPCL.Intheextremecase(i.e.,whenwerecursivelyapplyitwitht = T),weobtainthe
+following.
+Corollary1(T-stepconsistency).
+logp⋆(x |x )+···+logp⋆(x |x )+logp⋆(x ) (35)
+t 0 1 T T−1 T T T
+(cid:18) (cid:19)
+r(x )
+= 0 +logppre(x |x )+···+logppre(x |x )+logppre(x ).
+α 1 0 1 T T−1 T T T
+Proof. Weconsiderthemarginaldistributionwithrespecttox ,··· ,x inducedbythesoft-optimal
+T 0
+policy,anddenoteitl(x ,··· ,··· ,x ) ∈ X ×···×X. Wehave
+T 0
+l(x )l(x | x )···l(x |x ) = l(x )l(x | x )···l(x | x ) (36)
+T T−1 T 0 1 0 1 0 T T−1
+FromTheorem2thatcharacterizedmarginaldistributions,andTheorem3thatcharacterizeposterior
+distributions,thelefthandsideof(36)isequalto
+p⋆(x ) × p⋆ (x |x ) ×···× p⋆(x |x )
+T T T−1 T T−1 1 0 1
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+MarginaldistributionatT OptimalpolicyatT −1 Optimalpolicyat1
+andtheright-handsidein(36)isequalto
+exp(r(x )/α)
+0 ppre(x )× ppre(x | x ) ×···×ppre (x | x ).
+C 0 0 0 1 0 T−1 T T−1
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+(cid:124) (cid:123)(cid:122) (cid:125)
+Posteriordistribution Posteriordistribution
+Marginaldistributionat0
+Byrearrangingtheterm,weobtain(35).
+ComparisonwithGflownets. IntheGflownetsliterature,similarlossesareused. Forinstance,
+the loss derived from (33) or (35) is commonly known as a detailed balance loss (Bengio et al.,
+2023)oratrajectoryloss(Malkinetal.,2022),respectively.
+Noteingeneral,theliteratureinGflownetsprimarilyfocusesonsamplingfromunnormalized
+models(distributionsproportionaltoexp(r(x))). Hence,referencepolicies(i.e,{ppre})orlatent
+t
+states (i.e., x before x ) are introduced without relying on pre-trained diffusion models. In
+T:1 0
+contrast, in our context, we use policies derived from pre-trained diffusion models as reference
+policies,leveragingthemasourpriorknowledge.
+277 Fine-Tuning Settings Taxonomy
+Sofar,weimplicitlyassumewehaveaccesstorewardfunctions. However,thesefunctionsareoften
+unknownandneedtobelearnedfromdata. Weclassifyseveralsettingsintermsofwhetherreward
+functionsareavailableor,ifnot,howtheycouldbelearned. ThissectionissummarizedinFigure3.
+Directbackpropagation(Sec.5.2)
+Differentiable
+Non-differentiable PPO(Sec.5.1)
+Accurate rewards
+feedback
+Reward-weightedMLE(Sec.6.1)
+Unknown reward
+Memory effi-
+functions
+ciency
+Computational
+No fine-tuning
+efficiency
+Directbackpropagation(Sec.5.2)
+Value-weightedsampling(Sec.6.2)
+Figure 3: Practical recommendation of RL-based algorithms to optimize downstream reward
+functions.
+7.1 Fine-Tuning with Known, Differentiable Reward Functions
+Whenaccuratedifferentiablerewardfunctionsareavailable(e.g.,standardincomputervisiontasks),
+ourprimaryfocusistypicallyoncomputationalandmemoryefficiency. Ingeneral,weadvocatefor
+employingrewardbackpropagation(c.f.Algorithm2)foritscomputationalefficiency. Alternatively,
+ifmemoryefficiencyisasignificantconcern,wesuggestusingPPOduetoitsstability.
+7.2 Fine-Tuning with Black-Box Reward Feedback
+Here, we explore scenarios where we have access to accurate but non-differentiable (black-box)
+reward feedback, often found in scientific simulations. The emphasis still remains primarily on
+computational and memory efficiency. In such scenarios, dueto the non-differentiability ofreward
+feedback,werecommendusingPPOorreward-weightedMLEforthefollowingreasons.
+Intheprecedingsection,weadvocatedfortheuseofrewardbackpropagationduetoitscom-
+putational advantages. However, when dealing with non-differentiable feedback, the advantage
+of reward backpropagation may diminish. This is because learning from such feedback requires
+learningdifferentiablerewardfunctionstomakethealgorithmworkaswediscussinSection5.2.
+However, obtaining a differentiable reward function can be challenging in many domains. For
+example, in molecular property prediction, molecular fingerprints are informative features, and
+accurate reward functions can be derived by training simple neural networks on these features
+28(PattanaikandColey,2020). Yet,thesemappings,groundedinpriorscientificunderstanding,are
+non-differentiable,therebyrestrictingtheirapplicability.
+In contrast, PPO and reward-weighted MLE allow for policy updates without the explicit
+requirementto learna differentiable rewardfunction, offeringa significantadvantageoverreward
+backpropagation.
+7.3 Fine-Tuning with Unknown Rewards Functions
+When reward functions (or computational proxies in Section 7.2) are unavailable, we must learn
+fromdatawith reward feedback. Insuchcases,comparedto thepreviousscenarios,twoimportant
+considerationsarise:
+• Not only computational or memory efficiency but also feedback efficiency (i.e., sample
+efficiencyregardingrewardfeedback)iscrucial.
+• Given thatlearned rewardfeedback maynot generalizewell outsidethe trainingdatadistri-
+butions,itisessentialtoconstrainfine-tunedmodelstopreventsignificantdivergencefrom
+diffusionmodels. Inthesesituations,notonlysoftPPOanddirectbackpropagationbutalso
+methodsdiscussedinSection6,suchasreward-weightedMLE,canbeparticularlyeffective.
+Further,thescenarioinvolvingunknownrewardfunctionscanbebroadlycategorizedintotwocases,
+whichwewilldiscussinmoredetail.
+Offlinescenario(Figure4). Inmanyscenarios,even
+incaseswhererewardfunctionsareunknown,we of-
+ten have access to offline data with reward feedback
+{x(i),r(x(i))}. One straightforward approach is to
+perform regression with neural networks and build a
+learnedregressorrˆ. However,thislearnedrewardfunc-
+tionrˆmightnotgeneralizewellbeyondthedistribution
+oftheofflinedata. Inregionsoutsidethisdistribution,rˆ
+couldassignahighvalueevenwhentheactualreward
+r is low due to high uncertainty. Consequently, we
+couldbe easily misledbyout-of-distribution samples
+ifwesolelyoptimizerˆ.
+One approach to alleviate this issue is to adopt a
+pessimistic(i.e.,conservative)strategy,asproposedin Figure4: Offlinescenario
+Ueharaetal.(2024). This techniquehasbeenwidely
+appliedinthefieldofofflineRL(Levine,2018). The
+mainideaistopenalizerˆoutsidethedistributionsus-
+ingtechniques suchasadding anexplicitpenaltyterm
+(Yu et al., 2020; Chang et al., 2021), bootstrapping,
+or more sophisticated methods (Kumar et al., 2020;
+Xie et al., 2021; Rigter et al., 2022; Uehara and Sun,
+2021). By doing so, we can avoid being fooled by
+out-to-distribution regionswhilestill benefitingfrom
+Figure5: Onlinescenario
+theextrapolationcapabilitiesofrewardmodels.
+29Online scenario (Figure 5). Consider situations
+where reward functions are unknown, but we can gather data online. These scenarios are often
+referredtoasalab-in-the-loopsetting.
+Insuchscenarios,Ueharaetal.(2024)proposesaniterativeprocedurecomprisingthreesteps:
+(1)collectingfeedbackdatabyexploringnewareas(i.e.,obtainingxfromcurrentdiffusionmodels
+and corresponding r(x)), (2) learning the reward function from the collected feedback data, and
+(3)fine-tuningcurrentdiffusionmodelsbymaximizingthelearnedrewardfunctionenhancedby
+anoptimisticbonusterm,usingalgorithmsdiscussedinSection4.2. Incontrasttostandardonline
+PPO, where feedback data is directly used in the fine-tuning process, actual reward feedback is
+only used in step (2) and not in step (3). An additional key aspect is the use of an optimistic
+rewardfunctionthatencouragesexplorationbeyondthedistributionsofthecurrentdiffusionmodel.
+This deliberateseparation betweenreward learning andfine-tuning steps,coupled with theuse of
+optimism,significantlyenhancesfeedbackefficiency.
+8 Connection with Classifier Guidance
+Classifierguidance(DhariwalandNichol,2021)iscommonlyusedforconditionalgenerationin
+diffusionmodels. Interestingly,RL-basedmethodsshareacloseconnectionwithclassifierguidance.
+Morespecifically,inthissection,followingZhaoetal.(2024),weelucidatehowRL-basedmethods
+canbeappliedtoconditionalgeneration. Furthermore,fromthisunifiedviewpoint,wehighlight
+thatclassifierguidanceisseenasavalue-weightedsamplinginSection4.2.
+8.1 Classfier Guidance
+Inthissection,wefirstintroduceclassifierguidance. Classifierguidanceutilizesanunconditional
+pre-trainedmodelforconditionalgeneration. Morespecifically,weconsiderascenariowherewe
+haveapre-traineddiffusionmodel,whichenablesustosamplefromppre(x),anddatawithfeedback
+{x,y},wherey representsthenewlabelwewanttoconditionon. Ourobjectivehereistosample
+fromp(·|y) ∈ [Y → ∆(Rd)],
+p(· | y) ∝ p (y|·)ppre(·). (37)
+y
+wherep : X → ∆(Y)denotestheconditionaldistributionofy givenx.
+y
+Motivation. Inclassifierguidance,weconsiderthefollowingpolicy:
+pgui(·|x ,y) = N (cid:0) ρ(x ,t;θ )+σ2(t)∇ logq (x ,t),σ2(t)(cid:1) ,
+t t t pre x y t
+q (x,t) := E [I(Y = y)|x = x].
+y {pp tre},Y∼py(·|x0) t
+Under the continuous-time formulation of diffusion models, applying Doob’s h-transform (Rogers
+andWilliams,2000),itisshownthatwecansamplefromp(x|y)bysequentiallyrunning{pgui(·|x ,y)}1 .
+t t t=T+1
+Algorithm. Specifically,thealgorithmcomprisestwosteps. It’simportanttonotethatthisisnot
+afine-tuningmethodbutratheraninference-timetechniqueaswefreezethepre-trainedmodel.
+301. Learning q (x,t) through regression by gathering data containing {x ,y}. Here, for each
+y t
+(x ,y), using a forwardpolicyfor the pre-training (from0toT), we obtainx starting from
+0 t
+x .
+0
+2. Duringinference,sequentiallyexecute{pgui(·|x ,y)}1 byleveragethefactthatcompared
+t t t=T+1
+tothepolicyinpre-traineddiffusionmodels,themeanof{pgui(·|x ,y)}1 isjustshifted
+t t t=T+1
+withanadditionalterm∇ logq (x,t).
+x y
+Notably, the method described above can be reduced to value-weighted sampling (cf. Sec-
+tion 6.2), when r(x,y) = logp(y|x). Inspired by such an observation, we apply an RL-based
+fine-tuningmethodforconditionalgenerationasbelow.
+8.2 RL-Based Fine-Tuning for Conditional Generation
+In this section, following Zhao et al. (2024), we explain an RL-based fine-tuning approach for
+conditionalgeneration. Thecoreideaisthatsettingr(x,y) = logp(y|x)allowsustosamplefrom
+thetargetconditionaldistribution(37),drawingontheinsightsdiscussedinSection4.2.
+Moreprecisely,introducingadistributionoveryasq(·),weformulatethefollowingRLproblem:
+{p⋆} = argmax E [logp(y|x )−Σ1 KL(p (·|x ,y)∥ppre(·|x ))].
+t t {pt(·|·,y)},y∼Π 0 t=T+1 t t t t
+{pt∈[(Y,X)→∆(X)]}1
+t=T+1
+(38)
+Comparedtotheobjectivefunction(18)inSection4.2,themaindifferencesare: (1)policyspace
+is expanded to accommodate additional control (i.e., y): p (·|·,·) ⊂ [Rd ×Y → ∆(Rd)], (2) the
+t
+fine-tuning objectives are set as log-likelihoods: logp(y|x). Then, following Theorem 1, we can
+establishthefollowingresult.
+Corollary2. Thedistributioninducedby{p⋆}1 (i.e.,(cid:82) {(cid:81)1 p⋆(x | x ,y)}dx isthe
+t t=T+1 t=T+1 t t−1 t 1:T
+targetconditionaldistribution(37).
+Theabovecorollarysuggeststhatforconditionalgeneration,wecanutilizevariousoff-the-shelf
+algorithms discussed in Section 4.2 and 6, such as PPO, reward backpropagation, and reward-
+weightedMLE,aswellasvalue-weightedsampling.
+9 Connection with Flow-Based Diffusion Models
+We elucidate the close relationship between bridge matching and fine-tuning, as summarized in
+Table2. Bridge(flow)matching(Liuetal.,2022;Tongetal.,2023;Lipmanetal.,2023;Liuetal.,
+2022; Shi et al., 2024; Albergo and Vanden-Eijnden, 2022), has recently gained popularity as a
+distincttypeofdiffusionmodelfromscore-matching-basedones. Theseworkssuggestthattraining
+and inference speed will be accelerated due to the ability to define a more direct trajectory from
+noisetodatadistributionthanscore-matching-baseddiffusionmodels.
+The connection between bridge matching and fine-tuning becomes evident in the continuous-
+timeformulation. Tobegin,wefirstprovideabriefoverviewofthecontinuous-timeformulationof
+score-matching-baseddiffusionmodels.
+31Table 2: Comparison between training score/flow-based diffusion models and fine-tuning. We
+optimizetheparameterθinPθ,whichrepresentstheinduceddistributionovertrajectoriesassociated
+withθ.
+Loss NoteofQ
+Score-based KL(Qtime∥Pθ) Qtime: Time-reversal of reference SDE (reference
+training SDEisdefinedfrom0toT wheretheinitialdis-
+tributeat0isdatadistribution)
+Flow-based KL(Qdoob∥Pθ) Qdoob: CouplingbetweenthereferenceSDEfrom
+training T to 0 conditioning at 0 (dist. over x |x ) and
+T:1 0
+a data distribution at time 0 (dis. over x ). Note
+0
+thatreferenceSDEisdefinedfromT to0.
+Fine-tuning KL(Pθ∥Qfine) Qfine: Coupling between the pre-trained SDE
+fromT to0conditionedon0(dist. overx |x )
+T:1 0
+andadatadistributionattime0(dis. overx )
+0
+9.1 Continuous Time Formulation of Score-Based diffusion models
+Weprovideabriefoverviewofthecontinuous-timeformulationofdiffusionmodels(Songetal.,
+2021),furtherexpandingSection1.1.1. Inthisformulation,weinitiallydefinetheforwardreference
+SDE,spanningfromtime0toT (e.g.,varianceexploding(VE)processorvariancepreserving(VP)
+process),bysettinganinitialdistributionat0asthedatadistribution. Additionally,thereference
+SDE is tailored to converge to an easy distribution at time T, such as the normal distribution.
+Subsequently, we consider the time-reversal SDE (Anderson, 1982), progressing from T to 0. If
+we could learn this time-reversal SDE, it would enableus to sample from thedata distribution by
+startingwiththeeasyinitialdistribution(atT)andfollowingthetime-reversalSDEfromT to0at
+inferencetime.
+Training. Now, the remaining question is how to learn this time-reversal SDE. Here, by repre-
+sentingtheinduceddistributionovertrajectoriesfromT to0withthistime-reversalSDEasQtime,
+our goal is to train a new SDE, parameterized by θ in the neural network, such that the induced
+distributionPθ overtrajectoriesassociatedwithθ alignswithQtime. Specifically,theobjectiveisto
+minimizethefollowinglosses:
+argminKL(Qtime∥Pθ). (39)
+θ
+Withsomealgebra, leveragingthe observationthatthe time-reversal SDEcomprisestheoriginal
+forward SDE and the scoring term of the marginal distribution (Anderson, 1982) as in (2), Song
+etal.(2021)demonstratesthatthisKLloss(39)isapproximatedas
+θˆ = argminE [{σ⋄}2∥∇ logq (x | x )−s (x ,t)∥2], (40)
+pre t∼Uni([0,T]),xt∼q t|0(xt|x0),x0∼ppre t xt t|0 t 0 θ t
+θ
+32whichisequalto(4)wheretheweightλ(t)is{σ⋄}2 (fornotation,refertoSection1.1.1).
+t
+9.2 Flow-Based (Bridge-Based) Diffusion Models
+Weadopt the explanationoutlinedinLiu et al.(2022). Inthisframework,we beginbyconsidering
+areferenceSDE(fromT to0),x = z wherez isdefinedasBrownianmotion:
+t T−t t
+dz = dw , t ∈ [0,T]. (41)
+t t
+Subsequently,weconsiderthecouplingofthereferenceSDEconditionedonstateattime0(i.e.,
+distribution of x conditional on x ) and the data distribution at time 0, denoting the resulting
+0:T 0
+distributionasQdoob. Informally,thisQdoob ischaracterizedasfollows.
+InformalcharacterizationofQdoob. Whendiscretizingthetimestep,bydenotingthedistribution
+inducedbythereferenceSDEaspref(x ,··· ,x ),wedefine
+T 0
+Qdoob,T(x ,··· ,x ) := pref(x ,··· ,x | x )ppre(x ).
+T 0 T 1 0 0
+The distribution Qdoob above is a limiting distribution obtained by making the discretization step
+small.
+Training. In bridge-based diffusion models, our objective is to train a new SDE, parametrized by
+θ (e.g.,aneuralnetwork),toaligntheinduceddistributionPθ withQdoob. Specifically,bridge-based
+trainingaimstominimize
+argminKL(Qdoob∥Pθ). (42)
+θ
+Whilethemethodtominimizetheaboveiscurrentlyunclear,wecanderiveatrainableobjective
+throughalgebraicmanipulation. Initially,weobservethatthereferenceSDE(41),conditionedon
+statex attime0(z = b),isexpressedas:
+0 T
+b−zb
+t ∈ [0,T];dzb = gb(zb,t)dt+dw , gb(zb,t) = t, (43)
+t t t t T −t
+using the seminal “Doob’s h-transform” (Rogers and Williams, 2000). This SDE is commonly
+knownastheBrownianbridge. Now,weconsideranewSDEparameterizedbyθ:
+t ∈ [0,T];dz = s(z ,t;θ)dt+dw . (44)
+t t t
+Then,wecandemonstratethatminimizingtheKLlossin(42)isequivalentto
+arg θminE
+t∼Uni[0,T],zt∼q
+tx0,x0∼ppre(cid:2) ∥gx0(z t,t)−s(z t,t;θ)∥2 2(cid:3) (45)
+where qx0 denotes the induced distribution at time t following SDE (43) conditioned on x , and
+t 0
+s : X ×[0,T] → X isthemodelweaimtooptimize.
+33Flow-baseddiffusionmodels. Theaforementionedformulationhasbeenoriginallyproposedasa
+bridge-basedSDE(Liuetal.,2022)becausetheconditionalSDEisoftenreferredtoasaBrownian
+bridge. Flow-baseddiffusionmodelsproposedinLipmanetal.(2023);Tongetal.(2023)sharea
+closerelationshipwithbridge-baseddiffusionmodels. Theseflow-basedmodelsuseatargetSDE
+(43)andanSDEwithaparameter(44)withoutstochasticterms(i.e.,nodw )andaimtominimize
+t
+thelossfunction(45).
+Comparisonwithscore-baseddiffusionmodels. Bothscore-baseddiffusionmodelsandbridge-
+based diffusion models aim to minimize KL divergences. Despite its similarity, in contrast to
+score-based diffusion models, bridge-based diffusion models target Qdoob rather than the time-
+reversalSDEQtime. ThedistributionQdoob isoftenconsideredpreferablebecauseitcanimposean
+SDEthatnavigatesefficientlyfrom0toT (e.g.,aBrownianbridgewithminimalnoise). Thiscan
+expeditethelearningprocesssincewelackdirectcontroloverthetime-reversalSDEinscore-based
+diffusionmodels.
+9.3 Connection with RL-Based Fine-Tuning
+RL-basedfine-tuningsharesacloserelationshipwithflow-basedtraining. Toillustratethis,consider
+the reference SDE (from T to 0) following the pre-trained diffusion model. Then, akin to flow-
+based training, we consider the coupling of the reference SDE conditioned on state at time 0
+(i.e., distribution over x conditioned on x ) and the target distribution at time 0 (i.e., p (·) ∝
+0:T 0 r
+exp(r(·)/α)ppre(·)),denotingtheinduceddistributionasQfine.
+InformalcharacterizationofQfine. Informally,Qfine isintroducedasfollows. Whendiscretizing
+the time step, by denoting the distribution induced by the reference SDE as pref(x ,··· ,x ), we
+T 0
+define
+Qfine,T(x ,··· ,x ) := pref(x ,··· ,x | x )p (x ).
+T 0 T 1 0 r 0
+The distribution Qfine above is a limiting distribution obtained by making the discretization step
+small.
+Training. Now,weintroduceanewSDEparameterizedbyθ suchasanneuralnetworktoalign
+theinduceddistributionPθ withQfine. Actually,inthecontinuousformulation,theRL-problem(18)
+inSection4.2isequaltosolving
+argminKL(Pθ∥Qfine).
+θ
+ThisformalizationhasbeenpresentedinUeharaetal.(2024). Intuitively,asweseeinTheorem3,
+thisisexpectedbecauseweseethattheposteriordistributioninducedbypre-trainedmodels:
+pref(x ,··· ,x | x )(= pref (x |x )pref (x | x )···pref(x | x )),
+T 1 0 T−1 T T−1 T−2 T−1 T−2 0 1 0
+remainspreservedafterfine-tuningbasedontheRL-formulation(18).
+34Comparison with flow-based training. In contrast to flow-based training, RL-based fine-tuning
+minimizes the inverse KL divergence rather than the KL divergence. Intuitively, this is because,
+unlikeQtime orQdoob ,wecannotsamplefromQfine (recallthatamarginaldistributionattime0in
+Qfine,i.e.,p ,isunnormalized);ontheotherhand,themarginaldistributionsattime0inbothQtime
+r
+andQdoob aredatadistributions.
+Remark 7 (Extension to f-divergence). Each of these methods can be technically extended by
+incorporating more general divergences beyond KL divergence. For instance, in the context of
+fine-tuning,pleaseseeTang(2024).
+10 Connection with Sampling from Unnormalized Distributions
+Numerousstudiesdelveintosamplingfromanunnormalizeddistributionproportionaltoexp(r(x)),
+commonlyknownastheGibbsdistribution,extensivelydiscussedinthecomputationalstatistics
+and statistical physics community (Robert, 2014). This issue is pertinent to our work, as during
+fine-tuning,thetargetdistributionisalsoformulatedintheGibbsdistributionformin(10),whichis
+proportionaltoexp(r(x))ppre(x).
+The literature employs two main approaches to tackle this challenge: Markov Chain Monte
+Carlo (MCMC) and RL-based methods. In particular, the RL-based diffusion model fine-tuning
+we have discussed so far is closely related to the latter approach. In this section, we explain and
+comparethesetwoapproaches.
+10.1 Markov Chain Monte Carlo (MCMC)
+InMCMC,aMarkovchainisconstructedtoapproximateatargetdistributionsuchthattheequilib-
+riumdistributionoftheMarkovchainconvergestothetargetdistribution. However,dealingwith
+high-dimensionaldomainspacesischallengingforMCMC.Acommonstrategyinvolvesleveraging
+gradientinformation,suchastheMetropolis-adjustedLangevinalgorithm(MALA)(Besag,1994)
+or Hamiltonian Monte Carlo(HMC) (Nealet al.,2011; Girolamiand Calderhead, 2011). MALA
+sharessimilaritieswith classifierguidanceandvalue-weighted sampling,asboth methodsdepend
+onthefirst-orderinformationfromreward(orvalue)functions.
+Can we use MCMC for fine-tuning diffusion models? In the context of fine-tuning dif-
+fusion models, while it may seem intuitive to sample from the target distribution (10) (i.e.,
+p ∝ exp(r(x))ppre(x))usingMCMC,it’snotstraightforwardforthefollowingreasons:
+r
+• Welackofananalyticalformofppre(·).
+• Additionally,evenifwecanestimateppre(·)inanunbiasedmanner,asinChenetal.(2018),
+themixingtimeforobtainingasinglesampleinMCMCmightbelengthy.
+Therefore, we explore creating a generative model (i.e., diffusion model) for this task using RL-
+based fine-tuning so that we can easily sample from p (·) during inference (i.e., simulating the
+r
+time-reversal SDE (2) with policies from t = T +1 to t = 1), without relying on MCMC. This
+addressestheconcernofMCMCbyavoidingtheneedtoestimateppre(·)andminimizinginference
+time,albeitattheexpenseofincreasedtrainingtime.
+3510.2 RL-Based Approaches
+WhileMCMChashistoricallybeenwidelyusedforthispurpose,recentworkshaveproposedan
+RL-basedapproachoritsvariant(e.g.,Berntonetal.(2019);Hengetal.(2020);Huangetal.(2023);
+Vargasetal.(2023)). Forexample,aseminalstudy(ZhangandChen,2021)introducedamethod
+verysimilartorewardbackpropagation. Intheirwork,theyinitiallydefineBrownianmotionasa
+referenceSDE(fromT to0),similartothepre-traineddiffusionmodelsin ourcontext. Then,by
+appropriatelysettingrewards,ZhangandChen(2021)aimstolearnanewSDE(fromT to0)such
+thatwecansamplefromthetargetdistributionattheendpoint0.
+TheseapproachesofferadvantagesoverMCMCduetotheirabilitytominimizeinferencetime
+(amortization)byconstructingagenerativemodelcomprisingpoliciesinthetrainingtimeandsolely
+executinglearnedpoliciesduring inference. Unlike MCMC,thesemethodssignificantly reducethe
+inference cost as we don’t need to be concerned about the mixing time. Additionally, RL-based
+approacheshavethepotentialtoeffectivelyhandlehigh-dimensional,complex(i.e.,multi-modal)
+distributionsbyharnessingtheconsiderableexpressivepowerarisingfromlatentstates.
+Despitetheseadvantages,itisoftenunclearhowtoselectareferenceSDEintheseworks. In
+contrast, in RL-based fine-tuning of diffusion models, we directly leverage pre-trained diffusion
+modelsasthereferenceSDEs,i.e.,asourpriorknowledge.
+Keymessage. Finally,itisworthnotingthatwecantechnicallyutilizeanyoff-the-shelfRLalgo-
+rithmsfortraining. Forexample,Zhang andChen(2021)employs rewardbackpropagation,while
+worksin Gflownetstypically leverage PCL, as wemention in Section 6.3. However,additionally, it
+ispossibletousePPOorreward-weightedMLEmentionedinSection4.2.
+11 Closely Related Directions
+Lastly,wehighlightseveralcloselyrelateddirectionswehavenotyetdiscussed.
+Aligningtext-to-imagemodels. We recognizethatcurrenteffortsinfine-tuningdiffusionmodels
+primarilyrevolvearoundaligningtext-to-imagemodelsusinghumanfeedback(Leeetal.,2023;
+Wallaceetal.,2023;Wuetal.,2023;Yangetal.,2023). Inthispaper,ourgoalistoconsideramore
+generalandfundamentalformulationthatisnottailoredtoanyparticulartask.
+DiffusionmodelsforRL. Diffusionmodelsarewell-suitedforspecificreinforcementlearning
+applicationsduetotheirabilitytomodelcomplexandmultimodaldistributionsaspolices(Janner
+etal.,2022;Ajayetal.,2023;Wangetal.,2022;Hansen-Estruchetal.,2023;Duetal.,2024;Zhu
+et al., 2023). For example, Wang et al. (2022) use conditional diffusion models as policies and
+demonstratetheireffectivenessin typical offlineRLbenchmarks. WhileRL-basedfine-tuning also
+aimstomaximizecertainrewardfunctions,theprimaryfocusofthistutorialcoversmethodsthat
+leveragepre-traineddiffusionmodelsforthispurpose.
+RL from human feedback (RLHF) for language models. RLHF is widely discussed in the
+contextoflanguagemodels,wheremanyalgorithmssharesimilaritieswiththoseusedindiffusion
+models (Ouyang et al., 2022; Bai et al., 2022; Casper et al., 2023). For instance, both domains
+36commonlyemployPPOasastandardapproach,andreward-weightedtraining(orreward-weighted
+MLE) often serves as a basic baseline approach. Despite these similarities, nuanced differences
+exist mainly because diffusion models typically operate in a continuous input space rather than
+a discrete one. Moreover, techniques like value-weighted sampling emerge uniquely within the
+contextofdiffusionmodels.
+12 Summary
+In this article, we comprehensively explain how fine-tuning diffusion models to maximize down-
+streamrewardfunctionscanbeformalizedasareinforcementlearning(RL)probleminentropy-
+regularized Markov decision processes (MDPs). Based on this viewpoint, we elaborate on the
+applicationofvariousRLalgorithms,suchasPPOandreward-weightedMLE,specificallytailored
+for fine-tuning diffusion models. Additionally, we categorize different scenarios based on how
+rewardfeedbackisobtained. Whilethiscategorizationisnotalwaysexplicitlymentionedinmany
+existing works, it is crucial when selecting appropriate algorithms. Finally, we discuss the rela-
+tionshipswithseveralrelatedtopics,includingclassifierguidance,Gflownets,pathintegralcontrol
+theory,andsamplingfromunnormalizeddistributions.
+References
+Agarwal, A., N. Jiang, S. M. Kakade, and W. Sun (2019). Reinforcement learning: Theory and
+algorithms. CSDept.,UWSeattle,Seattle,WA,USA,Tech.Rep,10–4.
+Agarwal,V.andD.R.Kelley(2022). Thegeneticandbiochemicaldeterminantsofmrnadegradation
+ratesinmammals. Genomebiology23(1),245.
+Ajay,A.,Y.Du,A.Gupta,J.B.Tenenbaum,T.S.Jaakkola,andP.Agrawal(2023). Isconditional
+generativemodelingallyouneedfordecisionmaking? InTheEleventhInternationalConference
+onLearningRepresentations.
+Albergo, M. S. and E. Vanden-Eijnden (2022). Building normalizing flows with stochastic inter-
+polants. arXivpreprintarXiv:2209.15571.
+Anderson, B.D.(1982). Reverse-time diffusionequation models. StochasticProcessesand their
+Applications12(3),313–326.
+Austin, J., D. D. Johnson, J. Ho, D. Tarlow, and R. Van Den Berg (2021). Structured denoising
+diffusionmodelsindiscretestate-spaces. AdvancesinNeuralInformationProcessingSystems34,
+17981–17993.
+Avdeyev, P., C. Shi, Y. Tan, K. Dudnyk, and J. Zhou (2023). Dirichlet diffusion score model for
+biologicalsequencegeneration. arXivpreprintarXiv:2305.10699.
+Bai,Y.,S.Kadavath,S.Kundu,A.Askell,J.Kernion,A.Jones,A.Chen,A.Goldie,A.Mirhoseini,
+C.McKinnon,etal.(2022). Constitutionalai: Harmlessnessfromaifeedback. arXivpreprint
+arXiv:2212.08073.
+37Bansal,A.,H.-M.Chu,A.Schwarzschild,S.Sengupta,M.Goldblum,J.Geiping,andT.Goldstein
+(2023). Universalguidancefordiffusionmodels. InProceedingsoftheIEEE/CVFConference
+onComputerVisionandPatternRecognition,pp.843–852.
+Bengio,Y., S.Lahlou,T.Deleu, E.J.Hu, M.Tiwari,and E.Bengio(2023). Gflownet foundations.
+JournalofMachineLearningResearch24(210),1–55.
+Benton,J.,Y.Shi,V.DeBortoli,G.Deligiannidis,andA.Doucet(2024). Fromdenoisingdiffusions
+to denoising markov models. Journal of the Royal Statistical Society Series B: Statistical
+Methodology86(2),286–301.
+Bernton, E., J. Heng, A. Doucet, and P. E. Jacob (2019). Schr\” odinger bridge samplers. arXiv
+preprintarXiv:1912.13170.
+Besag,J.(1994). Commentson“representationsofknowledgeincomplexsystems”byu.grenander
+andmimiller. J.Roy.Statist.Soc.Ser.B56(591-592),4.
+Black, K., M. Janner, Y. Du, I. Kostrikov, and S. Levine (2023). Training diffusion models with
+reinforcementlearning. arXivpreprintarXiv:2305.13301.
+Campbell,A.,J.Benton,V.DeBortoli,T.Rainforth,G.Deligiannidis,andA.Doucet(2022). A
+continuous time framework for discrete denoising models. Advances in Neural Information
+ProcessingSystems35,28266–28279.
+Campbell, A., J. Yim, R. Barzilay, T. Rainforth, and T. Jaakkola (2024). Generative flows on
+discretestate-spaces: Enablingmultimodalflowswithapplicationstoproteinco-design. arXiv
+preprintarXiv:2402.04997.
+Cao,H.,C.Tan,Z.Gao,Y.Xu,G.Chen,P.-A.Heng,andS.Z.Li(2024). Asurveyongenerative
+diffusionmodels. IEEETransactionsonKnowledgeandDataEngineering.
+Casper, S., X. Davies, C. Shi, T. K. Gilbert, J. Scheurer, J. Rando, R. Freedman, T. Korbak,
+D.Lindner,P.Freire,etal.(2023). Openproblemsandfundamentallimitationsofreinforcement
+learningfromhumanfeedback. arXivpreprintarXiv:2307.15217.
+Castillo-Hair,S.M.andG.Seelig(2021). Machinelearningfordesigningnext-generationmrna
+therapeutics. AccountsofChemicalResearch55(1),24–34.
+Chang,J.D.,M.Uehara,D.Sreenivas,R.Kidambi,andW.Sun(2021). Mitigatingcovariateshift
+inimitationlearningviaofflinedatawithoutgreatcoverage. arXivpreprintarXiv:2106.03207.
+Chen, M., S. Mei, J. Fan, and M. Wang (2024). An overview of diffusion models: Applications,
+guidedgeneration,statisticalratesandoptimization. arXivpreprintarXiv:2404.07771.
+Chen,R.T.,Y.Rubanova,J.Bettencourt,andD.K.Duvenaud(2018). Neuralordinarydifferential
+equations. Advancesinneuralinformationprocessingsystems31.
+Chung,H.,J.Kim,M.T.Mccann,M.L.Klasky,andJ.C.Ye(2022). Diffusionposteriorsampling
+forgeneralnoisyinverseproblems. arXivpreprintarXiv:2209.14687.
+38Chung,H.,B.Sim,D.Ryu,andJ.C.Ye(2022). Improvingdiffusionmodelsforinverseproblems
+using manifold constraints. Advances in Neural Information Processing Systems 35, 25683–
+25696.
+Clark, K., P. Vicol, K. Swersky, and D. J. Fleet (2023). Directly fine-tuning diffusion models on
+differentiablerewards. arXivpreprintarXiv:2309.17400.
+DeBortoli,V.,E.Mathieu,M.Hutchinson,J.Thornton,Y.W.Teh,andA.Doucet(2022). Rieman-
+nianscore-basedgenerativemodelling. AdvancesinNeuralInformationProcessingSystems35,
+2406–2422.
+Deleu,T.,P.Nouri,N.Malkin,D.Precup,andY.Bengio(2024). Discreteprobabilisticinferenceas
+controlinmulti-pathenvironments. arXivpreprintarXiv:2402.10309.
+Dhariwal,P.andA.Nichol(2021). Diffusionmodelsbeatgansonimagesynthesis. Advancesin
+neuralinformationprocessingsystems34,8780–8794.
+Du,Y.,S.Yang,B.Dai,H.Dai,O.Nachum,J.Tenenbaum,D.Schuurmans,andP.Abbeel(2024).
+Learning universal policiesvia text-guidedvideo generation. Advancesin Neural Information
+ProcessingSystems36.
+Fan,Y.,O.Watkins,Y.Du,H. Liu,M.Ryu,C.Boutilier,P.Abbeel,M.Ghavamzadeh,K.Lee, and
+K. Lee (2023). DPOK: Reinforcementlearning for fine-tuning text-to-image diffusion models.
+arXivpreprintarXiv:2305.16381.
+Finn,C.,S.Levine,andP.Abbeel(2016). Guidedcostlearning: Deepinverseoptimalcontrolvia
+policyoptimization. InInternationalconferenceonmachinelearning,pp.49–58.PMLR.
+Fox, R., A. Pakman, and N. Tishby (2015). Taming the noise in reinforcement learning via soft
+updates. arXivpreprintarXiv:1512.08562.
+Frey, N. C., D. Berenberg, K. Zadorozhny, J. Kleinhenz, J. Lafrance-Vanasse, I. Hotzel, Y. Wu,
+S.Ra,R.Bonneau,K.Cho,etal.(2023). Proteindiscoverywithdiscretewalk-jumpsampling.
+arXivpreprintarXiv:2306.12360.
+Geist,M.,B.Scherrer,andO.Pietquin(2019). Atheoryofregularizedmarkovdecisionprocesses.
+InInternationalConferenceonMachineLearning,pp.2160–2169.PMLR.
+Girolami, M. and B. Calderhead (2011). Riemann manifold langevin and hamiltonian monte
+carlomethods. JournaloftheRoyalStatisticalSocietySeriesB:StatisticalMethodology73(2),
+123–214.
+Gosai, S. J., R. I. Castro, N. Fuentes, J. C. Butts, S. Kales, R. R. Noche, K. Mouri, P. C. Sabeti,
+S. K. Reilly, and R. Tewhey (2023). Machine-guided design of synthetic cell type-specific
+cis-regulatoryelements. bioRxiv.
+Haarnoja,T.,H.Tang,P.Abbeel,andS.Levine(2017). Reinforcementlearningwithdeepenergy-
+basedpolicies. InInternationalconferenceonmachinelearning,pp.1352–1361.PMLR.
+39Hansen-Estruch, P., I. Kostrikov, M. Janner, J. G. Kuba, and S. Levine (2023). Idql: Implicit
+q-learningasanactor-criticmethodwithdiffusionpolicies. arXivpreprintarXiv:2304.10573.
+Heng,J.,A.N.Bishop,G.Deligiannidis,andA.Doucet(2020). Controlledsequentialmontecarlo.
+Ho,J.,A.Jain,andP.Abbeel(2020). Denoisingdiffusionprobabilisticmodels. Advancesinneural
+informationprocessingsystems33,6840–6851.
+Ho,J.andT.Salimans(2022). Classifier-freediffusionguidance. arXivpreprintarXiv:2207.12598.
+Ho, J., T. Salimans, A. Gritsenko, W. Chan, M. Norouzi, and D. J. Fleet (2022). Video diffusion
+models. AdvancesinNeuralInformationProcessingSystems35,8633–8646.
+Hoogeboom, E., V. G. Satorras, C. Vignac, and M. Welling (2022). Equivariant diffusion for
+molecule generation in 3d. In International conference on machine learning, pp. 8867–8887.
+PMLR.
+Huang,X.,H.Dong,H.Yifan,Y.Ma,andT.Zhang(2023). Reversediffusionmontecarlo. InThe
+TwelfthInternationalConferenceonLearningRepresentations.
+Janner, M., Y. Du, J. B. Tenenbaum, and S. Levine (2022). Planning with diffusion for flexible
+behaviorsynthesis. arXivpreprintarXiv:2205.09991.
+Jo,J., S.Lee,andS.J.Hwang(2022). Score-basedgenerativemodelingofgraphsviathesystem
+of stochastic differential equations. In International Conference on Machine Learning, pp.
+10362–10383.PMLR.
+Kazim,M.,J.Hong,M.-G.Kim,andK.-K.K.Kim(2024). Recentadvancesinpathintegralcontrol
+for trajectory optimization: An overview in theoretical and algorithmic perspectives. Annual
+ReviewsinControl 57,100931.
+Krishnamoorthy, S., S. M. Mashkaria, and A. Grover (2023). Diffusion models for black-box
+optimization. arXivpreprintarXiv:2306.07180.
+Kumar,A.,A.Zhou, G.Tucker,andS.Levine(2020). Conservativeq-learningforofflinereinforce-
+mentlearning. AdvancesinNeuralInformationProcessingSystems33,1179–1191.
+Lal, A., D. Garfield, T. Biancalani, and G. Eraslan (2024). reglm: Designing realistic regulatory
+dnawithautoregressivelanguagemodels. bioRxiv,2024–02.
+Lee,K.,H.Liu,M.Ryu,O.Watkins,Y.Du,C.Boutilier,P.Abbeel,M.Ghavamzadeh,andS.S.Gu
+(2023). Aligningtext-to-imagemodelsusinghumanfeedback. arXivpreprintarXiv:2302.12192.
+Levine, S. (2018). Reinforcement learning and control as probabilistic inference: Tutorial and
+review. arXivpreprintarXiv:1805.00909.
+Li,Z.,Y.Ni,T.A.B.Huygelen,A.Das,G.Xia,G.-B.Stan,andY.Zhao(2023). Latentdiffusion
+modelfordnasequencegeneration. arXivpreprintarXiv:2310.06150.
+40Lipman,Y.,R.T.Chen,H.Ben-Hamu,M.Nickel,andM.Le(2023). Flowmatchingforgenerative
+modeling. ICLR2023.
+Liu, X.,C. Gong, andQ. Liu(2022). Flowstraight andfast: Learningto generate andtransfer data
+withrectifiedflow. arXivpreprintarXiv:2209.03003.
+Liu, X., L. Wu, M. Ye, and Q. Liu (2022). Let us build bridges: Understanding and extending
+diffusiongenerativemodels. arXivpreprintarXiv:2208.14699.
+Lou,A.,C.Meng,andS.Ermon(2023). Discretediffusionlanguagemodelingbyestimatingthe
+ratiosofthedatadistribution. arXivpreprintarXiv:2310.16834.
+Malkin,N.,M.Jain,E.Bengio,C.Sun,andY.Bengio(2022). Trajectorybalance: Improvedcredit
+assignmentingflownets. AdvancesinNeuralInformationProcessingSystems35,5955–5967.
+Mohammadpour,S.,E.Bengio,E.Frejinger,andP.-L.Bacon(2023). Maximumentropygflownets
+withsoftq-learning. arXivpreprintarXiv:2312.14331.
+Nachum, O.,M. Norouzi,K. Xu,and D.Schuurmans (2017). Bridgingthe gapbetween valueand
+policybasedreinforcementlearning. Advancesinneuralinformationprocessingsystems30.
+Neal,R. M.etal. (2011). Mcmcusing hamiltoniandynamics. Handbookof markovchain monte
+carlo2(11),2.
+Neu,G.,A.Jonsson,andV.Go´mez(2017). Aunifiedviewofentropy-regularizedmarkovdecision
+processes. arXivpreprintarXiv:1705.07798.
+Ouyang, L., J. Wu, X. Jiang, D. Almeida, C. Wainwright, P. Mishkin, C. Zhang, S. Agarwal,
+K. Slama, A. Ray, et al. (2022). Training language models to follow instructions with human
+feedback. AdvancesinNeuralInformationProcessingSystems35,27730–27744.
+Pattanaik, L. and C. W. Coley (2020). Molecular representation: going long on fingerprints.
+Chem6(6),1204–1207.
+Peng,X.B., A.Kumar,G. Zhang,andS.Levine(2019). Advantage-weightedregression: Simple
+andscalableoff-policyreinforcementlearning. arXivpreprintarXiv:1910.00177.
+Peters,J.,K.Mulling,andY.Altun(2010). Relativeentropypolicysearch. InProceedingsofthe
+AAAIConferenceonArtificialIntelligence,Volume24,pp.1607–1612.
+Podell,D.,Z.English,K.Lacey,A.Blattmann,T.Dockhorn,J.Mu¨ller,J.Penna,andR.Rombach
+(2023). Sdxl: Improving latent diffusion models for high-resolution image synthesis. arXiv
+preprintarXiv:2307.01952.
+Prabhudesai,M.,A.Goyal,D.Pathak,andK.Fragkiadaki(2023). Aligningtext-to-imagediffusion
+modelswithrewardbackpropagation. arXivpreprintarXiv:2310.03739.
+Ramesh, A., P. Dhariwal, A. Nichol, C. Chu, and M. Chen (2022). Hierarchical text-conditional
+imagegenerationwithcliplatents. arXivpreprintarXiv:2204.061251(2),3.
+41Rigter,M.,B.Lacerda,andN.Hawes(2022). Rambo-rl: Robustadversarialmodel-basedoffline
+reinforcementlearning. Advancesinneuralinformationprocessingsystems35,16082–16097.
+Robert,C.(2014). Statisticalmodelingandcomputation.
+Rogers,L.C.G.andD.Williams(2000). Diffusions,Markovprocessesandmartingales: Volume2,
+Itoˆ calculus,Volume2. Cambridgeuniversitypress.
+Rombach, R., A. Blattmann, D. Lorenz, P. Esser, and B. Ommer (2022, June). High-resolution
+imagesynthesiswithlatentdiffusionmodels. InProceedingsoftheIEEE/CVFConferenceon
+ComputerVisionandPatternRecognition(CVPR),pp.10684–10695.
+Sarkar, A., Z. Tang, C. Zhao, and P. Koo (2024). Designing dna with tunable regulatory activity
+usingdiscretediffusion. bioRxiv,2024–05.
+Schulman, J., X. Chen, and P. Abbeel (2017). Equivalence between policy gradients and soft
+q-learning. arXivpreprintarXiv:1704.06440.
+Schulman,J.,S.Levine,P.Abbeel,M.Jordan,andP.Moritz(2015).Trustregionpolicyoptimization.
+InInternationalconferenceonmachinelearning,pp.1889–1897.PMLR.
+Schulman,J.,F.Wolski,P.Dhariwal,A.Radford,andO.Klimov(2017). Proximalpolicyoptimiza-
+tionalgorithms. arXivpreprintarXiv:1707.06347.
+Shi,Y.,V.DeBortoli,A.Campbell,andA.Doucet(2024). Diffusionschro¨dingerbridgematching.
+AdvancesinNeuralInformationProcessingSystems36.
+Sohl-Dickstein, J., E. Weiss, N. Maheswaranathan, and S. Ganguli (2015). Deep unsupervised
+learningusingnonequilibriumthermodynamics. InInternationalconferenceonmachinelearning,
+pp.2256–2265.PMLR.
+Song, J., C. Meng, and S. Ermon (2020). Denoising diffusion implicit models. arXiv preprint
+arXiv:2010.02502.
+Song, Y., C.Durkan, I.Murray, andS.Ermon(2021). Maximumlikelihoodtrainingof score-based
+diffusionmodels. Advancesinneuralinformationprocessingsystems34,1415–1428.
+Stark, H., B. Jing, C. Wang, G. Corso, B. Berger, R. Barzilay, and T. Jaakkola (2024). Dirichlet
+flowmatchingwithapplicationstodnasequencedesign. arXivpreprintarXiv:2402.05841.
+Sutton,R.S.andA.G.Barto(2018). Reinforcementlearning: Anintroduction. MITpress.
+Tang,W.(2024). Fine-tuningofdiffusionmodelsviastochasticcontrol: entropyregularizationand
+beyond. arXivpreprintarXiv:2403.06279.
+Tang,W.andH.Zhao(2024). Score-baseddiffusionmodelsviastochasticdifferentialequations–a
+technicaltutorial. arXivpreprintarXiv:2402.07487.
+Theodorou, E., J. Buchli, and S. Schaal (2010). A generalized path integral control approach to
+reinforcementlearning. TheJournalofMachineLearningResearch11,3137–3181.
+42Tiapkin,D.,N.Morozov,A.Naumov,andD.Vetrov(2023). Generativeflownetworksasentropy-
+regularizedrl. arXivpreprintarXiv:2310.12934.
+Tong, A., N. Malkin, G. Huguet, Y. Zhang, J. Rector-Brooks, K. Fatras, G. Wolf, and Y. Bengio
+(2023). Conditionalflowmatching: Simulation-freedynamicoptimaltransport. arXivpreprint
+arXiv:2302.00482.
+Uehara, M. and W. Sun (2021). Pessimistic model-based offline reinforcement learning under
+partialcoverage. arXivpreprintarXiv:2107.06226.
+Uehara, M., Y. Zhao, K. Black, E. Hajiramezanali, G. Scalia, N. L. Diamant, A. M. Tseng,
+T.Biancalani,andS.Levine(2024). Fine-tuningofcontinuous-timediffusionmodelsasentropy-
+regularizedcontrol. arXivpreprintarXiv:2402.15194.
+Uehara,M.,Y.Zhao,K.Black,E.Hajiramezanali,G.Scalia,N.L.Diamant,A.M.Tseng,S.Levine,
+andT.Biancalani(2024).Feedbackefficientonlinefine-tuningofdiffusionmodels.arXivpreprint
+arXiv:2402.16359.
+Uehara,M.,Y.Zhao,E.Hajiramezanali,G.Scalia,G.Eraslan,A.Lal,S.Levine,andT.Biancalani
+(2024). Bridgingmodel-basedoptimizationandgenerativemodelingviaconservativefine-tuning
+ofdiffusionmodels. arXivpreprintarXiv:2405.19673.
+Vargas, F., W. Grathwohl, and A. Doucet (2023). Denoising diffusion samplers. arXiv preprint
+arXiv:2302.13834.
+Wallace,B.,M.Dang,R.Rafailov,L.Zhou,A.Lou,S.Purushwalkam,S.Ermon,C.Xiong,S.Joty,
+and N. Naik (2023). Diffusion model alignment using direct preference optimization. arXiv
+preprintarXiv:2311.12908.
+Wang,Z.,J.J.Hunt,andM.Zhou(2022). Diffusionpoliciesasanexpressivepolicyclassforoffline
+reinforcementlearning. arXivpreprintarXiv:2208.06193.
+Widatalla,T.,R.Rafailov,andB.Hie(2024). Aligningproteingenerativemodelswithexperimental
+fitnessviadirectpreferenceoptimization. bioRxiv,2024–05.
+Williams,G.,A.Aldrich,andE.A.Theodorou(2017). Modelpredictivepathintegralcontrol: From
+theorytoparallelcomputation. JournalofGuidance,Control,andDynamics40(2),344–357.
+Wu, X., K. Sun, F. Zhu, R. Zhao, and H. Li (2023). Better aligning text-to-image models with
+humanpreference. arXivpreprintarXiv:2303.14420.
+Wu, Y., G. Tucker, and O. Nachum (2019). Behavior regularized offline reinforcement learning.
+arXivpreprintarXiv:1911.11361.
+Wulfmeier,M.,P.Ondruska,andI.Posner(2015). Maximumentropydeepinversereinforcement
+learning. arXivpreprintarXiv:1507.04888.
+Xie,T.,C.-A.Cheng,N.Jiang,P.Mineiro,andA.Agarwal(2021). Bellman-consistentpessimism
+forofflinereinforcementlearning. Advancesinneuralinformationprocessingsystems34.
+43Xu, M., L. Yu, Y. Song, C. Shi, S. Ermon, and J. Tang (2022). Geodiff: A geometric diffusion
+modelformolecularconformationgeneration. arXivpreprintarXiv:2203.02923.
+Yang,L.,Z.Zhang,Y.Song,S.Hong,R.Xu,Y.Zhao,W.Zhang,B.Cui,andM.-H.Yang(2023).
+Diffusion models: A comprehensive survey of methods and applications. ACM Computing
+Surveys56(4),1–39.
+Yu, T., G. Thomas, L. Yu, S. Ermon, J. Y. Zou, S. Levine, C. Finn, and T. Ma (2020). Mopo:
+Model-basedofflinepolicyoptimization. AdvancesinNeuralInformationProcessingSystems33,
+14129–14142.
+Yuan, H.,K.Huang,C.Ni,M.Chen, andM.Wang(2023). Reward-directedconditionaldiffusion:
+Provable distribution estimation and reward improvement. In Thirty-seventh Conference on
+NeuralInformationProcessingSystems.
+Zhang,H.andT.Xu(2023). Towardscontrollablediffusionmodelsviareward-guidedexploration.
+arXivpreprintarXiv:2304.07132.
+Zhang,Q.andY.Chen(2021). Pathintegralsampler: astochasticcontrolapproachforsampling.
+arXivpreprintarXiv:2111.15141.
+Zhao, Y., M. Uehara, G. Scalia, T. Biancalani, S. Levine, and E. Hajiramezanali (2024).
+Adding conditional control to diffusion models with reinforcement learning. arXiv preprint
+arXiv:2406.12120.
+Zhou,Z., S.Kearnes,L. Li,R.N.Zare, andP. Riley(2019). Optimizationofmoleculesvia deep
+reinforcementlearning. Scientificreports9(1),10752.
+Zhu,Z.,H.Zhao,H.He,Y.Zhong,S.Zhang,Y.Yu,andW.Zhang(2023). Diffusionmodelsfor
+reinforcementlearning: Asurvey. arXivpreprintarXiv:2311.01223.
+Ziebart, B. D., A. L. Maas, J. A. Bagnell, A. K. Dey, et al. (2008). Maximum entropy inverse
+reinforcementlearning. InAaai,Volume8,pp.1433–1438.Chicago,IL,USA.
+44
