@@ -1,0 +1,1247 @@
+SOAP-RL: Sequential Option Advantage Propagation for
+Reinforcement Learning in POMDP Environments
+ShuIshida shu.ishida@oxon.org
+VisualGeometryGroup
+UniversityofOxford
+JoãoF.Henriques joao@robots.ox.ac.uk
+VisualGeometryGroup
+UniversityofOxford
+Abstract
+This work compares ways of extending Reinforcement Learning algorithms to Partially Observed
+MarkovDecisionProcesses(POMDPs)withoptions.Oneviewofoptionsisastemporallyextended
+action, which can be realized as a memory that allows the agent to retain historical information
+beyondthepolicy’scontextwindow.Whileoptionassignmentcouldbehandledusingheuristicsand
+hand-craftedobjectives,learningtemporallyconsistentoptionsandassociatedsub-policieswithout
+explicitsupervisionisachallenge. Twoalgorithms,PPOEMandSOAP,areproposedandstudiedin
+depthtoaddressthisproblem.PPOEMappliestheforward-backwardalgorithm(forHiddenMarkov
+Models) to optimize the expected returns for an option-augmented policy. However, this learning
+approachisunstableduringon-policyrollouts.Itisalsounsuitedforlearningcausalpolicieswithout
+the knowledge of future trajectories, since option assignments are optimized for offline sequences
+wheretheentireepisodeisavailable.Asanalternativeapproach,SOAPevaluatesthepolicygradient
+for an optimal option assignment. It extends the concept of the generalized advantage estimation
+(GAE)topropagateoptionadvantagesthroughtime,whichisananalyticalequivalenttoperforming
+temporalback-propagationofoptionpolicygradients. Thisoptionpolicyisonlyconditionalonthe
+history of the agent, not future actions. Evaluated against competing baselines, SOAP exhibited
+the most robust performance, correctly discovering options for POMDP corridor environments, as
+well as on standard benchmarks including Atari and MuJoCo, outperforming PPOEM, as well as
+LSTM and Option-Critic baselines. The open-sourced code is available at https://github.
+com/shuishida/SoapRL.
+1 Introduction
+While deep Reinforcement Learning (RL) has seen rapid advancements in recent years, with numerous real-world
+applicationssuchasrobotics(Guetal.,2017;Akkayaetal.,2019;Haarnojaetal.,2024),gaming(VanHasseltetal.,
+2016;Arulkumaranetal.,2019;Bakeretal.,2022),andautonomousvehicles(Kendalletal.,2019;Luetal.,2023),
+manyalgorithmsarelimitedbytheamountofobservationhistorytheyplanon.Developinglearnableembodiedagents
+thatplanoverawidespatialandtemporalhorizonhasbeenalongstandingchallengeinRL.
+With a simple Markovian policy π(a |s ), the agent’s ability to make decisions is limited by only having access to
+t t
+the current state as input. Early advances in RL were made on tasks that either adhere to the Markov assumption
+thatthepolicyandstatetransitionsonlydependonthecurrentstate,orthosecanbesolvedbyframestacking(Mnih
+et al., 2015) that grants the policy access to a short history. However, many real-world tasks are better modeled
+as Partially Observable Markov Decision Processes (POMDPs) (Åström, 1965), and necessitate solutions that use
+working memory. The history of the agent’s trajectory also contains signals to inform the agent to make a more
+optimal decision. This is due to the reward and next state distribution p(r ,s |s ,a ) being conditional on the
+t t+1 0:t 0:t
+paststatesandactions,notjustonthecurrentstateandaction.
+1
+4202
+luJ
+62
+]GL.sc[
+1v31981.7042:viXraAcommonapproachofaccommodatingPOMDPsistolearnalatentrepresentationusingsequentialpolicies,typically
+using a Long Short-Term Memory (LSTM) (Hochreiter & Schmidhuber, 1997), Gated Recurrent Unit (GRU) (Cho
+et al., 2014) or Transformer (Vaswani et al., 2017). This will allow the policy to gain access to signals from the
+past. Differentiableplanners(Tamaretal.,2016;Leeetal.,2018;Ishida&Henriques,2022)areanotherlineofwork
+that incorporate a learnable working memory into the system. However, these approaches have an inherent trade-
+off between the duration of history it can retain (defined by the policy’s context window size) and the compute and
+trainingdatarequiredtolearnthepolicy. Thisisbecausetheentirehistoryofobservationswithinthecontextwindow
+have to be included in the forward pass at training time to propagate useful gradients back to the sequential policy.
+Another caveat is that, with larger context windows, the input space is less constrained and it becomes increasingly
+unlikelythattheagentwillrevisitthesamecombinationofstates,whichmakeslearningthepolicyandvaluefunction
+sample-expensive,andpotentiallyunstableatinferencetimeifthepolicydistributionhaschangedduringtraining.
+Training RL agents to work with longer working memory is a non-trivial task, especially when the content of the
+memoryisnotpre-determinedandtheagentalsohastolearntostoreinformationrelevanttoeachtask. Withthetasks
+that the RL algorithms are expected to handle becoming increasingly complex (Dulac-Arnold et al., 2021; Milani
+etal.,2023;Chenetal.,2023),thereisavitalneedtodevelopalgorithmsthatlearnpoliciesandskillsthatgeneralise
+to dynamic and novel environments. Many real-world tasks are performed over long time horizons, which makes it
+crucialthatthealgorithmcanbeefficientlytrainedandquicklyadaptedtochangesintheenvironment.
+Theaimofthisworkistodevelopanalgorithmthat(a)cansolveproblemsmodeledasPOMDPusingmemory,(b)
+hasaconstrainedinputforthepolicyandvaluefunctionsothattheyaremoretrainable,(c)onlyrequiresthecurrent
+observationtobeforward-passedthroughaneuralnetworkatatimetoreducetheGraphicalProcessingUnit(GPU)
+memoryandcomputationalrequirements.
+Acquiringtransferableskillsandcomposingthemtoexecuteplans,eveninnovelenvironments,areremarkablehuman
+capabilities that are instrumental in performing complex tasks with long-term objectives. Whenever one encounters
+a novel situation, one can still strategize by applying prior knowledge with a limited budget of additional trial and
+error. One way of achieving this is by abstracting away the complexity of long-term planning by delegating short-
+termdecisionstoasetofspecializedlow-levelpolicies,whilethehigh-levelpolicyfocusesonachievingtheultimate
+objectivebyorchestratingtheselow-levelpolicies.
+There has been considerable effort in making RL more generalizable and efficient. Relevant research fields include
+HierarchicalReinforcementLearning(HRL)(Vezhnevetsetal.,2017;Nachumetal.,2018;Pateriaetal.,2021;Zhang
+et al., 2021), skill learning (Pertsch et al., 2020; Nam et al., 2022; Peng et al., 2022; Shi et al., 2023), Meta Rein-
+forcementLearning(Meta-RL)(Wangetal.,2016;Duanetal.,2016;Rakellyetal.,2019;Becketal.,2023)andthe
+options framework (Sutton et al., 1999; Precup & Sutton, 2000), with a shared focus on learning reusable policies.
+Inparticular,thisresearchfocusesontheoptionsframework,whichextendstheRLparadigmwithaHiddenMarkov
+Model(HMM)thatusesoptionstoexecutelong-termbehavior.
+TheOption-Criticarchitecture(Baconetal.,2017)presentsawell-formulatedsolutionforend-to-endoptiondiscovery.
+The authors showed that once the option policies are learned, the Option-Critic agent can quickly adapt when the
+environmentdynamicsarechanged,whereasotheralgorithmssufferfromthechangesinrewarddistributions.
+However, therearechallengeswithregardtoautomaticallylearningoptions. Acommonissueisthattheagentmay
+convergetoasingleoptionthatapproximatestheoptimalpolicyunderaMarkovassumption. Additionally,learning
+optionsfromscratchcanbesample-inefficientduetotheneedtolearnmultipleoptionpolicies.
+Inthefollowingsections,twotrainingobjectivesareproposedandderivedtolearnanoptimaloptionassignment.
+Thefirstapproach,ProximalPolicyOptimizationviaExpectationMaximization(PPOEM),appliesExpectationMax-
+imization (EM) to a HMM describing a POMDP for the options framework. The method is an extension of the
+forward-backwardalgorithm,alsoknownastheBaum-Welchalgorithm(Baum,1972),appliedtooptions. Whilethis
+approachhaspreviouslybeenexplored(Danieletal.,2016;Foxetal.,2017;Zhang&Paschalidis,2020;Giammarino
+& Paschalidis, 2021), these applications were limited to 1-step Temporal Difference (TD) learning. In addition, the
+learnedoptionshavelimitedexpressivityduetohowtheoptiontransitionsaredefined. Incontrast,PPOEMaugments
+the forward-backward algorithm with Generalized Advantage Estimate (GAE) (Schulman et al., 2016), which is a
+temporalgeneralizationofTDlearning,andextendstheProximalPolicyOptimization(PPO)(Schulmanetal.,2017)
+to work with options. While this approach was shown to be effective in a limited setting of a corridor environment
+2requiring memory, the performance degraded with longer corridors. It could be hypothesized that this is due to the
+learningobjectivebeingmisalignedwiththetrueRLobjective,astheapproachassumesaccesstothefulltrajectory
+oftheagentfortheoptimalassignmentofoptions,eventhoughtheagentonlyhasaccesstoitspasttrajectory(andnot
+itsfuture)atinferencetime.
+As an alternative approach, Sequential Option Advantage Propagation (SOAP) evaluates and maximizes the policy
+gradient for an optimal option assignment directly. With this approach, the option policy is only conditional on the
+history of the agent. The derived objective has a surprising resemblance to the forward-backward algorithm, but
+showed more robustness when tested in longer corridor environments. The algorithms were also evaluated on the
+Atari(Bellemareetal.,2013)andMuJoCo(Todorovetal.,2012)benchmarks. ResultsdemonstratedthatusingSOAP
+foroptionlearningismoreeffectiveandrobustthanusingthestandardapproachforlearningoptions,proposedbythe
+Option-Criticarchitecture.
+Theproposedapproachcanimprovetheefficiencyofskilldiscoveryinskill-basedRLalgorithms, allowingthemto
+adaptefficientlytocomplexnovelenvironments.
+2 Background
+2.1 PartiallyObservableMarkovDecisionProcess
+POMDP is a special case of an Markov Decision Process (MDP) where the observation available to the agent only
+contains partial information of the underlying state. In this work, s is used to denote the (partial) state given to the
+agent,whichmayormaynotcontainthefullinformationoftheenvironment(whichshallbedistinguishedfromstate
+s as the underlying state s).1 This implies that the “state” transitions are no longer fully Markovian in a POMDP
+setting,andmaybecorrelatedwithpastobservationsandactions. Hence,p(r ,s |s ,a )describesthefullstate
+t t+1 0:t 0:t
+andrewarddynamicsinthecaseofPOMDPs,wheres isashorthandfor{s |t ≤t≤t },andsimilarlywitha .
+0:t t 1 2 0:t
+2.2 TheOptionsFramework
+Options (Sutton et al., 1999; Precup & Sutton, 2000) are temporally extended actions that allow the agent to make
+high-level decisions in the environment. Each option corresponds to a specialized low-level policy that the agent
+can use to achieve a specific subtask. In the Options Framework, the inter-option policy π(z |s ) and an option
+t t
+termination probability ϖ(s ,z ) govern the transition of options, where z is the current option, and are chosen
+t+1 t t
+fromannnumberofdiscreteoptions{Z ,...,Z }.Optionsareespeciallyvaluablewhentherearemultiplestagesin
+1 n
+ataskthatmustbetakensequentially(e.g. followingarecipe)andtheagentmustobeydifferentpoliciesgivensimilar
+observations,dependingonthestageofthetask.
+EarlierworkshavebuiltupontheOptionsFrameworkbyeitherlearningoptimaloptionselectionoverapre-determined
+set of options (Peng et al., 2019) or using heuristics for option segmentation (Kulkarni et al., 2016; Nachum et al.,
+2018), rather than a fully end-to-end approach. While effective, such approaches constrain the agent’s ability to
+discoverusefulskillsautomatically. TheOption-Criticarchitecture(Baconetal.,2017)proposedend-to-endtrainable
+systems which learn option assignment. It formulates the problem such that inter-option policies and termination
+conditionsarelearnedjointlyintheprocessofmaximizingtheexpectedreturns.
+2.3 Option-Criticarchitecture
+As mentioned in Section 2.2, the options framework (Sutton et al., 1999; Precup & Sutton, 2000) formalizes the
+idea of temporally extended actions that allow agents to make high-level decisions. Let there be n discrete options
+{Z ,...,Z }fromwhichz ischosenandassignedateverytimestept. Eachoptioncorrespondstoaspecializedsub-
+1 n t
+policyπ (a |s ,z )thattheagentcanusetoachieveaspecificsubtask.Att=0,theagentchoosesanoptionaccording
+θ t t t
+toitsinter-optionpolicyπ (z |s )(policyoveroptions),thenfollowstheoptionsub-policyuntiltermination,which
+ϕ t t
+is dictated by the termination probability function ϖ (s ,z ). Once the option is terminated, a new option z is
+ψ t t−1 t
+sampledfromtheinter-optionpolicyandtheprocedureisrepeated.
+1Inotherliterature,oisusedtodenotethepartialobservationtodistinguishfromtheunderlyingstates.Whilethismakesthedistinctionexplicit,
+manyworksonstandardRLalgorithmsassumeafullyobservableMDPfortheirformulation,leadingtoconflictingnotations.
+3TheOption-Criticarchitecture(Baconetal.,2017)learnsoptionassignmentsend-to-end. Itformulatestheproblem
+suchthattheoptionsub-policiesπ (a |s ,z )andterminationfunctionϖ (s ,z )arelearnedjointlyintheprocess
+θ t t t ψ t+1 t
+ofmaximizingtheexpectedreturns. Theinter-optionpolicyπ (z |s )isanϵ-greedypolicythattakesanargmaxzof
+ϕ t t
+theoptionvaluefunctionQ (s,z)with1−ϵprobability,anduniformlyrandomlysamplesoptionswithϵprobability.
+ϕ
+IneverystepoftheOption-Criticalgorithm,thefollowingupdatesareperformedforacurrentstates,optionz,reward
+r,episodeterminationindicatord∈{0,1},nextstates′,anddiscountfactorγ ∈[0,1):
+δ←r+γ(1−d)h(cid:0) 1−ϖ (s′,z)(cid:1) Q(s′,z)+ϖ (s′,z)maxQ (s′,z)i −Q (s,z),
+ψ ψ ϕ ϕ
+z
+Q (s,z)←Q (s,z)+α δ,
+ϕ ϕ ϕ
+∂logπ (a|s,z) (1)
+θ←θ+α θ [r+γQ (s′,z)],
+θ ∂θ ϕ
+∂ϖ (s′,z)
+ψ←ψ−α ψ [Q (s′,z)−maxQ (s′,z)].
+ψ ∂ψ ϕ z ϕ
+Here,α ,α andα arelearningratesforQ (s,z),π (a|s,z),andϖ (s,z),respectively.
+ϕ θ ψ ϕ θ ψ
+ProximalPolicyOption-Critic(PPOC)(Klissarovetal.,2017)buildsontopoftheOption-Criticarchitecture(Bacon
+et al., 2017), replacing the ϵ-greedy policy over the option-values witha policy network π (z|s) parametrized by φ
+φ
+withcorrespondinglearningrateα , substitutingthepolicygradientalgorithmwithPPO(Schulmanetal.,2017)to
+φ
+optimizethesub-policiesπ (a|s,z).
+θ
+AstandardPPO’sobjectiveis:
+(cid:20) (cid:18) (cid:18) (cid:19) (cid:19)(cid:21)
+π (a|s) π (a|s)
+L (θ)= E min θ AGAE,clip θ ,1−ϵ,1+ϵ AGAE , (2)
+PPO s,a∼π π θold(a|s) t π θold(a|s) t
+where πθ(a|s) is a ratio of probabilities of taking action a at state s with the new policy against that with the old
+πθold(a|s)
+policy,andAGAEistheGAE(Schulmanetal.,2016)attimestept. GAEprovidesarobustandlow-varianceestimate
+t
+oftheadvantagefunction. Itcanbeexpressedasasumofexponentiallyweightedmulti-stepTDerrors:
+T
+AGAE =X (γλ)t′−tδ , (3)
+t t′
+t′=t
+where δ = r +γ(1−d )V(s )−V(s ) is the TD error at time t, and λ is a hyperparameter that controls the
+t t t t+1 t
+trade-offofbiasandvariance. ExtendingthedefinitionofGAEtoworkwithoptions, theupdateformulaforPPOC
+canbeexpressedas:
+AGAE(s,z)←r+γV(s′,z′)−V(s,z)+λγ(1−d)AGAE(s′,z′),
+Q (s,z)←Q (s,z)+α AGAE(s,z),
+ϕ ϕ ϕ
+∂L (θ)
+θ←θ+α PPO ,
+θ ∂θ (4)
+∂ϖ (s,z)
+ψ←ψ−α ψ AGAE(s,z),
+ψ ∂ψ
+∂logπ (z|s)
+φ←φ+α φ AGAE(s,z).
+φ ∂φ
+PPOCisusedasoneofthebaselinesinthiswork.
+2.4 ExpectationMaximizationalgorithm
+The EM algorithm (Dempster et al., 1977) is a well-known method for learning the assignment of latent variables,
+often used for unsupervised clustering and segmentation. The k-means clustering algorithm (Forgy, 1965) can be
+considered a special case of EM. The following explanation in this section is a partial summary of Chapter 9 of
+Bishop’sbook(Bishop,2006).
+4TheobjectiveofEMistofindamaximumlikelihoodsolutionformodelswithlatentvariables. Denotingthesetofall
+observeddataasX, thesetofalllatentvariablesasZ, andthesetofallmodelparametersasΘ, thelog-likelihood
+functionisgivenby:
+( )
+X
+logp(X|Θ)=log p(X,Z|Θ) . (5)
+Z
+However,evaluatingtheabovesummation(orintegralforacontinuousZ)overallpossiblelatentsisintractable. The
+EMalgorithmisawaytostrictlyincreasethelikelihoodfunctionbyalternatingbetweentheE-stepthatevaluatesthe
+expectationofajointlog-likelihoodlogp(X,Z|Θ),andtheM-stepthatmaximizesthisexpectation.
+IntheE-step,thecurrentparameterestimateΘ (usingrandominitializationinthefirstiteration,orthemostrecent
+old
+updatedparametersinsubsequentiterations)isusedtodeterminetheposteriorofthelatentsp(Z|X,Θ ). Thejoint
+old
+log-likelihoodisobtainedunderthisprior. Theexpectation,denotedasQ(Θ;Θ ),isgivenby:
+old
+X
+Q(Θ;Θ )= E [logp(X,Z|Θ)]= p(Z|X,Θ )logp(X,Z|Θ). (6)
+old old
+Z∼p(·|X,Θold)
+Z
+IntheM-step,anupdatedparameterestimateΘ isobtainedbymaximizingtheexpectation:
+new
+Θ =argmaxQ(Θ,Θ ). (7)
+new old
+Θ
+The E-step and the M-step are performed alternately until a convergence criterion is satisfied. The EM algorithm
+makesobtainingamaximumlikelihoodsolutiontractable(Bishop,2006).
+2.5 Forward-backwardalgorithm
+The EM algorithm can also be applied in an HMM setting for sequential data, resulting in the forward-backward
+algorithm,alsoknownastheBaum-Welchalgorithm(Baum,1972). Figure1showsthegraphoftheHMMofinterest.
+Ateverytimestept ∈ {0,...,T},alatentz ischosenoutofnnumberofdiscreteoptions{Z ,...,Z },whichisan
+t 1 n
+underlyingconditioningvariableforanobservationx .Inthefollowingderivation,{x |t ≤t≤t }isdenotedwitha
+t t 1 2
+shorthandx ,andsimilarlyforothervariables.Chapter13ofBishop’sbook(Bishop,2006)offersacomprehensive
+t1:t2
+explanationforthisalgorithm.
+Figure1: AnHMMforsequentialdataX oflengthT,givenlatentvariablesZ.
+For this HMM, the joint likelihood function for the observed sequence X = {x ,...,x } and latent variables Z =
+0 T
+{z ,...,z }isgivenby:
+0 T
+T T
+Y Y
+p(X,Z|Θ)=p(z |Θ) p(x |z ,Θ) p(z |z ,Θ). (8)
+0 t t t t−1
+t=0 t=1
+5Usingtheabove,EMobjectivecanbesimplifiedas:
+X
+Q(Θ;Θ )= p(Z|X,Θ )logp(X,Z|Θ)
+old old
+Z
+T
+X XX
+= p(z |Θ )logp(z |Θ)+ p(z |X,Θ )logp(x |z ,Θ)
+0 old 0 t old t t (9)
+z0 t=0 zt
+T
+X X
++ p(z ,z |X,Θ )logp(x ,z |z ,Θ).
+t−1 t old t t t−1
+t=1zt−1,zt
+2.5.1 E-step
+IntheE-step,p(z |X)andp(z ,z |X)areevaluated. Notethatinthefollowingderivation,itisassumedthatthe
+t t−1 t
+probabilitydistributionsareconditionedonΘ. Definingα(z ) := p(z |x ),β(z ) := p(xt+1:T|zt) andnormalising
+t t 0:t t p(xt+1:T|x0:t)
+constantc :=p(x |x ),
+t t 0:t−1
+p(x ,z ) p(x ,z )p(x |z )
+p(z |X)= 0:T t = 0:t t t+1:T t =α(z )β(z ), (10)
+t p(x ) p(x )p(x |x ) t t
+0:T 0:t t+1:T 0:t
+p(x ,z ,z ) p(x ,z )p(x |z )p(z |z )p(x |z )
+p(z ,z |X)= 0:T t−1 t = 0:t−1 t−1 t t t t−1 t+1:T t
+t−1 t p(x ) p(x )p(x |x )p(x |x )
+0:T 0:t−1 t 0:t−1 t+1:T 0:t
+α(z )β(z )
+=p(x |z )p(z |z ) t t . (11)
+t t t t+1 c
+t
+Recursivelyevaluatingα(z ),β(z )andc ,
+t t t
+P
+[p(z |x )p(x |z )p(z |z )]
+α(z )=
+p(x 0:t,z t)
+=
+p(x t,z t|x 0:t−1)
+=
+zt−1 t−1 0:t−1 t t t t−1
+t p(x ) p(x |x ) p(x |x )
+0:t t 0:t−1 t 0:t−1
+P
+p(x |z ) [α(z )p(z |z )]
+=
+t t zt−1 t−1 t t−1
+, (12)
+c
+t
+P
+β(z )=
+p(x t+1:T|z t)
+=
+zt+1[p(x t+2:T|z t+1)p(x t+1|z t+1)p(z t+1|z t)]
+t p(x |x ) p(x |x )p(x |x )
+t+1:T 0:t t+2:T 0:t+1 t+1 0:t
+P
+[β(z )p(x |z )p(z |z )]
+=
+zt+1 t+1 t+1 t+1 t+1 t
+, (13)
+c
+t+1
+X X
+c =p(x |x )= [p(z |x )p(x |z )p(z |z )]= [α(z )p(x |z )p(z |z )]. (14)
+t t 0:t−1 t−1 0:t−1 t t t t−1 t−1 t t t t−1
+zt−1,zt zt−1,zt
+Initialconditionsareα(z 0)= Pp(x0|z0)p(z0) ,β(z T)=1.
+z0[p(x0|z0)p(z0)]
+2.5.2 M-step
+In the M-step, the parameter set Θ is updated by maximizing Q(Θ;Θ ), which can be rewritten by substituting
+old
+p(z |X)andp(z ,z |X)inEquation(9)withα(z)andβ(z)(ignoringtheconstants)asderivedinSection2.5.1.
+t t−1 t
+2.5.3 Optiondiscoveryviatheforward-backwardalgorithm
+Theideaofapplyingtheforward-backwardalgorithmtolearnoptionassignmentsisfirstintroducedinDanieletal.
+(2016),andhaslaterbeenappliedinbothImitationLearning(IL)settings (Zhang&Paschalidis,2020;Giammarino
+&Paschalidis,2021)andRLsettings(Foxetal.,2017).However,inpreviousliterature,theoptionpolicyisdecoupled
+intoanoptionterminationprobabilityϖ(s ,z ),andaninter-optionpolicyπ(z |s ). Duetotheinter-optionpolicy
+t t−1 t t
+being unconditional on the previous option z , the choice of a new option z will be uninformed of the previous
+t−1 t
+option z . This may be problematic for learning POMDP tasks as demonstrated in Section 6.1, because if a task
+t−1
+consistsofasequenceofoptions,thenknowingwhichonewasexecutedbeforeisimportanttodecidetomoveonto
+6(a)Standardoptionsframework (b)Optionsusedinthiswork
+Figure2: Probabilisticgraphicalmodelsshowingtherelationshipsbetweenoptionsz, actionsaandstatessattime
+step t. b in the standard options framework denotes a boolean variable that initiates the switching of options when
+t
+activated. Thisworkadoptsamoregeneralformulationcomparedtotheoptionsframework.
+thenextone. Previousliteraturealsodoesnotaddresstheissuesofexponentiallydiminishingmagnitudesthatarise
+fromrecursivelyapplyingtheformula. Thisisknownasthescalingfactorproblem(Bishop,2006).
+This work presents a concise derivation of the forward-backward algorithm applied to an improved version of the
+optionsframework. Italsoaddressesthescalingfactorproblem,bybuildingthisfactorintothederivation.
+3 Option assignment formulation
+The aim is to learn a diverse set of options with corresponding policy and value estimates, such that each option is
+responsibleforaccomplishingawell-definedsubtask,suchasreachingacertainstateregion. Ateverytimestept,the
+agentchoosesanoptionz outofnnumberofdiscreteoptions{Z ,...,Z }.
+t 1 n
+3.1 Optionpolicyandsub-policy
+Thegoalistolearnasub-policyπ (a|s,z)conditionaltoalatentoptionvariablez,andanoptionpolicyπ (z′|s,a,z)
+θ ψ
+usedtoiterativelyassignoptionsateachtimestep,tomodelthejointoptionpolicy
+p (a ,z |s ,z )=π (a |s ,z )π (z |s ,a ,z ). (15)
+Θ t t+1 t t θ t t t ψ t+1 t t t
+Here,thelearnableparametersetofthepolicyisdenotedasΘ={θ,ψ}.
+AcomparisonoftheoptionpolicyusedinthisworkandthestandardoptionsframeworkisshowninFigure2. Un-
+like the options framework, which further decouples the option policy π into an option termination probability
+ψ
+ϖ(s ,z ), and an unconditional inter-option policy π(z |s ), in this work the option policy is modeled π with
+t t−1 t t ψ
+one network so that the inter-option policy is informed by the previous option z upon choosing the next z . A
+t t+1
+graphicalmodelforthefullHMMisshowninFigure3.
+3.2 Evaluatingtheprobabilityoflatents
+Letusdefineanauto-regressiveactionprobabilityα := p(a |s ,a ), anauto-regressiveoptionforwarddistri-
+t t 0:t 0:t−1
+butionζ(z ) := p(z |s ,a ),andanoptionbackwardfeedbackβ(z ) := p(st:T,at:T−1|st−1,at−1,zt). Noticethat
+t t 0:t 0:t−1 t p(st:T,at:T−1|s0:t−1,a0:t−1)
+thedefinitionsofactionprobabilityα,optionforwardζ(z ),andoptionbackwardβ(z )resemblec ,α(z )andβ(z )
+t t t t t
+defined in Section 2.5, respectively. While it is common practice to denote the forward and backward quantities as
+α and β in the forward-backward algorithm (also known as the α-β algorithm), here α is redefined to denote the
+t
+action probability (corresponding to the normalizing constant c ), and ζ(z ) for the option forward distribution, to
+t t
+drawattentiontothefactthattheseareprobabilitiesofoptionz andactiona ,respectively.
+t t
+7Figure3: AnHMMshowingtherelationshipsbetweenoptionsz,actionsaandstatess.
+α ,ζ(z )andβ(z )canberecursivelyevaluatedasfollows:
+t t t
+X X
+α =p(a |s ,a )= p(z |s ,a )p (a ,z |s ,z )= ζ(z )p (a ,z |s ,z ), (16)
+t t 0:t 0:t−1 t 0:t 0:t−1 Θ t t+1 t t t Θ t t+1 t t
+zt,zt+1 zt,zt+1
+p(z ,s ,a |s ,a )
+ζ(z )= t+1 t+1 t 0:t 0:t−1
+t+1 p(s ,a |s ,a )
+t+1 t 0:t 0:t−1
+P
+p(z |s ,a )p (a ,z |s ,z )P(s |s ,a )
+= zt t 0:t 0:t−1 Θ t t+1 t t t+1 0:t 0:t
+p(a |s ,a )P(s |s ,a )
+t 0:t 0:t−1 t+1 0:t 0:t
+P
+ζ(z )p (a ,z |s ,z )
+= zt t Θ t t+1 t t , (17)
+α
+t
+p(s ,a |s ,a ,z )
+β(z )= t:T t:T−1 t−1 t−1 t
+t p(s ,a |s ,a )
+t:T t:T−1 0:t−1 0:t−1
+P
+[p(s ,a |s ,a ,z )p (a ,z |s ,z )P(s |s ,a )]
+=
+zt+1 t+1:T t+1:T−1 t t t+1 Θ t t+1 t t t 0:t−1 0:t−1
+p(s ,a |s ,a )p(a |s ,a )P(s |s ,a )
+t+1:T t+1:T−1 0:t 0:t t 0:t 0:t−1 t 0:t−1 0:t−1
+P
+[β(z )p (a ,z |s ,z )]
+=
+zt+1 t+1 Θ t t+1 t t
+. (18)
+α
+t
+Initialconditionsareζ(z )=p(z )= 1 forallpossiblez ,indicatingauniformdistributionovertheoptionsinitially
+0 0 n 0
+whennoobservationsoractionsareavailable,andβ(z )= p(sT|sT−1,aT−1,zT) =1.
+T p(sT|s0:T−1,a0:T−1)
+4 Proximal Policy Optimization via Expectation Maximization
+Inthissection,PPOEMisintroduced,analgorithmthatextendsPPOforoptiondiscoverywithanEMobjective. The
+expectationofthereturnsistakenoverthejointprobabilitydistributionofstates,actionsandoptions,sampledbythe
+policy. Thisobjectivegivesatractableobjectivetomaximize,whichhasacloseresemblancetotheforward-backward
+algorithm.
+4.1 Expectedreturnmaximizationobjectivewithoptions
+The objective is to maximize the expectation of returns R(τ) for an agent policy π over a trajectory τ with latent
+optionz ateachtimestept. Thedefinitionofatrajectoryτ isasetofstates,actionsandrewardsvisitedbytheagent
+t
+policyinanepisode. TheobjectiveJ[π]canbewrittenas:
+Z
+J[π Θ]= E [R(τ)]= R(τ)p(τ,Z|Θ). (19)
+τ,Z∼π τ,Z
+Takingthegradientofthemaximizationobjective,
+Z Z ∇ p(τ,Z|Θ)
+∇ J[π ]= R(τ)∇ p(τ,Z|Θ)= R(τ) Θ p(τ,Z|Θ)= E [R(τ)∇ logp(τ,Z|Θ)]. (20)
+Θ Θ τ,Z Θ τ,Z p(τ,Z|Θ) τ,Z Θ
+8To simplify the derivation, let us focus on the states and actions that appear in the trajectory. The joint likelihood
+functionforthetrajectoryτ andlatentoptionsZ ={z ,...,z }isgivenby:
+0 T−1
+p(τ,Z|Θ)=p(s ,a ,z |Θ)=p(s ,z )ΠT−1[p (a ,z |s ,z )P(s |s ,a )], (21)
+0:T 0:T−1 0:T 0 0 t=0 Θ t t+1 t t t+1 0:t 0:t
+Evaluating∇ logp(τ,Z|Θ),thelogconvertstheproductsintosums,andthetermswhichareconstantwithrespect
+Θ
+toΘareeliminatedupontakingthegradient,leaving
+T−1
+X
+∇ logp(τ,Z|Θ)= ∇ log[π (a |s ,z )π (z |s ,a ,z ,s )]. (22)
+Θ Θ θ t t t ψ t+1 t t t t+1
+t=0
+SubstitutingEquation(22)intoEquation(20)andexplicitlyevaluatingtheexpectationoverthejointoptionprobabil-
+ities,
+" #
+T−1
+X
+∇ J[π ]= E R(τ)∇ logp (a ,z |s ,z )
+Θ Θ Θ Θ t t+1 t t
+τ,Z∼π
+t=0
+" #
+Z T−1
+X
+= E [R(τ)∇ logp (a ,z |s ,z )] p(Z|τ)
+Θ Θ t t+1 t t (23)
+τ∼π
+Z t=0
+ 
+T−1
+X X
+= E  [R(τ)p(z t,z t+1|τ)∇ Θlogp Θ(a t,z t+1|s t,z t)].
+τ∼π
+t=0zt,zt+1
+Using the action probability α := p(a |s ,a ), option forward distribution ζ(z ) := p(z |s ,a ), and
+t t 0:t 0:t−1 t t 0:t 0:t−1
+optionbackwardfeedbackβ(z ):= p(st:T,at:T−1|st−1,at−1,zt) evaluatedinSection3.2,p(z ,z |τ)canbeevaluated
+as
+t p(st:T,at:T−1|s0:t−1,a0:t−1) t t+1
+p(s ,a ,z ,z )
+p(z ,z |τ)= 0:T 0:T−1 t t+1
+t t+1 p(s ,a )
+0:T 0:T−1
+p(s ,a ,z )p (a ,z |s ,z )p(s ,a |s ,a ,z )
+= 0:t 0:t−1 t Θ t t+1 t t t+1:T t+1:T−1 t t t+1 (24)
+p(s ,a )p(a |s ,a )p(s ,a |s ,a )
+0:t 0:t−1 t 0:t 0:t−1 t+1:T t+1:T−1 0:t 0:t
+ζ(z )β(z )
+=p (a ,z |s ,z ) t t+1 .
+Θ t t+1 t t α
+t
+Usingthis,Equation(23)canbeevaluatedandmaximizedwithgradientdescent.
+4.1.1 RelationshipwithExpectationMaximization
+TheobjectivederivedinEquation(23)closelyresemblestheobjectiveoftheEMalgorithmappliedtotheHMMwith
+optionsaslatentvariables. Theexpectationofthemarginallog-likelihoodQ(Θ;Θ ),whichgivesthelower-bound
+old
+ofthemarginallog-likelihoodlogp(τ|Θ),isgivenby
+Z
+Q(Θ;Θ )= E [lnp(τ,Z|Θ)]= E p(Z|τ,Θ )lnp(τ,Z|Θ)dZ
+old old
+Z∼p(·|τ,Θold) τ∼π Z
+T−1 (25)
+X X
+= E [p(z ,z |τ,Θ )logp (a ,z |s ,z )]+const.
+t t+1 old Θ t t+1 t t
+τ∼π
+t=0 zt,zt+1
+ThedifferenceisthattheexpectedreturnmaximizationobjectiveinEquation(23)weightsthelogprobabilitiesofthe
+policyaccordingtothereturns,whereastheobjectiveofEquation(25)istofindaparametersetΘthatmaximizesthe
+probabilitythatthestatesandactionsthatappearedinthetrajectoryarevisitedbythejointoptionpolicyp .
+Θ
+94.2 PPOobjectivewithGeneralizedAdvantageEstimation
+A standard optimization technique for neural networks using gradient descent can be applied to optimize the policy
+network. NoticingthattheoptimizationobjectiveinEquation(23)resemblesthepolicygradientalgorithm,thejoint
+optionpolicycanbeoptimizedusingthePPOalgorithminsteadtopreventtheupdatedpolicyp (a ,z |s ,z )from
+Θ t t+1 t t
+deviatingfromtheoriginalpolicytoomuch.
+SeveralchangeshavetobemadetoadaptthetrainingobjectivetoPPO.Firstly,∇logp isreplacedby ∇pΘ,itsfirst
+Θ pΘold
+orderapproximation,toeasilyintroduceclippingconstraintstothepolicyratios.Secondly,thereturnR(τ)isreplaced
+withtheGAE,AGAE,asdescribedinEquation(3).
+t
+ExtendingthedefinitionofGAEtoworkwithoptions,
+AGAE(z ,z |τ)=r +γV(s ,z )−V(s ,z )+λγ(1−d )AGAE(z |τ) (26)
+t t t+1 t t+1 t+1 t t t t+1 t+1
+X
+AGAE(z |τ)= p(z |z ,τ)AGAE(z ,z |τ). (27)
+t t t+1 t t t t+1
+zt+1
+TheGAEcouldbeevaluatedbackwardsiteratively,startingfromt=T withtheinitialconditionAGAE(z |τ)=0.
+T t+1
+Theoptiontransitionfunctionp(z |z ,τ)canbeevaluatedusingp(z ,z |τ)(Equation(24))as:
+t+1 t t t+1
+p(z ,z |τ)
+p(z |z ,τ)= t t+1 . (28)
+t+1 t P p(z ,z |τ)
+zt+1 t t+1
+ThetargetvalueV (s ,z )toregresstheestimatedvaluefunctiontowardscanbedefinedintermsoftheGAEand
+target t t
+thecurrentvalueestimateas:
+V (s ,z )=Vπ(s ,z )+AGAE(z |τ). (29)
+target t t t t t t
+5 Sequential Option Advantage Propagation
+In the previous section, assignments of the latent option variables Z were determined by maximizing the expected
+return for complete trajectories. The derived algorithm resembles the forward-backward algorithm closely, and re-
+quiresthebackwardpassofβ(z )inordertofullyevaluatetheoptionprobabilityp(Z|τ). Duringrolloutsoftheagent
+t
+policy,however,knowingtheoptimalassignmentoflatentsp(z |τ)inadvanceisnotpossible,sincethetrajectoryis
+t
+incompleteandthebackwardpasshasnotbeeninitiated. Therefore,thepolicymustrelyonthecurrentbestestimate
+oftheoptionsgivenitsavailablepasttrajectory{s ,a }duringitsrollout. Thisoptiondistributionconditionalonly
+0:t 0:t
+onitspastisequivalenttotheauto-regressiveoptionforwarddistributionζ(z ):=p(z |s ,a ).
+t t 0:t 0:t−1
+Sincetheoptimaloptionassignmentcanonlybeachievedinhindsightoncethetrajectoryiscomplete,thisinformation
+is not helpful for the agent policy upon making its decisions. A more useful source of information for the agent,
+therefore, is the current best estimate of the option assignment ζ(z ). It is sensible, therefore, to directly optimize
+t
+for the expected returns evaluated over the option assignments ζ(z ) to find an optimal option policy, rather than
+t
+optimizingtheexpectedreturnsforanoptionassignmentp(Z|τ),whichcanonlybeknowninhindsight.
+ThefollowingsectionproposesanewoptionoptimizationobjectivethatdoesnotinvolvethebackwardpassoftheEM
+algorithm. Instead,theoptionpolicygradientforanoptimalforwardoptionassignmentisevaluatedanalytically. This
+resultsinatemporalgradientpropagation,whichcorrespondstoabackwardpass,butwithaslightlydifferentoutcome.
+Notably,thisimprovedalgorithm,SOAP,appliesanormalizationoftheoptionadvantagesineveryback-propagation
+stepthroughtime.
+Asfarastheauthorsareaware,thisworkisthefirsttoderivetheback-propagationofpolicygradientsinthecontext
+ofoptiondiscovery.
+105.1 PolicyGradientobjectivewithoptions
+Letusstartbyderivingthepolicygradientobjectiveassumingoptions. ThemaximizationobjectiveJ[π]fortheagent
+canbedefinedas:
+Z
+J[π ]= E [R(τ)]= R(τ)p(τ|Θ)dτ. (30)
+Θ
+τ∼π
+τ
+Takingthegradientofthemaximizationobjective,
+Z Z
+∇ p(τ|Θ)
+∇ ΘJ[π Θ]= R(τ)∇ Θp(τ|Θ)dτ = R(τ) pΘ
+(τ|Θ)
+p(τ|Θ)dτ =E τ[R(τ)∇ Θlogp(τ|Θ)]. (31)
+τ τ
+Sofar,theabovederivationisthesameasthenormalpolicygradientobjectivewithoutoptions. Next,thelikelihood
+forthetrajectoryτ isgivenby:
+p(τ|Θ)=p(s ,a |Θ)=ρ(s )ΠT−1[p(a |s ,a ,Θ)P(s |s ,a )]. (32)
+0:T 0:T−1 0 t=0 t 0:t 0:t−1 t+1 0:t 0:t
+Thisiswhereoptionsbecomerelevant,asthestandardformulationassumesthatthepolicyπ(a|s)isonlydependenton
+thecurrentstatewithouthistory,andsimilarlythatthestatetransitionenvironmentdynamicsP(s′|s,a)isMarkovian
+giventhecurrentstateandaction. Inmanyapplications,however,thestatesthatareobserveddonotcontaintheentire
+information about the underlying dynamics of the environment2, and therefore, conditioning on the history yields a
+differentdistributionoffuturestatescomparedtoconditioningonjustthecurrentstate. Tocapturethis,thepolicyand
+state transitions are now denoted to be p(a |s ,a ) and P(s |s ,a ), respectively. Here, the probabilities
+t 0:t 0:t−1 t+1 0:t 0:t
+are conditional on the historical observations (s ) and historical actions (e.g. a ), rather than just the immediate
+0:t 0:t
+states andactiona . Notethatp(a |s ,a )isaquantityα thathasalreadybeenevaluatedinSection3.2.
+t t t 0:t 0:t−1 t
+Evaluating∇ logp(τ|Θ),thelogconvertstheproductsintosums,andthetermsthatareconstantwithrespecttoΘ
+Θ
+areeliminatedupontakingthegradient,leaving
+T−1 T−1 T−1
+∇ logp(τ|Θ)= X ∇ logp(a |s ,a ,Θ)= X ∇ logα = X ∇ Θα t, (33)
+Θ Θ t 0:t 0:t−1 Θ t α
+t
+t=0 t=0 t=0
+whereα issubstitutedfollowingitsdefinitioninSection3.2.
+t
+SubstitutingEquation(33)intoEquation(31),
+"T−1 #
+∇ J[π ]=E[R(τ)∇ logp(τ|Θ)]= E X R(τ)∇ Θα t . (34)
+Θ Θ τ Θ τ∼π α t
+t=0
+Similarly to Section 4.2, it is possible to substitute the return R(τ) with GAE, thereby reducing the variance in the
+returnestimate. ExtendingthedefinitionofGAEtoworkwithoptions,
+AGAE(z ,z )=r +γV(s ,z )−V(s ,z )+λγ(1−d )AGAE(z ), (35)
+t t t+1 t t+1 t+1 t t t t+1 t+1
+X
+AGAE(z )= p(z |s ,a ,z )AGAE(z ,z ), (36)
+t t t+1 t t t t t t+1
+zt+1
+V (s ,z )=Vπ(s ,z )+AGAE(z ). (37)
+target t t t t t t
+Noticethat,whilethedefinitionoftheseestimatesisalmostidenticaltoSection4.2,theadvantagesarenowpropagated
+backwardsviatheoptiontransitionp(z |s ,a ,z )ratherthanp(z |z ,τ).
+t+1 t t t t+1 t
+2SomeliteratureonPOMDPchoosetomakethisexplicitbydenotingthepartialobservationavailabletotheagentasobservationo,distinguish-
+ingfromtheunderlyinggroundtruthstate.However,sinceocanalsostandforoptions,andisusedinotherliteratureonoptions,heretheinputto
+theagent’spolicyandvaluefunctionsisdenotedusingtheconventionalstopreventconfusion.
+11SubstitutingtheGAEintoEquation(34),
+∇ J[π ]= E
+" T X−1P ztAG tAE(z t)ζ(z t)
+∇ α
+#
+Θ Θ τ∼π α t Θ t
+t=0
+  (38)
+= τ∼E
+πT X−1P ztAG tA αE t(z t)ζ(z t) X
+[p Θ(a t,z t+1|s t,z t)∇ζ(z t)+ζ(z t)∇p Θ(a t,z t+1|s t,z t)].
+t=0 zt,zt+1
+5.2 Analyticback-propagationofthepolicygradient
+If a forward pass of the policy can be made in one step over the entire trajectory, a gradient optimization on the
+objectivecanbeperformeddirectly. However,thiswouldrequirestoringtheentiretrajectoryinGPUmemory,which
+is highly computationally intensive. Instead, this section analytically evaluates the back-propagation of gradients of
+theobjectivesothatthemodelcanbetrainedonsingletime-steprolloutsamplesduringtraining.
+Gradient terms appearing in Equation (38) are either ∇ζ(z ) or ∇p (a ,z |s ,z ) for 0 ≤ t ≤ T − 1. While
+t Θ t t+1 t t
+p (a ,z |s ,z )isapproximatedbyneuralnetworksandcanbedifferentiateddirectly,∇ζ(z )hastobefurther
+Θ t t+1 t t t+1
+expandedtoevaluatethegradientinrecursiveformas:
+P
+∇ζ(z )=
+∇ ztζ(z t)p Θ(a t,z t+1|s t,z t)
+−ζ(z
+)∇α
+t
+t+1 α t+1 α
+t t
+ 
+(39)
+= α1 X ∇[ζ(z t)p Θ(a t,z t+1|s t,z t)]−ζ(z t+1) X ∇(cid:2) ζ(z t′)p Θ(a t,z t′ +1|s t,z t′)(cid:3) .
+t
+zt z t′,z t′
++1
+UsingEquation(39),itispossibletorewritethe∇ζ(z )termsappearinginEquation(38)intermsof∇ζ(z )and
+t+1 t
+∇p (a ,z |s ,z ). Definingthecoefficientsof∇ζ(z )inEquation(38)asoptionutilityU(z ),
+Θ t t+1 t t t+1 t+1
+ 
+X 1 X X
+U(z t+1)∇ζ(z t+1)=
+α
+U(z t+1)− U(z t′ +1)ζ(z t′ +1)∇[ζ(z t)p Θ(a t,z t+1|s t,z t)]
+t
+zt+1 zt,zt+1 z t′
++1
+(40)
+ 
+1 X X
+=
+α
+U(z t+1)− U(z t′ +1)ζ(z t′ +1)[p Θ(a t,z t+1|s t,z t)∇ζ(z t)+ζ(z t)∇p Θ(a t,z t+1|s t,z t)].
+t
+zt,zt+1 z t′
++1
+Thus,theoccurrencesofgradients∇ζ(z )havebeenreducedtotermswith∇ζ(z )and∇p (a ,z |s ,z ).
+t+1 t Θ t t+1 t t
+ApplyingthisiterativelytoEquation(38),startingwitht=T −1inreverseorder,Equation(38)couldbeexpressed
+solelyintermsofgradients∇p (a ,z |s ,z ). Definingthecoefficientsof∇p (a ,z |s ,z )aspolicygradient
+Θ t t+1 t t Θ t t+1 t t
+weightingW (z ,z ),
+t t t+1
+ 
+X X
+AG tOA(z t+1)= AG tAE(z t)ζ(z t)+(1−d t)U(z t+1)− U(z t′ +1)ζ(z t′ +1),
+zt z t′
++1
+P AGOA(z )p (a ,z |s ,z ) (41)
+U(z )=
+zt+1 t t+1 Θ t t+1 t t
+,
+t α
+t
+AGOA(z )ζ(z )
+W(z ,z )= t t+1 t .
+t t+1 α
+t
+where AGOA(z ) is a new quantity derived and introduced in this work as Generalized Option Advantage (GOA),
+t t+1
+whichisatermthatappearsinevaluatingU(z )andW(z ,z ).
+t t t+1
+RewritingthepolicygradientobjectiveinEquation(38)withthepolicygradientweighting,
+ 
+∇ ΘJ[π Θ]= τ∼E πT X−1 X AG tOA(z αt+ t1)ζ(z t) ∇ Θp Θ(a t,z t+1|s t,z t). (42)
+t=0 zt,zt+1
+125.3 Learningobjectiveforoption-specificpoliciesandvalues
+ThetrainingobjectivegiveninEquation(42)ismodifiedsothatitcouldbeoptimizedwithPPO.UnlikeinSection4.2,
+thetrainingobjectiveiswrittenintermsof∇p andnot∇logp . Therefore,theclippingconstraintsareappliedto
+Θ Θ
+p directly,limitingittotherangeof(1−ϵ)p and(1+ϵ)p . TheresultingPPOobjectiveis:
+Θ Θold Θold
+X (cid:20) ζ(z ) (cid:16)
+J = E t min π (a ,z |s ,z )AGOA(z ),
+Θ st,at∼π α t Θ t t+1 t t t t+1
+zt,zt+1 (43)
+(cid:16) (cid:17) (cid:17)(cid:21)
+clip π (a ,z |s ,z ),(1−ϵ)π (a ,z |s ,z ),(1+ϵ)π (a ,z |s ,z ) AGOA(z ) .
+Θ t t+1 t t Θold t t+1 t t Θold t t+1 t t t t+1
+The option-specific value function Vπ(s ,z ) parameterized by ϕ can be learned by regressing towards the target
+ϕ t t
+values V (s ,z ) evaluated in Equation (37) for each state s and option z sampled from the policy and option-
+target t t t t
+forwardprobability,respectively. DefiningtheobjectivefunctionforthevalueregressionasJ ,
+ϕ
+J =− E (cid:2) V (s ,z )−Vπ(s ,z )(cid:3)2 . (44)
+ϕ target t t ϕ t t
+st∼π,zt∼ζ
+Thefinaltrainingobjectiveistomaximizethefollowing:
+J =J +J . (45)
+SOAP Θ ϕ
+6 Experiments
+ExperimentswereconductedonavarietyofRLagents: PPO,PPOC,ProximalPolicyOptimizationwithLongShort-
+Term Memory (PPO-LSTM), PPOEM (ours), and SOAP (ours). PPO (Schulman et al., 2017) is a baseline without
+memory,PPOC(Klissarovetal.,2017)implementstheOption-Criticalgorithm,PPO-LSTMimplementsarecurrent
+policy with latent states using an LSTM (Hochreiter & Schmidhuber, 1997), PPOEM is the algorithm developed in
+thefirsthalfofthisworkthatoptimizestheexpectedreturnsusingtheforward-backwardalgorithm,andSOAPisthe
+final algorithm proposed in this work that uses an option advantage derived by analytically evaluating the temporal
+propagation of the option policy gradients. SOAP mitigates the deficiency of PPOEM that the training objective
+optimizestheoptionassignmentsoverafulltrajectorywhichistypicallyonlyavailableinhindsight;SOAPoptimizes
+theoptionassignmentsgivenonlythehistoryofthetrajectoryinstead,makingtheoptimizationobjectivebetteraligned
+withthetaskobjective.
+Theaimisto(a)showandcomparetheoptionlearningcapabilityofthenewlydevelopedalgorithms,and(b)assess
+the stability of the algorithms on standard RL environments. All algorithms use PPO as the base policy optimizer,
+andsharethesamebackboneandhyperparameters,makingitafaircomparison. AllalgorithmsuseStableBaselines
+3(Raffinetal.,2021)asabaseimplementationwiththerecommendedtunedhyperparametersforeachenvironment.
+Inthefollowingexperiments,thenumberofoptionswassetto4.
+6.1 Optionlearningincorridorenvironments
+Asimpleenvironmentofacorridorwithaforkattheendisdesignedasaminimalisticandconcreteexamplewhere
+makingeffectiveuseoflatentvariablestoretaininformationoverasequenceisnecessarytoachievetheagent’sgoal.
+Figure4describesthecorridorenvironment,inwhichtheagenthastodeterminewhethertherewardingcell(colored
+yellow)isatthetoporbottom,basedonthecolorofthecellithasseenatthestart(either”blue”or”red”). However,
+the agent only has access to the color of the current cell, and does not have a bird’s-eye-view of the environment.
+Hence, the agent must retain the information of the color of the starting cell in memory, whilst discarding all other
+information irrelevant to the completion of the task. The agent must learn that the information of the color of the
+startingcellisimportanttotaskcompletioninanunsupervisedway,justfromtherewardsignals. Thismakesthetask
+challenging,asonlyinhindsight(afterreachingthefarendofthecorridor)isitclearthatthisinformationisusefulto
+retaininmemory,butifthisinformationwasnotwritteninmemoryinthefirstplacethencreditassignmentbecomes
+infeasible. Thelearnedoptionscanbeinterpretedas“moveupattheendofthecorridor”and“movedownattheend”.
+13Figure4: Acorridorenvironment. TheaboveexamplehasalengthL = 20. Theagentrepresentedasagreencircle
+startsattheleftendofthecorridor,andmovestowardstheright. Whenitreachestherightend,theagentcaneither
+takeanupactionoradownaction. Thiswilleithertaketheagenttoayellowcelloragreycell. Theyellowcellgives
+arewardof1,whilethegreycellgivesarewardof−1. Allothercellsgivearewardof0. Thelocationofarewarding
+yellow cell and the penalizing grey cell are determined by the color of the starting cell (either ”blue” or ”red”), as
+shown,andthisisrandomized,eachwith50%probability. Theagentonlyhasaccesstothecolorofthecurrentcell
+asobservation. Forsimplicityofimplementation,theagent’sactionspaceis{”up”,”down”},andapartfromthefork
+at the right end, taking either of the actions at each time step will move the agent one cell to the right. The images
+shown are taken from rollouts of the SOAP agent after training for 100k steps. The agent successfully navigated to
+therewardingcellinbothcases.
+ThelengthofthecorridorLcanbevariedtoadjustthedifficultyofthetask. Itisincreasinglychallengingtoretainthe
+informationofthestartingcellcolorwithlongercorridors. Intheory, thisenvironmentcanbesolvedbytechniques
+such as frame stacking, where the entire history of the agent observations is provided to the policy. However, the
+computational complexity of this approach scales proportionally to corridor length L, which makes this approach
+unscalable.
+Algorithmswithoptionspresentanalternativesolution,whereintheory,theoptionscanbeusedaslatentvariablesto
+carrytheinformationrelevanttothetask. Inthisexperiment,PPOC,PPO-LSTM,PPOEMandSOAParecompared
+againstastandardPPOalgorithm. TheresultsareshownforcorridorswithlengthsL=3,L=10andL=20. Due
+totheincreasinglevelofdifficultyofthetask,theagentsaretrainedwith8k,40kand100ktimestepsofenvironment
+interaction,respectively.
+TheresultsareshowninFigure5. Asexpected, thevanillaPPOagentdoesnothaveanymemorycomponentssoit
+learnedapolicythattakesoneactiondeterministicallyregardlessofthecolorofthefirstcell. Sincethelocationofthe
+rewardingcellisrandomized,thisresultsinanexpectedreturnof0.
+With PPOC that implements the Option-Critic architecture, while the options should in theory be able to retain in-
+formation from the past, it could be observed that the training objective was not sufficient to learn a useful option
+assignmenttocompletethetask. PPOEMandSOAP,ontheotherhand,wereabletolearntoselectadifferentoption
+foradifferentstartingcellcolor. FromFigure5, itcouldbeseenthatthetwoalgorithmshadidenticalperformance
+forashortcorridor,butasthecorridorlengthLincreased,theperformanceofPPOEMdeteriorated,whileSOAPwas
+abletoreliablyfindacorrectoptionassignment,albeitwithmoretrainingsteps.
+There are two major differences between PPOC and the proposed algorithms (PPOEM and SOAP) which could be
+contributing to their significant differences in performance. Firstly, while the option transition function in PPOEM
+and SOAP are in the form of π (z |s ,a ,z ), which allows the assignment of the new option to be conditional
+ϕ t+1 t t t
+on the current option, the option transition in the Option-Critic architecture is decoupled into an option termination
+probability ϖ(s ,z ), and an unconditional inter-option policy π(z |s ). This means that whenever the previous
+t t−1 t t
+option z is terminated with probability ϖ(s ,z ), the choice of the new option z will be uninformed of the
+t−1 t t−1 t
+previous option z , whereas in PPOEM and SOAP the probability of the next option z is conditional on the
+t−1 t+1
+previousoptionz . Anotherdifferenceisthat,inPPOCanewoptionissampledateverytimestep,butthecomplete
+t
+14optionforwarddistributiongiventhehistoryisnotavailableasaprobabilitydistribution. Incontrast,inPPOEMand
+SOAPthisisavailableasζ(z ) := p(z |s ,a ). Evaluatingexpectationsoverdistributionsgivesamorerobust
+t t 0:t 0:t−1
+estimate of the objective function compared to taking a Monte Carlo estimate of the expectations with the sampled
+options, which is another explanation of why PPOEM and SOAP were able to learn better option assignments than
+PPOC.
+SOAP’strainingobjectivemaximizestheexpectationofreturnstakenoveranoptionprobabilityconditionedonlyon
+theagent’spasthistory,whereasPPOEM’sobjectiveassumesafullyknowntrajectorytobeabletoevaluatetheoption
+assignmentprobability. Sinceoptionassignmentshavetobedeterminedonlineduringrollouts,thetrainingobjective
+ofSOAPbetterreflectsthetaskobjective. Thisexplainsitsmorereliableperformanceforlongersequences.
+PPO-LSTMachievedcompetitiveperformanceinacorridorwithL = 3,demonstratingthecapabilityoflatentstates
+toretainpastinformation,butitsperformancequicklydeterioratedforlongercorridors. Itcouldbehypothesizedthat
+thisisbecausethelatentstatespaceoftherecurrentpoliciesisnotwellconstrained,unlikeoptionsthattakediscrete
+values. Learning a correct the value function V(s,z) requires revisiting the same state-latent pair. It is conceivable
+that with longer sequence lengths during inference time, the latent state will fall within a region that has not been
+trainedwellduetocompoundingnoise,leadingtoaninaccurateestimateofthevaluesandsub-policy.
+6.2 StabilityofthealgorithmsonCartPole,LunarLander,Atari,andMuJoCoenvironments
+ExperimentswerealsoconductedonstandardRLenvironmentstoevaluatethestabilityofthealgorithmswithoptions.
+ResultsforCartPole-v1andLunarLander-v2areshowninFigure6,andresultson10Atarienvironments(Bellemare
+et al., 2013) and 6 MuJoCo environments (Todorov et al., 2012) are shown in Figure 7 and Figure 8, respectively.
+There was no significant difference in performances amongst the algorithms for simpler environments like CartPole
+andLunarLander,withPPO-LSTMslightlyoutperformingothers. FortheAtariandMuJoCoenvironments,however,
+there was a consistent trend that SOAP achieves similar performances (slightly better in some cases, slightly worse
+in others) to the vanilla PPO, while PPOEM, PPO-LSTM and PPOC were significantly less stable to train. It could
+behypothesizedthat, similarlytoSection6.1, thepolicyofPPOCdisregardedtheinformationofpastoptionswhen
+choosing the next option, which is why the performance was unstable with larger environments. Another point of
+considerationisthat,withN numberofoptions,thereareN numberofsub-policiestotrain,whichbecomesincreas-
+inglycomputationallyexpensiveandrequiresmanyvisitstothestate-optionpairinthetrainingdata,especiallywhen
+usingaMonteCarloestimatebysamplingthenextoptionasisdoneinPPOCinsteadofmaintainingadistributionof
+theoptionζ(z )asinPPOEMandSOAP.AsforPPO-LSTM,similarreasoningasinSection6.1suggeststhatwith
+t
+complex environments with a variety of trajectories that can be taken through the state space, the latent states that
+couldbevisitedincreasescombinatorially,makingitchallengingtolearnarobustsub-policyandvaluefunctions.
+7 Conclusion
+Two competing algorithms, PPOEM and SOAP, are proposed to solve the problem of option discovery and assign-
+mentsinanunsupervisedway. PPOEMimplementsatrainingobjectiveofmaximizingtheexpectedreturnsusingthe
+EMalgorithm,whileSOAPanalyticallyevaluatesthepolicygradientoftheoptionpolicytoderiveanoptionadvan-
+tagefunctionthatfacilitatestemporalpropagationofthepolicygradients. Theseapproacheshaveanadvantageover
+Option-Criticarchitectureinthat(a)theoptiondistributionisanalyticallyevaluatedratherthansampled,and(b)the
+optiontransitionsarefullyconditionalonthepreviousoption,allowinghistoricalinformationtopropagateforwardin
+timebeyondthetemporalwindowprovidedasobservations.
+ExperimentsinPOMDPcorridorenvironmentsdesignedtorequireoptionsshowedthatSOAPisthemostrobustway
+oflearningoptionassignmentsthatadheretothetaskobjective. SOAPalsomaintaineditsperformancewhensolving
+MDP taskswithout the needfor options (e.g. Atari withframe-stacking), whereas PPOC,PPO-LSTM and PPOEM
+wereunstablewhensolvingtheseproblems.
+8 Future Work
+SOAP demonstrated capabilities of learning options in a POMDP environment of corridors, and showed equivalent
+performances to the baseline PPO agent in other environments. However, even in simple settings, it took the agent
+15many samples before a correct option assignment was learned. Option discovery is a difficult chicken and an egg
+problem, since options need to be assigned correctly in order for the rewards to be obtained and passed onto the
+options, but without the rewards a correct option assignment may not be learned. Furthermore, learning to segment
+episodesintooptionsinanunsupervisedwaywithoutanypre-trainingisanill-definedproblem,sincetherecouldbe
+manyequallyvalidsolutions. CombiningthelearningobjectiveofSOAPwithmethodssuchascurriculumlearning
+topre-traindiversesub-policiesspecializedtodifferenttasksmaystabilizetraining.
+In the current formulation of SOAP, the options are discrete variables, and are less expressive compared to latent
+variablesinrecurrentpoliciesandtransformers. Thisgreatlyreducesthememorycapacityandcouldhinderlearning
+inPOMDPenvironments. FurtherresearchinextendingthederivationsofSOAPtoworkwithcontinuousormulti-
+discretevariablesaslatentsmayleadtomakingthemethodscalabletomorecomplexproblems.
+Acknowledgements
+The authors acknowledge the generous support of the Royal Academy of Engineering (RF\201819\18\163) and the
+Ezoe Memorial Recruit Foundation. For the purpose of Open Access, the authors have applied a CC BY pub-
+lic copyright licence to any Author Accepted Manuscript (AAM) version arising from this submission (https:
+//openaccess.ox.ac.uk/rights-retention/).
+References
+Ilge Akkaya, Marcin Andrychowicz, Maciek Chociej, Mateusz Litwin, Bob McGrew, Arthur Petron, Alex Paino,
+Matthias Plappert, Glenn Powell, Raphael Ribas, et al. Solving rubik’s cube with a robot hand. arXiv preprint
+arXiv:1910.07113,2019.
+Kai Arulkumaran, Antoine Cully, and Julian Togelius. Alphastar: An evolutionary computation perspective. In
+Proceedingsofthegeneticandevolutionarycomputationconferencecompanion,pp.314–315,2019.
+Pierre-LucBacon,JeanHarb,andDoinaPrecup. TheOption-Criticarchitecture. InProceedingsoftheAAAIConfer-
+enceofArtificialIntelligence,AAAI’17,pp.1726–1734.AAAIPress,2017.
+BowenBaker,IlgeAkkaya,PeterZhokov,JoostHuizinga,JieTang,AdrienEcoffet,BrandonHoughton,RaulSampe-
+dro, andJeffClune. Videopretraining(VPT):Learningtoactbywatchingunlabeledonlinevideos. Advancesin
+NeuralInformationProcessingSystems(NeurIPS),35:24639–24654,2022.
+Leonard E. Baum. An inequality and associated maximization technique in statistical estimation for probabilistic
+functions of Markov processes. In Oved Shisha (ed.), Proceedings of the Symposium on Inequalities, pp. 1–8,
+UniversityofCalifornia,LosAngeles,1972.AcademicPress.
+JacobBeck, RistoVuorio, EvanZheranLiu, ZhengXiong, LuisaZintgraf, ChelseaFinn, andShimonWhiteson. A
+surveyofmeta-reinforcementlearning. arXivpreprintarXiv:2301.08028,2023.
+M.G.Bellemare,Y.Naddaf,J.Veness,andM.Bowling. TheArcadeLearningEnvironment: Anevaluationplatform
+forgeneralagents. JournalofArtificialIntelligenceResearch,47:253–279,2013.
+ChristopherM.Bishop. PatternRecognitionandMachineLearning(InformationScienceandStatistics). Springer-
+Verlag,Berlin,Heidelberg,2006. ISBN0387310738.
+LiChen,PenghaoWu,KashyapChitta,BernhardJaeger,AndreasGeiger,andHongyangLi. End-to-endautonomous
+driving: Challengesandfrontiers. arXivpreprintarXiv:2306.16927,2023.
+KyunghyunCho,BartvanMerriënboer,CaglarGulcehre,DzmitryBahdanau,FethiBougares,HolgerSchwenk,and
+YoshuaBengio. LearningphraserepresentationsusingRNNencoder–decoderforstatisticalmachinetranslation. In
+AlessandroMoschitti,BoPang,andWalterDaelemans(eds.),ProceedingsoftheConferenceonEmpiricalMethods
+in Natural Language Processing (EMNLP), pp. 1724–1734, Doha, Qatar, 2014. Association for Computational
+Linguistics. doi: 10.3115/v1/D14-1179.
+16ChristianDaniel,HerkeVanHoof,JanPeters,andGerhardNeumann. Probabilisticinferencefordeterminingoptions
+inreinforcementlearning. MachineLearning,104:337–357,2016.
+A. P. Dempster, N. M. Laird, and D. B. Rubin. Maximum likelihood from incomplete data via the EM algorithm.
+JournaloftheRoyalStatisticalSociety.SeriesB(Methodological),39(1):1–38,1977.
+Yan Duan, John Schulman, Xi Chen, Peter L Bartlett, Ilya Sutskever, and Pieter Abbeel. RL2: Fast reinforcement
+learningviaslowreinforcementlearning. arXivpreprintarXiv:1611.02779,2016.
+Gabriel Dulac-Arnold, Nir Levine, Daniel J Mankowitz, Jerry Li, Cosmin Paduraru, Sven Gowal, and Todd Hester.
+Challengesofreal-worldreinforcementlearning: definitions,benchmarksandanalysis. MachineLearning,110(9):
+2419–2468,2021.
+E.W.Forgy. Clusteranalysisofmultivariatedata: efficiencyversusinterpretabilityofclassifications. Biometrics,21:
+768–769,1965.
+Roy Fox, Sanjay Krishnan, Ion Stoica, and Ken Goldberg. Multi-level discovery of deep options. arXiv preprint
+arXiv:1703.08294,2017.
+VittorioGiammarinoandIoannisCh.Paschalidis. OnlineBaum-Welchalgorithmforhierarchicalimitationlearning.
+In Proceedings of the IEEE Conference on Decision and Control (CDC), pp. 3717–3722, 2021. doi: 10.1109/
+CDC45484.2021.9683044.
+ShixiangGu,EthanHolly,TimothyLillicrap,andSergeyLevine. Deepreinforcementlearningforroboticmanipula-
+tionwithasynchronousoff-policyupdates. InProceedingsoftheIEEEInternationalConferenceonRoboticsand
+Automation(ICRA),pp.3389–3396.IEEE,2017.
+TuomasHaarnoja,BenMoran,GuyLever,SandyHHuang,DhruvaTirumala,JanHumplik,MarkusWulfmeier,Saran
+Tunyasuvunakool,NoahYSiegel,RolandHafner,etal. Learningagilesoccerskillsforabipedalrobotwithdeep
+reinforcementlearning. ScienceRobotics,9(89):eadi8022,2024.
+Sepp Hochreiter and Jürgen Schmidhuber. Long Short-term Memory. Neural computation, 9:1735–80, 1997. doi:
+10.1162/neco.1997.9.8.1735.
+ShuIshidaandJoãoF.Henriques. Towardsreal-worldnavigationwithdeepdifferentiableplanners. InProceedings
+oftheIEEE/CVFConferenceonComputerVisionandPatternRecognition(CVPR),pp.17327–17336,2022.
+AlexKendall,JeffreyHawke,DavidJanz,PrzemyslawMazur,DanieleReda,John-MarkAllen,Vinh-DieuLam,Alex
+Bewley, and Amar Shah. Learning to drive in a day. In Proceedings of the IEEE International Conference on
+RoboticsandAutomation(ICRA),pp.8248–8254.IEEE,2019.
+Martin Klissarov, Pierre-Luc Bacon, Jean Harb, and Doina Precup. Learnings options End-to-End for continuous
+actiontasks. arXivpreprintarXiv:1712.00004,2017.
+TejasDKulkarni,KarthikNarasimhan,ArdavanSaeedi,andJoshTenenbaum. Hierarchicaldeepreinforcementlearn-
+ing: Integratingtemporalabstractionandintrinsicmotivation. InD.Lee,M.Sugiyama,U.Luxburg,I.Guyon,and
+R. Garnett (eds.), Advances in Neural Information Processing Systems (NeurIPS), volume 29. Curran Associates,
+Inc.,2016.
+Lisa Lee, Emilio Parisotto, Devendra Singh Chaplot, Eric Xing, and Ruslan Salakhutdinov. Gated Path Planning
+Networks. InProceedingsoftheInternationalConferenceonMachineLearning(ICML),pp.2947–2955.PMLR,
+2018.
+Yiren Lu, Justin Fu, George Tucker, Xinlei Pan, Eli Bronstein, Rebecca Roelofs, Benjamin Sapp, Brandyn White,
+Aleksandra Faust, Shimon Whiteson, et al. Imitation is not enough: Robustifying imitation with reinforcement
+learningforchallengingdrivingscenarios. InProceedingsoftheIEEE/RSJInternationalConferenceonIntelligent
+RobotsandSystems(IROS),pp.7553–7560.IEEE,2023.
+17StephanieMilani,AnssiKanervisto,KarolisRamanauskas,SanderSchulhoff,BrandonHoughton,SharadaMohanty,
+Byron Galbraith, Ke Chen, Yan Song, Tianze Zhou, Bingquan Yu, He Liu, Kai Guan, Yujing Hu, Tangjie Lv,
+Federico Malato, Florian Leopold, Amogh Raut, Ville Hautamäki, Andrew Melnik, Shu Ishida, João F. Hen-
+riques,RobertKlassert,WalterLaurito,EllenNovoseller,ViniciusG.Goecks,NicholasWaytowich,DavidWatkins,
+JoshMiller, andRohinShah. Towardssolvingfuzzytaskswithhumanfeedback: AretrospectiveoftheMineRL
+BASALT2022competition,2023.
+VolodymyrMnih,KorayKavukcuoglu,DavidSilver,AndreiA.Rusu,JoelVeness,MarcG.Bellemare,AlexGraves,
+Martin Riedmiller, Andreas K. Fidjeland, Georg Ostrovski, Stig Petersen, Charles Beattie, Amir Sadik, Ioannis
+Antonoglou,HelenKing,DharshanKumaran,DaanWierstra,ShaneLegg,andDemisHassabis. Human-levelcon-
+trolthroughdeepreinforcementlearning. Nature,518(7540):529–533,2015. doi: 10.1038/nature14236. Number:
+7540Publisher: NaturePublishingGroup.
+OfirNachum,ShixiangShaneGu,HonglakLee,andSergeyLevine. Data-efficienthierarchicalreinforcementlearn-
+ing. AdvancesinNeuralInformationProcessingSystems(NeurIPS),31,2018.
+Taewook Nam, Shao-Hua Sun, Karl Pertsch, Sung Ju Hwang, and Joseph J Lim. Skill-based meta-reinforcement
+learning. InProceedingsoftheInternationalConferenceonLearningRepresentations(ICLR),2022.
+ShubhamPateria,BudhitamaSubagdja,Ah-hweeTan,andChaiQuek. Hierarchicalreinforcementlearning: Acom-
+prehensivesurvey. ACMComputingSurveys(CSUR),54(5):1–35,2021.
+Xue Bin Peng, Michael Chang, Grace Zhang, Pieter Abbeel, and Sergey Levine. MCP: Learning composable hier-
+archical control with multiplicative compositional policies. Advances in Neural Information Processing Systems
+(NeurIPS),32,2019.
+Xue Bin Peng, Yunrong Guo, Lina Halper, Sergey Levine, and Sanja Fidler. ASE: Large-scale reusable adversarial
+skill embeddings for physically simulated characters. ACM Transactions on Graphs, 41(4), 2022. doi: 10.1145/
+3528223.3530110.
+KarlPertsch, YoungwoonLee, andJosephJ.Lim. Acceleratingreinforcementlearningwithlearnedskillpriors. In
+ProceedingsoftheConferenceonRobotLearning(CoRL),2020.
+DoinaPrecupandRichardS.Sutton. Temporalabstractioninreinforcementlearning. InProceedingsoftheInterna-
+tionalConferenceonMachineLearning(ICML),2000.
+Antonin Raffin, Ashley Hill, Adam Gleave, Anssi Kanervisto, Maximilian Ernestus, and Noah Dormann. Stable-
+Baselines3: Reliable reinforcement learning implementations. Journal of Machine Learning Research, 22(268):
+1–8,2021.
+KateRakelly,AurickZhou,ChelseaFinn,SergeyLevine,andDeirdreQuillen.Efficientoff-policymeta-reinforcement
+learningviaprobabilisticcontextvariables. InProceedingsoftheInternationalConferenceonMachineLearning
+(ICML),pp.5331–5340.PMLR,2019.
+JohnSchulman,PhilippMoritz,SergeyLevine,MichaelI.Jordan,andPieterAbbeel. High-dimensionalcontinuous
+control using generalized advantage estimation. In Yoshua Bengio and Yann LeCun (eds.), Proceedings of the
+InternationalConferenceonLearningRepresentations(ICLR),2016.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal Policy Optimization
+Algorithms. arXiv:1707.06347[cs],2017. arXiv: 1707.06347.
+Lucy Xiaoyang Shi, Joseph J Lim, and Youngwoon Lee. Skill-based model-based reinforcement learning. In Pro-
+ceedingsoftheConferenceonRobotLearning(CoRL),pp.2262–2272.PMLR,2023.
+Richard S Sutton, Doina Precup, and Satinder Singh. Between MDPs and semi-MDPs: A framework for temporal
+abstractioninreinforcementlearning. ArtificialIntelligence,112(1-2):181–211,1999.
+Aviv Tamar, YI WU, Garrett Thomas, Sergey Levine, and Pieter Abbeel. Value Iteration Networks. In D. D. Lee,
+M.Sugiyama,U.V.Luxburg,I.Guyon,andR.Garnett(eds.),AdvancesinNeuralInformationProcessingSystems
+(NeurIPS),pp.2154–2162,2016.
+18EmanuelTodorov,TomErez,andYuvalTassa. MuJoCo: Aphysicsengineformodel-basedcontrol. InProceedings
+oftheIEEE/RSJInternationalConferenceonIntelligentRobotsandSystems(IROS),pp.5026–5033.IEEE,2012.
+HadoVanHasselt,ArthurGuez,andDavidSilver. DeepreinforcementlearningwithdoubleQ-learning. InProceed-
+ingsoftheAAAIConferenceofArtificialIntelligence,volume30,2016.
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,ŁukaszKaiser,andIllia
+Polosukhin. Attentionisallyouneed. AdvancesinNeuralInformationProcessingSystems(NeurIPS),30,2017.
+Alexander Sasha Vezhnevets, Simon Osindero, Tom Schaul, Nicolas Heess, Max Jaderberg, David Silver, and Ko-
+ray Kavukcuoglu. Feudal networks for hierarchical reinforcement learning. In Proceedings of the International
+ConferenceonMachineLearning(ICML),pp.3540–3549.PMLR,2017.
+Jane X Wang, Zeb Kurth-Nelson, Dhruva Tirumala, Hubert Soyer, Joel Z Leibo, Remi Munos, Charles Blundell,
+DharshanKumaran,andMattBotvinick. Learningtoreinforcementlearn. arXivpreprintarXiv:1611.05763,2016.
+Jesse Zhang, Haonan Yu, and Wei Xu. Hierarchical reinforcement learning by discovering intrinsic options.
+In Proceedings of the International Conference on Learning Representations (ICLR), 2021. URL https:
+//openreview.net/forum?id=r-gPPHEjpmw.
+Zhiyu Zhang and Ioannis Ch. Paschalidis. Provable hierarchical imitation learning via em. In Proceedings of the
+InternationalConferenceonArtificialIntelligenceandStatistics(AISTATS),2020.
+K.J Åström. Optimal control of Markov processes with incomplete state information. Journal of Mathematical
+AnalysisandApplications,10(1):174–205,1965. doi: https://doi.org/10.1016/0022-247X(65)90154-X.
+19A Appendix
+1.0
+PPO
+0.8
+PPOC
+0.6 PPO-LSTM
+PPOEM (ours)
+0.4 SOAP (ours)
+0.2
+0.0
+0.2
+0.4
+0k 1k 2k 3k 4k 5k 6k 7k 8k
+Training step
+(a)CorridoroflengthL=3
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+0.2
+0.4
+0k 5k 10k 15k 20k 25k 30k 35k 40k
+Training step
+(b)CorridoroflengthL=10
+1.0
+0.8
+0.6
+0.4
+0.2
+0.0
+0.2
+0.4
+0k 20k 40k 60k 80k 100k
+Training step
+(c)CorridoroflengthL=20
+Figure 5: Training curves of RL agents showing the episodic rewards obtained in the corridor environment with
+varyinglengths. Themean(solidline)andthemin-maxrange(coloredshadow)for5seedsperalgorithmareshown.
+20
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE500 300
+200
+400
+100
+300
+PPO 0
+200
+PPOC
+PPO-LSTM 100
+100
+PPOEM (ours)
+SOAP (ours) 200
+0
+0k 20k 40k 60k 80k 100k 0k 200k 400k 600k 800k 1,000k
+Training step Training step
+(a)CartPole-v1 (b)LunarLander-v2
+Figure6:TrainingcurvesofRLagentsshowingtheepisodicrewardsobtainedintheCartPole-v1andLunarLander-v2
+environments. Themean(solidline)andthemin-maxrange(coloredshadow)for5seedsperalgorithmareshown.
+PPO
+2500 PPOC
+PPO-LSTM 4000
+2000 PPOEM (ours)
+SOAP (ours)
+3000
+1500
+2000
+1000
+1000
+500
+0
+0
+0M 2M 4M 6M 8M 10M 0M 2M 4M 6M 8M 10M
+Training step Training step
+(a)Astroids (b)BeamRider
+400
+800
+300
+600
+200
+400
+100 200
+0 0
+0M 2M 4M 6M 8M 10M 0M 2M 4M 6M 8M 10M
+Training step Training step
+(c)Breakout (d)Enduro
+Figure7: TrainingcurvesofRLagentsshowingtheepisodicrewardsobtainedintheAtarienvironments. Themean
+(solidline)andthemin-maxrange(coloredshadow)for3seedsperalgorithmareshown. [Spansmultiplepages]
+21
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipEPPO 20
+2500
+PPOC
+PPO-LSTM
+2000 PPOEM (ours) 10
+SOAP (ours)
+1500
+0
+1000
+10
+500
+20
+0
+0M 2M 4M 6M 8M 10M 0M 2M 4M 6M 8M 10M
+Training step Training step
+(e)MsPacman (f)Pong
+14000
+4000
+12000
+10000
+3000
+8000
+6000 2000
+4000
+1000
+2000
+0 0
+0M 2M 4M 6M 8M 10M 0M 2M 4M 6M 8M 10M
+Training step Training step
+(g)Qbert (h)RoadRunner
+1400
+1750
+1200
+1500
+1000
+1250
+800
+1000
+600
+750
+500 400
+250 200
+0 0
+0M 2M 4M 6M 8M 10M 0M 2M 4M 6M 8M 10M
+Training step Training step
+(i)Seaquest (j)SpaceInvader
+[Continued]TrainingcurvesofRLagentsshowingtheepisodicrewardsobtainedintheAtarienvironments.Themean
+(solidline)andthemin-maxrange(coloredshadow)for3seedsperalgorithmareshown.
+22
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE3000
+PPO 6000
+2500 PPOC
+PPO-LSTM 5000
+2000 PPOEM (ours)
+SOAP (ours) 4000
+1500
+3000
+1000
+2000
+500
+1000
+0
+0
+0k 200k 400k 600k 800k 1,000k 0k 200k 400k 600k 800k 1,000k
+Training step Training step
+(a)Ant (b)HalfCheetah
+1400 10
+1200
+20
+1000
+30
+800
+40
+600
+400 50
+200 60
+0k 2,000k 4,000k 6,000k 8,000k 10,000k 0k 200k 400k 600k 800k 1,000k
+Training step Training step
+(c)Humanoid (d)Reacher
+350 4000
+300
+3000 250
+200
+2000
+150
+100
+1000
+50
+0 0
+0k 200k 400k 600k 800k 1,000k 0k 200k 400k 600k 800k 1,000k
+Training step Training step
+(e)Swimmer (f)Walker
+Figure 8: Training curves of RL agents showing the episodic rewards obtained in the MuJoCo environments. The
+mean(solidline)andthemin-maxrange(coloredshadow)for3seedsperalgorithmareshown. NotethatthePPOEM
+algorithmfailedmid-wayinsomecasesduetotraininginstabilities.
+23
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
+sdrawer
+cidosipE
