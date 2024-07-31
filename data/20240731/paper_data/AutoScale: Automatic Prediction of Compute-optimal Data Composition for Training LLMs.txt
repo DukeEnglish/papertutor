@@ -1,0 +1,1281 @@
+AutoScale–Automatic Prediction of Compute-optimal
+Data Composition for Training LLMs
+FeiyangKang∗† YifanSun∗ BingbingWen SiChen
+VirginiaTech UIUC UniversityofWashington VirginiaTech
+fyk@vt.edu yifan50@illinois.edu bingbw@uw.edu chensi@vt.edu
+DawnSong RafidMahmood RuoxiJia†
+UCBerkeley UniversityofOttwa&NVIDIA VirginiaTech
+dawnsong@gmail.com mahmood@telfer.uottawa.ca ruoxijia@vt.edu
+Abstract
+Toensureperformanceonadiversesetofdownstreamtasks,LLMsarepretrained
+viadatamixturesoverdifferentdomains. Inthiswork,wedemonstratethatthe
+optimaldatacompositionforafixedcomputebudgetvariesdependingonthescale
+ofthetrainingdata,suggestingthatthecommonpracticeofempiricallydetermining
+anoptimalcompositionusingsmall-scaleexperimentswillnotyieldtheoptimal
+data mixtures when scaling up to the final model. To address this challenge,
+we propose AutoScale, an automated tool that finds a compute-optimal data
+compositionfortrainingatanydesiredtargetscale.AutoScalefirstdeterminesthe
+optimalcompositionatasmallscaleusinganovelbi-leveloptimizationframework,
+DirectDataOptimization(DDO),andthenfitsapredictortoestimatetheoptimal
+compositionatlargerscales. Thepredictor’sdesignisinspiredbyourtheoretical
+analysisofscalinglawsrelatedtodatacomposition,whichcouldbeofindependent
+interest. Inempiricalstudieswithpre-training774MDecoder-onlyLMs(GPT-2
+Large)onRedPajamadataset,AutoScaledecreasesvalidationperplexityatleast
+25% faster than any baseline with up to 38% speed up compared to without
+reweighting,achievingthebestoverallperformanceacrossdownstreamtasks. On
+pre-trainingEncoder-onlyLMs(BERT)withmaskedlanguagemodeling,compared
+with without reweighting, DDO is shown to decrease loss on all domains while
+visibly improving average task performance on GLUE benchmark by 8.7% and
+onlarge-scaleQAdataset(SQuAD)by5.9%,whereAutoScalefurtherspeedsup
+trainingbyupto28%. Ourcodesareopen-sourced2.
+1 Introduction
+Largelanguagemodels(LLMs)arepre-trainedusingdatafromdifferentsourcesordomains. Given
+thelimitedcomputeavailableforpre-training,itisnecessarytostrategicallycurateandmixtrain-
+ing data from these sources. An emerging line of research strives to tackle this problem with
+domainreweighting,i.e.,adjustingtherelativeproportionofdatafromdifferentdatasources[1–6].
+Nonetheless,determiningtheoptimaldatacompositionischallenging.
+Amajorityoftheseworksaimtofirstoptimizedatacompositionforasmallerproxymodelandata
+smallerdatascale([1,5,6]). Yet,thisoptimizationisoftenconductedwithalternativeobjectivesnot
+alwaysalignedwiththeoriginalobjectivesofminimizingevaluationloss. DoReMi[1]firsttrainsa
+smallreferencemodel,andthentrainsasecondproxymodelwithGroupDRO[7]tominimizethe
+excessivedomainlossrelativetothereferencemodel,wherethedomainweightsoftheproxymodel
+∗Equalcontribution.†Correspondenceto:FeiyangKangandRuoxiJia<fyk, ruoxijia@vt.edu>.
+2https://github.com/feiyang-k/AutoScale
+Preprint.Underreview.
+4202
+luJ
+92
+]GL.sc[
+1v77102.7042:viXraFigure 1: LLMs are pre-trained using data from different sources or domains, yet determining
+the optimal data composition is challenging. We propose AutoScale, an automated tool that
+findsacompute-optimaldatacompositionfortrainingatanydesiredtargetscale. AutoScalefirst
+determinestheoptimalcompositionatasmallscaleusinganovelbi-leveloptimizationframework,
+DirectDataOptimization(DDO),andthenfitsapredictortoestimatetheoptimalcompositionatlarger
+scales. Thepredictor’sdesignisinspiredbyourtheoreticalanalysisofscalinglawsrelatedtodata
+composition,whichcouldbeofindependentinterest. Inempiricalstudies,AutoScaledecreases
+validationperplexityatleast25%fasterthananybaselinewithupto38%speedupcomparedto
+withoutreweighting,achievingthebestoverallperformanceacrossdownstreamtasks.
+willbetheoutput. DOGE[5]trainsaproxymodelwhiletrackingthefirst-ordergradientofthemodel
+onevaluationdomains(i.e.,datainfluence)andoptimizesdomainweightsbasedonthegradients,
+relyingoninfinitesimalapproximationswhichmayormaynotbeaccurateformodelstrainedwitha
+practicallearningrate. Data Mixing Laws[6]trainsanumberofproxymodelstorunacoarsegrid
+searchonthespaceofdatamixturesandinterpolatetheirperformancewithexponentialfunctionsto
+findtheminimum. Thesemethodsoftenrelyonad-hochyperparametertuningviatrialanderror.
+Further,theoptimizedweightsaredirectlyappliedtotrainingthetargetmodelonmagnitudesof
+largerdatascales. Thisimplicitlyposesastrongassumptionthatthe"optimaldatacomposition"is
+invariantofmodelsizesordatascales. Yet,optimaldatacompositionislikelytoshiftwithdatasize.
+Optimalcurationatasmallerscalemaynotremainoptimalatthetargetscale[8]. Wereferto[9]
+andAppendixAforrelatedworks.
+(b)DownstreamTaskPerformanceat
+(a)ValidationPerplexity.(↓lowerisbetter) 96kSteps.(↑higherisbetter)
+Figure 2: Training 774M Decoder-only LMs for 10B tokens (96k steps). AutoScale-predicted
+domainweightsdecreasevalidationPPLatleast28%fasterthananybaselinewithupto38%speed
+up. LLaMAweightsyieldamuchbettertrainingefficiencythanuniformweightswhenscalingup.
+2Giventhechallengesofoptimizingdatacomposition,anincreasinglypopularpracticeistodirectly
+usedomainweightsthatweredesignedfortrainingpreviousmodels(e.g.,LLaMAweights[10],The
+Pileweights[11]). Forinstance,[12]recentlytraineda1B-parametermodelonacombinationofThe
+Piledataset,LLaMa(RedPajama[13])trainingdataset,andDolma[4]trainingdataset. However,
+these weights are optimized for specific applications that may be vastly different from the target
+scenario(e.g.,modelarchitecture,languagemodelingobjectives,trainingdatascale,etc.). Industry
+practicestillreliesonheuristicsformixingdomaindata[14,12,15]. Thus,thepotentialforimproved
+trainingefficiencyviaprincipleddomainreweightingremainsunknown.
+In this work, we propose a generic domain reweighting methodology for LLM pre-training to
+overcometheselimitations. Oureffortsaretwo-fold:
+• First,weformalizetheproblemoffindingcompute-optimaldatacompositionwithdomainreweight-
+ingasbi-leveloptimization. Thisallowsfordirectlyoptimizingthefinalobjectiveoverdatacom-
+position,circumventingmostoftherisksfromheuristicdesigns. Further,weproposeapractical
+solutionalgorithm,DirectDataOptimization(DDO),fordeterminingacompute-optimaltraining
+datacompositionforagivendatascalebyestimatingandoptimizingovertheneuralscalinglaw
+ofthedatasources. Thisprovidesaglobalapproximationtothisproblem,whichallowsfinding
+theglobaloptimuminasinglestepwithhighprecision,achievingconsistentresultsandreliable
+performanceimprovementsrobusttodifferentusecases(Figure4).
+• Second, seminal work [16] suggests the possibility of attaining beyond-neural scaling law per-
+formance if one could find the best training dataset for each training data scale. We observe a
+similarpatterninoptimizingtrainingdatacompositionforLLMs(Figure3). Weshowthatthe
+shiftintheoptimaldatacompositionwiththescaleoftrainingcomplieswithasimplefunction
+formandisempiricallypredictable. Byfittingthispatternofshiftatsmallerscales,weareableto
+predictoptimaldatacompositionsatlargerscales,automaticallyadjustingdatacompositionforany
+trainingdatascaleandachievingbeyond-neuralscalingperformanceimprovementsonthetarget
+model. Correspondingly,weproposeAutoScale,anautomatedtoolthatfindsacompute-optimal
+datacompositionfortraininganLLMatthetargetscale. Withoptimaldatacompositionsfoundat
+smallerscales,wefittheAutoScalepredictordesignedbasedontheoreticalanalysiswithscaling
+lawsanduseittodetermineoptimaldatacompositionatlargerscales. Sinceoneonlyneedstotrain
+modelsonsmalldatascaleswherere-trainingisaffordable,AutoScaledoesnotrequireusing
+proxymodelswithasmallerparametersize,avoidingthetransferabilityissuebetweendomain
+weightsoptimizedondifferentmodels.
+(a)DDO-OptimizedDomainWeights (b)OptimalWeightsareScale-dependent
+Figure3: OptimizingdomainweightswithDDOalgorithmforpre-training774MDecoder-onlyLMs
+(GPT-2 Large). Optimaldomainweightsaredependentonthescaleoftrainingdata. Aconsistent
+shift can be observed. Using domain weights optimized for a different scale yields sub-optimal
+results,failingtofullyrealizethebenefitsofdomainreweighting.
+Inempiricalstudieswithpre-training774MDecoder-onlyLMs(GPT-2 Large[17])onRedPajama
+dataset,AutoScaledecreasesvalidationperplexityatleast25%fasterthananybaselinewithup
+to 38% speed up compared to without reweighting, achieving the best overall performance over
+downstreamtasks. Onpre-trainingEncoder-onlyLMs(BERT[18])withmaskedlanguagemodeling
+3(a)ValidationLoss(↓lowerisbetter) (b)TaskPerformance(↑higherisbetter)
+Figure4: OptimizingdomainweightswithDDOalgorithmforpre-trainingEncoder-onlyLMs(BERT).
+DDOsubstantiallyreducesvalidationloss. Afterreweighting,alltrainingdomains’losshaseither
+decreasedorremainedunchanged. Out-of-domainlossonnon-trainingdomainshasalsodecreased
+considerably. EnhancedperformancehasbeenobservedonallGLUEtasksandSQuAD.
+(MLM),comparedtowithoutreweighting,DDOdecreaseslossonalldomainswhilevisiblyimproving
+averagetaskperformanceonGLUEbenchmark[19]by8.7%andonlarge-scaleQAdataset,SQuAD
+[20],by5.9%,whereAutoScalefurtherspeedsuptrainingbyupto28%. Wefounddatasources
+withstandardformatsuchasWikipediaandscientificpapers,regardedashighquality,aremost
+beneficialatsmallerscalesbutobservesharpdiminishingreturnsasthetrainingdatascalesup. With
+morecompute,datasourceswithdiverseexamples,suchasCommonCrawl,demonstratecontinued
+reductionsintraininglossevenatconsiderablylargetrainingdatascales.
+2 Compute-optimalTrainingDataCompositions
+ConsidertraininganLLMonadatacompositionfrommultiplesources/domains. Proportionsof
+dataforeachdomainarereferredtoas“domainweights”. Thegoalistofindanoptimaltraining
+datacompositionsuchthat, foragivencomputebudget(i.e., trainingdatasize), thereductionin
+evaluationlossismaximized. Forlanguagemodels,themostcommonlyusedevaluationmetricis
+perplexity(PPL),definedastheexponentiationofcross-entropyloss.Ininformationtheory,reduction
+in perplexity is considered to measure the amount of information gain. Thus, the objective is to
+maximizetrainingefficiencybyfinding"compute-optimal" domainweightsforthetrainingdata.
+Thissetuphasbeenadoptedinthislineofresearch[1,3,5]andwewillalsofollowinthiswork.
+Wefirstformulatethisasabi-leveloptimizationproblemandthenintroduceanefficientsolution
+approachtosolveit.
+2.1 ProblemFormulation
+ConsidertraininganLLMonadatacompositionS frommdomains,D ,D ,··· ,D . LetS =
+1 2 m
+{S ,S ,··· ,S } denote the training dataset where S is the subset of training data from each
+1 2 m i
+domain. Thedomainweightsw = [w ,w ,··· ,w ]T aredefinedastheproportionsofdatafor
+1 2 m
+eachdomain. Namely,lettingN =|S|denotetheamountoftotaltokensoftrainingdata,domain
+weightsaregivenasw = N /N,where|S |denotestheamountoftokensfortrainingsubsetS .
+i i i i
+LetS(N,w)denotethedatasetofN tokenscomposedfromdifferentdomainsusingtheweights
+w. Let A(S) denote a learning algorithm (i.e., the model) parameterized by θ trained on data S
+withempiricalriskminimization(ERM),givenasA(S):=argmin L(θ,S)whereL(·,·)denotes
+θ
+thelossfunctionusedintraining. Withslightabuseofnotation,weuseA(N,w)asshorthandfor
+A(S(N,w)). Wewouldliketomaximizetheamountofinformationgainandachievemaximumloss
+reduction during training, given as min w∈WmLP v(A(N,w)) = (cid:80)m i=1LP
+i
+(A(N,w),D iv), where
+LP(·)andLP(·)denotetotalevaluationlossandthelossofthemodelevaluatedonthevalidation
+v i
+dataofindividualdomains,respectively;thespaceofweightsWmisthehyperplaneoftheprobability
+simplexWm ={w|w +w +···+w =1}∩{w|0≤w ≤1,∀i∈{1,2,··· ,m}}. Then,the
+1 2 m i
+optimaldomainweights,w∗,aregivenastheminimizeroftheobjective,
+m
+1 (cid:88)
+w∗ =arg min LP(A(N,w),Dv) s.t. A(N,w)=argminL(θ,S(N,w)) (1)
+w∈Wm m i i θ
+i=1
+4where perplexity is adopted as the loss metric. This formulation naturally produces a bi-level
+optimizationproblem,wheretheupper-levelproblem(left)seekstheoptimaldomainweights,while
+thelower-levelproblem(right)istrainingthemodelwithERMonthedatadefinedbycertainweights.
+Ageneralapproachistosolveitwithgradientdescent,wt+1 =wt−η· ∂LP v(A(N,wt)). Sincethere
+∂w
+isnotractableformofanalyticalexpressionforA,thisgradientneedstobeestimatedwithempirical
+methods(e.g.,approximatedbyfinitedifference),requiringrepetitivere-trainingofthemodelateach
+update. Itisworthnotingthatdespitetherichliteratureonbi-leveloptimization[21],traditional
+methodseitherrelyondifferentiatingthroughtheoptimizationprocessinvolvedinthelower-level
+problemorrequiresolvingalinearsystem,whicharenotscalableforthesettingofourinterest.
+2.2 APracticalSolutionviaScaling-law-inspiredApproximation
+Re-trainingLLMsisusuallyprohibitivelyexpensive. Thestandardpracticeistooptimizethedata
+compositionwithproxymodelswherere-trainingisplausible,andthenoptimizeddomainweights
+areusedtotrainmodelsatfullscale[1,5,6]. Theproxymodeloftenhasasimilararchitecturetothe
+targetmodelbutissmallerinparametersizeand/ortrainedwithmuchlessdata. Theassumptionis
+theperformanceachievedontheproxymodelcouldprovideaneffectiveindicatorforperformance
+onthetargetmodel. Evenforproxymodels,solvingthisbi-leveloptimizationproblemviagradient
+methodscanstillbeexpensive,whichnecessitatesatrade-offbetweenalgorithmicefficiencyand
+solutionquality.Currentwork[1,5,6]mostlyemploysheuristicmethodstoconductthisoptimization
+andachievesvaryingresults,renderingtheusershardtotellwhentheywillworkorfail. Instead,
+weprovideaglobalapproximationtothisproblem,whichallowsfindingtheglobaloptimumina
+singlestepwithhighprecision. Thisenablesachievingconsistentresultsandreliableperformance
+improvementsrobusttodifferentusecases.
+Neuralscalinglawssuggesttherelationshipbetweenamodel’sevaluationlossandthesizeofits
+training data can be well-represented by power law functions [22] LP(A(N,w)) = N−γ +L
+v 0
+whereconstantsL denotessomeirreduciblelossandγ ≥0issomescalingcoefficient. Drawing
+0
+inspirationsfrom[23],weproposethefollowingapproximation. Consideramodeltrainedondata
+withsizeN anddomainweightsw. IftheamountoftrainingdatafromonedomainD ischanged
+i
+fromN toN′withtheamountoftrainingfromotherdomainsunchanged,weapproximatethenew
+i i
+model’sevaluationlossafterre-trainingwithapowerlawfunctionofN′:
+i
+LP(A(N′,w′))=(Ni+N′)−bi +c , (2)
+v 0 i i
+where b ,c are constants associated with domain i, N′ = N +(N′ −N ) denotes the updated
+i i i i
+amountoftrainingdata,andw′ = N′/N′ denotestheupdateddomainweights. Ni estimatesthe
+i i 0
+evaluationlosswhentheamountoftrainingdatafromdomainiiszero(i.e.,N′ =0)andeffectively
+i
+measurestheeffectofdatafromallotherdomains. Fromthisregard,Ni canbeinterpretedasthe
+0
+equivalentdatasizefortrainingdatafromdomainsotherthani. Notably,thisformulationalignswith
+empiricalfindingsinthepriorliterature[23,6].
+Weproposethefollowingproceduretofittheparametersin(2). Were-traintwomodelswithdif-
+ferentN′ andN′′ andcalculatetheirevaluationloss. Then, togetherwithevaluationlossforthe
+i i
+original model trained with N , the parameters b , c and Ni can be estimated via ordinary least
+i i i 0
+square(OLS)fitting. Thedifferenceinevaluationlosscomparedtotheoriginalmodelisgivenas
+LP v(A(N′,w′))−LP v(A(N,w)) = (N 0i +N i′)−bi −(N 0i +N i)−bi. Repeatingthisprocess and
+fittingthescalingfunctionsforeachdomain,finally,weexpresstheevaluationlossasafunction
+oftheamountofdatafromeachdomainastheirsummation: LP(A(N′,w′))−LP(A(N,w))=
+v v
+(cid:80)m i=1(cid:2) (N 0i+N i′)−bi −(N 0i+N i)−bi(cid:3) where N′ = N +(cid:80) i(N i′ −N i) and w i′ = N i′/N′. Em-
+pirically, evaluationlossisshowntobewellrepresentedbysuchfunctionform(Figure5). This
+representationlendsusananalyticalformfortheobjectiveoftheproblem,whichbecomes
+m m
+w∗ =arg min (cid:88)(cid:2) (Ni+N′)−bi −(Ni+N )−bi(cid:3) =arg min (cid:88) (Ni+w′·N)−bi.
+w′∈Wm 0 i 0 i w′∈Wm 0 i
+i=1 i=1
+Toderivethefinalobjectivefromthemiddleone,wefirstnotethat(N 0i+N i)−bi isindependentof
+w′. Moreover,whenweretrainmodelontheperturbeddatasizesN′,weexplicitlyconstrainthe
+i
+totalamountoftrainingdatatobethesameasbefore,i.e.,(cid:80) N′ = N. Hence,(Ni+N′)−bi =
+i i 0 i
+(Ni+w′·N′)−bi =(Ni+w′·N)−bi. Sincetheobjectiveisdefinedasthesummationofconvex
+0 i 0 i
+functions,weendupwithaconvexoptimizationproblem. Withtheconstraintontheprobability
+simplexandtheobjectivebeingeasilydifferentiable,theproblemcanbesolvedextremelyefficiently
+5usingprojectedgradientdescent[24]. WetermthissolutionapproachasDDOAlgorithm(DirectData
+Optimization). WeprovideitspseudocodebelowandanoperationalpipelineinAppendixB.
+Algorithm1DirectDataOptimization(DDO)
+Require: m domains (data sources) with data D ...D , data budget N (≪ data budget for
+1 m 0
+full-scaletraining),trainingdatasetS,modelA,validationlossfunctionL .
+v
+Initializeweightsforalldomains∀i∈{1,...m}: w ←1/m;
+i
+Initializetrainingdataforalldomains∀i∈{1,...m}: sampleS ⊂D where|S |=w ·N;
+i i i i
+TrainthemodelondataS ={S ...S }andevaluatesitslossL ←L (A(S));
+1 m 0 v
+forj from1tomdo
+w+ ←3·w ; ▷Perturbdomainweights(+)
+j j
+ResampleS+ ⊂D where|S+|=w+·N;
+j j j j
+TrainthemodelondataS =({S ...S }\S )∪S+andevaluatesitslossL+ ←L (A(S));
+1 m i j j v
+w− ← 1 ·w ; ▷Perturbdomainweights(-,optional)
+j 3 j
+ResampleS− ⊂D where|S−|=w−·N;
+j j j j
+TrainthemodelondataS =({S ...S }\S )∪S−andevaluatesitslossL− ←L (A(S));
+1 m i j j v
+OLSfitforscalingfunctionsb j,c
+j
+=argmin bj,cj[L 0−(w i·N)−bj −c j]2+[L+
+j
+−(3·w i·
+N)−bj −c j]2+[L−
+j
+−(1
+3
+·w i·N)−bj −c j]2;
+endfor
+Outputoptimizeddomainweightsw∗ =argmin w′∈Wm(cid:80)m i=1(w i′·N)−bi.
+(a)774MDecoder-onlyLMs(GPT-2 Large) (b)Encoder-onlyLMs(BERT-case)
+Figure5: Fittingvalidationlosswithpower-lawfunctions,directlyapproximatinghowlosschanges
+witheachdomain’sdataquantity. ComparedtoBERTmodelstrainedwithMLM(right),GPTmodels
+trainedwithCLM(left)demonstrateamuchstrongerresponsetodomainreweighting. Infinalresults,
+GPT/CLMachieved>2xspeed-upmarginsrelativetouniformweightscomparedtoBERT/MLM.
+3 PredictingOptimalDataCompositionsforLargerScales
+WhileSection2providesanalgorithmicframeworktooptimizethedatacompositionatanyscale,
+itiscomputationallyexpensivetodirectlyperformoptimizationatalargetargetscalebecauseit
+requiresretrainingmodels,whichisonlypracticalatasmallerscale. Thissectionwillinvestigate
+how to predict the optimal composition at a larger scale based on the composition optimized at
+smallerscales. Inparticular, weshowthattheoptimalcompositionfollowsanexponentialtrend
+withrespecttothescale,derivedthroughanoveltheoreticalanalysisandfurtherjustifiedthrough
+empiricalobservations.
+3.1 ScalingDomainWeights
+Recallthatneuralscalinglawsgivetherelationshipbetweenevaluationlossandtrainingdataquantity
+asL=N−γ+L whereListheevaluationloss(e.g.,perplexity),L denotessomeirreducibleloss,
+0 0
+andγ ≥0aresomeconstant. (L ,γ)canbefittedempirically. Considerastylizedcasewherethe
+0
+evaluationmetricisaggregatedlossovermultipleindependenttaskswhereeachtrainingsamplewill
+onlycontributetoasingletaskandthelossofeachtaskonlyscaleswiththeamountoftrainingdata
+6contributingtothistaskasapowerlawfunction.Then,foratotalofmtasks,theaggregatedevaluation
+lossscalesasthefollowingL=L +(cid:80)m β ·N−γi,whereL denotessomeirreducibleloss,N
+0 i=1 i i 0 i
+denotestheamountofdatacontributingtotaski,andconstantsβ ≥0andγ ≥0arecoefficients
+i i
+associated with task i. Define diagonal matrix N = diag{N ,N ,···N }. For a training data
+1 2 m
+scaleN = (cid:80) N ,definecompute-optimaldatacompositionN = diag{N∗,N∗,···N∗}asthe
+i i 1 2 m
+minimizerofL,givenasN∗ =argmin(cid:80) iNi=NL 0+(cid:80)m i=1β i·N i−γi. Weproposethefollowing
+theorem,whichstatestheoptimaldatacompositionscalesinexponential-stylefunctionswiththe
+amountoftrainingdataandcanbedirectlypredictablefromthatofsmallerscales.
+Theorem 1 (Scaling Law for Optimal Data Compositions). For an evaluation loss that is ag-
+gregated over multiple independent tasks as described above. If we have optimal data compo-
+sitions N(1)∗ = diag{N(1)∗,N(1)∗,···N(1)∗} which minimizes L s.t. (cid:80) N(1)∗ = N(1) and
+1 2 m i i
+N(2)∗ = diag{N(2)∗,N(2)∗,···N(2)∗} minimizes L s.t. (cid:80) N(2)∗ = N(2) where N(1) ̸= N(2),
+1 2 m i i
+then, optimal data compositions at other data scales N(3)∗ = diag{N(3)∗,N(3)∗,···N(3)∗}
+1 2 m
+which minimizes L s.t. (cid:80) N(3)∗ = N(3) where N(3) ̸= N(2) ̸= N(1) can be given as
+i i
+N(3)∗ =N(2)∗(N(1)∗)−1N(2)∗.
+SeeAppendixC.1fortheformaltheoremstatementandacompleteproof,whichisbasedonthe
+optimalityconditionforconvexoptimization. Atanoptimaldatacomposition,KKTcondition[24]
+gives that we have the partial derivative of the loss function w.r.t. the amount of data from each
+domainequaltoeachother. ThisholdsforanydatascaleN. Thepowerlawscalingfunctionforthe
+lossyieldsanexponential-stylescalingfunctionfortheoptimaldataquantityofeachtask. Examples
+forillustrationarealsoprovidedinC.1. Webuiltourtheoryfromastylizedexamplewhichassumes
+theevaluationmetriciscomposedofindependenttaskswithseparatescalinglaws. InAppendixC.2,
+wefurtherextendthistheorytoageneralcasewherethesameconclusioncanbereachedwithout
+the independence assumption, where we consider the evaluation to be composed of a number of
+indepedentsub-tasks("latentskills"[25])whicharehiddenvariables. Finally,wenotethatempirical
+results are shown to be highly consistent with the derivations above. In Figure 3a, we observe a
+consistentshiftingpatternforoptimaldatacompositionwiththescaleoftrainingdata,whichcanbe
+well-describedbythefunctionformsdescribedabove.
+3.2 AutoScale: AutomaticPredictionofOptimalTrainingDataatLargerScales
+Weconcludethesectionbypresentinganoveltool–AutoScale,whichautomaticallypredictsoptimal
+trainingdatacompositionsatlargerscales.
+Theoretical analysis above
+Algorithm2AutoScale
+showsthattheoptimalquan-
+Require: Optimal domain weights (obtained from DDO) w(1)∗at tity for each domain scales
+data scale N(1) and w(2)∗ at data scale N(2), target data scale inexponential-stylefunctions
+with training data size. We
+N(t),whereN(1) <N(2) <N(t).
+leveragethisresulttoenable
+OptimaldomaindataN(1)∗ ←w(1)∗·N(1);
+the automatic prediction of
+OptimaldomaindataN(2)∗ ←w(2)∗·N(2);
+optimaltrainingdatacompo-
+NextoptimaldomaindataN(x)∗ ←N(2)∗(N(1)∗)−1N(2)∗;
+sitions at larger scales from
+NextdatascaleN(x) ←(cid:80) N(x)∗; optimalcompositionsatsmall
+i i
+whileN(x) <N(t)do scales. First,fortwosmaller
+NextoptimaldomaindataN(x)∗ ←N(x)∗(N(1)∗)−1N(2)∗; trainingdatascalesN(1)and
+NextdatascaleN(x) ←(cid:80) N(x)∗; N(2) where N(1) ̸= N(2),
+endwhile i i find their optimal training
+Outputpredictedoptimaldomainweightsw(t)∗ ←N(x)∗/N(x). datacompositionsN(1)∗ and
+N(2)∗ where (cid:80) N(1)∗ =(1)
+i i
+and(cid:80) N(2)∗ =N(2)usingDDOalgorithmprovidedinSection2. ModelstrainedatscalesN and
+i i
+N′areconsideredproxymodelswherere-trainingthesemodelsisaffordable. SinceN(1)andN(2)
+are small data scales where re-training these models is affordable, AutoScale does not require
+usingproxymodelswithasmallerparametersize,avoidingthetransferabilityissuebetweendomain
+weightsoptimizedondifferentmodels. Then,N(1)∗andN(2)∗yieldtheoptimaltrainingdatacom-
+positionatthenextscaleasN(3)∗ =N(2)∗(N(1)∗)−1N(2)∗,whereN(3)∗ =(N(2)∗)2/N(1)∗isthe
+i i i
+7optimalamountoftrainingdataforeachdomain. ThisgivesthatfordatascaleN(3) =(cid:80) N(3)∗,
+i i
+optimaldomainweightsaregivenasw(3)∗ =N(3)∗/N(3). Then,N(3)∗canbecombinedwitheither
+i i
+N(1)∗orN(2)∗tomakethenextprediction. Repeatthisprocessuntilthetargettrainingdatascaleis
+reached. Theprocedureisdescribedinthepseudocodeabove. Operationalpipelineisprovidedin
+AppendixB.
+4 EmpiricalResults
+Weshowcaseourproposedalgorithmsintwosetsofempiricalstudies: CausalLanguageModeling
+(CLM)inSection4.2,andMaskedLanguageModeling(MLM)inSection4.3. Wetrainmodelswith
+upto10Btokensandreportthenumberofstepssavedtoreachthesameevaluationloss(perplexity).
+Wealsoreportdownstreamtaskperformancetobenchmarkperformanceimprovementsaftertraining
+thesamenumberofsteps.
+4.1 Experimentalsetup
+InSection4.2,wepretrain774MDecoder-onlyLMs(GPT-2 Largearchitecture[17])fromscratch
+ontheRedPajamadataset[13]. RedPajamadatasetisanopen-sourcereproductionofthetraining
+data used for LLaMA-1/2 models [10], totaling 1.2T tokens from 7 data domains with propor-
+tions: Common Crawl(67%),C4[26](15%),GitHub(4.5%),Wikipedia(4.5%),ArXiv(2.5%),
+and StackExchange (2.0%). In Section 4.3, we pretrain 110M Encoder-only LMs (BERT-base
+architecture[27])fromscratchondatafrom5typicalsources—Amazon Reviews,Arxiv,Books,
+Wikipedia,andOpen WebText Corpus[28]. FurtherdetailsareinAppendixD.1andD.2. Run-
+timeandGPUhoursaredocumentedinAppendixD.7.
+4.2 CausalLanguageModelingwithDecoder-onlyLMs(GPT)
+Baselines In total, we report results for our methods (DDO and AutoScale) and 5 base-
+lines–Uniform,LLaMAweights(curated),DoReMi(LLaMAweightsinitialization),Data Mixing
+Lawsfrom[6]andDoReMifrom[1](uniforminitialization). Uniformweightsuniformlysample
+datafromalldomains,resultinginthesamenumberoftrainingtokensfromeachdomain. LLaMA
+weights are a set of curated domain weights heuristically tuned for training LLaMA-1/2 models.
+WeimplementedDoReMiproposedin[1]. DoReMitrainstwosmaller-scaleauxiliarymodels(proxy
+models). First,areferencemodelistrainedwiththedataset’soriginaldomainweights,whicharethe
+LLaMAweightsforRedPajamadataset. Then,optimizeddomainweightsareobtainedbyusinga
+proxymodeltominimizetheworst-caseexcesslossacrossdifferentdomains. Wetrainbothauxiliary
+modelsfor50Ksteps. ImplementationdetailsareavailableinAppendixD.3. Besides,wecompare
+with 2 domain weights from existing literature, which are optimized on the same data domains
+RedPajamadatasetwithsimilarDecoder-onlyLMs. Data Mixing Laws[6]firstperformsagrid
+searchonthespaceofpossibledatamixturesandrecordsevaluationlossforproxymodelstrainedon
+thesemixtures. Then,thelossisinterpolatedwithexponentialfunctionstofindtheoptimaldomain
+weightsfortheproxymodel. DOGE[5]alsoimplementsDoReMi[1]withauxiliarymodelstrainedfor
+50Kstepsbutwiththereferencemodeltrainedwithuniformweights. Weevaluatethemodeltrained
+onthesedomainweightstopresentacompletelandscape.
+EvaluationWetesttheperplexityontheheld-outdataset,comprising10Ksampleseachfromthe7
+domains. Fordownstreamtasks,weinclude: BoolQ[29](zero-shot),HellaSwag[30](zero-shot,10-
+shot),PIQA[31](zero-shot),TruthfulQA[32](zero-shot),PubMedQA[33](10-shot),CrowsPairs
+[34](25-shot), and ARC-Easy[35](zero-shot). Additionally, BBH Novel Concepts [36]taskis
+addedtotheaggregatedresultsformodelstrainedbeyond10Btokens,makingatotalof9tasks. We
+selecttasksthatensurethemodel’sperformancesurpassesrandomguessing,spanningfromquestion
+answeringandcommonsenseinferencetobiasidentificationandscientificproblemsolving. These
+tasksprovideacomprehensiveassessmentofmodelperformance[12,37]. Weadopttheevaluation
+frameworkfrom[38]. MoredetailsondownstreamdatasetsareavailableinAppendixD.4.
+DirectDataOptimization(DDO):WeconductDDOAlgorithmtooptimizedomainweightsforproxy
+models(774MDecoder-onlyLMs)trainedfromscratchwith30Mto1.2Btokens. Takeaway1a:,as
+depictedinFigure3a,optimaldomainweightsforeachtrainingdatascalearevisiblydifferentand
+demonstrateaclearshiftingpattern. WefounddatasourceswithstandardformatsuchasWikipedia
+andscientificpapers,regardedashighquality,aremostbeneficialatsmallerscalesandobservesharp
+diminishingreturnsasthetrainingdatascalesup. Withmorecompute,datasourceswithdiverse
+examples,suchasCommonCrawl,continuetoreducetraininglossevenatconsiderablylargetraining
+8datascales. WevalidatedthisobservationinFigure3b, wherewetrainedtwomodelswith0.3B
+tokenswithdomainweightsoptimizedat0.3Btokensand1.2Btokens,andtwomodelswith1.2B
+tokenswiththeseweights,respectively. Takeaway1b: theresultsshowthat,theoptimalweightson
+onlyoptimalatthescaleitisoptimizedandbecomesuboptimalwhenappliedonotherscales.
+Predicting Optimal Weights at Larger Scales with AutoScale: With DDO-optimized weights
+fromproxymodelstrainedupto0.6Btokens, wefitAutoScalepredictoranduseittovisualize
+how the optimal domain weights will shift as we continue scaling up training data. As depicted
+inFigure6, asthetrainingdatascalegrows, datasourceswithdiverseexamples, suchasC4and
+CommonCrawl,willtakeupaconsiderableproportionoftrainingdata. Takeaway2a: therefore,we
+expectLLaMAweightswillperformbetterwhenthetrainingdatascaleissufficientlylarge. The
+resultsalsosuggesttrainingondatafromBooksdomainwillcontinuetoprovidebenefits. Takeaway
+2b: thus,AutoScale-predicteddomainweightsgivealargerweighttoBooksdomaincomparedto
+baselineswhichcounterintuitivelydownweighthigh-qualitybookcontents.
+(a)AutoScale-predictedoptimaldataquantity (b) AutoScale-predicted optimal domain weights as
+foreachdomainastrainingdatascalesup. trainingdatascalesup.
+Figure6: AutoScale-predicteddomainweightsfortraining774MDecoder-onlyLMs. Optimaldata
+quantityforeachdomaingrowsinexponential-stylefunctionswithtrainingdatascale(left)where
+datasourceswithdiversesamples(e.g.,C4)areunweightedrelativetodomainswithstandardformat
+(e.g.,Wikipedia).
+Subsequently,toexamineAutoScale-predictedweights,wetrainmodelsonlargerscaleswith3B,
+5B,and10Btokens. On3Btrainingdata,wecompareAutoScale-predictedweightswithUniform
+weights, LLaMA weights, DoReMi weights from [5] (uniform initialization), and Data Mixing
+Lawsweightsfrom[6]. Takeaway2c: inboth3Band5Bresults(Figure8),AutoScaleachievesthe
+lowestvalidationperplexityafterthesamesteps,atleast25%fasterthananybaselinewithupto
+37%speedup. ProvidedinTable7,AutoScale-predictedweightssignificantlyreducedthelosson
+Booksdomainandalsoachievedmuchloweredworst-domainperplexity. Whentestingthefew-shot
+performanceon8downstreamtasks,themodeltrainedwithAutoScale-predictedweightsachieves
+the best overall performance, as shown in Table 1. Results for models trained with 10B tokens
+are depicted in Figure 2, where we added the comparison with DoReMi initialized with LLaMA
+weights. AutoScale-predictedweightsconsistentlyoutperformanybaselinewitha28%to38%
+marginanddemonstrateadvantageousperformanceondownstreamtasks. Takeaway2d: echoingour
+predictions,astrainingdatascalesup,LLaMAweightsvisiblyoutperformuniformdomainweights.
+ForadditionalresultsseeAppendixD.5.
+Method/Task truthfulqa pubmedqa piqa hellaswag crows_pairs boolq arc_easy hellaswag Avg
+_mc2 (10-shot) _english (zero-shot)
+UniformWeights 0.4526 0.438 0.6115 0.2923 0.5886 0.5636 0.3742 0.2907 0.4514
+LLaMAWeights 0.434 0.492 0.6055 0.2944 0.5903 0.5612 0.3956 0.2952 0.4585
+AutoScale(ours) 0.4385 0.536 0.6202 0.3021 0.585 0.6141 0.3977 0.303 0.4746
+DataMixingLaws(ref) 0.4537 0.468 0.6061 0.2951 0.5778 0.6162 0.3771 0.2938 0.4610
+Table1: Downstreamtaskperformancefor774MDecoder-onlyLMstrainedfor3Btokens. Models
+trainedwithAutoScale-predictedweightsachievethebestoverallperformanceacrossthetasks.
+94.3 MaskedLanguageModelingwithEncoder-onlyLMs(BERT)
+Weexaminethemodel’sMLMlossonheld-outdatasets,comprising10Ksampleseachfromthe
+5 training domains. Additionally, as an auxiliary evaluation, we also test the MLM loss on 3
+non-trainingheld-outdomains. TobeconsistentwiththeperplexitylossusedinCLM,wereport
+theexponentialcross-entropylossforMLM.Weevaluatethemodel’staskperformanceonGLUE
+benchmark[19](with8diversetasksfornaturallanguageunderstanding(NLU))andSQuAD[20](a
+large-scaleQAdataset). EvaluationdetailscanbefoundinAppendixD.4. Weexaminetheuniform
+weightsasthebaseline.
+DirectDataOptimization(DDO):WeconductDDOAlgorithmtooptimizedomainweightsforproxy
+models(110MEncoder-onlyLMs)trainedfromscratchwithMLMon1GBdata. ResultsforDDO-
+optimizedweightsareshowninFigure4. Takeaway3a: DDOvisiblydecreasedthemodel’svalidation
+lossonalltrainingdomainsaswellasheld-outnon-trainingdomains,demonstratingitseffectiveness
+inimprovingtrainingefficiencyandmodelutility. Takeaway3b: whentestingonGLUEbenchmark
+andSQuADdataset,consistentwiththereducedevaluationloss,DDO-optimizedweightsareshownto
+improvethemodel’sperformanceondownstreamtasksbyanotablemargin.
+PredictingOptimalWeightsatLargerScaleswithAutoScale: WithDDO-optimizedweightsfrom
+proxymodelstrainedupto0.5Btokens,wefitAutoScalepredictoranduseittovisualizehowthe
+optimaldomainweightswillshiftaswecontinuescalinguptrainingdata. Takeaway4a: asdepicted
+inFigure11,similartothepatterndescribedabove,asthetrainingdatascalegrows,datasources
+withdiverseexamples,suchasWebTextandAmazonReviews,becomeincreasinglyimportantover
+standarddomains,suchasWikipediaandArxiv. Onehypothesisissuchdatasourcescontainsamples
+ondiversetopicsandlanguagestyles,providingrichinformationcomparedtodomainswithclean,
+standard text. We train models with MLM for up to 288k steps (which corresponds to 120% of
+thepertainingdatasizeforBERT-basewhenfirstproposedin[18]). Takeaway4b: table2shows
+that,comparedtowithoutreweighting(uniformweights),AutoScale-predictedweightsspeedup
+trainingby16.7%onmostdatascaleswithanaround10%speeduponthelargestscale,validating
+itsconsistenteffectiveness. Takeaway4c: nonetheless,thespeedupislessimpressivethaninthe
+resultsforDecoder-onlyLMs,demonstratingthedifferentresponsetodomainreweightingformodels
+withdifferentarchitectureorlanguagemodelingobjectives. ThisisfirsthintedatinFigure5,where
+theevaluationlosshasasimilarresponsetodatafromdifferentdomains,suggestinglimitedpotential
+forperformanceimprovementsfromdomainreweighting.
+DataScale/steps 18k 36k 72k 144k 288k
+FinalLoss(exp) 38.32 16.94 10.97 8.13 6.30
+StepsSaved 5k(28%) 5k(14%) 10k(14%) 20k(14%) 20k(10%)
+Table2: AutoScalenotablyimprovingtrainingefficiencyforBERTmodelsonallscales–evenfora
+considerablylargescale,288ksteps,thespeedupmarginremainsvisible.
+5 Conclusions
+Inthiswork,wedemonstratethattheoptimaldatacompositionforafixedcomputebudgetvaries
+dependingonthescaleofthetrainingdata, showcasingthatthecommonpracticeofempirically
+determininganoptimalcompositionusingsmall-scaleexperimentswillnotyieldtheoptimaldata
+mixtureswhenscalinguptothefinalmodel. Addressingthischallenge,weproposeAutoScale,an
+automatedtoolthatfindsacompute-optimaldatacompositionfortrainingatanydesiredtargetscale.
+Inempiricalstudieswithpre-training774MDecoder-onlyLMsandEcoder-onlyLMs,AutoScale
+decreases validation perplexity at least 25% faster than any baseline with up to 38% speed up
+comparedtowithoutreweighting,achievingthebestoverallperformanceacrossdownstreamtasks.
+LimitationsandFutureWork ThepromisingresultsachievedbyAutoScaleinoptimizingdata
+compositionforlarge-scalelanguagemodelpretrainingopenupsomeintriguingavenuesforfuture
+exploration. (1)Generalizability: Itwillbeinterestingtoextendthisresearchtolarger-scalesettings,
+otherdatamodalities,andmorecomprehensiveevaluationbenchmarks,andre-examinethevalidity
+of insights provided by the experiments at the scale that we work on. (2) Direct optimization of
+downstreamperformance:Inpractice,thecapabilitiesofLLMsarecharacterizedbytheirperformance
+onvariousdownstreamtasks,andtheperplexitylossthatwefocusedoninthisstudyisonlyarough,
+inaccurateproxyfordownstreamperformance. ItwillbeinterestingtoextendAutoScaletodirectly
+optimizedownstreamperformance. (3)Morefine-graineddatacuration: AutoScaleworkswith
+fixeddatadomainsandonlyoptimizeshowthedomainsaremixedtogether,confiningtheoptimization
+10space. Intuitively,ifonecanstrategicallyselectthecorpuswithineachdomainandevenadaptthe
+dataselectionstrategytodifferentstagesoftraining,furtherimprovementscouldbeachieved.
+BroaderImpacts Reducingthecomplexityandresourcerequirementsassociatedwithpretrain-
+ingLLMs,AutoScalecontributestothedemocratizationofAI.Smallerorganizations,academic
+institutions,andindividualresearcherscanmoreeasilyparticipateincutting-edgeAIresearchandde-
+velopment,fosteringinnovationandcollaborationacrosstheAIcommunity. Moreover,learningfrom
+massiveamountsofdatarequireslargeandcostlycomputationalresources,whichnotonlyconsume
+substantial energy but alsogenerate asignificant carbon footprint, contributing toenvironmental
+issues. Furthermore,theseresourcesquicklybecomeobsoleteduetotherapidpaceoftechnological
+advancements,leadingtoe-waste. Thisresearchmakescontributionstomitigatingtheseissuesby
+improvingtheefficiencyofresourceutilizationinAItraining.
+Acknowledgement
+This work is supported in part by the National Science Foundation under grants IIS-2312794,
+IIS2313130, OAC-2239622, Amazon-Virginia Tech Initiative in Efficient and Robust Machine
+Learning,AWScomputationalcredits, andtheCommonwealthCyberInitiative. Theauthorsare
+gratefulforAnkitBattawarandAlixDelgadofromAWS,whosededicatedhelpandsupportwere
+crucialforsecuringcomputingresourcesandimplementingempiricalstudies.
+11References
+[1] SangMichaelXie,HieuPham,XuanyiDong,NanDu,HanxiaoLiu,YifengLu,PercySLiang,
+QuocVLe,TengyuMa,andAdamsWeiYu. Doremi: Optimizingdatamixturesspeedsup
+languagemodelpretraining. AdvancesinNeuralInformationProcessingSystems,36,2024.
+[2] MayeeChen,NicholasRoberts,KushBhatia,JueWang,CeZhang,FredericSala,andChristo-
+pher Ré. Skill-it! a data-driven skills framework for understanding and training language
+models. AdvancesinNeuralInformationProcessingSystems,36,2024.
+[3] AlonAlbalak,LiangmingPan,ColinRaffel,andWilliamYangWang. Efficientonlinedata
+mixingforlanguagemodelpre-training. arXivpreprintarXiv:2312.02406,2023.
+[4] LucaSoldaini, RodneyKinney, AkshitaBhagia, DustinSchwenk, DavidAtkinson, Russell
+Authur, Ben Bogin, Khyathi Chandu, Jennifer Dumas, Yanai Elazar, et al. Dolma: An
+opencorpusofthreetrilliontokensforlanguagemodelpretrainingresearch. arXivpreprint
+arXiv:2402.00159,2024.
+[5] SiminFan,MatteoPagliardini,andMartinJaggi.Doge:Domainreweightingwithgeneralization
+estimation. arXivpreprintarXiv:2310.15393,2023.
+[6] JiashengYe,PeijuLiu,TianxiangSun,YunhuaZhou,JunZhan,andXipengQiu. Datamixing
+laws: Optimizingdatamixturesbypredictinglanguagemodelingperformance. arXivpreprint
+arXiv:2403.16952,2024.
+[7] Shiori Sagawa, Pang Wei Koh, Tatsunori B Hashimoto, and Percy Liang. Distributionally
+robustneuralnetworksforgroupshifts: Ontheimportanceofregularizationforworst-case
+generalization. arXivpreprintarXiv:1911.08731,2019.
+[8] SachinGoyal,PratyushMaini,ZacharyChaseLipton,AditiRaghunathan,andJZicoKolter.
+Thescienceofdatafiltering:Datacurationcannotbecomputeagnostic.InICLR2024Workshop
+onNavigatingandAddressingDataProblemsforFoundationModels.
+[9] JiahaoWang,BolinZhang,QianlongDu,JiajunZhang,andDianhuiChu. Asurveyondata
+selectionforllminstructiontuning. arXivpreprintarXiv:2402.05123,2024.
+[10] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,Timo-
+théeLacroix,BaptisteRozière,NamanGoyal,EricHambro,FaisalAzhar,etal. Llama: Open
+andefficientfoundationlanguagemodels. arXivpreprintarXiv:2302.13971,2023.
+[11] LeoGao,StellaBiderman,SidBlack,LaurenceGolding,TravisHoppe,CharlesFoster,Jason
+Phang,HoraceHe,AnishThite,NoaNabeshima,etal. Thepile: An800gbdatasetofdiverse
+textforlanguagemodeling. arXivpreprintarXiv:2101.00027,2020.
+[12] Sachin Mehta, Mohammad Hossein Sekhavat, Qingqing Cao, Maxwell Horton, Yanzi Jin,
+ChenfanSun,ImanMirzadeh,MahyarNajibi,DmitryBelenko,PeterZatloukal,etal. Openelm:
+Anefficientlanguagemodelfamilywithopen-sourcetrainingandinferenceframework. arXiv
+preprintarXiv:2404.14619,2024.
+[13] TogetherComputer. Redpajama: Anopensourcerecipetoreproducellamatrainingdataset,
+2023.
+[14] BrandonMcKinzie,ZheGan,Jean-PhilippeFauconnier,SamDodge,BowenZhang,Philipp
+Dufter,DhrutiShah,XianzhiDu,FutangPeng,FlorisWeers,etal. Mm1: Methods,analysis&
+insightsfrommultimodalllmpre-training. arXivpreprintarXiv:2403.09611,2024.
+[15] JackWRae,SebastianBorgeaud,TrevorCai,KatieMillican,JordanHoffmann,FrancisSong,
+John Aslanides, Sarah Henderson, Roman Ring, Susannah Young, et al. Scaling language
+models: Methods,analysis&insightsfromtraininggopher. arXivpreprintarXiv:2112.11446,
+2021.
+[16] BenSorscher,RobertGeirhos,ShashankShekhar,SuryaGanguli,andAriMorcos. Beyond
+neuralscalinglaws:beatingpowerlawscalingviadatapruning.AdvancesinNeuralInformation
+ProcessingSystems,35:19523–19536,2022.
+12[17] Alec Radford, Jeffrey Wu, Rewon Child, David Luan, Dario Amodei, Ilya Sutskever, et al.
+Languagemodelsareunsupervisedmultitasklearners. OpenAIblog,1(8):9,2019.
+[18] JacobDevlin,Ming-WeiChang,KentonLee,andKristinaToutanova. Bert: Pre-trainingof
+deepbidirectionaltransformersforlanguageunderstanding. arXivpreprintarXiv:1810.04805,
+2018.
+[19] AlexWang,AmanpreetSingh,JulianMichael,FelixHill,OmerLevy,andSamuelBowman.
+Glue: Amulti-taskbenchmarkandanalysisplatformfornaturallanguageunderstanding. In
+Proceedingsofthe2018EMNLPWorkshopBlackboxNLP:AnalyzingandInterpretingNeural
+NetworksforNLP,pages353–355,2018.
+[20] PranavRajpurkar,JianZhang,KonstantinLopyrev,andPercyLiang.Squad:100,000+questions
+formachinecomprehensionoftext. arXivpreprintarXiv:1606.05250,2016.
+[21] RishengLiu,JiaxinGao,JinZhang,DeyuMeng,andZhouchenLin. Investigatingbi-level
+optimizationforlearningandvisionfromaunifiedperspective: Asurveyandbeyond. IEEE
+TransactionsonPatternAnalysisandMachineIntelligence,44(12):10045–10067,2021.
+[22] JaredKaplan,SamMcCandlish,TomHenighan,TomBBrown,BenjaminChess,RewonChild,
+ScottGray,AlecRadford,JeffreyWu,andDarioAmodei. Scalinglawsforneurallanguage
+models. arXivpreprintarXiv:2001.08361,2020.
+[23] Danny Hernandez, Jared Kaplan, Tom Henighan, and Sam McCandlish. Scaling laws for
+transfer. arXivpreprintarXiv:2102.01293,2021.
+[24] DimitriPBertsekas. Nonlinearprogramming. JournaloftheOperationalResearchSociety,
+48(3):334–334,1997.
+[25] AnthonyTiong,JunqiZhao,JunnanLi,StevenHoi,CaimingXiong,andBoyangLi. Toward
+data-driven skill identification for general-purpose vision-language models. In ICLR 2024
+WorkshoponNavigatingandAddressingDataProblemsforFoundationModels.
+[26] ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,
+YanqiZhou,WeiLi,andPeterJLiu. Exploringthelimitsoftransferlearningwithaunified
+text-to-texttransformer. Journalofmachinelearningresearch,21(140):1–67,2020.
+[27] JacobDevlin,Ming-WeiChang,KentonLee,andKristinaToutanova. BERT:pre-trainingof
+deepbidirectionaltransformersforlanguageunderstanding. CoRR,abs/1810.04805,2018.
+[28] AaronGokaslanandVanyaCohen. Openwebtextcorpus. http://Skylion007.github.io/
+OpenWebTextCorpus,2019.
+[29] ChristopherClark,KentonLee,Ming-WeiChang,TomKwiatkowski,MichaelCollins,and
+Kristina Toutanova. Boolq: Exploring the surprising difficulty of natural yes/no questions.
+arXivpreprintarXiv:1905.10044,2019.
+[30] RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi. Hellaswag: Cana
+machinereallyfinishyoursentence? arXivpreprintarXiv:1905.07830,2019.
+[31] YonatanBisk,RowanZellers,JianfengGao,YejinChoi,etal. Piqa: Reasoningaboutphys-
+icalcommonsenseinnaturallanguage. InProceedingsoftheAAAIconferenceonartificial
+intelligence,volume34,pages7432–7439,2020.
+[32] StephanieLin, JacobHilton, andOwainEvans. Truthfulqa: Measuringhowmodelsmimic
+humanfalsehoods. arXivpreprintarXiv:2109.07958,2021.
+[33] QiaoJin,BhuwanDhingra,ZhengpingLiu,WilliamWCohen,andXinghuaLu. Pubmedqa: A
+datasetforbiomedicalresearchquestionanswering. arXivpreprintarXiv:1909.06146,2019.
+[34] Nikita Nangia, Clara Vania, Rasika Bhalerao, and Samuel R Bowman. Crows-pairs: A
+challenge dataset for measuring social biases in masked language models. arXiv preprint
+arXiv:2010.00133,2020.
+13[35] PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,
+andOyvindTafjord. Thinkyouhavesolvedquestionanswering? tryarc,theai2reasoning
+challenge. arXivpreprintarXiv:1803.05457,2018.
+[36] Aarohi Srivastava, Abhinav Rastogi, Abhishek Rao, Abu Awal Md Shoeb, Abubakar Abid,
+Adam Fisch, Adam R Brown, Adam Santoro, Aditya Gupta, Adrià Garriga-Alonso, et al.
+Beyondtheimitationgame: Quantifyingandextrapolatingthecapabilitiesoflanguagemodels.
+arXivpreprintarXiv:2206.04615,2022.
+[37] Samir Yitzhak Gadre, Georgios Smyrnis, Vaishaal Shankar, Suchin Gururangan, Mitchell
+Wortsman,RulinShao,JeanMercat,AlexFang,JeffreyLi,SedrickKeh,etal.Languagemodels
+scalereliablywithover-trainingandondownstreamtasks. arXivpreprintarXiv:2403.08540,
+2024.
+[38] LeoGao,JonathanTow,StellaBiderman,SidBlack,AnthonyDiPofi,CharlesFoster,Laurence
+Golding,JeffreyHsu,KyleMcDonell,NiklasMuennighoff,etal. Aframeworkforfew-shot
+languagemodelevaluation. Versionv0.0.1.Sept,2021.
+[39] IbrahimMAlabdulmohsin,BehnamNeyshabur,andXiaohuaZhai. Revisitingneuralscaling
+lawsinlanguageandvision. AdvancesinNeuralInformationProcessingSystems,35:22300–
+22312,2022.
+[40] JordanHoffmann,SebastianBorgeaud,ArthurMensch,ElenaBuchatskaya,TrevorCai,Eliza
+Rutherford, DiegodeLasCasas, LisaAnneHendricks, JohannesWelbl, AidanClark, etal.
+Trainingcompute-optimallargelanguagemodels. arXivpreprintarXiv:2203.15556,2022.
+[41] AI@Meta. Llama3modelcard. 2024.
+[42] Yasaman Bahri, Ethan Dyer, Jared Kaplan, Jaehoon Lee, and Utkarsh Sharma. Explaining
+neuralscalinglaws. arXivpreprintarXiv:2102.06701,2021.
+[43] CodyColeman,ChristopherYeh,StephenMussmann,BaharanMirzasoleiman,PeterBailis,
+PercyLiang,JureLeskovec,andMateiZaharia. Selectionviaproxy: Efficientdataselectionfor
+deeplearning. arXivpreprintarXiv:1906.11829,2019.
+[44] VishalKaushal,RishabhIyer,SurajKothawade,RohanMahadev,KhoshravDoctor,andGanesh
+Ramakrishnan. Learningfromlessdata: Aunifieddatasubsetselectionandactivelearning
+frameworkforcomputervision. In2019IEEEWinterConferenceonApplicationsofComputer
+Vision(WACV),pages1289–1299.IEEE,2019.
+[45] KrishnatejaKillamsetty,SivasubramanianDurga,GaneshRamakrishnan,AbirDe,andRishabh
+Iyer. Grad-match: Gradient matching based data subset selection for efficient deep model
+training. InInternationalConferenceonMachineLearning,pages5464–5474.PMLR,2021.
+[46] SörenMindermann,JanMBrauner,MuhammedTRazzak,MrinankSharma,AndreasKirsch,
+WinnieXu,BenediktHöltgen,AidanNGomez,AdrienMorisot,SebastianFarquhar,etal. Pri-
+oritizedtrainingonpointsthatarelearnable,worthlearning,andnotyetlearnt. InInternational
+ConferenceonMachineLearning,pages15630–15649.PMLR,2022.
+[47] Chanho Park, Rehan Ahmad, and Thomas Hain. Unsupervised data selection for speech
+recognitionwithcontrastivelossratios. InICASSP2022-2022IEEEInternationalConference
+onAcoustics,SpeechandSignalProcessing(ICASSP),pages8587–8591.IEEE,2022.
+[48] AndrewRosenberg,BhuvanaRamabhadran,YuZhang,andMuraliKarthickBaskar. Guided
+dataselectionformaskedspeechmodeling,April62023. USPatentApp.17/820,871.
+[49] RoeeAharoniandYoavGoldberg.Unsuperviseddomainclustersinpretrainedlanguagemodels.
+arXivpreprintarXiv:2004.02105,2020.
+[50] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsare
+few-shotlearners. Advancesinneuralinformationprocessingsystems,33:1877–1901,2020.
+14[51] SuchinGururangan,AnaMarasovic´,SwabhaSwayamdipta,KyleLo,IzBeltagy,DougDowney,
+andNoahASmith. Don’tstoppretraining: Adaptlanguagemodelstodomainsandtasks. arXiv
+preprintarXiv:2004.10964,2020.
+[52] SangMichaelXie,ShibaniSanturkar,TengyuMa,andPercyLiang. Dataselectionforlanguage
+modelsviaimportanceresampling. arXivpreprintarXiv:2302.03169,2023.
+[53] AakankshaChowdhery,SharanNarang,JacobDevlin,MaartenBosma,GauravMishra,Adam
+Roberts,PaulBarham,HyungWonChung,CharlesSutton,SebastianGehrmann,etal. Palm:
+Scalinglanguagemodelingwithpathways. arXivpreprintarXiv:2204.02311,2022.
+[54] FeiyangKang,HoangAnhJust,YifanSun,HimanshuJahagirdar,YuanzhiZhang,Rongxing
+Du,AnitKumarSahu,andRuoxiJia. Getmoreforless: Principleddataselectionforwarming
+upfine-tuninginllms. 12thInternationalConferenceonLearningRepresentations,ICLR,2024.
+[55] Alexander Wettig, Aatmik Gupta, Saumya Malik, and Danqi Chen. Qurating: Selecting
+high-qualitydatafortraininglanguagemodels. arXivpreprintarXiv:2402.09739,2024.
+[56] Pratyush Maini, Skyler Seto, He Bai, David Grangier, Yizhe Zhang, and Navdeep Jaitly.
+Rephrasingtheweb: Arecipeforcomputeanddata-efficientlanguagemodeling. arXivpreprint
+arXiv:2401.16380,2024.
+[57] Christoph Schuhmann, Richard Vencu, Romain Beaumont, Robert Kaczmarczyk, Clayton
+Mullis,AarushKatta,TheoCoombes,JeniaJitsev,andAranKomatsuzaki. Laion-400m: Open
+datasetofclip-filtered400millionimage-textpairs. arXivpreprintarXiv:2111.02114,2021.
+[58] Rafid Mahmood, James Lucas, David Acuna, Daiqing Li, Jonah Philion, Jose M Alvarez,
+Zhiding Yu, Sanja Fidler, and Marc T Law. How much more data do i need? estimating
+requirementsfordownstreamtasks. InProceedingsoftheIEEE/CVFConferenceonComputer
+VisionandPatternRecognition,pages275–284,2022.
+[59] Rafid Mahmood, James Lucas, Jose M Alvarez, Sanja Fidler, and Marc Law. Optimizing
+data collection for machine learning. Advances in Neural Information Processing Systems,
+35:29915–29928,2022.
+[60] FeiyangKang,HoangAnhJust,AnitKumarSahu,andRuoxiJia. Performancescalingvia
+optimal transport: Enabling data selection from partially revealed sources. arXiv preprint
+arXiv:2307.02460,2023.
+[61] HoangAnhJust,I-FanChen,FeiyangKang,YuanzhiZhang,AnitKumarSahu,andRuoxi
+Jia. Asrdataselectionfrommultiplesources: Apracticalapproachonperformancescaling.
+NeurIPS2023WorkshoponEfficientNaturalLanguageandSpeechProcessing(ENLSP),2023.
+[62] ZalánBorsos,MojmirMutny,andAndreasKrause. Coresetsviabileveloptimizationforcontin-
+uallearningandstreaming. AdvancesinNeuralInformationProcessingSystems,33:14879–
+14890,2020.
+[63] BaharanMirzasoleiman,JeffBilmes,andJureLeskovec. Coresetsfordata-efficienttrainingof
+machinelearningmodels. InInternationalConferenceonMachineLearning,pages6950–6960.
+PMLR,2020.
+[64] RuoxiJia,DavidDao,BoxinWang,FrancesAnnHubis,NeziheMerveGurel,BoLi,CeZhang,
+CostasJSpanos,andDawnSong. Efficienttask-specificdatavaluationfornearestneighbor
+algorithms. arXivpreprintarXiv:1908.08619,2019.
+[65] Amirata Ghorbani and James Zou. Data shapley: Equitable valuation of data for machine
+learning. InInternationalConferenceonMachineLearning,pages2242–2251.PMLR,2019.
+[66] PangWeiKohandPercyLiang. Understandingblack-boxpredictionsviainfluencefunctions.
+InInternationalconferenceonmachinelearning,pages1885–1894.PMLR,2017.
+[67] HoangAnhJust,FeiyangKang,TianhaoWang,YiZeng,MyeongseobKo,MingJin,andRuoxi
+Jia. Lava: Data valuation without pre-specified learning algorithms. In 11th International
+ConferenceonLearningRepresentations,ICLR,pagetoappear,2023.
+15[68] YongchanKwonandJamesZou. Data-oob: Out-of-bagestimateasasimpleandefficientdata
+value. arXivpreprintarXiv:2304.07718,2023.
+[69] Stephanie Schoch, Ritwick Mishra, and Yangfeng Ji. Data selection for fine-tuning large
+languagemodelsusingtransferredshapleyvalues. arXivpreprintarXiv:2306.10165,2023.
+[70] ThomasWolf,LysandreDebut,VictorSanh,JulienChaumond,ClementDelangue,Anthony
+Moi,PierricCistac,TimRault,RémiLouf,MorganFuntowicz,etal. Huggingface’stransform-
+ers: State-of-the-artnaturallanguageprocessing. arXivpreprintarXiv:1910.03771,2019.
+16Appendices
+A ExtendedRelatedWork 18
+B OperationalPipelineforAlgorithms 18
+C ProofsforSection3 19
+C.1 Theorem1: ScalingLawforOptimalDataCompositions . . . . . . . . . . . . . . 19
+C.2 ScalingLatentSkills . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 21
+D ExperimentalDetailsandAdditionalResults 23
+D.1 ExperimentalDetailsofSection4.2 . . . . . . . . . . . . . . . . . . . . . . . . . 23
+D.2 ExperimentalDetailsofSection4.3 . . . . . . . . . . . . . . . . . . . . . . . . . 24
+D.3 ImplementationDetailsofBaselines . . . . . . . . . . . . . . . . . . . . . . . . . 25
+D.4 EvaluationDetails . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 25
+D.5 AdditionalResultsofSection4.2 . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+D.6 AdditionalResultsofSection4.3 . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+D.7 RuntimeAnalysis . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26
+17AppendixA ExtendedRelatedWork
+ExtensiveresearchshowsthatNeuralScalinglaws,predictinghowthemodelperformancechanges
+withthescaleoftrainingdata,modelparameters,andcomputationbudget[22],tobeimpressively
+accurateinvarioustasksfromvisionandtextprocessing[39]toLLMpre-training[15]andevaluations
+[37]. [40] proposes compute-optimal scaling for LLM pretraining data scales together with the
+model’sparametersizes. Yet,recentprogress[41,12]showsnosignofsaturationinpre-training
+evenformodelspre-trainedonaconsiderablylargerdatascalethanrecommendedby[40]. [42]
+showsthatdatafromdifferentsourcesgenerallyscaleatdifferentrates. Ourworkprovidesanovel
+perspectivethatmaterializesthisdependencyofscalingrelationshipswithmultipledatasourcesand
+atdifferentdatascales,achievingfavorableempiricalresults.
+DataSelectionproblemshavebeenextensivelystudiedforavarietyofapplicationssuchasvision[43–
+46],speech[47,48],andlanguagemodels[43,46,49],andhavebeenattractinggrowinginterest
+overrecentyears. ForLLMs,alineofresearchfocusesondataselectionforpre-training(also
+knownaspre-trainingdatacuration)[50,51,40]fromscratchorcontinuedpre-training. For
+thesesettings,thescaleofdataselectionbudgetrangesfrommillionstobillionsofsamples. For
+example,[51]showsthatcontinuingpre-trainingthemodelonthedomain-specificdatasetimproves
+itsperformanceontasksofthisdomain;[52]usesimportanceresamplingonsimplebi-gramfeatures
+with10Kbinstoselectmillionsofsamplesfordomain/taskadaptivepre-training. Problem-specific
+heuristicmethods[53]employsimplecriteriatodistinguishdataqualityforagivenlanguagemodel
+on particular datasets. The effectiveness of these methods for data selection is often limited to
+specificusecasesandeasilyfailswhenmigratedtodifferentproblems[52]. Morerecently, [54]
+selectssamplesforfine-tuningpre-trainedLLMsviagradientsofOptimalTransportdistance. [55]
+curatespre-trainingdatausingGPT-4torateandselectsamplesbasedonanumberofqualitycriteria;
+further, [56] uses pre-trained LLMs to re-write the entire training corpus to improves its quality
+forpre-trainingotherLLMs. Pre-trainingdatacurationisalsostudiedformultimodalfoundation
+models(MMFM)–e.g.,[14]forvision-languagemodels(VLMs),and[57,8]forCLIP(Contrastive
+Language-ImagePretraining). Asidefrompre-trainingLLMs,DomainReweightingproblemshave
+beenstudiedinresearchoncollectingdataforvision,audio,andtextapplications[58–61].
+Besides,Coresets[62,63]aimtofindarepresentativesubsetofsamplestospeedupthetraining
+process,whichmaybeformulatedasanoptimizationproblem. Thisprocessisconsiderablycom-
+putationallyintensiveandhardtobeappliedonapracticalscaleforlanguageapplications. Data
+valuationmethodsaimtomeasurethecontributionofeachsampletothemodelperformance,which
+naturallyprovidesaviabletoolfordataselection.Notableexamplesincludesmodel-basedapproaches
+Shapley[64,65],LOO[65,66],andmodel-agnosticmethods[67,68]. Achievingfruitfulresultsin
+theirrespectiveapplicationsandprovidingvaluableinsights,though,thesemethodsarecommonly
+knownfortheirscalabilityissues. Model-basedapproachesrequirerepetitivemodeltrainingand
+oftenstruggletoapplytoafewthousandsamples. Arecentexample,[69]usesasamplingapproach
+tospeedupaShapley-stylemethodforselectingdataforfine-tuningLLMsandscalesuptoselecting
+from7.28ksubsets. Itishardlyimaginabletoapplyittothescaleofpracticallanguagedatasets.
+[67] utilizes the gradients of an OT problem to provide an efficient measure of data values, yet
+theselectionbasedongradientsdoesnotnecessarilyalignwiththetargetdistribution,resultingin
+mediocreperformanceingeneralcases.
+AppendixB OperationalPipelineforAlgorithms
+OperationalPipeline(DDO)
+1. Trainabaseproxymodelwithuniformweights(orreferenceweights,ifavailable);
+2. Ateachtime,add/reducedataquantityforonedomainandre-traintheproxymodel;
+3. Fitpowerlawscalingfunctionsandsolvetheoptimizationproblem;
+4. Iteratetheprocessifnecessary.
+OperationalPipeline(AutoScale)
+181. FortwosmallertrainingdatascalesN(1)andN(2)wherere-trainingthemodelisaffordable,
+findtheircorrespondingoptimaltrainingdatacompositionsN(1)∗ andN(2)∗ usingDDO
+Algorithmdescribedabove;
+2. Predict the next optimal training data composition as N(3)∗ = N(2)∗(N(1)∗)−1N(2)∗,
+yieldingoptimaldomainweightsw(3)∗ = N(3)∗/N(3) atnewtrainingdatascaleN(3) =
+i i
+(cid:80) N(3)∗;
+i i
+3. Repeatthisprocessuntilthetargettrainingdatascaleisreached.
+AppendixC ProofsforSection3
+C.1 Theorem1: ScalingLawforOptimalDataCompositions
+Theorem1(ScalingLawforOptimalDataCompositions(restated)). Foranevaluationlossthat
+isaggregatedovermultipleindependenttaskswhereeachtrainingsamplewillonlycontributetoa
+singletaskandthelossofeachtaskonlyscaleswiththeamountoftrainingdatacontributingtothis
+taskasapowerlawfunction,givenasL=(cid:80)m β ·N−γi whereL denotessomeirreducibleloss,
+i=1 i i 0
+N denotestheamountofdatacontributingtotaski,andconstantsβ ≥0andγ ≥0arecoefficients
+i i i
+associatedwithtaski. IfwehaveoptimaldatacompositionsN(1)∗ =diag{N(1)∗,N(1)∗···N(1)∗}
+1 2 m
+whichminimizesLs.t. (cid:80) N(1)∗ = N(1) andN(2)∗ = diag{N(2)∗,N(2)∗,···N(2)∗}minimizes
+i i 1 2 m
+L s.t. (cid:80) N(2)∗ = N(2) where N(1) ̸= N(2), then, optimal data compositions at other data
+i i
+scales N(3)∗ = diag{N(3)∗,N(3)∗,···N(3)∗} which minimizes L s.t. (cid:80) N(3)∗ = N(3) where
+1 2 m i i
+N(3) ̸=N(2) ̸=N(1)canbegivenasN(3)∗ =N(2)∗(N(1)∗)−1N(2)∗.
+Proof. Fortheevaluationlossgivenas
+m
+(cid:88)
+L= β ·N−γi
+i i
+i=1
+Atanoptimaldatacomposition,KKTcondition[24]givesthatwehavethepartialderivativeofthe
+lossfunctionw.r.t. theamountofdatafromeachdomainequaltoeachother. Thisgives,foranytwo
+domainsaandb(w.l.o.g,wesimplifythederivationtothecaseoftwodomains)withoptimaldata
+quantityN∗andN∗,respectively,wehave
+a b
+∂L
+=−β ·γ ·N−γa−1
+∂N a a a
+a
+∂L
+=−β ·γ ·N−γb−1
+∂N b b b
+b
+(cid:12) (cid:12)
+∂L (cid:12) ∂L (cid:12)
+(cid:12) = (cid:12)
+∂N (cid:12) ∂N (cid:12)
+a Na=N a∗ b Nb=N b∗
+Withstraightforwardderivations,thisgives
+−β a·γ a·(N a∗)−γa−1 =−β b·γ b·(N b∗)−γb−1
+β a·γ
+a =
+(N a∗)γa+1
+β b·γ
+b
+(N b∗)γb+1
+β γ (3)
+(N∗)γa+1 = a a(N∗)γb+1
+a β γ b
+b b
+(cid:20) (cid:21) 1
+N∗ = β aγ a(N∗)γb+1 γa+1
+a β γ b
+b b
+LetN(2)∗,N(2)∗betheoptimaldataquantityfordomainsaandbatadifferentdatascaleN(2) =
+a b
+N(2)∗+N(2)∗ ̸=N. Assumingwehavetheoptimaldataquantityfordomainbbecomingmtimes
+a b
+thanN∗,namely,
+b
+N(2)∗ :=m·N∗
+b b
+19Then,fromEq. 3,theoptimaldataquantityfordomainacanbegivenas
+(cid:20) (cid:21) 1
+N(2)∗ = β aγ a(N(2)∗)γb+1 γa+1
+a β γ b
+b b
+(cid:20) (cid:21) 1
+= β aγ a(m·N∗)γb+1 γa+1
+β bγ b b (4)
+(cid:20) (cid:21) 1
+=mγγ ab+ +1 1 · β βaγ γa(N b∗)γb+1 γa+1
+b b
+=mγγ ab+ +1 1 ·N a∗
+ItcanbeimmediatelyseenthattheoptimaldomaindataN∗ andN∗ scaleatdifferentrates–new
+a b
+optimal data quantity for domain a does not become m times than before. This implies that the
+optimaldatacompositionisscale-dependentandisdifferentfordifferenttrainingdatascales. This
+impliesthattheoptimaldatacompositionisscale-dependentandisdifferentfordifferenttraining
+datascales,establishingthemainargumentofthispaper.
+SincetheratiofromEq. 4,(γ +1)/(γ +1),isconstantandinvarianttothechangeinthetraining
+b a
+datascale,itcanbeutilizedtoprovideadirectapproachforpredictingthescalingofoptimaldata
+compositions–givenas
+N a(2)∗ =(N Nb(2 ∗)∗ )γγ ab+ +1 1N a∗
+b
+Equivalently,takingthelogarithmforbothsidesoftheequation,wehave
+logN a(2)∗ =log(N Nb(2 ∗)∗ )γγ ab+ +1 1 +logN a∗
+b
+Further,weshowthatonedoesnotneedtoestimateanyofthecoefficients(γ ,γ )fromtheloss
+a b
+functiontopredicttheoptimaldataquantityforeachdomain. Assumeonehaveobtainedtheoptimal
+data quantity for domains a and b, N(1)∗,N(1)∗, at a data scale N(1) = N(1)∗ +N(1)∗ and the
+a b a b
+optimaldataquantityN(2)∗,N(2)∗atadatascaleN(2) =N(2)∗+N(2)∗whereN(1) ̸=N(2). This
+a b a b
+gives
+γ +1
+logN(2)∗ = b ·(logN(2)∗−logN(1)∗)+logN(1)∗
+a γ +1 b b a
+a
+Then,foradifferentdatascalewheretheoptimaldataquantityfordomainbisN(3)∗,theoptimal
+b
+dataquantityfordomainacanbegivenas
+γ +1
+logN(3)∗ = b ·(logN(3)∗−logN(2)∗)+logN(2)∗
+a γ +1 b b a
+a
+logN(2)∗−logN(1)∗
+= a a ·(logN(3)∗−logN(2)∗)+logN(2)∗
+logN(2)∗−logN(1)∗ b b a
+b b
+W.l.o.g.,consider N b(3)∗ = N b(2)∗ wherelogN(2)∗−logN(1)∗ =logN(3)∗−logN(2)∗,theequation
+N(2)∗ N(1)∗ b b b b
+b b
+abovecanbesimplifiedto
+logN(3)∗ =2logN(2)∗−logN(1)∗
+a a a
+andequivalently,
+(N(2)∗)2
+N(3)∗ = a
+a N(1)∗
+a
+DefiningcompactrepresentationsN(i)∗ =diag{N(i)∗,N(i)∗},theaboveresultscanbewrittenas
+a b
+N(3)∗ =N(2)∗(N(1)∗)−1N(2)∗
+whichconcludestheproof.
+20Theprocesscanbeiterated(e.g.,replacingN(1)∗ orN(2)∗ withN(3)∗)toobtainoptimaldomain
+dataquantityfordifferentdatascales. heexamplebelowprovidesastraightforwardlookonhowthis
+resultcanbeoperationalized.
+Remark1(AnExample). Thisexamplehelpsvisualizetheoperationpipeline.
+IfattrainingdatascaleN(1) =N(1)+N(1) =200,wehaveoptimaldomaindatacompositionas
+a b
+N(1)∗ =100,N(1)∗ =100(50%−50%);andatscaleN(2) =N(2)+N(2) =500,wehaveoptimal
+a b a b
+domain data composition as N(2)∗ = 300,N(2)∗ = 200 (60%−40%). Then, from the theorem,
+a b
+whentheoptimaldomaindatacompositionhasN(3)∗ = (N(2)∗)2/N(1)∗ = 900,wecanpredict
+a a a
+N(3)∗ =(N(2)∗)2/N(1)∗ =400,whichgivestheoptimalratioatN(3) =N(3)+N(3) =1300as
+b b b a b
+69%−31%.
+Similarly,
+ForN(4)∗ =2700,wehaveN(4)∗ =800,whichgivestheoptimalratioatN(4) =3500as77%−23%
+a b
+ForN(5)∗ =8100,wehaveN(5)∗ =1600,whichgivestheoptimalratioatN(5) =9700as84%−16%
+a b
+ForN(6)∗ =24300,wehaveN(6)∗ =3200,whichgivestheoptimalratioatN(6) =27500as88%−12%
+a b
+ForN(7)∗ =72900,wehaveN(7)∗ =6400,whichgivestheoptimalratioatN(7) =79300as92%−8%
+a b
+ForN(8)∗ =218700,wehaveN(8)∗ =12800,whichgivestheoptimalratioatN(8) =231500as94%−6%
+a b
+ForN(9)∗ =656100,wehaveN(9)∗ =25600,whichgivestheoptimalratioatN(9) =681700as96%−4%
+a b
+WevisualizeitinFigure7.
+Figure7: Illustration: optimaldatacompositionscalesinexponential-stylefunctionswithtraining
+dataquantity.
+C.2 ScalingLatentSkills
+Weextendthistheorytoageneralcasewheretheevaluationlossistheperplexityaveragedover
+trainingdomains. Considertheevaluationiscomposedofanumberofindepedentsub-tasks("latent
+skills" [25]) which are hidden variables, where each of them observes a power law scaling law
+relationshipwiththeamountofdatacontributingtothistask("equivalentdatasize"),L=L +β ·
+0 a
+K a−γa +β b·K b−γb +β c·K c−γc +··· wherescalarK
+j
+≥ 0denoteequivalentdatasizeforskill j,
+andconstants(β ,γ )≥0arecoefficientsassociatedwithskill ,respectively. Mathematically,these
+j j j
+latentskillscanbeseenasanorthogonalbasisthatspansthespaceofevaluationloss.
+ConsidertrainingdatafromeachdomainD contributestotheseskillstovaryingdegrees,where
+i
+Equivalentdatasizeforskill ,K ,isgivenasK =c ·N +c ·N +··· whereN =w ·N
+j j j j,1 1 j,2 2 i i
+denotestheamountoftrainingdatafromdomainD andconstantc isthecoefficientmeasuring
+i j,i
+21thedegreeofcontributionbetweendomainD andskill . Definingdiagonalmatricesfortraining
+i j
+data composition N = diag{N ,N ,···} and skill data composition K = diag{K ,K ,···},
+1 2 a b
+we have K = AN, where A = c is the matrix for coefficients. For simplicity, we consider
+ji j,i
+(cid:80)
+trainingdatafromeachdomainwillbedistributedtotheskillssuchthat∀i, N =1. Thisgives
+j i
+the amount of total training data from all domains is identical to the amount of total equivalent
+(cid:80) (cid:80) (cid:80) (cid:80)
+data for all skills, K = N . For a training data scale N = N = K , define
+j j i i i i j j
+optimal skill data composition K∗ = diag{K∗,K∗,···} as the minimizer of L, given as K∗ =
+a b
+argmin(cid:80) jKj=NL 0+β a·K a−γa +β b·K b−γb +···. Theoretically,therecanbeaninfinitenumber
+oflatentskills. Foranalysis,weconsiderafinitenumberofk independentskillsmostimportant
+fortheevaluation. ThiscanconsideredasperformingPrincipalComponentsAnalysis(PCA)with
+orthogonaltransformationandselectingthefirstkindependentcomponents.Weconsiderthestandard
+scenariowithanequalnumberofrelevantskillsanddatadomainswherek =mandAisasquare
+matrixwithfullrank. Thisdescribesthecasewherethisoptimizationproblemiswell-defined. We
+discussinAppendixC.2whatwillhappeninotherscenarios. Inthiscase,Aisinvertibleandthe
+correspondingoptimaltrainingdatacompositionforK∗canbegivenasN∗ =A−1K∗.
+Weprovidethefollowingtheorem,whichstatesthatforthescenariodescribedabove,optimaltraining
+datacompositionscalesinexponential-stylefunctionswithtrainingdataquantityandcanbedirectly
+predictablefromthatofsmallerscaleswithoutneedingtoidentifythelatentskills.
+Theorem 2 (Scaling Latent Skills). Consider the evaluation is composed of a number of in-
+depedent sub-tasks ("latent skills") where each of them observes a power law scaling law re-
+lationship with the amount of data contributing to this task ("equivalent data size"). Namely,
+L = L
+0
++β
+a
+·K a−γa +β
+b
+·K b−γb +β
+c
+·K c−γc +··· where scalar K
+j
+≥ 0 denote equivalent
+data size for skill , and constants (β ,γ ) ≥ 0 are coefficients associated with skill , respec-
+j j j j
+tively. DefinediagonalmatricesfortrainingdatacompositionN = diag{N ,N ,···}andskill
+1 2
+data composition K = diag{K ,K ,···}. Consider training data from each domain D con-
+a b i
+tributes to these skills to varying degrees, given as K = AN where A = c is the matrix
+ji j,i
+for coefficients. Assume the amount of total training data from all domains is identical to the
+(cid:80) (cid:80)
+amount of total equivalent data for all skills, K = N . Assume there is a finite number
+j j i i
+of latent skills and data domains and A is a square matrix with full rank. For a training data
+scale N = (cid:80) N = (cid:80) K , define optimal skill data composition K∗ = diag{K∗,K∗,···}
+i i j j a b
+(cid:80)
+as the minimizer of L s.t. K = N with corresponding optimal training data composition
+j j
+IfwehaveoptimaldatacompositionsN(1)∗ = diag{N(1)∗,N(1)∗,···}whereitscorresponding
+a b
+skill data composition K(1)∗ = diag{K(1)∗,K(1)∗,···} = AN(1)∗ minimizes L s.t. (cid:80) K =
+a b j j
+(cid:80) N(1)∗ =N(1),andN(2)∗ =diag{N(2)∗,N(2)∗,...}whereitscorrespondingskilldatacompo-
+i a b
+sitionK(2)∗ =diag{K(2)∗,K(2)∗,...}=AN(2)∗minimizesLs.t. (cid:80) K(2)∗ =(cid:80) N(2)∗ =N(2)
+a b j j i
+where N(2) ̸= N(1), then, other optimal data compositions N(3)∗ = diag{N(3)∗,N(3)∗,...}
+a b
+where its corresponding skill data composition K(3)∗ = diag{K(3)∗,K(3)∗,···} = AN(3)∗
+a b
+minimizes L s.t. (cid:80) K(3)∗ = (cid:80) N(3)∗ = N(3) where N(3) ̸= N(2) ̸= N(1) can be given as
+j j i
+N(3)∗ =N(2)∗(N(1)∗)−1N(2)∗.
+Proof. Bydefinition,wehave
+AN(1)∗ =K(1)∗, AN(2)∗ =K(2)∗, AN(3)∗ =K(3)∗
+FromresultsofTheorem1,wehave
+K(3)∗ =K(2)∗(K(1)∗)−1K(2)∗
+whichgives
+AN(3)∗ =(AN(2)∗)(AN(1)∗)−1AN(2)∗
+SinceAisinvertibleandNandKarediagonalmatrices,naturally,
+(AN(1)∗)−1 =(N(1)∗)−1A−1
+andwehave
+AN(3)∗ =AN(2)∗[(N(1)∗)−1A−1]AN(2)∗ =AN(2)∗(N(1)∗)−1N(2)∗
+22Thisdirectlygives
+N(3)∗ =A−1AN(2)∗(N(1)∗)−1N(2)∗ =N(2)∗(N(1)∗)−1N(2)∗
+whichcompletestheproof.
+Theaboveresultdoesnotrequireidentifyingthelatentskillsorobservingskilldatacompositions
+K. Rather,thetheoremgivesthataslongasthecoefficientmatrixAisinvertible,thescalingofN
+compliestothesamescalinglawasinSection3.1.
+Remark2(whathappenswhenAisnotinvertible.). Ingeneral,ifAisnotinvertible,scalingfor
+optimaltrainingdatacompositionisnotdirectlypredictable.Specifically,ifAdoesnothavefullrank,
+thereexistsredundantdomains/datasourceswheretheircontributiontotheskillsareidentical/exact
+multipliersofeachother. Somedatasourcesmaynotbeneededatanyscale;ifAhasmorerowsthan
+columns(moredomainsthanskills),thissuggestsmultipletrainingdatacompositionscanachievethe
+sameskillsdatacompositionandtheoptimaltrainingdatacompositionsarenon-unique(infinitely
+many). IfAhasmorecolumnsthanrows(moreskillsthandomains),thismeanstherearetoomany
+skillstooptimizefor. Nooptimaltrainingdatacompositionexistsandonehastomaketrade-offs.
+Ifthisisrelevanttothepracticalneeds,trainingdatamaybeprocessedwithadditionaltechniques
+suchasclusteringandsplitintomoredifferentdomains.
+AppendixD ExperimentalDetailsandAdditionalResults
+D.1 ExperimentalDetailsofSection4.2
+Model Training GPT-2 Large is a variant of the GPT-2 architecture, featuring an embedding
+dimensionof1280, 36transformerlayers, and20attentionheads. WerelyontheHuggingFace
+Transformerslibraryforimplementation[70]. SpecifictraininghyperparametersaredetailedinTable
+3.
+Architecture gpt2
+Optimizer AdamW
+TokenizerVocabularySize 50257
+BatchSizePerDevice 1
+GradientAccumulationSteps 10
+MaximumLearningRate 2e-4
+LRSchedule Linear
+WeightDecay 1e-2
+Warm-upRatio 10%
+Epochs 3
+GPUHardware 8xNVIDIAA100/8xNVIDIAH100
+Table3: ThelistofhyperparametersforGPT-2 Largepretraining.
+DatasetDetails TheRedPajamadatasetisavailableat: https://huggingface.co/datasets/
+togethercomputer/RedPajama-Data-1T. The7domainsinvolvedarecharacterizedasfollows:
+• Commoncrawl: Avastrepositoryofweb-crawleddata,providingaheterogeneousmixof
+internettext.
+• C4: The Colossal Clean Crawled Corpus, filtered to remove low-quality content, thus
+ensuringthereliabilityandcleanlinessofthedata.
+• GitHub:Thisdomainincludesacompilationofpubliclyavailablecoderepositories,offering
+arichsourceofsyntacticandsemanticpatternsinherentinprogramminglanguages.
+• Books: Acollectionoftextualcontentfrompublishedbooks,providingdiversenarrative
+stylesandcomplexcharacterdevelopments.
+• ArXiv:Comprisingscientificpapersprimarilyfromthefieldsofphysics,mathematics,com-
+puterscience,andquantitativebiology,thisdomainoffershigh-quality,scholarlycontent.
+23• Wikipedia: Awell-organizedandmeticulouslycurateddatasetofencyclopediaarticles,
+deliveringabroadspectrumofknowledgeacrossmultipledisciplines. WeonlyuseEnglish
+sampleswith’en’inmeta-data.
+• StackExchange:Thisdomaincapturesavarietyofuser-generatedcontentfromdiscussions
+andquestion-answersessionsacrossnumeroustechnicaltopics.
+GivencopyrightrestrictionswiththeBooksdomainonHuggingFace,wehaveoptedforanalternative
+sourceavailableathttps://yknzhu.wixsite.com/mbweb.
+Foreachdomain,weensureonlysampleswithmorethan1000charactersareretained. Foreach
+sample,thefirst1000charactersaretruncated,withtheexceptionoftheArXivandGitHubdomains
+wherewerandomlyextractacontinuousblockof1000characters. FortheWikipediadomain,we
+keeponlythosesamplesthatareinEnglish. Samplesareselectedwithoutreplacement,basedonthe
+computeddatavolumeforeachdomain. Additionally,foreachdomain,aheld-outdatasetcomprising
+10Ksamplesisreservedtoevaluatetheperplexityofthepretrainedmodel.
+D.2 ExperimentalDetailsofSection4.3
+ModelTraining WeemploytheBERT-base-uncasedmodelfromtheHuggingFaceTransformers
+library. Originally,BERT’spretrainingschemeinvolvedMLMandnextsentenceprediction(NSP);
+however,inourexperiments,weexclusivelyutilizeMLM.Detailedtraininghyperparameterscanbe
+foundinTable4.
+Architecture bert-base-uncased
+MaxTokenLength 300
+MaskTokenPercentage 15%
+Optimizer AdamW
+BatchSizePerDevice 12
+Devices 4
+MaximumLearningRate 1e-4
+LRSchedule Linear
+WeightDecay 1e-2
+Warm-upSteps 3000
+Epochs 1∼4
+GPUHardware 4xNVIDIARTXA6000
+Table4: ThelistofhyperparametersforBERTpretraining.
+DatasetDetails The5domainsoftrainingdatautilizedarelistedasfollows:
+• Amazon Reviews: AcompilationofcustomerreviewsfromAmazon,widelyutilizedin
+sentimentanalysisstudies,availableat: https://huggingface.co/datasets/amazon_
+us_reviews.
+• Arxiv: Comprises 1.7 million articles from arXiv, available at: https://www.
+tensorflow.org/datasets/catalog/scientific_papers.
+• Books: Acorpusof11,038novelsbyunpublishedauthorsacross16genres,availableat:
+https://yknzhu.wixsite.com/mbweb.
+• Wikipedia: Offers datasets extracted from Wikipedia in various languages, available
+at: https://www.tensorflow.org/datasets/catalog/wikipedia. WeonlyuseEn-
+glishsampleswith’en’inmeta-data.
+• Open WebText Corpus (OWTC):AcorpusofEnglishwebtextsfromRedditposts,avail-
+ableat: https://skylion007.github.io/OpenWebTextCorpus/.
+3held-outnon-trainingdomainsusedintheevaluationinclude:
+• Pubmed:Features19,717diabetes-relatedpublicationsfromthePubMeddatabase,organized
+intothreeclassesandlinkedbyanetworkof44,338citations,availableat: https://www.
+tensorflow.org/datasets/catalog/scientific_papers
+24• News: Comprises a significant collection of news articles derived from CommonCrawl,
+specifically from 5000 news domains indexed by Google News, available at: https:
+//github.com/rowanz/grover/blob/master/realnews/README.md
+• GitHub: A curated selection from the RedPajama dataset, this segment includes an ar-
+ray of open-source code projects, available at: https://huggingface.co/datasets/
+togethercomputer/RedPajama-Data-1T
+D.3 ImplementationDetailsofBaselines
+Implementationdetails Wefollowedtheofficialimplementation3ofDoReMiforourexperiments.
+Weevaluatedtwosetsofreferencedomainweights: (1)thedomainweightsutilizedintheLLaMA-
+2 paper [10] (referred to as LLaMA weights), and (2) uniform weights. Both the reference and
+proxymodelshave120Mparametersandaretrainedfromscratch. WeuseGPT-2tokenizerwitha
+vocabularysizeofroughly50K.ForLLaMAweights,wetraineachmodelfor20K,50Kand200K
+stepsforcomparison. Foruniformweights,wetraineachmodelfor10K,20Kand50Ksteps. Refer
+toTable5fordetailedhyperparameters. TheeffectofreferenceweightsontheoutputDoReMiis
+discussedinFigure10.
+Architecture Decoder-onlyLM
+MaxTokenLength 1024
+Optimizer AdamW
+BatchSizePerDevice 8
+Devices 8
+MaximumLearningRate 2e-4
+LRSchedule Linear
+WeightDecay 1e-2
+Warm-upSteps 3000
+Epochs 1
+GPUHardware 8xNVIDIARTXA6000
+Table5: ThelistofhyperparametersforDoReMi.
+D.4 EvaluationDetails
+GPT/CLM Thefollowingtasksareconsideredfordownstreamperformanceevaluation,inlinewith
+thesetupfrom[12,37]. Forfew-shottasks,thedemonstrationsaresampledatrandom.
+• BoolQ[29]consistsofaquestion-answeringformatthatrequiresbinaryyes/noanswers.
+• HellaSwag[30]challengesmodelsontheirabilitytomakecommonsenseinferences.
+• PIQA [31] focuses on evaluating a model’s commonsense reasoning regarding physical
+interactions.
+• TruthfulQA[32]isdesignedtoassesstheabilityofmodelstogeneratetruthfulandfactual
+responses.
+• PubMedQA[33]offersadatasetforevaluatingquestion-answeringinthebiomedicaldomain.
+• CrowsPairs-English[34]testsmodelsontheirabilitytoidentifyandcorrectstereotypical
+biasesinEnglishtext.
+• ARC-Easy[35]presentsasetofrelativelysimplerscientificreasoningquestions,aimedat
+evaluatingamodel’sbasicunderstandingofscientificprinciples.
+• BigBench-Novel Concepts[36]servesasatestofthemodel’screativeabstractionskills,
+challengingittomakesenseofscenariosthatitcouldnothavememorizedduringtraining.
+BERT/MLM Foreachtask,weconductsupervisedfine-tuningonthecorrespondingtrainingdata
+andtestthefine-tunedmodelonthevalidationdata. Thehyperparametersforsupervisedfine-tuning
+aregiveninTable6.
+3https://github.com/sangmichaelxie/doremi
+25Architecture bert-base-uncased
+MaxTokenLength 128
+BatchSizePerDevice 8or300
+Optimizer AdamW
+Devices 4
+MaximumLearningRate 2e-5or5e-5
+Epochs 3
+GPUHardware 4xNVIDIARTXA6000
+Table6: Thelistofhyperparametersforsupervisedfine-tuningofBERT.
+D.5 AdditionalResultsofSection4.2
+Figure8exhibitsthatAutoScale-predictedweightsdecreasesvallossatleast25%fasterthanany
+baselinewithupto37%speedup.
+Figure 9 provides a visualization of domain weights used for training GPT-2 Large, given by
+differentmethods.
+Table7examinesthedomain-specificperplexityofGPT-2 Largetrainedon3billiontokens,re-
+spectively. Notably,AutoScaleachievesthelowestaveragevalidationperplexityandsignificantly
+reducestheperplexityintheworst-performingdomains.
+Figure10visualizesDoReMioptimizeddomainweightswithdifferentreferenceweightsandtraining
+steps. Trainingproxy/referencemodelsfordifferentstepsgivesdifferentweights. Itisunclearwhich
+weightsareoptimal. DoReMirecommends200ksteps,whichequals>100Btokensinthedefault
+setup. Sinceoptimizationwasconductedrelativetothereferenceweights,referenceweightshavea
+profoundimpactonDoReMi’soutput.
+Domain/Method AutoScale DoReMi(Ref) DataMixing LLaMA Uniform
+Laws(ref) (30%moretokens)
+CommonCrawl 25.598 24.116 30.824 21.464 28.351
+Github 7.482 6.678 5.845 7.376 5.784
+Books 29.162 33.324 34.450 35.533 31.14
+Wikipedia 18.828 17.154 26.795 21.110 19.57
+C4 34.242 39.429 38.521 37.393 40.323
+StackExchange 15.991 15.393 14.519 20.133 13.890
+Arxiv 16.558 15.638 12.372 17.598 13.082
+Average 21.123 21.676 23.333 22.944 21.736
+Worst-domain 34.242 39.429 38.521 37.393 40.323
+Table7: Domainperplexityfor774MDecoder-onlyLMstrainedfor3Btokens. AutoScalenotably
+achievesthelowestaveragevalidationperplexitywhilealsosignificantlydecreasingworse-domain
+perplexity.
+D.6 AdditionalResultsofSection4.3
+Figure 11 depicts the AutoScale-predicted domain weights for training BERT. It is evident that
+optimaldataquantityforeachdomaingrowsinexponential-stylefunctionswithtrainingdatascale
+wheredatasourceswithdiversesamples(e.g.,WebText)areupweightedrelativetodomainswith
+standardformat(e.g.,ArXiv).
+D.7 RuntimeAnalysis
+TrainingaGPT-2 largemodelfromscratchfor3Btokensrequires15.5hourson8xNVIDIAA100
+40GBSXMGPUsor9hourson8xNVIDIAH10080GBGPUs. Trainingtimeincreaseslinearly
+withthenumberoftrainingtokensonbothtypesofGPUs.
+TrainingBERT-basemodelstakes2hoursforevery18kstepson4xNVIDIAA600048GBGPUs.
+Computationaltimegrowslinearlywiththenumberoftrainingsteps.
+26(a)TrainingDecoder-onlyLMsfor3Btokens. (b)TrainingDecoder-onlyLMsfor5Btokens.
+Figure8: AutoScale-predictedweightsdecreasesvallossatleast25%fasterthananybaselinewith
+upto37%speedup. DespiteLLaMaweightsbeingverydifferentfromuniformweights,theyyield
+highlysimilartrainingefficiencyatthesedatascales.
+Figure 9: Domain Weights used for training 774M Decoder-only LMs for 3B tokens. (Domain
+weightsforData Mixing LawsandDoReMiarefromreferences[6]and[5],respectively,which
+areimplementedonthesamedatasets/datadomainswithhighlysimilarmodelarchitecture/model
+size/tokenizers.)
+TrainingreferencemodelsforDoReMitakesonehourforevery10Kstepson8xNVIDIAA6000
+48GBGPUs. Computationaltimegrowslinearlywiththenumberoftrainingsteps. Similarruntime
+fortrainingproxymodelsforDoReMi.
+27(a)withUniformReferenceWeights (b)withLLaMAReferenceWeights(Default)
+Figure10: DoReMiwithdifferentreferenceweightsandsteps. Trainingproxy/referencemodelsfor
+differentstepsgivesdifferentweights. Itisunclearwhichweightsareoptimal. DoReMirecommends
+200k steps, which equals >100B tokens in the default setup. Since optimization was conducted
+relativetothereferenceweights,referenceweightshaveaprofoundimpactonDoReMi’soutput.
+(a)AutoScale-predictedoptimaldataquan-
+tityforeachdomainastrainingdatascales (b) AutoScale-predicted optimal domain weights as
+up. trainingdatascalesup.
+Figure11: AutoScale-predicteddomainweightsfortrainingEncoder-onlyLMs(BERT).Optimal
+dataquantityforeachdomaingrowsinexponential-stylefunctionswithtrainingdatascale(left)
+wheredatasourceswithdiversesamples(e.g.,WebText)areupweightedrelativetodomainswith
+standardformat(e.g.,ArXiv).
+28
