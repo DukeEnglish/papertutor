@@ -1,0 +1,879 @@
+Self-Taught Evaluators
+TianluWang IliaKulikov∗ OlgaGolovneva∗ PingYu∗
+WeizheYuan JaneDwivedi-Yu RichardYuanzhePang
+MaryamFazel-Zarandi JasonWeston XianLi
+∗equalcontribution
+MetaFAIR
+Abstract which can be costly and time-consuming to col-
+lect,asitrequiresexpertannotationforchallenging
+Model-basedevaluationisattheheartofsuc-
+tasks(e.g.,codingandmathematics). Thisdepen-
+cessful model development – as a reward
+dencyonhuman-generateddataposessignificant
+model for training, and as a replacement for
+human evaluation. To train such evaluators, challenges for scaling to new tasks or evaluation
+the standard approach is to collect a large criteria. Furthermore, as new models inevitably
+amountofhumanpreferencejudgmentsover improveoverolderones,theseexistingannotations
+modelresponses,whichiscostlyandthedata willtypicallybecomeoutdated,asthejudgments
+becomes stale as models improve. In this
+arebasedonannotationsofolder,lessperformant,
+work,wepresentanapproachthataimstoim-
+modelresponses.
+prove evaluators without human annotations,
+Inthiswork,weinsteadexploreaniterativeself-
+using synthetic training data only. Starting
+fromunlabeledinstructions,ouriterativeself- trainingapproachwhichusesnohumanannotated
+improvement scheme generates contrasting preferencesinthetrainingloop,relyingpurelyon
+modeloutputsandtrainsanLLM-as-a-Judgeto syntheticallygenerateddata. Givenaseedmodel,
+producereasoningtracesandfinaljudgments, our method first uses prompting to generate con-
+repeating this training at each new iteration
+trastingsyntheticpreferencepairsforagiveninput,
+usingtheimprovedpredictions. Withoutany
+suchthatoneresponseisdesignedtobeinferiorto
+labeledpreferencedata,ourSelf-TaughtEvalu-
+theother. Next,usingthemodelasanLLM-as-a-
+atorcanimproveastrongLLM(Llama3-70B-
+Judge,wegeneratereasoningtracesandjudgments
+Instruct)from75.4to88.3(88.7withmajority
+vote)onRewardBench. Thisoutperformscom- forthesepairs,whichwecanlabelascorrectornot
+monly used LLM judges such as GPT-4 and given our synthetic preference pair design. After
+matchestheperformanceofthetop-performing trainingonthislabeleddataweobtainasuperior
+rewardmodelstrainedwithlabeledexamples.
+LLM-as-a-Judge,fromwhichwecantheniterate
+thewholeprocessinorderforittoself-improve.
+1 Introduction
+Inourexperiments,startingfromLlama-3-70B-
+Largelanguagemodels(LLMs)relyonstrongeval- Instruct,theproposedmethodimprovestheaccu-
+uators at every stage of the development lifecy- racyonRewardBench(Lambertetal.,2024)from
+cle. Theyareusedattrainingtimeasrewardmod- 75.4to88.7(withmajorityvote,or88.3without).
+els to align with human preferences (Bai et al., This matches or outperforms the performance of
+2022; Ouyang et al., 2022) or for iterative self- reward models derived from the same Llama-3-
+improvement(Yuanetal.,2024),andatinference 70B-Instruct model that uses human annotations,
+timeasanalternativetohumanevaluation(Lietal., for example using the HelpSteer2 dataset (Wang
+2023;ChiangandLee,2023;Wangetal.,2023a; et al., 2024b) of 10k annotations achieves a per-
+Liu et al., 2023). Improvements in evaluation ca- formanceof85.6usingthesameLLM-as-a-Judge
+pabilitieswillthusclearlybenefitthisentirework- setup.
+flow–includingempoweringthescientificresearch
+process itself as we aim to develop better overall 2 RelatedWork
+techniques.
+Building such strong evaluator models usually LLM-basedEvaluators Whiletraditionalevalu-
+reliesonlargeamountsofhigh-qualitypreference ationbenchmarksemployautomatedmetricsthat
+datafromhumanannotationovermodelresponses, requireareferenceanswer(Wangetal.,2019;Ra-
+1
+4202
+guA
+5
+]LC.sc[
+1v66620.8042:viXraSynthetic LLM-as-a-Judge Data Creation Optimization
+Generate good Select
+Prompt
+response correct
+Judge verdicts Judge data
+LLM
+SFT
+Sample training
+judgments
+Generate
+LLM
+similar
+instruction
+Generate bad
+response to Next iteration model
+Figure1: Self-TaughtEvaluatoriterativetrainingscheme.
+jpurkar et al., 2016), these types of benchmarks modelnewskills(Schicketal.,2023;Lanchantin
+canposeseverelimitationswhenevaluatingopen- etal.,2023). Inthecontextofevaluation,synthetic
+endedorcomplexinstructionswheremultiplevalid data has been used to measure tasks such as fac-
+answersarepossible(e.g.,creativewritingandcod- tuality(Weietal.,2024;Fengetal.,2023),safety
+ing). Becausehumanevaluationperresponsecan (Perezetal.,2023;Hubingeretal.,2024),coding
+becostly,manyrecentworkshaveproposedLLMs (Guetal.,2024),andgeneralinstructionfollowing
+aseffectiveevaluators. Thesecomeinseveralfla- (Zengetal.,2024),showingstrongcorrelationwith
+vors: asclassifiersthatoutputscoresdirectly(Zhu real human judgments. The West-of-n approach
+etal.,2023;Wangetal.,2024a)orviaLLM-as-a- (Paceetal.,2024)hasbeenusedtoimprovereward
+Judgepromptingthatcanfirstgenerateachain-of- modelsbyconstructingpreferencepairsusingthe
+thoughtinnaturallanguage,whichhelpsprovide bestandworstscoringpairsfromaninitialmodel.
+explanations for judgments (Zheng et al., 2023). ForLLM-as-a-Judgemodelsspecifically,synthetic
+Responses can also be scored alone (Kim et al., responseshavebeengeneratedpromptingtheLLM
+2023) or pairwise relative to each other (Dubois to produce a given quality response (Kim et al.,
+etal.,2023;Lietal.,2023;Baietal.,2023;Saha 2023).
+etal.,2024). LLMevaluationshowsgreatpromise
+3 Method
+as a scalable proxy for human raters, and in the
+caseofLLM-as-a-Judgeasanexplainableproxyas
+Weconsiderthesettingofpairwiseevaluationusing
+well(Yeetal.,2024;Zhengetal.,2023). However,
+theLLM-as-a-Judgeapproach(Zhengetal.,2023)
+many of these “off-the-shelf” evaluators demon-
+thattakes:
+stratehighvarianceacrossmanytasks(Bavaresco
+etal.,2024),indicatingtheneedforimprovedmeth- • aninput(userinstruction)x;and
+ods.
+• twopossibleassistantresponsesy(A)andy(B)
+totheuserinstructionx;and
+SyntheticData Syntheticdatahasemergedasa
+promising solution for efficiently acquiring train-
+• the evaluation prompt containing the rubric
+ing examples and can be particularly valuable in
+andaskingtoevaluateandchoosethewinning
+settings where real-world data can be hard to ac-
+answer,seee.g.,Figure8.
+cess (e.g., weather data covering all conditions
+(Lam et al., 2023)) or where correct annotations The goal of the LLM-as-a-Judge model is to
+can be challenging to acquire (e.g., coding tasks outputapreferenceofwhichresponsey isbetter:
+(Liuetal.,2024)). Additionally,syntheticdatahas AorB.Inordertodothisitiscommontooutput,
+thebenefitofbeingeasilycustomizabletospecific priortothefinaljudgment,achain-of-thought(or
+requirements,suchasdifferentevaluationcriteria “reasoningchain”),whichisasetofstepsgenerated
+or safety constraints (Kim et al., 2023; El Emam innaturallanguagethathelpsthemodeldecideits
+et al., 2020; Howe et al., 2017). The use of syn- finaljudgment.
+theticdatahasbeenbeneficialinmodelalignment Such models can be used as pairwise reward
+(Leeetal.,2023),improvingtheoriginalmodel’s models to build training data for preference op-
+capabilities (Yuan et al., 2024; Li et al., 2024a; timization, e.g., for training methods like DPO
+Yuetal.,2024;Lietal.,2024b),andteachingthe (Rafailov et al., 2023), Iterative DPO (Xu et al.,
+22023) and Self-Rewarding methods (Yuan et al., 3.1 Initialization
+2024). Theycanalsobeusedforevaluation;e.g.,
+We assume we have access to a pool of user in-
+manypopularbenchmarkleaderboardsarebuiltby
+structions{x }. Eachsamplex caneitherbeone
+i i
+usingafixedLLM-as-a-Judgeevaluationmodel(Li
+singletextinstructionoramulti-turndialoghistory
+etal.,2023)suchasGPT4(Achiametal.,2023).
+ofturnsbetweentheuserandtheassistant,withthe
+Weproposeanovelrecipefortrainingsuchan
+lastturnbeinganinstructionorquestionfromthe
+evaluator. Ouroverallmethodisaniterativetrain-
+user. Instructionstypicallyinvolvedifferentskills
+ing scheme that bootstraps improvements by an-
+suchasgeneralknowledgeandreasoning,coding,
+notatingthecurrentmodel’sjudgmentsusingcon-
+safety,andmathematicalreasoning.
+structed synthetic data – so that the Self-Taught
+Evaluatorismoreperformantonthenextiteration. 3.2 InstructionSelection
+Ouroverallpipelineisthusasfollows:
+Given a pool of human-written user instructions,
+theremaybealargedegreeofnoise,aswellasan
+• Initialization: We assume access to a large
+imbalanceintermsoftopic,variety,difficulty,and
+setofhuman-writtenuserinstructions,e.g.,of
+ability of the model to answer. We therefore aim
+thetypethatiscommonlycollectedinproduc-
+toselectasubsetofinstructionstogeneratehigh-
+tionsystems,andaninitialseedLLM.
+qualitysyntheticresponsesandjudgmentsthatcan
+befurtherusedfortraining.
+• InstructionSelection: Wenextselectachal-
+We classify each input using an LLM into a
+lenging,balanceddistributionofuserinstruc-
+given category, for example coding, reasoning,
+tionsfromtheuncuratedsetbycategorizing
+brainstorming, etc. The precise prompt we use
+themviaLLM.
+isgiveninFigure7. Wearethenfreetoselectdata
+fromwithinthosecategories,andtodiscardcertain
+• ResponsePairConstruction: Foreachuser
+categoriesnotdeemedtobeusefulfortraining.
+instruction(example)wecreateapreference
+pair of two model responses (chosen & re-
+3.3 ResponsePairConstruction
+jected),generatingthemviapromptingsuch
+that the rejected response is likely of lower Foreachinputx i inourcuratedtrainingpool,we
+qualitythanthechosenresponse. next generate preference data involving two re-
+(w) (l)
+sponses y and y where w is expected to be
+i i
+• Iterative Training: We then iterate the fol- preferable (winning) over l (losing). We achieve
+lowingtwosteps: this by generating the data in a synthetic manner
+withoutusinghumanannotation.
+(i) JudgmentAnnotation: Foreachexam-
+Given the instruction x , we first prompt an
+i
+ple, we sample from the current model
+instruction-followingLLMtogenerateabaseline
+up to N times LLM-as-a-Judge gener- response yw as usual. We then prompt the LLM
+i
+atedreasoningtracesandjudgments. If
+to generate a “noisy” version of the original in-
+we find a correct judgment we add that structionx′ = ϕ(x ). Wedothisusingtheprompt
+i i
+exampletoourtrainingset,otherwisewe
+templategiveninFigure2,whereweaskto“gener-
+discardit.
+ateamodifiedinstructionthatishighlyrelevantbut
+(ii) Model Fine-tuning: We fine-tune the notsemanticallyidenticaltotheinstructionabove
+modelonthenewlyconstructedtraining from the user.” We then prompt the LLM for a
+set which yields an updated model for high-quality response yl to x′, which would not
+i i
+thenextiteration. beagoodresponseforx . Thisyieldsasynthetic
+i
+preferenceyw ≻ yl fortheoriginalinputx .
+i i i
+Notethatineachiterationoftrainingthesizeof Thispaireddataisthenusedtoconstructtraining
+thetrainingsetdependsonthequalityofthecurrent examples:
+model. Weexpectthatasthemodelimproves,the (A) (B)
+(x ,y ,y )
+sizeofthetrainingsetwillincreaseaswell,asthe i i i
+modelwillbeabletofindmorecorrectjudgments, wherewerandomizetheorderofwhetherthewin-
+givingthemodelakindofautomaticcurriculum. nerisw = Aorw = B,whichisimportanttodeal
+Wenextdescribeeachofthesestepsindetail. withpositionbiasforLLM-as-a-Judgeinference.
+3PromptTemplateforGeneratingResponsePairswithSyntheticPreference
+Below is a conversation between an user and an AI Assistant.
+{Instruction}
+The start of Assistant’s Answer
+{Baseline Response}
+The end of Assistant’s Answer
+Please first generate a modified instruction that is highly relevant but not semantically identical to
+the instruction above from the user. Then write a high-quality answer which is a good response to the
+modified instruction but not a good response to the original user question. IMPORTANT: Please strictly
+follow the following format:
+User Question Modified
+<provide a modified instruction here>
+The start of Assistant’s answer to the modified instruction
+<provide a high-quality response to the modified instruction>
+The end of Assistant’s answer to the modified instruction
+Figure2:GeneratingSyntheticResponsePairs. Weusethefollowingprompttemplatewhichisusedtogeneratea
+“worseresponse”yl. Givenaninstructionxandbaselineresponseywgeneratedbyaninstruction-followingLLMas
+usual,thispromptisusedtofirstgeneratea“noisy”versionx′oftheoriginalinstructionx,andthenabest-attempt
+yl atrespondingtox′. yl isthentreatedasapoorresponsetox,givingapreferencepairyw ≻yl.
+i i
+3.4 JudgmentAnnotation 4 Experiments
+Our LLM-as-a-Judge model is used to gener- 4.1 ExperimentalSetup
+ate evaluation judgments (reasoning chains and
+Training. Our initial model M is initialized
+verdicts) {j } for each training example e := 0
+i i
+from Llama3-70B-Instruct. In each iteration i =
+(A) (B)
+(x ,y ,y ) in the following manner: for a
+i i i 1,...T,weusemodelM fromthepreviousit-
+i−1
+given input e , we collect N diverse evaluations
+i erationtogeneratesyntheticpreferencesfollowed
+J := {j1,...,jN} by sampling from the model.
+i i by judgments on the training data, and then fine-
+WethenapplyrejectionsamplingtofilterJ byre-
+tuneLlama3-70B-Instructagain. Weusefairseq2
+movingjnwhenthefinalverdictdisagreeswiththe
+i library(Balioglu,2023)forinstructionfinetuning
+groundtruthlabeling,derivedfromSubsection3.3.
+andvLLM(Kwonetal.,2023)forinference. Dur-
+Wethenselectasinglecorrectreasoningchainand
+ingtrainingthenegativelog-likelihoodlossisonly
+verdictatrandomfromthepoolofcorrectsolutions.
+appliedtotheevaluationpart,i.e.,j ofthetraining
+i
+If no such judgment exists (J is empty) then we
+example. Traininghyperparametersareprovided
+discardtheexample.
+inTable7. Modelselectionisdoneusingacombi-
+Thisnowallowsustoconstructourfinaltraining
+nationofpairwisejudgmentaccuracyandposition
+examplesofsyntheticpreferencesforfine-tuning:
+bias computed over the held out set. Sampling
+parameters used for generations are provided in
+(A) (B)
+((x i,y
+i
+,y
+i
+),j i). Table8.
+Instructions and Responses. We start with a
+3.5 ModelFine-tuning(IterativeTraining)
+largepoolofhuman-writteninstructions{x }from
+i
+Our Self-Taught Evaluator (LLM-as-a-Judge the WildChat dataset (Zhao et al., 2024). To per-
+model)isfirstinitializedwiththeseedLLM.The formpromptselection,weannotatethecategoryof
+model is then trained in an iterative manner. At each instruction with the Mixtral 22Bx8 Instruct
+eachiteration,weannotatethetrainingexamples model, using the template in Figure 7 and select
+withjudgmentsasdescribedinSubsection3.4us- 20,582examplesinthereasoningcategory,aswe
+ing the current model, giving training examples expect these to be challenging inputs. For the se-
+{(x ,y(A) ,y(B) ,j )}. These are used to train the lectedinputswegeneratesyntheticresponsesyw
+i i i i i
+nextiteration’smodelbyfine-tuning. Notethatwe andyl usingMixtral22Bx8InstructfollowingSub-
+i
+initializefromtheseedmodelateachiteration. section3.3andFigure2.
+4Judge Annotation. For each training example, in the “harmless_base" training split. Then
+we sample N = 15 judgments from the model we take human preferences provided by the
+M andretainonepositivesamplej perexam- dataset as ground truth to perform rejection
+i−1 i
+ple. Then over the entire dataset we sample the samplingtoconstructjudgments.
+sameamountofexamplesfromdifferentlabels(“A
+4.3 Evaluation
+isbetter”,“Bisbetter”)toensurebalancedtraining.
+Judgements for training M were sampled from WeevaluatetheaccuracyofourSelf-TaughtEvalu-
+0
+Mixtral22Bx8Instruct,andfromtheLlamamodel atormodelonthefollowingbenchmarks:
+beingtrainedinallsubsequentiterations.
+• RewardBench(Lambertetal.,2024). Weuse
+The training data is constructed as (<system
+thestandardevaluationprotocolprovidedby
+(A) (B)
+prompt>, {(x ,y ,y ,j )}). We use the stan-
+i i i i theleaderboard.
+dardsystempromptfromMT-BenchandReward-
+BenchasshowninFigure8. • MT-Bench (Zheng et al., 2023). We report
+agreementratewithhumanjudgmentswhen
+MajorityVoteInference. AsLLM-as-a-Judge
+exampleswithtiesareexcluded.
+uses chain-of-though reasoning chains generated
+bytheLLMfollowedbyaverdict,itisknownthat • HelpSteer2(Wangetal.,2024b). Weevaluate
+majority vote inference can yield improvements onthevalidationsplit.
+in these cases (Wang et al., 2023b). At inference
+timewhenevaluatingfinalperformancewesample 5 Results
+generationsN times,andtakethefinaljudgment
+5.1 RewardBench
+tobethemostcommonverdict.
+ResultsonRewardBencharegiveninTable1. We
+4.2 OtherDataSources findthatourSelf-TaughtEvaluatorwhichistrained
+iterativelyonsyntheticdatawithoutanyannotated
+To understand the effectiveness of the proposed
+preference labels significantly improves over the
+method, we generate synthetic judgments using
+seed Llama3-70B-Instruct model, matching top-
+thesameapproachbutbasedonthefollowingdata
+performing reward models trained with labeled
+sources:
+data. Ourapproachimprovesitsresultsacrosstrain-
+• HelpSteer2 (Wang et al., 2024b). We gen- ingiterations,andachievesanoverallscoreof88.3
+erate evaluations conditioned on the scores oniteration5,whiletheseedmodelitstartsfrom
+ofhelpfulness,correctness, coherence, com- obtains75.4. TraininganLLM-as-a-Judgeinasim-
+plexity and verbosity provided the dataset. ilarmannerstartingfromthesameseedusingthe
+We use the aggregated score to derive labeledHelpSteer2dataweonlyobtain85.6,hence
+the ground truth preference for each ex- weobtainsuperiorperformancewithoutusinghu-
+ample using the recommended weighting man labeled data. Compared to the seed model,
+[0.65,0.8,0.45,0.55,−0.4]1. we observe improvements using our approach in
+evaluating instructions in the Chat Hard, Safety
+• GSM8K (Cobbe et al., 2021). We sample
+and Reasoning categories, while being worse on
+fromaninstruction-followingmodelmultiple
+theeasierChatcategory–perhapsbecauseourun-
+timestogetyw whenthefinalsolutionagrees
+labeledtrainingdatafocusedthemodelonharder
+withthegroundtruthandyl viseversa.
+examples.
+• Coding instructions from WildChat. Simi- Improvingresultsfurtherwithmajorityvoting
+lar to the “reasoning” prompts we selected AsalsoshowninTable1,with32-samplemajority
+fromWildChatusedinthemainexperiment, voting,ourthirditerationofSelf-TaughtEvaluator
+wealsoexperimentedwithpromptsannotated modelreachesanoverallperformanceof88.7on
+withthe“Coding”category. RewardBench,outperformingmanyotherexisting
+rewardmodels.
+• hh_rlhf(Baietal.,2022). Wegenerateevalu-
+ationsonthepromptsandresponsesprovided 5.2 MT-Bench
+WereportresultsonMT-BenchinTable2. Unlike
+1Recommended weighting was taken from
+https://huggingface.co/nvidia/Llama3-70B-SteerLM-RM. RewardBench,theMT-Benchdatasetcontainstie
+5Model Overall Chat ChatHard Safety Reasoning
+Llama-3-70B-Instruct(seed) 75.4 97.6 58.9 69.2 78.5
+Self-TaughtEvaluator,trainedonsyntheticdataonly
+Iteration1 83.9 98.3 69.0 85.7 82.6
+Iteration2 86.0 97.5 75.4 89.5 81.7
+Iteration3 87.5 97.2 79.1 89.7 83.9
+Iteration4 87.7 98.0 80.3 90.5 82.2
+Iteration5 88.3 96.6 84.2 91.5 81.0
+w/majorityvotingusing32samples 88.7 96.9 84.0 91.5 82.5
+BaselineswithLabeledData
+Llama-3-70B-Instructw/HelpSteer2,LLM-as-a-Judge 85.6 96.9 70.0 88.8 86.7
+nvidia/Llama370BRMwithHelpSteer2,classifier* 88.8 91.3 80.3 92.8 90.7
+OtherSoTALLM-as-a-Judgebaselinemodels
+GPT40125* 84.3 95.3 74.3 87.2 86.9
+Gemini1.5Pro0514* 88.1 92.3 80.6 87.5 92.0
+Llama3.1-405B-Instruct 83.7 98.0 75.1 74.7 86.8
+Llama3.1-70B-Instruct 82.2 97.8 69.7 76.3 85.2
+Table1: RewardBenchResults. OurSelf-TaughtEvaluatortrainedonsyntheticdatawithoutanyhumanannotated
+preferencelabelsmatchestop-performingrewardmodelstrainedwithlabeleddata. Modelsmarkedwith(*)are
+takenfromtheRewardBenchleaderboard.
+Model AgreementwithHuman
+Llama-3-70B-Instruct(seed) 77.7
+Self-TaughtEvaluator,trainedonsyntheticdataonly
+Iteration1 79.0
+Iteration2 78.7
+Iteration3 78.9
+Iteration4 77.5
+Iteration5 78.9
+OtherSoTALLM-as-a-Judgebaselinemodels
+GPT4-0125 79.1
+Table2: MT-BenchResults. OurSelf-TaughtEvaluatortrainedonsyntheticdatawithoutanyhumanannotated
+preferencelabelsperformsonparwithGPT-4judgments.
+Model 0-1Acc 1-0Acc AvgAcc Position-consistentAcc
+Llama-3-70B-Instruct(seed) 65.2 65.8 65.5 56.5
+Self-TaughtEvaluator,trainedonsyntheticdataonly
+Iteration1 68.1 68.7 68.4 59.4
+Iteration2 69.6 69.4 69.5 58.8
+Iteration3 70.3 71.2 70.8 61.1
+Iteration4 71.0 71.7 71.4 61.9
+Iteration5 71.6 70.3 71.0 60.6
+Table3: HelpSteer2results. Iterativetrainingonsyntheticpreferencesimprovesposition-consistentaccuracy
+comparedtoLlama3-70B-Instruct,measuredontheHelpSteer2(Wangetal.,2024b)validationsplit.
+Sourcefor
+Model syntheticpreferences Overall Chat ChatHard Safety Reasoning
+Llama-3-70B-Instruct 75.4 97.6 58.9 69.2 78.5
+safety(hh_rlhf) 79.6 97.2 55.4 87.0 78.8
+math(GSM8K) 79.3 96.1 58.8 79.4 83.0
+coding(WildChat) 79.4 96.6 55.9 85.3 79.7
+reasoning(WildChat) 83.5 97.5 70.6 84.2 81.6
+Table4: Supervisedfine-tuningwithsyntheticpreferencesfromdifferentsourcesimprovesLlama-3-70B-Instruct
+onvariouscategories,asmeasuredonRewardBench. Largestimprovementineachcategoryishighlightedinbold.
+6votes(AandBareconsideredequallygood). Since
+ourmodelsaretrainedtogivebinarydecisions,we
+onlyreporttheagreementonnon-tieexamples. For
+eachpairofresponsesAandB,wetesttwoorders:
+whereresponseAappearsfirstandresponseBap-
+pears first, and average the results. We find that
+our Self-Taught Evaluator again outperforms the
+Llama3-70B-Instructseedmodel,andperformson
+parwithGPT4-0125.
+Figure3: Distributionofcuratedtrainingsetofselected
+5.3 HelpSteer2 instructionscomparedtothefullWildChatdataset.
+ResultsontheHelpSteer2validationsetaregiven
+inTable3. Wereporttheaverageaccuracyoftwo
+orders and three seeds by swapping the response
+order in a similar manner, as well as reporting
+both orders separately (right answer first or sec-
+ond)totestforpositionbias. Wefurthercompute
+the position-consistent accuracy, treating a judg-
+mentasincorrectwhenamodelhasdifferentpre-
+Figure 4: Distribution of inferred complexities of cu-
+dictionsonthetwoorderings. Weusethehuman
+ratedtrainingdataversusallinstructionsinWildChat.
+labelsfromtheHelpsteer2datasetandtreatthere-
+sponse with higher summed scores as the better
+response. We find that our Self-Taught Evalua-
+tor method improves both average accuracy and
+position-consistentaccuracycomparedtotheseed
+Llama-3-70B-Instructmodel.
+6 AblationsandAnalysis
+6.1 SyntheticDatafromOtherSources
+Figure 5: Distribution of estimated output lengths of
+InTable4,wecompareSelf-TaughtEvaluatormod- curatedtrainingdataversusallinstructionsinWildChat.
+els trained on synthetic preferences constructed
+from different sources. We found data sources
+focusingondifferentskills,suchascoding,mathe-
+maticalreasoning,etc. arealleffectiveinturning
+astronginstruction-followingLLMintoastrong
+LLM-as-a-Judge. Intuitively, we find that data
+sources generally improve the categories in Re-
+wardBenchthatarerelatedtotheirdistribution.
+6.2 SyntheticBadResponseGeneration
+Inourexperimentswegeneratesyntheticdataby
+first generating a similar instruction, and then a
+goodresponseforthesimilarinstruction–withthe
+aim that this will be a bad response for the orig-
+inal instruction. An alternative is to just prompt
+anLLMtogenerateabadresponsetotheoriginal
+instruction directly. We use the prompt template
+Figure6: Distributionofinferredcategoriesofcurated
+giveninFigure10andotherwiseconducttraining trainingdataversusallinstructionsinWildChat.
+as before on the same set of reasoning-based in-
+structions. ThisapproachobtainsaRewardBench
+overall score of 80.7, which still works – but is
+7Model Overall Chat ChatHard Safety Reasoning
+Llama-3-70B-Instruct(seed) 75.4 97.6 58.9 69.2 78.5
+Self-TaughtEvaluator,trainedonlabeledHelpSteer2preferences
+Iteration1 85.6 96.9 70.0 88.8 86.7
+Iteration2 86.3 96.1 72.4 91.1 85.7
+Iteration3 87.0 95.0 74.2 91.2 87.8
+Iteration4 87.0 94.1 77.2 91.6 85.1
+Table 5: Iterative training with labeled data also shows improvement on RewardBench. However, it does not
+outperformiterativetrainingwithsyntheticpreferences.
+synthetic:HelpSteer2ratio Overall Chat ChatHard Safety Reasoning
+1:0 0.835 0.975 0.706 0.842 0.816
+0:1 0.856 0.969 0.700 0.888 0.867
+1:1 0.842 0.972 0.681 0.881 0.836
+1:2 0.858 0.972 0.711 0.891 0.857
+1:5 0.847 0.975 0.681 0.889 0.844
+2:1 0.833 0.972 0.689 0.847 0.823
+5:1 0.858 0.972 0.726 0.880 0.853
+Table6: Mixingdatasourcesindifferentproportionscanimproveperformanceofthefine-tunedmodel. Synthetic
+preferencedataisgeneratedwiththeLlama3-70B-Instructmodel.
+worse than using our proposed approach, which thetic preferences (out-of-distribution). We then
+achieves83.8. report evaluation results on RewardBench. The
+resultsshowthatoverallthemodelsretainstrong
+6.3 ComparisonofSyntheticDatawith
+performanceacrossdifferentdatamixingweights,
+HumanAnnotatedData
+withslightimprovementsonoverallaccuracy.
+Weconductedthesameiterativetrainingusingla-
+beledpreferencedatafromHelpSteer2(Wangetal.,
+6.5 Instructioncomplexity
+2024b), rather than synthetic data. On Reward-
+Bench, as is shown in Table 5, the improvement
+We analyze the length distribution of the curated
+fromeachiterationissmallerandthefinalmodel
+trainingsetofselectedinstructionsinFigure3. The
+didnotoutperformiterativetrainingonsynthetic
+datasethasalong-taildistributionofinputlength,
+preferences. We note that these experiments use
+withmostoftheexampleslessthan500tokens. In
+data to train an LLM-as-a-Judge. Other results
+contrast, the full dataset (i.e., the full data before
+intheliteraturehaveusedtheHelpSteer2totrain
+the instruction selection step of Subsection 3.2)
+classifier-basedrewardmodelswithslightlybetter
+hasaclusterofverylonginstructions,containing
+resultsonRewardBench,e.g.,obtaining88.8using
+content such as long-form coding instructions or
+Llama-3-70B,seeTable1.
+transcripts.
+6.4 CombiningSyntheticandHumanLabeled
+WefurtherinstructLlama-3-70B-Instructtoin-
+PreferenceData
+ferthecomplexity(usingascoreof1–5)andcate-
+Wecomparehowcombiningsyntheticpreference goryofeachinputinstruction,aswellasthelength
+data with human labelled preference data affects oftheexpectedoutput,followingtheprocedurein
+modelperformance. Inparticular,wecombinesyn- Yuan et al. (2024). From Figure 4 and Figure 6,
+theticpreferencesgeneratedfromreasoningWild- weseethatthecurateddatasethasmorecomplex
+ChatpromptswiththehumanlabeledHelpSteer2 instructions involving logical reasoning/science
+dataset(trainsplit)andreportperformanceinTa- whereasthefulldatasethasagreaterproportionfo-
+ble6. Wecomparetofirst-iterationmodelstrained cusedonrelationshipsandentertainment. Finally,
+on single data source, and select the best check- inFigure5weseethattheanticipatedlengthofthe
+pointforjointtrainingusingthevalidationsplitof responseishigherforthefulldatasetthanthecu-
+HelpSteer2andholdoutsetofsyntheticpreferences ratedone,perhapsbecauseofthegreaterfrequency
+(in-distribution), as well as safety and code syn- oflengthy,andsometimesrepetitiveinstructions.
+87 Conclusion DiogoAlmeida,JankoAltenschmidt,SamAltman,
+ShyamalAnadkat,etal.2023. GPT-4technicalre-
+We present a scalable approach to build a strong port. arXivpreprintarXiv:2303.08774.
+generalistevaluatortoperformmodel-basedeval-
+Yuntao Bai, Andy Jones, Kamal Ndousse, Amanda
+uation of LLM outputs. Our method constructs
+Askell, AnnaChen, NovaDasSarma, DawnDrain,
+syntheticpreferencesoverpairsofresponseswith- StanislavFort,DeepGanguli,TomHenighan,etal.
+outusinganyhumanannotation. OurSelf-Taught 2022. Trainingahelpfulandharmlessassistantwith
+evaluatorwithiterativetrainingoverthesesynthetic reinforcementlearningfromhumanfeedback. arXiv
+preprintarXiv:2204.05862.
+preferencesgreatlybooststheaccuracyofastrong
+seedLLM(Llama3-70B-Instruct)asanevaluator, Yushi Bai, Jiahao Ying, Yixin Cao, Xin Lv, Yuze
+from75.4to88.7onRewardBench,anewstate-of- He,XiaozhiWang,JifanYu,KaishengZeng,Yijia
+Xiao,HaozheLyu,JiayinZhang,JuanziLi,andLei
+the-artforgenerativeLLM-as-a-Judgemethods.
+Hou.2023. Benchmarkingfoundationmodelswith
+language-model-as-an-examiner. InThirty-seventh
+8 Limitations
+ConferenceonNeuralInformationProcessingSys-
+temsDatasetsandBenchmarksTrack.
+GenerativeLLM-as-a-Judgemodelsusuallyhave
+longeroutputsandthushigherinferencecostthan CanBalioglu.2023. fairseq2.
+rewardmodelsthatsimplyoutputascore,asLLM-
+AnnaBavaresco,RaffaellaBernardi,LeonardoBerto-
+as-a-Judge typically first generates a reasoning
+lazzi, Desmond Elliott, Raquel Fernández, Albert
+chain. Further,wehaveusedrelativelylargeLLMs Gatt, Esam Ghaleb, Mario Giulianelli, Michael
+inthiswork(70Bparameters)andmadenostudy Hanna, Alexander Koller, et al. 2024. LLMs in-
+of whether our approach works on smaller mod- stead of human judges? A large scale empirical
+studyacross20NLPevaluationtasks. arXivpreprint
+els. Since we use a seed model to generate first
+arXiv:2406.18403.
+syntheticpreferencesduringouriterativetraining
+scheme,oneoftheassumptionsisthatthemodelis Cheng-HanChiangandHung-yiLee.2023. Canlarge
+languagemodelsbeanalternativetohumanevalua-
+capableofgeneratingreasonableevaluations. Thus,
+tions? InProceedingsofthe61stAnnualMeetingof
+ourapproachislimitedbyhavingacapableinstruc-
+theAssociationforComputationalLinguistics(Vol-
+tionfine-tunedmodelwhichisalreadyreasonably ume1: LongPapers),pages15607–15631,Toronto,
+alignedtohuman(orlegal/policy)preferences. Fur- Canada.AssociationforComputationalLinguistics.
+thermore,weonlyinvestigatedandreportedmet-
+Karl Cobbe, Vineet Kosaraju, Mohammad Bavarian,
+ricsinvolvingevaluationaccuracyimprovements, MarkChen,HeewooJun,LukaszKaiser,Matthias
+rather than computational requirement concerns. Plappert, Jerry Tworek, Jacob Hilton, Reiichiro
+Wealsoonlyinvestigatedpairwiseevaluation,i.e., Nakano,etal.2021. Trainingverifierstosolvemath
+wordproblems. arXivpreprintarXiv:2110.14168.
+comparingtworesponses,whereasitisalsopossi-
+ble to use LLM-as-a-Judge models (or any other YannDubois,XuechenLi,RohanTaori,TianyiZhang,
+model)toevaluatethequalityofsingleresponses, IshaanGulrajani,JimmyBa,CarlosGuestrin,Percy
+Liang,andTatsunoriHashimoto.2023. AlpacaFarm:
+e.g.,givingthemascoreoutof5or10,ratherthan
+Asimulationframeworkformethodsthatlearnfrom
+apairwiseAvsBjudgment. Weleaveevaluating
+humanfeedback. InThirty-seventhConferenceon
+singleresponsestofuturework. NeuralInformationProcessingSystems.
+9 Acknowledgements KhaledElEmam, LucyMosquera, andRichardHop-
+troff.2020. Practicalsyntheticdatageneration: bal-
+WethankJingXuandJaniceLanfordiscussions ancing privacy and the broad availability of data.
+O’ReillyMedia.
+andsupportintheprojectoverall,andCanBalioglu
+forhisfeedbackandsupportinLLMtrainingusing Shangbin Feng, Vidhisha Balachandran, Yuyang Bai,
+the fairseq2 (Balioglu, 2023) library. We thank and Yulia Tsvetkov. 2023. FactKB: Generaliz-
+ablefactualityevaluationusinglanguagemodelsen-
+Nathan Lambert for the help with RewardBench,
+hancedwithfactualknowledge. InProceedingsof
+andYuntianDengandYejinChoiforthehelpwith
+the2023ConferenceonEmpiricalMethodsinNatu-
+WildChat. ralLanguageProcessing,pages933–952.
+Alex Gu, Baptiste Rozière, Hugh Leather, Armando
+References Solar-Lezama,GabrielSynnaeve,andSidaIWang.
+2024. CRUXEval: A benchmark for code reason-
+JoshAchiam,StevenAdler,SandhiniAgarwal,Lama ing, understanding and execution. arXiv preprint
+Ahmad, Ilge Akkaya, Florencia Leoni Aleman, arXiv:2401.03065.
+9BillHowe,JuliaStoyanovich,HaoyuePing,Bernease TatsunoriBHashimoto.2023. AlpacaEval: Anauto-
+Herman, and Matt Gee. 2017. Synthetic data for maticevaluatorofinstruction-followingmodels.
+socialgood. arXivpreprintarXiv:1710.08874.
+Changshu Liu, Shizhuo Dylan Zhang, and Reyhaneh
+EvanHubinger,CarsonDenison,JesseMu,MikeLam- Jabbarvand. 2024. CodeMind: A framework to
+bert, Meg Tong, Monte MacDiarmid, Tamera Lan- challengelargelanguagemodelsforcodereasoning.
+ham, Daniel M Ziegler, Tim Maxwell, Newton arXivpreprintarXiv:2402.09664.
+Cheng,etal.2024. Sleeperagents: Trainingdecep-
+tivellmsthatpersistthroughsafetytraining. arXiv Yang Liu, Dan Iter, Yichong Xu, Shuohang Wang,
+preprintarXiv:2401.05566. Ruochen Xu, and Chenguang Zhu. 2023. G-eval:
+NLG evaluation using GPT-4 with better human
+Seungone Kim, Jamin Shin, Yejin Cho, Joel Jang, alignment. InProceedingsofthe2023Conference
+Shayne Longpre, Hwaran Lee, Sangdoo Yun, onEmpiricalMethodsinNaturalLanguageProcess-
+SeongjinShin,SungdongKim,JamesThorne,etal. ing, pages 2511–2522, Singapore. Association for
+2023. Prometheus: Inducingfine-grainedevaluation ComputationalLinguistics.
+capabilityinlanguagemodels. InTheTwelfthInter-
+nationalConferenceonLearningRepresentations. LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,
+CarrollWainwright,PamelaMishkin,ChongZhang,
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying SandhiniAgarwal,KatarinaSlama,AlexRay,etal.
+Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. 2022. Training languagemodelsto followinstruc-
+Gonzalez, Hao Zhang, and Ion Stoica. 2023. Effi- tions with human feedback. Advances in Neural
+cientmemorymanagementforlargelanguagemodel InformationProcessingSystems,35:27730–27744.
+servingwithpagedattention. InProceedingsofthe
+ACMSIGOPS29thSymposiumonOperatingSystems AlizéePace, JonathanMallinson, EricMalmi, Sebas-
+Principles. tianKrause,andAliakseiSeveryn.2024. West-of-N:
+Syntheticpreferencegenerationforimprovedreward
+RemiLam,AlvaroSanchez-Gonzalez,MatthewWill- modeling. InICLR2024WorkshoponNavigating
+son,PeterWirnsberger,MeireFortunato,FerranAlet, andAddressingDataProblemsforFoundationMod-
+Suman Ravuri, Timo Ewalds, Zach Eaton-Rosen, els.
+WeihuaHu,etal.2023. Learningskillfulmedium-
+Ethan Perez, Sam Ringer, Kamile Lukosiute, Karina
+rangeglobalweatherforecasting. Science(NewYork,
+Nguyen, Edwin Chen, Scott Heiner, Craig Pettit,
+NY),382(6677):1416–1421.
+Catherine Olsson, Sandipan Kundu, Saurav Kada-
+Nathan Lambert, Valentina Pyatkin, Jacob Morrison, vath,etal.2023. Discoveringlanguagemodelbehav-
+LJ Miranda, Bill Yuchen Lin, Khyathi Chandu, iorswithmodel-writtenevaluations. InFindingsof
+NouhaDziri,SachinKumar,TomZick,YejinChoi, theAssociationforComputationalLinguistics: ACL
+et al. 2024. RewardBench: Evaluating reward 2023,pages13387–13434.
+models for language modeling. arXiv preprint
+RafaelRafailov,ArchitSharma,EricMitchell,Christo-
+arXiv:2403.13787.
+pherDManning,StefanoErmon,andChelseaFinn.
+Jack Lanchantin, Shubham Toshniwal, Jason E We- 2023. Directpreferenceoptimization:Yourlanguage
+ston,ArthurSzlam,andSainbayarSukhbaatar.2023. modelissecretlyarewardmodel. InThirty-seventh
+Learning to reason and memorize with self-notes. ConferenceonNeuralInformationProcessingSys-
+InThirty-seventhConferenceonNeuralInformation tems.
+ProcessingSystems.
+PranavRajpurkar,JianZhang,KonstantinLopyrev,and
+HarrisonLee,SamratPhatale,HassanMansoor,Kellie Percy Liang. 2016. SQuAD: 100,000+ questions
+Lu, Thomas Mesnard, Colton Bishop, Victor Car- formachinecomprehensionoftext. InProceedings
+bune,andAbhinavRastogi.2023. RLAIF:Scaling of the 2016 Conference on Empirical Methods in
+reinforcementlearningfromhumanfeedbackwithai NaturalLanguageProcessing,pages2383–2392.
+feedback. arXivpreprintarXiv:2309.00267.
+SwarnadeepSaha,OmerLevy,AsliCelikyilmaz,Mohit
+Qintong Li, Leyang Cui, Xueliang Zhao, Lingpeng Bansal,JasonWeston,andXianLi.2024. Branch-
+Kong, and Wei Bi. 2024a. GSM-Plus: A compre- solve-mergeimproveslargelanguagemodelevalu-
+hensivebenchmarkforevaluatingtherobustnessof ation and generation. In Proceedings of the 2024
+llmsasmathematicalproblemsolvers. arXivpreprint Conference of the North American Chapter of the
+arXiv:2402.19255. AssociationforComputationalLinguistics: Human
+Language Technologies (Volume 1: Long Papers),
+XianLi,PingYu,ChuntingZhou,TimoSchick,Omer pages8345–8363.
+Levy,LukeZettlemoyer,JasonEWeston,andMike
+Lewis.2024b. Self-alignmentwithinstructionback- TimoSchick,JaneDwivedi-Yu,RobertoDessi,Roberta
+translation. InTheTwelfthInternationalConference Raileanu,MariaLomeli,EricHambro,LukeZettle-
+onLearningRepresentations. moyer,NicolaCancedda,andThomasScialom.2023.
+Toolformer: Languagemodelscanteachthemselves
+XuechenLi,TianyiZhang,YannDubois,RohanTaori, tousetools. InThirty-seventhConferenceonNeural
+IshaanGulrajani,CarlosGuestrin,PercyLiang,and InformationProcessingSystems.
+10Alex Wang, Amanpreet Singh, Julian Michael, Felix The Twelfth International Conference on Learning
+Hill, Omer Levy, and Samuel R. Bowman. 2019. Representations.
+GLUE: A multi-task benchmark and analysis plat-
+formfornaturallanguageunderstanding. InInterna- WentingZhao,XiangRen,JackHessel,ClaireCardie,
+tionalConferenceonLearningRepresentations. YejinChoi,andYuntianDeng.2024. WildChat: 1M
+ChatGPTinteractionlogsinthewild. InTheTwelfth
+HaoxiangWang,WeiXiong,TengyangXie,HanZhao, International Conference on Learning Representa-
+and Tong Zhang. 2024a. Interpretable preferences tions.
+viamulti-objectiverewardmodelingandmixture-of-
+experts. arXivpreprintarXiv:2406.12845. LianminZheng,Wei-LinChiang,YingSheng,Siyuan
+Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin,
+JiaanWang,YunlongLiang,FandongMeng,Zengkui Zhuohan Li, Dacheng Li, Eric Xing, Hao Zhang,
+Sun,HaoxiangShi,ZhixuLi,JinanXu,JianfengQu, JosephE.Gonzalez,andIonStoica.2023. Judging
+andJieZhou.2023a. IsChatGPTagoodNLGevalu- LLM-as-a-judgewithMT-benchandchatbotarena.
+ator? apreliminarystudy. InProceedingsofthe4th InThirty-seventhConferenceonNeuralInformation
+New Frontiers in Summarization Workshop, pages ProcessingSystemsDatasetsandBenchmarksTrack.
+1–11,Singapore.AssociationforComputationalLin-
+guistics. Banghua Zhu, Evan Frick, Tianhao Wu, Hanlin Zhu,
+andJiantaoJiao.2023. Starling-7B:IncreasingLLM
+XuezhiWang,JasonWei,DaleSchuurmans,QuocVLe, Helpfulness&HarmlessnesswithRLAIF.
+EdH.Chi,SharanNarang,AakankshaChowdhery,
+andDennyZhou.2023b. Self-consistencyimproves A Appendix
+chainofthoughtreasoninginlanguagemodels. In
+TheEleventhInternationalConferenceonLearning A.1 PromptTemplates
+Representations.
+Weprovidetheprompttemplatesusedforannotat-
+Zhilin Wang, Yi Dong, Olivier Delalleau, Jiaqi ingandselectinginstructions(Figure7),annotating
+Zeng, Gerald Shen, Daniel Egert, Jimmy J Zhang,
+judgments with synthetic preferences (Figure 8),
+MakeshNarsimhanSreedhar,andOleksiiKuchaiev.
+andgeneratingablationsyntheticpreferencedata
+2024b. HelpSteer2: Open-source dataset for train-
+ingtop-performingrewardmodels. arXivpreprint withbadresponses(Figure10). Figure9illustrates
+arXiv:2406.08673. antrainingexamplebasedonsyntheticpreference
+data.
+JerryWei,ChengrunYang,XinyingSong,YifengLu,
+Nathan Hu, Dustin Tran, Daiyi Peng, Ruibo Liu,
+A.2 MoreTrainingandEvaluationDetails
+DaHuang,CosmoDu,etal.2024. Long-formfac-
+tuality in large language models. arXiv preprint
+arXiv:2403.18802. Name Value
+max_seq_len 4096
+JingXu,AndrewLee,SainbayarSukhbaatar,andJason max_num_tokens 8192
+Weston.2023. Somethingsaremorecringethanoth- model llama3_70b_instruct
+ers: Iterativepreferenceoptimizationwiththepair- dtype bfloat16
+wisecringeloss. arXivpreprintarXiv:2312.16682. data_parallelism fsdp
+tensor_parallel_size 8
+SeonghyeonYe,DoyoungKim,SungdongKim,Hyeon- activation_checkpointing true
+lr 1.0e-06
+bin Hwang, Seungone Kim, Yongrae Jo, James
+betas 0.9,0.95
+Thorne,JuhoKim,andMinjoonSeo.2024. FLASK:
+final_lr_ratio 0.2
+Fine-grained language model evaluation based on
+weight_decay 0.1
+alignment skill sets. In The Twelfth International
+num_lr_warmup_steps 100
+ConferenceonLearningRepresentations. gradient_accumulation 1
+max_num_data_epochs 2
+Longhui Yu, Weisen Jiang, Han Shi, Jincheng YU, checkpoint_every_n_steps 100
+ZhengyingLiu,YuZhang,JamesKwok,ZhenguoLi, seed 2
+AdrianWeller,andWeiyangLiu.2024. Metamath:
+Bootstrapyourownmathematicalquestionsforlarge Table 7: Training hyper-parameters used during fine-
+languagemodels. InTheTwelfthInternationalCon- tuning.
+ferenceonLearningRepresentations.
+WeizheYuan,RichardYuanzhePang,KyunghyunCho,
+Sainbayar Sukhbaatar, Jing Xu, and Jason Weston.
+2024. Self-rewarding language models. arXiv
+preprintarXiv:2401.10020.
+ZhiyuanZeng,JiatongYu,TianyuGao,YuMeng,Tanya
+Goyal,andDanqiChen.2024. Evaluatinglargelan-
+guagemodelsatevaluatinginstructionfollowing. In
+11PromptTemplateforSelectingInstructions
+I have an instruction below that I would like you to perform three steps of analysis about the instruction:
+<instruction> {instruction} </instruction>
+Firstly, categorize the instruction above into one of the following categories:
+Coding
+Mathematical reasoning
+Asking for Advice
+Brainstorming
+Classification
+Closed Question Answering
+Creative Writing
+Extraction
+Inhabiting a Character/Persona
+Open Question Answering
+Rewriting
+Summarization
+Knowledge and Reasoning
+Humanity, History or Social Studies
+Other
+Secondly, score the instruction in terms of complexity: how complex you think it is to answer
+from 1-10 (where 10 is a complex question whereby first reasoning or breaking down the question into
+multiple subquestions for example might help improve the answer).
+Thirdly, indicate how long you think the response to the instruction should be, either (a) 1 sen-
+tence, (b) 1-3 sentences, (c) 1 paragraph, (d) 2 paragraphs, or (e) 3 or more paragraphs.
+Provide your final response in the following format:
+Category: <one of the categories above>
+Complexity: <score out of 10>
+Length: <choose from (a) to (e)>. DO NOT provide the actual response.
+Figure7: PrompttemplateforSelectingInstructions. Wepromptaninstructionfollowingmodeltoannotatethe
+categoryofeachinstructioninordertocurateourtrainingdatainstructions.
+Stage Generationfor Temperature Topp
+Training Judgment 0.7 0.9
+Evaluation MT-Bench 0.0 1.0
+Evaluation RewardBench(RB) 0.0 1.0
+Evaluation RBw/majorityvoting 0.7 0.9
+Evaluation Helpsteer2validation 0.7 0.9
+Table8: Samplingparametersusedduringgenerations
+ateachstageoftrainingandevaluation.
+12PromptTemplateforJudgmentAnnotation
+Please act as an impartial judge and evaluate the quality of the responses provided by two AI assistants
+to the user question displayed below. You should choose the assistant that follows the user’s instructions
+and answers the user’s question better. Your evaluation should consider factors such as the helpfulness,
+relevance, accuracy, depth, creativity, and level of detail of their responses. Begin your evaluation by
+comparing the two responses and provide a short explanation. Avoid any position biases and ensure that
+the order in which the responses were presented does not influence your decision. Do not allow the length
+oftheresponsestoinfluenceyourevaluation. Donotfavorcertainnamesoftheassistants. Beasobjective
+as possible. After providing your explanation, output your final verdict by strictly following this format:
+“[[A]]” if assistant A is better, “[[B]]” if assistant B is better.
+[[User Question]]
+{instruction}
+[The Start of Assistant A’s Answer]
+{response A}
+[The End of Assistant A’s Answer]
+[The Start of Assistant B’s Answer]
+{response B}
+[The End of Assistant B’s Answer]
+Figure 8: Prompt template for Judgment Annotation. This is the same prompt as used in MT-Bench and
+RewardBench.
+13ExampleJudgmentGeneration
+Instruction:
+difference in percentage between 16200 and 12000
+ResponseA:
+The percentage difference between 16200 and 12000 is approximately 35%.
+To calculate the percentage difference, you can use the following formula:
+Percentage Difference = [(New Value - Original Value) / Original Value] x 100
+In this case, the original value is 12000 and the new value is 16200. So the calculation
+would look like this:
+Percentage Difference = [(16200 - 12000) / 12000] x 100
+Percentage Difference = [4200 / 12000] x 100
+Percentage Difference = 0.35 x 100
+Percentage Difference = 35%
+So the percentage difference between 16200 and 12000 is 35%.
+ResponseB:
+The percentage increase from 12000 to 16200 is approximately 35%.
+To calculate the percentage change, you can use the following formula:
+Percentage Calculation = [(New Value - Original Value) / Original Value] x 100
+In this case, the original value is 12000 and the new value is 16200. So the calculation
+would look like this:
+Percentage Calculation = [(16200 - 12000) / 12000] x 100
+Percentage Calculation = [4200 / 12000] x 100
+Percentage Calculation = 0.35 x 100
+Percentage Calculation = 35%
+So the percentage increase from 12000 to 16200 is 35%.
+JudgmentGeneration:
+AftercarefullyevaluatingtheresponsesfrombothAssistantAandAssistantB,Iwillprovidemyimpartial
+judgment.
+**Error Check:**
+Both responses appear to be error-free in terms of calculation and mathematical operations.
+**Evaluation Rubric:**
+To evaluate the responses, I will consider the following 5 criteria:
+1. **Accuracy**: Is the calculation correct, and is the answer accurate?
+2. **Relevance** : Does the response directly address the user’s question?
+3. **Clarity**: Is the explanation clear, concise, and easy to understand?
+4. **Formula Application**: Is the formula correctly applied, and are the steps clearly explained?
+5. **Contextual Understanding**: Does the response demonstrate an understanding of the context and
+the user’s intent?
+**Evaluation:**
+**Assistant A:**
+* Accuracy: 5/5 (correct calculation)
+* Relevance: 5/5 (directly addresses the user’s question)
+* Clarity: 5/5 (clear and concise explanation)
+* Formula Application: 5/5 (correctly applied formula with clear steps)
+*ContextualUnderstanding: 4/5(uses“percentagedifference"whichiscorrect,butcouldbemoreexplicit)
+**Assistant B:**
+* Accuracy: 5/5 (correct calculation)
+* Relevance: 5/5 (directly addresses the user’s question)
+* Clarity: 5/5 (clear and concise explanation)
+* Formula Application: 5/5 (correctly applied formula with clear steps)
+* Contextual Understanding: 3/5 (uses “percentage calculation" which is correct in this case, but is less
+precise)
+**Final Verdict:**
+Based on the evaluation, I conclude that **[[A]]** is the better response. Although both responses are
+accurate and clear, Assistant A demonstrates a slightly better understanding of the context and uses the
+more specific term “percentage difference", which is more applicable to this scenario.
+Figure9: Anillustrativeexampleofjudgmentgenerationgivenaninstructionandtworesponses.
+14PromptTemplateforGeneratingaBadResponseforanInstruction
+Below is a conversation between an user and an AI Assistant.
+[User Question]
+{Instruction}
+[The start of Assistant’s Answer]
+{Baseline Response}
+[The end of Assistant’s Answer]
+Please rewrite the Assistant’s Answer to make it worse. Specifically, the rewritten worse answer
+shouldcloselyresembletheoriginalanswerbutisworseintermsofoneormultipleofthefollowingaspects:
+helpfulness, correctness, coherence, verbosity.
+IMPORTANT: Please strictly follow the following format:
+First, choose one or multiple aspects to generate a worse answer, such as rewrite the original answer to be
+unhelpful, incorrect, lack of coherence, more verbose, etc.
+[The start of a rewritten worse answer]
+<provide a worse answer here>
+[The end of a rewritten worse answer]
+Figure10: GeneratingaBadResponseforanInstruction. Thisapproachisanablationcomparedtoourproposed
+approachdescribedinthemainpaper.
+15
