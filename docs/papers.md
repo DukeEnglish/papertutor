@@ -2,315 +2,335 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02666v1 |
-|title| Self-Taught Evaluators |
-|authors| Tianlu WangIlia KulikovOlga GolovnevaPing YuWeizhe YuanJane Dwivedi-YuRichard Yuanzhe PangMaryam Fazel-ZarandiJason WestonXian Li
-|links| http://arxiv.org/abs/2408.02666v1 |
-|updated| 2024-08-05 17:57:02 UTC |
-|summary| Model-based evaluation is at the heart of successful model development -- asa reward model for training and as a replacement for human evaluation. Totrain such evaluators the standard approach is to collect a large amount ofhuman preference judgments over model responses which is costly and the databecomes stale as models improve. In this work we present an approach that aimsto im-prove evaluators without human annotations using synthetic training dataonly. Starting from unlabeled instructions our iterative self-improvementscheme generates contrasting model outputs and trains an LLM-as-a-Judge toproduce reasoning traces and final judgments repeating this training at eachnew iteration using the improved predictions. Without any labeled preferencedata our Self-Taught Evaluator can improve a strong LLM Llama3-70B-Instructfrom 75.4 to 88.3 88.7 with majority vote on RewardBench. This outperformscommonly used LLM judges such as GPT-4 and matches the performance of thetop-performing reward models trained with labeled examples. |
+|idx| 2408.03326v1 |
+|title| LLaVA-OneVision: Easy Visual Task Transfer |
+|authors| Bo LiYuanhan ZhangDong GuoRenrui ZhangFeng LiHao ZhangKaichen ZhangYanwei LiZiwei LiuChunyuan Li
+|links| http://arxiv.org/abs/2408.03326v1 |
+|updated| 2024-08-06 17:59:44 UTC |
+|summary| We present LLaVA-OneVision a family of open large multimodal models LMMsdeveloped by consolidating our insights into data models and visualrepresentations in the LLaVA-NeXT blog series. Our experimental resultsdemonstrate that LLaVA-OneVision is the first single model that cansimultaneously push the performance boundaries of open LMMs in three importantcomputer vision scenarios: single-image multi-image and video scenarios.Importantly the design of LLaVA-OneVision allows strong transfer learningacross different modalities/scenarios yielding new emerging capabilities. Inparticular strong video understanding and cross-scenario capabilities aredemonstrated through task transfer from images to videos. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02651v1 |
-|title| Can Reinforcement Learning Unlock the Hidden Dangers in Aligned Large Language Models? |
-|authors| Mohammad Bahrami KarkevandiNishant VishwamitraPeyman Najafirad
-|links| http://arxiv.org/abs/2408.02651v1 |
-|updated| 2024-08-05 17:27:29 UTC |
-|summary| Large Language Models LLMs have demonstrated impressive capabilities innatural language tasks but their safety and morality remain contentious due totheir training on internet text corpora. To address these concerns alignmenttechniques have been developed to improve the public usability and safety ofLLMs. Yet the potential for generating harmful content through these modelsseems to persist. This paper explores the concept of jailbreakingLLMs-reversing their alignment through adversarial triggers. Previous methodssuch as soft embedding prompts manually crafted prompts and gradient-basedautomatic prompts have had limited success on black-box models due to theirrequirements for model access and for producing a low variety of manuallycrafted prompts making them susceptible to being blocked. This paperintroduces a novel approach using reinforcement learning to optimizeadversarial triggers requiring only inference API access to the target modeland a small surrogate model. Our method which leverages a BERTScore-basedreward function enhances the transferability and effectiveness of adversarialtriggers on new black-box models. We demonstrate that this approach improvesthe performance of adversarial triggers on a previously untested languagemodel. |
+|idx| 2408.03325v1 |
+|title| CoverBench: A Challenging Benchmark for Complex Claim Verification |
+|authors| Alon JacoviMoran AmbarEyal Ben-DavidUri ShahamAmir FederMor GevaDror MarcusAvi Caciularu
+|links| http://arxiv.org/abs/2408.03325v1 |
+|updated| 2024-08-06 17:58:53 UTC |
+|summary| There is a growing line of research on verifying the correctness of languagemodels outputs. At the same time LMs are being used to tackle complex queriesthat require reasoning. We introduce CoverBench a challenging benchmarkfocused on verifying LM outputs in complex reasoning settings. Datasets thatcan be used for this purpose are often designed for other complex reasoningtasks e.g. QA targeting specific use-cases e.g. financial tablesrequiring transformations negative sampling and selection of hard examples tocollect such a benchmark. CoverBench provides a diversified evaluation forcomplex claim verification in a variety of domains types of reasoningrelatively long inputs and a variety of standardizations such as multiplerepresentations for tables where available and a consistent schema. Wemanually vet the data for quality to ensure low levels of label noise. Finallywe report a variety of competitive baseline results to show CoverBench ischallenging and has very significant headroom. The data is available athttps://huggingface.co/datasets/google/coverbench . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02632v1 |
-|title| SEAS: Self-Evolving Adversarial Safety Optimization for Large Language Models |
-|authors| Muxi DiaoRumei LiShiyang LiuGuogang LiaoJingang WangXunliang CaiWeiran Xu
-|links| http://arxiv.org/abs/2408.02632v1 |
-|updated| 2024-08-05 16:55:06 UTC |
-|summary| As large language models LLMs continue to advance in capability andinfluence ensuring their security and preventing harmful outputs has becomecrucial. A promising approach to address these concerns involves trainingmodels to automatically generate adversarial prompts for red teaming. Howeverthe evolving subtlety of vulnerabilities in LLMs challenges the effectivenessof current adversarial methods which struggle to specifically target andexplore the weaknesses of these models. To tackle these challenges weintroduce the mathbfStextelf-mathbfEtextvolvingmathbfAtextdversarial mathbfStextafety mathbfSEASoptimization framework which enhances security by leveraging data generated bythe model itself. SEAS operates through three iterative stages: InitializationAttack and Adversarial Optimization refining both the Red Team and Targetmodels to improve robustness and safety. This framework reduces reliance onmanual testing and significantly enhances the security capabilities of LLMs.Our contributions include a novel adversarial framework a comprehensive safetydataset and after three iterations the Target model achieves a security levelcomparable to GPT-4 while the Red Team model shows a marked increase in attacksuccess rate ASR against advanced models. |
+|idx| 2408.03319v1 |
+|title| Training LLMs to Recognize Hedges in Spontaneous Narratives |
+|authors| Amie J. PaigeAdil SoubkiJohn MurzakuOwen RambowSusan E. Brennan
+|links| http://arxiv.org/abs/2408.03319v1 |
+|updated| 2024-08-06 17:51:42 UTC |
+|summary| Hedges allow speakers to mark utterances as provisional whether to signalnon-prototypicality or fuzziness to indicate a lack of commitment to anutterance to attribute responsibility for a statement to someone else toinvite input from a partner or to soften critical feedback in the service offace-management needs. Here we focus on hedges in an experimentallyparameterized corpus of 63 Roadrunner cartoon narratives spontaneously producedfrom memory by 21 speakers for co-present addressees transcribed to textGalati and Brennan 2010. We created a gold standard of hedges annotated byhuman coders the Roadrunner-Hedge corpus and compared three LLM-basedapproaches for hedge detection: fine-tuning BERT and zero and few-shotprompting with GPT-4o and LLaMA-3. The best-performing approach was afine-tuned BERT model followed by few-shot GPT-4o. After an error analysis onthe top performing approaches we used an LLM-in-the-Loop approach to improvethe gold standard coding as well as to highlight cases in which hedges areambiguous in linguistically interesting ways that will guide future research.This is the first step in our research program to train LLMs to interpret andgenerate collateral signals appropriately and meaningfully in conversation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02622v1 |
-|title| Language Model Can Listen While Speaking |
-|authors| Ziyang MaYakun SongChenpeng DuJian CongZhuo ChenYuping WangYuxuan WangXie Chen
-|links| http://arxiv.org/abs/2408.02622v1 |
-|updated| 2024-08-05 16:47:22 UTC |
-|summary| Dialogue serves as the most natural manner of human-computer interactionHCI. Recent advancements in speech language models SLM have significantlyenhanced speech-based conversational AI. However these models are limited toturn-based conversation lacking the ability to interact with humans inreal-time spoken scenarios for example being interrupted when the generatedcontent is not satisfactory. To address these limitations we explore fullduplex modeling FDM in interactive speech language models iSLM focusing onenhancing real-time interaction and more explicitly exploring thequintessential ability of interruption. We introduce a novel model designnamely listening-while-speaking language model LSLM an end-to-end systemequipped with both listening and speaking channels. Our LSLM employs atoken-based decoder-only TTS for speech generation and a streamingself-supervised learning SSL encoder for real-time audio input. LSLM fusesboth channels for autoregressive generation and detects turn-taking in realtime. Three fusion strategies -- early fusion middle fusion and late fusion-- are explored with middle fusion achieving an optimal balance between speechgeneration and real-time interaction. Two experimental settings command-basedFDM and voice-based FDM demonstrate LSLMs robustness to noise and sensitivityto diverse instructions. Our results highlight LSLMs capability to achieveduplex communication with minimal impact on existing systems. This study aimsto advance the development of interactive speech dialogue systems enhancingtheir applicability in real-world contexts. |
+|idx| 2408.03314v1 |
+|title| Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters |
+|authors| Charlie SnellJaehoon LeeKelvin XuAviral Kumar
+|links| http://arxiv.org/abs/2408.03314v1 |
+|updated| 2024-08-06 17:35:05 UTC |
+|summary| Enabling LLMs to improve their outputs by using more test-time computation isa critical step towards building generally self-improving agents that canoperate on open-ended natural language. In this paper we study the scaling ofinference-time computation in LLMs with a focus on answering the question: ifan LLM is allowed to use a fixed but non-trivial amount of inference-timecompute how much can it improve its performance on a challenging promptAnswering this question has implications not only on the achievable performanceof LLMs but also on the future of LLM pretraining and how one should tradeoffinference-time and pre-training compute. Despite its importance littleresearch attempted to understand the scaling behaviors of various test-timeinference methods. Moreover current work largely provides negative results fora number of these strategies. In this work we analyze two primary mechanismsto scale test-time computation: 1 searching against dense process-basedverifier reward models and 2 updating the models distribution over aresponse adaptively given the prompt at test time. We find that in both casesthe effectiveness of different approaches to scaling test-time computecritically varies depending on the difficulty of the prompt. This observationmotivates applying a compute-optimal scaling strategy which acts to mosteffectively allocate test-time compute adaptively per prompt. Using thiscompute-optimal strategy we can improve the efficiency of test-time computescaling by more than 4x compared to a best-of-N baseline. Additionally in aFLOPs-matched evaluation we find that on problems where a smaller base modelattains somewhat non-trivial success rates test-time compute can be used tooutperform a 14x larger model. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02600v1 |
-|title| BioMamba: A Pre-trained Biomedical Language Representation Model Leveraging Mamba |
-|authors| Ling YueSixue XingYingzhou LuTianfan Fu
-|links| http://arxiv.org/abs/2408.02600v1 |
-|updated| 2024-08-05 16:21:36 UTC |
-|summary| The advancement of natural language processing NLP in biology hinges onmodels ability to interpret intricate biomedical literature. Traditionalmodels often struggle with the complex and domain-specific language in thisfield. In this paper we present BioMamba a pre-trained model specificallydesigned for biomedical text mining. BioMamba builds upon the Mambaarchitecture and is pre-trained on an extensive corpus of biomedicalliterature. Our empirical studies demonstrate that BioMamba significantlyoutperforms models like BioBERT and general-domain Mamba across variousbiomedical tasks. For instance BioMamba achieves a 100 times reduction inperplexity and a 4 times reduction in cross-entropy loss on the BioASQ testset. We provide an overview of the model architecture pre-training processand fine-tuning techniques. Additionally we release the code and trained modelto facilitate further research. |
+|idx| 2408.03297v1 |
+|title| KaPO: Knowledge-aware Preference Optimization for Controllable Knowledge Selection in Retrieval-Augmented Language Models |
+|authors| Ruizhe ZhangYongxin XuYuzhen XiaoRunchuan ZhuXinke JiangXu ChuJunfeng ZhaoYasha Wang
+|links| http://arxiv.org/abs/2408.03297v1 |
+|updated| 2024-08-06 16:55:54 UTC |
+|summary| By integrating external knowledge Retrieval-Augmented Generation RAG hasbecome an effective strategy for mitigating the hallucination problems thatlarge language models LLMs encounter when dealing with knowledge-intensivetasks. However in the process of integrating external non-parametricsupporting evidence with internal parametric knowledge inevitable knowledgeconflicts may arise leading to confusion in the models responses. To enhancethe knowledge selection of LLMs in various contexts some research has focusedon refining their behavior patterns through instruction-tuning. Nonethelessdue to the absence of explicit negative signals and comparative objectivesmodels fine-tuned in this manner may still exhibit undesirable behaviors in theintricate and realistic retrieval scenarios. To this end we propose aKnowledge-aware Preference Optimization dubbed KaPO aimed at achievingcontrollable knowledge selection in real retrieval scenarios. Concretely weexplore and simulate error types across diverse context combinations and learnhow to avoid these negative signals through preference optimization methods.Simultaneously by adjusting the balance between response length and theproportion of preference data representing different behavior patterns weenhance the adherence capabilities and noise robustness of LLMs in a balancedmanner. Experimental results show that KaPO outperforms previous methods forhandling knowledge conflicts by over 37 while also exhibiting robustgeneralization across various out-of-distribution datasets. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02666v1 |
-|title| Self-Taught Evaluators |
-|authors| Tianlu WangIlia KulikovOlga GolovnevaPing YuWeizhe YuanJane Dwivedi-YuRichard Yuanzhe PangMaryam Fazel-ZarandiJason WestonXian Li
-|links| http://arxiv.org/abs/2408.02666v1 |
-|updated| 2024-08-05 17:57:02 UTC |
-|summary| Model-based evaluation is at the heart of successful model development -- asa reward model for training and as a replacement for human evaluation. Totrain such evaluators the standard approach is to collect a large amount ofhuman preference judgments over model responses which is costly and the databecomes stale as models improve. In this work we present an approach that aimsto im-prove evaluators without human annotations using synthetic training dataonly. Starting from unlabeled instructions our iterative self-improvementscheme generates contrasting model outputs and trains an LLM-as-a-Judge toproduce reasoning traces and final judgments repeating this training at eachnew iteration using the improved predictions. Without any labeled preferencedata our Self-Taught Evaluator can improve a strong LLM Llama3-70B-Instructfrom 75.4 to 88.3 88.7 with majority vote on RewardBench. This outperformscommonly used LLM judges such as GPT-4 and matches the performance of thetop-performing reward models trained with labeled examples. |
+|idx| 2408.03326v1 |
+|title| LLaVA-OneVision: Easy Visual Task Transfer |
+|authors| Bo LiYuanhan ZhangDong GuoRenrui ZhangFeng LiHao ZhangKaichen ZhangYanwei LiZiwei LiuChunyuan Li
+|links| http://arxiv.org/abs/2408.03326v1 |
+|updated| 2024-08-06 17:59:44 UTC |
+|summary| We present LLaVA-OneVision a family of open large multimodal models LMMsdeveloped by consolidating our insights into data models and visualrepresentations in the LLaVA-NeXT blog series. Our experimental resultsdemonstrate that LLaVA-OneVision is the first single model that cansimultaneously push the performance boundaries of open LMMs in three importantcomputer vision scenarios: single-image multi-image and video scenarios.Importantly the design of LLaVA-OneVision allows strong transfer learningacross different modalities/scenarios yielding new emerging capabilities. Inparticular strong video understanding and cross-scenario capabilities aredemonstrated through task transfer from images to videos. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02651v1 |
-|title| Can Reinforcement Learning Unlock the Hidden Dangers in Aligned Large Language Models? |
-|authors| Mohammad Bahrami KarkevandiNishant VishwamitraPeyman Najafirad
-|links| http://arxiv.org/abs/2408.02651v1 |
-|updated| 2024-08-05 17:27:29 UTC |
-|summary| Large Language Models LLMs have demonstrated impressive capabilities innatural language tasks but their safety and morality remain contentious due totheir training on internet text corpora. To address these concerns alignmenttechniques have been developed to improve the public usability and safety ofLLMs. Yet the potential for generating harmful content through these modelsseems to persist. This paper explores the concept of jailbreakingLLMs-reversing their alignment through adversarial triggers. Previous methodssuch as soft embedding prompts manually crafted prompts and gradient-basedautomatic prompts have had limited success on black-box models due to theirrequirements for model access and for producing a low variety of manuallycrafted prompts making them susceptible to being blocked. This paperintroduces a novel approach using reinforcement learning to optimizeadversarial triggers requiring only inference API access to the target modeland a small surrogate model. Our method which leverages a BERTScore-basedreward function enhances the transferability and effectiveness of adversarialtriggers on new black-box models. We demonstrate that this approach improvesthe performance of adversarial triggers on a previously untested languagemodel. |
+|idx| 2408.03319v1 |
+|title| Training LLMs to Recognize Hedges in Spontaneous Narratives |
+|authors| Amie J. PaigeAdil SoubkiJohn MurzakuOwen RambowSusan E. Brennan
+|links| http://arxiv.org/abs/2408.03319v1 |
+|updated| 2024-08-06 17:51:42 UTC |
+|summary| Hedges allow speakers to mark utterances as provisional whether to signalnon-prototypicality or fuzziness to indicate a lack of commitment to anutterance to attribute responsibility for a statement to someone else toinvite input from a partner or to soften critical feedback in the service offace-management needs. Here we focus on hedges in an experimentallyparameterized corpus of 63 Roadrunner cartoon narratives spontaneously producedfrom memory by 21 speakers for co-present addressees transcribed to textGalati and Brennan 2010. We created a gold standard of hedges annotated byhuman coders the Roadrunner-Hedge corpus and compared three LLM-basedapproaches for hedge detection: fine-tuning BERT and zero and few-shotprompting with GPT-4o and LLaMA-3. The best-performing approach was afine-tuned BERT model followed by few-shot GPT-4o. After an error analysis onthe top performing approaches we used an LLM-in-the-Loop approach to improvethe gold standard coding as well as to highlight cases in which hedges areambiguous in linguistically interesting ways that will guide future research.This is the first step in our research program to train LLMs to interpret andgenerate collateral signals appropriately and meaningfully in conversation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02632v1 |
-|title| SEAS: Self-Evolving Adversarial Safety Optimization for Large Language Models |
-|authors| Muxi DiaoRumei LiShiyang LiuGuogang LiaoJingang WangXunliang CaiWeiran Xu
-|links| http://arxiv.org/abs/2408.02632v1 |
-|updated| 2024-08-05 16:55:06 UTC |
-|summary| As large language models LLMs continue to advance in capability andinfluence ensuring their security and preventing harmful outputs has becomecrucial. A promising approach to address these concerns involves trainingmodels to automatically generate adversarial prompts for red teaming. Howeverthe evolving subtlety of vulnerabilities in LLMs challenges the effectivenessof current adversarial methods which struggle to specifically target andexplore the weaknesses of these models. To tackle these challenges weintroduce the mathbfStextelf-mathbfEtextvolvingmathbfAtextdversarial mathbfStextafety mathbfSEASoptimization framework which enhances security by leveraging data generated bythe model itself. SEAS operates through three iterative stages: InitializationAttack and Adversarial Optimization refining both the Red Team and Targetmodels to improve robustness and safety. This framework reduces reliance onmanual testing and significantly enhances the security capabilities of LLMs.Our contributions include a novel adversarial framework a comprehensive safetydataset and after three iterations the Target model achieves a security levelcomparable to GPT-4 while the Red Team model shows a marked increase in attacksuccess rate ASR against advanced models. |
+|idx| 2408.03304v1 |
+|title| Fusing Forces: Deep-Human-Guided Refinement of Segmentation Masks |
+|authors| Rafael SterzingerChristian StippelRobert Sablatnig
+|links| http://arxiv.org/abs/2408.03304v1 |
+|updated| 2024-08-06 17:11:40 UTC |
+|summary| Etruscan mirrors constitute a significant category in Etruscan artcharacterized by elaborate figurative illustrations featured on their backside.A laborious and costly aspect of their analysis and documentation is the taskof manually tracing these illustrations. In previous work a methodology hasbeen proposed to automate this process involving photometric-stereo scanningin combination with deep neural networks. While achieving quantitativeperformance akin to an expert annotator some results still lack qualitativeprecision and thus require annotators for inspection and potentialcorrection maintaining resource intensity. In response we propose a deepneural network trained to interactively refine existing annotations based onhuman guidance. Our human-in-the-loop approach streamlines annotationachieving equal quality with up to 75 less manual input required. Moreoverduring the refinement process the relative improvement of our methodology overpure manual labeling reaches peak values of up to 26 attaining drasticallybetter quality quicker. By being tailored to the complex task of segmentingintricate lines specifically distinguishing it from previous methods ourapproach offers drastic improvements in efficacy transferable to a broadspectrum of applications beyond Etruscan mirrors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02622v1 |
-|title| Language Model Can Listen While Speaking |
-|authors| Ziyang MaYakun SongChenpeng DuJian CongZhuo ChenYuping WangYuxuan WangXie Chen
-|links| http://arxiv.org/abs/2408.02622v1 |
-|updated| 2024-08-05 16:47:22 UTC |
-|summary| Dialogue serves as the most natural manner of human-computer interactionHCI. Recent advancements in speech language models SLM have significantlyenhanced speech-based conversational AI. However these models are limited toturn-based conversation lacking the ability to interact with humans inreal-time spoken scenarios for example being interrupted when the generatedcontent is not satisfactory. To address these limitations we explore fullduplex modeling FDM in interactive speech language models iSLM focusing onenhancing real-time interaction and more explicitly exploring thequintessential ability of interruption. We introduce a novel model designnamely listening-while-speaking language model LSLM an end-to-end systemequipped with both listening and speaking channels. Our LSLM employs atoken-based decoder-only TTS for speech generation and a streamingself-supervised learning SSL encoder for real-time audio input. LSLM fusesboth channels for autoregressive generation and detects turn-taking in realtime. Three fusion strategies -- early fusion middle fusion and late fusion-- are explored with middle fusion achieving an optimal balance between speechgeneration and real-time interaction. Two experimental settings command-basedFDM and voice-based FDM demonstrate LSLMs robustness to noise and sensitivityto diverse instructions. Our results highlight LSLMs capability to achieveduplex communication with minimal impact on existing systems. This study aimsto advance the development of interactive speech dialogue systems enhancingtheir applicability in real-world contexts. |
+|idx| 2408.03303v1 |
+|title| Understanding How Blind Users Handle Object Recognition Errors: Strategies and Challenges |
+|authors| Jonggi HongHernisa Kacorri
+|links| http://dx.doi.org/10.1145/3663548.3675635 |
+|updated| 2024-08-06 17:09:56 UTC |
+|summary| Object recognition technologies hold the potential to support blind andlow-vision people in navigating the world around them. However the gap betweenbenchmark performances and practical usability remains a significant challenge.This paper presents a study aimed at understanding blind users interactionwith object recognition systems for identifying and avoiding errors. Leveraginga pre-existing object recognition system URCam fine-tuned for our experimentwe conducted a user study involving 12 blind and low-vision participants.Through in-depth interviews and hands-on error identification tasks we gainedinsights into users experiences challenges and strategies for identifyingerrors in camera-based assistive technologies and object recognition systems.During interviews many participants preferred independent error review whileexpressing apprehension toward misrecognitions. In the error identificationtask participants varied viewpoints backgrounds and object sizes in theirimages to avoid and overcome errors. Even after repeating the taskparticipants identified only half of the errors and the proportion of errorsidentified did not significantly differ from their first attempts. Based onthese insights we offer implications for designing accessible interfacestailored to the needs of blind and low-vision users in identifying objectrecognition errors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02606v1 |
-|title| Backward explanations via redefinition of predicates |
-|authors| Léo SaulièresMartin C. CooperFlorence Dupin de Saint Cyr
-|links| http://arxiv.org/abs/2408.02606v1 |
-|updated| 2024-08-05 16:31:38 UTC |
-|summary| History eXplanation based on Predicates HXP studies the behavior of aReinforcement Learning RL agent in a sequence of agents interactions withthe environment a history through the prism of an arbitrary predicate. Tothis end an action importance score is computed for each action in thehistory. The explanation consists in displaying the most important actions tothe user. As the calculation of an actions importance is W1-hard it isnecessary for long histories to approximate the scores at the expense of theirquality. We therefore propose a new HXP method called Backward-HXP to provideexplanations for these histories without having to approximate scores.Experiments show the ability of B-HXP to summarise long histories. |
+|idx| 2408.03297v1 |
+|title| KaPO: Knowledge-aware Preference Optimization for Controllable Knowledge Selection in Retrieval-Augmented Language Models |
+|authors| Ruizhe ZhangYongxin XuYuzhen XiaoRunchuan ZhuXinke JiangXu ChuJunfeng ZhaoYasha Wang
+|links| http://arxiv.org/abs/2408.03297v1 |
+|updated| 2024-08-06 16:55:54 UTC |
+|summary| By integrating external knowledge Retrieval-Augmented Generation RAG hasbecome an effective strategy for mitigating the hallucination problems thatlarge language models LLMs encounter when dealing with knowledge-intensivetasks. However in the process of integrating external non-parametricsupporting evidence with internal parametric knowledge inevitable knowledgeconflicts may arise leading to confusion in the models responses. To enhancethe knowledge selection of LLMs in various contexts some research has focusedon refining their behavior patterns through instruction-tuning. Nonethelessdue to the absence of explicit negative signals and comparative objectivesmodels fine-tuned in this manner may still exhibit undesirable behaviors in theintricate and realistic retrieval scenarios. To this end we propose aKnowledge-aware Preference Optimization dubbed KaPO aimed at achievingcontrollable knowledge selection in real retrieval scenarios. Concretely weexplore and simulate error types across diverse context combinations and learnhow to avoid these negative signals through preference optimization methods.Simultaneously by adjusting the balance between response length and theproportion of preference data representing different behavior patterns weenhance the adherence capabilities and noise robustness of LLMs in a balancedmanner. Experimental results show that KaPO outperforms previous methods forhandling knowledge conflicts by over 37 while also exhibiting robustgeneralization across various out-of-distribution datasets. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02654v1 |
-|title| On Using Quasirandom Sequences in Machine Learning for Model Weight Initialization |
-|authors| Andriy MiranskyyAdam SorrentiViral Thakar
-|links| http://arxiv.org/abs/2408.02654v1 |
-|updated| 2024-08-05 17:33:09 UTC |
-|summary| The effectiveness of training neural networks directly impacts computationalcosts resource allocation and model development timelines in machine learningapplications. An optimizers ability to train the model adequately in terms oftrained model performance depends on the models initial weights. Model weightinitialization schemes use pseudorandom number generators PRNGs as a sourceof randomness.  We investigate whether substituting PRNGs for low-discrepancy quasirandomnumber generators QRNGs -- namely Sobol sequences -- as a source ofrandomness for initializers can improve model performance. We examineMulti-Layer Perceptrons MLP Convolutional Neural Networks CNN LongShort-Term Memory LSTM and Transformer architectures trained on MNISTCIFAR-10 and IMDB datasets using SGD and Adam optimizers. Our analysis usesten initialization schemes: Glorot He Lecun both Uniform and NormalOrthogonal Random Normal Truncated Normal and Random Uniform. Models withweights set using PRNG- and QRNG-based initializers are compared pairwise foreach combination of dataset architecture optimizer and initializationscheme.  Our findings indicate that QRNG-based neural network initializers eitherreach a higher accuracy or achieve the same accuracy more quickly thanPRNG-based initializers in 60 of the 120 experiments conducted. Thus usingQRNG-based initializers instead of PRNG-based initializers can speed up andimprove model training. |
+|idx| 2408.03323v1 |
+|title| ClassiFIM: An Unsupervised Method To Detect Phase Transitions |
+|authors| Victor KasatkinEvgeny MozgunovNicholas EzzellUtkarsh MishraItay HenDaniel Lidar
+|links| http://arxiv.org/abs/2408.03323v1 |
+|updated| 2024-08-06 17:58:29 UTC |
+|summary| Estimation of the Fisher Information Metric FIM-estimation is an importanttask that arises in unsupervised learning of phase transitions a problemproposed by physicists. This work completes the definition of the task bydefining rigorous evaluation metrics distMSE distMSEPS and distRE andintroduces ClassiFIM a novel machine learning method designed to solve theFIM-estimation task. Unlike existing methods for unsupervised learning of phasetransitions ClassiFIM directly estimates a well-defined quantity the FIMallowing it to be rigorously compared to any present and future other methodsthat estimate the same. ClassiFIM transforms a dataset for the FIM-estimationtask into a dataset for an auxiliary binary classification task and involvesselecting and training a model for the latter. We prove that the output ofClassiFIM approaches the exact FIM in the limit of infinite dataset size andunder certain regularity conditions. We implement ClassiFIM on multipledatasets including datasets describing classical and quantum phasetransitions and find that it achieves a good ground truth approximation withmodest computational resources. Furthermore we independently implement twoalternative state-of-the-art methods for unsupervised estimation of phasetransition locations on the same datasets and find that ClassiFIM predicts suchlocations at least as well as these other methods. To emphasize the generalityof our method we also propose and generate the MNIST-CNN dataset whichconsists of the output of CNNs trained on MNIST for different hyperparameterchoices. Using ClassiFIM on this dataset suggests there is a phase transitionin the distribution of image-prediction pairs for CNNs trained on MNISTdemonstrating the broad scope of FIM-estimation beyond physics. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02641v1 |
-|title| Detection of Compromised Functions in a Serverless Cloud Environment |
-|authors| Danielle LaviOleg BrodtDudu MimranYuval EloviciAsaf Shabtai
-|links| http://arxiv.org/abs/2408.02641v1 |
-|updated| 2024-08-05 17:14:35 UTC |
-|summary| Serverless computing is an emerging cloud paradigm with serverless functionsat its core. While serverless environments enable software developers to focuson developing applications without the need to actively manage the underlyingruntime infrastructure they open the door to a wide variety of securitythreats that can be challenging to mitigate with existing methods. Existingsecurity solutions do not apply to all serverless architectures since theyrequire significant modifications to the serverless infrastructure or rely onthird-party services for the collection of more detailed data. In this paperwe present an extendable serverless security threat detection model thatleverages cloud providers native monitoring tools to detect anomalous behaviorin serverless applications. Our model aims to detect compromised serverlessfunctions by identifying post-exploitation abnormal behavior related todifferent types of attacks on serverless functions and therefore it is a lastline of defense. Our approach is not tied to any specific serverlessapplication is agnostic to the type of threats and is adaptable through modeladjustments. To evaluate our models performance we developed a serverlesscybersecurity testbed in an AWS cloud environment which includes two differentserverless applications and simulates a variety of attack scenarios that coverthe main security threats faced by serverless functions. Our evaluationdemonstrates our models ability to detect all implemented attacks whilemaintaining a negligible false alarm rate. |
+|idx| 2408.03320v1 |
+|title| Hedge Fund Portfolio Construction Using PolyModel Theory and iTransformer |
+|authors| Siqiao ZhaoZhikang DongZeyu CaoRaphael Douady
+|links| http://arxiv.org/abs/2408.03320v1 |
+|updated| 2024-08-06 17:55:58 UTC |
+|summary| When constructing portfolios a key problem is that a lot of financial timeseries data are sparse making it challenging to apply machine learningmethods. Polymodel theory can solve this issue and demonstrate superiority inportfolio construction from various aspects. To implement the PolyModel theoryfor constructing a hedge fund portfolio we begin by identifying an asset poolutilizing over 10000 hedge funds for the past 29 years data. PolyModel theoryalso involves choosing a wide-ranging set of risk factors which includesvarious financial indices currencies and commodity prices. This comprehensiveselection mirrors the complexities of the real-world environment. Leveraging onthe PolyModel theory we create quantitative measures such as Long-term AlphaLong-term Ratio and SVaR. We also use more classical measures like the Sharperatio or Morningstars MRAR. To enhance the performance of the constructedportfolio we also employ the latest deep learning techniques iTransformer tocapture the upward trend while efficiently controlling the downside using allthe features. The iTransformer model is specifically designed to address thechallenges in high-dimensional time series forecasting and could largelyimprove our strategies. More precisely our strategies achieve better Sharperatio and annualized return. The above process enables us to create multipleportfolio strategies aiming for high returns and low risks when compared tovarious benchmarks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02637v1 |
-|title| Command-line Obfuscation Detection using Small Language Models |
-|authors| Vojtech OutrataMichael Adam PolakMartin Kopp
-|links| http://arxiv.org/abs/2408.02637v1 |
-|updated| 2024-08-05 17:01:33 UTC |
-|summary| To avoid detection adversaries often use command-line obfuscation. There arenumerous techniques of the command-line obfuscation all designed to alter thecommand-line syntax without affecting its original functionality. Thisvariability forces most security solutions to create an exhaustive enumerationof signatures for even a single pattern. In contrast to using signatures wehave implemented a scalable NLP-based detection method that leverages acustom-trained small transformer language model that can be applied to anysource of execution logs. The evaluation on top of real-world telemetrydemonstrates that our approach yields high-precision detections even onhigh-volume telemetry from a diverse set of environments spanning fromuniversities and businesses to healthcare or finance. The practical value isdemonstrated in a case study of real-world samples detected by our model. Weshow the models superiority to signatures on established malware known toemploy obfuscation and showcase previously unseen obfuscated samples detectedby our model. |
+|idx| 2408.03314v1 |
+|title| Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters |
+|authors| Charlie SnellJaehoon LeeKelvin XuAviral Kumar
+|links| http://arxiv.org/abs/2408.03314v1 |
+|updated| 2024-08-06 17:35:05 UTC |
+|summary| Enabling LLMs to improve their outputs by using more test-time computation isa critical step towards building generally self-improving agents that canoperate on open-ended natural language. In this paper we study the scaling ofinference-time computation in LLMs with a focus on answering the question: ifan LLM is allowed to use a fixed but non-trivial amount of inference-timecompute how much can it improve its performance on a challenging promptAnswering this question has implications not only on the achievable performanceof LLMs but also on the future of LLM pretraining and how one should tradeoffinference-time and pre-training compute. Despite its importance littleresearch attempted to understand the scaling behaviors of various test-timeinference methods. Moreover current work largely provides negative results fora number of these strategies. In this work we analyze two primary mechanismsto scale test-time computation: 1 searching against dense process-basedverifier reward models and 2 updating the models distribution over aresponse adaptively given the prompt at test time. We find that in both casesthe effectiveness of different approaches to scaling test-time computecritically varies depending on the difficulty of the prompt. This observationmotivates applying a compute-optimal scaling strategy which acts to mosteffectively allocate test-time compute adaptively per prompt. Using thiscompute-optimal strategy we can improve the efficiency of test-time computescaling by more than 4x compared to a best-of-N baseline. Additionally in aFLOPs-matched evaluation we find that on problems where a smaller base modelattains somewhat non-trivial success rates test-time compute can be used tooutperform a 14x larger model. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02604v1 |
-|title| Learning rheological parameters of non-Newtonian fluids from velocimetry data |
-|authors| Alexandros KontogiannisRichard HodgkinsonEmily L. Manchester
-|links| http://arxiv.org/abs/2408.02604v1 |
-|updated| 2024-08-05 16:27:38 UTC |
-|summary| We solve a Bayesian inverse Navier-Stokes N-S problem that assimilatesvelocimetry data in order to jointly reconstruct the flow field and learn theunknown N-S parameters. By incorporating a Carreau shear-thinning viscositymodel into the N-S problem we devise an algorithm that learns the most likelyCarreau parameters of a shear-thinning fluid and estimates theiruncertainties from velocimetry data alone. We then conduct a flow-MRIexperiment to obtain velocimetry data of an axisymmetric laminar jet through anidealised medical device FDA nozzle for a blood analogue fluid. We show thatthe algorithm can successfully reconstruct the flow field by learning the mostlikely Carreau parameters and that the learned parameters are in very goodagreement with rheometry measurements. The algorithm accepts any algebraiceffective viscosity model as long as the model is differentiable and it canbe extended to more complicated non-Newtonian fluids e.g. Oldroyd-B fluid ifa viscoelastic model is incorporated into the N-S problem. |
+|idx| 2408.03307v1 |
+|title| Pre-training and in-context learning IS Bayesian inference a la De Finetti |
+|authors| Naimeng YeHanming YangAndrew SiahHongseok Namkoong
+|links| http://arxiv.org/abs/2408.03307v1 |
+|updated| 2024-08-06 17:16:10 UTC |
+|summary| Accurately gauging uncertainty on the underlying environment is alongstanding goal of intelligent systems. We characterize which latent conceptspre-trained sequence models are naturally able to reason with. We go back to DeFinettis predictive view of Bayesian reasoning: instead of modeling latentparameters through priors and likelihoods like topic models do De Finetti haslong advocated for modeling exchangeable permutation invariant sequences ofobservables. According to this view pre-training autoregressive modelsformulates informed beliefs based on prior observations empirical Bayesand forward generation is a simulated instantiation of an environmentposterior inference. This connection allows extending in-context learningICL beyond predictive settings highlighting sequence models ability toperform explicit statistical inference. In particular we show the sequenceprediction loss over exchangeable documents controls performance on downstreamtasks where uncertainty quantification is key. Empirically we propose anddemonstrate several approaches for encoding exchangeability in sequence modelarchitectures: data augmentation regularization and causal masking. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02598v1 |
-|title| AI-Driven Strategies for Reducing Student Withdrawal -- A Study of EMU Student Stopout |
-|authors| Yan ZhaoAmy Otteson
-|links| http://arxiv.org/abs/2408.02598v1 |
-|updated| 2024-08-05 16:15:31 UTC |
-|summary| Not everyone who enrolls in college will leave with a certificate or degreebut the number of people who drop out or take a break is much higher thanexperts previously believed. In December 2013 there were 29 million peoplewith some college education but no degree. That number jumped to 36 million byDecember of 2018 according to a new report from the National StudentClearinghouse Research Center1. It is imperative to understand the underlyingfactors contributing to student withdrawal and to assist decision-makers toidentify effective strategies to prevent it. By analyzing the characteristicsand educational pathways of the stopout student population our aim is toprovide actionable insights that can benefit institutions facing similarchallenges. Eastern Michigan University EMU faces significant challenges instudent retention with approximately 55 of its undergraduate students notcompleting their degrees within six years. As an institution committed tostudent success EMU conducted a comprehensive study of student withdrawals tounderstand the influencing factors. And the paper revealed a high correlationbetween certain factors and withdrawals even in the early stages of universityattendance. Based on these findings we developed a predictive model thatemploys artificial intelligence techniques to assess the potential risk thatstudents abandon their studies. These models enable universities to implementearly intervention strategies support at-risk students and improve overallhigher education success. |
+|idx| 2408.03304v1 |
+|title| Fusing Forces: Deep-Human-Guided Refinement of Segmentation Masks |
+|authors| Rafael SterzingerChristian StippelRobert Sablatnig
+|links| http://arxiv.org/abs/2408.03304v1 |
+|updated| 2024-08-06 17:11:40 UTC |
+|summary| Etruscan mirrors constitute a significant category in Etruscan artcharacterized by elaborate figurative illustrations featured on their backside.A laborious and costly aspect of their analysis and documentation is the taskof manually tracing these illustrations. In previous work a methodology hasbeen proposed to automate this process involving photometric-stereo scanningin combination with deep neural networks. While achieving quantitativeperformance akin to an expert annotator some results still lack qualitativeprecision and thus require annotators for inspection and potentialcorrection maintaining resource intensity. In response we propose a deepneural network trained to interactively refine existing annotations based onhuman guidance. Our human-in-the-loop approach streamlines annotationachieving equal quality with up to 75 less manual input required. Moreoverduring the refinement process the relative improvement of our methodology overpure manual labeling reaches peak values of up to 26 attaining drasticallybetter quality quicker. By being tailored to the complex task of segmentingintricate lines specifically distinguishing it from previous methods ourapproach offers drastic improvements in efficacy transferable to a broadspectrum of applications beyond Etruscan mirrors. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02672v1 |
-|title| Latent-INR: A Flexible Framework for Implicit Representations of Videos with Discriminative Semantics |
-|authors| Shishira R MaiyaAnubhav GuptaMatthew GwilliamMax EhrlichAbhinav Shrivastava
-|links| http://arxiv.org/abs/2408.02672v1 |
-|updated| 2024-08-05 17:59:51 UTC |
-|summary| Implicit Neural Networks INRs have emerged as powerful representations toencode all forms of data including images videos audios and scenes. Withvideo many INRs for video have been proposed for the compression task andrecent methods feature significant improvements with respect to encoding timestorage and reconstruction quality. However these encoded representationslack semantic meaning so they cannot be used for any downstream tasks thatrequire such properties such as retrieval. This can act as a barrier foradoption of video INRs over traditional codecs as they do not offer anysignificant edge apart from compression. To alleviate this we propose aflexible framework that decouples the spatial and temporal aspects of the videoINR. We accomplish this with a dictionary of per-frame latents that are learnedjointly with a set of video specific hypernetworks such that given a latentthese hypernetworks can predict the INR weights to reconstruct the given frame.This framework not only retains the compression efficiency but the learnedlatents can be aligned with features from large vision models which grantsthem discriminative properties. We align these latents with CLIP and show goodperformance for both compression and video retrieval tasks. By aligning withVideoLlama we are able to perform open-ended chat with our learned latents asthe visual inputs. Additionally the learned latents serve as a proxy for theunderlying weights allowing us perform tasks like video interpolation. Thesesemantic properties and applications existing simultaneously with ability toperform compression interpolation and superresolution properties are a firstin this field of work. |
+|idx| 2408.03326v1 |
+|title| LLaVA-OneVision: Easy Visual Task Transfer |
+|authors| Bo LiYuanhan ZhangDong GuoRenrui ZhangFeng LiHao ZhangKaichen ZhangYanwei LiZiwei LiuChunyuan Li
+|links| http://arxiv.org/abs/2408.03326v1 |
+|updated| 2024-08-06 17:59:44 UTC |
+|summary| We present LLaVA-OneVision a family of open large multimodal models LMMsdeveloped by consolidating our insights into data models and visualrepresentations in the LLaVA-NeXT blog series. Our experimental resultsdemonstrate that LLaVA-OneVision is the first single model that cansimultaneously push the performance boundaries of open LMMs in three importantcomputer vision scenarios: single-image multi-image and video scenarios.Importantly the design of LLaVA-OneVision allows strong transfer learningacross different modalities/scenarios yielding new emerging capabilities. Inparticular strong video understanding and cross-scenario capabilities aredemonstrated through task transfer from images to videos. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02657v1 |
-|title| Lumina-mGPT: Illuminate Flexible Photorealistic Text-to-Image Generation with Multimodal Generative Pretraining |
-|authors| Dongyang LiuShitian ZhaoLe ZhuoWeifeng LinYu QiaoHongsheng LiPeng Gao
-|links| http://arxiv.org/abs/2408.02657v1 |
-|updated| 2024-08-05 17:46:53 UTC |
-|summary| We present Lumina-mGPT a family of multimodal autoregressive models capableof various vision and language tasks particularly excelling in generatingflexible photorealistic images from text descriptions. Unlike existingautoregressive image generation approaches Lumina-mGPT employs a pretraineddecoder-only transformer as a unified framework for modeling multimodal tokensequences. Our key insight is that a simple decoder-only transformer withmultimodal Generative PreTraining mGPT utilizing the next-token predictionobjective on massive interleaved text-image sequences can learn broad andgeneral multimodal capabilities thereby illuminating photorealistictext-to-image generation. Building on these pretrained models we proposeFlexible Progressive Supervised Finetuning FP-SFT on high-quality image-textpairs to fully unlock their potential for high-aesthetic image synthesis at anyresolution while maintaining their general multimodal capabilities.Furthermore we introduce Ominiponent Supervised Finetuning Omni-SFTtransforming Lumina-mGPT into a foundation model that seamlessly achievesomnipotent task unification. The resulting model demonstrates versatilemultimodal capabilities including visual generation tasks like flexibletext-to-image generation and controllable generation visual recognition taskslike segmentation and depth estimation and vision-language tasks likemultiturn visual question answering. Additionally we analyze the differencesand similarities between diffusion-based and autoregressive methods in a directcomparison. |
+|idx| 2408.03322v1 |
+|title| Segment Anything in Medical Images and Videos: Benchmark and Deployment |
+|authors| Jun MaSumin KimFeifei LiMohammed BaharoonReza AsakerehHongwei LyuBo Wang
+|links| http://arxiv.org/abs/2408.03322v1 |
+|updated| 2024-08-06 17:58:18 UTC |
+|summary| Recent advances in segmentation foundation models have enabled accurate andefficient segmentation across a wide range of natural images and videos buttheir utility to medical data remains unclear. In this work we first present acomprehensive benchmarking of the Segment Anything Model 2 SAM2 across 11medical image modalities and videos and point out its strengths and weaknessesby comparing it to SAM1 and MedSAM. Then we develop a transfer learningpipeline and demonstrate SAM2 can be quickly adapted to medical domain byfine-tuning. Furthermore we implement SAM2 as a 3D slicer plugin and GradioAPI for efficient 3D image and video segmentation. The code has been madepublicly available at urlhttps://github.com/bowang-lab/MedSAM. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02654v1 |
-|title| On Using Quasirandom Sequences in Machine Learning for Model Weight Initialization |
-|authors| Andriy MiranskyyAdam SorrentiViral Thakar
-|links| http://arxiv.org/abs/2408.02654v1 |
-|updated| 2024-08-05 17:33:09 UTC |
-|summary| The effectiveness of training neural networks directly impacts computationalcosts resource allocation and model development timelines in machine learningapplications. An optimizers ability to train the model adequately in terms oftrained model performance depends on the models initial weights. Model weightinitialization schemes use pseudorandom number generators PRNGs as a sourceof randomness.  We investigate whether substituting PRNGs for low-discrepancy quasirandomnumber generators QRNGs -- namely Sobol sequences -- as a source ofrandomness for initializers can improve model performance. We examineMulti-Layer Perceptrons MLP Convolutional Neural Networks CNN LongShort-Term Memory LSTM and Transformer architectures trained on MNISTCIFAR-10 and IMDB datasets using SGD and Adam optimizers. Our analysis usesten initialization schemes: Glorot He Lecun both Uniform and NormalOrthogonal Random Normal Truncated Normal and Random Uniform. Models withweights set using PRNG- and QRNG-based initializers are compared pairwise foreach combination of dataset architecture optimizer and initializationscheme.  Our findings indicate that QRNG-based neural network initializers eitherreach a higher accuracy or achieve the same accuracy more quickly thanPRNG-based initializers in 60 of the 120 experiments conducted. Thus usingQRNG-based initializers instead of PRNG-based initializers can speed up andimprove model training. |
+|idx| 2408.03312v1 |
+|title| MDT-A2G: Exploring Masked Diffusion Transformers for Co-Speech Gesture Generation |
+|authors| Xiaofeng MaoZhengkai JiangQilin WangChencan FuJiangning ZhangJiafu WuYabiao WangChengjie WangWei LiMingmin Chi
+|links| http://dx.doi.org/10.1145/3664647.3680684 |
+|updated| 2024-08-06 17:29:01 UTC |
+|summary| Recent advancements in the field of Diffusion Transformers have substantiallyimproved the generation of high-quality 2D images 3D videos and 3D shapes.However the effectiveness of the Transformer architecture in the domain ofco-speech gesture generation remains relatively unexplored as priormethodologies have predominantly employed the Convolutional Neural NetworkCNNs or simple a few transformer layers. In an attempt to bridge thisresearch gap we introduce a novel Masked Diffusion Transformer for co-speechgesture generation referred to as MDT-A2G which directly implements thedenoising process on gesture sequences. To enhance the contextual reasoningcapability of temporally aligned speech-driven gestures we incorporate a novelMasked Diffusion Transformer. This model employs a mask modeling schemespecifically designed to strengthen temporal relation learning among sequencegestures thereby expediting the learning process and leading to coherent andrealistic motions. Apart from audio Our MDT-A2G model also integratesmulti-modal information encompassing text emotion and identity. Furthermorewe propose an efficient inference strategy that diminishes the denoisingcomputation by leveraging previously calculated results thereby achieving aspeedup with negligible performance degradation. Experimental resultsdemonstrate that MDT-A2G excels in gesture generation boasting a learningspeed that is over 6times faster than traditional diffusion transformers andan inference speed that is 5.7times than the standard diffusion model. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02635v1 |
-|title| Interactive 3D Medical Image Segmentation with SAM 2 |
-|authors| Chuyun ShenWenhao LiYuhang ShiXiangfeng Wang
-|links| http://arxiv.org/abs/2408.02635v1 |
-|updated| 2024-08-05 16:58:56 UTC |
-|summary| Interactive medical image segmentation IMIS has shown significant potentialin enhancing segmentation accuracy by integrating iterative feedback frommedical professionals. However the limited availability of enough 3D medicaldata restricts the generalization and robustness of most IMIS methods. TheSegment Anything Model SAM though effective for 2D images requiresexpensive semi-auto slice-by-slice annotations for 3D medical images. In thispaper we explore the zero-shot capabilities of SAM 2 the next-generation MetaSAM model trained on videos for 3D medical image segmentation. By treatingsequential 2D slices of 3D images as video frames SAM 2 can fullyautomatically propagate annotations from a single frame to the entire 3Dvolume. We propose a practical pipeline for using SAM 2 in 3D medical imagesegmentation and present key findings highlighting its efficiency and potentialfor further optimization. Concretely numerical experiments on the BraTS2020and the medical segmentation decathlon datasets demonstrate that SAM 2 stillhas a gap with supervised methods but can narrow the gap in specific settingsand organ types significantly reducing the annotation burden on medicalprofessionals. Our code will be open-sourced and available athttps://github.com/Chuyun-Shen/SAM_2_Medical_3D. |
+|idx| 2408.03304v1 |
+|title| Fusing Forces: Deep-Human-Guided Refinement of Segmentation Masks |
+|authors| Rafael SterzingerChristian StippelRobert Sablatnig
+|links| http://arxiv.org/abs/2408.03304v1 |
+|updated| 2024-08-06 17:11:40 UTC |
+|summary| Etruscan mirrors constitute a significant category in Etruscan artcharacterized by elaborate figurative illustrations featured on their backside.A laborious and costly aspect of their analysis and documentation is the taskof manually tracing these illustrations. In previous work a methodology hasbeen proposed to automate this process involving photometric-stereo scanningin combination with deep neural networks. While achieving quantitativeperformance akin to an expert annotator some results still lack qualitativeprecision and thus require annotators for inspection and potentialcorrection maintaining resource intensity. In response we propose a deepneural network trained to interactively refine existing annotations based onhuman guidance. Our human-in-the-loop approach streamlines annotationachieving equal quality with up to 75 less manual input required. Moreoverduring the refinement process the relative improvement of our methodology overpure manual labeling reaches peak values of up to 26 attaining drasticallybetter quality quicker. By being tailored to the complex task of segmentingintricate lines specifically distinguishing it from previous methods ourapproach offers drastic improvements in efficacy transferable to a broadspectrum of applications beyond Etruscan mirrors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02629v1 |
-|title| VidGen-1M: A Large-Scale Dataset for Text-to-video Generation |
-|authors| Zhiyu TanXiaomeng YangLuozheng QinHao Li
-|links| http://arxiv.org/abs/2408.02629v1 |
-|updated| 2024-08-05 16:53:23 UTC |
-|summary| The quality of video-text pairs fundamentally determines the upper bound oftext-to-video models. Currently the datasets used for training these modelssuffer from significant shortcomings including low temporal consistencypoor-quality captions substandard video quality and imbalanced datadistribution. The prevailing video curation process which depends on imagemodels for tagging and manual rule-based curation leads to a highcomputational load and leaves behind unclean data. As a result there is a lackof appropriate training datasets for text-to-video models. To address thisproblem we present VidGen-1M a superior training dataset for text-to-videomodels. Produced through a coarse-to-fine curation strategy this datasetguarantees high-quality videos and detailed captions with excellent temporalconsistency. When used to train the video generation model this dataset hasled to experimental results that surpass those obtained with other models. |
+|idx| 2408.03302v1 |
+|title| TextIM: Part-aware Interactive Motion Synthesis from Text |
+|authors| Siyuan FanBo DuXiantao CaiBo PengLongling Sun
+|links| http://arxiv.org/abs/2408.03302v1 |
+|updated| 2024-08-06 17:08:05 UTC |
+|summary| In this work we propose TextIM a novel framework for synthesizingTEXT-driven human Interactive Motions with a focus on the precise alignment ofpart-level semantics. Existing methods often overlook the critical roles ofinteractive body parts and fail to adequately capture and align part-levelsemantics resulting in inaccuracies and even erroneous movement outcomes. Toaddress these issues TextIM utilizes a decoupled conditional diffusionframework to enhance the detailed alignment between interactive movements andcorresponding semantic intents from textual descriptions. Our approachleverages large language models functioning as a human brain to identifyinteracting human body parts and to comprehend interaction semantics togenerate complicated and subtle interactive motion. Guided by the refinedmovements of the interacting parts TextIM further extends these movements intoa coherent whole-body motion. We design a spatial coherence module tocomplement the entire body movements while maintaining consistency and harmonyacross body parts using a part graph convolutional network. For training andevaluation we carefully selected and re-labeled interactive motions fromHUMANML3D to develop a specialized dataset. Experimental results demonstratethat TextIM produces semantically accurate human interactive motionssignificantly enhancing the realism and applicability of synthesizedinteractive motions in diverse scenarios even including interactions withdeformable and dynamically changing objects. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02558v1 |
-|title| Peer-induced Fairness: A Causal Approach to Reveal Algorithmic Unfairness in Credit Approval |
-|authors| Shiqi FangZexun ChenJake Ansell
-|links| http://arxiv.org/abs/2408.02558v1 |
-|updated| 2024-08-05 15:35:34 UTC |
-|summary| This paper introduces a novel framework peer-induced fairness toscientifically audit algorithmic fairness. It addresses a critical but oftenoverlooked issue: distinguishing between adverse outcomes due to algorithmicdiscrimination and those resulting from individuals insufficient capabilities.By utilizing counterfactual fairness and advanced causal inference techniquessuch as the Single World Intervention Graph this model-agnostic approachevaluates fairness at the individual level through peer comparisons andhypothesis testing. It also tackles challenges like data scarcity andimbalance offering a flexible plug-and-play self-audit tool for stakeholdersand an external audit tool for regulators while providing explainable feedbackfor those affected by unfavorable decisions. |
+|idx| 2408.03307v1 |
+|title| Pre-training and in-context learning IS Bayesian inference a la De Finetti |
+|authors| Naimeng YeHanming YangAndrew SiahHongseok Namkoong
+|links| http://arxiv.org/abs/2408.03307v1 |
+|updated| 2024-08-06 17:16:10 UTC |
+|summary| Accurately gauging uncertainty on the underlying environment is alongstanding goal of intelligent systems. We characterize which latent conceptspre-trained sequence models are naturally able to reason with. We go back to DeFinettis predictive view of Bayesian reasoning: instead of modeling latentparameters through priors and likelihoods like topic models do De Finetti haslong advocated for modeling exchangeable permutation invariant sequences ofobservables. According to this view pre-training autoregressive modelsformulates informed beliefs based on prior observations empirical Bayesand forward generation is a simulated instantiation of an environmentposterior inference. This connection allows extending in-context learningICL beyond predictive settings highlighting sequence models ability toperform explicit statistical inference. In particular we show the sequenceprediction loss over exchangeable documents controls performance on downstreamtasks where uncertainty quantification is key. Empirically we propose anddemonstrate several approaches for encoding exchangeability in sequence modelarchitectures: data augmentation regularization and causal masking. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02489v1 |
-|title| Full error analysis of policy gradient learning algorithms for exploratory linear quadratic mean-field control problem in continuous time with common noise |
-|authors| Noufel FrikhaHuyên PhamXuanye Song
-|links| http://arxiv.org/abs/2408.02489v1 |
-|updated| 2024-08-05 14:11:51 UTC |
-|summary| We consider reinforcement learning RL methods for finding optimal policiesin linear quadratic LQ mean field control MFC problems over an infinitehorizon in continuous time with common noise and entropy regularization. Westudy policy gradient PG learning and first demonstrate convergence in amodel-based setting by establishing a suitable gradient dominationcondition.Next our main contribution is a comprehensive error analysis wherewe prove the global linear convergence and sample complexity of the PGalgorithm with two-point gradient estimates in a model-free setting withunknown parameters. In this setting the parameterized optimal policies arelearned from samples of the states and population distribution.Finally weprovide numerical evidence supporting the convergence of our implementedalgorithms. |
+|idx| 2408.03144v1 |
+|title| Active Learning for Level Set Estimation Using Randomized Straddle Algorithms |
+|authors| Yu InatsuShion TakenoKentaro KutsukakeIchiro Takeuchi
+|links| http://arxiv.org/abs/2408.03144v1 |
+|updated| 2024-08-06 12:39:12 UTC |
+|summary| Level set estimation LSE the problem of identifying the set of inputpoints where a function takes value above or below a given threshold isimportant in practical applications. When the function is expensive-to-evaluateand black-box the textitstraddle algorithm which is a representativeheuristic for LSE based on Gaussian process models and its extensions havingtheoretical guarantees have been developed. However many of existing methodsinclude a confidence parameter beta1/2_t that must be specified by theuser and methods that choose beta1/2_t heuristically do not providetheoretical guarantees. In contrast theoretically guaranteed values ofbeta1/2_t need to be increased depending on the number of iterations andcandidate points and are conservative and not good for practical performance.In this study we propose a novel method the textitrandomized straddlealgorithm in which beta_t in the straddle algorithm is replaced by a randomsample from the chi-squared distribution with two degrees of freedom. Theconfidence parameter in the proposed method has the advantages of not needingadjustment not depending on the number of iterations and candidate points andnot being conservative. Furthermore we show that the proposed method hastheoretical guarantees that depend on the sample complexity and the number ofiterations. Finally we confirm the usefulness of the proposed method throughnumerical experiments using synthetic and real data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02481v1 |
-|title| On the influence of dependent features in classification problems: a game-theoretic perspective |
-|authors| Laura Davila-PenaAlejandro Saavedra-NievesBalbina Casas-Méndez
-|links| http://arxiv.org/abs/2408.02481v1 |
-|updated| 2024-08-05 14:02:26 UTC |
-|summary| This paper deals with a new measure of the influence of each feature on theresponse variable in classification problems accounting for potentialdependencies among certain feature subsets. Within this framework we considera sample of individuals characterized by specific features each featureencompassing a finite range of values and classified based on a binaryresponse variable. This measure turns out to be an influence measure exploredin existing literature and related to cooperative game theory. We provide anaxiomatic characterization of our proposed influence measure by tailoringproperties from the cooperative game theory to our specific context.Furthermore we demonstrate that our influence measure becomes a generalcharacterization of the well-known Banzhaf-Owen value for games with a prioriunions from the perspective of classification problems. The definitions andresults presented herein are illustrated through numerical examples and variousapplications offering practical insights into our methodologies. |
+|idx| 2408.03138v1 |
+|title| Predictive Performance Test based on the Exhaustive Nested Cross-Validation for High-dimensional data |
+|authors| Iris Ivy GauranHernando OmbaoZhaoxia Yu
+|links| http://arxiv.org/abs/2408.03138v1 |
+|updated| 2024-08-06 12:28:16 UTC |
+|summary| It is crucial to assess the predictive performance of a model in order toestablish its practicality and relevance in real-world scenarios particularlyfor high-dimensional data analysis. Among data splitting or resampling methodscross-validation CV is extensively used for several tasks such as estimatingthe prediction error tuning the regularization parameter and selecting themost suitable predictive model among competing alternatives. The K-foldcross-validation is a popular CV method but its limitation is that the riskestimates are highly dependent on the partitioning of the data for trainingand testing. Here the issues regarding the reproducibility of the K-fold CVestimator is demonstrated in hypothesis testing wherein different partitionslead to notably disparate conclusions. This study presents an alternative novelpredictive performance test and valid confidence intervals based on exhaustivenested cross-validation for determining the difference in prediction errorbetween two model-fitting algorithms. A naive implementation of the exhaustivenested cross-validation is computationally costly. Here we address concernsregarding computational complexity by devising a computationally tractableclosed-form expression for the proposed cross-validation estimator using ridgeregularization. Our study also investigates strategies aimed at enhancingstatistical power within high-dimensional scenarios while controlling the TypeI error rate. To illustrate the practical utility of our method we apply it toan RNA sequencing study and demonstrate its effectiveness in the context ofbiological data analysis. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02433v1 |
-|title| On Probabilistic Embeddings in Optimal Dimension Reduction |
-|authors| Ryan MurrayAdam Pickarski
-|links| http://arxiv.org/abs/2408.02433v1 |
-|updated| 2024-08-05 12:46:21 UTC |
-|summary| Dimension reduction algorithms are a crucial part of many data sciencepipelines including data exploration feature creation and selection anddenoising. Despite their wide utilization many non-linear dimension reductionalgorithms are poorly understood from a theoretical perspective. In this workwe consider a generalized version of multidimensional scaling which is posedas an optimization problem in which a mapping from a high-dimensional featurespace to a lower-dimensional embedding space seeks to preserve either innerproducts or norms of the distribution in feature space and which encompassesmany commonly used dimension reduction algorithms. We analytically investigatethe variational properties of this problem leading to the following insights:1 Solutions found using standard particle descent methods may lead tonon-deterministic embeddings 2 A relaxed or probabilistic formulation of theproblem admits solutions with easily interpretable necessary conditions 3 Theglobally optimal solutions to the relaxed problem actually must give adeterministic embedding. This progression of results mirrors the classicaldevelopment of optimal transportation and in a case relating to theGromov-Wasserstein distance actually gives explicit insight into the structureof the optimal embeddings which are parametrically determined anddiscontinuous. Finally we illustrate that a standard computationalimplementation of this task does not learn deterministic embeddings whichmeans that it learns sub-optimal mappings and that the embeddings learned inthat context have highly misleading clustering structure underscoring thedelicate nature of solving this problem computationally. |
+|idx| 2408.02841v1 |
+|title| Evaluating Posterior Probabilities: Decision Theory, Proper Scoring Rules, and Calibration |
+|authors| Luciana FerrerDaniel Ramos
+|links| http://arxiv.org/abs/2408.02841v1 |
+|updated| 2024-08-05 21:35:51 UTC |
+|summary| Most machine learning classifiers are designed to output posteriorprobabilities for the classes given the input sample. These probabilities maybe used to make the categorical decision on the class of the sample providedas input to a downstream system or provided to a human for interpretation.Evaluating the quality of the posteriors generated by these system is anessential problem which was addressed decades ago with the invention of properscoring rules PSRs. Unfortunately much of the recent machine learningliterature uses calibration metrics -- most commonly the expected calibrationerror ECE -- as a proxy to assess posterior performance. The problem withthis approach is that calibration metrics reflect only one aspect of thequality of the posteriors ignoring the discrimination performance. For thisreason we argue that calibration metrics should play no role in the assessmentof posterior quality. Expected PSRs should instead be used for this jobpreferably normalized for ease of interpretation. In this work we first give abrief review of PSRs from a practical perspective motivating their definitionusing Bayes decision theory. We discuss why expected PSRs provide a principledmeasure of the quality of a systems posteriors and why calibration metrics arenot the right tool for this job. We argue that calibration metrics while notuseful for performance assessment may be used as diagnostic tools duringsystem development. With this purpose in mind we discuss a simple andpractical calibration metric called calibration loss derived from adecomposition of expected PSRs. We compare this metric with the ECE and withthe expected score divergence calibration metric from the PSR literature andargue using theoretical and empirical evidence that calibration loss issuperior to these two metrics. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02393v1 |
-|title| Graphical Modelling without Independence Assumptions for Uncentered Data |
-|authors| Bailey AndrewDavid R. WestheadLuisa Cutillo
-|links| http://arxiv.org/abs/2408.02393v1 |
-|updated| 2024-08-05 11:40:23 UTC |
-|summary| The independence assumption is a useful tool to increase the tractability ofones modelling framework. However this assumption does not match realityfailing to take dependencies into account can cause models to faildramatically. The field of multi-axis graphical modelling also calledmulti-way modelling Kronecker-separable modelling has seen growth over thepast decade but these models require that the data have zero mean. In themulti-axis case inference is typically done in the single sample scenariomaking mean inference impossible.  In this paper we demonstrate how the zero-mean assumption can causeegregious modelling errors as well as propose a relaxation to the zero-meanassumption that allows the avoidance of such errors. Specifically we proposethe Kronecker-sum-structured mean assumption which leads to models withnonconvex-but-unimodal log-likelihoods that can be solved efficiently withcoordinate descent. |
+|idx| 2408.02839v1 |
+|title| Optimizing Cox Models with Stochastic Gradient Descent: Theoretical Foundations and Practical Guidances |
+|authors| Lang ZengWeijing TangZhao RenYing Ding
+|links| http://arxiv.org/abs/2408.02839v1 |
+|updated| 2024-08-05 21:25:10 UTC |
+|summary| Optimizing Cox regression and its neural network variants poses substantialcomputational challenges in large-scale studies. Stochastic gradient descentSGD known for its scalability in model optimization has recently beenadapted to optimize Cox models. Unlike its conventional application whichtypically targets a sum of independent individual loss SGD for Cox modelsupdates parameters based on the partial likelihood of a subset of data. Despiteits empirical success the theoretical foundation for optimizing Cox partiallikelihood with SGD is largely underexplored. In this work we demonstrate thatthe SGD estimator targets an objective function that is batch-size-dependent.We establish that the SGD estimator for the Cox neural network Cox-NN isconsistent and achieves the optimal minimax convergence rate up to apolylogarithmic factor. For Cox regression we further prove thesqrtn-consistency and asymptotic normality of the SGD estimator withvariance depending on the batch size. Furthermore we quantify the impact ofbatch size on Cox-NN training and its effect on the SGD estimators asymptoticefficiency in Cox regression. These findings are validated by extensivenumerical experiments and provide guidance for selecting batch sizes in SGDapplications. Finally we demonstrate the effectiveness of SGD in a real-worldapplication where GD is unfeasible due to the large scale of data. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02622v1 |
-|title| Language Model Can Listen While Speaking |
-|authors| Ziyang MaYakun SongChenpeng DuJian CongZhuo ChenYuping WangYuxuan WangXie Chen
-|links| http://arxiv.org/abs/2408.02622v1 |
-|updated| 2024-08-05 16:47:22 UTC |
-|summary| Dialogue serves as the most natural manner of human-computer interactionHCI. Recent advancements in speech language models SLM have significantlyenhanced speech-based conversational AI. However these models are limited toturn-based conversation lacking the ability to interact with humans inreal-time spoken scenarios for example being interrupted when the generatedcontent is not satisfactory. To address these limitations we explore fullduplex modeling FDM in interactive speech language models iSLM focusing onenhancing real-time interaction and more explicitly exploring thequintessential ability of interruption. We introduce a novel model designnamely listening-while-speaking language model LSLM an end-to-end systemequipped with both listening and speaking channels. Our LSLM employs atoken-based decoder-only TTS for speech generation and a streamingself-supervised learning SSL encoder for real-time audio input. LSLM fusesboth channels for autoregressive generation and detects turn-taking in realtime. Three fusion strategies -- early fusion middle fusion and late fusion-- are explored with middle fusion achieving an optimal balance between speechgeneration and real-time interaction. Two experimental settings command-basedFDM and voice-based FDM demonstrate LSLMs robustness to noise and sensitivityto diverse instructions. Our results highlight LSLMs capability to achieveduplex communication with minimal impact on existing systems. This study aimsto advance the development of interactive speech dialogue systems enhancingtheir applicability in real-world contexts. |
+|idx| 2408.03304v1 |
+|title| Fusing Forces: Deep-Human-Guided Refinement of Segmentation Masks |
+|authors| Rafael SterzingerChristian StippelRobert Sablatnig
+|links| http://arxiv.org/abs/2408.03304v1 |
+|updated| 2024-08-06 17:11:40 UTC |
+|summary| Etruscan mirrors constitute a significant category in Etruscan artcharacterized by elaborate figurative illustrations featured on their backside.A laborious and costly aspect of their analysis and documentation is the taskof manually tracing these illustrations. In previous work a methodology hasbeen proposed to automate this process involving photometric-stereo scanningin combination with deep neural networks. While achieving quantitativeperformance akin to an expert annotator some results still lack qualitativeprecision and thus require annotators for inspection and potentialcorrection maintaining resource intensity. In response we propose a deepneural network trained to interactively refine existing annotations based onhuman guidance. Our human-in-the-loop approach streamlines annotationachieving equal quality with up to 75 less manual input required. Moreoverduring the refinement process the relative improvement of our methodology overpure manual labeling reaches peak values of up to 26 attaining drasticallybetter quality quicker. By being tailored to the complex task of segmentingintricate lines specifically distinguishing it from previous methods ourapproach offers drastic improvements in efficacy transferable to a broadspectrum of applications beyond Etruscan mirrors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02574v1 |
-|title| DanModCap: Designing a Danmaku Moderation Tool for Video-Sharing Platforms that Leverages Impact Captions |
-|authors| Siying HuHuanchen WangYu ZhangPiaohong WangZhicong Lu
-|links| http://arxiv.org/abs/2408.02574v1 |
-|updated| 2024-08-05 15:48:19 UTC |
-|summary| Online video platforms have gained increased popularity due to their abilityto support information consumption and sharing and the diverse socialinteractions they afford. Danmaku a real-time commentary feature that overlaysuser comments on a video has been found to improve user engagement howeverthe use of Danmaku can lead to toxic behaviors and inappropriate comments. Toaddress these issues we propose a proactive moderation approach inspired byImpact Captions a visual technique used in East Asian variety shows. ImpactCaptions combine textual content and visual elements to construct emotional andcognitive resonance. Within the context of this work Impact Captions were usedto guide viewers towards positive Danmaku-related activities and elicit morepro-social behaviors. Leveraging Impact Captions we developed DanModCap anmoderation tool that collected and analyzed Danmaku and used it as input tolarge generative language models to produce Impact Captions. Our evaluation ofDanModCap demonstrated that Impact Captions reduced negative antagonisticemotions increased users desire to share positive content and elicitedself-control in Danmaku social action to fostering proactive communitymaintenance behaviors. Our approach highlights the benefits of usingLLM-supported content moderation methods for proactive moderation in alarge-scale live content contexts. |
+|idx| 2408.03303v1 |
+|title| Understanding How Blind Users Handle Object Recognition Errors: Strategies and Challenges |
+|authors| Jonggi HongHernisa Kacorri
+|links| http://dx.doi.org/10.1145/3663548.3675635 |
+|updated| 2024-08-06 17:09:56 UTC |
+|summary| Object recognition technologies hold the potential to support blind andlow-vision people in navigating the world around them. However the gap betweenbenchmark performances and practical usability remains a significant challenge.This paper presents a study aimed at understanding blind users interactionwith object recognition systems for identifying and avoiding errors. Leveraginga pre-existing object recognition system URCam fine-tuned for our experimentwe conducted a user study involving 12 blind and low-vision participants.Through in-depth interviews and hands-on error identification tasks we gainedinsights into users experiences challenges and strategies for identifyingerrors in camera-based assistive technologies and object recognition systems.During interviews many participants preferred independent error review whileexpressing apprehension toward misrecognitions. In the error identificationtask participants varied viewpoints backgrounds and object sizes in theirimages to avoid and overcome errors. Even after repeating the taskparticipants identified only half of the errors and the proportion of errorsidentified did not significantly differ from their first attempts. Based onthese insights we offer implications for designing accessible interfacestailored to the needs of blind and low-vision users in identifying objectrecognition errors. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02535v1 |
-|title| Towards Coarse-grained Visual Language Navigation Task Planning Enhanced by Event Knowledge Graph |
-|authors| Zhao KaichenSong YaoxianZhao HaiquanLiu HaoyuLi TiefengLi Zhixu
-|links| http://arxiv.org/abs/2408.02535v1 |
-|updated| 2024-08-05 15:08:26 UTC |
-|summary| Visual language navigation VLN is one of the important research in embodiedAI. It aims to enable an agent to understand the surrounding environment andcomplete navigation tasks. VLN instructions could be categorized intocoarse-grained and fine-grained commands. Fine-grained command describes awhole task with subtasks step-by-step. In contrast coarse-grained commandgives an abstract task description which more suites human habits. Mostexisting work focuses on the former kind of instruction in VLN tasks ignoringthe latter abstract instructions belonging to daily life scenarios. To overcomethe above challenge in abstract instruction we attempt to considercoarse-grained instruction in VLN by event knowledge enhancement. Specificallywe first propose a prompt-based framework to extract an event knowledge graphnamed VLN-EventKG for VLN integrally over multiple mainstream benchmarkdatasets. Through small and large language model collaboration we realizeknowledge-enhanced navigation planning named EventNav for VLN tasks withcoarse-grained instruction input. Additionally we design a novel dynamichistory backtracking module to correct potential error action planning in realtime. Experimental results in various public benchmarks show ourknowledge-enhanced method has superiority in coarse-grained-instruction VLNusing our proposed VLN-EventKG with over 5 improvement in success rate. Ourproject is available at https://sites.google.com/view/vln-eventkg |
+|idx| 2408.03285v1 |
+|title| JetUnit: Rendering Diverse Force Feedback in Virtual Reality Using Water Jets |
+|authors| Zining ZhangJiasheng LiZeyu YanJun NishidaHuaishu Peng
+|links| http://dx.doi.org/10.1145/3654777.3676440 |
+|updated| 2024-08-06 16:33:35 UTC |
+|summary| We propose JetUnit a water-based VR haptic system designed to produce forcefeedback with a wide spectrum of intensities and frequencies through waterjets. The key challenge in designing this system lies in optimizing parametersto enable the haptic device to generate force feedback that closely replicatesthe most intense force produced by direct water jets while ensuring the userremains dry. In this paper we present the key design parameters of the JetUnitwearable device determined through a set of quantitative experiments and aperception study. We further conducted a user study to assess the impact ofintegrating our haptic solutions into virtual reality experiences. The resultsrevealed that by adhering to the design principles of JetUnit the water-basedhaptic system is capable of delivering diverse force feedback sensationssignificantly enhancing the immersive experience in virtual reality. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02525v1 |
-|title| Single-tap Latency Reduction with Single- or Double- tap Prediction |
-|authors| Naoto NishidaKaori IkematsuJunichi SatoShota YamanakaKota Tsubouchi
-|links| http://dx.doi.org/10.1145/3604271 |
-|updated| 2024-08-05 14:46:04 UTC |
-|summary| Touch surfaces are widely utilized for smartphones tablet PCs and laptopstouchpad and single and double taps are the most basic and common operationson them. The detection of single or double taps causes the single-tap latencyproblem which creates a bottleneck in terms of the sensitivity of touchinputs. To reduce the single-tap latency we propose a novelmachine-learning-based tap prediction method called PredicTaps. Our methodpredicts whether a detected tap is a single tap or the first contact of adouble tap without having to wait for the hundreds of millisecondsconventionally required. We present three evaluations and one user evaluationthat demonstrate its broad applicability and usability for various tapsituations on two form factors touchpad and smartphone. The results showedPredicTaps reduces the single-tap latency from 150-500 ms to 12 ms on laptopsand to 17.6 ms on smartphones without reducing usability. |
+|idx| 2408.03274v1 |
+|title| Compress and Compare: Interactively Evaluating Efficiency and Behavior Across ML Model Compression Experiments |
+|authors| Angie BoggustVenkatesh SivaramanYannick AssogbaDonghao RenDominik MoritzFred Hohman
+|links| http://arxiv.org/abs/2408.03274v1 |
+|updated| 2024-08-06 16:17:51 UTC |
+|summary| To deploy machine learning models on-device practitioners use compressionalgorithms to shrink and speed up models while maintaining their high-qualityoutput. A critical aspect of compression in practice is model comparisonincluding tracking many compression experiments identifying subtle changes inmodel behavior and negotiating complex accuracy-efficiency trade-offs.However existing compression tools poorly support comparison leading totedious and sometimes incomplete analyses spread across disjoint tools. Tosupport real-world comparative workflows we develop an interactive visualsystem called Compress and Compare. Within a single interface Compress andCompare surfaces promising compression strategies by visualizing provenancerelationships between compressed models and reveals compression-inducedbehavior changes by comparing models predictions weights and activations. Wedemonstrate how Compress and Compare supports common compression analysis tasksthrough two case studies debugging failed compression on generative languagemodels and identifying compression artifacts in image classification models. Wefurther evaluate Compress and Compare in a user study with eight compressionexperts illustrating its potential to provide structure to compressionworkflows help practitioners build intuition about compression and encouragethorough analysis of compressions effect on model behavior. Through theseevaluations we identify compression-specific challenges that future visualanalytics tools should consider and Compress and Compare visualizations thatmay generalize to broader model comparison tasks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.02508v1 |
-|title| PUREsuggest: Citation-based Literature Search and Visual Exploration with Keyword-controlled Rankings |
-|authors| Fabian Beck
-|links| http://arxiv.org/abs/2408.02508v1 |
-|updated| 2024-08-05 14:31:20 UTC |
-|summary| Citations allow quickly identifying related research. If multiplepublications are selected as seeds specific suggestions for related literaturecan be made based on the number of incoming and outgoing citation links to thisselection. Interactively adding recommended publications to the selectionrefines the next suggestion and incrementally builds a relevant collection ofpublications. Following this approach the paper presents a search and foragingapproach PUREsuggest which combines citation-based suggestions with augmentedvisualizations of the citation network. The focus and novelty of the approachis first the transparency of how the rankings are explained visually andsecond that the process can be steered through user-defined keywords whichreflect topics of interests. The system can be used to build new literaturecollections to update and assess existing ones as well as to use thecollected literature for identifying relevant experts in the field. Weevaluated the recommendation approach through simulated sessions and performeda user study investigating search strategies and usage patterns supported bythe interface. |
+|idx| 2408.03269v1 |
+|title| Connections Beyond Data: Exploring Homophily With Visualizations |
+|authors| Poorna Talkad SukumarMaurizio PorfiriOded Nov
+|links| http://arxiv.org/abs/2408.03269v1 |
+|updated| 2024-08-06 15:59:53 UTC |
+|summary| Homophily refers to the tendency of individuals to associate with others whoare similar to them in characteristics such as race ethnicity age genderor interests. In this paper we investigate if individuals exhibit racialhomophily when viewing visualizations using mass shooting data in the UnitedStates as the example topic. We conducted a crowdsourced experiment N450where each participant was shown a visualization displaying the counts of massshooting victims highlighting the counts for one of three racial groupsWhite Black or Hispanic. Participants were assigned to view visualizationshighlighting their own race or a different race to assess the influence ofracial concordance on changes in affect emotion and attitude towards guncontrol. While we did not find evidence of homophily the results showed asignificant negative shift in affect across all visualization conditions.Notably political ideology significantly impacted changes in affect with moreliberal views correlating with a more negative affect change. Our findingsunderscore the complexity of reactions to mass shooting visualizations andsuggest that future research should consider various methodologicalimprovements to better assess homophily effects. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2408.02845v1 |
+|title| Heterogeneous graph attention network improves cancer multiomics integration |
+|authors| Sina TabakhiCharlotte VandermeulenIan SudberyHaiping Lu
+|links| http://arxiv.org/abs/2408.02845v1 |
+|updated| 2024-08-05 22:01:13 UTC |
+|summary| The increase in high-dimensional multiomics data demands advanced integrationmodels to capture the complexity of human diseases. Graph-based deep learningintegration models despite their promise struggle with small patient cohortsand high-dimensional features often applying independent feature selectionwithout modeling relationships among omics. Furthermore conventionalgraph-based omics models focus on homogeneous graphs lacking multiple types ofnodes and edges to capture diverse structures. We introduce a HeterogeneousGraph ATtention network for omics integration HeteroGATomics to improvecancer diagnosis. HeteroGATomics performs joint feature selection through amulti-agent system creating dedicated networks of feature and patientsimilarity for each omic modality. These networks are then combined into oneheterogeneous graph for learning holistic omic-specific representations andintegrating predictions across modalities. Experiments on three cancermultiomics datasets demonstrate HeteroGATomics superior performance in cancerdiagnosis. Moreover HeteroGATomics enhances interpretability by identifyingimportant biomarkers contributing to the diagnosis outcomes. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2408.02768v1 |
+|title| Assessing the Effects of Container Handling Strategies on Enhancing Freight Throughput |
+|authors| Sarita RattanakunuprakarnMingzhou JinMustafa Can CamurXueping Li
+|links| http://arxiv.org/abs/2408.02768v1 |
+|updated| 2024-08-05 18:38:27 UTC |
+|summary| As global supply chains and freight volumes grow the U.S. faces escalatingtransportation demands. The heavy reliance on road transport coupled with theunderutilization of the railway system results in congested highwaysprolonged transportation times higher costs and increased carbon emissions.Californias San Pedro Port Complex SPPC the nations busiest incurs asignificant share of these challenges. We utilize an agent-based simulation toreplicate real-world scenarios focusing on the intricacies of interactions ina modified intermodal inbound freight system for the SPPC. This involvesrelocating container classification to potential warehouses in CaliforniaUtah Arizona and Nevada rather than exclusively at port areas. Our primaryaim is to evaluate the proposed systems efficiency considering cost andfreight throughput while also examining the effects of workforce shortages.Computational analysis suggests that strategically installing intermodalcapabilities in select warehouses can reduce transportation costs boostthroughput and foster resour |
+
 
 | Item |Content|
 | --- |---|
@@ -340,25 +360,5 @@
 |links| http://arxiv.org/abs/2408.02117v1 |
 |updated| 2024-08-04 19:14:36 UTC |
 |summary| We propose Exanna a framework to realize agents that incorporate values indecision making. An Exannaagent considers the values of itself and others whenproviding rationales for its actions and evaluating the rationales provided byothers. Via multiagent simulation we demonstrate that considering values indecision making and producing rationales especially for norm-deviatingactions leads to 1 higher conflict resolution 2 better social experience3 higher privacy and 4 higher flexibility. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.01869v1 |
-|title| MALADE: Orchestration of LLM-powered Agents with Retrieval Augmented Generation for Pharmacovigilance |
-|authors| Jihye ChoiNils PalumboPrasad ChalasaniMatthew M. EngelhardSomesh JhaAnivarya KumarDavid Page
-|links| http://arxiv.org/abs/2408.01869v1 |
-|updated| 2024-08-03 22:14:13 UTC |
-|summary| In the era of Large Language Models LLMs given their remarkable textunderstanding and generation abilities there is an unprecedented opportunityto develop new LLM-based methods for trustworthy medical knowledge synthesisextraction and summarization. This paper focuses on the problem ofPharmacovigilance PhV where the significance and challenges lie inidentifying Adverse Drug Events ADEs from diverse text sources such asmedical literature clinical notes and drug labels. Unfortunately this taskis hindered by factors including variations in the terminologies of drugs andoutcomes and ADE descriptions often being buried in large amounts of narrativetext. We present MALADE the first effective collaborative multi-agent systempowered by LLM with Retrieval Augmented Generation for ADE extraction from druglabel data. This technique involves augmenting a query to an LLM with relevantinformation extracted from text resources and instructing the LLM to compose aresponse consistent with the augmented data. MALADE is a general LLM-agnosticarchitecture and its unique capabilities are: 1 leveraging a variety ofexternal sources such as medical literature drug labels and FDA tools e.g.OpenFDA drug information API 2 extracting drug-outcome association in astructured format along with the strength of the association and 3 providingexplanations for established associations. Instantiated with GPT-4 Turbo orGPT-4o and FDA drug label data MALADE demonstrates its efficacy with an AreaUnder ROC Curve of 0.90 against the OMOP Ground Truth table of ADEs. Ourimplementation leverages the Langroid multi-agent LLM framework and can befound at https://github.com/jihyechoi77/malade. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.01753v1 |
-|title| Opinion Dynamics with Set-Based Confidence: Convergence Criteria and Periodic Solutions |
-|authors| Iryna ZabarianskaAnton V. Proskurnikov
-|links| http://arxiv.org/abs/2408.01753v1 |
-|updated| 2024-08-03 11:29:40 UTC |
-|summary| This paper introduces a new multidimensional extension of theHegselmann-Krause HK opinion dynamics model where opinion proximity is notdetermined by a norm or metric. Instead each agent trusts opinions within theMinkowski sum ximathcalO where xi is the agents current opinion andmathcalO is the confidence set defining acceptable deviations. During eachiteration agents update their opinions by simultaneously averaging the trustedopinions. Unlike traditional HK systems where mathcalO is a ball in somenorm our model allows the confidence set to be non-convex and even unbounded.  We demonstrate that the new model referred to as SCOD Set-based ConfidenceOpinion Dynamics can exhibit properties absent in the conventional HK model.Some solutions may converge to non-equilibrium points in the state space whileothers oscillate periodically. These pathologies disappear if the setmathcalO is symmetric and contains zero in its interior: similar to theusual HK model SCOD then converges in a finite number of iterations to one ofthe equilibrium points. The latter property is also preserved if one agent isstubborn and resists changing their opinion yet still influences the othershowever two stubborn agents can lead to oscillations. |
 
 
