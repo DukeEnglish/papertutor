@@ -2,315 +2,345 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03936v1 |
-|title| SLIM-RAFT: A Novel Fine-Tuning Approach to Improve Cross-Linguistic Performance for Mercosur Common Nomenclature |
-|authors| Vinícius Di OliveiraYuri Façanha BezerraLi WeigangPedro Carvalho BromVictor Rafael R. Celestino
-|links| http://arxiv.org/abs/2408.03936v1 |
-|updated| 2024-08-07 17:54:21 UTC |
-|summary| Natural language processing NLP has seen significant advancements with theadvent of large language models LLMs. However substantial improvements arestill needed for languages other than English especially for specific domainslike the applications of Mercosur Common Nomenclature NCM a BrazilianHarmonized System HS. To address this gap this study uses TeenyTineLLaMA afoundational Portuguese LLM as an LLM source to implement the NCM applicationprocessing. Additionally a simplified Retrieval-Augmented Fine-Tuning RAFTtechnique termed SLIM-RAFT is proposed for task-specific fine-tuning of LLMs.This approach retains the chain-of-thought CoT methodology for promptdevelopment in a more concise and streamlined manner utilizing brief andfocused documents for training. The proposed model demonstrates an efficientand cost-effective alternative for fine-tuning smaller LLMs significantlyoutperforming TeenyTineLLaMA and ChatGPT-4 in the same task. Although theresearch focuses on NCM applications the methodology can be easily adapted forHS applications worldwide. |
+|idx| 2408.04632v1 |
+|title| Arctic-TILT. Business Document Understanding at Sub-Billion Scale |
+|authors| Łukasz BorchmannMichał PietruszkaWojciech JaśkowskiDawid JurkiewiczPiotr HalamaPaweł JóziakŁukasz GarncarekPaweł LiskowskiKarolina SzyndlerAndrzej GretkowskiJulita OłtusekGabriela NowakowskaArtur ZawłockiŁukasz DuhrPaweł DydaMichał Turski
+|links| http://arxiv.org/abs/2408.04632v1 |
+|updated| 2024-08-08 17:59:46 UTC |
+|summary| The vast portion of workloads employing LLMs involves answering questionsgrounded on PDF or scan content. We introduce the Arctic-TILT achievingaccuracy on par with models 1000times its size on these use cases. It can befine-tuned and deployed on a single 24GB GPU lowering operational costs whileprocessing Visually Rich Documents with up to 400k tokens. The modelestablishes state-of-the-art results on seven diverse Document Understandingbenchmarks as well as provides reliable confidence scores and quick inferencewhich are essential for processing files in large-scale or time-sensitiveenterprise environments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03934v1 |
-|title| From Words to Worth: Newborn Article Impact Prediction with LLM |
-|authors| Penghai ZhaoQinghua XingKairan DouJinyu TianYing TaiJian YangMing-Ming ChengXiang Li
-|links| http://arxiv.org/abs/2408.03934v1 |
-|updated| 2024-08-07 17:52:02 UTC |
-|summary| As the academic landscape expands the challenge of efficiently identifyingpotentially high-impact articles among the vast number of newly published worksbecomes critical. This paper introduces a promising approach leveraging thecapabilities of fine-tuned LLMs to predict the future impact of newbornarticles solely based on titles and abstracts. Moving beyond traditionalmethods heavily reliant on external information the proposed method discernsthe shared semantic features of highly impactful papers from a large collectionof title-abstract and potential impact pairs. These semantic features arefurther utilized to regress an improved metric TNCSI_SP which has beenendowed with value field and time normalization properties. Additionally acomprehensive dataset has been constructed and released for fine-tuning theLLM containing over 12000 entries with corresponding titles abstracts andTNCSI_SP. The quantitative results with an NDCG20 of 0.901 demonstrate thatthe proposed approach achieves state-of-the-art performance in predicting theimpact of newborn articles when compared to competitive counterparts. Finallywe demonstrate a real-world application for predicting the impact of newbornjournal articles to demonstrate its noteworthy practical value. Overall ourfindings challenge existing paradigms and propose a shift towards a morecontent-focused prediction of academic impact offering new insights forassessing newborn article impact. |
+|idx| 2408.04628v1 |
+|title| LogogramNLP: Comparing Visual and Textual Representations of Ancient Logographic Writing Systems for NLP |
+|authors| Danlu ChenFreda ShiAditi AgarwalJacobo MyerstonTaylor Berg-Kirkpatrick
+|links| http://arxiv.org/abs/2408.04628v1 |
+|updated| 2024-08-08 17:58:06 UTC |
+|summary| Standard natural language processing NLP pipelines operate on symbolicrepresentations of language which typically consist of sequences of discretetokens. However creating an analogous representation for ancient logographicwriting systems is an extremely labor intensive process that requires expertknowledge. At present a large portion of logographic data persists in a purelyvisual form due to the absence of transcription -- this issue poses abottleneck for researchers seeking to apply NLP toolkits to study ancientlogographic languages: most of the relevant data are images of writing.  This paper investigates whether direct processing of visual representationsof language offers a potential solution. We introduce LogogramNLP the firstbenchmark enabling NLP analysis of ancient logographic languages featuringboth transcribed and visual datasets for four writing systems along withannotations for tasks like classification translation and parsing. Ourexperiments compare systems that employ recent visual and text encodingstrategies as backbones. The results demonstrate that visual representationsoutperform textual representations for some investigated tasks suggesting thatvisual processing pipelines may unlock a large amount of cultural heritage dataof logographic languages for NLP-based analyses. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03910v1 |
-|title| CodexGraph: Bridging Large Language Models and Code Repositories via Code Graph Databases |
-|authors| Xiangyan LiuBo LanZhiyuan HuYang LiuZhicheng ZhangWenmeng ZhouFei WangMichael Shieh
-|links| http://arxiv.org/abs/2408.03910v1 |
-|updated| 2024-08-07 17:13:59 UTC |
-|summary| Large Language Models LLMs excel in stand-alone code tasks like HumanEvaland MBPP but struggle with handling entire code repositories. This challengehas prompted research on enhancing LLM-codebase interaction at a repositoryscale. Current solutions rely on similarity-based retrieval or manual tools andAPIs each with notable drawbacks. Similarity-based retrieval often has lowrecall in complex tasks while manual tools and APIs are typicallytask-specific and require expert knowledge reducing their generalizabilityacross diverse code tasks and real-world applications. To mitigate theselimitations we introduce framework a system that integrates LLM agents withgraph database interfaces extracted from code repositories. By leveraging thestructural properties of graph databases and the flexibility of the graph querylanguage framework enables the LLM agent to construct and execute queriesallowing for precise code structure-aware context retrieval and codenavigation. We assess framework using three benchmarks: CrossCodeEvalSWE-bench and EvoCodeBench. Additionally we develop five real-world codingapplications. With a unified graph database schema framework demonstratescompetitive performance and potential in both academic and real-worldenvironments showcasing its versatility and efficacy in software engineering.Our application demo:https://github.com/modelscope/modelscope-agent/tree/master/apps/codexgraph_agent. |
+|idx| 2408.04619v1 |
+|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
+|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
+|links| http://arxiv.org/abs/2408.04619v1 |
+|updated| 2024-08-08 17:49:07 UTC |
+|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03907v1 |
-|title| Decoding Biases: Automated Methods and LLM Judges for Gender Bias Detection in Language Models |
-|authors| Shachi H KumarSaurav SahaySahisnu MazumderEda OkurRamesh ManuvinakurikeNicole BeckageHsuan SuHung-yi LeeLama Nachman
-|links| http://arxiv.org/abs/2408.03907v1 |
-|updated| 2024-08-07 17:11:34 UTC |
-|summary| Large Language Models LLMs have excelled at language understanding andgenerating human-level text. However even with supervised training and humanalignment these LLMs are susceptible to adversarial attacks where malicioususers can prompt the model to generate undesirable text. LLMs also inherentlyencode potential biases that can cause various harmful effects duringinteractions. Bias evaluation metrics lack standards as well as consensus andexisting methods often rely on human-generated templates and annotations whichare expensive and labor intensive. In this work we train models toautomatically create adversarial prompts to elicit biased responses from targetLLMs. We present LLM- based bias evaluation metrics and also analyze severalexisting automatic evaluation methods and metrics. We analyze the variousnuances of model responses identify the strengths and weaknesses of modelfamilies and assess where evaluation methods fall short. We compare thesemetrics to human evaluation and validate that the LLM-as-a-Judge metric alignswith human judgement on bias in response generation. |
+|idx| 2408.04614v1 |
+|title| Better Alignment with Instruction Back-and-Forth Translation |
+|authors| Thao NguyenJeffrey LiSewoong OhLudwig SchmidtJason WestonLuke ZettlemoyerXian Li
+|links| http://arxiv.org/abs/2408.04614v1 |
+|updated| 2024-08-08 17:42:32 UTC |
+|summary| We propose a new method instruction back-and-forth translation to constructhigh-quality synthetic data grounded in world knowledge for aligning largelanguage models LLMs. Given documents from a web corpus we generate andcurate synthetic instructions using the backtranslation approach proposed by Liet al.2023a and rewrite the responses to improve their quality further basedon the initial documents. Fine-tuning with the resulting backtranslatedinstruction rewritten response pairs yields higher win rates on AlpacaEvalthan using other common instruction datasets such as Humpback ShareGPT OpenOrca Alpaca-GPT4 and Self-instruct. We also demonstrate that rewriting theresponses with an LLM outperforms direct distillation and the two generatedtext distributions exhibit significant distinction in embedding space. Furtheranalysis shows that our backtranslated instructions are of higher quality thanother sources of synthetic instructions while our responses are more diverseand complex than those obtained from distillation. Overall we find thatinstruction back-and-forth translation combines the best of both worlds --making use of the information diversity and quantity found on the web whileensuring the quality of the responses which is necessary for effectivealignment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03900v1 |
-|title| Speech-MASSIVE: A Multilingual Speech Dataset for SLU and Beyond |
-|authors| Beomseok LeeIoan CalapodescuMarco GaidoMatteo NegriLaurent Besacier
-|links| http://arxiv.org/abs/2408.03900v1 |
-|updated| 2024-08-07 16:55:28 UTC |
-|summary| We present Speech-MASSIVE a multilingual Spoken Language Understanding SLUdataset comprising the speech counterpart for a portion of the MASSIVE textualcorpus. Speech-MASSIVE covers 12 languages from different families and inheritsfrom MASSIVE the annotations for the intent prediction and slot-filling tasks.Our extension is prompted by the scarcity of massively multilingual SLUdatasets and the growing need for versatile speech datasets to assessfoundation models LLMs speech encoders across languages and tasks. Weprovide a multimodal multitask multilingual dataset and report SLU baselinesusing both cascaded and end-to-end architectures in various training scenarioszero-shot few-shot and full fine-tune. Furthermore we demonstrate thesuitability of Speech-MASSIVE for benchmarking other tasks such as speechtranscription language identification and speech translation. The datasetmodels and code are publicly available at:https://github.com/hlt-mt/Speech-MASSIVE |
+|idx| 2408.04596v1 |
+|title| Code-switching in text and speech reveals information-theoretic audience design |
+|authors| Debasmita BhattacharyaMarten van Schijndel
+|links| http://arxiv.org/abs/2408.04596v1 |
+|updated| 2024-08-08 17:14:12 UTC |
+|summary| In this work we use language modeling to investigate the factors thatinfluence code-switching. Code-switching occurs when a speaker alternatesbetween one language variety the primary language and another the secondarylanguage and is widely observed in multilingual contexts. Recent work hasshown that code-switching is often correlated with areas of high informationload in the primary language but it is unclear whether high primary languageload only makes the secondary language relatively easier to produce atcode-switching points speaker-driven code-switching or whethercode-switching is additionally used by speakers to signal the need for greaterattention on the part of listeners audience-driven code-switching. In thispaper we use bilingual Chinese-English online forum posts and transcripts ofspontaneous Chinese-English speech to replicate prior findings that highprimary language Chinese information load is correlated with switches to thesecondary language English. We then demonstrate that the information load ofthe English productions is even higher than that of meaning equivalent Chinesealternatives and these are therefore not easier to produce providing evidenceof audience-driven influences in code-switching at the level of thecommunication channel not just at the sociolinguistic level in both writingand speech. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03936v1 |
-|title| SLIM-RAFT: A Novel Fine-Tuning Approach to Improve Cross-Linguistic Performance for Mercosur Common Nomenclature |
-|authors| Vinícius Di OliveiraYuri Façanha BezerraLi WeigangPedro Carvalho BromVictor Rafael R. Celestino
-|links| http://arxiv.org/abs/2408.03936v1 |
-|updated| 2024-08-07 17:54:21 UTC |
-|summary| Natural language processing NLP has seen significant advancements with theadvent of large language models LLMs. However substantial improvements arestill needed for languages other than English especially for specific domainslike the applications of Mercosur Common Nomenclature NCM a BrazilianHarmonized System HS. To address this gap this study uses TeenyTineLLaMA afoundational Portuguese LLM as an LLM source to implement the NCM applicationprocessing. Additionally a simplified Retrieval-Augmented Fine-Tuning RAFTtechnique termed SLIM-RAFT is proposed for task-specific fine-tuning of LLMs.This approach retains the chain-of-thought CoT methodology for promptdevelopment in a more concise and streamlined manner utilizing brief andfocused documents for training. The proposed model demonstrates an efficientand cost-effective alternative for fine-tuning smaller LLMs significantlyoutperforming TeenyTineLLaMA and ChatGPT-4 in the same task. Although theresearch focuses on NCM applications the methodology can be easily adapted forHS applications worldwide. |
+|idx| 2408.04631v1 |
+|title| Puppet-Master: Scaling Interactive Video Generation as a Motion Prior for Part-Level Dynamics |
+|authors| Ruining LiChuanxia ZhengChristian RupprechtAndrea Vedaldi
+|links| http://arxiv.org/abs/2408.04631v1 |
+|updated| 2024-08-08 17:59:38 UTC |
+|summary| We present Puppet-Master an interactive video generative model that canserve as a motion prior for part-level dynamics. At test time given a singleimage and a sparse set of motion trajectories i.e. drags Puppet-Master cansynthesize a video depicting realistic part-level motion faithful to the givendrag interactions. This is achieved by fine-tuning a large-scale pre-trainedvideo diffusion model for which we propose a new conditioning architecture toinject the dragging control effectively. More importantly we introduce theall-to-first attention mechanism a drop-in replacement for the widely adoptedspatial attention modules which significantly improves generation quality byaddressing the appearance and background issues in existing models. Unlikeother motion-conditioned video generators that are trained on in-the-wildvideos and mostly move an entire object Puppet-Master is learned fromObjaverse-Animation-HQ a new dataset of curated part-level motion clips. Wepropose a strategy to automatically filter out sub-optimal animations andaugment the synthetic renderings with meaningful motion trajectories.Puppet-Master generalizes well to real images across various categories andoutperforms existing methods in a zero-shot manner on a real-world benchmark.See our project page for more results: vgg-puppetmaster.github.io. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03910v1 |
-|title| CodexGraph: Bridging Large Language Models and Code Repositories via Code Graph Databases |
-|authors| Xiangyan LiuBo LanZhiyuan HuYang LiuZhicheng ZhangWenmeng ZhouFei WangMichael Shieh
-|links| http://arxiv.org/abs/2408.03910v1 |
-|updated| 2024-08-07 17:13:59 UTC |
-|summary| Large Language Models LLMs excel in stand-alone code tasks like HumanEvaland MBPP but struggle with handling entire code repositories. This challengehas prompted research on enhancing LLM-codebase interaction at a repositoryscale. Current solutions rely on similarity-based retrieval or manual tools andAPIs each with notable drawbacks. Similarity-based retrieval often has lowrecall in complex tasks while manual tools and APIs are typicallytask-specific and require expert knowledge reducing their generalizabilityacross diverse code tasks and real-world applications. To mitigate theselimitations we introduce framework a system that integrates LLM agents withgraph database interfaces extracted from code repositories. By leveraging thestructural properties of graph databases and the flexibility of the graph querylanguage framework enables the LLM agent to construct and execute queriesallowing for precise code structure-aware context retrieval and codenavigation. We assess framework using three benchmarks: CrossCodeEvalSWE-bench and EvoCodeBench. Additionally we develop five real-world codingapplications. With a unified graph database schema framework demonstratescompetitive performance and potential in both academic and real-worldenvironments showcasing its versatility and efficacy in software engineering.Our application demo:https://github.com/modelscope/modelscope-agent/tree/master/apps/codexgraph_agent. |
+|idx| 2408.04628v1 |
+|title| LogogramNLP: Comparing Visual and Textual Representations of Ancient Logographic Writing Systems for NLP |
+|authors| Danlu ChenFreda ShiAditi AgarwalJacobo MyerstonTaylor Berg-Kirkpatrick
+|links| http://arxiv.org/abs/2408.04628v1 |
+|updated| 2024-08-08 17:58:06 UTC |
+|summary| Standard natural language processing NLP pipelines operate on symbolicrepresentations of language which typically consist of sequences of discretetokens. However creating an analogous representation for ancient logographicwriting systems is an extremely labor intensive process that requires expertknowledge. At present a large portion of logographic data persists in a purelyvisual form due to the absence of transcription -- this issue poses abottleneck for researchers seeking to apply NLP toolkits to study ancientlogographic languages: most of the relevant data are images of writing.  This paper investigates whether direct processing of visual representationsof language offers a potential solution. We introduce LogogramNLP the firstbenchmark enabling NLP analysis of ancient logographic languages featuringboth transcribed and visual datasets for four writing systems along withannotations for tasks like classification translation and parsing. Ourexperiments compare systems that employ recent visual and text encodingstrategies as backbones. The results demonstrate that visual representationsoutperform textual representations for some investigated tasks suggesting thatvisual processing pipelines may unlock a large amount of cultural heritage dataof logographic languages for NLP-based analyses. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03909v1 |
-|title| LaFA: Latent Feature Attacks on Non-negative Matrix Factorization |
-|authors| Minh VuBen NebgenErik SkauGeigh ZollicofferJuan CastorenaKim RasmussenBoian AlexandrovManish Bhattarai
-|links| http://arxiv.org/abs/2408.03909v1 |
-|updated| 2024-08-07 17:13:46 UTC |
-|summary| As Machine Learning ML applications rapidly grow concerns aboutadversarial attacks compromising their reliability have gained significantattention. One unsupervised ML method known for its resilience to such attacksis Non-negative Matrix Factorization NMF an algorithm that decomposes inputdata into lower-dimensional latent features. However the introduction ofpowerful computational tools such as Pytorch enables the computation ofgradients of the latent features with respect to the original data raisingconcerns about NMFs reliability. Interestingly naively deriving theadversarial loss for NMF as in the case of ML would result in thereconstruction loss which can be shown theoretically to be an ineffectiveattacking objective. In this work we introduce a novel class of attacks in NMFtermed Latent Feature Attacks LaFA which aim to manipulate the latentfeatures produced by the NMF process. Our method utilizes the Feature ErrorFE loss directly on the latent features. By employing FE loss we generateperturbations in the original data that significantly affect the extractedlatent features revealing vulnerabilities akin to those found in other MLtechniques. To handle large peak-memory overhead from gradient back-propagationin FE attacks we develop a method based on implicit differentiation whichenables their scaling to larger datasets. We validate NMF vulnerabilities andFE attacks effectiveness through extensive experiments on synthetic andreal-world data. |
+|idx| 2408.04619v1 |
+|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
+|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
+|links| http://arxiv.org/abs/2408.04619v1 |
+|updated| 2024-08-08 17:49:07 UTC |
+|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03907v1 |
-|title| Decoding Biases: Automated Methods and LLM Judges for Gender Bias Detection in Language Models |
-|authors| Shachi H KumarSaurav SahaySahisnu MazumderEda OkurRamesh ManuvinakurikeNicole BeckageHsuan SuHung-yi LeeLama Nachman
-|links| http://arxiv.org/abs/2408.03907v1 |
-|updated| 2024-08-07 17:11:34 UTC |
-|summary| Large Language Models LLMs have excelled at language understanding andgenerating human-level text. However even with supervised training and humanalignment these LLMs are susceptible to adversarial attacks where malicioususers can prompt the model to generate undesirable text. LLMs also inherentlyencode potential biases that can cause various harmful effects duringinteractions. Bias evaluation metrics lack standards as well as consensus andexisting methods often rely on human-generated templates and annotations whichare expensive and labor intensive. In this work we train models toautomatically create adversarial prompts to elicit biased responses from targetLLMs. We present LLM- based bias evaluation metrics and also analyze severalexisting automatic evaluation methods and metrics. We analyze the variousnuances of model responses identify the strengths and weaknesses of modelfamilies and assess where evaluation methods fall short. We compare thesemetrics to human evaluation and validate that the LLM-as-a-Judge metric alignswith human judgement on bias in response generation. |
+|idx| 2408.04614v1 |
+|title| Better Alignment with Instruction Back-and-Forth Translation |
+|authors| Thao NguyenJeffrey LiSewoong OhLudwig SchmidtJason WestonLuke ZettlemoyerXian Li
+|links| http://arxiv.org/abs/2408.04614v1 |
+|updated| 2024-08-08 17:42:32 UTC |
+|summary| We propose a new method instruction back-and-forth translation to constructhigh-quality synthetic data grounded in world knowledge for aligning largelanguage models LLMs. Given documents from a web corpus we generate andcurate synthetic instructions using the backtranslation approach proposed by Liet al.2023a and rewrite the responses to improve their quality further basedon the initial documents. Fine-tuning with the resulting backtranslatedinstruction rewritten response pairs yields higher win rates on AlpacaEvalthan using other common instruction datasets such as Humpback ShareGPT OpenOrca Alpaca-GPT4 and Self-instruct. We also demonstrate that rewriting theresponses with an LLM outperforms direct distillation and the two generatedtext distributions exhibit significant distinction in embedding space. Furtheranalysis shows that our backtranslated instructions are of higher quality thanother sources of synthetic instructions while our responses are more diverseand complex than those obtained from distillation. Overall we find thatinstruction back-and-forth translation combines the best of both worlds --making use of the information diversity and quantity found on the web whileensuring the quality of the responses which is necessary for effectivealignment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03904v1 |
-|title| Lightweight Video Denoising Using a Classic Bayesian Backbone |
-|authors| Clément BledFrançois Pitié
-|links| http://arxiv.org/abs/2408.03904v1 |
-|updated| 2024-08-07 17:08:46 UTC |
-|summary| In recent years state-of-the-art image and video denoising networks havebecome increasingly large requiring millions of trainable parameters toachieve best-in-class performance. Improved denoising quality has come at thecost of denoising speed where modern transformer networks are far slower torun than smaller denoising networks such as FastDVDnet and classic Bayesiandenoisers such as the Wiener filter.  In this paper we implement a hybrid Wiener filter which leverages smallancillary networks to increase the original denoiser performance whileretaining fast denoising speeds. These networks are used to refine the Wienercoring estimate optimise windowing functions and estimate the unknown noiseprofile. Using these methods we outperform several popular denoisers andremain within 0.2 dB on average of the popular VRT transformer. Our methodwas found to be over x10 faster than the transformer method with a far lowerparameter cost. |
+|idx| 2408.04595v1 |
+|title| Inference with the Upper Confidence Bound Algorithm |
+|authors| Koulik KhamaruCun-Hui Zhang
+|links| http://arxiv.org/abs/2408.04595v1 |
+|updated| 2024-08-08 17:11:36 UTC |
+|summary| In this paper we discuss the asymptotic behavior of the Upper ConfidenceBound UCB algorithm in the context of multiarmed bandit problems and discussits implication in downstream inferential tasks. While inferential tasks becomechallenging when data is collected in a sequential manner we argue that thisproblem can be alleviated when the sequential algorithm at hand satisfiescertain stability property. This notion of stability is motivated from theseminal work of Lai and Wei 1982. Our first main result shows that such astability property is always satisfied for the UCB algorithm and as a resultthe sample means for each arm are asymptotically normal. Next we examine thestability properties of the UCB algorithm when the number of arms K isallowed to grow with the number of arm pulls T. We show that in such a casethe arms are stable when fraclog Klog T rightarrow 0 and the numberof near-optimal arms are large. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03936v1 |
-|title| SLIM-RAFT: A Novel Fine-Tuning Approach to Improve Cross-Linguistic Performance for Mercosur Common Nomenclature |
-|authors| Vinícius Di OliveiraYuri Façanha BezerraLi WeigangPedro Carvalho BromVictor Rafael R. Celestino
-|links| http://arxiv.org/abs/2408.03936v1 |
-|updated| 2024-08-07 17:54:21 UTC |
-|summary| Natural language processing NLP has seen significant advancements with theadvent of large language models LLMs. However substantial improvements arestill needed for languages other than English especially for specific domainslike the applications of Mercosur Common Nomenclature NCM a BrazilianHarmonized System HS. To address this gap this study uses TeenyTineLLaMA afoundational Portuguese LLM as an LLM source to implement the NCM applicationprocessing. Additionally a simplified Retrieval-Augmented Fine-Tuning RAFTtechnique termed SLIM-RAFT is proposed for task-specific fine-tuning of LLMs.This approach retains the chain-of-thought CoT methodology for promptdevelopment in a more concise and streamlined manner utilizing brief andfocused documents for training. The proposed model demonstrates an efficientand cost-effective alternative for fine-tuning smaller LLMs significantlyoutperforming TeenyTineLLaMA and ChatGPT-4 in the same task. Although theresearch focuses on NCM applications the methodology can be easily adapted forHS applications worldwide. |
+|idx| 2408.04619v1 |
+|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
+|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
+|links| http://arxiv.org/abs/2408.04619v1 |
+|updated| 2024-08-08 17:49:07 UTC |
+|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03915v1 |
-|title| Hard to Explain: On the Computational Hardness of In-Distribution Model Interpretation |
-|authors| Guy AmirShahaf BassanGuy Katz
-|links| http://arxiv.org/abs/2408.03915v1 |
-|updated| 2024-08-07 17:20:52 UTC |
-|summary| The ability to interpret Machine Learning ML models is becomingincreasingly essential. However despite significant progress in the fieldthere remains a lack of rigorous characterization regarding the innateinterpretability of different models. In an attempt to bridge this gap recentwork has demonstrated that it is possible to formally assess interpretabilityby studying the computational complexity of explaining the decisions of variousmodels. In this setting if explanations for a particular model can be obtainedefficiently the model is considered interpretable since it can be explainedeasily. However if generating explanations over an ML model iscomputationally intractable it is considered uninterpretable. Prior researchidentified two key factors that influence the complexity of interpreting an MLmodel: i the type of the model e.g. neural networks decision trees etc.and ii the form of explanation e.g. contrastive explanations Shapleyvalues etc.. In this work we claim that a third important factor must alsobe considered for this analysis -- the underlying distribution over which theexplanation is obtained. Considering the underlying distribution is key inavoiding explanations that are socially misaligned i.e. convey informationthat is biased and unhelpful to users. We demonstrate the significant influenceof the underlying distribution on the resulting overall interpretationcomplexity in two settings: i prediction models paired with an externalout-of-distribution OOD detector and ii prediction models designed toinherently generate socially aligned explanations. Our findings prove that theexpressiveness of the distribution can significantly influence the overallcomplexity of interpretation and identify essential prerequisites that a modelmust possess to generate socially aligned explanations. |
+|idx| 2408.04614v1 |
+|title| Better Alignment with Instruction Back-and-Forth Translation |
+|authors| Thao NguyenJeffrey LiSewoong OhLudwig SchmidtJason WestonLuke ZettlemoyerXian Li
+|links| http://arxiv.org/abs/2408.04614v1 |
+|updated| 2024-08-08 17:42:32 UTC |
+|summary| We propose a new method instruction back-and-forth translation to constructhigh-quality synthetic data grounded in world knowledge for aligning largelanguage models LLMs. Given documents from a web corpus we generate andcurate synthetic instructions using the backtranslation approach proposed by Liet al.2023a and rewrite the responses to improve their quality further basedon the initial documents. Fine-tuning with the resulting backtranslatedinstruction rewritten response pairs yields higher win rates on AlpacaEvalthan using other common instruction datasets such as Humpback ShareGPT OpenOrca Alpaca-GPT4 and Self-instruct. We also demonstrate that rewriting theresponses with an LLM outperforms direct distillation and the two generatedtext distributions exhibit significant distinction in embedding space. Furtheranalysis shows that our backtranslated instructions are of higher quality thanother sources of synthetic instructions while our responses are more diverseand complex than those obtained from distillation. Overall we find thatinstruction back-and-forth translation combines the best of both worlds --making use of the information diversity and quantity found on the web whileensuring the quality of the responses which is necessary for effectivealignment. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03913v1 |
-|title| AdapMTL: Adaptive Pruning Framework for Multitask Learning Model |
-|authors| Mingcan XiangSteven Jiaxun TangQizheng YangHui GuanTongping Liu
-|links| http://dx.doi.org/10.1145/3664647.3681426 |
-|updated| 2024-08-07 17:19:15 UTC |
-|summary| In the domain of multimedia and multimodal processing the efficient handlingof diverse data streams such as images video and sensor data is paramount.Model compression and multitask learning MTL are crucial in this fieldoffering the potential to address the resource-intensive demands of processingand interpreting multiple forms of media simultaneously. However effectivelycompressing a multitask model presents significant challenges due to thecomplexities of balancing sparsity allocation and accuracy performance acrossmultiple tasks. To tackle these challenges we propose AdapMTL an adaptivepruning framework for MTL models. AdapMTL leverages multiple learnable softthresholds independently assigned to the shared backbone and the task-specificheads to capture the nuances in different components sensitivity to pruning.During training it co-optimizes the soft thresholds and MTL model weights toautomatically determine the suitable sparsity level at each component toachieve both high task accuracy and high overall sparsity. It furtherincorporates an adaptive weighting mechanism that dynamically adjusts theimportance of task-specific losses based on each tasks robustness to pruning.We demonstrate the effectiveness of AdapMTL through comprehensive experimentson popular multitask datasets namely NYU-v2 and Tiny-Taskonomy with differentarchitectures showcasing superior performance compared to state-of-the-artpruning methods. |
+|idx| 2408.04607v1 |
+|title| Risk and cross validation in ridge regression with correlated samples |
+|authors| Alexander AtanasovJacob A. Zavatone-VethCengiz Pehlevan
+|links| http://arxiv.org/abs/2408.04607v1 |
+|updated| 2024-08-08 17:27:29 UTC |
+|summary| Recent years have seen substantial advances in our understanding ofhigh-dimensional ridge regression but existing theories assume that trainingexamples are independent. By leveraging recent techniques from random matrixtheory and free probability we provide sharp asymptotics for the in- andout-of-sample risks of ridge regression when the data points have arbitrarycorrelations. We demonstrate that in this setting the generalized crossvalidation estimator GCV fails to correctly predict the out-of-sample risk.However in the case where the noise residuals have the same correlations asthe data points one can modify the GCV to yield an efficiently-computableunbiased estimator that concentrates in the high-dimensional limit which wedub CorrGCV. We further extend our asymptotic analysis to the case where thetest point has nontrivial correlations with the training set a setting oftenencountered in time series forecasting. Assuming knowledge of the correlationstructure of the time series this again yields an extension of the GCVestimator and sharply characterizes the degree to which such test points yieldan overly optimistic prediction of long-time risk. We validate the predictionsof our theory across a variety of high dimensional data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03909v1 |
-|title| LaFA: Latent Feature Attacks on Non-negative Matrix Factorization |
-|authors| Minh VuBen NebgenErik SkauGeigh ZollicofferJuan CastorenaKim RasmussenBoian AlexandrovManish Bhattarai
-|links| http://arxiv.org/abs/2408.03909v1 |
-|updated| 2024-08-07 17:13:46 UTC |
-|summary| As Machine Learning ML applications rapidly grow concerns aboutadversarial attacks compromising their reliability have gained significantattention. One unsupervised ML method known for its resilience to such attacksis Non-negative Matrix Factorization NMF an algorithm that decomposes inputdata into lower-dimensional latent features. However the introduction ofpowerful computational tools such as Pytorch enables the computation ofgradients of the latent features with respect to the original data raisingconcerns about NMFs reliability. Interestingly naively deriving theadversarial loss for NMF as in the case of ML would result in thereconstruction loss which can be shown theoretically to be an ineffectiveattacking objective. In this work we introduce a novel class of attacks in NMFtermed Latent Feature Attacks LaFA which aim to manipulate the latentfeatures produced by the NMF process. Our method utilizes the Feature ErrorFE loss directly on the latent features. By employing FE loss we generateperturbations in the original data that significantly affect the extractedlatent features revealing vulnerabilities akin to those found in other MLtechniques. To handle large peak-memory overhead from gradient back-propagationin FE attacks we develop a method based on implicit differentiation whichenables their scaling to larger datasets. We validate NMF vulnerabilities andFE attacks effectiveness through extensive experiments on synthetic andreal-world data. |
+|idx| 2408.04595v1 |
+|title| Inference with the Upper Confidence Bound Algorithm |
+|authors| Koulik KhamaruCun-Hui Zhang
+|links| http://arxiv.org/abs/2408.04595v1 |
+|updated| 2024-08-08 17:11:36 UTC |
+|summary| In this paper we discuss the asymptotic behavior of the Upper ConfidenceBound UCB algorithm in the context of multiarmed bandit problems and discussits implication in downstream inferential tasks. While inferential tasks becomechallenging when data is collected in a sequential manner we argue that thisproblem can be alleviated when the sequential algorithm at hand satisfiescertain stability property. This notion of stability is motivated from theseminal work of Lai and Wei 1982. Our first main result shows that such astability property is always satisfied for the UCB algorithm and as a resultthe sample means for each arm are asymptotically normal. Next we examine thestability properties of the UCB algorithm when the number of arms K isallowed to grow with the number of arm pulls T. We show that in such a casethe arms are stable when fraclog Klog T rightarrow 0 and the numberof near-optimal arms are large. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03877v1 |
-|title| Knowledge Probing for Graph Representation Learning |
-|authors| Mingyu ZhaoXingyu HuangZiyu LyuYanlin WangLixin CuiLu Bai
-|links| http://arxiv.org/abs/2408.03877v1 |
-|updated| 2024-08-07 16:27:45 UTC |
-|summary| Graph learning methods have been extensively applied in diverse applicationareas. However what kind of inherent graph properties e.g. graph proximitygraph structural information has been encoded into graph representationlearning for downstream tasks is still under-explored. In this paper wepropose a novel graph probing framework GraphProbe to investigate andinterpret whether the family of graph learning methods has encoded differentlevels of knowledge in graph representation learning. Based on the intrinsicproperties of graphs we design three probes to systematically investigate thegraph representation learning process from different perspectives respectivelythe node-wise level the path-wise level and the structural level. Weconstruct a thorough evaluation benchmark with nine representative graphlearning methods from random walk based approaches basic graph neural networksand self-supervised graph methods and probe them on six benchmark datasets fornode classification link prediction and graph classification. The experimentalevaluation verify that GraphProbe can estimate the capability of graphrepresentation learning. Remaking results have been concluded: GCN andWeightedGCN methods are relatively versatile methods achieving better resultswith respect to different tasks. |
+|idx| 2408.04590v1 |
+|title| Learn To Learn More Precisely |
+|authors| Runxi ChengYongxian WeiXianglong HeWanyun ZhuSongsong HuangFei Richard YuFei MaChun Yuan
+|links| http://arxiv.org/abs/2408.04590v1 |
+|updated| 2024-08-08 17:01:26 UTC |
+|summary| Meta-learning has been extensively applied in the domains of few-shotlearning and fast adaptation achieving remarkable performance. WhileMeta-learning methods like Model-Agnostic Meta-Learning MAML and its variantsprovide a good set of initial parameters for the model the model still tendsto learn shortcut features which leads to poor generalization. In this paperwe propose the formal conception of learn to learn more precisely which aimsto make the model learn precise target knowledge from data and reduce theeffect of noisy knowledge such as background and noise. To achieve thistarget we proposed a simple and effective meta-learning framework named MetaSelf-DistillationMSD to maximize the consistency of learned knowledgeenhancing the models ability to learn precise target knowledge. In the innerloop MSD uses different augmented views of the same support data to update themodel respectively. Then in the outer loop MSD utilizes the same query data tooptimize the consistency of learned knowledge enhancing the models ability tolearn more precisely. Our experiment demonstrates that MSD exhibits remarkableperformance in few-shot classification tasks in both standard and augmentedscenarios effectively boosting the accuracy and consistency of knowledgelearned by the model. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03940v1 |
-|title| How Well Can Vision Language Models See Image Details? |
-|authors| Chenhui GouAbdulwahab FelembanFaizan Farooq KhanDeyao ZhuJianfei CaiHamid RezatofighiMohamed Elhoseiny
-|links| http://arxiv.org/abs/2408.03940v1 |
-|updated| 2024-08-07 17:59:40 UTC |
-|summary| Large Language Model-based Vision-Language Models LLM-based VLMs havedemonstrated impressive results in various vision-language understanding tasks.However how well these VLMs can see image detail beyond the semantic levelremains unclear. In our study we introduce a pixel value prediction task PVPto explore How Well Can Vision Language Models See Image Details and toassist VLMs in perceiving more details. Typically these models comprise afrozen CLIP visual encoder a large language model and a connecting module.After fine-tuning VLMs on the PVP task we find: 1 existing VLMs struggle topredict precise pixel values by only fine-tuning the connection module and LLMand 2 prediction precision is significantly improved when the vision encoderis also adapted. Additionally our research reveals that incorporating pixelvalue prediction as one of the VLM pre-training tasks and vision encoderadaptation markedly boosts VLM performance on downstream image-languageunderstanding tasks requiring detailed image perception such as referringimage segmentation with an average 10.19 cIoU improvement and video gamedecision making with average score improvements of 80.34 and 70.54 on twogames respectively. |
+|idx| 2408.04633v1 |
+|title| LiDAR-Event Stereo Fusion with Hallucinations |
+|authors| Luca BartolomeiMatteo PoggiAndrea ContiStefano Mattoccia
+|links| http://arxiv.org/abs/2408.04633v1 |
+|updated| 2024-08-08 17:59:58 UTC |
+|summary| Event stereo matching is an emerging technique to estimate depth fromneuromorphic cameras however events are unlikely to trigger in the absence ofmotion or the presence of large untextured regions making the correspondenceproblem extremely challenging. Purposely we propose integrating a stereo eventcamera with a fixed-frequency active sensor -- e.g. a LiDAR -- collectingsparse depth measurements overcoming the aforementioned limitations. Suchdepth hints are used by hallucinating -- i.e. inserting fictitious events --the stacks or raw input streams compensating for the lack of information inthe absence of brightness changes. Our techniques are general can be adaptedto any structured representation to stack events and outperformstate-of-the-art fusion methods applied to event-based stereo. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03923v1 |
-|title| Fast Sprite Decomposition from Animated Graphics |
-|authors| Tomoyuki SuzukiKotaro KikuchiKota Yamaguchi
-|links| http://arxiv.org/abs/2408.03923v1 |
-|updated| 2024-08-07 17:30:59 UTC |
-|summary| This paper presents an approach to decomposing animated graphics intosprites a set of basic elements or layers. Our approach builds on theoptimization of sprite parameters to fit the raster video. For efficiency weassume static textures for sprites to reduce the search space while preventingartifacts using a texture prior model. To further speed up the optimization weintroduce the initialization of the sprite parameters utilizing a pre-trainedvideo object segmentation model and user input of single frame annotations. Forour study we construct the Crello Animation dataset from an online designservice and define quantitative metrics to measure the quality of the extractedsprites. Experiments show that our method significantly outperforms baselinesfor similar decomposition tasks in terms of the quality/efficiency tradeoff. |
+|idx| 2408.04632v1 |
+|title| Arctic-TILT. Business Document Understanding at Sub-Billion Scale |
+|authors| Łukasz BorchmannMichał PietruszkaWojciech JaśkowskiDawid JurkiewiczPiotr HalamaPaweł JóziakŁukasz GarncarekPaweł LiskowskiKarolina SzyndlerAndrzej GretkowskiJulita OłtusekGabriela NowakowskaArtur ZawłockiŁukasz DuhrPaweł DydaMichał Turski
+|links| http://arxiv.org/abs/2408.04632v1 |
+|updated| 2024-08-08 17:59:46 UTC |
+|summary| The vast portion of workloads employing LLMs involves answering questionsgrounded on PDF or scan content. We introduce the Arctic-TILT achievingaccuracy on par with models 1000times its size on these use cases. It can befine-tuned and deployed on a single 24GB GPU lowering operational costs whileprocessing Visually Rich Documents with up to 400k tokens. The modelestablishes state-of-the-art results on seven diverse Document Understandingbenchmarks as well as provides reliable confidence scores and quick inferencewhich are essential for processing files in large-scale or time-sensitiveenterprise environments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03922v1 |
-|title| FMiFood: Multi-modal Contrastive Learning for Food Image Classification |
-|authors| Xinyue PanJiangpeng HeFengqing Zhu
-|links| http://arxiv.org/abs/2408.03922v1 |
-|updated| 2024-08-07 17:29:19 UTC |
-|summary| Food image classification is the fundamental step in image-based dietaryassessment which aims to estimate participants nutrient intake from eatingoccasion images. A common challenge of food images is the intra-class diversityand inter-class similarity which can significantly hinder classificationperformance. To address this issue we introduce a novel multi-modalcontrastive learning framework called FMiFood which learns more discriminativefeatures by integrating additional contextual information such as foodcategory text descriptions to enhance classification accuracy. Specificallywe propose a flexible matching technique that improves the similarity matchingbetween text and image embeddings to focus on multiple key information.Furthermore we incorporate the classification objectives into the frameworkand explore the use of GPT-4 to enrich the text descriptions and provide moredetailed context. Our method demonstrates improved performance on both theUPMC-101 and VFN datasets compared to existing methods. |
+|idx| 2408.04631v1 |
+|title| Puppet-Master: Scaling Interactive Video Generation as a Motion Prior for Part-Level Dynamics |
+|authors| Ruining LiChuanxia ZhengChristian RupprechtAndrea Vedaldi
+|links| http://arxiv.org/abs/2408.04631v1 |
+|updated| 2024-08-08 17:59:38 UTC |
+|summary| We present Puppet-Master an interactive video generative model that canserve as a motion prior for part-level dynamics. At test time given a singleimage and a sparse set of motion trajectories i.e. drags Puppet-Master cansynthesize a video depicting realistic part-level motion faithful to the givendrag interactions. This is achieved by fine-tuning a large-scale pre-trainedvideo diffusion model for which we propose a new conditioning architecture toinject the dragging control effectively. More importantly we introduce theall-to-first attention mechanism a drop-in replacement for the widely adoptedspatial attention modules which significantly improves generation quality byaddressing the appearance and background issues in existing models. Unlikeother motion-conditioned video generators that are trained on in-the-wildvideos and mostly move an entire object Puppet-Master is learned fromObjaverse-Animation-HQ a new dataset of curated part-level motion clips. Wepropose a strategy to automatically filter out sub-optimal animations andaugment the synthetic renderings with meaningful motion trajectories.Puppet-Master generalizes well to real images across various categories andoutperforms existing methods in a zero-shot manner on a real-world benchmark.See our project page for more results: vgg-puppetmaster.github.io. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03913v1 |
-|title| AdapMTL: Adaptive Pruning Framework for Multitask Learning Model |
-|authors| Mingcan XiangSteven Jiaxun TangQizheng YangHui GuanTongping Liu
-|links| http://dx.doi.org/10.1145/3664647.3681426 |
-|updated| 2024-08-07 17:19:15 UTC |
-|summary| In the domain of multimedia and multimodal processing the efficient handlingof diverse data streams such as images video and sensor data is paramount.Model compression and multitask learning MTL are crucial in this fieldoffering the potential to address the resource-intensive demands of processingand interpreting multiple forms of media simultaneously. However effectivelycompressing a multitask model presents significant challenges due to thecomplexities of balancing sparsity allocation and accuracy performance acrossmultiple tasks. To tackle these challenges we propose AdapMTL an adaptivepruning framework for MTL models. AdapMTL leverages multiple learnable softthresholds independently assigned to the shared backbone and the task-specificheads to capture the nuances in different components sensitivity to pruning.During training it co-optimizes the soft thresholds and MTL model weights toautomatically determine the suitable sparsity level at each component toachieve both high task accuracy and high overall sparsity. It furtherincorporates an adaptive weighting mechanism that dynamically adjusts theimportance of task-specific losses based on each tasks robustness to pruning.We demonstrate the effectiveness of AdapMTL through comprehensive experimentson popular multitask datasets namely NYU-v2 and Tiny-Taskonomy with differentarchitectures showcasing superior performance compared to state-of-the-artpruning methods. |
+|idx| 2408.04628v1 |
+|title| LogogramNLP: Comparing Visual and Textual Representations of Ancient Logographic Writing Systems for NLP |
+|authors| Danlu ChenFreda ShiAditi AgarwalJacobo MyerstonTaylor Berg-Kirkpatrick
+|links| http://arxiv.org/abs/2408.04628v1 |
+|updated| 2024-08-08 17:58:06 UTC |
+|summary| Standard natural language processing NLP pipelines operate on symbolicrepresentations of language which typically consist of sequences of discretetokens. However creating an analogous representation for ancient logographicwriting systems is an extremely labor intensive process that requires expertknowledge. At present a large portion of logographic data persists in a purelyvisual form due to the absence of transcription -- this issue poses abottleneck for researchers seeking to apply NLP toolkits to study ancientlogographic languages: most of the relevant data are images of writing.  This paper investigates whether direct processing of visual representationsof language offers a potential solution. We introduce LogogramNLP the firstbenchmark enabling NLP analysis of ancient logographic languages featuringboth transcribed and visual datasets for four writing systems along withannotations for tasks like classification translation and parsing. Ourexperiments compare systems that employ recent visual and text encodingstrategies as backbones. The results demonstrate that visual representationsoutperform textual representations for some investigated tasks suggesting thatvisual processing pipelines may unlock a large amount of cultural heritage dataof logographic languages for NLP-based analyses. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03904v1 |
-|title| Lightweight Video Denoising Using a Classic Bayesian Backbone |
-|authors| Clément BledFrançois Pitié
-|links| http://arxiv.org/abs/2408.03904v1 |
-|updated| 2024-08-07 17:08:46 UTC |
-|summary| In recent years state-of-the-art image and video denoising networks havebecome increasingly large requiring millions of trainable parameters toachieve best-in-class performance. Improved denoising quality has come at thecost of denoising speed where modern transformer networks are far slower torun than smaller denoising networks such as FastDVDnet and classic Bayesiandenoisers such as the Wiener filter.  In this paper we implement a hybrid Wiener filter which leverages smallancillary networks to increase the original denoiser performance whileretaining fast denoising speeds. These networks are used to refine the Wienercoring estimate optimise windowing functions and estimate the unknown noiseprofile. Using these methods we outperform several popular denoisers andremain within 0.2 dB on average of the popular VRT transformer. Our methodwas found to be over x10 faster than the transformer method with a far lowerparameter cost. |
+|idx| 2408.04610v1 |
+|title| Quantifying the Impact of Population Shift Across Age and Sex for Abdominal Organ Segmentation |
+|authors| Kate ČevoraBen GlockerWenjia Bai
+|links| http://arxiv.org/abs/2408.04610v1 |
+|updated| 2024-08-08 17:28:32 UTC |
+|summary| Deep learning-based medical image segmentation has seen tremendous progressover the last decade but there is still relatively little transfer intoclinical practice. One of the main barriers is the challenge of domaingeneralisation which requires segmentation models to maintain high performanceacross a wide distribution of image data. This challenge is amplified by themany factors that contribute to the diverse appearance of medical images suchas acquisition conditions and patient characteristics. The impact of shiftingpatient characteristics such as age and sex on segmentation performance remainsrelatively under-studied especially for abdominal organs despite that this iscrucial for ensuring the fairness of the segmentation model. We perform thefirst study to determine the impact of population shift with respect to age andsex on abdominal CT image segmentation by leveraging two large publicdatasets and introduce a novel metric to quantify the impact. We find thatpopulation shift is a challenge similar in magnitude to cross-dataset shift forabdominal organ segmentation and that the effect is asymmetric anddataset-dependent. We conclude that dataset diversity in terms of known patientcharacteristics is not necessarily equivalent to dataset diversity in terms ofimage features. This implies that simple population matching to ensure goodgeneralisation and fairness may be insufficient and we recommend that fairnessresearch should be directed towards better understanding and quantifyingmedical image dataset diversity in terms of performance-relevantcharacteristics such as organ morphology. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03769v1 |
-|title| Nadaraya-Watson kernel smoothing as a random energy model |
-|authors| Jacob A. Zavatone-VethCengiz Pehlevan
-|links| http://arxiv.org/abs/2408.03769v1 |
-|updated| 2024-08-07 13:43:21 UTC |
-|summary| We investigate the behavior of the Nadaraya-Watson kernel smoothing estimatorin high dimensions using its relationship to the random energy model and todense associative memories. |
+|idx| 2408.04607v1 |
+|title| Risk and cross validation in ridge regression with correlated samples |
+|authors| Alexander AtanasovJacob A. Zavatone-VethCengiz Pehlevan
+|links| http://arxiv.org/abs/2408.04607v1 |
+|updated| 2024-08-08 17:27:29 UTC |
+|summary| Recent years have seen substantial advances in our understanding ofhigh-dimensional ridge regression but existing theories assume that trainingexamples are independent. By leveraging recent techniques from random matrixtheory and free probability we provide sharp asymptotics for the in- andout-of-sample risks of ridge regression when the data points have arbitrarycorrelations. We demonstrate that in this setting the generalized crossvalidation estimator GCV fails to correctly predict the out-of-sample risk.However in the case where the noise residuals have the same correlations asthe data points one can modify the GCV to yield an efficiently-computableunbiased estimator that concentrates in the high-dimensional limit which wedub CorrGCV. We further extend our asymptotic analysis to the case where thetest point has nontrivial correlations with the training set a setting oftenencountered in time series forecasting. Assuming knowledge of the correlationstructure of the time series this again yields an extension of the GCVestimator and sharply characterizes the degree to which such test points yieldan overly optimistic prediction of long-time risk. We validate the predictionsof our theory across a variety of high dimensional data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03746v1 |
-|title| Flexible Bayesian Last Layer Models Using Implicit Priors and Diffusion Posterior Sampling |
-|authors| Jian XuZhiqi LinShigui LiMin ChenJunmei YangDelu ZengJohn Paisley
-|links| http://arxiv.org/abs/2408.03746v1 |
-|updated| 2024-08-07 12:59:58 UTC |
-|summary| Bayesian Last Layer BLL models focus solely on uncertainty in the outputlayer of neural networks demonstrating comparable performance to more complexBayesian models. However the use of Gaussian priors for last layer weights inBayesian Last Layer BLL models limits their expressive capacity when facedwith non-Gaussian outlier-rich or high-dimensional datasets. To address thisshortfall we introduce a novel approach that combines diffusion techniques andimplicit priors for variational learning of Bayesian last layer weights. Thismethod leverages implicit distributions for modeling weight priors in BLLcoupled with diffusion samplers for approximating true posterior predictionsthereby establishing a comprehensive Bayesian prior and posterior estimationstrategy. By delivering an explicit and computationally efficient variationallower bound our method aims to augment the expressive abilities of BLL modelsenhancing model accuracy calibration and out-of-distribution detectionproficiency. Through detailed exploration and experimental validation Weshowcase the methods potential for improving predictive accuracy anduncertainty quantification while ensuring computational efficiency. |
+|idx| 2408.04595v1 |
+|title| Inference with the Upper Confidence Bound Algorithm |
+|authors| Koulik KhamaruCun-Hui Zhang
+|links| http://arxiv.org/abs/2408.04595v1 |
+|updated| 2024-08-08 17:11:36 UTC |
+|summary| In this paper we discuss the asymptotic behavior of the Upper ConfidenceBound UCB algorithm in the context of multiarmed bandit problems and discussits implication in downstream inferential tasks. While inferential tasks becomechallenging when data is collected in a sequential manner we argue that thisproblem can be alleviated when the sequential algorithm at hand satisfiescertain stability property. This notion of stability is motivated from theseminal work of Lai and Wei 1982. Our first main result shows that such astability property is always satisfied for the UCB algorithm and as a resultthe sample means for each arm are asymptotically normal. Next we examine thestability properties of the UCB algorithm when the number of arms K isallowed to grow with the number of arm pulls T. We show that in such a casethe arms are stable when fraclog Klog T rightarrow 0 and the numberof near-optimal arms are large. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03733v1 |
-|title| Bayes-optimal learning of an extensive-width neural network from quadratically many samples |
-|authors| Antoine MaillardEmanuele TroianiSimon MartinFlorent KrzakalaLenka Zdeborová
-|links| http://arxiv.org/abs/2408.03733v1 |
-|updated| 2024-08-07 12:41:56 UTC |
-|summary| We consider the problem of learning a target function corresponding to asingle hidden layer neural network with a quadratic activation function afterthe first layer and random weights. We consider the asymptotic limit where theinput dimension and the network width are proportionally large. Recent workCui  al 23 established that linear regression provides Bayes-optimal testerror to learn such a function when the number of available samples is onlylinear in the dimension. That work stressed the open challenge of theoreticallyanalyzing the optimal test error in the more interesting regime where thenumber of samples is quadratic in the dimension. In this paper we solve thischallenge for quadratic activations and derive a closed-form expression for theBayes-optimal test error. We also provide an algorithm that we call GAMP-RIEwhich combines approximate message passing with rotationally invariant matrixdenoising and that asymptotically achieves the optimal performance.Technically our result is enabled by establishing a link with recent works onoptimal denoising of extensive-rank matrices and on the ellipsoid fittingproblem. We further show empirically that in the absence of noiserandomly-initialized gradient descent seems to sample the space of weightsleading to zero training loss and averaging over initialization leads to atest error equal to the Bayes-optimal one. |
+|idx| 2408.04569v1 |
+|title| Activation thresholds and expressiveness of polynomial neural networks |
+|authors| Bella FinkelJose Israel RodriguezChenxi WuThomas Yahl
+|links| http://arxiv.org/abs/2408.04569v1 |
+|updated| 2024-08-08 16:28:56 UTC |
+|summary| Polynomial neural networks have been implemented in a range of applicationsand present an advantageous framework for theoretical machine learning. Apolynomial neural network of fixed architecture and activation degree gives analgebraic map from the networks weights to a set of polynomials. The image ofthis map is the space of functions representable by the network. Its Zariskiclosure is an affine variety known as a neurovariety. The dimension of apolynomial neural networks neurovariety provides a measure of itsexpressivity. In this work we introduce the notion of the activation thresholdof a network architecture which expresses when the dimension of a neurovarietyachieves its theoretical maximum. In addition we prove expressiveness resultsfor polynomial neural networks with equi-widtharchitectures. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03626v1 |
-|title| On the choice of the non-trainable internal weights in random feature maps |
-|authors| Pinak MandalGeorg A. Gottwald
-|links| http://arxiv.org/abs/2408.03626v1 |
-|updated| 2024-08-07 08:37:23 UTC |
-|summary| The computationally cheap machine learning architecture of random featuremaps can be viewed as a single-layer feedforward network in which the weightsof the hidden layer are random but fixed and only the outer weights are learnedvia linear regression. The internal weights are typically chosen from aprescribed distribution. The choice of the internal weights significantlyimpacts the accuracy of random feature maps. We address here the task of how tobest select the internal weights. In particular we consider the forecastingproblem whereby random feature maps are used to learn a one-step propagator mapfor a dynamical system. We provide a computationally cheap hit-and-runalgorithm to select good internal weights which lead to good forecasting skill.We show that the number of good features is the main factor controlling theforecasting skill of random feature maps and acts as an effective featuredimension. Lastly we compare random feature maps with single-layer feedforwardneural networks in which the internal weights are now learned using gradientdescent. We find that random feature maps have superior forecastingcapabilities whilst having several orders of magnitude lower computationalcost. |
+|idx| 2408.04526v1 |
+|title| Hybrid Reinforcement Learning Breaks Sample Size Barriers in Linear MDPs |
+|authors| Kevin TanWei FanYuting Wei
+|links| http://arxiv.org/abs/2408.04526v1 |
+|updated| 2024-08-08 15:26:18 UTC |
+|summary| Hybrid Reinforcement Learning RL where an agent learns from both anoffline dataset and online explorations in an unknown environment has garneredsignificant recent interest. A crucial question posed by Xie et al. 2022 iswhether hybrid RL can improve upon the existing lower bounds established inpurely offline and purely online RL without relying on the single-policyconcentrability assumption. While Li et al. 2023 provided an affirmativeanswer to this question in the tabular PAC RL case the question remainsunsettled for both the regret-minimizing RL case and the non-tabular case.  In this work building upon recent advancements in offline RL andreward-agnostic exploration we develop computationally efficient algorithmsfor both PAC and regret-minimizing RL with linear function approximationwithout single-policy concentrability. We demonstrate that these algorithmsachieve sharper error or regret bounds that are no worse than and can improveon the optimal sample complexity in offline RL the first algorithm for PACRL and online RL the second algorithm for regret-minimizing RL in linearMarkov decision processes MDPs regardless of the quality of the behaviorpolicy. To our knowledge this work establishes the tightest theoreticalguarantees currently available for hybrid RL in linear MDPs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03590v1 |
-|title| Sensitivity analysis using the Metamodel of Optimal Prognosis |
-|authors| Thomas MostJohannes Will
-|links| http://arxiv.org/abs/2408.03590v1 |
-|updated| 2024-08-07 07:09:06 UTC |
-|summary| In real case applications within the virtual prototyping process it is notalways possible to reduce the complexity of the physical models and to obtainnumerical models which can be solved quickly. Usually every single numericalsimulation takes hours or even days. Although the progresses in numericalmethods and high performance computing in such cases it is not possible toexplore various model configurations hence efficient surrogate models arerequired. Generally the available meta-model techniques show several advantagesand disadvantages depending on the investigated problem. In this paper wepresent an automatic approach for the selection of the optimal suitablemeta-model for the actual problem. Together with an automatic reduction of thevariable space using advanced filter techniques an efficient approximation isenabled also for high dimensional problems. This filter techniques enable areduction of the high dimensional variable space to a much smaller subspacewhere meta-model-based sensitivity analyses are carried out to assess theinfluence of important variables and to identify the optimal subspace withcorresponding surrogate model which enables the most accurate probabilisticanalysis. For this purpose we investigate variance-based and moment-freesensitivity measures in combination with advanced meta-models as moving leastsquares and kriging. |
+|idx| 2408.04391v1 |
+|title| Robustness investigation of quality measures for the assessment of machine learning models |
+|authors| Thomas MostLars GräningSebastian Wolff
+|links| http://arxiv.org/abs/2408.04391v1 |
+|updated| 2024-08-08 11:51:34 UTC |
+|summary| In this paper the accuracy and robustness of quality measures for theassessment of machine learning models are investigated. The prediction qualityof a machine learning model is evaluated model-independent based on across-validation approach where the approximation error is estimated forunknown data. The presented measures quantify the amount of explained variationin the model prediction. The reliability of these measures is assessed by meansof several numerical examples where an additional data set for theverification of the estimated prediction error is available. Furthermore theconfidence bounds of the presented quality measures are estimated and localquality measures are derived from the prediction residuals obtained by thecross-validation approach. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03889v1 |
-|title| The State of Reproducibility Stamps for Visualization Research Papers |
-|authors| Tobias Isenberg
-|links| http://arxiv.org/abs/2408.03889v1 |
-|updated| 2024-08-07 16:40:03 UTC |
-|summary| I analyze the evolution of papers certified by the Graphics ReplicabilityStamp Initiative GRSI to be reproducible with a specific focus on the subsetof publications that address visualization-related topics. With this analysis Ishow that while the number of papers is increasing overall and within thevisualization field we still have to improve quite a bit to escape thereplication crisis. I base my analysis on the data published by the GRSI aswell as publication data for the different venues in visualization and lists ofjournal papers that have been presented at visualization-focused conferences. Ialso analyze the differences between the involved journals as well as thepercentage of reproducible papers in the different presentation venues.Furthermore I look at the authors of the publications and in particulartheir affiliation countries to see where most reproducible papers come from.Finally I discuss potential reasons for the low reproducibility numbers andsuggest possible ways to overcome these obstacles. This paper is reproducibleitself with source code and data available fromgithub.com/tobiasisenberg/Visualization-Reproducibility as well as a free papercopy and all supplemental materials at osf.io/mvnbj. |
+|idx| 2408.04619v1 |
+|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
+|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
+|links| http://arxiv.org/abs/2408.04619v1 |
+|updated| 2024-08-08 17:49:07 UTC |
+|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03876v1 |
-|title| From Data to Story: Towards Automatic Animated Data Video Creation with LLM-based Multi-Agent Systems |
-|authors| Leixian ShenHaotian LiYun WangHuamin Qu
-|links| http://arxiv.org/abs/2408.03876v1 |
-|updated| 2024-08-07 16:25:39 UTC |
-|summary| Creating data stories from raw data is challenging due to humans limitedattention spans and the need for specialized skills. Recent advancements inlarge language models LLMs offer great opportunities to develop systems withautonomous agents to streamline the data storytelling workflow. Thoughmulti-agent systems have benefits such as fully realizing LLM potentials withdecomposed tasks for individual agents designing such systems also faceschallenges in task decomposition performance optimization for sub-tasks andworkflow design. To better understand these issues we develop Data Directoran LLM-based multi-agent system designed to automate the creation of animateddata videos a representative genre of data stories. Data Director interpretsraw data breaks down tasks designs agent roles to make informed decisionsautomatically and seamlessly integrates diverse components of data videos. Acase study demonstrates Data Directors effectiveness in generating datavideos. Throughout development we have derived lessons learned from addressingchallenges guiding further advancements in autonomous agents for datastorytelling. We also shed light on future directions for global optimizationhuman-in-the-loop design and the application of advanced multi-modal LLMs. |
+|idx| 2408.04574v1 |
+|title| Integrating Annotations into the Design Process for Sonifications and Physicalizations |
+|authors| Rhys Sorenson-GraffS. Sandra BaeJordan Wirfs-Brock
+|links| http://arxiv.org/abs/2408.04574v1 |
+|updated| 2024-08-08 16:36:14 UTC |
+|summary| Annotations are a critical component of visualizations helping viewersinterpret the visual representation and highlighting critical data insights.Despite their significant role we lack an understanding of how annotations canbe incorporated into other data representations such as physicalizations andsonifications. Given the emergent nature of these representationssonifications and physicalizations lack formalized conventions e.g. designspace vocabulary that can introduce challenges for audiences to interpret theintended data encoding. To address this challenge this work focuses on howannotations can be more tightly integrated into the design process of creatingsonifications and physicalizations. In an exploratory study with 13 designerswe explore how visualization annotation techniques can be adapted to sonic andphysical modalities. Our work highlights how annotations for sonification andphysicalizations are inseparable from their data encodings. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03845v1 |
-|title| ImageSI: Semantic Interaction for Deep Learning Image Projections |
-|authors| Jiayue LinRebecca FaustChris North
-|links| http://arxiv.org/abs/2408.03845v1 |
-|updated| 2024-08-07 15:40:05 UTC |
-|summary| Semantic interaction SI in Dimension Reduction DR of images allows usersto incorporate feedback through direct manipulation of the 2D positions ofimages. Through interaction users specify a set of pairwise relationships thatthe DR should aim to capture. Existing methods for images incorporate feedbackinto the DR through feature weights on abstract embedding features. However ifthe original embedding features do not suitably capture the users task thenthe DR cannot either. We propose ImageSI an SI method for image DR thatincorporates user feedback directly into the image model to update theunderlying embeddings rather than weighting them. In doing so ImageSI ensuresthat the embeddings suitably capture the features necessary for the task sothat the DR can subsequently organize images using those features. We presenttwo variations of ImageSI using different loss functions - ImageSI_MDS_Inversewhich prioritizes the explicit pairwise relationships from the interaction andImageSI_Triplet which prioritizes clustering using the interaction to definegroups of images. Finally we present a usage scenario and a simulation basedevaluation to demonstrate the utility of ImageSI and compare it to currentmethods. |
+|idx| 2408.04539v1 |
+|title| ParetoTracker: Understanding Population Dynamics in Multi-objective Evolutionary Algorithms through Visual Analytics |
+|authors| Zherui ZhangFan YangRan ChengYuxin Ma
+|links| http://arxiv.org/abs/2408.04539v1 |
+|updated| 2024-08-08 15:46:11 UTC |
+|summary| Multi-objective evolutionary algorithms MOEAs have emerged as powerfultools for solving complex optimization problems characterized by multipleoften conflicting objectives. While advancements have been made incomputational efficiency as well as diversity and convergence of solutions acritical challenge persists: the internal evolutionary mechanisms are opaque tohuman users. Drawing upon the successes of explainable AI in explaining complexalgorithms and models we argue that the need to understand the underlyingevolutionary operators and population dynamics within MOEAs aligns well with avisual analytics paradigm. This paper introduces ParetoTracker a visualanalytics framework designed to support the comprehension and inspection ofpopulation dynamics in the evolutionary processes of MOEAs. Informed bypreliminary literature review and expert interviews the framework establishesa multi-level analysis scheme which caters to user engagement and explorationranging from examining overall trends in performance metrics to conductingfine-grained inspections of evolutionary operations. In contrast toconventional practices that require manual plotting of solutions for eachgeneration ParetoTracker facilitates the examination of temporal trends anddynamics across consecutive generations in an integrated visual interface. Theeffectiveness of the framework is demonstrated through case studies and expertinterviews focused on widely adopted benchmark optimization problems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03827v1 |
-|title| Automated Code Fix Suggestions for Accessibility Issues in Mobile Apps |
-|authors| Forough MehralianTitus BarikJeff NicholsAmanda Swearngin
-|links| http://arxiv.org/abs/2408.03827v1 |
-|updated| 2024-08-07 15:06:07 UTC |
-|summary| Accessibility is crucial for inclusive app usability yet developers oftenstruggle to identify and fix app accessibility issues due to a lack ofawareness expertise and inadequate tools. Current accessibility testing toolscan identify accessibility issues but may not always provide guidance on how toaddress them. We introduce FixAlly an automated tool designed to suggestsource code fixes for accessibility issues detected by automated accessibilityscanners. FixAlly employs a multi-agent LLM architecture to generate fixstrategies localize issues within the source code and propose codemodification suggestions to fix the accessibility issue. Our empirical studydemonstrates FixAllys capability in suggesting fixes that resolve issues foundby accessibility scanners -- with an effectiveness of 77 in generatingplausible fix suggestions -- and our survey of 12 iOS developers finds theywould be willing to accept 69.4 of evaluated fix suggestions. |
+|idx| 2408.04506v1 |
+|title| Who ruins the game?: unveiling cheating players in the "Battlefield" game |
+|authors| Dong Young KimHuy Kang Kim
+|links| http://arxiv.org/abs/2408.04506v1 |
+|updated| 2024-08-08 15:04:23 UTC |
+|summary| The Battlefield online game is well-known for its large-scale multiplayercapabilities and unique gaming features including various vehicle controls.However these features make the game a major target for cheatingsignificantly detracting from the gaming experience. This study analyzes userbehavior in cheating play in the popular online game the Battlefield usingstatistical methods. We aim to provide comprehensive insights into cheatingplayers through an extensive analysis of over 44000 reported cheatingincidents collected via the Game-tools API. Our methodology includes detailedstatistical analyses such as calculating basic statistics of key variablescorrelation analysis and visualizations using histograms box plots andscatter plots. Our findings emphasize the importance of adaptive data-drivenapproaches to prevent cheating plays in online games. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.03819v1 |
-|title| Leveraging Variation Theory in Counterfactual Data Augmentation for Optimized Active Learning |
-|authors| Simret Araya GebreegziabherKuangshi AiZheng ZhangElena L. GlassmanToby Jia-Jun Li
-|links| http://arxiv.org/abs/2408.03819v1 |
-|updated| 2024-08-07 14:55:04 UTC |
-|summary| Active Learning AL allows models to learn interactively from user feedback.This paper introduces a counterfactual data augmentation approach to ALparticularly addressing the selection of datapoints for user querying apivotal concern in enhancing data efficiency. Our approach is inspired byVariation Theory a theory of human concept learning that emphasizes theessential features of a concept by focusing on what stays the same and whatchanges. Instead of just querying with existing datapoints our approachsynthesizes artificial datapoints that highlight potential key similarities anddifferences among labels using a neuro-symbolic pipeline combining largelanguage models LLMs and rule-based models. Through an experiment in theexample domain of text classification we show that our approach achievessignificantly higher performance when there are fewer annotated data. As theannotated training data gets larger the impact of the generated data starts todiminish showing its capability to address the cold start problem in AL. Thisresearch sheds light on integrating theories of human learning into theoptimization of AL. |
+|idx| 2408.04500v1 |
+|title| "I Am Human, Just Like You": What Intersectional, Neurodivergent Lived Experiences Bring to Accessibility Research |
+|authors| Lindy Le
+|links| http://dx.doi.org/10.1145/3663548.3675651 |
+|updated| 2024-08-08 14:55:13 UTC |
+|summary| The increasing prevalence of neurodivergence has led society to give greaterrecognition to the importance of neurodiversity. Yet societal perceptions ofneurodivergence continue to be predominantly negative. Drawing on CriticalDisability Studies accessibility researchers have demonstrated howneuronormative assumptions dominate HCI. Despite their guidance neurodivergentand disabled individuals are still marginalized in technology research. Inparticular intersectional identities remain largely absent from HCIneurodivergence research. In this paper I share my perspective as an outsiderof the academic research community: I use critical autoethnography to analyzemy experiences of coming to understand accept and value my neurodivergencewithin systems of power privilege and oppression. Using Data Feminism as anaccessible and practical guide to intersectionality I derive three tenets forreconceptualizing neurodivergence to be more inclusive of intersectionalexperiences: 1 neurodivergence is a functional difference not a deficit 2neurodivergent disability is a moment of friction not a static label and 3neurodivergence accessibility is a collaborative practice not a one-sidedsolution. Then I discuss the tenets in the context of existing HCI researchapplying the same intersectional lens. Finally I offer three suggestions forhow accessibility research can apply these tenets in future work to bridge thegap between accessibility theory and practice in HCI neurodivergence research |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2408.04549v1 |
+|title| Learning Fair Cooperation in Mixed-Motive Games with Indirect Reciprocity |
+|authors| Martin SmitFernando P. Santos
+|links| http://dx.doi.org/10.24963/ijcai.2024/25 |
+|updated| 2024-08-08 15:57:15 UTC |
+|summary| Altruistic cooperation is costly yet socially desirable. As a result agentsstruggle to learn cooperative policies through independent reinforcementlearning RL. Indirect reciprocity where agents consider their interactionpartners reputation has been shown to stabilise cooperation in homogeneousidealised populations. However more realistic settings are comprised ofheterogeneous agents with different characteristics and group-based socialidentities. We study cooperation when agents are stratified into two suchgroups and allow reputation updates and actions to depend on groupinformation. We consider two modelling approaches: evolutionary game theorywhere we comprehensively search for social norms i.e. rules to assignreputations leading to cooperation and fairness and RL where we consider howthe stochastic dynamics of policy learning affects the analytically identifiedequilibria. We observe that a defecting majority leads the minority group todefect but not the inverse. Moreover changing the norms that judge in andout-group interactions can steer a system towards either fair or unfaircooperation. This is made clearer when moving beyond equilibrium analysis toindependent RL agents where convergence to fair cooperation occurs with anarrower set of norms. Our results highlight that in heterogeneous populationswith reputations carefully defining interaction norms is fundamental to tackleboth dilemmas of cooperation and of fairness. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2408.04514v1 |
+|title| Emergence in Multi-Agent Systems: A Safety Perspective |
+|authors| Philipp AltmannJulian SchönbergerSteffen IlliumMaximilian ZornFabian RitzTom HaiderSimon BurtonThomas Gabor
+|links| http://arxiv.org/abs/2408.04514v1 |
+|updated| 2024-08-08 15:15:28 UTC |
+|summary| Emergent effects can arise in multi-agent systems MAS where execution isdecentralized and reliant on local information. These effects may range fromminor deviations in behavior to catastrophic system failures. To formallydefine these effects we identify misalignments between the global inherentspecification the true specification and its local approximation such as theconfiguration of different reward components or observations. Usingestablished safety terminology we develop a framework to understand theseemergent effects. To showcase the resulting implications we use two broadlyconfigurable exemplary gridworld scenarios where insufficient specificationleads to unintended behavior deviations when derived independently. Recognizingthat a global adaptation might not always be feasible we propose adjusting theunderlying parameterizations to mitigate these issues thereby improving thesystems alignment and reducing the risk of emergent failures. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2408.04295v1 |
+|title| Assigning Credit with Partial Reward Decoupling in Multi-Agent Proximal Policy Optimization |
+|authors| Aditya KapoorBenjamin FreedHowie ChosetJeff Schneider
+|links| http://arxiv.org/abs/2408.04295v1 |
+|updated| 2024-08-08 08:18:05 UTC |
+|summary| Multi-agent proximal policy optimization MAPPO has recently demonstratedstate-of-the-art performance on challenging multi-agent reinforcement learningtasks. However MAPPO still struggles with the credit assignment problemwherein the sheer difficulty in ascribing credit to individual agents actionsscales poorly with team size. In this paper we propose a multi-agentreinforcement learning algorithm that adapts recent developments in creditassignment to improve upon MAPPO. Our approach leverages partial rewarddecoupling PRD which uses a learned attention mechanism to estimate which ofa particular agents teammates are relevant to its learning updates. We usethis estimate to dynamically decompose large groups of agents into smallermore manageable subgroups. We empirically demonstrate that our approachPRD-MAPPO decouples agents from teammates that do not influence their expectedfuture reward thereby streamlining credit assignment. We additionally showthat PRD-MAPPO yields significantly higher data efficiency and asymptoticperformance compared to both MAPPO and other state-of-the-art methods acrossseveral multi-agent tasks including StarCraft II. Finally we propose aversion of PRD-MAPPO that is applicable to textitshared reward settingswhere PRD was previously not applicable and empirically show that this alsoleads to performance improvements over MAPPO. |
+
 
 | Item |Content|
 | --- |---|
@@ -330,35 +360,5 @@
 |links| http://arxiv.org/abs/2408.03405v1 |
 |updated| 2024-08-06 18:56:29 UTC |
 |summary| Stochastic multi-agent multi-armed bandits typically assume that the rewardsfrom each arm follow a fixed distribution regardless of which agent pulls thearm. However in many real-world settings rewards can depend on thesensitivity of each agent to their environment. In medical screening diseasedetection rates can vary by test type in preference matching rewards candepend on user preferences and in environmental sensing observation qualitycan vary across sensors. Since past work does not specify how to allocateagents of heterogeneous but known sensitivity of these types in a stochasticbandit setting we introduce a UCB-style algorithm Min-Width which aggregatesinformation from diverse agents. In doing so we address the joint challengesof i aggregating the rewards which follow different distributions for eachagent-arm pair and ii coordinating the assignments of agents to arms.Min-Width facilitates efficient collaboration among heterogeneous agentsexploiting the known structure in the agents reward functions to weight theirrewards accordingly. We analyze the regret of Min-Width and conductpseudo-synthetic and fully synthetic experiments to study the performance ofdifferent levels of information sharing. Our results confirm that the gains tomodeling agent heterogeneity tend to be greater when the sensitivities are morevaried across agents while combining more information does not always improveperformance. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.02845v1 |
-|title| Heterogeneous graph attention network improves cancer multiomics integration |
-|authors| Sina TabakhiCharlotte VandermeulenIan SudberyHaiping Lu
-|links| http://arxiv.org/abs/2408.02845v1 |
-|updated| 2024-08-05 22:01:13 UTC |
-|summary| The increase in high-dimensional multiomics data demands advanced integrationmodels to capture the complexity of human diseases. Graph-based deep learningintegration models despite their promise struggle with small patient cohortsand high-dimensional features often applying independent feature selectionwithout modeling relationships among omics. Furthermore conventionalgraph-based omics models focus on homogeneous graphs lacking multiple types ofnodes and edges to capture diverse structures. We introduce a HeterogeneousGraph ATtention network for omics integration HeteroGATomics to improvecancer diagnosis. HeteroGATomics performs joint feature selection through amulti-agent system creating dedicated networks of feature and patientsimilarity for each omic modality. These networks are then combined into oneheterogeneous graph for learning holistic omic-specific representations andintegrating predictions across modalities. Experiments on three cancermultiomics datasets demonstrate HeteroGATomics superior performance in cancerdiagnosis. Moreover HeteroGATomics enhances interpretability by identifyingimportant biomarkers contributing to the diagnosis outcomes. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.02768v1 |
-|title| Assessing the Effects of Container Handling Strategies on Enhancing Freight Throughput |
-|authors| Sarita RattanakunuprakarnMingzhou JinMustafa Can CamurXueping Li
-|links| http://arxiv.org/abs/2408.02768v1 |
-|updated| 2024-08-05 18:38:27 UTC |
-|summary| As global supply chains and freight volumes grow the U.S. faces escalatingtransportation demands. The heavy reliance on road transport coupled with theunderutilization of the railway system results in congested highwaysprolonged transportation times higher costs and increased carbon emissions.Californias San Pedro Port Complex SPPC the nations busiest incurs asignificant share of these challenges. We utilize an agent-based simulation toreplicate real-world scenarios focusing on the intricacies of interactions ina modified intermodal inbound freight system for the SPPC. This involvesrelocating container classification to potential warehouses in CaliforniaUtah Arizona and Nevada rather than exclusively at port areas. Our primaryaim is to evaluate the proposed systems efficiency considering cost andfreight throughput while also examining the effects of workforce shortages.Computational analysis suggests that strategically installing intermodalcapabilities in select warehouses can reduce transportation costs boostthroughput and foster resour |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.02248v1 |
-|title| ReDel: A Toolkit for LLM-Powered Recursive Multi-Agent Systems |
-|authors| Andrew ZhuLiam DuganChris Callison-Burch
-|links| http://arxiv.org/abs/2408.02248v1 |
-|updated| 2024-08-05 05:43:23 UTC |
-|summary| Recently there has been increasing interest in using Large Language ModelsLLMs to construct complex multi-agent systems to perform tasks such ascompiling literature reviews drafting consumer reports and planningvacations. Many tools and libraries exist for helping create such systemshowever none support recursive multi-agent systems -- where the modelsthemselves flexibly decide when to delegate tasks and how to organize theirdelegation structure. In this work we introduce ReDel: a toolkit for recursivemulti-agent systems that supports custom tool-use delegation schemesevent-based logging and interactive replay in an easy-to-use web interface. Weshow that using ReDel we are able to achieve significant performance gains onagentic benchmarks and easily identify potential areas of improvements throughthe visualization and debugging tools. Our code documentation and PyPIpackage are open-source and free to use under the MIT license. |
 
 
