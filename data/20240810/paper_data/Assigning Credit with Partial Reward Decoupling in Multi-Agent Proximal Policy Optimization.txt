@@ -1,0 +1,1069 @@
+Published as a conference paper at RLC 2024
+Assigning Credit with Partial Reward Decoupling
+in Multi-Agent Proximal Policy Optimization
+Aditya Kapoor Benjamin Freed Howie Choset
+Research & Innovation, Robotics Institute, Robotics Institute,
+Tata Consultancy Services, Carnegie Mellon University, Carnegie Mellon University,
+Mumbai Pittsburgh, PA Pittsburgh, PA
+Jeff Schneider
+Robotics Institute,
+Carnegie Mellon University,
+Pittsburgh, PA
+Abstract
+Multi-agent proximal policy optimization (MAPPO) has recently demonstrated
+state-of-the-art performance on challenging multi-agent reinforcement learning
+tasks. However,MAPPOstillstruggleswiththecreditassignmentproblem,wherein
+thesheerdifficultyinascribingcredittoindividualagents’actionsscalespoorlywith
+teamsize. Inthispaper,weproposeamulti-agentreinforcementlearningalgorithm
+that adapts recent developments in credit assignment to improve upon MAPPO.
+Our approach leverages partial reward decoupling (PRD), which uses a learned
+attention mechanism to estimate which of a particular agent’s teammates are rele-
+vant to its learning updates. We use this estimate to dynamically decompose large
+groups of agents into smaller, more manageable subgroups. We empirically demon-
+stratethatourapproach, PRD-MAPPO,decouplesagentsfromteammatesthatdo
+not influence their expected future reward, thereby streamlining credit assignment.
+We additionally show that PRD-MAPPO yields significantly higher data efficiency
+and asymptotic performance compared to both MAPPO and other state-of-the-art
+methods across several multi-agent tasks, including StarCraft II. Finally, we pro-
+pose a version of PRD-MAPPO that is applicable to shared reward settings, where
+PRD was previously not applicable, and empirically show that this also leads to
+performance improvements over MAPPO.
+1 Introduction
+Multi-agent reinforcement learning (MARL) has achieved super-human performance on many com-
+plex sequential decision-making problems, such as DOTA 2 (Berner et al., 2019), StarCraft II
+(Vinyals et al., 2019), and capture the flag (Jaderberg et al., 2019). These impressive results,
+however, come at an immense cost: often, they require millions, if not billions, of time-consuming
+environmental interactions, and therefore can only be run on high-cost compute clusters.
+The credit assignment problem contributes to the computational difficulties that plague large-scale
+MARLalgorithms;asthenumberofagentsinvolvedinlearningincreases,sotoodoesthedifficultyof
+assessing any individual agent’s contribution to overall group success (Minsky, 1961; Sutton et al.,
+1998). While credit assignment already challenges reinforcement learning (RL), it is particularly
+prominent in large-scale cooperative MARL, because, unlike problems in which each agent can act
+greedily to optimize its own reward, all agents must maximize the total reward earned by the entire
+group. Therefore, agents must not only consider how their actions influence their own rewards, but
+also the rewards of every other agent in the group.
+4202
+guA
+8
+]AM.sc[
+1v59240.8042:viXraPublished as a conference paper at RLC 2024
+A popular class of approaches to MARL are policy-gradient methods, which also suffer from the
+credit assignment problem. Recent work in improving policy-gradient methods took the approach
+of developing concepts which were then used to extend the original actor-critic algorithm. These
+extensionsincludecounterfactualmulti-agentpolicygradients(COMA)(Foersteretal.,2018),multi-
+agentgameabstractionviagraphattentionneuralnetworks(G2ANet)(Liuetal.,2020),andpartial
+reward decoupling (PRD) (Freed et al., 2022). The primary contributions of this paper are
+1) the machinery necessary for applying PRD to a state-of-the-art multi-agent policy-
+gradient method (multi-agent PPO (MAPPO)), and 2) a version of PRD that does
+not require the environment to provide individual rewards streams for each agent, and
+instead utilizes a shared reward signal.
+PRD simplifies credit assignment by decomposing large cooperative multi-agent problems into
+smaller decoupled subproblems involving subsets of agents. PRD was applied to the actor-critic
+algorithm (Freed et al., 2022; Konda & Tsitsiklis, 2000). Meanwhile, significant progress has been
+madetowardsimprovingthedataefficiencyofpolicy-gradientalgorithms. Mostnotably,trust-region
+policy optimization (TRPO) and proximal policy optimization (PPO) improve the data efficiency
+of actor-critic algorithms by enabling a given batch of on-policy data to be re-used for multiple
+gradient updates. PPO, in particular, has demonstrated strong performance in multi-agent settings
+(Yu et al., 2021). However, we argue that because PPO relies on stochastic advantage estimates,
+it still suffers from the credit assignment problem, and can therefore be improved by incorporating
+advanced credit assignment strategies.
+In this paper, we demonstrate that PRD can be leveraged within the learning updates of PPO for
+each individual agent, to eliminate the contributions from other irrelevant agents. We find that the
+resultingalgorithm,PRDmulti-agentPPO(PRD-MAPPO),exceedstheperformanceofpriorstate-
+of-the-art MARL algorithms such as QMix (Rashid et al., 2018), MAPPO (Yu et al., 2021), LICA
+(Zhou et al., 2020a), G2ANet (Liu et al., 2020), HAPPO (Kuba et al., 2021) and COMA (Foerster
+etal.,2018)onarangeofmulti-agentbenchmarks, includingStarCraftII.BeyondintegratingPRD
+with MAPPO, we make three key modifications to the original PRD approach proposed by Freed
+et al. (2022). First, we introduce a “soft” variant that softly re-weights advantage terms in agents’
+learning updates based on attention weights, rather than the strict decoupling used by Freed et al.
+(2022). Second, we modify the advantage estimation strategy that allows learning updates to be
+computedintimethatislinear,ratherthanquadratic,inthenumberofagents. Finally,wepropose
+a version of PRD-MAPPO that is capable of using shared rewards, as opposed to individual agent
+rewards, thus broadening the range of problems to which our algorithm can be applied.
+To gain deeper insight to the source of PRD-MAPPO’s improved performance, we visualize the
+relevant sets identified by PRD, and verify that PRD decomposes multi-agent teams into subsets of
+agentsthatshouldcooperatewithoneanother. Finally,wecomparethegradientestimatorvariance
+of PRD-MAPPO and MAPPO, and find that PRD-MAPPO indeed tends to avoid the spikes in
+gradient variance present in MAPPO, helping explain its superior data efficiency and stability.
+2 Background
+Here we describe our problem formulation as a Markov game. Subsequently, we investigate mathe-
+maticallyhowimperfectcreditassignmentmanifestsitselfinhighpolicy-gradientvarianceinpolicy-
+gradient RL algorithms. Finally, we review PPO and PRD.
+2.1 Markov Games
+We consider multi-agent sequential decision-making problems that can be modeled as a Markov
+game. A Markov game is specified by (S,A,P,R,ρ ,γ), where S is the state space, A is the joint
+0
+action space, consisting of every possible combination of individual agents’ actions, P(s |s ,a )
+t+1 t t
+specifies the state transition probability distribution, R(r |s ,a ) specifies the reward distribution,
+t t t
+ρ (s ) denotes the initial state distribution, and γ ∈ (0,1] denotes a discount factor (Littman,
+0 0Published as a conference paper at RLC 2024
+1994). At each timestep t ∈ {0,...,T}, each agent i ∈ {1,...,M} selects an action independently
+according to its state-conditioned policy π (a(i)|s(i);θ ). Here, T specifies the episode length, M
+i t t i
+denotes the number of agents, s(i) denotes the state information available to agent i, and θ de-
+t i
+notes the parameters for agent i. Subsequently, individual agent rewards are sampled according to
+r(1),...,r(M) ∼R(·|s ,a ), and the state transitions according to s ∼P(·|s ,a ).
+t t t t t+1 t t
+Although agents receive individual rewards, we are primarily interested in learning cooperative be-
+haviorsthatmaximizetotal groupreturn,thatis,thesumofallagents’individualrewardsacrossall
+timesteps. More precisely, we wish to find the optimal agent policy parameters θ∗ ={θ∗,...,θ∗ }=
+1 M
+argmaxJ(θ), where
+θ
+J(θ)=EhXT XM γtr(j)(cid:12)
+(cid:12)π
+i
+.
+t (cid:12) θ
+t=0j=1
+This problem formulation is distinct from the “greedy” case, where each agent maximizes its own
+individual return. In this problem formulation, agents should learn to be altruistic in certain sit-
+uations, by selecting actions that help maximizes group reward, possibly at the expense of some
+individual reward.
+2.2 Credit Assignment and Policy Gradient Variance
+To understand the effects of scaling PPO to large numbers of agents, and how we expect PRD will
+improve this scaling, we explore how imperfect credit assignment causes difficulties in learning. In
+this paper, we argue that in policy-gradient algorithms (which includes many popular algorithms
+such as PPO (Schulman et al., 2017), TRPO (Schulman et al., 2015a), D4PG (Barth-Maron et al.,
+2018), MADDPG (Lowe et al., 2017), and A3C (Mnih et al., 2016)), the credit assignment problem
+manifests itself in the form of high variance of advantage estimates. High variance in advantage
+estimates in turn causes policy gradient estimates to be more noisy, resulting in slower learning.
+We consider an actor-critic-style gradient estimate for a single-agent system in its most stripped-
+down possible form, computed using a single state-action sample:
+∇ˆ J(θ,s,a)=∇ logπ(a|s)Aˆ(s,a),
+θ θ
+where state s is sampled from the state-visitation distribution induced by policy π, action a is
+sampled from π conditioned on s, and Aˆ(s,a) is a stochastic advantage estimate, which estimates
+the true advantage of taking action a in state s , and following policy π. The advantage function
+t t
+is typically defined as Aπ(s,a) = Qπ(s,a)−Vπ(s), where Qπ(s,a) and Vπ(s) are the state-action
+valuefunctionandstate-valuefunction,respectively(Suttonetal.,1998). Intuitively,theadvantage
+functionmeasureshowmuchbetteritistoselectaparticularactionathanarandomactionfromthe
+policy,whileinstates. TherearemanywaystocomputeAˆ,generallyallinvolvingsomeerror,asthe
+truevaluefunctionsareunknown(Suttonetal.,1998;Schulmanetal.,2015b). Ifperfectadvantage
+estimation were possible, then so too would be perfect credit assignment, as the advantage function
+directly measures how a particular action a impacted the total reward obtained by the group.
+Togainanunderstandingofhowthegradientvarianceisimpactedbyadvantageestimatorvariance,
+we note that the conditional variance of ∇ˆ J, given s and a, is proportional to the variance of Aˆ:
+θ
+Var(∇ˆ J|s,a)=(∇ logπ(a|s))(∇ logπ(a|s))T Var(Aˆ|s,a).
+θ θ θ
+Moving to a cooperative multi-agent setting, Aˆ(s,a) is replaced by a summation over individual
+agents’ advantages in the gradient estimate for a particular agent i:Published as a conference paper at RLC 2024
+M
+∇ˆ J(θ,s,a)=∇ logπ (a |s)X Aˆ (s,a),
+θi θi i i ij
+j=1
+where Aˆ (s,a) now corresponds to our estimate of how agent i’s action influenced the expected
+ij
+future reward of agent j. The summation results from the fact that in the cooperative setting,
+agent i is no longer interested only in maximizing its own total reward, but is instead interested in
+maximizing total group reward, as discussed in Sec. 2.1. The variance of ∇ˆ J given s and a now
+θi
+depends on the variance of each individual agent’s advantage estimates, as well as the covariance
+between every pair of agents’ advantages. Using Bienaymé’s identity, and omitting the arguments
+to π for brevity, we can express this variance as
+i
+M !
+Var(∇ˆ J|s,a)=(∇ logπ )(∇ logπ )T X Var(Aˆ |s,a)+2X Cov(Aˆ ,Aˆ |s,a) .
+θi θi i θi i ij ij ik
+j=1 k<j
+To simplify analysis, we consider an upper bound on gradient estimator variance, obtained using
+the Cauchy–Schwarz inequality,
+M q !
+Var(∇ˆ J|s,a)≤(∇ logπ )(∇ logπ )T X Var(Aˆ |s,a)+2X Var(Aˆ |s,a)Var(Aˆ |s,a) ,
+θi θi i θi i ij ij ik
+j=1 k<j
+(1)
+whichcanbeseentoscaleroughlylinearlywithnumberofagents,assumingVar(Aˆ |s,a)isroughly
+ij
+similarforallj. Therefore,toachieveaparticularsignal-to-noiseratio,moresuchgradientestimates
+will need to be averaged together as team size increases, thus increasing the data requirements of
+the algorithm. This analysis helps explain the mechanism by which improved credit assignment can
+yield data-efficiency improvements for policy-gradient algorithms, such as A3C (Mnih et al., 2016),
+TRPO (Schulman et al., 2015a) and PPO (Schulman et al., 2017) algorithms. In particular, our
+approach aims to eliminate extraneous advantage terms that do not on average contribute to the
+policy gradient, thereby reducing the number of terms in the summations in (1) and decreasing the
+total variance. We discuss this further in Sec. 2.4 and 3.
+2.3 Proximal Policy Optimization
+Earlier policy gradient algorithms, such as actor-critic (AC), suffered from poor data efficiency in
+part because they were purely on-policy, and therefore required a fresh batch of environmental data
+tobecollectedeachtimeasinglegradientupdatewasappliedtothepolicy(Konda&Tsitsiklis,2000;
+Schulman et al., 2015a; 2017). PPO provides higher data efficiency than AC by enabling multiple
+policy updates to be performed given a single batch of on-policy data, resulting in larger policy im-
+provementsforafixedamountofdata. Givenabatchofdata,PPOoptimizesthepolicywithrespect
+to a “surrogate” objective that penalizes excessively large changes from the old policy, permitting
+the agent to perform multiple gradient updates without becoming overly off-policy. Specifically,
+during each policy optimization step, PPO optimizes the following objective with respect to policy
+parameters θ,
+L (θ)=Eˆh min(cid:16)(cid:0) r (θ)Aˆ (cid:1) ,(cid:0) clip(r (θ),1−ϵ,1+ϵ)Aˆ (cid:1)(cid:17)i ,
+PPO t t t t
+where r(θ)= πθ(at|st) is the probability ratio, π is the data collection policy, π is the updated
+πθold(at|st) old
+policy, Aˆ isthestochasticadvantageestimatefortimet, andEˆ[·]denotesanempiricalaverageover
+t
+a finite batch of samples (Schulman et al., 2017).Published as a conference paper at RLC 2024
+PPOhasbeenrecentlyshowntoofferstrongperformanceonmulti-agentproblems(Yuetal.,2021).
+However, PPO does not explicitly control the variance of its policy gradient updates, which as we
+discuss in Sec. 2.2, tends to grow with multi-agent team size. This increased gradient estimate
+variance means that larger batches of data become necessary to reach a satisfactory signal-to-noise
+ratio in the learning updates; indeed, (Yu et al., 2021) found that much larger batch sizes were
+necessary for PPO to perform well on multi-agent tasks. In this work, we seek to combine the
+data efficiency benefits of PPO with the variance reduction benefits of PRD, to enable further
+improvements in data efficiency and stability.
+2.4 Partial Reward Decoupling
+PRD is an approach that enables large multi-agent problems to be dynamically decomposed into
+smaller subgroups such that cooperation among subgroups yields a fully cooperative group-level so-
+lution. Inpractice,PRDwasshowntoimprovetheperformanceofanAC-styleapproach,compared
+toavanillaACalgorithm. TheproposedPRD-ACalgorithmwasalsoshowntooutperformCOMA,
+a popular method for improved multi-agent credit assignment.
+PRD makes use of the fact that, considering two agents i and j at a particular timestep t, if the
+actionofagentidoesnotinfluencetheexpectedfuturerewardofagentj,thenagentineednottake
+agent j’s rewards into account when computing its advantage estimate for time t, thus streamlining
+credit assignment. The set of agents whose expected future rewards are impacted by the action
+of agent i at time t is referred to as the relevant set of agent i at time t, denoted Rπ(s ,a ). In
+i t t
+Freed et al. (2022), a learned value function with an attention mechanism was used to estimate the
+relevant set for each agent.
+ThereweresignificantdrawbackstotheapproachpresentedbyFreedetal.(2022),whichweaddress
+inthispaper. First,PRDwasusedinthecontextoftheACalgorithm,whichhasbeensurpassedby
+algorithms such as TRPO and PPO. Second, for a problem involving M agents, PRD required M
+evaluationsofthecriticfunctiontocomputeasingleagent’sgradientupdate;thusthecomputational
+burdenforalearningupdatescaledquadraticallywiththenumberofagents. Finally,PRDassumed
+thattheenvironmentprovidedper-agentrewardstreams(i.e.,providedascalarrewardvaluetoeach
+agent at each timestep). However, many multi-agent problems provide only a single scalar reward
+for the entire group at each timestep.
+3 Improving Proximal Policy Optimization with Partial Reward
+Decoupling
+Inthispaper,wetacklethecreditassignmentproblembydevelopingPRD-MAPPO,whichleverages
+a PRD-style decomposition within a PPO learning update to improve credit assignment. More
+specifically, PRD modifies the original PPO objective by eliminating advantage terms belonging to
+“irrelevant” agents. As shown by Freed et al. (2022), these irrelevant advantage terms contribute
+only noise to learning updates, making learning less efficient. PRD uses an attention-based value
+functiontoidentifywhenaparticularagent’sactiondidnotinfluenceanotheragent’sfuturereturn,
+allowing those agents to be decoupled.
+ToleveragetheimprovedcreditassignmentcapabilitiesofPRDinPPO,wemaketwomodifications
+to the standard PPO algorithm: first, we incorporate a learned critic with an attention mechanism.
+Similar to Freed et al. (2022), the attention weights computed by the critic will be used to estimate
+the relevant set of agents, as described in Sec. 3.1. Unlike Freed et al. (2022), we modify the critic
+architecturetoallowtherelevantsetsforeachagenttobecomputedinlinear,ratherthanquadratic
+time. Second,wemodifythesurrogateobjectiveofPPOtousethestreamlinedadvantageestimation
+strategy of PRD, which we describe in Sec. 3.2, using the relevant set estimated using the critic.
+In this work, we test a novel “soft” relevant set estimation strategy that softly decouples agents,
+which we find significantly improves performance over a manual thresholding approach as was used
+by Freed et al. (2022).Published as a conference paper at RLC 2024
+3.1 Learned Critics for Relevant Set and Advantage Estimation
+Similar to Freed et al. (2022), we use a
+learned critic function to perform relevant
+setestimation,albeitwithsignificantmod-
+Key/Query Embedding
+Value Network
+ifications. In our approach, each agent i Networks Network
+maintains a graph neural network Q func-
+tionQϕ(s ,a ),whichistrainedtoestimate
+i t t Output
+itsexpectedfutureindividualreturnsgiven Attention
+Network
+the current state and actions of all agents.
+A diagram of our Q function is depicted in
+Figure1: QandValueFunctionNetworkArchitecture.
+Fig. 1. In practice, all agents share the
+Each agent uses states from all agents to compute at-
+same Q function parameters. Qϕ takes as
+i tentionweightsforeveryagentotherthanitself. These
+input the state information and actions of
+attention weights are then used to aggregate attention
+all agents to estimate a scalar Q value for
+values from all agents other than itself. Finally, ag-
+each agent i.
+gregated attention values for agent i are concatenated
+The Q function contains an attention either with the embedded state-action vector for agent
+mechanism that allows it to “shut off” i (if the network is functioning as a Q function) or the
+dependence on particular agents’ actions. embedded state vector for agent i, (if the network is
+More concretely, the Q network for each functioning as a value function). Finally, this is passed
+agentiusesthestatesofallagents(includ-
+throughtheoutputnetworktogenerateeitherQϕ(s,a)
+i
+ingitself)tocomputeattentionweightsfor or Vψ(s,a̸=i).
+i
+allotheragents(agentsassignanattention
+weight of 1 to themselves, i.e., w (s ) = 1). These attention weights are then used as coefficients
+ii t
+to compute a linear combination of attention values computed from agents’ states and actions. If a
+particular attention weight w is 0, then any information about agent j’s action will not be prop-
+ij
+agated further through the network, meaning that agent j’s action will not influence the final Q
+estimate for agent i. Once the aggregated value is computed, it is concatenated with an embedding
+computed from agent i’s state and action and passed through a recurrent output network (Fig. 1).
+If the learned Q function of agent i at a particular timestep t computes an attention weight of
+exactly zero for another agent j (i.e., w (s )=0), then Qϕ does not depend on a(j) given the state
+ij t i t
+of all agents, and we can infer that agent i is outside the relevant set of agent j. As shown by Freed
+et al. (2022), agents outside the relevant set of agent j do not, on average, contribute to its policy
+gradient,andmaythereforeberemovedfromthepolicygradientestimateswithoutintroducingbias.
+In practice, when inferring the relevant sets for each agent, we infer that i ∈/ R (s ) if w (s ) < ϵ,
+j t ij t
+whereϵ>0isasmallmanuallychosenconstant. Usingthissoftattentionmechanism,agentscannot
+assign precisely zero attention weight to any other agent, and therefore cannot guarantee complete
+independenceoftheQfunctiontoanyparticularagent’saction. However,wefoundthatinpractice,
+very small attention weights were assigned to irrelevant agents, making this a practical method for
+relevant set estimation. We explore variants of this decoupling procedure, including a “soft” variant
+that softly re-weights agents’ contributions to learning updates.
+Our approach to computing advantage terms for learning updates reduces the computational com-
+plexity over (Freed et al., 2022) from quadratic to linear in the number of agents M. To compute
+the advantage terms required to update the policy of a particular agent i, the original algorithm
+described by Freed et al. (2022) requires each agent i to estimate the expected future return of each
+agentj, conditionedontheactionsofallagentsotherthani, foreachj ∈R (s ). Thiscomputation
+i t
+requires (at worst) M calls to the critic for each of the M agents, resulting M2 total calls during
+each learning update. Our approach, on the other hand, circumvents with quadratic scaling by
+maintaining two separate critics; the first is the Q function used for relevant set estimation, de-
+scribed above. The second critic is used solely to provide baseline estimates for advantage function
+estimation (Schulman et al., 2015b; Konda & Tsitsiklis, 2000). It estimates the sum of expected
+future returns for all agents within agent i’s relevant set, conditioned on the state of all agents,Published as a conference paper at RLC 2024
+and the actions of all agents other than i. We refer to this critic as the value function, rather than
+the Q function, because it does not depend on the actions of agent i. The value function uses an
+architecture almost identical to the Q function (Fig. 1), with the one difference that the attention
+values are concatenated with the embedded state of agent i, rather than state-action. Using this
+value function, computing advantages for all agents requires only M calls (one per agent).
+3.2 PRD-MAPPO Parameter Update Rule
+We modify the original MAPPO (Yu et al., 2021) objective for each agent i by eliminating the
+rewards from agents that are outside its relevant set from its advantage estimates. The original
+MAPPO algorithm optimizes the following objective during each policy parameter update for agent
+i:
+" !#
+(cid:16) (cid:17) (cid:16) (cid:17)
+L(i) =Eˆ min r(i)(θ )Aˆ , clip(r(i)(θ ),1−ϵ,1+ϵ)Aˆ , (2)
+MAPPO t i t t i t
+where r(i) is the ratio between the updated and old policy of agent i, and Aˆ is the advantage
+t
+estimate for timestep t. In (Yu et al., 2021), generalized advantage estiamtion was used to compute
+Aˆ , which combines group agent rewards and value function estimates according to
+t
+Aˆ =δ +(γλ)δ +...+(γλ)T−t+1δ ,
+t t t+1 T−1
+ 
+M
+where δ
+t
+=X r t(j) +γV(s t+1)−V(s t).
+j=1
+Wemodifytheobjectivein(2)byreplacingadvantagetermswithindividual agent advantageterms,
+which ignore the rewards of irrelevant agents. The objective for agent i becomes
+" !#
+(cid:16) (cid:17) (cid:16) (cid:17)
+L(i) =Eˆ min r(i)(θ )Aˆ , clip(r(i)(θ ),1−ϵ,1+ϵ)Aˆ ,
+PRD t i i,t t i i,t
+where
+Aˆ =δ +(γλ)δ +...+(γλ)T−t+1δ ,
+i,t i,t i,t+1 i,T−1
+ 
+δ
+i,t
+= X r t(j) +γV iψ(s t+1,a̸= t+i 1)−V iψ(s t,a̸=
+t
+i).
+j∈Ri(st)
+Note in the above equation that the reward terms for agents not in R (s ) have been removed, and
+i t
+V has been replaced by the value function Vψ described in Sec. 3.1., which is regressed against
+i
+the sum of returns of agents in R (s ). Pseudocode for PRD-MAPPO is included in Sec. B of the
+i t
+appendix.
+We additionally propose a “soft” variant of PRD-MAPPO, which we refer to as PRD-MAPPO-
+soft, that softly reweights agent rewards according to attention weights of the Q network, i.e.,
+(cid:16) (cid:17)
+δ = PM w (s )r(j) +γVψ(s ,a̸=i )−Vψ(s ,a̸=i). In this soft variant, Vψ is regressed
+i,t j=1 ji t t i t+1 t+1 i t t i
+against the weighted sum of agent returns, PM w (s )R(j).
+j=1 ji t tPublished as a conference paper at RLC 2024
+3.3 Partial Reward Decoupling for environments with shared rewards
+OnedrawbacktoourPRDapproachisthatitassumesindividualrewardstreamsforeachagentare
+available, i.e., at each timestep, the environment provides a separate scalar reward for each agent.
+However, some multi-agent systems only provide a single scalar shared reward for the entire group
+at each timestep. To deal with the shared reward setting, we propose strategy for decomposing
+sharedreturnsintoindividualagentreturns, towhichwecanthenapplyPRD.Westartbytraining
+a shared Q function to predict the shared returns (i.e., the sum of future shared rewards). Here we
+use a similar architecture as described in Sec. 3.1, with the one difference that our network has 1
+output rather than M outputs. We denote the vector of attention weights assigned by all agents to
+the action of agent j as W . There is one such vector for each timestep and each agent; we omit
+:j
+thetimestepsubscriptingforbrevity. Asaheuristictomeasuretheoverallinfluencethateachagent
+j has on the future shared reward, we aggregate the attention weights for each agent j by taking
+the mean of W , which we refer to as W˜ . The individual returns for each agent j at each timestep
+:j j
+are then set proportionally to W˜ , such that they sum to the original shared return. Subsequently,
+j
+we apply PRD-MAPPO to these individual returns as we would in the individual reward setting
+described in Sec. 3.2. We refer to this approach as PRD-MAPPO-shared.
+4 Experiments
+We experimentally compare the performance of the following algorithms on several cooperative
+MARL environments:
+PRD-MAPPO (ours): MAPPO with PRD, as described in Sec. 3.1.
+PRD-MAPPO-soft (ours) : the soft variant of PRD-MAPPO as described in Sec. 3.1.
+PRD-MAPPO-shared (ours) : the soft variant of PRD-MAPPO in the shared reward setting,
+as described in Sec. 3.3.
+MAPPO: a multi-agent variant of PPO, proposed by Yu et al. (2021).
+HAPPO: a recent state-of-the-art algorithm proposed by Kuba et al. (2021) that extends trust re-
+gionlearningtocooperativemulti-agentreinforcementlearning(MARL),enablingmonotonicpolicy
+improvement without the need for shared policy parameters.
+G2ANet-MAPPO: MAPPO with a G2ANet-style critic. This baseline attempts to import the
+credit assignment benefits of G2ANet (which was originally used in the Actor-Critic algorithm) to
+the more state-of-the-art MAPPO.
+Counterfactual Multi-Agent Policy Gradient (COMA): Proposed by Foerster et al. (2018),
+COMAisamulti-agentactor-criticmethod. COMAaddressescreditassignmentbyusingacounter-
+factualbaselinethatmarginalizesoutasingleagent’saction,whilekeepingtheotheragents’actions
+fixed, allowing COMA to better isolate each agent’s contribution to group reward.
+PRD-V-MAPPO: PRD-MAPPO, using the value-function-based method of relevant set estima-
+tion,asdescribedbyFreedetal.(2022). Thisversionusesalearnedvaluefunctionforbothrelevant
+set and advantage estimation, and scales quadratically in time complexity with number of agents.
+We include this as a baseline to assess the effect of critic choice.
+Learning Implicit Credit Assignment (LICA): proposed by Zhou et al. (2020b), LICA is a
+method for implicit credit assignment that is closely related to value gradient methods, which seek
+to optimize policies in the direction of approximate value gradients. LICA extends the concept of
+value mixing present for credit assignment found in QMix and Value-decomposition Networks by
+introducing an additional latent state representation into the policy gradients. The authors claim
+thatthisadditionalstateinformationprovidessufficientinformationforlearningoptimalcooperative
+behaviors without explicit credit assignment.Published as a conference paper at RLC 2024
+QMix: proposed by Rashid et al. (2018), QMix learns a joint state-action value function, repre-
+sented as a complex non-linear combination of per-agent value functions. The joint value function
+is structurally guaranteed to be monotonic in per-agent values, allowing agents to maximize the
+joint value function by greedily selecting the best actions according to their own per-agent value
+functions.
+The policy network and critic used for advantage calculations for PRD-MAPPO, PRD-MAPPO-
+soft, PRD-MAPPO-shared, MAPPO, HAPPO, G2ANet-MAPPO, COMA and PRD-V-MAPPO
+have the same architecture and number of parameters. Because LICA and QMix depend on a
+particular critic architecture, we used the original architectures as described by Zhou et al. (2020a)
+and Rashid et al. (2018) respectively. For all environments and all algorithms, we performed a grid
+search over hyperparameters as described in the appendix.
+Weconsiderthefollowingenvironments,withdetaileddescriptionsofeachintheappendix: Collision
+Avoidance,Pursuit,PressurePlate,Level-BasedForaging,andStarCraftMulti-AgentChallengeLite
+(SMAClite), specifically the 5m_vs_6m, 10m_vs_11m, and 3s5z battle scenarios.
+A) Team Collision Avoidance B) Pursuit C) Pressure Plate
+0 100
+400
+200 0
+400 200 100
+200
+600
+0
+300
+800
+200 400 1000
+500
+1200 400 600
+0.0 0.5 1.0 1.5 2.0 2.5 3.0 0.0 0.7 1.4 2.1 2.8 3.5 4.2 4.9 0.0 0.5 1.0 1.5 2.0 2.5 3.0
+Episodes ×104 Episodes ×103 Episodes ×104
+D) LB-Foraging E) 5m_vs_6m F) 10m_vs_11m
+1.0
+0.8 20 20
+0.6 15 15
+0.4 10 10
+0.2 5 5
+0.0
+0 0
+0.0 0.2 0.4 0.6 0.8 1.0 1.2 1.4 0.0 0.5 1.0 1.5 2.0 0.0 0.5 1.0 1.5 2.0
+Episodes ×104 Episodes ×104 Episodes ×104
+G) 3s5z
+20 PRD-MAPPO-soft
+PRD-MAPPO-shared
+15 MAPPO
+QMix
+10 PRD-V-MAPPO
+MAPPO-G2ANet
+5
+HAPPO
+LICA
+0
+COMA
+0.0 0.5 1.0 1.5 2.0
+Episodes ×104
+Figure 2: Average reward vs. episode for PRD-MAPPO-soft, PRD-MAPPO, PRD-
+V-MAPPO, COMA, LICA, QMix, MAPPO, MAPPO-G2ANet on A) team collision
+avoidance, B) pursuit, C) pressure plate, D) Level-Based Foraging, E) StarCraft
+5m_vs_6m, F)StarCraft10m_vs_11mtasks, andG)StarCraft3s5v. Solidlinesindicate
+the average over 5 random seeds, and shaded regions denote a 95% confidence interval. Approaches
+that incorporate PRD (PRD-MAPPO and PRD-MAPPO-soft) tend to outperform all other ap-
+proaches, indicating that PRD can be leveraged to improve PPO by improving credit assignment.
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeMPublished as a conference paper at RLC 2024
+5 Results and Discussion
+TherewardcurvesforalltasksareshowninFig. 2. Wefoundthatofthealgorithmswetested,only
+PRD-MAPPO-soft, PRD-MAPPO-shared, and PRD-MAPPO performed consistently well across
+all environments, with PRD-MAPPO-soft tending to perform the best. PRD-MAPPO-soft was
+outperformed only in one environment (pressure plate) by one algorithm (QMix), and in general
+outperformed all other algorithms on all tasks.
+5.1 Relevant Set Visualization
+To gain more insight into the relevant set selection process, in Fig. 3 we visualized the attention
+weights inferred by a trained group of agents in the Collision Avoidance task. In this task, agents
+arerewardedforreachinganassignedgoallocationwhileavoidingcollisions. Agentsaredividedinto
+threeteams,consistingofagents1-8,9-16,and17-24,andareonlypenalizedforcollidingwithother
+agents on their team. We therefore expect agents to assign large attention weights only to other
+agents on their same team, because each agents’ reward is independent of the actions of agents on
+other teams. Fig. 3 displays the average attention weights as an M x M grid, with the ith row and
+jth column corresponding to the average attention weight that agent i assigns to agent j. Because
+agents always assign an attention weight of 1 to themselves, we remove these elements from the
+visualization as they are uninformative. We find that, as expected, agents assign considerably non-
+zero attention weights only to other agents on their same team, while assigning near-zero attention
+weights to all other agents. Attention weights were averaged over 5000 independent episodes.
+5.2 Policy Gradient Estimator Variance Analysis
+To empirically verify the claim that partial reward
+Attention Weights Heatmap
+decoupling decreases the variance of MAPPO pol-
+0.12
+icy gradient estimates, we estimate the variance of
+MAPPOandPRD-MAPPOatvariouspointsduring 0.10
+training. For maximum comparability, we compute
+the variance for both MAPPO and PRD-MAPPO 0.08
+using data gathered from the same policy, taken at
+1000-episode intervals during the training of PRD- 0.06
+MAPPO. Using these policies, we collect 100 in-
+dependent batches of data, and differentiate the 0.04
+MAPPO or PRD-MAPPO surrogate objective eval-
+uated on each batch, to obtain 100 independent gra- 0.02
+dient estimates for both approaches for each policy.
+Finally, we arrive at a scalar empirical variance es- 0.00
+1 2 3 4 5 6 7 8 9 101112131415161718192021222324
+timate, by taking the trace of the covariance ma- Agent Index
+trix estimated using each batch of 100 gradient es- Figure 3: Relevant set visualization in
+timates, along with a 95% confidence interval. The Collision Avoidance environment. We
+resultsare plotted inFig. 4. In general, we findthat visualize the average attention weight that
+PRD-MAPPO tends to avoid the spikes in gradient each agent assigns to every other agent,
+variance present in MAPPO, which may explain its averaged across 5000 independent episodes.
+improved stability and asymptotic performance. Because agents always assign an attention
+weight of 1 to themselves, we remove those
+6 Related Work elementsfromtheplotastheyareuninforma-
+tive. Wenoticethatgenerallyagentsassigna
+far higher attention weight to agents in their
+Many recent approaches have been proposed to deal
+team, compared to agents on other teams,
+with the credit assignment problem. G2ANet (Liu
+which is to be expected given that only an
+etal.,2020),forinstance,proposedanovelattention-
+agent’s teammates are capable of influencing
+based game abstraction mechanism that enables the
+its rewards.
+critic to better isolate important interactions among
+xednI
+tnegA
+1
+2
+3
+4
+5
+6
+7
+8 9011121314151617181910212223242Published as a conference paper at RLC 2024
+agents, and ignore unimportant ones (although explicit decoupling is not done, as in PRD). Coun-
+terfactual Multi-Agent Policy Gradient (COMA) (Foerster et al., 2018) proposed a novel counter-
+factual baseline that allows each agent to more precisely determine the effect that its action had
+on group reward by conditioning on the actions of all other agents. COMA builds on the idea
+of difference rewards (Wolpert & Tumer, 2002), in which each agent uses a modified reward that
+compares the shared reward to a counterfactual situation in which the agent took some default ac-
+tion. Value-decompositionactor-critics(VDAC)(Suetal.,2021)usesvaluedecompositionnetworks
+(Sunehag et al., 2017; Rashid et al., 2018) as critics for credit assignment in the actor-critic frame-
+work. Off-policymulti-agentdecomposedpolicygradients(Wangetal.,2020)isanothermulti-agent
+policy-gradient algorithm that uses the idea of value decomposition, but applies it to a DDPG-style
+off-policy policy gradient (Silver et al., 2014). Finally, Learning Implicit Credit Assignment for
+Cooperative Multi-Agent Reinforcement Learning (LICA) (Zhou et al., 2020a) implicitly addressed
+thecreditassignmentproblembyrepresentingacentralizedcriticasahypernetwork,andfindingan
+end-to-end differentiable optimization setting where the policies simultaneously improve along the
+jointactionvaluegradients,thusservingasaproxyforfindingoptimalcreditassignmentstrategies.
+Figure4: Gradient estimator variance vs. episode for team collision avoidance, pressure
+plate, and LBF environments. Solidlinesindicatetheaverageover5randomseeds, andshaded
+regions denote a 95% confidence interval. PRD-MAPPO tends to avoid the dramatic spikes in
+gradient variance demonstrated by MAPPO.
+7 Limitations
+The primary limitation of PRD-MAPPO is that PRD is not guaranteed to accelerate learning
+in every environment, because some tasks cannot be decomposed (i.e., each agent’s relevant set
+contains most or all other agents). For example, in the traffic junction experiment, it is possible
+that learning is only somewhat improved by PRD because interactions among agents are too dense,
+making decoupling less effective.
+8 Conclusions
+We addressed the shortcomings of MAPPO, a state-of-the-art multi-agent reinforcement learning
+algorithm. Specifically, we hypothesized that the credit assignment problem manifests itself in
+policy gradient estimator variance. Based on this hypothesis, we proposed integrating PRD into
+MAPPO as a strategy to improve credit assignment, yielding a new multi-agent model-free RL
+algorithm, PRD-MAPPO. We demonstrated that PRD-MAPPO provides significant improvements
+bothinlearningefficiencyandstability,acrossadiversesetoftasks,comparedtobothMAPPOand
+severalstate-of-the-artMARLalgorithmssuchasQMix,LICA,andCOMA.Weempiricallyverified
+the hypothesis that PRD decreases the variance of the gradient estimates of MAPPO. Finally, we
+visualized the relevant sets inferred by PRD, and found that it correctly grouped together agents
+that should cooperate. The improvements in learning speed and stability, combined with decreased
+gradient variance and sensible relevant set estimation, indicate that PRD, used in the context of
+MAPPO, provides a useful credit assignment strategy for multi-agent problems.Published as a conference paper at RLC 2024
+References
+GabrielBarth-Maron,MatthewWHoffman,DavidBudden,WillDabney,DanHorgan,TBDhruva,
+Alistair Muldal, Nicolas Heess, and Timothy Lillicrap. Distributed distributional deterministic
+policy gradients. In International Conference on Learning Representations, 2018.
+Christopher Berner, Greg Brockman, Brooke Chan, Vicki Cheung, Przemysław Debiak, Christy
+Dennison,DavidFarhi,QuirinFischer,ShariqHashme,ChrisHesse,etal. Dota2withlargescale
+deep reinforcement learning. arXiv preprint arXiv:1912.06680, 2019.
+Jakob Foerster, Gregory Farquhar, Triantafyllos Afouras, Nantas Nardelli, and Shimon Whiteson.
+Counterfactual multi-agent policy gradients. In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 32, 2018.
+BenjaminFreed,AdityaKapoor,IanAbraham,JeffSchneider,andHowieChoset. Learningcooper-
+ativemulti-agentpolicieswithpartialrewarddecoupling. IEEE Robotics and Automation Letters,
+7(2):890–897, 2022. doi: 10.1109/LRA.2021.3135930.
+Jayesh K Gupta, Maxim Egorov, and Mykel Kochenderfer. Cooperative multi-agent control using
+deep reinforcement learning. In International Conference on Autonomous Agents and Multiagent
+Systems, pp. 66–83. Springer, 2017.
+Max Jaderberg, Wojciech M Czarnecki, Iain Dunning, Luke Marris, Guy Lever, Antonio Garcia
+Castaneda,CharlesBeattie,NeilCRabinowitz,AriSMorcos,AvrahamRuderman,etal. Human-
+levelperformancein3dmultiplayergameswithpopulation-basedreinforcementlearning. Science,
+364(6443):859–865, 2019.
+Vijay R Konda and John N Tsitsiklis. Actor-critic algorithms. In Advances in neural information
+processing systems, pp. 1008–1014, 2000.
+JakubGrudzienKuba,RuiqingChen,MuningWen,YingWen,FangleiSun,JunWang,andYaodong
+Yang. Trust region policy optimisation in multi-agent reinforcement learning. In International
+Conference on Learning Representations, 2021.
+Michael L Littman. Markov games as a framework for multi-agent reinforcement learning. In
+Machine learning proceedings 1994, pp. 157–163. Elsevier, 1994.
+Yong Liu, Weixun Wang, Yujing Hu, Jianye Hao, Xingguo Chen, and Yang Gao. Multi-agent
+game abstraction via graph attention neural network. In Proceedings of the AAAI Conference on
+Artificial Intelligence, volume 34, pp. 7211–7218, 2020.
+Ryan Lowe, Yi I Wu, Aviv Tamar, Jean Harb, OpenAI Pieter Abbeel, and Igor Mordatch. Multi-
+agentactor-criticformixedcooperative-competitiveenvironments.Advancesinneuralinformation
+processing systems, 30, 2017.
+Marvin Minsky. Steps toward artificial intelligence. Proceedings of the IRE, 49(1):8–30, 1961.
+Volodymyr Mnih, Adria Puigdomenech Badia, Mehdi Mirza, Alex Graves, Timothy Lillicrap, Tim
+Harley, David Silver, and Koray Kavukcuoglu. Asynchronous methods for deep reinforcement
+learning. In International conference on machine learning, pp. 1928–1937. PMLR, 2016.
+Tabish Rashid, Mikayel Samvelyan, Christian Schroeder, Gregory Farquhar, Jakob Foerster, and
+Shimon Whiteson. Qmix: Monotonic value function factorisation for deep multi-agent reinforce-
+ment learning. In International Conference on Machine Learning, pp. 4295–4304. PMLR, 2018.
+John Schulman, Sergey Levine, Pieter Abbeel, Michael Jordan, and Philipp Moritz. Trust region
+policy optimization. In International conference on machine learning, pp. 1889–1897. PMLR,
+2015a.Published as a conference paper at RLC 2024
+John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, and Pieter Abbeel. High-
+dimensional continuous control using generalized advantage estimation. arXiv preprint
+arXiv:1506.02438, 2015b.
+John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy
+optimization algorithms. arXiv preprint arXiv:1707.06347, 2017.
+David Silver, Guy Lever, Nicolas Heess, Thomas Degris, Daan Wierstra, and Martin Riedmiller.
+Deterministic policy gradient algorithms. In International conference on machine learning, pp.
+387–395. PMLR, 2014.
+Jianyu Su, Stephen Adams, and Peter Beling. Value-decomposition multi-agent actor-critics. In
+Proceedings of the AAAI Conference on Artificial Intelligence, volume35, pp.11352–11360, 2021.
+PeterSunehag,GuyLever,AudrunasGruslys,WojciechMarianCzarnecki,ViniciusZambaldi,Max
+Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. Value-decomposition
+networks for cooperative multi-agent learning. arXiv preprint arXiv:1706.05296, 2017.
+Richard S Sutton, Andrew G Barto, et al. Introduction to reinforcement learning, volume 135. MIT
+press Cambridge, 1998.
+JTerry,BenjaminBlack,NathanielGrammel,MarioJayakumar,AnanthHari,RyanSullivan,LuisS
+Santos, Clemens Dieffendahl, Caroline Horsch, Rodrigo Perez-Vicente, et al. Pettingzoo: Gym
+for multi-agent reinforcement learning. Advances in Neural Information Processing Systems, 34:
+15032–15043, 2021.
+OriolVinyals,IgorBabuschkin,WojciechMCzarnecki,MichaëlMathieu,AndrewDudzik,Junyoung
+Chung, David H Choi, Richard Powell, Timo Ewalds, Petko Georgiev, et al. Grandmaster level
+in starcraft ii using multi-agent reinforcement learning. Nature, 575(7782):350–354, 2019.
+YihanWang,BeiningHan,TonghanWang,HengDong,andChongjieZhang. Off-policymulti-agent
+decomposed policy gradients. arXiv preprint arXiv:2007.12322, 2020.
+DavidHWolpertandKaganTumer.Optimalpayofffunctionsformembersofcollectives.InModeling
+complexity in economic and social systems, pp. 355–369. World Scientific, 2002.
+Chao Yu, Akash Velu, Eugene Vinitsky, Yu Wang, Alexandre Bayen, and Yi Wu. The surprising
+effectiveness of ppo in cooperative, multi-agent games. arXiv preprint arXiv:2103.01955, 2021.
+Meng Zhou, Ziyu Liu, Pengwei Sui, Yixuan Li, and Yuk Ying Chung. Learning implicit credit
+assignment for cooperative multi-agent reinforcement learning. Advances in Neural Information
+Processing Systems, 33:11853–11864, 2020a.
+Meng Zhou, Ziyu Liu, Pengwei Sui, Yixuan Li, and Yuk Ying Chung. Learning implicit credit
+assignment for cooperative multi-agent reinforcement learning. arXiv preprint arXiv:2007.02529,
+2020b.
+A Detail Task Descriptions
+CollisionAvoidance: 3teamsof8agentseachexistinasquarebounded2Dregion. Agentsreceive
+arewardforreachingtheirassignedgoallocation,andreceiveapenaltyforcollidingwithotheragents
+belonging to the same team. Agents therefore need only cooperate with other agents on their team
+to avoid collisions. Both the agents and goals are initialized in random locations. The observation
+space consists of the agent’s position, velocity, team ID, and goal position. The agents can take 5
+possible actions that allow them to move either north, south, east, west or remain stationary. The
+reward function is the l2 distance between the agent position and the goal position multiplied by a
+scalarvalueof0.1. Oncollision, theparticipatingagentsreceivea-1rewardeach. TheenvironmentPublished as a conference paper at RLC 2024
+terminates if all agents reach their assigned goal location or 100 timesteps run out. While training
+decentralized policies, relative positions of all other agents and their team ID are also included in
+the observation space. Episodes last a maximum of 100 timesteps. This environment was modified
+from the cooperative navigation environment first developed by Lowe et al. (2017). The code for
+thisenvironmentcanbefoundathttps://github.com/openai/multiagent-particle-envs(MIT
+License).
+Pursuit: 8 agents exist in a 16 x 16 grid with an obstacle in the center. To receive a re-
+ward, two agents must coordinate their actions to surround randomly moving “evader” agents on
+two sides. There are 30 evaders in the environment. Each pursuer observes a 7 x 7 grid cen-
+tered around itself with 3 channels, indicating the positions of walls, other agents, and evaders,
+respectively. Once an evader is caught, it is removed from the environment. The environ-
+ment terminates when every evader has been caught, or when 500 timesteps are completed.
+The environment is available in the PettingZoo MARL benchmark suite (Terry et al., 2021)
+at https://pettingzoo.farama.org/environments/sisl/pursuit/ (MIT License) and was first
+proposed by Gupta et al. (2017).
+Pressure plate: 6 agents exist in a grid, divided into 6 separate chambers by gates. In any given
+chamber, a particular agent can open the gate by standing on a special grid cell known as the
+pressure plate. To successfully solve the task, this agent must remain on the pressure plate until
+the other agents have successfully moved into the next chamber. The goal is for one particular
+agent to traverse all six chambers and arrive at a goal location in the final chamber. Each agent
+observes a 5x5 square around its location, with a separate channel for each type of entity in the
+environment (e.g., walls, pressure plates, doors, agents, and goals). The agent’s (x,y) coordinates
+are concatenated to the end of the observation vector. The action space is discrete and has five
+possibilities: up, down, left, right, and remain stationary. Each agent receives rewards independent
+of other agents. If an agent is in the room that contains their assigned plate, their reward is the
+negative normalized Manhattan distance between their current position and the plate. Otherwise,
+their reward is the number of rooms between their current room and the room that contains their
+assignedplate. Episodeslastamaximumof70timesteps. Thecodeforthisenvironmentisavailable
+at https://github.com/uoe-agents/pressureplate (MIT License).
+Level-BasedForaging(LBF):Agentsnavigateagridworldandcollectfooditemsbycooperating
+with other agents. Each agent and food item is assigned a level and are randomly distributed
+throughouttheenvironment. Successfullycollectingafooditemofaparticularlevelrequiresthesum
+of the levels of the agents involved to be greater than or equal to the level of the food item. Agents
+are rewarded based on the level of the food items they help collect, divided by their contribution
+(theirlevel). Rewarddiscountingincentivizesagentstocollectallfooditemsasquicklyaspossibleto
+maximizereturns. Theobservationspaceconsistsoftheagent’spositioninthegrid,itslevel,relative
+positionsofallotheragentsandfooditems,andtheirlevels. Theagentscaneithermoveinoneofthe
+four directions, collect a food item, or do nothing. Episodes last a maximum of 70 timesteps. The
+code for this environment can be found at https://github.com/semitable/lb-foraging (MIT
+License).
+Lightweight StarCraft (SMAClite): SMACliteisalightweightversionoftheStarCraftIIgame
+engine. It is computationally less expensive relative to SC II and provides a simple “pythonic”
+framework to add custom environments and make alterations to the environment logic. The obser-
+vation space consists of the relative positions, unit type, health and shield strength of the agent’s
+allies and enemies within the field of view of the agent and the health and shield strength of it-
+self. The agents can move in any of the 4 cardinal directions, remain stationary, or attack any of
+the enemy agent within its field of view. Each combat scenario is run for 100 timesteps, though
+agents may die before this time. We consider three different battle scenarios, 1) 5m_vs_6m, where
+5 agent-controlled marines battle 6 enemy marines, 2) 10m_vs_11m, where 10 agent-controlled
+marines battle 11 enemy marines, and 3) 3s5z, where 3 agent-controlled stalkers and 5 agent-
+controlled zealots battle 3 enemy stalkers and 5 enemy zealots. The code for SMAClite is available
+at https://github.com/uoe-agents/smaclite (MIT License).Published as a conference paper at RLC 2024
+B Pseudocode
+Algorithm 1 PRD-MAPPO
+1: Initialize θ, the parameters for policy π, ω, the parameters for state-action value critic Q and ϕ,
+the parameters for state value critic V, using orthogonal initialization (Hu et al., 2020)
+2: Set learning rate α
+3: while step ≤ step max do
+4: set data buffer D ={}
+5: for i=1 to batch_size do
+6: τ =[] – empty list
+7: initialize h(1),...,h(M) actor RNN states
+0,π 0,π
+8: initialize h(1) ,...,h(M) state value RNN states
+0,V 0,V
+9: initialize h(1),...,h(M) state-action value RNN states
+0,Q 0,Q
+10: for t=1 to T do
+11: for all agents a do
+12: u(a),h(a) =π(o(a),h(a) ;θ)
+t t,π t t−1,π
+13: end for
+14: (q t(1),...q t(M)),(h( t,1 Q) ...h( t,M Q)),W prd,t =Q(s( t1)...s( tM),u( t1)...u( tM),h( t−1) 1,Q...h( t−M 1) ,Q;ω)
+15: (v(1),...v(M)),(h(1) ...h(M)) = V(s(1)...s(M),u(1)...u(M),h(1) ...h(M) ;ϕ) – we
+t t t,V t,V t t t t t−1,V t−1,V
+mask out the actions of agent a while calculating its state value v(a)
+16: Execute actions u t, observe r t, s t+1, o t+1
+17: τ +=[s t,o t,h t,π,h t,V,u t,r t,s t+1,o t+1]
+18: end for
+19: Compute relevant set R 1,...,R M using W prd
+20: ComputereturnG i foreachagenti=1,...,M,tolearntheQfunctionandtotalrelevant-set
+returnG¯ =P G foreachagentitolearnV functiononτ andnormalizewithPopArt
+i j∈Ri j
+21: Compute advantage estimate Aˆ1,...,AˆM via GAE on state value estimates on τ, using
+PopArt
+22: Split trajectory τ into chunks of length L
+23: for l=0,1,...,T//L do
+24: D =D∪(τ[l:l+T],Aˆ[l:l+L],G[l:l+L],G¯[l:l+L])
+25: end for
+26: end for
+27: for mini-batch k =1,...,K do
+28: b← random mini-batch from D with all agent data
+29: for each data chunk c in the mini-batch b do
+30: update RNN hidden states for π, Q and V from first hidden state in data chunk
+31: end for
+32: end for
+33: Adam update θ on L(θ) with data b
+34: Adam update ω on L(ω) with data b
+35: Adam update ϕ on L(ϕ) with data b
+36: end while
+C Additional Results
+Weexperimentedwithvariousmethodsforselectingagentrelevantsets,asdescribedbelow. Reward
+curves for each method in each of our four environments is shown in Fig. 5. PRD-MAPPO: As
+described in Sec. 3.1 of the manuscript. The attention-weight threshold ϵ used to agent relevant
+sets is held constant through training.Published as a conference paper at RLC 2024
+PRD-MAPPO-soft: As described in Sec. 4 of the manuscript. A variant of PRD-MAPPO in
+which advantage terms are not excluded from the PPO update according to hard thresholding, but
+rather advantage terms for each agent i are softly re-weighted according to the attention weights
+applied by other agents to the actions of agent i.
+PRD-MAPPO-ascend: Attention-weight threshold ϵ is linearly increased from 0 to θ over the
+first N policy updates and then held constant, where θ and N are hyperparameters. This method
+transitions from including all agents in the relevant set to having only a subset of agents in the
+relevant set.
+PRD-MAPPO-decay: Attention-weightthreshold ϵislinearlydecreasedfromthetato0overthe
+first N policy updates, and then held constant. In this case, agents aggressively prune relevant sets
+early on, transitioning to standard MAPPO by the end of training.
+PRD-MAPPO-G2ANet: A semi-hard attention mechanism based on G2ANet Liu et al. (2020)
+isusedtoselectrelevantsets. Agentsareexcludedfromtherelevantsetiftheirassociatedattention
+weightisexactly0. Thisapproachhastheadvantagethatitallowsamanualthresholdonattention
+weights to be avoided.
+PRD-MAPPO-top-k: The agents with the top k highest attention weights are included in the
+relevant set (where k is a hyperparameter).
+D Implementation Details
+ThecodewasrunonLambdaLabsdeeplearningworkstationwith2-4NvidiaRTX2080Tigraphics
+cards. Each training run was run on one single GPU, and required approximately 2 days. The
+hyperparamers used for our experiments are reported in the tables below:
+E Hyperparameters
+Hyperparameters used for MAPPO variants, PRD variants, PRD_V_MAPPO, QMix, LICA and
+COMA that are common to all tasks are shown in Tables 23, 4 5, and 6 respectively. The
+task-specific hyperparameters considered in our grid search for MAPPO variants, PRD variants,
+PRD_V_MAPPO QMix, LICA, and COMA are shown in Tables 7, 8, 9 10, 11, and 12, respec-
+tively. Bold values indicate the optimal hyperparameters.
+Table 1: Episodic Length of all environments
+common
+max timesteps
+environment
+collision avoidance 100
+pursuit 500
+pressure plate 70
+level-based foraging 70
+5m_vs_6m 100
+10m_vs_11m 100
+3s5z 100Published as a conference paper at RLC 2024
+Table 2: Common Hyperparameters for all algorithms in all domains
+common
+value
+hyperparameters
+optimizer AdamW
+gamma 0.99
+gae lambda 0.95
+weight decay 0.0
+optim epsilon 1e-5
+max grad norm 10.0
+network initialization orthogonal
+Table 3: Common Hyperparameters for MAPPO, HAPPO, MAPPO-G2ANet, PRD-V-MAPPO,
+PRD-MAPPO-shared and PRD-MAPPO-soft algorithms in all domains
+common
+value
+hyperparameters
+critic loss huber loss
+huber delta 10.0
+num mini-batch 1
+gae lambda 0.95
+actor network rnn
+recurrent data chunk length 10
+recurrent num layers 1
+rnn hidden dim 64
+value normalization PopArt
+Table 4: Common Hyperparameters for QMix in all domains.
+common
+value
+hyperparameters
+buffer size 5000
+batch size 32
+hypernet layers 2
+hypernet hidden dim 32
+target network update interval 200
+td lambda 0.8
+epsilon decay steps 2000 episodes
+epsilon start 1.0
+epsilon end 0.1
+value loss huber loss
+huber delta 10.0
+q network rnn
+rnn hidden dim 64
+recurrent data chunk length 10
+recurrent num layers 1Published as a conference paper at RLC 2024
+Table 5: Common Hyperparameters for LICA.
+common
+value
+hyperparameters
+hypernet layers 2
+hypernet hidden dim 64
+target network update interval 200
+td lambda 0.8
+critic loss huber loss
+huber delta 10.0
+actor network rnn
+actor rnn hidden dim 64
+actor recurrent data chunk length 10
+actor recurrent num layers 1
+Table 6: Common Hyperparameters for COMA.
+common
+value
+hyperparameters
+target network update interval 200
+td lambda 0.8
+critic loss huber loss
+huber delta 10.0
+actor network rnn
+rnn hidden dim 64
+recurrent data chunk length 10
+recurrent num layers 1
+Table 7: MAPPO and MAPPO-G2ANet hyperparameter sweep. Bold values indicate the optimal
+hyperparameters.
+Environment
+Name epochs num_episodes value_lr policy_lr clip entropy_pen
+Collision
+Avoidance [5,10,15] [5,10] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.05,0.2] [1e-3,8e-3,1e-2]
+Pursuit [5,10,15] [2,5,10] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.05,0.2] [1e-3,8e-3,1e-2]
+Pressure
+Plate [5,10,15] [5,7,10] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.05,0.1,0.2] [1e-3,1e-2,5e-2,1e-1]
+Level-Based
+Foraging [1,5,10] [1,5,10] [5e-4,1e-3,5e-3] [5e-4,1e-3,5e-3] [0.1,0.2] [1e-3,5e-3,1e-2]
+5m_vs_6m [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,5e-3,1e-2]
+10m_vs_11m [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,5e-3,1e-2]
+3s5z [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,5e-3,1e-2]
+Table 8: PRD-MAPPO-global and PRD-MAPPO-soft hyperparameter sweep. Bold values indicate
+the optimal hyperparameters.
+Environment
+Name epochs num_episodes value_lr policy_lr clip entropy_pen
+Collision
+Avoidance [5,10,15] [5,10] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.05,0.2] [0.0,1e-3,8e-3]
+Pursuit [5,10,15] [2,5] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.05,0.2] [1e-3,8e-3,1e-2]
+Pressure
+Plate [5,10,15] [5,7,10] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.1,0.2] [1e-3,1e-2,5e-2,1e-1]
+Level-Based
+Foraging [1,5,10] [1,5,10] [5e-4,1e-3,5e-3] [5e-4,1e-3,5e-3] [0.1,0.2] [0.0,1e-3,8e-3]
+5m_vs_6m [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,1e-3,1e-2]
+10m_vs_11m [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,1e-3,1e-2]
+3s5z [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,1e-3,1e-2]Published as a conference paper at RLC 2024
+Table9: PRD-V-MAPPOhyperparametersweep. Boldvaluesindicatetheoptimalhyperparameters.
+Environment
+Name epochs num_episodes value_lr policy_lr clip entropy_pen threshold
+Collision
+Avoidance [5,10,15] [5,10] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.05,0.2] [0.0,1e-3,1e-2] [0.05,0.12,0.2]
+Pursuit [5,10,15] [2,5] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.05,0.2] [1e-3,8e-3,1e-2] [0.2,0.3,0.5]
+Pressure
+Plate [5,10,15] [5,7,10] [1e-4,5e-4,1e-3] [1e-4,5e-4,1e-3] [0.1,0.2] [1e-3,1e-2,5e-2,1e-1] [0.2,0.4]
+Level-Based
+Foraging [1,5,10] [1,5,10] [5e-4,1e-3,5e-3] [5e-4,1e-3,5e-3] [0.1,0.2] [0.0,1e-3,8e-3] [0.15,0.2,0.33]
+5m_vs_6m [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,5e-3,1e-2] [0.15,0.2,0.33]
+10m_vs_11m [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,5e-3,1e-2] [0.1,0.2,0.33]
+3s5z [1,5,10] [5,10] [1e-4,3e-4,5e-4] [1e-4,3e-4,5e-4] [0.1,0.2] [0.0,5e-3,1e-2] [0.12,0.2,0.33]
+Table 10: Hyperparameter sweep for QMix. Bold values were selected for training the agent.
+Environment
+learningrate updateinterval(episodes) hardinterval
+Name
+Collision
+[1e-4,5e-4,1e-3] [5,10,20] [100,200,500]
+Avoidance
+Pursuit [1e-4,5e-4,1e-3] [5,10,20] [100,200,500]
+Pressure
+[1e-4,5e-4,1e-3] [5,10,20] [100,200,500]
+Plate
+LB-Foraging [1e-4,5e-4,1e-3] [5,10,20] [100,200,500]
+5m_vs_6m [1e-4,5e-4,1e-3] [5,10,20] [100,200,500]
+10m_vs_11m [1e-4,5e-4,1e-3] [5,10,20] [100,200,500]
+3s5z [1e-4,5e-4,1e-3] [5,10,20] [100,200,500]
+Table 11: Hyperparameter sweep for LICA. Bold values were selected for training the agent.
+Environment
+critic_lr actor_lr entropy_coeff
+Name
+Collision
+[1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-2, 1e-1]
+Avoidance
+Pursuit [1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-2, 1e-1]
+Pressure
+[1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-2, 1e-1]
+Plate
+LB-Foraging [1e-3, 5e-3, 1e-2] [1e-3, 5e-3, 1e-2] [1e-2, 1e-1]
+5m_vs_6m [1e-4, 5e-4, 1e-2] [1e-4, 5e-4, 1e-3] [1e-2, 1e-1]
+10m_vs_11m [1e-4, 5e-4, 1e-2] [1e-4, 5e-4, 1e-3] [1e-2, 1e-1]
+3s5z [1e-4, 5e-4, 1e-2] [1e-4, 5e-4, 1e-3] [1e-2, 1e-1]
+Table 12: Hyperparameter sweep for COMA. Bold values indicate the optimal hyperparameters.
+Environment
+value_lr policy_lr entropy_coeff
+Name
+Collision
+[1e-4, 5e-4, 1e-3] [5e-4, 7e-4, 1e-3] [1e-3, 8e-3, 1e-2]
+Avoidance
+Pursuit [1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-3, 8e-3, 1e-2]
+Pressure
+[1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-3, 8e-3, 1e-2]
+Plate
+LB-Foraging [1e-3, 5e-3, 1e-2] [1e-3, 5e-3, 1e-2] [1e-3, 8e-3, 1e-2]
+5m_vs_6m [1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-3, 8e-3, 1e-2]
+10m_vs_11m [1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-3, 8e-3, 1e-2]
+3s5z [1e-4, 5e-4, 1e-3] [1e-4, 5e-4, 1e-3] [1e-3, 8e-3, 1e-2]Published as a conference paper at RLC 2024
+A) Team Collision Avoidance B) Pursuit
+0 300
+200
+100
+100
+200
+0
+300 100
+200
+400
+300
+500 400
+0 5000 10000 15000 0 500 1000 1500 2000
+Episodes Episodes
+C) Pressure Plate D) LB-Foraging
+100
+0.8
+0
+100 0.6
+200
+0.4
+300
+400 0.2
+500
+0.0
+600
+0 5000 10000 15000 20000 25000 30000 0 2500 5000 7500 10000
+Episodes Episodes
+E) 5 marines vs 6 marines F) 10 marines vs 11 marines
+20 20
+15 15
+10 10
+5 5
+0
+0
+0 5000 10000 15000 20000 0 5000 10000 15000 20000
+Episodes Episodes
+G) 3 Stalkers and 5 Zealots
+20.0 PRD-MAPPO-soft
+17.5
+PRD-MAPPO-shared
+15.0
+PRD-MAPPO-ascend
+12.5
+PRD-MAPPO-decay
+10.0
+7.5 PRD-MAPPO
+5.0 PRD-MAPPO-top-K
+2.5 PRD-MAPPO-G2ANet
+0 5000 10000 15000 20000
+Episodes
+Figure 5: Average reward vs. episode for PRD-MAPPO-soft, PRD-MAPPO-shared,
+PRD-MAPPO-ascend, PRD-MAPPO-decay, PRD-MAPPO, PRD-MAPPO-top-K,
+and PRD-MAPPO-G2ANet on A) team collision avoidance, B) pursuit, C) pressure
+plate, D) Level-Based Foraging tasks, E) StarCraft 5 marines vs. 6 marines, F) Star-
+Craft 10 marines vs. 11 marines, and G) StarCraft 3 Stalkers and 5 Zealots. Solid lines
+indicate the average over 5 random seeds, and shaded regions denote a +/- 1 standard deviation
+confidence interval. PRD-MAPPO-soft tended to perform the best across all tasks.
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM

@@ -1,0 +1,767 @@
+Puppet-Master: Scaling Interactive Video Generation
+as a Motion Prior for Part-Level Dynamics
+RuiningLi ChuanxiaZheng ChristianRupprecht AndreaVedaldi
+VisualGeometryGroup,UniversityofOxford
+{ruining, cxzheng, chrisr, vedaldi}@robots.ox.ac.uk
+Abstract
+WepresentPuppet-Master,aninteractivevideogenerativemodelthatcanserveas
+amotionpriorforpart-leveldynamics. Attesttime,givenasingleimageanda
+sparsesetofmotiontrajectories(i.e.,drags),Puppet-Mastercansynthesizeavideo
+depictingrealisticpart-levelmotionfaithfultothegivendraginteractions. Thisis
+achievedbyfine-tuningalarge-scalepre-trainedvideodiffusionmodel,forwhich
+weproposeanewconditioningarchitecturetoinjectthedraggingcontroleffectively.
+More importantly, we introduce the all-to-first attention mechanism, a drop-in
+replacementforthewidelyadoptedspatialattentionmodules,whichsignificantly
+improvesgenerationqualitybyaddressingtheappearanceandbackgroundissues
+in existing models. Unlike other motion-conditioned video generators that are
+trainedonin-the-wildvideosandmostlymoveanentireobject,Puppet-Masteris
+learnedfromObjaverse-Animation-HQ,anewdatasetofcuratedpart-levelmotion
+clips. We propose a strategy to automatically filter out sub-optimal animations
+andaugmentthesyntheticrenderingswithmeaningfulmotiontrajectories. Puppet-
+Mastergeneralizeswelltorealimagesacrossvariouscategoriesandoutperforms
+existingmethodsinazero-shotmanneronareal-worldbenchmark. Seeourproject
+pageformoreresults: vgg-puppetmaster.github.io.
+1 Introduction
+Weconsiderlearninganopen-endedmodelofthemotionofnaturalobjects,whichcanunderstand
+theirinternaldynamics. Mostmodelsofdynamicobjectsaread-hocandonlyworkforaspecific
+familyofrelatedobjects, suchashumansorquadrupeds[1,2], severelylimitingtheirgenerality.
+Moreopen-endedmodelslike[3]donotusesuchconstrainedshapepriorsbutaredifficulttoscale
+duetothelackofsuitabletrainingdata(i.e.,vertex-aligned3Dmeshes). Therefore,werequirea
+more general framework to learn a universal model of motion. This framework must be flexible
+enoughtomodelverydifferenttypesofinternaldynamics(e.g.,partarticulation,slidingofparts,and
+softdeformations). Furthermore,itmustbeabletotapsubstantialquantitiesoftrainingdata.
+Recently,videogeneratorslearnedfrommillionsofvideoshavebeenproposedasproxiesofworld
+models,i.e.,modelsofanykindofnaturalphenomena,includingmotion.Suchmodelsmayimplicitly
+understandobjectdynamics; however,generatingvideosisinsufficient: ausefulmodelofobject
+dynamicsmustbeabletomakepredictionsaboutthemotionofgivenobjects.
+Inspired by DragAPart [4] and [5], we thus consider performing such predictions by learning a
+conditionalvideogenerator. Thisgeneratortakesasinputasingleimageofanobjectandoneormore
+dragswhichspecifythemotionofselectedphysicalpointsoftheobject;itthenoutputsaplausible
+videooftheentireobjectmotionconsistentwiththedrags(Fig.1).
+Severalauthorshavealreadyconsideredincorporatingdrag-likemotionpromptsinimageorvideo
+generation[6–18]. ManysuchworksutilizetechniqueslikeControlNet[19]toinjectmotioncontrol
+inapre-trainedgenerator. However,thesemodelstendtorespondtodragsbyshiftingorscalingan
+4202
+guA
+8
+]VC.sc[
+1v13640.8042:viXraDragNUWA Ours: Puppet-Master
+(a)
+(b)
+(c)
+(d)
+(e)
+(f)
+DragAnything Ours: Puppet-Master
+Figure1: Part-leveldynamicsvs. shiftingorscalinganentireobject. Puppet-Mastergenerates
+videosdepictingpart-levelmotion,promptedbyoneormoredrags.
+entireobjectandfailtocapturetheirinternaldynamics(Fig.1),suchasadrawerslidingoutofa
+cabinetorafishswingingitstail. Thechallengeisencouraginggenerativemodelstosynthesizesuch
+internal,part-leveldynamics.
+WhileDragAParthasalreadyconsideredthischallenge,itsresultsarelimitedfortworeasons. First,
+thediversityofitstrainingdataispoor,asitprimarilyfocusesonrenderingsof3Dfurniture. Second,
+itstartsfromanimagegeneratorinsteadofavideogenerator. Consequently,itcannotbenefitfrom
+themotionpriorthatavideogeneratortrainedonalargescalemayalreadyhavecaptured,andcan
+onlycapturetheendframeofthemotion.
+In this work, we thus explore the benefits of learning a motion model from a pre-trained video
+generatorwhilealsosignificantlyscalingthenecessarytrainingdatatolarger,morediversesources.
+Todoso,westartfromStableVideoDiffusion(SVD)[20]andshowhowtore-purposeitformotion
+prediction. Wemakethefollowingcontributions.
+First,weproposenewconditioningmodulestoinjectthedraggingcontrolintothevideogeneration
+pipeline effectively. In particular, we find that adaptive layer normalization [21] is much more
+effectivethantheshift-basedmodulationproposedby[4]. Wefurtherobservethatthecross-attention
+modulesoftheimage-conditionedSVDmodellackspatialawareness,andproposetoadddragtokens
+to these modules for better conditioning. We also address the degradation in appearance quality
+thatoftenariseswhenfine-tuningvideogeneratorsonout-of-distributiondatasetsbyintroducing
+all-to-firstattention,whereallgeneratedframesattendthefirstoneviamodifiedself-attention. This
+designcreatesashortcutthatallowsinformationtopropagatefromtheconditioningframetothe
+othersdirectly,significantlyimprovinggenerationquality.
+Oursecondcontributionisdatacuration: weprovidetwodatasetstolearnpart-levelobjectmotion.
+Bothdatasetscomprisesubsetsofthemorethan40kanimatedassetsfromObjaverse[22]. These
+animations vary in quality: some display realistic object dynamics, while others feature objects
+2that(i)arestatic,(ii)exhibitsimpletranslations,rotations,orscaling,or(iii)moveinaphysically
+implausibleway. Weintroduceasystematicapproachtocuratetheanimationsatscale. Theresulting
+datasets,Objaverse-AnimationandObjaverse-Animation-HQ,containprogressivelyfeweranimations
+ofhigherquality. WeshowthatObjaverse-Animation-HQ,whichcontainsfewerbuthigher-quality
+animations,leadstoabettermodelthanObjaverse-Animation,demonstratingtheeffectivenessofthe
+datacuration.
+Withthis,wetrainPuppet-Master,avideogenerativemodelthat,givenasinputasingleimageofan
+objectandcorrespondingdrags,generatesananimationoftheobject. Theseanimationsarefaithful
+toboththeinputimageandthedragswhilecontainingphysicallyplausiblemotionsatthelevelof
+theindividualobjectparts. Thesamemodelworksforadiversesetofobjectcategories. Empirically,
+itoutperformspriorworksonmultiplebenchmarks. Notably,whileourmodelisfine-tunedusing
+onlysyntheticdata,itgeneralizeswelltorealdata,outperformingpriormodelsthatwerefine-tuned
+onrealvideos. Itdoessoinazero-shotmannerbygeneralizingtoout-of-distribution,real-worlddata
+withoutfurthertuning.
+2 RelatedWork
+Generativemodels. Recentadvancesingenerativemodels, largelypoweredbydiffusionmod-
+els[23–25],haveenabledphoto-realisticsynthesisofimages[26–28]andvideos[29–31,20],and
+beenextendedtovariousothermodalities[32,33]. Thegenerationismainlycontrolledbyatext
+or image prompt. Recent works have explored ways to leverage these models’ prior knowledge,
+via either score distillation sampling [34–37] or fine-tuning on specialized data for downstream
+applications,suchasmulti-viewimagesfor3Dassetgeneration[38–43].
+Videogenerationformotion. Attemptstomodelobjectmotionoftenresorttopre-definedshape
+models,e.g.,SMPL[1]forhumansandSMAL[2]forquadrupeds,whichareconstrainedtoasingle
+oronlyafewcategories. Videoshavebeenconsideredasaunifiedrepresentationthatcancapture
+general object dynamics [5]. However, existing video generators pre-trained on Internet videos
+oftensufferfromincoherentorminimalmotion. Researchershaveconsideredexplicitlycontrolling
+videogenerationwithmotiontrajectories. Drag-A-Video[44]extendstheframeworkproposedby
+DragGAN[8]tovideos. Thismethodistraining-free,relyingonthemotionpriorcapturedbythe
+pre-trainedvideogenerator,whichisoftennotstrongenoughtoproducehigh-qualityvideos. Hence,
+otherworksfocusontraining-basedmethods,whichlearndrag-basedcontrolusingad-hoctraining
+data for this task. Early efforts such as iPoke [6] and YODA [45] train variational autoencoders
+or diffusion models to synthesize videos with objects in motion, conditioned on sparse motion
+trajectoriessampledfromopticalflow. GenerativeImageDynamics[10]usesaFourier-basedmotion
+representation suitable for natural, oscillatory dynamics such as those of trees and candles, and
+generatesmotionforthesecategorieswithadiffusionmodel. DragNUWA[9]andothers[11,16–18]
+fine-tunepre-trainedvideogeneratorsonlarge-scalecurateddatasets,enablingdrag-basedcontrol
+inopen-domainvideogeneration. However,thesemethodsdonotallowcontrollingmotionatthe
+levelofobjectparts,astheirtrainingdataentanglesmultiplefactors,includingcameraviewpointand
+objectscalingandre-positioning,makingithardtoobtainamodelofpart-levelmotion. Concurrent
+worksleveragethemotionpriorcapturedbyvideogenerativemodelsfortherelated4Dgeneration
+task[46–49]. Thesemodels, however, lackthecapabilityofexplicitdraggingcontrol, whichwe
+tackleinthiswork.
+3 Method
+GivenasingleimageyofanobjectandoneormoredragsD ={d }K ,ourgoalistosynthesizea
+k k=1
+videoX ={x }N sampledfromthedistribution
+i i=1
+X ∼P(x ,x ,...,x |y,D) (1)
+1 2 N
+whereN isthenumberofvideoframes. ThedistributionPshouldreflectphysicsandgeneratea
+part-levelanimationoftheobjectthatrespondstothedrags. Tolearnit,wecapitalizeonapre-trained
+videogenerator, i.e., StableVideoDiffusion(SVD,Section3.1)[20]. Suchvideogeneratorsare
+expectedtoacquireanimplicit,general-purposeunderstandingofmotionthroughtheirpre-training
+3Conditioning
+(𝑦,𝒟) Conv & Conv &
+(A)
+Modulate Modulate
+𝑦
+(C)All-to-First
+𝑑 ! 𝑑 " Spatial Attn.
+, 𝑄
+⋯
+attend
+CLIP MLP MLP
+Tokens
+𝐾 𝑉
+×𝑆
+Drag
+Tokens
+X-Attn. X-Attn. X-Attn. X-Attn.
+(B)
+Figure2: ArchitecturalOverviewofPuppet-Master. Toenableprecisedragconditioning,wefirst
+modifytheoriginallatentvideodiffusionarchitecture(Section3.1)by(A)addingadaptivelayer
+normalizationmodulestomodulatetheinternaldiffusionfeaturesand(B)addingcrossattention
+withdragtokens(Section3.2). Furthermore,toensurehigh-qualityappearanceandbackground,we
+introduce(C)all-to-firstspatialattention,adrop-inreplacementforthespatialself-attentionmodules,
+whichattendseverynoisedvideoframewiththefirstframe(Section3.3).
+onInternetvideos. Thispriorisparticularlyimportanttous,sincewerequiredatarepresentativeof
+part-levelmotionsforourpurposes,whicharerelativelyscarcecomparingtoInternetvideos.
+Inthissection,weshowhowtotamethepre-trainedvideogeneratorforpart-levelmotioncontrol.
+Therearetwomainchallenges. First,thedragconditioningmustbeinjectedintothevideogeneration
+pipelinetofacilitateefficientlearningandaccurateandtime-consistentmotioncontrolwhileavoiding
+toomuchmodifyingthepre-trainedvideogenerator’sinternalrepresentation. Second,naïvelyfine-
+tuningapre-trainedvideodiffusionmodelcanresultinartifactssuchasclutteredbackgrounds[39].
+Toaddressthesechallenges,inSection3.2,wefirstintroduceanovelmechanismtoinjectthedrag
+conditionDinthevideodiffusionmodel. Then,inSection3.3,weimprovethevideogeneration
+qualitybyintroducingall-to-firstattentionmechanism,whichreducesartifactslikethebackground
+clutter. NotethatwhilewebuildonSVD,thesetechniquesshouldbeeasilyportabletoothervideo
+generatorsbasedondiffusion.
+3.1 Preliminaries: StableVideoDiffusion
+SVDisanimage-conditionedvideogeneratorbasedondiffusion,implementingadenoisingprocess
+inlatentspace. Thisutilizesavariationalautoencoder(VAE)(E,D),wheretheencoderE maps
+thevideoframestothelatentspace,andthedecoderDreconstructsthevideofromthelatentcodes.
+Duringtraining,givenapair(X =x1:N,y)formedbyavideoandthecorrespondingimageprompt,
+one first obtains the latent code as z1:N = E(x1:N), and then adds to the latter Gaussian noise
+0
+ϵ∼N(0,I),obtainingtheprogressivelymorenoisedcodes
+√ √
+z1:N = α¯ z1:N + 1−α¯ ϵ1:N, t=1,...,T. (2)
+t t 0 t
+Thisusesapre-definednoisingscheduleα¯ =1,...,α¯ =0. Thedenoisingnetworkϵ istrained
+0 T θ
+toreversethisnoisingprocessbyoptimizingtheobjectivefunction:
+minE (cid:2) ∥ϵ1:N −ϵ (z1:N,t,y)∥2(cid:3) . (3)
+(x1:N,y),t,ϵ1:N∼N(0,I) θ t 2
+θ
+Here,ϵ usesthesameU-NetarchitectureofVideoLDM[30],insertingtemporalconvolutionand
+θ
+temporal attention modules after the spatial modules used in Stable Diffusion [27]. The image
+conditioningisachievedvia(1)crossattentionwiththeCLIP[50]embeddingofthereferenceframe
+y;and(2)concatenatingtheencodedreferenceimageE(y)channel-wisetoz1:N astheinputofthe
+t
+network. Afterϵ istrained,themodelgeneratesavideoXˆpromptedbyyviaiterativedenoising
+θ
+frompureGaussiannoisez1:N ∼N(0,I),followedbyVAEdecodingXˆ =xˆ1:N =D(z1:N).
+T 0
+4
+kcolB
+vnoC
+.nttA
+laropmeT
+kcolB
+vnoC
+.nttA
+laitapS
+tsriF-ot-llA
+.nttA
+laropmeT3.2 AddingDragControltoVideoDiffusionModels
+Next,weshowhowtoaddthedragsDasanadditionalinputtothedenoiserϵ formotioncontrol.
+θ
+WedosobyintroducinganencodingfunctionforthedragsDandbyextendingtheSVDarchitecture
+toinjecttheresultingcodeintothenetwork. Themodelisthenfine-tunedusingvideoscombined
+withcorrespondingdragpromptsintheformoftrainingtriplets(X,y,D). Wesummarizethekey
+componentsofthemodelbelowandreferthereadertoAppendixAformoredetails.
+Dragencoding. LetΩbethespatialgrid{1,...,H}×{1,...,W}whereH×W istheresolution
+of a video. A drag d is a tuple (u ,v1:N) specifying that the drag starts at location u ∈ Ω in
+k k k k
+the reference image y and lands at locations vn ∈ Ω in subsequent frames. To encode a set of
+k
+K ≤ K = 5dragsD = {d }K weusethemulti-resolutionencodingof[4]. Eachdragd 1,
+max k k=1 k
+isinputtoahand-craftedencodingfunctionenc(·,s) : ΩN (cid:55)→ RN×s×s×c,wheresisthedesired
+encodingresolution. Theencodingfunctioncapturesthestateofthedragineachframe;specifically,
+eachsliceenc(d ,s)[n]encodes(1)thedrag’sstartinglocationu inthereferenceimage,(2)its
+k k
+intermediate location vn in the n-th frame, and (3) its final location vN in the final frame. The
+k k
+s×smapenc(d ,s)[n]isfilledwithvalues−1exceptincorrespondenceofthe3locations,where
+k
+we store u , vn and vN respectively, utilizing c = 6 channels. Finally, we obtain the encoding
+k k k
+Ds ∈RN×s×s×cKmax ofDbyconcatenatingtheencodingsoftheK individualdrags,fillingextra
+enc
+channelswithvalue−1ifK <K . TheencodingfunctionisfurtherdetailedinAppendixA.
+max
+Dragmodulation. TheSVDdenoisercomprisesasequenceofU-Netblocksoperatingatdifferent
+resolutionss. WeinjectthedragencodingDs ineachblock,matchingtheblock’sresolutions. We
+enc
+dosoviamodulationusinganadaptivenormalizationlayer[21,51–56]. Namely,
+f ←f ⊗(1+γ )+β , (4)
+s s s s
+where f ∈ RB×N×s×s×C is the U-Net features of resolution s, and ⊗ denotes element-wise
+s
+multiplication. γ ,β ∈ RB×N×s×s×C are the scale and shift terms regressed from the drag
+s s
+encodingDs . WeuseconvolutionallayerstoembedDs fromthedimensioncK tothetarget
+enc enc max
+dimensionC. Weempiricallyfindthatthismechanismprovidesbetterconditioningthanusingonlya
+singleshifttermwithnoscalingasin[4].
+Dragtokens. Inadditiontoconditioningthenetworkviadragmodulation,wealsodosoviacross-
+attentionbyexploitingSVD’scross-attentionmodules. Thesemodulesattendasinglekey-value
+obtainedfromtheCLIP[50]encodingofthereferenceimagey. Thus,theydegeneratetoaglobal
+biastermwithnospatialawareness[57]. Incontrast,weconcatenatetotheCLIPtokenadditional
+dragtokenssothatcross-attentionisnon-trivial. Weusemulti-layerperceptrons(MLPs)toregress
+anadditionalkey-valuepairfromeachdragd . TheMLPstaketheoriginu andterminationsvn
+k k k
+andvN ofd alongwiththeinternaldiffusionfeaturessampledattheselocations,whichareshown
+k k
+tocontainsemanticinformation[58],asinputs. Overall,thecross-attentionmoduleshave1+K
+max
+key-valuepairs(1istheoriginalimageCLIPembedding),withextrapairssetto0ifK <K .
+max
+3.3 AttentionwiththeReferenceImageComestoRescue
+InpreliminaryexperimentsutilizingtheDrag-a-Move[4]dataset,wenotedthatthegeneratedvideos
+tendtohavecluttered/graybackgrounds. Instant3D[39]reportedasimilarproblemwhengenerating
+multipleviewsofa3Dobject,whichtheyaddressedviacarefulnoiseinitialization. VideoMV[59]
+andVivid-ZOO[60]directlyconstructedtrainingvideoswithagraybackground,whichmighthelp
+themoffsetasimilarproblem.
+TheculpritisthatSVD,whichwastrainedon576×320videos,failstogeneralizetoverydifferent
+resolutions. Indeed,whenpromptedbya256×256image,SVDcannotgeneratereasonablevideos.
+Asaconsequence,fine-tuningSVDon256×256videos(aswedoforPuppet-Master)isproneto
+localoptima,yieldingsub-optimalappearancedetails. Importantly,wenoticedthatthefirstframe
+ofeachgeneratedvideoissparedfromtheappearancedegradation(Fig.6),asthemodellearnsto
+directlycopythereferenceimage. Inspiredbythis, weproposetocreatea“shortcut”fromeach
+noisedframetothefirstframewithall-to-firstspatialattention,whichsignificantlymitigates,ifnot
+completelyresolves,theproblem.
+1Withaslightabuseofnotation,weassumed ∈ΩN,asu =v1andhencev1:N ∈ΩN fullydescribesd .
+k k k k k
+5All Objaverse Animated Assets (40k) Training Data
+Drastic Change Static Objaverse-Animation (16k)
+Sudden Appearance Unrealistic Objaverse-Animation
+Change Animation
+HQ (10k)
+⋯ ⋯ ⋯
+Global Change Only
+Feature extraction Rendering
+Random forest classification GPT-4V prompting & querying
+Figure 3: Data Curation. We propose two strategies to filter the animated assets in Objaverse,
+resultinginObjaverse-Animation(16k)andObjaverse-Animation-HQ(10k)ofvaryinglevelsof
+curation,fromwhichweconstructthetrainingdataofPuppet-Masterbysamplingsparsemotion
+trajectoriesandprojectingthemto2Dasdrags.
+All-to-firstspatialattention. Previousworks[61–63]haveshownthatattentionbetweenthenoised
+branchandthereferencebranchimprovesthegenerationqualityofimageeditingandnovelview
+synthesistasks. Here,wedesignanall-to-firstspatialattentionthatenableseachnoisedframeto
+attendtothefirst(reference)frame. Inspiredby[63],weimplementthisattentionbyhavingeach
+framequerythekeyandvalueofthefirstframeinallself-attentionlayerswithinthedenoisingU-Net.
+Morespecifically,denotingthequery,key,andvaluetensorsasQ,K andV ∈RB×N×s×s×C,we
+discardthekeyandvaluetensorsofnon-firstframes,i.e.,K[:,1:]andV[:,1:],andcomputethe
+spatialattentionA ofthei-thframeasfollows:
+i
+(cid:32) (cid:33)
+flat(Q[:,i])flat(K[:,0])T
+A =softmax √ flat(V[:,0]), (5)
+i
+D
+whereflat(·):RB×s×s×C (cid:55)→RB×L×C flattensthespatialdimensionstogetL=s×stokensfor
+attention. Thebenefitistwo-fold: first,this“shortcut”tothefirstframeallowseachnon-firstframe
+todirectlyaccessnon-degradedappearancedetailsofthereferenceimage,effectivelyalleviating
+localminimaduringoptimization. Second,combinedwiththeproposeddragencoding(Section3.2),
+whichspecifies,foreveryframe,theoriginu atthefirstframe,all-to-firstattentionenablesthelatent
+k
+pixelcontainingthedragtermination(i.e.,vn)tomoreeasilyattendtothelatentpixelcontainingthe
+k
+dragoriginonthefirstframe,potentiallyfacilitatinglearning.
+4 CuratingDatatoLearnPart-LevelObjectMotion
+Totrainourmodelwerequireavideodatasetthatcapturesthemotionofobjectsatthelevelofparts.
+Creatingsuchadatasetintherealworldmeanscapturingalargenumberofvideosofmovingobjects
+whilecontrollingforcameraandbackgroundmotion. Thisisdifficulttodoformanycategories(e.g.,
+animals)andunfeasibleatscale. DragAPart[4]proposedtouseinsteadrenderingsofsynthetic3D
+objects, andtheircorrespondingpartannotations, obtainedfromGAPartNet[64]. Unfortunately,
+thisdatasetstillrequirestomanuallyannotateandanimate3Dobjectpartssemi-manually,which
+limitsitsscale. WeinsteadturntoObjaverse[22],alarge-scale3Ddatasetof800kmodelscreatedby
+3Dartists,amongwhichabout40kareanimated. Inthissection,weintroduceapipelinetoextract
+suitabletrainingvideosfromtheseanimated3Dassets,togetherwithcorrespondingdragsD.
+Identifyinganimations. WhileObjaverse[22]hasmorethan40kassetslabeledasanimated,notall
+animationsareusefulforourpurposes(Fig.3). Notably,someare“fake”,withtheobjectsremaining
+staticthroughoutthesequence,whileothersfeaturedrasticchangesintheobjects’positionsoreven
+6theirappearances. Therefore,ourinitialstepistofilterouttheseunsuitableanimations. Todoso,we
+extractasequenceofalignedpointcloudsfromeachanimatedmodelandcalculateseveralmetrics
+foreachsequence,including: (1)thedimensionsandlocationoftheboundingboxencompassingthe
+entiremotionclip,(2)thesizeofthelargestboundingboxforthepointcloudatanysingletimestamp
+and(3)themeanandmaximaltotaldisplacementofallpointsthroughoutthesequence. Usingthese
+metrics,wefitarandomforestclassifier,whichdecideswhetherananimationshouldbeincluded
+inthetrainingvideosornot,onasubsetofObjaverseanimationswherethedecisionismanually
+labeled. Thefilteringexcludesmanyassetsthatexhibitimperceptiblylittleorover-dramaticmotions
+andresultsinasubsetof16kanimations,whichwedubObjaverse-Animation.
+Further investigation reveals that this subset still contains assets whose motions are artificially
+conceived and therefore do not accurately mimic real-world dynamics (Fig. 3). To avoid such
+imaginarydynamicsleakingintooursynthesizedvideos,weemploythemulti-modalunderstanding
+capabilityofGPT-4V[65]toassesstherealismofeachmotionclip.Specifically,foreachanimated3D
+assetinObjaverse-Animation,wefixthecameraatthefrontviewandrender4imagesattimestamps
+correspondingtothe4quartersoftheanimationandpromptGPT-4Vtodetermineifthemotion
+depictedissufficientlyrealistictoqualifyforthetrainingvideos. Thisfilteringmechanismexcludes
+another6kanimations,yieldingasubsetof10kanimationswhichwedubObjaverse-Animation-HQ.
+Sampling drags. The goal of drag sampling is to produce a sparse set of drags D = {d }K
+k k=1
+where each drag d := (u ,v1:N) tracks a point u on the asset in pixel coordinates throughout
+k k k k
+theN framesofrenderedvideos. Toencouragethevideogeneratortolearnameaningfulmotion
+prior,ideally,thesetshouldbebothminimalandsufficient: eachgroupofindependentlymoving
+partsshouldhaveoneandonlyonedragcorrespondingtoitsmotiontrajectory,similartoDrag-a-
+Move[4]. Forinstance,thereshouldbeseparatedragsfordifferentdrawersofthesamefurniture,
+astheirmotionsareindependent,butnotforadraweranditshandle,asinthiscase,themotionof
+oneimpliesthatoftheother. However, Objaverse[22]lacksthepart-levelannotationtoenforce
+this property. To partially overcome this, we find that some Objaverse assets are constructed in
+a bottom-up manner, consisting of multiple sub-models that align well with semantic parts. For
+theseassets,wesample1dragpersub-model;fortherest,wesamplearandomnumberofdrags
+intotal. Foreachdrag,wefirstsamplea3Dpointonthevisiblepartofthemodel(orsub-model)
+withprobabilitiesproportionaltothepoint’stotaldisplacementacrossN framesandthenproject
+itsground-truthmotiontrajectoryp ,...,p ∈ R3 topixelspacetoobtaind . OnceallK drags
+1 N k
+aresampled,weapplyapost-processingproceduretoensurethateachpairofdragsissufficiently
+distinct,i.e.,fori ̸= j,werandomlyremoveoneofd andd if∥v1:N −v1:N∥2 ≤ δ whereδ isa
+i j i j 2
+thresholdweempiricallysetto20N for256×256renderings.
+5 Experiments
+Thefinalmodel,Puppet-Master,istrainedonacombineddatasetofDrag-a-Move[4]andObjaverse-
+Animation-HQ(Section4). Weevaluatetheperformanceofthefinalcheckpointonmultiplebench-
+marks,includingthetestsplitofDrag-a-Moveandreal-worldcasesfromHuman3.6M[66],Amazon-
+BerkeleyObjects[67],FaunaDataset[68,69],andCC-licensedwebimagesinazero-shotmanner,
+demonstrating qualitative and quantitative improvements over prior works and excellent general-
+izationto realcases(Section5.1). Thedesignchoices thatledtoPuppet-Master areablatedand
+discussed further in Section 5.2. In Section 5.3, we show the effectiveness of our data curation
+strategy(Section4). WereferthereadertoAppendixCfortheimplementationdetails.
+5.1 MainResults
+Quantitativecomparison. WecomparePuppet-MastertoDragNUWA[9]andDragAnything[16],
+both of which are trained on real-world videos to support open-domain motion control, on the
+part-levelmotion-conditionedvideosynthesistaskinTable1. Onthein-domaintestset(i.e.,Drag-
+a-Move),Puppet-Masteroutperformsbothmethodsonallstandardmetrics,includingpixel-level
+PSNR,patch-levelSSIM,andfeature-levelLPIPSandFVD,byasignificantmargin.
+Additionally,tobetterdemonstrateourmodel’ssuperiorityingeneratingpart-levelobjectdynamics,
+weintroduceaflow-basedmetricdubbedflowerror. Specifically,wefirsttrackpointsontheobject
+throughoutthegeneratedandground-truthvideosusingCoTracker[70],andthencomputeflowerror
+7Table1:ComparisonswithDragNUWA[9],DragAnything[16]andDragAPart[4]onthein-domain
+Drag-a-Moveandout-of-domainHuman3.6Mdatasets. Thebestmethodisboldedandsecondbest
+underlined. OurmodelhasnotbeentrainedontheHuman3.6Mdataset,oranyrealvideodatasets.
+Drag-a-Move[4] Human3.6M[66]
+Method
+PSNR↑ SSIM↑ LPIPS↓ FVD↓ flowerror↓ PSNR↑ SSIM↑ LPIPS↓ FVD↓
+DragNUWA 20.09 0.874 0.172 281.49 17.55/15.41 17.52 0.878 0.158 466.91
+DragAnything 16.71 0.799 0.296 468.46 16.09/23.21 13.29 0.767 0.305 768.63
+DragAPart
+—Original 23.41 0.925 0.085 180.27 14.17/3.71 15.14 0.852 0.197 683.40
+—Re-Trained 23.78 0.927 0.082 189.10 14.34/3.73 15.25 0.860 0.188 549.64
+Puppet-Master 24.41 0.927 0.085 246.99 12.21/3.53 17.59 0.872 0.155 454.76
+DragAPart Ours: Puppet-Master
+(a)
+(b)
+Figure4: QualitativeComparisonwithDragAPart[4]. ThevideosgeneratedbyDragAPartlack
+temporalconsistency: (a)thedoorinitiallyopenstotheleft,butlateritisswitchedtoopentothe
+right,anditpartiallyclosesbetweenthesecondandthirdframesvisualizedhere;(b)DragAPartfails
+togeneralizetoout-of-domaincases,resultingindistortedmotion.
+astherootmeansquareerror(RMSE)betweenthetwotrajectories. WereporttwoRMSEsinTable1
+forthisflowerrormetric. Theformervalue(i.e.,beforetheslash)isaveragedamongtheorigins
+ofallconditioningdragsonly,i.e.,{u }K ,whilethelattervalue(i.e.,aftertheslash)isaveraged
+k k=1
+amongallforegroundpoints. WhilePuppet-Masterhaslowervaluesonboth,itobtainsasignificantly
+smallervaluewhentheerrorisaveragedamongallforegroundpoints. ThisindicatesPuppet-Master
+can better model nuanced part-level dynamics, thanks to which the parts that do not necessarily
+movealongwiththedraggedpartsstaystaticinthegeneratedvideos,reducingtheoverallerror. By
+contrast,DragNUWAandDragAnythingmovethewholeobject,soeverypointincursalargeerror.
+Toassessthecross-domaingeneralizability,wedirectlyevaluatePuppet-Masteronanunseendataset
+capturedintherealworld(i.e.,Human3.6M).Onthisout-of-domaintestset,Puppet-Masteroutper-
+formspriormodelsonmostmetrics,despitenotbeingfine-tunedonanyrealvideos.
+Forcompleteness,wealsoincludethemetricsofDragAPart[4],adrag-conditionedimagegenerator.
+TheoriginalDragAPartwastrainedonDrag-a-Moveonly. Forfairness,wefine-tuneitfromStable
+Diffusion[27]withtheidenticaldatasettingasPuppet-Master,andevaluatetheperformanceofboth
+checkpoints(Original2andRe-TrainedinTable1). ThevideosareobtainedfromN independently
+generatedframesconditionedongraduallyextendingdrags. Whileitssamplesexhibithighvisual
+qualityinindividualframes,theylacktemporalsmoothness,characterizedbyabrupttransitionsand
+discontinuitiesinmovement,resultinginalargerflowerror3 (Fig.4a). Thisjustifiesstartingfrom
+avideogeneratortoimprovetemporalconsistency. Furthermore,DragAPartfailstogeneralizeto
+out-of-domaincases(e.g.,Fig.4bandTable1).
+2Originalisnotrankedasitistrainedonsingle-categorydataonlyandhencenotanopen-domaingenerator.
+3FVDisnotaninformativemetricformotionquality.Priorworks[71,72]havenotedthatFVDisbiased
+towardsthequalityofindividualframesanddoesnotsufficientlyaccountformotioningeneratedvideos.Good
+FVDscorescanstillbeobtainedwithstaticvideosorvideoswithseveretemporalcorruption.
+8Figure5: QualitativeResultsonreal-worldcasesspanningdiversecategories.
+Qualitativecomparison. WeshowsamplesgeneratedbyPuppet-Masterandpriormodelssideby
+sideinFig.1. ThedynamicsgeneratedbyPuppet-Masterarephysicallyplausibleandfaithfultothe
+inputimageanddrags. Bycontrast,thevideosgeneratedbyDragNUWA[9]andDragAnything[16]
+scale(d,e,f)orshift(b)theobjectasawholeatbest,orevenshowdistortedmotion(a,c). Even
+thoughPuppet-Masterisfine-tunedsolelyonrenderingsofsynthetic3Dmodels,itdoesgeneralizeto
+realcases,andiscapableofpreservingfine-grainedtexturedetails.
+Qualitativeresultsonrealdata. InFig.5,weshowmorerealexamplesgeneratedbyPuppet-
+Master.Thesynthesizedvideosexhibitrealisticdynamicsthataretypicaloftheunderlyingcategories,
+includinghumans,animals,andseveralman-madecategories.
+Table2: Ablationstudiesofvariousmodelcomponents. Inadditiontothestandardmetrics, we
+report a flow-based metric dubbed flow error. A lower flow error indicates the generated videos
+followthedragcontrolbetter. Wealsomanuallycountthefrequencyofgeneratedvideoswhose
+motiondirectionsareoppositetotheintentionoftheirdraginputs. Here,≥indicatestherearevideo
+sampleswhosemotiondirectionsarehardtodistinguish. Whenablatingattentionwiththereference
+image,weuseCasthebasedragconditioningarchitecture.
+Setting PSNR↑ SSIM↑ LPIPS↓ FVD↓ flowerror↓ %wrongdir.↓
+Dragconditioning
+A Shiftonlyw/oendloc. 13.23 0.816 0.446 975.16 15.60px ≥5
+B Shift+scalew/oendloc. 22.98 0.917 0.093 223.20 9.33px 4
+C Shift+scalew/endloc. 23.67 0.926 0.080 205.40 10.48px 4
+D C+x-attn.w/dragtok. 24.00 0.929 0.069 170.43 9.80px 1
+Attn.w/ref.image
+Noattn. 11.96 0.771 0.391 823.00 12.35px ≥3
+Attn.w/staticref.video 17.51 0.874 0.233 483.18 13.57px ≥8
+All-to-firstattn. 23.67 0.926 0.080 205.40 10.48px 4
+5.2 Ablations
+WeconductseveralablationstudiestoanalyzetheintroducedcomponentsofPuppet-Master. For
+eachdesignchoice,wetrainamodelusingthetrainingsplitoftheDrag-a-Move[4]datasetwith
+batchsize8for30,000iterationsandevaluateon100videosfromitstestsplitwithoutclassifier-free
+guidance[73]. ResultsareshowninTable2andFig.6anddiscussedindetailnext.
+9No drag tok. x-attn. No drag tok. x-attn. No drag tok. x-attn.
+Full model
+(No attn.) (Attn. w/ static ref. vid.) (All-to-first attn.)
+Figure6: Visualizationofsamplesgeneratedbydifferentmodeldesigns,whereweshowthelast
+frameandthefirst3frames. Whilealldesignsproducenearlyperfectfirstframes, ourproposed
+all-to-firstattentionmodulesignificantlyenhancessamplequality.Withoutthismodule,thegenerated
+samplesoftenexhibitsub-optimalappearancesandbackgrounds. Thecross-attentionmodulewith
+dragtokensfurtherimprovestheappearancedetails.
+Dragconditioning. Table2comparesPuppet-Masterwithmultiplevariantsofconditioningmecha-
+nisms(Section3.2). Adaptivenormalizationlayers(Avs. B),dragencodingwithfinaltermination
+locationvN (Bvs. C),andcrossattentionwithdragtokens(Cvs. D)areallbeneficial. Notably,
+k
+bycombiningthese(i.e.,rowD),themodelachievesanegligiblerateofgeneratedsampleswith
+incorrectmotiondirections(seeTable2captionfordetails).
+Attentionwiththereferenceimage. Wefindthatall-to-firstattention(Section3.3)isessentialfor
+highgenerationquality. Wealsocompareall-to-firstattentionwithanalternativeimplementation
+strategyinspiredbytheX-UNetdesignin3DiM[61],wherewepassastaticvideoconsistingof
+thereferenceimagecopiedN timestothesamenetworkarchitectureandimplementcrossattention
+betweentheclean(static)referencevideobranchandthenoisedvideobranch. Thelatterstrategy
+performsworse. Wehypothesizethatthisisduetothedistributiondriftbetweenthetwobranches,
+whichforcestheoptimizationtomodifythepre-trainedSVD’sinternalrepresentationstoomuch.
+Setting PSNR↑ SSIM↑
+w/oDataCuration 6.04 0.411
+w/DataCuration 19.87 0.884
+Setting LPIPS↓ FVD↓
+w/oDataCuration 0.703 1475.35
+w/DataCuration 0.181 624.47
+Table 3: Training on more abundant but lower-
+qualitydataleadstolowergenerationquality.Here,
+‘w/oDataCuration’modelistrainedonObjaverse-
+Animation while ‘w/ Data Curation’ model is
+trainedonObjaverse-Animation-HQ.Bothmodels
+are trained for 7K iterations. Evaluation is per-
+Figure7: Datacurationhelpsstabilizetraining.
+formedonthetestsplitofDrag-a-Move[4].
+105.3 LessisMore: DataCurationHelpsatScale
+ToverifythatourdatacurationstrategyfromSection4iseffective,wecomparetwomodelstrained
+onObjaverse-AnimationandObjaverse-Animation-HQrespectivelyunderthesamehyper-parameter
+setting. The training dynamics are visualized in Fig. 7. The optimization collapses towards 7k
+iterationswhenthemodelistrainedonalesscurateddataset,resultinginmuchlower-qualityvideo
+samples(Table3). Thissuggeststhatthedata’squalitymattersmorethanquantityatscale.
+6 Conclusion
+WehaveintroducedPuppet-Master,amodelthatcansynthesizenuancedpart-levelmotioninthe
+formofavideo,conditionedonsparsemotiontrajectoriesordrags. Fine-tunedfromalarge-scale
+pre-trained video generator on a carefully curated synthetic part-level motion dataset Objaverse-
+Animation-HQ,whichwehavecontributed,ourmodeldemonstratesexcellentzero-shotgeneralization
+toreal-worldcases. Thankstotheproposedadaptivelayernormalizationmodules,thecross-attention
+moduleswithdragtokensand,perhapsmoreimportantly,theall-to-firstspatialattentionmodules,we
+haveshownsuperiorresultscomparedtopreviousworksonmultiplebenchmarks. Ablationstudies
+verifytheimportanceofthevariouscomponentsthatcontributedtothisimprovement.
+Acknowledgments. ThisworkisinpartsupportedbyaToshibaResearchStudentship,EPSRC
+SYN3DEP/Z001811/1,andERC-CoGUNION101001212. WethankLukeMelas-Kyriazi,Jinghao
+Zhou, Minghao Chen and Junyu Xie for useful discussions, Dejia Xu for sharing his experience
+developing CamCo [74], and RigManic, Inc. for providing the OpenAI credits essential for our
+research.
+References
+[1] MatthewLoper,NaureenMahmood,JavierRomero,GerardPons-Moll,andMichaelJ.Black.
+SMPL:askinnedmulti-personlinearmodel. InACMTOG,2015.
+[2] Silvia Zuffi, Angjoo Kanazawa, David W. Jacobs, and Michael J. Black. 3D menagerie:
+Modelingthe3Dshapeandposeofanimals. InCVPR,2017.
+[3] JiapengTang, MarkhasinLev, WangBi, ThiesJustus, andMatthiasNießner. Neuralshape
+deformationpriors. InNeurIPS,2022.
+[4] RuiningLi,ChuanxiaZheng,ChristianRupprecht,andAndreaVedaldi. Dragapart: Learninga
+part-levelmotionpriorforarticulatedobjects. InECCV,2024.
+[5] SherryYang,JacobWalker,JackParker-Holder,YilunDu,JakeBruce,AndreBarreto,Pieter
+Abbeel,andDaleSchuurmans. Videoasthenewlanguageforreal-worlddecisionmaking. In
+ICML,2024.
+[6] AndreasBlattmann,TimoMilbich,MichaelDorkenwald,andBjörnOmmer. iPOKE:Pokinga
+stillimageforcontrolledstochasticvideosynthesis. InICCV,2021.
+[7] Tsai-Shien Chen, Chieh Hubert Lin, Hung-Yu Tseng, Tsung-Yi Lin, and Ming-Hsuan
+Yang. Motion-conditioneddiffusionmodelforcontrollablevideosynthesis. arXivpreprint
+arXiv:2304.14404,2023.
+[8] XingangPan,AyushTewari,ThomasLeimkühler,LingjieLiu,AbhimitraMeka,andChristian
+Theobalt.Dragyourgan:Interactivepoint-basedmanipulationonthegenerativeimagemanifold.
+InACMSIGGRAPH,2023.
+[9] ShengmingYin,ChenfeiWu,JianLiang,JieShi,HouqiangLi,GongMing,andNanDuan.
+Dragnuwa: Fine-grainedcontrolinvideogenerationbyintegratingtext,image,andtrajectory.
+arXivpreprintarXiv:2308.08089,2023.
+[10] Zhengqi Li, Richard Tucker, Noah Snavely, and Aleksander Holynski. Generative image
+dynamics. InCVPR,2024.
+11[11] ZhouxiaWang,ZiyangYuan,XintaoWang,TianshuiChen,MenghanXia,PingLuo,andYing
+Shan. Motionctrl: Aunifiedandflexiblemotioncontrollerforvideogeneration. arXivpreprint
+arXiv:2312.03641,2023.
+[12] YujunShi,ChuhuiXue,JiachunPan,WenqingZhang,VincentYFTan,andSongBai. Dragdif-
+fusion: Harnessing diffusion models for interactive point-based image editing. In CVPR,
+2024.
+[13] Chong Mou, Xintao Wang, Jiechong Song, Ying Shan, and Jian Zhang. Dragondiffusion:
+Enablingdrag-stylemanipulationondiffusionmodels. InICLR,2024.
+[14] Daniel Geng and Andrew Owens. Motion guidance: Diffusion-based image editing with
+differentiablemotionestimators. InICLR,2024.
+[15] PengyangLing,LinChen,PanZhang,HuaianChen,andYiJin. Freedrag: Pointtrackingisnot
+youneedforinteractivepoint-basedimageediting. InCVPR,2024.
+[16] WeijiaWu,ZhuangLi,YuchaoGu,RuiZhao,YefeiHe,DavidJunhaoZhang,MikeZheng
+Shou,YanLi,TingtingGao,andDiZhang. Draganything: Motioncontrolforanythingusing
+entityrepresentation. InECCV,2024.
+[17] Chong Mou, Mingdeng Cao, Xintao Wang, Zhaoyang Zhang, Ying Shan, and Jian Zhang.
+Revideo: Remakeavideowithmotionandcontentcontrol. arXivpreprintarXiv:2405.13865,
+2024.
+[18] YaoweiLi,XintaoWang,ZhaoyangZhang,ZhouxiaWang,ZiyangYuan,LiangbinXie,Yuexian
+Zou,andYingShan. Imageconductor: Precisioncontrolforinteractivevideosynthesis. arXiv
+preprintarXiv:2406.15339,2024.
+[19] LvminZhang,AnyiRao,andManeeshAgrawala. Addingconditionalcontroltotext-to-image
+diffusionmodels. InICCV,2023.
+[20] AndreasBlattmann,TimDockhorn,SumithKulal,DanielMendelevitch,MaciejKilian,Do-
+minikLorenz,YamLevi,ZionEnglish,VikramVoleti,AdamLetts,etal. Stablevideodiffusion:
+Scalinglatentvideodiffusionmodelstolargedatasets. arXivpreprintarXiv:2311.15127,2023.
+[21] EthanPerez,FlorianStrub,HarmDeVries,VincentDumoulin,andAaronCourville. Film:
+Visualreasoningwithageneralconditioninglayer. InAAAI,2018.
+[22] Matt Deitke, Dustin Schwenk, Jordi Salvador, Luca Weihs, Oscar Michel, Eli VanderBilt,
+LudwigSchmidt,KianaEhsani,AniruddhaKembhavi,andAliFarhadi. Objaverse: Auniverse
+ofannotated3dobjects. InCVPR,2023.
+[23] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In
+NeurIPS,2020.
+[24] Yang Song and Stefano Ermon. Generative modeling by estimating gradients of the data
+distribution. InNeurIPS,2019.
+[25] YangSong,JaschaSohl-Dickstein,DiederikPKingma,AbhishekKumar,StefanoErmon,and
+BenPoole. Score-basedgenerativemodelingthroughstochasticdifferentialequations. InICLR,
+2021.
+[26] AdityaRamesh,MikhailPavlov,GabrielGoh,ScottGray,ChelseaVoss,AlecRadford,Mark
+Chen,andIlyaSutskever. Zero-shottext-to-imagegeneration. InICML,2021.
+[27] Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer.
+High-resolutionimagesynthesiswithlatentdiffusionmodels. InCVPR,2022.
+[28] ChitwanSaharia,WilliamChan,SaurabhSaxena,LalaLi,JayWhang,EmilyLDenton,Kamyar
+Ghasemipour,RaphaelGontijoLopes,BurcuKaragolAyan,TimSalimans,etal. Photorealistic
+text-to-imagediffusionmodelswithdeeplanguageunderstanding. InNeurIPS,2022.
+12[29] Jonathan Ho, William Chan, Chitwan Saharia, Jay Whang, Ruiqi Gao, Alexey Gritsenko,
+DiederikPKingma,BenPoole,MohammadNorouzi,DavidJFleet,etal. Imagenvideo: High
+definitionvideogenerationwithdiffusionmodels. arXivpreprintarXiv:2210.02303,2022.
+[30] AndreasBlattmann, RobinRombach, HuanLing, TimDockhorn, SeungWookKim, Sanja
+Fidler, and Karsten Kreis. Align your latents: High-resolution video synthesis with latent
+diffusionmodels. InCVPR,2023.
+[31] Rohit Girdhar, Mannat Singh, Andrew Brown, Quentin Duval, Samaneh Azadi, Sai Saketh
+Rambhatla, Akbar Shah, Xi Yin, Devi Parikh, and Ishan Misra. Emu video: Factorizing
+text-to-video generation by explicit image conditioning. arXiv preprint arXiv:2311.10709,
+2023.
+[32] GuyTevet,SigalRaab,BrianGordon,YoniShafir,DanielCohen-or,andAmitHaimBermano.
+Humanmotiondiffusionmodel. InICLR,2022.
+[33] JiahuiLei,CongyueDeng,BokuiShen,LeonidasGuibas,andKostasDaniilidis. Nap: Neural
+3darticulationprior. InNeurIPS,2023.
+[34] BenPoole,AjayJain,JonathanT.Barron,andBenMildenhall. DreamFusion: Text-to-3dusing
+2ddiffusion. InICLR,2023.
+[35] Chen-HsuanLin,JunGao,LumingTang,TowakiTakikawa,XiaohuiZeng,XunHuang,Karsten
+Kreis, Sanja Fidler, Ming-Yu Liu, and Tsung-Yi Lin. Magic3d: High-resolution text-to-3d
+contentcreation. InCVPR,2023.
+[36] LukeMelas-Kyriazi,IroLaina,ChristianRupprecht,andAndreaVedaldi. Realfusion: 360deg
+reconstructionofanyobjectfromasingleimage. InProceedingsoftheIEEE/CVFconference
+oncomputervisionandpatternrecognition(CVPR),pages8446–8455,2023.
+[37] TomasJakab,RuiningLi,ShangzheWu,ChristianRupprecht,andAndreaVedaldi. Farm3D:
+Learningarticulated3danimalsbydistilling2ddiffusion. In3DV,2024.
+[38] Ruoshi Liu, Rundi Wu, Basile Van Hoorick, Pavel Tokmakov, Sergey Zakharov, and Carl
+Vondrick. Zero-1-to-3: Zero-shotoneimageto3dobject. InICCV,2023.
+[39] JiahaoLi,HaoTan,KaiZhang,ZexiangXu,FujunLuan,YinghaoXu,YicongHong,Kalyan
+Sunkavalli, Greg Shakhnarovich, and Sai Bi. Instant3D: Fast text-to-3D with sparse-view
+generationandlargereconstructionmodel. InICLR,2024.
+[40] LukeMelas-Kyriazi,IroLaina,ChristianRupprecht,NataliaNeverova,AndreaVedaldi,Oran
+Gafni, and Filippos Kokkinos. Im-3d: Iterative multiview diffusion and reconstruction for
+high-quality3dgeneration. InICLR,2024.
+[41] Chuanxia Zheng and Andrea Vedaldi. Free3d: Consistent novel view synthesis without 3d
+representation. InCVPR,2024.
+[42] VikramVoleti, Chun-HanYao, MarkBoss, AdamLetts, DavidPankratz, DmitryTochilkin,
+ChristianLaforte,RobinRombach,andVarunJampani. Sv3d: Novelmulti-viewsynthesisand
+3dgenerationfromasingleimageusinglatentvideodiffusion.arXivpreprintarXiv:2403.12008,
+2024.
+[43] RuiqiGao,AleksanderHolynski,PhilippHenzler,ArthurBrussee,RicardoMartin-Brualla,
+Pratul Srinivasan, Jonathan T Barron, and Ben Poole. Cat3d: Create anything in 3d with
+multi-viewdiffusionmodels. arXivpreprintarXiv:2405.10314,2024.
+[44] YaoTeng,EnzeXie,YueWu,HaoyuHan,ZhenguoLi,andXihuiLiu. Drag-a-video:Non-rigid
+videoeditingwithpoint-basedinteraction. arXivpreprintarXiv:2312.02936,2023.
+[45] AramDavtyanandPaoloFavaro. Learntheforcewecan: Enablingsparsemotioncontrolin
+multi-objectvideogeneration. InAAAI,2024.
+[46] Hanwen Liang, Yuyang Yin, Dejia Xu, Hanxue Liang, Zhangyang Wang, Konstantinos N
+Plataniotis, Yao Zhao, and Yunchao Wei. Diffusion4d: Fast spatial-temporal consistent 4d
+generationviavideodiffusionmodels. arXivpreprintarXiv:2405.16645,2024.
+13[47] HaiyuZhang,XinyuanChen,YaohuiWang,XihuiLiu,YunhongWang,andYuQiao.4diffusion:
+Multi-viewvideodiffusionmodelfor4dgeneration. arXivpreprintarXiv:2405.20674,2024.
+[48] YanqinJiang,ChaohuiYu,ChenjieCao,FanWang,WeimingHu,andJinGao. Animate3d:
+Animatingany3dmodelwithmulti-viewvideodiffusion. arXivpreprintarXiv:2407.11398,
+2024.
+[49] YimingXie, Chun-HanYao, VikramVoleti, HuaizuJiang, andVarunJampani. SV4D:Dy-
+namic 3d content generation with multi-frame and multi-view consistency. arXiv preprint
+arXiv:2407.17470,2024.
+[50] AlecRadford,JongWookKim,ChrisHallacy,AdityaRamesh,GabrielGoh,SandhiniAgarwal,
+GirishSastry,AmandaAskell,PamelaMishkin,JackClark,etal. Learningtransferablevisual
+modelsfromnaturallanguagesupervision. InICML,2021.
+[51] Vincent Dumoulin, Jonathon Shlens, and Manjunath Kudlur. A learned representation for
+artisticstyle. InICLR,2016.
+[52] TeroKarras,SamuliLaine,andTimoAila. Astyle-basedgeneratorarchitectureforgenerative
+adversarialnetworks. InCVPR,2019.
+[53] Prafulla Dhariwal and Alexander Quinn Nichol. Diffusion models beat GANs on image
+synthesis. InNeurIPS,2021.
+[54] ChuanxiaZheng,Tung-LongVuong,JianfeiCai,andDinhPhung.Movq:Modulatingquantized
+vectorsforhigh-fidelityimagegeneration. InNeurIPS,2022.
+[55] WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InICCV,2023.
+[56] NanyeMa,MarkGoldstein,MichaelSAlbergo,NicholasMBoffi,EricVanden-Eijnden,and
+SainingXie.Sit:Exploringflowanddiffusion-basedgenerativemodelswithscalableinterpolant
+transformers. InECCV,2024.
+[57] IdoSobol,ChenfengXu,andOrLitany.Zero-to-hero:Enhancingzero-shotnovelviewsynthesis
+viaattentionmapfiltering. arXivpreprintarXiv:2405.18677,2024.
+[58] DmitryBaranchuk,AndreyVoynov,IvanRubachev,ValentinKhrulkov,andArtemBabenko.
+Label-efficientsemanticsegmentationwithdiffusionmodels. InICLR,2021.
+[59] QiZuo,XiaodongGu,LingtengQiu,YuanDong,ZhengyiZhao,WeihaoYuan,RuiPeng,Siyu
+Zhu,ZilongDong,LiefengBo,etal. Videomv: Consistentmulti-viewgenerationbasedon
+largevideogenerativemodel. arXivpreprintarXiv:2403.12010,2024.
+[60] BingLi,ChengZheng,WenxuanZhu,JinjieMai,BiaoZhang,PetermWonka,andBernard
+Ghanem. Vivid-zoo: Multi-view video generation with diffusion model. arXiv preprint
+arXiv:2406.08659,2024.
+[61] DanielWatson,WilliamChan,RicardoMartinBrualla,JonathanHo,AndreaTagliasacchi,and
+MohammadNorouzi. Novelviewsynthesiswithdiffusionmodels. InICLR,2023.
+[62] Mingdeng Cao, Xintao Wang, Zhongang Qi, Ying Shan, Xiaohu Qie, and Yinqiang Zheng.
+Masactrl: Tuning-freemutualself-attentioncontrolforconsistentimagesynthesisandediting.
+InICCV,2023.
+[63] Haohan Weng, Tianyu Yang, Jianan Wang, Yu Li, Tong Zhang, CL Chen, and Lei Zhang.
+Consistent123: Improve consistency for one image to 3d object synthesis. arXiv preprint
+arXiv:2310.08092,2023.
+[64] Haoran Geng, Helin Xu, Chengyang Zhao, Chao Xu, Li Yi, Siyuan Huang, and He Wang.
+Gapartnet: Cross-categorydomain-generalizableobjectperceptionandmanipulationviagener-
+alizableandactionableparts. InCVPR,2023.
+[65] OpenAI. Gpt-4technicalreport. arXivpreprintarXiv:2303.08774,2023.
+14[66] CatalinIonescu,DragosPapava,VladOlaru,andCristianSminchisescu. Human3.6m: Large
+scaledatasetsandpredictivemethodsfor3dhumansensinginnaturalenvironments. PAMI,
+2014.
+[67] JasmineCollins,ShubhamGoel,KenanDeng,AchleshwarLuthra,LeonXu,ErhanGundogdu,
+XiZhang,TomasFYagoVicente,ThomasDideriksen,HimanshuArora,MatthieuGuillaumin,
+andJitendraMalik. Abo: Datasetandbenchmarksforreal-world3dobjectunderstanding. In
+CVPR,2022.
+[68] ShangzheWu,RuiningLi,TomasJakab,ChristianRupprecht,andAndreaVedaldi. Magicpony:
+Learningarticulated3danimalsinthewild. InCVPR,2023.
+[69] ZizhangLi,DorLitvak,RuiningLi,YunzhiZhang,TomasJakab,ChristianRupprecht,Shangzhe
+Wu,AndreaVedaldi,andJiajunWu. Learningthe3dfaunaoftheweb. InCVPR,2024.
+[70] Nikita Karaev, Ignacio Rocco, Benjamin Graham, Natalia Neverova, Andrea Vedaldi, and
+ChristianRupprecht. Cotracker: Itisbettertotracktogether. InECCV,2024.
+[71] SongweiGe,AniruddhaMahapatra,GauravParmar,Jun-YanZhu,andJia-BinHuang. Onthe
+contentbiasinfréchetvideodistance. InCVPR,2024.
+[72] DanielWatson,SaurabhSaxena,LalaLi,AndreaTagliasacchi,andDavidJFleet. Controlling
+spaceandtimewithdiffusionmodels. arXivpreprintarXiv:2407.07860,2024.
+[73] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint
+arXiv:2207.12598,2022.
+[74] Dejia Xu, Weili Nie, Chao Liu, Sifei Liu, Jan Kautz, Zhangyang Wang, and Arash Vah-
+dat. Camco: Camera-controllable 3d-consistent image-to-video generation. arXiv preprint
+arXiv:2406.02509,2024.
+[75] LingtengQiu,GuanyingChen,XiaodongGu,QiZuo,MutianXu,YushuangWu,WeihaoYuan,
+ZilongDong,LiefengBo,andXiaoguangHan. Richdreamer: Ageneralizablenormal-depth
+diffusionmodelfordetailrichnessintext-to-3d. InCVPR,2024.
+15A AdditionalDetailsoftheDragEncoding
+Here, we give a formal definition of enc(·,s) introduced in Section 3.2. Recall that enc(·,s) en-
+codes each drag d := (u ,v1:N) into an embedding of shape N ×s×s×6. For each frame
+k k k
+n, the first, middle, and last two channels (of the c = 6 in total) encode the spatial location of
+u ,vn andvN respectively. Formally,enc(d ,s)[n,:,:,:2]isatensorofallnegativeonesexcept
+k k k k
+for enc(d ,s)[n,(cid:4)s·h(cid:5) ,(cid:4)s·w(cid:5) ,:2] = (cid:0)s·h −(cid:4)s·h(cid:5) ,s·w −(cid:4)s·w(cid:5)(cid:1) where u = (h,w) ∈ Ω =
+k H W H H W W k
+{1,··· ,H}×{1,··· ,W}. Theother4channelsaredefinedsimilarlywithu replacedbyvnand
+k k
+vN.
+k
+B AdditionalDetailsofDataCuration
+Weusethecategorizationprovidedby[75]andexcludethe3Dmodelsclassifiedas‘Poor-Quality’
+asapre-filteringsteppriortoourproposedfilteringpipelines(Section4).
+WhenusingGPT-4VtofilterObjaverse-AnimationintoObjaverse-Animation-HQ,wedesignthe
+followingprompttocoverawiderangeofcasestobeexcluded:
+System: Youarea3Dartist,andnowyouarebeingshownsomeanimationvideosdepicting
+ananimated3Dasset. Youareaskedtofilteroutsomeanimations.
+Youshouldfilterouttheanimationsthat:
+1)havetrivialornomotion,i.e.,theobjectissimplyscaling,rotating,ormovingasawhole
+withoutpart-leveldynamics;
+or2)depictasceneandonlyasmallcomponentinthesceneismoving;
+or3)havemotionthatisimaginary,i.e.,themotionisnottheusualwayofhowtheobject
+movesandit’shardforhumanstoanticipate;
+or4)haveverylargeglobalmotionsothattheobjectexitstheframepartiallyorfullyinone
+oftheframes;
+or5)havechangesinobjectcolorthatarenotduetolightingchanges;
+or6)havemotionthatcausesdifferentpartsofthesameobjecttodisconnect,overlapinan
+unnaturalway,ordisappear;
+or7)havemotionthatisverychaotic,forexampleobjectsexplodingorburstingapart.
+User: Forthefollowinganimation(asframesofavideo),frame1,frame2,frame3,frame4,
+tellme,inasingleword‘Yes’or‘No’,whetherthevideoshouldbefilteredoutornot.
+ThecostofGPT-4Vdatafilteringisestimatedtobe$500.
+C AdditionalExperimentDetails
+Data. Ourfinalmodelisfine-tunedonthecombineddatasetofDrag-a-Move[4]andObjaverse-
+Animation-HQ (Section 4). During training, we balance over various types of part-level dy-
+namics to control the data distribution. We achieve this by leveraging the categorization pro-
+vided by [75] and sampling individual data points with the following hand-crafted distribu-
+tion: p(Drag-a-Move) = 0.3, p(Objaverse-Animation-HQ, category ‘Human-Shape’) = 0.25,
+p(Objaverse-Animation-HQ,category‘Animals’) = 0.25,p(Objaverse-Animation-HQ,category
+‘Daily-Used’)=0.05,p(Objaverse-Animation-HQ,othercategories)=0.15.
+Architecture. Wezero-initializethefinalconvolutionallayerofeachadaptivenormalizationmodule
+beforefine-tuning. Withourintroducedmodules,theparametercountispumpedto1.68Bfromthe
+original1.5BSVD.
+Training. Wefine-tunethebaseSVDonvideosof256×256resolutionandN =14frameswith
+batchsize64for12,500iterations. WeadoptSVD’scontinuous-timenoisescheduler,shiftingthe
+noisedistributiontowardsmorenoisewithlogσ ∼N(0.7,1.62),whereσisthecontinuousnoise
+levelfollowingthepresentationin[20]. Thetrainingtakesroughly10daysonasingleNvidiaA6000
+GPUwhereweaccumulategradientfor64steps. Weenableclassifier-freeguidance(CFG)[73]by
+16randomlydroppingtheconditionaldragsDwithaprobablityof0.1duringtraining. Additionally,we
+trackanexponentialmovingaverageoftheweightsatadecayrateof0.9999.
+Inference. Unlessstatedotherwise,thesamplesaregeneratedusingS =50diffusionsteps. We
+adoptthelinearlyincreasingCFG[20]withmaximumguidanceweight5.0. Generatingasingle
+videoroughlytakes20secondsonanNvidiaA6000GPU.
+Baselines. ForDragNUWA[9]andDragAnything[16],weusetheirpubliclyavailablecheckpoints.
+Theyoperateonadifferentaspectratio(i.e.,576×320). Followingpreviouswork[4],wefirstpad
+the square input image y along the horizontal axis to the correct aspect ratio 1.8 and resize it to
+576×320,andthenremovethepaddingofthegeneratedframesandresizethembackto256×256.
+WetrainDragAPart[4]for100kiterationsusingitsofficialimplementationonthesamecombined
+datasetofDrag-a-MoveandObjaverse-Animation-HQwhichweusedfortrainingPuppet-Master.
+SinceDragAPartisanimage-to-imagemodel,weindependentlygenerateN framesconditionedon
+graduallyextendingdragstoobtainthevideo. Allmetricsarecomputedon256×256videos.
+17
