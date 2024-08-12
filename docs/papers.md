@@ -2,315 +2,345 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04632v1 |
-|title| Arctic-TILT. Business Document Understanding at Sub-Billion Scale |
-|authors| Łukasz BorchmannMichał PietruszkaWojciech JaśkowskiDawid JurkiewiczPiotr HalamaPaweł JóziakŁukasz GarncarekPaweł LiskowskiKarolina SzyndlerAndrzej GretkowskiJulita OłtusekGabriela NowakowskaArtur ZawłockiŁukasz DuhrPaweł DydaMichał Turski
-|links| http://arxiv.org/abs/2408.04632v1 |
-|updated| 2024-08-08 17:59:46 UTC |
-|summary| The vast portion of workloads employing LLMs involves answering questionsgrounded on PDF or scan content. We introduce the Arctic-TILT achievingaccuracy on par with models 1000times its size on these use cases. It can befine-tuned and deployed on a single 24GB GPU lowering operational costs whileprocessing Visually Rich Documents with up to 400k tokens. The modelestablishes state-of-the-art results on seven diverse Document Understandingbenchmarks as well as provides reliable confidence scores and quick inferencewhich are essential for processing files in large-scale or time-sensitiveenterprise environments. |
+|idx| 2408.05212v1 |
+|title| Preserving Privacy in Large Language Models: A Survey on Current Threats and Solutions |
+|authors| Michele MirandaElena Sofia RuzzettiAndrea SantilliFabio Massimo ZanzottoSébastien BratièresEmanuele Rodolà
+|links| http://arxiv.org/abs/2408.05212v1 |
+|updated| 2024-08-10 05:41:19 UTC |
+|summary| Large Language Models LLMs represent a significant advancement inartificial intelligence finding applications across various domains. Howevertheir reliance on massive internet-sourced datasets for training brings notableprivacy issues which are exacerbated in critical domains e.g. healthcare.Moreover certain application-specific scenarios may require fine-tuning thesemodels on private data. This survey critically examines the privacy threatsassociated with LLMs emphasizing the potential for these models to memorizeand inadvertently reveal sensitive information. We explore current threats byreviewing privacy attacks on LLMs and propose comprehensive solutions forintegrating privacy mechanisms throughout the entire learning pipeline. Thesesolutions range from anonymizing training datasets to implementing differentialprivacy during training or inference and machine unlearning after training. Ourcomprehensive review of existing literature highlights ongoing challengesavailable tools and future directions for preserving privacy in LLMs. Thiswork aims to guide the development of more secure and trustworthy AI systems byproviding a thorough understanding of privacy preservation methods and theireffectiveness in mitigating risks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04628v1 |
-|title| LogogramNLP: Comparing Visual and Textual Representations of Ancient Logographic Writing Systems for NLP |
-|authors| Danlu ChenFreda ShiAditi AgarwalJacobo MyerstonTaylor Berg-Kirkpatrick
-|links| http://arxiv.org/abs/2408.04628v1 |
-|updated| 2024-08-08 17:58:06 UTC |
-|summary| Standard natural language processing NLP pipelines operate on symbolicrepresentations of language which typically consist of sequences of discretetokens. However creating an analogous representation for ancient logographicwriting systems is an extremely labor intensive process that requires expertknowledge. At present a large portion of logographic data persists in a purelyvisual form due to the absence of transcription -- this issue poses abottleneck for researchers seeking to apply NLP toolkits to study ancientlogographic languages: most of the relevant data are images of writing.  This paper investigates whether direct processing of visual representationsof language offers a potential solution. We introduce LogogramNLP the firstbenchmark enabling NLP analysis of ancient logographic languages featuringboth transcribed and visual datasets for four writing systems along withannotations for tasks like classification translation and parsing. Ourexperiments compare systems that employ recent visual and text encodingstrategies as backbones. The results demonstrate that visual representationsoutperform textual representations for some investigated tasks suggesting thatvisual processing pipelines may unlock a large amount of cultural heritage dataof logographic languages for NLP-based analyses. |
+|idx| 2408.05211v1 |
+|title| VITA: Towards Open-Source Interactive Omni Multimodal LLM |
+|authors| Chaoyou FuHaojia LinZuwei LongYunhang ShenMeng ZhaoYifan ZhangXiong WangDi YinLong MaXiawu ZhengRan HeRongrong JiYunsheng WuCaifeng ShanXing Sun
+|links| http://arxiv.org/abs/2408.05211v1 |
+|updated| 2024-08-09 17:59:49 UTC |
+|summary| The remarkable multimodal capabilities and interactive experience of GPT-4ounderscore their necessity in practical applications yet open-source modelsrarely excel in both areas. In this paper we introduce VITA the first-everopen-source Multimodal Large Language Model MLLM adept at simultaneousprocessing and analysis of Video Image Text and Audio modalities andmeanwhile has an advanced multimodal interactive experience. Starting fromMixtral 8x7B as a language foundation we expand its Chinese vocabularyfollowed by bilingual instruction tuning. We further endow the language modelwith visual and audio capabilities through two-stage multi-task learning ofmultimodal alignment and instruction tuning. VITA demonstrates robustfoundational capabilities of multilingual vision and audio understanding asevidenced by its strong performance across a range of both unimodal andmultimodal benchmarks. Beyond foundational capabilities we have madeconsiderable progress in enhancing the natural multimodal human-computerinteraction experience. To the best of our knowledge we are the first toexploit non-awakening interaction and audio interrupt in MLLM. VITA is thefirst step for the open-source community to explore the seamless integration ofmultimodal understanding and interaction. While there is still lots of work tobe done on VITA to get close to close-source counterparts we hope that itsrole as a pioneer can serve as a cornerstone for subsequent research. ProjectPage: https://vita-home.github.io. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04619v1 |
-|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
-|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
-|links| http://arxiv.org/abs/2408.04619v1 |
-|updated| 2024-08-08 17:49:07 UTC |
-|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
+|idx| 2408.05204v1 |
+|title| Evaluating the capability of large language models to personalize science texts for diverse middle-school-age learners |
+|authors| Michael Vaccaro JrMikayla FridayArash Zaghi
+|links| http://arxiv.org/abs/2408.05204v1 |
+|updated| 2024-08-09 17:53:35 UTC |
+|summary| Large language models LLMs including OpenAIs GPT-series have madesignificant advancements in recent years. Known for their expertise acrossdiverse subject areas and quick adaptability to user-provided prompts LLMshold unique potential as Personalized Learning PL tools. Despite thispotential their application in K-12 education remains largely unexplored. Thispaper presents one of the first randomized controlled trials n  23 toevaluate the effectiveness of GPT-4 in personalizing educational science textsfor middle school students. In this study GPT-4 was used to profile studentlearning preferences based on choices made during a training session. For theexperimental group GPT-4 was used to rewrite science texts to align with thestudents predicted profile while for students in the control group textswere rewritten to contradict their learning preferences. The results of aMann-Whitney U test showed that students significantly preferred at the .10level the rewritten texts when they were aligned with their profile p .059. These findings suggest that GPT-4 can effectively interpret and tailoreducational content to diverse learner preferences marking a significantadvancement in PL technology. The limitations of this study and ethicalconsiderations for using artificial intelligence in education are alsodiscussed. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04614v1 |
-|title| Better Alignment with Instruction Back-and-Forth Translation |
-|authors| Thao NguyenJeffrey LiSewoong OhLudwig SchmidtJason WestonLuke ZettlemoyerXian Li
-|links| http://arxiv.org/abs/2408.04614v1 |
-|updated| 2024-08-08 17:42:32 UTC |
-|summary| We propose a new method instruction back-and-forth translation to constructhigh-quality synthetic data grounded in world knowledge for aligning largelanguage models LLMs. Given documents from a web corpus we generate andcurate synthetic instructions using the backtranslation approach proposed by Liet al.2023a and rewrite the responses to improve their quality further basedon the initial documents. Fine-tuning with the resulting backtranslatedinstruction rewritten response pairs yields higher win rates on AlpacaEvalthan using other common instruction datasets such as Humpback ShareGPT OpenOrca Alpaca-GPT4 and Self-instruct. We also demonstrate that rewriting theresponses with an LLM outperforms direct distillation and the two generatedtext distributions exhibit significant distinction in embedding space. Furtheranalysis shows that our backtranslated instructions are of higher quality thanother sources of synthetic instructions while our responses are more diverseand complex than those obtained from distillation. Overall we find thatinstruction back-and-forth translation combines the best of both worlds --making use of the information diversity and quantity found on the web whileensuring the quality of the responses which is necessary for effectivealignment. |
+|idx| 2408.05200v1 |
+|title| TaSL: Task Skill Localization and Consolidation for Language Model Continual Learning |
+|authors| Yujie FengXu ChuYongxin XuZexin LuBo LiuPhilip S. YuXiao-Ming Wu
+|links| http://arxiv.org/abs/2408.05200v1 |
+|updated| 2024-08-09 17:44:45 UTC |
+|summary| Language model continual learning CL has recently garnered significantinterest due to its potential to adapt large language models LLMs to dynamicreal-world environments without re-training. A key challenge in this field iscatastrophic forgetting where models lose previously acquired knowledge whenlearning new tasks. Existing methods commonly employ multipleparameter-efficient fine-tuning PEFT blocks to acquire task-specificknowledge for each task but these approaches lack efficiency and overlook thepotential for knowledge transfer through task interaction. In this paper wepresent a novel CL framework for language models called Task Skill Localizationand Consolidation TaSL which enhances knowledge transfer without relying onmemory replay. TaSL first divides the model into skill units based onparameter dependencies enabling more granular control. It then employs a novelgroup-wise skill localization technique to identify the importance distributionof skill units for a new task. By comparing this importance distribution withthose from previous tasks we implement a fine-grained skill consolidationstrategy that retains task-specific knowledge thereby preventing forgettingand updates task-shared knowledge which facilitates bi-directional knowledgetransfer. As a result TaSL achieves a superior balance between retainingprevious knowledge and excelling in new tasks. TaSL also shows stronggeneralizability suitable for general models and customizable for PEFT methodslike LoRA. Additionally it demonstrates notable extensibility allowingintegration with memory replay to further enhance performance. Extensiveexperiments on two CL benchmarks with varying model sizes from 220M to 7Bdemonstrate the effectiveness of TaSL and its variants across differentsettings. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04596v1 |
-|title| Code-switching in text and speech reveals information-theoretic audience design |
-|authors| Debasmita BhattacharyaMarten van Schijndel
-|links| http://arxiv.org/abs/2408.04596v1 |
-|updated| 2024-08-08 17:14:12 UTC |
-|summary| In this work we use language modeling to investigate the factors thatinfluence code-switching. Code-switching occurs when a speaker alternatesbetween one language variety the primary language and another the secondarylanguage and is widely observed in multilingual contexts. Recent work hasshown that code-switching is often correlated with areas of high informationload in the primary language but it is unclear whether high primary languageload only makes the secondary language relatively easier to produce atcode-switching points speaker-driven code-switching or whethercode-switching is additionally used by speakers to signal the need for greaterattention on the part of listeners audience-driven code-switching. In thispaper we use bilingual Chinese-English online forum posts and transcripts ofspontaneous Chinese-English speech to replicate prior findings that highprimary language Chinese information load is correlated with switches to thesecondary language English. We then demonstrate that the information load ofthe English productions is even higher than that of meaning equivalent Chinesealternatives and these are therefore not easier to produce providing evidenceof audience-driven influences in code-switching at the level of thecommunication channel not just at the sociolinguistic level in both writingand speech. |
+|idx| 2408.05192v1 |
+|title| Separating Style from Substance: Enhancing Cross-Genre Authorship Attribution through Data Selection and Presentation |
+|authors| Steven FinckeElizabeth Boschee
+|links| http://arxiv.org/abs/2408.05192v1 |
+|updated| 2024-08-09 17:31:37 UTC |
+|summary| The task of deciding whether two documents are written by the same author ischallenging for both machines and humans. This task is even more challengingwhen the two documents are written about different topics e.g. baseball vs.politics or in different genres e.g. a blog post vs. an academic article.For machines the problem is complicated by the relative lack of real-worldtraining examples that cross the topic boundary and the vanishing scarcity ofcross-genre data. We propose targeted methods for training data selection and anovel learning curriculum that are designed to discourage a models reliance ontopic information for authorship attribution and correspondingly force it toincorporate information more robustly indicative of style no matter the topic.These refinements yield a 62.7 relative improvement in average cross-genreauthorship attribution as well as 16.6 in the per-genre condition. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04631v1 |
-|title| Puppet-Master: Scaling Interactive Video Generation as a Motion Prior for Part-Level Dynamics |
-|authors| Ruining LiChuanxia ZhengChristian RupprechtAndrea Vedaldi
-|links| http://arxiv.org/abs/2408.04631v1 |
-|updated| 2024-08-08 17:59:38 UTC |
-|summary| We present Puppet-Master an interactive video generative model that canserve as a motion prior for part-level dynamics. At test time given a singleimage and a sparse set of motion trajectories i.e. drags Puppet-Master cansynthesize a video depicting realistic part-level motion faithful to the givendrag interactions. This is achieved by fine-tuning a large-scale pre-trainedvideo diffusion model for which we propose a new conditioning architecture toinject the dragging control effectively. More importantly we introduce theall-to-first attention mechanism a drop-in replacement for the widely adoptedspatial attention modules which significantly improves generation quality byaddressing the appearance and background issues in existing models. Unlikeother motion-conditioned video generators that are trained on in-the-wildvideos and mostly move an entire object Puppet-Master is learned fromObjaverse-Animation-HQ a new dataset of curated part-level motion clips. Wepropose a strategy to automatically filter out sub-optimal animations andaugment the synthetic renderings with meaningful motion trajectories.Puppet-Master generalizes well to real images across various categories andoutperforms existing methods in a zero-shot manner on a real-world benchmark.See our project page for more results: vgg-puppetmaster.github.io. |
+|idx| 2408.05212v1 |
+|title| Preserving Privacy in Large Language Models: A Survey on Current Threats and Solutions |
+|authors| Michele MirandaElena Sofia RuzzettiAndrea SantilliFabio Massimo ZanzottoSébastien BratièresEmanuele Rodolà
+|links| http://arxiv.org/abs/2408.05212v1 |
+|updated| 2024-08-10 05:41:19 UTC |
+|summary| Large Language Models LLMs represent a significant advancement inartificial intelligence finding applications across various domains. Howevertheir reliance on massive internet-sourced datasets for training brings notableprivacy issues which are exacerbated in critical domains e.g. healthcare.Moreover certain application-specific scenarios may require fine-tuning thesemodels on private data. This survey critically examines the privacy threatsassociated with LLMs emphasizing the potential for these models to memorizeand inadvertently reveal sensitive information. We explore current threats byreviewing privacy attacks on LLMs and propose comprehensive solutions forintegrating privacy mechanisms throughout the entire learning pipeline. Thesesolutions range from anonymizing training datasets to implementing differentialprivacy during training or inference and machine unlearning after training. Ourcomprehensive review of existing literature highlights ongoing challengesavailable tools and future directions for preserving privacy in LLMs. Thiswork aims to guide the development of more secure and trustworthy AI systems byproviding a thorough understanding of privacy preservation methods and theireffectiveness in mitigating risks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04628v1 |
-|title| LogogramNLP: Comparing Visual and Textual Representations of Ancient Logographic Writing Systems for NLP |
-|authors| Danlu ChenFreda ShiAditi AgarwalJacobo MyerstonTaylor Berg-Kirkpatrick
-|links| http://arxiv.org/abs/2408.04628v1 |
-|updated| 2024-08-08 17:58:06 UTC |
-|summary| Standard natural language processing NLP pipelines operate on symbolicrepresentations of language which typically consist of sequences of discretetokens. However creating an analogous representation for ancient logographicwriting systems is an extremely labor intensive process that requires expertknowledge. At present a large portion of logographic data persists in a purelyvisual form due to the absence of transcription -- this issue poses abottleneck for researchers seeking to apply NLP toolkits to study ancientlogographic languages: most of the relevant data are images of writing.  This paper investigates whether direct processing of visual representationsof language offers a potential solution. We introduce LogogramNLP the firstbenchmark enabling NLP analysis of ancient logographic languages featuringboth transcribed and visual datasets for four writing systems along withannotations for tasks like classification translation and parsing. Ourexperiments compare systems that employ recent visual and text encodingstrategies as backbones. The results demonstrate that visual representationsoutperform textual representations for some investigated tasks suggesting thatvisual processing pipelines may unlock a large amount of cultural heritage dataof logographic languages for NLP-based analyses. |
+|idx| 2408.05211v1 |
+|title| VITA: Towards Open-Source Interactive Omni Multimodal LLM |
+|authors| Chaoyou FuHaojia LinZuwei LongYunhang ShenMeng ZhaoYifan ZhangXiong WangDi YinLong MaXiawu ZhengRan HeRongrong JiYunsheng WuCaifeng ShanXing Sun
+|links| http://arxiv.org/abs/2408.05211v1 |
+|updated| 2024-08-09 17:59:49 UTC |
+|summary| The remarkable multimodal capabilities and interactive experience of GPT-4ounderscore their necessity in practical applications yet open-source modelsrarely excel in both areas. In this paper we introduce VITA the first-everopen-source Multimodal Large Language Model MLLM adept at simultaneousprocessing and analysis of Video Image Text and Audio modalities andmeanwhile has an advanced multimodal interactive experience. Starting fromMixtral 8x7B as a language foundation we expand its Chinese vocabularyfollowed by bilingual instruction tuning. We further endow the language modelwith visual and audio capabilities through two-stage multi-task learning ofmultimodal alignment and instruction tuning. VITA demonstrates robustfoundational capabilities of multilingual vision and audio understanding asevidenced by its strong performance across a range of both unimodal andmultimodal benchmarks. Beyond foundational capabilities we have madeconsiderable progress in enhancing the natural multimodal human-computerinteraction experience. To the best of our knowledge we are the first toexploit non-awakening interaction and audio interrupt in MLLM. VITA is thefirst step for the open-source community to explore the seamless integration ofmultimodal understanding and interaction. While there is still lots of work tobe done on VITA to get close to close-source counterparts we hope that itsrole as a pioneer can serve as a cornerstone for subsequent research. ProjectPage: https://vita-home.github.io. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04619v1 |
-|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
-|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
-|links| http://arxiv.org/abs/2408.04619v1 |
-|updated| 2024-08-08 17:49:07 UTC |
-|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
+|idx| 2408.05200v1 |
+|title| TaSL: Task Skill Localization and Consolidation for Language Model Continual Learning |
+|authors| Yujie FengXu ChuYongxin XuZexin LuBo LiuPhilip S. YuXiao-Ming Wu
+|links| http://arxiv.org/abs/2408.05200v1 |
+|updated| 2024-08-09 17:44:45 UTC |
+|summary| Language model continual learning CL has recently garnered significantinterest due to its potential to adapt large language models LLMs to dynamicreal-world environments without re-training. A key challenge in this field iscatastrophic forgetting where models lose previously acquired knowledge whenlearning new tasks. Existing methods commonly employ multipleparameter-efficient fine-tuning PEFT blocks to acquire task-specificknowledge for each task but these approaches lack efficiency and overlook thepotential for knowledge transfer through task interaction. In this paper wepresent a novel CL framework for language models called Task Skill Localizationand Consolidation TaSL which enhances knowledge transfer without relying onmemory replay. TaSL first divides the model into skill units based onparameter dependencies enabling more granular control. It then employs a novelgroup-wise skill localization technique to identify the importance distributionof skill units for a new task. By comparing this importance distribution withthose from previous tasks we implement a fine-grained skill consolidationstrategy that retains task-specific knowledge thereby preventing forgettingand updates task-shared knowledge which facilitates bi-directional knowledgetransfer. As a result TaSL achieves a superior balance between retainingprevious knowledge and excelling in new tasks. TaSL also shows stronggeneralizability suitable for general models and customizable for PEFT methodslike LoRA. Additionally it demonstrates notable extensibility allowingintegration with memory replay to further enhance performance. Extensiveexperiments on two CL benchmarks with varying model sizes from 220M to 7Bdemonstrate the effectiveness of TaSL and its variants across differentsettings. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04614v1 |
-|title| Better Alignment with Instruction Back-and-Forth Translation |
-|authors| Thao NguyenJeffrey LiSewoong OhLudwig SchmidtJason WestonLuke ZettlemoyerXian Li
-|links| http://arxiv.org/abs/2408.04614v1 |
-|updated| 2024-08-08 17:42:32 UTC |
-|summary| We propose a new method instruction back-and-forth translation to constructhigh-quality synthetic data grounded in world knowledge for aligning largelanguage models LLMs. Given documents from a web corpus we generate andcurate synthetic instructions using the backtranslation approach proposed by Liet al.2023a and rewrite the responses to improve their quality further basedon the initial documents. Fine-tuning with the resulting backtranslatedinstruction rewritten response pairs yields higher win rates on AlpacaEvalthan using other common instruction datasets such as Humpback ShareGPT OpenOrca Alpaca-GPT4 and Self-instruct. We also demonstrate that rewriting theresponses with an LLM outperforms direct distillation and the two generatedtext distributions exhibit significant distinction in embedding space. Furtheranalysis shows that our backtranslated instructions are of higher quality thanother sources of synthetic instructions while our responses are more diverseand complex than those obtained from distillation. Overall we find thatinstruction back-and-forth translation combines the best of both worlds --making use of the information diversity and quantity found on the web whileensuring the quality of the responses which is necessary for effectivealignment. |
+|idx| 2408.05195v1 |
+|title| HistoKernel: Whole Slide Image Level Maximum Mean Discrepancy Kernels for Pan-Cancer Predictive Modelling |
+|authors| Piotr KellerMuhammad DawoodBrinder Singh ChohanFayyaz ul Amir Afsar Minhas
+|links| http://arxiv.org/abs/2408.05195v1 |
+|updated| 2024-08-09 17:40:08 UTC |
+|summary| Machine learning in computational pathology CPath often aggregatespatch-level predictions from multi-gigapixel Whole Slide Images WSIs togenerate WSI-level prediction scores for crucial tasks such as survivalprediction and drug effect prediction. However current methods do notexplicitly characterize distributional differences between patch sets withinWSIs. We introduce HistoKernel a novel Maximum Mean Discrepancy MMD kernelthat measures distributional similarity between WSIs for enhanced predictionperformance on downstream prediction tasks.  Our comprehensive analysis demonstrates HistoKernels effectiveness acrossvarious machine learning tasks including retrieval n  9362 drugsensitivity regression n  551 point mutation classification n  3419and survival analysis n  2291 outperforming existing deep learningmethods. Additionally HistoKernel seamlessly integrates multi-modal data andoffers a novel perturbation-based method for patch-level explainability. Thiswork pioneers the use of kernel-based methods for WSI-level predictivemodeling opening new avenues for research. Code is available athttps://github.com/pkeller00/HistoKernel. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04595v1 |
-|title| Inference with the Upper Confidence Bound Algorithm |
-|authors| Koulik KhamaruCun-Hui Zhang
-|links| http://arxiv.org/abs/2408.04595v1 |
-|updated| 2024-08-08 17:11:36 UTC |
-|summary| In this paper we discuss the asymptotic behavior of the Upper ConfidenceBound UCB algorithm in the context of multiarmed bandit problems and discussits implication in downstream inferential tasks. While inferential tasks becomechallenging when data is collected in a sequential manner we argue that thisproblem can be alleviated when the sequential algorithm at hand satisfiescertain stability property. This notion of stability is motivated from theseminal work of Lai and Wei 1982. Our first main result shows that such astability property is always satisfied for the UCB algorithm and as a resultthe sample means for each arm are asymptotically normal. Next we examine thestability properties of the UCB algorithm when the number of arms K isallowed to grow with the number of arm pulls T. We show that in such a casethe arms are stable when fraclog Klog T rightarrow 0 and the numberof near-optimal arms are large. |
+|idx| 2408.05151v1 |
+|title| Meta-Learning Guided Label Noise Distillation for Robust Signal Modulation Classification |
+|authors| Xiaoyang HaoZhixi FengTongqing PengShuyuan Yang
+|links| http://arxiv.org/abs/2408.05151v1 |
+|updated| 2024-08-09 16:14:40 UTC |
+|summary| Automatic modulation classification AMC is an effective way to deal withphysical layer threats of the internet of things IoT. However there is oftenlabel mislabeling in practice which significantly impacts the performance androbustness of deep neural networks DNNs. In this paper we propose ameta-learning guided label noise distillation method for robust AMC.Specifically a teacher-student heterogeneous network TSHN framework isproposed to distill and reuse label noise. Based on the idea that labels arerepresentations the teacher network with trusted meta-learning divides andconquers untrusted label samples and then guides the student network to learnbetter by reassessing and correcting labels. Furthermore we propose amulti-view signal MVS method to further improve the performance ofhard-to-classify categories with few-shot trusted label samples. Extensiveexperimental results show that our methods can significantly improve theperformance and robustness of signal AMC in various and complex label noisescenarios which is crucial for securing IoT applications. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04619v1 |
-|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
-|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
-|links| http://arxiv.org/abs/2408.04619v1 |
-|updated| 2024-08-08 17:49:07 UTC |
-|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
+|idx| 2408.05212v1 |
+|title| Preserving Privacy in Large Language Models: A Survey on Current Threats and Solutions |
+|authors| Michele MirandaElena Sofia RuzzettiAndrea SantilliFabio Massimo ZanzottoSébastien BratièresEmanuele Rodolà
+|links| http://arxiv.org/abs/2408.05212v1 |
+|updated| 2024-08-10 05:41:19 UTC |
+|summary| Large Language Models LLMs represent a significant advancement inartificial intelligence finding applications across various domains. Howevertheir reliance on massive internet-sourced datasets for training brings notableprivacy issues which are exacerbated in critical domains e.g. healthcare.Moreover certain application-specific scenarios may require fine-tuning thesemodels on private data. This survey critically examines the privacy threatsassociated with LLMs emphasizing the potential for these models to memorizeand inadvertently reveal sensitive information. We explore current threats byreviewing privacy attacks on LLMs and propose comprehensive solutions forintegrating privacy mechanisms throughout the entire learning pipeline. Thesesolutions range from anonymizing training datasets to implementing differentialprivacy during training or inference and machine unlearning after training. Ourcomprehensive review of existing literature highlights ongoing challengesavailable tools and future directions for preserving privacy in LLMs. Thiswork aims to guide the development of more secure and trustworthy AI systems byproviding a thorough understanding of privacy preservation methods and theireffectiveness in mitigating risks. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04614v1 |
-|title| Better Alignment with Instruction Back-and-Forth Translation |
-|authors| Thao NguyenJeffrey LiSewoong OhLudwig SchmidtJason WestonLuke ZettlemoyerXian Li
-|links| http://arxiv.org/abs/2408.04614v1 |
-|updated| 2024-08-08 17:42:32 UTC |
-|summary| We propose a new method instruction back-and-forth translation to constructhigh-quality synthetic data grounded in world knowledge for aligning largelanguage models LLMs. Given documents from a web corpus we generate andcurate synthetic instructions using the backtranslation approach proposed by Liet al.2023a and rewrite the responses to improve their quality further basedon the initial documents. Fine-tuning with the resulting backtranslatedinstruction rewritten response pairs yields higher win rates on AlpacaEvalthan using other common instruction datasets such as Humpback ShareGPT OpenOrca Alpaca-GPT4 and Self-instruct. We also demonstrate that rewriting theresponses with an LLM outperforms direct distillation and the two generatedtext distributions exhibit significant distinction in embedding space. Furtheranalysis shows that our backtranslated instructions are of higher quality thanother sources of synthetic instructions while our responses are more diverseand complex than those obtained from distillation. Overall we find thatinstruction back-and-forth translation combines the best of both worlds --making use of the information diversity and quantity found on the web whileensuring the quality of the responses which is necessary for effectivealignment. |
+|idx| 2408.05196v1 |
+|title| Cell Morphology-Guided Small Molecule Generation with GFlowNets |
+|authors| Stephen Zhewen LuZiqing LuEhsan HajiramezanaliTommaso BiancalaniYoshua BengioGabriele ScaliaMichał Koziarski
+|links| http://arxiv.org/abs/2408.05196v1 |
+|updated| 2024-08-09 17:40:35 UTC |
+|summary| High-content phenotypic screening including high-content imaging HCI hasgained popularity in the last few years for its ability to characterize noveltherapeutics without prior knowledge of the protein target. When combined withdeep learning techniques to predict and represent molecular-phenotypeinteractions these advancements hold the potential to significantly accelerateand enhance drug discovery applications. This work focuses on the novel task ofHCI-guided molecular design. Generative models for molecule design could beguided by HCI data for example with a supervised model that links molecules tophenotypes of interest as a reward function. However limited labeled datacombined with the high-dimensional readouts can make training these methodschallenging and impractical. We consider an alternative approach in which weleverage an unsupervised multimodal joint embedding to define a latentsimilarity as a reward for GFlowNets. The proposed model learns to generate newmolecules that could produce phenotypic effects similar to those of the givenimage target without relying on pre-annotated phenotypic labels. Wedemonstrate that the proposed method generates molecules with highmorphological and structural similarity to the target increasing thelikelihood of similar biological activity as confirmed by an independentoracle model. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04607v1 |
-|title| Risk and cross validation in ridge regression with correlated samples |
-|authors| Alexander AtanasovJacob A. Zavatone-VethCengiz Pehlevan
-|links| http://arxiv.org/abs/2408.04607v1 |
-|updated| 2024-08-08 17:27:29 UTC |
-|summary| Recent years have seen substantial advances in our understanding ofhigh-dimensional ridge regression but existing theories assume that trainingexamples are independent. By leveraging recent techniques from random matrixtheory and free probability we provide sharp asymptotics for the in- andout-of-sample risks of ridge regression when the data points have arbitrarycorrelations. We demonstrate that in this setting the generalized crossvalidation estimator GCV fails to correctly predict the out-of-sample risk.However in the case where the noise residuals have the same correlations asthe data points one can modify the GCV to yield an efficiently-computableunbiased estimator that concentrates in the high-dimensional limit which wedub CorrGCV. We further extend our asymptotic analysis to the case where thetest point has nontrivial correlations with the training set a setting oftenencountered in time series forecasting. Assuming knowledge of the correlationstructure of the time series this again yields an extension of the GCVestimator and sharply characterizes the degree to which such test points yieldan overly optimistic prediction of long-time risk. We validate the predictionsof our theory across a variety of high dimensional data. |
+|idx| 2408.05195v1 |
+|title| HistoKernel: Whole Slide Image Level Maximum Mean Discrepancy Kernels for Pan-Cancer Predictive Modelling |
+|authors| Piotr KellerMuhammad DawoodBrinder Singh ChohanFayyaz ul Amir Afsar Minhas
+|links| http://arxiv.org/abs/2408.05195v1 |
+|updated| 2024-08-09 17:40:08 UTC |
+|summary| Machine learning in computational pathology CPath often aggregatespatch-level predictions from multi-gigapixel Whole Slide Images WSIs togenerate WSI-level prediction scores for crucial tasks such as survivalprediction and drug effect prediction. However current methods do notexplicitly characterize distributional differences between patch sets withinWSIs. We introduce HistoKernel a novel Maximum Mean Discrepancy MMD kernelthat measures distributional similarity between WSIs for enhanced predictionperformance on downstream prediction tasks.  Our comprehensive analysis demonstrates HistoKernels effectiveness acrossvarious machine learning tasks including retrieval n  9362 drugsensitivity regression n  551 point mutation classification n  3419and survival analysis n  2291 outperforming existing deep learningmethods. Additionally HistoKernel seamlessly integrates multi-modal data andoffers a novel perturbation-based method for patch-level explainability. Thiswork pioneers the use of kernel-based methods for WSI-level predictivemodeling opening new avenues for research. Code is available athttps://github.com/pkeller00/HistoKernel. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04595v1 |
-|title| Inference with the Upper Confidence Bound Algorithm |
-|authors| Koulik KhamaruCun-Hui Zhang
-|links| http://arxiv.org/abs/2408.04595v1 |
-|updated| 2024-08-08 17:11:36 UTC |
-|summary| In this paper we discuss the asymptotic behavior of the Upper ConfidenceBound UCB algorithm in the context of multiarmed bandit problems and discussits implication in downstream inferential tasks. While inferential tasks becomechallenging when data is collected in a sequential manner we argue that thisproblem can be alleviated when the sequential algorithm at hand satisfiescertain stability property. This notion of stability is motivated from theseminal work of Lai and Wei 1982. Our first main result shows that such astability property is always satisfied for the UCB algorithm and as a resultthe sample means for each arm are asymptotically normal. Next we examine thestability properties of the UCB algorithm when the number of arms K isallowed to grow with the number of arm pulls T. We show that in such a casethe arms are stable when fraclog Klog T rightarrow 0 and the numberof near-optimal arms are large. |
+|idx| 2408.05178v1 |
+|title| ECG-FM: An Open Electrocardiogram Foundation Model |
+|authors| Kaden McKeenLaura OlivaSameer MasoodAugustin TomaBarry RubinBo Wang
+|links| http://arxiv.org/abs/2408.05178v1 |
+|updated| 2024-08-09 17:06:49 UTC |
+|summary| The electrocardiogram ECG is a ubiquitous diagnostic test. Conventionaltask-specific ECG analysis models require large numbers of expensive ECGannotations or associated labels to train. Transfer learning techniques havebeen shown to improve generalization and reduce reliance on labeled data. Wepresent ECG-FM an open foundation model for ECG analysis and conduct acomprehensive study performed on a dataset of 1.66 million ECGs sourced fromboth publicly available and private institutional sources. ECG-FM adopts atransformer-based architecture and is pretrained on 2.5 million samples usingECG-specific augmentations and contrastive learning as well as a continuoussignal masking objective. Our transparent evaluation includes a diverse rangeof downstream tasks where we predict ECG interpretation labels reduced leftventricular ejection fraction and abnormal cardiac troponin. AffirmingECG-FMs effectiveness as a foundation model we demonstrate how its command ofcontextual information results in strong performance rich pretrainedembeddings and reliable interpretability. Due to a lack of open-weightpractices we highlight how ECG analysis is lagging behind other medicalmachine learning subfields in terms of foundation model adoption. Our code isavailable at https://github.com/bowang-lab/ECG-FM/. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04590v1 |
-|title| Learn To Learn More Precisely |
-|authors| Runxi ChengYongxian WeiXianglong HeWanyun ZhuSongsong HuangFei Richard YuFei MaChun Yuan
-|links| http://arxiv.org/abs/2408.04590v1 |
-|updated| 2024-08-08 17:01:26 UTC |
-|summary| Meta-learning has been extensively applied in the domains of few-shotlearning and fast adaptation achieving remarkable performance. WhileMeta-learning methods like Model-Agnostic Meta-Learning MAML and its variantsprovide a good set of initial parameters for the model the model still tendsto learn shortcut features which leads to poor generalization. In this paperwe propose the formal conception of learn to learn more precisely which aimsto make the model learn precise target knowledge from data and reduce theeffect of noisy knowledge such as background and noise. To achieve thistarget we proposed a simple and effective meta-learning framework named MetaSelf-DistillationMSD to maximize the consistency of learned knowledgeenhancing the models ability to learn precise target knowledge. In the innerloop MSD uses different augmented views of the same support data to update themodel respectively. Then in the outer loop MSD utilizes the same query data tooptimize the consistency of learned knowledge enhancing the models ability tolearn more precisely. Our experiment demonstrates that MSD exhibits remarkableperformance in few-shot classification tasks in both standard and augmentedscenarios effectively boosting the accuracy and consistency of knowledgelearned by the model. |
+|idx| 2408.05177v1 |
+|title| Beyond Closure Models: Learning Chaotic-Systems via Physics-Informed Neural Operators |
+|authors| Chuwei WangJulius BernerZongyi LiDi ZhouJiayun WangJane BaeAnima Anandkumar
+|links| http://arxiv.org/abs/2408.05177v1 |
+|updated| 2024-08-09 17:05:45 UTC |
+|summary| Accurately predicting the long-term behavior of chaotic systems is crucialfor various applications such as climate modeling. However achieving suchpredictions typically requires iterative computations over a densespatiotemporal grid to account for the unstable nature of chaotic systemswhich is expensive and impractical in many real-world situations. Analternative approach to such a full-resolved simulation is using a coarse gridand then correcting its errors through a textitclosure model whichapproximates the overall information from fine scales not captured in thecoarse-grid simulation. Recently ML approaches have been used for closuremodeling but they typically require a large number of training samples fromexpensive fully-resolved simulations FRS. In this work we prove an even morefundamental limitation i.e. the standard approach to learning closure modelssuffers from a large approximation error for generic problems no matter howlarge the model is and it stems from the non-uniqueness of the mapping. Wepropose an alternative end-to-end learning approach using a physics-informedneural operator PINO that overcomes this limitation by not using a closuremodel or a coarse-grid solver. We first train the PINO model on data from acoarse-grid solver and then fine-tune it with a small amount of FRS andphysics-based losses on a fine grid. The discretization-free nature of neuraloperators means that they do not suffer from the restriction of a coarse gridthat closure models face and they can provably approximate the long-termstatistics of chaotic systems. In our experiments our PINO model achieves a120x speedup compared to FRS with a relative error sim 5. In contrast theclosure model coupled with a coarse-grid solver is 58x slower than PINO whilehaving a much higher error sim205 when the closure model is trained on thesame FRS dataset. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04633v1 |
-|title| LiDAR-Event Stereo Fusion with Hallucinations |
-|authors| Luca BartolomeiMatteo PoggiAndrea ContiStefano Mattoccia
-|links| http://arxiv.org/abs/2408.04633v1 |
-|updated| 2024-08-08 17:59:58 UTC |
-|summary| Event stereo matching is an emerging technique to estimate depth fromneuromorphic cameras however events are unlikely to trigger in the absence ofmotion or the presence of large untextured regions making the correspondenceproblem extremely challenging. Purposely we propose integrating a stereo eventcamera with a fixed-frequency active sensor -- e.g. a LiDAR -- collectingsparse depth measurements overcoming the aforementioned limitations. Suchdepth hints are used by hallucinating -- i.e. inserting fictitious events --the stacks or raw input streams compensating for the lack of information inthe absence of brightness changes. Our techniques are general can be adaptedto any structured representation to stack events and outperformstate-of-the-art fusion methods applied to event-based stereo. |
+|idx| 2408.05211v1 |
+|title| VITA: Towards Open-Source Interactive Omni Multimodal LLM |
+|authors| Chaoyou FuHaojia LinZuwei LongYunhang ShenMeng ZhaoYifan ZhangXiong WangDi YinLong MaXiawu ZhengRan HeRongrong JiYunsheng WuCaifeng ShanXing Sun
+|links| http://arxiv.org/abs/2408.05211v1 |
+|updated| 2024-08-09 17:59:49 UTC |
+|summary| The remarkable multimodal capabilities and interactive experience of GPT-4ounderscore their necessity in practical applications yet open-source modelsrarely excel in both areas. In this paper we introduce VITA the first-everopen-source Multimodal Large Language Model MLLM adept at simultaneousprocessing and analysis of Video Image Text and Audio modalities andmeanwhile has an advanced multimodal interactive experience. Starting fromMixtral 8x7B as a language foundation we expand its Chinese vocabularyfollowed by bilingual instruction tuning. We further endow the language modelwith visual and audio capabilities through two-stage multi-task learning ofmultimodal alignment and instruction tuning. VITA demonstrates robustfoundational capabilities of multilingual vision and audio understanding asevidenced by its strong performance across a range of both unimodal andmultimodal benchmarks. Beyond foundational capabilities we have madeconsiderable progress in enhancing the natural multimodal human-computerinteraction experience. To the best of our knowledge we are the first toexploit non-awakening interaction and audio interrupt in MLLM. VITA is thefirst step for the open-source community to explore the seamless integration ofmultimodal understanding and interaction. While there is still lots of work tobe done on VITA to get close to close-source counterparts we hope that itsrole as a pioneer can serve as a cornerstone for subsequent research. ProjectPage: https://vita-home.github.io. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04632v1 |
-|title| Arctic-TILT. Business Document Understanding at Sub-Billion Scale |
-|authors| Łukasz BorchmannMichał PietruszkaWojciech JaśkowskiDawid JurkiewiczPiotr HalamaPaweł JóziakŁukasz GarncarekPaweł LiskowskiKarolina SzyndlerAndrzej GretkowskiJulita OłtusekGabriela NowakowskaArtur ZawłockiŁukasz DuhrPaweł DydaMichał Turski
-|links| http://arxiv.org/abs/2408.04632v1 |
-|updated| 2024-08-08 17:59:46 UTC |
-|summary| The vast portion of workloads employing LLMs involves answering questionsgrounded on PDF or scan content. We introduce the Arctic-TILT achievingaccuracy on par with models 1000times its size on these use cases. It can befine-tuned and deployed on a single 24GB GPU lowering operational costs whileprocessing Visually Rich Documents with up to 400k tokens. The modelestablishes state-of-the-art results on seven diverse Document Understandingbenchmarks as well as provides reliable confidence scores and quick inferencewhich are essential for processing files in large-scale or time-sensitiveenterprise environments. |
+|idx| 2408.05206v1 |
+|title| Multi-Garment Customized Model Generation |
+|authors| Yichen LiuPenghui DuYi Liu Quanwei Zhang
+|links| http://arxiv.org/abs/2408.05206v1 |
+|updated| 2024-08-09 17:57:33 UTC |
+|summary| This paper introduces Multi-Garment Customized Model Generation a unifiedframework based on Latent Diffusion Models LDMs aimed at addressing theunexplored task of synthesizing images with free combinations of multiplepieces of clothing. The method focuses on generating customized models wearingvarious targeted outfits according to different text prompts. The primarychallenge lies in maintaining the natural appearance of the dressed model whilepreserving the complex textures of each piece of clothing ensuring that theinformation from different garments does not interfere with each other. Totackle these challenges we first developed a garment encoder which is atrainable UNet copy with shared weights capable of extracting detailedfeatures of garments in parallel. Secondly our framework supports theconditional generation of multiple garments through decoupled multi-garmentfeature fusion allowing multiple clothing features to be injected into thebackbone network significantly alleviating conflicts between garmentinformation. Additionally the proposed garment encoder is a plug-and-playmodule that can be combined with other extension modules such as IP-Adapter andControlNet enhancing the diversity and controllability of the generatedmodels. Extensive experiments demonstrate the superiority of our approach overexisting alternatives opening up new avenues for the task of generating imageswith multiple-piece clothing combinations |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04631v1 |
-|title| Puppet-Master: Scaling Interactive Video Generation as a Motion Prior for Part-Level Dynamics |
-|authors| Ruining LiChuanxia ZhengChristian RupprechtAndrea Vedaldi
-|links| http://arxiv.org/abs/2408.04631v1 |
-|updated| 2024-08-08 17:59:38 UTC |
-|summary| We present Puppet-Master an interactive video generative model that canserve as a motion prior for part-level dynamics. At test time given a singleimage and a sparse set of motion trajectories i.e. drags Puppet-Master cansynthesize a video depicting realistic part-level motion faithful to the givendrag interactions. This is achieved by fine-tuning a large-scale pre-trainedvideo diffusion model for which we propose a new conditioning architecture toinject the dragging control effectively. More importantly we introduce theall-to-first attention mechanism a drop-in replacement for the widely adoptedspatial attention modules which significantly improves generation quality byaddressing the appearance and background issues in existing models. Unlikeother motion-conditioned video generators that are trained on in-the-wildvideos and mostly move an entire object Puppet-Master is learned fromObjaverse-Animation-HQ a new dataset of curated part-level motion clips. Wepropose a strategy to automatically filter out sub-optimal animations andaugment the synthetic renderings with meaningful motion trajectories.Puppet-Master generalizes well to real images across various categories andoutperforms existing methods in a zero-shot manner on a real-world benchmark.See our project page for more results: vgg-puppetmaster.github.io. |
+|idx| 2408.05205v1 |
+|title| Kalman-Inspired Feature Propagation for Video Face Super-Resolution |
+|authors| Ruicheng FengChongyi LiChen Change Loy
+|links| http://arxiv.org/abs/2408.05205v1 |
+|updated| 2024-08-09 17:57:12 UTC |
+|summary| Despite the promising progress of face image super-resolution video facesuper-resolution remains relatively under-explored. Existing approaches eitheradapt general video super-resolution networks to face datasets or applyestablished face image super-resolution models independently on individualvideo frames. These paradigms encounter challenges either in reconstructingfacial details or maintaining temporal consistency. To address these issues weintroduce a novel framework called Kalman-inspired Feature Propagation KEEPdesigned to maintain a stable face prior over time. The Kalman filteringprinciples offer our method a recurrent ability to use the information frompreviously restored frames to guide and regulate the restoration process of thecurrent frame. Extensive experiments demonstrate the effectiveness of ourmethod in capturing facial details consistently across video frames. Code andvideo demo are available at https://jnjaby.github.io/projects/KEEP. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04628v1 |
-|title| LogogramNLP: Comparing Visual and Textual Representations of Ancient Logographic Writing Systems for NLP |
-|authors| Danlu ChenFreda ShiAditi AgarwalJacobo MyerstonTaylor Berg-Kirkpatrick
-|links| http://arxiv.org/abs/2408.04628v1 |
-|updated| 2024-08-08 17:58:06 UTC |
-|summary| Standard natural language processing NLP pipelines operate on symbolicrepresentations of language which typically consist of sequences of discretetokens. However creating an analogous representation for ancient logographicwriting systems is an extremely labor intensive process that requires expertknowledge. At present a large portion of logographic data persists in a purelyvisual form due to the absence of transcription -- this issue poses abottleneck for researchers seeking to apply NLP toolkits to study ancientlogographic languages: most of the relevant data are images of writing.  This paper investigates whether direct processing of visual representationsof language offers a potential solution. We introduce LogogramNLP the firstbenchmark enabling NLP analysis of ancient logographic languages featuringboth transcribed and visual datasets for four writing systems along withannotations for tasks like classification translation and parsing. Ourexperiments compare systems that employ recent visual and text encodingstrategies as backbones. The results demonstrate that visual representationsoutperform textual representations for some investigated tasks suggesting thatvisual processing pipelines may unlock a large amount of cultural heritage dataof logographic languages for NLP-based analyses. |
+|idx| 2408.05191v1 |
+|title| Cross-Domain Learning for Video Anomaly Detection with Limited Supervision |
+|authors| Yashika JainAli DaboueiMin Xu
+|links| http://arxiv.org/abs/2408.05191v1 |
+|updated| 2024-08-09 17:28:29 UTC |
+|summary| Video Anomaly Detection VAD automates the identification of unusual eventssuch as security threats in surveillance videos. In real-world applicationsVAD models must effectively operate in cross-domain settings identifying rareanomalies and scenarios not well-represented in the training data. Howeverexisting cross-domain VAD methods focus on unsupervised learning resulting inperformance that falls short of real-world expectations. Since acquiring weaksupervision i.e. video-level labels for the source domain is cost-effectivewe conjecture that combining it with external unlabeled data has notablepotential to enhance cross-domain performance. To this end we introduce anovel weakly-supervised framework for Cross-Domain Learning CDL in VAD thatincorporates external data during training by estimating its prediction biasand adaptively minimizing that using the predicted uncertainty. We demonstratethe effectiveness of the proposed CDL framework through comprehensiveexperiments conducted in various configurations on two large-scale VADdatasets: UCF-Crime and XD-Violence. Our method significantly surpasses thestate-of-the-art works in cross-domain evaluations achieving an averageabsolute improvement of 19.6 on UCF-Crime and 12.87 on XD-Violence. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04610v1 |
-|title| Quantifying the Impact of Population Shift Across Age and Sex for Abdominal Organ Segmentation |
-|authors| Kate ČevoraBen GlockerWenjia Bai
-|links| http://arxiv.org/abs/2408.04610v1 |
-|updated| 2024-08-08 17:28:32 UTC |
-|summary| Deep learning-based medical image segmentation has seen tremendous progressover the last decade but there is still relatively little transfer intoclinical practice. One of the main barriers is the challenge of domaingeneralisation which requires segmentation models to maintain high performanceacross a wide distribution of image data. This challenge is amplified by themany factors that contribute to the diverse appearance of medical images suchas acquisition conditions and patient characteristics. The impact of shiftingpatient characteristics such as age and sex on segmentation performance remainsrelatively under-studied especially for abdominal organs despite that this iscrucial for ensuring the fairness of the segmentation model. We perform thefirst study to determine the impact of population shift with respect to age andsex on abdominal CT image segmentation by leveraging two large publicdatasets and introduce a novel metric to quantify the impact. We find thatpopulation shift is a challenge similar in magnitude to cross-dataset shift forabdominal organ segmentation and that the effect is asymmetric anddataset-dependent. We conclude that dataset diversity in terms of known patientcharacteristics is not necessarily equivalent to dataset diversity in terms ofimage features. This implies that simple population matching to ensure goodgeneralisation and fairness may be insufficient and we recommend that fairnessresearch should be directed towards better understanding and quantifyingmedical image dataset diversity in terms of performance-relevantcharacteristics such as organ morphology. |
+|idx| 2408.05169v1 |
+|title| Weak-Annotation of HAR Datasets using Vision Foundation Models |
+|authors| Marius BockKristof Van LaerhovenMichael Moeller
+|links| http://arxiv.org/abs/2408.05169v1 |
+|updated| 2024-08-09 16:46:53 UTC |
+|summary| As wearable-based data annotation remains to date a tedious time-consumingtask requiring researchers to dedicate substantial time benchmark datasetswithin the field of Human Activity Recognition in lack richness and sizecompared to datasets available within related fields. Recently visionfoundation models such as CLIP have gained significant attention helping thevision community advance in finding robust generalizable featurerepresentations. With the majority of researchers within the wearable communityrelying on vision modalities to overcome the limited expressiveness of wearabledata and accurately label their to-be-released benchmark datasets offline wepropose a novel clustering-based annotation pipeline to significantly reducethe amount of data that needs to be annotated by a human annotator. We showthat using our approach the annotation of centroid clips suffices to achieveaverage labelling accuracies close to 90 across three publicly available HARbenchmark datasets. Using the weakly annotated datasets we further demonstratethat we can match the accuracy scores of fully-supervised deep learningclassifiers across all three benchmark datasets. Code as well as supplementaryfigures and results are publicly downloadable viagithub.com/mariusbock/weak_har. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04607v1 |
-|title| Risk and cross validation in ridge regression with correlated samples |
-|authors| Alexander AtanasovJacob A. Zavatone-VethCengiz Pehlevan
-|links| http://arxiv.org/abs/2408.04607v1 |
-|updated| 2024-08-08 17:27:29 UTC |
-|summary| Recent years have seen substantial advances in our understanding ofhigh-dimensional ridge regression but existing theories assume that trainingexamples are independent. By leveraging recent techniques from random matrixtheory and free probability we provide sharp asymptotics for the in- andout-of-sample risks of ridge regression when the data points have arbitrarycorrelations. We demonstrate that in this setting the generalized crossvalidation estimator GCV fails to correctly predict the out-of-sample risk.However in the case where the noise residuals have the same correlations asthe data points one can modify the GCV to yield an efficiently-computableunbiased estimator that concentrates in the high-dimensional limit which wedub CorrGCV. We further extend our asymptotic analysis to the case where thetest point has nontrivial correlations with the training set a setting oftenencountered in time series forecasting. Assuming knowledge of the correlationstructure of the time series this again yields an extension of the GCVestimator and sharply characterizes the degree to which such test points yieldan overly optimistic prediction of long-time risk. We validate the predictionsof our theory across a variety of high dimensional data. |
+|idx| 2408.05116v1 |
+|title| Concept learning of parameterized quantum models from limited measurements |
+|authors| Beng Yee GanPo-Wei HuangElies Gil-FusterPatrick Rebentrost
+|links| http://arxiv.org/abs/2408.05116v1 |
+|updated| 2024-08-09 15:07:42 UTC |
+|summary| Classical learning of the expectation values of observables for quantumstates is a natural variant of learning quantum states or channels. Whilelearning-theoretic frameworks establish the sample complexity and the number ofmeasurement shots per sample required for learning such statistical quantitiesthe interplay between these two variables has not been adequately quantifiedbefore. In this work we take the probabilistic nature of quantum measurementsinto account in classical modelling and discuss these quantities under a singleunified learning framework. We provide provable guarantees for learningparameterized quantum models that also quantify the asymmetrical effects andinterplay of the two variables on the performance of learning algorithms. Theseresults show that while increasing the sample size enhances the learningperformance of classical machines even with single-shot estimates theimprovements from increasing measurements become asymptotically trivial beyonda constant factor. We further apply our framework and theoretical guarantees tostudy the impact of measurement noise on the classical surrogation ofparameterized quantum circuit models. Our work provides new tools to analysethe operational influence of finite measurement noise in the classical learningof quantum systems. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04595v1 |
-|title| Inference with the Upper Confidence Bound Algorithm |
-|authors| Koulik KhamaruCun-Hui Zhang
-|links| http://arxiv.org/abs/2408.04595v1 |
-|updated| 2024-08-08 17:11:36 UTC |
-|summary| In this paper we discuss the asymptotic behavior of the Upper ConfidenceBound UCB algorithm in the context of multiarmed bandit problems and discussits implication in downstream inferential tasks. While inferential tasks becomechallenging when data is collected in a sequential manner we argue that thisproblem can be alleviated when the sequential algorithm at hand satisfiescertain stability property. This notion of stability is motivated from theseminal work of Lai and Wei 1982. Our first main result shows that such astability property is always satisfied for the UCB algorithm and as a resultthe sample means for each arm are asymptotically normal. Next we examine thestability properties of the UCB algorithm when the number of arms K isallowed to grow with the number of arm pulls T. We show that in such a casethe arms are stable when fraclog Klog T rightarrow 0 and the numberof near-optimal arms are large. |
+|idx| 2408.05085v1 |
+|title| On expected signatures and signature cumulants in semimartingale models |
+|authors| Peter K. FrizPaul P. HagerNikolas Tapia
+|links| http://arxiv.org/abs/2408.05085v1 |
+|updated| 2024-08-09 14:16:21 UTC |
+|summary| The concept of signatures and expected signatures is vital in data scienceespecially for sequential data analysis. The signature transform a Cartan typedevelopment translates paths into high-dimensional feature vectors capturingtheir intrinsic characteristics. Under natural conditions the expectation ofthe signature determines the law of the signature providing a statisticalsummary of the data distribution. This property facilitates robust modeling andinference in machine learning and stochastic processes. Building on previouswork by the present authors Unified signature cumulants and generalized Magnusexpansions FoM Sigma 22 we here revisit the actual computation of expectedsignatures in a general semimartingale setting. Several new formulae aregiven. A log-transform of expected signatures leads to log-signaturessignature cumulants offering a significant reduction in complexity. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04569v1 |
-|title| Activation thresholds and expressiveness of polynomial neural networks |
-|authors| Bella FinkelJose Israel RodriguezChenxi WuThomas Yahl
-|links| http://arxiv.org/abs/2408.04569v1 |
-|updated| 2024-08-08 16:28:56 UTC |
-|summary| Polynomial neural networks have been implemented in a range of applicationsand present an advantageous framework for theoretical machine learning. Apolynomial neural network of fixed architecture and activation degree gives analgebraic map from the networks weights to a set of polynomials. The image ofthis map is the space of functions representable by the network. Its Zariskiclosure is an affine variety known as a neurovariety. The dimension of apolynomial neural networks neurovariety provides a measure of itsexpressivity. In this work we introduce the notion of the activation thresholdof a network architecture which expresses when the dimension of a neurovarietyachieves its theoretical maximum. In addition we prove expressiveness resultsfor polynomial neural networks with equi-widtharchitectures. |
+|idx| 2408.05058v1 |
+|title| Variational Bayesian Phylogenetic Inference with Semi-implicit Branch Length Distributions |
+|authors| Tianyu XieFrederick A. Matsen IVMarc A. SuchardCheng Zhang
+|links| http://arxiv.org/abs/2408.05058v1 |
+|updated| 2024-08-09 13:29:08 UTC |
+|summary| Reconstructing the evolutionary history relating a collection of molecularsequences is the main subject of modern Bayesian phylogenetic inference.However the commonly used Markov chain Monte Carlo methods can be inefficientdue to the complicated space of phylogenetic trees especially when the numberof sequences is large. An alternative approach is variational Bayesianphylogenetic inference VBPI which transforms the inference problem into anoptimization problem. While effective the default diagonal lognormalapproximation for the branch lengths of the tree used in VBPI is ofteninsufficient to capture the complexity of the exact posterior. In this work wepropose a more flexible family of branch length variational posteriors based onsemi-implicit hierarchical distributions using graph neural networks. We showthat this semi-implicit construction emits straightforward permutationequivariant distributions and therefore can handle the non-Euclidean branchlength space across different tree topologies with ease. To deal with theintractable marginal probability of semi-implicit variational distributions wedevelop several alternative lower bounds for stochastic optimization. Wedemonstrate the effectiveness of our proposed method over baseline methods onbenchmark data examples in terms of both marginal likelihood estimation andbranch length posterior approximation. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04526v1 |
-|title| Hybrid Reinforcement Learning Breaks Sample Size Barriers in Linear MDPs |
-|authors| Kevin TanWei FanYuting Wei
-|links| http://arxiv.org/abs/2408.04526v1 |
-|updated| 2024-08-08 15:26:18 UTC |
-|summary| Hybrid Reinforcement Learning RL where an agent learns from both anoffline dataset and online explorations in an unknown environment has garneredsignificant recent interest. A crucial question posed by Xie et al. 2022 iswhether hybrid RL can improve upon the existing lower bounds established inpurely offline and purely online RL without relying on the single-policyconcentrability assumption. While Li et al. 2023 provided an affirmativeanswer to this question in the tabular PAC RL case the question remainsunsettled for both the regret-minimizing RL case and the non-tabular case.  In this work building upon recent advancements in offline RL andreward-agnostic exploration we develop computationally efficient algorithmsfor both PAC and regret-minimizing RL with linear function approximationwithout single-policy concentrability. We demonstrate that these algorithmsachieve sharper error or regret bounds that are no worse than and can improveon the optimal sample complexity in offline RL the first algorithm for PACRL and online RL the second algorithm for regret-minimizing RL in linearMarkov decision processes MDPs regardless of the quality of the behaviorpolicy. To our knowledge this work establishes the tightest theoreticalguarantees currently available for hybrid RL in linear MDPs. |
+|idx| 2408.05040v1 |
+|title| BoFire: Bayesian Optimization Framework Intended for Real Experiments |
+|authors| Johannes P. DürholtThomas S. AscheJohanna KleinekorteGabriel Mancino-BallBenjamin SchillerSimon SungJulian KeuppAaron OsburgToby BoyneRuth MisenerRosona EldredWagner Steuer CostaChrysoula KappatouRobert M. LeeDominik LinznerDavid WalzNiklas WulkowBehrang Shafei
+|links| http://arxiv.org/abs/2408.05040v1 |
+|updated| 2024-08-09 12:50:48 UTC |
+|summary| Our open-source Python package BoFire combines Bayesian Optimization BOwith other design of experiments DoE strategies focusing on developing andoptimizing new chemistry. Previous BO implementations for example as theyexist in the literature or software require substantial adaptation foreffective real-world deployment in chemical industry. BoFire provides a richfeature-set with extensive configurability and realizes our vision offast-tracking research contributions into industrial use via maintainableopen-source software. Owing to quality-of-life features likeJSON-serializability of problem formulations BoFire enables seamlessintegration of BO into RESTful APIs a common architecture component for bothself-driving laboratories and human-in-the-loop setups. This paper discussesthe differences between BoFire and other BO implementations and outlines waysthat BO research needs to be adapted for real-world use in a chemistry setting. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04391v1 |
-|title| Robustness investigation of quality measures for the assessment of machine learning models |
-|authors| Thomas MostLars GräningSebastian Wolff
-|links| http://arxiv.org/abs/2408.04391v1 |
-|updated| 2024-08-08 11:51:34 UTC |
-|summary| In this paper the accuracy and robustness of quality measures for theassessment of machine learning models are investigated. The prediction qualityof a machine learning model is evaluated model-independent based on across-validation approach where the approximation error is estimated forunknown data. The presented measures quantify the amount of explained variationin the model prediction. The reliability of these measures is assessed by meansof several numerical examples where an additional data set for theverification of the estimated prediction error is available. Furthermore theconfidence bounds of the presented quality measures are estimated and localquality measures are derived from the prediction residuals obtained by thecross-validation approach. |
+|idx| 2408.04948v1 |
+|title| HybridRAG: Integrating Knowledge Graphs and Vector Retrieval Augmented Generation for Efficient Information Extraction |
+|authors| Bhaskarjit SarmahBenika HallRohan RaoSunil PatelStefano PasqualiDhagash Mehta
+|links| http://arxiv.org/abs/2408.04948v1 |
+|updated| 2024-08-09 09:07:48 UTC |
+|summary| Extraction and interpretation of intricate information from unstructured textdata arising in financial applications such as earnings call transcriptspresent substantial challenges to large language models LLMs even using thecurrent best practices to use Retrieval Augmented Generation RAG referred toas VectorRAG techniques which utilize vector databases for informationretrieval due to challenges such as domain specific terminology and complexformats of the documents. We introduce a novel approach based on a combinationcalled HybridRAG of the Knowledge Graphs KGs based RAG techniques calledGraphRAG and VectorRAG techniques to enhance question-answer QA systems forinformation extraction from financial documents that is shown to be capable ofgenerating accurate and contextually relevant answers. Using experiments on aset of financial earning call transcripts documents which come in the form ofQA format and hence provide a natural set of pairs of ground-truth QAs weshow that HybridRAG which retrieves context from both vector database and KGoutperforms both traditional VectorRAG and GraphRAG individually when evaluatedat both the retrieval and generation stages in terms of retrieval accuracy andanswer generation. The proposed technique has applications beyond the financialdomain |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04619v1 |
-|title| Transformer Explainer: Interactive Learning of Text-Generative Models |
-|authors| Aeree ChoGrace C. KimAlexander KarpekovAlec HelblingZijie J. WangSeongmin LeeBenjamin HooverDuen Horng Chau
-|links| http://arxiv.org/abs/2408.04619v1 |
-|updated| 2024-08-08 17:49:07 UTC |
-|summary| Transformers have revolutionized machine learning yet their inner workingsremain opaque to many. We present Transformer Explainer an interactivevisualization tool designed for non-experts to learn about Transformers throughthe GPT-2 model. Our tool helps users understand complex Transformer conceptsby integrating a model overview and enabling smooth transitions acrossabstraction levels of mathematical operations and model structures. It runs alive GPT-2 instance locally in the users browser empowering users toexperiment with their own input and observe in real-time how the internalcomponents and parameters of the Transformer work together to predict the nexttokens. Our tool requires no installation or special hardware broadening thepublics education access to modern generative AI techniques. Our open-sourcedtool is available at https://poloclub.github.io/transformer-explainer/. A videodemo is available at https://youtu.be/ECR4oAwocjs. |
+|idx| 2408.05204v1 |
+|title| Evaluating the capability of large language models to personalize science texts for diverse middle-school-age learners |
+|authors| Michael Vaccaro JrMikayla FridayArash Zaghi
+|links| http://arxiv.org/abs/2408.05204v1 |
+|updated| 2024-08-09 17:53:35 UTC |
+|summary| Large language models LLMs including OpenAIs GPT-series have madesignificant advancements in recent years. Known for their expertise acrossdiverse subject areas and quick adaptability to user-provided prompts LLMshold unique potential as Personalized Learning PL tools. Despite thispotential their application in K-12 education remains largely unexplored. Thispaper presents one of the first randomized controlled trials n  23 toevaluate the effectiveness of GPT-4 in personalizing educational science textsfor middle school students. In this study GPT-4 was used to profile studentlearning preferences based on choices made during a training session. For theexperimental group GPT-4 was used to rewrite science texts to align with thestudents predicted profile while for students in the control group textswere rewritten to contradict their learning preferences. The results of aMann-Whitney U test showed that students significantly preferred at the .10level the rewritten texts when they were aligned with their profile p .059. These findings suggest that GPT-4 can effectively interpret and tailoreducational content to diverse learner preferences marking a significantadvancement in PL technology. The limitations of this study and ethicalconsiderations for using artificial intelligence in education are alsodiscussed. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04574v1 |
-|title| Integrating Annotations into the Design Process for Sonifications and Physicalizations |
-|authors| Rhys Sorenson-GraffS. Sandra BaeJordan Wirfs-Brock
-|links| http://arxiv.org/abs/2408.04574v1 |
-|updated| 2024-08-08 16:36:14 UTC |
-|summary| Annotations are a critical component of visualizations helping viewersinterpret the visual representation and highlighting critical data insights.Despite their significant role we lack an understanding of how annotations canbe incorporated into other data representations such as physicalizations andsonifications. Given the emergent nature of these representationssonifications and physicalizations lack formalized conventions e.g. designspace vocabulary that can introduce challenges for audiences to interpret theintended data encoding. To address this challenge this work focuses on howannotations can be more tightly integrated into the design process of creatingsonifications and physicalizations. In an exploratory study with 13 designerswe explore how visualization annotation techniques can be adapted to sonic andphysical modalities. Our work highlights how annotations for sonification andphysicalizations are inseparable from their data encodings. |
+|idx| 2408.05169v1 |
+|title| Weak-Annotation of HAR Datasets using Vision Foundation Models |
+|authors| Marius BockKristof Van LaerhovenMichael Moeller
+|links| http://arxiv.org/abs/2408.05169v1 |
+|updated| 2024-08-09 16:46:53 UTC |
+|summary| As wearable-based data annotation remains to date a tedious time-consumingtask requiring researchers to dedicate substantial time benchmark datasetswithin the field of Human Activity Recognition in lack richness and sizecompared to datasets available within related fields. Recently visionfoundation models such as CLIP have gained significant attention helping thevision community advance in finding robust generalizable featurerepresentations. With the majority of researchers within the wearable communityrelying on vision modalities to overcome the limited expressiveness of wearabledata and accurately label their to-be-released benchmark datasets offline wepropose a novel clustering-based annotation pipeline to significantly reducethe amount of data that needs to be annotated by a human annotator. We showthat using our approach the annotation of centroid clips suffices to achieveaverage labelling accuracies close to 90 across three publicly available HARbenchmark datasets. Using the weakly annotated datasets we further demonstratethat we can match the accuracy scores of fully-supervised deep learningclassifiers across all three benchmark datasets. Code as well as supplementaryfigures and results are publicly downloadable viagithub.com/mariusbock/weak_har. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04539v1 |
-|title| ParetoTracker: Understanding Population Dynamics in Multi-objective Evolutionary Algorithms through Visual Analytics |
-|authors| Zherui ZhangFan YangRan ChengYuxin Ma
-|links| http://arxiv.org/abs/2408.04539v1 |
-|updated| 2024-08-08 15:46:11 UTC |
-|summary| Multi-objective evolutionary algorithms MOEAs have emerged as powerfultools for solving complex optimization problems characterized by multipleoften conflicting objectives. While advancements have been made incomputational efficiency as well as diversity and convergence of solutions acritical challenge persists: the internal evolutionary mechanisms are opaque tohuman users. Drawing upon the successes of explainable AI in explaining complexalgorithms and models we argue that the need to understand the underlyingevolutionary operators and population dynamics within MOEAs aligns well with avisual analytics paradigm. This paper introduces ParetoTracker a visualanalytics framework designed to support the comprehension and inspection ofpopulation dynamics in the evolutionary processes of MOEAs. Informed bypreliminary literature review and expert interviews the framework establishesa multi-level analysis scheme which caters to user engagement and explorationranging from examining overall trends in performance metrics to conductingfine-grained inspections of evolutionary operations. In contrast toconventional practices that require manual plotting of solutions for eachgeneration ParetoTracker facilitates the examination of temporal trends anddynamics across consecutive generations in an integrated visual interface. Theeffectiveness of the framework is demonstrated through case studies and expertinterviews focused on widely adopted benchmark optimization problems. |
+|idx| 2408.05126v1 |
+|title| Large Language Models and Thematic Analysis: Human-AI Synergy in Researching Hate Speech on Social Media |
+|authors| Petre BreazuMiriam SchirmerSongbo HuNapoleon Kastos
+|links| http://arxiv.org/abs/2408.05126v1 |
+|updated| 2024-08-09 15:34:41 UTC |
+|summary| In the dynamic field of artificial intelligence AI the development andapplication of Large Language Models LLMs for text analysis are ofsignificant academic interest. Despite the promising capabilities of variousLLMs in conducting qualitative analysis their use in the humanities and socialsciences has not been thoroughly examined. This article contributes to theemerging literature on LLMs in qualitative analysis by documenting anexperimental study involving GPT-4. The study focuses on performing thematicanalysis TA using a YouTube dataset derived from an EU-funded project whichwas previously analyzed by other researchers. This dataset is about therepresentation of Roma migrants in Sweden during 2016 a period marked by theaftermath of the 2015 refugee crisis and preceding the Swedish nationalelections in 2017. Our study seeks to understand the potential of combininghuman intelligence with AIs scalability and efficiency examining theadvantages and limitations of employing LLMs in qualitative research within thehumanities and social sciences. Additionally we discuss future directions forapplying LLMs in these fields. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04506v1 |
-|title| Who ruins the game?: unveiling cheating players in the "Battlefield" game |
-|authors| Dong Young KimHuy Kang Kim
-|links| http://arxiv.org/abs/2408.04506v1 |
-|updated| 2024-08-08 15:04:23 UTC |
-|summary| The Battlefield online game is well-known for its large-scale multiplayercapabilities and unique gaming features including various vehicle controls.However these features make the game a major target for cheatingsignificantly detracting from the gaming experience. This study analyzes userbehavior in cheating play in the popular online game the Battlefield usingstatistical methods. We aim to provide comprehensive insights into cheatingplayers through an extensive analysis of over 44000 reported cheatingincidents collected via the Game-tools API. Our methodology includes detailedstatistical analyses such as calculating basic statistics of key variablescorrelation analysis and visualizations using histograms box plots andscatter plots. Our findings emphasize the importance of adaptive data-drivenapproaches to prevent cheating plays in online games. |
+|idx| 2408.05123v1 |
+|title| Sportify: Question Answering with Embedded Visualizations and Personified Narratives for Sports Video |
+|authors| Chunggi LeeTica LinHanspeter PfisterChen Zhu-Tian
+|links| http://arxiv.org/abs/2408.05123v1 |
+|updated| 2024-08-09 15:30:10 UTC |
+|summary| As basketballs popularity surges fans often find themselves confused andoverwhelmed by the rapid game pace and complexity. Basketball tacticsinvolving a complex series of actions require substantial knowledge to befully understood. This complexity leads to a need for additional informationand explanation which can distract fans from the game. To tackle thesechallenges we present Sportify a Visual Question Answering system thatintegrates narratives and embedded visualization for demystifying basketballtactical questions aiding fans in understanding various game aspects. Wepropose three novel action visualizations i.e. Pass Cut and Screen todemonstrate critical action sequences. To explain the reasoning and logicbehind players actions we leverage a large-language model LLM to generatenarratives. We adopt a storytelling approach for complex scenarios from bothfirst and third-person perspectives integrating action visualizations. Weevaluated Sportify with basketball fans to investigate its impact onunderstanding of tactics and how different personal perspectives of narrativesimpact the understanding of complex tactic with action visualizations. Ourevaluation with basketball fans demonstrates Sportifys capability to deepentactical insights and amplify the viewing experience. Furthermore third-personnarration assists people in getting in-depth game explanations whilefirst-person narration enhances fans game engagement |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.04500v1 |
-|title| "I Am Human, Just Like You": What Intersectional, Neurodivergent Lived Experiences Bring to Accessibility Research |
-|authors| Lindy Le
-|links| http://dx.doi.org/10.1145/3663548.3675651 |
-|updated| 2024-08-08 14:55:13 UTC |
-|summary| The increasing prevalence of neurodivergence has led society to give greaterrecognition to the importance of neurodiversity. Yet societal perceptions ofneurodivergence continue to be predominantly negative. Drawing on CriticalDisability Studies accessibility researchers have demonstrated howneuronormative assumptions dominate HCI. Despite their guidance neurodivergentand disabled individuals are still marginalized in technology research. Inparticular intersectional identities remain largely absent from HCIneurodivergence research. In this paper I share my perspective as an outsiderof the academic research community: I use critical autoethnography to analyzemy experiences of coming to understand accept and value my neurodivergencewithin systems of power privilege and oppression. Using Data Feminism as anaccessible and practical guide to intersectionality I derive three tenets forreconceptualizing neurodivergence to be more inclusive of intersectionalexperiences: 1 neurodivergence is a functional difference not a deficit 2neurodivergent disability is a moment of friction not a static label and 3neurodivergence accessibility is a collaborative practice not a one-sidedsolution. Then I discuss the tenets in the context of existing HCI researchapplying the same intersectional lens. Finally I offer three suggestions forhow accessibility research can apply these tenets in future work to bridge thegap between accessibility theory and practice in HCI neurodivergence research |
+|idx| 2408.05105v1 |
+|title| Evaluating Layout Dimensionalities in PC+VR Asymmetric Collaborative Decision Making |
+|authors| Daniel EnriquezWai TongChris NorthHuamin QuYalong Yang
+|links| http://arxiv.org/abs/2408.05105v1 |
+|updated| 2024-08-09 14:55:59 UTC |
+|summary| With the commercialization of virtual/augmented reality VR/AR devicesthere is an increasing interest in combining immersive and non-immersivedevices e.g. desktop computers for asymmetric collaborations. While suchasymmetric settings have been examined in social platforms significantquestions around layout dimensionality in data-driven decision-making remainunderexplored. A crucial inquiry arises: although presenting a consistent 3Dvirtual world on both immersive and non-immersive platforms has been a commonpractice in social applications does the same guideline apply to lay out dataOr should data placement be optimized locally according to each devicesdisplay capacity This study aims to provide empirical insights into the userexperience of asymmetric collaboration in data-driven decision-making. Wetested practical dimensionality combinations between PC and VR resulting inthree conditions: PC2DVR2D PC2DVR3D and PC3DVR3D. The results revealed apreference for PC2DVR3D and PC2DVR2D led to the quickest task completion.Our investigation facilitates an in-depth discussion of the trade-offsassociated with different layout dimensionalities in asymmetric collaborations. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2408.05146v1 |
+|title| Performative Prediction on Games and Mechanism Design |
+|authors| António GóisMehrnaz MofakhamiFernando P. SantosSimon Lacoste-JulienGauthier Gidel
+|links| http://arxiv.org/abs/2408.05146v1 |
+|updated| 2024-08-09 16:03:44 UTC |
+|summary| Predictions often influence the reality which they aim to predict an effectknown as performativity. Existing work focuses on accuracy maximization underthis effect but model deployment may have important unintended impactsespecially in multiagent scenarios. In this work we investigate performativeprediction in a concrete game-theoretic setting where social welfare is analternative objective to accuracy maximization. We explore a collective riskdilemma scenario where maximising accuracy can negatively impact socialwelfare when predicting collective behaviours. By assuming knowledge of aBayesian agent behavior model we then show how to achieve better trade-offsand use them for mechanism design. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2408.04822v1 |
+|title| Performance Prediction of Hub-Based Swarms |
+|authors| Puneet JainChaitanya DwivediVigynesh BhattNick SmithMichael A Goodrich
+|links| http://arxiv.org/abs/2408.04822v1 |
+|updated| 2024-08-09 02:31:03 UTC |
+|summary| A hub-based colony consists of multiple agents who share a common nest sitecalled the hub. Agents perform tasks away from the hub like foraging for foodor gathering information about future nest sites. Modeling hub-based coloniesis challenging because the size of the collective state space grows rapidly asthe number of agents grows. This paper presents a graph-based representation ofthe colony that can be combined with graph-based encoders to createlow-dimensional representations of collective state that can scale to manyagents for a best-of-N colony problem. We demonstrate how the information inthe low-dimensional embedding can be used with two experiments. First we showhow the information in the tensor can be used to cluster collective states bythe probability of choosing the best site for a very small problem. Second weshow how structured collective trajectories emerge when a graph encoder is usedto learn the low-dimensional embedding and these trajectories have informationthat can be used to predict swarm performance. |
+
+
+| Item |Content|
+| --- |---|
+|idx| 2408.04734v1 |
+|title| A Multi-Scale Cognitive Interaction Model of Instrument Operations at the Linac Coherent Light Source |
+|authors| Jonathan SegalWan-Lin HuPaul FuossFrank E. RitterJeff Shrager
+|links| http://arxiv.org/abs/2408.04734v1 |
+|updated| 2024-08-08 19:23:44 UTC |
+|summary| We describe a novel multi-agent multi-scale computational cognitiveinteraction model of instrument operations at the Linac Coherent Light SourceLCLS. A leading scientific user facility LCLS is the worlds first hardx-ray free electron laser operated by the SLAC National Accelerator Laboratoryfor the U.S. Department of Energy. As the worlds first x-ray free electronlaser LCLS is in high demand and heavily oversubscribed. Our overall projectemploys cognitive engineering methodologies to improve experimental efficiencyand scientific productivity by refining experimental interfaces and workflowssimplifying tasks reducing errors and improving operator safety and stresslevels. Our model simulates aspects of human cognition at multiple cognitiveand temporal scales ranging from seconds to hours and among agents playingmultiple roles including instrument operator real time data analyst andexperiment manager. The model can predict impacts stemming from proposedchanges to operational interfaces and workflows. Because the model code is opensource and supplemental videos go into detail on all aspects of the model andresults this approach could be applied to other experimental apparatus andprocesses. Example results demonstrate the models potential in guidingmodifications to improve operational efficiency and scientific output. Wediscuss the implications of our findings for cognitive engineering in complexexperimental settings and outline future directions for research. |
+
 
 | Item |Content|
 | --- |---|
@@ -330,35 +360,5 @@
 |links| http://arxiv.org/abs/2408.04514v1 |
 |updated| 2024-08-08 15:15:28 UTC |
 |summary| Emergent effects can arise in multi-agent systems MAS where execution isdecentralized and reliant on local information. These effects may range fromminor deviations in behavior to catastrophic system failures. To formallydefine these effects we identify misalignments between the global inherentspecification the true specification and its local approximation such as theconfiguration of different reward components or observations. Usingestablished safety terminology we develop a framework to understand theseemergent effects. To showcase the resulting implications we use two broadlyconfigurable exemplary gridworld scenarios where insufficient specificationleads to unintended behavior deviations when derived independently. Recognizingthat a global adaptation might not always be feasible we propose adjusting theunderlying parameterizations to mitigate these issues thereby improving thesystems alignment and reducing the risk of emergent failures. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.04295v1 |
-|title| Assigning Credit with Partial Reward Decoupling in Multi-Agent Proximal Policy Optimization |
-|authors| Aditya KapoorBenjamin FreedHowie ChosetJeff Schneider
-|links| http://arxiv.org/abs/2408.04295v1 |
-|updated| 2024-08-08 08:18:05 UTC |
-|summary| Multi-agent proximal policy optimization MAPPO has recently demonstratedstate-of-the-art performance on challenging multi-agent reinforcement learningtasks. However MAPPO still struggles with the credit assignment problemwherein the sheer difficulty in ascribing credit to individual agents actionsscales poorly with team size. In this paper we propose a multi-agentreinforcement learning algorithm that adapts recent developments in creditassignment to improve upon MAPPO. Our approach leverages partial rewarddecoupling PRD which uses a learned attention mechanism to estimate which ofa particular agents teammates are relevant to its learning updates. We usethis estimate to dynamically decompose large groups of agents into smallermore manageable subgroups. We empirically demonstrate that our approachPRD-MAPPO decouples agents from teammates that do not influence their expectedfuture reward thereby streamlining credit assignment. We additionally showthat PRD-MAPPO yields significantly higher data efficiency and asymptoticperformance compared to both MAPPO and other state-of-the-art methods acrossseveral multi-agent tasks including StarCraft II. Finally we propose aversion of PRD-MAPPO that is applicable to textitshared reward settingswhere PRD was previously not applicable and empirically show that this alsoleads to performance improvements over MAPPO. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.03692v1 |
-|title| Asynchronous Credit Assignment Framework for Multi-Agent Reinforcement Learning |
-|authors| Yongheng LiangHejun WuHaitao WangHao Cai
-|links| http://arxiv.org/abs/2408.03692v1 |
-|updated| 2024-08-07 11:13:26 UTC |
-|summary| Credit assignment is a core problem that distinguishes agents marginalcontributions for optimizing cooperative strategies in multi-agentreinforcement learning MARL. Current credit assignment methods usually assumesynchronous decision-making among agents. However a prerequisite for manyrealistic cooperative tasks is asynchronous decision-making by agents withoutwaiting for others to avoid disastrous consequences. To address this issue wepropose an asynchronous credit assignment framework with a problem model calledADEX-POMDP and a multiplicative value decomposition MVD algorithm. ADEX-POMDPis an asynchronous problem model with extra virtual agents for a decentralizedpartially observable markov decision process. We prove that ADEX-POMDPpreserves both the task equilibrium and the algorithm convergence. MVD utilizesmultiplicative interaction to efficiently capture the interactions ofasynchronous decisions and we theoretically demonstrate its advantages inhandling asynchronous tasks. Experimental results show that on two asynchronousdecision-making benchmarks Overcooked and POAC MVD not only consistentlyoutperforms state-of-the-art MARL methods but also provides theinterpretability for asynchronous cooperation. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.03405v1 |
-|title| Combining Diverse Information for Coordinated Action: Stochastic Bandit Algorithms for Heterogeneous Agents |
-|authors| Lucia GordonEsther RolfMilind Tambe
-|links| http://arxiv.org/abs/2408.03405v1 |
-|updated| 2024-08-06 18:56:29 UTC |
-|summary| Stochastic multi-agent multi-armed bandits typically assume that the rewardsfrom each arm follow a fixed distribution regardless of which agent pulls thearm. However in many real-world settings rewards can depend on thesensitivity of each agent to their environment. In medical screening diseasedetection rates can vary by test type in preference matching rewards candepend on user preferences and in environmental sensing observation qualitycan vary across sensors. Since past work does not specify how to allocateagents of heterogeneous but known sensitivity of these types in a stochasticbandit setting we introduce a UCB-style algorithm Min-Width which aggregatesinformation from diverse agents. In doing so we address the joint challengesof i aggregating the rewards which follow different distributions for eachagent-arm pair and ii coordinating the assignments of agents to arms.Min-Width facilitates efficient collaboration among heterogeneous agentsexploiting the known structure in the agents reward functions to weight theirrewards accordingly. We analyze the regret of Min-Width and conductpseudo-synthetic and fully synthetic experiments to study the performance ofdifferent levels of information sharing. Our results confirm that the gains tomodeling agent heterogeneity tend to be greater when the sensitivities are morevaried across agents while combining more information does not always improveperformance. |
 
 
