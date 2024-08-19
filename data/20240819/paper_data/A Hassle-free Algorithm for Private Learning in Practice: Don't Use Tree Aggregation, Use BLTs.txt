@@ -1,0 +1,1333 @@
+A Hassle-free Algorithm for Private Learning in Practice:
+Don’t Use Tree Aggregation, Use BLTs
+H. Brendan McMahan, Zheng Xu, Yanxiang Zhang∗
+Google
+Abstract
+The state-of-the-art for training on-device language models for mobile keyboard applica-
+tions combines federated learning (FL) with differential privacy (DP) via the DP-Follow-the-
+Regularized-Leader (DP-FTRL) algorithm. Two variants of DP-FTRL are used in practice,
+tree aggregation and matrix factorization. However, tree aggregation suffers from significantly
+suboptimal privacy/utility tradeoffs, while matrix mechanisms require expensive optimization
+parameterizedbyhard-to-estimate-in-advanceconstants,andhighruntimememorycosts. This
+paper extends the recently introduced Buffered Linear Toeplitz (BLT) mechanism to multi-
+participationscenarios. OurBLT-DP-FTRLmaintainstheease-of-useadvantagesof TreeAgg,
+whileessentiallymatchingmatrixfactorizationintermsofutilityandprivacy. WeevaluateBLT-
+DP-FTRLontheStackOverflowdataset,servingasare-produciblesimulationbenchmark,and
+across four on-device language model tasks in a production FL system. Our empirical results
+highlight the advantages of the BLT mechanism and elevate the practicality and effectiveness
+of DP in real-world scenarios.
+1 Introduction
+Language models (LMs) that can predict the next word for input text are a powerful tool for many
+applications. In mobile keyboard applications, LMs are deployed on device to support various fea-
+tures (e.g., auto correction, smart completion and suggestion, and next word prediction) to improve
+users’ typing experience. On-device LMs are typically small (less than ten million parameters) due
+to latency requirement and limited on-device resources. Their performance can be significantly im-
+proved by training from user data [19, 35]; recent work [30, 32] shows the necessity of training on
+user data to achieve high utility even when we can access large-scale web data and pre-trained large
+LMs with billions of parameters.
+As mobile-keyboard user data can be highly privacy sensitive, differential privacy (DP) [15, 17]
+and federated learning (FL) [22, 26] have emerged as best practices for such models. DP provides a
+mathematicalformulationtoupper-boundthememorizationofanindividual’sinformationinmodel
+training. FLminimizesdataexposurebyaggregatingfocusedmodelupdatesfromdecentralizeddata
+stored only on user devices. DP and FL are combined when training on-device language models in
+production mobile keyboard applications [8, 32, 35]. Applying DP in a production cross-device FL
+system is challenging as many DP algorithms require specific pattern of sampling training data to
+achieve strong privacy-utility trade-off. However, a cross-device FL system has limited control of
+sampling as clients can only participate in training when local criteria (e.g., charging, idle, and
+connected to an unmetered network) are satisfied [3, 21]. Recently, DP-Follow-the-Regularized-
+Leader (DP-FTRL) algorithms [8, 23] have achieved superior privacy-utility trade-off with simpler
+client participation requirements, and are used in practice in FL systems [35, 37].
+∗Alphabeticalorder. {mcmahan, xuzheng, zhangyx}@google.com
+1
+4202
+guA
+61
+]GL.sc[
+1v86880.8042:viXraInsteadofrequiringuniformorPoissonsamplingofdevicesasinpreviouswork[1,28],DP-FTRL
+uses minimum separation (min-sep) to characterizes the participation pattern [23, 35]. Min-sep is
+thesmallestnumberofroundsbetweentheconsecutiveparticipationofaclient,andsmallermin-sep
+necessitates adding more noise to achieve a desired DP guarantee. Min-sep is enforced in the FL
+system by implementing a timer on each device so that a device only becomes eligible for training
+if a certain period of time (e.g., three days) has passed since their last participation. DP-FTRL
+algorithms leverage correlated noise mechanisms such as tree aggregation (TreeAgg) [23] or ma-
+trix factorization (MF) [8] with the client participation pattern in FL. The banded MF (BandMF)
+mechanism[8]pre-computesmatricestogeneratecorrelatednoisefromindependentnoisetoachieve
+strongerDPguaranteesthantheTreeAggmechanism[23]. BandMFissuperiorwhenthenumber
+ofroundsandmin-sepcanbe(accurately)estimatedbeforetrainingtooptimizematrices. However,
+min-sepisonlyknownaftertrainingwithtime-basedseparationasmanysystemfactorsmaypoten-
+tially affect training time 1. Furthermore, BandMF consumes more memory for noise generation,
+and hence is used less often than TreeAgg in practice.
+Inthiswork,wefocusonthechallengesofachievingstrongDPguaranteesintrainingproduction
+LMs in a cross-device FL system. We discuss how we extend the recent theoretical advancements of
+the Buffered Linear Toeplitz (BLT) mechanism from single participation [14] to multi-participation
+scenarios,andadaptBLTtoDP-FTRL.WeapplyBLT-DP-FTRLtoFLinpractice,demonstrating
+itsadvantagesinflexibility,easeofuse,andprivacy-utilitytrade-offs. TheBLT-DP-FTRLalgorithm
+offers flexibility in handling varying numbers of training rounds, and robustness to a wide range of
+min separation between user participations. Furthermore, BLT-DP-FTRL simplifies the correlated
+noise generation process and reduces memory by exploiting the parameterization of the Toeplitz
+matrices. We empirically evaluate BLT-DP-FTRL on the StackOverflow benchmark dataset and
+across four on-device LM training tasks in a production FL system. Our BLT-DP-FTRL achieves
+better privacy-utility trade-off compared to the widely used TreeAgg mechanism [23], and com-
+parable results compared to the state-of-the-art BandMF mechanism [8]. BLT-DP-FTRL exhibits
+desirable robustness properties in practice, offering a practical and effective solution for achieving
+strong DP in real-world FL systems.
+2 (BLT-)DP-FTRL for Private Learning in Practice
+2.1 DP Formulation
+We present the definition of (ϵ, δ)-DP [15, 17] to quantify the privacy protection.
+Definition 2.1 ((ϵ,δ)-DifferentialPrivacy). A randomized algorithm M satisfies (ϵ, δ)-DP for D if
+for any two neighboring datasets D, D′ and for all S ⊂Range(M):
+Pr[M(D)∈S]≤eϵPr[M(D′)∈S]+δ.
+Smaller (ϵ, δ) values suggest stronger DP guarantees, and we often measure ϵ at a fixed small
+δ = 10−10. DP-FTRL also uses an alternative definition, ρ-zCDP (zero-Concentrated DP) [5]
+designed for Gaussian mechanism, and smaller ρ suggests stronger DP guarantees. We use PLD
+(privacy Loss Distributions) accounting [12, 13] to convert ρ-zCDP to (ϵ, δ) DP. When applying
+DP in FL, the neighboring datasets D, D′ are defined by zeroing out the contribution of all data on
+a user device. More discussions on neighboring dataset for the streaming setting in learning, and
+connection to DP guarantees are provided in Sec. 3.1.
+1DespitebeingmorecomplicatedinFLsystems,itispossibletoenforceround-basedseparationsothatadevice
+only becomes eligible for training if min-sep rounds has passed since their last participation. However, it is still
+challenging to pre-specify min-sep before training due to the dynamics of client availability and population size. If
+the target min-sep is too large, training might halt because of lacking eligible devices. If the target min-sep is too
+small,theMFmechanismisnotoptimalforthecorrelatednoisegeneration.
+2Algorithm 1 FedAvg [27] with DP-FTRL [23] for DP FL
+input : clients per round m, learning rate on client η and on server η , momentum β =0.9, total
+c s
+number of rounds T, clip norm ζ, clip norm noise multiplier σ,
+Initialize model y−1 with pretraining
+function ClientUpdate(i, x )
+Initialize server optimizer state P i
+G ← (batches of user i’s local data)
+Initialize correlated noise state S with σζ
+for batch g ∈G do
+for each round t=0,1,2,...,n−1 do
+Qt ← (at least m users that did not partici- y i ←y i−η c∇ℓ(y i;g)
+pate in the previous b rounds) ∆←y i−y i(0)
+for each user i∈Qt in parallel do ∆′ ←∆·min(cid:16) 1, ζ (cid:17)
+∆t ← ClientUpdate(i,yt−1) ||∆||
+i
+return ∆′
+∆˜t,S ←AddCorrNoise(S,(cid:80) ∆t)
+i∈Qt i
+yt,P ←ServerOpt(yt−1, 1∆˜t,η ,β,P)
+m s
+2.2 Federated Learning with Differential Privacy (FL with DP)
+We apply the generalized Federated Averaging (FedAvg) algorithm [26, 31], as shown in Alg. 1 .
+FedAvg is the most common algorithm in cross-device FL systems. In a training round t of total
+n rounds, the server broadcasts a global model yt to a subset of clients; each client i then updates
+their local model y by SGD, and sends back the model delta; the model deltas are aggregated and
+i
+used as a pseudo gradient on the server to update the global model. DP is achieved by clipping the
+l norm of the model delta to control the sensitivity (contribution of each device), and then adding
+2
+noise to the aggregated deltas on the server.
+Whileourprimaryfocusisfederatedlearningwithdecentralizeddatainthispaper,Alg.1canalso
+be applied in datacenter to achieve user-level DP [7, 10, 34]. When using only one batch of a single
+sample for gradient computation in the ClientUpdate function and TreeAgg for correlated noise,
+Alg.1coincideswiththeDP-FTRLalgorithmdescribedin[23]. TheDPguaranteeisdeterminedby
+noise calibrated to sensitivity, which depends on clip norm noise multiplier σ, the correlated noise
+mechanism,totalnumberofroundsT,andclientparticipationpattern(min-sepb). Clipnormζ and
+clip norm noise multiplier σ are used as algorithmic hyperparameters, similar to independent noise
+mechanism (e.g., DP-SGD/DP-FedAvg [1, 27]). However, instead of directly applying independent
+Gaussian noise of standard deviation σζ, correlated noise are generated to privatize model updates.
+2.3 Matrix Factorization (MF) for DP-FTRL
+DP-FTRL [23] adds correlated noise to achieve strong privacy-utility trade-offs, observing that
+privatizing the prefix sum of model updates are essential for privatizing the training process. The
+intuition of privatizing prefix sum is easier to understand when server optimizer is SGD, as the
+iterative process of per-round updates is equivalent to updating with prefix sum, i.e.,
+t
+(cid:88)
+yt =yt−1−η ∆t =y−1−η ∆j.
+s s
+j=0
+Wecanwritesimilarformulationforadditionallinearoperationinoptimization,suchasmomentum
+inSGD.Inpractice,itisofteneasiertogetprivatizedper-roundupdateby(conceptually)subtracting
+the privatized prefix sum from two consecutive rounds, and use the privatized update ∆˜t in various
+server optimizers, guaranteed by the post-processing property of DP.
+3We represent the model updates for n rounds as a matrix X ∈ Rn×m, where each row is the
+sum of clipped updates (i.e., X := (cid:80) ∆t ∈ Rm from Alg. 1), we aim to privatize AX,
+t,: i∈Qt i
+where A ∈ Rn×n is a lower triangular matrix of ones, i.e., A = 1,∀i ≤ j and A = 0,∀i > j.
+i,j i,j
+Given the privatized prefix sum A(cid:103)X, the privatized model update is ∆˜t ← A(cid:103)X
+t,:
+− A(cid:103)X t−1,:,
+and Alg. 1 is privatized because of the post-processing property of DP. Kairouz et al. [23] adopts
+the TreeAgg [6, 16, 20] mechanism to privatize AX. Recent work suggest a general matrix
+factorization framework [8, 11] can be used to achieve even stronger privacy-utility trade-offs, and
+both TreeAgg-DP-FTRL and the popular DP-SGD algorithm [1] are special cases in the MF-DP-
+FTRL framework. MF mechanism considers the factorization of A = BC and privatizes CX by
+adding independent noise Z ∈Rn×m with standard deviation σζ. We can use the (pseudo-)inverse
+of the C matrix to generate the correlated noise in the streaming setting [8],
+A(cid:103)X =B(CX+ζZ)=AX+ζC−1Z ⇒∆˜t =∆t+(ζC−1Z)
+t,:
+(1)
+Eq. (1) also suggests the alternative interpretation of correlated noise in DP-FTRL: at round t, the
+noise added in previous rounds can be cancelled when C−1 is negative.
+t,:
+TreeAgg can be written in MF form by recursively defining Cl ∈ {0,1}(2l−1)×2l−1 l = ⌈log n⌉,
+2
+as C1 = [1], Cl = [[Cl−1,0],[0,Cl−1],[1,1]], where each row C represents a node in the binary
+i,:
+tree and the ones in C represent the leaf nodes for a subtree. After adding noise Z to every
+i,:
+tree node, vanilla TreeAgg uses matrix B to selects and aggregates tree nodes to privatize the
+prefix sum, i.e., B ∈ {0,1}2l−1×(2l−1) has B = 1,∀j = 2k+1 −1,k ∈ κ,i = (cid:80) 2k, otherwise
+i,j k∈κ
+B =0. SeveralschemesimprovevanillabinaryTreeAggforprefixsumsappearintheliterature.
+i,j
+Kairouz et al. [23] efficiently implemented TreeAgg with partial variance reduction [20], which
+leverages the recursive structure of C and only needs ⌈log n⌉m memory to generate correlated
+2
+noise. The full variance reduction trick [20] can further improve the performance and is equivalent
+to setting B =AC−1 ∈R2l−1×(2l−1) by computing the Moore-Penrose pseudoinverse of C [11] (we
+use an abuse of notation C−1 for pseudoinverse). However, the full variance reduction TreeAgg
+(TreeAgg-Full) does not have a memory-efficient implementation, and consumes nm memory.
+Another variant [2] is more memory-efficient, but achieves suboptimal performance compared to
+MF approaches [18]. In this paper, we primarily consider TreeAgg [23] that is widely used in
+industry[35],andTreeAgg-Full[11]thatachievesbetterprivacy-utilitytrade-offbutlessmemory
+and computation efficient, to represent the tree aggregation mechanisms.
+BandMF Choquette-Choo et al. [8] exploits the banded structure, i.e., C ∈ Rn×n where C =
+i,j
+0,∀|i−j|≥ˆb, to simplify the optimization and privacy accounting for MF mechanisms. BandMF
+successfully applied MF mechanisms to the FL system for the first time. When fixing all the other
+configurations for training a production LM, BandMF improved the DP guarantee from ρ=0.52-
+zCDPbyTreeAggtoρ=0.24-zCDP.However,BandMFhastoestimatethebandsizeˆbandtotal
+roundsnforoptimizingmatricesbeforetraining,andtheperformancequicklydropswhentheactual
+min-sepbinFLtrainingissmallerthanˆb,orthetrainingroundismorethann. BandMFimproves
+memory usage of MF from n×m to ˆb×m for correlated noise, but the typical value of min-sep b
+in FL is still hundreds to thousands for strong DP guarantees. More recently, BandFHU [24] and
+BandToep [25] optimize banded Toeplitz matrices for larger n and exploit Toeplitz structure for
+computation efficiency, but they have not been shown to outperform BandMF in the FL setting.
+2.4 BLT Mechanisms in DP-FTRL
+We now consider lower-triangular Toeplitz matrix in MF mechanism, i.e., C := LtToep(c) ∈ Rn×n
+where C = c ,∀i ≤ j otherwise C = 0. Buffered-linear Toeplitz (BLT) matrices [14] param-
+i,j i−j i,j
+eterize C by θ ∈ (0,1]d (the “buffer decay” parameters) and non-negative ω ∈ Rd (the “output
++
+4scale” parameters), where the Toeplitz coefficients are given by
+(cid:40)
+1 i=0
+c = (2)
+i (cid:80) ω θi−1 i>0.
+j∈[d] j j
+The BLT(ω,θ) matrices have many useful properties [14], most importantly for our purposes:
+(1) Streaming multiplication by C (Z = CZˆ for Z,Zˆ ∈ Rn×m) can be computed efficiently using
+only O(dm) memory and O(dm) time per round t, without fully materializing C, Z, or Zˆ. Hence
+C is referred as a d-buffer BLT. (2) The inverse of a d-buffer BLT (C = BLT(ω,θ)) is another
+d-buffer BLT (C−1 =BLT(ωˆ,θˆ)), and we can efficiently compute Toeplitz coefficients of C−1 using
+Eq.(2)appliedto(ωˆ,θˆ). WenowderivethecorrelatednoisegenerationschemaforC−1Z inEq.(1)
+based on the BLT properties. We can first derive the BLT parameters (θˆ,ωˆ) of C−1 such that
+C−1 = BLT(θˆ,ωˆ), and then generate the correlated noise based on (θˆ,ωˆ) in streaming setting.
+However, we show a simpler alternative that directly uses the BLT parameters (θ,ω) to generate
+streaming correlated noise Zˆ.
+ApplyingtheparameterizationinEq.(2)(alsoappearin[14,Sec5])to[14,Alg1],andinitializing
+buffers S ← 0 ∈ Rd×m, we can efficiently compute Z from Zˆ in the streaming setting,
+−1 t,: t,:
+Z =Zˆ +ωTS ,S =diag(θ)S +1 Zˆ . We rearrange the update equations to get Zˆ from
+t,: t,: t−1 t t−1 d t,:
+Z and S,
+Zˆ =Z −ωTS ,S =diag(θ)S +1 Zˆ . (3)
+t,: t,: t−1 t t−1 d t,:
+To efficiently generate correlated noise Zˆ at round t, we only need to materialize the independent
+t,:
+noise Z ∈ R1×m and use the buffers S ∈ Rd×m in Eq. (3). The efficient correlated noise
+t,: t−1
+generation parameterized by BLT parameters (θ,ω) for C−1 (instead of C) did not appear in
+Dvijotham et al. [14] and is new to this work. Eq. (3) intuitively shows the noise cancellation view
+of correlated noise, where the previous noises are tracked in the states decaying with θ ∈(0,1], and
+then subtracted in the current round after scaling with ω.
+Forcompleteness,weprovidethestreamingmultiplicationalgorithmofZ =CZˆ andZˆ =C−1Z
+forC =BLT(θ,ω)inAlg.2andAlg.3, respectively. Alg.2isadirectapplicationof[14, Alg1]and
+only used to derive Alg. 3, which is our streaming algorithm for generating correlated noise with
+BLTs using only dm memory. Finally, we apply the streaming correlated noise Zˆ by BLT from
+Alg. 3 (using Eq. (3)) in Alg. 1 for the BLT-DP-FTRL algorithm, i.e.,
+∆˜t ← (cid:88) ∆t+Zˆ . (4)
+i t,:
+i∈Qt
+Algorithm 2 Stream Mult. by BLT(θ,ω) [14] Algorithm 3 Stream Mult. by BLT−1(θ,ω)
+Input: Input:
+Input stream Zˆ ∈Rn×m Input stream Z ∈Rn×m
+θ,ω for C =BLT(θ,ω) θ,ω for C =BLT(θ,ω)
+Output: Output:
+The rows Z of Z =CZˆ The rows Zˆ of Zˆ =C−1Z
+t,: t,:
+Initialize buffers S ←0∈Rm×d Initialize buffers S ←0∈Rm×d
+−1 −1
+for t=0,...,n−1 do for t=0,...,n−1 do
+Z =Zˆ +ωTS Zˆ =Z −ωTS
+t,: t,: t−1 t,: t,: t−1
+▷DecayeachbufferbyθandaddZˆ toeach ▷ The buffer update is the same as Alg. 2
+t,:
+S t =diag(θ)S t−1+1 dZˆ t,: S t =diag(θ)S t−1+1 dZˆ t,:
+Output Z Output Zˆ
+t,: t,:
+5Mech Loss Mech. opt. Memory Noise (n,b)-
+cost overhead Added fragility
+BLT (ours) MaxLoss/ Low Low Low Low
+RmsLoss (O(n) ) (∼4×m )
+BandMF [8] RmsLoss High High Lowest Med
+(O(n2)) (ˆb×m )
+BandToep [25] RmsLoss Low High Low Med
+(O(n)) (ˆb×m)
+TreeAgg [23] RmsLoss* Lowest Med High Low
+(predefined) (⌈log (n)⌉×m)
+2
+Table 1: Summary of mechanisms considered, evaluated in terms of: mechanism optimization cost, how
+expensive is it to compute the mechanism C; O(·) gives the cost of a single gradient calculation. The next
+two columns relate to the deployment of the mechanism in a ML training system: memory overhead is the
+additional state (as a multiple of the model dimension m) that the server needs to maintain; the per-round
+runtime cost is also proportional to this value. The noise added is categorized subjectively, for details see
+examplesin Fig.2. (n,b)-fragilityreflectsthedegreetowhichthemechanismsperformancedegradeswhen
+totalnumberofroundsnandmin-sepbarepoorlyestimated,seediscussiononquantitativeresultsinFigs.3
+to 6. The conclusion: BLTs perform well on all aspects.
+2.5 Comparing DP-FTRL Mechanisms
+We summarize DP-FTRL mechanisms in Tab. 1 and show the advantages of BLT-DP-FTRL. Our
+BLTmechanismcanoptimizeeitherMaxLossorRmsLossforgeneratingcorrelatednoise(detailedin
+Sec.3.3following[14]),whilepreviousMFmechanismsinpracticeprimarilyconsiderRmsLoss[8,25].
+It is possible to extend the previous mechanisms to use MaxLoss, while it is still an open problem
+which loss format corresponds better with learning performance when running with the DP-FTRL
+algorithms. TreeAgg, especially TreeAgg-Full, is equivalent to considering RmsLoss though
+the mechanism is predefined without explicit optimization cost; and we present the lower memory
+overhead (⌈log (n)⌉×m) for TreeAgg while TreeAgg-Full without an efficient algorithm yet
+2
+actually needs .
+BLTsachievebetterprivacy-utilitytrade-offsthanTreeAgg-Fullinsimulationbenchmarkex-
+periments(seeSec.4),andclearlyoutperformsTreeAgginproductioncross-deviceFLexperiments
+(seeSec.5),aslowernoiseisaddedinBLTs. WhileBandMF[8]canaddlowestnoise(measuredby
+RmsLossinFig.2),BLTshavelowermechanismoptimizationcostandmemoryoverhead. Moreover,
+Secs.4and5showthelearningperformanceofBLTsareoftencomparablewithBandMFunderthe
+same privacy guarantee in practical settings, though BLTs’ RmsLoss is slightly worse. The memory
+overhead of BLTs is d×m where we empirically observe that buffer size d = 4 achieves low losses
+and further increasing d does not further improve in our empirical settings of total rounds n and
+min-sepb. TheBLTmemoryoverheadofd∼4issmallerthanTreeAggwhere⌈log (n)⌉∼11,and
+2
+muchsmallerthantypicalˆb∼X00forBandMFandBandToep. BandToep[25]suggestedsmall
+ˆb is preferred when using amplification by sampling in the many participation settings; however,
+sampling is generally not possible in practical cross-device FL systems.
+As shown in Figs. 3 to 6, BLT is also more robust than banded MF mechanisms when number
+of total rounds n and min-sep b are not accurately estimated. Specifically, it is unclear how to
+run Banded MF mechanisms beyond the estimated n after optimizing the C ∈ Rn,n matrix for
+correlated noise. Optimizing C ∈Rn,n for a much larger n and truncating it to the actual number
+of training rounds can achieve good privacy-utility trade-offs, but encounter non-trivial mechanism
+optimization cost. BandMF performance degrades fast when the actual min-sep b is smaller than
+6the estimatedbandˆb, butthe stronger DPguarantees are generallyachieved whenˆb is large. Hence
+the tricky task of estimating min-sep b is more important for BandMF. In general, BLT-DP-FTRL
+is competitive for achieving state-of-the-art privacy-utility trade-off (compared to BandMF), while
+maintains ease to use in practice (compared to TreeAgg).
+3 Optimizing BLTs for Multiple Participations
+We study how to optimize for the BLT parameters θ ∈Rd and ω ∈Rd in Eq. (3) for the BLT-DP-
+FTRL algorithm, and account for DP guarantees. Particularly, we generalize the BLT optimization
+and DP accounting in [14] from single participation to multiple participations
+3.1 Sensitivity Under Multiple Participations
+Adjacent Data Streams and Privacy Accounting We assume users (FL clients) participate
+in training according to a participation schema Π⊂Powerset([n]), where each participation pattern
+π ∈ Π (and so π ⊆ [n]) indicates a set of indexes of steps in which a single user might participate.
+EachΠresultsinaadjacencyrelationN ondatastreams: twodatastreamsxandx˜ areadjacent,
+Π
+that is (x,x˜)∈N, if there exists a π ∈Π such that x =x˜ for t∈/ π, and ∥x −x˜ ∥ ≤ζ for t∈π.
+t t t t 2
+InFLforuser-levelDP(Alg.1),x :=(cid:80) ∆t isasumoverper-usermodelgradientseachsubjectto
+t i i
+an L2-norm bound ζ, and two streaming datasets are adjacent if one can be formed from the other
+by “zeroing out” all the gradient contributions from any one user following Defn. 1.1 of Kairouz
+et al. [23]. Under this adjacent relationship, the DP guarantees of MF mechanism in DP-FTRL can
+be accounted for the release of CX +ζZ according Eq. (1), computing the sensitivity of CX to
+calibrate with the Gaussian noise Z of zero mean and σ standard deviation [8].
+Multi-participation Sensitivity We consider b-min-sep-participation, where the distance be-
+tween any two participations is at least b and there are at most k total participations, formally
+Π ={π ⊆[n]||π|<k,{i,j}⊆π,i̸=j ⇒|i−j|≥b}.
+b,k
+Thisismotivatednotonlybytheapplicabilitytofederatedlearning(asdiscussedbyChoquette-Choo
+et al. [8], which also formalized this schema), but also because (implicitly) it is the participation
+schema under which TreeAgg was extended to multiple participations by Kairouz et al. [23].
+LetD:={x−x˜ |(x,x˜)∈N}representthesetofallpossibledifferencesbetweenadjacentx,x˜.
+Then, the L2 sensitivity of C under N is given by
+sens (C)= sup ∥Cx−Cx˜∥ = sup∥Cu∥ . (5)
+N F F
+(x,x˜)∈N u∈D
+In this work, we only consider C ≥0 (elementwise), and so the supremum over u in Eq. (5) will
+always be achieved by some u≥0 (observe each non-zero entry u ∈Rm can be chosen arbitrarily
+i
+from the unit ball of radius ζ). The non-negativity also implies C⊤C ≥ 0, and hence following
+Corollary 2.1 of Choquette-Choo et al. [9], we have
+sens (C)=ζmax∥Cu(π)∥ when C ≥0. (6)
+NΠ
+π∈Π
+2
+where u(π)∈{0,1}n is given by u(π) =1 if i∈π and 0 otherwise. Note that ζ simply introduces
+i
+a linear scaling, and so we can take ζ = 1 w.l.o.g. both when optimizing mechanisms and when
+computing MaxLoss and RmsLoss.
+7Multi-participation Sensitivity for BLTs Let C = LtToep(c) ∈ Rn×n be a lower-triangular
+Toeplitz matrix defined by the sequence of Toeplitz coefficients c = (c ,c ,...,c ) ∈ RN as in
+0 1 n−1
+Sec. 2.4. We assume c ≥0 and c is non-increasing, and consider the sensitivity of C. Let c =C
+i i :,i
+be the ith column of C, so c =c and generally
+0
+c =(cid:0) 0,0,...,0,c ,c ,...c (cid:1) ∈Rn.
+j 0 1 n−j−1
+(cid:124) (cid:123)(cid:122) (cid:125)
+j zeros
+The sensitivity of general Toeplitz matrices with decaying coefficients is recently discussed in
+Kalinin and Lampert [24, Thm. 2], which we restate in Thm. 3.1 with our notation. The par-
+ticipation pattern π⋆ simply puts the k participations as early as possible, with each participation
+separated by exactly b. This sensitivity computation is important for both DP accounting and
+optimizing for BLT parameters in Sec. 3.3.
+Theorem 3.1. Given a Toeplitz strategy matrix C =LtToep(c)∈Rn×n with c non-increasing and
+non-negative. Then, sens (C) can be computed in time O(kn) as
+Πb
+sens (C)=∥Cu(π⋆)∥
+NΠ 2
+where π⋆ is given by
+π⋆ =(0,b,2b,...,(k−1)b). (7)
+ASensitivityLowerBound InspiredbyThm.3.1,westateasensitivitylowerboundforgeneral
+matrixinRemark3.2. Anoverlyoptimistic(insteadofcommonlyworst-case)DPguaranteescanbe
+computedforMFmechanismwithsensitivityinRemark3.2. Weonly useRemark3.2fortheprivacy
+accounting of baseline binary tree mechanisms in simulation experiments in Sec. 4 as the dynamic
+programming accounting in [23] is computationally expensive. In practice we find the lower-bound
+of Remark 3.2 is tight for the binary tree matrices we consider; proving this is an interesting open
+problem.
+Remark 3.2. Letting π⋆ ∈Π as in Eq. (7), for any mechanism C,
+sens (C)≥∥Cu(π⋆)∥ (8)
+Π 2
+is a lower-bound on sensitivity (the actual sensitivity might be higher). While Kairouz et al. [23]
+introduced a dynamic program for computing binary-tree sensitivity, it requires some work to extend
+it to the tree completion trick, and in practice it is expensive to compute. Hence, when evaluating
+TreeAgg approaches, for simplicity we use the lower bound of Eq. (8), which can be computed
+immediately for the tree-completion matrices C used when n is not a power of 2.
+3.2 Evaluating Matrix Factorization Mechanisms
+Whileourendgoalisgoodlearningperformance(asmeasuredbyheld-outtestsetaccuracy),wecan
+estimatetheutilityofamatrixmechanismforDP-FTRLbyquantifyingtheerroritintroducesinto
+prefix sum estimates. The total noise introduced by the DP mechanism into prefix sum estimates
+in Eq. (1) will be BZ = A(cid:103)X −AX where Z ∈ Rn×m is IID Gaussian noise with σ determined
+according to the desired DP guarantee, and B = AC−1. We consider two error metrics based on
+the standard deviation of the total noise added to the prefix sum estimates. The MaxError is the
+worst-case standard deviation in the estimate of any prefix sum, which can be computed as
+(cid:115)
+(cid:88)
+MaxError(B):=max B2 ;
+i,j
+i∈[n]
+j∈[n]
+8similarly the root-mean-squared error over all iterations i∈[n] is
+(cid:115)
+(cid:88) (cid:88)
+RmsError(B):= B2 /n.
+i,j
+i∈[n]j∈[n]
+The standard deviation σ of the noise Z must scale linearly in the sensitivity of C to achieve a
+target DP guarantee, so our final measures of noise account for this:
+MaxLoss(B,C):=MaxError(B)·sens (C) (9)
+Π
+RmsLoss(B,C):=RmsError(B)·sens (C) (10)
+Π
+Eqs.(9)and(10)measurethedistributionofnoisetoapproximatetheprivacy-utilitytrade-offasthe
+loss,whichdonotdependonthenoisemultiplierα=σ/sens (C)thatisdirectlyusedinaccounting
+Π
+for the DP guarantees, as discussed in [14, Introduction]. For optimized C in matrix factorization
+mechanisms (e.g., TreeAgg, BandMF, and BLT), specific DP guarantees are achieved by scaling
+α (and corresponding σ in Alg. 1). The total noise on the prefix sum BZ also scales MaxLoss and
+RmsLoss by α. Hence, without loss of generality, we use RmsLoss and MaxLoss to compare the
+optimality of different matrix factorization mechanisms, which is equivalent to assuming α=1 that
+corresponds to (ϵ=5.3,δ =10−7)-DP (for example).
+Notewedeviatefromthedefinitionsof[14,arXivv3],inordertodistinguishtheerrorintroduced
+by B from the total loss (which is what we optimize and use to compare mechanisms), which
+incorporates the sensitivity of C.
+3.3 Optimizing BLTs for Multiple Participations
+For the typical scale of n<105 in FL systems, rather than deriving closed forms for sensitivity
+and error as in Dvijotham et al. [14], we use an alternative approach that is flexible and simple to
+implement. Recall the properties of BLTs discussed in Sec. 2.4, we parameterize the optimization
+of the BLT by the pair (θ,θˆ). Dvijotham et al. [14, Lem. 5.2] implies given a pair (θ,θˆ), there exist
+unique (ω,ωˆ) such the BLT(θ,ω)−1 =BLT(θˆ,ωˆ), and we can compute ω and ωˆ in time O(d2); this
+result is summarized below as Alg. 5. Thus, given a (θˆ,θ), we can efficiently compute the Toeplitz
+coefficients of C (using Eq. (2) applied to (θ,ω)) and C−1 (applying Eq. (2) to (θˆ,ωˆ)). From the
+Toeplitz coefficients of C we can then efficiently compute sensitivity using Thm. 3.1. RmsError can
+be computed efficiently from the Toepltiz coefficients of C−1 following the approach of McKenna
+[25, Prop. 3.1], and a simple generalization of this approach applies to to MaxError as well. For
+completeness we summarize in the following proposition:
+Proposition 3.3. Let C = LtToep(c) ∈ Rn×n be a lower-triangular Toeplitz matrix defined by
+Toeplitzcoefficientsc=(c ,c ,...,c )∈RN. ThenC−1 isalsoalower-triangulartoeplitzmatrix;
+0 1 n−1
+let C−1 =LtToep(cˆ). Then, B :=AC−1 =LtToep(b) where b =(cid:80)i−1cˆ. Further, we can compute
+i j=0 i
+(cid:115)
+(cid:88)
+MaxError(B)= b2
+i
+i∈[n]
+and
+(cid:115)
+(cid:88)
+RmsError(B)= (n−i)b2/n.
+i
+i∈[n]
+Combining these elements gives us an efficient and differentiable algorithm for computing
+MaxLoss and RmsLoss. Complete pseudo-code for the differentiable loss calculation is given in
+Alg. 4. Following Dvijotham et al. [14], we use auto differentiation and L-BFGS optimizer in
+JAX [4] to optimize (θ,θˆ) for the BLT-DP-FTRL algorithm, and then extract BLT(θ,ω) for noise
+generation. Similar to [14], we introduce log-barrier penalties w/ strength 10−7 to keep ω > 0,
+9Algorithm 4 Differentiable Loss for BLTs
+Inputs:
+Pair of buffer-decay parameters (θ,θˆ) with d buffers each (θ,θˆ∈[0,1]d).
+num rounds n, min-separation b, max participations k
+Penalty strength λ, set to zero for loss calculation, or λ=10−7 to stabilize optimization
+Outputs:
+Either MaxLoss(AC−1,C) or RmsLoss(AC−1,C).
+▷ Use Alg. 5 to calculate the unique ω and ωˆ such that C =BLT(θ,ω) and C−1 =BLT(θˆ,ωˆ)
+ω =calc output scale(θ,θˆ)
+ωˆ =calc output scale(θˆ,θ)
+▷ Compute sens=∥Cπ⋆∥ where C =LtToep(c)
+2
+Compute c∈Rn where c =1 and c =(cid:80) ω θi−1 for i∈{1,...,n}.
+0 i j∈[d] j j
+c¯=0∈Rn ▷ Holds the sum of columns of C
+for i∈[k] do
+c¯[b·i:] += c[0:n−b·i] ▷ numpy-like semantics
+sens=∥c¯∥ ▷ Because c¯=Cπ⋆.
+2
+▷ Compute Errror(AC−1) where C−1 =LtToep(cˆ).
+Compute cˆ∈Rn where cˆ =1 and cˆ =(cid:80) ωˆ θˆi−1 for i∈{1,...,n}.
+0 i j∈[d] j j
+Compute b∈Rn by b =(cid:80)i cˆ ▷ So B =AC−1 =LtToep(b).
+i j=0 i
+(cid:113)
+ (cid:80) b2 for MaxError
+i∈[n] i
+err= (cid:113)
+ (cid:80) (n−i)b2/n for RmsError.
+i∈[n] i
+▷ Log-barrier penalties to keep θ >0, θ <1, and ω >0 for numerical stability when optimizing
+penalty=λ(−log(θ)−log(1−θ)−log(ω))
+Return loss=err·sens+penalty
+Algorithm 5 calc output scale (Lemma 5.2 of Dvijotham et al. [14])
+Input:
+Pair of buffer-decay parameters (θ,θˆ) with d buffers each (θ,θˆ∈[0,1]d).
+Output:
+The unique ω s.t. C =BLT(θ,ω) has a BLT inverse with buffer-decay θˆ(C−1 =BLT(θˆ,·)).
+(cid:81)
+p(x)= (1−θ x)
+i∈[d] i
+q(x)=(cid:81) (1−θˆx)
+i∈[d] i
+f(x)=(p(x)−q(x))/x ▷ Polynomial division gives f, a polynomial of degree d−1
+(cid:81)
+z = −θ
+i∈[d] i
+(cid:16) (cid:17)−1
+w = (cid:81) (θ−1−θ−1) for i∈[d]
+i j̸=i i j
+Define ω by ω
+i
+=f(θ i−1)−θ ziwi for i∈[d]
+Return ω
+10θ >0 and θ <1 (which is necessary to ensure the Toeplitz coefficients of C are decreasing to satisfy
+Thm. 3.1). For high precision optimization, we use double precision in JAX on CPUs and GPUs.
+We observe that increasing buffer size d does not necessarily reduce the loss due to numerical sta-
+bility and optimization challenges, and different BLT parameter (θ,ω) may be achieved in different
+optimization runs. We also highlight that the different BLT parameters (θ,ω) can generate similar
+ToeplitzcoefficientsforC,whichsuggestsasmallerdmighthelpmitigatetheoptimizationchallenge
+from overparametrization.
+90 mech
+n brute force via Alg. 5 speedup BandMF
+60 BLT
+2000 0.021 3.8e-5 550×
+20000 0.258 3.6e-5 7176×
+30
+200000 4.772 4.5e-5 104884×
+0
+Table 2: Seconds to compute n Toeplitz coefficients
+of C−1. JAX just-in-time (JIT) compilation is not 800 3200 12800 51200
+mechanism target iterations n
+included for either approach.
+Figure1: Totalwallclockoptimizationtime
+including JIT compilation on a V100 GPU
+forBandMFandBLTs,fixingb=400and
+varying n. The average over 3 runs is re-
+ported.
+The primary motivation for utilizing the (θ,θˆ) parameterization in Alg. 4 is computational effi-
+ciency. Tab. 2 compares the time to compute n Toepltiz coefficients for C−1 given either BLT(θ,ω)
+or given (θ,θˆ). In the first caes (“brute force”), we construct the Toeplitz coefficients of C using
+Eq. (2), and then solve a linear system (using jax.lax.scan and the property that the inverse of
+a lower triangular Toeplitz matrix is also lower triangular Toeplitz) to compute the coefficients of
+C−1). In the second case, we use Alg. 5 to compute (ω,ωˆ), and then compute the Toeplitz coef-
+ficients by applying Eq. (2) to BLT(θˆ,ωˆ). The comparison uses a V100 GPU and a compiled jax
+implementation, and is repeated many times with an average is given. The second approach can
+be fully vectorized, and is orders of magnitude faster. This is critical because this is the primary
+computationalstepincomputingtheRmsLossorMaxLossandoccursintheinnerloopofthemech-
+anism optimization procedure: the net result is mechanism optimization is substantially faster than
+forBandMF,andscalestomuchlargern, seeFig.1. Alg.4doesincurmorejaxjust-in-time(JIT)
+compilationoverheadcomparedtoBandMFoptimization,whichaccountsBLToptimizationbeing
+slightly slower for small n.
+4 Simulation Experiments
+We run simulation experiments before applying our BLT-DP-FTRL algorithm in Sec. 2.4 to train
+production LMs. The BLT parameters (θ,ω) are optimized with our multi-participation approach
+in Sec. 3. We present private-utility trade-off on StackOverflow benchmark dataset in Sec. 4.1,
+and MaxLoss, RmsLoss across a range of scenarios in Sec. 4.2. We compare BLTs to both flexible
+TreeAgg [23] and state-of-the-art BandMF [8] (see Sec. 2 for more discussion). In the simulation
+experiments,wearemaximallygenerous inevaluatingTreeAggmechanisms,consideringthemem-
+ory cost to be ⌈log n⌉, while calculating RmsError and MaxError using the optimal TreeAgg-
+2
+Full [11] without memory-efficient implementation, and use the lower bound of Remark 3.2 to
+11
+)sces(
+emit
+.tpoTest Accuracy RMS Max
+Mechanism ϵ=2 ϵ=8 Loss Loss
+BandMF (band=342) [8] 23.21 24.86 10.21 8.60
+TreeAgg-Full [11] 22.54 24.47 14.98 12.47
+BLT (nbuf=2,k=1) [14] 22.37 24.64 11.80 11.15
+BLT (nbuf=5,k=1) [14] 22.40 24.63 11.40 10.87
+BLT *(nbuf=2,k=6) 23.09 24.83 10.81 9.34
+BLT *(nbuf=3,k=6) 23.13 24.87 10.79 9.33
+BLT *(nbuf=4,k=6) 23.13 24.83 10.79 9.33
+BLT *(nbuf=5,k=6) 23.07 24.84 10.79 9.33
+Table3: Comparingmechanismsintermsoftest-setaccuracyontheStackOverflowNWPtask. Allrunsare
+based on n=2052 rounds of training with k =6 participations and min-sep b=342. BLTs are optimized
+for MaxLoss. Results are visualized in Fig. 11 in App. B.
+account for overly optimistic privacy-utility trade-off. Thus, in all cases we over-estimates the true
+performanceofthebinarytree, butneverthelessweshow BLTshavesuperiorperformanceinterms
+of both error and memory.
+4.1 StackOverflow NWP Benchmark
+We follow Choquette-Choo et al. [8] for StackOverflow next word prediction (NWP) experiments,
+including all hyperparameter tuning, and vary only the DP mechanism to compare BandMF,
+TreeAgg-Full,andBLTs. ResultsaresummarizedinTab.3. BandMFstillachievesthehighest
+performance,asinthisscenariowetrainforafixedknownnumberofrounds,withanexactlyknown
+max participations k = 6 and min-separation b = 342. TreeAgg-Full and BLTs optimized for
+only k =1 participation [14] are noticeably worse, but our multi-participation-optimized BLTs are
+very competitive with BandMF with only 2 or 3 buffers (with a 171× and 114× reduction in run-
+time memory overhead). We expect the negligibly worse performance of larger numbers of buffers
+may be due to the impact of regularization during the optimization of the BLT parameters. In
+the relatively large signal-to-noise ratio regime (ϵ = 8), BLT⋆ achieves comparable or even better
+learning accuracy though the RmsLoss (MaxLoss) is slightly worse.
+4.2 RmsLoss and MaxLoss Experiments
+Comparing BLT to TreeAgg-Full and BandMF We further show that BLT is better than
+TreeAgg-Full, and more flexible than BandMF by computing RmsLoss (MaxLoss) in a wide
+range of scenarios. Because the BandMF mechanisms are optimized for RmsLoss, we compare
+on this metric in Fig. 2. However, in both our StackOverflow and Gboard experiments described
+subsequently, we deploy BLT mechanisms optimized for MaxError following [14]. For completeness,
+we provide Fig. 12 in App. B that compares the mechanisms on MaxLoss. The BLTs directly
+optimized for the metric perform better than optimizing for a different metric. We observe that all
+the BLTs perform competitively with BandMF, and can outperform BandMF when the min-sep
+differssignificantlyfromthenumberofbands. Forexample,inFig.2,withk =2participations(left
+panel) our BLT(k =2,mean) (light blue) BLT outperforms BandMF(b=400) when min separation
+is less than 390 or greater than 700.
+12k = 2 k = 5
+6.50 12
+6.25
+mech
+11 BandMF(b=200)
+6.00
+BandMF(b=400)
+BandMF(b=800)
+5.75 BLT(k=2,mean)
+10 BLT(k=5,mean)
+5.50
+BLT(k=2,max)
+BLT(k=5,max)
+5.25 TreeAgg-Full
+9
+type
+5.00 BandMF
+BLT
+4.75 8 TreeAgg-Full
+4.50
+200 400 600 800 1000 200 250 300 350 400
+min seperation b min seperation b
+Figure2: Comparisonofmechanismsintermsofprefix-sumroot-mean-squarederroratafixedprivacylevel.
+BLTs were optimized for either RmsLoss (“mean”) or MaxLoss (“max”), and for either k = 2 or k = 5
+participations at min-separation b = 400. BandMF matrices were optimized for b ∈ {200,400,800} (the
+BandMF optimization does not depend on k, and previous work optimizes for RmsLoss). We also include
+TreeAgg-Fullusingtheoptimal(“fullHonaker”)decoding(forwhichamemory-efficientnoisegeneration
+algorithm is unknown). We observe that all the BLTs perform competitively with BandMF,
+and can outperform BandMF when the min-separation differs significantly from the number of bands.
+For example, with k = 2 participations (left panel) our BLT(k = 2,mean) (light blue) BLT outperforms
+BandMF(b=400) when min separation is less than 390 or greater than 700.
+Relative RmsLoss for k=3 participations, n=2000 Unnormalized RmsLoss
+1.5 16
+BandMF(b=50) BLT(b=1)
+1.4 BandMF(b=200) BLT(b=400) 14
+BandMF(b=400) BLT(b=999)
+1.3 BandMF(b=950) 12
+1.2
+10
+1.1
+8
+1.0
+6
+0.9
+50 200 400 950 50 200 400 950
+min seperation b min seperation b
+Figure 3: Comparison of BandMF and BLTs with n=2000 and k =3 participations, varying the
+min-separation b. The BLTs were optimized for RmsLoss. The x-axis is shown on a log-scale. The
+left panel gives loss relative to the BLT(b = 400) mechanism, while the right panel gives the same
+data on an unnormalized y-axis scale.
+13
+)evitaleR(
+ssoLsmR
+ssoLsmR
+ssoLsmRMechanism RmsLoss for n=2000 with b k=n Unnormalized RmsLoss
+1.8 250
+BandMF(b=10) BandMF(b=1000)
+1.6 BandMF(b=50) BLT(b=50,k=10) 200
+BandMF(b=200) BLT(b=400,k=5)
+1.4 BandMF(b=400) BLT(b=1000,k=2)
+150
+1.2
+100
+1.0
+50
+0.8
+0
+10 50 200 400 1000 10 50 200400 1000
+min-sep b with k=n/b min seperation b
+Figure 4: Comparison of BandMF and BLTs with n = 2000, varying b such that k = n/b is an
+integer. The BLTs were optimized for RmsLoss. The x-axis is shown on a log-scale. The left panel
+gives loss relative to the BLT(b=400) mechanism, while the right panel gives the same data on an
+unnormalized y-axis scale.
+RobustnesstoMin-sepb Fig.3comparesBLTtothestrongbaselineBandMF,fixingn=2000
+and k = 3 participations and varying the min-separation b. We make three primary observations:
+(1) The optimization of the BandMF mechanisms implicitly assumes b∼ˆb, and as expected, near
+this regime BandMF in fact (slightly) outperforms the BLTs. (2) However, when b ≪ n/k, the
+BLTs perform better. (3) Interestingly, BandMF performs significantly worse than the BLTs at
+b = 999. In this case, the only participation patterns that actually have 3 participations are e.g.
+{0,999,1998},{0,1000,1999}—importantly,onlythecolumns{0,1,999,1000,1998,1999}canever
+occurina3-participationpattern. BecausethecolumnsofC forBandMFallhavethesamecolumn
+norm,thisfactcannotbeexploited. However,becauseoftheirToeplitzstructure,columns1998and
+1999 have smaller norms than other columns, and that is beneficial in this situation.
+The setting where k is fixed and we vary b includes situations that should generally be avoided
+in practice. For example, if we had k =3, b=10, and n=2000, this indicates we had enough data
+we should have been able to achieve b = n/k ≈ 667, and so b = 10 indicates a highly suboptimal
+data ordering. Similarly, if we had k = 3, b = 999, and n = 2000, then we would have been better
+off stopping at n = 1998, which would have ensured only k = 2 participations and significantly
+decreased sensitivity (at presumably a small cost in learning performance compared to training for
+n=2000 iterations).
+Fig. 4 shows the contrasting scenario (indicating an essentially optimal data ordering, general
+not possible in federated learning) that occurs when we fix n = 2000, and choose b that exactly
+dividensothatwecantakek =n/bexactly. Fig.4considerstheworst-casemaxparticipationk for
+given min-sep b and total rounds n, and achieves generally larger RmsLoss. When b≤ˆb, BandMF
+slightly outperforms BLTs, but BandMF degrade more rapidly for b≤ˆb. In general, the curves of
+BLTs are more smoother across different min-sep b in both Fig. 3 and Fig. 4.
+Robustness to Total Rounds n Fig. 5 considers varying the number of steps of the mechanism
+actuallyexecutedformechanismsoptimziedfordifferentn. BandMFmechanismscanonlybeused
+up to the n they are optimized for, but BLTs naturally extend to any n. This figure demonstrates
+thatagainBLTsarenotparticularlysensitivetothenforwhichtheyareoptimized. Forthisfigure,
+the maximum number of participations is chosen to be the largest allowed given n and b=400 (i.e.,
+k =n/d),leadingtothestairstepbehavioroftheunnormalizedRmsLossinFig.5(Right). BandMF
+optimizing for large n performs well when the actual number of iterations executed is small, but
+14
+)evitaleR(
+ssoLsmR
+ssoLsmRoptimizing for large n encounters nontrivial as discussed in Tab. 1 and Fig. 1. Finally, these results
+showthatonlyd=2buffersissufficientforgoodperformance,ora200×memorysavingscompared
+to BandMF with b=400 bands.
+Relative RmsLoss varying n Unnormalized RmsLoss
+1.10 BandMF(n=800) BLT(n=2000,d=2) 8
+BandMF(n=2000) BLT(n=800,d=5)
+BLT(n=800,d=2) BLT(n=2000,d=5) 7
+1.05
+6
+5
+1.00
+4
+0.95 3
+0 200 400 600 800 1000 1200 1400 1600 1800 2000 0 1000 2000
+Number of iterations n executed n
+Figure 5: Comparison of BandMF and BLTs optimized for n=800 and n=2000, and evaluated
+fornuptotheoptimizationtarget(forBandMF)andover[0,2000]fortheBLTs. Allmechanisms
+were optimized for min-separation (bands) b = 400. BLTs with d = 2 and d = 5 perform almost
+equivalently; d=1 (not shown),is not sufficient with relative RmsLoss >1.07.
+Comparing additional mechanisms for n=2000, k=5 participations
+1.150
+BLT(k=2,mean)
+1.125
+BLT(k=5,mean)
+1.100 BandToep(b=200)
+BandToep(b=400)
+1.075
+BandToep(b=800)
+1.050 FHU(b=200)
+1.025 FHU(b=400)
+FHU(b=800)
+1.000
+0.975
+0.950
+200 250 300 350 400 450
+min seperation b
+Figure 6: Comparison of mechanisms for n = 2000 and k = 5 participations, optimized for min-
+separation b = 400 and compared for different actual values of min-separation. The setting is
+comparable to that of Fig. 2, so only relative lines are given.
+ComparingBLTtoBandToepandBandFHU Finally,wecompareBLT-DP-FTRLtoseveral
+other more recent mechanisms:
+• BandToep [25], which optimizes banded Toeplitz matrices C for b-min-sep-participation
+under RmsLoss. The primary advantage of this mechanism compared to BandMF is that
+BandToep matrices can be optimized for much larger n. However, the runtime is the same
+as BandMF, and the optimization is still slower than the optimization of BLTs.
+15
+)evitaleR(
+ssoLsmR
+)evitaleR(
+ssoLsmR
+ssoLsmR• BandFHU[24],whichusesprefixesoftheoptimal-for-single-participationMaxLosscoefficients
+of Fichtenberger et al. [18] to form banded Toeplitz matrices. These will likely be worse
+than BandToep (which is specifically optimized for multiple participations), but require no
+mechanism optimization.
+Fig. 6 shows that BLTs are comparable or better to both of these approaches.
+5 Production LMs for Mobile Keyboard
+Utility Privacy
+LM Rnds
+NWP(%) WMR(-%) WPM(+%) Mech-σ/MinS/MaxP zCDP DP-ϵ
+14.07 ± 0.06 - - BandMF-1.411 / 296 / 4 0.29 4.82
+es-ES 1280
+13.98 ± 0.11 0.38 0.13 BLT-7.379 / 300 / 4 0.16 3.46
+5.80 ± 0.10 - - TreeAgg-7 / 437 / 5 0.94 9.29
+id-ID 2350
+5.87 ± 0.04 0.09 0.07 BLT-7.379 / 447 / 5 0.20 3.93
+13.77 ± 0.36 - - BandMF-4.523 / 2001 / 1 2.45e-2 1.32
+pt-BR 2000 13.86 ± 0.25 -0.04 0.04 BLT-8.681 / 2001 / 1 2.23e-2 1.25
+13.96 ± 0.18 -0.13 0.18 BLT-16.1 / 1181 / 2 1.40e-2 0.98
+430 13.58 ± 0.06 - - TreeAgg-7 / 91 / 4 1.33 11.27
+pt-PT 430 13.76 ± 0.11 0.38 -0.24 BLT-3.12 / 92 / 4 1.11 10.19
+320 13.66 ± 0.04 0.07 -0.12 BLT-5.5 / 49 / 6 0.75 8.19
+Table 4: PrivacyandutilityofproductionLMs. UtilityaremeasuredbyNWPaccuracyaveragedbetween
+r±50roundsforroundr(r±10forpt-PT),andtherelativeWMRdecreaseandWPMincreaseinA/Btest;
+privacy shows the key parameters and corresponding DP guarantees, and smaller DP guarantees represent
+stronger protection; DP-ϵ is accounted for small δ = 10−10; estimated population sizes are es-ES (4.21M),
+id-ID(8.9M),pt-BR(16.6M),andpt-PT(0.83M).Werunadditionalexperimentsonpt-BRandpt-PTwith
+larger noise multipliers linearly scales with larger report goal for the BLT mechanism.
+Production Setting Our BLT-DP-FTRL algorithm is flexible in min-sep (shown in Sec. 4.2),
+achieves competitive privacy-utility performance for relatively large signal-to-noise ratio (shown in
+Sec. 4.1), and saves computation and memory cost (shown in Tab. 1), which motivates the usage
+in production FL systems. Following Hard et al. [19], Xu et al. [35], we train one-layer LSTM
+LMs of ∼6.4M parameters for mobile keyboard applications. These LMs are deployed on device to
+predict words during decoding time to facilitate user typing. We use next word prediction (NWP)
+accuracy on a hold-out set of devices to track the training progress, and also conduct A/B test in
+production, where following two metrics are reported: (1) Word Modified Ratio (WMR), the ratio
+of words being modified during typing or after committed; improvement is shown by reduction;
+(2) Word Per Minute (WPM): the number of committed words per minute. LMs are trained for
+different language-locale combination in different populations. We study Spanish in Spain (es-ES),
+Indonesian in Indonesia (id-ID), Portuguese in Brazil (pt-BR) and Portuguese in Portugal (pt-PT).
+LMs are pre-trained on public multilingual C4 dataset [36] before private training with FL and DP.
+Algorithm Setting We compare our BLT-DP-FTRL algorithm with TreeAgg [23, 35] and
+BandMF [8] discussed in Sec. 2. As far as we know, these two are the only DP algorithms actively
+used to train LMs in a production FL system. We follow the system and parameter configurations
+in [8, 33, 35] for baselines, and compare to TreeAgg for pt-PT and id-ID, and BandMF for es-ES
+and pt-BR. However, we highlight it is challenging to exactly reproduce the settings, especially for
+the min-sep parameter. The BandMF algorithm are optimized for total round n = 2000, band
+16ˆb=400 for es-ES, andˆb=1000 for pt-BR. We optimize BLT for total round n=40002, estimated
+min-sep b = 100 for pt-PT, b = 400 for es-ES and id-ID, and b = 1000 for pt-BR. We use BLT⋆
+for multi-participation and estimate the max-par based on n/b. For these n,b settings, only d = 4
+bufferscanachievenear-optimallossinoptimization,andBLT⋆ matricesareparameterizedbyonly
+8 numbers (these parameters are provided in App. A). Though different configures are used for
+populations with different sizes, the BLT parameters (θ,ω)∈R8 optimized for b=400 can achieve
+competitive results for a wide range of min-seps, which can be a reasonable default for BLT-DP-
+FTRL. As discussed in Tab. 1, BLT is more memory-efficient than both TreeAgg and BandMF.
+In the simulation results Tab. 3, BLT is also better than TreeAgg for privacy-utility trade-off,
+and comparable with BandMF. The results in production further show that the flexibility of BLT
+makes it easier to use in practice, and achieve better results than both TreeAgg and BandMF.
+0.140 0.140
+0.135
+0.130
+0.135
+0.125
+0.120
+0.115
+0.130
+0.110
+0.105 TreeAgg ε=11.27 BLT6k ε=9.38 TreeAgg BLT6k
+0.100 BLT ε=10.19 BLT
+0.125
+0 100 200 300 400 2 4 6 8 10
+Rounds DP Guarantee ε
+(a) NWP evaluation accuracy (b) Privacy-utility trade-off
+Figure 7: NWP evaluation accuracy and privacy-utility trade-off curves for training the production Por-
+tuguese LM in Portugal (pt-PT) with DP-FTRL in a FL system. Additional curves for es-ES, id-ID, and
+pt-BRareprovidedinFigs.13and15,withNWPaccuracyzoomed-inforlaterstageoftraininginFig.14.
+The privacy-utility trade-off curves are derived from NWP accuracy curves: for each selected round r, we
+compute the mean and standard deviation (shown as vertical bars) for accuracy from the rounds in the
+range of r±10, and accounting the DP guarantees. BLTs achieve better privacy-utility trade-off.
+Main Results We summarize the privacy and utility results for es-ES, id-ID, pt-BR, and pt-
+PT LMs in Tab. 4, and show the privacy-utility curves for training pt-PT in Fig. 7. We provide
+additional curves for other LMs in Figs. 13 to 15 inApp. B, and discuss the observations here.
+(1) Most of the models achieve DP guarantee of ϵ<10 with exception of ϵ 10 for pt-PT due to the
+challenge of small population; the pt-BR model trained with BLT-16.1 achieves ϵ<1 at round 2000.
+DP guarantees of ϵ < 10 is commonly used for machine learning, and ϵ < 1 are considered strong
+guarantees [29]. To achieve single-digit DP guarantees in practice without sacrificing the utility, the
+production LMs are trained with large number of clients per round (known as report goal in FL
+systems). We use typical report goal 6.5K [35] for es-ES, id-ID and pt-BR, and use a smaller report
+goal3Kforpt-PTwithasmallerpopulation. WeadditionallyrunBLT-DP-FTRLwithlargerreport
+goal and linearly scale up the noise multiplier to keep the signal-to-noise ratio for utility: BLT-16.1
+withreportgoal12Kforpt-BRandBLT-5.5withreportgoal6Kforpt-PT.Theresultingmin-seps
+in pt-BR and pt-PT almost halved when the report goals are increased. We use noise multiplier
+7 for TreeAgg, which is determined by StackOverflow simulation experiments [35]. The noise
+multiplierof BandMFiscomputedsothattheRMSEissimilartoTreeAggwithnoisemultiplier
+2Asthetargetroundisusuallylessthan2000,n=4000forBLTislessfavorablecomparedton=2000usedfor
+BandMF.BLTisrobusttothetargetroundn,andachievesstrongerresultswithaninferiorn.
+17
+ccA
+lavE
+ccA
+lavE7[8]andwillachievestrongerDPguarantees. AsBLTachievescomparableprivacy-utilitytrade-off
+as BandMF in the high single-to-noise ratio regime (ϵ = 8) in simulation experiment (Tab. 3 ),
+the noise multiplier of BLT is computed so that BLT achieves similar DP guarantee as BandMF
+for the desired round. (2) BLT achieves better privacy-utility trade-off compared to TreeAgg and
+BandMF. BLT achieves comparable and slightly better NWP accuracy for the models in Tab. 4
+and Fig. 7, and stronger DP guarantees. The model performance are further verified by A/B test
+in the production application comparing BLT models to baseline models for WMR and WPM. The
+advantage of BLT in privacy-utility trade-off is clearly demonstrated in Fig. 15, and BLT is better
+than not only TreeAgg, but also BandMF across the production LM training. The practical
+min-sep can be quite different from the estimated min-seps for optimizing BandMF and BLT
+matrices, ∼90 compared to 100 for pt-PT, ∼300 compared to 400 for es-ES, ∼440 compared to 400
+for id-ID, and 2000+ compared to 1000 for pt-BR. As BLT is more flexible on min-sep estimation,
+thechallengeofreliablyestimatingmin-sepresultinginBLTachievingevenstrongerprivacy-utility
+trade-offs than BandMF in the production LMs training.
+1.0
+0.30
+TreeAgg_r1000 BandMF_r2000
+0.9 TreeAgg_r1000 BandMF_r2000
+TreeAgg_r2000 BLT_r1000
+TreeAgg_r2000 BLT_r1000
+0.8 BandMF_r1000 BLT_r2000 0.25 BandMF_r1000 BLT_r2000
+0.7
+0.20
+0.6
+0.5 0.15
+0.4
+0.10
+0.3
+0.2 0.05
+0.1
+4000 5000 6000 7000 8000 900010000 4000 5000 6000 7000 8000 900010000
+Report goal Report goal
+(a) Population 3M (b) Population 10M
+TreeAgg pop-1M
+23
+BandMF pop-3M
+22 BLT pop-10M 2−2
+21
+TreeAgg pop-1M
+20 BandMF pop-3M
+2−3
+BLT pop-10M
+2−1
+2−2
+2−3
+2−4
+2−4
+200 400 600 8001000120014001600 200 400 600 8001000120014001600
+Min separation Min separation
+(c) Report goal 6500, worst-case max-par (d) Report goal 6500, optimistic max-par=2
+Figure8: Theeffectofpopulationsize,numberofrounds,reportgoals,andmin-sepsonDP-FTRLprivacy
+guarantees. The results are extrapolate from the setting for es-ES and id-ID (BandMF and BLT matrices
+areoptimizedformin-sep=400)basedonthehypothesisthatlinearlyscalenoisemultiplierandreportgoal,
+oronlychangemin-sepwillnotaffectthemodelutility. TheForafixednumberofroundstoachieveutility
+target,increasingreportgoalandmin-sepcanachievestrongerguaranteesmeasuredbysmallerzCDP.The
+optimal min-sep is capped by population size for a fixed report goal, and BLT provides better guarantees,
+and smoother transition across different min-seps.
+18
+PDCz
+PDCz
+PDCz
+PDCzExtrapolation We extrapolate the results for production setting by using a common hypothesis:
+linearly increase report goal and noise multiplier will not change the utility of the model as the
+signal-to-noise ratio is maintained. In addition, we assume only changing min-sep will not change
+theutilitybecauseofthesignal-to-noiseratio. Thehypothesishasbeenverifiedinpreviouswork[23]
+and the large report goal experiments for pt-BR and pt-PT in Tab. 4 and Fig. 13. Hence we can
+study the effect on DP without actually training the model, similar to Sec. 4.2 for simulation.
+We vary the report goal, and the min-sep is optimistically estimated by min-sep=⌊population-
+size/report-goal⌋,andmax-par=⌈total-rounds/min-sep⌉isusedunlessotherwisespecified. Wediscuss
+the extrapolation results in Fig. 8, where utility is the same based on the hypothesis. (1) BLT
+achieves better DP guarantees because of its robustness to min-seps and total rounds. (2) We
+observe that using larger report goal and optimizing for the largest possible min-sep achieves better
+results than using smaller report goals and larger corresponding min-sep, similar to observation
+for TreeAgg in [35]. (3) Fig. 8b shows training more rounds does not necessarily increasing DP
+guarantees when min-sep is large. (4) The gap of BLT and BandMF is small when min-sep is
+accurately estimated. In the regime of relatively high signal-to-noise ratio (large noise multiplier
+for limited computation resources), BLT is competitive in a wide range of different configurations.
+HenceBLTiseasiertouseinproductionFLsystemscomparedtoBandMF,andalsosavesmemory
+during training.
+Finally,inFig.9,weextrapolatetheDPguaranteeresultsbyvaryingthenumberoftotalrounds
+n with the noise multiplier for the fixed report goal 6500, fixed min separation b = 100,400,1000,
+and corresponding max participation k = n/b. The TreeAgg, BLT and BandMF mechanisms
+used in production are compared. Instead of using RmsLoss or MaxLoss to measure privacy-utility
+trade-offsinFigs.2and5,herewefixutilitybasedonempiricalutilityoftheproductiontrainingand
+the signal-to-noise-ratio hypothesis, and compare the DP guarantees. As mentioned before, using
+BandMF beyond the optimized matrices for n = 2000 has not been studied before, and hence we
+only extrapolate BandMF up to n=2000 rounds. TreeAgg and BLT can run arbitrary number
+of rounds, and BLTs achieve stronger DP guarantees than TreeAgg. In practice, we can use one
+of the BLTs as a default mechanism across different settings, and perform on-the-fly optimization
+for given customized setting.
+23 20 2−1 TreeAgg BLT(b=1000)
+BLT(b=100) BandMF(b=400)
+22 2−1 2−2 BLT(b=400) BandMF(b=1000)
+21
+20 2−2 2−3
+2−1 2−3
+2−2 2−4
+2−3 2−4
+2−4 TreeAgg BLT(b=1000) 2−5 TreeAgg BLT(b=1000)
+2−5
+22 −− 65 B BL LT T( (b b= =1 40 00 0) ) B Ba an nd dM MF F( (b b= =4 10 00 0) 0) 2−6 B BL LT T( (b b= =1 40 00 0) ) B Ba an nd dM MF F( (b b= =4 10 00 0) 0) 2−6
+1000 2000 3000 4000 1000 2000 3000 4000 1000 2000 3000 4000
+Rounds Rounds Rounds
+(a) Min-sep b=100 (b) Min-sep b=400 (c) Min-sep b=1000
+Figure 9: Extrapolate by varying number of rounds n for the TreeAgg, BLT and BandMF mecha-
+nisms used in production. Use the noise multiplier for the fixed report goal 6500; fix min separation
+b=100,400,1000, respectively; worst-case max participation is varied assuming fixed population size, i.e.,
+k = n/b. The utility of different mechanisms at a specific round (x-axis value) are assumed to be similar
+duetothesignal-to-noiseratiohypothesis,andwecancomparethecorrespondingzCDPguarantees(y-axis
+value).
+19
+PDCz PDCz PDCz6 Concluding Remarks
+ThisworkaddressesthecriticalchallengeofachievingstrongDPinFLforon-deviceLMs. Wehave
+successfullyextendedtheBLTmechanismtomulti-participationscenariosandintegrateditintothe
+DP-FTRL framework. Our BLT-DP-FTRL algorithm demonstrates superior privacy-utility trade-
+offs compared to the widely-used TreeAgg mechanism while maintaining its ease of use. Further-
+more, it rivals the state-of-the-art BandMF mechanism in performance, yet without the associated
+complexitiesandhighmemorycosts. Throughextensiveempiricalevaluationsonbothabenchmark
+dataset and real-world production tasks, we have showcased the practicality and effectiveness of
+BLT-DP-FTRL, paving the way for its broader adoption.
+The empirical results in this paper primarily focus on the cross-device FL setting where privacy
+amplificationbysamplingischallenginginpractice. Thediscussions(e.g. Tab.1)canalsobeapplied
+to centralized setting for user-level DP or example-level DP. In centralized setting, BandMF [8]
+with amplification can achieve better privacy-utility trade-off measured by RmsLoss among the
+mentioned mechanisms, when number of rounds n and model dimension m is not too large for
+optimizing and applying the mechanism. When n and m are large, BLT and BandToep [25]
+(similarly, BandFHU [24]) can both be applied, where BLT has less optimization cost for very
+large n (shown in Fig. 1), while BandToep can apply existing amplification by sampling.
+Acknowledgement
+TheauthorsthankZacharyGarrett, NicoleMitchell, andKeithRushforsupportingtheproduction
+code; Ryan McKenna and Yuanbo Zhang for reviewing an early draft.
+References
+[1] Martin Abadi, Andy Chu, Ian Goodfellow, H Brendan McMahan, Ilya Mironov, Kunal Talwar,
+andLiZhang. Deeplearningwithdifferentialprivacy. InProceedingsofthe2016ACMSIGSAC
+conference on computer and communications security, pages 308–318, 2016.
+[2] JoelDanielAnderssonandRasmusPagh. Asmoothbinarymechanismforefficientprivatecon-
+tinual observation. In Proceedings of the 37th International Conference on Neural Information
+Processing Systems, NeurIPS, Red Hook, NY, USA, 2024. Curran Associates Inc.
+[3] Keith Bonawitz, Hubert Eichner, Wolfgang Grieskamp, Dzmitry Huba, Alex Ingerman,
+VladimirIvanov,ChloeKiddon,JakubKoneˇcny`,StefanoMazzocchi,BrendanMcMahan,etal.
+Towards federated learning at scale: System design. Proceedings of machine learning and sys-
+tems, 1:374–388, 2019.
+[4] James Bradbury, Roy Frostig, Peter Hawkins, Matthew James Johnson, Chris Leary, Dougal
+Maclaurin, George Necula, Adam Paszke, Jake VanderPlas, Skye Wanderman-Milne, and Qiao
+Zhang. JAX: composable transformations of Python+NumPy programs, 2018. URL http:
+//github.com/google/jax.
+[5] Mark Bun and Thomas Steinke. Concentrated differential privacy: Simplifications, extensions,
+and lower bounds. In Theory of Cryptography Conference, pages 635–658. Springer, 2016.
+[6] T.-H. Hubert Chan, Elaine Shi, and Dawn Song. Private and continual release of statistics.
+ACM Trans. on Information Systems Security, 14(3):26:1–26:24, November 2011.
+[7] ZacharyCharles,ArunGanesh,RyanMcKenna,HBrendanMcMahan,NicoleMitchell,Krishna
+Pillutla,andKeithRush. Fine-tuninglargelanguagemodelswithuser-leveldifferentialprivacy.
+arXiv preprint arXiv:2407.07737, 2024.
+20[8] Christopher A. Choquette-Choo, Arun Ganesh, Ryan McKenna, H. Brendan McMahan, Keith
+Rush, Abhradeep Thakurta, and Zheng Xu. (Amplified) Banded Matrix Factorization: A
+unified approach to private training. In NeurIPS, 2023.
+[9] Christopher A. Choquette-Choo, Hugh Brendan McMahan, J. Keith Rush, and
+Abhradeep Guha Thakurta. Multi-epoch matrix factorization mechanisms for private machine
+learning. InInternationalConferenceonMachineLearning,ICML2023,23-29July2023,Hon-
+olulu,Hawaii,USA,volume202ofProceedingsofMachineLearningResearch,pages5924–5963.
+PMLR, 2023. URL https://proceedings.mlr.press/v202/choquette-choo23a.html.
+[10] Lynn Chua, Badih Ghazi, Yangsibo Huang, Pritish Kamath, Daogao Liu, Pasin Manurangsi,
+Amer Sinha, and Chiyuan Zhang. Mind the privacy unit! user-level differential privacy for
+language model fine-tuning. arXiv preprint arXiv:2406.14322, 2024.
+[11] SergeyDenisov,BrendanMcMahan,KeithRush,AdamSmith,andAbhradeepGuhaThakurta.
+Improved differential privacy for sgd via optimal private linear operators on adaptive streams,
+2022. URL https://arxiv.org/abs/2202.08312.
+[12] Vadym Doroshenko, Badih Ghazi, Pritish Kamath, Ravi Kumar, and Pasin Manurangsi. Con-
+nect the dots: Tighter discrete approximations of privacy loss distributions. arXiv preprint
+arXiv:2207.04380, 2022.
+[13] DP Team. Google’s differential privacy libraries., 2022. https://github.com/google/
+differential-privacy.
+[14] Krishnamurthy Dvijotham, H Brendan McMahan, Krishna Pillutla, Thomas Steinke,
+Abhradeep Thakurta, et al. Efficient and near-optimal noise generation for streaming dif-
+ferential privacy. arXiv preprint arXiv:2404.16706, 2024.
+[15] Cynthia Dwork, Frank McSherry, Kobbi Nissim, and Adam Smith. Calibrating noise to sensi-
+tivity in private data analysis. In Theory of cryptography conference, pages 265–284. Springer,
+2006.
+[16] CynthiaDwork,MoniNaor,ToniannPitassi,andGuyN.Rothblum. Differentialprivacyunder
+continual observation. In Proc. of the Forty-Second ACM Symp. on Theory of Computing
+(STOC’10), pages 715–724, 2010.
+[17] Cynthia Dwork, Aaron Roth, et al. The algorithmic foundations of differential privacy. Foun-
+dations and Trends® in Theoretical Computer Science, 9(3–4):211–407, 2014.
+[18] Hendrik Fichtenberger, Monika Henzinger, and Jalaj Upadhyay. Constant matters:
+Fine-grained complexity of differentially private continual observation. arXiv preprint
+arXiv:2202.11205, 2022. URL https://arxiv.org/abs/2202.11205.
+[19] AndrewHard, KanishkaRao, RajivMathews, SwaroopRamaswamy, Franc¸oiseBeaufays, Sean
+Augenstein, HubertEichner,Chlo´eKiddon, andDanielRamage. Federatedlearningformobile
+keyboard prediction. arXiv preprint arXiv:1811.03604, 2018.
+[20] James Honaker. Efficient use of differentially private binary trees. Theory and Practice of
+Differential Privacy (TPDP 2015), London, UK, 2015.
+[21] Dzmitry Huba, John Nguyen, Kshitiz Malik, Ruiyu Zhu, Mike Rabbat, Ashkan Yousefpour,
+Carole-Jean Wu, Hongyuan Zhan, Pavel Ustinov, Harish Srinivas, et al. Papaya: Practical,
+private, and scalable federated learning. Proceedings of Machine Learning and Systems, 4:
+814–832, 2022.
+21[22] Peter Kairouz, H. Brendan McMahan, Brendan Avent, Aur´elien Bellet, Mehdi Bennis, Ar-
+jun Nitin Bhagoji, Kaylee Bonawitz, Zachary Charles, Graham Cormode, Rachel Cummings,
+Rafael G. L. D’Oliveira, Salim El Rouayheb, David Evans, Josh Gardner, Zachary Garrett,
+Adri`a Gasc´on, Badih Ghazi, Phillip B. Gibbons, Marco Gruteser, Za¨ıd Harchaoui, Chaoyang
+He,LieHe,ZhouyuanHuo,BenHutchinson,JustinHsu,MartinJaggi,TaraJavidi,GauriJoshi,
+Mikhail Khodak, Jakub Konecny´, Aleksandra Korolova, Farinaz Koushanfar, Sanmi Koyejo,
+Tancr`edeLepoint,YangLiu,PrateekMittal,MehryarMohri,RichardNock,AyferO¨zgu¨r,Ras-
+mus Pagh, Mariana Raykova, Hang Qi, Daniel Ramage, Ramesh Raskar, Dawn Song, Weikang
+Song, Sebastian U. Stich, Ziteng Sun, Ananda Theertha Suresh, Florian Tram`er, Praneeth
+Vepakomma, Jianyu Wang, Li Xiong, Zheng Xu, Qiang Yang, Felix X. Yu, Han Yu, and Sen
+Zhao. Advances and open problems in federated learning. CoRR, abs/1912.04977, 2019. URL
+http://arxiv.org/abs/1912.04977.
+[23] Peter Kairouz, Brendan Mcmahan, Shuang Song, Om Thakkar, Abhradeep Thakurta, and
+ZhengXu. Practicalandprivate(deep)learningwithoutsamplingorshuffling. InInternational
+Conference on Machine Learning (ICML), pages 5213–5225, 2021.
+[24] Nikita Kalinin and Christoph Lampert. Banded square root matrix factorization for differen-
+tially private model training, 2024.
+[25] RyanMcKenna. Scalingupthebandedmatrixfactorizationmechanismfordifferentiallyprivate
+ml, 2024.
+[26] Brendan McMahan, Eider Moore, Daniel Ramage, Seth Hampson, and Blaise Aguera y Arcas.
+Communication-efficientlearningofdeepnetworksfromdecentralizeddata. InAISTATS,pages
+1273–1282. PMLR, 2017.
+[27] Brendan McMahan, Daniel Ramage, Kunal Talwar, and Li Zhang. Learning differentially
+private recurrent language models. In International Conference on Learning Representations
+(ICLR), 2018.
+[28] H Brendan McMahan, Daniel Ramage, Kunal Talwar, and Li Zhang. Learning differentially
+private recurrent language models. arXiv preprint arXiv:1710.06963, 2017.
+[29] NataliaPonomareva, HusseinHazimeh, AlexKurakin, ZhengXu, CarsonDenison, H.Brendan
+McMahan, Sergei Vassilvitskii, Steve Chien, and Abhradeep Thakurta. How to dp-fy ml: A
+practical guide to machine learning with differential privacy, 2023.
+[30] Boxin Wang, Yibo Jacky Zhang, Yuan Cao, Bo Li, H Brendan McMahan, Sewoong Oh, Zheng
+Xu, and Manzil Zaheer. Can public large language models help private cross-device federated
+learning? arXiv preprint arXiv:2305.12132, 2023.
+[31] JianyuWang, ZacharyCharles, ZhengXu, GauriJoshi, HBrendanMcMahan, BlaiseAgueray
+Arcas, Maruan Al-Shedivat, Galen Andrew, Salman Avestimehr, Katharine Daly, et al. A field
+guide to federated optimization. arXiv:2107.06917, 2021.
+[32] ShanshanWu,ZhengXu,YanxiangZhang,YuanboZhang,andDanielRamage. Promptpublic
+large language models to synthesize data for private on-device applications. arXiv preprint
+arXiv:2404.04360, 2024.
+[33] ZhengXuandYanxiangZhang. Advancesinprivatetrainingforproductionon-devicelanguage
+models, 2024.
+[34] Zheng Xu, Maxwell Collins, Yuxiao Wang, Liviu Panait, Sewoong Oh, Sean Augenstein, Ting
+Liu, Florian Schroff, and H Brendan McMahan. Learning to generate image embeddings with
+user-level differential privacy. arXiv preprint arXiv:2211.10844, 2022.
+22[35] Zheng Xu, Yanxiang Zhang, Galen Andrew, Christopher A Choquette-Choo, Peter Kairouz,
+H Brendan McMahan, Jesse Rosenstock, and Yuanbo Zhang. Federated learning of gboard
+language models with differential privacy. ACL Industry, 2023.
+[36] Linting Xue, Noah Constant, Adam Roberts, Mihir Kale, Rami Al-Rfou, Aditya Siddhant,
+Aditya Barua, and Colin Raffel. mt5: A massively multilingual pre-trained text-to-text trans-
+former. arXiv preprint arXiv:2010.11934, 2020.
+[37] Yuanbo Zhang, Daniel Ramage, Zheng Xu, Yanxiang Zhang, Shumin Zhai, and Peter Kairouz.
+Private federated learning in gboard. arXiv preprint arXiv:2306.14793, 2023.
+23A BLT Parameters for Production Training
+We provide the BLT⋆ parameters we generated and used in training production LMs with DP FL
+inSec.5. TheBLT⋆ matricesareoptimizedforthreemin-sepsettingsb=(100,400,1000)andeach
+BLT is parameterized by 8 values for buffer size d = 4, i.e., buffer decay θ ∈ Rd and output scale
+ω ∈Rd.
+• min-sep b=100, total rounds n=2000, max participation k =10 ⇒,
+θ = (0.989739971007307,0.7352001759538236,0.16776199983448145,0.1677619998016191),
+ω =(0.20502892852480875,0.23357939425278557,0.03479503245420878,0.03479509876050538).
+• min-sep b=400, total rounds n=4000, max participation k =5 ⇒,
+θ = (0.9999999999921251,0.9944453083640997,0.8985923474607591,0.4912001418098778),
+ω =(0.0070314825502323835,0.10613806907600574,0.1898159060327625,0.1966594748073734).
+• min-sep b=1000, total rounds n=4000, max participation k =2 ⇒,
+θ = (0.9999999999983397,0.9973412136664378,0.9584629472313878,0.6581796870749317),
+ω =(0.008657392263671862,0.05890891298180163,0.14548176930698697,0.2770117005326523).
+Fig. 10 visualizes the corresponding Toeplitz coefficients for C to compute sensitivity and C−1
+for generating correlated noise. The coefficients of BLT(θ,ω) for b = 100 decaying faster than
+b=400 and b=1000.
+100
+b=100 b=1000 −10−7
+10−1 b=400 b=100 b=1000
+−10−6 b=400
+10−2
+−10−5
+10−3
+−10−4
+10−4
+−10−3
+10−5
+−10−2
+10−6 −10−1
+10−7 −100
+0 500 1000 1500 2000 0 500 1000 1500 2000
+Index Index
+(a) (b)
+Figure 10: Toeplitz coefficients {c ,...,c } for C =LtToep(c) and {cˆ ,...,cˆ } for C−1 =LtToep(cˆ); For
+0 n 0 n
+BLT(θ,ω), c can be computed by Eq. (2), and there are many ways to derive corresponding cˆ (e.g., set
+Z =I in Alg. 3).
+B Additional Simulation and Production Results
+24
+stneiciffeoC
+ztilpeoT
+C
+stneiciffeoC
+ztilpeoT
+1−C25.0 16
+13 Mech
+23.5 24.9 15 BandMF(b=342,RMSE)
+12 TreeAgg-Full 24.8 14 BLT(nbuf=2,k=1)
+23.0 24.7 13 11 BLT(nbuf=5,k=1) BLT*(nbuf=2,k=6)
+24.6 12 10 BLT*(nbuf=3,k=6)
+22.5 BLT*(nbuf=4,k=6)
+24.5 11 9 BLT*(nbuf=5,k=6)
+22.0 24.4 10 8
+24.3 9 7
+21.5
+24.2 8 6
+Figure 11: Visualizing the results in Tab. 3.
+k = 2 k = 4 k = 5
+7.5 12 14 mech
+BandMF(b=200)
+7.0 11 13 BandMF(b=400)
+BandMF(b=800)
+BLT(k=2,mean)
+6.5 10 12 BLT(k=5,mean)
+BLT(k=2,max)
+6.0 11 BLT(k=5,max)
+9 TreeAgg-Full
+5.5 10 type
+BandMF
+5.0 8 9 BLT
+TreeAgg-Full
+200 400 600 800 1000 200 300 400 500 600 200 250 300 350 400 450
+min seperation b min seperation b min seperation b
+Figure 12: The same mechanisms from Fig. 2, but compared on MaxLoss instead of RmsLoss.
+25
+ssoLxaM
+2=
+ta ycaruccA
+tseT
+8=
+ta ycaruccA
+tseT
+ssoLxaM ssoLsmR0.060
+0.140
+0.055
+0.135
+0.050
+0.130
+0.045
+0.125
+0.040
+0.120
+0.035
+0.115
+0.030
+0.110
+BandMF ε=4.82 BLT ε=3.46 TreeAgg ε=9.29 BLT ε=3.93
+0.025
+0.105
+0 250 500 750 1000 1250 0 500 1000 1500 2000
+Rounds Rounds
+(a) Spanish LM in Spain (es-ES) (b) Indonesian LM in Indonesia (id-ID)
+0.140
+0.14
+0.135
+0.13 0.130
+0.125
+0.12
+0.120
+0.115
+0.11
+0.110
+0.10 BandMF ε=1.32 BLT12k ε=0.98 0.105 TreeAgg ε=11.27 BLT6k ε=9.38
+BLT ε=1.25 0.100 BLT ε=10.19
+0.09
+0 500 1000 1500 2000 0 100 200 300 400
+Rounds Rounds
+(c) Portuguese LM in Brazil (pt-BR) (d) Portuguese LM in Portugal (pt-PT)
+Figure 13: The NWP evaluation accuracy curves for training LMs with DP-FTRL in FL. BLT achieves
+comparableNWPaccuracyandslightlybetterprivacyguarantees(atthelastround)comparedtoBandMF
+for es-ES and pt-BR; much better DP guarantees, and/or better utility compared to TreeAgg for id-ID
+and pt-BR.
+26
+ccA
+lavE
+ccA
+lavE
+ccA
+lavE
+ccA
+lavE0.142 0.060
+TreeAgg ε=9.29 BLT ε=3.93
+0.141
+0.059
+0.140
+0.058
+0.139
+0.138
+0.057
+0.137
+0.056
+0.136
+BandMF ε=4.82 BLT ε=3.46
+0.135 0.055
+800 900 1000 1100 1200 1600 1800 2000 2200
+Rounds Rounds
+(a) Spanish LM in Spain (es-ES) (b) Indonesian LM in Indonesia (id-ID)
+0.140
+0.144
+0.142 0.138
+0.140
+0.136
+0.138
+0.136 0.134
+0.134
+0.132
+0.132 BandMF ε=1.32 BLT12k ε=0.98 TreeAgg ε=11.27 BLT6k ε=9.38
+BLT ε=1.25 BLT ε=10.19
+0.130 0.130
+1000 1200 1400 1600 1800 2000 200 250 300 350 400
+Rounds Rounds
+(c) Portuguese LM in Brazil (pt-BR) (d) Portuguese LM in Portugal (pt-PT)
+Figure 14: The NWP evaluation accuracy curves for training LMs with DP-FTRL in FL. Zoom in the
+latter stage of training for the curves in Fig. 13. The NWP accuracy increases fast in the first 200 rounds
+inDPFLtraining,andtheaccuracychangeswithintherangeof0.01whenzoominginthelaterstage. The
+oscillation is because of the stochasticity in forming subsets of devices in both training and evaluation per
+round. The average NWP accuracy from nearby rounds is reported in Tab. 4 to reduce the variance.
+27
+ccA
+lavE
+ccA
+lavE
+ccA
+lavE
+ccA
+lavE0.060
+BandMF BLT
+0.1400
+0.055
+0.1375
+0.050
+0.1350
+0.045
+0.1325
+TreeAgg BLT
+0.1300 0.040
+2 3 4 2 4 6 8 10
+DP Guarantee ε DP Guarantee ε
+(a) Spanish LM in Spain (es-ES) (b) Indonesian LM in Indonesia (id-ID)
+0.145 0.140
+BandMF BLT12k
+BLT
+0.140
+0.135
+0.135
+0.130
+0.130
+TreeAgg BLT6k
+BLT
+0.125 0.125
+0.6 0.8 1.0 1.2 2 4 6 8 10
+DP Guarantee ε DP Guarantee ε
+(c) Portuguese LM in Brazil (pt-BR) (d) Portuguese LM in Portugal (pt-PT)
+Figure15: Theprivacy-utilitytrade-offcurvesderivedfromFig.13. Foreachselectedroundr,wecompute
+themeanandstandarddeviation(shownasverticalbars)foraccuracyfromtheroundsintherangeofr±50
+(r±10 for pt-PT), and also accounting the DP guarantees. BLTs show better privacy-utility trade-off as
+their curves are closer to the top left (small DP guarantees and large NWP accuracy).
+28
+ccA
+lavE
+ccA
+lavE
+ccA
+lavE
+ccA
+lavE
