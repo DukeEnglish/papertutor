@@ -1,0 +1,1028 @@
+Transformers to SSMs: Distilling Quadratic Knowledge to
+Subquadratic Models
+AvivBick∗ 13,KevinY.Li∗2,EricP.Xing24,J.ZicoKolter2,andAlbertGu23
+1ComputerScienceDepartment,CarnegieMellonUniversity
+2MachineLearningDepartment,CarnegieMellonUniversity
+3Cartesia.ai
+4MBZUAI
+abick@cs.cmu.edu,kyl2@cs.cmu.edu
+Abstract
+Transformerarchitectureshavebecomeadominantparadigmfordomainslikelanguagemodelingbutsufferinmanyin-
+ferencesettingsduetotheirquadratic-timeself-attention.Recentlyproposedsubquadraticarchitectures,suchasMamba,
+haveshownpromise,buthavebeenpretrainedwithsubstantiallylesscomputationalresourcesthanthestrongestTrans-
+formermodels.Inthiswork,wepresentamethodthatisabletodistillapretrainedTransformerarchitectureintoalterna-
+tivearchitecturessuchasstatespacemodels(SSMs).ThekeyideatoourapproachisthatwecanviewbothTransformers
+andSSMsasapplyingdifferentformsofmixingmatricesoverthetokensequences.Wecanthusprogressivelydistillthe
+TransformerarchitecturebymatchingdifferentdegreesofgranularityintheSSM:firstmatchingthemixingmatrices
+themselves,thenthehiddenunitsateachblock,andfinallytheend-to-endpredictions.Ourmethod,calledMOHAWK,is
+abletodistillaMamba-2variantbasedonthePhi-1.5architecture(Phi-Mamba)usingonly3Btokensandahybridver-
+sion(HybridPhi-Mamba)using5Btokens.Despiteusinglessthan1%ofthetrainingdatatypicallyusedtotrainmodels
+fromscratch,Phi-Mambaboastssubstantiallystrongerperformancecomparedtoallpastopen-sourcenon-Transformer
+models.MOHAWKallowsmodelslikeSSMstoleveragecomputationalresourcesinvestedintrainingTransformer-based
+architectures,highlightinganewavenueforbuildingsuchmodels.
+1 Introduction
+LargelanguagemodelsbaseduponTransformerarchitectureshavebecomeastapleofnaturallanguageprocessingbut
+sufferfromtheirrelianceonquadraticself-attention–theneedtocomputeinnerproductsbetweentokensatallpositions
+uptothecontextlength.Thishasmotivatedthedevelopmentofseveralalternativesubquadraticmodels,eitherapproxi-
+mationsofself-attention(Katharopoulosetal.2020)orentirelydifferentarchitectures,suchasstatespacemodels(SSMs)
+(A.GuandDao2023;A.Gu,Goel,andRé2022;Pengetal.2023;Sunetal.2023).Trainingstrongsubquadraticmodelssuch
+asSSMscanbenefitthecommunitythroughtheircheaperfinetuningandinferencecosts;however,theyhavenotbene-
+fittedfromthesameamountofcommunityeffortintheformoftrainingandcomputeasforTransformers. Thisraisesa
+naturalquestion:isitpossibletoleveragethevastamountsofresourcesthathavebeeninvestedintrainingquadratic-time
+Transformersandusethesemodelstoproducestrongeralternativemodels,suchasstate-spacemodels?
+Inthispaper,wepresentanapproachfortrainingsubquadraticstate-spacemodels(specificallyfromtheclassofMamba
+SSMs(A.GuandDao2023))throughthedistillationofdifferentelementsofapretrainedTransformermodel. Thekey
+intuitionisviewingbothAttentionandSSMsassequencetransformationsthatmixdifferenttokenembeddingsbyapply-
+ingdifferentclassesofmatricesacrossthem.Sequencemodelarchitecturescanthenbefactoredintoseparate(i)sequence
+mixingand(ii)channelmixingblocks,e.g.,aTransformeriscomposedofAttention(sequencemixer)andMLP(channel
+mixer)blocks. Usingthisbreakdown,wecanseparatelydistillthemixing elementsofeachmodelexplicitlyatdifferent
+∗Authorscontributedequallytothiswork.
+1
+4202
+guA
+91
+]GL.sc[
+1v98101.8042:viXraToken Budget vs Common Sense and Language Understanding
+70
+65
+60
+55
+50
+1 10 100 1000
+Token Budget in Billions (log scale)
+Hyb-Phi-Mamba RWKV6-1.6B RWKV4-1.5B HGRN2-1B
+Phi-Mamba RWKV5-1.5B xLSTM-1.4B GLA-1.3B
+Mamba1-1.4B Pythia-1.4B HGRN1-1B RetNet-1.3B
+Mamba2-1.3B
+Figure 1: Plot of trained token budget to averaged accuracy on Winogrande, Arc-E, Arc-C, PIQA, and Hellaswag on
+variousopen-sourcemodels(mainlynon-Transformer-basedmodels). Ourmodel(Phi-Mamba)usesmorethan33×less
+tokenbudgettoachieve5%higheraverageaccuracythanthenextbestmodel.
+levelsofgranularity.Specifically,weproposeathree-phasedistillationprocessthatprogressivelytargetshigherlevelsof
+supervisionfromtheteachermodel:(1)amatrixorientationphasethatalignsthesequencetransformationmatricesthem-
+selves;(2)ahidden-statedistillationthatalignsthehidden-staterepresentationsofeachindividuallayerofthenetwork
+withoutsacrificingpreexistinglearnedrepresentations;and(3)anend-to-endtrainingphasewithweighttransferthatfi-
+nallydistillsthefinaloutputofthenetworkusingonlyafractionoftrainingdata.WetermourapproachMOHAWKafter
+thesethreestages(MatrixOrientation,Hidden-StateAlignment,Weight-TransferandKnowledgeDistillation).
+WeapplyourapproachtoamodifiedinstantiationoftheMamba-2architecture(DaoandA.Gu2024),termedPhi-Mamba,
+which is aimed at more directly corresponding to the different architectural blocks of the Phi-1.5 language model (Gu-
+nasekaretal.2023)–averystrongTransformermodelatthe1.3Bparameterscale. Usingourapproach,thePhi-Mamba
+model achievesperformance on benchmarks stronger thanany previous Mambamodel of similarsize. Althoughperfor-
+mancestilllagsbehindthatofthebasePhi-1.5modelonthesebenchmarks,themodelisdistilledwithonly3.0Btokens,less
+than1%ofthedatausedtotraineitherthepreviouslybest-performingMambamodelsand2%forthePhi-1.5modelitself.
+Forinstance,ourPhi-Mambaachievesa71.7%accuracyontheWinograndedataset,comparedtothepretrainedMamba-2
+model’s60.9%accuracy,and44.1%accuracyontheARC-Cdataset,comparedtotheMamba-2’s33.3%accuracy.
+Moreover,byretainingonlyfourattentionlayersandsubstitutingtheremaining20layerswithMamba,ourhybridmodel
+attainsanaverageperformanceof66.0%onselectdownstreamevaluations,comparedtoPhi-1.5’s67.2%.Interestingly,our
+hybridPhi-MambasurpassesorcloselymatchesSamba(Renetal.2024)onmultiplebenchmarktasks,eventhoughSamba
+wastrainedusingPhi-2’sdataset,containsmoreparameters,andfeatures3×thenumberofattentionlayers. Giventhat
+weutilizedthelowerqualityC4dataset(Raffeletal.2023)fordistillation,itindicatesthatdistillingfromtheTransformer
+model(Phi-1.5fromGunasekaretal.(2023))evenwithoutitsoriginaltrainingdatacanoutperformtrainingfromscratch
+onthesame/comparabletrainingdata.
+Our results highlight the benefit of our three-phase distillation approach: we show in ablation experiments that each
+phaseishighlybeneficialfortheeventualfinalperformanceofthemodelandthat,e.g.,onlyattemptingtodirectlydistill
+the Phi-1.5 model (i.e., Phase 3 alone) substantially underperforms the full MOHAWK method. Moreover, our findings
+emphasizethebenefitsofstate-spacemodelswhiletrainingonfewerthan100×tokensthantheoriginalpretrainedMamba
+model.
+2
+)%(
+ycaruccA
+egarevA2 Related Work
+SequenceModels. State-of-the-artautoregressivelanguagemodelshavebeenpretrainedonmassiveamountsofdata,
+resultinginmodelsthatexhibitextensivedownstreamcapabilities,suchaszero-shottranslationandlong-rangereason-
+ing(Brownetal.2020;Gunasekaretal.2023;Touvronetal.2023). Recentworkhasfocusedonaddressingthequadratic
+complexity of Transformers by developing subquadratic alternatives based on RNN (Beck et al. 2024; Peng et al. 2023),
+SSM (A. Gu and Dao 2023; Sun et al. 2023), and linear attention mechanisms (Dao, Fu, et al. 2022; Katharopoulos et al.
+2020;Liu,Zaharia,andAbbeel2023;Qin,S.Yang,etal.2024;S.Yangetal.2024),highlightingtheimportanceofefficient
+sequencemodelsintheeraoflarge-scaleautoregressivelanguagemodels.
+Inaddition,tocombinedifferentcapabilitieswhilemaintainingefficiency,hybridmodelsthatintegrateattentionmech-
+anismswithsubquadraticmethodshavebeenproposed(Fuetal.2023;Lieberetal.2024;Renetal.2024;Z.Wangetal.
+2024). Thesemodelstypicallyfeaturealimitednumberofattentionlayers,thusmaintainingthequadraticcomplexityat
+arelativelylowfactor.
+SSMArchitectures. GSSwasthepioneerinintegratingSSMsintogatedneuralnetworkarchitectureforlanguagemod-
+eling(Mehtaetal.2022). H3,inspiredbythecombinationofS4andlinearattention(Katharopoulosetal.2020),employs
+SSMswithshiftanddiagonalmatricesandmultiplicativeoperationsoninputprojections,extendingthisformulationto
+broaderrecurrences,afoundationforsubsequentarchitectures(Fuetal.2023).SelectiveS4incorporatesS4asablackbox
+thatgeneratesabinarymaskappliedtotheinput,anarchitecturalmodificationakintogatingmechanisms(J.Wangetal.
+2023). Mamba(A.GuandDao2023),combinestheH3blockwiththeubiquitousMLPblockofmodernneuralnetworks
+byinterleavingthem,resultinginamorepowerfularchitecture. TheMamba-2blocksimplifiestheMambablockbyre-
+movingsequentiallinearprojections;theSSMparameters𝐴,𝐵,𝐶 areproducedatthebeginningoftheblockratherthan
+asafunctionoftheinputXoftheSSM.Finally,Mamba-2(DaoandA.Gu2024)wasintroducedasavariantofMamba
+whichleveragesthestructuredstatespaceduality(SSD).TheMamba-2corelayeris2-8xfasterthanMamba’sselective
+SSMwhilecontinuingtooutperformTransformersinlanguagemodeling.
+Distillation. Knowledgedistillationcanbeusedtotransferknowledgefromalargeteachermodeltoasmallerstudent
+model,resultinginamoreefficientmodelthatretainstheperformanceoftheteachermodel(Hinton,Vinyals,andDean
+2015).Distillationhasbeenappliedtovariouslanguagemodelingtasks,suchastextgeneration(Chenetal.2020;Haidar
+andRezagholizadeh2019),machinetranslation(HahnandH.Choi2019;Tanetal.2019;Zhou,Neubig,andJ.Gu2021),
+andquestion-answeringsystem(Huetal.2018;Z.Yangetal.2019).
+Distillationinlanguagemodelshasbeenlargelyfocusedoncompression: turningalargerpretrainedTransformerintoa
+smalleronebyutilizingtheweightsoftheteachermodel(Jhaetal.2023;W.Wangetal.2020;Xiaetal.2023).Someofthe
+techniquesproposedlooksimilartoours;forexample,W.Wangetal.(2020)matchattentionmatricesinastepsimilarto
+ourmatrixorientation,andLiangetal.(2023)alignoutputsofeachblock(i.e.,thehiddenstates). However,thesediffer
+insubtleandimportantwaysbecauseofoursetting; forexample,theformerusesadifferentlossfunctionthanusthat
+reliesonsoftmaxattention,andthelatterisanend-to-endobjectivewhileourhiddenstatealignmentoccurscompletely
+independentlyblock-per-block.Consequently,priorworkhasobservedthatcombiningtheseobjectivesdoesnotactually
+helpandevenmighthurtdistillation(Jhaetal.2023),whereasweshowthatourtechniquesallsignificantlyhelpimprove
+thestudentmodel.
+Asmallerbodyofworkhasfocusedonourobjectiveofdistillingacrossarchitectures,inparticular,turningapretrained
+Transformerintoadifferentarchitecture(usuallyarecurrentmodelofsomeform)ofthesamesize.Kasaietal.(2021)first
+triedturningapretrainedsoftmaxattentionintoalinearattentionbydirectlytransferringweightsandcontinuingfine-
+tuning;asimilarapproachwastakenbyconcurrentwork(Mercatetal.2024).Recently,Zhangetal.(2024)alsoproposed
+distillingintolinearattentionbyfirstmatchingattentionmatrices.Ourapproachdiffersbyusingamoreconstrainedloss
+functionthatworksbeyondlinearattention;incorporatingmorefine-grainedalignment(e.g.,thehiddenstatealignment
+step);andusingrecent,moreexpressiveclassesofefficientstudentmodels(Mamba-2),whichweshowaresignificantly
+easiertodistill(Table7).
+33 Background and Overview
+Tofacilitateaclearunderstandingofourdistillationapproach,westartwiththenecessarybackgroundanddefinitions.
+AnoverviewoftheMamba-2architecture,whichformsthefoundationofourPhi-Mambamodel,isalsoprovided.
+3.1 MatrixMixers
+FollowingDaoandA.Gu(2024), werefertoanequivalentfunctionthatrepresentstheinputandoutputofasequence
+modelasasequencetransformationorasequencemixer.Formally,
+Definition 1 (Sequence Transformation). We use the term sequence transformation to refer to a parameterized map on
+sequences𝑌 = 𝑓 𝜃(𝑋) whereX,Y ∈ R(𝑇,𝑃) and𝜃 isanarbitrarycollectionofparameters. 𝑇 representsthesequenceortime
+axis;subscriptsindexintothefirstdimension,e.g.𝑋 𝑡,𝑌 𝑡 ∈R𝑃 .
+To put it differently, sequence mixers combine tokens at various time steps, facilitating the model’s comprehension of
+temporalinformationandinteractions. Sequencetransformationsformthefoundationofdeepsequencemodels, being
+integralcomponentsofneuralnetworkframeworkssuchasTransformers. Aparticularfamilyofsequencetransforma-
+tionscanberepresentedbyY = MXforamatrixM ∈ R(𝑇,𝑇),whichwerefertoasasequencetransformationmatrix or
+matrixmixer.
+Anexampleofsuchamatrixmixeristhevanillaself-attention,Softmax(QK⊤),whichisappliedtotheinput-dependent
+VresultinginthefamiliarSoftmax(QK⊤)V.Similarly,LinearAttention(Katharopoulosetal.2020)hasasequencetrans-
+formation matrix of the form K⊤. In addition, we can easily obtain their causal variants by multiplying by L, a lower
+triangular matrix filled with 1s, to obtain L◦Softmax(QK⊤) and L◦QK⊤, respectively. Another example is a Toeplitz
+matrixTusedtoperformdiscreteconvolutiononinputX,resultinginTX(Qin,Han,etal.2023).
+A naive approach to computing the output of a sequence transformation is to multiply the input sequence X by the
+matrixM.However,thisapproachhasatimecomplexityof𝑂(𝑇2),whichisprohibitiveforlongsequences.Subquadratic
+sequencetransformations,suchasMamba-2,havebeendevelopedtoaddresssuchinefficienciesthroughstructuredmatrix
+multiplication.
+3.2 Mamba-2
+Mamba-2(DaoandA.Gu2024),atypeofstructuredstatespacemodels(SSMs)(A.Gu2023;A.Gu,Goel,andRé2022),
+was recently introduced. Similarly to the original Mamba model (A. Gu and Dao 2023), Mamba-2 uses a time-varying
+state-space model which can selectively focus on or ignore inputs due to its input-dependent parameterization of the
+systemcomponents.Thetime-varyingSSMisdefinedasfollows:
+ℎ
+𝑡+1
+=A𝑡ℎ
+𝑡
++B𝑡𝑥
+𝑡
+(1)
+𝑦
+𝑡
+=C𝑡ℎ
+𝑡
+Here, B𝑡 and C𝑡 are input-dependent projections of the system, as in Mamba-1; however, A𝑡 is the identity matrix I
+multipliedbyascalar𝛼 . Theaboveformulationalsodiffersfromthepreviousonebytreatingtheunderlyingsequence
+𝑡
+asoriginatingfromadiscretesignalinsteadofacontinuousoneandthereforeomitsthesamplingcomponent Δ𝑡 from
+theoriginalMambamodel.
+Importantly,Mamba-2drawsanewconnectionbetweenSSMsandTransformers,termedStructuredStateSpaceDuality
+(SSD), which shows that a special case of SSMs can be viewed as a form of causal linear attention. In particular, fixing
+A𝑡 = 𝐼 (afurtherrestrictionofMamba-2to𝛼 𝑡 = 1)resultsintheformulationofcausallinearattention(Katharopoulos
+etal.2020)withthematricesBandCrepresentingtheprojectionsofthekeyandthequery,respectively,whiletheinput
+projectionXcorrespondstotheprojectionofthevalue.
+Mamba-2 as a matrix sequence transformation. Inspired by the aforementioned connection between SSMs and
+Transformers,DaoandA.Gu(2024)showsthatMamba-2’sSSDmixerfamilyisequivalenttosequentially-semi-separable
+4matrices(Chandrasekaranetal.2002).Formally,theSSDmixerfamilycanberepresentedas:
+𝛼 1 0 0 ··· 0 
+(cid:40)  𝛼 2:1 𝛼 2 0 ··· 0 
+ℎ 𝑡+1 =𝛼 𝑡 ·𝐼ℎ 𝑡 +B𝑥 𝑡 ⇒  𝛼 3:1 𝛼 3:2 𝛼 3 ··· 0  ◦(𝐶 ·𝐵⊤)·𝑋 (2)
+𝑦 𝑡 =C·ℎ 𝑡   . . . . . . . . . ... . . .  
+ 
+ 𝛼 𝑛:1 𝛼 𝑛:2 𝛼 𝑛:3 ··· 𝛼 𝑛 
+ 
+where𝛼
+𝑡:𝑖
+=𝛼 𝑡−1·𝛼 𝑡−2···𝛼 𝑖.AninterestingobservationisthattheMamba-2architecturecanbeviewedasacausallinear
+attentionwithalearnablecausalmask.
+TheMamba-2block. ToenhancetheeffectivenessoftheaboveMamba-2matrixmixer(Equation(2)),DaoandA.Gu
+(2024)designtheMamba-2block, amodifiedversionoftheMamba-1block(A.GuandDao2023). Theyaddedparallel
+parameterprojections,whereA,X,B,Careproducedinparallel,reducingparametersandsupportingtensorparallelism,
+andanextranormalizationlayerbeforethefinaloutputprojectiontoaddressinstabilitiesintraininglargermodels.
+AlthoughwehavemadeadditionalmodificationstotheMamba-2block,theyremainquitesimilar.Therefore,foravisual
+representationoftheMamba-2block, refertoFigure2. Notethatwehaverevertedtheintroducednormalizationlayer
+beforethefinaloutputprojectionandhavealsodiscardedthenonlinearactivationaftertheconvolutionoperationfound
+inboththeMamba-1andMamba-2blocks.
+4 Methods
+Throughoutthissection,wewilldescribeeachphaseofMOHAWK.Specifically,wewillcoverthestagesofmatrixori-
+entation, hidden-state alignment, and knowledge distillation, all three of which are crucial for developing an effective
+studentmodelfromthepretrainedTransformermodel. Unliketraditionaldistillationtechniques,thestudentmodelre-
+tainstheoverallarchitectureoftheteachermodel,differingonlyinthereplacementoftheattentionmatrixmixerwitha
+subquadraticalternative. Wewillprogressivelyunveilourarchitecture,Phi-Mamba,alongwiththespecificsofitsdistil-
+lationprocess.Thissectionconcludeswithanin-depthdescriptionofthePhi-Mambaarchitectureanditshybridversion,
+whichsurpassestheperformanceofothersubquadraticmatrixmixers. Furtherexaminationsoftheeffectivenessofthe
+methodandablationstudiesarediscussedinSection5.
+Forclarity,thetermblockreferstotherepeatingcomponentsthatformtheend-to-endmodel. Theblocksarecomposed
+of layers, such as the self-attention layer (including projections), the SSM layer (including the mixer and convolution),
+andtheconvolutionallayer. Inthismanner,manyTransformermodels,likeLlama(Touvronetal.2023),areviewedasa
+stackofalternatingself-attentionandMLPblocks,whereasthePhiandPhi-MambamodelsarecomprisedofPhiblocks
+thathaveparallelAttention/SSMandMLPblocks.
+4.1 Stage1: MatrixOrientation
+ThefirststageofMOHAWKaimstoalignthestudentmatrixmixerwiththeteacher’sself-attentionmatrix. Achieving
+thisalignmentisatwo-stepprocess:first,ateverymixinglayer,thestudentcomponentsprecedingthematrixmixerare
+settomatchtheteacher’scomponents.Thisensuresthateachlayer’sinputundergoesthesametransformationuptothe
+matrixmixersection.Consequently,theonlyvariationfromtheinputtothemixingprocessisthematrixcalculation.We
+thenminimizethedistancebetweenthematrixmixer,e.g.,theself-attentionmatrixandthematerializedSSMmatrix(2),
+ofeachlayerwithinthestudentandteachermodels:
+min∥TeacherMixer(u)−StudentMixer 𝝓(u)∥𝐹 (3)
+𝜙
+where 𝝓 denotes the parameters within the student’s sequence mixing layer, and u indicates any arbitrary input. In
+ourexperimentalsetup,uwaschosenastheoutputfromtheteachermodel’sprecedinglayertobettermimictheinput
+distributiontothelayer. Thisstageensuresthatthestudentandteachermodelshaveroughlysimilarmixinglayersand
+setsthefoundationforthesubsequentstagesofthedistillationprocess. Inparticular,thisstagecanbedoneinparallel
+acrossallthestudentlayers,astheinputstothestudentandteacherblocksareidentical.
+5ForMamba-2, webeginbysettingtheconvolutiontoanidentityfunction, effectivelynullifyingitsinitialimpact. This
+resultsinthecomputationofthesemi-separablematrixbeingthesoledistinctionbetweenthelayers. Wethenproceed
+tominimizethedistancebetweenthetwomatrixmixers: thesemiseparablescalaridentityandtheattentionmatrix(see
+Figure2).Figure3demonstratestheimportanceofthisstageinthedistillationprocess.Furthermore,Table6showsthat
+theMamba-2matrixmixerismoreexpressivethanpopularalternativesandcancloselyapproximatetheself-attention
+matrixofvariousdatasamplesacrossalllayersofaTransformermodelthroughgradientdescent,solidifyingitasastrong
+sequencemixer.
+4.2 Stage2: Hidden-StateAlignment
+FollowingtheoptimizationofEquation(3),wemuststilladdressthedifferencesbetweentheoutputsofthestudentand
+teacher blocks. To achieve this, we further align the components of the two blocks using initialization and distillation.
+Specifically,ourgoalistomatcheachstudentandteachermixingblocksbyminimizingtheL2normoftheiroutput(e.g.,
+theentireMambablockwiththeself-attentionblock):
+min∥AttnBlock(u)−StudentMixerBlock 𝝓(u)∥2 (4)
+𝜙
+where similar to Section 4.1, 𝝓 represents student’s block parameters, and u is an input. Once again, this stage can be
+doneinparallelacrossallthestudentlayers.
+InthecaseofMamba-2,wemodifytheremainingcomponentstobeidenticaltothePhi-1.5’sAttentionblock,sothatthe
+overallfunctionalityispreservedfromStage1.Concretely,weinitializethegate(seeFigure2)toaconstantvalueof1to
+“open”thegate,cancelingitsinitialeffect. Inaddition,weremovethenormalizationpriortotheoutputprojection,asit
+cannotbesettoalignwiththeAttentionblock.WethenminimizethedistancebetweentheoutputoftheMamba-2block
+andtheoutputoftheteacher’sself-attentionblock. OuranalysisindicatesthatthedistancebetweentheMamba-2block
+andthe self-attentionblockis stronglycorrelatedwith themodel’sability tolearnthe teacher’sdistribution, as shown
+inTable6. Furthermore,Figure3showsthatabetterindependentalignmentofthestudentandteacherblocksresultsin
+performanceimprovements,highlightingtheimportanceofthisstageinthedistillationprocess.
+4.3 Stage3: Weight-TransferandKnowledgeDistillation
+The final stage of the distillation process aims to fine-tune the student model to match the performance of the teacher
+model.Althougheachstudentmixingblockisalignedwithitscorrespondingteachermixingblock,discrepanciesarestill
+presentbetweenconsecutiveblocksthroughoutthenetworkTobridgethesegapsandaddresstheremainingcomponents
+ofthelanguagemodel,wetransfertheremainingweightsoftheteachermodeltothestudent’srespectivecomponents.
+ForPhi-Mamba,thisinvolvesthetokenembedding,thefinallayernormalization,theLanguageModelhead,andtheMLP
+and input norm at each block (see Figure 2). We then fine-tune the complete end-to-end student model under teacher
+supervision.Concretely,weuseadistillationlosstoencouragethestudentmodeltomimicthedistributionoftheteacher
+model’slogits,alsoknownasknowledgedistillation(Hinton,Vinyals,andDean2015):
+minLCE(cid:0)TeacherModel(x),StudentModel 𝝓(x)(cid:1) (5)
+𝜙
+wherexistheinputtokenstothemodels.
+IthasbeenhypothesizedthatmuchoftheinformationstoredinlanguagemodelsresidesinMLPblocks(Niuetal.2024).To
+utilizetheworkalreadydonepretrainingtheteacher,MOHAWKadjuststhestructureofthestudentblockstoutilizethe
+MLPinthesamewayastheteachermodel,effectivelyswappingtheteacher’smatrixmixerwiththatofthestudent.
+Interestingly,duringthisstep,theMLPweightscanbekeptfrozenwhilekeepingthemodelperformant. Thisshowcases
+Mamba-2’spowerfulexpressivenesscrucialforreplacingAttention,cutsthenumberoftrainedparametersbymorethan
+half, and, in larger models, helps prevent the student model from experiencing catastrophic forgetting of the teacher
+model’sinformation.WevalidateMamba-2’sabilitytodosoinTable8.
+4.4 Phi-Mambaarchitecture
+CombiningthethreestagesofMOHAWK,weintroducethePhi-Mambaarchitecture,whichmergestheMamba-2model
+of Dao and A. Gu (2024) with the Phi-1.5 Transformer model of Gunasekar et al. (2023). It consists of a stack of Phi-
+6×N
+Linear
+projection
+X Sequence
+transformation
+SSM
+Nonlinearity
+A XBC
+!
+Stage 1: Matrix
+Conv Mamba PhiMLP Attention PhiMLP Orientation
+Stage 2: Hidden-States
+Alignment
+Stage 3: Knowledge
+Distillation
+Mamba Phi-Mamba Phi
+Figure2: ThePhi-Mambaarchitectureconsistsofastackofblocks,eachofwhichcontainsaMambablockandanMLP
+block. The Mamba block is a simplified version of the Mamba-2 block (Dao and A. Gu 2024) that omits the non-linear
+activationfunctionaftertheconvolutionaloperation,aswellasthelayernormalizationpresentbeforetheoutputprojec-
+tion,sothatthepartsofthemodeloutsidethematrixmixercanbetransferredfromtheteachermodel. TheMOHAWK
+distillation process involves progressively matching fine-to-coarse parts of the model to the corresponding part of the
+teachermodel:(1)themixermixeritself(2)thefullMambavs.Attentionblocks,and(3)theend-to-endmodel.
+Mambablocks(Figure2),initializedanddistilledasdescribedinprevioussections.Additionally,weintroducetheHybrid-
+Phi-Mambavariant, whichretains4layersofattentionofPhi-1.5, effectivelyleveragingthestrengthsofbothsequence
+mixers.
+Overall,thePhi-Mambaarchitecture,asdepictedinFigure2,differsfromthevanillaMamba-2architecturebymodifying
+thestructureoftheSSMmatrixmixer,removingcomponentsfromtheSSMblockandincorporatingdenselayersfromthe
+teachermodel.Inparticular,eachMamba-2blockwasmodifiedbyremovingpost-convolutionactivationandpre-output
+projection normalization, while setting the gate and convolution to be identity functions. Interestingly, although these
+componentswerefoundtobebeneficialforperformancewhenMamba-2wastrainedfromscratch(DaoandA.Gu2024),
+wefindthattheyareunnecessaryforourdistillationprocess.
+TwokeychangesweremadetotheMamba-2matrixmixer.ThefirstwasconvertingtheSSMheadstructurefrommulti-
+valuetomulti-head,muchlikethemulti-headattentionmechanismfoundinTransformers(Vaswanietal.2023),enabling
+theindependentdistillationofeachTransformerheadintoaMambahead. Moreover,wehandlethesequencemixeras
+entirelydiscrete-timebymakingtheAmatrixaprojectionoftheinputandeliminatingthe Δ discretizationparameter.
+AlthoughthisformulationslightlydiffersfromMamba-2,theoriginalalgorithmcanstillbeappliedasablack-boxmethod
+(refertoAppendixB).
+5 Empirical Validation
+We start by examining in Section 5.1 downstream evaluation scores of our MOHAWK-distilled Phi-Mamba-1.5B and
+Hybrid-Phi-Mamba-1.5B, empirically showing that they outperform all previous subquadratic and hybrid models, re-
+spectively,whilehavingbettertimeandmemorycomplexities.
+Next, Sections 5.2, 5.3, and 5.4 analyze our three-stage framework in reverse order of their introduction, disentangling
+thecompoundingeffectsofMOHAWKonthetransferoflearnedrepresentationstothestudentmodel. Additionally,to
+formabaselinethatmirrorsthePhi-Mambadistillationprocessinidealconditions,weemployedMOHAWKtodistilla
+Phi-1.5 into another Phi-1.5, transferring all weights except Attention layers, which were initialized from scratch. The
+specificationsofourfinalPhi-MambamodeldistilledusingMOHAWKareprovidedinSection5.5.
+Section5.6outlinesthearchitectureselectedforthehybridPhi-Mamba,discussestheablationsregardingthenumberand
+placementofinterleavedattentions,andtacklesalimitationpotentiallycausedbythedistillationprocess.
+7Table1: Downstreamevaluationresultsforfullmethods,comparingPhi-Mambaagainstopen-sourcemodelsofsimilar
+sizespretrainedonstandardlanguagemodelingcorpuses.Phi-Mambaattainsperformanceclosetotheteachermodeland
+betterthanallpretrainedmodels,whileusinglessthan1%ofthetrainingdata.
+Model Tokens/Dataset WinoG. Arc-E Arc-C PIQA HellaS. Lamb. Avg.↑
+Phi-1.5-1.3B 150B/unknown 73.4 75.6 48.0 76.6 62.6 53.4 64.9
+Phi-Mamba-1.5B 3.0B/C4 71.7 74.0 44.1 75.5 60.2 50.1 62.6
+Mamba-1-1.4B 315B/ThePile 61.5 65.5 32.8 74.2 59.1 64.9 59.7
+Mamba-2-1.3B 315B/ThePile 60.9 64.3 33.3 73.2 59.9 65.7 59.6
+Finch-1.6B 1.1T/RWKVWorldv2 59.4 64.2 34.1 72.6 57.3 66.8 59.1
+xLSTM-1.4B 300B/SlimPajama 60.6 64.3 32.6 74.6 60.9 57.8 58.5
+Eagle-1.5B 1.1T/RWKVWorldv2 59.1 64.3 33.5 71.1 55.0 65.7 58.1
+Pythia-1.4B 300B/ThePile 57.3 60.6 26.0 71.1 52.1 61.6 54.8
+RWKV4-1.5B 330B/ThePile 54.6 60.5 29.4 72.4 52.5 56.4 54.3
+DeltaNet-1.3B 100B/SlimPajama 53.6 57.2 28.3 71.2 50.2 48.9 51.6
+GLA-1.3B 100B/SlimPajama 53.9 57.2 26.6 71.8 49.8 46.9 51.0
+Lastly, Section 5.7 dives deeper into Mamba-2’s capability to learn interactions similar to that of Self-Attention. Sec-
+tion5.7.1examinestheextenttowhichaMamba-2sequencetransformationcanapproximateaself-attentionmatrix,and
+Section5.7.2examineswhetherthiscapabilityisevidentinacomprehensivelanguagemodelsuchasPhi-1.5.
+5.1 FinalResults
+We empirically validate that our framework, MOHAWK, is able to achieve better performance on various downstream
+benchmarkscomparedtoprevioussubquadraticmodelsofsimilarsize.WedistillthePhi-1.5-1.3BmodelintoPhi-Mamba-
+1.5BaswellasHybrid-Phi-Mamba-1.5B.OurfinalPhi-Mambamodelisdistilledon3billiontokens(distributedas80M
+inStage1,160MinStage2,and2.76BtokensinStage3asdescribedinSection5.5)fromtheC4dataset,withasequence
+length of 2048. This constitutes less than 1% of the resources used by many top-performing subquadratic open-source
+models(e.g.,theopen-sourceMambaandMamba-2models,whicharepretrainedon315billiontokens).TheHybrid-Phi-
+Mamba-1.5Bisdistilledonabudgetof5billiontokensfromthesamedataset.
+Table1andTable2presentacomprehensivebreakdownofdownstreamevaluationresultsforourmodelsandmultiple
+baselines on a standard set of commonsense reasoning and language understanding tasks: WinoGrande (Sakaguchi et
+al. 2021), HellaSwag (Zellers et al. 2019), PIQA (Bisk et al. 2020), ARC-challenge and ARC-easy (Clark et al. 2018), and
+LAMBADA(Papernoetal.2016).Figure1showstheperformanceversusthetrainingcostofPhi-MambaandHybrid-Phi-
+Mambacomparedtomanyopen-sourcebaselinesfromtheliteratureatsimilarmodelsizes.
+Fortheremainderofthissection,wewillanalyzetheimpactofthe3stagesofMOHAWKonebyone. Throughoutthe
+experiments detailed in this section, we use the AdamW optimizer with 𝛽 = (0.9,0.95), a weight decay of 0.1, and a
+learningrateof1×10−4,combinedwithaWarmup-Stable-Decay(WSD)schedulerfeaturing10%warmupand10%decay.
+ThetraininglawfiguresandthefinalPhi-MambamodelusetheregimedetailedinAppendixA.
+5.2 Stage3(Weight-TransferandKnowledgeDistillation)
+AsdescribedinSection4.3,thisphaseemploysasimpleend-to-enddistillationofteacher-modellogits. Itleveragesthe
+alignmentamongallsequencemixersandsuccessiveblockstojointlyfine-tuneallcomponentsofthenetwork. Experi-
+mentsshowninTable3highlighttherelevanceofimplementingthisend-to-endalignment,withallthreearchitectures
+achievingtheirhighestscoresonlyafterthisphase.Predictably,theimpactofend-to-endalignmentvariesbyarchitecture:
+modelswithmoremixinglayerssimilartotheteachermodelseeareducedimportanceofthisphase.
+Stage3istheonlystageinMOHAWKthattrainsthestudentmodelend-to-endandcanbeseenasthe“main”stage.Many
+distillationmethodsemployonlythisstage;however,Table3showsthatusingonlyend-to-endknowledgedistillationis
+lessthanideal. AlthoughitisslightlyadvantageoustouseonlyStage3comparedtoonlyStage2forbothPhi-Mamba
+andHybrid-Phi-Mamba,thereisasignificantgapbetweenusingonlyStage2versususingStage2+3.
+8Table 2: Evaluation results show the performance of Hybrid-Phi-Mamba in downstream tasks, compared with similar-
+sizedopen-source modelspretrainedon standardlanguagemodeling data. Hybrid-Phi-Mambautilizes under3%of the
+trainingdatasetandemploysover3xfewerattentionlayers(𝑤 representsthelocalwindowsizeofSWA).BothSambaand
+Mamba-SWA-MLP(Renetal.2024)stacklayersofMamba,Attention,andMLPsandaretheonlyhybridarchitecturesof
+approximately1.5Binsizethatweareawareof.AnevaluationforSambaontheLambdadatasetwasnotavailable,hence
+ithasbeenexcluded.
+Model #Attns WinoG. Arc-E Arc-C PIQA HellaS. Avg.↑
+Phi-1.5-1.3B 24 73.4 75.6 48.0 76.6 62.6 67.2
+H.Phi-Mamba-1.5B 4 72.0 75.3 45.8 76.5 60.6 66.0
+Mamba-SWA-MLP-1.6B 18(𝑤 =2048) 73.7 76.6 46.1 76.5 49.7 64.5
+Samba-1.7B 12(𝑤 =2048) 72.9 79.2 48.2 77.1 49.7 65.4
+Table3:MOHAWKdistillationwasperformedonthefollowingmodels:(1)Phi-Mamba-1.5B,(2)Hybrid-Phi-Mamba-1.5B,
+and(3)Phi-1.5-1.3B.TheteachermodelforallthreearchitectureswasPhi-1.5.“StagesApplied”detailswhichofthethree
+MOHAWK stages was carried out, highlighting the importance of each stage. All experiments executed using a fixed
+amountof5Btokensfortheentiredistillationprocess.
+Model Stages WinoG. ARC-E ARC-C PIQA HellaS. Lamb. Avg.
+Type Applied Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑
+Phi-Mamba 2 55.9 75.4 38.0 75.2 56.6 18.9 53.3
+H.Phi-Mamba 2 66.0 75.0 38.0 76.5 57.0 36.1 58.1
+Phi 2 71.0 77.1 40.8 77.8 60.9 51.3 63.1
+Phi-Mamba 3 62.8 64.3 27.8 75.6 52.6 43.8 54.5
+H.Phi-Mamba 3 64.7 72.7 40.1 76.0 58.5 50.0 60.4
+Phi 3 64.1 73.7 38.7 58.9 75.6 48.0 59.9
+Phi-Mamba 2-3 72.3 75.0 40.8 75.2 59.7 50.6 62.3
+H.Phi-Mamba 2-3 75.4 75.7 40.8 76.0 59.4 51.9 63.2
+Phi 2-3 69.8 77.4 44.8 78.2 61.3 54.4 64.3
+Phi-Mamba 1-3 74.8 72.7 43.5 75.6 59.6 49.2 62.7
+H.Phi-Mamba 1-3 75.4 75.0 42.1 79.1 60.1 52.0 64.0
+Phi 1-3 74.2 76.7 43.5 78.6 61.7 54.2 64.9
+AselaboratedinSection5.7,thisphasecanfreezeallnetworkcomponentsexcepttheMamba-2sequencemixerwithout
+asignificantperformancedrop. Thisinparticularindicatesthatthethirdstage(liketheotherstagesofMOHAWK)can
+operateincomputationallylimitedsettings,enablingmoreuserstoutilizetheMOHAWKdistillationprocess.
+IncontrasttootherphasesofMOHAWK,wehaveobservedoccasionallossspikesduringthisphase.Theseabruptspikes
+aretypicallyseeninthetrainingoflarge-scalelanguagemodelsandcannegativelyimpactthemodel.Weaddressedthis
+issueusingcheckpointing,weightdecay,andgradientclipping,resultinginamorestableStage3.
+5.3 Stage2(Hidden-StateAlignment)
+Followingtheanalysisofthemodel’send-to-enddistillationinStage3,weevaluatetheimpactofaligningthehidden-state
+outputs of mixer blocks (Stage 2) on both the subsequent Stage 3 process and overall downstream model performance.
+We accomplish this by training Phi-Mamba instances from scratch using Stage 2 to various token counts. From these
+checkpoints,weproceedtoStage3training,endingwithdifferenttotalbudgetstoallowustoanalyzehowthedegreeof
+Stage2“pretraining”impactsStage3performanceatvarioustokenbudgets.
+Figure3demonstratesthatgivenanadequatetrainingbudget, modelsbeginningwithweightswithlowerhiddenstate
+distances(afterStage2)outperformthosethatdependexclusivelyonknowledgedistillation(Stage3).Theselowerhidden
+statesarealsocorrelatedwithlowerstartingperplexities,whichinturnarecorrelatedwithdownstreamperformance,as
+showninFigure5.Furthermore,Table3showsthesynergybetweenStage2andStage3,asapplyingStage3ontopofStage
+9Training Laws on Hidden State Zoomed In
+25
+20
+15
+20
+10
+5
+15
+10M 40M 160M 640M 2.56B 640M 1.28B 2.56B
+Tokens Observed
+Training Laws on Perplexity Zoomed In
+100 23
+50
+22
+20
+10M 40M 160M 640M 2.56B 640M 1.28B 2.56B
+Tokens Observed
+Stage 2 Initialization Stage 3 Finetuned Stage 3 Pretrained
+Figure3:TraininglawscomparingtheamountoftokenbudgetbetweenStages2and3,asmeasuredbytheStage2metric
+(hiddenstatedistance)andStage3metric(perplexity).Stage2initializationsareusedasthestartingcheckpointfortheir
+respectiveStage3finetuningmodels.Stage3pretrainedistrainedfromscratchonlywithweighttransferandknowledge
+distillation.DespitetrainingforlesstokensonStage3thantheStage3fromscratch,almostallStage2initializedmodels
+eventuallyoutperformthebaselineinperplexityonafixedbudget.Ingeneral,betteralignedStage2initializationsimprove
+post-Stage3performance.
+2outperformsvanillaknowledgedistillation,highlightingtheimportanceofincorporatingbothhidden-statealignment
+andknowledgedistillationmethodsforthetestedarchitectures. Table3alsoindicatesthatinscenarioswhereonlythis
+stageisapplied,thecloserthestudentarchitecturealignswiththeteacherarchitecture(particularly,themorelayersof
+attentionitshareswithPhi),thegreatertheimpactofthisstageonoverallperformance.However,whencombiningStage
+2and3,studentmodelsthatarelesssimilartotheteachermodelhavemorenoticeableimprovementsintheirperformance,
+e.g.,theimprovementforPhi-Mambawhichhaszeroattentionlayersislargerthanitshybridcounterpartwhichhasfour.
+WecontinuetoexploretheimpactofStage2onthedownstreamperformanceinFigure5.
+5.4 Stage1(MatrixMixerOrientation)
+Motivated by our previous finding, we then analyze how matching the matrix mixers can decrease the overall mixer
+block’s hidden-state distance with the teacher model even further. Similarly to our previous protocol, we assess the
+positiveimpactofthecurrentstageonthefollowingphase’smetricsandfinalmodel’sperformancebycomparingmodels
+withvaryingamountofStage1andStage2trainingonbothstagemetrics.
+Figure 4 shows that even with constrained budgets, performing Stage 1 for a small period can help with subsequent
+stagesandtheirperformances. Thus, evenasmallamountofStage1trainingcanhelptheirrespectiveStage2models
+reachbetterhidden-statedistancescomparedtothefrom-scratchcounterpart. Thisisdespitethephenomenonthatthe
+teacherandstudentmixersdivergeandthenre-convergeinStage2aftermixersimilarityisnolongerdirectlyoptimized.
+CoupledwithSection5.3,whichdiscoversthatlowerhiddenstateinitializationsleadtobetterperplexityanddownstream
+10
+ytixelpreP
+4C
+)goL(
+ecnatsiD
+etatS
+neddiHTraining Laws on Matrix Mixer Zoomed In
+200 40
+100
+30
+50
+20
+20
+10
+10M 20M 40M 80M 160M 320M 640M 160M 320M 640M
+Tokens Observed
+Training Laws on Hidden State Zoomed In
+11
+9
+5
+7
+5
+10M 20M 40M 80M 160M 320M 640M 160M 320M 640M
+Tokens Observed
+Stage 1 Initialization Stage 2 Finetuned Stage 2 Pretrained
+Figure4:TraininglawscomparingtheamountoftokenbudgetbetweenStages1and2,asmeasuredbytheStage1metric
+(matrixmixerdistance)andStage2metric(hiddenstatedistance). EvenasmallamountofStage1trainingcanimprove
+themodel’shidden-statedistancesinsubsequentstages. Notably,thisimprovementoccursdespiteanincreaseinmatrix
+mixerdistanceduringStage2.ThissuggeststhatearlyStage1trainingprovidesafoundationalbenefitthatenhancesthe
+model’sperformanceinlaterstages,demonstratingtheimportanceofinitialtrainingphasesinmodeloptimization.
+performance,itcanbeinferredthatStage1aidstheoveralldistillationprocess.
+Furthermore,weempiricallyvalidatethisintuitioninTable3,whichindicatesthatthisstagealignsthematrixmixerstoa
+strongerdegreethanonlythehiddenstatealignment.Forexample,employingonlyStage2and3forPhi-to-Phidistillation
+doesnotallowthestudenttofullyrecovertheoriginalPhi-1.5’sperformanceonkeymetrics.OnlybyincorporatingStage
+1doesthemetricperformancealignwiththeoriginalPhiteacher.MetricperformancegainsfromtheadditionofStage1
+canalsobeseeninbothPhi-MambaandHybrid-Phi-Mamba.
+5.5 TrainingtheFinalPhi-MambaModel
+AfterconfirmingtheimportanceofthestagesinSection5.2,Section5.3,andSection5.4,weproceedtodistillthefinal
+Phi-MambamodelusingthethreeelementsofMOHAWK.Weuse80MtokensforStage1,duetothestrongperformance
+ofthetokencountinboththematrixandhiddenstatedistances(Figure4).Stage2wasdistilledfor160Mtokensgiventhe
+apparentsaturationofbothhiddenstatedistanceandperplexitycomparedtotheotherinitializationstates,suchas10M,
+20M,40M,etc. (Figure3). WeemployedStage3toatotalof3Btokensacrossallstagesandobservedthatthepreviously
+optimal learning rate applied for training training laws led to instabilities in training, particularly spikes in evaluation
+perplexity.DecreasingthelearningrateforStage3mitigatedthisissue(AppendixA).Wehypothesizethattheinstability
+is due to the Stage 1 + 2 initialization’s Mamba component being quite similar to that of the teacher model, so a large
+learningratecoupledwithdisconnectbetweenblocks,whicharemendedinStage3,cancausetraininginstabilities.The
+performanceofthefinalmodelisreportedinTable1.
+11
+)goL(
+ecnatsiD
+rexiM
+xirtaM
+)goL(
+ecnatsiD
+etatS
+neddiHTable4: Givenabudgettomaintainfourattentionlayers,weexploretypicalconfigurationstointerleavethemintothe
+architecture.Phi-1.5comprises24Attentionlayers,ofwhich20aretransformedintoMamba-2blocksduringMOHAWK,
+resultinginHybrid-Phi-Mamba-1.5B,whiletheremaining4layersstayunchanged.Theaverageblockdistancewastaken
+atthestartoftheexperiment.
+Attention AvgBlock WinoG. ARC-E ARC-C PIQA HellaS. Lamb. Avg.
+Layers L2Dist↓ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑
+1-4 10.4 69.8 75.4 43.5 74.3 59.8 52.7 62.6
+1,7,13,19 9.8 71.0 76.7 41.4 76.0 59.7 51.6 62.8
+3,9,15,21 9.6 73.5 75.7 42.1 76.5 60.1 52.7 63.4
+5,12,17,23 9.6 75.4 75.0 42.1 79.1 60.1 52.0 64.0
+21-24 8.6 72.9 74.7 38.7 76.5 59.8 51.4 62.2
+Table5: ExaminationofhowchangingthenumberofinterleavedAttentionlayersaffectsperformance. Intheseexperi-
+ments,wekeptAttentionlayers5,12,17,and23unchanged(seeTable4),andutilizedMOHAWKtodistilltheintermediate
+layers.Theaverageblockdistancewastakenatthestartoftheexperiment.
+#Attention AvgBlock WinoG. ARC-E ARC-C PIQA HellaS. Lamb. Avg.
+Layers L2Dist↓ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑
+1 11.0 69.8 72.3 41.4 76.5 60.4 50.2 61.8
+2 10.2 72.9 72.7 40.8 76.5 60.0 51.0 62.3
+4 8.6 75.4 75.0 42.1 79.1 60.1 52.0 64.0
+5.6 HybridPhi-MambaModel
+Recently,modelsthatintegratebothAttentionmechanismsandSSMlayershavebeenproposed(HatamizadehandKautz
+2024;Lieberetal.2024;Renetal.2024),deliveringbetterresultsthanusingeitherarchitectureindependently.Empirically,
+incorporating a limitednumber of Attention layers doesmake the training and inferencetime quadratic, although this
+effectismitigatedbythesmallnumberofAttentionlayersused.
+WedistillthePhi-1.5modelintoahybridversion,preservingonlyfouroriginalAttentionlayersandconvertingallother
+AttentionblockstoMamba-2blocksthroughMOHAWK.Thishybridmodelachievesadownstreamevaluationscoreof
+66.0(refertoTable2),closelyapproachingtheperformanceofthepureAttentionTransformerarchitectureandexceeding
+thePhi-Mambaaveragescoreof65.1.Hybrid-Phi-MambaalsoperformswellcomparedtootherAttention-Mambahybrids
+atthe1.5BsizerangewhileusinglessAttentionlayersandlessoverallparameters.
+Table 4 shows the results for the most common placements of the four Attention layers in hybrid models. Despite all
+placementsshowingstrongresults,ourexperimentsindicatethatinterleavingMamba-2layersuniformlyyieldssuperior
+performanceondownstreamevaluationbenchmarks.ThisalignswiththesolutionsproposedbySamba(Renetal.2024),
+whichalsofindthatinterleavingAttentionlayerswithinMambalayersleadstoimprovedperformance.
+Table5examinestheimpactofvaryingthenumberofinterleavedAttentionlayers. BasedonpreviousfindingsinTable
+4, we carry out these experiments without converting the respective Attention layers in the network while utilizing
+MOHAWK to distill other layers. As anticipated, preserving a greater number of Attention layers results in improved
+outcomes.However,wehypothesizethatthereisstillroomforimprovementfordistillinghybridmodelsduetopotential
+variationsinthedistillationprocessforhybridversusnon-hybridarchitectures. Theseaspects,e.g.,additionalgradient
+updates,changesinoptimizersettings,etc,couldbefurtheroptimized,andweleaveitforfuturework.
+5.7 ApproximatingSelf-Attention
+GiventheimpactthatStage1(MatrixOrientation)andStage2(Hidden-StateAlignment)haveonStage3’s(WeightTrans-
+ferandKnowledge-Distillation)effectiveness,wedelvedeeperintoMamba-2’scapabilitytolearninteractionstaughtby
+Self-Attention.WefirstexamineinSection5.7.1theextenttowhichaMamba-2sequencetransformationcanapproximate
+aself-attentionmatrix.Next,weinvestigateinSection5.7.2whetherthiscapabilityisevidentinanend-to-endlanguage
+modelsuchasPhi-1.5.
+12Table 6: Attention matrix approximation by structured matrix mixers (Frobenius distance; lower is better). Structures
+are Toeplitz, (causal) low-rank (LR), state space dual (SSD) model (3.2) and general semi-separable matrices (SSM). We
+haveused1,000samples,eachconsistingof512tokens.Llama2-7B-Chatwasappliedoneverysample,andoneattention
+headfromeachlayerwasrandomlychosenforapproximation. Weevaluated(LR)andSSDfamilieswith10,000gradient
+descentstepspersample.
+Structure Toep. LR SSD SSM LR SSD SSM LR SSD SSM
+(Statesize𝑁) - (16) (16) (16) (32) (32) (32) (64) (64) (64)
+WT-103 12.0 0.619 0.477 0.266 0.322 0.237 0.127 0.132 0.097 0.046
+OWT 12.2 0.606 0.466 0.259 0.314 0.231 0.123 0.129 0.095 0.045
+C4 12.3 0.595 0.453 0.236 0.310 0.226 0.112 0.128 0.093 0.041
+IMdB 12.3 0.598 0.455 0.238 0.312 0.226 0.113 0.129 0.094 0.043
+5.7.1 Self-AttentionApproximationwithStructuredMatrixMixers
+Westartbytestingtheabilityofvariousmatrixmixerfamiliestomatchtheempiricalself-attentionmatricesofapretrained
+Transformer. We take 1000 samples from each layer of a Llama2-7b-Chat model (Touvron et al. 2023), materialize the
+attentionmatrices,andprojectthemontogivenclassesofstructuredmatrices.TheresultsinTable6areaveragedacross
+alllayers.
+Inparticular, todescribetheclassoflinearattentionmatrices(3.1), weusethefactthatQandKareprojectionsofthe
+input𝑥 ∈ R𝑑𝑖𝑛 onto R𝑑𝑜𝑢𝑡, and therefore their rank is bounded by min{𝑑 𝑖𝑛,𝑑 𝑜𝑢𝑡}. For multihead linear attention,𝑑 𝑜𝑢𝑡
+(alsoknownasheaddimension)istypicallyasmallvalue(e.g.,Phi-1.5andLlama2-7b-Chathaveheaddimensionsof64
+and 128, respectively). Thus, we approximate this family of sequence mixers using causal low-rank matrices L◦QK⊤,
+whereLisalower-triangularcausalmaskof1s,andQ,KareinR𝑛×𝑑 with𝑑 ≪𝑛(indicatingthattheheaddimensionis
+substantiallysmallerthanthesequencelength).
+Todescribethemulti-headMamba-2matrixfamily,weutilizethestatespacedual(SSD)layer(3.2)inamannersimilarto
+thepreviouslinearattention,butnowthecausalmatrixLpossessesan𝑛-degreerollingmultiplicativestructureforSSD
+whichcanbeseenasamoreexpressivemaskthatgeneralizesthecausalmask(Section3.2).
+Bothcausallow-rankandSSDmatrixfamilieswereapproximatedwith10,000stepsofgradientdescentpersample. Fi-
+nally,toapproximatethegeneralclassofSSMmatrixmixers,weutilizebalancedtruncation,aprojectionalgorithmthat
+doesnotrelyongradients.Thismethodismainlyknowninthefieldoftime-invariantDynamicalSystemmodelreduction
+(GugercinandAntoulas2004)andhasbeenmodifiedforuseintime-varyingsystems(SandbergandRantzer2004).Sim-
+ilarly,forthefamilyofcausalToeplitzmatrices,whichrepresentaconvolutionoperation,weemployasimpleheuristic
+thatminimizestheerrorforeachattentionmatrix.
+Table6showsthatwhiletheSSMmatrixfamilyprovidestheclosestapproximationtotheself-attentionmatrixmixer,the
+Mamba-2mixerfamily(SSD)hasjusttwicethedistancefromtheSSMmatrices. ThisisincontrasttoLinearAttention,
+whichhasthreetimesthedistance,allwhilekeepingacomputationalcostonparwithLinearAttention.Moredetailscan
+befoundinAppendixC.
+5.7.2 Self-AttentionReplacementinLanguageModels
+SincetheexperimentsinSection5.7.1weredesignedtoapproximateaself-attentionmatrixundercontrolledconditions,
+we further validate the ability of a Mamba-2 block to replace an Attention layer within a language model. Firstly, we
+create two variants of our architecture, Phi-Toeplitz and Phi-LR, and run the MOHAWK process for 1B tokens at each
+stage(seeTable7)toverifythatthepreviousfindingholdinamultilayer,end-to-endmodelcase.
+Secondly, we run MOHAWK while freezing various parts of the Phi-Mamba modules (refer to Table 8), revealing that
+limitingthetrainableelementstotheMamba-2blocks(excludingtheembedding,headandallMLPlayers)resultsinonly
+aminorperformancedecreaseduringMOHAWKdistillation.
+Interestingly, in all of the aforementioned experiments, we have found a consistent correlation between the projection
+distances of the matrix (Frobenius distance) in Table 6 and the downstream performance metrics (accuracy) in Table 7.
+Essentially,abettermatrixapproximation(lowerFrobeniusdistance)iscorrelatedwithbettermodelperformance(higher
+13Table 7: Ablations of matrix structure using the same training recipe (Stages 2 and 3). While many efficient sequence
+models(e.g.globalconvolutions,linearattention,andstatespacemodels)canberepresentedasstructuredmatrixmixers
+(e.g.Toeplitz,low-rank,andsemi-separablematricesrespectively),moreexpressivestructuredmatrixfamiliescanmatch
+theattentionmatrixmoreclosely.
+Matrix BlockOutput WinoG. ARC-E ARC-C PIQA HellaS. Avg.
+Structure L2Dist.↓ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑
+CausalToeplitz 9.6 49.3 21.2 26.2 52.3 25.9 35.0
+Causallow-rank 7.6 50.2 27.9 25.0 53.3 25.6 36.4
+SSD 5.5 67.2 71.0 38.6 74.2 45.0 59.2
+accuracy)onvarioustasks.Thisconnectionhighlightstherelationshipbetweenthequalityofthematrixapproximation
+andtheperformanceofthemodel.SuchfindingsareechoedinHwangetal.(2024),whichfindthatmoreexpressivematrix
+mixersleadtomoreperformantmodels,e.g.,Low-rank-basedBERTmodelsoutperformToeplitz-basedones.
+Table8:DistillationwithMOHAWKforbothPhi-Mamba-1.5BandHybrid-Phi-Mamba-1.5B(withthefinalfourAttention
+layersunchanged).MOHAWKcanbeemployedwhilemaintainingallcomponentsotherthanthesequencemixerblocks
+frozenwithoutcompromisingPhi-Mamba’sperformance(Section5.2).
+Model trainable WinoG. ARC-E ARC-C PIQA HellaS. Lamb. Avg.
+Type components Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑ Acc↑
+All 74.8 72.7 43.5 75.6 59.6 49.2 62.7
+Phi-Mamba
+Mamba-2 69.1 73.5 43.8 74.7 59.3 48.2 61.4
+All 75.4 75.0 42.1 79.1 60.1 52.0 64.0
+HybridPhi.M
+Mamba-2 78.6 75.0 41.4 76.5 59.8 51.9 63.9
+6 Discussion and Conclusion
+Our experiments shows that the Mamba-2 model can be successfully distilled from a pretrained Transformer teacher
+model,utilizingitsextensiveknowledgelearnedfromcustomdatasetsandhighercomputationalresources.Despiteusing
+lessthan100×datacomparedtomanyopen-sourcemodels,includingMamba,oursubquadraticmodeloutperformsother
+subquadraticmodelsinvariousbenchmarktestsbyawidemargin.
+TheMOHAWKframework’smulti-stageprocesswhichgraduallyincreasedthescopeofdistillationisessentialextracting
+the teacher model’s knowledge to the fullest extent as shown in our ablations and training laws. We continue to find
+theeffectivenessofMOHAWKwhendistillinghybridAttention-SSMmodelsandprovideablationsonthenumberand
+positionofAttentionlayers.
+Additionally,wedemonstratethatMamba-2’srelationshiptoTransformersisevidentnotonlyintheory,butalsoinprac-
+tice,asitcapturesinteractionssimilartothoseofTransformers,andisabletoreplaceAttentionwithlittledropinper-
+formance.Coupledwithpastresearchwhichhaspositedthatmuchofalanguagemodel’sknowledgeisembeddedinthe
+MLPblocks,webelievethatanysubquadraticmodelwithasufficientlyexpressivematrixmixercanreplicatethebehavior
+ofpretrainedTransformers, bringingquadraticknowledgetosubquadraticmodels. Werecommendfurtherresearchto
+exploretheroleofsequencemixinglayersinsubquadraticmodelsandtheirimpactonperformance. Advancementsin
+boththedistillationprocessandthesequencemixerarchitecturecouldleadtofurtherimprovedperformanceinarange
+oftasks.Weproposethat“trainability”and“distillability”aredistinctpropertiesofthemodels,andtherefore,distillation
+techniquesshouldbemoreappropriatelytailoredtothemodel.
+14References
+[1] MaximilianBeck,KorbinianPöppel,MarkusSpanring,AndreasAuer,OleksandraPrudnikova,MichaelKopp,Gün-
+terKlambauer,JohannesBrandstetter,andSeppHochreiter.xLSTM:ExtendedLongShort-TermMemory.2024.arXiv:
+2405.04517[cs.LG].
+[2] Yonatan Bisk, Rowan Zellers, Jianfeng Gao, Yejin Choi, et al. “PIQA: Reasoning about Physical Commonsense in
+NaturalLanguage”.In:ProceedingsoftheAAAIconferenceonArtificialIntelligence.Vol.34.05.2020,pp.7432–7439.
+[3] TomB.Brown,BenjaminMann,NickRyder,MelanieSubbiah,JaredKaplan,PrafullaDhariwal,ArvindNeelakan-
+tan,PranavShyam,GirishSastry,AmandaAskell,SandhiniAgarwal,ArielHerbert-Voss,GretchenKrueger,Tom
+Henighan,RewonChild,AdityaRamesh,DanielM.Ziegler,JeffreyWu,ClemensWinter,ChristopherHesse,Mark
+Chen,EricSigler,MateuszLitwin,ScottGray,BenjaminChess,JackClark,ChristopherBerner,SamMcCandlish,
+AlecRadford,IlyaSutskever,andDarioAmodei.LanguageModelsareFew-ShotLearners.2020.arXiv:2005.14165
+[cs.CL].
+[4] ShivChandrasekaran,PatrickDewilde,MingGu,TPals,andAlle-JanvanderVeen.“Faststablesolverforsequen-
+tially semi-separable linear systems of equations”. In: International Conference on High-Performance Computing.
+Springer.2002,pp.545–554.
+[5] Yen-ChunChen,ZheGan,YuCheng,JingzhouLiu,andJingjingLiu.DistillingKnowledgeLearnedinBERTforText
+Generation.2020.arXiv:1911.03829[cs.CL].
+[6] PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,andOyvindTafjord.
+“ThinkyouhaveSolvedQuestionAnswering?TryARC,theAI2ReasoningChallenge”.In:arXivpreprintarXiv:1803.05457
+(2018).
+[7] Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. FlashAttention: Fast and Memory-Efficient
+ExactAttentionwithIO-Awareness.2022.arXiv:2205.14135[cs.LG].
+[8] TriDaoandAlbertGu.“TransformersareSSMs:GeneralizedModelsandEfficientAlgorithmsThroughStructured
+StateSpaceDuality”.In:InternationalConferenceonMachineLearning(ICML).2024.
+[9] P.DewildeandA.J.vanderVeen.“OntheHankel-normapproximationofupper-triangularoperatorsandmatrices”.
+In:IntegralEquationsandOperatorTheory 17.1(Mar.1,1993),pp.1–45.doi:10.1007/BF01322544.url:https:
+//doi.org/10.1007/BF01322544.
+[10] PatrickDewildeandAlle-JanVeen.Time-VaryingSystemsandComputations.1sted.SpringerBookArchive.Springer
+Science+BusinessMediaDordrecht1998.SpringerNewYork,NY,1998,pp.XIV,460.isbn:978-1-4757-2817-0.doi:
+https://doi.org/10.1007/978-1-4757-2817-0.url:https://doi.org/10.1007/978-1-4757-2817-0.
+[11] DanielY.Fu,TriDao,KhaledK.Saab,ArminW.Thomas,AtriRudra,andChristopherRé.HungryHungryHippos:
+TowardsLanguageModelingwithStateSpaceModels.2023.arXiv:2212.14052[cs.LG].
+[12] AlbertGu.“ModelingSequenceswithStructuredStateSpaces”.PhDthesis.StanfordUniversity,2023.
+[13] AlbertGuandTriDao.Mamba:Linear-TimeSequenceModelingwithSelectiveStateSpaces.2023.arXiv:2312.00752
+[cs.LG].
+[14] AlbertGu,KaranGoel,andChristopherRé.EfficientlyModelingLongSequenceswithStructuredStateSpaces.2022.
+arXiv:2111.00396[cs.LG].
+[15] SerkanGugercinandAthanasiosC.Antoulas.“ASurveyofModelReductionbyBalancedTruncationandSomeNew
+Results”.In:InternationalJournalofControl77.8(2004),pp.748–766.doi:10.1080/00207170410001713448.eprint:
+https://doi.org/10.1080/00207170410001713448.url:https://doi.org/10.1080/00207170410001713448.
+[16] Suriya Gunasekar, Yi Zhang, Jyoti Aneja, Caio César Teodoro Mendes, Allie Del Giorno, Sivakanth Gopi, Mojan
+Javaheripi, Piero Kauffmann, Gustavo de Rosa, Olli Saarikivi, Adil Salim, Shital Shah, Harkirat Singh Behl, Xin
+Wang, Sébastien Bubeck, Ronen Eldan, Adam Tauman Kalai, Yin Tat Lee, and Yuanzhi Li. Textbooks Are All You
+Need.2023.arXiv:2306.11644[cs.CL].
+[17] SangchulHahnandHeeyoulChoi.Self-KnowledgeDistillationinNaturalLanguageProcessing.2019.arXiv:1908.
+01851[cs.CL].
+[18] Md.AkmalHaidarandMehdiRezagholizadeh.TextKD-GAN:TextGenerationusingKnowledgeDistillationandGen-
+erativeAdversarialNetworks.2019.arXiv:1905.01976[cs.CL].
+15[19] AliHatamizadehandJanKautz.MambaVision:AHybridMamba-TransformerVisionBackbone.2024.arXiv:2407.
+08083[cs.CV].url:https://arxiv.org/abs/2407.08083.
+[20] GeoffreyHinton,OriolVinyals,andJeffDean.DistillingtheKnowledgeinaNeuralNetwork.2015.arXiv:1503.02531
+[stat.ML].
+[21] Minghao Hu, Yuxing Peng, Furu Wei, Zhen Huang, Dongsheng Li, Nan Yang, and Ming Zhou. Attention-Guided
+AnswerDistillationforMachineReadingComprehension.2018.arXiv:1808.07644[cs.CL].
+[22] SukjunHwang,AakashLahoti,TriDao,andAlbertGu.Hydra:BidirectionalStateSpaceModelsThroughGeneralized
+MatrixMixers.2024.arXiv:2407.09941[cs.LG].url:https://arxiv.org/abs/2407.09941.
+[23] AnanyaHarshJha,DirkGroeneveld,EmmaStrubell,andIzBeltagy.“LargeLanguageModelDistillationDoesn’t
+NeedaTeacher”.In:arXivpreprintarXiv:2305.14864(2023).
+[24] JungoKasai,HaoPeng,YizheZhang,DaniYogatama,GabrielIlharco,NikolaosPappas,YiMao,WeizhuChen,and
+NoahASmith.“Finetuningpretrainedtransformersintornns”.In:arXivpreprintarXiv:2103.13076(2021).
+[25] AngelosKatharopoulos,ApoorvVyas,NikolaosPappas,andFrançoisFleuret.TransformersareRNNs:FastAutore-
+gressiveTransformerswithLinearAttention.2020.arXiv:2006.16236[cs.LG].
+[26] Chen Liang, Haoming Jiang, Zheng Li, Xianfeng Tang, Bin Yin, and Tuo Zhao. “Homodistil: Homotopic task-
+agnosticdistillationofpre-trainedtransformers”.In:arXivpreprintarXiv:2302.09632(2023).
+[27] OpherLieber,BarakLenz,HofitBata,GalCohen,JhonathanOsin,ItayDalmedigos,ErezSafahi,ShakedMeirom,
+Yonatan Belinkov, Shai Shalev-Shwartz, Omri Abend, Raz Alon, Tomer Asida, Amir Bergman, Roman Glozman,
+MichaelGokhman,AvashalomManevich,NirRatner,NoamRozen,ErezShwartz,MorZusman,andYoavShoham.
+Jamba:AHybridTransformer-MambaLanguageModel.2024.arXiv:2403.19887[cs.CL].url:https://arxiv.
+org/abs/2403.19887.
+[28] Hao Liu, Matei Zaharia, and Pieter Abbeel. Ring Attention with Blockwise Transformers for Near-Infinite Context.
+2023.arXiv:2310.01889[cs.CL].
+[29] Harsh Mehta, Ankit Gupta, Ashok Cutkosky, and Behnam Neyshabur. Long Range Language Modeling via Gated
+StateSpaces.2022.arXiv:2206.13947[cs.LG].
+[30] SamuelA.Melchior,PaulVanDooren,andKyleA.Gallivan.“Modelreductionoflineartime-varyingsystemsover
+finite horizons”. In: Applied Numerical Mathematics 77 (2014), pp. 72–81. issn: 0168-9274. doi: https://doi.
+org/10.1016/j.apnum.2013.10.007. url: https://www.sciencedirect.com/science/article/pii/
+S0168927413001414.
+[31] JeanMercat,IgorVasiljevic,SedrickKeh,KushalArora,AchalDave,AdrienGaidon,andThomasKollar.Linearizing
+LargeLanguageModels.2024.arXiv:2405.06640[cs.CL].
+[32] JingchengNiu,AndrewLiu,ZiningZhu,andGeraldPenn.WhatdoestheKnowledgeNeuronThesisHavetodowith
+Knowledge? 2024.arXiv:2405.02421[cs.CL].
+[33] Denis Paperno, Germán Kruszewski, Angeliki Lazaridou, Ngoc-Quan Pham, Raffaella Bernardi, Sandro Pezzelle,
+MarcoBaroni,GemmaBoleda,andRaquelFernández.“TheLAMBADADataset:WordPredictionRequiringaBroad
+DiscourseContext”.In:Proceedingsofthe54thAnnualMeetingoftheAssociationforComputationalLinguistics.2016,
+pp.1525–1534.
+[34] BoPeng,EricAlcaide,QuentinAnthony,AlonAlbalak,SamuelArcadinho,StellaBiderman,HuanqiCao,XinCheng,
+MichaelChung,MatteoGrella,KranthiKiranGV,XuzhengHe,HaowenHou,JiajuLin,PrzemyslawKazienko,Jan
+Kocon, Jiaming Kong, Bartlomiej Koptyra, Hayden Lau, Krishna Sri Ipsit Mantri, Ferdinand Mom, Atsushi Saito,
+GuangyuSong,XiangruTang,BolunWang,JohanS.Wind,StanislawWozniak,RuichongZhang,ZhenyuanZhang,
+QihangZhao,PengZhou,QinghuaZhou,JianZhu,andRui-JieZhu.RWKV:ReinventingRNNsfortheTransformer
+Era.2023.arXiv:2305.13048[cs.CL].
+[35] ZhenQin,XiaodongHan,WeixuanSun,BowenHe,DongLi,DongxuLi,YuchaoDai,LingpengKong,andYiran
+Zhong.ToeplitzNeuralNetworkforSequenceModeling.2023.arXiv:2305.04749[cs.CL].
+[36] ZhenQin,SonglinYang,WeixuanSun,XuyangShen,DongLi,WeigaoSun,andYiranZhong.HGRN2:GatedLinear
+RNNswithStateExpansion.2024.arXiv:2404.07904[cs.CL].
+16[37] ColinRaffel, NoamShazeer, AdamRoberts, KatherineLee, SharanNarang, MichaelMatena,Yanqi Zhou,Wei Li,
+andPeterJ.Liu.ExploringtheLimitsofTransferLearningwithaUnifiedText-to-TextTransformer.2023.arXiv:1910.
+10683[cs.LG].url:https://arxiv.org/abs/1910.10683.
+[38] LiliangRen,YangLiu,YadongLu,YelongShen,ChenLiang,andWeizhuChen.Samba:SimpleHybridStateSpace
+ModelsforEfficientUnlimitedContextLanguageModeling.2024.arXiv:2406.07522[cs.CL].url:https://arxiv.
+org/abs/2406.07522.
+[39] KeisukeSakaguchi,RonanLeBras,ChandraBhagavatula,andYejinChoi.“Winogrande:AnAdversarialWinograd
+SchemaChallengeatScale”.In:CommunicationsoftheACM 64.9(2021),pp.99–106.
+[40] H.SandbergandA.Rantzer.“Balancedtruncationoflineartime-varyingsystems”.In:IEEETransactionsonAuto-
+maticControl49.2(2004),pp.217–229.doi:10.1109/TAC.2003.822862.
+[41] YutaoSun,LiDong,ShaohanHuang,ShumingMa,YuqingXia,JilongXue,JianyongWang,andFuruWei.Retentive
+Network:ASuccessortoTransformerforLargeLanguageModels.2023.arXiv:2307.08621[cs.CL].
+[42] XuTan,YiRen,DiHe,TaoQin,ZhouZhao,andTie-YanLiu.MultilingualNeuralMachineTranslationwithKnowl-
+edgeDistillation.2019.arXiv:1902.10461[cs.CL].
+[43] HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,TimothéeLacroix,Baptiste
+Rozière,NamanGoyal,EricHambro,FaisalAzhar,AurelienRodriguez,ArmandJoulin,EdouardGrave,andGuil-
+laumeLample.LLaMA:OpenandEfficientFoundationLanguageModels.2023.arXiv:2302.13971[cs.CL].
+[44] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, and
+IlliaPolosukhin.AttentionIsAllYouNeed.2023.arXiv:1706.03762[cs.CL].
+[45] A.J.vanderVeenandP.Dewilde.“Onlow-complexityapproximationofmatrices”.In:LinearAlgebraanditsAppli-
+cations205-206(1994),pp.1145–1201.issn:0024-3795.doi:https://doi.org/10.1016/0024-3795(94)90383-2.
+url:https://www.sciencedirect.com/science/article/pii/0024379594903832.
+[46] JueWang,WentaoZhu,PichaoWang,XiangYu,LindaLiu,MohamedOmar,andRaffayHamid.SelectiveStructured
+State-SpacesforLong-FormVideoUnderstanding.2023.arXiv:2303.14526[cs.CV].
+[47] WenhuiWang,FuruWei,LiDong,HangboBao,NanYang,andMingZhou.“Minilm:Deepself-attentiondistillation
+fortask-agnosticcompressionofpre-trainedtransformers”.In:AdvancesinNeuralInformationProcessingSystems
+33(2020),pp.5776–5788.
+[48] Zicheng Wang, Zhenghao Chen, Yiming Wu, Zhen Zhao, Luping Zhou, and Dong Xu. PoinTramba: A Hybrid
+Transformer-MambaFrameworkforPointCloudAnalysis.2024.arXiv:2405.15463[cs.CV].url:https://arxiv.
+org/abs/2405.15463.
+[49] Mengzhou Xia, Tianyu Gao, Zhiyuan Zeng, and Danqi Chen. “Sheared llama: Accelerating language model pre-
+trainingviastructuredpruning”.In:arXivpreprintarXiv:2310.06694(2023).
+[50] SonglinYang,BailinWang,YikangShen,RameswarPanda,andYoonKim.GatedLinearAttentionTransformerswith
+Hardware-EfficientTraining.2024.arXiv:2312.06635[cs.LG].
+[51] ZeYang,LinjunShou,MingGong,WutaoLin,andDaxinJiang.ModelCompressionwithTwo-stageMulti-teacher
+KnowledgeDistillationforWebQuestionAnsweringSystem.2019.arXiv:1910.08381[cs.CL].
+[52] RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi.“HellaSwag:CanaMachineReallyFinish
+YourSentence?”In:Proceedingsofthe57thAnnualMeetingoftheAssociationforComputationalLinguistics.2019.
+[53] MichaelZhang,KushBhatia,HermannKumbong,andChristopherRé.TheHedgehog&thePorcupine:Expressive
+LinearAttentionswithSoftmaxMimicry.2024.arXiv:2402.04347[cs.LG].
+[54] ChuntingZhou,GrahamNeubig,andJiataoGu.UnderstandingKnowledgeDistillationinNon-autoregressiveMachine
+Translation.2021.arXiv:1911.02727[cs.CL].
+17A Experiments and Experimental Details
+ToconstructSection5.5,weperformedgridsearchesfortraininginStages1,2,and3independentlyfromscratchtofind
+theoptimalhyperparameters. Weexploredlearningrateslr = {1,2,5}×10{−3,−4} andbatchsizes2{15,16,17,18}. AdamW
+Optimizer was used with 𝛽 = (0.9,0.95), incorporating a weight decay of 0.1, gradient clipping at 1.0, and a Warmup-
+Stable-Decay(WSD)schedulerwith10%warmupand10%decayutilizinglinearwarmupandcooldownfunctions.Auto-
+maticmixedprecisiontrainingtobf16wasusedinallstages. ForStages1and2,weinitiallyfixedthebatchsizeat216,
+thenvariedthelearningrates. Afteridentifyingtheoptimallearningrate,weadjustedthebatchsizesandsubsequently
+finalized the learning rate after fixing the batch size. Consequently, Stage 1 used bs = 215,lr = 5×10−4 and Stage 2
+usedbs = 215,lr = 2×10−3. InStage3, wesetthebatchsizeto219 ≈ 0.5Mandfocusedsolelyonvaryingthelearning
+rate, resultingin5×10−4. Stages1and2weretrainedto200MstepseachwhileStage3extendedto1Bsteps. Forthe
+Phi-Mambaultimatemodel,theStage3learningratewasreducedto2×10−4toenhancestability.
+Inthedevelopmentofthetraininglaw(seeFigure3),weexecutedasingle"continuous"runinitializedfromastatethat
+includedseveralcheckpoints.Thewarm-upperiodwasdeterminedas10%ofthetokensprocessedduringthecontinuous
+run. Forinstance,ifthemodel’sgoalwastoprocess640milliontokens,anditstartedfromarunthathadprocessed40
+milliontokens,thenthewarm-upwouldbesetat60milliontokens.Thecheckpointsrecordedduringthewarm-upphase
+werepreservedastheywere,whilesubsequentcheckpointsunderwentacoolingof10%ofthecurrentphase.Toillustrate,
+in the scenario mentioned earlier, a checkpoint at 320 million tokens during the 40M to 640M run would maintain the
+originalwarmup,whilethecooldownwouldspan28milliontokens.Conversely,acheckpointat80milliontokenswithin
+thewarm-upphasewouldbesavedwithoutanycooldown.
+Figure5extendstheStage2versusStage3comparisoninFigure3,exceptwemeasureaverageaccuracyondownstream
+metricsinsteadofperplexity. Weobserveastrongcorrelationbetweenthetraininglawsofperplexityanddownstream
+evaluation metrics. While the general trend indicates that models exposed to more tokens during the prior stage ini-
+tializationtendtoperformbetteronbothperplexityanddownstreammetrics, therelationshipisnotperfectlyaligned.
+Specifically,theorderofmodelperformancebasedonperplexitydoesnotalwaysmatchtheorderbasedondownstream
+metrics,highlightingsomedifferencesinhowthesemetricscapturemodeleffectiveness.
+Training Laws on Downstream Metrics Zoomed In
+0.60
+0.55
+10M 40M 160M 640M 2.56B 640M 1.28B 2.56B
+Tokens Observed
+Stage 2 Initialization Stage 3 Finetuned Stage 3 Pretrained
+Figure 5: Training laws comparing the amount of token budget between Stages 2 and 3, as measured by the average
+accuracyofdownstreamevaluationmetrics.
+B Applying Mamba-2 as a Black Box
+AsnotedpreviouslySection4.4,ourMamba-basedsequencemixerisslightlymodifiedfromtheoriginaltomakeitmore
+amenable for distilling from a Transformer architecture. In particular, the Mamba-2 sequence mixer is treated entirely
+in discrete time by projecting the input onto the matrix A and removing the discretization parameter Δ. Even though
+this formulation is somewhat different from Mamba-2, the original algorithm remains applicable through a reduction
+expressedinAppendixB.
+18
+ycaruccA
+egarevAListing1PyTorchexampleforusingtheMambaalgorithmfora𝐷𝑒𝑙𝑡𝑎-freevariation.
+"""
+X: (batch, seqlen, nheads, headdim)
+A_log: (batch, seqlen, nheads)
+B: (batch, seqlen, nheads, dstate)
+C: (batch, seqlen, nheads, dstate)
+D: (nheads)
+"""
+y = Mamba(
+X = X / A_log.unsqueeze(-1),
+dt = rearrange(A_log, "b c h -> b h c"),
+A = torch.ones(self.nheads),
+B = B,
+C = C,
+)
+Du = torch.einsum("h,blhp->blhp", D, X)
+y = rearrange(y + Du, "b l h p -> b l (h p)")
+C Attention Matrix Approximation Details
+ThissectionservesasacomplementtoSection5.7.1andoutlinesthemethodsemployedtocreateTable6.AppendicesC.1
+to C.5 describe our strategies for finding a matrix within the specified families that closely approximates the original
+attentionmatrixusingaselecteddistancemetric.Formally,weconsiderthefollowingoptimizationproblem:
+min∥M−X∥ (6)
+X∈M
+whereMisthesubspaceofaspecificmatrixfamily,Mistheattentionmatrix,and∥·∥correspondstoaselecteddistance
+metric.Inthefollowingsections,weexploredifferentmethodsandmatrixfamiliesforthisoptimizationproblem.
+C.1 Semi-SeparableMatrixApproximation
+Considering a time-varying system denoted by {A k,B k,C k,D k}𝑘∈[𝑙], we can describe it using the matrix mixer𝑇 (also
+knownasthetransfermatrix)asfollows:
+ 𝐷 1 0 0 0 0 ··· 0 
+  𝐶 2𝐵 1 𝐷 2 0 0 0 ··· 0 
+  𝐶 3𝐴 2𝐵 1 𝐶 3𝐵 2 𝐷 3 0 0 ··· 0 
+𝑇 =  𝐶 4𝐴 3:2𝐵 1 𝐶 4𝐴 3𝐵 2 𝐶 4𝐵 3 𝐷 4 0 ··· 0 
+  . . . . . . . . . . . . . . . ... . . .  
+ 
+ 𝐶 𝑙𝐴 𝑙−1:2𝐵 1 𝐶 𝑙𝐴 𝑙−1:3𝐵 2 𝐶 𝑙𝐴 𝑙−1:4𝐵 3 𝐶 𝑙𝐴 𝑙−1:5𝐵 4 ··· 𝐶 𝑙𝐵 𝑙−1 𝐷 𝑙 
+ 
+WithA ∈ R𝑛×𝑛,B ∈ R𝑚×𝑛,C ∈ R𝑝×𝑛,andD ∈ R𝑝×𝑚,where𝑛 isthestatedimension,𝑚 theinputdimension,and𝑝
+k k k k
+theoutputdimension.
+AsT’sformcorrespondstoasemi-separablematrix(i.e.,eachsub-matrixhasarankofupto𝑛),wewilllabelthismatrix
+formasSSMwithstatesize𝑛throughouttheremainderofthisappendix,representingastate-spacemodelwithstatesize
+𝑛orasemi-separablematrixoforder𝑛.
+Everymatrixcanberepresentedasalinearcombinationofrank-onematrices. Thus,theattentionmatrixM ∈ R𝑙×𝑙 can
+beinterpretedasanSSMwithastatesizeofupto𝑙 ≫ 𝑛. Consequently,wecanemploypriorresearchontime-varying
+modelorderreduction(P.DewildeandA.J.v.d.Veen1993;Melchior,VanDooren,andGallivan2014;A.v.d.Veenand
+P. Dewilde 1994) to reduce M to an SSM with a smaller state size 𝑛. Specifically, we utilize the following SVD-based
+approximation:
+19Table9: FullattentionmatrixapproximationbystructuredmatrixmixersStructuresareToeplitz, causallow-rank(LR),
+RetNet, state space dual (SSD) model (3.2) with and without the diagonal D term and general semi-separable matrices
+(SSM).Wehaveused1,000samples,eachconsistingof512tokens.Llama2-7B-Chatwasappliedoneverysample,andone
+attention head from each layer was randomly chosen for approximation. We evaluated (LR), RetNet, and SSD families
+with10,000gradientdescentstepspersample.
+Structure Toeplitz CausalLow-rank RetNet SSDwithoutD SSD Semi.Sep.Matrix
+(Statesize𝑁) - (16) (16) (16) (16) (16)
+WT-103 12.0 0.619 0.530 0.522 0.477 0.266
+OWT 12.2 0.606 0.516 0.508 0.466 0.259
+C4 12.3 0.595 0.503 0.496 0.453 0.236
+IMdB 12.3 0.598 0.505 0.498 0.455 0.238
+(Statesize𝑁) - (32) (32) (32) (32) (32)
+WT-103 12.0 0.322 0.268 0.262 0.237 0.127
+OWT 12.2 0.314 0.261 0.255 0.231 0.123
+C4 12.3 0.310 0.255 0.249 0.226 0.112
+IMdB 12.3 0.312 0.256 0.251 0.226 0.113
+(Statesize𝑁) - (64) (64) (64) (64) (64)
+WT-103 12.0 0.132 0.110 0.107 0.097 0.046
+OWT 12.2 0.129 0.107 0.104 0.095 0.045
+C4 12.3 0.128 0.106 0.102 0.093 0.041
+IMdB 12.3 0.129 0.106 0.103 0.094 0.043
+Algorithm1ApproximationofAttentionMatrixMasanSSMwithStateSize𝑛
+Input:AttentionmatrixM∈R𝐿×𝐿,statesize𝑛
+Output:ApproximatedattentionmatrixM˜ ∈R𝐿×𝐿
+Procedure:
+1.For𝑘 =1,...,𝐿−1:
+1.1Define𝐻
+𝑘
+asthesubmatrixofMbelowandtotheleftofentry𝑀 𝑘,𝑘:
+𝑀 𝑘,1 ··· 𝑀 𝑘,𝑘−1
+𝐻 𝑘 =    . . . ... . . .   
+ 𝑀 𝑙,1 ··· 𝑀 𝑙,𝑘−1 
+ 
+1.2PerformtheSVDonH andtruncateittorank𝑛
+k
+1.3IntegratethetruncatedH backintothenewmatrixM˜
+k
+NotethatthediagonalelementsofMwerenotsubjecttoapproximationinAlgorithm1astheyremainunchanged.
+Althoughthisapproximationmethodforthesemi-separablematrixisheuristic,ithasbeenempiricallyshowntodeliver
+goodresults. Forfurtherdetailsonapproximationmethodsforsemi-separablematrices,andthetheoreticalbackground
+behindthem,wereferthereaderto(PatrickDewildeandA.-J.Veen1998;Melchior,VanDooren,andGallivan2014)
+C.2 CausalLow-rankMatrixApproximation
+Given a set of self-attention matrices, we tried to find how close an causal low-rank matrix could approximate 𝑀 =
+Softmax(QK⊤).Toensurethestatesize𝑁,orinthiscaserankof𝑁,oftheapproximation𝑀 (cid:101),wecomposedM(cid:101) =L◦AB⊤
+whereA,B∈R𝐷,𝑁,LisaR𝐷,𝐷 lowertriangularmask,and𝐷 =512.
+We used the results from our causal low-rank (LR) experiments to inform much of our experimental design for later
+20gradient descent-based approximations, which include both SSD classes (with and without D matrix) and RetNet. We
+experimentedwithvariousdifferentlow-rankapproximationsolvers. Wefoundthatgradientdescentperformedbetter
+thanalternatinggradientdescent. Bothtypesofgradientdescentwerebetterthanalternatingleast-squareswhichoften
+timesreachedlessthanoptimallocalminima.Causallow-rankmatrixapproximationcanalsobeseenasasofterversion
+ofthelow-rankmatrixcompletionproblem,butasemi-definiteprogramming(SDP)approachwasnotabletooutperform
+standardgradientdescent.
+DuetoourLRapproximationrequiringgradientdescent,weselectedthenumberofstepsinrelationtothetimerequiredto
+calculatethesemi-separableapproximationofthesamematrix.Giventheheuristicapproachforconvertingself-attention
+matricestoasemi-separableform(AppendixC.1)anditsabilitytobeparallelized, weselectedthenumberofstepsfor
+gradientdescentbasedonthetimeittooktorunanentirebatchofmatrices(32)usinggradientdecentoncausallow-rank
+versusonematrixusingthesemi-separableheuristic.Aftertestingwiththestatesizes𝑁 =16,32,64,wefoundthat10,000
+stepssuitableasitwasaroundafactorof5×comparedtoSSM.The10,000stepswasmaintainedacrossallgradientbased
+approximation classes (SSD, SSD without D, and RetNet). Experiments using the finalized step count showed AdamW
+providedbetterresultscomparedtoSGD/Adam,andtheuseofaschedulerprovidedlittlegain.
+During the experiments, we also found that initialization of the matrices A,B played a significant role in the resulting
+approximationdifference. TheoriginalA,Bvaluesweresampledfrom [0,1);however,given∀𝑀 𝑖𝑗 ≤ 1,𝑖,𝑗 ∈ [𝐷] dueto
+(cid:104) (cid:17)
+theSoftMaxoperator,A,Bvalueswasthensampledfrom 0,√ 1 tohavethelastrowoftheself-attentionmatrixbe
+512𝑁
+(cid:104) (cid:17)
+uniformprobability. Wethenproceededtovarythefactoroftherangeexponentially,testing 0,√ 1 ∗2{−2,−1,0,1,2,4,8}
+512𝑁
+(cid:104) (cid:17)
+wherewefound 0,√ 1 ∗24providedthebestinitializationacrossmultipledatasets.Anormaldistributionwith𝜇 =0
+512𝑁
+and 𝜎2 with the above tested values performed worse than the uniform distribution. Initialization experiments were
+conductedusingtheAdamWoptimizerwithalearningrateof0.001andthestandard10,000steps. Thisandsubsequent
+gradientdescentclassesusethesameinitializationfortheirA,Bmatrices.
+For all gradient descent experiments in Table 9, Three learning rates 0.1,0.01,0.001 and AdamW were used for each
+combinationofmatrixclass,statesize,anddataset,withthebestapproximationbeingdocumented.TheFrobeniusmatrix
+normwasusedasthelossfunction.
+Listing2PyTorchexampleforgeneratingCausalLow-rankapproximation.
+n_states = 512
+state_size = 16 # or 32, 64
+num_heads = 32
+A = torch.rand((num_heads, n_states, state_size))
+B = torch.rand((num_heads, state_size, n_states))
+L = torch.tril(torch.ones((n_states, n_states)))
+M_approximation = L * (A @ B)
+C.3 StateSpaceDual(SSD)Approximation
+FortheSSDapproximation,weutilizethescalarSSMrecurrent(1SS)representationintroducedinDaoandA.Gu(2024).
+A key component is the values of𝑎, which we will refer to𝑙 from here on out to avoid confusion with matrix A, that
+constitutethefinalmatrixmixerM.
+Given the rolling multiplicative property of 𝐿 and the size of n_states, initialization of𝑙 was important to prevent the
+bottom-rightvaluesof𝐿 quicklyreaching0. Weexploredtheuniforminitializationof [0,1) +{−10,−8,−6,−4,−2,0,2}
+wheresmallervaluesof𝑙 leadstoless“decay”withinthe𝐿matrix.Wefoundsampling𝑙 from[−8,−7)resultedinthebest
+performanceandusethisinitializationintheSSDfamilyandRetNetclass. Asexpected,addingtheDcomponenthelps
+reducetheerrorbetweentheapproximationandactualattentionmatrixTable9.
+21Listing3PyTorchexampleforgeneratingSSD(withandwithoutDcomponent)approximation.
+n_states = 512
+state_size = 16 # or 32, 64
+softplus = torch.nn.Softplus()
+num_heads = 32
+A = torch.rand((num_heads, n_states, state_size))
+B = torch.rand((num_heads, state_size, n_states))
+D = torch.rand((num_heads))
+l = torch.rand((h, n_states))
+L = torch.exp(segsum(softplus(l) * -1))
+M_approximation = L * (A @ B)
+if apply_D:
+M_approximation = M_approximation + torch.eye(n_states,n_states) * D[:, None, None]
+C.4 RetNetMatrixApproximation
+TheRetentionmechanism,introducedbySunetal.(2023),isakeycomponentinRetNetmodelsandcanberepresented
+mathematicallyas(QK⊤·L)V.Here,thematrixLisdefinedelement-wiseby
+(cid:40)
+𝛾𝑛−𝑚, 𝑛 ≥𝑚
+𝐿 𝑛𝑚 = (7)
+0, 𝑛 <𝑚
+where𝛾 is a decay factor. This lower triangular matrix L captures the temporal dependencies by decaying past values
+withrespecttothecurrentposition.
+Inourapproximation,wereplacetheproductQKwithmatricesAandB. ThematrixLcanbeefficientlyconstructedin
+PyTorchusingthefollowingcode,whichgeneratesaRetNetapproximation:
+Listing4PyTorchexampleforgeneratingtheRetNetmatrixapproximation.
+n_states = 512
+state_size = 16 # or 32, 64
+softplus = torch.nn.Softplus()
+num_heads = 32
+A = torch.rand((num_heads, n_states, state_size))
+B = torch.rand((num_heads, state_size, n_states))
+l = torch.rand((num_heads))
+L = torch.exp(segsum(softplus(einops.repeat(l, 'h -> h n', n=n_states) * -1))
+M_approximation = L * (A @ B)
+ThisimplementationprovidesapracticalmethodforsimulatingtheRetentionmechanism,crucialforreducingcomputa-
+tionalcomplexityinRetNetmodels.
+C.5 ToeplitzApproximation
+OurToeplitzapproximationtechniquecalculatesthematrixapproximationbysettingthevalueofeachbandoftheToeplitz
+matrixastheaverageofthevaluesoftherespectivebandintheattentionmatrix. SinceeachbandinaToeplitzmatrix
+isconstantalongitsdiagonal,thismethodensuresthattheapproximationpreservesthestructureoftheoriginalmatrix
+whilemaintainingcomputationalefficiency.
+To justify this approach, we observe that taking the mean per band minimizes the L2 norm (i.e., the sum of squared
+differences)betweentheoriginalattentionmatrixandtheapproximatedToeplitzmatrix. Specifically,foreachband,the
+optimal value that minimizes the L2 difference between the two matrices is the average of the elements in that band.
+Thisisbecausethemeanisthevaluethatminimizesthesumofsquareddeviationsforasetofnumbers. Assuch,using
+22the mean ensures that the approximation is as close as possible to the original matrix in terms of L2 distance, thereby
+providingarobustandefficientapproximationmethod.
+Asbefore,weassumethattheapproximationisinput-dependent,meaningthateachattentionmatrixhasitsownunique
+Toeplitzapproximation.
+C.6 SegsumOperator
+Thesegsumoperatorcomputesthesumofelementsacrossspecifiedsegmentsofamatrix,which,asappliedinAppen-
+dicesC.3andC.4,correspondstosummingoverthecolumns.Thisoperationiscrucialforvariousmatrixmanipulations,
+including the computation of the state-space dual (refer to Equation (2)). Below is the Python implementation of the
+‘segsum‘operatorusingPyTorch.
+Listing5PyTorchimplementationoftheSegmentedSummation(segsum)operator.
+def segsum(x):
+"""Naive segment sum calculation. exp(segsum(A)) produces a 1-SS matrix,
+which is equivalent to a scalar SSM."""
+T = x.size(-1)
+x_cumsum = torch.cumsum(x, dim=-1)
+x_segsum = x_cumsum[..., :, None] - x_cumsum[..., None, :]
+mask = torch.tril(torch.ones(T, T, device=x.device, dtype=bool), diagonal=0)
+x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
+return x_segsum
+23

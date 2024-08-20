@@ -1,0 +1,968 @@
+LONGVILA: SCALING LONG-CONTEXT VISUAL LAN-
+GUAGE MODELS FOR LONG VIDEOS
+FuzhaoXue1∗ YukangChen1∗ DachengLi1,3† QinghaoHu2†
+LigengZhu1 XiuyuLi1,3 YunhaoFang1 HaotianTang1,2 ShangYang1,2
+ZhijianLiu1 EthanHe1 HongxuYin1 PavloMolchanov1 JanKautz1
+LinxiFan1 YukeZhu1,4 YaoLu1 SongHan1,2
+1NVIDIA 2MIT 3UCBerkeley 4UTAustin
+NVlabs/LongVILA
+ABSTRACT
+Long-contextcapabilityiscriticalformulti-modalfoundationmodels. Weintro-
+duce LongVILA, a full-stack solution for long-context vision-language models,
+includingsystem, modeltraining, anddataset development. Onthesystem side,
+we introduce the first Multi-Modal Sequence Parallelism (MM-SP) system that
+enableslong-contexttrainingandinference,enabling2Mcontextlengthtraining
+on 256 GPUs. MM-SP is also efficient, being 2.1× - 5.7× faster than Ring-
+Style Sequence Parallelism and 1.1× - 1.4× faster than Megatron-LM in text-
+onlysettings.Moreover,itseamlesslyintegrateswithHuggingFaceTransformers.
+For model training, we propose a five-stage pipeline comprising alignment, pre-
+training, context extension, and long-short joint supervised fine-tuning. Regard-
+ing datasets, we meticulously construct large-scale visual language pre-training
+datasetsandlongvideoinstruction-followingdatasetstosupportourmulti-stage
+training process. The full-stack solution extends the feasible frame number of
+VILA by a factor of 128 (from 8 to 1024 frames) and improves long video
+captioning score from 2.00 to 3.26 (1.6x), achieving 99.5% accuracy in 1400-
+frames video (274k context length) “needle in a haystack”. LongVILA-8B also
+demonstratesaconsistentimprovementinperformanceonlongvideoswithinthe
+VideoMMEbenchmarkasthevideoframesincrease.
+1 INTRODUCTION
+The importance of Multi-Modal and Long Context From using customized machine learning
+modelstoArtificialGeneralIntelligence(AGI),AIresearchismovingtowardsaunifiedsolutionfor
+everything. Tothisend,themostexcitingbreakthroughoffoundationmodelresearchisunlocking
+new abilities (Wei et al., 2022), which indicates that the model offers new potential to solve both
+existingchallengesandunforeseenapplications. Twoimportantdirectionsofunlockingabilitiesare
+multi-modalityandlong-context.
+First, a foundation model supporting more modalities can take more flexible input signals so that
+peoplecaninteractwiththemodelinmorediversemanners,e.g.,GPT-4o-likemulti-modalchatbot,
+multi-modalwebagent(Kohetal.,2024),andreal-worldroboticsfoundationmodel(Brohanetal.,
+2022;2023;Padalkaretal.,2023). Thelongercontextenablesmodelstoprocessmoreinformation,
+e.g.,longdocuments,repo-levelcodebase,andhour-lengthvideo,whichsimilarlyprovidesrequired
+featurestomorereal-worldapplications. Sinceweexpectthefoundationmodeltoworkasageneral
+solutionforeverything,supportingthesetwofeaturesishighlydesirabletoachieverealAGI.
+Recently,therearemanyworksthatenableVLMforshortcontext(Linetal.,2023b),aswellasLLM
+forlongcontext(Chenetal.,2023;Lietal.,2023a). However,therearen’tmuchworkfocusingon
+Multi-Modal + Long Context at the same time. LWM(Liu et al., 2024a) proposes Ring Attention
+∗AlgorithmLead.†SystemLead.Thefirstfourauthorshaveequalcontributions.
+1
+4202
+guA
+91
+]VC.sc[
+1v88101.8042:viXraFigure1: ThetrainingpipelinefortheLongVILAmodelextendsexistingVLMmodelstosupport
+longvideoprocessing. UsingVILA-1.5(Linetal.,2023b)asanexample,theprocessbeginswith
+alignment, pre-training, and supervised fine-tuning, in Stages 1 through 3. In Stage 4, the model
+undergoesmid-trainingforcontextextensionusingtheVILAmodel. Finally,inStage5,themodel
+is fine-tuned for long video understanding with MM-specific supervised pretraining (MM-SP), re-
+sultingintheLongVILAmodel. WhilethisexampleusesVILA,theprocessisadaptabletoother
+VLMs. NotethatwetrainLongVILAmodelsforupto1024videoframesinStage5.
+to extend context length, however the discrete tokens in vision part lead to low performance of
+image/videounderstandingalthoughitsimplifiesthesystemdesign. LongVA(Zhangetal.,2024a)
+proposestraininglongcontextLLMandvisionencoderonshortvideosandextendcontextwindow
+duringinference. ItcanhelpincreasecontextwindowforVLMbuthitslimit.
+The Necessity of Full-Stack Design in Long Multi-Modal Language Model Compared to the
+traditionalmachinelearningalgorithms(Jordan&Mitchell,2015)LargeLanguageModel(LLM)
+training is usually a more systematic project requiring more data engineering (Betker et al., 2023;
+Ouyang et al., 2022; Zhou et al., 2024) and hardware-software co-design (Lepikhin et al., 2020;
+Chowdhery et al., 2023; Shoeybi et al., 2019; Brown et al., 2020; Dehghani et al., 2023). More-
+over, compared with text-only LLM, the multi-modal foundation model and long-context model
+both introduce more challenges requiring the multi-component co-design: (1) multi-modal foun-
+dationmodels(e.g., LLaVA(Liuetal.,2023b), andFlamingo(Alayracetal.,2022))usuallyhave
+differentmodelarchitectureswiththetext-onlyLLMs,sothatwemightneedadifferentdistributed
+trainingstrategytosupportthelargemulti-modaltransformerarchitecture;(2)longcontextmodel-
+ingrequiresbothlongcontextdatatounlocktheability(Fuetal.,2024b;Chenetal.,2023)andalso
+the infrastructure to make memory-intense long context training possible (Li et al., 2021; Jacobs
+etal.,2023;Lietal.,2023b).Asaresult,ifwewanttointroducebothlong-contextandmulti-modal
+abilitiesintothefoundationmodel,acarefulfull-stackdesignisrequiredtoscalethemodelsizeand
+contextlengthuptogether.
+LongVILA:All-in-OneLong-ContextVisualLanguageModelScalingInthiswork,wedevote
+ourselves to an all-in-one solution for the training and inference of long-context visual language
+model.Intraining,weneedtocollect(1)alargeamountofhigh-qualityvisuallanguagedatatocon-
+ductlarge-scalepre-training;and(2)high-qualitylong-contextvisuallanguageinstructionfollowing
+datatounlockthelong-rangemodelingability. Inadditiontothedata,wemustimplementtheef-
+ficientandeasy-to-useinfrastructure,i.e.,Multi-ModalSequenceParallelism(MM-SP),supporting
+(1)multi-modalLLMarchitectureand(2)memory-intenselongcontexttransformertraining. From
+themodelingperspective,weconductafive-stagetrainingcurriculum: (1)multi-modalalignment,
+(2)large-scalepre-training,(3)shortsupervisedfine-tuning,(4)contextextensionforLLMs,and(5)
+longsupervisedfine-tuning.Forinference,thememoryusageofKVcachewillalsobeabottleneck
+when the sequence length is very long, we thus implement the inference mode of our MM-SP to
+supportlongcontextmulti-modallanguagedeployment.
+ContributionsThecontributionsofourworkcanbesummarizedasfollows:
+• Fromthesystemlevel,weproposedMulti-ModalSequenceParallelism(MM-SP),thefirst
+open-sourced sequence parallelism implementation supporting the training and inference
+oflong-contextmulti-modallanguagemodels. Oursystemisefficientandextremelyeasy
+touse(i.e.,nativelycompatiblewithHuggingfaceTransformers1).
+1https://huggingface.co/docs/transformers/en/index
+2567 567 000 000 L M SL M So heo hn oe dn 5og rd i tg 2u r iv tvu m iv ivd m di id e v de o ie v od e o i oeT d T a o aeT Ts sa o 5aTk ks a 5sT 5k s ka 4ksk 4760 58 4860 62 4961 4766 5062 234 234 D C Ce o ot r na r tei eD C Cl ce xe o otd tn ut r na er ate si ell ce s xtd tn ue as l 1s
+.8
+1.82.5 2.12.2 5.9
+2.2
+1.52.93 22 .5.8 33.2 23.8 33..22 33.1 3.2 3.1
+4400
+442344 337845
+40
+373944
+37
+4145
+38
+43
+40 1 1
+1.4 1.1 2.4 1.21.7 1.7
+33 35 0.4 0.40.6 0.6
+3300 0 00.3 0.30.4 0.4
+82 164 328 64 16 128 32256 1 1 2 2 4 48 816 1632 3624 61428 122586 256
+NuNmumbebre orf oFfr aFmraemses NumbNeur mofb Ferra omfe Fsrames
+99 Ring Flash At( ta en) tiV onideoMME 8.68.6 20 20 HuggHinuggFgaicneg pF( iab pce) eli nC peipa ep lit ni eoning OOM OOM
+F oni 6g .7 Vu 5r ie de2 o:M M MZ M 2Se S Dig egc P M-Z ga Aa aat tr tg tlo Er ei- on nR n n - ti a i gn - oC ng nCPA t dP (ht ot un e Vrsc i)do en ote Cx 6.t 5 a6l .p5e tn iog nth inc gan onim Lp or no gv Ve Im Lu Al 1t -i 5 C-m a1p5o td iO oau nlr is .tOyurasccuracy,includ1i5n.4gb 15o .4thVideo-QA
+6
+4.5 4. 44 .4 3 4.5 4.5 10 10 8.5 8.5 9.24 9.24 2.2 05 03 •2 2.1 . m vF 1 31 2ar 1.6 o K.o r6 idm 1 oa 1 ult ssh c de a old 6mi 4a n K3 at g1a i.1 n1il .n s1e tv woe icl t, 9o h 6w n K2s1e 5. i5 d1 6t .eo 5 kro a tk ot 1i kOo 2b Oe 8n Mo
+O
+Kn2 . Ot s.h M3 O .2l . u3a rrg de a- ts ac ra 01e 05l .. 28ce 821e K01v 05i .. 28pi 21s tu 2ea 0.n4 1.l 37 6a 2 Kp b 0.4r l .37e e- s 0t .4 5r o 3. 32a 2ui K0n r .4 5i .m 32n 1g o .0 6d 8a 4e Kn 1ld .0to 8l 1o .g8 9n 8e 6g Kn- 1ec .8ro 8a2n .l 18it 29ze 8ex K2t w .8m 9e 2lu l 5l 6ot Ki n-
+• W32eKdevelop6e4dK a work9i6nKg traini1n2g8Krecipe to turn8aKshor1t6cKontex32tKLLM64aKnd vi9s6iKon en12c8oKder256K
+Sequence Length Sequence Length
+intoalongcSoeqnuteenxcet LVenLgMth.
+Sequence Length
+• As a result, our model achieved competitive results on both video caption and video QA
+tasksatvariedcontextlengths,whichoutperformsstate-of-the-artopen-sourcedmodelsby
+alargemargin.
+2 BACKGROUND AND RELATED WORK
+VisuallanguagemodelarchitectureForVLMs, therearetwomainstreamdesigns, i.e., encoder-
+decoder VLM (e.g., LLaVA (Liu et al., 2023b), PaLM-E (Driess et al., 2023)) and decoder-only
+VLM(e.g.,Fuyu(Bavishietal.,2023),Chameleon(Team,2024)).
+• Decoder-onlyVLMsstilllagbehindtheencoder-decoderVLMsalthoughtherearesome
+positive signals showing the potential of decoder-only VLMs. There might be various
+reasonsbehindthisresults.
+• Encoder-DecoderVLMsconnectthevisionencoderandLLMdecoderviathemulti-modal
+projector. Someofthemulti-modalprojectors(e.g.,spatialpooling,Q-former)cansignifi-
+cantlyreducethenumberoftokensforeachimageorvideoframe,sothatgreatlyreducethe
+computational cost of the LLM decoder. However, decoder-only LLMs take raw patches
+asinputwithouthierarchicaltokenpoolingbydefault,sothatmakeitmorechallengingto
+reducethenumberoftokensforeachimageorframe. Inthiswork,wefollowVILA(Lin
+et al., 2023b) as the starting point. Note that there are some other enhanced variants of
+VILA, including VILA2 (Fang et al., 2024) for better performance and the X-VILA (Ye
+et al., 2024) for cross-modality understanding, reasoning, and generation. We follow the
+plainVILA-1.5versionformodelarchitectureandtrainingpipeline.
+SequenceparallelismandhybridstrategyLong-contexttrainingexamplestypicallyproduceac-
+tivationbeyondtheavailablememoryofonedevice. Totacklethismemoryissue,multiplesystems
+haveemployedthesequenceparallelismparadigmintext-onlyLLMscommunity,whichdistributes
+a single sequence into multiple devices. In particular, Ring-style systems Li et al. (2021; 2023b);
+Liuetal.(2023a)usesPoint-to-Point(P2P)communicationprimitivestocollectivelycomputethe
+attentionmodule,whileDeepSpeed-UlyssesJacobsetal.(2023)usesAll-to-All(A2A)primitiveto
+changetheshardingdimensionbetweensequencedimensionandattentionheaddimensiontocom-
+pute the attention module. Our paper is the first to design and implement a sequence parallelism
+system for visual language models. Furthermore, we carefully study the A2A and P2P primitives
+anddesignanovelhybridsequenceparallelismstrategytooptimizetrainingthroughput. (Guetal.,
+2024)isaconcurrentworkwhichalsoinvestigatestheintegrationofthesetwoSPstrategies. How-
+ever, itislimitedtovanillaLLMtraininganddoesnotextendtomulti-modalscenariosduetothe
+lackofsupportforcomplexattentionmaskinputsandvariable-lengthinputsequences.
+3
+)s( noitaretI
+rep emiT
+EEMMMMooeeddiiVV
+)s( noitaretI
+rep emiT
+noitpaC-ALIVgnoL
+)s( nekot
+tsrfi ot emiT
+noitpaC-ALIVgnoL
+)s( nekot
+tsrfi ot emiT50 GB/s Send KV via P2P n # Image tokens
+GPU GPU GPU GPU
+Aggregate KV via All2All n # Text tokens
+Ring SP 900 GB/s
+GPU GPU GPU GPU 350 350
+GPU 0 GPU 1
+GPU GPU 50 GB/s GPU GPU <img> <img> <img> <img> 300
+MM-SP 900 GB/s Stage 1: Shard by # images
+(Ours)
+GPU GPU GPU GPU
+100 100 100 100 300
+Stage 2: Shard by # tokens
+Two-Stage Sharding Strategy 100 100 100 50 50 300
+Figure3: MM-SPcomprisesofournovel2Dattentiontechniquethatusesintra-nodeAll2Alland
+inter-nodeP2Ptocommunicatekeysandvalues(KV),andanovelshardingstrategythatbalances
+thecomputationofboththeimageencoderandthelanguagemodelingstage. Incontrast,Ring-style
+SP(Liuetal.,2023a;Lietal.,2021;2023b)employsP2Pinbothanintra-nodeandaninter-node
+setting, causing excessive communication overhead. In addition, they are developed in text-only
+modality, where the workload of an image encoder is not optimized. Intra-node and inter-node
+bandwidthsaremeasuredininternalH100clusters.
+3 SYSTEM
+Long-contextVLMstraininginducesexcessivememoryfootprints. Forinstance,duringourStage4
+longvideotraining(Figure 1),asinglesequenceconsistsof128Ktokens,whoseactivationconsume
+morememorythanavailableinasingleGPU.Themostpopularopen-sourcedsolution,fullysharded
+dataparallelismdoesnotdistributetheactivationproducedbyasinglesequence, andthuscannot
+support our use case. Thus, we develop our own system based on sequence parallelism (Li et al.,
+2021;2023b;Liuetal.,2023a;Jacobsetal.,2023),commonlyimplementedinexistingfoundation
+modelsystemtooptimizetext-onlyLLMtraining. However, wefindthatexistingsystemsarenot
+efficientandnotscalableenoughtosupportourlong-contextVLMsworkload.
+3.1 LIMITATIONSOFEXISTINGSYSTEMS
+Inthissection,wediscusstheinefficiencyofcurrentsequence-parallelsystemswhenapplyingmulti-
+modalLLMs.
+Modality heterogeneity In text-only LLMs, sequences are processed by a single tokenizer into
+tokens,whereitisstraightforwardtodistributetokensevenlyintomultipleGPUs. However,VLMs
+includeanencoderarchitecture,whereanon-textdataisusuallyfirstrepresentedbyasingleplace-
+holdertoken(e.g. <img>), andencodedwithvariousrealtokensduringtraining. Forexample, a
+videoframeusuallytakearound256tokens(Linetal.,2023b). Duetothedifferentprocessingin
+visual and text modality, a simple implementation that treats place-holder tokens equally as a text
+tokenresultsinaworkloadimbalancebetweenGPUs(Figure 3).
+Network heterogeneity Our multi-modality comprises extremely long videos (Figure 1), which
+requires employing sequence parallelism in a multi-node setting. In a multi-node setting, inter-
+nodeandintra-nodenetworkbandwidthdifferssignificantly. Forexample,theNVIDIADGXH100
+utilizes NVLink at 900 GB/s for intra-node GPU communication and InfiniBand at 50 GB/s for
+inter-nodeGPUcommunication(singlepath),resultinginan18×differenceinbandwidth.Previous
+work,Ring-Stylesequenceparallelism(Lietal.,2021;2023b;Liuetal.,2023a;Zhu,2023)ignores
+theheterogeneousnetworkingfeatureonGPUsandutilizesP2Pcommunicationinbothinter-node
+and intra-node settings. This design induces excessive communication costs where they usually
+attempttooverlapthemintocomputation. However,wefoundthatthisdesigncannotalwayshide
+theoverhead,andevenslowsdownthecomputationkernel(Table1).
+4Table1:Theforwardandbackwardattentionkernelwall-clocktimewithorwithouttheoverlapping
+design(Unit: µs). ThecommunicationoverlapdesignsinRing-styleSPslowsdowntheattention
+kernelbyacquiringstreamingmultiprocessor(SM).
+Seq.length 4K 8K 16K 24K 32K
+forw.w/o 29.5 49.3 122.1 239.2 402.9
+forw.w/ 35.0(+18.6%) 54.6(+10.7%) 131.2(+7.5%) 250.9(+4.8%) 420.1(+4.2%)
+backw.w/o 77.7 123.3 362.9 730.0 1218.9
+backw.w/ 82.2(+5.8%) 129.8(+5.3%) 367.0(+1.1%) 743.2(+1.8%) 1225.3(+0.5%)
+Stage 1: Shard Images Stage 2: Shard Tokens Stage 3: LLM Execution
+Balancing Vision Tower Load Balancing LLM Load Training/Serving with MM-SP
+(1) Gathering Global Input Embedding
+bs=4
+GPU 1
+Vision
+GPU 1 bs
+Tower
+LLM
+sequence
+(2) Padding Sequence GPU 2
+Vision
+GPU 2 LLM
+Tower
+(3) Sharding to Local GPU
+GPU 1 GPU 2 GPU 3 GPU 3 GPU 2 GPU 1 GPU 3
+1 1 1 2 2 2 3 3 3 3 3 3 2 2 2 1 1 1
+GPU 3 Vision 1 1 2 2 3 3 3 3 2 2 1 1 LLM
+Tower 1 1 2 2 3 3 3 3 2 2 1 1
+1 2 3 3 2 1
+Video Frames Pad Token to Enable P2P Communication Local Inputs
+CCaCpatpaiotpintoisnosns
+Figure4: WorkflowofMulti-ModalSequenceParallelism,whereBatchSize(bs)=4andSequence
+ParallelSize(SP Size)=3. Toenablesequenceparallelismformulti-modalinputs,weimplement
+atailoredshardingstrategythatachievesbalancedworkloaddistributionandiscompatiblewithour
+2D-attentionmechanism.
+Limited maximal sequence length supported DeepSpeed-Ulysses (Jacobs et al., 2023) offers a
+potentialsolutiontoaddressthecommunicationprobleminring-styleSP.ItusesAll-to-Allcommu-
+nicationprimitives,whichinduceslesscommunicationvolumn.Unfortunately,thisuseofAll-to-All
+primitivescomewithcosts-itsdesignisbindtoparallelingintheattentionheaddimension,instead
+of the sequence dimension in the attention computation. Thus, simply using DeepSpeed-Ulysses
+cannotscalebeyondthenumberofattentionheads. Forexample,Llama-38BmodelemploysGQA
+with8Key-Valueheads,limitingthemaximumsequenceparallelismdegreeto8. Evenfurtherem-
+ployingthereplicationapproachforKey-Valueheadswithadditionalcommunicationoverhead(Li
+etal.,2023b),thehighestachievablesequenceparallelismdegreeisstillrestrictedto32(numberof
+Queryheads). Thisisnotsufficientwhenhandlingextremelylongsequences(e.g,fullmovies).
+3.2 MULTI-MODALSEQUENCEPARALLELISMTRAININGMODE
+Observingproblems inexisting systems, wesummarize thatan ideal multi-modalsequence paral-
+lelism should achieve efficiency and scalability, by addressing the modality heterogeneity and the
+networkheterogeneity,andalsobeabletoscalebeyondthenumberofattentionheads.
+MM-SPworkflowToaddresstheissueofmodalityheterogeneity,weproposeatwo-stagesharding
+strategythatoptimizesthecomputeworkloadforboththeimageencodingandlanguagemodeling
+stages. As depicted in Figure 4, the process begins with evenly distributing images (e.g., video
+frames) across devices within the SP process group, thereby achieving load balancing during the
+image encoding stage. Subsequently, we gather the global vision and text inputs for token-level
+sharding in the second stage. To support ring-based attention, we extend sequences with arbitrary
+dummytokens,ensuringeachsequencecanbedividedbythering-basedSPdegree. Thismodifica-
+5
+AllgatherP2P A2A Head Parallel
+q0 q0 q0
+Rank 0 Rank 0 Rank 2
+q1 q7 q1
+Rank 0
+q2 q1 q6
+Rank 1 Rank 1
+q3 q6 q7
+q4 q2 q2
+Rank 2 Rank 2 Rank 3
+q5 q5 q3
+Rank 1
+q6 q3 q4
+Rank 3 Rank 3
+q7 q4 q5
+kv0kv1kv2kv3kv4kv5kv6kv7 kv0kv7kv1kv6kv2kv5kv3kv4 kv0kv1kv6kv7kv2kv3kv4kv5
+(a) RingAttention (b) Zigzag RingAttention (c) 2D-Attention
+Figure 5: Comparison of RingAttention, ZIGZAG-RINGATTN, and 2D-Attention. The blue block
+representsthereiscommutationbetweenQKVandtheblackframeindicateslocalattentioncompu-
+tationoneachSPLgorcoaul pArttaennktio(nS P Size=3).
+tionmaintainsconsistencywiththeoriginalversionbyadjustinglabelinputstoignorethepadded
+tokens when calculating loss. We employ a balanced sharding strategy to distribute the context to
+eachrankfrombothends,ensuringequalcomputationacrossranks. Theadvantageofthisstrategy
+willbedemonstratedlater(Table4).Sincethisredistributionisperformedonlyonceduringtraining,
+theoverheadisminimal. Finally,thebalancedlocalinputsarefedintotheLLMbackbone,utilizing
+the2D-attentionmechanismtoachieveefficientsequenceparallelism.
+2D-AttentionmechanismToaddressthenetworkheterogeneityandachievescalability,welever-
+age the advantages in ring-style SP and Ulysses SP. More specifically, we treat paralleling across
+the sequence dimension or the attention head dimension as a “1D SP”. Our method parallelizes
+computation across both attention head and sequence dimension. In particular, we convert 1D SP
+processgroupintoa2Dmesh,includingindependentRing(P2P)processgroupsandUlysses(A2A)
+processgroups. Forexample,asshowninFigure3left,toenablean8-degreesequenceparallelism
+across 2 nodes, we can construct a 4×2 communication mesh using 2D-SP. In this configuration,
+theA2Aprocessgroup,withasizeof4,distributestheQKVtensorsaccordingtotheheaddimen-
+sion and re-partitions them along the sequence dimension within each node. Meanwhile, the P2P
+process group, with a size of 2, transfers the partitioned KV chunks between nodes. Besides, to
+furtherillustratehow ZIGZAG-RINGATTN balancescomputationandhow2D-attentionworks,we
+depicttheattentioncomputationscheduleusingdifferentmethodsinFigure5. Inthisexample,the
+sequencelengthis8andtheglobalSPdegreeis4. Duetothetriangularstructureofcausalattention
+computations,RingAttentionexperiencesacomputationimbalance,withrank0becomingidleafter
+thefirstroundwhilerank3continuescomputingthroughallstages. ZIGZAG-RINGATTN addresses
+thisbyreorderinginputsequencetokensalongthesequencedimensiontoachieveloadbalance.Our
+2D-attention mechanism uses a ring parallel degree of 2 and a head parallel degree of 2, resulting
+inanequivalentglobalsequenceparalleldegreeof4. Thisapproachalsoincorporatesaworkload
+balancestrategywithinthering-basedprocessgroup.Additionally,itemploystheAll2Alloperation
+to distribute the QKV tensors based on the head dimension across devices, ensuring efficient and
+balancedcomputation.
+3.3 MULTI-MODALSEQUENCEPARALLELISMINFERENCEMODE
+The model we obtained by sequence parallelism training can handle long-context multi-modality
+downstream tasks. However, the most widely used inference system built on HuggingFace Trans-
+formers is usually ran on a single GPU. A lack of a distributed implementation hinders the maxi-
+mumsequencelengthwecanperforminference. Themoststraightforwardandeasy-to-usesolution
+inHuggingFaceTransformersistouseitsownpipelineparallelisminferencefeature,whichshards
+asinglemodelacrossdifferentdevicesinalayer-basis(Huangetal.,2019;Narayananetal.,2019).
+However,thisapproachisinefficient,whereonlyoneGPUisactivatedatthesametime.Italsodoes
+notwellsupportlongsequencelengthbecausethefirstdeviceneedstostoremorebigtensorssuch
+astheinputsembeddingandimages,bottleneckingthewholesystem.
+6Figure 7: The pipeline for generating instruction-following data from long videos. The process
+begins by segmenting the long video into short clips, each approximately 10 seconds in length.
+These clips are individually annotated with captions using the VILA-1.5 model. Subsequently, a
+Large Language Model (LLM) is employed to generate question-and-answer pairs based on the
+captionsoftheseclips. Thetypesofquestionsgeneratedincludesummarizationandotherinquiries
+pertinenttothecontentoflongvideos.
+Spatial
+Travel & Events Sports
+8% 11% 13% 9% Attribute
+8% Education Pets & Animals
+10% 8% Action
+12% 5% People & Blogs News & Politics 8% 24% Object
+Music Science & Technology
+3% 6% 9% OCR
+13% 13% Comedy Entertainment
+Synopsis
+6% 29%
+Film Gaming
+5% Temporal
+Propor%on of video categories Propor%on of ques%on categories
+Figure 8: The proportion of questionand video categoriesin our LongVILA sft dataset. Wehave
+15,292videosintotal. Foreachvideo,thereareonesampleforcaptioningandtheotherquestion.
+Theleftpiechartshowstheproportionofvideocategories. Therightpiechartshowstheproportion
+ofquestioncategories.
+Thus,weimplementsequenceparallelismforVLMsdis-
+HuggingFace Pipeline MM-SP (Ours)
+tributed inference. Compared to the training mode, the
+system needs to additionally maintain tensors (e.g. in- GPU 0 Active Idle Idle Idle Active
+puttokensandpositionencodings)thatareprogressively GPU 1 Idle Active Idle Idle Active
+changingduringthedecodingphrase(Yuetal.,2022). In GPU 2 Idle Idle Active Idle Active
+addition,thesystemneedstodetectsignalsfromthema-
+GPU 3 Idle Idle Idle Active Active
+chinethatholdsthelasttokenandaccordinglyterminate
+the distributed process. Compared to the Huggingface T=0 T=1 T=2 T=3 T=0
+native pipeline parallelism strategy, our inference mode
+Figure 6: GPU schedule of Hugging-
+is efficient in that all devices jointly compute during the
+Face pipeline versus MM-SP infer-
+inference,acceleratingtheprocessbythenumberofma-
+encemode,demonstratedwith4GPUs.
+chinestimes(Figure6). Inaddition,itisscalableinthat
+MM-SP leverages all GPUs to jointly
+all memory is evenly distributed, and thus can support
+computeforinferenceresults.
+longersequenceswithmoremachines.
+4 TRAINING AND DATA
+4.1 OVERALLTRAININGPIPELINE
+AsshowninFigure1,inourpipeline,therearefivetrainingstages,i.e.,Stage1: multi-modalalign-
+ment, Stage 2: large-scale pre-training, Stage 3: context extension for LLM, Stage 4: supervised
+fine-tuning. Stage 1 and Stage 2 are following VILA 1.0 Lin et al. (2023b), to firstly bridge the
+gap between LLM and vision encoder, and then pre-training on larger datasets. In Stage 1, only
+themulti-modalprojectoristrainablewithothersfrozen. InStage2,Wefrozenthevisionencoder
+andtrainingLLMandthemulti-modalprojector. Afterwards,weexendthecontextlengthofLLM
+with text-only dataset in a continued pre-training manner. In Stage 4, we enhance the instruction
+followingabilitiesbymulti-tasksupervisedfine-tuning. Bothshortandlongdata,includingimages,
+7Table2:TrainingsystemthroughputcomparisonagainstvariousMegatron-LMstrategyon32H100
+GPUs,measuredintimeperiteration(unit: second). ”OOM”standsfor”OutofMemory”.
+Sequencelength Megatron-LM Ours
+CP CP=4+TP=8 ZIGZAG-RINGATTN Ulysses 2DAttention
+320K OOM OOM 23.57 10.70 11.12
+288K OOM OOM 20.24 8.68 8.65
+256K OOM OOM 17.54 6.98 7.04
+224K OOM OOM 15.22 5.47 5.53
+192K OOM OOM 12.97 4.15 4.24
+160K OOM OOM 10.83 3.02 3.11
+128K OOM 2.96 8.38 2.07 2.17
+96K 4.32 1.77 6.35 1.33 1.41
+64K 3.00 0.96 4.25 0.76 0.80
+32K 1.72 0.44 2.26 0.39 0.40
+shortvideosandlongvideosrelatedquestions,areusedfortraining. Itisnotedthatallparameters
+aretrainableinthefinalstage.
+4.2 STAGE1&2&3: MULTIMODALALIGNMENT,PRE-TRAINING,ANDSHORTSUPERVISED
+FINE-TUNING
+Before training at scale, we first use open-sourced image and video caption datasets to train the
+multi-modalprojectorinstage(1)toconductthemulti-modalalignment. Notethat,following(Lin
+et al., 2023b), both vision encoder and LLM decoder are frozen at this stage. After that, we con-
+ductlarge-scalepre-trainingtolearngeneralmulti-modalcapacityatscale. Toimprovethequality
+of large open-sourced datasets, we follow VILA2 (Fang et al., 2024) to relabel COYO-25M (Lin
+etal.,2023b;Byeonetal.,2022)withVILA-1.5-40B(Linetal.,2023b).Thesupervisedfine-tuning
+processincorporatesmixeddatatypes,includingbothimagesandvideos. Forshortvideocompre-
+hension, we utilize open-source video instruction-following datasets, e.g., YouCook2 Zhou et al.
+(2018)andShareGPTVideoZhangetal.(2024b).
+4.3 STAGE4: CONTEXTEXTENSIONFORLLMS
+OurempiricalresearchindicatesthatextendingthecontextlengthofLLMsisessentialpriortoen-
+gaginginsupervisedfine-tuningwithlongvideodatasets. FollowingStage2ofourmethodology,
+we execute a continuation of pre-training on the LLM to enhance its context length to 262,144,
+utilizingatotalof17Btokens. Weemployaprogressivetrainingschedule, incrementallyincreas-
+ing the context length from 8,192 to 65,536, and ultimately to 262,144, utilizing the SlimPajama
+dataset(Sobolevaetal.,2023)inaccordancewiththemethodologyoutlinedby(Fuetal.,2024c).
+Furthermore, we augment the base frequency of the Rotary Position Embeddings (RoPE) as de-
+scribedin(Suetal.,2021)duringthefine-tuningphase. Sequenceparallelismisimplementedfor
+the training at the 262,144 context length. We use low-rank adaptation for context extension fine-
+tuning(Chenetal.,2024b). Theseprocessescollectivelyrequireapproximately336GPUhourson
+machinesequippedwith80GBA100GPUs.
+4.4 STAGE5: LONGSUPERVISEDFINE-TUNING
+Long video instruction following dataset To facilitate the fine-tuning of long videos, we also
+constructedanew,dedicateddatasetforlongvideotraining,consistingof15,292videoswitharound
+10 minute for each one. We use the original long videos from the Shot2Story dataset (Han et al.,
+2023).Eachvideoincludesdifferentquestionsandanswers:oneforgeneratingcaptionsandanother
+foransweringquestions, enablingdiverseapplicationsinvideounderstanding. Figure7illustrates
+theprocessforgeneratinginstruction-followingdatasetsfromlongvideos. Initially,thelongvideo
+is segmented into shorter clips, each approximately 10 seconds in duration. These clips are then
+independentlyannotatedwithdescriptivecaptionsutilizingtheVILA-1.5model. Subsequently,an
+83000 2880
+DP Only 2660
+Ulysses
+ZigZag-RingAttn
+2250
+2D-Attention (Ours)
+1500 13101310
+750 666666
+333333333 333 333 333
+8 82 82 74 8 164164148 8 8 8 8
+0
+8 16 32 64 128 256
+Number of GPUs
+Figure9:MaximalsupportedtrainingsequencelengthcomparisonagainstZIGZAG-RINGATTN(Li
+etal.,2023b;Liuetal.,2024a;Zhu,2023;Korthikantietal.,2023)andDeepSpeedUlysses(Jacobs
+etal.,2023). OursystemsupportshighertrainingsequencelengthcomparedtoUlysses,andonpar
+withZIGZAG-RINGATTN.
+LLM is employed to generate question-and-answer pairs derived from the captions of these clips.
+Thegeneratedquestionsencompasssummarizationandotherqueriesrelevanttothecomprehensive
+understandingoflongvideocontent.
+As in Figure 8, the left chart categorizes videos into several domains, including Travel & Events,
+Sports,Education,Pets&Animals,People&Blogs,News&Politics,Music,Science&Technol-
+ogy, Comedy, Entertainment, Film, and Gaming, ensuring a wide-ranging representation of video
+content. The right chart breaks down the categories of questions into Spatial, Attribute, Action,
+Object, OCR, Synopsis, and Temporal, reflecting the variety of inquiries and cognitive tasks that
+thedatasetcanaddress. Thisdatasetprovidesarichresourceforadvancingtheunderstandingand
+processingoflongvideoformatsinsupervisedfine-tuning.
+5 EVALUATION
+We evaluate our full-stack solution from both system and modeling perspectives. We report our
+trainingandinferenceresultsfirsttoverifytheefficiencyandscalabilityofoursystem,whichmakes
+long-contexttrainingandinferencepossible. Weevaluatethecaptioningandinstructionfollowing
+ofourlong-contextmodel.
+5.1 TRAININGANDINFERENCESYSTEM
+OurdevelopedtrainingandinferencesystemscanbeusedwithHuggingFaceTransformerbysimple
+monkey patching, following the popular open-source convention in (Zheng et al., 2023). In this
+section,weprovidequantitativeevaluationoftrainingsystemthroughput,inferencesystemlatency,
+andthemaximalsupportedsequencelength.
+5.1.1 TRAININGSYSTEM
+Baselines and hardware setup For training efficiency, we compare with a ZigZag ring-style se-
+quence parallelism system, which is incorporates load-balanced and GPU optimization (ZIGZAG-
+RINGATTN for consistency) (Li et al., 2023b; Zhu, 2023; Liu et al., 2024a; Korthikanti et al.,
+2023). Weselectapopularopen-sourcedimplementation(Zhu,2023). WeuseFully-sharded-Data-
+Parallelism(FSDP)(Zhaoetal.,2023)toreducethememoryoccupiedbymodels,gradientsandop-
+timizerstatesinsteadofZero-3(Rajbhandarietal.,2020)(Table 9). Inaddition,wecomparewith
+the expert-designed and highly optimized Megatron-LM (Shoeybi et al., 2019; Korthikanti et al.,
+2023) system. We compare with their implementation of sequence parallelism, termed “context-
+parallelism”(CP).Wealsocomparewithahybridstrategythatusestensormodelparallelism(TP)
+withinanode,andCPcrossnode,recommendedbytheMegatron-LMteamasanadvancedusage.
+WeconductmostexperimentsonH100nodes,eachwith8xH100(80GB)machinesequippedwith
+intra-node NVLink, and 400 Gbps inter-node Infiniband. We conduct the maximal supported se-
+quence length supported training experiments up to 32 A100 nodes, each equipped with 8xA100
+9
+)K(
+htgneL
+.qeS
+xaMTable 3: First token latency (left; unit: second) and maximal supported inference sequence length
+(right)comparisonversusnativeHuggingFacepipeline.
+Seq. 8K 16K 32K 64K 96K 128K 256K #GPUs 1 2 4 8
+HF 1.81 2.47 4.20 8.50 15.36 OOM OOM HF 48K 83K 96K 96K
+Ours 0.22 0.30 0.53 1.08 1.88 2.89 9.24 Ours 48K 88K 138K 276K
+Table4:TimeperiterationontheShareGPT4Videodataset(Chenetal.,2024a)withandwithoutour
+two-stageshardingstrategy,measuredwithdifferentsettingsasdetailedin§5.1.3(Unit: seconds).
+2GPUs 4GPUs 8GPUs
+one-stage 0.78 0.89 1.20
+70 Long video Task two-stage(ourMM-SP66) 0.774 D0et.a8ile6d 1.12
+( o V8 n L0 456 a000 G MmB s4567 ) o 30000 t, 3rdM S a4wh ee 3o id l nhr 4i tu L M S 4 o ievm 4o h nei f3rnd o dv gg ee r 4i t si u o 4d v 3vm it ie 8 aiTd zd h o ae v 4 ne e s eo iT o 0d 3k
+d
+a eT 85T 8s sa o a4 4k s a B tsT 0k hka m5s a4 ak 3e tn9 tdc4 h34o
+9
+ea5 n 48 4bc v5 l a i8 u st4 ucs 1i h a4 4o l15n s46 ei52 za n6 ep2 cp oo4l d3 fy 4 e4 317 rf 4 .o 7 i6 Sr s6 iH un sc1 ue0 a0 M llb yee g123 0oc 1234 a .4a rt du r eos re n
+0
+s
+0C CD C C -
+.
+.oo oe o o
+6
+6L ot r nr n fa rr tt e Me fi eel ce tc xx t hdt mtntn u 1u 1e ee ba .a . 4s 4l as l s a 1s s 1 g.sa 2.2 nem1 il1 . ti8e. un8 1 de1 .t 7o. e7 d2 ta. o2 s5. l me5 2.m s2 1 a.1 n2 le l. o9 m2 e. 2 t9 r. o52 n tr. h5 ay t a3 . i2 nvW3 .8 e2 Ll. e3 8 y. L2 e3 3 Msv.2 ua3 sp3 l ,u. p2 wa o33 .. t1 r2 ee t3.1
+pro3v0idema33inresultsfortheLLMbackbone,withoutt0h0. e40v.3isua0 l.4
+encoder. Weprovideanablationof
+30 2 4 8 16 32 010.3 20.4 4 8 16 32 64 128 256
+thevisualen2coderpa4rtin§85.1.3. 16 32 1 2 4 8 16 32 64 128 256
+Number of Frames Number of Frames
+Number of Frames Number of Frames
+OOM
+9 9 Z M 2Dig e -Z g Aaa tZ M 2tg tr Di eg- o en -R Z gn Atai a in t- otg t g r enC- oA nR nP ( tt oi int - oun g nCrA sP (t o)t un rs) 6.46.5 8.48.6 12 12 50 50 H OH Ouu uug rg r ssgg ii nn gg FF aa cc ee p p ipip ee linli ene 151 .45.4OOM 6
+6
+4.3 4.4 4.44.5 1100 8.85.5 9.249.24
+03 032.3 1.27.1 0.1 4.6 1 3 03 .81.1 1.41.5 OOOMO2 M.22.3 01 01 05 .. 05 28 .. 28 21 21 22 0. 0.44 ..37 37 00.4 5.4. 532. 32 1.10.808 1.818.88 2.829.89
+32K32K 64K64K 96K96K 12182K8K 88KK 1166KK 3322KK 646K4K 969K6K 1281K28K 2562K56K
+SeqSueeqnuceen Lceen Lgetnhgth SSeeqqueunecnec eL eLnegnthgth
+(a)Trainingthroughput (b)Inferencelatency(first-token)
+Figure10: Trainingandinferencesystemperformanceobtainedon32and8H100s.
+ThroughputTable2showsthethroughputresultusingwallclocktimeperiterationover32H100
+GPUs. Resultsareobtainedusing10warmupiterations,andaverageover5iterationstoreducethe
+variance. Oursystemachieves2.1×-5.7×speedupcomparedtoZIGZAG-RINGATTN,andonpar
+with DeepSpeed Ulysses. Compared to a more-optimized implementation of ring-style sequence
+parallelism,theMegatron-LMCP,ourmethoddemonstrates3.1×-4.3×speedup. Thisshowsthat
+our design of 2D sequence parallelism significantly addressed the problem in ring-style sequence
+parallelism,asdescribedin§3.2. Furthermore,comparedtothehybridstrategyofMegatron-LM,
+weachieve1.1×-1.4×speedup. WenotethatoursystemiscurrentlywritteninTriton(Tilletetal.,
+2019), where further porting it into C++ will achieve a higher speedup. In addition, we find that
+Megatron-LM system supports a noticeably lower maximal sequence length, and thus we do not
+include its result in the next section. We further conduct this experiment using 8 H100 nodes in
+Table8,andfindsimilarconclusions.
+Maximal supported sequence length We test the maximal sequence length of a fixed number of
+GPUs by testing from per GPU sequence length 1k, 2k, up to 10k until it raises out of memory
+error. Figure9summarizestheresult. Notethatactivationcheckpointingisdisabledtoensureafair
+comparison. Vanilladataparallelismfailtoscaleforlongvideosatlargerclustersizes. DeepSpeed-
+Ulyssespartitionsonattentionheads,whichcannotscaletoahighercontextlengthbecausethe8B
+modelonlyhas32attentionheads. Asaresult,weachieve 8×highercontextlengthsupportwhen
+scaleto256GPUs.Inaddition,weachieveasimilarcontextlengthscalingasZIGZAG-RINGATTN,
+withmorethan2Mcontextlengthsupporton256GPUs.
+10
+EMMoediV
+)s( noitaretI
+rep emiT
+EMMoediV
+)s( noitaretI
+rep emiT
+noitpnaoCitp-AaCL-IVAgLnIVogLnoL
+)s)(s n( neekkoot
+tt stsrrfifi
+oott eemmiiTT274k
+Context
+Figure11: ComparisonofNeedleintheLongVideoHaystackExperiment. The32-framebaseline
+model(left)cannotretrieverightneedlesafter32frames. Incontrast,theLongVILAmodel(right),
+trainedon1024frames,presents99.5%accuracyon274kcontextlength.
+Table5: PerformanceevaluationonVideoMME(Fuetal.,2024a)benchmark.
+Model Frames Short Medium Long Overall
+Qwen-VL-Chat 4 46.9 38.7 37.8 41.1
+Video-LLaVA(Linetal.,2023a) 8 45.3 38.0 36.2 39.9
+ST-LLM(Liuetal.,2024b) 64 45.7 36.8 31.3 37.9
+VideoChat2-Mistral(Lietal.,2023c) 16 48.3 37.0 33.2 39.5
+Chat-UniVi-V1.5(Jinetal.,2023) 64 45.7 40.3 35.8 40.6
+VideoLLaMA2(Chengetal.,2024) 16 56.0 45.4 42.1 47.9
+LLaVA-NeXT-Qwen2 32 58.0 47.0 43.4 49.5
+128 60.2 48.2 38.8 49.2
+LongVILA-8B
+256 61.8 49.7 39.7 50.5
+Insummary,ourtrainingsystemtakestheadvantageofbothworlds-itachievessimilarscalabilityas
+ZIGZAG-RINGATTN,andmaintainthethroughputofDeepSpeed-Ulysses.Itachieves1.3xspeedup
+anda2.5xlongercontextlengthsupportcomparedtothehighlyoptimizedMegatron-LM.
+5.1.2 INFERENCESYSTEM
+We evaluate our inference system against HuggingFace Pipeline parallelism on a single node of 8
+H100 GPUs and the 8B model. (Table 3). We achieve 8.2× speed up compared to HuggingFace
+pipelineon8xH100GPUs. ThisismainlybecauseHuggingfacepipelineinferenceonlyactivates1
+GPUatatime,whereourmethodleverageallGPUstojointlycomputeforresults.Table3compares
+themaximalsequencelengthsupported,wherewefindourmethodachieves2.9×longersequence
+length than HuggingFace pipeline. In particular, we find that during 96K inference, the largest
+sequencelengthitcansupport,HFpipelinestores80GBactivationsonthefirstGPUand18GBon
+laterGPUs. Thisimbalanceallocationofactivationbottlenecksthemaximalsequencelength.
+5.1.3 EFFECTOFTWO-STAGESHARDING
+Weablatetheeffectofourtwo-stageshardingstrategyusingavideocaptioningdataset(Chenetal.,
+2024a). Wecompareourtwo-stageshardingstrategyagainstabaselineone-stageshardingstrategy
+thatonlyshardbythenumberofimages. Wemeasurethetimeperiterationunderdifferentnumber
+of H100 GPUs. For k GPUs, we use a total number of k images per video, and a batch size of
+k. The results are shown in Table 4. We observe a speedup from 1% to 7%. The speedup comes
+fromthelongcaptioning, wherethebaselinesuffersfromimbalanceworkloadwithoutsharingby
+thenumberoftexttokens.
+5.2 NEEDLEINAHAYSTACK
+InFigure11,wepresenttheresultsofthe”NeedleinaHaystack”experimentforlongvideos. Fol-
+lowingthemethodologyestablishedintheexistingliterature(Zhangetal.),wepreparedalongvideo
+11Table 6: Ablation on Stage 3: Short SFT and Stage 4: Mid-training for LongVILA-8B on Video
+MMEbenchmarkwith128framesforevaluation.
+Stage3 Stage4 Average Short Medium Long
+✗ ✓ 28.5% 29.2% 28.8% 27.4%
+✓ ✗ 44.9% 55.1% 43.0% 36.5%
+✓ ✓ 49.2% 60.2% 48.2% 38.8%
+Table7: EvaluationofLongVILA-Captionperformanceacrossdifferentframecounts. LongVILA-
+Caption’s performance improves across all metrics. As the number of frames increases from 8 to
+256,withtheaveragescorerisingfrom2.00to3.26outofamaximumof5. UnlikeinFigure2,the
+modelspresentedinthistablearebothtrainedandevaluatedusingthesamenumberofframes.
+Frames Correctness Detailed Contextual Average
+8 1.87 1.85 2.27 2.00
+128 2.36 2.44 2.79 2.53
+256 3.23 3.11 3.43 3.26
+andsampledafixednumberofframes. Weinsertedspecificallydesignedimagesatvariousdepths
+andtaskedthemodelwithansweringcorrespondingquestions. The32-framebaselinemodel(left)
+wasunabletoaccuratelyretrievethecorrectimagesbeyond32frames. Incontrast,theLongVILA
+model(right)demonstratedenhancedperformanceacrossarangeofframecountsanddepths.
+5.3 GENERALVIDEOUNDERSTANDING
+Table 5 presents the performance of various models on the Video MME benchmark, comparing
+their effectiveness across short, medium, and long video lengths, as well as overall performance.
+LongVILA-8B,utilizing256frames,achievesanoverallscoreof50.5. Wealsodotheablationon
+theeffectsofStage3andStage4inTable6.
+5.4 LONGVILA-CAPTION
+Wehavedevelopedalongvideocaptioningbenchmark,LongVILA-Caption,consistingof100long
+videos,withcaptionsgeneratedasdetailedinSection4.4,andverifiedthroughhumanexamination.
+In line with the methodology of VideoChatGPT (Maaz et al., 2024), we evaluate the predictions
+of each model based on their correctness, detailed orientation, and contextual understanding. For
+instance,weassesscorrectnessbyemployingGPT-4topredictscoresusingaspecificprompt. Ad-
+ditionally,wepresenttwoexamplesinFigures13and14,featuringlongvideosinsportsandtech-
+nology. These examples demonstrate that LongVILA, with its capability to process more frames,
+offersamorecomprehensiveunderstandingofvideoscomparedtoitsshort-framecounterpart.
+TheTable7presentstheperformancemetricsfortheLongVILAmodelsbeingtrainedandevaluated
+onvaryingnumbersofframes:8,128,and256.Asthenumberofframesincreases,themodel’sper-
+formanceimprovessignificantly.Specifically,theaveragescoresrisefrom2.00to3.26,highlighting
+themodel’senhancedcapabilityingeneratingaccurateandrichcaptionswithmoreframes.
+6 CONCLUSION
+WepresentLongVILA,afull-stacksolutionforlong-contextvisuallanguagemodel,includingdis-
+tributed systems, model training, and data engineering. Our system can efficiently scale context
+length up to 2M tokens and achieve 2.1× - 5.7 × and 1.1× - 1.4× speedup than Ring Sequence
+ParallelismandMegatron-LM,respectively. Wethenmeticulouslycuratedlongvideodatasetsand
+trainourmodelwithatwo-stagepipelinebasedonpre-trainedVLMcheckpoint. OurLongVILA-
+8B model extends the feasible frame number from 8 to 1024, capturing fine-grained information
+12preciselyfrom2-hourvideo”needle-in-a-haystack”andachievingpromisingresultsonbothvideo
+QAandcaptioning.
+REFERENCES
+Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, Antoine Miech, Iain Barr, Yana Hasson, Karel
+Lenc,ArthurMensch,KatherineMillican,MalcolmReynolds,etal. Flamingo: avisuallanguage
+model for few-shot learning. Advances in neural information processing systems, 35:23716–
+23736,2022.
+Rohan Bavishi, Erich Elsen, Curtis Hawthorne, Maxwell Nye, Augustus Odena, Arushi Somani,
+andSag˘nakTas¸ırlar. Introducingourmultimodalmodels,2023. URLhttps://www.adept.ai/
+blog/fuyu-8b.
+JamesBetker,GabrielGoh,LiJing,TimBrooks,JianfengWang,LinjieLi,LongOuyang,Juntang
+Zhuang,JoyceLee,YufeiGuo,etal. Improvingimagegenerationwithbettercaptions. Computer
+Science.https://cdn.openai.com/papers/dall-e-3.pdf,2(3):8,2023.
+Anthony Brohan, Noah Brown, Justice Carbajal, Yevgen Chebotar, Joseph Dabis, Chelsea Finn,
+Keerthana Gopalakrishnan, Karol Hausman, Alex Herzog, Jasmine Hsu, et al. Rt-1: Robotics
+transformerforreal-worldcontrolatscale. arXivpreprintarXiv:2212.06817,2022.
+AnthonyBrohan,NoahBrown,JusticeCarbajal,YevgenChebotar,XiChen,KrzysztofChoroman-
+ski,TianliDing,DannyDriess,AvinavaDubey,ChelseaFinn,etal.Rt-2:Vision-language-action
+modelstransferwebknowledgetoroboticcontrol. arXivpreprintarXiv:2307.15818,2023.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla Dhariwal,
+ArvindNeelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsare
+few-shotlearners. Advancesinneuralinformationprocessingsystems,33:1877–1901,2020.
+MinwooByeon,BeomheePark,HaecheonKim,SungjunLee,WoonhyukBaek,andSaehoonKim.
+Coyo-700m:Image-textpairdataset.https://github.com/kakaobrain/coyo-dataset,2022.
+Lin Chen, Xilin Wei, Jinsong Li, Xiaoyi Dong, Pan Zhang, Yuhang Zang, Zehui Chen, Haodong
+Duan,BinLin,ZhenyuTang,etal. Sharegpt4video: Improvingvideounderstandingandgenera-
+tionwithbettercaptions. arXivpreprintarXiv:2406.04325,2024a.
+YukangChen,ShengjuQian,HaotianTang,XinLai,ZhijianLiu,SongHan,andJiayaJia.Longlora:
+Efficient fine-tuning of long-context large language models. arXiv preprint arXiv:2309.12307,
+2023.
+YukangChen,ShengjuQian,HaotianTang,XinLai,ZhijianLiu,SongHan,andJiayaJia.Longlora:
+Efficientfine-tuningoflong-contextlargelanguagemodels. InTheInternationalConferenceon
+LearningRepresentations,2024b.
+ZesenCheng,SicongLeng,HangZhang,YifeiXin,XinLi,GuanzhengChen,YongxinZhu,Wenqi
+Zhang, Ziyang Luo, Deli Zhao, and Lidong Bing. Videollama 2: Advancing spatial-temporal
+modelingandaudiounderstandinginvideo-llms. CoRR,abs/2406.07476,2024.
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam
+Roberts, Paul Barham, Hyung Won Chung, Charles Sutton, Sebastian Gehrmann, et al. Palm:
+Scaling language modeling with pathways. Journal of Machine Learning Research, 24(240):
+1–113,2023.
+MostafaDehghani,JosipDjolonga,BasilMustafa,PiotrPadlewski,JonathanHeek,JustinGilmer,
+Andreas Peter Steiner, Mathilde Caron, Robert Geirhos, Ibrahim Alabdulmohsin, et al. Scaling
+visiontransformersto22billionparameters. InInternationalConferenceonMachineLearning,
+pp.7480–7512.PMLR,2023.
+Danny Driess, Fei Xia, Mehdi SM Sajjadi, Corey Lynch, Aakanksha Chowdhery, Brian Ichter,
+AyzaanWahid,JonathanTompson,QuanVuong,TianheYu,etal. Palm-e: Anembodiedmulti-
+modallanguagemodel. arXivpreprintarXiv:2303.03378,2023.
+13YunhaoFang,LigengZhu,YaoLu,YanWang,PavloMolchanov,JangHyunCho,MarcoPavone,
+SongHan,andHongxuYin. Vila2:Vilaaugmentedvila. arXivpreprintarXiv:2407.17453,2024.
+ChaoyouFu,YuhanDai,YondongLuo,LeiLi,ShuhuaiRen,RenruiZhang,ZihanWang,Chenyu
+Zhou, Yunhang Shen, Mengdan Zhang, Peixian Chen, Yanwei Li, Shaohui Lin, Sirui Zhao,
+Ke Li, Tong Xu, Xiawu Zheng, Enhong Chen, Rongrong Ji, and Xing Sun. Video-mme: The
+first-ever comprehensive evaluation benchmark of multi-modal llms in video analysis. CoRR,
+abs/2405.21075,2024a.
+YaoFu,RameswarPanda,XinyaoNiu,XiangYue,HannanehHajishirzi,YoonKim,andHaoPeng.
+Dataengineeringforscalinglanguagemodelsto128kcontext. arXivpreprintarXiv:2402.10171,
+2024b.
+YaoFu,RameswarPanda,XinyaoNiu,XiangYue,HannanehHajishirzi,YoonKim,andHaoPeng.
+Dataengineeringforscalinglanguagemodelsto128kcontext. CoRR,abs/2402.10171,2024c.
+Diandian Gu, Peng Sun, Qinghao Hu, Ting Huang, Xun Chen, Yingtong Xiong, Guoteng Wang,
+QiaolingChen,ShangchunZhao,JiaruiFang,YonggangWen,TianweiZhang,XinJin,andXu-
+anzhe Liu. Loongtrain: Efficient training of long-sequence llms with head-context parallelism.
+CoRR,pdf/2406.18485,2024.
+MingfeiHan,LinjieYang,XiaojunChang,andHengWang. Shot2story20k: Anewbenchmarkfor
+comprehensiveunderstandingofmulti-shotvideos. arXivpreprintarXiv:2311.17043,2023.
+YanpingHuang,YoulongCheng,AnkurBapna,OrhanFirat,DehaoChen,MiaChen,HyoukJoong
+Lee, Jiquan Ngiam, Quoc V Le, Yonghui Wu, et al. Gpipe: Efficient training of giant neural
+networks using pipeline parallelism. Advances in neural information processing systems, 32,
+2019.
+Sam Ade Jacobs, Masahiro Tanaka, Chengming Zhang, Minjia Zhang, Leon Song, Samyam Ra-
+jbhandari, and Yuxiong He. Deepspeed ulysses: System optimizations for enabling training of
+extremelongsequencetransformermodels. arXivpreprintarXiv:2309.14509,2023.
+PengJin,RyuichiTakanobu,CaiwanZhang,XiaochunCao,andLiYuan.Chat-univi:Unifiedvisual
+representation empowers large language models with image and video understanding. CoRR,
+abs/2311.08046,2023.
+Michael I Jordan and Tom M Mitchell. Machine learning: Trends, perspectives, and prospects.
+Science,349(6245):255–260,2015.
+JingYuKoh,RobertLo,LawrenceJang,VikramDuvvur,MingChongLim,Po-YuHuang,Graham
+Neubig, Shuyan Zhou, Ruslan Salakhutdinov, and Daniel Fried. Visualwebarena: Evaluating
+multimodalagentsonrealisticvisualwebtasks. arXivpreprintarXiv:2401.13649,2024.
+VijayAnandKorthikanti,JaredCasper,SangkugLym,LawrenceMcAfee,MichaelAndersch,Mo-
+hammadShoeybi,andBryanCatanzaro. Reducingactivationrecomputationinlargetransformer
+models. ProceedingsofMachineLearningandSystems,5:341–353,2023.
+Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang,
+MaximKrikun,NoamShazeer,andZhifengChen.Gshard:Scalinggiantmodelswithconditional
+computationandautomaticsharding. arXivpreprintarXiv:2006.16668,2020.
+Dacheng Li, Rulin Shao, Anze Xie, Ying Sheng, Lianmin Zheng, Joseph Gonzalez, Ion Stoica,
+XuezheMa,andHaoZhang. Howlongcancontextlengthofopen-sourcellmstrulypromise? In
+NeurIPS2023WorkshoponInstructionTuningandInstructionFollowing,2023a.
+DachengLi,RulinShao,AnzeXie,EricXing,JosephGonzalez,IonStoica,XuezheMa,andHao
+Zhang. Lightseq: : Sequencelevelparallelismfordistributedtrainingoflongcontexttransform-
+ers. InWorkshoponAdvancingNeuralNetworkTraining: ComputationalEfficiency,Scalability,
+andResourceOptimization,2023b.
+Kunchang Li, Yinan He, Yi Wang, Yizhuo Li, Wenhai Wang, Ping Luo, Yali Wang, Limin Wang,
+andYuQiao. Videochat: Chat-centricvideounderstanding. CoRR,abs/2305.06355,2023c.
+14ShengguiLi,FuzhaoXue,ChaitanyaBaranwal,YongbinLi,andYangYou. Sequenceparallelism:
+Longsequencetrainingfromsystemperspective. arXivpreprintarXiv:2105.13120,2021.
+BinLin,YangYe,BinZhu,JiaxiCui,MunanNing,PengJin,andLiYuan. Video-llava: Learning
+unitedvisualrepresentationbyalignmentbeforeprojection. CoRR,abs/2311.10122,2023a.
+Ji Lin, Hongxu Yin, Wei Ping, Yao Lu, Pavlo Molchanov, Andrew Tao, Huizi Mao, Jan Kautz,
+MohammadShoeybi,andSongHan. Vila: Onpre-trainingforvisuallanguagemodels,2023b.
+Hao Liu, Matei Zaharia, and Pieter Abbeel. Ring attention with blockwise transformers for near-
+infinitecontext. arXivpreprintarXiv:2310.01889,2023a.
+HaoLiu,WilsonYan,MateiZaharia,andPieterAbbeel. Worldmodelonmillion-lengthvideoand
+languagewithblockwiseringattention. arXivpreprintarXiv:2402.08268,2024a.
+HaotianLiu,ChunyuanLi,QingyangWu,andYongJaeLee. Visualinstructiontuning. InNeurIPS,
+2023b.
+Ruyang Liu, Chen Li, Haoran Tang, Yixiao Ge, Ying Shan, and Ge Li. ST-LLM: large language
+modelsareeffectivetemporallearners. CoRR,abs/2404.00308,2024b.
+Muhammad Maaz, Hanoona Rasheed, Salman Khan, and Fahad Shahbaz Khan. Video-chatgpt:
+Towards detailed video understanding via large vision and language models. In Proceedings of
+the62ndAnnualMeetingoftheAssociationforComputationalLinguistics(ACL2024),2024.
+Deepak Narayanan, Aaron Harlap, Amar Phanishayee, Vivek Seshadri, Nikhil R Devanur, Gre-
+gory R Ganger, Phillip B Gibbons, and Matei Zaharia. Pipedream: Generalized pipeline par-
+allelism for dnn training. In Proceedings of the 27th ACM symposium on operating systems
+principles,pp.1–15,2019.
+LongOuyang,JeffreyWu,XuJiang,DiogoAlmeida,CarrollWainwright,PamelaMishkin,Chong
+Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to fol-
+lowinstructionswithhumanfeedback. Advancesinneuralinformationprocessingsystems, 35:
+27730–27744,2022.
+AbhishekPadalkar,AcornPooley,AjinkyaJain,AlexBewley,AlexHerzog,AlexIrpan,Alexander
+Khazatsky, Anant Rai, Anikait Singh, Anthony Brohan, et al. Open x-embodiment: Robotic
+learningdatasetsandrt-xmodels. arXivpreprintarXiv:2310.08864,2023.
+SamyamRajbhandari,JeffRasley,OlatunjiRuwase,andYuxiongHe. Zero: Memoryoptimizations
+toward training trillion parameter models. In SC20: International Conference for High Perfor-
+manceComputing,Networking,StorageandAnalysis,pp.1–16.IEEE,2020.
+Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Patrick LeGresley, Jared Casper, and Bryan
+Catanzaro. Megatron-lm: Training multi-billion parameter language models using model par-
+allelism. arXivpreprintarXiv:1909.08053,2019.
+DariaSoboleva,FaisalAl-Khateeb,RobertMyers,JacobRSteeves,JoelHestness,andNolanDey.
+SlimPajama: A627BtokencleanedanddeduplicatedversionofRedPajama,2023.
+Jianlin Su, Yu Lu, Shengfeng Pan, Bo Wen, and Yunfeng Liu. Roformer: Enhanced transformer
+withrotarypositionembedding. CoRR,abs/2104.09864,2021.
+Chameleon Team. Chameleon: Mixed-modal early-fusion foundation models. arXiv preprint
+arXiv:2405.09818,2024.
+PhilippeTillet,Hsiang-TsungKung,andDavidCox.Triton:anintermediatelanguageandcompiler
+for tiled neural network computations. In Proceedings of the 3rd ACM SIGPLAN International
+WorkshoponMachineLearningandProgrammingLanguages,pp.10–19,2019.
+Jason Wei, Yi Tay, Rishi Bommasani, Colin Raffel, Barret Zoph, Sebastian Borgeaud, Dani Yo-
+gatama,MaartenBosma,DennyZhou,DonaldMetzler,etal.Emergentabilitiesoflargelanguage
+models. arXivpreprintarXiv:2206.07682,2022.
+15HanrongYe,De-AnHuang,YaoLu,ZhidingYu,WeiPing,AndrewTao,JanKautz,SongHan,Dan
+Xu, PavloMolchanov, andHongxuYin. X-VILA:cross-modalityalignmentforlargelanguage
+model. CoRR,abs/2405.19335,2024.
+Gyeong-InYu,JooSeongJeong,Geon-WooKim,SoojeongKim,andByung-GonChun. Orca: A
+distributedservingsystemfor{Transformer-Based}generativemodels. In16thUSENIXSympo-
+siumonOperatingSystemsDesignandImplementation(OSDI22),pp.521–538,2022.
+Peiyuan Zhang, Kaichen Zhang, Bo Li, Guangtao Zeng, Jingkang Yang, Yuanhan Zhang, Ziyue
+Wang,HaoranTan,ChunyuanLi,andZiweiLiu. Longcontexttransferfromlanguagetovision.
+CoRR.
+Peiyuan Zhang, Kaichen Zhang, Bo Li, Guangtao Zeng, Jingkang Yang, Yuanhan Zhang, Ziyue
+Wang,HaoranTan,ChunyuanLi,andZiweiLiu. Longcontexttransferfromlanguagetovision.
+arXivpreprintarXiv:2406.16852,2024a. URLhttps://arxiv.org/abs/2406.16852.
+RuohongZhang,LiangkeGui,ZhiqingSun,YihaoFeng,KeyangXu,YuanhanZhang,DiFu,Chun-
+yuanLi,AlexanderHauptmann,YonatanBisk,andYimingYang. Directpreferenceoptimization
+ofvideolargemultimodalmodelsfromlanguagemodelreward,2024b.
+Yanli Zhao, Andrew Gu, Rohan Varma, Liang Luo, Chien-Chin Huang, Min Xu, Less Wright,
+Hamid Shojanazeri, Myle Ott, Sam Shleifer, et al. Pytorch fsdp: experiences on scaling fully
+shardeddataparallel. arXivpreprintarXiv:2304.11277,2023.
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang,
+ZiLin,ZhuohanLi,DachengLi,Eric.PXing,HaoZhang,JosephE.Gonzalez,andIonStoica.
+Judgingllm-as-a-judgewithmt-benchandchatbotarena,2023.
+ChuntingZhou, PengfeiLiu, PuxinXu, SrinivasanIyer, JiaoSun, YuningMao, XuezheMa, Avia
+Efrat,PingYu,LiliYu,etal. Lima: Lessismoreforalignment. AdvancesinNeuralInformation
+ProcessingSystems,36,2024.
+LuoweiZhou, ChenliangXu, andJasonJ.Corso. Towardsautomaticlearningofproceduresfrom
+webinstructionalvideos. InAAAI,pp.7590–7598,2018.
+ZilinZhu. Ringflashattention. https://github.com/zhuzilin/ring-flash-attention,2023.
+Accessed: 2024-07-28.
+16A APPENDIX
+7
+LongVILA (SP=4, DP=2)
+6
+LongVILA (DP=8)
+5
+4
+3
+2
+0 20 40 60 80 100
+Train Step
+Figure 12: Convergence evaluation. We compare the training loss curve of training LongVILA
+withandwithoutsequenceparallelism. ThisfigureshowsconvergenceofLongVILA-8Bmodelon
+8 A100 GPUs with sequence parallelism degree set at 4 and pure data parallelism training. The
+trainingdatasetmixtureincludesshot2story,ai2dandchartqa. Itisobviousthatthetwocurves
+alignclosely,indicatingthatourMM-SPsystemhasnoadverseimpactontrainingquality.
+FSDPversusZero-3withhybridsequenceparallelism
+Table8: Trainingsystemthroughputcomparisonon64H100GPUs,measuredintimeperiteration
+(unit: second). Ulyssesdoesnotapplyheresinceitcanonlysupportupto32GPUs.
+Sequencelength Megatron-LM Ours
+CP CP=8+TP=8 ZIGZAG-RINGATTN Ulysses 2DAttention
+640K OOM OOM 88.4 - OOM
+578K OOM OOM 77.2 - 16.9
+512K OOM OOM 66.1 - 13.31
+448K OOM OOM 57.5 - 10.39
+384K OOM OOM 48.6 - 7.80
+320K OOM OOM 40.5 - 5.63
+256K OOM 5.31 32.2 - 3.93
+192K 8.81 3.10 24.1 - 2.49
+128K 7.10 1.57 16.0 - 1.36
+64K 3.09 0.61 8.04 - 0.57
+32K 1.86 0.44 4.24 - 0.33
+Table9: OurtrainingsystemusingtogetherwithFSDP(Zhaoetal.,2023)orZero-3(Rajbhandari
+etal.,2020)on32H100GPUs. WefoundthatFSDPismorefriendlyinmemorymanagementand
+choosetouseitinourdefaultconfiguration. (Timeperiteration,unit: second).
+Sequence Zero-3 FSDP
+Length ZIGZAG-RINGATTN Ulysses 2DAttention ZIGZAG-RINGATTN Ulysses 2DAttention
+320K OOM OOM OOM 23.57 10.70 11.12
+288K OOM OOM OOM 20.24 8.68 8.65
+256K OOM OOM OOM 17.54 6.98 7.04
+224K 19.04 7.06 5.73 15.22 5.47 5.53
+192K 13.01 4.24 4.38 12.97 4.15 4.24
+160K 10.73 3.09 3.23 10.83 3.02 3.11
+128K 8.63 2.16 2.30 8.38 2.07 2.17
+96K 6.49 1.43 1.53 6.35 1.33 1.41
+64K 4.40 1.01 1.08 4.25 0.76 0.80
+32K 2.06 1.58 1.04 2.26 0.39 0.40
+17
+ssoLElaborate on the visual and narrative
+elementsofthevideoindetail.<Video> :
+Thevideoopenswithasceneoftwosoccerplayersinbluejerseysstandingonagreenfield,
+:
+withoneofthemholdingasoccerball.Thenextsceneshowsagoalkeeperinagreenjersey
+8 frames divingtosaveagoal.Followingthis,thereisaclipofaplayerinaredjerseyfallingtotheground,
+possiblyafteratackle.Thesubsequentscenecapturesaplayerinaredjerseyrunningwiththe
+balltowardsthegoal.Thevideothentransitionstoawideshotofasoccerfieldwithplayersin
+redandwhitejerseys,andacrowdinthestands.Thefinalscenedisplaysalogowiththetext
+"BUNDESLIGA"andacalltoactionto"CLICKHERETOSUBSCRIBE!"
+Thevideobeginswithasoccergamebeingplayedonafield,whereplayersinblueandred
+:
+jerseys are seen, with the ball being passed around and occasionally kicked. The camera
+256 frames focusesondifferentplayers,includingoneinabluejerseywhoscoresagoal.Thesceneshiftsto
+acelebrationwithaplayerinabluejerseyholdinghishandsup,followedbyashotofanumber
+10. The game continues with players in green and white jerseys, and the camera captures
+variousmoments,includinggoalsbeingscoredandplayersrunningonthefield.Atonepoint,
+theplayersareseenhuggingeachother.Thevideotransitionstoaseriesofshotsthatinclude
+numbersagainstawhitebackground,followedbymorescenesofthesoccergame.Theplayers
+arenowwearingredandwhitejerseys,andthecrowdischeeringenthusiastically.Thevideoalso
+featuresclose-upsofindividualplayersandmomentsofcelebration,suchasaplayerinared
+jerseybeingcongratulatedbyteammates.Towardstheend,thecamerashowsamaninablack
+jacket walking on the field, and then cuts to three men standing together. Finally, the video
+concludes with a man in a black T-shirt talking to the camera, with a red and white logo
+appearingonthescreen.
+Figure13: ExamplesofsportslongvideocaptionwithLongVILA.Forthegameplayopening,the
+8-frame baseline describes only static image, two players in only blue jerseys. In contrast, 256-
+frameLongVILAdescribesplayersinblueandredjerseyspassingandkickingtheball. Inaddition,
+the256-frameversionalsoincludethedetailofplayersElhabuogrgatiengoenmthpehavsiiszueasl tahnedcnealrerbatriavteoryaspects,
+:
+whichismissinginthe8-framebaseline. elementsofthevideoindetail.<Video>
+The video begins with a dark screen, followed by a series of images that highlight different
+:
+featuresofaMiniCooper.ThefirstimageshowstwoMiniCooperssidebyside,witharrows
+8 frames pointing to specific features such as "Side Mirror Lens," "New Bumper Fascia," "Larger Fog
+Lights,"and"FunctionalBrakeDucts."Thecarsareblue,andthetextisinwhitewithredarrows.
+ThenextimageisablurredmotionshotofaMiniCooperdrivingonaroadwithsnowonthe
+sides.Thefollowingimageisaclose-upofacar'sairventwithablurredbackground.Another
+imageshowsamaninablackcoatandglasses,presumablyacarexpert,speakinginsideaMini
+Cooper,withtheinteriorvisibleinthebackground.Thesubsequentimageisablurredshotofa
+whiteMiniCooperparkedinagarage.Thefinalimageisadarkscreenwiththetext"FORFULL
+REVIEW,VISIT:AutoGuide.com"inredandwhite.
+Thevideobeginswithafocusonasilvercar'signitionbuttonandtransitionstovariousshotsof
+:
+awhitecardrivingonasnowyroad,withclose-upsofitsfront,rear,andside.Amaninablack
+256 frames coatisthenintroduced,standingnexttoasilvercarinagarage,talkingtothecamera.Thescene
+shifts to a showroom setting, showcasi1ng8two blue cars, followed by a man in a black coat
+discussingfeaturesinfrontofalaptop.Thenarrativecontinueswiththemandriving,detailing
+thecar'sinteriorandcontrols,includingthedashboard,gearshift,andsteeringwheel.Thevideo
+emphasizesthedrivingexperience,withrepeatedshotsofthemantalkingandgesturingwhile
+drivingonasnowyroad,withthecameraoccasionallyfocusingonthecar'sdashboard,gauges,
+and controls.The sequence includes close-ups ofthe car's ignition button, gearshift, and a
+detailedviewofthedashboard.Towardstheend,thevideofeaturesthemaninablackcoat
+discussingthecar'sfeaturesinfrontofawhitecarparkedinagarage,highlightingtheheadlights,
+wheels,andthecar'sinterior.Thevideoconcludeswiththemanstandingnexttothewhitecar
+inadimlylitgarage,continuinghisdialoguewiththecamera.Elaborate on the visual and narrative
+elementsofthevideoindetail.<Video> :
+Thevideoopenswithasceneoftwosoccerplayersinbluejerseysstandingonagreenfield,
+:
+withoneofthemholdingasoccerball.Thenextsceneshowsagoalkeeperinagreenjersey
+8 frames divingtosaveagoal.Followingthis,thereisaclipofaplayerinaredjerseyfallingtotheground,
+possiblyafteratackle.Thesubsequentscenecapturesaplayerinaredjerseyrunningwiththe
+balltowardsthegoal.Thevideothentransitionstoawideshotofasoccerfieldwithplayersin
+redandwhitejerseys,andacrowdinthestands.Thefinalscenedisplaysalogowiththetext
+"BUNDESLIGA"andacalltoactionto"CLICKHERETOSUBSCRIBE!"
+Thevideobeginswithasoccergamebeingplayedonafield,whereplayersinblueandred
+:
+jerseys are seen, with the ball being passed around and occasionally kicked. The camera
+256 frames focusesondifferentplayers,includingoneinabluejerseywhoscoresagoal.Thesceneshiftsto
+acelebrationwithaplayerinabluejerseyholdinghishandsup,followedbyashotofanumber
+10. The game continues with players in green and white jerseys, and the camera captures
+variousmoments,includinggoalsbeingscoredandplayersrunningonthefield.Atonepoint,
+theplayersareseenhuggingeachother.Thevideotransitionstoaseriesofshotsthatinclude
+numbersagainstawhitebackground,followedbymorescenesofthesoccergame.Theplayers
+arenowwearingredandwhitejerseys,andthecrowdischeeringenthusiastically.Thevideoalso
+featuresclose-upsofindividualplayersandmomentsofcelebration,suchasaplayerinared
+jerseybeingcongratulatedbyteammates.Towardstheend,thecamerashowsamaninablack
+jacket walking on the field, and then cuts to three men standing together. Finally, the video
+concludes with a man in a black T-shirt talking to the camera, with a red and white logo
+appearingonthescreen.
+Elaborate on the visual and narrative
+:
+elementsofthevideoindetail.<Video>
+The video begins with a dark screen, followed by a series of images that highlight different
+:
+featuresofaMiniCooper.ThefirstimageshowstwoMiniCooperssidebyside,witharrows
+8 frames pointing to specific features such as "Side Mirror Lens," "New Bumper Fascia," "Larger Fog
+Lights,"and"FunctionalBrakeDucts."Thecarsareblue,andthetextisinwhitewithredarrows.
+ThenextimageisablurredmotionshotofaMiniCooperdrivingonaroadwithsnowonthe
+sides.Thefollowingimageisaclose-upofacar'sairventwithablurredbackground.Another
+imageshowsamaninablackcoatandglasses,presumablyacarexpert,speakinginsideaMini
+Cooper,withtheinteriorvisibleinthebackground.Thesubsequentimageisablurredshotofa
+whiteMiniCooperparkedinagarage.Thefinalimageisadarkscreenwiththetext"FORFULL
+REVIEW,VISIT:AutoGuide.com"inredandwhite.
+Thevideobeginswithafocusonasilvercar'signitionbuttonandtransitionstovariousshotsof
+:
+awhitecardrivingonasnowyroad,withclose-upsofitsfront,rear,andside.Amaninablack
+256 frames coatisthenintroduced,standingnexttoasilvercarinagarage,talkingtothecamera.Thescene
+shifts to a showroom setting, showcasing two blue cars, followed by a man in a black coat
+discussingfeaturesinfrontofalaptop.Thenarrativecontinueswiththemandriving,detailing
+thecar'sinteriorandcontrols,includingthedashboard,gearshift,andsteeringwheel.Thevideo
+emphasizesthedrivingexperience,withrepeatedshotsofthemantalkingandgesturingwhile
+drivingonasnowyroad,withthecameraoccasionallyfocusingonthecar'sdashboard,gauges,
+and controls.The sequence includes close-ups ofthe car's ignition button, gearshift, and a
+detailedviewofthedashboard.Towardstheend,thevideofeaturesthemaninablackcoat
+discussingthecar'sfeaturesinfrontofawhitecarparkedinagarage,highlightingtheheadlights,
+wheels,andthecar'sinterior.Thevideoconcludeswiththemanstandingnexttothewhitecar
+inadimlylitgarage,continuinghisdialoguewiththecamera.
+Figure 14: Examples of technology long video caption with LongVILA. At the beginning of cap-
+tions, the 8-frame baseline only describes static image and two cars. In contrast, the 256-frame
+LongVILA describes the car on snowy road, covering front, rear, and side views. For details, the
+256-frame LongVILA describes close-ups of ignition button, gear shift, and dashboard elements,
+whicharemissinginthe8-framebaseline.
+19

@@ -1,0 +1,531 @@
+Demystifying the Communication Characteristics
+for Distributed Transformer Models
+Quentin Anthony∗, Benjamin Michalowicz∗, Jacob Hatef, Lang Xu,
+Mustafa Abduljabbar, Aamir Shafi, Hari Subramoni, Dhabaleswar K. (DK) Panda
+Department of Computer Science and Engineering, The Ohio State University, Columbus, Ohio, USA
+{anthony.301, michalowicz.2, hatef.4, xu.3304, abduljabbar.1, shafi.16, subramoni.1, panda.2}@osu.edu
+Abstract—Deeplearning(DL)modelsbasedonthetransformer
+architecture have revolutionized many DL applications such
+as large language models (LLMs), vision transformers, audio
+generation, and time series prediction. Much of this progress
+has been fueled by distributed training, yet distributed commu-
+nication remains a substantial bottleneck to training progress.
+Thispaperexaminesthecommunicationbehavioroftransformer
+models — that is, how different parallelism schemes used in
+multi-node/multi-GPU DL Training communicate data in the
+context of transformers. We use GPT-based language models
+as a case study of the transformer architecture due to their
+ubiquity. We validate the empirical results obtained from our Fig. 1: 13-billion parameter model breakdown of communi-
+communicationlogsusinganalyticalmodels.Atahighlevel,our cation and computation using ZeRO-1 and 8 tensor-parallel
+analysis reveals a need to optimize small message point-to-point
+stages (single iteration)
+communication further, correlations between sequence length,
+per-GPU throughput, model size, and optimizations used, and
+where to potentially guide further optimizations in framework
+and HPC middleware design and optimization.
+IndexTerms—NeuralNetworks,DNN,MPI,GPU,LargeLan-
+guage Models, Interconnects, Communication Characterization
+I. INTRODUCTION
+Large Language Models (LLMs) such as ChatGPT [1],
+Gemini [2], and Llama [3] are revolutionizing multiple in-
+dustries with their ability to perform a range of tasks from
+customer service to creative content generation. LLMs are
+typically pre-trained with internet-scale, pre-processed data Fig. 2: 20-billion parameter model breakdown of communi-
+that allows them to learn the intricacies of human languages. cation and computation using ZeRO-1 and 8 tensor-parallel
+After pre-training, LLMs undergo a fine-tuning process in stages (single iteration)
+a supervised setting that allows them to excel in down-
+stream tasks like generation, summarization, translation, and
+question/answering. Modern LLMs utilize a large number of to lower Model FLOPs Utilization (MFU) [4] for training.
+parameters that imply increased computational and memory For instance, MegaScale [5] reports a 55.2% MFU on 12,288
+requirements during training. A higher number of parameters GPUs for training a 175-billion parameter model. To empha-
+allows the model to capture more intricate relationships and size this point, Figures 1 and 2 show how communication
+nuances in language, leading to improved performance on a begins to dominate computation at increasing scales for 13-
+range of downstream tasks. billion and 20-billion parameter GPT-2-based models. We are
+motivatedbythistoconductathoroughcharacterizationstudy
+A. Motivation
+to understand the communication stage during LLM training.
+AsanLLM’ssizeincreases,trainingrequiresalargenumber
+of GPUs for a considerable amount of time on modern HPC
+B. Problem Statement
+systems, and it is significantly bottlenecked by how quickly
+Good communication performance is critical for scaling
+data can be exchanged between parallel training processes.
+LLMtrainingonlargeHPCsystems.Thispaperaimstostudy
+Here,themessagingstackincludingthecommunicationfabric
+and analyze communication strategies used by state-of-the-
+plays a pivotal role. At large scales, such a bottleneck leads
+art Deep Learning (DL) training frameworks on leading-class
+∗ denotesequalcontribution supercomputers. Our objective is to learn the volume of data
+4202
+guA
+91
+]CD.sc[
+1v79101.8042:viXraexchanged—as well as communication primitives employed, line with the adopted analytical models, we present system-
+number of calls, and message sizes involved—between paral- agnosticmeasurementsforeachparallelismscheme.Measure-
+lel processes at different scales from various parallelization ments include 1) the collective communication type 2) the
+strategies. This detailed analysis needs to be conducted in data volumes per collective 3) the proportions, frequency, and
+the context of input datasets, model architectures, and model messagesizesforeachcollective.Wealsoexaminetheimpact
+sizes. This characterization study will aid the next generation of sequence length on communication volumes per collective
+of communication runtimes to meet the performance require- pattern for Data-Parallel and Model-Parallel environments.
+ments of LLM training workloads and increase the effective This technique is particularly valuable for researchers and
+utilization of large-scale systems. developersofcollectivecommunicationlibraries,asitprovides
+insights into which collectives to enhance and which mes-
+C. Challenges
+sage ranges to target to improve LLM training performance.
+Figure 3 shows just how many combinations someone Additionally, we conduct interconnect-specific evaluations,
+must consider when characterizing LLM communication on measuring latency for particular collectives on AMD Infinity
+AI/HPCsystems,fromframeworkssuchasMegatron-LM[6], Fabric and HPC-Slingshot 11 GPU and node interconnects.
+Llama [7], and DeepSpeed [8] and parameter count/model This aims to understand the communication overhead for the
+size, to choice of communication middleware [9], [10], [11], underlying calls at the OMB microbenchmark level, using the
+to parallelism strategies [12], [13], [14], all the way down to same communication backend as employed by our training
+the hardware on which training/characterization takes place. framework of choice, GPT-NeoX[15].
+E. Contributions
+Our contributions are as follows:
+1) We combine empirical results with analytical models to
+study communication behavior for various parallelism
+schemes and sequence lengths.
+2) Weprovideanin-depthunderstandingofthecommunica-
+tionoverheadsassociatedwithData,Pipeline,andTensor
+parallelismschemescommonlyusedintransformermod-
+els.
+3) We present system-agnostic and system-specific mea-
+surements for each parallelism scheme, including col-
+lective communication types, data volumes, proportions,
+frequency, and message sizes.
+4) We examine the impact of sequence length on commu-
+nication volumes per collective pattern for Data-Parallel
+Fig.3:Anon-exhaustivelistofwhatmustbeconsideredwhen
+and Model-Parallel environments.
+characterizingLLMperformance,scalability,andcommunica-
+5) We conduct interconnect-specific evaluations, measuring
+tion behavior.
+latency and bandwidth for the particular collectives used
+by the studied LLM models. The analysis is conducted
+Given these challenges, offering insights into communica-
+on AMD Infinity Fabric and HPE-Slingshot 11 GPU and
+tion behavior for transformer architectures while maintaining
+node interconnects.
+a balance between the framework, system, and interconnect
+To the best of our knowledge, this is the first study to
+choices, as well as generality, is not straightforward.
+systematically characterize communication for distributed
+D. Proposed Solution transformer models across multiple parallelism schemes
+and sequence lengths, providing detailed insights into
+Given the complexity and importance of understanding
+collective communication types, data volumes, and distri-
+communication in emergent transformer-based workloads, we
+butions,andcombiningtheseresultswiththeinterconnect-
+adopt a systematic approach that combines empirical results
+specific collective communication benchmarking on the
+withanalyticalmodelingtostudycommunicationbehaviorfor
+Frontier supercomputer.
+various parallelism schemes and sequence lengths. Through
+F. Paper Breakdown
+this, we aim to give an in-depth understanding of the com-
+munication overheads associated with parallelism schemes The rest of this paper is broken down as follows. Section
+commonly used in transformer models, which form the foun- II explains the background of LLMs and parallelism schemes
+dational architecture of LLMs. Our analysis covers a range of used to train them and other DL models on HPC clusters.
+model optimizers, including ZeRO-1, ZeRO-2, ZeRO-3, and Section III details the set of equations used to model com-
+ZeRO++, as well as Data Parallelism, Pipeline Parallelism, munication volume for each parallelism scheme used in this
+and Tensor Parallelism for up to 13B parameter models. In paper.SectionsIVandVbreakdownourexperimentalresults
+2and how they relate to our performance model. Section VI pipeline order. Since activation computation relies on depen-
+detailsrelatedworkinLLMcharacterizationfromitsbehavior dencies between different layers, inevitable GPU idle times,
+to system-level performance. Section VII will conclude this known as pipeline bubbles are present in this paradigm, there
+paper and offer our suggestions and insights. have been various research efforts in reducing such bubbles
+[24], [25]. In terms of communication, pipeline parallelism
+II. BACKGROUND
+involves point-to-point GPU communication to pass along
+A. Transformer Architecture
+activations between layers.
+The current trend in Natural Language Processing (NLP) Tensor Parallelism [26] aims at exploiting the inherent
+favors transformer models [16] for their exceptional accu- parallelisminsideGEMMoperationsanddistributethesecom-
+racy and computational efficiency. The original transformer putations along specific directions (rows, columns) and use
+architecture is designed for machine translation and contains synchronization among workers to gather the results, thus en-
+two main components: an Encoder and a Decoder. Modern suring correctness. State-of-the-art implementations distribute
+adaptations of transformers for language modeling utilize the MLP blocks and Self-Attention blocks [26]. Results are
+either the Encoder or Decoder depending on the specific task, collected and aggregated using Allreduce and Allgather. It is
+such as BERT [17] and GPT-2 [18]. a common practice to limit tensor parallelism degree within
+A transformer layer is structured with a self-attention block a compute node since intra-node bandwidth is typically larger
+followed by a two-layer multi-layer perceptron (MLP), com- than inter-node bandwidth [27].
+posedoftwoGEMMsandaGeLUnon-linearity(ReLUforthe Figure 4 demonstrates 3D Parallelism, which combines
+originalversion[16]).Eachencoderordecoderblockincludes Data Parallelism, Pipeline Parallelism and Tensor Parallelism.
+multiplesuchlayers,eachfeaturingmulti-headattention,MLP, This synergy has been a widely adopted approach to scale up
+normalization, and residual connections. transformertrainingtothousandsofworkers.Ithasthebenefit
+We consider a single encoder or decoder with multiple of preventing global batch size from growing atrociously but
+transformerlayers.Initially,inputtokensareprocessedthrough requires effort to implement and prototype.
+a word embedding table and combined with positional em-
+beddings, resulting in a 3-D tensor of size (sequence length × Mini-Batch 0 All-Gather Mini-Batch 1
+All-Reduce
+micro-batch size × hidden dimension) [19]. Each transformer Point-to-Point
+Data Parallel 0 Data Parallel 1
+layer processes this tensor through a self-attention block with PP stage 0 PP stage 1 PP stage 0 PP stage 1
+multiple attention heads and a two-layer MLP that quadru- GPU 0 GPU 1 GPU 2 GPU 3 GPU 0 GPU 1 GPU 2 GPU 3
+ples the hidden size and then reduces it back. The output
+TP 0 TP 1 TP 0 TP 1 TP 0 TP 1 TP 0 TP 1
+size remains consistent across layers, and the final output is
+projected back to the vocabulary dimension for cross-entropy Layer 1… N/2 Layer 1+N/2… N Layer 1… N/2 Layer 1+N/2… N
+loss calculation. Fig. 4: An illustration of 3D parallelism with 2 Data-Parallel
+ranks, 2 Pipeline-Parallel stages and 2 Tensor-Parallel ranks.
+B. Parallelism Techniques
+Each Pipeline-Parallel stage holds half of the total layers.
+Larger models are more sample-efficient given a fixed
+compute budget [20], [21], leading to a massive increase C. Zero Redundancy Optimizer
+in model parameter count. Training billion/trillion-parameter Dataparalleltrainingrequireseachranktoholdacopyofall
+transformermodelsisamemory-intensivetasksinceitrequires model optimizer states, gradients, and parameters. [28] Zero
+efficient distribution of multiple training parameters (model Redundancy Optimizer (ZeRO) reduces memory constraints
+weights, optimizer states, gradients, and activations). by removing redundant information, and partitioning model
+In Data Parallelism [22], a training mini-batch is divided data across data parallel ranks. ZeRO is divided into three
+among multiple workers and each worker maintains a full stages, ZeRO-1, ZeRO-2, and ZeRO-3. Given a certain de-
+modelreplica.Dataparallelismcanachievenear-linearscaling
+in training data throughput by increasing the mini-batch size Parameters Gradients Optimizer States All-Gather Reduce-Scatter
+Forward Backward Update
+in proportion to the number of available workers. Typically,
+an Allreduce on all the workers is required to synchronize DP 0 DP 0 DP 0 DP 0 DP 0 DP 0
+thegradientsbeforeupdatingthemodelweightsoneachlocal
+DP 1 DP 1 DP 1 DP 1 DP 1 DP 1
+replica. Data Parallelism is communication-bound since the … …
+achievable bandwidth and latency of the Allreduce greatly DP 2 DP 2 DP 2 DP 2 DP 2 DP 2
+affect iteration time given a worker’s memory is consumed DP 3 DP 3 DP 3 DP 3 DP 3 DP 3
+by the model and other training parameters. However, data
+Layer 1…N Layer N…1
+parallelismrequiresthatmodelsizemustfitinthelimitedGPU Fig. 5: An illustration of ZeRO-3 with 4 Data-Parallel ranks
+memory and additional optimizer and hyper-parameter tuning and N layers. Between each layer, an Allgather is needed to
+to ensure convergence with large global batch size [23]. collect the parameters from all the workers.
+Pipeline Parallelism mainly focuses on distributing layers
+of models among GPU workers and executes these layers in a gree of data parallelism, each ZeRO stage partitions different
+3trainingparameters.ZeRO-1partitionsoptimizerstatesacross
+workers. Each worker only needs to store and update its
+partitions. At the end of each training step, an allgather is param count=2Vh+sh+L(12h2+8h)+2h (1)
+required to collect the fully updated model weights. ZeRO-2
+further partitions gradients and reduces them to only update Considering a message size of m, the communication vol-
+the corresponding parameters. After gradient reduction, the ume for the Allreduce collective is 2×m(d−1). The commu-
+d
+memory can be released immediately, which will further alle- nication volume for Allgather, Reduce scatter, and Reduce is
+viate memory pressure on a worker. Such a process requires simply m(d−1).
+d
+Reduce-Scattertodistributeandreducethegradients.ZeRO-1 Thecommunicationvolumeperiterationfordistributeddata
+andZeRO-2producethesamecommunicationvolumeasstan- parallelism (DDP) just comes from the gradient Allreduce,
+dard data parallelism [28]. ZeRO-3 applies model parameter which gives the total volume per iteration given in Equation
+partitioningontopofoptimizerstatesandgradients.However, 2 below. ZeRO-1 and ZeRO-2 simply replace this Allreduce
+stage 3 requires an extra allgather to collect parameters from call with separate Reduce scatter and Allgather calls [28], so
+all other processes as needed in forward and backward com- theyhavethesamecommunicationvolumeasDDP.Therefore,
+putation which typically incurs 1.5x communication volume the communication volume (in units of parameters) from DP
+compared to data parallelism baseline (Figure 5). (Allreduce), ZeRO-1, and ZeRO-2 (Allgather/Reduce scatter)
+ZeRO++ applies various optimizations towards ZeRO-3, is given by:
+d−1
+aiming at reducing communication volume and featuring a 2∗param count∗( ) (2)
+d
+bandwidth-aware partitioning strategy. Specifically, ZeRO++
+integrates blocked-based quantization kernels [29] into model
+The communication volume for ZeRO-3 is 50% higher due
+weights and gradient communications to drastically reduce
+toanextraAllgatherofparameters,whichisnecessarybefore
+message size. It also keeps a secondary parameter partition
+the forward pass because parameters are now also sharded
+within a compute node so that high-latency inter-node All-
+across ranks (See II-C and [28]). Therefore, the ZeRO-3
+gathercanbeavoidedduetolowinterconnectbandwidth[30].
+communication volume (in units of parameters) is given by:
+d−1
+III. PERFORMANCEMODEL
+3∗param count∗( ) (3)
+d
+a Number of attention heads s Sequence length
+b Microbatch size t Tensor-parallel size B. Model Parallelism
+h Hidden dimension size V Vocabulary size
+L Number of transformer layers p Pipeline-parallel size The communication volume for pipeline parallelism comes
+d Number of training devices from the point-to-point communication of forward activations
+and backward gradients. The send or receive between two
+TABLE I: Variable names.
+pipeline stages is of size bsh, therefore the aggregate commu-
+nicationvolumeacrossallstagesinasingletrainingiterationis
+This section breaks down each component that makes up
+giveninEquation4below(inunitsofparametersandwhered
+our performance model.
+isthe numberof devices, orGPUs, usedin training).Notably,
+A. Data Parallelism and ZeRO the first stage doesn’t have to receive activations and the last
+To calculate the total parameters in a transformer, we have GPU doesn’t have to send activations (and vice-versa with
+theembeddingandunembeddingblocksofsizeV ×heach.If gradients), so we multiply by p−1 instead of p.
+embeddingandunembeddingparametersaretied(i.e.shared),
+2bsh×(p−1) (4)
+this leads to a total of V ×h parameters from embeddings.
+Since all configurations in this paper use untied embeddings,
+The communication volume per iteration for tensor paral-
+we have 2V × h embedding parameters. We also have the
+lelism comes from 6 Allreduce operations per layer (2 in the
+position embeddings of size sh. The attention matrices are
+four separate matrices of dimension h × h, leading to 4h2 forwardpass,2foractivationrecomputation,2inthebackward
+pass). Further, an additional Allreduce operation is performed
+attention parameters per layer. Multilayer perceptron (MLP)
+at the embedding. Each Allreduce incurs a volume of 2m,
+blocks for our models are composed of two fully-connected
+leadingtoatotalof(12L+2)volumeformessagesofsizebsh.
+linear projections of size h × xh and xh × h, where x is
+Since these Allreduce operations are across t ranks, they’re
+the expansion factor. For GPT-NeoX model architectures, the
+conventional projection factor is 4 [31], so we have 2xh2 = multiplied by a factor of t− t1.
+8h2 MLP parameters per layer. We then have a layernorm
+t−1
+each layer with both gains and biases on each of the Q,K,V (12L+2)∗bsh∗( ) (5)
+t
+and the first MLP linear projection, leading to 8h layernorm
+parameters per layer. Finally, we add the final layernorm of For 3D parallelism, one simply updates the tensor paral-
+size 2h to get a total number of parameters in Equation 1 lelism equation to be L → L/p. This implies that the total
+below. communication volume here is additive.
+4CPU AMDEpyc7713“Trento”64core2GHz a level of overhead during initialization. Allreduce is still a
+GPU 4xAMDMI-250X
+significant portion of the communication in ZeRO-1/2 thanks
+Interconnect HPESlingshot11(4NICS/Node)
+ROCmVersionUsed 5.6.0 tothefactthat,asidefromthe13B-parametermodel,allother
+CPU/GPU-Interconnect AMDInfinityFabric models can easily fit onto one of Frontier’s MI250X GPUs
+PyTorchVersionUsed 2.1.2
+with DDP. We would also like to note the general trend of
+DeepSpeedVersionUsed 0.14
+GPT-NeoXVersionUsed commit4bc667031d8 decreasing broadcast impact as the model size increases, and
+DatasetUsed enwik8 this is also shown in Figure 7, where each breakdown is them
+TABLE II: Experiment Setup Specifications modeled as a percentage of the total communication volume.
+2) Breakdown of Message Sizes and Frequency
+As the model size increases, more message sizes for each
+Infin (5i 0ty G F Ba /sb r +i c 5 0G GP BU /- sG )PU (5P 0C GIE B /G s e +n 54 0 E GS BM /s) (2H 5GPE B /S sl +in 2g 5s Gh Bot /s) communication call will be utilized, and to varying frequency
+MI-250X MI-250X levels.Figure9showcases2-Node,8GCDs/Nodeexperiments
+NIC GC 4D GC 5D GC 2D GC 3D NIC for 19-million, 1.3-billion, and 13-billion parameter models
+while using ZeRO-3. More verbose logging from DeepSpeed
+showshowmessagesizesgetgroupedintodifferentcategories
+MI-250X MI-250X fordifferentfunctions;inthecaseofthe1.3-billionparameter
+GCD GCD GCD GCD model, many of the smaller messages (on the order of kilo-
+NIC 6 7 0 1 NIC
+bytes) are used for parameter exchange among each process.
+Largermessages—from10sto100sofmegabytes—areused
+Fig. 6: Topology of a compute node on Frontier
+for gradient aggregation (instead of an Allreduce as done in
+puredataparallelism).Themaintakeaway:EventhoughDL
+modelssuchasLLMsoperateusingmassivemessagesizes,
+IV. SYSTEMSETUP
+optimizations at smaller message sizes should be treated
+This section explains the experiments run, and insights as equally important.
+gained from our results. All experiments were run on the 3) Comparison to Performance Model
+OLCFFrontiersupercomputer.SeeTableIIformoreinforma-
+Figure 10 shows how the 19M, 125M, 1.3B, and 13B-
+tiononhardwareandsoftwarespecifics.FordetailsonFrontier
+parameter models match up to the predicted communication
+compute node topology, please refer to Figure 6. Regarding
+volumesbasedontheData-ParallelandZeRO-basedformulas
+the use of Microsoft’s DeepSpeed: we would like to note that
+from Section III. In general, our prediction aligns well with
+communication/compute overlap is not possible when logging
+the communication volume observed across all model sizes
+isturnedon,whichallowedustoobtaincommunicationresults
+and all parallelism schemes (DDP, ZeRO-1/2/3). Note that
+featured in Section V with the following profiling numbers.
+we are able to predict 13B communication volume under a
+To facilitate easier training of the models involved, we
+Distributed Data-Parallel scenario but training parameters will
+utilize EleutherAI’s “GPT-NeoX” framework[15] and its con-
+exceed worker memory in action, causing an OOM error.
+figurationfilesfor19-million,125-million,1.3-billion,and13-
+billion parameter models. The “enwik8” dataset used features B. Model Parallelism Communication Volume Analysis (Ten-
+avocabularysizeof50304afterpaddingtohelpwithreducing sor and Pipeline)
+performance runtime anomalies.
+Thissectionexploresthedifferingcommunicationbehaviors
+for tensor/pipeline parallelism and a combination of them in
+V. PERFORMANCECHARACTERIZATION
+parallel (model parallelism).
+A. Data-Parallel Experiments (DDP, ZeRO-1/2/3)
+1) Breakdown of Communication Volume
+Here, we explore the communication behavior of different Figures12showshowdifferinglevelsoftensorandpipeline
+Data-Parallel schemes such as pure data parallelism or dif- parallelism can affect communication volume1. The first im-
+ferent levels of DeepSpeed’s ZeRO[28]. Per the cost models mediate observation is the domination of Allgather operations
+referenced in Section III, DDP and ZeRO-1 and 2 should despite the use of point-to-point operations in any config-
+approximately achieve a volume proportional to twice the uration utilizing a mix of pipeline and tensor parallelism.
+parametercount,andZeRO-3shouldachieveacommunication Onlypurepipelineparallelismavoidsthiswiththenext-largest
+volume equal to three times that of the parameter count. bottleneck being calls to Allreduce2.
+1) BreakdownofCommunicationVolume:ZeROdifferences Returning to the figures in Section I-A we noted that
+Figure8showscommunicationbreakdownsofeachselected pipelineparallelismhasaninterestinganomaly:thereceiveop-
+model size using one of ZeRO-1/2/3 (run on one node for erationistheonlyonetosufferfromcold-cacheperformance,
+all models except the 13B-parameter model due to memory
+errors. The models, as shown later still accurately hold up 1WesawlargeAllreduceoperationsshowupinthepurepipelineparallelism
+regardless of scale for a given model size). We want to note case that we suspect are internal to the DeepSpeed framework rather than
+inherenttotheparallelismscheme
+that Broadcast is included as a notion to the start-of-training
+2We saw a larger communication volume than predicted for tensor paral-
+parameter broadcast/distribution required, as this still incurs lelism,whichwebelievetobeduetoDeepSpeedinternals
+5(a) 19M (b) 125M (c) 1.3B (d) 13B
+Fig. 7: ZeRO-1/2/3 communication percentage breakdown for models of size 19M, 125M, 1.3B, and 13B.
+(a) 19M (b) 125M (c) 1.3B (d) 13B
+Fig. 8: ZeRO-1/2/3 total communication volume for models of size 19M, 125M, 1.3B, and 13B.
+(a) Allgather-message frequency breakdown, (b) Allgather-message frequency break- (c) Allgather-message frequency breakdown,
+19M-parameter model down, 1.3B-parameter model 13B-parameter model
+Fig. 9: Message size breakdown for Allgather in three different model sizes utilizing ZeRO-3
+(a) 19M (b) 125M (c) 1.3B (d) 13B
+Fig. 10: Communication volume for ZeRO-1/2/3 across model sizes 19M, 125M, 1.3B, and 13B
+particularly in small message sizes (first iteration receive 2) Comparison to Performance Model
+operationscancauseonoverheadontheorderofthousandsof Figure3 134 shows how the 19M, 125M, 1.3B, and 13B-
+milliseconds).Whilerawperformancemodelingisoutsidethe parameter models perform and match up to the predicted
+scope of this paper, it is important to note that this anomaly communication volumes based on the Tensor and Pipeline
+becomes a concern as model size increases and pipeline Parallelism formulas from Section III. Here, we are primarily
+parallelism is used. This goes back to the takeaway at the
+endoftheprevioussubsection:Smallmessageoptimizationis
+3Wenotethatsendoperationscontainuptoanextraeightmegabytes.We
+as important as large message optimization. believethistobeextrametadatabeingtransferredonbehalfofthesender
+4We note that the 125M-parameter model fails to run with pure tensor
+parallelism due to the number of attention heads not being appropriately
+divisiblebythenumberoftensorstages.
+6(a) Pipeline Parallelism (b) Tensor Parallelism
+Fig. 11: Tensor and Pipeline Parallel total communication volume for our four selected model sizes.
+(a) Pipeline Parallelism (b) Tensor Parallelism
+Fig. 12: Tensor and Pipeline Parallel Communication Breakdown for our four selected model sizes.
+(a) Pipeline Parallelism (b) Tensor Parallelism
+Fig. 13: Tensor and Pipeline Parallel Communication comparison to theory for our four selected model sizes.
+interested in the send/receive volume (pipeline parallelism- allelism. While pure tensor parallelism makes sole use of
+related) and/or Allreduce communication (tensor parallelism). Allreduce, pure pipeline parallelism and model parallelism
+make use of point-to-point operations as well, and contrary
+C. Sequence Length Experiments
+to the above, these volumes increase with token size (see
+This section examines how sequence length impacts com- Sections III and V-B). Figure 15b shows an approximate
+munication behavior for Data-Parallel and Model-Parallel en- doubling/slightly-larger-than-2x increase in communication
+vironments. Experiments here were all run on 2 Nodes, 8 volume with increasing sequence-length values while Figure
+GCDs/Node with the 1.3B-parameter model. 15a directly shows a 2x increase with increasing sequence-
+Figure 14a shows the Allgather communication volume length values. Similar to the data-parallel results, we also
+(where applicable) for both data and model parallelism. To see an increase in throughput as shown in figure 15c. For
+reduce redundancy, we will note that this does not change brevity, we only show when we have two pipeline stages or a
+acrossincreasingsequencelengthvalues,from512to4096or tensor parallelism value of two. Ultimately, the use of tensor
+higher. However, we do note that optimizations and sequence parallelismwillallowforahigherTFLOP-per-GPUcountover
+length do have an impact on throughput. Figure 14b shows pipelineparallelism(uptoalmost2xmore),thoughthishasan
+how different levels of ZeRO impact throughput. While we inverserelationshipwithpoint-to-pointcommunication(where
+seeanapproximate2-2.5xincreaseinTFlopsperGPU,ZeRO applicable as pure tensor parallelism does not use point-to-
+optimizations will more often than not result in a decrease of point) in communication volume.
+flops for the given sequence length.
+Compared to data parallelism and ZeRO, there is more
+variation in the “key” components tensor/pipeline/model par-
+7(a) Allgather Comm Volumes for Data/- (b) How Sequence Length Impacts Data
+Model Parallelism Schemes Parallelism Throughput
+Fig. 14: Sequence Length Impacts on Allgather, Allreduce, and DP and ZeRO-based throughput
+(a) Sequence Length Study: Ten- (b) Sequence Length Study: Ten- (c) How Sequence Length Impacts Tensor
+sor/Pipeline Parallelism Recv Vol- sor/PipelineParallelismSendVol- and Pipeline Parallelism Throughput
+umes ume
+Fig. 15: Sequence Length Impacts on Send/Recv Communication (Communication Volume and Throuhgput)
+VI. RELATEDWORK of LLMs for scales at and beyond ten thousand GPUs, with
+Many papers have analyzed LLMs and characterized them a focus on software/hardware co-design for efficiency and
+through bias and truthfulness. The authors of [32] develop stability. A more recent work ([27]) looks at characterizing
+“CoMPosT” to characterize LLM simulations that result in LLM performance at scale on NVIDIA DGX clusters with an
+caricatures:misrepresentationsofthemodels/workloadsbeing emphasis on 200Gb/s network utilization. Their work differs
+simulated. Our work performs analysis at a system level to from ours in that they look at performance characteriza-
+show the impact of communication on these models. [33] tion concerning scale, not directly in communication volume
+focuses on LLMs as a data generator and characterizes the and behavior. They also do not evaluate model, tensor, or
+diversity and bias of the data it generates post-training. pipelineparallelismandhowacombinationofsequencelength
+Research has been done to characterize the performance of and parallelism scheme impacts communication volume and
+DNNsonHPCclusters.[34]and[14]characterizedDNNper- throughput.
+formance,firstinthecontextofCPU/GPU-basedarchitectures
+and later with the PyTorch and TensorFlow frameworks. The
+VII. CONCLUSIONS
+authors of [35] evaluated DNN performance in the context of
+CUDA-aware MPI libraries.
+We have presented a characterization of LLM communi-
+More recently, LLMs have been analyzed from a sys-
+cation behavior on the Frontier supercomputer. This has been
+tem/performance perspective. The authors of [31] analyze
+donebycombiningarigorousperformancemodelformultiple
+different LLM architectures on the current5 world’s fastest
+parallelism schemes and multiple experiments utilizing cur-
+supercomputer Frontier and answer the question of how dif-
+rentstate-of-the-arttrainingframeworkswithpreciseprofiling
+ferent model architectures impact performance. The authors
+of communication and compute. We have provided insights
+of [36] explored the impact of LLMs on large-scale sys-
+into potential optimizations for communication middleware
+tems, namely hardware limitations and capabilities. They note
+for small-message communication. For future pending work,
+communication overheads as part of some performance skew
+giventhattheFrontiersystemrepresentsonecombination,we
+and degradation but ultimately do not do in-depth commu-
+would like to examine further parallelism schemes here such
+nication analysis. Even more recently, the authors of [5] de-
+as multi-dimensional parallelism and expert parallelism. We
+signed, developed, and characterized the performance of their
+wouldalsoliketoexaminehowalltheschemespresentedhere
+“MegaScale”frameworktoallowforeasytraining/deployment
+might change on current and upcoming systems with new or
+maturing communication and software stacks such as Aurora
+5AsofMay2024,FrontierranksfirstintheTop500listwithanRpeakof
+1.7exaFLOPS. at Argonne National Lab (Intel GPUs and Intel CPUs) or
+8the upcoming Vista cluster at the Texas Advanced Computing [19] V.Korthikanti,J.Casper,S.Lym,L.McAfee,M.Andersch,M.Shoeybi,
+Center (NVIDIA Grace Hopper). and B. Catanzaro, “Reducing activation recomputation in large trans-
+formermodels,”2022.
+VIII. ACKNOWLEDGMENTS [20] J. Hoffmann, S. Borgeaud, A. Mensch, E. Buchatskaya, T. Cai,
+E. Rutherford, D. de Las Casas, L. A. Hendricks, J. Welbl, A. Clark,
+We would like to thank the Oak Ridge Computing T.Hennigan,E.Noland,K.Millican,G.vandenDriessche,B.Damoc,
+Facilities/Oak Ridge National Laboratory for granting us A.Guy,S.Osindero,K.Simonyan,E.Elsen,J.W.Rae,O.Vinyals,and
+L.Sifre,“Trainingcompute-optimallargelanguagemodels,”2022.
+access to the Frontier supercomputer to run our ex-
+[21] J.Kaplan,S.McCandlish,T.Henighan,T.B.Brown,B.Chess,R.Child,
+periments. This research is supported in part by NSF S. Gray, A. Radford, J. Wu, and D. Amodei, “Scaling laws for neural
+grants#1818253,#1854828, #2007991,#2018627,#2112606, languagemodels,”2020.
+[22] T.Ben-NunandT.Hoefler,“DemystifyingParallelandDistributedDeep
+#2311830, #2312927, and XRAC grant #NCR-130002.
+Learning:AnIn-DepthConcurrencyAnalysis,”2018.
+[23] Y. You, J. Li, S. Reddi, J. Hseu, S. Kumar, S. Bhojanapalli, X. Song,
+REFERENCES
+J.Demmel,K.Keutzer,andC.-J.Hsieh,“LargeBatchOptimizationfor
+[1] OpenAIandJoshAchiamandStevenAdlerandSandhiniAgarwaland DeepLearning:TrainingBERTin76minutes,”2020.
+Lama Ahmad and Ilge Akkaya and et. al., “GPT-4 Technical Report,” [24] Y.Huang,Y.Cheng,A.Bapna,O.Firat,M.X.Chen,D.Chen,H.Lee,
+2024. J.Ngiam,Q.V.Le,Y.Wu,andZ.Chen,“GPipe:EfficientTrainingof
+[2] GeminiTeamandRohanAnilandSebastianBorgeaudandJean-Baptiste GiantNeuralNetworksusingPipelineParallelism,”2019.
+AlayracandJiahuiYuandRaduSoricutandet.al.,“Gemini:AFamily [25] A. Harlap, D. Narayanan, A. Phanishayee, V. Seshadri, N. Devanur,
+ofHighlyCapableMultimodalModels,”2024. G. Ganger, and P. Gibbons, “PipeDream: Fast and Efficient Pipeline
+[3] H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei, ParallelDNNTraining,”2018.
+andet.al.,“Llama2:OpenFoundationandFine-TunedChatModels,” [26] M.Shoeybi,M.Patwary,R.Puri,P.LeGresley,J.Casper,andB.Catan-
+2023. zaro,“Megatron-LM:TrainingMulti-BillionParameterLanguageMod-
+[4] A.Chowdhery,S.Narang,J.Devlin,M.Bosma,G.Mishra,A.Roberts, els using GPU Model Parallelism,” arXiv preprint arXiv:1909.08053,
+andet.al.,“PaLM:scalinglanguagemodelingwithpathways,”J.Mach. 2019.
+Learn.Res.,vol.24,no.1,mar2024. [27] S. Cheng, J.-L. Lin, M. Emani, S. Raskar, S. Foreman, Z. Xie,
+[5] Z. Jiang, H. Lin, Y. Zhong, Q. Huang, Y. Chen, Z. Zhang, and et. V. Vishwanath, and M. T. Kandemir, “Thorough characterization and
+al., “MegaScale: Scaling Large Language Model Training to More analysis of large transformer model training at-scale,” Proc. ACM
+Than 10,000 GPUs,” in 21st USENIX Symposium on Networked Meas.Anal.Comput.Syst.,vol.8,no.1,feb2024.[Online].Available:
+Systems Design and Implementation (NSDI 24). Santa Clara, CA: https://doi.org/10.1145/3639034
+USENIX Association, Apr. 2024, pp. 745–760. [Online]. Available: [28] S. Rajbhandari, J. Rasley, O. Ruwase, and Y. He, “ZeRO: Memory
+https://www.usenix.org/conference/nsdi24/presentation/jiang-ziheng OptimizationsTowardTrainingTrillionParameterModels,”2020.
+[6] NVIDIA,“Megatron-LM:Ongoingresearchtrainingtransformermodels [29] T.Dettmers,M.Lewis,S.Shleifer,andL.Zettlemoyer,“8-bitoptimizers
+at scale,” https://github.com/NVIDIA/Megatron-LM, 2024, accessed: viablock-wisequantization,”2022.
+August20,2024. [30] G.Wang,H.Qin,S.A.Jacobs,C.Holmes,S.Rajbhandari,O.Ruwase,
+[7] Meta, “Meta Llama,” https://llama.meta.com/, 2024, accessed: August F. Yan, L. Yang, and Y. He, “Zero++: Extremely efficient collective
+20,2024. communicationforgiantmodeltraining,”2023.
+[8] “DeepSpeed-MII,”https://github.com/microsoft/DeepSpeed-MII,2022. [31] J. Yin, A. Bose, G. Cong, I. Jyngaas, and Q. Anthony, “Comparative
+[9] Microsoft, “MSCCL: Microsoft Collective Communication Library,” Study of Large Language Model Architectures on Frontier ,” 5 2024,
+https://github.com/microsoft/msccl,2024,accessed:August20,2024. accepted,tobepresentedatIPDPS2024.
+[10] ROCm, “RCCL: ROCm Communication Collectives Library,” https:// [32] M. Cheng, T. Piccardi, and D. Yang, “CoMPosT: Characterizing and
+github.com/ROCm/rccl,2024,accessed:August20,2024.
+EvaluatingCaricatureinLLMSimulations,”inProceedingsofthe2023
+[11] NVIDIA, “NVIDIA Collective Communications Library (NCCL),”
+Conference on Empirical Methods in Natural Language Processing,
+https://developer.nvidia.com/nccl,2024,accessed:August20,2024. H. Bouamor, J. Pino, and K. Bali, Eds. Singapore: Association
+[12] Q. Anthony, A. Awan, J. Rasley, Y. He, A. Shafi, for Computational Linguistics, 12 2023, pp. 10853–10875. [Online].
+M. Abduljabbar, H. Subramoni, and D. Panda, “MCR-DL: Available:https://aclanthology.org/2023.emnlp-main.669
+Mix-and-Match Communication Runtime for Deep Learning,” in [33] Y. Yu, Y. Zhuang, J. Zhang, Y. Meng, A. J. Ratner, R. Krishna,
+2023 IEEE International Parallel and Distributed Processing J.Shen,andC.Zhang,“LargeLanguageModelasAttributedTraining
+Symposium (IPDPS). Los Alamitos, CA, USA: IEEE Computer DataGenerator:ATaleofDiversityandBias,”inAdvancesinNeural
+Society, may 2023, pp. 996–1006. [Online]. Available: Information Processing Systems, A. Oh, T. Naumann, A. Globerson,
+https://doi.ieeecomputersociety.org/10.1109/IPDPS54959.2023.00103 K. Saenko, M. Hardt, and S. Levine, Eds., vol. 36. Curran
+[13] A.Jain,A.A.Awan,C.Chu,H.Subramoni,andD.Panda,“Commu- Associates, Inc., 2023, pp. 55734–55784. [Online]. Available: https:
+nication profiling and characterization of deep-learning workloads on //proceedings.neurips.cc/paper files/paper/2023/file/ae9500c4f560\
+clusterswithhigh-performanceinterconnects,”August2019. 7caf2eff033c67daa9d7-Paper-Datasets and Benchmarks.pdf
+[14] A.Jain,A.A.Awan,Q.Anthony,H.Subramoni,andD.K.D.Panda, [34] A. A. Awan, H. Subramoni, and D. K. Panda, “An In-depth
+“PerformanceCharacterizationofDNNTrainingusingTensorFlowand Performance Characterization of CPU- and GPU-based DNN Training
+PyTorchonModernClusters,”in2019IEEEInternationalConference on Modern Architectures,” in Proceedings of the Machine Learning
+onClusterComputing(CLUSTER),2019,pp.1–11. on HPC Environments, ser. MLHPC’17. New York, NY, USA:
+[15] A. Andonian, Q. Anthony, S. Biderman, S. Black, P. Gali, L. Gao, Association for Computing Machinery, 2017. [Online]. Available:
+E.Hallahan,J.Levy-Kramer,C.Leahy,L.Nestler,K.Parker,M.Pieler, https://doi.org/10.1145/3146347.3146356
+J. Phang, S. Purohit, H. Schoelkopf, D. Stander, T. Songz, C. Tigges, [35] A. A. Awan, J. Be´dorf, C.-H. Chu, H. Subramoni, and D. K. Panda,
+B. The´rien, P. Wang, and S. Weinbach, “GPT-NeoX: Large scale “Scalable Distributed DNN Training using TensorFlow and CUDA-
+autoregressive language modeling in PyTorch,” GitHub Repo, 9 2023. Aware MPI: Characterization, Designs, and Performance Evaluation,”
+[Online].Available:https://www.github.com/eleutherai/gpt-neox in 2019 19th IEEE/ACM International Symposium on Cluster, Cloud
+[16] A.Vaswani,N.Shazeer,N.Parmar,J.Uszkoreit,L.Jones,A.N.Gomez,
+andGridComputing(CCGRID),2019,pp.498–507.
+Ł.Kaiser,andI.Polosukhin,“AttentionisAllYouNeed,”Advancesin [36] Q. Hu, Z. Ye, Z. Wang, G. Wang, M. Zhang, Q. Chen,
+NeuralInformationProcessingSystems,vol.30,2017. P. Sun, D. Lin, X. Wang, Y. Luo, Y. Wen, and T. Zhang,
+[17] J.Devlin,M.-W.Chang,K.Lee,andK.Toutanova,“Bert:Pre-training “Characterization of Large Language Model Development in the
+of deep bidirectional transformers for language understanding,” arXiv Datacenter,” in 21st USENIX Symposium on Networked Systems
+preprintarXiv:1810.04805,2018. Design and Implementation (NSDI 24). Santa Clara, CA: USENIX
+[18] A.Radford,J.Wu,R.Child,D.Luan,D.Amodei,I.Sutskeveretal., Association, 4 2024, pp. 709–729. [Online]. Available: https:
+“Language models are unsupervised multitask learners,” OpenAI blog, //www.usenix.org/conference/nsdi24/presentation/hu
+vol.1,no.8,p.9,2019.
+9

@@ -1,0 +1,975 @@
+Saner: Annotation-free Societal Attribute
+Neutralizer for Debiasing CLIP
+Yusuke Hirota1⋆, Min-Hung Chen2, Chien-Yi Wang2, Yuta Nakashima1,
+Yu-Chiang Frank Wang2,3, and Ryo Hachiuma2
+1 Osaka University 2 NVIDIA 3 National Taiwan University
+Abstract. Large-scalevision-languagemodels,suchasCLIP,areknown
+tocontainharmfulsocietalbiasregardingprotectedattributes(e.g.,gen-
+der and age). In this paper, we aim to address the problems of societal
+biasinCLIP.Althoughpreviousstudieshaveproposedtodebiassocietal
+bias through adversarial learning or test-time projecting, our compre-
+hensivestudyoftheseworksidentifiestwocriticallimitations:1)loss of
+attribute information when it is explicitly disclosed in the input and 2)
+useoftheattributeannotations duringdebiasingprocess.Tomitigateso-
+cietalbiasinCLIPandovercometheselimitationssimultaneously,wein-
+troduceasimple-yet-effectivedebiasingmethodcalledSANER(societal
+attribute neutralizer) that eliminates attribute information from CLIP
+textfeaturesonlyofattribute-neutral descriptions.Experimentalresults
+show that SANER, which does not require attribute annotations and
+preserves original information for attribute-specific descriptions, demon-
+strates superior debiasing ability than the existing methods.
+Keywords: Societal bias · CLIP · Debiasing · Fairness
+1 Introduction
+Large-scale vision-language models (VLMs), such as CLIP [37], have demon-
+stratedaremarkablecapabilityinmulti-modalunderstanding[32,50]andgener-
+ation[39,48,57],beingtrainedwithmillion-scaleimage-textpairs.Utilizingthese
+VLMs,recentvisionmodelshaveachievedsignificantperformanceenhancements
+across a wide range of computer vision tasks (e.g., captioning [15,28,33,56,58]
+andobjectdetection[27,60]),withoutthenecessityfortask-specifictraining[45].
+Despite the success, several works have identified societal bias regarding de-
+mographic attributes, such as gender and age, in these VLMs [1,5,18,21,36,54,
+55], potentially causing unfair or prejudicial decisions by models. Hall et al. [20]
+conducted audits on performance disparity, particularly with respect to gender,
+and revealed gender-dependency of the CLIP performance. Qiu et al. [36] also
+demonstrated that adopting CLIP for caption evaluation tends to favor gender-
+stereotypical sentences (e.g., preferring “A woman is cooking” over “A man is
+⋆ Work done as an intern at NVIDIA. Correspondence to Yusuke Hirota <y-
+hirota@is.ids.osaka-u.ac.jp> and Ryo Hachiuma <rhachiuma@nvidia.com>.
+4202
+guA
+91
+]VC.sc[
+1v20201.8042:viXra2 Hirota et al.
+(a) Text-to-image model using debiased CLIP (b) Datasets for debiasing
+Previous: Lose attribute information Previous: Face-centric images + GT att. annotations
+Photo of a female doctor
+Protected attribute
++ annotations
+(e.g., gender, age)
+SANER: Retain attribute information SANER: Natural images + Captions
+Photo of a female doctor
++ Image-paired captions
+Fig.1: Our debiasing method, SANER, overcomes the limitations in existing meth-
+ods: (a) attribute information is retained after debiasing, and (b) protected attribute
+annotations are not required for debiasing.
+cooking” forimagesdepictingmen),highlightingtheinherentgenderbias.These
+findings underscore the importance of addressing bias in VLMs.
+Some studies have proposed to mitigate societal bias in VLMs [4,9,11,43].
+Adversarial debiasing [4,11,43] fine-tunes CLIP to lessen leakage of protected
+attributes1 into the features, while projection-based debiasing [9] removes the
+protected attribute encoded in CLIP features in the inference phase. Our holis-
+tic review of these pioneering works (Sec. 3), though, identifies the following
+potential disadvantages or controversies in their design choices.
+Loss of attribute information explicitly disclosed in the input. Some
+methods aim to completely remove attribute information by decorrelating the
+attribute and the features [11] or by squashing the subspace associated with the
+attribute[9],evenwhentheattributeisexplicitlydisclosed.Thischoicecanlimit
+thegeneralizabilityofaVLM’sfeaturestoaspectrumofdownstreamtasks(e.g.,
+Stable Diffusion [39] generates male images for text prompt “a female doctor”
+when encoded with debiased CLIP as shown in Fig. 1 (a) and Sec. 6.2), while it
+works for attribute-agnostic downstream tasks [26,35].
+Use of the attribute annotations. Adversarial debiasing methods [4,11,43]
+require protected attribute annotations, as provided in FairFace [24], for fine-
+tuning(Fig.1(b)).Datasetswithattributeannotationsarestillscarce,perhaps
+partly because the annotation process needs ethical considerations [2], limit-
+ing their applicability and generalizability. This dataset scarcity also causes the
+limited diversity of images and text descriptions used for fine-tuning the VLM,
+potentially inducing overfitting.
+Thispaperpresentsasimple-yet-effectivedebiasingapproachforCLIP,called
+SANER (societal attribute neutralizer), that simultaneously overcomes the
+aforementioned limitations. Specifically, SANER trains a debiasing layer (i.e., a
+multilayer perception) to amend CLIP text feature vectors of attribute-neutral
+descriptions, given by attribute neutralization, such that they are equidis-
+1 We refer to any demographic variables, like age and gender, as protected attribute
+(or attribute in short), based on which a model’s decisions should not be made.Saner: Annotation-free Societal Attribute Neutralizer 3
+tant to those of attribute-specific descriptions using annotation-free debias-
+ing loss. With this, only feature vectors for attribute-neutral descriptions are
+debiased, whereas the attribute-specific ones retain the original information.
+Attribute-specific descriptions for all possible attribute groups2 can be easily
+augmentedbymodifyingtheattribute-specificwordsintheoriginaldescriptions,
+directing the training without attribute annotations.
+Contribution.Thankstoourannotation-freedebiasingpipeline,SANERis
+designed to be compatible with any dataset of image-text pairs, such as COCO
+[29]. This provides denser guidance for training the debiasing layer compared
+to the existing methods. Experiments on both discriminative and generative
+tasks (i.e., text-to-image retrieval [19] and text-to-image generation [39]) show
+that SANER can mitigate gender, age, and racial biases of CLIP. Moreover, we
+demonstrate that SANER outperforms the existing methods [4,9], showing that
+SANERleadstolessattribute-dependencyofthedownstreamperformancewhile
+overcoming the limitations in existing methods.
+2 Related Work
+Societal bias in VLMs. With the growing application of VLMs, such as
+CLIP [37], across various tasks, there has been increasing awareness of their
+inherentsocialbiases[12,20,40,41,46,51,55].Halletal.[20]examinedgenderbias
+in CLIP, uncovering significant discrepancies in object recognition performance
+basedonthegenderdepictedinimages.Forexample,theaccuracyinpredicting
+an umbrella when it appears with women is much better than with men.
+The existence of such societal bias poses a substantial risk of perpetuating
+and exacerbating discrimination against historically marginalized groups [5,22,
+36,47,53]. Birhane et al. [5] demonstrated that adopting CLIP-based filtering
+in the dataset creation causes a risk of selecting stereotypical images regarding
+specificdemographicsubgroups.Forinstance,foranimageofafemaleastronaut,
+thecaption“Thisisaphotographofasmilinghousewife” isfavoredover“Thisis
+aportraitofanastronaut” byCLIP,resultingindatasetsthatcontainanumber
+of image-caption pairs with harmful stereotypical descriptions.
+Debiasing societal bias in CLIP. Recognizing the problem of bias in CLIP,
+some recent research has concentrated on mitigating societal bias in CLIP [4,
+9,11,43]. These debiasing efforts intend to remove attribute information from
+CLIPfeatures,resultinginlessbiasedpredictionoutcomes.Forexample,Berget
+al.[4]proposedaprompttuning-baseddebiasingmethodbasedonanadversarial
+learning paradigm, minimizing the encoding of protected attribute information
+by the CLIP text encoder. However, in Sec. 3, we identify that these methods
+contain critical limitations that pose challenges in utilizing various datasets for
+debiasing and applying debiased models to a wide range of downstream tasks.
+2 Attribute group isaclassinaprotectedattribute(e.g.,female andmale ingender).4 Hirota et al.
+3 Review: Existing Debiasing Methods
+Several debiasing approaches for CLIP have been introduced, broadly catego-
+rized into two main types: adversarial debiasing [4,11,43] and projection-based
+debiasing [9]. This section conducts an in-depth analysis of these existing debi-
+asing strategies, highlighting their respective limitations.
+Notation. LetDdenoteadataset,eachofwhosesampleisquadruple(v,t,a,d),
+where v is an image, t is a text description, a∈A is a protected attribute anno-
+tation from set A of all attribute groups, and d is the ground-truth annotation
+for a downstream task (if any). The CLIP text and image encoders, denoted by
+f (t) ∈ RK and f (v) ∈ RK, respectively, take t and v as input and generate
+t v
+corresponding feature vectors in a common space.
+3.1 Adversarial debiasing
+Adversarialdebiasing[4,11,43]aimstoeliminateprotectedattributeinformation
+intheCLIPfeatures.Specifically,anadversarialclassifierisemployedtopredict
+and remove protected attribute a from CLIP features.
+Prompt tuning-based debiasing [4] proposes to use learnable tokens to re-
+duce attribute leakage through the similarity between an image and a set of
+pre-definedtextualconcepts.Concretely,forasetC ofpre-definedconcepts(i.e.,
+phrases) that are supposed to be attribute non-specific (e.g., smart and attrac-
+tive), a sequence l of k learnable tokens are prepended to the sentence template
+t with concept c ∈ C (e.g., t = “A photo of a smart person” for c = smart) to
+c c
+obtain t′ = [l,t ], where [·,·] represents sequence concatenation. Then, t′ and
+c c c
+arbitrary v ∈D is fed into the CLIP encoders to compute similarity s (v) by
+c
+s (v)=f (v)⊤f (t′). (1)
+c v t c
+Let s(v) ∈ R|C| denote a vector, each of whose elements is the similarity score
+s (v) for a concept in C. Due to the attribute non-specificity of concepts in C,
+c
+s(v) should not correlate with attribute a of v. However, the CLIP text encoder
+can embed a into s(v) due to bias, allowing an attribute classifier to predict a.
+We denote the probability of being a given s(v) (or a prediction score of the
+attribute classifier) by m (s(v)). Prompt tuning-based debiasing [4] uses m for
+a a
+adversarial loss, given by
+(cid:88)
+L =− logm (s(v)). (2)
+adv a
+v∈D
+Minimizing L with respect to l reduces attribute leakage through s(v). A
+adv
+contrastive loss between image and text features is also used for regularization.
+The experiments [4] showed that this method could effectively reduce at-
+tribute leakage through f (t), but the limited number of concepts3 may limit
+t
+3 Their experiments used 10 concepts.Saner: Annotation-free Societal Attribute Neutralizer 5
+downstream tasks that enjoy the debiased features because as l is learned only
+through a sparse set of concepts. Additionally, attribute annotations are neces-
+sary for the adversarial loss, resulting in the exclusive use of face-centric image
+datasets (e.g., FairFace [24]) as D.
+AdditiveResidualLearner(ARL)[43]isdesignedtoremoveattributeinfor-
+mationfromCLIPimagefeatures.Thismethodassumesthatadebiasinglayer4
+rcanidentifyavectortoadditivelyamendattribute-neutralimagefeaturevector
+δ(v), i.e.,
+δ(v)=f (v)−r(f (v)). (3)
+v v
+Similarly to [4], an adversarial classifier is trained to predict a from δ with
+adversarial loss
+(cid:88)
+L =− logm (δ(v)). (4)
+adv a
+v∈D
+Thereconstructionlossbetweenf (v)andδ(v)regularizesthetrainingtomain-
+v
+tain the original features.
+This method shares a common limitation with prompt tuning-based debi-
+asing [4], notably requiring attribute annotations. Another limitation is that it
+tries to remove attribute features even when attributes of people in images are
+explicitlydisclosed(i.e.,whenthepersonisdepictedinanimage).Consequently,
+debiased CLIP is ignorant of protected attributes.
+Mapper [11] aims to reduce spurious correlations between protected attributes
+a and task label d in D. It applies mappings f′ and f′ to image and text fea-
+v t
+tures, respectively, as x (v) = f′(f (v)) and x (t) = f′(f (t)) for mitigating
+v v v t t t
+dependence on a. The adversarial loss is computed using a dependence measure
+Dep(·,·) to quantify statistical dependence between features as:
+L =−Dep(x (v),a)−Dep(x (t),a). (5)
+adv v t
+Thesemappingfunctionsarealsotrainedtomaximizethestatisticaldependence
+between the features after the mapping and task label d, i.e.,
+Dep(x (v),d)+Dep(x (t),d), (6)
+v t
+to retain the predictive power on the downstream task while reducing bias.
+Similar to [4,43], Mapper relies on attribute annotations. Moreover, it is
+designed only to address the spurious correlations between the attribute and
+task labels for a specific task but not for different tasks.
+3.2 Projection-based debiasing
+Projection-based debiasing [9] projects CLIP text feature vectors into the or-
+thogonal complement of the space spanned by a set of CLIP text feature vec-
+tors that pertain to the protected attribute. Specifically, let U denote a set of
+4 A fully-connected layer is used.6 Hirota et al.
+text descriptions with the target attribute (e.g., “A photo of a w” ∈ U, where
+w ∈{“woman”, “man”}forbinarygender),andU beamatrixeachofwhosecol-
+umn vectors is f (u) with u ∈ U. The projection matrix P into the orthogonal
+t
+complement for U is given by
+P =I−U(U⊤U)−1U⊤ (7)
+where I is the identity matrix. P can project a CLIP text feature vector f (t)
+t
+for a text description t into the orthogonal complement by Pf (t).
+t
+Unlikeadversarialdebiasing,whichrequirestrainingbygradientdescentup-
+date,P hasaclosed-formsolutionandiscomputedintheinferencephase.How-
+ever, as with ARL, this method also eliminates attribute information even from
+descriptions with explicit attributes (e.g., “A photo of a female doctor”).
+3.3 Summary of the challenges
+The existing debiasing methods, including adversarial and projection-based, re-
+vealseveralchallenges:1)Lossofattributeinformation(ARLandprojection-
+based) even with explicit attribute description narrows down the utility of the
+debiased CLIP. For example, a text-to-image generative model with gender-
+debiased CLIP features may not properly depict explicitly specified gender (as
+shown in Sec. 6.2), 2) Dependency on attribute annotations (prompt tun-
+ing, ARL, and Mapper) constrains the range of datasets that can be utilized,
+often necessitating the use of face-centric image datasets (e.g., FairFace), as
+opposed to more diverse, natural image datasets (e.g., COCO [29]).
+4 Societal Attribute Neutralizer (SANER)
+Our method for debiasing CLIP features, SANER, addresses the limitations of
+theexistingmethodsidentifiedinSection3.Notably,SANER1)retainsattribute
+informationincaseswheretheperson’sattributesareexplicitlydescribedand2)
+eliminates the reliance on attribute annotations, allowing the use of any image-
+text dataset for training the debiasing layer.
+SANERcomprises1)attributeneutralization,whicheliminatesprotected
+attribute information from input text (Section 4.1); 2) feature modification,
+which removes attribute information from the CLIP text features by amending
+them with a debiasing layer (Section 4.2); 3) attribute annotation-free de-
+biasing loss, ensuring the features are not biased towards any attribute group
+g ∈A (Section 4.3); and 4) regularization losses, which preserve the original
+CLIPfeaturesandthealignmentbetweenimageandtextfeatures(Section4.4).
+Figure 2 shows an overview of SANER. We train the debiasing layer for fea-
+ture modification over an arbitrary dataset D = {(v,t)} of image v and text
+description t (e.g., image caption, alt text) pairs, which does not provide at-
+tribute annotation a as well as target task label d.Saner: Annotation-free Societal Attribute Neutralizer 7
+z(t) h(t)
+Feature modification
+deb Debiasing layer
+A woman is A person is r(.) eating salad eating salad recon t
+cont
+Annotation-free debiasing loss Regularization losses
+deb recon cont
+f t ( ) ft ( t) fv ( v)
+Text encoder Image encoder
+Text encoder
+A woman is eating salad A woman is eating salad v
+A man is eating salad t
+Fig.2: An overview of SANER, exemplified by binary gender.
+4.1 Attribute neutralization
+We first modify text description t ∈ D that contain person-related words,5 to
+removeattribute-specificwords.Takingbinarygenderasaprotectedattribute,6
+i.e., A={female,male}, as example, the text description
+t=“A woman is eating salad.”
+containsattributeinformation(i.e.,woman).Wereplaceattribute-specificterms7
+with the attribute-neutral ones to obtain an attribute-neutral text:
+ξ (t)=“A person is eating salad.”
+n
+where ξ denotes a function for attribute neutralization. Neutralization can be
+n
+done for other attributes, such as age.8 We remove age-specific terms9 (e.g.,
+young and senior) in text descriptions, for instance, “A young woman is eating
+salad” → “A woman is eating salad”. In contrast to the previous approach [9],
+which is optimized not to predict the attribute information from the original
+description t, we target the attribute-neutral descriptions ξ (t) to preserve the
+n
+attribute information in the features of attribute-specific descriptions.
+5 The person-related words include any words relevant to a person (e.g., person, girl,
+man). The complete list is available in the supplementary material.
+6 Following prior research [4,6,9,11,43,52,59], we focus on the binary gender but
+recognize the importance of inclusivity. SANER applies to non-binary genders.
+7 We use gender words defined in [23].
+8 Examples for the race attribute are in the supplementary material.
+9 We define age-specific terms. The list is in the supplementary material.
+n
+o i e t t a u z b i l i a r t r t t
+A u e N
+…
+ft
+Text
+encoder8 Hirota et al.
+4.2 Feature modification
+CLIPtextfeaturesz(t)=f (ξ (t))afterattributeneutralizationcanstillconvey
+t n
+the protected attribute information due to CLIP’s bias. To remove such bias,
+we append a learnable debiasing layer r on top of f , inspired by recent CLIP
+t
+fine-tuning techniques [17,43]. Neutralized t’s debiased feature h(t) is given by
+h(t)=z(t)+r(z(t)). (8)
+4.3 Attribute annotation-free debiasing loss
+TotrainrtoextractattributeinformationfromCLIPfeatureswithoutattribute
+annotations, we generate a set T of attribute-specific descriptions for t∈D and
+for g ∈ A, i.e., T = {ξ (t)|t ∈ D,g ∈ A}, where ξ (t) generates a description
+g g
+specific to attribute group g from t. For the binary gender case, this involves
+generatingdescriptionswithfemale-andmale-specificwords.Forinstance,from
+thetextdescription,“Awomaniseatingsalad.”,wegeneratetwosentenceswith
+female and male attributes:
+A woman is eating salad.
+A man is eating salad.
+The debiasing loss trains r such that h(t) is equidistant from f (ξ (t)) for all
+t g
+attribute groups in A, ensuring an impartial representation across the spectrum
+of attribute groups. We implement this loss as the standard deviation of the
+cosine similarity between h(t) and f (ξ (t)). Let s (t) denote the similarity, i.e.,
+t g g
+h(t)⊤f (ξ (t))
+s (t)= t g . (9)
+g ∥h(t)∥∥f (ξ (t))∥
+t g
+The debiasing loss L is defined as
+deb
+(cid:115)
+1 (cid:88)
+L = (s (t)−s¯(t))2, (10)
+deb |D| g
+t∈D
+(cid:80)
+where s¯(t) = s (t)/|A|. A lower standard deviation means s is close to
+g∈A g g
+s¯, leading to h(t) being equidistant to f (ξ (t)) for all g ∈ A. Notably, this
+t g
+debiasing loss can be computed without attribute annotations.
+4.4 Regularization losses
+Applying the debiasing loss alone significantly changes original CLIP features,
+thereby losing semantics [4,43]. To maintain the alignment of resulting image-
+text features, we utilize reconstruction loss [43] and contrastive loss [37]. Re-
+construction loss L is the mean squared error between f (t) and h(t). Con-
+recon t
+trastive loss L aims to minimize the negative log-likelihood of input image-
+cont
+caption pairs, f (v) and f (t), in comparison to negative ones.
+v tSaner: Annotation-free Societal Attribute Neutralizer 9
+4.5 Training and inference
+The overall loss L is given by:
+L=αL +βL +γL , (11)
+deb recon cont
+where α, β, and γ are the hyperparameters to weight respective losses.
+Duringinference,weapplythetraineddebiasinglayerrandusethemodified
+text features r(f (t)) as the CLIP text features.
+t
+5 Experiments: Text-to-Image Retrieval
+Followingpreviousstudies[4,9,11,43],weevaluateSANERonthetext-to-image
+retrieval task regarding gender, age, and racial biases. Further analysis, such as
+the ablation study of the loss components, is in the supplementary materials.
+5.1 Experimental settings
+Evaluation metric. We employ the MaxSkew metric [19], utilized in the
+previous studies [4,9,11,43], to quantify the societal bias in CLIP in the text-
+to-image retrieval task. MaxSkew measures the disparity between the attribute
+distributionof|A|protectedattributesinthetop-k retrievedimages.Letη (q)
+ak
+denotetheratioofimageslabeledwithattributeainthetop-k retrievedimages.
+For attribute neutral query q, η (q) should be 1/|A| if the model is unbiased.
+ak
+MaxSkew@k is defined as:
+η (q)
+MaxSkew@k =maxlog ak . (12)
+a∈A 1/|A|
+Ideally, MaxSkew@k is 0 but is larger when a model biased.
+Evaluation setting. For the attribute-neutral queries, we use template-based
+queries such as “a photo of a c person”, where c is an attribute-neutral concept.
+Prior work [4] has defined a list of person-related adjectives, such as clever
+and attractive, as attribute-neutral concepts. We extend the list to encompass
+occupations (e.g., doctor, nurse), and activities (e.g., cooking and cleaning)
+for a more comprehensive evaluation. MaxSkew@k is computed per concept.10
+We also evaluate zero-shot image classification accuracy on ImageNet-
+1K[42]toensurethatdebiasingdoesnotspoiltheoriginalCLIP’sperformance.
+Evaluation datasets. We utilize two datasets, FairFace [24] and PATA [43],
+which consist of images alongside protected attribute annotations (e.g., female
+andmale forgender)associatedwiththepersonineachimage.FairFaceconsists
+of10,954croppedface-centricimages,whilePATAcontains4,934naturalimages
+withasingleperson.Mostdebiasingapproachesonlyreporttheperformanceon
+10 The complete lists of the concepts are in the supplementary material.10 Hirota et al.
+Table 1: Gender bias, evaluated by MaxSkew@1000 (scaled by 100), on FairFace
+andPATAfortheoriginalCLIP(Original),prompttuning-baseddebiasing(Prompt),
+projection-based debiasing (Projection), and our method (SANER). A lower value is
+better (less gender bias). Bold represents the best across the models.
+FairFace PATA
+CLIPModel
+Adjective Occupation Activity Adjective Occupation Activity
+Original[37] 22.9 33.7 19.5 12.1 18.7 10.7
+Prompt[4] 12.3 29.9 20.0 6.7 16.5 10.2
+Projection[9] 15.4 37.4 15.0 6.4 13.6 5.4
+SANER(Ours) 8.9 14.5 7.7 5.4 9.5 3.3
+Table 2: Age bias, evaluated by MaxSkew@1000 (scaled by 100), on FairFace and
+PATA. Bold denotes the best across the models.
+FairFace PATA
+CLIPModel
+Adjective Occupation Activity Adjective Occupation Activity
+Original[37] 111.1 121.1 113.0 40.4 44.4 39.7
+Projection[9] 107.6 112.8 100.0 37.6 45.6 45.5
+SANER(Ours) 96.0 112.6 101.9 30.3 36.7 27.5
+the FairFace dataset, but we additionally employ PATA to evaluate the debias
+performance on more diverse images.
+Methods for comparison. We compare SANER against existing methods,
+i.e.,prompttuning-baseddebiasing[4]andprojection-baseddebiasing[9],whose
+codeispubliclyavailable.Unfortunately,wecouldnotreproducetheothermeth-
+ods [11,43] since sufficient reproduction details are unavailable.
+Implementationdetails. Followingthepreviousworks[4,9],weemployCLIP
+[37]withViT-B/16backbone[14]asatargetmodelinourexperiments.Wetrain
+the debiasing layer (a multilayer perception with two linear layers with ReLU
+activation[34])appendedtothemodelusing170,624image-captionpairs,which
+is a subset of the COCO training set [29] with person-related words/phrases
+(e.g., person and boy). We empirically set α, β, and γ to 1.0, 0.1, and 0.0001
+(Eq. (11)), respectively, and train for 5 epochs. Further details are provided in
+the supplementary materials.
+5.2 Gender bias analysis
+Table 1 summarizes MaxSkew@1000 on FairFace and PATA for gender bias,
+showingthatSANERmitigatesgenderbiasthemostamongallmethods.Incon-
+trast to the existing methods, this tendency is consistent across 1) the datasets
+with different image domains (i.e., face-centric and natural images) and 2) con-
+cept types (i.e., adjective, occupation, and activity). For instance, while the
+prompt tuning-based method [4] fails to mitigate bias for activity concepts on
+FairFace (i.e., bias is amplified from 19.5 to 20.0), SANER significantly miti-
+gates bias from 19.5 to 7.7. This verifies the better debiasing performance ofSaner: Annotation-free Societal Attribute Neutralizer 11
+Table 3: Racial bias,evaluatedbyMaxSkew@1000(scaledby100),onFairFaceand
+PATA. Bold denotes the best across the models.
+FairFace PATA
+CLIPModel
+Adjective Occupation Activity Adjective Occupation Activity
+Original[37] 62.2 57.4 68.3 33.4 28.6 31.5
+Projection[9] 56.9 75.3 67.0 19.9 43.8 26.3
+SANER(Ours) 49.3 45.7 46.6 28.9 21.2 20.5
+SANER compared to the existing methods on diverse concepts and image do-
+mains, possibly because SANER is trained with diverse text descriptions (i.e.,
+captionsinCOCO),whicharenotconstrainedlikepre-definedconceptsrequired
+in the previous method [4].
+Insight: Our debiasing method SANER, which does not necessitate at-
+tribute annotations, outperforms previous methods, including those that
+require annotations, in mitigating gender bias.
+5.3 Age and racial biases analysis
+Tables 2 and 3 present the results of MaxSkew@1000 for age and racial bi-
+ases, respectively. We compare SANER with projection-based debiasing [9], as
+the prompt tuning-based method [4] does not provide age and race debiasing
+variants. Similarly to the results for gender bias, SANER surpasses the exist-
+ing method across the datasets and the concept types. For example, SANER
+successfully mitigates the age bias on PATA. Meanwhile, the projection-based
+methodworksonlyontheadjectiveconceptsandamplifiesthebiasontheother
+concepts (e.g., from 39.7 to 45.5). These results validate the generalizability of
+SANER in bias mitigation across the protected attributes.
+Insight: SANER also demonstrates superior performance in mitigating
+age and racial biases compared to the existing method.
+5.4 Zero-shot image classification
+To verify whether debiasing harms the zero-
+shotimageclassificationperformanceoftheorig- Table 4: Accuracy on Image-
+inal CLIP, we evaluate the prompt tuning-based Net-1K.
+method[4]andSANERonImageNet-1Kinterms
+CLIPModel Acc.(%)
+of classification accuracy. Projection-based debi-
+Original[37] 65.4
+asing[9]doesnotapplytothisevaluationbecause
+Prompt[4] 64.1
+zero-shot prompts, such as “a photo of a car,” do
+SANER(Ours) 65.2
+not necessarily include person-related words.11
+11 Projection-based debiasing requires modified input text to include attribute terms.12 Hirota et al.
+The results are shown in Tab. 4, showing that applying SANER maintains clas-
+sification performance, whereas the performance of the prompt tuning-based
+method slightly degrades.
+Insight: SANER does not compromise the classification performance of
+the original CLIP.
+6 Experiments: Text-to-Image Generation
+We also evaluate SANER on text-to-image generation, for which societal bias
+is actively investigated [3,7,30,31]. Specifically, we conduct two experiments
+fromdifferentaspects:1)genderbiasregardingoccupationsusinggender-neutral
+prompts (Sec. 6.1), and 2) retention of attribute information when prompts
+explicitly disclose gender (Sec. 6.2).
+Image generation settings. We use Stable Diffusion (SD) v2.1 [39] as the
+text-to-image generation model. The CLIP text encoder in SD is replaced with
+the debiased one for evaluation. Following [9], we use gender-neutral prompts
+with specifying occupations to analyze gender bias in generated images. These
+promptsarederivedfromthetemplate“Aphotoofao”,whereoisreplacedwith
+specific occupation terms, such as doctor and teacher.12 On the other hand, we
+employ gender-specific prompts to evaluate the capability of attribute informa-
+tion retention. Concretely, a gender term, either female or male, is added just
+before the occupation terms, i.e., “A photo of a {female/male} o”, to see if gen-
+erated images specify the gender. We generate 100 images for each prompt with
+SD’s default hyperparameters shown in [39].
+Evaluation metrics. For the bias evaluation for the generative task, we use
+statistical parity (SP) metric that measures the disparity of attribute groups
+ingeneratedimages[8,9,49].Specifically,weannotatebinarygenderlabels(i.e.,
+A = {female,male}) for the generated images with the assistance of human
+workers.13 SP is defined as the difference between the empirical distribution κ
+a
+of gender a and uniform distribution, given by:
+(cid:115)
+(cid:88)
+SP= (κ −1/|A|)2, (13)
+a
+a∈A
+(cid:80)
+where κ = N / N with N being the number of images annotated as a.
+a a a′ a′ a
+For an unbiased text-to-image generation model, SP should be 0 but increases
+for biased models.
+For gender-specific prompts for evaluating gender information retention, we
+computetheaccuracy,i.e.,theratiooftheimagesthatcontainthesamegender
+as the prompt to all generated images.
+12 The list of the occupations is in the supplementary material.
+13 Differentfrompreviousworksthatusepre-trainedgenderclassifierstoassigngender
+labels, we do not use them due to their bias issues [10,13,38].Saner: Annotation-free Societal Attribute Neutralizer 13
+Table 5: Gender bias (SP) and retention of gender information (Accuracy) in images
+generatedbyStableDiffusionwithoriginalCLIPtextencoder(Original)andthemodel
+usingprojection-baseddebiasedCLIP(Projection)andourdebiasedCLIP(SANER).
+We report the mean and standard deviation over the set of occupations. Female and
+maledenotepromptswithfemaleandmalespecifications,respectively.Boldrepresents
+the best across the models.
+Accuracy↑
+CLIPModel SP↓ Female Male
+Original[37] 0.51±0.22 1.00±0.00 1.00±0.00
+Projection[9] 0.47±0.19 0.58±0.28 0.79±0.18
+SANER(Ours) 0.39±0.22 1.00±0.00 1.00±0.00
+6.1 Gender bias analysis
+Table 5 summarizes SP scores, which demonstrate that applying SANER to
+Stable Diffusion notably mitigates gender bias regarding occupations. SANER
+again outperforms projection-based debiasing one (i.e., 0.39 for SANER and
+0.47 for projection-based), highlighting the superiority of SANER.
+WeshowvisualexamplesinwhichSANERsuccessfullymitigatesgenderbias
+in Fig. 3. For the gender-neutral prompt, “A photo of a designer,” the original
+SD and projection-based debiasing (Projection) predominantly generate images
+depicting a man. In contrast, ours shows a more balanced gender distribution.
+Insight: Applying SANER debiased CLIP to Stable Diffusion results in
+generating images with a more gender-equal distribution.
+6.2 Assessment of retention of attribute information
+Table5alsoshowstheaccuracyregardinghowmuchthegenderofthepersonin
+generatedimagesmatchesthegenderspecifiedintheprompts.Forbothprompts
+thatdescribewomenandmen,usingdebiasedCLIPbyprojection-baseddebias-
+ing leads to losing gender information (i.e., accuracies for projection are much
+lower than those for the original). Conversely, SANER retains gender informa-
+tion (i.e., accuracies for SANER are 1.00). Figure 4 confirms this, showing that
+using projection-based debiased CLIP results in generating male images for the
+prompt, “A photo of a female doctor”.
+Insight:SANERretainsgenderinformationforinputtextsthatexplicitly
+include gender terms.
+7 Limitations
+Bias metrics. While SANER outperforms the existing methods in mitigat-
+ing gender, age, and racial biases according to existing bias metrics, such as14 Hirota et al.
+Fig.3:Generatedimagesfortheprompt,“Aphotoofadesigner,”bytheoriginalStable
+Diffusion (SD), projection-based debiased CLIP (Projection), and our debiased CLIP
+(SANER). We randomly sample 10 images from generated images. Images framed in
+green denote those of the minority gender in the generated images (i.e., female).
+Fig.4: Generatedimagesfortheprompt,“Aphotoofafemaledoctor,” bytheoriginal
+StableDiffusion(SD),projection-baseddebiasedCLIP(Projection),andourdebiased
+CLIP (SANER). We randomly sample 10 images from generated images. Red frame
+indicates images with incorrect gender (i.e., male).
+MaxSkew@k and SP, this does not guarantee that SANER is always superior to
+themineveryaspectorscenario.Assuggestedinpriorwork[4,9,11,43],reliance
+onthesemetricsprovidesastandardizedmeasureofsocietalbias;however,there
+couldbedimensionsofbiasnotadequatelycapturedbythem,whichimpliesthe
+necessity of more holistic metrics to assess societal bias.
+Further bias mitigation. The experimental results show that SANER notice-
+ably mitigates societal bias in CLIP. Nonetheless, the bias is not completely
+eliminated (e.g., MaxSkew is not zero). A promising direction for further debi-
+asingcouldinvolvedebiasingtheimageencoder,specificallytrainingadebiasing
+layertoremoveattributeinformationfromthevisualfeaturesforimagesinwhich
+humans do not appear.
+Intersectional bias analysis. Although we focus on gender, age, and racial
+biases separately in our experiments, following the previous debias works [4,9,
+11,43],SANERcanbeeasilyextendedtovariousprotectedattributes,including
+their combinations. For instance, considering the intersection of binary gender
+and age, we generate four sentences with (female, young), (female, old), (male,
+young), and (male, old) for the debiasing loss, e.g., “A young woman is eating
+salad” fortheinputtext“Awomaniseatingsalad”.Thispotentialforaddressing
+complex biases is noted in future research.
+rengised
+a
+fo
+otohp
+A
+rotcod
+elamef
+a
+fo
+otohp
+A
+DS
+noitcejorP
+RENAS
+DS
+noitcejorP
+RENASSaner: Annotation-free Societal Attribute Neutralizer 15
+8 Conclusion
+ThispaperproposedSANER,asimple-yet-effectivedebiasingmethodforCLIP,
+consisting of attribute neutralization and anotation-free debiasing loss.
+Consequently, SANER can use an arbitrary dataset of image-text pairs for
+training the debiasing layer, resulting in superior debiasing performance com-
+paredtotheexistingmethodsforbothdiscriminativeandgenerativetasks(i.e.,
+text-to-image retrieval and text-to-image generation). We also confirmed that
+SANER retains attribute information for attribute-specific descriptions through
+the gender-specified prompts for text-to-image generation.
+Future work can explore extending SANER to the vision encoder, remov-
+ing attribute information from visual features in images without humans, and
+addressing intersectional biases, combining attributes like gender and age. Fur-
+thermore, SANER is applicable to any dataset of image-caption pairs, thus,
+scalingtolargerdatasets(e.g.,ConceptualCaptions[44])fordensersupervision
+is an interesting future direction.
+References
+1. Alabdulmohsin,I.,Wang,X.,Steiner,A.P.,Goyal,P.,D’Amour,A.,Zhai,X.:Clip
+the bias:How useful isbalancing datain multimodallearning? In:ICLR (2024) 1
+2. Andrews, J., Zhao, D., Thong, W., Modas, A., Papakyriakopoulos, O., Xiang, A.:
+Ethical considerations for responsible data curation. In: NeurIPS Datasets and
+Benchmarks Track (2023) 2
+3. Bansal,H.,Yin,D.,Monajatipoor,M.,Chang,K.W.:Howwellcantext-to-image
+generativemodelsunderstandethicalnaturallanguageinterventions?In:EMNLP
+(2022) 12
+4. Berg, H., Hall, S.M., Bhalgat, Y., Yang, W., Kirk, H.R., Shtedritski, A., Bain,
+M.: A prompt array keeps the bias away: Debiasing vision-language models with
+adversarial learning. In: AACL (2022) 2, 3, 4, 5, 7, 8, 9, 10, 11, 14, 19, 21
+5. Birhane, A., Prabhu, V.U., Kahembwe, E.: Multimodal datasets: Misogyny,
+pornography, and malignant stereotypes. arXiv preprint arXiv:2110.01963 (2021)
+1, 3
+6. Burns, K., Hendricks, L.A., Saenko, K., Darrell, T., Rohrbach, A.: Women also
+snowboard: Overcoming bias in captioning models. In: ECCV (2018) 7
+7. Cho, J., Zala, A., Bansal, M.: Dall-eval: Probing the reasoning skills and social
+biases of text-to-image generation models. In: ICCV (2023) 12
+8. Choi, K., Grover, A., Singh, T., Shu, R., Ermon, S.: Fair generative modeling via
+weak supervision. In: ICML (2020) 12
+9. Chuang, C.Y., Jampani, V., Li, Y., Torralba, A., Jegelka, S.: Debiasing vision-
+languagemodelsviabiasedprompts.arXivpreprintarXiv:2302.00070(2023) 2,3,
+4, 5, 7, 9, 10, 11, 12, 13, 14
+10. Das, A., Dantcheva, A., Bremond, F.: Mitigating bias in gender, age and ethnic-
+ity classification: a multi-task convolution neural network approach. In: ECCV
+Workshops (2018) 12
+11. Dehdashtian, S., Wang, L., Boddeti, V.: FairVLM: Mitigating bias in pre-trained
+vision-language models. In: ICLR (2024), https://openreview.net/forum?id=
+HXoq9EqR9e 2, 3, 4, 5, 7, 9, 10, 1416 Hirota et al.
+12. Dehouche,N.:Implicitstereotypesinpre-trainedclassifiers.IEEEAccess(2021) 3
+13. Dinan,E.,Fan,A.,Wu,L.,Weston,J.,Kiela,D.,Williams,A.:Multi-dimensional
+gender bias classification. In: EMNLP (2020) 12
+14. Dosovitskiy,A.,Beyer,L.,Kolesnikov,A.,Weissenborn,D.,Zhai,X.,Unterthiner,
+T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S., et al.: An image is worth
+16x16 words: Transformers for image recognition at scale. In: ICLR (2021) 10
+15. Fei, J., Wang, T., Zhang, J., He, Z., Wang, C., Zheng, F.: Transferable decoding
+with visual entities for zero-shot image captioning. In: ICCV (2023) 1
+16. Friedrich,F.,Schramowski,P.,Brack,M.,Struppek,L.,Hintersdorf,D.,Luccioni,
+S., Kersting, K.: Fair diffusion: Instructing text-to-image generation models on
+fairness. arXiv preprint arXiv:2302.10893 (2023) 21
+17. Gao, P., Geng, S., Zhang, R., Ma, T., Fang, R., Zhang, Y., Li, H., Qiao, Y.:
+Clip-adapter: Better vision-language models with feature adapters. International
+Journal of Computer Vision (2024) 8
+18. Garcia, N., Hirota, Y., Wu, Y., Nakashima, Y.: Uncurated image-text datasets:
+Shedding light on demographic bias. In: CVPR (2023) 1
+19. Geyik,S.C.,Ambler,S.,Kenthapadi,K.:Fairness-awarerankinginsearch&recom-
+mendationsystemswithapplicationtolinkedintalentsearch.In:SIGKDD(2019)
+3, 9
+20. Hall, M., Gustafson, L., Adcock, A., Misra, I., Ross, C.: Vision-language models
+performing zero-shot tasks exhibit gender-based disparities. In: ICCV Workshops
+(2023) 1, 3
+21. Hausladen,C.I.,Knott,M.,Perona,P.,Camerer,C.:Causalanalysisofsocialbias
+in CLIP (2024), https://openreview.net/forum?id=Dk10QugVHb 1
+22. Hirota, Y., Nakashima, Y., Garcia, N.: Quantifying societal bias amplification in
+image captioning. In: CVPR (2022) 3
+23. Hirota,Y.,Nakashima,Y.,Garcia,N.:Model-agnosticgenderdebiasedimagecap-
+tioning. In: CVPR (2023) 7
+24. Karkkainen,K.,Joo,J.:Fairface:Faceattributedatasetforbalancedrace,gender,
+and age for bias measurement and mitigation. In: WACV (2021) 2, 5, 9
+25. Kay,W.,Carreira,J.,Simonyan,K.,Zhang,B.,Hillier,C.,Vijayanarasimhan,S.,
+Viola,F.,Green,T.,Back,T.,Natsev,P.,etal.:Thekineticshumanactionvideo
+dataset. arXiv preprint arXiv:1705.06950 (2017) 22
+26. Krause, J., Stark, M., Deng, J., Fei-Fei, L.: 3d object representations for fine-
+grained categorization. In: ICCV Workshops (2013) 2
+27. Li, L.H., Zhang, P., Zhang, H., Yang, J., Li, C., Zhong, Y., Wang, L., Yuan, L.,
+Zhang, L., Hwang, J.N., Chang, K.W., Gao, J.: Grounded language-image pre-
+training. In: CVPR (2022) 1
+28. Li, W., Zhu, L., Wen, L., Yang, Y.: Decap: Decoding clip latents for zero-shot
+captioning via text-only training. In: ICLR (2023) 1
+29. Lin, T.Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., Dollár, P.,
+Zitnick, C.L.: Microsoft COCO: Common objects in context. In: ECCV (2014) 3,
+6, 10, 19
+30. Liu, Z., Schaldenbrand, P., Okogwu, B.C., Peng, W., Yun, Y., Hundt, A., Kim,
+J., Oh, J.: Scoft: Self-contrastive fine-tuning for equitable image generation. In:
+CVPR (2024) 12
+31. Luccioni,A.S.,Akiki,C.,Mitchell,M.,Jernite,Y.:Stablebias:Analyzingsocietal
+representations in diffusion models. In: NeurIPS (2023) 12
+32. Lüddecke, T., Ecker, A.: Image segmentation using text and image prompts. In:
+CVPR (2022) 1Saner: Annotation-free Societal Attribute Neutralizer 17
+33. Mokady, R., Hertz, A., Bermano, A.H.: Clipcap: Clip prefix for image captioning.
+arXiv preprint arXiv:2111.09734 (2021) 1
+34. Nair, V., Hinton, G.E.: Rectified linear units improve restricted boltzmann ma-
+chines. In: ICML (2010) 10
+35. Nilsback,M.E.,Zisserman,A.:Automatedflowerclassificationoveralargenumber
+of classes. In: 2008 Sixth Indian conference on computer vision, graphics & image
+processing (2008) 2
+36. Qiu, H., Dou, Z.Y., Wang, T., Celikyilmaz, A., Peng, N.: Gender biases in auto-
+matic evaluation metrics for image captioning. In: EMNLP (2023) 1, 3
+37. Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., Goh, G., Agarwal, S., Sastry,
+G., Askell, A., Mishkin, P., Clark, J., et al.: Learning transferable visual models
+from natural language supervision. In: ICML (2021) 1, 3, 8, 10, 11, 13, 19, 20
+38. Ramaswamy, V.V., Kim, S.S.Y., Russakovsky, O.: Fair attribute classification
+through latent space de-biasing. In: IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR) (2021) 12
+39. Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.: High-resolution
+image synthesis with latent diffusion models. In: CVPR (2022) 1, 2, 3, 12, 22
+40. Ross, C., Katz, B., Barbu, A.: Measuring social biases in grounded vision and
+language embeddings. In: ACL (2021) 3
+41. Ruggeri,G.,Nozza,D.,etal.:Amulti-dimensionalstudyonbiasinvision-language
+models. In: Findings of ACL (2023) 3
+42. Russakovsky, O., Deng, J., Su, H., Krause, J., Satheesh, S., Ma, S., Huang, Z.,
+Karpathy, A., Khosla, A., Bernstein, M., Berg, A.C., Fei-Fei, L.: ImageNet Large
+Scale Visual Recognition Challenge. IJCV (2015) 9, 19
+43. Seth, A., Hemani, M., Agarwal, C.: Dear: Debiasing vision-language models with
+additive residuals. In: CVPR (2023) 2, 3, 4, 5, 7, 8, 9, 10, 14
+44. Sharma, P., Ding, N., Goodman, S., Soricut, R.: Conceptual captions: A cleaned,
+hypernymed, image alt-text dataset for automatic image captioning. In: ACL
+(2018) 15
+45. Shen, S., Li, L.H., Tan, H., Bansal, M., Rohrbach, A., Chang, K.W., Yao, Z.,
+Keutzer,K.:Howmuchcanclipbenefitvision-and-languagetasks?In:ICLR(2022)
+1
+46. Srinivasan, T., Bisk, Y.: Worst of both worlds: Biases compound in pre-trained
+vision-and-language models. In: ACL Workshops (2022) 3
+47. Tanjim, M.M., Singh, K.K., Kafle, K., Sinha, R., Cottrell, G.W.: Discovering and
+mitigating biases in clip-based image editing. In: WACV (2024) 3
+48. Tao,M.,Bao,B.K.,Tang,H.,Xu,C.:Galip:Generativeadversarialclipsfortext-
+to-image synthesis. In: CVPR (2023) 1
+49. Teo,C.,Abdollahzadeh,M.,Cheung,N.M.M.:Onmeasuringfairnessingenerative
+models. In: NeurIPS (2023) 12
+50. Tewel, Y., Shalev, Y., Schwartz, I., Wolf, L.: Zerocap: Zero-shot image-to-text
+generation for visual-semantic arithmetic. In: CVPR (2022) 1
+51. Wang, J., Liu, Y., Wang, X.E.: Are gender-neutral queries really gender-neutral?
+mitigating gender bias in image search. arXiv preprint arXiv:2109.05433 (2021) 3
+52. Wang,T.,Zhao,J.,Yatskar,M.,Chang,K.W.,Ordonez,V.:Balanceddatasetsare
+notenough:Estimatingandmitigatinggenderbiasindeepimagerepresentations.
+In: ICCV (2019) 7
+53. Wang, X., Yi, X., Jiang, H., Zhou, S., Wei, Z., Xie, X.: Tovilag: Your visual-
+language generative model is also an evildoer. In: EMNLP (2023) 3
+54. Wolfe, R., Caliskan, A.: Markedness in visual semantic ai. In: FAccT (2022) 118 Hirota et al.
+55. Wolfe,R.,Yang,Y.,Howe,B.,Caliskan,A.:Contrastivelanguage-visionaimodels
+pretrainedonweb-scrapedmultimodaldataexhibitsexualobjectificationbias.In:
+FAccT (2023) 1, 3
+56. Yamazaki,K.,Truong,S.,Vo,K.,Kidd,M.,Rainwater,C.,Luu,K.,Le,N.:Vlcap:
+Vision-languagewithcontrastivelearningforcoherentvideoparagraphcaptioning.
+In: ICIP (2022) 1
+57. Yamazaki, K., Vo, K., Truong, Q.S., Raj, B., Le, N.: Vltint: visual-linguistic
+transformer-in-transformer for coherent video paragraph captioning. In: AAAI
+(2023) 1
+58. Zeng, Z., Zhang, H., Lu, R., Wang, D., Chen, B., Wang, Z.: Conzic: Controllable
+zero-shot image captioning by sampling-based polishing. In: CVPR (2023) 1
+59. Zhao, J., Wang, T., Yatskar, M., Ordonez, V., Chang, K.W.: Men also like
+shopping: Reducing gender bias amplification using corpus-level constraints. In:
+EMNLP (2017) 7
+60. Zhong, Y., Yang, J., Zhang, P., Li, C., Codella, N., Li, L.H., Zhou, L., Dai, X.,
+Yuan,L.,Li,Y.,Gao,J.:Regionclip:Region-basedlanguage-imagepretraining.In:
+CVPR (2022) 1
+Supplementary Material
+This supplementary material includes:
+– Implementation details for SANER (Appendix A).
+– Further analysis (Appendix B).
+– List of person-, gender-, age-, and race-specific terms (Appendix C).
+– List of concepts and occupations (Appendix D).
+– Additionalvisualexamplesforimagegenerationexperiments(AppendixE).
+– Potential negative impact (Appendix F).
+A Implementation Details for SANER
+Wetrainthedebiasinglayer(amultilayerperceptionwithtwolinearlayerswith
+ReLU activation) using 170,624 image-caption pairs, which is a subset of the
+COCO training set with person-related words/phrases defined in Appendix C.
+The hidden embedding dimensionality for the debiasing layer is set to 128. We
+empirically set α, β, and γ to 1.0, 0.1, and 0.0001 (Eq. (11) in the main paper),
+respectively. We set the training epochs, batch size, and learning rate to 5, 128,
+and 5×10−6, respectively.
+Racial bias mitigation.Forraceattribute,weremoverace-specificterms14
+(e.g., African and Asian) in text descriptions, for instance, “An African woman
+is eating salad” → “A woman is eating salad”.
+14 We define race-specific terms. The list is in Appendix C.Saner: Annotation-free Societal Attribute Neutralizer 19
+Table 6: Gender bias, evaluated by MaxSkew@1000 (scaled by 100), on FairFace
+and PATA for our method (SANER) with different regularization loss combinations.
+Recon denotes the use of the reconstruction loss, and cont represents the use of the
+contrastiveloss.INaccisthezero-shotclassificationaccuracyonImageNet.Adj,Occ,
+and Act represent the types of concepts (i.e., Adjective, Occupations, and Activity,
+respectively).Alowervalueisbetter(lessgenderbias).Boldrepresentsthebestacross
+the SANER variants.
+FairFace PATA
+CLIPModel
+Adj Occ Act Adj Occ Act INacc(%)
+Original[37] 22.9 33.7 19.5 12.1 18.7 10.7 65.4
+SANER
+(noregularization) 15.7 15.0 15.3 15.8 14.4 15.4 58.8
+Recon 10.2 16.7 11.4 6.2 12.0 6.2 64.2
+Cont 18.0 19.4 21.7 7.0 9.1 9.0 63.0
+Recon+Cont 8.9 14.5 7.7 5.4 9.5 3.3 65.2
+B Additional Experiments
+B.1 Loss ablation
+To validate the effectiveness of each regularization loss (i.e., reconstruction loss
+andcontrastiveloss),weconductanablationstudybyremovingoneofthelosses
+orbothlosses.Table6presentstheresultsofgenderbias.Theresultsshowthat
+usingbothreconstructionandcontrastivelossesyieldsthebestresultsregarding
+gender bias mitigation and zero-shot classification accuracy on ImangeNet [42].
+Furthermore,SANERwithoutregularizationlossessignificantlydegradesCLIP’s
+zero-shot classification ability (i.e., from 65.4 to 58.8). These observations con-
+firmthe importanceofhaving both reconstructionand contrastivelosses forthe
+regularization.
+B.2 Analysis on the data size
+The experiments in the main paper (Sections 5 and 6) verify that SANER out-
+performs existing debiasing methods, showing a better bias mitigation ability
+in terms of gender and age biases. This superior performance of SANER may
+be because SANER is trained with diverse text descriptions (i.e., captions in
+COCO[29]),whicharenotconstrainedlikepre-definedconceptsrequiredinthe
+previous method [4]. In this section, we conduct an experiment to verify this
+hypothesis. Specifically, we use n percent of the training samples (i.e., 17,624
+image-caption pairs of COCO) to evaluate the impact of the training dataset
+size. We use the same settings in Appendix A, but use the different training
+epochs to align the number of iterations. The results are shown in Tab. 7.
+The results validate that as the number of data samples increases, gender
+bias is reduced. Specifically, while using a part of the training data results in
+mitigatinggenderbias(i.e.,MaxSkewscoresaresmallerthantheoriginalCLIP),
+usingthefulltrainingsamples(i.e.,COCO-100%)givesthebestresults,showing
+the importance of the use of more diverse data for debiasing.20 Hirota et al.
+Table 7: Genderbias,evaluatedbyMaxSkew@1000(scaledby100),onFairFaceand
+PATA for the original CLIP (Original) and our method (SANER) with different data
+sizes. COCO-n% denotes that we use n% of the training samples. IN acc is the zero-
+shot classification accuracy on ImageNet. A lower value is better (less gender bias).
+Bold represents the best across the SANER variants.
+FairFace PATA
+CLIPModel
+Adj Occ Act Adj Occ Act INacc(%)
+Original[37] 22.9 33.7 19.5 12.1 18.7 10.7 65.4
+SANER
+COCO-50% 15.7 19.4 17.9 10.0 14.1 10.2 65.4
+COCO-75% 12.8 17.6 16.1 7.8 13.0 8.3 65.4
+COCO-100% 8.9 14.5 7.7 5.4 9.5 3.3 65.2
+C List of Person-, Gender-, Age-, Race-Specific Terms
+The person-related words that are used to identify text descriptions that are
+relevant to humans (in Sec. 4.1 in the main paper) are as below:
+actor,actress,adult,architect,artist,associate,aunt,baby,boy,boyfriend,brother,
+chairman,chairperson,chairwoman,chef,child,coach,colleague,comedian,coun-
+selor, cowboy, cowgirl, dancer, daughter, designer, director, doctor, driver, dude,
+elder, emperor, employee, employer, engineer, entrepreneur, executive, expect-
+ing, father, female, friend, gentleman, girl, girlfriend, guy, hairdresser, he, her,
+hers, herself, him, himself, his, husband, individual, infant, instructor, kid, lady,
+lawyer,leader,lecturer,male,man,manager,mechanic,member,mentor,mother,
+musician, neighbor, novelist, nurse, parent, partner, people, performer, person,
+pharmacist, photographer, physician, pilot, player, police officer, policeman, po-
+licewoman, politician, pregnant, prince, princess, professor, queen, relative, re-
+searcher,royal,scholar,scientist,secretary,server,she,sibling,singer,sister,son,
+specialist, spouse, student, surfer, surgeon, tailor, teacher, technician, teenager,
+their, theirs, them, themselves, therapist, they, toddler, uncle, veterinarian, vol-
+unteer, waiter, waitress, wife, woman, worker, writer, youth, and their plurals.
+Welistthegender-specific termsthatareusedtocreateattribute-neutral
+text descriptions ξ (t) (in Sec. 4.1 in the main paper): woman, female, lady,
+n
+mother, girl, aunt, wife, actress, princess, waitress, sister, queen, pregnant,
+daughter, she, her, hers, herself, man, male, father, gentleman, boy, uncle,
+husband, actor, prince, waiter, son, brother, guy, emperor, dude, cowboy, he,
+his, him, himself and their plurals (orange denotes female-specific words, and
+oliverepresentsmale-specificterms).Tosynthesizeattribute-specificdescriptions
+(i.e., T ={ξ (t)|t∈D,g ∈A} in Sec. 4.3 in the main paper) for binary gender,
+g
+we replace person-specific terms in the attribute-neutral descriptions with their
+corresponding gender terms (e.g., person → woman and person → man).
+Wealsolisttheage-specific termsusedtocreateattribute-neutraltextde-
+scriptionsξ (t)(inSec.4.1inthemainpaper):elderly ,baby,child,kid,teenager,
+n
+adult, youth, infant, toddler, elder, girl, boy, young, old, teenage, and their plu-
+rals. To create attribute-specific descriptions (i.e., T = {ξ (t)|t ∈ D,g ∈ A} in
+gSaner: Annotation-free Societal Attribute Neutralizer 21
+Sec. 4.3 in the main paper) for binary age, we add young or old just before the
+person-specific terms (e.g., person → young person and person → old person).
+Regarding race attributes, we use race-specific terms to create attribute-
+neutral text descriptions: african, africa, asian, oriental, asia, east asian, south
+asian,southeastasian,black,caucasian,european,hispanic,latino,latina,latinx,
+white, arab, arabic, middle eastern, native, indigenous, american, african amer-
+ican, usa, united states, chinese, china, japanese, japan, indian, india, mexican,
+mexico, italian, italy, spanish, german, french, france, english, british, england,
+russian,swiss,hawaiian,thai,brazil,brazilian,canadian,canada,australian,aus-
+tralia,newzealander,newzealand,korean,korea,filipino,philippines,vietnamese,
+vietnam, malaysian, malaysia, singaporean, singapore, indonesian, indonesia,
+thai,thailand,burmese,myanmar,cambodian,cambodia,laotian,laos,taiwanese,
+taiwan, pacific, melanesian, melanesia, polynesian, polynesia, micronesian, mi-
+cronesia, aboriginal, aborigine. We adopt racial classes used in FairFace (i.e.,
+East Asian, Southeast Asian, White, Black, Hispanic, Middle Eastern, Indian),
+creating attribute-specific descriptions. Specifically, we add East Asian for the
+East Asian class, Southeast Asian for the Southeast Asian class, White or Cau-
+casian fortheWhiteclass,Black orAfrican fortheBlackclass,Latino,Latina,or
+Hispanic for the Hispanic class, Middle Eastern or Arab for the Middle Eastern
+class,Indian fortheIndianclassbeforetheperson-specificterms(e.g.,person →
+{East Asian person,Southeast Asian person,White person,Black person,Latino
+person, Middle Eastern person, Indian person}).
+D List of concepts and occupations
+WeshowtheconceptsusedtocomputeMaxSkew@k(inTab.1and2inthemain
+paper). The list of the concepts for each category (i.e., adjectives, occupations,
+and activities) are as follows:
+Adjectives:kind,successful,noncriminal,nonviolent,moral,rich,honest,smart,
+evil, unkind, unsuccessful, criminal, violent, immoral, poor, dishonest, dumb,
+clever, stupid, hardworking, lazy, nasty, trustworthy, untrustworthy, caring, dan-
+gerous, heroic, villainous, good. We refer these concepts from [4]. Regardig the
+templatesusedtocreateprompts,weuse“Thisisthefaceofa{}person”,“This
+is a photo of a {} person”, “This person is {}”, “A {} person”, “A {} individual”,
+“This individual is {}”, “Photo of a {}”, “{}”, “This is a {}”, “This is the photo of
+a {}”, “A {}”, following [4]. The curly brackets are replaced with each concept.
+Occupations: doctor, aerospace engineer, computer programmer, electrical en-
+gineer,scientist,artist,author,designer,musician,painter,photographer,singer,
+writer, architect, civil engineer, engineer, programmer, software developer, child-
+care worker,coach,dental assistant,dental hygienist,dentist,clerk,housekeeper,
+maid, massage therapist, nurse, therapist,psychologist, social assistant, social
+worker, teacher, professor, CEO, skateboarder, surfer, baseball player, football
+player, soccer player, tennis player. For the occupation list, we refer to [16] with
+some modifications such as additional occupations for more inclusive list. As
+for the prompt templates, we select ones that are suitable to occupations (e.g.,22 Hirota et al.
+“Photo of a {}”). We use this list for the text-to-image experiments with some
+modifications.Specifically,weremovethesimilaroccupations(e.g.,removecivil
+engineer as there is engineer). Additionally, we remove occupations where the
+text-to-image model [39] can not generate images with humans or it tends to
+generate multiple individuals.
+Activities: arranging flowers, playing tennis, playing skateboarding, playing
+baseball, playing soccer, playing football, playing snowboarding, playing ski-
+ing, cleaning, dressmaking, tying tie, smiling, crying, laughing, cooking, making
+pizza, dancing, drinking beer, drinking wine, eating hotdog, eating cake, using
+computer, playing game, gardening, singing, petting dog, petting cat, makeup,
+shopping, playing piano, playing guitar, carrying baby. For activities, we use
+a subset of the Kinetics dataset [25] with some additional activities. For the
+prompt templates, we use “This is the face of a person who likes {}”, “ This is a
+photo of a person who likes {}”, “This person likes {}”, “A person who likes {}”,
+“Photo of a person who likes {}”, “This is a person who likes {}”.
+E Additional visual examples for image generation
+experiments
+We show additional visual examples for Figures 3 and 4 in the main paper in
+Figures 5 and 6, respectively.
+Fig.5:Generatedimagesfortheprompt,“Aphotoofateacher,” bytheoriginalStable
+Diffusion (SD), projection-based debiased CLIP (Projection), and our debiased CLIP
+(SANER). We randomly sample 10 images from generated images. Images framed in
+green denote those of the minority gender in the generated images (i.e., male).
+F Potential Negative Impact
+ApplyingSANERtodebiasCLIPmayleadtoapotentialnegativeimpactwhere
+usersmightoverlookremainingbiases,assumingtheprocesstobefullyeffective.
+While SANER performs better in gender and age bias mitigation, as evidenced
+bytheMaxSkewandstatisticalparitymetrics,thisdoesnotensurethatSANER
+mitigates all possible societal biases, and there could be dimensions of bias not
+rehcaet
+a
+fo
+otohp
+A
+DS
+noitcejorP
+RENASSaner: Annotation-free Societal Attribute Neutralizer 23
+Fig.6:Generatedimagesfortheprompt,“Aphotoofamalemusician,” bytheoriginal
+StableDiffusion(SD),projection-baseddebiasedCLIP(Projection),andourdebiased
+CLIP (SANER). We randomly sample 10 images from generated images. Red frame
+indicates images with incorrect gender (i.e., female).
+adequatelymeasuredbythesemetrics.ItiscrucialtoacknowledgethatSANER,
+thoughimpactful,isnotanall-encompassingsolutionforremovingsocietalbias.
+We notice that researchers must exercise due diligence in evaluating the appli-
+cation of SANER to avoid inadvertently introducing unanticipated biases.
+naicisum
+elam
+a
+fo
+otohp
+A
+DS
+noitcejorP
+RENAS
