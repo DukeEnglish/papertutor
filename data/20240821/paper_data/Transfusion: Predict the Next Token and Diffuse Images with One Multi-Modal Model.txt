@@ -1,0 +1,995 @@
+Transfusion: Predict the Next Token and
+Diffuse Images with One Multi-Modal Model
+ChuntingZhouµ∗ LiliYuµ∗ ArunBabuδ† KushalTirumalaµ
+MichihiroYasunagaµ LeonidShamisµ JacobKahnµ XuezheMaσ
+LukeZettlemoyerµ OmerLevy†
+µMeta
+δ Waymoσ UniversityofSouthernCalifornia
+Abstract
+WeintroduceTransfusion,arecipefortrainingamulti-modalmodeloverdiscrete
+andcontinuousdata. Transfusioncombinesthelanguagemodelinglossfunction
+(next token prediction) with diffusion to train a single transformer over mixed-
+modalitysequences. WepretrainmultipleTransfusionmodelsupto7Bparameters
+fromscratchonamixtureoftextandimagedata,establishingscalinglawswith
+respecttoavarietyofuni-andcross-modalbenchmarks. Ourexperimentsshow
+thatTransfusionscalessignificantlybetterthanquantizingimagesandtraininga
+languagemodeloverdiscreteimagetokens. Byintroducingmodality-specificen-
+codinganddecodinglayers,wecanfurtherimprovetheperformanceofTransfusion
+models,andevencompresseachimagetojust16patches. Wefurtherdemonstrate
+thatscalingourTransfusionrecipeto7Bparametersand2Tmulti-modaltokens
+producesamodelthatcangenerateimagesandtextonaparwithsimilarscale
+diffusionmodelsandlanguagemodels,reapingthebenefitsofbothworlds.
+1 Introduction
+Multi-modal generative models need to be able to perceive, process, and produce both discrete
+elements(suchastextorcode)andcontinuouselements(e.g. image,audio,andvideodata). While
+languagemodelstrainedonthenexttokenpredictionobjectivedominatediscretemodalities[OpenAI
+etal.,2024,Dubeyetal.,2024],diffusionmodels[Hoetal.,2020,Rombachetal.,2022a]andtheir
+generalizations[Lipmanetal.,2022]arethestateoftheartforgeneratingcontinuousmodalities[Dai
+etal.,2023,Esseretal.,2024b,Bar-Taletal.,2024]. Manyeffortshavebeenmadetocombinethese
+approaches,includingextendingalanguagemodeltouseadiffusionmodelasatool,eitherexplicitly
+[Liuetal.,2023]orbygraftingapretraineddiffusionmodelontothelanguagemodel[Dongetal.,
+2023,Kohetal.,2024]. Alternatively,onecanquantizethecontinuousmodalities[VanDenOord
+etal.,2017]andtrainastandardlanguagemodeloverdiscretetokens[Rameshetal.,2021,Yuetal.,
+2022,2023],simplifyingthemodel’sarchitectureatthecostoflosinginformation. Inthiswork,we
+showitispossibletofullyintegratebothmodalities,withnoinformationloss,bytrainingasingle
+modeltobothpredictdiscretetexttokensanddiffusecontinuousimages.
+WeintroduceTransfusion,arecipefortrainingamodelthatcanseamlesslygeneratediscreteand
+continuousmodalities. WedemonstrateTransfusionbypretrainingatransformermodelon50%text
+and50%imagedatausingadifferentobjectiveforeachmodality: nexttokenpredictionfortextand
+diffusionforimages. Themodelisexposedtobothmodalitiesandlossfunctionsateachtraining
+step. Standardembeddinglayersconverttexttokenstovectors,whilepatchificationlayersrepresent
+∗Equalcontribution.
+†WorkdonewhileatMeta.
+4202
+guA
+02
+]IA.sc[
+1v93011.8042:viXracute cat . <BOI> What color is its nose ?
+Transformer
+A cute cat . <BOI> <EOI> What color is its nose
+Figure1: Ahigh-levelillustrationofTransfusion. Asingletransformerperceives,processes,and
+producesdataofeverymodality. Discrete(text)tokensareprocessedautoregressivelyandtrainedon
+thenexttokenpredictionobjective. Continuous(image)vectorsareprocessedtogetherinparallel
+andtrainedonthediffusionobjective. MarkerBOIandEOItokensseparatethemodalities.
+eachimageasasequenceofpatchvectors. Weapplycausalattentionfortexttokensandbidirectional
+attentionforimagepatches. Forinference,weintroduceadecodingalgorithmthatcombinesthe
+standardpracticesoftextgenerationfromlanguagemodelsandimagegenerationfromdiffusion
+models. Figure1illustratesTransfusion.
+In a controlled comparison with Chameleon’s discretization approach [Chameleon Team, 2024],
+weshowthatTransfusionmodelsscalebetterineverycombinationofmodalities. Intext-to-image
+generation, we find that Transfusion exceeds the Chameleon approach at less than a third of the
+compute, as measured by both FID and CLIP scores. When controlling for FLOPs, Transfusion
+achievesapproximately2×lowerFIDscoresthanChameleonmodels. Weobserveasimilartrendin
+image-to-textgeneration,whereTransfusionmatchesChameleonat21.8%oftheFLOPs.Surprisingly,
+Transfusionisalsomoreefficientatlearningtext-to-textprediction,achievingperplexityparityon
+texttasksaround50%to60%ofChameleon’sFLOPs.
+AblationexperimentsrevealcriticalcomponentsandpotentialimprovementsforTransfusion. We
+observethattheintra-imagebidirectionalattentionisimportant,andthatreplacingitwithcausal
+attention hurts text-to-image generation. We also find that adding U-Net down and up blocks to
+encodeanddecodeimagesenablesTransfusiontocompresslargerimagepatcheswithrelatively
+smalllosstoperformance,potentiallydecreasingtheservingcostsbyupto64×.
+Finally,wedemonstratethatTransfusioncangenerateimagesatsimilarqualitytootherdiffusion
+models. We train from scratch a 7B transformer enhanced with U-Net down/up layers (0.27B
+parameters)over2Ttokens: 1Ttexttokens,andapproximately5epochsof692Mimagesandtheir
+captions,amountingtoanother1Tpatches/tokens. Figure2showssomegeneratedimagessampled
+from the model. On the GenEval [Ghosh et al., 2023] benchmark, our model outperforms other
+popularmodelssuchasDALL-E2andSDXL;unlikethoseimagegenerationmodels,itcangenerate
+text,reachingthesamelevelofperformanceasLlama1ontextbenchmarks. Ourexperimentsthus
+showthatTransfusionisapromisingapproachfortrainingtrulymulti-modalmodels.
+2 Background
+Transfusionisasinglemodeltrainedwithtwoobjectives: languagemodelinganddiffusion. Eachof
+theseobjectivesrepresentsthestateoftheartindiscreteandcontinuousdatamodeling,respectively.
+Thissectionbrieflydefinestheseobjectives,aswellasbackgroundonlatentimagerepresentations.
+2.1 LanguageModeling
+Givenasequenceofdiscretetokensy =y ,...,y fromaclosedvocabularyV,alanguagemodel
+1 n
+predictstheprobabilityofthesequenceP(y). StandardlanguagemodelsdecomposeP(y)intoa
+productofconditionalprobabilities(cid:81)n
+P (y |y ). Thiscreatesanautoregressiveclassification
+i=1 θ i <i
+task,wheretheprobabilitydistributionofeachtokeny ispredictedconditionedontheprefixofa
+i
+sequencey usingasingledistributionP parameterizedbyθ. Themodelcanbeoptimizedby
+<i θ
+minimizingthecross-entropybetweenP andtheempiricaldistributionofthedata, yieldingthe
+θ
+standardnext-tokenpredictionobjective,colloquiallyreferredtoasLMloss:
+L =E (cid:2) −logP (y |y )(cid:3) (1)
+LM yi θ i <i
+2Anarmchairintheshape Abread,anapple,anda Acorgi. human life depicted en-
+ofanavocado knifeonatable tirelyoutoffractals
+Abluejaystandingona “Transfusion" is written Acloseupphotoofahu- A cloud in the shape of
+large basket of rainbow ontheblackboard. man hand, hand model. twobunniesplayingwith
+macarons. Highquality aball.Theballismadeof
+cloudstoo.
+the word ‘START’ on a A Dutch still life of an A wall in a royal castle. Three spheres made of
+bluet-shirt arrangement of tulips in There are two paintings glass falling into ocean.
+a fluted vase. The light- onthewall. Theoneon Water is splashing. Sun
+ingissubtle,castinggen- theleftadetailedoilpaint- issetting.
+tlehighlightsontheflow- ing of the royal raccoon
+ersandemphasizingtheir king.Theoneontheright
+delicatedetailsandnatu- adetailedoilpaintingof
+ralbeauty. theroyalraccoonqueen.
+Atransparentsculptureof Achromeplatedcatsculp- A kangaroo holding a aneggandabirdmadeof
+aduckmadeoutofglass. ture placed on a Persian beer,wearingskigoggles wheatbread
+rug. andpassionatelysinging
+sillysongs.
+Figure2: Generatedimagesfroma7BTransfusiontrainedon2Tmulti-modaltokens.
+3Oncetrained,languagemodelscanalsobeusedtogeneratetextbysamplingtokenbytokenfromthe
+modeldistributionP ,typicallyusingtemperatureandtop-ptruncation.
+θ
+2.2 Diffusion
+Denoisingdiffusionprobabilisticmodels(a.k.a. DDPMordiffusionmodels)operateontheprinciple
+oflearningtoreverseagradualnoise-additionprocess[Hoetal.,2020]. Unlikelanguagemodelsthat
+typicallyworkwithdiscretetokens(y),diffusionmodelsoperateovercontinuousvectors(x),making
+themparticularlysuitedfortasksinvolvingcontinuousdatalikeimages. Thediffusionframework
+involvestwoprocesses: aforwardprocessthatdescribeshowtheoriginaldataisturnedintonoise,
+andareverseprocessofdenoisingthatthemodellearnstoperform.
+ForwardProcess Fromamathematicalperspective,theforwardprocessdefineshowthenoiseddata
+(whichservesasthemodelinput)iscreated. Givenadatapointx ,Hoetal.[2020]defineaMarkov
+0
+chainthatgraduallyaddsGaussiannoiseoverT steps,creatingasequenceofincreasinglynoisyver-
+√
+sionsx ,x ,...,x . Eachstepofthisprocessisdefinedbyq(x |x )=N(x ; 1−β x ,β I),
+1 2 T t t−1 t t t−1 t
+whereβ increasesovertimeaccordingtoapredefinednoiseschedule(seebelow). Thisprocesscan
+t
+bereparameterizedinawaythatallowsustodirectlysamplex fromx usingasinglesampleof
+t 0
+Gaussiannoiseϵ∼N(0,I):
+√ √
+x = α¯ x + 1−α¯ ϵ (2)
+t t 0 t
+Here,α¯ =
+(cid:81)t
+(1−β ),providingausefulabstractionovertheoriginalMarkovchain. Infact,
+t s=1 s
+boththetrainingobjectiveandthenoiseschedulerareeventuallyexpressed(andimplemented)in
+theseterms.
+Reverse Process The diffusion model is trained to perform the reverse process p (x |x ),
+θ t−1 t
+learningtodenoisethedatastepbystep. Thereareseveralwaystodoso;inthiswork,wefollow
+theapproachofHoetal.[2020]andmodeltheGaussiannoiseϵinEquation2asaproxyforthe
+cumulativenoiseatstept. Specifically,amodelϵ (·)withparametersθistrainedtoestimatethe
+θ
+noiseϵgiventhenoiseddatax andtimestept. Inpractice,themodeloftenconditionsonadditional
+t
+contextualinformationc,suchasacaptionwhengeneratinganimage. Theparametersofthenoise
+predictionmodelarethusoptimizedbyminimizingthemeansquarederrorloss:
+L =E (cid:2) ||ϵ−ϵ (x ,t,c)||2(cid:3) (3)
+DDPM x0,t,ϵ θ t
+NoiseSchedule Whencreatinganoisedexamplex (Equation2),α¯ determinesthevarianceof
+t t
+thenoisefortimestept. Inthiswork,weadoptthecommonlyusedcosineschedulerNicholand
+√
+Dhariwal[2021],whichlargelyfollows α¯ ≈cos(t · π)withsomeadjustments.
+t T 2
+Inference Decoding is done iteratively, pealing away some of the noise at each step. Starting
+withpureGaussiannoiseatx ,themodelϵ (x ,t,c)predictsthenoiseaccumulatedattimestep
+T θ t
+t. Thepredictednoiseisthenscaledaccordingtothenoiseschedule,andtheproportionalamount
+ofpredictednoiseisremovedfromx toproducex . Inpractice,inferenceisdoneoverfewer
+t t−1
+timestepsthantraining. Classifier-freeguidance(CFG)[HoandSalimans,2022]isoftenusedto
+improvegenerationbycontrastingthepredictionofthemodelconditionedonthecontextcwiththe
+unconditionedprediction,atthecostofdoublingthecomputation.
+2.3 LatentImageRepresentation
+Earlydiffusionmodelsworkeddirectlyinpixelspace[Hoetal.,2020],butthisprovedcomputation-
+allyexpensive. Variationalautoencoders(VAEs)[KingmaandWelling,2013]cansavecomputeby
+encodingimagesintoalower-dimensionallatentspace. ImplementedasdeepCNNs,modernVAEs
+aretrainedonacombinationofreconstructionandregularizationlosses[Esseretal.,2021],allowing
+downstreammodelslikelatentdiffusionmodels(LDMs)[Rombachetal.,2022a]tooperateefficiently
+on compact image patch embeddings; e.g. represent every 8×8 pixel patch as an 8-dimensional
+vector. For autoregressive language modeling approaches [Ramesh et al., 2021, Yu et al., 2022],
+imagesmustbediscretized. Discreteautoencoders,suchasvector-quantizedVAEs(VQ-VAE)[Van
+DenOordetal.,2017],achievethisbyintroducingaquantizationlayer(andrelatedregularization
+losses)thatmapscontinuouslatentembeddingstodiscretetokens.
+4VAE Decoder
+A cute cat<BOI> <EOI>What
+Linear or U-Net Up A
+cute
+Transformer cat
+<BOI>
+Linear or U-Net Down
+Noising
+VAE Encoder
+<EOI>
+What
+Figure 3: We convert images to and from la-
+tentrepresentationsusingapretrainedVAE,and Figure4: Expandingonthecausalmask,Trans-
+thenintopatchrepresentationswitheitherasim- fusionallowspatchesofthesameimagetocon-
+plelinearlayerorU-Netdownblocks. ditiononeachother.
+3 Transfusion
+Transfusionisamethodfortrainingasingleunifiedmodeltounderstandandgeneratebothdiscrete
+andcontinuousmodalities. Ourmaininnovationisdemonstratingthatwecanuseseparatelosses
+fordifferentmodalities–languagemodelingfortext,diffusionforimages–overshareddataand
+parameters. Figure1illustratesTransfusion.
+DataRepresentation Weexperimentwithdataspanningtwomodalities: discretetextandcontinu-
+ousimages. Eachtextstringistokenizedintoasequenceofdiscretetokensfromafixedvocabulary,
+where each token is represented as an integer. Each image is encoded as latent patches using a
+VAE(see§2.3),whereeachpatchisrepresentedasacontinuousvector;thepatchesaresequenced
+left-to-righttop-to-bottomtocreateasequenceofpatchvectorsfromeachimage.3 Formixed-modal
+examples,wesurroundeachimagesequencewithspecialbeginningofimage(BOI)andendofimage
+(EOI)tokensbeforeinsertingittothetextsequence;thus,wearriveatasinglesequencepotentially
+containingbothdiscreteelements(integersrepresentingtexttokens)andcontinuouselements(vectors
+representingimagepatches).
+ModelArchitecture Thevastmajorityofthemodel’sparametersbelongtoasingletransformer,
+which processes every sequence, regardless of modality.45 The transformer takes a sequence of
+high-dimensional vectors in Rd as input, and produces similar vectors as output. To convert our
+dataintothisspace,weuselightweightmodality-specificcomponentswithunsharedparameters.
+Fortext,thesearetheembeddingmatrices,convertingeachinputintegertovectorspaceandeach
+outputvectorintoadiscretedistributionoverthevocabulary. Forimages,weexperimentwithtwo
+alternativesforcompressinglocalwindowsofk×kpatchvectorsintoasingletransformervector
+3WhileourcanonicalsettingusesaVAEfollowinglatentdiffusionmodels,wewerealsoabletodemonstrate
+Transfusionusingrawpixelrepresentationsinpreliminaryexperiments.
+4WefollowLlama’s[Touvronetal.,2023a]flavorofthetransformerblock,whichincludestheSwiGLU
+activationfunction[Shazeer,2020]andRoPE[Suetal.,2024].
+5Whileweusethetransformerarchitectureinthiswork, Transfusioncouldpotentiallyworkwithother
+architecturestoo,despiteitsname.
+5(and vice versa): (1) a simple linear layer,6 and (2) up and down blocks of a U-Net [Nichol and
+Dhariwal,2021,Sahariaetal.,2022].7 Figure3illustratestheoverallarchitecture.
+Transfusion Attention Language models typically use causal masking to efficiently compute
+thelossandgradientsoveranentiresequenceinasingleforward-backwardpasswithoutleaking
+informationfromfuturetokens. Whiletextisnaturallysequential,imagesarenot,andareusually
+modeledwithunrestricted(bidirectional)attention. Transfusioncombinesbothattentionpatterns
+byapplyingcausalattentiontoeveryelementinthesequence,andbidirectionalattentionwithinthe
+elementsofeachindividualimage. Thisallowseveryimagepatchtoattendtoeveryotherpatch
+withinthesameimage,butonlyattendtotextorpatchesofotherimagesthatappearedpreviouslyin
+thesequence. Wefindthatenablingintra-imageattentionsignificantlyboostsmodelperformance
+(see§4.3). Figure4showsanexampleTransfusionattentionmask.
+TrainingObjective Totrainourmodel,weapplythelanguagemodelingobjectiveL topre-
+LM
+dictions of text tokens and the diffusion objective L to predictions of image patches. LM
+DDPM
+lossiscomputedpertoken,8whilediffusionlossiscomputedperimage,whichmayspanmultiple
+elements(imagepatches)inthesequence. Specifically,weaddnoiseϵtoeachinputlatentimage
+x according to the diffusion process to produce x before patchification, and then compute the
+0 t
+image-leveldiffusionloss.9 Wecombinethetwolossesbysimplyaddingthelossescomputedover
+eachmodalitywithabalancingcoefficientλ:
+L =L +λ·L (4)
+Transfusion LM DDPM
+Thisformulationisaspecificinstantiationofabroaderidea: combiningadiscretedistributionloss
+withacontinuousdistributionlosstooptimizethesamemodel. Weleavefurtherexplorationofthis
+space,suchasreplacingdiffusionwithflowmatching[Lipmanetal.,2022]),tofuturework.
+Inference Reflectingthetrainingobjective,ourdecodingalgorithmalsoswitchesbetweentwo
+modes: LManddiffusion. InLMmode,wefollowthestandardpracticeofsamplingtokenbytoken
+fromthepredicteddistribution. WhenwesampleaBOItoken, thedecodingalgorithmswitches
+to diffusion mode, where we follow the standard procedure of decoding from diffusion models.
+Specifically, we append a pure noise x in the form of n image patches to the input sequence
+T
+(dependingonthedesiredimagesize),anddenoiseoverT steps. Ateachstept,wetakethenoise
+predictionanduseittoproducex ,whichthenoverwritesx inthesequence;i.e.themodelalways
+t−1 t
+conditionsonthelasttimestepofthenoisedimageandcannotattendtoprevioustimesteps. Oncethe
+diffusionprocesshasended,weappendanEOItokentothepredictedimage,andswitchbacktoLM
+mode. Thisalgorithmenablesthegenerationofanymixtureoftextandimagemodalities.
+4 Experiments
+WedemonstrateinaseriesofcontrolledexperimentsthatTransfusionisaviable,scalablemethodfor
+trainingaunifiedmulti-modalmodel.
+4.1 Setup
+Evaluation We evaluate model performance on a collection of standard uni-modal and cross-
+modalbenchmarks(Table1). Fortext-to-text,wemeasureperplexityon20Mheld-outtokensfrom
+WikipediaandtheC4corpus[Raffeletal.,2019],aswellasaccuracyonthepretrainingevaluation
+suiteofLlama2[Touvronetal.,2023b].10 Fortext-to-image,weusetheMS-COCObenchmark
+[Linetal.,2014],wherewegenerateimagesonrandomlyselected30kpromptsfromvalidationset
+andmeasuretheirphoto-realismusingzero-shotFrechetInceptionDistance(FID)[Heuseletal.,
+6Weaddanembeddingofthetimestepttoeverypatchvectorbeforethelinearlayer.
+7WereplacetheU-Net’sAdaLayerNormwithregularlayernorminourimplementation.
+8WhentheinputisaBOItoken,wedonotcomputeanyloss.
+9Ergo,downstreamtokensconditiononnoisyimagesduringtraining.See§4.3.4forfurtherdiscussion.
+10TheLlama2evaluationsuiteincludesHellaSwag[Zellersetal.,2019],PIQA[Bisketal.,2020],SIQA[Sap
+etal.,2019],WinoGrande[Sakaguchietal.,2021],ARC-eand-c[Clarketal.,2018],andBoolQ[Clarketal.,
+2019].Wereporttheaverage0-shottaskaccuracyonthesebenchmarks.
+6Input Output Benchmark Metric
+Wikipedia Perplexity(↓)
+Size Layers EmbDim AttHeads
+Text Text C4 Perplexity(↓)
+Llama2EvalSuite Accuracy(↑) 0.16B 16 768 12
+0.37B 24 1024 16
+Image Text MS-COCO5k CIDEr(↑)
+0.76B 24 1536 24
+MS-COCO30k FID(↓),CLIP(↑) 1.4B 24 2048 16
+Text Image
+GenEval GenEvalscore(↑) 7B 32 4096 32
+Table1: Anoverviewoftheevaluationsuiteusedinthis Table2: Modelsizesandconfigurations
+work. forbothTransfusionandbaselines.
+2017]aswellastheiralignmentwiththepromptsusingCLIPscore[Radfordetal.,2021].11 Wealso
+evaluatethemodel’sabilitytogenerateimagecaptions;wereportCIDEr[Vedantametal.,2015]
+scoresontheKarpathytestsplitofMS-COCO[Linetal.,2014]. Theseevaluationsprovidesignalfor
+investigationscalinglaws(§4.2)andablations(§4.3). Tocomparewithrecentliteratureindiffusion
+models,weevaluateourlargestscalemodel(§4.4)alsoonGenEval[Ghoshetal.,2023],abenchmark
+thatexaminesamodel’sabilitytogenerateanaccuratedepictionoftheprompt.
+Baseline Atthetimeofwriting,theprominentopen-sciencemethodfortrainingasinglemixed-
+modalmodelthatcangeneratebothtextandimagesistoquantizeimagesintodiscretetokens,and
+then model the entire token sequence with a standard language model [Ramesh et al., 2021, Yu
+etal.,2022,2023]. WefollowtherecipeofChameleon[ChameleonTeam,2024]totrainafamilyof
+data-andcompute-controlledbaselinemodels,whichwecandirectlycomparetoourTransfusion
+models. ThekeydifferencebetweenChameleonandTransfusionisthatwhileChameleondiscretizes
+imagesandprocessesthemastokens,Transfusionkeepsimagesincontinuousspace,removingthe
+quantizationinformationbottleneck. Tofurtherminimizeanyconfoundingvariables,wetrainthe
+VAEsforChameleonandTransfusionusingexactlythesamedata,compute,andarchitecture,with
+theonlydifferentiatorbeingthequantizationlayerandcodebooklossofChameleon’sVQ-VAE(see
+detailsbelow). ChameleonalsodeviatesfromtheLlamatransformerarchitecture,addingquery-key
+normalization,post-normalization,denominatorloss,andalowerlearningrateof1e-4tomanage
+traininginstability,whichincuranefficiencycost(see§4.2).12
+Data Foralmostallofourexperiments,wesample0.5Ttokens(patches)fromtwodatasetsata1:1
+tokenratio. Fortext,weusetheLlama2tokenizerandcorpus[Touvronetal.,2023b],containing2T
+tokensacrossadiversedistributionofdomains. Forimages,weuseacollectionof380Mlicensed
+Shutterstockimagesandcaptions. Eachimageiscenter-croppedandresizedtoproducea256×256
+pixelimage.13 Werandomlyordertheimageandcaptions,orderingthecaptionfirst80%ofthetime.
+Inoneexperiment(4.4)wescaleupthetotaltrainingdatato2Ttokens(1Ttexttokensandabout
+3.5Bcaption-imagepairsat256patchesperimage). Todiversify,weadd220Mpubliclyavailable
+imageswithcaptions,prefilteredtonotcontainpeople. Torebalancethedistribution,weupsample
+80M Shutterstock images containing people. We also add data from Conceptual 12M (CC12M)
+[Changpinyoetal.,2021],reachingatotalmixtureof692Mimage-captionpairsperepoch. Finally,
+weupweighttheportionofhigh-aestheticimagesinthelast1%ofthetrainingschedule.
+Latent Image Representation We train a 86M parameter VAE following Esser et al. [2021].
+WeuseaCNNencoderanddecoder, andlatentdimension8. Thetrainingobjectiveiscombines
+reconstructionandregularizationlosses.14 Ourimplementationreducesanimageof256×256pixels
+toa32×32×8tensor,whereeachlatent8-dimensionallatentpixelrepresents(conceptually)an8×8
+pixelpatchintheoriginalimage,andtrainsfor1Msteps. ForVQ-VAEtraining,wefollowthesame
+11Wefollowcommonpracticeforablationsanduseonly5kexamplestocomputeFIDandCLIPin§4.3.
+12RemovingthesedeviationsinpreliminaryexperimentsencounteredoptimizationinstabilitiesinChameleon.
+13Dependingonthecompressionrateofthepatchencoder(seeModelArchitecturein§3),eachimagewillbe
+representedbyeither1024,256,64,or16elementsinthesequence.Sincethetext/imageratioisconstantduring
+training,highercompressionratesenabletrainingonmoreimagesintotal,atthecostoflesscomputeperimage.
+14SeeAppendixAfordetails.
+7setupdescribedforVAEtraining,exceptwereplaceL withthestandardcodebookcommitment
+KL
+losswithβ =0.25[VanDenOordetal.,2017]. Weuseacodebookof16,384tokentypes.
+ModelConfiguration Toinvestigatescalingtrends,wetrainmodelsatfivedifferentsizes–0.16B,
+0.37B,0.76B,1.4B,and7Bparameters–followingthestandardsettingsfromLlama[Touvronetal.,
+2023a]. Table2describeseachsettingindetail. Inconfigurationsthatuselinearpatchencoding(§4.2
+and§4.3),thenumberofadditionalparametersisinsignificant,accountingforfewerthan0.5%of
+totalparametersineveryconfiguration. WhenusingU-Netpatchencoding(§4.3and§4.4),these
+parametersaddupto0.27Badditionalparametersacrossallconfigurations;whilethisisasubstantial
+additionofparameterstosmallermodels, theselayersamounttoonlya3.8%increaseofthe7B
+configuration,almostidenticaltothenumberofparametersintheembeddinglayers.
+Optimization We randomly initialize all model parameters, and optimize them using AdamW
+(β =0.9,β =0.95,ϵ=1e-8)withalearningrateof3e-4,warmedupfor4000stepsanddecaying
+1 2
+to1.5e-5usingacosinescheduler. Wetrainonsequencesof4096tokensinbatchesof2Mtokensfor
+250ksteps,reaching0.5Ttokensintotal. Inourlarge-scaleexperiment(§4.4),wetrainwithabatch
+sizeof4Mtokensover500ksteps,totalling2Ttokens. Weregularizewithweightdecayof0.1and
+clipgradientsbynorm(1.0). WesettheλcoefficientintheTransfusionobjective(Equation4)to5
+followingpreliminaryexperiments;weleavefurthertuningofλtofuturework.
+Inference Intextmode,weusegreedydecodingforgeneratingtext. Rankedclassificationisused
+fortheLlamaevaluationsuite. Forimagegeneration,wefollowthestandardof250diffusionsteps
+(themodelistrainedon1,000timesteps). WefollowChameleonanduseCFGwithacoefficientof5
+inthecontrolledcomparisonexperiments(§4.2). ThisvalueissuboptimalforTransfusion,andso
+weuseaCFGcoefficientof3throughouttheablationexperiments(§4.3),andfollowthestandard
+practiceoftuningthecoefficientforeachbenchmarkinourlargescaleexperiment(§4.4).
+4.2 ControlledComparisonwithChameleon
+WerunaseriesofcontrolledexperimentstocompareTransfusionwithChameleonatdifferentmodel
+sizes(N)andtokencounts(D),usingthecombinationofbothasaproxyforFLOPs(6ND).15 For
+simplicityandparametercontrol,theTransfusionvariantintheseexperimentsusessimplelinear
+imageencoder/decoderwithpatchsize2×2,aswellasbidirectionalattention. Foreachbenchmark,
+weplotallresultsonalog-metricoverlog-FLOPscurveandregresslineartrendlines.16 Wealso
+estimate relative compute efficiency by measuring the parity FLOP ratio: the ratio between the
+numberofFLOPsrequiredbyTransfusionandChameleontoreachthesamelevelofperformance.
+Figure5visualizesthescalingtrends, andTable3showstheresultsofthelargestmodelsinthis
+controlledsettingandtheirestimatedparityFLOPratio.Ineverybenchmark,Transfusionconsistently
+exhibitsbetterscalinglawsthanChameleon. Whilethelinesareclosetoparallel,thereisasignificant
+gapinTransfusion’sfavor. Thedifferenceincomputeefficiencyisparticularlystrikinginimage
+generation,whereFIDTransfusionachievesparitywithChameleonusing34×lesscompute.
+Surprisingly,text-onlybenchmarksalsorevealbetterperformancewithTransfusion,eventhough
+bothTransfusionandChameleonmodeltextinthesameway. Weinvestigatethisphenomenonby
+ablatingthevariouschangesleadinguptoTransfusionandChameleonfromtheoriginalLlama2
+recipe. Table4showsthatwhileTransfusiondoescomeatanon-zerocosttotextperformance,the
+Chameleonrecipesuffersfromboththestabilitymodificationsmadetothearchitectureandfrom
+theintroductionofimagetokens. Trainingonquantizedimagetokensdegradestextperformance
+morethandiffusiononallthreebenchmarks. Onehypothesisisthatthisstemsfromthecompetition
+betweentextandimagetokensintheoutputdistribution;alternatively,itispossiblethatdiffusionis
+moreefficientatimagegenerationandrequiresfewerparameters,allowingTransfusionmodelsto
+usemorecapacitythanChameleontomodeltext. Weleavefurtherinvestigationofthisphenomenon
+tofutureresearch.
+15SinceTransfusionusescontinuousrepresentationsofimages,itcanexpressasingleimagewithsignificantly
+fewertokens,shorteningtheaveragedocumentlengthandthustheoverallquadraticpriceofattention.Since
+thisfactfavorsTransfusion,weremovethisconfounderbyusingthetheoreticalFLOPcalculation.
+16ThesmallerChameleonmodelsperformpoorlyonimagegenerationandunderstandingtasks,leadingto
+outlierresultsthatdonotcorrelatewiththeemergingscalinglawoflargerChameleonmodels.Wetherefore
+defineminimalperformancethresholdsbelowwhichweremovedatapoints:≤100FID,≥17CLIP,≥4CIDEr.
+816
+Transfusion Transfusion
+Chameleon Chameleon
+16
+8
+8
+4
+1e+20 1e+21 1e+22 1e+20 1e+21 1e+22
+FLOPs FLOPs
+C4Perplexity WikipediaPerplexity
+64 32
+16
+8
+4
+Transfusion Transfusion
+Chameleon Chameleon
+32 2
+1e+20 1e+21 1e+22 1e+20 1e+21 1e+22
+FLOPs FLOPs
+Llama2EvalSuiteAccuracy MS-COCO5kCIDEr
+128 Transfusion
+Chameleon 24
+64
+32
+Transfusion
+16
+Chameleon
+12
+1e+20 1e+21 1e+22 1e+20 1e+21 1e+22
+FLOPs FLOPs
+MS-COCO30kFID MS-COCO30kCLIP
+Figure 5: Performance of Transfusion and Chameleon models at different scales, controlled for
+parameters,data,andcompute. Allaxesarelogarithmic.
+C4 Wiki Llama MS-COCO
+Model
+PPL(↓) PPL(↓) Acc(↑) CDr(↑) FID(↓) CLIP(↑)
+Transfusion 7.72 4.28 61.5 27.2 16.8 25.5
+Chameleon 8.41 4.69 59.1 18.0 29.6 24.3
+ParityFLOPRatio 0.489 0.526 0.600 0.218 0.029 0.319
+Table3: Performanceofthelargest(7B)TransfusionandChameleonmodelsinacontrolledsetting.
+Bothmodelsweretrainedon0.5Ttokens. ParityFLOPRatioistherelativeamountofTransfusion
+FLOPsneededtomatchtheresultsofChameleon7B.
+9
+LPP
+ccA
+DIF
+LPP
+rEDIC
+PILCC4 Wiki Llama
+Model Batch
+PPL(↓) PPL(↓) Acc(↑)
+Llama2 1MTextTokens 10.1 5.8 53.7
+Transfusion +Diffusion +1MImagePatches (+0.3)10.4 (+0.2)6.0 (-2.0)51.7
+Chameleon +StabilityModifications 1MTextTokens (+0.9)11.0 (+0.5)6.3 (-1.8)51.9
++LMLossonImageTokens +1MImageTokens (+0.8)11.8 (+0.5)6.8 (-3.0)48.9
+Table4: Performanceofthe0.76BTransfusionandChameleonmodelsontext-onlybenchmarks,
+comparedtotheoriginalLlama2recipe.
+C4 Wiki Llama MS-COCO
+Enc/Dec Attention
+PPL(↓) PPL(↓) Acc(↓) CDr(↑) FID(↓) CLIP(↑)
+Causal 10.4 6.0 51.4 12.7 61.3 23.0
+Linear
+Bidirectional 10.4 6.0 51.7 16.0 20.3 24.0
+Causal 10.3 5.9 52.0 23.3 16.8 25.3
+U-Net
+Bidirectional 10.3 5.9 51.9 25.4 16.7 25.4
+Table 5: Performance of 0.76B Transfusion models with and without intra-image bidirectional
+attention. Patchsizeissetat2×2latentpixels.
+4.3 ArchitectureAblations
+NowthatwehaveestablishedthatTransfusionisaviable,scalableapproachtomulti-modalmodeling
+in a controlled environment, we can explore improvements and extensions that are applicable to
+Transfusionalone.
+4.3.1 AttentionMasking
+Wefirstexaminethenecessityofintra-imagebidirectionalattention. Table5showsthatenablingthis
+attentionpatternbeyondthestandardcausalattentionisadvantageousthroughoutallbenchmarks,and
+usingbothimageencoding/decodingarchitectures. Inparticular,wenoticeasignificantimprovement
+inFIDwhenusinglinearencodinglayers(61.3→20.3). Inthecausal-onlyversionofthisarchitecture,
+thereisnoflowofinformationfrompatchesthatappearlaterinthesequencetothosebefore;since
+U-Netblockscontainbidirectionalattentionwithin,independentofthetransformer’sattentionmask,
+thisgapislesspronouncedwhentheyareapplied.
+4.3.2 PatchSize
+Transfusionmodelscanbedefinedoverdifferentsizesoflatentpixelpatches.Largerpatchsizesallow
+themodeltopackmoreimagesineachtrainingbatchanddramaticallyreduceinferencecompute,
+butmaycomeataperformancecost. Table6shedslightontheseperformancetrade-offs. While
+performancedoesdecreaseconsistentlyaseachimageisrepresentedbyfewerpatcheswithlinear
+encoding, modelswithU-Netencodingbenefitfromlargerpatchesontasksinvolvingtheimage
+modality. Wepositthatthisisduetothegreateramountoftotalimages(anddiffusionnoise)seen
+during training. We also observe that text performance deteriorates with larger patches, perhaps
+becausetransfusionneedstoexertmoreresources(i.e. parameters)tolearnhowtoprocessimages
+withfewerpatchesandthuslessinferencecompute.
+4.3.3 PatchEncoding/DecodingArchitecture
+OurexperimentssofarindicateanadvantagetousingtheU-Netupanddownblocksinsteadofa
+simplelinearlayer. Onepossiblereasonisthatthemodelbenefitsfromtheinductivebiasesofthe
+U-Netarchitecure;analternativehypothesisisthatthisadvantagestemsfromthesignificantincrease
+inoverallmodelparametersintroducedbytheU-Netlayers. Todecouplethesetwoconfounders,
+wescaleupthecoretransformerto7Bparameters,whilekeepingtheamountofU-Netparameters
+10Latent/ Pixel/ Patch/ C4 Wiki Llama MS-COCO
+Enc/Dec
+Patch Patch Image PPL(↓) PPL(↓) Acc(↓) CDr(↑) FID(↓) CLIP(↑)
+None 1×1 8×8 1024 10.3 5.9 52.2 12.0 21.0 24.0
+2×2 16×16 256 10.4 6.0 51.7 16.0 20.3 24.0
+Linear 4×4 32×32 64 10.9 6.3 49.8 14.3 25.6 22.6
+8×8 64×64 16 11.7 6.9 47.7 11.3 43.5 18.9
+2×2 16×16 256 10.3 5.9 51.9 25.4 16.7 25.4
+U-Net 4×4 32×32 64 10.7 6.2 50.7 29.9 16.0 25.7
+8×8 64×64 16 11.4 6.6 49.2 29.5 16.1 25.2
+Table6: Performanceof0.76BTransfusionmodelswithdifferentpatchsizes. Boldedfiguresindicate
+globalbest,underlinesindicatebestwithinarchitecture.
+Model ∆Enc/Dec C4 Wiki Llama MS-COCO
+Enc/Dec
+Params Params PPL(↓) PPL(↓) Acc(↑) CDr(↑) FID(↓) CLIP(↑)
+Linear 0.5% 14.8 8.8 44.2 6.2 37.6 20.0
+0.16B
+U-Net 106.1% 14.4 8.5 45.7 15.3 18.8 23.9
+Linear 0.4% 12.0 7.0 47.9 11.1 21.5 22.4
+0.37B
+U-Net 71.3% 11.8 6.9 48.8 21.1 18.1 24.9
+Linear 0.4% 10.4 6.0 51.7 16.0 20.3 24.0
+0.76B
+U-Net 35.5% 10.3 5.9 51.9 25.4 16.7 25.4
+Linear 0.4% 9.5 5.4 53.8 19.1 19.4 24.3
+1.4B
+U-Net 19.3% 9.4 5.4 53.4 28.1 16.6 25.7
+Linear 0.3% 7.7 4.3 61.5 27.2 18.6 25.9
+7B
+U-Net 3.8% 7.8 4.3 61.1 33.7 16.0 26.5
+Table7: PerformanceoflinearandU-NetvariantsofTransfusionacrossdifferentmodelsizes. Patch
+sizeissetat2×2latentpixels. Modelparametersreferstothetransformeralone.
+(almost)constant;17 inthissetting, theadditionalencoder/decoderparametersaccountforonlya
+3.8%increaseoftotalmodelparameters,equivalenttotheamountoftokenembeddingparameters.
+Table7showsthateventhoughtherelativebenefitofU-Netlayersshrinksasthetransformergrows,
+itdoesnotdiminish. Inimagegeneration, forexample, theU-Netencoder/decoderallowsmuch
+smallermodelstoobtainbetterFIDscoresthanthe7Bmodelwithlinearpatchificationlayers. We
+observe a similar trend in image captioning, where adding U-Net layers boosts the CIDEr score
+ofa1.4Btransformer(1.67Bcombined)beyondtheperformanceofthelinear7Bmodel. Overall,
+itappearsthatthereareindeedinductivebiasbenefitstoU-Netencodinganddecodingofimages
+beyondthemereadditionofparameters.
+4.3.4 ImageNoising
+Ourexperimentsorder80%ofimage-captionpairswiththecaptionfirst,andtheimageconditioning
+onthecaption,followingtheintuitionthatimagegenerationmaybeamoredata-hungrytaskthan
+imageunderstanding. Theremaining20%ofthepairsconditionthecaptionontheimage. However,
+theseimagesarenoisedaspartofthediffusionobjective. Wethusmeasuretheeffectoflimitingthe
+diffusionnoisetoamaximumoft = 500(halfofthenoiseschedule)inthe20%ofcaseswhere
+imagesappearbeforetheircaptions. Table8showsthatnoiselimitingsignificantlyimprovesimage
+captioning, as measure by CIDEr, while having a relatively small effect (less than 1%) on other
+benchmarks.
+17WhilewedonotscaletheU-Netlayerswiththetransformerintheseexperiments,thisisapotentially
+fruitfulavenueforfutureresearch.
+11Model Noise C4 Wiki Llama MS-COCO
+Params Limit PPL(↓) PPL(↓) Acc(↑) CDr(↑) FID(↓) CLIP(↑)
+10.3 5.9 51.9 25.4 16.7 25.4
+0.76B
+✓ 10.3 5.9 52.1 29.4 16.5 25.4
+7.8 4.3 61.1 33.7 16.0 26.5
+7B
+✓ 7.7 4.3 60.9 35.2 15.7 26.3
+Table8:PerformanceofTransfusionwithandwithoutlimitingtheamountofsampleddiffusionnoise
+toamaximumoft=500whenimagesappearbeforethecaption. ThemodelsareU-Netvariants
+encoding2×2latentpixelpatches. Metricsthatchangebyover1%arebolded.
+Model Text Llama COCO Gen
+Model Images
+Params Tokens Acc(↑) FID(↓) Eval(↑)
+Llama1[Touvronetal.,2023a] 7B 1.4T — 66.1 — —
+Llama2[Touvronetal.,2023b] 7B 2.0T — 66.3 — —
+Chameleon[ChameleonTeam,2024] 7B 6.0T 3.5B 67.1 26.74 0.39
+Imagen[Sahariaetal.,2022] 2.6B+4.7B∗ — 5.0B — 7.27 —
+Parti[Yuetal.,2022] 20B — 4.8B — r7.23 —
+SD1.5[Rombachetal.,2022b] 0.9B+0.1B∗ — 4.0B — — 0.43
+SD2.1[Rombachetal.,2022b] 0.9B+0.1B∗ — 2.3B — — 0.50
+DALL-E2[Rameshetal.,2022] 4.2B+1B∗ — 2.6B — 10.39 0.52
+SDXL[Podelletal.,2023] 2.6B+0.8B∗ — 1.6B — — 0.55
+DeepFloyd[StabilityAI,2024] 5.5B+4.7B∗ — 7.5B — 6.66 0.61
+SD3[Esseretal.,2024b] 8B+4.7B∗ — s2.0B — — 0.68
+Transfusion(Ours) 7.3B 1.0T 3.5B 66.1 6.78 0.63
+Table9: Performanceofa7BTransfusionmodel(U-Netencoder/decoderlayers,2×2latentpixel
+patches)trainedontheequivalentof2Ttokens,comparedtosimilarscalemodelsintheliterature.
+Except Chameleon, all the other models are restricted to generating one modality (either text or
+image). ∗ Frozentextencoderparameters. r Partisamples16imagesforeverypromptandthen
+rerankswithanauxiliaryscoringmodel. sSD3trainswithsyntheticcaptiondata,whichprovides
+boostsGenEvalperformance.
+4.4 ComparisonwithImageGenerationLiterature
+OurexperimentsthusfarhavecoveredcontrolledcomparisonswithChameleonandLlama,butwe
+haveyettocompareTransfusion’simagegenerationcapabilitiestothoseofstate-of-the-artimage
+generation models. To that end, we train a 7B parameter model with U-Net encoding/decoding
+layers (2×2 latent pixel patches) over the equivalent of 2T tokens, comprising of 1T text corpus
+tokensand3.5Bimagesandtheircaptions. WhiletheTransfusionvariantin§4.2favoredsimplicity
+andexperimentalcontrol,thedesignchoicesanddatamixture(§4.1)ofthisvariantleanabitmore
+towardsimagegeneration. Figure2andAppendixBshowcasegeneratedimagesfromthismodel.
+Wecomparetheperformanceofourmodeltoreportedresultsofothersimilarscaleimagegeneration
+models, as well as some publicly available text generating models for reference. Table 9 shows
+thatTransfusionachievessimilarperformancetohigh-performingimagegenerationmodelssuch
+asDeepFloyd[StabilityAI,2024],whilesurpassingpreviouslypublishedmodelsincludingSDXL
+[Podell et al., 2023]. While Transfusion does lag behind SD 3 [Esser et al., 2024a], this model
+leveragedsyntheticimagecaptionsthroughbacktranslation[Betkeretal.,2023],whichenhances
+its GenEval performance by 6.5% absolute (0.433→0.498) at smaller scale; for simplicity, our
+experimentalsetuponlyincludednaturaldata. Finally,wenotethatourTransfusionmodelcanalso
+generatetext,andperformsonparwiththeLlamamodels,whichweretrainedonthesametextdata
+distribution(§4.1).
+12Removethecupcakeontheplate. Changethetomatoontherighttoagreenolive.
+Writetheword"Zebra"inArialbold. Changethistocartoonstyle.
+Figure6: Editedimagesfromafine-tuned7BTransfusionmodel.
+4.5 ImageEditing
+OurTransfusionmodels,whichhavebeenpretrainedontext-text,image-text,andtext-imagedata,
+performwellacrossthesemodalitypairings. Canthesemodelsextendtheircapabilitiestogenerate
+imagesbasedonotherimages? Toinvestigate,wefine-tunedour7Bmodel(§4.4)usingadatasetof
+only8kpubliclyavailableimageeditingexamples,whereeachexampleconsistsofaninputimage,
+aneditprompt,andanoutputimage. Thisapproach,inspiredbyLIMA[Zhouetal.,2024],allowsus
+toassesshowwellthemodelcangeneralizetoimage-to-imagegeneration,ascenarionotcovered
+duringpretraining.
+ManualexaminationofrandomexamplesfromtheEmuEdittestset[Sheyninetal.,2024],shownin
+Figure6andAppendix4.5,revealsthatourfine-tunedTransfusionmodelperformsimageeditsas
+instructed. Despitethelimitationsofthisexperiment,thefindingssuggestthatTransfusionmodels
+canindeedadapttoandgeneralizeacrossnewmodalitycombinations. Weleavefurtherexploration
+ofthispromisingdirectiontofutureresearch.
+5 RelatedWork
+Mostexistingmulti-modalmodelsarebuiltontheideaofattachingtwoormoremodality-specific
+architectures together, often pretraining each component separately in advance. State-of-the-art
+imageandvideogenerationmodels,forinstance,uselargepretrainedtextencoderstorepresenttheir
+inputpromptsinlatentspace,whichcanthenbeusedtoconditiondiffusionmodels[Sahariaetal.,
+2022]. Infact,recentworkfusesrepresentationsfrommultipleoff-the-shelfencoderstoenhance
+performance [Podell et al., 2023, Esser et al., 2024b]. A similar pattern can be observed in the
+vision language model literature, where typically a pretrained language model is complemented
+bypretrainedmodality-specificencoders/decodersviaprojectionlayersto/fromthepretrainedtext
+space. ExamplesincludeFlamingo[Alayracetal.,2022]andLLaVA[Liuetal.,2024]forvisual
+understanding,GILL[Kohetal.,2024]forvisualgeneration,andDreamLLM[Dongetal.,2024]
+forbothvisualcomprehensionandgeneration. Incontrast,Transfusionhasoneunifiedarchitecture
+learnedend-to-endtogeneratebothtextandimages.
+Priorworkonend-to-endmulti-modalmodelsincludesexamplessuchasFuyu[Bavishietal.,2023],
+whichusesimagepatchesasinputsforvisualunderstanding,andChameleon[ChameleonTeam,
+2024], which converts each image to a sequence of discretized tokens and then trains over the
+combined text-image token sequences. However, these approaches are either restricted to input-
+13levelmulti-modaltasks,orlagbehindstate-of-the-artmodels(i.e. diffusionmodels)incontinuous
+datageneration. Transfusionprovidesasimple,end-to-endsolutiontomulti-modallearningthat
+understandsandgenerateshigh-qualitymulti-modaldata.
+Aninterestingareaofrecentacriveresearchistheapplicationdiffusionmodelsandtheirgeneraliza-
+tionstodiscretetextgeneration[Lietal.,2022,Gatetal.,2024]. However,thisapproachhasyetto
+achievetheperformanceandscaleofstandardautoregressivelanguagemodels. Futureresearchin
+thisdirectionmayunlocknewwaystofusediscreteandcontinuousmodalitiesinasinglemodel.
+6 Conclusion
+Thisworkexploreshowtobridgethegapbetweenthestateoftheartindiscretesequencemodeling
+(next token prediction) and continuous media generation (diffusion). We propose a simple, yet
+previouslyunexploredsolution: trainasinglejointmodelontwoobjectives,tyingeachmodalityto
+itspreferredobjective. OurexperimentsshowthatTransfusionscalesefficiently,incurringlittletono
+parametersharingcost,whileenablingthegenerationofanymodality.
+AcknowledgmentsandDisclosureofFunding
+WewouldliketothankHoraceHe,SonglinYang,JiataoGu,andIshanMisraforhelpfuldiscussions
+throughoutthisproject.
+References
+Jean-BaptisteAlayrac,JeffDonahue,PaulineLuc,AntoineMiech,IainBarr,YanaHasson,Karel
+Lenc,ArthurMensch,KatherineMillican,MalcolmReynolds,etal. Flamingo: avisuallanguage
+modelforfew-shotlearning. Advancesinneuralinformationprocessingsystems,35:23716–23736,
+2022.
+OmerBar-Tal,HilaChefer,OmerTov,CharlesHerrmann,RoniPaiss,ShiranZada,ArielEphrat,
+JunhwaHur, YuanzhenLi, TomerMichaeli, etal. Lumiere: Aspace-timediffusionmodelfor
+videogeneration. arXivpreprintarXiv:2401.12945,2024.
+RohanBavishi, ErichElsen, CurtisHawthorne, MaxwellNye, AugustusOdena, ArushiSomani,
+andSag˘nakTas¸ırlar. Introducingourmultimodalmodels,2023. URLhttps://www.adept.ai/
+blog/fuyu-8b.
+JamesBetker,GabrielGoh,LiJing,TimBrooks,JianfengWang,LinjieLi,LongOuyang,Juntang
+Zhuang,JoyceLee,YufeiGuo,WesamManassra,PrafullaDhariwal,CaseyChu,YunxinJiao,
+and Aditya Ramesh. Improving image generation with better captions, 2023. URL https:
+//api.semanticscholar.org/CorpusID:264403242.
+Yonatan Bisk, Rowan Zellers, Jianfeng Gao, Yejin Choi, et al. Piqa: Reasoning about physical
+commonsenseinnaturallanguage. InProceedingsoftheAAAIconferenceonartificialintelligence,
+pages7432–7439,2020.
+Chameleon Team. Chameleon: Mixed-modal early-fusion foundation models. arXiv preprint
+arXiv:2405.09818,2024.
+SoravitChangpinyo,PiyushSharma,NanDing,andRaduSoricut. Conceptual12m: Pushingweb-
+scaleimage-textpre-trainingtorecognizelong-tailvisualconcepts. CoRR,abs/2102.08981,2021.
+URLhttps://arxiv.org/abs/2102.08981.
+Xinlei Chen, Haoqi Fan, Ross Girshick, and Kaiming He. Improved baselines with momentum
+contrastivelearning. arXivpreprintarXiv:2003.04297,2020.
+ChristopherClark,KentonLee,Ming-WeiChang,TomKwiatkowski,MichaelCollins,andKristina
+Toutanova. Boolq: Exploringthesurprisingdifficultyofnaturalyes/noquestions. arXivpreprint
+arXiv:1905.10044,2019.
+14PeterClark,IsaacCowhey,OrenEtzioni,TusharKhot,AshishSabharwal,CarissaSchoenick,and
+OyvindTafjord. Thinkyouhavesolvedquestionanswering? tryarc,theai2reasoningchallenge.
+arXivpreprintarXiv:1803.05457,2018.
+XiaoliangDai,JiHou,Chih-YaoMa,SamTsai,JialiangWang,RuiWang,PeizhaoZhang,Simon
+Vandenhende, Xiaofang Wang, Abhimanyu Dubey, et al. Emu: Enhancing image generation
+modelsusingphotogenicneedlesinahaystack. arXivpreprintarXiv:2309.15807,2023.
+RunpeiDong,ChunruiHan,YuangPeng,ZekunQi,ZhengGe,JinrongYang,LiangZhao,Jianjian
+Sun,HongyuZhou,HaoranWei,etal. Dreamllm: Synergisticmultimodalcomprehensionand
+creation. arXivpreprintarXiv:2309.11499,2023.
+RunpeiDong,ChunruiHan,YuangPeng,ZekunQi,ZhengGe,JinrongYang,LiangZhao,Jianjian
+Sun,HongyuZhou,HaoranWei,etal. Dreamllm: Synergisticmultimodalcomprehensionand
+creation. InTheTwelfthInternationalConferenceonLearningRepresentations,2024.
+AbhimanyuDubey,AbhinavJauhri,AbhinavPandey,AbhishekKadian,AhmadAl-Dahle,Aiesha
+Letman,AkhilMathur,AlanSchelten,AmyYang,AngelaFan,AnirudhGoyal,AnthonyHartshorn,
+AoboYang,ArchiMitra,ArchieSravankumar,ArtemKorenev,ArthurHinsvark,ArunRao,Aston
+Zhang,AurelienRodriguez,AustenGregerson,AvaSpataru,BaptisteRoziere,BethanyBiron,
+BinhTang, BobbieChern, CharlotteCaucheteux, ChayaNayak, ChloeBi, ChrisMarra, Chris
+McConnell,ChristianKeller,ChristopheTouret,ChunyangWu,CorinneWong,CristianCanton
+Ferrer,CyrusNikolaidis,DamienAllonsius,DanielSong,DaniellePintz,DannyLivshits,David
+Esiobu,DhruvChoudhary,DhruvMahajan,DiegoGarcia-Olano,DiegoPerino,DieuwkeHupkes,
+Egor Lakomkin, Ehab AlBadawy, Elina Lobanova, Emily Dinan, Eric Michael Smith, Filip
+Radenovic,FrankZhang,GabrielSynnaeve,GabrielleLee,GeorgiaLewisAnderson,Graeme
+Nail,GregoireMialon,GuanPang,GuillemCucurell,HaileyNguyen,HannahKorevaar,HuXu,
+HugoTouvron,IliyanZarov,ImanolArrietaIbarra,IsabelKloumann,IshanMisra,IvanEvtimov,
+Jade Copet, Jaewon Lee, Jan Geffert, Jana Vranes, Jason Park, Jay Mahadeokar, Jeet Shah,
+JelmervanderLinde,JenniferBillock,JennyHong,JenyaLee,JeremyFu,JianfengChi,Jianyu
+Huang, Jiawen Liu, Jie Wang, Jiecao Yu, Joanna Bitton, Joe Spisak, Jongsoo Park, Joseph
+Rocca,JoshuaJohnstun,JoshuaSaxe,JuntengJia,KalyanVasudenAlwala,KartikeyaUpasani,
+Kate Plawiak, Ke Li, Kenneth Heafield, Kevin Stone, Khalid El-Arini, Krithika Iyer, Kshitiz
+Malik,KuenleyChiu,KunalBhalla,LaurenRantala-Yeary,LaurensvanderMaaten,Lawrence
+Chen,LiangTan,LizJenkins,LouisMartin,LovishMadaan,LuboMalo,LukasBlecher,Lukas
+Landzaat,LukedeOliveira,MadelineMuzzi,MaheshPasupuleti,MannatSingh,ManoharPaluri,
+MarcinKardas,MathewOldham,MathieuRita,MayaPavlova,MelanieKambadur,MikeLewis,
+MinSi,MiteshKumarSingh,MonaHassan,NamanGoyal,NarjesTorabi,NikolayBashlykov,
+NikolayBogoychev,NiladriChatterji,OlivierDuchenne,OnurÇelebi,PatrickAlrassy,Pengchuan
+Zhang,PengweiLi,PetarVasic,PeterWeng,PrajjwalBhargava,PratikDubal,PraveenKrishnan,
+Punit Singh Koura, Puxin Xu, Qing He, Qingxiao Dong, Ragavan Srinivasan, Raj Ganapathy,
+RamonCalderer,RicardoSilveiraCabral,RobertStojnic,RobertaRaileanu,RohitGirdhar,Rohit
+Patel,RomainSauvestre,RonniePolidoro,RoshanSumbaly,RossTaylor,RuanSilva,RuiHou,
+RuiWang,SagharHosseini,SahanaChennabasappa,SanjaySingh,SeanBell,SeohyunSonia
+Kim,SergeyEdunov,ShaoliangNie,SharanNarang,SharathRaparthy,ShengShen,ShengyeWan,
+ShrutiBhosale,ShunZhang,SimonVandenhende,SoumyaBatra,SpencerWhitman,StenSootla,
+StephaneCollot, SuchinGururangan, SydneyBorodinsky, TamarHerman, TaraFowler, Tarek
+Sheasha,ThomasGeorgiou,ThomasScialom,TobiasSpeckbacher,TodorMihaylov,TongXiao,
+UjjwalKarn, VedanujGoswami, VibhorGupta, VigneshRamanathan, ViktorKerkez, Vincent
+Gonguet,VirginieDo,VishVogeti,VladanPetrovic,WeiweiChu,WenhanXiong,WenyinFu,
+WhitneyMeers,XavierMartinet,XiaodongWang,XiaoqingEllenTan,XinfengXie,XuchaoJia,
+XueweiWang,YaelleGoldschlag,YasheshGaur,YasmineBabaei,YiWen,YiwenSong,Yuchen
+Zhang, Yue Li, Yuning Mao, Zacharie Delpierre Coudert, Zheng Yan, Zhengxing Chen, Zoe
+Papakipos,AadityaSingh,AaronGrattafiori,AbhaJain,AdamKelsey,AdamShajnfeld,Adithya
+Gangidi,AdolfoVictoria,AhuvaGoldstand,AjayMenon,AjaySharma,AlexBoesenberg,Alex
+Vaughan,AlexeiBaevski,AllieFeinstein,AmandaKallet,AmitSangani,AnamYunus,Andrei
+Lupu, Andres Alvarado, Andrew Caples, Andrew Gu, Andrew Ho, Andrew Poulton, Andrew
+Ryan, Ankit Ramchandani, Annie Franco, Aparajita Saraf, Arkabandhu Chowdhury, Ashley
+Gabriel,AshwinBharambe,AssafEisenman,AzadehYazdan,BeauJames,BenMaurer,Benjamin
+Leonhardi, Bernie Huang, Beth Loyd, Beto De Paola, Bhargavi Paranjape, Bing Liu, Bo Wu,
+15BoyuNi,BradenHancock,BramWasti,BrandonSpence,BraniStojkovic,BrianGamido,Britt
+Montalvo, Carl Parker, Carly Burton, Catalina Mejia, Changhan Wang, Changkyu Kim, Chao
+Zhou,ChesterHu,Ching-HsiangChu,ChrisCai,ChrisTindal,ChristophFeichtenhofer,Damon
+Civin,DanaBeaty,DanielKreymer,DanielLi,DannyWyatt,DavidAdkins,DavidXu,Davide
+Testuggine,DeliaDavid,DeviParikh,DianaLiskovich,DidemFoss,DingkangWang,DucLe,
+Dustin Holland, Edward Dowling, Eissa Jamil, Elaine Montgomery, Eleonora Presani, Emily
+Hahn,EmilyWood,ErikBrinkman,EstebanArcaute,EvanDunbar,EvanSmothers,FeiSun,Felix
+Kreuk,FengTian,FiratOzgenel,FrancescoCaggioni,FranciscoGuzmán,FrankKanayet,Frank
+Seide, Gabriela Medina Florez, Gabriella Schwarz, Gada Badeer, Georgia Swee, Gil Halpern,
+GovindThattai,GrantHerman,GrigorySizov,Guangyi,Zhang,GunaLakshminarayanan,Hamid
+Shojanazeri,HanZou,HannahWang,HanwenZha,HarounHabeeb,HarrisonRudolph,Helen
+Suk,HenryAspegren,HunterGoldman,IgorMolybog,IgorTufanov,Irina-ElenaVeliche,ItaiGat,
+JakeWeissman,JamesGeboski,JamesKohli,JaphetAsher,Jean-BaptisteGaya,JeffMarcus,Jeff
+Tang,JenniferChan,JennyZhen,JeremyReizenstein,JeremyTeboul,JessicaZhong,JianJin,
+JingyiYang,JoeCummings,JonCarvill,JonShepard,JonathanMcPhie,JonathanTorres,Josh
+Ginsburg,JunjieWang,KaiWu,KamHouU,KaranSaxena,KarthikPrasad,KartikayKhandelwal,
+Katayoun Zand, Kathy Matosich, Kaushik Veeraraghavan, Kelly Michelena, Keqian Li, Kun
+Huang, Kunal Chawla, Kushal Lakhotia, Kyle Huang, Lailin Chen, Lakshya Garg, Lavender
+A,LeandroSilva,LeeBell,LeiZhang,LiangpengGuo,LichengYu,LironMoshkovich,Luca
+Wehrstedt,MadianKhabsa,ManavAvalani,ManishBhatt,MariaTsimpoukelli,MartynasMankus,
+MatanHasson,MatthewLennie,MatthiasReso,MaximGroshev,MaximNaumov,MayaLathi,
+MeghanKeneally,MichaelL.Seltzer,MichalValko,MichelleRestrepo,MihirPatel,MikVyatskov,
+MikayelSamvelyan,MikeClark,MikeMacey,MikeWang,MiquelJubertHermoso,MoMetanat,
+Mohammad Rastegari, Munish Bansal, Nandhini Santhanam, Natascha Parks, Natasha White,
+NavyataBawa,NayanSinghal,NickEgebo,NicolasUsunier,NikolayPavlovichLaptev,Ning
+Dong,NingZhang,NormanCheng,OlegChernoguz,OliviaHart,OmkarSalpekar,OzlemKalinli,
+ParkinKent,ParthParekh,PaulSaab,PavanBalaji,PedroRittner,PhilipBontrager,PierreRoux,
+PiotrDollar,PolinaZvyagina,PrashantRatanchandani,PritishYuvraj,QianLiang,RachadAlao,
+Rachel Rodriguez, Rafi Ayub, Raghotham Murthy, Raghu Nayani, Rahul Mitra, Raymond Li,
+Rebekkah Hogan, Robin Battey, Rocky Wang, Rohan Maheswari, Russ Howes, Ruty Rinott,
+SaiJayeshBondu,SamyakDatta,SaraChugh,SaraHunt,SargunDhillon,SashaSidorov,Satadru
+Pan,SaurabhVerma,SeijiYamamoto,SharadhRamaswamy,ShaunLindsay,ShaunLindsay,Sheng
+Feng, Shenghao Lin, Shengxin Cindy Zha, Shiva Shankar, Shuqiang Zhang, Shuqiang Zhang,
+SinongWang,SnehaAgarwal,SojiSajuyigbe,SoumithChintala,StephanieMax,StephenChen,
+SteveKehoe,SteveSatterfield,SudarshanGovindaprasad,SumitGupta,SungminCho,Sunny
+Virk,SurajSubramanian,SyChoudhury,SydneyGoldman,TalRemez,TamarGlaser,Tamara
+Best,ThiloKohler,ThomasRobinson,TianheLi,TianjunZhang,TimMatthews,TimothyChou,
+TzookShaked,VarunVontimitta,VictoriaAjayi,VictoriaMontanez,VijaiMohan,VinaySatish
+Kumar,VishalMangla,VladIonescu,VladPoenaru,VladTiberiuMihailescu,VladimirIvanov,
+WeiLi,WenchenWang,WenwenJiang,WesBouaziz,WillConstable,XiaochengTang,Xiaofang
+Wang,XiaojianWu,XiaolanWang,XideXia,XilunWu,XinboGao,YanjunChen,YeHu,YeJia,
+YeQi,YendaLi,YilinZhang,YingZhang,YossiAdi,YoungjinNam,Yu,Wang,YuchenHao,
+YundiQian,YuziHe,ZachRait,ZacharyDeVito,ZefRosnbrick,ZhaoduoWen,ZhenyuYang,and
+ZhiweiZhao. Thellama3herdofmodels,2024. URLhttps://arxiv.org/abs/2407.21783.
+PatrickEsser,RobinRombach,andBjornOmmer. Tamingtransformersforhigh-resolutionimage
+synthesis. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpatternrecognition,
+pages12873–12883,2021.
+PatrickEsser,SumithKulal,AndreasBlattmann,RahimEntezari,JonasMüller,HarrySaini,Yam
+Levi,DominikLorenz,AxelSauer,FredericBoesel,etal. Scalingrectifiedflowtransformersfor
+high-resolutionimagesynthesis. InForty-firstInternationalConferenceonMachineLearning,
+2024a.
+PatrickEsser,SumithKulal,AndreasBlattmann,RahimEntezari,JonasMüller,HarrySaini,Yam
+Levi,DominikLorenz,AxelSauer,FredericBoesel,DustinPodell,TimDockhorn,ZionEnglish,
+KyleLacey,AlexGoodwin,YannikMarek,andRobinRombach. Scalingrectifiedflowtransform-
+ersforhigh-resolutionimagesynthesis,2024b. URLhttps://arxiv.org/abs/2403.03206.
+ItaiGat,TalRemez,NetaShaul,FelixKreuk,RickyTQChen,GabrielSynnaeve,YossiAdi,and
+YaronLipman. Discreteflowmatching. arXivpreprintarXiv:2407.15595,2024.
+16DhrubaGhosh,HannanehHajishirzi,andLudwigSchmidt. Geneval: Anobject-focusedframework
+forevaluatingtext-to-imagealignment. AdvancesinNeuralInformationProcessingSystems,36,
+2023.
+MartinHeusel,HubertRamsauer,ThomasUnterthiner,BernhardNessler,andSeppHochreiter. Gans
+trainedbyatwotime-scaleupdateruleconvergetoalocalnashequilibrium. Advancesinneural
+informationprocessingsystems,30,2017.
+JonathanHoandTimSalimans. Classifier-freediffusionguidance. arXivpreprintarXiv:2207.12598,
+2022.
+JonathanHo,AjayJain,andPieterAbbeel. Denoisingdiffusionprobabilisticmodels. Advancesin
+neuralinformationprocessingsystems,33:6840–6851,2020.
+Diederik P Kingma and Max Welling. Auto-encoding variational bayes. arXiv preprint
+arXiv:1312.6114,2013.
+JingYuKoh,DanielFried,andRussRSalakhutdinov. Generatingimageswithmultimodallanguage
+models. AdvancesinNeuralInformationProcessingSystems,36,2024.
+XiangLisaLi,JohnThickstun,IshaanGulrajani,PercyLiang,andTatsunoriHashimoto.Diffusion-lm
+improvescontrollabletextgeneration. ArXiv,abs/2205.14217,2022.
+Tsung-YiLin,MichaelMaire,SergeBelongie,JamesHays,PietroPerona,DevaRamanan,Piotr
+Dollár, and C Lawrence Zitnick. Microsoft coco: Common objects in context. In European
+conferenceoncomputervision,pages740–755.Springer,2014.
+YaronLipman,RickyTQChen,HeliBen-Hamu,MaximilianNickel,andMattLe. Flowmatching
+forgenerativemodeling. arXivpreprintarXiv:2210.02747,2022.
+HaotianLiu,ChunyuanLi,QingyangWu,andYongJaeLee. Visualinstructiontuning. Advancesin
+neuralinformationprocessingsystems,36,2024.
+ShilongLiu,HaoCheng,HaotianLiu,HaoZhang,FengLi,TianheRen,XueyanZou,JianweiYang,
+HangSu,JunZhu,etal. Llava-plus: Learningtousetoolsforcreatingmultimodalagents. arXiv
+preprintarXiv:2311.05437,2023.
+AlexanderQuinnNicholandPrafullaDhariwal. Improveddenoisingdiffusionprobabilisticmodels.
+InInternationalconferenceonmachinelearning,pages8162–8171.PMLR,2021.
+OpenAI,JoshAchiam,StevenAdler,SandhiniAgarwal,LamaAhmad,IlgeAkkaya,FlorenciaLeoni
+Aleman,DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,RedAvila,Igor
+Babuschkin,SuchirBalaji,ValerieBalcom,PaulBaltescu,HaimingBao,MohammadBavarian,
+JeffBelgum,IrwanBello,JakeBerdine,GabrielBernadett-Shapiro,ChristopherBerner,Lenny
+Bogdonoff,OlegBoiko,MadelaineBoyd,Anna-LuisaBrakman,GregBrockman,TimBrooks,
+MilesBrundage,KevinButton,TrevorCai,RosieCampbell,AndrewCann,BrittanyCarey,Chelsea
+Carlson,RoryCarmichael,BrookeChan,CheChang,FotisChantzis,DerekChen,SullyChen,
+RubyChen,JasonChen,MarkChen,BenChess,ChesterCho,CaseyChu,HyungWonChung,
+DaveCummings,JeremiahCurrier,YunxingDai,CoryDecareaux,ThomasDegry,NoahDeutsch,
+DamienDeville,ArkaDhar,DavidDohan,SteveDowling,SheilaDunning,AdrienEcoffet,Atty
+Eleti,TynaEloundou,DavidFarhi,LiamFedus,NikoFelix,SimónPosadaFishman,JustonForte,
+IsabellaFulford,LeoGao,ElieGeorges,ChristianGibson,VikGoel,TarunGogineni,Gabriel
+Goh,RaphaGontijo-Lopes,JonathanGordon,MorganGrafstein,ScottGray,RyanGreene,Joshua
+Gross,ShixiangShaneGu,YufeiGuo,ChrisHallacy,JesseHan,JeffHarris,YuchenHe,Mike
+Heaton,JohannesHeidecke,ChrisHesse,AlanHickey,WadeHickey,PeterHoeschele,Brandon
+Houghton,KennyHsu,ShengliHu,XinHu,JoostHuizinga,ShantanuJain,ShawnJain,Joanne
+Jang,AngelaJiang,RogerJiang,HaozhunJin,DennyJin,ShinoJomoto,BillieJonn,Heewoo
+Jun, Tomer Kaftan, Łukasz Kaiser, Ali Kamali, Ingmar Kanitscheider, Nitish Shirish Keskar,
+Tabarak Khan, Logan Kilpatrick, Jong Wook Kim, Christina Kim, Yongjik Kim, Jan Hendrik
+Kirchner,JamieKiros,MattKnight,DanielKokotajlo,ŁukaszKondraciuk,AndrewKondrich,
+ArisKonstantinidis,KyleKosic,GretchenKrueger,VishalKuo,MichaelLampe,IkaiLan,Teddy
+Lee, Jan Leike, Jade Leung, Daniel Levy, Chak Ming Li, Rachel Lim, Molly Lin, Stephanie
+Lin,MateuszLitwin,TheresaLopez,RyanLowe,PatriciaLue,AnnaMakanju,KimMalfacini,
+17SamManning,TodorMarkov,YanivMarkovski,BiancaMartin,KatieMayer,AndrewMayne,
+BobMcGrew,ScottMayerMcKinney,ChristineMcLeavey,PaulMcMillan,JakeMcNeil,David
+Medina,AalokMehta,JacobMenick,LukeMetz,AndreyMishchenko,PamelaMishkin,Vinnie
+Monaco, Evan Morikawa, Daniel Mossing, Tong Mu, Mira Murati, Oleg Murk, David Mély,
+AshvinNair,ReiichiroNakano,RajeevNayak,ArvindNeelakantan,RichardNgo,Hyeonwoo
+Noh,LongOuyang,CullenO’Keefe,JakubPachocki,AlexPaino,JoePalermo,AshleyPantuliano,
+GiambattistaParascandolo,JoelParish,EmyParparita,AlexPassos,MikhailPavlov,AndrewPeng,
+AdamPerelman,FilipedeAvilaBelbutePeres,MichaelPetrov,HenriquePondedeOliveiraPinto,
+Michael,Pokorny,MichellePokrass,VitchyrH.Pong,TollyPowell,AletheaPower,BorisPower,
+ElizabethProehl,RaulPuri,AlecRadford,JackRae,AdityaRamesh,CameronRaymond,Francis
+Real,KendraRimbach,CarlRoss,BobRotsted,HenriRoussez,NickRyder,MarioSaltarelli,Ted
+Sanders,ShibaniSanturkar,GirishSastry,HeatherSchmidt,DavidSchnurr,JohnSchulman,Daniel
+Selsam,KylaSheppard,TokiSherbakov,JessicaShieh,SarahShoker,PranavShyam,Szymon
+Sidor,EricSigler,MaddieSimens,JordanSitkin,KatarinaSlama,IanSohl,BenjaminSokolowsky,
+Yang Song, Natalie Staudacher, Felipe Petroski Such, Natalie Summers, Ilya Sutskever, Jie
+Tang,NikolasTezak,MadeleineB.Thompson,PhilTillet,AminTootoonchian,ElizabethTseng,
+Preston Tuggle, Nick Turley, Jerry Tworek, Juan Felipe Cerón Uribe, Andrea Vallone, Arun
+Vijayvergiya, Chelsea Voss, Carroll Wainwright, Justin Jay Wang, Alvin Wang, Ben Wang,
+JonathanWard,JasonWei,CJWeinmann,AkilaWelihinda,PeterWelinder,JiayiWeng,Lilian
+Weng,MattWiethoff,DaveWillner,ClemensWinter,SamuelWolrich,HannahWong,Lauren
+Workman,SherwinWu,JeffWu,MichaelWu,KaiXiao,TaoXu,SarahYoo,KevinYu,Qiming
+Yuan,WojciechZaremba,RowanZellers,ChongZhang,MarvinZhang,ShengjiaZhao,Tianhao
+Zheng, Juntang Zhuang, William Zhuk, and Barret Zoph. Gpt-4 technical report, 2024. URL
+https://arxiv.org/abs/2303.08774.
+Dustin Podell, Zion English, Kyle Lacey, Andreas Blattmann, Tim Dockhorn, Jonas Müller, Joe
+Penna,andRobinRombach. Sdxl: Improvinglatentdiffusionmodelsforhigh-resolutionimage
+synthesis. arXivpreprintarXiv:2307.01952,2023.
+AlecRadford, JongWookKim, ChrisHallacy, AdityaRamesh, GabrielGoh, SandhiniAgarwal,
+GirishSastry,AmandaAskell,PamelaMishkin,JackClark,etal. Learningtransferablevisual
+modelsfromnaturallanguagesupervision. arXivpreprintarXiv:2103.00020,2021.
+ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,Yanqi
+Zhou,WeiLi,andPeterJ.Liu. Exploringthelimitsoftransferlearningwithaunifiedtext-to-text
+transformer. CoRR,abs/1910.10683,2019. URLhttp://arxiv.org/abs/1910.10683.
+AdityaRamesh,MikhailPavlov,GabrielGoh,ScottGray,ChelseaVoss,AlecRadford,MarkChen,
+andIlyaSutskever. Zero-shottext-to-imagegeneration. InInternationalconferenceonmachine
+learning,pages8821–8831.Pmlr,2021.
+Aditya Ramesh, Prafulla Dhariwal, Alex Nichol, Casey Chu, and Mark Chen. Hierarchical text-
+conditional image generation with clip latents, 2022. URL https://arxiv.org/abs/2204.
+06125.
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-
+resolutionimagesynthesiswithlatentdiffusionmodels. InProceedingsoftheIEEE/CVFconfer-
+enceoncomputervisionandpatternrecognition,pages10684–10695,2022a.
+Robin Rombach, Andreas Blattmann, Dominik Lorenz, Patrick Esser, and Björn Ommer. High-
+resolutionimagesynthesiswithlatentdiffusionmodels. InProceedingsoftheIEEE/CVFconfer-
+enceoncomputervisionandpatternrecognition,pages10684–10695,2022b.
+ChitwanSaharia,WilliamChan,SaurabhSaxena,LalaLi,JayWhang,EmilyLDenton,Kamyar
+Ghasemipour,RaphaelGontijoLopes,BurcuKaragolAyan,TimSalimans,etal. Photorealistic
+text-to-imagediffusionmodelswithdeeplanguageunderstanding. Advancesinneuralinformation
+processingsystems,35:36479–36494,2022.
+Keisuke Sakaguchi, Ronan Le Bras, Chandra Bhagavatula, and Yejin Choi. Winogrande: An
+adversarial winograd schema challenge at scale. Communications of the ACM, 64(9):99–106,
+2021.
+18MaartenSap,HannahRashkin,DerekChen,RonanLeBras,andYejinChoi.Socialiqa:Commonsense
+reasoningaboutsocialinteractions. arXivpreprintarXiv:1904.09728,2019.
+NoamShazeer. Gluvariantsimprovetransformer. arXivpreprintarXiv:2002.05202,2020.
+ShellySheynin,AdamPolyak,UrielSinger,YuvalKirstain,AmitZohar,OronAshual,DeviParikh,
+andYanivTaigman. Emuedit: Preciseimageeditingviarecognitionandgenerationtasks. In
+ProceedingsoftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,pages
+8871–8879,2024.
+Stability AI. If by deepfloyd lab at stabilityai, 2024. URL https://stability.ai/news/
+deepfloyd-if-text-to-image-model.
+JianlinSu,MurtadhaAhmed,YuLu,ShengfengPan,WenBo,andYunfengLiu.Roformer:Enhanced
+transformerwithrotarypositionembedding. Neurocomputing,568:127063,2024.
+HugoTouvron,ThibautLavril,GautierIzacard,XavierMartinet,Marie-AnneLachaux,Timothée
+Lacroix, BaptisteRozière, NamanGoyal, EricHambro, FaisalAzhar, etal. Llama: Openand
+efficientfoundationlanguagemodels. arXivpreprintarXiv:2302.13971,2023a.
+HugoTouvron,LouisMartin,KevinStone,PeterAlbert,AmjadAlmahairi,YasmineBabaei,Nikolay
+Bashlykov,SoumyaBatra,PrajjwalBhargava,ShrutiBhosale,etal. Llama2: Openfoundation
+andfine-tunedchatmodels. arXivpreprintarXiv:2307.09288,2023b.
+AaronVanDenOord, OriolVinyals, etal. Neuraldiscreterepresentationlearning. Advancesin
+neuralinformationprocessingsystems,30,2017.
+Ramakrishna Vedantam, C Lawrence Zitnick, and Devi Parikh. Cider: Consensus-based image
+descriptionevaluation. InProceedingsoftheIEEEconferenceoncomputervisionandpattern
+recognition,pages4566–4575,2015.
+JiahuiYu,YuanzhongXu,JingYuKoh,ThangLuong,GunjanBaid,ZiruiWang,VijayVasudevan,
+Alexander Ku, et al. Scaling autoregressive models for content-rich text-to-image generation.
+arXivpreprintarXiv:2206.10789,2(3):5,2022.
+LiliYu,BowenShi,RamakanthPasunuru,BenjaminMuller,OlgaGolovneva,TianluWang,Arun
+Babu,BinhTang,BrianKarrer,ShellySheynin,etal. Scalingautoregressivemulti-modalmodels:
+Pretrainingandinstructiontuning. arXivpreprintarXiv:2309.02591,2023.
+RowanZellers,AriHoltzman,YonatanBisk,AliFarhadi,andYejinChoi. Hellaswag: Canamachine
+reallyfinishyoursentence? InProceedingsofthe57thAnnualMeetingoftheAssociationfor
+ComputationalLinguistics(ACL-2019).AssociationforComputationalLinguistics,2019.
+RichardZhang,PhillipIsola,AlexeiAEfros,EliShechtman,andOliverWang. Theunreasonable
+effectivenessofdeepfeaturesasaperceptualmetric. InProceedingsoftheIEEEconferenceon
+computervisionandpatternrecognition,pages586–595,2018.
+ChuntingZhou,PengfeiLiu,PuxinXu,SrinivasanIyer,JiaoSun,YuningMao,XuezheMa,Avia
+Efrat,PingYu,LiliYu,etal. Lima: Lessismoreforalignment. AdvancesinNeuralInformation
+ProcessingSystems,36,2024.
+19A AutoencoderDetails
+ThetrainingobjectiveforourVAEcloselyfollowsthatofEsseretal.[2021]:
+L =L +L +0.5L +0.2L +0.000001L
+VAE 1 LPIPS GAN ID KL
+where L is L1 loss in pixel space, L is perceptual loss based on LPIPS similarity Zhang
+1 LPIPS
+etal.[2018],L isapatch-baseddiscriminatorloss,L isaperceptuallossbasedoninternal
+GAN ID
+featuresoftheMocov2modelChenetal.[2020],andL isthestandardKL-regularizationtermto
+KL
+encourageencoderoutputstowardsanormaldistribution. WedelaythebeginningofGANtraining
+(i.e. includingtheadversariallossinthelossfunction)to50,000steps,inordertolettheVAEachieve
+sufficientlygoodreconstructionperformance. Weusealatentdimensionof8.
+The training objective for the VQ-GAN matches that of the VAE, with one notable exception:
+we replace the L loss with the standard codebook commitment loss L [Van Den Oord
+KL codebook
+etal.,2017],whichencouragesencoderoutputsandcodebookvectorstobeclosetogether. Weuse
+β =0.25,anduselossweighting1.0. ThefinallossfunctionfortheVQ-VAEistherefore:
+L =L +L +0.5L +0.2L +L
+VQ-VAE 1 LPIPS GAN ID codebook
+Thevectorquantizationlayerisappliedafterprojectingtheencoderoutputsto8-dimensionalspace.
+Outsideofthelossfunctionchangeandthequantizationlayer,thetrainingsetupfortheVAE(for
+Transfusion)andVQ-VAE(forChameleon)arethesame(e.g. sameamountoftrainingcompute,
+sametrainingdata,andsameencoder/decoderarchitecture).
+B Examples: ImageGeneration
+Figure7andFigure8showexamplesofimagesgeneratedfroma7BTransfusionmodeltrainedon
+2Tmulti-modaltokens(§4.4).
+C Examples: ImageEditing
+Figure9showrandomexamplesofimageeditingbyafine-tuned7BTransfusionmodel.
+20DowntownSeattleatsun- Acarmadeoutofvegeta- A sign that says “Diffu- A black basketball shoe
+rise.detailedinkwash. bles. sion". withalightningboltonit.
+anespressomachinethat Intricateorigamiofafox a yellow wall with two Acrabmadeofcheeseon
+makescoffeefromhuman andaunicorninasnowy framedsketches aplate.
+souls,high-contrastpaint- forest.
+ing.
+Asinglebeamoflighten- White Cycladic houses The saying “BE EX- darkhighcontrastrender
+tertheroomfromtheceil- withblueaccentsandvi- CELLENT TO EACH of a psychedelic tree of
+ing. Thebeamoflightis brantmagentabougainvil- OTHER" written in a lifeilluminatingdustina
+illuminatinganeasel.On lea in a serene Greek is- stainedglasswindow. mysticalcave.
+theeaselthereisaRem- landsetting.
+brandt painting of a rac-
+coon.
+Aphotoofapersonwith Photoofalychee-inspired Anoldrustedrobotwear- Filmstillofalong-legged
+theheadofacow, wear- spherical chair, with a ingpantsandajacketrid- cutebig-eyeanthropomor-
+ing a tuxedo and black bumpywhiteexteriorand ingskisinasupermarket. phic cheeseburger wear-
+bowtie. Beachwallpaper plushinterior,setagainst ingsneakersrelaxingon
+inthebackground. atropicalwallpaper. the couch in a sparsely
+decoratedlivingroom.
+Figure7: Generatedimagesfroma7BTransfusiontrainedon2Tmulti-modaltokens.
+21Awomanonabedunder- Asmallbluebooksitting Ahorsereadingabook. Alightbulbcontaininga
+neathablanket. onalargeredbook. sailboatfloatsthroughthe
+galaxy.
+amonarchbutterfly. Arowboatonalakewith Anexpressiveoilpainting An angry duck doing
+abikeonit. ofachocolatechipcookie heavyweightliftingatthe
+beingdippedinaglassof gym.
+milk, depicted as an ex-
+plosionofflavors.
+Anemojiofababypanda A tranquil, anime-style amassivealienspaceship graffitiofafunnydogon
+wearing a red hat, green koi pond in a serene thatisshapedlikeapret- astreetwall.
+gloves, red shirt, and Japanese garden, featur- zel.
+greenpants. ing blossoming cherry
+trees.
+Aspacious,sereneroom A raccoon wearing cow- A relaxed garlic with a photoofabearwearinga
+influenced by modern boyhatandblackleather blindfoldreadinganews- suitandtophatinariver
+Japanese aesthetics with jacketisbehindtheback- paperwhilefloatingina inthemiddleofaforest
+aviewofacityscapeout- yard window. Rain pooloftomatosoup. holdingasignthatsays“I
+sideofthewindow. dropletsonthewindow. cantbearit".
+Figure8: Generatedimagesfroma7BTransfusiontrainedon2Tmulti-modaltokens.
+22Changetheclosestkeyboardtobeallblack. Change the graffiti on the truck into calligraphy
+writing.
+Canwehavemountainsonthebackground? Replacetheairplanewithablackhawkhelicopter.
+Addabluerugtothefloor. Deletetheoverheadlightsontopofthesink.
+Changetherollofthreadintoarollofwire. Changethebaseballbattoallbrown.
+Figure9: Editedimagesfromafine-tuned7BTransfusionmodel.
+23

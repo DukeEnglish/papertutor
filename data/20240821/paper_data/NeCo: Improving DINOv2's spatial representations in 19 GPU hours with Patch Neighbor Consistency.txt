@@ -1,0 +1,961 @@
+NeCo : Improving DINOv2’s spatial representations
+in 19 GPU hours with Patch Neighbor Consistency
+ValentinosPariza1*,MohammadrezaSalehi1*,
+GertjanBurghouts2,FrancescoLocatello3,YukiM.Asano1
+1UniversityofAmsterdam,2TNO,3InstituteofScienceandTechnologyAustria
+*equalcontribution
+valentinos.pariza@student.uva.nl,s.salehidehnavi@uva.nl
+Abstract
+Weproposesortingpatchrepresentationsacrossviewsasanovelself-supervised
+learningsignaltoimprovepretrainedrepresentations. Tothisend,weintroduce
+NeCo: Patch Neighbor Consistency, a novel training loss that enforces patch-
+levelnearestneighborconsistencyacrossastudentandteachermodel,relativeto
+referencebatches. Ourmethodleveragesadifferentiablesortingmethodapplied
+ontopofpretrainedrepresentations,suchasDINOv2-registerstobootstrapthe
+learningsignalandfurtherimproveuponthem. Thisdensepost-pretrainingleads
+tosuperiorperformanceacrossvariousmodelsanddatasets,despiterequiringonly
+19hoursonasingleGPU.Wedemonstratethatthismethodgenerateshigh-quality
+dense feature encoders and establish several new state-of-the-art results: +5.5
+% and + 6% for non-parametric in-context semantic segmentation on ADE20k
+andPascalVOC,and+7.2%and+5.7%forlinearsegmentationevaluationson
+COCO-Thingsand-Stuff.
+1 Introduction
+Denseself-supervisedlearningtrainsfeatureextractorstoproducerepresentationsforeverypixel
+orpatchofanimagewithoutsupervision. Thisfieldhasseensubstantialadvancementsinrecent
+years,notablyimprovingunsupervisedsemanticsegmentation[1–5],object-centricrepresentation
+learning[6],andotherdensedownstreamtaskslikeobjecttrackingandobjectdetection[7–9,2].
+Oneparticularlyinterestinguse-caseofdenselypretrainedencoderswasdevelopedbyBalazevicet.
+al.[10]. Theyproposetosolvesemanticsegmentationbyposingitasanearest-neighborretrieval
+problemutilizingthefeaturesofthespatialpatches. Thisnon-parametricmethodnotonlymirrorsin-
+contextlearninginlargelanguagemodels(LLMs)[11]butalsodeliversrapidandrobustperformance,
+especiallywithlimiteddata.
+Inspiredbythisidea,weturnthisevaluationapproachonitsheadandproposetousenearest-neighbor
+retrievalasatrainingmechanismforencoders. Byintegratingnearest-neighborrelationshipsinto
+thetrainingphase,weaimtotrainmodelsthatcannaturallyclusteranddistinguishintricatevisual
+similarities. Thismethodpromisestoyieldmodelswithdeeplysemanticspatialfeaturesspecifically
+tailored for in-context tasks, enhancing their adaptability and robustness. This approach, while
+promising,presentstwomainchallenges.
+Thefirstisthesourceofsupervision. Inthecaseofevaluation, ground-truthlabelsareused, yet
+weareinterestedinobtainingbetterself-supervisedrepresentations. Whilepreviousworks[10,9]
+addressthisbyessentiallyconvertingdenselearningtoimage-levellearningvialearnablepoolingof
+patches,weofferamorepracticalandversatilesolution. Wesimplystartfromalreadyimage-level
+pretrainedmodelsandadaptthemfurther. Wetermthisstagedensepost-pretraininganddemonstrate
+Preprint.Underreview.
+4202
+guA
+02
+]VC.sc[
+1v45011.8042:viXrathatitisaneffectiveandfastsolutiontothisproblem, takingonly19hoursonasingleGPUfor
+tuningforaViT-S/16model.
+The second challenge is the discrete nature of nearest-neighbor retrieval, which does not yield
+gradients. Toovercomethis,weapplyadifferentiablesortingmethod[12],originallyproposedfor
+rankingsupervision,thatwecanusetobackpropagategradients. Aswedemonstrateempirically,this
+resultsinamoreefficientandeffectivealgorithm.
+Our method enforces Patch Neighbor Consistency, so we term it NeCo. We show that it can be
+applied on top of image-level pretrained models such as DINO [13], and densely trained ones
+like iBOT [14], Leopart [1], CrIBO [9] and DINOv2 [15, 16] to obtain superior features for in-
+context scene understanding. Despite not being as close to our NeCo training task, our method
+alsoconsistentlyimprovesondownstreambenchmarkssuchasunsupervisedsemanticandlinear
+segmentation.
+Overall,ourcontributionscanbesummarizedasfollows:
+• We propose a new post-pretraining adaptation that applies a dense, patch-sorting-based
+self-supervisedobjective,NeCo,applicabletoanypretrainedVisionTransformer
+• WedemonstrateNeCo’sutilitybyapplyingittosixdifferentbackbonesandevaluatingiton
+fourdatasetsandfourevaluationprotocols,achievingperformancegainsfrom6%to16%.
+• Wesetseveralnewstate-of-the-artperformances,forexampleonthein-contextsegmentation
+benchmarkof[10],weoutperformthepreviousmethodssuchasCrIboandDINOv2on
+PascalVOCandADE20kby4%to13%acrossdifferentmetrics.
+2 RelatedWorks
+DenseSelf-supervisedLearning. Denseself-supervisedlearningmethodsaimtogeneratecat-
+egorizable representations at the pixel or patch level, rather than the image level. This field has
+gainedsignificantattention[2,1,3,4,9,10,17,18,8,19,8,7]duetotheobservationthatimage-
+levelself-supervisedmethods[20–28,15,13,29–34]donotnecessarilyproduceexpressivedense
+representations[10,8,35,36].
+CroC[4]isarecentmethodthathasproposedadenseself-supervisedlosstoaddresstheissue. It
+appliesjointclusteringbetweendifferentviews, ensuringthatclustercenterscapturingthesame
+objectaresimilar. Leopart[1]improvesdenserepresentationsbyapplyingadenseclusteringloss
+to pretrained models. Extending this concept, Timetuning [2] has demonstrated that finetuning
+pretrainedbackbonesoverthetemporaldimensionofunlabeledvideosenhancesdensereasoning
+capabilities. Recently,Hummingbird[10]hasproposedadenselossthatleveragesattentionwithin
+andacrossimagesduringtraining,showingstrongin-contextsceneunderstandingduringevaluation.
+CrIBo[9]takesthisfurtherbyexplicitlyenforcingcross-imagenearestneighborconsistencybetween
+imageobjects,achievingstate-of-the-artresults.
+We similarly adopt nearest neighbor consistency due to its promising results in in-context scene
+understandingbutwithtwomajordifferences: (1)insteadofusingpooledversionsofpatchesat
+either the image or object level, we directly apply it to patch features; (2) in addition to nearest
+neighborconsistency,weensurethattheorderofneighborsforthesamepatchesfromdifferentviews
+issimilar. Thesechangesresultinmoresemanticpatch-levelfeatures,directlyenhancingin-context
+sceneunderstandingandstabilizingtraining,asthereisnoneedtoinferobject-levelfeaturesthrough
+clusteringmethods,whichcanbeunstableduringtraining.
+UnsupervisedObjectSegmentation. Severalworksspecificallytargetunsupervisedobjectsegmen-
+tation[37–40,6,41–44]. Thegoaloftheseworksisnottolearnsemanticpatch-levelrepresentations;
+instead,theyoftenutilizetheexistinginformationinfrozenpretrainedbackbonesandtrainanother
+modeltoexplicitlysolvesemanticsegmentation. Forinstance,Seitzeretal.[37]trainaslot-attention
+encoderanddecodermodule[45]toreconstructDINO[13]pretrainedfeatureswithafewslotsfor
+eachinputimage. Thisprocessenablesthecreationofper-imageobjectclustermaps,whereeach
+slotrepresentsadistinctobjectorpartofanobjectwithintheimage,basedonthefeaturesitpredicts.
+Incontrast,ourapproachlearnsdistinctfeaturesforvariousobjectsandemploysdenserepresentations
+asintermediariesfordensetaskslikesemanticsegmentation. Thesefeaturescanthenbeusedto
+developper-datasetclustermapsforsemanticsegmentationusecases.
+2Teacher
+ROI Align
+Encoder
+Differentiable …
+Sorting
+EMA Forcing consistent
+… neighbor ordering
+Batch Images
+Student
+ROI Align …
+Encoder
+Differentiable
+Sorting
+Figure1: NeCo overview. GivenaninputimageI,twoaugmentationsτ andτ areappliedtocreate
+1 2
+twodifferentviews,whichareprocessedbytheteacherandstudentencoders,ϕ andϕ respectively.
+t s
+TheteacherencoderisupdatedusingExponentialMovingAverage(EMA).Theencodedfeaturesare
+thenalignedusingROIAlignandcomparedwithreferencefeaturesF obtainedbyapplyingϕ to
+r s
+otherbatchimages. Next,pairwisedistancesD betweenF andF ,aswellasbetweenF andF ,
+ij s r t r
+arecomputedusingcosinesimilarity. Thesedistancesarethensortedusingdifferentiablesortingand
+utilizedtoforcenearestorderconsistencyacrosstheviewsthroughtheNeColoss.
+3 PatchNeighborConsistency
+Thegoalistodevelopafeaturespaceinwhich, foragiveninput, patchesrepresentingthesame
+objectexhibitsimilarfeatures,whereaspatchesrepresentingdifferentobjectsshowdistinctfeatures.
+Akeychallengeforaself-supervisedmethodinthisprocessisdefiningthesimilaritybetweenimage
+patches. Althoughpatchesfromthesameobject(e.g. acat)areexpectedtobemoresimilartoeach
+otherthantothosefromdifferentobjects(e.g. adog),theymaystilldepictdifferentpartsoftheobject
+(e.g. acat’stailandlegs). Bothpart-andwhole-objectrepresentationshaveimportantapplications.
+Therefore,togenerateafeaturespacethatcanreliablyrepresentboth,merelyestablishingasingle
+clusteringperobjectisnotenough. Instead,thisrequiresaccuratelyorderingsimilarities,suchthat
+patchesrepresentingthesameobjectanditspartsaremoresimilartooneanotherandlesstothoseof
+otherobjects. Tothisend,ourmethodworksbyextractingdensefeaturesoftheinputs,findingtheir
+pair-wisedistances,andforcingaconsistencybetweentheorderofnearestneighborswithinabatch
+acrosstwoviews. Figure1providesanoverviewofthemethod,whichwedescribeindetailbelow.
+Feature Extraction and Alignment. Given an input image I, two augmentations specified by
+parameters τ and τ are applied to create two different views V and V . These views are then
+1 2 1 2
+dividedintoN =⌊H⌋×⌊W⌋separatepatches,whereH andW representtheheightandwidthof
+P P
+theinputimage,andP representsthepatchsize. ThepatchesarerepresentedasVp =(cid:2) v1,...,v1 (cid:3)
+1 1 N
+andVp =(cid:2) v2,...,v2 (cid:3) ,whicharefedtothefeatureextractor.
+2 1 N
+WeutilizetheVisionTransformer(ViT)architecture[46]asthebackboneandemployateacher-
+studentframework,wherethestudentandteachermodelsaredenotedbyϕ andϕ ,respectively.
+s t
+Theteacher’sweightsareupdatedusingtheexponentialmovingaverageofthestudent’sweights.
+Asthegeneratedviewscoverdifferentpartsoftheinput,theextractedfeaturesdonotnecessarily
+correspondtothesameobjects. Toaddressthis,wealignthefeaturesbyapplyingROI-Align[47],
+adjustedaccordingtothecropaugmentationparameters. Thisprocesscreatesspatiallyaligneddense
+featuresfortheteacherandstudentnetworks,representedbyF ∈RN′×dandF ∈RN′×d. These
+s t
+featuresarethenforcedtomaintainaconsistentorderofnearestneighbors,ensuringmorerobustand
+meaningfulfeaturerepresentations,asexplainednext.
+PairwiseDistanceComputation. Toidentifythenearestneighborsofthepatches,itisnecessary
+toextractfeaturesfromotherimagesinthebatchandcomputetheirdistanceswithrespecttoF
+s
+and F . To achieve this, all batch images are fed through the student network, ϕ , to obtain the
+t s
+batchfeaturesF ∈ RBN×d. Wesamplearandomfractionf ≪ 1ofthesepatchestoobtainthe
+B
+R=fBN referencepatchesF ∈Rr×dwhichweusetocomparethenearestneighborsofourF
+r s
+3
+…andF features. Tothisend,wecomputedistancesbasedoncosinesimilarities,
+t
+⟨Fi,Fj⟩
+D (i,j)=1− s r , (1)
+s ∥Fi∥∥Fj∥
+s r
+⟨Fi,Fj⟩
+D (i,j)=1− t r , (2)
+t ∥Fi∥∥Fj∥
+t r
+i∈(1,...,N′), j ∈(1,...,R), (3)
+Next,thesedistancematricesaresortedinadifferentiablemannertoproducealossthatenforcesa
+similarsortingacrossthetwoviews.
+DifferentiableSortingofDistances. Todeterminetheorderofnearestneighborsfromdistance
+matrices,sortingisnecessary. However,traditionalsortingalgorithmscannotpropagategradients
+becausetheyusenon-differentiableoperationssuchasd′ ← min(d ,d )andd′ ← max(d ,d )
+i a b a a b
+to facilitate element swapping in the sequence for an ordering a < b. Given a sequence s =
+(cid:0) (cid:1)
+d ,...,d ,whereRisthelengthofthesequence,Weuserelaxed,differentiableversionsofthese
+1 R
+operationsbydefiningtheirsoftversionsfollowingrecentwork[17],asfollows:
+d′ =softmin(d ,d ):=d f(d −d )+d f(d −d ), (4)
+a a b a b a b a b
+d′ =softmax(d ,d ):=d f(d −d )+d f(d −d ), (5)
+b a b a a b b b a
+(6)
+wherethefunctionf(x) = 1(arctan(βx)+0.5),andβ > 0isaninversetemperatureparameter,
+2
+specifyingthesteepnessoftheoperator. Thisfunctionissigmoid-shapedandcenteredaroundx=0.
+Asβ approachesinfinity,therelaxationconvergestothediscreteswapoperation. Thisoperation
+canbedefinedinanapproximatepermutationmatrixP (d ,d )∈RL×L,whichisessentiallyan
+swap i j
+identitymatrixexceptfortheentriesP ,P ,P ,andP definedas
+ii ij ji jj
+P =P =f(d −d ), P =P =f(d −d ), (7)
+ii jj j i ij ji i j
+suchthatonestepofswappingthepair(d ,d )inthesequenceisequivalenttomultiplyingP with
+i j
+thatsequence. Thefinalpermutationmatrixfortheentiresequenceisdeterminedbythesorting
+algorithmemployed. Forexample,intheodd-evensortingalgorithm,thepermutationmatrixP fora
+t
+steptisdefinedas:
+(cid:89)
+P = P (d ,d ), (8)
+t swap i i+1
+i∈M
+whereM isthesetofoddindicesiftisoddandthesetofevenindicesiftiseven. Theoverall
+permutation matrix Q is obtained by multiplying the permutation matrices from all steps of the
+sortingalgorithm,Q=(cid:81)L
+P .Asshownby[12],L=Rofsuchstepsaresufficientforefficient
+t=1 t
+sorting. Inthediscretecase,foreachcolumni,thepermutationmatrixhasexactlyoneentryof1,
+indicatingthesequenceelementthatshouldbeplacedinthei-thcolumn. Intherelaxedversion,
+columnvaluesrepresentadistributionoverpossiblesequenceelements. Inourcase,arowiofthe
+distancematrixD showsthedistanceofthei-thstudentfeaturetoallthereferencefeatures.
+s
+With its sorting matrix Q , the (r,k) element of this matrix can be viewed as the probability of
+i
+a reference feature r being the k-th nearest neighbor for the i-th feature. Hence, to maintain the
+orderofnearestneighborsforeveryROI-alignedpatchfeature, wecomputeQ foreveryrowof
+i
+D and D and force these to be similar. This results in final matrices Qs =[Qs,...,Qs ] and
+s t 1 N′
+Qt =[Qt,...,Qt ],whichareusedinthetrainingloss.
+1 N′
+TrainingLoss. Aftercomputingpermutationmatrices,weenforcesimilarityontheorderofnearest
+neighbors for each of the aligned patch features using the cross-entropy loss. The loss for the
+permutationmatrixofpatchiisdefinedas:
+4(cid:88)
+L (Qt,Qs)=− Qt(j,k)log(Qs(j,k)),
+CE i i i i
+j,k
+Toensurerobustnearestneighborconsistency,wecomputethecross-entropylossinbothdirections
+andsumthelosses. Thefinaltrainingloss,incorporatingbothdirections,forallthepatchesis:
+N′
+(cid:88)
+L = L (Qt,Qs)+L (Qs,Qt)
+NeCo CE i i CE i i
+i=1
+Thisensures,inadifferentiablemanner,thattheorderofnearestneighborsisconsistentbetweenthe
+studentandteacherfeaturesinbothdirections.
+4 Experiments
+4.1 Setup
+BenchmarkedMethods. Wecompareourmethodagainststate-of-the-artdenseself-supervised
+learningmethods,includingCrIBo[9],Hummingbird[10],TimeT[2],andLeopart[1]. Toprovidea
+morecomprehensiveevaluation,WealsoincludetheperformanceofDINOv2enhancedwithregisters,
+referred to as DINOv2R [15, 16], as it has demonstrated strong dense capabilities. Additionally,
+webenchmarkourmethodagainstleadingunsupervisedsemanticsegmentationapproachessuchas
+COMUS[44].
+Training. WerunourexperimentsonViT-SmallandViT-Basewithapatchsizeof14. Westart
+fromvariouspretrainedbackbones, anduseDINOv2withregisters’unlessotherwisenoted. We
+post-pretrainthesemodelsfor25COCOepochsonasingleNVIDIARTXA6000-46GBGPU,taking
+around19hours. Forothertrainingdetails,wereferreaderstotheAppendixA.
+Evaluation. Inallourevaluations,wediscardtheprojectionhead,followingpreviousworks[13,1,
+2],anddirectlyusethespatialtokensfromtheVisionTransformerbackbone.Scoresinallexperiments
+arereportedasmeanintersectionoverunion(mIoU).Weconductfourtypesofevaluations: linear
+segmentationfine-tuningwitha1×1convolution, end-to-endsegmentationwiththeSegmenter
+head[48],clusteringandoverclusteringsemanticsegmentation[1,2],anddensenearestneighbor
+retrieval[10]. Forclusteringandoverclustering,weapplyK-Meanstospatialtokens,settingK to
+thenumberofgroundtruthobjectsandtohighvalueslike300and500,aspreviouslyused[1,2]. We
+thenextractobjectclustermapsandmatchthemusingHungarianmatching[49]. Fordensenearest
+neighborretrieval,wefollowtheprotocolfrom[10],implementedin[50].
+Datasets. We train our model on ImageNet-100 [51], Pascal VOC12 [52], and COCO [53] for
+ablationsanduseCOCOasourprimarytrainingdatasetforallstate-of-the-artcomparisons. For
+evaluations,weusethevalidationsetsofPascalVOC12[52],COCO[53],ADE20k[54],andPascal
+Context[55]. ForfinetuningandfeaturetransferabilityevaluationsonCOCO[56],wetrainusinga
+10%splitofthetrainingset,whileweusethefulltrainingsplitsoftheotherdatasets.
+4.2 ComparisontoState-of-the-Art
+In this section, we first compare the quality of frozen features learned through NeCo with state-
+of-the-artmethodsinin-contextlearningvianearestneighborretrievalandunsupervisedsemantic
+segmentation tasks. Next, we demonstrate that NeCo’s versatility by applying it to five different
+pretrainingmodelsandshowitimprovestheirdensefeaturesconsistently. Finally,weevaluatethe
+transferabilityofourlearneddenserepresentationstootherdatasetsbyusinglinearheadsemantic
+segmentationandend-to-endfine-tuningwithSegmentor[48].
+VisualIn-ContextLearningEvaluation. Wecompareourapproachtoarecentlyproposedbench-
+mark[10]thatevaluatesin-contextreasoninginvisionmodels. Unliketraditionallinearsegmentation
+methods, this evaluation does not require fine-tuning or end-to-end training. Instead, it creates
+validationsegmentationmapsbymatchingpatch-level,feature-wisenearestneighborsimilarities
+betweenvalidationimages(queries)andtrainingsamples(keys). Thismethod, inspiredbyNLP
+5Figure2: In-contextsceneunderstandingbenchmark. Densenearestneighborretrievalperfor-
+mance is reported across various training data proportions on two scene-centric datasets, Pascal
+VOCandADE20k. TheretrievedclustermapsarecomparedwiththegroundtruthusingHungarian
+matching[57],andtheirmIoUscoreisreported.Forallmodels,ViT-S16isusedexceptforDINOv2R
+andNeCo,whereitisViT-S14. Forfulltables,refertoAppendixB.3
+Table1:Frozenclustering-basedevaluations.(a)WeevaluatethemodelsbyrunningK-meanswith
+variousclusteringgranularitiesK onthespatialfeaturesontwodatasets. Theresultingclustermaps
+arematchedtotheground-truthbyHungarianmatching,andtheintersectionisreportedinmIoU.
+(b)Followingpreviousworks[1,2],wepost-processtheresultingmapsandreportunsupervised
+semanticsegmentationonPascalVOC.BothtablesuseViT-Swiththepatchsizeof16,exceptfor
+DINOv2andNeCo,whereitis14.
+(a)Clustering (b)Semanticsegmentation
+PascalVOC COCO-Things Method mIoU
+Method K=GT K=300 K=500 K=GT K=300 K=500
+MaskConstrast[19] 35.1
+DINO[13] 4.3 13.9 17.3 5.4 18.8 19.2 DINOv2R[15] 35.1
+iBOT[14] 4.4 23.8 31.1 7.6 26.6 28.0 DeepSpectral[58] 37.2
+CrOC[4] 3.4 16.4 20.0 4.9 14.7 18.1
+DINOSAUR[37] 37.2
+TimeT[2] 12.2 43.6 46.2 17.5 42.7 44.6
+DINOv2R[15] 12.2 46.7 49.5 12.3 38.9 41.2 Leopart[1] 41.7
+CrIBo[9] 18.3 51.3 54.5 14.5 46.0 48.3 COMUS[44] 50.0
+NeCo 17.8 69.4 72.6 18.2 61.2 64.5 NeCo 55.1
+strategies,testshowwellmodelslearntasksfromafewexamples. TheresultsarepresentedinFig-
+ure2. Asshown, NeCooutperformspriorstate-of-the-artmethodssuchasCrIBoandDINOv2R
+by 4% to 13% on Pascal and ADE20k across different fractions. The performance gap between
+NeCoandothersincreases,particularlyinthedata-efficiencyregime. Thisimprovementisduetoour
+method’sexplicitenforcementofpatch-levelnearestneighborconsistency,resultinginhigher-quality
+patch-levelrepresentationsthatremaineffectiveevenwithfewerimages. Incontrast,othermethods
+thatpromoteimage-level[10]orobject-level[9]consistencyforceconsistencybetweenapooled
+vectorofpatches,potentiallyleadingtoinadequatesemanticpatch-levelrepresentations,particularly
+in smaller datasets. Our method’s ability to perform well with few images brings vision models
+onestepclosertoin-contextlearningstylegeneralistreasoning. Forcompletetablesanddetailson
+scalingtheresultstolargermodels,pleaserefertoAppendixB.3. Forvisualizationspleasereferto
+AppendixC.
+FrozenClustering-basedEvaluations. Next,weevaluatetherepresentationqualityofourlearned
+dense features across different objects in each dataset. Ideally, we expect that all patch features
+belongingtothesameobject,whenclustered,willbeassignedtothesamecluster. Ifthelearned
+representationsaremorefine-grained,suchaslearningobjectpartsinsteadofwholeobjects(e.g.,
+handsorfacesinsteadofaperson),theyshouldconsistentlycoverthesamepartacrosstheentire
+dataset. Tomeasurethis,weextractdensefeaturesfromallimagesandapplyK-meansclustering
+6Table2: Linearsegmentationperformance. Alinearsegmentationheadistrainedontopofthe
+frozenspatialfeaturesobtainedfromdifferentfeatureextractors. WereportthemIoUscoresachieved
+onthevalidationsetsof4differentdatasets.
+Method Backbone Params COCO-Things COCO-Stuff PascalVOC ADE20K
+DINO ViT-S/16 21M 43.9 45.9 50.2 17.5
+TimeT ViT-S/16 21M 58.2 48.7 66.3 20.7
+iBOT ViT-S/16 21M 58.9 51.5 66.1 21.8
+CrOC ViT-S/16 21M 64.3 51.2 67.4 23.1
+CrlBo ViT-S/16 21M 64.3 49.1 71.6 22.7
+DINOv2R ViT-S/14 21M 75.3 56.0 74.2 35.0
+NeCo ViT-S/14 21M 82.3 62.0 81.3 40.1
+DINO ViT-B/16 85M 55.8 51.2 62.7 23.6
+MAE ViT-B/16 85M 38.0 38.6 32.9 5.8
+iBOT ViT-B/16 85M 69.4 55.9 73.1 30.1
+CrIBo ViT-B/16 85M 69.6 53.0 73.9 25.7
+DINOv2R ViT-B/14 85M 78.3 57.6 79.8 40.3
+NeCo ViT-B/14 85M 85.5 63.3 83.3 44.9
+Table3: NeCostartingfromdifferentpretrainings. Wereportfrozenclusteringandlinearseg-
+mentationonPascalVOCandCOCO-Things. NeCocanconsiderablyboost(↑)theperformanceof
+modelswithdifferentinitialization,showingourapproach’sgenerality. ThebackboneisViT-S16.
+PascalVOC COCO-Things
+AtInit +NeCo AtInit +NeCo
+Pretrain K=GT K=500 Lin. K=GT K=500 Lin. K=21 K=500 Lin. K=21 K=500 Lin.
+iBOT[14] 4.4 31.1 66.1 15.4↑11.0 51.2↑20.1 68.6↑2.5 7.6 28.0 58.9 20.4↑12.8 52.8↑24.8 67.7↑8.8
+DINO[13] 4.3 17.3 50.2 14.5↑10.2 47.9↑30.6 61.3↑11.1 5.4 19.2 43.9 16.9↑11.5 50.0↑30.8 62.4↑18.5
+TimeT[2] 12.2 46.2 66.3 17.9↑5.7 52.1↑5.9 68.5↑2.2 18.4 44.6 58.2 20.6↑2.2 54.3↑9.7 64.8↑6.6
+Leopart[1] 15.4 51.2 66.5 21.0↑5.6 55.3↑4.1 68.3↑1.8 14.8 53.2 63.0 18.8↑4.0 53.9↑0.7 65.4↑2.4
+CrIBo[9] 18.3 54.5 71.6 21.7↑3.4 59.6↑5.1 72.1↑0.5 14.5 48.3 64.3 21.1↑6.6 54.0↑5.7 68.0↑3.7
+withvariousK valuestocreateclustermapsforeachimage. Theseclustermapsarethenmatched
+with the ground truth using Hungarian matching [49], and their mIoU is reported. For the first
+scenario,K matchesthenumberofgroundtruthobjects. Additionally,toaccountforthesecond
+scenario,wealsoreportperformanceinoverclusteringsetups.
+TheresultsinTable1ashowthatNeCopassesstate-of-the-artbyCrIBoby14.5%onaverageacross
+various datasets and metrics. Note that this gain is not due to the DINOv2R initialization, as it
+performs4%lowerthanCrIBoonaverage. InTable1b,wereportclusteringperformancewhenK
+matchesthenumberofgroundtruthobjects,withclusteringappliedsolelytoforegroundpatches
+extractedbymethodsusedin[1,2]. Weoutperformothermethodsbyatleast5.1%withoutrelying
+onself-training,whichrequirestrainingaseparatesegmentationhead,asusedinCOMUS.
+LinearSemanticSegmentationEvaluation. Inthisexperiment,wekeepthepretrainedbackbone
+frozenandtrainalinearlayerontopofthespatialfeaturestosolveasupervisedsemanticsegmentation
+task. Bilinearinterpolationisusedtomatchthespatialfeatureresolutiontotheimagesize,enabling
+the application of pixel-wise cross-entropy loss. This setup provides a better evaluation of the
+pretrainedmodelscomparedtoend-to-endfinetuning,wherealllearnedparametersareoverwritten.
+The results, reported in Table 2, show that NeCo surpasses CrIBo on all datasets by at least 10%
+andoutperformsDINOv2Rby5%to7%. Thesesignificantimprovementsdemonstratethatpatches
+representingthesameobjectorobjectparthavehighersimilaritiesinfeaturespacecomparedtoother
+methods,asasimplelinearlayercanutilizethesefeaturesforstrongsemanticsegmentation.
+Compatibility with Differently Pretrained Backbones. As shown in Table 3, our method is
+generalizableacrossvariousself-supervisedlearninginitialization,improvingthembyroughly4%
+to30%acrossdifferentmetricsanddatasets. Surprisingly,NeCoevenenhancestheperformanceof
+methodsspecificallydesignedfordensetasks, suchasCrIBo, TimeT,andLeopart. Forinstance,
+7Table 4: Evaluation of Full Fine-Tuning with Segmenter. Various backbones pre-trained with
+differentself-supervisedlearningmethodsarefine-tunedusingSegmenter[48]. Thetableshowsthe
+mIoUscoresobtainedonvalidationsetsacross4differentdatasets.
+Method Backbone Params PascalContext PascalVOC COCO-Stuff ADE20K
+DINO ViT-S/16 21M 46.0 80.3 43.2 43.3
+CrOC ViT-S/16 21M 46.0 80.9 42.9 42.8
+TimeT ViT-S/16 21M 47.4 80.4 43.1 43.5
+CrIBo ViT-S/16 21M 49.3 82.3 43.9 45.2
+DINOv2R ViT-S/14 21M 55.0 85.9 46.8 49.3
+NeCo ViT-S/14 21M 55.2 86.3 46.5 49.5
+DINO ViT-B/16 85M 45.8 82.2 44.4 45.0
+MAE ViT-B/16 85M 47.9 82.7 45.5 46.4
+CrIBo ViT-B/16 85M 49.2 83.4 44.6 46.0
+DINOv2R ViT-B/14 85M 57.8 89.3 49.7 55.3
+NeCo ViT-B/14 85M 58.0 89.5 49.8 55.1
+CrIBodemonstratesaperformanceincreaseofapproximately5%inoverclusteringevaluations,which
+measureshowfine-grainedandsemantictherepresentationslearnedduringpretrainingare. This
+indicatesthatNeCoappliedtoCrIBocanextractmorediscriminativefeatures,leadingtoimproved
+transferperformance,shownby0.5%and3.7%betterlinearclassificationperformanceonPascal
+VOCandCOCO-Things.
+End-to-End Full-Finetuning Evaluation. One advantage of self-supervised pretraining is the
+ability to transfer learned general semantic features to specialized downstream tasks, improving
+performanceinanend-to-endfinetuningsetup. WeevaluatethiscapabilityofNeCo byaddinga
+transformer-baseddecoderfromSegmenter[48]ontopofthefeatureextractorandfinetuningthe
+entirenetworkforsemanticsegmentation. Thebackbone’sspatialfeaturesarefedintoatransformer
+decoder along with K learnable class tokens. These class and spatial tokens are projected onto
+eachothertoobtainpatch-levelpredictions, whicharethenupsampledtomatchtheinputimage
+size,enforcingpixel-wisecross-entropyloss. WereportthemIoUscoresachievedonPascalVOC,
+PascalContext,COCO-Stuff,andADE20kinTable4. Despiteallparametersbeingadapted,the
+resultsshowthatNeCo learnssuperiorfeatures,leadingtobetterperformanceindownstreamtasks,
+outperforming CrIBo by approximately 4%. Notably, while DINOv2R has demonstrated strong
+transferresultsinvarioustasks,includingsemanticsegmentation,duetobeingtrainedonamassive
+datasetof142Mimagesandusingacombinationofdenseandclassificationlosses,NeCosurpasses
+eventhis. Bytrainingonly19GPU-hoursonCOCO,whichisafractionoftheoriginalcompute,we
+obtainconsistentgains,settinganewstate-of-the-art.
+4.3 AblationStudies
+Here,weexaminetheessentialparametersofourmethodbytrainingNeCoonPascalVOC12and
+ADE20k. Weassessitsabilitytoperformlinearsegmentationandin-contextsceneunderstanding
+usingthefrozenrepresentationslearnedwitheachsetofparameters. Forin-contextsceneunder-
+standingevaluations,weuse 1 fractionofthetrainingdataandreducethespatialdimensionto
+128
+4482. Thenumberoftrainingepochsforlinearsegmentationevaluationsissetto20epochs. For
+moreablationsrefertoAppendixB.
+PatchSelectionApproach. Wedemonstratetheeffectofselectingpatchesfromtheforeground,
+background,orbothinTable5a. Foregroundpatchesareselectedusingtheattentionmapaveraged
+acrossheads. Ourresultsindicatethatselectingpatchesfromtheforegroundgives1%betterresults
+comparedtothebackgroundselectionin3outof4metrics. However,theperformancepeakswhen
+weselectpatchesfrombothlocations. Thisimprovementcanbeattributedtotheuseofscene-centric
+images for training, where the background often contains meaningful objects that contribute to
+enhancedperformance.
+Utilizing a Teacher. We ablate the role of teacher-student architecture in Table 5b. As shown,
+employingateachernetworkupdatedbyexponentialmovingaveragecansignificantlyimprovethe
+8Table5: Ablationsofthekeyparametersofourmethod. Weevaluatethemodelsbytraininga
+linearlayerontopofthefrozenrepresentations(Lin.) orusingthein-context(IC)evaluationof[10]
+usingthevalidationimagesforPascalVOC12andADE20k.
+(a)Patchselection (b)UseofEMATeacher
+Pascal ADE20K Pascal ADE20K
+Location Lin. IC Lin. IC Teacher Lin. IC Lin. IC
+backg. 78.4 60.5 35.8 20.6 ✗ 70.4 42.6 28.3 15.9
+foreg. 78.4 61.6 36.8 21.5 ✓ 78.9 62.0 37.3 21.7
+both 78.9 62.0 37.3 21.7
+(c)Nearest-neighbourselection (d)Trainingdataset (e)Sortingalgorithm
+Pascal ADE20K Pascal ADE20K Pascal ADE20K
+NN Lin. IC Lin. IC Dataset Lin. IC Lin. IC Method Lin. IC Lin. IC
+intra 78.1 61.2 36.3 21.3 IN-100 76.7 55.8 34.9 18.7 Odd-even 78.9 62.2 37.0 21.6
+inter 78.9 62.0 37.3 21.7 Pascal 77.9 60.6 36.4 20.8 Bitonic 78.9 62.0 37.3 21.7
+COCO 78.9 62.0 37.3 21.7
+performanceacrossallthemetricsby8%to20%. Thisisconsistentwiththepreviousworks[13,29],
+whichreportedamorestabletrainingprocesswhentheteacher-studentarchitectureisemployed.
+NearestNeighborSelectionApproach. Weevaluatetheinfluenceofpickingnearestneighbors
+fromthesameimage(intra)ordifferentbatchimages(inter)inTable5c. Theresultsindicatethat
+selecting patches across images consistently boosts performance by roughly 0.4% to 1% across
+differentmetrics. Thehigherdiversityofpatchesinvolvedinthelatterapproachlikelyaccountsfor
+thisimprovement.
+TrainingDataset. Table5dpresentstheimpactofthetrainingdatasetbasedontheImageNet-100,
+Pascal,andCOCOdatasets. ImageNet-100comprisesrelativelysimpleimageswithfewobjects,
+whereasPascalandCOCOfeaturemorecomplexsceneswithmultipleobjects. Ourmethodshows
+consistentimprovementswhentrainedonmulti-objectdatasets,achievingaperformanceincreaseof
+2%to7%onCOCOcomparedtoImageNet-100. Thisimprovementisduetothegreaterquantity
+anddiversityofobjectsperbatchinmulti-objectscenes,whichprovidestrongerlearningsignalsby
+requiringdiscriminationagainstahighernumberofobjects. Notably,theadditionalperformance
+boost we observe from finetuning DINOv2R on Pascal—despite it already being trained on this
+dataset[15]—furtherunderscorestheefficacyofourproposedlossfunction.
+SortingAlgorithm. WeablatetheeffectofchangingthesortingalgorithminTable5e. Ourmethod
+demonstratesrobustperformanceacrossdifferentsortingapproaches,achievingthebestresultswith
+Bitonicsorting,whichyieldsslightlybetterperformanceonaverage. Wepresenttheablationstudy
+onthesortingsteepnessparameterintheAppendixB.4,asourmethodisrobusttovariationsinthis
+parameter.
+5 Discussion
+Broaderimpact. Byleveragingpretrainedmodels,ourmethodhasimplicationsforreducingthe
+carbonfootprintofmodeltraining. SimilartohowonceanLLMsistrained,itcanbere-usedand
+tunedwithverylittlecompute,wedemonstratethatthisispossibleforvisualfoundationmodels. Our
+finetuningrequiresonly19GPU-h,yetyieldsvastlybettermodelsfordenseimageunderstanding.
+Webelievethisworkspursfurtherresearchintopost-pretrainingmethods.
+Conclusion. In this work, we propose Patch Nearest Neighbor Consistency as a new method
+for dense post-pretraining of self-supervised backbones. By applying our method to the many
+backbonesincludingtheDINOv2-registersmodel,weimproveuponthesemodelsbyalargemargin
+forfrozenclustering,semanticsegmentationandfullfinetuning,settingseveralnewstate-of-the-art
+performances.
+9References
+[1] AdrianZieglerandYukiMAsano. Self-supervisedlearningofobjectpartsforsemanticsegmentation. In
+CVPR,2022. 1,2,5,6,7,13,14,15,22,23
+[2] MohammadrezaSalehi,EfstratiosGavves,CeesGMSnoek,andYukiMAsano. Timedoestell: Self-
+supervisedtime-tuningofdenseimagerepresentations. InICCV,2023. 1,2,5,6,7,15
+[3] Nikita Araslanov, Simone Schaub-Meyer, and Stefan Roth. Dense unsupervised learning for video
+segmentation. NeurIPS,2021. 2
+[4] ThomasStegmüller,TimLebailly,BehzadBozorgtabar,TinneTuytelaars,andJean-PhilippeThiran. Croc:
+Cross-viewonlineclusteringfordensevisualrepresentationlearning. InCVPR,2023. 2,6,15
+[5] XinlongWang,RufengZhang,ChunhuaShen,TaoKong,andLeiLi. Densecontrastivelearningfor
+self-supervisedvisualpre-training. InCVPR,2021. 1
+[6] AndriiZadaianchuk,MaximilianSeitzer,andGeorgMartius. Object-centriclearningforreal-worldvideos
+bypredictingtemporalfeaturesimilarities. NeurIPS,2023. 1,2
+[7] OlivierJHénaff,SkandaKoppula,Jean-BaptisteAlayrac,AaronVandenOord,OriolVinyals,andJoão
+Carreira. Efficientvisualpretrainingwithcontrastivedetection. InICCV,2021. 1,2
+[8] OlivierJHénaff,SkandaKoppula,EvanShelhamer,DanielZoran,AndrewJaegle,AndrewZisserman,
+JoãoCarreira,andReljaArandjelovic´. Objectdiscoveryandrepresentationnetworks. InECCV.Springer,
+2022. 2
+[9] Tim Lebailly, Thomas Stegmüller, Behzad Bozorgtabar, Jean-Philippe Thiran, and Tinne Tuytelaars.
+CrIBo: Self-supervised learning via cross-image object-level bootstrapping. In ICLR, 2023. URL
+https://openreview.net/forum?id=3M0GXoUEzP. 1,2,5,6,7,14,15
+[10] IvanaBalazevic,DavidSteiner,NikhilParthasarathy,ReljaArandjelovic´,andOlivierHenaff. Towards
+in-contextsceneunderstanding. NeurIPS,2023. 1,2,5,6,9,13,14,17
+[11] TomBrown,BenjaminMann,NickRyder,MelanieSubbiah,JaredDKaplan,PrafullaDhariwal,Arvind
+Neelakantan,PranavShyam,GirishSastry,AmandaAskell,etal. Languagemodelsarefew-shotlearners.
+NeurIPS,2020. 1
+[12] FelixPetersen,ChristianBorgelt,HildeKuehne,andOliverDeussen. Differentiablesortingnetworksfor
+scalablesortingandrankingsupervision. InICML,2021. 2,4,13
+[13] MathildeCaron,HugoTouvron,IshanMisra,HervéJégou,JulienMairal,PiotrBojanowski,andArmand
+Joulin. Emergingpropertiesinself-supervisedvisiontransformers. InICCV,2021. 2,5,6,7,9,13,15,16
+[14] JinghaoZhou,ChenWei,HuiyuWang,WeiShen,CihangXie,AlanYuille,andTaoKong. ibot:Image
+bertpre-trainingwithonlinetokenizer. ICLR,2022. 2,6,7,15
+[15] MaximeOquab,TimothéeDarcet,ThéoMoutakanni,HuyVo,MarcSzafraniec,VasilKhalidov,Pierre
+Fernandez,DanielHaziza,FranciscoMassa,AlaaeldinEl-Nouby,etal. Dinov2:Learningrobustvisual
+featureswithoutsupervision. arXivpreprintarXiv:2304.07193,2023. 2,5,6,9,15
+[16] TimothéeDarcet,MaximeOquab,JulienMairal,andPiotrBojanowski. Visiontransformersneedregisters.
+InICLR,2024. 2,5
+[17] Jyh-JingHwang,StellaXYu,JianboShi,MaxwellDCollins,Tien-JuYang,XiaoZhang,andLiang-Chieh
+Chen. Segsort:Segmentationbydiscriminativesortingofsegments. InICCV,2019. 2,4
+[18] SongtaoLiu,ZemingLi,andJianSun.Self-emd:Self-supervisedobjectdetectionwithoutimagenet.arXiv
+preprintarXiv:2011.13677,2020. 2
+[19] WouterVanGansbeke,SimonVandenhende,StamatiosGeorgoulis,andLucVanGool. Unsupervised
+semanticsegmentationbycontrastingobjectmaskproposals. InICCV,2021. 2,6,23
+[20] MathildeCaron,PiotrBojanowski,ArmandJoulin,andMatthijsDouze. Deepclusteringforunsupervised
+learningofvisualfeatures. InECCV,2018. 2
+[21] MathildeCaron,IshanMisra,JulienMairal,PriyaGoyal,PiotrBojanowski,andArmandJoulin. Unsuper-
+visedlearningofvisualfeaturesbycontrastingclusterassignments. NeurIPS,2020.
+[22] YukiMarkusAsano,ChristianRupprecht,andAndreaVedaldi. Self-labellingviasimultaneousclustering
+andrepresentationlearning. arXivpreprintarXiv:1911.05371,2019.
+[23] MahmoudAssran,MathildeCaron,IshanMisra,PiotrBojanowski,FlorianBordes,PascalVincent,Armand
+Joulin,MikeRabbat,andNicolasBallas. Maskedsiamesenetworksforlabel-efficientlearning. InECCV.
+Springer,2022.
+[24] DeepakPathak,PhilippKrahenbuhl,JeffDonahue,TrevorDarrell,andAlexeiAEfros. Contextencoders:
+Featurelearningbyinpainting. InCVPR,2016.
+[25] KaimingHe,XinleiChen,SainingXie,YanghaoLi,PiotrDollár,andRossGirshick.Maskedautoencoders
+arescalablevisionlearners. InCVPR,2022.
+[26] HangboBao,LiDong,SonghaoPiao,andFuruWei. Beit:Bertpre-trainingofimagetransformers. arXiv
+preprintarXiv:2106.08254,2021.
+10[27] KunYi,YixiaoGe,XiaotongLi,ShushengYang,DianLi,JianpingWu,YingShan,andXiaohuQie.
+Maskedimagemodelingwithdenoisingcontrast. arXivpreprintarXiv:2205.09616,2022.
+[28] Xinyu Zhang, Jiahui Chen, Junkun Yuan, Qiang Chen, Jian Wang, Xiaodi Wang, Shumin Han, Xi-
+aokangChen,JiminPi,KunYao,etal. Caev2: Contextautoencoderwithcliptarget. arXivpreprint
+arXiv:2211.09799,2022. 2
+[29] Jean-BastienGrill,FlorianStrub,FlorentAltché,CorentinTallec,PierreRichemond,ElenaBuchatskaya,
+CarlDoersch,BernardoAvilaPires,ZhaohanGuo,MohammadGheshlaghiAzar,etal. Bootstrapyour
+ownlatent-anewapproachtoself-supervisedlearning. NeurIPS,2020. 2,9,13
+[30] XinleiChenandKaimingHe. Exploringsimplesiameserepresentationlearning. InCVPR,2021.
+[31] MahmoudAssran,QuentinDuval,IshanMisra,PiotrBojanowski,PascalVincent,MichaelRabbat,Yann
+LeCun, andNicolasBallas. Self-supervisedlearningfromimageswithajoint-embeddingpredictive
+architecture. InCVPR,2023.
+[32] Ting Chen, Simon Kornblith, Mohammad Norouzi, and Geoffrey Hinton. A simple framework for
+contrastivelearningofvisualrepresentations. InICML.PMLR,2020.
+[33] ZhirongWu,YuanjunXiong,StellaXYu,andDahuaLin.Unsupervisedfeaturelearningvianon-parametric
+instancediscrimination. InCVPR,2018.
+[34] GautierIzacard,MathildeCaron,LucasHosseini,SebastianRiedel,PiotrBojanowski,ArmandJoulin,
+andEdouardGrave. Unsuperviseddenseinformationretrievalwithcontrastivelearning. arXivpreprint
+arXiv:2112.09118,2021. 2
+[35] KaimingHe,RossGirshick,andPiotrDollár. Rethinkingimagenetpre-training. InICCV,2019. 2
+[36] SenthilPurushwalkamandAbhinavGupta.Demystifyingcontrastiveself-supervisedlearning:Invariances,
+augmentationsanddatasetbiases. NeurIPS,2020. 2
+[37] MaximilianSeitzer,MaxHorn,AndriiZadaianchuk,DominikZietlow,TianjunXiao,Carl-JohannSimon-
+Gabriel,TongHe,ZhengZhang,BernhardSchölkopf,ThomasBrox,etal. Bridgingthegaptoreal-world
+object-centriclearning. arXivpreprintarXiv:2209.14860,2022. 2,6
+[38] SindyLöwe,PhillipLippe,FrancescoLocatello,andMaxWelling. Rotatingfeaturesforobjectdiscovery.
+NeurIPS,2023.
+[39] ZhipengBao,PavelTokmakov,Yu-XiongWang,AdrienGaidon,andMartialHebert. Objectdiscovery
+frommotion-guidedtokens. InCVPR,2023.
+[40] OrianeSiméoni,ChloéSekkat,GillesPuy,AntonínVobecký,ÉloiZablocki,andPatrickPérez. Unsuper-
+visedobjectlocalization:Observingthebackgroundtodiscoverobjects. InCVPR,2023. 2
+[41] ZiyuWang,MikeZhengShou,andMengmiZhang. Object-centriclearningwithcyclicwalksbetween
+partsandwhole. NeurIPS,2023. 2
+[42] MarkHamilton,ZhoutongZhang,BharathHariharan,NoahSnavely,andWilliamTFreeman.Unsupervised
+semanticsegmentationbydistillingfeaturecorrespondences. arXivpreprintarXiv:2203.08414,2022.
+[43] MengchengLan,XinjiangWang,YipingKe,JiaxingXu,LitongFeng,andWayneZhang. Smooseg:
+smoothnesspriorforunsupervisedsemanticsegmentation. NeurIPS,2023.
+[44] Andrii Zadaianchuk, Matthaeus Kleindessner, Yi Zhu, Francesco Locatello, and Thomas Brox. Un-
+supervisedsemanticsegmentationwithself-supervisedobject-centricrepresentations. arXivpreprint
+arXiv:2207.05027,2022. 2,5,6
+[45] FrancescoLocatello,DirkWeissenborn,ThomasUnterthiner,AravindhMahendran,GeorgHeigold,Jakob
+Uszkoreit,AlexeyDosovitskiy,andThomasKipf. Object-centriclearningwithslotattention. NeurIPS,
+2020. 2
+[46] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov, Dirk Weissenborn, Xiaohua Zhai, Thomas
+Unterthiner,MostafaDehghani,MatthiasMinderer,GeorgHeigold,SylvainGelly,etal.Animageisworth
+16x16words:Transformersforimagerecognitionatscale. arXivpreprintarXiv:2010.11929,2020. 3,13
+[47] KaimingHe,GeorgiaGkioxari,PiotrDollár,andRossGirshick. Maskr-cnn. InICCV,2017. 3,13
+[48] RobinStrudel,RicardoGarcia,IvanLaptev,andCordeliaSchmid. Segmenter:Transformerforsemantic
+segmentation. InICCV,2021. 5,8,14
+[49] HaroldWKuhn. Thehungarianmethodfortheassignmentproblem. NavalResearchLogisticsQuarterly,
+1955. 5,7,14,15,16
+[50] ValentinosPariza,MohammadrezaSalehi,andYukiAsano. Hummingbirdevaluationforvisionencoders,
+2024. URLhttps://github.com/vpariza/open-hummingbird-eval. 5,13
+[51] YonglongTian,DilipKrishnan,andPhillipIsola. Contrastivemultiviewcoding. InECCV.Springer,2020.
+5
+[52] MarkEveringham,LucVanGool,ChristopherKIWilliams,JohnWinn,andAndrewZisserman. The
+pascalvisualobjectclasses(voc)challenge. InternationalJournalofComputerVision,2010. 5,14,23
+[53] Tsung-YiLin,MichaelMaire,SergeBelongie,JamesHays,PietroPerona,DevaRamanan,PiotrDollár,
+andCLawrenceZitnick. Microsoftcoco:Commonobjectsincontext. InECCV.Springer,2014. 5
+11[54] BoleiZhou,HangZhao,XavierPuig,SanjaFidler,AdelaBarriuso,andAntonioTorralba. Sceneparsing
+throughade20kdataset. InCVPR,2017. 5,14,23
+[55] RoozbehMottaghi,XianjieChen,XiaobaiLiu,Nam-GyuCho,Seong-WhanLee,SanjaFidler,Raquel
+Urtasun,andAlanYuille. Theroleofcontextforobjectdetectionandsemanticsegmentationinthewild.
+InCVPR,2014. 5
+[56] HolgerCaesar,JasperUijlings,andVittorioFerrari. Coco-stuff:Thingandstuffclassesincontext,2018.
+5,13,14,23
+[57] HaofeiKuang,YiZhu,ZhiZhang,XinyuLi,JosephTighe,SörenSchwertfeger,CyrillStachniss,and
+MuLi. Videocontrastivelearningwithglobalcontext. InICCV,2021. 6
+[58] LukeMelas-Kyriazi,ChristianRupprecht,IroLaina,andAndreaVedaldi. Deepspectralmethods: A
+surprisinglystrongbaselineforunsupervisedsemanticsegmentationandlocalization. InCVPR,2022. 6
+[59] AdamPaszke,SamGross,FranciscoMassa,AdamLerer,JamesBradbury,GregoryChanan,TrevorKilleen,
+ZemingLin,NataliaGimelshein,LucaAntiga,etal. Pytorch:Animperativestyle,high-performancedeep
+learninglibrary. NeurIPS,2019. 13
+[60] WilliamFalconandThePyTorchLightningteam. Pytorchlightning,2019. URLhttps://github.com/
+Lightning-AI/lightning. 13
+[61] OlgaRussakovsky,JiaDeng,HaoSu,JonathanKrause,SanjeevSatheesh,SeanMa,ZhihengHuang,
+AndrejKarpathy,AdityaKhosla,MichaelBernstein,AlexanderCBerg,andLiFei-Fei. Imagenetlarge
+scalevisualrecognitionchallenge,2015. 13,23
+[62] DanHendrycksandKevinGimpel. Gaussianerrorlinearunits(gelus). arXivpreprintarXiv:1606.08415,
+2016. 13
+[63] DiederikPKingmaandJimmyBa. Adam:Amethodforstochasticoptimization,2017. 13,14
+[64] Ruiqi Guo, Philip Sun, Erik Lindgren, Quan Geng, David Simcha, Felix Chern, and Sanjiv Kumar.
+Acceleratinglarge-scaleinferencewithanisotropicvectorquantization. InICML,2020. URLhttps:
+//arxiv.org/abs/1908.10396. 14
+[65] M. Everingham, L. Van Gool, C. K. I. Williams, J. Winn, and A. Zisserman. The
+PASCAL Visual Object Classes Challenge 2012 (VOC2012) Results. http://www.pascal-
+network.org/challenges/VOC/voc2012/workshop/index.html. 14,15,23
+[66] JeffJohnson,MatthijsDouze,andHervéJégou. Billion-scalesimilaritysearchwithgpus. IEEETransac-
+tionsonBigData,2019. 14
+[67] XuJi,JoaoFHenriques,andAndreaVedaldi. Invariantinformationclusteringforunsupervisedimage
+classificationandsegmentation. InICCV,2019. 14,23
+[68] MMSegmentationContributors. OpenMMLabSemanticSegmentationToolboxandBenchmark,2020.
+URLhttps://github.com/open-mmlab/mmsegmentation. 14,23
+[69] SukminYun,HankookLee,JaehyungKim,andJinwooShin. Patch-levelrepresentationlearningfor
+self-supervisedvisiontransformers. InCVPR,2022. 16
+[70] AlexanderKirillov,KaimingHe,RossGirshick,CarstenRother,andPiotrDollar. Panopticsegmentation.
+InCVPR,2019. 23
+12A ExperimentalSetup
+A.1 DensePost-Pretraining
+ImplementationFramework OurmodelisimplementedinPython,usingTorch[59]andPyTorch
+Lightning[60].
+Datasets OurpretrainingdatasetsconsistofCOCO[56]andImageNet-100subsetoftheoriginal
+Imagenet[61]. COCOcontainsapproximately118,000scene-centricimages,whereasImageNet-
+100kincludesaround100kobject-centricimages.
+DataAugmentations OurDataaugmentationsarethesameasin[1]. Morespecifically,weuse:
+randomcolor-jitter,Gaussianblur,grayscaleandmulti-cropaugmentations. Similarly,theglobal
+crop’sresolutionis224x224andthelocalcrop’sresolutionis96x96, forthealltheexperiments
+exceptwhenworkingwithDinov2whereweuse98x98forlocalcrops. Furthermore,ourgenerated
+globalandlocalcropshavetheconstraintthattheyintersectatleastby1%oftheoriginalimagesize.
+NetworkArchitecture Forourbackbone,weemployvisiontransformers. Morespecifically,we
+trainonViT-SmallandViT-Base[46]. Moreover,following[13,29],weuseastudent-teachersetup
+wheretheteacherweightsareupdatedbytheexponentialmovingaverageofthestudentweights.
+ProjectionHead Following[13],theprojectionheadconsistsofthreelinearlayerswithhidden
+dimensionality of 2048, a Gaussian error linear units as activation function [62], and an output
+dimensionalityof256.
+DenseImageRepresentationAlignmentofCrops Following[1],duetothedistinctionbetween
+globalandlocalcrops,afterprojectingthedensespatialoutputtoalowerspace,thealignmentstepis
+appliedonthedenseimagerepresentationstobringthemtoafixedspatialresolutionofsizeof7x7
+duringtraining. Thisensuresthatthelocalandglobalcropfeaturemapshavethesamesizeandthat
+theycorrespondtoeachother. Thealignmentisdoneusingregionofinterestalignment(roialign)
+[47].
+Optimization Wetrainbothnetworksizeswithacosinelearningrateschedulegoingdownto0
+over25trainingepochs,exceptfortheablationstudieswhereweuse10epochs. Theinitialprojection
+headlearningrateis1e−4foralltheexperiments,whereasthebackbone’slearningrateis1e−5,
+withtheexceptionofbeing1e−6whenapplyingourmethodonDinov2. Theexponentialmoving
+averageforupdatingtheteacher’sweightsisadaptedwithacosineschedulestartingat0.9995and
+goingupto1. WeuseAdamOptimizer[63]withacosineweightdecayschedule.
+DifferentiableSortingNetworks BydefaultweusetheBitonicDifferentiableSortingNetworks
+[12]andthesteepnesses(i.e.,inversetemperatures)usedforthenetworkare100fortheStudentand
+100fortheteacher. Alltheotherparametersremainasthedefaultones;i.e.,weusethelogistic
+ϕ
+functionwithaλ=0.25fortheinterpolationofnumbersinthedifferentiablesortingalgorithms.
+A.2 EvaluationSetup
+VisualIn-ContextLearning TheDenseNearestNeighborRetrievalEvaluationisaretrieval-based
+scene understanding evaluation introduced by [10]. Its goal is to assess the scene understanding
+capabilitiesofadenseimageencoder. Itworksasfollows:
+1. MemoryBankConstruction: Usingadatasetofimagesandtheirdenseannotations,two
+memorybanksarecreated. Onememorybankstoresimagepatchfeaturesextractedfrom
+thespatialoutputofadenseencoderappliedtothetrainingimages. Theothermemorybank
+storesthecorrespondingpatchlabelsfromthedatasetannotations.
+2. QueryProcessing: Foranimagefromthevalidationsplit,thespatialoutputofthedense
+image encoder is processed. For each patch representation in this output, the k nearest
+neighbors are identified from the memory bank of features. The labels of these nearest
+neighborsarethencombinedtoconstructthequery’slabel.
+3. Comparison: Afterconstructingtheannotationfortheentireimage,itiscomparedwiththe
+groundtruthannotation.
+Duetotheunavailabilityoftheoriginalimplementationby[10],weusetheopenimplementation
+from[50]. Thisimplementationalignswiththeoriginalauthors’descriptionanddetails,including
+13theuseoftheScaNNLibrary[64]forefficientnearestneighborretrieval. Weadheretothesetup
+fromtheHummingbirdModelauthors[10]forourexperiments. Weuseamemorysizeof10,240,000
+andconfigureScaNNwith30nearestneighbors,consistentwiththeevaluationoftheHummingbird
+modelonthismemorysize.
+ThefinalresultsarereportedasmeanIntersectionoverUnion(mIoU)onfourdifferentfractionsof
+twodatasets:PascalVOC2012[65]andADE20K[54]. Thesub-samplingfactorsare1,8,64,or128.
+Forfactorsgreaterthan1,resultsareaveragedoverfivedifferentseeds. Thesedatasetsubsetsare
+createdbyuniformlyandrandomlyselectingauniquesetofimagesfromthetrainingsplit,ensuring
+anapproximatelyequalnumberofdistinctimagesforeachannotationlabel. Forexample,forthe
+1/128fractionofthePascalVOC2012dataset,wewouldcollectaround83images,ensuringeachof
+the20labels(excludingthebackground)appearsinatleast4differentimagesinthesubset.
+Overclustering FortheOverclusteringexperiment,following[1],werunK-Means(usingfaiss
+[66])onallspatialtokensfromourbackbone(i.e.,withtheprojectionheaddiscarded)foragiven
+dataset. Wethengrouptheclusterstotheground-truthclassesofthedatasetbyapplyinggreedy
+matchingtothepixel-levelprecisionandthenrunHungarianmatching[49]onthecombinedcluster
+maps,whichmakestheevaluationmetricpermutation-invariant[67]. Weuseacropsizeof448x448
+fortheinputimages,andoverclusteringisappliedondownsampled100x100masksinordertospeed
+uptheHungarianmatching. ThefinalresultsarereportedasanaverageofmeanIntersectionover
+Union(mIoU)overfivedifferentseedsonfourdifferentdatasets: COCO-ThingandCOCO-Stuff
+[56],PascalVOC2012[65],andADE20K[54].
+Linear segmentation For linear segmentation, we closely follow the setup from Leopart [1].
+Concisely,wetake448x448images,encodethemwithourbackbonetogetthespatialoutputs,apply
+bilinear interpolation to match the mask resolution, and finally apply a linear head to obtain the
+segmentationpredictions. Thesepredictionsarethencomparedwiththegroundtruthsegmentation
+masksandtrainedviacross-entropyloss.
+Fortrainingthelinearhead,wedownsamplethesegmentationmasksto100x100toincreasetraining
+speed. WeuseStochasticGradientDescentwithaweightdecayof0.0001,amomentumof0.9,anda
+steplearningratescheduler. Wefoundthatalearningrateof0.01worksquitewellforthebackbone
+modelsweevaluatedandoursetup. Wefine-tunethelinearheadsfor20epochs.
+Moreover,wetrainandevaluatelinearheadsonfourversionsofdatasets: PascalVOC2012[65],
+subsetsofCOCO-ThingandCOCO-Stuff(explainedinAppendixA),andADE20K[54].
+SegmenterFinetuning Followingtheevaluationsetupfrom[9],wefinetuneourbackbonesand
+thetransformer-baseddecoderfromSegmenter[48]inanend-to-endmanner. WeusetheSegmenter
+implementationavailablewithintheMMSegmentationLibrary[68].
+The performance metric used here is the mIoU score, reported on four different datasets: Pascal
+Context[52],PascalVOC2012[65],COCO-Stuff164K[56],andADE20K[54]. Thecropsizeused
+is512×512. FortheDINOv2modelandourmethodonit,weapplyzeropaddingaroundtheimage
+of512×512tobringittothesizeof518×518.
+Theremainingconfigurationsfollow[9]. FortheADE20KandCOCO-Stuff164Kdatasets,weuse
+160k iterations, and forPascalVOC 2012 andPascalContext, we use80k iterations, all with an
+eta_minof0.1·lr. WeusetheAdamoptimizer[63]andforeachpretrainingmethodanddataset,
+weexperimentwithfourdifferentlearningrates(8×10−5,3×10−5,1×10−5,8×10−6)before
+reportingthehighestmIoUscore.
+Fullyunsupervisedsemanticsegmentation Tobetterevaluatethesceneunderstandingabilities
+ofourmethod,wealsoevaluateitusingtheFullyUnsupervisedSemanticSegmentationEvaluation
+method[1]. Thisevaluationconsistsoftwoparts: Cluster-basedForegroundExtraction(CBFE)and
+OverclusteringwithCommunityDetection(CD).
+TheCBFEclustersthespatialoutputsofamodeloveradatasetandassignseachclusterasbackground
+(bg) or foreground (fg). The separation of foreground and background clusters is facilitated by
+attentionmapsfromaVisionTransformer,whichprovidecuesforthefg/bgdistinction. Weconstruct
+thefinalhardfg-bgassignmentbyaveragingtheattentionheads,applyingGaussianfilteringwitha
+7x7kernelsize,andretaining70%oftheattentionmasstoobtainthefinalbinarymask. Therestof
+theconfigurationsremainthesameastheoriginalsetup[1].
+14TheCDmetric[1]exploitslocalco-occurrencestatisticsamongclusterstoidentifyandcategorizeob-
+jects.Thisapproachusesnolabelsforcategorizingsemanticparts;itsimplyfindslocalco-occurrence
+ofclustersinanimagebyutilizinganinformation-theoreticdefinitionofnetworkcommunities. Our
+configurationsfortheCDevaluationremainthesameasinLeopart[1].
+WeusetheimplementationfromLeopart[1]andapplyCBFEandCDonthenon-augmented(train)
+splitofPascalVOC2012[65],andevaluateonitsfullvalidationset. ForCD,wereportthebest
+resultsover10seedsobtainedfromahyper-parametersearch, leadingtoourbestparametersfor
+CD+CBFE:weight_threshold=0.07,markov_time=1.2,andk_community=189.
+B AdditionalExperiments
+B.1 UnsupervisedSemanticSegmentation
+InTable1b,weshowthecontributionofeachcomponenttothefinalclusteringevaluationgainson
+PascalVOC2012with21clustersforDINOv2RViT-small. StartingwithourmethodNeCo,wethen
+applyClusteringBasedForegroundExtraction(CBFE),andfinallycommunitydetection(CD).We
+observethatCBFEprovidesthelargestboost(23.3%)duetothehighqualityofouroverclustering
+maps,asalsoshowninTable1a. WhileCDcontributesamoremodestincrease(13.8%),whichis
+abouthalfasmuchasCBFE,combiningbothCBFEandCDresultsinasignificantimprovement,
+bringingtheoverallgainto55.1%,comparedtotheinitial17.8%.
+Table6: Componentcontributions. Weshowthegainsthateachindividualcomponentbringsfor
+PVOCsegmentationandK=21.
+mIoU
+DINOv2R 12.2
++NeCo 17.8(+5.6%)
++CBFE 41.3(+23.3%)
++CD 55.1(+13.8%)
+B.2 FullClusteringTables
+InTable7,weshowfullclusteringresultsshownbyTable1b.
+Table7: Clusteringevaluationperformance. K-meanswithvariousclusteringgranularityK is
+appliedtothespatialfeaturesobtainedfromdifferentfeatureextractorsontwodatasets. Theresulting
+clustermapsarematchedtothegroundtruthbyHungarianmatching[49],andtheintersectionis
+reportedinmIoU.
+PascalVOC COCO-Things
+Method Backbone Params K=GT K=300 K=500 K=GT K=300 K=500
+DINO[13] ViT-S/16 21M 4.3 13.9 17.3 5.4 18.8 19.2
+iBOT[14] ViT-S/16 21M 4.4 23.8 31.1 7.6 26.6 28.0
+CrOC[4] ViT-S/16 21M 3.4 16.4 20.0 4.9 14.7 18.1
+TimeT[2] ViT-S/16 21M 12.2 43.6 46.2 17.5 42.7 44.6
+DINOv2R[15] ViT-S/14 21M 12.2 46.7 49.5 12.3 38.9 41.2
+CrIBo[9] ViT-S/16 21M 18.3 51.3 54.5 14.5 46.0 48.3
+NeCo ViT-S/14 21M 17.8 69.4 72.6 18.2 61.2 64.5
+MAE ViT-B/16 85M 3.5 6.0 7.4 6.9 9.2 10.1
+DINO ViT-B/16 85M 5.3 19.6 23.9 6.4 19.1 21.2
+iBOT ViT-B/16 85M 6.5 29.0 34.0 7.2 26.4 30.5
+DINOv2R ViT-B/14 85M 14.4 47.7 50.5 12.4 30.9 33.5
+CrIBo ViT-B/16 85M 18.9 56.9 56.8 16.2 43.1 44.5
+NeCo ViT-B/14 85M 18.6 64.2 71.8 13.3 61.3 65.5
+15B.3 FullVisualIn-ContextLearningTables
+WeshowtheresultsshownbyFigure2inTable8. Toprovideamorecomprehensivecomparison,
+we also evaluate our method against SelfPatch [69], a finetuning approach with a similar aim of
+enhancingdenserepresentations.
+Table8:In-contextsceneunderstandingbenchmark.Densenearestneighborretrievalperformance
+isreportedacrossvarioustrainingdataproportionsontwoscene-centricdatasets,ADE20kandPascal
+VOC.TheretrievedclustermapsarecomparedwiththegroundtruthusingHungarianmatching[49],
+andtheirmIoUscoreisreported.
+ADE20K PascalVOC
+Method Backbone Params 1/128 1/64 1/8 1/1 1/128 1/64 1/8 1/1
+DINO ViT-S/16 21M 9.5 11.0 15.0 17.9 26.4 30.5 41.3 47.9
+SelfPatch ViT-S/16 21M 10.0 10.9 14.7 17.7 28.4 32.6 43.2 50.1
+CrOC ViT-S/16 21M 8.7 10.8 15.2 17.3 34.0 41.8 53.8 59.5
+TimeT ViT-S/16 21M 12.1 14.1 18.9 23.2 38.1 43.8 55.2 61.3
+Leopart ViT-S/16 21M 12.9 14.8 19.6 23.9 44.6 49.7 58.4 63.4
+CrlBo ViT-S/16 21M 14.6 17.3 22.7 26.6 53.9 59.9 66.9 71.2
+DINOv2R ViT-S/14 21M 19.6 22.8 30.1 35.9 53.0 57.9 68.2 73.8
+NeCo ViT-S/14 21M 23.7 27.2 34.0 39.8 66.5 70.3 76.3 78.9
+MAE ViT-B/16 85M 10.0 11.3 15.4 18.6 3.5 4.1 5.6 6.9
+DINO ViT-B/16 85M 11.5 13.5 18.2 21.5 33.1 37.7 49.8 56.5
+Leopart ViT-B/16 85M 14.6 16.8 21.8 26.7 50.1 54.7 63.1 68.2
+Hummingbird ViT-B/16 85M 11.7 15.1 22.3 29.6 50.5 57.2 64.3 71.8
+CrlBo ViT-B/16 85M 15.9 18.4 24.4 28.4 55.9 61.8 69.2 73.1
+DINOv2R ViT-B/14 85M 22.1 25.8 33.2 38.7 51.8 58.9 70.6 76.2
+NeCo ViT-B/14 85M 29.1 33.7 39.2 44.2 67.0 71.4 77.5 82.2
+B.4 ExtraAblations
+Sorting Steepness. In Table 9c, we vary the sorting steepness, denoted by β, for both teacher
+andstudentnetworkstoevaluatetheinfluenceofhardorsoftnearestneighborassignments. The
+performanceimproveswhentheteacher’ssteepnessishigherorequaltothestudent’s,consistent
+withpreviousfindings[13]. Ourbestresultsareachievedwhenbothnetworkshaveequalsteepness.
+However,extremesteepnessvalues(e.g.,1000)harmperformance. Thisisbecausesortingpatch
+similarities lacks clear boundaries, and formulating it as a hard assignment can force incorrect
+orderings,negativelyimpactingperformance.
+BatchSize. Table9bexaminestheimpactofbatchsizeonperformance. Wemaintainthesame
+experimentalsetupasreportedinthepaperforallablations. Asanticipated,smallerbatchsizesresult
+inmarginalimprovementsduetotheweakersupervisorysignal. However,amoderatelylargebatch
+size,suchasthe64usedinthepaper,showssignificantimprovementsoverthebaseline. Furthermore,
+thetrendsuggeststhatincreasingbatchsizescouldleadtoevengreaterperformancegains.
+Number of Neighbors. As mentioned in the method section, compute and sort the distances
+betweeneachpatchandallotherpatchesusingadifferentiablesortingalgorithm. Ultimately,The
+sorted distances for the same patches in different views should be similar. Here, we conduct an
+ablation study, selecting only the top K distances for each patch instead of all distances. The
+resultsarereportedinTable9a. Asshown,incorporatingmoreneighboursinNeCo lossenhances
+performance. However, after reaching a threshold (e.g., 32 neighbors), adding more becomes
+lesseffective. Thisindicatesourmethod’srobustnessagainstthishyperparameter,notrelyingon
+computingdistancesforallbatchpatchestoimprovethebaseline.
+TrainingEpochs. WeshowtheperformanceacrossdifferenttrainingepochsinTable9d. Asthe
+tableshows,evenafterjustoneepochoftraining,DINOv2Rimprovesby1%to3%acrossvarious
+metrics. Theperformancecontinuestoincreasewithmoretrainingepochs,buttheimprovements
+becomesmallerafter25epochs,whichisthenumberusedinthepaper.
+16Table9: Ablationsofthekeyparametersofourmethod. Weevaluatethemodelsbytraininga
+linearlayerontopofthefrozenrepresentations(Lin.) orusingthein-context(IC)evaluationof[10]
+usingthevalidationimagesforPascalVOC12andADE20k.
+(a)NumNeighbors (b)BatchSize
+Pascal ADE20K Pascal ADE20K
+Num Lin. IC Lin. IC BatchSize Lin. IC Lin. IC
+4 74.4 54.8 35.2 19.7 4 76.2 60.2 35.6 20.2
+8 76.8 61.1 36.3 20.2 8 76.8 61.1 36.3 20.8
+16 77.7 60.9 36.7 20.9 16 77.7 60.9 36.7 21.1
+32 78.1 61.3 37.1 21.4 32 78.2 61.4 37.1 21.4
+All 78.9 62.0 37.3 21.7 64 78.9 62.0 37.3 21.7
+(c)Sortingsteepness (d)TrainingEpochs
+Pascal ADE20K Pascal ADE20K
+(Std,Tch) Lin. IC Lin. IC Epochs Lin. IC Lin. IC Exec. Time
+(10,100) 78.3 60.5 36.2 20.8 1 76.8 60.5 35.8 20.1 0.5h
+(1000,100) 74.5 48.3 27.8 16.5 2 77.7 62.7 36.6 21.4 1h
+(1000,1000) 79.0 61.5 36.6 21.2 4 79.0 64.7 37.8 22.5 2h
+(100,100) 78.9 62.0 37.3 21.7 8 80.7 65.9 39.6 23.2 5h
+16 81.6 66.7 40.5 24.2 10h
+25 81.9 66.9 40.8 24.4 19h
+50 82.3 67.2 41.0 24.5 40h
+B.5 ComputationalAnalysis
+WeprovideadetailedruntimeanalysisforDINO,CrIBo,TimeT,andNeCoinTable10. Allexperi-
+mentsareconductedon8NVIDIARTXA6000-46GBGPUs. AsshowninTable3,startingfrom
+alreadyexistingpretrainednetworks,NeCo onlyrequires2.5GPUhourstoenhancetheperformance
+ofthestate-of-the-artmethod,CrIBo,by3.7%inlinearsegmentation. Furthermore,whenNeCo is
+appliedtoTimeT,startingfromDINOinitialization,itcansurpassCrIBOwithnearly30%lesstotal
+trainingtime(20h+1.6h+2.5hvs. 70h). Thistrendisalsoobservedinclusteringandoverclustering
+numbers,showinguptoa6%improvementoverCrIBOwhenstartingfromTimeT,asdetailedin
+Table3. Theseresultsvalidatethecomputationalefficiencyoftheproposedmethod.
+Method Epochtime Init Numepoch Batchsize Totaltrainingtime Linearsegmentation
+(Min:Sec)
+DINO 1:33 random 800 64 20h 43.9
+TimeT 3:12 DINO 30 64 2h 58.2
+CrIBo 5:16 random 800 64 70h 64.3
+NeCo 4:48 TimeT 25 64 1.6h 64.8
+NeCo 4:48 CrIBo 25 64 2.5h 68.0
+Table10: Computationalanalysisandsegmentationperformance.NeCo demonstratessuperior
+computationalefficiency,requiringonly2.5GPUhourstoenhanceCrIBo’sperformanceby3.7%in
+linearsegmentation.
+C AdditionalVisualizations
+Visualizationofnearestpatchretrieval. InFigure4,wetakeonepatchfromanimageinPascal
+VOCasthequeryandretrieveitssevennearestpatchesacrossthedataset. WecompareNeCo against
+DINOv2R. As illustrated, the nearest neighbors retrieved by NeCo are not only more relevant
+comparedtoDINOv2Rbutalsomoreprecise,successfullyfindingnearestpatchesnotonlywithin
+thesameobjectbutalsowithinobjectparts.
+17Figure3: PascalVOCvisualizations. Weoverlaythegroundtruthontopofasubsetofimagesin
+PascalVOC.Theseimagesandtheirgroundtruthsegmentationmapsareusedforourtasks,suchas
+visualin-contextlearningandlinearsegmentation.
+InFigure5,weshowsomeborderlinecaseswhereDINOv2Rretrievesmorerelevantpatchesthanour
+method. NeCo occasionallyretrievespatchesofsimilarpartsfromdifferentobjects. Forexample,a
+patchfromabicyclewheelmightbematchedwithamotorcyclewheel.Additionally,sincewerelyon
+croppingtoinducenearestneighborsimilarity,smallobjectsintheinput,whichmaynotsignificantly
+affecttheoverallsemantics,canalterthesemanticsatthepatchlevel,leadingtounexpectednearest
+neighbors,asseeninthecaseofthesheepphoto.
+VisualizationofclusteringandOverclustering. Wedisplaythevisualizationsforboththecluster-
+ingandoverclusteringapproachesinFigure7andFigure6,respectively. Fortheclusteringapproach,
+detailedinTable1b,weapplycluster-basedforegroundextractioncombinedwithcommunitydetec-
+tiontoidentifytheforegroundregionsfromfeaturesextractedacrosstheentiredataset. Theextracted
+featuresarethenmaskedwiththeextractedmasksandclusteredaccordingtothenumberofobjects
+inthedataset,whichis21forPascal. AsshowninFigure7,thisprocesssuccessfullyassignsunique
+clusterIDstothedetectedobjectsandaccuratelysketchestheirboundaries.
+Foroverclustering,wedon’textractforegroundregionsandinsteadclusterallthefeaturesintoa
+significantlyhighernumberofclusterscomparedtothegroundtruth. ForPascal,thisnumber(K)is
+setto100. Figure6illustratestheresults. Weobserveasimilareffectaswithclustering,exceptthat
+someobjects,suchashumansorcertainanimals,arepartitionedintotheirconstituentparts,which
+remainrelativelyconsistentacrossdifferentsamples.
+18(a)DINOv2R
+Query Retrieved Nearest Neighbors
+(b)NeCo
+Query Retrieved Nearest Neighbors
+Figure 4: Nearest patch retrieval. Comparison of nearest neighbor retrieval results between
+NeCoandDINOv2RonPascalVOC.Foreachquerypatch,NeCoretrievesmorerelevantandprecise
+nearestpatches,accuratelyidentifyingpatcheswithinthesameobjectandobjectparts.
+19(a)DINOv2R
+Query Retrieved Nearest Neighbors
+(b)NeCo
+Query Retrieved Nearest Neighbors
+Figure5:Borderlinecases.NeCo,sometimesretrievespatchesofsimilarpartsfromdifferentobjects.
+Forexample,apatchfromabicyclewheelmightbematchedwithamotorcyclewheel. Additionally,
+sincewerelyoncroppingtoinducenearestneighborsimilarity,smallobjectsintheinput,whichmay
+notsignificantlyaffecttheoverallsemantics,canalterthesemanticsatthepatchlevel,leadingto
+unexpectednearestneighbors,asseeninthecaseofthesheepphoto.
+20(a)Input
+(b)DINOv2R
+(c)NeCo
+Figure6: DINOv2RandNeCooverclusteringvisualizationsonPascalforK=100. NeColocalizes
+objectsmorepreciselywithtighterboundaries.
+21Figure7: FullyunsupervisedsegmentationonPascalforK=21. Weextractforegroundmasks
+usingtheCBFE+CDmethod,followingtheapproachoutlinedin[1]. Thesemasksarethenclustered
+intothenumberofobjectspresentinthePascaldataset,withK =21. Asdemonstrated,NeCo yields
+distinctandaccuratesegmentationmapsforeachobject.
+22D DatasetDetails
+Pascal VOC 2012 [65] This dataset, the latest split version of trainaug, features 10,582 images
+andtheirannotationsdistributedacross21classes,withonereferringtothebackgroundclass. The
+validationsetconsistsof1,449images. Following[19]weignoreunlabelledobjectsaswellasthe
+boundaryclass. Moreover,forhyper-parametertuningofthefullyunsupervisedsegmentationmethod
+[1]thatweapplyonourmethod,weusethePVOC12trainsplitwith1464images. Figure3shows
+thedatasetimagesoverlaidbytheannotations.
+PascalContext[52]Thisscene-centricdatasetincludes4,998trainingimagescovering60semantic
+classes,includingthebackground. Thevalidationsetconsistsof5,105images. Weusethisdataset
+fortheLinearSegmentationandSegmenterexperiments,viatheMMSegmentationLibrary[68].
+COCO-Stuff164K[56]Thisscene-understandingdatasetincludeslabelsacross91"stuff"categories
+and80"things"categories. Thetrainingsetcomprises118,000images,andthevalidationsetcontains
+5,000images. Wefollowthesamesetupas[1]andthusweusetheCOCObenchmarkintwowaysto
+isolatefurtherthegivenobjectdefinitions.
+Concisely,webeginbyextractingstuffannotations,whichrefertoobjectswithoutclearboundaries
+andoftenfoundinthebackground,usingtheCOCO-Stuffannotations[56]. Then,weconsolidate
+the91detailedlabelsinto15broaderlabels,asdescribedin[67]andweassignthegenerallabel
+“other”tonon-stuffobjects, asthislabellacksspecificsemanticmeaning. Non-Stuffobjectsare
+ignoredduringtrainingandevaluation. Weindicatethisversionofthedatasetwithinourworkas
+COCO-StuffusedinOverclusterringandLinearSegmentationinAppendixA.2.
+Next,weextractforegroundannotationsutilizingthepanopticlabelsfrom[70]. Wecombinethe
+instance-levelannotationsintoobjectcategoriesusingascriptprovidedbytheauthors. Additionally,
+weconsolidatethe80detailedcategoriesinto12broadobjectclasses.Thebackgroundclassisignored
+duringtrainingandevaluation. ThisleadsastotheCOCO-Thingversionofthedatasetwhichweuse
+fortheOverclusterringandourLinearSegmentationinAppendixA.2.
+ADE20K[54]Thedatasetisacollectionofimagesusedforsemanticsegmentationtasks,featuring
+finelydetailedlabelsacross150uniquesemanticcategories. Someofthecategoriesincludestuffs
+likeskyandgrass,aswellasdistinguishableobjectslikeperson,andacar. Overall,itincludesa
+widevarietyofscenes,with20,210imagesinthetrainingsetand2,000imagesinthevalidationset,
+makingitoneofthemostchallenginganddiversedatasetsforsceneunderstanding. Weusethefull
+datasetinourexperiments. Inourexperiments,weignoretheotherslabelofthedataset.
+Imagenet[61]Thedataset,isalarge-scalevisualdatabasedesignedforuseinvisualobjectrecogni-
+tionresearch. Itcontainsover1.3millionimagescategorizedinto1,000objectclasses. Eachimage
+islabeledwithdetailedannotations,makingitacriticalresourcefortrainingandevaluatingmachine
+learningmodels,particularlyinthefieldofcomputervision. Inourwork,wealsoexploretraining
+onpartoftheImagenet,theImagenet100kthatconsists100Kimagesacross100classes,fromthe
+originaldataset.
+23
