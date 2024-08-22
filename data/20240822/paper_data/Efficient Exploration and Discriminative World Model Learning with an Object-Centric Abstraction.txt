@@ -1,0 +1,1707 @@
+Efficient Exploration and Discriminative World Model
+Learning with an Object-Centric Abstraction
+AnthonyGX-Chen KennethMarino RobFergus
+CenterforDataScience,NYU GoogleDeepMind NYU
+anthony.gx.chen@nyu.edu NewYorkCity,NY NewYorkCity,NY
+Abstract
+Inthefaceofdifficultexplorationproblemsinreinforcementlearning,westudy
+whethergivinganagentanobject-centricmapping(describingasetofitemsand
+theirattributes)allowformoreefficientlearning. Wefoundthisproblemisbest
+solvedhierarchicallybymodellingitemsatahigherlevelofstateabstractionto
+pixels,andattributechangeatahigherleveloftemporalabstractiontoprimitive
+actions. This abstraction simplifies the transition dynamic by making specific
+futurestateseasiertopredict. Wemakeuseofthistoproposeafullymodel-based
+algorithm that learns a discriminative world model, plans to explore efficiently
+withonlyacount-basedintrinsicreward,andcansubsequentlyplantoreachany
+discovered(abstract)states.
+Wedemonstratethemodel’sabilityto(i)efficientlysolvesingletasks,(ii)transfer
+zero-shotandfew-shotacrossitemtypesandenvironments,and(iii)planacross
+long horizons. Across a suite of 2D crafting and MiniHack environments, we
+empiricallyshowourmodelsignificantlyout-performsstate-of-the-artlow-level
+methods(withoutabstraction),aswellasperformantmodel-freeandmodel-based
+methodsusingthesameabstraction. Finally,weshowhowtoreinforcelearnlow
+levelobject-perturbingpolicies,aswellassuperviselearntheobjectmappingitself.
+1 Introduction
+Sincetheinceptionofreinforcementlearning(RL),theproblemsofexplorationandworldmodel
+learninghavebeenmajorroadblocks. RLrequiresanagenttolearnbothbasicmotorabilities,and
+explorelongsequencesofinteractionsintheenvironment. Currently,wehavemadetremendous
+progress on problems of low-level control for short-horizon problems. With well defined single
+tasks,givenenoughsamples(ordemonstrations),therearewell-developedwaysoftraininglowlevel
+policiesreliably(Schulmanetal.,2017;Hafneretal.,2023).
+Perhapsabetterwaytoexplorecomplexenvironmentsistotreatthehigh-levelexplorationproblem
+separately. Weincreasinglyhavetheabilitytogetsemanticallyrichabstractions: viarepresentation
+learning(Locatelloetal.,2020), objectsegmentation(Kirillovetal.,2023), andvisual-language
+models (Alayracetal.,2022);evenindifficultcontrolsettingssuchasrobotics(Liuetal.,2024). In
+addition,withtherecentexplosioninthefieldofnaturallanguageprocessing,peopleareincreasingly
+interestedinaddressingRLenvironmentsonasemanticlevel(Andreasetal.,2017;Jiangetal.,2019;
+Chenetal.,2021). Thus,weaskatimelyquestion: if theagenthasagoodabilitytoperceiveobjects,
+whatmorecanwedootherthantabularasalearningatthelevelofpixelsandprimitivemotoractions?
+Inthiswork,wefocusonexplorationandworldmodellingatasemanticlevel. Weexploreasimple
+yetflexibleabstraction: inadditiontotheagent’srawobservations(e.g. pixels),itseesanabstract
+representation of a set of items and their attributes (i.e. object states). We find that to navigate
+thesetwolevelseffectively, itisbesttoconstructaproxydecisionprocess(Ab-MDP)withstate
+andtemporalabstractionsatthelevelofobjects,withahandfulofcompetentobject-perturbinglow
+Preprint.Underreview.
+4202
+guA
+12
+]GL.sc[
+1v61811.8042:viXralevelpolicies. Byconstruction,dynamicsonthissemanticlevelbecomesstructured,andwemake
+useofthistodesignadiscriminativemodel-basedRLmethodthatlearnstopredictsifaspecific
+objectperturbationwillbesuccessful. Ourmethod,Model-basedExplorationofabstractedAttribute
+Dynamics(MEAD),isfitwithasimpleobjectivetomodelsemanticleveltransitions,resultingin
+stablemodelimprovementswithnoneedforauxiliaryobjectives. Itisfullyonline: theagentplansto
+explorewithoutanextrinsicrewardtolearnabouttheworlditinhabitsusingacount-basedobjective.
+The same model can be used at any point to plan to solve downstream tasks when given a goal
+function,withouttheneedtotrainpolicyorvaluefunctions.
+Themainresultsofthisworkinvestigatesdecisionmakingatthesemanticlevelasdefinedbythe
+Ab-MDP,assumingaccesstoanobjectcentricmapandobjectperturbingpolicies. Weempirically
+evaluateourmethodinasetof2Dcraftinggames,andMiniHackenvironmentsthatareknownto
+beverydifficulttoexplore(Henaffetal.,2022). Wethenshowhowtolearncomponentsofthe
+Ab-MDPwhenitisnotgiven: byreinforcementlearningobjectperturbationpoliciesgivenanobject
+mapping,andsupervisedlearningoftheobjectcentricmappingitself.
+Themaincontributionsofthisworkare:
+• WedefinetheAb-MDP:asimplehuman-understandablehierarchicalMDP.Thestructureof
+thisabstractionallowsforpre-trainedorfrom-scratchvisualencoderstobeused. Italso
+allowsourmethod(MEAD)touseadiscriminativeobjectiveforworld-modellearning.
+• We introduce our model-learning method (MEAD). MEAD uses a stable discriminative
+objectivetomodelitemattributechanges,whichismoreefficientatlearningthangenerative-
+basedbaselinesandalsoallowsforefficientinference-timeplanning.
+• WeempiricallyshowMEADextractsaninterpretableworldmodel,accuratelyplansover
+long horizons, reaches competitive final performance on all levels with greater sample
+efficiencytostrongbaselines,andtransferswelltonewenvironments.
+• WedemonstratehowtolearnpartsoftheAb-MDPwhenitisnotgiven: byreinforcement
+learningobject-perturbingpolicies,andsupervisedlearningtheobject-centricmapping.
+2 ProblemSetting
+We begin by considering a (reward free) “base” Markov Decision Process (MDP) as the tuple
+⟨S,A,P⟩, with state space S, primitive action space A, and transition probability function P :
+S×A×S →[0,1](Puterman,1994). Belowweconstructthe“abstracted”space.
+2.1 Abstractstatesandbehaviours
+Wegivetheagentadeterministicobject-centricmappingM: S → X fromlowlevelobservations
+toanabstractstateX ∈ X. Theabstractstateisadiscretesetofitems,eachhavingform(item
+identity, itemattribute). Denotethei-thiteminthis(ordered)setasx(i), eachx(i) = (α(i),ξ(i))
+consistsofanitem’sidentityα(i)(e.g. “potion”),andattributeξ(i)(e.g. “ininventory”). Inpractice,
+eachX isrepresentedasaN ×(d +d )matrixcontainingN items(includingemptyitems)
+iden attr
+eachhavingad dimensionalidentityembeddingandd dimensionalattributeembedding.
+iden attr
+DenoteaspaceB ofobjectperturbationpolicieswhichwecallbehaviours. Eachbehaviourhas
+anassociatedπ :S →A. Abehaviourb=(α(i),ξ′)describesasingleitemidα(i)andadesired
+b
+newattribute. ForN objectsandmattributes,thereareN ×msingleitembehaviours.1 Notall
+behaviourschangesα(i)tohaveξ′(duetothechangebeingimpossiblefromcurrentX,orhaving
+abadπ ). Abehaviouriscompetentifexecutingbehaviourpolicyπ fromstateS, M(S) = X,
+b b
+resultinarrivingatstateS′, M(S′)=X′,(α(i),ξ′)∈X′,withinkstepswithhighprobability. See
+AppendixB.1formoredetails. Executingcompetentbehavioursleadtopredictablechanges.
+Forthemainexperimentsweassumeaccessto(learnedorgiven)abstractstatesandbehavioursand
+buildontop. WeaddresslearningbothinSection4.3.
+2.2 AbstractedItem-AttributeMDP
+WenowdefineanAbstractedItem-AttributeMDPusingtheabstractstateX andbehaviourBspaces,
+whichwerefertoinbriefasAb-MDP.TheabstractmappingMprovidesanstateabstraction. We
+1Herewedefinesingleitembehaviours.Behaviourscanalsobemultiitems,seeAppendixB.1.3.
+2furtherdefinetheAb-MDPtohaveacoarsertemporalresolutionthanthelowlevelMDP:anabstract
+transitiononlyoccurswhenanabstractstatechanges,orifthestatestaysthesamebutklowlevel
+stepselapses(seeDefinitionB.1formoredetails).
+Specifically,theAb-MDPisthetuple⟨X,B,T⟩,withabstractstatesX,abstractbehavioursB,and
+transitionprobabilityfunctionT : X ×B×X → [0,1]. T(X′|X,b)describestheprobabilityof
+beinginabstractstateX′whenstartingfromX,executingbehaviourb,andwaitinguntilanabstract
+transitionoccurs. Figure1providesanexampleofanabstracttransitionandassociatedlowlevel
+steps. TheAb-MDPcanbeinterpretedasOptions(Suttonetal.,1999;Precup,2000),whichwe
+discussinAppendixB.1.1.
+Thereisanintuitiverelationshipbetweenthecompetenceofabehaviourandthetransitionprobability
+functionT. Forinstance,executinganincompetentbehaviourbfromabstractstateX willlikely
+leadtothenextabstractstatebeingitself,X =X ,orsomehard-to-predictdistributionovernext
+t+1 t
+states. Executingacompetentbehaviourbleadtoapredictablenextstatethatcontainstheproposed
+attributechangewithhighprobability.
+Inanycase,wecantreattheAb-MDPasaregularMDPusestandardRLalgorithmstosolveit. This
+canbeviewedassolvingaproxyproblemofthelowlevelbaseMDP.Fortheremainderofthis
+paper,allmethodsaretrainedexclusivelywithintheAb-MDPunlessstatedotherwise.
+Item Ids Item Attributes id attr ABSTRACTED MDP id attr
+stairs in world
+player standing on
+potion in inventory
+Symbols Map Map Map Map
+abstract
+behavi-
+our
+policy
+primitive
+action N"W ete Hlc ao cm k"e to LOW LEVEL MDP " aY po ou
+t
+is oe ne
+"
+here
+Figure1: AnexamplestatetransitioninanAb-MDP(heredefinedinMiniHack). Abstractstates
+aresetsof(itemidentity,itemattribute),andbehaviourb havestructure(item,newattribute). An
+1
+abstractstatecancorrespondtomultiplelowlevelstates,andanabstractbehaviourmultipleprimitive
+actions. Weprovidelegendsfortheitemidentitiesandattributesillustrated(leftrectangles).
+3 Methods
+WhileanystandardRLmethodscanbeusedtosolvetheAb-MDP,wedevelopamethodtomore
+fullymakeuseoftheitem-attributestructureanditem-perturbingbehaviours. Specifically,wedesign
+amodel-basedmethodthatefficientlyexploresandlearnanaccuratefullworldmodel. Ourmethod,
+Model-basedExplorationofabstractedAttributeDynamics(MEAD)canbebrokendownintothree
+components: (i)Aforwardmodelf (X,b),(ii)Arewardfunctionr(X,b),(iii)Aplannerwhich
+θ
+maximizestherewardfunction.
+OurforwardmodeltakesinthecurrentabstractstateX andbehaviourb,andpredictstheprobability
+ofsuccessofthechangeproposedbytheabstractbehaviour. Wedescribetheprocedurefortraining
+theforwardmodelinSection3.1.
+Weuseadifferentrewardfunctionandplannerattrainingversusinferencetime. Duringtraining,
+theagentlearnsanaccurate(abstract)worldmodelwithoutrewards. Weuseanintrinsicreward
+function r (X,b) that encourages infrequently visited states, and plan using Monte-Carlo Tree
+intr
+Search(MCTS)towardthesestates. Section3.2describestheexplorationphaseindetail.
+Atinferencetime,ouraimistoreachaparticularabstractstate. Wedefineourrewardfunctionr
+goal
+as1forthegoalabstractstatesand0forallothers. Becauseourforwardmodelhasbeentrained
+to accurately estimate state transitions, we simply run Dijkstra’s algorithm using f and r to
+θ goal
+maximizeexpectedreward. Section3.3describesthis.
+33.1 Forwardmodel
+Aforwardmodeltakesinacurrentabstractstateandbehaviourtomodelthedistributionovernext
+states,X ∼p(X |X ,b ). Typically,thisdistributionhassupportoverthefullstatespaceX.
+t+1 t+1 t t
+Weobservethatbyconstruction,Ab-MDPconsiderscompetentpoliciesasonesthatchangesingle
+item-attributes. Thus,wemakethemodellingassumptionthatanabstracttransitionwouldresult
+ineither(i)asingleobject’sattributechanging(asspecifiedbytheexecutedbehaviour),or(ii)the
+abstractstateremainingunchanged. Itisofcoursepossibleformultipleitems’attributestochangeat
+once,orforanunexpecteditem’sattributetochange—weshowwithacompetentsetofpoliciesand
+re-planningourmodelisrobusttothisinpracticeinAppendixB.2.2.
+Discriminativemodelling Givenanabstract 1
+transition(X ,b ,X ),weconsiderthistran- id attr
+t t t+1
+sitionsuccessfulifthenextabstractstatecon- .5
+tains the attribute change proposed by the be- 0
+haviour: (α(i),ξ′) ∈ X
+t+1
+for b
+t
+= (α(i),ξ′). ...
+Executingacompetentpolicyhasahighprob- ... ...
+abilityofleadingtoasuccessfultransition.
+Figure2: Theforwardmodelf predictstheprob-
+Wemodelthissuccessprobabilitydirectly, θ
+abilitypthatthebehaviourb issuccessfulfrom
+q(X ,b )=Pr(x′ ∈X |X ,b ), (1) t
+t t t+1 t t stateX . Thenextstatedistributionismodelledas
+t
+wherex′ =b =(α(i),ξ′). abinarydistribution(Equation3).
+t
+Werefertothiswayofmodellingasdiscriminativeworldmodelling,whichmodelstheprobability
+that the state change specified by a behaviour is successful. As behaviours are by construction
+item perturbations, we can view this as asking a question about allowable item changes (“can I
+changethisitemtohavethisattribute?”). Thisisdifferentfromgenerativeworldmodellingwhich
+modelsPr(X |X ,b )withoutanyrestrictionsonpossiblefuturestates(i.e. “whatareallpossible
+t+1 t t
+outcomesofmyactioninthisstate”). Wefindthisinductivebiasleadstomoredataefficientlearning
+andmulti-stepplanning(Section4.4.1).
+ForwardPrediction Wecanmodelthenextstateafterasuccessfultransitionas,2
+X′ =∆(X,b)=X\x(i)∪(α(i),ξ′), foranyb=(α(i),ξ′). (2)
+Then,givensuccessprobabilityfunctionq(Equation1),wemodelthenextstatedistributionas:
+(cid:26)
+∆(X ,b ) withprobabilityq(X ,b ),
+Pr(X |X ,b )= t t t t (3)
+t+1 t t X withprobability1−q(X ,b ).
+t t t
+SeeFigure2foranexample. Asmentionedabove,ourmodelisrobusttocaseswheremultipleitems
+changethroughre-planning(AppendixB.2.2).
+ModelLearning Weusemodelfunctionclassf : X ×B → [0,1]withtrainbaleparametersθ,
+θ
+andfitittoapproximatesuccessprobability(Equation1). Wecanestimatetheempiricalsuccess
+probabilityfromadatasetoftrajectoriessimplybycounting,andfitabinarycrossentropyloss. We
+foundthistobeastable,simple-to-optimizeobjective. MoredetailsinAppendixC.1.
+3.2 Planningforexploration
+Wewanttheagenttoexploreindefinitelytodiscoverhowtheworldworksandrepresentitinits
+modelf . Weuseacount-basedintrinsicrewardintroducedinZhangetal.(2018)whichencourages
+θ
+theagenttouniformlycoverallstate-behaviours(detailsinAppendixC.3):
+(cid:112)
+r (X,b)= T/(N(X,b)+ϵT), (4)
+intr
+whereN(X,b)isacountofthenumberoftimes(X,b)isvisited,T isthetotalnumberof(abstract)
+time-steps,andϵ=0.001asmoothingconstant.
+WeuseMonte-CarloTreeSearch(MCTS)tofindbehaviourstoreachstatesthatmaximizesEquation4.
+Thisisdonewithinthepartiallylearnedmodel’simaginationandallowtheagenttoplantoward
+novelstatesmultiplestepsinthefuture. Theagenttakesthefirstbehaviourproposed. Further,since
+behavioursdonotalwayssucceed,oneneedsmultiplestate-visitationstoestimateq(X,b)well. We
+foundMCTSexplorationdiscoversmorenoveltransitionthanexploringrandomly(Section4.4.2).
+2Weusesetnotationstodenoteremovaloftheitemx(i) =(α(i),ξ(i))fromthesetX,andreplacingitwith
+newitem(α(i),ξ′).
+4
+etats
+txen
+ytilibaborp0.997 0.982
+0.99
+0.988
+Model 0.992
+Prediction
+successful 0.002
+transition 0.001 0.01
+un-successful
+transition
+(a)TaskagnostictrainingusingMCTSandacountbased (b)Dijkstraplanningatevaluationtimetomaxi-
+rewardtoexploreandlearntheworldmodel mizesuccessprobabilityofreachinganygoalstate
+Figure3: Planningwithinmodel’simaginationtobothexplore,andtoreachanygoalstate.
+3.3 Planningforgoal
+Oncetheagenthassufficientlyexploredtheenvironmentandiswell-fitted,themodelf usually
+θ
+containsasmallsetofhighsuccessprobabilityedgesbetweenabstractstates(seeFigure3b;most
+item-attributechangesaregenerallyimpossible).Wecanusethismodelf toplantoreachanydesired
+θ
+(abstract)worldstate. Asourmodelisnottrainedtomaximizeexternalrewards,wesimplygiveita
+functionthattellsitwhenitisinadesiredstate: r (X)=1ifX isagoalstate,and0otherwise.
+goal
+WeuseDijkstra’salgorithmwhichfindstheshortestpathinaweightedgraph. Weturnourworld
+modelintoagraphweightedbysuccessprobabilities,usinganegativelogtransform:
+d(X,∆(X,b))=−logf (X,b), with∆(X,b)definedinEquation2. (5)
+θ
+Thus,findingtheshortestpathbetweencurrentandgoalstatereturnsanabstractbehavioursequences
+thatmaximizestheprobabilityofsuccessfullyreachingthegoal.
+4 Results
+Weusetwosetsofofenvironment. Oneis2Dcrafting,whichrequiresagenttocraftobjectsfollowing
+aMinecraft-likecraftingtreewitheachcraftingstagerequiringmultiplelowlevelactions(Chen
+etal.,2020). SecondisMiniHack(Samvelyanetal.,2021),whichcontainsaseriesofextremely
+difficultexplorationgames(Henaffetal.,2022). WedetailtheenvironmentsfurtherinAppendixD.
+Forbaselines,weusestrongmodel-free(asynchPPO,(Schulmanetal.,2017;Petrenkoetal.,2020))
+and model-based (Dreamer-v3, (Hafner et al., 2023; Sekar et al., 2020)) baselines. More details
+inAppendixE.AllthemethodsaretrainedintheAb-MDP.Wereportlowlevelstepsandplot95
+confidenceinterval. SeeAppendixGforotherexperimentaldetails.
+4.1 Learningfromscratchinsingleenvironments
+2 Steps 3 Steps Levitate-Boots Levitate-Potion Freeze-Horn 1.00 1.00 1.0 1.0 1.0
+0.75 0.75 0.5 0.5 0.5
+0.50 0.50
+0.0 0.0 0.0
+0.25 0.25
+0.00 0.00 0.5 0.5 0.5
+103 105 107 103 105 107 104 105 106 107 104 105 106 107 104 105 106 107
+4 Steps Freeze-Wand Freeze-Random
+1.00 Model-Based (ours, 1.0 1.0 Model-Based (ours,
+0.75 online planning) 0.5 0.5 online planning) 0.50 M (Do rd ee al m-B ea rs -ve 3d ) 0.0 0.0 M (Do rd ee al m-B ea rs -ve 3d )
+0.25 Model-Free (PPO) Model-Free (PPO) 0.00 20k 500k 1e8 Low level (PPO) 0.5 150k 10mil50 0.5 E3B
+103 105 107 104 105 106 107 104 105 106 107 IMPALA, RND, ICM
+Env Frames (Log Scale) Env Frames (Log Scale) Env Frames (Log Scale)
+(a)2Dcraftinggames (b)MiniHackskillgames
+Figure4: ResultsingamestrainedfromscratchinAb-MDP.Trianglesandstarsdenotelow-level
+onlymethods. ForMiniHack, wealsoshowthefinalperformanceofstate-of-the-artexploration
+methodsinthelowlevelMDP(star/triangle),fromHenaffetal.(2022). X-axisonlogscale.
+Figure4showsthefrom-scratchAb-MDPtrainingresultsforstrongbaselinesandourmethod. We
+seethatDreamer-v3,astate-of-the-artmodel-basedmethod,ishighlysampleefficient. PPO,amodel-
+freemethod,stablyoptimizesthereward,butatadatabudgetofmorethantwoordersofmagnitude
+5
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM(hundredsofthousandsversus10million). OurmethodlearnstheAb-MDPwithanadditionalorder
+ofmagnitudesampleefficiencyimprovementcomparedtothealreadyefficientDreamer. Wealso
+referthereadertoFigure3b(whichisacleanillustrationofthesamedatapresentedinAppendixF.6)
+foranexampleoftheinterpretableworldmodelwecanextractfromMEAD.
+Forreference,weplottheperformanceforSOTAalgorithmsinthebaseMDP(withouttheAb-MDP)
+astrianglesandstars. InparticularinMiniHacktasks(Fig.4b),model-freemethodswithrandomand
+globalexplorationbonuses(IMPALA,RND,ICM)performpoorlyevenafter50millionsteps,and
+methodsusingepisodicexplorationbonusperformbetter(E3B).Nonetheless,allofthemareless
+efficientthantheleastefficientmethodtrainedontheAb-MDP.
+TheseresultsshowthatAb-MDPhelpssimplifytheproblem,withallmethodsreachingreasonable
+performances—a feat not achievable by most methods trained in the low level MiniHack MDP
+(Henaffetal.,2022). However,wealsoseethattheproblemisstillnon-trivial,withthemodel-free
+baselinestillrequiringmillionsofframestoachievesuccess. Ourmethodreachesthesamepeak
+performanceasthemodel-freemethodwhileusingfewersamplesthanthemodel-basedbaseline.
+4.2 TransferandCompositions
+1.0 Model based (ours, 1.0
+0.8 no pretraining)
+0.6 0.8 Model based (ours, 0.5
+0.5 count-based pretrain)
+0.4 0.2 Dreamer-v3 0.0 PPO at 20mil
+0.2 (no pretrain) 0.0 0.0 Dreamer-v3 0.5
+-0.2 (count-based pretrain)
+-0.2 Dreamer-v3 0 50000 100000 150000 200000
+-0.4 -0.5 (disagreement pretrain) Env Frames
+-0.8 Dreamer-v3 Model based (ours, no pretrain) Dreamer-v3 (no pretraining)
+0 E2 n0 v0 0 F0 ram40 e0 s00 0 2 E0 n0 v0 0 Frames40000 (reward-based pretrain) M pro ed tre al ib na ins ge d in ( o Fru er es z, e2 -0 R0 ak n dom) D prr ee ta rm aine ir n-v g3 i n(2 F0 r0 ek e ze-Random)
+(a)Sandbox (b)Freeze-Randomtransfer (c)Compositionalenvironment.
+Figure5: Transferexperimentsandadifficultcompositionalenvironment.
+Next,sincetheAb-MDPabstractionmodelsobjectidentitiesandsharedattributes,weevaluateif
+theabstractlevelmodelscantransferobjectknowledgetonewsettings. Hereweexclusivelyusethe
+MiniHackenvironmentsduetotheirrichrepertoireofobjecttypesandhigherdifficulty. Notewe
+runeachtransferexperimentsinmultipleenvironments;astheresultissimilar,wereportasingle
+illustrativeenvironmentinFigure5forbrevityandprovidefullresultsintheAppendixFigure16.
+Sandbox transfer We first place the agent in a “sandbox” environment where all objects are
+spawnedwithsomeprobability(AppendixD.2.1). Theagentisallowedtointeractwiththeenviron-
+mentwithonlyanexplorationreward(notask-specificreward)for200kframes.Wethenfine-tunethe
+agentineachoftheenvironments.Forourmodel,wecontinuetotrainf withinthenewenvironment.
+θ
+ForDreamer-v3,wetransferonlytheworldmodel(encoder,decoderanddynamicsfunction)and
+re-initializethepolicyandrewardfunctions.3 Resultsforallfiveenvironmentsfollowsimilartrends,
+thusweshowarepresentativeexampleinFigure5aandpresentthefullsetinFigure16a.
+Surprisingly,Dreamer-v3trainedwithbothcount-anddisagreement-basedintrinsicrewardsfails
+togetanymeaningfulrewardsintheallocatedfine-tuningbudget(Figure5a,red&orangecurves),
+althoughtrainingforlongerseemstoshowasomereward—indicatingnegativetransfer(seeAp-
+pendixF.1.2). Similarly,themodel-freePPOpolicyshowsnegativetransfer—reachinglowerperfor-
+mancewiththesamedatabudgetascomparedtotrainingfromscratch(resultsinAppendixF.1.1
+sincex-axisindifferentorderofmagnitude). Apossibleexplanationiswhiletheagentobserveall
+objecttypes,thedatadistributionisdominatedbyseeingmoreobjectsonaverageinthetraining
+environmentthanintheevaluationenvironments,thuspresentingadistributionshift. Incontrast,our
+modelexhibitsgoodzero-shotperformance,andreachesoptimalperformanceefficiently.
+TohelptheDreamer-v3baselinefurther,wegiveitarewardfunctionto“use”theitemsseeninthe
+pre-trainingsandboxenvironment. Thisisakindofprivilegedinformationwhichbiasesthemodel
+representationtobettermodeltheevaluation-timetask. WeobservethatthisvariantofDreamer-
+v3 exhibits positive transfer, hinting at Dreamer’s representatin reliance on the reward function.
+Nevertheless,itdoesnotexhibitthesamedegreeofzero-shotorfine-tuningcapabilityasourmodel.
+3Thepointofthisexperimentistoevaluateworldknowledgetransfer. Nevertheless,fine-tuningtheex-
+ploratoryrewardfunctionandpolicyalsoachievesnobetterperformance.
+6
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeMTransferacrossobjectclasses Wefurtherevaluatetheabilityofthemodelstotransfertonew
+objecttypes. Forexample,wouldamodellearntouseapotionbetter,afterithaslearnedtousea
+freezewand,sincetheabstractlevelinteractionsoftheseobjectsaresimilar(theagentcanstand
+ontopoftheseobjects,pickitup,andusethem)? Wetake200kframecheckpointsintheFreeze
+Randomenvironmentandre-trainthemodelintheother4environmentsforanadditional50kframes.
+WeagainshowonerepresentativecomparisoninFigure5bandpresentthefull4-environmentsresult
+inFigure16b. Weseeourmodelexhibitsreasonablezero-shotperformanceandimprovesfurther
+throughfine-tuning. Similartothesandboxenvironment,weobservethatexploration-basedtraining
+ofbothPPO(resultsplottedinAppendixF.1.1duetox-axisbeingindifferentorderofmagnitude)
+andDreamer-v3exhibitsnegativetransferinoursetting,withbothmethodseventuallyachieving
+betterrewardsbutslowerthantrainingfromscratch.4 Weagainpre-trainDreamer-v3withprivileged
+rewardinformationthatmatchesthedownstreamtask,butstillrequiresgeneralizationtonovelobjects.
+Weseethatingeneralthiswayoftrainingdreamerresultedinpositivetransfer–itlearnstoreacha
+higherrewardwithfewersamplescomparedtotrainingfromscratch.
+It is somewhat surprising that our model transfer so well zero-shot to completely new objects in
+Levitate-Boots and Levitate-Potion. We analyze this further in Appendix F.5: for (item id, item
+attribute) vectors with unseen ids, we find the model internally cluster them by object attributes,
+whichgeneralizesfromFreezeobjectstoLevitateobjects.
+Compositional planning environment Finally, we designed an environment similar to the 5
+difficultMinihackexplorationlevels,butwiththerequiredplanningdepthtwiceaslong.5 Thisis
+anevenmorechallengingtaskwheretheagentneedstopickupbothafreezeandalevitateobject,
+makeitselflevitate(usingthelevitateobject), thencastafreezingspelltoterminatetheepisode.
+Further,thelevitatespellmustbecastafteralltheobjectshavebeenpickedup(sincetheagentcannot
+pickupobjectswhilelevitating),butbeforethefreezespelliscast. Thisisachallengingenvironment
+requiringprecisesequencesofabstractbehaviours.
+WeobserveinFigure5cthatwhenpre-trainedonFreezeobjects,ourmodeltrainsmorestablyin
+thisenvironment(butnolongershowsgoodzero-shotresults),succeedingmajorityoftimes. Our
+fromscratchmodelsolvesthistaskwithbetterrewards. Ourmethodalsolearnsahighlycomplexyet
+stillinterpretableworldgraph,withasimplifiedversionshowninFigure31. Incontrast,allother
+methods,withandwithoutpre-training,donotfindthecorrectsolutionatall,butinsteadarestuckat
+a0rewardlocalminima.
+4.3 Learningobjectperturbingpoliciesandobject-centricmap
+Behaviour Success Episode Reward Encoder Accuracy Episode Reward
+1.0
+0.5 0.5 0.75
+0.4 0.8 0.50
+0.3 0.0 Crafted 0.6 0.25 Learned Neural
+0.2 0.5 Policies 0.4 0.00 Encoder
+Learned Ground Truth
+0.1 1.0 Policies 0.2 0.25 Encoder
+0.0 0.0 0.50
+0 1 2 0 20000 40000 60000 Model 0 20000 40000 60000
+Low Lvl Frames1e7 Low Level Frames Low Level Frames
+(a)LearningB (b)Perf.withlearnedB (c)Performancewithlearnedobjectmapping
+Figure6: PerformanceusinglearnedAb-MDPcomponents. Allerrorbarsdenote95confidence
+intervalofmeanwithexceptionofencoderaccuracywhichshows1standarddeviation.
+Uptothispointwehaveassumedtheexistenceofanobject-centricmappingandcompetentbehaviours
+(Sec.2.1),whichcanbecombinedwithourmethodforefficientexplorationandworldmodellearning.
+Wenowdemonstratehowonemightlearnbothcomponents.
+4.3.1 Learninglowlevelpolicies
+WeobservelowlevelpoliciescanbelearnedwithRLifanobject-centricmapexists. Specifically,we
+rewardtheagentforachievinganabstracttransitionsuccessfully: fromX ,ifexecutingbehaviour
+t
+b = (α(i),ξ′)untilanabstracttransitionresultsinX containingitem(α(i),ξ′),theassociated
+t+1
+policyπ getsarewardof+1(else-1). Wetrainlowlevelpoliciestoreplaceallbehavioursinthe
+b
+MiniHacksingletaskenvironments,andobservethesuccessprobabilitycanbestablyoptimizedwith
+4PPOandextendedDreamer-v3curvesinAppendixF.1.
+5Previousenvironmentsneedaminimumofthreeabstracttransitionstocomplete;thisoneneedsatleastsix.
+7
+borP
+sseccuS
+egarevAPPO(Fig.6a;noteitdoesnotreach1asitisaveragedoverallattemptedbehaviours,somearefor
+impossibletransitions). SolvingAb-MDPwithlearnedbehavioursperformsimilarly(Fig.6b). The
+reported2DCraftingresults(Section4.1)alreadyuselearnedbehaviours. DetailsinAppendixF.2.
+4.3.2 Learningobject-centricmap
+Ifwewishtoalsolearntheobject-centricmapping,wecandosousingsupervisedlearning. We
+generateadatasetof100ktransitionsusingarandompolicyinMiniHack’sFreeze-Hornenviron-
+ment, andusethehand-craftedmappingtoprovidegroundtruthabstractstatelabels. Wetraina
+neural net to produce the abstract state X from S. We compare planning performance using the
+learnedobject-centricmappinginFigure6candobserveitreachessimilarperformanceastheground
+truthmapping,eventhoughtheencoderisnotperfectinpredictingtheabstractstates. Wediscuss
+alternativewayofgettingthismappinginSection6.
+4.4 Ablations
+Weablatemajordesignchoicesbelow,withadditionalablationsinAppendixF.3.
+4.4.1 Generativevs. DiscriminativeModels
+A common way of learning a forward model is to model 0.8
+the next state generative-ly, i.e. Xˆ t+1 ∼ f(X t,b t), with 0.6
+supportovertheentirestatespaceX. InMEAD,weopted 0.4
+toconstrainthepossiblefuturetoeitherbethesameasthe 0.2
+currenttime-step,oronewherethereisasingleitemchange 0.0
+(Fig.2). Thishasthedisadvantageofbeinglessflexible,but 0.2 D ai ts ic vr eimin-
+theadvantageofbeingeasiertomodel. Toisolateonlythe 0.4 Generative
+effectofdiscriminativemodelling,wedesignanexperiment
+100 1000 5000 10000
+where we fit models to the same expert dataset, with the Dataset Size (Transitions)
+only difference being the model type (fit to either predict
+Figure7: Planningperformancewith
+successprobabilityinthediscriminativecase,ortopredict
+discriminativevs. generativemodels
+thedistributionovernextitem-attributesets),whilekeeping
+allothervariablesconstant. Indeed, giventhesame(expert)databudget, adiscriminativemodel
+learnsabettermodelforAb-MDPplanninginthelowerdataregime(Figure7,experimentaldetails
+inAppendixF.3.1).
+4.4.2 Count-basedexploration Number of Discovered
+Object-Attribute Transitions
+We observe using the count-based intrinsic reward (Equation 4)
+withMCTSwasimportantforexploration. Figure8(right)shows 100
+count-based exploration discovering many more valid object at- 80
+tributetransitionscomparedtoarandomlyexploringagent. Corre-
+60
+spondingly,thisleadstoamodelf thatisbetteratachievinggoals
+θ
+(Figure8,left). 40 MCTS (depth=1)
+20 MCTS (depth=4)
+Random Exploration
+4.4.3 Parametricvs. Non-ParametricModels
+0
+Insteadoffittingadiscriminativemodeltosuccessprobability,we 0 30000 60000 90000 120000
+Env Frames
+candirectlyusetheempiricalcount-basedestimatefromadataset
+(anonparametricmodel). ThisisdonetolearnthemodelinZhang Figure8: Effectofcount-based
+etal.(2018). WecomparethischoiceinAppendixF.1.3andshow explorationintheFreeze-Wand
+ourparametricmodelhasbettersampleefficiency,demonstrating environment. MCTS discov-
+thegeneralizationbenefitsofourparametricforwardmodel. ers more unique valid (item
+identity,itemattribute,newat-
+5 RelatedWork tribute)transitions.
+Hierarchical RL Our Ab-MDP is a hierarchical state and temporal abstraction formalism and
+canbeinterpretedasOptions(AppendixB.1). WithintheOptionsFramework(Suttonetal.,1999;
+Precup,2000),Optiondiscoveryremainsanopenandimportantquestion. Existingmethodstypically
+dooptiondiscoveryina“bottom-up”fashionbylearningstructuresfromtheirtrainingenvironments
+(Baconetal.,2016;Machadoetal.,2017;Rameshetal.,2019;Machadoetal.,2021). Incontrast,
+ourAb-MDPuses“top-down”priorknowledgeintheformofobject-perception,anddefineoptions
+thatperturbobjects’attributes.
+Planningwithabstractrepresentations Abstractionisafundamentalconcept(Abel,2022)and
+weselectasubsetofmostrelevantworks. TheAb-MDPcanbeviewedasamorestructuredMDP
+8
+draweR
+edosipEformulationinwhichlearningandplanningissimplified. ThisrelatestoOO-MDP(Diuketal.,2008;
+Keramatietal.,2018),whichdescribesstateasasetofobjectandobjectstateswhichinteractthrough
+relations. AlsorelatedisMaxQandAMDP(Dietterich,1998;Gopalanetal.,2017),whichprovides
+a decomposition of a base MDP into multi-level sub-MDP hierarchies to plan more efficiently.
+Transitiondynamicscanalsobedefinedassymbolicdomainspecificlanguage(Maoetal.,2023).
+Aboveworksrequirepre-specifyingadditionalinteractionrules,functions,andobjectrelationsto
+simplifyplanning,whereasweonlyassumetheabilitytoseeobjectsandtheirattributes,andlearn
+theforwardmodelasaneuralnetwork. MoredistantlyrelatedisVeerapanenietal.(2019)which
+focusmoreonlearninggoodobject-centricrepresentationsratherthaneffectiveusageofanabstract
+level. Nasirianyetal.(2019)tacklessub-policylearningandplanningwithabstraction,focusingon
+implicitlyrepresentingabstractionsratherthanusingsemanticallymeaningfulones. TheDAC-MDP
+(Shresthaetal.,2020)clusterslowlevelstatesinto“corestates”tosolvebyvalueiteration,witha
+focusongettinggoodpoliciesinanofflineRLsettingratherthanabstractworldmodellearning.
+MostsimilarisZhangetal.(2018),whichdoesmodel-basedplanningoverabstractattributes. We
+differinhavingamoreexpressiveabstractionframework: modellingaflexiblesetofobjectsand
+shareableattributes,ratherthanafixed,binarysetofattributesonly. Wealsouseaparametricmodel
+tomoreefficientlylearnandisabletotransferobjectinformationtonewenvironments. Wecompare
+againsttheirnon-parametricapproachandshowbettersampleefficiencyinSection4.4.3.
+RLinsemanticspacesAslanguagemodelshavegrownininterestandsophistication,therehasbeen
+anincreasinginterestinsemanticandlinguisticabstractionsinRL.EarlyworkssuchasAndreasetal.
+(2017)lookedathandcraftedabstractspacessuchaswedoheretoshowthatcreatingabstractions
+allowsforbetterlearningandexploration. OtherworkssuchasJiangetal.(2019);Chenetal.(2021)
+specificallyusenaturallanguageastheabstractspace. Inothers,thelanguagespaceabstractionis
+usedasawayofguidingexplorationTametal.(2022);Guoetal.(2023).
+Model-basedRL OurworkisrelatedtootherworkinModel-basedReinforcementLearning(Sut-
+ton, 1990; Kaiser et al., 2019; Doya et al., 2002). In particular we compare to the Dreamer line
+ofwork(Hafneretal.,2019,2023;Sekaretal.,2020;Mendoncaetal.,2021;Hafneretal.,2022).
+Thesemethodsweredevelopedforapixelssettingandemployatwosteplearningstrategy: learning
+a generative forward model to predicts the next states X′, then learning a policy in imagination.
+Wecomparedirectlytothisinourexperiments,whereweshowthatourmethod(whichemploysa
+discriminativeforwardmodel)learnsmorequicklyandtransfersbetterinoursetting.
+ExplorationinRL Explorationisawell-studiedprobleminRL.Foramoreextensiveliterature
+review,Aminetal.(2021)givesacomprehensivepicture. Mostrelevanttoherearecount-based
+methodssuchasRaileanuandRocktäschel(2020);Zhangetal.(2021). Ourworktakesinspiration
+fromthehardexplorationproblemsfrom Henaffetal.(2022). Therearealsomanydisagreement-
+basedmethodsincludingSekaretal.(2020)andMendoncaetal.(2021);wecomparedirectlytothe
+formerforourDreamerbenchmarkswithpre-training.
+6 Discussion
+InthisworkweintroducetheAb-MDP,whichuseshumanunderstandableobject-attributerelations
+tobuildanabstractMDP.Thisenablesustolearnadiscriminitivemodel-basedplanningmethod
+(MEAD)whichexploresandlearnsthissemanticworldmodelwithoutextrinsicrewards.
+Limitations The major limitation of the work is that the construction of Ab-MDP requires the
+existenceofanobject-centricmapping. Whileweshowhowthesecomponentscanbelearnedin
+Section4.3,learningtheobjectmappingstillrequiresalabelleddataset. Promisingly,thefieldasa
+wholeismovinginadirectionwhereabstractionsarebecomingmoreeasilyobtainable. Forinstance,
+object-centricabstractmapscanbeacquiredusingsegmentationmodels(Kirillovetal.,2023)and
+visuallanguagemodels(Alayracetal.,2022). Similarly,theshort-horizon(lowlevel)manipulation
+policiescanbeacquiredmoreefficientlythroughimitationlearning. Intheroboticssettingit’seven
+beenfoundthatusingoff-the-shelfmodelsfortheseperceptionandskillpoliciesispossible(Liu
+etal.,2024). Nevertheless,amethodtoautomaticallydiscoverobject-centricrepresentationsremains
+anopenquestion.
+97 Acknowledgements
+ThisworkissupportedbyONRMURI#N00014-22-1-2773andONR#N00014-21-1-2758. AGCis
+supportedbytheNaturalSciencesandEngineeringResearchCouncilofCanada(NSERC),PGSD3-
+559278-2021. CetterechercheaétéfinancéeparleConseilderecherchesensciencesnaturelles
+etengénieduCanada(CRSNG),PGSD3-559278-2021. Wearegratefulforinsightfuldiscussions
+withRajeshRanganath. WethankBenEvans,SiddhantHaldar,UlyanaPiterbarg,DongyanLin,and
+MandanaSamieifortheirhelpfulfeedbackonearlierdraftsofthispaper.
+References
+Abel,D.(2022). Atheoryofabstractioninreinforcementlearning. ArXiv,abs/2203.00397.
+Alayrac,J.-B.,Donahue,J.,Luc,P.,Miech,A.,Barr,I.,Hasson,Y.,Lenc,K.,Mensch,A.,Millican,
+K.,Reynolds,M.,Ring,R.,Rutherford,E.,Cabi,S.,Han,T.,Gong,Z.,Samangooei,S.,Monteiro,
+M.,Menick,J.,Borgeaud,S.,Brock,A.,Nematzadeh,A.,Sharifzadeh,S.,Binkowski,M.,Barreira,
+R.,Vinyals,O.,Zisserman,A.,andSimonyan,K.(2022). Flamingo: avisuallanguagemodelfor
+few-shotlearning. ArXiv,abs/2204.14198.
+Amin,S.,Gomrokchi,M.,Satija,H.,vanHoof,H.,andPrecup,D.(2021). Asurveyofexploration
+methodsinreinforcementlearning. ArXiv,abs/2109.00157.
+Andreas,J.,Klein,D.,andLevine,S.(2017). Modularmultitaskreinforcementlearningwithpolicy
+sketches. InICML,pages166–175.JMLR.org.
+Bacon,P.-L.,Harb,J.,andPrecup,D.(2016). Theoption-criticarchitecture. ArXiv,abs/1609.05140.
+Barto,A.G.andMahadevan,S.(2003). Recentadvancesinhierarchicalreinforcementlearning.
+DiscreteEventDynamicSystems,13:41–77.
+Burda, Y., Edwards, H., Storkey, A., and Klimov, O. (2019). Exploration by random network
+distillation. InInternationalConferenceonLearningRepresentations.
+Chen,V.,Gupta,A.,andMarino,K.(2021). Askyourhumans: Usinghumaninstructionstoimprove
+generalizationinreinforcementlearning. InICLR.
+Chen, V., Gupta, A.K., andMarino, K.(2020). Askyourhumans: Usinghumaninstructionsto
+improvegeneralizationinreinforcementlearning. ArXiv,abs/2011.00517.
+Dietterich,T.G.(1998). Themaxqmethodforhierarchicalreinforcementlearning. InInternational
+ConferenceonMachineLearning.
+Diuk, C., Cohen, A., and Littman, M. L. (2008). An object-oriented representation for efficient
+reinforcementlearning. InInternationalConferenceonMachineLearning.
+Doya,K.,Samejima,K.,ichiKatagiri,K.,andKawato,M.(2002). Multiplemodel-basedreinforce-
+mentlearning. NeuralComputation,14:1347–1369.
+Espeholt,L.,Soyer,H.,Munos,R.,Simonyan,K.,Mnih,V.,Ward,T.,Doron,Y.,Firoiu,V.,Harley,
+T., Dunning, I., et al. (2018). Impala: Scalable distributed deep-rl with importance weighted
+actor-learnerarchitectures. InInternationalconferenceonmachinelearning,pages1407–1416.
+PMLR.
+Gopalan, N., desJardins, M., Littman, M. L., MacGlashan, J., Squire, S., Tellex, S., Winder, J.,
+andWong,L.L.S.(2017). Planningwithabstractmarkovdecisionprocesses. InInternational
+ConferenceonAutomatedPlanningandScheduling.
+Guo,Z.,Yao,M.,Yu,Y.,andYin,Q.(2023). Improvetheefficiencyofdeepreinforcementlearning
+throughsemanticexplorationguidedbynaturallanguage. ArXiv,abs/2309.11753.
+Hafner,D.,Lee,K.-H.,Fischer,I.S.,andAbbeel,P.(2022). Deephierarchicalplanningfrompixels.
+ArXiv,abs/2206.04114.
+10Hafner,D.,Lillicrap,T.P.,Ba,J.,andNorouzi,M.(2019). Dreamtocontrol: Learningbehaviorsby
+latentimagination. ArXiv,abs/1912.01603.
+Hafner,D.,Pašukonis,J.,Ba,J.,andLillicrap,T.P.(2023). Masteringdiversedomainsthroughworld
+models. ArXiv,abs/2301.04104.
+Henaff,M.,Raileanu,R.,Jiang,M.,andRocktäschel,T.(2022). Explorationviaellipticalepisodic
+bonuses. AdvancesinNeuralInformationProcessingSystems,35:37631–37646.
+Jiang,Y.,Gu,S.S.,Murphy,K.P.,andFinn,C.(2019). Languageasanabstractionforhierarchical
+deepreinforcementlearning. InNeurIPS,pages9414–9426.
+Kaiser,L.,Babaeizadeh,M.,Milos,P.,Osinski,B.,Campbell,R.H.,Czechowski,K.,Erhan,D.,
+Finn,C.,Kozakowski,P.,Levine,S.,Mohiuddin,A.,Sepassi,R.,Tucker,G.,andMichalewski,H.
+(2019). Model-basedreinforcementlearningforatari. ArXiv,abs/1903.00374.
+Keramati,R.,Whang,J.,Cho,P.,andBrunskill,E.(2018). Fastexplorationwithsimplifiedmodels
+andapproximatelyoptimisticplanninginmodelbasedreinforcementlearning. arXiv: Artificial
+Intelligence.
+Kirillov, A., Mintun, E., Ravi, N., Mao, H., Rolland, C., Gustafson, L., Xiao, T., Whitehead, S.,
+Berg,A.C.,Lo,W.-Y.,Dollár,P.,andGirshick,R.B.(2023). Segmentanything. 2023IEEE/CVF
+InternationalConferenceonComputerVision(ICCV),pages3992–4003.
+Küttler,H.,Nardelli,N.,Lavril,T.,Selvatici,M.,Sivakumar,V.,Rocktäschel,T.,andGrefenstette,E.
+(2019). TorchBeast: APyTorchPlatformforDistributedRL. arXivpreprintarXiv:1910.03552.
+Küttler,H.,Nardelli,N.,Miller,A.H.,Raileanu,R.,Selvatici,M.,Grefenstette,E.,andRocktäschel,
+T. (2020). The NetHack Learning Environment. In Proceedings of the Conference on Neural
+InformationProcessingSystems(NeurIPS).
+Liu, P., Orru, Y., Paxton, C., Shafiullah, N. M. M., and Pinto, L. (2024). Ok-robot: What really
+mattersinintegratingopen-knowledgemodelsforrobotics. arXivpreprintarXiv:2401.12202.
+Locatello,F.,Weissenborn,D.,Unterthiner,T.,Mahendran,A.,Heigold,G.,Uszkoreit,J.,Dosovitskiy,
+A.,andKipf,T.(2020). Object-centriclearningwithslotattention. Advancesinneuralinformation
+processingsystems,33:11525–11538.
+Machado,M.C.,Barreto,A.,andPrecup,D.(2021). Temporalabstractioninreinforcementlearning
+withthesuccessorrepresentation. J.Mach.Learn.Res.,24:80:1–80:69.
+Machado, M.C., Bellemare, M.G., andBowling, M.(2017). Alaplacianframeworkforoption
+discoveryinreinforcementlearning. InInternationalConferenceonMachineLearning.
+Mao, J., Lozano-Perez, T., Tenenbaum, J. B., and Kaelbling, L. P. (2023). Pdsketch: Integrated
+planningdomainprogrammingandlearning. InNeurIPS,volumeabs/2303.05501.
+Mendonca, R., Rybkin, O., Daniilidis, K., Hafner, D., and Pathak, D. (2021). Discovering and
+achievinggoalsviaworldmodels. ArXiv,abs/2110.09514.
+Nasiriany,S.,Pong,V.H.,Lin,S.,andLevine,S.(2019). Planningwithgoal-conditionedpolicies.
+ArXiv,abs/1911.08453.
+Pathak, D., Agrawal, P., Efros, A. A., and Darrell, T. (2017). Curiosity-driven exploration by
+self-supervisedprediction. InInternationalconferenceonmachinelearning,pages2778–2787.
+PMLR.
+Pennington,J.,Socher,R.,andManning,C.D.(2014).GloVe:Globalvectorsforwordrepresentation.
+InEMNLP.
+Petrenko, A., Huang, Z., Kumar, T., Sukhatme, G. S., and Koltun, V. (2020). Sample factory:
+Egocentric3dcontrolfrompixelsat100000FPSwithasynchronousreinforcementlearning. In
+Proceedingsofthe37thInternationalConferenceonMachineLearning,ICML2020,13-18July
+2020,VirtualEvent,volume119ofProceedingsofMachineLearningResearch,pages7652–7662.
+PMLR.
+11Precup,D.(2000). Temporalabstractioninreinforcementlearning. UniversityofMassachusetts
+Amherst.
+Puterman,M.L.(1994). Markovdecisionprocesses: discretestochasticdynamicprogramming. John
+Wiley&Sons.
+Raileanu,R.andRocktäschel,T.(2020).Ride:Rewardingimpact-drivenexplorationforprocedurally-
+generatedenvironments. ArXiv,abs/2002.12292.
+Ramesh,R.,Tomar,M.,andRavindran,B.(2019).Successoroptions:Anoptiondiscoveryframework
+forreinforcementlearning. ArXiv,abs/1905.05731.
+Samvelyan,M.,Kirk,R.,Kurin,V.,Parker-Holder,J.,Jiang,M.,Hambro,E.,Petroni,F.,Kuttler,
+H.,Grefenstette,E.,andRocktäschel,T.(2021). Minihacktheplanet: Asandboxforopen-ended
+reinforcementlearningresearch. InThirty-fifthConferenceonNeuralInformationProcessing
+SystemsDatasetsandBenchmarksTrack(Round1).
+Schulman, J., Wolski, F., Dhariwal, P., Radford, A., and Klimov, O. (2017). Proximal policy
+optimizationalgorithms. ArXiv,abs/1707.06347.
+Sekar,R.,Rybkin,O.,Daniilidis,K.,Abbeel,P.,Hafner,D.,andPathak,D.(2020). Planningto
+exploreviaself-supervisedworldmodels. InInternationalConferenceonMachineLearning.
+Shrestha, A., Lee, S., Tadepalli, P., and Fern, A. (2020). Deepaveragers: Offline reinforcement
+learningbysolvingderivednon-parametricmdps. ArXiv,abs/2010.08891.
+Sutton,R.S.(1990). Dyna,anintegratedarchitectureforlearning,planning,andreacting. SIGART
+Bull.,2:160–163.
+Sutton,R.S.,Precup,D.,andSingh,S.(1999). Betweenmdpsandsemi-mdps: Aframeworkfor
+temporalabstractioninreinforcementlearning. Artif.Intell.,112:181–211.
+Tam,A.C.,Rabinowitz,N.C.,Lampinen,A.K.,Roy,N.A.,Chan,S.C.Y.,Strouse,D.,Wang,J.X.,
+Banino,A.,andHill,F.(2022). Semanticexplorationfromlanguageabstractionsandpretrained
+representations. ArXiv,abs/2204.05080.
+Veerapaneni, R., Co-Reyes, J. D., Chang, M., Janner, M., Finn, C., Wu, J., Tenenbaum, J. B.,
+andLevine,S.(2019). Entityabstractioninvisualmodel-basedreinforcementlearning. ArXiv,
+abs/1910.12827.
+Zhang,A.,Sukhbaatar,S.,Lerer,A.,Szlam,A.,andFergus,R.(2018). Composableplanningwith
+attributes. InInternationalConferenceonMachineLearning,pages5842–5851.PMLR.
+Zhang,T.,Xu,H.,Wang,X.,Wu,Y.,Keutzer,K.,Gonzalez,J.E.,andTian,Y.(2021). Noveld: A
+simpleyeteffectiveexplorationcriterion. InNeuralInformationProcessingSystems.
+12Appendix
+A BroaderImpact
+Ourcontributionsarefundamentalreinforcementlearningalgorithms,andwehopeourworkwill
+contribute to the goal of developing generally intelligent systems. However, we do not focus on
+applicationsinthiswork,andsubstantialadditionalworkwillberequiredtoapplyourmethodsto
+real-worldsettings.
+Regardingcomputeresources,weuseaninternalclusterswithNvidiaA100andH100GPUs. All
+experimentsuseatmostoneGPUandarerunfornomorethantwodays. Runningbaselinesalong
+withrandomizationofseedsrequiresmultipleGPUsatonce.
+B ProblemSettingDetails
+B.1 AbstractedMDP
+Herewere-iterateourframeworkanddiscussitingreaterdetails. Wefirstdefinealowlevel(reward-
+free)MarkovDecisionProcess(MDP,Puterman(1994))asthetuple⟨S,A,P⟩,with(lowlevel)state
+spaceS,primitiveactionspaceA,andtransitionprobabilityfunctionP :S×A×S →[0,1].Suppose
+theagentinteractswiththeenvironmentsatdiscretetime-stepsu=0,1,2,...,thenP(s |s ,a )
+u+1 u u
+describestheprobabilityoftransitioningtostates ∈S afteronetime-stepwhenchoosingaction
+u+1
+a ∈Ainthecurrentlowlevelstates .
+u u
+ToconstructanAb-MDP,westartwithasurjectivedeterministicmappingMfromlowtoabstract
+level:M:S →X.Thatis,anylowlevelstateS ∈SmapsontosomeabstractstateX ∈X (multiple
+S cananddomaptothesameX).
+Define behaviours B. Each b = (α(i),ξ′) ∈ B describes a single item id α(i) and a desired new
+attribute,alongwithanassociatedlowlevelpolicyπ :S →Awhichtriestosetthespecifieditem
+b
+to have the new attribute. A behaviour can be competent or incompetent. Executing competent
+behavioursleadtothespecifieditem-attributechangeswithhighprobability.
+Abehaviourmaybeincompetentbecause(i)theproposedattributechangeisimpossiblewithinthe
+rulesoftheworld(e.g. itemisnotacraft-ableobject)(ii)theattributechangeisnotpossiblefrom
+thecurrentstate(e.g. donothavethecorrectrawingredientsininventory),or(iii)thebehaviouris
+notsufficientlytrainedtoperformthespecifiedchange.
+Webuildasimpleabstractionthatallowustolearnpurelyattheabstractlevelwhilestillbeingable
+toinfluenceactionsatthelowlevel. NoticethesurjectivemapMgiveusstateabstraction. Webuild
+temporalabstractionbydefiningabstractstatetransitionsashappeningataslowertime-scalethan
+thelowleveltime-stepu.
+Definition B.1. An abstract state transition has occurred at (low level) time-step u if: (i) the
+abstractstatehaschanged,M(s )̸=M(s );or(ii)theabstractstatehasnotchangedinthepast
+u u−1
+ksteps,M(s )=M(s )=...=M(s ).
+u u−1 u−k
+DefinitionB.2. An(max-k)Ab-MDPisdefinedasthetuple⟨X,B,T ⟩, withabstractstatesX,
+k
+abstractbehavioursB,andtransitionprobabilityfunctionT :X ×B×X →[0,1]. T (X′|X,b)
+k k
+describestheprobabilityofbeinginabstractstateX′whenstartingfromX andexecutingbehaviour
+buntilanabstractstatetransitionoccurs(DefinitionB.1).
+Inthemaintext,wewriteAb-MDPanddenotethetransitionfunctionasTforbrevity(insteadof
+writingmax-kAb-MDPandtransitionfunctionT ). k =8waschosenforbaselinemethodsasit
+k
+workedslightlybetter. MEADworksjustaswellwithk =8andk =16.
+B.1.1 InterpretationasOptions
+It is natural to interpret our hierarchical framework within the Options framework (Sutton et al.,
+1999). Anoptionconsistsofapolicyπ :Ω×A→[0,1],aterminationfunctionβ :Ω→[0,1],and
+aninitiationsetofstatesI ⊆S. Ωisusedtodenotethesetofallpossiblehistoricalstates.
+13Oursetofbehaviourb∈Bisasetofoptions. Eachbehaviourspecifiesabehaviourpolicyπ ,which
+b
+deterministicallyterminatewhenanabstractstatetransitionoccurs(DefinitionB.1),andtheycanbe
+initiatedfromallstates(I =S).
+ThepointoftheOptionsFrameworkandtemporalabstractiongenerallyistobreakupamonolithic
+problem into re-usable sub-problems. How one breaks up a problem is an open question. Some
+popularpreviousapproachesincludefindingbottleneckstatesandusingthesuccessorrepresentation
+to discover well-connectedstates. Wecan view our approachas anotherwayof breaking upthe
+problemwhenpriorknowledgeintheformofobjectsisavailable: webreakuptheproblematthe
+levelofsingleitem-attributechanges(withoptionsdefinedaspoliciesthatcanchangeasingleitem’s
+attribute).
+B.1.2 Anoteonsemi-MDP
+Thedecisionprocessthatselectsamongstoptionsisasemi-MDP(Theorem1,(Suttonetal.,1999)).
+Thegeneralwaytomodelsemi-MDPdynamicrequiresconsideringtheamountoflowleveltimesteps
+that passes between each abstract level decision as a random variable (Sutton et al., 1999; Barto
+andMahadevan,2003). Instead,wechosetosimplytreattheabstractedlevelashavingafixedtime
+intervalinbetweensteps. Thisischosenforsimplicityasourfocusiswithlearningefficiencyonthe
+abstractlevel,andthisformulationallowustodirectlyapplyefficientalgorithmsdevelopedtosolve
+MDPs. WealsoseeempiricallythatgivenourMandBthischoicedoesnotleadtoalessoptimal
+policycomparedtoalgorithmsthatdirectlysolvethelowlevelMDP.
+B.1.3 Multi-ItemBehaviours
+IntheAb-MDP,weconsiderabstractstatesasan(ordered)setofitemsX ={x(1),x(2),...},where
+eachitemconsistofanidentityandattributex(i) =(α(i),ξ(i)).Abehaviourisadescriptionofwhich
+item(s)tochange(Section2.1). Forinstance,thesingle-itembehaviourb={(α(i),ξ′)}specifiesa
+changeofthei-thitemtoanewattributeξ′. Wecansimilarlyspecifymulti-itembehaviours,suchas
+atwo-itembehaviourb = {(α(i),ξ′),(α(j),ξ′′)}. Thisbehaviouriscompetentifafteranabstract
+state change, the i-th item takes on attribute ξ′ and the j-th item takes on attribute ξ′′ with high
+probability.
+ForN objects,mattributes,andI itemschangestoconsiderinbehaviours,
+(cid:18) (cid:19)
+N
+Numberofbehaviours= ×mI. (6)
+I
+Forinstance,forsingleitemchangebehaviours(I =1),thereare(cid:0)N(cid:1) ×m1 =N×mbehaviours.For
+1
+two-itemchangebehaviours(I =2),thereare(cid:0)N(cid:1) ×m2behaviours,andsoon. Intheextreme,one
+2
+canchoosetomodelaallpossibleitemattributechanges(I =N),whichresultsinmN behaviours
+thatisexponentialinthenumberofitemsconsidered.
+B.2 AnalysisofAssumptions
+B.2.1 ThegeneralityofAb-MDP
+OnemayworrythattheabstractionspecifiedbyAb-MDPisoverlyspecifictoaparticularproblem
+andanappropriateabstractionwouldnotexistforadifferentproblem. Tothisend,wemakethe
+followingobservationthatanysparserewardRLtaskcanbedescribedbyaAb-MDPwithasingle
+item,
+RemarkB.3. ForanyMDPwitharewardfunctionR:S →R,where,
+R(S)=1ifS ∈G and0otherwise,
+forS ∈G terminalgoalstate(s),wecandescribethisasanAb-MDPwithasingleitemαandbinary
+attributes{ξ ,ξ }. TheabstractmapM:S →X canbeconstructedinthefollowingway,
+1 2
+(cid:26)
+{(α,ξ )} ifS ∈G,
+M(S)= 2 (7)
+{(α,ξ )} otherwise.
+1
+TheproxyproblemoftransitionfromX ={(α,ξ )}toX ={(α,ξ )}solvesthesparserewardtask
+1 2
+inthebaseMDPandacompetentbehaviourforthistransitionisagoodpolicyisthebasetask.
+14ThepointofthisismerelytosaythatAb-MDPdoesnotrestricttheRLprobleminaparticularway.
+Ofcourse,suchaconstructionofanAb-MDPisnotinterestingandlearningacompetentbehaviour
+forthisAb-MDPisnoeasierthanlearningabehaviourthatmaximizestherewardfunctioninthe
+baseMDP.
+ThepointofAb-MDP,however,isthatataskcanbebroken-upinamoreinterestingway,e.g. inour
+casethrougharichersetofitemsandattributes. Wedemonstrateinthisworkthatanobject-centric
+item-attributesetencodingresultinasetofintuitivelybasebehavioursandaworldmodelthatis
+interesting.
+B.2.2 Discriminativemodellingwithsingleitemchange
+Inourforwardmodel,wemadetheassumptiontoonlymodelsingleitem’sattributechange(Sec-
+tion3.1andEquation3),andthatiftheattributedoesnotchangethentheabstractstateX stays
+t+1
+thesameasX . Weanalyzethisassumptionmoredeeplyinthissection.
+t
+True States Plan at t = 0
+t = 0
+Plan at t = 1
+t= 1
+Plan at t = 2
+t= 2
+Figure9: Anillustrativeexamplefollowingthelogicofthe2DCraftinggame. Theobjectiveof
+thegameistogetplanksbychoppingtrees(whichchangestheplank’sattributefromabsentto
+in inventory,andthetree’sattributetofromin worldtoabsentastheresourceisdepleted),
+thencraftwoodenstairsusingtheplank(whichdepletestheplankresourcestoabsentandcreates
+woodenstairsin inventory). Comparingthetruestatetrajectorywiththeimaginedplanatt=0,
+wenoticethattheimaginedfutureisincorrect: modellingonlysingleitemchangesdonotcapture
+thefactthatresourcesaredepleted,butonlynewresourcesarecreated. Nevertheless,att=1,the
+modelobservesthenewabstractstateandcanthereforere-planwiththemostup-to-dateinformation
+whichcorrectsforpreviouslyincorrectpredictions. Acaselikethishappensinpracticewithinthe2D
+Craftinggames.
+Robustnessthroughre-planning Wefirstnotethatinpractice,itisoftenthecasethatmultiple
+item’s attribute changes. For instance, in the 2D Crafting environments, crafting an item often
+consumestherawingredientusedtocraftit. Thus,aplanthatconsidersmultipleitemsbeingcrafted
+(attributechangefromabsenttoin inventory)willinaccuratelypredictthattherawingredient
+staysintheinventory(attributeofrawingredientstaysthesame,stayingasin inventory)rather
+than changing to absent. We illustrate the plan generate at each abstract step in Figure 9, and
+showthatdespitethisbeingthecase,theplanstillgeneratesanoptimalactionsequence;andthatat
+eachtime-step,re-planningwiththenewlyobserbvedabstractstateupdatestheincorrectabstract
+predictiontobemoreaccurate.
+Anadversarialfailurecase Hereweartificiallydesignanadversarialsettingwhichisnotencoun-
+teredinourevaluationenvironments,butwouldintheoryresultinsub-optimalplans. Withreference
+toFigure10a,weconstructanenvironmentwhosegoalistoconstructbothawoodenstairand a
+15Correct
+Trajectory
+Taken
+Trajectory
+Goal
+Plan
+(t=0) Real transition
+(success)
+Real transition
+(failed)
+Imagine transition
+(success)
+Plan
+Imagine transition
+(t=1) (failed)
+(a)Planningwithsingleitem-attributechangesfailsinthisadversarialtask.
+Taken
+Trajectory
+Goal
+Plan
+(t=0)
+Real transition
+(success)
+Plan Imagine transition
+(success)
+(t=1)
+Plan
+(t=2)
+(b)Planningwithdoubleitem-attributechangesmodelsattributedynamicsperfectly.
+Figure10: Singleanddoubleitem-attributechangeplanning
+woodendoor. Bothrequireasingleunitofwoodenplanktocraft. Theattributehereisthequantity
+oftheitemintheinventory. Supposefurtherthatoncewestartcrafting,wecannolongercollect
+additionalwoodenplanks.
+Thecorrectsequenceofbehaviourwouldbetofirstcollectanotherunitofwood,beforecraftinga
+woodenstairsandawoodendoor. Planningwithadiscriminativesingleitemchangemodelwould
+resultinasub-optimalplan,asitfailstoconsiderthatcraftingawoodenstairresultinthewooden
+plankbeingconsumed,andthereforecannotsubsequentlycraftthewoodendoor(Fig.10a,planat
+t=0).
+Notethatthisfailurecaseisalimitationofdoingdiscriminativemodellingwithsingleitemchanges
+(Section3.1),nottheAb-MDPframework. Doinggenerativemodelling(consideringallpossible
+X ∈X givenX ,b )wouldbeabletolearnthecorrectrelationship—atthecostofdatainefficiency
+t+1 t t
+(Section4.4.1). Nevertheless,wediscusshowtofixitbelowwithdiscriminativemodelling.
+Discriminativemodellingofmulti-objectchanges Onesimplewayofgeneratingplanswithmulti-
+itemdependenciesovertimeistoconsidermulti-itembehaviours(SectionB.1.3). Withreferenceto
+Figure10b,wenoticethatsimplymodellingtwoitemchangescanperfectlycapturethedynamics
+withinthistaskandgeneratetheoptimalplan. Thiscomesatacostofagreaternumberofbehaviours
+16toconsiderateachstepofplanning(E.g. forN =3items,m=3attributes,thereare9behaviours
+toconsiderforsingle-itemchanges,and27behaviourstoconsiderfortwo-itemschanges).
+Generallyspeaking,withasmallchangeintherepresentationoftheproblem,wecanplantogenerate
+theoptimalsequenceofabstractbehaviours. Thiscanalsohappenthroughchangingtheabstract
+mapping—e.g. bymodellingitemsalongwiththeresourcesneededtocreatethem. Overall,weview
+thisasaproblemofconstructingtherightabstractionfortheproblemwhich,althoughimportant,is
+notthemainfocusofthisworkandnorafundamentalissuewithourmodellingchoice.
+C MEAD:ExtendedMethods
+Hereweprovidemoredetailsaboutourmethods
+C.1 ModelFitting
+Givenadatasetof(abstract)trajectoriescollectedviatheexplorationstrategyoutlinedinSection3.2,
+D = {(X ,b ,X ,b ,...) } , we can estimate the empirical success probability q of all
+1 1 2 2 i i=1,...,n
+observeditem-attributepairsbycountingtheiroccurrences:
+Numberof(X ,b ,X )transitionswhere(α(i),ξ′)∈X +ϵ
+q(X,b)≈ρ(X,b)= t t t+1 t+1 , (8)
+Numberof(X ,b )+2ϵ
+t t
+whereϵisasmallsmoothingconstant(usually1e-3). Thiscanbeefficientlyimplementedasahash
+map,viahashing(X ,b )askeys,andthenumberofsuccessfulandtotaltransitions(startingfrom
+t t
+(X ,b ))asvalues.
+t t
+Totrainourdiscriminativemodelf :X ×B →[0,1],weminimizebinarycrossentropylosswithρ
+θ
+asthetarget,
+θ∗ =argminE[ρ(X,b)·log(f (X,b))+(1−ρ(X,b))·log(1−f (x,b))] , (9)
+θ θ
+θ
+wheretheexpectationisestimatedbyuniformlysamplingunique(X,b)pairsfromdataset.
+AppendixC.2containsarchitecturaldetailsforf . Allinall,wefoundthatoursamplingmethodand
+θ
+lossfunctionleadtoastable,simple-to-optimizeobjective. Moreover,itispossibletodirectlyuseρ
+todoplanning,asisdoneinZhangetal.(2018). However,weshowinSectionF.1.3thatitismore
+efficienttouseourparametricmodellingapproachasitgeneralizesbettertonewobjects.
+Algorithm1ExampleDataCollectionandTrainingloopforMEAD
+Require: Modelf
+θ
+repeat
+Collectnframesofdatainenvironmentusingmodelf toplantoexplore
+θ
+AdddatatodatasetD
+Resetmodelweightsθ
+whileaccuracyrequirementnotmetdo
+iflocalminimathen
+Resetmodelweightsθ
+endif
+SamplefromDandminimizeEquation9,formoptimizersteps
+endwhile
+untiltimerunsout
+We provide the pseudocode for training MEAD in Algorithm 1. The accuracy requirement is a
+runningaveragebinaryclassificationaccuracy(typicallysetto0.95). Thelocalminimaisevaluated
+bycheckingifthedifferenceisaccuracyisclosetozero(takenasaexponentiallysmoothedaverage
+to be insensitive to stochasticity). We find in Figure 26 that the most important setting is to run
+enoughgradientupdatesbetweendatacollectionsteps—theprecisesettingofcheckingforaccuracy
+andlocalminimadoesnotmatterasmuch.
+17m
+1
+m
+linear
+600 128 m
+1 1 m (logits)
+dot prod
+600 128 1 +
+fully connected key-query-value layer norm
+layer applied projections (linear)
+element-wise
+Figure11: ModelArchitecture
+C.2 ModelArchitecture
+We use a small key-query attention architecture that takes in sets of vectors to produce a binary
+prediction,seeFigure11.
+C.3 Exploration
+Weusearewardfunctionthatencouragesindefinitelyexploringallstatesandbehaviours,
+(cid:115)
+T
+r (X,b)= , (10)
+intr N(X,b)+ϵT
+whereN(X,b)isacountofthenumberoftimes(X,b)isvisited,T isthetotalnumberofabstract
+time-steps,andϵ=0.001isasmoothingconstant.
+Intuitively, astatewithmanyvisits(largeN(X,b))willhavelowerreward, whileT preventsthe
+intrinsicrewardfromshrinkingtozero(sotheagentexploresindefinitely). Indeed,inthebandits
+setting,thisrewardfunctionismaximizedwhenallstatesarevisiteduniformly(Zhangetal.,2018).
+Weemphasizethatallofourmodeltrainingisdonewiththisintrinsicreward,withnotask-specific
+informationinjectedattrainingtime.
+WeuseMCTStofindhigh(intrinsic)rewardstates. MCTSiterativelyexpandsasearchtreeand
+balances between exploring less-visited states (using an upper confidence tree) and exploiting
+rewarding states.6 In our case, MCTS generates child nodes of abstract state X by proposing
+behaviours b and checking if f (X,b) > 0.5 (Figure 3a). We also introduce a small degree of
+θ
+randomnesssoallbehaviourshaveasmallchanceofbeingselected.
+WemodifytheMCTSalgorithmtoreturnthethemaximumr (X,b)encounteredalongeachpath
+intr
+duringtheback-propagationstageandsetafixexpansiondepthwithoutasimulationstagefromthe
+leafnode. Thisisdonetopreventloopsandencouragetheagenttogotowardfrontierstateswiththe
+leastamountofvisitations.
+D Environments
+D.1 2DCrafting
+WeadoptthreecraftingenvironmentsproposedinChenetal.(2020),whichcontainMinecraft-like
+craftinglogic. Theagentneedstotraverseagridworld,collectresources,andbuildincreasinglymore
+complexitemsbycollectingandcraftingingredients(e.g. gettinganaxe,choppingtreetogetwood,
+beforebeingabletomakewoodenplanksandfurniturethatdependonplanks). Primitiveactions
+consistofmovementinthefourcardinaldirections(N,E,S,W),toggle(ofaswitchtoopendoors),
+grab(e.g. pickaxe),mine(e.g. ores),craft(atcraftingbenchofspecificitems). Thelowlevel
+6Thisexplorationispurelywithinthemodel’simagination,ratherthantherealenvironment. Balancing
+explorationandexploitationisstillnecessaryasexhaustivesearchintheabstractspaceishighlyinefficient/
+intractable.
+18PublishedasaconferencepaperatICLR2021
+Figure12: Exampleepisodeinanexample2DCraftingenvironment,figuretakenfromChenetal.
+Figure 6: Generated language at test time for a 2-step craft. We only display key frames of the
+(2020). To solve this task, the agent needs to pickup the pickaxe, mine the cobblestone stash to
+trajectorywhichledtochangesinthelanguage. Thesekeyframesmatchchangesintheinventory
+getctoobtbhleesotbojencet,mtheenntiounseedthinetahceqgueinreerdatceodbibnlsetrsutcotnioent.oQcuraalfittactoivbeblyl,esthtoengeensetarairtesd. Tinhsteruictetimonssmaruestbe
+acquciroendsiisntetnhtadtuorridngerwahsaetawcehwstoeupldredqeusicrreibsehaasviansgutbh-etaistke.mQfuraonmtittahtieveplrye,vthioeunsestwteoprk(wwiitlhlsapnenadddointional
+obstaacvleeraogfeb4e.8insgteapbslienttohecreonsvsirtohnemdeonotfroornthlyeisfamitehgaesnaerkaeteyd).languageoutput.
+REFERENCES
+Peter Anderson, Qi Wu, Damien Teney, Jake Bruce, Mark Johnson, Niko Su¨nderhauf, Ian Reid,
+observaSttieopnhsepnacGeocuoldn,siasntdofAandtoicntivoannardyecnonHteaningienl.g:(Vi)isaionn(-5a,nd5-,l3an0g0u)amgeatnriaxvidgeastciornib:inIgntaer5 pr× eti5 ngworld
+witheavcihsusatalltye-gbreoiunngddeedsncarvibigeadtiboynainnst3ru0c0t-idonimsiwnroeradleenmvbireodndminegnt,s(.iiI)naPnro3c0e0e-ddinimgsionfvtehnetoIEryEEemCboend-ding
+describfienrgentcheinognsCinomthpeutienrvVenistioorny,anadndPa(ititie)rnaR3e0c0o-gdnimitiogno,aplpe.m36b7e4d–d3i6n8g3d,e2s0c1r8i.binginwordsthetaskto
+complete. Wedescribeeachenvironment’scraftingsequencesrequiredtofinisheachtaskinTable1.
+Jacob Andreas, Dan Klein, and Sergey Levine. Modular multitask reinforcement learning with
+policy sketches. In Proceedings of the 34th International Conference on Machine Learning-
+EnvironmentName CraftingTaskDescription
+Volume70,pp.166–175.JMLR.org,2017.
+2Steps Pickuppickaxe,minegoldore
+Jacob A3nSdtreeapss, Dan Klein, andPSicekrguepypLicekvianxee.,mLeinarenidnigamwoitnhdlaotreen,tclraanfgtudaigaem. oInndPbrooocetsedings
+of the 2018 Conference of the North American Chapter of the Association for Computational
+4Steps Pickupaxe,choptreetogetwood,craftwoodenplankfromwood,
+Linguistics:HumanLanguageTechnologies,Volume1(LongPapers),pp.2166–2179,2018.
+thencrafteitherwoodenstairsorwoodendoorfromplank
+SRKBranavan,DavidSilver,aTnadbRlee1gi:n2aDBaCrzrialaftyi.nLgeeanrnviinrgontomwenintsb.yreadingmanualsinamonte-
+carloframework. JournalofArtificialIntelligenceResearch,43:661–704,2012.
+Tianshi Cao, Jingkang Wang, Yining Zhang, and Sivabalan Manivasagam. Babyai++: Towards
+AbstragcrtoiuonndeSdt-alatnegsuagWeeleabruniilndgabesyiomnpdlmeeambsotrriazacttiioonn. taorXmivapprefprorimntathreXilvo:2w00le4v.0e7l2o0b0s,e2r0v2a0t.iontoan
+abstractrepresentation. Wetakeasitemsallobjectsintheworld,intheinventory,andpotentially
+craft-DaebvleenodbrajeScitnsg.hWCehaapssloigt,nKeaancthhaisthermeeoMneysoofrethSeatthhyeeantdtrraib,uRtaemsainKTuambalreP2a.sumarthi,DheerajRa-
+jagopal, and Ruslan Salakhutdinov. Gated-attention architectures for task-oriented language
+Wetakegreoaucnhdiintegm. InidTehnitrittyy-Saesciotnsd3A0A0-AdIimCownfoerrednecmeobnedAdritnifigciparloIvnitdelelidgefrnocme,2th0e18e.nvironment,andeach
+attributeasaone-hotembedding,repeatedtoalsobe300-dim. Eachitemintheitemsetisdescribed
+DavidLChenandRaymondJMooney. Learningtointerpretnaturallanguagenavigationinstruc-
+asa600-dimvector.
+tionsfromobservations. InTwenty-FifthAAAIConferenceonArtificialIntelligence,2011.
+Attribute Description
+MaximeChevalier-Boisvert,DzmitryBahdanau,SalemLahlou,LucasWillems,ChitwanSaharia,
+ThienHuuNIgNu_yWeOn,RaLnDdYoshuaABnenitgeimo.BisaibnyAthIe:Fwirosrtlsdtebpusttonwoatridnstghreouinnvdeedntloarnyg.uagelearning
+withahuImNa_nIinNVthEeNlTooOpR.YInInternatioAnnaliCteomnfeisreinncethoenpLleaayrenri’nsginRveepnretsoernyt.ations,2019a.URL
+https://oApBeSnErNeTview.nAetn/ifteomruismn?eiidth=errJienXthCeo0incvYeXn.toryorintheworld.
+Table2: 2DCraftingattributes.
+MaximeChevalier-Boisvert,DzmitryBahdanau,SalemLahlou,LucasWillems,ChitwanSaharia,
+ThienHuuNguyen,andYoshuaBengio.BabyAI:Firststepstowardsgroundedlanguagelearning
+withahumanintheloop.InInternationalConferenceonLearningRepresentations,2019b.URL
+https://openreview.net/forum?id=rJeXCo0cYX.
+D.2 MiniHack
+Geoffrey Cideron, Mathieu Seurin, Florian Strub, and Olivier Pietquin. Self-educated lan-
+We alsoguuagsee tahgeenMt iwniiHthachkindesnivgihrtonemxpeenriten(Sceamrevpellayyanfoertianls.,tr2uc0t2io1n),fwolhloicwhinigs.buialrtXoinv tphreepNrientthack
+LearninagrXEivn:1v9ir1o0n.0m94e5n1t,(2K01ü9tt.ler et al., 2020). We use five hard-exploration games from Henaff
+etal.(2022)requiringinteractionwithdifferenttypesofobjects. Thebasegamehasamulti-modal
+JohnDCo-Reyes,AbhishekGupta,SuvanshSanjeev,NickAltieri,JacobAndreas,JohnDeNero,
+observationspaceinvolvingimage,text,inventory,etc. Solvingthegamefromthebaseobservation
+PieterAbbeel,andSergeyLevine. Guidingpolicieswithlanguageviameta-learning. InInterna-
+isextremelydifficultsinceeachenvironmenthasmultiplevariantsofanobject(e.g. Freeze-Wandhas
+tionalConferenceonLearningRepresentations,2018.
+27differenttypesofwands),andrandomlygeneratedobjectlocations. Indeed,Henaffetal.(2022)
+foundthatperformantRLmethodssuchasIMPALA(Espeholtetal.,2018;Küttleretal.,2019)and
+alltestedglobalexplorationmethods(ICM(Pathak9etal.,2017)andRND(Burdaetal.,2019))failto
+solvetheseenvironments.
+Thebaseenvironmentcontainsandictionaryobservationspace,containinga21×79gridofglyphs
+(integerdenotingoneof5976nethackglyphtypes),an27-dimensionalvectordenotingagent’sstats,
+a256dimvectorformessage,andanothervectordenotingagent’sinventory. Theenvironmentsare:
+19• "MiniHack-Levitate-Boots-Restricted-v0"
+• "MiniHack-Levitate-Potion-Restricted-v0"
+• "MiniHack-Freeze-Horn-Restricted-v0"
+• "MiniHack-Freeze-Wand-Restricted-v0"
+• "MiniHack-Freeze-Random-Restricted-v0"
+Generically,theNethackLearningEnvironmentcontainsover100actions;whereasthe“restricted”
+setofgamesreducethisspace. Thepossibleprimitiveactionsincludethe8cardinalactions(N, E,
+S, W, NE, SE, SW, NW),PICKUP,ZAP,WEAR,APPLY,QUAFF,PUTON,FIRE,READ,andRUSH.It
+maybeevenlessdependeingonthespecificenvironment.
+AbstractStates Wehand-constructamapthatmapsfromthemulti-modalobservationstoaset
+of (object identities, object attribute) vectors. We do this by taking the glyph and inventory
+observationmodalitiesandfilteringoutallglyphscontainingblankspaces,floor,andwalls. Toget
+theobjectattributes,Wetaketheremainingglyphsandmarkthemasbeing“inworld”iftheyare
+inglyph,and“ininventory”iftheywerefromtheinventorymodality. Then,iftheagentobject
+wasbesideanobjectandtookaprimitiveactiontomovetowardsit,wemarktheobjectas“standing
+on”. Ifweobservealevitatingmessage(e.g. “up,upandaway”fromthemessagemodality,weset
+theagentobjecttohave“levitate”attribute. Alternatively,ifthelowlevelepisodeterminatesalong
+withthelastobservationbeingeitheralevitatemessageora“freezespell”message(e.g. “thefrozen
+boltbounces”),thenwesetthecorrespondinglevitateorfreezeobjecttohave“used”status. Finally,
+ifanobjectdisappearsfromthelowlevelobservationthatisnotbeingstoodon,wesetittohave
+“removed”attribute. WesummarizethisinTable3.
+AttributeName Meaning HowtoInfer
+inworld Theobjectisintheworld Objectisintheglyphobservation
+standingon Objectinworld,andthe Objectwasintheglyphobservation
+playerisstandingonit andmessagesays“youseehere...”
+ininventory Objectininventory Objectintheinventoryobservation
+levitating Agentislevitating Messagesaysalevitatemessage
+used Anobjectisused Afreezeorlevitatemessageappears,
+andepisodeterminates
+removed Objectdisappearsfromworld Theobjectisnotlongerpresent
+Table3: ObjectAttributesandhowtoinferthem.
+Asforobjectidentities,theyaresimplytheglyphnumbergiventotheminMiniHack(e.g. 329for
+theplayeragent).
+Embeddings We then embed the object identities and attributes before providing them to the
+agents. Forobjectidentities,wetakeeachobject’sglyphnumber,andmapittotheNetHacktext
+descriptionforthatglyph(whichwecanextractfromthescreen_descriptionsmodalityinthe
+lowlevelobservation). Foreachglyph’stextdescription(whichisashortsentence),wepre-process
+thesentencetoremovestopwords,thentakeeachword’sGloVe(Penningtonetal.,2014)embedding
+andaveragingoverthesentence. Weusethe300-dimensionalWikipedia2014+Gigaword5GloVe
+wordvectorembeddingsfromhttps://nlp.stanford.edu/projects/glove/(6Btokens,400k
+vocab, uncased). The 300-dim vectors were chosen as we found them to have naturally good
+separationbetweenobjecttypesinpreliminaryanalysis.
+We embed the object attributes as 300-dimensional one-hot vectors (i.e. one-hot between six
+categoriesandrepeatedtofill300dimension). Thisisdonetomakesuretheinputspaceisequally
+representedbytheidentityandattributeembeddings.
+D.2.1 SandboxEnvironment
+Wedesignasandboxenvironmentwheretheagentcanobserveandinteractwithallitemsitmay
+encounterinoneofthefiveevaluationenvironments. Inthesandbox,eachoftheseobjectshasan
+0.5chance(independently)ofspawningatarandomlocation: levitateboots,levitaterings,levitate
+20id attr
+id attr embeds embeds
+m
+600
+1
+600
+Figure13: Embedding
+Figure14: SandboxMinihackenvironment
+potions,freezehorn,freezewands. Furtherthereisa0.5changethatasecondofthesameobject
+typewillspawn. Theagentcaninteractwithanyoftheobjectsforupto250lowlevelframes,orthe
+episodeterminatesoncetheagentsetsanyoftheobject’sattributeto“used”. Figure14showsan
+instantiationofanepisode.
+D.2.2 LowLevelPolicyErrors
+Thelearnedandhand-definedlowlevelpoliciesarenotperfect. Weseethatdependingontheinitial
+abstractstate,thelowlevelpolicysucceedsonaveragearound90%ofthetime,butcanbeaslowas
+10%forparticularstates(Figure15).
+Figure15: Low-Levelpolicysuccessratesforanenvironment
+Somecommonfailurecasesfortheselow-levelpoliciesare:
+1. Touseanitemintheinventory,thepolicyneedstoselectwhichitemtouse(e.g. todrinka
+potionthepolicyneedstofirstdoprimitiveaction"quaff",thenprimitiveactionthatselects
+theinventoryobjecttodrink,etc.). Whentherearemultipleobjectsintheinventoryitjust
+picksarandomobject,meaningitmightnotpicktheobjectspecifiedbythebehaviour
+2. The“gostandon”policyiscodedtomoveinastraightlinetowardsanobject. Sincewe
+measureapolicy"success"whenevertheabstractstatechanges, iftheagentwalksover
+21anotherobjectenroute,theAb-MDPwillregisteranabstractstatechangeanddeemthe
+transitionunsuccessful
+3. Tosuccessfullycastafreezespell,theNetHackgameneedstoreturnamessagesayingthe
+spellhasbouncedoffawall. Toourknowledge,thisisstochastic—wegotasfarasfiguring
+outthatthespellneedstotravelsufficientdistancetobounce,butevensowewereunableto
+producealowlevelpolicythatresultsinspellbounce100%ofthetime. Thissucceeds8˜0%
+ofthetime
+E BaselineMethods
+Forbaselines,weuseanenvironmentwrapperwhichabstractsawaythelowlevelobservationsinto
+onlytheabstractlevelobservationsandbehaviours(asdescribedinSection2.1). Wesimilarlyequip
+thebaselinepolicieswithtransformer-basedencoders,withinputmaskinginplaceswheretheinput
+sequence is longer than the number of objects in the set as well as positional embedding, which
+wefoundinpreliminaryexperimentshelpedwithtraining. Foractionspaces,theagentgeneratesa
+discreteintegeractionwhichmapsontoanobjectindexintheobservationsetaswellastheobject
+attributetochangeto.
+Specifically,weuseDreamer-v3asaperformantmodel-basedbaseline(Hafneretal.,2023),and
+PPOasamodelfreebaseline(Schulmanetal.,2017;Petrenkoetal.,2020). Forexploration-reward
+transferexperiments,weuseadisagreement-basedmodelforDreamerintrinsicreward(Sekaretal.,
+2020),aswellasusingthesamecount-basedrewardtotrainallmodels.
+F ExtendedResults
+F.1 ExtendedMainResults
+Allruns,extendedandmain,arerunwithaminimumof3independentseeds.
+To get the performance of the various algorithms in the low level MDP as we plotted them in
+Figure4b,weextractedthemfromFigure13inHenaffetal.(2022),usingtheWebPlotDigitizerapp
+(https://apps.automeris.io/wpd/).
+Levitate-Boots Levitate-Potion
+1.00 1.00
+Levitate-Boots Levitate-Potion
+0.75 0.75 1.0 1.0
+0.50 0.50
+0.25 0.25 0.5 0.5
+0.00 0.00
+0.25 0.25 0.0 0.0
+0.50 0.50 0.5 0.5
+0.75 0.75
+0 1000020000300004000050000 0 1000020000300004000050000 0 1000020000300004000050000 0 1000020000300004000050000
+Freeze-Horn Freeze-Wand Freeze-Horn Freeze-Wand
+1.00 1.00 1.0 1.0
+0.75 0.75
+0.50 0.50 0.5 0.5
+0.25 0.25
+0.00 0.00 0.0 0.0
+0.25 0.25
+0.5 0.5
+0.50 0.50
+0.75 0.75 0 1000020000300004000050000 0 1000020000300004000050000
+0 1000020000300004000050000 0 1000020000300004000050000 Env Frames (Linear Scale) Env Frames (Linear Scale)
+Freeze-Random
+1.00 M (oo ud rse ,l nb oa s pe rd e train) M noo d pe rel tb ra as ine id n g(o )urs, D (cr oe ua nm t-e br a-v s3 e d pretraining)
+0.75
+Model based (ours, Model based (ours, Dreamer-v3
+0.50 count-based pretraining) count-based pretraining) (disagreement pretraining)
+0.25 Dreamer-v3 (no pretrain) Dreamer-v3 Dreamer-v3
+0.00 Dreamer-v3 (no pretraining) (reward-based pretraining)
+0.25 (count-based pretraining)
+0.50 D (dr ie sa am gre er e-v m3
+e nt pretraining)
+(b)Transfertonewobjecttypes.PretrainedinFreeze
+0.75
+0 1000020000300004000050000 Dreamer-v3 RandomenvironmentwhereFreeze HornandFreeze
+Env Frames (Linear Scale) (reward-based pretraining)
+Wandobjectsappearwith0.5probabilities,fine-tuning
+(a)Sandboxtransferperformance.Episodereturn onremaining4environments. (Toprow): fine-tuning
+fromfine-tuningmodelweightsfrompre-training performancewherenewobjecttypeisfullyunseen,(bot-
+inasandboxenvironmentcontainingmultipleob- tomrow):fine-tuningperformanceforseenobjectsbut
+jectsinstancesandtypes. appearingindifferentfrequencies.
+Figure16: Fulltransferexperiments
+22
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeMMiniHack-Levitate-Boots-Restricted-v0 MiniHack-Levitate-Potion-Restricted-v0 MiniHack-Freeze-Horn-Restricted-v0 MiniHack-Freeze-Wand-Restricted-v0 MiniHack-Freeze-Random-Restricted-v0
+1.0 1.0
+0.8 0.8 0.8
+0.8 0.8 0.6 0.6 0.6 0.6 0.6
+0.4 0.4 0.4 0.4 0.4
+0.2 0.2 0.2 0.2 0.2
+0.0 0.0 0.0 0.0 0.0
+0.2 00 .. 42 0.2 0.2 0.2
+0.4 0.6 0.4 0.4 0.4
+0 50000 100000 150000 200000 250000 0 50000 100000 150000 200000 250000 0 50000 100000 150000 200000 250000 0 50000 100000 150000 200000 250000 0 50000 100000 150000 200000 250000
+Env Frames Env Frames Env Frames Env Frames Env Frames
+Parametric model, count-based exploration with MCTS Non parametric model, count-based exploration with MCTS Non parametric model, random exploration
+Figure17: Trainingfromscratchwithdifferentmodeltypes
+F.1.1 PPOAllRuns
+WeplotallPPOrunswithdifferentpre-trainingsettingsinFigure18. Pre-trainingresultedinonly
+negativetransferascomparedtonopre-training.
+Levitate-Boots Levitate-Potion Freeze-Horn Freeze-Wand Freeze-Random
+0.8 0.8 0.8 0.8 0.8
+0.4 0.4 0.4 0.4 0.4
+0.0 0.0 0.0 0.0 0.0
+0.4 0.4 0.4 0.4 0.4
+0 3 6 9 0 3 6 9 0 3 6 9 0 3 6 9 0 3 6 9
+Env Frames 1e6 Env Frames 1e6 Env Frames 1e6 Env Frames 1e6 Env Frames 1e6
+Count-based Pretraining in Freeze-Random Count-based Pretraining in Playground No Pretraining
+Figure18: PPOallruns.
+F.1.2 Dreamer
+We show extended transfer results for Dreamer. We see in Figures 19 and 20 that when trained
+formuchlonger,Dreamerwithbothdisagreement-basedandcount-basedpre-trainingdoesstartto
+getmorerewards. However, wealsoobservetherewardcurveswithpre-trainingismuchworse
+thantherewardcurveswithoutpre-training(blackdottedlines),indicatingnegativetransferacross
+environmentandobjecttypesforthesemethods.
+Levitate-Boots Levitate-Potion Freeze-Horn Freeze-Wand Freeze-Random
+1.0 1.0 1.0 1.0 1.0
+0.5 0.5 0.5 0.5 0.5
+0.0 0.0 0.0 0.0 0.0
+0.5 0.5 0.5 0.5 0.5
+0 100000 200000 300000 0 100000 200000 300000 0 100000 200000 300000 0 100000 200000 300000 0 100000 200000 300000
+Env Frames (Linear Scale)
+Dreamer-v3 (no pretraining) Dreamer-v3 (count-based pretraining) Dreamer-v3 (disagreement pretraining)
+Figure19: LongerDreamerpretrainingrunsinthesandboxenvironmenttoshowevalrewarddoes
+increasewithmoresamples,albeitpretrainingseemstoresultinnegativetransfer.
+F.1.3 Non-ParametricModel
+Weplotcomprehensivelythenon-parametricmodelresultsinFigure21.
+F.2 LowLevelLearning
+Wecanreinforcementlearnlowlevelbehaviours.FromsomeX ,weproposebehaviourb=(α(i),ξ′)
+t
+andexecuteπ untilanabstracttransition. IftheresultingX containsitem(α(i),ξ′),wereward
+b t+1
+π witharewardof+1(else-1).
+b
+Whilethiscanbeimplementedinmanyways,inpracticeweuseagoalconditionedRLset-up,where
+asinglemodelfreepolicynetworktakesinboththelowlevelstateandthebehaviourembeddingto
+23
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeMLevitate-Boots Levitate-Potion Freeze-Horn Freeze-Wand
+1.0 1.0 1.0 1.0
+0.5 0.5 0.5 0.5
+0.0 0.0 0.0 0.0
+0.5 0.5 0.5 0.5
+0 50000100000150000200000250000300000 0 50000100000150000200000250000300000 0 250005000075000100000125000150000175000 0 50000 100000 150000 200000
+Env Frames (Linear Scale)
+Dreamer-v3 (no pretraining) Dreamer-v3 (count-based pretraining) Dreamer-v3 (disagreement pretraining)
+Figure20:LongerDreamerpretrainingrunsintheFreeze Randomenvironmenttoshowevalreward
+doesincreasewithmoresamples,ableitpretrainingseemstoresultinnegativetransfer.
+Levitate-Boots Levitate-Potion Freeze-Horn Freeze-Wand Freeze-Random
+0.9 0.9 0.9 0.9 0.9
+0.6 0.6 0.6 0.6 0.6
+0.3 0.3 0.3 0.3 0.3
+0.0 0.0 0.0 0.0 0.0
+0.3 0.3 0.3 0.3 0.3
+80000 160000 240000 80000 160000 240000 80000 160000 240000 0 300000 600000 900000 0 300000 600000 900000
+Env Frames Env Frames Env Frames Env Frames Env Frames
+Non-Param, MCTS Exploration Non-Param, Random Exploration
+(a)Meanepisodereturn
+Levitate-Boots Levitate-Potion Freeze-Horn Freeze-Wand Freeze-Random
+30 100 10 100 100
+25 75 8 75 75
+20
+50 6 50 50
+15
+10 25 4 25 25
+0 80000 160000 240000 0 80000 160000 240000 0 80000 160000 240000 0 300000 600000 900000 0 300000 600000 900000
+Env Frames Env Frames Env Frames Env Frames Env Frames
+Non-Param, MCTS Exploration Non-Param, Random Exploration
+(b)Numberofunique(Object,Attribute,NewAttribute)transitionsdiscovered
+Figure21: Non-parametricagent. NoticethedifferenceinX-axisscaleforFreeze-WandandFreeze-
+Randomenvironments.
+produceaprimitiveaction:π :S×B →A. Thelowlevelstateistheenvironment’srawobservations
+while the behaviour embedding is the same as the one given to the abstract level model. This is
+implementedasawrapperovertheoriginalenvironmentwhichprovidesthepolicywitha+1reward
+if(α(i),ξ′)∈X ,and-1otherwise. WeuseAPPOasthepolicyoptimizationalgorithm(Petrenko
+t+1
+etal.,2020). Thepointofthisismerelytoshowthatwecanlearnthesetofbehavioursneurallyand
+buildinganAb-MDPwiththemstillworks.
+The full MiniHack low level policy learning result is shown in Figure 23a. The performance of
+MEADinanAb-MDPwithlearnedbehavioursisshowninFigure23b. Notethatthereported2D
+CraftingresultsinmaintextSection4.1alreadyuseneurallylearnedbehaviours.
+F.3 ExtendedAblationResults
+F.3.1 GenerativeandDiscriminativeModelling
+Wedesignanexperimentwhereweisolatethedifferencemadebythegenerativevs. discriminative
+modelling,whichwecanviewasaconstraintoverthesupportofthepredicteddistributionforX .
+t+1
+Wecollectadatasetusingahand-craftedexpertpolicyinMiniHack’sFreeze-Hornenvironment,with
+adegreeofactionnoiseaddedtoincreasecoverage. Thisisdonetoremovetheexplorationproblem:
+themodelonlyneedstolearntofitthetrajectorieswellanditshouldcontainwithinitsworldmodel
+thecorrecttransitionsrequiredtosolvethetask. Wefittwomodels:
+• Adiscriminativemodel,whichlearnstopredictsuccessprobability(Equation1)asdescribed
+bythemaintext.
+• Agenerativemodel,whichlearnstopredictthedistributionoverX.
+24
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeMNumber of Discovered Number of Discovered
+Mean Episode Return Object-Attribute Transitions Mean Episode Return Object-Attribute Transitions
+0.9 100 0.8 100
+0.6 80 0.4 80
+0.3 60 60
+0.0 40 0.0 40
+0.3 20 0.4 20
+0 0
+0 100000 200000 300000 0 100000 200000 300000 0 30000 60000 90000 120000 0 30000 60000 90000 120000
+Env Frames Env Frames Env Frames Env Frames
+Non-Param, MCTS Exploration Parametric, MCTS Exploration Counts + MCTS (depth=1) Counts + MCTS (depth=4)
+Non-Param, Random Exploration Counts + MCTS (depth=2) Random Exploration
+(a)Trainingfromscratchwithparametric(ours)and (b)Effectofcount-basedintrinsicrewardandMCTS
+non-parametricmodeltypesintheFreeze-Wanden- in the Freeze-Wand environment. (Left) Episode
+vironment. (Left)Episodereturn. (Right)Number return.(Right)Numberofuniquevalid(itemidentity,
+of unique valid (item identity, item attribute, new itemattribute,newattribute)transitionsdiscovered
+attribute)transitionsdiscovered. bytheagent.
+Figure22: Modelablations
+Freeze-Horn Freeze-Random Freeze-Wand Levitate-Boots Levitate-Potion
+0.6 0.6 0.6 0.6
+0.5 0.5 0.5 0.5 0.5
+0.4 0.4 0.4 0.4 0.4
+0.3 0.3 0.3 0.3 0.3
+0.2 0.2 0.2 0.2 0.2
+0.1 0.1 0.1 0.1 0.1
+0.0 0.0 0.0 0.0 0.0
+0.0 0.5 1.0 1.5 2.0 0.0 0.5 1.0 1.5 0.0 0.5 1.0 1.5 2.0 0.0 0.5 1.0 1.5 2.0 0.0 0.5 1.0 1.5 2.0
+Env Frames 1e7 Env Frames 1e7 Env Frames 1e7 Env Frames 1e7 Env Frames 1e7
+(a)LowlevelmodelfreeRLtooptimizebehavioursuccessprobabilities
+Freeze-Horn Freeze-Random Freeze-Wand Levitate-Boots Levitate-Potion
+1 1.0 1.0 1
+0.5 0.5 0.5
+0 0.0 0.0 0 0.0
+0.5 0.5
+1 1.0 0.5 1.0 1
+2 21 .. 05 1.0 21 .. 05 2 C Lera af rt ne ed d
+0 80000 160000 0 80000 160000 0 80000 160000 0 80000 160000 0 80000 160000
+Env Frames Env Frames Env Frames Env Frames Env Frames
+(b)MEADperformanceinAb-MDPwithlearnedvs.craftedbehaviours
+Figure23: LearninglowlevelbehaviourswithinMiniHack
+The two models use the same architecture to encode the previous abstract state and behaviours.
+Itdiffersonlyinitsoutputhead: thediscriminativemodeloutputsabinaryprediction, whilethe
+generativemodeloutputsacategoricalpredictionforeachitem. WeobserveinFigure24thatboth
+modelclassesoptimizetheloss.
+Discriminative Generative
+100
+100 5000 100 5000
+0.4 1000 10000 1000 10000
+0.3
+101
+0.2
+0.1
+0 100 200 300 400 500 0 100 200 300 400 500
+Optimization steps Optimization steps
+Figure24: Losscurvesfortraininggenerativeanddiscriminativemdoelsonafixedexpertdataset.
+Colorsdenotedifferentnumberofdatasettransitionsize.
+To do planning, we run Dijkstra, with the edge weight as the negative log of Pr(X′|X,b,θ)
+(where θ denotes the generative or discriminative model). There are two ways we can gen-
+erate the neighbours for the generative model: either by proposing the modal next state, i.e.
+X′ = argmax X′Pr(X′|X,b,θ), or by expected behaviour change X′ = ∆(X,b). Using ex-
+pectedbehaviourchangedoesnotworkinplanning(themodelneverproposesbehavioursequences
+25
+borP
+sseccuS
+gvA
+borP
+sseccuS
+gvA
+ssoL
+yportnE
+ssorC
+niB
+ssoL
+yportnE
+ssorCthatleadtosolvingthetask),thuswereportresultsbyusingthemodalnextstate. Theresultsare
+reportedinmaintextFigure 7,notingtheerrorbarsdenotestandarderrorofmean.
+F.3.2 Modelfitting
+Wefoundthatrunningsufficientnumberofmodelfittingstepsinbetweendatacollectionstepswas
+important. Fullyre-settingtheweightsbeforedatafittingisalsohelpful.
+F.3.3 SemanticEmbeddings
+F.3.4 GloVeEmbedding
+Levitate-Boots (7 types) Levitate-Potion (25 types) Freeze-Horn (1 type) Freeze-Wand (27 types) Freeze-Random (28 types)
+1.0 1.00 0.8 0.8 0.8
+000 ... 468 00 .. 57 05 00 .. 46 00 .. 46 00 .. 46
+0.2 0.25 0.2 0.2 0.2
+0.0 0.00 0.0 0.0 0.0 0.2 0.25
+0.4 0.50 0.2 0.2 0.2
+0.6 0.75 0.4 0.4 0.4
+1000020000300004000050000 1000020000300004000050000 1000020000300004000050000 1000020000300004000050000 1000020000300004000050000
+Env Frames Env Frames Env Frames Env Frames Env Frames
+GloVe embedding of object name (frozen weights) Random object embedding (trainable weights)
+Figure25: TrainingfromscratchwithfrozenGloVeembeddings,ortrainablerandomlyinitialized
+weights.
+We investigate the impact of having the object identity embeddings be semantically meaningful
+versusrandomone-hotembeddinginMiniHack. Bydefault,allexperimentsinthemaintexttakeas
+inputobjectidentityembeddingusingGloVePenningtonetal.(2014)embedding,whicharekept
+frozenthroughouttraining. Weablatethisbyinitializingtheobjectidentityembeddingmatrixtobe
+randomlyinitializedfromastandardGaussian,N(0,1),andallowthemtobeupdatedbygradients.
+Figure25showstheresultsinallfivegames. Weobservethathavingwordembeddinghelpsabitin
+environmentwheretherearemanytypesofthesameobjects(i.e. Levitate-PotionandFreeze-Wand).
+Thisisunsurprisingasthetextembeddingbetweenobjectswouldberathersimilar(e.g. “wooden
+wand” and “metal wand” would have similar averaged embedding). Abeit they still performant
+overall. Thishintsattheabstractionbeingusefulmainlyduetoits(objectidentity,objectattribute)
+structure.
+F.4 ModelUpdates
+WeshoweffectsofnumberofmodelupdatestepsduringdatacollectioninFigure26,27,&28.
+Model update steps
+0.8 500 0.8 0.8
+2500
+0.6 10000 0.6 0.6
+0.4 0.4 0.4
+0.2 0.2 0.2
+0.0 0.0 0.0
+Thresholds to collect more data
+0.2 0.2 accuracy diff threshold only 0.2
+accuracy threshold only Weight reset
+0.4 0.4 both thresholds 0.4 all weights
+no thresholds no weights
+0 10000 20000 30000 40000 50000 0 10000 20000 30000 40000 50000 60000 0 20000 40000 60000 80000 100000
+Env Frames Env Frames Env Frames
+(a)Effectofmodelupdatestepsbe-(b)Effectofmodelthresholdlogic(c) Weight reset strategies before
+tweendatacollectionsteps. prior to being allowed to collectfittingonnewdata
+moredata
+Figure26: ModeltraininghyperparameterstraininginFreeze Wandenvironment.
+26
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeM
+nruteR
+edosipE
+naeMExploration setting
+0.8 mcts exploration (depth=1)
+0.6 m mc ct ts s e ex xp pl lo or ra at ti io on n ( (d de ep pt th h= =2 4) ) 0.8
+0.4 random exploration 0.6
+0.2 0.4
+0.0 0.2
+0.2 0.0
+0.4 0.2
+Transition estimate for MCTS
+0.4 current parametric model
+0 20000 40000 60000 80000100000120000 dataset empirical probabilities
+Env Frames
+0 20000 40000 60000 80000 100000120000
+(a)MCTShyperparametereffects, Env Frames
+planningtofindthemaxreward- (b) Using the empirical dataset
+ingstateusingcurrentparametric probability for MCTS planning
+model. (i.e.,anon-parametricestimate)
+Figure27: MCTSexplorationhyperparametersintheFreeze Wandenvironment.
+Data collection frequency 50000 Data collection frequency
+0.8 250 2500 250 2500
+0.6 40000
+0.4 30000
+0.2
+0.0 20000
+0.2 10000
+0.4
+0.6 0
+0 5000 10000 15000 20000 25000 2000 4000 6000 8000 10000 12000 14000
+Env Frames Env Frames
+(a)Evalperformanceasfunction (b) Wallclock time for different
+ofdatacollection datacollectionfrequencies
+Figure28: DatacollectionfrequencyintheFreeze Wandenvironment.
+F.5 ModelEmbedding
+Weinvestigatethevectorrepresentationofdifferent(objectidentity,objectattribute)pairsinour
+modelatthestartoftrainingandintheend. ResultsareshowninFigure29. Weobservevector
+clustermainlyalongobjectattributesinthestartoftraining(duetotheorthogonalobjectembedding
+initialization). Aftertraining,vectorsclusterbyobjectattributesinanidentity-dependentway. For
+instance, the STAIRS_UP object in Figure 29a are not clustered by attributes along the first two
+principle components in the Freeze Random environment, likely due to their usage being very
+differentascomparedtotheotherusableobjects. Wealsoobserveseparationbyobject-identities
+insideeachoftheobjectattributeclustersaftertraining,butnotbefore.
+Again referring to Figure 29 (a), we notice that unseen objects (not seen in the Freeze Random
+environment—hereitisthe“levitate”objects)largelyfallintoclustersbyattributes.
+F.6 InternalWorldGraphs
+Wecanalsoshowthemodel’sinternalworldmodelinahighlyinterpretableway: throughrunning
+a graph search algorithm (e.g. breadth first search) along transitions the model predicts is high
+probability,andreconstructingthemodel’sinternalgraph.
+Wedothisfortwoenvironments,showingonlyhighprobabilitytransitions,anddisallowvisualization
+ofloopsinthegraphs. TheworldmodelgraphforFreeze-RandomisinFigure30. Notethisisthe
+samemodelwhichweillustratedinbriefinmaintextFigure3b. Theworldmodelgraphfora200k
+framescheckpointintheLevitate-then-FreezeenvironmentisinFigure31, whichismuchmore
+complexevenwithonlythehighprobabilityedges.
+27
+nruteR
+edosipE
+naeM
+nruteR edosipE
+naeM
+)s( emiT
+kcolcllaW
+nruteR
+edosipE
+naeMEnv Frames: 0 Env Frames: 200000
+10
+0.5 By Object Identities
+LEVITATE_BOOTS
+5 LEVITATE_RINGS
+LEVITATE_POTIONS 0.0 FREEZE_HORNS
+0 F AR GE EE NZ TE S_WANDS
+0.5 STAIRS_UP
+0.5 0.0 0.5 1.0 5 0 5 10
+10
+0.5 By Object Attributes
+in_world
+5 in_inventory
+standing_on_top 0.0 no_exist
+0 l ue sv eit dating
+0.5
+0.5 0.0 0.5 1.0 5 0 5 10
+PC 1 PC 1
+(a)TraininginFreeze Randomenvironment.Perdimensionvari-
+anceratioexplainedat0frame:(0.24735658,0.22067907);at200k
+frames:(0.49951893,0.35679522)
+Env Frames: 0 Env Frames: 200000
+1.0
+5.0 By Object Identities
+0.5 2.5 L LE EV VI IT TA AT TE E_ _B RO INO GT SS
+0.0 LEVITATE_POTIONS
+FREEZE_HORNS
+0.0 2.5 FREEZE_WANDS
+AGENTS
+5.0 STAIRS_UP
+0.5
+0.5 0.0 0.5 1.0 5 0 5 10
+1.0
+5.0 By Object Attributes
+0.5 2.5 i in n_ _w ino vr eld ntory 0.0 standing_on_top
+no_exist
+0.0 2.5 levitating
+used
+5.0
+0.5
+0.5 0.0 0.5 1.0 5 0 5 10
+PC 1 PC 1
+(b)TrainingintheSandbox Playgroundenvironment.Perdimen-
+sionvarianceratioexplainedat0frame:(0.3139481,0.23430094);
+at200kframes:(0.5275301,0.23016657)
+Figure 29: Principle components analysis (PCA) of the (object identity, object attribute) vector
+representationinthemodelrightbeforethekey-query-valueprojectionlayer. PCAprojectsfrom
+128dimensionsto2orthogonaldimensionsofmaximumvariance. Weshowtherepresentationat
+twopointsintraining: 0framesand200kframes(columns). Welabeleach(objectidentity,object
+attribute)vectorbyitsidentity(toprow)andbyitsattribute(bottomrow)separately.
+G TrainingDetailsandHyperparameters
+G.0.1 Ourmodel
+WedescribeourdefaultparametersinTable4.
+G.0.2 Dreamer-v3
+WedescribethedefaultparameterusedtoruntheDreamer-v3baseline. WeuseaPyTorchimplemen-
+tationofDreamer: https://github.com/NM512/dreamerv3-torch,whichhassimilartraining
+curvesasreportedinitiallyinDreamer-v3. Unlessotherwisementioned, weusethe“XL”world
+model setting with the highest amount of training iteration, which had the best reported sample
+efficiencyinHafneretal.(2023),andwasconfirmedbyourpreliminaryexperiments. Westartwith
+parametersasfaithfultothereportedonesinHafneretal.(2023)aspossibleasitwasfoundtowork
+acrossawiderangeofsettings,thensweepoverasubsetofhyperparametersandreportthebestones
+(whichweuse)inTable5.
+28
+2 CP
+2 CP
+2 CP
+2 CPSTAIRS_UP - in_world,
+AGENTS - in_world,
+FREEZE_WANDS - in_world,
+FREEZE_WANDS: STAIRS_UP:
+in_world -> standing_on_top: 0.99 in_world -> standing_on_top: 0.992
+STAIRS_UP - in_world, AGENTS - in_world,
+AGENTS - in_world, FREEZE_WANDS - in_world,
+FREEZE_WANDS - standing_on_top, STAIRS_UP - standing_on_top,
+FREEZE_WANDS:
+standing_on_top -> in_inventory: 0.997
+FREEZE_WANDS - in_inventory,
+STAIRS_UP - in_world,
+AGENTS - in_world,
+STAIRS_UP: FREEZE_WANDS:
+in_world -> standing_on_top: 0.982 in_inventory -> used: 0.988
+FREEZE_WANDS - in_inventory, STAIRS_UP - in_world,
+AGENTS - in_world, AGENTS - in_world,
+STAIRS_UP - standing_on_top, FREEZE_WANDS - used,
+Figure 30: Extracted internal world model with a particular starting state in Freeze-Random by
+startingtraversalfromagiveninitialstate. Onlythemostrelevantobjectsareincludedforclarity
+andonlytransitionswithsuccessprobabilityabove0.1areincluded. Notethateachnodehas40-50
+edges,althoughweonlyvisualizethehighprobabilityones.
+Hyperparameter Value
+Optimizer Adam
+Learningrate 1e-4
+Optimization Adambetas (0.9,0.999)
+Adameps 1e-8
+Maxbatchsize 2048
+Additionalframesbeforetraining 2500
+DataCollection Weightresetbeforetraining resetallweights
+Minimumoptimizerstepsbeforedatacollection 2500
+Randomgoalselectionprobability 0.2
+Numsimulations 16
+MCTSExploration
+Maxsearchdepth 4
+Probabilityforvalidedge 0.5
+Dijkstramaxiters 100
+EvalPlanning
+Dijkstralowprobabilitycut-off 0.1
+Table4: Defaulttrainingparametersforourmodel
+Weperformparametersweepoverasubsetandreportthebestones(whichweuse)inOtherwisewe
+keeptheparametersasfaithfultothereportedonesinHafneretal.(2023)aspossibleasitwasfound
+toworkacrossawiderangeofsettings.
+G.0.3 PPO
+We use the Sample-Factory implementation of PPO (Petrenko et al., 2020). We run a parameter
+sweepoverasubsetandreportthebestparameterswhichweuseinTable6.
+29Hyperparameter Value
+Optimizer Adam
+Modellr 1e-4
+Actorlr 3e-5
+Criticlr 3e-5
+Optimization
+Batchsize 32
+Batchlength 64
+Trainratio 1024
+Replaycapacity 106
+GRUrecurrentunits 4096
+ModelUnits Densehiddenunits 1024
+MLPlayers 5
+Planning Imaginationhorizon 15
+Exploration(disagreement) Ensemblesize 10
+Table5: Dreamerparameters
+Hyperparameter Value
+Numberofworkers 2
+Numberofenvperworker 10
+DataCollection
+Rolloutlength 128
+Recurrencelength 2
+Optimizer Adam
+Modellr 1e-4
+Optimization Rewardscale 1.0
+Batchsize 4096
+Shuffleminibatches False
+Table6: PPOParameters
+30Figure31: Extractedinternalworldmodelbystartingtraversalfromagiveninitialstate. Onlythe
+mostrelevantobjectsareincludedforclarity. TheplanrequiredtosolvetheLevitate-then-Freeze
+taskinvolvesgoingfromthetop(root)statetothebottomleftstate.
+31
+, ,d dl lr r,o od w, wld r_ _l onr nwoi i w _- - n S_ SinT D-iO NP-O US ABT W__SNE _RE ETIG ZAAAT ETISEV RE FL 49.0 :pot_n o:P_Ugn_iSdRnIaAtTs S>- dlrow_ni 119.0 :po :tS_DnoN_AgWni_dEnZaEtsE >R-F dlrow_ni829.0 :p o:St_TnOoO_gBn_iEdTnAaTtsI V>E-L dlrow_ni , , p,ddollr tr_oo nw, wd o__l _nr ngoiin w --i dS_ Sn nTDi aO N- tO sS A B -T W _ PNE_UE ET _G ZA SATERIEIV ARE TFL S ,po t, _d nlr o ,o _d w g, ld rn_l on ir dwoi n w _- a nS_ tinT s -i O -P- O SUS DBT __ NSNERAETIWGAAATT_EISV ZE EL ERF
+,pot _,ndol
+r, _od g, wld nr_lo ir dnwo niw _ a-n _ tSin s D -i - N P- S US ATT W_ OSN O_RE EBIG ZA _A EETS TEARTFIVEL
+379.0 :yro t:nSeDvNniA_nWi _>E-Z pEoEt_RnFo_gnidnats
+489.0
+:yro t:nSeTvOnOi_Bn_iE >T-A pToIVt_EnLo_gnidnats
+,y ,r do lt r n ,od e w, ldv r_nl onri wo_ i wn _- ni S_ i-nT -SiO P-D O USN BT _A _SNW ERETI_GAAEATTZ ISE VE ER LF
+,yr ,o dt ln r,oe d , wv ldrn _lori nw_o inw _-i n _ S- in DS -i T NP- O US AOT W_SNB _R_E EE IG ZATA ETA SET RIV FEL
+539.0
+:pot_n :oP_Ug_nSidRnIAaTtsS >- dlrow_ni 998.0 :p o:St_TnOoO_gBn_iEdTnAaTtsI V>E-L dlrow_ni 503. 0: S:dDeNsAuW >_- EyZroEtEnRevFni_ni
+739.0 :pot_n :oP_Ug_nSidRnIAaTtsS >- dlrow_ni 758.0 :gn i:tSaTtiNveElG >A- dlrow_ni 9.0 :pot :_SnDo_NgAnWid_nEaZtsE >ER- dFlrow_ni
+, y ,,r pdo olt rtn _o e nw,dv o_nl _nr gio_ in wn -i i dS_ -n nT Si aO - tD O sSN B-T A _PNW EUET_ _GAE SATZ RIE IVAE ETR LSF ,po ,y t_r no ot n ,_d e g,ldv nrnloir di wo_ nwn _ani_ t i-n s -Si - P-D S USN TT_OA SN OW RE BI_GA_EA ETZ STE AE TR IVF EL ,d l ,r d,ode w, lsd r_ ul onr w-oi w S_- nDS_ inT N -iO AP-O WUSBT ___SN EERZETIEGAAEATTRISV FEL
+,y ,r p,o dot ltn r_oe n,wvd on _l _ri ng_oinnw -ii d _S-n n DSi a T N- t sOSA O -TW PNB _U_EEE _GZSTAERA ET IARIV TFE SL ,yr ,o dt ln r, oed ,gwvlr nn _o ii nw_ tian _-tin i S- vi eDS- lT NP -O UASO W_ TSB N_R_ EEEIZA GT ET AASET RIV FEL
+,p , oy tr _o nt on ,_e d g,v ldrnnloiri dw_on nw_i an _- tin s S -i -T P- SO US DOT_NSNB RA_EE IWGATAT_A EST ZIV EE EL RF
+39.0 :pot_n o:P_Ugn_iSdRnIaAtTs S>- dlrow_ni 319.0 :p o:St_TnOoO_gBn_iEdTnAaTtsI V>E-L dlrow_ni
+419.0 :po :tS_DnoN_AgWni_dEnZaEtsE >R-F dlrow_ni 839.0 :pot_n :oP_Ug_nSidRnIAaTtsS >- dlrow_ni 89.0
+:yrot
+n:SeDvnNi_AnWi
+>_E- ZpEotE_RnFo_gnidnats
+,,pdo l ,rtd_o e nw, sd o_ ul _nr g-oi n w S-i dDS_n nT Ni aO A- tO sWS B-T _ _PN EEUZET_EGASEATRRIIV FAETLS ,pot_n o, d,_d e g,l sd nr uloir d w -o n w S_an D_ tin sN -i - A P- S WUS TT_ _OSN EOR ZE BI EGA_EA ET RSTFATIVEL
+,p , oy tr _o nt on , _ed,ggvlr nnno iii dw_ tan n_ti ani - vti s eS- l-TP -SO USDO_TNSB NR A_ EEI WAGTT _AA EST ZIV EE EL RF ,y ,r p,od otl tnr _ oe ,ngwv onn_ _iin g_ tiann -tii di S- vn eDS alTN t-sO AS O -W TPB N_ U_EEE _ZGSTE RAAET IARIV TFE SL
+,y,yrroottn n ,e d e ,v ldv rnn lorii w_o_nwn _i ni _ - i- n S -S i T P-D O USNOT_A SNBW R_EE I_ GAETATZA STEIEVREFL
+239.0 :pot_n :oP_Ug_nSidRnIAaTtsS >- dlrow_ni
+723.
+0: S:dDeNsAuW >_- EyZroEtEnRevFni_ni198.0 :gn i:tSaTtiNveElG
+>A-
+dlrow_ni
+,y, y ,rr poo ott tnn _e e n,vdv onn l_ri gi_o_ nnwn iii d _ -- nn SS ia T-tD sOSN O -T A PNBW U_EE_ _GE STAZ RATE IAIEV TRE SFL
+,yro t ,n d,e de ,v lsdrn ulori w_ -o nw S_i nD _- in N S -i AT P- O WUSOT__SN EB RZ_EE IEGAT EATA RST FIVEL
+,y,yrroottn n , ede ,gvlv rnnn oiii w_ t_ ann _tini i - vi- eS-S lTP D -O UN SO_TA SB NW R_ EEI_ AGETTZ AASTEIEVREFL
+529.0
+:pot_n
+:oP_Ug_nSidRnIAaTtsS >- dlrow_ni
+339.0
+:pot_n
+:oP_Ug_nSidRnIAaTtsS
+>- dlrow_ni29.0 : :SdDeNsuA W>-_ EyrZoEtnEeRvFni_ni
+,y ,r po o t ,tn d_e e n,v sdon ul_ri g_ -o nnw Sii dD _-nn NSia AT-t sO WS O -T _ PN EB UZ_EE _EGST EARA RT IFAIV TE SL
+,y, y ,rr poo ott tnn _ ee ,ngvv onnn _ii gi_t_ annn tiii di -v- n eSS alT tD -sO N S O - TA PBNW U_EE_ _GE STZ RAATE IAIEV TRE SFL
+,yro t ,n d, ed e,gvl srnn uoii w_ t- an S_tin Di - vi N eS- lATP -O W USO_ _TS EB NR Z_ EEI EAGT ETAA RST FIVEL
+729.0
+:pot_n
+:oP_Ug_nSidRnIAaTtsS
+>- dlrow_ni ,y ,r po o t ,tn d_ e e,ngv sonn u_ii g_t - ann Stii dDi -vn NeS al AT t-sO W S O -_ TPEBNUZ_EE _EGST ERAA RT IFAIV TE SL

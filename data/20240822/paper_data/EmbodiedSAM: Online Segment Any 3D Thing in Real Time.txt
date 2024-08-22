@@ -1,0 +1,703 @@
+EmbodiedSAM: Online Segment Any 3D Thing in
+Real Time
+XiuweiXu1, HuangxingChen1, LinqingZhao1, ZiweiWang2, JieZhou1, JiwenLu1∗
+1TsinghuaUniversity, 2NanyangTechnologicalUniversity
+Abstract
+Embodiedtasksrequiretheagenttofullyunderstand3Dscenessimultaneously
+withitsexploration,soanonline,real-time,fine-grainedandhighly-generalized
+3Dperceptionmodelisdesperatelyneeded. Sincehigh-quality3Ddataislimited,
+directly training such a model in 3D is almost infeasible. Meanwhile, vision
+foundation models (VFM) has revolutionized the field of 2D computer vision
+with superior performance, which makes the use of VFM to assist embodied
+3Dperceptionapromisingdirection. However,mostexistingVFM-assisted3D
+perceptionmethodsareeitherofflineortooslowthatcannotbeappliedinpractical
+embodiedtasks. Inthispaper,weaimtoleverageSegmentAnythingModel(SAM)
+forreal-time3Dinstancesegmentationinanonlinesetting. Thisisachallenging
+problemsincefutureframesarenotavailableintheinputstreamingRGB-Dvideo,
+andaninstancemaybeobservedinseveralframessoobjectmatchingbetween
+framesisrequired. Toaddressthesechallenges,wefirstproposeageometric-aware
+queryliftingmoduletorepresentthe2DmasksgeneratedbySAMby3D-aware
+queries,whichistheniterativelyrefinedbyadual-levelquerydecoder. Inthisway,
+the2Dmasksaretransferredtofine-grainedshapeson3Dpointclouds. Benefit
+fromthequeryrepresentationfor3Dmasks,wecancomputethesimilaritymatrix
+betweenthe3Dmasksfromdifferentviewsbyefficientmatrixoperation,which
+enablesreal-timeinference. ExperimentsonScanNet,ScanNet200,SceneNNand
+3RScanshowourmethodachievesleadingperformanceevencomparedwithoffline
+methods. Ourmethodalsodemonstratesgreatgeneralizationabilityinseveralzero-
+shotdatasettransferringexperimentsandshowgreatpotentialinopen-vocabulary
+anddata-efficientsetting. CodeanddemoareavailableatHERE,withonlyone
+RTX3090GPUrequiredfortrainingandevaluation.
+1 Introduction
+Embodied tasks, like robotic manipulation and navigation [20; 3; 36; 35], require the agent to
+understand the 3D scene, reason about human instructions and make decisions with self-action.
+Amongthepipeline, embodiedvisualperceptionisthefoundationforvariousdownstreamtasks.
+In embodied scenarios, we hope the 3D perception model to be: (1) online. The input data is a
+streamingRGB-Dvideoratherthanapre-collectedoneandvisualperceptionshouldbeperformed
+synchronouslywithdatacollection;(2)real-time. Highinferencespeedisneeded;(3)fine-grained.
+Itshouldrecognizealmostanyobjectappearedinthescene;(4)highly-generalized. Onemodelcan
+beappliedtodifferentkindsofscenesandbecompatiblewithdifferentsensorparameterslikecamera
+intrinsics. Ashigh-quality3Ddataislimited,trainingsuchamodelinpure3Disalmostinfeasible.
+Inspiredbythegreatachievementsoflargelanguagemodels(LLMs)[38;4;1],aseriesofvision
+foundationmodels(VFMs)suchasSAM[12]andSEEM[40],haveemerged. VFMsarerevolution-
+izingthefieldof2Dcomputervisionbytheirfine-grained,accurateandgeneralizablesegmentation
+∗Correspondingauthor.
+Preprint.Workinprogress.
+4202
+guA
+12
+]VC.sc[
+1v11811.8042:viXra3D Segmentation 3D Segmentation
+SAM SAM
+20.2 AP 35.9 AP
+3 min 5 sec
+Color 2D Mask Color 2D Mask
+Lift &
+Project Refine
+Hand-crafted Fast Learnable
+Merging InsQuery Merging
+Depth 3D Mask Depth 3D Mask
+Previous 3D SAM v.s. Ours
+(a) Offline RGB-D video (b) Streaming RGB-D video
+Figure1: Differentfromprevious3DSAMmethods[33;31;34]thatproject2Dmasksto3Dand
+mergethemwithhand-craftedstrategies,ESAMlifts2Dmasksto3Dqueriesanditerativelyrefine
+themtopredictaccurate3Dmasks. With3Dqueries,ESAMisalsoabletofastlymerge3Dmasks
+indifferentframeswithsimplematrixoperations. TakeSAM3D[33]forcomparison,ourESAM
+surpassesitsperformanceby15.7%APwithamorethan20×fasterspeed.
+onimagepixels. However,lessstudieshavebeenconductedondevelopingVFMsforthe3Ddomain.
+Sincethereismuchlesshigh-qualityannotated3Ddatacomparedwith2Dcounterparts,itholdsgreat
+promisetoexploretheadaptationorextensionofexisting2DVFMsforembodied3Dperception.
+Recently, therearesomeworks[33;34;17]thatadoptSAMtoautomaticallygeneratemaskson
+multi-viewimagesofa3Dsceneandmergethemasksin3Dwithprojectionanditerativemerging.
+While these approaches achieve fine-grained 3D instance segmentation with high generalization
+ability,theystillfacesomeseriousproblemsthathindertheirapplication: (1)theyapplySAMon
+individualimagesanddirectlyprojectthe2Dmasksto3Dpointcloudswithcameraparameters. So
+thepredictionsarenotgeometric-aware, whichmayproduceinconsistentresultsacrossdifferent
+views;(2)theymergeper-framemaskpredictionsin3Dwithhand-craftedstrategy. E.g.,computing
+geometricsimilaritybetweenallpairsofmasksandmergethemaccordingtoathreshold,whichis
+inaccurateandveryslow;(3)mostofthemareofflinemethodsbasedonpre-collectedRGB-Dframes
+with3Dreconstruction.
+Inthispaper,weproposeaVFM-assisted3DinstancesegmentationframeworknamelyEmbodied-
+SAM(ESAM),whichexploitsthepowerofSAMtoonlinesegmentanythingin3Dsceneswithhigh
+accuracy,fastspeedandstronggeneralizationability. AsshowninFigure1,differentfromprevious
+3D SAM methods [33; 31; 34] that project 2D masks to 3D and merge them with hand-crafted
+strategies,ESAMlifts2Dmasksto3Dqueriesandpredictstemporalandgeometric-consistent3D
+masks with iterative query refinement. Benefit from the 3D query representation, ESAM is also
+abletofastlymerge3Dmasksindifferentframeswithsimplematrixoperations. Specifically,we
+extractpoint-wisefeaturesfromthepointcloudsprojectedfromdepthimage. Thenweregardthe
+2DmasksgeneratedbySAMassuperpoints,whichisusedtoguidemask-wiseaggregationbyour
+proposedgeometric-awarepoolingmodule,generating3Dquerieswithone-to-onecorrespondence
+toSAMmasks. Wefurtherpresentadual-levelquerydecodertoiterativelyrefinethe3Dqueries,
+whichmakesthequeriesefficientlyattendwithsuperpoint-wisefeaturesandgeneratefine-grained
+point-wisemasks. Sinceeach3Dinstancemaskisassociatedwithaquery,wecancomputesimilarity
+betweennewlypredicted3Dmasksandpreviousonesbyefficientmatrixmultiplicationinparallel
+andaccuratelymergethem. Toenhancethediscriminativeabilityofqueryfeatures,wedesignthree
+representativeauxiliarytasksforestimationofgeometric,contrastiveandsemanticsimilarities. We
+conductextensiveexperimentsonScanNet,ScanNet200,SceneNNand3RScandatasets. Compared
+withpreviousVFM-assisted3Dinstancesegmentationmethods,weimprovetheaccuracyandspeed
+byalargemarginwhilestillremainstronggeneralizationability. Moreover,ESAMcanbeeasily
+extendedtoopen-vocabularysegmentation. Italsoshowsgreatpotentialindata-efficientsettingwhen
+trainedwithlimiteddata.
+2 RelatedWork
+VFM-assisted3DSceneSegmentation: In2Drealm,visionfoundationmodels(VFM)[23;12;15]
+haveexplodedingrowth. Benefitfromthelargeamountofannotatedvisualdata,the2DVFMshows
+great accuracy and very strong generalization ability, which makes them work well in zero-shot
+scenarios. Sincethereismuchlesshigh-qualityannotateddatainthefieldof3Dvisionthanthe2D
+counterpart,using2DVFMtoassist3Dsceneperceptionbecomesapromisingdirection[25;33;
+231;34]. UnScene3D[25]considers2Dself-supervisedfeaturesfromDINO[23]togenerateinitial
+pseudomasks,whichistheniterativelyrefinedwithself-training. SAM3D[33]adoptsSAM[12]to
+generate2Dinstancemasks,whicharethenprojectedto3Dspacebydepthandcameraparameters
+andmergedaccordingtothegeometry. SAMPro3D[31]maps3Dpointsinscenestomulti-view2D
+imagesas3Dprompts,whichareusedtoalignthe2DmasksgeneratedbySAMandclusterthe3D
+pointsintoinstancemasks. SAI3D[34]generates3Dprimitivesonthereconstructed3Dmesh. Then
+itadoptssemantic-SAMtoacquire2Dmaskswithsemanticscores,whichareconnectedwiththe3D
+primitivesandmergedbyagraph-basedregiongrowingstrategy. OurapproachalsoutilizesSAM
+toassist3Dinstancesegmentation. Differently,wemakestheprocessof2D-to-3Dprojectionand
+3Dmaskmerginglearnableandonline. Inthisway,ourESAMisabletopredictmoreaccurate3D
+masksandbeappliedinpracticalreal-timeonlinetasks.
+Online 3D Scene Perception: In persuit of embodied AI, real world applications like robotic
+navigation [3; 36] and manipulation [20] have received increasing attention. Online 3D scene
+perception,whichpreciselyunderstandsthesurrounding3DscenesfromstreamingRGB-Dvideos,
+becomesthevisualbasisoftheserobotictasks. Earlyonline3Dperceptionmethodsprocess2D
+imagesseparatelyandprojectthepredictionsto3Dpointclouds,whichisfollowedbyafusionstep
+tomergethepredictionsfromdifferentframes[18;21]. However,thepredictionson2Dimageisnot
+geometricandtemporal-aware,whichmakesthefusionstepdifficultandinaccurate. Fusion-aware
+3D-Conv[37]andSVCNN[11]constructdatastructurestomaintaintheinformationofprevious
+framesandconductpoint-based3Daggregationtofusethe3Dfeaturesforsemanticsegmentation.
+INS-CONV[16]extendssparseconvolution[9;5]toincrementalCNNtoefficientlyextractglobal
+3Dfeaturesforsemanticandinstancesegmentation. Inordertosimplifythedesignofonline3D
+perceptionmodelandleveragethepoweroftheadvancedoffline3Darchitectures,MemAda[32]
+proposesanewparadigmforonline3Dsceneperception,whichempowersofflinemodelwithonline
+perceptionabilitybymultimodalmemory-basedadapters. Differentfromthepreviousworks,our
+ESAMliftsSAM-generated2Dmaskstoaccurate3Dmaskandcorrespondingqueries,whichenables
+ustoefficientlymergetheper-framepredictionswithhighaccuracy.
+3 Approach
+GivenasequenceofRGB-DimagesX ={x ,x ,...,x }withknownposes,ourgoalistosegment
+t 1 2 t
+anyinstanceinthecorresponding3Dscene. Formally,x =(I ,P )whereI isthecolorimageand
+t t t t
+P isthepointcloudsacquiredbyprojectingthedepthimageto3Dspacewithposeparameters. Our
+t
+methodisrequiredtopredictinstancemasksfortheobserved3DsceneS
+=(cid:83)t
+P . Furthermore,
+t i=1 i
+wewanttosolvethisproblemonline;thatis,atanytimeinstanttfutureframesx , i > tarenot
+i
+known,andtemporallyconsistent3DinstancemasksofS shouldbepredictedateachtimeinstant.
+t
+Overview. TheoverviewofourapproachisshowninFigure2. Wesolvetheproblemofonline3D
+instancesegmentationinanincrementalmannertoachievereal-timeprocessing. Attimeinstantt,
+weonlypredicttheinstancemasksMcur ofcurrentframeP . ThenwemergeMcur totheprevious
+t t t
+instancemasksMpre ofS andgettheupdatedinstancemasksMpreofS .
+t−1 t−1 t t
+3.1 QueryLiftingandRefinement
+Considerthemodelisreceivingthet-thRGB-Dframex =(I ,P ),wefirstadoptSAMautomatic
+t t t
+mask generation to acquire 2D instance masks M2d from I . In this subsection, we ignore the
+t t
+subscripttforclearerstatement.
+Geometric-awareQueryLifting. AsSAMdoesnotleveragetheinformationfrompreviousframes,
+nor does it exploit 3D information from the depth image, directly project M2d to P results in
+inaccurateandtemporal-inconsistent3Dmasks. Instead,weaimtolifteach2Dmasktoa3Dquery
+feature,whichenablesustofurtherrefinethequeriesfor3Dinstancemaskgeneration. Sincethe2D
+binarymaskislessinformative,hereweproposetoextractpointcloudfeaturesfromthesceneand
+thenregardthe2Dmasksasindexstoclusterpointcloudsintosuperpoints,wherequeriescanbe
+simplyselectedfromthesuperpointfeatures. AssumingthepointcloudsP ∈RN×3andthereareM
+masksinM2d,wefirstmapM2dtoP accordingtothecolor-depthcorrespondencetogetsuperpoint
+indexS ∈ZN,whereeachelementinS fallsin[0,M). ThenwefeedP toa3DsparseU-Net[5]
+withmemory-basedadapter[32]toextracttemporal-aware3DfeaturesF ∈RN×C. WithF and
+P P
+S,wecanpoolthepoint-wisefeaturestosuperpointfeaturesF ∈RM×C.
+S
+3Temporal-aware
+Posed RGB-D Query Decoder x 3
+3D U-Net +
+N x 3 N x C Point Mask
+Generation
+Feed Forward +
+SAM Memory
+Self-Attention
+M x C Superpoint Masked
+Cross-Attention Attention
+Mask
+2D Mask Superpoints Select InsQuery
+Query Lifting Query Refinement Query Merging
+Figure2: OverviewofESAM.Atanewtimeinstantt,wefirstadoptSAMtogenerate2Dinstance
+masksM2d. Weproposeageometric-awarequeryliftingmoduletoliftM2dto3DqueriesQ while
+t t t
+preservingfine-grainedshapeinformation. Q arerefinedbyadual-leveldecoder,whichenables
+t
+efficientcross-attentionandgeneratesfine-grainedpoint-wisemasksMcur fromQ . ThenMcur is
+t t t
+mergedintopreviousmasksMpre byafastquerymergingstrategy.
+t−1
+However,naiveoperationsuchasmaxoraveragepoolingmaydegradetherepresentationability
+ofF . Tobetterpreservethepointfeaturesinsideeachsuperpoint,wetakethegeometricshapeof
+S
+eachsuperpointintoaccount. ForasuperpointPi ⊆ P, i ∈ [0,M),wecomputethenormalized
+relativepositionspr ofallpointsp ∈Piwithrespecttothesuperpoint’scenterc . Inthisway,the
+j j i
+setP ={pr = pj−ci |p ∈Pi}representsthenormalizedshapeofthissuperpointwith
+i j max(pj)−min(pj) j
+diameterof1andcenteroforigin. Thenwecomputethelocalandglobalfeaturesforeachpoint:
+zglobal =Agg(zlocal)∈RC, zlocal =MLP(P )∈R|Pi|×C (1)
+i
+whereMLPperformsoneachindividualpointandAggistheaggregationfunctionimplemented
+withchannel-wisemax-pooling. Thelocalandglobalfeaturesrepresenttherelevancebetweenpoints
+andshape,soweconcatbothfeaturesandfeedthemtoanotherMLPtopredictpoint-wiseweight:
+w =Sigmoid(MLP(z ))∈R(0,1), z =[zlocal,zglobal] (2)
+j j j j
+Finally,weaggregatepointfeaturesFi intothei-thsuperpointwithweightedaveragepooling:
+P
+Fi =G(Fi)+zglobal, G(Fi)=mean(Fi ∗[w ,...,w ]) (3)
+S P P P 1 |Pi|
+Noteweenhancethepooledsuperpointfeaturewithzglobaltofullycombinetheshape-levelgeometric
+featureandscene-level3DU-Netfeature. Thecomputationforeachsuperpointcanbeparallelized
+withpoint-wiseMLPandScatterfunction[8],sothisgeometric-awarepoolingisactuallyefficient.
+Dual-levelQueryDecoder. Afterpooling,theM 2DinstancemasksM2dareliftedto3Dsuperpoint
+featuresF . Thenweinitializeaseriesof3DinstancequeriesQ fromF ,whichareiteratively
+S 0 S
+refinedbyseveraltransformer-basedquerydecoderlayersandleveragedtopredict3Dmasks. During
+training, we randomly sample a proportion between 0.5 and 1 of F to construct Q for data
+S 0
+augmentation. WhileatinferencetimewesimplysetQ =F .
+0 S
+Eachqeurydecoderemploysmaskedcross-attentionbetweenqueriesandthescenerepresentations
+toaggregateinstanceinformationforeachquery:
+Q·KT (cid:26) 0 if Mcur(i,j) =True
+Qˆ =Softmax( √ +A )·V, A (i,j)= l , l=0,1,2 (4)
+l C l l −∞ otherwise
+where·indicatesmatrixmultiplication, QisthelinearprojectionofQ , K andV arethelinear
+l
+projection of the scene representations F. F can be point-wise features F or superpoint-wise
+P
+featuresF . A istheattentionmaskderivedfromthepredicted3DinstancemasksMcur inthel-th
+S l l
+decoderlayer. (i,j)indicatesi-thqueryattendingtoj-thpointorsuperpoint. ThenwefeedQˆ to
+l
+self-attentionlayerandfeedforwardnetworktogetQ ,followedbyamaskgenerationmoduleto
+l+1
+predicttheinstancemaskforeachquery:
+Mcur =Sigmoid(ϕ(Q )·FT)>φ, l=0,1,2,3 (5)
+l l
+4
+Projection
+Grouping Pooling Geo-aware
+Geo-aware
+Pooling
+...
+...
+Correspondence Query-Mask
+Merge
+...whereϕisalinearlayer. Mcur isapointmaskifF =F ,otherwiseitisasuperpointmask.
+l P
+Acommonpractice[27;28;14]forqeurydecoderistoadoptthesamelevelofscenerepresentations
+for cross-attention and mask generation. However, since SAM has already outputs high-level
+semantic-awaremasks,weobserveM ≪N. Ifweadoptthepoint-wisescenerepresentationsF
+P
+forquerydecoder,thecross-attentionoperationwillbememory-consumingduetothelargeamount
+ofpoints. WhileifweusesuperpointfeaturesF ,thepredicted3Dinstancemaskswillonlybethe
+S
+combinationofsuperpointsandthuscannotberefinedtofinergranularity. Togetthebestofboth
+worlds,ourquerydecoderisdesignedtobedual-level. Forcross-attentioninEq(4),wesetF =F
+S
+toachieveefficientinteraction. WhileformaskpredictioninEq(5),wesetF =F forfine-grained
+P
+maskgeneration. Tosupportmaskedattention,wepoolpointmasktosuperpointmaskbeforeEq(4):
+Mcur ←G(Mcur)>φ (6)
+l l
+whereGisthegeometric-awarepoolinginEq(3).Wecanreusethepre-computedweightsinEq(2)to
+reducecomputation. Inthisway,after3×querydecoders,weacquireaccuratepointmasksMcur as
+3
+wellasthecorrespondingqueriesQ ,whichisdenotedasMcur andQ inthefollowingsubsections.
+3 t t
+Weperformmask-NMSonMcur tofilteroutredundantmasksaswellasthecorrespondingqueries.
+t
+3.2 EfficientOnlineQueryMerging
+Once lifting 2D masks M2d to accurate 3D masks Mcur, we then merge Mcur to the previous
+t t t
+instancemasksMpre toacquireMpre. Notewhent=1wehaveMpre =Mcur asaninitialization.
+t−1 t 1 1
+However,themainstreamsolutionformerginginstancemasksinpreviousworks[33;34;16;21;17]
+istotraverseoverallmasksinMcur andcompareeachmaskinMcur withallpreviousmasksin
+t t
+Mpre. Thisprocessisveryslow,becauseinordertoaccuratelydecidewheteranewmaskshoulebe
+t−1
+mergedintoapreviousmask,thegeometricsimilaritysuchasmask-IoUorCD-distanceiscomputed
+onthepointcloudsofthetwomasks. Thecomputationofsimilarityinvolvesallthepointsineach
+mask, which has high computation complexity. What is worse, above operations are hard to be
+computedinparallel,sincethenumberofpointsineachmaskisdifferentandweneedtopickout
+pointcloudsofeachinstanceaccordingtothemaskonebyone. Tothisend,weproposetorepresent
+eachmaskinfixed-sizevectorsandcomputethesimilaritywithefficientmatrixoperation.
+Benefitfromourarchitecture,foreachmaskinMcur andMpre wehavethecorrespondingquery
+t t−1
+feature. Thequeryfeatureitselfisafixed-sizevectorrepresentation,butsimplycomputingsimilarity
+betweenthemislessinformative,whichgetsverylowperformance. Therefore,wesetupseveral
+representative auxiliary tasks based on the query features to learn vector representations under
+differentmetrics,whichareusedtocomputegeometric,contrastiveandsemanticsimilarities.
+First,forgeometricsimilarity,weobservethemodel
+is able to learn the whole geometry with only par- Auxiliary Task
+tialobservation. However,duetotherestrictionof
+segmentationthatpredictionscanonlybemadeonex-
+istingpoints,themodelcannotexpressitsknowledge
+aboutthewholegeometry. Therefore,wemakethe
+Amodal-Box
+modelabletoexpressitsfullknowledgebyintroduc-
+inganauxiliarytaskofboundingboxprediction. We Push
+Push
+adoptaMLPtopredicttheboundingboxregression
+basedonthecenterofeachquery(i.e.thecenterc Pull Q-Contrast
+i
+ofthecorrespondingsuperpoint)togetboxB ∈R6. Chair Toilet ... Sofa
+Then the geometric similarity between two masks Semantic
+canbecomputedbytheIoUbetweenthetwoboxes.
+Figure3: Detailsofourefficientquerymerg-
+WeignoreboxorientationssincetheIoUmatrixbe-
+ingstrategy. Weproposethreekindsofrep-
+tweentwosetsofaxis-alignedboundingboxescan
+resentative auxiliary tasks, which generates
+becomputedbysimplematrixoperation.
+geometric,contrastiveandsemanticrepresen-
+Second,forcontrastivesimilarity,weaimtolearnan tationsintheformofvectors. Thenthesimi-
+instance-specificrepresentationwherefeaturesfrom laritymatrixcanbeefficientlycomputedby
+thesameinstanceshouldbepulledtogetherandother- matrixmultiplication. Wefurtherprunethe
+wisepushedaway.Thisrepresentationcanbelearned similaritymatrixandadoptbipartitematching
+bycontrastivetrainingbetweentwoadjacentframes: tomergetheinstances.
+we use MLP to map the query features Q to con-
+t
+trastivefeaturef . Thenforaninstanceiappearsinthet-thand(t+1)-thframes,wechoosethe
+t
+5twofeaturesofthisinstance(fi,fi )asthepositionpair,andsamplefeaturesfromotherinstances
+t t+1
+(fi,fk )asthenegativepair. Thedetailedlossfunctionisshowninthenextsubsection.
+t t+1
+Finally,forsemanticsimilarity,wesimplyadoptaMLPtopredictper-categoryprobabilitydistribution
+S ∈RK,whereK isthenumberofpre-definedcategories. Therearealsootherchoicesforthistask.
+Forexample,ifweadoptsemantic-SAM[15]insteadofSAM,wecandirectlyutilizethesemantic
+predictionsforthe2DmaskstoserveasS forthecorrespondingqueries.
+Inthisway,thesimilaritymatrixC betweenMpre andMcur canbeefficientlycomputedwiththeir
+t−1 t
+correspondinggeometric,contrastiveandsemanticrepresentations:
+fpre fcur Spre Scur
+C =IoU(Bpre,Bcur)+ t−1 ·( t )T + t−1 ·( t )T (7)
+t−1 t ||fpre|| ||fcur|| ||Spre|| ||Scur||
+t−1 2 t 2 t−1 2 t 2
+whereIoU(·,·)meanstheIoUmatrixbetweentwosetofaxis-alignedboundingboxes.WepruneCby
+settingelementssmallerthanthresholdϵto−∞. Thenbipartitematchingwithcost−C isperformed
+onMpre andMcur,whichassignseachmaskinMcur tooneofthemasksinMpre. Ifanewmask
+t−1 t t t−1
+failstomatchwithanypreviousmask,weregisteranewinstanceforthismask. Otherwisewemerge
+thetwomasksaswellastheirB,f andS.Maskmergingcanbesimplyimplementedbytakingunion.
+Whileforotherrepresentations,weweightedaveragethemby:Bpre[i]= n Bpre[i]+ 1 Bcur[j]
+t n+1 t−1 n+1 t
+andsoon. Weassumethej-thnewmaskismergedtothei-thpreviousmask. nisthecountof
+merging,whichindicatesthenumberofmasksthathavebeenmergedtoMpre[i].
+t−1
+3.3 LossFunction
+WehavesemanticandinstancelabelsoneachRGB-Dframe. IneachRGB-Dvideo,theinstance
+labelsofdifferentframesareconsistent. Giventheannotations,wecomputeper-framelossesbased
+thepredictionsfromeachquery. SincethequeriesQ areliftedfrom2DSAMmasksinaone-to-one
+t
+way,weignorethecomplicatedlabelassignmentstepanddirectlyutilizetheannotationson2Dmask
+tosupervisethepredictionsfromthecorrespondingquery. Weassumethata2DSAMmaskcan
+belongonlytooneinstance,andthuswecanacquiretheground-truthsemanticlabeland2Dinstance
+maskforeachquery. Weutilizethepixelcorrespondencewithdepthimagetomap2Dinstancemask
+to3Dpointclouds,andcomputeground-truthaxis-alignedboundingboxbasedonthe3Dinstance
+mask. With above annotations, we compute binary classification loss Lt with cross-entropy to
+cls
+discriminateforegroundandbackgroundinstances. Thepredicted3Dmaskissupervisedbyabinary
+cross-entropyLt andaDicelossLt . Thelossesforboundingboxesandsemanticpredictions
+bce dice
+aredefinedasIoU-lossLt andbinarycross-entropyLt respectively.
+iou sem
+Apartfromtheaboveper-framelosses,wealsoformulateacontrastivelossbetweenadjacentframes:
+1(cid:88)Z e(⟨f ti,f ti +1⟩/τ)
+L t→t+1 =− log (8)
+cont Z
+i=1
+(cid:80) j̸=ie(⟨f ti,f tj +1⟩/τ) +e(⟨f ti,f ti +1⟩/τ)
+where⟨·,·⟩iscosinesimilarity. Sofinallythetotallossisformulatedas:
+T
+1 (cid:88)
+L= (αLt +Lt +Lt +βLt +Lt +L t→t+1+L t→t−1) (9)
+T cls bce dice iou sem cont cont
+t=1
+whereL T→T+1andL 1→0issetto0.
+cont cont
+4 Experiment
+In this section, we first describe our datasets and implementation details. Then we compare our
+methodwithstate-of-the-artVFM-assisted3Dinstancesegmentationmethodsonline3Dsegmentation
+methodstovalidateitseffectiveness. WealsoapplyESAMinopen-vocabularyanddata-efficient
+setting to demonstrate its application potential. Finally we conduct ablation studies to provide a
+comprehensiveanalysisonourdesign.
+6Table1: Class-agnostic3DinstancesegmentationresultsofdifferentmethodsonScanNet200dataset.
+Following [34], we compare with conventional clustering methods and VFM-assisted 3D scene
+perceptionmethods. TheunitofSpeedismsperframe,wherethespeedofVFMandotherpartsare
+reportedseparately.
+Method Type VFM AP AP AP Speed
+50 25
+HDBSCAN[19] Offline – 1.6 5.5 32.1 –
+Nunesetal.[22] Offline – 2.3 7.3 30.5 –
+Felzenszwalbetal.[7] Offline – 5.0 12.7 38.9 –
+UnScene3D[25] Offline DINO[2] 15.9 32.2 58.5 –
+SAMPro3D[31] Offline SAM[12] 18.0 32.8 56.1 –
+SAI3D[34] Offline SemanticSAM[15] 30.8 50.5 70.6 –
+SAM3D[33] Online SAM 20.2 35.7 55.5 1369+1518
+ESAM Online SAM 37.9 58.8 75.0 1369+80
+ESAM-E Online FastSAM[39] 35.9 56.3 74.0 20+80
+Table2: DatasettransferresultsofdifferentmethodsfromScanNet200toSceneNNand3RScan. We
+directlyevaluatethemodelsinTable1onotherdatasetstoshowtheirgeneralizationability.
+ScanNet200→SceneNN ScanNet200→3RScan
+Method Type
+AP AP AP AP AP AP
+50 25 50 25
+SAMPro3D Offline 12.6 25.8 53.2 3.9 8.0 21.0
+SAI3D Offline 18.6 34.7 65.7 5.4 11.8 27.4
+SAM3D Online 15.1 30.0 51.8 6.2 13.0 33.9
+ESAM Online 26.6 46.2 63.1 10.3 23.6 50.7
+ESAM-E Online 23.4 43.0 60.0 10.2 22.4 48.5
+4.1 BenchmarkandImplementationDetails
+We evaluate our method on four datasets: ScanNet [6], ScanNet200 [24], SceneNN [10] and
+3RScan [30]. ScanNet contains 1513 scanned scenes, out of which we use 1201 sequences for
+training and the rest 312 for testing. ScanNet200 provides more fine-grained annotations on the
+scenesofScanNet,whichcontainsmorethan200categories. SceneNNcontains50high-quality
+scannedsceneswithinstanceandsemanticlabels. Following[32],weselect12cleansequencesfor
+testing. 3RScanisamorechallengingindoordatasetwheretheRGB-Dsequencesareacquiredby
+fast-movingcameras. Wechooseitstestsplitfortesting,whichcontains46scenes. Eachdataset
+providebothposedRGB-Dsequencesandreconstructedpointcloudswithlabels.
+Benchmarks: Wecomparedifferentmethodsonfourbenchmarks. First,wecomparewithVFM-
+assisted3DinstancesegmentationmethodsinTable1. WetraindifferentmethodsonScanNet200
+trainingset(ifneeded)andevaluatethemonScanNet200validationsetinaclass-agnosticmanner.
+Forofflinemethods,theinputofeachsceneisareconstructedpointcloudandaRGB-Dvideo,where
+predictionsaremadeonthereconstructedpointclouds. Foronlinemethods,theinputisastreaming
+RGB-Dvideo,andwemapthefinalpredictedresultsonS tothereconstructedpointcloudswith
+t
+nearestneighborinterpolationforcomparison.
+Sincezero-shotmethodslikeSAM3Ddonotrequiretraining. Tofairlycomparethemwithlearnable
+methods,wefurtherevaluatethemodelsinTable1onSceneNNand3RScanwithoutfinetuning. This
+benchmark,showninTable2,validatesthegeneralizationabilityofdifferentmethods.
+Wealsocomparewithonline3DinstancesegmentationmethodsinTable3. Followingprevious
+works[16;32],wetraindifferentmethodsonScanNettrainingsetandevaluatethemonScanNet
+validatesetandSceneNN.
+Finally,weevaluatetheopen-vocabulary3Dinstancesegmentationabilityonthe198categoriesof
+ScanNet200inTable4. SinceESAMoutputsclass-agnostic3Dmasks,therearetwomethodsto
+extendittoopen-vocabulary3Dsegmentation. Thefirstistofeedtheclass-agnostic3Dmasksto
+open-vocabularymaskclassificationmodellikeOpenMask3D[29],whichisadoptedinthecodeof
+7Table3: 3DinstancesegmentationresultsofdifferentmethodsonScanNetandSceneNNdatasets.
+ScanNet SceneNN
+Method Type FPS
+AP AP AP AP AP AP
+50 25 50 25
+TD3D[13] Offline 46.2 71.1 81.3 – – – –
+Oneformer3D[14] Offline 59.3 78.8 86.7 – – – –
+INS-Conv[16] Online – 57.4 – – – – –
+TD3D-MA[32] Online 39.0 60.5 71.3 26.0 42.8 59.2 3.5
+ESAM-E Online 38.4 57.7 72.9 27.3 42.1 56.4 10.0
+ESAM-E+FF[26] Online 40.8 58.9 75.7 30.2 48.6 63.6 9.8
+SAI3D[34]. Thesecondistoadoptopen-vocabulary2Dsegmentationmodeltoacquirethecategory
+labelsforeach2Dmask. Sincethereisone-to-onecorrespondencebetween3Dmaskand2Dmask
+inESAM,wecanacquirethecategorylabelsforeach3Dmaskaccordingly. HerewefollowSAI3D
+toadoptthefirstmethodandcomparewithit.
+Implementationdetails: Following[32], wetrain Table 4: Open-vocabulary 3D instance seg-
+ESAM in two stages. First we train a single-view mentationresultsonScanNet200dataset.
+perception model on ScanNet(200)-25k, which is
+Method AP AP AP
+a subset of ScanNet(200) with individual RGB-D 50 25
+frames,withoutmemory-basedadaptersandlosses SAI3D 9.6 14.7 19.0
+for the three auxiliary tasks. Next we finetune the ESAM 13.7 19.2 23.9
+single-viewperceptionmodelonRGB-Dsequences
+with the adapters and full losses. To reduce memory footprint, we randomly sample 8 adjacent
+RGB-D frames for each scene at every iteration. In terms of hyperparameters, we set φ = 0.5,
+ϵ=1.75,τ =0.02,α=0.5andβ =0.5.
+4.2 ComparisonwithState-of-the-art
+Wecompareourmethodwiththetop-performanceVFM-assisted3Dinstancesegmentationmethods
+and online 3D instance segmentation methods as described above. We provide three versions of
+ESAM,namelyESAM,ESAM-EandESAM-E+FF.ESAMadoptsSAMastheVFMwhileESAM-E
+adoptsFastSAM[39]toachievereal-timeinference.ESAM-E+FFnotonlyadoptsthe2Dmasksfrom
+FastSAM,butalsofusesimagefeaturesextractedbyFastSAMbackbonetopointcloudsfollowing
+[26]. Wealsoincludesomevisualizationresultsinforqualitativeevaluation.
+AccordingtoTable1,onclass-agnostic3Dinstancesegmentationtask(i.e.the3D"segmentanything
+task"),ourESAMestablishesnewstate-of-the-artcomparedwithpreviousmethods,evenincluding
+theofflineones. Notethatitismuchmorechallengingforonlinemethodstoperceivethe3Dscenes
+comparedtoofflinealternatives,sinceofflinemethodsdirectlyprocessthecompletereconstructed3D
+sceneswhileonlinemethodsdealwithpartialandnoisyframes. Despitethehighaccuracy,ESAMis
+alsomuchfasterthanpreviousmethods. Ittakesonly80mstoprocessaframeduetotheefficient
+architecturedesignandfastmergingstrategy,whilemethodslikeSAM3Dthatadoptshand-crafted
+mergingstrategyrequiresmorethan1sperframe. WhenreplacingSAMwiththefasteralternative
+FastSAM,ESAM-Ecanachievereal-timeonline3Dinstancesegmentationwithabout10FPS,while
+theaccuracyisstillmuchhigherthanpreviousmethods.
+Intermsofgeneralizationability,ESAMalsodemonstratesgreatperformance. AsshowninTable
+2,whendirectlytransferredtootherdatasets,ESAMstillachievesleadingaccuracycomparedwith
+zero-shotmethods. WenoteSAI3DevenperformsworsethanSAM3Don3RScandataset,thisis
+becauseithighlyreliescleanreconstructed3DmesheswithaccuratelyalignedRGBframes. While
+in3RScan,thecameraismovingfastandthustheRGBimagesandcameraposesareblurry.
+WevisualizethepredictionsoftheabovemethodsonScanNet200,asshowninFigure4. ESAM
+canpredictaccurateandfine-grained3Dinstancesegmentationmasks,whilebeingabletoprocess
+streamingRGB-Dvideoinrealtime. Wealsoprovideanonlinevisualizationtofurtherdemonstrate
+thepracticabilityofESAMinFigure5. Moredetailscanbeviewedinourvideodemo.
+8e
+n
+e
+c
+S
+ut
+p
+n
+I
+h
+ut
+Tr
+d-
+n
+u
+o
+Gr
+D
+3
+M
+A
+S
+D
+3
+AI
+S
+s
+ur
+O
+Figure4: Visualizationresultsofdifferent3DinstancesegmentationmethodsonScanNet200dataset.
+Ashighlightedinredboxes,SAM3DpredictsnoisymaskswhileSAI3Dtendstooversegmentan
+instanceintomultipleparts.
+AsshowninTable3andTable4,ESAMalsoachievesstate-of-the-artperformancecomparedwith
+previousonline3Dinstancesegmentationmethodsandopen-vocabulary3Dinstancesegmentation
+methods.
+4.3 AnalysisofESAM
+Data-efficientlearning. Wereducethetrainingsam- Table5: PerformanceofESAMwhentrained
+plesbyusingonly20%or50%trainingsetandreport withpartialtrainingset.
+the class-agnostic performance of ESAM on Scan-
+Net200inTable5. Itisshownthattheperformance Proportion AP AP 50 AP 25
+degradation of ESAM is not significant even with
+100% 37.9 58.8 75.0
+limitedtrainingdata. Thisisbecause2DVFMhasal-
+50% 37.0 58.4 75.4
+readyprovidedagoodinitialization,thusthelearning
+20% 34.4 55.8 74.2
+partofESAMiseasytoconverge.
+Decompositionofinferencetime. WedecomposetheinferencetimeofESAMexcludingVFM
+in Table 6. The temporal-aware backbone consists of a sparse convolutional U-Net and several
+memory-basedadapters. Themergingprocessconsistsofsimilaritycomputation,bipartitematching
+andmask/representationupdating. Duetotheefficientdesign,thedecoderandmergingoperationof
+ESAMonlytakeasmallproportionofinferencetime.
+Ablation study. We first conduct ablation studies on ESAM to validate the effectiveness of the
+proposedmethods. Forarchitecturedesign,weconductexperimentsonScanNet200-25kandreport
+class-agnosticAPandaverageinferencelatency(ms)ofeachframeexcludingSAMinTable7. It
+canbeseenthatgeometric-awarepoolingbooststheperformanceupto1.4%whilebringsnegligible
+computational overhead. Note that the prediction error on single views will accumulate on the
+9Table6: Decompositionoftheinferencetime(ms)ofESAMexcludingVFM.
+Backbone Merging
+Decoder Total
+3D-Unet Adapters Similarity Matching Updating
+41.0 28.0 5.0 0.7 0.3 5.0 80
+Figure5: OnlinevisualizationofESAMonScanNet200dataset. Refertothevideodemoinour
+projectpageformoredetails.
+wholescenes,soahighAPonScanNet200-25kcontributesalottothefinalperformance. Wecan
+alsoobservethatthedual-leveldesigninESAMachievescomparableaccuracycomparedwiththe
+time-consumingF =F strategy,whileonlyslightlyincreasesthelatencycomparedwiththefully-
+P
+superpointF =F strategy. Forthemergingstrategies,wecomparedifferentdesignonScanNet200
+S
+withAPreported,asshowninTable8. Itisshownthateachauxiliarytaskisimportantforthequality
+ofmaskmerging. Wenoticethatthegeometricsimilarityhasthemostsignificantinfluenceonthe
+finalperformance. Thisisbecausemostmaskpairscanbeexcludedbasedondistance.
+Visualization of auxiliary tasks. We also visualize the predictions of our auxiliary tasks for
+comprehensiveunderstandingofESAM.FromFigure6(a), itcanbeobservedthatthemodelis
+abletopredictthewholegeometryofobjectswithonlypartialobservation. Thet-SNEvisualization
+inFigure6(b)validatesthatthemodelsuccessfullylearnsdiscriminativequeryrepresentationfor
+objectmatching. FinallythesemanticsegmentationresultsinFigure6(c)showsthatourESAMcan
+learnsatisfactorysemanticrepresentationandisextendableto3Dsemanticsegmentationtask.
+10Table7: Effectsofthearchitecturedesign. Table8: Effectsofthemergingstrategies.
+Method AP Latency Method AP
+ReplaceGwithaveragepooling 56.3 43.6 Removeboxrepresentation 28.7
+SetF =F only 45.6 43.1 Removecontrastiverepresentation 31.6
+S
+SetF =F only 58.0 51.7 Removesemanticrepresentation 34.8
+P
+Thefinalmodel 57.7 45.4 Thefinalmodel 37.9
+t=5
+t=15
+(a) (b) (c)
+Figure6: Visualizationoftheauxiliarytasksforourmergingstrategy. (a)3Dboxpredictionfor
+geometric similarity. We visualize the bounding boxes of an object at different time instant. (b)
+t-SNEvisualizationoftheinstance-specificrepresentationforcontrastivesimilarity. Differentcolors
+indicatedifferentinstancesanddifferentpointsindicatetheinstancefeatureatdifferentframes. (c)
+Query-wisesemanticsegmentationforsemanticsimilarity.
+5 ConcludingRemark
+Inthiswork,wepresentedESAM,anefficientframeworkthatleveragesvisionfoundationmodels
+foronline,real-time,fine-grained,generalizedandopen-vocabulary3Dinstancesegmentation. We
+proposetoliftthe2DmasksgeneratedbyVFMto3Dquerieswithgeometric-awarepooling,whichis
+followedbyadual-pathquerydecodertorefinethequeriesandgenerateaccurate3Dinstancemasks.
+Thenwiththequery-maskcorrespondence,wedesignthreeauxiliarytaskstorepresenteach3Dmask
+inthreediscriminativevectors,whichenablesfastmaskmergingwithmatrixoperations. Extensive
+experimentalresultsonfourdatasetsdemonstratesthatESAMachievesleadingperformance,online
+andreal-timeinferenceandstronggeneralizationability. ESAMalsoshowsgreatpotentialinopen-
+vocabularyanddata-efficientsetting. WebelieveESAMbringsanewparadigmonhowtoeffectively
+leverage2DVFMforembodiedperception.
+PotentialLimitations. Despiteofthesatisfactoryperformance,therearestillsomelimitationsof
+ESAM.First,whetherESAMisreal-timedependsontheadoptedVFM.CurrentlyweadoptSAM
+andFastSAM,amongwhichonlyFastSAMcanachievereal-timeinference. However,webelieve
+therewillbemoreefficient2DVFMwithbetterperformanceandmorefunctionsinthenearfuture,
+andESAMcanbefurtherimprovedalongwiththeimprovementof2DVFM.Second,the3DU-Net
+andmemory-basedadaptersforfeatureextractionarerelativelyheavy,whichcountformostofthe
+inferencetimefor3DpartofESAM.ThespeedofESAMmaybeboostedtoahigherlevelifwecan
+makethebackbonemoreefficient,whichweleaveforfuturework.
+References
+[1] JoshAchiam,StevenAdler,SandhiniAgarwal,LamaAhmad,IlgeAkkaya,FlorenciaLeoniAleman,
+DiogoAlmeida,JankoAltenschmidt,SamAltman,ShyamalAnadkat,etal. Gpt-4technicalreport. arXiv
+preprintarXiv:2303.08774,2023.
+[2] MathildeCaron,HugoTouvron,IshanMisra,HervéJégou,JulienMairal,PiotrBojanowski,andArmand
+Joulin. Emergingpropertiesinself-supervisedvisiontransformers. InICCV,pages9650–9660,2021.
+[3] DevendraSinghChaplot,DhirajPrakashchandGandhi,AbhinavGupta,andRussRSalakhutdinov. Object
+goalnavigationusinggoal-orientedsemanticexploration. NeurIPS,33:4247–4258,2020.
+11[4] AakankshaChowdhery,SharanNarang,JacobDevlin,MaartenBosma,GauravMishra,AdamRoberts,
+PaulBarham,HyungWonChung,CharlesSutton,SebastianGehrmann,etal. Palm: Scalinglanguage
+modelingwithpathways. JMLR,24(240):1–113,2023.
+[5] Christopher Choy, JunYoung Gwak, and Silvio Savarese. 4d spatio-temporal convnets: Minkowski
+convolutionalneuralnetworks. InCVPR,pages3075–3084,2019.
+[6] AngelaDai,AngelX.Chang,ManolisSavva,MaciejHalber,ThomasFunkhouser,andMatthiasNießner.
+Scannet:Richly-annotated3dreconstructionsofindoorscenes. InCVPR,pages5828—-5839,2017.
+[7] Pedro F Felzenszwalb and Daniel P Huttenlocher. Efficient graph-based image segmentation. IJCV,
+59(2):167–181,2004.
+[8] MatthiasFey. Pytorchextensionlibraryofoptimizedscatteroperations. [EB/OL]. https://github.
+com/rusty1s/pytorch_scatter.
+[9] Benjamin Graham, Martin Engelcke, and Laurens Van Der Maaten. 3d semantic segmentation with
+submanifoldsparseconvolutionalnetworks. InCVPR,pages9224–9232,2018.
+[10] Binh-SonHua,Quang-HieuPham,DucThanhNguyen,Minh-KhoiTran,Lap-FaiYu,andSai-KitYeung.
+Scenenn:Ascenemeshesdatasetwithannotations. In3DV,pages92–101,2016.
+[11] Shi-ShengHuang,Ze-YuMa,Tai-JiangMu,HongboFu,andShi-MinHu. Supervoxelconvolutionfor
+online3dsemanticsegmentation. TOG,40(3):1–15,2021.
+[12] AlexanderKirillov,EricMintun,NikhilaRavi,HanziMao,ChloeRolland,LauraGustafson,TeteXiao,
+SpencerWhitehead,AlexanderCBerg,Wan-YenLo,etal. Segmentanything. InICCV,pages4015–4026,
+2023.
+[13] Maksim Kolodiazhnyi, Anna Vorontsova, Anton Konushin, and Danila Rukhovich. Top-down beats
+bottom-upin3dinstancesegmentation. InWACV,pages3566–3574,2024.
+[14] MaximKolodiazhnyi,AnnaVorontsova,AntonKonushin,andDanilaRukhovich. Oneformer3d: One
+transformerforunifiedpointcloudsegmentation. InCVPR,2024.
+[15] Feng Li, Hao Zhang, Peize Sun, Xueyan Zou, Shilong Liu, Jianwei Yang, Chunyuan Li, Lei Zhang,
+andJianfengGao. Semantic-sam: Segmentandrecognizeanythingatanygranularity. arXivpreprint
+arXiv:2307.04767,2023.
+[16] LeyaoLiu,TianZheng,Yun-JouLin,KaiNi,andLuFang. Ins-conv:Incrementalsparseconvolutionfor
+online3dsegmentation. InCVPR,pages18975–18984,2022.
+[17] Shiyang Lu, Haonan Chang, Eric Pu Jing, Abdeslam Boularias, and Kostas Bekris. Ovir-3d: Open-
+vocabulary3dinstanceretrievalwithouttrainingon3ddata. InCoRL,pages1610–1620.PMLR,2023.
+[18] JohnMcCormac,AnkurHanda,AndrewDavison,andStefanLeutenegger. Semanticfusion: Dense3d
+semanticmappingwithconvolutionalneuralnetworks. InICRA,pages4628–4635.IEEE,2017.
+[19] LelandMcInnesandJohnHealy. Acceleratedhierarchicaldensitybasedclustering. InICDMW,pages
+33–42.IEEE,2017.
+[20] ArsalanMousavian,ClemensEppner,andDieterFox. 6-dofgraspnet:Variationalgraspgenerationfor
+objectmanipulation. InICCV,pages2901–2910,2019.
+[21] GakuNarita,TakashiSeno,TomoyaIshikawa,andYohsukeKaji. Panopticfusion: Onlinevolumetric
+semanticmappingatthelevelofstuffandthings. InIROS,pages4205–4212.IEEE,2019.
+[22] LucasNunes,XieyuanliChen,RodrigoMarcuzzi,AljosaOsep,LauraLeal-Taixé,CyrillStachniss,and
+JensBehley. Unsupervisedclass-agnosticinstancesegmentationof3dlidardataforautonomousvehicles.
+RAL,7(4):8713–8720,2022.
+[23] MaximeOquab,TimothéeDarcet,ThéoMoutakanni,HuyVo,MarcSzafraniec,VasilKhalidov,Pierre
+Fernandez,DanielHaziza,FranciscoMassa,AlaaeldinEl-Nouby,etal. Dinov2:Learningrobustvisual
+featureswithoutsupervision. arXivpreprintarXiv:2304.07193,2023.
+[24] DavidRozenberszki,OrLitany,andAngelaDai. Language-groundedindoor3dsemanticsegmentationin
+thewild. InECCV,pages125–141.Springer,2022.
+[25] DavidRozenberszki,OrLitany,andAngelaDai. Unscene3d:Unsupervised3dinstancesegmentationfor
+indoorscenes. InCVPR,2024.
+12[26] DanilaRukhovich,AnnaVorontsova,andAntonKonushin. Tr3d: Towardsreal-timeindoor3dobject
+detection. arXivpreprintarXiv:2302.02858,2023.
+[27] JonasSchult,FrancisEngelmann,AlexanderHermans,OrLitany,SiyuTang,andBastianLeibe. Mask3d
+for3dsemanticinstancesegmentation. arXivpreprintarXiv:2210.03105,2022.
+[28] JiahaoSun,ChunmeiQing,JunpengTan,andXiangminXu. Superpointtransformerfor3dsceneinstance
+segmentation. InAAAI,volume37,pages2393–2401,2023.
+[29] Ayça Takmaz, Elisabetta Fedele, Robert W Sumner, Marc Pollefeys, Federico Tombari, and Francis
+Engelmann. Openmask3d:Open-vocabulary3dinstancesegmentation. arXivpreprintarXiv:2306.13631,
+2023.
+[30] JohannaWald,ArmenAvetisyan,NassirNavab,FedericoTombari,andMatthiasNießner. Rio:3dobject
+instancere-localizationinchangingindoorenvironments. InICCV,pages7658–7667,2019.
+[31] MutianXu,XingyilangYin,LingtengQiu,YangLiu,XinTong,andXiaoguangHan. Sampro3d:Locating
+sampromptsin3dforzero-shotscenesegmentation. arXivpreprintarXiv:2311.17707,2023.
+[32] XiuweiXu,ChongXia,ZiweiWang,LinqingZhao,YueqiDuan,JieZhou,andJiwenLu. Memory-based
+adaptersforonline3dsceneperception. InCVPR,2024.
+[33] YunhanYang,XiaoyangWu,TongHe,HengshuangZhao,andXihuiLiu. Sam3d:Segmentanythingin3d
+scenes. arXivpreprintarXiv:2306.03908,2023.
+[34] YingdaYin, YuzhengLiu, YangXiao, DanielCohen-Or, JingweiHuang, andBaoquanChen. Sai3d:
+Segmentanyinstancein3dscenes. InCVPR,2024.
+[35] Yanjie Ze, Ge Yan, Yueh-Hua Wu, Annabella Macaluso, Yuying Ge, Jianglong Ye, Nicklas Hansen,
+LiErranLi,andXiaolongWang.Gnfactor:Multi-taskrealrobotlearningwithgeneralizableneuralfeature
+fields. InCoRL,pages284–301.PMLR,2023.
+[36] JiazhaoZhang,LiuDai,FanpengMeng,QingnanFan,XuelinChen,KaiXu,andHeWang. 3d-aware
+objectgoalnavigationviasimultaneousexplorationandidentification. InCVPR,pages6672–6682,2023.
+[37] JiazhaoZhang,ChenyangZhu,LintaoZheng,andKaiXu. Fusion-awarepointconvolutionforonline
+semantic3dscenesegmentation. InCVPR,pages4534–4543,2020.
+[38] SusanZhang,StephenRoller,NamanGoyal,MikelArtetxe,MoyaChen,ShuohuiChen,Christopher
+Dewan,MonaDiab,XianLi,XiVictoriaLin,etal. Opt:Openpre-trainedtransformerlanguagemodels.
+arXivpreprintarXiv:2205.01068,2022.
+[39] XuZhao,WenchaoDing,YongqiAn,YinglongDu,TaoYu,MinLi,MingTang,andJinqiaoWang. Fast
+segmentanything. arXivpreprintarXiv:2306.12156,2023.
+[40] XueyanZou,JianweiYang,HaoZhang,FengLi,LinjieLi,JianfengWang,LijuanWang,JianfengGao,
+andYongJaeLee. Segmenteverythingeverywhereallatonce. NeurIPS,36,2023.
+13
