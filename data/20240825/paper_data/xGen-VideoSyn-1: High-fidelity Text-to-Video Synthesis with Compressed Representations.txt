@@ -1,0 +1,821 @@
+xGen-VideoSyn-1: High-fidelity Text-to-Video
+Synthesis with Compressed Representations
+CanQin∗,CongyingXia∗,KrithikaRamakrishnan∗,MichaelRyoo∗,LifuTu∗,YihaoFeng∗,
+ManliShu,HongluZhou,AnasAwadalla,JunWang,SenthilPurushwalkam,LeXue,YingboZhou,
+HuanWang,SilvioSavarese,JuanCarlosNiebles∗,ZeyuanChen∗,RanXu∗,CaimingXiong∗
+SalesforceAIResearch
+∗Coreauthors
+{cqin, zeyuan.chen, ran.xu, cxiong}@salesforce.com
+Abstract
+WepresentxGen-VideoSyn-1, atext-to-video(T2V)generationmodelcapable
+of producing realistic scenes from textual descriptions. Building on recent ad-
+vancements,suchasOpenAI’sSora,weexplorethelatentdiffusionmodel(LDM)
+architectureandintroduceavideovariationalautoencoder(VidVAE).VidVAEcom-
+pressesvideodatabothspatiallyandtemporally,significantlyreducingthelength
+ofvisualtokensandthecomputationaldemandsassociatedwithgeneratinglong-
+sequencevideos. Tofurtheraddressthecomputationalcosts,weproposeadivide-
+and-mergestrategythatmaintainstemporalconsistencyacrossvideosegments.Our
+DiffusionTransformer(DiT)modelincorporatesspatialandtemporalself-attention
+layers,enablingrobustgeneralizationacrossdifferenttimeframesandaspectratios.
+Wehavedevisedadataprocessingpipelinefromtheverybeginningandcollected
+over13Mhigh-qualityvideo-textpairs. Thepipelineincludesmultiplestepssuch
+asclipping,textdetection,motionestimation,aestheticsscoring,anddensecap-
+tioningbasedonourin-housevideo-LLMmodel. TrainingtheVidVAEandDiT
+modelsrequiredapproximately40and642H100days,respectively. Ourmodel
+supportsover14-second720pvideogenerationinanend-to-endwayanddemon-
+stratescompetitiveperformanceagainststate-of-the-artT2Vmodels. Codewillbe
+availableathttps://github.com/SalesforceAIResearch/xgen-videosyn.
+1 Introduction
+Text-to-video(T2V)generationmodelsaredesignedtocreatevideosthatdepictbothrealisticscenes
+fromtextualdescriptions. Thesemodelshavegarneredsignificantattentionfrombothacademiaand
+industryduetocurrentbreakthroughsinthefield. Recently,Sora[1]demonstratedthatitispossible
+togeneraterealisticvideosofoveroneminuteinlength. Despitesuchimpressiveadvancements,
+themostcapablevideogenerationmodelsremainproprietaryandtheirdetailsundisclosed. Inthe
+meantime,anumberofopenvideogenerationmodelshaveemerged,buttheircapabilitiesseemto
+qualitativelyunder-performproprietarymodels. Inthiswork,ourprimaryobjectiveistodesignan
+effectivearchitectureforT2Vwithcompetitiveperformancecomparedtothestateoftheart;examine
+theassociatedmodelingandtrainingtechnologies;aswellasexplorethedatacollectionpipeline.
+Apopularapproachforimageandvideogenerationbuildsuponthelatentdiffusionmodel(LDM)
+[2]architecture. Inthisframework,pixelinformationistypicallycompressedwithapre-trainedVAE
+[3]intoalatentencodedspace. Adiffusionprocessisthenappliedtothislatentspaceeitherwith
+aU-Net[4,5]orDiTarchitecture[6]. Generally,thisframeworkhasbeenadaptedtobothtextto
+image[2,7–9]andtexttovideo[10–12]generationtasks.
+SalesforceAIResearch,USA.
+4202
+guA
+22
+]VC.sc[
+1v09521.8042:viXraA cute panda is standing and playing guitar in front of pink wall.
+A turtle swims in the sky as clouds drift by.
+On a clear winter night, a beautiful aurora illuminates the sky with vibrant shades of green, purple, and pink. The shimmering lights cascade over a serene,
+snow-covered landscape, where a cozy chalet nestles beside the trees, its warm glow from the windows creating a welcoming contrast to the icy expanse.
+A serene beach bathed in the soft glow of moonlight, with gentle waves lapping at the shore. Bioluminescent algae create a magical, glowing effect on the
+water's surface. A small lighthouse at the water's edge, gazing out at the star-filled sky, lost in contemplation.
+Figure1: Example720ptext-to-videogenerationresultsbyourxGen-VideoSyn-1model.
+A crucial component of such design is the dimensionality of the latent space determined by the
+outputoftheVAE.Alatentspacewithsmalldimensionalitymeansthattheinputpixelinformation
+needs to be highly compressed, which makes the reconstruction by diffussion more difficult but
+computationallylessexpensive. Alatentspacewithlargedimensionalitymakesreconstructioneasier
+butcomputationallymoreexpensive. Inthecaseofimagegenerationonecanchooselargerencoding
+spaces[2]tofacilitatereconstructionquality. However,thistrade-offisparticularlycriticalforvideo
+generation. IfweencodeeachframeindependentlyusinganimageVAE[10,11],a100framevideo
+of720pspatialresolutionwouldtranslateintoalatentspaceofsize100×4×90×160containing360,
+000tokens. Thismakesbothtrainingcomputationallyveryexpensiveandinferenceslow.
+To address this issue, we focus on developing a text-to-video (T2V) generation model based on
+video-specificVAEandDiTtechnologies. WeadoptavideoVAEtoachieveeffectivecompression
+ofthevideopixelinformationbyreducingbothspatialandtemporaldimensions. Thatis,instead
+ofencodingeachframeindependently,weincorporatebothtemporalandspatialcompression. This
+significantlydecreasesthetokenlength,improvesthecomputationalcostoftrainingandinference,
+andfacilitates thegenerationoflong videos. Additionally, tofurther reducecomputationduring
+longvideoencoding, weproposeadivide-and-mergestrategy. Thisapproachsplitsalongvideo
+intomultiplesegments,whichareencodedindividuallywithoverlappingframestomaintaingood
+temporalconsistency. WiththeaidofthisadvancedvideoVAE,ourxGen-VideoSyn-1modelisable
+togeneratevideoswithover100framesat720presolutioninanend-to-endmanner. Figure1shows
+someexamplevideosgeneratedwithourmodel.
+In terms of the diffussion stage, we adopt a video diffusion transformer (VDiT) model that is
+architecturallysimilartoLatte[11]andOpen-Sora[13]. OurVDiTincorporatestransformerblocks
+withbothtemporalandspatialself-attentionlayers. WeuseROPE[14]andsinusoidal[15]encodings
+forspatialandtemporalpositioninformation. Thisallowsforeffectivegeneralizationacrossdifferent
+lengths, aspect ratios, and resolutions. Moreover, our DiT model is trained on a diverse dataset
+including240p,512×512,480p,720p,and1024×1024resolutions. ThevideoVAEtrainingtakes
+approximately40H100days,whiletheDiTmodelrequiresaround642H100days.
+AnothercrucialaspectofT2Vmodelsisthedatausedfortraining. Generally,thesemodelsrequire
+high-qualityvideo-textpairssothatthemodelcanbetterlearnthemappingfromthetexttovideo
+modalities. We address this by designing a data processing pipeline that yields a large quantity
+ofhigh-qualityvideo-textpairs. Ourpipelineinvolvesdeduplication,OCR,motionandaesthetics
+analysis,amongotherprocessingsteps. Italsoincludesacaptioningstage,forwhichwedeveloped
+2“A turtle swims
+in the blue sky VDiT
+as white clouds
+drift by.”
+Text Condition Generated Video
+xGen-VideoSyn-1
+Figure 2: Our xGen-VideoSyn-1 model consists of VDiT and VidVAE that can compress long
+sequencevideointolatent.
+adensevideocaptioningmodelthatproducesanaveragecaptionlengthof84.4words. Ourfull
+pipelineisautomaticandscalable. Withthispipeline,wehavecollectedatrainingdatasetwithover
+13Mhigh-qualityvideo-textpairs.
+ThecontributionsofourxGen-VideoSyn-1frameworkcanbesummarizedasfollows:(1)Wepropose
+anovelvideocompressionmethodthatencodeslongvideosintolatentswithsignificantlyreduced
+sizes. (2)Wehavedevelopedanautomateddataprocessingpipelineandcreatedalargetraining
+setcontainingover13millionhigh-qualityvideo-textpairs. (3)xGen-VideoSyn-1supportsvideo
+generation with various sizes, durations, and aspect ratios, producing up to 14 seconds of 720p
+video. (4)Ourmodelachievescompetitiveperformanceintext-to-videogenerationcomparedto
+state-of-the-artmodels.
+2 RelatedWork
+2.1 VideoGeneration
+Videogenerationhasgainedsignificantpopularityinrecentyears,drawingconsiderableattention.
+Buildingonadvancementsindiffusionmodelsforimagegeneration,thesetechniqueshavebeen
+adaptedforvideogeneration,particularlythroughtheuseof3DU-Netarchitectures[16]. Toaddress
+the challenge of generating high-resolution videos, cascaded architectures have proven effective.
+Forexample,ImagenVideo[17]andMake-a-Video[18]employmulti-stagepipelinesthatintegrate
+spatialandtemporalsuper-resolutionnetworks. However,trainingsuchmulti-stagemodelsposes
+considerabledifficultieswithmanyhyper-parameterstotune.
+InspiredbythesuccessofLatentDiffusion,VideoLDM[19]adaptsasimilarapproachtothevideo
+domainbyemployingaVariationalAutoencoder(VAE)toencodevideosintolatentrepresentations.
+OthermodelssuchasStableVideoDiffusion(SVD)[10],Lavie[12],andModelScope[20]utilizea
+3DU-Netarchitecturetomodeldiffusionprocessesinlatentspaces.
+TheDiffusionTransformer(DiT)hasgainedprominenceforitsmulti-scaleflexibilityandscalability.
+IteffectivelyaddressesthelimitationsofU-Netmodelswhichareoftenconstrainedbyfixed-size
+datagenerationduetotheinherentconstraintsofconvolutionaloperationsinlocalfeaturelearning.
+DiT also benefits from acceleration techniques borrowed from Large Language Models (LLMs),
+facilitatingeasierscaling. Latte[11],apioneeringmethod,extendsDiTtothevideodomainwiththe
+introductionofaspatial-temporaltransformerblock. Sora[1]employsDiTasitsbackbone,inspiring
+furtherdevelopmentsinthefield. Open-sourceprojectslikeOpen-Sora[13]andOpenSoraPlan[21]
+haveemergedasleadingopen-sourceprojects,continuingtopushtheboundariesinthisfield.
+2.2 VariationalAutoencoders
+Variational Autoencoders (VAEs) [3] have become a prominent tool for image encoding. Two
+mainapproachesaretypicallyemployed: encodingimagesintocontinuouslatentspaces[2,3],and
+incorporatingquantizationtechniquestolearndiscretelatentrepresentations,asinVQVAE[22]and
+VQGAN[23]. ExpandingtheapplicationofVAEs,recentresearchhasdelvedintoencodingvideos,
+aimingtoleveragetheseencodedrepresentationsintext-to-videogenerationmodels. VideoGPT[24]
+employsavariantofVQ-VAEusing3Dconvolutionsandaxialself-attentiontolearndownsampled,
+discretelatentrepresentationsofrawvideos.MAGVIT[25]introducesanew3D-VQVAEarchitecture
+focused on temporal compression; and its successor, MAGVIT-v2 [26], further refines the video
+3
+EAVdiV redoceDReconstructed
+Video
+xN
+Video Diffusion
+Transformer (VDiT)
+FFN
+Training Video (SM cao ld e,u Sla ht ie ft) Latent
+Caption Prompt Temporal Self-attention
+Embedding
+“A white yacht
+from the side Prompt
+view. Sky is blue Cross-attention MHA
+with cloud.”
+Layer Norm
+Temporal ROPE
+Self-attention
+[(B,H,W), (T) , C]
+Modulate
+Spatial Self-attention
+(Scale, Shift)
+Training
+Video Latent MHA
++ POS_spatial Spatial + Noise_t Self-attention Layer Norm
+Modulate Time
+z_t (Scale, Shift) Embedding
+Time t [(B,T), (H,W), C]
+Figure3: DetailedarchitectureofourproposedxGen-VideoSyn-1modelduringtraining
+tokenizationprocessbyintegratingalookup-freequantizerandvariousenhancementstothetokenizer
+model.
+Despitetheirinnovations,manyofthesemodelsarenotopen-sourcedordescribedwithsufficientde-
+tail,whichoftenleavestheresearchcommunitywithknowledgegapsintermsoftheirimplementation
+details. Conversely,recentcontributionsfromOpen-sora-plan[21]andOpen-Sora[13],havenotably
+openedtheirmethodologies,providingaccesstobothcodeandmodelcheckpoints. [21]expands
+upontraditional2DVAEsbytransitioning2Dconvolutionallayersto3Dcausalconvolutionsand
+integratingtemporalcompressionlayersfollowingspatialcompression. [13]introducesacascading
+framework,initiallyencodingwitha2DVAEfollowedbyadditionalcompressionviaa3DVAE.
+Duringthedecodingphase,thismodelreconstructsthedatafirstthrougha3DVAEdecoderandthen
+througha2DVAEdecoder,providingauniqueapproachtotemporalandspatialdatahandlingin
+videos.
+3 ModelArchitecture
+OurproposedxGen-VideoSyn-1modelcomprisesthreemaincomponents: 1)aVideoVAEencoder
+anddecoder,2)aVideoDiffusionTransformer(VDiT),and3)aLanguageModel(TextEncoder).
+Furtherdetailsaredescribedbelow.
+3.1 VideoVAE
+ThetaskoftheVideoVAEencoderistotakeaninputvideoandproducealatentencodingthatcanbe
+usedforreconstructionlater. Ourprimaryobjectiveistoefficientlycompressvideosnotonlyinthe
+spatialdimensionbutalsotemporally,therebyenhancingtrainingspeedandreducingcomputation
+costs. Drawinginspirationfrom[21],weenhancetheconventional2DVAE—usedpredominantly
+for spatial compression of still images—into a 3D variant capable of temporal compression by
+incorporatingtime-compactinglayers. Originallyintroducedby[3],VAEshavebeenextensively
+utilizedforimageautoencoding, encodinganimageintoalatentfeaturespaceandsubsequently
+reconstructingitfromthatspace. Specifically,givenanimagex ∈ RH×W×3 inRGBformat,the
+encoderE mapsxtoalatentrepresentationz =E(x),andthedecoderDreconstructstheimagefrom
+z,suchthatx˜ = D(z) = D(E(x)),wherez ∈ Rh×w×c. Theencoderreducesthedimensionality
+inthefeaturespacebyafactoroff = H/h = W/w. Toconstructa3DVideoVAE,weadapta
+pre-trained2DimageVAE1,withaspatialcompressionrateof1/8from[2]. Thisadaptationinvolves
+theincorporationoftimecompressionlayersintothemodel. Similarly,foravideox∈RT×H×W×3,
+1https://huggingface.co/stabilityai/sd-vae-ft-mse-original/blob/main/
+vae-ft-mse-840000-ema-pruned.ckpt
+4
+Encoder VidVAE
+Encoder T5
+Text
+EAVdiV redoceD0 0
+1 Segment Video- Segment 1
+Split with 2 -wise wise -wise 2-
+overlap Latent Latent Latent Merge overlap frame
+frame
+2-
+01
+2 3
+2
+3 4
+2+
+3 4-
+2+ 2 01
+2 3
+4 4
+5 6 5 6
+7 8 4 5 4+ 5 7 8
+6 6-
+Input Video Output Video
+6 VDiT 6+
+7 7
+8 8
+Encoding Decoding
+Figure4: Videolatentextractionpipeline
+whereT representsthenumberofframes,theVideoVAEencodesxintoz =E(x),andDreconstructs
+thevideofromz,renderingx˜ = D(z) = D(E(x)),wherez ∈ Rt×h×w×c. Theencodernotonly
+reducesthespatialdimensionalitybyafactoroff =H/h=W/wbutalsocompressestemporally
+byafactorofs=T/t. Inourexperiments,weachieveatemporalcompressionof1/4.
+To extend the 2D image-based VAE into a 3D VideoVAE, we implemented a series of modifica-
+tions: 1)Wereplacedall2Dconvolutionallayers(Conv2d)withCausalConvolutional3Dlayers
+(CausalConv3D).WeoptedforCausalConv3Dtoensurethatonlysubsequentframeshaveaccess
+toinformationfrompreviousframes, therebypreservingthetemporaldirectionalityfrompastto
+future. 2)Weintroducedatimedownsamplinglayerfollowingthespatialdownsamplinglayersto
+compactthevideodataalongthetemporaldimension. Forthispurpose,weutilizeda3Daverage
+poolingtechnique. Specifically,weincorporatedtwotemporaldownsamplinglayers,eachreducing
+the temporal resolution by half. Consequently, the overall time compression factor achieved is
+1/4,meaningthateveryfourframesarecondensedintoasinglelatentrepresentation. Thespatial
+compressionratioremains1/8.
+Despite achieving a 4×8×8 compression, the computation cost remains a significant bottleneck,
+particularlyasvideosizesincrease,leadingtosubstantialmemorydemands. Toaddresstheout-of-
+memory(OOM)issuesencounteredduringlongvideoencoding,weproposeadivide-and-merge
+strategy. As illustrated in Figure 4, this approach involves splitting a long video into multiple
+segments. Eachsegmentconsistsoffiveframes,withduplicateframesatboththebeginningand
+end. Thesesegmentsareencodedindividually,usingoverlappingframestomaintainstrongtemporal
+consistency.WiththisvideoVariationalAutoencoder(VAE)framework,ourxGen-VideoSyn-1model
+cangenerateover100framesof720pvideoinanend-to-endmanner,whilemitigatingadditional
+computationcosts.
+3.2 VideoDiffusionTransformer(VDiT)
+Our Video Diffusion Transformer is based on the architecture of Open-Sora [13] and Latte [11],
+utilizingastackofspatial-temporaltransformerblocksasillustratedinFigure3. Eachtransformer
+moduleincorporatesapre-normlayerandmulti-headself-attention(MHA).WeuseRotaryPositional
+Embedding(RoPE)[14]toencodetemporalinformationandsinusoidalencoding[15]forspatial
+information. Fortextfeatureextraction,weemploytheT5model[27]withatokenlengthlimitof
+250. Theextractedtextfeaturesareintegratedintothebackbonethroughacross-attentionlayer. We
+followthePixArt-Alpha[8]modeltoencodethetime-stepembedding,incorporatingamodulation
+layerwithineachtransformerblock.
+Wetakethelatentdiffusionmodel(LDM)fortraining[2]. ItfollowsthestandardDDPM[5]with
+denoising loss and uses Diffusion Transformer (DiT) [6] as the diffusion backbone. To enable
+generativecontrollability,ourmodelhasappliedconditioningcaptionsignals(y),encodedasideby
+languagemodelT5andinjectedintotheDiT,withthehelpofcross-attentionlayers. Thiscanbe
+formulatedas:
+L :=E [∥ε−ε (z ,t,c (y))∥], (1)
+LDM z∼E(x),ε∼N(0,1),t,y θ t ϕ
+wheretrepresentsthetimestep,z isthenoisecorruptedlatenttensorattimestept,andz =G(x).
+t 0
+ε is the unscaled Gaussian noise, c is the conditioning network parameterized by ϕ and ε is
+ϕ θ
+the Transformer-like denoising network (video decoder). The parameters of both conditioning
+5
+Encoder VidVAE EAVdiV redoceDLong-Video Deduplication Aesthetic
+DeM teo ct ti io on
+n & OCR Dense
+Clipping Scoring Re-clipping Detection Captioning
+Figure5: Trainingdatacollectionandprocessingpipeline
+anddenoisingnetworksθ,ϕ,aretrainedbytheLDMloss. Duringinference,cleanvideoscanbe
+generatedviaclassifier-freeguidance[28]as:
+εˆ (z |y)=ε (z )+s·(ε (z ,c (y))−ε (z )), (2)
+θ t θ t θ t ϕ θ t
+wheresistheguidanceweighttobalancetextcontrollabilityandimagefidelity.
+4 TrainingDataCollectionandProcessing
+As shown at Figure 5, the pipeline operates sequentially as follows: 1) Clipping: Splitting long
+videosintomanageableclips;2)Deduplication: Removingsimilarandredundantclips;3)Motion
+DetectionandRe-Clipping: Analyzingmotiondynamicsacrossframestoeliminatestaticvideoclips
+andinconsistentframes. 4)OCRDetection: Identifyingandremovingclipscontaminatedwithtextor
+watermarks. 5)AestheticsScoring: Evaluatingandscoringthevisualqualityofclips. 6)Captioning:
+Addingdescriptivecaptionstotheclips.
+4.1 VideoClipping
+Afterloadingrawlongvideos,weusethePySceneDetect2 tooltodividethemintomultipleclips
+witheachclipintendedtorepresentadistinctandcleanscene. However,wefoundthatsomeclips
+stillcontainredundantorinconsistentscenes,whichweaddressinsubsequentsteps.
+4.2 Deduplication
+Theclippingprocesscanoccasionallyyieldclipsthatarehighlysimilartooneanother. Toaddress
+this,ade-duplicationstepisessentialtofilteroutredundantclips. Weuseffmpeg3toextractframes
+and the clip-as-a-service tool4 to efficiently extract CLIP features and compute similarity scores
+betweenclips. Ineachduplicatepair,weremovetheshorterclipbasedonasimilarityscorethreshold,
+τ. Throughempiricalanalysis,wehavefoundthatathresholdofτ =0.9iseffectiveforidentifying
+duplicates.
+4.3 AestheticScoring
+Toensurehigh-qualitytrainingdata,itiscrucialtousevideoclipsthatarewell-lit,well-composed,
+andhaveclearfootage. Tofilteroutpoor-qualitydata,wecomputetheAestheticScore—ameasure
+ofhowvisuallypleasingavideois. Weutilizeasimpleneuralnetwork5trainedonhumanaesthetic
+scoresofimages. Thisnetwork,whichtakesCLIPfeaturesasinput,outputsascorerangingfrom0
+to10. ClipswithanAestheticScorebelow4.5arefilteredout.
+4.4 MotionDetectionandRe-clipping
+Inthisvideoprocessingstep,weaimtoachievetwoprimarygoals. Firstly,wewanttoeliminate
+videosthatarenearlystatic. Secondly,aftertheinitialvideoclipping,somevideosmaystillexhibit
+suddenscenechanges. Forthesevideos,wewillre-clipthemtoensureconsistencyandmaintaina
+unifiedtopicthroughout. Ourapproachutilizesframedifferencingtodetectmotionwithinavideo,
+followedbymotion-basedre-clipping. Theprocesscommenceswiththecomputationofgrayscale
+framedifferences,wherewesubtracteachframefromitspredecessorinthesequence. Thistechnique,
+2https://github.com/Breakthrough/PySceneDetect
+3https://ffmpeg.org
+4https://github.com/jina-ai/clip-as-service/tree/main
+5https://github.com/christophschuhmann/improved-aesthetic-predictor/tree/main
+6Motion Scores Distribution
+Under static threshold
+Static Video
+Static Remove
+Threshold
+Calculate Motion Scores Distribution Video Re-clipping
+Motion Scores
+Peak Over peak threshold
+Threshold and peak diff threshold
+Figure6: Processofmotiondetectionandre-clipping
+Dataset Domain #Videos Avg/TotalVideolen Avgcaptionlen Resolution
+MSVD[31] Open 1970 9.7s 5.3h 8.7words -
+LSMDC[32] Movie 118K 4.8s 158h 7.0words 1080p
+MSR-VTT[33] Open 10K 15.0s 40h 9.3words 240p
+DiDeMo[34] Flickr 27K 6.9s 87h 8.0words -
+ActivityNet[35] Action 100K 36.0s 849h 13.5words -
+YouCook2[36] Cooking 14K 19.6s 176h 8.8words -
+VATEX[37] Open 41K ∼10s ∼115h 15.2words -
+WebVid-10M[38] Open 10M 18s 52kh 12.0words 336p
+Panda-70M[39] Open 70.8M 8.5s 166.8Khr 13.2words 720p
+OpenVid-1M[40] Open 1M - - Long 720p-1080p
+xGen-VideoSyn-1 Open 13M 6.9s 25Kh 84.4words 720p-1080p
+Table1: Comparisonofourdatasetandothervideo-languagedatasets
+whileeffective,canintroducebackgroundnoise,manifestingasspecklesthatfalselyindicatemotion.
+Theseartifactstypicallystemfromminorcamerashakesorthepresenceofmultipleshadows. To
+counteractthis,weimplementathresholdontheframedifferencestocreateabinarymotionmask.To
+refinethequalityofthismotionmask,weapplytechniquessuchasblurring[29]andmorphological
+operations[30]. Followingthis,wecalculateamotionscorebytakingthemeanofthemotionmask
+values.
+Guidedbythemotionscore,weperformbothmotiondetectionandre-clipping.Anoverallillustration
+isshowninFigure6. Wecalculatetheaveragemotionscoreacrossthevideoandsetathreshold. The
+overalldistributionoftheaveragemotionscoreisillustratedinFigure13oftheAppendix. Videos
+fallingbelowthisthresholdaredeemednearlystaticandsubsequentlyremoved. Forthere-clipping,
+ourcriteriafocusoneliminatingsignificant,suddenscenechanges. Weidentifytheframewiththe
+highestmotionscoreandanalyzethemotionscoredifferenceswithitsneighboringframes. Ifboth
+thepeakmotionscoreandthedifferencessurpasspredefinedthresholds,thisflagsamajorscene
+change. Here,wesegmentthevideoatthiscriticalframe. Weretainthelongersegment,ensuringit
+meetsthelengthrequirementandisdevoidoffurtherdisruptivetransitions.
+4.5 OpticalCharacterRecognition(OCR)
+WealsoconductOCRtodetecttextinthevideoinordertogethighqualityvideodata. Thetoolwe
+usedisPaddleOCR6.Weperformedtextdetectiononkeyframesfromthevideos. Thetextdetection
+modelweusedis“ch_PPOCRv4_det_infer”,alightweightmodelsupportingChinese,English,and
+multilingualtextdetection. Inthisstep,weonlykeptvideoswherethesizeoftheboundingboxis
+smallerthan20000pixels.
+4.6 DenseCaptioning
+WetrainamultimodalvideoLLMtogeneratevideocaptions. Thismodeltakesasequenceofframes
+fromthevideoasaninput,andistrainedtogeneratetextcaptionsdescribingthecontentsofthe
+videoasanoutput.
+6https://github.com/PaddlePaddle/PaddleOCR
+7
+Peak
+DiffLifestyle & Activities
+2.00 35.3%
+111 ... 257 505 Technology & Gadgets 16.7% TT er ca hn s nGV p oe o aH h lre odtia c a gl gt lh te
+ye
+i& os
+t
+nW &s&el lnFa esh sio sn & Beauty Home & Garden Food P& eAD or ci ptn ik lvei t& ie s
+0001 .... 2570 5050
+Nature & Environment
+16.2%
+N aAtu nirme T r a& a Ll v oe cs l ati& ons Entertainment Art & Creativi tyReE am cO tE o iW oc tv i nc oeo snan sr s k t &is o & n& s Busin 1e 0ss .7%5.9 E% motionW
+s
+o &rk
+E
+&
+ve
+B nu tssiness
+0.00 15.3%
+0 50 100 150 200 250
+Caption Length (#words) Entertainment & Arts
+(a)Distributionofcaptionlength (b)Categorydistribution
+Figure7: Captionstatisticsanalysis
+Methods #Params GPUDays Data VAE MaxResolution MaxDuration
+OpenSoraPlanV1.1 1.0B 240(H100)+1536(Ascend) 4.8M 4x8x8 512×512 9.2s
+OpenSoraPlanV1.2 2.77B 1578(H100)+500(Ascend) 6.1M 4x8x8 720p 4s
+OpenSoraV1.1 700M 576(H800) 10M 1x8x8 720p 4s
+OpenSoraV1.2 1.1B 1458(H100) >30M 4x8x8 720p 16s
+Ours 731M 672(H100) 13M 4x8x8 720p 14s
+Table2: Settingsofdifferenttext-to-videomodels
+CaptioningModel
+OurvideocaptioningmodelisanextendedversionofxGen-MM[41]. Themodelarchitectureis
+composedofthefollowingfourcomponents: (1)thevisionencoder(ViT)takingeachframeinput,
+(2) the frame-level tokenizer to reduce the number of tokens, (3) the temporal encoder to build
+video-leveltokenrepresentations,and(4)theLLMgeneratingoutputtextcaptionsbasedonsuch
+videotokensandtextprompttokens.
+Specifically,weuseapretrainedViT-H-14[42]asthevisionencoder,designedtotakeonesingle
+image frame at a time. Perceiver-Resampler [43] is then applied to map such visual tokens into
+N =128visualtokensperframe.ThetemporalencoderisimplementedwithTokenTuringMachines
+(TTM)[44],whichisasequentialmodelcapableoftakinganynumberofframestogenerateavideo-
+level token representation (e.g., M = 128 tokens regardless the number of frames). Our use of
+TTMissimilartoitsusageinMirasol3B[45],exceptthatourmodelusesTTMdirectlytoencode
+asequenceofimagetokenswhileMirasol3BusesTTMtoencodeasequenceoflow-levelvideo
+tokens. WeusePhi-3[46]asourmultimodalLLMtakingsuchvideotokensinadditiontothetext
+prompttokens. Forcomputationalefficiency,themodeltakesuniformlysampled4framespervideo.
+Asaresult,inourmodel,ViTfirstmapsavideointoapproximately4×700visualtokens,whichis
+thenmappedto4×128visualtokensusingPerceiver-Resampler,andthento128videotokensusing
+TTM.
+Themodelisfirstpretrainedwithstandardimagecaptiondatasets. Themodelisthenfinetunedwith
+theLLaVA-Hound-DPOtrainingdataset[47],providingvideocaptionsover900kframes. Instead
+ofdirectlyusingthetextcaptionsprovidedinLLaVA-Hound-DPO,weusedMistral-8x7B[48]to
+rephrasesuchtextcaptionssothattheybecomemoreSora-stylecaptions.
+Weuseaverystraightforwardtextpromptinputtogeneratethecaptions: ‘Achatbetweenacurious
+userandanartificialintelligenceassistant. “Theassistantgiveshelpful,detailed,andpoliteanswers
+totheuser’squestions.” Pleaseprovideadescriptionofthisvideo.’
+AnalysisofCaptioningResults
+Werandomlysampled100kcaptions. Figure7(a)showsthecaptionlengthdistributionandwork
+cloudforthesesampledcaptions. Theaveragecaptionlengthis84.4words,whichismuchlonger
+thanothervideo-languagedatasetsasweknow. Additionally,about87%ofcaptionsrangefrom50
+to120words.
+Wepre-definedsixscene-specificcategoriesforvideos: “Lifestyle&Activities”,“Nature&Envi-
+ronment”,“Technology&Gadgets”,“Entertainment&Arts”,“Work&Business”,and“Emotions
+8
+)%(
+oitaRA basketball court with a clear sky and tall buildings in the background. A player in a red shirt and black shorts is dribbling the ball and preparing to
+shoot. Two defenders, one in a white shirt and the other in a blue shirt, are positioned to block the shot. The player in red takes a shot, and the ball is
+seen in mid-air. The defenders attempt to block the shot, but the outcome is not shown. The court is marked with white lines, and there are no visible
+texts or subtitles in the video.
+A person is seated on a green couch in the middle of a body of water, possibly a lake or sea. The couch is of a standard design with a solid green
+color and no visible patterns or textures. The person is dressed in a pink and white striped shirt, dark pants, and is barefoot. They are holding a
+baseball bat and are captured in various poses, suggesting they are swinging the bat. The sky is overcast, and the water is calm, with no other
+objects or people visible in the vicinity.
+Figure8: ExampletextcaptionsgeneratedusingourxGen-MM-basedvideoCaptioner. Weusesuch
+generatedvideo-textpairsforthevideogenerationtraining.
+Two individuals in a lush, green outdoor setting, possibly a park or garden. One person wears a white sleeveless top and denim shorts, carrying a
+green backpack and holding a notebook or book. The other person is dressed in a dark sleeveless top and light-colored pants, carrying a black bag.
+They engage in a conversation, with the person in the white top gesturing towards the notebook or book. The environment is filled with trees and a
+building structure in the background.
+OpenSora V1.1
+42.1%
+57.9%
+Ours
+A person in a white shirt is shown in a kitchen setting, with a rolling pin and a bowl of eggs visible in the background. The person is seen cracking
+eggs into a bowl and mixing them with other ingredients. The mixture is then shaped into small, round cookies and placed on a baking tray. The
+cookies are baked until they turn golden brown. The final frames depict the person holding a cookie, suggesting they are ready to be eaten.
+Figure9: Userstudyoftext-to-videogeneration
+&Events”,alongwiththeirrespectivesubcategories. Foreachvideocaption,weaskedOpenAI’s
+fastestmodel“gpt-4o-mini”toselectthemostappropriatesubcategory. Figure7(b)displaysthe
+A tranquil coastal scene with a group of white ducks swimming in clear, shallow water. The water reveals a bed of rocks and pebbles beneath the
+csautrefagceo. rIny thde ibsatcrkigbrouutnido, nse.veTrahl beoavtsi dareeo ancchaopretdi,o wnitsh ocnoe nprtoamininedntilyv deisrpslaeyiongf ac balutee agnod rwiheiste, cmoloar kscihnegmei. tThae vskayl ius eovreercsaost,u arncde thef or
+voivdeeraoll cgoleorn pearleatttei ios nm.uteFdi, gwuithr tehe1 w5hitse hofo thwe sdutchkse anwd oboradts ccolonturadstinogf agoauinrst cthae pgrteiyoisnh-sb.lue of the water and sky.
+4.7 DistributedDataProcessingPipeline
+Toefficientlyorchestratethesixdataprocessingandfilteringstepsdescribedabovewithminimal
+manual intervention and optimal resource utilization, we employ a Distributed Data Processing
+Pipeline. WeuseRabbitMQtomanageavideoprocessingpipeline. Eachstageisdeployedwith
+specificresourcesandprocessesvideoIDsthroughmultiplequeues. Thepipelinestartsbyadding
+videoIDstotheinitialqueue,witheachsubsequentstagefilteringandprocessingclipsbasedon
+predefinedcriteria. FurtherdetailscanbefoundintheSectionA.1ofAppendix.
+5 Evaluation
+WeempiricallyevaluatetheeffectivenessofxGen-VideoSyn-1throughaseriesofcomprehensive
+experiments across various tasks, including video generation and compression. Details on the
+experimentalsetup,methodologies,andresultsanalysisareprovidedinthefollowingsections.
+5.1 ImplementationDetails
+OurproposedxGen-VideoSyn-1modelintegratesa731Mdiffusiontransformerwitha244Mvideo
+VAEmodel,trainedsequentially. SeemoredetailsinTable2.
+ThevideoVAEmodelcancompressthevideoby4x8x8. ItistrainedonasubsetoftheKinetics[49]
+datasetandadditionalhigh-qualityinternalvideos. Wesamplemulti-scaleimagesandvideosfrom
+91×768×768 17×512×512 65×256×256
+Methods
+PSNR↑ SSIM↑ MSE↓ PSNR↑ SSIM↑ MSE↓ PSNR↑ SSIM↑ MSE↓
+ImageVAE[2] 40.98 0.972 0.00067 37.59 0.951 0.00152 32.54 0.901 0.00472
+OpenSoraPlan[21] 39.15 0.973 0.00082 33.62 0.934 0.00289 30.06 0.874 0.00814
+Ours 39.41 0.971 0.00082 33.83 0.935 0.00281 29.68 0.879 0.00780
+Table3: VideoVAEquantitativeevaluation
+1st frame mid frame last frame
+A vibrant sunrise over a
+calm lake, with a canoe
+in the foreground. The
+sky is crystal blue.
+A vibrant sunrise over a
+calm lake, with a canoe
+in the foreground. The
+sky is crystal blue. Van
+Gogh style.
+A vibrant sunrise over a
+calm lake, with a canoe
+in the foreground. The
+sky is crystal blue. Pixel
+Art style.
+A vibrant sunrise over a
+calm lake, with a canoe
+in the foreground. The
+sky is crystal blue.
+Cartoon style.
+Figure10: Prompt-basedstylecontrol
+thetrainingset,includingresolutionsof1×768×768,17×512×512,and65×256×256. Themodel,
+initializedwiththeimageVAE,requires40H100daystotrain. Forfurtherdetails,pleasereferto
+Section3.1.
+ThevideoDiTmodelfeatures28stackedtransformerblocks,witheachmulti-headattention(MHA)
+layerconsistingof16attentionheadsandafeaturedimensionof1152. ThisDiTmodelencompasses
+731millionparametersintotal. WeadoptatrainingpipelinesimilartoOpenSoraV1.1,utilizing
+multiple buckets to accommodate various sizes, aspect ratios, and durations. The DiT model is
+initializedusingthePixArt-Alpha[8]modelandundergoestraininginthreestages: thefirststage
+withvideosupto240p,thesecondstagewithvideosupto480p,andthethirdstagewithvideosup
+to720p. WeuseAdamWwithadefaultlearningrateof2e-5,andthefinalcheckpointisobtained
+throughexponentialmovingaverage(EMA).Theoveralltrainingprocessspansapproximately672
+H100days. ThisDiTmodelcansupportupto14s720pvideogeneration.
+5.2 Text-to-VideoGeneration
+5.2.1 QuantitativeResults
+WeuseVbench[50]toquantitativelyevaluatethetext-to-videogenerationresults. Tab.4presents
+variousscoresforcomprehensiveevaluation. Thesescoresarecategorizedintothefollowingmetrics:
+“Consistency”(includingBackgroundConsistency,SubjectConsistency,andOverallConsistency),
+“Aesthetic”(includingAesthetic,ImageQuality,andColor),“Temporal”(includingTemporalFlick-
+ering,MotionSmoothness,andHumanAction),and“Spatial”(spatialrelationship). OpenSoraV1.1,
+whichiscomparabletoourmodelinsize(∼700M)andtrainingcost,providesafairbenchmark.
+TheModelScope[20]representsaStableDiffusion-basedmethod. Weconducttheevaluationof
+OpenSoraV1.1andOursunderthesamesetting. ModelScope’sscoresarereferredtotheofficial
+10Methods Consistency Temporal Aesthetic Spatial Avg
+ModelScope[20] 0.702 0.955 0.641 0.337 0.659
+OpenSoraV1.1[13] 0.716 0.941 0.599 0.520 0.694
+Ours 0.714 0.947 0.655 0.523 0.709
+Table4: VbenchT2Vscore
+table. AsshowninTab.4,ourmodeloutperformsthebaselinesin“Aesthetic,”“Spatial”,andaverage
+results,whileperformingcomparablytothebaselinesinothermetrics.
+5.2.2 UserStudy
+Wealsoconductedauserstudyon2s720ptext-to-videogenerationtoevaluatetextcontrollability,
+as shown in Figure 9, using Amazon Mechanical Turk [51]. Approximately 100 prompts, each
+around55wordsinlengthandrandomlygeneratedbyChatGPT,wereusedtocoverawiderangeof
+scenariosandchallengingcases. Thepercentagesofuservotesforthethreemethodsarereported
+in Figure 9. In this study, our model outperformed the baseline by more than 15%, indicating a
+significantimprovement. Additionally,thep-value,computedas0.03withthreerepetitionsofthe
+userstudy,isstatisticallysignificantwithathresholdof<0.05.
+5.2.3 StyleControl
+Todemonstratethecapacityofourmodelincontentcreation,weconductedanablationstudyon
+promptsrelatedtostylecontrol. AsillustratedinFigure10,weappliedasamplepromptwithvarious
+styles. Ourmodelsuccessfullyinterpretsandgeneratescontentinthedesiredstyles,including“Van
+Gogh”,“PixelArt”,and“Cartoon”. Bydefault,thestyletendstoberealistic. However,applying
+stylecontrolpromptscansometimesreducetheprominenceofotherelements,suchassunrise,as
+observedwithstaticsunimageryinthelattertworows. Thishighlightsalimitationofourcurrent
+model,whichmaybemitigatedbyscalingupthemodelsize.
+5.3 VideoCompression
+TofurtherassessthereconstructioncapacityofourtrainedvideoVAE,werandomlysampled1,000
+videosfromtheKinetics[49]andOpenVid1M[40]datasets,ensuringthesevideoswerenotincluded
+inthetrainingset. WethenusedtheVAEmodeltoencodeanddecodethesevideos,expectingthe
+outputstobeidenticaltotheinputs. WeevaluatedtheresultsusingPSNR,SSIM[52],andmean
+squarederror(MSE)metrics. AsshowninTab.3,ourmodeloutperformsthebaselinevideoVAE
+fromOpenSoraPlan,whichhasthesamecompressionratioof4x8x8,inmostscenarios. Nevertheless,
+thereremainsasignificantgapbetweentheimageVAEandourvideoVAE,indicatingsubstantial
+potentialforfutureimprovements. TheimageVAEcannotcompressvideosatthetimedimension
+whichleaveshugeredundancyincomputation.
+6 Conclusion
+ThisworkexploresthearchitectureandtechnologiesoftheT2Vmodel,focusingontheintegrationof
+videoVAEandDiffusionTransformer(DiT)architectures. Unlikeexistingmodelsthatutilizeimage
+VAEs,ourapproachincorporatesavideoVAEtoenhancebothspatialandtemporalcompression,
+addressing the challenges of long token sequences. We introduce a divide-and-merge strategy
+to manage out-of-memory issues, enabling efficient encoding of extended video sequences. Our
+xGen-VideoSyn-1modelsupportsover100framesin720presolution,andtheaccompanyingDiT
+model uses advanced encoding techniques for versatile video generation. A robust data pipeline
+for generating high-quality video-text pairs underpins our model’s competitive performance in
+text-to-videogeneration.
+References
+[1] TimBrooks,BillPeebles,ConnorHolmes,WillDePue,YufeiGuo,LiJing,DavidSchnurr,
+Joe Taylor, Troy Luhman, Eric Luhman, Clarence Ng, Ricky Wang, and Aditya Ramesh.
+11Videogenerationmodelsasworldsimulators. 2024. URLhttps://openai.com/research/
+video-generation-models-as-world-simulators.
+[2] RobinRombach,AndreasBlattmann,DominikLorenz,PatrickEsser,andBjörnOmmer. High-
+resolutionimagesynthesiswithlatentdiffusionmodels. InProceedingsoftheieeeconference
+oncomputervisionandpatternrecognition,2022.
+[3] Diederik P Kingma and Max Welling. Auto-encoding variational bayes. arXiv preprint
+arXiv:1312.6114,2013.
+[4] Olaf Ronneberger, Philipp Fischer, and Thomas Brox. U-net: Convolutional networks
+for biomedical image segmentation. In Medical image computing and computer-assisted
+intervention–MICCAI2015: 18thinternationalconference,Munich,Germany,October5-9,
+2015,proceedings,partIII18,pages234–241.Springer,2015.
+[5] JonathanHo,AjayJain,andPieterAbbeel. Denoisingdiffusionprobabilisticmodels. Advances
+inneuralinformationprocessingsystems,2020.
+[6] WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InProceedings
+oftheIEEE/CVFInternationalConferenceonComputerVision,pages4195–4205,2023.
+[7] Axel Sauer, Frederic Boesel, Tim Dockhorn, Andreas Blattmann, Patrick Esser, and Robin
+Rombach. Fasthigh-resolutionimagesynthesiswithlatentadversarialdiffusiondistillation.
+arXivpreprintarXiv:2403.12015,2024.
+[8] JunsongChen,JinchengYu,ChongjianGe,LeweiYao,EnzeXie,YueWu,ZhongdaoWang,
+JamesKwok,PingLuo,HuchuanLu,etal. Pixart-alpha: Fasttrainingofdiffusiontransformer
+forphotorealistictext-to-imagesynthesis. arXivpreprintarXiv:2310.00426,2023.
+[9] Pablo Pernias, Dominic Rampas, Mats L. Richter, Christopher J. Pal, and Marc Aubreville.
+Wuerstchen: Anefficientarchitectureforlarge-scaletext-to-imagediffusionmodels,2023.
+[10] AndreasBlattmann,TimDockhorn,SumithKulal,DanielMendelevitch,MaciejKilian,Do-
+minikLorenz,YamLevi,ZionEnglish,VikramVoleti,AdamLetts,etal. Stablevideodiffusion:
+Scalinglatentvideodiffusionmodelstolargedatasets. arXivpreprintarXiv:2311.15127,2023.
+[11] Xin Ma, Yaohui Wang, Gengyun Jia, Xinyuan Chen, Ziwei Liu, Yuan-Fang Li, Cunjian
+Chen,andYuQiao. Latte: Latentdiffusiontransformerforvideogeneration. arXivpreprint
+arXiv:2401.03048,2024.
+[12] YaohuiWang,XinyuanChen,XinMa,ShangchenZhou,ZiqiHuang,YiWang,CeyuanYang,
+YinanHe,JiashuoYu,PeiqingYang,etal. Lavie: High-qualityvideogenerationwithcascaded
+latentdiffusionmodels. arXivpreprintarXiv:2309.15103,2023.
+[13] ZangweiZheng,XiangyuPeng,TianjiYang,ChenhuiShen,ShengguiLi,HongxinLiu,Yukun
+Zhou,TianyiLi,andYangYou. Open-sora: Democratizingefficientvideoproductionforall,
+March2024. URLhttps://github.com/hpcaitech/Open-Sora.
+[14] JianlinSu,MurtadhaAhmed,YuLu,ShengfengPan,WenBo,andYunfengLiu. Roformer:
+Enhancedtransformerwithrotarypositionembedding. Neurocomputing,568:127063,2024.
+[15] AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,
+ŁukaszKaiser,andIlliaPolosukhin. Attentionisallyouneed. Advancesinneuralinformation
+processingsystems,30,2017.
+[16] Jonathan Ho, Tim Salimans, Alexey Gritsenko, William Chan, Mohammad Norouzi, and
+DavidJFleet. Videodiffusionmodels. AdvancesinNeuralInformationProcessingSystems,
+35:8633–8646,2022.
+[17] Jonathan Ho, William Chan, Chitwan Saharia, Jay Whang, Ruiqi Gao, Alexey Gritsenko,
+DiederikPKingma,BenPoole,MohammadNorouzi,DavidJFleet,etal. Imagenvideo: High
+definitionvideogenerationwithdiffusionmodels. arXivpreprintarXiv:2210.02303,2022.
+12[18] Uriel Singer, Adam Polyak, Thomas Hayes, Xi Yin, Jie An, Songyang Zhang, Qiyuan Hu,
+HarryYang,OronAshual,OranGafni,etal. Make-a-video: Text-to-videogenerationwithout
+text-videodata. arXivpreprintarXiv:2209.14792,2022.
+[19] AndreasBlattmann, RobinRombach, HuanLing, TimDockhorn, SeungWookKim, Sanja
+Fidler, and Karsten Kreis. Align your latents: High-resolution video synthesis with latent
+diffusionmodels. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pages22563–22575,2023.
+[20] Jiuniu Wang, Hangjie Yuan, Dayou Chen, Yingya Zhang, Xiang Wang, and Shiwei Zhang.
+Modelscopetext-to-videotechnicalreport. arXivpreprintarXiv:2308.06571,2023.
+[21] PKU-YuanLabandTuzhanAIetc. Open-sora-plan,April2024. URLhttps://doi.org/10.
+5281/zenodo.10948109.
+[22] AaronVanDenOord,OriolVinyals,etal. Neuraldiscreterepresentationlearning. Advancesin
+neuralinformationprocessingsystems,30,2017.
+[23] PatrickEsser,RobinRombach,andBjornOmmer. Tamingtransformersforhigh-resolution
+imagesynthesis. InProceedingsoftheIEEE/CVFconferenceoncomputervisionandpattern
+recognition,pages12873–12883,2021.
+[24] WilsonYan,YunzhiZhang,PieterAbbeel,andAravindSrinivas. Videogpt: Videogeneration
+usingvq-vaeandtransformers. arXivpreprintarXiv:2104.10157,2021.
+[25] LijunYu,YongCheng,KihyukSohn,JoséLezama,HanZhang,HuiwenChang,AlexanderG
+Hauptmann,Ming-HsuanYang,YuanHao,IrfanEssa,etal. Magvit: Maskedgenerativevideo
+transformer. InProceedingsoftheIEEE/CVFConferenceonComputerVisionandPattern
+Recognition,pages10459–10469,2023.
+[26] LijunYu,JoséLezama,NiteshBGundavarapu,LucaVersari,KihyukSohn,DavidMinnen,
+YongCheng,AgrimGupta,XiuyeGu,AlexanderGHauptmann,etal. Languagemodelbeats
+diffusion–tokenizeriskeytovisualgeneration. arXivpreprintarXiv:2310.05737,2023.
+[27] ColinRaffel,NoamShazeer,AdamRoberts,KatherineLee,SharanNarang,MichaelMatena,
+YanqiZhou,WeiLi,andPeterJLiu. Exploringthelimitsoftransferlearningwithaunified
+text-to-texttransformer. Journalofmachinelearningresearch,21(140):1–67,2020.
+[28] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance. arXiv preprint
+arXiv:2207.12598,2022.
+[29] Ivan Culjak, David Abram, Tomislav Pribanic, Hrvoje Dzapo, and Mario Cifrek. A brief
+introductiontoopencv. In2012proceedingsofthe35thinternationalconventionMIPRO,pages
+1725–1730.IEEE,2012.
+[30] MaryLComerandEdwardJDelpIII. Morphologicaloperationsforcolorimageprocessing.
+Journalofelectronicimaging,8(3):279–289,1999.
+[31] DavidChenandWilliamBDolan. Collectinghighlyparalleldataforparaphraseevaluation. In
+Proceedingsofthe49thannualmeetingoftheassociationforcomputationallinguistics: human
+languagetechnologies,pages190–200,2011.
+[32] Anna Rohrbach, Marcus Rohrbach, Niket Tandon, and Bernt Schiele. A dataset for movie
+description. InProceedingsoftheieeeconferenceoncomputervisionandpatternrecognition,
+2015.
+[33] Jun Xu, Tao Mei, Ting Yao, and Yong Rui. Msr-vtt: A large video description dataset for
+bridgingvideoandlanguage. InProceedingsoftheieeeconferenceoncomputervisionand
+patternrecognition,2016.
+[34] Lisa Anne Hendricks, Oliver Wang, Eli Shechtman, Josef Sivic, Trevor Darrell, and Bryan
+Russell. Localizingmomentsinvideowithnaturallanguage. InIEEEInternationalConference
+onComputerVision,2017.
+13[35] FabianCabaHeilbron,VictorEscorcia,BernardGhanem,andJuanCarlosNiebles. Activitynet:
+Alarge-scalevideobenchmarkforhumanactivityunderstanding. InProceedingsoftheieee
+conferenceoncomputervisionandpatternrecognition,pages961–970,2015.
+[36] LuoweiZhou,ChenliangXu,andJasonCorso. Towardsautomaticlearningofproceduresfrom
+webinstructionalvideos. InProceedingsoftheAAAIConferenceonArtificialIntelligence,
+volume32,2018.
+[37] XinWang,JiaweiWu,JunkunChen,LeiLi,Yuan-FangWang,andWilliamYangWang. Vatex:
+A large-scale, high-quality multilingual dataset for video-and-language research. In IEEE
+InternationalConferenceonComputerVision,2019.
+[38] MaxBain,ArshaNagrani,GülVarol,andAndrewZisserman. Frozenintime: Ajointvideo
+andimageencoderforend-to-endretrieval. InIEEEInternationalConferenceonComputer
+Vision,2021.
+[39] Tsai-ShienChen,AliaksandrSiarohin,WilliMenapace,EkaterinaDeyneka,Hsiang-weiChao,
+Byung Eun Jeon, Yuwei Fang, Hsin-Ying Lee, Jian Ren, Ming-Hsuan Yang, and Sergey
+Tulyakov. Panda-70m: Captioning70mvideoswithmultiplecross-modalityteachers. arXiv
+preprintarXiv:2402.19479,2024.
+[40] KepanNan,RuiXie,PenghaoZhou,TiehanFan,ZhenhengYang,ZhijieChen,XiangLi,Jian
+Yang,andYingTai.Openvid-1m:Alarge-scalehigh-qualitydatasetfortext-to-videogeneration.
+arXivpreprintarXiv:2407.02371,2024.
+[41] LeXue,ManliShu,AnasAwadalla,JunWang,AnYan,SenthilPurushwalkam,HongluZhou,
+VirajPrabhu,YutongDai,MichaelSRyoo,ShrikantB.Kendre,JieyuZhang,CanQin,Shu
+Zhang,Chia-ChihChen,NingYu,JuntaoTan,TulikaAwalgaonkar,ShelbyHeinecke,Huan
+Wang, Yejin Choi, Ludwig Schmidt, Zeyuan Chen, Silvio Savarese, Juan Carlos Niebles,
+CaimingXiong,andRanXu. xGen-MM(BLIP-3): Afamilyofopenlargemultimodalmodels,
+2024. URLhttps://arxiv.org/abs/2408.08872.
+[42] AlexeyDosovitskiy,LucasBeyer,AlexanderKolesnikov,DirkWeissenborn,XiaohuaZhai,
+Thomas Unterthiner, Mostafa Dehghani, Matthias Minderer, Georg Heigold, Sylvain Gelly,
+JakobUszkoreit,andNeilHoulsby. Animageisworth16x16words: Transformersforimage
+recognitionatscale. InInternationalConferenceonLearningRepresentations,2021.
+[43] Jean-BaptisteAlayrac, JeffDonahue, PaulineLuc, AntoineMiech, IainBarr, YanaHasson,
+KarelLenc,ArthurMensch,KatieMillican,MalcolmReynolds,RomanRing,ElizaRuther-
+ford,SerkanCabi,TengdaHan,ZhitaoGong,SinaSamangooei,MarianneMonteiro,Jacob
+Menick,SebastianBorgeaud,AndrewBrock,AidaNematzadeh,SahandSharifzadeh,Miko-
+laj Binkowski, Ricardo Barreira, Oriol Vinyals, Andrew Zisserman, and Karen Simonyan.
+Flamingo: avisuallanguagemodelforfew-shotlearning. InAdvancesinneuralinformation
+processingsystems,2022.
+[44] MichaelS.Ryoo,KeerthanaGopalakrishnan,KumaraKahatapitiya,TedXiao,KanishkaRao,
+AustinStone,YaoLu,JulianIbarz,andAnuragArnab. Tokenturingmachines. InProceedings
+oftheIEEE/CVFConferenceonComputerVisionandPatternRecognition,2023.
+[45] AJ Piergiovanni, Isaac Noble, Dahun Kim, Michael S. Ryoo, Victor Gomes, and Anelia
+Angelova. Mirasol3b: A multimodal autoregressive model for time-aligned and contextual
+modalities. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition,2024.
+[46] MarahAbdin,SamAdeJacobs,AmmarAhmadAwan,JyotiAneja,AhmedAwadallah,Hany
+Awadalla,NguyenBach,AmitBahree,ArashBakhtiari,JianminBao,HarkiratBehl,AlonBen-
+haim,MishaBilenko,JohanBjorck,SébastienBubeck,QinCai,MartinCai,CaioCésarTeodoro
+Mendes,WeizhuChen,VishravChaudhary,DongChen,DongdongChen,Yen-ChunChen,
+Yi-LingChen,ParulChopra,XiyangDai,AllieDelGiorno,GustavodeRosa,MatthewDixon,
+RonenEldan,VictorFragoso,DanIter,MeiGao,MinGao,JianfengGao,AmitGarg,Abhishek
+Goswami,SuriyaGunasekar,EmmanHaider,JunhengHao,RussellJ.Hewett,JamieHuynh,
+MojanJavaheripi,XinJin,PieroKauffmann,NikosKarampatziakis,DongwooKim,Mahoud
+14Khademi,LevKurilenko,JamesR.Lee,YinTatLee,YuanzhiLi,YunshengLi,ChenLiang,
+Lars Liden, Ce Liu, Mengchen Liu, Weishung Liu, Eric Lin, Zeqi Lin, Chong Luo, Piyush
+Madan,MattMazzola,ArindamMitra,HardikModi,AnhNguyen,BrandonNorick,Barun
+Patra,DanielPerez-Becker,ThomasPortet,ReidPryzant,HeyangQin,MarkoRadmilac,Corby
+Rosset, Sambudha Roy, Olatunji Ruwase, Olli Saarikivi, Amin Saied, Adil Salim, Michael
+Santacroce,ShitalShah,NingShang,HiteshiSharma,SwadheenShukla,XiaSong,Masahiro
+Tanaka,AndreaTupini,XinWang,LijuanWang,ChunyuWang,YuWang,RachelWard,Guan-
+huaWang,PhilippWitte,HaipingWu,MichaelWyatt,BinXiao,CanXu,JiahangXu,Weijian
+Xu, SonaliYadav, FanYang, JianweiYang, ZiyiYang, YifanYang, DonghanYu, LuYuan,
+Chengruidong Zhang, Cyril Zhang, Jianwen Zhang, Li Lyna Zhang, Yi Zhang, Yue Zhang,
+YunanZhang,andXirenZhou. Phi-3technicalreport: Ahighlycapablelanguagemodellocally
+onyourphone,2024. URLhttps://arxiv.org/abs/2404.14219.
+[47] RuohongZhang,LiangkeGui,ZhiqingSun,YihaoFeng,KeyangXu,YuanhanZhang,DiFu,
+Chunyuan Li, Alexander Hauptmann, Yonatan Bisk, and Yiming Yang. Direct preference
+optimizationofvideolargemultimodalmodelsfromlanguagemodelreward,2024.
+[48] AlbertQJiang,AlexandreSablayrolles,AntoineRoux,ArthurMensch,BlancheSavary,Chris
+Bamford,DevendraSinghChaplot,DiegodelasCasas,EmmaBouHanna,FlorianBressand,
+etal. Mixtralofexperts. arXivpreprintarXiv:2401.04088,2024.
+[49] Will Kay, Joao Carreira, Karen Simonyan, Brian Zhang, Chloe Hillier, Sudheendra Vijaya-
+narasimhan, Fabio Viola, Tim Green, Trevor Back, Paul Natsev, et al. The kinetics human
+actionvideodataset. arXivpreprintarXiv:1705.06950,2017.
+[50] ZiqiHuang,YinanHe,JiashuoYu,FanZhang,ChenyangSi,YumingJiang,YuanhanZhang,
+TianxingWu,QingyangJin,NattapolChanpaisit,etal. Vbench: Comprehensivebenchmark
+suiteforvideogenerativemodels. InProceedingsoftheIEEE/CVFConferenceonComputer
+VisionandPatternRecognition,pages21807–21818,2024.
+[51] MichaelBuhrmester,TracyKwang,andSamuelD.Gosling. Amazon’smechanicalturk: Anew
+sourceofinexpensive,yethigh-quality,data? PerspectivesonPsychologicalScience,2011.
+[52] AlainHoréandDjemelZiou. Imagequalitymetrics: Psnrvs.ssim. In201020thInternational
+ConferenceonPatternRecognition,pages2366–2369,2010. doi: 10.1109/ICPR.2010.579.
+15Figure11: Systemdesignofautomatichigh-qualityvideo-textdatacollectionpipeline
+Appendix
+A DataProcessing
+A.1 DistributedDataProcessingPipeline
+TheDistributedDataProcessingPipelinemeetsthefollowingcriteria:
+1. Eachprocess(oneofthesixstepsabove)isabletouseitsownresourcespecs. Forexample,
+clippingisCPUbased,captioningisGPUbased.
+2. Eachprocessisindependentlyscalablewithoutinterruptingtheprocessflow. Forexam-
+ple, Clipping is extremely fast, while Similarity Score is time consuming. Hence, we
+independentlyscale-downtheclippingprocessandscale-uptheSimilarityScoreprocess.
+3. Thedownstreamprocessesareautomaticallytriggeredafteraprocessiscompletedfora
+video. Forexample,afterclippingiscompleteforvideowithID‘A’,thesimilarityscore
+computationisstartedforthatvideoautomatically.
+4. Theactivationofadownstreamtaskoptionallydependsonacondition. Forexample,The
+motiondetectionforaclipistriggeredonlyiftheclipdoesnothaveatext,whichisaresult
+oftheOCRdetectionprocess.
+Toachievethepipeline,weusetheRabbitMQ7 asaTaskOrchestrator(Figure11). Eachprocess
+is a deploymentwith it’s ownresource specification, subscribed to a Task Queue. Totrigger the
+pipeline,westartbypushingthevideoIDstotheinitialqueue. Thisistheonlymanualsteprequired.
+Oncethisisdone,theclippingprocesspopulatestheSimilarityScoreQueuewiththevideoID.The
+SimilarityScoredeployement,subscribedtothecorrespondingqueue,takesupthetask,completes
+it, andpushesonlythede-duplicatedclipIDstotheAestheticScorequeue. TheAestheticscore
+process,aftercomputation,enqueuestheOCRdetectionQueuewithonlytheIDsofonlythoseclips
+thatmeetthethreshold. Inthisfashion,thenumberofclipsthatarebeingprocessedkeepsreducing
+witheachstepinthepipelinebyskippingthecomputationforclipsthatdonotmeetthepassing
+criteriainthepreviousstepsinthepipeline. Inadditiontothespeedgainbyskippingcomputation
+forfailedclips,wealsoachievethespeedgainduetopipelining. Thetimetakenforeachstepto
+process1000videosisgiveninTab. 5. Equation5showsthatthepipelinedsystemis1.5timesfaster
+thantheequivalentsequentialsystem. Thereisscopetofurtherimprovethisbyspeedingupthe
+bottleneckprocess,astheprocessingtimeofthepipelinedsystemisdependentonthetimetaken
+7https://www.rabbitmq.com
+16DataProcessingStep Timetakenfor1000videos(inminutes) PassRate(%)
+Clipping 1 N/A
+Deduplication 3 64.18
+AestheticScore 0.8 90.23
+OCRDetection 1.2 67.9
+MotionDetection 12 88.6
+Table5: Timetakenandpassrateforeachdataprocessingstep
+Figure12: Distributionofvideoduration
+bythebottleneckprocess. AsshowninFigure11, ourdatacollectionpipelineincludesmultiple
+modulessuchasclipping,captioningandotherprocess.
+T =1+3+0.8+1.2+12
+Sequential
+=18minutes (3)
+T =12minutes(Timetakenbybottleneckstep) (4)
+Pipelined
+T
+efficiency = Sequential
+T
+Pipelined
+=1.5 (5)
+17Figure13: Theoveralldistributionofaveragemotionscores
+A basketball court with a clear sky and tall buildings in the background. A player in a red shirt and black shorts is dribbling the ball and preparing to
+shoot. Two defenders, one in a white shirt and the other in a blue shirt, are positioned to block the shot. The player in red takes a shot, and the ball is
+seen in mid-air. The defenders attempt to block the shot, but the outcome is not shown. The court is marked with white lines, and there are no visible
+texts or subtitles in the video.
+A person is seated on a green couch in the middle of a body of water, possibly a lake or sea. The couch is of a standard design with a solid green
+color and no visible patterns or textures. The person is dressed in a pink and white striped shirt, dark pants, and is barefoot. They are holding a
+baseball bat and are captured in various poses, suggesting they are swinging the bat. The sky is overcast, and the water is calm, with no other
+objects or people visible in the vicinity.
+Two individuals in a lush, green outdoor setting, possibly a park or garden. One person wears a white sleeveless top and denim shorts, carrying a
+green backpack and holding a notebook or book. The other person is dressed in a dark sleeveless top and light-colored pants, carrying a black bag.
+They engage in a conversation, with the person in the white top gesturing towards the notebook or book. The environment is filled with trees and a
+building structure in the background.
+A person in a white shirt is shown in a kitchen setting, with a rolling pin and a bowl of eggs visible in the background. The person is seen cracking
+eggs into a bowl and mixing them with other ingredients. The mixture is then shaped into small, round cookies and placed on a baking tray. The
+cookies are baked until they turn golden brown. The final frames depict the person holding a cookie, suggesting they are ready to be eaten.
+A tranquil coastal scene with a group of white ducks swimming in clear, shallow water. The water reveals a bed of rocks and pebbles beneath the
+surface. In the background, several boats are anchored, with one prominently displaying a blue and white color scheme. The sky is overcast, and the
+overall color palette is muted, with the white of the ducks and boats contrasting against the greyish-blue of the water and sky.
+Figure14: AdditionalexampletextcaptionsgeneratedusingourxGen-MM-basedvideocaptioner.
+Weusesuchgeneratedvideo-textpairsforthevideogenerationtraining.
+18Figure15: Wordcloudofcaptionsamples
+A butterfly with delicate, iridescent wings flutters gracefully in slow motion beneath the ocean's surface, weaving its way through a vibrant forest of coral.
+Each gentle beat of its wings sends shimmering ripples through the sun-dappled, azure waters, creating an enchanting underwater ballet.
+On a clear winter night, a beautiful aurora dances across the sky, painting it with vibrant shades of green, purple, and pink. The shimmering lights cascade
+over the snow-covered landscape, casting an ethereal glow on the frost-laden trees and illuminating the serene, icy expanse below.
+A formidable pirate ship battling a fierce storm at sea. Towering waves crash against the hull, and lightning illuminates the dark, turbulent sky. Pirates, clad in
+weathered attire, struggle to secure the sails and maintain control amidst the chaos.
+A majestic horse is running freely over a vast grassland, its mane flowing in the wind as it moves gracefully across the open field.
+A beautiful woman with golden hair in a silk white dress walks slowly and gracefully through a lush garden, surrounded by colorful flowers and vibrant greenery.
+Figure16: Additionalexample720ptext-to-videogenerationresultsbyourxGen-VideoSyn-1model
+19

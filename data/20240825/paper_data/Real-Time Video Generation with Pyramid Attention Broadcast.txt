@@ -1,0 +1,842 @@
+Preprint.
+REAL-TIME VIDEO GENERATION WITH PYRAMID
+ATTENTION BROADCAST
+XuanleiZhao1,2∗, XiaolongJin2,3∗, KaiWang1,2∗†, YangYou1,2†
+1NationalUniversityofSingapore 2VideoSysTeam 3PurdueUniversity
+Code: NUS-HPC-AI-Lab/VideoSys
+ABSTRACT
+We present Pyramid Attention Broadcast (PAB), a real-time, high quality and
+training-freeapproachforDiT-basedvideogeneration. Ourmethodisfounded
+on the observation that attention difference in the diffusion process exhibits a
+U-shapedpattern,indicatingsignificantredundancy. Wemitigatethisbybroadcast-
+ingattentionoutputstosubsequentstepsinapyramidstyle. Itappliesdifferent
+broadcaststrategiestoeachattentionbasedontheirvarianceforbestefficiency.
+We further introduce broadcast sequence parallel for more efficient distributed
+inference. PABdemonstratessuperiorresultsacrossthreemodelscomparedto
+baselines,achievingreal-timegenerationforupto720pvideos. Weanticipatethat
+oursimpleyeteffectivemethodwillserveasarobustbaselineandfacilitatefuture
+researchandapplicationforvideogeneration.
+Open-Sora Open-Sora-Plan Latte
+U
+P
+G
+1
+,l
+a
+n
+ig
+ir
+o
+latency: 97.5s, FPS: 2.0 latency: 139.5s, FPS: 1.6 latency: 80.5s, FPS: 0.6
+s
+U
+P
+G
+8
+,s
+r
+u
+o
+latency: 9.2s, FPS: 21.3 latency: 16.5s, FPS: 13.4 latency: 9.2s, FPS: 13.8
+(10.5× Faster) (8.4× Faster) (8.7× Faster)
+prompt: A serene night scene in a forested area. The first frame ... The second frame ... The third frame ... The video is a
+time-lapse, capturing the transition from day to night, with the lake and forest serving as a constant backdrop. The style
+of the video is naturalistic, emphasizing the beauty of the night sky and the peacefulness of the forest.
+Figure1: Resultsandspeedcomparisonofourmethodandoriginalmethod. PABcansignificantly
+boostgenerationspeedwhilepreservingoriginalquality. LatencyismeasuredonH100s. Videogen-
+erationspecifications: Open-Sora(2s,480p),Open-Sora-Plan(2.7s,512x512),Latte(2s,512x512).
+∗equalcontribution †equalcorrespondence
+{xuanlei,kai.wang,youy}@comp.nus.edu.sg jin509@purdue.edu
+1
+4202
+guA
+22
+]VC.sc[
+1v88521.8042:viXraPreprint.
+1 INTRODUCTION
+Sora(Brooksetal.,2024)kicksoffthedoorofDiT-basedvideogeneration(Peebles&Xie,2023).
+Recent approaches (Ma et al., 2024a; Zheng et al., 2024; Lab & etc., 2024) demonstrate their
+superioritycomparedtoCNN-basedmethods(Blattmannetal.,2023;Wangetal.,2023a)especially
+ingeneratedvideoquality. However,thisimprovedqualitycomesfromsignificantcosts,i.e.,more
+memoryoccupancy,computation,andinferencetime. Therefore,exploringanefficientapproach
+forDiT-basedvideogenerationbecomesurgentforbroaderGenAIapplications(Kumar&Kapoor,
+2023;Othman,2023;Melietal.,2024).
+Modelcompressionmethodsemploytechniquessuchasdistillation(Crowleyetal.,2018;Hsieh
+etal.,2023),pruning(Hanetal.,2015;Maetal.,2023),quantization(Banneretal.,2019;Linetal.,
+2024),andnovelarchitectures(Linetal.,2024)tospeedupdeeplearningmodelsandhaveachieved
+remarkablysuccess. Recently,theyhavealsobeenproventobeeffectiveondiffusionmodels(Sauer
+et al., 2023; Ma et al., 2024b; Chen et al., 2024a). Nevertheless, these methods usually require
+additionaltrainingwithnon-negligiblecomputationalresourcesanddatasets,whichmakesmodel
+compressionprohibitiveandimpracticalespeciallyforlarge-scalepre-trainedmodels.
+Mostrecently,peoplerevisittheideaofcache(Smith,1982;Goodman,1983;Albonesi,1999)to
+speedupdiffusionmodels. Differentfrommodelcompressionmethods,modelcachingmethodsare
+training-free. Theyalleviateredundancybycachingandreusingpartialnetworkoutputs,thereby
+eliminatingadditionaltraining. Somestudiesutilizehigh-levelconvolutionalfeaturesforreusing
+purposes(Maetal.,2024c)andefficientdistributedinference(Lietal.,2024;Wangetal.,2024).
+Similarstrategieshavealsobeenextendedtospecificattentions(Zhangetal.,2024;Wimbaueretal.,
+2024),i.e.,crossattention,andstandardtransformers(Chenetal.,2024b).
+However,training-freespeedupmethodsforDiT-basedvideogenerationstillremainsunexplored.
+Besides, previous model caching methods are not directly applicable to video DiTs due to two
+intrinsicdifferences: i)Differentarchitecture. Themodelarchitecturehasshiftedfromconvolutional
+networks(Ronnebergeretal.,2015)totransformers(Vaswanietal.,2017). Thistransactionmakes
+formertechniquesthataimsatconvolutionalnetworksnotapplicabletovideogenerationanymore.
+ii)Differentcomponents. Videogenerationreliesonthreediverseattentionmechanisms: spatial,
+temporal,andcrossattention(Blattmannetal.,2023;Maetal.,2024a). Suchcomponentsleadto
+morecomplexdependencyandattentioninteractions,makingsimplestrategiesineffective. Theyalso
+increasethetimeconsumedbyattentions,makingattentionsmorecriticalthanbefore.
+To address these challenges, we take a
+closer look at attentions in video DiTs
+and empirically obtain two observation
+as shown in Figure 2: (i) The attention
+differences between adjacent diffusion
+stepsexhibitaU-shapedpattern,withsta-
+bilityinthemiddle70%steps,indicating
+considerableredundancyforattention. (ii)
+Withinthestablemiddlesegment,different
+attentions also demonstrate varying
+degrees of difference. Spatial attention
+varies the most with high-frequency
+visualelements,temporalattentionshows
+mid-frequencyvariationsrelatedtomove- Figure 2: Comparison of the attention outputs differ-
+ments,andcross-modalattentionremains encesbetweenthecurrentandpreviousdiffusionsteps.
+the most stable, linking text with video DifferencesaremeasuredbyMeanSquareError(MSE)
+content(Zhangetal.,2024). andaveragedacrossalllayersforeachdiffusionstep.
+Based on these observations, we propose Pyramid Attention Broadcast (PAB), a real-time, high
+qualityandtraining-freemethodforefficientDiT-basedvideogeneration. Ourmethodmitigates
+attention redundancy by broadcasting the attention outputs to subsequent steps, thus eliminating
+attentioncomputationinthediffusionprocess. Specifically,weapplyvariedbroadcastrangesfor
+differentattentionsinapyramidstyle,basedontheirstabilityanddifferencesasshowninFigure
+2. WeempiricallyfindthatsuchbroadcaststrategycanalsoworkwelltoMLPlayersanddiffusion
+2Preprint.
+steps. Additionally,toenableefficientdistributedinference,weproposebroadcastsequenceparallel,
+whichsignificantlydecreasesgenerationtimewithmuchlowercommunicationcosts.
+Insummary,tothebestofourknowledge,PABisthefirstapproachthatachievesreal-timevideo
+generation, reachingupto20.6FPSwitha10.5×accelerationwithoutcompromisingquality. It
+consistentlydeliversexcellentandstablespeedupacrosspopularopen-sourcevideoDiTs,including
+Open-Sora(Zhengetal.,2024),Open-Sora-Plan(Lab&etc.,2024),andLatte(Maetal.,2024a).
+Notably,asatraining-freeandgeneralizedapproach,PABhasthepotentialtoempoweranyfuture
+videoDiTswithreal-timecapabilities.
+2 HOW TO ACHIEVE REAL-TIME VIDEO GENERATION
+2.1 PRELIMINARIES
+Denoisingdiffusionmodels. Diffusionmodelsareinspiredbythephysicalprocesswhereparticles
+spreadoutovertimeduetorandommotion,whichconsistsofforwardandreversediffusionprocesses.
+TheforwarddiffusionprocessgraduallyaddsnoisetothedataoverT steps. Startingwithdatax
+0
+fromadistributionq(x),noiseisaddedateachstep:
+√ √
+x = α x + 1−α z for t=1,...,T, (1)
+t t t−1 t t
+whereα controlsthenoiselevelandz ∼N(0,I)isGaussiannoise. Astincreases,x becomes
+t t t
+noisier,eventuallyapproximatinganormaldistributionN(0,I)whent=T. Thereversediffusion
+processaimstorecovertheoriginaldatafromthenoisyversion:
+p (x |x )=N(x ;µ (x ,t),Σ (x ,t)), (2)
+θ t−1 t t−1 θ t θ t
+whereµ andΣ arelearnedparametersdefiningthemeanandcovariance.
+θ θ
+Video generation models. Early approaches in this do-
+main primarily leveraged GANs (Goodfellow et al., 2014), video
+VA-VAE (Van Den Oord et al., 2017), autoregressive Trans-
+former(Rakhimovetal.,2020)andconvolution-baseddiffusion
+models(Hoetal.,2022b). However,theremarkablesuccessof FFN
+Sora(Brooksetal.,2024)hasdemonstratedthegreatpotential temp. cross attn.
+ofdiffusiontransformers(DiT)(Peebles&Xie,2023)invideo
+temporal attn.
+generation,whichleadstoaseriesofresearchincludingOpen-
+Sora(Zhengetal.,2024),Open-Sora-Plan(Lab&etc.,2024), N
+CogVideoX(Yangetal.,2024),andLatte(Maetal.,2024a).
+FFN
+In this work, we focus on accelerating the DiT-based video
+spat. cross attn.
+generationmodels. AsillustratedinFigure3,wepresentthe
+fundamentalarchitectureofDiT-basedvideodiffusionmodels. spatial attn.
+ThebackboneiscomposedoftwotypesofTransformerblocks:
+spatialandtemporal.SpatialTransformerblockscapturespatial
+noise
+informationamongtokensthatsharethesametemporalindex,
+whiletemporalTransformerblockshandleinformationacross
+Figure 3: Overview of backbone
+different temporal dimensions. Cross-attention enables the
+of current DiT-based video gener-
+modeltoincorporateinformationfromtheconditioninginput
+ationmodels,whichcompromises
+at each step, ensuring that the generated output is coherent
+SpatialTransformerblockandTem-
+andalignedwiththegivencontext. Notethatcross-attention
+poral Transformer block. Cross-
+mechanismsarenotincludedinthetemporalblocksofsome
+attentionincorporatesinformation
+videogenerationmodels(Maetal.,2024a).
+fromthetextconditioninginput.
+2.2 ATTENTIONREDUNDANCYINVIDEODITS
+Attention’srisingcosts. VideoDiTsemploythreedistincttypesofattention: spatial,temporal,and
+cross-attention. Consequently,thecomputationalcostofattentioninthesemodelsissignificantly
+higherthaninpreviousmethods.AsFigure4(b)illustrates,theproportionoftimeintotalforattention
+invideoDiTsissignificantlylargerthaninCNNapproaches,whichwillfurtherescalatewithlarger
+videosizes. Thisdramaticincreaseposesasignificantchallengetotheefficiencyofvideogeneration.
+3
+text
+embed.Preprint.
+.ntta
+laitaps
+.ntta
+laropm
+b) total attn. cost comparison
+et
+prompt:
+bs ll
+a
+io nzw
+i dn
+op
+g
+oa
+o
+rn
+a
+f
+iu
+k
+r
+p efw
+i pr
+lea
+a
+r cid
+n
+e
+.o af
+n
+.ntta
+ssorc
+diff 49-50 diff 34-35 diff 24-25 diff 14-15 diff 0-1
+a) visualized examples of attention difference c) quantitative attn. difference
+Figure4: a)VisualizationofattentiondifferencesinOpen-Sora. diffi-jrepresentsthedifference
+betweenstepiandstepj. b)ComparisonoftotalattentiontimecostbetweenStableVideoDiffu-
+sion(Blattmannetal.,2023)(U-Net)andOpen-Sora(DiT).c)Quantitativeanalysisofattention
+differencesinOpen-Sora,assessedusingmeansquarederror(MSE).Thedashedlinerepresentsthe
+averagevalueofthecorrespondingattentiondifference.
+Unmaskingattentionpatterns. Toacceleratecostlyattentioncomponents,weconductanin-depth
+analysisoftheirbehavior. Figure4(a)depictsthevisualizeddifferencesinattentionoutputsacross
+variousstages. Weobservethatformiddlesegments,thedifferencesareminimalandpatternsappear
+similar. Thefirstfewstepsshowvaguepatterns,likelyduetotheinitialarrangementofcontent. In
+contrast,thefinalstepsexhibitsignificantdifferences,presumablyasthemodelsharpensfeatures.
+Similarityanddiversity. Tofurtherinvestigatethisphenomenon,wequantifythedifferencesinat-
+tentionoutputsacrossalldiffusionsteps,asillustratedinFigure4(c). Ouranalysisrevealsthatthedif-
+ferencesinattentionoutputsdemonstratelowdifferenceforapproximately70%ofthediffusionsteps
+inthemiddlesegment. Additionally,thevarianceintheiroutputsisalsolow,butstillwithslightdif-
+ferences: spatialattentionshowsthehighestvariance,followedbytemporalandthencross-attention.
+2.3 PYRAMIDATTENTIONBROADCAST
+Figure5:OverviewofPyramidAttentionBroadcast.Ourmethod(shownontherightside)whichsets
+differentbroadcastrangesforthreeattentionsbasedontheirdifferences. Thesmallerthevariationin
+attention,thebroaderthebroadcastrange. Duringruntime,webroadcastattentionresultstothenext
+severalsteps(shownontheleftside)toavoidredundantattentioncomputations.
+Building on findings above, we propose Pyramid Attention Broadcast (PAB), a real-time, high
+qualityandtraining-freemethodtospeedupDiT-basedvideogenerationbyalleviatingredundancy
+inattentioncomputations. AsshowninFigure5,PABemploysasimpleyeteffectivestrategyto
+broadcasttheattentionoutputfromsomediffusionstepstotheirsubsequentstepswithinthestable
+middlesegment. Differentfrompreviousapproachesthatreuseattentionscores(Lietal.,2023b),
+wechoosetobroadcasttheentireattentionmodule’soutputs,aswefindthismethodtobeequally
+effectivebutsignificantlymoreefficient. Thisapproachallowsustocompletelybypassredundant
+4Preprint.
+attentioncomputationsinthosesubsequentsteps,therebysignificantlyreducingcomputationalcosts.
+Thiscanbeformulatedas:
+O ={F(X ), Y∗,··· ,Y∗ ,F(X ),Y∗ ,··· ,Y∗ ,···}. (3)
+attn. t t t t−n t−n t−n
+(cid:124) (cid:123)(cid:122) (cid:125) (cid:124) (cid:123)(cid:122) (cid:125)
+broadcastrange broadcastrange
+whereO referstotheoutputoftheattentionmoduleatalltimesteps,F(X )denotestheattentions
+attn. t
+arecalculatedattimesteptandY∗indicatestheattentionsresultsarebroadcastfromtimestept.
+t
+Furthermore,ourresearchrevealsthatemployingasinglestrategyacrossallattentiontypesisstill
+far from optimal speedup, as the feature and difference vary a lot for each attention as shown in
+Figure2. Toenhanceefficiencywhilepreservingquality,weproposetotailorbroadcastrangesfor
+eachattentiontype,asdepictedinFigure5. Thedeterminationofthebroadcastrangesisbasedon
+twokeyfactors: therateofchangeandthestabilityofeachattentiontype. Attentionmechanisms
+thatexhibitmorechangesandfluctuationsatconsecutivestepareassignedsmallerbroadcastranges
+fortheiroutputs. Thisadaptivemethodologyfacilitatesmoreefficienthandlingofdiverseattentions
+withinthemodelarchitecture.
+2.4 BROADCASTSEQUENCEPARALLELISM
+We introduce broadcast sequence
+paralleltoenhancevideogeneration
+speed based on Dynamic Sequence
+Parallelism (DSP) (Zhao et al.,
+2024),whichleveragesPAB’sunique
+characteristics to improve sequence
+parallelism. Sequenceparallelmeth-
+odsdistributesworkloadacrossGPUs,
+Figure6: Comparisonbetweenoriginalsequenceparallelism
+thus reduce generation latency. But
+andours.Whentemporalattentionisbroadcast,wecanavoid
+theyincursignificantcommunication
+allcommunication.
+overhead for temporal attention as
+showninFigure6. Bybroadcastingtemporalattention,weeliminateintra-modulecommunications,
+substantiallyreducingoverheadwithoutqualityloss. Thisenablesmoreefficient,scalabledistributed
+inferenceforreal-timevideogeneration.
+3 EXPERIMENTS
+Inthissection,wepresentourexperimentalsettings,followedbyourresultsandablationstudies. We
+thenevaluatethescalingcapabilitiesofourapproachandvisualizetheresults.
+3.1 EXPERIMENTALSETUP
+Models. Weselectthreestate-of-the-artopen-sourceDiT-basedvideogenerationmodelsincluding
+Open-Sora(Zhengetal.,2024),Open-Sora-Plan(Lab&etc.,2024),andLatte(Maetal.,2024a)as
+ourexperimentalmodels.
+Metrics. Followingpreviousworks(Lietal.,2024;Maetal.,2024a),weevaluatevideoquality
+using the following metrics: VBench (Huang et al., 2024), Peak Signal-to-Noise Ratio (PSNR),
+LearnedPerceptualImagePatchSimilarity(LPIPS)(Zhangetal.,2018),andStructuralSimilarity
+IndexMeasure(SSIM)(Wang&Bovik,2002). VBenchevaluatesvideogenerationquality,aligning
+withhumanperception. PSNRquantifiespixel-levelfidelitybetweenoutputs,whileLPIPSmeasures
+perceptualsimilarity,andSSIMassessesthestructuralsimilarity. Thedetailsofevaluationmetrics
+arepresentedinAppendixA.2.
+Baselines. Weemploy∆-DiT(Chenetal.,2024b)andT-GATE(Zhangetal.,2024),whicharealso
+cache-basedmethodsasbaselinesintheevaluation. WeshowdetailsinAppendixA.3.
+Implementationdetails. AllexperimentsarecarriedoutontheNVIDIAH10080GBGPUswith
+Pytorch. WeenableFlashAttention(Daoetal.,2022)bydefaultforallexperiments.
+5Preprint.
+3.2 MAINRESULTS
+model method VBench(%)↑ PSNR↑ LPIPS↓ SSIM↑ FLOPs(T) latency(s) speedup
+original 79.22 – – – 3230.24 26.54 –
+∆-DiT 78.21 11.91 0.5692 0.4811 3166.47 25.87 1.03×
+T-GATE 77.61 15.50 0.3495 0.6760 2818.40 22.22 1.19×
+Open-Sora
+PAB246 78.51 27.04 0.0925 0.8847 2657.70 19.87 1.34×
+PAB357 77.64 24.50 0.1471 0.8405 2615.15 19.35 1.37×
+PAB579 76.95 23.58 0.1743 0.8220 2558.25 18.52 1.43×
+original 80.39 – – – 12032.40 46.49 –
+∆-DiT 77.55 13.85 0.5388 0.3736 12027.72 46.08 1.01×
+Open-Sora- T-GATE 80.15 18.32 0.3066 0.6219 10663.32 39.37 1.18×
+Plan PAB246 80.30 18.80 0.3059 0.6550 9276.57 33.83 1.37×
+PAB357 77.54 16.40 0.4490 0.5440 8899.32 31.61 1.47×
+PAB579 71.81 15.47 0.5499 0.4717 8551.26 29.50 1.58×
+original 77.40 – – – 3439.47 11.18 –
+∆-DiT 52.00 8.65 0.8513 0.1078 3437.33 10.85 1.02×
+T-GATE 75.42 19.55 0.2612 0.6927 3059.02 9.88 1.13×
+Latte
+PAB235 76.32 19.71 0.2699 0.7014 2767.22 8.91 1.25×
+PAB347 73.69 18.07 0.3517 0.6582 2648.45 8.45 1.32×
+PAB469 73.13 17.16 0.3903 0.6421 2576.77 8.21 1.36×
+Table 1: Latency and speedup are calculated on one GPU. PAB denotes broadcast ranges of
+αβγ
+spatial(α),temporal(β),andcross(γ)attentions. Videogenerationspecifications: Open-Sora(2s,
+480p),Open-Sora-Plan(2.7s,512x512),Latte(2s,512x512). PSNR,SSIM,andLPIPSarecalculated
+againsttheoriginalmodelresults. FLOPsindicatefloating-pointoperationspervideogeneration.
+Qualityresults. Table1presentsqualitycomparisonsbetweenourmethodandtwobaselinesacross
+fourmetricsandthreemodels. WegeneratevideosbasedonVBench’s(Huangetal.,2024)prompts,
+asotherdatasetshavebeenshowntosufferfromoverfitting(Zhengetal.,2024;Lab&etc.,2024).
+WethenevaluateVBench(Huangetal.,2024)foreachmethodindependently,andcalculateother
+metricsincludingPSNR,LPIPS,andSSIM,withrespecttotheoriginalmodelresults.
+Basedontheresults,wemakethefollowingobservations: i)Ourmethodachievescomparableor
+superiorqualityresultstothetwobaselineswhilesimultaneouslyachievingsignificantlyhigheraccel-
+erationbyupto1.58×onasingleGPU.Thisdemonstratesourmethod’sabilitytoimproveefficiency
+withnegligiblequalityloss. ii)Ourmethodconsistentlyperformswellacrossallthreemodels,which
+utilizediversetrainingstrategiesandnoiseschedulers,demonstratingitsgeneralizability.
+1.33× 1.38× 1.35×
+3.22× 2.53× 2.46×
+6.08×10.50× 4.79× 8.43× 4.72× 8.70×
+Figure7:Speedups.WeevaluatethelatencyandspeedupachievedbyPABforsinglevideogeneration
+acrossupto8NVIDIAH100GPUs. Theresultsarepresentedforthreemodelsutilizingbroadcast
+sequenceparallelism.
+Speedups. Figure 7 illustrates the significant speedup achieved by our method when leveraging
+multipleGPUswithbroadcastsequenceparallelism.Ourmethoddemonstratesalmostlinearspeedups
+astheGPUcountincreasesacrossthreedifferentmodels. Notably,itachievesanimpressive10.60×
+speedupwhenutilizing8GPUs. Theseresultshighlightthesignificantreductionincommunication
+overheadandunderscoretheefficacyofourbroadcastsequenceparallelismstrategy.
+6Preprint.
+3.3 ABLATIONSTUDY
+To thoroughly examine the characteristics of our method, we conduct extensive ablation studies.
+Unlessotherwisestated,weapplyPAB (thehigestquality,butlessspeedup)toOpen-Sorafor
+246
+generating2s480pvideosusingasingleNVIDIAH100GPU.
+Table 2: Evaluation of components. w/o indicates the Table 3: Broadcast object comparison.
+broadcaststrategyisdisabledforthatcomponentand∆ Wecomparethespeedup,memorycost
+representsthecorrespondingincreasedlatency. fordifferentbroadcastingobject. atten-
+tionoutputsrefertothefinaloutputof
+broadcaststrategy latency(s) ∆ VBench(%)↑ theattentionmodule.
+w/ospatialattn. 21.74 +1.87 78.45
+w/otemporalattn. 23.95 +4.08 78.98 broadcastobject VBench(%) latency(s)
+w/ocrossattn. 20.98 +1.11 78.58
+w/omlp 20.27 +0.40 78.59 original 79.22 26.54
+allcomponents 19.87 – 78.51 attentionscores 78.53 29.12
+attentionoutputs 78.51 19.87
+Evaluationofcomponents. AsshowninTable2,wecomparethecontributionofeachcomponent
+intermsofspeedandquality. Wedisablethebroadcaststrategyforeachcomponentindividually
+and measure the VBench scores and increase in latency. While the impact on VBench scores is
+negligible, each component contributes to the overall speedup. Spatial and temporal attentions
+yield themost computationalsavings, as they addressmore extensiveredundancies compared to
+othercomponents. Crossattentionfollows,offeringmoderateimprovementsdespiteitsrelatively
+lightweightcomputation. Themlpshowslimitedspeedupduetoitsinherentlylowredundancy.
+spatial attention. temporal attention cross attention
+27.0 80.0 25.0
+22 66 .. 05 l Va Bte en nc cy h score 77 99 .. 05 22 44 .. 05 77 99 .. 04 22 66 .. 34 77 99 .. 45
+25.5 78.5 23.5 78.5 26.1 79.3 25.0 78.0 23.0 78.0 26.0 79.2 222 344 ... 505 24.86 24.50 24.30 24.12 777 677 ... 505 222 122 ... 505 22.61 22.28 21.94 21.85 777 677 ... 616 222 555 ... 578 25.72 25.68 25.66 25.65 777 899 ... 901
+23.0 76.0 21.0 76.1 25.4 78.8
+22.5 75.5 20.5 75.7 25.2 78.6
+22.0 75.0 20.0 75.2 25.1 78.5
+2 3 4 5 4 5 6 7 5 6 7 8
+broadcast range
+Figure8: Evaluationofattentionbroadcastranges. Comparisonoflatencyandvideoqualityacross
+varyingattentionbroadcastrangesinspatial,temporal,andcrossattentions.
+Effect of attention broadcast range. We conduct a comparative analysis of different broadcast
+rangesforspatial,temporal,andcrossattentions. AsillustratedinFigure8,ourfindingsrevealaclear
+inverserelationshipbetweenbroadcastrangeandvideoquality. Moreover,weobservethattheeffect
+ofdifferentbroadcastrangevariesacrossdifferentattention,suggestingthateachtypeofattention
+hasitsowndistinctcharacteristicsandrequirementsforoptimalperformance.
+What to broadcast in attention? While previous works (Treviso et al., 2021) typically reuse
+attention scores, we find that broadcasting attention outputs is superior. Table 3 compares the
+speedupandvideoqualityachievedbybroadcastingattentionscoresversusattentionoutputs. Our
+resultsdemonstratethatbroadcastingattentionoutputsmaintainssimilarqualitywhileofferingmuch
+betterefficiency,fortwoprimaryreasons:
+i)Attentionoutputchangeratesarelow,astheaccumulatedresultsafterattentionaggregationremain
+similardespitepixel-levelchanges.Thisfurtherindicatessignificantredundancyinattentioncomputa-
+tions. ii)Broadcastingattentionscoresreducesefficiencybyprecludingtheuseofoptimizedkernels
+such as FlashAttention. It also necessitates additional attention-related computations, including
+normalizationandattentionprojection,whichareavoidedwhenbroadcastingoutputs.
+3.4 SCALINGABILITY
+Toevaluateourmethod’sscalability,weconductaseriesofexperiments. Ineachexperiment,we
+apply PAB (the higest quality, but less speedup) to Open-Sora as our baseline configuration,
+246
+changeonlythevideosizes,parallelmethodandGPUnumbers.
+7
+)s( ycnetal
+)%(
+erocs hcneBV )s( ycnetal
+)%(
+erocs hcneBV )s( ycnetal
+)%(
+erocs hcneBVPreprint.
+Table4: Communicationandlatencycomparison
+ours (8 devices) ours (16 devices)
+of different sequence parallelism methods on 8 39.1 17.8
+NVIDIAH100GPUswithandwithoutourmethod. 35.2 35.56 16.1 16.22
+31.3 14.3
+originalreferstoourmethodonsingleGPU.comm. 27.4 12.5
+represents the total communication volume re- 23.5 10.7
+quiredtogenerateasingle2s480pvideo. 11 59 .. 66 20.67 78 .. 19 8.79
+11.7 5.4
+w/oPAB w/PAB 7.8 3.6
+method 3.9 1.8
+comm.(G) latency(s) comm.(G) latency(s) 0.0 0.0
+4.0s (102 frames), 480p 4.0s (102 frames), 720p
+original – 97.51 – 71.25
+Megatron-SP 184.63 17.17 104.62 14.78 Figure 9: Real-time video generation per-
+DS-Ulysses 46.16 12.34 26.16 9.85 formance. We evaluate our methods’ speed
+DSP 23.08 12.01 – –
+in frames per second (FPS) using 8 and 16
+ours – – 13.08 9.29 NVIDIAH100GPUsfor480pand720pvideos.
+ScalingtomultipleGPUs. Wecomparethescalingefficiencywithandwithoutourmethodusing8
+GPUsinTable4forfoursequenceparallelismmethodsincludingMegatron-SP(Korthikantietal.,
+2023),DS-Ulysses(Jacobsetal.,2023)andDSP(Zhaoetal.,2024). Theresultsdemonstratethat: i)
+PABsignificantlyreducescommunicationvolumeforallsequenceparallelismmethods. Furthermore,
+ourmethodachievesthelowestcommunicationcostcomparedtoothertechniques,andachieving
+near-linearscalingon8GPUs. Withalargertemporalbroadcastrange, itcanyieldevengreater
+performanceimprovements. ii)Implementingsequenceparallelismaloneisinsufficientforoptimal
+performancebecauseofthesignificantcommunicationoverheadacrossmultipledevices.
+1.33× 1.32× 1.26× 1.31× 1.34×
+3.22× 3.21× 2.85× 3.03× 2.23×
+6.08×10.50× 5.60×9.81× 5.60×10.59× 5.68× 10.09× 4.05× 7.08×
+Figure10: Scalingvideosize. Validatingourmethod’saccelerationandscalingcapabilitiesonsingle
+andmulti-GPUsetupsforgeneratinglargervideos.
+Scalingtolargervideosize. Currently,mostmodelsarelimitedtogeneratingshort,low-resolution
+videos. However,theabilitytogeneratelonger,higher-qualityvideosisbothinevitableandnecessary
+forfutureapplications. Toevaluateourmodel’scapacitytoaccelerateprocessingforlargervideo
+sizes,weconductedtestsacrossvariousvideolengthsandresolutions,asillustratedinFigure10. Our
+resultsdemonstratethatasvideosizeincreases,wecandeliverstablespeeduponasingleGPUand
+betterscalingcapabilitieswhenextendingtomultipleGPUs. Thesefindingsunderscoretheefficacy
+andpotentialofourmethodforprocessinglargervideosizes.
+Real-timevideogeneration. Weevaluateourmethod’sspeedintermsofFPSon8and16devices.
+Sinceininference,thebatchsizeofdiffusionisoften2becauseofCFG.Therefore,wesplitthebatch
+firstandapplysequenceparallelismtoeachbatch;inthisway,PABcanextendto16deviceswith
+almostlinearacceleration. AsshowninFigure9,wecanachievereal-timewithveryhighFPSvideo
+generationfor480pvideoson8devicesandevenfor720pon16devices. Notethatwithacceleration
+techniqueslikeTorchCompiler,weareabletoachieveevenbetterspeed.
+spatial attn. temporal attn. cross attn. mlp other
+spatial attn. related temporal attn. related cross attn. related
+original
+ours
+0.0 1.5 3.0 4.5 6.0 7.5 9.0 10.5 12.0 13.5 15.0 16.5 18.0 19.5 21.0 22.5 24.0 25.5 27.0 28.5 30.0
+latency (s)
+Figure11: Runtimebreakdownforgeneratinga2s480pvideo. attn. denotesthetimeconsumedby
+attentionoperationsalone,whileattn. relatedincludesthetimeforadditionaloperationsassociated
+withattention,suchasnormalizationandprojection.
+8
+SPFPreprint.
+Runtimebreakdown. Tofurtherinvestigatehowourmethodachievessuchsignificantspeedup,we
+provideabreakdownofthetimeconsumptionforvariouscomponents,asshowninFigure11. The
+analysisrevealsthattheattentioncalculationitselfdoesnotconsumealargeportionoftimebecause
+thesequencelengthforattentionwillbemuchshorterifwedoattentionseperatelyforeachdimension.
+However,attention-relatedoperations,suchasnormalizationandprojection,areconsiderablymore
+time-consumingthantheattentionmechanismitself,whichmainlycontributetoourspeedup.
+3.5 VISUALIZATION
+AsshowninFigure12, wevisualizethevideoresultsgeneratedbyourmethodcomparedtothe
+originalmodel. ThegenerationspecificationsarethesamewiththoseinTable1,andweemploythe
+highestqualitystrategyoutlinedinthetable. Thevisualizedresultsdemonstratethatourmethod
+maintainstheoriginalqualityanddetails.
+Open-Sora Open-Sora-Plan Latte
+Original Ours Original Ours Original Ours
+prompt: white smoke on black background. simply drop it in and change its blending mode to screen or add.
+prompt: summer landscape on a mountain lake. small rustic wooden pier on the water waves. morning and sunlight through the clouds waves, in the background of the mountain in the fog.
+prompt: korean popular dish, samgyopsal, is being baked on a stone plate with kimchi. close-up, macro shot.
+prompt: slow pan upward of blazing oak fire in an indoor fireplace.
+prompt: snow falling over multiple houses and trees on winter landscape against night sky. christmas festivity and celebration concept.
+Figure12: Qualitativeresults. Wecomparethegenerationqualitybetweenourmethodandoriginal
+model. Thefiguresarerandomlysampledfromthegeneratedvideo.
+4 RELATED WORK
+4.1 VIDEOGENERATION
+Video generation has seen remarkable progress recently, which aims to synthesize visually high-
+qualityandmotion-consistentvideos. Previousresearchcanbebroadlydividedintothreekeystages:
+GAN-based,auto-regressive,anddiffusionmodels. Initially,GANswereextendedfromimageto
+9Preprint.
+videogeneration,aimingtomaintainspatiotemporalcoherence(Vondricketal.,2016;Saitoetal.,
+2017;Clarketal.,2019;Kahembwe&Ramamoorthy,2020;Wangetal.,2020).Despitetheirsuccess,
+GAN-basedapproachesoftenstruggledwithmodecollapse,whichhinderedtheireffectivenessin
+producingdiverseandconsistentvideos. Toaddresstheselimitations,auto-regressivemodelswere
+introduced,leveragingTransformerarchitecturestopredictvideoframessequentially,conditionedon
+previouslygeneratedframes. (Rakhimovetal.,2020;Weissenbornetal.,2020;Yanetal.,2021;Ge
+etal.,2022)Althoughthesemodelsgenerallyyieldhighervideoqualityandmorestableconvergence,
+theydemandsubstantialcomputationalresources.
+Thelatestadvancementsinvideogenerationhavebeendrivenbydiffusionmodels,whichiteratively
+refinenoisyinputstogeneratehigh-fidelityvideoframes(Hoetal.,2022b;Anetal.,2023;Esser
+etal.,2023;Geetal.,2023). Whilemanyworksfocusonconv-baseddiffusions(Wangetal.,2020;
+Hoetal.,2020;Harveyetal.,2022;Mei&Patel,2022;Singeretal.,2022;Hoetal.,2022a;Luo
+etal.,2023;Wangetal.,2023b;Wuetal.,2023;Zhangetal.,2023),researchersbegintoexplore
+Transformer-baseddiffusionmodelsforvideogeneration(Zhengetal.,2024;Lab&etc.,2024;Ma
+etal.,2024a)becauseofscalability(Peebles&Xie,2023)andefficiency. Inthiswork,wefocuson
+acceleratingtheDiT-basedvideogenerationmodels.
+4.2 DIFFUSIONMODELACCELERATION
+Advancementsinvideodiffusionmodelshavedemonstratedtheirpotentialforhigh-qualityvideo
+generation,yettheirpracticalapplicationisoftenlimitedbyslowinferencespeeds. Previousresearch
+aboutspeedingupdiffusionmodelinferencecanbebroadlyclassifiedintothreecategories. First,
+reducingthesamplingtimestepshasbeenexploredthroughmethodssuchasDDIM(Songetal.,
+2020),whichenablesfewersamplingstepswithoutcompromisinggenerationquality. Otherworks
+alsoexploreefficientsolverofODEorSDE(Songetal.,2021;Jolicoeur-Martineauetal.,2021;
+Luetal.,2022;Karrasetal.,2022;Luetal.,2023),whichemploysapseudonumericalmethodto
+achievefastersampling. Second,researchersaimedatreducingtheworkloadandinferencetimeat
+eachsamplingstep,includingdistillation(Salimans&Ho,2022;Lietal.,2023d),quantization(Li
+etal.,2023c;Heetal.,2023;Soetal.,2023a;Shangetal.,2023),distributedinference(Lietal.,
+2024). Third,jointlyoptimizedmethodssimultaneouslyoptimizenetworkandsamplingmethods(Li
+etal.,2023a;Liuetal.,2023). Moreover,researchersmodifythemodelstructureindirectlybyusing
+thecachemechanismtoreducecomputation. Cache(Smith,1982)incomputersystemsisamethod
+totemporarilystorefrequentlyaccesseddatafromthemainmemorytoimproveprocessingspeed
+andefficiency. Basedonthefindings thathigh-level featuresusuallychangeminimallybetween
+consecutivesteps,researchersreusethehigh-levelfeaturesinU-Netstructurewhileupdatingthe
+low-levelones (Maetal.,2024c;Lietal.,2023b;Wimbaueretal.,2024;Soetal.,2023b). Besides,
+(Zhangetal.,2024)cachetheredundantcross-attentioninthefidelity-improvingstage.
+However, previous methods mainly focus on the U-Net structure and image domain. The most
+similarworkare (Maetal.,2024b), (Chenetal.,2024b), (Zhangetal.,2024)and (Lietal.,2024).
+(Maetal.,2024b)skipthecomputationofalargeproportionoffeedforwardlayersinDiTmodels
+throughpost-training. (Zhangetal.,2024)cachetheself-attentionintheinitialstageandreuses
+cross-attentioninthefidelity-improvingphase. (Chenetal.,2024b)cachesfeatureoffsetsofDiT
+blocks. (Lietal.,2024)reducethelatencyofsingle-samplegenerationbyrunningconvolution-
+baseddiffusionmodelsacrossmultipledevicesinparallelwhilesacrificingqualityandefficiencyfor
+parallel.Differentfrompreviousworks,weaimatreal-timeDiT-basedvideogenerationmodelsusing
+training-freeaccelerationmethods. Weutilizepyramidattentionandbroadcastsequenceparallelto
+acceleratevideogenerationwithoutlossofquality.
+5 DISCUSSION AND CONCLUSION
+In this work, we introduce Pyramid Attention Broadcast (PAB), a novel real-time, high quality,
+andtraining-freeapproachtoenhancetheefficiencyofDiT-basedvideogeneration. PABreduces
+redundancythroughpyramid-stylebroadcastingbyexploitingtheU-shapedattentionpatterninthe
+diffusionprocess. Moreover,thebroadcastsequenceparallelizationmethodsignificantlyimproves
+distributedinferenceefficiency. Overall,PABenablesreal-time,high-qualityvideogenerationof
+upto720pvideo,consistentlyoutperformingbaselinemethodsacrossvariousmodels. Webelieve
+10Preprint.
+that PAB provides a simple yet effective foundation for advancing future research and practical
+applicationsinvideogeneration.
+Limitation. Ourapproachshowspromisebuthassomelimitations. PAB’sperformancemayvary
+depending on the input data’s complexity, especially with dynamic scenes. The fixed broadcast
+strategy might not work best for all video types and tasks. Also, we only focused on reducing
+redundancyinattentionmechanisms,nototherpartsofthemodellikeFeed-ForwardNetworks.Future
+workcouldexplorewaystomakePABmoreflexibleandeffectiveacrossdifferentapplications,such
+asdevelopingadaptivestrategiesandexpandingredundancyreductiontoothermodelcomponents.
+REFERENCES
+D.H.Albonesi. Selectivecacheways: on-demandcacheresourceallocation. InMICRO-32,1999.
+JieAn,SongyangZhang,HarryYang,SonalGupta,Jia-BinHuang,JieboLuo,andXiYin. Latent-
+Shift: LatentDiffusionwithTemporalShiftforEfficientText-to-VideoGeneration,2023.
+RonBanner,YuryNahshan,andDanielSoudry. Posttraining4-bitquantizationofconvolutional
+networksforrapid-deployment. NeurIPS,2019.
+AndreasBlattmann,TimDockhorn,SumithKulal,DanielMendelevitch,MaciejKilian,Dominik
+Lorenz,YamLevi,ZionEnglish,VikramVoleti,AdamLetts,etal. Stablevideodiffusion: Scaling
+latentvideodiffusionmodelstolargedatasets. arXiv:2311.15127,2023.
+Tim Brooks, Bill Peebles, Connor Holmes, Will DePue, Yufei Guo, Li Jing, David Schnurr, Joe
+Taylor, Troy Luhman, Eric Luhman, Clarence Ng, Ricky Wang, and Aditya Ramesh. Video
+generation models as world simulators, 2024. URL https://openai.com/research/
+video-generation-models-as-world-simulators.
+LeiChen,YuanMeng,ChenTang,XinzhuMa,JingyanJiang,XinWang,ZhiWang,andWenwu
+Zhu. Q-dit: Accuratepost-trainingquantizationfordiffusiontransformers. arXiv:2406.17343,
+2024a.
+Pengtao Chen, Mingzhu Shen, Peng Ye, Jianjian Cao, Chongjun Tu, Christos-Savvas Bouganis,
+YirenZhao,andTaoChen. delta-dit: Atraining-freeaccelerationmethodtailoredfordiffusion
+transformers. arXiv:2406.01125,2024b.
+Aidan Clark, Jeff Donahue, and Karen Simonyan. Adversarial Video Generation on Complex
+Datasets,2019.
+ElliotJCrowley,GavinGray,andAmosJStorkey. Moonshine: Distillingwithcheapconvolutions.
+NeurIPS,2018.
+TriDao,DanFu,StefanoErmon,AtriRudra,andChristopherRe´. Flashattention: Fastandmemory-
+efficientexactattentionwithio-awareness. NeurIPS,2022.
+PatrickEsser,JohnathanChiu,ParmidaAtighehchian,JonathanGranskog,andAnastasisGermanidis.
+StructureandContent-GuidedVideoSynthesiswithDiffusionModels. InCVPR,2023.
+SongweiGe,ThomasHayes,HarryYang,XiYin,GuanPang,DavidJacobs,Jia-BinHuang,and
+DeviParikh. Longvideogenerationwithtime-agnosticvqganandtime-sensitivetransformer. In
+ECCV,2022.
+SongweiGe,SeungjunNah,GuilinLiu,TylerPoon,AndrewTao,BryanCatanzaro,DavidJacobs,
+Jia-BinHuang,Ming-YuLiu,andYogeshBalaji. PreserveYourOwnCorrelation: ANoisePrior
+forVideoDiffusionModels. InCVPR,2023.
+IanGoodfellow,JeanPouget-Abadie,MehdiMirza,BingXu,DavidWarde-Farley,SherjilOzair,
+AaronCourville,andYoshuaBengio. Generativeadversarialnets. NeurIPS,2014.
+JamesR.Goodman. Usingcachememorytoreduceprocessor-memorytraffic. SIGARCHComput.
+Archit. News, 11(3):124–131, 1983. ISSN 0163-5964. doi: 10.1145/1067651.801647. URL
+https://doi.org/10.1145/1067651.801647.
+11Preprint.
+SongHan,HuiziMao,andWilliamJDally. Deepcompression: Compressingdeepneuralnetworks
+withpruning,trainedquantizationandhuffmancoding. arXiv:1510.00149,2015.
+WilliamHarvey,SaeidNaderiparizi,VadenMasrani,ChristianWeilbach,andFrankWood. Flexible
+DiffusionModelingofLongVideos,2022.
+Yefei He, Luping Liu, Jing Liu, Weijia Wu, Hong Zhou, and Bohan Zhuang. PTQD: Accurate
+Post-TrainingQuantizationforDiffusionModels,2023.
+JonathanHo,AjayJain,andPieterAbbeel. DenoisingDiffusionProbabilisticModels,2020.
+JonathanHo,WilliamChan,ChitwanSaharia,JayWhang,RuiqiGao,AlexeyGritsenko,DiederikP.
+Kingma,BenPoole,MohammadNorouzi,DavidJ.Fleet,andTimSalimans. ImagenVideo: High
+DefinitionVideoGenerationwithDiffusionModels,2022a.
+JonathanHo,TimSalimans,AlexeyGritsenko,WilliamChan,MohammadNorouzi,andDavidJ
+Fleet. Videodiffusionmodels. NeurIPS,2022b.
+Cheng-YuHsieh,Chun-LiangLi,Chih-KuanYeh,HootanNakhost,YasuhisaFujii,AlexanderRatner,
+RanjayKrishna,Chen-YuLee,andTomasPfister. Distillingstep-by-step! outperforminglarger
+languagemodelswithlesstrainingdataandsmallermodelsizes. arXiv:2305.02301,2023.
+ZiqiHuang,YinanHe,JiashuoYu,FanZhang,ChenyangSi,YumingJiang,YuanhanZhang,Tianxing
+Wu,QingyangJin,NattapolChanpaisit,YaohuiWang,XinyuanChen,LiminWang,DahuaLin,
+YuQiao,andZiweiLiu. VBench: Comprehensivebenchmarksuiteforvideogenerativemodels.
+InCVPR,2024.
+SamAdeJacobs,MasahiroTanaka,ChengmingZhang,MinjiaZhang,LeonSong,SamyamRajbhan-
+dari,andYuxiongHe. Deepspeedulysses: Systemoptimizationsforenablingtrainingofextreme
+longsequencetransformermodels. arXiv:2309.14509,2023.
+Alexia Jolicoeur-Martineau, Ke Li, Re´mi Piche´-Taillefer, Tal Kachman, and Ioannis Mitliagkas.
+GottaGoFastWhenGeneratingDatawithScore-BasedModels,2021.
+Emmanuel Kahembwe and Subramanian Ramamoorthy. Lower Dimensional Kernels for Video
+Discriminators. NeuralNetworks,132:506–520,2020. ISSN08936080. doi: 10.1016/j.neunet.
+2020.09.016.
+TeroKarras,MiikaAittala,TimoAila,andSamuliLaine. ElucidatingtheDesignSpaceofDiffusion-
+BasedGenerativeModels,2022.
+Vijay Anand Korthikanti, Jared Casper, Sangkug Lym, Lawrence McAfee, Michael Andersch,
+MohammadShoeybi,andBryanCatanzaro.Reducingactivationrecomputationinlargetransformer
+models. MLSys,2023.
+MadhavKumarandAnujKapoor. Generativeaiandpersonalizedvideoadvertisements. Availableat
+SSRN4614118,2023.
+PKU-YuanLabandTuzhanAIetc. Open-sora-plan,April2024. URLhttps://doi.org/10.
+5281/zenodo.10948109.
+LijiangLi,HuixiaLi,XiawuZheng,JieWu,XuefengXiao,RuiWang,MinZheng,XinPan,FeiChao,
+andRongrongJi. AutoDiffusion: Training-FreeOptimizationofTimeStepsandArchitecturesfor
+AutomatedDiffusionModelAcceleration,2023a.
+MuyangLi,TianleCai,JiaxinCao,QinshengZhang,HanCai,JunjieBai,YangqingJia,KaiLi,and
+SongHan. Distrifusion: Distributedparallelinferenceforhigh-resolutiondiffusionmodels. In
+CVPR,2024.
+SenmaoLi,TaihangHu,FahadShahbazKhan,LinxuanLi,ShiqiYang,YaxingWang,Ming-Ming
+Cheng,andJianYang. Fasterdiffusion: Rethinkingtheroleofunetencoderindiffusionmodels.
+arXiv:2312.09608,2023b.
+YanjingLi,ShengXu,XianbinCao,XiaoSun,andBaochangZhang. Q-DM:AnEfficientLow-bit
+QuantizedDiffusionModel. InNeurIPS,2023c.
+12Preprint.
+YanyuLi,HuanWang,QingJin,JuHu,PavloChemerys,YunFu,YanzhiWang,SergeyTulyakov,
+andJianRen.SnapFusion:Text-to-ImageDiffusionModelonMobileDeviceswithinTwoSeconds,
+2023d.
+JiLin,JiamingTang,HaotianTang,ShangYang,Wei-MingChen,Wei-ChenWang,Guangxuan
+Xiao,XingyuDang,ChuangGan,andSongHan. Awq: Activation-awareweightquantizationfor
+on-devicellmcompressionandacceleration. MLSys,2024.
+EnshuLiu,XuefeiNing,ZinanLin,HuazhongYang,andYuWang. OMS-DPM:Optimizingthe
+ModelScheduleforDiffusionProbabilisticModels,2023.
+ChengLu,YuhaoZhou,FanBao,JianfeiChen,ChongxuanLi,andJunZhu. DPM-Solver: AFast
+ODESolverforDiffusionProbabilisticModelSamplinginAround10Steps,2022.
+ChengLu,YuhaoZhou,FanBao,JianfeiChen,ChongxuanLi,andJunZhu. DPM-Solver++: Fast
+SolverforGuidedSamplingofDiffusionProbabilisticModels,2023.
+ZhengxiongLuo,DayouChen,YingyaZhang,YanHuang,LiangWang,YujunShen,DeliZhao,
+JingrenZhou,andTieniuTan. NoticeofRemoval: VideoFusion: DecomposedDiffusionModels
+forHigh-QualityVideoGeneration. InCVPR,2023.
+XinMa,YaohuiWang,GengyunJia,XinyuanChen,ZiweiLiu,Yuan-FangLi,CunjianChen,and
+YuQiao. Latte: Latentdiffusiontransformerforvideogeneration. arXiv:2401.03048,2024a.
+Xinyin Ma, Gongfan Fang, and Xinchao Wang. Llm-pruner: On the structural pruning of large
+languagemodels. NeurIPS,2023.
+XinyinMa,GongfanFang,MichaelBiMi,andXinchaoWang. Learning-to-cache: Accelerating
+diffusiontransformervialayercaching. arXiv:2406.01733,2024b.
+XinyinMa,GongfanFang,andXinchaoWang. Deepcache: Acceleratingdiffusionmodelsforfree.
+InCVPR,2024c.
+KangfuMeiandVishalM.Patel. VIDM:VideoImplicitDiffusionModels,2022.
+KMeli,JTaouki,andDPantazatos. Empoweringeducatorswithgenerativeai: Thegenaieducation
+frontierinitiative. InEDULEARN24Proceedings,pp.4289–4299.IATED,2024.
+ImranOthman. Aivideoeditor: Aconceptualreviewingenerativearts. InICCM,2023.
+WilliamPeeblesandSainingXie. Scalablediffusionmodelswithtransformers. InCVPR,2023.
+RuslanRakhimov,DenisVolkhonskiy,AlexeyArtemov,DenisZorin,andEvgenyBurnaev. Latent
+VideoTransformer,2020.
+OlafRonneberger,PhilippFischer,andThomasBrox. U-net: Convolutionalnetworksforbiomedical
+imagesegmentation. InMICCAI,2015.
+Masaki Saito, Eiichi Matsumoto, and Shunta Saito. Temporal Generative Adversarial Nets with
+SingularValueClipping,2017.
+TimSalimansandJonathanHo. ProgressiveDistillationforFastSamplingofDiffusionModels,
+2022.
+Axel Sauer, Dominik Lorenz, Andreas Blattmann, and Robin Rombach. Adversarial diffusion
+distillation. arXiv:2311.17042,2023.
+YuzhangShang,ZhihangYuan,BinXie,BingzheWu,andYanYan. Post-trainingQuantizationon
+DiffusionModels,2023.
+UrielSinger,AdamPolyak,ThomasHayes,XiYin,JieAn,SongyangZhang,QiyuanHu,Harry
+Yang,OronAshual,OranGafni,DeviParikh,SonalGupta,andYanivTaigman. Make-A-Video:
+Text-to-VideoGenerationwithoutText-VideoData,2022.
+AlanJaySmith. Cachememories. ACMComputingSurveys,14(3):473–530,1982.
+13Preprint.
+JunhyukSo,JungwonLee,DaehyunAhn,HyungjunKim,andEunhyeokPark. TemporalDynamic
+QuantizationforDiffusionModels,2023a.
+Junhyuk So, Jungwon Lee, and Eunhyeok Park. Frdiff: Feature reuse for exquisite zero-shot
+accelerationofdiffusionmodels. arXiv:2312.03517,2023b.
+Jiaming Song, Chenlin Meng, and Stefano Ermon. Denoising diffusion implicit models.
+arXiv:2010.02502,2020.
+YangSong,JaschaSohl-Dickstein,DiederikP.Kingma,AbhishekKumar,StefanoErmon,andBen
+Poole. Score-BasedGenerativeModelingthroughStochasticDifferentialEquations,2021.
+MarcosTreviso,Anto´nioGo´is,PatrickFernandes,ErickFonseca,andAndre´FTMartins. Predicting
+attentionsparsityintransformers. arXiv:2109.12188,2021.
+AaronVanDenOord,OriolVinyals,etal. Neuraldiscreterepresentationlearning. NeurIPS,2017.
+AshishVaswani,NoamShazeer,NikiParmar,JakobUszkoreit,LlionJones,AidanNGomez,Łukasz
+Kaiser,andIlliaPolosukhin. Attentionisallyouneed. NeurIPS,2017.
+CarlVondrick,HamedPirsiavash,andAntonioTorralba. GeneratingVideoswithSceneDynamics,
+2016.
+JiannanWang,JiaruiFang,AoyuLi,andPengChengYang. Pipefusion: Displacedpatchpipeline
+parallelismforinferenceofdiffusiontransformermodels. arXiv:2405.14430,2024.
+JiuniuWang,HangjieYuan,DayouChen,YingyaZhang,XiangWang,andShiweiZhang. Mod-
+elscopetext-to-videotechnicalreport. arXiv:2308.06571,2023a.
+YaohuiWang,PiotrBilinski,FrancoisBremond,andAntitzaDantcheva. ImaGINator: Conditional
+Spatio-TemporalGANforVideoGeneration. InWACV,2020.
+YaohuiWang,XinyuanChen,XinMa,ShangchenZhou,ZiqiHuang,YiWang,CeyuanYang,Yinan
+He,JiashuoYu,PeiqingYang,YuweiGuo,TianxingWu,ChenyangSi,YumingJiang,Cunjian
+Chen, ChenChangeLoy, BoDai, DahuaLin, YuQiao, andZiweiLiu. LAVIE:High-Quality
+VideoGenerationwithCascadedLatentDiffusionModels,2023b.
+ZhouWangandAlanCBovik. Auniversalimagequalityindex. IEEEsignalprocessingletters,
+2002.
+DirkWeissenborn,OscarTa¨ckstro¨m,andJakobUszkoreit. ScalingAutoregressiveVideoModels,
+2020.
+FelixWimbauer,BichenWu,EdgarSchoenfeld,XiaoliangDai,JiHou,ZijianHe,ArtsiomSanakoyeu,
+PeizhaoZhang,SamTsai,JonasKohler,etal. Cachemeifyoucan: Acceleratingdiffusionmodels
+throughblockcaching. InCVPR,2024.
+JayZhangjieWu,YixiaoGe,XintaoWang,StanWeixianLei,YuchaoGu,YufeiShi,WynneHsu,
+Ying Shan, Xiaohu Qie, and Mike Zheng Shou. Tune-A-Video: One-Shot Tuning of Image
+DiffusionModelsforText-to-VideoGeneration. InCVPR,2023.
+WilsonYan,YunzhiZhang,PieterAbbeel,andAravindSrinivas. VideoGPT:VideoGenerationusing
+VQ-VAEandTransformers,2021.
+ZhuoyiYang,JiayanTeng,WendiZheng,MingDing,ShiyuHuang,JiazhengXu,YuanmingYang,
+WenyiHong,XiaohanZhang,GuanyuFeng,etal. Cogvideox: Text-to-videodiffusionmodels
+withanexperttransformer. arXiv:2408.06072,2024.
+RichardZhang,PhillipIsola,AlexeiAEfros,EliShechtman,andOliverWang. Theunreasonable
+effectivenessofdeepfeaturesasaperceptualmetric. InCVPR,2018.
+Wentian Zhang, Haozhe Liu, Jinheng Xie, Francesco Faccio, Mike Zheng Shou, and Ju¨rgen
+Schmidhuber. Cross-attentionmakesinferencecumbersomeintext-to-imagediffusionmodels.
+arXiv:2404.02747,2024.
+14Preprint.
+Yabo Zhang, Yuxiang Wei, Dongsheng Jiang, Xiaopeng Zhang, Wangmeng Zuo, and Qi Tian.
+ControlVideo: Training-freeControllableText-to-VideoGeneration,2023.
+XuanleiZhao,ShengganCheng,ZangweiZheng,ZhemingYang,ZimingLiu,andYangYou. Dsp:
+Dynamicsequenceparallelismformulti-dimensionaltransformers. arXiv:2403.10266,2024.
+ZangweiZheng,XiangyuPeng,TianjiYang,ChenhuiShen,ShengguiLi,HongxinLiu,YukunZhou,
+TianyiLi,andYangYou. Open-sora: Democratizingefficientvideoproductionforall,2024. URL
+https://github.com/hpcaitech/Open-Sora.
+15Preprint.
+Real-Time Video Generation with Pyramid Attention Broadcast
+Supplementary Material
+A EXPERIMENT SETUP
+A.1 MODELS
+AswefocusonDiT-basedvideogeneration,threepopularstate-of-the-artopen-sourceDiT-based
+videogenerationmodelsareselectedintheevaluation,includingOpen-Sora(Zhengetal.,2024),
+Open-Sora-Plan(Lab&etc.,2024),andLatte(Maetal.,2024a). Open-Sora-Plan(Lab&etc.,2024)
+utilizesCausalVideoVAEtocompressvisualrepresentationsandDiTwiththe3Dfullattention
+module. Open-Sora(Zhengetal.,2024)combines2D-VAEwith3D-VAEforbettervideo
+compressionandusesanSD-DiTblockinthediffusionprocess. Latte(Maetal.,2024a)usesspatial
+TransformerblocksandtemporalTransformerblockstocapturevideoinformationinthediffusion
+process.
+A.2 METRICS
+Inthiswork,weevaluateourmethodsusingseveralestablishedmetricstocomprehensivelyassess
+videoqualityandsimilarity. Ontheonehand,weassessvideogenerationqualitybythebenchmark
+VBench,whichiswellalignedwithhumanperceptions.
+VBench(Huangetal.,2024): VBenchisabenchmarksuitedesignedforevaluatingvideo
+generativemodels,whichusesahierarchicalapproachtobreakdown’videogenerationquality’into
+variousspecific,well-defineddimensions. Specifically,VBenchcomprises16dimensionsinvideo
+generation,includingSubjectConsistency,BackgroundConsistency,TemporalFlickering,Motion
+Smoothness,DynamicDegree,AestheticQuality,ImagingQuality,ObjectClass,MultipleObjects,
+HumanAction,Color,SpatialRelationship,Scene,AppearanceStyle,TemporalStyle,Overall
+Consistency. Inexperiments,weadopttheVBenchevaluationframeworkandutilizetheofficialcode
+toapplyweightedscorestoassessgenerationquality.
+Ontheotherhand,wealsoevaluatetheperformanceoftheacceleratedvideogenerationmodelby
+thefollowingmetrics. Wecomparethegeneratedvideosfromtheoriginalmodel(usedasthe
+baseline)withthosefromtheacceleratedmodel. Themetricsarecomputedoneachframeofthe
+videoandthenaveragedoverallframestoprovideacomprehensiveassessment.
+PeakSignal-to-NoiseRatio(PSNR):awidelyusedmetricformeasuringthequalityof
+reconstructioninimageprocessing. PSNRisdefinedas:
+(cid:18) R2 (cid:19)
+PSNR=10·log , (4)
+10 MSE
+whereRisthemaximumpossiblepixelvalueoftheimageandMSEdenotestheMeanSquared
+Errorbetweenthereferenceimageandthereconstructedimage. HigherPSNRvaluesindicatebetter
+quality,astheyreflectalowererrorbetweenthecomparedimages. Forvideoevaluation,PSNRis
+computedforeachframeandtheresultsareaveragedtoobtaintheoverallPSNRforthevideo.
+However,PSNRprimarilymeasurespixel-wisefidelityandmaynotalwaysalignwithperceived
+imagequality.
+LearnedPerceptualImagePatchSimilarity(LPIPS)(Zhangetal.,2018): ametricdesignedto
+captureperceptualsimilaritybetweenimagesmoreeffectivelythanpixel-basedmeasures. LPIPSis
+basedondeeplearningmodelsthatlearntopredictperceptualsimilaritybytrainingonlargedatasets.
+Itmeasuresthedistancebetweenfeaturesextractedfrompre-traineddeepnetworks. TheLPIPS
+scoreiscomputedas:
+(cid:88)
+LPIPS= α ·Dist(F (I ),F (I )), (5)
+i i 1 i 2
+i
+16Preprint.
+whereF representsthefeaturemapsfromdifferentlayersofthenetwork,I andI aretheimages
+i 1 2
+beingcompared,Distisadistancefunction(oftenL2norm),andα areweightsforeachfeature
+i
+layer. LowerLPIPSvaluesindicatehigherperceptualsimilaritybetweentheimages,aligningbetter
+withhumanvisualperceptioncomparedtoPSNR.LPIPSiscalculatedforeachframeofthevideo
+andaveragedacrossallframestoproduceafinalscore.
+StructuralSimilarityIndexMeasure(SSIM)(Wang&Bovik,2002): thesimilaritybetweentwo
+imagesbyconsideringchangesinstructuralinformation,luminance,andcontrast. SSIMiscomputed
+as:
+(2µ µ +C )(2σ +C )
+SSIM(x,y)= x y 1 xy 2 , (6)
+(µ2 +µ2 +C )(σ2+σ2+C )
+x y 1 x y 2
+whereµ andµ arethemeanvaluesofimagepatches,σ2 andσ2arethevariances,σ isthe
+x y x y xy
+covariance,andC andC areconstantstostabilizethedivisionwithweakdenominators. SSIM
+1 2
+valuesrangefrom-1to1,with1indicatingperfectstructuralsimilarity. Itprovidesameasureof
+imagequalitythatreflectsstructuralandperceptualdifferences. Forvideoevaluation,SSIMis
+calculatedforeachframeandthenaveragedoverallframestoprovideanoverallsimilaritymeasure.
+A.3 BASELINES
+Weemploy∆-DiT(Chenetal.,2024b)andT-GATE(Zhangetal.,2024),whicharecache-based
+methodsasbaselinesintheevaluation.
+∆-DiT Diffusionsteps b k Blockrange
+Open-Sora-Plan 150 148 2 [0,2]
+Open-Sora 30 25 2 [0,5]
+Latte 50 48 2 [0,5]
+Table5: Configurationof∆-DiT.brepresentsthegatestepoftwostagesandkisthecacheinterval.
+Blockrangereferstotheindexofthefrontblocksthatareskipped.’Blockrange’referstothespecific
+indicesoftheblocksintheDiT-basedvideogenerationmodelthatareskippedduringtheprocess.
+Forexample,’Blockrange’[0,2]meansthatthefirstthreeblocksinthemodelblock0,block1,and
+block2—areskipped.
+∆-DiT(Chenetal.,2024b)usestheoffsetofhiddenstates(thedeviationsbetweenfeaturemaps)
+ratherthanthefeaturemapsthemselves. ∆-DiTisappliedtothebackblocksintheDiTduringthe
+earlyoutlinegenerationstageofthediffusionmodelandonfrontblocksduringthedetailgeneration
+stage. Thestageisboundedbyahyperparameterb,andthecacheintervalisk. Sincethesourcecode
+for∆-DiTisnotpubliclyavailable,weimplementthebaselinebasedonthemethodsinthepaper.
+Additionally,weselectedtheparametersbasedonexperimentalresultsonvideogenerationmodels.
+WeonlyjumpthecomputationofthefrontblocksduringtheOutlineGenerationstage. Thedetailed
+configurationisshowninTable5.
+T-GATE Diffusionsteps m k
+Open-Sora-Plan 150 90 6
+Open-Sora 30 12 2
+Latte 50 20 2
+Table6: ConfigurationofT-GATE.mrepresentsthegatestepoftheSemantics-PlanningPhaseand
+theFidelity-ImprovingPhase,andkisthecacheinterval.
+T-GATE(Zhangetal.,2024)reusesSelf-Attentioninsemantics-planningphaseandthenskip
+Cross-Attentioninthefidelity-improvingphase. T-GATEsegmentsthediffusionprocessintotwo
+phases: theSemantics-PlanningPhaseandtheFidelity-ImprovingPhase. Supposemrepresentthe
+gatestepofthetransitionbetweenphases. Beforegatestepm,duringtheSemantics-PlanningPhase,
+17Preprint.
+cross-attention(CA)remainsactivecontinuously,whereasself-attention(SA)iscalculatedand
+reusedeverykstepsfollowinganinitialwarm-upperiod. Aftergatestepm,cross-attentionis
+replacedbyacachingmechanism,withself-attentioncontinuingtofunction. Wepresentdetailsin
+Table6.
+18
