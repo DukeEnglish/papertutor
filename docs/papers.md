@@ -2,315 +2,325 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12599v1 |
-|title| Controllable Text Generation for Large Language Models: A Survey |
-|authors| Xun LiangHanyu WangYezhaohui WangShichao SongJiawei YangSimin NiuJie HuDan LiuShunyu YaoFeiyu XiongZhiyu Li
-|links| http://arxiv.org/abs/2408.12599v1 |
-|updated| 2024-08-22 17:59:04 UTC |
-|summary| In Natural Language Processing NLP Large Language Models LLMs havedemonstrated high text generation quality. However in real-world applicationsLLMs must meet increasingly complex requirements. Beyond avoiding misleading orinappropriate content LLMs are also expected to cater to specific user needssuch as imitating particular writing styles or generating text with poeticrichness. These varied demands have driven the development of Controllable TextGeneration CTG techniques which ensure that outputs adhere to predefinedcontrol conditions--such as safety sentiment thematic consistency andlinguistic style--while maintaining high standards of helpfulness fluency anddiversity.  This paper systematically reviews the latest advancements in CTG for LLMsoffering a comprehensive definition of its core concepts and clarifying therequirements for control conditions and text quality. We categorize CTG tasksinto two primary types: content control and attribute control. The key methodsare discussed including model retraining fine-tuning reinforcement learningprompt engineering latent space manipulation and decoding-time intervention.We analyze each methods characteristics advantages and limitationsproviding nuanced insights for achieving generation control. Additionally wereview CTG evaluation methods summarize its applications across domains andaddress key challenges in current research including reduced fluency andpracticality. We also propose several appeals such as placing greater emphasison real-world applications in future research. This paper aims to offervaluable guidance to researchers and developers in the field. Our referencelist and Chinese version are open-sourced athttps://github.com/IAAR-Shanghai/CTGSurvey. |
+|idx| 2408.13253v1 |
+|title| Domain-specific long text classification from sparse relevant information |
+|authors| Célia D'CruzJean-Marc BerederFrédéric PreciosoMichel Riveill
+|links| http://arxiv.org/abs/2408.13253v1 |
+|updated| 2024-08-23 17:54:19 UTC |
+|summary| Large Language Models have undoubtedly revolutionized the Natural LanguageProcessing field the current trend being to promote one-model-for-all taskssentiment analysis translation etc.. However the statistical mechanisms atwork in the larger language models struggle to exploit the relevant informationwhen it is very sparse when it is a weak signal. This is the case forexample for the classification of long domain-specific documents when therelevance relies on a single relevant word or on very few relevant words fromtechnical jargon. In the medical domain it is essential to determine whether agiven report contains critical information about a patients condition. Thiscritical information is often based on one or few specific isolated terms. Inthis paper we propose a hierarchical model which exploits a short list ofpotential target terms to retrieve candidate sentences and represent them intothe contextualized embedding of the target terms they contain. A pooling ofthe terms embeddings entails the document representation to be classified.We evaluate our model on one public medical document benchmark in English andon one private French medical dataset. We show that our narrower hierarchicalmodel is better than larger language models for retrieving relevant longdocuments in a domain-specific context. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12579v1 |
-|title| RuleAlign: Making Large Language Models Better Physicians with Diagnostic Rule Alignment |
-|authors| Xiaohan WangXiaoyan YangYuqi ZhuYue ShenJian WangPeng WeiLei LiangJinjie GuHuajun ChenNingyu Zhang
-|links| http://arxiv.org/abs/2408.12579v1 |
-|updated| 2024-08-22 17:44:40 UTC |
-|summary| Large Language Models LLMs like GPT-4 MedPaLM-2 and Med-Gemini achieveperformance competitively with human experts across various medical benchmarks.However they still face challenges in making professional diagnoses akin tophysicians particularly in efficiently gathering patient information andreasoning the final diagnosis. To this end we introduce the RuleAlignframework designed to align LLMs with specific diagnostic rules. We develop amedical dialogue dataset comprising rule-based communications between patientsand physicians and design an alignment learning approach through preferencelearning. Experimental results demonstrate the effectiveness of the proposedapproach. We hope that our work can serve as an inspiration for exploring thepotential of LLMs as AI physicians. |
+|idx| 2408.13247v1 |
+|title| Data Exposure from LLM Apps: An In-depth Investigation of OpenAI's GPTs |
+|authors| Evin JaffYuhao WuNing ZhangUmar Iqbal
+|links| http://arxiv.org/abs/2408.13247v1 |
+|updated| 2024-08-23 17:42:06 UTC |
+|summary| LLM app ecosystems are quickly maturing and supporting a wide range of usecases which requires them to collect excessive user data. Given that the LLMapps are developed by third-parties and that anecdotal evidence suggests LLMplatforms currently do not strictly enforce their policies user data sharedwith arbitrary third-parties poses a significant privacy risk. In this paper weaim to bring transparency in data practices of LLM apps. As a case study westudy OpenAIs GPT app ecosystem. We develop an LLM-based framework to conductthe static analysis of natural language-based source code of GPTs and theirActions external services to characterize their data collection practices.Our findings indicate that Actions collect expansive data about usersincluding sensitive information prohibited by OpenAI such as passwords. Wefind that some Actions including related to advertising and analytics areembedded in multiple GPTs which allow them to track user activities acrossGPTs. Additionally co-occurrence of Actions exposes as much as 9.5x more datato them than it is exposed to individual Actions. Lastly we develop anLLM-based privacy policy analysis framework to automatically check theconsistency of data collection by Actions with disclosures in their privacypolicies. Our measurements indicate that the disclosures for most of thecollected data types are omitted in privacy policies with only 5.8 of Actionsclearly disclosing their data collection practices. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12574v1 |
-|title| MuMA-ToM: Multi-modal Multi-Agent Theory of Mind |
-|authors| Haojun ShiSuyu YeXinyu FangChuanyang JinLayla IsikYen-Ling KuoTianmin Shu
-|links| http://arxiv.org/abs/2408.12574v1 |
-|updated| 2024-08-22 17:41:45 UTC |
-|summary| Understanding peoples social interactions in complex real-world scenariosoften relies on intricate mental reasoning. To truly understand how and whypeople interact with one another we must infer the underlying mental statesthat give rise to the social interactions i.e. Theory of Mind reasoning inmulti-agent interactions. Additionally social interactions are oftenmulti-modal -- we can watch peoples actions hear their conversations and/orread about their past behaviors. For AI systems to successfully and safelyinteract with people in real-world environments they also need to understandpeoples mental states as well as their inferences about each others mentalstates based on multi-modal information about their interactions. For this weintroduce MuMA-ToM a Multi-modal Multi-Agent Theory of Mind benchmark.MuMA-ToM is the first multi-modal Theory of Mind benchmark that evaluatesmental reasoning in embodied multi-agent interactions. In MuMA-ToM we providevideo and text descriptions of peoples multi-modal behavior in realistichousehold environments. Based on the context we then ask questions aboutpeoples goals beliefs and beliefs about others goals. We validated MuMA-ToMin a human experiment and provided a human baseline. We also proposed a novelmulti-modal multi-agent ToM model LIMP Language model-based InverseMulti-agent Planning. Our experimental results show that LIMP significantlyoutperforms state-of-the-art methods including large multi-modal models e.g.GPT-4o Gemini-1.5 Pro and a recent multi-modal ToM model BIP-ALM. |
+|idx| 2408.13240v1 |
+|title| Which Prosodic Features Matter Most for Pragmatics? |
+|authors| Nigel G. WardDivette MarcoOlac Fuentes
+|links| http://arxiv.org/abs/2408.13240v1 |
+|updated| 2024-08-23 17:29:05 UTC |
+|summary| We investigate which prosodic features matter most in conveying prosodicfunctions. We use the problem of predicting human perceptions of pragmaticsimilarity among utterance pairs to evaluate the utility of prosodic featuresof different types. We find for example that duration-related features aremore important than pitch-related features and that utterance-initial featuresare more important than utterance-final features. Further failure analysisindicates that modeling using pitch features only often fails to handleimportant pragmatic functions and suggests that several generally-neglectedacoustic and prosodic features are pragmatically significant includingnasality and vibrato. These findings can guide future basic research inprosody and suggest how to improve speech synthesis evaluation among otherapplications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12570v1 |
-|title| Jamba-1.5: Hybrid Transformer-Mamba Models at Scale |
-|authors| Jamba TeamBarak LenzAlan AraziAmir BergmanAvshalom ManevichBarak PelegBen AviramChen AlmagorClara FridmanDan PadnosDaniel GissinDaniel JannaiDor MuhlgayDor ZimbergEdden M GerberElad DolevEran KrakovskyErez SafahiErez SchwartzGal CohenGal ShachafHaim RozenblumHofit BataIdo BlassInbal MagarItay DalmedigosJhonathan OsinJulie FadlonMaria RozmanMatan DanosMichael GokhmanMor ZusmanNaama GidronNir RatnerNoam GatNoam RozenOded FriedOhad LeshnoOmer AntvergOmri AbendOpher LieberOr DaganOrit CohaviRaz AlonRo'i BelsonRoi CohenRom GiladRoman GlozmanShahar LevShaked MeiromTal DelbariTal NessTomer AsidaTom Ben GalTom BraudeUriya PumerantzYehoshua CohenYonatan BelinkovYuval GlobersonYuval Peleg LevyYoav Shoham
-|links| http://arxiv.org/abs/2408.12570v1 |
-|updated| 2024-08-22 17:38:59 UTC |
-|summary| We present Jamba-1.5 new instruction-tuned large language models based onour Jamba architecture. Jamba is a hybrid Transformer-Mamba mixture of expertsarchitecture providing high throughput and low memory usage across contextlengths while retaining the same or better quality as Transformer models. Werelease two model sizes: Jamba-1.5-Large with 94B active parameters andJamba-1.5-Mini with 12B active parameters. Both models are fine-tuned for avariety of conversational and instruction-following capabilties and have aneffective context length of 256K tokens the largest amongst open-weightmodels. To support cost-effective inference we introduce ExpertsInt8 a novelquantization technique that allows fitting Jamba-1.5-Large on a machine with 880GB GPUs when processing 256K-token contexts without loss of quality. Whenevaluated on a battery of academic and chatbot benchmarks Jamba-1.5 modelsachieve excellent results while providing high throughput and outperformingother open-weight models on long-context benchmarks. The model weights for bothsizes are publicly available under the Jamba Open Model License and we releaseExpertsInt8 as open source. |
+|idx| 2408.13233v1 |
+|title| Multi-Layer Transformers Gradient Can be Approximated in Almost Linear Time |
+|authors| Yingyu LiangZhizhou ShaZhenmei ShiZhao SongYufa Zhou
+|links| http://arxiv.org/abs/2408.13233v1 |
+|updated| 2024-08-23 17:16:43 UTC |
+|summary| The quadratic computational complexity in the self-attention mechanism ofpopular transformer architectures poses significant challenges for training andinference particularly in terms of efficiency and memory requirements. Towardsaddressing these challenges this paper introduces a novel fast computationmethod for gradient calculation in multi-layer transformer models. Our approachenables the computation of gradients for the entire multi-layer transformermodel in almost linear time n1o1 where n is the input sequencelength. This breakthrough significantly reduces the computational bottleneckassociated with the traditional quadratic time complexity. Our theory holds forany loss function and maintains a bounded approximation error across the entiremodel. Furthermore our analysis can hold when the multi-layer transformermodel contains many practical sub-modules such as residual connection casualmask and multi-head attention. By improving the efficiency of gradientcomputation in large language models we hope that our work will facilitate themore effective training and deployment of long-context language models based onour theoretical results. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12547v1 |
-|title| Towards Evaluating and Building Versatile Large Language Models for Medicine |
-|authors| Chaoyi WuPengcheng QiuJinxin LiuHongfei GuNa LiYa ZhangYanfeng WangWeidi Xie
-|links| http://arxiv.org/abs/2408.12547v1 |
-|updated| 2024-08-22 17:01:34 UTC |
-|summary| In this study we present MedS-Bench a comprehensive benchmark designed toevaluate the performance of large language models LLMs in clinical contexts.Unlike existing benchmarks that focus on multiple-choice question answeringMedS-Bench spans 11 high-level clinical tasks including clinical reportsummarization treatment recommendations diagnosis named entity recognitionand medical concept explanation among others. We evaluated six leading LLMse.g. MEDITRON Mistral InternLM 2 Llama 3 GPT-4 and Claude-3.5 usingfew-shot prompting and found that even the most sophisticated models strugglewith these complex tasks. To address these limitations we developed MedS-Insa large-scale instruction tuning dataset for medicine. MedS-Ins comprises 58medically oriented language corpora totaling 13.5 million samples across 122tasks. To demonstrate the datasets utility we conducted a proof-of-conceptexperiment by performing instruction tuning on a lightweight open-sourcemedical language model. The resulting model MMedIns-Llama 3 significantlyoutperformed existing models across nearly all clinical tasks. To promotefurther advancements in the application of LLMs to clinical challenges we havemade the MedS-Ins dataset fully accessible and invite the research community tocontribute to its expansion.Additionally we have launched a dynamicleaderboard for MedS-Bench which we plan to regularly update the test set totrack progress and enhance the adaptation of general LLMs to the medicaldomain. Leaderboard: https://henrychur.github.io/MedS-Bench/. Github:https://github.com/MAGIC-AI4Med/MedS-Ins. |
+|idx| 2408.13227v1 |
+|title| Enhancing Few-Shot Transfer Learning with Optimized Multi-Task Prompt Tuning through Modular Prompt Composition |
+|authors| Ahmad PouraminiHesham Faili
+|links| http://arxiv.org/abs/2408.13227v1 |
+|updated| 2024-08-23 17:01:51 UTC |
+|summary| In recent years multi-task prompt tuning has garnered considerable attentionfor its inherent modularity and potential to enhance parameter-efficienttransfer learning across diverse tasks. This paper aims to analyze and improvethe performance of multiple tasks by facilitating the transfer of knowledgebetween their corresponding prompts in a multi-task setting. Our proposedapproach decomposes the prompt for each target task into a combination ofshared prompts source prompts and a task-specific prompt private prompt.During training the source prompts undergo fine-tuning and are integrated withthe private prompt to drive the target prompt for each task. We present andcompare multiple methods for combining source prompts to construct the targetprompt analyzing the roles of both source and private prompts within eachmethod. We investigate their contributions to task performance and offerflexible adjustable configurations based on these insights to optimizeperformance. Our empirical findings clearly showcase improvements in accuracyand robustness compared to the conventional practice of prompt tuning andrelated works. Notably our results substantially outperform other methods inthe field in few-shot settings demonstrating superior performance in varioustasks across GLUE benchmark among other tasks. This achievement is attainedwith a significantly reduced amount of training data making our method apromising one for few-shot settings. |
 
 
 # cs.AI 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12598v1 |
-|title| ND-SDF: Learning Normal Deflection Fields for High-Fidelity Indoor Reconstruction |
-|authors| Ziyu TangWeicai YeYifan WangDi HuangHujun BaoTong HeGuofeng Zhang
-|links| http://arxiv.org/abs/2408.12598v1 |
-|updated| 2024-08-22 17:59:01 UTC |
-|summary| Neural implicit reconstruction via volume rendering has demonstrated itseffectiveness in recovering dense 3D surfaces. However it is non-trivial tosimultaneously recover meticulous geometry and preserve smoothness acrossregions with differing characteristics. To address this issue previous methodstypically employ geometric priors which are often constrained by theperformance of the prior models. In this paper we propose ND-SDF which learnsa Normal Ddeflection field to represent the angular deviation between the scenenormal and the prior normal. Unlike previous methods that uniformly applygeometric priors on all samples introducing significant bias in accuracy ourproposed normal deflection field dynamically learns and adapts the utilizationof samples based on their specific characteristics thereby improving both theaccuracy and effectiveness of the model. Our method not only obtains smoothweakly textured regions such as walls and floors but also preserves thegeometric details of complex structures. In addition we introduce a novel raysampling strategy based on the deflection angle to facilitate the unbiasedrendering process which significantly improves the quality and accuracy ofintricate surfaces especially on thin structures. Consistent improvements onvarious challenging datasets demonstrate the superiority of our method. |
+|idx| 2408.13256v1 |
+|title| How Diffusion Models Learn to Factorize and Compose |
+|authors| Qiyao LiangZiming LiuMitchell OstrowIla Fiete
+|links| http://arxiv.org/abs/2408.13256v1 |
+|updated| 2024-08-23 17:59:03 UTC |
+|summary| Diffusion models are capable of generating photo-realistic images thatcombine elements which likely do not appear together in the training setdemonstrating the ability to compositionally generalize. Nonetheless theprecise mechanism of compositionality and how it is acquired through trainingremains elusive. Inspired by cognitive neuroscientific approaches we considera highly reduced setting to examine whether and when diffusion models learnsemantically meaningful and factorized representations of composable features.We performed extensive controlled experiments on conditional DenoisingDiffusion Probabilistic Models DDPMs trained to generate various forms of 2DGaussian data. We found that the models learn factorized but not fullycontinuous manifold representations for encoding continuous features ofvariation underlying the data. With such representations models demonstratesuperior feature compositionality but limited ability to interpolate overunseen values of a given feature. Our experimental results further demonstratethat diffusion models can attain compositionality with few compositionalexamples suggesting a more efficient way to train DDPMs. Finally we connectmanifold formation in diffusion models to percolation theory in physicsoffering insight into the sudden onset of factorized representation learning.Our thorough toy experiments thus contribute a deeper understanding of howdiffusion models capture compositional structure in data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12591v1 |
-|title| Differentiable Logic Programming for Distant Supervision |
-|authors| Akihiro TakemuraKatsumi Inoue
-|links| http://arxiv.org/abs/2408.12591v1 |
-|updated| 2024-08-22 17:55:52 UTC |
-|summary| We introduce a new method for integrating neural networks with logicprogramming in Neural-Symbolic AI NeSy aimed at learning with distantsupervision in which direct labels are unavailable. Unlike prior methods ourapproach does not depend on symbolic solvers for reasoning about missinglabels. Instead it evaluates logical implications and constraints in adifferentiable manner by embedding both neural network outputs and logicprograms into matrices. This method facilitates more efficient learning underdistant supervision. We evaluated our approach against existing methods whilemaintaining a constant volume of training data. The findings indicate that ourmethod not only matches or exceeds the accuracy of other methods across varioustasks but also speeds up the learning process. These results highlight thepotential of our approach to enhance both accuracy and learning efficiency inNeSy applications. |
+|idx| 2408.13255v1 |
+|title| Ensemble Modeling of Multiple Physical Indicators to Dynamically Phenotype Autism Spectrum Disorder |
+|authors| Marie HuynhAaron KlineSaimourya SurabhiKaitlyn DunlapOnur Cezmi MutluMohammadmahdi HonarmandParnian AzizianPeter WashingtonDennis P. Wall
+|links| http://arxiv.org/abs/2408.13255v1 |
+|updated| 2024-08-23 17:55:58 UTC |
+|summary| Early detection of autism a neurodevelopmental disorder marked by socialcommunication challenges is crucial for timely intervention. Recentadvancements have utilized naturalistic home videos captured via the mobileapplication GuessWhat. Through interactive games played between children andtheir guardians GuessWhat has amassed over 3000 structured videos from 382children both diagnosed with and without Autism Spectrum Disorder ASD. Thiscollection provides a robust dataset for training computer vision models todetect ASD-related phenotypic markers including variations in emotionalexpression eye contact and head movements. We have developed a protocol tocurate high-quality videos from this dataset forming a comprehensive trainingset. Utilizing this set we trained individual LSTM-based models using eyegaze head positions and facial landmarks as input features achieving testAUCs of 86 67 and 78 respectively. To boost diagnostic accuracy weapplied late fusion techniques to create ensemble models improving the overallAUC to 90. This approach also yielded more equitable results across differentgenders and age groups. Our methodology offers a significant step forward inthe early detection of ASD by potentially reducing the reliance on subjectiveassessments and making early identification more accessibly and equitable. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12590v1 |
-|title| xGen-VideoSyn-1: High-fidelity Text-to-Video Synthesis with Compressed Representations |
-|authors| Can QinCongying XiaKrithika RamakrishnanMichael RyooLifu TuYihao FengManli ShuHonglu ZhouAnas AwadallaJun WangSenthil PurushwalkamLe XueYingbo ZhouHuan WangSilvio SavareseJuan Carlos NieblesZeyuan ChenRan XuCaiming Xiong
-|links| http://arxiv.org/abs/2408.12590v1 |
-|updated| 2024-08-22 17:55:22 UTC |
-|summary| We present xGen-VideoSyn-1 a text-to-video T2V generation model capable ofproducing realistic scenes from textual descriptions. Building on recentadvancements such as OpenAIs Sora we explore the latent diffusion modelLDM architecture and introduce a video variational autoencoder VidVAE.VidVAE compresses video data both spatially and temporally significantlyreducing the length of visual tokens and the computational demands associatedwith generating long-sequence videos. To further address the computationalcosts we propose a divide-and-merge strategy that maintains temporalconsistency across video segments. Our Diffusion Transformer DiT modelincorporates spatial and temporal self-attention layers enabling robustgeneralization across different timeframes and aspect ratios. We have devised adata processing pipeline from the very beginning and collected over 13Mhigh-quality video-text pairs. The pipeline includes multiple steps such asclipping text detection motion estimation aesthetics scoring and densecaptioning based on our in-house video-LLM model. Training the VidVAE and DiTmodels required approximately 40 and 642 H100 days respectively. Our modelsupports over 14-second 720p video generation in an end-to-end way anddemonstrates competitive performance against state-of-the-art T2V models. |
+|idx| 2408.13248v1 |
+|title| Foundational Model for Electron Micrograph Analysis: Instruction-Tuning Small-Scale Language-and-Vision Assistant for Enterprise Adoption |
+|authors| Sakhinana Sagar SrinivasChidaksh RavuruGeethan SannidhiVenkataramana Runkana
+|links| http://arxiv.org/abs/2408.13248v1 |
+|updated| 2024-08-23 17:42:11 UTC |
+|summary| Semiconductor imaging and analysis are critical yet understudied in deeplearning limiting our ability for precise control and optimization insemiconductor manufacturing. We introduce a small-scale multimodal frameworkfor analyzing semiconductor electron microscopy images MAEMI throughvision-language instruction tuning. We generate a customizedinstruction-following dataset using large multimodal models on microscopicimage analysis. We perform knowledge transfer from larger to smaller modelsthrough knowledge distillation resulting in improved accuracy of smallermodels on visual question answering VQA tasks. This approach eliminates theneed for expensive human expert-annotated datasets for microscopic imageanalysis tasks. Enterprises can further finetune MAEMI on their intellectualdata enhancing privacy and performance on low-cost consumer hardware. Ourexperiments show that MAEMI outperforms traditional methods adapts to datadistribution shifts and supports high-throughput screening. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12581v1 |
-|title| Identifying the Best Arm in the Presence of Global Environment Shifts |
-|authors| Phurinut SrisawadJuergen BrankeLong Tran-Thanh
-|links| http://arxiv.org/abs/2408.12581v1 |
-|updated| 2024-08-22 17:47:01 UTC |
-|summary| This paper formulates a new Best-Arm Identification problem in thenon-stationary stochastic bandits setting where the means of all arms areshifted in the same way due to a global influence of the environment. The aimis to identify the unique best arm across environmental change given a fixedtotal budget. While this setting can be regarded as a special case ofAdversarial Bandits or Corrupted Bandits we demonstrate that existingsolutions tailored to those settings do not fully utilise the nature of thisglobal influence and thus do not work well in practice despite theirtheoretical guarantees. To overcome this issue in this paper we develop anovel selection policy that is consistent and robust in dealing with globalenvironmental shifts. We then propose an allocation policy LinLUCB whichexploits information about global shifts across all arms in each environment.Empirical tests depict a significant improvement in our policies against otherexisting methods. |
+|idx| 2408.13247v1 |
+|title| Data Exposure from LLM Apps: An In-depth Investigation of OpenAI's GPTs |
+|authors| Evin JaffYuhao WuNing ZhangUmar Iqbal
+|links| http://arxiv.org/abs/2408.13247v1 |
+|updated| 2024-08-23 17:42:06 UTC |
+|summary| LLM app ecosystems are quickly maturing and supporting a wide range of usecases which requires them to collect excessive user data. Given that the LLMapps are developed by third-parties and that anecdotal evidence suggests LLMplatforms currently do not strictly enforce their policies user data sharedwith arbitrary third-parties poses a significant privacy risk. In this paper weaim to bring transparency in data practices of LLM apps. As a case study westudy OpenAIs GPT app ecosystem. We develop an LLM-based framework to conductthe static analysis of natural language-based source code of GPTs and theirActions external services to characterize their data collection practices.Our findings indicate that Actions collect expansive data about usersincluding sensitive information prohibited by OpenAI such as passwords. Wefind that some Actions including related to advertising and analytics areembedded in multiple GPTs which allow them to track user activities acrossGPTs. Additionally co-occurrence of Actions exposes as much as 9.5x more datato them than it is exposed to individual Actions. Lastly we develop anLLM-based privacy policy analysis framework to automatically check theconsistency of data collection by Actions with disclosures in their privacypolicies. Our measurements indicate that the disclosures for most of thecollected data types are omitted in privacy policies with only 5.8 of Actionsclearly disclosing their data collection practices. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12579v1 |
-|title| RuleAlign: Making Large Language Models Better Physicians with Diagnostic Rule Alignment |
-|authors| Xiaohan WangXiaoyan YangYuqi ZhuYue ShenJian WangPeng WeiLei LiangJinjie GuHuajun ChenNingyu Zhang
-|links| http://arxiv.org/abs/2408.12579v1 |
-|updated| 2024-08-22 17:44:40 UTC |
-|summary| Large Language Models LLMs like GPT-4 MedPaLM-2 and Med-Gemini achieveperformance competitively with human experts across various medical benchmarks.However they still face challenges in making professional diagnoses akin tophysicians particularly in efficiently gathering patient information andreasoning the final diagnosis. To this end we introduce the RuleAlignframework designed to align LLMs with specific diagnostic rules. We develop amedical dialogue dataset comprising rule-based communications between patientsand physicians and design an alignment learning approach through preferencelearning. Experimental results demonstrate the effectiveness of the proposedapproach. We hope that our work can serve as an inspiration for exploring thepotential of LLMs as AI physicians. |
+|idx| 2408.13237v1 |
+|title| JacNet: Learning Functions with Structured Jacobians |
+|authors| Jonathan LorraineSafwan Hossain
+|links| http://arxiv.org/abs/2408.13237v1 |
+|updated| 2024-08-23 17:21:44 UTC |
+|summary| Neural networks are trained to learn an approximate mapping from an inputdomain to a target domain. Incorporating prior knowledge about true mappings iscritical to learning a useful approximation. With current architectures it ischallenging to enforce structure on the derivatives of the input-outputmapping. We propose to use a neural network to directly learn the Jacobian ofthe input-output function which allows easy control of the derivative. Wefocus on structuring the derivative to allow invertibility and also demonstratethat other useful priors such as k-Lipschitz can be enforced. Using thisapproach we can learn approximations to simple functions that are guaranteedto be invertible and easily compute the inverse. We also show similar resultsfor 1-Lipschitz functions. |
 
 
 # cs.LG 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12594v1 |
-|title| Non-Homophilic Graph Pre-Training and Prompt Learning |
-|authors| Xingtong YuJie ZhangYuan FangRenhe Jiang
-|links| http://arxiv.org/abs/2408.12594v1 |
-|updated| 2024-08-22 17:57:31 UTC |
-|summary| Graphs are ubiquitous for modeling complex relationships between objectsacross various fields. Graph neural networks GNNs have become a mainstreamtechnique for graph-based applications but their performance heavily relies onabundant labeled data. To reduce labeling requirement pre-training and promptlearning has become a popular alternative. However most existing promptmethods do not differentiate homophilic and heterophilic characteristics ofreal-world graphs. In particular many real-world graphs are non-homophilicnot strictly or uniformly homophilic with mixing homophilic and heterophilicpatterns exhibiting varying non-homophilic characteristics across graphs andnodes. In this paper we propose ProNoG a novel pre-training and promptlearning framework for such non-homophilic graphs. First we analyze existinggraph pre-training methods providing theoretical insights into the choice ofpre-training tasks. Second recognizing that each node exhibits uniquenon-homophilic characteristics we propose a conditional network tocharacterize the node-specific patterns in downstream tasks. Finally wethoroughly evaluate and analyze ProNoG through extensive experiments on tenpublic datasets. |
+|idx| 2408.13256v1 |
+|title| How Diffusion Models Learn to Factorize and Compose |
+|authors| Qiyao LiangZiming LiuMitchell OstrowIla Fiete
+|links| http://arxiv.org/abs/2408.13256v1 |
+|updated| 2024-08-23 17:59:03 UTC |
+|summary| Diffusion models are capable of generating photo-realistic images thatcombine elements which likely do not appear together in the training setdemonstrating the ability to compositionally generalize. Nonetheless theprecise mechanism of compositionality and how it is acquired through trainingremains elusive. Inspired by cognitive neuroscientific approaches we considera highly reduced setting to examine whether and when diffusion models learnsemantically meaningful and factorized representations of composable features.We performed extensive controlled experiments on conditional DenoisingDiffusion Probabilistic Models DDPMs trained to generate various forms of 2DGaussian data. We found that the models learn factorized but not fullycontinuous manifold representations for encoding continuous features ofvariation underlying the data. With such representations models demonstratesuperior feature compositionality but limited ability to interpolate overunseen values of a given feature. Our experimental results further demonstratethat diffusion models can attain compositionality with few compositionalexamples suggesting a more efficient way to train DDPMs. Finally we connectmanifold formation in diffusion models to percolation theory in physicsoffering insight into the sudden onset of factorized representation learning.Our thorough toy experiments thus contribute a deeper understanding of howdiffusion models capture compositional structure in data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12581v1 |
-|title| Identifying the Best Arm in the Presence of Global Environment Shifts |
-|authors| Phurinut SrisawadJuergen BrankeLong Tran-Thanh
-|links| http://arxiv.org/abs/2408.12581v1 |
-|updated| 2024-08-22 17:47:01 UTC |
-|summary| This paper formulates a new Best-Arm Identification problem in thenon-stationary stochastic bandits setting where the means of all arms areshifted in the same way due to a global influence of the environment. The aimis to identify the unique best arm across environmental change given a fixedtotal budget. While this setting can be regarded as a special case ofAdversarial Bandits or Corrupted Bandits we demonstrate that existingsolutions tailored to those settings do not fully utilise the nature of thisglobal influence and thus do not work well in practice despite theirtheoretical guarantees. To overcome this issue in this paper we develop anovel selection policy that is consistent and robust in dealing with globalenvironmental shifts. We then propose an allocation policy LinLUCB whichexploits information about global shifts across all arms in each environment.Empirical tests depict a significant improvement in our policies against otherexisting methods. |
+|idx| 2408.13248v1 |
+|title| Foundational Model for Electron Micrograph Analysis: Instruction-Tuning Small-Scale Language-and-Vision Assistant for Enterprise Adoption |
+|authors| Sakhinana Sagar SrinivasChidaksh RavuruGeethan SannidhiVenkataramana Runkana
+|links| http://arxiv.org/abs/2408.13248v1 |
+|updated| 2024-08-23 17:42:11 UTC |
+|summary| Semiconductor imaging and analysis are critical yet understudied in deeplearning limiting our ability for precise control and optimization insemiconductor manufacturing. We introduce a small-scale multimodal frameworkfor analyzing semiconductor electron microscopy images MAEMI throughvision-language instruction tuning. We generate a customizedinstruction-following dataset using large multimodal models on microscopicimage analysis. We perform knowledge transfer from larger to smaller modelsthrough knowledge distillation resulting in improved accuracy of smallermodels on visual question answering VQA tasks. This approach eliminates theneed for expensive human expert-annotated datasets for microscopic imageanalysis tasks. Enterprises can further finetune MAEMI on their intellectualdata enhancing privacy and performance on low-cost consumer hardware. Ourexperiments show that MAEMI outperforms traditional methods adapts to datadistribution shifts and supports high-throughput screening. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12579v1 |
-|title| RuleAlign: Making Large Language Models Better Physicians with Diagnostic Rule Alignment |
-|authors| Xiaohan WangXiaoyan YangYuqi ZhuYue ShenJian WangPeng WeiLei LiangJinjie GuHuajun ChenNingyu Zhang
-|links| http://arxiv.org/abs/2408.12579v1 |
-|updated| 2024-08-22 17:44:40 UTC |
-|summary| Large Language Models LLMs like GPT-4 MedPaLM-2 and Med-Gemini achieveperformance competitively with human experts across various medical benchmarks.However they still face challenges in making professional diagnoses akin tophysicians particularly in efficiently gathering patient information andreasoning the final diagnosis. To this end we introduce the RuleAlignframework designed to align LLMs with specific diagnostic rules. We develop amedical dialogue dataset comprising rule-based communications between patientsand physicians and design an alignment learning approach through preferencelearning. Experimental results demonstrate the effectiveness of the proposedapproach. We hope that our work can serve as an inspiration for exploring thepotential of LLMs as AI physicians. |
+|idx| 2408.13247v1 |
+|title| Data Exposure from LLM Apps: An In-depth Investigation of OpenAI's GPTs |
+|authors| Evin JaffYuhao WuNing ZhangUmar Iqbal
+|links| http://arxiv.org/abs/2408.13247v1 |
+|updated| 2024-08-23 17:42:06 UTC |
+|summary| LLM app ecosystems are quickly maturing and supporting a wide range of usecases which requires them to collect excessive user data. Given that the LLMapps are developed by third-parties and that anecdotal evidence suggests LLMplatforms currently do not strictly enforce their policies user data sharedwith arbitrary third-parties poses a significant privacy risk. In this paper weaim to bring transparency in data practices of LLM apps. As a case study westudy OpenAIs GPT app ecosystem. We develop an LLM-based framework to conductthe static analysis of natural language-based source code of GPTs and theirActions external services to characterize their data collection practices.Our findings indicate that Actions collect expansive data about usersincluding sensitive information prohibited by OpenAI such as passwords. Wefind that some Actions including related to advertising and analytics areembedded in multiple GPTs which allow them to track user activities acrossGPTs. Additionally co-occurrence of Actions exposes as much as 9.5x more datato them than it is exposed to individual Actions. Lastly we develop anLLM-based privacy policy analysis framework to automatically check theconsistency of data collection by Actions with disclosures in their privacypolicies. Our measurements indicate that the disclosures for most of thecollected data types are omitted in privacy policies with only 5.8 of Actionsclearly disclosing their data collection practices. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12578v1 |
-|title| A Percolation Model of Emergence: Analyzing Transformers Trained on a Formal Language |
-|authors| Ekdeep Singh LubanaKyogo KawaguchiRobert P. DickHidenori Tanaka
-|links| http://arxiv.org/abs/2408.12578v1 |
-|updated| 2024-08-22 17:44:22 UTC |
-|summary| Increase in data size or compute can lead to sudden learning of specificcapabilities by a neural network -- a phenomenon often called emergence.Beyond scientific understanding establishing the causal factors underlyingsuch emergent capabilities is crucial to enable risk regulation frameworks forAI. In this work we seek inspiration from study of emergent properties inother fields and propose a phenomenological definition for the concept in thecontext of neural networks. Our definition implicates the acquisition ofspecific structures underlying the data-generating process as a cause of suddenperformance growth for specific narrower tasks. We empirically investigatethis definition by proposing an experimental system grounded in acontext-sensitive formal language and find that Transformers trained to performtasks on top of strings from this language indeed exhibit emergentcapabilities. Specifically we show that once the languages underlying grammarand context-sensitivity inducing structures are learned by the modelperformance on narrower tasks suddenly begins to improve. We then analogize ournetworks learning dynamics with the process of percolation on a bipartitegraph establishing a formal phase transition model that predicts the shift inthe point of emergence observed in experiment when changing the data structure.Overall our experimental and theoretical frameworks yield a step towardsbetter defining characterizing and predicting emergence in neural networks. |
+|idx| 2408.13242v1 |
+|title| Improving Equivariant Model Training via Constraint Relaxation |
+|authors| Stefanos PertigkiozoglouEvangelos ChatzipantazisShubhendu TrivediKostas Daniilidis
+|links| http://arxiv.org/abs/2408.13242v1 |
+|updated| 2024-08-23 17:35:08 UTC |
+|summary| Equivariant neural networks have been widely used in a variety ofapplications due to their ability to generalize well in tasks where theunderlying data symmetries are known. Despite their successes such networkscan be difficult to optimize and require careful hyperparameter tuning to trainsuccessfully. In this work we propose a novel framework for improving theoptimization of such models by relaxing the hard equivariance constraint duringtraining: We relax the equivariance constraint of the networks intermediatelayers by introducing an additional non-equivariance term that we progressivelyconstrain until we arrive at an equivariant solution. By controlling themagnitude of the activation of the additional relaxation term we allow themodel to optimize over a larger hypothesis space containing approximateequivariant networks and converge back to an equivariant solution at the end oftraining. We provide experimental results on different state-of-the-art networkarchitectures demonstrating how this training framework can result inequivariant models with improved generalization performance. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12574v1 |
-|title| MuMA-ToM: Multi-modal Multi-Agent Theory of Mind |
-|authors| Haojun ShiSuyu YeXinyu FangChuanyang JinLayla IsikYen-Ling KuoTianmin Shu
-|links| http://arxiv.org/abs/2408.12574v1 |
-|updated| 2024-08-22 17:41:45 UTC |
-|summary| Understanding peoples social interactions in complex real-world scenariosoften relies on intricate mental reasoning. To truly understand how and whypeople interact with one another we must infer the underlying mental statesthat give rise to the social interactions i.e. Theory of Mind reasoning inmulti-agent interactions. Additionally social interactions are oftenmulti-modal -- we can watch peoples actions hear their conversations and/orread about their past behaviors. For AI systems to successfully and safelyinteract with people in real-world environments they also need to understandpeoples mental states as well as their inferences about each others mentalstates based on multi-modal information about their interactions. For this weintroduce MuMA-ToM a Multi-modal Multi-Agent Theory of Mind benchmark.MuMA-ToM is the first multi-modal Theory of Mind benchmark that evaluatesmental reasoning in embodied multi-agent interactions. In MuMA-ToM we providevideo and text descriptions of peoples multi-modal behavior in realistichousehold environments. Based on the context we then ask questions aboutpeoples goals beliefs and beliefs about others goals. We validated MuMA-ToMin a human experiment and provided a human baseline. We also proposed a novelmulti-modal multi-agent ToM model LIMP Language model-based InverseMulti-agent Planning. Our experimental results show that LIMP significantlyoutperforms state-of-the-art methods including large multi-modal models e.g.GPT-4o Gemini-1.5 Pro and a recent multi-modal ToM model BIP-ALM. |
+|idx| 2408.13237v1 |
+|title| JacNet: Learning Functions with Structured Jacobians |
+|authors| Jonathan LorraineSafwan Hossain
+|links| http://arxiv.org/abs/2408.13237v1 |
+|updated| 2024-08-23 17:21:44 UTC |
+|summary| Neural networks are trained to learn an approximate mapping from an inputdomain to a target domain. Incorporating prior knowledge about true mappings iscritical to learning a useful approximation. With current architectures it ischallenging to enforce structure on the derivatives of the input-outputmapping. We propose to use a neural network to directly learn the Jacobian ofthe input-output function which allows easy control of the derivative. Wefocus on structuring the derivative to allow invertibility and also demonstratethat other useful priors such as k-Lipschitz can be enforced. Using thisapproach we can learn approximations to simple functions that are guaranteedto be invertible and easily compute the inverse. We also show similar resultsfor 1-Lipschitz functions. |
 
 
 # cs.CV 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12601v1 |
-|title| DreamCinema: Cinematic Transfer with Free Camera and 3D Character |
-|authors| Weiliang ChenFangfu LiuDiankun WuHaowen SunHaixu SongYueqi Duan
-|links| http://arxiv.org/abs/2408.12601v1 |
-|updated| 2024-08-22 17:59:44 UTC |
-|summary| We are living in a flourishing era of digital media where everyone has thepotential to become a personal filmmaker. Current research on cinematictransfer empowers filmmakers to reproduce and manipulate the visual elementse.g. cinematography and character behaviors from classic shots. Howevercharacters in the reimagined films still rely on manual crafting whichinvolves significant technical complexity and high costs making itunattainable for ordinary users. Furthermore their estimated cinematographylacks smoothness due to inadequate capturing of inter-frame motion and modelingof physical trajectories. Fortunately the remarkable success of 2D and 3D AIGChas opened up the possibility of efficiently generating characters tailored tousers needs diversifying cinematography. In this paper we proposeDreamCinema a novel cinematic transfer framework that pioneers generative AIinto the film production paradigm aiming at facilitating user-friendly filmcreation. Specifically we first extract cinematic elements i.e. human andcamera pose and optimize the camera trajectory. Then we apply a charactergenerator to efficiently create 3D high-quality characters with a humanstructure prior. Finally we develop a structure-guided motion transferstrategy to incorporate generated characters into film creation and transfer itvia 3D graphics engines smoothly. Extensive experiments demonstrate theeffectiveness of our method for creating high-quality films with free cameraand 3D characters. |
+|idx| 2408.13257v1 |
+|title| MME-RealWorld: Could Your Multimodal LLM Challenge High-Resolution Real-World Scenarios that are Difficult for Humans? |
+|authors| Yi-Fan ZhangHuanyu ZhangHaochen TianChaoyou FuShuangqing ZhangJunfei WuFeng LiKun WangQingsong WenZhang ZhangLiang WangRong JinTieniu Tan
+|links| http://arxiv.org/abs/2408.13257v1 |
+|updated| 2024-08-23 17:59:51 UTC |
+|summary| Comprehensive evaluation of Multimodal Large Language Models MLLMs hasrecently garnered widespread attention in the research community. However weobserve that existing benchmarks present several common barriers that make itdifficult to measure the significant challenges that models face in the realworld including: 1 small data scale leads to a large performance variance 2reliance on model-based annotations results in restricted data quality 3insufficient task difficulty especially caused by the limited imageresolution. To tackle these issues we introduce MME-RealWorld. Specificallywe collect more than 300K images from public datasets and the Internetfiltering 13366 high-quality images for annotation. This involves theefforts of professional 25 annotators and 7 experts in MLLMs contributingto 29429 question-answer pairs that cover 43 subtasks across 5real-world scenarios extremely challenging even for humans. As far as we knowMME-RealWorld is the largest manually annotated benchmark to date featuringthe highest resolution and a targeted focus on real-world applications. Wefurther conduct a thorough evaluation involving 28 prominent MLLMs such asGPT-4o Gemini 1.5 Pro and Claude 3.5 Sonnet. Our results show that even themost advanced models struggle with our benchmarks where none of them reach60 accuracy. The challenges of perceiving high-resolution images andunderstanding complex real-world scenarios remain urgent issues to beaddressed. The data and evaluation code are released athttps://mme-realworld.github.io/ . |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12598v1 |
-|title| ND-SDF: Learning Normal Deflection Fields for High-Fidelity Indoor Reconstruction |
-|authors| Ziyu TangWeicai YeYifan WangDi HuangHujun BaoTong HeGuofeng Zhang
-|links| http://arxiv.org/abs/2408.12598v1 |
-|updated| 2024-08-22 17:59:01 UTC |
-|summary| Neural implicit reconstruction via volume rendering has demonstrated itseffectiveness in recovering dense 3D surfaces. However it is non-trivial tosimultaneously recover meticulous geometry and preserve smoothness acrossregions with differing characteristics. To address this issue previous methodstypically employ geometric priors which are often constrained by theperformance of the prior models. In this paper we propose ND-SDF which learnsa Normal Ddeflection field to represent the angular deviation between the scenenormal and the prior normal. Unlike previous methods that uniformly applygeometric priors on all samples introducing significant bias in accuracy ourproposed normal deflection field dynamically learns and adapts the utilizationof samples based on their specific characteristics thereby improving both theaccuracy and effectiveness of the model. Our method not only obtains smoothweakly textured regions such as walls and floors but also preserves thegeometric details of complex structures. In addition we introduce a novel raysampling strategy based on the deflection angle to facilitate the unbiasedrendering process which significantly improves the quality and accuracy ofintricate surfaces especially on thin structures. Consistent improvements onvarious challenging datasets demonstrate the superiority of our method. |
+|idx| 2408.13256v1 |
+|title| How Diffusion Models Learn to Factorize and Compose |
+|authors| Qiyao LiangZiming LiuMitchell OstrowIla Fiete
+|links| http://arxiv.org/abs/2408.13256v1 |
+|updated| 2024-08-23 17:59:03 UTC |
+|summary| Diffusion models are capable of generating photo-realistic images thatcombine elements which likely do not appear together in the training setdemonstrating the ability to compositionally generalize. Nonetheless theprecise mechanism of compositionality and how it is acquired through trainingremains elusive. Inspired by cognitive neuroscientific approaches we considera highly reduced setting to examine whether and when diffusion models learnsemantically meaningful and factorized representations of composable features.We performed extensive controlled experiments on conditional DenoisingDiffusion Probabilistic Models DDPMs trained to generate various forms of 2DGaussian data. We found that the models learn factorized but not fullycontinuous manifold representations for encoding continuous features ofvariation underlying the data. With such representations models demonstratesuperior feature compositionality but limited ability to interpolate overunseen values of a given feature. Our experimental results further demonstratethat diffusion models can attain compositionality with few compositionalexamples suggesting a more efficient way to train DDPMs. Finally we connectmanifold formation in diffusion models to percolation theory in physicsoffering insight into the sudden onset of factorized representation learning.Our thorough toy experiments thus contribute a deeper understanding of howdiffusion models capture compositional structure in data. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12593v1 |
-|title| Automating Deformable Gasket Assembly |
-|authors| Simeon AdebolaTara SadjadpourKarim El-RefaiWill PanitchZehan MaRoy LinTianshuang QiuShreya GantiCharlotte LeJaimyn DrakeKen Goldberg
-|links| http://arxiv.org/abs/2408.12593v1 |
-|updated| 2024-08-22 17:57:03 UTC |
-|summary| In Gasket Assembly a deformable gasket must be aligned and pressed into anarrow channel. This task is common for sealing surfaces in the manufacturingof automobiles appliances electronics and other products. Gasket Assembly isa long-horizon high-precision task and the gasket must align with the channeland be fully pressed in to achieve a secure fit. To compare approaches wepresent 4 methods for Gasket Assembly: one policy from deep imitation learningand three procedural algorithms. We evaluate these methods with 100 physicaltrials. Results suggest that the Binary algorithm succeeds in 10/10 on thestraight channel whereas the learned policy based on 250 human teleoperateddemonstrations succeeds in 8/10 trials and is significantly slower. Code CADmodels videos and data can be found athttps://berkeleyautomation.github.io/robot-gasket/ |
+|idx| 2408.13255v1 |
+|title| Ensemble Modeling of Multiple Physical Indicators to Dynamically Phenotype Autism Spectrum Disorder |
+|authors| Marie HuynhAaron KlineSaimourya SurabhiKaitlyn DunlapOnur Cezmi MutluMohammadmahdi HonarmandParnian AzizianPeter WashingtonDennis P. Wall
+|links| http://arxiv.org/abs/2408.13255v1 |
+|updated| 2024-08-23 17:55:58 UTC |
+|summary| Early detection of autism a neurodevelopmental disorder marked by socialcommunication challenges is crucial for timely intervention. Recentadvancements have utilized naturalistic home videos captured via the mobileapplication GuessWhat. Through interactive games played between children andtheir guardians GuessWhat has amassed over 3000 structured videos from 382children both diagnosed with and without Autism Spectrum Disorder ASD. Thiscollection provides a robust dataset for training computer vision models todetect ASD-related phenotypic markers including variations in emotionalexpression eye contact and head movements. We have developed a protocol tocurate high-quality videos from this dataset forming a comprehensive trainingset. Utilizing this set we trained individual LSTM-based models using eyegaze head positions and facial landmarks as input features achieving testAUCs of 86 67 and 78 respectively. To boost diagnostic accuracy weapplied late fusion techniques to create ensemble models improving the overallAUC to 90. This approach also yielded more equitable results across differentgenders and age groups. Our methodology offers a significant step forward inthe early detection of ASD by potentially reducing the reliance on subjectiveassessments and making early identification more accessibly and equitable. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12590v1 |
-|title| xGen-VideoSyn-1: High-fidelity Text-to-Video Synthesis with Compressed Representations |
-|authors| Can QinCongying XiaKrithika RamakrishnanMichael RyooLifu TuYihao FengManli ShuHonglu ZhouAnas AwadallaJun WangSenthil PurushwalkamLe XueYingbo ZhouHuan WangSilvio SavareseJuan Carlos NieblesZeyuan ChenRan XuCaiming Xiong
-|links| http://arxiv.org/abs/2408.12590v1 |
-|updated| 2024-08-22 17:55:22 UTC |
-|summary| We present xGen-VideoSyn-1 a text-to-video T2V generation model capable ofproducing realistic scenes from textual descriptions. Building on recentadvancements such as OpenAIs Sora we explore the latent diffusion modelLDM architecture and introduce a video variational autoencoder VidVAE.VidVAE compresses video data both spatially and temporally significantlyreducing the length of visual tokens and the computational demands associatedwith generating long-sequence videos. To further address the computationalcosts we propose a divide-and-merge strategy that maintains temporalconsistency across video segments. Our Diffusion Transformer DiT modelincorporates spatial and temporal self-attention layers enabling robustgeneralization across different timeframes and aspect ratios. We have devised adata processing pipeline from the very beginning and collected over 13Mhigh-quality video-text pairs. The pipeline includes multiple steps such asclipping text detection motion estimation aesthetics scoring and densecaptioning based on our in-house video-LLM model. Training the VidVAE and DiTmodels required approximately 40 and 642 H100 days respectively. Our modelsupports over 14-second 720p video generation in an end-to-end way anddemonstrates competitive performance against state-of-the-art T2V models. |
+|idx| 2408.13252v1 |
+|title| LayerPano3D: Layered 3D Panorama for Hyper-Immersive Scene Generation |
+|authors| Shuai YangJing TanMengchen ZhangTong WuYixuan LiGordon WetzsteinZiwei LiuDahua Lin
+|links| http://arxiv.org/abs/2408.13252v1 |
+|updated| 2024-08-23 17:50:23 UTC |
+|summary| 3D immersive scene generation is a challenging yet critical task in computervision and graphics. A desired virtual 3D scene should 1 exhibitomnidirectional view consistency and 2 allow for free exploration in complexscene hierarchies. Existing methods either rely on successive scene expansionvia inpainting or employ panorama representation to represent large FOV sceneenvironments. However the generated scene suffers from semantic drift duringexpansion and is unable to handle occlusion among scene hierarchies. To tacklethese challenges we introduce LayerPano3D a novel framework for full-viewexplorable panoramic 3D scene generation from a single text prompt. Our keyinsight is to decompose a reference 2D panorama into multiple layers atdifferent depth levels where each layer reveals the unseen space from thereference views via diffusion prior. LayerPano3D comprises multiple dedicateddesigns: 1 we introduce a novel text-guided anchor view synthesis pipeline forhigh-quality consistent panorama generation. 2 We pioneer the Layered 3DPanorama as underlying representation to manage complex scene hierarchies andlift it into 3D Gaussians to splat detailed 360-degree omnidirectional sceneswith unconstrained viewing paths. Extensive experiments demonstrate that ourframework generates state-of-the-art 3D panoramic scene in both full viewconsistency and immersive exploratory experience. We believe that LayerPano3Dholds promise for advancing 3D panoramic scene creation with numerousapplications. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12588v1 |
-|title| Real-Time Video Generation with Pyramid Attention Broadcast |
-|authors| Xuanlei ZhaoXiaolong JinKai WangYang You
-|links| http://arxiv.org/abs/2408.12588v1 |
-|updated| 2024-08-22 17:54:21 UTC |
-|summary| We present Pyramid Attention Broadcast PAB a real-time high quality andtraining-free approach for DiT-based video generation. Our method is founded onthe observation that attention difference in the diffusion process exhibits aU-shaped pattern indicating significant redundancy. We mitigate this bybroadcasting attention outputs to subsequent steps in a pyramid style. Itapplies different broadcast strategies to each attention based on theirvariance for best efficiency. We further introduce broadcast sequence parallelfor more efficient distributed inference. PAB demonstrates superior resultsacross three models compared to baselines achieving real-time generation forup to 720p videos. We anticipate that our simple yet effective method willserve as a robust baseline and facilitate future research and application forvideo generation. |
+|idx| 2408.13251v1 |
+|title| Re-evaluation of Face Anti-spoofing Algorithm in Post COVID-19 Era Using Mask Based Occlusion Attack |
+|authors| Vaibhav SundharamAbhijit SarkarA. Lynn Abbott
+|links| http://arxiv.org/abs/2408.13251v1 |
+|updated| 2024-08-23 17:48:22 UTC |
+|summary| Face anti-spoofing algorithms play a pivotal role in the robust deployment offace recognition systems against presentation attacks. Conventionally fullfacial images are required by such systems to correctly authenticateindividuals but the widespread requirement of masks due to the currentCOVID-19 pandemic has introduced new challenges for these biometricauthentication systems. Hence in this work we investigate the performance ofpresentation attack detection PAD algorithms under synthetic facialocclusions using masks and glasses. We have used five variants of masks tocover the lower part of the face with varying coverage areas low-coveragemedium-coverage high-coverage round coverage and 3D cues. We have also useddifferent variants of glasses that cover the upper part of the face. Wesystematically tested the performance of four PAD algorithms under theseocclusion attacks using a benchmark dataset. We have specifically looked atfour different baseline PAD algorithms that focus on texture image qualityframe difference/motion and abstract features through a convolutional neuralnetwork CNN. Additionally we have introduced a new hybrid model that uses CNNand local binary pattern textures. Our experiment shows that adding theocclusions significantly degrades the performance of all of the PAD algorithms.Our results show the vulnerability of face anti-spoofing algorithms withocclusions which could be in the usage of such algorithms in the post-pandemicera. |
 
 
 # stat.ML 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12564v1 |
-|title| Factor Adjusted Spectral Clustering for Mixture Models |
-|authors| Shange TangSoham JanaJianqing Fan
-|links| http://arxiv.org/abs/2408.12564v1 |
-|updated| 2024-08-22 17:31:21 UTC |
-|summary| This paper studies a factor modeling-based approach for clusteringhigh-dimensional data generated from a mixture of strongly correlatedvariables. Statistical modeling with correlated structures pervades modernapplications in economics finance genomics wireless sensing etc. withfactor modeling being one of the popular techniques for explaining the commondependence. Standard techniques for clustering high-dimensional data e.g.naive spectral clustering often fail to yield insightful results as theirperformances heavily depend on the mixture components having a weaklycorrelated structure. To address the clustering problem in the presence of alatent factor model we propose the Factor Adjusted Spectral Clustering FASCalgorithm which uses an additional data denoising step via eliminating thefactor component to cope with the data dependency. We prove this methodachieves an exponentially low mislabeling rate with respect to the signal tonoise ratio under a general set of assumptions. Our assumption bridges manyclassical factor models in the literature such as the pervasive factor modelthe weak factor model and the sparse factor model. The FASC algorithm is alsocomputationally efficient requiring only near-linear sample complexity withrespect to the data dimension. We also show the applicability of the FASCalgorithm with real data experiments and numerical studies and establish thatFASC provides significant results in many cases where traditional spectralclustering fails. |
+|idx| 2408.13237v1 |
+|title| JacNet: Learning Functions with Structured Jacobians |
+|authors| Jonathan LorraineSafwan Hossain
+|links| http://arxiv.org/abs/2408.13237v1 |
+|updated| 2024-08-23 17:21:44 UTC |
+|summary| Neural networks are trained to learn an approximate mapping from an inputdomain to a target domain. Incorporating prior knowledge about true mappings iscritical to learning a useful approximation. With current architectures it ischallenging to enforce structure on the derivatives of the input-outputmapping. We propose to use a neural network to directly learn the Jacobian ofthe input-output function which allows easy control of the derivative. Wefocus on structuring the derivative to allow invertibility and also demonstratethat other useful priors such as k-Lipschitz can be enforced. Using thisapproach we can learn approximations to simple functions that are guaranteedto be invertible and easily compute the inverse. We also show similar resultsfor 1-Lipschitz functions. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12353v1 |
-|title| Distributed quasi-Newton robust estimation under differential privacy |
-|authors| Chuhan WangLixing ZhuXuehu Zhu
-|links| http://arxiv.org/abs/2408.12353v1 |
-|updated| 2024-08-22 12:51:28 UTC |
-|summary| For distributed computing with Byzantine machines under Privacy ProtectionPP constraints this paper develops a robust PP distributed quasi-Newtonestimation which only requires the node machines to transmit five vectors tothe central processor with high asymptotic relative efficiency. Compared withthe gradient descent strategy which requires more rounds of transmission andthe Newton iteration strategy which requires the entire Hessian matrix to betransmitted the novel quasi-Newton iteration has advantages in reducingprivacy budgeting and transmission cost. Moreover our PP algorithm does notdepend on the boundedness of gradients and second-order derivatives. Whengradients and second-order derivatives follow sub-exponential distributions weoffer a mechanism that can ensure PP with a sufficiently high probability.Furthermore this novel estimator can achieve the optimal convergence rate andthe asymptotic normality. The numerical studies on synthetic and real data setsevaluate the performance of the proposed algorithm. |
+|idx| 2408.13235v1 |
+|title| Double Descent: Understanding Linear Model Estimation of Nonidentifiable Parameters and a Model for Overfitting |
+|authors| Ronald Christensen
+|links| http://arxiv.org/abs/2408.13235v1 |
+|updated| 2024-08-23 17:19:17 UTC |
+|summary| We consider ordinary least squares estimation and variations on least squaresestimation such as penalized regularized least squares and spectral shrinkageestimates for problems with p  n and associated problems with prediction ofnew observations. After the introduction of Section 1 Section 2 examines anumber of commonly used estimators for p  n. Section 3 introduces predictionwith p  n. Section 4 introduces notational changes to facilitate discussion ofoverfitting and Section 5 illustrates the phenomenon of double descent. Weconclude with some final comments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12332v1 |
-|title| Simplifying Random Forests' Probabilistic Forecasts |
-|authors| Nils KosterFabian Krüger
-|links| http://arxiv.org/abs/2408.12332v1 |
-|updated| 2024-08-22 12:20:17 UTC |
-|summary| Since their introduction by Breiman Random Forests RFs have proven to beuseful for both classification and regression tasks. The RF prediction of apreviously unseen observation can be represented as a weighted sum of alltraining sample observations. This nearest-neighbor-type representation isuseful among other things for constructing forecast distributionsMeinshausen 2006. In this paper we consider simplifying RF-based forecastdistributions by sparsifying them. That is we focus on a small subset ofnearest neighbors while setting the remaining weights to zero. Thissparsification step greatly improves the interpretability of RF predictions. Itcan be applied to any forecasting task without re-training existing RF models.In empirical experiments we document that the simplified predictions can besimilar to or exceed the original ones in terms of forecasting performance. Weexplore the statistical sources of this finding via a stylized analytical modelof RFs. The model suggests that simplification is particularly promising if theunknown true forecast distribution contains many small weights that areestimated imprecisely. |
+|idx| 2408.13231v1 |
+|title| On the design of scalable, high-precision spherical-radial Fourier features |
+|authors| Ayoub BelhadjiQianyu Julie ZhuYoussef Marzouk
+|links| http://arxiv.org/abs/2408.13231v1 |
+|updated| 2024-08-23 17:11:25 UTC |
+|summary| Approximation using Fourier features is a popular technique for scalingkernel methods to large-scale problems with myriad applications in machinelearning and statistics. This method replaces the integral representation of ashift-invariant kernel with a sum using a quadrature rule. The design of thelatter is meant to reduce the number of features required for high-precisionapproximation. Specifically for the squared exponential kernel one mustdesign a quadrature rule that approximates the Gaussian measure onmathbbRd. Previous efforts in this line of research have faceddifficulties in higher dimensions. We introduce a new family of quadraturerules that accurately approximate the Gaussian measure in higher dimensions byexploiting its isotropy. These rules are constructed as a tensor product of aradial quadrature rule and a spherical quadrature rule. Compared to previouswork our approach leverages a thorough analysis of the approximation errorwhich suggests natural choices for both the radial and spherical components. Wedemonstrate that this family of Fourier features yields improved approximationbounds. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12319v1 |
-|title| Neural-ANOVA: Model Decomposition for Interpretable Machine Learning |
-|authors| Steffen LimmerSteffen UdluftClemens Otte
-|links| http://arxiv.org/abs/2408.12319v1 |
-|updated| 2024-08-22 11:55:43 UTC |
-|summary| The analysis of variance ANOVA decomposition offers a systematic method tounderstand the interaction effects that contribute to a specific decisionoutput. In this paper we introduce Neural-ANOVA an approach to decomposeneural networks into glassbox models using the ANOVA decomposition. Ourapproach formulates a learning problem which enables rapid and closed-formevaluation of integrals over subspaces that appear in the calculation of theANOVA decomposition. Finally we conduct numerical experiments to illustratethe advantages of enhanced interpretability and model validation by adecomposition of the learned interaction effects. |
+|idx| 2408.13230v1 |
+|title| Amortized Bayesian Multilevel Models |
+|authors| Daniel HabermannMarvin SchmittLars KühmichelAndreas BullingStefan T. RadevPaul-Christian Bürkner
+|links| http://arxiv.org/abs/2408.13230v1 |
+|updated| 2024-08-23 17:11:04 UTC |
+|summary| Multilevel models MLMs are a central building block of the Bayesianworkflow. They enable joint interpretable modeling of data across hierarchicallevels and provide a fully probabilistic quantification of uncertainty. Despitetheir well-recognized advantages MLMs pose significant computationalchallenges often rendering their estimation and evaluation intractable withinreasonable time constraints. Recent advances in simulation-based inferenceoffer promising solutions for addressing complex probabilistic models usingdeep generative networks. However the utility and reliability of deep learningmethods for estimating Bayesian MLMs remains largely unexplored especiallywhen compared with gold-standard samplers. To this end we explore a family ofneural network architectures that leverage the probabilistic factorization ofmultilevel models to facilitate efficient neural network training andsubsequent near-instant posterior inference on unseen data sets. We test ourmethod on several real-world case studies and provide comprehensive comparisonsto Stan as a gold-standard method where possible. Finally we provide anopen-source implementation of our methods to stimulate further research in thenascent field of amortized Bayesian inference. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12288v1 |
-|title| Demystifying Functional Random Forests: Novel Explainability Tools for Model Transparency in High-Dimensional Spaces |
-|authors| Fabrizio MaturoAnnamaria Porreca
-|links| http://arxiv.org/abs/2408.12288v1 |
-|updated| 2024-08-22 10:52:32 UTC |
-|summary| The advent of big data has raised significant challenges in analysinghigh-dimensional datasets across various domains such as medicine ecology andeconomics. Functional Data Analysis FDA has proven to be a robust frameworkfor addressing these challenges enabling the transformation ofhigh-dimensional data into functional forms that capture intricate temporal andspatial patterns. However despite advancements in functional classificationmethods and very high performance demonstrated by combining FDA and ensemblemethods a critical gap persists in the literature concerning the transparencyand interpretability of black-box models e.g. Functional Random Forests FRF.In response to this need this paper introduces a novel suite of explainabilitytools to illuminate the inner mechanisms of FRF. We propose using FunctionalPartial Dependence Plots FPDPs Functional Principal Component FPCProbability Heatmaps various model-specific and model-agnostic FPCsimportance metrics and the FPC Internal-External Importance and ExplainedVariance Bubble Plot. These tools collectively enhance the transparency of FRFmodels by providing a detailed analysis of how individual FPCs contribute tomodel predictions. By applying these methods to an ECG dataset we demonstratethe effectiveness of these tools in revealing critical patterns and improvingthe explainability of FRF. |
+|idx| 2408.13222v1 |
+|title| An Overview on Machine Learning Methods for Partial Differential Equations: from Physics Informed Neural Networks to Deep Operator Learning |
+|authors| Lukas GononArnulf JentzenBenno KuckuckSiyu LiangAdrian RiekertPhilippe von Wurstemberger
+|links| http://arxiv.org/abs/2408.13222v1 |
+|updated| 2024-08-23 16:57:34 UTC |
+|summary| The approximation of solutions of partial differential equations PDEs withnumerical algorithms is a central topic in applied mathematics. For manydecades various types of methods for this purpose have been developed andextensively studied. One class of methods which has received a lot of attentionin recent years are machine learning-based methods which typically involve thetraining of artificial neural networks ANNs by means of stochastic gradientdescent type optimization methods. While approximation methods for PDEs usingANNs have first been proposed in the 1990s they have only gained widepopularity in the last decade with the rise of deep learning. This article aimsto provide an introduction to some of these methods and the mathematical theoryon which they are based. We discuss methods such as physics-informed neuralnetworks PINNs and deep BSDE methods and consider several operator learningapproaches. |
 
 
 # cs.HC 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12579v1 |
-|title| RuleAlign: Making Large Language Models Better Physicians with Diagnostic Rule Alignment |
-|authors| Xiaohan WangXiaoyan YangYuqi ZhuYue ShenJian WangPeng WeiLei LiangJinjie GuHuajun ChenNingyu Zhang
-|links| http://arxiv.org/abs/2408.12579v1 |
-|updated| 2024-08-22 17:44:40 UTC |
-|summary| Large Language Models LLMs like GPT-4 MedPaLM-2 and Med-Gemini achieveperformance competitively with human experts across various medical benchmarks.However they still face challenges in making professional diagnoses akin tophysicians particularly in efficiently gathering patient information andreasoning the final diagnosis. To this end we introduce the RuleAlignframework designed to align LLMs with specific diagnostic rules. We develop amedical dialogue dataset comprising rule-based communications between patientsand physicians and design an alignment learning approach through preferencelearning. Experimental results demonstrate the effectiveness of the proposedapproach. We hope that our work can serve as an inspiration for exploring thepotential of LLMs as AI physicians. |
+|idx| 2408.13173v1 |
+|title| Demonstration of Wheeler: A Three-Wheeled Input Device for Usable, Efficient, and Versatile Non-Visual Interaction |
+|authors| Md Touhidul IslamNoushad SojibImran KabirAshiqur Rahman AmitMohammad Ruhul AminSyed Masum Billah
+|links| http://dx.doi.org/10.1145/3672539.3686749 |
+|updated| 2024-08-23 15:44:06 UTC |
+|summary| Navigating multi-level menus with complex hierarchies remains a big challengefor blind and low-vision users who predominantly use screen readers tointeract with computers. To that end we demonstrate Wheeler a three-wheeledinput device with two side buttons that can speed up complex multi-levelhierarchy navigation in common applications. When in operation the threewheels of Wheeler are each mapped to a different level in the applicationhierarchy. Each level can be independently traversed using its designatedwheel allowing users to navigate through multiple levels efficiently.Wheelers three wheels can also be repurposed for other tasks such as 2D cursormanipulation. In this demonstration we describe the different operation modesand usage of Wheeler. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12500v1 |
-|title| WhisperMask: A Noise Suppressive Mask-Type Microphone for Whisper Speech |
-|authors| Hirotaka HirakiShusuke KanazawaTakahiro MiuraManabu YoshidaMasaaki MochimaruJun Rekimoto
-|links| http://dx.doi.org/10.1145/3652920.3652925 |
-|updated| 2024-08-22 15:51:07 UTC |
-|summary| Whispering is a common privacy-preserving technique in voice-basedinteractions but its effectiveness is limited in noisy environments. Inconventional hardware- and software-based noise reduction approaches isolatingwhispered speech from ambient noise and other speech sounds remains achallenge. We thus propose WhisperMask a mask-type microphone featuring alarge diaphragm with low sensitivity making the wearers voice significantlylouder than the background noise. We evaluated WhisperMask using three keymetrics: signal-to-noise ratio quality of recorded voices and speechrecognition rate. Across all metrics WhisperMask consistently outperformedtraditional noise-suppressing microphones and software-based solutions.Notably WhisperMask showed a 30 higher recognition accuracy for whisperedspeech recorded in an environment with 80 dB background noise compared with thepin microphone and earbuds. Furthermore while a denoiser decreased thewhispered speech recognition rate of these two microphones by approximately 20at 30-60 dB noise WhisperMask maintained a high performance even withoutdenoising surpassing the other microphones performances by a significantmargin.WhisperMasks design renders the wearers voice as the dominant inputand effectively suppresses background noise without relying on signalprocessing. This device allows for reliable voice interactions such as phonecalls and voice commands in a wide range of noisy real-world scenarios whilepreserving user privacy. |
+|idx| 2408.13166v1 |
+|title| Wheeler: A Three-Wheeled Input Device for Usable, Efficient, and Versatile Non-Visual Interaction |
+|authors| Md Touhidul IslamNoushad SojibImran KabirAshiqur Rahman AmitMohammad Ruhul AminSyed Masum Billah
+|links| http://dx.doi.org/10.1145/3654777.3676396 |
+|updated| 2024-08-23 15:39:21 UTC |
+|summary| Blind users rely on keyboards and assistive technologies like screen readersto interact with user interface UI elements. In modern applications withcomplex UI hierarchies navigating to different UI elements poses a significantaccessibility challenge. Users must listen to screen reader audio descriptionsand press relevant keyboard keys one at a time. This paper introduces Wheelera novel three-wheeled mouse-shaped stationary input device to address thisissue. Informed by participatory sessions Wheeler enables blind users tonavigate up to three hierarchical levels in an app independently using threewheels instead of navigating just one level at a time using a keyboard. Thethree wheels also offer versatility allowing users to repurpose them for othertasks such as 2D cursor manipulation. A study with 12 blind users indicates asignificant reduction 40 in navigation time compared to using a keyboard.Further a diary study with our blind co-author highlights Wheelers additionalbenefits such as accessing UI elements with partial metadata and facilitatingmixed-ability collaboration. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12463v1 |
-|title| Smartphone-based Eye Tracking System using Edge Intelligence and Model Optimisation |
-|authors| Nishan GunawardenaGough Yumu LuiJeewani Anupama GinigeBahman Javadi
-|links| http://arxiv.org/abs/2408.12463v1 |
-|updated| 2024-08-22 15:04:59 UTC |
-|summary| A significant limitation of current smartphone-based eye-tracking algorithmsis their low accuracy when applied to video-type visual stimuli as they aretypically trained on static images. Also the increasing demand for real-timeinteractive applications like games VR and AR on smartphones requiresovercoming the limitations posed by resource constraints such as limitedcomputational power battery life and network bandwidth. Therefore wedeveloped two new smartphone eye-tracking techniques for video-type visuals bycombining Convolutional Neural Networks CNN with two different RecurrentNeural Networks RNN namely Long Short Term Memory LSTM and Gated RecurrentUnit GRU. Our CNNLSTM and CNNGRU models achieved an average Root MeanSquare Error of 0.955cm and 1.091cm respectively. To address the computationalconstraints of smartphones we developed an edge intelligence architecture toenhance the performance of smartphone-based eye tracking. We applied variousoptimisation methods like quantisation and pruning to deep learning models forbetter energy CPU and memory usage on edge devices focusing on real-timeprocessing. Using model quantisation the model inference time in the CNNLSTMand CNNGRU models was reduced by 21.72 and 19.50 respectively on edgedevices. |
+|idx| 2408.13084v1 |
+|title| Avatar Visual Similarity for Social HCI: Increasing Self-Awareness |
+|authors| Bernhard HilpertClaudio Alves da SilvaLeon ChristidisChirag BhuvaneshwaraPatrick GebhardFabrizio NunnariDimitra Tsovaltzi
+|links| http://arxiv.org/abs/2408.13084v1 |
+|updated| 2024-08-23 14:11:35 UTC |
+|summary| Self-awareness is a critical factor in social human-human interaction andhence in social HCI interaction. Increasing self-awareness through mirrors orvideo recordings is common in face-to-face trainings since it influencesantecedents of self-awareness like explicit identification and implicitaffective identification affinity. However increasing self-awareness hasbeen scarcely examined in virtual trainings with virtual avatars which allowfor adjusting the similarity e.g. to avoid negative effects ofself-consciousness. Automatic visual similarity in avatars is an open issuerelated to high costs. It is important to understand which features need to bemanipulated and which degree of similarity is necessary for self-awareness toleverage the added value of using avatars for self-awareness. This articleexamines the relationship between avatar visual similarity and increasingself-awareness in virtual training environments. We define visual similaritybased on perceptually important facial features for human-human identificationand develop a theory-based methodology to systematically manipulate visualsimilarity of virtual avatars and support self-awareness. Three personalizedversions of virtual avatars with varying degrees of visual similarity toparticipants were created weak medium and strong facial featuresmanipulation. In a within-subject study N33 we tested effects of degree ofsimilarity on perceived similarity explicit identification and implicitaffective identification affinity. Results show significant differencesbetween the weak similarity manipulation and both the strong manipulation andthe random avatar for all three antecedents of self-awareness. An increasingdegree of avatar visual similarity influences antecedents of self-awareness invirtual environments. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12428v1 |
-|title| VR4UrbanDev: An Immersive Virtual Reality Experience for Energy Data Visualization |
-|authors| Saeed SafikhaniGeorg Arbesser-RastburgAnna SchreuerJürgen Suschek-BergerHermann EdtmayerJohanna Pirker
-|links| http://arxiv.org/abs/2408.12428v1 |
-|updated| 2024-08-22 14:22:05 UTC |
-|summary| In this demonstration paper we present our interactive virtual reality VRexperience which has been designed to facilitate interaction withenergy-related information. This experience consists of two main modes: theworld in miniature for large-scale and first-person for real-world scalevisualizations. Additionally we presented our approach to potential targetgroups in interviews. The results of these interviews can help developers forfuture implementation considering the requirements of each group. |
+|idx| 2408.13019v1 |
+|title| VCEMO: Multi-Modal Emotion Recognition for Chinese Voiceprints |
+|authors| Jinghua TangLiyun ZhangYu LuDian DingLanqing YangYiChao ChenMinjie BianXiaoshan LiGuangtao Xue
+|links| http://arxiv.org/abs/2408.13019v1 |
+|updated| 2024-08-23 12:14:18 UTC |
+|summary| Emotion recognition can enhance humanized machine responses to user commandswhile voiceprint-based perception systems can be easily integrated intocommonly used devices like smartphones and stereos. Despite having the largestnumber of speakers there is a noticeable absence of high-quality corpusdatasets for emotion recognition using Chinese voiceprints. Hence this paperintroduces the VCEMO dataset to address this deficiency. The proposed datasetis constructed from everyday conversations and comprises over 100 users and7747 textual samples. Furthermore this paper proposes a multimodal-basedmodel as a benchmark which effectively fuses speech text and externalknowledge using a co-attention structure. The system employs contrastivelearning-based regulation for the uneven distribution of the dataset and thediversity of emotional expressions. The experiments demonstrate the significantimprovement of the proposed model over SOTA on the VCEMO and IEMOCAP datasets.Code and dataset will be released for research. |
 
 
 | Item |Content|
 | --- |---|
-|idx| 2408.12365v1 |
-|title| Enhancing Uncertainty Communication in Time Series Predictions: Insights and Recommendations |
-|authors| Apoorva KaragappaPawandeep Kaur BetzJonas GilgMoritz ZeumerAndreas GerndtBernhard Preim
-|links| http://arxiv.org/abs/2408.12365v1 |
-|updated| 2024-08-22 13:03:55 UTC |
-|summary| As the world increasingly relies on mathematical models for forecasts indifferent areas effective communication of uncertainty in time seriespredictions is important for informed decision making. This study explores howusers estimate probabilistic uncertainty in time series predictions underdifferent variants of line charts depicting uncertainty. It examines the roleof individual characteristics and the influence of user-reported metrics onuncertainty estimations. By addressing these aspects this paper aims toenhance the understanding of uncertainty visualization and for improvingcommunication in time series forecast visualizations and the design ofprediction data dashboards.As the world increasingly relies on mathematicalmodels for forecasts in different areas effective communication of uncertaintyin time series predictions is important for informed decision making. Thisstudy explores how users estimate probabilistic uncertainty in time seriespredictions under different variants of line charts depicting uncertainty. Itexamines the role of individual characteristics and the influence ofuser-reported metrics on uncertainty estimations. By addressing these aspectsthis paper aims to enhance the understanding of uncertainty visualization andfor improving communication in time series forecast visualizations and thedesign of prediction data dashboards. |
+|idx| 2408.12990v1 |
+|title| A Survey on Drowsiness Detection -- Modern Applications and Methods |
+|authors| Biying FuFadi BoutrosChin-Teng LinNaser Damer
+|links| http://arxiv.org/abs/2408.12990v1 |
+|updated| 2024-08-23 11:15:21 UTC |
+|summary| Drowsiness detection holds paramount importance in ensuring safety inworkplaces or behind the wheel enhancing productivity and healthcare acrossdiverse domains. Therefore accurate and real-time drowsiness detection plays acritical role in preventing accidents enhancing safety and ultimately savinglives across various sectors and scenarios. This comprehensive review exploresthe significance of drowsiness detection in various areas of applicationtranscending the conventional focus solely on driver drowsiness detection. Wedelve into the current methodologies challenges and technologicaladvancements in drowsiness detection schemes considering diverse contexts suchas public transportation healthcare workplace safety and beyond. Byexamining the multifaceted implications of drowsiness this work contributes toa holistic understanding of its impact and the crucial role of accurate andreal-time detection techniques in enhancing safety and performance. Weidentified weaknesses in current algorithms and limitations in existingresearch such as accurate and real-time detection stable data transmissionand building bias-free systems. Our survey frames existing works and leads topractical recommendations like mitigating the bias issue by using syntheticdata overcoming the hardware limitations with model compression andleveraging fusion to boost model performance. This is a pioneering work tosurvey the topic of drowsiness detection in such an entirely and not onlyfocusing on one single aspect. We consider the topic of drowsiness detection asa dynamic and evolving field presenting numerous opportunities for furtherexploration. |
 
 
 # cs.MA 
+
+| Item |Content|
+| --- |---|
+|idx| 2408.12795v1 |
+|title| From Mobilisation to Radicalisation: Probing the Persistence and Radicalisation of Social Movements Using an Agent-Based Model |
+|authors| Emma F. ThomasMengbin YeSimon D. AngusTony J. MathewWinnifred LouisLiam WalshSilas ElleryMorgana Lizzio-WilsonCraig McGarty
+|links| http://arxiv.org/abs/2408.12795v1 |
+|updated| 2024-08-23 02:18:07 UTC |
+|summary| We are living in an age of protest. Although we have an excellentunderstanding of the factors that predict participation in protest weunderstand little about the conditions that foster a sustained versustransient movement. How do interactions between supporters and authoritiescombine to influence whether and how people engage i.e. using conventional orradical tactics This paper introduces a novel theoretically-founded andempirically-informed agent-based model DIMESim to address these questions. Wemodel the complex interactions between the psychological attributes of theprotester agents the authority to whom the protests are targeted and theenvironment that allows protesters to coordinate with each other -- over timeand at a population scale. Where an authority is responsive and failure iscontested a modest sized conventional movement endured. Where authoritiesrepeatedly and incontrovertibly fail the movement the population disengagedfrom action but evidenced an ongoing commitment to radicalism latentradicalism. |
+
 
 | Item |Content|
 | --- |---|
@@ -350,15 +360,5 @@
 |links| http://arxiv.org/abs/2408.11772v1 |
 |updated| 2024-08-21 16:54:22 UTC |
 |summary| A Viral Infection Risk Indoor Simulator VIRIS has been developed to quicklyassess and compare mitigations for airborne disease spread. This agent-basedsimulator combines people movement in an indoor space viral transmissionmodelling and detailed architectural design and it is powered by topologicpyan open-source Python library. VIRIS generates very fast predictions of theviral concentration and the spatiotemporal infection risk for individuals asthey move through a given space. The simulator is validated with data from acourtroom superspreader event. A sensitivity study for unknown parameter valuesis also performed. We compare several non-pharmaceutical interventions NPIsissued in UK government guidance for two indoor settings: a care home and asupermarket. Additionally we have developed the user-friendly VIRIS web appthat allows quick exploration of diverse scenarios of interest andvisualisation allowing policymakers architects and space managers to easilydesign or assess infection risk in an indoor space. |
-
-
-| Item |Content|
-| --- |---|
-|idx| 2408.11751v1 |
-|title| Bayesian Optimization Framework for Efficient Fleet Design in Autonomous Multi-Robot Exploration |
-|authors| David Molina ConchaJiping LiHaoran YinKyeonghyeon ParkHyun-Rok LeeTaesik LeeDhruv SirohiChi-Guhn Lee
-|links| http://arxiv.org/abs/2408.11751v1 |
-|updated| 2024-08-21 16:22:51 UTC |
-|summary| This study addresses the challenge of fleet design optimization in thecontext of heterogeneous multi-robot fleets aiming to obtain feasible designsthat balance performance and costs. In the domain of autonomous multi-robotexploration reinforcement learning agents play a central role offeringadaptability to complex terrains and facilitating collaboration among robots.However modifying the fleet composition results in changes in the learnedbehavior and training multi-robot systems using multi-agent reinforcementlearning is expensive. Therefore an exhaustive evaluation of each potentialfleet design is infeasible. To tackle these hurdles we introduce BayesianOptimization for Fleet Design BOFD a framework leveraging multi-objectiveBayesian Optimization to explore fleets on the Pareto front of performance andcost while accounting for uncertainty in the design space. Moreover weestablish a sub-linear bound for cumulative regret supporting BOFDsrobustness and efficacy. Extensive benchmark experiments in synthetic andsimulated environments demonstrate the superiority of our framework overstate-of-the-art methods achieving efficient fleet designs with minimal fleetevaluations. |
 
 

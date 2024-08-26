@@ -1,0 +1,1344 @@
+AMORTIZED BAYESIAN MULTILEVEL MODELS
+DanielHabermann MarvinSchmitt LarsKühmichel
+DepartmentofStatistics ClusterofExcellenceSimTech DepartmentofStatistics
+TUDortmundUniversity UniversityofStuttgart TUDortmundUniversity
+Germany Germany Germany
+AndreasBulling StefanT.Radev
+InstituteforVisualisationandInteractiveSystems DepartmentofCognitiveScience
+UniversityofStuttgart RensselaerPolytechnicInstitute
+Germany USA
+Paul-ChristianBürkner
+DepartmentofStatistics
+TUDortmundUniversity
+Germany
+ABSTRACT
+Multilevelmodels(MLMs)areacentralbuildingblockoftheBayesianworkflow. Theyenablejoint,
+interpretablemodelingofdataacrosshierarchicallevelsandprovideafullyprobabilisticquantifica-
+tionofuncertainty. Despitetheirwell-recognizedadvantages,MLMsposesignificantcomputational
+challenges,oftenrenderingtheirestimationandevaluationintractablewithinreasonabletimecon-
+straints. Recentadvancesinsimulation-basedinferenceofferpromisingsolutionsforaddressing
+complexprobabilisticmodelsusingdeepgenerativenetworks. However,theutilityandreliability
+ofdeeplearningmethodsforestimatingBayesianMLMsremainslargelyunexplored, especially
+whencomparedwithgold-standardsamplers. Tothisend,weexploreafamilyofneuralnetwork
+architecturesthatleveragetheprobabilisticfactorizationofmultilevelmodelstofacilitateefficient
+neuralnetworktrainingandsubsequentnear-instantposteriorinferenceonunseendatasets. Wetest
+ourmethodonseveralreal-worldcasestudiesandprovidecomprehensivecomparisonstoStanasa
+gold-standardmethodwherepossible. Finally,weprovideanopen-sourceimplementationofour
+methodstostimulatefurtherresearchinthenascentfieldofamortizedBayesianinference.
+Keywords BayesianModels,AmortizedInference,MultilevelModels
+1 Introduction
+Obtainingaccurateinferenceandfaithfuluncertaintyquantificationinreasonabletimeisafrontieroftoday’sstatistical
+research(Cranmeretal.,2020). Onemajordifficultyarisinginmostexperimentalandalmostallobservationaldatais
+thepresenceofcomplexdependencystructures,forexample,duetonaturalgroupings(e.g.,datagatheredindifferent
+countries)orrepeatedmeasurementsofthesameobservationalunitsovertime(e.g., particles, bacteria, orpeople;
+GelmanandHill,2006). Toleveragethesedependencystructures,multilevelmodels(MLMs),alsoreferredtoaslatent
+variable,hierarchical,random,ormixedeffectsmodels,havebecomeanintegralpartofmodernBayesianstatistics
+(Goldstein,2011;Gelmanetal.,2013;McGlothlinandViele,2018;Finchetal.,2019;Yaoetal.,2022).
+DespitethewidesuccessofBayesianMLMsacrossthequantitativesciences,amajorchallengeistheirlimitedefficiency
+andscalabilitywhendealingwithlargeandcomplexdata. Thisisbecauseestimatingthefullposteriordistributionofall
+parametersofinterestcanbeverycostly(Gelmanetal.,2013). Formodelswherethelikelihoodfunctionisanalytically
+tractableanddifferentiablewithrespecttomodelparameters,MarkovchainMonteCarlo(MCMC)samplingalgorithms
+4202
+guA
+32
+]LM.tats[
+1v03231.8042:viXraAmortizedBayesianMultilevelModels
+asimplementedinprobabilisticprogramminglanguageslikeStan(StanDevelopmentTeam,2024)arethecurrentgold
+standardforgeneratingaccuratedrawsfromtheposteriordistribution.
+ConsiderableefforthasbeenmadetoimprovethesamplingspeedofMCMCalgorithms,especiallyforhigh-dimensional
+modelswithrichstructure,suchasMLMs. Thisincludesstep-sizeadjustmentsorreparameterizationstowork-around
+orimprovetheposteriorgeometry(Hoffmanetal.,2019;Modietal.,2023), enablingwithin-chainparallelization
+viaparallelevaluationofthelikelihood(StanDevelopmentTeam,2024),aswellasthedevelopmentofspecialized
+algorithmsthatentailfasterandmorereliableadaptationphases,suchthatmultipleshorterchainscanberuninparallel
+(Zhang et al., 2022; Margossian et al., 2021). However, despite these advancements, sampling methods based on
+MCMC are still too slow for many multilevel settings. Even for models and data sets of moderate size, posterior
+inferencecantakedaysorevenweeks,creatingalargegapbetweenthemodelsthatresearchersmightwanttocompute
+andthemodelsthatarecomputationallyfeasible. Expandingthespaceofmodelsthatcanbefitinareasonabletime
+frameisthereforeanimportantrequirementforthebroadapplicabilityofBayesianMLMs.
+Inadditiontosamplingspeed,therearetwofundamentalissueswithposteriorinferenceforBayesianMLMsinmost
+applicationsofscientificinterest:
+1. Theneedtoreruncomputationallyexpensivesamplingalgorithmswhennewdatabecomesavailableorwhen
+computationalfaithfulnessneedstobeassessed;
+2. Efficientsamplingformodelswithhigh-dimensionalandhighlystructured,intractableornon-differentiable
+likelihoods.
+Issue(1)isacruciallimitingfactorincaseswheredataarearrivinginreal-timeormanydatasetsneedtobeevaluated.
+Inaddition,essentialstepsinthemodernBayesianworkflow(Gelmanetal.,2020)likecross-validation(Vehtarietal.,
+2017;Merkleetal.,2019)orsimulation-basedcalibration(SBC,Taltsetal.,2018;Modráketal.,2023)requiremany
+modelrefitsonsubsetsofthedata,renderingcarefulmodeltestingatime-intensivetaskforallbutthesimplestmodels.
+Issue(2)isalsobecomingincreasinglycommon,asmanyscientificdomainsnowadaysemploymodelswhoseoutput
+istheresultofacomplexsimulationprogram(Cranmeretal.,2020). Consequently, closed-formsolutionsforthe
+likelihoodareoftenunavailable.
+BothoftheseissueshaveledtothedevelopmentofnovelalgorithmsthatdonotrelyonMCMCsampling. Formodels
+withoutatractablelikelihood, simulation-basedinferencemethodslikeapproximateBayesiancomputation(ABC,
+Sisson et al., 2018) can sample from the posterior without computing the likelihood directly. The main drawback
+ofABCisthatitheavilysuffersfromthecurseofdimensionality(Barberetal.,2015)asthenumberofparameters
+increases. ThisisofparticularconcernforMLMsastheirnumberofparametersscaleslinearlywiththenumberof
+groupsinthedata. WhileABCalgorithmsforMLMshavebeendeveloped(SissonandFan,2011), theyhavenot
+managedtofullyovercomethismajordrawbackofABC.OtherapproachestoBayesianinferenceforMLMswith
+intractablelikelihoodsincludemean-fieldvariationalalgorithms(Tranetal.,2017;Roederetal.,2019),butthisclassof
+algorithmssuffersfromsignificantlossofaccuracyinposteriorestimation(Yaoetal.,2018).
+Recently,algorithmsbasedonneuraldensityestimationhaveshowntobepromisingalternativestoclassicalMCMC.
+Oneparticularadvantageofneuraldensityestimation(PapamakariosandMurray,2016)isthatitallowstosample
+fromtheposteriorconditionedondatasamplesofanysizealmostimmediatelyafteraninitialtrainingphase(Radev
+etal.,2020). Thispropertyiscalledamortization(GershmanandGoodman,2014),astheinitialtimeinvestmentduring
+trainingamortizesatinferencetimebyallowingposteriorinferencefornewdatasetstypicallywithinafractionof
+asecond. Additionally,thisnewclassofneuralsimulation-basedalgorithmsscalestohigh-dimensionalmodelsand
+cannaturallydealwithmodelslackingtractablelikelihoods(Cranmeretal.,2020). Neuraldensityestimatorsemulate
+samplingfromanintractabledistributionvianeuralnetworksthattransformarandominputvectorintoadrawfroma
+targetprobabilitydistribution. Byusingtrainingexamplesofthejoint(Bayesian)modelp(x,θ),theycangenerate
+approximatedrawsfromtheposteriordistributionp(θ x). Importantly,theneuralnetworksareonlyusedtosample
+|
+fromtheposteriorofanunderlyingBayesianmodelandarenotusedforfittingthedatadirectly. Methodsbuildingon
+neuralposteriordensityestimationhaveshowntremendoussuccessinperforminginferenceforcomplexandotherwise
+intractablemodelsindifferentapplicationslikeneuroscience(Gonçalvesetal.,2020),cognitivescience(Radevetal.,
+2020),epidemiology(Radevetal.,2021),psychology(vonKrauseetal.,2022),medicine(Wehenkeletal.,2023),
+physics(Brehmeretal.,2020),andengineering(ZhangandMikelsons,2023). Yet,fullyamortizedBayesianinference
+isstilladevelopingfield.
+OneofthecurrentmajorchallengesforamortizedBayesianinferenceliesinefficientlycapturingcomplexdependencies.
+Suchdependencystructuresareforexampleencounteredinglobal-localshrinkagepriors(PiironenandVehtari,2017),
+itemresponsetheorymodels(Bürkner,2021),longitudinalstudies(Steele,2008),andinmanyothersettingswhere
+MLMsareapplied(GelmanandHill,2006).ThefundamentalstatisticalassumptionofMLMsisthatasetofparameters,
+definedaccordingtothehierarchicalstructureofthedata,areexchangeableandoriginatefromthesameunderlying
+2AmortizedBayesianMultilevelModels
+distributionwhosehyper-parametersaresubsequentlyestimatedfromthedata. Inthisaspect,theyareparticularly
+suitable for data with complex dependency structures: Instead of inferring estimates for each group in isolation
+(nopooling)ordisregardingthegroupingstructureofthedata(completepooling), MLMscancapturesimilarities
+acrossgroupswhilealsoallowingforgroup-levelvariation. Thispartial-poolingpropertyincreasestherobustness
+oftheobtainedparameterestimates,helpstoensuretheiraccurateuncertaintycalibration,andimprovespredictive
+performance(Gelman,2006).
+Expanding neural density estimation to MLMs is challenging because the dimension of the posterior depends on
+thenumberofgroups andmayvaryoverdatasets. Sucha setting requiresbespokeneuralarchitecturestoliftthe
+requirementoffixed-lengthinputs. AmortizedinferencewithvaryinggroupsizesinMLMsiscomplicatedbythefact
+thatestimatesoflocalparametersforonegroupdependnotonlyonthatspecificgroupbutalsoonallothergroupsin
+thedataset. Additionally,thenumberofparametersincreaseslinearlywiththenumberofgroups,renderingnetwork
+traininginefficientfordatasetswithalargenumberofgroups.
+In important pioneering work, initial progress has been made to address these challenges (Rodrigues et al., 2021;
+Arrudaetal.,2023;Heinrichetal.,2023),buttheyhavesofarconsideredonlyanarrowrangeofMLMsandhave
+performedonlylimitedvalidationagainststate-of-the-artBayesiansamplers. Inparticular,existingmethodsdonot
+consider(1)simultaneousamortizationoverboththenumberofgroupsandthenumberofobservationspergroup,(2)
+amortizationoverspacesofcovariates,(3)simultaneousjointestimationwithnon-IIDresponsevariables,(4)highly
+correlatedgroup-levelparameters,(5)additional(non-hierarchical)sharedparameters,(6)systematiccalibrationand
+shrinkageanalysistoverifyinferencecorrectnessateachlevel,aswellas(7)discussingdifferentneuralfactorizations
+thatequivalentlyfollowfromthesameprobabilisticmodelstructure. Ourproposedframeworkaddressesallofthese
+challengesbymakingthefollowingkeycontributions:
+• Wedevelopneuralnetworkarchitecturesthatutilizetheprobabilisticfactorizationofthelikelihoodofmultilevel
+modelstofacilitateefficientneuralnetworktrainingandsubsequentnear-instantamortizedposteriorinference.
+• Wetestourmethodonawiderangeofreal-worldcasestudiestogethercoveringalltheabovementioned
+challenges. WealsoprovidecomparisonstoStanasagold-standardmethodforposteriorinferencewhenever
+possible.
+• Weprovideanefficientanduser-friendlyimplementationofouralgorithmintheBayesFlowPythonlibrary
+(Radevetal.,2023b). Inthisway,userscanbenefitfromamortizedinferenceforotherwiseintractablemodels
+andgeneratefastandaccuratedrawsfromtheposteriordistribution.
+2 Methods
+Below,wereviewtheseveralcomponentsthattogetherenablefullyamortizedBayesianinferenceonmultilevelmodels.
+ThenovelmethodologicalcontributionsofthispaperstartfromSubsection2.4.
+2.1 NotationandDefinitions
+FollowingRobertetal.(2007),weconsiderparametricBayesianmodelsdefinedbyajointdistributionp(θ,x)overall
+randomquantitiesinanapplicationdomainofinterest. Weassumethatθ RD representsallunobservable(latent)
+∈
+quantities, whereasx denotesallobservable(manifest)quantities. Wealsoassumethatthejointdistribution
+∈ X
+factorizesintoalikelihoodp(x θ)andapriorp(θ),defininga“generativemodel”thatcanbetranslatedintoacomputer
+|
+programand“sampled”accordingtoasimpleancestralscheme:
+θ p(θ) (1)
+∼
+x p(x θ) (2)
+∼ |
+Consequently, multilevel models emerge as a special case of this general formulation, prescribing an explicit and
+application-dependent factorization to the prior p(θ), for instance, p(θ) = p(θ )p(θ θ )p(θ θ ,θ )
+1 2 1 3 2 1
+| | · ··· ·
+p(θ θ ,...,θ ). Ideally, the particular factorization reflects the probabilistic structure of the assumed data-
+D D−1 1
+|
+generatingprocess. Forexample,atwo-levelmodelassumingexchangeablegroupsandexchangeableobservations
+withingroupscanbesampledaccordingto
+θ p(θ ) (3)
+1 1
+∼
+θ p(θ θ ) for d=2,...,D (4)
+d d 1
+∼ |
+x p(x θ ) for n=1,...,N (5)
+nd nd d d
+∼ |
+3AmortizedBayesianMultilevelModels
+wherethe“hyperparameters”θ arecommonlydenotedwiththeirownsymbol(e.g.,τ). ThetypicaltargetofBayesian
+1
+analysisisthenthejointposterioroverallparameters
+D Nd
+p(θ ,...,θ x ,...,x ) p(θ ) p(θ θ ) p(x θ ), (6)
+1 D
+|
+11 DND
+∝
+1 d
+|
+1 nd
+|
+d
+d=2 n=1
+(cid:89) (cid:89)
+whichgenerallyadmitsanon-uniquefactorization(Stuhlmülleretal.,2013)andistoocomplextocalculateanalytically.
+Thus,MCMCalgorithms,suchasGibbs(Gelfand,2000)orHamiltonianMonteCarlo(HMC)samplers(Neal,2011)
+arecommonlyemployedtoapproximatetheposteriorwheneverthelikelihoodp(x θ)isanalyticallytractable(e.g.,
+|
+whenitfollowsaknowndensityfunction). Inrecentyears,implicitmodels(DiggleandGratton,1984)havegained
+considerabletractioninscientificmodeling. Thesemodelsrequirenovellikelihood-freeorsimulation-basedmethods
+thatbypasstheevaluationoftheintractablelikelihood(Cranmeretal.,2020).
+2.2 Simulation-BasedInference
+Inscientificmodeling,thelikelihoodp(θ x)ofthemodelmayoftenbeanalyticallyintractable,forexample,because
+|
+the model contains differential equations without known analytical solutions or several levels of latent variables
+followingcomplexgenerativeprocedures(DiggleandGratton,1984;Cranmeretal.,2020). TheBayesiangenerative
+modelisthenonlyavailableasatripleofthepriorp(θ)oversimulationparametersθ,aprobabilisticmodelp(ν θ)for
+|
+nuisanceparameters(aka.noise)ν,andasimulationprogramg :(θ,ν) xthatoutputssyntheticobservabledatax.
+(cid:55)→
+Moreconcretely,theforwardprocessisdefinedas
+x=g(θ,ν) with ν p(ν θ), θ p(θ). (7)
+∼ | ∼
+Wecanreadilysamplefromthisgenerativemodelandobtainpairsofobservabledataxalongwiththedata-generating
+parametersθ.Whenestimatingmodelswithanalyticallyintractablelikelihoods,onecommonlyspeaksoflikelihood-free
+inference,atermthatissomewhatmisleadingasthelikelihoodstillimplicitlyexistsasanintegraloverallpossible
+executionpaths(asrepresentedbythestochasticnoisevariatesν),
+p(x θ)= p(x,ν θ)dν, (8)
+| |
+(cid:90)
+eventhoughtheanalyticformofthatlikelihoodp(x θ)isgenerallyunknown(Cranmeretal.,2020). Nevertheless,
+|
+MonteCarlosimulationsfromthefullmodel(Equation7)canbecleverlyusedtoperformfullyBayesianinference,
+whichmotivatesthealternativeandmoredescriptivetermsimulation-basedinference(SBI).Intractablemodelsthat
+requireSBIareubiquitousinthequantitativesciencesandSBIhasbeenconceptualizedasoneofthekeypillarsof
+today’scomputationalstack(Lavinetal.,2021).
+Simulation-basedmethodsarealsoapplicablewhenthelikelihoodistractable,asisthecaseinmanyMLMapplications.
+Traditionally,fortractablelikelihoodmodels,simulation-basedmethodswerenotconsideredbecausetheywereinferior
+todensity-basedinferencemethods(e.g.,MCMC)intermsofbothinferencespeedandaccuracy. However,simulation-
+basedtrainingofneuralnetworksseemscrucialforachievingamortizedBayesianinferencevianeuralnetworks(see
+below),regardlessofwhetherwehaveaccesstotheanalyticlikelihood(orprior)densities.
+2.3 AmortizedBayesianinference
+WhileperformingBayesianinferenceforhigh-dimensionalmodelsonasingledatasetisalreadychallenging, the
+computationalburdenincreasessignificantlywhenthesamemodelmustbeappliedtomultipledatasets. Achieving
+accurate posterior inference can quickly become too computationally expensive in such cases. This issue is most
+apparentwhenfittingthesamestatisticalmodeltoseveralorsometimesmillions(vonKrauseetal.,2022)ofmutually
+independentdatasets.
+However,evenwithasingledataset,numerousrefitsofthesamemodelmightbenecessary. Forexample,established
+state-of-the-artmodelevaluationtechniquesrequiremultiplemodelrefitstodifferentdatasetsorsubsets. Twosuch
+methodsintheBayesianworkflow(Gelmanetal.,2020)aresimulation-basedcalibration(SBC;Taltsetal.,2018)
+andcross-validation(CV;Vehtarietal.,2017). WhileSBCcanvalidatetheapproximationintheclosed-worldsetting,
+CVevaluatesitspredictiveout-of-sampleperformance(seeSection3formoredetails). InSection3.2,weshowthat
+amortizedBayesianinferencecanprovideconsiderablespeedadvantagesforthesemethodswhichcomprisekeysteps
+inaprincipledBayesianworkflow(Gelmanetal.,2020).
+AmortizedBayesianInference(ABI)(ABI;GershmanandGoodman,2014;Ritchieetal.,2016;Leetal.,2017;Radev
+etal.,2020)offersapromisingsolutiontotheproblemofrepeatedrefitsformodelswithorwithouttractablelikelihood
+4AmortizedBayesianMultilevelModels
+functions. ABIdecouplesestimationintotwophases: (1)atrainingphase,duringwhichaneuralnetworklearnsa
+posteriorfunctionalfrommodelsimulations,and(2)aninferencephase,whereposteriorsamplingistransformedintoan
+almostinstantaneousforwardpassthroughtheneuralnetwork. Thetermamortizedemphasizesthatthecomputational
+demandfromtheinitialtrainingphaseamortizesoversubsequentrapidmodelfits, typicallywithinafractionofa
+secondwhenusinginvertibleneuralnetworks(Kruseetal.,2021). Inthefollowing,wedescribeposteriorestimation
+withneuralnetworksinmoredetail.
+2.3.1 Neuralposteriorestimation
+Neural posterior estimation (NPE) approximates the target posterior distribution p(θ x) with a surrogate density
+|
+q (θ x),whereϕdenoteslearnableweightsofagenerativeneuralnetworkf . Thisso-calledinferencenetworkf
+ϕ ϕ ϕ
+|
+oftenimplementsanormalizingflow(Kobyzevetal.,2020)throughaconditionalinvertibleneuralnetwork(Ardizzone
+etal.,2019)capableofmodelingcomplextargetdistributions. Suchnetworkshavedemonstratedremarkablesuccessin
+tacklingamortizedNPEproblemsacrossdisciplines(e.g.,Ardizzoneetal.,2018;Gonçalvesetal.,2020;Bieringer
+etal.,2021;vonKrauseetal.,2022;Avecillaetal.,2022). Thatsaid,othergenerativeneuralarchitectures,suchas
+diffusionmodels(Sharrocketal.,2022),consistencymodels(Schmittetal.,2024b),orflowmatching(Wildberger
+etal.,2024)canbeusedforNPEaswellandarefullycompatiblewithourproposedmethods. Below,wefocuson
+normalizingflows(Kobyzevetal.,2020)asaconcreteexampleofneuraldensityestimation.
+The normalizing flow represents an invertible learnable transformation between the intractable target (posterior)
+distributionandatractablebasedistribution,suchasaunitGaussian. Duringtraining,theinferencenetworkminimizes
+the expected forward Kullback-Leibler (KL) divergence between the approximate posterior q (θ x) and the true
+ϕ
+|
+posteriorp(θ x)viabackpropagation,
+|
+ϕ=argminE KL p(θ x) q (θ x)
+(θ,x)∼p(θ,x) ϕ
+| |
+ϕ
+(cid:104) (cid:16) (cid:12)(cid:12) (cid:17)(cid:105) (9)
+(cid:98) =argminE
+(θ,x)∼p(θ,x)
+logq ϕ(θ (cid:12) (cid:12)x(cid:12) (cid:12)) +const,
+− |
+ϕ
+(cid:104) (cid:105)
+wheretheexpectationisapproximatedviaitsempiricalmeanoverdrawsfromtheBayesianmodel(θ,x) p(θ,x).
+∼
+Thedensityofthetrueposteriorp(θ x)isdroppedfromtheobjectiveinEquation9becauseitdoesnotdependon
+|
+the neural network parameters ϕ. This procedure is self-consistent and recovers the true posterior under optimal
+convergence and a sufficiently expressive neural network (Ardizzone et al., 2019). Crucially for optimization and
+downstreaminferencetasks,wecanevaluatetheapproximateposteriordensityq (θ x)foranypair(θ,x)viathe
+ϕ
+|
+change-of-variablesformula,
+∂f (θ;x)
+ϕ
+q (θ x)=p z =f (θ;x) det , (10)
+ϕ ϕ
+| ∂θ
+(cid:12) (cid:12)
+wheref (θ;x)denotesaforwardpassofparame(cid:0)tersθthrough(cid:1)th(cid:12)eneuralnetwor(cid:12)kf ,conditionalondatax,andzis
+avectorϕ fromthebasedistribution,typicallyz Normal(0,I). A(cid:12) (cid:12) mortizationis(cid:12) (cid:12)adϕ irectconsequenceofthefactthat
+∼
+weareusingasingle(global)setofneuralnetworkparametersϕtoapproximatetheposteriordistributionformany
+datasetsinthesupportofp(θ,x). Thestructureofthesedatasetswillvaryinpractice,forinstance,withrespectto
+theirsamplesizeN N. Thisnecessitatessomeformofpreprocessingorcompressionbeforebeingpassedtof ,as
+ϕ
+∈
+discussednext.
+2.3.2 Learnedsummarystatistics
+Directly using conditional invertible neural networks to learn the posterior distribution based on raw data has two
+mainshortcomings: First,thedatamaybehigh-dimensionaleventhoughsome(opaque)lower-dimensionalrepre-
+sentation would suffice to inform posterior inference. Second, these architectures cannot generally deal with data
+x= x ,...,x ofvaryinglengthsN,whichisrequiredtorepresentdifferentsamplesizesortimehorizons.
+1 N
+{ }
+Toaddressbothproblemssimultaneously,Radevetal.(2020)proposedtouseasecondneuralnetworkh ,dubbeda
+ψ
+summarynetwork. Thetaskofthesummarynetworkistocompressthedataxintoalower-dimensionalrepresentation
+h (x),alsoknownassummarystatisticsorembeddings. Thenetwork’sarchitecturedependsonthestructureofthe
+ψ
+data(e.g.,permutationinvariantnetworkforexchangeabledata,recurrentnetworkfortime-seriesdata,etc.)1. Crucially,
+thesummarynetworkh andtheinferencenetworkq areoptimizedinonejointend-to-endoptimizationobjective,
+ψ ϕ
+ψ,ϕ=argminE logq θ h (x) , (11)
+(θ,x)∼p(θ,x) ϕ ψ
+− |
+ψ,ϕ
+(cid:104) (cid:0) (cid:1)(cid:105)
+1Itisalsopossibletodoawayw(cid:98)ith(cid:98)explicitsummarystatistics(e.g.,intransformer-basedarchitectures,Gloeckleretal.,2024),
+butaccessingthesestatisticscanbebeneficialinmultipleways,e.g.,indetectingmodelmisspecification(Schmittetal.,2022)or
+robustifyinginference(Huangetal.,2024).
+5AmortizedBayesianMultilevelModels
+suchthatthelearnedsummarystatisticsareapproximatelysufficient(Chenetal.,2020;Radevetal.,2020)forposterior
+inference. Asaconsequence,thelearnedsummarystatisticsh (x)arenotgenerallysufficienttoreconstructthedata
+ψ
+setxitself(i.e.,asintraditionalautoencoders). Instead,theymerelyapproximatetheBayesiannotionofsufficiency,
+where summary statistics are sufficient if they do not alter the posterior distribution when swapped with the data:
+p(θ x)=p(θ h (x)).
+ψ
+| |
+2.3.3 Samplingfromtheamortizedneuralestimator
+Onceoptimizationhasbeenperformed,thesamepre-trainedarchitecturecanbeappliedtoestimatethesamemodel
+familyonanunseenobserveddatasetxobs.Duringinference,thepre-trainednetworksh andf areusedtoefficiently
+ψ ϕ
+obtaindrawsfromtheapproximateposteriorq (θ xobs).First,thesummarynetworkh compressestheobserveddata
+ϕ ψ
+|
+toafixed-sizevectorh (xobs). Then,theinvertiblenetworkf obtainsSdraws(θ(1),...,θ(S))fromtheapproximate
+ψ ϕ
+posterior by sampling random multivariate unit Gaussian vectors (z(1),...,z(S)) and performing an inverse pass
+throughtheinferencenetwork,conditionalonthesummarizeddatah (xobs):
+ψ
+θ(s) =f−1 z(s);h (xobs) withz(s) Normal(0,I) fors=1,...,S. (12)
+ϕ ψ ∼
+At this stage, no MCMC or im(cid:0)portance sampl(cid:1)ing is performed, but multiple independent random draws from the
+posteriorcanefficientlybeobtainedinparallelbecausebothsamplingthelatentvectorsz(s) andtheinversepass
+throughtheneuralnetworkarereadilyparallelized. WhilethelatentspacetypicallyfollowsaunitGaussiandistribution,
+otherdistributionslikeheavy-tailedStudent-t(AlexandersonandHenter,2020)havebeenexploredaswell,which
+simplyaltersthesamplingstatementforz(s)inEquation12.
+2.3.4 Whyaremultilevelmodelschallengingforneuralposteriorestimation?
+Asdescribedabove,usingNPEwithlearnedsummarystatisticshasadvantagesoveritsnon-amortizedsimulation-based
+counterparts(fasterre-fits)oramortizedlikelihood-basedalgorithms(expressiveneuralarchitecturesandallowing
+inferenceformodelswithimplicitlikelihoods). However,standardNPEisnotwellsuitedforestimatingMLMsout
+ofthebox. ThisisduetoMLMs’particularprobabilisticsymmetriesthatfeaturehierarchicallylayeredstagesinthe
+generativeforwardmodelaswellasmultiplelevelsofexchangeabilityandinterdependencethatshouldbeconsidered.
+Inparticular:
+1. Thenumberofgroupsandthenumberofobservationswithingroupsmayvary(e.g.,duetomissingness),
+necessitatinghierarchicalsummarynetworksalignedwiththestructureofthedata.
+2. Thedimensionofthejointposteriordistributiondependsonthenumberofgroupsandmayalsovarybetween
+datasets,necessitatinghierarchicalinferencenetworkswithvaryingnumbersofoutputs.
+3. The dependencies between the two levels may vary (e.g., non-exchangeable observations, exchangeable
+groups),necessitatingdifferenttypesofsummaryandinferencenetworks.
+Inwhatfollows,wewillpresentaneuralarchitecturethatisbasedonNPEwithlearnedsummarystatisticsandenables
+fullyamortizedBayesianinferenceforMLMswithbothtractableandintractablelikelihoods. Wecallourmethod
+Multi-LevelNeuralPosteriorEstimation(ML-NPE).
+2.4 MultilevelNeuralPosteriorEstimation
+InanMLMwithtwolevelsandgroupindicesj =1,...,J,therearethreequalitativelydifferentkindsofparameters:
+(1) Local parameters θ that are specific for each group j, such as a separate intercepts or slopes per group; (2)
+j
+hyperparametersτ,typicallymeansandstandarddeviationsforthelocalparametersaswellascorrelationsamong
+localparametersofthesamegroup;and(3)sharedparametersσ withadirecteffectonthelikelihoodfunctionof
+allgroups,withoutanyhierarchicalcomponent. BuildingontheapproachofHeinrichetal.(2023),weexploitthe
+exchangeabilityofthegroupsbyusingtwopairsofsummaryandinferencenetworks: Onenetworkpairestimatesthe
+localparametersconditionalonthegroup-leveldataandtheglobalparameters,thatis,theconcatenationofhyperand
+sharedparameters. Theothernetworkpairdirectlyestimatestheglobalparametersconditionalonallavailabledata.
+ToillustrateourML-NPEmethod,consideramodelwithgroupsj =1,...,J andN observationspergroup,where
+j
+i=1,...,N denotestheindexofagivenobservationalunit. Accordingly,x isthe(multivariate)observationofthe
+j j,i
+ith unitinthejth group. Asabove,letθ bethesetoflocalparametersinthejth group,τ behyperparameters,and
+j
+σ besharedparameters. Utilizingexchangeabilityofgroupsandobservationswithingroups,thejointdistribution
+6AmortizedBayesianMultilevelModels
+p(τ,σ,θ ,x )ofallvariablesfactorizesas:
+j j,i
+J
+p(τ,σ, θ , x )=p(τ)p(σ) p(θ τ)p(x θ ,σ) (13)
+j j,i j j j
+{ } { } | |
+j=1
+(cid:89)
+Thesetnotations θ and x highlightthatboththenumberofgroupsandobservationsineachgroupcanvary
+j j,i
+{ } { }
+across simulations, datasets, or experiments. The goal of fully Bayesian inference is to obtain the joint posterior
+distributionofparametersconditionedontheobserveddata:
+p(τ,σ, θ , x )
+j j,i
+p(τ,σ, θ x )= { } { } (14)
+j j,i
+{ }|{ } p( x )
+j,i
+{ }
+Inanutshell,ourproposedmethodleveragesthefactthatthejointposteriorcanbefurtherfactorizedintotwoparts,
+namely(1)thehyperparametersτ togetherwiththesharedparametersσ;and(2)thelocalparametersθ :
+j
+p(τ,σ, θ x )=p(τ,σ x )p( θ τ,σ, x )
+j j,i j,i j j
+{ }|{ } |{ } { }| { }
+J
+(15)
+=p(τ,σ x ) p(θ τ,σ,x )
+j,i j j
+|{ } |
+j=1
+(cid:89)
+Inthisway,wedividetheproblemoflearningthefulljointposteriorintosmallerproblemsoflearningthejointposteriors
+ateachlevelseparately. Torepresentthisposterior,weintroducetwoNPEsub-modulesf (τ,σ;h ( h (x ) ))
+ϕ ψ ψ j
+1 1 { 2 }
+andf (θ ;h (x ),τ,σ)),oneforeachofthetwotermsinEquation15. Thefirstinferencenetworkf learnsa
+ϕ j ψ j ϕ
+2 2 1
+representationofthemarginaldistributionofhyperandsharedparameters,whilethesecondinferencenetworkf
+ϕ
+2
+estimatesthelocalparameters. Whenstructuredinthisway,wecanleveragethemodel-impliedexchangeabilityof
+thelocalparametersθ andemployweightsharingbyonlyusingasinglenetworkf foralllocalparametersθ .
+j ϕ j
+2
+AmortizingoverthenumberofgroupsJ greatlyreducesthecomputationalcomplexitybecausethetotalnumberof
+networkparametersϕ=(ϕ ,ϕ )isnowindependentofthenumberofgroupsJ.
+1 2
+SimilartostandardNPEwithlearnedsummarystatistics,eachinferencenetworkisalsoequippedwithitsrespective
+summary network: The first summary network h learns a low-dimensional representation of the whole dataset
+ψ
+1
+x ,whilethesecondsummarynetworkh onlyrequiresobservationsofthespecificgroupj alongsideitsglobal
+i,j ψ
+{ } 2
+andsharedparameterswhichareprocessedbythesecondinferencenetworkf . Thisispossiblebecausethelocal
+ϕ
+2
+parametersθ foreachgroupareconditionallyindependentofthedatainothergroups,giventhehyperandshared
+j
+parameters.
+Writingϕ=(ϕ ,ϕ )fortheweightsoftheinferencenetworksandψ =(ψ ,ψ )fortheweightsofthesummary
+1 2 1 2
+networks,ouroptimizationcriterionfromEquation11becomes
+ψ,ϕ=argminE logq τ,σ, θ x , (16)
+(τ,σ,θ,x)∼p(τ,σ,θ,x) ϕ j j,i
+− { }|{ }
+ψ,ϕ
+(cid:104) (cid:0) (cid:1)(cid:105)
+wherewedenoteexchan(cid:98)ge(cid:98)ablereplicationswithasubscript. Thenegativelog-densityterminsidetheexpectationcan
+nowbedecomposedinto:
+logq τ,σ, θ x = logq τ,σ h ( x )
+ϕ j j,i ϕ ψ j,i
+− { }|{ } − 1 | 1 { }
+(cid:0) (cid:1) J (cid:0) (cid:1) (17)
+logq θ h (τ,σ,x )) ,
+ϕ j ψ j
+− 2 | 2
+j=1
+(cid:88) (cid:0) (cid:1)
+whichcanbeoptimizedinclosed-formviabackpropagation.
+2.5 AmortizedsamplingfromML-NPE
+Oncetraininghasconverged,thenetworkscanbestoredandappliedmultipletimestoarbitrarynumbersofobservations
+(datasets)oftheform x . Foreachdataset,wecanobtaindrawsfromthejointposteriorviainverseancestral
+j,i
+{ }
+samplingbyapplyingthetransformationofeachconditionalinvertibleneuralnetworkmoduletorandomdrawsfrom
+thecorrespondingbasedistributions:
+(τ(s),σ(s)) q (τ,σ h ( x ))
+ϕ ψ j,i
+∼ 1 | 1 { } (18)
+θ(s) q (θ h (τ(s),σ(s),x ))
+j ∼ ϕ 2 j | ψ 2 j
+7AmortizedBayesianMultilevelModels
+Thismakessamplingateachlevelveryefficientsinceonlysinglepassesthroughthepre-trainedinvertiblemodules
+arerequired. Second,nodrawsarerejectedorthinned(asinMCMCmethods),since,assumingperfectconvergence,
+thenetworksgenerateindependentsamplesfromthetruejointposterior(Ardizzoneetal.,2019). Inpractice,perfect
+convergencecanrarelybeachieved, sosomeapproximationerroristobeexpected. Fortunately, wecandiagnose
+approximationerrorseitherdirectlybyinspectingthebasedistributionsoverdifferentsimulateddatasetsorindirectly,
+byperforminginferentialcalibrationchecks(seeSection3formoredetails). Third,duetotheapplicationofspecialized
+summarynetworksasconditioners,thenetworksdonotneedtobere-trainedfordifferentindividualsamplesizesor
+groups. Thisimpliesthatdifferenttypesofcross-validationcanalsobeefficientlyimplementedbyre-usingthesame
+pre-trainedarchitecture. Finally,sinceweapproximatetheexpectationinEquation17viaitsempiricalmeanover
+simulationsfromthegenerativemodel,werequirenoclosed-formlikelihoodfunctionorpotentialnumericalintegration
+ofacomplexlikelihood,whichmakesML-NPEapplicabletointractablemodels.
+2.6 Alternativefactorizations
+ThefactorizationinEquation15isnotunique. Anequallyvalidfactorizationwouldbe:
+p(τ,σ, θ x )=p(τ θ )p(σ x , θ )p( θ x ), (19)
+j j,i j j,i j j j,i
+{ }|{ } |{ } |{ } { } { }|{ }
+which suggests a different neural inference architecture consisting of three components f (τ;h ( θ )),
+ϕ ψ j
+1 1 { }
+f (σ;h ( x ),h ( θ )), and f ( θ ;h ( x )). For this factorization, we utilize the fact that the
+ϕ ψ j,i ψ j ϕ j ψ j,i
+2 21 { } 22 { } 3 { } 3 { }
+globalparametersτ arecompletelyidentifiedbythelocalparametersθ . Wenowalsorequireanadditionalinference
+j
+networksolelyforthesharedparametersσ,astheyarenotidentifiedbythelocalparametersalone. Comparedtothe
+factorizationinEquation15,thisarchitecturecannoteasilybeamortizedoverthenumberofgroups,becausewelacka
+per-groupsummaryandinferencenetworks.
+Wecouldimprovethisarchitecturebyintroducingthefollowingmodifications. First,wesplitthesinglesummarynet-
+workh inthesub-moduleforthelocalparametersintotwosummarynetworks: h ( x )learnsarepresentation
+ψ3 ψ
+31 {
+j,i
+}
+oftheglobaldatastructure(i.e.,sufficientstatisticstodeterminethedegreeofrequiredshrinkage)andh (x )learns
+ψ j
+4
+arepresentationofthelocaldatastructureofgroupj. Second,weredefinef intoaper-groupinferencenetwork
+ϕ
+3
+f (θ ;h ( x ),h (x ))tobeappliedJ times,onceforeachgroup. Thisrestoresamortizationcapabilities
+ϕ j ψ j,i ψ j
+3 31 { } 32
+andkeepstheoutputdimensionalityofallinferencenetworksconstantregardlessofthedataset. However,theimplied
+architectureismoreinvolved,requiringupto5summaryand3inferencenetworks,insteadofonly2summaryand2
+inferencenetworksforthefactorizationpresentedinEquation15. Forthisreason,wedecidedtofurtherstudyonlythe
+latter,structurallysimplerarchitectureinourempiricalevaluations.
+3 Empiricalevaluation
+We evaluate our two-level neural architecture in 3 different applications based on real-world data sets that aim to
+coverabroadspectrumofusecasesformultilevelmodelsinpractice. Concretely,theapplicationsencompass1)an
+autoregressivetime-seriesmodelthatpredictsairpassengertrafficbetweendifferentEuropeancountriesandtheUS,2)
+adrift-diffusionmodeltoinferlatentparametersofadecision-makingprocessfromreactiontimedata,3)amodelto
+inferstyleparametersofhandwritingfromhigh-dimensionalimagedata. Allexperimentsareimplementedwiththe
+BayesFlowsoftwareforamortizedBayesianworkflowswithneuralnetworks(Radevetal.,2023b).
+Evaluationmetrics Foreachapplication,weimplementaseriesofmodelchecks: Weperformsimulation-based
+calibration(SBC)toensurethatourneuralposteriorestimationalgorithmsamplesfromthecorrectposterior. Givena
+perfectapproximationofthetrueposteriorp(θ x),foranyquantileq (0,1),aq 100%posteriorintervalcontains
+| ∈ ×
+thetruevalueinapproximatelyq 100%ofthecases. SBCflagsviolationsofposteriorcalibrationwhichhintsatissues
+×
+withcomputationalvalidity,forexamplearisingfrominsufficientsimulation-basedtrainingoralackofexpressiveness
+oftheneuralnetworks.
+To detect model misspecification, we perform posterior predictive checks. We investigate inferential accuracy by
+providing graphical comparisons of posterior intervals and ground truth parameter values over the test set. When
+computationallyfeasible,wealsofiteachmodelinStanandprovideplotsofposteriorintervalstocomparetheestimates
+againstaknowntobereliablereferencealgorithm. Forthelastmodelcheck,weexplicitlycompareshrinkageofthe
+group-levelparametersbetweenourneuralframeworkandStan,asweexpectthatanysubtlealgorithmicerrorwould
+likelyfirstmanifestasincorrectposteriorshrinkage.
+8AmortizedBayesianMultilevelModels
+3.1 Experiment1: Airpassengertraffic
+WeapplyourneuralarchitecturetoanalyzetrendsinEuropeanairpassengertrafficdataprovidedbyEurostat(2022a,b,c).
+Usingthiscasestudy,wehighlightthatourneuralarchitecturecancorrectlyandefficientlyamortizeoverboththe
+numberofgroupsandthenumberofobservationspergroup,aswellasoverspacesofcovariates. Byusingasummary
+networkthatisalignedtothestructureofdata,wealsoshowthatourapproachcanbeeasilyextendedtoestimate
+non-IIDresponsevariables. Weprovideasystematiccalibrationandshrinkageanalysistoverifycorrectinferenceat
+eachhierarchylevel.
+Modeldescription Weobtainedtimeseriesofannualairpassengercountsbetween16Europeancountries(departures)
+andtheUnitedStatesofAmerica(destination)from2004to2019andfitthefollowingautoregressivemultilevelmodel:
+y Normal(α +y β +u γ +w δ ,σ ), (20)
+j,t+1 j j,t j j,t j j,t j j
+∼
+wherethetargetquantityy isthedifferenceinairpassengertrafficforcountryj betweentimet+1andt. To
+j,t+1
+predicty ,weusetwoadditionalpredictors: Thefirstpredictoru istheannualhouseholddebtofcountryj at
+j,t+1 j,t
+timet,measuredin%ofgrossdomesticproduct(GDP),andthesecondpredictorw istherealGDPpercapita. The
+j,t
+parametersα arethecountry-levelintercepts,β aretheautoregressivecoefficients,γ aretheregressioncoefficients
+j j j
+ofthehouseholddebtpredictor,δ aretheregressioncoefficientsfortheGDPpercapitapredictor,σ isthestandard
+j j
+deviationofthenoiseterm,µarethehierarchicalmeansforlocalparameters,σarethehierarchicalstandarddeviations
+forthelocalparameters,NormalisthenormaldistributionparameterizedbymeanandstandarddeviationandNormal+
+isthecorrespondinghalf-normaldistribution(truncatedatzero).
+Mappingthenotationinthisappliedmodelingtasktothetaxonomyofprevioussections,theobservablesxarenow
+splitintoatargetyandpredictors(u,w)withgroup-structuredefinedbythecountryindexj. Weusethefollowing
+priordistribution:
+σ Normal+(0,0.25)
+α Normal(µ ,σ ) µ Normal(0,0.5) α
+j α α α ∼
+β j ∼∼ Normal(µ β,σ β) µ β ∼ ∼Normal(0,0.2) σ β ∼Normal+(0,0.15)
+γ j Normal(µ γ,σ γ) µ γ Normal(0,0.5) σ γ Normal+(0,0.25) (21)
+∼ ∼ ∼
+δ j ∼Normal(µ δ,σ δ) µ δ ∼Normal(0,0.5) σ δ ∼Normal+(0,0.25)
+log(σ j) ∼Normal(µ σ,σ σ) µ σ ∼Normal( −1,0.5) σ
+σ
+Normal+(0,1)
+∼
+Ascommonlydoneforautoregressivemodels,weregressonthedifferencesbetweentimeperiodstoreduceissues
+duetonon-stationarity. ThisisparticularlyimportantinanSBIsetting, becauseforβ > 1thetimeserieswould
+j
+exhibitstrongexponentialgrowththatwouldquicklysurpassreasonableairtrafficvolumes,creatinghighlyunrealistic
+simulations.
+Modeltraining Togeneratetrainingdatafortheneuralapproximator,weutilizeanancestralsamplingscheme: First,
+a sample is drawn from the distribution of hyperparameters p(τ). We then draw M samples from the conditional
+distributionofgroup-levelparametersp(α ,β ,γ ,σ τ),whereτ denotethehyperparametersandeachoftheM
+j j j j
+|
+draws corresponds to a country. For each country, we then simulate a time series from the conditional likelihood
+p(y α ,β ,γ ,σ ,u ,w ). WeamortizeoverthenumberofcountriesM aswellasthenumberofobservedtime
+j,t+1 j j j j j j
+|
+pointsT. Theneuralapproximatoristhereforeabletogeneratedrawsfromtheposteriorp(τ,α ,β ,γ ,σ y ,u ,w )
+j j j j j j j
+|
+for data sets with a varying number of countries as well as a varying number of time points without any further
+training. Tofacilitatetrainingonsimulateddataandwithoutlossofgenerality,weassumethateachtimeseriesstartsat
+y Normal(0.5,1).
+j,t=1
+∼
+Thenetworkarchitectureforamortizedposteriorinferenceconsistsofalocalsummarynetworkwithaninitiallong
+short-termmemory(LSTM;HochreiterandSchmidhuber,1997)layercapturingtimedependenciesoftheseinputdata,
+followedbyadenselayerwith256unitsandexponentiallinearunitactivationfunctionandanotherdenselayerwith32
+units. Fortheglobalsummarynetwork,weuseasettransformer(Leeetal.,2018)with32summarydimensions,16
+inducingpointsand2hiddenlayerswith64unitswitharectifiedlinearunit(ReLU;Agarap,2018)activationfunction.
+Themultiheadattentionlayerofthesettransformerusesanattentionblockwith4headsandkeydimension32with
+1%dropout. Fortheinferencenetworks,weuseneuralsplineflows(Durkanetal.,2019)with6couplinglayersusing
+2 dense layers with 256 units each, a ReLU activation function and 5% dropout. We set the simulation budget to
+N =100000andtrainfor200epochsusingtheAdam(KingmaandBa,2014)optimizerwithaninitiallearningrateof
+5 10−4withcosinedecay(LoshchilovandHutter,2016)andabatchsizeof32.
+×
+9AmortizedBayesianMultilevelModels
+Air traffic between the United States and European countries
+Austria Belgium Czechia
+7.5 2
+2.5
+5.0
+0.0 0
+2.5
+Germany Denmark Greece
+60
+5.0 2.5
+2.5
+0.0
+40
+Spain Finland France
+2
+20 40
+10 30
+0
+Ireland Italy Netherlands
+20 30
+20
+15
+10 20
+Poland Portugal Sweden
+4 5.0
+5
+2
+2.5
+0
+2006 2010 2014 2018 2006 2010 2014 2018 2006 2010 2014 2018
+year
+Figure1: Annualairpassengertrafficvolumein100thousandpassengersbetweendifferentEuropeancountriesandthe
+UnitedStatesofAmerica. Bluepointsshowobserveddata,bluelinesshow95%uncertaintyintervalsofthe1-step
+aheadposteriorpredictivedistribution. Forreference,greylinesshowdrawsfromtheposteriorpredictivedistribution
+ofthesamemodelfittedinStan. Theposteriorpredictivechecksshowthatthemodelpredictionsareconsistentwith
+theobserveddataanddrawsfromtheposteriorpredictivedistributionobtainedbythereferenceimplementationinStan
+areindistinguishablefromdrawsobtainedbyouramortizedML-NPEmethod.
+Posteriorpredictivechecks ToensurethatthesimpleAR(1)modelisadequateenoughtodescribetheobservedata,
+Figure1showstheobservedtimeseriesoverlaidwithdrawsfromtheposteriorpredictivedistributionobtainedbyour
+ML-NPEmethodaswellasareferenceimplementationinStan. Whilepredictiveuncertaintyishigh, presumably
+inpartbecauseoftherelativelysimplemodel,shorttimeseriesandpredictorsthatonlyweaklyassociatedwiththe
+responsevariable,thepredictionsfromtheAR(1)modelareconsistentwiththeobserveddata.
+Posteriorinference Figure2andFigure3showsposteriorrecoveryandcalibrationon100simulatedvalidation
+datasets. Weobservegoodposteriorrecoveryandcalibrationforallparameters.
+Tovalidatethatwealsoobservegoodposteriorrecoveryonrealdata,weperformposteriorinferenceontheEurostat
+(2022a,b,c)datasetandcontrasttheresultstotheposteriorintervalsobtainedbytheStanreferenceimplementation(see
+10
+]k001[
+sregnessap
+riaAmortizedBayesianMultilevelModels
+α β γ
+δ log(σ) global parameters
+1 0 1 2 5 0 5 2 1 0 1 2
+− − − −
+ground truth
+Figure2: Posteriorrecoveryon50simulatedvalidationdatasets. Allparametersshowgoodposteriorrecoveryand
+calibration,indicatingthatourML-NPEisabletorecovertrueparametervalueswithoutbiasandaccurateuncertainty
+quantification.
+α β γ
+0.1 0.1 0.1
+0.0 0.0 0.0
+0.1 0.1 0.1
+− − −
+δ log(σ) global parameters
+0.1 0.1 0.1
+0.0 0.0 0.0
+0.1 0.1 0.1
+− − −
+0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0
+Fractional rank statistics
+Figure3: Simulation-basedcalibrationplots. ECDFdifferenceisthedifferencebetweentheempiricalcumulative
+distributionfunctionoftherankdistribution(obtainedbycomparingtherankofpriordrawswiththeircorresponding
+posteriordraws)andtheuniformcumulativedistributionfunction. Fortheparametersα,β,γ,δ,andlog(σ),each
+linerepresentsagroup-levelparameter(i.e.,thecountry-specificestimate). Thepanelglobalparameterscontainsthe
+estimatedmeanandstandarddeviationforeachofthe5group-levelparameters. Alllinesliewithintheshaded99%
+simultaneousconfidencebands,indicatingwell-calibratedmarginalposteriordistributions.
+11
+etamitse
+ecnereffid
+FDCEAmortizedBayesianMultilevelModels
+ML-NPE Stan
+α β γ
+1 0.5
+0.5
+0.0
+0.0
+0 0.5
+−
+δ log(σ) global parameters
+0.5 1
+0
+0.0 0
+0.5 2 1
+− − −
+Figure 4: Posterior intervals obtained from amortized ML-NPE (ours) and the gold-standard HMC reference, as
+implementedviaStan. Plotsshowthecentral50%(dark)and95%(light)posteriorcredibleintervalsbasedonquantiles.
+Fortheparametersα, β, γ, δ, andlog(σ), eachintervalpairreferstoasinglegroup-levelparameter(oneforeach
+country). Fortheglobalparameters,eachintervalpairreferstoahyperparameter(onemeanandonestandarddeviation
+foreachofthegroup-levelparameters,so10hyperparametersintotal). Theparametersaresortedbyincreasingmean
+(asperStan)toeaseinterpretationofshrinkagetowardsacommonmean.
+α β γ δ log(σ)
+0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0 0.0 0.5 1.0
+pooling factor λ (Stan)
+Figure5: Posteriorshrinkageobservedin100simulateddatasetsviaourML-NPEmethodstotheresultsobtained
+byStan. Thescatterpointsliealongthediagonal,indicatingthatourmethodisabletocorrectlyshrinkgroup-level
+regressioncoefficientstowardstheircommonmean.
+Figure4). Modeltestsonnon-simulateddataareparticularlyimportantinamortizedBayesianinferencebecauseofa
+possibleamortizationgap: Ifthesimulateddatausedfortrainingdoesnotliewithinthescopeofdatathemodelis
+goingtobeappliedon,ABImightyieldposteriordrawsthatarefarofffromthetrueposterior. Theplotshowsthatthe
+resultsobtainedbyML-NPEareconsistentwiththeresultsobtainedbyStan.
+Posteriorshrinkage Toidentifyifourapproachpartiallypoolsthelocalparameterscorrectlytowardstheircommon
+mean,wecompareposteriorshrinkageofourML-NPEmethodtoareferenceimplementationinStan. Wequantify
+posteriorshrinkageviathepoolingfactor,whichdescribeshowmuchthegroup-levelcoefficientsareshrunktowards
+thecommonmean. FollowingGelmanandHill(2006),thepoolingfactorλ foralocalparameterθ iscalculatedas
+j j
+λ =
+sd(θj−µθ)2
+,whereµ andσ arethehierarchicalmeanandhierarchicalstandarddeviationforalocalparameter
+j σ2 θ θ
+θ
+θ . Apoolingfactorofλ =0denotesnoshrinkageandaposteriorestimatethatisidenticaltotheno-poolingsolution,
+j j
+whereasashrinkagecoefficientofλ =1denotescompleteshrinkagetowardsthehierarchicalmean.
+j
+Figure5showsscatterplotsofpoolingfactorsforeachparameterobtainedon100simulateddatasetsviaourML-NPE
+methodcomparedtopoolingfactorsobtainedonthesamedataviaStan. Thescatterpointsliealongthediagonal,
+indicatingcorrectshrinkagebehaviorofourML-NPEmethod.
+12
+)EPN(
+λ
+rotcaf
+gniloop
+eulav
+retemarapAmortizedBayesianMultilevelModels
+upper decision threshold (α)
+α
+βα
+d
+rif t r a t e ν
+non-decision time τ
+0
+lower decision threshold (0)
+0 100 200 300 400 500 600 700 800
+time [ms]
+Figure6: Exampleofalatentevidencetrajectoryforasinglesubject. Thedecisionmakingprocessismodeledas
+arandomwalkthatisgovernedby4parameters: Thenon-decisiontimeτ isthetimeuntilevidenceaccumulation
+beginsandcapturescomponentsthatarenotdirectlyrelatedtothedecision,suchastimespentonprocessingofsensory
+information. Thedriftrateν correspondstotherateofinformationuptake. Thedecisionthresholdαcanbeinterpreted
+astheamountofevidencenecessarytomakeadecisionandisthusameasurementofresponsecaution. Thestarting
+pointβ quantifiesasubject’stendencytopreferonechoiceovertheother.
+3.2 Experiment2: DiffusionDecisionModel
+TotestifML-NPEisabletoestimateabroadrangeofhierarchicalstructuresandcanachievegoodcalibration,we
+applyourmethodtoacommondecision-makingmodelinpsychology,neuroscience,andthecognitivesciences. We
+alsousethiscasestudytohighlightkeyadvantagesofamortizedBayesianinferencecomparedtoposteriorinference
+basedonHamiltonianMonteCarlobyperformingnear-instantaneousleave-one-group-out(LOGO)cross-validation.
+Additionally,weshowthatML-NPEcanreliablyamortizeoverboththenumberofgroupsandobservations,enabling
+fastandreliableposteriorinferenceforalmostarbitrarydatasetsinthismodelclass.
+Modeldescription Considerasimpledecisiontask, forexampleasettingwhereparticipantsarepresentedwith
+sequencesoflettersandaskedtodifferentiatebetweenwordsandnon-words(i.e.,alexicaldecisiontask). TheDiffusion
+DecisionModel(DDM;Ratcliffetal.,2016)simultaneouslymodelsthisbinarydecisionandtheresponsetimeviaa
+continuousevidence-accumulationprocess: Afteraninitialnon-decisiontime,evidenceaccumulatesfollowinganoisy
+diffusionprocesswithacertaindriftrateuntiloneofthetwodecisionthresholdscorrespondingtothetwochoicesishit.
+Foreachsubject,thelatentevidencetrajectoryisgovernedby4parameters: Anon-decisiontimeτ,adriftrateν,a
+decisionthresholdα,andabias(startingpoint)β (seeFigure6).
+Thenestedstructureofindividualobservationswithinsubjectslendsitselftoamultilevelmodelwheresubject-specific
+estimatesshareinformationviacommonhyper-priors. Forthefirstpartofthiscasestudy,weconsidersubject-specific
+estimatesforthenon-decisiontimeτ,driftrateν anddecisionthresholdα(localparameters),whileestimatingaglobal
+biasβ forallsubjects(sharedparameter). Thegenerativemodelissummarizedas:
+µ Normal(0.5,0.3) µ Normal(0,0.05) µ Normal( 1,0.3)
+ν α τ
+∼ ∼ ∼ −
+logσ Normal( 1,1) logσ Normal( 3,1) logσ Normal( 1,0.3)
+ν α τ
+∼ − ∼ − ∼ −
+ν Normal(µ ,σ ) logα Normal(µ ,σ ) logτ Normal(µ ,σ )
+j ∼ ν ν j ∼ α α j ∼ τ τ (22)
+β Beta(50,50)
+∼
+y DDM(ν ,α ,τ ,β),
+j j j j
+∼
+wherey isthevectorcontainingtuplesofdecisionsandreactiontimesforsubjectj,DDMisthelikelihoodofthe
+j
+4-parameterdiffusiondecisionmodel,β isthesharedbiasforallsubjects,BetaistheBetadistributionwithshape
+13AmortizedBayesianMultilevelModels
+parametersaandb,Normalisthenormaldistributionwithmeanµandstandarddeviationσ,andν ,α ,τ arethe
+j j j
+subject-specificdriftrate,boundarythresholdandnon-decisiontimeparameters,respectively. Thepriorswerechosen
+basedonpriorpredictivecheckstomatchtherangeoftypicaloutcomesforsuchdecisiontasks.
+Model training We use the following network architecture for posterior inference: The local summary network
+consistsofasettransformerwith16summarydimensions,32inducingpoints,2hiddenlayerswith64unitswitha
+rectifiedlinearunit(ReLU)activationfunctionandGlorotuniforminitializer(GlorotandBengio,2010). Themultihead
+attentionlayerutilizesanattentionblockwith4headsandkeydimension32with1%dropout. Thearchitectureofthe
+globalsummarynetworkisidenticaltothatofthelocalsummarynetwork,exceptusing16inducingpointsand32
+summarydimensions. Fortheinferencenetworks,weuseneuralsplineflowswith4hiddenlayersforbothlocaland
+globalapproximators.
+Togeneratedatafornetworktraining, weusethesameancestralsampleschemeasfortheairtrafficcasestudyin
+Subsection3.1: First,wegenerateN randomdrawsfromthehyper-priors. ForeachoftheseN randomdraws,we
+then draw N draws from the corresponding subject specific, local parameters. For each subject, we simulate
+groups
+N observationsfromthediffusionprocess. Tofacilitateamortizationoverdifferentgroupandobservationsizes,
+obs
+werandomlydrawvaluesofN fromauniformdistributionwithlowerandupperboundsof1and100anddraw
+obs
+N fromauniformdistributionwithlowerandupperboundsof10and30. Wesettheinitialsimulationbudgetto
+obs
+N =10000andtrainfor200epochsusingtheAdamoptimizerwithaninitiallearningrateof5 10−4andabatch
+×
+sizeof32.
+Posteriorinference Figure7showsposteriorrecoveryandcalibrationon100simulatedvalidationdatasets. We
+observegoodposteriorrecoveryandcalibrationforallparameters. However,calibrationforthenon-decisiontimeτ is
+notperfect,whichislikelyaresultofthestrongposteriorcontraction,asτ showsgoodposteriorrecovery.
+To validate that we also observe accurate posterior inference on non-simulated data, we contrast these results to
+modelfitsonexperimentaldatapublishedbyWagenmakersetal.(2008). Intotal,17subjectswereaskedtomake32
+word/non-worddecisionsineachofthe20trialblocks. Theexperimentwasrepeatedintwoconditions: Onceafter
+askingthesubjectstofocusonaccuracyandonceafteraskingthesubjectstofocusonspeed. Figure8showsmarginal
+posteriordensitiesforthemodelfitonasubsetofthedata(observationsintheaccuracyconditionintrialblock4)
+comparedtotheresultsobtainedbyStanasagoldstandardforreliableposteriorinference. Theresultsobtainedby
+ML-NPEcloselymatchtheresultsobtainedbyStan. Weonlyuseasubsetofthedatatobetteralignwiththemodel
+structureoutlinedinSection3.2,ourproposedML-NPEalgorithmcanalsobeeasilyadaptedtoaccountfordifferent
+trialconditionsandblockdesigns.
+Leave-one-group-outcross-validation AmortizedBayesianinferenceisnotonlyusefulwhenperformingposterior
+inferenceonmanydifferentdatasets. Refittingthemodelmultipletimesondifferentsubsetsofthedataisalsorequired
+formanyessentialstepsinthemodernBayesianworkflow(Gelmanetal.,2020)likecross-validation(Vehtarietal.,
+2017;Merkleetal.,2019)andsimulation-basedcalibration(Taltsetal.,2018). Formultilevelmodels,itisoftenof
+practicalinteresttoestimateandcomparethepredictiveperformanceofmodelsonnewgroups,leadingtoleave-one-
+group-out(LOGO)cross-validation. AstheLOGOposteriorisoftenvastlydifferentfromthefullposteriorbecause
+thelocalparametersfortheleftoutgroupareonlyidentifiedviatheirhyperparameters,approximationmethodslike
+Pareto-smoothedimportancesampling(Vehtarietal.,2024)almostalwaysfail. PerformingLOGOcross-validationthen
+requiresrefittingthemodelonceforeachgroupinthedataset,quicklyrenderingmodelcomparisoncomputationally
+infeasiblewhenrelyingon,forexample,MCMCalgorithmsforposteriorinference. Withamortizedposteriorinference,
+obtainingtheLOGOposteriorisalmostinstant(fractionofasecondforourarchitectures),asitdoesnotrequirerefitting
+themodelforeachdatasubset.
+ToshowthatourML-NPEmethodenablesmodelcomparisonformultilevelmodelsthatareotherwisecomputationally
+infeasible,wecontrastthepreviouslydescribeddiffusiondecisionmodelinSection3.2withanothermodelvariantthat
+alsoestimatesβhierarchically. Insteadofasinglesharedβforallsubjects,thismodelvariantestimatessubject-specific
+β thatsharecommonhyper-priors. Wemakethefollowingadjustmentscomparedtothepreviousdescriptionofthe
+j
+driftdiffusionmodel:
+β BetaProportion(µ ,κ ) µ Beta(50,50) κ Gamma(5,3), (23)
+j β β β
+∼ ∼ ∼
+whereβ isthebiasforsubjectj,BetaProportionistheBetadistributionparameterizedbyameanµ andconcentration
+j β
+parameterκ .TheBetaproportiondistributionislinkedtothe(standard)shapeparameterizationoftheBetadistribution
+β
+viatherelationα=µκandβ =(1 µ)κ. Thisadaptedversionofthediffusiondecisionmodelalsoillustratesthat
+−
+ML-NPEcanestimatenon-normalhyper-priordistributions.
+14AmortizedBayesianMultilevelModels
+3 multilevel parameters 4 multilevel parameters
+v
+0 2 4 0.0 0.5 1.0 2.5 0.0 2.5 0.0 0.5 1.0
+−
+a
+0.5 1.0 1.5 0.0 0.5 1.0 0.75 1.00 1.25 0.0 0.5 1.0
+τ
+0 1 2 0.0 0.5 1.0 0 1 0.0 0.5 1.0
+β
+0.4 0.5 0.6 0.0 0.5 1.0 0.4 0.5 0.6 0.0 0.5 1.0
+µ
+v
+0 1 0.0 0.5 1.0 0 1 0.0 0.5 1.0
+σ
+v
+0 1 2 0.0 0.5 1.0 0 2 0.0 0.5 1.0
+µ
+a
+0.1 0.0 0.1 0.0 0.5 1.0 0.1 0.0 0.1 0.0 0.5 1.0
+− −
+σ
+a
+0.0 0.5 0.0 0.5 1.0 0.0 0.2 0.0 0.5 1.0
+µ
+τ
+2 1 0.0 0.5 1.0 1.5 1.0 0.5 0.0 0.5 1.0
+− − − − −
+σ
+τ
+0.25 0.50 0.75 0.0 0.5 1.0 0.5 1.0 0.0 0.5 1.0
+Figure7: Posteriorrecovery(columns1and3)andcalibration(columns2and4)forthediffusiondecisionmodel
+on100simulatedvalidationdatasets. Thefirsttwocolumnscorrespondtoamodelwhereasingleβ isestimatedfor
+allsubjects(sharedparameter). Thelasttwocolumnscorrespondtoamodelwhereβ isalsoestimatedhierarchically
+(seethetextfordetails). Allparametersshowgoodposteriorrecoveryandcalibration,exceptτ inthemodelwith
+3 hierarchical parameters. As we observe particularly strong posterior contraction for this parameter, even minor
+deviationsinposteriorcoveragewouldbedetectedasmiscalibration. Therefore,theobservedmiscalibrationforτ is
+unlikelytohaveanymeaningfulimpactinpracticalsettings.
+15AmortizedBayesianMultilevelModels
+ML-NPE Stan
+ν α τ β µ
+v
+5 5
+2 25 20
+0 0 0 0 0
+0.0 0.4 0.8 1.2 0.0 0.4 0.4 0.8 0.0 0.4
+σ µ σ µ σ
+v a a τ τ
+10 5
+10
+5 5
+0 0 0 0 0
+0.0 0.4 0.0 0.4 0.0 0.4 1.2 0.8 0.0 0.4
+− −
+Figure8: Marginalposteriordistributionsofthedriftdiffusionmodelfittedonexperimentaldata. Bluekerneldensity
+plotswereobtainedbyourML-NPEmethod,reddashedlinesshowtheresultsobtainedbyStanasagoldstandardfor
+reliableposteriorinference. TheplotsshowthatmarginalposteriorsobtainedbyML-NPEarehighlysimilartothe
+marginalposteriorsobtainedbyStan.
+3 multilevel parameters
+4 multilevel parameters
+0
+50
+−
+100
+− elpd =27.03 1.73
+diff
+±
+2 4 6 8 10 12 14 16
+Subject ID
+Figure9: LOGOcross-validationontrialblock4oftheexperimentaldatasetpublishedbyWagenmakersetal.(2008).
+Verticallinesshowcentral80%posteriorintervalsbasedonquantiles. LOGOcross-validationisperformedbyleaving
+outeachofthe17subjects,refittingthemodelandquantifyingpredictiveperformanceviaELPD.Thebluevertical
+barscorrespondtothemodelvariantwith3localparameters(ν ,α ,τ )andasharedβ forallsubjects,thereddashed
+j j j
+linescorrespondtoamoreflexiblemodelthatestimatesall4parameters(ν ,α ,τ ,β )aslocal. ThecomputedELPD
+j j j j
+differenceindicatesasubstantiallybetterfitofthemoreflexiblemodelwith4localparameterspersubject.
+16
+ytisneD
+)
+y
+y(pgol=
+dple
+i
+i
+i
+−
+|
+dAmortizedBayesianMultilevelModels
+Figure10: Experiment3. Overviewofthehierarchicalmodelofdigitstyleinference.
+Figure9showsexpectedlogpredictivedensity(ELPD;Vehtarietal.,2017)valuesforeachsubjectobtainedbyfirst
+removingsubjectj fromthedataset,generatingsamplesfromtheLOGOposteriorandthenevaluatingthepredictive
+performanceontheleft-outsubject. TheELPDdifferencebetweenthemodelswithvs. withoutsubject-specificβ
+j
+evaluatestoELPD 27.03, whichisseveraltimeslargerthanitsstandarderrorSE 1.73. Thatis, thereis
+diff diff
+≈ ≈
+strongstatisticalevidencethatthemodelwithvaryingβ hasbetterpredictiveperformanceontdataofapreviously
+j
+unseengroup.
+Performing such a model comparison is computationally efficient in an amortized Bayesian inference setting, but
+quickly becomes infeasible when the model is fit using MCMC-based algorithms. In this example, using Stan to
+draw1000samples(after1000warm-updraws)from4chainsinparalleltakesabout6minutesonastandarddesktop
+processor,resultinginatotalruntimeofabout1.5hoursforallsubjects. Incontrast,trainingtheamortizedmodel
+usingML-NPEtakesabout1houronastandarddesktopgraphicscard,subsequentlyallowingalmostinstantinference
+(fraction of a second) of the LOGO posteriors. This comparison demonstrates that the required training time of
+amortizedmethodscanquicklypayoff,eveninscenarioswhereoneisonlyinterestedinevaluatingasingledataseton
+whichcross-validationisperformed. Thisisparticularlytrueifthenumberofgroupsislarge,withgrowinggainsfor
+amortizedmethodsasthenumberofgroupsbecomeslarger.
+3.3 Experiment3: Styleinferenceforhand-drawndigits
+Asafinalexperiment,wedemonstratetheefficacyofouramortizedmultilevelapproximatoronunstructured,high-
+dimensionalobservations. Concretely,theobservationsxareimagesthataregeneratedfromapre-trainedgenerative
+neuralnetworkwhichwetreatasablack-boxsimulator(i.e.,animplicitdatamodel),seeFigure10foranoverview.
+Thesimulatorisageneralincompressibleflownetwork(GIN;Sorrensonetal.,2020)whichhasbeentrainedonthe
+digitsoftheEMNISTdataset(Cohenetal.,2017). TheGINlearnsaclass-conditionalbijectivemappingfromthe
+imagedomaintoadisentangledlatentspace,whichcanbeinterpretedasanonlinearindependentcomponentanalysis
+(ICA).Wetreatthedecoderofthepre-trainedGINasthe“likelihood”whichisparameterizedbythe4dimensionswith
+thehighestvarianceofthelatentspace. Theseparametersencodeglobalstylefeaturesacrossalldigits(seeSorrenson
+etal.,2020, foradetailedanalysis). Additionally, weconditionthedecoderonrandomnoisevariatesν toinduce
+aleatoricuncertaintyinthelearnedbijectivemappingoftheGIN.WeuseABItoapproximatetheposterioroverthe
+latent“style”variablesoftheGINsimulator.
+Our multi-level setting features ten subjects j = 1,...,10. Each subject has a 4-dimensional style vector θ =
+j
+(θ ,...,θ ),andtheentiretyofthesestylesconstitutethelocalparametersθ R10×4. Theglobalparametersarean
+j,1 j,4
+averagestyleµ R4,thestyledispersionσ R4 ,andthe6uniqueelements∈ ofacorrelationmatrixΩ [ 1,1]4×4
+∈ ∈ >0 ∈ −
+betweenstyledimensions. Theforwardsimulationprogramisformalizedas
+µ Normal(0,0.3 I), σ Exponential(5), Ω LKJ(2), (globalparameters)
+∼ · ∼ ∼
+θ Normal(µ,Σ) withΣ=diag(σ)Ωdiag(σ)andj =1,...,J, (localparameters) (24)
+j
+∼
+x =GIN(θ ,ν)withj =1,...,J, (datamodel)
+j j
+17AmortizedBayesianMultilevelModels
+θ θ θ θ
+1 2 3 4 1 1 1 1
+0.1 θ1
+θ2
+0.0
+θ3
+−0.1 θ4
+−1 −1 1 −1 −1 Ground1 t− r1 u−t1
+h
+1 −1 −1 1 Frac0 t.0 ionalr0 a.5 nksta1. t0 istic
+(a)Localparametersof“subject”j =1(restintheAppendix).
+µ µ µ µ
+1 2 3 4 1 1 1 1
+0.1 µ1
+µ2
+0.0
+µ3
+−0.1 µ4
+−1 −1 1 −1 −1 Ground1 t− r1 u−t1
+h
+1 −1 −1 1 Frac0 t.0 ionalr0 a.5 nksta1. t0 istic
+σ σ σ σ
+1 2 3 4 1.5 1.5 1.5 1.5
+0.1 σ1
+σ2
+0.0
+σ3
+−0.1 σ4
+0.0 0.0 0.0 0.0
+0.0 1.5 0.0 1.5 0.0 1.5 0.0 1.5 Frac0 t.0 ionalr0 a.5 nksta1. t0 istic
+Ground truth
+Ω Ω Ω Ω Ω Ω
+1 21 1 31 1 32 1 41 1 42 1 43 Ω21
+0.1 Ω31
+Ω32
+0.0
+Ω41
+−0.1 Ω42
+−1 −1 1 −1 −1 1 −1 −1 1 −1 −1 1 −1 −1 1 −1 −1 1 Fract0 i.0 onalr0 a.5 nkst1 a.0 tΩ ist43ic
+Ground truth
+(b)Recoveryandcalibrationofglobalparameters.
+Figure11: Experiment3. Therecoveryofthelocalparameters(a,left)andglobalparameters(b,left)isattheupper
+limitgiventheepistemicandaleatoricuncertaintyintheprobabilisticmodel. Dotsindicateposteriormeans,vertical
+barsrepresentthesymmetric95%posteriorcredibleintervals. Alllocalandglobalparametersarewell-calibrated(right,
+SBC-ECDFplots).
+whereNormal(µ,Σ)isamultivariatenormaldistributionwithmeanµandcovarianceΣ,Iisthe4 4identitymatrix,
+×
+Exponential(λ)isanexponentialdistributionwithrateλ,LKJ(γ)istheLewandowski-Kurowicka-Joedistribution
+withshapeγ, andGIN : (θ ,ν) x isthedecoderofthepre-trainedglobalincompressible-flownetworkfrom
+j j
+(cid:55)→
+Sorrensonetal.(2020)withstylevectorθ andunmodelednuisanceparametersν.
+j
+Modeltraining Theglobalsummarynetworkh isasettransformer(Leeetal.,2019)whichlearnsa32-dimensional
+ψ
+1
+embeddingfromthelocalsummaryvectorsofallsubjects(seebelow). Thelocalsummarynetworkh extracts32
+ψ
+2
+featuresfromeachsubject’s28 28imagethroughasequenceofresidualconvolutionalblocksfollowedbyaverage
+×
+pooling. Boththeglobalinferencenetworkf andthelocalinferencenetworkf areaffinecouplingflows. The
+ϕ ϕ
+1 2
+Appendixcontainsdetailsabouttheneuralnetworksandtraininghyperparameters.
+Results Wedraw1000approximateposteriorsamplesfromouramortizedneuralestimatorsandreporttherecovery
+andcalibrationoflocalandglobalparametersinthefollowing. Theapproximateposteriorsfortheglobalparameters
+µ,σ,Ω show excellent calibration (see Figure 11b). While the ground-truths of the average style µ dispersion σ
+canberecoveredwithnear-perfectaccuracy,therecoveryoftheglobalcorrelationmatrixΩisboundedduetothe
+limitedsamplesizeofJ =10subjects. Alllocalparametersofallsubjectscanberecoveredwithexcellentprecision
+andsatisfactorycalibration(SBC;seeFigure11aandFigure13). Thisexperimentunderscoresthescalabilityofour
+amortizedmultilevelapproximatortohighdatadimensions,correlatedparameters,andblack-boxforwardsimulators.
+18
+etamitsE
+etamitsE
+etamitsE
+etamitsE
+ecnereffidFDCE
+ecnereffidFDCE
+ecnereffidFDCE
+ecnereffidFDCEAmortizedBayesianMultilevelModels
+4 Conclusion
+Inthispaper,wedevelopedaframeworkforamortizedBayesianinferenceofmultilevelmodelsusingdeepgenerative
+neuralnetworks. Byexploitingtheprobabilisticsymmetriesofmultilevelmodelsandmirroringthemintheneural
+architectures, we not only enable efficient training of the neural approximators but also flexible amortization over
+boththenumberofgroupsandthenumberofobservationswithingroups. Thismeansthat,oncetrained,ourneural
+approximatorsprovidenearinstantinferenceofthemultilevelmodelonanynumberofnewdatasetsordatasubsets.
+We extensively studied our framework in three realistic case studies, where we demonstrate both the amortization
+capabilities and the accuracy of the resulting Bayesian inference as validated by simulation-based calibration and
+comparisonwithStanwherepossible. Tofosterpracticalapplication,weimplementedourmethodsandarchitecturesin
+thePythonlibraryBayesflow(Radevetal.,2023b),whichprovidesefficientanduser-friendlyworkflowsforamortized
+Bayesianinference.
+4.1 FutureWork
+Sofar,researchonamortizedmultilevelmodelinghasfocusedontwo-levelmodelsonly. Thisalreadycoversalotofuse
+cases,butstillleavesoutmanypracticallyscenariosofinferenceondatasetswithmorethantwolevels,whichshould
+beconsideredinfuturework. Anotherchallengeispresentedbymodelswithveryexpensivesimulators,suchthatonly
+veryfew(say,amaximumofacoupleofhundred)simulationsareavailablefortrainingtheneuralapproximators. In
+thislowdataregime,fullyamortizedmethodsmaynotachieveacceptablelevelsofinferenceaccuracyandcalibrations
+(Lueckmannetal.,2021;Schmittetal.,2024a;Radevetal.,2023a;Geffneretal.,2023). Instead,sequentialneural
+methods,whichenabletargetedinferenceonlyforasingledataset(PapamakariosandMurray,2016;Greenbergetal.,
+2019),maybebettersuitedbuthaveyettobedevelopedformultilevelmodels.
+Acknowledgments
+DanielHabermann,LarsKühmichel,StefanRadev,andPaulBürkneracknowledgesupportoftheDeutscheForschungs-
+gemeinschaft(DFG,GermanResearchFoundation)Projects508399956and528702768. MarvinSchmittandPaul
+BürkneracknowledgesupportofCyberValleyProjectCyVy-RF-2021-16, theDFGunderGermany’sExcellence
+Strategy–EXC-2075-390740016(theStuttgartClusterofExcellenceSimTech). MarvinSchmittacknowledgestravel
+supportfromtheEuropeanUnion’sHorizon2020researchandinnovationprogrammeundergrantagreementsNo
+951847(ELISE)andNo101070617(ELSA),andtheAaltoScience-ITproject.
+References
+Agarap,A.F.(2018). “DeepLearningusingRectifiedLinearUnits(ReLU).” arXivpreprint. 9
+Alexanderson,S.andHenter,G.E.(2020). “RobustmodeltrainingandgeneralisationwithStudentisingflows.” arXiv
+preprint. 6
+Ardizzone,L.,Kruse,J.,Wirkert,S.,Rahner,D.,Pellegrini,E.W.,Klessen,R.S.,Maier-Hein,L.,Rother,C.,and
+Köthe,U.(2018). “Analyzinginverseproblemswithinvertibleneuralnetworks.” arXivpreprint. 5
+Ardizzone, L., Lüth, C., Kruse, J., Rother, C., and Köthe, U. (2019). “Guided image generation with conditional
+invertibleneuralnetworks.” arXivpreprint. 5,8
+Arruda,J.,Schälte,Y.,Peiter,C.,Teplytska,O.,Jaehde,U.,andHasenauer,J.(2023). “Anamortizedapproachto
+non-linearmixed-effectsmodelingbasedonneuralposteriorestimation.” bioRxiv. 3
+Avecilla,G.,Chuong,J.N.,Li,F.,Sherlock,G.,Gresham,D.,andRam,Y.(2022). “Neuralnetworksenableefficient
+andaccuratesimulation-basedinferenceofevolutionaryparametersfromadaptationdynamics.” PLoSbiology,20(5):
+e3001633. 5
+Barber, S., Voss, J., and Webster, M. (2015). “The rate of convergence for approximate Bayesian computation.”
+ElectronicJournalofStatistics,9(1). 2
+Bieringer, S., Butter, A., Heimel, T., Höche, S., Köthe, U., Plehn, T., and Radev, S. T. (2021). “Measuring QCD
+splittingswithinvertiblenetworks.” SciPostPhysics,10(6): 126. 5
+Brehmer,J.,Louppe,G.,Pavez,J.,andCranmer,K.(2020). “Mininggoldfromimplicitmodelstoimprovelikelihood-
+freeinference.” ProceedingsoftheNationalAcademyofSciences,117(10): 5242–5249. 2
+Bürkner,P.-C.(2021). “BayesianItemResponseModelinginRwithbrmsandStan.” JournalofStatisticalSoftware,
+100(5): 1–54. 2
+19AmortizedBayesianMultilevelModels
+Chen,Y.,Zhang,D.,Gutmann,M.,Courville,A.,andZhu,Z.(2020). “Neuralapproximatesufficientstatisticsfor
+implicitmodels.” arXivpreprint. 6
+Cohen,G.,Afshar,S.,Tapson,J.,andVanSchaik,A.(2017). “EMNIST:ExtendingMNISTtohandwrittenletters.” In
+2017internationaljointconferenceonneuralnetworks(IJCNN),2921–2926.IEEE. 17
+Cranmer,K.,Brehmer,J.,andLouppe,G.(2020). “Thefrontierofsimulation-basedinference.” Proceedingsofthe
+NationalAcademyofSciences,117(48): 30055–30062. 1,2,4
+Diggle,P.J.andGratton,R.J.(1984). “MonteCarlomethodsofinferenceforimplicitstatisticalmodels.” Journalof
+theRoyalStatisticalSocietySeriesB:StatisticalMethodology,46(2): 193–212. 4
+Durkan,C.,Bekasov,A.,Murray,I.,andPapamakarios,G.(2019). “NeuralSplineFlows.” arXivpreprint. 9
+Eurostat(2022a). “Householddebt,consolidatedincludingNon-profitinstitutionsservinghouseholds-%ofGDP.” 9,
+10
+— (2022b). “International extra-EU air passenger transport by reporting country and partner world regions and
+countries.” 9,10
+—(2022c). “RealGDPpercapita.” 9,10
+Finch,W.H.,Bolin,J.E.,andKelley,K.(2019). MultilevelmodelingusingR. ChapmanandHall/CRC. 1
+Geffner,T.,Papamakarios,G.,andMnih,A.(2023). “CompositionalScoreModelingforSimulation-BasedInference.”
+InKrause,A., Brunskill,E., Cho, K., Engelhardt, B., Sabato,S., andScarlett,J.(eds.), Proceedingsofthe40th
+InternationalConferenceonMachineLearning,volume202ofProceedingsofMachineLearningResearch,11098–
+11116.PMLR. 19
+Gelfand,A.E.(2000). “Gibbssampling.” JournaloftheAmericanStatisticalAssociation,95(452): 1300–1304. 4
+Gelman,A.(2006). “Multilevel(Hierarchical)Modeling: WhatItCanandCannotDo.” Technometrics,48(3): 432–435.
+3
+Gelman,A.,Carlin,J.B.,Stern,H.S.,Dunson,D.B.,Vehtari,A.,andRubin,D.B.(2013). BayesianDataAnalysis.
+ChapmanandHall/CRC. 1
+Gelman, A.andHill, J.(2006). DataAnalysisUsingRegressionandMultilevel/HierarchicalModels. Cambridge
+UniversityPress. 1,2,12
+Gelman,A.,Vehtari,A.,Simpson,D.,Margossian,C.C.,Carpenter,B.,Yao,Y.,Kennedy,L.,Gabry,J.,Bürkner,P.-C.,
+andModrák,M.(2020). “BayesianWorkflow.” arXivpreprint. 2,4,14
+Gershman,S.andGoodman,N.(2014). “Amortizedinferenceinprobabilisticreasoning.” InProceedingsoftheannual
+meetingofthecognitivesciencesociety,volume36. 2,4
+Gloeckler,M.,Deistler,M.,Weilbach,C.,Wood,F.,andMacke,J.H.(2024). “All-in-onesimulation-basedinference.”
+arXivpreprint. 5
+Glorot,X.andBengio,Y.(2010). “Understandingthedifficultyoftrainingdeepfeedforwardneuralnetworks.” InTeh,
+Y.W.andTitterington,M.(eds.),ProceedingsoftheThirteenthInternationalConferenceonArtificialIntelligence
+andStatistics,volume9ofProceedingsofMachineLearningResearch,249–256.ChiaLagunaResort,Sardinia,
+Italy: PMLR. 14
+Goldstein,H.(2011). Multilevelstatisticalmodels. JohnWiley&Sons. 1
+Gonçalves,P.J.,Lueckmann,J.-M.,Deistler,M.,Nonnenmacher,M.,Öcal,K.,Bassetto,G.,Chintaluri,C.,Podlaski,
+W.F.,Haddad,S.A.,Vogels,T.P.,etal.(2020). “Trainingdeepneuraldensityestimatorstoidentifymechanistic
+modelsofneuraldynamics.” Elife,9: e56261. 2,5
+Greenberg,D.,Nonnenmacher,M.,andMacke,J.(2019). “AutomaticPosteriorTransformationforLikelihood-Free
+Inference.” InProceedingsofthe36thInternationalConferenceonMachineLearning,2404–2414.PMLR. ISSN:
+2640-3498. 19
+Heinrich,L.,Mishra-Sharma,S.,Pollard,C.,andWindischhofer,P.(2023). “HierarchicalNeuralSimulation-Based
+InferenceOverEventEnsembles.” 3,6
+Hochreiter,S.andSchmidhuber,J.(1997). “LongShort-TermMemory.” NeuralComputation,9(8): 1735–1780. 9
+Hoffman,M.,Sountsov,P.,Dillon,J.V.,Langmore,I.,Tran,D.,andVasudevan,S.(2019). “NeutralizingBadGeometry
+inHamiltonianMonteCarloUsingNeuralTransport.” arXivpreprint. 2
+Huang,D.,Bharti,A.,Souza,A.,Acerbi,L.,andKaski,S.(2024). “Learningrobuststatisticsforsimulation-based
+inferenceundermodelmisspecification.” AdvancesinNeuralInformationProcessingSystems,36. 5
+20AmortizedBayesianMultilevelModels
+Kingma,D.P.andBa,J.(2014). “Adam: AMethodforStochasticOptimization.” arXivpreprint. 9
+Kobyzev,I.,Prince,S.J.,andBrubaker,M.A.(2020). “Normalizingflows: Anintroductionandreviewofcurrent
+methods.” IEEETransactionsonPatternAnalysisandMachineIntelligence,43(11): 3964–3979. 5
+Kruse,J.,Ardizzone,L.,Rother,C.,andKöthe,U.(2021). “Benchmarkinginvertiblearchitecturesoninverseproblems.”
+arXivpreprint. 5
+Lavin,A.,Krakauer,D.,Zenil,H.,Gottschlich,J.,Mattson,T.,Brehmer,J.,Anandkumar,A.,Choudry,S.,Rocki,
+K.,Baydin,A.G.,etal.(2021). “Simulationintelligence: Towardsanewgenerationofscientificmethods.” arXiv
+preprint. 4
+Le,T.A.,Baydin,A.G.,andWood,F.(2017). “Inferencecompilationanduniversalprobabilisticprogramming.” In
+ArtificialIntelligenceandStatistics,1338–1348.PMLR. 4
+Lee,J.,Lee,Y.,Kim,J.,Kosiorek,A.,Choi,S.,andTeh,Y.W.(2019). “SetTransformer: AFrameworkforAttention-
+basedPermutation-InvariantNeuralNetworks.” InProceedingsofthe36thInternationalConferenceonMachine
+Learning,3744–3753. 18
+Lee, J., Lee, Y., Kim, J., Kosiorek, A. R., Choi, S., and Teh, Y. W. (2018). “Set Transformer: A Framework for
+Attention-basedPermutation-InvariantNeuralNetworks.” arXivpreprint. 9
+Loshchilov,I.andHutter,F.(2016). “SGDR:StochasticGradientDescentwithWarmRestarts.” arXivpreprint. 9
+Lueckmann,J.-M.,Boelts,J.,Greenberg,D.,Goncalves,P.,andMacke,J.(2021). “BenchmarkingSimulation-Based
+Inference.” InBanerjee,A.andFukumizu,K.(eds.),ProceedingsofThe24thInternationalConferenceonArtificial
+IntelligenceandStatistics,volume130ofProceedingsofMachineLearningResearch,343–351.PMLR. 19
+Margossian,C.C.,Hoffman,M.D.,Sountsov,P.,Riou-Durand,L.,Vehtari,A.,andGelman,A.(2021). “NestedRˆ:
+AssessingtheconvergenceofMarkovchainMonteCarlowhenrunningmanyshortchains.” arXivpreprint. 2
+McGlothlin,A.E.andViele,K.(2018). “Bayesianhierarchicalmodels.” JAMA,320(22): 2365–2366. 1
+Merkle,E.C.,Furr,D.,andRabe-Hesketh,S.(2019). “BayesianComparisonofLatentVariableModels: Conditional
+VersusMarginalLikelihoods.” Psychometrika,84(3): 802–829. 2,14
+Modi,C.,Barnett,A.,andCarpenter,B.(2023). “DelayedrejectionHamiltonianMonteCarloforsamplingmultiscale
+distributions.” BayesianAnalysis,1–28. 2
+Modrák, M., Moon, A. H., Kim, S., Bürkner, P., Huurre, N., Faltejsková, K., Gelman, A., and Vehtari, A. (2023).
+“Simulation-basedcalibrationcheckingforBayesiancomputation: Thechoiceoftestquantitiesshapessensitivity.”
+BayesianAnalysis,1(1): 1–28. 2
+Neal,R.M.(2011). “MCMCUsingHamiltonianDynamics.” InHandbookofMarkovChainMonteCarlo,113–162.
+ChapmanandHall/CRC. 4
+Papamakarios, G. and Murray, I. (2016). “Fast ϵ-free Inference of Simulation Models with Bayesian Conditional
+DensityEstimation.” InAdvancesinNeuralInformationProcessingSystems,volume29.CurranAssociates,Inc. 2,
+19
+Piironen,J.andVehtari,A.(2017). “Sparsityinformationandregularizationinthehorseshoeandothershrinkage
+priors.” ElectronicJournalofStatistics,11(2): 5018–5051. Publisher: TheInstituteofMathematicalStatisticsand
+theBernoulliSociety. 2
+Radev,S.T.,Graw,F.,Chen,S.,Mutters,N.T.,Eichel,V.M.,Bärnighausen,T.,andKöthe,U.(2021). “OutbreakFlow:
+Model-basedBayesianinferenceofdiseaseoutbreakdynamicswithinvertibleneuralnetworksanditsapplicationto
+theCOVID-19pandemicsinGermany.” PLoScomputationalbiology,17(10): e1009472. 2
+Radev,S.T.,Mertens,U.K.,Voss,A.,Ardizzone,L.,andKothe,U.(2020). “BayesFlow:LearningComplexStochastic
+ModelsWithInvertibleNeuralNetworks.” IEEETransactionsonNeuralNetworksandLearningSystems,33(4):
+1452–1466. 2,4,5,6
+Radev,S.T.,Schmitt,M.,Pratz,V.,Picchini,U.,Köthe,U.,andBürkner,P.-C.(2023a). “JANA:JointlyAmortized
+NeuralApproximationofComplexBayesianModels.” InEvans,R.J.andShpitser,I.(eds.),Proceedingsofthe39th
+ConferenceonUncertaintyinArtificialIntelligence,volume216ofProceedingsofMachineLearningResearch,
+1695–1706.PMLR. 19
+Radev,S.T.,Schmitt,M.,Schumacher,L.,Elsemüller,L.,Pratz,V.,Schälte,Y.,Köthe,U.,andBürkner,P.-C.(2023b).
+“BayesFlow: AmortizedBayesianWorkflowsWithNeuralNetworks.” JournalofOpenSourceSoftware,8(89): 5702.
+3,8,19
+Ratcliff,R.,Smith,P.L.,Brown,S.D.,andMcKoon,G.(2016). “Diffusiondecisionmodel: Currentissuesandhistory.”
+Trendsincognitivesciences,20(4): 260–281. 13
+21AmortizedBayesianMultilevelModels
+Ritchie,D.,Horsfall,P.,andGoodman,N.D.(2016). “Deepamortizedinferenceforprobabilisticprograms.” arXiv
+preprint. 4
+Robert,C.P.etal.(2007). TheBayesianchoice: fromdecision-theoreticfoundationstocomputationalimplementation,
+volume2. Springer. 3
+Rodrigues,P.L.C.,Moreau,T.,Louppe,G.,andGramfort,A.(2021). “HNPE:LeveragingGlobalParametersfor
+NeuralPosteriorEstimation.” 3
+Roeder,G.,Grant,P.,Phillips,A.,Dalchau,N.,andMeeds,E.(2019). “Efficientamortisedbayesianinferencefor
+hierarchical and nonlinear dynamical systems.” In International Conference on Machine Learning, 4445–4455.
+PMLR. 2
+Schmitt,M.,Bürkner,P.-C.,Köthe,U.,andRadev,S.T.(2022). “DetectingModelMisspecificationinAmortized
+BayesianInferencewithNeuralNetworks.” 5
+Schmitt,M.,Habermann,D.,Köthe,U.,Bürkner,P.-C.,andRadev,S.T.(2024a). “LeveragingSelf-Consistencyfor
+Data-EfficientAmortizedBayesianInference.” ProceedingsoftheInternationalConferenceonMachineLearning
+(ICML). 19
+Schmitt,M.,Pratz,V.,Köthe,U.,Bürkner,P.-C.,andRadev,S.T.(2024b). “ConsistencyModelsforScalableandFast
+Simulation-BasedInference.” arXivpreprint. 5
+Sharrock,L.,Simons,J.,Liu,S.,andBeaumont,M.(2022). “SequentialNeuralScoreEstimation: Likelihood-Free
+InferencewithConditionalScoreBasedDiffusionModels.” 5
+Sisson,S.A.andFan,Y.(2011). “Likelihood-freeMCMC.” HandbookofMarkovChainMonteCarlo,313–335. 2
+Sisson,S.A.,Fan,Y.,andBeaumont,M.A.(2018). “OverviewofABC.” 2
+Sorrenson,P.,Rother,C.,andKöthe,U.(2020). “DisentanglementbyNonlinearICAwithGeneralIncompressible-flow
+Networks(GIN).” InInternationalConferenceonLearningRepresentations. 17,18
+StanDevelopmentTeam(2024). “StanModelingLanguageUsersGuideandReferenceManual,2.31.0.”
+URLhttps://mc-stan.org 2
+Steele,F.(2008). “Multilevelmodelsforlongitudinaldata.” JournaloftheRoyalStatisticalSocietySeriesA:Statistics
+inSociety,171(1): 5–19. 2
+Stuhlmüller,A.,Taylor,J.,andGoodman,N.(2013). “Learningstochasticinverses.” Advancesinneuralinformation
+processingsystems,26. 4
+Talts,S.,Betancourt,M.,Simpson,D.,Vehtari,A.,andGelman,A.(2018). “ValidatingBayesianInferenceAlgorithms
+withSimulation-BasedCalibration.” arXivpreprint. 2,4,14
+Tran,D.,Ranganath,R.,andBlei,D.(2017). “Hierarchicalimplicitmodelsandlikelihood-freevariationalinference.”
+AdvancesinNeuralInformationProcessingSystems,30. 2
+Vehtari,A.,Gelman,A.,andGabry,J.(2017).“PracticalBayesianmodelevaluationusingleave-one-outcross-validation
+andWAIC.” StatisticsandComputing,27(5): 1413–1432. 2,4,14,17
+Vehtari,A.,Simpson,D.,Gelman,A.,Yao,Y.,andGabry,J.(2024). “ParetoSmoothedImportanceSampling.” Journal
+ofMachineLearningResearch,25(72): 1–58. 14
+vonKrause,M.,Radev,S.T.,andVoss,A.(2022). “Mentalspeedishighuntilage60asrevealedbyanalysisofovera
+millionparticipants.” Naturehumanbehaviour,6(5): 700–708. 2,4,5
+Wagenmakers,E.-J.,Ratcliff,R.,Gomez,P.,andMcKoon,G.(2008). “Adiffusionmodelaccountofcriterionshiftsin
+thelexicaldecisiontask.” JournalofMemoryandLanguage,58(1): 140–159. 14,16
+Wehenkel,A.,Behrmann,J.,Miller,A.C.,Sapiro,G.,Sener,O.,Cuturi,M.,andJacobsen,J.-H.(2023). “Simulation-
+basedinferenceforcardiovascularmodels.” arXivpreprint. 2
+Wildberger,J.,Dax,M.,Buchholz,S.,Green,S.,Macke,J.H.,andSchölkopf,B.(2024). “FlowMatchingforScalable
+Simulation-BasedInference.” AdvancesinNeuralInformationProcessingSystems,36. 5
+Yao,Y.,Pirš,G.,Vehtari,A.,andGelman,A.(2022). “Bayesianhierarchicalstacking: Somemodelsare(somewhere)
+useful.” BayesianAnalysis,17(4): 1043–1071. 1
+Yao,Y.,Vehtari,A.,Simpson,D.,andGelman,A.(2018). “Yes,butDidItWork?: EvaluatingVariationalInference.”
+InProceedingsofthe35thInternationalConferenceonMachineLearning,5581–5590.PMLR. ISSN:2640-3498. 2
+Zhang,L.,Carpenter,B.,Gelman,A.,andVehtari,A.(2022). “Pathfinder: Parallelquasi-Newtonvariationalinference.”
+JournalofMachineLearningResearch,23(306): 1–49. 2
+Zhang, Y. and Mikelsons, L. (2023). “Solving stochastic inverse problems with stochastic bayesflow.” In 2023
+IEEE/ASMEInternationalConferenceonAdvancedIntelligentMechatronics(AIM),966–972.IEEE. 2
+22AmortizedBayesianMultilevelModels
+A Experiment2: Varyingsimulationbudgets
+Tobetterunderstandtherelationshipbetweensimulationbudgetandqualityofposteriorinference,werefitthediffusion
+decisionmodelwithnetworktrainingbudgetsof1000,2000,5000,10000and20000simulateddatasets. Foreach
+ofthesemodels,wequantifyposteriorfidelitybycomputingthemaximummeandiscrepancy(MMD)betweenthe
+posteriorconditionedontheexperimentaldatadescribedinparagraphPosteriorinferenceandtheresultsobtainedby
+Stan(Figure12).
+1.0
+0.5
+0.0
+1000 2000 5000 10000 20000
+simulation budget
+Figure12: MMDbetweentheposteriorobtainedbyML-NPEonexperimentaldataandareferenceposteriorobtained
+byfittingthesamemodelinStan. Foreachsimulationbudget,werepeatmodelfittingthreetimesondifferenttraining
+data. Errorbarsshow95%confidenceintervalsquantifyingvariationinMMDbetweenthe21trialblocks.
+B Experiment3: Details
+Theglobalinferencenetworkisanaffinecouplingflowwith6couplinglayers,eachofwhichfeatures2denselayers
+with128units,5%dropout,andkernelregularizationwithstrength10−4. Thelocalinferencenetworkisanaffine
+couplingflowwith10couplinglayers,eachofwhichfeaturesonedenselayerwith512units,nodropout,andkernel
+regularizationwithstrength10−4. Thelocalsummarynetworkisaconvolutionalneuralnetwork(CNN)withresidual
+connections, Mish activation, and He Normal initialization, followed by average pooling. The filter sizes of the
+convolutionallayersare32–64–32–32–32(output). Theglobalsummarynetworkisasettransformerwith32output
+dimensions,32inducingpoints,2denselayers,and2attentionblocks. Theneuralnetworksaretrainedfor200epochs
+withabatchsizeof128and500iterationsperepoch. WeusetheAdamoptimizerwithaninitiallearningrateof10−3
+andcosinedecay.
+23
+DMMAmortizedBayesianMultilevelModels
+θ θ θ θ SBC
+1 2 3 4
+Ground truth
+Figure13: Experiment3. Ouramortizedmultilevelapproximatorshowsexcellentrecoveryandsatisfactorysimulation-
+basedcalibrationforallparametersandsubjects. Themaintextshowstheresultsofsubject1(Figure11a).
+24
+detamitsE
+1
+tcejbuS
+2
+tcejbuS
+3
+tcejbuS
+4
+tcejbuS
+5
+tcejbuS
+6
+tcejbuS
+7
+tcejbuS
+8
+tcejbuS
+9
+tcejbuS
+01
+tcejbuS
