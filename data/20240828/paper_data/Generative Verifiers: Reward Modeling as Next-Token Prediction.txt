@@ -1,0 +1,1268 @@
+2024-8-28
+Generative Verifiers: Reward Modeling as
+Next-Token Prediction
+1,2 1,3* 1,4* 1 1 1
+LunjunZhang ,ArianHosseini ,HritikBansal ,MehranKazemi ,AviralKumar andRishabhAgarwal
+*CoreContribution,1GoogleDeepMind,2UniversityofToronto,3Mila,4UCLA
+Verifiersorrewardmodelsareoftenusedtoenhancethereasoningperformanceoflargelanguagemodels
+(LLMs). AcommonapproachistheBest-of-Nmethod,whereNcandidatesolutionsgeneratedbytheLLM
+are ranked by a verifier, and the best one is selected. While LLM-based verifiers are typically trained as
+discriminativeclassifierstoscoresolutions,theydonotutilizethetextgenerationcapabilitiesofpretrained
+LLMs. Toovercomethislimitation,weinsteadproposetrainingverifiersusingtheubiquitousnext-token
+predictionobjective,jointlyonverificationandsolutiongeneration. Comparedtostandardverifiers,such
+generativeverifiers(GenRM)canbenefitfromseveraladvantagesofLLMs: theyintegrateseamlesslywith
+instructiontuning,enablechain-of-thoughtreasoning,andcanutilizeadditionalinference-timecompute
+via majority voting for better verification. We demonstrate that when using Gemma-based verifiers on
+algorithmicandgrade-schoolmathreasoningtasks,GenRMoutperformsdiscriminativeverifiersandLLM-as-
+a-Judge,showinga16−64%improvementinthepercentageofproblemssolvedwithBest-of-N.Furthermore,
+weshowthatGenRMscalesfavorablyacrossdatasetsize,modelcapacity,andinference-timecompute.
+1. Introduction
+Self-Consistency LLM-as-a-Judge Discriminative RM GenRM GenRM-CoT
+Last Letter Concat Word Sorting Grade-School Math (GSM8K)
+20%
+60% 90%
+15%
+85%
+40%
+10%
+80%
+20%
+5% 75%
+Figure1|ComparingGenRMwithstandardverificationapproachesonseveralreasoningtasks,intermsofBest-
+of-Nperformance. Byrecastingrewardmodelingasnext-tokenprediction,GenRMoutperformsotherapproaches
+toimproveBest-of-Nperformance. Thehorizontaldottedlinecorrespondstodirectgenerationperformance(Best-
+of-1). GenRM leverages the generation capabilities of LLMs, enabling a finetuned verifier model to effectively
+utilizechain-of-thoughtandmajority-votingatinferencetimetoidentifyreasoningerrors.
+While large language models (LLMs) demonstrate remarkable capabilities, they often confidently make
+logicalandfactualmistakes(Zhangetal.,2023). Thesemistakesposeasignificantchallengeforreasoning
+problems, where a single mistake can invalidate the entire solution. A common strategy to address this
+issue is Best-of-N (Charniak and Johnson, 2005; Cobbe et al., 2021): the LLM generates N candidate
+Correspondingauthor(s):lunjun@cs.toronto.edu,{aviralkumar,rishabhagarwal}@google.com
+© 2024GoogleDeepMind.Allrightsreserved
+4202
+guA
+72
+]GL.sc[
+1v04251.8042:viXra
+devloS
+smelborP
+%
+)23-fo-tseB( )23-fo-tseB( )61-fo-tseB(GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Problem:Timdecidestocancelhiscablesubscriptionandgetstreamingservices.HegetsNetflixfor$10amonth.Hulu
+andDisneyPlusnormallycost$10amontheachbuthesaves20%forbundling. Howmuchmoneydoeshesaveby
+cancellinghis$60cablepackage?
+Solution:Timpays$60forcable.HegetsNetflixfor10andthebundleofHuluandDisneyPluscosts$10*80%=$8.
+Sohepays$10+$8=$18forNetflixandthebundle.Nowhesaves$60-$18=$42.Theansweris42.
+DiscriminativeRMcorrectnessscore:0.999
+GenRM-CoT:Let’sverifystepbystep.
+···
+Step3.**ThebundleofHuluandDisneyPluscosts$10*80%=$8.**(Incorrect)
+-ExpectedAnswer:ThebundleofHuluandDisneyPluscosts$10+$10=$20.Withthe20%discount,thetotalcostis
+$20*0.8=$16.···
+Verification:Istheanswercorrect(Yes/No)?No
+GenRM-CoT(MajorityVoting)score:0.0015
+Figure2 | ExampleusinggenerativeverifiersonGSM8Ktest. LLM-generatedsolutionsoftensoundconvincing
+evenwhentheyarewrong,makingverificationachallengingtask. Here,thesolutionisincorrectbecauseithas
+ignored the word ‘each’ in the problem. While the discriminative RM fails to recognize this subtle mistake in
+the solution, our GenRM-CoT verifier reliably detects the error. This is because GenRM-CoT was trained with
+next-tokenpredictiononsyntheticchain-of-thoughtrationales,enablingittoexplicitlyreasonaboutthesolution.
+ThefullverificationoutputcanbefoundinTableC.12.
+solutionsforagivenproblem,andalearnedrewardmodel,referredtoasa“verifier”,ranksthesesolutions
+and picks the most suitable one. The effectiveness of this strategy hinges on how accurate the verifier is,
+making it crucial to identify better approaches for training verifiers.
+On reasoning domains, LLM-based verifiers are typically trained as discriminative reward models (RMs)
+to assign numerical scores to candidate solutions, which is then used to classify them as correct or
+incorrect (Cobbe et al., 2021; Lightman et al., 2023; Wang et al., 2023). However, this scoring approach
+does not utilize the text-generation capabilities LLMs are fundamentally designed for. As a result,
+discriminative RMs miss out on the inherent strengths of generative LLMs, such as unified instruction
+tuning (Chung et al., 2022), chain-of-thought reasoning (Wei et al., 2022), and utilizing additional
+inference-time computation for better performance (Brown et al., 2024; Wang et al., 2022). While
+LLM-as-a-Judge (Zheng et al., 2024), which simply prompts off-the-shelf generative LLMs, also offer the
+above advantages, it often underperforms trained LLMs-based verifiers, especially on reasoning.
+In this work, we propose training verifiers with next-token prediction, which we call GenRM, to leverage
+the text generation capabilities of LLMs (Figure 2). Concretely, to produce a numerical score for a
+solution, the verifier now uses a prompt such as ‘Is the answer correct?’, and represents the score as
+the probability of a single text token (e.g., ‘Yes’ or ‘No’) under the context and the prompt. GenRM
+naturallysupportsCoTreasoning(Weietal.,2022): itcanbetrainedtoreasonexplicitlybygeneratinga
+verbalizedrationalebeforepredictingcorrectnessusing‘Yes’or‘No’token(Figure3),assumingrationales
+are available during training. We can further boost verification accuracy of CoT verifiers using majority
+voting(Wangetal.,2022): samplingmultipleCoTrationales(votes)andcalculatingtheaveragescoreof
+the ‘Yes’ token across all samples, resulting in a favorable use of more test-time computation. Moreover,
+GenRM’s next-token prediction training enables unifying solution generation with verification, which
+has been difficult (Hosseini et al., 2024), potentially improving verification through positive knowledge
+transfer from solution generation.
+2GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Token Probability
+Problem Finetuned Verifier “Is the answer correct (Yes/No)?” Yes 0.4 r
+GenRM
+No
+Solution
+Other tokens
+“Let’s verify step by step.” Average
+Finetuned Verifier Verification CoT No 0.2
+Problem 1
+GenRM-CoT … Yes 0.9 r
+Solution
+Verification CoT Yes 0.8
+N
+Figure 3 | An illustration of generative verifiers, namely GenRM and GenRM-CoT. Given a question and a
+candidate solution, GenRM directly finetunes an LLM to answer the question ‘Is the answer correct (Yes/No)?’
+via SFT on the next-token response corresponding to either ‘Yes’ or ‘No’. During inference, the verifier score is
+obtained by extracting the probability of the ‘Yes’ token (4). In comparison, GenRM-CoT finetunes a LLM to
+produce verification chain-of-thought (CoT) rationale before yielding the final Yes/No token. At test-time, we
+sample multiple CoT rationales and use majority voting to compute the average probability of ‘Yes’, enabling
+GenRM-CoTtoutilizeadditionalinference-computeforbetterverification.
+GenRM outperforms discriminative RMs, LLM-as-a-Judge, and self-consistency on algorithmic string
+manipulation and math reasoning tasks (Figure 1), namely Last Letter Concat (Wei et al., 2022),
+Word Sorting from Big-Bench Hard (Suzgun et al., 2022), and GSM8K (Cobbe et al., 2021). Best-
+of-N performance with GenRM-CoT further improves when using majority-voting, nearly matching
+performancewithoracleverifieronalgorithmicreasoningtasks. OnGSM8K(Figure1,right),whenusing
+aGemma-9BGenRM-CoTmodeltoverifytheoutputsofGemini1.0Pro,weobservea20%improvement
+in terms of the number of problems solved (73% → 92.8%), surpassing GPT-4 and Gemini 1.5 Pro.
+Moreover, we find that generative verifiers exhibit scales favorably as we increase dataset size as well as
+model capacity. Furthermore, GenRM-CoT also outperforms LLM-as-a-Judge as we scale inference-time
+compute by sampling multiple verification rationales for majority voting. Overall, these results suggest
+that generative verifiers hold significant potential for improving the reasoning capabilities of LLMs.
+2. Preliminaries
+Anautoregressivelanguagemodelgeneratesanoutputsequencey = (𝑦 1,𝑦 2,...,𝑦 𝑇) givenainputcontext
+x (e.g., math problem) by predicting tokens one at a time, based on the previously generated tokens.
+Assuming that the language model is parameterized by 𝜃, the conditional probability distribution of
+generating a sequence y given context x is
+𝑇
+(cid:214)
+𝑝 𝜃(y | x) = 𝑝 𝜃(𝑦
+𝑡
+| x,𝑦 <𝑡), (1)
+𝑡=1
+with the convention 𝑦 <1 = ∅ and y<𝑡 = (𝑦 1,𝑦 2,...,𝑦 𝑡−1). For ease of notation, we define 𝑝 𝜃(𝑦 𝑡 | x) :=
+𝑝 𝜃(𝑦
+𝑡
+| y<𝑡,x). For a vocabulary size 𝑀, the probability of predicting the 𝑡-th token 𝑦 𝑡, 𝑝 𝜃(𝑦
+𝑡
+| x),
+is determined using a softmax with temperature 𝛾 on logit scores 𝑧 of all the tokens: 𝑝 𝜃(𝑦
+𝑡
+| x) =
+3GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+(cid:205) 𝑖𝑀
+=e 1xp ex(𝑧 p𝑡 (/ 𝑧𝛾 𝑖) /𝛾), where 𝑧
+𝑡
+= logit 𝜃(𝑦
+𝑡
+| x,y<𝑡). Highervaluesof 𝛾 introducemorerandomness,whilesetting
+temperature 𝜏 = 0 makes the output deterministic, which corresponds to greedy decoding.
+Next-token prediction is the typical approach for pre-training and fine-tuning LLMs. In particular,
+supervised fine-tuning (SFT) minimizes the cross-entropy loss between the model’s predicted next token
+and the actual target token in a given sequence. Given a dataset D = {(𝑥,𝑦)} of input context x and
+target response y, the SFT loss is given by:
+(cid:34) |y| (cid:35)
+∑︁
+LSFT(𝜃,D) = −𝔼
+(x,y)∼D
+log𝑝 𝜃(𝑦
+𝑡
+| x,y<𝑡) . (2)
+𝑡=1
+Best-of-N is a widely-used approach to improve the reasoning performance of LLMs (Cobbe et al., 2021;
+Lightman et al., 2023). Specifically, given a test problem, we sample N candidate solutions from a
+generator LLM. These candidates are then scored using a learned verifier or reward model, and the
+highest-scoring solution is selected as the final answer. A better verifier increases the chance of selecting
+the correct solution, improving test accuracy.
+Discriminative Verifiers. The prevalent approach of training verifiers for reasoning domains is to
+fine-tune an LLM as a classifier on a dataset of correct and incorrect solutions generated from a fixed
+LLM, using the binary cross-entropy loss. To do so, these verifiers directly assign a numerical score
+𝑟 𝜃(x,y) ∈ [0,1] to estimate the probability that a solution y is correct for a problem x. As such, these
+verifiersdonotutilizethetextgenerationthecapabilitiesofLLMs. Givenareward-modeling(RM)dataset
+D
+𝑅𝑀
+= D incorrect(cid:208) Dcorrect, we train discriminative RMs as follows:
+L Discriminative-RM(𝜃,D 𝑅𝑀) =−𝔼
+(x,y+)∼D𝑐𝑜𝑟𝑟𝑒𝑐𝑡
+(cid:2)log𝑟 𝜃(x,y+)(cid:3) −𝔼
+(x,y−)∼D𝑖𝑛𝑐𝑜𝑟𝑟𝑒𝑐𝑡
+[log(1−𝑟 𝜃(x,y−))], (3)
+where 𝑟 𝜃(x,y) = sigmoid(𝑧 𝑐𝑙𝑠), and 𝑧
+𝑐𝑙𝑠
+= logit 𝜃(𝑐𝑙𝑠 | y,x)
+wherey+ arecorrectandy− areincorrectsolutions,and 𝑐𝑙𝑠 correspondstoaspecialvocabularytoken. In
+this work, we always use a balanced data mixture between correct (Dcorrect) and incorrect (D incorrect)
+problem-solution pairs.
+3. GenRM: Verification as Next-Token Prediction
+Discriminative LLM-based verifiers (3) do not utilize the text generation capabilities of pretrained LLMs.
+Toaddressthisissue,weproposetrainingverifiersorthatcangeneratetext,whichwecallGenRM,using
+standard next-token prediction (2). To do so, GenRM represents solution correctness using the LLM’s
+probability distribution over tokens, instead of predicting a separate numerical score. This keeps the
+generationabilitiesofGenRMintactastheverificationdecisionisjustanothertoken,whilealsoenabling
+several advantages that come for “free” with LLMs such as unified training for solution generation and
+verification, chain-of-thought reasoning, and inference-time computation.
+3.1. Direct Verifier
+Initssimplestform,GenRMpredictswhetherasolutioniscorrectusingasingle‘Yes’or‘No’token(Figure3,
+top). Thiscanbedonebysimplymaximizinglog𝑝 𝜃(‘Yes’ | (x,y+))forcorrectsolutionsy+andlog𝑝 𝜃(‘No’ |
+4GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+(x,y−)) for incorrect solutions y−. To do so, we minimize the SFT loss in (2) on the dataset D
+Direct
+containing problem-solution pairs as input and a single ‘Yes‘ or ‘No’ token as target:
+D Direct = {(x,y+,I),‘Yes’}(cid:208) {(x,y−,I),‘No’} , I = ‘Is the answer correct (Yes/No)?’
+At inference, we use the likelihood of the ‘Yes’ token as the verifier’s score for re-ranking solutions:
+𝑟 Direct(x,y) = 𝑝 𝜃(Yes | x,y,I). (4)
+This score takes into account the verifier’s confidence about its correctness prediction, which reduces the
+chance of being miscalibrated and wrong at test-time when using a binary ‘Yes’ or ‘No’ prediction.
+3.2. Unifying Generation and Verification
+GenRM seamlessly integrates reward modelling, which distinguishes between correct and incorrect
+solutions, with SFT for generating correct solutions. This can be done by simply changing the data
+mixture in the SFT loss (2) to include both verification and generation tasks. Given a verification dataset
+D verify,whichcanbeD
+Direct
+orDCoT (discussedbelow)ofproblems-solutionpairswithcorrectnesstokens
+(optionally with CoT rationales), GenRM minimizes the loss:
+LGenRM(𝜃,D verify) = LSFT(𝜃,D verify)+𝜆LSFT(𝜃,Dcorrect) , (5)
+where𝜆 > 0isahyperparameterthatcontrolsthedatamixtureratiobetweensolutionverification(D )
+verify
+and generating correct solutions (Dcorrect). This unified training can improve verifier and generation
+performance via positive transfer between these two related tasks: how to generate a correct solution,
+and whether a solution is correct. By default, we train GenRM verifiers using the unified loss in (5).
+3.3. Chain-of-Thought Verifiers (GenRM-CoT)
+Since verification often involves complex reasoning, generative verifiers can naturally benefit from CoT
+reasoning (Wei et al., 2022). Specifically, we can generate intermediate reasoning steps or critique
+(CoT) before making a decision about the solution correctness, which may identify subtle reasoning
+errors missed by direct verifiers (Figure 3, bottom). To train CoT verifiers, we can minimize the SFT loss
+LGenRM on the dataset DCoT containing problem-solution pairs as inputs, and corresponding verification
+rationales v appended with a final question I and ‘Yes’ or ‘No’ token as targets:
+CoT
+DCoT = {(cid:0) x,y+,I CoT(cid:1),(v CoT,I,‘Yes’)}(cid:208) {(x,y−,I CoT),(v CoT,I,‘No’)} , I
+CoT
+= ‘Let’s verify step by step.’
+Notably, these rationales can either be human-generated or LLM-generated, both of which we explore in
+this work. During inference, we first generate a CoT rationale v from GenRM-CoT and then use the
+CoT
+probability of ‘Yes’ for assigning the correctness score:
+𝑟 CoT(x,y) = 𝑝 𝜃(Yes | x,y,I CoT,v CoT,I), where v
+CoT
+∼ 𝑝 𝜃(· | x,y,I CoT), (6)
+Compared to (4) that directly uses the instruction I to produce a score, we can see that the above CoT
+reward additionally conditions on I and self-generated v before getting a score via instruction I.
+CoT CoT
+5GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Inference-time Compute for CoT verifier When sampling verification CoTs, the generative verifier may
+use different reasoning paths and yield different correctness probabilities for the same problem-solution
+pair. As such, we would like to marginalize out the intermediate reasoning paths to select the most
+consistent correctness answer (Wang et al., 2022). To do so, we can use majority voting where we first
+generate 𝐾 verification CoT rationales, and average the CoT-verifier score for these rationales:
+𝑟 MajVote@K(x,y) =
+𝐾1 ∑︁𝐾
+𝑝 𝜃
+(cid:16)
+Yes | x,y,I CoT,v C(𝑖 o)
+T,I(cid:17)
+, where v C(𝑖 o)
+T
+∼ 𝑝 𝜃(· | x,y,I CoT) (7)
+𝑖=1
+Since individual verification rationales from CoT verifiers can have reasoning errors, majority voting can
+mitigatetheimpactofsucherrorsbyaveragingcorrectnessscoresacrossmultiplerationales. Importantly,
+this means that GenRM-CoT can leverage additional inference-time compute to improve its accuracy,
+which discriminative verifiers cannot do. Unless otherwise specified, we report GenRM-CoT performance
+based on majority voting with 32 votes, that is, 𝐾 = 32 in (7).
+Synthetic Verification Rationales for CoT Verifier. Verifying LLM solutions with human-generated
+rationalescanbecomeincreasinglyexpensiveandchallengingasLLMssurpasshumanreasoningabilities.
+To address this challenge, we explore using synthetically-generated rationales on GSM8K. One naive
+approachistosimplyusethe‘Let’sverifystepbystep’ promptgivenaproblem-solutionpair,andfilterthe
+generated rationales based on whether they correctly verify the correctness of a solution. However, such
+rationales are often of poor quality due to 50% accuracy from random guessing.
+Instead, we use reference-guided grading (Zheng et al., 2024) to improve the quality of synthetic
+rationales. Specifically, we provide a reference solution in addition to the problem and solution to verify
+(see Table A.2), making it easier for an LLM to point out any reasoning error in the provided solution.
+Here, a reference solution is defined as any model-generated solution that manages to arrive at the
+correct final answer. Note that reference-guided grading can only be used during training, as we do not
+have reference solutions for test problems.
+4. Experiments
+The goal of our experiments is to demonstrate the efficacy of next-token prediction compared to other
+approaches for training verifiers. To this end, we compare GenRM and standard verifiers on a number of
+reasoning problems with the goal of answering the following research questions:
+• How does GenRM compare to standard discriminative verifiers in reasoning domains?
+• Does unified training of GenRM improve generation and verification performance?
+• Can GenRM effectively utilize CoT reasoning and test-time compute to improve its performance?
+• How does GenRM scale with data and model size?
+Tasks and Data Generation. We focus on the following reasoning tasks (more details in Appendix A):
+• Last Letter Concatenation (Wei et al., 2022): Given a list of words, the task is to concatenate the
+last letters of each word (for instance, "Noah Paul Elisha Rebecca" → "hlaa"). We train verifiers on
+lists of lengths 2−4, and evaluate the verifier on the out-of-distribution (OOD) setting of length 6.
+• Word Sorting (Suzgun et al., 2022) Given a list of words, sort them in alphabetical order. For a
+sorting task, verification is clearly easier than generating the correct solution. Similar to the last
+6GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Problem: Carol spends 4 hours writing a song, half that much time recording it, and 90 minutes editing it. What
+percentageofhertotalworktimedidshespendediting?
+Solution:Halfof4hoursis2hours.Sothetimespentrecordingis2hours.Addtheeditingtimeof90minutesandthe
+totaltimefortheentireprojectis4+2+1.5=7.5hours.Thatmeansshespent(90/7.5)*100=12%ofthetotal
+timeediting.Theansweris12.
+DiscriminativeRMcorrectnessscore:0.8414
+GenRM-CoT:Let’sverifystepbystep.
+···
+Step3:Thatmeansshespent(90/7.5)*100=12%ofthetotaltimeediting.
+ExpectedAnswer:Incorrect.Theeditingtimeshouldbeinhours,soitshouldbe(1.5/7.5)*100=20%.
+Verification:Istheanswercorrect(Yes/No)?No
+GenRM-CoT(MajorityVoting)score:0.2498
+Figure4 | AnexamplewhereGenRM-CoTcatchesasubtlemistakethatthediscriminativeverifierisunableto
+catch. Thecandidatesolutiondidnotconvert90minutesinto1.5hoursbeforedividingitby7.5. However,the
+discriminativeverifierwasnotabletodetectthismistakelikelybecausethesolutiondoesstillappeartoproducea
+valid-soundingpercentage90/7.5=12. OurproposedGenRM-CoTmodelisabletoidentifythismistakeusing
+step-by-stepgenerativeverification. ThefullverificationoutputcanbefoundinTableC.11.
+letter concatenation task, we train verifiers on up to 4-words, and evaluate length-generalization
+performance on 5 word examples.
+• GSM8K (Cobbe et al., 2021) is a widely-used dataset to evaluate grade-school math reasoning
+capabilities of LLMs. For training, we use at most 16 correct and 16 incorrect solutions per problem.
+We evaluate the verifier performance on 16 solutions per problem in the test set.
+Baselines. We compare GenRM to the following standard approaches for verification:
+• Discriminative (standard) RM (ORM) (Cobbe et al., 2021): The prevalent approach for training
+verifiers for test-time re-ranking on reasoning tasks, as discussed in §2, serves as our main baseline.
+• Self-consistency (Wang et al., 2022): A simple approach to use test-time compute without verifiers:
+sample multiple solutions from the LLM generator and pick the most common answer.
+• LLM-as-a-Judge (Zheng et al., 2024): This approach uses an off-the-shelf pretrained LLM for
+verification. To do so, we use a CoT prompt to produce 32 verification rationales that is used for
+correctness prediction and pick the majority vote correctness answer.
+Evaluation protocol. Following prior work (Cobbe et al., 2021; Lightman et al., 2023), we primarily use
+Best-of-N performance (in terms of the percentage of problems solved) of a fixed LLM (generator) (§2)
+with learned verifiers, and report average performance on the test set. Best-of-N evaluates what fraction
+of solutions chosen by the verifier are correct. For some results, we also report RM accuracy on the test
+set or a held-out validation set, which measures whether the verifier accurately classifies incorrect and
+correct solutions. While these two metrics are often correlated, RM accuracy only evaluates the verifier’s
+point-wise accuracy, while Best-of-N evaluates its group-wise ranking performance.
+Models. For training discriminative RMs and GenRM, we use open-weights Gemma models (Team et al.,
+2024),specificallyGemma-2Bforalgorithmictasks,andGemma2B,7B,and9BforGSM8K.Forsolution
+generationaswellasLLM-as-a-Judge,weuseGemma2BforalgorithmictasksandGemini1.0Pro(Team
+7GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Problem:Digimonhadits20thanniversary.WhenitcameoutJohnwastwiceasoldasJim.IfJohnis28howoldis
+Jim?
+Solution:LetJim’sagebexwhenDigimoncameout.ThatmeansJohn’sageis2xwhenDigimoncameout.
+20yearsago,John’sagewas2x-20(currentage-20years)andJim’sagewasx-20(currentage-20years).
+Weknowthat2x-20=28(sinceJohn’scurrentageis28)
+2x=48
+x=24
+So,whenDigimoncameout,Jimwas24.Sinceit’sbeen20years,Jimisnow24+20=44yearsold.Theansweris44.
+DiscriminativeRMscore:0.9778
+GenRM-CoT:Let’sverifystepbystep.
+···
+Step2:20yearsago,John’sagewas2x-20(currentage-20years)andJim’sagewasx-20(currentage-20years).
+(Correct)
+···
+Step6:So,whenDigimoncameout,Jimwas24.Sinceit’sbeen20years,Jimisnow24+20=44yearsold.(Incorrect)
+**ExpectedAnswer:**
+SinceJohnwastwiceasoldasJimwhenDigimoncameout20yearsago,andJohnis28now,wecancalculateJim’sage.
+LetJim’sage20yearsagobex.Thenweknowthat2x=28-20=8,sox=4.Therefore,Jim’sagenowis4+20=24.
+Theansweris24.
+···
+Verification:Isthesolutioncorrect(Yes/No)?No
+GenRM-CoT(MajorityVoting)score:0.0000
+Figure5|WhathappenswhenGenRMdoesnotcatchthemistakeinitsfirstpass? Attheendofthestep-by-step
+verification,GenRM-CoTtendstooutputacorrect/incorrecttokensummarizingifthefinalanswerseemswrong,
+similartoadirectGenRMthatonlypredictsYes/No. IfGenRMdeemsthefinalanswerincorrect,itwillattemptto
+solvetheproblemagainusingareasoningpathdifferentfromthesolution. Intheexampleabove,eventhough
+thestep-by-stepverificationfailstofindanymistake,GenRMgivestheproblemanothertryandcorrectlyverifies
+thesolution. FullverificationoutputinFigureC.1. Thisbehavioremergesfromtrainingonsyntheticrationales
+generatedusingthepromptingformatshowninTableA.2.
+et al., 2023) for GSM8K.
+Hyperparameters. By default, all GenRM experiments use unified training for verification with solution
+generation (5), with 𝜆 = 1/3 for algorithmic tasks and 𝜆 = 1/4 for GSM8K. We use the label ‘Verification
+Only’ to indicate GenRMor GenRM-CoT verifiers trained using only verification data (𝜆 = 0). See
+Appendix Appendix B for more details.
+Verification CoT Rationale Generation. For training rationales, we generated ground-truth rationales
+for word sorting and last letter concatenation algorithmically, as shown in Table A.1. On GSM8K, we
+generated rationales using Gemini 1.0 Pro with reference-guided grading (Zheng et al., 2024), with the
+prompt outlined in Table A.2.
+4.1. Comparing GenRM with Prior Verification Approaches
+GenRM,whichdirectlypredictsYes/Notokenforverification,canmatchoroutperformthediscriminative
+RM and other approaches on all the three tasks, as shown in Figure 6. This shows that the next-token-
+prediction loss allows GenRM to tap into the capabilities of pretrained Gemma models more effectively.
+CoT Reasoning Improves Verification. GenRM-CoT, which combines chain-of-thought with majority
+8GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Pass@N (Oracle) LLM-as-a-Judge GenRM
+Self-Consistency Discriminative RM GenRM-CoT
+Last Letter Concat Word Sorting Grade-School Math (GSM8K)
+20%
+95%
+60%
+15% 90%
+40% 85%
+10%
+80%
+20%
+5% 75%
+1 2 4 8 16 32 1 2 4 8 16 32 1 2 4 8 16
+Number of Solutions (N) Number of Solutions (N) Number of Solutions (N)
+Figure6 | Comparinggenerativeverifierswithotherapproaches. GenRMgenerallyoutperformsothermethods,
+and more closely matches the Best-of-N performance with oracle verifier ( Pass@N). Moreover, GenRM with
+majorityvotingisabletoeffectivelyutilizechain-of-thoughtreasoningandtest-timecomputetofurtherimprove
+overdirectGenRMverifier.
+voting, further improves the performance over GenRM.
+In particular, on the two algorithmic tasks with oracle verification CoTs, GenRM-CoT closely matches
+the oracle verifier performance (Pass@N). On GSM8K, GenRM-CoT consistently outperforms all other
+methods, even though the training CoT rationales (generated with Gemini 1.0 Pro) may contain errors.
+Qualitatively, GenRM-CoT is able to detect subtle reasoning errors that are missed by discriminative
+verifiers (see Figure 2, 5,4).
+4.2. Unifying Generation and Verification
+Unifying solution generation with verification, as done by GenRM using the next-token-prediction
+objective, consistently improves verification performance across all tasks, as illustrated in Figure 7. This
+improvement is observed for both direct and CoT-based generative verifiers, suggesting that teaching the
+verifier to imitate correct solutions generally helps.
+Notably, incorporating CoT verification data into the generator’s training mix leads to better solution
+generation performance for the GenRM-CoT verifier itself, as evidenced in Figure 8 by the improved
+Best-of-N scores with the oracle verifier (Pass@N). This suggests that teaching a generator to perform
+verification based on next-token prediction can deepen its understanding of the generation process itself.
+Overall,theaboveresultsindicatetheunifyingsolutiongenerationandverificationismutuallybeneficial.
+4.3. Scaling Data, Model Size, and Inference-time Compute
+Scaling Test-Time Compute with GenRM-CoT can be done by sampling multiple CoTs and conduct
+majority voting, as described in (7). As shown in Figure 9, GenRM-CoT verifier’s performance scales
+gracefully with greater number of votes at test time, under all three Gemma scales (2B, 7B, 9B),
+outperforming greedy decoding performance within 4 votes. Across model scales, the finetuned GenRM-
+9
+)N-fo-tseB(
+devloS
+smelborP
+%GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+GenRM (Verification Only) GenRM GenRM-CoT (Verification Only) GenRM-CoT
+Last Letter Concat Word Sorting GSM8K
+20%
+92%
+18%
+60%
+15%
+90%
+12%
+40%
+10% 88%
+Figure7 | SFToncorrectsolutionsenhancesverificationperformance,bothforGenRMthatdirectlypredicts
+Yes/No,andGenRM-CoTthatusesverificationCoTrationales,acrossalltasksthatweconsider. Here,‘Verification
+Only’correspondstotrainingGenRMorGenRM-CoTonlyonverificationdata,bysetting 𝜆 =0in(5).
+Base LLM SFT (Generation) GenRM-CoT (Verification + Generation)
+Last Letter Concat ( =1/3) Word Sorting ( =1/3) GSM8K ( =1/4)
+80%
+80%
+90%
+60% 60%
+40% 40% 80%
+20% 20%
+70%
+0%
+21 23 21 23 21 23
+Number of Solutions (N) Number of Solutions (N) Number of Solutions (N)
+Figure8 | UnifyinggenerationandverificationboostsGenRM’sgenerationperformance. ComparedtoSFT
+onlyoncorrectsolutions,jointlytrainingongenerationdataandCoTverificationdataresultsinimprovedBest-of-N
+performance(withoracleverifier)forthegenerator. Furthermore,weobservethatthegenerationperformanceof
+GenRM-CoTexhibitsmoreimprovementonalgorithmictasksthanonGSM8K,likelybecausethosetasksuseground
+truthverificationrationaleswhileGSMreliesonsyntheticLLM-generatedrationales,whichmaybeinaccurate.
+CoT verifier outperforms LLM-as-a-Judge, which also utilizes the same CoT approach and number of
+majority votes, but prompts a more capable Gemini 1.0 Pro model than Gemma models.
+Scalingmodelsize. InFigure10,weshowthattheperformanceofgenerativeverifiersscalesuppositively
+with an increase in model capacity. The model scaling experiments use the fixed dataset (32 solutions
+per problem, and for CoT GenRM, 4 rationales per solution). The results show that bigger models are
+able to learn more from the same data, which matches what we expect from scaling model parameter
+counts under the next-token prediction loss.
+DatascalingforCoTverifiers. GenRM-CoTallowsforanadditionalaxisofdatascaling,whichisabsent
+in standard verifiers: scaling the number of rationales per solution. On GSM8K, we find that using
+multiple rationales per solution has a substantial effect on the performance of generative verifiers. We
+suspectthatthisisbecausemodel-generated,syntheticrationalesarenoisyinthiscase,suchthattraining
+onmultiplerationalespersolutionandtheassociated“ensembling”effectpreventsthetrainingprocedure
+10
+devloS
+smelborP
+%
+)reifireV
+elcarO(
+N-fo-tseB
+)23-fo-tseB( )23-fo-tseB( )61-fo-tseB(GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+LLM-as-a-Judge (MajVote@K) GenRM-CoT (MajVote@K) GenRM-CoT (Greedy)
+Gemma-2B Gemma-7B Gemma-9B
+90%
+85%
+80%
+1 2 4 8 16 32 1 2 4 8 16 32 1 2 4 8 16 32
+# Sampled CoT Rationales (K) # Sampled CoT Rationales (K) # Sampled CoT Rationales (K)
+Figure9 | ScalingInference-timeComputeforVerification. Byposingrewardmodelingasnext-tokenprediction,
+GenRMcanutilizethepowerfultoolboxfromgenerativeLLMs,suchasChain-of-ThoughtandMajorityVoting,
+toturnadditionaltest-timecomputeintohigherBest-of-Naccuracy. Themorecapablethebasemodel,themore
+effectiveinference-timecomputescalingseemstobecome. Here,thehorizontallinecorrespondstoperformanceof
+GenRM-CoTverifierwithgreedydecoding.
+fromoverfittingtothisnoiseandspuriouscorrelations. SeeFigure11fordetailedcomparisons. BothRM
+Accuracy and Best-of-N Accuracy scales positively on both data axis, with the number of rationales per
+solution having a bigger effect.
+Data scaling for direct GenRM. GenRM trained on verification only data still outperforms standard
+verifiers as we increase the number of solutions per problem on GSM8K (Figure 12, left), demonstrating
+the effectiveness of casting verification as a next-token prediction problem. Across all data scales, unified
+training with solution generation data further boosts the performance of GenRM verifiers, as already
+discussed in §4.2. Moreover, the optimal loss coefficient for solution generation data in GenRM follows
+an inverted U-shape: adding too little or too much negatively impacts verification, while intermediate
+values yield the best results (Figure 12, right).
+4.4. Impact of Synthetic Rationale Quality
+OurresultsonGSM8KresultsindicatethatGenRM-CoTverifiercanoutperformdiscriminativeanddirect
+GenRM verifiers even without human-written rationales, highlighting the potential of LLM-generated
+rationales. However, the quality of these synthetic rationales does matter, as shown in Figure 13. Using
+reference-guided grading during rationale generation significantly improves performance (91.7% with
+guidance vs. 87.8% without for Gemma-7B verifiers), indicating that LLMs are better at identifying
+reasoning errors when they have a reference solution for comparison. Importantly, achieving our result
+does not require a more capable model for generating verification rationales: we use the same model
+(Gemini 1.0 Pro) to generate both solutions to verify and synthetic rationales in the training data.
+5. Related Work
+Reward models (RMs) and verifiers. Conventionally, RMs and verifiers are trained as discriminative
+models via binary classification: given a prompt and a corresponding solution or a pair of solutions), the
+model is either trained to predict the correctness of the solution (Cobbe et al., 2021; Lightman et al.,
+11
+devloS
+smelborP
+K8MSG
+%
+)61-fo-tseB(GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+GSM8K: Model Scaling GSM8K: Model Scaling Model Scaling w/ GenRM-CoT
+92.5%
+80.0% 90%
+90.0%
+2B
+75.0% 80% 7B
+87.5%
+9B
+pass@N
+70.0%
+2B 7B 9B 2B 7B 9B 1 2 4 8 16
+Parameter Count (Gemma) Parameter Count (Gemma) Number of Solutions (N)
+GenRM GenRM-CoT
+Figure10 | ModelScalingforGenerativeVerifiers. OnGSM8K,wescalemodelcapacityusingGemma(Team
+etal.,2024a)2B.7B,9B,andobservepositivescalingtrendsbothforGenRM(direct)andGenRM-CoT,bothfor
+Best-of-Nperformanceaswellasrewardmodelingaccuracyonthetestset.
+GSM8K: Scaling Number of Rationales GSM8K: Scaling Number of Solutions
+Gemma-7B Gemma-7B Gemma-7B Gemma-7B
+92% 89% 89% 89%
+91% 88% 88% 88%
+87%
+90% 87% 87%
+86%
+89% 86% 86%
+85%
+88%
+85% 85%
+1 2 4 1 2 4 8 16 32 8 16 32
+Training CoT rationales Per Solution Training Solutions Per Problem
+Figure 11 | Data scaling for GenRM-CoT on GSM8K. We observe that both the RM accuracy and Best-of-N
+performance improve as we scale up the number of rationales per solution and solutions per problem. When
+addingmoresolutions,weuse4rationalespersolution. Here,wecomputeGenRM-CoTscoreswithCoTrationales
+generatedusinggreedydecoding,asdiscussedin(6).
+2023;Luoetal.,2024;Saundersetal.,2022;Uesatoetal.,2022;Wangetal.,2023;Yuetal.,2024)ora
+preferencebetweenthetwosolutions(Nakanoetal.,2021;Stiennonetal.,2020). Concretely,theRMor
+verifierdirectlyproducesanumericalcontinuous-valuedscore,whichisthenpluggedintoaclassification
+objective (3). As such, discriminative verifiers do not utilize the text generation capabilities of LLMs. In
+contrast to discriminative RMs, GenRM does not train RMs that output a numerical score from a special
+logit,butratherrepresentthecorrectnessdecisionusingthelogprobabilityof‘Yes’and‘No’tokensunder
+special instructions. Posing verification as generating “yet another token” allows it to tap better into the
+generation capabilities of LLMs, by making it straightforward to employ CoT reasoning and additional
+inference-time compute for better verification.
+LLM-as-a-Judge for verification. Another line of work that poses verification as next-token prediction
+simply prompts off-the-shelf LLMs to act as a verifier when provided with a rubric and a template for
+grading(Baietal.,2022;Kimetal.,2023;Lingetal.,2024;Zhengetal.,2024),butwithoutanyspecific
+12
+devloS
+smelborP
+%
+ycaruccA
+MR
+)61-fo-tseB(
+devloS
+smelborP
+%
+)61-fo-tseB(
+)tseT(
+ycaruccA
+MR
+ycaruccA
+MR
+devloS
+smelborP
+fo
+%
+devloS
+smelborP
+%
+)61-fo-tseB(GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+GenRM-CoT: Synthetic
+Discriminative RM GenRM (Verification, =0) GenRM
+Rationale Quality on GSM8K
+Scaling Training Data Impact of on Verifier
+91%
+90%
+90%
+90%
+85%
+89% 80%
+8 Solutions Reference Guidance
+No Guidance 88% 32 Solutions Oracle (pass@N)
+8 16 32 0.0 0.5 1.0 1 2 4 8 16
+Solutions Per Problem Generation Data Fraction ( ) Number of Solutions (N)
+Figure12 | DataefficiencyforGenRMvsastandardverifier. Overallwe Figure 13 | Using reference guid-
+observeapositivebutmoderatescalingtrendforallmethods,withGenRM ance in the prompt for synthetic
+consistentlyoutperformingthediscriminativeverifierinalldataregimes. In rationale generation is crucialfor
+addition,wefindthataddingasolutiongenerationloss(𝜆 >0)canfurther GenRM-CoTtoperformwell.
+helpGenRM,with 𝜆 =1/4beingagoodvalueforGSM.
+training for the same. Perhaps unsurprisingly, we find in our experiments that using substantially more
+powerfulLLMs(Gemini1.0Pro)asajudgeissubstantiallyworsethanourtrainedGenRM(usingweaker
+Gemma models), highlighting the necessity of training generative verifiers. More generally, even the
+strongestproprietaryLLMstodate,suchasGPT-4(Achiametal.,2023)andGemini(Teametal.,2024b),
+fall behind trained RMs on popular leaderboards, such as RewardBench (Lambert et al., 2024), and this
+gapismuchlargerforreasoningproblems. WhileAgarwaletal.(2024)utilizedmany-shotpromptingon
+an off-the-shelf LLM to obtain a “Yes/No” verifier, our work focuses on training generative verifiers and
+also leverages CoT rationales and test-time compute.
+Using CoTs for reward models. Prior works have also considered using critiques or CoT to extract
+preference and verification signals (Wang et al., 2024; Wu et al., 2024; Ye et al., 2024a; Yuan et al.,
+2024); in contrast to these prior works, GenRM utilizes model-generated CoT directly for training the
+verifier. Upon inference, a GenRM produces its own CoTs, which it then uses to make decisions on
+correctness, unlike other work that simply uses CoTs from a separate (and highly-capable) model (Ye
+et al., 2024b). Compared to (McAleese et al., 2024) which assumes access to high-quality data from
+humans to train discriminative RMs for generating code critiques, we show that GenRM can be trained
+from purely synthetic, model-generated critiques.
+Concurrentwork(Ankneretal.,2024)trainsamodeltoproduceresponsecritiques,whicharethenpassed
+as input into a reward modelling head, separate from the base LLM. Unlike GenRM which uses next-
+token prediction, their RM head is trained discriminatively akin to standard RMs. While this approach
+allows them to leverage CoTs and inference-time computation, it does not allow them to unify solution
+generation and verification together as a result of a discriminative RM head, that GenRM seamlessly
+enables(Section4.2). Moreover,ourresultsshowthatevenusingGenRMtoproduceasingleverification
+token outperforms standard RMs even without CoT or inference-time compute, which can potentially
+improve the results in this concurrent work (Figure 12, Left).
+Unified generation and verification. One of the hallmark properties of GenRM is that the very same
+generative verifiercan beco-trained witha generationobjective(5): whengivena problem, the model is
+trained to produce a solution, whereas when given a problem and a candidate solution, it is trained to
+13
+devloS
+smelborP
+fo
+%
+)61-fo-tseB(
+devloS
+smelborP
+%
+)N-fo-tseB(GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+verifythiscandidate. ThisisrelatedtoDPO(Rafailovetal.,2024)anditsapplicationtolearningverifiers
+in reasoning (Hosseini et al., 2024), which aims to unify generation (policy) and verification (reward
+models) by representing the reward implicitly using the logits of a policy and training the policy with
+a reward-modelling loss. For reasoning, this type of model tying has been shown to exhibit erroneous
+extrapolation and a degradation in learned representations, which prior work has attempted to address
+with additional techniques (Pal et al., 2024; Pang et al., 2024; Setlur et al., 2024; Yang et al., 2024). Of
+these, while the approach of Yang et al. (2024) trains an reward model with an auxiliary generative SFT
+loss, note that this loss is applied on a separate head for regularization purposes and is discarded after
+training; unlike GenRM no text is produced when querying the RM.
+Unlike DPO, our unification approach is distinct: GenRM treats verification as next-token prediction,
+allowingthesamemodeltobetrainedonbothverificationandpolicytasksusingtheirrespectiveprompts.
+This eliminates the need for separate reward modeling or loss modifications, offering greater flexibility
+for practitioners to combine various reward and generation objectives. For example, while Hosseini et al.
+(2024) struggled to obtain a DPO verifier that can generate correct solutions, the GenRM-CoT verifier
+has better generation performance compared to SFT only on correct solutions (Figure 7).
+6. Conclusion & Future Work
+In this paper, we have introduced Generative Verifiers (GenRM), which recast verification as next-token
+prediction in LLM reasoning domains. GenRM is a more performant alternative to discriminative reward
+models,andunlockstheuseofpowerfultools,suchaschain-of-thoughtreasoningandmajorityvotingfor
+better verification. GenRM also unifies generation and verification into a single LLM, and demonstrates
+that such a unification benefits both generation and verification. Moreover, we show that synthetic
+model-generated rationales, which are noisy and sub-optimal in many aspects, are sufficient to teach
+GenRM how to use verification CoT to pick out tricky reasoning errors in grade school math problems.
+Future work includes extending the generative verification framework to a broader range of tasks (such
+as coding, alignment, and answering open-ended questions), and studying how generative verifiers can
+be integrated into existing LLM self-improvement algorithms (Gulcehre et al., 2023; Singh et al., 2023).
+As a generative LLM for verification, GenRM offers a solid foundation for future work. It’s readily
+compatible with all the existing tools designed to improve LLMs, such as retrieval-augmented generation
+(Borgeaud et al., 2022), many-shot learning (Agarwal et al., 2024), multi-staged prompting (Yao et al.,
+2024), tool use (Schick et al., 2024), and code generation and execution (Chen et al., 2021). Future
+work can explore how those techniques can be in service of verifying model-generated outputs under the
+generative verifier framework.
+Acknowledgements
+This work was done during LZ, AH, and HB’s internship at Google. We thank Hugo Larochelle, Minqi
+Jiang,AleksandraFaust,AnkitAnand,GuillaumeDesjardins,DoinaPrecup,andCharlieSnellforfeedback
+on an earlier version of this paper and informative discussions. We thank Chirag Nagpal and Katrin
+Tomanek for support in setting up infrastructure for experimentation that was crucial for running our
+experiments.
+14GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+References
+J.Achiam,S.Adler,S.Agarwal,L.Ahmad,I.Akkaya,F.L.Aleman,D.Almeida,J.Altenschmidt,S.Altman,
+S. Anadkat, et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774, 2023.
+R. Agarwal, A. Singh, L. M. Zhang, B. Bohnet, S. Chan, A. Anand, Z. Abbas, A. Nova, J. D. Co-Reyes,
+E. Chu, et al. Many-shot in-context learning. arXiv preprint arXiv:2404.11018, 2024.
+Z. Ankner, M. Paul, B. Cui, J. D. Chang, and P. Ammanabrolu. Critique-out-loud reward models. arXiv
+preprint arXiv:2408.11791, 2024.
+Y. Bai, S. Kadavath, S. Kundu, A. Askell, J. Kernion, A. Jones, A. Chen, A. Goldie, A. Mirhoseini, C. McK-
+innon, et al. Constitutional ai: Harmlessness from ai feedback. arXiv preprint arXiv:2212.08073,
+2022.
+S. Borgeaud, A. Mensch, J. Hoffmann, T. Cai, E. Rutherford, K. Millican, G. B. Van Den Driessche, J.-B.
+Lespiau, B. Damoc, A. Clark, et al. Improving language models by retrieving from trillions of tokens.
+In International conference on machine learning, pages 2206–2240. PMLR, 2022.
+B. Brown, J. Juravsky, R. Ehrlich, R. Clark, Q. V. Le, C. Ré, and A. Mirhoseini. Large language monkeys:
+Scaling inference compute with repeated sampling. arXiv preprint arXiv:2407.21787, 2024.
+E. Charniak and M. Johnson. Coarse-to-fine n-best parsing and maxent discriminative reranking. In
+Proceedings of the 43rd Annual Meeting of the Association for Computational Linguistics (ACL’05), pages
+173–180, 2005.
+M. Chen, J. Tworek, H. Jun, Q. Yuan, H. P. D. O. Pinto, J. Kaplan, H. Edwards, Y. Burda, N. Joseph,
+G.Brockman,etal. Evaluatinglargelanguagemodelstrainedoncode. arXivpreprintarXiv:2107.03374,
+2021.
+H. W. Chung, L. Hou, S. Longpre, B. Zoph, Y. Tay, W. Fedus, Y. Li, X. Wang, M. Dehghani, S. Brahma,
+et al. Scaling instruction-finetuned language models. arXiv preprint arXiv:2210.11416, 2022.
+K.Cobbe,V.Kosaraju,M.Bavarian,M.Chen,H.Jun,L.Kaiser,M.Plappert,J.Tworek,J.Hilton,R.Nakano,
+et al. Training verifiers to solve math word problems. arXiv preprint arXiv:2110.14168, 2021.
+C. Gulcehre, T. L. Paine, S. Srinivasan, K. Konyushkova, L. Weerts, A. Sharma, A. Siddhant, A. Ah-
+ern, M. Wang, C. Gu, et al. Reinforced self-training (rest) for language modeling. arXiv preprint
+arXiv:2308.08998, 2023.
+A. Hosseini, X. Yuan, N. Malkin, A. Courville, A. Sordoni, and R. Agarwal. V-star: Training verifiers for
+self-taught reasoners. arXiv preprint arXiv:2402.06457, 2024.
+S. Kim, J. Shin, Y. Cho, J. Jang, S. Longpre, H. Lee, S. Yun, S. Shin, S. Kim, J. Thorne, et al. Prometheus:
+Inducingfine-grainedevaluationcapabilityinlanguagemodels. InTheTwelfthInternationalConference
+on Learning Representations, 2023.
+D. P. Kingma. Adam: A method for stochastic optimization. arXiv preprint arXiv:1412.6980, 2014.
+N. Lambert, V. Pyatkin, J. Morrison, L. Miranda, B. Y. Lin, K. Chandu, N. Dziri, S. Kumar, T. Zick, Y. Choi,
+etal.Rewardbench: Evaluatingrewardmodelsforlanguagemodeling.arXivpreprintarXiv:2403.13787,
+2024.
+15GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+H. Lightman, V. Kosaraju, Y. Burda, H. Edwards, B. Baker, T. Lee, J. Leike, J. Schulman, I. Sutskever, and
+K. Cobbe. Let’s verify step by step. arXiv preprint arXiv:2305.20050, 2023.
+Z. Ling, Y. Fang, X. Li, Z. Huang, M. Lee, R. Memisevic, and H. Su. Deductive verification of chain-of-
+thought reasoning. Advances in Neural Information Processing Systems, 36, 2024.
+I. Loshchilov and F. Hutter. Decoupled weight decay regularization. arXiv preprint arXiv:1711.05101,
+2017.
+L.Luo,Y.Liu,R.Liu,S.Phatale,H.Lara,Y.Li,L.Shu,Y.Zhu,L.Meng,J.Sun,etal. Improvemathematical
+reasoning in language models by automated process supervision. arXiv preprint arXiv:2406.06592,
+2024.
+N. McAleese, R. M. Pokorny, J. F. C. Uribe, E. Nitishinskaya, M. Trebacz, and J. Leike. Llm critics help
+catch llm bugs. arXiv preprint arXiv:2407.00215, 2024.
+R.Nakano,J.Hilton,S.Balaji,J.Wu,L.Ouyang,C.Kim,C.Hesse,S.Jain,V.Kosaraju,W.Saunders,etal.
+Webgpt: Browser-assisted question-answering with human feedback. arXiv preprint arXiv:2112.09332,
+2021.
+A. Pal, D. Karkhanis, S. Dooley, M. Roberts, S. Naidu, and C. White. Smaug: Fixing failure modes of
+preference optimisation with dpo-positive. arXiv preprint arXiv:2402.13228, 2024.
+R. Y. Pang, W. Yuan, K. Cho, H. He, S. Sukhbaatar, and J. Weston. Iterative reasoning preference
+optimization. arXiv preprint arXiv:2404.19733, 2024.
+R.Rafailov,A.Sharma,E.Mitchell,C.D.Manning,S.Ermon,andC.Finn. Directpreferenceoptimization:
+Your language model is secretly a reward model. Advances in Neural Information Processing Systems,
+36, 2024.
+A. Roberts, H. W. Chung, A. Levskaya, G. Mishra, J. Bradbury, D. Andor, S. Narang, B. Lester, C. Gaffney,
+A. Mohiuddin, C. Hawthorne, A. Lewkowycz, A. Salcianu, M. van Zee, J. Austin, S. Goodman, L. B.
+Soares, H. Hu, S. Tsvyashchenko, A. Chowdhery, J. Bastings, J. Bulian, X. Garcia, J. Ni, A. Chen,
+K. Kenealy, J. H. Clark, S. Lee, D. Garrette, J. Lee-Thorp, C. Raffel, N. Shazeer, M. Ritter, M. Bosma,
+A. Passos, J. Maitin-Shepard, N. Fiedel, M. Omernick, B. Saeta, R. Sepassi, A. Spiridonov, J. Newlan,
+andA.Gesmundo. Scalingupmodelsanddatawitht5xandseqio. arXivpreprintarXiv:2203.17189,
+2022. URL https://arxiv.org/abs/2203.17189.
+W. Saunders, C. Yeh, J. Wu, S. Bills, L. Ouyang, J. Ward, and J. Leike. Self-critiquing models for assisting
+human evaluators. arXiv preprint arXiv:2206.05802, 2022.
+T. Schick, J. Dwivedi-Yu, R. Dessì, R. Raileanu, M. Lomeli, E. Hambro, L. Zettlemoyer, N. Cancedda,
+and T. Scialom. Toolformer: Language models can teach themselves to use tools. Advances in Neural
+Information Processing Systems, 36, 2024.
+A. Setlur, S. Garg, X. Geng, N. Garg, V. Smith, and A. Kumar. Rl on incorrect synthetic data scales the
+efficiency of llm math reasoning by eight-fold. arXiv preprint arXiv:2406.14532, 2024.
+A.Singh,J.D.Co-Reyes,R.Agarwal,A.Anand,P.Patil,P.J.Liu,J.Harrison,J.Lee,K.Xu,A.Parisi,etal.
+Beyond human data: Scaling self-training for problem-solving with language models. arXiv preprint
+arXiv:2312.06585, 2023.
+16GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+N. Stiennon, L. Ouyang, J. Wu, D. Ziegler, R. Lowe, C. Voss, A. Radford, D. Amodei, and P. F. Christiano.
+Learning to summarize with human feedback. Advances in Neural Information Processing Systems, 33:
+3008–3021, 2020.
+M. Suzgun, N. Scales, N. Schärli, S. Gehrmann, Y. Tay, H. W. Chung, A. Chowdhery, Q. V. Le, E. H. Chi,
+D. Zhou, et al. Challenging big-bench tasks and whether chain-of-thought can solve them. arXiv
+preprint arXiv:2210.09261, 2022.
+G. Team, R. Anil, S. Borgeaud, Y. Wu, J.-B. Alayrac, J. Yu, R. Soricut, J. Schalkwyk, A. M. Dai, A. Hauth,
+et al. Gemini: a family of highly capable multimodal models. arXiv preprint arXiv:2312.11805, 2023.
+G. Team, T. Mesnard, C. Hardin, R. Dadashi, S. Bhupatiraju, S. Pathak, L. Sifre, M. Rivière, M. S.
+Kale, J. Love, et al. Gemma: Open models based on gemini research and technology. arXiv preprint
+arXiv:2403.08295, 2024a.
+G. Team, M. Reid, N. Savinov, D. Teplyashin, T. Lillicrap, J.-b. Alayrac, R. Soricut, A. Lazaridou, O. Firat,
+J. Schrittwieser, et al. Gemini 1.5: Unlocking multimodal understanding across millions of tokens of
+context. arXiv e-prints, pages arXiv–2403, 2024b.
+G.Team M.Riviere,S.Pathak,P.G.Sessa,C.Hardin,S.Bhupatiraju,L.Hussenot,T.Mesnard,B.Shahriari,
+A. Ramé, et al. Gemma 2: Improving open language models at a practical size. arXiv preprint
+arXiv:2408.00118, 2024.
+J.Uesato,N.Kushman,R.Kumar,F.Song,N.Siegel,L.Wang,A.Creswell,G.Irving,andI.Higgins.Solving
+math word problems with process-and outcome-based feedback. arXiv preprint arXiv:2211.14275,
+2022.
+P. Wang, L. Li, Z. Shao, R. Xu, D. Dai, Y. Li, D. Chen, Y. Wu, and Z. Sui. Math-shepherd: A label-free
+step-by-step verifier for llms in mathematical reasoning. arXiv preprint arXiv:2312.08935, 2023.
+T. Wang, I. Kulikov, O. Golovneva, P. Yu, W. Yuan, J. Dwivedi-Yu, R. Y. Pang, M. Fazel-Zarandi, J. Weston,
+and X. Li. Self-taught evaluators. arXiv preprint arXiv:2408.02666, 2024.
+X. Wang, J. Wei, D. Schuurmans, Q. Le, E. Chi, S. Narang, A. Chowdhery, and D. Zhou. Self-consistency
+improves chain of thought reasoning in language models. arXiv preprint arXiv:2203.11171, 2022.
+J. Wei, X. Wang, D. Schuurmans, M. Bosma, F. Xia, E. Chi, Q. V. Le, D. Zhou, et al. Chain-of-thought
+promptingelicitsreasoninginlargelanguagemodels. Advancesinneuralinformationprocessingsystems,
+35:24824–24837, 2022.
+T. Wu, W. Yuan, O. Golovneva, J. Xu, Y. Tian, J. Jiao, J. Weston, and S. Sukhbaatar. Meta-rewarding
+languagemodels: Self-improvingalignmentwithllm-as-a-meta-judge.arXivpreprintarXiv:2407.19594,
+2024.
+R.Yang,R.Ding,Y.Lin,H.Zhang,andT.Zhang.Regularizinghiddenstatesenableslearninggeneralizable
+reward model for llms. arXiv preprint arXiv:2406.10216, 2024.
+S. Yao, D. Yu, J. Zhao, I. Shafran, T. Griffiths, Y. Cao, and K. Narasimhan. Tree of thoughts: Deliberate
+problem solving with large language models. Advances in Neural Information Processing Systems, 36,
+2024.
+17GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Z. Ye, F. Greenlee-Scott, M. Bartolo, P. Blunsom, J. A. Campos, and M. Gallé. Improving reward models
+with synthetic critiques. arXiv preprint arXiv:2405.20850, 2024a.
+Z. Ye, F. Greenlee-Scott, M. Bartolo, P. Blunsom, J. A. Campos, and M. Gallé. Improving reward models
+with synthetic critiques. arXiv preprint arXiv:2405.20850, 2024b.
+F. Yu, A. Gao, and B. Wang. Ovm, outcome-supervised value models for planning in mathematical
+reasoning. In Findings of the Association for Computational Linguistics: NAACL 2024, pages 858–875,
+2024.
+W. Yuan, R. Y. Pang, K. Cho, S. Sukhbaatar, J. Xu, and J. Weston. Self-rewarding language models. arXiv
+preprint arXiv:2401.10020, 2024.
+Y.Zhang,Y.Li,L.Cui,D.Cai,L.Liu,T.Fu,X.Huang,E.Zhao,Y.Zhang,Y.Chen,etal. Siren’ssonginthe
+ai ocean: a survey on hallucination in large language models. arXiv preprint arXiv:2309.01219, 2023.
+L.Zheng,W.-L.Chiang,Y.Sheng,S.Zhuang,Z.Wu,Y.Zhuang,Z.Lin,Z.Li,D.Li,E.Xing,etal. Judging
+llm-as-a-judge with mt-bench and chatbot arena. Advances in Neural Information Processing Systems,
+36, 2024.
+18GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+Appendices
+A. Training Data Generation for Verifiers
+Problem SolutiontoVerify
+LastLetter Task:takethelastlettersofeachwordsand A:Let’sthinkstepbystep.
+Concatenation concatenatethem. Jacob->b(Listsofar:[b])
+Q:Jacob,Vivian Vivian->n(Listsofar:[bn])
+Theansweris:bn
+Let’s verify step by step.
+The given answer is: b , n. The input is: Jacob , Vivian.
+Is the length of the final answer the same as the number of input words? Yes
+Is ‘b’ the last letter of ‘J a c o b’? Yes
+Is ‘n’ the last letter of ‘V i v i a n’? Yes
+Is the final answer correct? Yes
+WordSorting Task:sortalistofwordsalphabetically. A:Let’sthinkstepbystep.
+Q:cell,apple,courage Identifythealphabeticallocationsof1stletters:
+cell->c:3.apple->a:1.courage->c:3.
+Weneedtosortthenumbers:3,1,3
+Sortingthenumbers:1<3=3
+Theansweris:apple,courage,cell
+Let’s verify step by step.
+The given answer is: apple, courage, cell. The input is: cell, apple, courage.
+Does the final answer contain the same words as the original input? Yes
+Are ‘a p p l e’, ‘c o u r a g e’ in the correct order? Yes
+Are ‘c o u r a g e’, ‘c e l l’ in the correct order? No
+Is the answer correct? No
+TableA.1 | Algorithmicreasoningtasksthatweconsider. Inthestasks,wecangenerateground-truthverification
+chain-of-thoughtsasthetrainingdataforagenerativeverifier. Thosesynthetictaskshelpusunderstandwhether
+agenerativeverifiercanoutperformadiscriminativeverifierintheidealscenariowherethereisnonoiseinthe
+verificationCoTtrainingdata.
+• Last Letter Concatenation: To generate the training data, for each length {2,3,4}, we generate
+350 problem queries by randomly sampling from the set of words in original training set; for each
+problem query, we generate 128 attempts from Gemma-2B (Team et al., 2024a) model. This gives
+us a total of about 50K training data points after de-duplication. We train verifiers on examples
+of lengths {2,3,4} (here the length refers to how many words are in the input list), and evaluate
+the verifier performance on length 6. We use the format in Table A.1 to algorithmically generate
+ground-truth verification CoT for training.
+• Word Sorting: We train verifiers on a dataset comprised of {2,3,4} words in each example, and
+evaluate the performance on length 5. For each length, we generate 4096 lists of words as the
+problem queries; for each problem, we generate 64 attempts from Gemma-2B. After de-duplication
+and filtering out invalid responses, we have a total of about 100K training data points. We also
+algorithmically generate ground-truth verification CoT for training (see Table A.1).
+• Grade School Math: We follow the original train/test split and use 1.3K problems for test, 128
+problems for validation, and about 7.2K problems for training. We generate 50 solutions per
+problem, and randomly sample at max 16 correct solutions and 16 incorrect solutions per problem
+as the training set.
+19GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+PromptforGeneratingSyntheticRationalesforCoTVerifieronGSM
+You are a math teacher. Grade the Solution, verifying correctness step by step. Use
+Expected Answer to find any erroneous step in the Solution.
+At the end of the Solution verification, when you give your final grade, write it in the
+form "Verification: Is the answer correct (Yes/No)? X", where X is either Yes or No.
+Question: {problem}
+Solution: {solution}
+Expected Answer: {a solution that arrives at the correct answer}
+TableA.2 | We usemodel-generatedrationales asCoT trainingdataonGSMwiththeaboveprompt. When
+generatingthetrainingdataforrationales,weshowthemodelanothermodel-generatedsolutionthatarrivesat
+thecorrectanswer,whichisprivilegedinformationthatdoesnotexistattesttime. Ourmethoddoesnotrequirea
+morecapablemodelfortherationalescomparedtothesolutions: weusethesamemodeltogeneratesolutionsand
+syntheticrationalesinthetrainingdata.
+B. Hyper-parameters for Verifier Training
+GenRM verifiers We finetune Gemma-based language models. After doing a sweep of learning rates
+(LR), we find that an LR of [2𝑒−6,1𝑒−6,5𝑒−7] works well for our tasks considered (with LR=2𝑒−6
+generally being the best). We use a weight decay of 1𝑒−2, and do not apply any dropout. We use
+the Adam optimizer (Kingma, 2014) with decoupled weight decay (Loshchilov and Hutter, 2017) and
+a gradient norm clipping of 1.0. We use a linear warmup of 1000 gradient steps, and a cosine decay
+schedule that decays to 10% of the peak learning rate towards the end of training. We finetune for 200K
+steps with a batch size of 128, and use seqio (Roberts et al., 2022) library to create data mixtures. We
+pick the best checkpoint based on validation accuracy of verification on held out problems and solutions.
+We always use data balancing between 50% correct solutions and 50% incorrect solutions in training.
+Discriminative RMs We finetune Gemma-based discriminative RMs by using a special token’s logit
+for classification. We chose the best performing ORM on our validation sets by launching a large sweep
+over learning rates [1𝑒−7,5𝑒−7,1𝑒−6,2𝑒−6,3𝑒−6,5𝑒−6], weight decay [1𝑒−3,1𝑒−2,1𝑒−1] and
+dropouts [1𝑒−3,1𝑒−2,4𝑒−2]. We also schedule the learning rate with a linear ramp up and a cosine
+decay. We then pick the best model according to validation accuracy of verification on held out problems
+and solutions. We always use data balancing between 50% correct solutions and 50% incorrect solutions
+in training.
+20GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+C. Examples of verification rationales generated by GenRM-CoT on GSM8K
+21GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofonGradeSchoolMath
+Question:Ina60-itemquiz,40%ofthequestionsareeasy,andtherestareequallydividedasaverageanddifficult
+questions.IfAriesissuretoget75%oftheeasyquestions,andhalfoftheaverageanddifficultquestionscorrectly,how
+manypointsisshesuretoget?
+Answer:40%of60itemsareeasyquestions,sothereare60*40/100=24easyquestions.Ariesissuretoget75%of
+those,soshewillget24*75/100=18easyquestionscorrect.Therestofthequestionsareequallydividedasaverage
+anddifficultquestions.So,thereare(60-24)/2=18averageanddifficultquestionseach.Ariesissuretogethalfof
+thosecorrect,soshewillget18*50/100=9averageanddifficultquestionscorrect.Intotal,sheissuretoget18+9
+=27questionscorrect.Eachquestionisworthonepoint,sosheissuretoget27points.Theansweris27.
+DiscriminativeRMscore:0.6107
+GenRM-CoT:Let’sverifystepbystep.
+<b>Step1:</b>
+40%of60itemsareeasyquestions,sothereare60*40/100=24easyquestions.
+<b>ExpectedAnswer:</b>
+40%of60=24easyquestions.
+<b>Verification:</b>Correct
+<b>Step2:</b>
+Ariesissuretoget75%ofthose,soshewillget24*75/100=18easyquestionscorrect.
+<b>ExpectedAnswer:</b>
+75%of24=18easyquestions.
+<b>Verification:</b>Correct
+<b>Step3:</b>
+Therestofthequestionsareequallydividedasaverageanddifficultquestions.So,thereare(60-24)/2=18average
+anddifficultquestionseach.
+<b>ExpectedAnswer:</b>
+(60-24)/2=18averageanddifficultquestionseach.
+<b>Verification:</b>Correct
+<b>Step4:</b>
+Ariesissuretogethalfofthosecorrect,soshewillget18*50/100=9averageanddifficultquestionscorrect.
+<b>ExpectedAnswer:</b>
+50%of(60-24)=18averageanddifficultquestions.
+<b>Verification:</b>Erroneous
+<b>Step5:</b>
+Intotal,sheissuretoget18+9=27questionscorrect.Eachquestionisworthonepoint,sosheissuretoget27points.
+Theansweris27.
+<b>ExpectedAnswer:</b>
+18easy+9average+9difficult=36totalcorrectquestions.
+<b>Verification:</b>Erroneous
+<b>FinalGrade:</b>
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.1151
+TableC.1 | GenRMCoTExample1
+22GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question:SandywantstoloseasmuchweightasJoeydoesbutneeds4weekstolosethesameamountofweightthat
+Joeylosesinasingleweek. IfJoeyloses8poundsin4weeks,howmanyweekswillittakeSandytolosethesame
+amountofweight?
+Answer:SinceJoeyloses8poundsin4weeks,Sandywilltake4timesaslongtolosethesameamountofweight.That
+meansshewilltake4*4=16weeks.Theansweris16.
+DiscriminativeRMscore:0.0399
+GenRM-CoT:Let’sverifystepbystep.
+**SolutionVerification:**
+**Step1:**
+Solution:SinceJoeyloses8poundsin4weeks,Sandywilltake4timesaslongtolosethesameamountofweight.
+ExpectedAnswer:WearegiventhatSandyneeds4weeksforwhatJoeydoesin1week.Therefore,wecanmultiplythe
+timeJoeytakesby4tofindouthowmuchtimeSandywilltake.
+**Grade:**Correct
+**Step2:**
+Solution:Thatmeansshewilltake4*4=16weeks.
+ExpectedAnswer:So,wehave4*4=16weeks.
+**Grade:**Correct
+**FinalGrade:**
+Verification:Istheanswercorrect(Yes/No)?Yes
+Gen-RM(MajorityVoting)score:0.5131
+TableC.2 | GenRMCoTExample2
+23GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question:Roryisretrievingtennisballsfromthecourtafteratennismatch.Inthefirstofthreesets,hehadtoretrieve
+fourmoreballsthaninthesecondset.Inthethirdset,heretrievedhalfasmanyballsasinthesecond.Heretrieved19
+tennisballsinall.Howmanytennisballsdidheretrieveinthefirstsetofthematch?
+Answer:Letthenumberofballsretrievedinthesecondsetbex.Inthefirstset,heretrievedfourmore,soheretrievedx
++4balls.Inthethirdset,heretrievedhalfasmany,whichwouldbex/2.Sinceheretrieved19ballsinall,wehave:
+x+x+4+x/2=19
+3x/2+4=19
+3x+8=38
+3x=30
+x=10
+So, he retrieved 10 balls in the second set. In the first set, he retrieved x + 4 = 10 + 4 = 14 tennis balls.
+Theansweris14.
+DiscriminativeRMscore:0.9413
+GenRM-CoT:Let’sverifystepbystep.
+(Seenextpage···)
+TableC.3 | GenRMCoTExample3
+24GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+··· Continued
+GenRM-CoT:Let’sverifystepbystep.
+Step1:
+Solution:Letthenumberofballsretrievedinthesecondsetbex.
+ExpectedAnswer:Letthenumberofballsinthesecondsetbex.
+Verification:Yes
+Step2:
+Solution:Inthefirstset,heretrievedfourmore,soheretrievedx+4balls.
+ExpectedAnswer:Theninthefirstsethehadtoretrievex+4balls.
+Verification:Yes
+Step3:
+Solution:Inthethirdset,heretrievedhalfasmany,whichwouldbex/2.
+ExpectedAnswer:Inthethirdsetheretrievedhalfasmanyasinthesecondset,thatisx/2.
+Verification:Yes
+Step4:
+Solution:Sinceheretrieved19ballsinall,wehave:
+x+x+4+x/2=19
+ExpectedAnswer:Inall,thisshouldaddupto19.Therefore,x+x+4+x/2=19.
+Verification:Yes
+Step5:
+Solution:3x/2+4=19
+ExpectedAnswer:Simplifyingthisequation:2.5x+4=19
+Verification:No
+Step6:
+Solution:3x+8=38
+ExpectedAnswer:2.5x=15
+Verification:No
+Step7:
+Solution:3x=30
+ExpectedAnswer:x=6
+Verification:No
+Step8:
+Solution:x=10
+ExpectedAnswer:Therefore,thenumberofballsinthefirstsetwasx+4=6+4=10.
+Verification:No
+FinalAnswer:
+Solution:Theansweris14.
+ExpectedAnswer:Theansweris10.
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.3267
+TableC.4 | GenRMCoTExample3(Continued)
+25GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question: WhenthewateriscoldRayswimsamilein16minutes. WhenthewateriswarmRayswimsamilein2
+minutesmorethantwiceaslong.HowmuchlongerdoesRaytaketoswim3milesonahotdaythanacoldday?
+Answer:WhenthewateriswarmRayswimsamilein2minutesmorethantwiceaslongaswhenthewateriscold.This
+meanshetakes2+2*16=2+32=34minutestoswimamileonahotday.
+Toswim3milesonahotdayhewilltake3*34=102minutes.Onacolddayhetakes16*3=48minutestoswim3miles.
+Thedifferenceintimeis102-48=54minutes.Theansweris54.
+DiscriminativeRMscore:0.2452
+GenRM-CoT:Let’sverifystepbystep.
+**Verification:**
+1."WhenthewateriswarmRayswimsamilein2minutesmorethantwiceaslongaswhenthewateriscold."
+-Thisstepiscorrect.
+2."Thismeanshetakes2+2*16=2+32=34minutestoswimamileonahotday."
+-Thisstepiscorrect.
+3."Toswim3milesonahotdayhewilltake3*34=102minutes."
+-Thisstepiscorrect.
+4."Onacolddayhetakes16*3=48minutestoswim3miles."
+-Thisstepiscorrect.
+5."Thedifferenceintimeis102-48=54minutes."
+-Thisstepiscorrect.
+6."Theansweris54."
+-Thisstepiscorrect.
+**ExpectedAnswer:**
+-Theexpectedanswerisalso54minutes.
+Verification:Istheanswercorrect(Yes/No)?Yes
+Gen-RM(MajorityVoting)score:0.9963
+TableC.5 | GenRMCoTExample4
+26GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question:Theicecreamparlorwasofferingadeal,buy2scoopsoficecream,get1scoopfree.Eachscoopcost$1.50.
+IfErinhad$6.00,howmanyscoopsoficecreamshouldshebuy?
+Answer:Erinhad$6.00.First,sheshouldbuy2scoopsoficecream.Sinceeachscoopcosts$1.50,shewillspend2*
+$1.50=$3.00onthetwoscoops.Afterthat,shecanget1scoopfree.Sincethethirdscoopwasfree,shewillnotspend
+anythingonthethirdscoop.So,shecanaffordthreescoops.Theansweris3.
+DiscriminativeRMscore:0.9973
+GenRM-CoT:Let’sverifystepbystep.
+**SolutionVerification:**
+Step1:Erinhad$6.00.(Correct)
+Step2:Shebought2scoopsoficecreamat$1.50each,spending$3.00.(Correct)
+Step3:Shereceived1scoopfree.(Correct)
+Step4:Shecanaffordthreescoops.(Incorrect)
+Step5:Theansweris3.(Incorrect)
+**ExpectedAnswer:**
+Step1:Erinhad$6.00.(Correct)
+Step2:Shecanbuy6/$1.50=4scoopsoficecream.(Correct)
+Step3:Shewillget2freescoopsforbuying2.(Correct)
+Step4:Shewillgetatotalof4+2=6scoops.(Correct)
+Step5:Theansweris4.(Correct)
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.0487
+TableC.6 | GenRMCoTExample5
+27GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question:CherriewantstobuyChristmasgiftsforher5friends.2ofherfriendswant5giftsandtheother3friends
+want2giftsforthemselves.Cherriegoesaheadandbuysthemanddecidestofurthersurprisethembygetting10more
+randomgifts.HowmanygiftsdidCherriebuyintotal?
+Answer:2ofherfriendswant5giftseach.So,theywant2*5=10gifts.3otherfriendswant2giftseach.So,they
+want3*2=6gifts.Addthose6giftstothe10giftsfromthebeginning,that’s16gifts.Now,Cherriedecidedtobuy10
+moregifts,sointotalshebought16+10=26gifts.Theansweris26.
+DiscriminativeRMscore:0.1710
+GenRM-CoT:Let’sverifystepbystep.
+<b>Verification:</b>
+<b>Step1:</b>
+Solution:2ofherfriendswant5giftseach.So,theywant2*5=10gifts.
+ExpectedAnswer:Cherriehas5friends.2ofthemwant5gifts,sointotaltheywant2*5=10gifts.
+<b>Verification:</b>Thisstepiscorrect.
+<b>Step2:</b>
+Solution:3otherfriendswant2giftseach.So,theywant3*2=6gifts.
+ExpectedAnswer:Theother3friendswant2giftseach,sointotaltheywant3*2=6gifts.
+<b>Verification:</b>Thisstepiscorrect.
+<b>Step3:</b>
+Solution:Addthose6giftstothe10giftsfromthebeginning,that’s16gifts.
+ExpectedAnswer:Sointotal,sheneedstobuy10+6=16giftsforherfriends.
+<b>Verification:</b>Thisstepiscorrect.
+<b>Step4:</b>
+Solution:Now,Cherriedecidedtobuy10moregifts,sointotalshebought16+10=26gifts.
+ExpectedAnswer:Ontopofthat,shewantstoget10morerandomgifts.Therefore,intotalsheneedstobuy16+10=
+26gifts.
+<b>Verification:</b>Thisstepiscorrect.
+<b>FinalGrade:</b>
+Verification:Istheanswercorrect(Yes/No)?Yes
+Gen-RM(MajorityVoting)score:0.8017
+TableC.7 | GenRMCoTExample6
+28GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question:Juanwantstoaddcroissantstohisbakerymenu.Ittakes1/4poundofbuttertomake1dozencroissants.He
+wantstostartwithmaking4dozenadayforaweek.Howmanypoundsofbutterwillheneedtomakethesecroissants?
+Answer:1dozenisequalto12croissants.Hewantstomake4dozenaday,whichis4*12=48croissants.Hewantsto
+makethisnumberofcroissantsforaweek,whichis7days.Thatmeansintotalheneedstomake48*7=336croissants.
+Ittakes1/4poundofbuttertomake1dozencroissants.Sointotalhewillneed336/12=28poundsofbutter.The
+answeris28.
+DiscriminativeRMscore:0.9999
+GenRM-CoT:Let’sverifystepbystep.
+**SolutionVerification**
+Step1:1dozenisequalto12croissants.
+ExpectedAnswer:Correct.
+Step2:Hewantstomake4dozenaday,whichis4*12=48croissants.
+ExpectedAnswer:Correct.
+Step3:Hewantstomakethisnumberofcroissantsforaweek,whichis7days.Thatmeansintotalheneedstomake48
+*7=336croissants.
+ExpectedAnswer:Correct.
+Step4:Ittakes1/4poundofbuttertomake1dozencroissants.Sointotalhewillneed336/12=28poundsofbutter.
+ExpectedAnswer:Incorrect.Thecorrectcalculationshouldbe336/12*1/4=7poundsofbutter.
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.0000
+TableC.8 | GenRMCoTExample7
+29GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question:Susanearns$5every10minutesforanonlinetaskshedoes.Ifsheworksbetween8a.m.and11a.m.and
+pausesinbetweenforhalfanhour,howmuchmoneydoessheearnfortheonlinetask?
+Answer:Itisfrom8amto11am,whichis3hours.However,shepausesfor30minutesorhalfanhour.Sosheworksfor
+2.5hours.Every10minutes,sheearns$5.Thenumberof10-minuteperiodsin2.5hourscanbefoundbydividing2.5by
+1/10.Thatis2.5/(1/10)=25.Sheearns$5every10minutes.Soin25periods,sheearns25*$5=$125.Theanswer
+is$125.
+DiscriminativeRMscore:0.9920
+GenRM-CoT:Let’sverifystepbystep.
+**Step1:**
+Solution:Itisfrom8amto11am,whichis3hours.
+ExpectedAnswer:Itisfrom8amto11am,whichis3hours.
+**Verification:**Thestepiscorrect.
+**Step2:**
+Solution:However,shepausesfor30minutesorhalfanhour.Sosheworksfor2.5hours.
+ExpectedAnswer:Shepausesforhalfanhour,whichis1/2hour.Thismeanssheworksfor3-1/2=2.5hours.
+**Verification:**Thestepiscorrect.
+**Step3:**
+Solution:Every10minutes,sheearns$5.Thenumberof10-minuteperiodsin2.5hourscanbefoundbydividing2.5by
+1/10.Thatis2.5/(1/10)=25.
+ExpectedAnswer:Sincesheearns$5every10minutes,wecanfindthenumberof10-minuteperiodsin2.5hoursusing
+theformula2.5*60/10=15.
+**Verification:**Thestepisincorrect.Thecorrectnumberof10-minuteperiodsshouldbe15,not25.
+**Step4:**
+Solution:Sheearns$5every10minutes.Soin25periods,sheearns25*$5=$125.Theansweris$125.
+ExpectedAnswer:Nowwecanfindtheamountsheearnsbymultiplyingthenumberofperiodsbytheamountsheearns
+eachperiod:15*$5=$75.Theansweris$75.
+**Verification:**Thestepisincorrect.Theamountsheearnsshouldbe$75,not$125.
+**FinalGrade:**
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.3926
+TableC.9 | GenRMCoTExample8
+30GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question:Markisacopy-editor.Heeditsanequalnumberofsentenceseachweekfortwodifferentpublishers,who
+eachpayhimadifferentratepersentence. PublisherBpaysMarktwicewhatPublisherApays. Markeditsatotal
+numberof1000sentenceseachweek,andPublisherApayshim5centspersentence.HowmuchdoesMarkmakeina
+week,incents?
+Answer:Markeditsatotalnumberof1000sentenceseachweek.SincePublisherApaysMark5centspersentence,Mark
+makes1000*5=$50forPublisherA.However,PublisherBpaysMarktwicewhatPublisherApays,soMarkmakes2*
+$50=$100forPublisherB.Intotal,Markmakes$50+$100=$150eachweek.Incents,thisis150*100=15000
+cents.Theansweris15000.
+DiscriminativeRMscore:0.9907
+GenRM-CoT:Let’sverifystepbystep.
+**Verification:**
+**Step1:**
+Solution:Markeditsatotalnumberof1000sentenceseachweek.
+ExpectedAnswer:Markeditsatotalof1000sentenceseachweek.
+**Thisstepiscorrect.**
+**Step2:**
+Solution:SincePublisherApaysMark5centspersentence,Markmakes1000*5=$50forPublisherA.
+ExpectedAnswer:WeknowthatPublisherApayshim5centspersentence,sofor500sentenceshemakes5*500=
+2500cents.
+**Thisstepisincorrect.**
+**Step3:**
+Solution:However,PublisherBpaysMarktwicewhatPublisherApays,soMarkmakes2*$50=$100forPublisherB.
+ExpectedAnswer:PublisherBpayshimtwiceasmuch,sohemakes2*2500=5000centsforthe500sentencesfrom
+PublisherB.
+**Thisstepisincorrect.**
+**Step4:**
+Solution:Intotal,Markmakes$50+$100=$150eachweek.
+ExpectedAnswer:Intotalhemakes2500+5000=7500cents.
+**Thisstepisincorrect.**
+**Step5:**
+Solution:Incents,thisis150*100=15000cents.
+ExpectedAnswer:Theansweris7500.
+**Thisstepisincorrect.**
+**FinalGrade:**
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.4293
+TableC.10 | GenRMCoTExample9
+31GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question: Carolspends4hourswritingasong,halfthatmuchtimerecordingit,and90minuteseditingit. What
+percentageofhertotalworktimedidshespendediting?
+Answer:Halfof4hoursis2hours.Sothetimespentrecordingis2hours.Addtheeditingtimeof90minutesandthe
+totaltimefortheentireprojectis4+2+1.5=7.5hours.Thatmeansshespent(90/7.5)*100=12%ofthetotal
+timeediting.Theansweris12.
+DiscriminativeRMscore:0.8414
+GenRM-CoT:Let’sverifystepbystep.
+**Verification:**
+Step1:Halfof4hoursis2hours.
+ExpectedAnswer:Correct.
+Step2:Addtheeditingtimeof90minutesandthetotaltimefortheentireprojectis4+2+1.5=7.5hours.
+ExpectedAnswer: Incorrect. Theeditingtimeshouldbeconvertedtohoursfirst: 90minutes=90/60=1.5hours.
+Then,thetotaltimeis4+2+1.5=7.5hours.
+Step3:Thatmeansshespent(90/7.5)*100=12%ofthetotaltimeediting.
+ExpectedAnswer:Incorrect.Theeditingtimeshouldbeinhours,soitshouldbe(1.5/7.5)*100=20%.
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.2498
+TableC.11 | GenRMCoTExample10
+32GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Question: Timdecidestocancelhiscablesubscriptionandgetstreamingservices. HegetsNetflixfor$10amonth.
+HuluandDisneyPlusnormallycost$10amontheachbuthesaves20%forbundling.Howmuchmoneydoeshesave
+bycancellinghis$60cablepackage?
+Answer:Timpays$60forcable.HegetsNetflixfor$10andthebundleofHuluandDisneyPluscosts$10*80%=$8.
+Sohepays$10+$8=$18forNetflixandthebundle.Nowhesaves$60-$18=$42comparedtothecablepackage.
+Theansweris42.
+DiscriminativeRMscore:0.9999
+GenRM-CoT:Let’sverifystepbystep.
+**Verification:**
+1.**Timpays$60forcable.**(Correct)
+2.**HegetsNetflixfor$10.**(Correct)
+3.**ThebundleofHuluandDisneyPluscosts$10*80%=$8.**(Incorrect)
+-ExpectedAnswer:ThebundleofHuluandDisneyPluscosts$10+$10=$20.Withthe20%discount,thetotalcostis
+$20*0.8=$16.
+4.**Sohepays$10+$8=$18forNetflixandthebundle.**(Incorrect)
+-ExpectedAnswer:Sohepays$10+$16=$26forNetflixandthebundle.
+5.**Nowhesaves$60-$18=$42comparedtothecablepackage.**(Incorrect)
+-ExpectedAnswer:Nowhesaves$60-$26=$34comparedtothecablepackage.
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.0015
+TableC.12 | GenRMCoTExample11
+33GenerativeVerifiers:RewardModelingasNext-TokenPrediction
+ExampleofGenRM-CoTonGradeSchoolMath
+Problem:Digimonhadits20thanniversary.WhenitcameoutJohnwastwiceasoldasJim.IfJohnis28nowhowold
+isJim?
+Solution:LetJim’sagebexwhenDigimoncameout.ThatmeansJohn’sageis2xwhenDigimoncameout.
+20yearsago,John’sagewas2x-20(currentage-20years)andJim’sagewasx-20(currentage-20years).
+Weknowthat2x-20=28(sinceJohn’scurrentageis28)
+2x=48
+x=24
+So,whenDigimoncameout,Jimwas24.Sinceit’sbeen20years,Jimisnow24+20=44yearsold.
+Theansweris44.
+DiscriminativeRMscore:0.9778
+GenRM-CoT:Let’sverifystepbystep.
+**SolutionVerification:**
+1. Let Jim’s age be x when Digimon came out. That means John’s age is 2x when Digimon came out. (Cor-
+rect)
+2. 20 years ago, John’s age was 2x - 20 (current age - 20 years) and Jim’s age was x - 20 (current age - 20
+years).(Correct)
+3.Weknowthat2x-20=28(sinceJohn’scurrentageis28)(Correct)
+4.2x=48(Correct)
+5.x=24(Correct)
+6. So, when Digimon came out, Jim was 24. Since it’s been 20 years, Jim is now 24 + 20 = 44 years old.
+(Incorrect)
+**ExpectedAnswer:**
+Since John was twice as old as Jim when Digimon came out 20 years ago, and John is 28 now, we can calcu-
+lateJim’sage.LetJim’sage20yearsagobex.Thenweknowthat2x=28-20=8,sox=4.Therefore,Jim’sagenow
+is4+20=24.Theansweris24.
+**ErroneousStepintheSolution:**
+The erroneous step in the Solution is step 6, where it concludes that Jim is 44 years old now. According to the
+ExpectedAnswer,Jimshouldbe24yearsoldnow.
+Verification:Istheanswercorrect(Yes/No)?No
+Gen-RM(MajorityVoting)score:0.0000
+FigureC.1 | GenRMCoTExample12
+34

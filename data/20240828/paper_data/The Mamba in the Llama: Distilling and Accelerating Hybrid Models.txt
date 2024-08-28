@@ -1,0 +1,813 @@
+The Mamba in the Llama:
+Distilling and Accelerating Hybrid Models
+JunxiongWang*1,DanielePaliotta∗2,3,AvnerMay3,AlexanderM.Rush1,andTriDao3,4
+1CornellUniversity
+2UniversityofGeneva
+3TogetherAI
+4PrincetonUniversity
+Abstract
+Linear RNN architectures, like Mamba, can be competitive with Transformer models in language
+modelingwhilehavingadvantageousdeploymentcharacteristics. Giventhefocusontraininglarge-scale
+Transformermodels,weconsiderthechallengeofconvertingthesepretrainedmodelsfordeployment.
+We demonstrate that it is feasible to distill large Transformers into linear RNNs by reusing the linear
+projection weights from attention layers with academic GPU resources. The resulting hybrid model,
+which incorporates a quarter of the attention layers, achieves performance comparable to the original
+Transformerinchatbenchmarksandoutperformsopen-sourcehybridMambamodelstrainedfromscratch
+with trillions of tokens in both chat benchmarks and general benchmarks. Moreover, we introduce a
+hardware-awarespeculativedecodingalgorithmthatacceleratestheinferencespeedofMambaandhybrid
+models. Overallweshowhow,withlimitedcomputationresources,wecanremovemanyoftheoriginal
+attentionlayersandgeneratefromtheresultingmodelmoreefficiently. Ourtop-performingmodel,distilled
+fromLlama3-8B-Instruct,achievesa29.61length-controlledwinrateonAlpacaEval2againstGPT-4and
+7.35onMT-Bench,surpassingthebestinstruction-tunedlinearRNNmodel.
+1 Introduction
+WhileTransformers[70]havebeenanessentialarchitectureindeeplearningandhavedriventhesuccess
+of large language models such as GPT [8], Llama [68], and Mistral [36], they are prohibitively slow for
+verylongsequencegenerationduetotheirquadraticcomplexitywithrespecttosequencelengthandlarge
+key-value(KV)cacherequirement. RecentlinearRNNmodels(Mamba[25],Mamba2[17],GLA[76],RetNet
+[65],Griffin[18])beatTransformersincontrolledexperimentsatsmalltomediumscale,althoughthebest
+Transformersstillsignificantlyoutperformthesemodelsondownstreamtasks. Wenotethatthetraining
+timesoflinearRNNmodelsaresimilartothoseofhighlyoptimizedTransformers[76],andthereforescaling
+upeitherofthesemodelsrequiressubstantialcomputationalresources.
+TheprimarybenefitoflinearRNNmodels(Mamba[25],Mamba2[17])isthattheyhavefasterinference
+(5×higherthroughput)thanTransformers. EfficientinferenceisemergingasacriticalneedforLLMsystems
+such as new applications currently bottlenecked by the large KV cache of Transformers, e.g. reasoning
+overmultiplelongdocuments[29,54,62]andfilesinlargecodebases[41,58]). Emergingworkflowswith
+agents [74, 77] also require large-batch inference to explore more trajectories and long-context to model
+complexenvironments.
+These properties motivate the goal of distilling a large pretrained Transformer model into a linear
+RNN in order to generate as efficiently as possible. The technical challenges are two-fold: how to map
+pretrained Transformer weights to linear RNN weights for distillation, and how to adapt best-practice
+*EqualContribution.Orderdeterminedbycoinflip.
+1
+4202
+guA
+72
+]GL.sc[
+1v73251.8042:viXraTransformer inference techniques, such as speculative decoding, to the new architecture. We make the
+followingcontributions:
+• Weshowthatbyreusingweightsfromattentionlayers,itispossibletodistillalargetransformerinto
+alargehybrid-linearRNNwithminimaladditionalcomputewhilepreservingmuchofitsgeneration
+quality. WeproposeamodifiedMambaarchitecturethatcanbedirectlyinitializedfromtheattention
+blockofapretrainedmodel.
+• We propose a multistage distillation approach that mirrors the standard LLM pipeline combining
+progressive distillation, supervised fine-tuning [38], and directed preference optimization [56]. This
+approachshowsbetterperplexityanddownstreamevaluationcomparedwithvanilladistillation.
+• Wedevelopahardware-awarespeculativesamplingalgorithmandafastkernelforspeculativedecoding
+onMambaandhybridarchitectures. Weachieveathroughputofover300tokens/secondforaMamba
+7B model. Additionally, we show that speculative decoding can be effectively applied to our hybrid
+architecture.
+Ourexperimentsdistilldifferentlarge-scaleopenchatLLMs,Zephyr-7B[69],Llama-38B[20]tolinear
+RNN models (hybrid Mamba and Mamba2), using only 20B tokens of training. Results show that the
+distilledapproachmatchestheteachermodelinstandardChatbenchmarks[42,80]. Wealsoshowthatit
+performsonparorbetterwithallsimilarlysizedpretrained-from-scatchMambamodelsincludingMamba
+7Bmodels[25,51]trainedfromscratchwith1.2TtokensorNVIDIAHybridMamba2models[71]trained
+fromscratchwith3.5Ttokensinmultipletasks(e.g.,MMLU[33],TruthfulQA[46])intheLMevaluation[24].
+2 From Transformer to Mamba
+2.1 RelationshipBetweenAttentionandLinearRNNs
+Webeginbyreviewingmultiheadattentiontoclarifytheshapesofintermediateobjects. Notationally,weuse
+explicitsubscriptsforthesequencepositioninsteadofmatrixrepresentation,tobetterhighlightsimilarities
+betweenthetwomodels.
+Attentioniscomputedinparallelformultipledifferentlyparameterizedheads. Eachheadtakessequence
+owithhiddensizeDasanargumentandcomputes,
+Q =WQo , K =WKo , V =WVo forallt,
+t t t t t t
+√ t
+α ...α =softmax(cid:0) [Q⊤K ...Q⊤K ]/ D(cid:1) y =(cid:88) m α V
+1 T t 1 t T t s,t s s
+s=1
+whereo ∈RD×1, W∈RN×D Q ,K ,V ∈RN×1 m =1(s≤t)
+t t t t s,t
+Recent work has argued that linear RNNs can be serious competitors to attention in large language
+models. SeveraldifferentlinearRNNformulationshavebeenproposedwithsimilarformulations. Fornow,
+weleavetheshapesoftheparametersA ,B ,C abstract,andnotethatlinearRNNsalltakethefollowing
+t t t
+form,wherehisamatrix-valuedhiddenstate,
+h =A h +B x , y =C h (1)
+t t t−1 t t t t t
+LinearRNNshaveseveralcomputationaladvantagesoverattention. Duringtraining,ally valuescanbe
+t
+computedmoreefficientlythanattentionsincethereisnosoftmaxnon-linearity. Duringinference,eachnext
+y canbecomputedseriallywithoutrequiringacache.
+t
+Despitethesuperficiallydifferentform,thereisanaturalrelationshipbetweenlinearRNNsandattention.
+Linearizingtheattentionformulabyremovingthesoftmaxyields:
+t t t
+(cid:88) 1 (cid:88) 1 (cid:88)
+y = m α V = √ Q (m K⊤V )= √ Q m K⊤WVo .
+t s,t s s t s,t s s t s,t s s
+D D
+s=1 s=1 s=1
+2ThisimpliesthatthereexistsalinearRNNformoflinearizedattention,specifically:
+1
+h =m h +K V y = √ Q h
+t t−1,t t−1 t t t t t
+D
+↓
+h =A h +B x , y =C h
+t t t−1 t t t t t
+A =m , B =WKo ,C =WQo , x =WVo
+t t−1,t t t t t t t
+Notethoughthatthisversionusesahiddenstateofsizeh∈RN×1. Effectivelytrackingonlyonescalarover
+timeperhiddendimension. Naivelyapplyingthistransformationleadstopoorresults. Theissueisthat
+linearizingattentionproducesadegradedrepresentationoftheoriginalmodel,asthesoftmaxnonlinearity
+iscriticaltoattention.
+Thekeytoimprovingthesemodelsistoincreasethecapacityofthelinearhiddenstatetobettercapture
+long-term structure. For example, previous work has shown the use of kernel methods to improve this
+approximation[35,60,79]. Theseapproachesexpandthesizeofthehiddenstaterepresentationtohto
+RN×N′ tobettermatchthemodelingcapacityofsoftmax.
+2.2 DistillingtoanExpandedLinearRNN
+TodesignaeffectivedistilledlinearRNN,weaimtostayascloseaspossibletotheoriginalTransformer
+parameterization,whilealsoexpandingthecapacityofthelinearRNNinanefficientmanner. Wewillnot
+attempttohavethenewmodelcapturetheexactoriginalattentionfunction,butinsteadusethelinearized
+formasastartingpointfordistillation.
+Specifically,weadapttheparameterizationfrom
+Mamba, [25] to increase the hidden state size,
+Algorithm1Attention-InitializedMamba
+whileinitializingfromtheattentionrepresentation. 1: Shapes: B-Batch,L-Length,D-embedsize,
+Mambausesacontinuoustimestate-spacemodel 2: N =D/Heads,N′-expand
+(SSM) to parameterize a linear RNN at run time, 3: Input: o t: (B,D)
+describedbythedifferentialequation, 4: Output: output: (B,D)
+5: NewParams: MLP,A
+h′(k)=Ah(k)+B(k)x(k) y(k)=C(k)h(k) 6: for eachheadWk,Wq,Wv,Wo :(N,D)
+7: expandinggroupedKVsdo
+WhereAisadiagonalmatrixandothervaluesare 8: HeadParameter: A:(N,N′)
+continuous signals. To apply this formulation to
+9: forallpositionst:
+10: x :(B,N)←WVo
+a discrete-time problem like language modeling, t t
+11: B :(B,N)←WKo
+weuseaneuralnetworktoproduceasequenceof t t
+12: C :(B,N)←WQo
+sampling intervals ∆
+t
+and samples of the signals
+13:
+∆t :(B,N′)←MLP(t
+x )
+atthesetimesteps. Giventhesesamplingintervals, 14: At ,B ,C :(B,Nt ,N′)←Disc(A,B,C,∆)
+1:T 1:T 1:T
+andT samplesofB,C, Mambaapproximatesthe 15: y←LinearRNN(A,B,C,x)
+continuous-timeequationusingalinearRNNasa 16: output←output+WO⊤y
+discretization. We use an overbar to indicate the 17: returnoutput
+discrete-timeform,whichisreconstructeddynami-
+cally.
+A ,B ,C =Discretize(A,B ,C ,∆ )
+1...T 1...T 1...T 1...T 1...T 1...T
+Inthissimplestcase,withN′ =1andanidentitydiscretization,thisapproachrecoversthelinearattention
+tolinearRNNconversiondiscussedintheprevioussection. ThebenefitofMambaisthatwithN′ >1the
+continuous-timeparameterizationallowsthemodeltolearnsignificantlyricherfunctions,withoutmany
+moreparametersordecreasedefficiency. Specificallytheonlyadditionallearnedparameterswillbethe
+samplingrate∆andthedynamicA. ThesenewparameterswillcontroltheconstructedlinearRNNthrough
+thediscretizationfunctionyieldingthenewmatrixvaluedlinearRNN.Specifically,wetakeinthesame
+B ,C ∈ RN×1 and ∆ ∈ RN′, but output B ,C ∈ RN′×N×1, effectively increasing the hidden size by a
+t t t t t
+factorofN′overthenaivelinearattention.
+3AcorecontributionofMamba[17,25]istodemonstrateahardware-awarefactorizationofthisalgorithm.
+Implementingthealgorithmnaivelywouldbeprohibitivelyslowasthenewexpandedparametersarequite
+large. Theirapproachfusesdiscretization,stateexpansion,andapplyingthelinearRNNintoasinglekernel,
+whichcircumventsfullymaterializingthediscreteparameters. ThisallowsforlargeN′withrelativelysmall
+efficiencycosts.
+2.3 Attention-to-MambaInitializationandHybridStepwiseTraining
+OurfullapproachisshowninAlgorithm1. ThisalgorithmfeedsthestandardQ,K,Vheadsfromattention
+directlyintotheMambadiscretization,andthenappliestheresultinglinearRNN.Asnotedabove,thiscan
+seenasroughlyinitializingwithlinearizedattentionandallowingthemodeltolearnricherinteractions
+throughtheexpandedhiddenstate.
+Figure1showstheresultingarchitecture. OurversiondirectlyreplacesTransformerattentionheads
+directlywithfine-tunelinearRNNlayers. WekeeptheTransformerMLPlayersasisanddonottrainthem.
+Thisapproachalsorequiresprocessingadditionalcomponentslikegroupedqueryattentionthatshareskeys
+andvaluesacrossheads. WenotethatthisarchitecturediffersfromthearchitectureusedinmanyMamba
+systems,whichcombinesMLP-SSMlayersandusesasinglehead.
+This initialization allows us to replace any attention block with a linear RNN block. We experiment
+withhybridmodelswherewekeepeverynattentionlayers. Empiricallywefoundthatreplacinglayersina
+stepwisemannerwasthemosteffectivestrategy,i.e. wefirstkeepevery2layers,distill,andthenevery4,
+andcontinuedistillation.
+Attention Mamba
+K Q V A B C x Δ
+Figure1: TransferringTransformertoMamba. Weights, inorange, areinitializedfromtheTransformer
+(LinearprojectionsforQ,K,andVareinitializedusinglinearprojectionforC,B,andXrespectively). We
+replaceindividualattentionheadswithMambaheads,andthenfinetuneMambablockswhilefreezingthe
+MLPblocks. Shapesarekeptmainlythesame. Weightsingreenareadded. Newparametersareintroduced
+forthelearnedAand∆parameters.
+3 Knowledge Distillation for Aligned LMs
+Knowledgedistillation(KD)[34]servesasacompressiontechniqueaimedattrainingasmallernetwork
+thatmimicsthebehaviorofalargerteachernetwork. AfterinitializingthemodelfromtheTransformer
+parameters,weaimtodistillittoperformonparwiththeoriginallanguagemodel. Weassumethatmost
+oftheknowledgefromthetransformerismaintainedintheMLPlayerswhichweretransferredfromthe
+4originalmodel,andfocusondistillingthefine-tuningandalignmentstepsoftheLLM.Duringthisstage,the
+MLPlayersarekeptfrozenandtheMambalayersaretrainedasinFigure1.
+SupervisedFine-TuningWefirstapplyknowledgedistillationtoredothesupervisedfine-tuning(SFT)
+stageoflanguagemodeladaptation. Duringthisstage,anLLMistrainedtomaximizethelikelihoodofa
+responseygivenaninputpromptx,i.e. p(y |x). Thetasklookssimilartoconditionalgeneration.
+There are two common approaches for distillation in this setting. One method is to use word-level
+KL-Divergence. In this setting, the full probability distribution of the student model p(·;θ) is trained to
+matchthefulldistributionoftheteachermodelp(·;θ )byminimizingtheKLdivergenceovertheentireset
+T
+ofnextpossibletokensatpositiont. Thesecondmethodissequence-levelknowledgedistillation(SeqKD)
+[38]. SeqKDsuggestsasimplemethodfordistillationonthisstyleoftask,byreplacingthegroundtruthtext
+y withtheteachergenerationoutputyˆ ,alsoknownaspseudo-labels.
+1···t 1···t
+T
+(cid:88)
+L(θ)=− α log p(yˆ |yˆ ,x,θ)+β KL[p(·|yˆ ,x,θ )||p(·|yˆ ,x,θ)] (2)
+t+1 1:t 1:t T 1:t
+t=1
+Hereθistrainableparametersofthestudentmodelandαandβ controltheweightsofsequenceandword
+losstermrespectively.
+PreferenceOptimizationThesecondstageofinstruction-tuningforLLMsistoalignthemtoasetofuser
+preferences. Duringthisstage,asetofdesiredpreferencepairsisusedtoimprovethemodel’soutput. The
+objectiveistoproduceoutputsytopromptsxthatmaximizearewardmodelrwhilemaintainingclosetoa
+referencemodel. Typicallythereferencemodelischosentobethemodelaftersupervisedfine-tuning. For
+distillation,wecanconvenientlyutilizetheoriginalteacher,i.e.
+maxE (cid:2) r (x,y)(cid:3) −βKL(cid:2) p(y |x;θ)||π(y |x;θ )(cid:3) (3)
+x∼D,y∼p(y|x;θ) ϕ T
+θ
+Thispreferencemodelisdefinedbyarewardfunctionr (x,y)dependentonthemethodused. Previous
+ϕ
+researchutilizingAIfeedbackhasprimarilyfocusedonemployingreinforcementlearningmethods,suchas
+proximalpolicyoptimization(PPO)[61],tooptimizeϕconcerningthisreward. Recently,methodsusing
+directpreferenceoptimization(DPO)[56]havebeeneffectiveatoptimizingthisobjectivewithdirectgradient
+updates. Specifically,DPOshowsthat,ifwehaveaccesstopreferredy anddispreferredy outputsfora
+w l
+givenpromptx,wecanreformulatethisoptimizationproblemas,
+(cid:18) (cid:19)
+p(y |x;θ) p(y |x;θ)
+π =max E logσ βlog w −βlog l . (4)
+θ θ (x,yw,yl)∼D p(y w|x;θ T) p(y l|x;θ T)
+This optimization can be performed at the sequence level by scoring the preferred and dispreferred
+outputsofthemodelwiththeteacherandstudentandthenbackpropagatingtothestudent. Asfarasweare
+awarethisisthefirstuseofDPOasadistillationobjective.
+4 Speculative Decoding Algorithms For Linear RNNs
+The main goal of the linear RNN formulation is to improve decoding efficiency. For both attention
+and linear RNNs, the serial dependency of autoregressive generation inherently bottlenecks efficiency.
+Systemscannotutilizeallavailablecompute,astheyneedtowaitforthegenerationofprevioustokensto
+proceed [9, 10, 40, 64, 73]. Speculative decoding has emerged as a method for breaking this bottleneck by
+spendingextracompute tospeculate onfuturegenerations. Inthissection, weconsider approachesfor
+applyingthistechniquetolargeMambamodels,whichcanthenbeappliedtothedistilledmodels.
+4.1 ChallengesinRNNSpeculation
+Speculativedecodingusestwomodels: adraftmodel,θ ,andaverificationmodel,θ . Thefastdraftmodel
+D V
+producespotentialfuturecompletions,y∗ =argmax p(y ,...,y ;θ ),andthelargerverificationmodel
+checksthatthesearetoprankingateachtimestep,i.ey .1:cTheck1 ingp(yT ∗|y∗D
+;θ ). Thelongerachainbeforea
+t 1:t−1 V
+verificationfailurethefastertheoutput. Ifapartialchainmatches,wecanrewindtothelastmatch.
+5Draft Model Verifier Model
+Multistep decode + cache Accept Reject
+To Draft Model
+Generate draft tokens + cache
+Sample new
+token
+From Verifier
+Recompute from Recompute from
+cache Multistep decode +
+cache
+cache
+Figure2: Multi-StepRNNSpeculativeDecoding. Left(top): Thedraftmodelgeneratesthesetofbluedraft
+tokenssequentially. Thedrafttokensarethenverified. Right(top): Verificationusesthemultistepkernel,
+withoutmaterializingtheintermediatestates. Thelasttokenisrejectedandreplacedwiththetruebest
+token. Note,thateventhoughmoretokensaregeneratedwecannotadvancethehiddenstatecache. Left
+(bottom)Thedraftmodelcannowgeneratemorebluedrafttokensfromthecurrenttokens,resultinginsix
+total. Right(bottom)Whenthenewdraftisverified,themulti-stepkernelreturnsboththehiddenstateafter
+theyellowtokenandthefinalhiddenstate,sinceverificationwillfallbetweenthosepositions.
+Attention-basedmodelsareparticularlyamenabletospeculation,astheyareslowatgenerationdueto
+sequentialnature,butfastatverificationduetotheirabilitytocheckmultipletokensinparallel. LinearRNN
+modelslikeMambahavesignificantlydifferentperformancecharacteristicsthatmakethemlessamenable
+tospeculativedecoding. Sequentialdecodingusingrecurrent-stylesamplingisalreadysignificantlyfaster
+thanattention. Likeattention,thereareparallelmodesformodelslikeMambawhichareusedattraining.
+Theseareefficient,butaretunedforextremelylongsequences. Inaddition,theyrelyonhardware-aware
+optimizations,suchasavoidingmaterializingintermediatestates. Thesepropertiesmakeitdifficulttouse
+forspeculationforrelativelyshortchainswhenitisunknownwhenaconflictwilloccur.
+An additional challenge arises from caching states in RNN models. The state of an attention model
+isrepresentedbythekey-valuecache,K ,V ;whereasthestateofanRNNmodelissimplyh . Tobe
+1:t 1:t t
+competitivewithattentionthissingleRNNstateneedstobeverylarge. Duringspeculation,weneedto
+rewindtoapreviousstateattimestept′. Forattention,thisissimplyK ,V ;however,forRNNsthis
+1:t′ 1:t′
+wouldrequirecachingallh whichwouldrequirealargememoryoverhead.
+1:t
+Algorithm2Multi-StepLinearRNNSpeculation
+4.2 Multi-StepLinearRNNSpeculation functionVerify(y ,j,h )
+1:k i
+WeproposeanewalgorithmforlinearRNNspec-
+//y
+1:k
+aredraft,j islastverified,
+ulativedecodingusinghardware-awaremulti-step
+//h iisacachedstatewithi≤j
+generation. The core to the approach generation y j′ :k,h j,h k ←MultiStep(h i,y 1:k,i,j,k;θ v)
+kernelthatcomputes, k′ ←FirstConflict(y j:k,y j′ :k)
+returnk′,h ifk′ =kelseh
+k j
+y j:k,h j,h
+k
+←MultiStep(h i,y 1:n,i,j,k;A,B,C,∆) functionSpeculate(K)
+//K tokensaredraftedperstep
+Whereiisthestartinghiddenstate,i≤j ≤k,and
+hcache ←h
+0
+j...kistherangeofyoutputsneeded. Thekernel
+j ←0
+ishardware-awarebecauseitavoidsmaterializing whiley isnotenddo
+j
+keytermsoffofthefastGPUmemory. Specifically,it
+k ←j+K
+avoidsinstantiatingmosth 1:naswellasthediscrete-
+y
+j+1:k
+←argmaxp(y
+j+1:k
+|y 1:j,θ D)
+timelinearRNNparameters. Thiskernelisaimed j,hcache ←Verify(y 1:k,j,hcache)
+returny
+1:j
+6totargettheissuespresentedabove. Specifically,itcansaveasnapshotofthestateh beforeevaluatingthe
+j
+drafttokens. Thisallowsrecomputingthecorrectstateontheflyafteratokenisrejected. Theassumptionis
+thatdecodingisbottleneckedbymemoryandnotbycompute,aswecancomputemultiplestepsofdecoding
+withverylittleoverheadoversingle-stepdecoding.
+Algorithm 2 and Figure 2 show the full algorithm. The approach maintains only one RNN hidden
+stateincacheforverificationandadvancesitlazilybasedonthesuccessofthemulti-stepkernel. Since
+thedistilledmodelscontaintransformerlayers,wealsoextendspeculativedecodingtoAttention/RNN
+hybridarchitectures. Inthissetting,theRNNlayersperformverificationaccordingtoAlgorithm2,whilethe
+transformerlayerssimplyperformparallelverification.
+NotethatifthedraftmodelisaMambaorhybridmodel,thespeculationpartofthealgorithmgetsmore
+complicated,asthedraftmodelneedstorecomputethestateforthetokensacceptedinthepreviousiteration.
+Thisisdonesimilarlytotheverifiermodel,bycachingolderentriesandrecomputingontheflyduringthe
+nextroundofspeculation.
+4.3 SpeculationAnalysisandHardwareSpecificOptimization
+ModelSize GPU K #Gen. Tokens Throughput(toks/s) Speedup
+2.8B 3090 3 3.01 259 2.3x
+2.8B 3090 4 3.28 289 2.6x
+2.8B H100 3 4.04 389 1.71x
+2.8B H100 4 3.9 421 1.85x
+7B 3090 3 3.19 109 2.1x
+7B 3090 4 3.56 110 2.1x
+7B H100 3 3.28 271 1.95x
+7B H100 4 3.6 272 2x
+Table1: SpeedupresultsforspeculativedecodingwithpureMambamodels. The2.8Bverifierusesa130M
+Mambadraft. The7BverifierusesaLlama31Bdraftwetrained. DataisfromThePile. K isnumberofdraft
+tokensproduced,#GenincludesanadditionaltokenfromthelastVerifierlogits.
+ToverifytheeffectivenessofthisapproachwerunthespeculationusingMamba7BandMamba2.8Bas
+targetmodels. ResultsareshowninTable1. Figure3showstheperformancecharacteristicsoftheMulti-Step
+kernelitself.
+SpeeduponH100GPUs. Anaiveimplementation
+ofouralgorithmalreadyshowsstrongperformance 5
+on Ampere GPUs as shown in Table 1. However,
+achieving strong performance on H100 GPUs is
+4
+much more challenging. This is mainly due to
+GEMMoperationsbeingmuchfaster,whichmakes
+3 Multi-step Time (ms)
+theoverheadincurredfromthecachingandrecom-
+Single-step Time (ms)
+putation operations more visible. In practice, the
+naiveimplementationofouralgorithm,withseveral 2
+differentkernelcalls,achievesadecentspeedupon
+3090 GPUs (1.5x for Mamba 2.8B with 60% accep- 1
+tancerate)butnospeedupatallonH100s.
+Weoptimizedourimplementationbyfusingker-
+0
+nels,andbyadaptingtheimplementationtoeasily 2 4 8 16 32
+Step Size (K)
+allowcachingandrecomputingoldsteps. Specifi-
+cally,theverifiermodelperformsi)recomputation Figure 3: Performance of the multi-step SSM kernel for
+of previous steps from the cache, ii) multistep de- generating32tokens.
+codingforthenewsequenceofdrafttokensandiii)
+7
+)sm(
+emiTcachingwithinasinglekernel1. Forthedraftmodel,recomputation,decodingandcachingarealsofusedin
+asinglekernel. TheresultingimplementationsarchivesspeedupsonH100sGPUs,asshowninTable1.
+5 Results
+5.1 ExperimentalSetup
+Target models. We perform experiments using two LLM chat models: Zephyr-7B [69], which is a chat
+fine-tunedMistral7B[36],andLlama-3Instruct8B[20]. ForthelinearRNNmodels,weusehybridversionsof
+MambaandMamba2with50%,25%,12.5%,and0%attentionlayers. Wereferto0%asapureMambamodel.
+Mamba2isavariantarchitectureofMambathatisdesignedtobemoretargetedtorecentGPUarchitectures.
+Zephyr-MambareferstoadistillationfromZephyr[69],whileLlama3-Mamba/Llama3-Mamba2indicates
+distillationfromLlama-3instruct8B[68].
+Training. Distillation does not require any language modeling pretraining data, but instead uses the
+post-training process to adapt the new model. We use a three-stage process. In the first stage, we use
+UltraChat[19]andUltraFeedback[16]asseedpromptsandusetheteachermodeltogeneratepseudo-labels.
+ThestudentmodelistrainedinoneepochusingthelossLinEq 2withα = 1andβ = 0.1. Modelsare
+trainedusingAdamWoptimizerwithβ = (0.9,0.98)withabatchsize64. Weusealinearlearningrate
+warm-up (for the first 500 steps) followed by cosine annealing. In the second stage, we use supervised
+finetuningwithourmodelontheGenQA[11],InfinityInstruct[3]andOpenHermes2.5[67]datasetsusing
+SFTinoneepoch,withthesamehyperparametersasZephyr[69]. Inthefinalstage,formodelsdistilledfrom
+Zephyr,wedodistilledalignmentwithourmodelusingDPOontheUltraFeedback[16]datasetwhichis
+consistentwithteachermodel. WhilemodelsdistilledfromLlama-3instructed8B,weusedatasets2 3 4from
+SimPO[50]andZephyr [69]. WeonlyfreezeGatedMLP(FFN)inthefirststage,whileinthesecondandfinal
+stageallparametersaretrained. Thetotaldistillationprocessforeachhybridmodel(e.g.,Mamba-Llama3
+(50%att))takeslessthanfivedaysin8x80GA100.
+Baselines. InadditiontothecoreTransformerarchitectures,themainbaselineswecompareagainstareother
+large-scalelinearRNNmodels. WecomparewithbothpureSSMarchitectures,suchasTRIMamba7B[51]
+trainedwith1.2TtokensandFalconMamba7B5trainedwithmorethan5Ttokens,hybridSSMarchitectures,
+suchasNvidiaHybridMamba2[71]trainedwith3.7Ttokens,andotherlinearhybridRNNmodels,suchas
+RecurrentGemma-9BInstruct[7,18].
+5.2 EvaluationonChatBenchmarks
+We evaluate our models using both single-turn, AlpacaEval [42] and multi-turn chat benchmarks, MT-
+Bench[80]. Thesebenchmarksassessthemodel’sabilitytofollowinstructionsandrespondtochallenging
+promptsacrossawidevarietyofdomains.
+Table2showstheperformanceofourmodelsonchatbenchmarkscomparedwithlargetransformer
+models. The distilled hybrid Mamba model (50%) achieves a similar score in the MT-benchmark as the
+teachermodel,andslightlybetterthantheteachermodelontheAlpacaEvalbenchmarkinbothLCwin
+rateandoverallwinrate. ThedistilledhybridMamba(25%and12.5%)performanceisslightlyworsethan
+thatoftheteachermodelsintheMTbenchmarkbutstillsurpassessomelargetransformersevenwithmore
+parametersinAlpcaaEval. Thedistilledpure(0%)modeldoesdegradesignificantlyinaccuracy. Notably,
+thedistilledhybridmodelperformsbetterthanFalconMamba,whichwastrainedfromscratchwithmore
+than5Ttokens.
+1Additionally,weimplementtheconvolutionalpartoftheMambablockusingacircularbufferwhichallowsustokeeptrackofthe
+oldentriesandincludethemintheconvolutionwhentheyareneededforrecomputation.
+2https://huggingface.co/datasets/princeton-nlp/llama3-ultrafeedback-armorm
+3https://huggingface.co/datasets/HuggingFaceH4/ultrafeedback_binarized
+4https://huggingface.co/datasets/HuggingFaceH4/orca_dpo_pairs
+5https://huggingface.co/tiiuae/falcon-mamba-7b
+8MT-Bench MT-Bench MT-Bench AlpacaEval AlpacaEval
+Model(%Att) Size Align
+(score) (Round1) (Round2) (LCwin%) (win%)
+Zephyr 7B DPO 7.34 - - 13.20 0.96 10.99 0.96
+Mamba-Zephyr(50%) 7B DPO 7.31 - - 20.660.74 16.691.10
+Mamba-Zephyr(25%) 7B DPO 7.03 - - 17.16 0.69 13.11 1.00
+Mamba-Zephyr(12.5%) 7B DPO 6.40 - - 15.32 0.66 12.96 1.02
+Llama-3-Instruct 8B RLHF 8.00 - - 22.90 1.26 22.60 1.26
+Mamba-Llama3(50%) 8B DPO 7.35 7.82 6.88 29.611.31 26.691.31
+Mamba-Llama3(25%) 8B DPO 6.86 7.56 6.15 25.85 1.26 22.50 1.26
+Mamba-Llama3(12.5%) 8B DPO 6.46 6.91 6.01 20.76 1.16 17.93 1.16
+Mamba2-Llama3(50%) 8B DPO 7.32 7.93 6.70 25.00 1.24 22.27 1.24
+Mamba2-Llama3(25%) 8B DPO 6.74 7.24 6.24 22.75 1.18 19.01 1.18
+Mamba2-Llama3(12.5%) 8B DPO 6.48 6.83 6.13 20.25 1.13 16.88 1.13
+Mamba2-Llama3(0%) 8B DPO 5.64 6.16 5.11 14.49 0.93 10.88 0.93
+FalconMambaInstruct 7B SFT 6.40 7.25 5.55 4.04 2.15
+0.45 0.45
+GPT-3.5-turbo - RLHF 7.94 - - 22.70 14.10
+GPT-4o - RLHF - - - 57.461.47 51.331.47
+Table2: Chatbenchmarkresultsforopen-accessandproprietarymodelsonMT-BenchandAlpacaEval.
+MT-BenchscoresmodelresponsesusingGPT-4. AlpacaEvalversiontwomeasuresthewin-lossratebetween
+baselinemodelsandGPT-4scoredbyGPT-4Turbo.
+5.3 EvaluationonGeneralBenchmarks
+ZeroShotEvaluation. Weutilizetheopen-sourceLMEvaluationHarnesslibrary[24](branchbig-refactor)
+to assess 10 tasks, with the following evaluation metrics: WinoGrande (WG) accuracy [59], PIQA (PQ)
+accuracy[6],HellaSwag(HS)normalizedaccuracy[78],ARC-EasyandARC-Challenge(AEandAC)accuracy
+andnormalizedaccuracy, [13],MMLU(MM),accuracy[32],OpenBookQA(OB)normalizedaccuracy[53],
+TruthFulQA(TQ)accuracy[45],PubMedQA(PM)accuracy[37],andRACE(RA),accuracy[39]. Eachtaskis
+evaluatedbyanalyzingtheprobabilityassignedbythemodeltoeachpotentialanswerchoice.
+Model(%Att) WG PI HS AE AC MM OB TQ PM RA AVG
+TRIMamba-7B[51] 71.42 81.01 77.93 77.53 46.67 33.39 46.20 32.09 72.30 37.99 57.65
+NvidiaHybridMamba-8B[71] 71.27 79.65 77.68 77.23 47.70 51.46 42.80 38.72 69.80 39.71 59.60
+Mamba-Llama3(50%) 68.98 78.02 78.43 74.45 51.96 57.81 44.00 47.69 73.00 38.56 61.30
+Mamba-Llama3(25%) 62.83 78.07 75.00 74.28 47.35 53.50 40.00 43.64 65.4 36.94 57.70
+Mamba-Llama3(12.5%) 59.75 75.08 71.71 70.58 43.60 49.81 41.40 41.41 62.40 34.45 55.02
+Mamba2-Llama3(50%) 71.51 81.45 79.47 78.83 58.19 55.70 44.20 57.74 72.4 38.85 63.84
+Mamba2-Llama3(25%) 64.80 78.73 77.7 76.35 52.47 53.71 42.40 55.33 64.80 39.23 60.55
+Mamba2-Llama3(12.5%) 63.38 76.82 73.14 75.84 50.26 50.78 39.60 50.00 65.80 36.46 58.21
+Mamba2-Llama3(0%) 58.56 76.82 70.75 74.12 47.95 45.19 39.00 40.20 62.20 32.63 54.74
+Table3: EvaluationonLMEvalbenchmarkforMambaandMamba2distilledfromdifferentteachermodel.
+Table3showszeroshotevaluationinLMEvalbenchmarkforMambaandMamba2distilledfromdifferent
+teacher models. Both hybrid Mamba-Llama3 and Mamba2-Llama3 models, distilled from the Llama-3
+Instruct8B,performbettercomparedtotheopen-sourceTRIMambaandNvidiaMambamodelstrained
+fromscratch. PerformancedegradeswithmorelinearRNNlayers,butisstillcompetitiveat25%tomodels
+trainedfromscratch.
+Benchmark Evaluation. We also report few-shot evaluations on OpenLLMLeaderboard by conducting
+25 shots on ARC-Challenge [14], 10 shots on HellaSwag [78], 5 shots on MMLU [33], and 5 shots on
+Winogrande [59]. For GSM8K [15], we follow the evaluation for instruct tuned model [50], which uses
+ZeroEval[44],abenchmarkdesignedforchatmodels. WealsoincludetheCRUX[28]fromthatbenchmark,
+whichisdesignedforevaluatingreasoningoncode. Allmodelsareevaluatedwithgreedydecodinginthe
+9ZeroEval.
+Model(%Att) ARC HS MMLU WG TQ GSM8K CRUX
+FalconMamba-7B 62.03 80.82 62.11 73.64 53.42 41.32 8.88
+RecurrentGemma-9B[7,18] 52.00 80.40 60.50 73.60 38.60 38.51 26.25
+Mamba-Llama3(50%) 56.57 78.99 59.26 69.06 58.85 67.70 27.88
+Mamba-Llama3(25%) 55.03 75.66 52.68 62.83 55.03 40.64 15.62
+Mamba-Llama3(12.5%) 52.90 72.46 49.20 59.19 53.00 26.91 11.25
+Mamba2-Llama3(50%) 60.41 77.97 56.67 71.35 66.60 59.36 24.88
+Mamba2-Llama3(25%) 59.22 76.88 53.94 64.88 64.64 38.13 13.25
+Mamba2-Llama3(12.5%) 53.33 72.16 50.85 63.61 61.12 35.03 10.25
+Mamba2-Llama3(0%) 53.41 69.08 43.19 58.41 52.01 - -
+Table4: ResultsontheOpenLLMLeaderboardandZeroEvalLeaderboard. ForGSM8KandCRUX,wechose
+thezero-shotevaluationusingZeroEval,whichisdesignedforevaluatinginstructmodels. Weevaluatedthe
+correspondinginstruct-tunedmodelsforFalconMamba-7bandRecurrentGemma-9B,specificallyFalcon
+Mamba-7b-instructandRecurrentGemma-9B-it.
+Table4showsthattheperformanceofourdistilledhybridmodelsmatchesthatofthebestopen-source
+linearRNNmodelsontheOpenLLMLeaderboard,whileoutperformingtheircorrespondingopen-source
+instructmodelsinGSM8KandCRUX.
+5.4 Hybridspeculativedecoding
+Setup Weperformspeculativedecodingusingthedistilledhybridmodels. Werunexperimentsusingboth
+HybridMamba50%andHybridMamba25%asmainmodels. Forthedraftmodels,wetrain2and4-layer
+TransformerDraftmodelsontheOpenHermes2.5dataset[67],forapproximately3fullepochs,following
+the“shrinkandfine-tune”approachfrom[63]. Specifically,weinitializethedraftlayersusinglayersfrom
+theZephyr-7Bmodel(wetakelayersatindices[0,31]forthe2-layermodeland[0,10,20,31]forthe4-layer
+model),andtheembeddingsandlanguagemodelheadalsofromtheZephyr-7Bmodel[69]. Weperform
+lossmaskingontheprompt,thusonlyconsideringnexttokenpredictionloss(cross-entropy)onthechat
+continuationsfromthetrainingset. SpeculativedecodingexperimentsarerunonasingleNVIDIARTX3090
+ondatafromOpenHermes2.5.
+DraftModel K TargetModel(%Att) #Gen. Tokens Speedup
+4 Mamba-Zephyr(50%) 2.48 1.8x
+2layers
+4 Mamba-Zephyr(25%) 2.64 1.88x
+4 Mamba-Zephyr(50%) 3 1.81x
+4layers
+4 Mamba-Zephyr(25%) 3 1.8x
+4layers 3 Mamba-Llama3(50%) 2.7 1.6x
+4layers 4 Mamba-Llama3(50%) 3.6 1.58x
+Table5: PerformancemetricsfordifferentdraftandtargetmodelconfigurationsforK = 4ondatafrom
+OpenHermes2.5. #Genistheaveragenumberofgeneratedtokensperspeculativedecodingstepandincludes
+anadditionaltokenfromthelastVerifierlogits.
+Results Table5showsresultsforhybridspeculativedecodingwith,usingboththeZephyrandLlama
+hybridmodelswithdifferentconfigurations. Forboththe50%and25%distilledmodels,weachievespeedups
+ofover1.8xontheZephyr-Hybridcomparedtothenon-speculativebaseline. Wealsoshowthatthe4-layer
+draftmodelwetrainedachievesahigheracceptancerate,butitaddssomeadditionaloverheadduetothe
+increaseddraftmodelsize. FortheLlama-hybridmodels,thespeedupsaremoremodestsincethedraft
+10modelislargerduetothelargeembeddingtableofLlama3. Insubsequentwork,wewillfocusonmaking
+thesedraftmodelssmaller.
+6 Analysis
+Model(%Att) PPL Ratio
+Teacher: Zephyr(7B) 2.02 1 Model HybMamba HybMamba
+Mamba-Zephyr(50%) 2.09 1.03 (50%Att) (25%Att)
+Mamba-Zephyr(25%) 2.20 1.09
+Dis 5.55 5.01
+Mamba-Zephyr(6.25%) 2.46 1.22
+Dis+SFT 5.61 4.97
+Mamba-Zephyr(0%) 3.36 1.66
+Dis+DPO 5.42 4.84
+Teacher: Pythia(70M) 51.4 1 Dis+SFT+DPO 6.69 6.10
+DistillHyena 121.2 2.36
+Table6: (Left)Perplexitycomparisonbetweenourdistillationapproachand[57]. (Right)Ablationstudyof
+differentalignmentmethodsoftheDistilledHybridMambaontheMT-benchmarkusingOpenHermes2.5
+astheSFTdataset.
+Comparisonwithotherdistillationapproaches Table6(left)comparestheperplexityofdifferentmodel
+variants. We distill using Ultrachat as seed prompt [19] in one epoch and compare the perplexity. We
+findthatremovingmorelayersgetssignificantlyworse. Wealsocompareourdistillationapproachwith
+apreviousbaseline. ThisapproachdistillsaTransformermodelintoaHyenamodel[55],asproposedin
+[57]. Theyuseadifferentdistillationapproachusingprogressiveknowledgetransfer,whereinthestudent
+modelistrainedstartingfromthefirstlayerandprogressivelyextendingtosubsequentlayers. Whileit
+ischallengingtocompare,ourdistillshowsasmallerdegradation(1.03for50%attention,1.09for25%
+attention,1.22for6.35%attention,and3.36fornoattention),whiletheDistillHyenamodelistrainedin
+WikiText[52]datasetwithamuchsmallermodelandshowslargeperplexitydegrade.
+Doesdistillingfrompreferenceshelp? InTable6(Right),weshowtheimpactofdifferentstepsinthe
+alignmentprocessofthedistillation. WeobservethatSFTorDPOalonedoesnotyieldmuchimprovement,
+while SFT + DPO yields the best score. Models are trained using Zephyr as the teacher model and the
+OpenHermes2.5[67]datasetastheSFTdataset,andUltraFeedback[16]astheDPOdataset.
+PseudoLabelDistillationAblations. WeconsiderseveraldifferentmodelablationstudiesinTable7. For
+theseexperimentsweconsidertrainingfor5kstepsusingthepseudo-labelapproachesontheUltrachat
+[19]dataset. Table7(Left)presentstheresultsofdistillationwithvariousinitializations. Accordingtothis
+table,initializingweightsfromatransformeriscrucialforperformance. Withoutweightinitializationfrom
+a transformer, perplexity significantly worsens for both pure Mamba models and hybrid models. Also,
+freezingMLPlayerscanhelpthestudentmodelfocusonlearningtheinteractionoftokensandbettermimic
+attentionlayers. Table7(Right)showsalsoseesmallerbenefitsfromprogressivedistillationandinterleaving
+theattentionlayerswithMamba.
+Mamba HybMamba HybMamba HybMamba
+Model (0%Att) (50%Att) Model (25%Att) (50%Att)
+Froz -Froz Froz -Froz Step -Step Step -Step
++Attention-Init 3.36 66.7 2.09 9.1 +Interleave 2.20 2.29 2.09 -
+-Attention-Init 18.2 20.3 7.4 11.2 -Interleave 2.89 - 2.41 -
+Table 7: (Left) Perplexity comparison with different initialization. (Right) Perplexity comparison with
+differentMambainterleavinglayersandstepwisedistillation.
+11AttentionInitialization. WecomparethedefaultrandominitializationofMambawithreusingthelinear
+projectionfromtheattentionusingthesamerecipe. BothmodelsaretrainedusingZephyrastheteacher
+modelandtheOpenHermes2.5[67]datasetastheSFTdataset,andUltraFeedback[16]astheDPOdataset.
+LAMBADA MT-Bench AlpacaEval
+Model MMLU ARC-C TruthfulQA HellaSwag
+(ppl) (score) (LCwin%)
++Attentioninit 6.20 47.98 49.15 46.67 75.07 6.69 14.11
+-Attentioninit 55.01 26.21 25.26 34.01 27.91 1.04 0.02
+Table8: PerformanceofZephyr-Mamba(50%attention)withdifferentinitialization.
+Table8comparestheperformanceofthehybridmodelusingtwodifferentinitializationmethods: default
+randominitializationandreusingthelinearprojectionfromtheattention. Themodelperformssignificantly
+betterwithreusingthelinearprojectionfromtheattentioncomparedtorandominitialization,acrossall
+evaluatedbenchmarks. Thisresultconfirmsthatinitializationfromattentionweightsiscritical.
+LAMBADA MT-Bench AlpacaEval
+Model MMLU ARC-C TruthfulQA HellaSwag
+(ppl) (score) (LCwin%)
+50%AttwMamba 6.20 47.98 49.15 46.67 75.07 6.69 14.11
+50%Attw/oMamba 151.98 24.46 21.93 32.39 27.91 1.01 0
+Table9: PerformanceofHybrid-Mambawithdifferentinitialization.
+NecessityofLinearRNN. WetrainamodelthatremovesMambablocksfromthemodelentirelyusing
+thesamerecipetoseeifthemodelcanadapt. BothmodelsaretrainedusingZephyrastheteachermodel,
+withtheOpenHermes2.5[67]datasetastheSFTdatasetandUltraFeedback[16]astheDPOdataset. Table9
+comparestheperformanceofthemodelwithandwithoutMambablocks. ThemodelwithMambaperforms
+significantlybetterthantheonewithoutit. ThisconfirmsthataddingMambalayersiscriticalandthatthe
+improvedperformanceisnotsolelyattributabletotheremainingattentionmechanism.
+7 Related Work
+Attention-freemodels. Attention-freemodelsofferimprovedcomputationalandmemoryefficiency,making
+themincreasinglypopularforvariouslanguageprocessingtasks,includingautoregressivelanguagemodeling.
+ModelslikeS4[27]anditssubsequentvariants[26,30]haveshownpromisingresultsinlong-rangesynthetic
+tasks[66]. GatedSSMarchitectures,suchasGSS[49]andBiGS[72],incorporateagatingmechanisminto
+SSMsfor(bidirectional)languagemodeling. TherecentlyintroducedMambamodel[25]arguesthatthe
+staticdynamicsofthesemethodsfailtoincorporateinput-specificcontextselectionwithinthehiddenstate,
+whichcouldbecrucialfortaskslikelanguagemodeling. MambahasbeenshowntooutperformTransformers
+across different model sizes and scales. Additionally, several other sub-quadratic model architectures
+[1,2,4,18,21,55,76]andhybridarchitectures[22,43]havealsobeenproposed.
+DistillationfromTransformers. TherehavebeenrelativelyfewattemptstodistillontolinearRNN
+stylemodels. LaughingHyena[48]proposestodistillthelongconvolutionintoastatespacerepresentation,
+enabling constant time inference in Hyena [55]. Ralambomihanta et al. [57] introduces a progressive
+knowledgeapproachtodistillsmalltransformermodels(70M)intoHyenamodels.
+Speculative Decoding. Speculative decoding [9, 10, 40, 64, 73] has recently emerged as a promising
+method to accelerate the inference process of large language models, particularly Transformers. This
+approachutilizesasmallerdraftmodeltospeculativelygeneratecandidatetokens,whichthelargertarget
+modelthenverifies. Chenetal.[10],Leviathanetal.[40]proposedarejectionsamplingschemetoimprove
+inferencequality,whileSpectorandRe[64]organizedcandidatetokensintoatreestructuretoenablemore
+efficientverification. Subsequentworkhasexaminedbothtraineddraftmodels[5,12,47]andtraining-free
+draftmodels[23,31,75].
+128 Limitations
+Apotentiallimitationofourstudyisthattheevaluationwasconductedprimarilyonlarge-scalelanguage
+models,specificallyinthe7B-9Brange. Asaresult,itremainsunclearwhetherourproposedmethodwould
+beequallyeffectiveonsmaller-scalemodels. Whilelargemodelshavedemonstratedsignificantperformance
+gains,theapplicabilityofourapproachtosmallermodels,whichareoftenmorecomputationallyefficient,
+hasnotbeenfullyexplored. Futureworkshouldinvestigatetheperformanceofourmethodonsmaller
+transformermodels,includingconductingexperimentsthatinvolvetrainingsmallermodelsfromscratchand
+applyingthedistillationtechniquetoassesstheirperformanceacrossvariousmetrics. Thiswouldprovidea
+morecomprehensiveunderstandingofthegeneralizabilityandlimitationsofourapproach.
+9 Conclusion
+WeconsidertheproblemofmaintainingLLMabilitieswhileincreasingdecodingspeedthroughacombination
+ofdistillationandspeculativedecoding. WefirstshowthataTransformerLLMcanbeusedtoeffectively
+initializeaMambalinearRNNmodelwhilemaintainingoriginalabilities. Wethenshowthatthrougha
+combinationofdistillationonsupervisedinstructionsandpreferences,wecanimprovethemodel’sability
+with relatively little compute. Finally, we show that the Mamba model can be significantly sped up at
+inferencetimethroughtheuseofahardware-awarespeculativedecodingmethod. ThefullmodelnearsLLM
+chataccuracy,andisacceleratedwithspeculativedecoding. Webelievetheseresultsshowthattransformer
+knowledgecanbetransferredeffectivelytootherarchitectures,openingupthepotentialforcustomizingthe
+inferenceprofileofLLMsbeyondoptimizingattention.
+Acknowledgement
+WethankTogetherAIforprovidingcomputeforsomeoftheexperiments. Thisworkhasbenefitedfrom
+helpfuldiscussionswithAlbertGuatCMU,FrançoisFleuretandVincentMicheliattheUniversityofGeneva,
+AlbertTsengandWen-DingLiatCornellUniversity.
+References
+[1] Arora,S.,Eyuboglu,S.,Timalsina,A.,Johnson,I.,Poli,M.,Zou,J.,Rudra,A.,andRé,C.(2023). Zoology:
+Measuringandimprovingrecallinefficientlanguagemodels. arXivpreprintarXiv:2312.04927.
+[2] Arora,S.,Eyuboglu,S.,Zhang,M.,Timalsina,A.,Alberti,S.,Zinsley,D.,Zou,J.,Rudra,A.,andRé,C.
+(2024). Simplelinearattentionlanguagemodelsbalancetherecall-throughputtradeoff. arXivpreprint
+arXiv:2402.18668.
+[3] BAAI(2024). Infinityinstruct. arXivpreprintarXiv:2406.XXXX.
+[4] Beck,M.,Pöppel,K.,Spanring,M.,Auer,A.,Prudnikova,O.,Kopp,M.,Klambauer,G.,Brandstetter,J.,
+andHochreiter,S.(2024). xlstm: Extendedlongshort-termmemory. arXivpreprintarXiv:2405.04517.
+[5] Bhendawade, N., Belousova, I., Fu, Q., Mason, H., Rastegari, M., and Najibi, M. (2024). Speculative
+streaming: Fastllminferencewithoutauxiliarymodels. arXivpreprintarXiv:2402.11131.
+[6] Bisk, Y., Zellers, R., Gao, J., Choi, Y., et al. (2020). PIQA: Reasoning about Physical Commonsense
+in Natural Language. In Proceedings of the AAAI Conference on Artificial Intelligence, volume 34, pages
+7432–7439.
+[7] Botev,A.,De,S.,Smith,S.L.,Fernando,A.,Muraru,G.-C.,Haroun,R.,Berrada,L.,Pascanu,R.,Sessa,
+P.G.,Dadashi,R.,etal.(2024). Recurrentgemma: Movingpasttransformersforefficientopenlanguage
+models. arXivpreprintarXiv:2404.07839.
+13[8] Brown, T., Mann, B., Ryder, N., Subbiah, M., Kaplan, J.D., Dhariwal, P., Neelakantan, A., Shyam, P.,
+Sastry,G.,Askell,A.,etal.(2020). Languagemodelsarefew-shotlearners. Advancesinneuralinformation
+processingsystems,33:1877–1901.
+[9] Cai,T.,Li,Y.,Geng,Z.,Peng,H.,Lee,J.D.,Chen,D.,andDao,T.(2024). Medusa: Simplellminference
+accelerationframeworkwithmultipledecodingheads. arXivpreprintarXiv:2401.10774.
+[10] Chen,C.,Borgeaud,S.,Irving,G.,Lespiau,J.-B.,Sifre,L.,andJumper,J.(2023a). AcceleratingLarge
+LanguageModelDecodingwithSpeculativeSampling.
+[11] Chen, J., Qadri, R., Wen, Y., Jain, N., Kirchenbauer, J., Zhou, T., and Goldstein, T. (2024). Genqa:
+Generatingmillionsofinstructionsfromahandfulofprompts. arXivpreprintarXiv:2406.10323.
+[12] Chen,Z.,Yang,X.,Lin,J.,Sun,C.,Huang,J.,andChang,K.C.-C.(2023b). Cascadespeculativedrafting
+forevenfasterllminference. arXivpreprintarXiv:2312.11462.
+[13] Clark,P.,Cowhey,I.,Etzioni,O.,Khot,T.,Sabharwal,A.,Schoenick,C.,andTafjord,O.(2018a).Thinkyou
+haveSolvedQuestionAnswering? TryARC,theAI2ReasoningChallenge. arXivpreprintarXiv:1803.05457.
+[14] Clark,P.,Cowhey,I.,Etzioni,O.,Khot,T.,Sabharwal,A.,Schoenick,C.,andTafjord,O.(2018b). Think
+youhavesolvedquestionanswering? tryarc,theai2reasoningchallenge. arXivpreprintarXiv:1803.05457.
+[15] Cobbe,K.,Kosaraju,V.,Bavarian,M.,Chen,M.,Jun,H.,Kaiser,L.,Plappert,M.,Tworek,J.,Hilton,J.,
+Nakano,R.,etal.(2021). Trainingverifierstosolvemathwordproblems. arXivpreprintarXiv:2110.14168.
+[16] Cui,G.,Yuan,L.,Ding,N.,Yao,G.,Zhu,W.,Ni,Y.,Xie,G.,Liu,Z.,andSun,M.(2023). Ultrafeedback:
+Boostinglanguagemodelswithhigh-qualityfeedback. arXivpreprintarXiv:2310.01377.
+[17] Dao,T.andGu,A.(2024). Transformersaressms: Generalizedmodelsandefficientalgorithmsthrough
+structuredstatespaceduality. arXivpreprintarXiv:2405.21060.
+[18] De,S.,Smith,S.L.,Fernando,A.,Botev,A.,Cristian-Muraru,G.,Gu,A.,Haroun,R.,Berrada,L.,Chen,
+Y.,Srinivasan,S.,etal.(2024). Griffin: Mixinggatedlinearrecurrenceswithlocalattentionforefficient
+languagemodels. arXivpreprintarXiv:2402.19427.
+[19] Ding,N.,Chen,Y.,Xu,B.,Qin,Y.,Hu,S.,Liu,Z.,Sun,M.,andZhou,B.(2023). Enhancingchatlanguage
+modelsbyscalinghigh-qualityinstructionalconversations. InProceedingsofthe2023ConferenceonEmpirical
+MethodsinNaturalLanguageProcessing,pages3029–3051.
+[20] Dubey,A.,Jauhri,A.,Pandey,A.,Kadian,A.,Al-Dahle,A.,Letman,A.,Mathur,A.,Schelten,A.,Yang,
+A.,Fan,A.,etal.(2024). Thellama3herdofmodels. arXivpreprintarXiv:2407.21783.
+[21] Fu,D.,Arora,S.,Grogan,J.,Johnson,I.,Eyuboglu,E.S.,Thomas,A.,Spector,B.,Poli,M.,Rudra,A.,and
+Ré,C.(2024a). Monarchmixer: Asimplesub-quadraticgemm-basedarchitecture. AdvancesinNeural
+InformationProcessingSystems,36.
+[22] Fu,D.Y.,Dao,T.,Saab,K.K.,Thomas,A.W.,Rudra,A.,andRe,C.(2022). Hungryhungryhippos:
+Towardslanguagemodelingwithstatespacemodels. InTheEleventhInternationalConferenceonLearning
+Representations.
+[23] Fu,Y.,Bailis,P.,Stoica,I.,andZhang,H.(2024b). Breakthesequentialdependencyofllminference
+usinglookaheaddecoding. arXivpreprintarXiv:2402.02057.
+[24] Gao,L.,Tow,J.,Abbasi,B.,Biderman,S.,Black,S.,DiPofi,A.,Foster,C.,Golding,L.,Hsu,J.,LeNoac’h,
+A.,Li,H.,McDonell,K.,Muennighoff,N.,Ociepa,C.,Phang,J.,Reynolds,L.,Schoelkopf,H.,Skowron,
+A.,Sutawika,L.,Tang,E.,Thite,A.,Wang,B.,Wang,K.,andZou,A.(2023). Aframeworkforfew-shot
+languagemodelevaluation.
+[25] Gu,A.andDao,T.(2023). Mamba: Linear-timesequencemodelingwithselectivestatespaces. arXiv
+preprintarXiv:2312.00752.
+14[26] Gu,A.,Goel,K.,Gupta,A.,andRé,C.(2022). OntheParameterizationandInitializationofDiagonal
+StateSpaceModels. AdvancesinNeuralInformationProcessingSystems,35:35971–35983.
+[27] Gu,A.,Goel,K.,andRé,C.(2021). EfficientlyModelingLongSequenceswithStructuredStateSpaces.
+arXivpreprintarXiv:2111.00396.
+[28] Gu,A.,Rozière,B.,Leather,H.,Solar-Lezama,A.,Synnaeve,G.,andWang,S.I.(2024). Cruxeval: A
+benchmarkforcodereasoning,understandingandexecution. arXivpreprintarXiv:2401.03065.
+[29] Guo,M.,Ainslie,J.,Uthus,D.,Ontanon,S.,Ni,J.,Sung,Y.-H.,andYang,Y.(2021). Longt5: Efficient
+text-to-texttransformerforlongsequences. arXivpreprintarXiv:2112.07916.
+[30] Gupta,A.,Gu,A.,andBerant,J.(2022). DiagonalStateSpacesareasEffectiveasStructuredStateSpaces.
+AdvancesinNeuralInformationProcessingSystems,35:22982–22994.
+[31] He,Z.,Zhong,Z.,Cai,T.,Lee,J.D.,andHe,D.(2023). Rest: Retrieval-basedspeculativedecoding. arXiv
+preprintarXiv:2311.08252.
+[32] Hendrycks,D.,Burns,C.,Basart,S.,Zou,A.,Mazeika,M.,Song,D.,andSteinhardt,J.(2020). Measuring
+MassiveMultitaskLanguageUnderstanding. InInternationalConferenceonLearningRepresentations.
+[33] Hendrycks, D., Burns, C., Basart, S., Zou, A., Mazeika, M., Song, D., and Steinhardt, J. (2021).
+Measuring massive multitask language understanding. Proceedings of the International Conference on
+LearningRepresentations(ICLR).
+[34] Hinton,G.,Vinyals,O.,andDean,J.(2015). Distillingtheknowledgeinaneuralnetwork. arXivpreprint
+arXiv:1503.02531.
+[35] Irie, K., Schlag, I., Csordás, R., andSchmidhuber, J.(2021). Goingbeyondlineartransformerswith
+recurrentfastweightprogrammers. Advancesinneuralinformationprocessingsystems,34:7703–7717.
+[36] Jiang, A. Q., Sablayrolles, A., Mensch, A., Bamford, C., Chaplot, D. S., Casas, D. d. l., Bressand, F.,
+Lengyel,G.,Lample,G.,Saulnier,L.,etal.(2023). Mistral7b. arXivpreprintarXiv:2310.06825.
+[37] Jin,Q.,Dhingra,B.,Liu,Z.,Cohen,W.W.,andLu,X.(2019). PubMedQA:ADatasetforBiomedical
+ResearchQuestionAnswering. arXivpreprintarXiv:1909.06146.
+[38] Kim, Y. and Rush, A. M. (2016). Sequence-level knowledge distillation. In Proceedings of the 2016
+ConferenceonEmpiricalMethodsinNaturalLanguageProcessing,pages1317–1327.
+[39] Lai,G.,Xie,Q.,Liu,H.,Yang,Y.,andHovy,E.(2017). RACE:Large-scaleReAdingComprehension
+DatasetFromExaminations. arXivpreprintarXiv:1704.04683.
+[40] Leviathan, Y., Kalman, M., andMatias, Y.(2023). FastInferencefromTransformersviaSpeculative
+Decoding. InProceedingsofthe40thInternationalConferenceonMachineLearning,volume202ofProceedings
+ofMachineLearningResearch,pages19274–19286.PMLR.
+[41] Li,R.,Allal,L.B.,Zi,Y.,Muennighoff,N.,Kocetkov,D.,Mou,C.,Marone,M.,Akiki,C.,Li,J.,Chim,J.,
+etal.(2023a). Starcoder: maythesourcebewithyou! arXivpreprintarXiv:2305.06161.
+[42] Li,X.,Zhang,T.,Dubois,Y.,Taori,R.,Gulrajani,I.,Guestrin,C.,Liang,P.,andHashimoto,T.B.(2023b).
+Alpacaeval: Anautomaticevaluatorofinstruction-followingmodels. https://github.com/tatsu-lab/
+alpaca_eval.
+[43] Lieber,O.,Lenz,B.,Bata,H.,Cohen,G.,Osin,J.,Dalmedigos,I.,Safahi,E.,Meirom,S.,Belinkov,Y.,
+Shalev-Shwartz,S.,etal.(2024). Jamba: Ahybridtransformer-mambalanguagemodel. arXivpreprint
+arXiv:2403.19887.
+[44] Lin,B.Y.(2024). ZeroEval: AUnifiedFrameworkforEvaluatingLanguageModels.
+15[45] Lin,S.,Hilton,J.,andEvans,O.(2021). TruthfulQA:MeasuringHowModelsMimicHumanFalsehoods.
+arXivpreprintarXiv:2109.07958.
+[46] Lin,S.,Hilton,J.,andEvans,O.(2022). Truthfulqa: Measuringhowmodelsmimichumanfalsehoods.
+InProceedingsofthe60thAnnualMeetingoftheAssociationforComputationalLinguistics(Volume1: Long
+Papers),pages3214–3252.
+[47] Liu, X., Hu, L., Bailis, P., Stoica, I., Deng, Z., Cheung, A., andZhang, H.(2023). Onlinespeculative
+decoding. arXivpreprintarXiv:2310.07177.
+[48] Massaroli, S., Poli, M., Fu, D., Kumbong, H., Parnichkun, R., Romero, D., Timalsina, A., McIntyre,
+Q.,Chen,B.,Rudra,A.,etal.(2024). Laughinghyenadistillery: Extractingcompactrecurrencesfrom
+convolutions. AdvancesinNeuralInformationProcessingSystems,36.
+[49] Mehta,H.,Gupta,A.,Cutkosky,A.,andNeyshabur,B.(2023). LongRangeLanguageModelingvia
+GatedStateSpaces. InTheEleventhInternationalConferenceonLearningRepresentations.
+[50] Meng,Y.,Xia,M.,andChen,D.(2024). Simpo: Simplepreferenceoptimizationwithareference-free
+reward. arXivpreprintarXiv:2405.14734.
+[51] Mercat,J.,Vasiljevic,I.,Keh,S.,Arora,K.,Dave,A.,Gaidon,A.,andKollar,T.(2024). Linearizinglarge
+languagemodels. arXivpreprintarXiv:2405.06640.
+[52] Merity,S.,Xiong,C.,Bradbury,J.,andSocher,R.(2016). Pointersentinelmixturemodels. arXivpreprint
+arXiv:1609.07843.
+[53] Mihaylov,T.,Clark,P.,Khot,T.,andSabharwal,A.(2018). CanaSuitofArmorConductElectricity? A
+NewDatasetforOpenBookQuestionAnswering. arXivpreprintarXiv:1809.02789.
+[54] Peng,B.,Quesnelle,J.,Fan,H.,andShippole,E.(2023). Yarn: Efficientcontextwindowextensionof
+largelanguagemodels. arXivpreprintarXiv:2309.00071.
+[55] Poli,M.,Massaroli,S.,Nguyen,E.,Fu,D.Y.,Dao,T.,Baccus,S.,Bengio,Y.,Ermon,S.,andRé,C.(2023).
+Hyenahierarchy: Towardslargerconvolutionallanguagemodels. InInternationalConferenceonMachine
+Learning,pages28043–28078.PMLR.
+[56] Rafailov,R.,Sharma,A.,Mitchell,E.,Manning,C.D.,Ermon,S.,andFinn,C.(2024). Directpreference
+optimization: Yourlanguagemodelissecretlyarewardmodel. AdvancesinNeuralInformationProcessing
+Systems,36.
+[57] Ralambomihanta, T. R., Mohammadzadeh, S., Islam, M. S. N., Jabbour, W., and Liang, L. (2024).
+Scavenginghyena: Distillingtransformersintolongconvolutionmodels. arXivpreprintarXiv:2401.17574.
+[58] Roziere,B.,Gehring,J.,Gloeckle,F.,Sootla,S.,Gat,I.,Tan,X.E.,Adi,Y.,Liu,J.,Remez,T.,Rapin,J.,etal.
+(2023). Codellama: Openfoundationmodelsforcode. arXivpreprintarXiv:2308.12950.
+[59] Sakaguchi,K.,Bras,R.L.,Bhagavatula,C.,andChoi,Y.(2021). Winogrande: Anadversarialwinograd
+schemachallengeatscale. CommunicationsoftheACM,64(9):99–106.
+[60] Schlag,I.,Irie,K.,andSchmidhuber,J.(2021). Lineartransformersaresecretlyfastweightprogrammers.
+InInternationalConferenceonMachineLearning,pages9355–9366.PMLR.
+[61] Schulman,J.,Wolski,F.,Dhariwal,P.,Radford,A.,andKlimov,O.(2017). Proximalpolicyoptimization
+algorithms. arXivpreprintarXiv:1707.06347.
+[62] Shaham, U., Segal, E., Ivgi, M., Efrat, A., Yoran, O., Haviv, A., Gupta, A., Xiong, W., Geva, M.,
+Berant,J.,etal.(2022). Scrolls: Standardizedcomparisonoverlonglanguagesequences. arXivpreprint
+arXiv:2201.03533.
+[63] Shleifer,S.andRush,A.M.(2020). Pre-trainedsummarizationdistillation. CoRR,abs/2010.13002.
+16[64] Spector,B.andRe,C.(2023). Acceleratingllminferencewithstagedspeculativedecoding. arXivpreprint
+arXiv:2308.04623.
+[65] Sun,Y.,Dong,L.,Huang,S.,Ma,S.,Xia,Y.,Xue,J.,Wang,J.,andWei,F.(2023). Retentivenetwork: A
+successortotransformerforlargelanguagemodels. arXivpreprintarXiv:2307.08621.
+[66] Tay,Y.,Dehghani,M.,Abnar,S.,Shen,Y.,Bahri,D.,Pham,P.,Rao,J.,Yang,L.,Ruder,S.,andMetzler,D.
+(2020). Longrangearena: Abenchmarkforefficienttransformers. InInternationalConferenceonLearning
+Representations.
+[67] Teknium(2023). Openhermes2.5: Anopendatasetofsyntheticdataforgeneralistllmassistants.
+[68] Touvron, H., Lavril, T., Izacard, G., Martinet, X., Lachaux, M.-A., Lacroix, T., Rozière, B., Goyal, N.,
+Hambro,E.,Azhar,F.,etal.(2023). Llama: Openandefficientfoundationlanguagemodels. arXivpreprint
+arXiv:2302.13971.
+[69] Tunstall,L.,Beeching,E.,Lambert,N.,Rajani,N.,Rasul,K.,Belkada,Y.,Huang,S.,vonWerra,L.,Fourrier,
+C.,Habib,N.,etal.(2023). Zephyr: Directdistillationoflmalignment. arXivpreprintarXiv:2310.16944.
+[70] Vaswani,A.,Shazeer,N.,Parmar,N.,Uszkoreit,J.,Jones,L.,Gomez,A.N.,Kaiser,Ł.,andPolosukhin,I.
+(2017). Attentionisallyouneed. Advancesinneuralinformationprocessingsystems,30.
+[71] Waleffe,R.,Byeon,W.,Riach,D.,Norick,B.,Korthikanti,V.,Dao,T.,Gu,A.,Hatamizadeh,A.,Singh,
+S., Narayanan, D., etal.(2024). Anempiricalstudyofmamba-basedlanguagemodels. arXivpreprint
+arXiv:2406.07887.
+[72] Wang, J., Yan, J. N., Gu, A., and Rush, A. M. (2022). Pretraining without attention. arXiv preprint
+arXiv:2212.10544.
+[73] Xia, H., Ge, T., Wang, P., Chen, S.-Q., Wei, F., and Sui, Z. (2023). Speculative Decoding: Exploiting
+SpeculativeExecutionforAcceleratingSeq2seqGeneration. InFindingsoftheAssociationforComputational
+Linguistics: EMNLP2023,pages3909–3925,Singapore.AssociationforComputationalLinguistics.
+[74] Yang,J.,Jimenez,C.E.,Wettig,A.,Lieret,K.,Yao,S.,Narasimhan,K.,andPress,O.(2024). Swe-agent:
+Agentcomputerinterfacesenablesoftwareengineeringlanguagemodels.
+[75] Yang,N.,Ge,T.,Wang,L.,Jiao,B.,Jiang,D.,Yang,L.,Majumder,R.,andWei,F.(2023a). Inferencewith
+reference: Losslessaccelerationoflargelanguagemodels. arXivpreprintarXiv:2304.04487.
+[76] Yang,S.,Wang,B.,Shen,Y.,Panda,R.,andKim,Y.(2023b). Gatedlinearattentiontransformerswith
+hardware-efficienttraining. arXivpreprintarXiv:2312.06635.
+[77] Yao,S.,Zhao,J.,Yu,D.,Du,N.,Shafran,I.,Narasimhan,K.,andCao,Y.(2022). React: Synergizing
+reasoningandactinginlanguagemodels. arXivpreprintarXiv:2210.03629.
+[78] Zellers,R.,Holtzman,A.,Bisk,Y.,Farhadi,A.,andChoi,Y.(2019). Hellaswag: Canamachinereally
+finishyoursentence? arXivpreprintarXiv:1905.07830.
+[79] Zhang,M.,Bhatia,K.,Kumbong,H.,andRé,C.(2024). Thehedgehog&theporcupine: Expressive
+linearattentionswithsoftmaxmimicry. arXivpreprintarXiv:2402.04347.
+[80] Zheng,L.,Chiang,W.-L.,Sheng,Y.,Zhuang,S.,Wu,Z.,Zhuang,Y.,Lin,Z.,Li,Z.,Li,D.,Xing,E.P.,
+Zhang,H.,Gonzalez,J.E.,andStoica,I.(2023). Judgingllm-as-a-judgewithmt-benchandchatbotarena.
+17

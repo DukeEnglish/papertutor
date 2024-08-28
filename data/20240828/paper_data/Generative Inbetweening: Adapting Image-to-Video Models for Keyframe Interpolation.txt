@@ -1,0 +1,663 @@
+Generative Inbetweening: Adapting Image-to-Video Models for Keyframe
+Interpolation
+XiaojuanWang1 BoyangZhou1 BrianCurless1 IraKemelmacher-Shlizerman1
+AleksanderHolynski2,3 StevenM.Seitz1
+1UniversityofWashington 2GoogleDeepMind 3UCBerkeley
+Abstract Giventhesimilaritybetweentheinputsignalsneededfor
+keyframe interpolation (i.e., two-frame conditioning) and
+We present a method for generating video sequences the input signals to existing models (e.g., one-frame con-
+with coherent motion between a pair of input key frames. ditioning), an interesting alternative solution is to instead
+Weadaptapretrainedlarge-scaleimage-to-videodiffusion adapt an existing pre-trained image-to-video model, with-
+model (originally trained to generate videos moving for- outtrainingaspecializedmodelfromscratch. Inthispaper,
+ward in time from a single input image) for key frame in- we propose an approach for enabling key frame interpola-
+terpolation, i.e., to produce a video in between two in- tionbydoingpreciselythis. Ourapproachisfoundedupon
+put frames. We accomplish this adaptation through a the observation that a keyframe interpolation model needs
+lightweight fine-tuning technique that produces a version to know how to accomplish three objectives: (1) given a
+ofthemodelthatinsteadpredictsvideosmovingbackwards starting frame, it needs to predict coherent motion starting
+in time from a single input image. This model (along with fromthatframeandadvancingintothefuture,(2)givenan
+the original forward-moving model) is subsequently used ending frame, it needs to predict coherent motion starting
+in a dual-directional diffusion sampling process that com- fromthatframeandadvancingbackwardsintothepast,and
+binestheoverlappingmodelestimatesstartingfromeachof (3) given these two predictions, produce a video that has
+thetwokeyframes. Ourexperimentsshowsthatourmethod a coherent combination of the two. Since existing image-
+outperformsbothexistingdiffusion-basedmethodsandtra- to-video models can already accomplish the first of these
+ditional frame interpolation techniques. Please see our threeobjectives, wefocusoureffortsonthethelattertwo,
+projectpageatsvd-keyframe-interpolation.github.io. i.e., producing a single-frame conditioned model that can
+generate motion backwards in time, and a mechanism for
+combining forward and backward motion predictions into
+1.Introduction coherentvideos.
+One may imagine that producing such a single-image
+Recent advances of large-scale text-to-video and image- conditionedmodelthatproducesbackwardsmotionshould
+to-video models [3–5, 36, 37, 39] have shown the ability be trivial: simply pass an image into a regular image-to-
+to generate high resolution videos with dynamic motion. video model, and reverse the output. Unfortunately, real-
+Whilethesemodelscanacceptavarietyofinputcondition- world motion is inherently asymmetric, and reversed mo-
+ing signals, such as text captions or single images, most tion into the future is notably different from motion into
+availablemodelsremainunsuitableforanobviousapplica- the past. As such, we first propose a novel, lightweight
+tion: keyframe interpolation. Interpolating between a pair fine-tuning mechanism that reverses the arrow of time by
+ofkeyframes—thatis,producingavideothatsimulatesco- rotatingthetemporalself-attentionmaps(i.e.,reversingthe
+herent motion between two input frames, one defining the temporalinteractions)withinthediffusionU-Net. Thisen-
+starting frame of the video, and one defining the ending ables the reuse of the existing learned motion statistics in
+frame—iscertainlypossibleifalarge-scalemodelhasbeen thepretrainedmodel,andenablesgeneralizationwhileonly
+trained to accept these particular two conditioning signals, requiringasmallnumberoftrainingvideos.
+but most open-source models have not. Despite the task’s Given both the original image-to-video model and this
+similarity to existing conditioning signals, creating an in- adapted reverse model, we also propose a sampling mech-
+terpolation model requires further training, and therefore anism that merges the scores of both to produce a single
+both large amounts of data and substantial computational consistentsample. Thesetwosamplingpathsaresynchro-
+resourcesbeyondwhatmostresearchershaveaccessto. nized through shared rotated temporal self-attention maps,
+1
+4202
+guA
+72
+]VC.sc[
+1v93251.8042:viXraensuring they generate exactly opposite motions, an effect arbitrary-sized images or panoramas from smaller pieces.
+whichweterm“forward-backwardmotionconsistency”.At These methods involve concurrently generating these
+eachsamplingstep,theirintermediatenoisepredictionsare multiple pieces and merging their intermediate results in
+fused, resultinginageneratedvideowithcoherentmotion the overlapping areas within the sampling process. For
+thatstartsandendswiththeprovidedframes. Wecompare example, MultiDiffusion [2] averages the diffusion model
+our work qualitatively and quantitatively to related meth- predictions to reconcile the different denoising processes.
+odsinkeyframeinterpolation,andfindthatourmethodpro- Recent work, TRF [8] extends this joint generation ap-
+ducesnotablyhigherqualityvideoswithmorecoherentdy- proach to the bounded video generation taking two end
+namicsgiventemporallydistantkeyframes. Pleaseseeour frames as input. By running two parallel image-to-video
+webpage for a complete collection of video results: svd- generations guided by the start and end frames, it merge
+keyframe-interpolation.github.io. theiroutputsbyaveragingineachdenoisingstep.However,
+a significant drawback of this method is that it cannot
+2.RelatedWorks generate coherent motion in-between: simply fusing a
+forward video generation from the first end frame and the
+Frame interpolation Frame interpolation [7] synthesizes reversedforwardvideostartingfromthesecondendframe
+intermediate images between a pair of input frames, and using a single image-to-video model designed for forward
+hasbeenalong-standingresearchareaincomputervision. motion only causes the generated videos to oscillate
+Example applications include temporal up-sampling to in- between moving forward and then reversing, rather than
+crease refresh rate, create slow-motion videos, or interpo- continuouslyprogressforwardasourmethoddoes.
+latingbetweennear-duplicatephotos. Muchoftheresearch
+in this field [15, 17, 19, 23–25] employs flow-based meth- 3.Background
+ods, which estimate optical flow between the frames and
+We introduce some background on Stable Video Diffu-
+then synthesize the middle images guided by the flow via
+sion [4], the base image-to-video diffusion model used in
+either warping or splatting techniques. Traditionally, this
+our work, and then specifically explain the temporal self-
+taskassumesunambiguousmotionandtheinputframesare
+attention layers within its architecture, which are key to
+usuallycloselyspaced( 1/30s)samplesinthevideo. Re-
+≤ modelingmotionwithinthegeneratedvideo.
+cent studies have begun to address large motions [27, 29],
+or quadratic motion [22, 38], though these still involve a 3.1.StableVideoDiffusion
+single motion interpolation and cannot address distant in-
+Diffusion models are trained to convert random noise into
+put frames. In contrast, we aim to generate in-between
+high-resolutionimages/videosviaaniterativesamplingpro-
+frames that capture dynamic motions across distant input
+cess[6,21,30–33]. Thissamplingprocessaimstoreverse
+keyframes ( 1s apart), a challenge that goes beyond the
+≥ a fixed, time-dependent destructive process (forward pro-
+capabilityofcurrentframeinterpolationtechnique.
+cess)thatgraduallycorruptsdatabyaddingGaussiannoise.
+DiffusionmodelsforvideointerpolationDiffusionmod-
+Inparticular, StableVideoDiffusion(SVD)isalatentdif-
+elshaveshownremarkablecapabilitiesforgenerativemod-
+fusion model where the diffusion process operates in the
+eling of images [6, 12, 30–33] and videos [5, 13, 14, 36].
+latentspaceofapre-trainedautoencoderwithencoder ()
+Inearlierwork,MCVD[35]devisesageneral-purposedif- E ·
+anddecoder ().
+fusion model for a range of video generative modeling D ·
+In the forward process, a video sample x =
+tasks including video interpolation. More recent works
+I ,I ,...,I composed of N frames, is first encoded
+0 1 N 1
+[10,16,37]explicitlytraindiffusionmodelstoaccepttwo {
+in the latent
+s−pac}
+e z = (x), then the intermediate noisy
+end frames with conditioning to generate 7 or 16 interme- E
+video at time step t is created as z = α z+σ ϵ, where
+t t t
+diateframesatmaximumresolutionof320 512atonce,
+ϵ (0,I) is Gaussian noise, and α and σ define a
+× t t
+and achieved superior results in generating dynamic, am- ∼ N
+fixed noise schedule. The denoising network f receives
+θ
+biguousmotionscomparedwithtraditionalmethods.Inthis
+thisnoisyvideolatentz andtheconditioningccomputed
+t
+work, we focus on enabling pre-trained large-scale image-
+from the input image, i.e., the first frame I in the video,
+0
+to-videomodelstodokeyframeinterpolation. Exposedto
+andistrainedbyminimizingtheloss:
+millionsofvideos,thesemodelshavedemonstratedremark-
+(θ)=E [ f (z ;t,c) y 2]
+ablecapabilitiesingeneratinghigh-resolution(upto1080p) L t ∼U[1,T],ϵ ∼N(0,I) ∥ θ t − ∥2
+andlong(upto4s)videoswithrichmotionpriors.
+wherethetargetvectoryhereisv = α ϵ σ z ,referred
+t t t
+−
+Diffusion sampling for consistent generation In toasv-prediction.
+diffusion-based image generation tasks, novel joint Oncethedenoisingnetworkistrained,startingfrompure
+diffusion sampling techniques [2, 20, 34, 40] for con- noise z (0,I), the sampling process iteratively de-
+T
+∼ N
+sistent generation are usually employed in generating noises the noisy latent by predicting the noise in the input
+2Iterative denoising
+c<latexit sha1_base64="2hKaQxy48Ypg7/ecQP1/uNK78+g=">AAAB83icbVBNS8NAFHypVWv8qnoQ9LJYBEEoiYfqsVAEjxXsBzShbLabdulmE3Y3Qgn9G148KOLVP+PNX6ObtgdtHVgYZt7jzU6QcKa043xZhbXi+sZmacve3tnd2y8fHLZVnEpCWyTmsewGWFHOBG1ppjntJpLiKOC0E4wbud95pFKxWDzoSUL9CA8FCxnB2kieF2E9CsKMTPtOv1xxqs4MaJW4C1Kpn9iXx8XvRrNf/vQGMUkjKjThWKme6yTaz7DUjHA6tb1U0QSTMR7SnqECR1T52SzzFJ0bZYDCWJonNJqpvzcyHCk1iQIzmWdUy14u/uf1Uh3e+BkTSaqpIPNDYcqRjlFeABowSYnmE0MwkcxkRWSEJSba1GSbEtzlL6+S9lXVrVVr96aNW5ijBKdwBhfgwjXU4Q6a0AICCTzBC7xaqfVsvVnv89GCtdg5gj+wPn4AoAKToA==</latexit> 0 I 0
+Train
+Fuse & Update
+Inference
+z <latexit sha1_base64="b7s+qZYXuv+YmzOrL+hsBSKKJE0=">AAAB83icbVBNS8NAFHzRqjV+VT0IelksgiCUxEP1WCiCxwr2A5pQNttNu3SzCbsboYb+DS8eFPHqn/Hmr9FN24O2DiwMM+/xZidIOFPacb6sldXC2vpGcdPe2t7Z3SvtH7RUnEpCmyTmsewEWFHOBG1qpjntJJLiKOC0HYzqud9+oFKxWNzrcUL9CA8ECxnB2kieF2E9DMLscdLTvVLZqThToGXizkm5dmxfHBW+641e6dPrxySNqNCEY6W6rpNoP8NSM8LpxPZSRRNMRnhAu4YKHFHlZ9PME3RmlD4KY2me0Giq/t7IcKTUOArMZJ5RLXq5+J/XTXV47WdMJKmmgswOhSlHOkZ5AajPJCWajw3BRDKTFZEhlphoU5NtSnAXv7xMWpcVt1qp3pk2bmCGIpzAKZyDC1dQg1toQBMIJPAEL/Bqpdaz9Wa9z0ZXrPnOIfyB9fEDKkKT+w==</latexit> t v<latexit sha1_base64="Mc5sYBghatk1xNU20keN7KYcn6I=">AAACAHicbVA9SwNBEN2LGmM0emphYbMYhBQS7iyiZUAEywjmA5Lj2NvsJUv2PtidC4bjGv+KjYUitlb+Bjt/jODmo9DEBwOP92aYmefFgiuwrC8jt7a+kd8sbBW3d0q7e+b+QUtFiaSsSSMRyY5HFBM8ZE3gIFgnlowEnmBtb3Q19dtjJhWPwjuYxMwJyCDkPqcEtOSaR70hgbQXEBh6fjrOMjeFM2xlrlm2qtYMeJXYC1KuV9R3KX//0XDNz14/oknAQqCCKNW1rRiclEjgVLCs2EsUiwkdkQHrahqSgCknnT2Q4VOt9LEfSV0h4Jn6eyIlgVKTwNOd00vVsjcV//O6CfiXTsrDOAEW0vkiPxEYIjxNA/e5ZBTERBNCJde3YjokklDQmRV1CPbyy6ukdV61a9XarU7jGs1RQMfoBFWQjS5QHd2gBmoiijL0iJ7Ri/FgPBmvxtu8NWcsZg7RHxjvPzyTmdI=</latexit>ˆ t,0
+Reverse {<latexit sha1_base64="IaMLwkXTu4hlK6ZTfbdJU71zg1k=">AAAB7nicbVDLSsNAFL2pr1pfVZduBkvBVUlctC4rIrisYB/QhDKZTtohk0mYmQglFME/cONCEXXn3wju/Bunj4W2HrhwOOde7r3HTzhT2ra/rdzK6tr6Rn6zsLW9s7tX3D9oqTiVhDZJzGPZ8bGinAna1Exz2kkkxZHPadsPLyZ++5ZKxWJxo0cJ9SI8ECxgBGsjtd3svMfcca9Ysiv2FGiZOHNSqpfD+7v3t89Gr/jl9mOSRlRowrFSXcdOtJdhqRnhdFxwU0UTTEI8oF1DBY6o8rLpuWNUNkofBbE0JTSaqr8nMhwpNYp80xlhPVSL3kT8z+umOjjzMiaSVFNBZouClCMdo8nvqM8kJZqPDMFEMnMrIkMsMdEmoYIJwVl8eZm0TitOtVK9Nmlcwgx5OIJjOAEHalCHK2hAEwiE8ABP8Gwl1qP1Yr3OWnPWfOYQ/sD6+AFusZNk</latexit>Ai} … Reverse
+180° rotation
+z<latexit sha1_base64="wn2592E6U1mAvJPXfgbC4Sx49eM=">AAAB9HicbVDLSgMxFL1TX7W+ql26CZaiINQZF9VlQQSXFewD2qFk0kwbmsmMSaZQh/obblwo4sKNH+POvzHTdqGtBwKHc+7lnhwv4kxp2/62Miura+sb2c3c1vbO7l5+/6ChwlgSWichD2XLw4pyJmhdM81pK5IUBx6nTW94lfrNEZWKheJOjyPqBrgvmM8I1kZyOwHWA89PHibHXd3NF+2yPQVaJs6cFKuls4/Hwmmj1s1/dXohiQMqNOFYqbZjR9pNsNSMcDrJdWJFI0yGuE/bhgocUOUm09ATVDJKD/mhNE9oNFV/byQ4UGoceGYyDakWvVT8z2vH2r90EyaiWFNBZof8mCMdorQB1GOSEs3HhmAimcmKyABLTLTpKWdKcBa/vEwa52WnUq7cmjauYYYsHMIRnIADF1CFG6hBHQjcwxO8wKs1sp6tN+t9Npqx5jsF+APr8wcWRpSP</latexit>
+0t I
+v<latexit sha1_base64="xy3I/R+lXLRMbgheKoyXccELIlU=">AAACAHicbVA9SwNBEN2LGmM0emphYbMYhBQS7iyiZUAEywjmA5Lj2NvsJUv2PtidC4bjGv+KjYUitlb+Bjt/jODmo9DEBwOP92aYmefFgiuwrC8jt7a+kd8sbBW3d0q7e+b+QUtFiaSsSSMRyY5HFBM8ZE3gIFgnlowEnmBtb3Q19dtjJhWPwjuYxMwJyCDkPqcEtOSaR70hgbQXEBh6fjrOMjeFM2xnrlm2qtYMeJXYC1KuV9R3KX//0XDNz14/oknAQqCCKNW1rRiclEjgVLCs2EsUiwkdkQHrahqSgCknnT2Q4VOt9LEfSV0h4Jn6eyIlgVKTwNOd00vVsjcV//O6CfiXTsrDOAEW0vkiPxEYIjxNA/e5ZBTERBNCJde3YjokklDQmRV1CPbyy6ukdV61a9XarU7jGs1RQMfoBFWQjS5QHd2gBmoiijL0iJ7Ri/FgPBmvxtu8NWcsZg7RHxjvPz4YmdM=</latexit>ˆ
+t,1
+N−1
+c<latexit sha1_base64="/IDwRimY/jqjUpVWhqblXzTGd8k=">AAAB+XicbVDLSgMxFL1Trdb6GnUlboKt4MYy46K6LIjgQqSCfUA7lEyaaUMzD5JMoQ7zAf6DGxeKuPVP3Pk3ZtoutPVA4HDOvdyT40acSWVZ30ZuZTW/tl7YKG5ube/smnv7TRnGgtAGCXko2i6WlLOANhRTnLYjQbHvctpyR1eZ3xpTIVkYPKhJRB0fDwLmMYKVlnqm2fWxGrpeQtJecndmpz2zZFWsKdAyseekVCvnDx/LT7f1nvnV7Yck9mmgCMdSdmwrUk6ChWKE07TYjSWNMBnhAe1oGmCfSieZJk/RiVb6yAuFfoFCU/X3RoJ9KSe+qyeznHLRy8T/vE6svEsnYUEUKxqQ2SEv5kiFKKsB9ZmgRPGJJpgIprMiMsQCE6XLKuoS7MUvL5PmecWuVqr3uo1rmKEAR3AMp2DDBdTgBurQAAJjeIZXeDMS48V4Nz5mozljvnMAf2B8/gACIpV2</latexit> N 1
+ 
+Figure1.Methodoverview.Inthelightweightbackwardmotionfine-tuningstage,aninputvideox={I ,I ,...,I }isencodedinto
+0 1 N−1
+thelatentspacebyE(x),andnoiseisaddedtocreatenoisylatentz ;duringinference,z iscreatedbyiterativedenoisingstartingfrom
+t t
+z ∼ N(0,I). (1)Forwardmotionprediction: wefirsttaketheconditioningc ofthefirstinputimage(inferencestage)orthefirst
+T 0
+frameinthevideo(trainingstage)I ,alongwiththenoisylatentz tofeedintothepre-trained3DUNetf togetthenoisepredictions
+0 t θ
+vˆ ,aswellasthetemporalselfattentionmaps{A }. (2)Backwardmotionprediction: Wereversethenoisylatentz alongtemporal
+t,0 i t
+axistogetz′. Thenwetaketheconditioningc ofthesecondinputimage,orthelastframeinthevideoI ,alongwiththe180-
+t N−1 N−1
+degreerotatedtemporalself-attentionmaps{A′ i},andfeedthemthroughthefine-tuned3DUNetf θ′ forbackwardmotionpredictionvˆ t,1.
+(3)Fuseandupdate: Thepredictedbackwardmotionnoiseisreversedagaintofusewiththeforwardmotionnoisetocreateconsistent
+motionpath. NotethatonlythevalueandoutputprojectionmatricesW inthetemporalself-attentionlayers(green)arefine-tuned;
+{v,o}
+seeFig.2formoredetails.
+andthenapplyinganupdatesteptoremoveaportionofthe (Q = W X ), key (K = W X ) and value (V = W X )
+q ′ k ′ v ′
+estimatednoisefromthenoisylatent features. Thenthescale-dotproductattentionisapplied:
+z
+t 1
+=update(z t,f θ(z t;t,c);t) Attention(Q,K,V)=softmax(QKT/√d)V
+−
+untilwegetcleanlatentz ,followedbydecoding (z )to
+0 0 The attention output is fed through another linear layer
+D
+get the generated video. The exact implementation of the W to get the final output. We refer to A = QKT
+o
+update(, ) function depends on the specifics of the sam- RHW N N as the temporal self-attention map, whic∈ h
+· · × ×
+plingmethod;SVDusesEDMsampler[18].
+models the inter-frame correlations per spatial location.
+3.2.Temporalself-attention Thistemporalattentionmechanismallowseachframe’sup-
+datedfeaturetogatherinformationfromotherframes.
+The denoising network f in SVD is a 3D UNet, com-
+θ
+posedof“down”,“mid”,and“up”blocks. Eachblockcon- 4.Method
+tains spatial layers interleaved with temporal layers, with
+thetemporalself-attentionlayersresponsibleformodeling GivenapairofkeyframesI andI ,ourgoalistogen-
+0 N 1
+motion in the generated video. This layer takes a spatio- erate a video I ,I ,I ,....,I t−hat begins with frame
+0 1 2 N 1
+temporal tensor X R1 N H W C as input, where N I and ends w{ ith frame I ,−le} veraging the pre-trained
+× × × × 0 N 1
+is the number of fr∈ ames, and C is the number of chan- image-to-videoStableVideo−Diffusion(SVD)model. The
+nels. Here we use batch size of 1 for simplicity. The ten- generatedvideoshouldexhibitanaturalandconsistentmo-
+sor is reshaped by moving the spatial dimensions (H,W) tion path, such as a car traveling or a person walking in a
+into the batch dimension. This creates X RHW N C, steadydirection.
+′ × ×
+∈
+where self-attention operates solely on the temporal axis. Image-to-video models typically generate video with
+More specifically, X is projected through three separate motions that run forward in time. It is primarily the tem-
+′
+matricesW , W ,W Rd C (disthedimensionalityof poralself-attentionlayersthatlearnthismotion-timeasso-
+q k v ×
+∈
+the projected space.), resulting in the corresponding query ciation. In Sec 4.1, we discuss how this forward motion
+3canbereversedbyrotatingthetemporalself-attentionmaps trixW ,W inthetemporalself-attentionlayers,usingthe
+v o
+by180degrees. Thenweintroduceanefficientlightweight 180-degreerotatedattentionmapfromtheforwardvideoas
+fine-tuningtechniquetoreversethisassociationandenable additional input (see Fig. 2). We use f θ′(z t;t,c, {A ′i}) to
+SVD to generate backward motion videos from the input denotethebackwardmotiongenerationnetwork. Thisfine-
+image in Sec. 4.2. Finally we present our dual-directional tuningapproachofferstwokeyadvantages. First,byutiliz-
+sampling approach that fuses the forward motion genera- ing existing forward motion statistics from the pre-trained
+tionstartingwithframeI andbackwardmotionvideogen- SVDmodel,fine-tuningW simplifiesthemodel’stask
+0 v,o
+erationstartingwithframeI inaconsistentmannerin to focus on learning how to{ sy}nthesize reasonable content
+N 1
+Sec.4.3. Anoverviewofourm−ethodisshowninFig.1. when operating in reverse. This strategy requires signif-
+icantly less data and fewer parameters compared to full
+4.1. Reverse motion-time association by self-
+model fine-tuning. Second, it enables the control for the
+attentionmaprotation
+model to generate a backward motion trajectory corre-
+The temporal self-attention maps A in the net- spondingtotheoppositeoftheforwardtrajectorydescribed
+i
+work f feature the forward motion tr{ ajec} tory in video by the attention map. This feature is particularly benefi-
+θ
+I ,I ,...,I . Byrotatingtheseattentionmapsby180 cialwhenplanningtomergeforwardandbackwardmotions
+0 1 N 1
+{ degrees, we o−bta} in a new set A that depicts the oppo- convergingtowardseachother,andthusachievingforward-
+site backward motion, corresp{
+ond′i}
+ing to the reversed one backwardconsistency.
+I ,I ,...,I startingfromthelastframeI . ThedetailedtrainingprocessisshowninAlg.1. Forla-
+N 1 N 2 0 N 1
+{ S−pecific−ally,rotat} ingthetemporalself-attentionm−apsby tent video z R1 ×N ×C ×H ×W, we denote flip(z) specif-
+∈
+180 degrees—flipping them vertically and horizontally— ically by the second dimension, i.e., reversing the latent
+yields a backward motion opposite to the original forward video along the time axis. In every training iteration, we
+motion. Forexample,considerattentionmapA;therotated sample an input video of N frames, and random time step
+map A ′N j,N k = A j,k, where A j,k indicates the atten- t, then the noisy video latent z t is created by adding the
+tionscore−bet−weenthej-thandk-thframes(I andI ). In noise in that time step. The noisy video latent along with
+j k
+thecorrespondingreversedvideo,thereverseframeindices theinputconditioningc 0(computedfromI 0)isfedintothe
+N j andN kmaintainthesamerelativeresponse. pre-trained 3D UNet f θ to extract the self attention maps
+− − A from the temporal attention layers. Then we reverse
+i
+{ }
+thenoisyvideolatent,alongwiththelastframecondition-
+ing c , feed them into the backward motion 3D-UNet
+N 1
+f
+θ′.Th−elossfunctioniscomputedbytakingthepredictions
+ofthenetworkandthegroundtruthreversevideo.
+Linear W
+180° rotation v ALGORITHM 1: Light-weight backward motion fine-
+tuning
+Input:f ,p (x),E(·)
+θ data
+whilenotconvergeddo
+Samplex∼p (x),x={I }N−1,z=E(x);
+data n n=0
+Computeconditioningc fromI ;
+0 0
+t∼Uniform({1,...,T}),ϵ∼N(0,I);
+Linear W o z t =α tz+σ tϵ;
+{A }=extract attention map(f (z ;t,c ));
+i θ t 0
+z′ =flip(z );
+t t
+Computeconditioningc fromI ;
+N−1 N−1
+Takegradientdescentstepon
+Figure2.Temporalself-attentionmoduleinthebackwardmo-
+tiongeneration. GiveninputtensorX,ourattentionmechanism
+∇ W{v,o}∥f θ′(z′ t;t,c N−1,{A′ i})−y∥2 2,y=
+α flip(ϵ)−σ z′;
+additionally takes the respective attention map A from the pre- t t t
+end
+trainedSVDfeaturingforwardmotion,rotatingitby180degrees
+tocreateareversemotion-timeassociationA′. NotethatW Return:W {v,o}
+{v,o}
+aretheonlytrainableparametersinthismodule.
+4.3. Dual-directional sampling with forward-
+4.2.Lightweightbackwardmotionfine-tuning backwardconsistency
+We introduce a lightweight fine-tuning framework that Ourcompletedual-directionalsamplingprocessisdetailed
+specifically fine-tunes the value and output projection ma- in Alg. 2. Given a pair of key frames I and I , their
+0 N 1
+−
+4correspondingconditioningc andc arepre-computed. ingrateof1e 4,β =0.9,β =0.999,andweightdecay
+0 N 1 1 2
+Then each sampling step (illustrated i−n Figure 1) works as of 1e 2. Th− e training takes around 15K iterations with
+−
+follows: batch size of 4. We trained on 4 A100 GPUs. For sam-
+(1) Forward motion denoising with I as input: The pling,weapply50samplingsteps. Forotherparametersin
+0
+noisy video latent z along with the conditioning c is fed SVD, we use the default values: motionbucketid = 127,
+t 0
+intothepre-trained3DUNetf inSVDtopredictthenoise noiseaugstrength=0.02.
+θ
+volumevˆ . Additionally,thetemporalself-attentionmaps
+t,0
+A inthe3DUNetareextracted. 5.Experiments
+i
+{ }
+(2)BackwardmotiondenoisingwithI asinput:The
+N 1
+noisy video z is flipped along the tempor−al dimension to InFigs.3, 4, 5, 7,wedemonstratethatourapproachsuc-
+t
+createthereversevideolatentz correspondingtotheback- cessfullygenerateshighqualityvideoswithconsistentmo-
+′t
+ward motion. This backward video, along with the condi- tiongivenkeyframescapturingadynamicsceneatdifferent
+tioning c , as well as the 180-degree rotated attention moments. Wehighlyrecommendviewingthevideoresults
+N 1
+sm tea pps
+p{
+reA d′i
+i}
+c−, ta thre ef ne od isin eto voo lu ur mfi en ve ˆ-tun re ed pr3 eD seU ntN ine gt f aθ r′ e. vT eh rsi es o dn est ch re ibp er so tj he ect dp aa tg ae wto
+e
+use se edth te or ee vs au ll uts atm eo or ue rc mle ea tr hl oy. dS ae nc d.5 th.1
+e
+t,1
+motionfromI . baselines. Sec. 5.2 demonstrates how our method outper-
+N 1
+(3) Finally, th− e predicted noise volumes from both for- formstraditionalframeinterpolationmethodFILM,andthe
+wardandreversemotionpathsarefusedandthendenoised recent work TRF [8] that also leverages SVD for video
+using the update(, ) function to create less noisy video generation. Sec. 5.3 justifies our design decisions with an
+z . In this way· ,· we ensure forward-backward consis- ablation study. Sec. 5.4 discusses the optimal scenarios
+t 1
+ten−cy and thus a consistent moving direction in the gener- whereourmethodexcelsandsub-optimaloneswhereitout-
+atedvideo. Thefuse(, )functionperformsasimpleaver- performs the baselines but remains limited by SVD itself.
+age. In practice, we a· ls· o adopt per-step recurrence to en- Sec.5.5demonstratestheadaptabilityofourmethodbyfix-
+hancethefusionasseenin[1,8],byre-injectingGaussian ing the first key frame and varying the second. Sec. 5.6
+noise into the update z and repeating the denoising 5 discussesourfailurecases.
+t 1
+timesbeforecontinuingt−hesamplingforthenextstep.
+5.1.EvaluationDataset
+ALGORITHM2:Dual-directionaldiffusionsampling We use two high-resolution (1080p) datasets for evalua-
+Input:I 0,I N−1,f θ,f θ′,D(·) tions: (1)TheDavis[26]dataset,wherewecreateatotalof
+Computeconditionc 0,c N−1fromI 0,I N−1; 117inputpairsfromallofthevideos. Thisdatasetmostly
+Setz
+T
+∼N(0,I);
+features subject articulated motions, such as animal or hu-
+fort←T to1do
+manmotions. (2)ThePexelsdataset,wherewecollectato-
+vˆ =f (z ;t,c );
+t,0 θ t 0 talof45inputkeyframepairsfromacompiledcollectionof
+{A }=extract attention map(f (z ;t,c ));
+i θ t 0 highresolutionvideosonPexels2,featuringdirectionaldy-
+z′ =flip(z );
+t t
+vˆ
+t,1
+=f θ′(z′ t;t,c N−1,{A′ i}); namicscenemotionssuchasvehiclesmoving, animals, or
+vˆ′ =flip(vˆ ); people running, surfing, wave movements, and time-lapse
+t,1 t,1
+vˆ =fuse(vˆ ,vˆ′ ); videos. Allinputpairsareatleast25framesapartandhave
+t t,0 t,1
+z =update(z ,vˆ ;t) thecorrespondinggroundtruthvideoclips.
+t−1 t t
+end
+Return:D(z ) 5.2.BaselineComparisons
+0
+We mainly compare our approach to FILM [27], the cur-
+rent state-of-the-art frame interpolation method for large
+4.4.ImplementationDetails
+motion, and TRF [8] which also adapts SVD for bounded
+As presented in Sec. 4.2, our lightweight fine-tuning does generation. We show representative qualitative results
+not rely on large collection of videos. So we collected in Figs. 3, 5. In addition, we also include results for
+100highqualityvideoswhichareoriginallygeneratedfrom the keyframe interpolation feature from the recent work
+SVDfromacommunitywebsite1 asourtrainingdata. Our DynamiCrafter [37]—a large-scale image-to-video model.
+experimentalresultsshowthatourmethodgeneralizeswell The keyframing feature is modified from it and specially
+to the real image data. We select the ones with large ob- trainedtoaccepttwoendframesasconditions,whilewefo-
+jectmotionsuchasanimalrunning,vehiclemoving,people cus on how to adapt a pretrained image-to-video model in
+walking,andsoon. WeusetheAdamoptimizerwithlearn- a lightweight way with small collection of training videos
+1https://www.stablevideo.com/ 2https://www.pexels.com/
+5i=0 i=6 i=12 i=18 i=24
+i=0 i=21 i=22 i=23 i=24
+i=0 i=14 i=18 i=22 i=24
+Figure3. Qualitativebaselinecomparisons. Leftmost(i = 0)andrightmostcolumns(i = 24): startandendframes. TRFgenerates
+back-and-forth motions, such as vehicles moving forward and then reversing. FILM struggles to find correspondences when the input
+framesaredistantandmorphsfromthefirstframetothelast.Theredarrowindicatesthedirectionofmotion.Werecommendviewingthe
+videoresultsontheprojectwebpage.
+6
+TG
+MLIF
+FRT
+sruO
+TG
+MLIF
+FRT
+sruO
+TG
+MLIF
+FRT
+sruOandmuchlesscomputationalresources. Thisfeaturegener-
+ates16framesatresolution512 320,whileoursgenerates
+×
+atresolution1024 576.
+×
+QuantitativeevaluationForeachdataset,weevaluatethe
+generated in-between videos using FID [11] and FVD [9],
+widely used metrics for evaluating generative models.
+These two metrics measure the distance between the dis-
+tributionsofgeneratedframes/videosandactualones. The
+resultsareshowninTab.1,andourmethodoutperformsall
+ofthebaselinesbyasignificantmargin.
+i=0 i=2 i=24
+Pexels Davis
+FID↓ FVD↓ FID↓ FVD↓ Figure4. Ablationstudy. Weevaluateotheroptionsforgenerat-
+FILM[28] 36.03 460.89 41.85 1048.65 ingin-betweenmotionconsistency.(1)Oursw/oRA:fullpipeline
+TRF[8] 41.90 788.07 36.79 563.07 withfine-tuningallparametersW inthetemporalatten-
+{q,k,v,o}
+DynamiCrafter[37] 47.60 410.67 38.32 439.74 tion layers but without using 180-degree rotated temporal self-
+attention maps as extra input (top row). (2) Ours w/o FT: full
+Oursw/oRA 39.11 644.47 36.70 549.98
+pipelinewithoutfine-tuningW forbackwardmotion(second
+Oursw/oFT 53.44 633.51 47.23 604.76 {v,o}
+row).
+Ours 34.58 366.53 32.68 424.69
+Table 1. Comparisons with baselines and our ablation vari- seventhrow,thedog’slegsaremovingbackwards,leading
+ants. Ours w/o RA: full pipeline with fine-tuning all parameters
+to unnatural motions. In contrast, our approach fine-tunes
+W without using the 180-degree rotated temporal atten-
+{q,k,v,o} SVDtogenerateabackwardvideostartingfromthesecond
+tionmap. Oursw/oFT:fullpipelinewithusingrotatedattention
+frame in the opposite direction to the forward video from
+maponlyinthe“up”blocksandwithoutfine-tuningW for
+{v,o} the first frame.This forward-backward motion consistency
+backwardmotion.
+leadstothegenerationofamotion-consistentvideo.
+ComparisontoFILMTheflow-basedframeinterpolation 5.3.Ablations
+methodFILMsuffersfromtwoproblems. First,itstruggles
+InFig.4andTab.1,weshowvisualandquantitativecom-
+to find correspondences in scenes with large motions. For
+parisons to simpler versions of our method to evaluate the
+example, in the second row of Fig. 3, in a highway where
+effectofthekeycomponentsinourmethod.
+vehicles moving in both directions, FILM fails to find the
+correspondence between the moving cars across the input Fine-tuning without rotated attention map (Ours w/o
+keyframes, resulting in implausible intermediate motions. RA) We compare with a variant that fine-tunes all pa-
+For example, some cars in the first frame disappear in the rameters in the temporal self-attention layers, namely,
+middleandreappearattheend. Second,itgeneratesunde- W ,butwithoutusingthe180-degreerotatedtempo-
+q,k,v,o
+sirable unambiguous motion which takes the shortest path ral{self-at}tentionmapfromtheforwardvideoasextrainput.
+between the end frames. In the example in Fig. 5, given Though fine-tuning all parameters can generate backward
+twosimilar-lookingframesthatcapturesdifferentstatesofa motion from the second input image, there is no guaran-
+personrunning,FILMproducesamotionthatmerelytrans- tee that the backward motion will mirror the forward mo-
+lates the person across the frames, losing the natural kine- tion from the first input image. This discrepancy makes
+maticmotionsofthelegs. it hard for the model to reconcile the two motion paths,
+often resulting in blending artifacts, as shown in the top
+Comparison to TRF TRF fuses the forward video gen-
+row of Fig. 4. In contrast, fine-tuning W with the ro-
+eration starting from the first frame and the reversed for- v,o
+tatedattentionmapsgeneratescoherentan{dhi}gh-fidelityin-
+ward video starting from the second frame, both using the
+betweenvideos. inforward-backwardconsistency.
+originalSVD.Thereversedforwardvideofromthesecond
+framecreatesabackwardmotionvideothatendsatthesec- Fine-tuning W vs. no fine-tuning (Ours w/o FT)
+v,o
+ondframe. Fusingthesegenerationpathsresultsinaback- In Sec. 4.1, we{sho}w that rotating the temporal attention
+and-forth motion in the generated videos. One notable ef- mapsby180degreesreversesthemotion-timeassociation,
+fect we observe with TRF is that the generated videos ex- creating a backward motion trajectory. Here we show that
+hibitapatternofprogressingforwardfirstandthenrevers- fine-tuningthevalueandoutputprojectionmatricesW is
+v,o
+ingtotheendframe.Forexample,inthethirdrowofFig.3, necessaryforthemodeltosynthesizehigh-fidelitycontent
+wecanseetheredtruckmovingbackwardovertime;inthe giventheinputbackwardmotion-timeassociation. Werun
+7
+ARo/w
+TFo/w
+sruOi=0 i=6 i=12 i=18 i=24
+Figure5. Ourmethod outperforms FILMandTRFingeneratingarticulatedmovementsinbetween, butstillstrugglestocreatenatural
+kinematicmotionsbecauseofthelimitationofSVDitselffailingtogeneratedcomplexkinematics(bottomrow).Notethattheinputimage
+serveasconditioningtoSVD,sogeneratedfirstframemightdifferfromtheinputimageifSVDstrugglestocreateplausiblevideosfrom
+thatinput.
+ourfullpipelinewithoutanyfine-tuning, andourattention 5.5.AdaptiveIn-betweengeneration
+map rotation operation is only applied to the “up” blocks
+in this variant. As shown in the second row of Fig. 4 and Given the same first keyframe, and varying the second
+Tab.1,withoutfine-tuningtheseparameters,themodelcan keyframe,ourmethodcanstillgenerateplausiblevideosac-
+createconsistentmotionbutsuffersfrompoorframequality cordinglyduetotherichmotionspaceoflarge-scaleimage-
+duetothelowframequalityofthebackwardvideogenera- to-videomodels(seeFig.7).
+tion. Forexample,thepersonisdisfiguredinthegenerated
+video. Moreover,applyingattentionmaprotationoperation
+inthe“down”and“mid”blocksinthisvariantworsensthe 5.6.Failures
+visualfidelityevenfurther.
+When the input pairs are captured at such distant intervals
+thattheyhavesparsecorrespondences, asshowninFig.6,
+where only a small portion of cars appear in both input
+5.4.Optimalandsub-optimalscenarios frames,itbecomesdifficultforourmethodtofusethefor-
+wardandbackwardmotions.Thissituation,wheretheover-
+lappingareasareminimal,leadstoartifactsintheinterme-
+Our method is limited by the motion quality and priors
+diateframes.
+learned by SVD. Firstly, our empirical experiments indi-
+cate that SVD works well with generating rigid motions,
+butstruggleswithnon-rigid,articulatedmovements. Ithas
+difficulty accurately rendering the limb movements of an-
+imal/people. In Fig. 5, though our method significantly
+improves upon FILM and TRF, it still appears unnatural
+inputframe1 inputframe2 midframe
+comparedtothegroundtruthmovements. Thebottomrow,
+showingthesequencegeneratedbySVDusingonlythefirst
+Figure6.Failurecase.Ourmethodfailstoworkwellinthecases
+inputframe,confirmsthatSVDitselfstrugglestogenerate whereinputpairshavesparsecorrespondences.
+naturalrunningmovementsinbetween.
+8
+TG
+MLIF
+FRT
+sruO
+DVSi=0 i=6 i=12 i=18 i=24
+Figure7. Leftmost(i=0)andrightmostcolumns(i=24):keyframesinput. Middlecolumns:generatedframes. Byfixingthefirstkey
+frameandvaryingthesecond,ourmethodadaptstodifferentendingposesofthedog,generatingmotionkinematicsthatnaturallydepict
+awalkingdog.
+6.Discussion&Limitations diffusion: Scaling latent video diffusion models to large
+datasets. arXivpreprintarXiv:2311.15127,2023. 2
+OurmethodislimitedbythemotionqualityinStableVideo
+[5] AndreasBlattmann,RobinRombach,HuanLing,TimDock-
+Diffusion(SVD),asdiscussedinSec.5.4. Anotherlimita-
+horn, Seung Wook Kim, Sanja Fidler, and Karsten Kreis.
+tionisthatSVDhasstrongmotionpriorsderivedfromthe Alignyourlatents: High-resolutionvideosynthesiswithla-
+input image, tending to generate only specific motions for tentdiffusionmodels.InProceedingsoftheIEEE/CVFCon-
+a given input. As a result, the actual motion required to ferenceonComputerVisionandPatternRecognition,pages
+connecttheinputkeyframesmaynotberepresentedwithin 22563–22575,2023. 1,2
+SVD’s motion space, making it challenging to synthesize [6] PrafullaDhariwalandAlexanderNichol. Diffusionmodels
+plausible intermediate videos. However, with advance- beatgansonimagesynthesis. Advancesinneuralinforma-
+ments in large scale image-to-video models like SoRA3, tionprocessingsystems,34:8780–8794,2021. 2
+weareoptimisticthattheselimitationscanbeaddressedin [7] JiongDong,KaoruOta,andMianxiongDong. Videoframe
+interpolation: Acomprehensivesurvey. ACMTransactions
+the future. Another potential improvement involves using
+on Multimedia Computing, Communications and Applica-
+motion heuristics between the input key frames to prompt
+tions,19(2s):1–31,2023. 2
+the image-to-video model to generate more accurate in-
+[8] HaiwenFeng,ZhengDing,ZhihaoXia,SimonNiklaus,Vic-
+betweenmotions.
+toria Abrevaya, Michael J Black, and Xuaner Zhang. Ex-
+AcknowledgementsWethankMeng-LiShih,BoweiChen, plorative inbetweening of time and space. arXiv preprint
+andDorVerbinforhelpfuldiscussionsandfeedback. This arXiv:2403.14611,2024. 2,5,7
+workwassupportedbytheUWRealityLabandGoogle. [9] Songwei Ge, Aniruddha Mahapatra, Gaurav Parmar, Jun-
+YanZhu,andJia-BinHuang. Onthecontentbiasinfre´chet
+References
+videodistance.InProceedingsoftheIEEE/CVFConference
+on Computer Vision and Pattern Recognition, pages 7277–
+[1] Arpit Bansal, Hong-Min Chu, Avi Schwarzschild, 7288,2024. 7
+Soumyadip Sengupta, Micah Goldblum, Jonas Geip- [10] Yuwei Guo, Ceyuan Yang, Anyi Rao, Maneesh Agrawala,
+ing, and Tom Goldstein. Universal guidance for diffusion Dahua Lin, and Bo Dai. Sparsectrl: Adding sparse con-
+models. In Proceedings of the IEEE/CVF Conference on trols to text-to-video diffusion models. arXiv preprint
+Computer Vision and Pattern Recognition, pages 843–852, arXiv:2311.16933,2023. 2
+2023. 5 [11] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner,
+[2] Omer Bar-Tal, Lior Yariv, Yaron Lipman, and Tali Dekel. Bernhard Nessler, and Sepp Hochreiter. Gans trained by a
+Multidiffusion: Fusingdiffusionpathsforcontrolledimage twotime-scaleupdateruleconvergetoalocalnashequilib-
+generation. arXivpreprintarXiv:2302.08113,2023. 2 rium. Advances in neural information processing systems,
+[3] Omer Bar-Tal, Hila Chefer, Omer Tov, Charles Her- 30,2017. 7
+rmann,RoniPaiss,ShiranZada,ArielEphrat,JunhwaHur, [12] JonathanHo,AjayJain,andPieterAbbeel. Denoisingdif-
+Yuanzhen Li, Tomer Michaeli, et al. Lumiere: A space- fusionprobabilisticmodels. Advancesinneuralinformation
+time diffusion model for video generation. arXiv preprint processingsystems,33:6840–6851,2020. 2
+arXiv:2401.12945,2024. 1 [13] Jonathan Ho, WilliamChan, ChitwanSaharia, JayWhang,
+[4] Andreas Blattmann, Tim Dockhorn, Sumith Kulal, Daniel Ruiqi Gao, Alexey Gritsenko, Diederik P Kingma, Ben
+Mendelevitch, Maciej Kilian, Dominik Lorenz, Yam Levi, Poole, Mohammad Norouzi, David J Fleet, et al. Imagen
+ZionEnglish,VikramVoleti,AdamLetts,etal.Stablevideo video:Highdefinitionvideogenerationwithdiffusionmod-
+els. arXivpreprintarXiv:2210.02303,2022. 2
+3https://openai.com/index/sora/ [14] Jonathan Ho, Tim Salimans, Alexey Gritsenko, William
+9Chan, Mohammad Norouzi, and David J Fleet. Video dif- [28] FitsumAReda, DeqingSun, AysegulDundar, Mohammad
+fusionmodels. AdvancesinNeuralInformationProcessing Shoeybi,GuilinLiu,KevinJShih,AndrewTao,JanKautz,
+Systems,35:8633–8646,2022. 2 andBryanCatanzaro. Unsupervisedvideointerpolationus-
+[15] Zhewei Huang, Tianyuan Zhang, Wen Heng, Boxin Shi, ingcycleconsistency. InProceedingsoftheIEEE/CVFIn-
+and Shuchang Zhou. Rife: Real-time intermediate flow ternationalConferenceonComputerVision,pages892–900,
+estimation for video frame interpolation. arXiv preprint 2019. 7
+arXiv:2011.06294,2020. 2 [29] Hyeonjun Sim, Jihyong Oh, and Munchurl Kim. Xvfi:
+[16] Siddhant Jain, Daniel Watson, Eric Tabellion, Aleksander extreme video frame interpolation. In Proceedings of the
+Hołyn´ski, Ben Poole, and Janne Kontkanen. Video IEEE/CVF international conference on computer vision,
+interpolation with diffusion models. arXiv preprint pages14489–14498,2021. 2
+arXiv:2404.01203,2024. 2 [30] JaschaSohl-Dickstein, EricWeiss, NiruMaheswaranathan,
+[17] Huaizu Jiang, Deqing Sun, Varun Jampani, Ming-Hsuan and Surya Ganguli. Deep unsupervised learning using
+Yang, Erik Learned-Miller, and Jan Kautz. Super slomo: nonequilibrium thermodynamics. In International confer-
+Highqualityestimationofmultipleintermediateframesfor enceonmachinelearning,pages2256–2265.PMLR,2015.
+videointerpolation. InProceedingsoftheIEEEconference 2
+on computer vision and pattern recognition, pages 9000– [31] Jiaming Song, Chenlin Meng, and Stefano Ermon.
+9008,2018. 2 Denoising diffusion implicit models. arXiv preprint
+[18] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine. arXiv:2010.02502,2020.
+Elucidating the design space of diffusion-based generative [32] YangSongandStefanoErmon.Generativemodelingbyesti-
+models. Advances in Neural Information Processing Sys- matinggradientsofthedatadistribution.Advancesinneural
+tems,35:26565–26577,2022. 3 informationprocessingsystems,32,2019.
+[19] Hyeongmin Lee, Taeoh Kim, Tae-young Chung, Daehyun
+[33] YangSong,JaschaSohl-Dickstein,DiederikPKingma,Ab-
+Pak,YuseokBan,andSangyounLee.Adacof:Adaptivecol-
+hishekKumar,StefanoErmon,andBenPoole. Score-based
+laboration of flows for video frame interpolation. In Pro-
+generative modeling through stochastic differential equa-
+ceedingsoftheIEEE/CVFConferenceonComputerVision
+tions. arXivpreprintarXiv:2011.13456,2020. 2
+andPatternRecognition,pages5316–5325,2020. 2
+[34] ShitaoTang,FuyangZhang,JiachengChen,PengWang,and
+[20] Yuseung Lee, Kunho Kim, Hyunjin Kim, and Minhyuk
+YasutakaFurukawa. Mvdiffusion: Enablingholisticmulti-
+Sung. Syncdiffusion: Coherent montage via synchronized
+viewimagegenerationwithcorrespondence-awarediffusion.
+jointdiffusions. InThirty-seventhConferenceonNeuralIn-
+arXivpreprintarXiv:2307.01097,2023. 2
+formationProcessingSystems,2023. 2
+[35] Vikram Voleti, Alexia Jolicoeur-Martineau, and Chris Pal.
+[21] Luping Liu, Yi Ren, Zhijie Lin, and Zhou Zhao. Pseudo
+Mcvd-masked conditional video diffusion for prediction,
+numericalmethodsfordiffusionmodelsonmanifolds.arXiv
+generation,andinterpolation. Advancesinneuralinforma-
+preprintarXiv:2202.09778,2022. 2
+tionprocessingsystems,35:23371–23385,2022. 2
+[22] Yihao Liu, Liangbin Xie, Li Siyao, Wenxiu Sun, Yu Qiao,
+[36] Jay Zhangjie Wu, Yixiao Ge, Xintao Wang, Stan Weixian
+and Chao Dong. Enhanced quadratic video interpolation.
+Lei,YuchaoGu,YufeiShi,WynneHsu,YingShan,Xiaohu
+InComputerVision–ECCV2020Workshops: Glasgow,UK,
+Qie,andMikeZhengShou. Tune-a-video: One-shottuning
+August23–28,2020,Proceedings,PartIV16,pages41–56.
+of image diffusion models for text-to-video generation. In
+Springer,2020. 2
+ProceedingsoftheIEEE/CVFInternationalConferenceon
+[23] Simon Niklaus and Feng Liu. Softmax splatting for video
+ComputerVision,pages7623–7633,2023. 1,2
+frameinterpolation. InProceedingsoftheIEEE/CVFCon-
+[37] JinboXing,MenghanXia,YongZhang,HaoxinChen,Xin-
+ferenceonComputerVisionandPatternRecognition,pages
+taoWang,Tien-TsinWong,andYingShan. Dynamicrafter:
+5437–5446,2020. 2
+Animatingopen-domainimageswithvideodiffusionpriors.
+[24] JunheumPark,KeunsooKo,ChulLee,andChang-SuKim.
+arXivpreprintarXiv:2310.12190,2023. 1,2,5,7
+Bmbc: Bilateral motion estimation with bilateral cost vol-
+[38] Xiangyu Xu, Li Siyao, Wenxiu Sun, Qian Yin, and Ming-
+ume for video interpolation. In European Conference on
+Hsuan Yang. Quadratic video interpolation. Advances in
+ComputerVision,pages109–125.Springer,2020.
+NeuralInformationProcessingSystems,32,2019. 2
+[25] JunheumPark,ChulLee,andChang-SuKim. Asymmetric
+[39] Yan Zeng, Guoqiang Wei, Jiani Zheng, Jiaxin Zou, Yang
+bilateralmotionestimationforvideoframeinterpolation. In
+Wei,YuchenZhang,andHangLi.Makepixelsdance:High-
+ProceedingsoftheIEEE/CVFInternationalConferenceon
+dynamicvideogeneration. InProceedingsoftheIEEE/CVF
+ComputerVision,pages14539–14548,2021. 2
+Conference on Computer Vision and Pattern Recognition,
+[26] JordiPont-Tuset,FedericoPerazzi,SergiCaelles,PabloAr-
+pages8850–8860,2024. 1
+bela´ez,AlexSorkine-Hornung,andLucVanGool.The2017
+davischallengeonvideoobjectsegmentation.arXivpreprint [40] Qinsheng Zhang, Jiaming Song, Xun Huang, Yongxin
+arXiv:1704.00675,2017. 5 Chen, and Ming-Yu Liu. Diffcollage: Parallel genera-
+tionoflargecontentwithdiffusionmodels. arXivpreprint
+[27] FitsumReda,JanneKontkanen,EricTabellion,DeqingSun,
+arXiv:2303.17076,2023. 2
+CarolinePantofaru, andBrianCurless. Film: Frameinter-
+polationforlargemotion. InEuropeanConferenceonCom-
+puterVision,pages250–266.Springer,2022. 2,5
+10
