@@ -84,12 +84,12 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2408.16757v1 |
+|idx| 2408.16757v2 |
 |title| Dissecting Out-of-Distribution Detection and Open-Set Recognition: A Critical Analysis of Methods and Benchmarks |
 |authors| Hongjun WangSagar VazeKai Han
-|links| http://arxiv.org/abs/2408.16757v1 |
-|updated| 2024-08-29 17:55:07 UTC |
-|summary| Detecting test-time distribution shift has emerged as a key capability forsafely deployed machine learning models with the question being tackled undervarious guises in recent years. In this paper we aim to provide a consolidatedview of the two largest sub-fields within the community: out-of-distributionOOD detection and open-set recognition OSR. In particular we aim toprovide rigorous empirical analysis of different methods across settings andprovide actionable takeaways for practitioners and researchers. Concretely wemake the following contributions: i We perform rigorous cross-evaluationbetween state-of-the-art methods in the OOD detection and OSR settings andidentify a strong correlation between the performances of methods for themii We propose a new large-scale benchmark setting which we suggest betterdisentangles the problem tackled by OOD detection and OSR re-evaluatingstate-of-the-art OOD detection and OSR methods in this setting iii Wesurprisingly find that the best performing method on standard benchmarksOutlier Exposure struggles when tested at scale while scoring rules whichare sensitive to the deep feature magnitude consistently show promise and ivWe conduct empirical analysis to explain these phenomena and highlightdirections for future research. Code:urlhttps://github.com/Visual-AI/Dissect-OOD-OSR |
+|links| http://arxiv.org/abs/2408.16757v2 |
+|updated| 2024-08-30 02:26:01 UTC |
+|summary| Detecting test-time distribution shift has emerged as a key capability forsafely deployed machine learning models with the question being tackled undervarious guises in recent years. In this paper we aim to provide a consolidatedview of the two largest sub-fields within the community: out-of-distributionOOD detection and open-set recognition OSR. In particular we aim toprovide rigorous empirical analysis of different methods across settings andprovide actionable takeaways for practitioners and researchers. Concretely wemake the following contributions: i We perform rigorous cross-evaluationbetween state-of-the-art methods in the OOD detection and OSR settings andidentify a strong correlation between the performances of methods for themii We propose a new large-scale benchmark setting which we suggest betterdisentangles the problem tackled by OOD detection and OSR re-evaluatingstate-of-the-art OOD detection and OSR methods in this setting iii Wesurprisingly find that the best performing method on standard benchmarksOutlier Exposure struggles when tested at scale while scoring rules whichare sensitive to the deep feature magnitude consistently show promise and ivWe conduct empirical analysis to explain these phenomena and highlightdirections for future research. Code:https://github.com/Visual-AI/Dissect-OOD-OSR |
 
 
 | Item |Content|
@@ -146,11 +146,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2408.16725v1 |
+|idx| 2408.16725v2 |
 |title| Mini-Omni: Language Models Can Hear, Talk While Thinking in Streaming |
 |authors| Zhifei XieChangqiao Wu
-|links| http://arxiv.org/abs/2408.16725v1 |
-|updated| 2024-08-29 17:18:53 UTC |
+|links| http://arxiv.org/abs/2408.16725v2 |
+|updated| 2024-08-30 02:53:48 UTC |
 |summary| Recent advances in language models have achieved significant progress.GPT-4o as a new milestone has enabled real-time conversations with humansdemonstrating near-human natural fluency. Such human-computer interactionnecessitates models with the capability to perform reasoning directly with theaudio modality and generate output in streaming. However this remains beyondthe reach of current academic models as they typically depend on extra TTSsystems for speech synthesis resulting in undesirable latency. This paperintroduces the Mini-Omni an audio-based end-to-end conversational modelcapable of real-time speech interaction. To achieve this capability we proposea text-instructed speech generation method along with batch-parallelstrategies during inference to further boost the performance. Our method alsohelps to retain the original models language capabilities with minimaldegradation enabling other works to establish real-time interactioncapabilities. We call this training method Any Model Can Talk. We alsointroduce the VoiceAssistant-400K dataset to fine-tune models optimized forspeech output. To our best knowledge Mini-Omni is the first fully end-to-endopen-source model for real-time speech interaction offering valuable potentialfor future research. |
 
 
@@ -272,11 +272,11 @@
 
 | Item |Content|
 | --- |---|
-|idx| 2408.16725v1 |
+|idx| 2408.16725v2 |
 |title| Mini-Omni: Language Models Can Hear, Talk While Thinking in Streaming |
 |authors| Zhifei XieChangqiao Wu
-|links| http://arxiv.org/abs/2408.16725v1 |
-|updated| 2024-08-29 17:18:53 UTC |
+|links| http://arxiv.org/abs/2408.16725v2 |
+|updated| 2024-08-30 02:53:48 UTC |
 |summary| Recent advances in language models have achieved significant progress.GPT-4o as a new milestone has enabled real-time conversations with humansdemonstrating near-human natural fluency. Such human-computer interactionnecessitates models with the capability to perform reasoning directly with theaudio modality and generate output in streaming. However this remains beyondthe reach of current academic models as they typically depend on extra TTSsystems for speech synthesis resulting in undesirable latency. This paperintroduces the Mini-Omni an audio-based end-to-end conversational modelcapable of real-time speech interaction. To achieve this capability we proposea text-instructed speech generation method along with batch-parallelstrategies during inference to further boost the performance. Our method alsohelps to retain the original models language capabilities with minimaldegradation enabling other works to establish real-time interactioncapabilities. We call this training method Any Model Can Talk. We alsointroduce the VoiceAssistant-400K dataset to fine-tune models optimized forspeech output. To our best knowledge Mini-Omni is the first fully end-to-endopen-source model for real-time speech interaction offering valuable potentialfor future research. |
 
 
